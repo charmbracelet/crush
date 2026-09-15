@@ -1,0 +1,17 @@
+{
+	"id": "vague-fix-failing-test",
+	"schema_version": 1,
+	"origin": {"kind": "synthetic"},
+	"start_state": {"kind": "fixture", "fixture_dir": "fixture"},
+	"task": {
+		"turns": ["the test fails — fix it"]
+	},
+	"check": {
+		"script": "check.sh",
+		"expect_start_state": "fail",
+		"timeout_seconds": 300
+	},
+	"coverage": {"min_steps": 1},
+	"requires": {"tools": ["go"]},
+	"budget": {"run_timeout_seconds": 300, "max_steps": 15}
+}

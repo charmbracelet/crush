@@ -1,0 +1,17 @@
+{
+	"id": "vague-startup-crash",
+	"schema_version": 1,
+	"origin": {"kind": "synthetic"},
+	"start_state": {"kind": "fixture", "fixture_dir": "fixture"},
+	"task": {
+		"turns": ["it crashes when I run it — fix it"]
+	},
+	"check": {
+		"script": "check.sh",
+		"expect_start_state": "fail",
+		"timeout_seconds": 300
+	},
+	"coverage": {"min_steps": 1},
+	"requires": {"tools": ["go"]},
+	"budget": {"run_timeout_seconds": 300, "max_steps": 15}
+}

@@ -194,11 +194,12 @@ type optionSpec struct {
 // handleOption above and do not appear here.
 var optionSpecs = map[string]optionSpec{
 	// Boolean fields (stored as-is).
-	"debug":         {jsonKey: "debug", kind: optBool},
-	"debug-lsp":     {jsonKey: "debug_lsp", kind: optBool},
-	"auto-lsp":      {jsonKey: "auto_lsp", kind: optBool},
-	"progress":      {jsonKey: "progress", kind: optBool},
-	"project-index": {jsonKey: "project_index", kind: optBool},
+	"debug":                   {jsonKey: "debug", kind: optBool},
+	"debug-lsp":               {jsonKey: "debug_lsp", kind: optBool},
+	"auto-lsp":                {jsonKey: "auto_lsp", kind: optBool},
+	"progress":                {jsonKey: "progress", kind: optBool},
+	"project-index":           {jsonKey: "project_index", kind: optBool},
+	"ambiguity-clarification": {jsonKey: "ambiguity_clarification", kind: optBool},
 
 	// Boolean fields exposed positively but stored as their negation.
 	"metrics":              {jsonKey: "disable_metrics", kind: optBool, inverted: true},
@@ -210,6 +211,7 @@ var optionSpecs = map[string]optionSpec{
 	"notifications":  {jsonKey: "notifications", kind: optString},
 	"data-directory": {jsonKey: "data_directory", kind: optString},
 	"initialize-as":  {jsonKey: "initialize_as", kind: optString},
+	"turn-context":   {jsonKey: "turn_context", kind: optString},
 
 	// Integer fields, in seconds.
 	"request-timeout": {jsonKey: "request_timeout", kind: optInt},

@@ -839,14 +839,16 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		NotebookAutoInject:   c.cfg.Config().Options.NotebookAutoInjectEnabled(),
 		StubSuperseded: c.cfg.Config().Options.NotebookStubSupersededEnabled() &&
 			c.cfg.Config().Options.NotebookIsEnabled(),
-		StubBoundary:         c.stubBoundary,
-		StubStats:            c.stubStats,
-		SegmentTrackers:      c.segmentTrackers,
-		PrefixCache:          c.prefixCache,
-		NotebookStats:        c.nbStats,
-		NotebookScanIdx:      c.nbScanIdx,
-		NotebookPendingReads: c.nbPendingReads,
-		FileTracker:          c.filetracker,
+		StubBoundary:           c.stubBoundary,
+		StubStats:              c.stubStats,
+		SegmentTrackers:        c.segmentTrackers,
+		PrefixCache:            c.prefixCache,
+		NotebookStats:          c.nbStats,
+		NotebookScanIdx:        c.nbScanIdx,
+		NotebookPendingReads:   c.nbPendingReads,
+		FileTracker:            c.filetracker,
+		TurnContext:            c.cfg.Config().Options.TurnContextMode(),
+		AmbiguityClarification: c.cfg.Config().Options.AmbiguityClarificationEnabled(),
 	})
 
 	if c.cfg.Config().Options.NotebookStubSupersededEnabled() && !c.cfg.Config().Options.NotebookIsEnabled() {
@@ -1069,6 +1071,15 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	// per delegated turn. The top-level invocation of the sub-agent tool
 	// itself is still wrapped from the coder's side.
 	filteredTools = wrapToolsWithHooks(filteredTools, hookRunner, isSubAgent)
+
+	// The scope gate sits outermost: the explore→execute boundary must
+	// see every call, and a confirmed write then flows through hooks,
+	// permissions, and verification unchanged. Interactive top-level
+	// runs only — a question nobody can answer must degrade, never
+	// stall.
+	if !isSubAgent && c.interactive && cfg.Options.AmbiguityClarificationEnabled() {
+		filteredTools = wrapToolsWithScopeGate(filteredTools, c.questions)
+	}
 
 	return filteredTools, nil
 }

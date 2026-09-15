@@ -20,12 +20,6 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-// maxVerificationAttempts bounds the gate's retry loop — the number of
-// verification-repair turns permitted after the original turn. It is the
-// only bound: the loop detector resets per Run and sees a different
-// signature each retry anyway.
-const maxVerificationAttempts = 2
-
 // gateCheckOutcome pairs a verification check with the tool call that
 // recorded it, so a resolved outcome lands back on the originating
 // result's stored metadata. stepIndex records where in the run the entry
@@ -51,128 +45,6 @@ type resolvedCheck struct {
 	state  string
 	detail string
 	output string
-}
-
-// runVerificationGate implements the end-of-turn verification gate. When
-// the run ended on a clean stop with failed or pending checks — or left
-// session todos open — it resolves the checks, lands outcomes on stored
-// tool-result metadata, and — within budget — prepends a retry call
-// carrying the check output and open items. Returns true when a retry
-// was queued so the caller can suppress the finished notification.
-func (a *sessionAgent) runVerificationGate(ctx context.Context, call SessionAgentCall, result *fantasy.AgentResult, currentAssistant *message.Message) bool {
-	if a.configStore == nil || result == nil || len(result.Steps) == 0 {
-		return false
-	}
-	terminal := result.Steps[len(result.Steps)-1]
-	if terminal.Response.FinishReason != fantasy.FinishReasonStop {
-		return false
-	}
-	// A StopTurn ending — hook halt, permission denial, question tool —
-	// is not a completion claim; do not gate it.
-	for _, tr := range terminal.Content.ToolResults() {
-		if tr.StopTurn {
-			return false
-		}
-	}
-
-	failed, pending, observed := scanVerification(result.Steps)
-
-	if len(pending) > 0 {
-		unique := map[string]bool{}
-		for _, p := range pending {
-			unique[p.check.Check] = true
-		}
-		a.notifyVerifying(call, len(unique))
-		resolved := a.runGateChecks(ctx, a.configStore.WorkingDir(), pending, observed)
-		if ctx.Err() != nil {
-			// Cancelled mid-gate: leave pending entries pending (the
-			// notebook maps them to unverified) rather than writing
-			// failed verdicts for checks that never completed.
-			return false
-		}
-		for i := range pending {
-			out, ok := resolved[pending[i].check.Check]
-			if !ok {
-				continue
-			}
-			pending[i].check.State = out.state
-			pending[i].check.Detail = out.detail
-			pending[i].output = out.output
-		}
-		// Persist the resolved states onto the originating results, then
-		// flush: the post-run goroutine's List reads storage directly and
-		// would otherwise miss a debounced metadata-only update.
-		a.writeVerificationOutcomes(ctx, call.SessionID, pending)
-		if err := a.messages.FlushAll(ctx); err != nil {
-			slog.Error("Failed to flush verification outcomes", "error", err, "session_id", call.SessionID)
-		}
-		for _, p := range pending {
-			if p.check.State == message.VerificationFailed {
-				failed = append(failed, p)
-			}
-		}
-	}
-
-	// The session's todo list is the model's own declared scope: a
-	// clean stop that leaves items open is the same premature-done
-	// claim a failed check is — reconcile before the turn counts.
-	openTodos := a.incompleteTodos(ctx, call.SessionID)
-
-	if len(failed) == 0 && len(openTodos) == 0 {
-		return false
-	}
-
-	if call.VerificationAttempts >= maxVerificationAttempts {
-		// Budget exhausted: surface the terminal state on the final
-		// assistant message — it is the last assistant message of the
-		// run, so the text reaches RunComplete.Text for `crush run`.
-		if currentAssistant != nil {
-			var note strings.Builder
-			if len(failed) > 0 {
-				headline := failed[0].check.Detail
-				if headline == "" {
-					headline = firstLine(failed[0].output)
-				}
-				fmt.Fprintf(&note, "%d check(s) still failing after %d attempt(s). Last failure: %s",
-					len(failed), call.VerificationAttempts, headline)
-			}
-			if len(openTodos) > 0 {
-				if note.Len() > 0 {
-					note.WriteString(" ")
-				}
-				fmt.Fprintf(&note, "%d todo item(s) still incomplete after %d attempt(s).",
-					len(openTodos), call.VerificationAttempts)
-			}
-			currentAssistant.AppendContent("\n\nVerification: " + note.String())
-			if err := a.messages.Update(ctx, *currentAssistant); err != nil {
-				slog.Error("Failed to record verification exhaustion", "error", err, "session_id", call.SessionID)
-			} else if err := a.messages.FlushAll(ctx); err != nil {
-				// Same flush race as the outcome writes: a fast notebook
-				// goroutine would generate this turn's entries without
-				// the exhaustion line.
-				slog.Error("Failed to flush verification exhaustion", "error", err, "session_id", call.SessionID)
-			}
-		}
-		return false
-	}
-
-	// Clone the caller's call — ProviderOptions, sampling params,
-	// NonInteractive, and OnAuthRefresh all carry through — with the
-	// prompt replaced and the budget incremented. The same RunID keeps
-	// the retry non-foldable and suppresses the premature RunComplete;
-	// Accepted/acceptSeq are cleared so a cancel mark drops it.
-	retry := call
-	retry.Prompt = gateRetryPrompt(failed, openTodos)
-	retry.VerificationAttempts++
-	retry.Accepted = nil
-	retry.acceptSeq = 0
-
-	mu := a.sessionMu(call.SessionID)
-	mu.Lock()
-	existing, _ := a.messageQueue.Get(call.SessionID)
-	a.messageQueue.Set(call.SessionID, append([]SessionAgentCall{retry}, existing...))
-	mu.Unlock()
-	return true
 }
 
 // scanVerification walks the run's steps collecting write-tool
@@ -551,38 +423,6 @@ func (a *sessionAgent) incompleteTodos(ctx context.Context, sessionID string) []
 		}
 	}
 	return open
-}
-
-// gateRetryPrompt builds the retry prompt from the failed checks' raw
-// output (truncated to the tool-result cap) plus any todo items left
-// open — both are evidence the turn claimed done prematurely.
-func gateRetryPrompt(failed []gateCheckOutcome, openTodos []session.Todo) string {
-	var b strings.Builder
-	if len(failed) > 0 {
-		b.WriteString("Verification failed. The following check(s) did not pass — fix the underlying issue; do not restate success.\n")
-		for _, f := range failed {
-			fmt.Fprintf(&b, "\n<check name=%q>\n", f.check.Check)
-			out := f.output
-			if out == "" {
-				out = f.check.Detail
-			}
-			b.WriteString(tools.TruncateOutput(out))
-			b.WriteString("\n</check>\n")
-		}
-	}
-	if len(openTodos) > 0 {
-		b.WriteString("\nThe todo list still has incomplete item(s) — a turn is not done while its declared tasks are open:\n")
-		const maxListedTodos = 20
-		for i, t := range openTodos {
-			if i >= maxListedTodos {
-				fmt.Fprintf(&b, "- … and %d more\n", len(openTodos)-maxListedTodos)
-				break
-			}
-			fmt.Fprintf(&b, "- [%s] %s\n", t.Status, t.Content)
-		}
-		b.WriteString("Finish the remaining work, or reconcile the list with the todos tool (mark genuinely done items completed; drop abandoned ones). Do not report the task finished while the list says otherwise.\n")
-	}
-	return b.String()
 }
 
 // toolResultText extracts text from a fantasy tool result for check

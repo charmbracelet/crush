@@ -1069,10 +1069,19 @@ func validateClientID(id string) (string, error) {
 
 func workspaceToProto(ws *Workspace) proto.Workspace {
 	cfg := ws.Cfg.Config()
+	// Report the mode the permission service actually enforces rather
+	// than the startup override. The override is a one-shot seed that
+	// app.New reads at construction; runtime toggles reach only the
+	// service, so reporting the override would show a client "normal"
+	// while the server auto-approves everything.
+	//
+	// ws.Permissions is safe to dereference here: it is promoted from
+	// the embedded app.App, which CreateWorkspace always populates
+	// alongside ws.Cfg, and ws.Cfg is already dereferenced above.
 	out := proto.Workspace{
 		ID:             ws.ID,
 		Path:           ws.Path,
-		PermissionMode: proto.PermissionModeToProto(ws.Cfg.Overrides().PermissionMode),
+		PermissionMode: proto.PermissionModeToProto(ws.Permissions.PermissionMode()),
 		Channels:       ws.Cfg.Overrides().EnabledChannels,
 		DataDir:        cfg.Options.DataDirectory,
 		Debug:          cfg.Options.Debug,

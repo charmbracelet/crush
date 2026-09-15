@@ -26,10 +26,11 @@ type eventBridge struct {
 	// mu guards the per-message tracking maps below. Message events carry a
 	// whole-message snapshot rather than a delta, so the difference against the
 	// last snapshot is the new content.
-	mu        sync.Mutex
-	streamed  map[string]int             // msgID -> text bytes already sent
-	thoughts  map[string]int             // msgID -> reasoning bytes already sent
-	toolCalls map[string]map[string]bool // msgID -> toolCallID -> finished
+	mu             sync.Mutex
+	streamed       map[string]int             // msgID -> text bytes already sent
+	thoughts       map[string]int             // msgID -> reasoning bytes already sent
+	toolCalls      map[string]map[string]bool // msgID -> toolCallID -> finished
+	toolResultSent map[string]bool            // toolCallID -> content already sent
 }
 
 // toolKindFor maps a Crush tool name to the closest ACP tool kind.
@@ -62,12 +63,13 @@ func toolKindFor(name string) acp.ToolKind {
 // forwards them as ACP session/update notifications.
 func newEventBridge(conn *acp.AgentSideConnection, app *app.App, log *slog.Logger) *eventBridge {
 	return &eventBridge{
-		conn:      conn,
-		app:       app,
-		log:       log,
-		streamed:  make(map[string]int),
-		thoughts:  make(map[string]int),
-		toolCalls: make(map[string]map[string]bool),
+		conn:           conn,
+		app:            app,
+		log:            log,
+		streamed:       make(map[string]int),
+		thoughts:       make(map[string]int),
+		toolCalls:      make(map[string]map[string]bool),
+		toolResultSent: make(map[string]bool),
 	}
 }
 
@@ -118,12 +120,60 @@ func (b *eventBridge) subscribeMessages(ctx context.Context) {
 }
 
 func (b *eventBridge) handleMessage(ctx context.Context, m message.Message) {
+	b.streamToolResults(ctx, m)
 	if m.Role != message.Assistant || m.SessionID == "" {
 		return
 	}
 	b.streamText(ctx, m)
 	b.streamThoughts(ctx, m)
 	b.streamToolCalls(ctx, m)
+}
+
+// streamToolResults surfaces executed tool output on its tool_call_update so
+// the client can observe tool results as they complete (O9). Without this a
+// tool-heavy turn is silent between the first tool batch and the final
+// assistant message, which reads as a stall. Output is attached via the ACP
+// tool_call_update raw-output/content fields rather than the agent message
+// stream, so it does not pollute the assistant text. A per-toolCallID guard
+// prevents re-emitting the same content when a tool message is re-snapshotted.
+func (b *eventBridge) streamToolResults(ctx context.Context, m message.Message) {
+	if m.Role != message.Tool || m.SessionID == "" {
+		return
+	}
+	for _, part := range m.Parts {
+		tr, ok := part.(message.ToolResult)
+		if !ok || tr.ToolCallID == "" {
+			continue
+		}
+		b.mu.Lock()
+		if b.toolResultSent[tr.ToolCallID] {
+			b.mu.Unlock()
+			continue
+		}
+		b.toolResultSent[tr.ToolCallID] = true
+		b.mu.Unlock()
+
+		text := tr.Content
+		if tr.IsError {
+			text = "Error: " + text
+		}
+		if text == "" {
+			continue
+		}
+		update := acp.UpdateToolCall(
+			acp.ToolCallId(tr.ToolCallID),
+			acp.WithUpdateContent([]acp.ToolCallContent{
+				acp.ToolContent(acp.TextBlock(text)),
+			}),
+		)
+		notification := acp.SessionNotification{
+			SessionId: acp.SessionId(m.SessionID),
+			Update:    update,
+		}
+		if err := b.conn.SessionUpdate(ctx, notification); err != nil {
+			b.log.Warn("Failed to send tool result update", "error", err)
+		}
+	}
 }
 
 // streamText streams the new tail of the assistant message text.

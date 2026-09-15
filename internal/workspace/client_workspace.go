@@ -197,6 +197,10 @@ func (w *ClientWorkspace) SetCurrentSession(ctx context.Context, sessionID strin
 	return w.client.SetCurrentSession(ctx, w.workspaceID(), sessionID)
 }
 
+func (w *ClientWorkspace) AcquireSessionLock(sessionID string) error {
+	return nil
+}
+
 // -- Messages --
 
 func (w *ClientWorkspace) ListMessages(ctx context.Context, sessionID string) ([]message.Message, error) {

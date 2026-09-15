@@ -17,7 +17,7 @@ import (
 var evalCmd = &cobra.Command{
 	Use:   "eval",
 	Short: "Run the golden-trajectory eval harness",
-	Long: `Golden-trajectory behavioral regression harness (plan/EVAL_HARNESS.md).
+	Long: `Golden-trajectory behavioral regression harness (docs/plans/EVAL_HARNESS.md).
 
 The corpus lives under --eval-dir (default ./eval):
 

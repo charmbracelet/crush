@@ -693,6 +693,10 @@
           "type": "string",
           "description": "Shell command to run when AWS credentials expire (Bedrock only)."
         },
+        "aws_region": {
+          "type": "string",
+          "description": "AWS region for Bedrock inference (Bedrock only). Defaults to us-east-1, or eu-west-1 for bedrock-europe."
+        },
         "flat_rate": {
           "type": "boolean",
           "description": "Flat-rate mode for this provider"

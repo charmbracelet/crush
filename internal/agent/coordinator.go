@@ -1135,11 +1135,14 @@ func (c *coordinator) buildAzureProvider(baseURL, apiKey string, headers map[str
 	return azure.New(opts...)
 }
 
-func (c *coordinator) buildBedrockProvider(apiKey string, headers map[string]string, providerID string) (fantasy.Provider, error) {
+func (c *coordinator) buildBedrockProvider(baseURL, apiKey string, headers map[string]string, providerID string, extraParams map[string]string) (fantasy.Provider, error) {
 	var opts []bedrock.Option
 	if c.cfg.Config().Options.Debug {
 		httpClient := log.NewHTTPClient()
 		opts = append(opts, bedrock.WithHTTPClient(httpClient))
+	}
+	if baseURL != "" {
+		opts = append(opts, bedrock.WithBaseURL(baseURL))
 	}
 	if len(headers) > 0 {
 		opts = append(opts, bedrock.WithHeaders(headers))
@@ -1154,12 +1157,19 @@ func (c *coordinator) buildBedrockProvider(apiKey string, headers map[string]str
 		// Skip, let the SDK do authentication.
 	}
 
-	switch providerID {
-	case string(catwalk.InferenceProviderBedrockEurope):
-		opts = append(opts, bedrock.WithRegion("eu-west-1"))
-	default:
-		opts = append(opts, bedrock.WithRegion("us-east-1"))
+	// An explicit region from config wins. Otherwise fall back to a
+	// per-provider default. AWS_REGION is intentionally not consulted
+	// (see the aws_region config field and charmbracelet/crush#2985).
+	region := extraParams["region"]
+	if region == "" {
+		switch providerID {
+		case string(catwalk.InferenceProviderBedrockEurope):
+			region = "eu-west-1"
+		default:
+			region = "us-east-1"
+		}
 	}
+	opts = append(opts, bedrock.WithRegion(region))
 
 	return bedrock.New(opts...)
 }
@@ -1254,7 +1264,7 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 	case azure.Name:
 		return c.buildAzureProvider(baseURL, apiKey, headers, providerCfg.ExtraParams)
 	case bedrock.Name:
-		return c.buildBedrockProvider(apiKey, headers, providerCfg.ID)
+		return c.buildBedrockProvider(baseURL, apiKey, headers, providerCfg.ID, providerCfg.ExtraParams)
 	case google.Name:
 		return c.buildGoogleProvider(baseURL, apiKey, headers)
 	case "google-vertex":

@@ -15,10 +15,14 @@ type SessionTelemetry struct {
 	StubResults       int   `json:"results"`
 	StubSavedBytes    int64 `json:"saved_bytes"`
 	BoundaryAdvances  int   `json:"boundary_advances"`
-	ResultRecalls     int   `json:"result_recalls"`
-	EntryRecalls      int   `json:"entry_recalls"`
-	EmptyRecalls      int   `json:"empty_recalls"`
-	CrossRecalls      int   `json:"cross_recalls"`
+	// StubKinds splits StubResults by stub kind, keyed by the kind's
+	// telemetry label — the empty-string superseded kind surfaces as
+	// "superseded", never "".
+	StubKinds     map[string]int `json:"kinds,omitempty"`
+	ResultRecalls int            `json:"result_recalls"`
+	EntryRecalls  int            `json:"entry_recalls"`
+	EmptyRecalls  int            `json:"empty_recalls"`
+	CrossRecalls  int            `json:"cross_recalls"`
 }
 
 // SessionTelemetry returns the coordinator's per-session counters.
@@ -36,6 +40,12 @@ func (c *coordinator) SessionTelemetry(sessionID string) SessionTelemetry {
 		t.StubResults = s.Results
 		t.StubSavedBytes = s.SavedBytes
 		t.BoundaryAdvances = s.BoundaryAdvances
+		if len(s.Kinds) > 0 {
+			t.StubKinds = make(map[string]int, len(s.Kinds))
+			for kind, n := range s.Kinds {
+				t.StubKinds[kind.String()] += n
+			}
+		}
 	}
 	if n, ok := sa.nbStats.Get(sessionID); ok {
 		t.ResultRecalls = n.ResultRecalls

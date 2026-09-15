@@ -114,8 +114,8 @@ type Check struct {
 // Coverage is the closed predicate grammar over run-record fields:
 // keys are <op>_<field> where op is min|max and field is a dotted
 // run-record path (steps, tokens.output, stub_stats.boundary_advances,
-// recalls.entry). A run that misses any predicate is inconclusive
-// (passes only; fails stand).
+// stub_stats.kinds.deleted, recalls.entry). A run that misses any
+// predicate is inconclusive (passes only; fails stand).
 type Coverage map[string]float64
 
 // Requires declares environment preconditions. Declared, not enforced:
@@ -204,6 +204,11 @@ type StubStats struct {
 	Results          int   `json:"results"`
 	SavedBytes       int64 `json:"saved_bytes"`
 	BoundaryAdvances int   `json:"boundary_advances"`
+	// Kinds splits Results by stub kind, keyed by the kind's
+	// telemetry label — the superseded kind (the empty string on the
+	// mark itself) is "superseded" here. It backs the
+	// stub_stats.kinds.<kind> coverage predicates.
+	Kinds map[string]int `json:"kinds,omitempty"`
 }
 
 // Recalls mirrors notebook.Stats' recall split.

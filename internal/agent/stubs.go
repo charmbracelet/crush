@@ -70,6 +70,11 @@ type stubStats struct {
 	// telemetry counterpart of Invalidations for turns long enough
 	// to have moved the boundary without promoting anything.
 	BoundaryAdvances int
+	// Kinds splits Results by stub kind — the counter backing the
+	// eval harness's min_stub_stats.kinds.* coverage predicates.
+	// Like Results it counts promoted stubs only; a flag still
+	// pending promotion is not yet a stub.
+	Kinds map[message.StubKind]int
 }
 
 // messageTurns returns the turn index of each message: the number of
@@ -465,6 +470,7 @@ func (a *sessionAgent) promoteSupersededStubs(ctx context.Context, msgs []messag
 	recentFloor := len(segs) - stubRecentSegmentGuard
 	promoted := 0
 	var saved int64
+	promotedKinds := make(map[message.StubKind]int)
 	persistFailed := false
 	for i := boundary; i < len(msgs); i++ {
 		m := &msgs[i]
@@ -500,6 +506,9 @@ func (a *sessionAgent) promoteSupersededStubs(ctx context.Context, msgs []messag
 		}
 		promoted += len(flipped)
 		saved += msgSaved
+		for _, mk := range flipped {
+			promotedKinds[mk.Kind]++
+		}
 	}
 	if promoted > 0 {
 		slog.Debug("Promoted superseded tool results to stubs",
@@ -513,6 +522,17 @@ func (a *sessionAgent) promoteSupersededStubs(ctx context.Context, msgs []messag
 			stats.Invalidations++
 			stats.Results += promoted
 			stats.SavedBytes += saved
+			// Merge into a fresh map rather than mutating the stored
+			// one in place — a reader holding the pre-Set snapshot
+			// keeps a consistent view.
+			kinds := make(map[message.StubKind]int, len(stats.Kinds)+len(promotedKinds))
+			for kind, n := range stats.Kinds {
+				kinds[kind] = n
+			}
+			for kind, n := range promotedKinds {
+				kinds[kind] += n
+			}
+			stats.Kinds = kinds
 			a.stubStats.Set(sessionID, stats)
 		}
 	}

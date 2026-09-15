@@ -339,6 +339,12 @@ func TestPromoteSupersededStubs(t *testing.T) {
 		stored, err := svc.Get(t.Context(), msgs[2].ID)
 		require.NoError(t, err)
 		require.True(t, resultOf(t, stored, "tc-view").Superseded.Applied)
+
+		// The promotion lands in per-session stats, split by kind.
+		stats, ok := a.stubStats.Get(sessionID)
+		require.True(t, ok)
+		require.Equal(t, 1, stats.Results)
+		require.Equal(t, 1, stats.Kinds[message.StubKindSuperseded])
 	})
 
 	t.Run("leaves flags in the last two turns pending", func(t *testing.T) {

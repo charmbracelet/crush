@@ -3,6 +3,8 @@ package eval
 import (
 	"fmt"
 	"strings"
+
+	"github.com/charmbracelet/crush/internal/message"
 )
 
 // coverageFields is the closed set of run-record field paths a coverage
@@ -12,9 +14,11 @@ import (
 // Warning for corpus authors: all stub_stats.* fields are flag-gated,
 // not flag-invariant — stub flagging and promotion are disabled in the
 // control arm, so they are structurally 0 there. That includes
-// stub_stats.boundary_advances: its counter only exists once a run has
-// promoted a stub, so it cannot serve as a flag-agnostic "work
-// happened" predicate. Predicates over steps and tokens.* are safe.
+// stub_stats.boundary_advances and every stub_stats.kinds.<kind>: the
+// counters only exist once a run has promoted a stub, so they cannot
+// serve as flag-agnostic "work happened" predicates — they are safe
+// only on arms where stubbing is enabled. Predicates over steps and
+// tokens.* are safe.
 var coverageFields = map[string]func(*RunRecord) float64{
 	"steps":                        func(r *RunRecord) float64 { return float64(r.Steps) },
 	"tokens.input":                 func(r *RunRecord) float64 { return float64(r.Tokens.Input) },
@@ -29,6 +33,19 @@ var coverageFields = map[string]func(*RunRecord) float64{
 	"recalls.entry":                func(r *RunRecord) float64 { return float64(r.Recalls.Entry) },
 	"recalls.empty":                func(r *RunRecord) float64 { return float64(r.Recalls.Empty) },
 	"recalls.cross":                func(r *RunRecord) float64 { return float64(r.Recalls.Cross) },
+}
+
+func init() {
+	// Per-kind stub counts: stub_stats.kinds.<kind> for every
+	// message.StubKind, keyed by the kind's telemetry label — the
+	// empty-string superseded kind spells "superseded", so
+	// min_stub_stats.kinds.superseded is a real predicate.
+	for _, kind := range message.StubKinds() {
+		name := kind.String()
+		coverageFields["stub_stats.kinds."+name] = func(r *RunRecord) float64 {
+			return float64(r.StubStats.Kinds[name])
+		}
+	}
 }
 
 // ParseCoverageKey validates a coverage predicate key at load time:

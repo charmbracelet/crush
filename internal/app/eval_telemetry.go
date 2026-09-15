@@ -59,11 +59,18 @@ func (app *App) emitEvalTelemetry(sessionID string, result *fantasy.AgentResult,
 		SessionTelemetry(string) agent.SessionTelemetry
 	}); ok {
 		tel := c.SessionTelemetry(sessionID)
+		kinds := tel.StubKinds
+		if kinds == nil {
+			// Emit an object, not null, so the doc's shape is stable
+			// for runs that never promoted a stub.
+			kinds = map[string]int{}
+		}
 		doc["stub_stats"] = map[string]any{
 			"invalidations":     tel.StubInvalidations,
 			"results":           tel.StubResults,
 			"saved_bytes":       tel.StubSavedBytes,
 			"boundary_advances": tel.BoundaryAdvances,
+			"kinds":             kinds,
 		}
 		doc["recalls"] = map[string]any{
 			"result": tel.ResultRecalls,

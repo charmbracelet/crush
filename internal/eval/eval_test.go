@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/stretchr/testify/require"
 )
 
@@ -203,6 +204,77 @@ func TestCoverage_MinMaxAndClosedGrammar(t *testing.T) {
 	require.Error(t, err)
 	_, _, err = ParseCoverageKey("gte_steps")
 	require.Error(t, err)
+}
+
+func TestCoverage_StubKinds(t *testing.T) {
+	t.Parallel()
+	rec := &RunRecord{}
+	rec.StubStats.Kinds = map[string]int{"deleted": 2, "superseded": 1}
+
+	// Every declared kind is a valid coverage field — a new kind that
+	// missed registration fails here.
+	for _, kind := range message.StubKinds() {
+		_, _, err := ParseCoverageKey("min_stub_stats.kinds." + kind.String())
+		require.NoError(t, err, "kind %q must be a valid coverage field", kind)
+	}
+
+	met, err := CoverageMet(Coverage{"min_stub_stats.kinds.deleted": 1}, rec)
+	require.NoError(t, err)
+	require.True(t, met)
+
+	// The empty-string superseded mark spells "superseded" in the
+	// kinds map — and is a valid predicate.
+	met, err = CoverageMet(Coverage{"min_stub_stats.kinds.superseded": 1}, rec)
+	require.NoError(t, err)
+	require.True(t, met)
+
+	// Kinds absent from the map count as 0.
+	met, err = CoverageMet(Coverage{"min_stub_stats.kinds.rerun": 1}, rec)
+	require.NoError(t, err)
+	require.False(t, met)
+
+	// An unknown kind is still rejected by the closed grammar.
+	_, _, err = ParseCoverageKey("min_stub_stats.kinds.bogus")
+	require.Error(t, err)
+}
+
+// --- run telemetry ---
+
+// TestRunTelemetry_StubKinds pins the telemetry contract end to end:
+// the child's stub_stats.kinds object parses, and per-turn kind deltas
+// sum into the trajectory totals like the other counters.
+func TestRunTelemetry_StubKinds(t *testing.T) {
+	t.Parallel()
+	writeTel := func(kinds map[string]int) runTelemetry {
+		doc := map[string]any{
+			"session_id": "s1",
+			"steps":      3,
+			"stub_stats": map[string]any{
+				"invalidations":     1,
+				"results":           2,
+				"saved_bytes":       900,
+				"boundary_advances": 1,
+				"kinds":             kinds,
+			},
+		}
+		path := filepath.Join(t.TempDir(), "tel.json")
+		data, err := json.Marshal(doc)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(path, data, 0o644))
+		tel, err := readTelemetry(path)
+		require.NoError(t, err)
+		return tel
+	}
+
+	var res RunResult
+	res.addTurnTelemetry(writeTel(map[string]int{"superseded": 1, "stale": 1}))
+	// A mid-run turn may emit no kinds at all — sparse map or absent.
+	res.addTurnTelemetry(writeTel(nil))
+	res.addTurnTelemetry(writeTel(map[string]int{"deleted": 2}))
+
+	require.Equal(t, 9, res.Steps)
+	require.Equal(t, 6, res.StubStats.Results)
+	require.Equal(t, map[string]int{"superseded": 1, "stale": 1, "deleted": 2}, res.StubStats.Kinds)
 }
 
 // --- stats ---

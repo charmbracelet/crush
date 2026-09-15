@@ -162,7 +162,15 @@ every characterization pass a diff to reviewed files.
   `HARNESS_TOPOLOGY.md` promises them as assertable checkpoints),
   no arbitrary expressions — and coverage must be achievable within
   `budget`: a trajectory that can't reach its mechanism inside
-  `max_steps` is permanently inconclusive. `inconclusive` does not
+  `max_steps` is permanently inconclusive. `stub_stats` carries a
+  per-kind split — `stub_stats.kinds.<kind>` for `superseded`,
+  `modified`, `deleted`, `duplicate`, `rerun`, `stale`, sparse in
+  the record (only kinds that fired appear) — so a trajectory
+  authored to trigger a specific kind can assert it fired instead
+  of grepping message metadata. Like every `stub_stats.*` field the
+  counters only exist once stubbing ran, so per-kind predicates are
+  safe on stubbing-enabled arms only.
+  `inconclusive` does not
   consume a `runs_per_trajectory` slot: the runner resamples to N
   conclusive runs with an attempts cap (~2N) before flagging the
   trajectory coverage-starved. `error` resamples identically — a
@@ -322,7 +330,13 @@ approximately exchangeable, which the permutation test assumes.
 	"duration_s": 142,
 	"steps": 6,
 	"tokens": {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0},
-	"stub_stats": {"invalidations": 0, "results": 0, "saved_bytes": 0, "boundary_advances": 0},
+	"stub_stats": {
+		"invalidations": 1,
+		"results": 4,
+		"saved_bytes": 12803,
+		"boundary_advances": 2,
+		"kinds": {"superseded": 3, "stale": 1}
+	},
 	"recalls": {"result": 0, "entry": 0, "empty": 0, "cross": 0},
 	"session_db": "results/<experiment>/artifacts/<trajectory_id>-<arm>-<run_index>.db",
 	"env": {"crush_sha": "...", "model_resolved": "...", "go": "1.25", "os": "darwin", "content_hash": "..."}

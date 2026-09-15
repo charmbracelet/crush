@@ -745,10 +745,7 @@ func gatherPruningStats(ctx context.Context, queries *db.Queries) (*PruningStats
 			Content:    row.ContentHead,
 		}
 		saved := max(row.ContentBytes.Int64-int64(len(mark.StubText(tr))), 0)
-		kind := string(mark.Kind)
-		if kind == "" {
-			kind = "superseded"
-		}
+		kind := mark.Kind.String()
 		ks, ok := byKind[kind]
 		if !ok {
 			ks = &PruningKindStats{Kind: kind}

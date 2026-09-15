@@ -11,6 +11,7 @@ package shell
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -298,26 +299,47 @@ func IsCommandBlocked(command string, blockFuncs []BlockFunc) bool {
 	return BlockedCommandReason(command, blockFuncs) != ""
 }
 
-// BlockedCommandReason returns a short human-readable reason why a command
-// string would likely be blocked by the given block functions, or an empty
-// string if it looks safe.
+// CommandCheck is the verdict of the static command check.
 //
-// It is a static check used to warn about dangerous commands before they run
-// and to gate auto-approval. Each command in the script is expanded to fields
-// the way the shell would (quotes are removed, word parts joined, globbing
-// disabled), but nothing is executed: a command substitution or any other
-// expansion that would require running a command is treated as dangerous
-// rather than resolved. A command name that is itself built from an expansion
+// Reason and Matched answer different questions, and conflating them is the
+// mistake this type exists to prevent. Reason says "there is something here
+// worth warning about", which covers both a command on the deny list and a
+// command nobody could analyse. Matched says specifically "a named command on
+// the deny list was recognised", which is the only case where a user can be
+// shown what they are approving and meaningfully approve it. Treating an
+// unanalysable command as though it had been approved lets an unrelated
+// $(date) anywhere on the line waive the run-time checks for everything else
+// on it.
+type CommandCheck struct {
+	// Matched reports that a command was recognised on the deny list by
+	// name. Reason then names it.
+	Matched bool
+	// Reason is a short human-readable explanation, or empty when nothing
+	// looked wrong.
+	Reason string
+}
+
+// Dangerous reports whether the check found anything worth warning about.
+func (c CommandCheck) Dangerous() bool { return c.Reason != "" }
+
+// CheckCommand statically inspects a command string for anything dangerous.
+//
+// It is used to warn about dangerous commands before they run and to gate
+// auto-approval. Each command in the script is expanded to fields the way the
+// shell would (quotes are removed, word parts joined, globbing disabled), but
+// nothing is executed: a command substitution or any other expansion that
+// would require running a command is treated as dangerous rather than
+// resolved. A command name that is itself built from an expansion
 // ("$CMD example.com") is dangerous for the same reason: what it resolves to
 // is unknowable until it runs. Unparseable input is likewise treated as
 // dangerous. This fails safe, but it cannot see the results of runtime
 // expansion, so it is a conservative approximation of the authoritative
 // blockHandler check.
-func BlockedCommandReason(command string, blockFuncs []BlockFunc) string {
+func CheckCommand(command string, blockFuncs []BlockFunc) CommandCheck {
 	file, err := syntax.NewParser().Parse(strings.NewReader(command), "")
 	if err != nil {
 		// If we can't parse it, consider it potentially dangerous.
-		return "it could not be parsed"
+		return CommandCheck{Reason: "it could not be parsed"}
 	}
 
 	// Empty environment, nil CmdSubst, and erroring ProcSubst: variables
@@ -333,27 +355,36 @@ func BlockedCommandReason(command string, blockFuncs []BlockFunc) string {
 		},
 	}
 
-	reason := ""
+	var result CommandCheck
 	syntax.Walk(file, func(node syntax.Node) bool {
+		// Returning false prunes the current subtree but the walk carries
+		// on, so without this guard a later, vaguer finding would overwrite
+		// the name of the command that was actually recognised.
+		if result.Matched {
+			return false
+		}
 		switch node := node.(type) {
 		case *syntax.CallExpr:
 			if len(node.Args) == 0 {
 				return true
 			}
 			if isDynamicWord(node.Args[0]) {
-				reason = "its command name is only known at runtime"
+				result.Reason = cmp.Or(result.Reason, "its command name is only known at runtime")
 				return false
 			}
 			args, err := expand.Fields(cfg, node.Args...)
 			if err != nil {
 				// A substitution or expansion we can't resolve without running
 				// something. Be conservative and treat it as dangerous.
-				reason = "it runs another command to build its arguments"
+				result.Reason = cmp.Or(result.Reason, "it runs another command to build its arguments")
 				return false
 			}
 			for _, blockFunc := range blockFuncs {
 				if blockFunc(args) {
-					reason = "it uses " + normalizeCommand(args[0])
+					// A named match outranks anything found earlier: it is the
+					// most specific thing that can be said about the command,
+					// and the only finding a user can act on.
+					result = CommandCheck{Matched: true, Reason: "it uses " + normalizeCommand(args[0])}
 					return false
 				}
 			}
@@ -367,14 +398,22 @@ func BlockedCommandReason(command string, blockFuncs []BlockFunc) string {
 				return true
 			}
 			if _, err := expand.Fields(cfg, node.Word); err != nil {
-				reason = "it redirects through another command"
+				result.Reason = cmp.Or(result.Reason, "it redirects through another command")
 				return false
 			}
 		}
 		return true
 	})
 
-	return reason
+	return result
+}
+
+// BlockedCommandReason returns a short human-readable reason why a command
+// string would likely be blocked by the given block functions, or an empty
+// string if it looks safe. See [CheckCommand] when the distinction between a
+// named deny-list match and an unanalysable command matters.
+func BlockedCommandReason(command string, blockFuncs []BlockFunc) string {
+	return CheckCommand(command, blockFuncs).Reason
 }
 
 // isDynamicWord reports whether a word's value depends on runtime state, i.e.

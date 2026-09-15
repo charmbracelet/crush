@@ -3,30 +3,21 @@ package copilot
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
-// writeAppsJSON points the token lookup at a temporary home and seeds
-// apps.json with body. It cannot be parallel: t.Setenv forbids it.
-func writeAppsJSON(t *testing.T, body string) {
+// writeAppsJSON seeds a temporary apps.json with body and returns its path.
+func writeAppsJSON(t *testing.T, body string) string {
 	t.Helper()
 
-	dir := t.TempDir()
-	if runtime.GOOS == "windows" {
-		t.Setenv("LOCALAPPDATA", dir)
-	} else {
-		t.Setenv("HOME", dir)
-	}
-
-	path := tokenFilePath()
-	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	path := filepath.Join(t.TempDir(), "apps.json")
 	require.NoError(t, os.WriteFile(path, []byte(body), 0o600))
+	return path
 }
 
-func TestRefreshTokenFromDisk(t *testing.T) {
+func TestRefreshTokenFromFile(t *testing.T) {
 	tests := []struct {
 		name  string
 		body  string
@@ -89,9 +80,9 @@ func TestRefreshTokenFromDisk(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			writeAppsJSON(t, tt.body)
+			t.Parallel()
 
-			token, ok := RefreshTokenFromDisk()
+			token, ok := refreshTokenFromFile(writeAppsJSON(t, tt.body))
 
 			require.Equal(t, tt.found, ok)
 			require.Equal(t, tt.want, token)
@@ -99,30 +90,27 @@ func TestRefreshTokenFromDisk(t *testing.T) {
 	}
 }
 
-func TestRefreshTokenFromDiskIsStableAcrossCalls(t *testing.T) {
-	writeAppsJSON(t, `{"github.com:Iv50zzz":{"oauth_token":"gho_z"},
-	                   "github.com:Iv10aaa":{"oauth_token":"gho_a"},
-	                   "github.com:Iv30mmm":{"oauth_token":"gho_m"}}`)
+func TestRefreshTokenFromFileIsStableAcrossCalls(t *testing.T) {
+	t.Parallel()
 
-	first, ok := RefreshTokenFromDisk()
+	path := writeAppsJSON(t, `{"github.com:Iv50zzz":{"oauth_token":"gho_z"},
+                   "github.com:Iv10aaa":{"oauth_token":"gho_a"},
+                   "github.com:Iv30mmm":{"oauth_token":"gho_m"}}`)
+
+	first, ok := refreshTokenFromFile(path)
 	require.True(t, ok)
 
 	for range 20 {
-		again, ok := RefreshTokenFromDisk()
+		again, ok := refreshTokenFromFile(path)
 		require.True(t, ok)
 		require.Equal(t, first, again, "map iteration order must not leak into the choice")
 	}
 }
 
-func TestRefreshTokenFromDiskWithoutFile(t *testing.T) {
-	dir := t.TempDir()
-	if runtime.GOOS == "windows" {
-		t.Setenv("LOCALAPPDATA", dir)
-	} else {
-		t.Setenv("HOME", dir)
-	}
+func TestRefreshTokenFromFileWithoutFile(t *testing.T) {
+	t.Parallel()
 
-	token, ok := RefreshTokenFromDisk()
+	token, ok := refreshTokenFromFile(filepath.Join(t.TempDir(), "missing"))
 
 	require.False(t, ok)
 	require.Empty(t, token)

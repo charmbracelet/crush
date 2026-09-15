@@ -20,7 +20,13 @@ const (
 // RefreshTokenFromDisk returns a GitHub OAuth token that a Copilot client
 // already stored on this machine, if one is there.
 func RefreshTokenFromDisk() (string, bool) {
-	data, err := os.ReadFile(tokenFilePath())
+	return refreshTokenFromFile(tokenFilePath())
+}
+
+// refreshTokenFromFile returns a GitHub OAuth token from the apps.json at
+// path, if one is there.
+func refreshTokenFromFile(path string) (string, bool) {
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", false
 	}

@@ -258,6 +258,12 @@ func ArgumentsBlocker(cmd string, args []string, flags []string) BlockFunc {
 // different program from `curl` is not a real scenario, and folding there too
 // costs at most one unnecessary prompt. Not folding costs a silent bypass.
 func normalizeCommand(cmd string) string {
+	cmd = strings.TrimSpace(cmd)
+	if cmd == "" {
+		// filepath.Base("") is ".", which would be a command name nobody
+		// meant and which matches a real directory reference.
+		return ""
+	}
 	cmd = strings.ToLower(filepath.Base(filepath.FromSlash(cmd)))
 	for _, ext := range []string{".exe", ".bat", ".cmd"} {
 		if len(cmd) > len(ext) && cmd[len(cmd)-len(ext):] == ext {
@@ -265,6 +271,14 @@ func normalizeCommand(cmd string) string {
 		}
 	}
 	return cmd
+}
+
+// NormalizeCommandName reduces a command name to the form the block list
+// matches on. Configuration goes through this too, so an entry written
+// "/usr/bin/CURL " lines up with the "curl" the list already holds instead of
+// quietly matching nothing.
+func NormalizeCommandName(cmd string) string {
+	return normalizeCommand(cmd)
 }
 
 // splitArgsFlags separates positional arguments from flags. It understands the

@@ -625,6 +625,17 @@
           },
           "type": "array",
           "description": "Shell commands to drop from the dangerous list so they stop prompting"
+        },
+        "safe_commands": {
+          "items": {
+            "type": "string",
+            "examples": [
+              "go build",
+              "cargo check"
+            ]
+          },
+          "type": "array",
+          "description": "Exact command lines that skip the permission prompt. Matched literally with no extra arguments"
         }
       },
       "additionalProperties": false,

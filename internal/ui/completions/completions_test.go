@@ -1,8 +1,10 @@
 package completions
 
 import (
+	"fmt"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/stretchr/testify/require"
 )
@@ -105,4 +107,55 @@ func TestFilterPrefersPathSegmentExact(t *testing.T) {
 	first, ok := filtered[0].(*CompletionItem)
 	require.True(t, ok)
 	require.Equal(t, "internal/ui/chat/mcp.go", first.Text())
+}
+
+func TestScrollByRevealsOverflowItems(t *testing.T) {
+	t.Parallel()
+
+	c := New(lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle())
+	files := make([]FileCompletionValue, 20)
+	for i := range files {
+		files[i] = FileCompletionValue{Path: fmt.Sprintf("internal/pkg/file-%02d.go", i)}
+	}
+	c.SetItems(files, nil)
+
+	startBefore := c.list.Offset()
+	c.ScrollBy(5)
+	startAfter := c.list.Offset()
+	require.NotEqual(t, startBefore, startAfter)
+}
+
+func TestPageDownScrollsOverflowItems(t *testing.T) {
+	t.Parallel()
+
+	c := New(lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle())
+	files := make([]FileCompletionValue, 20)
+	for i := range files {
+		files[i] = FileCompletionValue{Path: fmt.Sprintf("internal/pkg/file-%02d.go", i)}
+	}
+	c.SetItems(files, nil)
+
+	startBefore := c.list.Offset()
+	_, handled := c.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
+	require.True(t, handled)
+	startAfter := c.list.Offset()
+	require.NotEqual(t, startBefore, startAfter)
+}
+
+func TestSelectNextScrollsSelectedItemIntoView(t *testing.T) {
+	t.Parallel()
+
+	c := New(lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle())
+	files := make([]FileCompletionValue, 20)
+	for i := range files {
+		files[i] = FileCompletionValue{Path: fmt.Sprintf("internal/pkg/file-%02d.go", i)}
+	}
+	c.SetItems(files, nil)
+
+	for range 15 {
+		_, handled := c.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+		require.True(t, handled)
+	}
+
+	require.True(t, c.list.SelectedItemInView())
 }

@@ -112,7 +112,10 @@ func defaultPermissionsKeyMap() permissionsKeyMap {
 			key.WithHelp("tab", "next option"),
 		),
 		Select: key.NewBinding(
-			key.WithKeys("enter", "ctrl+y"),
+			// ctrl+y is deliberately absent: it is the global yolo-mode
+			// toggle, and dialogs see keys first, so accepting it here
+			// turns "stop asking me" into "approve this one".
+			key.WithKeys("enter"),
 			key.WithHelp("enter", "confirm"),
 		),
 		Allow: key.NewBinding(
@@ -163,6 +166,42 @@ func defaultPermissionsKeyMap() permissionsKeyMap {
 	}
 }
 
+// permissionOption describes one button in the dialog. The slice index is
+// what selectedOption holds, so the buttons, the keyboard cursor, and the
+// action they resolve to cannot drift apart.
+type permissionOption struct {
+	text           string
+	underlineIndex int
+	action         PermissionAction
+}
+
+// permissionOptions are the dialog's buttons in display order.
+var permissionOptions = []permissionOption{
+	{"Allow", 0, PermissionAllow},
+	{"Allow for Session", 10, PermissionAllowForSession},
+	{"Deny", 0, PermissionDeny},
+}
+
+// optionIndex returns the position of the button that resolves to action.
+func optionIndex(action PermissionAction) int {
+	for i, o := range permissionOptions {
+		if o.action == action {
+			return i
+		}
+	}
+	return 0
+}
+
+// defaultSelectedOption picks the button the cursor starts on. A flagged
+// request starts on Deny so that answering the prompt by reflex refuses
+// instead of approving.
+func defaultSelectedOption(perm permission.PermissionRequest) int {
+	if perm.Danger != "" {
+		return optionIndex(PermissionDeny)
+	}
+	return optionIndex(PermissionAllow)
+}
+
 var _ Dialog = (*Permissions)(nil)
 
 // PermissionsOption configures the permissions dialog.
@@ -199,7 +238,7 @@ func NewPermissions(com *common.Common, perm permission.PermissionRequest, opts 
 	p := &Permissions{
 		com:            com,
 		permission:     perm,
-		selectedOption: 0,
+		selectedOption: defaultSelectedOption(perm),
 		viewport:       vp,
 		help:           h,
 		keyMap:         km,
@@ -239,10 +278,11 @@ func (p *Permissions) HandleMsg(msg tea.Msg) Action {
 			// Escape denies the permission request.
 			return p.respond(PermissionDeny)
 		case key.Matches(msg, p.keyMap.Right), key.Matches(msg, p.keyMap.Tab):
-			p.selectedOption = (p.selectedOption + 1) % 3
+			p.selectedOption = (p.selectedOption + 1) % len(permissionOptions)
 		case key.Matches(msg, p.keyMap.Left):
-			// Add 2 instead of subtracting 1 to avoid negative modulo.
-			p.selectedOption = (p.selectedOption + 2) % 3
+			// Step forward by one short of a full cycle to avoid negative
+			// modulo.
+			p.selectedOption = (p.selectedOption + len(permissionOptions) - 1) % len(permissionOptions)
 		case key.Matches(msg, p.keyMap.Select):
 			return p.selectCurrentOption()
 		case key.Matches(msg, p.keyMap.Allow):
@@ -302,14 +342,12 @@ func (p *Permissions) HandleMsg(msg tea.Msg) Action {
 }
 
 func (p *Permissions) selectCurrentOption() tea.Msg {
-	switch p.selectedOption {
-	case 0:
-		return p.respond(PermissionAllow)
-	case 1:
-		return p.respond(PermissionAllowForSession)
-	default:
+	if p.selectedOption < 0 || p.selectedOption >= len(permissionOptions) {
+		// Only reachable through a bug, and refusing is the safe way to
+		// be wrong.
 		return p.respond(PermissionDeny)
 	}
+	return p.respond(permissionOptions[p.selectedOption].action)
 }
 
 func (p *Permissions) respond(action PermissionAction) tea.Msg {
@@ -773,14 +811,37 @@ func (p *Permissions) renderContentPanel(content string, width int) string {
 	return panelStyle.Width(width).Render(content)
 }
 
-func (p *Permissions) renderButtons(contentWidth int, fullscreen bool) string {
-	buttons := []common.ButtonOpts{
-		{Text: "Allow", UnderlineIndex: 0, Selected: p.selectedOption == 0},
-		{Text: "Allow for Session", UnderlineIndex: 10, Selected: p.selectedOption == 1},
-		{Text: "Deny", UnderlineIndex: 0, Selected: p.selectedOption == 2},
+// renderButtonGroup renders the permission buttons joined by spacing. On a
+// flagged request the approving buttons are painted in the negative style,
+// because approving is the destructive choice here and it should not wear
+// the same inviting highlight it does on an ordinary prompt.
+func (p *Permissions) renderButtonGroup(spacing string) string {
+	t := p.com.Styles
+	approveStyles := t
+	if p.permission.Danger != "" {
+		danger := *t
+		danger.Button.Focused = danger.Button.Negative
+		approveStyles = &danger
 	}
 
-	content := common.ButtonGroup(p.com.Styles, buttons, "  ")
+	parts := make([]string, len(permissionOptions))
+	for i, o := range permissionOptions {
+		st := t
+		if o.action != PermissionDeny {
+			st = approveStyles
+		}
+		parts[i] = common.Button(st, common.ButtonOpts{
+			Text:           o.text,
+			UnderlineIndex: o.underlineIndex,
+			Selected:       p.selectedOption == i,
+		})
+	}
+
+	return strings.Join(parts, spacing)
+}
+
+func (p *Permissions) renderButtons(contentWidth int, fullscreen bool) string {
+	content := p.renderButtonGroup("  ")
 
 	// Center when stacked or when the dialog fills the screen; otherwise
 	// hug the right edge next to the content. Right-aligning across a
@@ -790,7 +851,7 @@ func (p *Permissions) renderButtons(contentWidth int, fullscreen bool) string {
 		align = lipgloss.Center
 	}
 	if lipgloss.Width(content) > contentWidth {
-		content = common.ButtonGroup(p.com.Styles, buttons, "\n")
+		content = p.renderButtonGroup("\n")
 		align = lipgloss.Center
 	}
 

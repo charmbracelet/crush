@@ -128,15 +128,9 @@ func NewQuestionForm(sty *styles.Styles, batch question.Request) *QuestionForm {
 		showTabs:     showTabs,
 		numQuestions: numQuestions,
 		confirmComp:  confirmComp,
-		keyPrevTab: key.NewBinding(
-			key.WithKeys("[", "ctrl+left"),
-			key.WithHelp("[", "prev tab"),
-		),
-		keyNextTab: key.NewBinding(
-			key.WithKeys("]", "ctrl+right"),
-			key.WithHelp("]", "next tab"),
-		),
-		keyClose: CloseKey,
+		keyPrevTab:   QuestionPrevTab,
+		keyNextTab:   QuestionNextTab,
+		keyClose:     CloseKey,
 	}
 
 	// Wire confirm callbacks.

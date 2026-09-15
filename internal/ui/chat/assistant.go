@@ -7,6 +7,7 @@ import (
 	"hash/fnv"
 	"strings"
 
+	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/message"
@@ -793,8 +794,8 @@ func (a *AssistantMessageItem) HandleMouseClick(btn ansi.MouseButton, x, y int) 
 }
 
 // HandleKeyEvent implements KeyEventHandler.
-func (a *AssistantMessageItem) HandleKeyEvent(key tea.KeyMsg) (bool, tea.Cmd) {
-	if k := key.String(); k == "c" || k == "y" {
+func (a *AssistantMessageItem) HandleKeyEvent(msg tea.KeyMsg) (bool, tea.Cmd) {
+	if key.Matches(msg, ItemCopy) {
 		text := a.message.Content().Text
 		return true, common.CopyToClipboard(text, "Message copied to clipboard")
 	}

@@ -1148,6 +1148,18 @@ func (m *Chat) ClearMouse() {
 	m.pendingClickID++ // Invalidate any pending delayed click
 }
 
+// ClearSelection drops every item highlight and the mouse state behind
+// it, so a keybound clear action leaves no ghost selection.
+func (m *Chat) ClearSelection() {
+	for i := range m.list.Len() {
+		if h, ok := m.list.ItemAt(i).(list.Highlightable); ok {
+			h.SetHighlight(-1, -1, -1, -1)
+		}
+	}
+	m.list.EndSelectionDrag()
+	m.ClearMouse()
+}
+
 // applyHighlightRange applies the current highlight range to the chat items.
 func (m *Chat) applyHighlightRange(idx, selectedIdx int, item list.Item) list.Item {
 	if hi, ok := item.(list.Highlightable); ok {

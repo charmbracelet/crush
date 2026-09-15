@@ -21,6 +21,7 @@ func TestCloneForWrite_Isolation(t *testing.T) {
 			SelectedModelTypeLarge: {{Provider: "openai", Model: "gpt-4"}},
 		},
 		MCP:       MCPs{"a": {}},
+		Keybinds:  map[string][]string{"global.quit": {"ctrl+c"}},
 		Providers: csync.NewMap[string, ProviderConfig](),
 		Options: &Options{
 			TUI: &TUIOptions{CompactMode: false},
@@ -33,6 +34,7 @@ func TestCloneForWrite_Isolation(t *testing.T) {
 	clone.Models[SelectedModelTypeLarge] = SelectedModel{Provider: "anthropic", Model: "claude"}
 	clone.RecentModels[SelectedModelTypeLarge] = []SelectedModel{{Provider: "anthropic", Model: "claude"}}
 	clone.MCP["b"] = MCPConfig{}
+	clone.Keybinds["global.quit"][0] = "ctrl+q"
 	clone.Options.TUI.CompactMode = true
 	enabled := true
 	clone.Options.TUI.Transparent = &enabled
@@ -43,6 +45,7 @@ func TestCloneForWrite_Isolation(t *testing.T) {
 	require.Equal(t, "openai", orig.Models[SelectedModelTypeLarge].Provider, "Models leaked")
 	require.Equal(t, "openai", orig.RecentModels[SelectedModelTypeLarge][0].Provider, "RecentModels leaked")
 	require.NotContains(t, orig.MCP, "b", "MCP leaked")
+	require.Equal(t, []string{"ctrl+c"}, orig.Keybinds["global.quit"], "Keybinds leaked")
 	require.False(t, orig.Options.TUI.CompactMode, "Options.TUI.CompactMode leaked")
 	require.Nil(t, orig.Options.TUI.Transparent, "Options.TUI.Transparent leaked")
 	require.Nil(t, orig.Options.TUI.Mouse, "Options.TUI.Mouse leaked")

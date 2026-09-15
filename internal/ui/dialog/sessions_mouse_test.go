@@ -8,6 +8,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -27,6 +28,10 @@ func (w *sessionMouseWorkspace) ListSessions(context.Context) ([]session.Session
 
 func (w *sessionMouseWorkspace) AgentIsReady() bool {
 	return false
+}
+
+func (w *sessionMouseWorkspace) Config() *config.Config {
+	return &config.Config{}
 }
 
 func newSessionMouseDialog(t *testing.T, sessions []session.Session, selectedSessionID string) *Session {

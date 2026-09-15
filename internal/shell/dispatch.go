@@ -42,9 +42,12 @@ const probeWindow = 128
 // Non-path-prefixed argv[0] and empty args are passed straight through; this
 // handler is a no-op for ordinary commands like `echo` or `jq`.
 //
-// blockFuncs is the block list used when building the nested runner for the
-// shell-source case, so deny rules apply recursively to commands invoked
-// from in-process scripts.
+// blockFuncs is the block list. It gates the interpreter a shebang script
+// names, and is passed to the nested runner built for the shell-source case
+// so deny rules apply recursively to commands an in-process script invokes.
+// It cannot reach inside a child process: once a shebang script is handed
+// to an external interpreter, whatever that interpreter goes on to run is
+// beyond this handler's view.
 func scriptDispatchHandler(blockFuncs []BlockFunc) execMiddleware {
 	return func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {
 		return func(ctx context.Context, args []string) error {
@@ -63,7 +66,7 @@ func scriptDispatchHandler(blockFuncs []BlockFunc) execMiddleware {
 
 			switch {
 			case hasShebang(probe):
-				return dispatchShebang(ctx, scriptPath, probe, args)
+				return dispatchShebang(ctx, scriptPath, probe, args, blockFuncs)
 			case isBinary(probe):
 				return next(ctx, args)
 			default:
@@ -171,7 +174,7 @@ func isBinary(probe []byte) bool {
 // interpreter via os/exec, inheriting the parent runner's cwd, env, and
 // stdio. Returns interp.ExitStatus on non-zero interpreter exit so the
 // parent interpreter sees it as a normal non-zero status.
-func dispatchShebang(ctx context.Context, scriptPath string, probe []byte, args []string) error {
+func dispatchShebang(ctx context.Context, scriptPath string, probe []byte, args []string, blockFuncs []BlockFunc) error {
 	sb, err := parseShebang(probe)
 	if err != nil {
 		hc := interp.HandlerCtx(ctx)
@@ -189,6 +192,22 @@ func dispatchShebang(ctx context.Context, scriptPath string, probe []byte, args 
 	cmdArgs := append([]string{}, sb.args...)
 	cmdArgs = append(cmdArgs, scriptPath)
 	cmdArgs = append(cmdArgs, args[1:]...)
+
+	// The script picks its own interpreter, so that choice is checked too.
+	// Otherwise a shebang naming a denied command runs it under a name the
+	// caller never typed. This is the last point at which a deny rule can
+	// apply at all: past here the interpreter is a separate process and
+	// what it runs is nobody's business but its own.
+	for _, blockFunc := range blockFuncs {
+		if blockFunc(append([]string{interpreter}, cmdArgs...)) {
+			return fmt.Errorf(
+				"command is not allowed for security reasons: %q, named by the shebang in %s. "+
+					"Run it directly rather than from inside a script to be asked for approval in normal mode, "+
+					"or use sysadmin mode (-yy) to allow dangerous commands without checks",
+				interpreter, scriptPath,
+			)
+		}
+	}
 
 	cmd := exec.CommandContext(ctx, interpreter, cmdArgs...)
 	hc := interp.HandlerCtx(ctx)

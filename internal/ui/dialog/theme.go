@@ -585,8 +585,6 @@ func (th *Theme) newThemeItem(info styles.ThemeInfo, currentTheme string) *Theme
 	label := info.Name
 	if info.Overridden {
 		label += " (overridden)"
-	} else if info.Source != styles.ThemeSourceBuiltin {
-		label += " (" + info.Source.String() + ")"
 	}
 	item := &ThemeItem{
 		Versioned:  &list.Versioned{},

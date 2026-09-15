@@ -58,7 +58,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolP("debug", "d", false, "Debug")
 	rootCmd.PersistentFlags().StringVarP(&clientHost, "host", "H", server.DefaultHost(), "Connect to a specific crush server host (for advanced users)")
 	rootCmd.Flags().BoolP("help", "h", false, "Help")
-	rootCmd.PersistentFlags().CountP("yolo", "y", "Skip permission prompts: -y for non-dangerous commands, -yy to skip all including dangerous ones")
+	rootCmd.PersistentFlags().CountP("yolo", "y", "Skip permission prompts: -y to stop being asked, -yy to also drop the exec-time block list")
 	rootCmd.PersistentFlags().StringSlice("channels", nil, "MCP servers to enable as channels (repeatable), e.g. --channels server:webhook")
 	_ = rootCmd.PersistentFlags().MarkHidden("channels")
 	rootCmd.Flags().StringP("session", "s", "", "Continue a previous session by ID")
@@ -96,10 +96,10 @@ cat README.md | crush run "make this more glamorous" > GLAMOROUS_README.md
 # Run with debug logging in a specific directory
 crush --debug --cwd /path/to/project
 
-# Run in yolo mode (skip prompts for non-dangerous commands)
+# Run in yolo mode (skip permission prompts)
 crush -y
 
-# Run in sysadmin mode (skip all prompts including dangerous commands)
+# Run in sysadmin mode (skip prompts and the exec-time block list too)
 crush -yy
 
 # Run with custom data directory
@@ -272,7 +272,7 @@ func setupWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error) {
 // sysadminModeWarning is printed to stderr whenever -yy puts a session in
 // sysadmin mode. Both the local and client paths print it, so it lives here
 // rather than being spelled out twice.
-const sysadminModeWarning = "Warning: sysadmin mode is active. All commands, including potentially dangerous ones, will be auto-approved without prompting."
+const sysadminModeWarning = "Warning: sysadmin mode is active. Every command is auto-approved, and the block list that catches dangerous commands at run time is switched off."
 
 // setupLocalWorkspace creates an in-process app.App and wraps it in an
 // AppWorkspace.

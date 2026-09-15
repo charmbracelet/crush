@@ -216,6 +216,12 @@ type Workspace interface {
 	InitializePrompt() (string, error)
 	ListSkills(ctx context.Context) ([]skills.CatalogEntry, error)
 	ReadSkill(ctx context.Context, skillID string) ([]byte, skills.SkillReadResult, error)
+	ActiveSubagents() []SubagentInfo
+	RunningSubagents(parentSessionID string) []RunningSubagentInfo
+	CancelSubagent(childSessionID string)
+	AllSubagents() []SubagentDefInfo
+	DeleteUserSubagent(name string) error
+	SetSubagentDisabled(name string, disabled bool) error
 
 	// MCP operations (server-side in client mode)
 	MCPGetStates() map[string]mcptools.ClientInfo
@@ -234,6 +240,46 @@ type Workspace interface {
 	// Events
 	Subscribe(program *tea.Program)
 	Shutdown()
+}
+
+// SubagentInfo holds the minimal frontend-facing data for an active subagent.
+type SubagentInfo struct {
+	Name        string
+	Description string
+}
+
+// RunningSubagentInfo holds frontend-facing data for a currently running
+// subagent instance, enriched with session token counts.
+type RunningSubagentInfo struct {
+	ChildSessionID   string
+	ParentSessionID  string
+	Name             string
+	Color            string
+	Model            string
+	Status           string
+	StartedAt        time.Time
+	PromptTokens     int64
+	CompletionTokens int64
+}
+
+// SubagentDefInfo holds frontend-facing data for a discovered subagent
+// definition, including its scope relative to the workspace.
+type SubagentDefInfo struct {
+	Name        string
+	Description string
+	Color       string
+	FilePath    string
+	Scope       string // "user", "project", or "builtin"
+	Disabled    bool
+	// Deletable reports whether the definition lives in a user-owned global
+	// subagents directory and may be removed via DeleteUserSubagent. Scope is
+	// display-oriented and does not imply this; broken (Error) entries are
+	// never deletable.
+	Deletable bool
+	// Error carries the discovery diagnostic when the definition file failed
+	// to parse or validate. Such entries are informational only: they cannot
+	// be dispatched, toggled, or deleted.
+	Error string
 }
 
 // MCPResourceContents holds the contents of an MCP resource.

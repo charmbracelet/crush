@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"text/template"
+	"text/template" // nosemgrep: go.lang.security.audit.xss.import-text-template.import-text-template
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
@@ -21,11 +21,23 @@ import (
 
 // Prompt represents a template-based prompt generator.
 type Prompt struct {
-	name       string
-	template   string
-	now        func() time.Time
-	platform   string
-	workingDir string
+	name               string
+	template           string
+	now                func() time.Time
+	platform           string
+	workingDir         string
+	subagentBody       string
+	preloadedSkillsXML string
+	availSubagentXML   string
+	availSkillXML      string
+	// availSkillXMLSet records that the caller supplied availSkillXML, so an
+	// intentionally empty block is distinguishable from "not provided" and
+	// still skips discovery.
+	availSkillXMLSet bool
+	// suppressAvailableSkills omits the <available_skills> discovery list. Set
+	// for subagents that pin an explicit skills set, so the preloaded skills are
+	// their only skill exposure.
+	suppressAvailableSkills bool
 }
 
 type PromptDat struct {
@@ -40,6 +52,9 @@ type PromptDat struct {
 	ContextFiles       []ContextFile
 	GlobalContextFiles []ContextFile
 	AvailSkillXML      string
+	AvailSubagentXML   string
+	SubagentBody       string
+	PreloadedSkillsXML string
 }
 
 type ContextFile struct {
@@ -64,6 +79,42 @@ func WithPlatform(platform string) Option {
 func WithWorkingDir(workingDir string) Option {
 	return func(p *Prompt) {
 		p.workingDir = workingDir
+	}
+}
+
+func WithSuppressAvailableSkills(suppress bool) Option {
+	return func(p *Prompt) { p.suppressAvailableSkills = suppress }
+}
+
+func WithSubagentBody(body string) Option {
+	return func(p *Prompt) { p.subagentBody = body }
+}
+
+func WithPreloadedSkillsXML(xml string) Option {
+	return func(p *Prompt) { p.preloadedSkillsXML = xml }
+}
+
+// WithAvailableSubagentsXML sets the pre-rendered <available_subagents> XML
+// block for the coder prompt (see subagents.ToPromptXML). The caller supplies
+// the already-discovered active-subagent list rather than this package doing
+// its own discovery, so the prompt's view of "available subagents" and the
+// agent tool's subagent_type enum are guaranteed to come from the same
+// snapshot.
+func WithAvailableSubagentsXML(xml string) Option {
+	return func(p *Prompt) { p.availSubagentXML = xml }
+}
+
+// WithAvailableSkillsXML sets the pre-rendered <available_skills> block from a
+// skill set the caller already holds (see skills.ToPromptXML), skipping this
+// package's own discovery walk. Callers that dispatch frequently — every
+// subagent dispatch builds a fresh prompt — should pass this rather than pay a
+// recursive walk of every configured skills path per build. The supplied list
+// must already be deduplicated and filtered by disabled_skills, which is what
+// skills.Manager.ActiveSkills returns.
+func WithAvailableSkillsXML(xml string) Option {
+	return func(p *Prompt) {
+		p.availSkillXML = xml
+		p.availSkillXMLSet = true
 	}
 }
 
@@ -170,50 +221,61 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 	contextFiles := loadContextFiles(cfg.Options.ContextPaths, store)
 	globalContextFiles := loadContextFiles(cfg.Options.GlobalContextPaths, store)
 
-	// Discover and load skills metadata.
+	// Discover and load skills metadata. Skipped entirely when the prompt
+	// suppresses the available-skills list (subagents that pin an explicit
+	// skills set) or when the caller already supplied the rendered block, both
+	// of which also avoid the discovery filesystem walk.
 	var availSkillXML string
-
-	// Start with builtin skills.
-	allSkills := skills.DiscoverBuiltin()
-	builtinNames := make(map[string]bool, len(allSkills))
-	for _, s := range allSkills {
-		builtinNames[s.Name] = true
-	}
-
-	// Discover user skills from configured paths.
-	if len(cfg.Options.SkillsPaths) > 0 {
-		expandedPaths := make([]string, 0, len(cfg.Options.SkillsPaths))
-		for _, pth := range cfg.Options.SkillsPaths {
-			expandedPaths = append(expandedPaths, expandPath(pth, store))
+	switch {
+	case p.suppressAvailableSkills:
+	case p.availSkillXMLSet:
+		availSkillXML = p.availSkillXML
+	default:
+		// Start with builtin skills.
+		allSkills := skills.DiscoverBuiltin()
+		builtinNames := make(map[string]bool, len(allSkills))
+		for _, s := range allSkills {
+			builtinNames[s.Name] = true
 		}
-		for _, userSkill := range skills.Discover(expandedPaths) {
-			if builtinNames[userSkill.Name] {
-				slog.Warn("User skill overrides builtin skill", "name", userSkill.Name)
+
+		// Discover user skills from configured paths.
+		if len(cfg.Options.SkillsPaths) > 0 {
+			expandedPaths := make([]string, 0, len(cfg.Options.SkillsPaths))
+			for _, pth := range cfg.Options.SkillsPaths {
+				expandedPaths = append(expandedPaths, expandPath(pth, store))
 			}
-			allSkills = append(allSkills, userSkill)
+			for _, userSkill := range skills.Discover(expandedPaths) {
+				if builtinNames[userSkill.Name] {
+					slog.Warn("User skill overrides builtin skill", "name", userSkill.Name)
+				}
+				allSkills = append(allSkills, userSkill)
+			}
 		}
-	}
 
-	// Deduplicate: user skills override builtins with the same name.
-	allSkills = skills.Deduplicate(allSkills)
+		// Deduplicate: user skills override builtins with the same name.
+		allSkills = skills.Deduplicate(allSkills)
 
-	// Filter out disabled skills.
-	allSkills = skills.Filter(allSkills, cfg.Options.DisabledSkills)
+		// Filter out disabled skills.
+		allSkills = skills.Filter(allSkills, cfg.Options.DisabledSkills)
 
-	if len(allSkills) > 0 {
-		availSkillXML = skills.ToPromptXML(allSkills)
+		if len(allSkills) > 0 {
+			availSkillXML = skills.ToPromptXML(allSkills)
+		}
 	}
 
 	isGit := isGitRepo(store.WorkingDir())
 	data := PromptDat{
-		Provider:      provider,
-		Model:         model,
-		Config:        *cfg,
-		WorkingDir:    filepath.ToSlash(workingDir),
-		IsGitRepo:     isGit,
-		Platform:      platform,
-		Date:          p.now().Format("1/2/2006"),
-		AvailSkillXML: availSkillXML,
+		Provider:           provider,
+		Model:              model,
+		Config:             *cfg,
+		WorkingDir:         filepath.ToSlash(workingDir),
+		IsGitRepo:          isGit,
+		Platform:           platform,
+		Date:               p.now().Format("1/2/2006"),
+		AvailSkillXML:      availSkillXML,
+		AvailSubagentXML:   p.availSubagentXML,
+		SubagentBody:       p.subagentBody,
+		PreloadedSkillsXML: p.preloadedSkillsXML,
 	}
 	if isGit {
 		var err error

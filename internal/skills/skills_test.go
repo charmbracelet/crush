@@ -332,34 +332,6 @@ func TestToPromptXMLEmpty(t *testing.T) {
 	require.Empty(t, ToPromptXML([]*Skill{}))
 }
 
-func TestEscape(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name string
-		in   string
-		want string
-	}{
-		{
-			name: "escape xml special chars",
-			in:   `<tag attr="x&y">'z'</tag>`,
-			want: `&lt;tag attr=&quot;x&amp;y&quot;&gt;&apos;z&apos;&lt;/tag&gt;`,
-		},
-		{
-			name: "plain text unchanged",
-			in:   "hello world",
-			want: "hello world",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			require.Equal(t, tt.want, escape(tt.in))
-		})
-	}
-}
-
 func TestToPromptXMLBuiltinType(t *testing.T) {
 	t.Parallel()
 

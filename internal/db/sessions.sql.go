@@ -10,6 +10,27 @@ import (
 	"database/sql"
 )
 
+const addSessionCost = `-- name: AddSessionCost :execrows
+UPDATE sessions
+SET
+    cost = cost + ?,
+    updated_at = strftime('%s', 'now')
+WHERE id = ?
+`
+
+type AddSessionCostParams struct {
+	Cost float64 `json:"cost"`
+	ID   string  `json:"id"`
+}
+
+func (q *Queries) AddSessionCost(ctx context.Context, arg AddSessionCostParams) (int64, error) {
+	result, err := q.exec(ctx, q.addSessionCostStmt, addSessionCost, arg.Cost, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const createSession = `-- name: CreateSession :one
 INSERT INTO sessions (
     id,
@@ -47,7 +68,8 @@ type CreateSessionParams struct {
 }
 
 func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error) {
-	row := q.queryRow(ctx, q.createSessionStmt, createSession,
+	row := q.queryRow(
+		ctx, q.createSessionStmt, createSession,
 		arg.ID,
 		arg.ParentSessionID,
 		arg.Title,
@@ -134,6 +156,48 @@ func (q *Queries) GetSessionByID(ctx context.Context, id string) (Session, error
 	return i, err
 }
 
+const listChildSessions = `-- name: ListChildSessions :many
+SELECT id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos
+FROM sessions
+WHERE parent_session_id = ?
+ORDER BY updated_at DESC
+`
+
+func (q *Queries) ListChildSessions(ctx context.Context, parentSessionID sql.NullString) ([]Session, error) {
+	rows, err := q.query(ctx, q.listChildSessionsStmt, listChildSessions, parentSessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Session{}
+	for rows.Next() {
+		var i Session
+		if err := rows.Scan(
+			&i.ID,
+			&i.ParentSessionID,
+			&i.Title,
+			&i.MessageCount,
+			&i.PromptTokens,
+			&i.CompletionTokens,
+			&i.Cost,
+			&i.UpdatedAt,
+			&i.CreatedAt,
+			&i.SummaryMessageID,
+			&i.Todos,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSessions = `-- name: ListSessions :many
 SELECT id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos
 FROM sessions
@@ -217,7 +281,8 @@ type UpdateSessionParams struct {
 }
 
 func (q *Queries) UpdateSession(ctx context.Context, arg UpdateSessionParams) (Session, error) {
-	row := q.queryRow(ctx, q.updateSessionStmt, updateSession,
+	row := q.queryRow(
+		ctx, q.updateSessionStmt, updateSession,
 		arg.Title,
 		arg.PromptTokens,
 		arg.CompletionTokens,
@@ -263,7 +328,8 @@ type UpdateSessionTitleAndUsageParams struct {
 }
 
 func (q *Queries) UpdateSessionTitleAndUsage(ctx context.Context, arg UpdateSessionTitleAndUsageParams) error {
-	_, err := q.exec(ctx, q.updateSessionTitleAndUsageStmt, updateSessionTitleAndUsage,
+	_, err := q.exec(
+		ctx, q.updateSessionTitleAndUsageStmt, updateSessionTitleAndUsage,
 		arg.Title,
 		arg.PromptTokens,
 		arg.CompletionTokens,

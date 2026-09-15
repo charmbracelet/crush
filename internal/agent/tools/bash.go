@@ -276,6 +276,12 @@ func NewBashTool(permissions permission.Service, workingDir, spillDir string, at
 						Description: fmt.Sprintf("Execute command: %s", params.Command),
 						Params:      BashPermissionsParams(params),
 						Danger:      check.Reason,
+						// Path is only the working directory here, so a
+						// session grant keyed on it alone would turn one
+						// approval of `ls` into standing approval for every
+						// later command run in that directory. Key it to the
+						// command the user was actually shown.
+						GrantKey: params.Command,
 					},
 				)
 				if err != nil {

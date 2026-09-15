@@ -1,0 +1,192 @@
+diff --git a/config.yaml b/config.yaml
+index 9f28e8c..62c64c9 100644
+--- a/config.yaml
++++ b/config.yaml
+@@ -1,3 +1,3 @@
+ endpoint: https://api.internal.example
+-timeout_ms: 30
++timeout_seconds: 30
+ max_connections: 8
+diff --git a/internal/client/client.go b/internal/client/client.go
+index 60e58d3..3e1822a 100644
+--- a/internal/client/client.go
++++ b/internal/client/client.go
+@@ -20,7 +20,7 @@ func New(cfg config.Config) *Client {
+ 	return &Client{
+ 		cfg: cfg,
+ 		hc: &http.Client{
+-			Timeout: time.Duration(cfg.TimeoutMS) * time.Second,
++			Timeout: time.Duration(cfg.TimeoutSeconds) * time.Second,
+ 		},
+ 	}
+ }
+diff --git a/internal/config/config.go b/internal/config/config.go
+index 46e7187..34c9455 100644
+--- a/internal/config/config.go
++++ b/internal/config/config.go
+@@ -16,9 +16,9 @@ type Config struct {
+ 	// Endpoint is the upstream API base URL.
+ 	Endpoint string
+ 
+-	// TimeoutMS is the request timeout. Despite the name, the value
++	// TimeoutSeconds is the request timeout. Despite the name, the value
+ 	// has always been interpreted as seconds by every consumer.
+-	TimeoutMS int
++	TimeoutSeconds int
+ 
+ 	// MaxConnections bounds the outbound connection pool.
+ 	MaxConnections int
+@@ -56,9 +56,9 @@ func parse(text string) Config {
+ 		switch key {
+ 		case "endpoint":
+ 			cfg.Endpoint = value
+-		case "timeout_ms":
++		case "timeout_seconds":
+ 			if n, err := strconv.Atoi(value); err == nil {
+-				cfg.TimeoutMS = n
++				cfg.TimeoutSeconds = n
+ 			}
+ 		case "max_connections":
+ 			if n, err := strconv.Atoi(value); err == nil {
+@@ -68,3 +68,15 @@ func parse(text string) Config {
+ 	}
+ 	return cfg
+ }
++
++// Validate reports an error for an empty endpoint or a non-positive
++// timeout.
++func (c Config) Validate() error {
++	if c.Endpoint == "" {
++		return fmt.Errorf("endpoint is required")
++	}
++	if c.TimeoutSeconds <= 0 {
++		return fmt.Errorf("timeout_seconds must be positive")
++	}
++	return nil
++}
+diff --git a/internal/config/config_test.go b/internal/config/config_test.go
+index 4820619..b5e3b24 100644
+--- a/internal/config/config_test.go
++++ b/internal/config/config_test.go
+@@ -2,13 +2,13 @@ package config
+ 
+ import "testing"
+ 
+-func TestParseTimeoutMS(t *testing.T) {
+-	cfg := Parse("endpoint: http://x\ntimeout_ms: 45\nmax_connections: 4\n")
++func TestParseTimeoutSeconds(t *testing.T) {
++	cfg := Parse("endpoint: http://x\ntimeout_seconds: 45\nmax_connections: 4\n")
+ 	if cfg.Endpoint != "http://x" {
+ 		t.Fatalf("endpoint = %q", cfg.Endpoint)
+ 	}
+-	if cfg.TimeoutMS != 45 {
+-		t.Fatalf("TimeoutMS = %d, want 45", cfg.TimeoutMS)
++	if cfg.TimeoutSeconds != 45 {
++		t.Fatalf("TimeoutSeconds = %d, want 45", cfg.TimeoutSeconds)
+ 	}
+ 	if cfg.MaxConnections != 4 {
+ 		t.Fatalf("MaxConnections = %d, want 4", cfg.MaxConnections)
+@@ -17,7 +17,28 @@ func TestParseTimeoutMS(t *testing.T) {
+ 
+ func TestParseMissingKeys(t *testing.T) {
+ 	cfg := Parse("")
+-	if cfg.TimeoutMS != 0 {
+-		t.Fatalf("TimeoutMS = %d, want 0", cfg.TimeoutMS)
++	if cfg.TimeoutSeconds != 0 {
++		t.Fatalf("TimeoutSeconds = %d, want 0", cfg.TimeoutSeconds)
++	}
++}
++
++func TestValidate(t *testing.T) {
++	cases := []struct {
++		name string
++		cfg  Config
++	}{
++		{"empty endpoint", Config{TimeoutSeconds: 5}},
++		{"zero timeout", Config{Endpoint: "http://x"}},
++		{"negative timeout", Config{Endpoint: "http://x", TimeoutSeconds: -1}},
++	}
++	for _, tc := range cases {
++		t.Run(tc.name, func(t *testing.T) {
++			if err := tc.cfg.Validate(); err == nil {
++				t.Fatal("expected validation error")
++			}
++		})
++	}
++	if err := (Config{Endpoint: "http://x", TimeoutSeconds: 5}).Validate(); err != nil {
++		t.Fatalf("valid config rejected: %v", err)
+ 	}
+ }
+diff --git a/internal/retry/backoff.go b/internal/retry/backoff.go
+index 0531f6d..75f8c1c 100644
+--- a/internal/retry/backoff.go
++++ b/internal/retry/backoff.go
+@@ -26,7 +26,7 @@ type Policy struct {
+ // attempts.
+ func DefaultPolicy(cfg config.Config) Policy {
+ 	return Policy{
+-		Budget:      time.Duration(cfg.TimeoutMS) * time.Second,
++		Budget:      time.Duration(cfg.TimeoutSeconds) * time.Second,
+ 		BaseBackoff: 100 * time.Millisecond,
+ 		MaxAttempts: 3,
+ 	}
+diff --git a/internal/retry/backoff_test.go b/internal/retry/backoff_test.go
+index 3f1659c..31589a0 100644
+--- a/internal/retry/backoff_test.go
++++ b/internal/retry/backoff_test.go
+@@ -7,8 +7,8 @@ import (
+ 	"taskapi/internal/config"
+ )
+ 
+-func TestDefaultPolicyUsesTimeoutMS(t *testing.T) {
+-	p := DefaultPolicy(config.Config{TimeoutMS: 20})
++func TestDefaultPolicyUsesTimeoutSeconds(t *testing.T) {
++	p := DefaultPolicy(config.Config{TimeoutSeconds: 20})
+ 	if p.Budget != 20*time.Second {
+ 		t.Fatalf("Budget = %v, want 20s", p.Budget)
+ 	}
+diff --git a/internal/server/server.go b/internal/server/server.go
+index f2e52a6..b857b0f 100644
+--- a/internal/server/server.go
++++ b/internal/server/server.go
+@@ -23,7 +23,7 @@ func New(cfg config.Config) *Server {
+ // ReadTimeout is how long a request may take to send its headers
+ // before the connection is closed.
+ func (s *Server) ReadTimeout() time.Duration {
+-	return time.Duration(s.cfg.TimeoutMS) * time.Second
++	return time.Duration(s.cfg.TimeoutSeconds) * time.Second
+ }
+ 
+ // IdleTimeout is how long a keep-alive connection may sit unused.
+@@ -39,6 +39,6 @@ func (s *Server) ListenAddr(port int) string {
+ 
+ // Describe returns a human-readable summary used at startup.
+ func (s *Server) Describe() string {
+-	return fmt.Sprintf("upstream=%s timeout_ms=%d max_conn=%d",
+-		s.cfg.Endpoint, s.cfg.TimeoutMS, s.cfg.MaxConnections)
++	return fmt.Sprintf("upstream=%s timeout_seconds=%d max_conn=%d",
++		s.cfg.Endpoint, s.cfg.TimeoutSeconds, s.cfg.MaxConnections)
+ }
+diff --git a/main.go b/main.go
+index 05bf5a6..cfe785f 100644
+--- a/main.go
++++ b/main.go
+@@ -16,13 +16,17 @@ func main() {
+ 		fmt.Fprintln(os.Stderr, "load config:", err)
+ 		os.Exit(1)
+ 	}
++	if err := cfg.Validate(); err != nil {
++		fmt.Fprintln(os.Stderr, "invalid config:", err)
++		os.Exit(1)
++	}
+ 
+ 	srv := server.New(cfg)
+ 	cli := client.New(cfg)
+ 	policy := retry.DefaultPolicy(cfg)
+ 
+ 	fmt.Println("endpoint:", cfg.Endpoint)
+-	fmt.Println("timeout_ms:", cfg.TimeoutMS)
++	fmt.Println("timeout_seconds:", cfg.TimeoutSeconds)
+ 	fmt.Println("server read timeout:", srv.ReadTimeout())
+ 	fmt.Println("client timeout:", cli.Timeout())
+ 	fmt.Println("retry budget:", policy.Budget)

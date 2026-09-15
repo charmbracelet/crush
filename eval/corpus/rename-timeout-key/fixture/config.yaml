@@ -1,0 +1,3 @@
+endpoint: https://api.internal.example
+timeout_ms: 30
+max_connections: 8

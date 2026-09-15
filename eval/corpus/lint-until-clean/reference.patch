@@ -1,0 +1,166 @@
+diff --git a/internal/config/load.go b/internal/config/load.go
+index 2d2ffae..8e46866 100644
+--- a/internal/config/load.go
++++ b/internal/config/load.go
+@@ -5,6 +5,8 @@ import (
+ 	"fmt"
+ 	"os"
+ 	"strings"
++
++	"toolkit/internal/log"
+ )
+ 
+ // Config carries toolkit settings.
+@@ -17,7 +19,7 @@ type Config struct {
+ func Load(path string) (Config, error) {
+ 	data, err := os.ReadFile(path)
+ 	if err != nil {
+-		panic(fmt.Sprintf("cannot read config %s", path))
++		return Config{}, fmt.Errorf("cannot read config %s: %w", path, err)
+ 	}
+ 	var cfg Config
+ 	for _, line := range strings.Split(string(data), "\n") {
+@@ -37,8 +39,15 @@ func Load(path string) (Config, error) {
+ 		}
+ 	}
+ 	if cfg.Workspace == "" {
+-		fmt.Println("config: workspace not set, using .")
++		log.Infof("config: workspace not set, using .")
+ 		cfg.Workspace = "."
+ 	}
+ 	return cfg, nil
+ }
++
++// DryRun reports whether TOOLKIT_DRY_RUN preview mode is on.
++// Environment access is centralized here so lint can forbid
++// os.Getenv elsewhere.
++func DryRun() bool {
++	return os.Getenv("TOOLKIT_DRY_RUN") != ""
++}
+diff --git a/internal/fileutil/copy.go b/internal/fileutil/copy.go
+index 03cfc64..ce411bc 100644
+--- a/internal/fileutil/copy.go
++++ b/internal/fileutil/copy.go
+@@ -5,6 +5,8 @@ import (
+ 	"fmt"
+ 	"io"
+ 	"os"
++
++	"toolkit/internal/log"
+ )
+ 
+ // DescribeCopy returns a human-readable description of a copy
+@@ -31,7 +33,7 @@ func Copy(src, dst string) (int64, error) {
+ 	if err != nil {
+ 		return 0, fmt.Errorf("copy data: %w", err)
+ 	}
+-	fmt.Printf("copied %d bytes from %s to %s\n", n, src, dst)
++	log.Infof("copied %d bytes from %s to %s", n, src, dst)
+ 	return n, nil
+ }
+ 
+@@ -42,7 +44,7 @@ func Size(path string) (int64, error) {
+ 		return 0, fmt.Errorf("stat: %w", err)
+ 	}
+ 	if fi.IsDir() {
+-		panic("Size called on directory")
++		return 0, fmt.Errorf("size: %s is a directory", path)
+ 	}
+ 	return fi.Size(), nil
+ }
+diff --git a/internal/fileutil/move.go b/internal/fileutil/move.go
+index 3c08e81..7d79318 100644
+--- a/internal/fileutil/move.go
++++ b/internal/fileutil/move.go
+@@ -3,6 +3,9 @@ package fileutil
+ import (
+ 	"fmt"
+ 	"os"
++
++	"toolkit/internal/config"
++	"toolkit/internal/log"
+ )
+ 
+ // Move renames src to dst, refusing to overwrite a directory.
+@@ -12,14 +15,19 @@ func Move(src, dst string) error {
+ 	if err == nil && fi.IsDir() {
+ 		return fmt.Errorf("destination %s is a directory", dst)
+ 	}
+-	if os.Getenv("TOOLKIT_DRY_RUN") != "" {
+-		fmt.Println("dry run: would move", src, "to", dst)
++	if config.DryRun() {
++		log.Infof("dry run: would move %s to %s", src, dst)
+ 		return nil
+ 	}
+ 	if err := os.Rename(src, dst); err != nil {
+-		return fmt.Errorf("rename: %w", err)
++		if _, cerr := Copy(src, dst); cerr != nil {
++			return fmt.Errorf("rename: %w", err)
++		}
++		if cerr := os.Remove(src); cerr != nil {
++			return fmt.Errorf("remove source after copy: %w", cerr)
++		}
+ 	}
+-	fmt.Println("moved", src, "to", dst)
++	log.Infof("moved %s to %s", src, dst)
+ 	return nil
+ }
+ 
+@@ -28,5 +36,3 @@ func Exists(path string) bool {
+ 	_, err := os.Stat(path)
+ 	return err == nil
+ }
+-
+-// TODO: support copying across filesystems (rename fails with EXDEV).
+diff --git a/internal/fileutil/move_test.go b/internal/fileutil/move_test.go
+new file mode 100644
+index 0000000..b787a46
+--- /dev/null
++++ b/internal/fileutil/move_test.go
+@@ -0,0 +1,22 @@
++package fileutil
++
++import (
++	"os"
++	"path/filepath"
++	"testing"
++)
++
++func TestMoveRefusesDirectory(t *testing.T) {
++	dir := t.TempDir()
++	src := filepath.Join(dir, "src.txt")
++	if err := os.WriteFile(src, []byte("data"), 0o644); err != nil {
++		t.Fatal(err)
++	}
++	dst := filepath.Join(dir, "dstdir")
++	if err := os.Mkdir(dst, 0o755); err != nil {
++		t.Fatal(err)
++	}
++	if err := Move(src, dst); err == nil {
++		t.Fatal("Move onto a directory: expected error, got nil")
++	}
++}
+diff --git a/lint.sh b/lint.sh
+index 83fa1a9..bdf1da2 100755
+--- a/lint.sh
++++ b/lint.sh
+@@ -3,6 +3,7 @@
+ #   1. no fmt.Print* calls outside main.go — use the logger
+ #   2. no panic( outside main.go — return errors instead
+ #   3. no TODO/FIXME markers — resolve or remove them
++#   4. no os.Getenv outside internal/config — env lives in config
+ set -u
+ cd "$(dirname "$0")"
+ 
+@@ -36,6 +37,11 @@ while IFS= read -r line; do
+ 	violations=$((violations + 1))
+ done < <(grep -rn "TODO\|FIXME" --include="*.go" . || true)
+ 
++while IFS= read -r line; do
++	echo "getenv: $line"
++	violations=$((violations + 1))
++done < <(grep -rn "os.Getenv" --include="*.go" . | grep -v "internal/config" || true)
++
+ echo "lint: scanned $scanned file(s)"
+ if [ "$violations" -eq 0 ]; then
+ 	echo "lint: clean"

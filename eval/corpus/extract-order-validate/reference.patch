@@ -1,0 +1,231 @@
+diff --git a/cmd/shop/main.go b/cmd/shop/main.go
+index 94cae4a..35ac543 100644
+--- a/cmd/shop/main.go
++++ b/cmd/shop/main.go
+@@ -4,6 +4,7 @@ import (
+ 	"fmt"
+ 
+ 	"shop/internal/model"
++	"shop/internal/order"
+ 	"shop/internal/service"
+ )
+ 
+@@ -16,6 +17,7 @@ func main() {
+ 		Items: []model.Item{{SKU: "w-1", Qty: 2, Price: 999}},
+ 		Total: 1998,
+ 	}
++	fmt.Println("valid:", order.IsValid(o.Email, o.Items))
+ 	id, err := svc.Orders().CreateOrder(o)
+ 	fmt.Println("created:", id, "err:", err)
+ }
+diff --git a/internal/handlers/exchange.go b/internal/handlers/exchange.go
+index e169f2e..63f0ba4 100644
+--- a/internal/handlers/exchange.go
++++ b/internal/handlers/exchange.go
+@@ -5,6 +5,7 @@ import (
+ 	"fmt"
+ 
+ 	"shop/internal/model"
++	"shop/internal/order"
+ 	"shop/internal/store"
+ )
+ 
+@@ -23,24 +24,14 @@ func (h *ExchangeHandler) RequestExchange(x model.Exchange) error {
+ 	if _, err := h.store.GetOrder(x.OrderID); err != nil {
+ 		return fmt.Errorf("lookup order: %w", err)
+ 	}
+-	if x.Email == "" {
+-		return errors.New("email is required")
+-	}
+-	if len(x.NewItems) == 0 {
+-		return errors.New("exchange must contain at least one item")
++	if err := order.Validate(x.Email, x.NewItems); err != nil {
++		return err
+ 	}
+ 	if x.NewTotal < 0 {
+ 		return errors.New("exchange total must not be negative")
+ 	}
+-	computed := 0
+-	for _, it := range x.NewItems {
+-		if it.Qty <= 0 {
+-			return fmt.Errorf("item %s: quantity must be positive", it.SKU)
+-		}
+-		computed += it.Qty * it.Price
+-	}
+-	if computed != x.NewTotal {
+-		return fmt.Errorf("exchange total %d does not match items %d", x.NewTotal, computed)
++	if err := order.CheckTotal(x.NewTotal, x.NewItems); err != nil {
++		return err
+ 	}
+ 	if x.Reason == "" {
+ 		return errors.New("exchange reason is required")
+diff --git a/internal/handlers/order.go b/internal/handlers/order.go
+index 5cf21dc..5d47c72 100644
+--- a/internal/handlers/order.go
++++ b/internal/handlers/order.go
+@@ -1,12 +1,12 @@
+ // Package handlers contains the entry points for customer-facing
+-// operations. Each handler currently validates its input inline.
++// operations. Validation is shared via internal/order.
+ package handlers
+ 
+ import (
+-	"errors"
+ 	"fmt"
+ 
+ 	"shop/internal/model"
++	"shop/internal/order"
+ 	"shop/internal/store"
+ )
+ 
+@@ -22,24 +22,14 @@ func NewOrderHandler(s *store.Store) *OrderHandler {
+ 
+ // CreateOrder validates and persists a new order.
+ func (h *OrderHandler) CreateOrder(o model.Order) (string, error) {
+-	if o.Email == "" {
+-		return "", errors.New("email is required")
+-	}
+-	if len(o.Items) == 0 {
+-		return "", errors.New("order must contain at least one item")
++	if err := order.Validate(o.Email, o.Items); err != nil {
++		return "", err
+ 	}
+ 	if o.Total <= 0 {
+-		return "", errors.New("order total must be positive")
+-	}
+-	computed := 0
+-	for _, it := range o.Items {
+-		if it.Qty <= 0 {
+-			return "", fmt.Errorf("item %s: quantity must be positive", it.SKU)
+-		}
+-		computed += it.Qty * it.Price
++		return "", fmt.Errorf("order total must be positive")
+ 	}
+-	if computed != o.Total {
+-		return "", fmt.Errorf("order total %d does not match items %d", o.Total, computed)
++	if err := order.CheckTotal(o.Total, o.Items); err != nil {
++		return "", err
+ 	}
+ 
+ 	if o.Status == "" {
+diff --git a/internal/handlers/return.go b/internal/handlers/return.go
+index 26080c1..2a5cf89 100644
+--- a/internal/handlers/return.go
++++ b/internal/handlers/return.go
+@@ -5,6 +5,7 @@ import (
+ 	"fmt"
+ 
+ 	"shop/internal/model"
++	"shop/internal/order"
+ 	"shop/internal/store"
+ )
+ 
+@@ -23,16 +24,8 @@ func (h *ReturnHandler) RequestReturn(r model.Return) error {
+ 	if _, err := h.store.GetOrder(r.OrderID); err != nil {
+ 		return fmt.Errorf("lookup order: %w", err)
+ 	}
+-	if r.Email == "" {
+-		return errors.New("email is required")
+-	}
+-	if len(r.Items) == 0 {
+-		return errors.New("return must contain at least one item")
+-	}
+-	for _, it := range r.Items {
+-		if it.Qty <= 0 {
+-			return fmt.Errorf("item %s: quantity must be positive", it.SKU)
+-		}
++	if err := order.Validate(r.Email, r.Items); err != nil {
++		return err
+ 	}
+ 	if r.Reason == "" {
+ 		return errors.New("return reason is required")
+diff --git a/internal/order/validate.go b/internal/order/validate.go
+new file mode 100644
+index 0000000..a3e5ef2
+--- /dev/null
++++ b/internal/order/validate.go
+@@ -0,0 +1,45 @@
++// Package order holds the shared order-validation rules extracted
++// from the handlers.
++package order
++
++import (
++	"errors"
++	"fmt"
++
++	"shop/internal/model"
++)
++
++// Validate checks the common item rules shared by orders, returns,
++// and exchanges: email required, at least one item, and positive
++// quantities.
++func Validate(email string, items []model.Item) error {
++	if email == "" {
++		return errors.New("email is required")
++	}
++	if len(items) == 0 {
++		return errors.New("order must contain at least one item")
++	}
++	for _, it := range items {
++		if it.Qty <= 0 {
++			return fmt.Errorf("item %s: quantity must be positive", it.SKU)
++		}
++	}
++	return nil
++}
++
++// IsValid reports whether the common item rules pass.
++func IsValid(email string, items []model.Item) bool {
++	return Validate(email, items) == nil
++}
++
++// CheckTotal verifies a declared total equals the item sum.
++func CheckTotal(total int, items []model.Item) error {
++	computed := 0
++	for _, it := range items {
++		computed += it.Qty * it.Price
++	}
++	if computed != total {
++		return fmt.Errorf("order total %d does not match items %d", total, computed)
++	}
++	return nil
++}
+diff --git a/internal/order/validate_test.go b/internal/order/validate_test.go
+new file mode 100644
+index 0000000..9f93092
+--- /dev/null
++++ b/internal/order/validate_test.go
+@@ -0,0 +1,33 @@
++package order
++
++import (
++	"testing"
++
++	"shop/internal/model"
++)
++
++func TestValidateFailures(t *testing.T) {
++	cases := []struct {
++		name  string
++		email string
++		items []model.Item
++	}{
++		{"empty email", "", []model.Item{{SKU: "a", Qty: 1, Price: 100}}},
++		{"no items", "a@b.co", nil},
++		{"zero qty", "a@b.co", []model.Item{{SKU: "a", Qty: 0, Price: 100}}},
++	}
++	for _, tc := range cases {
++		t.Run(tc.name, func(t *testing.T) {
++			if err := Validate(tc.email, tc.items); err == nil {
++				t.Fatal("expected validation error")
++			}
++		})
++	}
++}
++
++func TestValidateAccepts(t *testing.T) {
++	items := []model.Item{{SKU: "a", Qty: 2, Price: 100}}
++	if err := Validate("a@b.co", items); err != nil {
++		t.Fatalf("unexpected error: %v", err)
++	}
++}

@@ -1,0 +1,23 @@
+{
+	"id": "rename-timeout-key",
+	"schema_version": 1,
+	"origin": {"kind": "synthetic"},
+	"start_state": {"kind": "fixture", "fixture_dir": "fixture"},
+	"task": {
+		"turns": [
+			"The `timeout_ms` YAML key and the `TimeoutMS` Go field are misnamed — the value has always been seconds. Rename the YAML key to `timeout_seconds` and the field to `TimeoutSeconds` everywhere, including config.yaml, struct tags/parsing, and tests — no backwards-compatibility alias. Keep `go build ./...` and `go test ./...` green.",
+			"Add a `Validate()` method on the Config type that returns an error when the endpoint is empty or the timeout is non-positive, call it from main after loading, and keep the build and tests green.",
+			"Add tests for Config.Validate covering the empty-endpoint case, a non-positive timeout, and a fully valid config. Keep `go test ./...` green."
+		]
+	},
+	"check": {
+		"script": "check.sh",
+		"expect_start_state": "fail",
+		"timeout_seconds": 300
+	},
+	"coverage": {
+		"min_steps": 12
+	},
+	"requires": {"tools": ["go"]},
+	"budget": {"run_timeout_seconds": 900, "max_steps": 45}
+}

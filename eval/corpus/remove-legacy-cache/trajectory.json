@@ -1,0 +1,23 @@
+{
+	"id": "remove-legacy-cache",
+	"schema_version": 1,
+	"origin": {"kind": "synthetic"},
+	"start_state": {"kind": "fixture", "fixture_dir": "fixture"},
+	"task": {
+		"turns": [
+			"internal/cache is deprecated — internal/store exposes the same Get/Set/Delete API. Look over the cache package sources, migrate internal/service/catalog.go and internal/service/search.go to internal/store, then delete the internal/cache package entirely. `go build ./...` and `go test ./...` must stay green.",
+			"Add a test asserting that a Store.Get miss increments the miss counter reported by Stats, and keep `go test ./...` green.",
+			"Add a test asserting that a Store.Get hit increments the hit counter reported by Stats, and keep `go test ./...` green."
+		]
+	},
+	"check": {
+		"script": "check.sh",
+		"expect_start_state": "fail",
+		"timeout_seconds": 300
+	},
+	"coverage": {
+		"min_steps": 10
+	},
+	"requires": {"tools": ["go"]},
+	"budget": {"run_timeout_seconds": 900, "max_steps": 45}
+}

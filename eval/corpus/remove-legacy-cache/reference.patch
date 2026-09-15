@@ -1,0 +1,218 @@
+diff --git a/internal/cache/cache.go b/internal/cache/cache.go
+deleted file mode 100644
+index b657470..0000000
+--- a/internal/cache/cache.go
++++ /dev/null
+@@ -1,43 +0,0 @@
+-package cache
+-
+-import "sync"
+-
+-// Cache is a plain string-keyed in-memory cache.
+-type Cache struct {
+-	mu    sync.Mutex
+-	items map[string]string
+-}
+-
+-// New returns an empty Cache.
+-func New() *Cache {
+-	return &Cache{items: make(map[string]string)}
+-}
+-
+-// Get returns the value for key, or "" and false when absent.
+-func (c *Cache) Get(key string) (string, bool) {
+-	c.mu.Lock()
+-	defer c.mu.Unlock()
+-	v, ok := c.items[key]
+-	return v, ok
+-}
+-
+-// Set stores value under key.
+-func (c *Cache) Set(key, value string) {
+-	c.mu.Lock()
+-	defer c.mu.Unlock()
+-	c.items[key] = value
+-}
+-
+-// Delete removes key. Missing keys are not an error.
+-func (c *Cache) Delete(key string) {
+-	c.mu.Lock()
+-	defer c.mu.Unlock()
+-	delete(c.items, key)
+-}
+-
+-// Len reports how many entries are held.
+-func (c *Cache) Len() int {
+-	c.mu.Lock()
+-	defer c.mu.Unlock()
+-	return len(c.items)
+-}
+diff --git a/internal/cache/doc.go b/internal/cache/doc.go
+deleted file mode 100644
+index c9cdcfe..0000000
+--- a/internal/cache/doc.go
++++ /dev/null
+@@ -1,5 +0,0 @@
+-// Package cache is the legacy in-memory cache. It is deprecated in
+-// favor of internal/store, which exposes the same Get/Set/Delete API
+-// with metrics hooks. This package remains only until callers are
+-// migrated.
+-package cache
+diff --git a/internal/cache/lru.go b/internal/cache/lru.go
+deleted file mode 100644
+index bbbbd22..0000000
+--- a/internal/cache/lru.go
++++ /dev/null
+@@ -1,69 +0,0 @@
+-package cache
+-
+-import (
+-	"container/list"
+-	"sync"
+-)
+-
+-// LRU is a bounded Cache variant evicting the least recently used
+-// entry once Cap is exceeded.
+-type LRU struct {
+-	cap   int
+-	mu    sync.Mutex
+-	ll    *list.List
+-	items map[string]*list.Element
+-}
+-
+-type lruEntry struct {
+-	key   string
+-	value string
+-}
+-
+-// NewLRU returns an LRU holding at most cap entries.
+-func NewLRU(capacity int) *LRU {
+-	return &LRU{
+-		cap:   capacity,
+-		ll:    list.New(),
+-		items: make(map[string]*list.Element),
+-	}
+-}
+-
+-// Get returns the value for key and marks it most recently used.
+-func (l *LRU) Get(key string) (string, bool) {
+-	l.mu.Lock()
+-	defer l.mu.Unlock()
+-	if el, ok := l.items[key]; ok {
+-		l.ll.MoveToFront(el)
+-		return el.Value.(lruEntry).value, true
+-	}
+-	return "", false
+-}
+-
+-// Set stores value under key, evicting the oldest entry when full.
+-func (l *LRU) Set(key, value string) {
+-	l.mu.Lock()
+-	defer l.mu.Unlock()
+-	if el, ok := l.items[key]; ok {
+-		l.ll.MoveToFront(el)
+-		el.Value = lruEntry{key, value}
+-		return
+-	}
+-	l.items[key] = l.ll.PushFront(lruEntry{key, value})
+-	if l.ll.Len() > l.cap {
+-		back := l.ll.Back()
+-		if back != nil {
+-			l.ll.Remove(back)
+-			delete(l.items, back.Value.(lruEntry).key)
+-		}
+-	}
+-}
+-
+-// Delete removes key.
+-func (l *LRU) Delete(key string) {
+-	l.mu.Lock()
+-	defer l.mu.Unlock()
+-	if el, ok := l.items[key]; ok {
+-		l.ll.Remove(el)
+-		delete(l.items, key)
+-	}
+-}
+diff --git a/internal/service/catalog.go b/internal/service/catalog.go
+index 978ef1d..c17df13 100644
+--- a/internal/service/catalog.go
++++ b/internal/service/catalog.go
+@@ -5,17 +5,17 @@ package service
+ import (
+ 	"fmt"
+ 
+-	"catalog/internal/cache"
++	"catalog/internal/store"
+ )
+ 
+ // Catalog keeps SKU → name mappings in a cache backend.
+ type Catalog struct {
+-	c *cache.Cache
++	c *store.Store
+ }
+ 
+-// NewCatalog builds a Catalog on the legacy cache.
++// NewCatalog builds a Catalog on the store backend.
+ func NewCatalog() *Catalog {
+-	return &Catalog{c: cache.New()}
++	return &Catalog{c: store.New()}
+ }
+ 
+ // Put stores a SKU mapping.
+diff --git a/internal/service/search.go b/internal/service/search.go
+index e567002..604faad 100644
+--- a/internal/service/search.go
++++ b/internal/service/search.go
+@@ -1,18 +1,18 @@
+ package service
+ 
+ import (
+-	"catalog/internal/cache"
++	"catalog/internal/store"
+ )
+ 
+ // Search is a tiny lookup index over product descriptions, backed by
+ // the same cache type as Catalog.
+ type Search struct {
+-	c *cache.Cache
++	c *store.Store
+ }
+ 
+-// NewSearch builds a Search on the legacy cache.
++// NewSearch builds a Search on the store backend.
+ func NewSearch() *Search {
+-	return &Search{c: cache.New()}
++	return &Search{c: store.New()}
+ }
+ 
+ // Index stores a document under its key.
+diff --git a/internal/store/store_test.go b/internal/store/store_test.go
+new file mode 100644
+index 0000000..8827b13
+--- /dev/null
++++ b/internal/store/store_test.go
+@@ -0,0 +1,24 @@
++package store
++
++import "testing"
++
++func TestGetMissIncrementsMisses(t *testing.T) {
++	s := New()
++	s.Get("absent")
++	hits, misses := s.Stats()
++	if misses != 1 || hits != 0 {
++		t.Fatalf("Stats() = %d hits, %d misses; want 0 hits, 1 miss", hits, misses)
++	}
++}
++
++func TestGetHitIncrementsHits(t *testing.T) {
++	s := New()
++	s.Set("sku-1", "widget")
++	if _, ok := s.Get("sku-1"); !ok {
++		t.Fatal("Get returned miss for a stored key")
++	}
++	hits, misses := s.Stats()
++	if hits != 1 || misses != 0 {
++		t.Fatalf("Stats() = %d hits, %d misses; want 1 hit, 0 misses", hits, misses)
++	}
++}

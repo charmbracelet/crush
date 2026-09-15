@@ -1,0 +1,23 @@
+{
+	"id": "extract-order-validate",
+	"schema_version": 1,
+	"origin": {"kind": "synthetic"},
+	"start_state": {"kind": "fixture", "fixture_dir": "fixture"},
+	"task": {
+		"turns": [
+			"The three handlers in internal/handlers each duplicate the same item-validation rules (email required, at least one item, positive quantities, totals matching the item sum). Extract that logic into a shared package internal/order exporting Validate, and have all three handlers call it. Keep `go build ./...` green and don't change the validation behavior.",
+			"Add a table-driven test for the shared validator covering each validation failure case, and keep `go test ./...` green.",
+			"Add an `IsValid(email string, items []model.Item) bool` helper in internal/order wrapping Validate, and call it from cmd/shop/main.go so the demo reports whether the order validates. Keep `go build ./...` and `go test ./...` green."
+		]
+	},
+	"check": {
+		"script": "check.sh",
+		"expect_start_state": "fail",
+		"timeout_seconds": 300
+	},
+	"coverage": {
+		"min_steps": 12
+	},
+	"requires": {"tools": ["go"]},
+	"budget": {"run_timeout_seconds": 900, "max_steps": 45}
+}

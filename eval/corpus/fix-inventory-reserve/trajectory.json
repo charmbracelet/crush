@@ -1,0 +1,21 @@
+{
+	"id": "fix-inventory-reserve",
+	"schema_version": 1,
+	"origin": {"kind": "synthetic"},
+	"start_state": {"kind": "fixture", "fixture_dir": "fixture"},
+	"task": {
+		"turns": [
+			"Run `go test -v ./...` — it reports a failing test in internal/inventory. Fix the implementation so all tests pass — do not modify any _test.go file.",
+			"Add a test covering Release returning units to availability — reserve, release, then reserve again should succeed. Keep `go test -v ./...` green.",
+			"Add an `InUse(item string) bool` method on Inventory reporting whether an item currently has reserved units, and include it in report.Stock's per-item line. Keep `go build ./...` and `go test -v ./...` green."
+		]
+	},
+	"check": {
+		"script": "check.sh",
+		"expect_start_state": "fail",
+		"timeout_seconds": 300
+	},
+	"coverage": {"min_steps": 9},
+	"requires": {"tools": ["go"]},
+	"budget": {"run_timeout_seconds": 900, "max_steps": 30}
+}

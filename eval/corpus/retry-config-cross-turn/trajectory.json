@@ -1,0 +1,21 @@
+{
+	"id": "retry-config-cross-turn",
+	"schema_version": 1,
+	"origin": {"kind": "synthetic"},
+	"start_state": {"kind": "fixture", "fixture_dir": "fixture"},
+	"task": {
+		"turns": [
+			"Add a `retries` field to the Config struct — parsed from a `retries:` key in config.yaml, defaulting to 0 when the key is absent — and add a test asserting the default is 0.",
+			"Now make client.Do retry a failed request up to cfg.Retries additional times, returning the last error when attempts are exhausted. Keep `go build ./...` and `go test ./...` green.",
+			"Add a test for the retry behavior using `httptest.NewServer`: fail the first request then succeed, and assert Do returns success when Retries permits it. Keep `go build ./...` and `go test ./...` green."
+		]
+	},
+	"check": {
+		"script": "check.sh",
+		"expect_start_state": "fail",
+		"timeout_seconds": 300
+	},
+	"coverage": {"min_steps": 10},
+	"requires": {"tools": ["go"]},
+	"budget": {"run_timeout_seconds": 900, "max_steps": 45}
+}

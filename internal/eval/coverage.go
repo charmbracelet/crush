@@ -8,6 +8,13 @@ import (
 // coverageFields is the closed set of run-record field paths a coverage
 // predicate may compare against. Keeping it a table (not reflection)
 // is what makes the grammar closed: nothing else is reachable.
+//
+// Warning for corpus authors: all stub_stats.* fields are flag-gated,
+// not flag-invariant — stub flagging and promotion are disabled in the
+// control arm, so they are structurally 0 there. That includes
+// stub_stats.boundary_advances: its counter only exists once a run has
+// promoted a stub, so it cannot serve as a flag-agnostic "work
+// happened" predicate. Predicates over steps and tokens.* are safe.
 var coverageFields = map[string]func(*RunRecord) float64{
 	"steps":                        func(r *RunRecord) float64 { return float64(r.Steps) },
 	"tokens.input":                 func(r *RunRecord) float64 { return float64(r.Tokens.Input) },

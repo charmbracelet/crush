@@ -1,0 +1,21 @@
+{
+	"id": "lint-until-clean",
+	"schema_version": 1,
+	"origin": {"kind": "synthetic"},
+	"start_state": {"kind": "fixture", "fixture_dir": "fixture"},
+	"task": {
+		"turns": [
+			"Run ./lint.sh — it reports style violations. Fix every one: fmt.Print* calls outside main.go should go through the logger in internal/log, panic calls outside main.go should become returned errors (the signatures already return error — return it instead), and TODO/FIXME markers should be resolved or removed. Keep `go build ./...` and `go test ./...` green and re-run ./lint.sh until it reports clean.",
+			"Extend lint.sh with one more rule: forbid `os.Getenv` calls outside the config package — config should own environment access. Fix anything the new rule reports and keep ./lint.sh, `go build ./...`, and `go test ./...` green.",
+			"Add a test in internal/fileutil asserting `Move` refuses to overwrite a directory. Keep ./lint.sh, `go build ./...`, and `go test ./...` green."
+		]
+	},
+	"check": {
+		"script": "check.sh",
+		"expect_start_state": "fail",
+		"timeout_seconds": 300
+	},
+	"coverage": {"min_steps": 11},
+	"requires": {"tools": ["go", "bash"]},
+	"budget": {"run_timeout_seconds": 900, "max_steps": 45}
+}

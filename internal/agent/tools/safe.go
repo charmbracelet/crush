@@ -284,7 +284,17 @@ func isSafeReadOnly(command string) bool {
 	if len(file.Stmts) == 0 {
 		return false
 	}
-	for _, stmt := range file.Stmts {
+	return safeStmts(file.Stmts)
+}
+
+// safeStmts reports whether every statement in a list is safe. An empty list
+// is not: a command that resolves to nothing is not something to wave
+// through, and it is the shape a parse surprise tends to take.
+func safeStmts(stmts []*syntax.Stmt) bool {
+	if len(stmts) == 0 {
+		return false
+	}
+	for _, stmt := range stmts {
 		if !safeStmt(stmt) {
 			return false
 		}
@@ -312,6 +322,25 @@ func safeStmt(stmt *syntax.Stmt) bool {
 	// its own node. It only measures what it wraps, so defer to that.
 	if clause, ok := stmt.Cmd.(*syntax.TimeClause); ok {
 		return clause.Stmt != nil && safeStmt(clause.Stmt)
+	}
+	// Composing read-only commands leaves them read-only, so a chain is
+	// judged by its parts: `&&`, `||`, and `|` are safe exactly when both
+	// sides are. Each part keeps its own fixed argv, which is what makes
+	// this sound — unlike command substitution, where one command's output
+	// becomes another's arguments and could supply a flag that turns a
+	// read-only command into a writing one. Substitution is still refused
+	// by literalArgs below.
+	if bin, ok := stmt.Cmd.(*syntax.BinaryCmd); ok {
+		switch bin.Op {
+		case syntax.AndStmt, syntax.OrStmt, syntax.Pipe, syntax.PipeAll:
+			return safeStmt(bin.X) && safeStmt(bin.Y)
+		default:
+			return false
+		}
+	}
+	// A subshell changes where the commands run, not what they may do.
+	if sub, ok := stmt.Cmd.(*syntax.Subshell); ok {
+		return safeStmts(sub.Stmts)
 	}
 	call, ok := stmt.Cmd.(*syntax.CallExpr)
 	if !ok {

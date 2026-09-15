@@ -194,10 +194,15 @@ func (s *Shell) SetBlockFuncs(blockFuncs []BlockFunc) {
 func CommandsBlocker(cmds []string) BlockFunc {
 	bannedSet := make(map[string]struct{}, len(cmds))
 	for _, cmd := range cmds {
-		bannedSet[cmd] = struct{}{}
+		bannedSet[normalizeCommand(cmd)] = struct{}{}
 	}
 
 	return func(args []string) bool {
+		// Resolve through any wrapper first: `nice curl` is an invocation
+		// of curl, and a rule about curl has to see it as one. The list of
+		// commands allowed to skip a prompt peels the same way, so both
+		// answer "what actually runs here" identically.
+		args = ResolveArgv(args)
 		if len(args) == 0 {
 			return false
 		}
@@ -221,9 +226,11 @@ type Rule struct {
 }
 
 // Match reports whether the given expanded argument list is blocked by the
-// rule.
+// rule. The argv is resolved through any command wrapper first, so a rule
+// about `npm install -g` catches `nice npm install -g` too.
 func (r Rule) Match(args []string) bool {
-	if len(args) == 0 || normalizeCommand(args[0]) != r.Command {
+	args = ResolveArgv(args)
+	if len(args) == 0 || normalizeCommand(args[0]) != normalizeCommand(r.Command) {
 		return false
 	}
 
@@ -339,7 +346,10 @@ func CheckCommand(command string, blockFuncs []BlockFunc) CommandCheck {
 	file, err := syntax.NewParser().Parse(strings.NewReader(command), "")
 	if err != nil {
 		// If we can't parse it, consider it potentially dangerous.
-		return CommandCheck{Reason: "it could not be parsed"}
+		// A command the shell cannot parse will not run either way: Run
+		// and execCommon refuse it with a parse error of their own. Warning
+		// about danger here would dress a typo up as a threat.
+		return CommandCheck{}
 	}
 
 	// Empty environment, nil CmdSubst, and erroring ProcSubst: variables
@@ -369,14 +379,14 @@ func CheckCommand(command string, blockFuncs []BlockFunc) CommandCheck {
 				return true
 			}
 			if isDynamicWord(node.Args[0]) {
-				result.Reason = cmp.Or(result.Reason, "its command name is only known at runtime")
+				result.Reason = cmp.Or(result.Reason, "expansion in command name")
 				return false
 			}
 			args, err := expand.Fields(cfg, node.Args...)
 			if err != nil {
 				// A substitution or expansion we can't resolve without running
 				// something. Be conservative and treat it as dangerous.
-				result.Reason = cmp.Or(result.Reason, "it runs another command to build its arguments")
+				result.Reason = cmp.Or(result.Reason, "substitution in arguments")
 				return false
 			}
 			for _, blockFunc := range blockFuncs {
@@ -384,7 +394,7 @@ func CheckCommand(command string, blockFuncs []BlockFunc) CommandCheck {
 					// A named match outranks anything found earlier: it is the
 					// most specific thing that can be said about the command,
 					// and the only finding a user can act on.
-					result = CommandCheck{Matched: true, Reason: "it uses " + normalizeCommand(args[0])}
+					result = CommandCheck{Matched: true, Reason: normalizeCommand(ResolveArgv(args)[0])}
 					return false
 				}
 			}
@@ -398,7 +408,7 @@ func CheckCommand(command string, blockFuncs []BlockFunc) CommandCheck {
 				return true
 			}
 			if _, err := expand.Fields(cfg, node.Word); err != nil {
-				result.Reason = cmp.Or(result.Reason, "it redirects through another command")
+				result.Reason = cmp.Or(result.Reason, "process substitution in redirect position")
 				return false
 			}
 		}
@@ -522,8 +532,10 @@ func ExitCode(err error) int {
 // Redirection alone (`ls > out`, `ls &> /dev/null`) is not chaining: it changes
 // where output goes, not which commands run.
 //
-// Unparseable input reports true, matching IsCommandBlocked: if we cannot tell
-// what the command does, we do not get to call it simple.
+// Unparseable input reports true: if we cannot tell what the command does, we
+// do not get to call it simple. Note this differs from [CheckCommand], which
+// reports nothing for unparseable input, because that answers a different
+// question — such a command never runs, so there is no danger to name.
 func ContainsCommandChaining(command string) bool {
 	file, err := syntax.NewParser().Parse(strings.NewReader(command), "")
 	if err != nil {

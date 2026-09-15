@@ -159,6 +159,11 @@ the dependency.
 ## Non-goals
 
 - Semantic compaction — `CONTEXT_NOTEBOOK.md`.
+- Turn-granularity collapse — the `prior_turn` predicate (drop a
+  completed turn's call/result pairs, stand a generated digest in
+  their place) lives in `TURN_DIGEST.md`; it reuses this doc's
+  mark/render/pointer machinery but is a separate feature with its
+  own flag and gates.
 - Whole-request budgeting and mandatory-overflow errors —
   `CONTEXT_WINDOW_SAFETY.md` (the universal cap is the shared seam).
 - Per-tool cap tuning — existing caps stay.

@@ -62,6 +62,5 @@ eval/results/
 docs/design/BACKGROUND_SUBAGENTS.md
 docs/design/HARNESS_TOPOLOGY.md
 docs/design/SEMANTIC_INDEX.md
-docs/design/SESSION_KNOWLEDGE.md
 docs/design/SWARM_DEDUP.md
 docs/design/TURN_CONTEXT.md

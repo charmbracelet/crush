@@ -470,6 +470,40 @@ func (w *AppWorkspace) DisableDockerMCP() error {
 	return w.store.DisableDockerMCP()
 }
 
+// MCPServersDisabled returns the MCP servers disabled for this
+// repository. The override set is shared by every session, including
+// sub-agent sessions.
+func (w *AppWorkspace) MCPServersDisabled(ctx context.Context) ([]string, error) {
+	return w.app.Sessions.MCPDisabledServers(ctx)
+}
+
+// MCPServersEnabled returns the MCP servers with a repository-scoped
+// enabled override: config-disabled servers the user enabled here. Startup
+// force-starts them so the toggle survives restarts.
+func (w *AppWorkspace) MCPServersEnabled(ctx context.Context) ([]string, error) {
+	return w.app.Sessions.MCPServersEnabled(ctx)
+}
+
+// MCPSetServerDisabled adds or removes a repository-scoped MCP override.
+// Config files are never touched.
+func (w *AppWorkspace) MCPSetServerDisabled(ctx context.Context, name string, disabled bool) error {
+	return w.app.Sessions.SetMCPServerDisabled(ctx, name, disabled)
+}
+
+// MCPSetServerConfigDisabled toggles an MCP server's disabled flag in the
+// global config and applies the change to the running client.
+func (w *AppWorkspace) MCPSetServerConfigDisabled(ctx context.Context, name string, disabled bool) error {
+	return mcptools.SetConfigDisabled(ctx, w.store, config.ScopeGlobal, name, disabled)
+}
+
+// MCPStartServer starts the named MCP server even when its config entry is
+// disabled. The repository-scoped enabled override recorded by
+// MCPSetServerDisabled makes the start survive restarts. Config files are
+// never touched.
+func (w *AppWorkspace) MCPStartServer(ctx context.Context, name string) error {
+	return mcptools.InitializeSingleForced(ctx, name, w.store)
+}
+
 func (w *AppWorkspace) MCPAuthenticate(ctx context.Context, name string) error {
 	return mcptools.AuthenticateMCP(ctx, w.store, name)
 }

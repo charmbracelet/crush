@@ -5,13 +5,16 @@ import (
 	_ "embed"
 	"fmt"
 	"strings"
+	"time"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/shell"
 )
 
 const (
-	JobOutputToolName = "job_output"
+	JobOutputToolName    = "job_output"
+	DefaultWaitTimeout   = 60 // seconds: default max wait time when wait=true
+	MaxWaitTimeout       = 600 // seconds: absolute max wait time (10 minutes)
 )
 
 //go:embed job_output.md
@@ -20,6 +23,11 @@ var jobOutputDescription string
 type JobOutputParams struct {
 	ShellID string `json:"shell_id" description:"The ID of the background shell to retrieve output from"`
 	Wait    bool   `json:"wait" description:"If true, block until the background shell completes before returning output"`
+	// TimeoutSeconds sets the maximum time to wait in seconds when wait=true.
+	// Default: 60. Setting to 0 uses the default. Maximum: 600 (10 minutes).
+	// For long-running processes (e.g. servers), set to a reasonable value
+	// or use wait=false (the default) to poll periodically instead.
+	TimeoutSeconds int `json:"timeout_seconds,omitempty" description:"Max wait time in seconds when wait=true (default: 60, max: 600)"`
 }
 
 type JobOutputResponseMetadata struct {
@@ -46,7 +54,16 @@ func NewJobOutputTool() fantasy.AgentTool {
 			}
 
 			if params.Wait {
-				bgShell.WaitContext(ctx)
+				timeout := DefaultWaitTimeout
+				if params.TimeoutSeconds > 0 {
+					timeout = params.TimeoutSeconds
+				}
+				if timeout > MaxWaitTimeout {
+					timeout = MaxWaitTimeout
+				}
+				waitCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
+				defer cancel()
+				bgShell.WaitContext(waitCtx)
 			}
 
 			stdout, stderr, done, err := bgShell.GetOutput()

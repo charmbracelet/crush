@@ -194,10 +194,15 @@ func (s *Shell) SetBlockFuncs(blockFuncs []BlockFunc) {
 func CommandsBlocker(cmds []string) BlockFunc {
 	bannedSet := make(map[string]struct{}, len(cmds))
 	for _, cmd := range cmds {
-		bannedSet[cmd] = struct{}{}
+		bannedSet[normalizeCommand(cmd)] = struct{}{}
 	}
 
 	return func(args []string) bool {
+		// Resolve through any wrapper first: `nice curl` is an invocation
+		// of curl, and a rule about curl has to see it as one. The list of
+		// commands allowed to skip a prompt peels the same way, so both
+		// answer "what actually runs here" identically.
+		args = ResolveArgv(args)
 		if len(args) == 0 {
 			return false
 		}
@@ -221,9 +226,11 @@ type Rule struct {
 }
 
 // Match reports whether the given expanded argument list is blocked by the
-// rule.
+// rule. The argv is resolved through any command wrapper first, so a rule
+// about `npm install -g` catches `nice npm install -g` too.
 func (r Rule) Match(args []string) bool {
-	if len(args) == 0 || normalizeCommand(args[0]) != r.Command {
+	args = ResolveArgv(args)
+	if len(args) == 0 || normalizeCommand(args[0]) != normalizeCommand(r.Command) {
 		return false
 	}
 
@@ -384,7 +391,7 @@ func CheckCommand(command string, blockFuncs []BlockFunc) CommandCheck {
 					// A named match outranks anything found earlier: it is the
 					// most specific thing that can be said about the command,
 					// and the only finding a user can act on.
-					result = CommandCheck{Matched: true, Reason: "it uses " + normalizeCommand(args[0])}
+					result = CommandCheck{Matched: true, Reason: "it uses " + normalizeCommand(ResolveArgv(args)[0])}
 					return false
 				}
 			}

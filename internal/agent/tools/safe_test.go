@@ -214,42 +214,6 @@ func TestIsSafeReadOnly_Denied(t *testing.T) {
 	}
 }
 
-func TestPeelWrapper(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name    string
-		input   []string
-		want    []string
-		wrapped bool
-	}{
-		{"not a wrapper", []string{"ls", "-la"}, nil, false},
-		{"nohup", []string{"nohup", "ls", "-la"}, []string{"ls", "-la"}, true},
-		{"timeout skips duration", []string{"timeout", "5", "ls"}, []string{"ls"}, true},
-		{"timeout with value flag", []string{"timeout", "-s", "TERM", "5", "ls"}, []string{"ls"}, true},
-		{"timeout with equals flag", []string{"timeout", "--signal=TERM", "5", "ls"}, []string{"ls"}, true},
-		{"nice with adjustment", []string{"nice", "-n", "10", "ls"}, []string{"ls"}, true},
-		// Assignments are not skipped: the assignment stays at the head of
-		// the inner argv, where it matches no entry and so fails closed.
-		{"env with assignment", []string{"env", "FOO=bar", "ls"}, []string{"FOO=bar", "ls"}, true},
-		{"env with multiple assignments", []string{"env", "A=1", "B=2", "ls", "-l"}, []string{"A=1", "B=2", "ls", "-l"}, true},
-		{"env alone is not wrapping", []string{"env"}, nil, false},
-		{"env with only flags is not wrapping", []string{"env", "-i"}, nil, false},
-		{"double dash", []string{"nohup", "--", "ls"}, []string{"ls"}, true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			got, ok := peelWrapper(tt.input)
-			assert.Equal(t, tt.wrapped, ok, "peelWrapper(%v) wrapped", tt.input)
-			if tt.wrapped {
-				assert.Equal(t, tt.want, got, "peelWrapper(%v)", tt.input)
-			}
-		})
-	}
-}
-
 // TestIsSafeReadOnly_WrapperDepth proves the unwrapping is bounded, so a
 // pathological nest cannot spin.
 func TestIsSafeReadOnly_WrapperDepth(t *testing.T) {

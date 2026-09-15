@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/shell"
 	"mvdan.cc/sh/v3/syntax"
 )
@@ -244,7 +245,7 @@ func init() {
 // assignment, a word that is not fully literal, or an argument that does
 // not match a [safeCommand] entry all result in false — which costs the
 // user a permission prompt and nothing more.
-func isSafeReadOnly(command string) bool {
+func isSafeReadOnly(command string, extra []safeCommand) bool {
 	file, err := syntax.NewParser().Parse(strings.NewReader(command), "")
 	if err != nil {
 		return false
@@ -252,18 +253,18 @@ func isSafeReadOnly(command string) bool {
 	if len(file.Stmts) == 0 {
 		return false
 	}
-	return safeStmts(file.Stmts)
+	return safeStmts(file.Stmts, extra)
 }
 
 // safeStmts reports whether every statement in a list is safe. An empty list
 // is not: a command that resolves to nothing is not something to wave
 // through, and it is the shape a parse surprise tends to take.
-func safeStmts(stmts []*syntax.Stmt) bool {
+func safeStmts(stmts []*syntax.Stmt, extra []safeCommand) bool {
 	if len(stmts) == 0 {
 		return false
 	}
 	for _, stmt := range stmts {
-		if !safeStmt(stmt) {
+		if !safeStmt(stmt, extra) {
 			return false
 		}
 	}
@@ -277,7 +278,7 @@ func safeStmts(stmts []*syntax.Stmt) bool {
 // either composes commands in ways this analysis does not model, or (in
 // the case of a pipeline into a non-listed command) has no benefit worth
 // the added surface.
-func safeStmt(stmt *syntax.Stmt) bool {
+func safeStmt(stmt *syntax.Stmt, extra []safeCommand) bool {
 	if stmt == nil || stmt.Cmd == nil {
 		return false
 	}
@@ -289,7 +290,7 @@ func safeStmt(stmt *syntax.Stmt) bool {
 	// `time` is a shell keyword rather than a command, so it arrives as
 	// its own node. It only measures what it wraps, so defer to that.
 	if clause, ok := stmt.Cmd.(*syntax.TimeClause); ok {
-		return clause.Stmt != nil && safeStmt(clause.Stmt)
+		return clause.Stmt != nil && safeStmt(clause.Stmt, extra)
 	}
 	// Composing read-only commands leaves them read-only, so a chain is
 	// judged by its parts: `&&`, `||`, and `|` are safe exactly when both
@@ -301,14 +302,14 @@ func safeStmt(stmt *syntax.Stmt) bool {
 	if bin, ok := stmt.Cmd.(*syntax.BinaryCmd); ok {
 		switch bin.Op {
 		case syntax.AndStmt, syntax.OrStmt, syntax.Pipe, syntax.PipeAll:
-			return safeStmt(bin.X) && safeStmt(bin.Y)
+			return safeStmt(bin.X, extra) && safeStmt(bin.Y, extra)
 		default:
 			return false
 		}
 	}
 	// A subshell changes where the commands run, not what they may do.
 	if sub, ok := stmt.Cmd.(*syntax.Subshell); ok {
-		return safeStmts(sub.Stmts)
+		return safeStmts(sub.Stmts, extra)
 	}
 	call, ok := stmt.Cmd.(*syntax.CallExpr)
 	if !ok {
@@ -323,21 +324,51 @@ func safeStmt(stmt *syntax.Stmt) bool {
 	if !ok {
 		return false
 	}
-	return safeArgv(argv)
+	return safeArgv(argv, extra)
 }
 
 // safeArgv reports whether a fully-literal argv is a safe command. The argv
 // is first resolved through any command wrapper, with the same peeling the
 // deny list applies, so the two lists cannot disagree about which command is
 // being run.
-func safeArgv(argv []string) bool {
+func safeArgv(argv []string, extra []safeCommand) bool {
 	argv = shell.ResolveArgv(argv)
 	if len(argv) == 0 {
 		return false
 	}
-	return slices.ContainsFunc(safeCommands, func(sc safeCommand) bool {
-		return sc.matches(argv)
-	})
+	match := func(sc safeCommand) bool { return sc.matches(argv) }
+	return slices.ContainsFunc(safeCommands, match) || slices.ContainsFunc(extra, match)
+}
+
+// userSafeCommands turns configured safe command lines into entries.
+//
+// Each entry matches only the exact tokens it was given: no operands and no
+// flags beyond them, so "go build" covers `go build` and not `go build -o
+// /usr/local/bin/thing`. That is deliberately stricter than the built-in
+// entries, which carry a hand-checked flag policy per command. A setting that
+// widened itself to cover flags nobody reviewed would be a way to hand over
+// far more than the reader thought they were granting.
+func userSafeCommands(perms *config.Permissions) []safeCommand {
+	if perms == nil {
+		return nil
+	}
+	out := make([]safeCommand, 0, len(perms.SafeCommands))
+	for _, entry := range perms.SafeCommands {
+		argv := strings.Fields(entry)
+		if len(argv) == 0 {
+			continue
+		}
+		// A wrapper in front would let the entry stand in for whatever the
+		// wrapper was handed, so resolve it the way every other list does
+		// and record what actually runs.
+		argv = shell.ResolveArgv(argv)
+		argv[0] = shell.NormalizeCommandName(argv[0])
+		out = append(out, safeCommand{
+			argv:          argv,
+			restrictFlags: true, // allowFlags is empty, so any flag fails.
+		})
+	}
+	return out
 }
 
 // matches reports whether argv is an instance of this safe command form.

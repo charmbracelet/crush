@@ -169,11 +169,26 @@ func resolveBlockedCommands(perms *config.Permissions) []string {
 	if perms == nil {
 		return slices.Clone(defaultBlockedCommands)
 	}
+	// Both sides are normalized the way the block list itself matches, so a
+	// config entry spelled "/usr/bin/CURL" or " curl " lines up with the
+	// "curl" already on the list. Without this, allowing a command by a
+	// slightly different spelling did nothing at all, which is the worst way
+	// for a permission setting to be wrong: it looks applied.
+	allowed := make(map[string]struct{}, len(perms.AllowedCommands))
+	for _, cmd := range perms.AllowedCommands {
+		allowed[shell.NormalizeCommandName(cmd)] = struct{}{}
+	}
+
 	blocked := make([]string, 0, len(defaultBlockedCommands)+len(perms.BlockedCommands))
 	blocked = append(blocked, defaultBlockedCommands...)
-	blocked = append(blocked, perms.BlockedCommands...)
+	for _, cmd := range perms.BlockedCommands {
+		if name := shell.NormalizeCommandName(cmd); name != "" {
+			blocked = append(blocked, name)
+		}
+	}
 	blocked = slices.DeleteFunc(blocked, func(c string) bool {
-		return slices.Contains(perms.AllowedCommands, c)
+		_, ok := allowed[shell.NormalizeCommandName(c)]
+		return ok
 	})
 
 	seen := make(map[string]struct{}, len(blocked))
@@ -242,6 +257,7 @@ func blockFuncs(blocked []string) []shell.BlockFunc {
 
 func NewBashTool(permissions permission.Service, workingDir, spillDir string, attribution *config.Attribution, modelID string, perms *config.Permissions) fantasy.AgentTool {
 	blocked := resolveBlockedCommands(perms)
+	userSafe := userSafeCommands(perms)
 	return fantasy.NewAgentTool(
 		BashToolName,
 		string(bashDescription(attribution, modelID, blocked)),
@@ -253,7 +269,7 @@ func NewBashTool(permissions permission.Service, workingDir, spillDir string, at
 			// Determine working directory
 			execWorkingDir := cmp.Or(params.WorkingDir, workingDir)
 
-			safeReadOnly := isSafeReadOnly(params.Command)
+			safeReadOnly := isSafeReadOnly(params.Command, userSafe)
 
 			sessionID := GetSessionFromContext(ctx)
 			if sessionID == "" {

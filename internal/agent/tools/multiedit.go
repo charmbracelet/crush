@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
+	"github.com/charmbracelet/crush/internal/index"
 	"github.com/charmbracelet/crush/internal/permission"
 )
 
@@ -222,6 +223,7 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 	}
 
 	edit.filetracker.RecordRead(edit.ctx, sessionID, params.FilePath)
+	index.NotifyWritten(params.FilePath)
 
 	var message string
 	if len(failedEdits) > 0 {

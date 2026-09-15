@@ -535,6 +535,7 @@ Boolean Keys:
   provider-auto-update           update the provider catalog automatically
   default-providers              include built-in providers
   attribution-generated-with     add the Generated with Crush line
+  project-index                  build a project index for the map tool
 
 String Keys:
   data-directory string            directory for project data and state

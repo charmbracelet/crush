@@ -402,6 +402,7 @@ type Options struct {
 	NotebookMemoryServer   string   `json:"notebook_memory_server,omitempty" jsonschema:"description=Name of the MCP server to use for mem0 cross-session memory sync and search,default=mem0"`
 	NotebookAutoInject     *bool    `json:"notebook_auto_inject,omitempty" jsonschema:"description=Auto-inject full notebook entries for files mentioned in the user message,default=false"`
 	NotebookStubSuperseded *bool    `json:"notebook_stub_superseded,omitempty" jsonschema:"description=Replace stale or superseded tool results in raw history with labeled stubs (experimental),default=false"`
+	ProjectIndex           *bool    `json:"project_index,omitempty" jsonschema:"description=Enable the persistent per-project symbol index and map tool for codebase navigation,default=false"`
 	InitializeAs           string   `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization,default=AGENTS.md,example=AGENTS.md,example=CRUSH.md,example=CLAUDE.md,example=docs/LLMs.md"`
 	AutoLSP                *bool    `json:"auto_lsp,omitempty" jsonschema:"description=Automatically setup LSPs based on root markers,default=true"`
 	Progress               *bool    `json:"progress,omitempty" jsonschema:"description=Show indeterminate progress updates during long operations,default=true"`
@@ -1028,6 +1029,7 @@ func allToolNames() []string {
 		"glob",
 		"grep",
 		"ls",
+		"map",
 		"question",
 		"sourcegraph",
 		"todos",
@@ -1049,7 +1051,7 @@ func resolveAllowedTools(allTools []string, disabledTools []string) []string {
 }
 
 func resolveReadOnlyTools(tools []string) []string {
-	readOnlyTools := []string{"glob", "grep", "ls", "lsp_call_hierarchy", "lsp_definition", "lsp_symbols", "sourcegraph", "view"}
+	readOnlyTools := []string{"glob", "grep", "ls", "lsp_call_hierarchy", "lsp_definition", "lsp_symbols", "map", "sourcegraph", "view"}
 	// filter to only include tools that are in allowedtools (include mode)
 	return filterSlice(tools, readOnlyTools, true)
 }
@@ -1282,6 +1284,17 @@ func (o *Options) NotebookSyncMem0Enabled() bool {
 		return false
 	}
 	return *o.NotebookSyncMem0
+}
+
+// ProjectIndexEnabled returns the resolved project-index setting,
+// defaulting to false when not explicitly set — experimental features
+// in this codebase default off; the first-run full-tree walk is an
+// unrequested cost until the eval arm justifies flipping it.
+func (o *Options) ProjectIndexEnabled() bool {
+	if o.ProjectIndex == nil {
+		return false
+	}
+	return *o.ProjectIndex
 }
 
 // NotebookAutoInjectEnabled returns the resolved auto-inject setting,

@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
+	"github.com/charmbracelet/crush/internal/index"
 
 	"github.com/charmbracelet/crush/internal/permission"
 )
@@ -174,6 +175,7 @@ func createNewFile(edit editContext, filePath, content string, call fantasy.Tool
 	}
 
 	edit.filetracker.RecordRead(edit.ctx, sessionID, filePath)
+	index.NotifyWritten(filePath)
 
 	return fantasy.WithResponseMetadata(
 		fantasy.NewTextResponse("File created: "+filePath),
@@ -265,6 +267,7 @@ func commitFileChange(edit editContext, sessionID, filePath, oldContent, newCont
 	}
 
 	edit.filetracker.RecordRead(edit.ctx, sessionID, filePath)
+	index.NotifyWritten(filePath)
 	return nil
 }
 

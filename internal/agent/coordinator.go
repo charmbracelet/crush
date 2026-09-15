@@ -993,6 +993,12 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		allTools = append(allTools, tools.NewQuestionTool(c.questions))
 	}
 
+	// Project index is shared across sessions — including sub-agent
+	// child sessions — on the same working dir.
+	if c.cfg.Config().Options.ProjectIndexEnabled() {
+		allTools = append(allTools, tools.NewMapTool(c.cfg))
+	}
+
 	// Add LSP tools if user has configured LSPs or auto_lsp is enabled (nil or true).
 	if len(c.cfg.Config().LSP) > 0 || c.cfg.Config().Options.AutoLSP == nil || *c.cfg.Config().Options.AutoLSP {
 		allTools = append(

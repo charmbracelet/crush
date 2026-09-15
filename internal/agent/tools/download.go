@@ -15,6 +15,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/filepathext"
+	"github.com/charmbracelet/crush/internal/index"
 	"github.com/charmbracelet/crush/internal/permission"
 )
 
@@ -153,6 +154,7 @@ func NewDownloadTool(permissions permission.Service, workingDir string, client *
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
 			}
+			index.NotifyWritten(filePath)
 
 			contentType := resp.Header.Get("Content-Type")
 			responseMsg := fmt.Sprintf("Successfully downloaded %d bytes to %s", bytesWritten, relPath)

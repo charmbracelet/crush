@@ -194,10 +194,11 @@ type optionSpec struct {
 // handleOption above and do not appear here.
 var optionSpecs = map[string]optionSpec{
 	// Boolean fields (stored as-is).
-	"debug":     {jsonKey: "debug", kind: optBool},
-	"debug-lsp": {jsonKey: "debug_lsp", kind: optBool},
-	"auto-lsp":  {jsonKey: "auto_lsp", kind: optBool},
-	"progress":  {jsonKey: "progress", kind: optBool},
+	"debug":         {jsonKey: "debug", kind: optBool},
+	"debug-lsp":     {jsonKey: "debug_lsp", kind: optBool},
+	"auto-lsp":      {jsonKey: "auto_lsp", kind: optBool},
+	"progress":      {jsonKey: "progress", kind: optBool},
+	"project-index": {jsonKey: "project_index", kind: optBool},
 
 	// Boolean fields exposed positively but stored as their negation.
 	"metrics":              {jsonKey: "disable_metrics", kind: optBool, inverted: true},

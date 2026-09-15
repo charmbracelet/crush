@@ -13,6 +13,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/history"
+	"github.com/charmbracelet/crush/internal/index"
 	"github.com/charmbracelet/crush/internal/lsp"
 	lsputil "github.com/charmbracelet/crush/internal/lsp/util"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -99,6 +100,9 @@ func NewRenameTool(
 				for _, path := range affectedFiles {
 					filetracker.RecordRead(ctx, sessionID, path)
 				}
+			}
+			for _, path := range affectedFiles {
+				index.NotifyWritten(path)
 			}
 
 			var b strings.Builder

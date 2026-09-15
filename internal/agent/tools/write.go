@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
+	"github.com/charmbracelet/crush/internal/index"
 
 	"github.com/charmbracelet/crush/internal/permission"
 )
@@ -160,6 +161,7 @@ func NewWriteTool(
 			}
 
 			filetracker.RecordRead(ctx, sessionID, filePath)
+			index.NotifyWritten(filePath)
 
 			result := fmt.Sprintf("File successfully written: %s", filePath)
 			result = fmt.Sprintf("<result>\n%s\n</result>", result)

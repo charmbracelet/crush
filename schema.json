@@ -634,6 +634,11 @@
           "description": "Replace stale or superseded tool results in raw history with labeled stubs (experimental)",
           "default": false
         },
+        "project_index": {
+          "type": "boolean",
+          "description": "Enable the persistent per-project symbol index and map tool for codebase navigation",
+          "default": false
+        },
         "initialize_as": {
           "type": "string",
           "description": "Name of the context file to create/update during project initialization",

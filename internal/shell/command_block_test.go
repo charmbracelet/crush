@@ -96,13 +96,13 @@ func TestCommandBlocking(t *testing.T) {
 			if tt.shouldBlock {
 				if err == nil {
 					t.Errorf("Expected command to be blocked, but it was allowed")
-				} else if !strings.Contains(err.Error(), "not allowed for security reasons") {
+				} else if !strings.Contains(err.Error(), "is a dangerous command") {
 					t.Errorf("Expected security error, got: %v", err)
 				}
 			} else {
 				// For non-blocked commands, we might get other errors (like command not found)
 				// but we shouldn't get the security error
-				if err != nil && strings.Contains(err.Error(), "not allowed for security reasons") {
+				if err != nil && strings.Contains(err.Error(), "is a dangerous command") {
 					t.Errorf("Command was unexpectedly blocked: %v", err)
 				}
 			}
@@ -468,10 +468,13 @@ func TestIsCommandBlocked(t *testing.T) {
 			expected: false,
 		},
 		{
-			name:     "unparseable input is dangerous",
+			// A command the shell cannot parse never reaches execution:
+			// Run refuses it with a parse error of its own. There is no
+			// danger to report, only a typo.
+			name:     "unparseable input is not reported as dangerous",
 			command:  "echo 'unterminated",
 			funcs:    []BlockFunc{blockedCurl},
-			expected: true,
+			expected: false,
 		},
 		{
 			name:     "command substitution is dangerous",
@@ -575,11 +578,13 @@ func TestBlockedCommandReason(t *testing.T) {
 		reason  string
 	}{
 		{"ls -la", ""},
-		{"curl https://example.com", "it uses curl"},
-		{"/usr/bin/curl https://example.com", "it uses curl"},
-		{"$CMD https://example.com", "its command name is only known at runtime"},
-		{"echo $(curl https://example.com)", "it runs another command to build its arguments"},
-		{"echo 'unterminated", "it could not be parsed"},
+		{"curl https://example.com", "curl"},
+		{"/usr/bin/curl https://example.com", "curl"},
+		{"$CMD https://example.com", "expansion in command name"},
+		{"echo $(curl https://example.com)", "substitution in arguments"},
+		// A command the shell cannot parse never runs, so there is
+		// nothing to warn about: it fails with a parse error instead.
+		{"echo 'unterminated", ""},
 	}
 
 	for _, tc := range tests {

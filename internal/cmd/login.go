@@ -91,7 +91,7 @@ func loginHyper(ws workspace.Workspace, force bool) error {
 		return err
 	}
 
-	if err := ws.SetProviderAPIKey(config.ScopeGlobal, "hyper", token); err != nil {
+	if err := ws.SetProviderAPIKey(ctx, config.ScopeGlobal, "hyper", token); err != nil {
 		return err
 	}
 
@@ -120,7 +120,7 @@ func loginCopilot(ws workspace.Workspace, force bool) error {
 		if err != nil {
 			return fmt.Errorf("unable to refresh token from disk: %w", err)
 		}
-		if err := ws.SetProviderAPIKey(config.ScopeGlobal, "copilot", token); err != nil {
+		if err := ws.SetProviderAPIKey(ctx, config.ScopeGlobal, "copilot", token); err != nil {
 			return err
 		}
 		fmt.Println()
@@ -143,7 +143,7 @@ func loginCopilot(ws workspace.Workspace, force bool) error {
 		return err
 	}
 
-	if err := ws.SetProviderAPIKey(config.ScopeGlobal, "copilot", token); err != nil {
+	if err := ws.SetProviderAPIKey(ctx, config.ScopeGlobal, "copilot", token); err != nil {
 		return err
 	}
 
@@ -170,7 +170,7 @@ func loginOpenAI(ws workspace.Workspace, force bool) error {
 		return err
 	}
 
-	if err := ws.SetProviderAPIKey(config.ScopeGlobal, "openai", token); err != nil {
+	if err := ws.SetProviderAPIKey(ctx, config.ScopeGlobal, "openai", token); err != nil {
 		return err
 	}
 

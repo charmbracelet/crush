@@ -104,7 +104,7 @@ func buildAgentWorkspace(t *testing.T, coord agent.Coordinator) (*controllerV1, 
 		App:  a,
 	}
 	backend.InsertWorkspaceForTest(b, ws)
-	backend.SetWorkspaceShutdownFnForTest(ws, func() {})
+	backend.SetWorkspaceShutdownFnForTest(ws, func(context.Context) {})
 
 	s := &Server{backend: b}
 	return &controllerV1{backend: b, server: s}, ws.ID

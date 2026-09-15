@@ -206,7 +206,7 @@ func buildMultiSessionWorkspace(t *testing.T, sessionIDs ...string) (*controller
 	backend.InsertWorkspaceForTest(b, ws)
 	// Synthetic workspaces have an incomplete App; bypass the
 	// default teardown to avoid panics when the last client detaches.
-	backend.SetWorkspaceShutdownFnForTest(ws, func() {})
+	backend.SetWorkspaceShutdownFnForTest(ws, func(context.Context) {})
 
 	s := &Server{backend: b}
 	return &controllerV1{backend: b, server: s}, ws
@@ -249,7 +249,7 @@ func TestSessionListIncludesAttachedClients(t *testing.T) {
 	// Attach A, set to S1: S1=1.
 	cidA := uuid.New().String()
 	require.NoError(t, c.backend.AttachClient(ws.ID, cidA))
-	t.Cleanup(func() { c.backend.DetachClient(ws.ID, cidA) })
+	t.Cleanup(func() { c.backend.DetachClient(context.Background(), ws.ID, cidA) })
 	require.NoError(t, c.backend.SetCurrentSession(ws.ID, cidA, "S1"))
 	counts = countsBySessionID(listSessions(t, c, ws.ID))
 	require.Equal(t, 1, counts["S1"])
@@ -270,7 +270,7 @@ func TestSessionListIncludesAttachedClients(t *testing.T) {
 	require.Equal(t, 1, counts["S2"])
 
 	// B detaches: S2 drops to 0.
-	c.backend.DetachClient(ws.ID, cidB)
+	c.backend.DetachClient(context.Background(), ws.ID, cidB)
 	counts = countsBySessionID(listSessions(t, c, ws.ID))
 	require.Equal(t, 1, counts["S1"])
 	require.Equal(t, 0, counts["S2"])
@@ -285,8 +285,8 @@ func TestSessionListExcludesHoldOnlyClient(t *testing.T) {
 	c, ws := buildMultiSessionWorkspace(t, "S1")
 
 	cid := uuid.New().String()
-	require.NoError(t, backend.RegisterClientForTesting(c.backend, ws, cid))
-	t.Cleanup(func() { _ = c.backend.DeleteWorkspace(ws.ID, cid) })
+	require.NoError(t, backend.RegisterClientForTesting(t.Context(), c.backend, ws, cid))
+	t.Cleanup(func() { _ = c.backend.DeleteWorkspace(context.Background(), ws.ID, cid) })
 
 	counts := countsBySessionID(listSessions(t, c, ws.ID))
 	require.Equal(t, 0, counts["S1"], "hold-only client must not be counted")
@@ -301,7 +301,7 @@ func TestSessionListExcludesUnselectedAttachedClient(t *testing.T) {
 
 	cid := uuid.New().String()
 	require.NoError(t, c.backend.AttachClient(ws.ID, cid))
-	t.Cleanup(func() { c.backend.DetachClient(ws.ID, cid) })
+	t.Cleanup(func() { c.backend.DetachClient(context.Background(), ws.ID, cid) })
 	// Intentionally do NOT call SetCurrentSession.
 
 	counts := countsBySessionID(listSessions(t, c, ws.ID))
@@ -317,7 +317,7 @@ func TestSessionGetIncludesAttachedClients(t *testing.T) {
 
 	cid := uuid.New().String()
 	require.NoError(t, c.backend.AttachClient(ws.ID, cid))
-	t.Cleanup(func() { c.backend.DetachClient(ws.ID, cid) })
+	t.Cleanup(func() { c.backend.DetachClient(context.Background(), ws.ID, cid) })
 	require.NoError(t, c.backend.SetCurrentSession(ws.ID, cid, "S1"))
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet,

@@ -157,7 +157,7 @@ type Workspace interface {
 	UpdateAgentModel(ctx context.Context) error
 	InitCoderAgent(ctx context.Context) error
 	InitCoderAgentNonInteractive(ctx context.Context) error
-	GetDefaultSmallModel(providerID string) config.SelectedModel
+	GetDefaultSmallModel(ctx context.Context, providerID string) config.SelectedModel
 
 	// Permissions
 	//
@@ -202,18 +202,18 @@ type Workspace interface {
 	Resolver() config.VariableResolver
 
 	// Config mutations (proxied to server in client mode)
-	UpdatePreferredModel(scope config.Scope, modelType config.SelectedModelType, model config.SelectedModel) error
-	SetCompactMode(scope config.Scope, enabled bool) error
-	SetProviderAPIKey(scope config.Scope, providerID string, apiKey any) error
-	SetConfigField(scope config.Scope, key string, value any) error
-	RemoveConfigField(scope config.Scope, key string) error
-	ImportCopilot() (*oauth.Token, bool)
+	UpdatePreferredModel(ctx context.Context, scope config.Scope, modelType config.SelectedModelType, model config.SelectedModel) error
+	SetCompactMode(ctx context.Context, scope config.Scope, enabled bool) error
+	SetProviderAPIKey(ctx context.Context, scope config.Scope, providerID string, apiKey any) error
+	SetConfigField(ctx context.Context, scope config.Scope, key string, value any) error
+	RemoveConfigField(ctx context.Context, scope config.Scope, key string) error
+	ImportCopilot(ctx context.Context) (*oauth.Token, bool)
 	RefreshOAuthToken(ctx context.Context, scope config.Scope, providerID string) error
 
 	// Project lifecycle
 	ProjectNeedsInitialization() (bool, error)
 	MarkProjectInitialized() error
-	InitializePrompt() (string, error)
+	InitializePrompt(ctx context.Context) (string, error)
 	ListSkills(ctx context.Context) ([]skills.CatalogEntry, error)
 	ReadSkill(ctx context.Context, skillID string) ([]byte, skills.SkillReadResult, error)
 
@@ -224,16 +224,16 @@ type Workspace interface {
 	RefreshMCPTools(ctx context.Context, name string)
 	ReadMCPResource(ctx context.Context, name, uri string) ([]MCPResourceContents, error)
 	ListMCPPrompts(ctx context.Context) ([]commands.MCPPrompt, error)
-	GetMCPPrompt(clientID, promptID string, args map[string]string) (string, error)
+	GetMCPPrompt(ctx context.Context, clientID, promptID string, args map[string]string) (string, error)
 	EnableDockerMCP(ctx context.Context) error
-	DisableDockerMCP() error
+	DisableDockerMCP(ctx context.Context) error
 	MCPAuthenticate(ctx context.Context, name string) error
 	MCPPendingAuth() []mcptools.PendingAuthServer
-	MCPAuthURL(name string) string
+	MCPAuthURL(ctx context.Context, name string) string
 
 	// Events
 	Subscribe(program *tea.Program)
-	Shutdown()
+	Shutdown(ctx context.Context)
 }
 
 // MCPResourceContents holds the contents of an MCP resource.

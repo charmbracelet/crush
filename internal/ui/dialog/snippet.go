@@ -107,7 +107,7 @@ func (s *Snippet) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	dialogW := min(snippetMaxWidth, max(snippetMinWidth, area.Dx()-st.Dialog.View.GetHorizontalFrameSize()-4))
 	s.editor.SetWidth(dialogW - st.Dialog.View.GetHorizontalFrameSize())
 
-	helpView := st.Dialog.HelpView.Width(dialogW - st.Dialog.View.GetHorizontalFrameSize()).Render(s.help.View(s))
+	helpView := renderDialogHelp(st, &s.help, s, dialogW-st.Dialog.View.GetHorizontalFrameSize())
 
 	header := common.DialogTitle(st, "Paste Code Snippet", dialogW-st.Dialog.View.GetHorizontalFrameSize(), st.Dialog.TitleGradFromColor, st.Dialog.TitleGradToColor)
 
@@ -141,7 +141,7 @@ func (s *Snippet) cursor(headerHeight, _ int) *tea.Cursor {
 
 // ShortHelp implements help.KeyMap.
 func (s *Snippet) ShortHelp() []key.Binding {
-	return []key.Binding{s.keyMap.Submit, s.keyMap.Close}
+	return []key.Binding{s.keyMap.Submit, s.keyMap.Newline, s.keyMap.Close}
 }
 
 // FullHelp implements help.KeyMap.

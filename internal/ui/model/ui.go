@@ -2068,11 +2068,11 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 				cmds = append(cmds, cmd)
 			}
 		} else {
-			m.toggleMode(permission.PermissionModeYolo)
+			cmds = append(cmds, m.toggleModeAndReport(permission.PermissionModeYolo))
 		}
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleSysadminMode:
-		m.toggleMode(permission.PermissionModeSysadmin)
+		cmds = append(cmds, m.toggleModeAndReport(permission.PermissionModeSysadmin))
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionSelectNotificationStyle:
 		cfg := m.com.Config()
@@ -4221,6 +4221,36 @@ func (m *UI) toggleMode(target permission.PermissionMode) (enabled bool) {
 	}
 	m.setPermissionMode(mode)
 	return enabled
+}
+
+// permissionModeName is the human-readable name for a permission mode.
+func permissionModeName(mode permission.PermissionMode) string {
+	switch mode {
+	case permission.PermissionModeYolo:
+		return "yolo"
+	case permission.PermissionModeSysadmin:
+		return "sysadmin"
+	default:
+		return "normal"
+	}
+}
+
+// toggleModeAndReport flips the permission mode and announces where it
+// landed. It names the resulting mode rather than saying "enabled" or
+// "disabled", which reads as a lie when a toggle drops back to normal.
+// Sysadmin warns and spells out the cost, because the command palette is
+// the only way into it from the TUI and it would otherwise be a silent
+// move into the most permissive state the program has.
+func (m *UI) toggleModeAndReport(target permission.PermissionMode) tea.Cmd {
+	mode := permission.PermissionModeNormal
+	if m.toggleMode(target) {
+		mode = target
+	}
+	msg := "Permission mode: " + permissionModeName(mode)
+	if mode == permission.PermissionModeSysadmin {
+		return util.ReportWarn(msg + ". Every command is auto-approved, and the block list that catches dangerous commands at run time is switched off.")
+	}
+	return util.ReportInfo(msg)
 }
 
 // setEditorPrompt configures the textarea prompt function based on the current

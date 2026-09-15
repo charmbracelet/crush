@@ -328,10 +328,25 @@ func TestCommandsBlocker(t *testing.T) {
 			shouldBlock: false,
 		},
 		{
-			name:        "case sensitive matching",
+			// Windows and macOS both resolve command names case
+			// insensitively, so `CURL` runs the same binary as `curl`.
+			// Matching has to fold case or the list is trivially dodged.
+			name:        "case insensitive matching",
 			banned:      []string{"curl"},
 			input:       []string{"CURL", "https://example.com"},
-			shouldBlock: false,
+			shouldBlock: true,
+		},
+		{
+			name:        "case insensitive matching with mixed case",
+			banned:      []string{"sudo"},
+			input:       []string{"SuDo", "rm", "-rf", "/"},
+			shouldBlock: true,
+		},
+		{
+			name:        "case insensitive matching through a path",
+			banned:      []string{"sudo"},
+			input:       []string{"/usr/bin/SUDO", "rm"},
+			shouldBlock: true,
 		},
 	}
 

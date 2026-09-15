@@ -106,7 +106,7 @@ func TestPermissions_DefaultSelectionAvoidsApprovingDangerousRequests(t *testing
 		action PermissionAction
 	}{
 		{"ordinary request", "", PermissionAllow},
-		{"dangerous request", "it uses sudo", PermissionDeny},
+		{"dangerous request", "sudo", PermissionDeny},
 	}
 
 	for _, tc := range tests {
@@ -133,7 +133,7 @@ func TestPermissions_DefaultSelectionAvoidsApprovingDangerousRequests(t *testing
 func TestPermissions_CtrlYDoesNotRespond(t *testing.T) {
 	t.Parallel()
 
-	for _, danger := range []string{"", "it uses sudo"} {
+	for _, danger := range []string{"", "sudo"} {
 		p := newTestPermissionsWithDanger(t, danger)
 		action := p.HandleMsg(tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl})
 		require.Nil(t, action, "ctrl+y should not resolve the permission dialog")
@@ -147,7 +147,7 @@ func TestPermissions_DangerousButtonsLookDifferent(t *testing.T) {
 	t.Parallel()
 
 	ordinary := newTestPermissionsWithDanger(t, "")
-	dangerous := newTestPermissionsWithDanger(t, "it uses sudo")
+	dangerous := newTestPermissionsWithDanger(t, "sudo")
 
 	// Compare the same selection so only the danger styling differs.
 	ordinary.selectedOption = optionIndex(PermissionAllow)

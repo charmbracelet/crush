@@ -16,11 +16,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
 
 	"github.com/charmbracelet/x/exp/slice"
+	"mvdan.cc/sh/v3/expand"
 	"mvdan.cc/sh/v3/interp"
 	"mvdan.cc/sh/v3/syntax"
 )
@@ -185,9 +188,11 @@ func (s *Shell) SetBlockFuncs(blockFuncs []BlockFunc) {
 	s.blockFuncs = blockFuncs
 }
 
-// CommandsBlocker creates a BlockFunc that blocks exact command matches
+// CommandsBlocker creates a BlockFunc that blocks a command by name,
+// regardless of any leading path (so "/bin/curl" is blocked the same as
+// "curl").
 func CommandsBlocker(cmds []string) BlockFunc {
-	bannedSet := make(map[string]struct{})
+	bannedSet := make(map[string]struct{}, len(cmds))
 	for _, cmd := range cmds {
 		bannedSet[cmd] = struct{}{}
 	}
@@ -196,46 +201,197 @@ func CommandsBlocker(cmds []string) BlockFunc {
 		if len(args) == 0 {
 			return false
 		}
-		_, ok := bannedSet[args[0]]
+		_, ok := bannedSet[normalizeCommand(args[0])]
 		return ok
 	}
 }
 
-// ArgumentsBlocker creates a BlockFunc that blocks specific subcommand
-func ArgumentsBlocker(cmd string, args []string, flags []string) BlockFunc {
-	return func(parts []string) bool {
-		if len(parts) == 0 || parts[0] != cmd {
-			return false
-		}
-
-		argParts, flagParts := splitArgsFlags(parts[1:])
-		if len(argParts) < len(args) || len(flagParts) < len(flags) {
-			return false
-		}
-
-		argsMatch := slices.Equal(argParts[:len(args)], args)
-		flagsMatch := slice.IsSubset(flags, flagParts)
-
-		return argsMatch && flagsMatch
-	}
+// Rule blocks a single command invocation. It matches when the command name
+// (with any leading path stripped) equals Command, the leading positional
+// arguments match Args in order, and every flag in Flags is present.
+type Rule struct {
+	// Command is the command name to match, without a path, e.g. "npm".
+	Command string
+	// Args are the required leading positional arguments, e.g. ["install"].
+	Args []string
+	// Flags are flags that must all be present for the rule to match, e.g.
+	// ["--global"]. Clustered short flags are matched too, so a rule naming
+	// "-S" matches "pacman -Syu".
+	Flags []string
 }
 
+// Match reports whether the given expanded argument list is blocked by the
+// rule.
+func (r Rule) Match(args []string) bool {
+	if len(args) == 0 || normalizeCommand(args[0]) != r.Command {
+		return false
+	}
+
+	pos, flags := splitArgsFlags(args[1:])
+	if len(pos) < len(r.Args) || !slices.Equal(pos[:len(r.Args)], r.Args) {
+		return false
+	}
+	return slice.IsSubset(r.Flags, flags)
+}
+
+// ArgumentsBlocker creates a BlockFunc that blocks a specific subcommand
+// invocation. It is a thin adapter over [Rule].
+func ArgumentsBlocker(cmd string, args []string, flags []string) BlockFunc {
+	return Rule{Command: cmd, Args: args, Flags: flags}.Match
+}
+
+// normalizeCommand reduces a command word to a bare command name for matching:
+// it strips any directory prefix and a Windows executable extension, so
+// "/usr/bin/rm", "rm.exe" and "RM.EXE" all normalize to "rm".
+//
+// Windows resolves command names case-insensitively, so on Windows the whole
+// name is lowercased. Elsewhere only the extension is folded: a name carrying
+// one is a Windows-style invocation wherever it is typed.
+func normalizeCommand(cmd string) string {
+	cmd = filepath.Base(filepath.FromSlash(cmd))
+	if runtime.GOOS == "windows" {
+		cmd = strings.ToLower(cmd)
+	}
+	for _, ext := range []string{".exe", ".bat", ".cmd"} {
+		if len(cmd) > len(ext) && strings.EqualFold(cmd[len(cmd)-len(ext):], ext) {
+			return strings.ToLower(cmd[:len(cmd)-len(ext)])
+		}
+	}
+	return cmd
+}
+
+// splitArgsFlags separates positional arguments from flags. It understands the
+// "--" end-of-options marker, "--flag=value" (matched as "--flag"), and
+// clustered short flags ("-Syu" also yields "-S", "-y", "-u") so that rules
+// naming a single short flag still match it inside a cluster.
 func splitArgsFlags(parts []string) (args []string, flags []string) {
 	args = make([]string, 0, len(parts))
 	flags = make([]string, 0, len(parts))
+	endOfFlags := false
 	for _, part := range parts {
-		if strings.HasPrefix(part, "-") {
-			// Extract flag name before '=' if present
-			flag := part
-			if before, _, ok := strings.Cut(part, "="); ok {
-				flag = before
-			}
-			flags = append(flags, flag)
-		} else {
+		if endOfFlags || part == "-" || !strings.HasPrefix(part, "-") {
 			args = append(args, part)
+			continue
+		}
+		if part == "--" {
+			endOfFlags = true
+			continue
+		}
+		name := part
+		if before, _, ok := strings.Cut(part, "="); ok {
+			name = before
+		}
+		flags = append(flags, name)
+		// Expand clustered short flags (e.g. "-Syu"). Long ("--") flags and
+		// single-character shorts need no expansion.
+		if !strings.HasPrefix(name, "--") && len(name) > 2 {
+			for _, c := range name[1:] {
+				flags = append(flags, "-"+string(c))
+			}
 		}
 	}
 	return args, flags
+}
+
+// IsCommandBlocked reports whether a command string would likely be blocked
+// by the given block functions. See [BlockedCommandReason] for the details.
+func IsCommandBlocked(command string, blockFuncs []BlockFunc) bool {
+	return BlockedCommandReason(command, blockFuncs) != ""
+}
+
+// BlockedCommandReason returns a short human-readable reason why a command
+// string would likely be blocked by the given block functions, or an empty
+// string if it looks safe.
+//
+// It is a static check used to warn about dangerous commands before they run
+// and to gate auto-approval. Each command in the script is expanded to fields
+// the way the shell would (quotes are removed, word parts joined, globbing
+// disabled), but nothing is executed: a command substitution or any other
+// expansion that would require running a command is treated as dangerous
+// rather than resolved. A command name that is itself built from an expansion
+// ("$CMD example.com") is dangerous for the same reason: what it resolves to
+// is unknowable until it runs. Unparseable input is likewise treated as
+// dangerous. This fails safe, but it cannot see the results of runtime
+// expansion, so it is a conservative approximation of the authoritative
+// blockHandler check.
+func BlockedCommandReason(command string, blockFuncs []BlockFunc) string {
+	file, err := syntax.NewParser().Parse(strings.NewReader(command), "")
+	if err != nil {
+		// If we can't parse it, consider it potentially dangerous.
+		return "it could not be parsed"
+	}
+
+	// Empty environment, nil CmdSubst, and erroring ProcSubst: variables
+	// resolve to empty and command/process substitutions error out instead
+	// of executing. The ProcSubst handler is required: mvdan.cc/sh calls
+	// cfg.ProcSubst directly without a nil guard (unlike CmdSubst), so any
+	// command containing <(...) or >(...) would otherwise panic with a nil
+	// function call.
+	cfg := &expand.Config{
+		Env: expand.FuncEnviron(func(string) string { return "" }),
+		ProcSubst: func(*syntax.ProcSubst) (string, error) {
+			return "", errors.New("process substitution requires execution")
+		},
+	}
+
+	reason := ""
+	syntax.Walk(file, func(node syntax.Node) bool {
+		switch node := node.(type) {
+		case *syntax.CallExpr:
+			if len(node.Args) == 0 {
+				return true
+			}
+			if isDynamicWord(node.Args[0]) {
+				reason = "its command name is only known at runtime"
+				return false
+			}
+			args, err := expand.Fields(cfg, node.Args...)
+			if err != nil {
+				// A substitution or expansion we can't resolve without running
+				// something. Be conservative and treat it as dangerous.
+				reason = "it runs another command to build its arguments"
+				return false
+			}
+			for _, blockFunc := range blockFuncs {
+				if blockFunc(args) {
+					reason = "it uses " + normalizeCommand(args[0])
+					return false
+				}
+			}
+		case *syntax.Redirect:
+			// Process substitutions in redirect position (cmd > >(...),
+			// cmd < <(...)) hang off the redirect word rather than a call
+			// argument, so expand it too: the ProcSubst handler errors and
+			// the command fails closed as dangerous. Plain filenames and
+			// variable expansions resolve without error and are ignored.
+			if node.Word == nil {
+				return true
+			}
+			if _, err := expand.Fields(cfg, node.Word); err != nil {
+				reason = "it redirects through another command"
+				return false
+			}
+		}
+		return true
+	})
+
+	return reason
+}
+
+// isDynamicWord reports whether a word's value depends on runtime state, i.e.
+// whether it contains a parameter expansion, a command or process
+// substitution, or an arithmetic expansion.
+func isDynamicWord(word *syntax.Word) bool {
+	dynamic := false
+	syntax.Walk(word, func(node syntax.Node) bool {
+		switch node.(type) {
+		case *syntax.ParamExp, *syntax.CmdSubst, *syntax.ProcSubst, *syntax.ArithmExp:
+			dynamic = true
+			return false
+		}
+		return true
+	})
+	return dynamic
 }
 
 // newInterp creates a new interpreter with the current shell state. A nil
@@ -309,4 +465,57 @@ func ExitCode(err error) int {
 		return int(exitErr)
 	}
 	return 1
+}
+
+// ContainsCommandChaining reports whether command does anything beyond
+// running a single simple command with redirections: pipelines, `&&`/`||`,
+// `;`, backgrounding, subshells, and command or process substitution all
+// count.
+//
+// Callers use it to decide whether a command is simple enough for its leading
+// words to be matched against a safe-command list. Matching a prefix is only
+// meaningful when the prefix is the whole command, so anything that can smuggle
+// a second command past the prefix has to report true.
+//
+// Redirection alone (`ls > out`, `ls &> /dev/null`) is not chaining: it changes
+// where output goes, not which commands run.
+//
+// Unparseable input reports true, matching IsCommandBlocked: if we cannot tell
+// what the command does, we do not get to call it simple.
+func ContainsCommandChaining(command string) bool {
+	file, err := syntax.NewParser().Parse(strings.NewReader(command), "")
+	if err != nil {
+		return true
+	}
+	if len(file.Stmts) == 0 {
+		return false
+	}
+	if len(file.Stmts) > 1 {
+		return true
+	}
+
+	stmt := file.Stmts[0]
+	// `ls &` backgrounds ls and lets whatever follows run on its own; the
+	// parser reports it as one statement, so check the flag directly.
+	if stmt.Background || stmt.Negated {
+		return true
+	}
+	// Anything that is not a plain call (pipelines, `&&`, subshells, blocks,
+	// loops, conditionals, function definitions) can run more than one thing.
+	if _, ok := stmt.Cmd.(*syntax.CallExpr); !ok {
+		return true
+	}
+
+	// A substitution anywhere in the arguments or redirections runs a command
+	// whose text we cannot see.
+	chained := false
+	syntax.Walk(stmt, func(node syntax.Node) bool {
+		switch node.(type) {
+		case *syntax.CmdSubst, *syntax.ProcSubst:
+			chained = true
+			return false
+		}
+		return !chained
+	})
+	return chained
 }

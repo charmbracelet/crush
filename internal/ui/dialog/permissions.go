@@ -451,10 +451,23 @@ func (p *Permissions) renderHeader(contentWidth int) string {
 	title := common.DialogTitle(t, "Permission Required", contentWidth-t.Dialog.Title.GetHorizontalFrameSize(), t.Dialog.TitleGradFromColor, t.Dialog.TitleGradToColor)
 	title = t.Dialog.Title.Render(title)
 
+	lines := []string{title}
+
+	// Add warning for dangerous commands, naming what tripped the check so
+	// the user can judge it rather than just be alarmed by it.
+	if p.permission.Danger != "" {
+		warning := lipgloss.NewStyle().
+			Foreground(t.Status.WarnIndicator.GetBackground()).
+			Width(contentWidth).
+			Render("⚠ Potentially dangerous: " + p.permission.Danger)
+		lines = append(lines, "", warning)
+	}
+
+	lines = append(lines, "")
+
 	// Tool info.
 	toolLine := p.renderToolName(contentWidth)
-
-	lines := []string{title, "", toolLine}
+	lines = append(lines, toolLine)
 
 	// Show generic Path only for tools that don't render their own file/path line.
 	switch p.permission.ToolName {

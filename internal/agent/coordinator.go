@@ -67,49 +67,44 @@ var (
 	errSmallModelNotFound              = errors.New("small model not found in provider config")
 )
 
-// Copilot models that use the Responses API instead of Chat Completions.
-var copilotResponsesModels = map[string]bool{
-	"gpt-5.2":       true,
-	"gpt-5.2-codex": true,
-	"gpt-5.3-codex": true,
-	"gpt-5.4":       true,
-	"gpt-5.4-mini":  true,
-	"gpt-5.5":       true,
-	"gpt-5-mini":    true,
-	"gpt-5.6-luna":  true,
-	"gpt-5.6-terra": true,
-	"gpt-5.6-sol":   true,
-	"gpt-6-astra":   true,
-	"grok-4.5":      true,
-	"grok-4.6":      true,
-}
-
-// OpenCode models that use the Anthropic Messages API instead of Chat
-// Completions. Which endpoint serves each model differs per provider, see
-// https://opencode.ai/docs/zen and https://opencode.ai/docs/go.
-func isOpenCodeMessagesModel(providerID, modelID string) bool {
-	switch providerID {
-	case string(catwalk.InferenceProviderOpenCodeGo):
-		return strings.HasPrefix(modelID, "minimax-") ||
-			strings.HasPrefix(modelID, "qwen3.6-") ||
-			strings.HasPrefix(modelID, "qwen3.7-") ||
-			strings.HasPrefix(modelID, "qwen3.8-")
-	case string(catwalk.InferenceProviderOpenCodeZen):
-		return strings.HasPrefix(modelID, "claude-") ||
-			strings.HasPrefix(modelID, "qwen3.5-") ||
-			strings.HasPrefix(modelID, "qwen3.6-") ||
-			strings.HasPrefix(modelID, "qwen3.7-") ||
-			strings.HasPrefix(modelID, "qwen3.8-")
+// servingProvider returns the fantasy provider package that serves the
+// given provider and model. Providers with bespoke SDKs (Bedrock, Azure,
+// Google, Vertex AI, OpenRouter, Vercel, Hyper) are selected by ID, and
+// gateway providers (Copilot, OpenCode) are always OpenAI-compatible;
+// everything else is determined by the catwalk type, which describes the
+// API endpoint format the model speaks.
+func servingProvider(providerCfg config.ProviderConfig, model catwalk.Model) string {
+	switch providerCfg.ID {
+	case string(catwalk.InferenceProviderBedrock), string(catwalk.InferenceProviderBedrockEurope):
+		return bedrock.Name
+	case string(catwalk.InferenceProviderAzure):
+		return azure.Name
+	case string(catwalk.InferenceProviderGemini), string(catwalk.InferenceProviderVertexAI):
+		return google.Name
+	case string(catwalk.InferenceProviderOpenRouter):
+		return openrouter.Name
+	case string(catwalk.InferenceProviderVercel):
+		return vercel.Name
+	case hyper.Name:
+		return hyper.Name
+	case string(catwalk.InferenceProviderCopilot),
+		string(catwalk.InferenceProviderOpenCodeGo),
+		string(catwalk.InferenceProviderOpenCodeZen):
+		return openaicompat.Name
 	}
-	return false
-}
 
-// OpenCode models that use the OpenAI Responses API instead of Chat
-// Completions. See https://opencode.ai/docs/zen and https://opencode.ai/docs/go.
-func isOpenCodeResponsesModel(modelID string) bool {
-	return strings.HasPrefix(modelID, "gpt-") ||
-		strings.HasPrefix(modelID, "grok-") ||
-		strings.HasPrefix(modelID, "muse-spark-")
+	switch model.EffectiveType(providerCfg.Type) {
+	case catwalk.TypeResponses:
+		return openai.Name
+	case catwalk.TypeMessages:
+		return anthropic.Name
+	case catwalk.TypeCompletions:
+		return openaicompat.Name
+	default:
+		// Custom provider types (litellm, ollama, lmstudio, ...) are
+		// handled by the caller through IsKnownCustomProvider.
+		return string(providerCfg.Type)
+	}
 }
 
 type Coordinator interface {
@@ -370,18 +365,19 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 // It prefers the user-selected effort when valid, otherwise the model default when
 // valid, and finally falls back to the first configured reasoning level.
 func effectiveReasoningEffort(model Model) string {
-	if !model.CatwalkCfg.CanReason {
+	if !config.ModelCanReason(model.CatwalkCfg) {
 		return ""
 	}
 
-	if effort := model.ModelCfg.ReasoningEffort; effort != "" && slices.Contains(model.CatwalkCfg.ReasoningLevels, effort) {
+	levels := config.ReasoningEffortLevels(model.CatwalkCfg)
+	if effort := model.ModelCfg.ReasoningEffort; effort != "" && slices.Contains(levels, effort) {
 		return effort
 	}
-	if effort := model.CatwalkCfg.DefaultReasoningEffort; effort != "" && slices.Contains(model.CatwalkCfg.ReasoningLevels, effort) {
+	if effort := model.CatwalkCfg.Reasoning.DefaultEffortLevel; effort != "" && slices.Contains(levels, effort) {
 		return effort
 	}
-	if len(model.CatwalkCfg.ReasoningLevels) > 0 {
-		return model.CatwalkCfg.ReasoningLevels[0]
+	if len(levels) > 0 {
+		return levels[0]
 	}
 	return ""
 }
@@ -435,17 +431,18 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 	}
 
 	reasoningEffort := effectiveReasoningEffort(model)
-	shouldSetEffort := model.CatwalkCfg.CanReason &&
+	levels := config.ReasoningEffortLevels(model.CatwalkCfg)
+	shouldSetEffort := config.ModelCanReason(model.CatwalkCfg) &&
 		reasoningEffort != "" &&
-		slices.Contains(model.CatwalkCfg.ReasoningLevels, reasoningEffort)
+		slices.Contains(levels, reasoningEffort)
 
-	switch providerCfg.Type {
-	case openai.Name, azure.Name:
+	switch servingProvider(providerCfg, model.CatwalkCfg) {
+	case openai.Name:
 		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
 		if !hasReasoningEffort && shouldSetEffort {
 			mergedOptions["reasoning_effort"] = reasoningEffort
 		}
-		if openai.IsResponsesModel(model.CatwalkCfg.ID) {
+		if model.CatwalkCfg.EffectiveType(providerCfg.Type) == catwalk.TypeResponses {
 			if openai.IsResponsesReasoningModel(model.CatwalkCfg.ID) {
 				mergedOptions["reasoning_summary"] = "auto"
 				mergedOptions["include"] = []openai.IncludeType{openai.IncludeReasoningEncryptedContent}
@@ -461,6 +458,30 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 			}
 		}
 
+	case azure.Name:
+		// The Azure SDK picks the responses API per model with its own
+		// heuristic, so options parsing follows the same heuristic to stay
+		// in sync with the requests it sends.
+		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
+		if !hasReasoningEffort && shouldSetEffort {
+			mergedOptions["reasoning_effort"] = reasoningEffort
+		}
+		if openai.IsResponsesModel(model.CatwalkCfg.ID) {
+			if openai.IsResponsesReasoningModel(model.CatwalkCfg.ID) {
+				mergedOptions["reasoning_summary"] = "auto"
+				mergedOptions["include"] = []openai.IncludeType{openai.IncludeReasoningEncryptedContent}
+			}
+			parsed, err := openai.ParseResponsesOptions(mergedOptions)
+			if err == nil {
+				options[azure.Name] = parsed
+			}
+		} else {
+			parsed, err := openai.ParseOptions(mergedOptions)
+			if err == nil {
+				options[azure.Name] = parsed
+			}
+		}
+
 	case anthropic.Name, bedrock.Name:
 		var (
 			_, hasEffort = mergedOptions["effort"]
@@ -473,7 +494,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 			switch {
 			case !hasEffort && shouldSetEffort:
 				extraBody["reasoning_effort"] = reasoningEffort
-			case !hasThink && model.CatwalkCfg.CanReason:
+			case !hasThink && config.ModelCanReason(model.CatwalkCfg):
 				if model.ModelCfg.Think {
 					extraBody["thinking"] = map[string]any{"type": "enabled"}
 				} else {
@@ -570,7 +591,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		case hyper.Name:
 			extraBody["thinking"] = model.ModelCfg.Think
 		case string(catwalk.InferenceProviderIoNet):
-			if _, ok := extraBody["reasoning"]; !ok && model.CatwalkCfg.CanReason {
+			if _, ok := extraBody["reasoning"]; !ok && config.ModelCanReason(model.CatwalkCfg) {
 				if model.ModelCfg.Think {
 					extraBody["reasoning"] = map[string]string{"effort": "medium"}
 				} else {
@@ -605,7 +626,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 			// "reasoning_split" must be true so thinking content is returned
 			// in the "reasoning_content" field instead of inline in "content".
 			if strings.HasPrefix(strings.ToLower(model.CatwalkCfg.ID), "minimax") {
-				if model.CatwalkCfg.CanReason && (model.ModelCfg.Think || reasoningEffort != "") {
+				if config.ModelCanReason(model.CatwalkCfg) && (model.ModelCfg.Think || reasoningEffort != "") {
 					extraBody["thinking"] = map[string]any{"type": "adaptive"}
 					extraBody["reasoning_split"] = true
 				} else {
@@ -614,7 +635,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 			}
 
 		case string(catwalk.InferenceProviderAlibabaSingapore), string(catwalk.InferenceProviderAlibabaUS):
-			if model.CatwalkCfg.CanReason && !shouldSetEffort {
+			if config.ModelCanReason(model.CatwalkCfg) && !shouldSetEffort {
 				extraBody["enable_thinking"] = model.ModelCfg.Think
 			}
 		}
@@ -888,19 +909,9 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 		return Model{}, Model{}, errLargeModelProviderNotConfigured
 	}
 
-	largeProvider, err := c.buildProvider(largeProviderCfg, largeModelCfg, isSubAgent)
-	if err != nil {
-		return Model{}, Model{}, err
-	}
-
 	smallProviderCfg, ok := c.cfg.Config().Providers.Get(smallModelCfg.Provider)
 	if !ok {
 		return Model{}, Model{}, errSmallModelProviderNotConfigured
-	}
-
-	smallProvider, err := c.buildProvider(smallProviderCfg, smallModelCfg, true)
-	if err != nil {
-		return Model{}, Model{}, err
 	}
 
 	var largeCatwalkModel *catwalk.Model
@@ -923,6 +934,16 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 
 	if smallCatwalkModel == nil {
 		return Model{}, Model{}, errSmallModelNotFound
+	}
+
+	largeProvider, err := c.buildProvider(largeProviderCfg, largeModelCfg, isSubAgent, largeCatwalkModel.EffectiveType(largeProviderCfg.Type))
+	if err != nil {
+		return Model{}, Model{}, err
+	}
+
+	smallProvider, err := c.buildProvider(smallProviderCfg, smallModelCfg, true, smallCatwalkModel.EffectiveType(smallProviderCfg.Type))
+	if err != nil {
+		return Model{}, Model{}, err
 	}
 
 	largeModelID := largeModelCfg.Model
@@ -997,10 +1018,15 @@ func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map
 	return anthropic.New(opts...)
 }
 
-func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[string]string, token *oauth.Token) (fantasy.Provider, error) {
+func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[string]string, token *oauth.Token, wireType catwalk.Type) (fantasy.Provider, error) {
 	opts := []openai.Option{
 		openai.WithAPIKey(apiKey),
 		openai.WithUseResponsesAPI(),
+		// Whether a model speaks the Responses API comes from catwalk's
+		// model type, not from a model ID heuristic.
+		openai.WithResponsesAPIFunc(func(string) bool {
+			return wireType == catwalk.TypeResponses
+		}),
 	}
 	var httpClient *http.Client
 	if c.cfg.Config().Options.Debug {
@@ -1058,7 +1084,7 @@ func (c *coordinator) buildVercelProvider(_, apiKey string, headers map[string]s
 	return vercel.New(opts...)
 }
 
-func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers map[string]string, extraBody map[string]any, providerID string, isSubAgent bool) (fantasy.Provider, error) {
+func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers map[string]string, extraBody map[string]any, providerID string, isSubAgent bool, wireType catwalk.Type) (fantasy.Provider, error) {
 	opts := []openaicompat.Option{
 		openaicompat.WithBaseURL(baseURL),
 		openaicompat.WithAPIKey(apiKey),
@@ -1066,14 +1092,15 @@ func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers 
 
 	// Set HTTP client based on provider and debug mode.
 	var httpClient *http.Client
+	// Gateway providers route per model between chat completions and the
+	// responses API based on the model's catwalk type.
+	responsesFunc := func(string) bool { return wireType == catwalk.TypeResponses }
 	switch providerID {
 	case string(catwalk.InferenceProviderCopilot):
 		opts = append(
 			opts,
 			openaicompat.WithUseResponsesAPI(),
-			openaicompat.WithResponsesAPIFunc(func(modelID string) bool {
-				return copilotResponsesModels[modelID]
-			}),
+			openaicompat.WithResponsesAPIFunc(responsesFunc),
 		)
 		httpClient = copilot.NewClient(isSubAgent, c.cfg.Config().Options.Debug)
 
@@ -1081,7 +1108,7 @@ func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers 
 		opts = append(
 			opts,
 			openaicompat.WithUseResponsesAPI(),
-			openaicompat.WithResponsesAPIFunc(isOpenCodeResponsesModel),
+			openaicompat.WithResponsesAPIFunc(responsesFunc),
 		)
 
 	case hyper.Name:
@@ -1205,14 +1232,14 @@ func (c *coordinator) isAnthropicThinking(model config.SelectedModel) bool {
 	return err == nil && opts.Thinking != nil
 }
 
-func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model config.SelectedModel, isSubAgent bool) (fantasy.Provider, error) {
+func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model config.SelectedModel, isSubAgent bool, wireType catwalk.Type) (fantasy.Provider, error) {
 	headers := maps.Clone(providerCfg.ExtraHeaders)
 	if headers == nil {
 		headers = make(map[string]string)
 	}
 
 	// handle special headers for anthropic
-	if providerCfg.Type == anthropic.Name && c.isAnthropicThinking(model) {
+	if wireType == catwalk.TypeMessages && c.isAnthropicThinking(model) {
 		if v, ok := headers["anthropic-beta"]; ok {
 			headers["anthropic-beta"] = v + ",interleaved-thinking-2025-05-14"
 		} else {
@@ -1224,15 +1251,29 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 	baseURL, _ := c.cfg.Resolve(providerCfg.BaseURL)
 
 	switch providerCfg.ID {
-	case string(catwalk.InferenceProviderOpenCodeGo), string(catwalk.InferenceProviderOpenCodeZen):
-		if isOpenCodeMessagesModel(providerCfg.ID, model.Model) {
+	case string(catwalk.InferenceProviderBedrock), string(catwalk.InferenceProviderBedrockEurope):
+		return c.buildBedrockProvider(apiKey, headers, providerCfg.ID)
+	case string(catwalk.InferenceProviderAzure):
+		return c.buildAzureProvider(baseURL, apiKey, headers, providerCfg.ExtraParams)
+	case string(catwalk.InferenceProviderVertexAI):
+		return c.buildGoogleVertexProvider(headers, providerCfg.ExtraParams)
+	case string(catwalk.InferenceProviderGemini):
+		return c.buildGoogleProvider(baseURL, apiKey, headers)
+	case string(catwalk.InferenceProviderOpenRouter):
+		return c.buildOpenrouterProvider(baseURL, apiKey, headers)
+	case string(catwalk.InferenceProviderVercel):
+		return c.buildVercelProvider(baseURL, apiKey, headers)
+	case string(catwalk.InferenceProviderCopilot),
+		string(catwalk.InferenceProviderOpenCodeGo), string(catwalk.InferenceProviderOpenCodeZen):
+		// Messages models on the OpenCode gateways are served by the
+		// Anthropic Messages API at the endpoint root, without the /v1
+		// prefix the chat completions and responses endpoints use.
+		if wireType == catwalk.TypeMessages {
 			baseURL = strings.TrimSuffix(baseURL, "/v1")
 			return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID)
 		}
-	}
-
-	switch providerCfg.Type {
-	case openai.Name:
+		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent, wireType)
+	case string(catwalk.InferenceProviderOpenAI):
 		// A ChatGPT login is the provider's single credential: every
 		// request goes through the Codex backend with the OAuth token.
 		token := providerCfg.OAuthToken
@@ -1244,22 +1285,15 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 				headers["chatgpt-account-id"] = token.AccountID
 			}
 		}
-		return c.buildOpenaiProvider(baseURL, apiKey, headers, token)
-	case anthropic.Name:
+		return c.buildOpenaiProvider(baseURL, apiKey, headers, token, wireType)
+	}
+
+	switch wireType {
+	case catwalk.TypeMessages:
 		return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID)
-	case openrouter.Name:
-		return c.buildOpenrouterProvider(baseURL, apiKey, headers)
-	case vercel.Name:
-		return c.buildVercelProvider(baseURL, apiKey, headers)
-	case azure.Name:
-		return c.buildAzureProvider(baseURL, apiKey, headers, providerCfg.ExtraParams)
-	case bedrock.Name:
-		return c.buildBedrockProvider(apiKey, headers, providerCfg.ID)
-	case google.Name:
-		return c.buildGoogleProvider(baseURL, apiKey, headers)
-	case "google-vertex":
-		return c.buildGoogleVertexProvider(headers, providerCfg.ExtraParams)
-	case openaicompat.Name, hyper.Name:
+	case catwalk.TypeResponses:
+		return c.buildOpenaiProvider(baseURL, apiKey, headers, providerCfg.OAuthToken, wireType)
+	case catwalk.TypeCompletions:
 		switch providerCfg.ID {
 		case hyper.Name:
 			baseURL = hyper.BaseURL() + "/v1"
@@ -1270,12 +1304,12 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 			}
 			providerCfg.ExtraBody["tool_stream"] = true
 		}
-		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent)
+		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent, wireType)
 	default:
 		// Known custom providers (litellm, llamacpp, lmstudio, ollama,
 		// omlx) are openai-compat under the hood.
 		if discover.IsKnownCustomProvider(string(providerCfg.Type)) {
-			return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent)
+			return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent, wireType)
 		}
 		return nil, fmt.Errorf("provider type not supported: %q", providerCfg.Type)
 	}

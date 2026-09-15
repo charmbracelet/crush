@@ -91,7 +91,7 @@ func (m *ModelItem) SelectedModel() config.SelectedModel {
 	return config.SelectedModel{
 		Model:           m.model.ID,
 		Provider:        string(m.prov.ID),
-		ReasoningEffort: m.model.DefaultReasoningEffort,
+		ReasoningEffort: m.model.Reasoning.DefaultEffortLevel,
 		MaxTokens:       m.model.DefaultMaxTokens,
 	}
 }

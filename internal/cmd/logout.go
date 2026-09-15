@@ -20,6 +20,7 @@ var providerDisplayNames = map[string]string{
 	"hyper":   "Charm Hyper",
 	"copilot": "GitHub Copilot",
 	"openai":  "ChatGPT",
+	"xai":     "Grok",
 }
 
 var logoutCmd = &cobra.Command{
@@ -29,7 +30,7 @@ var logoutCmd = &cobra.Command{
 	Long: `Logout Crush from a specified platform, removing stored credentials.
 The platform should be provided as an argument.
 If no argument is given, a list of logged-in platforms will be shown.
-Available platforms are: hyper, copilot, openai.`,
+Available platforms are: hyper, copilot, openai, grok.`,
 	Example: `
 # Sign out from Charm Hyper
 crush logout hyper
@@ -39,6 +40,9 @@ crush logout copilot
 
 # Sign out from your ChatGPT (OpenAI) account
 crush logout openai
+
+# Sign out from your Grok (xAI) account
+crush logout grok
   `,
 	ValidArgs: []cobra.Completion{
 		"hyper",
@@ -47,6 +51,8 @@ crush logout openai
 		"github-copilot",
 		"openai",
 		"chatgpt",
+		"grok",
+		"xai",
 	},
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -83,6 +89,8 @@ crush logout openai
 			provider = "copilot"
 		case "openai", "chatgpt":
 			provider = "openai"
+		case "grok", "xai":
+			provider = "xai"
 		default:
 			return fmt.Errorf("unknown platform: %s", provider)
 		}
@@ -108,6 +116,8 @@ crush logout openai
 			return logoutCopilot(c, ws.ID)
 		case "openai":
 			return logoutOpenAI(c, ws.ID)
+		case "xai":
+			return logoutXAI(c, ws.ID)
 		default:
 			return fmt.Errorf("unknown platform: %s", provider)
 		}
@@ -161,6 +171,23 @@ func logoutOpenAI(c *client.Client, wsID string) error {
 	return nil
 }
 
+func logoutXAI(c *client.Client, wsID string) error {
+	ctx := getLogoutContext()
+
+	// Logout clears both stored xAI credentials: the OAuth token and the
+	// API key, which mirrors the OAuth access token when the sign-in
+	// wrote it.
+	if err := cmp.Or(
+		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers.xai.oauth"),
+		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers.xai.api_key"),
+	); err != nil {
+		return err
+	}
+
+	fmt.Printf("Successfully logged out of %s.\n", providerDisplayNames["xai"])
+	return nil
+}
+
 // pickLoggedInProvider returns the provider to log out of and whether the
 // user explicitly picked it from a list of logged-in platforms.
 func pickLoggedInProvider(c *client.Client, wsID string) (string, bool, error) {
@@ -177,7 +204,7 @@ func pickLoggedInProvider(c *client.Client, wsID string) (string, bool, error) {
 		id   string
 		name string
 	}
-	for _, id := range []string{"hyper", "copilot", "openai"} {
+	for _, id := range []string{"hyper", "copilot", "openai", "xai"} {
 		if p, ok := cfg.Providers.Get(id); ok && p.OAuthToken != nil {
 			loggedIn = append(loggedIn, struct {
 				id   string

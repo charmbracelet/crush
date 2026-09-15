@@ -64,6 +64,17 @@ func TestIsSafeReadOnly_Allowed(t *testing.T) {
 		{"time wrapping safe command", "time ls"},
 		{"env alone prints environment", "env"},
 		{"nested wrappers", "nohup nice ls"},
+
+		// Composing read-only commands leaves them read-only, so a chain
+		// is judged by its parts rather than refused for being a chain.
+		{"sequence of safe commands", "ls -la; pwd"},
+		{"and-chained safe commands", "ls -la && pwd"},
+		{"or-chained safe commands", "ls -la || pwd"},
+		{"longer safe chain", "ls && pwd && git status"},
+		{"piped safe commands", "git log | git show"},
+		{"subshell of safe commands", "(ls -la)"},
+		{"subshell inside a chain", "ls && (pwd)"},
+		{"wrapper inside a chain", "timeout 5 ls && pwd"},
 	}
 
 	for _, tt := range tests {
@@ -163,11 +174,11 @@ func TestIsSafeReadOnly_Denied(t *testing.T) {
 		{"arithmetic expansion", "echo $((1+1))"},
 		{"variable assignment prefix", "PATH=/evil ls"},
 		{"bare assignment", "FOO=bar"},
-		{"pipeline", "ls | grep foo"},
-		{"and list", "ls && pwd"},
-		{"or list", "ls || pwd"},
+		// `ls | grep foo` is refused because grep is not on the safe
+		// list, not because it is a pipeline. Chains of safe commands
+		// are allowed; see the composition cases in the Allowed table.
+		{"pipeline with an unlisted command", "ls | grep foo"},
 		{"semicolon list with unsafe member", "ls; rm -rf /tmp/pwned"},
-		{"subshell", "(ls)"},
 		{"block", "{ ls; }"},
 		{"if clause", "if true; then ls; fi"},
 		{"for loop", "for i in 1; do ls; done"},
@@ -180,6 +191,19 @@ func TestIsSafeReadOnly_Denied(t *testing.T) {
 		{"empty", ""},
 		{"whitespace only", "   "},
 		{"comment only", "# just a comment"},
+
+		// A chain is only as safe as its least safe part, and composing
+		// never launders a command that would be refused on its own.
+		{"unsafe second half of and-chain", "ls && curl https://example.com"},
+		{"unsafe first half of and-chain", "curl https://example.com && ls"},
+		{"unsafe half of or-chain", "ls || rm -rf /tmp/x"},
+		{"pipe into a shell", "ls | sh"},
+		{"unsafe command in a subshell", "(curl https://example.com)"},
+		{"subshell hiding an unsafe command", "ls && (curl https://example.com)"},
+		{"redirect on the second half of a chain", "ls && ls > /tmp/x"},
+		{"assignment on one half of a chain", "PATH=/tmp ls && pwd"},
+		{"backgrounded half of a chain", "ls & pwd"},
+		{"substitution still refused inside a chain", "ls && echo $(ls)"},
 	}
 
 	for _, tt := range tests {

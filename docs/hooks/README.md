@@ -17,8 +17,8 @@ forward.
 - Hooks are Claude Code-compatible
 - Crush ships with a builtin `crush-hook` skill write, edit, and configure
   hooks; just tell Crush how to configure Crush
-- Crush currently supports just one hook, `PreToolUse`, with plans to support
-  the full gamut; please let us know which hooks you'd like to see next
+- Crush currently supports `PreToolUse` and `UserPromptSubmit`, with plans to
+  support the full gamut; please let us know which hooks you'd like to see next
 - Hooks run in parallel for speed, but their results compose in config order
   for determinism
 
@@ -30,6 +30,8 @@ forward.
   Language", and so on
 - Inject context: add notes to the model's context whenever certain tools are
   called. For example: "remember to run gofumpt after editing Go files"
+- Inject context into every turn: prepend retrieved notes, project state, or
+  reminders to the prompt before it is sent to the model
 - Auto-approve tools: skip the permission prompt for bash commands that
   you know are safe
 - Log certain tool calls
@@ -176,7 +178,7 @@ wins when rewriting input, but first deny wins when blocking.
 
 ## Events
 
-Here are the events you can hook into (spoiler: there's currently just one):
+Here are the events you can hook into:
 
 ### PreToolUse
 
@@ -199,6 +201,56 @@ agent spawn sub-agents" still works.
 
 Hooks are keyed by event name. Only `command` is required, and you can omit
 `matcher` to match all tools.
+
+### UserPromptSubmit
+
+Fires after a submitted user message is recorded in the session and before the
+turn reaches the model. Use it to inject context (project state, retrieved
+notes, reminders) into the copy of the prompt that is sent to the provider. The
+stored transcript keeps the original message, so the user still sees exactly
+what they typed.
+
+**Matched against**: nothing. There is no tool name at this point, so `matcher`
+is ignored for this event and every configured hook runs.
+
+**Scope**: fires on the top-level agent's turns only, mirroring `PreToolUse`.
+Sub-agents (the `agent` task tool, `agentic_fetch`, etc.) are skipped so a
+delegated turn does not trigger your hooks again.
+
+> [!NOTE]
+> `UserPromptSubmit` currently honors only the `context` field. `decision`,
+> `halt`, `reason`, and `updated_prompt` are accepted but not enforced yet: a
+> `deny` or `halt` is logged and ignored, and the prompt is sent unchanged.
+> Blocking and rewriting prompts are future work.
+
+#### Example
+
+`crush.json`:
+
+```jsonc
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "name": "branch-context",
+        "command": "./hooks/branch-context.sh"
+      }
+    ]
+  }
+}
+```
+
+`hooks/branch-context.sh`:
+
+```bash
+#!/usr/bin/env bash
+# Prepend the current git branch to every turn. Emit context only; no
+# decision is needed for this event.
+branch=$(git branch --show-current 2>/dev/null)
+if [[ -n "$branch" ]]; then
+  echo "{\"context\":\"Current branch: $branch\"}"
+fi
+```
 
 ## Building Hooks
 
@@ -651,6 +703,20 @@ Extends the common payload:
 }
 ```
 
+### Stdin payload — UserPromptSubmit
+
+Extends the common payload with the submitted prompt:
+
+```jsonc
+{
+  // ...common fields...
+
+  // string. The user message as it will be sent to the model, before any
+  // hook-provided context is prepended.
+  "prompt": "fix the login flow",
+}
+```
+
 ### Output envelope (common)
 
 Fields a hook may print to stdout on exit 0. All are optional and apply to every
@@ -696,6 +762,12 @@ Extends the common envelope:
   },
 }
 ```
+
+### Output envelope — UserPromptSubmit
+
+Only the common fields are honored. `context` is prepended to the outbound
+prompt; `halt`, `reason`, and `decision` are parsed and logged but do not yet
+affect the turn.
 
 ### Exit codes
 

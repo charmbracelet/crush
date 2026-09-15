@@ -698,12 +698,24 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	}
 
 	largeProviderCfg, _ := c.cfg.Config().Providers.Get(large.ModelCfg.Provider)
+
+	// UserPromptSubmit hooks inject context before the turn reaches the
+	// model. Like PreToolUse, they only run for the top-level agent;
+	// sub-agents keep the caller's context unmodified.
+	var promptHookRunner *hooks.Runner
+	if !isSubAgent {
+		if promptHooks := c.cfg.Config().Hooks[hooks.EventUserPromptSubmit]; len(promptHooks) > 0 {
+			promptHookRunner = hooks.NewRunner(promptHooks, c.cfg.WorkingDir(), c.cfg.WorkingDir())
+		}
+	}
+
 	result := NewSessionAgent(SessionAgentOptions{
 		LargeModel:           large,
 		SmallModel:           small,
 		SystemPromptPrefix:   largeProviderCfg.SystemPromptPrefix,
 		SystemPrompt:         "",
 		IsSubAgent:           isSubAgent,
+		PromptHookRunner:     promptHookRunner,
 		DisableAutoSummarize: c.cfg.Config().Options.DisableAutoSummarize,
 		IsYolo:               c.permissions.SkipRequests(),
 		Sessions:             c.sessions,

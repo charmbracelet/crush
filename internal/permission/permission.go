@@ -58,6 +58,10 @@ type CreatePermissionRequest struct {
 	Params      any    `json:"params"`
 	Path        string `json:"path"`
 	Danger      string `json:"danger,omitempty"`
+	// GrantKey narrows what "allow for this session" covers. Leave it empty
+	// when Path already says what is being acted on; set it when it does
+	// not, as for a shell command, where Path is only the directory.
+	GrantKey string `json:"grant_key,omitempty"`
 }
 
 type PermissionNotification struct {
@@ -81,6 +85,9 @@ type PermissionRequest struct {
 	Params      any    `json:"params"`
 	Path        string `json:"path"`
 	Danger      string `json:"danger,omitempty"`
+	// GrantKey narrows what a session grant covers. See
+	// [CreatePermissionRequest.GrantKey].
+	GrantKey string `json:"grant_key,omitempty"`
 }
 
 type Service interface {
@@ -112,6 +119,24 @@ type PermissionKey struct {
 	ToolName  string
 	Action    string
 	Path      string
+	// Grant narrows a session grant to one specific operation. For tools
+	// whose Path already identifies what is being touched, such as reading
+	// or editing a file, it is empty and the path carries the meaning. For
+	// bash it holds the command, because there the path is only the working
+	// directory: without this, approving `ls` for the session would approve
+	// every later command run in the same directory, `sudo` included.
+	Grant string
+}
+
+// pendingRequest couples a request with the channel its caller waits on.
+//
+// Keeping the request rather than only the channel means a resolution is
+// recorded against what the server actually asked, not against whatever the
+// answering client says it was answering. Those are the same thing when the
+// client is honest and the difference matters when it is not.
+type pendingRequest struct {
+	req    PermissionRequest
+	respCh chan bool
 }
 
 type permissionService struct {
@@ -121,7 +146,7 @@ type permissionService struct {
 	modeBroker            *pubsub.Broker[ModeChangedEvent]
 	workingDir            string
 	sessionPermissions    *csync.Map[PermissionKey, bool]
-	pendingRequests       *csync.Map[string, chan bool]
+	pendingRequests       *csync.Map[string, pendingRequest]
 	autoApproveSessions   map[string]bool
 	autoApproveSessionsMu sync.RWMutex
 	allowedTools          []string
@@ -150,18 +175,25 @@ type permissionService struct {
 // All three public resolution methods (Grant, GrantPersistent, Deny)
 // route through this helper so multi-subscriber UIs can race safely:
 // the first caller wins, the rest become no-ops.
-func (s *permissionService) resolve(permission PermissionRequest, granted, denied bool, onResolve func()) bool {
-	respCh, ok := s.pendingRequests.Take(permission.ID)
+func (s *permissionService) resolve(permission PermissionRequest, granted, denied bool, onResolve func(PermissionRequest)) bool {
+	pending, ok := s.pendingRequests.Take(permission.ID)
 	if !ok {
 		return false
 	}
 
+	// Everything below describes the request the server issued, not the copy
+	// the answer arrived with. Only the ID is taken from the caller, and it
+	// is unguessable and single-use. A client that echoed back a different
+	// session, tool, action or path would otherwise have that echo recorded
+	// as the thing being approved.
+	req := pending.req
+
 	if onResolve != nil {
-		onResolve()
+		onResolve(req)
 	}
 
 	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
-		ToolCallID: permission.ToolCallID,
+		ToolCallID: req.ToolCallID,
 		Granted:    granted,
 		Denied:     denied,
 	})
@@ -169,14 +201,25 @@ func (s *permissionService) resolve(permission PermissionRequest, granted, denie
 	// respCh is buffered (cap 1) and only ever has at most one sender
 	// per request because Take removes the entry under the map lock,
 	// so this send never blocks.
-	respCh <- granted
+	pending.respCh <- granted
 
 	s.activeRequestMu.Lock()
-	if s.activeRequest != nil && s.activeRequest.ID == permission.ID {
+	if s.activeRequest != nil && s.activeRequest.ID == req.ID {
 		s.activeRequest = nil
 	}
 	s.activeRequestMu.Unlock()
 	return true
+}
+
+// permissionKeyFor builds the session-grant key for a request.
+func permissionKeyFor(req PermissionRequest) PermissionKey {
+	return PermissionKey{
+		SessionID: req.SessionID,
+		ToolName:  req.ToolName,
+		Action:    req.Action,
+		Path:      req.Path,
+		Grant:     req.GrantKey,
+	}
 }
 
 func (s *permissionService) GrantPersistent(permission PermissionRequest) bool {
@@ -184,13 +227,8 @@ func (s *permissionService) GrantPersistent(permission PermissionRequest) bool {
 	// pending-request race. Otherwise a losing GrantPersistent that
 	// lost to a Deny would still leave an auto-approve entry behind,
 	// silently flipping later denied calls to allowed.
-	return s.resolve(permission, true, false, func() {
-		s.sessionPermissions.Set(PermissionKey{
-			SessionID: permission.SessionID,
-			ToolName:  permission.ToolName,
-			Action:    permission.Action,
-			Path:      permission.Path,
-		}, true)
+	return s.resolve(permission, true, false, func(req PermissionRequest) {
+		s.sessionPermissions.Set(permissionKeyFor(req), true)
 	})
 }
 
@@ -277,14 +315,10 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		Action:      opts.Action,
 		Params:      opts.Params,
 		Danger:      opts.Danger,
+		GrantKey:    opts.GrantKey,
 	}
 
-	if _, ok := s.sessionPermissions.Get(PermissionKey{
-		SessionID: permission.SessionID,
-		ToolName:  permission.ToolName,
-		Action:    permission.Action,
-		Path:      permission.Path,
-	}); ok {
+	if _, ok := s.sessionPermissions.Get(permissionKeyFor(permission)); ok {
 		s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
 			ToolCallID: opts.ToolCallID,
 			Granted:    true,
@@ -297,7 +331,7 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	s.activeRequestMu.Unlock()
 
 	respCh := make(chan bool, 1)
-	s.pendingRequests.Set(permission.ID, respCh)
+	s.pendingRequests.Set(permission.ID, pendingRequest{req: permission, respCh: respCh})
 	defer s.pendingRequests.Del(permission.ID)
 
 	// Publish the request
@@ -348,6 +382,6 @@ func NewPermissionService(workingDir string, allowedTools []string) Service {
 		autoApproveSessions: make(map[string]bool),
 		mode:                PermissionModeNormal,
 		allowedTools:        allowedTools,
-		pendingRequests:     csync.NewMap[string, chan bool](),
+		pendingRequests:     csync.NewMap[string, pendingRequest](),
 	}
 }

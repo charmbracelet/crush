@@ -69,14 +69,14 @@ func TestSessionGrantDoesNotCoverADifferentCommand(t *testing.T) {
 		ok, _ := svc.Request(t.Context(), CreatePermissionRequest{
 			SessionID: "s", ToolCallID: "c3", ToolName: "bash",
 			Action: "execute", Description: "sudo rm -rf /", Path: "/work",
-			GrantKey: "sudo rm -rf /", Danger: "it uses sudo",
+			GrantKey: "sudo rm -rf /", Danger: "sudo",
 		})
 		dangerous <- ok
 	}()
 
 	select {
 	case ev := <-events:
-		require.Equal(t, "it uses sudo", ev.Payload.Danger)
+		require.Equal(t, "sudo", ev.Payload.Danger)
 		svc.Deny(ev.Payload)
 	case granted := <-dangerous:
 		t.Fatalf("a different command rode the earlier grant without prompting (granted=%v)", granted)

@@ -409,6 +409,16 @@ type Options struct {
 	Notifications          string   `json:"notifications,omitempty" jsonschema:"description=Notification style to use. Options: auto (default)\\, native\\, osc\\, bell\\, disabled. Auto selects based on environment: native for local sessions\\, osc for SSH (with automatic OSC 99/777 detection).,enum=auto,enum=native,enum=osc,enum=bell,enum=disabled,default=auto"`
 	DisabledSkills         []string `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=crush-config"`
 	RequestTimeout         *int     `json:"request_timeout,omitempty" jsonschema:"description=Timeout in seconds for each LLM API request. Streaming responses are aborted only after this much inactivity\\, so slow but active streams are never killed. 0 disables it\\, negative values are invalid.,default=60,example=120,example=300,example=0"`
+	// TurnContext selects the per-turn context augmentation tier:
+	// off (default) or session (deterministic session signals —
+	// working set, open todos — appended at the request tail). The
+	// value names the scope of context drawn on, not the mechanism.
+	TurnContext string `json:"turn_context,omitempty" jsonschema:"description=Per-turn context augmentation tier. session injects deterministic session signals (working set\\, open todos) at the request tail.,enum=off,enum=session,default=off"`
+	// AmbiguityClarification enables the calibrated-autonomy gates:
+	// the turn-zero vagueness pre-filter, the first-write scope gate,
+	// and the loop-stop escalation edge. Experimental; default off
+	// until the vague-prompt corpus arm justifies flipping it.
+	AmbiguityClarification *bool `json:"ambiguity_clarification,omitempty" jsonschema:"description=Enable deterministic clarification gates: turn-zero vagueness pre-filter\\, first-write scope gate\\, and loop-stop escalation. Experimental.,default=false"`
 }
 
 // OptionKeys returns the Options struct's JSON field names — the set
@@ -1314,6 +1324,28 @@ func (o *Options) NotebookStubSupersededEnabled() bool {
 		return false
 	}
 	return *o.NotebookStubSuperseded
+}
+
+// TurnContextMode returns the resolved per-turn context tier — "off"
+// or "session". Unrecognized values resolve to "off" so a typo
+// disables rather than silently selecting a tier.
+func (o *Options) TurnContextMode() string {
+	switch o.TurnContext {
+	case "session":
+		return o.TurnContext
+	default:
+		return "off"
+	}
+}
+
+// AmbiguityClarificationEnabled returns the resolved
+// calibrated-autonomy setting, defaulting to false — the gates stay
+// opt-in until the paired corpus evidence says otherwise.
+func (o *Options) AmbiguityClarificationEnabled() bool {
+	if o.AmbiguityClarification == nil {
+		return false
+	}
+	return *o.AmbiguityClarification
 }
 
 // NotebookMemoryServerName returns the resolved memory server name,

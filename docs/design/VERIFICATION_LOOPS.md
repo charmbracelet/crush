@@ -98,7 +98,7 @@ output, or the harness can trust the summary over the exit code.
   step; the detector misses verify-thrash because each retrying edit
   has a different signature; and it is per-`Stream` — `steps` resets
   on every recursive `a.Run`, so thrash across gate retries is
-  invisible even with identical signatures. `VerificationAttempts`
+  invisible even with identical signatures. `RepairAttempts`
   is the only bound.
 - **Post-run pipeline — and an ordering trap.** The post-run
   goroutine spawns at `agent.go:1406`, re-lists messages, runs
@@ -142,7 +142,7 @@ output, or the harness can trust the summary over the exit code.
   terminal event when the same RunID continues." **Corollary: any
   counter scoped to a single `Run` invocation resets on every gate
   retry** — the attempt budget must be threaded through
-  `SessionAgentCall` (`agent.go:79`, add e.g. `VerificationAttempts
+  `SessionAgentCall` (`agent.go:79`, add e.g. `RepairAttempts
 int`; the gate builds the follow-up call, so it self-propagates)
   rather than held in `Run` locals or session-keyed state.
 - **The queue is not FIFO-until-run-end.** `drainQueueForStep`
@@ -448,7 +448,7 @@ gate thrashes on exotic stacks. With pending or failed checks:
    settlement; non-foldable; a cancel-drop still publishes a
    cancelled `RunComplete` via `publishCanceledQueueDrops`), none
    otherwise. And the retry is a CLONE of the caller's
-   `SessionAgentCall` — `Prompt` replaced, `VerificationAttempts`
+   `SessionAgentCall` — `Prompt` replaced, `RepairAttempts`
    incremented — not a from-scratch call: the struct carries
    `ProviderOptions`, all five sampling params, `NonInteractive`
    (which gates the `TypeAgentFinished` publish at
@@ -494,7 +494,7 @@ before the dequeue — a queued retry means the session emits
 finished→busy on every gate retry; suppress the notify when a retry
 is prepended, or the TUI flickers per attempt.
 
-**Retry budget via `SessionAgentCall.VerificationAttempts`** — the
+**Retry budget via `SessionAgentCall.RepairAttempts`** — the
 gate builds the follow-up call, so incrementing the field there
 self-propagates across the recursive `a.Run` boundary where any
 `Run`-local counter would reset. On budget exhaustion the terminal
@@ -610,7 +610,7 @@ let two writes race a scalar.
   observes the verdicts; prepend the follow-up under `sessionMu`
   ahead of queued `RunID` prompts, inheriting the caller's `RunID`
   (non-foldable, suppresses the premature `RunComplete`);
-  `SessionAgentCall.VerificationAttempts` carries the budget across
+  `SessionAgentCall.RepairAttempts` carries the budget across
   the recursive `a.Run` boundary; each retry is its own turn, a
   clone of the caller's call with `Prompt` replaced; budget
   exhaustion writes into `currentAssistant` so it surfaces via
@@ -675,7 +675,7 @@ metadata disagrees (should be structurally zero).
   honest output is "unverified," and the gate should treat it as
   non-blocking (warn, don't re-enter) or verification becomes a
   thrash generator.
-- **Re-entry loops:** `VerificationAttempts` is the only thing
+- **Re-entry loops:** `RepairAttempts` is the only thing
   between a gate and an infinite edit→fail→edit cycle; re-entry
   must ride the `sessionMu`/`BeginAccepted` handoff or the cancel
   window reopens.

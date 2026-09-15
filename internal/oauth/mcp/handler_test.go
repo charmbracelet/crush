@@ -552,12 +552,19 @@ func TestCallbackReceiver_ConcurrentAuthorizeOpensOneTab(t *testing.T) {
 
 	base := serveReceiver(t, r)
 
-	// Stand in for the browser: record the open, then redirect back as the
-	// authorization server would once the user consents.
+	// Stand in for the browser: record the open, but hold the redirect
+	// until every caller has joined the flight. Releasing it immediately
+	// would let a fast settle retire the flight before the slowest caller
+	// arrives, and that late caller would open a second tab.
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+
 	var opens atomic.Int64
 	r.handler = &Handler{openURL: func(string) error {
 		opens.Add(1)
 		go func() {
+			<-release
 			resp, gerr := http.Get(base + callbackPath + "?code=abc&state=xyz") //nolint:noctx
 			if gerr == nil {
 				resp.Body.Close()
@@ -577,6 +584,15 @@ func TestCallbackReceiver_ConcurrentAuthorizeOpensOneTab(t *testing.T) {
 			errs <- ferr
 		})
 	}
+
+	// Every caller must be parked on the same flight before the redirect
+	// lands, or the opens==1 assertion below is left to the scheduler.
+	require.Eventually(t, func() bool {
+		flight := r.current()
+		return flight != nil && flight.refs.Load() == callers
+	}, 5*time.Second, time.Millisecond, "all callers must join the in-flight authorization")
+	releaseOnce.Do(func() { close(release) })
+
 	wg.Wait()
 	close(results)
 	close(errs)

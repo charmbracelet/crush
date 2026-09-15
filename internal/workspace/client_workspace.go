@@ -91,7 +91,7 @@ func NewClientWorkspace(c *client.Client, ws proto.Workspace) *ClientWorkspace {
 	states := protoToSkillStates(ws.Skills)
 	mgr := skills.NewManager(nil, nil, states, skills.WithGlobalMirror())
 	subCtx, subCancel := context.WithCancel(context.Background())
-	return &ClientWorkspace{
+	w := &ClientWorkspace{
 		client:      c,
 		ws:          ws,
 		skills:      mgr,
@@ -99,6 +99,20 @@ func NewClientWorkspace(c *client.Client, ws proto.Workspace) *ClientWorkspace {
 		subCancel:   subCancel,
 		subDone:     make(chan struct{}),
 		herdrClient: herdr.Init(),
+	}
+	w.reportModel()
+	return w
+}
+
+// reportModel pushes the configured large model id to herdr's pane
+// metadata. Best-effort: the model token is also refreshed from
+// every assistant message, so a missed update self-heals on the
+// next turn.
+func (w *ClientWorkspace) reportModel() {
+	if cfg := w.Config(); cfg != nil {
+		if model, ok := cfg.Models[config.SelectedModelTypeLarge]; ok {
+			w.herdrClient.ReportModel(model.Model)
+		}
 	}
 }
 
@@ -117,6 +131,7 @@ func (w *ClientWorkspace) refreshWorkspace() {
 	w.mu.Lock()
 	w.ws = *updated
 	w.mu.Unlock()
+	w.reportModel()
 }
 
 // cached returns a snapshot of the cached workspace.
@@ -190,7 +205,23 @@ func (w *ClientWorkspace) ParseAgentToolSessionID(sessionID string) (string, str
 // are propagated to the caller; the TUI logs and ignores them since
 // the presence record is a hint, not correctness-critical state.
 func (w *ClientWorkspace) SetCurrentSession(ctx context.Context, sessionID string) error {
-	w.herdrClient.SetSessionID(sessionID)
+	// Resolve the title so herdr's pane metadata reflects the
+	// session immediately: no session event fires on a plain
+	// switch. A lookup failure still reports the session id; the
+	// title catches up on the next session event. Outside a herdr
+	// pane the lookup has no consumer, so skip the round trip —
+	// this runs on every switch and on every reconnect re-assert.
+	if w.herdrClient != nil {
+		var title string
+		if sessionID != "" {
+			if sess, err := w.GetSession(ctx, sessionID); err == nil {
+				title = sess.Title
+			} else {
+				slog.Debug("Failed to look up session title for herdr", "session_id", sessionID, "error", err)
+			}
+		}
+		w.herdrClient.SetSession(sessionID, title)
+	}
 	w.mu.Lock()
 	w.lastSession = sessionID
 	w.mu.Unlock()

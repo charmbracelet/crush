@@ -261,9 +261,9 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 
 			// Check whether the command is dangerous so we can surface a
 			// warning in the permission dialog.
-			dangerReason := ""
+			var check shell.CommandCheck
 			if !safeReadOnly {
-				dangerReason = shell.BlockedCommandReason(params.Command, blockFuncs(blocked))
+				check = shell.CheckCommand(params.Command, blockFuncs(blocked))
 
 				p, err := permissions.Request(
 					ctx,
@@ -275,7 +275,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 						Action:      "execute",
 						Description: fmt.Sprintf("Execute command: %s", params.Command),
 						Params:      BashPermissionsParams(params),
-						Danger:      dangerReason,
+						Danger:      check.Reason,
 					},
 				)
 				if err != nil {
@@ -286,19 +286,25 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 				}
 			}
 
-			// Re-blocking a command that was already approved would just
-			// override the answer that was given, whether the user gave it
-			// at a prompt or yolo mode gave it on their behalf, so flagged
-			// commands run unguarded. Everything else keeps the block list
-			// on at exec time, because the static check cannot see what
-			// indirection resolves to: a script that turns around and calls
-			// `sudo` reaches here unflagged. The block handler is the only
-			// thing that sees the real command name.
+			// Re-blocking a command that was already approved would override
+			// the answer that was given, whether the user gave it at a prompt
+			// or yolo mode gave it on their behalf. That only applies when the
+			// check actually recognised a command by name, though: a warning
+			// that merely says "this could not be analysed" names nothing the
+			// user could have judged, so approving it is not approval of
+			// anything in particular and the block list stays on. Otherwise a
+			// stray $(date) anywhere on the line would waive the run-time
+			// checks for every command beside it.
+			//
+			// What the block list can see is narrow: commands this interpreter
+			// dispatches itself, including names that only resolve after a
+			// glob or variable expands. A command that runs inside a child
+			// process is invisible to it.
 			//
 			// Sysadmin mode is the deliberate exception: it asks for nothing
 			// and blocks nothing.
 			var blocksToUse []shell.BlockFunc
-			if dangerReason == "" && permissions.PermissionMode() != permission.PermissionModeSysadmin {
+			if !check.Matched && permissions.PermissionMode() != permission.PermissionModeSysadmin {
 				blocksToUse = blockFuncs(blocked)
 			}
 			return executeBashCommand(ctx, params, execWorkingDir, blocksToUse)

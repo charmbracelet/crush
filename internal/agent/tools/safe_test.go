@@ -80,7 +80,7 @@ func TestIsSafeReadOnly_Allowed(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			assert.True(t, isSafeReadOnly(tt.input), "expected %q to be auto-approved", tt.input)
+			assert.True(t, isSafeReadOnly(tt.input, nil), "expected %q to be auto-approved", tt.input)
 		})
 	}
 }
@@ -209,7 +209,7 @@ func TestIsSafeReadOnly_Denied(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			assert.False(t, isSafeReadOnly(tt.input), "expected %q to require a permission prompt", tt.input)
+			assert.False(t, isSafeReadOnly(tt.input, nil), "expected %q to require a permission prompt", tt.input)
 		})
 	}
 }
@@ -219,8 +219,8 @@ func TestIsSafeReadOnly_Denied(t *testing.T) {
 func TestIsSafeReadOnly_WrapperDepth(t *testing.T) {
 	t.Parallel()
 
-	assert.True(t, isSafeReadOnly("nohup nohup nohup ls"), "three wrappers is within the bound")
-	assert.False(t, isSafeReadOnly("nohup nohup nohup nohup nohup ls"), "beyond the bound should fail closed")
+	assert.True(t, isSafeReadOnly("nohup nohup nohup ls", nil), "three wrappers is within the bound")
+	assert.False(t, isSafeReadOnly("nohup nohup nohup nohup nohup ls", nil), "beyond the bound should fail closed")
 }
 
 // TestFlagDenied covers the spellings a short flag can take. getopt lets

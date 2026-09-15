@@ -164,6 +164,16 @@ func (b *Backend) UpdateAgent(ctx context.Context, workspaceID string) error {
 	return ws.UpdateAgentModel(ctx)
 }
 
+// ReloadSkills re-discovers skills and propagates them to the agent.
+func (b *Backend) ReloadSkills(ctx context.Context, workspaceID string) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+
+	return ws.ReloadSkills(ctx)
+}
+
 // CancelSession cancels an ongoing agent operation for the given
 // session.
 func (b *Backend) CancelSession(workspaceID, sessionID string) error {

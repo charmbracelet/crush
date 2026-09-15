@@ -2,6 +2,8 @@ package skills
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"sync"
@@ -33,6 +35,10 @@ type Manager struct {
 	resolvedPaths []string
 	workingDir    string
 
+	// discoveryCfg caches the config used at construction so Reload
+	// can re-run discovery without callers needing to pass it again.
+	discoveryCfg DiscoveryConfig
+
 	broker       *pubsub.Broker[Event]
 	globalMirror bool
 }
@@ -56,6 +62,15 @@ func WithGlobalMirror() ManagerOption {
 func WithResolvedPaths(paths []string) ManagerOption {
 	return func(m *Manager) {
 		m.resolvedPaths = paths
+	}
+}
+
+// WithDiscoveryConfig stores the config used during discovery so the
+// manager can re-run discovery later via Reload without callers needing
+// to pass it again.
+func WithDiscoveryConfig(cfg DiscoveryConfig) ManagerOption {
+	return func(m *Manager) {
+		m.discoveryCfg = cfg
 	}
 }
 
@@ -99,6 +114,14 @@ func (m *Manager) ActiveSkills() []*Skill {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.activeSkills
+}
+
+// SkillSnapshot returns allSkills and activeSkills in a single lock
+// acquisition, preventing torn reads across a concurrent Reload.
+func (m *Manager) SkillSnapshot() (all, active []*Skill) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.allSkills, m.activeSkills
 }
 
 // ResolvedPaths returns the expanded skills directory paths stored at
@@ -155,6 +178,30 @@ func (m *Manager) SubscribeEvents(ctx context.Context) <-chan pubsub.Event[Event
 	return m.broker.Subscribe(ctx)
 }
 
+// Reload re-runs discovery from scratch using the stored DiscoveryConfig,
+// replacing allSkills, activeSkills, states, and resolvedPaths. It also
+// publishes a discovery event so subscribers (TUI sidebar, etc.) update.
+// Returns the new active skills so callers (e.g. the coordinator) can
+// propagate them to the system prompt and tools. The context is checked
+// for cancellation after discovery completes but before swapping state.
+func (m *Manager) Reload(ctx context.Context) (all, active []*Skill, err error) {
+	allSkills, activeSkills, states := DiscoverFromConfig(m.discoveryCfg)
+	resolved := m.discoveryCfg.ResolvePaths()
+
+	if err := ctx.Err(); err != nil {
+		return nil, nil, fmt.Errorf("skill reload cancelled: %w", err)
+	}
+
+	m.mu.Lock()
+	m.allSkills = allSkills
+	m.activeSkills = activeSkills
+	m.resolvedPaths = resolved
+	m.mu.Unlock()
+
+	m.PublishStates(states)
+	return allSkills, activeSkills, nil
+}
+
 // Shutdown releases broker resources.
 func (m *Manager) Shutdown() {
 	if m.broker != nil {
@@ -191,7 +238,41 @@ func DiscoverFromConfig(cfg DiscoveryConfig) (allSkills, activeSkills []*Skill, 
 	slices.SortStableFunc(allStates, func(a, b *SkillState) int {
 		return strings.Compare(strings.ToLower(a.Path), strings.ToLower(b.Path))
 	})
+
+	logDiscovery(allSkills, activeSkills, allStates, userPaths, cfg.DisabledSkills)
+
 	return allSkills, activeSkills, allStates
+}
+
+// logDiscovery emits a single structured INFO line summarising a
+// discovery pass. Called from DiscoverFromConfig so every discovery —
+// initial startup AND reloads — is logged.
+func logDiscovery(all, active []*Skill, states []*SkillState, userPaths []string, disabled []string) {
+	var builtinOK, builtinErr, userOK, userErr int
+	for _, s := range states {
+		isBuiltin := strings.HasPrefix(s.Path, "builtin/")
+		switch {
+		case isBuiltin && s.State == StateNormal:
+			builtinOK++
+		case isBuiltin && s.State == StateError:
+			builtinErr++
+		case !isBuiltin && s.State == StateNormal:
+			userOK++
+		case !isBuiltin && s.State == StateError:
+			userErr++
+		}
+	}
+	slog.Info("Skill discovery complete",
+		"component", "skills",
+		"builtin_ok", builtinOK,
+		"builtin_errors", builtinErr,
+		"user_ok", userOK,
+		"user_errors", userErr,
+		"user_paths", len(userPaths),
+		"deduped_total", len(all),
+		"active", len(active),
+		"disabled", len(disabled),
+	)
 }
 
 // DiscoveryConfig contains the inputs DiscoverFromConfig needs. Using a

@@ -691,6 +691,20 @@
             300,
             0
           ]
+        },
+        "turn_context": {
+          "type": "string",
+          "enum": [
+            "off",
+            "session"
+          ],
+          "description": "Per-turn context augmentation tier. session injects deterministic session signals (working set, open todos) at the request tail.",
+          "default": "off"
+        },
+        "ambiguity_clarification": {
+          "type": "boolean",
+          "description": "Enable deterministic clarification gates: turn-zero vagueness pre-filter, first-write scope gate, and loop-stop escalation. Experimental.",
+          "default": false
         }
       },
       "additionalProperties": false,

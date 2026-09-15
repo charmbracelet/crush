@@ -133,12 +133,19 @@ type SessionAgentCall struct {
 	// fantasy retries the stream transparently. Returning an error
 	// surfaces the original auth error without retry.
 	OnAuthRefresh func(ctx context.Context, err *fantasy.ProviderError) error
-	// VerificationAttempts counts the verification-repair retries this
-	// call has already consumed. The end-of-turn gate builds each retry
-	// as a clone of the caller with this field incremented, so the
-	// budget propagates across the recursive Run boundary where a
-	// Run-local counter would reset.
-	VerificationAttempts int
+	// RepairAttempts counts the repair retries this call has already
+	// consumed across every run-boundary edge (verification, todos,
+	// stall). The edge layer builds each retry as a clone of the
+	// caller with this field incremented, so the shared budget
+	// propagates across the recursive Run boundary where a Run-local
+	// counter would reset.
+	RepairAttempts int
+	// RunStamp identifies the user turn's run boundary for the scope
+	// gate's explore→execute bookkeeping. Run stamps a zero value
+	// once; repair retries clone the caller and keep it, so a user
+	// turn gets one boundary check regardless of transport (TUI,
+	// `crush run`, backend) rather than one per retry Run.
+	RunStamp uint64
 }
 
 type SessionAgent interface {
@@ -234,9 +241,23 @@ type sessionAgent struct {
 	// the cursor swept past its index still counts once.
 	nbPendingReads *csync.Map[string, map[string]string]
 	// filetracker provides the session's read/write working set for
-	// notebook selection. Nil skips the working-set and liveness
-	// passes.
+	// notebook selection and turn-context augmentation. Nil skips the
+	// working-set and liveness passes.
 	filetracker filetracker.Service
+	// turnContext selects the per-turn context augmentation tier
+	// (options.turn_context): "off" or "session".
+	turnContext string
+	// ambiguityClarification enables the calibrated-autonomy gates:
+	// the turn-zero vagueness pre-filter and the first-write scope
+	// gate (options.ambiguity_clarification).
+	ambiguityClarification bool
+	// interactive records whether the run can ask the user — the
+	// mode the clarification gates degrade on.
+	interactive bool
+	// runStampGen is the monotonic source of per-Run stamps the scope
+	// gate uses to reset its explore→execute boundary bookkeeping.
+	// Atomic: Run invocations on different sessions can race on it.
+	runStampGen atomic.Uint64
 	// segmentTrackers holds per-session intra-turn segment state:
 	// in-flight generation marks and backfill claims, shared across
 	// agent rebuilds so a rebuilt coordinator cannot double-fire.
@@ -349,49 +370,62 @@ type SessionAgentOptions struct {
 	NotebookScanIdx      *csync.Map[string, int]
 	NotebookPendingReads *csync.Map[string, map[string]string]
 	// FileTracker provides the session's read/write working set for
-	// notebook selection. May be nil — the working-set and liveness
-	// passes are skipped without it.
+	// notebook selection and turn-context augmentation. May be nil —
+	// the working-set and liveness passes are skipped without it.
 	FileTracker filetracker.Service
+	// TurnContext is the resolved options.turn_context tier: "off"
+	// or "session".
+	TurnContext string
+	// AmbiguityClarification enables the calibrated-autonomy gates
+	// (options.ambiguity_clarification).
+	AmbiguityClarification bool
+	// Interactive reports whether the run can ask the user —
+	// coordinator's interactive flag threaded through for the gate
+	// degrade branches.
+	Interactive bool
 }
 
 func NewSessionAgent(
 	opts SessionAgentOptions,
 ) SessionAgent {
 	a := &sessionAgent{
-		largeModel:           csync.NewValue(opts.LargeModel),
-		smallModel:           csync.NewValue(opts.SmallModel),
-		systemPromptPrefix:   csync.NewValue(opts.SystemPromptPrefix),
-		systemPrompt:         csync.NewValue(opts.SystemPrompt),
-		promptSections:       csync.NewSlice[prompt.PromptSection](),
-		isSubAgent:           opts.IsSubAgent,
-		sessions:             opts.Sessions,
-		messages:             opts.Messages,
-		disableAutoSummarize: opts.DisableAutoSummarize,
-		tools:                csync.NewSliceFrom(opts.Tools),
-		isYolo:               opts.IsYolo,
-		notify:               opts.Notify,
-		runComplete:          opts.RunComplete,
-		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
-		activeRequests:       csync.NewMap[string, *activeCancel](),
-		dispatchMu:           csync.NewMap[string, *sync.Mutex](),
-		acceptedRuns:         csync.NewMap[string, int](),
-		cancelMark:           csync.NewMap[string, uint64](),
-		notebook:             opts.Notebook,
-		notebookEnabled:      opts.NotebookEnabled,
-		rawTokenBudget:       opts.RawTokenBudget,
-		configStore:          opts.ConfigStore,
-		notebookSyncMem0:     opts.NotebookSyncMem0,
-		notebookMemoryServer: opts.NotebookMemoryServer,
-		notebookAutoInject:   opts.NotebookAutoInject,
-		stubSuperseded:       opts.StubSuperseded,
-		stubBoundary:         cmp.Or(opts.StubBoundary, csync.NewMap[string, int]()),
-		stubStats:            cmp.Or(opts.StubStats, csync.NewMap[string, stubStats]()),
-		segmentTrackers:      cmp.Or(opts.SegmentTrackers, csync.NewMap[string, *segmentTracker]()),
-		prefixCache:          cmp.Or(opts.PrefixCache, csync.NewMap[string, cachedPrefix]()),
-		nbStats:              cmp.Or(opts.NotebookStats, csync.NewMap[string, notebook.Stats]()),
-		nbScanIdx:            cmp.Or(opts.NotebookScanIdx, csync.NewMap[string, int]()),
-		nbPendingReads:       cmp.Or(opts.NotebookPendingReads, csync.NewMap[string, map[string]string]()),
-		filetracker:          opts.FileTracker,
+		largeModel:             csync.NewValue(opts.LargeModel),
+		smallModel:             csync.NewValue(opts.SmallModel),
+		systemPromptPrefix:     csync.NewValue(opts.SystemPromptPrefix),
+		systemPrompt:           csync.NewValue(opts.SystemPrompt),
+		promptSections:         csync.NewSlice[prompt.PromptSection](),
+		isSubAgent:             opts.IsSubAgent,
+		sessions:               opts.Sessions,
+		messages:               opts.Messages,
+		disableAutoSummarize:   opts.DisableAutoSummarize,
+		tools:                  csync.NewSliceFrom(opts.Tools),
+		isYolo:                 opts.IsYolo,
+		notify:                 opts.Notify,
+		runComplete:            opts.RunComplete,
+		messageQueue:           csync.NewMap[string, []SessionAgentCall](),
+		activeRequests:         csync.NewMap[string, *activeCancel](),
+		dispatchMu:             csync.NewMap[string, *sync.Mutex](),
+		acceptedRuns:           csync.NewMap[string, int](),
+		cancelMark:             csync.NewMap[string, uint64](),
+		notebook:               opts.Notebook,
+		notebookEnabled:        opts.NotebookEnabled,
+		rawTokenBudget:         opts.RawTokenBudget,
+		configStore:            opts.ConfigStore,
+		notebookSyncMem0:       opts.NotebookSyncMem0,
+		notebookMemoryServer:   opts.NotebookMemoryServer,
+		notebookAutoInject:     opts.NotebookAutoInject,
+		stubSuperseded:         opts.StubSuperseded,
+		stubBoundary:           cmp.Or(opts.StubBoundary, csync.NewMap[string, int]()),
+		stubStats:              cmp.Or(opts.StubStats, csync.NewMap[string, stubStats]()),
+		segmentTrackers:        cmp.Or(opts.SegmentTrackers, csync.NewMap[string, *segmentTracker]()),
+		prefixCache:            cmp.Or(opts.PrefixCache, csync.NewMap[string, cachedPrefix]()),
+		nbStats:                cmp.Or(opts.NotebookStats, csync.NewMap[string, notebook.Stats]()),
+		nbScanIdx:              cmp.Or(opts.NotebookScanIdx, csync.NewMap[string, int]()),
+		nbPendingReads:         cmp.Or(opts.NotebookPendingReads, csync.NewMap[string, map[string]string]()),
+		filetracker:            opts.FileTracker,
+		turnContext:            opts.TurnContext,
+		ambiguityClarification: opts.AmbiguityClarification,
+		interactive:            opts.Interactive,
 	}
 	return a
 }
@@ -774,8 +808,14 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 	// Idle: become the active run. Register the cancel func before dropping
 	// the lock so a Cancel that arrives between here and assistant creation
-	// is not lost.
+	// is not lost. The run stamp distinguishes this user turn's runs —
+	// repair retries clone the caller and carry its stamp forward, so the
+	// scope gate boundary is per turn, not per Run invocation.
+	if call.RunStamp == 0 {
+		call.RunStamp = a.runStampGen.Add(1)
+	}
 	runCtx := context.WithValue(ctx, tools.SessionIDContextKey, call.SessionID)
+	runCtx = context.WithValue(runCtx, tools.RunStampContextKey, call.RunStamp)
 	genCtx, cancel = context.WithCancel(runCtx)
 	ac := &activeCancel{cancel: cancel}
 	a.activeRequests.Set(call.SessionID, ac)
@@ -850,7 +890,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// can take tens of seconds. Blocking Run on it delays the
 	// response to the caller. Use a detached context so the title
 	// goroutine survives Run's cancel.
-	if !hasUserTextMessage(msgs) {
+	if !hasSubstantiveUserMessage(msgs) {
 		titleCtx := context.WithoutCancel(ctx)
 		go a.GenerateTitle(titleCtx, call.SessionID, call.Prompt)
 	}
@@ -928,8 +968,18 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 	history, files := a.preparePrompt(ctx, msgs, largeModel.CatwalkCfg.SupportsImages, call.Attachments...)
 
+	// Per-turn tail augmentation: the turn-context blob and the
+	// vagueness pre-filter's clarify directive. Computed once here —
+	// appended inside PrepareStep so they survive the notebook
+	// rebuild and stay byte-stable across steps.
+	tailMessages := a.turnTailMessages(ctx, call, msgs)
+
 	startTime := time.Now()
 	a.eventPromptSent(call.SessionID)
+
+	// loopStopped records that the loop detector's StopWhen ended the
+	// run — the stall edge's trigger at the run boundary.
+	var loopStopped bool
 
 	var stepMessages []fantasy.Message
 	var shouldSummarize bool
@@ -1011,6 +1061,13 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 			prepared.Messages = a.workaroundProviderMediaLimitations(prepared.Messages, largeModel)
 
+			// Ephemeral tail augmentation: the turn-context blob and
+			// clarify directive ride in the moving tail — the history
+			// prefix still cache-reads, and the same byte-stable
+			// messages re-append every step so the notebook rebuild
+			// cannot drop them.
+			prepared.Messages = append(prepared.Messages, tailMessages...)
+
 			// Anthropic allows at most 4 cache breakpoints per request.
 			// With MCP tools present, Run adds a second tool breakpoint
 			// (after the built-in partition), so cache only the last
@@ -1022,9 +1079,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 					break
 				}
 			}
-			tailStart := len(prepared.Messages) - 2
+			tailStart := max(len(prepared.Messages)-2, 0)
 			if mcpToolsPresent {
-				tailStart = len(prepared.Messages) - 1
+				tailStart = max(len(prepared.Messages)-1, 0)
 			}
 			lastSystemRoleInx := 0
 			systemMessageUpdated := false
@@ -1254,7 +1311,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				return false
 			},
 			func(steps []fantasy.StepResult) bool {
-				return hasRepeatedToolCalls(steps, loopDetectionWindowSize, loopDetectionMaxRepeats)
+				if hasRepeatedToolCalls(steps, loopDetectionWindowSize, loopDetectionMaxRepeats) {
+					loopStopped = true
+					return true
+				}
+				return false
 			},
 		}, evalStepCaps()...),
 	})
@@ -1391,14 +1452,20 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		return nil, err
 	}
 
-	// Verification gate: a run ending on a clean stop with failed or
+	// Run-boundary edges: a run ending on a clean stop with failed or
 	// pending checks — or session todos still open — does not get to
-	// report done — the gate resolves the checks, lands outcomes on
-	// stored tool-result metadata (flushed so the notebook goroutine
-	// below observes them), and prepends a bounded retry ahead of
-	// queued prompts. Must run before the notebook goroutine spawn AND
-	// before the queue dequeue.
-	verifyRetryQueued := a.runVerificationGate(ctx, call, result, currentAssistant)
+	// report done; a loop-detector stop escalates instead of dying
+	// silently. The verification edge resolves its checks, lands
+	// outcomes on stored tool-result metadata (flushed so the
+	// notebook goroutine below observes them), and all firing edges
+	// merge into one bounded retry prepended ahead of queued prompts.
+	// Must run before the notebook goroutine spawn AND before the
+	// queue dequeue.
+	repairQueued := a.runEdges(ctx, call, edgeInput{
+		result:           result,
+		currentAssistant: currentAssistant,
+		stalled:          loopStopped,
+	})
 
 	// Generate notebook entries asynchronously when notebook is
 	// enabled. This runs in the background so the user sees the
@@ -1469,7 +1536,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// nested/non-interactive sessions, and when a gate retry is queued —
 	// the session is about to go busy again and the finished→busy flap
 	// would flicker the TUI on every attempt).
-	if !call.NonInteractive && a.notify != nil && !verifyRetryQueued {
+	if !call.NonInteractive && a.notify != nil && !repairQueued {
 		a.notify.Publish(pubsub.CreatedEvent, notify.Notification{
 			SessionID:    call.SessionID,
 			SessionTitle: currentSession.Title,
@@ -2304,15 +2371,21 @@ func countUserMessages(msgs []message.Message) int {
 	return count
 }
 
-// hasUserTextMessage reports whether any user message in msgs contains
-// text content (as opposed to only shell commands or other non-text parts).
-func hasUserTextMessage(msgs []message.Message) bool {
+// hasSubstantiveUserMessage reports whether any user message in msgs
+// contains text that can carry context — explicit paths or more than a
+// couple of words. A bare greeting or acknowledgement ("hi", "ok
+// thanks") does not suppress downstream context checks.
+func hasSubstantiveUserMessage(msgs []message.Message) bool {
 	for _, msg := range msgs {
 		if msg.Role != message.User {
 			continue
 		}
 		for _, part := range msg.Parts {
-			if tc, ok := part.(message.TextContent); ok && tc.Text != "" {
+			tc, ok := part.(message.TextContent)
+			if !ok || tc.Text == "" {
+				continue
+			}
+			if len(extractExplicitFilePaths(tc.Text)) > 0 || len(strings.Fields(tc.Text)) >= 3 {
 				return true
 			}
 		}

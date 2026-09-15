@@ -364,15 +364,15 @@ func TestRunVerificationGate(t *testing.T) {
 			stepWith(fantasy.FinishReasonStop, fantasy.TextContent{Text: "done"}),
 		}}
 
-		queued := a.runVerificationGate(t.Context(), SessionAgentCall{
+		queued := a.runEdges(t.Context(), SessionAgentCall{
 			SessionID: sessionID, RunID: "run-1", Prompt: "do it",
-		}, result, assistantMsg())
+		}, edgeInput{result: result, currentAssistant: assistantMsg()})
 		require.True(t, queued)
 		q, ok := a.messageQueue.Get(sessionID)
 		require.True(t, ok)
 		require.Len(t, q, 1)
 		require.Equal(t, "run-1", q[0].RunID)
-		require.Equal(t, 1, q[0].VerificationAttempts)
+		require.Equal(t, 1, q[0].RepairAttempts)
 		require.Contains(t, q[0].Prompt, "diagnostics")
 	})
 
@@ -386,7 +386,7 @@ func TestRunVerificationGate(t *testing.T) {
 				Result: fantasy.ToolResultOutputContentText{Text: "denied"},
 			}),
 		}}
-		queued := a.runVerificationGate(t.Context(), SessionAgentCall{SessionID: sessionID}, result, assistantMsg())
+		queued := a.runEdges(t.Context(), SessionAgentCall{SessionID: sessionID}, edgeInput{result: result, currentAssistant: assistantMsg()})
 		require.False(t, queued)
 	})
 
@@ -397,7 +397,7 @@ func TestRunVerificationGate(t *testing.T) {
 			stepWith(fantasy.FinishReasonToolCalls, editWith(`{"verification":[{"check":"diagnostics","state":"failed"}]}`)),
 			stepWith(fantasy.FinishReasonLength, fantasy.TextContent{Text: "cut off"}),
 		}}
-		require.False(t, a.runVerificationGate(t.Context(), SessionAgentCall{SessionID: sessionID}, result, assistantMsg()))
+		require.False(t, a.runEdges(t.Context(), SessionAgentCall{SessionID: sessionID}, edgeInput{result: result, currentAssistant: assistantMsg()}))
 	})
 
 	t.Run("observed failing bash resolves pending and retries", func(t *testing.T) {
@@ -423,7 +423,7 @@ func TestRunVerificationGate(t *testing.T) {
 			stepWith(fantasy.FinishReasonStop, fantasy.TextContent{Text: "done"}),
 		}}
 
-		queued := a.runVerificationGate(t.Context(), SessionAgentCall{SessionID: sessionID, RunID: "r"}, result, assistantMsg())
+		queued := a.runEdges(t.Context(), SessionAgentCall{SessionID: sessionID, RunID: "r"}, edgeInput{result: result, currentAssistant: assistantMsg()})
 		require.True(t, queued)
 
 		// The stored row's pending entry resolved to failed.
@@ -444,9 +444,9 @@ func TestRunVerificationGate(t *testing.T) {
 			stepWith(fantasy.FinishReasonToolCalls, editWith(`{"verification":[{"check":"diagnostics","state":"failed"}]}`)),
 			stepWith(fantasy.FinishReasonStop, fantasy.TextContent{Text: "done"}),
 		}}
-		queued := a.runVerificationGate(t.Context(), SessionAgentCall{
+		queued := a.runEdges(t.Context(), SessionAgentCall{
 			SessionID: sessionID, RunID: "run-1",
-		}, result, assistantMsg())
+		}, edgeInput{result: result, currentAssistant: assistantMsg()})
 		require.True(t, queued)
 		q, _ := a.messageQueue.Get(sessionID)
 		require.Len(t, q, 2)
@@ -462,9 +462,9 @@ func TestRunVerificationGate(t *testing.T) {
 			stepWith(fantasy.FinishReasonToolCalls, editWith(`{"verification":[{"check":"diagnostics","state":"failed","detail":"1 new error(s)"}]}`)),
 			stepWith(fantasy.FinishReasonStop, fantasy.TextContent{Text: "done"}),
 		}}
-		queued := a.runVerificationGate(t.Context(), SessionAgentCall{
-			SessionID: sessionID, VerificationAttempts: maxVerificationAttempts,
-		}, result, asst)
+		queued := a.runEdges(t.Context(), SessionAgentCall{
+			SessionID: sessionID, RepairAttempts: maxRepairAttempts,
+		}, edgeInput{result: result, currentAssistant: asst})
 		require.False(t, queued)
 		require.Contains(t, asst.Content().Text, "still failing")
 	})
@@ -490,14 +490,14 @@ func TestRunVerificationGate(t *testing.T) {
 			stepWith(fantasy.FinishReasonStop, fantasy.TextContent{Text: "done"}),
 		}}
 
-		queued := a.runVerificationGate(t.Context(), SessionAgentCall{
+		queued := a.runEdges(t.Context(), SessionAgentCall{
 			SessionID: sessionID, RunID: "run-1",
-		}, result, assistantMsg())
+		}, edgeInput{result: result, currentAssistant: assistantMsg()})
 		require.True(t, queued)
 		q, _ := a.messageQueue.Get(sessionID)
 		require.Len(t, q, 1)
 		require.Equal(t, "run-1", q[0].RunID)
-		require.Equal(t, 1, q[0].VerificationAttempts)
+		require.Equal(t, 1, q[0].RepairAttempts)
 		require.Contains(t, q[0].Prompt, "run the tests")
 		require.Contains(t, q[0].Prompt, "update docs")
 		require.NotContains(t, q[0].Prompt, "implement the fix")
@@ -514,7 +514,7 @@ func TestRunVerificationGate(t *testing.T) {
 		result := &fantasy.AgentResult{Steps: []fantasy.StepResult{
 			stepWith(fantasy.FinishReasonStop, fantasy.TextContent{Text: "done"}),
 		}}
-		require.False(t, a.runVerificationGate(t.Context(), SessionAgentCall{SessionID: sessionID}, result, assistantMsg()))
+		require.False(t, a.runEdges(t.Context(), SessionAgentCall{SessionID: sessionID}, edgeInput{result: result, currentAssistant: assistantMsg()}))
 	})
 
 	t.Run("failed check and open todos share one retry prompt", func(t *testing.T) {
@@ -527,7 +527,7 @@ func TestRunVerificationGate(t *testing.T) {
 			stepWith(fantasy.FinishReasonToolCalls, editWith(`{"verification":[{"check":"diagnostics","state":"failed","detail":"1 new error(s)"}]}`)),
 			stepWith(fantasy.FinishReasonStop, fantasy.TextContent{Text: "done"}),
 		}}
-		queued := a.runVerificationGate(t.Context(), SessionAgentCall{SessionID: sessionID}, result, assistantMsg())
+		queued := a.runEdges(t.Context(), SessionAgentCall{SessionID: sessionID}, edgeInput{result: result, currentAssistant: assistantMsg()})
 		require.True(t, queued)
 		q, _ := a.messageQueue.Get(sessionID)
 		require.Len(t, q, 1)
@@ -545,9 +545,9 @@ func TestRunVerificationGate(t *testing.T) {
 		result := &fantasy.AgentResult{Steps: []fantasy.StepResult{
 			stepWith(fantasy.FinishReasonStop, fantasy.TextContent{Text: "done"}),
 		}}
-		queued := a.runVerificationGate(t.Context(), SessionAgentCall{
-			SessionID: sessionID, VerificationAttempts: maxVerificationAttempts,
-		}, result, asst)
+		queued := a.runEdges(t.Context(), SessionAgentCall{
+			SessionID: sessionID, RepairAttempts: maxRepairAttempts,
+		}, edgeInput{result: result, currentAssistant: asst})
 		require.False(t, queued)
 		require.Contains(t, asst.Content().Text, "todo item(s) still incomplete")
 	})
@@ -563,9 +563,9 @@ func TestRunVerificationGate(t *testing.T) {
 			stepWith(fantasy.FinishReasonToolCalls, editWith(`{"verification":[{"check":"diagnostics","state":"failed","detail":"1 new error(s)"}]}`)),
 			stepWith(fantasy.FinishReasonStop, fantasy.TextContent{Text: "done"}),
 		}}
-		queued := a.runVerificationGate(t.Context(), SessionAgentCall{
-			SessionID: sessionID, VerificationAttempts: maxVerificationAttempts,
-		}, result, asst)
+		queued := a.runEdges(t.Context(), SessionAgentCall{
+			SessionID: sessionID, RepairAttempts: maxRepairAttempts,
+		}, edgeInput{result: result, currentAssistant: asst})
 		require.False(t, queued)
 		require.Contains(t, asst.Content().Text, "still failing")
 		require.Contains(t, asst.Content().Text, "todo item(s) still incomplete")
@@ -583,7 +583,7 @@ func TestRunVerificationGate(t *testing.T) {
 		result := &fantasy.AgentResult{Steps: []fantasy.StepResult{
 			stepWith(fantasy.FinishReasonStop, fantasy.TextContent{Text: "done"}),
 		}}
-		require.False(t, a.runVerificationGate(t.Context(), SessionAgentCall{SessionID: sessionID}, result, assistantMsg()))
+		require.False(t, a.runEdges(t.Context(), SessionAgentCall{SessionID: sessionID}, edgeInput{result: result, currentAssistant: assistantMsg()}))
 	})
 }
 

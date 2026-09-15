@@ -1,0 +1,11 @@
+{
+	"name": "ambiguity-clarification",
+	"model": "hyper/deepseek-v4-pro-0813",
+	"temperature": 0,
+	"corpus": ["vague-*"],
+	"runs_per_trajectory": {"stable": 3, "mid": 10, "uncharacterized": 5},
+	"arms": {
+		"control":   {"config": {"options": {"ambiguity_clarification": false, "turn_context": "off"}}},
+		"treatment": {"config": {"options": {"ambiguity_clarification": true, "turn_context": "session"}}}
+	}
+}

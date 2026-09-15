@@ -15,6 +15,7 @@ type (
 	messageIDContextKey string
 	supportsImagesKey   string
 	modelNameKey        string
+	runStampKey         string
 )
 
 const (
@@ -26,6 +27,10 @@ const (
 	SupportsImagesContextKey supportsImagesKey = "supports_images"
 	// ModelNameContextKey is the key for the model name in the context.
 	ModelNameContextKey modelNameKey = "model_name"
+	// RunStampContextKey is the key for the per-Run stamp — a value
+	// unique to each Run invocation so tool decorators can tell one
+	// run's calls from a retried or queued follow-up run's.
+	RunStampContextKey runStampKey = "run_stamp"
 )
 
 // getContextValue is a generic helper that retrieves a typed value from context.
@@ -59,6 +64,12 @@ func GetSupportsImagesFromContext(ctx context.Context) bool {
 // GetModelNameFromContext retrieves the model name from the context.
 func GetModelNameFromContext(ctx context.Context) string {
 	return getContextValue(ctx, ModelNameContextKey, "")
+}
+
+// GetRunStampFromContext retrieves the per-Run stamp, or 0 when the
+// call did not originate inside a Run (tests, direct tool use).
+func GetRunStampFromContext(ctx context.Context) uint64 {
+	return getContextValue(ctx, RunStampContextKey, uint64(0))
 }
 
 // NewPermissionDeniedResponse returns a tool response indicating the user

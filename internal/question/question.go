@@ -3,8 +3,9 @@
 // the permission service pattern: publish a request over pubsub,
 // block on a channel, and resolve when the UI sends back answers.
 //
-// Only one question can be pending at a time (the tool blocks until
-// answered), so no correlation IDs are needed in the domain model.
+// Only one question can be pending at a time — a concurrent Ask fails
+// fast with ErrQuestionPending rather than overwriting the pending
+// channels — so no correlation IDs are needed in the domain model.
 package question
 
 import (
@@ -19,6 +20,12 @@ import (
 
 // ErrCancelled is returned by Ask when the user cancels the question.
 var ErrCancelled = errors.New("question cancelled by user")
+
+// ErrQuestionPending is returned by Ask when a question is already
+// pending. The service keeps a single pending question: a second Ask
+// must fail fast rather than orphan its channels and wedge the caller
+// until ctx.Done().
+var ErrQuestionPending = errors.New("a question is already pending")
 
 // Type identifies the kind of question to present.
 type Type string
@@ -245,6 +252,10 @@ func (s *questionService) Ask(ctx context.Context, req Request) ([]Answer, error
 	}
 
 	s.mu.Lock()
+	if s.pending != nil {
+		s.mu.Unlock()
+		return nil, ErrQuestionPending
+	}
 	s.pending = make(chan []Answer, 1)
 	s.cancelled = make(chan struct{})
 	s.pendingID = req.ID

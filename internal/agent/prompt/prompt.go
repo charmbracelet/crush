@@ -21,11 +21,12 @@ import (
 
 // Prompt represents a template-based prompt generator.
 type Prompt struct {
-	name       string
-	template   string
-	now        func() time.Time
-	platform   string
-	workingDir string
+	name        string
+	template    string
+	now         func() time.Time
+	platform    string
+	workingDir  string
+	interactive bool
 }
 
 type PromptDat struct {
@@ -41,6 +42,11 @@ type PromptDat struct {
 	GlobalContextFiles []ContextFile
 	AvailSkillXML      string
 	NotebookEnabled    bool
+	// Interactive reports whether the run can ask the user (the TUI
+	// path). Headless renders must never mention interactive-only
+	// tools — a model that hallucinates a `question` call it doesn't
+	// have burns turns on tool-not-found errors.
+	Interactive bool
 }
 
 type ContextFile struct {
@@ -65,6 +71,15 @@ func WithPlatform(platform string) Option {
 func WithWorkingDir(workingDir string) Option {
 	return func(p *Prompt) {
 		p.workingDir = workingDir
+	}
+}
+
+// WithInteractive marks whether the rendered prompt is for a run that
+// can ask the user — the template renders the ask-capable clauses only
+// in that mode.
+func WithInteractive(interactive bool) Option {
+	return func(p *Prompt) {
+		p.interactive = interactive
 	}
 }
 
@@ -233,6 +248,7 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 		Date:            p.now().Format("1/2/2006"),
 		AvailSkillXML:   availSkillXML,
 		NotebookEnabled: cfg.Options.NotebookIsEnabled(),
+		Interactive:     p.interactive,
 	}
 	if isGit {
 		var err error

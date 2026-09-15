@@ -17,7 +17,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -244,17 +243,17 @@ func ArgumentsBlocker(cmd string, args []string, flags []string) BlockFunc {
 // it strips any directory prefix and a Windows executable extension, so
 // "/usr/bin/rm", "rm.exe" and "RM.EXE" all normalize to "rm".
 //
-// Windows resolves command names case-insensitively, so on Windows the whole
-// name is lowercased. Elsewhere only the extension is folded: a name carrying
-// one is a Windows-style invocation wherever it is typed.
+// Matching folds case everywhere. Windows and macOS both resolve command
+// names case-insensitively, so on those platforms `SUDO` runs the very same
+// binary as `sudo` and a case-sensitive list simply misses it. Linux can tell
+// the two apart, but a machine carrying a `CURL` that is genuinely a
+// different program from `curl` is not a real scenario, and folding there too
+// costs at most one unnecessary prompt. Not folding costs a silent bypass.
 func normalizeCommand(cmd string) string {
-	cmd = filepath.Base(filepath.FromSlash(cmd))
-	if runtime.GOOS == "windows" {
-		cmd = strings.ToLower(cmd)
-	}
+	cmd = strings.ToLower(filepath.Base(filepath.FromSlash(cmd)))
 	for _, ext := range []string{".exe", ".bat", ".cmd"} {
-		if len(cmd) > len(ext) && strings.EqualFold(cmd[len(cmd)-len(ext):], ext) {
-			return strings.ToLower(cmd[:len(cmd)-len(ext)])
+		if len(cmd) > len(ext) && cmd[len(cmd)-len(ext):] == ext {
+			return cmd[:len(cmd)-len(ext)]
 		}
 	}
 	return cmd

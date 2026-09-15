@@ -3,6 +3,7 @@ package config
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -287,11 +288,9 @@ type LSPConfig struct {
 }
 
 type TUIOptions struct {
-	CompactMode bool   `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
-	DiffMode    string `json:"diff_mode,omitempty" jsonschema:"description=Diff mode for the TUI interface,enum=unified,enum=split"`
-	// Here we can add themes later or any TUI related options
-	//
-
+	CompactMode bool        `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
+	DiffMode    string      `json:"diff_mode,omitempty" jsonschema:"description=Diff mode for the TUI interface,enum=unified,enum=split"`
+	ActiveTheme string      `json:"active_theme,omitempty" jsonschema:"description=Name of the currently active theme,default=charmtone,example=charmtone,example=gruvbox-dark"`
 	Completions Completions `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
 	Transparent *bool       `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
 	Scrollbar   string      `json:"scrollbar,omitempty" jsonschema:"description=Chat scrollbar visibility,enum=default,enum=always,enum=never,default=default"`
@@ -304,6 +303,37 @@ type TUIOptions struct {
 // without unwrapping either.
 func (t *TUIOptions) IsTransparent() bool {
 	return t != nil && t.Transparent != nil && *t.Transparent
+}
+
+// UnmarshalJSON tolerates the legacy string form of the "theme" field.
+// Older Crush builds stored the selected theme as `"theme":
+// "gruvbox-dark"`. When that string is encountered it is promoted to the
+// active theme name so existing configs keep loading.
+func (t *TUIOptions) UnmarshalJSON(data []byte) error {
+	type tuiOptionsAlias TUIOptions
+	var loose struct {
+		tuiOptionsAlias
+		Theme json.RawMessage `json:"theme"`
+	}
+	if err := json.Unmarshal(data, &loose); err != nil {
+		return err
+	}
+	*t = TUIOptions(loose.tuiOptionsAlias)
+	if len(loose.Theme) == 0 || string(loose.Theme) == "null" {
+		return nil
+	}
+
+	var legacyName string
+	if err := json.Unmarshal(loose.Theme, &legacyName); err != nil {
+		// Legacy inline theme maps are ignored now that files are the only
+		// palette source, but they must remain loadable during migration.
+		var legacyThemes map[string]json.RawMessage
+		return json.Unmarshal(loose.Theme, &legacyThemes)
+	}
+	if legacyName != "" && t.ActiveTheme == "" {
+		t.ActiveTheme = legacyName
+	}
+	return nil
 }
 
 // Completions defines options for the completions UI.

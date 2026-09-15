@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"charm.land/fantasy"
@@ -466,4 +467,100 @@ func TestBashTool_SafeReadOnlyPathStillEnforcesBlockList(t *testing.T) {
 
 	require.Zero(t, perms.requestCount, "safe read-only commands must not prompt")
 	require.False(t, resp.IsError)
+}
+
+// TestBashTool_YoloModeDoesNotPromptForDangerousCommands pins the rule that
+// yolo mode means stop asking. It drives the real permission service rather
+// than a mock, because the whole behaviour under test lives there.
+func TestBashTool_YoloModeDoesNotPromptForDangerousCommands(t *testing.T) {
+	workingDir := t.TempDir()
+	perms := permission.NewPermissionService(workingDir, nil)
+	perms.SetPermissionMode(permission.PermissionModeYolo)
+
+	// Any prompt would land here. Nothing should.
+	prompts := perms.Subscribe(t.Context())
+
+	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
+	tool := NewBashTool(perms, workingDir, attribution, "test-model", nil)
+	ctx := context.WithValue(t.Context(), SessionIDContextKey, "test-session")
+
+	// `ifconfig` is on the default dangerous list. In yolo it must run
+	// without asking, and without being re-blocked at exec time either.
+	// Run it off the test goroutine so a regression that reinstates the
+	// prompt fails here in a few seconds rather than hanging until the
+	// whole package times out.
+	content := make(chan string, 1)
+	go func() {
+		resp := runBashTool(t, tool, ctx, BashParams{
+			Description: "dangerous command in yolo mode",
+			Command:     "ifconfig --help",
+		})
+		content <- resp.Content
+	}()
+
+	var got string
+	select {
+	case got = <-content:
+	case <-time.After(30 * time.Second):
+		t.Fatal("yolo mode blocked waiting for a permission prompt that should never have been raised")
+	}
+
+	require.NotContains(t, got, "not allowed for security reasons",
+		"a dangerous command must not be blocked in yolo mode")
+
+	select {
+	case p := <-prompts:
+		t.Fatalf("yolo mode must not prompt, but got a request for %q", p.Payload.Description)
+	default:
+	}
+}
+
+// TestBashTool_NormalModeStillPromptsForDangerousCommands is the other half of
+// the rule: manual mode keeps asking.
+func TestBashTool_NormalModeStillPromptsForDangerousCommands(t *testing.T) {
+	workingDir := t.TempDir()
+	perms := &recordingPermissionService{
+		Broker: pubsub.NewBroker[permission.PermissionRequest](),
+		allow:  true,
+		mode:   permission.PermissionModeNormal,
+	}
+	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
+	tool := NewBashTool(perms, workingDir, attribution, "test-model", nil)
+	ctx := context.WithValue(t.Context(), SessionIDContextKey, "test-session")
+
+	runBashTool(t, tool, ctx, BashParams{
+		Description: "dangerous command in normal mode",
+		Command:     "ifconfig --help",
+	})
+
+	require.Equal(t, 1, perms.requestCount, "normal mode must still ask")
+	require.Equal(t, "it uses ifconfig", perms.lastDanger,
+		"the prompt must name what tripped the check")
+}
+
+// TestBlockedCommandErrorNamesTheWayOut checks that a command stopped by the
+// exec-time block list explains how to proceed, since reaching that point
+// means no prompt was ever shown to explain it.
+func TestBlockedCommandErrorNamesTheWayOut(t *testing.T) {
+	workingDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(workingDir, "ifconfig"), []byte("#!/bin/sh\n"), 0o755))
+	perms := &recordingPermissionService{
+		Broker: pubsub.NewBroker[permission.PermissionRequest](),
+		allow:  true,
+		mode:   permission.PermissionModeYolo,
+	}
+	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
+	tool := NewBashTool(perms, workingDir, attribution, "test-model", nil)
+	ctx := context.WithValue(t.Context(), SessionIDContextKey, "test-session")
+
+	resp := runBashTool(t, tool, ctx, BashParams{
+		Description: "indirect dangerous command",
+		Command:     "ifconf?g --help",
+	})
+
+	require.Contains(t, resp.Content, "not allowed for security reasons")
+	require.Contains(t, resp.Content, "sysadmin mode",
+		"the error must name the mode that allows it")
+	require.Contains(t, resp.Content, "normal mode",
+		"the error must name the mode that asks about it")
 }

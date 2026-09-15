@@ -340,7 +340,16 @@ func blockHandler(blockFuncs []BlockFunc) execMiddleware {
 			}
 			for _, blockFunc := range blockFuncs {
 				if blockFunc(args) {
-					return fmt.Errorf("command is not allowed for security reasons: %q", args[0])
+					// Say how to get past this. Reaching here means the
+					// command was not visible to the static check that would
+					// otherwise have raised a prompt, so the reader has no
+					// other clue about which lever to pull.
+					return fmt.Errorf(
+						"command is not allowed for security reasons: %q. "+
+							"Run it directly rather than from inside a script to be asked for approval in normal mode, "+
+							"or use sysadmin mode (-yy) to allow dangerous commands without checks",
+						args[0],
+					)
 				}
 			}
 			return next(ctx, args)

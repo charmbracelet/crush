@@ -177,6 +177,11 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 			// `agentic_fetch` call itself is already wrapped from the coder's
 			// side; firing hooks again for every inner tool call would run
 			// the user's hooks N times per delegated turn.
+			//
+			// They do get the error boundary: a sourcegraph or fetch failure
+			// must reach the sub-agent as an error result, not end its turn
+			// and discard everything it had already gathered.
+			fetchTools = wrapToolsWithErrorBoundary(fetchTools)
 
 			agent := NewSessionAgent(SessionAgentOptions{
 				LargeModel:           small, // Use small model for both (fetch doesn't need large)

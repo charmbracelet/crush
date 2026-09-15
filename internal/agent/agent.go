@@ -177,6 +177,7 @@ type sessionAgent struct {
 	sessions             session.Service
 	messages             message.Service
 	disableAutoSummarize bool
+	maxRetries           *int
 	isYolo               bool
 	notify               pubsub.Publisher[notify.Notification]
 	runComplete          pubsub.Publisher[notify.RunComplete]
@@ -229,6 +230,7 @@ type SessionAgentOptions struct {
 	SystemPrompt         string
 	IsSubAgent           bool
 	DisableAutoSummarize bool
+	MaxRetries           *int
 	IsYolo               bool
 	Sessions             session.Service
 	Messages             message.Service
@@ -249,6 +251,7 @@ func NewSessionAgent(
 		sessions:             opts.Sessions,
 		messages:             opts.Messages,
 		disableAutoSummarize: opts.DisableAutoSummarize,
+		maxRetries:           opts.MaxRetries,
 		tools:                csync.NewSliceFrom(opts.Tools),
 		isYolo:               opts.IsYolo,
 		notify:               opts.Notify,
@@ -259,6 +262,14 @@ func NewSessionAgent(
 		acceptedRuns:         csync.NewMap[string, int](),
 		cancelMark:           csync.NewMap[string, uint64](),
 	}
+}
+
+func (a *sessionAgent) retryOption() fantasy.AgentOption {
+	maxRetries := fantasy.DefaultRetryOptions().MaxRetries
+	if a.maxRetries != nil {
+		maxRetries = *a.maxRetries
+	}
+	return fantasy.WithMaxRetries(maxRetries)
 }
 
 // AcceptedRun owns exactly one accept reservation taken by
@@ -686,6 +697,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		largeModel.Model,
 		fantasy.WithSystemPrompt(systemPrompt),
 		fantasy.WithTools(agentTools...),
+		a.retryOption(),
 		fantasy.WithUserAgent(userAgent),
 	)
 
@@ -732,6 +744,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// message of the turn is the value reachable through this
 	// pointer when the defer runs.
 	var currentAssistant *message.Message
+	// retryAttempt counts OnRetry invocations for this turn so the
+	// user-visible retry notice can report progress. Fantasy invokes
+	// OnRetry synchronously from its retry loop, so no atomics needed.
+	var retryAttempt int
 	// Drain any debounced message updates before returning. message.Service
 	// already flushes synchronously on terminal updates, but a defer here
 	// guarantees the contract at every Run exit (success, error, panic
@@ -930,6 +946,25 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		},
 		OnRetry: func(err *fantasy.ProviderError, delay time.Duration) {
 			slog.Warn("Provider request failed, retrying", providerRetryLogFields(err, delay)...)
+			retryAttempt++
+			// Surface the retry where the user can see it: without
+			// this the turn sits silent through the backoff (up to a
+			// minute per attempt) and looks hung, typically on the
+			// last tool-call spinner. Best-effort and lossy on
+			// purpose: Publish never blocks the retry loop.
+			if a.notify != nil {
+				reason := "provider request failed"
+				if err != nil {
+					reason = err.Error()
+				}
+				a.notify.Publish(pubsub.CreatedEvent, notify.Notification{
+					SessionID:    call.SessionID,
+					SessionTitle: currentSession.Title,
+					Type:         notify.TypeAgentRetrying,
+					Message: fmt.Sprintf("%s; retrying in %s (attempt %d)",
+						reason, delay.Round(time.Millisecond), retryAttempt),
+				})
+			}
 			// Reset streamed content so the retried response doesn't
 			// concatenate with partial content from the failed attempt.
 			// On the final attempt (no more retries), any partial content
@@ -1193,6 +1228,23 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		if updateErr != nil {
 			return nil, updateErr
 		}
+		// The error is already persisted in the chat above. If this
+		// turn went through retries, emit one terminal toast signal:
+		// per-attempt notices were status-bar only, so without this
+		// an away user would never learn the run actually failed.
+		// Cancellations stay silent; the cancel path has its own UX.
+		if retryAttempt > 0 && !isCancelErr && a.notify != nil {
+			attempts := "1 retry"
+			if retryAttempt > 1 {
+				attempts = fmt.Sprintf("%d retries", retryAttempt)
+			}
+			a.notify.Publish(pubsub.CreatedEvent, notify.Notification{
+				SessionID:    call.SessionID,
+				SessionTitle: currentSession.Title,
+				Type:         notify.TypeAgentError,
+				Message:      fmt.Sprintf("failed after %s: %v", attempts, err),
+			})
+		}
 		return nil, err
 	}
 
@@ -1371,6 +1423,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	agent := fantasy.NewAgent(
 		largeModel.Model,
 		fantasy.WithSystemPrompt(string(summaryPrompt)),
+		a.retryOption(),
 		fantasy.WithUserAgent(userAgent),
 	)
 	summaryMessage, err := a.messages.Create(ctx, sessionID, message.CreateMessageParams{
@@ -1751,6 +1804,8 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 			m,
 			fantasy.WithSystemPrompt(string(p)+"\n /no_think"),
 			fantasy.WithMaxOutputTokens(tok),
+			// Title generation is best-effort and must not extend detached work.
+			fantasy.WithMaxRetries(0),
 			fantasy.WithUserAgent(userAgent),
 		)
 	}

@@ -149,6 +149,9 @@ func handleOption(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		if err != nil {
 			return usage(stderr, fmt.Sprintf("option: %s expects a number of seconds, got %q", key, val))
 		}
+		if key == "max-retries" && n < 0 {
+			return usage(stderr, fmt.Sprintf("option: %s expects a non-negative integer, got %q", key, val))
+		}
 		o[spec.jsonKey] = n
 		slog.Info("Option set in shell config", "key", key, "value", n)
 		return nil
@@ -210,8 +213,9 @@ var optionSpecs = map[string]optionSpec{
 	"data-directory": {jsonKey: "data_directory", kind: optString},
 	"initialize-as":  {jsonKey: "initialize_as", kind: optString},
 
-	// Integer fields, in seconds.
+	// Integer fields.
 	"request-timeout": {jsonKey: "request_timeout", kind: optInt},
+	"max-retries":     {jsonKey: "max_retries", kind: optInt},
 
 	// List fields. Keys are singular because each call appends one value.
 	"context-path":        {jsonKey: "context_paths", kind: optList},

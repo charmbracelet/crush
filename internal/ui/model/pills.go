@@ -313,6 +313,8 @@ func (m *UI) renderPills() {
 	inProgressIcon := t.Tool.TodoInProgressIcon.Render(styles.SpinnerIcon)
 	if m.todoIsSpinning {
 		inProgressIcon = m.todoSpinner.View()
+	} else if !m.isCurrentSessionBusy() {
+		inProgressIcon = t.Tool.TodoInProgressIcon.Render("‖")
 	}
 
 	var pills []string

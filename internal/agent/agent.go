@@ -2218,9 +2218,9 @@ func (a *sessionAgent) countNotebookReViews(sessionID string, msgs []message.Mes
 			continue
 		}
 		for _, tc := range m.ToolCalls() {
-			p := toolCallFilePath(tc.Input)
+			p := tools.ToolCallFilePath(tc.Input)
 			switch {
-			case !readToolNames[tc.Name] || p == "":
+			case !tools.ReadToolNames[tc.Name] || p == "":
 				// Not a read call, or no path to join against later.
 			case tc.Finished:
 				newCalls = append(newCalls, p)

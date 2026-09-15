@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"charm.land/fantasy"
+	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/stretchr/testify/require"
 )
@@ -26,8 +27,8 @@ func TestWrapToolsWithVerification(t *testing.T) {
 	require.Len(t, out, len(inputs))
 	for i, tool := range inputs {
 		wrapped, isWrapped := out[i].(*verifyingTool)
-		require.Equal(t, writeToolNames[tool.Info().Name], isWrapped,
-			"tool %q wrap = %v, want %v", tool.Info().Name, isWrapped, writeToolNames[tool.Info().Name])
+		require.Equal(t, tools.WriteToolNames[tool.Info().Name], isWrapped,
+			"tool %q wrap = %v, want %v", tool.Info().Name, isWrapped, tools.WriteToolNames[tool.Info().Name])
 		if isWrapped && tool.Info().Name == "lsp_rename" {
 			require.True(t, wrapped.projectWide, "rename refreshes all open files")
 		}

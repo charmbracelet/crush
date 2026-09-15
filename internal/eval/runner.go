@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/version"
 )
 
@@ -288,10 +289,36 @@ func (r *Runner) ExecuteRun(ctx context.Context, exp *Experiment, traj *Trajecto
 	rec.Env.ModelSummary = res.ModelSummary
 
 	// Preserve the session DB — the failed-run debugging artifact is
-	// the full message/tool trace, free.
-	if res.SessionID != "" {
-		if dst, err := r.preserveSessionDB(exp.Name, traj.ID, armName, inv, attempt, workdir); err == nil {
-			rec.SessionDB = dst
+	// the full message/tool trace, free. Attempted regardless of
+	// whether telemetry reported a session: a turn-0 hard-kill writes
+	// no telemetry but still leaves a DB worth keeping.
+	dst, walSafe, err := r.preserveSessionDB(ctx, exp.Name, traj.ID, armName, inv, attempt, workdir)
+	// Record the run's workdir unconditionally — the materialized dir is
+	// deleted after the run, and the anchor is the only way a post-hoc
+	// `eval analyze` can resolve relative call paths correctly.
+	rec.Workdir = workdir
+	if err != nil {
+		// Record why the metrics are absent — indistinguishable from
+		// "no metrics by design" otherwise.
+		rec.CallMetricsError = fmt.Sprintf("session db not preserved: %v", err)
+	} else {
+		rec.SessionDB = dst
+		rec.SessionDBIncomplete = !walSafe
+		// Sequence analysis runs on the preserved artifact, not the
+		// about-to-be-deleted source — `crush eval analyze <artifact>`
+		// then reproduces exactly what the record carries.
+		metrics, aerr := AnalyzeSessionDB(ctx, filepath.Join(r.EvalDir, dst), AnalyzeOptions{
+			SessionID: res.SessionID,
+			Workdir:   workdir,
+			Turns:     traj.Task.Turns,
+			// The producing host's conventions — rec.Env.OS — not the
+			// analyzer's, in case artifacts are analyzed cross-platform.
+			GOOS: rec.Env.OS,
+		})
+		if aerr != nil {
+			rec.CallMetricsError = aerr.Error()
+		} else {
+			rec.CallMetrics = metrics
 		}
 	}
 
@@ -334,26 +361,48 @@ func (r *Runner) ExecuteRun(ctx context.Context, exp *Experiment, traj *Trajecto
 	return rec, nil
 }
 
-// preserveSessionDB copies the run's SQLite DB into
+// preserveSessionDB snapshots the run's SQLite DB into
 // results/<experiment>/artifacts/<trajectory>-<arm>-<inv>-<run_index>.db.
-func (r *Runner) preserveSessionDB(expName, trajID, arm, inv string, runIndex int, workdir string) (string, error) {
+//
+// The source is WAL-mode: a bare file copy drops the committed tail
+// still sitting in crush.db-wal — on WaitDelay hard-kills (timeout
+// runs) that tail is exactly the derailment trace the artifact exists
+// for. VACUUM INTO produces a consistent single-file snapshot including
+// un-checkpointed commits; a raw copy is the last-resort fallback and
+// reports walSafe=false so the record can flag a possibly-truncated
+// artifact.
+func (r *Runner) preserveSessionDB(ctx context.Context, expName, trajID, arm, inv string, runIndex int, workdir string) (rel string, walSafe bool, err error) {
 	src := filepath.Join(DataDirFor(workdir), "crush.db")
 	if !fileExists(src) {
-		return "", fmt.Errorf("no session db at %s", src)
+		return "", false, fmt.Errorf("no session db at %s", src)
 	}
 	dstDir := filepath.Join(r.EvalDir, "results", expName, "artifacts")
 	if err := os.MkdirAll(dstDir, 0o755); err != nil {
-		return "", err
+		return "", false, err
 	}
 	dst := filepath.Join(dstDir, fmt.Sprintf("%s-%s-%s-%d.db", trajID, arm, inv, runIndex))
-	data, err := os.ReadFile(src)
+
+	conn, err := db.ConnectReadOnly(ctx, src)
+	if err == nil {
+		// VACUUM INTO takes a string literal, not a bound parameter.
+		_, err = conn.ExecContext(ctx, `VACUUM INTO '`+strings.ReplaceAll(dst, "'", "''")+`'`)
+		conn.Close()
+	}
 	if err != nil {
-		return "", err
+		slog.Warn("VACUUM INTO failed, falling back to raw copy (WAL tail may be lost)",
+			"src", src, "error", err)
+		data, rerr := os.ReadFile(src)
+		if rerr != nil {
+			return "", false, rerr
+		}
+		if werr := os.WriteFile(dst, data, 0o644); werr != nil {
+			return "", false, werr
+		}
+		rel, err = filepath.Rel(r.EvalDir, dst)
+		return rel, false, err
 	}
-	if err := os.WriteFile(dst, data, 0o644); err != nil {
-		return "", err
-	}
-	return filepath.Rel(r.EvalDir, dst)
+	rel, err = filepath.Rel(r.EvalDir, dst)
+	return rel, true, err
 }
 
 // appendRecord writes one line to results/<experiment>/<traj>.jsonl.

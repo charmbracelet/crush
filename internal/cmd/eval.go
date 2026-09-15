@@ -2,10 +2,12 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"slices"
 	"strings"
 	"syscall"
@@ -129,6 +131,63 @@ var evalRunCmd = &cobra.Command{
 	},
 }
 
+var evalAnalyzeCmd = &cobra.Command{
+	Use:   "analyze <session.db>",
+	Short: "Reconstruct per-call gate metrics from a session DB",
+	Long: `Run the session-DB sequence analysis standalone — the same pass
+ExecuteRun runs before appending a run record. The path may be absolute,
+CWD-relative, or eval-dir-relative (a RunRecord session_db value).
+
+Useful beyond eval: it doubles as a debugging tool for real sessions,
+which is why --workdir and --session exist. --trajectory supplies the
+corpus turns so process-turn boundaries are authoritative instead of
+repair-prompt fingerprinted.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		evalDir, _ := cmd.Flags().GetString("eval-dir")
+		workdir, _ := cmd.Flags().GetString("workdir")
+		sessionID, _ := cmd.Flags().GetString("session")
+		trajID, _ := cmd.Flags().GetString("trajectory")
+
+		dbPath := args[0]
+		if !filepath.IsAbs(dbPath) {
+			if _, err := os.Stat(dbPath); err != nil {
+				// session_db paths in run records are eval-dir-relative.
+				dbPath = filepath.Join(evalDir, dbPath)
+			}
+		}
+
+		var turns []string
+		if trajID != "" {
+			traj, err := eval.LoadTrajectory(filepath.Join(evalDir, "corpus", trajID))
+			if err != nil {
+				return err
+			}
+			turns = traj.Task.Turns
+		}
+		if workdir == "" {
+			workdir, _ = os.Getwd()
+		}
+
+		goos, _ := cmd.Flags().GetString("goos")
+		metrics, err := eval.AnalyzeSessionDB(cmd.Context(), dbPath, eval.AnalyzeOptions{
+			SessionID: sessionID,
+			Workdir:   workdir,
+			Turns:     turns,
+			GOOS:      goos,
+		})
+		if err != nil {
+			return err
+		}
+		out, err := json.MarshalIndent(metrics, "", "  ")
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(out))
+		return nil
+	},
+}
+
 var evalSmokeCmd = &cobra.Command{
 	Use:   "smoke",
 	Short: "Smoke tier: strict 0/N collapse check over the stable band",
@@ -171,5 +230,9 @@ func init() {
 	evalSmokeCmd.Flags().Float64("temperature", 0, "sampling temperature")
 	_ = evalCharacterizeCmd.MarkFlagRequired("model")
 	_ = evalSmokeCmd.MarkFlagRequired("model")
-	evalCmd.AddCommand(evalQuarantineCmd, evalCharacterizeCmd, evalRunCmd, evalSmokeCmd)
+	evalAnalyzeCmd.Flags().String("workdir", "", "run working dir for normalizing relative call paths (default: CWD)")
+	evalAnalyzeCmd.Flags().String("session", "", "session ID to analyze (default: latest parent session)")
+	evalAnalyzeCmd.Flags().String("trajectory", "", "corpus trajectory ID — supplies turns for process-turn segmentation")
+	evalAnalyzeCmd.Flags().String("goos", "", "OS whose path conventions produced the artifact (default: this machine)")
+	evalCmd.AddCommand(evalQuarantineCmd, evalCharacterizeCmd, evalRunCmd, evalSmokeCmd, evalAnalyzeCmd)
 }

@@ -19,6 +19,11 @@ import (
 // serve as flag-agnostic "work happened" predicates — they are safe
 // only on arms where stubbing is enabled. Predicates over steps and
 // tokens.* are safe.
+//
+// call_metrics.* registers the flag-invariant subset only: map_*,
+// question_*, and wrong_pointer_events are absent-by-construction in
+// one arm (map isn't registered in control; question isn't registered
+// headless) and can never be predicates.
 var coverageFields = map[string]func(*RunRecord) float64{
 	"steps":                        func(r *RunRecord) float64 { return float64(r.Steps) },
 	"tokens.input":                 func(r *RunRecord) float64 { return float64(r.Tokens.Input) },
@@ -33,6 +38,41 @@ var coverageFields = map[string]func(*RunRecord) float64{
 	"recalls.entry":                func(r *RunRecord) float64 { return float64(r.Recalls.Entry) },
 	"recalls.empty":                func(r *RunRecord) float64 { return float64(r.Recalls.Empty) },
 	"recalls.cross":                func(r *RunRecord) float64 { return float64(r.Recalls.Cross) },
+	// Flag-invariant call_metrics subset — see the comment above.
+	"call_metrics.requests":          func(r *RunRecord) float64 { return float64(callMetrics(r).Requests) },
+	"call_metrics.calls":             func(r *RunRecord) float64 { return float64(callMetrics(r).Calls) },
+	"call_metrics.first_write_index": func(r *RunRecord) float64 { return float64(callMetrics(r).FirstWriteIndex) },
+	"call_metrics.first_write_attempt_index": func(r *RunRecord) float64 {
+		return float64(callMetrics(r).FirstWriteAttemptIndex)
+	},
+	"call_metrics.requests_to_first_edit": func(r *RunRecord) float64 { return float64(callMetrics(r).RequestsToFirstEdit) },
+	"call_metrics.discovery_calls_before_write": func(r *RunRecord) float64 {
+		return float64(callMetrics(r).DiscoveryCallsBeforeWrite)
+	},
+	"call_metrics.files_viewed":             func(r *RunRecord) float64 { return float64(callMetrics(r).FilesViewed) },
+	"call_metrics.edit_failures":            func(r *RunRecord) float64 { return float64(callMetrics(r).EditFailures) },
+	"call_metrics.edit_failures_hook":       func(r *RunRecord) float64 { return float64(callMetrics(r).EditFailuresHook) },
+	"call_metrics.edit_failures_not_found":  func(r *RunRecord) float64 { return float64(callMetrics(r).EditFailuresNotFound) },
+	"call_metrics.edit_failures_cancelled":  func(r *RunRecord) float64 { return float64(callMetrics(r).EditFailuresCancelled) },
+	"call_metrics.edit_failures_permission": func(r *RunRecord) float64 { return float64(callMetrics(r).EditFailuresPermission) },
+	"call_metrics.edit_failures_other":      func(r *RunRecord) float64 { return float64(callMetrics(r).EditFailuresOther) },
+	"call_metrics.rereads":                  func(r *RunRecord) float64 { return float64(callMetrics(r).Rereads) },
+	"call_metrics.rereads_same_turn":        func(r *RunRecord) float64 { return float64(callMetrics(r).RereadsSameTurn) },
+	"call_metrics.rereads_cross_turn":       func(r *RunRecord) float64 { return float64(callMetrics(r).RereadsCrossTurn) },
+	"call_metrics.canceled_calls":           func(r *RunRecord) float64 { return float64(callMetrics(r).CanceledCalls) },
+	"call_metrics.interrupted_calls":        func(r *RunRecord) float64 { return float64(callMetrics(r).InterruptedCalls) },
+	"call_metrics.truncated_calls":          func(r *RunRecord) float64 { return float64(callMetrics(r).TruncatedCalls) },
+	"call_metrics.view_directory_errors":    func(r *RunRecord) float64 { return float64(callMetrics(r).ViewDirectoryErrors) },
+}
+
+// callMetrics dereferences the optional analysis sub-object. CoverageMet
+// short-circuits nil CallMetrics before reaching field funcs, so this
+// only runs when analysis is present.
+func callMetrics(r *RunRecord) CallMetrics {
+	if r.CallMetrics == nil {
+		return CallMetrics{}
+	}
+	return *r.CallMetrics
 }
 
 func init() {
@@ -71,6 +111,11 @@ func CoverageMet(cov Coverage, rec *RunRecord) (bool, error) {
 		op, field, err := ParseCoverageKey(key)
 		if err != nil {
 			return false, err
+		}
+		// Absent analysis starves call_metrics predicates in BOTH
+		// directions — max_* must not pass on a missing analysis.
+		if strings.HasPrefix(field, "call_metrics.") && rec.CallMetrics == nil {
+			return false, nil
 		}
 		got := coverageFields[field](rec)
 		switch op {

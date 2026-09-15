@@ -43,7 +43,7 @@ type verifyingTool struct {
 func wrapToolsWithVerification(toolList []fantasy.AgentTool, lspManager *lsp.Manager, workingDir string, pendingChecks func(absPath string) []message.VerificationCheck) []fantasy.AgentTool {
 	out := make([]fantasy.AgentTool, len(toolList))
 	for i, tool := range toolList {
-		if writeToolNames[tool.Info().Name] {
+		if tools.WriteToolNames[tool.Info().Name] {
 			out[i] = &verifyingTool{
 				inner:         tool,
 				lspManager:    lspManager,
@@ -77,7 +77,7 @@ func (v *verifyingTool) SetProviderOptions(opts fantasy.ProviderOptions) {
 }
 
 func (v *verifyingTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-	filePath := toolCallFilePath(call.Input)
+	filePath := tools.ToolCallFilePath(call.Input)
 	if filePath == "" {
 		return v.inner.Run(ctx, call)
 	}

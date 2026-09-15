@@ -178,6 +178,21 @@ type RunRecord struct {
 	StubStats   StubStats  `json:"stub_stats"`
 	Recalls     Recalls    `json:"recalls"`
 	SessionDB   string     `json:"session_db,omitempty"`
+	// Workdir is the materialized run directory — recorded so a
+	// post-hoc `crush eval analyze` on the artifact can anchor relative
+	// call paths correctly (the directory itself is deleted).
+	Workdir string `json:"workdir,omitempty"`
+	// SessionDBIncomplete marks a raw-copy fallback snapshot — the WAL
+	// tail may be missing, so call_metrics underreports.
+	SessionDBIncomplete bool `json:"session_db_incomplete,omitempty"`
+	// CallMetrics is the post-run sequence analysis of SessionDB —
+	// populated between preserveSessionDB and record append so
+	// min_call_metrics.* predicates can read it during CoverageMet.
+	CallMetrics *CallMetrics `json:"call_metrics,omitempty"`
+	// CallMetricsError records analyzer failure instead of silently
+	// absent metrics — inconclusive-by-absence and analyzer-broke are
+	// operationally different and must not conflate.
+	CallMetricsError string `json:"call_metrics_error,omitempty"`
 	// BaselineKey is the hash of the run's effective config over the
 	// flag projection — which baseline condition this run counts
 	// toward. Computed at run time so merged experiments' treatment

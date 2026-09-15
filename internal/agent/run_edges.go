@@ -275,6 +275,25 @@ func (a *sessionAgent) resolveVerificationEdge(ctx context.Context, call Session
 	t.fire = len(t.failed) > 0
 }
 
+// Repair-prompt leading literals. Repair turns are enqueued inside the
+// firing `crush run` process, so they never start a new process-turn —
+// the eval analyzer (internal/eval/analyze.go) fingerprints these
+// prefixes to segment turns when the trajectory isn't known.
+const (
+	verificationRetryPrefix = "Verification failed."
+	todosRetryPrefix        = "The todo list still has"
+	stallRetryPrefix        = "The previous attempt was stopped"
+)
+
+// RepairPromptPrefixes is every repair-prompt leading literal — the
+// eval analyzer fingerprints these to distinguish harness-authored
+// repair turns from process-boundary user messages.
+var RepairPromptPrefixes = []string{
+	verificationRetryPrefix,
+	todosRetryPrefix,
+	stallRetryPrefix,
+}
+
 // verificationRetrySection renders the failed checks' raw output
 // (truncated to the tool-result cap) — evidence the turn claimed done
 // prematurely.
@@ -283,7 +302,7 @@ func verificationRetrySection(t *edgeTrigger) string {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("Verification failed. The following check(s) did not pass — fix the underlying issue; do not restate success.\n")
+	b.WriteString(verificationRetryPrefix + " The following check(s) did not pass — fix the underlying issue; do not restate success.\n")
 	for _, f := range t.failed {
 		fmt.Fprintf(&b, "\n<check name=%q>\n", f.check.Check)
 		out := f.output
@@ -332,7 +351,7 @@ func todosRetrySection(t *edgeTrigger) string {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("The todo list still has incomplete item(s) — a turn is not done while its declared tasks are open:\n")
+	b.WriteString(todosRetryPrefix + " incomplete item(s) — a turn is not done while its declared tasks are open:\n")
 	const maxListedTodos = 20
 	for i, todo := range t.todos {
 		if i >= maxListedTodos {
@@ -441,7 +460,7 @@ func repeatedToolName(steps []fantasy.StepResult) string {
 // interactive run — what was tried, what's blocking, options with
 // tradeoffs via the question tool's single_choice.
 func stallRetrySection(_ *edgeTrigger) string {
-	return "The previous attempt was stopped: the same tool calls repeated without making progress. " +
+	return stallRetryPrefix + ": the same tool calls repeated without making progress. " +
 		"Do not retry the same approach. Escalate with ONE question-tool call — a single_choice question " +
 		"naming what you tried and what is blocking, with each choice describing the tradeoff of that " +
 		"way forward. If the user cannot answer, proceed with your stated-best option."

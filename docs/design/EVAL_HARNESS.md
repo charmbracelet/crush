@@ -157,7 +157,8 @@ every characterization pass a diff to reviewed files.
   would otherwise pass on runs where the trigger never fired.
   Coverage-starved trajectories alarm like corpus shrinkage. The
   predicate grammar is closed — comparisons against run-record
-  fields only (`stub_stats`, `recalls`, `steps`, `tokens`;
+  fields only (`stub_stats`, `recalls`, `steps`, `tokens`,
+  `call_metrics`;
   `edge_firings` joins the grammar when named transitions land —
   `HARNESS_TOPOLOGY.md` promises them as assertable checkpoints),
   no arbitrary expressions — and coverage must be achievable within
@@ -170,6 +171,63 @@ every characterization pass a diff to reviewed files.
   of grepping message metadata. Like every `stub_stats.*` field the
   counters only exist once stubbing ran, so per-kind predicates are
   safe on stubbing-enabled arms only.
+  `call_metrics.*` is the sequence-analysis record: after each run
+  the preserved `session_db` is replayed into an ordered
+  `tool_calls[]` (joined to results by call ID, ordered
+  `created_at, rowid`) and reduced to per-call metrics on the
+  record — `requests`, `calls`, `first_write_index`,
+  `first_write_attempt_index`, `requests_to_first_edit`,
+  `discovery_calls_before_write`, `files_viewed`,
+  `read_files_rows`, `edit_failures` (cause-bucketed),
+  `rereads{,_same_turn,_cross_turn}`, `canceled_calls`,
+  `interrupted_calls`, `truncated_calls`, `view_directory_errors`,
+  plus the flag-dependent forensics
+  (`map_*`, `question_*`, `wrong_pointer_events`) that can never
+  be predicates — `map` isn't registered in a `project_index`-off
+  arm and `question` isn't registered headless, so those fields
+  are absent-by-construction in one arm and same-arm-invariance is
+  the registration rule. The analyzer runs inside `ExecuteRun`
+  between `preserveSessionDB` and record append, so predicates are
+  populated before `CoverageMet` reads them; an analyzer failure
+  lands as `call_metrics_error` on the record —
+  inconclusive-by-absence and analyzer-broke stay distinguishable.
+  Semantics: `requests` counts billed requests — the finish-only
+  canceled-turn placeholder is excluded, but a mid-stream cancel
+  (real parts + `finish{canceled}`) still counts. Discovery and
+  rereads count _attempts_ — the gate measures roundtrips spent
+  before acting, so a failed read is a spent discovery attempt that
+  just never joins the seen-set; but a re-view of a seen path with a
+  different `offset`/`limit` is legitimate paging, not a reread —
+  only a re-read of the same window counts. Window keys are the
+  _requested_ window resolved to the tool's defaults
+  (`offset=0`/`limit<=0` alias to the unpaged head), so a
+  contained-window re-read of a short file still undercounts —
+  conservative, never fabricated. The discovery set is
+  enumerated: grep/glob/ls, the LSP read tools, sourcegraph, agent
+  delegation, and view/read of unseen paths. Excluded deliberately:
+  `recall`/`notebook_search` (notebook_enabled-gated — counting
+  them would make this registered metric flag-variant),
+  `fetch`/`agentic_fetch`/`web_fetch`/`web_search`/`download`
+  (external fetching, not codebase discovery), and `map` (the
+  metric measures what map replaces). The discovery cutoff is
+  `first_write_attempt_index` — a canceled write placeholder keeps
+  its tool name, so the window closes when the model tried to act,
+  not only when a write landed; `requests_to_first_edit` anchors on
+  the same attempt, since the gate measures time-to-action.
+  `read_files_rows` is a loose bound on `files_viewed`, not an
+  equality — the tracker also records writes and keys rows on the
+  raw param path, so `read_files_rows >= files_viewed` is expected.
+  The axes overlap deliberately: a
+  pre-write `view`-on-directory lands in both
+  `view_directory_errors` and `discovery_calls_before_write`.
+  `crush eval analyze <session_db>` runs the same pass standalone
+  and backfills old artifacts; the record carries `workdir` so a
+  post-hoc analyze can anchor relative call paths. Known blind
+  spots, both bash-side: discovery through `cat`/`find`/`rg`/`go doc`
+  is invisible to tool-name classification so
+  `discovery_calls_before_write` undercounts systematically, and
+  mutations through `sed -i`/redirects/`download` are equally
+  invisible so a bash-only mutating run shows `first_write_index=-1`.
   `inconclusive` does not
   consume a `runs_per_trajectory` slot: the runner resamples to N
   conclusive runs with an attempts cap (~2N) before flagging the

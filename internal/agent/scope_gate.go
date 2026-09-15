@@ -127,7 +127,7 @@ var quotedSpanRe = regexp.MustCompile(`'[^']*'|"[^"]*"`)
 // write-tool name, a file-writing download, or a bash command whose
 // text matches a mutating pattern or a file-writing redirect.
 func isMutatingCall(call fantasy.ToolCall) bool {
-	if writeToolNames[call.Name] || call.Name == tools.DownloadToolName {
+	if tools.WriteToolNames[call.Name] || call.Name == tools.DownloadToolName {
 		return true
 	}
 	if call.Name != "bash" {

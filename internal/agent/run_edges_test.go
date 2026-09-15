@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"strings"
 	"testing"
 
 	"charm.land/fantasy"
@@ -8,6 +9,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/session"
 	"github.com/stretchr/testify/require"
 )
 
@@ -124,4 +126,19 @@ func TestStallEdge(t *testing.T) {
 		// Retries prepend — the newest (most-consumed budget) is first.
 		require.Equal(t, maxRepairAttempts, q[0].RepairAttempts)
 	})
+}
+
+// TestRepairPromptPrefixes_Stable pins the repair-prompt wording to
+// the exported RepairPromptPrefixes — the eval analyzer fingerprints
+// those literals to keep repair turns inside the firing process-turn.
+func TestRepairPromptPrefixes_Stable(t *testing.T) {
+	t.Parallel()
+	v := verificationRetrySection(&edgeTrigger{failed: []gateCheckOutcome{{
+		check: message.VerificationCheck{Check: "c"}, output: "out",
+	}}})
+	require.True(t, strings.HasPrefix(v, verificationRetryPrefix))
+	require.True(t, strings.HasPrefix(
+		todosRetrySection(&edgeTrigger{todos: []session.Todo{{Content: "x", Status: "pending"}}}),
+		todosRetryPrefix))
+	require.True(t, strings.HasPrefix(stallRetrySection(nil), stallRetryPrefix))
 }

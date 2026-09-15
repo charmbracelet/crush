@@ -110,7 +110,7 @@ func scanVerification(steps []fantasy.StepResult) (failed, pending []gateCheckOu
 					isError: isErr,
 					output:  toolResultText(tr),
 				})
-			case writeToolNames[tr.ToolName] && tr.ClientMetadata != "":
+			case tools.WriteToolNames[tr.ToolName] && tr.ClientMetadata != "":
 				var meta struct {
 					Verification []message.VerificationCheck `json:"verification"`
 				}

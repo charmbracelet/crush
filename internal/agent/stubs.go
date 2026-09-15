@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/filepathext"
 	"github.com/charmbracelet/crush/internal/message"
 )
@@ -23,22 +24,9 @@ const stubMinContentBytes = 200
 // stub carries a head-prefix digest, so smaller results save nothing.
 const stubCommandMinBytes = 512
 
-// writeToolNames mutate files; a successful result supersedes earlier
-// reads of the same path. The set is also the verifyingTool wrap set and
-// the gate's metadata-scan set — lsp_rename/lsp_replace_symbol mutate
-// via workspace edits, the canonical caller-breaker.
-var writeToolNames = map[string]bool{
-	"edit": true, "write": true, "multiedit": true,
-	"lsp_rename": true, "lsp_replace_symbol": true,
-}
-
-// readToolNames capture file content; their results go stale on writes.
-var readToolNames = map[string]bool{"view": true, "read": true}
-
-// commandToolNames emit re-derivable output: once a result is old
-// enough to leave the recency guard, or a re-run makes it redundant,
-// a labeled stub suffices.
-var commandToolNames = map[string]bool{"bash": true, "grep": true, "glob": true, "ls": true}
+// The write/read/command tool-class vocabulary lives in
+// tools/toolclass.go — the eval analyzer shares it, so it has exactly
+// one home.
 
 // volatileInputKeys are tool-call inputs that do not change what the
 // tool runs — dropping them lets two invocations of the same command
@@ -90,21 +78,6 @@ func messageTurns(msgs []message.Message) []int64 {
 		turns[i] = turn
 	}
 	return turns
-}
-
-// toolCallFilePath extracts the file path from a tool call's JSON
-// input, trying the conventional keys.
-func toolCallFilePath(input string) string {
-	var fields map[string]any
-	if err := json.Unmarshal([]byte(input), &fields); err != nil {
-		return ""
-	}
-	for _, key := range []string{"file_path", "path", "file"} {
-		if s, ok := fields[key].(string); ok && s != "" {
-			return s
-		}
-	}
-	return ""
 }
 
 // canonicalToolInput normalizes a tool-call input for identity
@@ -205,9 +178,9 @@ func (a *sessionAgent) flagPrunableToolResults(ctx context.Context, msgs []messa
 				continue
 			}
 			switch {
-			case readToolNames[tc.Name] || writeToolNames[tc.Name]:
-				calls[tc.ID] = callInfo{name: tc.Name, path: toolCallFilePath(tc.Input), input: canonicalToolInput(tc.Name, tc.Input)}
-			case commandToolNames[tc.Name]:
+			case tools.ReadToolNames[tc.Name] || tools.WriteToolNames[tc.Name]:
+				calls[tc.ID] = callInfo{name: tc.Name, path: tools.ToolCallFilePath(tc.Input), input: canonicalToolInput(tc.Name, tc.Input)}
+			case tools.CommandToolNames[tc.Name]:
 				calls[tc.ID] = callInfo{name: tc.Name, input: canonicalToolInput(tc.Name, tc.Input)}
 			}
 		}
@@ -243,7 +216,7 @@ func (a *sessionAgent) flagPrunableToolResults(ctx context.Context, msgs []messa
 		}
 		for _, tr := range m.ToolResults() {
 			call, ok := calls[tr.ToolCallID]
-			if !ok || !writeToolNames[call.name] || call.path == "" || tr.IsError {
+			if !ok || !tools.WriteToolNames[call.name] || call.path == "" || tr.IsError {
 				continue
 			}
 			key := normalizedPath(call.path)
@@ -261,7 +234,7 @@ func (a *sessionAgent) flagPrunableToolResults(ctx context.Context, msgs []messa
 				continue
 			}
 			call, ok := calls[tr.ToolCallID]
-			if !ok || !readToolNames[call.name] || call.path == "" {
+			if !ok || !tools.ReadToolNames[call.name] || call.path == "" {
 				continue
 			}
 			var best *writeEvent
@@ -303,7 +276,7 @@ func (a *sessionAgent) flagPrunableToolResults(ctx context.Context, msgs []messa
 				continue
 			}
 			call, ok := calls[tr.ToolCallID]
-			if !ok || !readToolNames[call.name] || call.path == "" {
+			if !ok || !tools.ReadToolNames[call.name] || call.path == "" {
 				continue
 			}
 			fi, err := os.Stat(a.resolveReadPath(call.path))
@@ -350,11 +323,11 @@ func (a *sessionAgent) flagPrunableToolResults(ctx context.Context, msgs []messa
 				}
 				call, ok := calls[tr.ToolCallID]
 				if !ok || call.input == "" ||
-					(!commandToolNames[call.name] && !readToolNames[call.name]) {
+					(!tools.CommandToolNames[call.name] && !tools.ReadToolNames[call.name]) {
 					continue
 				}
 				min := stubCommandMinBytes
-				if readToolNames[call.name] {
+				if tools.ReadToolNames[call.name] {
 					min = stubMinContentBytes
 				}
 				if len(tr.Content) < min {
@@ -393,7 +366,7 @@ func (a *sessionAgent) flagPrunableToolResults(ctx context.Context, msgs []messa
 				continue
 			}
 			call, ok := calls[tr.ToolCallID]
-			if !ok || !commandToolNames[call.name] {
+			if !ok || !tools.CommandToolNames[call.name] {
 				continue
 			}
 			mark(i, j, message.SupersededMark{Turn: turns[i], Kind: message.StubKindStale})
@@ -437,14 +410,14 @@ func (a *sessionAgent) resolveReadPath(p string) string {
 // file-read result, anchoring pass-2 supersession to the state the
 // read actually observed.
 func (a *sessionAgent) stampReadMtime(tr *message.ToolResult, calls []message.ToolCall) {
-	if tr.IsError || !readToolNames[tr.Name] {
+	if tr.IsError || !tools.ReadToolNames[tr.Name] {
 		return
 	}
 	for _, tc := range calls {
 		if tc.ID != tr.ToolCallID {
 			continue
 		}
-		if p := toolCallFilePath(tc.Input); p != "" {
+		if p := tools.ToolCallFilePath(tc.Input); p != "" {
 			if fi, err := os.Stat(a.resolveReadPath(p)); err == nil {
 				tr.FileMtime = fi.ModTime().UnixNano()
 			}

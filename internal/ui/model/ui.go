@@ -1519,6 +1519,10 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 	// Load nested tool calls for agent/agentic_fetch tools.
 	m.loadNestedToolCalls(items)
 
+	if !m.isAgentBusy() {
+		retireOrphanedToolCalls(items)
+	}
+
 	// If the user switches between sessions while the agent is working we
 	// want to make sure the animations are shown. Gate on the agent actually
 	// being busy: a session that was killed mid-generation can persist an
@@ -1534,6 +1538,28 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 	}
 	m.chat.SelectLast()
 	return tea.Sequence(cmds...)
+}
+
+// retireOrphanedToolCalls marks tool calls that never produced a result as
+// cancelled. A killed process leaves the assistant message with no finish
+// part at all, so nothing else marks them, and they would spin forever.
+func retireOrphanedToolCalls(items []chat.MessageItem) {
+	for _, item := range items {
+		tool, ok := item.(chat.ToolMessageItem)
+		if !ok {
+			continue
+		}
+		if animatable, ok := item.(chat.Animatable); ok && animatable.Spinning() {
+			tool.SetStatus(chat.ToolStatusCanceled)
+		}
+		if container, ok := item.(chat.NestedToolContainer); ok {
+			nested := make([]chat.MessageItem, 0, len(container.NestedTools()))
+			for _, n := range container.NestedTools() {
+				nested = append(nested, n)
+			}
+			retireOrphanedToolCalls(nested)
+		}
+	}
 }
 
 // handleConnectionEvent reports the health of the client-server link and,
@@ -1631,6 +1657,11 @@ func (m *UI) loadNestedToolCalls(items []chat.MessageItem) {
 // if the message is a tool result it will update the corresponding tool call message
 func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 	var cmds []tea.Cmd
+
+	// The real message carries its own spinner from here on.
+	if msg.Role == message.Assistant {
+		m.chat.RemoveMessage(chat.PendingAssistantID)
+	}
 
 	existing := m.chat.MessageItem(msg.ID)
 	if existing != nil {
@@ -4341,10 +4372,21 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 		return util.ReportError(err)
 	}
 
-	// Start the turn timer.
-	common.StartTurn()
+	// A prompt sent while the agent is working is queued behind the running
+	// turn, which already has a spinner and a running clock. Restarting
+	// either would show a second spinner and reset the elapsed time
+	// mid-turn.
+	queued := m.isAgentBusy()
+	if !queued {
+		common.StartTurn()
+	}
+
+	// Loading an idle session freezes the clock to stop ghost spinners.
+	// Sending is new work, so unfreeze it.
+	m.chat.SetAnimationsAllowed(true)
 
 	var cmds []tea.Cmd
+	hadSession := m.hasSession()
 	if !m.hasSession() {
 		newSession, err := m.com.Workspace.CreateSession(context.Background(), "New Session")
 		if err != nil {
@@ -4358,6 +4400,14 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 			cmds = append(cmds, m.loadSession(newSession.ID))
 		}
 		m.setState(uiChat, m.focus)
+	}
+
+	// Show the spinner now, not when the assistant message is created.
+	// Skipped for a session this send just created: its load would replace
+	// the chat items and drop the placeholder.
+	if hadSession && !queued {
+		m.chat.AppendMessages(chat.NewPendingAssistantItem(m.com.Styles))
+		m.chat.ScrollToBottom()
 	}
 
 	ctx := context.Background()
@@ -4820,6 +4870,9 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 	switch n.Type {
 	case notify.TypeAgentFinished:
 		common.StopTurn()
+		// A turn that failed during setup has no assistant message to
+		// take the spinner over.
+		m.chat.RemoveMessage(chat.PendingAssistantID)
 		cmds = append(cmds, m.sendNotification(notification.Notification{
 			Title:   "Crush is waiting...",
 			Message: fmt.Sprintf("Agent's turn completed in \"%s\"", n.SessionTitle),
@@ -4830,6 +4883,7 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 	case notify.TypeAgentError:
 		// Terminal edge like TypeAgentFinished; fall through to the
 		// busy/queue refresh below.
+		m.chat.RemoveMessage(chat.PendingAssistantID)
 	case notify.TypeReAuthenticate:
 		return m.handleReAuthenticate(n.ProviderID)
 	case notify.TypeAWSSSOAuth:

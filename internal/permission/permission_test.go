@@ -113,9 +113,29 @@ func TestPermissionService_SkipMode(t *testing.T) {
 		assert.True(t, result, "expected permission to be granted in skip mode")
 	})
 
-	t.Run("yolo mode prompts for dangerous commands", func(t *testing.T) {
+	t.Run("yolo mode auto-approves dangerous commands", func(t *testing.T) {
 		service := NewPermissionService("/tmp", []string{})
 		service.SetPermissionMode(PermissionModeYolo)
+
+		// Yolo means stop asking. A dangerous command that only shows up
+		// once the shell runs it is still caught at exec time, but it no
+		// longer interrupts the user here.
+		result, err := service.Request(t.Context(), CreatePermissionRequest{
+			SessionID:   "test-session",
+			ToolCallID:  "test-call",
+			ToolName:    "bash",
+			Action:      "execute",
+			Description: "dangerous command",
+			Path:        "/tmp",
+			Danger:      "it uses sudo",
+		})
+		require.NoError(t, err)
+		assert.True(t, result, "expected dangerous permission to be granted in yolo mode")
+	})
+
+	t.Run("normal mode still prompts for dangerous commands", func(t *testing.T) {
+		service := NewPermissionService("/tmp", []string{})
+		service.SetPermissionMode(PermissionModeNormal)
 
 		done := make(chan struct{})
 		go func() {

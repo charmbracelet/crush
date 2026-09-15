@@ -297,13 +297,14 @@ func NewBashTool(permissions permission.Service, workingDir, spillDir string, at
 				}
 			}
 
-			// Re-blocking a command the user was warned about and approved
-			// anyway would just override the answer they already gave, so
-			// those run unguarded. Everything else keeps the block list on at
-			// exec time, because the static check cannot see what indirection
-			// resolves to: `CMD=curl; $CMD ...` reaches here unflagged, and in
-			// yolo mode unflagged means auto-approved. The block handler is
-			// the only thing that sees the real command name.
+			// Re-blocking a command that was already approved would just
+			// override the answer that was given, whether the user gave it
+			// at a prompt or yolo mode gave it on their behalf, so flagged
+			// commands run unguarded. Everything else keeps the block list
+			// on at exec time, because the static check cannot see what
+			// indirection resolves to: a script that turns around and calls
+			// `sudo` reaches here unflagged. The block handler is the only
+			// thing that sees the real command name.
 			//
 			// Sysadmin mode is the deliberate exception: it asks for nothing
 			// and blocks nothing.

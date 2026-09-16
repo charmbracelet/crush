@@ -478,6 +478,7 @@ Every rebindable action and its default keys.
 | `global.sessions` | `ctrl+s` |
 | `global.tab` | `tab` |
 | `global.toggle_yolo` | `ctrl+y` |
+| `global.shift_tab` | `shift+tab` |
 | `global.summarize` | `ctrl+.` |
 | `global.toggle_thinking` | `ctrl+,` |
 | `global.toggle_compact` | `ctrl+;` |
@@ -561,6 +562,9 @@ Every rebindable action and its default keys.
 | `dialog.permissions.scroll_right` | `shift+right` `L` |
 | `dialog.filepicker.forward` | `right` `l` |
 | `dialog.filepicker.backward` | `left` `h` |
+| `dialog.plan_handoff.coding` | `c` `C` |
+| `dialog.plan_handoff.yolo` | `y` `Y` |
+| `dialog.plan_handoff.no` | `n` `N` |
 | `dialog.question.toggle` | `space` |
 | `dialog.question.yes` | `y` `Y` |
 | `dialog.question.no` | `n` `N` |

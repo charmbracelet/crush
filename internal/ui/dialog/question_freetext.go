@@ -29,8 +29,10 @@ type FreeText struct {
 	keyNewline   key.Binding
 	keyClose     key.Binding
 
-	lastResponse question.Answer
-	lastWidth    int
+	lastResponse    question.Answer
+	lastWidth          int
+	lastWidthMethod    ansi.Method
+	lastWidthMethodSet bool
 }
 
 // freeTextMinEditorHeight and freeTextMaxEditorHeight bound the
@@ -119,7 +121,8 @@ func (d *FreeText) Height(width int) int {
 		w = choiceListMaxWidth
 	}
 	iconPrompt := questionIconPrompt(d.Styles, d.focused)
-	h := sectionHeight(d.Request.Text, w-lipgloss.Width(iconPrompt)) // question
+	method := layoutWidthMethod(d.lastWidthMethodSet, d.lastWidthMethod)
+	h := sectionHeightAt(d.Request.Text, w-lipgloss.Width(iconPrompt), method) // question
 	h++                                                              // blank
 	if d.Request.Description != "" {
 		r := common.MarkdownRenderer(d.Styles, w)
@@ -131,7 +134,7 @@ func (d *FreeText) Height(width int) int {
 			out = strings.TrimSuffix(out, "\n")
 			h += strings.Count(out, "\n") + 1
 		} else {
-			h += sectionHeight(d.Request.Description, w)
+			h += sectionHeightAt(d.Request.Description, w, method)
 		}
 		h++ // blank
 	}
@@ -149,6 +152,9 @@ func (d *FreeText) Height(width int) int {
 // textarea from being permanently squeezed by fixed header rows.
 func (d *FreeText) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	d.lastWidth = area.Dx()
+	d.lastWidthMethod = screenWidthMethod(scr)
+	d.lastWidthMethodSet = true
+	method := d.lastWidthMethod
 	viewport := area.Dy()
 
 	barActive := d.Styles.Editor.QuestionCursorBar.Render("┃ ")
@@ -176,7 +182,7 @@ func (d *FreeText) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		cursorRow := -1
 
 		header := iconPrompt + d.Styles.Editor.QuestionUnselected.Render(
-			ansi.Wrap(d.Request.Text, contentWidth-iconWidth, ""),
+			wrapAt(d.Request.Text, contentWidth-iconWidth, "", method),
 		)
 		for _, l := range strings.Split(header, "\n") {
 			lines = append(lines, ftLine{text: l, cursorX: -1})

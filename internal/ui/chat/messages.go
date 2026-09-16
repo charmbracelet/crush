@@ -432,6 +432,9 @@ func formatHypercreditSavings(v float64) string {
 func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults map[string]message.ToolResult, workingDir string) []MessageItem {
 	switch msg.Role {
 	case message.User:
+		if msg.Content().Hidden {
+			return nil
+		}
 		// Reconstruct shell command items from ShellCommand parts.
 		var items []MessageItem
 		for _, part := range msg.Parts {

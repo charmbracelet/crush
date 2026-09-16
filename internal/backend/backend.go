@@ -31,6 +31,7 @@ var (
 	ErrWorkspaceNotFound       = errors.New("workspace not found")
 	ErrLSPClientNotFound       = errors.New("LSP client not found")
 	ErrAgentNotInitialized     = errors.New("agent coordinator not initialized")
+	ErrAgentBusy               = errors.New("agent is busy with a run")
 	ErrPathRequired            = errors.New("path is required")
 	ErrInvalidPermissionAction = errors.New("invalid permission action")
 	ErrUnknownCommand          = errors.New("unknown command")

@@ -542,6 +542,25 @@ func (c *controllerV1) handlePostWorkspaceAgentUpdate(w http.ResponseWriter, r *
 	w.WriteHeader(http.StatusOK)
 }
 
+// handlePostWorkspaceAgentMain switches the workspace's active agent
+// (e.g. "coder" or "plan").
+func (c *controllerV1) handlePostWorkspaceAgentMain(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	var req proto.AgentSetMainRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		c.server.logError(r, "Failed to decode agent set-main request", "error", err)
+		jsonError(w, http.StatusBadRequest, "failed to decode request")
+		return
+	}
+
+	if err := c.backend.SetMainAgent(id, req.AgentID); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
 // handleGetWorkspaceAgentSession returns a specific agent session.
 func (c *controllerV1) handleGetWorkspaceAgentSession(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
@@ -742,6 +761,11 @@ func (c *controllerV1) handleError(w http.ResponseWriter, r *http.Request, err e
 		status = http.StatusNotFound
 	case errors.Is(err, backend.ErrAgentNotInitialized):
 		status = http.StatusBadRequest
+	case errors.Is(err, backend.ErrAgentBusy):
+		// Switching the main agent mid-run could strand the run's
+		// queued prompts on the previous agent; mirror the TUI's
+		// own busy guard for API callers.
+		status = http.StatusConflict
 	case errors.Is(err, backend.ErrPathRequired):
 		status = http.StatusBadRequest
 	case errors.Is(err, backend.ErrInvalidPermissionAction):

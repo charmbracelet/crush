@@ -184,6 +184,13 @@ type AssistantMessageItem struct {
 	thinkingViewMode  thinkingViewMode
 	thinkingBoxHeight int // Tracks the rendered thinking box height for click detection.
 
+	// planAgent marks this item as plan-agent output. While the plan
+	// streams (the message is not finished) and the plan-start marker
+	// has arrived, the content renders as an open plan card: top and
+	// side borders only, with the bottom border withheld until the
+	// plan-ready marker lands.
+	planAgent bool
+
 	// Incremental FNV-64a hash of the thinking text. Avoids
 	// re-hashing the entire accumulated text on every streaming
 	// tick. thinkingHashSample holds a short prefix of the hashed
@@ -214,6 +221,13 @@ type AssistantMessageItem struct {
 	// thinking text, which burns CPU and starves the terminal emulator
 	// during long reasoning traces.
 	streamingThinking streamingMarkdown
+
+	// streamingPlan applies the same stable-prefix caching to the plan
+	// card while the plan streams, so each streaming flush only
+	// re-renders the trailing partial of the plan document. Kept apart
+	// from streamingContent because it renders through the plan
+	// renderer, whose cached prefix is not interchangeable.
+	streamingPlan streamingMarkdown
 }
 
 var _ Expandable = (*AssistantMessageItem)(nil)
@@ -484,9 +498,34 @@ func (a *AssistantMessageItem) thinkingHashIncremental(thinking string) uint64 {
 }
 
 // contentKey returns the (srcHash, extra) cache key components for the
-// main content section.
+// main content section. extra folds in the streaming-plan state so a
+// message flips between the plain, open-card, and closed-card renders
+// as the plan run progresses.
 func (a *AssistantMessageItem) contentKey() (uint64, uint64) {
-	return fnv64(a.message.Content().Text), 0
+	var planStreaming byte
+	if a.planStreaming() {
+		planStreaming = 1
+	}
+	return fnv64(a.message.Content().Text), uint64(planStreaming)
+}
+
+// SetPlanAgent flags this item as plan-agent output (or clears the
+// flag). The flag scopes plan-card rendering to plan mode; the plan
+// start marker decides which message is the plan.
+func (a *AssistantMessageItem) SetPlanAgent(plan bool) {
+	if a.planAgent == plan {
+		return
+	}
+	a.planAgent = plan
+	a.Bump()
+}
+
+// planStreaming reports whether the plan is still streaming into
+// this message: the item belongs to the plan agent and the message
+// has not finished. The bottom border is withheld until the
+// plan-ready marker lands.
+func (a *AssistantMessageItem) planStreaming() bool {
+	return a.planAgent && !a.message.IsFinished()
 }
 
 // errorKey returns the (srcHash, extra) cache key components for the
@@ -528,9 +567,87 @@ func (a *AssistantMessageItem) cachedContent(width int) string {
 	if a.contentSec.hit(width, srcHash, extra) {
 		return a.contentSec.out
 	}
-	out := a.renderMarkdown(a.message.Content().Text, width)
+	text := a.message.Content().Text
+	// In plan mode the agent ends its final plan with a sentinel marker.
+	// Hide the end plan marker and wrap the message in a background "card" so
+	// the plan stands out from regular assistant replies. Mirrors the
+	// ThinkingBox treatment.
+	var out string
+	switch {
+	case common.PlanReadyMarkerPresent(text):
+		out = a.renderPlanCard(common.StripPlanMarkers(text), width)
+	case a.planStreaming() && common.PlanStartMarkerPresent(text):
+		// While the plan streams, draw the card as an open box: top
+		// and side borders only. The bottom border closes once the
+		// plan-ready marker arrives. The plan-start marker gates the
+		// card so intermediate exploratory replies in plan mode never
+		// grow a border.
+		out = a.renderPlanCardStreaming(common.StripPlanMarkers(text), width)
+	default:
+		out = a.renderMarkdown(common.StripPlanMarkers(text), width)
+	}
 	a.contentSec.store(width, srcHash, extra, out, 0)
 	return out
+}
+
+// renderPlanCard renders the final plan message as a full-width bordered
+// card. The markdown is rendered at the card's inner width (accounting for
+// PlanBox's horizontal frame) with the PlanMarkdown style; PlanBox then
+// draws the border and padding and pads each line out to full width. The
+// plan is final by the time the marker appears, so this bypasses the
+// streaming-markdown cache and renders directly, like renderThinking.
+func (a *AssistantMessageItem) renderPlanCard(text string, width int) string {
+	box, innerWidth := planBoxLayout(a.sty.Messages.PlanBox, width)
+	renderer := common.PlanMarkdownRenderer(a.sty, innerWidth)
+	mu := common.LockMarkdownRenderer(renderer)
+	mu.Lock()
+	rendered, err := renderer.Render(text)
+	mu.Unlock()
+	if err != nil {
+		rendered = text
+	}
+	return renderPlanBox(box, rendered, width, true)
+}
+
+// renderPlanCardStreaming renders the plan while it is still streaming
+// as an open card: top and side borders only, no bottom border. It
+// routes through the stable-prefix streaming cache so each streaming
+// flush only re-renders the trailing partial of the plan document.
+func (a *AssistantMessageItem) renderPlanCardStreaming(text string, width int) string {
+	box, innerWidth := planBoxLayout(a.sty.Messages.PlanBox, width)
+	renderer := common.PlanMarkdownRenderer(a.sty, innerWidth)
+	rendered := a.streamingPlan.Render(text, innerWidth, renderer)
+	return renderPlanBox(box, rendered, width, false)
+}
+
+// renderPlanBox applies the card layout: an un-filled bordered box whose
+// padding lets the terminal background show through. Only intentional
+// backgrounds (the inline-code chip, the H1 badge) keep a color of their
+// own; everything else renders on the terminal background. With closed
+// false the bottom border is withheld, leaving the card open while the
+// plan streams.
+func renderPlanBox(style lipgloss.Style, content string, width int, closed bool) string {
+	style, innerWidth := planBoxLayout(style, width)
+	if !closed {
+		style = style.BorderBottom(false)
+	}
+	lines := strings.Split(strings.TrimSpace(content), "\n")
+	for i, line := range lines {
+		lines[i] = ansi.Truncate(line, innerWidth, "")
+	}
+	return style.Width(innerWidth).Render(strings.Join(lines, "\n"))
+}
+
+// planBoxLayout returns a style and content width whose combined horizontal
+// frame fits within the available message width.
+func planBoxLayout(style lipgloss.Style, width int) (lipgloss.Style, int) {
+	width = max(1, width)
+	frameWidth := style.GetHorizontalFrameSize()
+	if frameWidth >= width {
+		style = style.PaddingLeft(0).PaddingRight(0)
+		frameWidth = style.GetHorizontalFrameSize()
+	}
+	return style, max(1, width-frameWidth)
 }
 
 // cachedError returns the rendered error section.
@@ -712,6 +829,7 @@ func (a *AssistantMessageItem) clearCache() {
 	a.errorSec.reset()
 	a.streamingContent.Reset()
 	a.streamingThinking.Reset()
+	a.streamingPlan.Reset()
 	a.thinkingHash = 0
 	a.thinkingHashLen = 0
 	a.thinkingHashSample = ""

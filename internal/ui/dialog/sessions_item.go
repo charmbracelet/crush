@@ -100,9 +100,29 @@ func (s *SessionItem) HandleInput(msg tea.Msg) tea.Cmd {
 	return cmd
 }
 
-// Cursor returns the cursor of the update title input
+// titleInputCursorX returns the column (in terminal cells) of the text
+// cursor inside the rename input. textinput positions the cursor by rune
+// count, which lands left of the actual column whenever wide (CJK) runes
+// precede it, so derive the column from the display width of the text
+// before the cursor.
+func titleInputCursorX(in textinput.Model) int {
+	runes := []rune(in.Value())
+	pos := min(in.Position(), len(runes))
+	x := ansi.StringWidth(string(runes[:pos]))
+	if w := in.Width(); w > 0 {
+		x = min(x, w)
+	}
+	return x
+}
+
+// Cursor returns the cursor of the update title input.
 func (s *SessionItem) Cursor() *tea.Cursor {
-	return s.updateTitleInput.Cursor()
+	cur := s.updateTitleInput.Cursor()
+	if cur == nil {
+		return nil
+	}
+	cur.X = titleInputCursorX(s.updateTitleInput)
+	return cur
 }
 
 // InfoText returns the secondary text shown on the right of the item.

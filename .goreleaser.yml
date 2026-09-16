@@ -179,6 +179,16 @@ aurs:
       install -Dm644 README* "${pkgdir}/usr/share/doc/crush/"
 
 furies:
+  # Repo.charm.sh is served via Gemfury on Heroku
+  # (repo.charm.sh.furyns.com). Intermittent HTTP 429 and TLS
+  # handshake drops occur without CDN caching in front of the
+  # origin. The YUM and APT repo snippets in README.md include
+  # client-side retries, timeout, and skip_if_unavailable to
+  # tolerate transient edge throttling and short repomd.xml
+  # desync windows during releases. If rate limiting persists,
+  # front repo.charm.sh with a CDN (e.g., Cloudflare or Fastly)
+  # caching repodata/* with Cache-Control: max-age=60,
+  # stale-while-revalidate. See #3657.
   - disable: "{{ if (or .Prerelease .IsNightly) }}true{{ end }}"
     account: "{{ with .Env.FURY_TOKEN }}charmcli{{ else }}{{ end }}"
     secret_name: FURY_TOKEN

@@ -509,7 +509,7 @@
             "type": "string",
             "examples": [
               "bash",
-              "sourcegraph"
+              "agentic_fetch"
             ]
           },
           "type": "array",

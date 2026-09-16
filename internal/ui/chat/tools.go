@@ -252,8 +252,6 @@ func NewToolMessageItem(
 		item = NewDownloadToolMessageItem(sty, toolCall, result, canceled)
 	case tools.FetchToolName:
 		item = NewFetchToolMessageItem(sty, toolCall, result, canceled)
-	case tools.SourcegraphToolName:
-		item = NewSourcegraphToolMessageItem(sty, toolCall, result, canceled)
 	case tools.DiagnosticsToolName:
 		item = NewDiagnosticsToolMessageItem(sty, toolCall, result, canceled)
 	case agent.AgentToolName:
@@ -1004,14 +1002,6 @@ func formatTimeout(timeout int) string {
 	return fmt.Sprintf("%ds", timeout)
 }
 
-// formatNonZero returns string representation of non-zero integers, empty string for zero.
-func formatNonZero(value int) string {
-	if value == 0 {
-		return ""
-	}
-	return fmt.Sprintf("%d", value)
-}
-
 // toolOutputMultiEditDiffContent renders a diff with optional failed edits note.
 func toolOutputMultiEditDiffContent(sty *styles.Styles, file string, meta tools.MultiEditResponseMetadata, totalEdits, width int, expanded bool) string {
 	bodyWidth := width - toolBodyLeftPaddingTotal
@@ -1268,19 +1258,6 @@ func (t *baseToolMessageItem) formatParametersForCopy() string {
 			}
 			return strings.Join(parts, "\n")
 		}
-	case tools.SourcegraphToolName:
-		var params tools.SourcegraphParams
-		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
-			var parts []string
-			parts = append(parts, fmt.Sprintf("**Query:** %s", params.Query))
-			if params.Count > 0 {
-				parts = append(parts, fmt.Sprintf("**Count:** %d", params.Count))
-			}
-			if params.ContextWindow > 0 {
-				parts = append(parts, fmt.Sprintf("**Context:** %d", params.ContextWindow))
-			}
-			return strings.Join(parts, "\n")
-		}
 	case tools.DiagnosticsToolName:
 		return "**Project:** diagnostics"
 	case agent.AgentToolName:
@@ -1338,7 +1315,7 @@ func (t *baseToolMessageItem) formatResultForCopy() string {
 		return t.formatWebFetchResultForCopy()
 	case agent.AgentToolName:
 		return t.formatAgentResultForCopy()
-	case tools.DownloadToolName, tools.GrepToolName, tools.GlobToolName, tools.LSToolName, tools.SourcegraphToolName, tools.DiagnosticsToolName, tools.TodosToolName:
+	case tools.DownloadToolName, tools.GrepToolName, tools.GlobToolName, tools.LSToolName, tools.DiagnosticsToolName, tools.TodosToolName:
 		return fmt.Sprintf("```\n%s\n```", t.result.Content)
 	default:
 		return t.result.Content
@@ -1682,8 +1659,6 @@ func prettifyToolName(name string) string {
 		return "Grep"
 	case tools.LSToolName:
 		return "List"
-	case tools.SourcegraphToolName:
-		return "Sourcegraph"
 	case tools.TodosToolName:
 		return "To-Do"
 	case tools.ViewToolName:

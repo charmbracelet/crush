@@ -194,7 +194,7 @@ func TestLoadShellConfig_PermissionsDeny(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	script := `permissions deny bash sourcegraph`
+	script := `permissions deny bash view`
 	path := filepath.Join(dir, "crushrc")
 
 	jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(script))
@@ -205,7 +205,7 @@ func TestLoadShellConfig_PermissionsDeny(t *testing.T) {
 
 	opts := result["options"].(map[string]any)
 	disabled := opts["disabled_tools"].([]any)
-	require.Equal(t, []any{"bash", "sourcegraph"}, disabled)
+	require.Equal(t, []any{"bash", "view"}, disabled)
 	require.NotContains(t, result, "permissions",
 		"deny must not create a permissions section")
 }

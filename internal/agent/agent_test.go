@@ -461,45 +461,6 @@ func TestCoderAgent(t *testing.T) {
 				require.NoError(t, err)
 				require.Contains(t, string(content), "Hello, Crush!", "Expected file to contain 'Hello, Crush!'")
 			})
-			t.Run("sourcegraph tool", func(t *testing.T) {
-				agent, env := setupAgent(t, pair)
-
-				session, err := env.sessions.Create(t.Context(), "New Session")
-				require.NoError(t, err)
-
-				res, err := agent.Run(t.Context(), SessionAgentCall{
-					Prompt:          "use sourcegraph to search for 'func main' in Go repositories",
-					SessionID:       session.ID,
-					MaxOutputTokens: 10000,
-				})
-				require.NoError(t, err)
-				assert.NotNil(t, res)
-
-				msgs, err := env.messages.List(t.Context(), session.ID)
-				require.NoError(t, err)
-
-				foundSourcegraph := false
-				var sourcegraphTCID string
-
-				for _, msg := range msgs {
-					if msg.Role == message.Assistant {
-						for _, tc := range msg.ToolCalls() {
-							if tc.Name == tools.SourcegraphToolName {
-								sourcegraphTCID = tc.ID
-							}
-						}
-					}
-					if msg.Role == message.Tool {
-						for _, tr := range msg.ToolResults() {
-							if tr.ToolCallID == sourcegraphTCID {
-								foundSourcegraph = true
-							}
-						}
-					}
-				}
-
-				require.True(t, foundSourcegraph, "Expected to find a sourcegraph operation")
-			})
 			t.Run("write tool", func(t *testing.T) {
 				agent, env := setupAgent(t, pair)
 

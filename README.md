@@ -528,7 +528,7 @@ permissions allow view ls grep edit mcp_context7_get-library-doc
 You can also deny tools, hiding then from the agent entirely:
 
 ```bash
-permissions deny bash sourcegraph
+permissions deny bash view
 ```
 
 To disable tools from MCP servers, see the [MCP config section](#mcps).

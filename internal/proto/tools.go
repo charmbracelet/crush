@@ -181,22 +181,6 @@ type MultiEditResponseMetadata struct {
 	EditsApplied int    `json:"edits_applied"`
 }
 
-const SourcegraphToolName = "sourcegraph"
-
-// SourcegraphParams represents the parameters for the sourcegraph tool.
-type SourcegraphParams struct {
-	Query         string `json:"query"`
-	Count         int    `json:"count,omitempty"`
-	ContextWindow int    `json:"context_window,omitempty"`
-	Timeout       int    `json:"timeout,omitempty"`
-}
-
-// SourcegraphResponseMetadata represents the metadata for a sourcegraph tool response.
-type SourcegraphResponseMetadata struct {
-	NumberOfMatches int  `json:"number_of_matches"`
-	Truncated       bool `json:"truncated"`
-}
-
 const ViewToolName = "view"
 
 // ViewParams represents the parameters for the view tool.

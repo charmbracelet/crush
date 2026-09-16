@@ -357,6 +357,8 @@ one specific event (file read, file edit, command, decision).
   a query (tag, event type, or text).
 - Do NOT re-read files with notebook entries — use `recall` first.
   It is 16x cheaper than re-reading the file.
+- When a `checkpoint` entry is present, consult it before re-reading
+  files to reconstruct what was established vs. still open.
 - If recall doesn't have what you need, then use `view` to re-read.
 {{end}}{{/*
 env lives last so the stable sections above it form a cacheable

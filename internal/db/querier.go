@@ -42,7 +42,7 @@ type Querier interface {
 	GetNotebookEntryCount(ctx context.Context, sessionID string) (int64, error)
 	GetNotebookTagsByEntry(ctx context.Context, entryID string) ([]string, error)
 	GetNotebookTokenCount(ctx context.Context, sessionID string) (int64, error)
-	GetNotebookTurnsWithEntries(ctx context.Context, sessionID string) ([]int64, error)
+	GetNotebookTurnsWithEntries(ctx context.Context, arg GetNotebookTurnsWithEntriesParams) ([]int64, error)
 	GetOldestNotebookEntries(ctx context.Context, arg GetOldestNotebookEntriesParams) ([]NotebookEntry, error)
 	GetProcessedSegment(ctx context.Context, arg GetProcessedSegmentParams) (ProcessedSegment, error)
 	// One row per tool result that renders as a stub (applied superseded

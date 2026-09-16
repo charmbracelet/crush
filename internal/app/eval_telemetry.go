@@ -78,6 +78,10 @@ func (app *App) emitEvalTelemetry(sessionID string, result *fantasy.AgentResult,
 			"empty":  tel.EmptyRecalls,
 			"cross":  tel.CrossRecalls,
 		}
+		doc["checkpoints"] = map[string]any{
+			"written":  tel.CheckpointsWritten,
+			"rendered": tel.CheckpointRenders,
+		}
 	}
 	if m, ok := app.config.Config().Models[config.SelectedModelTypeLarge]; ok {
 		doc["model"] = m.Provider + "/" + m.Model

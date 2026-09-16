@@ -400,12 +400,17 @@ func (q *Queries) GetNotebookTokenCount(ctx context.Context, sessionID string) (
 const getNotebookTurnsWithEntries = `-- name: GetNotebookTurnsWithEntries :many
 SELECT DISTINCT turn_number
 FROM notebook_entries
-WHERE session_id = ?
+WHERE session_id = ? AND event_type != ?
 ORDER BY turn_number ASC
 `
 
-func (q *Queries) GetNotebookTurnsWithEntries(ctx context.Context, sessionID string) ([]int64, error) {
-	rows, err := q.query(ctx, q.getNotebookTurnsWithEntriesStmt, getNotebookTurnsWithEntries, sessionID)
+type GetNotebookTurnsWithEntriesParams struct {
+	SessionID         string `json:"session_id"`
+	ExcludedEventType string `json:"excluded_event_type"`
+}
+
+func (q *Queries) GetNotebookTurnsWithEntries(ctx context.Context, arg GetNotebookTurnsWithEntriesParams) ([]int64, error) {
+	rows, err := q.query(ctx, q.getNotebookTurnsWithEntriesStmt, getNotebookTurnsWithEntries, arg.SessionID, arg.ExcludedEventType)
 	if err != nil {
 		return nil, err
 	}

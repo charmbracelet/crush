@@ -4,6 +4,7 @@
 		"notebook_stub_superseded": false,
 		"notebook_auto_inject": false,
 		"notebook_sync_mem0": false,
+		"notebook_checkpoint": true,
 		"notebook_raw_token_budget": 25000,
 		"project_index": false,
 		"auto_lsp": true,

@@ -299,6 +299,10 @@ func (g *countingGen) Generate(ctx context.Context, sessionID string, events []n
 	return echoEntryGen{}.Generate(ctx, sessionID, events)
 }
 
+func (g *countingGen) GenerateCheckpoint(ctx context.Context, sessionID, input string) (notebook.GeneratedEntry, error) {
+	return echoEntryGen{}.GenerateCheckpoint(ctx, sessionID, input)
+}
+
 // newSegmentTestAgent builds a sessionAgent on real services with
 // synchronous segment generation for determinism.
 func newSegmentTestAgent(t *testing.T, gen notebook.Generator) (*sessionAgent, message.Service, notebook.Service, string) {

@@ -86,7 +86,7 @@ func TestIsMutatingCall(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			require.Equal(t, tc.want, isMutatingCall(tc.call))
+			require.Equal(t, tc.want, tools.IsMutatingCall(tc.call.Name, tc.call.Input))
 		})
 	}
 }

@@ -218,6 +218,9 @@ type sessionAgent struct {
 	// notebookAutoInject controls whether file references in the
 	// user message trigger auto-injection of full notebook entries.
 	notebookAutoInject bool
+	// notebookCheckpoint controls the consolidated-position
+	// checkpoint: generated at the write boundary and at run end.
+	notebookCheckpoint bool
 	// stubSuperseded enables replacing superseded file-read tool
 	// results in the raw window with stub text once the notebook
 	// boundary advances.
@@ -383,6 +386,11 @@ type SessionAgentOptions struct {
 	// coordinator's interactive flag threaded through for the gate
 	// degrade branches.
 	Interactive bool
+	// NotebookCheckpoint enables the consolidated-position checkpoint
+	// entry type (options.notebook_checkpoint, default on under
+	// notebook). Detection lives in the per-step rebuild so it works
+	// without the ambiguity-clarification gates.
+	NotebookCheckpoint bool
 }
 
 func NewSessionAgent(
@@ -414,6 +422,7 @@ func NewSessionAgent(
 		notebookSyncMem0:       opts.NotebookSyncMem0,
 		notebookMemoryServer:   opts.NotebookMemoryServer,
 		notebookAutoInject:     opts.NotebookAutoInject,
+		notebookCheckpoint:     opts.NotebookCheckpoint,
 		stubSuperseded:         opts.StubSuperseded,
 		stubBoundary:           cmp.Or(opts.StubBoundary, csync.NewMap[string, int]()),
 		stubStats:              cmp.Or(opts.StubStats, csync.NewMap[string, stubStats]()),
@@ -1505,6 +1514,17 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			// segments whose generation failed. Coverage is per
 			// segment, so a covered segment is never re-generated.
 			a.generateRunEndSegments(notebookCtx, notebookSessionID, allMsgs, notebookPreTurnCount, lastAssistantID)
+			// Run-end checkpoint fallback: a run that gathered
+			// context but never crossed the write boundary (or whose
+			// mid-run checkpoint failed) consolidates here.
+			if a.notebookCheckpoint {
+				registry, regErr := a.segmentRegistry(notebookCtx, notebookSessionID)
+				if regErr != nil {
+					slog.Warn("Failed to list processed segments for checkpoint", "session_id", notebookSessionID, "error", regErr)
+				} else {
+					a.generateRunEndCheckpoint(notebookCtx, notebookSessionID, allMsgs, call.RunStamp, registry)
+				}
+			}
 		}()
 	}
 

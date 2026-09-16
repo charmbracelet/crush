@@ -42,6 +42,17 @@ func (m *mockGenerator) Generate(ctx context.Context, sessionID string, events [
 	return m.entries, nil
 }
 
+func (m *mockGenerator) GenerateCheckpoint(ctx context.Context, sessionID, input string) (GeneratedEntry, error) {
+	if m.err != nil {
+		return GeneratedEntry{}, m.err
+	}
+	return GeneratedEntry{
+		EventType: EventCheckpoint,
+		Title:     "Checkpoint",
+		Text:      "## Checkpoint\n\n" + input,
+	}, nil
+}
+
 // newTestService creates a notebook service backed by an in-memory
 // SQLite database for testing.
 func newTestService(t *testing.T, gen Generator) (Service, *db.Queries, string) {

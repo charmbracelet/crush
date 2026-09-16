@@ -203,6 +203,7 @@ var optionSpecs = map[string]optionSpec{
 	"notebook-enabled":         {jsonKey: "notebook_enabled", kind: optBool},
 	"notebook-sync-mem0":       {jsonKey: "notebook_sync_mem0", kind: optBool},
 	"notebook-auto-inject":     {jsonKey: "notebook_auto_inject", kind: optBool},
+	"notebook-checkpoint":      {jsonKey: "notebook_checkpoint", kind: optBool},
 	"notebook-stub-superseded": {jsonKey: "notebook_stub_superseded", kind: optBool},
 
 	// Boolean fields exposed positively but stored as their negation.

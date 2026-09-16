@@ -401,6 +401,7 @@ type Options struct {
 	NotebookSyncMem0       *bool    `json:"notebook_sync_mem0,omitempty" jsonschema:"description=Sync notebook entries to mem0 for cross-session search,default=false"`
 	NotebookMemoryServer   string   `json:"notebook_memory_server,omitempty" jsonschema:"description=Name of the MCP server to use for mem0 cross-session memory sync and search,default=mem0"`
 	NotebookAutoInject     *bool    `json:"notebook_auto_inject,omitempty" jsonschema:"description=Auto-inject full notebook entries for files mentioned in the user message,default=false"`
+	NotebookCheckpoint     *bool    `json:"notebook_checkpoint,omitempty" jsonschema:"description=Write a consolidated checkpoint entry (established facts vs open questions) at the write boundary and run end,default=true"`
 	NotebookStubSuperseded *bool    `json:"notebook_stub_superseded,omitempty" jsonschema:"description=Replace stale or superseded tool results in raw history with labeled stubs (experimental),default=false"`
 	ProjectIndex           *bool    `json:"project_index,omitempty" jsonschema:"description=Enable the persistent per-project symbol index and map tool for codebase navigation,default=false"`
 	InitializeAs           string   `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization,default=AGENTS.md,example=AGENTS.md,example=CRUSH.md,example=CLAUDE.md,example=docs/LLMs.md"`
@@ -1314,6 +1315,16 @@ func (o *Options) NotebookAutoInjectEnabled() bool {
 		return false
 	}
 	return *o.NotebookAutoInject
+}
+
+// NotebookCheckpointEnabled returns the resolved checkpoint setting,
+// defaulting to true — the consolidated position is part of the
+// notebook's core value, not an experiment.
+func (o *Options) NotebookCheckpointEnabled() bool {
+	if o.NotebookCheckpoint == nil {
+		return true
+	}
+	return *o.NotebookCheckpoint
 }
 
 // NotebookStubSupersededEnabled returns the resolved superseded-result

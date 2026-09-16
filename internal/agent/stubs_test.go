@@ -180,6 +180,14 @@ func (echoEntryGen) Generate(_ context.Context, _ string, events []notebook.Entr
 	return entries, nil
 }
 
+func (echoEntryGen) GenerateCheckpoint(_ context.Context, _ string, input string) (notebook.GeneratedEntry, error) {
+	return notebook.GeneratedEntry{
+		EventType: notebook.EventCheckpoint,
+		Title:     "Checkpoint",
+		Text:      "## Checkpoint\n\n" + input,
+	}, nil
+}
+
 // TestStubRenderKeepsNotebookOriginal is the combined invariant: after
 // a boundary advance promotes the raw-window result to a stub, the same
 // turn's notebook generation still sees the full original content.
@@ -858,6 +866,10 @@ func (taggedGen) Generate(_ context.Context, _ string, events []notebook.EntryIn
 		}
 	}
 	return entries, nil
+}
+
+func (taggedGen) GenerateCheckpoint(ctx context.Context, sessionID, input string) (notebook.GeneratedEntry, error) {
+	return echoEntryGen{}.GenerateCheckpoint(ctx, sessionID, input)
 }
 
 // TestCoveredReViews_CountsViewOnInjectedFile is the positive half of

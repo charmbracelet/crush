@@ -1,0 +1,21 @@
+{
+	"name": "notebook-checkpoint",
+	"model": "hyper/deepseek-v4-pro-0813",
+	"temperature": 0,
+	"corpus": [
+		"rename-timeout-key",
+		"fix-inventory-reserve",
+		"extract-order-validate",
+		"remove-legacy-cache",
+		"lint-until-clean",
+		"retry-config-cross-turn"
+	],
+	"runs_per_trajectory": {"stable": 3, "mid": 10, "uncharacterized": 5},
+	"arms": {
+		"control": {"config": {"options": {"notebook_enabled": true, "notebook_checkpoint": false}}},
+		"treatment": {
+			"config": {"options": {"notebook_enabled": true, "notebook_checkpoint": true}},
+			"coverage": {"min_checkpoints.written": 1}
+		}
+	}
+}

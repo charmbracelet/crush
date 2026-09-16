@@ -23,7 +23,7 @@ var recallDescription []byte
 
 // RecallParams holds the parameters for the recall tool.
 type RecallParams struct {
-	Query string `json:"query" description:"Search query: a tag (file:auth.go), event type (command, decision), turn number (turn:5), segment (segment:5.2), an original tool result (result:<tool_call_id>), or text to search for. Use cross: prefix to search across sessions in this project via mem0."`
+	Query string `json:"query" description:"Search query: a tag (file:auth.go), event type (command, decision, checkpoint), turn number (turn:5), segment (segment:5.2), an original tool result (result:<tool_call_id>), or text to search for. Use cross: prefix to search across sessions in this project via mem0."`
 }
 
 // recallContext holds dependencies for the recall tool.
@@ -205,7 +205,7 @@ func searchNotebook(ctx context.Context, svc notebook.Service, sessionID, query 
 			return nil, fmt.Errorf("invalid segment: query %q: expected segment:<turn>.<segment>", query)
 		}
 		return svc.GetByTurnSegment(ctx, sessionID, turn, seg)
-	case query == "command" || query == "decision" || query == "file_read" || query == "file_edit" || query == "exploration":
+	case query == "command" || query == "decision" || query == "file_read" || query == "file_edit" || query == "exploration" || query == "checkpoint":
 		return svc.SearchByEventType(ctx, sessionID, query)
 	default:
 		return svc.SearchByText(ctx, sessionID, query)

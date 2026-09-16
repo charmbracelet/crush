@@ -102,7 +102,7 @@ WHERE session_id = ? AND turn_number = ?;
 -- name: GetNotebookTurnsWithEntries :many
 SELECT DISTINCT turn_number
 FROM notebook_entries
-WHERE session_id = ?
+WHERE session_id = ? AND event_type != sqlc.arg(excluded_event_type)
 ORDER BY turn_number ASC;
 
 -- name: RecordProcessedSegment :exec

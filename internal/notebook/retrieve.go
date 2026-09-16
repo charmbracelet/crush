@@ -304,19 +304,28 @@ func (s *service) noteCompactProgress(sessionID string) {
 	}
 }
 
-// pinnedEntryIDs returns the IDs of entries pinned to files under
-// active edit — entries carrying a file: tag that had a successful
-// edit entry in the last two turns.
+// pinnedEntryIDs returns the IDs of entries compaction must not
+// compress: entries pinned to files under active edit, plus the
+// latest checkpoint at each position granularity. A pinned boundary
+// or session checkpoint is fully exempt — compressing the consolidated
+// position to a sentence would destroy the Established/Open structure
+// it exists to carry. Only the latest per granularity pins: historical
+// checkpoints compress like any other entry once a newer position
+// lands. Turn-grain digests are ordinary entries — compressible and
+// unpinned.
 func (s *service) pinnedEntryIDs(ctx context.Context, sessionID string) (map[string]bool, error) {
 	entries, err := s.GetEntries(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
+	ids := make(map[string]bool)
+	for _, e := range LatestCheckpointIDs(entries) {
+		ids[e] = true
+	}
 	tags := PinnedFileTags(entries)
-	if len(tags) == 0 {
+	if len(tags) == 0 && len(ids) == 0 {
 		return nil, nil
 	}
-	ids := make(map[string]bool)
 	for _, e := range entries {
 		for _, tag := range e.Tags {
 			if tags[tag] {
@@ -326,6 +335,30 @@ func (s *service) pinnedEntryIDs(ctx context.Context, sessionID string) (map[str
 		}
 	}
 	return ids, nil
+}
+
+// LatestCheckpointIDs returns the IDs of the newest checkpoint per
+// position granularity — boundary and session only. Latest is the max
+// (turn, event) key per granularity, matching the notebook's canonical
+// ordering.
+func LatestCheckpointIDs(entries []Entry) []string {
+	latest := make(map[string]Entry)
+	for _, e := range entries {
+		g := CheckpointGranularity(e)
+		if g != GranularityBoundary && g != GranularitySession {
+			continue
+		}
+		cur, ok := latest[g]
+		if !ok || e.TurnNumber > cur.TurnNumber ||
+			(e.TurnNumber == cur.TurnNumber && e.EventNumber > cur.EventNumber) {
+			latest[g] = e
+		}
+	}
+	ids := make([]string, 0, len(latest))
+	for _, e := range latest {
+		ids = append(ids, e.ID)
+	}
+	return ids
 }
 
 // compactOldestToLevel compresses the oldest entries at fromLevel to

@@ -321,6 +321,10 @@ type segmentTracker struct {
 	inflight          map[segmentKey]bool
 	backfillAttempted bool
 	driftLogged       map[segmentKey]bool
+	// checkpointStamp/checkpointInFlight are the per-run generation
+	// claim — see notebook_checkpoint.go.
+	checkpointStamp    uint64
+	checkpointInFlight bool
 }
 
 func newSegmentTracker() *segmentTracker {
@@ -522,6 +526,10 @@ func (a *sessionAgent) detectSegments(ctx context.Context, sessionID string, msg
 			}()
 		}
 	}
+	// Write-boundary checkpoint trigger — runs on the same per-step
+	// detection pass, cheap-scan first.
+	a.maybeCheckpointBoundary(ctx, sessionID, msgs, segs, processed)
+
 	// Flag superseded tool results once per pass that fired generation
 	// or recorded a close — the mid-run stub win ("a read superseded
 	// two segments ago gets stubbed") needs a pass over the full
@@ -1024,6 +1032,13 @@ func (a *sessionAgent) renderNotebookPrefix(ctx context.Context, sessionID strin
 		selected, diff := selectNotebookEntries(filtered, refs, floor, sel)
 		a.noteSelectionDiff(sessionID, diff)
 		for _, e := range selected {
+			// A checkpoint's file: tags cite evidence rather than
+			// cover the file — counting them here would inflate
+			// CoveredReViews, the metric the checkpoint eval arm
+			// reads.
+			if e.EventType == notebook.EventCheckpoint {
+				continue
+			}
 			for _, tag := range e.Tags {
 				if base, ok := strings.CutPrefix(tag, "file:"); ok {
 					files[base] = true
@@ -1073,5 +1088,6 @@ func (a *sessionAgent) noteSelectionDiff(sessionID string, diff selectionDiff) {
 	stats.SelPassRefs += diff.refs
 	stats.SelPassWorking += diff.working
 	stats.SelPassFill += diff.fill
+	stats.CheckpointRenders += diff.checkpoints
 	a.nbStats.Set(sessionID, stats)
 }

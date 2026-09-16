@@ -177,15 +177,16 @@ type RunRecord struct {
 	CheckDetail map[string]any `json:"check_detail,omitempty"`
 	// Bounded tails of check.sh output — the first forensic stop on
 	// failure is what the check actually said.
-	CheckStdout string     `json:"check_stdout,omitempty"`
-	CheckStderr string     `json:"check_stderr,omitempty"`
-	StartedAt   time.Time  `json:"started_at"`
-	DurationS   float64    `json:"duration_s"`
-	Steps       int        `json:"steps"`
-	Tokens      TokenUsage `json:"tokens"`
-	StubStats   StubStats  `json:"stub_stats"`
-	Recalls     Recalls    `json:"recalls"`
-	SessionDB   string     `json:"session_db,omitempty"`
+	CheckStdout string      `json:"check_stdout,omitempty"`
+	CheckStderr string      `json:"check_stderr,omitempty"`
+	StartedAt   time.Time   `json:"started_at"`
+	DurationS   float64     `json:"duration_s"`
+	Steps       int         `json:"steps"`
+	Tokens      TokenUsage  `json:"tokens"`
+	StubStats   StubStats   `json:"stub_stats"`
+	Recalls     Recalls     `json:"recalls"`
+	Checkpoints Checkpoints `json:"checkpoints"`
+	SessionDB   string      `json:"session_db,omitempty"`
 	// Workdir is the materialized run directory — recorded so a
 	// post-hoc `crush eval analyze` on the artifact can anchor relative
 	// call paths correctly (the directory itself is deleted).
@@ -240,6 +241,14 @@ type Recalls struct {
 	Entry  int `json:"entry"`
 	Empty  int `json:"empty"`
 	Cross  int `json:"cross"`
+}
+
+// Checkpoints mirrors the checkpoint telemetry split: written counts
+// committed checkpoint entries, rendered counts prefix renders that
+// included one — the "checkpoint present at render" predicate field.
+type Checkpoints struct {
+	Written  int `json:"written"`
+	Rendered int `json:"rendered"`
 }
 
 // Env is the forensic record: when a trajectory rots, the diff between

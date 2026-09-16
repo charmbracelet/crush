@@ -534,3 +534,68 @@ func TestSelectNotebookEntries_DeadDemotion(t *testing.T) {
 		require.Equal(t, 1, diff.refs)
 	})
 }
+
+func TestSelectNotebookEntries_Checkpoints(t *testing.T) {
+	t.Parallel()
+
+	ckpt := func(id string, turn, event int64, granularity string, tokens int64, tags ...string) notebook.Entry {
+		return nbEntry(id, turn, event, notebook.EventCheckpoint, "checkpoint "+id, tokens,
+			append([]string{"granularity:" + granularity, "phase:checkpoint"}, tags...)...)
+	}
+
+	t.Run("latest boundary checkpoint outranks edits, stale checkpoint drops", func(t *testing.T) {
+		t.Parallel()
+		// Three 5000-token entries cannot all fit the 12K injection
+		// cap — fill order decides who survives.
+		entries := []notebook.Entry{
+			ckpt("ckpt-old", 1, 1, notebook.GranularityBoundary, 5000),
+			nbEntry("edit", 2, 1, notebook.EventFileEdit, "edited a.go", 5000, "file:a.go"),
+			ckpt("ckpt-new", 3, 1, notebook.GranularityBoundary, 5000),
+		}
+		got, diff := selectNotebookEntries(entries, nil, segmentKey{turn: 100}, selectionInput{})
+		ids := entryIDs(got)
+		require.Contains(t, ids, "ckpt-new", "the consolidated position renders first")
+		require.Contains(t, ids, "edit")
+		require.NotContains(t, ids, "ckpt-old",
+			"a superseded checkpoint ranks below everything — never outlives its replacement")
+		require.Equal(t, 1, diff.checkpoints)
+	})
+
+	t.Run("turn digest ranks below edits", func(t *testing.T) {
+		t.Parallel()
+		entries := []notebook.Entry{
+			ckpt("digest", 1, 1, notebook.GranularityTurn, 5000),
+			nbEntry("edit", 2, 1, notebook.EventFileEdit, "edited a.go", 5000, "file:a.go"),
+			nbEntry("cmd", 2, 2, notebook.EventCommand, "ran tests", 5000),
+		}
+		got, _ := selectNotebookEntries(entries, nil, segmentKey{turn: 100}, selectionInput{})
+		ids := entryIDs(got)
+		require.Contains(t, ids, "edit")
+		require.Contains(t, ids, "cmd")
+		require.NotContains(t, ids, "digest",
+			"a turn-grain digest is mid-rank — finer consolidation, ordinary entry")
+	})
+
+	t.Run("checkpoint file tags do not supersede the reads it cites", func(t *testing.T) {
+		t.Parallel()
+		// The checkpoint cites file:x.go as evidence; without the
+		// superseder exclusion it would count as the newest
+		// observation and drop the read it consolidates.
+		entries := []notebook.Entry{
+			nbEntry("read", 1, 1, notebook.EventFileRead, "read x.go", 10, "file:x.go"),
+			ckpt("ckpt", 2, 1, notebook.GranularityBoundary, 10, "file:x.go"),
+		}
+		got, _ := selectNotebookEntries(entries, nil, segmentKey{turn: 100}, selectionInput{})
+		require.Contains(t, entryIDs(got), "read")
+	})
+
+	t.Run("refs pass skips checkpoints", func(t *testing.T) {
+		t.Parallel()
+		entries := []notebook.Entry{
+			ckpt("ckpt", 1, 1, notebook.GranularityBoundary, 10, "file:auth.go"),
+		}
+		_, diff := selectNotebookEntries(entries, []string{"file:auth.go"}, segmentKey{turn: 100}, selectionInput{})
+		require.Equal(t, 0, diff.refs,
+			"a checkpoint cites every file it consolidates — ref matching must not promote it")
+	})
+}

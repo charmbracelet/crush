@@ -2,11 +2,9 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
-	"regexp"
 	"sync"
 
 	"charm.land/fantasy"
@@ -90,66 +88,6 @@ func (g *scopeGate) wrap(all []fantasy.AgentTool) []fantasy.AgentTool {
 	return out
 }
 
-// mutatingBashRe matches shell commands that mutate files or git state
-// — the "large, destructive, hard to reverse" calls that must not
-// bypass the gate just because they arrive through bash instead of a
-// write tool. Deliberately conservative in both directions: mutations
-// hidden inside scripts or build targets (make, go generate) pass
-// un-gated, and read-ish commands that merely touch state (git config
-// --get) stay exploration. A false positive costs one confirmation
-// question; a false negative skips the checkpoint.
-//
-// The scan runs on the raw command text — command names inside quoted
-// spans still match ("bash -c 'rm -rf /'" gates) — while the redirect
-// check below masks quoted spans so "echo 'a > b'" stays exploration.
-var mutatingBashRe = regexp.MustCompile(`\b(rm|rmdir|mv|cp|dd|truncate|shred|chmod|chown|chgrp|ln|tee|patch|install|touch|mkdir|rsync|scp)\b|` +
-	`\b(sed|perl)\s+(-\S+\s+)*(-\S*i|-i\S*|--in-place)\b|` +
-	`\bgit\s+(commit|push|reset|checkout|switch|restore|clean|rebase|merge|am|apply|stash|tag|revert|cherry-pick|mv|rm|init|clone|pull|bisect|submodule|update-ref|notes|branch\s+-[dDmM])\b|` +
-	`\bapt(-get)?\s+(install|remove|purge|upgrade|update|dist-upgrade)\b|` +
-	`\bkubectl\s+(delete|apply|create|patch|edit|replace|scale|drain|cordon|uncordon)\b`)
-
-// redirectTargetRe finds shell redirects and their targets; writing to
-// a real file mutates it, while fd duplication and /dev/null do not.
-var redirectTargetRe = regexp.MustCompile(`>>?\s*(\S+)`)
-
-// fdDupTargetRe matches the fd-duplication redirect targets that are
-// not file writes — `>&1`, `>&-` — as opposed to `>&out`, which is
-// bash's stdout+stderr-to-file form and does mutate.
-var fdDupTargetRe = regexp.MustCompile(`^&[-\d]`)
-
-// quotedSpanRe masks single- and double-quoted spans before the
-// redirect scan: a `>` inside a string literal must not gate, while a
-// quoted *target* (`> 'out'`) still counts — masking to a placeholder
-// keeps the target position occupied.
-var quotedSpanRe = regexp.MustCompile(`'[^']*'|"[^"]*"`)
-
-// isMutatingCall classifies a call as a write for gate purposes: a
-// write-tool name, a file-writing download, or a bash command whose
-// text matches a mutating pattern or a file-writing redirect.
-func isMutatingCall(call fantasy.ToolCall) bool {
-	if tools.WriteToolNames[call.Name] || call.Name == tools.DownloadToolName {
-		return true
-	}
-	if call.Name != "bash" {
-		return false
-	}
-	var params struct {
-		Command string `json:"command"`
-	}
-	if err := json.Unmarshal([]byte(call.Input), &params); err != nil || params.Command == "" {
-		return false
-	}
-	if mutatingBashRe.MatchString(params.Command) {
-		return true
-	}
-	for _, m := range redirectTargetRe.FindAllStringSubmatch(quotedSpanRe.ReplaceAllString(params.Command, "f"), -1) {
-		if m[1] != "/dev/null" && !fdDupTargetRe.MatchString(m[1]) {
-			return true
-		}
-	}
-	return false
-}
-
 // observe records one tool call against the session's run state and
 // reports the gate's verdict plus the exploration count the verdict was
 // reached at. A new run stamp resets the state — the boundary is per
@@ -171,7 +109,7 @@ func (g *scopeGate) observe(ctx context.Context, call fantasy.ToolCall) (gateVer
 		st = &scopeGateState{stamp: stamp}
 		g.states[sessionID] = st
 	}
-	if isMutatingCall(call) {
+	if tools.IsMutatingCall(call.Name, call.Input) {
 		switch {
 		case st.resolved || st.explore < scopeGateMinExploration:
 			return gatePass, st.explore

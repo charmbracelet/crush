@@ -23,6 +23,10 @@ type SessionTelemetry struct {
 	EntryRecalls  int            `json:"entry_recalls"`
 	EmptyRecalls  int            `json:"empty_recalls"`
 	CrossRecalls  int            `json:"cross_recalls"`
+	// Checkpoint telemetry: written counts committed checkpoint
+	// entries; rendered counts prefix renders that included one.
+	CheckpointsWritten int `json:"checkpoints_written"`
+	CheckpointRenders  int `json:"checkpoint_renders"`
 }
 
 // SessionTelemetry returns the coordinator's per-session counters.
@@ -52,6 +56,8 @@ func (c *coordinator) SessionTelemetry(sessionID string) SessionTelemetry {
 		t.EntryRecalls = n.EntryRecalls
 		t.EmptyRecalls = n.EmptyRecalls
 		t.CrossRecalls = n.CrossRecalls
+		t.CheckpointsWritten = n.CheckpointsWritten
+		t.CheckpointRenders = n.CheckpointRenders
 	}
 	return t
 }

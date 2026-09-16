@@ -1,12 +1,11 @@
 # Run Edges — Deterministic Transitions at the Run Boundary
 
-> **Status:** Spec. Split from `HARNESS_TOPOLOGY.md` — that doc is
-> the analysis of why this shape; this doc is the work: the edge
-> type, the catalog, and the rules every edge obeys.
->
-> **Depends on:** nothing external — the seam is a pure refactor
-> of shipped code (`runVerificationGate`). Lands inside #39's
-> series as the `escalate-human` enabling step.
+> **Status:** Partially shipped. The `runEdge` seam, verification,
+> todos-reconcile, `escalate-human`, and `phase-confirm` landed via
+> #43 — this doc's remaining work is the unimplemented catalog rows
+> (stall-replan, burn-watch, summarize-continue, join-subagents) and
+> edge-firing records. Split from `HARNESS_TOPOLOGY.md` — that doc
+> is the analysis of why this shape; this doc is the work.
 > **Ship when:** per edge — the catalog names each trigger.
 > **Measured by:** edge-firing records per turn (PR 3 below);
 > `EVAL_HARNESS` trajectory assertions on named transitions.
@@ -38,7 +37,9 @@ type runEdge struct {
 }
 ```
 
-Evaluated in sequence at the `agent.go:1401` site. Aggregation rule,
+Evaluated in sequence at the `agent.go:1464` site (`runEdges` —
+the seam itself shipped in #43; this doc's remaining work is the
+unimplemented catalog rows). Aggregation rule,
 already precedented: all firing edges merge evidence into **one**
 retry prompt, one prepend, one budget increment — two edges each
 enqueueing a turn would double every repair. Budget becomes a shared
@@ -60,8 +61,8 @@ here because the list must have exactly one home.
 | verification       | failed/pending checks                              | implemented (the extraction source)   |
 | todos-reconcile    | open plan items at clean stop                      | implemented (same site)               |
 | stall-replan       | loop-detector / no-progress                        | new — repurposes the stop-only signal |
-| escalate-human     | loop-detector stop, or repair budget spent         | new — question turn, not retry (#39)  |
-| phase-confirm      | first write-class call after ≥N exploration events | new — plan confirmation gate (#39)    |
+| escalate-human     | loop-detector stop, or repair budget spent         | implemented (#43) — question turn     |
+| phase-confirm      | first write-class call after ≥N exploration events | implemented (#43) — plan gate         |
 | join-subagents     | outstanding dispatch ledger                        | lives in `BACKGROUND_SUBAGENTS.md`    |
 | summarize-continue | context pressure at run end                        | new — reframes auto-summarize         |
 | burn-watch         | run spent >T tokens with zero write-class calls    | new — the unnoticed-spend tripwire    |

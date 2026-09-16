@@ -137,6 +137,14 @@ func (echoGenerator) Generate(ctx context.Context, sessionID string, events []no
 	return entries, nil
 }
 
+func (echoGenerator) GenerateCheckpoint(ctx context.Context, sessionID, input string) (notebook.GeneratedEntry, error) {
+	return notebook.GeneratedEntry{
+		EventType: notebook.EventCheckpoint,
+		Title:     "Checkpoint",
+		Text:      "## Checkpoint\n\n" + input,
+	}, nil
+}
+
 // newNotebookTestEnv builds a session, a real notebook service, and a
 // recall tool wired to both.
 func newNotebookTestEnv(t *testing.T) (notebook.Service, message.Service, string, *csync.Map[string, notebook.Stats]) {
@@ -233,4 +241,35 @@ func TestRecallStatsByQueryType(t *testing.T) {
 	// All three entry queries returned nothing — misses counted
 	// separately from attempts.
 	require.Equal(t, 3, got.EmptyRecalls)
+}
+
+func TestRecallCheckpointQuery(t *testing.T) {
+	t.Parallel()
+
+	svc, msgs, sessionID, stats := newNotebookTestEnv(t)
+	tool := NewRecallTool(svc, msgs, nil, "", false, stats)
+	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, sessionID)
+
+	// Seed a committed checkpoint to recall.
+	committed, err := svc.GenerateCheckpoint(t.Context(), sessionID, notebook.CheckpointRequest{
+		TurnNumber:     1,
+		SegmentNumber:  1,
+		Granularity:    notebook.GranularityBoundary,
+		RunTag:         "run:1",
+		MinExploration: 1,
+		Msgs: []message.Message{
+			{Role: message.Assistant, Parts: []message.ContentPart{
+				message.ToolCall{ID: "tc-v", Name: "view", Input: `{"file_path":"a.go"}`, Finished: true},
+			}},
+			{Role: message.Tool, Parts: []message.ContentPart{
+				message.ToolResult{ToolCallID: "tc-v", Name: "view", Content: strings.Repeat("x", 2000)},
+			}},
+		},
+	})
+	require.NoError(t, err)
+	require.True(t, committed)
+
+	resp := runRecall(t, tool, ctx, "checkpoint")
+	require.False(t, resp.IsError)
+	require.Contains(t, resp.Content, "Checkpoint")
 }

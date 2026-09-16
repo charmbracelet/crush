@@ -26,12 +26,30 @@ const workingSetFileCap = 64
 const fillRecencyBandSegments = 8
 
 // entryTypeRank orders event types for the beyond-band fill —
-// file_edit > command > decision > file_read > exploration > general.
-// decision sits mid-list: hasDecision is a keyword heuristic, so
-// top-ranking it would amplify the noisiest signal over entries
-// grounded in real tool events.
-func entryTypeRank(eventType string) int {
-	switch eventType {
+// file_edit > command > decision/turn digest > file_read >
+// exploration > general. decision sits mid-list: hasDecision is a
+// keyword heuristic, so top-ranking it would amplify the noisiest
+// signal over entries grounded in real tool events.
+//
+// Checkpoints split on granularity and freshness: only the LATEST
+// boundary or session checkpoint takes the top rank — it is the
+// consolidated position the model should consult first. A superseded
+// checkpoint ranks below everything: its position is restated by the
+// newer one, so letting it outrank real entries would render stale
+// "established" facts forever. Turn-grain digests are middle rank —
+// a finer consolidation, still compressible and ordinary.
+func entryTypeRank(e notebook.Entry, latestCkpt map[string]bool) int {
+	if e.EventType == notebook.EventCheckpoint {
+		switch {
+		case latestCkpt[e.ID]:
+			return 6
+		case notebook.CheckpointGranularity(e) == notebook.GranularityTurn:
+			return 3
+		default:
+			return -1
+		}
+	}
+	switch e.EventType {
 	case notebook.EventFileEdit:
 		return 5
 	case notebook.EventCommand:
@@ -187,6 +205,9 @@ type selectionDiff struct {
 	refs    int
 	working int
 	fill    int
+	// checkpoints counts rendered checkpoint entries — the
+	// "checkpoint-present-at-render" telemetry the eval arm reads.
+	checkpoints int
 }
 
 // total returns the number of entries selection produced.
@@ -225,6 +246,13 @@ func selectNotebookEntries(entries []notebook.Entry, refs []string, floor segmen
 	seen := make(map[string]bool, len(entries))
 	selected := make([]notebook.Entry, 0, len(entries))
 	var used int64
+	// latestCkpt holds the IDs that take the top rank — the newest
+	// checkpoint per position granularity. Stale checkpoints rank
+	// below everything so they never outlive their replacement.
+	latestCkpt := make(map[string]bool)
+	for _, id := range notebook.LatestCheckpointIDs(entries) {
+		latestCkpt[id] = true
+	}
 
 	trySelect := func(e notebook.Entry, pass func(*selectionDiff)) {
 		if seen[e.ID] {
@@ -247,6 +275,9 @@ func selectNotebookEntries(entries []notebook.Entry, refs []string, floor segmen
 		used += tokens + 1
 		selected = append(selected, e)
 		pass(&diff)
+		if e.EventType == notebook.EventCheckpoint {
+			diff.checkpoints++
+		}
 	}
 
 	recency := func(d *selectionDiff) { d.recency++ }
@@ -266,9 +297,14 @@ func selectNotebookEntries(entries []notebook.Entry, refs []string, floor segmen
 	}
 	// Pass 1.5: entries pinned to files under active edit — an edit
 	// in the last two segments keeps every entry for that file alive.
+	// Checkpoints are skipped: their file: tags cite evidence, not
+	// liveness, and the top rank already renders the latest one.
 	pinned := notebook.PinnedFileTagsSince(entries, floor.turn, floor.segment)
 	if len(pinned) > 0 {
 		for _, e := range entries {
+			if e.EventType == notebook.EventCheckpoint {
+				continue
+			}
 			for _, tag := range e.Tags {
 				if pinned[tag] {
 					trySelect(e, pinnedP)
@@ -278,8 +314,13 @@ func selectNotebookEntries(entries []notebook.Entry, refs []string, floor segmen
 		}
 	}
 	// Pass 2: entries matching explicit file paths from the user
-	// prompt and active todos.
+	// prompt and active todos. Checkpoints are skipped — a checkpoint
+	// cites every file it consolidates, so ref matching would promote
+	// stale ones on any mention.
 	for _, e := range entries {
+		if e.EventType == notebook.EventCheckpoint {
+			continue
+		}
 		if entryMatchesRefs(e, refs) {
 			trySelect(e, refsP)
 		}
@@ -298,11 +339,17 @@ func selectNotebookEntries(entries []notebook.Entry, refs []string, floor segmen
 	// entries.
 	if len(sel.workingSet) > 0 {
 		for i := len(entries) - 1; i >= 0; i-- {
+			if entries[i].EventType == notebook.EventCheckpoint {
+				continue
+			}
 			if confident, _ := sel.workingSetMatch(entries[i]); confident && !sel.entryIsDead(entries[i]) {
 				trySelect(entries[i], working)
 			}
 		}
 		for i := len(entries) - 1; i >= 0; i-- {
+			if entries[i].EventType == notebook.EventCheckpoint {
+				continue
+			}
 			confident, ambiguous := sel.workingSetMatch(entries[i])
 			if !confident && ambiguous && !sel.entryIsDead(entries[i]) {
 				trySelect(entries[i], working)
@@ -327,8 +374,8 @@ func selectNotebookEntries(entries []notebook.Entry, refs []string, floor segmen
 			oldDead = append(oldDead, e)
 		}
 	}
-	slices.SortStableFunc(oldLive, typeThenRecency)
-	slices.SortStableFunc(oldDead, typeThenRecency)
+	slices.SortStableFunc(oldLive, func(a, b notebook.Entry) int { return typeThenRecency(a, b, latestCkpt) })
+	slices.SortStableFunc(oldDead, func(a, b notebook.Entry) int { return typeThenRecency(a, b, latestCkpt) })
 	for _, e := range slices.Concat(bandLive, oldLive, bandDead, oldDead) {
 		trySelect(e, fill)
 	}
@@ -345,8 +392,10 @@ func selectNotebookEntries(entries []notebook.Entry, refs []string, floor segmen
 
 // typeThenRecency orders the beyond-band fill: higher type rank first,
 // ties broken by recency (turn, segment, event), newest first.
-func typeThenRecency(a, b notebook.Entry) int {
-	if d := entryTypeRank(b.EventType) - entryTypeRank(a.EventType); d != 0 {
+// latestCkpt carries the newest-per-granularity checkpoint IDs the
+// rank consults.
+func typeThenRecency(a, b notebook.Entry, latestCkpt map[string]bool) int {
+	if d := entryTypeRank(b, latestCkpt) - entryTypeRank(a, latestCkpt); d != 0 {
 		return d
 	}
 	if a.TurnNumber != b.TurnNumber {
@@ -459,13 +508,17 @@ func entryMatchesRefs(e notebook.Entry, refs []string) bool {
 // for the same file exists — a re-read or an edit makes the earlier
 // read's snapshot stale. Only successful events supersede: a failed
 // edit leaves the file — and the earlier read — untouched. Entries
-// without file tags are untouched.
+// without file tags are untouched. Checkpoints are excluded from the
+// superseder side only: a checkpoint's file: tags cite the reads it
+// consolidates, so letting it count as the newest observation would
+// drop the very evidence it points at. The receiver side still only
+// drops file_read entries.
 func dropSupersededReads(entries []notebook.Entry) []notebook.Entry {
 	// newestForFile maps a file: tag to the newest entry tagged with it.
 	type key struct{ turn, event int64 }
 	newestForFile := map[string]key{}
 	for _, e := range entries {
-		if !e.Succeeded {
+		if !e.Succeeded || e.EventType == notebook.EventCheckpoint {
 			continue
 		}
 		for _, tag := range e.Tags {

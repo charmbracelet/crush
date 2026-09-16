@@ -845,6 +845,8 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		NotebookSyncMem0:     c.cfg.Config().Options.NotebookSyncMem0Enabled(),
 		NotebookMemoryServer: c.cfg.Config().Options.NotebookMemoryServerName(),
 		NotebookAutoInject:   c.cfg.Config().Options.NotebookAutoInjectEnabled(),
+		NotebookCheckpoint: c.cfg.Config().Options.NotebookCheckpointEnabled() &&
+			c.cfg.Config().Options.NotebookIsEnabled(),
 		StubSuperseded: c.cfg.Config().Options.NotebookStubSupersededEnabled() &&
 			c.cfg.Config().Options.NotebookIsEnabled(),
 		StubBoundary:           c.stubBoundary,

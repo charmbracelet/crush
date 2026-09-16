@@ -88,6 +88,8 @@ func logStepComposition(sessionID string, messages []fantasy.Message, agentTools
 		"nb_empty_recalls", nb.EmptyRecalls,
 		"nb_stub_reviews", nb.StubReViews,
 		"nb_covered_reviews", nb.CoveredReViews,
+		"nb_checkpoints_written", nb.CheckpointsWritten,
+		"nb_checkpoint_renders", nb.CheckpointRenders,
 		"nb_sel_recency", nb.SelPassRecency,
 		"nb_sel_pinned", nb.SelPassPinned,
 		"nb_sel_refs", nb.SelPassRefs,

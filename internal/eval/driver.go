@@ -32,6 +32,7 @@ type RunResult struct {
 	Tokens        TokenUsage
 	StubStats     StubStats
 	Recalls       Recalls
+	Checkpoints   Checkpoints
 	SessionID     string
 	ModelResolved string
 	ModelSmall    string
@@ -97,6 +98,13 @@ type runTelemetry struct {
 		Empty  int `json:"empty"`
 		Cross  int `json:"cross"`
 	} `json:"recalls"`
+	// Checkpoints carries the checkpoint telemetry: written counts
+	// committed checkpoint entries, rendered counts prefix renders
+	// that included one — the "present at render" signal.
+	Checkpoints struct {
+		Written  int `json:"written"`
+		Rendered int `json:"rendered"`
+	} `json:"checkpoints"`
 	Model        string `json:"model"`
 	ModelSmall   string `json:"model_small"`
 	ModelSummary string `json:"model_summary"`
@@ -248,6 +256,8 @@ func (res *RunResult) addTurnTelemetry(tel runTelemetry) {
 	res.Recalls.Entry += tel.Recalls.Entry
 	res.Recalls.Empty += tel.Recalls.Empty
 	res.Recalls.Cross += tel.Recalls.Cross
+	res.Checkpoints.Written += tel.Checkpoints.Written
+	res.Checkpoints.Rendered += tel.Checkpoints.Rendered
 }
 
 // remainingSteps converts the trajectory-wide max_steps budget into

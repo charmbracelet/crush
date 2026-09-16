@@ -7,6 +7,7 @@ package notebook
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"sync"
 
 	"github.com/charmbracelet/crush/internal/csync"
@@ -23,7 +24,57 @@ const (
 	EventDecision    = "decision"
 	EventExploration = "exploration"
 	EventGeneral     = "general"
+	// EventCheckpoint is a consolidated session position — an
+	// Established/Open digest with evidence handles, written at the
+	// investigation→execution boundary and at run end. Unlike other
+	// entries it does not mark segment coverage: a checkpoint-only
+	// turn is not a covered turn (see TurnsWithEntries), and its
+	// file: tags never supersede the reads it cites.
+	EventCheckpoint = "checkpoint"
 )
+
+// Checkpoint granularity values, carried as granularity:<value> tags
+// on checkpoint entries. Ordering matters: finer feeds coarser — a
+// boundary checkpoint's input may include turn digests, never another
+// boundary checkpoint.
+const (
+	GranularityTurn     = "turn"
+	GranularityBoundary = "boundary"
+	GranularitySession  = "session"
+)
+
+// granularityTagPrefix namespaces the checkpoint granularity tag.
+const granularityTagPrefix = "granularity:"
+
+// granularityRank orders granularities finer → coarser. Unknown or
+// missing granularity ranks coarsest — an untagged checkpoint is
+// treated as session-grain so it never feeds a finer consolidation.
+func granularityRank(g string) int {
+	switch g {
+	case GranularityTurn:
+		return 0
+	case GranularityBoundary:
+		return 1
+	case GranularitySession:
+		return 2
+	default:
+		return 3
+	}
+}
+
+// CheckpointGranularity returns the entry's granularity tag value, or
+// "" for non-checkpoint entries and untagged checkpoints.
+func CheckpointGranularity(e Entry) string {
+	if e.EventType != EventCheckpoint {
+		return ""
+	}
+	for _, tag := range e.Tags {
+		if g, ok := strings.CutPrefix(tag, granularityTagPrefix); ok {
+			return g
+		}
+	}
+	return ""
+}
 
 // Compression levels for notebook entries.
 const (
@@ -132,6 +183,13 @@ type Stats struct {
 	SelPassRefs    int
 	SelPassWorking int
 	SelPassFill    int
+	// CheckpointRenders counts renders that included a checkpoint
+	// entry — the "checkpoint present at render" telemetry the
+	// checkpoint eval arm asserts on.
+	CheckpointRenders int
+	// CheckpointsWritten counts committed checkpoint entries — the
+	// firing side of the same metric.
+	CheckpointsWritten int
 }
 
 // Service is the interface for notebook operations.
@@ -173,6 +231,16 @@ type Service interface {
 	// one turn never emit duplicate (turn, event) keys. A segment with
 	// no significant events still commits the marker.
 	GenerateSegmentEntries(ctx context.Context, sessionID string, turnNumber, segmentNumber, startIndex, endIndex int64, msgs []message.Message) error
+
+	// GenerateCheckpoint writes one consolidated checkpoint entry when
+	// enough new context has gathered since the last same-or-coarser
+	// checkpoint and no checkpoint already carries req.RunTag. The
+	// entry is keyed to (req.TurnNumber, req.SegmentNumber) — the
+	// caller passes the session's last closed segment so the entry
+	// renders once the boundary passes that key. Reports whether a
+	// checkpoint committed; a false return leaves the run free to
+	// retry under a different threshold.
+	GenerateCheckpoint(ctx context.Context, sessionID string, req CheckpointRequest) (bool, error)
 
 	// RecordSegmentClose records a closed segment's extent as
 	// unprocessed. Idempotent under (session, turn, segment).
@@ -248,12 +316,45 @@ type Options struct {
 	OnCompactionStall func(sessionID, reason string)
 }
 
+// CheckpointRequest parameterizes GenerateCheckpoint. The caller
+// computes the entry's coverage key and supplies the uncovered tail.
+type CheckpointRequest struct {
+	// TurnNumber and SegmentNumber are the coverage key the entry is
+	// written under — the session's last closed segment, so the
+	// checkpoint renders once the boundary passes that key. An
+	// open-segment key can never render mid-run.
+	TurnNumber    int64
+	SegmentNumber int64
+	// Granularity is the checkpoint's consolidation level
+	// (GranularityBoundary or GranularitySession). Inputs exclude
+	// checkpoints at the same or a coarser granularity — a boundary
+	// checkpoint consolidates turn digests, never another boundary.
+	Granularity string
+	// RunTag is the dedup tag ("run:<stamp>"): an existing checkpoint
+	// carrying it short-circuits generation so a run writes at most
+	// one. Empty disables the check.
+	RunTag string
+	// MinExploration is the minimum count of newly gathered context —
+	// committed entries plus classified non-trivial non-mutating tail
+	// events, counted since the last same-or-coarser checkpoint —
+	// required before a checkpoint is worth a small-model call.
+	MinExploration int
+	// Msgs is the uncovered tail: messages past the last segment with
+	// committed coverage. Their classified events supplement the
+	// committed entries as consolidation input.
+	Msgs []message.Message
+}
+
 // Generator generates notebook entries from classified events using an
 // LLM. It is abstracted so tests can provide a mock.
 type Generator interface {
 	// Generate takes classified events and returns structured entry
 	// texts. Each returned string is the full entry text for one event.
 	Generate(ctx context.Context, sessionID string, events []EntryInput) ([]GeneratedEntry, error)
+	// GenerateCheckpoint produces one consolidated checkpoint entry
+	// from a rendered input block (committed entry digests plus raw
+	// tail event descriptions).
+	GenerateCheckpoint(ctx context.Context, sessionID, input string) (GeneratedEntry, error)
 }
 
 // GeneratedEntry is the output of the Generator for one event.

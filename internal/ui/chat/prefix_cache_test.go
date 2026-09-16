@@ -111,14 +111,7 @@ func TestUserMessageItemRender_PrefixCacheFocusBlur(t *testing.T) {
 			message.TextContent{Text: "Hello from the user."},
 		},
 	}
-	r := attachments.NewRenderer(
-		sty.Attachments.Normal,
-		sty.Attachments.Deleting,
-		sty.Attachments.Image,
-		sty.Attachments.Text,
-		sty.Attachments.Skill,
-		sty.Attachments.Remove,
-	)
+	r := attachments.NewRenderer(sty.Attachments)
 	item := NewUserMessageItem(&sty, msg, r).(*UserMessageItem)
 
 	const width = 60

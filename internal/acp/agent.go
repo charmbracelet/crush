@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -295,6 +296,98 @@ func (a *crushAgent) setThinking(ctx context.Context, enabled bool) error {
 	return a.app.UpdateAgentModel(ctx)
 }
 
+// setModel applies a selected model (from the "model" select config option) to
+// the large model slot, then refreshes the coordinator so the new model serves
+// the next turn. The current thinking preference is preserved.
+func (a *crushAgent) setModel(ctx context.Context, sel config.SelectedModel) error {
+	store := a.app.Store()
+	if store == nil {
+		return fmt.Errorf("config store unavailable")
+	}
+	if cfg := a.config(); cfg != nil {
+		if current, ok := cfg.Models[config.SelectedModelTypeLarge]; ok {
+			sel.Think = current.Think
+		}
+	}
+	if err := store.UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeLarge, sel); err != nil {
+		return err
+	}
+	return a.app.UpdateAgentModel(ctx)
+}
+
+// parseModelValue splits a "provider/model" option value into a SelectedModel.
+// The separator is the first slash so a model id that itself contains slashes
+// is preserved intact.
+func parseModelValue(value string) config.SelectedModel {
+	if i := strings.Index(value, "/"); i > 0 {
+		return config.SelectedModel{Provider: value[:i], Model: value[i+1:]}
+	}
+	return config.SelectedModel{Model: value}
+}
+
+// modelOptionsFor builds the ACP select-option values for the model picker.
+// Values are encoded as "provider/model" so a selection round-trips to a
+// SelectedModel unambiguously. Every configured provider's catalog is listed
+// (deduped, provider-sorted), and the currently selected model is always
+// included so the select's CurrentValue is never dangling.
+func modelOptionsFor(cfg *config.Config) []acp.SessionConfigSelectOption {
+	seen := map[string]bool{}
+	opts := []acp.SessionConfigSelectOption{}
+	add := func(provider, model, name string) {
+		value := provider + "/" + model
+		if seen[value] {
+			return
+		}
+		seen[value] = true
+		if name == "" {
+			name = model
+		}
+		opts = append(opts, acp.SessionConfigSelectOption{
+			Value: acp.SessionConfigValueId(value),
+			Name:  name,
+		})
+	}
+	if cfg != nil && cfg.Providers != nil {
+		providers := cfg.Providers.Copy()
+		ids := make([]string, 0, len(providers))
+		for id := range providers {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		for _, pid := range ids {
+			p := providers[pid]
+			if p.Disable {
+				continue
+			}
+			for _, m := range p.Models {
+				if m.ID == "" {
+					continue
+				}
+				add(pid, m.ID, m.Name)
+			}
+		}
+	}
+	if cfg != nil {
+		if current, ok := cfg.Models[config.SelectedModelTypeLarge]; ok && current.Model != "" {
+			add(current.Provider, current.Model, current.Model)
+		}
+	}
+	return opts
+}
+
+// modelSelectValue returns the currently selected large model as a
+// "provider/model" value, or "" when no model is selected.
+func modelSelectValue(cfg *config.Config) string {
+	if cfg == nil {
+		return ""
+	}
+	current, ok := cfg.Models[config.SelectedModelTypeLarge]
+	if !ok || current.Model == "" {
+		return ""
+	}
+	return current.Provider + "/" + current.Model
+}
+
 // pushUpdate sends a session/update notification to the connected client. It is
 // a no-op when no connection is established.
 func (a *crushAgent) pushUpdate(ctx context.Context, sessionID acp.SessionId, update acp.SessionUpdate) {
@@ -397,6 +490,25 @@ func configOptionsFor(cfg *config.Config) []acp.SessionConfigOption {
 			},
 		},
 	})
+	modelOpts := modelOptionsFor(cfg)
+	if len(modelOpts) > 0 {
+		cur := acp.SessionConfigValueId(modelSelectValue(cfg))
+		if cur == "" {
+			cur = modelOpts[0].Value
+		}
+		ungroupedModels := acp.SessionConfigSelectOptionsUngrouped(modelOpts)
+		opts = append(opts, acp.SessionConfigOption{
+			Select: &acp.SessionConfigOptionSelect{
+				Id:           "model",
+				Name:         "Model",
+				Type:         "select",
+				CurrentValue: cur,
+				Options: acp.SessionConfigSelectOptions{
+					Ungrouped: &ungroupedModels,
+				},
+			},
+		})
+	}
 	return opts
 }
 

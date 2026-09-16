@@ -286,6 +286,37 @@ func (c *Client) DisableDockerMCP(ctx context.Context, id string) error {
 	return nil
 }
 
+// MCPEnable enables (starts) a named MCP server on the workspace.
+func (c *Client) MCPEnable(ctx context.Context, id, name string) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/mcp/enable", id), nil, jsonBody(
+		proto.MCPNameRequest{Name: name},
+	),
+		http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return fmt.Errorf("failed to enable MCP: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to enable MCP: status code %d", rsp.StatusCode)
+	}
+	return nil
+}
+
+// MCPDisable disables (stops) a named MCP server on the workspace.
+func (c *Client) MCPDisable(ctx context.Context, id, name string) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/mcp/disable", id), nil, jsonBody(
+		proto.MCPNameRequest{Name: name},
+	), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return fmt.Errorf("failed to disable MCP: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to disable MCP: status code %d", rsp.StatusCode)
+	}
+	return nil
+}
+
 // RefreshMCPTools refreshes tools for a named MCP server.
 func (c *Client) RefreshMCPTools(ctx context.Context, id, name string) error {
 	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/mcp/refresh-tools", id), nil, jsonBody(struct {

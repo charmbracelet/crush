@@ -135,6 +135,15 @@ type ProviderConfig struct {
 	// credential error. Output is discarded to avoid corrupting the TUI.
 	AWSAuthRefresh string `json:"aws_auth_refresh,omitempty" jsonschema:"description=Shell command to run when AWS credentials expire (Bedrock only)."`
 
+	// AWSRegion overrides the AWS region used for Bedrock inference. When
+	// empty, Crush falls back to a per-provider default (us-east-1 for
+	// bedrock, eu-west-1 for bedrock-europe). This is opt-in: AWS_REGION
+	// and AWS_DEFAULT_REGION are intentionally NOT read here, since not
+	// every region hosts every model and silently honoring an ambient
+	// env var caused confusion (see charmbracelet/crush#2985). The value
+	// is shell-expanded at load time, so $VAR and $(cmd) work.
+	AWSRegion string `json:"aws_region,omitempty" jsonschema:"description=AWS region for Bedrock inference (Bedrock only). Defaults to us-east-1\\, or eu-west-1 for bedrock-europe."`
+
 	// Skip cost accumulation for this provider when using subscription or flat rate billing.
 	FlatRate bool `json:"flat_rate,omitempty" jsonschema:"description=Flat-rate mode for this provider"`
 

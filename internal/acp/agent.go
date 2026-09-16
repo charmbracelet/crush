@@ -466,30 +466,6 @@ func configOptionsFor(cfg *config.Config) []acp.SessionConfigOption {
 			Description:  acp.Ptr("Enable extended reasoning for supported models"),
 		},
 	})
-	selectOpts := []acp.SessionConfigSelectOption{}
-	for id, agent := range cfg.Agents {
-		if agent.Disabled {
-			continue
-		}
-		desc := agent.Description
-		selectOpts = append(selectOpts, acp.SessionConfigSelectOption{
-			Value:       acp.SessionConfigValueId(id),
-			Name:        agent.Name,
-			Description: &desc,
-		})
-	}
-	ungrouped := acp.SessionConfigSelectOptionsUngrouped(selectOpts)
-	opts = append(opts, acp.SessionConfigOption{
-		Select: &acp.SessionConfigOptionSelect{
-			Id:           "mode",
-			Name:         "Mode",
-			Type:         "select",
-			CurrentValue: "coder",
-			Options: acp.SessionConfigSelectOptions{
-				Ungrouped: &ungrouped,
-			},
-		},
-	})
 	modelOpts := modelOptionsFor(cfg)
 	if len(modelOpts) > 0 {
 		cur := acp.SessionConfigValueId(modelSelectValue(cfg))

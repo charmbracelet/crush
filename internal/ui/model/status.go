@@ -18,7 +18,7 @@ const DefaultStatusTTL = 5 * time.Second
 
 // badgeLeftInset is the number of cells between the status bar's left edge
 // and the mode badge.
-const badgeLeftInset = 2
+const badgeLeftInset = 1
 
 // Status is the status bar and help model.
 type Status struct {

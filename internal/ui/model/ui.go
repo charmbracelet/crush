@@ -379,7 +379,12 @@ type UI struct {
 	// provider-retry notice. It is set on TypeAgentRetrying and
 	// cleared on the next sign of progress (message, new turn,
 	// session switch) so a stale backoff note never lingers.
-	retryNotice bool
+	// retryReason/retryAttempt/retryDeadline drive the live
+	// countdown text while the notice is pinned.
+	retryNotice   bool
+	retryReason   string
+	retryAttempt  int
+	retryDeadline time.Time
 
 	// mouse highlighting related state
 	lastClickTime time.Time
@@ -1275,6 +1280,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					cmds = append(cmds, cmd)
 				}
 			}
+		}
+	case retryTickMsg:
+		if cmd := m.applyRetryTick(); cmd != nil {
+			cmds = append(cmds, cmd)
 		}
 	case scrollbarHideMsg:
 		if m.state == uiChat {
@@ -4757,13 +4766,57 @@ func (m *UI) handlePermissionNotification(notification permission.PermissionNoti
 // notifications using the UI notification backend.
 // clearRetryNotice drops a lingering provider-retry status note, if
 // any. Callers are progress points (message traffic, new turn,
-// session switch) proving the backoff is over.
+// session switch) proving the backoff is over. The tick loop is
+// flag-gated, so no timer needs cancelling: the next tick simply
+// becomes a no-op.
 func (m *UI) clearRetryNotice() {
 	if !m.retryNotice {
 		return
 	}
 	m.retryNotice = false
+	m.retryReason = ""
+	m.retryAttempt = 0
+	m.retryDeadline = time.Time{}
 	m.status.ClearInfoMsg()
+}
+
+// retryTickMsg drives the per-second countdown of a pinned retry
+// notice while its backoff elapses.
+type retryTickMsg struct{}
+
+// retryCountdownText renders the status-bar line for a retry notice
+// with the given remaining backoff. Pure for testability.
+func retryCountdownText(reason string, attempt int, remaining time.Duration) string {
+	secs := int64(remaining.Round(time.Second).Seconds())
+	if secs < 0 {
+		secs = 0
+	}
+	return fmt.Sprintf("Retrying provider request: %s; retrying in %ds (attempt %d)",
+		reason, secs, attempt)
+}
+
+// retryTickCmd schedules the next countdown refresh, or nothing once
+// the notice is gone.
+func (m *UI) retryTickCmd() tea.Cmd {
+	if !m.retryNotice || m.retryDeadline.IsZero() {
+		return nil
+	}
+	return tea.Tick(time.Second, func(time.Time) tea.Msg {
+		return retryTickMsg{}
+	})
+}
+
+// applyRetryTick refreshes the countdown text. It returns a follow-up
+// tick while the notice is still pinned.
+func (m *UI) applyRetryTick() tea.Cmd {
+	if !m.retryNotice || m.retryDeadline.IsZero() {
+		return nil
+	}
+	m.status.SetInfoMsg(util.InfoMsg{
+		Type: util.InfoTypeWarn,
+		Msg:  retryCountdownText(m.retryReason, m.retryAttempt, time.Until(m.retryDeadline)),
+	})
+	return m.retryTickCmd()
 }
 
 func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
@@ -4796,11 +4849,18 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 		// are routine and would spam the desktop; the single toast
 		// fires on terminal failure (TypeAgentError) instead.
 		m.retryNotice = true
+		m.retryReason = cmp.Or(n.RetryReason, n.Message)
+		m.retryAttempt = n.RetryAttempt
+		if n.RetryDelayMs > 0 {
+			m.retryDeadline = time.Now().Add(time.Duration(n.RetryDelayMs) * time.Millisecond)
+		} else {
+			m.retryDeadline = time.Time{}
+		}
 		m.status.SetInfoMsg(util.InfoMsg{
 			Type: util.InfoTypeWarn,
-			Msg:  "Retrying provider request: " + n.Message,
+			Msg:  retryCountdownText(m.retryReason, m.retryAttempt, time.Until(m.retryDeadline)),
 		})
-		return nil
+		return m.retryTickCmd()
 	case notify.TypeReAuthenticate:
 		return m.handleReAuthenticate(n.ProviderID)
 	case notify.TypeAWSSSOAuth:

@@ -855,6 +855,39 @@ func TestAgentRetryingNotificationIsStatusOnly(t *testing.T) {
 	require.True(t, m.status.msg.IsEmpty())
 }
 
+// TestAgentRetryingCountdownTicks pins the live countdown: while
+// the notice is pinned, ticks refresh the status text with the
+// remaining backoff; once cleared, ticks are no-ops that schedule
+// nothing further.
+func TestAgentRetryingCountdownTicks(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true}
+	m := newBusyUI(ws)
+	warmCaches(m, true)
+
+	m.handleAgentNotification(notify.Notification{
+		SessionID:    "s1",
+		Type:         notify.TypeAgentRetrying,
+		Message:      "overloaded; retrying in 5s (attempt 1)",
+		RetryReason:  "overloaded",
+		RetryAttempt: 1,
+		RetryDelayMs: 5000,
+	})
+	require.True(t, m.retryNotice)
+	require.Contains(t, m.status.msg.Msg, "attempt 1")
+
+	_, cmd := m.Update(retryTickMsg{})
+	require.NotNil(t, cmd, "a pinned notice must reschedule its countdown tick")
+	require.True(t, m.retryNotice, "ticks must not clear the notice")
+	require.Contains(t, m.status.msg.Msg, "retrying in",
+		"a tick must refresh the countdown text")
+
+	m.clearRetryNotice()
+	require.Nil(t, m.applyRetryTick(),
+		"a cleared notice must stop the tick loop")
+}
+
 // TestAgentErrorNotificationToastsTerminalFailure pins the toast
 // policy: per-attempt retry notices are status-bar only, but the
 // terminal failure gets one desktop toast so an away user learns the

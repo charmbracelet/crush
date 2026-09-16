@@ -405,7 +405,7 @@ type Options struct {
 // of blocking a session forever; streamed responses are only aborted after
 // this much inactivity, and users running slow local models can raise or
 // disable it via options.request_timeout.
-const DefaultRequestTimeout = time.Minute
+const DefaultRequestTimeout = 2 * time.Minute
 
 // GetRequestTimeout returns the per-request timeout for LLM API calls (a
 // hard deadline for non-streaming requests and an idle timeout for

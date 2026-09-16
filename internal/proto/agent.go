@@ -52,6 +52,12 @@ type AgentEvent struct {
 	// result's failure text travels through Error, like TypeAgentError.
 	AWSSOCommand string `json:"aws_sso_command,omitempty"`
 	AWSSOURL     string `json:"aws_sso_url,omitempty"`
+
+	// Retry countdown fields, carried for agent-retrying notices so
+	// client TUIs can render a live countdown through the backoff.
+	RetryAttempt int    `json:"retry_attempt,omitempty"`
+	RetryDelayMs int64  `json:"retry_delay_ms,omitempty"`
+	RetryReason  string `json:"retry_reason,omitempty"`
 }
 
 // MarshalJSON implements the [json.Marshaler] interface.

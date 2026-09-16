@@ -48,6 +48,16 @@ type Notification struct {
 	// retry status for TypeAgentRetrying. Other notification types
 	// ignore it.
 	Message string
+	// RetryAttempt and RetryDelayMs carry the structured countdown
+	// for TypeAgentRetrying: which attempt just failed and how long
+	// the backoff waits before the next one. Zero when not a retry
+	// notice; other notification types ignore them.
+	RetryAttempt int   `json:"retry_attempt,omitempty"`
+	RetryDelayMs int64 `json:"retry_delay_ms,omitempty"`
+	// RetryReason is the failure reason for TypeAgentRetrying,
+	// kept separate from Message so TUIs can render a live
+	// countdown around it. Empty otherwise.
+	RetryReason string `json:"retry_reason,omitempty"`
 	// AWSSOCommand carries the shell command for TypeAWSSSOAuth.
 	AWSSOCommand string
 	// AWSSOURL carries the SSO verification URL for TypeAWSSSOAuth once it

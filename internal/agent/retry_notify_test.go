@@ -65,6 +65,79 @@ func (m *flakyStreamModel) StreamObject(context.Context, fantasy.ObjectCall) (fa
 	return nil, errors.New("not implemented")
 }
 
+// TestSessionAgentRun_PublishesRetryNotification proves the retry
+// visibility contract: a turn whose first attempt fails retryably
+// must emit exactly one TypeAgentRetrying notification carrying the
+// session and the failure reason, then complete normally without
+// duplicating the user message. Before this, retries were only a
+// slog line: the TUI sat silent through the backoff and looked hung,
+// typically on the last tool-call spinner.
+func TestSessionAgentRun_PublishesRetryNotification(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	broker := pubsub.NewBroker[notify.Notification]()
+	t.Cleanup(broker.Shutdown)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	sub := broker.Subscribe(ctx)
+
+	oneRetry := 1
+	large := Model{
+		Model:      &flakyStreamModel{},
+		CatwalkCfg: catwalk.Model{ID: "mock-model", ContextWindow: 8192, DefaultMaxTokens: 128},
+		ModelCfg:   config.SelectedModel{Provider: "mock", Model: "mock-model"},
+	}
+	small := Model{
+		Model:      &finishStreamModel{text: "title"},
+		CatwalkCfg: catwalk.Model{ID: "mock-model", ContextWindow: 8192, DefaultMaxTokens: 128},
+		ModelCfg:   config.SelectedModel{Provider: "mock", Model: "mock-model"},
+	}
+	sa := NewSessionAgent(SessionAgentOptions{
+		LargeModel:           large,
+		SmallModel:           small,
+		SystemPrompt:         "fake system prompt",
+		IsSubAgent:           true,
+		DisableAutoSummarize: true,
+		IsYolo:               true,
+		Sessions:             env.sessions,
+		Messages:             env.messages,
+		MaxRetries:           &oneRetry,
+		Notify:               broker,
+	})
+
+	sess, err := env.sessions.Create(t.Context(), "retry-notify")
+	require.NoError(t, err)
+
+	result, err := sa.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, Prompt: "go"})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "recovered", result.Response.Content.Text())
+
+	select {
+	case ev := <-sub:
+		require.Equal(t, notify.TypeAgentRetrying, ev.Payload.Type)
+		require.Equal(t, sess.ID, ev.Payload.SessionID)
+		require.Contains(t, ev.Payload.Message, "overloaded")
+		require.Contains(t, ev.Payload.Message, "attempt 1")
+		require.Equal(t, 1, ev.Payload.RetryAttempt)
+		require.Equal(t, int64(1), ev.Payload.RetryDelayMs)
+		require.Contains(t, ev.Payload.RetryReason, "overloaded")
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the retry notification")
+	}
+
+	msgs, err := env.messages.List(t.Context(), sess.ID)
+	require.NoError(t, err)
+	userMsgs := 0
+	for _, msg := range msgs {
+		if msg.Role == message.User {
+			userMsgs++
+		}
+	}
+	require.Equal(t, 1, userMsgs, "the retried turn must not duplicate the user message")
+}
+
 // alwaysFailModel never recovers: every stream ends in a retryable
 // in-band provider error.
 type alwaysFailModel struct {
@@ -100,116 +173,6 @@ func (m *alwaysFailModel) StreamObject(context.Context, fantasy.ObjectCall) (fan
 	return nil, errors.New("not implemented")
 }
 
-// retryNotifyTitleModel answers title generation without touching
-// the retry accounting under test.
-type retryNotifyTitleModel struct{}
-
-func (retryNotifyTitleModel) Provider() string { return "fake" }
-func (retryNotifyTitleModel) Model() string    { return "fake-model" }
-
-func (retryNotifyTitleModel) Generate(context.Context, fantasy.Call) (*fantasy.Response, error) {
-	return &fantasy.Response{
-		Content:      fantasy.ResponseContent{fantasy.TextContent{Text: "title"}},
-		FinishReason: fantasy.FinishReasonStop,
-	}, nil
-}
-
-func (retryNotifyTitleModel) Stream(context.Context, fantasy.Call) (fantasy.StreamResponse, error) {
-	return func(yield func(fantasy.StreamPart) bool) {
-		if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextStart, ID: "1"}) {
-			return
-		}
-		if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextDelta, ID: "1", Delta: "title"}) {
-			return
-		}
-		if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextEnd, ID: "1"}) {
-			return
-		}
-		yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop})
-	}, nil
-}
-
-func (retryNotifyTitleModel) GenerateObject(context.Context, fantasy.ObjectCall) (*fantasy.ObjectResponse, error) {
-	return nil, errors.New("not implemented")
-}
-
-func (retryNotifyTitleModel) StreamObject(context.Context, fantasy.ObjectCall) (fantasy.ObjectStreamResponse, error) {
-	return nil, errors.New("not implemented")
-}
-
-func retryNotifyAgent(env fakeEnv, model fantasy.LanguageModel, broker *pubsub.Broker[notify.Notification], maxRetries int) SessionAgent {
-	large := Model{
-		Model:      model,
-		CatwalkCfg: catwalk.Model{ID: "mock-model", ContextWindow: 8192, DefaultMaxTokens: 128},
-		ModelCfg:   config.SelectedModel{Provider: "mock", Model: "mock-model"},
-	}
-	small := Model{
-		Model:      retryNotifyTitleModel{},
-		CatwalkCfg: catwalk.Model{ID: "mock-model", ContextWindow: 8192, DefaultMaxTokens: 128},
-		ModelCfg:   config.SelectedModel{Provider: "mock", Model: "mock-model"},
-	}
-	return NewSessionAgent(SessionAgentOptions{
-		LargeModel:           large,
-		SmallModel:           small,
-		SystemPrompt:         "fake system prompt",
-		IsSubAgent:           true,
-		DisableAutoSummarize: true,
-		IsYolo:               true,
-		Sessions:             env.sessions,
-		Messages:             env.messages,
-		MaxRetries:           &maxRetries,
-		Notify:               broker,
-	})
-}
-
-// TestSessionAgentRun_PublishesRetryNotification proves the retry
-// visibility contract: a turn whose first attempt fails retryably
-// must emit exactly one TypeAgentRetrying notification carrying the
-// session and the failure reason, then complete normally without
-// duplicating the user message. Before this, retries were only a
-// slog line: the TUI sat silent through the backoff and looked hung,
-// typically on the last tool-call spinner.
-func TestSessionAgentRun_PublishesRetryNotification(t *testing.T) {
-	t.Parallel()
-
-	env := testEnv(t)
-	broker := pubsub.NewBroker[notify.Notification]()
-	t.Cleanup(broker.Shutdown)
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	sub := broker.Subscribe(ctx)
-
-	sa := retryNotifyAgent(env, &flakyStreamModel{}, broker, 1)
-
-	sess, err := env.sessions.Create(t.Context(), "retry-notify")
-	require.NoError(t, err)
-
-	result, err := sa.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, Prompt: "go"})
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	require.Equal(t, "recovered", result.Response.Content.Text())
-
-	select {
-	case ev := <-sub:
-		require.Equal(t, notify.TypeAgentRetrying, ev.Payload.Type)
-		require.Equal(t, sess.ID, ev.Payload.SessionID)
-		require.Contains(t, ev.Payload.Message, "overloaded")
-		require.Contains(t, ev.Payload.Message, "attempt 1")
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for the retry notification")
-	}
-
-	msgs, err := env.messages.List(t.Context(), sess.ID)
-	require.NoError(t, err)
-	userMsgs := 0
-	for _, msg := range msgs {
-		if msg.Role == message.User {
-			userMsgs++
-		}
-	}
-	require.Equal(t, 1, userMsgs, "the retried turn must not duplicate the user message")
-}
-
 // TestSessionAgentRun_ExhaustedRetriesToastOnce proves the terminal
 // notification contract: when retries run out, the turn emits exactly
 // one TypeAgentError carrying the retry count. Per-attempt notices
@@ -225,7 +188,29 @@ func TestSessionAgentRun_ExhaustedRetriesToastOnce(t *testing.T) {
 	defer cancel()
 	sub := broker.Subscribe(ctx)
 
-	sa := retryNotifyAgent(env, &alwaysFailModel{}, broker, 1)
+	oneRetry := 1
+	large := Model{
+		Model:      &alwaysFailModel{},
+		CatwalkCfg: catwalk.Model{ID: "mock-model", ContextWindow: 8192, DefaultMaxTokens: 128},
+		ModelCfg:   config.SelectedModel{Provider: "mock", Model: "mock-model"},
+	}
+	small := Model{
+		Model:      &finishStreamModel{text: "title"},
+		CatwalkCfg: catwalk.Model{ID: "mock-model", ContextWindow: 8192, DefaultMaxTokens: 128},
+		ModelCfg:   config.SelectedModel{Provider: "mock", Model: "mock-model"},
+	}
+	sa := NewSessionAgent(SessionAgentOptions{
+		LargeModel:           large,
+		SmallModel:           small,
+		SystemPrompt:         "fake system prompt",
+		IsSubAgent:           true,
+		DisableAutoSummarize: true,
+		IsYolo:               true,
+		Sessions:             env.sessions,
+		Messages:             env.messages,
+		MaxRetries:           &oneRetry,
+		Notify:               broker,
+	})
 
 	sess, err := env.sessions.Create(t.Context(), "retry-exhausted")
 	require.NoError(t, err)

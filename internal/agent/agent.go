@@ -963,6 +963,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 					Type:         notify.TypeAgentRetrying,
 					Message: fmt.Sprintf("%s; retrying in %s (attempt %d)",
 						reason, delay.Round(time.Millisecond), retryAttempt),
+					RetryAttempt: retryAttempt,
+					RetryDelayMs: delay.Round(time.Millisecond).Milliseconds(),
+					RetryReason:  reason,
 				})
 			}
 			// Reset streamed content so the retried response doesn't

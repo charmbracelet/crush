@@ -9,7 +9,7 @@ import (
 func TestActions(t *testing.T) {
 	t.Parallel()
 	ids := Actions()
-	require.Len(t, ids, 97)
+	require.Len(t, ids, 101)
 	seen := make(map[string]struct{}, len(ids))
 	for _, id := range ids {
 		require.NotContains(t, seen, id)

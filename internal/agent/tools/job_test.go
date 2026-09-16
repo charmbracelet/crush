@@ -2,10 +2,12 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"runtime"
 	"testing"
 	"time"
 
+	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/stretchr/testify/require"
 )
@@ -331,4 +333,112 @@ func TestBackgroundShell_AutoBackground(t *testing.T) {
 		require.True(t, ok, "Should be able to retrieve background shell")
 		require.Equal(t, bgShell.ID, retrieved.ID)
 	})
+}
+
+func TestJobOutput_WaitContextCanceled(t *testing.T) {
+	t.Parallel()
+
+	workingDir := t.TempDir()
+	bgManager := shell.GetBackgroundShellManager()
+
+	// Start a long-running background job that won't complete
+	bgShell, err := bgManager.Start(context.Background(), workingDir, nil, "sleep 3600", "long-running test")
+	require.NoError(t, err)
+	defer bgManager.Kill(bgShell.ID)
+
+	jobTool := NewJobOutputTool()
+
+	paramsJSON, err := json.Marshal(JobOutputParams{
+		ShellID: bgShell.ID,
+		Wait:    true,
+	})
+	require.NoError(t, err)
+
+	// Context that is already canceled
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	resp, err := jobTool.Run(ctx, fantasy.ToolCall{
+		ID:    "test-call",
+		Name:  JobOutputToolName,
+		Input: string(paramsJSON),
+	})
+	require.NoError(t, err)
+
+	require.Contains(t, resp.Content, "Status: interrupted")
+	require.Contains(t, resp.Content, "Wait was interrupted")
+
+	var meta JobOutputResponseMetadata
+	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
+	require.False(t, meta.Done)
+}
+
+func TestJobOutput_WaitCompletes(t *testing.T) {
+	t.Parallel()
+
+	workingDir := t.TempDir()
+	bgManager := shell.GetBackgroundShellManager()
+
+	bgShell, err := bgManager.Start(context.Background(), workingDir, nil, "echo 'hello from job'", "quick test")
+	require.NoError(t, err)
+	defer bgManager.Kill(bgShell.ID)
+
+	jobTool := NewJobOutputTool()
+
+	paramsJSON, err := json.Marshal(JobOutputParams{
+		ShellID: bgShell.ID,
+		Wait:    true,
+	})
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	resp, err := jobTool.Run(ctx, fantasy.ToolCall{
+		ID:    "test-call",
+		Name:  JobOutputToolName,
+		Input: string(paramsJSON),
+	})
+	require.NoError(t, err)
+
+	require.Contains(t, resp.Content, "Status: completed")
+	require.Contains(t, resp.Content, "hello from job")
+
+	var meta JobOutputResponseMetadata
+	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
+	require.True(t, meta.Done)
+}
+
+func TestJobOutput_NoWaitReturnsRunning(t *testing.T) {
+	t.Parallel()
+
+	workingDir := t.TempDir()
+	bgManager := shell.GetBackgroundShellManager()
+
+	bgShell, err := bgManager.Start(context.Background(), workingDir, nil, "sleep 3600", "long-running test")
+	require.NoError(t, err)
+	defer bgManager.Kill(bgShell.ID)
+
+	jobTool := NewJobOutputTool()
+
+	paramsJSON, err := json.Marshal(JobOutputParams{
+		ShellID: bgShell.ID,
+		Wait:    false,
+	})
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	start := time.Now()
+	resp, err := jobTool.Run(ctx, fantasy.ToolCall{
+		ID:    "test-call",
+		Name:  JobOutputToolName,
+		Input: string(paramsJSON),
+	})
+	elapsed := time.Since(start)
+
+	require.NoError(t, err)
+	require.Less(t, elapsed, 2*time.Second, "no-wait should return immediately")
+	require.Contains(t, resp.Content, "Status: running")
+
+	var meta JobOutputResponseMetadata
+	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
+	require.False(t, meta.Done)
 }

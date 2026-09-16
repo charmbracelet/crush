@@ -245,13 +245,13 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 				}
 			}
 
-			// If explicitly requested as background, start immediately with detached context
+			// If explicitly requested as background, start with the agent context
+			// so Esc/session cancellation can propagate to the background job.
 			if params.RunInBackground {
 				startTime := time.Now()
 				bgManager := shell.GetBackgroundShellManager()
 				bgManager.Cleanup()
-				// Use background context so it continues after tool returns
-				bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(), params.Command, params.Description)
+				bgShell, err := bgManager.Start(ctx, execWorkingDir, blockFuncs(), params.Command, params.Description)
 				if err != nil {
 					return fantasy.ToolResponse{}, fmt.Errorf("error starting background shell: %w", err)
 				}
@@ -306,7 +306,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			// Start with detached context so it can survive if moved to background
 			bgManager := shell.GetBackgroundShellManager()
 			bgManager.Cleanup()
-			bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(), params.Command, params.Description)
+			bgShell, err := bgManager.Start(ctx, execWorkingDir, blockFuncs(), params.Command, params.Description)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error starting shell: %w", err)
 			}

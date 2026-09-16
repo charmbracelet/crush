@@ -36,6 +36,19 @@ func makeToolStep(name, input, output string) fantasy.StepResult {
 	)
 }
 
+// makeErrorToolStep creates a step with a single tool call that returned an error.
+func makeErrorToolStep(name, input, errMsg string) fantasy.StepResult {
+	callID := fmt.Sprintf("call_%s_%s", name, input)
+	return makeStep(
+		[]fantasy.ToolCallContent{
+			{ToolCallID: callID, ToolName: name, Input: input},
+		},
+		[]fantasy.ToolResultContent{
+			{ToolCallID: callID, ToolName: name, Result: fantasy.ToolResultOutputContentError{Error: fmt.Errorf("%s", errMsg)}},
+		},
+	)
+}
+
 // makeEmptyStep creates a step with no tool calls (e.g. a text-only response).
 func makeEmptyStep() fantasy.StepResult {
 	return fantasy.StepResult{
@@ -122,6 +135,62 @@ func TestHasRepeatedToolCalls(t *testing.T) {
 		result := hasRepeatedToolCalls(steps, 10, 5)
 		if result {
 			t.Error("expected false: only 4 repeated tool calls, empty steps should be skipped")
+		}
+	})
+
+	t.Run("error loop detected with varying inputs", func(t *testing.T) {
+		// Same tool returns errors 3 times with different inputs — should be detected
+		steps := []fantasy.StepResult{
+			makeErrorToolStep("notion_search", `{"query":"meeting notes"}`, "401 Unauthorized"),
+			makeErrorToolStep("notion_search", `{"query":"meeting notes recent"}`, "401 Unauthorized"),
+			makeErrorToolStep("notion_search", `{"query":"search meeting notes"}`, "401 Unauthorized"),
+		}
+		// Existing signature-based detection would miss this (different inputs)
+		result := hasRepeatedToolCalls(steps, 10, 5)
+		if result {
+			t.Error("signature-based should NOT detect varying inputs")
+		}
+		// Error-based detection should catch it
+		result = hasRepeatedToolErrors(steps, 3)
+		if !result {
+			t.Error("expected error loop detected for 3 errors from same tool")
+		}
+	})
+
+	t.Run("error loop not triggered below threshold", func(t *testing.T) {
+		steps := []fantasy.StepResult{
+			makeErrorToolStep("notion_search", `{"query":"a"}`, "401 Unauthorized"),
+			makeErrorToolStep("notion_search", `{"query":"b"}`, "401 Unauthorized"),
+		}
+		result := hasRepeatedToolErrors(steps, 3)
+		if result {
+			t.Error("expected false: only 2 errors, threshold is 3")
+		}
+	})
+
+	t.Run("error loop counts per tool name", func(t *testing.T) {
+		// Two different tools each failing twice — neither hits threshold of 3
+		steps := []fantasy.StepResult{
+			makeErrorToolStep("notion_search", `{"query":"a"}`, "401"),
+			makeErrorToolStep("read_file", `{"path":"/x"}`, "not found"),
+			makeErrorToolStep("notion_search", `{"query":"b"}`, "401"),
+			makeErrorToolStep("read_file", `{"path":"/y"}`, "not found"),
+		}
+		result := hasRepeatedToolErrors(steps, 3)
+		if result {
+			t.Error("expected false: each tool only has 2 errors")
+		}
+	})
+
+	t.Run("mixed success and error not counted", func(t *testing.T) {
+		steps := []fantasy.StepResult{
+			makeErrorToolStep("notion_search", `{"query":"a"}`, "401"),
+			makeToolStep("notion_search", `{"query":"b"}`, "results..."),
+			makeErrorToolStep("notion_search", `{"query":"c"}`, "401"),
+		}
+		result := hasRepeatedToolErrors(steps, 3)
+		if result {
+			t.Error("expected false: only 2 errors, 1 success in between")
 		}
 	})
 

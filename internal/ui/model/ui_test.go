@@ -7,6 +7,8 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/ui/attachments"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/workspace"
 	"github.com/stretchr/testify/require"
@@ -53,7 +55,7 @@ func TestCurrentModelSupportsImages(t *testing.T) {
 		providers.Set("test-provider", config.ProviderConfig{
 			ID: "test-provider",
 			Models: []catwalk.Model{
-				{ID: "test-model", SupportsImages: true},
+				{ID: "test-model", Capabilities: catwalk.Capabilities{Vision: true}},
 			},
 		})
 
@@ -72,6 +74,54 @@ func TestCurrentModelSupportsImages(t *testing.T) {
 
 		ui := newTestUIWithConfig(t, cfg)
 		require.True(t, ui.currentModelSupportsImages())
+	})
+}
+
+func TestAttachmentsLimit(t *testing.T) {
+	t.Parallel()
+
+	newCfg := func(maxAttachments int) *config.Config {
+		providers := csync.NewMap[string, config.ProviderConfig]()
+		providers.Set("test-provider", config.ProviderConfig{
+			ID: "test-provider",
+			Models: []catwalk.Model{
+				{ID: "test-model", MaxAttachments: maxAttachments},
+			},
+		})
+		return &config.Config{
+			Models: map[config.SelectedModelType]config.SelectedModel{
+				config.SelectedModelTypeLarge: {
+					Provider: "test-provider",
+					Model:    "test-model",
+				},
+			},
+			Providers: providers,
+			Agents: map[string]config.Agent{
+				config.AgentCoder: {Model: config.SelectedModelTypeLarge},
+			},
+		}
+	}
+
+	t.Run("no limit when the model does not set max_attachments", func(t *testing.T) {
+		t.Parallel()
+
+		ui := newTestUIWithConfig(t, newCfg(0))
+		require.Zero(t, ui.currentModelMaxAttachments())
+		require.False(t, ui.attachmentsLimitReached())
+	})
+
+	t.Run("limit reached when pending attachments hit max_attachments", func(t *testing.T) {
+		t.Parallel()
+
+		ui := newTestUIWithConfig(t, newCfg(2))
+		ui.attachments = attachments.New(nil, attachments.Keymap{})
+		require.False(t, ui.attachmentsLimitReached())
+
+		ui.attachments.Update(message.Attachment{FileName: "a.png"})
+		require.False(t, ui.attachmentsLimitReached())
+
+		ui.attachments.Update(message.Attachment{FileName: "b.png"})
+		require.True(t, ui.attachmentsLimitReached())
 	})
 }
 

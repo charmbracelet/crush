@@ -1208,7 +1208,7 @@ func TestWorkaroundProviderMediaLimitations_TextOnlyModel(t *testing.T) {
 	largeModel := Model{
 		ModelCfg: config.SelectedModel{Provider: "openai"},
 		CatwalkCfg: catwalk.Model{
-			SupportsImages: false,
+			Capabilities: catwalk.Capabilities{Vision: false},
 		},
 	}
 
@@ -1252,7 +1252,7 @@ func TestWorkaroundProviderMediaLimitations_VisionModel(t *testing.T) {
 	largeModel := Model{
 		ModelCfg: config.SelectedModel{Provider: "openai"},
 		CatwalkCfg: catwalk.Model{
-			SupportsImages: true,
+			Capabilities: catwalk.Capabilities{Vision: true},
 		},
 	}
 
@@ -1301,11 +1301,11 @@ func TestWorkaroundProviderMediaLimitations_AnthropicProvider(t *testing.T) {
 	}
 
 	// Anthropic provider — should return messages unchanged regardless of
-	// SupportsImages, since Anthropic handles media in tool results natively.
+	// Capabilities.Vision, since Anthropic handles media in tool results natively.
 	largeModel := Model{
 		ModelCfg: config.SelectedModel{Provider: string(catwalk.InferenceProviderAnthropic)},
 		CatwalkCfg: catwalk.Model{
-			SupportsImages: true,
+			Capabilities: catwalk.Capabilities{Vision: true},
 		},
 	}
 

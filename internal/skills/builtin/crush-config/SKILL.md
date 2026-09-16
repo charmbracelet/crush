@@ -72,15 +72,16 @@ provider add <id> [flags]    # define/update; repeated calls merge
 provider remove <id>         # alias: rm — removes the provider and its models
 ```
 
-Flags: `--name`, `--type` (`openai`, `openai-compat`, `anthropic`, or a local
-type like `ollama`, `lmstudio`, `llamacpp`), `--api-key`, `--base-url`,
+Flags: `--name`, `--type` (`completions`, `responses`, `messages`, or a local
+type like `ollama`, `lmstudio`, `llamacpp`; legacy values `openai`, `openai-compat`,
+`anthropic` are migrated automatically), `--api-key`, `--base-url`,
 `--disable BOOL`, `--flat-rate BOOL`, `--discover-models BOOL`,
 `--system-prompt-prefix TEXT`, `--extra-header KEY VALUE` (repeatable),
 `--extra-body JSON`, `--provider-options JSON`.
 
 ```bash
 provider add deepseek \
-  --type openai-compat \
+  --type completions \
   --base-url "https://api.deepseek.com/v1" \
   --api-key "${DEEPSEEK_API_KEY:?set DEEPSEEK_API_KEY}"
 ```
@@ -97,9 +98,10 @@ model small [<provider>/<id>] [flags]  # set the small slot; no arg prints it
 - `<provider>/<id>` is the same form `crush models` prints. A missing slash is
   an error. `model add` requires the provider to already exist.
 - `model add` flags: `--name`, `--context-window N`, `--default-max-tokens N`,
-  `--can-reason BOOL`, `--supports-images BOOL`, `--price-input F`,
-  `--price-output F`, `--price-cache-create F`, `--price-cache-hit F`,
-  `--reasoning-effort low|medium|high`.
+  `--thinking always|never|toggleable`, `--supports-images BOOL`,
+  `--price-input F`, `--price-output F`, `--price-cache-create F`,
+  `--price-cache-hit F`, `--reasoning-effort low|medium|high`,
+  `--max-attachments N`.
 - `model large`/`model small` flags: `--think`, `--reasoning-effort`,
   `--max-tokens N`, `--temperature F`, `--top-p F`, `--top-k N`,
   `--frequency-penalty F`, `--presence-penalty F`, `--provider-options JSON`.

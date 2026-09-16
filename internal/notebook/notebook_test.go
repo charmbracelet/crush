@@ -919,11 +919,11 @@ func TestMem0Sync_NilGuards(t *testing.T) {
 	// Should not panic.
 
 	// Empty server name should be a no-op.
-	m = NewMem0Sync(nil, "", "session1")
+	m = NewMem0Sync(nil, "")
 	m.SyncEntries(context.Background(), []Entry{{ID: "test"}})
 
 	// Empty entries should be a no-op.
-	m = NewMem0Sync(nil, "mem0", "session1")
+	m = NewMem0Sync(nil, "mem0")
 	m.SyncEntries(context.Background(), nil)
 }
 

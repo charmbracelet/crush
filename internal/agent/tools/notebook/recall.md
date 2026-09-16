@@ -11,7 +11,7 @@ recall("segment:5.2") — retrieve all events from segment 2 of turn 5
 recall("command") — retrieve all command events
 recall("decision") — retrieve all decision events
 recall("auth.go") — fuzzy text search for auth.go
-recall("cross:auth.go") — search across sessions via mem0 (requires sync enabled)
+recall("cross:auth.go") — search across sessions in this project via mem0 (requires sync enabled; the memory server must accept metadata filters or return JSON memories, otherwise cross: returns nothing rather than leaking other projects)
 recall("result:<tool_call_id>") — retrieve the original full output of a tool call that was compacted to a stub or digested
 
 Returns: full notebook entries with all preserved details, or the

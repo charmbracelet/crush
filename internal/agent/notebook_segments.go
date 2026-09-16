@@ -629,7 +629,7 @@ func (a *sessionAgent) generateSegment(ctx context.Context, sessionID string, s 
 		if err != nil {
 			slog.Error("Failed to get segment entries for mem0 sync", "error", err)
 		} else {
-			mem0 := notebook.NewMem0Sync(a.configStore, a.notebookMemoryServer, sessionID)
+			mem0 := notebook.NewMem0Sync(a.configStore, a.notebookMemoryServer)
 			mem0.SyncEntries(ctx, entries)
 		}
 	}

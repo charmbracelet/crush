@@ -23,7 +23,7 @@ var recallDescription []byte
 
 // RecallParams holds the parameters for the recall tool.
 type RecallParams struct {
-	Query string `json:"query" description:"Search query: a tag (file:auth.go), event type (command, decision), turn number (turn:5), segment (segment:5.2), an original tool result (result:<tool_call_id>), or text to search for. Use cross: prefix to search across sessions via mem0."`
+	Query string `json:"query" description:"Search query: a tag (file:auth.go), event type (command, decision), turn number (turn:5), segment (segment:5.2), an original tool result (result:<tool_call_id>), or text to search for. Use cross: prefix to search across sessions in this project via mem0."`
 }
 
 // recallContext holds dependencies for the recall tool.

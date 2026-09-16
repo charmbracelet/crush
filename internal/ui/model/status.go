@@ -110,6 +110,10 @@ func (s *Status) Draw(scr uv.Screen, area uv.Rectangle) {
 		s.help.SetWidth(max(0, helpWidth))
 		helpView := helpStyle.Render(s.help.View(s.helpKm))
 		if badge != "" {
+			// Indent the rows after the first so the expanded help lines up
+			// with the hints on the badge row.
+			indent := strings.Repeat(" ", badgeLeftInset+lipgloss.Width(badge)+1)
+			helpView = strings.ReplaceAll(helpView, "\n", "\n"+indent)
 			helpView = strings.Repeat(" ", badgeLeftInset) + badge + " " + helpView
 		}
 		uv.NewStyledString(helpView).Draw(scr, area)

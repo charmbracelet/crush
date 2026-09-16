@@ -112,6 +112,10 @@ func NewViewTool(
 			// Handle relative paths
 			filePath := filepathext.SmartJoin(workingDir, params.FilePath)
 
+			if resp, ignored := ignoredPathResponse(workingDir, filePath); ignored {
+				return resp, nil
+			}
+
 			// Check if file is outside working directory and request permission if needed
 			absWorkingDir, err := filepath.Abs(workingDir)
 			if err != nil {

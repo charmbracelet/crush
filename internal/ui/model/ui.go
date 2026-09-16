@@ -2096,6 +2096,9 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		cmds = append(cmds, util.ReportInfo("Theme saved"))
 		m.dialog.CloseDialog(dialog.ThemeEditorID)
+		if td, ok := m.dialog.Dialog(dialog.ThemeID).(*dialog.Theme); ok {
+			td.RefreshThemes(themeName)
+		}
 	case dialog.ActionEditTheme:
 		m.openThemeEditorDialog(msg.Name)
 	case dialog.ActionRevertThemePalette:
@@ -2177,6 +2180,28 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			}
 		}
 		cmds = append(cmds, util.ReportInfo("Renamed theme "+oldName+" to "+newName))
+		m.dialog.CloseDialog(dialog.ThemeID)
+		m.openThemeDialog()
+	case dialog.ActionDeleteTheme:
+		if err := styles.DeleteThemeFile(msg.Name); err != nil {
+			cmds = append(cmds, util.ReportError(err))
+			break
+		}
+		// If the deleted theme was active, reset to the default theme.
+		if strings.EqualFold(common.ThemeNameFromConfig(m.com.Config()), msg.Name) {
+			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.tui.active_theme", "charmtone"); err != nil {
+				cmds = append(cmds, util.ReportError(err))
+				break
+			}
+			newStyles, err := styles.LoadTheme("charmtone")
+			if err != nil {
+				cmds = append(cmds, util.ReportError(err))
+				break
+			}
+			m.applyTheme(newStyles)
+			m.preThemeStyles = nil
+		}
+		cmds = append(cmds, util.ReportInfo("Deleted theme "+msg.Name))
 		m.dialog.CloseDialog(dialog.ThemeID)
 		m.openThemeDialog()
 	case dialog.ActionToggleMouseSupport:

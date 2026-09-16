@@ -164,12 +164,17 @@ func FindThemeFile(name string) (string, error) {
 // separated by single hyphens or underscores.
 var validThemeName = regexp.MustCompile(`^[a-z0-9]+([-_][a-z0-9]+)*$`)
 
+// ThemeNameFormatHint is the longest message the theme-name validators can
+// return. Dialogs reserve space for it so they do not grow when an error
+// appears.
+const ThemeNameFormatHint = "use lowercase letters, numbers, hyphens, and underscores only"
+
 func validateThemeNameFormat(name string) error {
 	if name == "" {
 		return errors.New("theme name cannot be empty")
 	}
-	if !validThemeName.MatchString(strings.ToLower(name)) {
-		return errors.New("use lowercase letters, numbers, hyphens, and underscores only")
+	if !validThemeName.MatchString(name) {
+		return errors.New(ThemeNameFormatHint)
 	}
 	return nil
 }
@@ -194,13 +199,10 @@ func ValidateThemeName(name string) error {
 // theme to itself (case-insensitive). It still rejects builtins and
 // collisions with other themes.
 func ValidateThemeRename(oldName, newName string) error {
-	if newName == "" {
-		return errors.New("theme name cannot be empty")
+	if err := validateThemeNameFormat(newName); err != nil {
+		return err
 	}
 	lower := strings.ToLower(newName)
-	if !validThemeName.MatchString(lower) {
-		return errors.New("use lowercase letters, numbers, hyphens, and underscores only")
-	}
 	if IsBuiltinTheme(lower) {
 		return fmt.Errorf("%q is a built-in theme", lower)
 	}
@@ -230,6 +232,23 @@ func RenameThemeFile(oldName, newName string) (string, string, error) {
 		return "", "", fmt.Errorf("rename theme file: %w", err)
 	}
 	return oldPath, newPath, nil
+}
+
+// DeleteThemeFile removes a user theme file from disk. It rejects
+// built-in themes and returns an error when the theme is not found.
+func DeleteThemeFile(name string) error {
+	lower := strings.ToLower(name)
+	if IsBuiltinTheme(lower) {
+		return fmt.Errorf("%q is a built-in theme", lower)
+	}
+	path, err := FindThemeFile(lower)
+	if err != nil {
+		return fmt.Errorf("delete theme: %w", err)
+	}
+	if err := os.Remove(path); err != nil {
+		return fmt.Errorf("delete theme file: %w", err)
+	}
+	return nil
 }
 
 // ListUserThemes returns the names of all user-defined themes found

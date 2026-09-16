@@ -7,6 +7,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	uv "github.com/charmbracelet/ultraviolet"
@@ -104,10 +105,16 @@ func (d *ThemeNew) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	rc := NewRenderContext(t, width)
 	rc.Title = "New Theme"
 	rc.AddPart(t.Dialog.InputPrompt.Render(d.input.View()))
+	// Reserve space for the validation error so the dialog keeps the same
+	// height when an error appears. The reserve is sized to the longest
+	// message the validator can produce, wrapped at the error width.
+	errWidth := innerWidth - 2 // account for left and right margins
+	errStyle := t.Dialog.TitleError.Margin(0, 1).MarginBottom(1).Width(errWidth)
+	reservedErrHeight := lipgloss.Height(errStyle.Render(styles.ThemeNameFormatHint))
 	if d.err != "" {
-		errWidth := innerWidth - 2 // account for left and right margins
-		errStyle := t.Dialog.TitleError.Margin(0, 1).MarginBottom(1).Width(errWidth)
-		rc.AddPart(errStyle.Render(d.err))
+		rc.AddPart(errStyle.Height(reservedErrHeight).Render(d.err))
+	} else {
+		rc.AddPart(errStyle.Height(reservedErrHeight).Render(""))
 	}
 	rc.Help = renderDialogHelp(t, &d.help, d, innerWidth)
 

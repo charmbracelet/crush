@@ -91,6 +91,9 @@ type (
 		OldName string
 		NewName string
 	}
+	ActionDeleteTheme struct {
+		Name string
+	}
 	ActionInitializeProject struct{}
 	ActionSummarize         struct {
 		SessionID string

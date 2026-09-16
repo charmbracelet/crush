@@ -28,6 +28,7 @@ type themesMode uint8
 const (
 	themesModeNormal themesMode = iota
 	themesModeRenaming
+	themesModeDeleting
 )
 
 // Theme is the theme management dialog. It lists all available themes
@@ -49,8 +50,11 @@ type Theme struct {
 		EditTheme     key.Binding
 		Rename        key.Binding
 		Revert        key.Binding
+		Delete        key.Binding
 		ConfirmRename key.Binding
 		CancelRename  key.Binding
+		ConfirmDelete key.Binding
+		CancelDelete  key.Binding
 		Close         key.Binding
 	}
 }
@@ -155,6 +159,18 @@ func NewTheme(com *common.Common) *Theme {
 		key.WithKeys("ctrl+d"),
 		key.WithHelp("ctrl+d", "revert"),
 	)
+	th.keyMap.Delete = key.NewBinding(
+		key.WithKeys("ctrl+x"),
+		key.WithHelp("ctrl+x", "delete"),
+	)
+	th.keyMap.ConfirmDelete = key.NewBinding(
+		key.WithKeys("y", "enter"),
+		key.WithHelp("y", "delete"),
+	)
+	th.keyMap.CancelDelete = key.NewBinding(
+		key.WithKeys("n", "esc"),
+		key.WithHelp("n", "cancel"),
+	)
 	th.keyMap.ConfirmRename = key.NewBinding(
 		key.WithKeys("enter"),
 		key.WithHelp("enter", "confirm"),
@@ -173,13 +189,36 @@ func (th *Theme) ID() string {
 	return ThemeID
 }
 
+// RefreshThemes rebuilds the theme list after on-disk changes (e.g. the
+// theme editor saved an override), so labels like "(overridden)" and the
+// revert keybind update immediately. The selection moves to selectName
+// when it still exists.
+func (th *Theme) RefreshThemes(selectName string) {
+	th.setThemeItems()
+	for i, item := range th.list.FilteredItems() {
+		if ti, ok := item.(*ThemeItem); ok && strings.EqualFold(ti.name, selectName) {
+			th.list.SetSelected(i)
+			break
+		}
+	}
+}
+
 // RefreshStyles invalidates cached renders on all theme items so they
 // pick up in-place style mutations after a theme switch or preview.
 func (th *Theme) RefreshStyles() {
+	// The input and help models keep their own copies of style structs,
+	// so re-apply them to pick up the previewed theme's colors.
+	th.input.SetStyles(th.com.Styles.TextInput)
+	th.help.Styles = th.com.Styles.DialogHelpStyles()
 	for _, item := range th.list.FilteredItems() {
-		if ti, ok := item.(*ThemeItem); ok {
-			ti.cache = nil
-			ti.Bump()
+		switch it := item.(type) {
+		case *ThemeItem:
+			it.cache = nil
+			it.Bump()
+		case *ThemeSectionHeader:
+			// Section headers are render-frozen in the list cache, so
+			// bump them to force a re-render with the new styles.
+			it.Bump()
 		}
 	}
 }
@@ -249,6 +288,17 @@ func (th *Theme) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		switch th.mode {
+		case themesModeDeleting:
+			switch {
+			case key.Matches(msg, th.keyMap.ConfirmDelete):
+				action := th.confirmDelete()
+				th.mode = themesModeNormal
+				th.setThemeItems()
+				return action
+			case key.Matches(msg, th.keyMap.CancelDelete):
+				th.mode = themesModeNormal
+				th.setThemeItems()
+			}
 		case themesModeRenaming:
 			switch {
 			case key.Matches(msg, th.keyMap.ConfirmRename):
@@ -295,6 +345,13 @@ func (th *Theme) HandleMsg(msg tea.Msg) Action {
 				}
 				th.selectedIndex = th.list.Selected()
 				th.mode = themesModeRenaming
+				th.setThemeItems()
+			case key.Matches(msg, th.keyMap.Delete):
+				if !th.canDeleteSelected() {
+					break
+				}
+				th.selectedIndex = th.list.Selected()
+				th.mode = themesModeDeleting
 				th.setThemeItems()
 			case key.Matches(msg, th.keyMap.Revert):
 				selectedItem := th.list.SelectedItem()
@@ -345,6 +402,25 @@ func (th *Theme) HandleMsg(msg tea.Msg) Action {
 		}
 	}
 	return nil
+}
+
+func (th *Theme) confirmDelete() Action {
+	item := th.selectedThemeItem()
+	if item == nil || item.name == newThemeItemName {
+		return nil
+	}
+	return ActionDeleteTheme{Name: item.name}
+}
+
+// canDeleteSelected reports whether the currently selected theme item
+// supports deletion (user-defined, not the sentinel). Built-in themes
+// and overrides use revert instead.
+func (th *Theme) canDeleteSelected() bool {
+	item := th.selectedThemeItem()
+	if item == nil || item.name == newThemeItemName {
+		return false
+	}
+	return !styles.IsBuiltinTheme(item.name)
 }
 
 func (th *Theme) confirmRename() Action {
@@ -408,6 +484,12 @@ func (th *Theme) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	rc := NewRenderContext(t, width)
 	rc.Title = "Themes"
 	switch th.mode {
+	case themesModeDeleting:
+		rc.TitleStyle = t.Dialog.Sessions.DeletingTitle
+		rc.TitleGradientFromColor = t.Dialog.Sessions.DeletingTitleGradientFromColor
+		rc.TitleGradientToColor = t.Dialog.Sessions.DeletingTitleGradientToColor
+		rc.ViewStyle = t.Dialog.Sessions.DeletingView
+		rc.AddPart(t.Dialog.Sessions.DeletingMessage.Render("Delete this theme?"))
 	case themesModeRenaming:
 		rc.TitleStyle = t.Dialog.Sessions.RenamingingTitle
 		rc.TitleGradientFromColor = t.Dialog.Sessions.RenamingTitleGradientFromColor
@@ -472,6 +554,18 @@ func (th *Theme) canRevertSelected() bool {
 }
 
 func (th *Theme) ShortHelp() []key.Binding {
+	switch th.mode {
+	case themesModeDeleting:
+		return []key.Binding{
+			th.keyMap.ConfirmDelete,
+			th.keyMap.CancelDelete,
+		}
+	case themesModeRenaming:
+		return []key.Binding{
+			th.keyMap.ConfirmRename,
+			th.keyMap.CancelRename,
+		}
+	}
 	bindings := []key.Binding{
 		th.keyMap.UpDown,
 	}
@@ -485,6 +579,9 @@ func (th *Theme) ShortHelp() []key.Binding {
 		if th.canRevertSelected() {
 			bindings = append(bindings, th.keyMap.Revert)
 		}
+		if th.canDeleteSelected() {
+			bindings = append(bindings, th.keyMap.Delete)
+		}
 	}
 	bindings = append(bindings, th.keyMap.Select, th.keyMap.Close)
 	return bindings
@@ -494,9 +591,15 @@ func (th *Theme) FullHelp() [][]key.Binding {
 	if th.mode == themesModeRenaming {
 		return [][]key.Binding{{th.keyMap.ConfirmRename, th.keyMap.CancelRename}}
 	}
+	if th.mode == themesModeDeleting {
+		return [][]key.Binding{{th.keyMap.ConfirmDelete, th.keyMap.CancelDelete}}
+	}
 	row2 := []key.Binding{th.keyMap.Close}
 	if th.canRevertSelected() {
 		row2 = append([]key.Binding{th.keyMap.Revert}, row2...)
+	}
+	if th.canDeleteSelected() {
+		row2 = append([]key.Binding{th.keyMap.Delete}, row2...)
 	}
 	if th.canRenameSelected() {
 		row2 = append([]key.Binding{th.keyMap.Rename}, row2...)
@@ -566,7 +669,8 @@ func (th *Theme) setThemeItems() {
 	// Restore selection or default to the currently active theme, matching
 	// the behavior of the session and model pickers.
 	switch {
-	case th.mode == themesModeRenaming && th.selectedIndex >= 0 && th.selectedIndex < len(items):
+	case (th.mode == themesModeRenaming || th.mode == themesModeDeleting) &&
+		th.selectedIndex >= 0 && th.selectedIndex < len(items):
 		th.list.SetSelected(th.selectedIndex)
 	default:
 		selected := 0
@@ -687,6 +791,9 @@ func (r *ThemeItem) Render(width int) string {
 	}
 
 	switch r.mode {
+	case themesModeDeleting:
+		s.ItemBlurred = r.t.Dialog.Sessions.DeletingItemBlurred
+		s.ItemFocused = r.t.Dialog.Sessions.DeletingItemFocused
 	case themesModeRenaming:
 		s.ItemBlurred = r.t.Dialog.Sessions.RenamingItemBlurred
 		s.ItemFocused = r.t.Dialog.Sessions.RenamingingItemFocused

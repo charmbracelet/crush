@@ -172,6 +172,39 @@ func TestRenameThemeFile_ReturnsPaths(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestValidateThemeName_RejectsUppercase(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"MyTheme", "MY-THEME", "my_Theme", "Uppercase"} {
+		require.Error(t, ValidateThemeName(name), "name %q should be rejected", name)
+	}
+}
+
+func TestDeleteThemeFile_RemovesUserTheme(t *testing.T) {
+	dir := t.TempDir()
+	setTestThemeDirs(t, []string{dir})
+	path := filepath.Join(dir, "my-theme.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{}`), 0o644))
+
+	require.NoError(t, DeleteThemeFile("my-theme"))
+	_, err := os.Stat(path)
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestDeleteThemeFile_RejectsBuiltin(t *testing.T) {
+	require.Error(t, DeleteThemeFile("charmtone"))
+}
+
+func TestDeleteThemeFile_NotFound(t *testing.T) {
+	dir := t.TempDir()
+	setTestThemeDirs(t, []string{dir})
+	require.Error(t, DeleteThemeFile("missing-theme"))
+}
+
+func TestValidateThemeRename_RejectsUppercase(t *testing.T) {
+	t.Parallel()
+	require.Error(t, ValidateThemeRename("old-name", "MyTheme"))
+}
+
 func TestListUserThemes_NormalizesFilenameCase(t *testing.T) {
 	dir := t.TempDir()
 	setTestThemeDirs(t, []string{dir})

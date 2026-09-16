@@ -556,6 +556,10 @@ func sessionWriter(ctx context.Context, contentHeight int) (io.Writer, func(), b
 	}
 
 	if err := cmd.Start(); err != nil {
+		// `pipe` is the read end of an OS pipe owned by `cmd`; once Start fails,
+		// the cleanup func we return is a no-op, so close it here or the FD leaks
+		// every time the pager binary is missing/unexecutable.
+		pipe.Close()
 		return colorprofile.NewWriter(os.Stdout, os.Environ()), func() {}, false
 	}
 

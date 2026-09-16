@@ -1087,6 +1087,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.handlePermissionNotification(msg.Payload)
 	case pubsub.Event[pinentry.Event]:
 		cmds = append(cmds, m.handlePinentryEvent(msg.Payload))
+	case pubsub.Event[pinentry.PromptError]:
+		if cmd := m.handlePinentryPromptError(msg.Payload); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case pubsub.Event[pinentry.PromptRequest]:
 		if cmd := m.openPinentryDialog(msg.Payload); cmd != nil {
 			cmds = append(cmds, cmd)

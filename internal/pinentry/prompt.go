@@ -46,6 +46,16 @@ type Notification struct {
 	RequestID string `json:"request_id"`
 }
 
+// PromptError is published as soon as a credential attempt fails, so
+// clients can surface the reason immediately rather than waiting for the
+// next (retry) prompt.
+type PromptError struct {
+	// RequestID identifies the prompt the failed attempt belonged to.
+	RequestID string `json:"request_id,omitempty"`
+	// Error describes why the attempt failed.
+	Error string `json:"error"`
+}
+
 // ErrCancelled is returned when the user cancelled the prompt.
 var ErrCancelled = errors.New("pinentry prompt cancelled by user")
 
@@ -64,6 +74,7 @@ var ErrNoPrompter = errors.New("no pinentry prompt listener available")
 type Prompts struct {
 	broker             *pubsub.Broker[PromptRequest]
 	notificationBroker *pubsub.Broker[Notification]
+	errorBroker        *pubsub.Broker[PromptError]
 
 	mu         sync.Mutex
 	pending    chan PromptResponse
@@ -88,6 +99,7 @@ func NewPrompts() *Prompts {
 	return &Prompts{
 		broker:             pubsub.NewBroker[PromptRequest](),
 		notificationBroker: pubsub.NewBroker[Notification](),
+		errorBroker:        pubsub.NewBroker[PromptError](),
 	}
 }
 
@@ -109,6 +121,12 @@ func (s *Prompts) Subscribe(ctx context.Context) <-chan pubsub.Event[PromptReque
 // notifications.
 func (s *Prompts) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[Notification] {
 	return s.notificationBroker.Subscribe(ctx)
+}
+
+// SubscribeErrors returns a channel for failed-attempt errors, published
+// the moment a bad credential is rejected by GPG.
+func (s *Prompts) SubscribeErrors(ctx context.Context) <-chan pubsub.Event[PromptError] {
+	return s.errorBroker.Subscribe(ctx)
 }
 
 // Prompt publishes a credential request and blocks until the user
@@ -150,6 +168,14 @@ func (s *Prompts) Prompt(ctx context.Context, req PromptRequest) (string, error)
 	// Credential prompts are terminal events; losing one to a full
 	// buffer would hang the GPG operation.
 	s.broker.PublishMustDeliver(context.Background(), pubsub.CreatedEvent, req)
+	// A retry request carries the reason the previous attempt failed;
+	// surface it immediately so the user sees it as soon as it happens.
+	if req.Error != "" {
+		s.errorBroker.PublishMustDeliver(context.Background(), pubsub.CreatedEvent, PromptError{
+			RequestID: req.ID,
+			Error:     req.Error,
+		})
+	}
 
 	select {
 	case <-ctx.Done():

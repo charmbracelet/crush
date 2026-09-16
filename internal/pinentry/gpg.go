@@ -142,7 +142,12 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) error {
 
 	// The operation genuinely needs a credential the agent does not
 	// have. Collect one and retry, re-prompting on a bad value.
-	lastErr := probeErr
+	//
+	// The probe error is deliberately not carried into the first prompt:
+	// it reflects the empty-passphrase probe, not a user attempt, so
+	// only genuine retries (a user-provided credential GPG rejected)
+	// surface an error.
+	var lastErr error
 	for attempt := 1; attempt <= maxPassphraseAttempts; attempt++ {
 		secret, perr := r.collectCredential(ctx, st, attempt, lastErr)
 		if perr != nil {

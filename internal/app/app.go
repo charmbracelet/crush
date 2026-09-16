@@ -701,6 +701,7 @@ func (app *App) setupEvents() {
 	app.subscribeMustDeliver(ctx, "pinentry", app.Pinentry.Subscribe)
 	app.subscribeMustDeliver(ctx, "pinentry-prompts", pinentry.DefaultPrompts().Subscribe)
 	app.subscribeMustDeliver(ctx, "pinentry-notifications", pinentry.DefaultPrompts().SubscribeNotifications)
+	app.subscribeMustDeliver(ctx, "pinentry-errors", pinentry.DefaultPrompts().SubscribeErrors)
 	app.subscribeMustDeliver(ctx, "run-completions", app.runCompletions.Subscribe)
 	app.subscribe(ctx, "mcp", mcp.SubscribeEvents)
 	app.subscribe(ctx, "lsp", SubscribeLSPEvents)

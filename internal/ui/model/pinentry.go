@@ -134,3 +134,10 @@ func (m *UI) handlePinentryNotification(_ pinentry.Notification) {
 		m.dialog.CloseDialog(dialog.PinentryID)
 	}
 }
+
+// handlePinentryPromptError surfaces a failed credential attempt as a
+// caution-level status notification the moment GPG rejects a passphrase
+// or PIN, instead of waiting for (or printing inside) the retry dialog.
+func (m *UI) handlePinentryPromptError(pe pinentry.PromptError) tea.Cmd {
+	return util.ReportWarn(pe.Error)
+}

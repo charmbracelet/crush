@@ -142,18 +142,7 @@ func (m *Pinentry) descriptionView() string {
 	if m.req.KeyInfo != "" {
 		lines = append(lines, "Key: "+m.req.KeyInfo)
 	}
-	if m.req.Error != "" {
-		lines = append(lines, m.com.Styles.Dialog.PrimaryText.Render("Previous attempt failed: "+firstLine(m.req.Error)))
-	}
 	return strings.Join(lines, "\n")
-}
-
-func firstLine(s string) string {
-	s = strings.TrimSpace(s)
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		return s[:i]
-	}
-	return s
 }
 
 // noun returns the credential noun for titles.

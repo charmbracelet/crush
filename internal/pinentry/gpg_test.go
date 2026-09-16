@@ -78,6 +78,9 @@ func TestRunnerPromptsAndSucceeds(t *testing.T) {
 	require.Equal(t, 1, rec.calls)
 	require.Equal(t, KindPassphrase, rec.reqs[0].Kind)
 	require.Equal(t, "Test Key <test@example.com>", rec.reqs[0].KeyInfo, "user id hint is surfaced")
+	// The first prompt carries no error: the probe failure was an empty
+	// passphrase, not a user attempt.
+	require.Empty(t, rec.reqs[0].Error)
 }
 
 func TestRunnerRetriesBadPassphraseThenGivesUp(t *testing.T) {
@@ -91,6 +94,11 @@ func TestRunnerRetriesBadPassphraseThenGivesUp(t *testing.T) {
 	require.Equal(t, 0, rec.reqs[0].RetryCount)
 	require.Equal(t, 1, rec.reqs[1].RetryCount)
 	require.Equal(t, 2, rec.reqs[2].RetryCount)
+	// Only genuine retries carry the error that rejected the previous
+	// credential; the first prompt does not.
+	require.Empty(t, rec.reqs[0].Error)
+	require.NotEmpty(t, rec.reqs[1].Error)
+	require.NotEmpty(t, rec.reqs[2].Error)
 }
 
 func TestRunnerFallsBackWhenLoopbackUnsupported(t *testing.T) {

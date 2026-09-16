@@ -59,6 +59,7 @@ const (
 
 const (
 	AgentCoder string = "coder"
+	AgentPlan  string = "plan"
 	AgentTask  string = "task"
 )
 
@@ -147,6 +148,12 @@ type ProviderConfig struct {
 
 	// The provider models
 	Models []catwalk.Model `json:"models,omitempty" jsonschema:"description=List of models available from this provider"`
+
+	// ChatGPTModels lists the models the ChatGPT (Codex) backend grants
+	// when the provider is authenticated with a ChatGPT account. It is
+	// the provider's whole catalog in that case: the API-key models in
+	// Models are not served by the subscription.
+	ChatGPTModels []catwalk.Model `json:"chatgpt_models,omitempty" jsonschema:"-"`
 }
 
 // ToProvider converts the [ProviderConfig] to a [catwalk.Provider].
@@ -181,6 +188,17 @@ func (c *ProviderConfig) ToProvider() catwalk.Provider {
 
 func (c *ProviderConfig) SetupGitHubCopilot() {
 	maps.Copy(c.ExtraHeaders, copilot.Headers())
+}
+
+// HasAPIKey reports whether the provider's api_key resolves to a usable
+// credential. The stored value is often an unresolved template like
+// $OPENAI_API_KEY, which is not a credential until the variable exists.
+func (c *ProviderConfig) HasAPIKey(resolver VariableResolver) bool {
+	if c.APIKey == "" {
+		return false
+	}
+	v, err := resolver.ResolveValue(c.APIKey)
+	return err == nil && v != ""
 }
 
 type MCPType string
@@ -853,6 +871,11 @@ func (c *Config) GetModel(provider, model string) *catwalk.Model {
 				return &m
 			}
 		}
+		for _, m := range providerConfig.ChatGPTModels {
+			if m.ID == model {
+				return &m
+			}
+		}
 	}
 	return nil
 }
@@ -977,6 +1000,24 @@ func resolveReadOnlyTools(tools []string) []string {
 	return filterSlice(tools, readOnlyTools, true)
 }
 
+func resolvePlanTools(tools []string) []string {
+	// The read-only LSP lookups mirror the task agent's tool set: planning
+	// needs symbol navigation just as much as research does.
+	planTools := []string{
+		"agent",
+		"glob",
+		"grep",
+		"ls",
+		"lsp_call_hierarchy",
+		"lsp_definition",
+		"lsp_symbols",
+		"question",
+		"sourcegraph",
+		"view",
+	}
+	return filterSlice(tools, planTools, true)
+}
+
 func filterSlice(data []string, mask []string, include bool) []string {
 	var filtered []string
 	for _, s := range data {
@@ -1009,6 +1050,17 @@ func (c *Config) SetupAgents() {
 			Model:        SelectedModelTypeLarge,
 			ContextPaths: c.Options.ContextPaths,
 			AllowedTools: resolveReadOnlyTools(allowedTools),
+			// NO MCPs or LSPs by default
+			AllowedMCP: map[string][]string{},
+		},
+
+		AgentPlan: {
+			ID:           AgentPlan,
+			Name:         "Plan",
+			Description:  "An agent that performs deep analysis and prepares implementation plans without modifying files.",
+			Model:        SelectedModelTypeLarge,
+			ContextPaths: c.Options.ContextPaths,
+			AllowedTools: resolvePlanTools(allowedTools),
 			// NO MCPs or LSPs by default
 			AllowedMCP: map[string][]string{},
 		},

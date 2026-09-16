@@ -619,6 +619,23 @@ func (app *App) GetDefaultSmallModel(providerID string) config.SelectedModel {
 		return largeModelCfg
 	}
 
+	// A ChatGPT-authenticated OpenAI provider only serves the models the
+	// subscription grants, so the default small model must come from that
+	// catalog as well.
+	if providerID == string(catwalk.InferenceProviderOpenAI) && largeModelCfg.Provider == providerID {
+		if pc, ok := cfg.Providers.Get(providerID); ok && pc.OAuthToken != nil {
+			if small := chatGPTSmallModel(pc); small != nil {
+				return config.SelectedModel{
+					Provider:        providerID,
+					Model:           small.ID,
+					MaxTokens:       small.DefaultMaxTokens,
+					ReasoningEffort: small.DefaultReasoningEffort,
+				}
+			}
+			return largeModelCfg
+		}
+	}
+
 	slog.Info("Using provider default small model", "provider", providerID, "model", defaultSmallModelID)
 	return config.SelectedModel{
 		Provider:        providerID,
@@ -626,6 +643,22 @@ func (app *App) GetDefaultSmallModel(providerID string) config.SelectedModel {
 		MaxTokens:       model.DefaultMaxTokens,
 		ReasoningEffort: model.DefaultReasoningEffort,
 	}
+}
+
+// chatGPTSmallModel picks a lightweight model from the ChatGPT catalog,
+// preferring a "mini" variant and falling back to the last entry (the
+// catalog lists heavier models first). Returns nil when the catalog is
+// empty.
+func chatGPTSmallModel(pc config.ProviderConfig) *catwalk.Model {
+	for i := range pc.ChatGPTModels {
+		if strings.Contains(pc.ChatGPTModels[i].ID, "mini") {
+			return &pc.ChatGPTModels[i]
+		}
+	}
+	if len(pc.ChatGPTModels) > 0 {
+		return &pc.ChatGPTModels[len(pc.ChatGPTModels)-1]
+	}
+	return nil
 }
 
 func (app *App) setupEvents() {

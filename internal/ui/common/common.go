@@ -20,6 +20,103 @@ import (
 // MaxAttachmentSize defines the maximum allowed size for file attachments (5 MB).
 const MaxAttachmentSize = int64(5 * 1024 * 1024)
 
+// PlanStartMarker is the sentinel the plan agent emits on its own line at the
+// very start of its final response, so the UI can tell the plan document
+// apart from the agent's intermediate exploratory replies while it streams.
+const PlanStartMarker = "<!-- CRUSH_PLAN_START -->"
+
+// PlanReadyMarker is the sentinel the plan agent emits on its own line at the
+// end of its final response to signal that the plan is ready for execution.
+const PlanReadyMarker = "<!-- CRUSH_PLAN_READY -->"
+
+// PlanStartMarkerPresent reports whether text contains the plan-start
+// sentinel on a line by itself. See [PlanReadyMarkerPresent] for why the
+// check is line-scoped.
+func PlanStartMarkerPresent(text string) bool {
+	return planMarkerPresent(text, PlanStartMarker)
+}
+
+// PlanReadyMarkerPresent reports whether text contains the plan-ready sentinel
+// on a line by itself. An own-line check (rather than a substring match) avoids
+// a false positive when the agent merely mentions the marker inside explanatory
+// prose, while still tolerating trailing whitespace or notes after it. Inline
+// code backticks around the marker count as a marker line too: some models wrap
+// the marker despite the prompt asking for plain text.
+func PlanReadyMarkerPresent(text string) bool {
+	return planMarkerPresent(text, PlanReadyMarker)
+}
+
+func planMarkerPresent(text, marker string) bool {
+	for line := range strings.SplitSeq(text, "\n") {
+		if planMarkerLine(line, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// planMarkerLine reports whether the line consists solely of the given plan
+// sentinel, optionally wrapped in inline-code backticks and whitespace.
+func planMarkerLine(line, marker string) bool {
+	trimmed := strings.TrimSpace(strings.Trim(strings.TrimSpace(line), "`"))
+	return trimmed == marker
+}
+
+// StripPlanReadyMarker removes lines that consist solely of the plan-ready
+// sentinel (matching the detection rule of [PlanReadyMarkerPresent]) so the
+// marker never shows up in rendered chat output. Mentions of the marker
+// inside prose are left untouched. When the marker was wrapped in its own
+// code fence — ``` markers on the lines directly before and after — the
+// fence pair is removed with it so an empty code block is not left behind.
+func StripPlanReadyMarker(text string) string {
+	return stripPlanMarker(text, PlanReadyMarker)
+}
+
+// StripPlanMarkers removes both the plan-start and plan-ready sentinel lines.
+// Use it wherever rendered text could contain either marker, such as the plan
+// card (which strips the trailing ready marker and the leading start marker)
+// or an interrupted plan whose start marker never got its ready companion.
+func StripPlanMarkers(text string) string {
+	return stripPlanMarker(stripPlanMarker(text, PlanStartMarker), PlanReadyMarker)
+}
+
+func stripPlanMarker(text, marker string) string {
+	lines := strings.Split(text, "\n")
+	kept := lines[:0]
+	inFence := false
+	for i := 0; i < len(lines); i++ {
+		if planMarkerLine(lines[i], marker) {
+			// When the marker sits in a block fenced on the lines directly
+			// before and after, drop the whole block so an empty code
+			// block is not left behind. inFence guards against eating the
+			// closing fence of a real code block above the marker.
+			if inFence && len(kept) > 0 && isCodeFenceLine(kept[len(kept)-1]) &&
+				i+1 < len(lines) && isCodeFenceLine(lines[i+1]) {
+				kept = kept[:len(kept)-1]
+				i++
+				inFence = false
+			}
+			continue
+		}
+		if isCodeFenceLine(lines[i]) {
+			inFence = !inFence
+		}
+		kept = append(kept, lines[i])
+	}
+	return strings.Join(kept, "\n")
+}
+
+// isCodeFenceLine reports whether the line opens or closes a fenced code
+// block, e.g. ``` or ```go.
+func isCodeFenceLine(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasPrefix(trimmed, "```") {
+		return false
+	}
+	info := strings.TrimLeft(trimmed[3:], "`")
+	return !strings.ContainsAny(info, "` ")
+}
+
 // AllowedImageTypes defines the permitted image file types.
 var AllowedImageTypes = []string{".jpg", ".jpeg", ".png"}
 

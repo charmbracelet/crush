@@ -33,6 +33,8 @@ const (
 	InfoTypeWarn
 	InfoTypeError
 	InfoTypeUpdate
+	InfoTypePlan
+	InfoTypeYolo
 )
 
 func NewInfoMsg(info string) InfoMsg {

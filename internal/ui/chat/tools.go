@@ -30,6 +30,16 @@ const responseContextHeight = 10
 // toolBodyLeftPaddingTotal represents the padding that should be applied to each tool body
 const toolBodyLeftPaddingTotal = 2
 
+// collapsedMaxLines returns the number of lines to display when content
+// is collapsed. If collapsing would hide only a single line, all lines
+// are shown instead.
+func collapsedMaxLines(totalLines int) int {
+	if totalLines <= responseContextHeight+1 {
+		return totalLines
+	}
+	return responseContextHeight
+}
+
 // ToolStatus represents the current state of a tool call.
 type ToolStatus int
 
@@ -647,7 +657,7 @@ func toolOutputPlainContent(sty *styles.Styles, content string, width int, expan
 	content = common.RemapANSI16(content, sty.ANSI)
 	lines := strings.Split(content, "\n")
 
-	maxLines := responseContextHeight
+	maxLines := collapsedMaxLines(len(lines))
 	if expanded {
 		maxLines = len(lines) // Show all
 	}
@@ -664,12 +674,12 @@ func toolOutputPlainContent(sty *styles.Styles, content string, width int, expan
 		out = append(out, sty.Tool.ContentLine.Width(width).Render(ln))
 	}
 
-	wasTruncated := len(lines) > responseContextHeight
+	wasTruncated := len(lines) > maxLines
 
 	if !expanded && wasTruncated {
 		out = append(out, sty.Tool.ContentTruncation.
 			Width(width).
-			Render(fmt.Sprintf(assistantMessageTruncateFormat, len(lines)-responseContextHeight)))
+			Render(fmt.Sprintf(assistantMessageTruncateFormat, len(lines)-maxLines)))
 	}
 
 	return strings.Join(out, "\n")
@@ -680,7 +690,7 @@ func toolOutputCodeContent(sty *styles.Styles, path, content string, offset, wid
 	content = stringext.NormalizeSpace(content)
 
 	lines := strings.Split(content, "\n")
-	maxLines := responseContextHeight
+	maxLines := collapsedMaxLines(len(lines))
 	if expanded {
 		maxLines = len(lines)
 	}
@@ -970,7 +980,7 @@ func toolOutputDiffContent(sty *styles.Styles, file, oldContent, newContent stri
 	lines := strings.Split(formatted, "\n")
 
 	// Truncate if needed.
-	maxLines := responseContextHeight
+	maxLines := collapsedMaxLines(len(lines))
 	if expanded {
 		maxLines = len(lines)
 	}
@@ -1020,7 +1030,7 @@ func toolOutputMultiEditDiffContent(sty *styles.Styles, file string, meta tools.
 	lines := strings.Split(formatted, "\n")
 
 	// Truncate if needed.
-	maxLines := responseContextHeight
+	maxLines := collapsedMaxLines(len(lines))
 	if expanded {
 		maxLines = len(lines)
 	}
@@ -1080,7 +1090,7 @@ func toolOutputMarkdownContent(sty *styles.Styles, content string, width int, ex
 	}
 
 	lines := strings.Split(rendered, "\n")
-	maxLines := responseContextHeight
+	maxLines := collapsedMaxLines(len(lines))
 	if expanded {
 		maxLines = len(lines)
 	}

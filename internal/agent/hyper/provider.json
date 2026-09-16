@@ -9,17 +9,17 @@
     {
       "id": "deepseek-v4.1-flash",
       "name": "DeepSeek V4.1 Flash",
-      "cost_per_1m_in": 0.3,
-      "cost_per_1m_out": 1.2,
+      "cost_per_1m_in": 0.32664,
+      "cost_per_1m_out": 1.30656,
       "cost_per_1m_in_cached": 0,
-      "cost_per_1m_out_cached": 0.03,
-      "context_window": 1048576,
-      "default_max_tokens": 26214,
+      "cost_per_1m_out_cached": 0.032664,
+      "context_window": 1000000,
+      "default_max_tokens": 32768,
       "can_reason": true,
       "reasoning_levels": [
         "low",
         "high",
-        "xhigh"
+        "max"
       ],
       "default_reasoning_effort": "high",
       "supports_attachments": true
@@ -83,11 +83,10 @@
       "cost_per_1m_out": 4.311648,
       "cost_per_1m_in_cached": 0,
       "cost_per_1m_out_cached": 0.0479072,
-      "context_window": 1048576,
+      "context_window": 1000000,
       "default_max_tokens": 262144,
       "can_reason": true,
       "reasoning_levels": [
-        "none",
         "low",
         "high",
         "max"
@@ -98,10 +97,10 @@
     {
       "id": "gemma-4-26b-a4b-it",
       "name": "Gemma 4 26B A4B",
-      "cost_per_1m_in": 0.122,
-      "cost_per_1m_out": 0.42,
+      "cost_per_1m_in": 0.098,
+      "cost_per_1m_out": 0.334,
       "cost_per_1m_in_cached": 0,
-      "cost_per_1m_out_cached": 0.061,
+      "cost_per_1m_out_cached": 0.049,
       "context_window": 256000,
       "default_max_tokens": 25600,
       "can_reason": true,
@@ -111,7 +110,7 @@
       "id": "glm-5",
       "name": "GLM-5",
       "cost_per_1m_in": 0.86,
-      "cost_per_1m_out": 2.784,
+      "cost_per_1m_out": 2.752,
       "cost_per_1m_in_cached": 0,
       "cost_per_1m_out_cached": 0.43,
       "context_window": 202752,
@@ -122,10 +121,10 @@
     {
       "id": "glm-5.1",
       "name": "GLM-5.1",
-      "cost_per_1m_in": 1.326,
-      "cost_per_1m_out": 4.22,
+      "cost_per_1m_in": 1.358,
+      "cost_per_1m_out": 4.268,
       "cost_per_1m_in_cached": 0,
-      "cost_per_1m_out_cached": 0.663,
+      "cost_per_1m_out_cached": 0.679,
       "context_window": 202750,
       "default_max_tokens": 3276,
       "can_reason": true,
@@ -156,7 +155,7 @@
       "cost_per_1m_in_cached": 0,
       "cost_per_1m_out_cached": 0.283088,
       "context_window": 1048576,
-      "default_max_tokens": 262144,
+      "default_max_tokens": 128000,
       "can_reason": true,
       "reasoning_levels": [
         "low",
@@ -164,7 +163,7 @@
         "max"
       ],
       "default_reasoning_effort": "high",
-      "supports_attachments": true
+      "supports_attachments": false
     },
     {
       "id": "glm-5.3-flash",
@@ -264,9 +263,9 @@
       "cost_per_1m_out": 4.3552,
       "cost_per_1m_in_cached": 0,
       "cost_per_1m_out_cached": 0.206872,
-      "context_window": 262000,
+      "context_window": 256000,
       "default_max_tokens": 16000,
-      "can_reason": true,
+      "can_reason": false,
       "supports_attachments": true
     },
     {
@@ -314,10 +313,10 @@
     {
       "id": "llama-4-maverick-17b-128e-instruct-fp8",
       "name": "Llama 4 Maverick 17B 128E Instruct FP8",
-      "cost_per_1m_in": 0.274,
-      "cost_per_1m_out": 0.8992,
+      "cost_per_1m_in": 0.25188,
+      "cost_per_1m_out": 0.82563,
       "cost_per_1m_in_cached": 0,
-      "cost_per_1m_out_cached": 0.137,
+      "cost_per_1m_out_cached": 0.12594,
       "context_window": 430000,
       "default_max_tokens": 43000,
       "can_reason": true,
@@ -326,10 +325,10 @@
     {
       "id": "minimax-m2.7",
       "name": "MiniMax M2.7",
-      "cost_per_1m_in": 0.404,
-      "cost_per_1m_out": 1.496,
+      "cost_per_1m_in": 0.418,
+      "cost_per_1m_out": 1.588,
       "cost_per_1m_in_cached": 0,
-      "cost_per_1m_out_cached": 0.202,
+      "cost_per_1m_out_cached": 0.209,
       "context_window": 262100,
       "default_max_tokens": 6553,
       "can_reason": false,

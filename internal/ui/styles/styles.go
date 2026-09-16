@@ -127,6 +127,7 @@ type Styles struct {
 	// Markdown & Chroma
 	Markdown      ansi.StyleConfig
 	QuietMarkdown ansi.StyleConfig
+	PlanMarkdown  ansi.StyleConfig
 
 	// Inputs
 	TextInput textinput.Styles
@@ -142,8 +143,12 @@ type Styles struct {
 
 	// Buttons
 	Button struct {
-		Focused  lipgloss.Style
-		Blurred  lipgloss.Style
+		Focused lipgloss.Style
+		Blurred lipgloss.Style
+		// Inactive styles buttons of a prompt that is not in the
+		// active pane: slightly lighter than Blurred so the choices
+		// stay legible while the chat has focus.
+		Inactive lipgloss.Style
 		Hovered  lipgloss.Style
 		Negative lipgloss.Style // Selected negative/destructive action.
 	}
@@ -152,11 +157,19 @@ type Styles struct {
 	Editor struct {
 		Textarea textarea.Styles
 
-		// Normal mode prompt (default "::: ").
-		PromptNormalFocused lipgloss.Style
-		PromptNormalBlurred lipgloss.Style
+		// Normal mode prompt ("> " icon on the first line, "::: " after).
+		PromptNormalIconFocused lipgloss.Style
+		PromptNormalIconBlurred lipgloss.Style
+		PromptNormalFocused     lipgloss.Style
+		PromptNormalBlurred     lipgloss.Style
 
-		// YOLO mode prompt (" ! " icon + ":::" dots).
+		// Plan mode prompt.
+		PromptPlanIconFocused lipgloss.Style
+		PromptPlanIconBlurred lipgloss.Style
+		PromptPlanDotsFocused lipgloss.Style
+		PromptPlanDotsBlurred lipgloss.Style
+
+		// YOLO mode prompt.
 		PromptYoloIconFocused lipgloss.Style
 		PromptYoloIconBlurred lipgloss.Style
 		PromptYoloDotsFocused lipgloss.Style
@@ -325,6 +338,9 @@ type Styles struct {
 		ShellExitCode      lipgloss.Style // Non-zero exit code indicator.
 		ShellTruncation    lipgloss.Style // "N more lines" hint.
 		SectionHeader      lipgloss.Style
+
+		// Plan section styles
+		PlanBox lipgloss.Style // Border+padding for the final plan message
 
 		// Thinking section styles
 		ThinkingBox            lipgloss.Style // Background for thinking content
@@ -525,6 +541,13 @@ type Styles struct {
 			Spinner lipgloss.Style // Loading spinner while validating the key
 		}
 
+		// AuthMethod styles the OAuth-vs-API-key choice dialog.
+		AuthMethod struct {
+			Prompt      lipgloss.Style // "How would you like to authenticate?" question line
+			CardBlurred lipgloss.Style // Unselected choice card frame and label
+			CardFocused lipgloss.Style // Selected choice card frame and label
+		}
+
 		OAuth struct {
 			Spinner      lipgloss.Style // Loading spinner
 			Instructions lipgloss.Style // Emphasized instruction text
@@ -567,6 +590,16 @@ type Styles struct {
 	// Status bar and help
 	Status struct {
 		Help lipgloss.Style
+
+		// Mode badges shown before the help hints.
+		ModeBadgePlan lipgloss.Style
+		ModeBadgeYolo lipgloss.Style
+
+		// Full-width banners shown when switching modes.
+		ModeBannerPlan      lipgloss.Style
+		ModeBannerPlanBadge lipgloss.Style
+		ModeBannerYolo      lipgloss.Style
+		ModeBannerYoloBadge lipgloss.Style
 
 		ErrorIndicator   lipgloss.Style
 		WarnIndicator    lipgloss.Style

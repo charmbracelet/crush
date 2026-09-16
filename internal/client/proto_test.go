@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/stretchr/testify/require"
@@ -158,6 +159,38 @@ func TestSendMessageFallsBackOnEmptyErrorBody(t *testing.T) {
 	require.Contains(t, err.Error(), "status code 500")
 }
 
+func TestSetMainAgentSendsAgentID(t *testing.T) {
+	t.Parallel()
+
+	var gotPath string
+	var got proto.AgentSetMainRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := captureClient(t, srv)
+	require.NoError(t, c.SetMainAgent(context.Background(), "ws1", "plan"))
+
+	require.Equal(t, "/v1/workspaces/ws1/agent/main", gotPath)
+	require.Equal(t, "plan", got.AgentID)
+}
+
+func TestSetMainAgentPropagatesServerError(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	c := captureClient(t, srv)
+	err := c.SetMainAgent(context.Background(), "ws1", "plan")
+	require.Error(t, err)
+}
+
 func marshalSSEPayload(t *testing.T) []byte {
 	t.Helper()
 
@@ -175,4 +208,24 @@ func marshalSSEPayload(t *testing.T) []byte {
 	})
 	require.NoError(t, err)
 	return payload
+}
+
+func TestSendHiddenContinuation(t *testing.T) {
+	t.Parallel()
+	requests := make(chan proto.AgentMessage, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var msg proto.AgentMessage
+		if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		requests <- msg
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer srv.Close()
+	c := captureClient(t, srv)
+	require.NoError(t, c.SendMessage(message.WithHiddenUserMessage(t.Context()), "ws1", "sess1", "", "Implement the plan."))
+	msg := <-requests
+	require.True(t, msg.HiddenUserMessage)
+	require.Equal(t, "Implement the plan.", msg.Prompt)
 }

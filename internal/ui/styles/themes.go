@@ -80,6 +80,11 @@ func charmtoneOpts() quickStyleOpts {
 		yolo:              charmtone.Zest,
 		plan:              charmtone.Charple,
 		planMoreSubtle:    charmtone.Hazy,
+
+		button:         charmtone.Dolly,
+		buttonSubtle:   charmtone.Char,
+		buttonInactive: charmtone.Iron,
+		buttonHovered:  charmtone.Oyster,
 		// ANSI 16-color palette for remapping raw terminal output
 		// (e.g. bang-mode shell commands) onto legible Charmtone colors.
 		ansiBlack:   charmtone.BBQ,
@@ -194,6 +199,11 @@ func gruvboxDarkOpts() quickStyleOpts {
 		yolo:           lipgloss.Color("#fabd2f"), // yellow bright
 		plan:           lipgloss.Color("#d3869b"), // purple
 		planMoreSubtle: lipgloss.Color("#665c54"), // bg3
+
+		button:         lipgloss.Color("#d3869b"), // purple
+		buttonSubtle:   lipgloss.Color("#504945"), // bg2
+		buttonInactive: lipgloss.Color("#665c54"), // bg3
+		buttonHovered:  lipgloss.Color("#928374"), // gray
 
 		// ANSI 16-color palette for remapping raw terminal output
 		// (e.g. bang-mode shell commands) onto legible Gruvbox colors.

@@ -75,6 +75,10 @@ func PaletteFields() []PaletteField {
 		{"yolo", func(p Palette) string { return p.Yolo }, func(p *Palette, v string) { p.Yolo = v }},
 		{"plan", func(p Palette) string { return p.Plan }, func(p *Palette, v string) { p.Plan = v }},
 		{"plan_more_subtle", func(p Palette) string { return p.PlanMoreSubtle }, func(p *Palette, v string) { p.PlanMoreSubtle = v }},
+		{"button", func(p Palette) string { return p.Button }, func(p *Palette, v string) { p.Button = v }},
+		{"button_subtle", func(p Palette) string { return p.ButtonSubtle }, func(p *Palette, v string) { p.ButtonSubtle = v }},
+		{"button_inactive", func(p Palette) string { return p.ButtonInactive }, func(p *Palette, v string) { p.ButtonInactive = v }},
+		{"button_hovered", func(p Palette) string { return p.ButtonHovered }, func(p *Palette, v string) { p.ButtonHovered = v }},
 	}
 }
 
@@ -116,6 +120,11 @@ type Palette struct {
 	Yolo           string `json:"yolo,omitempty"`
 	Plan           string `json:"plan,omitempty"`
 	PlanMoreSubtle string `json:"plan_more_subtle,omitempty"`
+
+	Button         string `json:"button,omitempty"`
+	ButtonSubtle   string `json:"button_subtle,omitempty"`
+	ButtonInactive string `json:"button_inactive,omitempty"`
+	ButtonHovered  string `json:"button_hovered,omitempty"`
 }
 
 // PaletteFromOpts extracts a Palette from quickStyleOpts, converting
@@ -156,6 +165,11 @@ func PaletteFromOpts(o quickStyleOpts) Palette {
 		Yolo:           colorToHex(o.yolo),
 		Plan:           colorToHex(o.plan),
 		PlanMoreSubtle: colorToHex(o.planMoreSubtle),
+
+		Button:         colorToHex(o.button),
+		ButtonSubtle:   colorToHex(o.buttonSubtle),
+		ButtonInactive: colorToHex(o.buttonInactive),
+		ButtonHovered:  colorToHex(o.buttonHovered),
 	}
 }
 
@@ -198,6 +212,11 @@ func (p Palette) ToQuickStyleOpts(base quickStyleOpts) quickStyleOpts {
 		yolo:           resolveColor(p.Yolo, base.yolo),
 		plan:           resolveColor(p.Plan, base.plan),
 		planMoreSubtle: resolveColor(p.PlanMoreSubtle, base.planMoreSubtle),
+
+		button:         resolveColor(p.Button, base.button),
+		buttonSubtle:   resolveColor(p.ButtonSubtle, base.buttonSubtle),
+		buttonInactive: resolveColor(p.ButtonInactive, base.buttonInactive),
+		buttonHovered:  resolveColor(p.ButtonHovered, base.buttonHovered),
 
 		// The ANSI 16-color palette isn't customizable, so it's always
 		// inherited from the base theme.

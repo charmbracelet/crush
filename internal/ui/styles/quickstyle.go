@@ -59,6 +59,13 @@ type quickStyleOpts struct {
 	plan              color.Color
 	planMoreSubtle    color.Color
 
+	// Buttons. Backgrounds for each button state; the foregrounds are
+	// derived from onPrimary / fgBase.
+	button         color.Color // focused/primary button background.
+	buttonSubtle   color.Color // blurred button background.
+	buttonInactive color.Color // inactive (unfocused pane) button background.
+	buttonHovered  color.Color // hovered button background.
+
 	// ANSI 16-color palette. These remap the basic terminal colors that
 	// programs emit (e.g. bang-mode shell output) onto legible, on-brand
 	// colors instead of leaving them to the user's terminal defaults.
@@ -760,10 +767,10 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Tool.ResultItemDesc = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
 
 	// Buttons
-	s.Button.Focused = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.secondary)
-	s.Button.Blurred = lipgloss.NewStyle().Foreground(o.fgBase).Background(o.bgLessVisible)
-	s.Button.Inactive = lipgloss.NewStyle().Foreground(o.fgBase).Background(o.bgMostVisible)
-	s.Button.Hovered = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.fgMostSubtle)
+	s.Button.Focused = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.button)
+	s.Button.Blurred = lipgloss.NewStyle().Foreground(o.fgBase).Background(o.buttonSubtle)
+	s.Button.Inactive = lipgloss.NewStyle().Foreground(o.fgBase).Background(o.buttonInactive)
+	s.Button.Hovered = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.buttonHovered)
 	s.Button.Negative = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.error)
 
 	// Editor

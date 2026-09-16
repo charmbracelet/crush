@@ -254,6 +254,10 @@ func TestThemeFile_AllPaletteFieldsRoundTrip(t *testing.T) {
 			Yolo:              "#fabd2f",
 			Plan:              "#d3869b",
 			PlanMoreSubtle:    "#665c54",
+			Button:            "#d3869b",
+			ButtonSubtle:      "#504945",
+			ButtonInactive:    "#665c54",
+			ButtonHovered:     "#928374",
 		},
 	}
 

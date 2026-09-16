@@ -119,6 +119,8 @@ func bindingFor(km *KeyMap, action string) *key.Binding {
 		return &km.Tab
 	case "global.toggle_yolo":
 		return &km.ToggleYolo
+	case "global.shift_tab":
+		return &km.ShiftTab
 	case "global.summarize":
 		return &km.Summarize
 	case "global.toggle_thinking":

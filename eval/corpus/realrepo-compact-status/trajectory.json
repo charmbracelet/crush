@@ -1,0 +1,27 @@
+{
+	"id": "realrepo-compact-status",
+	"schema_version": 1,
+	"origin": {"kind": "synthetic"},
+	"start_state": {
+		"kind": "git",
+		"repo": "https://github.com/charmbracelet/crush.git",
+		"ref": "8b2b2857a625425ab4eccf5789e84902ec204ad5",
+		"setup": ["go mod download"]
+	},
+	"task": {
+		"turns": [
+			"Add a `compact_status` boolean option (default false) to the crush configuration: a `*bool` field on Options with a jsonschema description, exposed through the `option` crushrc builtin under the kebab-case key `compact-status`, and regenerate `schema.json` so the published schema carries it. Keep `go build ./...` green.",
+			"Add a second boolean option `quiet_startup` (default false) following the same pattern — Options field, `option` builtin key `quiet-startup`, regenerated `schema.json`. Keep the build green."
+		]
+	},
+	"check": {
+		"script": "check.sh",
+		"expect_start_state": "fail",
+		"timeout_seconds": 600
+	},
+	"coverage": {
+		"min_steps": 3
+	},
+	"requires": {"network": true, "tools": ["go", "git"]},
+	"budget": {"run_timeout_seconds": 1500, "max_steps": 60}
+}

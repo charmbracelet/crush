@@ -144,10 +144,18 @@ type Experiment struct {
 	Arms              map[string]Arm `json:"arms"`
 }
 
-// Arm is a generated config fragment. Config is an options-fragment
-// only: providers, MCPs, and LSPs can't vary between arms.
+// Arm is a generated config fragment plus an optional arm-scoped
+// coverage block. Config is an options-fragment only: providers, MCPs,
+// and LSPs can't vary between arms. Coverage applies only to this
+// arm's runs, after the trajectory's shared predicates — it is where
+// flag-gated firing assertions live (e.g. a treatment arm that enables
+// stubbing can demand min_stub_stats.results so a run where the
+// mechanism never fired lands inconclusive instead of passing as
+// evidence of nothing), and its grammar reaches the flag-dependent
+// call_metrics fields trajectory coverage excludes.
 type Arm struct {
-	Config ArmConfig `json:"config"`
+	Config   ArmConfig `json:"config"`
+	Coverage Coverage  `json:"coverage,omitempty"`
 }
 
 // ArmConfig carries the options delta under test.

@@ -93,7 +93,10 @@ func ValidateTrajectory(t *Trajectory, trajDir string) []string {
 	// local source — the clone itself is egress.
 	// Coverage must be achievable within budget — a min_steps
 	// predicate above the step cap is permanently inconclusive and
-	// burns attempts to the starvation cap forever.
+	// burns attempts to the starvation cap forever. min_ over a
+	// flag-gated field is worse: the counter is structurally absent
+	// on the arm where the flag is off, so the pairing starves by
+	// construction — those assertions belong in arm coverage.
 	for key, v := range t.Coverage {
 		op, field, err := ParseCoverageKey(key)
 		if err != nil {
@@ -102,6 +105,13 @@ func ValidateTrajectory(t *Trajectory, trajDir string) []string {
 		}
 		if op == "min" && field == "steps" && t.Budget.MaxSteps > 0 && int(v) > t.Budget.MaxSteps {
 			problems = append(problems, fmt.Sprintf("coverage min_steps=%v exceeds budget.max_steps=%d — permanently inconclusive", v, t.Budget.MaxSteps))
+		}
+		if op == "min" {
+			for _, p := range flagGatedPrefixes {
+				if strings.HasPrefix(field, p) {
+					problems = append(problems, fmt.Sprintf("coverage %q: %s is flag-gated — a shared min_ predicate starves the arm where the flag is off; move it to arm coverage in the experiment", key, field))
+				}
+			}
 		}
 	}
 	if t.Requires.Network != nil && !*t.Requires.Network && t.StartState.Kind == "git" {
@@ -251,6 +261,130 @@ func ValidateExperiment(e *Experiment) error {
 		}
 		if n <= 0 {
 			return fmt.Errorf("runs_per_trajectory[%s] must be > 0", band)
+		}
+	}
+	for name, arm := range e.Arms {
+		for key := range arm.Coverage {
+			op, field, err := ParseArmCoverageKey(key)
+			if err != nil {
+				return fmt.Errorf("arm %q coverage %q: %w", name, key, err)
+			}
+			// At experiment load only the arm's literal options are
+			// visible — an absent key defers to flags.json defaults
+			// and can't be judged here. RunExperiment re-checks
+			// against resolved options once the manifest is loaded.
+			resolve := armOptionResolver(arm)
+			if err := checkArmStarvation(name, key, op, field, resolve); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// armStarvationRequires maps a coverage field to the option keys that
+// must resolve true for its counter to be reachable. map_calls is
+// absent deliberately: tool-not-found attempts still count, so a
+// flag-off arm can measure unprompted map reach — only the *_ok /
+// *_index_unavailable / result_bytes fields are truly unreachable.
+func armStarvationRequires(field string) []string {
+	switch field {
+	case "call_metrics.map_calls_ok",
+		"call_metrics.map_calls_index_unavailable",
+		"call_metrics.map_result_bytes",
+		// The wrong-pointer detector requires a successful map call
+		// (analyze.go skips is_error records) — structurally zero
+		// wherever map isn't registered.
+		"call_metrics.wrong_pointer_events":
+		return []string{"project_index"}
+	}
+	if strings.HasPrefix(field, "stub_stats.") {
+		return []string{"notebook_stub_superseded", "notebook_enabled"}
+	}
+	if strings.HasPrefix(field, "recalls.") {
+		return []string{"notebook_enabled"}
+	}
+	return nil
+}
+
+// armOptionResolver resolves only the arm's literal options — an
+// absent key reports unknown so load-time validation can't flag what
+// flags.json might enable.
+func armOptionResolver(arm Arm) func(string) (bool, bool) {
+	return func(opt string) (bool, bool) {
+		v, ok := arm.Config.Options[opt]
+		if !ok {
+			return false, false
+		}
+		b, ok := v.(bool)
+		return b, ok
+	}
+}
+
+// checkArmStarvation rejects min_ predicates that can't measure what
+// they claim — flag-gated fields whose gating option resolves off,
+// and question_* counters: the question tool is interactive-only, so
+// headless eval calls only ever register as is_error tool-not-found
+// attempts — a min_ asserts hallucination, not firing. resolve
+// reports (value, known); unknown options are skipped so the check
+// only rejects what it can prove starves.
+func checkArmStarvation(armName, key, op, field string, resolve func(string) (bool, bool)) error {
+	if op != "min" {
+		return nil
+	}
+	if strings.HasPrefix(field, "call_metrics.question_") {
+		return fmt.Errorf("arm %q coverage %q: the question tool is interactive-only — headless calls only register as is_error, so a min_ asserts a hallucination", armName, key)
+	}
+	for _, opt := range armStarvationRequires(field) {
+		if v, known := resolve(opt); known && !v {
+			return fmt.Errorf("arm %q coverage %q: %s needs %s, which resolves off for this arm — every run starves", armName, key, field, opt)
+		}
+	}
+	return nil
+}
+
+// flagCodeDefaults mirror the Options helper defaults for the flag-
+// gated coverage counters — the last resolution step when neither the
+// arm nor the flags manifest names the key.
+var flagCodeDefaults = map[string]bool{
+	"notebook_enabled":         true,
+	"notebook_stub_superseded": false,
+	"project_index":            false,
+}
+
+// ValidateArmCoverageResolved re-runs the starvation check against
+// fully resolved options — arm option, then flags.json default, then
+// the code default. This catches the likelier footgun the load-time
+// check can't see: a firing assertion on an arm that omits the flag
+// entirely (notebook_stub_superseded defaults false).
+func ValidateArmCoverageResolved(e *Experiment, manifest *FlagsManifest) error {
+	for name, arm := range e.Arms {
+		for key := range arm.Coverage {
+			op, field, err := ParseArmCoverageKey(key)
+			if err != nil {
+				return fmt.Errorf("arm %q coverage %q: %w", name, key, err)
+			}
+			resolve := func(opt string) (bool, bool) {
+				if v, ok := arm.Config.Options[opt]; ok {
+					b, isBool := v.(bool)
+					return b, isBool
+				}
+				if manifest != nil {
+					if v, ok := manifest.Defaults[opt]; ok {
+						b, isBool := v.(bool)
+						return b, isBool
+					}
+				}
+				if d, ok := flagCodeDefaults[opt]; ok {
+					return d, true
+				}
+				// An unnamed flag defaults off — the counter is
+				// unreachable either way.
+				return false, true
+			}
+			if err := checkArmStarvation(name, key, op, field, resolve); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

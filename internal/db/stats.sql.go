@@ -66,6 +66,31 @@ func (q *Queries) GetHourDayHeatmap(ctx context.Context) ([]GetHourDayHeatmapRow
 	return items, nil
 }
 
+const getMapUsage = `-- name: GetMapUsage :one
+SELECT
+    COUNT(*) as map_calls,
+    COUNT(DISTINCT session_id) as sessions
+FROM messages, json_each(parts)
+WHERE json_extract(value, '$.type') = 'tool_call'
+  AND json_extract(value, '$.data.name') = 'map'
+`
+
+type GetMapUsageRow struct {
+	MapCalls int64 `json:"map_calls"`
+	Sessions int64 `json:"sessions"`
+}
+
+// Per-tool call count plus the number of distinct sessions that used
+// it: the per-session split the GROUP BY aggregate loses. Counts
+// attempted calls (tool-not-found results included), so flag-off
+// reach is measurable.
+func (q *Queries) GetMapUsage(ctx context.Context) (GetMapUsageRow, error) {
+	row := q.queryRow(ctx, q.getMapUsageStmt, getMapUsage)
+	var i GetMapUsageRow
+	err := row.Scan(&i.MapCalls, &i.Sessions)
+	return i, err
+}
+
 const getPruningStats = `-- name: GetPruningStats :many
 SELECT
     session_id,

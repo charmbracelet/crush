@@ -1,0 +1,14 @@
+{
+	"name": "project-index",
+	"model": "hyper/deepseek-v4-pro-0813",
+	"temperature": 0,
+	"corpus": [
+		"realrepo-env-cmd",
+		"realrepo-compact-status"
+	],
+	"runs_per_trajectory": {"stable": 3, "mid": 10, "uncharacterized": 5},
+	"arms": {
+		"control": {"config": {"options": {"project_index": false}}},
+		"treatment": {"config": {"options": {"project_index": true}}}
+	}
+}

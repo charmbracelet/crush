@@ -12,7 +12,10 @@
 	],
 	"runs_per_trajectory": {"stable": 3, "mid": 10, "uncharacterized": 5},
 	"arms": {
-		"control": {"config": {"options": {"notebook_stub_superseded": false}}},
-		"treatment": {"config": {"options": {"notebook_stub_superseded": true}}}
+		"control": {"config": {"options": {"notebook_enabled": true, "notebook_stub_superseded": false}}},
+		"treatment": {
+			"config": {"options": {"notebook_enabled": true, "notebook_stub_superseded": true}},
+			"coverage": {"min_stub_stats.results": 1}
+		}
 	}
 }

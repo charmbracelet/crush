@@ -42,6 +42,11 @@ type PromptDat struct {
 	GlobalContextFiles []ContextFile
 	AvailSkillXML      string
 	NotebookEnabled    bool
+	// ProjectIndexEnabled reports whether the map tool is registered —
+	// the prompt's map hint must not render when the tool is absent, or
+	// the model calls a tool it doesn't have and burns turns on
+	// tool-not-found errors.
+	ProjectIndexEnabled bool
 	// Interactive reports whether the run can ask the user (the TUI
 	// path). Headless renders must never mention interactive-only
 	// tools — a model that hallucinates a `question` call it doesn't
@@ -239,16 +244,17 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 
 	isGit := isGitRepo(store.WorkingDir())
 	data := PromptDat{
-		Provider:        provider,
-		Model:           model,
-		Config:          *cfg,
-		WorkingDir:      filepath.ToSlash(workingDir),
-		IsGitRepo:       isGit,
-		Platform:        platform,
-		Date:            p.now().Format("1/2/2006"),
-		AvailSkillXML:   availSkillXML,
-		NotebookEnabled: cfg.Options.NotebookIsEnabled(),
-		Interactive:     p.interactive,
+		Provider:            provider,
+		Model:               model,
+		Config:              *cfg,
+		WorkingDir:          filepath.ToSlash(workingDir),
+		IsGitRepo:           isGit,
+		Platform:            platform,
+		Date:                p.now().Format("1/2/2006"),
+		AvailSkillXML:       availSkillXML,
+		NotebookEnabled:     cfg.Options.NotebookIsEnabled(),
+		ProjectIndexEnabled: cfg.Options.ProjectIndexEnabled(),
+		Interactive:         p.interactive,
 	}
 	if isGit {
 		var err error

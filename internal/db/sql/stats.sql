@@ -82,6 +82,18 @@ WHERE json_extract(value, '$.type') = 'tool_call'
 GROUP BY tool_name
 ORDER BY call_count DESC;
 
+-- name: GetMapUsage :one
+-- Per-tool call count plus the number of distinct sessions that used
+-- it: the per-session split the GROUP BY aggregate loses. Counts
+-- attempted calls (tool-not-found results included), so flag-off
+-- reach is measurable.
+SELECT
+    COUNT(*) as map_calls,
+    COUNT(DISTINCT session_id) as sessions
+FROM messages, json_each(parts)
+WHERE json_extract(value, '$.type') = 'tool_call'
+  AND json_extract(value, '$.data.name') = 'map';
+
 -- name: GetHourDayHeatmap :many
 SELECT
     CAST(strftime('%w', created_at, 'unixepoch') AS INTEGER) as day_of_week,

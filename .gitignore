@@ -55,8 +55,10 @@ completions/crush.*sh
 .prettierignore
 .task
 
-# Eval run artifacts (run records, session DBs)
+# Eval run artifacts (run records, session DBs, generated band state)
 eval/results/
+eval/bands.json
+eval/.eval-lock/
 
 # Unimplemented design docs — kept local, not committed
 docs/design/BACKGROUND_SUBAGENTS.md

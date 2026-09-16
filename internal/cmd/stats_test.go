@@ -67,6 +67,43 @@ func TestGatherPruningStats(t *testing.T) {
 	require.EqualValues(t, 1, kinds["stale"].Results)
 }
 
+func TestGatherStats_ProjectIndex(t *testing.T) {
+	t.Parallel()
+
+	conn, err := db.Connect(t.Context(), t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { conn.Close() })
+
+	queries := db.New(conn)
+	sessions := session.NewService(queries, conn)
+	messages := message.NewService(queries)
+
+	mk := func(sessID string, name string) {
+		t.Helper()
+		_, err := messages.Create(t.Context(), sessID, message.CreateMessageParams{
+			Role:  message.Assistant,
+			Parts: []message.ContentPart{message.ToolCall{ID: "tc-" + name, Name: name, Finished: true}},
+		})
+		require.NoError(t, err)
+	}
+
+	s1, err := sessions.Create(t.Context(), "one")
+	require.NoError(t, err)
+	s2, err := sessions.Create(t.Context(), "two")
+	require.NoError(t, err)
+
+	mk(s1.ID, "map")
+	mk(s1.ID, "map")
+	mk(s2.ID, "map")
+	mk(s2.ID, "view")
+
+	stats, err := gatherStats(t.Context(), conn)
+	require.NoError(t, err)
+	require.NotNil(t, stats.ProjectIndex)
+	require.EqualValues(t, 3, stats.ProjectIndex.MapCalls)
+	require.EqualValues(t, 2, stats.ProjectIndex.Sessions)
+}
+
 func TestGatherPruningStats_Empty(t *testing.T) {
 	t.Parallel()
 

@@ -238,6 +238,187 @@ func TestCoverage_StubKinds(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestCoverage_ArmScoped(t *testing.T) {
+	t.Parallel()
+
+	// The arm grammar reaches the flag-dependent call_metrics fields
+	// trajectory coverage excludes — asserting "the model called map"
+	// is legal only where the arm itself fixes project_index.
+	_, _, err := ParseArmCoverageKey("min_call_metrics.map_calls_ok")
+	require.NoError(t, err)
+	_, _, err = ParseCoverageKey("min_call_metrics.map_calls_ok")
+	require.Error(t, err)
+
+	// Shared fields work in both grammars.
+	_, _, err = ParseArmCoverageKey("min_stub_stats.results")
+	require.NoError(t, err)
+
+	rec := &RunRecord{CallMetrics: &CallMetrics{MapCalls: 3, MapCallsOK: 2}}
+	met, err := ArmCoverageMet(Coverage{"min_call_metrics.map_calls": 1}, rec)
+	require.NoError(t, err)
+	require.True(t, met)
+
+	met, err = ArmCoverageMet(Coverage{"min_call_metrics.map_calls_ok": 3}, rec)
+	require.NoError(t, err)
+	require.False(t, met)
+
+	// Same fail-closed rule as trajectory coverage: absent analysis
+	// starves call_metrics predicates, even max_ ones.
+	met, err = ArmCoverageMet(Coverage{"max_call_metrics.map_result_bytes": 1024}, &RunRecord{})
+	require.NoError(t, err)
+	require.False(t, met)
+
+	// Unknown fields stay rejected.
+	_, _, err = ParseArmCoverageKey("min_call_metrics.bogus")
+	require.Error(t, err)
+}
+
+func TestValidateExperiment_ArmCoverage(t *testing.T) {
+	t.Parallel()
+	temp := 0.0
+	exp := &Experiment{
+		Name:              "x",
+		Model:             "p/m",
+		Temperature:       &temp,
+		Corpus:            []string{"*"},
+		RunsPerTrajectory: map[Band]int{BandUncharacterized: 1},
+		Arms: map[string]Arm{
+			ArmControl:   {},
+			ArmTreatment: {Coverage: Coverage{"min_call_metrics.map_calls": 1}},
+		},
+	}
+	require.NoError(t, ValidateExperiment(exp))
+
+	exp.Arms[ArmTreatment] = Arm{Coverage: Coverage{"min_bogus_field": 1}}
+	require.Error(t, ValidateExperiment(exp))
+}
+
+func TestValidateExperiment_ArmCoverageStarvation(t *testing.T) {
+	t.Parallel()
+	temp := 0.0
+	exp := &Experiment{
+		Name:              "x",
+		Model:             "p/m",
+		Temperature:       &temp,
+		Corpus:            []string{"*"},
+		RunsPerTrajectory: map[Band]int{BandUncharacterized: 1},
+		Arms:              map[string]Arm{ArmControl: {}, ArmTreatment: {}},
+	}
+
+	// min_ on a flag-gated field where the arm sets the flag off —
+	// every run starves, so this is a load error.
+	exp.Arms[ArmControl] = Arm{
+		Config:   ArmConfig{Options: map[string]any{"notebook_stub_superseded": false}},
+		Coverage: Coverage{"min_stub_stats.results": 1},
+	}
+	require.Error(t, ValidateExperiment(exp))
+
+	// Same predicate on the arm that enables the flag is the intended
+	// firing assertion — legal.
+	exp.Arms[ArmControl] = Arm{}
+	exp.Arms[ArmTreatment] = Arm{
+		Config:   ArmConfig{Options: map[string]any{"notebook_stub_superseded": true}},
+		Coverage: Coverage{"min_stub_stats.results": 1},
+	}
+	require.NoError(t, ValidateExperiment(exp))
+
+	// The question tool is interactive-only — min_ predicates on
+	// question_* starve in headless runs regardless of flags.
+	exp.Arms[ArmTreatment] = Arm{Coverage: Coverage{"min_call_metrics.question_calls": 1}}
+	require.Error(t, ValidateExperiment(exp))
+
+	// max_ is a bound, not a firing assertion — still legal.
+	exp.Arms[ArmTreatment] = Arm{Coverage: Coverage{"max_call_metrics.question_calls": 0}}
+	require.NoError(t, ValidateExperiment(exp))
+
+	// map_calls_ok needs the flag; an arm that sets it off starves.
+	exp.Arms[ArmTreatment] = Arm{
+		Config:   ArmConfig{Options: map[string]any{"project_index": false}},
+		Coverage: Coverage{"min_call_metrics.map_calls_ok": 1},
+	}
+	require.Error(t, ValidateExperiment(exp))
+
+	// map_calls itself is NOT guarded — tool-not-found attempts count,
+	// so flag-off arms can measure unprompted map reach.
+	exp.Arms[ArmTreatment] = Arm{
+		Config:   ArmConfig{Options: map[string]any{"project_index": false}},
+		Coverage: Coverage{"min_call_metrics.map_calls": 1},
+	}
+	require.NoError(t, ValidateExperiment(exp))
+
+	// wrong_pointer_events needs a successful map call — zero on
+	// flag-off arms, so min_ starves there.
+	exp.Arms[ArmTreatment] = Arm{
+		Config:   ArmConfig{Options: map[string]any{"project_index": false}},
+		Coverage: Coverage{"min_call_metrics.wrong_pointer_events": 1},
+	}
+	require.Error(t, ValidateExperiment(exp))
+}
+
+func TestValidateArmCoverageResolved(t *testing.T) {
+	t.Parallel()
+	manifest := &FlagsManifest{Defaults: map[string]any{
+		"notebook_stub_superseded": false,
+		"notebook_enabled":         true,
+		"project_index":            false,
+	}}
+	exp := &Experiment{Arms: map[string]Arm{
+		ArmControl:   {},
+		ArmTreatment: {},
+	}}
+
+	// Firing assertion with NO config: the flag resolves to the
+	// manifest's false default — silent starvation, now an error.
+	exp.Arms[ArmTreatment] = Arm{Coverage: Coverage{"min_stub_stats.results": 1}}
+	require.Error(t, ValidateArmCoverageResolved(exp, manifest))
+
+	// Enabled by the arm — resolves on.
+	exp.Arms[ArmTreatment] = Arm{
+		Config:   ArmConfig{Options: map[string]any{"notebook_stub_superseded": true}},
+		Coverage: Coverage{"min_stub_stats.results": 1},
+	}
+	require.NoError(t, ValidateArmCoverageResolved(exp, manifest))
+
+	// Enabled by manifest default — resolves on without arm config.
+	manifest.Defaults["project_index"] = true
+	exp.Arms[ArmTreatment] = Arm{Coverage: Coverage{"min_call_metrics.map_result_bytes": 1}}
+	require.NoError(t, ValidateArmCoverageResolved(exp, manifest))
+}
+
+func TestValidateTrajectory_FlagGatedMinRejected(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "fixture"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "check.sh"), []byte("#!/bin/sh\nexit 1\n"), 0o755))
+	mk := func(cov Coverage) *Trajectory {
+		return &Trajectory{
+			ID: "x", SchemaVersion: 1,
+			Origin:     Origin{Kind: "synthetic"},
+			StartState: StartState{Kind: "fixture", FixtureDir: "fixture"},
+			Task:       Task{Turns: []string{"do it"}},
+			Check:      Check{Script: "check.sh", ExpectStartState: "fail"},
+			Coverage:   cov,
+		}
+	}
+
+	// A shared min_ on a flag-gated field starves the flag-off arm —
+	// load-time error, not a surprise at run time.
+	problems := ValidateTrajectory(mk(Coverage{"min_stub_stats.results": 1}), dir)
+	require.NotEmpty(t, problems)
+	require.Contains(t, problems[0], "flag-gated")
+
+	problems = ValidateTrajectory(mk(Coverage{"min_recalls.entry": 1}), dir)
+	require.NotEmpty(t, problems)
+
+	// max_ bounds both arms legitimately — still legal unscoped.
+	problems = ValidateTrajectory(mk(Coverage{"max_stub_stats.results": 10}), dir)
+	require.Empty(t, problems)
+
+	// Flag-invariant fields unaffected.
+	problems = ValidateTrajectory(mk(Coverage{"min_steps": 1}), dir)
+	require.Empty(t, problems)
+}
+
 // --- run telemetry ---
 
 // TestRunTelemetry_StubKinds pins the telemetry contract end to end:

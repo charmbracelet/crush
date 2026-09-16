@@ -358,15 +358,41 @@ func (s *Service) renderTopFiles(ctx context.Context, b *strings.Builder, limit 
 	// O(F × depth): a file's degree sums ref counts over itself and
 	// each ancestor dir.
 	deg := make(map[string]int, len(paths))
+	maxDeg := 0
 	for _, p := range paths {
 		deg[p] = refDeg[p]
 		for d := path.Dir(p); d != "." && d != "/" && d != ""; d = path.Dir(d) {
 			deg[p] += refDeg[d]
 		}
+		if deg[p] > maxDeg {
+			maxDeg = deg[p]
+		}
+	}
+
+	// Blend git churn with ref-degree so recently hot files rank with
+	// well-referenced ones. Each signal is normalized to its own max
+	// — raw addition would let whichever count runs larger dominate.
+	// Empty churn (non-git project) reduces the score to pure degree.
+	churn := s.churnCounts(ctx)
+	maxChurn := 0
+	for _, p := range paths {
+		if churn[p] > maxChurn {
+			maxChurn = churn[p]
+		}
+	}
+	score := func(p string) float64 {
+		var v float64
+		if maxDeg > 0 {
+			v = float64(deg[p]) / float64(maxDeg)
+		}
+		if maxChurn > 0 {
+			v += float64(churn[p]) / float64(maxChurn)
+		}
+		return v
 	}
 	sort.Slice(paths, func(i, j int) bool {
-		if deg[paths[i]] != deg[paths[j]] {
-			return deg[paths[i]] > deg[paths[j]]
+		if si, sj := score(paths[i]), score(paths[j]); si != sj {
+			return si > sj
 		}
 		return paths[i] < paths[j]
 	})
@@ -383,8 +409,14 @@ func (s *Service) renderTopFiles(ctx context.Context, b *strings.Builder, limit 
 		}
 		// deg includes ancestor-dir (package) refs — label it so a
 		// zero-direct-ref file in a hot package doesn't read as a
-		// lie.
-		fmt.Fprintf(b, "  %s (%d refs incl. pkg)", p, deg[p])
+		// lie. The commits count is the churn half of the blend.
+		fmt.Fprintf(b, "  %s (%d refs incl. pkg", p, deg[p])
+		if n := churn[p]; n == 1 {
+			b.WriteString(", 1 commit")
+		} else if n > 0 {
+			fmt.Fprintf(b, ", %d commits", n)
+		}
+		b.WriteString(")")
 		if len(syms) > 0 {
 			names := make([]string, 0, len(syms))
 			for _, t := range syms {

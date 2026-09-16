@@ -251,6 +251,53 @@ func mustHash(t *testing.T, dir string) string {
 	return h
 }
 
+// The arm gate end to end: a run whose check passes but whose arm
+// coverage starves lands inconclusive with coverage_scope "arm", and
+// a trajectory-coverage miss records "trajectory".
+func TestExecuteRun_ArmCoverageGate(t *testing.T) {
+	t.Parallel()
+	root := newEvalDir(t)
+	trajDir := writeTrajectory(t, filepath.Join(root, "corpus"), "gate-t", nil)
+	tr, err := LoadTrajectory(trajDir)
+	require.NoError(t, err)
+	r := &Runner{
+		EvalDir:    root,
+		Driver:     fakeRunner{flag: "debug"},
+		WorkParent: t.TempDir(),
+		RNG:        rand.New(rand.NewPCG(1, 2)),
+	}
+	exp := &Experiment{Name: "exp1", Model: "mock/m", Temperature: ptr(0.0)}
+	manifest := &FlagsManifest{Defaults: map[string]any{"debug": false}}
+	off := Arm{Config: ArmConfig{Options: map[string]any{"debug": false}}}
+
+	// Flag off → fakeRunner writes the marker → check passes; the arm
+	// demands more steps than the driver's fixed 3 → inconclusive.
+	starving := off
+	starving.Coverage = Coverage{"min_steps": 100}
+	rec, err := r.ExecuteRun(context.Background(), exp, tr, trajDir, ArmTreatment, starving, manifest, 1, "inv")
+	require.NoError(t, err)
+	require.Equal(t, OutcomeInconclusive, rec.Outcome)
+	require.Equal(t, "arm", rec.CheckDetail["coverage_scope"])
+	require.Equal(t, "min_steps", rec.CheckDetail["coverage_key"])
+
+	// Same run shape under a starving trajectory predicate → the
+	// trajectory scope is recorded instead.
+	tr.Coverage = Coverage{"min_steps": 100}
+	rec, err = r.ExecuteRun(context.Background(), exp, tr, trajDir, ArmControl, off, manifest, 1, "inv")
+	require.NoError(t, err)
+	require.Equal(t, OutcomeInconclusive, rec.Outcome)
+	require.Equal(t, "trajectory", rec.CheckDetail["coverage_scope"])
+	require.Equal(t, "min_steps", rec.CheckDetail["coverage_key"])
+
+	// No coverage anywhere → pass, no scope recorded.
+	tr.Coverage = nil
+	rec, err = r.ExecuteRun(context.Background(), exp, tr, trajDir, ArmControl, off, manifest, 1, "inv")
+	require.NoError(t, err)
+	require.Equal(t, OutcomePass, rec.Outcome)
+	_, ok := rec.CheckDetail["coverage_scope"]
+	require.False(t, ok)
+}
+
 func TestRunExperiment_CatastrophicFires(t *testing.T) {
 	t.Parallel()
 	root := newEvalDir(t)

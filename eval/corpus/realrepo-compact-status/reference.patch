@@ -1,0 +1,55 @@
+diff --git a/internal/config/config.go b/internal/config/config.go
+index 2d697dec..27f25ce3 100644
+--- a/internal/config/config.go
++++ b/internal/config/config.go
+@@ -394,6 +394,8 @@ type Options struct {
+ 	InitializeAs              string       `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization,default=AGENTS.md,example=AGENTS.md,example=CRUSH.md,example=CLAUDE.md,example=docs/LLMs.md"`
+ 	AutoLSP                   *bool        `json:"auto_lsp,omitempty" jsonschema:"description=Automatically setup LSPs based on root markers,default=true"`
+ 	Progress                  *bool        `json:"progress,omitempty" jsonschema:"description=Show indeterminate progress updates during long operations,default=true"`
++	CompactStatus             *bool        `json:"compact_status,omitempty" jsonschema:"description=Use a compact single-line status area in the TUI,default=false"`
++	QuietStartup              *bool        `json:"quiet_startup,omitempty" jsonschema:"description=Suppress non-essential output during startup,default=false"`
+ 	Notifications             string       `json:"notifications,omitempty" jsonschema:"description=Notification style to use. Options: auto (default)\\, native\\, osc\\, bell\\, disabled. Auto selects based on environment: native for local sessions\\, osc for SSH (with automatic OSC 99/777 detection).,enum=auto,enum=native,enum=osc,enum=bell,enum=disabled,default=auto"`
+ 	DisabledSkills            []string     `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=crush-config"`
+ 	RequestTimeout            *int         `json:"request_timeout,omitempty" jsonschema:"description=Timeout in seconds for each LLM API request. Streaming responses are aborted only after this much inactivity\\, so slow but active streams are never killed. 0 disables it\\, negative values are invalid.,default=60,example=120,example=300,example=0"`
+diff --git a/internal/shellconfig/options.go b/internal/shellconfig/options.go
+index 74cddd1b..4215253c 100644
+--- a/internal/shellconfig/options.go
++++ b/internal/shellconfig/options.go
+@@ -194,10 +194,12 @@ type optionSpec struct {
+ // handleOption above and do not appear here.
+ var optionSpecs = map[string]optionSpec{
+ 	// Boolean fields (stored as-is).
+-	"debug":     {jsonKey: "debug", kind: optBool},
+-	"debug-lsp": {jsonKey: "debug_lsp", kind: optBool},
+-	"auto-lsp":  {jsonKey: "auto_lsp", kind: optBool},
+-	"progress":  {jsonKey: "progress", kind: optBool},
++	"debug":          {jsonKey: "debug", kind: optBool},
++	"debug-lsp":      {jsonKey: "debug_lsp", kind: optBool},
++	"auto-lsp":       {jsonKey: "auto_lsp", kind: optBool},
++	"progress":       {jsonKey: "progress", kind: optBool},
++	"compact-status": {jsonKey: "compact_status", kind: optBool},
++	"quiet-startup":  {jsonKey: "quiet_startup", kind: optBool},
+ 
+ 	// Boolean fields exposed positively but stored as their negation.
+ 	"metrics":              {jsonKey: "disable_metrics", kind: optBool, inverted: true},
+diff --git a/schema.json b/schema.json
+index 8a1939df..6ee53d95 100644
+--- a/schema.json
++++ b/schema.json
+@@ -555,6 +555,16 @@
+           "description": "Show indeterminate progress updates during long operations",
+           "default": true
+         },
++        "compact_status": {
++          "type": "boolean",
++          "description": "Use a compact single-line status area in the TUI",
++          "default": false
++        },
++        "quiet_startup": {
++          "type": "boolean",
++          "description": "Suppress non-essential output during startup",
++          "default": false
++        },
+         "notifications": {
+           "type": "string",
+           "enum": [

@@ -28,6 +28,11 @@ type Querier interface {
 	GetHourDayHeatmap(ctx context.Context) ([]GetHourDayHeatmapRow, error)
 	GetLastAssistantMessageBySession(ctx context.Context, sessionID string) (Message, error)
 	GetLastSession(ctx context.Context) (Session, error)
+	// Per-tool call count plus the number of distinct sessions that used
+	// it: the per-session split the GROUP BY aggregate loses. Counts
+	// attempted calls (tool-not-found results included), so flag-off
+	// reach is measurable.
+	GetMapUsage(ctx context.Context) (GetMapUsageRow, error)
 	GetMaxNotebookEventNumber(ctx context.Context, arg GetMaxNotebookEventNumberParams) (int64, error)
 	GetMessage(ctx context.Context, id string) (Message, error)
 	GetNotebookEntries(ctx context.Context, sessionID string) ([]NotebookEntry, error)

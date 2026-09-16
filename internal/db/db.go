@@ -81,6 +81,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.getLastSessionStmt, err = db.PrepareContext(ctx, getLastSession); err != nil {
 		return nil, fmt.Errorf("error preparing query GetLastSession: %w", err)
 	}
+	if q.getMapUsageStmt, err = db.PrepareContext(ctx, getMapUsage); err != nil {
+		return nil, fmt.Errorf("error preparing query GetMapUsage: %w", err)
+	}
 	if q.getMaxNotebookEventNumberStmt, err = db.PrepareContext(ctx, getMaxNotebookEventNumber); err != nil {
 		return nil, fmt.Errorf("error preparing query GetMaxNotebookEventNumber: %w", err)
 	}
@@ -305,6 +308,11 @@ func (q *Queries) Close() error {
 	if q.getLastSessionStmt != nil {
 		if cerr := q.getLastSessionStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getLastSessionStmt: %w", cerr)
+		}
+	}
+	if q.getMapUsageStmt != nil {
+		if cerr := q.getMapUsageStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getMapUsageStmt: %w", cerr)
 		}
 	}
 	if q.getMaxNotebookEventNumberStmt != nil {
@@ -575,6 +583,7 @@ type Queries struct {
 	getHourDayHeatmapStmt                *sql.Stmt
 	getLastAssistantMessageBySessionStmt *sql.Stmt
 	getLastSessionStmt                   *sql.Stmt
+	getMapUsageStmt                      *sql.Stmt
 	getMaxNotebookEventNumberStmt        *sql.Stmt
 	getMessageStmt                       *sql.Stmt
 	getNotebookEntriesStmt               *sql.Stmt
@@ -642,6 +651,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getHourDayHeatmapStmt:                q.getHourDayHeatmapStmt,
 		getLastAssistantMessageBySessionStmt: q.getLastAssistantMessageBySessionStmt,
 		getLastSessionStmt:                   q.getLastSessionStmt,
+		getMapUsageStmt:                      q.getMapUsageStmt,
 		getMaxNotebookEventNumberStmt:        q.getMaxNotebookEventNumberStmt,
 		getMessageStmt:                       q.getMessageStmt,
 		getNotebookEntriesStmt:               q.getNotebookEntriesStmt,

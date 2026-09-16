@@ -141,24 +141,7 @@ func coderAgent(r *vcr.Recorder, env fakeEnv, large, small fantasy.LanguageModel
 		return nil, err
 	}
 
-	// NOTE(@andreynering): Set a fixed config to ensure cassettes match
-	// independently of user config on `$HOME/.config/crush/crush.json`.
-	cfg.Config().Options.Attribution = &config.Attribution{
-		TrailerStyle:  "co-authored-by",
-		GeneratedWith: true,
-	}
-
-	// Clear some fields to avoid issues with VCR cassette matching.
-	cfg.Config().Options.SkillsPaths = nil
-	cfg.Config().Options.DisabledSkills = []string{"crush-config"}
-	cfg.Config().Options.ContextPaths = nil
-	cfg.Config().Options.GlobalContextPaths = nil
-	cfg.Config().LSP = nil
-	// Disable notebook for golden tests — the notebook block would
-	// otherwise be injected into the system prompt and break cassette
-	// matching.
-	notebookOff := false
-	cfg.Config().Options.NotebookEnabled = &notebookOff
+	pinCassetteConfig(cfg)
 
 	systemPrompt, err := prompt.Build(context.TODO(), large.Provider(), large.Model(), cfg)
 	if err != nil {
@@ -190,6 +173,32 @@ func coderAgent(r *vcr.Recorder, env fakeEnv, large, small fantasy.LanguageModel
 
 // createSimpleGoProject creates a simple Go project structure in the given directory.
 // It creates a go.mod file and a main.go file with a basic hello world program.
+// pinCassetteConfig neutralizes ambient config that leaks into
+// recorded interactions — both cassette replay (coderAgent) and
+// cassette regeneration (TestPatchCoderCassettes) must pin the same
+// set or recorded and runtime prompts diverge on machines whose
+// global config enables a prompt-affecting option.
+//
+// NOTE(@andreynering): Set a fixed config to ensure cassettes match
+// independently of user config on `$HOME/.config/crush/crush.json`.
+func pinCassetteConfig(cfg *config.ConfigStore) {
+	cfg.Config().Options.Attribution = &config.Attribution{
+		TrailerStyle:  "co-authored-by",
+		GeneratedWith: true,
+	}
+	cfg.Config().Options.SkillsPaths = nil
+	cfg.Config().Options.DisabledSkills = []string{"crush-config"}
+	cfg.Config().Options.ContextPaths = nil
+	cfg.Config().Options.GlobalContextPaths = nil
+	cfg.Config().LSP = nil
+	// Notebook and project-index blocks/hints are gated on these
+	// options — an ambient `option notebook-enabled`/`project-index`
+	// in global config would inject them into the system prompt.
+	off := false
+	cfg.Config().Options.NotebookEnabled = &off
+	cfg.Config().Options.ProjectIndex = &off
+}
+
 func createSimpleGoProject(t *testing.T, dir string) {
 	goMod := `module example.com/testproject
 

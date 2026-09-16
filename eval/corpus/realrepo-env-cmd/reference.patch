@@ -1,0 +1,41 @@
+diff --git a/internal/cmd/env.go b/internal/cmd/env.go
+new file mode 100644
+index 00000000..7f162b67
+--- /dev/null
++++ b/internal/cmd/env.go
+@@ -0,0 +1,23 @@
++package cmd
++
++import (
++	"fmt"
++	"os"
++	"runtime"
++
++	"github.com/charmbracelet/crush/internal/version"
++	"github.com/spf13/cobra"
++)
++
++var envCmd = &cobra.Command{
++	Use:   "env",
++	Short: "Print environment information",
++	Long:  "Print the runtime environment (platform, architecture, version, and working directory) as key=value lines.",
++	Run: func(cmd *cobra.Command, _ []string) {
++		cwd, _ := os.Getwd()
++		fmt.Fprintf(cmd.OutOrStdout(), "goos=%s\n", runtime.GOOS)
++		fmt.Fprintf(cmd.OutOrStdout(), "goarch=%s\n", runtime.GOARCH)
++		fmt.Fprintf(cmd.OutOrStdout(), "version=%s\n", version.Version)
++		fmt.Fprintf(cmd.OutOrStdout(), "cwd=%s\n", cwd)
++	},
++}
+diff --git a/internal/cmd/root.go b/internal/cmd/root.go
+index 77d73c3a..617e920d 100644
+--- a/internal/cmd/root.go
++++ b/internal/cmd/root.go
+@@ -75,6 +75,7 @@ func init() {
+ 		loginCmd,
+ 		statsCmd,
+ 		sessionCmd,
++		envCmd,
+ 	)
+ }
+ 

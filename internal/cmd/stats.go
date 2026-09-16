@@ -72,6 +72,7 @@ type Stats struct {
 	ToolUsage         []ToolUsage        `json:"tool_usage"`
 	HourDayHeatmap    []HourDayHeatmapPt `json:"hour_day_heatmap"`
 	Pruning           *PruningStats      `json:"pruning,omitempty"`
+	ProjectIndex      *ProjectIndexStats `json:"project_index,omitempty"`
 }
 
 type TotalStats struct {
@@ -146,6 +147,16 @@ type PruningStats struct {
 	SavedBytes     int64              `json:"saved_bytes"`
 	Sessions       int64              `json:"sessions"`
 	ByKind         []PruningKindStats `json:"by_kind"`
+}
+
+// ProjectIndexStats summarizes `map` tool adoption — whether sessions
+// actually reach for the project index once it is registered. Kept
+// first-class (not just a tool_usage row) because the feature's
+// value case hinges on adoption, and a model that never calls it is
+// indistinguishable from the flag being off.
+type ProjectIndexStats struct {
+	MapCalls int64 `json:"map_calls"`
+	Sessions int64 `json:"sessions"`
 }
 
 // ProjectStats associates stats with a project path.
@@ -522,6 +533,15 @@ func mergeStats(projectStats []ProjectStats) *Stats {
 			}
 		}
 
+		// Aggregate project index (`map`) adoption.
+		if s.ProjectIndex != nil {
+			if merged.ProjectIndex == nil {
+				merged.ProjectIndex = &ProjectIndexStats{}
+			}
+			merged.ProjectIndex.MapCalls += s.ProjectIndex.MapCalls
+			merged.ProjectIndex.Sessions += s.ProjectIndex.Sessions
+		}
+
 		// Accumulate response time for averaging.
 		if s.AvgResponseTimeMs > 0 {
 			totalResponseTimeMs += s.AvgResponseTimeMs * float64(s.Total.TotalMessages)
@@ -716,6 +736,16 @@ func gatherStats(ctx context.Context, conn *sql.DB) (*Stats, error) {
 		return nil, err
 	}
 	stats.Pruning = pruning
+
+	// Project index (`map`) adoption — GetToolUsage's GROUP BY loses
+	// the per-session split, so this has its own query.
+	mapUsage, err := queries.GetMapUsage(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get map usage: %w", err)
+	}
+	if mapUsage.MapCalls > 0 {
+		stats.ProjectIndex = &ProjectIndexStats{MapCalls: mapUsage.MapCalls, Sessions: mapUsage.Sessions}
+	}
 
 	return stats, nil
 }

@@ -348,12 +348,35 @@ func (r *Runner) ExecuteRun(ctx context.Context, exp *Experiment, traj *Trajecto
 	}
 
 	// Coverage masks passes only: a check-fail is a real outcome
-	// whether or not the mechanism fired.
-	met, err := CoverageMet(traj.Coverage, &rec)
+	// whether or not the mechanism fired. Trajectory coverage is
+	// flag-invariant by construction; the arm's own block is where
+	// flag-gated firing assertions live (a treatment arm asserting
+	// stubbing actually fired starves itself otherwise — the pairing
+	// can't pass on evidence of nothing).
+	met, failedKey, err := coverageMet(traj.Coverage, &rec, coverageFields)
 	if err != nil {
 		return rec, fmt.Errorf("coverage eval: %w", err)
 	}
+	scope := ""
 	if !met {
+		scope = "trajectory"
+	} else if armMet, akey, aerr := coverageMet(arm.Coverage, &rec, armFields); aerr != nil {
+		return rec, fmt.Errorf("arm coverage eval: %w", aerr)
+	} else if !armMet {
+		// An arm-coverage miss after a trajectory-coverage pass is
+		// the firing assertion tripping, not generic undercoverage.
+		scope, failedKey = "arm", akey
+		met = false
+	}
+	if !met {
+		// Record which scope and predicate starved the run so
+		// forensics can tell a firing assertion from generic
+		// undercoverage.
+		if rec.CheckDetail == nil {
+			rec.CheckDetail = map[string]any{}
+		}
+		rec.CheckDetail["coverage_scope"] = scope
+		rec.CheckDetail["coverage_key"] = failedKey
 		rec.Outcome = OutcomeInconclusive
 		return rec, nil
 	}
@@ -495,6 +518,9 @@ func (r *Runner) RunExperiment(ctx context.Context, exp *Experiment) (Report, er
 		return Report{}, err
 	}
 	if err := manifest.ValidateArmFlags(exp); err != nil {
+		return Report{}, err
+	}
+	if err := ValidateArmCoverageResolved(exp, manifest); err != nil {
 		return Report{}, err
 	}
 	bands, err := LoadBands(r.EvalDir)

@@ -56,17 +56,7 @@ func TestPatchCoderCassettes(t *testing.T) {
 
 		cfg, err := config.Init(workingDir, "", false)
 		require.NoError(t, err)
-		cfg.Config().Options.Attribution = &config.Attribution{
-			TrailerStyle:  "co-authored-by",
-			GeneratedWith: true,
-		}
-		cfg.Config().Options.SkillsPaths = nil
-		cfg.Config().Options.DisabledSkills = []string{"crush-config"}
-		cfg.Config().Options.ContextPaths = nil
-		cfg.Config().Options.GlobalContextPaths = nil
-		cfg.Config().LSP = nil
-		notebookOff := false
-		cfg.Config().Options.NotebookEnabled = &notebookOff
+		pinCassetteConfig(cfg)
 
 		built, err := p.Build(t.Context(), "hyper", "deepseek-v4-pro-0813", cfg)
 		require.NoError(t, err)

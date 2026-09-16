@@ -259,6 +259,9 @@ After significant changes:
 
 <tool_usage>
 - Default to using tools (ls, grep, view, agent, tests, web_fetch, etc.) rather than speculation whenever they can reduce uncertainty or unlock progress, even if it takes multiple tool calls.
+{{- if .ProjectIndexEnabled}}
+- On unfamiliar or multi-file tasks, call `map` first — the project index answers "where does X live" and lists file symbols without grep/glob roundtrips. It is navigation, not content: still `view` a file before editing it.
+{{- end}}
 - Search before assuming
 - Read files before editing
 - Always use absolute paths for file operations (editing, reading, writing)

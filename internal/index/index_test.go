@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -731,4 +732,48 @@ func A() { b.B() }
 		`SELECT dst_path FROM refs WHERE src_path = 'a/a.go'`).Scan(&dst)
 	require.NoError(t, err)
 	require.Equal(t, "b", dst)
+}
+
+func TestChurnRanking(t *testing.T) {
+	t.Parallel()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	root := t.TempDir()
+	dataDir := t.TempDir()
+
+	// a.go and b.go carry no refs — pure in-degree leaves them tied;
+	// b.go's commit history must lift it first in the ranking.
+	writeFile(t, root, "a.go", "package main\n")
+	writeFile(t, root, "b.go", "package main\n")
+
+	git := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "%s: %s", args, out)
+	}
+	git("init", "-q")
+	git("add", ".")
+	git("commit", "-qm", "init")
+	for i := range 3 {
+		writeFile(t, root, "b.go", fmt.Sprintf("package main\n\nvar v%d int\n", i))
+		git("add", "b.go")
+		git("commit", "-qm", "touch")
+	}
+
+	svc, err := Open(dataDir, root)
+	require.NoError(t, err)
+	defer svc.Close()
+	ctx := context.Background()
+	require.NoError(t, svc.EnsureIndexed(ctx))
+
+	skel, err := svc.Skeleton(ctx, 500)
+	require.NoError(t, err)
+	require.Contains(t, skel, ", 4 commits") // init + 3 touch commits
+	require.Less(t, strings.Index(skel, "b.go"), strings.Index(skel, "a.go"),
+		"churned file must outrank the untouched one: %s", skel)
 }

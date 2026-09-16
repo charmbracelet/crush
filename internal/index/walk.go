@@ -159,6 +159,10 @@ func (s *Service) walk(ctx context.Context) error {
 			tx.Commit()
 		}
 	}
+
+	// One git log pass refreshes the churn table — the skeleton's
+	// hot-file ranking blends it with ref-degree. No-op off git.
+	s.rebuildChurn(ctx, seen)
 	return nil
 }
 

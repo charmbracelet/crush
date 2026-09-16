@@ -22,9 +22,11 @@
 > - `project_index` option, default off (`option project-index true`
 >   in crushrc); `readOnlyTools` inclusion; tool-level test
 >
-> **Remaining:** git-churn ranking, LSP enrichment, eval arm,
-> `task fmt` (gofumpt not on PATH; gofmt-clean). Semantic search:
-> `SEMANTIC_INDEX.md`.
+> **Remaining:** LSP enrichment. Semantic search: `SEMANTIC_INDEX.md`.
+> **Now done:** git-churn ranking (one `git log` pass per walk,
+> blended with ref-degree), coder prompt hint (gated on the flag),
+> `project-index` eval arm (`eval/experiments/project-index.json` +
+> `realrepo-*` corpus).
 
 ## Goal
 
@@ -285,9 +287,10 @@ _where_, `view` reads before edit, `lsp_references`/
 ### Ranking — shipped vs remaining
 
 Shipped: `refs` in-degree centrality (files imported by many rank
-highest). Remaining: git-churn tiebreak (`git log` frequency — one
-command at build), session-hot files via filetracker, and
-hydrated hot-file pre-ranking once `SESSION_KNOWLEDGE` lands.
+highest) blended with git-churn (touches over recent history, one
+`git log` pass per walk — `internal/index/churn.go`). Remaining:
+session-hot files via filetracker, and hydrated hot-file
+pre-ranking once `SESSION_KNOWLEDGE` lands.
 
 ## Field traps — updated from as-built review
 
@@ -505,9 +508,10 @@ rebuildable, so added columns are a re-tag, not a migration):
   tool — and the miss path still triggers `refreshDirty`
   (rate-limited, so bounded but not free). On miss, fall back to
   `name LIKE ? || '%'` then substring, before reporting nothing.
-- **Coder prompt hint.** One line in `coder.md.tpl` — "call `map`
-  first on unfamiliar multi-file tasks" — addresses pull-only
-  adoption without committing to always-injected skeleton.
+- ~~**Coder prompt hint.**~~ **Done.** One line in `coder.md.tpl`
+  (gated on `project_index` so flag-off prompts are unchanged) —
+  "call `map` first on unfamiliar multi-file tasks" — addresses
+  pull-only adoption without committing to always-injected skeleton.
 
 Consumers that live in other plans: serving `map` slices inside
 edge-retry prompts and binding `PlanItem.Evidence` to index paths
@@ -561,10 +565,14 @@ feature.
    **done**.
 3. ~~Background first-build + partial results; `project_index`
    default (off); new-file visibility (write-event retag);
-   tool-level test~~ — **done**. `task fmt` still owed before merge.
+   tool-level test~~ — **done**.
 4. Extensions (`parent`/`sig` columns, `map impact=`, fuzzy
    `symbol=` fallback, coder prompt hint) — see Extensions section.
-5. Remaining polish: git-churn ranking, LSP `documentSymbol`
-   enrichment when the server is already running.
-6. Eval arm; then decide skeleton-injection and the semantic
-   continuation (`SEMANTIC_INDEX.md`) from data.
+5. ~~Git-churn ranking~~ — **done** (`churn.go`, one `git log` pass
+   per walk). ~~Coder prompt hint~~ — **done**, gated on the flag so
+   flag-off prompts are unchanged. Remaining polish: LSP
+   `documentSymbol` enrichment when the server is already running.
+6. ~~Eval arm~~ — **done**: `eval/experiments/project-index.json` over
+   the `realrepo-*` corpus slice; run it, then decide
+   skeleton-injection and the semantic continuation
+   (`SEMANTIC_INDEX.md`) from data.

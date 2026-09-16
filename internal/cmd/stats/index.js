@@ -376,9 +376,7 @@ if (stats.usage_by_day?.length > 0) {
     const row = document.createElement("tr");
     row.innerHTML = `<td>${formatDate(d.day)}</td><td>${d.session_count}</td><td>${formatNumber(
       d.prompt_tokens,
-    )}</td><td>${formatNumber(
-      d.completion_tokens,
-    )}</td><td>${formatNumber(d.total_tokens)}</td><td>${formatCost(
+    )}</td><td>${formatNumber(d.completion_tokens)}</td><td>${formatNumber(d.total_tokens)}</td><td>${formatCost(
       d.cost,
     )}</td>`;
     fragment.appendChild(row);
@@ -424,7 +422,9 @@ if (projectStats && projectStats.length > 1) {
       const row = document.createElement("tr");
       const displayPath = p.project_path || "unknown";
       const projectName = displayPath.split("/").pop() || displayPath;
-      const dirPath = displayPath.substring(0, displayPath.length - projectName.length) || "/";
+      const dirPath =
+        displayPath.substring(0, displayPath.length - projectName.length) ||
+        "/";
       row.innerHTML = `
         <td>
           <div class="project-name">${projectName}</div>
@@ -476,6 +476,23 @@ if (stats.pruning && stats.pruning.stubbed_results > 0) {
         <tbody>${rows}</tbody>
       </table>
     </div>
+  `;
+  const container = document.querySelector(".charts-grid");
+  if (container) {
+    container.appendChild(section);
+  }
+}
+
+// Project Index (only shown when the map tool has been called)
+if (stats.project_index && stats.project_index.map_calls > 0) {
+  const section = document.createElement("div");
+  section.className = "chart-card full-width";
+  section.innerHTML = `
+    <h2>Project Index</h2>
+    <p style="color: var(--text-muted); margin: 0">
+      ${formatNumber(stats.project_index.map_calls)} map calls across
+      ${formatNumber(stats.project_index.sessions)} sessions.
+    </p>
   `;
   const container = document.querySelector(".charts-grid");
   if (container) {

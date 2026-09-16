@@ -1,0 +1,27 @@
+{
+	"id": "realrepo-env-cmd",
+	"schema_version": 1,
+	"origin": {"kind": "synthetic"},
+	"start_state": {
+		"kind": "git",
+		"repo": "https://github.com/charmbracelet/crush.git",
+		"ref": "8b2b2857a625425ab4eccf5789e84902ec204ad5",
+		"setup": ["go mod download"]
+	},
+	"task": {
+		"turns": [
+			"Add a `crush env` subcommand that prints the runtime environment as `key=value` lines — `goos=`, `goarch=`, and `version=` (the version comes from the internal version package). Follow the existing subcommand patterns and register it alongside the others. Keep `go build ./...` green.",
+			"Also print the process working directory as `cwd=` on its own line. Keep the build green."
+		]
+	},
+	"check": {
+		"script": "check.sh",
+		"expect_start_state": "fail",
+		"timeout_seconds": 600
+	},
+	"coverage": {
+		"min_steps": 3
+	},
+	"requires": {"network": true, "tools": ["go", "git"]},
+	"budget": {"run_timeout_seconds": 1500, "max_steps": 60}
+}

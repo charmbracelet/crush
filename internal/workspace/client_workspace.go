@@ -24,6 +24,7 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/pinentry"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
@@ -434,6 +435,35 @@ func (w *ClientWorkspace) QuestionCancel() bool {
 	cancelled, err := w.client.CancelQuestionBatch(context.Background(), w.workspaceID())
 	if err != nil {
 		slog.Error("Failed to cancel question", "error", err)
+		return false
+	}
+	return cancelled
+}
+
+// -- Pinentry --
+
+// PinentryRespond submits the secret for a pending integrated pinentry
+// prompt via the client SDK.
+func (w *ClientWorkspace) PinentryRespond(id, secret string) bool {
+	resolved, err := w.client.AnswerPinentry(context.Background(), w.workspaceID(), proto.PinentryAnswer{
+		RequestID: id,
+		Secret:    secret,
+	})
+	if err != nil {
+		slog.Error("Failed to answer pinentry prompt", "error", err)
+		return false
+	}
+	return resolved
+}
+
+// PinentryCancel dismisses a pending integrated pinentry prompt via the
+// client SDK.
+func (w *ClientWorkspace) PinentryCancel(id string) bool {
+	cancelled, err := w.client.CancelPinentry(context.Background(), w.workspaceID(), proto.PinentryCancel{
+		RequestID: id,
+	})
+	if err != nil {
+		slog.Error("Failed to cancel pinentry prompt", "error", err)
 		return false
 	}
 	return cancelled
@@ -1143,6 +1173,25 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 			Type: e.Type,
 			Payload: question.Notification{
 				BatchID: e.Payload.BatchID,
+			},
+		}
+	case pubsub.Event[proto.PinentryPromptRequest]:
+		return pubsub.Event[pinentry.PromptRequest]{
+			Type: e.Type,
+			Payload: pinentry.PromptRequest{
+				ID:         e.Payload.ID,
+				Prompt:     e.Payload.Prompt,
+				KeyInfo:    e.Payload.KeyInfo,
+				Kind:       pinentry.Kind(e.Payload.Kind),
+				RetryCount: e.Payload.RetryCount,
+				Error:      e.Payload.Error,
+			},
+		}
+	case pubsub.Event[proto.PinentryNotification]:
+		return pubsub.Event[pinentry.Notification]{
+			Type: e.Type,
+			Payload: pinentry.Notification{
+				RequestID: e.Payload.RequestID,
 			},
 		}
 	case pubsub.Event[proto.Message]:

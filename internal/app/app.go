@@ -138,6 +138,23 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	// stops with the events pipeline.
 	app.Pinentry.Start(app.eventsCtx)
 
+	// Enable the integrated pinentry: GPG passphrase/PIN prompts are
+	// rendered as native dialogs (loopback pinentry) for Crush-spawned
+	// processes without touching GPG or git configuration. The
+	// terminal-handover watcher above remains the fallback.
+	if cfg.Options.GetPinentryIntegrated() {
+		if executable, err := os.Executable(); err != nil {
+			slog.Warn("Integrated pinentry unavailable", "error", err)
+		} else if cleanup, err := pinentry.StartIntegration(ctx, executable, cfg.Options.GetPinentryCacheTimeout()); err != nil {
+			slog.Warn("Integrated pinentry unavailable", "error", err)
+		} else {
+			app.cleanupFuncs = append(app.cleanupFuncs, func(context.Context) error {
+				cleanup()
+				return nil
+			})
+		}
+	}
+
 	// Initialize clipboard support. This is best-effort; if it fails
 	// (e.g., headless environment), clipboard operations will return nil.
 	if err := clipboard.Init(); err != nil {
@@ -679,8 +696,11 @@ func (app *App) setupEvents() {
 	app.subscribe(ctx, "agent-notifications", app.agentNotifications.Subscribe)
 	// Pinentry transitions are rare and drive the terminal handover, so
 	// they must not be dropped: a lost release/restore would leave the
-	// terminal in the wrong state.
+	// terminal in the wrong state. The same goes for integrated pinentry
+	// credential prompts, which hang a GPG command if lost.
 	app.subscribeMustDeliver(ctx, "pinentry", app.Pinentry.Subscribe)
+	app.subscribeMustDeliver(ctx, "pinentry-prompts", pinentry.DefaultPrompts().Subscribe)
+	app.subscribeMustDeliver(ctx, "pinentry-notifications", pinentry.DefaultPrompts().SubscribeNotifications)
 	app.subscribeMustDeliver(ctx, "run-completions", app.runCompletions.Subscribe)
 	app.subscribe(ctx, "mcp", mcp.SubscribeEvents)
 	app.subscribe(ctx, "lsp", SubscribeLSPEvents)

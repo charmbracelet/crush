@@ -1087,6 +1087,18 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.handlePermissionNotification(msg.Payload)
 	case pubsub.Event[pinentry.Event]:
 		cmds = append(cmds, m.handlePinentryEvent(msg.Payload))
+	case pubsub.Event[pinentry.PromptRequest]:
+		if cmd := m.openPinentryDialog(msg.Payload); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		if cmd := m.sendNotification(notification.Notification{
+			Title:   "Crush is waiting...",
+			Message: "GPG needs your passphrase to continue",
+		}); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case pubsub.Event[pinentry.Notification]:
+		m.handlePinentryNotification(msg.Payload)
 	case pubsub.Event[question.Request]:
 		m.openBatchFormDialog(msg.Payload)
 		m.chat.ScrollToBottom()
@@ -2281,6 +2293,13 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		case dialog.PermissionDeny:
 			m.com.Workspace.PermissionDeny(msg.Permission)
 		}
+
+	case dialog.ActionPinentrySubmit:
+		m.dialog.CloseDialog(dialog.PinentryID)
+		m.com.Workspace.PinentryRespond(msg.RequestID, msg.Secret)
+	case dialog.ActionPinentryCancel:
+		m.dialog.CloseDialog(dialog.PinentryID)
+		m.com.Workspace.PinentryCancel(msg.RequestID)
 
 	case dialog.ActionFilePickerSelected:
 		cmds = append(cmds, tea.Sequence(

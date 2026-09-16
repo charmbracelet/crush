@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/pinentry"
+	"github.com/charmbracelet/crush/internal/ui/dialog"
 	"github.com/charmbracelet/crush/internal/ui/notification"
 	"github.com/charmbracelet/crush/internal/ui/util"
 )
@@ -112,5 +113,24 @@ func (m *UI) restoreTerminalForPinentry() tea.Cmd {
 			slog.Error("Failed to restore terminal after pinentry", "error", err)
 		}
 		return nil
+	}
+}
+
+// openPinentryDialog shows the integrated pinentry dialog for a GPG
+// credential request (passphrase or security key PIN). Input is masked;
+// the secret is returned via [dialog.ActionPinentrySubmit].
+func (m *UI) openPinentryDialog(req pinentry.PromptRequest) tea.Cmd {
+	// Close any existing pinentry dialog first to prevent stacking.
+	m.dialog.CloseDialog(dialog.PinentryID)
+	m.dialog.OpenDialogWithGrace(dialog.NewPinentry(m.com, req))
+	return nil
+}
+
+// handlePinentryNotification dismisses the pinentry dialog once the
+// prompt is resolved, covering the case where another subscriber (or a
+// cancelled GPG command) resolved it first.
+func (m *UI) handlePinentryNotification(_ pinentry.Notification) {
+	if m.dialog.ContainsDialog(dialog.PinentryID) {
+		m.dialog.CloseDialog(dialog.PinentryID)
 	}
 }

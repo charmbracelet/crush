@@ -100,6 +100,25 @@ func wrapEvent(ev any) *pubsub.Payload {
 				BatchID: e.Payload.BatchID,
 			},
 		})
+	case pubsub.Event[pinentry.PromptRequest]:
+		return envelope(pubsub.PayloadTypePinentryPromptRequest, pubsub.Event[proto.PinentryPromptRequest]{
+			Type: e.Type,
+			Payload: proto.PinentryPromptRequest{
+				ID:         e.Payload.ID,
+				Prompt:     e.Payload.Prompt,
+				KeyInfo:    e.Payload.KeyInfo,
+				Kind:       string(e.Payload.Kind),
+				RetryCount: e.Payload.RetryCount,
+				Error:      e.Payload.Error,
+			},
+		})
+	case pubsub.Event[pinentry.Notification]:
+		return envelope(pubsub.PayloadTypePinentryNotification, pubsub.Event[proto.PinentryNotification]{
+			Type: e.Type,
+			Payload: proto.PinentryNotification{
+				RequestID: e.Payload.RequestID,
+			},
+		})
 	case pubsub.Event[message.Message]:
 		return envelope(pubsub.PayloadTypeMessage, pubsub.Event[proto.Message]{
 			Type:    e.Type,

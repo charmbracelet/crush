@@ -262,7 +262,7 @@ func (b *Backend) RunShellCommand(ctx context.Context, workspaceID string, req p
 	result, err := shell.RunAndPersist(ctx, shell.RunOptions{
 		Command:   req.Command,
 		Cwd:       ws.Path,
-		Env:       append(os.Environ(), ws.Env...),
+		Env:       append(ws.Env, os.Environ()...),
 		TermWidth: req.TermWidth,
 	}, persist)
 	if err != nil {

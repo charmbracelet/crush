@@ -1,4 +1,4 @@
-//go:build (darwin || linux || windows || freebsd || openbsd || netbsd) && !ios && !android
+//go:build !crush_omit_native && (darwin || linux || windows || freebsd || openbsd || netbsd) && !ios && !android
 
 package clipboard
 

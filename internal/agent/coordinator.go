@@ -386,6 +386,13 @@ func effectiveReasoningEffort(model Model) string {
 	return ""
 }
 
+func setOpenAiEffortIfNecessary(mergedOptions map[string]any, shouldSetEffort bool, reasoningEffort string) {
+	_, hasReasoningEffort := mergedOptions["reasoning_effort"]
+	if !hasReasoningEffort && shouldSetEffort {
+		mergedOptions["reasoning_effort"] = reasoningEffort
+	}
+}
+
 func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.ProviderOptions {
 	options := fantasy.ProviderOptions{}
 
@@ -441,10 +448,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 
 	switch providerCfg.Type {
 	case openai.Name, azure.Name:
-		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
-		if !hasReasoningEffort && shouldSetEffort {
-			mergedOptions["reasoning_effort"] = reasoningEffort
-		}
+		setOpenAiEffortIfNecessary(mergedOptions, shouldSetEffort, reasoningEffort)
 		if openai.IsResponsesModel(model.CatwalkCfg.ID) {
 			if openai.IsResponsesReasoningModel(model.CatwalkCfg.ID) {
 				mergedOptions["reasoning_summary"] = "auto"
@@ -630,6 +634,8 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		// Known custom providers (litellm, llamacpp, lmstudio, ollama,
 		// omlx) are openai-compat under the hood.
 		if discover.IsKnownCustomProvider(string(providerCfg.Type)) {
+			setOpenAiEffortIfNecessary(mergedOptions, shouldSetEffort, reasoningEffort)
+
 			// Set "top_k" under "extra_body", as it is not part of the OpenAI protocol
 			// and will be explicitly omitted by Fantasy downstream.
 			topK := cmp.Or(model.ModelCfg.TopK, model.CatwalkCfg.Options.TopK)

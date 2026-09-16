@@ -229,14 +229,32 @@ description: First test skill.
 # Skill One
 `), 0o644))
 
-	// Create valid skill 2 in nested directory.
-	skill2Dir := filepath.Join(tmpDir, "nested", "skill-two")
+	// Create valid skill 2.
+	skill2Dir := filepath.Join(tmpDir, "skill-two")
 	require.NoError(t, os.MkdirAll(skill2Dir, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(skill2Dir, "SKILL.md"), []byte(`---
 name: skill-two
 description: Second test skill.
 ---
 # Skill Two
+`), 0o644))
+
+	// Create nested skills (won't be discovered).
+	nestedSkillDir := filepath.Join(tmpDir, "nested", "nested-skill")
+	require.NoError(t, os.MkdirAll(nestedSkillDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(nestedSkillDir, "SKILL.md"), []byte(`---
+name: nested-skill
+description: Nested test skill.
+---
+# Nested Skill
+`), 0o644))
+	deepSkillDir := filepath.Join(skill1Dir, "deep", "deep-skill")
+	require.NoError(t, os.MkdirAll(deepSkillDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(deepSkillDir, "SKILL.md"), []byte(`---
+name: deep-skill
+description: Deep test skill.
+---
+# Deep Skill
 `), 0o644))
 
 	// Create invalid skill (won't be included).
@@ -268,7 +286,7 @@ description: Name doesn't match directory.
 	require.Equal(t, 1, errorCount)
 	require.True(t, hasInvalidDir)
 	require.Len(t, skills, 2)
-	require.Equal(t, []string{"skill-two", "skill-one"}, []string{skills[0].Name, skills[1].Name})
+	require.Equal(t, []string{"skill-one", "skill-two"}, []string{skills[0].Name, skills[1].Name})
 
 	names := make(map[string]bool)
 	for _, s := range skills {
@@ -276,6 +294,12 @@ description: Name doesn't match directory.
 	}
 	require.True(t, names["skill-one"])
 	require.True(t, names["skill-two"])
+	require.False(t, names["nested-skill"])
+	require.False(t, names["deep-skill"])
+	for _, state := range states {
+		require.NotContains(t, state.Path, "nested-skill")
+		require.NotContains(t, state.Path, "deep-skill")
+	}
 }
 
 func TestDiscoverEmptyDir(t *testing.T) {
@@ -294,6 +318,20 @@ func TestDiscoverMissingPath(t *testing.T) {
 	skills, states := DiscoverWithStates([]string{filepath.Join(t.TempDir(), "missing")})
 	require.Empty(t, states)
 	require.Empty(t, skills)
+}
+
+func TestDiscoverUnreadablePathState(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "file")
+	require.NoError(t, os.WriteFile(path, []byte("not a directory"), 0o644))
+
+	skills, states := DiscoverWithStates([]string{path})
+	require.Empty(t, skills)
+	require.Len(t, states, 1)
+	require.Empty(t, states[0].Name)
+	require.Equal(t, StateError, states[0].State)
+	require.Error(t, states[0].Err)
 }
 
 func TestToPromptXML(t *testing.T) {

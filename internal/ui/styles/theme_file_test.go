@@ -251,6 +251,9 @@ func TestThemeFile_AllPaletteFieldsRoundTrip(t *testing.T) {
 			Success:           "#b8bb26",
 			SuccessMoreSubtle: "#b8bb26",
 			SuccessMostSubtle: "#8ec07c",
+			Yolo:              "#fabd2f",
+			Plan:              "#d3869b",
+			PlanMoreSubtle:    "#665c54",
 		},
 	}
 

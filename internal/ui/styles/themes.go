@@ -191,6 +191,10 @@ func gruvboxDarkOpts() quickStyleOpts {
 		successMoreSubtle: lipgloss.Color("#b8bb26"), // green bright
 		successMostSubtle: lipgloss.Color("#8ec07c"), // aqua bright
 
+		yolo:           lipgloss.Color("#fabd2f"), // yellow bright
+		plan:           lipgloss.Color("#d3869b"), // purple
+		planMoreSubtle: lipgloss.Color("#665c54"), // bg3
+
 		// ANSI 16-color palette for remapping raw terminal output
 		// (e.g. bang-mode shell commands) onto legible Gruvbox colors.
 		ansiBlack:   lipgloss.Color("#282828"),

@@ -72,6 +72,9 @@ func PaletteFields() []PaletteField {
 		{"success", func(p Palette) string { return p.Success }, func(p *Palette, v string) { p.Success = v }},
 		{"success_more_subtle", func(p Palette) string { return p.SuccessMoreSubtle }, func(p *Palette, v string) { p.SuccessMoreSubtle = v }},
 		{"success_most_subtle", func(p Palette) string { return p.SuccessMostSubtle }, func(p *Palette, v string) { p.SuccessMostSubtle = v }},
+		{"yolo", func(p Palette) string { return p.Yolo }, func(p *Palette, v string) { p.Yolo = v }},
+		{"plan", func(p Palette) string { return p.Plan }, func(p *Palette, v string) { p.Plan = v }},
+		{"plan_more_subtle", func(p Palette) string { return p.PlanMoreSubtle }, func(p *Palette, v string) { p.PlanMoreSubtle = v }},
 	}
 }
 
@@ -109,6 +112,10 @@ type Palette struct {
 	Success           string `json:"success,omitempty"`
 	SuccessMoreSubtle string `json:"success_more_subtle,omitempty"`
 	SuccessMostSubtle string `json:"success_most_subtle,omitempty"`
+
+	Yolo           string `json:"yolo,omitempty"`
+	Plan           string `json:"plan,omitempty"`
+	PlanMoreSubtle string `json:"plan_more_subtle,omitempty"`
 }
 
 // PaletteFromOpts extracts a Palette from quickStyleOpts, converting
@@ -145,6 +152,10 @@ func PaletteFromOpts(o quickStyleOpts) Palette {
 		Success:           colorToHex(o.success),
 		SuccessMoreSubtle: colorToHex(o.successMoreSubtle),
 		SuccessMostSubtle: colorToHex(o.successMostSubtle),
+
+		Yolo:           colorToHex(o.yolo),
+		Plan:           colorToHex(o.plan),
+		PlanMoreSubtle: colorToHex(o.planMoreSubtle),
 	}
 }
 
@@ -183,6 +194,10 @@ func (p Palette) ToQuickStyleOpts(base quickStyleOpts) quickStyleOpts {
 		success:           resolveColor(p.Success, base.success),
 		successMoreSubtle: resolveColor(p.SuccessMoreSubtle, base.successMoreSubtle),
 		successMostSubtle: resolveColor(p.SuccessMostSubtle, base.successMostSubtle),
+
+		yolo:           resolveColor(p.Yolo, base.yolo),
+		plan:           resolveColor(p.Plan, base.plan),
+		planMoreSubtle: resolveColor(p.PlanMoreSubtle, base.planMoreSubtle),
 
 		// The ANSI 16-color palette isn't customizable, so it's always
 		// inherited from the base theme.

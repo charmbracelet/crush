@@ -210,3 +210,38 @@ func TestJQ_Success(t *testing.T) {
 		t.Fatalf("stdout = %q, want %q", got, "1\n")
 	}
 }
+
+// TestJQ_RawInputTrailingNewline verifies that `jq -R` treats a terminating
+// newline as a line terminator, not a separator: "a\nb\n" is two lines and
+// must not produce a spurious trailing empty string. Interior empty lines are
+// preserved.
+func TestJQ_RawInputTrailingNewline(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name, in, want string
+	}{
+		{"trailing newline", "a\nb\n", "\"a\"\n\"b\"\n"},
+		{"interior empty preserved", "a\n\nb\n", "\"a\"\n\"\"\n\"b\"\n"},
+		{"single line with newline", "a\n", "\"a\"\n"},
+		{"no trailing newline", "a\nb", "\"a\"\n\"b\"\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var stdout bytes.Buffer
+			err := handleJQ(
+				t.Context(),
+				[]string{"jq", "-R", "."},
+				strings.NewReader(tc.in),
+				&stdout, io.Discard,
+			)
+			if err != nil {
+				t.Fatalf("handleJQ returned error: %v", err)
+			}
+			if got := stdout.String(); got != tc.want {
+				t.Fatalf("stdout = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

@@ -2,6 +2,7 @@ package chat
 
 import (
 	"encoding/xml"
+	"path/filepath"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -11,6 +12,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // skillInvocation represents the XML structure for a loaded skill.
@@ -28,9 +30,10 @@ type UserMessageItem struct {
 	*cachedMessageItem
 	*focusableMessageItem
 
-	attachments *attachments.Renderer
-	message     *message.Message
-	sty         *styles.Styles
+	attachments     *attachments.Renderer
+	message         *message.Message
+	sty             *styles.Styles
+	expandedContent bool
 }
 
 // NewUserMessageItem creates a new UserMessageItem.
@@ -45,6 +48,41 @@ func NewUserMessageItem(sty *styles.Styles, message *message.Message, attachment
 		message:                  message,
 		sty:                      sty,
 	}
+}
+
+var (
+	_ Expandable          = (*UserMessageItem)(nil)
+	_ list.MouseClickable = (*UserMessageItem)(nil)
+)
+
+// hasTextAttachments reports whether the message carries any text
+// attachments whose content can be shown when expanded.
+func (m *UserMessageItem) hasTextAttachments() bool {
+	for _, bc := range m.message.BinaryContent() {
+		if strings.HasPrefix(bc.MIMEType, "text/") {
+			return true
+		}
+	}
+	return false
+}
+
+// ToggleExpanded implements [Expandable]. Pasted text attachments are
+// collapsed to a truncated preview by default; toggling reveals their
+// full content.
+func (m *UserMessageItem) ToggleExpanded() bool {
+	if !m.hasTextAttachments() {
+		return false
+	}
+	m.expandedContent = !m.expandedContent
+	m.clearCache()
+	m.Bump()
+	return m.expandedContent
+}
+
+// HandleMouseClick implements [list.MouseClickable]. The whole message
+// is clickable so a single click toggles the pasted content.
+func (m *UserMessageItem) HandleMouseClick(btn ansi.MouseButton, x, y int) bool {
+	return btn == ansi.MouseLeft && m.hasTextAttachments()
 }
 
 // Finished implements list.Item. User messages are immutable once
@@ -92,6 +130,14 @@ func (m *UserMessageItem) RawRender(width int) string {
 			content = attachmentsStr
 		} else {
 			content = strings.Join([]string{content, "", attachmentsStr}, "\n")
+		}
+	}
+
+	if textBlocks := m.renderTextAttachmentContent(cappedWidth); textBlocks != "" {
+		if content == "" {
+			content = textBlocks
+		} else {
+			content = strings.Join([]string{content, "", textBlocks}, "\n")
 		}
 	}
 
@@ -171,6 +217,28 @@ func (m *UserMessageItem) renderAttachments(width int) string {
 	// This message is already posted, so the attachment can't be removed;
 	// don't render the remove button.
 	return m.attachments.Render(attachments, false, false, width)
+}
+
+// renderTextAttachmentContent renders the content of pasted text
+// attachments below the attachment chips. Collapsed attachments show a
+// truncated preview with an expand hint; expanded attachments show the
+// full content.
+func (m *UserMessageItem) renderTextAttachmentContent(width int) string {
+	var blocks []string
+	for _, bc := range m.message.BinaryContent() {
+		if !strings.HasPrefix(bc.MIMEType, "text/") {
+			continue
+		}
+		filename := filepath.Base(bc.Path)
+		header := lipgloss.JoinHorizontal(lipgloss.Left,
+			m.sty.Attachments.Text.String(),
+			m.sty.Attachments.Normal.Render(filename),
+		)
+		bodyWidth := max(0, width-toolBodyLeftPaddingTotal)
+		body := m.sty.Tool.Body.Render(toolOutputPlainContent(m.sty, string(bc.Data), bodyWidth, m.expandedContent))
+		blocks = append(blocks, strings.Join([]string{header, "", body}, "\n"))
+	}
+	return strings.Join(blocks, "\n\n")
 }
 
 // HandleKeyEvent implements KeyEventHandler.

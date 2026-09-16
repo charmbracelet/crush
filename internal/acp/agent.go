@@ -257,6 +257,11 @@ func (a *crushAgent) SetSessionConfigOption(ctx context.Context, req acp.SetSess
 			a.log.Warn("Failed to apply thinking config option", "error", err)
 		}
 	}
+	if req.ValueId != nil && req.ValueId.ConfigId == "model" {
+		if err := a.setModel(ctx, parseModelValue(string(req.ValueId.Value))); err != nil {
+			a.log.Warn("Failed to apply model config option", "error", err)
+		}
+	}
 	a.log.Info("ACP set session config option", "sessionId", sessionID)
 	a.pushUpdate(ctx, sessionID, a.configOptionsUpdate())
 	return acp.SetSessionConfigOptionResponse{ConfigOptions: a.configOptions()}, nil

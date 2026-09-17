@@ -212,7 +212,7 @@ func Execute() {
 		context.Background(),
 		rootCmd,
 		fang.WithVersion(version.Version),
-		fang.WithNotifySignal(os.Interrupt),
+		fang.WithNotifySignal(terminationSignals()...),
 	); err != nil {
 		os.Exit(1)
 	}

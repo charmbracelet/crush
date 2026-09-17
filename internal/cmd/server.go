@@ -61,9 +61,7 @@ var serverCmd = &cobra.Command{
 
 		errch := make(chan error, 1)
 		sigch := make(chan os.Signal, 1)
-		sigs := []os.Signal{os.Interrupt}
-		sigs = append(sigs, addSignals(sigs)...)
-		signal.Notify(sigch, sigs...)
+		signal.Notify(sigch, terminationSignals()...)
 
 		go func() {
 			errch <- srv.ListenAndServe()

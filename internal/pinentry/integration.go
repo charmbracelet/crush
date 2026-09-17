@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -98,6 +99,9 @@ func GitWrapperEnv() []string {
 // Returns ("", nil, nil) on platforms without a POSIX sh (Windows),
 // where git is pointed back at its own gpg and integration is disabled.
 func WriteGPGWrapper(executable string) (string, func(), error) {
+	if runtime.GOOS == "windows" {
+		return "", nil, nil
+	}
 	dir, err := os.MkdirTemp("", "crush-pinentry-*")
 	if err != nil {
 		return "", nil, err

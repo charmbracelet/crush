@@ -8,7 +8,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"runtime"
 	"time"
 
 	"github.com/google/uuid"
@@ -37,13 +36,9 @@ func StartIntegration(ctx context.Context, executable string, cacheTimeout time.
 	// The socket dir must have no spaces (git's gpg program is exec'd
 	// as a path); os.TempDir on macOS can contain none, but create a
 	// dedicated random dir to be certain.
-	wrapperPath := ""
-	var wrapperCleanup func()
-	if runtime.GOOS != "windows" {
-		wrapperPath, wrapperCleanup, err = WriteGPGWrapper(executable)
-		if err != nil {
-			return nil, err
-		}
+	wrapperPath, wrapperCleanup, err := WriteGPGWrapper(executable)
+	if err != nil {
+		return nil, err
 	}
 
 	dir, err := os.MkdirTemp("", "crush-pinentry-sock-*")

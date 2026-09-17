@@ -180,6 +180,13 @@ func TestShouldInterceptAndWrapperEnv(t *testing.T) {
 func TestWriteGPGWrapper(t *testing.T) {
 	path, cleanup, err := WriteGPGWrapper("/path/to/crush app")
 	require.NoError(t, err)
+
+	// Windows has no POSIX sh, so no wrapper is written there.
+	if runtime.GOOS == "windows" {
+		require.Empty(t, path)
+		require.Nil(t, cleanup)
+		return
+	}
 	defer cleanup()
 
 	data, err := os.ReadFile(path)

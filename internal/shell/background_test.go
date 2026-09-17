@@ -2,6 +2,7 @@ package shell
 
 import (
 	"context"
+	"fmt"
 	"runtime"
 	"strings"
 	"testing"
@@ -18,7 +19,7 @@ func TestBackgroundShellManager_Start(t *testing.T) {
 	workingDir := t.TempDir()
 	manager := newBackgroundShellManager()
 
-	bgShell, err := manager.Start(ctx, workingDir, nil, "echo 'hello world'", "")
+	bgShell, err := manager.Start(ctx, workingDir, nil, "echo 'hello world'", "", testMaxJobs)
 	if err != nil {
 		t.Fatalf("failed to start background shell: %v", err)
 	}
@@ -55,7 +56,7 @@ func TestBackgroundShellManager_Get(t *testing.T) {
 	workingDir := t.TempDir()
 	manager := newBackgroundShellManager()
 
-	bgShell, err := manager.Start(ctx, workingDir, nil, "echo 'test'", "")
+	bgShell, err := manager.Start(ctx, workingDir, nil, "echo 'test'", "", testMaxJobs)
 	if err != nil {
 		t.Fatalf("failed to start background shell: %v", err)
 	}
@@ -82,7 +83,7 @@ func TestBackgroundShellManager_Kill(t *testing.T) {
 	manager := newBackgroundShellManager()
 
 	// Start a long-running command
-	bgShell, err := manager.Start(ctx, workingDir, nil, "sleep 10", "")
+	bgShell, err := manager.Start(ctx, workingDir, nil, "sleep 10", "", testMaxJobs)
 	if err != nil {
 		t.Fatalf("failed to start background shell: %v", err)
 	}
@@ -123,7 +124,7 @@ func TestBackgroundShell_IsDone(t *testing.T) {
 	workingDir := t.TempDir()
 	manager := newBackgroundShellManager()
 
-	bgShell, err := manager.Start(ctx, workingDir, nil, "echo 'quick'", "")
+	bgShell, err := manager.Start(ctx, workingDir, nil, "echo 'quick'", "", testMaxJobs)
 	if err != nil {
 		t.Fatalf("failed to start background shell: %v", err)
 	}
@@ -146,7 +147,7 @@ func TestBackgroundShell_WithBlockFuncs(t *testing.T) {
 		CommandsBlocker([]string{"curl", "wget"}),
 	}
 
-	bgShell, err := manager.Start(ctx, workingDir, blockFuncs, "curl example.com", "")
+	bgShell, err := manager.Start(ctx, workingDir, blockFuncs, "curl example.com", "", testMaxJobs)
 	if err != nil {
 		t.Fatalf("failed to start background shell: %v", err)
 	}
@@ -181,12 +182,12 @@ func TestBackgroundShellManager_List(t *testing.T) {
 	manager := newBackgroundShellManager()
 
 	// Start two shells
-	bgShell1, err := manager.Start(ctx, workingDir, nil, "sleep 1", "")
+	bgShell1, err := manager.Start(ctx, workingDir, nil, "sleep 1", "", testMaxJobs)
 	if err != nil {
 		t.Fatalf("failed to start first background shell: %v", err)
 	}
 
-	bgShell2, err := manager.Start(ctx, workingDir, nil, "sleep 1", "")
+	bgShell2, err := manager.Start(ctx, workingDir, nil, "sleep 1", "", testMaxJobs)
 	if err != nil {
 		t.Fatalf("failed to start second background shell: %v", err)
 	}
@@ -225,17 +226,17 @@ func TestBackgroundShellManager_KillAll(t *testing.T) {
 	manager := newBackgroundShellManager()
 
 	// Start multiple long-running shells
-	shell1, err := manager.Start(ctx, workingDir, nil, "sleep 10", "")
+	shell1, err := manager.Start(ctx, workingDir, nil, "sleep 10", "", testMaxJobs)
 	if err != nil {
 		t.Fatalf("failed to start shell 1: %v", err)
 	}
 
-	shell2, err := manager.Start(ctx, workingDir, nil, "sleep 10", "")
+	shell2, err := manager.Start(ctx, workingDir, nil, "sleep 10", "", testMaxJobs)
 	if err != nil {
 		t.Fatalf("failed to start shell 2: %v", err)
 	}
 
-	shell3, err := manager.Start(ctx, workingDir, nil, "sleep 10", "")
+	shell3, err := manager.Start(ctx, workingDir, nil, "sleep 10", "", testMaxJobs)
 	if err != nil {
 		t.Fatalf("failed to start shell 3: %v", err)
 	}
@@ -288,7 +289,7 @@ func TestBackgroundShellManager_KillAll_Timeout(t *testing.T) {
 	manager := newBackgroundShellManager()
 
 	// Start a shell that traps signals and ignores cancellation.
-	_, err := manager.Start(t.Context(), workingDir, nil, "trap '' TERM INT; sleep 60", "")
+	_, err := manager.Start(t.Context(), workingDir, nil, "trap '' TERM INT; sleep 60", "", testMaxJobs)
 	require.NoError(t, err)
 
 	// Short timeout to test the timeout path.
@@ -327,4 +328,95 @@ func TestBackgroundShell_WaitContext_Canceled(t *testing.T) {
 	cancel()
 
 	require.False(t, bgShell.WaitContext(ctx))
+}
+
+const testMaxJobs = 50
+
+// track registers a fake job with the manager. When completedAt is zero the
+// job counts as still running.
+func track(m *BackgroundShellManager, id string, completedAt int64) {
+	bgShell := &BackgroundShell{
+		ID:     id,
+		done:   make(chan struct{}),
+		stdout: &syncBuffer{},
+		stderr: &syncBuffer{},
+		cancel: func() {},
+	}
+	if completedAt > 0 {
+		bgShell.completedAt.Store(completedAt)
+		close(bgShell.done)
+	}
+	m.shells[id] = bgShell
+}
+
+func TestBackgroundShellManager_FinishedJobsDoNotBlockStart(t *testing.T) {
+	t.Parallel()
+
+	manager := newBackgroundShellManager()
+	for i := range testMaxJobs {
+		track(manager, fmt.Sprintf("done-%d", i), time.Now().Unix())
+	}
+
+	bgShell, err := manager.Start(t.Context(), t.TempDir(), nil, "echo hi", "", testMaxJobs)
+	require.NoError(t, err)
+	require.NotEmpty(t, bgShell.ID)
+	bgShell.Wait()
+}
+
+func TestBackgroundShellManager_RunningJobsBlockStart(t *testing.T) {
+	t.Parallel()
+
+	manager := newBackgroundShellManager()
+	track(manager, "running-0", 0)
+	track(manager, "running-1", 0)
+
+	_, err := manager.Start(t.Context(), t.TempDir(), nil, "echo hi", "", 2)
+	require.ErrorContains(t, err, "maximum number of running background jobs (2)")
+
+	bgShell, err := manager.Start(t.Context(), t.TempDir(), nil, "echo hi", "", 3)
+	require.NoError(t, err, "a higher limit admits the job")
+	bgShell.Wait()
+}
+
+// Output stays readable for the retention period and no longer.
+func TestBackgroundShellManager_DropsStaleFinishedJobs(t *testing.T) {
+	t.Parallel()
+
+	manager := newBackgroundShellManager()
+	now := time.Now()
+	track(manager, "stale", now.Add(-CompletedJobRetention).Unix()-1)
+	track(manager, "fresh", now.Unix())
+
+	bgShell, err := manager.Start(t.Context(), t.TempDir(), nil, "echo hi", "", testMaxJobs)
+	require.NoError(t, err)
+	bgShell.Wait()
+
+	_, ok := manager.Get("stale")
+	require.False(t, ok, "a job past its retention window is dropped")
+	_, ok = manager.Get("fresh")
+	require.True(t, ok, "a recently finished job stays readable")
+}
+
+func TestBackgroundShellManager_PruneDropsOldestFinished(t *testing.T) {
+	t.Parallel()
+
+	manager := newBackgroundShellManager()
+	now := time.Now().Unix()
+	for i := range MaxFinishedJobs + 1 {
+		track(manager, fmt.Sprintf("done-%d", i), now+int64(i))
+	}
+	track(manager, "running", 0)
+
+	bgShell, err := manager.Start(t.Context(), t.TempDir(), nil, "sleep 1", "", testMaxJobs)
+	require.NoError(t, err)
+
+	require.Len(t, manager.List(), MaxFinishedJobs+2)
+	_, ok := manager.Get("done-0")
+	require.False(t, ok, "oldest finished job should have been dropped")
+	_, ok = manager.Get("done-1")
+	require.True(t, ok, "only the excess is dropped")
+	_, ok = manager.Get("running")
+	require.True(t, ok, "running jobs must never be dropped")
+
+	require.NoError(t, manager.Kill(bgShell.ID))
 }

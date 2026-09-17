@@ -479,6 +479,19 @@ type Options struct {
 	Notifications             string       `json:"notifications,omitempty" jsonschema:"description=Notification style to use. Options: auto (default)\\, native\\, osc\\, bell\\, disabled. Auto selects based on environment: native for local sessions\\, osc for SSH (with automatic OSC 99/777 detection).,enum=auto,enum=native,enum=osc,enum=bell,enum=disabled,default=auto"`
 	DisabledSkills            []string     `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=crush-config"`
 	RequestTimeout            *int         `json:"request_timeout,omitempty" jsonschema:"description=Timeout in seconds for each LLM API request. Streaming responses are aborted only after this much inactivity\\, so slow but active streams are never killed. 0 disables it\\, negative values are invalid.,default=60,example=120,example=300,example=0"`
+	MaxBackgroundJobs         *int         `json:"max_background_jobs,omitempty" jsonschema:"description=How many background shell jobs may run at once. Jobs that have finished never count against it. 0 or negative restores the default.,default=50,example=10,example=200"`
+}
+
+// DefaultMaxBackgroundJobs is how many background shell jobs may run at once
+// when the user has not set max_background_jobs.
+const DefaultMaxBackgroundJobs = 50
+
+// GetMaxBackgroundJobs returns the running-job ceiling, always positive.
+func (o *Options) GetMaxBackgroundJobs() int {
+	if o == nil || o.MaxBackgroundJobs == nil || *o.MaxBackgroundJobs <= 0 {
+		return DefaultMaxBackgroundJobs
+	}
+	return *o.MaxBackgroundJobs
 }
 
 // DefaultRequestTimeout bounds each LLM API request when the user has not

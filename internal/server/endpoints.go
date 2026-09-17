@@ -361,6 +361,23 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 			Responds(proto.PinentryResponse{}).
 			Fails(400, 404, 500).
 			Handle(c.handlePostWorkspacePinentryCancel),
+		apigen.Post("/v1/workspaces/{id}/ssh/answer").
+			Summary("Answer SSH prompt").
+			Tags("ssh").
+			PathParam("id", "Workspace ID").
+			Accepts(proto.SSHAnswer{}).
+			Responds(proto.SSHResponse{}).
+			Fails(400, 404, 500).
+			Handle(c.handlePostWorkspaceSSHAnswer),
+
+		apigen.Post("/v1/workspaces/{id}/ssh/cancel").
+			Summary("Cancel SSH prompt").
+			Tags("ssh").
+			PathParam("id", "Workspace ID").
+			Accepts(proto.SSHCancel{}).
+			Responds(proto.SSHResponse{}).
+			Fails(400, 404, 500).
+			Handle(c.handlePostWorkspaceSSHCancel),
 
 		apigen.Get("/v1/workspaces/{id}/agent").
 			Summary("Get agent info").

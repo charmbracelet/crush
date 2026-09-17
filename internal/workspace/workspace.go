@@ -215,6 +215,14 @@ type Workspace interface {
 	// no matching prompt is pending.
 	PinentryRespond(id, secret string) bool
 	PinentryCancel(id string) bool
+	// SSH prompts
+	//
+	// SSHRespond resolves the pending integrated SSH credential or
+	// confirmation prompt with the secret ("yes" for confirmations);
+	// SSHCancel dismisses it. Both return false when no matching prompt
+	// is pending.
+	SSHRespond(id, secret string) bool
+	SSHCancel(id string) bool
 
 	// FileTracker
 	FileTrackerRecordRead(ctx context.Context, sessionID, path string)

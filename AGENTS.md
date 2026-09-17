@@ -45,6 +45,8 @@ internal/
   permission/                      Tool permission checking and allow-lists
   pinentry/                        GPG pinentry: terminal handover watcher, plus the integrated
                                    pinentry (native passphrase dialogs via loopback pinentry)
+  sshaskpass/                      Integrated SSH askpass: OpenSSH credential and security key
+                                   confirmation prompts rendered as native dialogs
   skills/                          Skill file discovery and loading
   shell/                           Bash command execution with background job support
   event/                           Telemetry (PostHog)

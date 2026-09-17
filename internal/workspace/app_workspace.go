@@ -25,6 +25,7 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/charmbracelet/crush/internal/sshaskpass"
 )
 
 // AppWorkspace implements the Workspace interface by delegating
@@ -312,6 +313,16 @@ func (w *AppWorkspace) PinentryRespond(id, secret string) bool {
 
 func (w *AppWorkspace) PinentryCancel(id string) bool {
 	return pinentry.DefaultPrompts().Cancel(id)
+}
+
+// -- SSH prompts --
+
+func (w *AppWorkspace) SSHRespond(id, secret string) bool {
+	return sshaskpass.DefaultPrompts().Respond(id, secret)
+}
+
+func (w *AppWorkspace) SSHCancel(id string) bool {
+	return sshaskpass.DefaultPrompts().Cancel(id)
 }
 
 // -- FileTracker --

@@ -35,6 +35,7 @@ import (
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/server"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/exitbanner"
@@ -873,6 +874,12 @@ func startDetachedServer(cmd *cobra.Command, hostURL *url.URL) error {
 	// DETACHED_PROCESS on windows) is what truly detaches the child from
 	// this process's lifetime.
 	c := exec.CommandContext(context.Background(), exe, cmdArgs...)
+
+	// Strip herdr pane-ownership vars as defense in depth: even if the
+	// server ever skipped herdr.Disable, without these it cannot
+	// attach to or release this pane's agent authority.
+	c.Env = shell.WithoutHerdrEnv(os.Environ())
+
 	stdoutPath := filepath.Join(chDir, "stdout.log")
 	stderrPath := filepath.Join(chDir, "stderr.log")
 	detachProcess(c)

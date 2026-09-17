@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/backend"
+	"github.com/charmbracelet/crush/internal/goal"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -220,6 +221,7 @@ func (c *scriptedCoordinator) ClearQueue(string)                             {}
 func (c *scriptedCoordinator) Summarize(context.Context, string) error       { return nil }
 func (c *scriptedCoordinator) Model() agent.Model                            { return agent.Model{} }
 func (c *scriptedCoordinator) UpdateModels(context.Context) error            { return nil }
+func (c *scriptedCoordinator) GoalRuntime() *goal.Runtime                    { return nil }
 func (c *scriptedCoordinator) SetMainAgent(string) error                     { return nil }
 func (c *scriptedCoordinator) GenerateTitle(context.Context, string, string) {}
 

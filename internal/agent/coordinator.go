@@ -29,6 +29,7 @@ import (
 	"github.com/charmbracelet/crush/internal/discover"
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/filetracker"
+	"github.com/charmbracelet/crush/internal/goal"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/log"
@@ -137,6 +138,7 @@ type Coordinator interface {
 	Summarize(context.Context, string) error
 	Model() Model
 	UpdateModels(ctx context.Context) error
+	GoalRuntime() *goal.Runtime
 	GenerateTitle(ctx context.Context, sessionID, prompt string)
 }
 
@@ -148,6 +150,8 @@ type coordinator struct {
 	questions   question.Service
 	history     history.Service
 	filetracker filetracker.Service
+	goalService goal.Service
+	goalRuntime *goal.Runtime
 	lspManager  *lsp.Manager
 	notify      pubsub.Publisher[notify.Notification]
 	runComplete pubsub.Publisher[notify.RunComplete]
@@ -180,6 +184,7 @@ type CoordinatorOptions struct {
 	Questions   question.Service
 	History     history.Service
 	FileTracker filetracker.Service
+	GoalService goal.Service
 	LSPManager  *lsp.Manager
 	Notify      pubsub.Publisher[notify.Notification]
 	RunComplete pubsub.Publisher[notify.RunComplete]
@@ -209,6 +214,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		questions:    opts.Questions,
 		history:      opts.History,
 		filetracker:  opts.FileTracker,
+		goalService:  opts.GoalService,
 		lspManager:   opts.LSPManager,
 		notify:       opts.Notify,
 		runComplete:  opts.RunComplete,
@@ -217,6 +223,9 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		activeSkills: activeSkills,
 		skillTracker: skillTracker,
 		interactive:  opts.Interactive,
+	}
+	if opts.GoalService != nil {
+		c.goalRuntime = goal.NewRuntime(opts.GoalService, c, opts.Notify)
 	}
 
 	agentCfg, ok := opts.Config.Config().Agents[config.AgentCoder]
@@ -299,7 +308,22 @@ func (c *coordinator) RunAccepted(ctx context.Context, accept *AcceptedRun, sess
 // Accepted so sessionAgent.Run can consume the accept reservation under
 // dispatchMu; when nil (the in-process/local path) no accept tracking
 // applies.
-func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID string, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
+func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID string, prompt string, attachments ...message.Attachment) (result *fantasy.AgentResult, retErr error) {
+	if c.goalRuntime != nil {
+		c.goalRuntime.BeginTurn(sessionID)
+	}
+	defer func() {
+		failure := recover()
+		if failure != nil {
+			retErr = fmt.Errorf("agent panicked: %v", failure)
+		}
+		if c.goalRuntime != nil {
+			c.goalRuntime.AfterTurn(ctx, sessionID, result, retErr)
+		}
+		if failure != nil {
+			panic(failure)
+		}
+	}()
 	if err := c.readyWg.Wait(); err != nil {
 		return nil, err
 	}
@@ -838,6 +862,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 
 	allTools = append(
 		allTools,
+		tools.NewUpdateGoalTool(c.goalService),
 		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelID),
 		tools.NewCrushInfoTool(c.cfg, c.lspManager, c.allSkills, c.activeSkills, c.skillTracker),
 		tools.NewCrushLogsTool(logFile),
@@ -1361,10 +1386,18 @@ func (c *coordinator) BeginAccepted(sessionID string) *AcceptedRun {
 }
 
 func (c *coordinator) Cancel(sessionID string) {
+	if c.goalRuntime != nil {
+		if _, err := c.goalRuntime.Pause(context.Background(), sessionID); err != nil {
+			slog.Error("Failed to pause goal during cancellation", "session_id", sessionID, "error", err)
+		}
+	}
 	c.currentAgent().Cancel(sessionID)
 }
 
 func (c *coordinator) CancelAll() {
+	if c.goalRuntime != nil {
+		c.goalRuntime.Stop(context.Background())
+	}
 	c.currentAgent().CancelAll()
 }
 
@@ -1382,6 +1415,10 @@ func (c *coordinator) IsSessionBusy(sessionID string) bool {
 
 func (c *coordinator) Model() Model {
 	return c.currentAgent().Model()
+}
+
+func (c *coordinator) GoalRuntime() *goal.Runtime {
+	return c.goalRuntime
 }
 
 func (c *coordinator) UpdateModels(ctx context.Context) error {

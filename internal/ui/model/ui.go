@@ -37,6 +37,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/fsext"
+	"github.com/charmbracelet/crush/internal/goal"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/lsp"
@@ -140,6 +141,11 @@ type shellStreamMsg struct {
 type (
 	// cancelTimerExpiredMsg is sent when the cancel timer expires.
 	cancelTimerExpiredMsg struct{}
+
+	// goalTimerTickMsg is sent every second while a goal is active to keep
+	// the elapsed time display live.
+	goalTimerTickMsg struct{}
+
 	// userCommandsLoadedMsg is sent when user commands are loaded.
 	userCommandsLoadedMsg struct {
 		Commands []commands.CustomCommand
@@ -411,6 +417,9 @@ type UI struct {
 	// It is nil when unknown, or when the team has hypercredit display
 	// disabled, and no balance is rendered in either case.
 	hyperCredits *int
+
+	// currentGoal is the active goal for the current session.
+	currentGoal *goal.Goal
 
 	// Prompt history for up/down navigation through previous messages.
 	promptHistory struct {
@@ -841,8 +850,23 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.setState(uiChat, m.focus)
 		m.session = msg.session
+		m.currentGoal = nil
 		m.sidebarOffset = 0
 		m.sessionFiles = msg.files
+		sessionID := msg.session.ID
+		cmds = append(cmds, func() tea.Msg {
+			g, err := m.com.Workspace.GoalGet(context.Background(), sessionID)
+			if err != nil || g == nil {
+				return nil
+			}
+			if g.Status == goal.GoalActive {
+				_ = m.com.Workspace.GoalStart(context.Background(), sessionID)
+			}
+			return pubsub.Event[goal.Goal]{
+				Type:    pubsub.UpdatedEvent,
+				Payload: *g,
+			}
+		})
 		// Session switch: the memoized busy state and queued prompts
 		// belong to the previous session. Drop them and re-fetch
 		// off-thread so the queue pill and esc behavior track the new
@@ -875,8 +899,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.runShellCommandInternal(m.pendingBangCommand, true))
 			m.pendingBangCommand = ""
 		}
-		if hasInProgressTodo(m.session.Todos) {
-			// only start spinner if there is an in-progress todo
+		if hasInProgressTodo(m.session.Todos) || hasInProgressGoal(m.currentGoal) {
+			// Only start the spinner if work is in progress.
 			if m.isAgentBusy() {
 				m.todoIsSpinning = true
 				cmds = append(cmds, m.todoSpinner.Tick)
@@ -941,6 +965,25 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case closeDialogMsg:
 		m.dialog.CloseFrontDialog()
 
+	case pubsub.Event[goal.Goal]:
+		if m.session != nil && msg.Payload.SessionID == m.session.ID {
+			prevHasInProgress := hasInProgressGoal(m.currentGoal)
+			if msg.Type == pubsub.DeletedEvent {
+				m.currentGoal = nil
+			} else {
+				m.currentGoal = &msg.Payload
+				if hasInProgressGoal(m.currentGoal) {
+					cmds = append(cmds, goalTimerTickCmd())
+				}
+			}
+			if !prevHasInProgress && hasInProgressGoal(m.currentGoal) {
+				if m.isAgentBusy() {
+					m.todoIsSpinning = true
+					cmds = append(cmds, m.todoSpinner.Tick)
+				}
+			}
+			m.updateLayoutAndSize()
+		}
 	case pubsub.Event[session.Session]:
 		if msg.Type == pubsub.DeletedEvent {
 			if m.session != nil && m.session.ID == msg.Payload.ID {
@@ -951,10 +994,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 		if m.session != nil && msg.Payload.ID == m.session.ID {
-			prevHasInProgress := hasInProgressTodo(m.session.Todos)
+			prevHasInProgress := hasInProgressTodo(m.session.Todos) || hasInProgressGoal(m.currentGoal)
 			prevPillsHeight := m.pillsAreaHeight()
 			m.session = &msg.Payload
-			if !prevHasInProgress && hasInProgressTodo(m.session.Todos) {
+			if !prevHasInProgress && (hasInProgressTodo(m.session.Todos) || hasInProgressGoal(m.currentGoal)) {
 				m.todoIsSpinning = true
 				cmds = append(cmds, m.todoSpinner.Tick)
 			}
@@ -1007,7 +1050,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.chat.RemoveMessage(msg.Payload.ID)
 		}
 		// start the spinner if there is a new message
-		if hasInProgressTodo(m.session.Todos) && m.isAgentBusy() && !m.todoIsSpinning {
+		if (hasInProgressTodo(m.session.Todos) || hasInProgressGoal(m.currentGoal)) && m.isAgentBusy() && !m.todoIsSpinning {
 			m.todoIsSpinning = true
 			cmds = append(cmds, m.todoSpinner.Tick)
 		}
@@ -1071,6 +1114,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.handleQuestionNotification(msg.Payload)
 	case cancelTimerExpiredMsg:
 		m.isCanceling = false
+	case goalTimerTickMsg:
+		if m.currentGoal != nil && m.currentGoal.Status == goal.GoalActive {
+			m.renderPills()
+			cmds = append(cmds, goalTimerTickCmd())
+		}
 	case tea.TerminalVersionMsg:
 		termVersion := strings.ToLower(msg.Name)
 		// Only enable progress bar for the following terminals.
@@ -1352,7 +1400,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, cmd)
 			}
 		}
-		if m.state == uiChat && m.hasSession() && hasInProgressTodo(m.session.Todos) && m.todoIsSpinning {
+		if m.state == uiChat && m.hasSession() && (hasInProgressTodo(m.session.Todos) || hasInProgressGoal(m.currentGoal)) && m.todoIsSpinning {
 			var cmd tea.Cmd
 			m.todoSpinner, cmd = m.todoSpinner.Update(msg)
 			if cmd != nil {
@@ -2307,6 +2355,102 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			break
 		}
 		cmds = append(cmds, m.runMCPPrompt(msg.ClientID, msg.PromptID, msg.Args))
+	case dialog.ActionSetGoal:
+		if msg.Args == nil {
+			m.dialog.CloseFrontDialog()
+			m.dialog.OpenDialog(dialog.NewGoalInput(m.com, msg))
+			break
+		}
+		objective := strings.TrimSpace(msg.Args["objective"])
+		if objective == "" {
+			cmds = append(cmds, util.ReportWarn("Please provide an objective for the goal."))
+			break
+		}
+		if !m.com.Workspace.AgentIsReady() {
+			cmds = append(cmds, util.ReportError(fmt.Errorf("coder agent is not initialized")))
+			break
+		}
+		// Mirror sendMessage: create session synchronously so UI can subscribe
+		// to its events before the goal runtime starts publishing messages.
+		if !m.hasSession() {
+			newSession, err := m.com.Workspace.CreateSession(context.Background(), "New Session")
+			if err != nil {
+				cmds = append(cmds, util.ReportError(err))
+				break
+			}
+			if m.forceCompactMode {
+				m.isCompact = true
+			}
+			m.session = &newSession
+			cmds = append(cmds, m.loadSession(newSession.ID))
+			m.setState(uiChat, m.focus)
+		}
+		sessionID := m.session.ID
+		cmds = append(cmds, func() tea.Msg {
+			g, err := m.com.Workspace.GoalSet(context.Background(), sessionID, objective)
+			if err != nil {
+				return util.ReportError(err)()
+			}
+			return pubsub.Event[goal.Goal]{
+				Type:    pubsub.UpdatedEvent,
+				Payload: *g,
+			}
+		})
+		m.dialog.CloseFrontDialog()
+	case dialog.ActionGoalClear:
+		cmds = append(cmds, func() tea.Msg {
+			if !m.hasSession() {
+				return nil
+			}
+			g, err := m.com.Workspace.GoalClear(context.Background(), m.session.ID)
+			if err != nil {
+				return util.ReportError(err)()
+			}
+			if g == nil {
+				return util.NewInfoMsg("No active goal to clear.")
+			}
+			return pubsub.Event[goal.Goal]{
+				Type:    pubsub.DeletedEvent,
+				Payload: *g,
+			}
+		})
+		m.dialog.CloseFrontDialog()
+	case dialog.ActionGoalPause:
+		cmds = append(cmds, func() tea.Msg {
+			if !m.hasSession() {
+				return util.NewInfoMsg("No active session.")
+			}
+			g, err := m.com.Workspace.GoalPause(context.Background(), m.session.ID)
+			if err != nil {
+				return util.ReportError(err)()
+			}
+			if g == nil {
+				return util.NewInfoMsg("No active goal to pause.")
+			}
+			return pubsub.Event[goal.Goal]{
+				Type:    pubsub.UpdatedEvent,
+				Payload: *g,
+			}
+		})
+		m.dialog.CloseFrontDialog()
+	case dialog.ActionGoalResume:
+		cmds = append(cmds, func() tea.Msg {
+			if !m.hasSession() {
+				return util.NewInfoMsg("No active session.")
+			}
+			g, err := m.com.Workspace.GoalResume(context.Background(), m.session.ID)
+			if err != nil {
+				return util.ReportError(err)()
+			}
+			if g == nil {
+				return util.NewInfoMsg("No active goal to resume.")
+			}
+			return pubsub.Event[goal.Goal]{
+				Type:    pubsub.UpdatedEvent,
+				Payload: *g,
+			}
+		})
+		m.dialog.CloseFrontDialog()
 	default:
 		cmds = append(cmds, util.CmdHandler(msg))
 	}
@@ -2872,13 +3016,16 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				if value == "exit" || value == "quit" {
 					return m.openQuitDialog()
 				}
-
 				if m.bangMode && value != "" {
 					m.bangMode = false
 					m.setEditorPrompt(m.yoloModeCached())
 					m.randomizePlaceholders()
 					m.historyReset()
 					return tea.Batch(m.runShellCommand(value))
+				}
+
+				if cmd := m.handleSlashGoal(value); cmd != nil {
+					return cmd
 				}
 
 				attachments := m.attachments.List()
@@ -3191,6 +3338,7 @@ func (m *UI) drawHeader(scr uv.Screen, area uv.Rectangle) {
 		area.Dx(),
 		m.lspErrorCount(),
 		m.hyperCredits,
+		m.currentGoal,
 	)
 }
 
@@ -4824,6 +4972,15 @@ func (m *UI) runShellCommandInternal(command string, isFirstMessage bool) tea.Cm
 
 const cancelTimerDuration = 2 * time.Second
 
+const goalTimerTickDuration = 1 * time.Second
+
+// goalTimerTickCmd creates a command that ticks the goal elapsed time display.
+func goalTimerTickCmd() tea.Cmd {
+	return tea.Tick(goalTimerTickDuration, func(time.Time) tea.Msg {
+		return goalTimerTickMsg{}
+	})
+}
+
 // cancelTimerCmd creates a command that expires the cancel timer.
 func cancelTimerCmd() tea.Cmd {
 	return tea.Tick(cancelTimerDuration, func(time.Time) tea.Msg {
@@ -4834,6 +4991,56 @@ func cancelTimerCmd() tea.Cmd {
 // cancelAgent handles the cancel key press. The first press sets isCanceling to true
 // and starts a timer. The second press (before the timer expires) actually
 // cancels the agent.
+func (m *UI) handleSlashGoal(value string) tea.Cmd {
+	if !strings.HasPrefix(value, "/goal") {
+		return nil
+	}
+
+	parts := strings.Fields(value)
+	if len(parts) == 1 {
+		// Just /goal, show status
+		return func() tea.Msg {
+			if !m.hasSession() {
+				return util.ReportWarn("Start a session first to see goal status.")
+			}
+			g, err := m.com.Workspace.GoalGet(context.Background(), m.session.ID)
+			if err != nil {
+				return util.ReportError(err)()
+			}
+			if g == nil {
+				return util.NewInfoMsg("No active goal for this session.")
+			}
+			return pubsub.Event[goal.Goal]{
+				Type:    pubsub.UpdatedEvent,
+				Payload: *g,
+			}
+		}
+	}
+
+	subcommand := parts[1]
+	switch subcommand {
+	case "clear":
+		return func() tea.Msg {
+			if !m.hasSession() {
+				return util.ReportWarn("Start a session first.")
+			}
+			g, err := m.com.Workspace.GoalClear(context.Background(), m.session.ID)
+			if err != nil {
+				return util.ReportError(err)()
+			}
+			if g == nil {
+				return nil
+			}
+			return pubsub.Event[goal.Goal]{
+				Type:    pubsub.DeletedEvent,
+				Payload: *g,
+			}
+		}
+	default:
+		return util.ReportWarn("Use the command palette (set_goal) to set a goal objective.")
+	}
+}
+
 func (m *UI) cancelAgent() tea.Cmd {
 	if !m.hasSession() {
 		return nil
@@ -4972,7 +5179,12 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 	hasTodos := hasSession && hasIncompleteTodos(m.session.Todos)
 	hasQueue := m.promptQueue > 0
 
-	commands, err := dialog.NewCommands(m.com, sessionID, hasSession, hasTodos, hasQueue, m.customCommands, m.mcpPrompts)
+	var goalStatus goal.GoalStatus
+	if m.currentGoal != nil {
+		goalStatus = m.currentGoal.Status
+	}
+
+	commands, err := dialog.NewCommands(m.com, sessionID, hasSession, hasTodos, hasQueue, goalStatus, m.customCommands, m.mcpPrompts)
 	if err != nil {
 		return util.ReportError(err)
 	}
@@ -5246,6 +5458,7 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 	var cmds []tea.Cmd
 	switch n.Type {
 	case notify.TypeAgentFinished:
+		m.randomizePlaceholders()
 		common.StopTurn()
 		cmds = append(cmds, m.sendNotification(notification.Notification{
 			Title:   "Crush is waiting...",
@@ -5259,6 +5472,9 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 		// busy/queue refresh below.
 	case notify.TypeReAuthenticate:
 		return m.handleReAuthenticate(n.ProviderID)
+	case notify.TypeGoalContinue:
+		m.workingPlaceholder = "Continuing goal..."
+		return nil
 	case notify.TypeAWSSSOAuth:
 		return m.handleAWSSSOAuth(n.AWSSOCommand, n.AWSSOURL)
 	case notify.TypeAWSSSOAuthResult:
@@ -5350,6 +5566,7 @@ func (m *UI) newSession() tea.Cmd {
 
 	planCmd := m.resetPlanModeState()
 	m.session = nil
+	m.currentGoal = nil
 	m.sidebarOffset = 0
 	m.sessionFiles = nil
 	m.sessionFileReads = nil

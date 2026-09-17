@@ -3,9 +3,11 @@ package model
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/goal"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -25,9 +27,15 @@ const (
 type pillSection int
 
 const (
-	pillSectionTodos pillSection = iota
+	pillSectionGoal pillSection = iota
+	pillSectionTodos
 	pillSectionQueue
 )
+
+// hasInProgressGoal returns true if there is an active goal.
+func hasInProgressGoal(g *goal.Goal) bool {
+	return g != nil && g.Status == goal.GoalActive
+}
 
 // hasIncompleteTodos returns true if there are any non-completed todos.
 func hasIncompleteTodos(todos []session.Todo) bool {
@@ -42,6 +50,43 @@ func hasInProgressTodo(todos []session.Todo) bool {
 		}
 	}
 	return false
+}
+
+// goalPill renders the goal status pill.
+func goalPill(g *goal.Goal, spinnerView string, panelFocused bool, t *styles.Styles) string {
+	if g == nil {
+		return ""
+	}
+
+	label := t.Pills.TodoLabel.Render("Goal")
+	status := string(g.Status)
+	progress := t.Pills.TodoProgress.Render(status)
+
+	var elapsedSeconds int64
+	if g.Status == goal.GoalActive {
+		elapsedSeconds = g.ActiveSeconds + int64(time.Since(g.UpdatedAt).Seconds())
+	} else {
+		elapsedSeconds = g.ActiveSeconds
+	}
+	elapsed := t.Pills.GoalElapsedTime.Render((time.Duration(elapsedSeconds) * time.Second).String())
+
+	var content string
+	if panelFocused {
+		content = fmt.Sprintf("%s %s %s", label, progress, elapsed)
+	} else {
+		taskText := g.Objective
+		if ansi.StringWidth(taskText) > maxTaskDisplayLength {
+			taskText = ansi.Truncate(taskText, maxTaskDisplayLength-1, "…")
+		}
+		task := t.Pills.TodoCurrentTask.Render(taskText)
+		if g.Status == goal.GoalActive {
+			content = fmt.Sprintf("%s %s %s %s %s", spinnerView, label, progress, task, elapsed)
+		} else {
+			content = fmt.Sprintf("%s %s %s %s", label, progress, task, elapsed)
+		}
+	}
+
+	return t.Pills.Focused.Render(content)
 }
 
 // queuePill renders the queue count pill with gradient triangles. Pills always
@@ -145,7 +190,7 @@ func (m *UI) autoExpandPillsIfReasonable() tea.Cmd {
 	if m.height < pillsHeightReasonableTerminalHeight {
 		return nil
 	}
-	hasPills := hasIncompleteTodos(m.session.Todos) || m.promptQueue > 0
+	hasPills := hasIncompleteTodos(m.session.Todos) || m.promptQueue > 0 || m.currentGoal != nil
 	if !hasPills {
 		return nil
 	}
@@ -157,7 +202,9 @@ func (m *UI) autoExpandPillsIfReasonable() tea.Cmd {
 	}
 	m.pillsExpanded = true
 	m.pillsAutoExpanded = true
-	if hasIncompleteTodos(m.session.Todos) {
+	if m.currentGoal != nil {
+		m.focusedPillSection = pillSectionGoal
+	} else if hasIncompleteTodos(m.session.Todos) {
 		m.focusedPillSection = pillSectionTodos
 	} else {
 		m.focusedPillSection = pillSectionQueue
@@ -174,13 +221,15 @@ func (m *UI) togglePillsExpanded() tea.Cmd {
 	if !m.hasSession() {
 		return nil
 	}
-	hasPills := hasIncompleteTodos(m.session.Todos) || m.promptQueue > 0
+	hasPills := hasIncompleteTodos(m.session.Todos) || m.promptQueue > 0 || m.currentGoal != nil
 	if !hasPills {
 		return nil
 	}
 	m.pillsExpanded = !m.pillsExpanded
 	if m.pillsExpanded {
-		if hasIncompleteTodos(m.session.Todos) {
+		if m.currentGoal != nil {
+			m.focusedPillSection = pillSectionGoal
+		} else if hasIncompleteTodos(m.session.Todos) {
 			m.focusedPillSection = pillSectionTodos
 		} else {
 			m.focusedPillSection = pillSectionQueue
@@ -198,24 +247,45 @@ func (m *UI) togglePillsExpanded() tea.Cmd {
 	return nil
 }
 
-// switchPillSection changes focus between todo and queue sections.
+// switchPillSection changes focus between goal, todo and queue sections.
 func (m *UI) switchPillSection(dir int) tea.Cmd {
 	if !m.pillsExpanded || !m.hasSession() {
 		return nil
 	}
+	hasGoal := m.currentGoal != nil
 	hasIncompleteTodos := hasIncompleteTodos(m.session.Todos)
 	hasQueue := m.promptQueue > 0
 
-	if dir < 0 && m.focusedPillSection == pillSectionQueue && hasIncompleteTodos {
-		m.focusedPillSection = pillSectionTodos
-		m.updateLayoutAndSize()
+	var sections []pillSection
+	if hasGoal {
+		sections = append(sections, pillSectionGoal)
+	}
+	if hasIncompleteTodos {
+		sections = append(sections, pillSectionTodos)
+	}
+	if hasQueue {
+		sections = append(sections, pillSectionQueue)
+	}
+
+	if len(sections) <= 1 {
 		return nil
 	}
-	if dir > 0 && m.focusedPillSection == pillSectionTodos && hasQueue {
-		m.focusedPillSection = pillSectionQueue
-		m.updateLayoutAndSize()
+
+	currentIndex := -1
+	for i, s := range sections {
+		if s == m.focusedPillSection {
+			currentIndex = i
+			break
+		}
+	}
+
+	if currentIndex == -1 {
 		return nil
 	}
+
+	nextIndex := (currentIndex + dir + len(sections)) % len(sections)
+	m.focusedPillSection = sections[nextIndex]
+	m.updateLayoutAndSize()
 	return nil
 }
 
@@ -225,9 +295,20 @@ func (m *UI) switchPillSection(dir int) tea.Cmd {
 // or it defaults to todos before any todos exist). In that case we fall through
 // to whichever section still has content so the expanded list stays populated.
 func (m *UI) effectiveFocusedSection() pillSection {
+	hasGoal := m.currentGoal != nil
 	hasIncomplete := hasIncompleteTodos(m.session.Todos)
 	hasQueue := m.promptQueue > 0
 	switch m.focusedPillSection {
+	case pillSectionGoal:
+		if hasGoal {
+			return pillSectionGoal
+		}
+		if hasIncomplete {
+			return pillSectionTodos
+		}
+		if hasQueue {
+			return pillSectionQueue
+		}
 	case pillSectionQueue:
 		if hasQueue {
 			return pillSectionQueue
@@ -235,9 +316,12 @@ func (m *UI) effectiveFocusedSection() pillSection {
 		if hasIncomplete {
 			return pillSectionTodos
 		}
-	default: // pillSectionTodos
+	case pillSectionTodos:
 		if hasIncomplete {
 			return pillSectionTodos
+		}
+		if hasGoal {
+			return pillSectionGoal
 		}
 		if hasQueue {
 			return pillSectionQueue
@@ -258,7 +342,8 @@ func (m *UI) pillsAreaHeight() int {
 	}
 	hasIncomplete := hasIncompleteTodos(m.session.Todos)
 	hasQueue := m.promptQueue > 0
-	hasPills := hasIncomplete || hasQueue
+	hasGoal := m.currentGoal != nil
+	hasPills := hasIncomplete || hasQueue || hasGoal
 	if !hasPills {
 		return 0
 	}
@@ -266,6 +351,10 @@ func (m *UI) pillsAreaHeight() int {
 	pillsAreaHeight := pillHeightWithBorder
 	if m.pillsExpanded {
 		switch m.effectiveFocusedSection() {
+		case pillSectionGoal:
+			if hasGoal {
+				pillsAreaHeight++
+			}
 		case pillSectionTodos:
 			if hasIncomplete {
 				pillsAreaHeight += len(m.session.Todos)
@@ -300,13 +389,15 @@ func (m *UI) renderPills() {
 
 	hasIncomplete := hasIncompleteTodos(m.session.Todos)
 	hasQueue := m.promptQueue > 0
+	hasGoal := m.currentGoal != nil
 
-	if !hasIncomplete && !hasQueue {
+	if !hasIncomplete && !hasQueue && !hasGoal {
 		return
 	}
 
 	t := m.com.Styles
 	effective := m.effectiveFocusedSection()
+	goalFocused := m.pillsExpanded && effective == pillSectionGoal
 	todosFocused := m.pillsExpanded && effective == pillSectionTodos
 	queueFocused := m.pillsExpanded && effective == pillSectionQueue
 
@@ -316,6 +407,9 @@ func (m *UI) renderPills() {
 	}
 
 	var pills []string
+	if hasGoal {
+		pills = append(pills, goalPill(m.currentGoal, inProgressIcon, m.pillsExpanded, t))
+	}
 	if hasIncomplete {
 		pills = append(pills, todoPill(m.session.Todos, inProgressIcon, m.pillsExpanded, t))
 	}
@@ -325,7 +419,9 @@ func (m *UI) renderPills() {
 
 	var expandedList string
 	if m.pillsExpanded {
-		if todosFocused && hasIncomplete {
+		if goalFocused && hasGoal {
+			expandedList = t.Sidebar.WorkingDir.Render(m.currentGoal.Objective)
+		} else if todosFocused && hasIncomplete {
 			expandedList = todoList(m.session.Todos, inProgressIcon, t, contentWidth)
 		} else if queueFocused && hasQueue {
 			// Render from the memoized queue (fetched off-thread, see

@@ -12,6 +12,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/goal"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -101,6 +102,10 @@ func (w *countingWorkspace) ListMessages(context.Context, string) ([]message.Mes
 }
 
 func (w *countingWorkspace) ListUserMessages(context.Context, string) ([]message.Message, error) {
+	return nil, nil
+}
+
+func (w *countingWorkspace) GoalGet(context.Context, string) (*goal.Goal, error) {
 	return nil, nil
 }
 

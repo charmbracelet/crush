@@ -60,6 +60,20 @@ func (m *UI) modelInfo(width int) string {
 	return common.ModelInfo(m.com.Styles, modelName, providerName, reasoningInfo, modelContext, width, m.hyperCredits)
 }
 
+func (m *UI) goalInfo(width int) string {
+	if m.currentGoal == nil {
+		return ""
+	}
+	t := m.com.Styles
+	status := string(m.currentGoal.Status)
+	header := t.Sidebar.SectionHeader.Render("GOAL (" + status + ")")
+	objective := t.Sidebar.SessionTitle.
+		Foreground(t.Sidebar.WorkingDir.GetForeground()).
+		Width(width).
+		Render(m.currentGoal.Objective)
+	return lipgloss.JoinVertical(lipgloss.Left, header, objective)
+}
+
 // updateSidebarScrollState renders the sidebar content and computes scroll
 // state (scrollability, max offset, clamp) before drawing. This keeps all
 // state mutation in the update path rather than in the draw function.
@@ -107,6 +121,8 @@ func (m *UI) updateSidebarScrollState() {
 		cwd,
 		"",
 		m.modelInfo(contentWidth),
+		"",
+		m.goalInfo(contentWidth),
 		"",
 		filesSection,
 		"",

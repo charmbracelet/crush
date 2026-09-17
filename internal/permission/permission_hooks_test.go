@@ -256,6 +256,7 @@ func TestPermissionService_NoHooksUnchanged(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, granted, "no hooks installed: normal flow must be unchanged")
 }
+
 func TestPermissionService_EscalationNote(t *testing.T) {
 	t.Parallel()
 

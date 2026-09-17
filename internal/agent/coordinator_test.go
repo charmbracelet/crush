@@ -6,14 +6,18 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/anthropic"
 	"charm.land/fantasy/providers/bedrock"
 	"charm.land/fantasy/providers/openaicompat"
+	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/discover"
+	"github.com/charmbracelet/crush/internal/oauth"
+	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -61,6 +65,14 @@ func newTestCoordinator(t *testing.T, env fakeEnv, providerID string, providerCf
 		sessions: env.sessions,
 		messages: env.messages,
 	}
+}
+
+func newTestCoordinatorWithNotify(t *testing.T, env fakeEnv, providerID string, providerCfg config.ProviderConfig) (*coordinator, *pubsub.Broker[notify.Notification]) {
+	broker := pubsub.NewBroker[notify.Notification]()
+	t.Cleanup(broker.Shutdown)
+	coord := newTestCoordinator(t, env, providerID, providerCfg)
+	coord.notify = broker
+	return coord, broker
 }
 
 // newMockAgent creates a mockSessionAgent with the given provider and run function.
@@ -535,29 +547,125 @@ func TestGetProviderOptionsReasoningEffort(t *testing.T) {
 	}
 }
 
-func TestIsUnauthorized(t *testing.T) {
+func TestIsAuthFailure(t *testing.T) {
 	t.Run("nil error", func(t *testing.T) {
-		assert.False(t, isUnauthorized(nil))
+		assert.False(t, isAuthFailure(nil))
 	})
 
 	t.Run("non-provider error", func(t *testing.T) {
-		assert.False(t, isUnauthorized(errors.New("something broke")))
+		assert.False(t, isAuthFailure(errors.New("something broke")))
 	})
 
 	t.Run("provider error with 401", func(t *testing.T) {
 		err := &fantasy.ProviderError{StatusCode: http.StatusUnauthorized, Message: "unauthorized"}
-		assert.True(t, isUnauthorized(err))
+		assert.True(t, isAuthFailure(err))
 	})
 
 	t.Run("provider error with non-401", func(t *testing.T) {
 		err := &fantasy.ProviderError{StatusCode: http.StatusForbidden, Message: "forbidden"}
-		assert.False(t, isUnauthorized(err))
+		assert.False(t, isAuthFailure(err))
+	})
+
+	t.Run("provider error flagged as auth error without 401", func(t *testing.T) {
+		err := &fantasy.ProviderError{Message: "failed to refresh cached credentials", AuthError: true}
+		assert.True(t, isAuthFailure(err))
 	})
 
 	t.Run("wrapped provider error with 401", func(t *testing.T) {
 		inner := &fantasy.ProviderError{StatusCode: http.StatusUnauthorized, Message: "expired"}
 		err := fmt.Errorf("request failed: %w", inner)
-		assert.True(t, isUnauthorized(err))
+		assert.True(t, isAuthFailure(err))
+	})
+}
+
+func TestCanPromptForCredentials(t *testing.T) {
+	t.Run("api key provider can be prompted", func(t *testing.T) {
+		assert.True(t, canPromptForCredentials(config.ProviderConfig{ID: "openai"}))
+	})
+
+	t.Run("oauth provider can be prompted", func(t *testing.T) {
+		assert.True(t, canPromptForCredentials(config.ProviderConfig{
+			ID:         "hyper",
+			OAuthToken: &oauth.Token{},
+		}))
+	})
+
+	t.Run("aws sso provider cannot be prompted", func(t *testing.T) {
+		assert.False(t, canPromptForCredentials(config.ProviderConfig{
+			ID:             "bedrock",
+			AWSAuthRefresh: "aws sso login",
+		}))
+	})
+}
+
+func TestRunSubAgentPublishesReAuthenticate(t *testing.T) {
+	t.Run("auth failure from an api key provider requests re-authentication", func(t *testing.T) {
+		const providerID = "kimi"
+		env := testEnv(t)
+
+		coord, broker := newTestCoordinatorWithNotify(t, env, providerID, config.ProviderConfig{ID: providerID})
+		events := broker.Subscribe(t.Context())
+
+		parentSession, err := env.sessions.Create(t.Context(), "Parent")
+		require.NoError(t, err)
+
+		agent := newMockAgent(providerID, 4096, func(_ context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
+			return nil, &fantasy.ProviderError{StatusCode: http.StatusUnauthorized, Message: "Invalid API Key."}
+		})
+
+		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
+			Agent:          agent,
+			SessionID:      parentSession.ID,
+			AgentMessageID: "msg-1",
+			ToolCallID:     "call-1",
+			Prompt:         "test",
+			SessionTitle:   "Test",
+		})
+		require.NoError(t, err)
+		assert.True(t, resp.IsError)
+
+		select {
+		case event := <-events:
+			assert.Equal(t, notify.TypeReAuthenticate, event.Payload.Type)
+			assert.Equal(t, providerID, event.Payload.ProviderID)
+		case <-time.After(2 * time.Second):
+			t.Fatal("expected a re-authenticate notification")
+		}
+	})
+
+	t.Run("aws sso provider does not request re-authentication", func(t *testing.T) {
+		const providerID = "bedrock"
+		env := testEnv(t)
+
+		coord, broker := newTestCoordinatorWithNotify(t, env, providerID, config.ProviderConfig{
+			ID:             providerID,
+			AWSAuthRefresh: "aws sso login",
+		})
+		events := broker.Subscribe(t.Context())
+
+		parentSession, err := env.sessions.Create(t.Context(), "Parent")
+		require.NoError(t, err)
+
+		agent := newMockAgent(providerID, 4096, func(_ context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
+			return nil, &fantasy.ProviderError{StatusCode: http.StatusUnauthorized, Message: "expired"}
+		})
+
+		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
+			Agent:          agent,
+			SessionID:      parentSession.ID,
+			AgentMessageID: "msg-1",
+			ToolCallID:     "call-1",
+			Prompt:         "test",
+			SessionTitle:   "Test",
+		})
+		require.NoError(t, err)
+		assert.True(t, resp.IsError)
+
+		select {
+		case event := <-events:
+			t.Fatalf("unexpected notification: %+v", event.Payload)
+		case <-time.After(200 * time.Millisecond):
+		}
 	})
 }
 

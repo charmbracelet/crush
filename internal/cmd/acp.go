@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -43,7 +44,24 @@ func runACP(cmd *cobra.Command, _ []string) error {
 	log := slog.Default()
 	log.Info("starting ACP server")
 
-	srv := acp.NewServer(app, log, os.Stdin, os.Stdout)
+	var (
+		stdin  = io.Reader(os.Stdin)
+		stdout = io.Writer(os.Stdout)
+	)
+	// CRUSH_ACP_LOG enables a timestamped capture of every stdio JSON-RPC
+	// frame in both directions, written as JSONL.
+	if path := os.Getenv("CRUSH_ACP_LOG"); path != "" {
+		fl, err := acp.OpenFrameLogger(path)
+		if err != nil {
+			return fmt.Errorf("acp log: %w", err)
+		}
+		defer fl.Close()
+		stdin = fl.Reader(stdin)
+		stdout = fl.Writer(stdout)
+		log.Info("ACP frame capture enabled", "path", path)
+	}
+
+	srv := acp.NewServer(app, log, stdin, stdout)
 	srv.SetLogger(log)
 
 	// Wire the ACP permission service into the app so tools use it. The

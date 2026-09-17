@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	notify "github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/app"
@@ -15,6 +16,12 @@ import (
 	"github.com/charmbracelet/crush/internal/pubsub"
 	acp "github.com/coder/acp-go-sdk"
 )
+
+// chunkDeliveryDelay is the delay between streamed ACP chunk
+// notifications. Since the message broker delivers debounced
+// full-turn snapshots rather than per-token deltas, spacing chunks
+// out makes output appear progressive rather than bursty.
+const chunkDeliveryDelay = 50 * time.Millisecond
 
 // eventBridge translates Crush agent events into ACP session updates.
 type eventBridge struct {
@@ -176,6 +183,26 @@ func (b *eventBridge) streamToolResults(ctx context.Context, m message.Message) 
 	}
 }
 
+// splitDelta splits a streaming delta into ~4-word chunks so the ACP
+// client sees smooth, token-sized updates rather than large paragraph
+// jumps.
+func splitDelta(delta string) []string {
+	if delta == "" {
+		return nil
+	}
+	words := strings.Fields(delta)
+	var chunks []string
+	const wordsPerChunk = 4
+	for i := 0; i < len(words); i += wordsPerChunk {
+		end := i + wordsPerChunk
+		if end > len(words) {
+			end = len(words)
+		}
+		chunks = append(chunks, strings.Join(words[i:end], " "))
+	}
+	return chunks
+}
+
 // streamText streams the new tail of the assistant message text.
 func (b *eventBridge) streamText(ctx context.Context, m message.Message) {
 	text := m.Content().Text
@@ -193,12 +220,28 @@ func (b *eventBridge) streamText(ctx context.Context, m message.Message) {
 		return
 	}
 	delta := text[sent:]
-	update := acp.SessionNotification{
-		SessionId: acp.SessionId(m.SessionID),
-		Update:    acp.UpdateAgentMessageText(delta),
-	}
-	if err := b.conn.SessionUpdate(ctx, update); err != nil {
-		b.log.Warn("Failed to send streamed session update", "error", err)
+	// Split large streaming deltas into small pieces (~4 words) so Zed
+	// sees smooth, token-sized updates rather than paragraph-sized jumps.
+	chunks := splitDelta(delta)
+	for i, chunk := range chunks {
+		update := acp.SessionNotification{
+			SessionId: acp.SessionId(m.SessionID),
+			Update:    acp.UpdateAgentMessageText(chunk),
+		}
+		if err := b.conn.SessionUpdate(ctx, update); err != nil {
+			b.log.Warn("Failed to send streamed session update", "error", err)
+		}
+		// Throttle chunk delivery so the client perceives progressive
+		// output instead of a single burst. The message broker delivers
+		// debounced full-turn snapshots (not per-token deltas), so we space
+		// the split chunks out to approximate streaming cadence.
+		if i < len(chunks)-1 {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(chunkDeliveryDelay):
+			}
+		}
 	}
 }
 
@@ -218,12 +261,22 @@ func (b *eventBridge) streamThoughts(ctx context.Context, m message.Message) {
 		return
 	}
 	delta := thinking[sent:]
-	update := acp.SessionNotification{
-		SessionId: acp.SessionId(m.SessionID),
-		Update:    acp.UpdateAgentThoughtText(delta),
-	}
-	if err := b.conn.SessionUpdate(ctx, update); err != nil {
-		b.log.Warn("Failed to send thought update", "error", err)
+	chunks := splitDelta(delta)
+	for i, chunk := range chunks {
+		update := acp.SessionNotification{
+			SessionId: acp.SessionId(m.SessionID),
+			Update:    acp.UpdateAgentThoughtText(chunk),
+		}
+		if err := b.conn.SessionUpdate(ctx, update); err != nil {
+			b.log.Warn("Failed to send streamed session update", "error", err)
+		}
+		if i < len(chunks)-1 {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(chunkDeliveryDelay):
+			}
+		}
 	}
 }
 
@@ -380,7 +433,8 @@ func (b *eventBridge) usageUpdate(ctx context.Context, sessionID string) {
 
 	size := 0
 	if store := b.app.Store(); store != nil {
-		if model := store.Config().GetModelByType(config.SelectedModelType(config.AgentCoder)); model != nil {
+		cfg := store.Config()
+		if model := cfg.GetModelByType(cfg.Agents[config.AgentCoder].Model); model != nil {
 			size = int(model.ContextWindow)
 		}
 	}

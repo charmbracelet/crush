@@ -148,3 +148,36 @@ func TestEventBridge_ToolResultStreaming(t *testing.T) {
 	case <-time.After(200 * time.Millisecond):
 	}
 }
+
+func TestSplitDelta_Spaces(t *testing.T) {
+	chunks := splitDelta("alpha bravo charlie delta echo foxtrot golf hotel")
+	if len(chunks) != 2 {
+		t.Fatalf("expected 2 chunks for 8 words, got %d", len(chunks))
+	}
+	if chunks[0] != "alpha bravo charlie delta" {
+		t.Errorf("chunk 0 = %q, want %q", chunks[0], "alpha bravo charlie delta")
+	}
+	if chunks[1] != "echo foxtrot golf hotel" {
+		t.Errorf("chunk 1 = %q, want %q", chunks[1], "echo foxtrot golf hotel")
+	}
+}
+
+func TestSplitDelta_Newlines(t *testing.T) {
+	chunks := splitDelta("alpha\nbravo\ncharlie\ndelta\necho\nfoxtrot\ngolf\nhotel")
+	if len(chunks) != 2 {
+		t.Fatalf("expected 2 chunks for 8 newline-separated words, got %d", len(chunks))
+	}
+}
+
+func TestSplitDelta_Empty(t *testing.T) {
+	if chunks := splitDelta(""); chunks != nil {
+		t.Errorf("expected nil for empty input, got %v", chunks)
+	}
+}
+
+func TestSplitDelta_SingleWord(t *testing.T) {
+	chunks := splitDelta("hello")
+	if len(chunks) != 1 || chunks[0] != "hello" {
+		t.Errorf("expected [hello], got %v", chunks)
+	}
+}

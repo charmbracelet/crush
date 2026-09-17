@@ -2484,18 +2484,19 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		m.com.Workspace.ImportCopilot()
 	}
 
-	// The OpenAI provider holds exactly one credential: a ChatGPT login
-	// or an API key. The empty model ID marks the OAuth flow's hand-off
-	// message (sign-in completed, or the method choice going to OAuth),
-	// and a catalog model needs one of the credentials before it can
-	// serve.
-	if providerID == string(catwalk.InferenceProviderOpenAI) {
+	// The OpenAI and xAI providers hold exactly one credential: an
+	// account login or an API key. The empty model ID marks the OAuth
+	// flow's hand-off message (sign-in completed, or the method choice
+	// going to OAuth), and a catalog model needs one of the credentials
+	// before it can serve.
+	if providerID == string(catwalk.InferenceProviderOpenAI) ||
+		providerID == string(catwalk.InferenceProviderXAI) {
 		providerCfg, _ := cfg.Providers.Get(providerID)
 		if msg.Model.Model == "" {
 			m.dialog.CloseDialog(dialog.ModelsID)
 			if providerCfg.OAuthToken != nil && !msg.ReAuthenticate {
 				// A sign-in just completed: reopen the list so the user
-				// can pick one of the freshly fetched subscription models.
+				// can pick from the now-available catalog.
 				m.dialog.CloseDialog(dialog.OAuthID)
 				if cmd := m.openModelsDialog(); cmd != nil {
 					return cmd
@@ -2606,6 +2607,21 @@ func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.Se
 			// An API key is the credential in force: edit it.
 			dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, model, modelType)
 		}
+	case catwalk.InferenceProviderXAI:
+		providerCfg, _ := m.com.Config().Providers.Get(string(provider.ID))
+		hasAPIKey := providerCfg.HasAPIKey(m.com.Workspace.Resolver())
+		switch {
+		case model.Model == "" || providerCfg.OAuthToken != nil:
+			// The sign-in flow's hand-off, or a re-authentication while
+			// the Grok login is the credential in force.
+			dlg, cmd = dialog.NewOAuthGrok(m.com, isOnboarding, provider, model, modelType)
+		case !hasAPIKey:
+			// No credential at all: let the user pick the method.
+			dlg = dialog.NewAuthMethod(m.com, isOnboarding, provider, model, modelType)
+		default:
+			// An API key is the credential in force: edit it.
+			dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, model, modelType)
+		}
 	default:
 		dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, model, modelType)
 	}
@@ -2621,9 +2637,10 @@ func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.Se
 
 // openAuthenticationDialogWithMethod opens the authentication dialog for
 // the method the user chose in the auth method picker. Choosing OAuth
-// clears the model: the ChatGPT catalog is only known after sign-in, so
-// the flow ends by reopening the models list rather than selecting the
-// API-key model the user happened to start from.
+// clears the model for providers whose catalog depends on the sign-in
+// (OpenAI's ChatGPT models), so the flow ends by reopening the models
+// list rather than selecting the API-key model the user happened to
+// start from.
 func (m *UI) openAuthenticationDialogWithMethod(provider catwalk.Provider, model config.SelectedModel, modelType config.SelectedModelType, useOAuth bool) tea.Cmd {
 	isOnboarding := m.state == uiOnboarding
 
@@ -2633,7 +2650,12 @@ func (m *UI) openAuthenticationDialogWithMethod(provider catwalk.Provider, model
 	)
 	if useOAuth {
 		model.Model = ""
-		dlg, cmd = dialog.NewOAuthOpenAI(m.com, isOnboarding, provider, model, modelType)
+		switch provider.ID {
+		case catwalk.InferenceProviderOpenAI:
+			dlg, cmd = dialog.NewOAuthOpenAI(m.com, isOnboarding, provider, model, modelType)
+		case catwalk.InferenceProviderXAI:
+			dlg, cmd = dialog.NewOAuthGrok(m.com, isOnboarding, provider, model, modelType)
+		}
 	} else {
 		dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, model, modelType)
 	}

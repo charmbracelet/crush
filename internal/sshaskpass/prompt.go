@@ -24,17 +24,22 @@ const (
 	// KindPassword is an SSH authentication password or private key
 	// passphrase, collected in a masked input.
 	KindPassword Kind = "password"
-	// KindConfirm is a confirmation question rather than a secret: a
-	// security key touch (user presence), a host key acceptance, or an
-	// ssh-add key use confirmation. The dialog submits "yes" to confirm
-	// and cancels to decline.
+	// KindConfirm is a decision question that must not be answered
+	// automatically: a host key acceptance or an ssh-add key use
+	// confirmation. The dialog submits "yes" to confirm and cancels to
+	// decline.
 	KindConfirm Kind = "confirm"
+	// KindTouch is a passive security key touch (FIDO user presence, a
+	// "touch your device" instruction). The physical touch is the
+	// approval, so the UI just surfaces a warning and confirms
+	// automatically; no input is collected.
+	KindTouch Kind = "touch"
 )
 
 // PromptRequest describes a credential or confirmation the user must
 // provide. It is published over pubsub and rendered by the UI as a
-// masked-input or confirm dialog. The resolved secret is never carried
-// on this type.
+// masked-input or confirm dialog, or auto-confirmed as a touch warning.
+// The resolved secret is never carried on this type.
 type PromptRequest struct {
 	// ID identifies the request; used to correlate the response.
 	ID string `json:"id"`

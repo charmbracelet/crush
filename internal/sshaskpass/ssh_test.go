@@ -35,7 +35,12 @@ func TestClassifyPrompt(t *testing.T) {
 		{
 			name:   "fido user presence",
 			prompt: "Confirm user presence for key ECDSA-SK SHA256:abcdef",
-			want:   KindConfirm,
+			want:   KindTouch,
+		},
+		{
+			name:   "touch the device",
+			prompt: "Please touch the device. Confirm user presence for key ECDSA-SK SHA256:abcdef",
+			want:   KindTouch,
 		},
 		{
 			name:   "host key acceptance",

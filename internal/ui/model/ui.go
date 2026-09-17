@@ -1071,12 +1071,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pubsub.Event[question.Notification]:
 		m.handleQuestionNotification(msg.Payload)
 	case pubsub.Event[sshaskpass.PromptRequest]:
-		if cmd := m.openSSHDialog(msg.Payload); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-		if cmd := m.sendNotification(sshWaitingNotification(msg.Payload)); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
+		cmds = append(cmds, m.handleSSHPrompt(msg.Payload)...)
 	case pubsub.Event[sshaskpass.Notification]:
 		m.handleSSHNotification(msg.Payload)
 	case cancelTimerExpiredMsg:

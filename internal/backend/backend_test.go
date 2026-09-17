@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -1781,4 +1782,54 @@ func TestIdleShutdown_RefusesLaterCreates(t *testing.T) {
 	_, _, err := b.CreateWorkspace(protoWS(t.TempDir(), t.TempDir(), cid))
 	require.ErrorIs(t, err, ErrServerShuttingDown,
 		"the client must be told to retry against a replacement server")
+}
+
+// TestShutdownWorkspaces_TearsDownEachOnceInParallel covers a server told
+// to stop while hosting live workspaces: each is torn down exactly once,
+// concurrently, and the backend refuses creates and server re-shutdowns.
+func TestShutdownWorkspaces_TearsDownEachOnceInParallel(t *testing.T) {
+	t.Parallel()
+
+	b, serverShutdowns := newTestBackend(t)
+	const n = 3
+	var started sync.WaitGroup
+	started.Add(n)
+	release := make(chan struct{})
+	counts := make([]*atomic.Int32, n)
+	workspaces := make([]*Workspace, n)
+	for i := range n {
+		ws, count := insertTestWorkspace(t, b, fmt.Sprintf("/tmp/live-%d", i))
+		ws.shutdownFn = func() {
+			count.Add(1)
+			started.Done()
+			<-release
+		}
+		counts[i], workspaces[i] = count, ws
+	}
+
+	done := make(chan struct{})
+	go func() {
+		b.ShutdownWorkspaces()
+		close(done)
+	}()
+	// Every teardown must be in flight at once; serial teardown would
+	// block here on the first workspace forever.
+	started.Wait()
+	close(release)
+	<-done
+
+	for _, count := range counts {
+		require.Equal(t, int32(1), count.Load())
+	}
+	require.Zero(t, b.workspaces.Len())
+	require.Empty(t, b.pathIndex)
+
+	// A detach racing the shutdown must not tear a workspace down again,
+	// nor trigger the idle server shutdown.
+	b.teardown(workspaces[0])
+	require.Equal(t, int32(1), counts[0].Load())
+	require.Zero(t, serverShutdowns.Load())
+
+	_, _, err := b.CreateWorkspace(protoWS(t.TempDir(), t.TempDir(), newClientID(t)))
+	require.ErrorIs(t, err, ErrServerShuttingDown)
 }

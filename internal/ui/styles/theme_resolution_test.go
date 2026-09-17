@@ -210,6 +210,34 @@ func TestListAllThemes_Sorted(t *testing.T) {
 	}
 }
 
+func TestLoadPaletteTheme_OverridesOnlyForPureBuiltin(t *testing.T) {
+	// An untouched base theme keeps the built-in's style overrides
+	// (e.g. the hardcoded Charmtone syntax colors).
+	pure, err := LoadPaletteTheme("charmtone-panther", Palette{})
+	require.NoError(t, err)
+	builtin := CharmtonePantera()
+	require.Equal(t, builtin.Markdown.CodeBlock.Chroma.CommentPreproc.Color,
+		pure.Markdown.CodeBlock.Chroma.CommentPreproc.Color)
+
+	// A customized theme must not inherit those overrides; otherwise
+	// light themes would keep dark-tuned syntax and markdown colors.
+	light := Palette{BgBase: "#ffffff", FgBase: "#000000"}
+	custom, err := LoadPaletteTheme("charmtone-panther", light)
+	require.NoError(t, err)
+	require.NotEqual(t, builtin.Markdown.CodeBlock.Chroma.CommentPreproc.Color,
+		custom.Markdown.CodeBlock.Chroma.CommentPreproc.Color)
+}
+
+func TestLoadPaletteTheme_AnsiColors(t *testing.T) {
+	// ANSI 16-color remapping is customizable so light themes can keep
+	// raw terminal output legible.
+	custom := Palette{BgBase: "#ffffff", AnsiWhite: "#000000", AnsiBrightWhite: "#1a1a1a"}
+	s, err := LoadPaletteTheme("charmtone-panther", custom)
+	require.NoError(t, err)
+	require.Equal(t, "#000000", *hex(s.ANSI[7]))
+	require.Equal(t, "#1a1a1a", *hex(s.ANSI[15]))
+}
+
 func TestExportResolvedPalette_Builtin(t *testing.T) {
 	t.Parallel()
 	tf, err := ExportResolvedPalette("charmtone-panther")

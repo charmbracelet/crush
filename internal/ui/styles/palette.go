@@ -79,6 +79,22 @@ func PaletteFields() []PaletteField {
 		{"button_subtle", func(p Palette) string { return p.ButtonSubtle }, func(p *Palette, v string) { p.ButtonSubtle = v }},
 		{"button_inactive", func(p Palette) string { return p.ButtonInactive }, func(p *Palette, v string) { p.ButtonInactive = v }},
 		{"button_hovered", func(p Palette) string { return p.ButtonHovered }, func(p *Palette, v string) { p.ButtonHovered = v }},
+		{"ansi_black", func(p Palette) string { return p.AnsiBlack }, func(p *Palette, v string) { p.AnsiBlack = v }},
+		{"ansi_red", func(p Palette) string { return p.AnsiRed }, func(p *Palette, v string) { p.AnsiRed = v }},
+		{"ansi_green", func(p Palette) string { return p.AnsiGreen }, func(p *Palette, v string) { p.AnsiGreen = v }},
+		{"ansi_yellow", func(p Palette) string { return p.AnsiYellow }, func(p *Palette, v string) { p.AnsiYellow = v }},
+		{"ansi_blue", func(p Palette) string { return p.AnsiBlue }, func(p *Palette, v string) { p.AnsiBlue = v }},
+		{"ansi_magenta", func(p Palette) string { return p.AnsiMagenta }, func(p *Palette, v string) { p.AnsiMagenta = v }},
+		{"ansi_cyan", func(p Palette) string { return p.AnsiCyan }, func(p *Palette, v string) { p.AnsiCyan = v }},
+		{"ansi_white", func(p Palette) string { return p.AnsiWhite }, func(p *Palette, v string) { p.AnsiWhite = v }},
+		{"ansi_bright_black", func(p Palette) string { return p.AnsiBrightBlack }, func(p *Palette, v string) { p.AnsiBrightBlack = v }},
+		{"ansi_bright_red", func(p Palette) string { return p.AnsiBrightRed }, func(p *Palette, v string) { p.AnsiBrightRed = v }},
+		{"ansi_bright_green", func(p Palette) string { return p.AnsiBrightGreen }, func(p *Palette, v string) { p.AnsiBrightGreen = v }},
+		{"ansi_bright_yellow", func(p Palette) string { return p.AnsiBrightYellow }, func(p *Palette, v string) { p.AnsiBrightYellow = v }},
+		{"ansi_bright_blue", func(p Palette) string { return p.AnsiBrightBlue }, func(p *Palette, v string) { p.AnsiBrightBlue = v }},
+		{"ansi_bright_magenta", func(p Palette) string { return p.AnsiBrightMagenta }, func(p *Palette, v string) { p.AnsiBrightMagenta = v }},
+		{"ansi_bright_cyan", func(p Palette) string { return p.AnsiBrightCyan }, func(p *Palette, v string) { p.AnsiBrightCyan = v }},
+		{"ansi_bright_white", func(p Palette) string { return p.AnsiBrightWhite }, func(p *Palette, v string) { p.AnsiBrightWhite = v }},
 	}
 }
 
@@ -125,6 +141,23 @@ type Palette struct {
 	ButtonSubtle   string `json:"button_subtle,omitempty"`
 	ButtonInactive string `json:"button_inactive,omitempty"`
 	ButtonHovered  string `json:"button_hovered,omitempty"`
+
+	AnsiBlack         string `json:"ansi_black,omitempty"`
+	AnsiRed           string `json:"ansi_red,omitempty"`
+	AnsiGreen         string `json:"ansi_green,omitempty"`
+	AnsiYellow        string `json:"ansi_yellow,omitempty"`
+	AnsiBlue          string `json:"ansi_blue,omitempty"`
+	AnsiMagenta       string `json:"ansi_magenta,omitempty"`
+	AnsiCyan          string `json:"ansi_cyan,omitempty"`
+	AnsiWhite         string `json:"ansi_white,omitempty"`
+	AnsiBrightBlack   string `json:"ansi_bright_black,omitempty"`
+	AnsiBrightRed     string `json:"ansi_bright_red,omitempty"`
+	AnsiBrightGreen   string `json:"ansi_bright_green,omitempty"`
+	AnsiBrightYellow  string `json:"ansi_bright_yellow,omitempty"`
+	AnsiBrightBlue    string `json:"ansi_bright_blue,omitempty"`
+	AnsiBrightMagenta string `json:"ansi_bright_magenta,omitempty"`
+	AnsiBrightCyan    string `json:"ansi_bright_cyan,omitempty"`
+	AnsiBrightWhite   string `json:"ansi_bright_white,omitempty"`
 }
 
 // PaletteFromOpts extracts a Palette from quickStyleOpts, converting
@@ -170,6 +203,23 @@ func PaletteFromOpts(o quickStyleOpts) Palette {
 		ButtonSubtle:   colorToHex(o.buttonSubtle),
 		ButtonInactive: colorToHex(o.buttonInactive),
 		ButtonHovered:  colorToHex(o.buttonHovered),
+
+		AnsiBlack:         colorToHex(o.ansiBlack),
+		AnsiRed:           colorToHex(o.ansiRed),
+		AnsiGreen:         colorToHex(o.ansiGreen),
+		AnsiYellow:        colorToHex(o.ansiYellow),
+		AnsiBlue:          colorToHex(o.ansiBlue),
+		AnsiMagenta:       colorToHex(o.ansiMagenta),
+		AnsiCyan:          colorToHex(o.ansiCyan),
+		AnsiWhite:         colorToHex(o.ansiWhite),
+		AnsiBrightBlack:   colorToHex(o.ansiBrightBlack),
+		AnsiBrightRed:     colorToHex(o.ansiBrightRed),
+		AnsiBrightGreen:   colorToHex(o.ansiBrightGreen),
+		AnsiBrightYellow:  colorToHex(o.ansiBrightYellow),
+		AnsiBrightBlue:    colorToHex(o.ansiBrightBlue),
+		AnsiBrightMagenta: colorToHex(o.ansiBrightMagenta),
+		AnsiBrightCyan:    colorToHex(o.ansiBrightCyan),
+		AnsiBrightWhite:   colorToHex(o.ansiBrightWhite),
 	}
 }
 
@@ -218,25 +268,23 @@ func (p Palette) ToQuickStyleOpts(base quickStyleOpts) quickStyleOpts {
 		buttonInactive: resolveColor(p.ButtonInactive, base.buttonInactive),
 		buttonHovered:  resolveColor(p.ButtonHovered, base.buttonHovered),
 
-		// The ANSI 16-color palette isn't customizable, so it's always
-		// inherited from the base theme.
-		ansiBlack:   base.ansiBlack,
-		ansiRed:     base.ansiRed,
-		ansiGreen:   base.ansiGreen,
-		ansiYellow:  base.ansiYellow,
-		ansiBlue:    base.ansiBlue,
-		ansiMagenta: base.ansiMagenta,
-		ansiCyan:    base.ansiCyan,
-		ansiWhite:   base.ansiWhite,
+		ansiBlack:   resolveColor(p.AnsiBlack, base.ansiBlack),
+		ansiRed:     resolveColor(p.AnsiRed, base.ansiRed),
+		ansiGreen:   resolveColor(p.AnsiGreen, base.ansiGreen),
+		ansiYellow:  resolveColor(p.AnsiYellow, base.ansiYellow),
+		ansiBlue:    resolveColor(p.AnsiBlue, base.ansiBlue),
+		ansiMagenta: resolveColor(p.AnsiMagenta, base.ansiMagenta),
+		ansiCyan:    resolveColor(p.AnsiCyan, base.ansiCyan),
+		ansiWhite:   resolveColor(p.AnsiWhite, base.ansiWhite),
 
-		ansiBrightBlack:   base.ansiBrightBlack,
-		ansiBrightRed:     base.ansiBrightRed,
-		ansiBrightGreen:   base.ansiBrightGreen,
-		ansiBrightYellow:  base.ansiBrightYellow,
-		ansiBrightBlue:    base.ansiBrightBlue,
-		ansiBrightMagenta: base.ansiBrightMagenta,
-		ansiBrightCyan:    base.ansiBrightCyan,
-		ansiBrightWhite:   base.ansiBrightWhite,
+		ansiBrightBlack:   resolveColor(p.AnsiBrightBlack, base.ansiBrightBlack),
+		ansiBrightRed:     resolveColor(p.AnsiBrightRed, base.ansiBrightRed),
+		ansiBrightGreen:   resolveColor(p.AnsiBrightGreen, base.ansiBrightGreen),
+		ansiBrightYellow:  resolveColor(p.AnsiBrightYellow, base.ansiBrightYellow),
+		ansiBrightBlue:    resolveColor(p.AnsiBrightBlue, base.ansiBrightBlue),
+		ansiBrightMagenta: resolveColor(p.AnsiBrightMagenta, base.ansiBrightMagenta),
+		ansiBrightCyan:    resolveColor(p.AnsiBrightCyan, base.ansiBrightCyan),
+		ansiBrightWhite:   resolveColor(p.AnsiBrightWhite, base.ansiBrightWhite),
 	}
 }
 
@@ -301,6 +349,17 @@ func (p Palette) Validate() error {
 		return fmt.Errorf("invalid palette colors: %s", strings.Join(errs, "; "))
 	}
 	return nil
+}
+
+// IsEmpty reports whether no palette colors are set, meaning the theme
+// inherits everything from its base.
+func (p Palette) IsEmpty() bool {
+	for _, f := range PaletteFields() {
+		if f.Get(p) != "" {
+			return false
+		}
+	}
+	return true
 }
 
 // ThemePalette returns the Palette for a built-in theme by name.
@@ -417,8 +476,15 @@ func LoadPaletteTheme(baseName string, palette Palette) (Styles, error) {
 		return Styles{}, err
 	}
 	s := quickStyle(palette.ToQuickStyleOpts(base.ToQuickStyleOpts(rootOpts)))
-	if override, ok := builtinThemeOverrides[root]; ok {
-		s = override(s)
+	// Root theme overrides hardcode built-in colors (e.g. the Charmtone
+	// syntax palette) that only make sense for the untouched built-in.
+	// Only apply them when the theme is unmodified, so user themes (e.g.
+	// light themes) get fully token-driven styles.
+	pure := palette.IsEmpty() && base == PaletteFromOpts(rootOpts)
+	if pure {
+		if override, ok := builtinThemeOverrides[root]; ok {
+			s = override(s)
+		}
 	}
 	return s, nil
 }

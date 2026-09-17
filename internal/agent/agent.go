@@ -17,7 +17,6 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
-	"net/http"
 	"os"
 	"regexp"
 	"strconv"
@@ -1166,8 +1165,15 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			// Checked before the provider branches so a deadline our own
 			// request timeout imposed is never reported as a provider error.
 			currentAssistant.AddFinish(message.FinishReasonError, "Request timed out", requestTimedOutErr.userMessage())
-		} else if isHyper && errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusUnauthorized {
+		} else if isHyper && isAuthFailure(err) {
 			currentAssistant.AddFinish(message.FinishReasonError, "Unauthorized", `Please re-authenticate with Hyper. You can also run "crush auth" to re-authenticate.`)
+		} else if isAuthFailure(err) {
+			// Honest in every mode: the TUI opens the authentication
+			// dialog automatically, while headless runs must fix the
+			// credential in the provider configuration.
+			currentAssistant.AddFinish(message.FinishReasonError, "Unauthorized", fmt.Sprintf(
+				"Your credentials for %q were rejected. Update them in the authentication dialog or your provider configuration, then retry.",
+				largeModel.ModelCfg.Provider))
 		} else if errors.As(err, &providerErr) {
 			if providerErr.Message == "The requested model is not supported." {
 				url := "https://github.com/settings/copilot/features"

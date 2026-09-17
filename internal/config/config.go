@@ -904,6 +904,25 @@ func (c *Config) GetModelByType(modelType SelectedModelType) *catwalk.Model {
 	return c.GetModel(model.Provider, model.Model)
 }
 
+// ModelForProvider returns the selected model served by providerID together
+// with its type. It prefers the coder agent's model, then the large model,
+// then the small model, so a re-authentication prompt opened for a failing
+// provider targets the model that is actually in use.
+func (c *Config) ModelForProvider(providerID string) (SelectedModel, SelectedModelType, bool) {
+	if agentCfg, ok := c.Agents[AgentCoder]; ok {
+		if model, ok := c.Models[agentCfg.Model]; ok && model.Provider == providerID {
+			return model, agentCfg.Model, true
+		}
+	}
+	if model, ok := c.Models[SelectedModelTypeLarge]; ok && model.Provider == providerID {
+		return model, SelectedModelTypeLarge, true
+	}
+	if model, ok := c.Models[SelectedModelTypeSmall]; ok && model.Provider == providerID {
+		return model, SelectedModelTypeSmall, true
+	}
+	return SelectedModel{}, "", false
+}
+
 func (c *Config) LargeModel() *catwalk.Model {
 	model, ok := c.Models[SelectedModelTypeLarge]
 	if !ok {

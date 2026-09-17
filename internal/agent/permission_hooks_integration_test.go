@@ -190,7 +190,7 @@ func TestPermissionDeniedBridge(t *testing.T) {
 	logFile := filepath.Join(t.TempDir(), "denials.log")
 	store, workDir := loadStoreWithHooks(t, `{
 		"PermissionDenied": [
-			{"command": "echo denied >> ` + logFile + `"}
+			{"command": "echo denied >> `+logFile+`"}
 		]
 	}`)
 

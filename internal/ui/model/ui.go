@@ -4298,7 +4298,7 @@ func (m *UI) switchPlanToYolo() tea.Cmd {
 // Mode banner copy shown in the status bar after switching modes.
 const (
 	planModeBannerMsg = "Plan with Crush before generating any code."
-	yoloModeBannerMsg = "Skip permission prompts. System level commands will be blocked."
+	yoloModeBannerMsg = "System level commands stay blocked. The rest run unprompted."
 )
 
 func (m *UI) setInputMode(target uiInputMode) tea.Cmd {

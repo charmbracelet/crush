@@ -29,6 +29,7 @@ import (
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/charmbracelet/crush/internal/sshaskpass"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/pkg/browser"
@@ -434,6 +435,35 @@ func (w *ClientWorkspace) QuestionCancel() bool {
 	cancelled, err := w.client.CancelQuestionBatch(context.Background(), w.workspaceID())
 	if err != nil {
 		slog.Error("Failed to cancel question", "error", err)
+		return false
+	}
+	return cancelled
+}
+
+// -- SSH prompts --
+
+// SSHRespond submits the secret for a pending integrated SSH prompt via
+// the client SDK. Confirmations answer "yes".
+func (w *ClientWorkspace) SSHRespond(id, secret string) bool {
+	resolved, err := w.client.AnswerSSH(context.Background(), w.workspaceID(), proto.SSHAnswer{
+		RequestID: id,
+		Secret:    secret,
+	})
+	if err != nil {
+		slog.Error("Failed to answer ssh prompt", "error", err)
+		return false
+	}
+	return resolved
+}
+
+// SSHCancel dismisses a pending integrated SSH prompt via the client
+// SDK.
+func (w *ClientWorkspace) SSHCancel(id string) bool {
+	cancelled, err := w.client.CancelSSH(context.Background(), w.workspaceID(), proto.SSHCancel{
+		RequestID: id,
+	})
+	if err != nil {
+		slog.Error("Failed to cancel ssh prompt", "error", err)
 		return false
 	}
 	return cancelled
@@ -1143,6 +1173,23 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 			Type: e.Type,
 			Payload: question.Notification{
 				BatchID: e.Payload.BatchID,
+			},
+		}
+	case pubsub.Event[proto.SSHPromptRequest]:
+		return pubsub.Event[sshaskpass.PromptRequest]{
+			Type: e.Type,
+			Payload: sshaskpass.PromptRequest{
+				ID:      e.Payload.ID,
+				Prompt:  e.Payload.Prompt,
+				KeyInfo: e.Payload.KeyInfo,
+				Kind:    sshaskpass.Kind(e.Payload.Kind),
+			},
+		}
+	case pubsub.Event[proto.SSHNotification]:
+		return pubsub.Event[sshaskpass.Notification]{
+			Type: e.Type,
+			Payload: sshaskpass.Notification{
+				RequestID: e.Payload.RequestID,
 			},
 		}
 	case pubsub.Event[proto.Message]:

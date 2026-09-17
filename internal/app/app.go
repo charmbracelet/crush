@@ -37,6 +37,7 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/charmbracelet/crush/internal/sshaskpass"
 	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/update"
@@ -128,6 +129,22 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	}
 
 	app.setupEvents()
+
+	// Enable the integrated ssh askpass: OpenSSH credential and
+	// confirmation prompts (passwords, key passphrases, security key
+	// touches) for Crush-spawned commands are rendered as native
+	// dialogs. The redirect is environment-scoped; no ssh configuration
+	// or files are modified.
+	if executable, err := os.Executable(); err != nil {
+		slog.Warn("Integrated ssh prompts unavailable", "error", err)
+	} else if cleanup, err := sshaskpass.StartIntegration(ctx, executable); err != nil {
+		slog.Warn("Integrated ssh prompts unavailable", "error", err)
+	} else {
+		app.cleanupFuncs = append(app.cleanupFuncs, func(context.Context) error {
+			cleanup()
+			return nil
+		})
+	}
 
 	// Initialize clipboard support. This is best-effort; if it fails
 	// (e.g., headless environment), clipboard operations will return nil.
@@ -666,6 +683,10 @@ func (app *App) setupEvents() {
 	app.subscribeMustDeliver(ctx, "permissions-notifications", app.Permissions.SubscribeNotifications)
 	app.subscribeMustDeliver(ctx, "question-batches", app.Questions.Subscribe)
 	app.subscribeMustDeliver(ctx, "question-notifications", app.Questions.SubscribeNotifications)
+	// SSH credential prompts hang a running ssh command if lost, so
+	// the fan-in must not drop them.
+	app.subscribeMustDeliver(ctx, "ssh-prompts", sshaskpass.DefaultPrompts().Subscribe)
+	app.subscribeMustDeliver(ctx, "ssh-notifications", sshaskpass.DefaultPrompts().SubscribeNotifications)
 	app.subscribe(ctx, "history", app.History.Subscribe)
 	app.subscribe(ctx, "agent-notifications", app.agentNotifications.Subscribe)
 	app.subscribeMustDeliver(ctx, "run-completions", app.runCompletions.Subscribe)

@@ -264,6 +264,40 @@ type QuestionNotification struct {
 	BatchID string `json:"batch_id"`
 }
 
+// SSHPromptRequest is the SSE wire format for an integrated SSH askpass
+// prompt: an authentication password or key passphrase, or a
+// confirmation question (security key touch, host key acceptance). The
+// resolved secret is never carried on this type.
+type SSHPromptRequest struct {
+	ID      string `json:"id"`
+	Prompt  string `json:"prompt"`
+	KeyInfo string `json:"key_info,omitempty"`
+	Kind    string `json:"kind"`
+}
+
+// SSHAnswer is the wire format for answering an SSH prompt, sent from
+// client to server via REST.
+type SSHAnswer struct {
+	RequestID string `json:"request_id"`
+	Secret    string `json:"secret"`
+}
+
+// SSHCancel is the wire format for dismissing an SSH prompt.
+type SSHCancel struct {
+	RequestID string `json:"request_id"`
+}
+
+// SSHResponse is the server's response to SSH answer and cancel calls.
+type SSHResponse struct {
+	Resolved bool `json:"resolved"`
+}
+
+// SSHNotification is published when an SSH prompt is resolved so
+// non-answering clients can dismiss their dialogs.
+type SSHNotification struct {
+	RequestID string `json:"request_id"`
+}
+
 // PermissionSkipRequest represents a request to skip permission prompts.
 type PermissionSkipRequest struct {
 	Skip bool `json:"skip"`

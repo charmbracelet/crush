@@ -207,6 +207,18 @@ func (c *Client) SubscribeEvents(ctx context.Context, id string) (<-chan any, er
 				if !sendEvent(ctx, events, e) {
 					return
 				}
+			case pubsub.PayloadTypeSSHPromptRequest:
+				var e pubsub.Event[proto.SSHPromptRequest]
+				_ = json.Unmarshal(p.Payload, &e)
+				if !sendEvent(ctx, events, e) {
+					return
+				}
+			case pubsub.PayloadTypeSSHNotification:
+				var e pubsub.Event[proto.SSHNotification]
+				_ = json.Unmarshal(p.Payload, &e)
+				if !sendEvent(ctx, events, e) {
+					return
+				}
 			case pubsub.PayloadTypeMessage:
 				var e pubsub.Event[proto.Message]
 				_ = json.Unmarshal(p.Payload, &e)
@@ -742,6 +754,43 @@ func (c *Client) CancelQuestionBatch(ctx context.Context, id string) (bool, erro
 	var resp proto.QuestionAnswerResponse
 	if err := json.NewDecoder(rsp.Body).Decode(&resp); err != nil {
 		return false, fmt.Errorf("failed to decode cancel question batch response: %w", err)
+	}
+	return resp.Resolved, nil
+}
+
+// AnswerSSH submits a secret for the pending integrated SSH prompt on a
+// workspace. Returns true if this call resolved the pending prompt,
+// false if already resolved by another caller.
+func (c *Client) AnswerSSH(ctx context.Context, id string, req proto.SSHAnswer) (bool, error) {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/ssh/answer", id), nil, jsonBody(req), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return false, fmt.Errorf("failed to answer ssh prompt: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("failed to answer ssh prompt: status code %d", rsp.StatusCode)
+	}
+	var resp proto.SSHResponse
+	if err := json.NewDecoder(rsp.Body).Decode(&resp); err != nil {
+		return false, fmt.Errorf("failed to decode answer ssh prompt response: %w", err)
+	}
+	return resp.Resolved, nil
+}
+
+// CancelSSH dismisses the pending integrated SSH prompt on a workspace.
+// Returns true if a prompt was cancelled, false if none was pending.
+func (c *Client) CancelSSH(ctx context.Context, id string, req proto.SSHCancel) (bool, error) {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/ssh/cancel", id), nil, jsonBody(req), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return false, fmt.Errorf("failed to cancel ssh prompt: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("failed to cancel ssh prompt: status code %d", rsp.StatusCode)
+	}
+	var resp proto.SSHResponse
+	if err := json.NewDecoder(rsp.Body).Decode(&resp); err != nil {
+		return false, fmt.Errorf("failed to decode cancel ssh prompt response: %w", err)
 	}
 	return resp.Resolved, nil
 }

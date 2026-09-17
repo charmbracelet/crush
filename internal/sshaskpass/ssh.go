@@ -3,28 +3,48 @@ package sshaskpass
 import "strings"
 
 // ClassifyPrompt maps an OpenSSH askpass prompt to the credential kind
-// and a short key/account hint for the dialog. Confirmations (security
-// key user presence, host key acceptance, ssh-add key use) become
-// KindConfirm; everything else is treated as a secret prompt.
+// and a short key/account hint for the dialog. Passive security key
+// touches become KindTouch (surfaced as a warning and confirmed
+// automatically); genuine decision questions (host key acceptance,
+// ssh-add key use) become KindConfirm; everything else is treated as a
+// secret prompt.
 func ClassifyPrompt(prompt string) (kind Kind, keyInfo string) {
 	lower := strings.ToLower(strings.TrimSpace(prompt))
-	if isConfirmPrompt(lower) {
+	switch {
+	case isTouchPrompt(lower):
+		return KindTouch, ""
+	case isConfirmPrompt(lower):
 		return KindConfirm, ""
+	default:
+		return KindPassword, keyInfoFromPrompt(prompt)
 	}
-	return KindPassword, keyInfoFromPrompt(prompt)
 }
 
-// isConfirmPrompt reports whether the prompt asks a yes/no question
-// rather than a secret. These come from OpenSSH's confirmation dialogs:
-// FIDO/security key user presence, host key acceptance, and ssh-add -c.
-func isConfirmPrompt(lower string) bool {
+// isTouchPrompt reports whether the prompt is a passive security key
+// touch instruction (FIDO user presence). The physical touch is the
+// approval, so these never need a decision from the user.
+func isTouchPrompt(lower string) bool {
 	for _, m := range []string{
 		"confirm user presence",
+		"touch the device",
+		"touch your security key",
+		"touch the key",
+	} {
+		if strings.Contains(lower, m) {
+			return true
+		}
+	}
+	return false
+}
+
+// isConfirmPrompt reports whether the prompt is a decision question
+// whose answer must come from the user: host key acceptance or an
+// ssh-add -c key use confirmation.
+func isConfirmPrompt(lower string) bool {
+	for _, m := range []string{
 		"are you sure you want to continue connecting",
 		"yes/no",
 		"allow use of key",
-		"touch the device",
-		"touch your security key",
 	} {
 		if strings.Contains(lower, m) {
 			return true

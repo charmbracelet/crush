@@ -59,6 +59,16 @@ type quickStyleOpts struct {
 	plan              color.Color
 	planMoreSubtle    color.Color
 
+	// Diff view. Inserted (positive) and deleted (negative) lines. The
+	// gutter (line-number column) uses the darker gutter background
+	// while the code and symbol columns use the lighter one.
+	insertFg       color.Color // diff insert symbols and line numbers.
+	insertBg       color.Color // diff insert code and symbol background.
+	insertGutterBg color.Color // diff insert line-number background.
+	deleteFg       color.Color // diff delete symbols and line numbers.
+	deleteBg       color.Color // diff delete code and symbol background.
+	deleteGutterBg color.Color // diff delete line-number background.
+
 	// Buttons. Backgrounds for each button state; the foregrounds are
 	// derived from onPrimary / fgBase.
 	button         color.Color // focused/primary button background.
@@ -608,23 +618,23 @@ func quickStyle(o quickStyleOpts) Styles {
 		},
 		InsertLine: diffview.LineStyle{
 			LineNumber: lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#629657")).
-				Background(lipgloss.Color("#2b322a")),
+				Foreground(o.insertFg).
+				Background(o.insertGutterBg),
 			Symbol: lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#629657")).
-				Background(lipgloss.Color("#323931")),
+				Foreground(o.insertFg).
+				Background(o.insertBg),
 			Code: lipgloss.NewStyle().
-				Background(lipgloss.Color("#323931")),
+				Background(o.insertBg),
 		},
 		DeleteLine: diffview.LineStyle{
 			LineNumber: lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#a45c59")).
-				Background(lipgloss.Color("#312929")),
+				Foreground(o.deleteFg).
+				Background(o.deleteGutterBg),
 			Symbol: lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#a45c59")).
-				Background(lipgloss.Color("#383030")),
+				Foreground(o.deleteFg).
+				Background(o.deleteBg),
 			Code: lipgloss.NewStyle().
-				Background(lipgloss.Color("#383030")),
+				Background(o.deleteBg),
 		},
 		Filename: diffview.LineStyle{
 			LineNumber: lipgloss.NewStyle().

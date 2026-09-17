@@ -72,6 +72,12 @@ func PaletteFields() []PaletteField {
 		{"success", func(p Palette) string { return p.Success }, func(p *Palette, v string) { p.Success = v }},
 		{"success_more_subtle", func(p Palette) string { return p.SuccessMoreSubtle }, func(p *Palette, v string) { p.SuccessMoreSubtle = v }},
 		{"success_most_subtle", func(p Palette) string { return p.SuccessMostSubtle }, func(p *Palette, v string) { p.SuccessMostSubtle = v }},
+		{"insert_fg", func(p Palette) string { return p.InsertFg }, func(p *Palette, v string) { p.InsertFg = v }},
+		{"insert_bg", func(p Palette) string { return p.InsertBg }, func(p *Palette, v string) { p.InsertBg = v }},
+		{"insert_gutter_bg", func(p Palette) string { return p.InsertGutterBg }, func(p *Palette, v string) { p.InsertGutterBg = v }},
+		{"delete_fg", func(p Palette) string { return p.DeleteFg }, func(p *Palette, v string) { p.DeleteFg = v }},
+		{"delete_bg", func(p Palette) string { return p.DeleteBg }, func(p *Palette, v string) { p.DeleteBg = v }},
+		{"delete_gutter_bg", func(p Palette) string { return p.DeleteGutterBg }, func(p *Palette, v string) { p.DeleteGutterBg = v }},
 		{"yolo", func(p Palette) string { return p.Yolo }, func(p *Palette, v string) { p.Yolo = v }},
 		{"plan", func(p Palette) string { return p.Plan }, func(p *Palette, v string) { p.Plan = v }},
 		{"plan_more_subtle", func(p Palette) string { return p.PlanMoreSubtle }, func(p *Palette, v string) { p.PlanMoreSubtle = v }},
@@ -132,6 +138,13 @@ type Palette struct {
 	Success           string `json:"success,omitempty"`
 	SuccessMoreSubtle string `json:"success_more_subtle,omitempty"`
 	SuccessMostSubtle string `json:"success_most_subtle,omitempty"`
+
+	InsertFg       string `json:"insert_fg,omitempty"`
+	InsertBg       string `json:"insert_bg,omitempty"`
+	InsertGutterBg string `json:"insert_gutter_bg,omitempty"`
+	DeleteFg       string `json:"delete_fg,omitempty"`
+	DeleteBg       string `json:"delete_bg,omitempty"`
+	DeleteGutterBg string `json:"delete_gutter_bg,omitempty"`
 
 	Yolo           string `json:"yolo,omitempty"`
 	Plan           string `json:"plan,omitempty"`
@@ -194,6 +207,13 @@ func PaletteFromOpts(o quickStyleOpts) Palette {
 		Success:           colorToHex(o.success),
 		SuccessMoreSubtle: colorToHex(o.successMoreSubtle),
 		SuccessMostSubtle: colorToHex(o.successMostSubtle),
+
+		InsertFg:       colorToHex(o.insertFg),
+		InsertBg:       colorToHex(o.insertBg),
+		InsertGutterBg: colorToHex(o.insertGutterBg),
+		DeleteFg:       colorToHex(o.deleteFg),
+		DeleteBg:       colorToHex(o.deleteBg),
+		DeleteGutterBg: colorToHex(o.deleteGutterBg),
 
 		Yolo:           colorToHex(o.yolo),
 		Plan:           colorToHex(o.plan),
@@ -258,6 +278,13 @@ func (p Palette) ToQuickStyleOpts(base quickStyleOpts) quickStyleOpts {
 		success:           resolveColor(p.Success, base.success),
 		successMoreSubtle: resolveColor(p.SuccessMoreSubtle, base.successMoreSubtle),
 		successMostSubtle: resolveColor(p.SuccessMostSubtle, base.successMostSubtle),
+
+		insertFg:       resolveColor(p.InsertFg, base.insertFg),
+		insertBg:       resolveColor(p.InsertBg, base.insertBg),
+		insertGutterBg: resolveColor(p.InsertGutterBg, base.insertGutterBg),
+		deleteFg:       resolveColor(p.DeleteFg, base.deleteFg),
+		deleteBg:       resolveColor(p.DeleteBg, base.deleteBg),
+		deleteGutterBg: resolveColor(p.DeleteGutterBg, base.deleteGutterBg),
 
 		yolo:           resolveColor(p.Yolo, base.yolo),
 		plan:           resolveColor(p.Plan, base.plan),

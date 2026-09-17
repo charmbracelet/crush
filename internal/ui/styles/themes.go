@@ -81,6 +81,16 @@ func charmtoneOpts() quickStyleOpts {
 		plan:              charmtone.Charple,
 		planMoreSubtle:    charmtone.Hazy,
 
+		// Diff insert/delete tints. Charmtone has no green- or
+		// red-tinted background colors, so these blend the diff hues
+		// with the base background.
+		insertFg:       lipgloss.Color("#629657"),
+		insertBg:       lipgloss.Color("#323931"),
+		insertGutterBg: lipgloss.Color("#2b322a"),
+		deleteFg:       lipgloss.Color("#a45c59"),
+		deleteBg:       lipgloss.Color("#383030"),
+		deleteGutterBg: lipgloss.Color("#312929"),
+
 		button:         charmtone.Dolly,
 		buttonSubtle:   charmtone.Char,
 		buttonInactive: charmtone.Iron,
@@ -199,6 +209,15 @@ func gruvboxDarkOpts() quickStyleOpts {
 		yolo:           lipgloss.Color("#fabd2f"), // yellow bright
 		plan:           lipgloss.Color("#d3869b"), // purple
 		planMoreSubtle: lipgloss.Color("#665c54"), // bg3
+
+		// Diff insert/delete tints, blended from gruvbox's green and
+		// red onto bg0.
+		insertFg:       lipgloss.Color("#b8bb26"), // green bright
+		insertBg:       lipgloss.Color("#3d3e27"),
+		insertGutterBg: lipgloss.Color("#363727"),
+		deleteFg:       lipgloss.Color("#fb4934"), // red bright
+		deleteBg:       lipgloss.Color("#412726"),
+		deleteGutterBg: lipgloss.Color("#352727"),
 
 		button:         lipgloss.Color("#d3869b"), // purple
 		buttonSubtle:   lipgloss.Color("#504945"), // bg2

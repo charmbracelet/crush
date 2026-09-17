@@ -56,7 +56,7 @@ func TestClassifierStaticTiers(t *testing.T) {
 	assert.Equal(t, VerdictDeny, v)
 	assert.Contains(t, r, "dangerous pattern")
 
-	v, r = cl.classify(context.Background(), "bash", "git status", "", "/proj", "")
+	v, _ = cl.classify(context.Background(), "bash", "git status", "", "/proj", "")
 	assert.Equal(t, VerdictAllow, v)
 
 	v, r = cl.classify(context.Background(), "bash", "terraform apply", "", "/proj", "")

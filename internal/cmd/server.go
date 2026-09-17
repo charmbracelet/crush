@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"time"
 
@@ -60,18 +59,14 @@ var serverCmd = &cobra.Command{
 		slog.Info("Starting Crush server...", "addr", serverHost)
 
 		errch := make(chan error, 1)
-		sigch := make(chan os.Signal, 1)
-		sigs := []os.Signal{os.Interrupt}
-		sigs = append(sigs, addSignals(sigs)...)
-		signal.Notify(sigch, sigs...)
-
 		go func() {
 			errch <- srv.ListenAndServe()
 		}()
 
+		// The root command cancels its context on a termination signal.
 		select {
-		case <-sigch:
-			slog.Info("Received interrupt signal...")
+		case <-cmd.Context().Done():
+			slog.Info("Received termination signal...")
 		case err = <-errch:
 			if err != nil && !errors.Is(err, server.ErrServerClosed) {
 				_ = srv.Close()
@@ -84,7 +79,9 @@ var serverCmd = &cobra.Command{
 			return nil
 		}
 
-		ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Second)
+		// The signal already cancelled cmd.Context(); detach so the
+		// shutdown gets its full budget instead of none.
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(cmd.Context()), 15*time.Second)
 		defer cancel()
 
 		slog.Info("Shutting down...")

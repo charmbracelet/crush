@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -198,17 +199,20 @@ func (s *Server) closeListener() {
 	}
 }
 
-// Close force closes all listeners and connections.
+// Close force closes all listeners and connections. Unlike [Server.Shutdown]
+// it leaves hosted workspaces running.
 func (s *Server) Close() error {
 	defer func() { s.closeListener() }()
 	return s.h.Close()
 }
 
-// Shutdown gracefully shuts down the server without interrupting active
-// connections.
+// Shutdown tears down hosted workspaces, then gracefully shuts down the
+// server without interrupting active connections. ctx bounds both. The
+// idle-shutdown path relies on the teardown being a no-op with none left.
 func (s *Server) Shutdown(ctx context.Context) error {
 	defer func() { s.closeListener() }()
-	return s.h.Shutdown(ctx)
+	err := s.backend.ShutdownWorkspaces(ctx)
+	return errors.Join(err, s.h.Shutdown(ctx))
 }
 
 func (s *Server) logDebug(r *http.Request, msg string, args ...any) {

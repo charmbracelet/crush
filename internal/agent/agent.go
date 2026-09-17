@@ -2096,6 +2096,7 @@ func (a *sessionAgent) CancelAll() {
 	for a.IsBusy() {
 		select {
 		case <-timeout:
+			slog.Warn("Gave up waiting for agent runs to cancel; their final state may not be recorded")
 			return
 		default:
 			time.Sleep(200 * time.Millisecond)

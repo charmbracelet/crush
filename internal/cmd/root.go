@@ -209,7 +209,7 @@ func Execute() {
 		_, _ = w.WriteString(heartbit.String())
 		rootCmd.SetVersionTemplate(b.String() + "\n" + defaultVersionTemplate)
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), terminationSignals()...)
 	err := fang.Execute(
 		ctx,
 		rootCmd,

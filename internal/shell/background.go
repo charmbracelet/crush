@@ -2,6 +2,7 @@ package shell
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"fmt"
 	"slices"
@@ -13,9 +14,14 @@ import (
 )
 
 const (
-	// MaxBackgroundJobs is the maximum number of concurrent background jobs allowed
-	MaxBackgroundJobs = 50
-	// CompletedJobRetentionMinutes is how long to keep completed jobs before auto-cleanup (8 hours)
+	// DefaultMaxBackgroundJobs is how many background jobs may run at once
+	// when nothing else is configured. Finished jobs never count against it.
+	DefaultMaxBackgroundJobs = 50
+	// MaxRetainedJobs bounds how many jobs are tracked in total, including
+	// finished ones whose output can still be read. The oldest go first.
+	MaxRetainedJobs = 250
+	// CompletedJobRetentionMinutes is how long a finished job's output stays
+	// readable (8 hours).
 	CompletedJobRetentionMinutes = 8 * 60
 )
 
@@ -62,6 +68,12 @@ type BackgroundShell struct {
 // BackgroundShellManager manages background shell instances.
 type BackgroundShellManager struct {
 	shells *csync.Map[string, *BackgroundShell]
+	// admit serializes the capacity check in Start so concurrent callers
+	// cannot both pass the limit and then both register a shell.
+	admit sync.Mutex
+	// maxJobs is the configured ceiling on running jobs. Zero means
+	// DefaultMaxBackgroundJobs.
+	maxJobs atomic.Int64
 }
 
 var (
@@ -85,12 +97,34 @@ func GetBackgroundShellManager() *BackgroundShellManager {
 	return backgroundManager
 }
 
+// SetMaxJobs sets how many jobs may run at once. Jobs already running are
+// left alone, so a lowered limit only bites on the next start.
+func (m *BackgroundShellManager) SetMaxJobs(n int) {
+	m.maxJobs.Store(int64(n))
+}
+
+// MaxJobs reports the ceiling on running jobs.
+func (m *BackgroundShellManager) MaxJobs() int {
+	if n := m.maxJobs.Load(); n > 0 {
+		return int(n)
+	}
+	return DefaultMaxBackgroundJobs
+}
+
 // Start creates and starts a new background shell with the given command.
 func (m *BackgroundShellManager) Start(ctx context.Context, workingDir string, blockFuncs []BlockFunc, command string, description string) (*BackgroundShell, error) {
-	// Check job limit
-	if m.shells.Len() >= MaxBackgroundJobs {
-		return nil, fmt.Errorf("maximum number of background jobs (%d) reached. Please terminate or wait for some jobs to complete", MaxBackgroundJobs)
+	m.admit.Lock()
+	defer m.admit.Unlock()
+
+	// Only jobs that are still running hold a slot. Finished jobs stay in the
+	// map so their output remains readable, but they must not block new work.
+	limit := m.MaxJobs()
+	if running := m.runningCount(); running >= limit {
+		return nil, fmt.Errorf("maximum number of running background jobs (%d) reached. Please terminate or wait for some jobs to complete", limit)
 	}
+
+	m.dropStale()
+	m.trim(limit, 1)
 
 	id := fmt.Sprintf("%03X", idCounter.Add(1))
 
@@ -126,6 +160,53 @@ func (m *BackgroundShellManager) Start(ctx context.Context, workingDir string, b
 	}()
 
 	return bgShell, nil
+}
+
+// runningCount reports how many tracked jobs have not finished yet.
+func (m *BackgroundShellManager) runningCount() int {
+	var n int
+	for shell := range m.shells.Seq() {
+		if shell.completedAt.Load() == 0 {
+			n++
+		}
+	}
+	return n
+}
+
+// trim drops the oldest finished jobs so that headroom more jobs can be
+// tracked without passing the retention cap. Running jobs are never dropped,
+// so the cap has to leave room for a full complement of them.
+func (m *BackgroundShellManager) trim(limit, headroom int) {
+	retained := max(MaxRetainedJobs, 2*limit)
+	over := m.shells.Len() + headroom - retained
+	if over <= 0 {
+		return
+	}
+
+	var done []*BackgroundShell
+	for shell := range m.shells.Seq() {
+		if shell.completedAt.Load() > 0 {
+			done = append(done, shell)
+		}
+	}
+	slices.SortFunc(done, func(a, b *BackgroundShell) int {
+		return cmp.Compare(a.completedAt.Load(), b.completedAt.Load())
+	})
+
+	for _, job := range done[:min(over, len(done))] {
+		m.shells.Del(job.ID)
+	}
+}
+
+// dropStale removes finished jobs whose output has been readable for longer
+// than the retention period.
+func (m *BackgroundShellManager) dropStale() {
+	cutoff := time.Now().Unix() - int64(CompletedJobRetentionMinutes*60)
+	for shell := range m.shells.Seq() {
+		if at := shell.completedAt.Load(); at > 0 && at < cutoff {
+			m.shells.Del(shell.ID)
+		}
+	}
 }
 
 // Get retrieves a background shell by ID.
@@ -171,31 +252,15 @@ func (m *BackgroundShellManager) List() []string {
 	return ids
 }
 
-// Cleanup removes completed jobs that have been finished for more than the retention period
-func (m *BackgroundShellManager) Cleanup() int {
-	now := time.Now().Unix()
-	retentionSeconds := int64(CompletedJobRetentionMinutes * 60)
-
-	var toRemove []string
-	for shell := range m.shells.Seq() {
-		completedAt := shell.completedAt.Load()
-		if completedAt > 0 && now-completedAt > retentionSeconds {
-			toRemove = append(toRemove, shell.ID)
-		}
-	}
-
-	for _, id := range toRemove {
-		m.Remove(id)
-	}
-
-	return len(toRemove)
-}
-
 // KillAll terminates all background shells. The provided context bounds how
 // long the function waits for each shell to exit.
 func (m *BackgroundShellManager) KillAll(ctx context.Context) {
+	// Held across the clear so a Start that has already passed the capacity
+	// check cannot register its shell behind us and survive the kill.
+	m.admit.Lock()
 	shells := slices.Collect(m.shells.Seq())
 	m.shells.Reset(map[string]*BackgroundShell{})
+	m.admit.Unlock()
 
 	var wg sync.WaitGroup
 	for _, shell := range shells {

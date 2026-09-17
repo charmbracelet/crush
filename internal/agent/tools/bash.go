@@ -250,7 +250,6 @@ func NewBashTool(permissions permission.Service, workingDir, spillDir string, at
 			if params.RunInBackground {
 				startTime := time.Now()
 				bgManager := shell.GetBackgroundShellManager()
-				bgManager.Cleanup()
 				// Use background context so it continues after tool returns
 				bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(), params.Command, params.Description)
 				if err != nil {
@@ -306,7 +305,6 @@ func NewBashTool(permissions permission.Service, workingDir, spillDir string, at
 
 			// Start with detached context so it can survive if moved to background
 			bgManager := shell.GetBackgroundShellManager()
-			bgManager.Cleanup()
 			bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(), params.Command, params.Description)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error starting shell: %w", err)

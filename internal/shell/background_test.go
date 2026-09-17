@@ -2,6 +2,7 @@ package shell
 
 import (
 	"context"
+	"fmt"
 	"runtime"
 	"strings"
 	"testing"
@@ -327,4 +328,131 @@ func TestBackgroundShell_WaitContext_Canceled(t *testing.T) {
 	cancel()
 
 	require.False(t, bgShell.WaitContext(ctx))
+}
+
+// track registers a fake job with the manager. When completedAt is zero the
+// job counts as still running.
+func track(m *BackgroundShellManager, id string, completedAt int64) {
+	bgShell := &BackgroundShell{
+		ID:     id,
+		done:   make(chan struct{}),
+		stdout: &syncBuffer{},
+		stderr: &syncBuffer{},
+		cancel: func() {},
+	}
+	if completedAt > 0 {
+		bgShell.completedAt.Store(completedAt)
+		close(bgShell.done)
+	}
+	m.shells.Set(id, bgShell)
+}
+
+func TestBackgroundShellManager_FinishedJobsDoNotBlockStart(t *testing.T) {
+	t.Parallel()
+
+	manager := newBackgroundShellManager()
+	for i := range DefaultMaxBackgroundJobs {
+		track(manager, fmt.Sprintf("done-%d", i), time.Now().Unix())
+	}
+
+	bgShell, err := manager.Start(t.Context(), t.TempDir(), nil, "echo hi", "")
+	require.NoError(t, err)
+	require.NotEmpty(t, bgShell.ID)
+	bgShell.Wait()
+}
+
+func TestBackgroundShellManager_RunningJobsBlockStart(t *testing.T) {
+	t.Parallel()
+
+	manager := newBackgroundShellManager()
+	for i := range DefaultMaxBackgroundJobs {
+		track(manager, fmt.Sprintf("running-%d", i), 0)
+	}
+
+	_, err := manager.Start(t.Context(), t.TempDir(), nil, "echo hi", "")
+	require.ErrorContains(t, err, "maximum number of running background jobs")
+}
+
+// The ceiling is a setting, so a user who wants more (or fewer) parallel
+// jobs than the default gets them.
+func TestBackgroundShellManager_HonorsConfiguredLimit(t *testing.T) {
+	t.Parallel()
+
+	manager := newBackgroundShellManager()
+	manager.SetMaxJobs(2)
+	require.Equal(t, 2, manager.MaxJobs())
+	track(manager, "running-0", 0)
+	track(manager, "running-1", 0)
+
+	_, err := manager.Start(t.Context(), t.TempDir(), nil, "echo hi", "")
+	require.ErrorContains(t, err, "maximum number of running background jobs (2)")
+
+	manager.SetMaxJobs(0) // back to the default
+	require.Equal(t, DefaultMaxBackgroundJobs, manager.MaxJobs())
+
+	bgShell, err := manager.Start(t.Context(), t.TempDir(), nil, "echo hi", "")
+	require.NoError(t, err)
+	bgShell.Wait()
+}
+
+// A limit above the retention cap would otherwise leave no room for finished
+// jobs to be dropped, so the map would grow past its stated bound in silence.
+func TestBackgroundShellManager_RetentionLeavesRoomForTheLimit(t *testing.T) {
+	t.Parallel()
+
+	manager := newBackgroundShellManager()
+	manager.SetMaxJobs(MaxRetainedJobs * 2)
+
+	now := time.Now().Unix()
+	for i := range MaxRetainedJobs {
+		track(manager, fmt.Sprintf("done-%d", i), now+int64(i))
+	}
+
+	bgShell, err := manager.Start(t.Context(), t.TempDir(), nil, "echo hi", "")
+	require.NoError(t, err, "a high limit must still admit work")
+	bgShell.Wait()
+
+	_, ok := manager.shells.Get("done-0")
+	require.True(t, ok, "with headroom to spare nothing needs dropping")
+}
+
+// Output stays readable for the retention period and no longer.
+func TestBackgroundShellManager_DropsStaleFinishedJobs(t *testing.T) {
+	t.Parallel()
+
+	manager := newBackgroundShellManager()
+	now := time.Now().Unix()
+	track(manager, "stale", now-int64(CompletedJobRetentionMinutes*60)-1)
+	track(manager, "fresh", now)
+
+	bgShell, err := manager.Start(t.Context(), t.TempDir(), nil, "echo hi", "")
+	require.NoError(t, err)
+	bgShell.Wait()
+
+	_, ok := manager.shells.Get("stale")
+	require.False(t, ok, "a job past its retention window is dropped")
+	_, ok = manager.shells.Get("fresh")
+	require.True(t, ok, "a recently finished job stays readable")
+}
+
+func TestBackgroundShellManager_TrimDropsOldestFinished(t *testing.T) {
+	t.Parallel()
+
+	manager := newBackgroundShellManager()
+	now := time.Now().Unix()
+	for i := range MaxRetainedJobs {
+		track(manager, fmt.Sprintf("done-%d", i), now+int64(i))
+	}
+	track(manager, "running", 0)
+
+	bgShell, err := manager.Start(t.Context(), t.TempDir(), nil, "echo hi", "")
+	require.NoError(t, err)
+	bgShell.Wait()
+
+	require.LessOrEqual(t, manager.shells.Len(), MaxRetainedJobs)
+
+	_, ok := manager.shells.Get("done-0")
+	require.False(t, ok, "oldest finished job should have been dropped")
+	_, ok = manager.shells.Get("running")
+	require.True(t, ok, "running jobs must never be dropped")
 }

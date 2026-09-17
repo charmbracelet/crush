@@ -21,6 +21,7 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
+	"github.com/charmbracelet/crush/internal/agent/ratelimit"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
@@ -1125,6 +1126,7 @@ func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers 
 
 	// Set HTTP client based on provider and debug mode.
 	var httpClient *http.Client
+	var headerFunc openai.LanguageModelHeaderFunc
 	switch providerID {
 	case string(catwalk.InferenceProviderCopilot):
 		opts = append(
@@ -1146,13 +1148,23 @@ func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers 
 	case hyper.Name:
 		// Hyper may route requests through a Prism model; capture the
 		// router headers so the UI can show which model answered.
-		opts = append(
-			opts,
-			openaicompat.WithLanguageModelOptions(
-				openai.WithLanguageModelHeaderFunc(hyper.HeaderFunc),
-			),
-		)
+		headerFunc = func(header http.Header, metadata *openai.ProviderMetadata) {
+			hyper.HeaderFunc(header, metadata)
+			ratelimit.HeaderFunc(header, metadata)
+		}
 	}
+
+	// Every provider reports where the account stands on each response and the
+	// numbers were being dropped, so the only way to learn a window was nearly
+	// spent was to hit it mid-turn. Captured for all of them, not just the one
+	// with a router in front (#420).
+	if headerFunc == nil {
+		headerFunc = ratelimit.HeaderFunc
+	}
+	opts = append(
+		opts,
+		openaicompat.WithLanguageModelOptions(openai.WithLanguageModelHeaderFunc(headerFunc)),
+	)
 	if httpClient == nil && c.cfg.Config().Options.Debug {
 		httpClient = log.NewHTTPClient()
 	}

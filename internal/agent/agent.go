@@ -37,6 +37,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/agent/notify"
+	"github.com/charmbracelet/crush/internal/agent/ratelimit"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
@@ -1018,6 +1019,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				}
 			}
 			currentAssistant.AddFinish(finishReason, "", "")
+			recordRateLimit(currentAssistant.Provider, stepResult.ProviderMetadata)
 			currentAssistant.PrismModelID, currentAssistant.PrismModelName = extractPrismModel(stepResult.ProviderMetadata)
 			currentAssistant.PrismHypercreditSavings, currentAssistant.PrismDollarSavings = extractPrismSavings(stepResult.ProviderMetadata)
 			sessionLock.Lock()
@@ -1903,6 +1905,26 @@ func extractHyperCredits(metadata fantasy.ProviderMetadata) {
 	if pm.ExtraField("remaining", &remaining) && remaining.Hypercredits > 0 {
 		hyper.SetBalance(int(math.Round(remaining.Hypercredits)))
 	}
+}
+
+// recordRateLimit lifts the rate-limit headers the provider sent with this step
+// out of provider metadata and stores them as the last known reading. Nothing
+// is requested to learn it: the numbers rode along with a call that was going
+// to happen anyway.
+func recordRateLimit(providerID string, metadata fantasy.ProviderMetadata) {
+	openaiMeta, ok := metadata[openai.Name]
+	if !ok {
+		return
+	}
+	pm, ok := openaiMeta.(*openai.ProviderMetadata)
+	if !ok || pm.ExtraFields == nil {
+		return
+	}
+	snapshot, ok := ratelimit.Decode(pm.ExtraFields[ratelimit.Field])
+	if !ok {
+		return
+	}
+	ratelimit.Record(providerID, snapshot)
 }
 
 // extractPrismModel returns the ID and name of the model that actually

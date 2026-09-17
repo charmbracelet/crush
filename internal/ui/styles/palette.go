@@ -306,7 +306,7 @@ func (p Palette) Validate() error {
 // ThemePalette returns the Palette for a built-in theme by name.
 // Returns an error if the theme is not recognized.
 func ThemePalette(name string) (Palette, error) {
-	optsFn, ok := builtinThemes[strings.ToLower(name)]
+	optsFn, ok := builtinThemes[normalizeThemeName(name)]
 	if !ok {
 		return Palette{}, fmt.Errorf("unknown theme %q; available themes: %s", name, strings.Join(BuiltinThemeNames(), ", "))
 	}
@@ -338,9 +338,9 @@ func MergePalette(baseName string, palette Palette) (Palette, error) {
 // a theme. User themes may inherit from other user themes; cycles are rejected.
 func resolveThemePalette(name string, visiting map[string]bool) (Palette, string, error) {
 	if name == "" {
-		name = "charmtone"
+		name = "charmtone-panther"
 	}
-	key := strings.ToLower(name)
+	key := normalizeThemeName(name)
 	if visiting[key] {
 		return Palette{}, "", fmt.Errorf("theme inheritance cycle at %q", key)
 	}
@@ -354,7 +354,7 @@ func resolveThemePalette(name string, visiting map[string]bool) (Palette, string
 		}
 		baseName := tf.Base
 		if baseName == "" {
-			baseName = "charmtone"
+			baseName = "charmtone-panther"
 		}
 		var base Palette
 		var root string
@@ -391,9 +391,9 @@ func resolveThemePalette(name string, visiting map[string]bool) (Palette, string
 // builtinThemeOpts returns the quickStyleOpts of a built-in theme.
 func builtinThemeOpts(name string) (quickStyleOpts, error) {
 	if name == "" {
-		name = "charmtone"
+		name = "charmtone-panther"
 	}
-	optsFn, ok := builtinThemes[strings.ToLower(name)]
+	optsFn, ok := builtinThemes[normalizeThemeName(name)]
 	if !ok {
 		return quickStyleOpts{}, fmt.Errorf("unknown theme %q; available themes: %s", name, strings.Join(BuiltinThemeNames(), ", "))
 	}

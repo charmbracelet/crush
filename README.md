@@ -394,7 +394,7 @@ dialog.
 
 | Theme | Name |
 | --- | --- |
-| Charmtone | `charmtone` (default) |
+| Charmtone Pantera | `charmtone-panther` (default) |
 | Gruvbox Dark | `gruvbox-dark` |
 
 ### LSPs

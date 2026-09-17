@@ -171,7 +171,7 @@ func TestLoadPaletteTheme_UnknownBase(t *testing.T) {
 
 func TestLoadPaletteTheme_InvalidPalette(t *testing.T) {
 	t.Parallel()
-	_, err := LoadPaletteTheme("charmtone", Palette{Primary: "not-a-color"})
+	_, err := LoadPaletteTheme("charmtone-panther", Palette{Primary: "not-a-color"})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "primary")
 }

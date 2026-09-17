@@ -242,16 +242,32 @@ func gruvboxDarkOverrides(s Styles) Styles {
 
 // builtinThemes maps theme names to their quickStyleOpts palette definitions.
 var builtinThemes = map[string]func() quickStyleOpts{
-	"charmtone":    charmtoneOpts,
-	"gruvbox-dark": gruvboxDarkOpts,
+	"charmtone-panther": charmtoneOpts,
+	"gruvbox-dark":      gruvboxDarkOpts,
 }
 
 // builtinThemeOverrides maps theme names to functions that apply
 // theme-specific style tweaks on top of the styles produced by
 // [quickStyle]. Themes without overrides are absent from the map.
 var builtinThemeOverrides = map[string]func(Styles) Styles{
-	"charmtone":    charmtoneOverrides,
-	"gruvbox-dark": gruvboxDarkOverrides,
+	"charmtone-panther": charmtoneOverrides,
+	"gruvbox-dark":      gruvboxDarkOverrides,
+}
+
+// deprecatedThemeNames maps legacy built-in theme names to their current
+// names so existing configs and user theme files keep resolving.
+var deprecatedThemeNames = map[string]string{
+	"charmtone": "charmtone-panther",
+}
+
+// normalizeThemeName lowercases a theme name and maps deprecated built-in
+// names to their current equivalents.
+func normalizeThemeName(name string) string {
+	key := strings.ToLower(name)
+	if renamed, ok := deprecatedThemeNames[key]; ok {
+		return renamed
+	}
+	return key
 }
 
 // BuiltinThemeNames returns the names of all built-in themes, sorted.
@@ -274,7 +290,7 @@ func LoadTheme(name string) (Styles, error) {
 	if name == "" {
 		return CharmtonePantera(), nil
 	}
-	key := strings.ToLower(name)
+	key := normalizeThemeName(name)
 
 	if path, err := FindThemeFile(key); err == nil {
 		tf, err := LoadThemeFile(path)
@@ -393,7 +409,8 @@ func ExportResolvedPalette(name string) (*ThemeFile, error) {
 }
 
 // IsBuiltinTheme reports whether the given name matches a built-in theme.
+// Deprecated names still count as built-in.
 func IsBuiltinTheme(name string) bool {
-	_, ok := builtinThemes[strings.ToLower(name)]
+	_, ok := builtinThemes[normalizeThemeName(name)]
 	return ok
 }

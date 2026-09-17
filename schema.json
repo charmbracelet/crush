@@ -810,9 +810,9 @@
         "active_theme": {
           "type": "string",
           "description": "Name of the currently active theme",
-          "default": "charmtone",
+          "default": "charmtone-panther",
           "examples": [
-            "charmtone",
+            "charmtone-panther",
             "gruvbox-dark"
           ]
         },

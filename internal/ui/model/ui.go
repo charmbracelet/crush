@@ -2285,14 +2285,14 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	case dialog.ActionCreateTheme:
 		base := msg.Base
 		if base == "" {
-			base = "charmtone"
+			base = "charmtone-panther"
 		}
 		name := msg.Name
 		exported, err := styles.ExportResolvedPalette(base)
 		if err != nil {
-			// Fall back to charmtone when the base theme is no longer
-			// resolvable (e.g. a user theme that was since deleted).
-			base = "charmtone"
+			// Fall back to the default theme when the base theme is no
+			// longer resolvable (e.g. a user theme that was since deleted).
+			base = "charmtone-panther"
 			exported, err = styles.ExportResolvedPalette(base)
 			if err != nil {
 				cmds = append(cmds, util.ReportError(err))
@@ -2345,11 +2345,11 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		// If the deleted theme was active, reset to the default theme.
 		if strings.EqualFold(common.ThemeNameFromConfig(m.com.Config()), msg.Name) {
-			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.tui.active_theme", "charmtone"); err != nil {
+			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.tui.active_theme", "charmtone-panther"); err != nil {
 				cmds = append(cmds, util.ReportError(err))
 				break
 			}
-			newStyles, err := styles.LoadTheme("charmtone")
+			newStyles, err := styles.LoadTheme("charmtone-panther")
 			if err != nil {
 				cmds = append(cmds, util.ReportError(err))
 				break

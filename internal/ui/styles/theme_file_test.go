@@ -14,7 +14,7 @@ func TestThemeFile_SaveAndLoad_RoundTrip(t *testing.T) {
 	path := filepath.Join(dir, "my-theme.json")
 
 	tf := &ThemeFile{
-		Base: "charmtone",
+		Base: "charmtone-panther",
 		Palette: Palette{
 			Primary: "#ff0000",
 			BgBase:  "#1a1a2e",
@@ -71,12 +71,12 @@ func TestThemeFile_LoadUnknownFieldsWarnsButSucceeds(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "extra.json")
-	data := `{"base":"charmtone","primary":"#ff0000","unknown_field":"value","another_bad":"x"}`
+	data := `{"base":"charmtone-panther","primary":"#ff0000","unknown_field":"value","another_bad":"x"}`
 	require.NoError(t, os.WriteFile(path, []byte(data), 0o644))
 
 	tf, err := LoadThemeFile(path)
 	require.NoError(t, err)
-	require.Equal(t, "charmtone", tf.Base)
+	require.Equal(t, "charmtone-panther", tf.Base)
 	require.Equal(t, "#ff0000", tf.Primary)
 }
 
@@ -191,7 +191,7 @@ func TestDeleteThemeFile_RemovesUserTheme(t *testing.T) {
 }
 
 func TestDeleteThemeFile_RejectsBuiltin(t *testing.T) {
-	require.Error(t, DeleteThemeFile("charmtone"))
+	require.Error(t, DeleteThemeFile("charmtone-panther"))
 }
 
 func TestDeleteThemeFile_NotFound(t *testing.T) {

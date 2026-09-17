@@ -54,7 +54,7 @@ var _ Dialog = (*ThemeEditor)(nil)
 // NewThemeEditor creates an editor for the given theme. When themeName is
 // empty the currently active theme is edited.
 func NewThemeEditor(com *common.Common, themeName string) *ThemeEditor {
-	ed := &ThemeEditor{com: com, name: themeName, base: "charmtone", slots: newPaletteSlots()}
+	ed := &ThemeEditor{com: com, name: themeName, base: "charmtone-panther", slots: newPaletteSlots()}
 
 	h := help.New()
 	h.Styles = com.Styles.DialogHelpStyles()
@@ -194,7 +194,7 @@ func (ed *ThemeEditor) loadTheme() {
 	cfg := ed.com.Config()
 	if cfg == nil || cfg.Options == nil || cfg.Options.TUI == nil {
 		if ed.name == "" {
-			ed.name = "charmtone"
+			ed.name = "charmtone-panther"
 		}
 		ed.loadBuiltin(ed.name)
 		return
@@ -204,7 +204,7 @@ func (ed *ThemeEditor) loadTheme() {
 		ed.name = cfg.Options.TUI.ActiveTheme
 	}
 	if ed.name == "" {
-		ed.name = "charmtone"
+		ed.name = "charmtone-panther"
 	}
 
 	// Check for a user theme file first.
@@ -212,7 +212,7 @@ func (ed *ThemeEditor) loadTheme() {
 		if tf, terr := styles.LoadThemeFile(path); terr == nil {
 			base := tf.Base
 			if base == "" {
-				base = "charmtone"
+				base = "charmtone-panther"
 			}
 			merged, merr := styles.MergePalette(base, tf.Palette)
 			if merr == nil {
@@ -229,7 +229,7 @@ func (ed *ThemeEditor) loadTheme() {
 func (ed *ThemeEditor) loadBuiltin(name string) {
 	p, err := styles.ThemePalette(name)
 	if err != nil {
-		name = "charmtone"
+		name = "charmtone-panther"
 		p, _ = styles.ThemePalette(name)
 	}
 	ed.base = name

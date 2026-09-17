@@ -23,12 +23,12 @@ func TestLoadTheme_UserFileShadowsBuiltin(t *testing.T) {
 	setTestThemeDirs(t, []string{dir})
 
 	tf := &ThemeFile{
-		Base:    "charmtone",
+		Base:    "charmtone-panther",
 		Palette: Palette{Primary: "#ff0000"},
 	}
-	require.NoError(t, SaveThemeFile(filepath.Join(dir, "charmtone.json"), tf))
+	require.NoError(t, SaveThemeFile(filepath.Join(dir, "charmtone-panther.json"), tf))
 
-	s, err := LoadTheme("charmtone")
+	s, err := LoadTheme("charmtone-panther")
 	require.NoError(t, err)
 	require.NotNil(t, s.WorkingGradFromColor)
 }
@@ -86,9 +86,9 @@ func TestLoadTheme_RejectsInheritanceCycle(t *testing.T) {
 func TestLoadTheme_OverriddenBuiltinKeepsThemeOverrides(t *testing.T) {
 	dir := t.TempDir()
 	setTestThemeDirs(t, []string{dir})
-	require.NoError(t, SaveThemeFile(filepath.Join(dir, "charmtone.json"), &ThemeFile{Base: "charmtone"}))
+	require.NoError(t, SaveThemeFile(filepath.Join(dir, "charmtone-panther.json"), &ThemeFile{Base: "charmtone-panther"}))
 
-	loaded, err := LoadTheme("charmtone")
+	loaded, err := LoadTheme("charmtone-panther")
 	require.NoError(t, err)
 	builtin := CharmtonePantera()
 	require.Equal(t, builtin.Editor.PromptBangIconFocused.GetForeground(), loaded.Editor.PromptBangIconFocused.GetForeground())
@@ -122,13 +122,13 @@ func TestListAllThemes_IncludesBuiltins(t *testing.T) {
 
 	foundCharmtone := false
 	for _, info := range infos {
-		if info.Name == "charmtone" {
+		if info.Name == "charmtone-panther" {
 			foundCharmtone = true
 			require.Equal(t, ThemeSourceBuiltin, info.Source)
 			require.False(t, info.Overridden)
 		}
 	}
-	require.True(t, foundCharmtone, "expected charmtone in theme list")
+	require.True(t, foundCharmtone, "expected charmtone-panther in theme list")
 }
 
 func TestListAllThemes_ShowsOverridden(t *testing.T) {
@@ -184,7 +184,7 @@ func TestListAllThemes_IncludesUserOnlyThemes(t *testing.T) {
 	userDir := t.TempDir()
 	setTestThemeDirs(t, []string{userDir})
 
-	tf := &ThemeFile{Base: "charmtone"}
+	tf := &ThemeFile{Base: "charmtone-panther"}
 	require.NoError(t, SaveThemeFile(filepath.Join(userDir, "my-neon.json"), tf))
 
 	infos := ListAllThemes()
@@ -212,9 +212,9 @@ func TestListAllThemes_Sorted(t *testing.T) {
 
 func TestExportResolvedPalette_Builtin(t *testing.T) {
 	t.Parallel()
-	tf, err := ExportResolvedPalette("charmtone")
+	tf, err := ExportResolvedPalette("charmtone-panther")
 	require.NoError(t, err)
-	require.Equal(t, "charmtone", tf.Base)
+	require.Equal(t, "charmtone-panther", tf.Base)
 	require.NotEmpty(t, tf.Primary)
 	require.NotEmpty(t, tf.BgBase)
 	require.NotEmpty(t, tf.FgBase)
@@ -236,14 +236,14 @@ func TestExportResolvedPalette_UserTheme(t *testing.T) {
 	setTestThemeDirs(t, []string{dir})
 
 	userTf := &ThemeFile{
-		Base:    "charmtone",
+		Base:    "charmtone-panther",
 		Palette: Palette{Primary: "#ff0000"},
 	}
 	require.NoError(t, SaveThemeFile(filepath.Join(dir, "custom.json"), userTf))
 
 	exported, err := ExportResolvedPalette("custom")
 	require.NoError(t, err)
-	require.Equal(t, "charmtone", exported.Base)
+	require.Equal(t, "charmtone-panther", exported.Base)
 	require.Equal(t, "#ff0000", exported.Primary)
 	require.NotEmpty(t, exported.BgBase)
 	require.NotEmpty(t, exported.FgBase)
@@ -265,7 +265,8 @@ func TestThemeSource_String(t *testing.T) {
 
 func TestIsBuiltinTheme(t *testing.T) {
 	t.Parallel()
-	require.True(t, IsBuiltinTheme("charmtone"))
+	require.True(t, IsBuiltinTheme("charmtone-panther"))
+	require.True(t, IsBuiltinTheme("charmtone")) // deprecated alias
 	require.True(t, IsBuiltinTheme("Gruvbox-Dark"))
 	require.False(t, IsBuiltinTheme("my-custom"))
 }
@@ -303,7 +304,7 @@ func TestValidateThemeName_RejectsBuiltin(t *testing.T) {
 	dir := t.TempDir()
 	setTestThemeDirs(t, []string{dir})
 
-	err := ValidateThemeName("charmtone")
+	err := ValidateThemeName("charmtone-panther")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "built-in")
 }
@@ -312,7 +313,7 @@ func TestValidateThemeName_RejectsExisting(t *testing.T) {
 	dir := t.TempDir()
 	setTestThemeDirs(t, []string{dir})
 
-	require.NoError(t, SaveThemeFile(filepath.Join(dir, "taken.json"), &ThemeFile{Base: "charmtone"}))
+	require.NoError(t, SaveThemeFile(filepath.Join(dir, "taken.json"), &ThemeFile{Base: "charmtone-panther"}))
 
 	err := ValidateThemeName("taken")
 	require.Error(t, err)

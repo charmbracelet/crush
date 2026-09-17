@@ -462,11 +462,11 @@ func (th *Theme) previewAction() Action {
 }
 
 // currentThemeName returns the active theme name from config, defaulting
-// to charmtone when unset.
+// to the built-in default when unset.
 func (th *Theme) currentThemeName() string {
 	cfg := th.com.Config()
 	if cfg == nil || cfg.Options == nil || cfg.Options.TUI == nil || cfg.Options.TUI.ActiveTheme == "" {
-		return "charmtone"
+		return "charmtone-panther"
 	}
 	return cfg.Options.TUI.ActiveTheme
 }

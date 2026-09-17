@@ -8,9 +8,27 @@ import (
 )
 
 func TestLoadTheme_Builtin(t *testing.T) {
+	_, err := LoadTheme("charmtone-panther")
+	if err != nil {
+		t.Fatalf("LoadTheme(charmtone-panther): %v", err)
+	}
+}
+
+func TestLoadTheme_DeprecatedAlias(t *testing.T) {
 	_, err := LoadTheme("charmtone")
 	if err != nil {
+		t.Fatalf("LoadTheme(charmtone) via deprecated alias: %v", err)
+	}
+	newStyles, err := LoadTheme("charmtone-panther")
+	if err != nil {
+		t.Fatalf("LoadTheme(charmtone-panther): %v", err)
+	}
+	alias, err := LoadTheme("charmtone")
+	if err != nil {
 		t.Fatalf("LoadTheme(charmtone): %v", err)
+	}
+	if *alias.Markdown.Document.Color != *newStyles.Markdown.Document.Color {
+		t.Error("deprecated alias should resolve to the same styles")
 	}
 }
 

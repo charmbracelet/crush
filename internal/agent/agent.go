@@ -1650,6 +1650,14 @@ func filterFileParts(parts []fantasy.MessagePart) []fantasy.MessagePart {
 	return filtered
 }
 
+// Copy recorded for work a dead process never finished. Both strings are
+// written to the database by repairInterruptedToolCalls, so they are what
+// the model reads on the next turn and what the transcript shows.
+const (
+	interruptedToolResult  = "tool call was interrupted and did not produce a result, you may retry this call if the result is still needed"
+	interruptedTurnMessage = "Interrupted"
+)
+
 // toolResultsForCalls builds the tool message that must immediately follow
 // an assistant message with tool calls. LLM APIs require every tool call to
 // be followed by its results before any other message; strict-adjacency
@@ -1676,7 +1684,7 @@ func toolResultsForCalls(m message.Message, toolResultsByCall map[string][]fanta
 		content = append(content, fantasy.ToolResultPart{
 			ToolCallID: tc.ID,
 			Output: fantasy.ToolResultOutputContentError{
-				Error: errors.New("tool call was interrupted and did not produce a result, you may retry this call if the result is still needed"),
+				Error: errors.New(interruptedToolResult),
 			},
 		})
 	}
@@ -1707,7 +1715,101 @@ func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.S
 			msgs[0].Role = message.User
 		}
 	}
+
+	msgs, err = a.repairInterruptedToolCalls(ctx, session.ID, msgs)
+	if err != nil {
+		return nil, err
+	}
 	return msgs, nil
+}
+
+// repairInterruptedToolCalls settles tool calls that a dead process left
+// dangling, writing the repair back rather than papering over it on every
+// read.
+//
+// A process killed mid-turn leaves an assistant message holding a tool call
+// with no result, because the result is a separate row written after the
+// tool answers. Nothing else fixes this: the cleanup that handles Ctrl+C
+// lives in the turn loop's error branch, which a SIGKILL, a panic, or a lost
+// terminal never reaches. Left alone the call stays pending forever, so
+// every reader has to know to treat it as dead, and each reader that forgets
+// reports a tool as still running months later.
+//
+// This is safe to run unguarded because it is only reachable from a turn
+// that has already claimed the session: both callers check IsSessionBusy
+// first and refuse if another run holds it, so a call found without a result
+// here cannot belong to a run still in flight.
+func (a *sessionAgent) repairInterruptedToolCalls(ctx context.Context, sessionID string, msgs []message.Message) ([]message.Message, error) {
+	resolved := make(map[string]struct{})
+	for _, msg := range msgs {
+		for _, tr := range msg.ToolResults() {
+			resolved[tr.ToolCallID] = struct{}{}
+		}
+	}
+
+	var repaired []message.Message
+	for i := range msgs {
+		msg := &msgs[i]
+		if msg.Role != message.Assistant {
+			continue
+		}
+		var orphans []message.ToolCall
+		for _, tc := range msg.ToolCalls() {
+			if _, ok := resolved[tc.ID]; !ok {
+				orphans = append(orphans, tc)
+			}
+		}
+		if len(orphans) == 0 {
+			continue
+		}
+
+		for _, tc := range orphans {
+			// A call announced but never given its arguments is stored
+			// with an empty input. Settle it the way a cancelled turn
+			// does, so no provider has to guess what "" means.
+			if !tc.Finished || !json.Valid([]byte(tc.Input)) {
+				tc.Finished = true
+				tc.Input = "{}"
+				msg.AddToolCall(tc)
+			}
+		}
+		// A turn can end cleanly and still lose a tool result, so the
+		// finish part is repaired only when it is genuinely absent
+		// rather than used as the signal that anything is wrong.
+		if !msg.IsFinished() {
+			msg.AddFinishAt(message.FinishReasonError, interruptedTurnMessage, "", msg.UpdatedAt)
+		}
+		if err := a.messages.Update(ctx, *msg); err != nil {
+			return nil, fmt.Errorf("failed to repair interrupted tool calls: %w", err)
+		}
+
+		for _, tc := range orphans {
+			slog.Warn(
+				"Recording interrupted result for an orphaned tool call",
+				"session_id", sessionID,
+				"tool_call_id", tc.ID,
+				"tool_name", tc.Name,
+			)
+			created, err := a.messages.Create(ctx, sessionID, message.CreateMessageParams{
+				Role: message.Tool,
+				Parts: []message.ContentPart{
+					message.ToolResult{
+						ToolCallID: tc.ID,
+						Name:       tc.Name,
+						Content:    interruptedToolResult,
+						IsError:    true,
+					},
+				},
+			})
+			if err != nil {
+				return nil, fmt.Errorf("failed to record interrupted tool result: %w", err)
+			}
+			repaired = append(repaired, created)
+		}
+	}
+	// Results pair with their call by ID rather than by position, so the
+	// repaired rows can simply follow the transcript.
+	return append(msgs, repaired...), nil
 }
 
 // hasUserTextMessage reports whether any user message in msgs contains

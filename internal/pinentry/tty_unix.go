@@ -4,10 +4,22 @@ package pinentry
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 
 	"golang.org/x/sys/unix"
 )
+
+// ReapplyTerminalModes puts the controlling terminal back into
+// non-canonical, no-echo mode after the terminal handover restored the
+// pre-Crush modes. It is a no-op when the terminal cannot be configured;
+// callers have no useful recovery, and the visible hint on the terminal
+// remains as the fallback.
+func ReapplyTerminalModes() {
+	if err := SetTerminalRawNoEcho(); err != nil {
+		slog.Debug("Failed to configure terminal modes for pinentry", "error", err)
+	}
+}
 
 // SetTerminalRawNoEcho puts the controlling terminal into non-canonical,
 // no-echo mode, approximating the termios a pinentry dialog configures

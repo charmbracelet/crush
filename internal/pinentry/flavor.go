@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"path"
 	"path/filepath"
-	"runtime"
 )
 
 // flavor describes a pinentry program's terminal behavior.
@@ -72,10 +71,14 @@ func resolveFlavor(p Proc) flavor {
 
 // resolveExe resolves the executable path of a process, following
 // symlinks. It uses the full command path when the process table provides
-// one (e.g. ps on macOS) and falls back to /proc on Linux.
+// one (e.g. ps on macOS) and falls back to /proc on Linux. Windows has
+// neither, so the flavor falls back to the name-based defaults there.
 func resolveExe(p Proc) string {
 	target := p.Path
-	if target == "" && runtime.GOOS == "linux" {
+	if target == "" {
+		if !procExeSupported || p.PID <= 0 {
+			return ""
+		}
 		target = fmt.Sprintf("/proc/%d/exe", p.PID)
 	}
 	if target == "" {

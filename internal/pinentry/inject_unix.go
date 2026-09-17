@@ -4,6 +4,7 @@ package pinentry
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 
 	"golang.org/x/sys/unix"
@@ -12,6 +13,17 @@ import (
 // ctrlL is the byte that makes ncurses-based pinentry dialogs redraw
 // their UI.
 const ctrlL = 0x0C
+
+// InjectCtrlLRedraw writes Ctrl-L into the controlling terminal so a
+// curses-based pinentry dialog redraws its UI, approximating a user
+// pressing Ctrl-L. Injection is best-effort: there is no recovery for
+// the caller, so failures are only logged; the visible hint printed on
+// the terminal remains as the fallback. See [InjectCtrlL].
+func InjectCtrlLRedraw() {
+	if err := InjectCtrlL(); err != nil {
+		slog.Debug("Failed to inject Ctrl-L for pinentry redraw", "error", err)
+	}
+}
 
 // InjectCtrlL writes a Ctrl-L byte into the controlling terminal's input
 // queue via TIOCSTI, causing a curses-based pinentry dialog to redraw.

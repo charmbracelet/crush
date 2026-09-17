@@ -76,23 +76,23 @@ func (m *UI) releaseTerminalForPinentry() tea.Cmd {
 		// The release restored the pre-Crush terminal modes (canonical,
 		// echo), clobbering the modes the pinentry dialog configured when
 		// it started. Re-apply raw/noecho so the dialog's input is not
-		// line-buffered or echoed in cleartext.
-		if err := pinentry.SetTerminalRawNoEcho(); err != nil {
-			slog.Debug("Failed to configure terminal modes for pinentry", "error", err)
-		}
-		// pinentry-curses draws its dialog the moment it starts, while the
-		// renderer may still own the screen, and it does not redraw on
-		// SIGWINCH. The handover can therefore erase the first frame, so
-		// leave a hint on the normal screen. Masked-input feedback while
-		// typing still comes from pinentry itself.
-		fmt.Fprintln(os.Stdout, "\nGPG is asking for your passphrase on this terminal (pinentry). Type it and press Enter; input is hidden.")
-		if ctrlL {
-			// Ncurses pinentry flavors repaint their full dialog on Ctrl-L,
-			// recovering the frame the handover may have erased. If the
-			// injection fails (e.g. TIOCSTI disabled on Linux), the hint
-			// above remains as the fallback.
-			if err := pinentry.InjectCtrlL(); err != nil {
-				slog.Debug("Failed to inject Ctrl-L for pinentry redraw", "error", err)
+		// line-buffered or echoed in cleartext. Platforms without a POSIX
+		// terminal (Windows) have no modes to change; the calls are
+		// resolved at compile time there.
+		if pinentry.TerminalHandoverSupported {
+			pinentry.ReapplyTerminalModes()
+			// pinentry-curses draws its dialog the moment it starts, while
+			// the renderer may still own the screen, and it does not redraw
+			// on SIGWINCH. The handover can therefore erase the first frame,
+			// so leave a hint on the normal screen. Masked-input feedback
+			// while typing still comes from pinentry itself.
+			fmt.Fprintln(os.Stdout, "\nGPG is asking for your passphrase on this terminal (pinentry). Type it and press Enter; input is hidden.")
+			if ctrlL {
+				// Ncurses pinentry flavors repaint their full dialog on
+				// Ctrl-L, recovering the frame the handover may have erased.
+				// If the injection fails (e.g. TIOCSTI disabled on Linux),
+				// the hint above remains as the fallback.
+				pinentry.InjectCtrlLRedraw()
 			}
 		}
 		return nil

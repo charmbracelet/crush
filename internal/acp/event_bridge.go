@@ -38,6 +38,11 @@ type eventBridge struct {
 	thoughts       map[string]int             // msgID -> reasoning bytes already sent
 	toolCalls      map[string]map[string]bool // msgID -> toolCallID -> finished
 	toolResultSent map[string]bool            // toolCallID -> content already sent
+
+	// pendingText tracks messages where thinking has started but not finished.
+	// Text for these messages is held back until thinking completes (FinishedAt > 0)
+	// to avoid interleaving agent_thought_chunk and agent_message_chunk.
+	pendingText map[string]bool
 }
 
 // toolKindFor maps a Crush tool name to the closest ACP tool kind.
@@ -77,6 +82,7 @@ func newEventBridge(conn *acp.AgentSideConnection, app *app.App, log *slog.Logge
 		thoughts:       make(map[string]int),
 		toolCalls:      make(map[string]map[string]bool),
 		toolResultSent: make(map[string]bool),
+		pendingText:    make(map[string]bool),
 	}
 }
 
@@ -131,8 +137,23 @@ func (b *eventBridge) handleMessage(ctx context.Context, m message.Message) {
 	if m.Role != message.Assistant || m.SessionID == "" {
 		return
 	}
-	b.streamText(ctx, m)
+
 	b.streamThoughts(ctx, m)
+
+	thinking := m.ReasoningContent()
+	hasThinking := len(thinking.Thinking) > 0
+	if hasThinking && thinking.FinishedAt == 0 {
+		b.mu.Lock()
+		b.pendingText[m.ID] = true
+		b.mu.Unlock()
+		return
+	}
+
+	b.mu.Lock()
+	delete(b.pendingText, m.ID)
+	b.mu.Unlock()
+
+	b.streamText(ctx, m)
 	b.streamToolCalls(ctx, m)
 }
 
@@ -185,22 +206,42 @@ func (b *eventBridge) streamToolResults(ctx context.Context, m message.Message) 
 
 // splitDelta splits a streaming delta into ~4-word chunks so the ACP
 // client sees smooth, token-sized updates rather than large paragraph
-// jumps.
+// jumps. Original whitespace is preserved exactly so spaces at chunk
+// and delta boundaries are not lost.
 func splitDelta(delta string) []string {
 	if delta == "" {
 		return nil
 	}
-	words := strings.Fields(delta)
 	var chunks []string
 	const wordsPerChunk = 4
-	for i := 0; i < len(words); i += wordsPerChunk {
-		end := i + wordsPerChunk
-		if end > len(words) {
-			end = len(words)
+	s := delta
+	for len(s) > 0 {
+		pos := 0
+		wordCount := 0
+		for wordCount < wordsPerChunk && pos < len(s) {
+			for pos < len(s) && isSpace(s[pos]) {
+				pos++
+			}
+			if pos >= len(s) {
+				break
+			}
+			wordCount++
+			for pos < len(s) && !isSpace(s[pos]) {
+				pos++
+			}
 		}
-		chunks = append(chunks, strings.Join(words[i:end], " "))
+		if wordCount < wordsPerChunk {
+			chunks = append(chunks, s)
+			break
+		}
+		chunks = append(chunks, s[:pos])
+		s = s[pos:]
 	}
 	return chunks
+}
+
+func isSpace(c byte) bool {
+	return c == ' ' || c == '\n' || c == '\t'
 }
 
 // streamText streams the new tail of the assistant message text.
@@ -406,6 +447,10 @@ func (b *eventBridge) handleRunComplete(ctx context.Context, rc notify.RunComple
 	}
 
 	b.usageUpdate(ctx, rc.SessionID)
+
+	b.mu.Lock()
+	b.pendingText = make(map[string]bool)
+	b.mu.Unlock()
 }
 
 // sendText emits an agent_message_chunk carrying the given text.

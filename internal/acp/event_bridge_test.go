@@ -157,8 +157,47 @@ func TestSplitDelta_Spaces(t *testing.T) {
 	if chunks[0] != "alpha bravo charlie delta" {
 		t.Errorf("chunk 0 = %q, want %q", chunks[0], "alpha bravo charlie delta")
 	}
-	if chunks[1] != "echo foxtrot golf hotel" {
-		t.Errorf("chunk 1 = %q, want %q", chunks[1], "echo foxtrot golf hotel")
+	if chunks[1] != " echo foxtrot golf hotel" {
+		t.Errorf("chunk 1 = %q, want %q", chunks[1], " echo foxtrot golf hotel")
+	}
+}
+
+func TestSplitDelta_ConcatenationPreservesSpaces(t *testing.T) {
+	input := "to analyze the codebase. Let me start by exploring the project structure"
+	chunks := splitDelta(input)
+	joined := ""
+	for _, c := range chunks {
+		joined += c
+	}
+	if joined != input {
+		t.Errorf("concatenated chunks = %q, want %q", joined, input)
+	}
+}
+
+func TestSplitDelta_ContinuationDelta(t *testing.T) {
+	delta := " Let me start by exploring the project structure"
+	chunks := splitDelta(delta)
+	joined := ""
+	for _, c := range chunks {
+		joined += c
+	}
+	if joined != delta {
+		t.Errorf("concatenated chunks = %q, want %q", joined, delta)
+	}
+	if chunks[0] != " Let me start by" {
+		t.Errorf("chunk 0 = %q, want %q", chunks[0], " Let me start by")
+	}
+}
+
+func TestSplitDelta_MixedWhitespace(t *testing.T) {
+	input := "hello   world\t\n  foo bar"
+	chunks := splitDelta(input)
+	joined := ""
+	for _, c := range chunks {
+		joined += c
+	}
+	if joined != input {
+		t.Errorf("concatenated chunks = %q, want %q", joined, input)
 	}
 }
 

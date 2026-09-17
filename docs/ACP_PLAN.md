@@ -424,3 +424,27 @@ Direct answer to "is any point unaddressed":
 All other spec areas (baseline methods, permission bridge, fs client ops, text/
 resource_link content, `session/close`, stdio transport, `_meta` field presence)
 are covered.
+
+---
+
+## Current Streaming Behavior (post-Zed test, 2026-09-17)
+
+**Status: IMPROVED BUT STILL LIMITED.**
+
+After fixing `splitDelta` (using `strings.Fields` + chunk spacing) and adding
+`chunkDeliveryDelay` (50ms) in `streamText`/`streamThoughts`, the ACP stream
+works for text that contains whitespace-separated tokens. However:
+
+- The message broker (`internal/pubsub`) delivers **debounced full-turn
+  snapshots**, not per-token deltas. `OnTextDelta` (in `agent.go`) fires only
+  on full snapshot changes, not continuously during generation.
+- As a result, `streamText` receives large deltas at turn boundaries rather
+  than fine-grained per-word updates. The 50ms spacing approximates streaming
+  cadence, but the underlying data is bulk.
+- Tests (`crush_debug.jsonl`) show single-burst `agent_message_chunk`
+  notifications (e.g., all 88 words delivered in one chunk at `12:37:38.814Z`)
+  followed by spaced chunks — a long initial wait then progressive output.
+- `agent_thought_chunk`, `tool_call`, `plan`, and `user_message_chunk`
+  updates are **not emitted** (§3.3), which is the primary upstream gap
+  (documented in Tier 1 / P2 S1). The upstream `OnTextDelta` infrequent firing
+  (investigation B) should be tracked separately.

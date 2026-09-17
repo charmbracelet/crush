@@ -2,6 +2,7 @@ package message
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -420,20 +421,17 @@ func (m *Message) FinishToolCall(toolCallID string) {
 	}
 }
 
-func (m *Message) AppendToolCallInput(toolCallID string, inputDelta string) {
-	for i, part := range m.Parts {
-		if c, ok := part.(ToolCall); ok {
-			if c.ID == toolCallID {
-				m.Parts[i] = ToolCall{
-					ID:       c.ID,
-					Name:     c.Name,
-					Input:    c.Input + inputDelta,
-					Finished: c.Finished,
-				}
-				return
-			}
-		}
+// toolCallInput returns arguments safe to hand a provider. A process killed
+// between a tool call being announced and its arguments arriving leaves the
+// input empty, and providers disagree violently about what to do with that:
+// Anthropic substitutes {} so the call stays paired with its result, while
+// Google drops the call entirely and leaves the result dangling, which the
+// API then rejects. Normalizing here means no provider sees the difference.
+func toolCallInput(input string) string {
+	if !json.Valid([]byte(input)) {
+		return "{}"
 	}
+	return input
 }
 
 func (m *Message) AddToolCall(tc ToolCall) {
@@ -500,6 +498,15 @@ func (m *Message) ResetStreamedContent() {
 }
 
 func (m *Message) AddFinish(reason FinishReason, message, details string) {
+	m.AddFinishAt(reason, message, details, time.Now().Unix())
+}
+
+// AddFinishAt is AddFinish with an explicit timestamp. Repairing a message
+// that a dead process left unfinished has to stamp the finish with when the
+// turn actually stopped rather than with now: response-time statistics
+// average over this field, so a months-old turn finished "now" would swamp
+// the mean.
+func (m *Message) AddFinishAt(reason FinishReason, message, details string, at int64) {
 	// remove any existing finish part
 	for i, part := range m.Parts {
 		if _, ok := part.(Finish); ok {
@@ -507,7 +514,7 @@ func (m *Message) AddFinish(reason FinishReason, message, details string) {
 			break
 		}
 	}
-	m.Parts = append(m.Parts, Finish{Reason: reason, Time: time.Now().Unix(), Message: message, Details: details})
+	m.Parts = append(m.Parts, Finish{Reason: reason, Time: at, Message: message, Details: details})
 }
 
 func (m *Message) AddImageURL(url, detail string) {
@@ -616,7 +623,7 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 			parts = append(parts, fantasy.ToolCallPart{
 				ToolCallID:       call.ID,
 				ToolName:         call.Name,
-				Input:            call.Input,
+				Input:            toolCallInput(call.Input),
 				ProviderExecuted: call.ProviderExecuted,
 			})
 		}

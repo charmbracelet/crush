@@ -1164,8 +1164,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		}
 		for _, tc := range toolCalls {
 			if !tc.Finished {
+				// Partial arguments stay as the model wrote them; the send
+				// path makes them valid JSON.
 				tc.Finished = true
-				tc.Input = "{}"
 				currentAssistant.AddToolCall(tc)
 				updateErr := a.messages.Update(cleanupCtx, *currentAssistant)
 				if updateErr != nil {
@@ -1784,6 +1785,11 @@ func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.S
 			msgs = msgs[summaryMsgIndex:]
 			msgs[0].Role = message.User
 		}
+	}
+
+	msgs, err = a.repairInterruptedToolCalls(ctx, session.ID, msgs)
+	if err != nil {
+		return nil, err
 	}
 	return msgs, nil
 }

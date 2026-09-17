@@ -55,6 +55,7 @@ func CharmtonePantera() Styles {
 		separator: charmtone.Char,
 
 		destructive:       charmtone.Coral,
+		destructiveSubtle: charmtone.Salmon,
 		error:             charmtone.Sriracha,
 		warningSubtle:     charmtone.Zest,
 		warning:           charmtone.Mustard,

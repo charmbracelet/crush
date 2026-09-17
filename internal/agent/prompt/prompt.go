@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"text/template"
 	"time"
@@ -45,6 +46,14 @@ type PromptDat struct {
 type ContextFile struct {
 	Path    string
 	Content string
+}
+
+// ToolEnabled reports whether a built-in tool is available to the agent.
+func (d PromptDat) ToolEnabled(name string) bool {
+	if d.Config.Options == nil {
+		return true
+	}
+	return !slices.Contains(d.Config.Options.DisabledTools, name)
 }
 
 type Option func(*Prompt)

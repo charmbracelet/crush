@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/charmbracelet/crush/internal/sshaskpass"
 )
 
 // wrapEvent converts a raw tea.Msg (a pubsub.Event[T] from the app
@@ -97,6 +98,23 @@ func wrapEvent(ev any) *pubsub.Payload {
 			Type: e.Type,
 			Payload: proto.QuestionNotification{
 				BatchID: e.Payload.BatchID,
+			},
+		})
+	case pubsub.Event[sshaskpass.PromptRequest]:
+		return envelope(pubsub.PayloadTypeSSHPromptRequest, pubsub.Event[proto.SSHPromptRequest]{
+			Type: e.Type,
+			Payload: proto.SSHPromptRequest{
+				ID:      e.Payload.ID,
+				Prompt:  e.Payload.Prompt,
+				KeyInfo: e.Payload.KeyInfo,
+				Kind:    string(e.Payload.Kind),
+			},
+		})
+	case pubsub.Event[sshaskpass.Notification]:
+		return envelope(pubsub.PayloadTypeSSHNotification, pubsub.Event[proto.SSHNotification]{
+			Type: e.Type,
+			Payload: proto.SSHNotification{
+				RequestID: e.Payload.RequestID,
 			},
 		})
 	case pubsub.Event[message.Message]:

@@ -2,6 +2,7 @@ package shell
 
 import (
 	"context"
+	"fmt"
 	"runtime"
 	"strings"
 	"testing"
@@ -327,4 +328,69 @@ func TestBackgroundShell_WaitContext_Canceled(t *testing.T) {
 	cancel()
 
 	require.False(t, bgShell.WaitContext(ctx))
+}
+
+// track registers a fake job with the manager. When completedAt is zero the
+// job counts as still running.
+func track(m *BackgroundShellManager, id string, completedAt int64) {
+	bgShell := &BackgroundShell{
+		ID:     id,
+		done:   make(chan struct{}),
+		stdout: &syncBuffer{},
+		stderr: &syncBuffer{},
+		cancel: func() {},
+	}
+	if completedAt > 0 {
+		bgShell.completedAt.Store(completedAt)
+		close(bgShell.done)
+	}
+	m.shells.Set(id, bgShell)
+}
+
+func TestBackgroundShellManager_FinishedJobsDoNotBlockStart(t *testing.T) {
+	t.Parallel()
+
+	manager := newBackgroundShellManager()
+	for i := range MaxBackgroundJobs {
+		track(manager, fmt.Sprintf("done-%d", i), time.Now().Unix())
+	}
+
+	bgShell, err := manager.Start(t.Context(), t.TempDir(), nil, "echo hi", "")
+	require.NoError(t, err)
+	require.NotEmpty(t, bgShell.ID)
+	bgShell.Wait()
+}
+
+func TestBackgroundShellManager_RunningJobsBlockStart(t *testing.T) {
+	t.Parallel()
+
+	manager := newBackgroundShellManager()
+	for i := range MaxBackgroundJobs {
+		track(manager, fmt.Sprintf("running-%d", i), 0)
+	}
+
+	_, err := manager.Start(t.Context(), t.TempDir(), nil, "echo hi", "")
+	require.ErrorContains(t, err, "maximum number of running background jobs")
+}
+
+func TestBackgroundShellManager_TrimDropsOldestFinished(t *testing.T) {
+	t.Parallel()
+
+	manager := newBackgroundShellManager()
+	now := time.Now().Unix()
+	for i := range MaxRetainedJobs {
+		track(manager, fmt.Sprintf("done-%d", i), now+int64(i))
+	}
+	track(manager, "running", 0)
+
+	bgShell, err := manager.Start(t.Context(), t.TempDir(), nil, "echo hi", "")
+	require.NoError(t, err)
+	bgShell.Wait()
+
+	require.LessOrEqual(t, manager.shells.Len(), MaxRetainedJobs)
+
+	_, ok := manager.shells.Get("done-0")
+	require.False(t, ok, "oldest finished job should have been dropped")
+	_, ok = manager.shells.Get("running")
+	require.True(t, ok, "running jobs must never be dropped")
 }

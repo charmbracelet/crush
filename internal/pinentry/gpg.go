@@ -219,7 +219,7 @@ func (r *Runner) exec(ctx context.Context, bin string, opts RunOptions, stdin *o
 	args[0] = bin
 	args = append(args, "--batch", "--pinentry-mode", "loopback", "--passphrase-fd", passphraseFD())
 
-	cmd := exec.Command(args[0], args[1:]...)
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	cmd.Env = opts.Env
 	cmd.Dir = opts.Dir
 	prepareProcess(cmd)

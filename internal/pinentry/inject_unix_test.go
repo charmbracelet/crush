@@ -47,8 +47,11 @@ func TestInjectCtrlL(t *testing.T) {
 	select {
 	case res := <-done:
 		out := string(res.data)
-		if strings.Contains(out, "INJECT-ERROR") && strings.Contains(out, "permission denied") {
-			t.Skip("TIOCSTI is disabled on this system")
+		// TIOCSTI failures are environment limitations, not regressions:
+		// some Linux kernels boot with dev.tty.legacy_tiocsti=0, which
+		// makes the ioctl fail with EPERM or EIO depending on the build.
+		if strings.Contains(out, "INJECT-ERROR") && strings.Contains(out, "TIOCSTI") {
+			t.Skipf("TIOCSTI is disabled on this system: %q", out)
 		}
 		require.Contains(t, out, "GOT-0c", "helper output: %q", out)
 	case <-time.After(15 * time.Second):

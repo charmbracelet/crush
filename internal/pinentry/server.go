@@ -55,7 +55,8 @@ func StartIntegration(ctx context.Context, executable string, cacheTimeout time.
 	}
 	socketPath := filepath.Join(dir, "pinentry.sock")
 
-	ln, err := net.Listen("unix", socketPath)
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "unix", socketPath)
 	if err != nil {
 		_ = os.RemoveAll(dir)
 		if wrapperCleanup != nil {

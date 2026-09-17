@@ -61,17 +61,17 @@ func runPinentryGpg(ctx context.Context, args []string) error {
 		// gpg, which triggers the terminal-handover watcher.
 	}
 
-	return runPlainGpg(gpgArgs)
+	return runPlainGpg(ctx, gpgArgs)
 }
 
 // runPlainGpg execs gpg as-is, preserving stdin/stdout/stderr and the
 // exit status.
-func runPlainGpg(args []string) error {
+func runPlainGpg(ctx context.Context, args []string) error {
 	bin, err := exec.LookPath(args[0])
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(bin, args[1:]...)
+	cmd := exec.CommandContext(ctx, bin, args[1:]...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

@@ -3,17 +3,14 @@ package hyper
 
 import (
 	"cmp"
-	"context"
 	_ "embed"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy/providers/openai"
@@ -107,65 +104,30 @@ func copyHeaderField(header http.Header, metadata *openai.ProviderMetadata, head
 	metadata.ExtraFields[fieldName] = json.RawMessage(strconv.Quote(value))
 }
 
-// lastKnownBalance stores the most recently extracted hypercredit balance
-// from API response metadata. FetchCredits checks this before making a
-// separate HTTP call.
-var lastKnownBalance atomic.Int64
+// balanceValue stores the hypercredit balance most recently reported by
+// an API response; balanceKnown tracks whether any response has reported
+// one.
+var (
+	balanceValue atomic.Int64
+	balanceKnown atomic.Bool
+)
 
-// hasBalance tracks whether lastKnownBalance has been set.
-var hasBalance atomic.Bool
-
-// SetBalance stores a credit balance extracted from API response metadata.
+// SetBalance stores the hypercredit balance reported by an API response's
+// usage.remaining block. Every Hyper chat completion, streamed or not,
+// carries it, which makes responses the only balance source Crush needs.
 func SetBalance(balance int) {
-	lastKnownBalance.Store(int64(balance))
-	hasBalance.Store(true)
+	balanceValue.Store(int64(balance))
+	balanceKnown.Store(true)
 }
 
-// FetchCredits returns the remaining hypercredit balance. It first checks
-// for a balance extracted from the most recent API response's usage
-// metadata. If none is available, it falls back to calling the /v1/credits
-// endpoint directly.
-//
-// It returns nil when the team has hypercredit display disabled, in which
-// case Hyper reports the balance in dollars instead and there is no
-// hypercredit figure to show.
-func FetchCredits(ctx context.Context, apiKey string) (*int, error) {
-	if hasBalance.Load() {
-		hasBalance.Store(false)
-		balance := int(lastKnownBalance.Load())
-		return &balance, nil
+// Balance returns the hypercredit balance most recently reported by an API
+// response, or nil when no response has reported one yet. That includes
+// teams with hypercredit display disabled: their responses carry no
+// hypercredit figure at all, so there is never a balance to show.
+func Balance() *int {
+	if !balanceKnown.Load() {
+		return nil
 	}
-
-	req, err := http.NewRequestWithContext(
-		ctx,
-		http.MethodGet,
-		BaseURL()+"/v1/credits",
-		nil,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("could not create request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to make request: %w", err)
-	}
-	defer resp.Body.Close() //nolint:errcheck
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-
-	// Teams with hypercredit display disabled get a balance_usd field
-	// instead of balance, and no balance is shown for them at all.
-	var result struct {
-		Balance *int `json:"balance"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	return result.Balance, nil
+	balance := int(balanceValue.Load())
+	return &balance
 }

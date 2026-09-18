@@ -62,14 +62,15 @@ crush models gpt5`,
 			// credential. Signed in with ChatGPT or Grok, only the
 			// models the subscription grants are usable; an API key
 			// lists the regular catalog.
-			var models []catwalk.Model
-			switch {
-			case providerID == string(catwalk.InferenceProviderOpenAI) && provider.OAuthToken != nil:
-				models = provider.ChatGPTModels
-			case providerID == string(catwalk.InferenceProviderXAI) && provider.OAuthToken != nil:
-				models = provider.GrokModels
-			default:
-				models = provider.Models
+			var models []catwalk.Model = provider.Models
+			if provider.OAuthToken != nil {
+				switch {
+				case providerID == string(catwalk.InferenceProviderOpenAI):
+					models = provider.ChatGPTModels
+				case providerID == string(catwalk.InferenceProviderXAI):
+					models = provider.GrokModels
+				case providerID == string(catwalk.InferenceProviderCopilot):
+					models = provider.CopilotModels
 			}
 
 			for _, model := range models {

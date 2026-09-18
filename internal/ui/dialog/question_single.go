@@ -225,6 +225,7 @@ func (d *SingleChoice) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			style = selectedStyle
 		}
 		barWidth := 2 // "┃ " or "  ", applied by buildLines
-		return style.Render(wrapIndent(ch.Label, innerWidth-barWidth, ""))
+		method := layoutWidthMethod(d.widthMethodSet, d.widthMethod)
+		return style.Render(wrapIndent(ch.Label, innerWidth-barWidth, "", method))
 	})
 }

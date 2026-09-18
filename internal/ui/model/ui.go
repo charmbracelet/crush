@@ -1587,6 +1587,16 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 	m.loadNestedToolCalls(items)
 	m.setMessagePlanFlags(items)
 
+	// Only retire when this session is genuinely idle. The general busy
+	// flag is the wrong question here: it is true while any session is
+	// working, and true while a shell command runs, so asking it would
+	// both skip the sweep when opening an abandoned session alongside a
+	// working one and, worse, sweep a session whose tools really are
+	// still running.
+	if !m.currentSessionBusy() {
+		retireOrphanedToolCalls(items)
+	}
+
 	// If the user switches between sessions while the agent is working we
 	// want to make sure the animations are shown. Gate on the agent actually
 	// being busy: a session that was killed mid-generation can persist an
@@ -1602,6 +1612,38 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 	}
 	m.chat.SelectLast()
 	return tea.Sequence(cmds...)
+}
+
+// forEachToolItem visits every tool item in items, including those nested
+// inside another tool.
+func forEachToolItem(items []chat.MessageItem, visit func(chat.ToolMessageItem)) {
+	for _, item := range items {
+		tool, ok := item.(chat.ToolMessageItem)
+		if !ok {
+			continue
+		}
+		visit(tool)
+		if container, ok := item.(chat.NestedToolContainer); ok {
+			nested := make([]chat.MessageItem, 0, len(container.NestedTools()))
+			for _, n := range container.NestedTools() {
+				nested = append(nested, n)
+			}
+			forEachToolItem(nested, visit)
+		}
+	}
+}
+
+// retireOrphanedToolCalls marks tool calls that never produced a result as
+// cancelled. A killed process leaves the assistant message with no finish
+// part at all, so nothing else marks them: half-streamed calls would spin
+// forever, and calls that finished streaming would sit on "Waiting for tool
+// response..." for good.
+func retireOrphanedToolCalls(items []chat.MessageItem) {
+	forEachToolItem(items, func(tool chat.ToolMessageItem) {
+		if tool.Unresolved() {
+			tool.SetStatus(chat.ToolStatusCanceled)
+		}
+	})
 }
 
 // handleConnectionEvent reports the health of the client-server link and,
@@ -1714,6 +1756,11 @@ func (m *UI) setMessagePlanFlags(items []chat.MessageItem) {
 // if the message is a tool result it will update the corresponding tool call message
 func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 	var cmds []tea.Cmd
+
+	// The real message carries its own spinner from here on.
+	if msg.Role == message.Assistant {
+		m.chat.RemoveMessage(chat.PendingAssistantID)
+	}
 
 	existing := m.chat.MessageItem(msg.ID)
 	if existing != nil {
@@ -4530,6 +4577,22 @@ func (m *UI) isAgentBusy() bool {
 	return m.agentBusyCache.val
 }
 
+// currentSessionBusy reports whether a run is in flight for the open
+// session specifically.
+//
+// This asks the workspace rather than reading the memoized isAgentBusy
+// value, because that value answers a different question: it is true while
+// any session is working and while a shell command is running, and it can
+// trail the truth by design. Deciding whether one session's tools are alive
+// needs an answer about that session, and a load is rare enough to afford
+// asking properly.
+func (m *UI) currentSessionBusy() bool {
+	if !m.hasSession() {
+		return false
+	}
+	return m.com.Workspace.AgentIsSessionBusy(m.session.ID)
+}
+
 // hasSession returns true if there is an active session with a valid ID.
 func (m *UI) hasSession() bool {
 	return m.session != nil && m.session.ID != ""
@@ -4670,13 +4733,24 @@ func (m *UI) sendMessageInternal(content string, hidden bool, attachments ...mes
 		return util.ReportError(err)
 	}
 
-	// Start the turn timer.
-	common.StartTurn()
+	// A prompt sent while the agent is working is queued behind the running
+	// turn, which already has a spinner and a running clock. Restarting
+	// either would show a second spinner and reset the elapsed time
+	// mid-turn.
+	queued := m.isAgentBusy()
+	if !queued {
+		common.StartTurn()
+	}
+
+	// Loading an idle session freezes the clock to stop ghost spinners.
+	// Sending is new work, so unfreeze it.
+	m.chat.SetAnimationsAllowed(true)
 
 	// Any new prompt supersedes a pending, unconfirmed plan.
 	m.setPlanReadyPending("")
 
 	var cmds []tea.Cmd
+	hadSession := m.hasSession()
 	if !m.hasSession() {
 		newSession, err := m.com.Workspace.CreateSession(context.Background(), "New Session")
 		if err != nil {
@@ -4690,6 +4764,14 @@ func (m *UI) sendMessageInternal(content string, hidden bool, attachments ...mes
 			cmds = append(cmds, m.loadSession(newSession.ID))
 		}
 		m.setState(uiChat, m.focus)
+	}
+
+	// Show the spinner now, not when the assistant message is created.
+	// Skipped for a session this send just created: its load would replace
+	// the chat items and drop the placeholder.
+	if hadSession && !queued {
+		m.chat.AppendMessages(chat.NewPendingAssistantItem(m.com.Styles))
+		m.chat.ScrollToBottom()
 	}
 
 	ctx := context.Background()
@@ -5247,6 +5329,9 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 	switch n.Type {
 	case notify.TypeAgentFinished:
 		common.StopTurn()
+		// A turn that failed during setup has no assistant message to
+		// take the spinner over.
+		m.chat.RemoveMessage(chat.PendingAssistantID)
 		cmds = append(cmds, m.sendNotification(notification.Notification{
 			Title:   "Crush is waiting...",
 			Message: fmt.Sprintf("Agent's turn completed in \"%s\"", n.SessionTitle),
@@ -5257,6 +5342,7 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 	case notify.TypeAgentError:
 		// Terminal edge like TypeAgentFinished; fall through to the
 		// busy/queue refresh below.
+		m.chat.RemoveMessage(chat.PendingAssistantID)
 	case notify.TypeReAuthenticate:
 		return m.handleReAuthenticate(n.ProviderID)
 	case notify.TypeAWSSSOAuth:

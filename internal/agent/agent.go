@@ -1208,7 +1208,17 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			if !ok {
 				existing = []SessionAgentCall{}
 			}
-			call.Prompt = fmt.Sprintf("The previous session was interrupted because it got too long, the initial user request was: `%s`", call.Prompt)
+			// call.Prompt is the prompt of the run being interrupted, which
+			// after a mid-task follow-up is not the task the session was
+			// started with. The queued continuation must restate the original
+			// request, so take the earliest user message still on record for
+			// the session (#3867); fall back to the current prompt when the
+			// history is unavailable or carries no usable text.
+			original := call.Prompt
+			if userMessages, listErr := a.messages.ListUserMessages(ctx, call.SessionID); listErr == nil {
+				original = rootUserPrompt(userMessages, call.Prompt)
+			}
+			call.Prompt = fmt.Sprintf("The previous session was interrupted because it got too long, the initial user request was: `%s`", original)
 			existing = append(existing, call)
 			a.messageQueue.Set(call.SessionID, existing)
 		}
@@ -1332,6 +1342,22 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		a.publishRunComplete(ctx, call, complete)
 	}
 	return a.Run(ctx, firstQueuedMessage)
+}
+
+// rootUserPrompt returns the earliest usable user prompt in the session — the
+// task the session was started with — so an auto-summarize continuation can
+// restate the original request instead of the prompt of the interrupted run
+// (#3867). userMessages is ordered newest first (the message service's
+// ListUserMessages order), so the earliest entry sits at the end. Blank or
+// hidden-only messages are skipped, and fallback is returned when nothing
+// usable remains.
+func rootUserPrompt(userMessages []message.Message, fallback string) string {
+	for i := len(userMessages) - 1; i >= 0; i-- {
+		if text := strings.TrimSpace(userMessages[i].Content().Text); text != "" {
+			return text
+		}
+	}
+	return fallback
 }
 
 func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error) error {

@@ -215,6 +215,13 @@ func NewViewTool(
 				if readErr != nil {
 					return fantasy.ToolResponse{}, fmt.Errorf("error reading image file: %w", readErr)
 				}
+				// An empty file is not an image. Sending it as one is
+				// refused by the provider for the whole request, not
+				// just the attachment, so the turn dies on a detail the
+				// model could have worked around had it been told.
+				if len(imageData) == 0 {
+					return fantasy.NewTextErrorResponse(fmt.Sprintf("Image file is empty: %s", filePath)), nil
+				}
 
 				// Some tools save files with a mismatched extension
 				// (e.g. pinchtab writes JPEG bytes to a .png file).

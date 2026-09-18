@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"slices"
 
 	"charm.land/fantasy"
@@ -130,11 +131,28 @@ func (m *Tool) Run(ctx context.Context, params fantasy.ToolCall) (fantasy.ToolRe
 		return fantasy.NewTextErrorResponse(err.Error()), nil
 	}
 
+	return m.responseFor(result, GetSupportsImagesFromContext(ctx), GetModelNameFromContext(ctx)), nil
+}
+
+// responseFor turns an MCP result into the response handed back to the model.
+func (m *Tool) responseFor(result mcp.ToolResult, supportsImages bool, modelName string) fantasy.ToolResponse {
 	switch result.Type {
 	case "image", "media":
-		if !GetSupportsImagesFromContext(ctx) {
-			modelName := GetModelNameFromContext(ctx)
-			return fantasy.NewTextErrorResponse(fmt.Sprintf("This model (%s) does not support image data.", modelName)), nil
+		if !supportsImages {
+			return fantasy.NewTextErrorResponse(fmt.Sprintf("This model (%s) does not support image data.", modelName))
+		}
+
+		// Last gate before the payload leaves for the provider, which
+		// refuses an empty one for the whole request rather than just
+		// the attachment — one unusable picture costs the turn, and the
+		// rejected block then sits in the conversation failing every
+		// turn after it. RunTool already drops empty media, so nothing
+		// should arrive here; the check is cheap and the alternative is
+		// a session that cannot be recovered without restarting.
+		if len(result.Data) == 0 {
+			slog.Warn("MCP tool returned media with no data, sending a note instead",
+				"mcp", m.mcpName, "tool", m.tool.Name, "media_type", result.MediaType)
+			return fantasy.NewTextErrorResponse("The tool returned empty media data, so there is nothing to show here.")
 		}
 
 		var response fantasy.ToolResponse
@@ -144,8 +162,8 @@ func (m *Tool) Run(ctx context.Context, params fantasy.ToolCall) (fantasy.ToolRe
 			response = fantasy.NewMediaResponse(result.Data, result.MediaType)
 		}
 		response.Content = result.Content
-		return response, nil
+		return response
 	default:
-		return fantasy.NewTextResponse(result.Content), nil
+		return fantasy.NewTextResponse(result.Content)
 	}
 }

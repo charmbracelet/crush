@@ -228,15 +228,10 @@ func newBaseToolMessageItem(
 		GradColorB:  sty.WorkingGradToColor,
 		LabelColor:  sty.WorkingLabelColor,
 		CycleColors: true,
-		// Per-tool elapsed time on the pending spinner, so long-running
-		// tools (e.g. bash) show a timer from the moment they appear.
-		// Reads startedAt lazily: it is cleared for restored items.
-		Suffix: func() string {
-			if d := t.elapsed(); d > 0 {
-				return common.FormatDuration(d)
-			}
-			return ""
-		},
+		// Timer on the pending spinner: quick tools (view, grep, edit)
+		// show the overall turn time, long-running ones their own
+		// elapsed time once it becomes the more useful signal.
+		Suffix:      t.spinnerTimer,
 		SuffixColor: sty.WorkingTimerColor,
 	})
 
@@ -464,6 +459,26 @@ func (t *baseToolMessageItem) elapsed() time.Duration {
 		end = time.Now()
 	}
 	return end.Sub(t.startedAt)
+}
+
+// toolTimerOwnTimeThreshold is how long a tool call must run before its
+// own elapsed time takes over the pending spinner's timer. Quick tools
+// (view, grep, edit) never cross it and keep showing the overall turn
+// time, which is the more useful signal for them; long-running ones
+// (bash, fetch, sub-agents) switch to their own duration once it starts
+// to matter.
+const toolTimerOwnTimeThreshold = 10 * time.Second
+
+// spinnerTimer returns the timer text shown next to the pending
+// spinner: the overall turn time while the tool is quick, its own
+// elapsed time once it has been running long enough to matter. Empty
+// when no turn is active and the start time is unknown, so renders of
+// restored sessions are unaffected.
+func (t *baseToolMessageItem) spinnerTimer() string {
+	if d := t.elapsed(); d >= toolTimerOwnTimeThreshold {
+		return common.FormatDuration(d)
+	}
+	return common.Elapsed()
 }
 
 // SetResult sets the tool result associated with this message item.

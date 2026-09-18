@@ -1469,28 +1469,27 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Type == util.InfoTypeError {
 			slog.Error("Error reported", "error", msg.Msg)
 		}
-		m.status.SetInfoMsg(msg)
 		ttl := msg.TTL
 		if ttl <= 0 {
 			ttl = DefaultStatusTTL
 		}
-		cmds = append(cmds, clearInfoMsgCmd(ttl))
+		cmds = append(cmds, clearInfoMsgCmd(m.status.SetInfoMsg(msg), ttl))
 	case app.UpdateAvailableMsg:
 		text := fmt.Sprintf("Crush update available: v%s → v%s.", msg.CurrentVersion, msg.LatestVersion)
 		if msg.IsDevelopment {
 			text = fmt.Sprintf("This is a development version of Crush. The latest version is v%s.", msg.LatestVersion)
 		}
 		ttl := 10 * time.Second
-		m.status.SetInfoMsg(util.InfoMsg{
+		seq := m.status.SetInfoMsg(util.InfoMsg{
 			Type: util.InfoTypeUpdate,
 			Msg:  text,
 			TTL:  ttl,
 		})
-		cmds = append(cmds, clearInfoMsgCmd(ttl))
+		cmds = append(cmds, clearInfoMsgCmd(seq, ttl))
 	case workspace.ConnectionEvent:
 		cmds = append(cmds, m.handleConnectionEvent(msg)...)
 	case util.ClearStatusMsg:
-		m.status.ClearInfoMsg()
+		m.status.ClearInfoMsg(msg.Seq)
 	case completions.CompletionItemsLoadedMsg:
 		if m.completionsOpen {
 			m.completions.SetItems(msg.Files, msg.Resources)
@@ -1663,8 +1662,7 @@ func (m *UI) handleConnectionEvent(msg workspace.ConnectionEvent) []tea.Cmd {
 			TTL:  DefaultStatusTTL,
 		}
 	}
-	m.status.SetInfoMsg(info)
-	cmds := []tea.Cmd{clearInfoMsgCmd(info.TTL)}
+	cmds := []tea.Cmd{clearInfoMsgCmd(m.status.SetInfoMsg(info), info.TTL)}
 	if msg.State == workspace.ConnectionRecovered && m.session != nil {
 		cmds = append(cmds, m.loadSession(m.session.ID))
 	}

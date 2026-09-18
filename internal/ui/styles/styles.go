@@ -272,6 +272,7 @@ type Styles struct {
 		Reasoning            lipgloss.Style // Reasoning effort text
 		TokenCount           lipgloss.Style // "(42K)" token count
 		TokenPercentage      lipgloss.Style // "42%" percent of context window
+		TokenPercentageWarn  lipgloss.Style // "85%" when the window is nearly full
 		EstimatedUsagePrefix lipgloss.Style // "~" prefix for estimated usage
 		Cost                 lipgloss.Style // "$0.42" cost readout
 		HypercreditIcon      lipgloss.Style // Hypercredit icon (◆)

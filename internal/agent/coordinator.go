@@ -1126,7 +1126,15 @@ func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers 
 				return copilotResponsesModels[modelID]
 			}),
 		)
-		httpClient = copilot.NewClient(isSubAgent, c.cfg.Config().Options.Debug)
+		httpClient = copilot.NewClient(isSubAgent, c.cfg.Config().Options.Debug, func() *oauth.Token {
+			// Read the token lazily: the provider client outlives the
+			// token, which the refresh flow replaces.
+			cfg, ok := c.cfg.Config().Providers.Get(string(catwalk.InferenceProviderCopilot))
+			if !ok {
+				return nil
+			}
+			return cfg.OAuthToken
+		})
 
 	case string(catwalk.InferenceProviderOpenCodeGo), string(catwalk.InferenceProviderOpenCodeZen):
 		opts = append(

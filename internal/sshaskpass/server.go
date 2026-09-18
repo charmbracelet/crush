@@ -56,7 +56,8 @@ func StartIntegration(ctx context.Context, executable string) (cleanup func(), e
 
 	// Owner-only permissions keep the credential socket unreadable to
 	// other local users.
-	ln, err := net.Listen("unix", socketPath)
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "unix", socketPath)
 	if err != nil {
 		_ = os.RemoveAll(dir)
 		if wrapperCleanup != nil {

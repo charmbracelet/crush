@@ -79,9 +79,12 @@ func TestWriteAskpassWrapper(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "#!/bin/sh\nexec '/path/to/crush app' __ssh-askpass \"$@\"\n", string(data))
 
-	st, err := os.Stat(path)
-	require.NoError(t, err)
-	require.Equal(t, os.FileMode(0o755), st.Mode().Perm())
+	// Windows does not honor Unix mode bits on os.WriteFile.
+	if runtime.GOOS != "windows" {
+		st, err := os.Stat(path)
+		require.NoError(t, err)
+		require.Equal(t, os.FileMode(0o755), st.Mode().Perm())
+	}
 }
 
 func TestAskpassEnv(t *testing.T) {

@@ -2,7 +2,6 @@ package pinentry
 
 import (
 	"fmt"
-	"path"
 	"path/filepath"
 )
 
@@ -53,13 +52,16 @@ func resolveFlavor(p Proc) flavor {
 	}
 
 	if target := resolveExe(p); target != "" {
-		switch path.Base(target) {
+		// filepath.Base, not path.Base: the resolved path may use
+		// backslashes on Windows.
+		base := filepath.Base(target)
+		switch base {
 		case "pinentry-curses":
 			return flavorCurses
 		case "pinentry-tty":
 			return flavorTTY
 		}
-		if _, ok := guiPinentryNames[path.Base(target)]; ok {
+		if _, ok := guiPinentryNames[base]; ok {
 			return flavorGUI
 		}
 	}

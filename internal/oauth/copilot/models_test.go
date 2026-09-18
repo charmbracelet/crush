@@ -15,10 +15,14 @@ func TestModels(t *testing.T) {
 		require.Equal(t, "Bearer at-models", r.Header.Get("Authorization"))
 		require.Equal(t, "crush", r.Header.Get("originator"))
 		require.Equal(t, "model-access", r.Header.Get("OpenAI-Intent"))
+		for k, v := range Headers() {
+			require.Equal(t, v, r.Header.Get(k), "header %s", k)
+		}
 
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
-			"models": [
+			"object": "list",
+			"data": [
 				{
 					"id": "claude-sonnet-4.5",
 					"name": "Claude Sonnet 4.5",
@@ -93,7 +97,7 @@ func TestModels_Errors(t *testing.T) {
 
 	t.Run("empty catalog", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			_, _ = w.Write([]byte(`{"models": []}`))
+			_, _ = w.Write([]byte(`{"object": "list", "data": []}`))
 		}))
 		t.Cleanup(server.Close)
 

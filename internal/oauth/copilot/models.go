@@ -31,7 +31,7 @@ type ModelInfo struct {
 }
 
 type modelsResponse struct {
-	Models []ModelInfo `json:"models"`
+	Models []ModelInfo `json:"data"`
 }
 
 // Models fetches the model catalog the GitHub Copilot subscription
@@ -50,6 +50,11 @@ func Models(ctx context.Context, token *oauth.Token) ([]catwalk.Model, error) {
 	req.Header.Set("Authorization", "Bearer "+token.AccessToken)
 	req.Header.Set("OpenAI-Intent", "model-access")
 	req.Header.Set("originator", "crush")
+	// The API rejects catalog requests without the editor identity
+	// headers, asking for IDE auth.
+	for k, v := range Headers() {
+		req.Header.Set(k, v)
+	}
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)

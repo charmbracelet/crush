@@ -17,8 +17,9 @@ forward.
 - Hooks are Claude Code-compatible
 - Crush ships with a builtin `crush-hook` skill write, edit, and configure
   hooks; just tell Crush how to configure Crush
-- Crush currently supports just one hook, `PreToolUse`, with plans to support
-  the full gamut; please let us know which hooks you'd like to see next
+- Crush supports three hook events: `PreToolUse`, `PrePermission`, and
+  `PermissionDenied`, with plans to support the full gamut; please let us know
+  which hooks you'd like to see next
 - Hooks run in parallel for speed, but their results compose in config order
   for determinism
 
@@ -32,6 +33,10 @@ forward.
   called. For example: "remember to run gofumpt after editing Go files"
 - Auto-approve tools: skip the permission prompt for bash commands that
   you know are safe
+- Auto-approve on judgment: run a classifier (rules, an LLM, whatever) only
+  for calls that would otherwise prompt, via `PrePermission`
+- React to denials: notify, log, or disable things when a request is
+  denied, via `PermissionDenied`
 - Log certain tool calls
 
 …And lots more. Show us what you're building!
@@ -176,7 +181,7 @@ wins when rewriting input, but first deny wins when blocking.
 
 ## Events
 
-Here are the events you can hook into (spoiler: there's currently just one):
+Here are the events you can hook into:
 
 ### PreToolUse
 
@@ -199,6 +204,82 @@ agent spawn sub-agents" still works.
 
 Hooks are keyed by event name. Only `command` is required, and you can omit
 `matcher` to match all tools.
+
+### PrePermission
+
+This hook fires **only when a permission request is about to prompt the user**
+— after allowlists, hook approvals (`PreToolUse` allows), session auto-approvals,
+and previously granted permissions have all been exhausted. It lets external
+policy (rules engines, classifiers, LLMs) decide whether to grant or deny
+without ever showing the prompt.
+
+**Matched against**: the tool name (same as `PreToolUse`).
+
+**Scope**: unlike `PreToolUse`, this hook runs at the permission-service level,
+so it fires for permission requests from **any agent** (top-level and
+sub-agents). The payload includes `session_id` so hooks can scope decisions.
+
+**Ordering**: `PrePermission` runs while holding the permission service's
+request mutex, so a slow hook delays other concurrent permission requests.
+Keep timeouts short (5–10 s recommended) and prefer deterministic rules over
+LLM calls when latency matters.
+
+Decisions:
+
+- `"allow"` — grant immediately; no prompt.
+- `"deny"` with `reason` — block immediately; the reason surfaces in the UI
+  notification and in the agent's error response.
+- Omitted / `null` — fall through to the normal prompt.
+
+`updated_input` is **ignored** for this event: the tool call has already been
+accepted by the agent and cannot be rewritten at this stage.
+
+Example — auto-approve safe bash commands via an external classifier:
+
+```jsonc
+{
+  "hooks": {
+    "PrePermission": [
+      {
+        "matcher": "^bash$",
+        "command": "./hooks/auto-classify.sh",
+        "timeout": 8,
+        "include_transcript": true
+      }
+    ]
+  }
+}
+```
+
+### PermissionDenied
+
+This hook fires **after** a permission request has been denied (whether by the
+user pressing deny in the TUI, by a `PrePermission` hook, or by any other
+denial path). It is fire-and-forget: the hook does not block the denial and its
+output is ignored. Use it for observability — logging, notifications, metrics,
+or disabling features after repeated denials.
+
+**Matched against**: the tool name.
+
+**Scope**: like `PrePermission`, this runs at the permission-service level and
+fires for denials from any agent.
+
+The dispatch is asynchronous with a background context so a slow hook never
+delays the denial itself.
+
+Example — log every denial:
+
+```jsonc
+{
+  "hooks": {
+    "PermissionDenied": [
+      {
+        "command": "echo \"$(date -Iseconds) DENIED $CRUSH_TOOL_NAME\" >> ./denials.log"
+      }
+    ]
+  }
+}
+```
 
 ## Building Hooks
 
@@ -244,6 +325,7 @@ The available environment variables are:
 | `CRUSH_PROJECT_DIR`          | Project root directory.                        |
 | `CRUSH_TOOL_INPUT_COMMAND`   | For `bash` calls: the shell command being run. |
 | `CRUSH_TOOL_INPUT_FILE_PATH` | For file tools: the target file path.          |
+| `CRUSH_TRANSCRIPT`             | Reasoning-blind conversation excerpt (opt-in). |
 
 The `CRUSH`, `AGENT`, and `AI_AGENT` markers are also set by the `bash`
 tool, so a script can detect "am I running under Crush?" the same way in
@@ -260,10 +342,17 @@ Standard input provides the full context as JSON:
   "cwd": "/home/user/project", // Working directory
   "tool_name": "bash", // The tool being called
   "tool_input": { "command": "rm -rf /" }, // The tool's input
+  // Present only when the hook opts in via include_transcript.
+  "transcript": "User: please fix the failing tests\nAction: bash {\"command\":\"npm test\"}"
 }
 ```
 
 Note that `tool_input` field contains the raw JSON the model sent to the tool.
+When present, `transcript` is a reasoning-blind excerpt of the recent session
+conversation: user messages and tool calls only. Assistant prose, tool outputs,
+system prompts, and reasoning content are stripped so hook classifiers judge
+the conversation rather than the model's own argumentation or possibly-injected
+tool results. Each entry is middle-truncated to keep the excerpt bounded.
 
 To parse the stdin JSON in your hook script, read from stdin and use a tool like
 `jq`:
@@ -613,6 +702,12 @@ Each entry under a `hooks.<EventName>` array:
 
   // number. Optional. Seconds before the hook is killed. Defaults to 30.
   "timeout": 10,
+
+  // boolean. Optional. When true, the hook receives a reasoning-blind
+  // excerpt of the recent session conversation in the `transcript` stdin
+  // field and as CRUSH_TRANSCRIPT. Assistant prose and tool outputs are
+  // stripped. Opt-in only; hooks that omit it are unaffected.
+  "include_transcript": false,
 }
 ```
 
@@ -648,8 +743,22 @@ Extends the common payload:
   "tool_input": {
     "command": "npm test",
   },
+
+  // string. Present only when the hook opts in via include_transcript.
+  // Reasoning-blind excerpt: user messages and tool calls only.
+  "transcript": "User: please fix the failing tests\nAction: bash {\"command\":\"npm test\"}"
 }
 ```
+
+### Stdin payload — PrePermission
+
+Same shape as `PreToolUse`. The `tool_input` contains the permission request's
+`Params` marshaled as JSON (e.g. `{"command":"..."}` for bash, or
+`{"file_path":"...","old_content":"...","new_content":"..."}` for edits).
+
+### Stdin payload — PermissionDenied
+
+Same shape as `PrePermission`. Fired after the denial; output is ignored.
 
 ### Output envelope (common)
 
@@ -696,6 +805,31 @@ Extends the common envelope:
   },
 }
 ```
+
+### Output envelope — PrePermission
+
+Only `decision` and `reason` apply. `updated_input` is **ignored** (the tool
+call has already been accepted by the agent and cannot be rewritten at this
+stage). `halt` is also ignored; use `decision: "deny"` instead.
+
+```jsonc
+{
+  // "allow" | "deny" | null. "allow" grants immediately without prompting.
+  // "deny" blocks immediately; reason surfaces in the UI notification and
+  // in the agent's error response. null/omitted falls through to the prompt.
+  "decision": "deny",
+
+  // string. Shown when denying. Recommended to include a category tag so
+  // the agent can retry safely, e.g. "[data-exfiltration] sending creds to
+  // external endpoint".
+  "reason": "[destructive] rm -rf outside workspace",
+}
+```
+
+### Output envelope — PermissionDenied
+
+Ignored entirely. The event is fire-and-forget observability; exit codes and
+stdout have no effect on the denial.
 
 ### Exit codes
 

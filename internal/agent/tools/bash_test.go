@@ -35,6 +35,20 @@ func (m *mockBashPermissionService) AutoApproveSession(sessionID string) {}
 
 func (m *mockBashPermissionService) SetSkipRequests(skip bool) {}
 
+func (m *mockBashPermissionService) SetPermissionHooks(hooks permission.PermissionHooks) {}
+
+func (m *mockBashPermissionService) DenialReason(toolCallID string) string {
+	return ""
+}
+
+func (m *mockBashPermissionService) SetAutoMode(enabled bool) {}
+
+func (m *mockBashPermissionService) AutoMode() bool { return false }
+
+func (m *mockBashPermissionService) EscalationNote(toolCallID string) string {
+	return ""
+}
+
 func (m *mockBashPermissionService) SkipRequests() bool {
 	return false
 }
@@ -105,6 +119,20 @@ func (m *recordingPermissionService) GrantPersistent(req permission.PermissionRe
 func (m *recordingPermissionService) AutoApproveSession(sessionID string) {}
 
 func (m *recordingPermissionService) SetSkipRequests(skip bool) {}
+
+func (m *recordingPermissionService) SetPermissionHooks(hooks permission.PermissionHooks) {}
+
+func (m *recordingPermissionService) DenialReason(toolCallID string) string {
+	return ""
+}
+
+func (m *recordingPermissionService) SetAutoMode(enabled bool) {}
+
+func (m *recordingPermissionService) AutoMode() bool { return false }
+
+func (m *recordingPermissionService) EscalationNote(toolCallID string) string {
+	return ""
+}
 
 func (m *recordingPermissionService) SkipRequests() bool {
 	return false

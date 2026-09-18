@@ -20,26 +20,41 @@ const SupportedOutputVersion = 1
 // ToolInput is emitted as a parsed JSON object for compatibility with
 // Claude Code hooks (which expect tool_input to be an object, not a
 // string).
+//
+// Transcript, when present, is a reasoning-blind excerpt of the recent
+// session conversation (user messages and tool calls only; assistant
+// prose and tool outputs are stripped). It is only populated for hooks
+// that opt in via include_transcript, so existing hooks are unaffected.
 type Payload struct {
-	Event     string          `json:"event"`
-	SessionID string          `json:"session_id"`
-	CWD       string          `json:"cwd"`
-	ToolName  string          `json:"tool_name"`
-	ToolInput json.RawMessage `json:"tool_input"`
+	Event      string          `json:"event"`
+	SessionID  string          `json:"session_id"`
+	CWD        string          `json:"cwd"`
+	ToolName   string          `json:"tool_name"`
+	ToolInput  json.RawMessage `json:"tool_input"`
+	Transcript string          `json:"transcript,omitempty"`
 }
 
 // BuildPayload constructs the JSON stdin payload for a hook command.
+// It never includes a transcript; see BuildPayloadWithTranscript.
 func BuildPayload(eventName, sessionID, cwd, toolName, toolInputJSON string) []byte {
+	return BuildPayloadWithTranscript(eventName, sessionID, cwd, toolName, toolInputJSON, "")
+}
+
+// BuildPayloadWithTranscript constructs the JSON stdin payload for a
+// hook command, optionally including a reasoning-blind transcript
+// excerpt. The transcript is omitted entirely when empty.
+func BuildPayloadWithTranscript(eventName, sessionID, cwd, toolName, toolInputJSON, transcript string) []byte {
 	toolInput := json.RawMessage(toolInputJSON)
 	if !json.Valid(toolInput) {
 		toolInput = json.RawMessage("{}")
 	}
 	p := Payload{
-		Event:     eventName,
-		SessionID: sessionID,
-		CWD:       cwd,
-		ToolName:  toolName,
-		ToolInput: toolInput,
+		Event:      eventName,
+		SessionID:  sessionID,
+		CWD:        cwd,
+		ToolName:   toolName,
+		ToolInput:  toolInput,
+		Transcript: transcript,
 	}
 	data, err := json.Marshal(p)
 	if err != nil {
@@ -49,8 +64,16 @@ func BuildPayload(eventName, sessionID, cwd, toolName, toolInputJSON string) []b
 }
 
 // BuildEnv constructs the environment variable slice for a hook command.
-// It includes all current process env vars plus hook-specific ones.
+// It includes all current process env vars plus hook-specific ones. The
+// transcript is only included when non-empty.
 func BuildEnv(eventName, toolName, sessionID, cwd, projectDir, toolInputJSON string) []string {
+	return BuildEnvWithTranscript(eventName, toolName, sessionID, cwd, projectDir, toolInputJSON, "")
+}
+
+// BuildEnvWithTranscript is BuildEnv with an optional reasoning-blind
+// transcript exposed as CRUSH_TRANSCRIPT. The variable is omitted when
+// transcript is empty.
+func BuildEnvWithTranscript(eventName, toolName, sessionID, cwd, projectDir, toolInputJSON, transcript string) []string {
 	env := os.Environ()
 	env = append(env, shell.CrushEnvMarkers()...)
 	env = append(
@@ -61,6 +84,9 @@ func BuildEnv(eventName, toolName, sessionID, cwd, projectDir, toolInputJSON str
 		fmt.Sprintf("CRUSH_CWD=%s", cwd),
 		fmt.Sprintf("CRUSH_PROJECT_DIR=%s", projectDir),
 	)
+	if transcript != "" {
+		env = append(env, fmt.Sprintf("CRUSH_TRANSCRIPT=%s", transcript))
+	}
 
 	// Extract tool-specific env vars from the JSON input.
 	if toolInputJSON != "" {

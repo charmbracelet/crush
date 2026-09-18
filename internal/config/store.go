@@ -127,6 +127,12 @@ type ConfigStore struct {
 	// back to the real provider clients.
 	exchangeToken func(ctx context.Context, providerID, refreshToken string) (*oauth.Token, error)
 
+	// fetchCopilotModels fetches the model catalog the Copilot
+	// subscription grants. A field for the same reason as exchangeToken:
+	// tests stub it to avoid network calls, production leaves it nil and
+	// refetchCopilotModels falls back to the real client.
+	fetchCopilotModels func(ctx context.Context, token *oauth.Token) ([]catwalk.Model, error)
+
 	// authSignalMu guards authSignals, which maps provider IDs to
 	// channels that WaitForTokenChange blocks on. SignalAuthComplete
 	// closes the channel to unblock waiters; a new channel is created
@@ -732,8 +738,6 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 // matching how the catwalk and hyper syncers are swappable globals.
 var fetchOpenAIModels = openai.Models
 
-var fetchCopilotModels = copilot.Models
-
 // refetchOpenAIModels stores the Codex model catalog the ChatGPT plan
 // grants next to the provider's API-key models. Best effort: a failure
 // leaves the existing catalog in place and the login still succeeds.
@@ -798,7 +802,7 @@ func (s *ConfigStore) refetchCopilotModels(ctx context.Context, scope Scope) {
 			return
 		}
 	}
-	fetchModels := fetchCopilotModels
+	fetchModels := s.fetchCopilotModels
 	if fetchModels == nil {
 		fetchModels = copilot.Models
 	}

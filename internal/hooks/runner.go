@@ -93,19 +93,57 @@ func (r *Runner) Run(ctx context.Context, eventName, sessionID, toolName, toolIn
 		return AggregateResult{Decision: DecisionNone}, nil
 	}
 
+	envVars := BuildEnv(eventName, toolName, sessionID, r.cwd, r.projectDir, toolInputJSON)
+	payload := BuildPayload(eventName, sessionID, r.cwd, toolName, toolInputJSON)
+
+	return r.run(ctx, eventName, matching, envVars, payload, toolInputJSON), nil
+}
+
+// RunPrompt executes every configured UserPromptSubmit hook and returns
+// the aggregated result. Matchers are meaningless for this event (there is
+// no tool name to match), so they are not applied.
+//
+// Only the aggregated Context is honored by the caller today; decision,
+// halt, and updated_input are parsed and surfaced so a later change can
+// act on them, but they do not affect the turn yet.
+func (r *Runner) RunPrompt(ctx context.Context, sessionID, prompt string) (AggregateResult, error) {
+	if len(r.hooks) == 0 {
+		return AggregateResult{Decision: DecisionNone}, nil
+	}
+
+	all := make([]config.HookConfig, 0, len(r.hooks))
+	for _, h := range r.hooks {
+		all = append(all, h.cfg)
+	}
+	envVars := BuildPromptEnv(EventUserPromptSubmit, sessionID, r.cwd, r.projectDir)
+	payload := BuildPromptPayload(EventUserPromptSubmit, sessionID, r.cwd, prompt)
+
+	agg := r.run(ctx, EventUserPromptSubmit, all, envVars, payload, "")
+	if agg.Decision == DecisionDeny || agg.Halt {
+		slog.Warn(
+			"UserPromptSubmit hook decision is not enforced yet; ignoring",
+			"decision", agg.Decision.String(),
+			"halt", agg.Halt,
+		)
+	}
+	return agg, nil
+}
+
+// run deduplicates hooks by command, executes them in parallel, and
+// aggregates their results in config order. originalInput is the value
+// updated_input patches merge against; pass "" for events that have no
+// tool input.
+func (r *Runner) run(ctx context.Context, eventName string, hooks []config.HookConfig, envVars []string, payload []byte, originalInput string) AggregateResult {
 	// Deduplicate by command string.
-	seen := make(map[string]bool, len(matching))
+	seen := make(map[string]bool, len(hooks))
 	var deduped []config.HookConfig
-	for _, h := range matching {
+	for _, h := range hooks {
 		if seen[h.Command] {
 			continue
 		}
 		seen[h.Command] = true
 		deduped = append(deduped, h)
 	}
-
-	envVars := BuildEnv(eventName, toolName, sessionID, r.cwd, r.projectDir, toolInputJSON)
-	payload := BuildPayload(eventName, sessionID, r.cwd, toolName, toolInputJSON)
 
 	results := make([]HookResult, len(deduped))
 	var wg sync.WaitGroup
@@ -119,7 +157,7 @@ func (r *Runner) Run(ctx context.Context, eventName, sessionID, toolName, toolIn
 	}
 	wg.Wait()
 
-	agg := aggregate(results, toolInputJSON)
+	agg := aggregate(results, originalInput)
 	agg.Hooks = make([]HookInfo, len(deduped))
 	for i, h := range deduped {
 		agg.Hooks[i] = HookInfo{
@@ -134,11 +172,10 @@ func (r *Runner) Run(ctx context.Context, eventName, sessionID, toolName, toolIn
 	slog.Info(
 		"Hook completed",
 		"event", eventName,
-		"tool", toolName,
 		"hooks", len(deduped),
 		"decision", agg.Decision.String(),
 	)
-	return agg, nil
+	return agg
 }
 
 // matchingHooks returns hooks whose matcher matches the tool name (or has

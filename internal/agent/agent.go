@@ -44,6 +44,7 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/stringext"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/x/ansi"
@@ -2043,6 +2044,13 @@ func (a *sessionAgent) Cancel(sessionID string) {
 	if ac, ok := a.activeRequests.Get(sessionID); ok && ac != nil {
 		slog.Debug("Request cancellation initiated", "session_id", sessionID)
 		ac.cancel()
+		// Shells this run moved to the background automatically were started
+		// so the turn could keep working, not as deliberate background jobs;
+		// a cancelled session must not leave them running unbounded (#3878).
+		// Explicitly backgrounded jobs and other sessions are untouched.
+		if killed := shell.GetBackgroundShellManager().KillAutoBackgroundedForSession(sessionID); killed > 0 {
+			slog.Debug("Killed auto-backgrounded shells on cancel", "session_id", sessionID, "count", killed)
+		}
 	}
 
 	// Also check for summarize requests.

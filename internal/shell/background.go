@@ -62,6 +62,12 @@ type BackgroundShell struct {
 // BackgroundShellManager manages background shell instances.
 type BackgroundShellManager struct {
 	shells *csync.Map[string, *BackgroundShell]
+	// autoBackgrounded tracks shells that were moved to the background
+	// automatically (a synchronous command that outlived its auto-background
+	// threshold), mapping shell ID to the owning session. Unlike explicitly
+	// backgrounded jobs, they are tied to the run that started them and are
+	// terminated when that session is cancelled (#3878).
+	autoBackgrounded *csync.Map[string, string]
 }
 
 var (
@@ -73,7 +79,8 @@ var (
 // newBackgroundShellManager creates a new BackgroundShellManager instance.
 func newBackgroundShellManager() *BackgroundShellManager {
 	return &BackgroundShellManager{
-		shells: csync.NewMap[string, *BackgroundShell](),
+		shells:           csync.NewMap[string, *BackgroundShell](),
+		autoBackgrounded: csync.NewMap[string, string](),
 	}
 }
 
@@ -196,6 +203,7 @@ func (m *BackgroundShellManager) Cleanup() int {
 func (m *BackgroundShellManager) KillAll(ctx context.Context) {
 	shells := slices.Collect(m.shells.Seq())
 	m.shells.Reset(map[string]*BackgroundShell{})
+	m.autoBackgrounded.Reset(map[string]string{})
 
 	var wg sync.WaitGroup
 	for _, shell := range shells {
@@ -208,6 +216,43 @@ func (m *BackgroundShellManager) KillAll(ctx context.Context) {
 		})
 	}
 	wg.Wait()
+}
+
+// MarkAutoBackgrounded records shellID as a shell that was moved to the
+// background automatically on behalf of sessionID. It reports false when the
+// shell is unknown or has already finished, in which case there is nothing a
+// later cancel needs to terminate.
+func (m *BackgroundShellManager) MarkAutoBackgrounded(shellID, sessionID string) bool {
+	shell, ok := m.shells.Get(shellID)
+	if !ok || shell.IsDone() {
+		return false
+	}
+	m.autoBackgrounded.Set(shellID, sessionID)
+	return true
+}
+
+// KillAutoBackgroundedForSession terminates the still-running shells that were
+// moved to the background automatically on behalf of sessionID, so a cancelled
+// session cannot leave them running unbounded (#3878). Explicitly backgrounded
+// jobs and other sessions' shells are left alone. Returns how many shells were
+// killed.
+func (m *BackgroundShellManager) KillAutoBackgroundedForSession(sessionID string) int {
+	killed := 0
+	for shellID, owner := range m.autoBackgrounded.Seq2() {
+		_, ok := m.shells.Get(shellID)
+		if !ok {
+			m.autoBackgrounded.Del(shellID)
+			continue
+		}
+		if owner != sessionID {
+			continue
+		}
+		if err := m.Kill(shellID); err == nil {
+			killed++
+		}
+		m.autoBackgrounded.Del(shellID)
+	}
+	return killed
 }
 
 // GetOutput returns the current output of a background shell.

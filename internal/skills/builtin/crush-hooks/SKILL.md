@@ -16,8 +16,18 @@ need to author correct hooks.
 
 ## Supported Events
 
-Only `PreToolUse` is currently supported. Event names are case-insensitive and
-accept snake_case (`PreToolUse`, `pretooluse`, `pre_tool_use` all work).
+| Event              | Fires                                              | Output consumed?                |
+| ------------------ | -------------------------------------------------- | ------------------------------- |
+| `SessionStart`     | First turn of a session                            | No                              |
+| `UserPromptSubmit` | Prompt accepted, before the model sees it          | No                              |
+| `PreToolUse`       | Before every tool call                             | Yes (allow/deny/halt/rewrite)   |
+| `PostToolUse`      | After a tool finishes, whether or not it succeeded | `context` joins the tool result |
+| `Stop`             | Turn ends, including on cancel                     | No                              |
+
+Event names are case-insensitive and accept snake_case (`PreToolUse`,
+`pretooluse`, `pre_tool_use` all work). `matcher` applies to tool events only;
+on `SessionStart`, `UserPromptSubmit`, and `Stop` it never matches because no
+tool is involved.
 
 ## Configuration
 
@@ -56,6 +66,7 @@ the input/output contract is identical regardless of language.
 | `CRUSH_SESSION_ID`           | Current session ID                       |
 | `CRUSH_CWD`                  | Working directory                        |
 | `CRUSH_PROJECT_DIR`          | Project root directory                   |
+| `CRUSH_PROMPT`               | For `UserPromptSubmit`: the prompt       |
 | `CRUSH_TOOL_INPUT_COMMAND`   | For `bash` calls: the shell command      |
 | `CRUSH_TOOL_INPUT_FILE_PATH` | For file tools: the target file path     |
 
@@ -64,12 +75,17 @@ the input/output contract is identical regardless of language.
 ```json
 {
   "event": "PreToolUse",
+  "hook_event_name": "PreToolUse",
   "session_id": "313909e",
   "cwd": "/home/user/project",
   "tool_name": "bash",
   "tool_input": {"command": "rm -rf /"}
 }
 ```
+
+`hook_event_name` mirrors `event` for Claude Code compatibility. `prompt`
+appears only on `UserPromptSubmit` and `tool_response` only on `PostToolUse`
+(the tool's output, or its error when the call failed).
 
 ## Output
 

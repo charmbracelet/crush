@@ -98,7 +98,7 @@
             "type": "array"
           },
           "type": "object",
-          "description": "User-defined shell commands that fire on hook events (e.g. PreToolUse)"
+          "description": "User-defined shell commands that fire on hook events (SessionStart / UserPromptSubmit / PreToolUse / PostToolUse / Stop)"
         },
         "env": {
           "additionalProperties": {
@@ -806,6 +806,14 @@
             "split"
           ],
           "description": "Diff mode for the TUI interface"
+        },
+        "theme": {
+          "type": "string",
+          "description": "Color theme name",
+          "examples": [
+            "dracula",
+            "nord"
+          ]
         },
         "completions": {
           "$ref": "#/$defs/Completions",

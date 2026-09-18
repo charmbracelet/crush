@@ -222,6 +222,9 @@ type UI struct {
 	// opens so it can be restored if the user cancels without selecting.
 	themeBeforePreview styles.Styles
 
+	// titleFrame advances with each animation tick. See windowTitle.
+	titleFrame uint64
+
 	focus uiFocusState
 	state uiState
 	mode  uiInputMode
@@ -1541,6 +1544,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // that did keeps the view pinned to the bottom while following, since
 // animated items can change height.
 func (m *UI) handleAnimTick(msg animTickMsg) tea.Cmd {
+	// Advance on every tick, not only while the chat animates, so a tracker
+	// sees the pane as working even with no animated UI.
+	m.titleFrame++
 	if m.state != uiChat {
 		m.chat.stopAnimating(msg)
 		m.markScrollOnly()
@@ -3404,6 +3410,30 @@ func mouseMode(enabled, inlineActive bool) tea.MouseMode {
 	}
 }
 
+// agentTitleFrames rotate through the window title while the agent works.
+var agentTitleFrames = [...]rune{'⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'}
+
+const (
+	agentTitleIdleGlyph    = '✳'
+	agentTitleBlockedGlyph = '✋'
+)
+
+// windowTitle is the terminal status signal for external trackers: a leading
+// spinner means working, "✳" idle, "✋" blocked, and the word "crush" keeps
+// the pane attributable. window_title_test.go pins the contract.
+func (m *UI) windowTitle() string {
+	dir := home.Short(m.com.Workspace.WorkingDir())
+	switch {
+	case m.dialog != nil && m.dialog.ContainsDialog(dialog.PermissionsID):
+		return string(agentTitleBlockedGlyph) + " crush " + dir
+	case m.isAgentBusy():
+		frame := agentTitleFrames[m.titleFrame%uint64(len(agentTitleFrames))]
+		return string(frame) + " crush " + dir
+	default:
+		return string(agentTitleIdleGlyph) + " crush " + dir
+	}
+}
+
 // View renders the UI model's view.
 func (m *UI) View() tea.View {
 	var v tea.View
@@ -3413,7 +3443,7 @@ func (m *UI) View() tea.View {
 	}
 	v.MouseMode = mouseMode(m.mouseEnabled, m.activeInline != nil)
 	v.ReportFocus = m.caps.ReportFocusEvents
-	v.WindowTitle = "crush " + home.Short(m.com.Workspace.WorkingDir())
+	v.WindowTitle = m.windowTitle()
 
 	key, cacheable := m.currentFrameKey()
 	if cacheable {

@@ -17,8 +17,8 @@ forward.
 - Hooks are Claude Code-compatible
 - Crush ships with a builtin `crush-hook` skill write, edit, and configure
   hooks; just tell Crush how to configure Crush
-- Crush currently supports just one hook, `PreToolUse`, with plans to support
-  the full gamut; please let us know which hooks you'd like to see next
+- Crush fires `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`,
+  and `Stop`; please let us know which hooks you'd like to see next
 - Hooks run in parallel for speed, but their results compose in config order
   for determinism
 
@@ -176,7 +176,23 @@ wins when rewriting input, but first deny wins when blocking.
 
 ## Events
 
-Here are the events you can hook into (spoiler: there's currently just one):
+Crush fires hooks on a turn's lifecycle as well as on tool calls. Tool events
+can steer the turn; lifecycle events are observational, reporting what the agent
+is doing to whatever is listening (a status panel, a notifier, a log). Output
+from an observational event is ignored, so a hook can never fail a run.
+
+| Event              | Fires                                                   | Output consumed?                                      |
+| ------------------ | ------------------------------------------------------- | ----------------------------------------------------- |
+| `SessionStart`     | On the first turn of a session                          | No                                                    |
+| `UserPromptSubmit` | When a prompt is accepted, before the model sees it     | No                                                    |
+| `PreToolUse`       | Before every tool call                                  | Yes: allow, deny, halt, rewrite input, inject context |
+| `PostToolUse`      | After a tool call finishes, whether or not it succeeded | `context` is appended to the tool result              |
+| `Stop`             | When a turn ends, including on cancel                   | No                                                    |
+
+> [!NOTE]
+> Event names are case insensitive and snake-caseable, so `PreToolUse`,
+> `pretooluse`, `PRETOOLUSE`, `pre_tool_use`, and `PRE_TOOL_USE` all work.
+> The same applies to every event in the table above.
 
 ### PreToolUse
 
@@ -187,15 +203,45 @@ stuff, and so on.
 **Matched against**: the tool name (e.g. `bash`, `edit`, `write`,
 `mcp_github_create_pull_request`).
 
-> [!NOTE]
-> Event names are case insensitive and snake-caseable, so `PreToolUse`,
-> `pretooluse`, `PRETOOLUSE`, `pre_tool_use`, and `PRE_TOOL_USE` all work.
+### PostToolUse
 
-**Scope**: `PreToolUse` only fires on the **top-level agent's** tool calls.
-Sub-agents (the `agent` task tool, `agentic_fetch`, etc.) run without hook
-interception so a single delegated turn doesn't trigger your hook N times. The
-outer sub-agent tool call itself _is_ hooked, so policy like "never let the
-agent spawn sub-agents" still works.
+Fires after a tool call finishes, whether it succeeded or failed. It cannot
+block a call that already ran, but its `context` output is appended to the tool
+result, which makes it a good place to record what happened ("log every file
+edited") or to nudge the model afterwards.
+
+**Matched against**: the tool name, same as `PreToolUse`.
+
+### UserPromptSubmit
+
+Fires after the user's message is saved and before the model sees it. The prompt
+is on stdin (`prompt`) and in `CRUSH_PROMPT`, which makes this the event for
+"a run just started" reporting. Output is ignored; Claude Code's
+`additionalContext` is not wired up yet.
+
+**Matched against**: nothing. A matcher on this event never fires, because no
+tool is involved.
+
+### SessionStart
+
+Fires once per session, on its first turn. Useful for setting up per-session
+state or announcing the session to an external service.
+
+**Matched against**: nothing.
+
+### Stop
+
+Fires when a turn ends: after a normal completion, after a failure, and after a
+cancel. This is the event to use for "the agent is done" notifications.
+
+**Matched against**: nothing.
+
+**Scope**: tool events (`PreToolUse`, `PostToolUse`) only fire on the
+**top-level agent's** tool calls. Sub-agents (the `agent` task tool,
+`agentic_fetch`, etc.) run without hook interception so a single delegated turn
+doesn't trigger your hook N times. The outer sub-agent tool call itself _is_
+hooked, so policy like "never let the agent spawn sub-agents" still works.
+Lifecycle events fire once per turn regardless of how many sub-agents run.
 
 Hooks are keyed by event name. Only `command` is required, and you can omit
 `matcher` to match all tools.
@@ -242,6 +288,7 @@ The available environment variables are:
 | `CRUSH_SESSION_ID`           | Current session ID.                            |
 | `CRUSH_CWD`                  | Working directory.                             |
 | `CRUSH_PROJECT_DIR`          | Project root directory.                        |
+| `CRUSH_PROMPT`               | For `UserPromptSubmit`: the submitted prompt.  |
 | `CRUSH_TOOL_INPUT_COMMAND`   | For `bash` calls: the shell command being run. |
 | `CRUSH_TOOL_INPUT_FILE_PATH` | For file tools: the target file path.          |
 
@@ -256,12 +303,18 @@ Standard input provides the full context as JSON:
 ```jsonc
 {
   "event": "PreToolUse", // Hook event name
+  "hook_event_name": "PreToolUse", // Same value, Claude Code's field name
   "session_id": "313909e", // Current session ID
   "cwd": "/home/user/project", // Working directory
   "tool_name": "bash", // The tool being called
   "tool_input": { "command": "rm -rf /" }, // The tool's input
 }
 ```
+
+`hook_event_name` carries the same value as `event` so hook scripts written for
+Claude Code can read either field. Lifecycle events add their own fields:
+`prompt` on `UserPromptSubmit`, and `tool_response` on `PostToolUse` (the tool's
+output, or its error when the call failed).
 
 Note that `tool_input` field contains the raw JSON the model sent to the tool.
 
@@ -407,6 +460,14 @@ and are then abandoned (the agent moves on regardless). Long-running work
 should honor context cancellation or run out-of-process via a shebang.
 
 ## Examples
+
+### Report agent status to Orca
+
+Orca's left panel tracks status for each agent pane. Crush reports working,
+idle, and waiting states through its terminal title, so several Crush panes show
+independent statuses with no configuration. To also report turn and tool detail,
+point the lifecycle events above at Orca's agent-hook endpoint. See
+[docs/hooks/orca.md](./orca.md).
 
 ### Block destructive commands
 

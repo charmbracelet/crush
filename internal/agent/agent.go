@@ -41,6 +41,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
@@ -221,6 +222,15 @@ type sessionAgent struct {
 	// across the agent. Cancel uses its current value as the per-session
 	// high-water mark.
 	acceptSeqGen uint64
+
+	// hookDispatcher runs turn-level events; tool-level events are handled
+	// where the tools run. Nil when no hooks are configured.
+	hookDispatcher *hooks.Dispatcher
+
+	// sessionStartFired remembers the sessions that already reported
+	// SessionStart, so a turn that dies before its user message lands cannot
+	// report it again. Zero value is ready to use.
+	sessionStartFired sync.Map
 }
 
 type SessionAgentOptions struct {
@@ -236,6 +246,7 @@ type SessionAgentOptions struct {
 	Tools                []fantasy.AgentTool
 	Notify               pubsub.Publisher[notify.Notification]
 	RunComplete          pubsub.Publisher[notify.RunComplete]
+	Hooks                *hooks.Dispatcher
 }
 
 func NewSessionAgent(
@@ -259,6 +270,7 @@ func NewSessionAgent(
 		dispatchMu:           csync.NewMap[string, *sync.Mutex](),
 		acceptedRuns:         csync.NewMap[string, int](),
 		cancelMark:           csync.NewMap[string, uint64](),
+		hookDispatcher:       opts.Hooks,
 	}
 }
 
@@ -564,6 +576,17 @@ func ValidateCall(call SessionAgentCall) error {
 	return nil
 }
 
+// reportSessionStart fires SessionStart once per session. LoadOrStore makes
+// the claim atomic, so overlapping runs cannot both report.
+func (a *sessionAgent) reportSessionStart(ctx context.Context, sessionID string) {
+	if _, alreadyReported := a.sessionStartFired.LoadOrStore(sessionID, true); alreadyReported {
+		return
+	}
+	a.hookDispatcher.Run(ctx, hooks.EventSessionStart, hooks.EventData{
+		SessionID: sessionID,
+	})
+}
+
 func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *fantasy.AgentResult, retErr error) {
 	if err := ValidateCall(call); err != nil {
 		return nil, err
@@ -708,6 +731,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	if !hasUserTextMessage(msgs) {
 		titleCtx := context.WithoutCancel(ctx)
 		go a.GenerateTitle(titleCtx, call.SessionID, call.Prompt)
+		a.reportSessionStart(ctx, call.SessionID)
 	}
 
 	// Add the user message to the session.
@@ -716,6 +740,13 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		return nil, err
 	}
 	userMsgCreated = true
+
+	// Fires after the message is persisted so a hook sees the same prompt the
+	// model will.
+	a.hookDispatcher.Run(ctx, hooks.EventUserPromptSubmit, hooks.EventData{
+		SessionID: call.SessionID,
+		Prompt:    call.Prompt,
+	})
 
 	// Add the session to the context. The run context (genCtx) and its
 	// cancel func were already created and registered under the dispatch
@@ -760,6 +791,13 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		if skipRunComplete {
 			return
 		}
+		// Detached from the run context so a cancelled turn still reports its
+		// terminal state.
+		stopCtx, stopCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		a.hookDispatcher.Run(stopCtx, hooks.EventStop, hooks.EventData{
+			SessionID: call.SessionID,
+		})
+		stopCancel()
 		complete := notify.RunComplete{SessionID: call.SessionID, RunID: call.RunID}
 		if currentAssistant != nil {
 			complete.MessageID = currentAssistant.ID

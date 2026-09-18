@@ -224,7 +224,7 @@ var optionSpecs = map[string]optionSpec{
 // that live under options.tui rather than as top-level options.
 func optionUI(options map[string]any, args []string, stderr io.Writer) error {
 	if len(args) != 4 {
-return usage(stderr, "usage: option ui <compact|diff|transparent|mouse|scrollbar|theme|completions-max-depth|completions-max-items|exit-banner> <value>")
+		return usage(stderr, "usage: option ui <compact|diff|transparent|mouse|scrollbar|theme|completions-max-depth|completions-max-items|exit-banner> <value>")
 	}
 
 	key := args[2]

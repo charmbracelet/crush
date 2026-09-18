@@ -754,6 +754,11 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	}
 
 	largeProviderCfg, _ := c.cfg.Config().Providers.Get(large.ModelCfg.Provider)
+
+	// One dispatcher for the agent's turn- and tool-level events, so hooks are
+	// compiled once per agent.
+	dispatcher := c.hookDispatcher()
+
 	result := NewSessionAgent(SessionAgentOptions{
 		LargeModel:           large,
 		SmallModel:           small,
@@ -767,6 +772,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		Tools:                nil,
 		Notify:               c.notify,
 		RunComplete:          c.runComplete,
+		Hooks:                dispatcher,
 	})
 
 	// The readiness goroutines below perform one-time setup — building the
@@ -795,11 +801,18 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		if err != nil {
 			return err
 		}
-		result.SetTools(tools)
+		result.SetTools(wrapToolsWithHooks(tools, dispatcher, isSubAgent))
 		return nil
 	})
 
 	return result, nil
+}
+
+// hookDispatcher builds the current config's dispatcher. Hook commands run
+// from the working directory, like the bash tool.
+func (c *coordinator) hookDispatcher() *hooks.Dispatcher {
+	dir := c.cfg.WorkingDir()
+	return hooks.NewDispatcher(c.cfg.Config().Hooks, dir, dir)
 }
 
 func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubAgent bool) ([]fantasy.AgentTool, error) {
@@ -829,12 +842,6 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	}
 
 	logFile := filepath.Join(c.cfg.Config().Options.DataDirectory, "logs", "crush.log")
-
-	// Build hook runner if PreToolUse hooks are configured.
-	var hookRunner *hooks.Runner
-	if preToolHooks := c.cfg.Config().Hooks[hooks.EventPreToolUse]; len(preToolHooks) > 0 {
-		hookRunner = hooks.NewRunner(preToolHooks, c.cfg.WorkingDir(), c.cfg.WorkingDir())
-	}
 
 	allTools = append(
 		allTools,
@@ -918,13 +925,8 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		return strings.Compare(a.Info().Name, b.Info().Name)
 	})
 
-	// Wrap tools with hook interception for the top-level agent only.
-	// Sub-agents (the `agent` task tool, `agentic_fetch`, etc.) run
-	// without hook interception to avoid firing the user's hook N times
-	// per delegated turn. The top-level invocation of the sub-agent tool
-	// itself is still wrapped from the coder's side.
-	filteredTools = wrapToolsWithHooks(filteredTools, hookRunner, isSubAgent)
-
+	// Wrapping is the caller's job: only the owner of the dispatcher knows
+	// which instance to arm the tools with.
 	return filteredTools, nil
 }
 
@@ -1414,7 +1416,7 @@ func (c *coordinator) updateAgentModels(ctx context.Context, agent SessionAgent,
 	if err != nil {
 		return err
 	}
-	agent.SetTools(tools)
+	agent.SetTools(wrapToolsWithHooks(tools, c.hookDispatcher(), false))
 	return nil
 }
 

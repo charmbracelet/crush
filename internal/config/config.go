@@ -153,6 +153,16 @@ type ProviderConfig struct {
 	// the provider's whole catalog in that case: the API-key models in
 	// Models are not served by the subscription.
 	ChatGPTModels []catwalk.Model `json:"chatgpt_models,omitempty" jsonschema:"-"`
+
+	// CopilotModels lists the models the GitHub Copilot subscription
+	// grants, fetched from the Copilot API with the OAuth token. It
+	// reflects the models enabled in the user's Copilot plan rather
+	// than the provider's static catalog.
+	CopilotModels []catwalk.Model `json:"copilot_models,omitempty" jsonschema:"-"`
+
+	// CopilotModelsFetchAt records when CopilotModels was last fetched
+	// so the catalog is only refreshed once it grows stale.
+	CopilotModelsFetchAt time.Time `json:"copilot_models_fetch_at,omitempty" jsonschema:"-"`
 }
 
 // ToProvider converts the [ProviderConfig] to a [catwalk.Provider].
@@ -842,6 +852,11 @@ func (c *Config) GetModel(provider, model string) *catwalk.Model {
 			}
 		}
 		for _, m := range providerConfig.ChatGPTModels {
+			if m.ID == model {
+				return &m
+			}
+		}
+		for _, m := range providerConfig.CopilotModels {
 			if m.ID == model {
 				return &m
 			}

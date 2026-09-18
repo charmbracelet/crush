@@ -1,0 +1,95 @@
+package copilot
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"time"
+
+	"charm.land/catwalk/pkg/catwalk"
+	"github.com/charmbracelet/crush/internal/oauth"
+)
+
+// ModelInfo is a single entry of the Copilot /models payload. Only the
+// fields Crush needs are decoded.
+type ModelInfo struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Enabled      bool   `json:"model_picker_enabled"`
+	Capabilities struct {
+		Limits struct {
+			ContextWindow int64 `json:"max_context_window_tokens"`
+		}
+		Supports struct {
+			Vision          bool     `json:"vision"`
+			Thinking        bool     `json:"thinking"`
+			ReasoningEffort []string `json:"reasoning_effort"`
+		}
+	} `json:"capabilities"`
+}
+
+type modelsResponse struct {
+	Models []ModelInfo `json:"models"`
+}
+
+// Models fetches the model catalog the GitHub Copilot subscription
+// grants, using the OAuth token obtained from the device flow. Models
+// the plan does not enable for the model picker are filtered out.
+func Models(ctx context.Context, token *oauth.Token) ([]catwalk.Model, error) {
+	if token == nil {
+		return nil, fmt.Errorf("an OAuth token is required to list GitHub Copilot models")
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsEndpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token.AccessToken)
+	req.Header.Set("OpenAI-Intent", "model-access")
+	req.Header.Set("originator", "crush")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch Copilot model catalog: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, fmt.Errorf("read Copilot model catalog: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, &oauth.TokenExchangeError{
+			StatusCode: resp.StatusCode,
+			Body:       string(body),
+		}
+	}
+
+	var payload modelsResponse
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, fmt.Errorf("decode Copilot model catalog: %w", err)
+	}
+
+	models := make([]catwalk.Model, 0, len(payload.Models))
+	for _, m := range payload.Models {
+		if !m.Enabled {
+			continue
+		}
+		models = append(models, catwalk.Model{
+			ID:              m.ID,
+			Name:            m.Name,
+			ContextWindow:   m.Capabilities.Limits.ContextWindow,
+			CanReason:       m.Capabilities.Supports.Thinking || len(m.Capabilities.Supports.ReasoningEffort) > 0,
+			ReasoningLevels: m.Capabilities.Supports.ReasoningEffort,
+			SupportsImages:  m.Capabilities.Supports.Vision,
+		})
+	}
+	if len(models) == 0 {
+		return nil, fmt.Errorf("the Copilot model catalog was empty")
+	}
+	return models, nil
+}

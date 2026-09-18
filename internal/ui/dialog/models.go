@@ -441,13 +441,24 @@ func (m *Models) setProviderItems() error {
 
 		name := cmp.Or(displayProvider.Name, providerID)
 
-		// The OpenAI provider holds exactly one credential. Signed in
-		// with ChatGPT, only the models the subscription grants are
-		// usable, so they are all the section lists; the API catalog
-		// would only 404. Without a login the section is the API catalog.
-		if provider.ID == catwalk.InferenceProviderOpenAI && providerConfig.OAuthToken != nil {
+		// Providers signed in with OAuth hold a credential-scoped
+		// catalog: ChatGPT only grants the models the subscription
+		// allows, and Copilot lists the models fetched with its token.
+		// The static API catalog would only 404, so the section lists
+		// the credential-scoped models alone.
+		var oauthModels []catwalk.Model
+		oauthScoped := providerConfig.OAuthToken != nil
+		switch provider.ID {
+		case catwalk.InferenceProviderOpenAI:
+			oauthModels = providerConfig.ChatGPTModels
+		case catwalk.InferenceProviderCopilot:
+			oauthModels = providerConfig.CopilotModels
+		default:
+			oauthScoped = false
+		}
+		if oauthScoped {
 			group := NewModelGroup(t, name, true)
-			for _, model := range providerConfig.ChatGPTModels {
+			for _, model := range oauthModels {
 				item := NewModelItem(t, provider, model, m.modelType, false)
 				group.AppendItems(item)
 				itemsMap[item.ID()] = item

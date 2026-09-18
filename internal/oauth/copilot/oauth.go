@@ -20,7 +20,12 @@ const (
 	deviceCodeURL   = "https://github.com/login/device/code"
 	accessTokenURL  = "https://github.com/login/oauth/access_token"
 	copilotTokenURL = "https://api.github.com/copilot_internal/v2/token"
+	copilotBaseURL  = "https://api.githubcopilot.com"
 )
+
+// modelsEndpoint lists the models the Copilot subscription enables. A
+// var so tests can point it at a stub server.
+var modelsEndpoint = copilotBaseURL + "/models"
 
 var ErrNotAvailable = errors.New("github copilot not available")
 

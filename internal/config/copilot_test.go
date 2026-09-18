@@ -130,7 +130,11 @@ func TestRefetchCopilotModelsTTL(t *testing.T) {
 	t.Setenv("CRUSH_GLOBAL_DATA", t.TempDir())
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 
-	token := &oauth.Token{AccessToken: "copilot-at"}
+	token := &oauth.Token{
+		AccessToken: "copilot-at",
+		ExpiresIn:   3600,
+		ExpiresAt:   time.Now().Add(time.Hour).Unix(),
+	}
 
 	newStore := func(t *testing.T, fetchAt time.Time, calls *atomic.Int32) *ConfigStore {
 		t.Helper()
@@ -186,6 +190,57 @@ func TestRefetchCopilotModelsTTL(t *testing.T) {
 		store.RefetchCopilotModels(context.Background())
 
 		require.Equal(t, int32(1), calls.Load(), "a zero timestamp counts as stale")
+	})
+
+	t.Run("expired token is refreshed before the fetch", func(t *testing.T) {
+		dir := t.TempDir()
+		configPath := filepath.Join(dir, "crush.json")
+		require.NoError(t, os.WriteFile(configPath, []byte(`{"providers":{"copilot":{"id":"copilot"}}}`), 0o600))
+
+		expired := &oauth.Token{
+			AccessToken:  "old-at",
+			RefreshToken: "old-rt",
+			ExpiresIn:    3600,
+			ExpiresAt:    time.Now().Add(-time.Hour).Unix(),
+		}
+		fresh := &oauth.Token{
+			AccessToken:  "fresh-at",
+			RefreshToken: "fresh-rt",
+			ExpiresIn:    3600,
+			ExpiresAt:    time.Now().Add(time.Hour).Unix(),
+		}
+
+		var exchanges atomic.Int32
+		var fetchToken atomic.Value
+		providers := csync.NewMap[string, ProviderConfig]()
+		providers.Set("copilot", ProviderConfig{
+			ID:           "copilot",
+			OAuthToken:   expired,
+			ExtraHeaders: map[string]string{},
+		})
+		store := &ConfigStore{
+			config:         &Config{Providers: providers},
+			globalDataPath: configPath,
+			workingDir:     dir,
+			exchangeToken: func(_ context.Context, providerID, refreshToken string) (*oauth.Token, error) {
+				exchanges.Add(1)
+				require.Equal(t, "copilot", providerID)
+				require.Equal(t, "old-rt", refreshToken)
+				return fresh, nil
+			},
+			fetchCopilotModels: func(_ context.Context, token *oauth.Token) ([]catwalk.Model, error) {
+				fetchToken.Store(token.AccessToken)
+				return []catwalk.Model{{ID: "fresh-model"}}, nil
+			},
+		}
+
+		store.RefetchCopilotModels(context.Background())
+
+		require.Equal(t, int32(1), exchanges.Load(), "the expired token is exchanged")
+		require.Equal(t, "fresh-at", fetchToken.Load(), "the fetch uses the refreshed token")
+		pc, _ := store.Config().Providers.Get("copilot")
+		require.Equal(t, fresh, pc.OAuthToken)
+		require.Equal(t, "fresh-model", pc.CopilotModels[0].ID)
 	})
 
 	t.Run("signed out is a no-op", func(t *testing.T) {

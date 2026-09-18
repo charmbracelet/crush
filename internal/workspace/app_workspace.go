@@ -517,9 +517,11 @@ func (w *AppWorkspace) ConfigStore() *config.ConfigStore {
 // ApplyTrustedConfig reconciles the running app with the config after a
 // project trust decision: MCP servers defined by configs that just
 // entered the active configuration are started, and servers whose
-// configs left it are torn down. Agent tools don't need rebuilding
-// here: every run refreshes them from the current config, and MCP
-// tools register as their servers connect.
+// configs left it are torn down. Skills are re-discovered because a
+// just-trusted project config can contribute skills_paths that were
+// absent from the initial discovery, and the coordinator's prompts and
+// tools are rebuilt so those skills are actually applied. MCP tools
+// register as their servers connect, so they need no extra wiring here.
 func (w *AppWorkspace) ApplyTrustedConfig(ctx context.Context) {
 	// Wait for startup MCP initialization so we don't race it: servers it
 	// covers already recorded state and are left alone by Reinitialize.
@@ -527,6 +529,41 @@ func (w *AppWorkspace) ApplyTrustedConfig(ctx context.Context) {
 		slog.Warn("Failed to wait for MCP initialization", "error", err)
 	}
 	mcptools.Reinitialize(ctx, w.store)
+
+	// Refresh skills now that the trusted project config may have added
+	// skills_paths and disabled_skills entries. The manager feeds the UI
+	// (via the global mirror), while the coordinator drives the model's
+	// prompt and tool list.
+	if w.app.Skills != nil {
+		w.app.Skills.Rediscover(skillsDiscoveryConfig(w.store))
+	}
+	if refresher, ok := w.app.AgentCoordinator.(interface{ RefreshSkills(context.Context) error }); ok {
+		if err := refresher.RefreshSkills(ctx); err != nil {
+			slog.Warn("Failed to refresh skills after trusting config", "error", err)
+		}
+	}
+}
+
+// skillsDiscoveryConfig adapts a *config.ConfigStore to the inputs
+// skills.DiscoverFromConfig expects, reading skills_paths and
+// disabled_skills from the current (possibly just-reloaded) config.
+func skillsDiscoveryConfig(store *config.ConfigStore) skills.DiscoveryConfig {
+	opts := store.Config().Options
+	var paths, disabled []string
+	if opts != nil {
+		paths = opts.SkillsPaths
+		disabled = opts.DisabledSkills
+	}
+	var resolver func(string) (string, error)
+	if r := store.Resolver(); r != nil {
+		resolver = r.ResolveValue
+	}
+	return skills.DiscoveryConfig{
+		SkillsPaths:    paths,
+		DisabledSkills: disabled,
+		WorkingDir:     store.WorkingDir(),
+		Resolver:       resolver,
+	}
 }
 
 // Compile-time check that AppWorkspace implements Workspace.

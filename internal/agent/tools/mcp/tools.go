@@ -57,8 +57,19 @@ func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string
 		return ToolResult{}, err
 	}
 
+	return toolResultFromCall(result), nil
+}
+
+// EmptyMediaNote is what the model is told when a tool offered media that
+// turned out to carry no bytes.
+const EmptyMediaNote = "The tool returned empty media data, so there is nothing to show here."
+
+// toolResultFromCall folds the content blocks of an MCP reply into the one
+// result Crush carries. At most one image and one audio payload survive,
+// since that is all a tool result can hold downstream.
+func toolResultFromCall(result *mcp.CallToolResult) ToolResult {
 	if len(result.Content) == 0 {
-		return ToolResult{Type: "text", Content: ""}, nil
+		return ToolResult{Type: "text", Content: ""}
 	}
 
 	var textParts []string
@@ -66,19 +77,35 @@ func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string
 	var imageMimeType string
 	var audioData []byte
 	var audioMimeType string
+	var emptyMedia bool
 
+	// Payloads are decoded here rather than on the way out, so that "empty"
+	// means the same thing everywhere: no bytes once the encoding is undone.
+	// A server reporting a capture it failed to take sends an empty or
+	// blank string, and the provider rejects an empty media block by
+	// refusing the whole request rather than just the attachment.
 	for _, v := range result.Content {
 		switch content := v.(type) {
 		case *mcp.TextContent:
 			textParts = append(textParts, content.Text)
 		case *mcp.ImageContent:
+			data := ensureRawBytes(content.Data)
+			if len(data) == 0 {
+				emptyMedia = true
+				continue
+			}
 			if imageData == nil {
-				imageData = content.Data
+				imageData = data
 				imageMimeType = content.MIMEType
 			}
 		case *mcp.AudioContent:
+			data := ensureRawBytes(content.Data)
+			if len(data) == 0 {
+				emptyMedia = true
+				continue
+			}
 			if audioData == nil {
-				audioData = content.Data
+				audioData = data
 				audioMimeType = content.MIMEType
 			}
 		default:
@@ -86,32 +113,35 @@ func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string
 		}
 	}
 
+	// Saying so keeps the model from reading an empty result as a successful
+	// one and carrying on as though it had seen the picture.
+	if emptyMedia && imageData == nil && audioData == nil {
+		textParts = append(textParts, EmptyMediaNote)
+	}
 	textContent := strings.Join(textParts, "\n")
 
-	// We need to make sure the data is base64
-	// when using something like docker + playwright the data was not returned correctly.
 	if imageData != nil {
 		return ToolResult{
 			Type:      "image",
 			Content:   textContent,
-			Data:      ensureRawBytes(imageData),
+			Data:      imageData,
 			MediaType: imageMimeType,
-		}, nil
+		}
 	}
 
 	if audioData != nil {
 		return ToolResult{
 			Type:      "media",
 			Content:   textContent,
-			Data:      ensureRawBytes(audioData),
+			Data:      audioData,
 			MediaType: audioMimeType,
-		}, nil
+		}
 	}
 
 	return ToolResult{
 		Type:    "text",
 		Content: textContent,
-	}, nil
+	}
 }
 
 // RefreshTools gets the updated list of tools from the MCP and updates the

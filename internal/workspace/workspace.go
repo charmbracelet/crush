@@ -183,6 +183,14 @@ type Workspace interface {
 	// QuestionCancel cancels the pending question.
 	QuestionCancel() bool
 
+	// Pinentry
+	//
+	// PinentryRespond resolves the pending GPG credential prompt with
+	// the secret; PinentryCancel dismisses it. Both return false when
+	// no matching prompt is pending.
+	PinentryRespond(id, secret string) bool
+	PinentryCancel(id string) bool
+
 	// FileTracker
 	FileTrackerRecordRead(ctx context.Context, sessionID, path string)
 	FileTrackerLastReadTime(ctx context.Context, sessionID, path string) time.Time

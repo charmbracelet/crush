@@ -586,6 +586,19 @@
             300,
             0
           ]
+        },
+        "pinentry_integrated": {
+          "type": "boolean",
+          "description": "Render GPG passphrase prompts as a native Crush dialog instead of an external pinentry program. Works with file-based keys and security keys and never modifies GPG or git configuration.",
+          "default": true
+        },
+        "pinentry_cache_timeout": {
+          "type": "integer",
+          "description": "Seconds Crush keeps an entered GPG passphrase in memory so repeated signing operations do not re-prompt. 0 (the default) disables it; gpg-agent's own cache applies regardless.",
+          "default": 0,
+          "examples": [
+            300
+          ]
         }
       },
       "additionalProperties": false,

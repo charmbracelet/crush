@@ -183,6 +183,15 @@ type Workspace interface {
 	// QuestionCancel cancels the pending question.
 	QuestionCancel() bool
 
+	// SSH prompts
+	//
+	// SSHRespond resolves the pending integrated SSH credential or
+	// confirmation prompt with the secret ("yes" for confirmations);
+	// SSHCancel dismisses it. Both return false when no matching prompt
+	// is pending.
+	SSHRespond(id, secret string) bool
+	SSHCancel(id string) bool
+
 	// FileTracker
 	FileTrackerRecordRead(ctx context.Context, sessionID, path string)
 	FileTrackerLastReadTime(ctx context.Context, sessionID, path string) time.Time

@@ -46,6 +46,7 @@ import (
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/charmbracelet/crush/internal/sshaskpass"
 	"github.com/charmbracelet/crush/internal/stringext"
 	"github.com/charmbracelet/crush/internal/ui/attachments"
 	"github.com/charmbracelet/crush/internal/ui/chat"
@@ -1069,6 +1070,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case pubsub.Event[question.Notification]:
 		m.handleQuestionNotification(msg.Payload)
+	case pubsub.Event[sshaskpass.PromptRequest]:
+		cmds = append(cmds, m.handleSSHPrompt(msg.Payload)...)
+	case pubsub.Event[sshaskpass.Notification]:
+		m.handleSSHNotification(msg.Payload)
 	case cancelTimerExpiredMsg:
 		m.isCanceling = false
 	case tea.TerminalVersionMsg:
@@ -2252,6 +2257,13 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		case dialog.PermissionDeny:
 			m.com.Workspace.PermissionDeny(msg.Permission)
 		}
+
+	case dialog.ActionSSHSubmit:
+		m.dialog.CloseDialog(dialog.SSHID)
+		m.com.Workspace.SSHRespond(msg.RequestID, msg.Secret)
+	case dialog.ActionSSHCancel:
+		m.dialog.CloseDialog(dialog.SSHID)
+		m.com.Workspace.SSHCancel(msg.RequestID)
 
 	case dialog.ActionFilePickerSelected:
 		cmds = append(cmds, tea.Sequence(

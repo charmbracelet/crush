@@ -72,6 +72,16 @@ type (
 		Permission permission.PermissionRequest
 		Action     PermissionAction
 	}
+	// Messages for the integrated SSH askpass dialog. The secret only
+	// ever travels through ActionSSHSubmit to the workspace, mirroring
+	// how the permission dialog resolves its requests.
+	ActionSSHSubmit struct {
+		RequestID string
+		Secret    string
+	}
+	ActionSSHCancel struct {
+		RequestID string
+	}
 	// ActionRunCustomCommand is a message to run a custom command.
 	ActionRunCustomCommand struct {
 		Content   string

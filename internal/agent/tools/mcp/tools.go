@@ -51,8 +51,15 @@ func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string
 		return ToolResult{}, err
 	}
 
+	return toolResultFromCall(result), nil
+}
+
+// toolResultFromCall folds the content blocks of an MCP reply into the one
+// result Crush carries. At most one image and one audio payload survive,
+// since that is all a tool result can hold downstream.
+func toolResultFromCall(result *mcp.CallToolResult) ToolResult {
 	if len(result.Content) == 0 {
-		return ToolResult{Type: "text", Content: ""}, nil
+		return ToolResult{Type: "text", Content: ""}
 	}
 
 	var textParts []string
@@ -60,18 +67,33 @@ func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string
 	var imageMimeType string
 	var audioData []byte
 	var audioMimeType string
+	var emptyMedia bool
 
 	for _, v := range result.Content {
 		switch content := v.(type) {
 		case *mcp.TextContent:
 			textParts = append(textParts, content.Text)
 		case *mcp.ImageContent:
-			if imageData == nil {
+			// Only a payload with bytes in it counts. A server that
+			// reports a capture it did not manage to take sends an
+			// empty string, which decodes to an empty-but-present
+			// slice and so passes any nil check — and an empty media
+			// block is rejected by the provider outright, taking the
+			// whole request with it rather than just the image.
+			if len(content.Data) == 0 {
+				emptyMedia = true
+				continue
+			}
+			if len(imageData) == 0 {
 				imageData = content.Data
 				imageMimeType = content.MIMEType
 			}
 		case *mcp.AudioContent:
-			if audioData == nil {
+			if len(content.Data) == 0 {
+				emptyMedia = true
+				continue
+			}
+			if len(audioData) == 0 {
 				audioData = content.Data
 				audioMimeType = content.MIMEType
 			}
@@ -84,28 +106,39 @@ func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string
 
 	// We need to make sure the data is base64
 	// when using something like docker + playwright the data was not returned correctly.
-	if imageData != nil {
+	if len(imageData) > 0 {
 		return ToolResult{
 			Type:      "image",
 			Content:   textContent,
 			Data:      ensureRawBytes(imageData),
 			MediaType: imageMimeType,
-		}, nil
+		}
 	}
 
-	if audioData != nil {
+	if len(audioData) > 0 {
 		return ToolResult{
 			Type:      "media",
 			Content:   textContent,
 			Data:      ensureRawBytes(audioData),
 			MediaType: audioMimeType,
-		}, nil
+		}
+	}
+
+	// Nothing usable came back, but the server did offer media. Saying so
+	// keeps the model from reading an empty result as a successful one and
+	// carrying on as though it had seen the picture.
+	if emptyMedia {
+		note := "The tool returned empty media data, so there is nothing to show here."
+		if textContent != "" {
+			note = textContent + "\n\n" + note
+		}
+		return ToolResult{Type: "text", Content: note}
 	}
 
 	return ToolResult{
 		Type:    "text",
 		Content: textContent,
-	}, nil
+	}
 }
 
 // RefreshTools gets the updated list of tools from the MCP and updates the

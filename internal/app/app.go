@@ -639,8 +639,8 @@ func (app *App) GetDefaultSmallModel(providerID string) config.SelectedModel {
 
 	// A subscription-authenticated provider only serves the models its
 	// subscription grants, so the default small model must come from that
-	// catalog as well. This applies to ChatGPT-authenticated OpenAI and
-	// Grok-authenticated xAI alike.
+	// catalog as well. This applies to ChatGPT-authenticated OpenAI,
+	// Grok-authenticated xAI, and Copilot alike.
 	if largeModelCfg.Provider == providerID {
 		var pick func(config.ProviderConfig) *catwalk.Model
 		switch providerID {
@@ -648,6 +648,8 @@ func (app *App) GetDefaultSmallModel(providerID string) config.SelectedModel {
 			pick = chatGPTSmallModel
 		case string(catwalk.InferenceProviderXAI):
 			pick = grokSmallModel
+		case string(catwalk.InferenceProviderCopilot):
+			pick = copilotSmallModel
 		}
 		if pick != nil {
 			if pc, ok := cfg.Providers.Get(providerID); ok && pc.OAuthToken != nil {
@@ -703,6 +705,22 @@ func grokSmallModel(pc config.ProviderConfig) *catwalk.Model {
 	}
 	if len(pc.GrokModels) > 0 {
 		return &pc.GrokModels[len(pc.GrokModels)-1]
+	}
+	return nil
+}
+
+// copilotSmallModel picks a lightweight model from the Copilot catalog,
+// preferring a "mini" or "haiku" variant and falling back to the last
+// entry. Returns nil when the catalog is empty.
+func copilotSmallModel(pc config.ProviderConfig) *catwalk.Model {
+	for i := range pc.CopilotModels {
+		id := pc.CopilotModels[i].ID
+		if strings.Contains(id, "mini") || strings.Contains(id, "haiku") {
+			return &pc.CopilotModels[i]
+		}
+	}
+	if len(pc.CopilotModels) > 0 {
+		return &pc.CopilotModels[len(pc.CopilotModels)-1]
 	}
 	return nil
 }

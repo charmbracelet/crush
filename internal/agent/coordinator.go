@@ -1004,8 +1004,9 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 
 	// Resolve the selected model from the provider's whole catalog: an
 	// API-key model, or a subscription model from ChatGPT, Grok, or
-	// Copilot. The subscription catalogs live outside Models, so looking
-	// only there strands a model that catwalk doesn't also publish.
+	// Copilot. The subscription catalogs live outside Models and can
+	// hold models the static catalog does not (e.g. Copilot's "auto"),
+	// so the lookup must go through GetModel rather than Models.
 	largeCatwalkModel := c.cfg.Config().GetModel(largeModelCfg.Provider, largeModelCfg.Model)
 	smallCatwalkModel := c.cfg.Config().GetModel(smallModelCfg.Provider, smallModelCfg.Model)
 

@@ -15,9 +15,10 @@ import (
 // ModelInfo is a single entry of the Copilot /models payload. Only the
 // fields Crush needs are decoded.
 type ModelInfo struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	Enabled      bool   `json:"model_picker_enabled"`
+	ID                 string   `json:"id"`
+	Name               string   `json:"name"`
+	Enabled            bool     `json:"model_picker_enabled"`
+	SupportedEndpoints []string `json:"supported_endpoints"`
 	Capabilities struct {
 		Limits struct {
 			ContextWindow int64 `json:"max_context_window_tokens"`
@@ -34,14 +35,9 @@ type modelsResponse struct {
 	Models []ModelInfo `json:"data"`
 }
 
-// Models fetches the model catalog the GitHub Copilot subscription
-// grants, using the OAuth token obtained from the device flow. Models
-// the plan does not enable for the model picker are filtered out.
-func Models(ctx context.Context, token *oauth.Token) ([]catwalk.Model, error) {
-	if token == nil {
-		return nil, fmt.Errorf("an OAuth token is required to list GitHub Copilot models")
-	}
-
+// fetchCatalog GETs the Copilot /models catalog using the OAuth token
+// obtained from the device flow.
+func fetchCatalog(ctx context.Context, token *oauth.Token) ([]ModelInfo, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsEndpoint, nil)
 	if err != nil {
 		return nil, err
@@ -78,10 +74,25 @@ func Models(ctx context.Context, token *oauth.Token) ([]catwalk.Model, error) {
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return nil, fmt.Errorf("decode Copilot model catalog: %w", err)
 	}
+	return payload.Models, nil
+}
 
-	models := make([]catwalk.Model, 0, len(payload.Models)+1)
+// Models fetches the model catalog the GitHub Copilot subscription
+// grants, using the OAuth token obtained from the device flow. Models
+// the plan does not enable for the model picker are filtered out.
+func Models(ctx context.Context, token *oauth.Token) ([]catwalk.Model, error) {
+	if token == nil {
+		return nil, fmt.Errorf("an OAuth token is required to list GitHub Copilot models")
+	}
+
+	catalog, err := fetchCatalog(ctx, token)
+	if err != nil {
+		return nil, err
+	}
+
+	models := make([]catwalk.Model, 0, len(catalog)+1)
 	hasAuto := false
-	for _, m := range payload.Models {
+	for _, m := range catalog {
 		if !m.Enabled {
 			continue
 		}
@@ -97,7 +108,7 @@ func Models(ctx context.Context, token *oauth.Token) ([]catwalk.Model, error) {
 			SupportsImages:  m.Capabilities.Supports.Vision,
 		})
 	}
-	if len(payload.Models) == 0 {
+	if len(catalog) == 0 {
 		return nil, fmt.Errorf("the Copilot model catalog was empty")
 	}
 
@@ -112,8 +123,8 @@ func Models(ctx context.Context, token *oauth.Token) ([]catwalk.Model, error) {
 		// the session substitutes the concrete model anyway. When the
 		// picker is disabled for every model, fall back to the first
 		// catalog entry, whose capabilities are still populated.
-		reference := payload.Models[0]
-		for _, m := range payload.Models {
+		reference := catalog[0]
+		for _, m := range catalog {
 			if m.Enabled {
 				reference = m
 				break

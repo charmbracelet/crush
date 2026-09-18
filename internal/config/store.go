@@ -785,7 +785,24 @@ func (s *ConfigStore) refetchCopilotModels(ctx context.Context, scope Scope) {
 	if !ok || pc.OAuthToken == nil {
 		return
 	}
+<<<<<<< HEAD
 	fetchModels := fetchCopilotModels
+=======
+	// Copilot IDE tokens live about thirty minutes, so the stored
+	// token is usually expired by the time a refetch happens. Refresh
+	// it first; fetching with a stale token would only 401.
+	if pc.OAuthToken.IsExpired() {
+		if err := s.RefreshOAuthToken(ctx, scope, string(catwalk.InferenceProviderCopilot)); err != nil {
+			slog.Warn("Failed to refresh GitHub Copilot token before catalog fetch", "error", err)
+			return
+		}
+		pc, ok = s.Config().Providers.Get(string(catwalk.InferenceProviderCopilot))
+		if !ok || pc.OAuthToken == nil {
+			return
+		}
+	}
+	fetchModels := s.fetchCopilotModels
+>>>>>>> 6c51e29 (fix: read Copilot catalog from data and refresh stale tokens)
 	if fetchModels == nil {
 		fetchModels = copilot.Models
 	}

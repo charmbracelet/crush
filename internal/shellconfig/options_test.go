@@ -162,6 +162,21 @@ func TestOption_UIUnknownKey(t *testing.T) {
 	require.Contains(t, err.Error(), "unknown key")
 }
 
+func TestOption_UITheme(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "crushrc")
+	jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(`option ui theme dracula`))
+	require.NoError(t, err)
+
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &result))
+
+	opts := result["options"].(map[string]any)
+	tui := opts["tui"].(map[string]any)
+	require.Equal(t, "dracula", tui["theme"])
+}
+
 func TestOption_UIExitBanner(t *testing.T) {
 	t.Parallel()
 

@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/clipboard"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/themes"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/crush/internal/workspace"
@@ -144,11 +145,27 @@ func (c *Common) Config() *config.Config {
 // workspace has a large model selected, the theme is chosen based on its
 // provider; otherwise the default theme is used.
 func DefaultCommon(ws workspace.Workspace) *Common {
-	s := styles.ThemeForProvider(largeModelProviderID(ws))
+	s := ThemeForConfig(ws)
 	return &Common{
 		Workspace: ws,
 		Styles:    &s,
 	}
+}
+
+// ResolveFromConfig resolves the active theme from a config. An explicitly
+// configured options.tui.theme wins; otherwise provider-derived theming
+// applies. Nil cfg, Options, or TUI yield the provider-derived/default theme.
+func ResolveFromConfig(cfg *config.Config, providerID string) styles.Styles {
+	return themes.ResolveForProvider(cfg, providerID)
+}
+
+// ThemeForConfig resolves the active theme for a workspace using its
+// configured options.tui.theme when set, falling back to provider theming.
+func ThemeForConfig(ws workspace.Workspace) styles.Styles {
+	if ws == nil {
+		return styles.ThemeForProvider("")
+	}
+	return ResolveFromConfig(ws.Config(), largeModelProviderID(ws))
 }
 
 // largeModelProviderID returns the provider ID of the currently selected

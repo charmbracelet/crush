@@ -47,6 +47,7 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/stringext"
+	"github.com/charmbracelet/crush/internal/themes"
 	"github.com/charmbracelet/crush/internal/ui/attachments"
 	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/common"
@@ -216,6 +217,10 @@ type UI struct {
 	// skip the expensive style rebuild when switching to a provider that
 	// resolves to the same theme.
 	themeKey string
+
+	// themeBeforePreview snapshots the applied theme when the theme picker
+	// opens so it can be restored if the user cancels without selecting.
+	themeBeforePreview styles.Styles
 
 	focus uiFocusState
 	state uiState
@@ -1998,6 +2003,12 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			break
 		}
 
+		// Revert any live theme preview when the picker is dismissed without
+		// a selection.
+		if last := m.dialog.DialogLast(); last != nil && last.ID() == dialog.ThemeID {
+			m.applyTheme(m.themeBeforePreview)
+		}
+
 		if m.dialog.ContainsDialog(dialog.FilePickerID) {
 			defer fimage.ResetCache()
 		}
@@ -2078,6 +2089,22 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			m.notifyBackend = selectNotificationBackend(m.caps, cfg)
 		}
 		m.dialog.CloseDialog(dialog.NotificationsID)
+	case dialog.ActionPreviewTheme:
+		if s, err := themes.Resolve(msg.Name); err == nil {
+			m.applyTheme(s)
+		}
+	case dialog.ActionSelectTheme:
+		m.dialog.CloseDialog(dialog.ThemeID)
+		if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.tui.theme", msg.Name); err != nil {
+			m.applyTheme(m.themeBeforePreview)
+			cmds = append(cmds, util.ReportError(err))
+			break
+		}
+		if s, err := themes.Resolve(msg.Name); err == nil {
+			m.applyTheme(s)
+			m.themeKey = "user:" + msg.Name
+		}
+		cmds = append(cmds, util.CmdHandler(util.NewInfoMsg("Theme set to: "+msg.Name)))
 	case dialog.ActionNewSession:
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before starting a new session..."))
@@ -4595,6 +4622,13 @@ func (m *UI) cacheSidebarLogo(width int) {
 // invalidating the markdown renderer cache and re-rendering the entire
 // transcript for no visible change.
 func (m *UI) applyThemeForProvider(providerID string) {
+	// An explicitly configured theme is authoritative; provider switching
+	// must not clobber it.
+	if m.com != nil && m.com.Workspace != nil {
+		if themes.ConfiguredTheme(m.com.Workspace.Config()) != "" {
+			return
+		}
+	}
 	key := styles.ThemeKeyForProvider(providerID)
 	if key == m.themeKey {
 		return
@@ -4909,6 +4943,10 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openNotificationsDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.ThemeID:
+		if cmd := m.openThemeDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.FilePickerID:
 		if cmd := m.openFilesDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -5007,6 +5045,18 @@ func (m *UI) openNotificationsDialog() tea.Cmd {
 
 	notificationsDialog := dialog.NewNotifications(m.com)
 	m.dialog.OpenDialog(notificationsDialog)
+	return nil
+}
+
+func (m *UI) openThemeDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.ThemeID) {
+		m.dialog.BringToFront(dialog.ThemeID)
+		return nil
+	}
+
+	m.themeBeforePreview = *m.com.Styles
+	themeDialog := dialog.NewThemePicker(m.com)
+	m.dialog.OpenDialog(themeDialog)
 	return nil
 }
 

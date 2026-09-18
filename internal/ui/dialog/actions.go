@@ -57,6 +57,14 @@ type (
 	ActionSelectNotificationStyle struct {
 		Style string
 	}
+	// ActionSelectTheme requests applying and persisting a theme selection.
+	ActionSelectTheme struct {
+		Name string
+	}
+	// ActionPreviewTheme applies a theme live without persisting it.
+	ActionPreviewTheme struct {
+		Name string
+	}
 	ActionToggleTransparentBackground struct{}
 	ActionToggleMouseSupport          struct{}
 	ActionInitializeProject           struct{}

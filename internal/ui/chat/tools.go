@@ -608,13 +608,24 @@ func toolEarlyStateContent(sty *styles.Styles, opts *ToolRenderOpts, width int) 
 	case ToolStatusCanceled:
 		msg = sty.Tool.StateCancelled.Render("Canceled.")
 	case ToolStatusAwaitingPermission:
-		msg = sty.Tool.StateWaiting.Render("Requesting permission...")
+		msg = sty.Tool.StateWaiting.Render("Requesting permission...") + toolTimerSuffix(sty)
 	case ToolStatusRunning:
 		msg = sty.Tool.StateWaiting.Render(waitingForToolMessage(opts))
 	default:
 		return "", false
 	}
 	return msg, true
+}
+
+// toolTimerSuffix renders the live turn timer shown next to tool calls
+// that are still in flight. Returns an empty string when no turn is
+// active, so renders of persisted sessions are unaffected.
+func toolTimerSuffix(sty *styles.Styles) string {
+	elapsed := common.Elapsed()
+	if elapsed == "" {
+		return ""
+	}
+	return " " + lipgloss.NewStyle().Foreground(sty.WorkingTimerColor).Render(elapsed)
 }
 
 // toolErrorContent formats an error message with an ERROR or WARN tag.

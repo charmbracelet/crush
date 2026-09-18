@@ -289,6 +289,19 @@ type channelTransport struct {
 func (t *channelTransport) unwrapTransport() mcp.Transport { return t.inner }
 
 func (t *channelTransport) Connect(ctx context.Context) (mcp.Connection, error) {
+	// Streamable HTTP must NOT be wrapped. The SDK starts the standalone SSE
+	// stream — the hanging GET every server-initiated notification rides — from
+	// sessionUpdated, which it reaches by type-asserting this connection to its
+	// unexported clientConnection interface. A wrapper declared in another
+	// package cannot implement that interface's unexported method, so the assert
+	// fails silently (the ok is discarded), the stream is never opened, and every
+	// push is rejected with "stream not connected or already closed" while the
+	// session still initializes and answers pings. Filter below the connection
+	// instead, in the HTTP round-tripper, and hand the SDK the real thing.
+	if inner, ok := t.inner.(*mcp.StreamableClientTransport); ok {
+		installChannelSSEFilter(inner, t.name, t.gate)
+		return inner.Connect(ctx)
+	}
 	conn, err := t.inner.Connect(ctx)
 	if err != nil {
 		return nil, err

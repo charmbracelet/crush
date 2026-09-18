@@ -651,7 +651,11 @@ func renderPlanBox(style lipgloss.Style, content string, width int, closed bool)
 	for i, line := range lines {
 		lines[i] = ansi.Truncate(line, innerWidth, "")
 	}
-	return style.Width(innerWidth).Render(strings.Join(lines, "\n"))
+	// In lipgloss v2 Width is the total box width: border and padding live
+	// inside it, so the content area ends up Width minus the frame. Glamour
+	// already wrapped at innerWidth (width minus the frame), so size the box
+	// to the full width or every line gets re-wrapped narrower.
+	return style.Width(max(1, width)).Render(strings.Join(lines, "\n"))
 }
 
 // planBoxLayout returns a style and content width whose combined horizontal

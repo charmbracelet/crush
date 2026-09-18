@@ -247,3 +247,58 @@ func TestDiscoverFromConfig_Resolver(t *testing.T) {
 	}
 	require.True(t, found, "DiscoverFromConfig must expand $VAR via Resolver")
 }
+
+// TestManager_Rediscover verifies that Rediscover replaces the manager's
+// snapshot when the set of skill directories grows at runtime (the
+// just-trusted-project-config case).
+func TestManager_Rediscover(t *testing.T) {
+	// Not parallel - exercises WithGlobalMirror, which touches the
+	// package-level cache.
+	prev := GetLatestStates()
+	t.Cleanup(func() { SetLatestStates(prev) })
+
+	empty := t.TempDir()
+	mgr := NewManager(nil, nil, nil, WithGlobalMirror())
+	t.Cleanup(mgr.Shutdown)
+
+	tmp := t.TempDir()
+	skillDir := filepath.Join(tmp, "trusted-skill")
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(skillDir, SkillFileName),
+		[]byte("---\nname: trusted-skill\ndescription: Added after trust.\n---\nx\n"),
+		0o644,
+	))
+
+	// Initially point at an empty dir: only builtin skills appear, so
+	// the not-yet-available skill must be absent.
+	mgr.Rediscover(DiscoveryConfig{SkillsPaths: []string{empty}})
+	require.False(t, hasSkill(mgr.AllSkills(), "trusted-skill"))
+
+	// Re-point at the dir that now holds a skill; the snapshot, the
+	// resolved paths, and the package-level mirror must all update.
+	mgr.Rediscover(DiscoveryConfig{SkillsPaths: []string{tmp}})
+
+	require.True(t, hasSkill(mgr.AllSkills(), "trusted-skill"), "Rediscover must pick up newly available skills")
+	require.True(t, hasSkill(mgr.ActiveSkills(), "trusted-skill"), "Rediscover must update active skills")
+	require.True(t, hasSkillStates(GetLatestStates(), "trusted-skill"), "Rediscover (with mirror) must update package globals")
+	require.ElementsMatch(t, []string{tmp}, mgr.ResolvedPaths())
+}
+
+func hasSkill(skills []*Skill, name string) bool {
+	for _, s := range skills {
+		if s.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func hasSkillStates(states []*SkillState, name string) bool {
+	for _, s := range states {
+		if s.Name == name {
+			return true
+		}
+	}
+	return false
+}

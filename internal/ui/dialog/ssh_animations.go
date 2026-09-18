@@ -136,7 +136,7 @@ func (s *SSHAnimations) renderHeader(contentWidth int) string {
 func (s *SSHAnimations) renderBody(contentWidth int) string {
 	return lipgloss.NewStyle().
 		Width(contentWidth).
-		Align(lipgloss.Center).
+		Align(lipgloss.Left).
 		Render("Crush detected that you are connected over SSH.\nAnimated spinners can look choppy or\nconsume extra bandwidth in some terminal sessions.\n\nWould you like to switch to a simpler animation mode?")
 }
 

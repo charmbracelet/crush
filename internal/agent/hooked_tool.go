@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent/tools"
@@ -14,27 +13,26 @@ import (
 )
 
 // hookedTool wraps a fantasy.AgentTool to run PreToolUse hooks before
-// delegating to the inner tool.
+// the tool runs and PostToolUse hooks after it returns.
 type hookedTool struct {
-	inner  fantasy.AgentTool
-	runner *hooks.Runner
+	inner      fantasy.AgentTool
+	dispatcher *hooks.Dispatcher
 }
 
-func newHookedTool(inner fantasy.AgentTool, runner *hooks.Runner) *hookedTool {
-	return &hookedTool{inner: inner, runner: runner}
+func newHookedTool(inner fantasy.AgentTool, dispatcher *hooks.Dispatcher) *hookedTool {
+	return &hookedTool{inner: inner, dispatcher: dispatcher}
 }
 
-// wrapToolsWithHooks returns a tool slice with each entry wrapped in a
-// hookedTool. Returns the original slice unchanged when runner is nil or
-// when isSubAgent is true — sub-agents never fire hooks, the top-level
-// invocation of the sub-agent tool itself is wrapped on the caller's side.
-func wrapToolsWithHooks(tools []fantasy.AgentTool, runner *hooks.Runner, isSubAgent bool) []fantasy.AgentTool {
-	if runner == nil || isSubAgent {
-		return tools
+// wrapToolsWithHooks returns the slice unchanged when there are no hooks or
+// when isSubAgent is set: a sub-agent's own tool calls never fire hooks (only
+// the top-level call that spawns it does).
+func wrapToolsWithHooks(allTools []fantasy.AgentTool, dispatcher *hooks.Dispatcher, isSubAgent bool) []fantasy.AgentTool {
+	if dispatcher == nil || isSubAgent {
+		return allTools
 	}
-	out := make([]fantasy.AgentTool, len(tools))
-	for i, tool := range tools {
-		out[i] = newHookedTool(tool, runner)
+	out := make([]fantasy.AgentTool, len(allTools))
+	for i, tool := range allTools {
+		out[i] = newHookedTool(tool, dispatcher)
 	}
 	return out
 }
@@ -53,50 +51,94 @@ func (h *hookedTool) SetProviderOptions(opts fantasy.ProviderOptions) {
 
 func (h *hookedTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 	sessionID := tools.GetSessionFromContext(ctx)
-	result, err := h.runner.Run(ctx, hooks.EventPreToolUse, sessionID, call.Name, call.Input)
-	if err != nil {
-		slog.Warn("Hook execution error, proceeding with tool call",
-			"tool", call.Name, "error", err)
-	}
+	pre := h.dispatcher.Run(ctx, hooks.EventPreToolUse, hooks.EventData{
+		SessionID: sessionID,
+		ToolName:  call.Name,
+		ToolInput: call.Input,
+	})
 
-	if result.Decision == hooks.DecisionDeny || result.Halt {
-		reason := fmt.Sprintf("Tool call blocked by hook. Reason: %s", result.Reason)
-		if result.Halt {
-			reason = fmt.Sprintf("Turn halted by hook. Reason: %s", result.Reason)
-		}
-		resp := fantasy.NewTextErrorResponse(reason)
-		// Halt ends the whole turn; a plain deny only blocks this tool
-		// call so the model can see the error and try something else.
-		resp.StopTurn = result.Halt
-		resp.Metadata = hookMetadataJSON(result)
-		return resp, nil
-	}
-
-	if result.UpdatedInput != "" {
-		call.Input = result.UpdatedInput
-	}
-
-	// An explicit allow from a hook pre-approves the permission prompt for
-	// this tool call. Deny is already handled above; silence falls through
-	// to the normal permission flow.
-	if result.Decision == hooks.DecisionAllow {
-		ctx = permission.WithHookApproval(ctx, call.ID)
+	ctx, call, blocked := gateCall(ctx, call, pre)
+	if blocked != nil {
+		return *blocked, nil
 	}
 
 	resp, err := h.inner.Run(ctx, call)
-	if err != nil {
-		return resp, err
+	post := h.reportPostToolUse(ctx, call, resp, err)
+
+	resp.Content = appendHookContext(resp.Content, pre.Context, post.Context)
+	resp.Metadata = mergeHookMetadata(resp.Metadata, pre)
+	resp.Metadata = mergeHookMetadata(resp.Metadata, post)
+	return resp, err
+}
+
+// gateCall applies a PreToolUse result before the call runs. A non-nil
+// response means the call must not run.
+func gateCall(
+	ctx context.Context,
+	call fantasy.ToolCall,
+	pre hooks.AggregateResult,
+) (context.Context, fantasy.ToolCall, *fantasy.ToolResponse) {
+	if pre.Decision == hooks.DecisionDeny || pre.Halt {
+		blocked := blockedResponse(pre)
+		return ctx, call, &blocked
 	}
 
-	if result.Context != "" {
-		if resp.Content != "" {
-			resp.Content += "\n"
+	if pre.UpdatedInput != "" {
+		call.Input = pre.UpdatedInput
+	}
+
+	// An allow pre-approves the permission prompt; silence falls through to the
+	// normal flow.
+	if pre.Decision == hooks.DecisionAllow {
+		ctx = permission.WithHookApproval(ctx, call.ID)
+	}
+	return ctx, call, nil
+}
+
+// reportPostToolUse tells PostToolUse hooks about a finished call, failures
+// included, so a consumer sees the tool settle either way.
+func (h *hookedTool) reportPostToolUse(
+	ctx context.Context,
+	call fantasy.ToolCall,
+	resp fantasy.ToolResponse,
+	callErr error,
+) hooks.AggregateResult {
+	observed := resp.Content
+	if callErr != nil {
+		observed = callErr.Error()
+	}
+	return h.dispatcher.Run(ctx, hooks.EventPostToolUse, hooks.EventData{
+		SessionID:    tools.GetSessionFromContext(ctx),
+		ToolName:     call.Name,
+		ToolInput:    call.Input,
+		ToolResponse: observed,
+	})
+}
+
+func appendHookContext(content string, contexts ...string) string {
+	for _, context := range contexts {
+		if context == "" {
+			continue
 		}
-		resp.Content += result.Context
+		if content != "" {
+			content += "\n"
+		}
+		content += context
 	}
+	return content
+}
 
-	resp.Metadata = mergeHookMetadata(resp.Metadata, result)
-	return resp, nil
+// blockedResponse marks a halt as turn-ending so the caller stops instead of
+// letting the model retry; a deny only fails this one call.
+func blockedResponse(result hooks.AggregateResult) fantasy.ToolResponse {
+	reason := fmt.Sprintf("Tool call blocked by hook. Reason: %s", result.Reason)
+	if result.Halt {
+		reason = fmt.Sprintf("Turn halted by hook. Reason: %s", result.Reason)
+	}
+	resp := fantasy.NewTextErrorResponse(reason)
+	resp.StopTurn = result.Halt
+	resp.Metadata = hookMetadataJSON(result)
+	return resp
 }
 
 // buildHookMetadata creates a HookMetadata from an AggregateResult.

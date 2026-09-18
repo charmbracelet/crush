@@ -2,6 +2,7 @@ package hooks
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"strings"
 	"sync"
@@ -220,6 +221,91 @@ func TestBuildPayload(t *testing.T) {
 	require.Contains(t, s, `"tool_name":"bash"`)
 	// tool_input should be an object, not a string.
 	require.Contains(t, s, `"tool_input":{"command":"ls"}`)
+	// Claude Code consumers read hook_event_name.
+	require.Contains(t, s, `"hook_event_name":"`+EventPreToolUse+`"`)
+}
+
+func TestBuildPayloadForLifecycleEvent(t *testing.T) {
+	t.Parallel()
+
+	payload := BuildPayloadFor(EventUserPromptSubmit, EventData{
+		SessionID: "sess-1",
+		CWD:       "/work",
+		Prompt:    "fix the tests",
+	})
+
+	var got Payload
+	require.NoError(t, json.Unmarshal(payload, &got))
+	require.Equal(t, EventUserPromptSubmit, got.Event)
+	require.Equal(t, EventUserPromptSubmit, got.HookEventName)
+	require.Equal(t, "sess-1", got.SessionID)
+	require.Equal(t, "/work", got.CWD)
+	require.Equal(t, "fix the tests", got.Prompt)
+	require.Empty(t, got.ToolName)
+	require.Empty(t, got.ToolResponse)
+}
+
+func TestBuildPayloadForPostToolUseCarriesResponse(t *testing.T) {
+	t.Parallel()
+
+	var got Payload
+	require.NoError(t, json.Unmarshal(BuildPayloadFor(EventPostToolUse, EventData{
+		SessionID:    "sess-1",
+		ToolName:     "bash",
+		ToolInput:    `{"command":"ls"}`,
+		ToolResponse: "file.go",
+	}), &got))
+
+	require.Equal(t, EventPostToolUse, got.HookEventName)
+	require.Equal(t, "bash", got.ToolName)
+	require.Equal(t, "file.go", got.ToolResponse)
+}
+
+func TestBuildEnvForPromptEvent(t *testing.T) {
+	t.Parallel()
+
+	var prompt string
+	for _, e := range BuildEnvFor(EventUserPromptSubmit, "/project", EventData{Prompt: "hello"}) {
+		if name, value, ok := strings.Cut(e, "="); ok && name == "CRUSH_PROMPT" {
+			prompt = value
+		}
+	}
+	require.Equal(t, "hello", prompt)
+}
+
+func TestDispatcherScopesEventsAndMatches(t *testing.T) {
+	t.Parallel()
+
+	dispatcher := NewDispatcher(map[string][]config.HookConfig{
+		EventStop: {{
+			Command: `echo '{"context":"stopped"}'`,
+		}},
+		EventPostToolUse: {{
+			Matcher: "^bash$",
+			Command: `echo '{"context":"bash only"}'`,
+		}},
+	}, t.TempDir(), t.TempDir())
+	require.NotNil(t, dispatcher)
+
+	require.True(t, dispatcher.Has(EventStop))
+	require.Equal(t, "stopped", dispatcher.Run(t.Context(), EventStop, EventData{}).Context)
+
+	require.False(t, dispatcher.Has(EventUserPromptSubmit))
+	require.Equal(t, 0, dispatcher.Run(t.Context(), EventUserPromptSubmit, EventData{}).HookCount)
+
+	require.Equal(t, 0, dispatcher.Run(t.Context(), EventPostToolUse, EventData{}).HookCount)
+	require.Equal(t, "bash only", dispatcher.Run(t.Context(), EventPostToolUse, EventData{ToolName: "bash"}).Context)
+	require.Equal(t, 0, dispatcher.Run(t.Context(), EventPostToolUse, EventData{ToolName: "view"}).HookCount)
+}
+
+func TestDispatcherNilIsUsable(t *testing.T) {
+	t.Parallel()
+
+	var dispatcher *Dispatcher
+	require.False(t, dispatcher.Has(EventStop))
+	require.Equal(t, DecisionNone, dispatcher.Run(t.Context(), EventStop, EventData{}).Decision)
+
+	require.Nil(t, NewDispatcher(nil, t.TempDir(), t.TempDir()))
 }
 
 func TestRunnerExitCode0Allow(t *testing.T) {
@@ -450,30 +536,55 @@ func TestValidateHooksEmptyCommand(t *testing.T) {
 func TestValidateHooksNormalizesEventNames(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name  string
-		input string
-	}{
-		{"canonical", "PreToolUse"},
-		{"lowercase", "pretooluse"},
-		{"snake_case", "pre_tool_use"},
-		{"upper_snake", "PRE_TOOL_USE"},
-		{"mixed_case", "preToolUse"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
+	t.Run("PreToolUse variants", func(t *testing.T) {
+		t.Parallel()
+		for _, input := range []string{"PreToolUse", "pretooluse", "pre_tool_use", "PRE_TOOL_USE", "preToolUse"} {
 			cfg := &config.Config{
 				Hooks: map[string][]config.HookConfig{
-					tt.input: {
-						{Command: "true"},
-					},
+					input: {{Command: "true"}},
 				},
 			}
 			require.NoError(t, cfg.ValidateHooks())
 			require.Len(t, cfg.Hooks[EventPreToolUse], 1)
-		})
-	}
+		}
+	})
+
+	t.Run("lifecycle event variants", func(t *testing.T) {
+		t.Parallel()
+		tests := []struct {
+			input string
+			want  string
+		}{
+			{"SessionStart", EventSessionStart},
+			{"session_start", EventSessionStart},
+			{"UserPromptSubmit", EventUserPromptSubmit},
+			{"user_prompt_submit", EventUserPromptSubmit},
+			{"PostToolUse", EventPostToolUse},
+			{"post_tool_use", EventPostToolUse},
+			{"Stop", EventStop},
+			{"stop", EventStop},
+		}
+		for _, tt := range tests {
+			cfg := &config.Config{
+				Hooks: map[string][]config.HookConfig{
+					tt.input: {{Command: "true"}},
+				},
+			}
+			require.NoError(t, cfg.ValidateHooks())
+			require.Len(t, cfg.Hooks[tt.want], 1, "input %q", tt.input)
+		}
+	})
+
+	t.Run("unknown event names are left alone", func(t *testing.T) {
+		t.Parallel()
+		cfg := &config.Config{
+			Hooks: map[string][]config.HookConfig{
+				"SomeFutureEvent": {{Command: "true"}},
+			},
+		}
+		require.NoError(t, cfg.ValidateHooks())
+		require.Len(t, cfg.Hooks["SomeFutureEvent"], 1)
+	})
 }
 
 func TestRunnerHookNameUsesDisplayName(t *testing.T) {

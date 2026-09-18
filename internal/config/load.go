@@ -366,6 +366,12 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 				}
 			}
 		default:
+			// An OAuth login is a credential too: providers signed in
+			// through OAuth (e.g. OpenAI with a ChatGPT account) are
+			// configured even when no API key is present.
+			if config.OAuthToken != nil {
+				break
+			}
 			// if the provider api or endpoint are missing we skip them
 			v, err := resolver.ResolveValue(p.APIKey)
 			if v == "" || err != nil {
@@ -452,11 +458,13 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 			c.Providers.Del(id)
 			continue
 		}
-		if providerConfig.APIKey == "" {
+		apiKey, err := resolver.ResolveValue(providerConfig.APIKey)
+		if apiKey == "" || err != nil {
 			slog.Warn("Provider is missing API key, this might be OK for local providers", "provider", id)
 		}
-		if providerConfig.BaseURL == "" {
-			slog.Warn("Skipping custom provider due to missing API endpoint", "provider", id)
+		baseURL, err := resolver.ResolveValue(providerConfig.BaseURL)
+		if baseURL == "" || err != nil {
+			slog.Warn("Skipping custom provider due to missing API endpoint", "provider", id, "error", err)
 			c.Providers.Del(id)
 			continue
 		}
@@ -478,17 +486,6 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 
 		if len(providerConfig.Models) == 0 {
 			slog.Warn("Skipping custom provider because the provider has no models", "provider", id)
-			c.Providers.Del(id)
-			continue
-		}
-
-		apiKey, err := resolver.ResolveValue(providerConfig.APIKey)
-		if apiKey == "" || err != nil {
-			slog.Warn("Provider is missing API key, this might be OK for local providers", "provider", id)
-		}
-		baseURL, err := resolver.ResolveValue(providerConfig.BaseURL)
-		if baseURL == "" || err != nil {
-			slog.Warn("Skipping custom provider due to missing API endpoint", "provider", id, "error", err)
 			c.Providers.Del(id)
 			continue
 		}

@@ -22,13 +22,16 @@ func swapInitGate(t *testing.T) chan struct{} {
 
 	initMu.Lock()
 	origStarted := initStarted
+	origArmedAt := initArmedAt
 	initStarted = true
+	initArmedAt = time.Now()
 	initMu.Unlock()
 
 	t.Cleanup(func() {
 		initDone = orig
 		initMu.Lock()
 		initStarted = origStarted
+		initArmedAt = origArmedAt
 		initMu.Unlock()
 	})
 	return initDone
@@ -78,6 +81,98 @@ func TestWaitForInit_ReturnsWhenNotArmed(t *testing.T) {
 	defer cancel()
 	require.NoError(t, WaitForInit(ctx),
 		"WaitForInit must return immediately when initialization was never armed")
+}
+
+// TestWaitForInitBudget_ProceedsWhenInitWedged is the regression test for the
+// "messages go into the void" hang: an MCP server that never answers its
+// handshake (e.g. a Python server that chokes on the SEP-2575 server/discover
+// probe without responding) keeps Initialize — and so the init gate — open for
+// its full connect timeout, up to minutes. Every turn gated on the open-ended
+// WaitForInit, so typing a message produced nothing: no persisted user
+// message, no spinner. The bounded wait must give up after its budget and let
+// the turn proceed without the wedged server.
+func TestWaitForInitBudget_ProceedsWhenInitWedged(t *testing.T) {
+	swapInitGate(t) // armed, never closed: initialization is wedged
+
+	start := time.Now()
+	require.NoError(t, WaitForInitBudget(context.Background(), 50*time.Millisecond),
+		"a wedged MCP initialization must not fail the turn once the budget elapses")
+	require.Less(t, time.Since(start), 5*time.Second,
+		"WaitForInitBudget must return promptly after its budget, not block until initialization finishes")
+}
+
+// TestWaitForInitBudget_ReturnsOnceInitCompletes pins that the budget is a
+// ceiling, not a delay: when initialization finishes within the budget the
+// wait ends immediately, preserving the #132 guarantee that a healthy
+// slow-to-start server's tools are registered before buildTools reads the
+// registry.
+func TestWaitForInitBudget_ReturnsOnceInitCompletes(t *testing.T) {
+	gate := swapInitGate(t)
+
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		close(gate)
+	}()
+
+	start := time.Now()
+	require.NoError(t, WaitForInitBudget(context.Background(), 30*time.Second))
+	require.Less(t, time.Since(start), 5*time.Second,
+		"WaitForInitBudget must return as soon as initialization completes, not sit out its budget")
+}
+
+// TestWaitForInitBudget_CallerCancellationStillAborts pins that the budget
+// only absorbs its own deadline: the caller's context being cancelled (the
+// user hit esc, the request ended) still aborts the turn with an error rather
+// than being mistaken for an elapsed budget and silently proceeding.
+func TestWaitForInitBudget_CallerCancellationStillAborts(t *testing.T) {
+	swapInitGate(t) // armed, never closed
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+
+	require.ErrorIs(t, WaitForInitBudget(ctx, 30*time.Second), context.Canceled,
+		"caller cancellation must surface as an error, not be swallowed like an elapsed budget")
+}
+
+// TestWaitForInitBudget_DeadlineIsAbsolute pins that the budget anchors at
+// ArmInit, not at each call: a turn's path holds several sequential waiters
+// (readyWg's tool build, then the turn's own gate), and per-call budgets would
+// stack into multiples of the budget while a server is wedged. A call arriving
+// after the armed-at deadline has already passed must return at once.
+func TestWaitForInitBudget_DeadlineIsAbsolute(t *testing.T) {
+	swapInitGate(t) // armed, never closed
+
+	// Rewind the arming time so the 30s budget is already spent.
+	initMu.Lock()
+	initArmedAt = time.Now().Add(-time.Minute)
+	initMu.Unlock()
+
+	start := time.Now()
+	require.NoError(t, WaitForInitBudget(context.Background(), 30*time.Second),
+		"a call after the armed-at deadline must proceed without waiting")
+	require.Less(t, time.Since(start), 5*time.Second,
+		"the budget must not restart per call once the armed-at deadline has passed")
+}
+
+// TestWaitForInitBudget_ReturnsWhenNotArmed mirrors WaitForInit's contract for
+// coordinators built outside app startup: nothing armed means nothing to wait
+// for.
+func TestWaitForInitBudget_ReturnsWhenNotArmed(t *testing.T) {
+	initMu.Lock()
+	orig := initStarted
+	initStarted = false
+	initMu.Unlock()
+	t.Cleanup(func() {
+		initMu.Lock()
+		initStarted = orig
+		initMu.Unlock()
+	})
+
+	require.NoError(t, WaitForInitBudget(context.Background(), 30*time.Second),
+		"WaitForInitBudget must return immediately when initialization was never armed")
 }
 
 // TestWaitForInit_ToolsVisibleAfterInit pins the visibility guarantee

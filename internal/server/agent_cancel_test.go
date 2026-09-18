@@ -36,6 +36,10 @@ type runCoordinator struct {
 	ranCount   atomic.Int32
 	entered    chan struct{} // closed exactly once when Run is first entered.
 	enteredOne sync.Once
+
+	setMainAgentErr  error
+	lastMainAgentSet atomic.Value
+	busy             bool
 }
 
 func newRunCoordinator(returnFn func(ctx context.Context) error) *runCoordinator {
@@ -69,7 +73,7 @@ func (s *runCoordinator) BeginAccepted(sessionID string) *agent.AcceptedRun {
 }
 func (s *runCoordinator) Cancel(string) {}
 func (s *runCoordinator) CancelAll()    {}
-func (s *runCoordinator) IsBusy() bool  { return false }
+func (s *runCoordinator) IsBusy() bool  { return s.busy }
 func (s *runCoordinator) IsSessionBusy(string) bool {
 	return false
 }
@@ -82,6 +86,10 @@ func (s *runCoordinator) Summarize(context.Context, string) error {
 func (s *runCoordinator) Model() agent.Model                            { return agent.Model{} }
 func (s *runCoordinator) UpdateModels(context.Context) error            { return nil }
 func (s *runCoordinator) GenerateTitle(context.Context, string, string) {}
+func (s *runCoordinator) SetMainAgent(agentName string) error {
+	s.lastMainAgentSet.Store(agentName)
+	return s.setMainAgentErr
+}
 
 func (s *runCoordinator) capturedCtx() context.Context {
 	s.mu.Lock()

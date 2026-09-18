@@ -66,7 +66,9 @@ func CharmtonePantera() Styles {
 		success:           charmtone.Julep,
 		successMoreSubtle: charmtone.Bok,
 		successMostSubtle: charmtone.Guac,
-
+		yolo:              charmtone.Zest,
+		plan:              charmtone.Charple,
+		planMoreSubtle:    charmtone.Hazy,
 		// ANSI 16-color palette for remapping raw terminal output
 		// (e.g. bang-mode shell commands) onto legible Charmtone colors.
 		ansiBlack:   charmtone.BBQ,
@@ -106,6 +108,11 @@ func CharmtonePantera() Styles {
 		Foreground(charmtone.Hazy)
 	s.Messages.ShellPromptBlurred = s.Messages.ShellPromptBlurred.
 		Foreground(charmtone.Hazy)
+
+	// The ◆ hypercredit symbol inside subdued text (e.g. savings
+	// suffixes) uses Mochi so it stays visible against its surroundings.
+	s.Messages.SubduedHypercreditIcon = s.Messages.SubduedHypercreditIcon.
+		Foreground(charmtone.Violet)
 
 	return s
 }

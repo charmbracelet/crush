@@ -186,7 +186,9 @@ option reset <list-key>    # clear a list option back to empty
 - **Attribution keys**: `attribution-trailer-style` (`none`, `co-authored-by`,
   `assisted-by`) and `attribution-generated-with` (boolean).
 - **UI settings**: `option ui compact BOOL`, `option ui diff unified|split`,
-  `option ui transparent BOOL`, `option ui scrollbar default|always|never`,
+  `option ui transparent BOOL`, `option ui mouse BOOL` (default `true`;
+  disable to let the terminal/tmux handle selection, copy/paste, and
+  scrolling), `option ui scrollbar default|always|never`,
   `option ui exit-banner default|compact|none`,
   `option ui completions-max-depth N`, `option ui completions-max-items N`.
 - **List keys** (singular, one value per call, repeatable): `context-path`,
@@ -348,6 +350,7 @@ The `$schema` property enables IDE autocomplete but is optional.
 | `permissions deny bash`              | `options.disabled_tools = ["bash"]`                    |
 | `option skill-path ./skills`         | `options.skills_paths = ["./skills"]`                  |
 | `option metrics false`               | `options.disable_metrics = true`                       |
+| `option request-timeout 300`          | `options.request_timeout = 300`                        |
 | `option attribution-trailer-style none` | `options.attribution.trailer_style = "none"`        |
 | `option attribution-generated-with false` | `options.attribution.generated_with = false`       |
 

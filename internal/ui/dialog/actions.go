@@ -66,6 +66,7 @@ type (
 		Name string
 	}
 	ActionToggleTransparentBackground struct{}
+	ActionToggleMouseSupport          struct{}
 	ActionInitializeProject           struct{}
 	ActionSummarize                   struct {
 		SessionID string
@@ -157,6 +158,23 @@ type (
 	// ActionOAuthErrored is sent when the device flow encounters an error.
 	ActionOAuthErrored struct {
 		Error error
+	}
+
+	// ActionCloseOAuth closes the OAuth dialog and runs the given cleanup
+	// command, cancelling any in-flight authorization. It exists so a
+	// dismissed dialog does not leave a poller or loopback listener
+	// running in the background.
+	ActionCloseOAuth struct {
+		Cmd tea.Cmd
+	}
+
+	// ActionSelectAuthMethod is sent when the user picks how to
+	// authenticate a provider that supports both OAuth and API keys.
+	ActionSelectAuthMethod struct {
+		Provider  catwalk.Provider
+		Model     config.SelectedModel
+		ModelType config.SelectedModelType
+		UseOAuth  bool
 	}
 )
 

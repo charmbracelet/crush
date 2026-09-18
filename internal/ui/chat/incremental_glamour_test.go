@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -850,4 +851,137 @@ func TestAssistantStreamingContent_ResetOnClearCache(t *testing.T) {
 		"clearCache must Reset the streaming-markdown cache")
 	require.Equal(t, "", item.streamingContent.stablePrefixRender)
 	require.Equal(t, 0, item.streamingContent.width)
+}
+
+// -----------------------------------------------------------------------
+// Relaxed boundary (#3162). Prose holding no blank line never satisfies
+// the blank-line predicate, so before relaxBoundaryAfter the cache never
+// advances and every flush re-renders the whole document. Past that much
+// unstable tail we cut at a plain newline instead — but only where the
+// same hazard checks pass.
+// -----------------------------------------------------------------------
+
+// longProse returns n lines of plain prose joined by single newlines,
+// so the document holds no blank-line separator anywhere.
+func longProse(n int) string {
+	lines := make([]string, n)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("Let me reconsider step %d: the constraint holds for every branch here.", i)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func TestStreamingMarkdown_RelaxedBoundaryAdvancesOnLongProse(t *testing.T) {
+	t.Parallel()
+
+	const width = 80
+	doc := longProse(400)
+	require.Greater(t, len(doc), relaxBoundaryAfter*2,
+		"sanity check: doc must outgrow the relax threshold")
+	require.Equal(t, -1, findSafeMarkdownBoundary(doc),
+		"sanity check: no blank lines, no safe boundary")
+
+	r := newTestRenderer(t, width)
+	var sm streamingMarkdown
+
+	var lastOut string
+	for _, p := range progressivePrefixes(doc, 40) {
+		if p == "" {
+			continue
+		}
+		lastOut = sm.Render(p, width, r)
+		require.NotEmpty(t, lastOut)
+		require.True(t, strings.HasPrefix(p, sm.stablePrefix),
+			"stable prefix must stay a literal prefix of the content")
+	}
+
+	require.NotEmpty(t, sm.stablePrefix,
+		"relaxed boundary must advance the cache once the tail outgrows the threshold")
+	visible := stripANSI(lastOut)
+	require.Contains(t, visible, "step 0:", "head of the trace must survive")
+	require.Contains(t, visible, "step 399:", "tail of the trace must survive")
+}
+
+func TestStreamingMarkdown_RelaxedBoundaryRespectsHazards(t *testing.T) {
+	t.Parallel()
+
+	const width = 80
+
+	tests := []struct {
+		name string
+		doc  string
+	}{
+		{
+			// Every line holds a pipe, so lineOpensConstruct rejects
+			// each candidate and the table is never split.
+			name: "long table",
+			doc: func() string {
+				rows := make([]string, 1200)
+				rows[0] = "| col a | col b | col c |"
+				rows[1] = "| ----- | ----- | ----- |"
+				for i := 2; i < len(rows); i++ {
+					rows[i] = fmt.Sprintf("| %d | %d | %d |", i, i*2, i*3)
+				}
+				return strings.Join(rows, "\n")
+			}(),
+		},
+		{
+			// An open fence makes the parity odd at every candidate
+			// inside it, so no cut lands in the code block.
+			name: "open code fence",
+			doc:  "```go\n" + longProse(400),
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			require.Greater(t, len(tc.doc), relaxBoundaryAfter*2)
+
+			r := newTestRenderer(t, width)
+			var sm streamingMarkdown
+			for _, p := range progressivePrefixes(tc.doc, 40) {
+				if p == "" {
+					continue
+				}
+				require.NotEmpty(t, sm.Render(p, width, r))
+			}
+			require.Equal(t, "", sm.stablePrefix,
+				"cache must not advance across an unsafe construct")
+		})
+	}
+}
+
+// TestStreamingMarkdown_LastLinesMatchesOutput pins the incrementally
+// tracked line count to the value a fresh countLines would produce.
+// renderThinking sizes its "N lines hidden" truncation hint from
+// LastLines, so any drift here shows up as a wrong number on screen.
+func TestStreamingMarkdown_LastLinesMatchesOutput(t *testing.T) {
+	t.Parallel()
+
+	const width = 80
+
+	docs := map[string]string{
+		"blank-line-free prose": longProse(400),
+		"paragraphs":            strings.Repeat("A paragraph of reasoning that runs on for a while.\n\n", 120),
+		"mixed":                 longProse(60) + "\n\n" + strings.Repeat("- a list item\n", 30) + "\n\n" + longProse(200),
+		"fenced":                "```go\nfunc main() {}\n```\n\n" + longProse(200),
+		"table":                 "| a | b |\n| - | - |\n| 1 | 2 |\n\n" + longProse(200),
+	}
+
+	for name, doc := range docs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			r := newTestRenderer(t, width)
+			var sm streamingMarkdown
+			for i, p := range progressivePrefixes(doc, 60) {
+				if p == "" {
+					continue
+				}
+				out := sm.Render(p, width, r)
+				require.Equalf(t, countLines(strings.TrimSpace(out)), sm.LastLines(),
+					"step %d (len=%d): tracked line count must match the output", i, len(p))
+			}
+		})
+	}
 }

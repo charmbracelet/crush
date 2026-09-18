@@ -28,6 +28,12 @@ type Status struct {
 	helpKm   help.KeyMap
 	msg      util.InfoMsg
 
+	// msgSeq names the message currently on screen. Each one schedules
+	// its own expiry, so the timer has to say which message it came for:
+	// an earlier one firing late would otherwise cut short whatever
+	// replaced it.
+	msgSeq uint64
+
 	// inputMode and yolo drive the mode badge shown before the help hints.
 	inputMode uiInputMode
 	yolo      bool
@@ -43,14 +49,23 @@ func NewStatus(com *common.Common, km help.KeyMap) *Status {
 	return s
 }
 
-// SetInfoMsg sets the status info message.
-func (s *Status) SetInfoMsg(msg util.InfoMsg) {
+// SetInfoMsg sets the status info message and returns the sequence that
+// identifies it, which the caller passes to the expiry it schedules.
+func (s *Status) SetInfoMsg(msg util.InfoMsg) uint64 {
 	s.msg = msg
+	s.msgSeq++
+	return s.msgSeq
 }
 
-// ClearInfoMsg clears the status info message.
-func (s *Status) ClearInfoMsg() {
+// ClearInfoMsg clears the status info message if seq still names the one on
+// screen, and reports whether it did. A timer belonging to a message that
+// has since been replaced is ignored.
+func (s *Status) ClearInfoMsg(seq uint64) bool {
+	if seq != s.msgSeq {
+		return false
+	}
 	s.msg = util.InfoMsg{}
+	return true
 }
 
 // SetMode sets the input mode and YOLO state used for the mode badge.
@@ -171,10 +186,10 @@ func (s *Status) Draw(scr uv.Screen, area uv.Rectangle) {
 	uv.NewStyledString(strings.Repeat(" ", indInset)+ind+info).Draw(scr, area)
 }
 
-// clearInfoMsgCmd returns a command that clears the info message after the
-// given TTL.
-func clearInfoMsgCmd(ttl time.Duration) tea.Cmd {
+// clearInfoMsgCmd returns a command that retires the message named by seq
+// after the given TTL.
+func clearInfoMsgCmd(seq uint64, ttl time.Duration) tea.Cmd {
 	return tea.Tick(ttl, func(time.Time) tea.Msg {
-		return util.ClearStatusMsg{}
+		return util.ClearStatusMsg{Seq: seq}
 	})
 }

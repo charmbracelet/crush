@@ -93,6 +93,11 @@ func TestAutoResolverCachesSession(t *testing.T) {
 	orig := autoSessionURL
 	autoSessionURL = server.URL
 	t.Cleanup(func() { autoSessionURL = orig })
+	stubCatalog(t, `{
+		"data": [
+			{"id": "gpt-4.1", "name": "GPT-4.1", "supported_endpoints": ["/chat/completions"]}
+		]
+	}`)
 
 	resolver := newAutoResolver(func() *oauth.Token { return &oauth.Token{AccessToken: "at"} })
 
@@ -113,6 +118,100 @@ func TestAutoResolverCachesSession(t *testing.T) {
 	require.Equal(t, int32(2), calls.Load(), "an expired session is refreshed")
 }
 
+// stubCatalog points the models endpoint at a test server serving the
+// given catalog payload.
+func stubCatalog(t *testing.T, payload string) {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(payload))
+	}))
+	t.Cleanup(server.Close)
+
+	orig := modelsEndpoint
+	modelsEndpoint = server.URL
+	t.Cleanup(func() { modelsEndpoint = orig })
+}
+
+func TestAutoResolverSkipsResponsesOnlyModels(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{
+			"available_models": ["gpt-5.4-mini", "gpt-4.1"],
+			"session_token": "sess-1",
+			"expires_at": 4102444800
+		}`))
+	}))
+	t.Cleanup(server.Close)
+
+	orig := autoSessionURL
+	autoSessionURL = server.URL
+	t.Cleanup(func() { autoSessionURL = orig })
+	stubCatalog(t, `{
+		"data": [
+			{"id": "gpt-5.4-mini", "name": "GPT-5.4 mini", "supported_endpoints": ["/responses"]},
+			{"id": "gpt-4.1", "name": "GPT-4.1", "supported_endpoints": ["/chat/completions", "/responses"]}
+		]
+	}`)
+
+	resolver := newAutoResolver(func() *oauth.Token { return &oauth.Token{AccessToken: "at"} })
+	model, _, err := resolver.resolve(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "gpt-4.1", model, "the Responses-only model is skipped")
+}
+
+func TestAutoResolverFallsBackWhenCatalogFails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{
+			"available_models": ["gpt-5.4-mini"],
+			"session_token": "sess-1",
+			"expires_at": 4102444800
+		}`))
+	}))
+	t.Cleanup(server.Close)
+
+	orig := autoSessionURL
+	autoSessionURL = server.URL
+	t.Cleanup(func() { autoSessionURL = orig })
+
+	catalogServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	t.Cleanup(catalogServer.Close)
+
+	origModels := modelsEndpoint
+	modelsEndpoint = catalogServer.URL
+	t.Cleanup(func() { modelsEndpoint = origModels })
+
+	resolver := newAutoResolver(func() *oauth.Token { return &oauth.Token{AccessToken: "at"} })
+	model, _, err := resolver.resolve(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "gpt-5.4-mini", model, "the first session model is used when the catalog is unreachable")
+}
+
+func TestAutoResolverNoChatCompletionsModel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{
+			"available_models": ["gpt-5.4-mini"],
+			"session_token": "sess-1",
+			"expires_at": 4102444800
+		}`))
+	}))
+	t.Cleanup(server.Close)
+
+	orig := autoSessionURL
+	autoSessionURL = server.URL
+	t.Cleanup(func() { autoSessionURL = orig })
+	stubCatalog(t, `{
+		"data": [
+			{"id": "gpt-5.4-mini", "name": "GPT-5.4 mini", "supported_endpoints": ["/responses"]}
+		]
+	}`)
+
+	resolver := newAutoResolver(func() *oauth.Token { return &oauth.Token{AccessToken: "at"} })
+	_, _, err := resolver.resolve(context.Background())
+	require.ErrorContains(t, err, "chat/completions")
+}
+
 func TestInitiatorTransportAutoModel(t *testing.T) {
 	sessionServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{
@@ -126,6 +225,11 @@ func TestInitiatorTransportAutoModel(t *testing.T) {
 	orig := autoSessionURL
 	autoSessionURL = sessionServer.URL
 	t.Cleanup(func() { autoSessionURL = orig })
+	stubCatalog(t, `{
+		"data": [
+			{"id": "gpt-4.1", "name": "GPT-4.1", "supported_endpoints": ["/chat/completions"]}
+		]
+	}`)
 
 	var gotModel, gotSessionToken string
 	chatServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -3,6 +3,7 @@ package copilot
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -10,21 +11,31 @@ import (
 	"regexp"
 
 	"github.com/charmbracelet/crush/internal/log"
+	"github.com/charmbracelet/crush/internal/oauth"
 )
 
-var assistantRolePattern = regexp.MustCompile(`"role"\s*:\s*"assistant"`)
+var (
+	assistantRolePattern = regexp.MustCompile(`"role"\s*:\s*"assistant"`)
+	autoModelPattern     = regexp.MustCompile(`"model"\s*:\s*"` + AutoModelID + `"`)
+)
 
 // NewClient creates a new HTTP client with a custom transport that adds the
-// X-Initiator header based on message history in the request body.
-func NewClient(isSubAgent, debug bool) *http.Client {
-	return &http.Client{
-		Transport: &initiatorTransport{debug: debug, isSubAgent: isSubAgent},
+// X-Initiator header based on message history in the request body. The
+// token getter feeds auto mode: requests whose model is the "auto"
+// pseudo-model are rewritten to a model the session grants and authorized
+// with the session token. A nil getter disables auto mode.
+func NewClient(isSubAgent, debug bool, token func() *oauth.Token) *http.Client {
+	t := &initiatorTransport{debug: debug, isSubAgent: isSubAgent}
+	if token != nil {
+		t.auto = newAutoResolver(token)
 	}
+	return &http.Client{Transport: t}
 }
 
 type initiatorTransport struct {
 	debug      bool
 	isSubAgent bool
+	auto       *autoResolver
 }
 
 func (t *initiatorTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -56,8 +67,19 @@ func (t *initiatorTransport) RoundTrip(req *http.Request) (*http.Response, error
 	}
 	defer req.Body.Close()
 
+	// The "auto" pseudo-model is not servable as-is: resolve it to a
+	// model the auto session grants and authorize the request with the
+	// session token, mirroring the official VS Code extension.
+	if t.auto != nil && autoModelPattern.Match(bodyBytes) {
+		bodyBytes, err = t.resolveAuto(req, bodyBytes)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	// Restore the original body using the preserved bytes.
 	req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+	req.ContentLength = int64(len(bodyBytes))
 
 	// Check for assistant messages using regex to handle whitespace
 	// variations in the JSON while avoiding full unmarshalling overhead.
@@ -71,6 +93,33 @@ func (t *initiatorTransport) RoundTrip(req *http.Request) (*http.Response, error
 	req.Header.Set(xInitiatorHeader, initiator)
 
 	return t.roundTrip(req)
+}
+
+// resolveAuto rewrites the request body's model field from "auto" to the
+// session-granted model and sets the session token header.
+func (t *initiatorTransport) resolveAuto(req *http.Request, body []byte) ([]byte, error) {
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, fmt.Errorf("failed to parse request body for auto mode: %w", err)
+	}
+	if payload["model"] != AutoModelID {
+		return body, nil
+	}
+
+	model, sessionToken, err := t.auto.resolve(req.Context())
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve Copilot auto model: %w", err)
+	}
+	slog.Debug("Resolved Copilot auto model", "model", model)
+
+	payload["model"] = model
+	req.Header.Set("Copilot-Session-Token", sessionToken)
+
+	rewritten, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to rewrite request body for auto mode: %w", err)
+	}
+	return rewritten, nil
 }
 
 func (t *initiatorTransport) roundTrip(req *http.Request) (*http.Response, error) {

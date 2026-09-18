@@ -73,6 +73,45 @@ func TestDiscoverModels_ExistingModelsWin(t *testing.T) {
 	require.Equal(t, "model-b", models[1].Name)
 }
 
+func TestDiscoverModels_PopulatesContextWindowFromResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// Mix of field shapes seen across OpenAI-compatible providers:
+		// llama-swap and 9Router use top-level context_length/context_window,
+		// 9Router nests contextWindow under capabilities, and max_completion_tokens
+		// carries the default max output tokens.
+		_, _ = w.Write([]byte(`{
+			"data": [
+				{"id": "m1", "object": "model", "context_length": 131072, "context_window": 131072},
+				{"id": "m2", "object": "model", "context_length": 1048576, "max_completion_tokens": 65536},
+				{"id": "m3", "object": "model", "capabilities": {"contextWindow": 200000}},
+				{"id": "m4", "object": "model"}
+			]
+		}`))
+	}))
+	defer server.Close()
+
+	cfg := Config{
+		ID:      "test",
+		BaseURL: server.URL + "/v1",
+		APIKey:  "test-key",
+	}
+
+	models, err := DiscoverModels(context.Background(), cfg, &mockResolver{})
+	require.NoError(t, err)
+	require.Len(t, models, 4)
+
+	require.Equal(t, int64(131072), models[0].ContextWindow)
+
+	require.Equal(t, int64(1048576), models[1].ContextWindow)
+	require.Equal(t, int64(65536), models[1].DefaultMaxTokens)
+
+	require.Equal(t, int64(200000), models[2].ContextWindow)
+
+	// Plain OpenAI-style entry without these fields stays at zero.
+	require.Equal(t, int64(0), models[3].ContextWindow)
+}
+
 func TestDiscoverModels_HTTPError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)

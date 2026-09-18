@@ -155,6 +155,24 @@ func (m *Manager) SubscribeEvents(ctx context.Context) <-chan pubsub.Event[Event
 	return m.broker.Subscribe(ctx)
 }
 
+// Rediscover re-runs skill discovery against a fresh DiscoveryConfig,
+// replacing the manager's cached snapshot. It updates the skill lists,
+// the resolved paths used for source labelling, and the discovery
+// states, then publishes the change so subscribers (and, with
+// WithGlobalMirror, the package globals read by the TUI) observe it.
+// Use this when the set of skill directories changes at runtime, e.g.
+// after trusting a project config that contributes skills_paths.
+func (m *Manager) Rediscover(cfg DiscoveryConfig) {
+	allSkills, activeSkills, states := DiscoverFromConfig(cfg)
+	m.mu.Lock()
+	m.allSkills = allSkills
+	m.activeSkills = activeSkills
+	m.resolvedPaths = cfg.ResolvePaths()
+	m.workingDir = cfg.WorkingDir
+	m.mu.Unlock()
+	m.PublishStates(states)
+}
+
 // Shutdown releases broker resources.
 func (m *Manager) Shutdown() {
 	if m.broker != nil {

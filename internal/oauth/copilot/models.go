@@ -79,10 +79,14 @@ func Models(ctx context.Context, token *oauth.Token) ([]catwalk.Model, error) {
 		return nil, fmt.Errorf("decode Copilot model catalog: %w", err)
 	}
 
-	models := make([]catwalk.Model, 0, len(payload.Models))
+	models := make([]catwalk.Model, 0, len(payload.Models)+1)
+	hasAuto := false
 	for _, m := range payload.Models {
 		if !m.Enabled {
 			continue
+		}
+		if m.ID == AutoModelID {
+			hasAuto = true
 		}
 		models = append(models, catwalk.Model{
 			ID:              m.ID,
@@ -93,8 +97,36 @@ func Models(ctx context.Context, token *oauth.Token) ([]catwalk.Model, error) {
 			SupportsImages:  m.Capabilities.Supports.Vision,
 		})
 	}
-	if len(models) == 0 {
+	if len(payload.Models) == 0 {
 		return nil, fmt.Errorf("the Copilot model catalog was empty")
+	}
+
+	// Auto is the only model some accounts, such as Copilot Free and
+	// student plans, may use: the server lists every model with the
+	// picker disabled. The catalog does not always list it, so offer
+	// it first when missing, mirroring the official VS Code
+	// extension's picker. The transport resolves it to a session-granted
+	// model at request time.
+	if !hasAuto {
+		// Inherit the default model's limits as a safe approximation;
+		// the session substitutes the concrete model anyway. When the
+		// picker is disabled for every model, fall back to the first
+		// catalog entry, whose capabilities are still populated.
+		reference := payload.Models[0]
+		for _, m := range payload.Models {
+			if m.Enabled {
+				reference = m
+				break
+			}
+		}
+		auto := catwalk.Model{
+			ID:             AutoModelID,
+			Name:           "Auto",
+			ContextWindow:  reference.Capabilities.Limits.ContextWindow,
+			CanReason:      reference.Capabilities.Supports.Thinking || len(reference.Capabilities.Supports.ReasoningEffort) > 0,
+			SupportsImages: reference.Capabilities.Supports.Vision,
+		}
+		models = append([]catwalk.Model{auto}, models...)
 	}
 	return models, nil
 }

@@ -142,7 +142,20 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	// blocks for the in-flight init instead of racing the goroutine and
 	// returning before any MCP tools register.
 	mcp.ArmInit()
-	go mcp.Initialize(ctx, app.Permissions, store)
+	// Config-disabled servers the user enabled via Toggle MCPs have a
+	// repository-scoped enabled override; force-start them so the toggle
+	// survives restarts. A read failure only means the override is skipped.
+	var forceStart []string
+	if enabled, err := app.Sessions.MCPServersEnabled(ctx); err != nil {
+		slog.Warn("Failed to list enabled MCP overrides; config-disabled servers stay disabled", "error", err)
+	} else {
+		for _, name := range enabled {
+			if m, ok := store.Config().MCP[name]; ok && m.Disabled {
+				forceStart = append(forceStart, name)
+			}
+		}
+	}
+	go mcp.Initialize(ctx, app.Permissions, store, forceStart...)
 
 	// Start herdr integration when running inside a herdr pane.
 	app.herdrClient = herdr.Init()

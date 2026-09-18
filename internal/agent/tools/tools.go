@@ -3,6 +3,7 @@ package tools
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"html/template"
 	"os/exec"
 	"testing"
@@ -67,6 +68,13 @@ func GetSupportsImagesFromContext(ctx context.Context) bool {
 // GetModelNameFromContext retrieves the model name from the context.
 func GetModelNameFromContext(ctx context.Context) string {
 	return getContextValue(ctx, ModelNameContextKey, "")
+}
+
+// UnsupportedMediaResponse is what a tool returns when it has media to show
+// but the model cannot take it. Every producer of media answers this the same
+// way, so the wording lives here rather than at each of them.
+func UnsupportedMediaResponse(modelName string) fantasy.ToolResponse {
+	return fantasy.NewTextErrorResponse(fmt.Sprintf("This model (%s) does not support image data.", modelName))
 }
 
 // NewPermissionDeniedResponse returns a tool response indicating the user

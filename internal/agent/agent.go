@@ -2213,7 +2213,17 @@ func (a *sessionAgent) convertToToolResult(result fantasy.ToolResultContent) mes
 		}
 	case fantasy.ToolResultContentTypeMedia:
 		if r, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentMedia](result.Result); ok {
-			if !stringext.IsValidBase64(r.Data) {
+			switch {
+			case r.Data == "":
+				// The tool ran and had no picture to show, which is not a
+				// failure; calling it one would invite a pointless retry.
+				slog.Warn(
+					"Tool returned media with no data, storing a note instead",
+					"tool", result.ToolName,
+					"tool_call_id", result.ToolCallID,
+				)
+				baseResult.Content = mcp.EmptyMediaNote
+			case !stringext.IsValidBase64(r.Data):
 				slog.Warn(
 					"Tool returned media with invalid base64 data, discarding image",
 					"tool", result.ToolName,
@@ -2221,7 +2231,7 @@ func (a *sessionAgent) convertToToolResult(result fantasy.ToolResultContent) mes
 				)
 				baseResult.Content = "Tool returned image data with invalid encoding"
 				baseResult.IsError = true
-			} else {
+			default:
 				content := r.Text
 				if content == "" {
 					content = fmt.Sprintf("Loaded %s content", r.MediaType)

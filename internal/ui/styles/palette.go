@@ -457,14 +457,14 @@ func resolveThemePalette(name string, visiting map[string]bool) (Palette, string
 				return Palette{}, "", err
 			}
 		}
-		if err := tf.Palette.Validate(); err != nil {
+		if err := tf.Validate(); err != nil {
 			return Palette{}, "", err
 		}
 		rootOpts, err := builtinThemeOpts(root)
 		if err != nil {
 			return Palette{}, "", err
 		}
-		return PaletteFromOpts(tf.Palette.ToQuickStyleOpts(base.ToQuickStyleOpts(rootOpts))), root, nil
+		return PaletteFromOpts(tf.ToQuickStyleOpts(base.ToQuickStyleOpts(rootOpts))), root, nil
 	}
 
 	optsFn, ok := builtinThemes[key]

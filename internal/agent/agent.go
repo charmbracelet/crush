@@ -2188,8 +2188,14 @@ func (a *sessionAgent) convertToToolResult(result fantasy.ToolResultContent) mes
 //
 // Solution: For these providers, we:
 //  1. Replace the media in the tool result with a text placeholder
-//  2. Inject a user message immediately after with the image as a file attachment
+//  2. Inject a user message with the image as a file attachment
 //  3. This maintains the tool execution flow while working around API limitations
+//
+// The synthetic user messages are emitted after the contiguous run of
+// tool messages ends: strict chat-completions validators require every
+// tool message answering an assistant's tool_calls to immediately
+// follow it, so a user message interleaved in the run invalidates every
+// tool result after it.
 //
 // Anthropic and Bedrock support images natively in tool results, so we skip
 // this workaround for them.
@@ -2197,7 +2203,7 @@ func (a *sessionAgent) convertToToolResult(result fantasy.ToolResultContent) mes
 // Example transformation:
 //
 //	BEFORE: [tool result: image data]
-//	AFTER:  [tool result: "Image loaded - see attached"], [user: image attachment]
+//	AFTER:  [tool result: "Image loaded - see attached"], [user: image attachment] (after the tool run)
 func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Message, largeModel Model) []fantasy.Message {
 	providerSupportsMedia := largeModel.ModelCfg.Provider == string(catwalk.InferenceProviderAnthropic) ||
 		largeModel.ModelCfg.Provider == string(catwalk.InferenceProviderBedrock) ||
@@ -2210,9 +2216,12 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 	supportsImages := largeModel.CatwalkCfg.SupportsImages
 
 	convertedMessages := make([]fantasy.Message, 0, len(messages))
+	var deferredMediaUsers []fantasy.Message
 
 	for _, msg := range messages {
 		if msg.Role != fantasy.MessageRoleTool {
+			convertedMessages = append(convertedMessages, deferredMediaUsers...)
+			deferredMediaUsers = nil
 			convertedMessages = append(convertedMessages, msg)
 			continue
 		}
@@ -2274,13 +2283,14 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 		})
 
 		if len(mediaFiles) > 0 {
-			convertedMessages = append(convertedMessages, fantasy.NewUserMessage(
+			deferredMediaUsers = append(deferredMediaUsers, fantasy.NewUserMessage(
 				"Here is the media content from the tool result:",
 				mediaFiles...,
 			))
 		}
 	}
 
+	convertedMessages = append(convertedMessages, deferredMediaUsers...)
 	return convertedMessages
 }
 

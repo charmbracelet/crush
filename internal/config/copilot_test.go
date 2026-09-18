@@ -33,6 +33,22 @@ func TestGetModelIncludesCopilotModels(t *testing.T) {
 	require.Nil(t, cfg.GetModel("copilot", "missing"))
 }
 
+func TestIsModelAvailableIncludesCopilotModels(t *testing.T) {
+	t.Parallel()
+
+	providers := csync.NewMap[string, ProviderConfig]()
+	providers.Set("copilot", ProviderConfig{
+		Models:        []catwalk.Model{{ID: "gpt-4.1"}},
+		CopilotModels: []catwalk.Model{{ID: "auto", Name: "Auto"}},
+	})
+	cfg := &Config{Providers: providers}
+
+	require.True(t, cfg.IsModelAvailable("copilot", "gpt-4.1"))
+	require.True(t, cfg.IsModelAvailable("copilot", "auto"))
+	require.False(t, cfg.IsModelAvailable("copilot", "missing"))
+	require.False(t, cfg.IsModelAvailable("missing-provider", "auto"))
+}
+
 // TestSetProviderAPIKeyCopilot proves a Copilot login fetches the model
 // catalog the subscription grants, and that entering an API key retires
 // the login together with its catalog.

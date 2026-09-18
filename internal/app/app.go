@@ -615,12 +615,23 @@ func (app *App) GetDefaultSmallModel(providerID string) config.SelectedModel {
 		return largeModelCfg
 	}
 
-	// A ChatGPT-authenticated OpenAI provider only serves the models the
-	// subscription grants, so the default small model must come from that
-	// catalog as well.
 	if providerID == string(catwalk.InferenceProviderOpenAI) && largeModelCfg.Provider == providerID {
 		if pc, ok := cfg.Providers.Get(providerID); ok && pc.OAuthToken != nil {
 			if small := chatGPTSmallModel(pc); small != nil {
+				return config.SelectedModel{
+					Provider:        providerID,
+					Model:           small.ID,
+					MaxTokens:       small.DefaultMaxTokens,
+					ReasoningEffort: small.DefaultReasoningEffort,
+				}
+			}
+			return largeModelCfg
+		}
+	}
+
+	if providerID == string(catwalk.InferenceProviderCopilot) && largeModelCfg.Provider == providerID {
+		if pc, ok := cfg.Providers.Get(providerID); ok && pc.OAuthToken != nil && len(pc.CopilotModels) > 0 {
+			if small := copilotSmallModel(pc); small != nil {
 				return config.SelectedModel{
 					Provider:        providerID,
 					Model:           small.ID,
@@ -653,6 +664,22 @@ func chatGPTSmallModel(pc config.ProviderConfig) *catwalk.Model {
 	}
 	if len(pc.ChatGPTModels) > 0 {
 		return &pc.ChatGPTModels[len(pc.ChatGPTModels)-1]
+	}
+	return nil
+}
+
+// copilotSmallModel picks a lightweight model from the Copilot catalog,
+// preferring a "mini" or "haiku" variant and falling back to the last
+// entry. Returns nil when the catalog is empty.
+func copilotSmallModel(pc config.ProviderConfig) *catwalk.Model {
+	for i := range pc.CopilotModels {
+		id := pc.CopilotModels[i].ID
+		if strings.Contains(id, "mini") || strings.Contains(id, "haiku") {
+			return &pc.CopilotModels[i]
+		}
+	}
+	if len(pc.CopilotModels) > 0 {
+		return &pc.CopilotModels[len(pc.CopilotModels)-1]
 	}
 	return nil
 }

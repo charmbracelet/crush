@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
@@ -76,13 +78,14 @@ func fetchAutoSession(ctx context.Context, token *oauth.Token) (*autoSession, er
 
 // autoResolver caches the auto session and resolves the pseudo-model to
 // a concrete one. The session token routes the request server-side, so
-// the first available model is enough; the server may still substitute a
-// better fit.
+// the server may still substitute a better fit than the model picked
+// here.
 type autoResolver struct {
 	token func() *oauth.Token
 
 	mu      sync.Mutex
 	session *autoSession
+	model   string
 }
 
 func newAutoResolver(token func() *oauth.Token) *autoResolver {
@@ -98,13 +101,49 @@ func (r *autoResolver) resolve(ctx context.Context) (string, string, error) {
 	// Refresh the session once used past its expiry, with the same
 	// five-minute safety margin the VS Code extension applies.
 	if r.session != nil && r.session.ExpiresAt*1000-time.Now().UnixMilli() > 5*60*1000 {
-		return r.session.AvailableModels[0], r.session.SessionToken, nil
+		return r.model, r.session.SessionToken, nil
 	}
 
-	session, err := fetchAutoSession(ctx, r.token())
+	token := r.token()
+	session, err := fetchAutoSession(ctx, token)
 	if err != nil {
 		return "", "", err
 	}
+	model := pickAutoModel(ctx, token, session.AvailableModels)
+	if model == "" {
+		return "", "", fmt.Errorf("the Copilot auto session granted no model accessible via the /chat/completions endpoint")
+	}
 	r.session = session
-	return session.AvailableModels[0], session.SessionToken, nil
+	r.model = model
+	return model, session.SessionToken, nil
+}
+
+// chatCompletionsEndpoint is the catalog's name for the Chat Completions
+// API, the endpoint the provider selects for the "auto" pseudo-model.
+const chatCompletionsEndpoint = "/chat/completions"
+
+// pickAutoModel chooses the first session-granted model the account can
+// serve over the Chat Completions API, skipping Responses-only models
+// such as gpt-5.4-mini, which the server rejects on /chat/completions.
+// This mirrors the VS Code extension, which intersects the session's
+// available models with the catalog's supported endpoints.
+func pickAutoModel(ctx context.Context, token *oauth.Token, available []string) string {
+	catalog, err := fetchCatalog(ctx, token)
+	if err != nil {
+		slog.Warn("Failed to fetch Copilot catalog for auto model selection, using the first session model", "error", err)
+		return available[0]
+	}
+	endpoints := make(map[string][]string, len(catalog))
+	for _, m := range catalog {
+		endpoints[m.ID] = m.SupportedEndpoints
+	}
+	for _, id := range available {
+		supported, ok := endpoints[id]
+		// Models absent from the catalog or without endpoint metadata
+		// predate supported_endpoints and default to Chat Completions.
+		if !ok || len(supported) == 0 || slices.Contains(supported, chatCompletionsEndpoint) {
+			return id
+		}
+	}
+	return ""
 }

@@ -886,13 +886,24 @@ func (c *Config) ValidateReasoningEffort(provider, modelID, effort string) error
 }
 
 // IsModelAvailable returns true if the provider is enabled and the model
-// exists in its catalog. Unlike GetModel, it rejects disabled providers.
+// exists in its catalog, including the credential-scoped OAuth catalogs
+// . Unlike GetModel, it rejects disabled providers.
 func (c *Config) IsModelAvailable(provider, model string) bool {
 	providerConfig, ok := c.Providers.Get(provider)
 	if !ok || providerConfig.Disable {
 		return false
 	}
 	for _, m := range providerConfig.Models {
+		if m.ID == model {
+			return true
+		}
+	}
+	for _, m := range providerConfig.ChatGPTModels {
+		if m.ID == model {
+			return true
+		}
+	}
+	for _, m := range providerConfig.CopilotModels {
 		if m.ID == model {
 			return true
 		}

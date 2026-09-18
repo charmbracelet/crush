@@ -959,9 +959,9 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 		return Model{}, Model{}, err
 	}
 
-	// Resolve through GetModel so credential-scoped catalogs (OAuth
-	// providers like Copilot keep subscription-granted models outside
-	// the static Models list) are usable for agent selection.
+	// The credential-scoped OAuth catalogs (ChatGPT, Copilot) hold models
+	// the static provider catalog does not, e.g. Copilot's "auto", so the
+	// lookup must go through GetModel rather than providerCfg.Models.
 	largeCatwalkModel := c.cfg.Config().GetModel(largeModelCfg.Provider, largeModelCfg.Model)
 	smallCatwalkModel := c.cfg.Config().GetModel(smallModelCfg.Provider, smallModelCfg.Model)
 

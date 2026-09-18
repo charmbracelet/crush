@@ -912,6 +912,21 @@ Or set the `CRUSH_DISABLE_PROVIDER_AUTO_UPDATE` environment variable:
 export CRUSH_DISABLE_PROVIDER_AUTO_UPDATE=1
 ```
 
+### Disabling the version update check
+
+By default, Crush checks GitHub for new releases in the background at
+startup. In offline or air-gapped environments this can be disabled too:
+
+```bash
+option update-check false
+```
+
+Or set the `CRUSH_DISABLE_UPDATE_CHECK` environment variable:
+
+```bash
+export CRUSH_DISABLE_UPDATE_CHECK=1
+```
+
 ### Manually updating providers
 
 Manually updating providers is possible with the `crush update-providers`

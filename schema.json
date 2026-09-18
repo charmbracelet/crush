@@ -534,6 +534,11 @@
           "description": "Disable sending metrics",
           "default": false
         },
+        "disable_update_check": {
+          "type": "boolean",
+          "description": "Disable checking GitHub for new Crush releases. Intended for offline or air-gapped environments.",
+          "default": false
+        },
         "initialize_as": {
           "type": "string",
           "description": "Name of the context file to create/update during project initialization",

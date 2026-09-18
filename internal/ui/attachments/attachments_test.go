@@ -1,6 +1,8 @@
 package attachments
 
 import (
+	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -8,19 +10,13 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 )
 
 func newTestRenderer() *Renderer {
 	sty := styles.CharmtonePantera()
-	return NewRenderer(
-		sty.Attachments.Normal,
-		sty.Attachments.Deleting,
-		sty.Attachments.Image,
-		sty.Attachments.Text,
-		sty.Attachments.Skill,
-		sty.Attachments.Remove,
-	)
+	return NewRenderer(sty.Attachments)
 }
 
 func TestRender_IncludesRemoveButton(t *testing.T) {
@@ -80,8 +76,8 @@ func TestRender_ShowRemoveFalseKeepsGapBetweenChips(t *testing.T) {
 		{FileName: "alpha.txt"},
 		{FileName: "beta.txt"},
 	}
-	bare := lipgloss.Width(r.textStyle.String()+r.normalStyle.Render("alpha.txt")) +
-		lipgloss.Width(r.textStyle.String()+r.normalStyle.Render("beta.txt"))
+	bare := lipgloss.Width(r.styles.Text.String()+r.styles.Normal.Render("alpha.txt")) +
+		lipgloss.Width(r.styles.Text.String()+r.styles.Normal.Render("beta.txt"))
 
 	got := lipgloss.Width(r.Render(atts, false, false, 200))
 	require.Equal(t, bare+2, got,
@@ -387,4 +383,213 @@ func TestHandleClick_EmptyListIgnored(t *testing.T) {
 
 	handled := m.HandleClick(5)
 	require.False(t, handled)
+}
+
+// overflowFixture is a set of attachments wide enough to overflow any
+// reasonable editor, so tests can exercise the hint path.
+func overflowFixture() []message.Attachment {
+	atts := make([]message.Attachment, 8)
+	for i := range atts {
+		atts[i] = message.Attachment{FileName: fmt.Sprintf("file-%d.txt", i)}
+	}
+	return atts
+}
+
+// chipWidth is the rendered width of a lone editor chip for the given
+// filename. Below this a row cannot fit even one chip, so it is the
+// natural floor for any "the row fits" assertion.
+func chipWidth(r *Renderer, name string) int {
+	return lipgloss.Width(r.Render([]message.Attachment{{FileName: name}}, false, true, 1000))
+}
+
+// hintCount returns the number the "N more…" hint claims, or 0 when the
+// row carries no hint. The trailing trim matters: a hint padded out to a
+// fixed width would otherwise read as no hint at all.
+func hintCount(out string) int {
+	plain := strings.TrimRight(ansi.Strip(out), " ")
+	if !strings.HasSuffix(plain, "more…") {
+		return 0
+	}
+	fields := strings.Fields(plain)
+	n, err := strconv.Atoi(fields[len(fields)-2])
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
+func TestRender_SingleVisibleChipHasNoMoreHint(t *testing.T) {
+	t.Parallel()
+
+	// Regression: the row used to budget every chip at the maximum filename
+	// width, so on a narrow editor a single short-named attachment was
+	// counted as overflowing its own row. The chip rendered fine and then
+	// "1 more…" was tacked on beside it, promising a file that was already
+	// on screen. Widths are now measured as chips are laid out.
+	r := newTestRenderer()
+	atts := []message.Attachment{{FileName: "paste_1.png"}}
+	for width := range 121 {
+		require.Zero(t, hintCount(r.Render(atts, false, true, width)),
+			"a lone attachment must never claim there are others (width %d)", width)
+	}
+}
+
+func TestRender_HintOnlyAppearsWhenSomethingIsHidden(t *testing.T) {
+	t.Parallel()
+
+	// The stronger form of the regression above: for any number of
+	// attachments at any width, a hint may appear only when chips were
+	// actually left out, and it must name exactly how many. A single-
+	// attachment test cannot catch a hint that is off by one for n >= 2.
+	r := newTestRenderer()
+	all := overflowFixture()
+	for n := 1; n <= len(all); n++ {
+		for width := range 161 {
+			out := r.Render(all[:n], false, true, width)
+			drawn := strings.Count(out, styles.TextIcon)
+			require.Positive(t, drawn, "some chip must always be drawn (n=%d width=%d)", n, width)
+			if got := hintCount(out); got != 0 {
+				require.Equal(t, n-drawn, got,
+					"hint must name exactly the chips left out (n=%d width=%d drew=%d)", n, width, drawn)
+			} else {
+				require.True(t, drawn == n || drawn == 1,
+					"a row may go without the hint only when everything fit, or when "+
+						"a single chip crowded the hint out (n=%d width=%d drew=%d)", n, width, drawn)
+			}
+		}
+	}
+}
+
+func TestRender_DrawnChipsAreTheLeadingRun(t *testing.T) {
+	t.Parallel()
+
+	// Overflow drops chips off the end, never the middle. Click handling
+	// indexes straight into the attachment slice with the chip's position,
+	// so a gap would remove the wrong file.
+	r := newTestRenderer()
+	atts := overflowFixture()
+	for width := range 161 {
+		out := ansi.Strip(r.Render(atts, false, true, width))
+		drawn := strings.Count(out, styles.TextIcon)
+		for i := range drawn {
+			require.Contains(t, out, fmt.Sprintf("file-%d.txt", i),
+				"chip %d must be present when %d chips were drawn (width %d)", i, drawn, width)
+		}
+		for i := drawn; i < len(atts); i++ {
+			require.NotContains(t, out, fmt.Sprintf("file-%d.txt", i),
+				"chip %d must be absent when only %d chips were drawn (width %d)", i, drawn, width)
+		}
+	}
+}
+
+func TestRender_MoreHintUsesTheThemeStyle(t *testing.T) {
+	t.Parallel()
+
+	// The hint used to be rendered with a bare lipgloss.Style, so it came
+	// out in the terminal's default foreground next to the themed chips.
+	// The expectation is built from the theme rather than from the
+	// renderer, so this cannot pass by agreeing with itself.
+	r := newTestRenderer()
+	atts := overflowFixture()
+	out := r.Render(atts, false, true, 60)
+
+	n := hintCount(out)
+	require.Positive(t, n, "width 60 must overflow for this to mean anything")
+	want := styles.CharmtonePantera().Attachments.More.Render(fmt.Sprintf("%d more…", n))
+	require.Contains(t, want, "\x1b[", "the theme's hint style must actually set a color")
+	require.Contains(t, out, want, "the row must render the hint through the theme style")
+}
+
+func TestRender_RowNeverSpillsOnceOneChipFits(t *testing.T) {
+	t.Parallel()
+
+	// Room is reserved for the hint before a chip is committed, so a row
+	// wide enough for a single chip never runs past the width it was
+	// given. Narrower than that, the first chip is drawn anyway and the
+	// row is exactly that one chip wide.
+	r := newTestRenderer()
+	atts := overflowFixture()
+	floor := chipWidth(r, "file-0.txt")
+	for width := range 161 {
+		got := lipgloss.Width(r.Render(atts, false, true, width))
+		if width < floor {
+			require.Equal(t, floor, got,
+				"too narrow for a chip, so the row is exactly one chip (width %d)", width)
+			continue
+		}
+		require.LessOrEqual(t, got, width,
+			"the attachment row must not spill past the editor (width %d)", width)
+	}
+}
+
+func TestRender_OverflowHoldsInEveryMode(t *testing.T) {
+	t.Parallel()
+
+	// Delete-mode and posted messages share this layout code, so the hint
+	// and the width budget have to hold for them too.
+	for _, tc := range []struct {
+		name                 string
+		deleting, showRemove bool
+	}{
+		{"editor", false, true},
+		{"delete mode", true, true},
+		{"posted message", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			// Render mutates the renderer's hit-test bounds, so each
+			// parallel subtest needs its own.
+			r := newTestRenderer()
+			atts := overflowFixture()
+			out := r.Render(atts, tc.deleting, tc.showRemove, 60)
+			drawn := strings.Count(out, styles.TextIcon)
+			require.Less(t, drawn, len(atts), "width 60 must overflow for this to mean anything")
+			require.Equal(t, len(atts)-drawn, hintCount(out))
+			require.LessOrEqual(t, lipgloss.Width(out), 60)
+		})
+	}
+}
+
+func TestHitTestRemove_OverflowBoundsOnlyCoverDrawnChips(t *testing.T) {
+	t.Parallel()
+
+	// Callers index straight into the attachment slice with whatever
+	// HitTestRemove returns, so a bound recorded for a chip that was never
+	// drawn would delete the wrong file.
+	r := newTestRenderer()
+	atts := overflowFixture()
+	out := r.Render(atts, false, true, 60)
+	drawn := strings.Count(out, styles.TextIcon)
+	require.Less(t, drawn, len(atts), "width 60 must overflow for this to mean anything")
+	require.Len(t, r.bounds, drawn, "only drawn chips may carry a clickable remove button")
+
+	for x := range lipgloss.Width(out) {
+		require.Less(t, r.HitTestRemove(atts, x), drawn,
+			"column %d hit-tests to a chip that was never drawn", x)
+	}
+}
+
+func TestRender_NonPositiveWidthDrawsOneChip(t *testing.T) {
+	t.Parallel()
+
+	// Layout can hand down a zero or negative width mid-resize. That must
+	// not panic or silently render an empty row. Nothing fits beside the
+	// first chip at these widths, so the hint gives way to the filename.
+	r := newTestRenderer()
+	atts := []message.Attachment{{FileName: "a.txt"}, {FileName: "b.txt"}}
+	for _, width := range []int{-5, 0, 1} {
+		out := r.Render(atts, false, true, width)
+		require.Equal(t, 1, strings.Count(out, styles.TextIcon),
+			"width %d should still show the first chip", width)
+		require.Zero(t, hintCount(out),
+			"width %d has no room for a hint beside the chip", width)
+	}
+}
+
+func TestRender_NoAttachmentsRendersNothing(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRenderer()
+	require.Empty(t, r.Render(nil, false, true, 80))
+	require.Empty(t, r.bounds)
 }

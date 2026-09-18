@@ -1117,6 +1117,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	// keeps a transparent gap between adjacent chips.
 	s.Attachments.Remove = base.Padding(0, 1).MarginRight(1).Background(o.bgLessVisible).Foreground(o.fgSubtle).SetString(RemoveIcon)
 	s.Attachments.Deleting = base.Padding(0, 1).MarginRight(1).Bold(true).Background(o.destructive).Foreground(o.fgBase)
+	s.Attachments.More = base.Foreground(o.fgSubtle)
 
 	// Pills styles
 	s.Pills.Base = base.Padding(0, 1)

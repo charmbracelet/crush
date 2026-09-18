@@ -50,7 +50,7 @@ func NewLSPRestartTool(lspManager *lsp.Manager) fantasy.AgentTool {
 			var wg sync.WaitGroup
 			for name, client := range clientsToRestart {
 				wg.Go(func() {
-					if err := client.Restart(); err != nil {
+					if err := client.Restart(ctx); err != nil {
 						slog.Error("Failed to restart LSP client", "name", name, "error", err)
 						mu.Lock()
 						failed = append(failed, name)

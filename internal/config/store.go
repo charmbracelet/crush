@@ -274,7 +274,7 @@ func (s *ConfigStore) LoadedPaths() []string {
 // The returned release function drops both locks. Callers must call it
 // as soon as the file access is complete — no I/O should be performed
 // while the lock is held.
-func (s *ConfigStore) lockConfig(scope Scope) (func(), error) {
+func (s *ConfigStore) lockConfig(ctx context.Context, scope Scope) (func(), error) {
 	s.mu.Lock()
 	path, err := s.configPath(scope)
 	if err != nil {
@@ -285,9 +285,9 @@ func (s *ConfigStore) lockConfig(scope Scope) (func(), error) {
 		s.mu.Unlock()
 		return nil, fmt.Errorf("create config directory: %w", err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), configLockDeadline)
+	lockCtx, cancel := context.WithTimeout(ctx, configLockDeadline)
 	defer cancel()
-	release, err := lock.File(ctx, path+".lock")
+	release, err := lock.File(lockCtx, path+".lock")
 	if err != nil {
 		s.mu.Unlock()
 		return nil, fmt.Errorf("acquire config lock: %w", err)
@@ -302,8 +302,8 @@ func (s *ConfigStore) lockConfig(scope Scope) (func(), error) {
 // config file mutations. The fn callback receives the current file
 // contents (raw bytes, or {} if the file is missing) and must return the
 // new contents. fn must be pure — no I/O, no network calls.
-func (s *ConfigStore) atomicWrite(scope Scope, fn func(current []byte) ([]byte, error)) error {
-	unlock, err := s.lockConfig(scope)
+func (s *ConfigStore) atomicWrite(ctx context.Context, scope Scope, fn func(current []byte) ([]byte, error)) error {
+	unlock, err := s.lockConfig(ctx, scope)
 	if err != nil {
 		return err
 	}
@@ -361,8 +361,8 @@ func (s *ConfigStore) HasConfigField(scope Scope, key string) bool {
 // SetConfigField sets a key/value pair in the config file for the given scope.
 // After a successful write, it automatically reloads config to keep in-memory
 // state fresh.
-func (s *ConfigStore) SetConfigField(scope Scope, key string, value any) error {
-	return s.SetConfigFields(scope, map[string]any{key: value})
+func (s *ConfigStore) SetConfigField(ctx context.Context, scope Scope, key string, value any) error {
+	return s.SetConfigFields(ctx, scope, map[string]any{key: value})
 }
 
 // SetConfigFields sets multiple key/value pairs in the config file for the
@@ -374,14 +374,14 @@ func (s *ConfigStore) SetConfigField(scope Scope, key string, value any) error {
 //
 // The write is protected by an in-process mutex and a cross-process flock
 // to prevent races between concurrent writers in different processes.
-func (s *ConfigStore) SetConfigFields(scope Scope, kv map[string]any) error {
-	if err := s.writeConfigFields(scope, kv); err != nil {
+func (s *ConfigStore) SetConfigFields(ctx context.Context, scope Scope, kv map[string]any) error {
+	if err := s.writeConfigFields(ctx, scope, kv); err != nil {
 		return err
 	}
-	// Auto-reload to keep in-memory state fresh after config edits.
-	// We use context.Background() since this is an internal operation that
-	// shouldn't be cancelled by user context.
-	if err := s.autoReload(context.Background()); err != nil {
+	// Auto-reload uses a detached context since the write has already
+	// landed on disk and the reload must not be cancelled by a caller's
+	// request scope ending.
+	if err := s.autoReload(context.WithoutCancel(ctx)); err != nil {
 		// Log warning but don't fail the write - disk is already updated.
 		slog.Warn("Config file updated but failed to reload in-memory state", "error", err)
 	}
@@ -394,7 +394,7 @@ func (s *ConfigStore) SetConfigFields(scope Scope, kv map[string]any) error {
 // already published an updated clone and capture the snapshot themselves
 // (update). Both of those run under writeMu, which is what keeps the
 // snapshot map free of concurrent writers.
-func (s *ConfigStore) writeConfigFields(scope Scope, kv map[string]any) error {
+func (s *ConfigStore) writeConfigFields(ctx context.Context, scope Scope, kv map[string]any) error {
 	// Sort keys for deterministic output regardless of map iteration
 	// order. This also ensures consistent results when callers pass
 	// overlapping JSONPath keys (e.g. "a" and "a.b").
@@ -404,7 +404,7 @@ func (s *ConfigStore) writeConfigFields(scope Scope, kv map[string]any) error {
 	}
 	slices.Sort(keys)
 
-	return s.atomicWrite(scope, func(data []byte) ([]byte, error) {
+	return s.atomicWrite(ctx, scope, func(data []byte) ([]byte, error) {
 		v := string(data)
 		for _, key := range keys {
 			var sErr error
@@ -434,21 +434,21 @@ func (s *ConfigStore) mutateInMemory(mutate func(*Config)) {
 // mutate edits the clone and returns the JSON-path fields to write to disk;
 // because the clone already reflects the change, no reload is needed.
 // Returning an empty map publishes the clone without a disk write.
-func (s *ConfigStore) update(scope Scope, mutate func(*Config) map[string]any) error {
+func (s *ConfigStore) update(ctx context.Context, scope Scope, mutate func(*Config) map[string]any) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
-	return s.updateLocked(scope, mutate)
+	return s.updateLocked(ctx, scope, mutate)
 }
 
 // updateLocked is the lock-free core of update. Caller must hold writeMu.
-func (s *ConfigStore) updateLocked(scope Scope, mutate func(*Config) map[string]any) error {
+func (s *ConfigStore) updateLocked(ctx context.Context, scope Scope, mutate func(*Config) map[string]any) error {
 	nc := s.Config().cloneForWrite()
 	fields := mutate(nc)
 	s.setConfig(nc)
 	if len(fields) == 0 {
 		return nil
 	}
-	if err := s.writeConfigFields(scope, fields); err != nil {
+	if err := s.writeConfigFields(ctx, scope, fields); err != nil {
 		return err
 	}
 	// Refresh the staleness snapshot so the file watcher does not treat
@@ -494,8 +494,8 @@ func (s *ConfigStore) pinPreferredModelLocked(modelType SelectedModelType, model
 // state fresh.
 //
 // The write is protected by an in-process mutex and a cross-process flock.
-func (s *ConfigStore) RemoveConfigField(scope Scope, key string) error {
-	err := s.atomicWrite(scope, func(data []byte) ([]byte, error) {
+func (s *ConfigStore) RemoveConfigField(ctx context.Context, scope Scope, key string) error {
+	err := s.atomicWrite(ctx, scope, func(data []byte) ([]byte, error) {
 		v, sErr := sjson.Delete(string(data), key)
 		if sErr != nil {
 			return nil, fmt.Errorf("failed to delete config field %s: %w", key, sErr)
@@ -506,7 +506,7 @@ func (s *ConfigStore) RemoveConfigField(scope Scope, key string) error {
 		return err
 	}
 
-	if err := s.autoReload(context.Background()); err != nil {
+	if err := s.autoReload(context.WithoutCancel(ctx)); err != nil {
 		slog.Warn("Config file updated but failed to reload in-memory state", "error", err)
 	}
 
@@ -521,8 +521,8 @@ func (s *ConfigStore) RemoveConfigField(scope Scope, key string) error {
 // provider catalog and agents on every model switch and dominate selection
 // latency); agents are refreshed separately by the caller (see
 // UpdateAgentModel).
-func (s *ConfigStore) UpdatePreferredModel(scope Scope, modelType SelectedModelType, model SelectedModel) error {
-	return s.update(scope, func(c *Config) map[string]any {
+func (s *ConfigStore) UpdatePreferredModel(ctx context.Context, scope Scope, modelType SelectedModelType, model SelectedModel) error {
+	return s.update(ctx, scope, func(c *Config) map[string]any {
 		return s.updatePreferredModelFields(c, modelType, model)
 	})
 }
@@ -551,16 +551,16 @@ func (s *ConfigStore) updatePreferredModelFields(c *Config, modelType SelectedMo
 }
 
 // SetCompactMode sets the compact mode setting and persists it.
-func (s *ConfigStore) SetCompactMode(scope Scope, enabled bool) error {
-	return s.update(scope, func(c *Config) map[string]any {
+func (s *ConfigStore) SetCompactMode(ctx context.Context, scope Scope, enabled bool) error {
+	return s.update(ctx, scope, func(c *Config) map[string]any {
 		c.ensureTUI().CompactMode = enabled
 		return map[string]any{"options.tui.compact_mode": enabled}
 	})
 }
 
 // SetTransparentBackground sets the transparent background setting and persists it.
-func (s *ConfigStore) SetTransparentBackground(scope Scope, enabled bool) error {
-	return s.update(scope, func(c *Config) map[string]any {
+func (s *ConfigStore) SetTransparentBackground(ctx context.Context, scope Scope, enabled bool) error {
+	return s.update(ctx, scope, func(c *Config) map[string]any {
 		c.ensureTUI().Transparent = &enabled
 		return map[string]any{"options.tui.transparent": enabled}
 	})
@@ -570,7 +570,7 @@ func (s *ConfigStore) SetTransparentBackground(scope Scope, enabled bool) error 
 // The OpenAI provider holds exactly one credential: storing a ChatGPT
 // token removes a previously entered API key, and storing an API key
 // removes a previous ChatGPT login.
-func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey any) error {
+func (s *ConfigStore) SetProviderAPIKey(ctx context.Context, scope Scope, providerID string, apiKey any) error {
 	var providerConfig ProviderConfig
 	var exists bool
 	var setKeyOrToken func()
@@ -578,7 +578,7 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 
 	switch v := apiKey.(type) {
 	case string:
-		if err := s.SetConfigField(scope, fmt.Sprintf("providers.%s.api_key", providerID), v); err != nil {
+		if err := s.SetConfigField(ctx, scope, fmt.Sprintf("providers.%s.api_key", providerID), v); err != nil {
 			return fmt.Errorf("failed to save api key to config file: %w", err)
 		}
 		setKeyOrToken = func() {
@@ -593,10 +593,10 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 		if providerID == string(catwalk.InferenceProviderOpenAI) {
 			// Either OAuth or an API key, never both: the new key
 			// leaves nothing usable on the ChatGPT side behind.
-			if err := s.RemoveConfigField(scope, fmt.Sprintf("providers.%s.oauth", providerID)); err != nil {
+			if err := s.RemoveConfigField(ctx, scope, fmt.Sprintf("providers.%s.oauth", providerID)); err != nil {
 				return err
 			}
-			if err := s.RemoveConfigField(scope, fmt.Sprintf("providers.%s.chatgpt_models", providerID)); err != nil {
+			if err := s.RemoveConfigField(ctx, scope, fmt.Sprintf("providers.%s.chatgpt_models", providerID)); err != nil {
 				return err
 			}
 		}
@@ -611,15 +611,15 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 		if providerID != string(catwalk.InferenceProviderOpenAI) {
 			fields[fmt.Sprintf("providers.%s.api_key", providerID)] = v.AccessToken
 		}
-		if err := s.withRefreshLock(providerID, func() error {
-			return s.SetConfigFields(scope, fields)
+		if err := s.withRefreshLock(ctx, providerID, func() error {
+			return s.SetConfigFields(ctx, scope, fields)
 		}); err != nil {
 			return err
 		}
 		if providerID == string(catwalk.InferenceProviderOpenAI) {
 			// Either OAuth or an API key, never both: the login retires
 			// any key that came before it.
-			if err := s.RemoveConfigField(scope, fmt.Sprintf("providers.%s.api_key", providerID)); err != nil {
+			if err := s.RemoveConfigField(ctx, scope, fmt.Sprintf("providers.%s.api_key", providerID)); err != nil {
 				return err
 			}
 		}
@@ -672,7 +672,7 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 	// After authenticating with Hyper, re-fetch the provider catalog so
 	// the latest models are available without restarting.
 	if providerID == "hyper" {
-		if refetchErr := s.RefetchHyperProvider(context.Background()); refetchErr != nil {
+		if refetchErr := s.RefetchHyperProvider(ctx); refetchErr != nil {
 			slog.Warn("Failed to refetch Hyper provider after auth", "error", refetchErr)
 		}
 	}
@@ -680,7 +680,7 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 	// catalog the subscription grants and persist it so the models
 	// dialog can offer it beside the API-key catalog.
 	if providerID == string(catwalk.InferenceProviderOpenAI) && isToken {
-		s.refetchOpenAIModels(context.Background(), scope)
+		s.refetchOpenAIModels(context.WithoutCancel(ctx), scope)
 	}
 	return nil
 }
@@ -703,7 +703,7 @@ func (s *ConfigStore) refetchOpenAIModels(ctx context.Context, scope Scope) {
 		slog.Warn("Failed to fetch ChatGPT model catalog after auth", "error", err)
 		return
 	}
-	if err := s.update(scope, func(c *Config) map[string]any {
+	if err := s.update(ctx, scope, func(c *Config) map[string]any {
 		p, ok := c.Providers.Get(string(catwalk.InferenceProviderOpenAI))
 		if !ok {
 			return nil
@@ -833,7 +833,7 @@ func (s *ConfigStore) refreshOAuthTokenLocked(ctx context.Context, scope Scope, 
 		return err
 	}
 
-	if err := s.SetConfigFields(scope, tokenFields(providerID, refreshedToken)); err != nil {
+	if err := s.SetConfigFields(ctx, scope, tokenFields(providerID, refreshedToken)); err != nil {
 		return fmt.Errorf("failed to persist refreshed token: %w", err)
 	}
 	return nil
@@ -985,8 +985,8 @@ func (s *ConfigStore) exchange(ctx context.Context, providerID, refreshToken str
 // token exchange. Acquisition is best effort: when the lock cannot be
 // taken in time, fn runs anyway rather than blocking a write the user is
 // waiting on.
-func (s *ConfigStore) withRefreshLock(providerID string, fn func() error) error {
-	ctx, cancel := context.WithTimeout(context.Background(), credentialWriteLockDeadline)
+func (s *ConfigStore) withRefreshLock(ctx context.Context, providerID string, fn func() error) error {
+	ctx, cancel := context.WithTimeout(ctx, credentialWriteLockDeadline)
 	defer cancel()
 	release, err := lock.File(ctx, s.refreshLockPath(providerID))
 	if err != nil {
@@ -1104,7 +1104,7 @@ func NewTestStore(cfg *Config, loadedPaths ...string) *ConfigStore {
 }
 
 // ImportCopilot attempts to import a GitHub Copilot token from disk.
-func (s *ConfigStore) ImportCopilot() (*oauth.Token, bool) {
+func (s *ConfigStore) ImportCopilot(ctx context.Context) (*oauth.Token, bool) {
 	if s.HasConfigField(ScopeGlobal, "providers.copilot.api_key") || s.HasConfigField(ScopeGlobal, "providers.copilot.oauth") {
 		return nil, false
 	}
@@ -1115,17 +1115,17 @@ func (s *ConfigStore) ImportCopilot() (*oauth.Token, bool) {
 	}
 
 	slog.Info("Found existing GitHub Copilot token on disk. Authenticating...")
-	token, err := copilot.RefreshToken(context.TODO(), diskToken)
+	token, err := copilot.RefreshToken(ctx, diskToken)
 	if err != nil {
 		slog.Error("Unable to import GitHub Copilot token", "error", err)
 		return nil, false
 	}
 
-	if err := s.SetProviderAPIKey(ScopeGlobal, string(catwalk.InferenceProviderCopilot), token); err != nil {
+	if err := s.SetProviderAPIKey(ctx, ScopeGlobal, string(catwalk.InferenceProviderCopilot), token); err != nil {
 		return token, false
 	}
 
-	if err := s.SetConfigFields(ScopeGlobal, map[string]any{
+	if err := s.SetConfigFields(ctx, ScopeGlobal, map[string]any{
 		"providers.copilot.api_key": token.AccessToken,
 		"providers.copilot.oauth":   token,
 	}); err != nil {
@@ -1287,7 +1287,7 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 	// Migrate deprecated disable_notifications before reloading config.
 	migrateDisableNotifications()
 
-	configPaths := lookupConfigs(s.workingDir)
+	configPaths := lookupConfigs(ctx, s.workingDir)
 	cfg, loadedPaths, err := loadFromConfigPaths(ctx, configPaths)
 	if err != nil {
 		return fmt.Errorf("failed to reload config: %w", err)
@@ -1298,7 +1298,7 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 	if cur := s.Config(); cur != nil && cur.Options != nil {
 		dataDir = cur.Options.DataDirectory
 	}
-	cfg.setDefaults(s.workingDir, dataDir)
+	cfg.setDefaults(ctx, s.workingDir, dataDir)
 
 	// Merge workspace config if present
 	workspacePath := filepath.Join(cfg.Options.DataDirectory, fmt.Sprintf("%s.json", appName))
@@ -1310,7 +1310,7 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 		if mergeErr == nil {
 			dataDir := cfg.Options.DataDirectory
 			*cfg = *merged
-			cfg.setDefaults(s.workingDir, dataDir)
+			cfg.setDefaults(ctx, s.workingDir, dataDir)
 			loadedPaths = append(loadedPaths, workspacePath)
 		}
 	}
@@ -1350,7 +1350,7 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 	// like AWS_PROFILE are visible to the AWS SDK credential chain.
 	cfg.applyEnv(resolver)
 
-	providers, err := Providers(cfg)
+	providers, err := Providers(ctx, cfg)
 	if err != nil {
 		if len(providers) == 0 {
 			return fmt.Errorf("failed to load providers during reload: %w", err)

@@ -414,6 +414,20 @@ func (m *Chat) InvalidateRenderCaches() {
 	chat.ClearItemCaches(items)
 }
 
+// InvalidateVisibleRenderCaches drops cached rendered output on the
+// message items currently visible in the viewport, so the next draw
+// re-renders them with the current styles. Items outside the viewport
+// keep their cached output, which keeps theme previews fast in large
+// sessions; they are re-rendered by a later full invalidation.
+func (m *Chat) InvalidateVisibleRenderCaches() {
+	start, end := m.list.VisibleItemIndices()
+	for i := start; i <= end; i++ {
+		if item, ok := m.list.ItemAt(i).(chat.MessageItem); ok {
+			chat.ClearItemCaches([]chat.MessageItem{item})
+		}
+	}
+}
+
 // SetMessages sets the chat messages to the provided list of message items.
 func (m *Chat) SetMessages(msgs ...chat.MessageItem) tea.Cmd {
 	m.idInxMap = make(map[string]int)

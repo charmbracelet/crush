@@ -2207,7 +2207,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			saved := m.com.Styles.Clone()
 			m.preThemeStyles = &saved
 		}
-		m.applyTheme(newStyles)
+		m.previewTheme(newStyles)
 	case dialog.ActionRevertThemePreview:
 		if m.preThemeStyles != nil {
 			m.applyTheme(*m.preThemeStyles)
@@ -2223,7 +2223,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			saved := m.com.Styles.Clone()
 			m.preThemeStyles = &saved
 		}
-		m.applyTheme(newStyles)
+		m.previewTheme(newStyles)
 	case dialog.ActionSaveThemePalette:
 		newStyles, err := styles.LoadPaletteTheme(msg.Base, msg.Palette)
 		if err != nil {
@@ -4811,10 +4811,24 @@ func (m *UI) applyTheme(s styles.Styles) {
 	*m.com.Styles = s
 	common.InvalidateStyleCaches()
 	m.refreshStyles()
+	m.chat.InvalidateRenderCaches()
+}
+
+// previewTheme applies the given styles for live preview inside an open
+// theme dialog. The whole interface updates, but only the chat messages
+// currently on screen re-render; the rest of the transcript keeps its
+// cached output so browsing themes stays fast in large sessions. Off-screen
+// messages follow along when the theme is actually applied.
+func (m *UI) previewTheme(s styles.Styles) {
+	*m.com.Styles = s
+	common.InvalidateStyleCaches()
+	m.refreshStyles()
+	m.chat.InvalidateVisibleRenderCaches()
 }
 
 // refreshStyles pushes the current *m.com.Styles into every subcomponent
 // that copies or pre-renders style-dependent values at construction time.
+// Callers are responsible for invalidating chat render caches.
 func (m *UI) refreshStyles() {
 	t := m.com.Styles
 	m.header.refresh()
@@ -4833,7 +4847,6 @@ func (m *UI) refreshStyles() {
 	)
 	m.todoSpinner.Style = t.Pills.TodoSpinner
 	m.status.help.Styles = t.Help
-	m.chat.InvalidateRenderCaches()
 	if d := m.dialog.Dialog(dialog.ThemeID); d != nil {
 		if td, ok := d.(*dialog.Theme); ok {
 			td.RefreshStyles()

@@ -2,11 +2,9 @@ package copilot
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -99,21 +97,21 @@ func TestAutoResolverCachesSession(t *testing.T) {
 		]
 	}`)
 
-	resolver := newAutoResolver(func() *oauth.Token { return &oauth.Token{AccessToken: "at"} })
+	resolver := NewAutoResolver(func() *oauth.Token { return &oauth.Token{AccessToken: "at"} }, nil)
 
-	model, sessionToken, err := resolver.resolve(context.Background())
+	selection, err := resolver.resolve(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, "gpt-4.1", model)
-	require.Equal(t, "sess-1", sessionToken)
+	require.Equal(t, "gpt-4.1", selection.model)
+	require.Equal(t, "sess-1", selection.sessionToken)
 
-	model, sessionToken, err = resolver.resolve(context.Background())
+	selection, err = resolver.resolve(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, "gpt-4.1", model)
-	require.Equal(t, "sess-1", sessionToken)
+	require.Equal(t, "gpt-4.1", selection.model)
+	require.Equal(t, "sess-1", selection.sessionToken)
 	require.Equal(t, int32(1), calls.Load(), "a fresh session is reused")
 
 	resolver.session.ExpiresAt = time.Now().Unix() - 60
-	_, _, err = resolver.resolve(context.Background())
+	_, err = resolver.resolve(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, int32(2), calls.Load(), "an expired session is refreshed")
 }
@@ -133,7 +131,7 @@ func stubCatalog(t *testing.T, payload string) {
 	t.Cleanup(func() { modelsEndpoint = orig })
 }
 
-func TestAutoResolverSkipsResponsesOnlyModels(t *testing.T) {
+func TestAutoResolverRoutesResponsesOnlyModel(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{
 			"available_models": ["gpt-5.4-mini", "gpt-4.1"],
@@ -153,10 +151,12 @@ func TestAutoResolverSkipsResponsesOnlyModels(t *testing.T) {
 		]
 	}`)
 
-	resolver := newAutoResolver(func() *oauth.Token { return &oauth.Token{AccessToken: "at"} })
-	model, _, err := resolver.resolve(context.Background())
+	resolver := NewAutoResolver(func() *oauth.Token { return &oauth.Token{AccessToken: "at"} }, nil)
+	selection, err := resolver.resolve(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, "gpt-4.1", model, "the Responses-only model is skipped")
+	require.Equal(t, "gpt-5.4-mini", selection.model)
+	require.Equal(t, autoEndpointResponses, selection.endpoint)
+	require.True(t, resolver.UsesResponsesAPI("gpt-5.4-mini"))
 }
 
 func TestAutoResolverFallsBackWhenCatalogFails(t *testing.T) {
@@ -182,13 +182,17 @@ func TestAutoResolverFallsBackWhenCatalogFails(t *testing.T) {
 	modelsEndpoint = catalogServer.URL
 	t.Cleanup(func() { modelsEndpoint = origModels })
 
-	resolver := newAutoResolver(func() *oauth.Token { return &oauth.Token{AccessToken: "at"} })
-	model, _, err := resolver.resolve(context.Background())
+	resolver := NewAutoResolver(func() *oauth.Token { return &oauth.Token{AccessToken: "at"} }, func(modelID string) bool {
+		return modelID == "gpt-5.4-mini"
+	})
+	selection, err := resolver.resolve(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, "gpt-5.4-mini", model, "the first session model is used when the catalog is unreachable")
+	require.Equal(t, "gpt-5.4-mini", selection.model, "the first session model is used when the catalog is unreachable")
+	require.Equal(t, autoEndpointUnknown, selection.endpoint)
+	require.True(t, resolver.UsesResponsesAPI("gpt-5.4-mini"))
 }
 
-func TestAutoResolverNoChatCompletionsModel(t *testing.T) {
+func TestAutoResolverNoSupportedEndpoint(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{
 			"available_models": ["gpt-5.4-mini"],
@@ -203,87 +207,11 @@ func TestAutoResolverNoChatCompletionsModel(t *testing.T) {
 	t.Cleanup(func() { autoSessionURL = orig })
 	stubCatalog(t, `{
 		"data": [
-			{"id": "gpt-5.4-mini", "name": "GPT-5.4 mini", "supported_endpoints": ["/responses"]}
+			{"id": "gpt-5.4-mini", "name": "GPT-5.4 mini", "supported_endpoints": ["/messages"]}
 		]
 	}`)
 
-	resolver := newAutoResolver(func() *oauth.Token { return &oauth.Token{AccessToken: "at"} })
-	_, _, err := resolver.resolve(context.Background())
-	require.ErrorContains(t, err, "chat/completions")
-}
-
-func TestInitiatorTransportAutoModel(t *testing.T) {
-	sessionServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{
-			"available_models": ["gpt-4.1"],
-			"session_token": "sess-1",
-			"expires_at": 4102444800
-		}`))
-	}))
-	t.Cleanup(sessionServer.Close)
-
-	orig := autoSessionURL
-	autoSessionURL = sessionServer.URL
-	t.Cleanup(func() { autoSessionURL = orig })
-	stubCatalog(t, `{
-		"data": [
-			{"id": "gpt-4.1", "name": "GPT-4.1", "supported_endpoints": ["/chat/completions"]}
-		]
-	}`)
-
-	var gotModel, gotSessionToken string
-	chatServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotSessionToken = r.Header.Get("Copilot-Session-Token")
-		body, _ := io.ReadAll(r.Body)
-		var payload struct {
-			Model string `json:"model"`
-		}
-		_ = json.Unmarshal(body, &payload)
-		gotModel = payload.Model
-	}))
-	t.Cleanup(chatServer.Close)
-
-	transport := &initiatorTransport{
-		auto: newAutoResolver(func() *oauth.Token { return &oauth.Token{AccessToken: "at"} }),
-	}
-	client := &http.Client{Transport: transport}
-
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, chatServer.URL,
-		strings.NewReader(`{"model":"auto","messages":[{"role":"user"}]}`))
-	require.NoError(t, err)
-	resp, err := client.Do(req)
-	require.NoError(t, err)
-	resp.Body.Close()
-
-	require.Equal(t, "gpt-4.1", gotModel, "auto is rewritten to the session-granted model")
-	require.Equal(t, "sess-1", gotSessionToken)
-}
-
-func TestInitiatorTransportAutoModelPassthrough(t *testing.T) {
-	var gotModel, gotSessionToken string
-	chatServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotSessionToken = r.Header.Get("Copilot-Session-Token")
-		body, _ := io.ReadAll(r.Body)
-		var payload struct {
-			Model string `json:"model"`
-		}
-		_ = json.Unmarshal(body, &payload)
-		gotModel = payload.Model
-	}))
-	t.Cleanup(chatServer.Close)
-
-	transport := &initiatorTransport{
-		auto: newAutoResolver(func() *oauth.Token { return &oauth.Token{AccessToken: "at"} }),
-	}
-	client := &http.Client{Transport: transport}
-
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, chatServer.URL,
-		strings.NewReader(`{"model":"gpt-4.1","messages":[{"role":"user"}]}`))
-	require.NoError(t, err)
-	resp, err := client.Do(req)
-	require.NoError(t, err)
-	resp.Body.Close()
-
-	require.Equal(t, "gpt-4.1", gotModel, "a concrete model is untouched")
-	require.Empty(t, gotSessionToken, "no session token is attached")
+	resolver := NewAutoResolver(func() *oauth.Token { return &oauth.Token{AccessToken: "at"} }, nil)
+	_, err := resolver.resolve(context.Background())
+	require.ErrorContains(t, err, "supported endpoint")
 }

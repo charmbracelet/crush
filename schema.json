@@ -496,6 +496,23 @@
           "description": "Disable automatic conversation summarization",
           "default": false
         },
+        "auto_summarize_ratio": {
+          "type": "number",
+          "exclusiveMaximum": 1,
+          "minimum": 0,
+          "description": "Share of a context window of up to 200k tokens kept free before the session is summarized (default 0.2)",
+          "examples": [
+            0.3
+          ]
+        },
+        "auto_summarize_buffer": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Tokens kept free in a context window above 200k tokens before the session is summarized (default 20000)",
+          "examples": [
+            40000
+          ]
+        },
         "data_directory": {
           "type": "string",
           "description": "Directory for storing application data. Relative paths are resolved against the working directory; absolute paths are used as-is.",

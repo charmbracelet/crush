@@ -417,8 +417,8 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 		return nil, proto.Workspace{}, fmt.Errorf("failed to initialize config: %w", err)
 	}
 
-	cfg.Overrides().SkipPermissionRequests = args.YOLO
 	cfg.Overrides().EnabledChannels = args.Channels
+	cfg.Overrides().PermissionMode = proto.ProtoModeToPermission(args.PermissionMode)
 
 	if err := createDotCrushDir(cfg.Config().Options.DataDirectory); err != nil {
 		return nil, proto.Workspace{}, fmt.Errorf("failed to create data directory: %w", err)
@@ -1069,16 +1069,25 @@ func validateClientID(id string) (string, error) {
 
 func workspaceToProto(ws *Workspace) proto.Workspace {
 	cfg := ws.Cfg.Config()
+	// Report the mode the permission service actually enforces rather
+	// than the startup override. The override is a one-shot seed that
+	// app.New reads at construction; runtime toggles reach only the
+	// service, so reporting the override would show a client "normal"
+	// while the server auto-approves everything.
+	//
+	// ws.Permissions is safe to dereference here: it is promoted from
+	// the embedded app.App, which CreateWorkspace always populates
+	// alongside ws.Cfg, and ws.Cfg is already dereferenced above.
 	out := proto.Workspace{
-		ID:       ws.ID,
-		Path:     ws.Path,
-		YOLO:     ws.Cfg.Overrides().SkipPermissionRequests,
-		Channels: ws.Cfg.Overrides().EnabledChannels,
-		DataDir:  cfg.Options.DataDirectory,
-		Debug:    cfg.Options.Debug,
-		Config:   cfg,
-		Env:      ws.Env,
-		Version:  version.Version,
+		ID:             ws.ID,
+		Path:           ws.Path,
+		PermissionMode: proto.PermissionModeToProto(ws.Permissions.PermissionMode()),
+		Channels:       ws.Cfg.Overrides().EnabledChannels,
+		DataDir:        cfg.Options.DataDirectory,
+		Debug:          cfg.Options.Debug,
+		Config:         cfg,
+		Env:            ws.Env,
+		Version:        version.Version,
 	}
 	if ws.Skills != nil {
 		out.Skills = skillStatesToProto(ws.Skills.States())
@@ -1097,9 +1106,12 @@ func workspaceToProto(ws *Workspace) proto.Workspace {
 // while the first set one will still log the mismatch.
 func logFirstWinsMismatch(existing *Workspace, args proto.Workspace) {
 	existingCfg := existing.Cfg.Config()
-	existingYOLO := existing.Cfg.Overrides().SkipPermissionRequests
 	existingChannels := existing.Cfg.Overrides().EnabledChannels
-	if existingYOLO == args.YOLO &&
+	// Compare the internal modes so an unset request ("") matches the
+	// normalized default ("normal") instead of spuriously logging.
+	existingMode := existing.Cfg.Overrides().PermissionMode
+	requestedMode := proto.ProtoModeToPermission(args.PermissionMode)
+	if existingMode == requestedMode &&
 		existingCfg.Options.Debug == args.Debug &&
 		existingCfg.Options.DataDirectory == args.DataDir &&
 		stringSlicesEqual(existing.Env, args.Env) &&
@@ -1110,8 +1122,8 @@ func logFirstWinsMismatch(existing *Workspace, args proto.Workspace) {
 		"Workspace flag mismatch on duplicate create; first wins",
 		"workspace_id", existing.ID,
 		"path", existing.Path,
-		"existing_yolo", existingYOLO,
-		"requested_yolo", args.YOLO,
+		"existing_permission_mode", proto.PermissionModeToProto(existingMode),
+		"requested_permission_mode", proto.PermissionModeToProto(requestedMode),
 		"existing_debug", existingCfg.Options.Debug,
 		"requested_debug", args.Debug,
 		"existing_data_dir", existingCfg.Options.DataDirectory,

@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/attachments"
 	"github.com/charmbracelet/crush/internal/ui/chat"
@@ -21,6 +22,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/crush/internal/workspace"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 )
 
@@ -129,7 +131,7 @@ type testWorkspace struct {
 	agentReady        bool
 	agentBusy         bool
 	runPrompts        []string
-	yolo              bool
+	permMode          permission.PermissionMode
 	runHidden         []bool
 }
 
@@ -151,9 +153,13 @@ func (w *testWorkspace) UpdateAgentModel(context.Context) error {
 	return nil
 }
 
-func (w *testWorkspace) PermissionSkipRequests() bool { return w.yolo }
+func (w *testWorkspace) PermissionMode() permission.PermissionMode {
+	return w.permMode
+}
 
-func (w *testWorkspace) PermissionSetSkipRequests(skip bool) { w.yolo = skip }
+func (w *testWorkspace) PermissionSetMode(mode permission.PermissionMode) {
+	w.permMode = mode
+}
 
 func (w *testWorkspace) AgentIsReady() bool {
 	return w.agentReady
@@ -187,18 +193,22 @@ func TestToggleInputMode(t *testing.T) {
 	t.Parallel()
 	ui, ws := newPlanUI(t, "sess-1")
 	ui.mode = uiInputModeCode
+	// The Shift+Tab cycle: code -> plan -> YOLO -> sysadmin -> code. Only
+	// the two input-mode changes switch agents, so the update count stops
+	// climbing once the cycle is only moving the permission mode.
 	for _, want := range []struct {
 		mode    uiInputMode
-		yolo    bool
+		perm    permission.PermissionMode
 		updates int
 	}{
-		{uiInputModePlan, false, 1},
-		{uiInputModeCode, true, 2},
-		{uiInputModeCode, false, 2},
+		{uiInputModePlan, permission.PermissionModeNormal, 1},
+		{uiInputModeCode, permission.PermissionModeYolo, 2},
+		{uiInputModeCode, permission.PermissionModeSysadmin, 2},
+		{uiInputModeCode, permission.PermissionModeNormal, 2},
 	} {
 		applyModeSwitchMsg(ui, ui.toggleInputMode())
 		require.Equal(t, want.mode, ui.mode)
-		require.Equal(t, want.yolo, ws.yolo)
+		require.Equal(t, want.perm, ws.permMode)
 		require.Equal(t, want.updates, ws.updateCalls)
 	}
 }
@@ -228,6 +238,18 @@ func newPlanUI(t *testing.T, sessionID string) (*UI, *testWorkspace) {
 		chat:     NewChat(com, config.ScrollbarDefault),
 	}
 	return u, ws
+}
+
+// seedYolo puts the workspace and the UI's memoized permission mode in the
+// same state the running UI keeps them in: every write goes through
+// setPermissionMode, so the cache never trails the workspace.
+func seedYolo(u *UI, ws *testWorkspace, on bool) {
+	mode := permission.PermissionModeNormal
+	if on {
+		mode = permission.PermissionModeYolo
+	}
+	ws.PermissionSetMode(mode)
+	u.permModeCache.set(mode)
 }
 
 // applyModeSwitchMsg runs a setInputMode command to completion the way the
@@ -545,7 +567,7 @@ func TestSetInputMode_TracksModeSwitching(t *testing.T) {
 	require.True(t, ok)
 	require.NoError(t, msg.err)
 	require.Equal(t, uiInputModeCode, msg.mode)
-	require.False(t, msg.yolo)
+	require.Equal(t, permission.PermissionModeNormal, msg.perm)
 }
 
 func TestHandlePlanHandoff_SetsPendingPlan(t *testing.T) {
@@ -655,11 +677,11 @@ func TestPlanHandoffExplicitPermissionMode(t *testing.T) {
 	t.Parallel()
 	for _, yolo := range []bool{false, true} {
 		u, ws := newPlanUI(t, "sess-1")
-		ws.yolo = !yolo
+		seedYolo(u, ws, !yolo)
 		u.openPlanHandoff()
 		inline := u.activeInline.(*dialog.PlanHandoffInline)
 		cmd := inline.OnConfirm(yolo)
-		require.Equal(t, yolo, ws.yolo)
+		require.Equal(t, yolo, ws.permMode != permission.PermissionModeNormal)
 		require.Empty(t, ws.runPrompts, "wait for the coder model to finish switching")
 		switched := cmd().(modeSwitchedMsg)
 		require.NoError(t, switched.err)
@@ -672,7 +694,7 @@ func TestPlanPromptIgnoresYOLO(t *testing.T) {
 	u, _ := newPlanUI(t, "sess-1")
 	u.textarea.SetWidth(40)
 	u.textarea.Focus()
-	u.setEditorPrompt(true)
+	u.setEditorPrompt(permission.PermissionModeYolo)
 	require.Contains(t, u.textarea.View(), "⏸")
 	require.NotContains(t, u.textarea.View(), " ! ")
 }
@@ -693,27 +715,70 @@ func TestGeneratedPlanContinuationIsHidden(t *testing.T) {
 	require.Equal(t, []string{"Implement the plan.", "Implement the plan."}, ws.runPrompts)
 }
 
-func TestToggleInputModePreservesExistingYOLOOnEntry(t *testing.T) {
+// A permissive mode the user chose himself is part of the ring like any
+// other: the cycle picks up where the badge says it is and closes.
+func TestToggleInputModeCycleCompletesFromExplicitYolo(t *testing.T) {
 	t.Parallel()
 	u, ws := newPlanUI(t, "sess-1")
 	u.mode = uiInputModeCode
-	ws.yolo = true
+	seedYolo(u, ws, true)
+
+	for _, want := range []struct {
+		mode uiInputMode
+		perm permission.PermissionMode
+	}{
+		{uiInputModeCode, permission.PermissionModeSysadmin},
+		{uiInputModeCode, permission.PermissionModeNormal},
+		{uiInputModePlan, permission.PermissionModeNormal},
+		{uiInputModeCode, permission.PermissionModeYolo},
+	} {
+		applyModeSwitchMsg(u, u.toggleInputMode())
+		require.Equal(t, want.mode, u.mode)
+		require.Equal(t, want.perm, ws.permMode)
+	}
+}
+
+// Leaving plan mode pulls the user into YOLO coding, but a session already
+// on the sysadmin rung keeps it rather than being knocked down to YOLO.
+func TestToggleInputModeKeepsSysadminLeavingPlan(t *testing.T) {
+	t.Parallel()
+	u, ws := newPlanUI(t, "sess-1")
+	u.setPermissionMode(permission.PermissionModeSysadmin)
+
 	applyModeSwitchMsg(u, u.toggleInputMode())
-	require.Equal(t, uiInputModePlan, u.mode)
-	require.True(t, ws.yolo)
+	require.Equal(t, uiInputModeCode, u.mode)
+	require.Equal(t, permission.PermissionModeSysadmin, ws.permMode)
 }
 
 func TestSwitchPlanToYolo(t *testing.T) {
 	t.Parallel()
 	for _, carriedYolo := range []bool{false, true} {
 		u, ws := newPlanUI(t, "sess-1")
-		ws.yolo = carriedYolo
-		u.cycleYolo = carriedYolo
+		seedYolo(u, ws, carriedYolo)
 
 		applyModeSwitchMsg(u, u.switchPlanToYolo())
 		require.Equal(t, uiInputModeCode, u.mode, "activating YOLO leaves plan mode")
-		require.True(t, ws.yolo, "YOLO ends up enabled regardless of the carried state")
-		require.False(t, u.cycleYolo, "explicit activation must not be undone by the Shift+Tab cycle")
+		require.Equal(t, permission.PermissionModeYolo, ws.permMode, "YOLO ends up enabled regardless of the carried state")
 		require.Equal(t, config.AgentCoder, ws.setMainCalledWith)
+	}
+}
+
+func TestStatusModeBadge(t *testing.T) {
+	t.Parallel()
+	u, _ := newPlanUI(t, "sess-1")
+	s := &Status{com: u.com}
+	for _, tc := range []struct {
+		name  string
+		mode  uiInputMode
+		perm  permission.PermissionMode
+		badge string
+	}{
+		{"code", uiInputModeCode, permission.PermissionModeNormal, ""},
+		{"yolo", uiInputModeCode, permission.PermissionModeYolo, "YOLO MODE"},
+		{"sysadmin", uiInputModeCode, permission.PermissionModeSysadmin, "SYSADMIN MODE"},
+		{"plan wins", uiInputModePlan, permission.PermissionModeSysadmin, "PLAN MODE"},
+	} {
+		s.SetMode(tc.mode, tc.perm)
+		require.Contains(t, ansi.Strip(s.modeBadge()), tc.badge, tc.name)
 	}
 }

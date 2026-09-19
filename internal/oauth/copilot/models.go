@@ -19,7 +19,7 @@ type ModelInfo struct {
 	Name               string   `json:"name"`
 	Enabled            bool     `json:"model_picker_enabled"`
 	SupportedEndpoints []string `json:"supported_endpoints"`
-	Capabilities struct {
+	Capabilities       struct {
 		Limits struct {
 			ContextWindow int64 `json:"max_context_window_tokens"`
 		}
@@ -33,6 +33,14 @@ type ModelInfo struct {
 
 type modelsResponse struct {
 	Models []ModelInfo `json:"data"`
+}
+
+// AutoModel returns the pseudo-model used for Copilot auto mode.
+func AutoModel() catwalk.Model {
+	return catwalk.Model{
+		ID:   AutoModelID,
+		Name: "Auto",
+	}
 }
 
 // fetchCatalog GETs the Copilot /models catalog using the OAuth token
@@ -130,13 +138,10 @@ func Models(ctx context.Context, token *oauth.Token) ([]catwalk.Model, error) {
 				break
 			}
 		}
-		auto := catwalk.Model{
-			ID:             AutoModelID,
-			Name:           "Auto",
-			ContextWindow:  reference.Capabilities.Limits.ContextWindow,
-			CanReason:      reference.Capabilities.Supports.Thinking || len(reference.Capabilities.Supports.ReasoningEffort) > 0,
-			SupportsImages: reference.Capabilities.Supports.Vision,
-		}
+		auto := AutoModel()
+		auto.ContextWindow = reference.Capabilities.Limits.ContextWindow
+		auto.CanReason = reference.Capabilities.Supports.Thinking || len(reference.Capabilities.Supports.ReasoningEffort) > 0
+		auto.SupportsImages = reference.Capabilities.Supports.Vision
 		models = append([]catwalk.Model{auto}, models...)
 	}
 	return models, nil

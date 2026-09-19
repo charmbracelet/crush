@@ -20,6 +20,8 @@ func TestGetModelIncludesCopilotModels(t *testing.T) {
 
 	providers := csync.NewMap[string, ProviderConfig]()
 	providers.Set("copilot", ProviderConfig{
+		ID:            "copilot",
+		OAuthToken:    &oauth.Token{AccessToken: "token"},
 		Models:        []catwalk.Model{{ID: "gpt-4.1"}},
 		CopilotModels: []catwalk.Model{{ID: "claude-sonnet-4.5", Name: "Claude Sonnet 4.5"}},
 	})
@@ -29,7 +31,7 @@ func TestGetModelIncludesCopilotModels(t *testing.T) {
 	require.NotNil(t, model)
 	require.Equal(t, "Claude Sonnet 4.5", model.Name)
 
-	require.NotNil(t, cfg.GetModel("copilot", "gpt-4.1"))
+	require.Nil(t, cfg.GetModel("copilot", "gpt-4.1"), "the static API-key catalog is unavailable during OAuth")
 	require.Nil(t, cfg.GetModel("copilot", "missing"))
 }
 
@@ -38,15 +40,77 @@ func TestIsModelAvailableIncludesCopilotModels(t *testing.T) {
 
 	providers := csync.NewMap[string, ProviderConfig]()
 	providers.Set("copilot", ProviderConfig{
+		ID:            "copilot",
+		OAuthToken:    &oauth.Token{AccessToken: "token"},
 		Models:        []catwalk.Model{{ID: "gpt-4.1"}},
 		CopilotModels: []catwalk.Model{{ID: "auto", Name: "Auto"}},
 	})
 	cfg := &Config{Providers: providers}
 
-	require.True(t, cfg.IsModelAvailable("copilot", "gpt-4.1"))
+	require.False(t, cfg.IsModelAvailable("copilot", "gpt-4.1"))
 	require.True(t, cfg.IsModelAvailable("copilot", "auto"))
 	require.False(t, cfg.IsModelAvailable("copilot", "missing"))
 	require.False(t, cfg.IsModelAvailable("missing-provider", "auto"))
+}
+
+func TestCopilotAvailableModels(t *testing.T) {
+	t.Parallel()
+
+	t.Run("OAuth catalog is authoritative", func(t *testing.T) {
+		t.Parallel()
+
+		provider := ProviderConfig{
+			ID:            "copilot",
+			OAuthToken:    &oauth.Token{AccessToken: "token"},
+			Models:        []catwalk.Model{{ID: "static-model"}},
+			CopilotModels: []catwalk.Model{{ID: "auto"}},
+		}
+
+		require.Equal(t, []catwalk.Model{{ID: "auto"}}, provider.AvailableModels())
+	})
+
+	t.Run("granted static model keeps rich metadata", func(t *testing.T) {
+		t.Parallel()
+
+		providers := csync.NewMap[string, ProviderConfig]()
+		providers.Set("copilot", ProviderConfig{
+			ID:            "copilot",
+			OAuthToken:    &oauth.Token{AccessToken: "token"},
+			Models:        []catwalk.Model{{ID: "granted-model", DefaultMaxTokens: 4096}},
+			CopilotModels: []catwalk.Model{{ID: "granted-model"}},
+		})
+		cfg := &Config{Providers: providers}
+
+		model := cfg.GetModel("copilot", "granted-model")
+		require.NotNil(t, model)
+		require.Equal(t, int64(4096), model.DefaultMaxTokens)
+	})
+
+	t.Run("missing OAuth catalog falls back to auto", func(t *testing.T) {
+		t.Parallel()
+
+		provider := ProviderConfig{
+			ID:         "copilot",
+			OAuthToken: &oauth.Token{AccessToken: "token"},
+			Models:     []catwalk.Model{{ID: "static-model"}},
+		}
+
+		models := provider.AvailableModels()
+		require.Len(t, models, 1)
+		require.Equal(t, "auto", models[0].ID)
+	})
+
+	t.Run("API key keeps the static catalog", func(t *testing.T) {
+		t.Parallel()
+
+		provider := ProviderConfig{
+			ID:     "copilot",
+			APIKey: "key",
+			Models: []catwalk.Model{{ID: "static-model"}},
+		}
+
+		require.Equal(t, provider.Models, provider.AvailableModels())
+	})
 }
 
 // TestSetProviderAPIKeyCopilot proves a Copilot login fetches the model

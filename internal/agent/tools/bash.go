@@ -372,6 +372,11 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			}
 
 			// Still running - keep as background job
+			// Track the shell as auto-backgrounded on behalf of this session
+			// so a session cancel can terminate it, instead of leaving it
+			// running unbounded (#3878). Explicitly backgrounded jobs are not
+			// tracked: the model chose to keep those running.
+			bgManager.MarkAutoBackgrounded(bgShell.ID, sessionID)
 			metadata := BashResponseMetadata{
 				StartTime:        startTime.UnixMilli(),
 				EndTime:          time.Now().UnixMilli(),

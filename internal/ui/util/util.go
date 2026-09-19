@@ -35,6 +35,7 @@ const (
 	InfoTypeUpdate
 	InfoTypePlan
 	InfoTypeYolo
+	InfoTypeSysadmin
 )
 
 func NewInfoMsg(info string) InfoMsg {
@@ -72,7 +73,12 @@ type (
 		Msg  string
 		TTL  time.Duration
 	}
-	ClearStatusMsg struct{}
+	// ClearStatusMsg retires the status message identified by Seq. Every
+	// message schedules its own expiry, so without naming one the first
+	// timer to fire would retire whatever is on screen at the time, and a
+	// message that replaced an earlier one would serve out the remainder
+	// of its predecessor's time instead of its own.
+	ClearStatusMsg struct{ Seq uint64 }
 )
 
 // IsEmpty checks if the [InfoMsg] is empty.

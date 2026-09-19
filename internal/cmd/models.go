@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 
-	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2/tree"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/mattn/go-isatty"
@@ -58,20 +57,7 @@ crush models gpt5`,
 				configured: true,
 			}
 
-			// Providers signed in with OAuth hold a credential-scoped
-			// catalog: ChatGPT only grants the models the subscription
-			// allows, and Copilot lists the models fetched with its token.
-			models := provider.Models
-			if provider.OAuthToken != nil {
-				switch providerID {
-				case string(catwalk.InferenceProviderOpenAI):
-					models = provider.ChatGPTModels
-				case string(catwalk.InferenceProviderCopilot):
-					models = provider.CopilotModels
-				}
-			}
-
-			for _, model := range models {
+			for _, model := range provider.AvailableModels() {
 				if term != "" {
 					matched := false
 					for _, s := range []string{provider.ID, provider.Name, model.ID, model.Name} {

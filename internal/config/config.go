@@ -199,6 +199,52 @@ func (c *ProviderConfig) SetupGitHubCopilot() {
 	maps.Copy(c.ExtraHeaders, copilot.Headers())
 }
 
+// AvailableModels returns the catalog served by the provider's active
+// credential. OAuth subscriptions use their credential-scoped catalogs rather
+// than the static API-key catalog.
+func (c ProviderConfig) AvailableModels() []catwalk.Model {
+	if c.UsesCredentialScopedModels() {
+		switch c.ID {
+		case string(catwalk.InferenceProviderOpenAI):
+			// Model discovery is best effort. Keep startup viable until the
+			// lazy refetch can repair an empty cached catalog.
+			if len(c.ChatGPTModels) == 0 {
+				return c.Models
+			}
+			return c.withStaticModelMetadata(c.ChatGPTModels)
+		case string(catwalk.InferenceProviderCopilot):
+			if len(c.CopilotModels) == 0 {
+				return []catwalk.Model{copilot.AutoModel()}
+			}
+			return c.withStaticModelMetadata(c.CopilotModels)
+		}
+	}
+	return c.Models
+}
+
+func (c ProviderConfig) withStaticModelMetadata(scoped []catwalk.Model) []catwalk.Model {
+	models := slices.Clone(scoped)
+	for i, model := range models {
+		for _, static := range c.Models {
+			if static.ID == model.ID {
+				models[i] = static
+				break
+			}
+		}
+	}
+	return models
+}
+
+// UsesCredentialScopedModels reports whether the active credential determines
+// the provider's complete model catalog.
+func (c ProviderConfig) UsesCredentialScopedModels() bool {
+	if c.OAuthToken == nil {
+		return false
+	}
+	return c.ID == string(catwalk.InferenceProviderOpenAI) ||
+		c.ID == string(catwalk.InferenceProviderCopilot)
+}
+
 // HasAPIKey reports whether the provider's api_key resolves to a usable
 // credential. The stored value is often an unresolved template like
 // $OPENAI_API_KEY, which is not a credential until the variable exists.
@@ -846,17 +892,7 @@ func (c *Config) IsConfigured() bool {
 
 func (c *Config) GetModel(provider, model string) *catwalk.Model {
 	if providerConfig, ok := c.Providers.Get(provider); ok {
-		for _, m := range providerConfig.Models {
-			if m.ID == model {
-				return &m
-			}
-		}
-		for _, m := range providerConfig.ChatGPTModels {
-			if m.ID == model {
-				return &m
-			}
-		}
-		for _, m := range providerConfig.CopilotModels {
+		for _, m := range providerConfig.AvailableModels() {
 			if m.ID == model {
 				return &m
 			}
@@ -893,17 +929,7 @@ func (c *Config) IsModelAvailable(provider, model string) bool {
 	if !ok || providerConfig.Disable {
 		return false
 	}
-	for _, m := range providerConfig.Models {
-		if m.ID == model {
-			return true
-		}
-	}
-	for _, m := range providerConfig.ChatGPTModels {
-		if m.ID == model {
-			return true
-		}
-	}
-	for _, m := range providerConfig.CopilotModels {
+	for _, m := range providerConfig.AvailableModels() {
 		if m.ID == model {
 			return true
 		}

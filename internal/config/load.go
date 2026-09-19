@@ -726,10 +726,11 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (large
 		defaultLargeModel := c.GetModel(string(p.ID), p.DefaultLargeModelID)
 		if defaultLargeModel == nil {
 			slog.Warn("Default large model %s not found for provider %s", p.DefaultLargeModelID, p.ID)
-			if len(providerConfig.Models) == 0 {
+			availableModels := providerConfig.AvailableModels()
+			if len(availableModels) == 0 {
 				return largeModel, smallModel, fmt.Errorf("default large model %s not found for provider %s", p.DefaultLargeModelID, p.ID)
 			}
-			defaultLargeModel = &providerConfig.Models[0]
+			defaultLargeModel = &availableModels[0]
 		}
 		largeModel = SelectedModel{
 			Provider:        string(p.ID),
@@ -741,10 +742,11 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (large
 		defaultSmallModel := c.GetModel(string(p.ID), p.DefaultSmallModelID)
 		if defaultSmallModel == nil {
 			slog.Warn("Default small model %s not found for provider %s", p.DefaultSmallModelID, p.ID)
-			if len(providerConfig.Models) == 0 {
+			availableModels := providerConfig.AvailableModels()
+			if len(availableModels) == 0 {
 				return largeModel, smallModel, fmt.Errorf("default small model %s not found for provider %s", p.DefaultSmallModelID, p.ID)
 			}
-			defaultSmallModel = &providerConfig.Models[0]
+			defaultSmallModel = &availableModels[0]
 		}
 		smallModel = SelectedModel{
 			Provider:        string(p.ID),
@@ -766,17 +768,18 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (large
 	}
 
 	providerConfig := enabledProviders[0]
-	if len(providerConfig.Models) == 0 {
+	availableModels := providerConfig.AvailableModels()
+	if len(availableModels) == 0 {
 		err = fmt.Errorf("provider %s has no models configured", providerConfig.ID)
 		return largeModel, smallModel, err
 	}
-	defaultLargeModel := c.GetModel(providerConfig.ID, providerConfig.Models[0].ID)
+	defaultLargeModel := &availableModels[0]
 	largeModel = SelectedModel{
 		Provider:  providerConfig.ID,
 		Model:     defaultLargeModel.ID,
 		MaxTokens: defaultLargeModel.DefaultMaxTokens,
 	}
-	defaultSmallModel := c.GetModel(providerConfig.ID, providerConfig.Models[0].ID)
+	defaultSmallModel := &availableModels[0]
 	smallModel = SelectedModel{
 		Provider:  providerConfig.ID,
 		Model:     defaultSmallModel.ID,

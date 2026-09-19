@@ -33,7 +33,7 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 		return nil, err
 	}
 
-	agent, err := c.buildAgent(ctx, prompt, agentCfg, true)
+	agent, err := c.buildAgent(ctx, prompt, agentCfg, true, c.runComplete)
 	if err != nil {
 		return nil, err
 	}

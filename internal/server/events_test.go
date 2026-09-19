@@ -152,6 +152,31 @@ func TestRunCompleteToProto_RoundTrip(t *testing.T) {
 	require.False(t, decoded.Payload.Cancelled)
 }
 
+func TestPlanSaveNotificationToProto(t *testing.T) {
+	t.Parallel()
+	for _, eventType := range []notify.Type{notify.TypePlanSaved, notify.TypePlanSaveError} {
+		t.Run(string(eventType), func(t *testing.T) {
+			t.Parallel()
+			src := pubsub.Event[notify.Notification]{
+				Type: pubsub.CreatedEvent,
+				Payload: notify.Notification{
+					SessionID: "session-1",
+					Type:      eventType,
+					Message:   ".crush/plans/2026-09-19-153045-fix-login-timeout.md",
+				},
+			}
+			env := wrapEvent(src)
+			require.NotNil(t, env)
+			require.Equal(t, pubsub.PayloadTypeAgentEvent, env.Type)
+			var decoded pubsub.Event[proto.AgentEvent]
+			require.NoError(t, json.Unmarshal(env.Payload, &decoded))
+			require.Equal(t, proto.AgentEventType(eventType), decoded.Payload.Type)
+			require.Equal(t, "session-1", decoded.Payload.SessionID)
+			require.EqualError(t, decoded.Payload.Error, ".crush/plans/2026-09-19-153045-fix-login-timeout.md")
+		})
+	}
+}
+
 // TestAgentErrorToProto_PreservesRunID verifies that an async agent
 // error notification carries its originating RunID (and SessionID)
 // through the SSE envelope. Without these correlators, `crush run`

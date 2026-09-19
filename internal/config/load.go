@@ -1410,16 +1410,21 @@ func ProjectSkillsDir(workingDir string) []string {
 
 func isAppleTerminal() bool { return os.Getenv("TERM_PROGRAM") == "Apple_Terminal" }
 
-// normalizeHookEvent maps user-provided event names to their canonical
-// form. Matching is case-insensitive and accepts snake_case variants
-// (e.g. "pre_tool_use" → "PreToolUse").
+// normalizeHookEvent maps user-provided event names to their canonical form,
+// case-insensitively and with snake_case accepted. The names are spelled out
+// here because this package cannot import internal/hooks without a cycle.
 func normalizeHookEvent(name string) string {
-	switch strings.ToLower(strings.ReplaceAll(name, "_", "")) {
-	case "pretooluse":
-		return "PreToolUse"
-	default:
-		return name
+	canonical := map[string]string{
+		"sessionstart":     "SessionStart",
+		"userpromptsubmit": "UserPromptSubmit",
+		"pretooluse":       "PreToolUse",
+		"posttooluse":      "PostToolUse",
+		"stop":             "Stop",
 	}
+	if event, ok := canonical[strings.ToLower(strings.ReplaceAll(name, "_", ""))]; ok {
+		return event
+	}
+	return name
 }
 
 // ValidateHooks normalizes event names and checks that every configured

@@ -88,41 +88,84 @@ func (r *Runner) Hooks() []config.HookConfig {
 // Run executes all matching hooks for the given event and tool, returning
 // an aggregated result.
 func (r *Runner) Run(ctx context.Context, eventName, sessionID, toolName, toolInputJSON string) (AggregateResult, error) {
-	matching := r.matchingHooks(toolName)
-	if len(matching) == 0 {
+	return r.RunEvent(ctx, eventName, EventData{
+		SessionID: sessionID,
+		CWD:       r.cwd,
+		ToolName:  toolName,
+		ToolInput: toolInputJSON,
+	})
+}
+
+// RunEvent runs the hooks that match the event and aggregates them. Events
+// without a tool pass an empty ToolName, matching only matcher-less hooks.
+func (r *Runner) RunEvent(ctx context.Context, eventName string, data EventData) (AggregateResult, error) {
+	if data.CWD == "" {
+		data.CWD = r.cwd
+	}
+	deduped := dedupeByCommand(r.matchingHooks(data.ToolName))
+	if len(deduped) == 0 {
 		return AggregateResult{Decision: DecisionNone}, nil
 	}
 
-	// Deduplicate by command string.
-	seen := make(map[string]bool, len(matching))
-	var deduped []config.HookConfig
-	for _, h := range matching {
+	results := r.runConcurrently(
+		ctx,
+		deduped,
+		BuildEnvFor(eventName, r.projectDir, data),
+		BuildPayloadFor(eventName, data),
+	)
+
+	agg := aggregate(results, data.ToolInput)
+	agg.Hooks = hookInfos(deduped, results)
+	slog.Info(
+		"Hook completed",
+		"event", eventName,
+		"tool", data.ToolName,
+		"hooks", len(deduped),
+		"decision", agg.Decision.String(),
+	)
+	return agg, nil
+}
+
+// dedupeByCommand keeps one hook per command, so a command shared by several
+// matchers runs once.
+func dedupeByCommand(hooks []config.HookConfig) []config.HookConfig {
+	seen := make(map[string]bool, len(hooks))
+	deduped := make([]config.HookConfig, 0, len(hooks))
+	for _, h := range hooks {
 		if seen[h.Command] {
 			continue
 		}
 		seen[h.Command] = true
 		deduped = append(deduped, h)
 	}
+	return deduped
+}
 
-	envVars := BuildEnv(eventName, toolName, sessionID, r.cwd, r.projectDir, toolInputJSON)
-	payload := BuildPayload(eventName, sessionID, r.cwd, toolName, toolInputJSON)
-
-	results := make([]HookResult, len(deduped))
+// runConcurrently returns results in hook order, not finish order.
+func (r *Runner) runConcurrently(
+	ctx context.Context,
+	hooks []config.HookConfig,
+	envVars []string,
+	payload []byte,
+) []HookResult {
+	results := make([]HookResult, len(hooks))
 	var wg sync.WaitGroup
-	wg.Add(len(deduped))
+	wg.Add(len(hooks))
 
-	for i, h := range deduped {
+	for i, h := range hooks {
 		go func(idx int, hook config.HookConfig) {
 			defer wg.Done()
 			results[idx] = r.runOne(ctx, hook, envVars, payload)
 		}(i, h)
 	}
 	wg.Wait()
+	return results
+}
 
-	agg := aggregate(results, toolInputJSON)
-	agg.Hooks = make([]HookInfo, len(deduped))
-	for i, h := range deduped {
-		agg.Hooks[i] = HookInfo{
+func hookInfos(hooks []config.HookConfig, results []HookResult) []HookInfo {
+	infos := make([]HookInfo, len(hooks))
+	for i, h := range hooks {
+		infos[i] = HookInfo{
 			Name:         h.DisplayName(),
 			Matcher:      h.Matcher,
 			Decision:     results[i].Decision.String(),
@@ -131,14 +174,7 @@ func (r *Runner) Run(ctx context.Context, eventName, sessionID, toolName, toolIn
 			InputRewrite: results[i].UpdatedInput != "",
 		}
 	}
-	slog.Info(
-		"Hook completed",
-		"event", eventName,
-		"tool", toolName,
-		"hooks", len(deduped),
-		"decision", agg.Decision.String(),
-	)
-	return agg, nil
+	return infos
 }
 
 // matchingHooks returns hooks whose matcher matches the tool name (or has

@@ -2,6 +2,9 @@ package agent
 
 import (
 	"context"
+	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"charm.land/fantasy"
@@ -18,6 +21,7 @@ type fakeTool struct {
 	called bool
 	gotCtx context.Context
 	resp   fantasy.ToolResponse
+	err    error
 }
 
 func (f *fakeTool) Info() fantasy.ToolInfo {
@@ -27,15 +31,15 @@ func (f *fakeTool) Info() fantasy.ToolInfo {
 func (f *fakeTool) Run(ctx context.Context, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
 	f.called = true
 	f.gotCtx = ctx
-	return f.resp, nil
+	return f.resp, f.err
 }
 
 func (f *fakeTool) ProviderOptions() fantasy.ProviderOptions     { return nil }
 func (f *fakeTool) SetProviderOptions(_ fantasy.ProviderOptions) {}
 
-// newRunner builds a hooks.Runner from a single HookConfig, running the
-// config-loader path that compiles the matcher regex.
-func newRunner(t *testing.T, cmd string) *hooks.Runner {
+// newRunner builds a hooks.Dispatcher from a single PreToolUse HookConfig,
+// running the config-loader path that compiles the matcher regex.
+func newRunner(t *testing.T, cmd string) *hooks.Dispatcher {
 	t.Helper()
 	cfg := &config.Config{
 		Hooks: map[string][]config.HookConfig{
@@ -43,7 +47,7 @@ func newRunner(t *testing.T, cmd string) *hooks.Runner {
 		},
 	}
 	require.NoError(t, cfg.ValidateHooks())
-	return hooks.NewRunner(cfg.Hooks[hooks.EventPreToolUse], t.TempDir(), t.TempDir())
+	return hooks.NewDispatcher(cfg.Hooks, t.TempDir(), t.TempDir())
 }
 
 func TestHookedTool_AllowStampsHookApproval(t *testing.T) {
@@ -111,6 +115,135 @@ func TestHookedTool_DenySkipsInnerTool(t *testing.T) {
 	require.False(t, inner.called, "denied call must not reach the inner tool")
 	require.True(t, resp.IsError)
 	require.Contains(t, resp.Content, "blocked")
+}
+
+func TestHookedTool_PostToolUseRunsAfterInnerTool(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "order.log")
+	cfg := &config.Config{
+		Hooks: map[string][]config.HookConfig{
+			hooks.EventPostToolUse: {{
+				Command: `printf 'hook:%s\n' "$CRUSH_TOOL_NAME" >> ` + marker,
+			}},
+		},
+	}
+	require.NoError(t, cfg.ValidateHooks())
+
+	inner := &fakeTool{name: "view", resp: fantasy.NewTextResponse("tool output")}
+	tool := newHookedTool(inner, hooks.NewDispatcher(cfg.Hooks, dir, dir))
+
+	resp, err := tool.Run(t.Context(), fantasy.ToolCall{ID: "call-9", Name: "view"})
+	require.NoError(t, err)
+	require.True(t, inner.called)
+
+	got, err := os.ReadFile(marker)
+	require.NoError(t, err, "PostToolUse hook should have run")
+	require.Equal(t, "hook:view\n", string(got))
+	require.Contains(t, resp.Content, "tool output")
+}
+
+func TestHookedTool_PostToolUseConfinedToMatchingTool(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "order.log")
+	cfg := &config.Config{
+		Hooks: map[string][]config.HookConfig{
+			hooks.EventPostToolUse: {{
+				Matcher: "^edit$",
+				Command: `printf 'edit\n' >> ` + marker,
+			}},
+		},
+	}
+	require.NoError(t, cfg.ValidateHooks())
+
+	inner := &fakeTool{name: "view", resp: fantasy.NewTextResponse("ok")}
+	tool := newHookedTool(inner, hooks.NewDispatcher(cfg.Hooks, dir, dir))
+
+	_, err := tool.Run(t.Context(), fantasy.ToolCall{ID: "call-10", Name: "view"})
+	require.NoError(t, err)
+
+	_, err = os.Stat(marker)
+	require.ErrorIs(t, err, os.ErrNotExist, "matcher-scoped hook must not fire for another tool")
+}
+
+func TestHookedTool_PostToolUseDoesNotBlockDeniedCall(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "order.log")
+	cfg := &config.Config{
+		Hooks: map[string][]config.HookConfig{
+			hooks.EventPreToolUse: {{
+				Command: `exit 2`,
+			}},
+			hooks.EventPostToolUse: {{
+				Command: `printf 'post\n' >> ` + marker,
+			}},
+		},
+	}
+	require.NoError(t, cfg.ValidateHooks())
+
+	inner := &fakeTool{name: "bash", resp: fantasy.NewTextResponse("ok")}
+	tool := newHookedTool(inner, hooks.NewDispatcher(cfg.Hooks, dir, dir))
+
+	resp, err := tool.Run(t.Context(), fantasy.ToolCall{ID: "call-11", Name: "bash"})
+	require.NoError(t, err)
+	require.True(t, resp.IsError)
+	require.False(t, inner.called)
+}
+
+func TestHookedTool_PostToolUseSeesFailedTool(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "response.txt")
+	cfg := &config.Config{
+		Hooks: map[string][]config.HookConfig{
+			hooks.EventPostToolUse: {{
+				Command: `printf '%s' "$CRUSH_TOOL_NAME" > ` + marker,
+			}},
+		},
+	}
+	require.NoError(t, cfg.ValidateHooks())
+
+	inner := &fakeTool{name: "bash", err: errors.New("boom")}
+	tool := newHookedTool(inner, hooks.NewDispatcher(cfg.Hooks, dir, dir))
+
+	resp, err := tool.Run(t.Context(), fantasy.ToolCall{ID: "call-12", Name: "bash"})
+	require.Error(t, err, "the tool error must still surface to the caller")
+
+	got, readErr := os.ReadFile(marker)
+	require.NoError(t, readErr, "PostToolUse should observe a failed tool call too")
+	require.Equal(t, "bash", string(got))
+	require.Contains(t, resp.Metadata, `"hook"`,
+		"a hook that ran must stay visible in the metadata of a failed call")
+}
+
+func TestAppendHookContext(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		content  string
+		contexts []string
+		want     string
+	}{
+		{"no contexts leaves content alone", "output", nil, "output"},
+		{"empty contexts are skipped", "output", []string{"", ""}, "output"},
+		{"one context is appended", "output", []string{"note"}, "output\nnote"},
+		{"contexts keep their order", "output", []string{"first", "second"}, "output\nfirst\nsecond"},
+		{"empty content takes the first context without a separator", "", []string{"note"}, "note"},
+		{"empty content skips leading empties", "", []string{"", "note"}, "note"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tt.want, appendHookContext(tt.content, tt.contexts...))
+		})
+	}
 }
 
 func TestWrapToolsWithHooks(t *testing.T) {

@@ -21,8 +21,9 @@ func NewSymbolsToolMessageItem(
 	toolCall message.ToolCall,
 	result *message.ToolResult,
 	canceled bool,
+	reduceAnimations bool,
 ) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &SymbolsToolRenderContext{}, canceled)
+	return newBaseToolMessageItem(sty, toolCall, result, &SymbolsToolRenderContext{}, canceled, reduceAnimations)
 }
 
 // SymbolsToolRenderContext renders symbols tool messages.

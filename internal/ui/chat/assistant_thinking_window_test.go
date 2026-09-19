@@ -91,7 +91,7 @@ func TestThinkingWindow_CollapsedCapPreserved(t *testing.T) {
 
 	sty := styles.CharmtonePantera()
 	msg := thinkingMessageWithLines("collapsed", 5000)
-	item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
+	item := NewAssistantMessageItem(&sty, msg, false).(*AssistantMessageItem)
 
 	// Default state must be collapsed.
 	require.Equal(t, thinkingCollapsed, item.thinkingViewMode)
@@ -126,7 +126,7 @@ func TestThinkingWindow_ExpandedShortSkipsTailWindow(t *testing.T) {
 	require.Less(t, lines, maxExpandedThinkingTailLines,
 		"this test relies on the source being well under the tail cap")
 	msg := thinkingMessageWithLines("short", lines)
-	item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
+	item := NewAssistantMessageItem(&sty, msg, false).(*AssistantMessageItem)
 
 	require.True(t, item.ToggleExpanded(),
 		"first toggle should report expanded")
@@ -174,7 +174,7 @@ func TestThinkingWindow_TailWindowed(t *testing.T) {
 
 	// Tail-windowed render.
 	tailMsg := thinkingMessageWithLines("tail", total)
-	tailItem := NewAssistantMessageItem(&sty, tailMsg).(*AssistantMessageItem)
+	tailItem := NewAssistantMessageItem(&sty, tailMsg, false).(*AssistantMessageItem)
 	require.True(t, tailItem.ToggleExpanded(), "first toggle should report expanded")
 	require.Equal(t, thinkingTailWindow, tailItem.thinkingViewMode,
 		"a long block must enter tail-window after the first toggle")
@@ -205,7 +205,7 @@ func TestThinkingWindow_TailWindowed(t *testing.T) {
 	// expansion (no tail slice). The tail-windowed output's last K
 	// lines must byte-equal the unwindowed output's last K lines.
 	fullMsg := thinkingMessageWithLines("tail-full-ref", total)
-	fullItem := NewAssistantMessageItem(&sty, fullMsg).(*AssistantMessageItem)
+	fullItem := NewAssistantMessageItem(&sty, fullMsg, false).(*AssistantMessageItem)
 	fullItem.thinkingViewMode = thinkingFullExpanded
 	_ = fullItem.RawRender(width)
 	fullPlain := ansi.Strip(fullItem.thinkingSec.out)
@@ -243,7 +243,7 @@ func TestThinkingWindow_PromoteToFull(t *testing.T) {
 	sty := styles.CharmtonePantera()
 	const total = 1500
 	msg := thinkingMessageWithLines("promote", total)
-	item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
+	item := NewAssistantMessageItem(&sty, msg, false).(*AssistantMessageItem)
 
 	const width = 97
 
@@ -269,7 +269,7 @@ func TestThinkingWindow_PromoteToFull(t *testing.T) {
 	// Independent reference: a fresh item, rendered straight into
 	// the full-expanded state, must produce byte-equal output.
 	freshMsg := thinkingMessageWithLines("promote-fresh", total)
-	fresh := NewAssistantMessageItem(&sty, freshMsg).(*AssistantMessageItem)
+	fresh := NewAssistantMessageItem(&sty, freshMsg, false).(*AssistantMessageItem)
 	fresh.thinkingViewMode = thinkingFullExpanded
 	_ = fresh.RawRender(width)
 	require.Equal(t, fresh.thinkingSec.out, fullOut,
@@ -339,7 +339,7 @@ func TestThinkingWindow_ContentChangeKeepsThinkingCacheInTailWindow(t *testing.T
 		return &message.Message{ID: "tail-stream", Role: message.Assistant, Parts: parts}
 	}
 
-	item := NewAssistantMessageItem(&sty, build("first answer")).(*AssistantMessageItem)
+	item := NewAssistantMessageItem(&sty, build("first answer"), false).(*AssistantMessageItem)
 	item.thinkingViewMode = thinkingTailWindow
 
 	const width = 99
@@ -410,7 +410,7 @@ func TestThinkingWindow_ToggleInvalidatesOnlyThinking(t *testing.T) {
 		}
 	}
 
-	item := NewAssistantMessageItem(&sty, build()).(*AssistantMessageItem)
+	item := NewAssistantMessageItem(&sty, build(), false).(*AssistantMessageItem)
 
 	const width = 101
 	_ = item.RawRender(width)
@@ -477,7 +477,7 @@ func TestThinkingWindow_BoxHeightTracksWindow(t *testing.T) {
 	sty := styles.CharmtonePantera()
 	const total = 5000
 	msg := thinkingMessageWithLines("box-height", total)
-	item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
+	item := NewAssistantMessageItem(&sty, msg, false).(*AssistantMessageItem)
 
 	const width = 103
 

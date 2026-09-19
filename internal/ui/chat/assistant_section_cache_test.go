@@ -91,7 +91,7 @@ func TestAssistantSectionCache_ContentChangeDoesNotInvalidateThinking(t *testing
 	sty := styles.CharmtonePantera()
 	thinking := "Step 1\nStep 2\nStep 3"
 	msg := thinkingMessage("a1", thinking, "Initial answer.")
-	item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
+	item := NewAssistantMessageItem(&sty, msg, false).(*AssistantMessageItem)
 
 	const width = 71
 
@@ -119,7 +119,7 @@ func TestAssistantSectionCache_ThinkingChangeDoesNotInvalidateContent(t *testing
 	sty := styles.CharmtonePantera()
 	content := "Final answer goes here."
 	msg := thinkingMessage("a2", "Step 1", content)
-	item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
+	item := NewAssistantMessageItem(&sty, msg, false).(*AssistantMessageItem)
 
 	const width = 73
 
@@ -146,8 +146,8 @@ func TestAssistantSectionCache_HashKeyDiscrimination(t *testing.T) {
 	msgA := thinkingMessage("a3", "thinking A", "content A")
 	msgB := thinkingMessage("a3", "thinking B", "content B")
 
-	itemA := NewAssistantMessageItem(&sty, msgA).(*AssistantMessageItem)
-	itemB := NewAssistantMessageItem(&sty, msgB).(*AssistantMessageItem)
+	itemA := NewAssistantMessageItem(&sty, msgA, false).(*AssistantMessageItem)
+	itemB := NewAssistantMessageItem(&sty, msgB, false).(*AssistantMessageItem)
 
 	thinkSrcA, _ := itemA.thinkingKey()
 	thinkSrcB, _ := itemB.thinkingKey()
@@ -161,7 +161,7 @@ func TestAssistantSectionCache_HashKeyDiscrimination(t *testing.T) {
 
 	// Identical source text on a fresh item must produce the same
 	// hashes — keying invariant for cache hits.
-	itemAClone := NewAssistantMessageItem(&sty, thinkingMessage("a3", "thinking A", "content A")).(*AssistantMessageItem)
+	itemAClone := NewAssistantMessageItem(&sty, thinkingMessage("a3", "thinking A", "content A"), false).(*AssistantMessageItem)
 	thinkSrcAClone, _ := itemAClone.thinkingKey()
 	contentSrcAClone, _ := itemAClone.contentKey()
 	require.Equal(t, thinkSrcA, thinkSrcAClone)
@@ -175,7 +175,7 @@ func TestAssistantSectionCache_HashKeyDiscrimination(t *testing.T) {
 func TestAssistantSectionCache_CloneRoundTrip(t *testing.T) {
 	sty := styles.CharmtonePantera()
 	orig := thinkingMessage("a4", "Reasoning step.", "Answer text.")
-	item := NewAssistantMessageItem(&sty, orig).(*AssistantMessageItem)
+	item := NewAssistantMessageItem(&sty, orig, false).(*AssistantMessageItem)
 
 	const width = 75
 	_ = item.RawRender(width)
@@ -204,7 +204,7 @@ func TestAssistantSectionCache_ResizeInvalidatesAll(t *testing.T) {
 			FinishedAt: testFinishedAt,
 		},
 	}, msg.Parts...)
-	item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
+	item := NewAssistantMessageItem(&sty, msg, false).(*AssistantMessageItem)
 
 	_ = item.RawRender(77)
 	first := snapshot(item)
@@ -247,7 +247,7 @@ func TestAssistantSectionCache_ErrorIndependentOfThinkingAndContent(t *testing.T
 		}
 	}
 
-	item := NewAssistantMessageItem(&sty, build("think", "content", "boom", "details")).(*AssistantMessageItem)
+	item := NewAssistantMessageItem(&sty, build("think", "content", "boom", "details"), false).(*AssistantMessageItem)
 	_ = item.RawRender(79)
 	first := snapshot(item)
 
@@ -288,7 +288,7 @@ func TestAssistantSectionCache_PrefixCacheRespectsSectionChanges(t *testing.T) {
 		}
 	}
 
-	item := NewAssistantMessageItem(&sty, build("first content")).(*AssistantMessageItem)
+	item := NewAssistantMessageItem(&sty, build("first content"), false).(*AssistantMessageItem)
 	item.SetFocused(true)
 
 	const width = 81
@@ -366,11 +366,11 @@ func TestAssistantSectionCache_ByteIdenticalToFreshRender(t *testing.T) {
 	}
 
 	first := steps[0].msg.Clone()
-	cached := NewAssistantMessageItem(&sty, &first).(*AssistantMessageItem)
+	cached := NewAssistantMessageItem(&sty, &first, false).(*AssistantMessageItem)
 	for _, s := range steps {
 		cached.SetMessage(s.msg)
 		freshMsg := s.msg.Clone()
-		fresh := NewAssistantMessageItem(&sty, &freshMsg).(*AssistantMessageItem)
+		fresh := NewAssistantMessageItem(&sty, &freshMsg, false).(*AssistantMessageItem)
 		require.Equal(t, fresh.RawRender(width), cached.RawRender(width),
 			"step %q: cached path must match fresh render byte-for-byte", s.name)
 	}
@@ -401,7 +401,7 @@ func TestAssistantSectionCache_PrefixCacheInvalidatesOnCompositionOnlyChange(t *
 		}
 	}
 
-	item := NewAssistantMessageItem(&sty, build(message.FinishReasonEndTurn)).(*AssistantMessageItem)
+	item := NewAssistantMessageItem(&sty, build(message.FinishReasonEndTurn), false).(*AssistantMessageItem)
 	endTurnOut := item.Render(width)
 
 	// Flip only the finish reason. Thinking is empty and content
@@ -415,7 +415,7 @@ func TestAssistantSectionCache_PrefixCacheInvalidatesOnCompositionOnlyChange(t *
 	// A fresh item built with the same final state must match the
 	// cached item byte-for-byte — caching is invisible from the
 	// outside and never serves stale output.
-	fresh := NewAssistantMessageItem(&sty, build(message.FinishReasonCanceled)).(*AssistantMessageItem)
+	fresh := NewAssistantMessageItem(&sty, build(message.FinishReasonCanceled), false).(*AssistantMessageItem)
 	require.Equal(t, fresh.Render(width), canceledOut,
 		"cached output must equal a fresh render of the same final state")
 }
@@ -440,7 +440,7 @@ func TestAssistantSectionCache_ThinkingBoxHeightSurvivesCacheHit(t *testing.T) {
 		"Verifying constraints.",
 	}, "\n")
 	msg := thinkingMessage("hbox", thinking, "initial answer")
-	item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
+	item := NewAssistantMessageItem(&sty, msg, false).(*AssistantMessageItem)
 	item.thinkingViewMode = thinkingFullExpanded
 
 	_ = item.RawRender(width)

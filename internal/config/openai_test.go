@@ -20,6 +20,8 @@ func TestGetModelIncludesChatGPTModels(t *testing.T) {
 
 	providers := csync.NewMap[string, ProviderConfig]()
 	providers.Set("openai", ProviderConfig{
+		ID:            "openai",
+		OAuthToken:    &oauth.Token{AccessToken: "token"},
 		Models:        []catwalk.Model{{ID: "gpt-5.1"}},
 		ChatGPTModels: []catwalk.Model{{ID: "gpt-5.1-codex", Name: "GPT-5.1 Codex"}},
 	})
@@ -29,8 +31,20 @@ func TestGetModelIncludesChatGPTModels(t *testing.T) {
 	require.NotNil(t, model)
 	require.Equal(t, "GPT-5.1 Codex", model.Name)
 
-	require.NotNil(t, cfg.GetModel("openai", "gpt-5.1"))
+	require.Nil(t, cfg.GetModel("openai", "gpt-5.1"), "the static API-key catalog is unavailable during OAuth")
 	require.Nil(t, cfg.GetModel("openai", "missing"))
+}
+
+func TestOpenAIAvailableModelsFallsBackWhileOAuthCatalogIsMissing(t *testing.T) {
+	t.Parallel()
+
+	provider := ProviderConfig{
+		ID:         "openai",
+		OAuthToken: &oauth.Token{AccessToken: "token"},
+		Models:     []catwalk.Model{{ID: "static-model"}},
+	}
+
+	require.Equal(t, provider.Models, provider.AvailableModels())
 }
 
 func TestTokenFields(t *testing.T) {

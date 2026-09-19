@@ -499,7 +499,7 @@ func (app *App) restoreModelFromSession(ctx context.Context, sessionID string) e
 		Provider: lastMsg.Provider,
 		Model:    lastMsg.Model,
 	})
-	if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
+	if small, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok || !cfg.IsModelAvailable(small.Provider, small.Model) {
 		smallModel := app.GetDefaultSmallModel(lastMsg.Provider)
 		app.config.OverridePreferredModel(config.SelectedModelTypeSmall, smallModel)
 	}
@@ -608,16 +608,6 @@ func (app *App) GetDefaultSmallModel(providerID string) config.SelectedModel {
 		return largeModelCfg
 	}
 
-	defaultSmallModelID := knownProvider.DefaultSmallModelID
-	model := cfg.GetModel(providerID, defaultSmallModelID)
-	if model == nil {
-		slog.Warn("Default small model not found, using large model", "provider", providerID, "model", largeModelCfg.Model)
-		return largeModelCfg
-	}
-
-	// A ChatGPT-authenticated OpenAI provider only serves the models the
-	// subscription grants, so the default small model must come from that
-	// catalog as well.
 	if providerID == string(catwalk.InferenceProviderOpenAI) && largeModelCfg.Provider == providerID {
 		if pc, ok := cfg.Providers.Get(providerID); ok && pc.OAuthToken != nil {
 			if small := chatGPTSmallModel(pc); small != nil {
@@ -630,6 +620,27 @@ func (app *App) GetDefaultSmallModel(providerID string) config.SelectedModel {
 			}
 			return largeModelCfg
 		}
+	}
+
+	if providerID == string(catwalk.InferenceProviderCopilot) && largeModelCfg.Provider == providerID {
+		if pc, ok := cfg.Providers.Get(providerID); ok && pc.OAuthToken != nil {
+			if small := copilotSmallModel(pc); small != nil {
+				return config.SelectedModel{
+					Provider:        providerID,
+					Model:           small.ID,
+					MaxTokens:       small.DefaultMaxTokens,
+					ReasoningEffort: small.DefaultReasoningEffort,
+				}
+			}
+			return largeModelCfg
+		}
+	}
+
+	defaultSmallModelID := knownProvider.DefaultSmallModelID
+	model := cfg.GetModel(providerID, defaultSmallModelID)
+	if model == nil {
+		slog.Warn("Default small model not found, using large model", "provider", providerID, "model", largeModelCfg.Model)
+		return largeModelCfg
 	}
 
 	slog.Info("Using provider default small model", "provider", providerID, "model", defaultSmallModelID)
@@ -646,13 +657,31 @@ func (app *App) GetDefaultSmallModel(providerID string) config.SelectedModel {
 // catalog lists heavier models first). Returns nil when the catalog is
 // empty.
 func chatGPTSmallModel(pc config.ProviderConfig) *catwalk.Model {
-	for i := range pc.ChatGPTModels {
-		if strings.Contains(pc.ChatGPTModels[i].ID, "mini") {
-			return &pc.ChatGPTModels[i]
+	models := pc.AvailableModels()
+	for i := range models {
+		if strings.Contains(models[i].ID, "mini") {
+			return &models[i]
 		}
 	}
-	if len(pc.ChatGPTModels) > 0 {
-		return &pc.ChatGPTModels[len(pc.ChatGPTModels)-1]
+	if len(models) > 0 {
+		return &models[len(models)-1]
+	}
+	return nil
+}
+
+// copilotSmallModel picks a lightweight model from the Copilot catalog,
+// preferring a "mini" or "haiku" variant and falling back to the last
+// entry. Returns nil when the catalog is empty.
+func copilotSmallModel(pc config.ProviderConfig) *catwalk.Model {
+	models := pc.AvailableModels()
+	for i := range models {
+		id := models[i].ID
+		if strings.Contains(id, "mini") || strings.Contains(id, "haiku") {
+			return &models[i]
+		}
+	}
+	if len(models) > 0 {
+		return &models[len(models)-1]
 	}
 	return nil
 }

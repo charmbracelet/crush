@@ -46,6 +46,10 @@ const refreshLockDeadline = 45 * time.Second
 // would rather write and risk a rare clobber than hang the UI.
 const credentialWriteLockDeadline = 10 * time.Second
 
+// copilotModelsTTL is how long the fetched GitHub Copilot model catalog
+// is trusted before RefetchCopilotModels refreshes it.
+const copilotModelsTTL = time.Hour
+
 // fileSnapshot captures metadata about a config file at a point in time.
 type fileSnapshot struct {
 	Path    string
@@ -122,10 +126,12 @@ type ConfigStore struct {
 	// back to the real provider clients.
 	exchangeToken func(ctx context.Context, providerID, refreshToken string) (*oauth.Token, error)
 
-	// fetchOpenAIModels fetches the ChatGPT model catalog. A field for the
-	// same reason as exchangeToken: tests stub it to avoid network calls,
-	// production leaves it nil and refetchOpenAIModels calls the real one.
-	fetchOpenAIModels func(ctx context.Context, token *oauth.Token) ([]catwalk.Model, error)
+	// fetchOpenAIModels and fetchCopilotModels fetch the credential-scoped
+	// model catalogs. Fields for the same reason as exchangeToken: tests
+	// stub them to avoid network calls, production leaves them nil and the
+	// refetch functions call the real ones.
+	fetchOpenAIModels  func(ctx context.Context, token *oauth.Token) ([]catwalk.Model, error)
+	fetchCopilotModels func(ctx context.Context, token *oauth.Token) ([]catwalk.Model, error)
 
 	// authSignalMu guards authSignals, which maps provider IDs to
 	// channels that WaitForTokenChange blocks on. SignalAuthComplete
@@ -583,20 +589,38 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 		}
 		setKeyOrToken = func() {
 			providerConfig.APIKey = v
-			if providerID == string(catwalk.InferenceProviderOpenAI) {
+			switch providerID {
+			case string(catwalk.InferenceProviderOpenAI):
 				// Either OAuth or an API key, never both: the login
 				// leaves nothing usable on the API-key side behind.
 				providerConfig.OAuthToken = nil
 				providerConfig.ChatGPTModels = nil
+			case string(catwalk.InferenceProviderCopilot):
+				// An API key retires the OAuth login and the catalog
+				// fetched with it.
+				providerConfig.OAuthToken = nil
+				providerConfig.CopilotModels = nil
+				providerConfig.CopilotModelsFetchAt = time.Time{}
 			}
 		}
-		if providerID == string(catwalk.InferenceProviderOpenAI) {
+		switch providerID {
+		case string(catwalk.InferenceProviderOpenAI):
 			// Either OAuth or an API key, never both: the new key
 			// leaves nothing usable on the ChatGPT side behind.
 			if err := s.RemoveConfigField(scope, fmt.Sprintf("providers.%s.oauth", providerID)); err != nil {
 				return err
 			}
 			if err := s.RemoveConfigField(scope, fmt.Sprintf("providers.%s.chatgpt_models", providerID)); err != nil {
+				return err
+			}
+		case string(catwalk.InferenceProviderCopilot):
+			if err := s.RemoveConfigField(scope, fmt.Sprintf("providers.%s.oauth", providerID)); err != nil {
+				return err
+			}
+			if err := s.RemoveConfigField(scope, fmt.Sprintf("providers.%s.copilot_models", providerID)); err != nil {
+				return err
+			}
+			if err := s.RemoveConfigField(scope, fmt.Sprintf("providers.%s.copilot_models_fetch_at", providerID)); err != nil {
 				return err
 			}
 		}
@@ -632,6 +656,7 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 			}
 			providerConfig.APIKey = v.AccessToken
 			if providerID == string(catwalk.InferenceProviderCopilot) {
+				isToken = true
 				providerConfig.SetupGitHubCopilot()
 			}
 		}
@@ -669,18 +694,19 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 		cfg.Providers.Set(providerID, providerConfig)
 	}
 
-	// After authenticating with Hyper, re-fetch the provider catalog so
-	// the latest models are available without restarting.
-	if providerID == "hyper" {
+	switch providerID {
+	case "hyper":
 		if refetchErr := s.RefetchHyperProvider(context.Background()); refetchErr != nil {
 			slog.Warn("Failed to refetch Hyper provider after auth", "error", refetchErr)
 		}
-	}
-	// After authenticating with a ChatGPT account, fetch the Codex model
-	// catalog the subscription grants and persist it so the models
-	// dialog can offer it beside the API-key catalog.
-	if providerID == string(catwalk.InferenceProviderOpenAI) && isToken {
-		s.refetchOpenAIModels(context.Background(), scope)
+	case string(catwalk.InferenceProviderCopilot):
+		if isToken {
+			s.refetchCopilotModels(context.Background(), scope)
+		}
+	case string(catwalk.InferenceProviderOpenAI):
+		if isToken {
+			s.refetchOpenAIModels(context.Background(), scope)
+		}
 	}
 	return nil
 }
@@ -716,6 +742,69 @@ func (s *ConfigStore) refetchOpenAIModels(ctx context.Context, scope Scope) {
 	}); err != nil {
 		slog.Warn("Failed to persist ChatGPT model catalog", "error", err)
 	}
+}
+
+// refetchCopilotModels stores the model catalog the GitHub Copilot
+// subscription grants next to the provider's static catalog. Best
+// effort: a failure leaves the existing catalog in place and the login
+// still succeeds.
+func (s *ConfigStore) refetchCopilotModels(ctx context.Context, scope Scope) {
+	fg := s.Config()
+	pc, ok := fg.Providers.Get(string(catwalk.InferenceProviderCopilot))
+	if !ok || pc.OAuthToken == nil {
+		return
+	}
+	// Copilot IDE tokens live about thirty minutes, so the stored
+	// token is usually expired by the time a refetch happens. Refresh
+	// it first; fetching with a stale token would only 401.
+	if pc.OAuthToken.IsExpired() {
+		if err := s.RefreshOAuthToken(ctx, scope, string(catwalk.InferenceProviderCopilot)); err != nil {
+			slog.Warn("Failed to refresh GitHub Copilot token before catalog fetch", "error", err)
+			return
+		}
+		pc, ok = s.Config().Providers.Get(string(catwalk.InferenceProviderCopilot))
+		if !ok || pc.OAuthToken == nil {
+			return
+		}
+	}
+	fetchModels := s.fetchCopilotModels
+	if fetchModels == nil {
+		fetchModels = copilot.Models
+	}
+	models, err := fetchModels(ctx, pc.OAuthToken)
+	if err != nil {
+		slog.Warn("Failed to fetch GitHub Copilot model catalog after auth", "error", err)
+		return
+	}
+	if err := s.update(scope, func(c *Config) map[string]any {
+		p, ok := c.Providers.Get(string(catwalk.InferenceProviderCopilot))
+		if !ok {
+			return nil
+		}
+		p.CopilotModels = models
+		p.CopilotModelsFetchAt = time.Now()
+		c.Providers.Set(string(catwalk.InferenceProviderCopilot), p)
+		return map[string]any{
+			"providers.copilot.copilot_models":          models,
+			"providers.copilot.copilot_models_fetch_at": p.CopilotModelsFetchAt,
+		}
+	}); err != nil {
+		slog.Warn("Failed to persist GitHub Copilot model catalog", "error", err)
+	}
+}
+
+// RefetchCopilotModels refreshes the GitHub Copilot model catalog when
+// the provider is signed in and the stored catalog is stale — older than
+// copilotModelsTTL — or missing, because the fetch at login time failed
+// or the credentials predate the catalog. A no-op while the catalog is
+// fresh, so callers can invoke it freely on model updates.
+func (s *ConfigStore) RefetchCopilotModels(ctx context.Context) {
+	cfg := s.Config()
+	pc, ok := cfg.Providers.Get(string(catwalk.InferenceProviderCopilot))
+	if !ok || pc.OAuthToken == nil || time.Since(pc.CopilotModelsFetchAt) < copilotModelsTTL {
+		return
+	}
+	s.refetchCopilotModels(ctx, ScopeGlobal)
 }
 
 // RefetchOpenAIChatGPTModels fills in the ChatGPT model catalog when the

@@ -1391,6 +1391,10 @@ func (c *coordinator) UpdateModels(ctx context.Context) error {
 	// this a no-op once the catalog exists.
 	c.cfg.RefetchOpenAIChatGPTModels(ctx)
 
+	// Same for GitHub Copilot: refresh the subscription's model catalog
+	// once it grows stale. TTL-gated, so a no-op while it is fresh.
+	c.cfg.RefetchCopilotModels(ctx)
+
 	agent, name := c.activeAgent()
 	return c.updateAgentModels(ctx, agent, name)
 }

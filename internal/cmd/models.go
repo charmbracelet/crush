@@ -58,14 +58,17 @@ crush models gpt5`,
 				configured: true,
 			}
 
-			// The OpenAI provider holds exactly one credential. Signed
-			// in with ChatGPT, only the models the subscription grants are
-			// usable; an API key lists the regular catalog.
-			var models []catwalk.Model
-			if providerID == string(catwalk.InferenceProviderOpenAI) && provider.OAuthToken != nil {
-				models = provider.ChatGPTModels
-			} else {
-				models = provider.Models
+			// Providers signed in with OAuth hold a credential-scoped
+			// catalog: ChatGPT only grants the models the subscription
+			// allows, and Copilot lists the models fetched with its token.
+			models := provider.Models
+			if provider.OAuthToken != nil {
+				switch providerID {
+				case string(catwalk.InferenceProviderOpenAI):
+					models = provider.ChatGPTModels
+				case string(catwalk.InferenceProviderCopilot):
+					models = provider.CopilotModels
+				}
 			}
 
 			for _, model := range models {

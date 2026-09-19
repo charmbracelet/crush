@@ -44,8 +44,9 @@ type TreeNode struct {
 }
 
 type LSResponseMetadata struct {
-	NumberOfFiles int  `json:"number_of_files"`
-	Truncated     bool `json:"truncated"`
+	Path          string `json:"path"`
+	NumberOfFiles int    `json:"number_of_files"`
+	Truncated     bool   `json:"truncated"`
 }
 
 const (
@@ -153,6 +154,7 @@ func ListDirectoryTree(searchPath string, params LSParams, lsConfig config.ToolL
 	}
 
 	metadata := LSResponseMetadata{
+		Path:          searchPath,
 		NumberOfFiles: len(files),
 		Truncated:     truncated,
 	}

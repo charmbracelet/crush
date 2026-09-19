@@ -1117,16 +1117,10 @@ func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers 
 
 	// Set HTTP client based on provider and debug mode.
 	var httpClient *http.Client
+	var autoResolver *copilot.AutoResolver
 	switch providerID {
 	case string(catwalk.InferenceProviderCopilot):
-		opts = append(
-			opts,
-			openaicompat.WithUseResponsesAPI(),
-			openaicompat.WithResponsesAPIFunc(func(modelID string) bool {
-				return copilotResponsesModels[modelID]
-			}),
-		)
-		httpClient = copilot.NewClient(isSubAgent, c.cfg.Config().Options.Debug, func() *oauth.Token {
+		token := func() *oauth.Token {
 			// Read the token lazily: the provider client outlives the
 			// token, which the refresh flow replaces.
 			cfg, ok := c.cfg.Config().Providers.Get(string(catwalk.InferenceProviderCopilot))
@@ -1134,7 +1128,16 @@ func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers 
 				return nil
 			}
 			return cfg.OAuthToken
+		}
+		autoResolver = copilot.NewAutoResolver(token, func(modelID string) bool {
+			return copilotResponsesModels[modelID]
 		})
+		opts = append(
+			opts,
+			openaicompat.WithUseResponsesAPI(),
+			openaicompat.WithResponsesAPIFunc(autoResolver.UsesResponsesAPI),
+		)
+		httpClient = copilot.NewClient(isSubAgent, c.cfg.Config().Options.Debug)
 
 	case string(catwalk.InferenceProviderOpenCodeGo), string(catwalk.InferenceProviderOpenCodeZen):
 		opts = append(
@@ -1168,7 +1171,14 @@ func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers 
 		opts = append(opts, openaicompat.WithSDKOptions(openaisdk.WithJSONSet(extraKey, extraValue)))
 	}
 
-	return openaicompat.New(opts...)
+	provider, err := openaicompat.New(opts...)
+	if err != nil {
+		return nil, err
+	}
+	if autoResolver != nil {
+		return copilot.NewAutoProvider(provider, autoResolver), nil
+	}
+	return provider, nil
 }
 
 func (c *coordinator) buildAzureProvider(baseURL, apiKey string, headers map[string]string, options map[string]string) (fantasy.Provider, error) {

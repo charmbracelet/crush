@@ -115,6 +115,10 @@ func newOAuth(
 		key.WithHelp("enter", "copy & open"),
 	)
 	m.keyMap.Close = CloseKey
+	applyDialogKeybinds(com, map[string]*key.Binding{
+		"select": &m.keyMap.Submit,
+		"copy":   &m.keyMap.Copy,
+	})
 
 	return &m, tea.Batch(m.spinner.Tick, m.oAuthProvider.initiateAuth)
 }

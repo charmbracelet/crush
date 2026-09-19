@@ -418,6 +418,12 @@ type UI struct {
 		index    int
 		draft    string
 	}
+
+	// keybindWarnings holds config problems found while applying
+	// keybind overrides (unknown actions, same-domain collisions).
+	// Init reports them through the status bar because slog only
+	// reaches the log file.
+	keybindWarnings []string
 }
 
 // New creates a new instance of the [UI] model.
@@ -457,6 +463,8 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		com.Styles.Completions.Focused,
 		com.Styles.Completions.Match,
 	)
+
+	keybindWarnings := applyUserKeybinds(com, &keyMap, &ta, comp)
 
 	todoSpinner := spinner.New(
 		spinner.WithSpinner(spinner.MiniDot),
@@ -500,6 +508,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		initialSessionID:    initialSessionID,
 		continueLastSession: continueLast,
 		skillStates:         skills.GetLatestStates(),
+		keybindWarnings:     keybindWarnings,
 	}
 
 	status := NewStatus(com, ui)
@@ -561,6 +570,11 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 // Init initializes the UI model.
 func (m *UI) Init() tea.Cmd {
 	var cmds []tea.Cmd
+	// Surface keybind config problems where the user is looking:
+	// slog alone only reaches the log file.
+	for _, w := range m.keybindWarnings {
+		cmds = append(cmds, util.ReportWarn(w))
+	}
 	if m.state == uiOnboarding {
 		if cmd := m.openModelsDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -1093,8 +1107,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyboardEnhancementsMsg:
 		m.keyenh = msg
 		if msg.SupportsKeyDisambiguation() {
-			m.keyMap.Models.SetHelp("ctrl+m", "models")
-			m.keyMap.Editor.Newline.SetHelp("shift+enter", "newline")
+			// Prefer shift+enter only when the user kept the default;
+			// a remapped binding keeps its own help text.
+			if slices.Contains(m.keyMap.Editor.Newline.Keys(), "ctrl+j") {
+				m.keyMap.Models.SetHelp("ctrl+m", "models")
+				m.keyMap.Editor.Newline.SetHelp("shift+enter", "newline")
+			}
 		}
 	case copyChatHighlightMsg:
 		cmds = append(cmds, m.copyChatHighlight())
@@ -2092,13 +2110,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before summarizing session..."))
 			break
 		}
-		cmds = append(cmds, func() tea.Msg {
-			err := m.com.Workspace.AgentSummarize(context.Background(), msg.SessionID)
-			if err != nil {
-				return util.ReportError(err)()
-			}
-			return nil
-		})
+		cmds = append(cmds, m.summarizeSession(msg.SessionID))
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleHelp:
 		m.status.ToggleHelp()
@@ -2123,50 +2135,10 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleThinking:
-		cmds = append(cmds, m.updateAgentModelCmd(func() tea.Msg {
-			cfg := m.com.Config()
-			if cfg == nil {
-				return util.ReportError(errors.New("configuration not found"))()
-			}
-
-			agentCfg, ok := cfg.Agents[config.AgentCoder]
-			if !ok {
-				return util.ReportError(errors.New("agent configuration not found"))()
-			}
-
-			currentModel := cfg.Models[agentCfg.Model]
-			currentModel.Think = !currentModel.Think
-			if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, agentCfg.Model, currentModel); err != nil {
-				return util.ReportError(err)()
-			}
-			m.com.Workspace.UpdateAgentModel(context.TODO())
-			status := "disabled"
-			if currentModel.Think {
-				status = "enabled"
-			}
-			return util.NewInfoMsg("Thinking mode " + status)
-		}))
+		cmds = append(cmds, m.toggleThinkingCmd())
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleTransparentBackground:
-		cmds = append(cmds, func() tea.Msg {
-			cfg := m.com.Config()
-			if cfg == nil {
-				return util.ReportError(errors.New("configuration not found"))()
-			}
-
-			isTransparent := cfg.Options != nil && cfg.Options.TUI.IsTransparent()
-			newValue := !isTransparent
-			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.tui.transparent", newValue); err != nil {
-				return util.ReportError(err)()
-			}
-			m.isTransparent = newValue
-
-			status := "disabled"
-			if newValue {
-				status = "enabled"
-			}
-			return util.NewInfoMsg("Transparent background " + status)
-		})
+		cmds = append(cmds, m.toggleTransparentCmd())
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleMouseSupport:
 		cfg := m.com.Config()
@@ -2726,6 +2698,41 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				cmds = append(cmds, util.ReportInfo("Yolo mode disabled"))
 			}
 			return true
+		case key.Matches(msg, m.keyMap.Summarize):
+			if m.state == uiChat && m.hasSession() {
+				if m.isAgentBusy() {
+					cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before summarizing session..."))
+					return true
+				}
+				cmds = append(cmds, m.summarizeSession(m.session.ID))
+				return true
+			}
+		case key.Matches(msg, m.keyMap.ToggleThinking):
+			cmds = append(cmds, m.toggleThinkingCmd())
+			return true
+		case key.Matches(msg, m.keyMap.ToggleCompact):
+			cmds = append(cmds, m.toggleCompactMode())
+			return true
+		case key.Matches(msg, m.keyMap.ToggleTransparent):
+			cmds = append(cmds, m.toggleTransparentCmd())
+			return true
+		case key.Matches(msg, m.keyMap.InitializeProject):
+			if m.isAgentBusy() {
+				cmds = append(cmds, util.ReportWarn("Agent is busy, please wait..."))
+				return true
+			}
+			cmds = append(cmds, m.initializeProject())
+			return true
+		case key.Matches(msg, m.keyMap.Reasoning):
+			if cmd := m.openReasoningDialog(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			return true
+		case key.Matches(msg, m.keyMap.Notifications):
+			if cmd := m.openNotificationsDialog(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			return true
 		}
 		return false
 	}
@@ -3090,6 +3097,8 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				}
 			case key.Matches(msg, m.keyMap.Chat.Expand):
 				m.chat.ToggleExpandedSelectedItem()
+			case key.Matches(msg, m.keyMap.Chat.ClearHighlight):
+				m.chat.ClearSelection()
 			case key.Matches(msg, m.keyMap.Chat.Up):
 				m.markScrollOnly()
 				m.chat.ScrollBy(-1)
@@ -3188,6 +3197,7 @@ func (m *UI) drawHeader(scr uv.Screen, area uv.Rectangle) {
 		m.session,
 		m.isCompact,
 		m.detailsOpen,
+		firstKey(m.keyMap.Chat.Details),
 		area.Dx(),
 		m.lspErrorCount(),
 		m.hyperCredits,
@@ -3450,7 +3460,7 @@ func (m *UI) ShortHelp() []key.Binding {
 	tab := k.Tab
 	commands := k.Commands
 	if m.focus == uiFocusEditor && m.textarea.Value() == "" {
-		commands.SetHelp("/ or ctrl+p", "commands")
+		commands.SetHelp(firstKey(k.Editor.Commands)+" or "+firstKey(k.Commands), "commands")
 	}
 
 	switch m.state {
@@ -3461,18 +3471,18 @@ func (m *UI) ShortHelp() []key.Binding {
 		if m.isAgentBusy() {
 			cancelBinding := k.Chat.Cancel
 			if m.isCanceling {
-				cancelBinding.SetHelp("esc", "press again to cancel")
+				cancelBinding.SetHelp(firstKey(k.Chat.Cancel), "press again to cancel")
 			} else if m.promptQueue > 0 {
-				cancelBinding.SetHelp("esc", "clear queue")
+				cancelBinding.SetHelp(firstKey(k.Chat.Cancel), "clear queue")
 			}
 			binds = append(binds, cancelBinding)
 		}
 
 		switch m.focus {
 		case uiFocusEditor:
-			tab.SetHelp("tab", "focus chat")
+			tab.SetHelp(firstKey(k.Tab), "focus chat")
 		default:
-			tab.SetHelp("tab", "focus editor")
+			tab.SetHelp(firstKey(k.Tab), "focus editor")
 		}
 
 		binds = append(
@@ -3557,12 +3567,12 @@ func (m *UI) FullHelp() [][]key.Binding {
 	var binds [][]key.Binding
 	k := &m.keyMap
 	help := k.Help
-	help.SetHelp("ctrl+g", "less")
+	help.SetHelp(firstKey(k.Help), "less")
 	hasAttachments := len(m.attachments.List()) > 0
 	hasSession := m.hasSession()
 	commands := k.Commands
 	if m.focus == uiFocusEditor && m.textarea.Value() == "" {
-		commands.SetHelp("/ or ctrl+p", "commands")
+		commands.SetHelp(firstKey(k.Editor.Commands)+" or "+firstKey(k.Commands), "commands")
 	}
 
 	switch m.state {
@@ -3576,9 +3586,9 @@ func (m *UI) FullHelp() [][]key.Binding {
 		if m.isAgentBusy() {
 			cancelBinding := k.Chat.Cancel
 			if m.isCanceling {
-				cancelBinding.SetHelp("esc", "press again to cancel")
+				cancelBinding.SetHelp(firstKey(k.Chat.Cancel), "press again to cancel")
 			} else if m.promptQueue > 0 {
-				cancelBinding.SetHelp("esc", "clear queue")
+				cancelBinding.SetHelp(firstKey(k.Chat.Cancel), "clear queue")
 			}
 			binds = append(binds, []key.Binding{cancelBinding})
 		}
@@ -3587,9 +3597,9 @@ func (m *UI) FullHelp() [][]key.Binding {
 		tab := k.Tab
 		switch m.focus {
 		case uiFocusEditor:
-			tab.SetHelp("tab", "focus chat")
+			tab.SetHelp(firstKey(k.Tab), "focus chat")
 		default:
-			tab.SetHelp("tab", "focus editor")
+			tab.SetHelp(firstKey(k.Tab), "focus editor")
 		}
 
 		mainBinds = append(
@@ -3759,6 +3769,67 @@ func (m *UI) toggleCompactMode() tea.Cmd {
 	m.updateLayoutAndSize()
 
 	return nil
+}
+
+// summarizeSession returns a command that summarizes the session.
+func (m *UI) summarizeSession(sessionID string) tea.Cmd {
+	return func() tea.Msg {
+		err := m.com.Workspace.AgentSummarize(context.Background(), sessionID)
+		if err != nil {
+			return util.ReportError(err)()
+		}
+		return nil
+	}
+}
+
+// toggleThinkingCmd flips thinking mode on the large model.
+func (m *UI) toggleThinkingCmd() tea.Cmd {
+	return m.updateAgentModelCmd(func() tea.Msg {
+		cfg := m.com.Config()
+		if cfg == nil {
+			return util.ReportError(errors.New("configuration not found"))()
+		}
+
+		agentCfg, ok := cfg.Agents[config.AgentCoder]
+		if !ok {
+			return util.ReportError(errors.New("agent configuration not found"))()
+		}
+
+		currentModel := cfg.Models[agentCfg.Model]
+		currentModel.Think = !currentModel.Think
+		if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, agentCfg.Model, currentModel); err != nil {
+			return util.ReportError(err)()
+		}
+		m.com.Workspace.UpdateAgentModel(context.TODO())
+		status := "disabled"
+		if currentModel.Think {
+			status = "enabled"
+		}
+		return util.NewInfoMsg("Thinking mode " + status)
+	})
+}
+
+// toggleTransparentCmd flips the transparent background setting.
+func (m *UI) toggleTransparentCmd() tea.Cmd {
+	return func() tea.Msg {
+		cfg := m.com.Config()
+		if cfg == nil {
+			return util.ReportError(errors.New("configuration not found"))()
+		}
+
+		isTransparent := cfg.Options != nil && cfg.Options.TUI.IsTransparent()
+		newValue := !isTransparent
+		if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.tui.transparent", newValue); err != nil {
+			return util.ReportError(err)()
+		}
+		m.isTransparent = newValue
+
+		status := "disabled"
+		if newValue {
+			status = "enabled"
+		}
+		return util.NewInfoMsg("Transparent background " + status)
+	}
 }
 
 // updateLayoutAndSize updates the layout and sizes of UI components.

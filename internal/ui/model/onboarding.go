@@ -87,7 +87,7 @@ func (m *UI) initializeView() string {
 	header := s.Header.Render("Would you like to initialize this project?")
 	path := s.Accent.PaddingLeft(2).Render(cwd)
 	desc := s.Content.Render(fmt.Sprintf("When I initialize your codebase I examine the project and put the result into an %s file which serves as general context.", initFile))
-	hint := s.Content.Render("You can also initialize anytime via ") + s.Accent.Render("ctrl+p") + s.Content.Render(".")
+	hint := s.Content.Render("You can also initialize anytime via ") + s.Accent.Render(firstKey(m.keyMap.Commands)) + s.Content.Render(".")
 	prompt := s.Content.Render("Would you like to initialize now?")
 
 	buttons := common.ButtonGroup(m.com.Styles, []common.ButtonOpts{

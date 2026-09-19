@@ -337,6 +337,9 @@ type Styles struct {
 
 		// Plan section styles
 		PlanBox lipgloss.Style // Border+padding for the final plan message
+		// PlanBoxFooter is the dim path line rendered under the plan
+		// card once the plan has been saved to a file.
+		PlanBoxFooter lipgloss.Style
 
 		// Thinking section styles
 		ThinkingBox            lipgloss.Style // Background for thinking content

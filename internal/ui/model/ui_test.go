@@ -21,6 +21,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/crush/internal/workspace"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 )
 
@@ -257,6 +258,77 @@ func TestHandlePlanHandoff_MarkerOpensInline(t *testing.T) {
 		Text:      "Here is the plan.\n<!-- CRUSH_PLAN_READY -->",
 	})
 	require.True(t, isPlanHandoffInline(u))
+}
+
+func TestSetPlanFilePath_AttachesPathToPlanCard(t *testing.T) {
+	t.Parallel()
+
+	u, _ := newPlanUI(t, "sess-1")
+	item := chat.NewAssistantMessageItem(u.com.Styles, &message.Message{
+		ID:   "plan-msg",
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.TextContent{Text: "<!-- CRUSH_PLAN_START -->\n\n# Plan\n\nDone\n\n<!-- CRUSH_PLAN_READY -->"},
+			message.Finish{Reason: message.FinishReasonEndTurn, Time: 1},
+		},
+	})
+	u.chat.SetMessages(item)
+
+	u.setPlanFilePath(notify.RunComplete{
+		SessionID: "sess-1",
+		MessageID: "plan-msg",
+		PlanPath:  ".crush/plans/2026-09-19-153045-fix-login-timeout.md",
+	})
+	got := item.RawRender(200)
+	require.Contains(t, ansi.Strip(got), "Saved to .crush/plans/2026-09-19-153045-fix-login-timeout.md")
+	// testWorkspace.WorkingDir is /tmp/crush-test, so the footer links to
+	// the absolute path while still displaying the relative one.
+	require.Contains(
+		t,
+		got,
+		"file:///tmp/crush-test/.crush/plans/2026-09-19-153045-fix-login-timeout.md",
+		"the plan footer must hyperlink the absolute path",
+	)
+	require.Contains(t, got, "\x1b]8;", "the plan footer must emit an OSC 8 hyperlink")
+}
+
+func TestSetPlanFilePath_IgnoresOtherSessionsAndEmptyPath(t *testing.T) {
+	t.Parallel()
+
+	u, _ := newPlanUI(t, "sess-1")
+	item := chat.NewAssistantMessageItem(u.com.Styles, &message.Message{
+		ID:    "plan-msg",
+		Role:  message.Assistant,
+		Parts: []message.ContentPart{message.TextContent{Text: "<!-- CRUSH_PLAN_READY -->"}},
+	})
+	u.chat.SetMessages(item)
+
+	// A path for a different session, and an empty path, must both be
+	// ignored so a stale event cannot annotate the wrong card.
+	u.setPlanFilePath(notify.RunComplete{SessionID: "other", MessageID: "plan-msg", PlanPath: ".crush/plans/a.md"})
+	u.setPlanFilePath(notify.RunComplete{SessionID: "sess-1", MessageID: "plan-msg", PlanPath: ""})
+	require.NotContains(t, item.RawRender(72), "Saved to")
+}
+
+func TestHandlePlanSaveNotification(t *testing.T) {
+	t.Parallel()
+	u, _ := newPlanUI(t, "sess-1")
+	for _, tc := range []struct {
+		eventType notify.Type
+		message   string
+		want      string
+		infoType  util.InfoType
+	}{
+		{notify.TypePlanSaved, ".crush/plans/2026-09-19-153045-fix-login-timeout.md", "Plan saved to .crush/plans/2026-09-19-153045-fix-login-timeout.md", util.InfoTypeInfo},
+		{notify.TypePlanSaveError, "permission denied", "failed to save plan: permission denied", util.InfoTypeError},
+	} {
+		cmd := u.handleAgentNotification(notify.Notification{Type: tc.eventType, Message: tc.message})
+		require.NotNil(t, cmd)
+		msg, ok := cmd().(util.InfoMsg)
+		require.True(t, ok)
+		require.Equal(t, tc.want, msg.Msg)
+		require.Equal(t, tc.infoType, msg.Type)
+	}
 }
 
 func TestHandlePlanHandoff_NoMarkerNoInline(t *testing.T) {
@@ -716,4 +788,16 @@ func TestSwitchPlanToYolo(t *testing.T) {
 		require.False(t, u.cycleYolo, "explicit activation must not be undone by the Shift+Tab cycle")
 		require.Equal(t, config.AgentCoder, ws.setMainCalledWith)
 	}
+}
+
+func TestPlanPathOnlyLivesInCurrentView(t *testing.T) {
+	t.Parallel()
+	u, _ := newPlanUI(t, "sess-1")
+	msg := message.Message{ID: "plan-msg", SessionID: "sess-1", Role: message.Assistant, Parts: []message.ContentPart{message.TextContent{Text: "# Plan\n\n<!-- CRUSH_PLAN_READY -->"}, message.Finish{Reason: message.FinishReasonEndTurn, Time: 1}}}
+	u.setSessionMessages([]message.Message{msg})
+	u.setPlanFilePath(notify.RunComplete{SessionID: "sess-1", MessageID: msg.ID, PlanPath: ".crush/plans/a.md"})
+	u.updateSessionMessage(msg)
+	require.Contains(t, u.chat.MessageItem(msg.ID).RawRender(72), "file:///tmp/crush-test/.crush/plans/a.md")
+	u.setSessionMessages([]message.Message{msg})
+	require.NotContains(t, u.chat.MessageItem(msg.ID).RawRender(72), "Saved to")
 }

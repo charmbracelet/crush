@@ -42,6 +42,7 @@ import (
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/plan"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
@@ -796,6 +797,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 	case pubsub.Event[notify.RunComplete]:
+		if cmd := m.setPlanFilePath(msg.Payload); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 		if cmd := m.handlePlanHandoff(msg.Payload); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -1100,7 +1104,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.copyChatHighlight())
 	case DelayedClickMsg:
 		// Handle delayed single-click action (e.g., expansion).
-		m.chat.HandleDelayedClick(msg)
+		if _, cmd := m.chat.HandleDelayedClick(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case tea.MouseClickMsg:
 		// Pass mouse events to dialogs first if any are open.
 		if m.dialog.HasDialogs() {
@@ -1163,7 +1169,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Adjust for chat area position
 			x -= m.layout.main.Min.X
 			y -= m.layout.main.Min.Y
-			if !image.Pt(msg.X, msg.Y).In(m.layout.sidebar) {
+			if msg.Button == uv.MouseLeft && !image.Pt(msg.X, msg.Y).In(m.layout.sidebar) {
 				if handled, cmd := m.chat.HandleMouseDown(x, y); handled {
 					m.lastClickTime = time.Now()
 					if cmd != nil {
@@ -5155,6 +5161,27 @@ func (m *UI) handlePermissionNotification(notification permission.PermissionNoti
 	}
 }
 
+// setPlanFilePath records the saved plan's path on the plan card for the
+// run's message so the card can render it as a footer for the current view. It is a
+// no-op for runs without a saved plan (non-plan runs, failed saves, or
+// completions that belong to another session).
+func (m *UI) setPlanFilePath(rc notify.RunComplete) tea.Cmd {
+	if rc.PlanPath == "" || m.session == nil || rc.SessionID != m.session.ID {
+		return nil
+	}
+	item := m.chat.MessageItem(rc.MessageID)
+	a, ok := item.(*chat.AssistantMessageItem)
+	if !ok {
+		return nil
+	}
+	absPath := ""
+	if wd := m.com.Workspace.WorkingDir(); filepath.IsAbs(wd) {
+		absPath = filepath.Join(wd, filepath.FromSlash(rc.PlanPath))
+	}
+	a.SetPlanFileLink(rc.PlanPath, absPath)
+	return nil
+}
+
 // handlePlanHandoff checks whether a completed run in plan mode contained the
 // plan-ready sentinel marker and, if so, opens the plan handoff dialog.
 func (m *UI) handlePlanHandoff(rc notify.RunComplete) tea.Cmd {
@@ -5167,7 +5194,7 @@ func (m *UI) handlePlanHandoff(rc notify.RunComplete) tea.Cmd {
 	if m.session == nil || rc.SessionID != m.session.ID {
 		return nil
 	}
-	if !common.PlanReadyMarkerPresent(rc.Text) {
+	if !plan.ReadyMarkerPresent(rc.Text) {
 		slog.Debug("Plan run completed without ready marker", "session_id", rc.SessionID)
 		return nil
 	}
@@ -5257,6 +5284,10 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 	case notify.TypeAgentError:
 		// Terminal edge like TypeAgentFinished; fall through to the
 		// busy/queue refresh below.
+	case notify.TypePlanSaved:
+		return util.ReportInfo("Plan saved to " + n.Message)
+	case notify.TypePlanSaveError:
+		return util.ReportError(fmt.Errorf("failed to save plan: %s", n.Message))
 	case notify.TypeReAuthenticate:
 		return m.handleReAuthenticate(n.ProviderID)
 	case notify.TypeAWSSSOAuth:

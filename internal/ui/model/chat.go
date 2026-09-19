@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"image"
 	"strings"
 	"time"
@@ -12,10 +13,12 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
+	"github.com/charmbracelet/crush/internal/ui/util"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/clipperhouse/displaywidth"
 	"github.com/clipperhouse/uax29/v2/words"
+	"github.com/pkg/browser"
 )
 
 // Constants for multi-click detection.
@@ -1029,19 +1032,28 @@ func (m *Chat) HandleMouseDown(x, y int) (bool, tea.Cmd) {
 // HandleDelayedClick handles a delayed single-click action (like expansion).
 // It only executes if the click ID matches (i.e., no double-click occurred)
 // and no text selection was made (drag to select).
-func (m *Chat) HandleDelayedClick(msg DelayedClickMsg) bool {
+func (m *Chat) HandleDelayedClick(msg DelayedClickMsg) (bool, tea.Cmd) {
 	// Ignore if this click was superseded by a newer click (double/triple).
 	if msg.ClickID != m.pendingClickID {
-		return false
+		return false, nil
 	}
 
 	// Don't expand if user dragged to select text.
 	if m.HasHighlight() {
-		return false
+		return false, nil
 	}
 
 	// Execute the click action (e.g., expansion).
 	selectedItem := m.list.SelectedItem()
+	if selectedItem != m.list.ItemAt(msg.ItemIdx) {
+		return false, nil
+	}
+	if item, ok := selectedItem.(*chat.AssistantMessageItem); ok && !m.mouseDown {
+		if path := item.PlanFileAt(msg.X, msg.Y, m.list.Width()); path != "" {
+			m.pendingClickID++
+			return true, openPlanFile(path, browser.OpenFile)
+		}
+	}
 	if clickable, ok := selectedItem.(list.MouseClickable); ok {
 		handled := clickable.HandleMouseClick(ansi.MouseButton1, msg.X, msg.Y)
 		// Toggle expansion only when the item signalled it handled the
@@ -1057,10 +1069,20 @@ func (m *Chat) HandleDelayedClick(msg DelayedClickMsg) bool {
 				}
 			}
 		}
-		return handled
+		return handled, nil
 	}
 
-	return false
+	return false, nil
+}
+
+// openPlanFile keeps filesystem and process work outside Update.
+func openPlanFile(path string, open func(string) error) tea.Cmd {
+	return func() tea.Msg {
+		if err := open(path); err != nil {
+			return util.ReportError(fmt.Errorf("open plan: %w", err))()
+		}
+		return nil
+	}
 }
 
 // HandleMouseUp handles mouse up events for the chat component.

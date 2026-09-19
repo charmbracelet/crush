@@ -15,6 +15,10 @@ const (
 	// TypeAgentError indicates the agent's turn terminated with an
 	// error. The error text is carried in Notification.Message.
 	TypeAgentError Type = "error"
+	// TypePlanSaved reports the relative path of a saved plan in Message.
+	TypePlanSaved Type = "plan_saved"
+	// TypePlanSaveError reports a failed plan save in Message.
+	TypePlanSaveError Type = "plan_save_error"
 	// TypeAWSSSOAuth indicates AWS SSO credentials have expired and the
 	// coordinator is running the configured refresh command. It opens the
 	// AWS SSO dialog; a follow-up with the same type carries the SSO URL
@@ -39,8 +43,8 @@ type Notification struct {
 	// specific request rather than to any in-flight run on the
 	// session. Empty when no caller set one.
 	RunID string
-	// Message carries the error text for TypeAgentError. Other
-	// notification types ignore it.
+	// Message carries error text for TypeAgentError and TypePlanSaveError,
+	// or the saved path for TypePlanSaved.
 	Message string
 	// AWSSOCommand carries the shell command for TypeAWSSSOAuth.
 	AWSSOCommand string
@@ -68,11 +72,16 @@ type Notification struct {
 // by RunID lets a client correlate a SendMessage call with its
 // terminal event even when the session is busy and other turns are
 // finishing on the same session.
+//
+// PlanPath is the workspace-relative path of the plan file saved for
+// a plan-mode run that ended with a ready plan. Empty for non-plan
+// runs and for plans that could not be saved.
 type RunComplete struct {
 	SessionID string
 	RunID     string
 	MessageID string
 	Text      string
+	PlanPath  string
 	Error     string
 	Cancelled bool
 }

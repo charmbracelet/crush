@@ -197,6 +197,66 @@ func TestAssistantMessageItem_PlanStreamingCardIsOpenUntilMarker(t *testing.T) {
 	require.NotContains(t, cut, "CRUSH_PLAN_START", "the start marker must not leak into rendered output")
 }
 
+func TestAssistantMessageItem_PlanCardShowsSavedFilePath(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	msg := &message.Message{
+		ID:   "plan-saved-path",
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.TextContent{Text: "<!-- CRUSH_PLAN_START -->\n\n# Plan\n\nDone\n\n<!-- CRUSH_PLAN_READY -->"},
+			message.Finish{Reason: message.FinishReasonEndTurn, Time: 1},
+		},
+	}
+	item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
+	item.SetPlanAgent(true)
+
+	// Before the save lands there is no footer.
+	require.NotContains(t, item.RawRender(72), "Saved to")
+
+	item.SetPlanFilePath(".crush/plans/2026-09-19-153045-fix-login-timeout.md")
+	got := item.RawRender(72)
+	require.Contains(t, ansi.Strip(got), "Saved to .crush/plans/2026-09-19-153045-fix-login-timeout.md")
+	// A relative path alone carries no target, so the footer is plain text.
+	require.NotContains(t, got, "\x1b]8;", "a footer without an absolute path must not emit a hyperlink")
+	// The footer must survive the section cache even though the message
+	// content never changed: the path folds into the content key.
+	require.Contains(t, item.RawRender(72), "Saved to")
+}
+
+func TestAssistantMessageItem_PlanCardFooterHyperlinksAbsolutePath(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	msg := &message.Message{
+		ID:   "plan-saved-link",
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.TextContent{Text: "<!-- CRUSH_PLAN_START -->\n\n# Plan\n\nDone\n\n<!-- CRUSH_PLAN_READY -->"},
+			message.Finish{Reason: message.FinishReasonEndTurn, Time: 1},
+		},
+	}
+	item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
+	item.SetPlanAgent(true)
+	item.SetPlanFileLink(
+		".crush/plans/2026-09-19-153045-fix-login-timeout.md",
+		"/Users/vadim/git/me/crush/.crush/plans/2026-09-19-153045-fix-login-timeout.md",
+	)
+
+	got := item.RawRender(200)
+	require.Contains(t, ansi.Strip(got), "Saved to .crush/plans/2026-09-19-153045-fix-login-timeout.md")
+	require.Contains(
+		t,
+		got,
+		"file:///Users/vadim/git/me/crush/.crush/plans/2026-09-19-153045-fix-login-timeout.md",
+		"the footer must point at the plan file",
+	)
+	require.Contains(t, got, "id=plan-file", "the hyperlink must carry its OSC 8 id param")
+	// The visible label stays the workspace-relative path.
+	require.NotContains(t, got, "Saved to /Users/vadim")
+}
+
 func TestAssistantMessageItem_NonPlanRepliesHaveNoPlanCard(t *testing.T) {
 	t.Parallel()
 
@@ -292,4 +352,43 @@ func colorsEqual(left, right color.Color) bool {
 	leftR, leftG, leftB, leftA := left.RGBA()
 	rightR, rightG, rightB, rightA := right.RGBA()
 	return [4]uint32{leftR, leftG, leftB, leftA} == [4]uint32{rightR, rightG, rightB, rightA}
+}
+
+func TestPlanLinkCacheAndHitTarget(t *testing.T) {
+	t.Parallel()
+	sty := styles.CharmtonePantera()
+	msg := &message.Message{ID: "plan", Role: message.Assistant, Parts: []message.ContentPart{
+		message.ReasoningContent{Thinking: "Some reasoning", FinishedAt: 1},
+		message.TextContent{Text: "# Plan\n\nDone\n<!-- CRUSH_PLAN_READY -->"},
+		message.Finish{Reason: message.FinishReasonEndTurn, Time: 1},
+	}}
+	item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
+	path := ".crush/plans/план with spaces.md"
+	item.SetPlanFilePath(path)
+	require.NotContains(t, item.Render(72), "file://")
+	item.SetPlanFileLink(path, "/tmp/project/"+path)
+	require.Contains(t, item.Render(72), "file:///tmp/project/")
+	item.SetPlanFileLink(path, "/tmp/other/"+path)
+	require.Contains(t, item.Render(72), "file:///tmp/other/")
+	require.NotContains(t, item.Render(72), "file:///tmp/project/")
+	for width := 0; width < 12; width++ {
+		require.LessOrEqual(t, ansi.StringWidth(item.renderPlanFileFooter(width)), width)
+	}
+	for _, width := range []int{12, 24, 72, 140} {
+		rendered := item.Render(width)
+		require.LessOrEqual(t, lipgloss.Width(rendered), width)
+		lines := strings.Split(ansi.Strip(rendered), "\n")
+		for y, line := range lines {
+			left := len(line) - len(strings.TrimLeft(line, " "))
+			isFooter := strings.Contains(line, "Saved to") || y == len(lines)-1
+			for x := 0; x < width; x++ {
+				target := item.PlanFileAt(x, y, width)
+				if isFooter && x >= left && x < ansi.StringWidth(line) && strings.TrimSpace(line) != "" {
+					require.Equal(t, "/tmp/other/"+path, target, "width=%d x=%d y=%d", width, x, y)
+				} else {
+					require.Empty(t, target, "width=%d x=%d y=%d", width, x, y)
+				}
+			}
+		}
+	}
 }

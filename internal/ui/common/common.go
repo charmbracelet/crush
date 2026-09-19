@@ -11,7 +11,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/clipboard"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/plan"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/crush/internal/workspace"
@@ -20,32 +19,6 @@ import (
 
 // MaxAttachmentSize defines the maximum allowed size for file attachments (5 MB).
 const MaxAttachmentSize = int64(5 * 1024 * 1024)
-
-// PlanStartMarker is the sentinel at the start of a final plan response.
-const PlanStartMarker = plan.StartMarker
-
-// PlanReadyMarker is the sentinel that signals a plan is ready for execution.
-const PlanReadyMarker = plan.ReadyMarker
-
-// PlanStartMarkerPresent reports whether text contains the start marker.
-func PlanStartMarkerPresent(text string) bool {
-	return plan.StartMarkerPresent(text)
-}
-
-// PlanReadyMarkerPresent reports whether text contains the ready marker.
-func PlanReadyMarkerPresent(text string) bool {
-	return plan.ReadyMarkerPresent(text)
-}
-
-// StripPlanReadyMarker removes ready marker lines from text.
-func StripPlanReadyMarker(text string) string {
-	return plan.StripReadyMarker(text)
-}
-
-// StripPlanMarkers removes both plan marker lines from text.
-func StripPlanMarkers(text string) string {
-	return plan.StripMarkers(text)
-}
 
 // AllowedImageTypes defines the permitted image file types.
 var AllowedImageTypes = []string{".jpg", ".jpeg", ".png"}

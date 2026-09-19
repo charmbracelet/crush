@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/plan"
@@ -23,7 +24,7 @@ func TestSaveReadyPlanKeepsEachVersion(t *testing.T) {
 		Text:      plan.StartMarker + "\n# First plan\n\nA step.\n" + plan.ReadyMarker,
 	}
 
-	firstPath, err := saveReadyPlan(workingDir, complete)
+	firstPath, err := saveReadyPlan(workingDir, complete, time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC))
 	require.NoError(t, err)
 	require.Regexp(t, `^\.crush/plans/\d{4}-\d{2}-\d{2}-\d{6}-first-plan\.md$`, firstPath)
 	firstContent, err := os.ReadFile(filepath.Join(workingDir, firstPath))
@@ -31,13 +32,13 @@ func TestSaveReadyPlanKeepsEachVersion(t *testing.T) {
 	require.Equal(t, "# First plan\n\nA step.\n", string(firstContent))
 
 	// Re-saving the same plan within the same second reuses its file.
-	repeatPath, err := saveReadyPlan(workingDir, complete)
+	repeatPath, err := saveReadyPlan(workingDir, complete, time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC))
 	require.NoError(t, err)
 	require.Equal(t, firstPath, repeatPath)
 
 	complete.MessageID = uuid.NewString()
 	complete.Text = plan.StartMarker + "\n# Revised plan\n" + plan.ReadyMarker
-	secondPath, err := saveReadyPlan(workingDir, complete)
+	secondPath, err := saveReadyPlan(workingDir, complete, time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC))
 	require.NoError(t, err)
 	require.NotEqual(t, firstPath, secondPath)
 	secondContent, err := os.ReadFile(filepath.Join(workingDir, secondPath))
@@ -55,7 +56,7 @@ func TestSaveReadyPlanDisambiguatesSameTitleAndSecond(t *testing.T) {
 		MessageID: uuid.NewString(),
 		Text:      "# Same title\n\nFirst body.\n" + plan.ReadyMarker,
 	}
-	firstPath, err := saveReadyPlan(workingDir, first)
+	firstPath, err := saveReadyPlan(workingDir, first, time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC))
 	require.NoError(t, err)
 
 	// A different plan saved in the same second would collide on the
@@ -66,7 +67,7 @@ func TestSaveReadyPlanDisambiguatesSameTitleAndSecond(t *testing.T) {
 		MessageID: uuid.NewString(),
 		Text:      "# Same title\n\nSecond body.\n" + plan.ReadyMarker,
 	}
-	secondPath, err := saveReadyPlan(workingDir, second)
+	secondPath, err := saveReadyPlan(workingDir, second, time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC))
 	require.NoError(t, err)
 	require.Equal(t, strings.TrimSuffix(firstPath, ".md")+"-2.md", secondPath)
 
@@ -86,13 +87,13 @@ func TestSaveReadyPlanDoesNotOverwriteDifferentContent(t *testing.T) {
 		MessageID: uuid.NewString(),
 		Text:      "# Original\n" + plan.ReadyMarker,
 	}
-	path, err := saveReadyPlan(workingDir, complete)
+	path, err := saveReadyPlan(workingDir, complete, time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC))
 	require.NoError(t, err)
 
 	// Same message, different content: the original file must survive and a
 	// new file must be written alongside it.
 	complete.Text = "# Changed\n" + plan.ReadyMarker
-	newPath, err := saveReadyPlan(workingDir, complete)
+	newPath, err := saveReadyPlan(workingDir, complete, time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC))
 	require.NoError(t, err)
 	require.NotEqual(t, path, newPath)
 	content, err := os.ReadFile(filepath.Join(workingDir, path))
@@ -166,14 +167,20 @@ func TestPlanRunCompletePublisherReportsSaveResult(t *testing.T) {
 			publisher.PublishMustDeliver(ctx, pubsub.UpdatedEvent, complete)
 			notice := (<-noticeEvents).Payload
 			require.Equal(t, complete.SessionID, notice.SessionID)
+			downstream := (<-runEvents).Payload
 			if fail {
 				require.Equal(t, notify.TypePlanSaveError, notice.Type)
 				require.Contains(t, notice.Message, "create plan directory")
+				require.Empty(t, downstream.PlanPath, "a failed save must not report a plan path")
 			} else {
 				require.Equal(t, notify.TypePlanSaved, notice.Type)
 				require.FileExists(t, filepath.Join(workingDir, notice.Message))
+				// The terminal event carries the saved path so the TUI can
+				// render it under the plan card.
+				require.Equal(t, notice.Message, downstream.PlanPath)
 			}
-			require.Equal(t, complete, (<-runEvents).Payload)
+			complete.PlanPath = downstream.PlanPath
+			require.Equal(t, complete, downstream)
 		})
 	}
 }

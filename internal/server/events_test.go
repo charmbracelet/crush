@@ -130,6 +130,7 @@ func TestRunCompleteToProto_RoundTrip(t *testing.T) {
 			RunID:     "run-42",
 			MessageID: "M",
 			Text:      "VERDICT: APPROVED",
+			PlanPath:  ".crush/plans/план.md",
 			Error:     "",
 			Cancelled: false,
 		},
@@ -148,6 +149,7 @@ func TestRunCompleteToProto_RoundTrip(t *testing.T) {
 			"this event with the SendMessage call that produced it")
 	require.Equal(t, "M", decoded.Payload.MessageID)
 	require.Equal(t, "VERDICT: APPROVED", decoded.Payload.Text)
+	require.Equal(t, src.Payload.PlanPath, decoded.Payload.PlanPath)
 	require.Empty(t, decoded.Payload.Error)
 	require.False(t, decoded.Payload.Cancelled)
 }

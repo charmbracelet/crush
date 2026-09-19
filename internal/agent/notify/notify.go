@@ -72,11 +72,16 @@ type Notification struct {
 // by RunID lets a client correlate a SendMessage call with its
 // terminal event even when the session is busy and other turns are
 // finishing on the same session.
+//
+// PlanPath is the workspace-relative path of the plan file saved for
+// a plan-mode run that ended with a ready plan. Empty for non-plan
+// runs and for plans that could not be saved.
 type RunComplete struct {
 	SessionID string
 	RunID     string
 	MessageID string
 	Text      string
+	PlanPath  string
 	Error     string
 	Cancelled bool
 }

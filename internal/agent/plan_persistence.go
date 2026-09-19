@@ -25,20 +25,23 @@ type planRunCompletePublisher struct {
 }
 
 func (p *planRunCompletePublisher) Publish(eventType pubsub.EventType, complete notify.RunComplete) {
-	p.persist(context.Background(), complete)
+	complete = p.persist(context.Background(), complete)
 	p.downstream.Publish(eventType, complete)
 }
 
 func (p *planRunCompletePublisher) PublishMustDeliver(ctx context.Context, eventType pubsub.EventType, complete notify.RunComplete) {
-	p.persist(ctx, complete)
+	complete = p.persist(ctx, complete)
 	p.downstream.PublishMustDeliver(ctx, eventType, complete)
 }
 
-func (p *planRunCompletePublisher) persist(ctx context.Context, complete notify.RunComplete) {
+// persist saves a completed ready plan and returns the run event enriched
+// with the saved path. Runs that did not produce a ready plan (errors,
+// cancellations, intermediate replies) are returned unchanged.
+func (p *planRunCompletePublisher) persist(ctx context.Context, complete notify.RunComplete) notify.RunComplete {
 	if complete.Error != "" || complete.Cancelled || !plan.ReadyMarkerPresent(complete.Text) {
-		return
+		return complete
 	}
-	path, err := saveReadyPlan(p.workingDir, complete)
+	path, err := saveReadyPlan(p.workingDir, complete, time.Now())
 	if err != nil {
 		slog.Error("Failed to save plan", "session_id", complete.SessionID, "message_id", complete.MessageID, "error", err)
 		if p.notify != nil {
@@ -48,8 +51,9 @@ func (p *planRunCompletePublisher) persist(ctx context.Context, complete notify.
 				Message:   err.Error(),
 			})
 		}
-		return
+		return complete
 	}
+	complete.PlanPath = path
 	if p.notify != nil {
 		p.notify.PublishMustDeliver(ctx, pubsub.CreatedEvent, notify.Notification{
 			SessionID: complete.SessionID,
@@ -57,9 +61,10 @@ func (p *planRunCompletePublisher) persist(ctx context.Context, complete notify.
 			Message:   path,
 		})
 	}
+	return complete
 }
 
-func saveReadyPlan(workingDir string, complete notify.RunComplete) (string, error) {
+func saveReadyPlan(workingDir string, complete notify.RunComplete, at time.Time) (string, error) {
 	if _, err := uuid.Parse(complete.SessionID); err != nil {
 		return "", fmt.Errorf("invalid plan session ID: %w", err)
 	}
@@ -78,7 +83,7 @@ func saveReadyPlan(workingDir string, complete notify.RunComplete) (string, erro
 		return "", fmt.Errorf("create plan directory: %w", err)
 	}
 
-	base := strings.TrimSuffix(plan.Filename(content, time.Now()), ".md")
+	base := strings.TrimSuffix(plan.Filename(content, at), ".md")
 	for attempt := 1; ; attempt++ {
 		name := base + ".md"
 		if attempt > 1 {

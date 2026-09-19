@@ -160,6 +160,7 @@ type coordinator struct {
 	mainAgent     SessionAgent
 	mainAgentName string
 	agents        map[string]SessionAgent
+	hookRunner    *hooks.Runner
 
 	// Skills discovery results (session-start snapshot).
 	allSkills    []*skills.Skill // Pre-filter: all discovered after dedup.
@@ -184,6 +185,7 @@ type CoordinatorOptions struct {
 	Notify      pubsub.Publisher[notify.Notification]
 	RunComplete pubsub.Publisher[notify.RunComplete]
 	Skills      *skills.Manager
+	HookRunner  *hooks.Runner
 	Interactive bool
 }
 
@@ -217,6 +219,16 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		activeSkills: activeSkills,
 		skillTracker: skillTracker,
 		interactive:  opts.Interactive,
+	}
+
+	// Wire the shared hook runner into the agent and permission
+	// service.
+	c.hookRunner = opts.HookRunner
+	if c.hookRunner != nil {
+		c.permissions.SetLifecycleHooks(permission.LifecycleHookRunnerFunc(func(ctx context.Context, eventName, sessionID string) error {
+			_, err := c.hookRunner.Run(ctx, eventName, sessionID, "", "")
+			return err
+		}))
 	}
 
 	agentCfg, ok := opts.Config.Config().Agents[config.AgentCoder]
@@ -767,6 +779,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		Tools:                nil,
 		Notify:               c.notify,
 		RunComplete:          c.runComplete,
+		LifecycleHooks:       c.hookRunner,
 	})
 
 	// The readiness goroutines below perform one-time setup — building the
@@ -833,7 +846,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	// Build hook runner if PreToolUse hooks are configured.
 	var hookRunner *hooks.Runner
 	if preToolHooks := c.cfg.Config().Hooks[hooks.EventPreToolUse]; len(preToolHooks) > 0 {
-		hookRunner = hooks.NewRunner(preToolHooks, c.cfg.WorkingDir(), c.cfg.WorkingDir())
+		hookRunner = hooks.NewRunner(map[string][]config.HookConfig{hooks.EventPreToolUse: preToolHooks}, c.cfg.WorkingDir(), c.cfg.WorkingDir())
 	}
 
 	allTools = append(
@@ -923,12 +936,17 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	// without hook interception to avoid firing the user's hook N times
 	// per delegated turn. The top-level invocation of the sub-agent tool
 	// itself is still wrapped from the coder's side.
-	filteredTools = wrapToolsWithHooks(filteredTools, hookRunner, isSubAgent)
+	// Build PostToolUse runner if configured.
+	var postToolRunner *hooks.Runner
+	if postHooks := c.cfg.Config().Hooks[hooks.EventPostToolUse]; len(postHooks) > 0 {
+		postToolRunner = hooks.NewRunner(map[string][]config.HookConfig{hooks.EventPostToolUse: postHooks}, c.cfg.WorkingDir(), c.cfg.WorkingDir())
+	}
+
+	filteredTools = wrapToolsWithHooks(filteredTools, hookRunner, postToolRunner, isSubAgent)
 
 	return filteredTools, nil
 }
 
-// TODO: when we support multiple agents we need to change this so that we pass in the agent specific model config
 func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Model, Model, error) {
 	largeModelCfg, ok := c.cfg.Config().Models[config.SelectedModelTypeLarge]
 	if !ok {

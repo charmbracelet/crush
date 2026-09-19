@@ -820,6 +820,15 @@ func (app *App) Shutdown() {
 	// before closing the DB so agents can finish writing their state.
 	if app.AgentCoordinator != nil {
 		app.AgentCoordinator.CancelAll()
+		// CancelAll gives up after a bounded wait. If a run outlasts it,
+		// the database is about to close underneath a turn that is still
+		// writing, which is how a session ends up recording a tool call
+		// that never got an answer. Nothing here can safely wait longer,
+		// so say so plainly rather than leaving it to be worked out from
+		// the damage later.
+		if app.AgentCoordinator.IsBusy() {
+			slog.Warn("Shutting down while agent work is still running; its final state may not be recorded")
+		}
 	}
 
 	// Shared shutdown context for all timeout-bounded cleanup.

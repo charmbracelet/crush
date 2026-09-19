@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -196,41 +197,59 @@ func formatQuestionAnswers(sty *styles.Styles, content string, width int) string
 }
 
 // styleAnswer extracts the meaningful part of an answer string and styles it.
-// styleAnswer extracts the meaningful part of an answer string and styles it.
 // An answer may span multiple lines (e.g. multi-choice selections plus a
-// custom fill-in), so each line is styled independently and rejoined.
+// custom fill-in, or free text the user typed across several lines), so lines
+// are grouped into segments and each segment is styled as a whole.
 func styleAnswer(sty *styles.Styles, answer string) string {
 	answer = strings.TrimSpace(answer)
-	lines := strings.Split(answer, "\n")
-	styled := make([]string, 0, len(lines))
-	for _, line := range lines {
+
+	type segment struct {
+		style lipgloss.Style
+		parts []string
+	}
+
+	var segments []segment
+	for line := range strings.SplitSeq(answer, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
-		styled = append(styled, styleAnswerLine(sty, line))
+		text, style, isNew := classifyAnswerLine(sty, line)
+		if !isNew && len(segments) > 0 {
+			// Continuation of the previous answer: keep its styling.
+			last := &segments[len(segments)-1]
+			last.parts = append(last.parts, text)
+			continue
+		}
+		segments = append(segments, segment{style: style, parts: []string{text}})
+	}
+
+	styled := make([]string, 0, len(segments))
+	for _, seg := range segments {
+		styled = append(styled, seg.style.Render(strings.Join(seg.parts, " ")))
 	}
 	return strings.Join(styled, sty.Tool.TodoStatusNote.Render(", "))
 }
 
-// styleAnswerLine styles a single answer line.
-func styleAnswerLine(sty *styles.Styles, answer string) string {
+// classifyAnswerLine maps an answer line to its display text and style. The
+// final return value reports whether the line starts a new answer segment;
+// unrecognized lines are continuations of whatever came before them.
+func classifyAnswerLine(sty *styles.Styles, answer string) (string, lipgloss.Style, bool) {
 	switch {
 	case answer == "User answered: yes":
-		return sty.Tool.TodoCompletedIcon.Render("Yes")
+		return "Yes", sty.Tool.TodoCompletedIcon, true
 	case answer == "User answered: no":
-		return sty.Tool.StateCancelled.Render("No")
+		return "No", sty.Tool.StateCancelled, true
 	case strings.HasPrefix(answer, "User selected:"):
 		selected := strings.TrimPrefix(answer, "User selected: ")
 		selected = strings.Trim(selected, "[]\"")
 		selected = strings.ReplaceAll(selected, "\",\"", ", ")
-		return sty.Tool.ParamMain.Render(selected)
+		return selected, sty.Tool.ParamMain, true
 	case strings.HasPrefix(answer, "User provided:"):
-		text := strings.TrimPrefix(answer, "User provided: ")
-		return sty.Tool.ParamMain.Render(text)
+		return strings.TrimPrefix(answer, "User provided: "), sty.Tool.ParamMain, true
 	case answer == "User skipped this question":
-		return sty.Tool.StateCancelled.Render("Skipped")
+		return "Skipped", sty.Tool.StateCancelled, true
 	default:
-		return answer
+		return answer, sty.Tool.ParamMain, false
 	}
 }

@@ -962,11 +962,36 @@ func formatSize(bytes int) string {
 	}
 }
 
-// maxFormattedDiffLines is how long a diff may be before it is truncated ahead
-// of formatting rather than after. Formatting is roughly 286ms per MB, and the
-// TUI re-renders on every keystroke, so a diff beyond this stops being cheap
-// enough to render in full. A thousand lines is far past any ordinary edit.
-const maxFormattedDiffLines = 1000
+// maxFormattedLines bounds how much content a renderer will format. A collapsed
+// card shows collapsedMaxLines of it, but syntax highlighting and markdown
+// rendering cost far more per line than the ten lines that end up visible, and
+// the TUI re-renders on every keystroke. A thousand lines is far past any
+// ordinary tool result.
+const maxFormattedLines = 1000
+
+// boundForFormatting truncates content to the collapsed line budget unless the
+// card is expanded, and reports how many lines it hid. Renderers call this
+// before formatting, so the cost is bounded by what is displayed rather than by
+// what was stored.
+func boundForFormatting(content string, expanded bool) (string, int) {
+	if expanded {
+		return content, 0
+	}
+	lineCount := strings.Count(content, "\n") + 1
+	if lineCount <= maxFormattedLines {
+		return content, 0
+	}
+	maxLines := collapsedMaxLines(lineCount)
+	lines := strings.Split(content, "\n")
+	return strings.Join(lines[:maxLines], "\n"), lineCount - maxLines
+}
+
+// diffTruncationNotice renders the marker shown in place of hidden lines.
+func diffTruncationNotice(sty *styles.Styles, width, hidden int) string {
+	return sty.Tool.DiffTruncation.
+		Width(width - toolBodyLeftPaddingTotal).
+		Render(fmt.Sprintf(assistantMessageTruncateFormat, hidden))
+}
 
 // toolOutputDiffContent renders a diff between old and new content.
 func toolOutputDiffContent(sty *styles.Styles, file, oldContent, newContent string, width int, expanded bool) string {
@@ -976,15 +1001,9 @@ func toolOutputDiffContent(sty *styles.Styles, file, oldContent, newContent stri
 	// seconds per frame once the diff is large. Bound it first.
 	if !expanded {
 		unified, _, _ := diff.GenerateDiff(oldContent, newContent, file)
-		if lineCount := strings.Count(unified, "\n") + 1; lineCount > maxFormattedDiffLines {
-			maxLines := collapsedMaxLines(lineCount)
-			lines := strings.Split(unified, "\n")
-			truncMsg := sty.Tool.DiffTruncation.
-				Width(width - toolBodyLeftPaddingTotal).
-				Render(fmt.Sprintf(assistantMessageTruncateFormat, lineCount-maxLines))
-			return toolOutputDiffContentFromUnified(
-				sty, strings.Join(lines[:maxLines], "\n"), width, true) +
-				"\n" + truncMsg
+		if bounded, hidden := boundForFormatting(unified, false); hidden > 0 {
+			return toolOutputDiffContentFromUnified(sty, bounded, width, true) +
+				"\n" + diffTruncationNotice(sty, width, hidden)
 		}
 	}
 
@@ -1038,6 +1057,16 @@ func formatNonZero(value int) string {
 
 // toolOutputMultiEditDiffContent renders a diff with optional failed edits note.
 func toolOutputMultiEditDiffContent(sty *styles.Styles, file string, meta tools.MultiEditResponseMetadata, totalEdits, width int, expanded bool) string {
+	// Same as toolOutputDiffContent: the formatter highlights every line, and a
+	// collapsed card shows collapsedMaxLines of them.
+	if !expanded {
+		unified, _, _ := diff.GenerateDiff(meta.OldContent, meta.NewContent, file)
+		if bounded, hidden := boundForFormatting(unified, false); hidden > 0 {
+			return toolOutputDiffContentFromUnified(sty, bounded, width, true) +
+				"\n" + diffTruncationNotice(sty, width, hidden)
+		}
+	}
+
 	bodyWidth := width - toolBodyLeftPaddingTotal
 
 	formatter := common.DiffFormatter(sty).
@@ -1095,8 +1124,19 @@ func roundedEnumerator(lPadding, width int) tree.Enumerator {
 	}
 }
 
+// maxMarkdownBytes is the point past which markdown is not worth rendering.
+// Glamour is superlinear -- a 2 MB tool result takes minutes to render, and the
+// TUI re-renders on every keystroke -- while the collapsed card shows
+// collapsedMaxLines of it. Past this size the content is shown as plain text,
+// which is the same fallback the renderer already takes when it errors.
+const maxMarkdownBytes = 256 << 10
+
 // toolOutputMarkdownContent renders markdown content with optional truncation.
 func toolOutputMarkdownContent(sty *styles.Styles, content string, width int, expanded bool) string {
+	if len(content) > maxMarkdownBytes {
+		return toolOutputPlainContent(sty, content, width, expanded)
+	}
+
 	content = stringext.NormalizeSpace(content)
 
 	// Cap width for readability.

@@ -8,30 +8,56 @@ import (
 	"net/http"
 	"time"
 
-	"charm.land/catwalk/pkg/catwalk"
+	"charm.land/catwalk/v3/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/oauth"
 )
 
 // ModelInfo is a single entry of the Copilot /models payload. Only the
 // fields Crush needs are decoded.
 type ModelInfo struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	Enabled      bool   `json:"model_picker_enabled"`
-	Capabilities struct {
-		Limits struct {
-			ContextWindow int64 `json:"max_context_window_tokens"`
-		}
-		Supports struct {
-			Vision          bool     `json:"vision"`
-			Thinking        bool     `json:"thinking"`
-			ReasoningEffort []string `json:"reasoning_effort"`
-		}
-	} `json:"capabilities"`
+	ID           string            `json:"id"`
+	Name         string            `json:"name"`
+	Enabled      bool              `json:"model_picker_enabled"`
+	Capabilities ModelCapabilities `json:"capabilities"`
+}
+
+// ModelCapabilities mirrors the per-model capability block.
+type ModelCapabilities struct {
+	Limits   ModelLimits   `json:"limits"`
+	Supports ModelSupports `json:"supports"`
+}
+
+// ModelLimits mirrors the per-model usage limits.
+type ModelLimits struct {
+	ContextWindow int64 `json:"max_context_window_tokens"`
+}
+
+// ModelSupports mirrors the per-model feature flags.
+type ModelSupports struct {
+	Vision          bool     `json:"vision"`
+	Thinking        bool     `json:"thinking"`
+	ReasoningEffort []string `json:"reasoning_effort"`
 }
 
 type modelsResponse struct {
 	Models []ModelInfo `json:"data"`
+}
+
+// modelReasoning maps the catalog's thinking flags onto the catwalk
+// reasoning structure. Models that list effort levels get them all as a
+// toggleable setting; models that only claim thinking support toggle
+// reasoning without levels; the rest cannot reason.
+func modelReasoning(s ModelSupports) catwalk.Reasoning {
+	if len(s.ReasoningEffort) > 0 {
+		return catwalk.Reasoning{
+			Thinking:     catwalk.ThinkingToggleable,
+			EffortLevels: catwalk.NewEffortLevels(s.ReasoningEffort...),
+		}
+	}
+	if s.Thinking {
+		return catwalk.Reasoning{Thinking: catwalk.ThinkingToggleable}
+	}
+	return catwalk.Reasoning{Thinking: catwalk.ThinkingNever}
 }
 
 // Models fetches the model catalog the GitHub Copilot subscription
@@ -85,12 +111,11 @@ func Models(ctx context.Context, token *oauth.Token) ([]catwalk.Model, error) {
 			continue
 		}
 		models = append(models, catwalk.Model{
-			ID:              m.ID,
-			Name:            m.Name,
-			ContextWindow:   m.Capabilities.Limits.ContextWindow,
-			CanReason:       m.Capabilities.Supports.Thinking || len(m.Capabilities.Supports.ReasoningEffort) > 0,
-			ReasoningLevels: m.Capabilities.Supports.ReasoningEffort,
-			SupportsImages:  m.Capabilities.Supports.Vision,
+			ID:            m.ID,
+			Name:          m.Name,
+			ContextWindow: m.Capabilities.Limits.ContextWindow,
+			Reasoning:     modelReasoning(m.Capabilities.Supports),
+			Capabilities:  catwalk.Capabilities{Vision: m.Capabilities.Supports.Vision},
 		})
 	}
 	if len(models) == 0 {

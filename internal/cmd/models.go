@@ -71,6 +71,7 @@ crush models gpt5`,
 					models = provider.GrokModels
 				case providerID == string(catwalk.InferenceProviderCopilot):
 					models = provider.CopilotModels
+				}
 			}
 
 			for _, model := range models {

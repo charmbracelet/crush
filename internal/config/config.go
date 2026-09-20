@@ -889,17 +889,33 @@ func (c *Config) IsConfigured() bool {
 	return len(c.EnabledProviders()) > 0
 }
 
+// GetModel resolves the model with the given ID against every catalog
+// the provider's current credentials can use: the static catalog first,
+// then the OAuth-scoped catalogs fetched at login (ChatGPT, Grok,
+// Copilot).
 func (c *Config) GetModel(provider, model string) *catwalk.Model {
 	if providerConfig, ok := c.Providers.Get(provider); ok {
-		for _, m := range providerConfig.Models {
-			if m.ID == model {
-				return &m
-			}
+		return providerConfig.findModel(model)
+	}
+	return nil
+}
+
+// findModel looks the model ID up across the provider's static and
+// credential-scoped catalogs, in that order.
+func (p ProviderConfig) findModel(id string) *catwalk.Model {
+	for _, models := range [][]catwalk.Model{p.Models, p.ChatGPTModels, p.GrokModels, p.CopilotModels} {
+		if m := findModelByID(models, id); m != nil {
+			return m
 		}
-		for _, m := range providerConfig.ChatGPTModels {
-			if m.ID == model {
-				return &m
-			}
+	}
+	return nil
+}
+
+// findModelByID returns the model with the given ID, or nil.
+func findModelByID(models []catwalk.Model, id string) *catwalk.Model {
+	for i := range models {
+		if models[i].ID == id {
+			return &models[i]
 		}
 	}
 	return nil

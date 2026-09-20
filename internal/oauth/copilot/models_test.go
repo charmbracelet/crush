@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"charm.land/catwalk/v3/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/stretchr/testify/require"
 )
@@ -66,13 +67,16 @@ func TestModels(t *testing.T) {
 	require.Equal(t, "claude-sonnet-4.5", models[0].ID)
 	require.Equal(t, "Claude Sonnet 4.5", models[0].Name)
 	require.Equal(t, int64(200000), models[0].ContextWindow)
-	require.True(t, models[0].CanReason)
-	require.True(t, models[0].SupportsImages)
+	require.True(t, models[0].CanReason())
+	require.Equal(t, catwalk.ThinkingToggleable, models[0].Reasoning.Thinking)
+	require.Empty(t, models[0].Reasoning.EffortLevels)
+	require.True(t, models[0].Capabilities.Vision)
 
 	require.Equal(t, "gpt-5.1", models[1].ID)
-	require.True(t, models[1].CanReason)
-	require.Equal(t, []string{"low", "medium", "high"}, models[1].ReasoningLevels)
-	require.False(t, models[1].SupportsImages)
+	require.True(t, models[1].CanReason())
+	require.Equal(t, catwalk.ThinkingToggleable, models[1].Reasoning.Thinking)
+	require.Equal(t, []string{"low", "medium", "high"}, models[1].ReasoningEffortLevels())
+	require.False(t, models[1].Capabilities.Vision)
 }
 
 func TestModels_Errors(t *testing.T) {

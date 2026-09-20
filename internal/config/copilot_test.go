@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"charm.land/catwalk/pkg/catwalk"
+	"charm.land/catwalk/v3/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/stretchr/testify/require"
@@ -67,13 +67,16 @@ func TestSetProviderAPIKeyCopilot(t *testing.T) {
 			Providers *csync.Map[string, ProviderConfig] `json:"providers"`
 		}{Providers: providers}))
 
+		originalFetch := fetchCopilotModels
+		fetchCopilotModels = func(context.Context, *oauth.Token) ([]catwalk.Model, error) {
+			return []catwalk.Model{{ID: "claude-sonnet-4.5"}}, nil
+		}
+		t.Cleanup(func() { fetchCopilotModels = originalFetch })
+
 		return &ConfigStore{
 			config:         &Config{Providers: providers},
 			globalDataPath: configPath,
 			workingDir:     dir,
-			fetchCopilotModels: func(context.Context, *oauth.Token) ([]catwalk.Model, error) {
-				return []catwalk.Model{{ID: "claude-sonnet-4.5"}}, nil
-			},
 		}
 	}
 
@@ -124,7 +127,8 @@ func TestSetProviderAPIKeyCopilot(t *testing.T) {
 // TestRefetchCopilotModelsTTL proves the catalog is refreshed only once
 // it grows stale: a fresh catalog is left alone, a stale one is replaced.
 func TestRefetchCopilotModelsTTL(t *testing.T) {
-	// Not parallel: t.Setenv below.
+	// Not parallel: t.Setenv below, and it swaps the fetchCopilotModels
+	// package variable.
 
 	t.Setenv("CRUSH_GLOBAL_CONFIG", t.TempDir())
 	t.Setenv("CRUSH_GLOBAL_DATA", t.TempDir())
@@ -150,14 +154,17 @@ func TestRefetchCopilotModelsTTL(t *testing.T) {
 			CopilotModelsFetchAt: fetchAt,
 		})
 
+		originalFetch := fetchCopilotModels
+		fetchCopilotModels = func(context.Context, *oauth.Token) ([]catwalk.Model, error) {
+			calls.Add(1)
+			return []catwalk.Model{{ID: "fresh-model"}}, nil
+		}
+		t.Cleanup(func() { fetchCopilotModels = originalFetch })
+
 		return &ConfigStore{
 			config:         &Config{Providers: providers},
 			globalDataPath: configPath,
 			workingDir:     dir,
-			fetchCopilotModels: func(context.Context, *oauth.Token) ([]catwalk.Model, error) {
-				calls.Add(1)
-				return []catwalk.Model{{ID: "fresh-model"}}, nil
-			},
 		}
 	}
 
@@ -228,11 +235,14 @@ func TestRefetchCopilotModelsTTL(t *testing.T) {
 				require.Equal(t, "old-rt", refreshToken)
 				return fresh, nil
 			},
-			fetchCopilotModels: func(_ context.Context, token *oauth.Token) ([]catwalk.Model, error) {
-				fetchToken.Store(token.AccessToken)
-				return []catwalk.Model{{ID: "fresh-model"}}, nil
-			},
 		}
+
+		originalFetch := fetchCopilotModels
+		fetchCopilotModels = func(_ context.Context, token *oauth.Token) ([]catwalk.Model, error) {
+			fetchToken.Store(token.AccessToken)
+			return []catwalk.Model{{ID: "fresh-model"}}, nil
+		}
+		t.Cleanup(func() { fetchCopilotModels = originalFetch })
 
 		store.RefetchCopilotModels(context.Background())
 
@@ -253,5 +263,44 @@ func TestRefetchCopilotModelsTTL(t *testing.T) {
 		store.RefetchCopilotModels(context.Background())
 
 		require.Equal(t, int32(0), calls.Load())
+	})
+
+	t.Run("credential change during the fetch discards the result", func(t *testing.T) {
+		dir := t.TempDir()
+		configPath := filepath.Join(dir, "crush.json")
+		require.NoError(t, os.WriteFile(configPath, []byte(`{"providers":{"copilot":{"id":"copilot"}}}`), 0o600))
+
+		providers := csync.NewMap[string, ProviderConfig]()
+		providers.Set("copilot", ProviderConfig{
+			ID:                   "copilot",
+			OAuthToken:           token,
+			CopilotModels:        []catwalk.Model{{ID: "stale-model"}},
+			CopilotModelsFetchAt: time.Now().Add(-2 * copilotModelsTTL),
+		})
+		store := &ConfigStore{
+			config:         &Config{Providers: providers},
+			globalDataPath: configPath,
+			workingDir:     dir,
+		}
+
+		originalFetch := fetchCopilotModels
+		fetchCopilotModels = func(context.Context, *oauth.Token) ([]catwalk.Model, error) {
+			// A new login lands while the request is in flight.
+			pc, _ := providers.Get("copilot")
+			pc.OAuthToken = &oauth.Token{
+				AccessToken: "other-at",
+				ExpiresIn:   3600,
+				ExpiresAt:   time.Now().Add(time.Hour).Unix(),
+			}
+			providers.Set("copilot", pc)
+			return []catwalk.Model{{ID: "fresh-model"}}, nil
+		}
+		t.Cleanup(func() { fetchCopilotModels = originalFetch })
+
+		store.RefetchCopilotModels(context.Background())
+
+		pc, _ := store.Config().Providers.Get("copilot")
+		require.Equal(t, "stale-model", pc.CopilotModels[0].ID,
+			"the old credential's catalog must not be committed onto the new login")
 	})
 }

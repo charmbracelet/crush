@@ -287,19 +287,11 @@ func (c *choiceList) buildLines(innerWidth int, fillInPrefix string, itemFn choi
 	const barInactive = "  "
 
 	var lines []contentLine
-	push := func(text string, flags ...bool) {
-		cl := newContentLine(text)
-		if len(flags) > 0 {
-			cl.fillInRow = flags[0]
-		}
-		if len(flags) > 1 {
-			cl.cursorItem = flags[1]
-		}
-		// Split multi-line strings into one row each.
+	// push appends one row per line of text, flush against the gutter:
+	// the question header, its description, and the blank separators.
+	push := func(text string) {
 		for ln := range strings.SplitSeq(text, "\n") {
-			row := cl
-			row.text = ln
-			lines = append(lines, row)
+			lines = append(lines, newContentLine(ln))
 		}
 	}
 
@@ -324,30 +316,21 @@ func (c *choiceList) buildLines(innerWidth int, fillInPrefix string, itemFn choi
 		if active || hovered {
 			bar = barActive
 		}
-		content := itemFn(i, ch, active, innerWidth)
-		// Prepend bar to every line so continuation lines also
-		// show the selection indicator.
-		for j, ln := range strings.Split(content, "\n") {
-			b := bar
-			if j > 0 && !active {
-				b = barInactive
+		// Hang a rendered block in this choice's gutter, one row per
+		// line. The bar goes on every row, so a block that wraps keeps
+		// an unbroken gutter rather than marking only its first line.
+		hang := func(block string) {
+			for ln := range strings.SplitSeq(block, "\n") {
+				lines = append(lines, contentLine{text: bar + ln, cursorItem: active, choiceIdx: i})
 			}
-			lines = append(lines, contentLine{text: b + ln, cursorItem: active, choiceIdx: i})
 		}
-
+		hang(itemFn(i, ch, active, innerWidth))
 		if ch.Description != "" {
-			descContent := bodyStyle.Render(wrapIndent(ch.Description, innerWidth-lipgloss.Width(bar), ""))
-			for j, ln := range strings.Split(descContent, "\n") {
-				b := bar
-				if j > 0 && !active {
-					b = barInactive
-				}
-				lines = append(lines, contentLine{text: b + ln, cursorItem: active, choiceIdx: i})
-			}
+			hang(bodyStyle.Render(wrapIndent(ch.Description, innerWidth-lipgloss.Width(bar), "")))
 		}
 
 		// Inline note editor or saved note for this choice.
-		c.drawNote(&lines, innerWidth, bar, barInactive, ch.ID, active)
+		c.drawNote(&lines, innerWidth, bar, ch.ID, active)
 
 		// Blank separator — tag with current choice index so it's
 		// part of the clickable/hoverable zone.
@@ -367,7 +350,7 @@ func (c *choiceList) buildLines(innerWidth int, fillInPrefix string, itemFn choi
 		fillBar = barActive
 	}
 	linesBeforeFillIn := len(lines)
-	c.drawFillIn(&lines, innerWidth, fillBar, barInactive, fillInPrefix, c.isFillIn(), false)
+	c.drawFillIn(&lines, innerWidth, fillBar, fillInPrefix, c.isFillIn(), false)
 
 	// Record fill-in row range for wheel-scroll bounds checking.
 	c.fillInTop = -1

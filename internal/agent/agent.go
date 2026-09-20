@@ -1596,7 +1596,7 @@ If not, please feel free to ignore. Again do not mention this message to the use
 			continue
 		}
 		// Assistant message without content or tool calls (cancelled before it returned anything).
-		if m.Role == message.Assistant && len(m.ToolCalls()) == 0 && m.Content().Text == "" && m.ReasoningContent().String() == "" {
+		if m.Role == message.Assistant && len(m.ToolCalls()) == 0 && m.Content().Text == "" {
 			continue
 		}
 		// Tool results are emitted right after their assistant message.

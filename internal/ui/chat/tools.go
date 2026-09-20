@@ -962,8 +962,32 @@ func formatSize(bytes int) string {
 	}
 }
 
+// maxFormattedDiffLines is how long a diff may be before it is truncated ahead
+// of formatting rather than after. Formatting is roughly 286ms per MB, and the
+// TUI re-renders on every keystroke, so a diff beyond this stops being cheap
+// enough to render in full. A thousand lines is far past any ordinary edit.
+const maxFormattedDiffLines = 1000
+
 // toolOutputDiffContent renders a diff between old and new content.
 func toolOutputDiffContent(sty *styles.Styles, file, oldContent, newContent string, width int, expanded bool) string {
+	// A collapsed card only ever shows collapsedMaxLines, but the formatter
+	// below syntax-highlights every line it is handed. Truncating afterwards
+	// therefore pays for the whole diff to render ten lines of it, which is
+	// seconds per frame once the diff is large. Bound it first.
+	if !expanded {
+		unified, _, _ := diff.GenerateDiff(oldContent, newContent, file)
+		if lineCount := strings.Count(unified, "\n") + 1; lineCount > maxFormattedDiffLines {
+			maxLines := collapsedMaxLines(lineCount)
+			lines := strings.Split(unified, "\n")
+			truncMsg := sty.Tool.DiffTruncation.
+				Width(width - toolBodyLeftPaddingTotal).
+				Render(fmt.Sprintf(assistantMessageTruncateFormat, lineCount-maxLines))
+			return toolOutputDiffContentFromUnified(
+				sty, strings.Join(lines[:maxLines], "\n"), width, true) +
+				"\n" + truncMsg
+		}
+	}
+
 	bodyWidth := width - toolBodyLeftPaddingTotal
 
 	formatter := common.DiffFormatter(sty).

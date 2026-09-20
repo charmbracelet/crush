@@ -22,12 +22,13 @@ func TestBuildAgentModelsResolvesCredentialScopedCatalog(t *testing.T) {
 
 	crushJSON := `{
   "options": {"disable_default_providers": true, "disable_provider_auto_update": true},
-  "providers": {"mock": {"id": "mock", "name": "Mock", "type": "openai",
+  "providers": {"copilot": {"id": "copilot", "name": "Copilot", "type": "openai-compat",
     "base_url": "http://127.0.0.1:9/v1", "api_key": "test-key",
+    "oauth": {"access_token": "copilot-at", "refresh_token": "copilot-rt"},
     "models": [{"id": "static-model", "name": "Static", "context_window": 8192, "default_max_tokens": 128}],
     "copilot_models": [{"id": "scoped-model", "name": "Scoped", "context_window": 8192, "default_max_tokens": 128}]}},
-  "models": {"large": {"provider": "mock", "model": "scoped-model"},
-             "small": {"provider": "mock", "model": "scoped-model"}}
+  "models": {"large": {"provider": "copilot", "model": "scoped-model"},
+             "small": {"provider": "copilot", "model": "scoped-model"}}
 }`
 	require.NoError(t, os.WriteFile(filepath.Join(env.workingDir, "crush.json"), []byte(crushJSON), 0o644))
 

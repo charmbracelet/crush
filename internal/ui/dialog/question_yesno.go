@@ -32,7 +32,7 @@ type YesNo struct {
 	keyNo        key.Binding
 	keyClose     key.Binding
 
-	lastResponse    question.Answer
+	lastResponse       question.Answer
 	lastWidth          int
 	lastWidthMethod    ansi.Method
 	lastWidthMethodSet bool
@@ -131,7 +131,7 @@ func (d *YesNo) Height(width int) int {
 	iconPrompt := questionIconPrompt(d.Styles, d.focused)
 	method := layoutWidthMethod(d.lastWidthMethodSet, d.lastWidthMethod)
 	h := sectionHeightAt(d.Request.Text, w-lipgloss.Width(iconPrompt), method) // question
-	h++                                                              // blank
+	h++                                                                        // blank
 	if d.Request.Description != "" {
 		r := common.MarkdownRenderer(d.Styles, w)
 		mu := common.LockMarkdownRenderer(r)

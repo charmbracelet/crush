@@ -37,14 +37,14 @@ type ConfirmComponent struct {
 	keyUp    key.Binding
 	keyDown  key.Binding
 
-	focused           bool
+	focused            bool
 	lastWidth          int
 	lastWidthMethod    ansi.Method
 	lastWidthMethodSet bool
 	scrollOffset       int
-	compositor   *lipgloss.Compositor
-	hoverX       int
-	hoverY       int
+	compositor         *lipgloss.Compositor
+	hoverX             int
+	hoverY             int
 
 	// OnConfirm is called when the user confirms.
 	OnConfirm func()
@@ -152,7 +152,7 @@ func (c *ConfirmComponent) Height(width int) int {
 	iconPrompt := questionIconPrompt(c.Styles, c.focused)
 	method := layoutWidthMethod(c.lastWidthMethodSet, c.lastWidthMethod)
 	h := sectionHeightAt(c.Title, w-lipgloss.Width(iconPrompt), method) // title
-	h++                                                       // blank
+	h++                                                                 // blank
 	if c.Description != "" {
 		r := common.MarkdownRenderer(c.Styles, w)
 		mu := common.LockMarkdownRenderer(r)

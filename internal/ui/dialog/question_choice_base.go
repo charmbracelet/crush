@@ -44,9 +44,9 @@ type choiceList struct {
 	cursorIdx        int
 	scrollOffset     int // lines scrolled past the top of the viewport
 	focused          bool
-	lastWidth       int
-	widthMethod     ansi.Method // active screen width method from the last draw
-	widthMethodSet  bool
+	lastWidth        int
+	widthMethod      ansi.Method // active screen width method from the last draw
+	widthMethodSet   bool
 	choiceCompositor *lipgloss.Compositor
 	suppressScroll   bool // skip scroll clamping after mouse click
 	wheelActive      bool // wheel-scroll mode: skip cursor snap until next keyboard nav

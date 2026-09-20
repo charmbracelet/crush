@@ -785,9 +785,6 @@ func (s *ConfigStore) refetchCopilotModels(ctx context.Context, scope Scope) {
 	if !ok || pc.OAuthToken == nil {
 		return
 	}
-<<<<<<< HEAD
-	fetchModels := fetchCopilotModels
-=======
 	// Copilot IDE tokens live about thirty minutes, so the stored
 	// token is usually expired by the time a refetch happens. Refresh
 	// it first; fetching with a stale token would only 401.
@@ -801,11 +798,11 @@ func (s *ConfigStore) refetchCopilotModels(ctx context.Context, scope Scope) {
 			return
 		}
 	}
-	fetchModels := s.fetchCopilotModels
->>>>>>> 6c51e29 (fix: read Copilot catalog from data and refresh stale tokens)
+	fetchModels := fetchCopilotModels
 	if fetchModels == nil {
 		fetchModels = copilot.Models
 	}
+	fetchToken := pc.OAuthToken.AccessToken
 	models, err := fetchModels(ctx, pc.OAuthToken)
 	if err != nil {
 		slog.Warn("Failed to fetch GitHub Copilot model catalog after auth", "error", err)
@@ -814,6 +811,13 @@ func (s *ConfigStore) refetchCopilotModels(ctx context.Context, scope Scope) {
 	if err := s.update(scope, func(c *Config) map[string]any {
 		p, ok := c.Providers.Get(string(catwalk.InferenceProviderCopilot))
 		if !ok {
+			return nil
+		}
+		// The credential may have changed while the fetch was in
+		// flight (sign out, an API key replacing OAuth, a new login).
+		// Committing the old credential's catalog would mark it fresh
+		// and let the new credential skip fetching its own models.
+		if p.OAuthToken == nil || p.OAuthToken.AccessToken != fetchToken {
 			return nil
 		}
 		p.CopilotModels = models

@@ -254,4 +254,40 @@ func TestRefetchCopilotModelsTTL(t *testing.T) {
 
 		require.Equal(t, int32(0), calls.Load())
 	})
+
+	t.Run("credential change during the fetch discards the result", func(t *testing.T) {
+		dir := t.TempDir()
+		configPath := filepath.Join(dir, "crush.json")
+		require.NoError(t, os.WriteFile(configPath, []byte(`{"providers":{"copilot":{"id":"copilot"}}}`), 0o600))
+
+		providers := csync.NewMap[string, ProviderConfig]()
+		providers.Set("copilot", ProviderConfig{
+			ID:                   "copilot",
+			OAuthToken:           token,
+			CopilotModels:        []catwalk.Model{{ID: "stale-model"}},
+			CopilotModelsFetchAt: time.Now().Add(-2 * copilotModelsTTL),
+		})
+		store := &ConfigStore{
+			config:         &Config{Providers: providers},
+			globalDataPath: configPath,
+			workingDir:     dir,
+			fetchCopilotModels: func(context.Context, *oauth.Token) ([]catwalk.Model, error) {
+				// A new login lands while the request is in flight.
+				pc, _ := providers.Get("copilot")
+				pc.OAuthToken = &oauth.Token{
+					AccessToken: "other-at",
+					ExpiresIn:   3600,
+					ExpiresAt:   time.Now().Add(time.Hour).Unix(),
+				}
+				providers.Set("copilot", pc)
+				return []catwalk.Model{{ID: "fresh-model"}}, nil
+			},
+		}
+
+		store.RefetchCopilotModels(context.Background())
+
+		pc, _ := store.Config().Providers.Get("copilot")
+		require.Equal(t, "stale-model", pc.CopilotModels[0].ID,
+			"the old credential's catalog must not be committed onto the new login")
+	})
 }

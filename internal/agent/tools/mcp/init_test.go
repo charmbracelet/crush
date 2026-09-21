@@ -733,6 +733,9 @@ func TestMCPConfigEqualExhaustive(t *testing.T) {
 	excluded := map[string]bool{
 		"OAuthToken":   true, // internally managed, refreshed out-of-band.
 		"ChannelReply": true, // read live from config at reply time, not baked into the session.
+		// Lazy decides which tools reach the model, not how the server is
+		// reached, so toggling it must never tear the connection down.
+		"Lazy": true,
 	}
 
 	typ := reflect.TypeOf(config.MCPConfig{})

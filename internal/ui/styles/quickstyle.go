@@ -2,6 +2,7 @@ package styles
 
 import (
 	"image/color"
+	"math"
 
 	"charm.land/bubbles/v2/filepicker"
 	"charm.land/bubbles/v2/help"
@@ -12,7 +13,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/ui/diffview"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/charmbracelet/x/exp/charmtone"
 )
 
 // quickStyleOpts is the palette of colors used by quickStyle to simplify the
@@ -60,6 +60,27 @@ type quickStyleOpts struct {
 	plan              color.Color
 	planMoreSubtle    color.Color
 
+	// Diff view. Inserted (positive) and deleted (negative) lines. The
+	// gutter (line-number column) uses the darker gutter background
+	// while the code and symbol columns use the lighter one.
+	//
+	// All six are optional: unset foregrounds default to the success and
+	// destructive hues, and unset backgrounds blend the foreground over
+	// bgBase (see deriveDiffColors).
+	insertFg       color.Color // diff insert symbols and line numbers.
+	insertBg       color.Color // diff insert code and symbol background.
+	insertGutterBg color.Color // diff insert line-number background.
+	deleteFg       color.Color // diff delete symbols and line numbers.
+	deleteBg       color.Color // diff delete code and symbol background.
+	deleteGutterBg color.Color // diff delete line-number background.
+
+	// Buttons. Backgrounds for each button state; the foregrounds are
+	// derived from onPrimary / fgBase.
+	button         color.Color // focused/primary button background.
+	buttonSubtle   color.Color // blurred button background.
+	buttonInactive color.Color // inactive (unfocused pane) button background.
+	buttonHovered  color.Color // hovered button background.
+
 	// ANSI 16-color palette. These remap the basic terminal colors that
 	// programs emit (e.g. bang-mode shell output) onto legible, on-brand
 	// colors instead of leaving them to the user's terminal defaults.
@@ -72,6 +93,7 @@ type quickStyleOpts struct {
 	ansiMagenta color.Color
 	ansiCyan    color.Color
 	ansiWhite   color.Color
+
 	// Bright intensity.
 	ansiBrightBlack   color.Color
 	ansiBrightRed     color.Color
@@ -83,12 +105,63 @@ type quickStyleOpts struct {
 	ansiBrightWhite   color.Color
 }
 
+// Diff tint blend ratios: the fraction of the insert/delete foreground
+// hue blended over bgBase for the code area and the line-number gutter.
+// The gutter stays subtler than the code area, and the delete tints are
+// more muted than the insert ones. These approximate the tints the
+// built-in themes used when they were picked by hand; no single set of
+// CIELAB ratios can reproduce those per-theme RGB choices exactly, so
+// these are fitted to land closest to both built-in themes.
+const (
+	diffInsertCodeBlend   = 0.20
+	diffInsertGutterBlend = 0.13
+	diffDeleteCodeBlend   = 0.15
+	diffDeleteGutterBlend = 0.08
+)
+
+// deriveDiffColors fills unset diff tokens: foregrounds default to the
+// success and destructive hues, and backgrounds blend the foreground
+// over bgBase.
+func (o *quickStyleOpts) deriveDiffColors() {
+	if o.insertFg == nil {
+		o.insertFg = o.success
+	}
+	if o.deleteFg == nil {
+		o.deleteFg = o.destructive
+	}
+	if o.insertBg == nil && o.insertFg != nil && o.bgBase != nil {
+		o.insertBg = blendTint(o.insertFg, o.bgBase, diffInsertCodeBlend)
+	}
+	if o.insertGutterBg == nil && o.insertFg != nil && o.bgBase != nil {
+		o.insertGutterBg = blendTint(o.insertFg, o.bgBase, diffInsertGutterBlend)
+	}
+	if o.deleteBg == nil && o.deleteFg != nil && o.bgBase != nil {
+		o.deleteBg = blendTint(o.deleteFg, o.bgBase, diffDeleteCodeBlend)
+	}
+	if o.deleteGutterBg == nil && o.deleteFg != nil && o.bgBase != nil {
+		o.deleteGutterBg = blendTint(o.deleteFg, o.bgBase, diffDeleteGutterBlend)
+	}
+}
+
+// blendTint blends fg over bg in CIELAB (via lipgloss.Blend1D) with the
+// given fraction of fg: 0 returns bg, 1 returns fg.
+func blendTint(fg, bg color.Color, fraction float64) color.Color {
+	const steps = 101
+	gradient := lipgloss.Blend1D(steps, fg, bg)
+	// Blend1D's first stop is pure fg, so the gradient index counts fg
+	// share down from 1.
+	i := min(int(math.Round((1-fraction)*(steps-1))), steps-1)
+	return gradient[i]
+}
+
 // quickStyle builds the default Styles (that is, the default theme, Charmtone
 // Pantera) from a palette of semi-semanticly-named colors.
 //
 // The idea here is that you can do most of the work on a theme with quickStyle,
 // then add overrides as needed.
 func quickStyle(o quickStyleOpts) Styles {
+	o.deriveDiffColors()
+
 	var (
 		base   = lipgloss.NewStyle().Foreground(o.fgBase)
 		muted  = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
@@ -237,7 +310,7 @@ func quickStyle(o quickStyleOpts) Styles {
 			Unticked:       "[ ] ",
 		},
 		Link: ansi.StylePrimitive{
-			Color:     hex(charmtone.Zinc),
+			Color:     hex(o.info),
 			Underline: new(true),
 		},
 		LinkText: ansi.StylePrimitive{
@@ -245,7 +318,7 @@ func quickStyle(o quickStyleOpts) Styles {
 			Bold:  new(true),
 		},
 		Image: ansi.StylePrimitive{
-			Color:     hex(charmtone.Cheeky),
+			Color:     hex(o.accent),
 			Underline: new(true),
 		},
 		ImageText: ansi.StylePrimitive{
@@ -289,22 +362,22 @@ func quickStyle(o quickStyleOpts) Styles {
 					Color: hex(o.fgMostSubtle),
 				},
 				CommentPreproc: ansi.StylePrimitive{
-					Color: hex(charmtone.Bengal),
+					Color: hex(o.accent),
 				},
 				Keyword: ansi.StylePrimitive{
 					Color: hex(o.info),
 				},
 				KeywordReserved: ansi.StylePrimitive{
-					Color: hex(charmtone.Pony),
+					Color: hex(o.keyword),
 				},
 				KeywordNamespace: ansi.StylePrimitive{
-					Color: hex(charmtone.Pony),
+					Color: hex(o.keyword),
 				},
 				KeywordType: ansi.StylePrimitive{
-					Color: hex(charmtone.Guppy),
+					Color: hex(o.infoMoreSubtle),
 				},
 				Operator: ansi.StylePrimitive{
-					Color: hex(charmtone.Salmon),
+					Color: hex(o.fgSubtle),
 				},
 				Punctuation: ansi.StylePrimitive{
 					Color: hex(o.warningSubtle),
@@ -313,21 +386,21 @@ func quickStyle(o quickStyleOpts) Styles {
 					Color: hex(o.fgSubtle),
 				},
 				NameBuiltin: ansi.StylePrimitive{
-					Color: hex(charmtone.Cheeky),
+					Color: hex(o.accent),
 				},
 				NameTag: ansi.StylePrimitive{
-					Color: hex(charmtone.Mauve),
+					Color: hex(o.secondary),
 				},
 				NameAttribute: ansi.StylePrimitive{
-					Color: hex(charmtone.Hazy),
+					Color: hex(o.infoMoreSubtle),
 				},
 				NameClass: ansi.StylePrimitive{
-					Color:     hex(charmtone.Salt),
+					Color:     hex(o.primary),
 					Underline: new(true),
 					Bold:      new(true),
 				},
 				NameDecorator: ansi.StylePrimitive{
-					Color: hex(charmtone.Citron),
+					Color: hex(o.attention),
 				},
 				NameFunction: ansi.StylePrimitive{
 					Color: hex(o.successMostSubtle),
@@ -336,7 +409,7 @@ func quickStyle(o quickStyleOpts) Styles {
 					Color: hex(o.success),
 				},
 				LiteralString: ansi.StylePrimitive{
-					Color: hex(charmtone.Cumin),
+					Color: hex(o.warningSubtle),
 				},
 				LiteralStringEscape: ansi.StylePrimitive{
 					Color: hex(o.successMoreSubtle),
@@ -602,23 +675,23 @@ func quickStyle(o quickStyleOpts) Styles {
 		},
 		InsertLine: diffview.LineStyle{
 			LineNumber: lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#629657")).
-				Background(lipgloss.Color("#2b322a")),
+				Foreground(o.insertFg).
+				Background(o.insertGutterBg),
 			Symbol: lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#629657")).
-				Background(lipgloss.Color("#323931")),
+				Foreground(o.insertFg).
+				Background(o.insertBg),
 			Code: lipgloss.NewStyle().
-				Background(lipgloss.Color("#323931")),
+				Background(o.insertBg),
 		},
 		DeleteLine: diffview.LineStyle{
 			LineNumber: lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#a45c59")).
-				Background(lipgloss.Color("#312929")),
+				Foreground(o.deleteFg).
+				Background(o.deleteGutterBg),
 			Symbol: lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#a45c59")).
-				Background(lipgloss.Color("#383030")),
+				Foreground(o.deleteFg).
+				Background(o.deleteBg),
 			Code: lipgloss.NewStyle().
-				Background(lipgloss.Color("#383030")),
+				Background(o.deleteBg),
 		},
 		Filename: diffview.LineStyle{
 			LineNumber: lipgloss.NewStyle().
@@ -761,10 +834,10 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Tool.ResultItemDesc = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
 
 	// Buttons
-	s.Button.Focused = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.secondary)
-	s.Button.Blurred = lipgloss.NewStyle().Foreground(o.fgBase).Background(o.bgLessVisible)
-	s.Button.Inactive = lipgloss.NewStyle().Foreground(o.fgBase).Background(o.bgMostVisible)
-	s.Button.Hovered = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.fgMostSubtle)
+	s.Button.Focused = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.button)
+	s.Button.Blurred = lipgloss.NewStyle().Foreground(o.fgBase).Background(o.buttonSubtle)
+	s.Button.Inactive = lipgloss.NewStyle().Foreground(o.fgBase).Background(o.buttonInactive)
+	s.Button.Hovered = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.buttonHovered)
 	s.Button.Negative = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.error)
 
 	// Editor

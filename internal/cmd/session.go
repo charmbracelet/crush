@@ -23,7 +23,7 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/chat"
-	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/charmbracelet/x/term"
@@ -440,11 +440,7 @@ func outputSessionJSON(w io.Writer, sess session.Session, msgs []*message.Messag
 }
 
 func outputSessionHuman(ctx context.Context, cfg *config.ConfigStore, sess session.Session, msgs []*message.Message) error {
-	var providerID string
-	if cfg != nil {
-		providerID = cfg.Config().Models[config.SelectedModelTypeLarge].Provider
-	}
-	styles := styles.ThemeForProvider(providerID)
+	styles := common.ThemeStylesFromConfig(cfg.Config())
 	toolResults := chat.BuildToolResultMap(msgs)
 
 	width := sessionOutputWidth

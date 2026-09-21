@@ -218,6 +218,50 @@ func adjustOnboardingInputCursor(t *styles.Styles, cur *tea.Cursor) *tea.Cursor 
 	return cur
 }
 
+// renameCursorOffset adjusts a cursor returned by an inline list item's
+// text input so it lands at the correct screen position inside a dialog
+// that is showing a rename prompt. The math accounts for the dialog
+// border/padding/margin, the input prompt frame, and the height of the
+// confirmation message rendered above the list. visibleStart and
+// visibleEnd are the list's VisibleItemIndices; selectedIndex is the
+// list's Selected index. The cursor Y is advanced one row per item
+// between visibleStart and selectedIndex.
+func renameCursorOffset(
+	t *styles.Styles,
+	cur *tea.Cursor,
+	messageHeight int,
+	visibleStart, visibleEnd, selectedIndex int,
+) *tea.Cursor {
+	if cur == nil {
+		return nil
+	}
+	titleStyle := t.Dialog.Sessions.RenamingingTitle
+	dialogStyle := t.Dialog.Sessions.RenamingView
+	inputStyle := t.Dialog.InputPrompt
+
+	cur.X += inputStyle.GetBorderLeftSize() +
+		inputStyle.GetMarginLeft() +
+		inputStyle.GetPaddingLeft() +
+		dialogStyle.GetBorderLeftSize() +
+		dialogStyle.GetPaddingLeft() +
+		dialogStyle.GetMarginLeft()
+	cur.Y += titleStyle.GetVerticalFrameSize() +
+		inputStyle.GetBorderTopSize() +
+		inputStyle.GetMarginTop() +
+		inputStyle.GetPaddingTop() +
+		inputStyle.GetBorderBottomSize() +
+		inputStyle.GetMarginBottom() +
+		inputStyle.GetPaddingBottom() +
+		dialogStyle.GetPaddingTop() +
+		dialogStyle.GetBorderTopSize() +
+		messageHeight - 1
+
+	for i := visibleStart; i <= visibleEnd && i != selectedIndex && selectedIndex > -1; i++ {
+		cur.Y++
+	}
+	return cur
+}
+
 // RenderContext is a dialog rendering context that can be used to render
 // common dialog layouts.
 type RenderContext struct {

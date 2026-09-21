@@ -210,8 +210,9 @@ type sessionAgent struct {
 	sessions   session.Service
 	messages   message.Service
 	// cfg backs channel reply routing (config lookup + MCP tool
-	// invocation). Nil in tests and sub-agents that never see channel
-	// turns; sendChannelReply treats nil as "routing disabled".
+	// invocation) and lazy-MCP policy resolution. Nil in tests and
+	// sub-agents that never see channel turns; sendChannelReply treats
+	// nil as "routing disabled".
 	cfg                  *config.ConfigStore
 	disableAutoSummarize bool
 	isYolo               bool
@@ -269,10 +270,13 @@ type SessionAgentOptions struct {
 	IsYolo               bool
 	Sessions             session.Service
 	Messages             message.Service
-	Cfg                  *config.ConfigStore
-	Tools                []fantasy.AgentTool
-	Notify               pubsub.Publisher[notify.Notification]
-	RunComplete          pubsub.Publisher[notify.RunComplete]
+	// Cfg resolves the lazy-MCP policy and backs channel reply routing.
+	// It is required for MCP tool exposure and nil only for agents that
+	// can never have MCP tools.
+	Cfg         *config.ConfigStore
+	Tools       []fantasy.AgentTool
+	Notify      pubsub.Publisher[notify.Notification]
+	RunComplete pubsub.Publisher[notify.RunComplete]
 }
 
 func NewSessionAgent(
@@ -704,20 +708,12 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	largeModel := a.largeModel.Get()
 	systemPrompt := a.systemPrompt.Get()
 	promptPrefix := a.systemPromptPrefix.Get()
-	var instructions strings.Builder
 
-	for _, server := range mcp.GetStates() {
-		if server.State != mcp.StateConnected {
-			continue
-		}
-		if s := server.Client.InitializeResult().Instructions; s != "" {
-			instructions.WriteString(s)
-			instructions.WriteString("\n\n")
-		}
-	}
-
-	if s := instructions.String(); s != "" {
-		systemPrompt += "\n\n<mcp-instructions>\n" + s + "\n</mcp-instructions>"
+	// MCP servers contribute two blocks: their own initialize instructions
+	// and, when tools are lazy-loaded, a short index naming what the model
+	// has to load with mcp_search.
+	if sections := mcp.PromptSections(a.cfg, call.SessionID); sections != "" {
+		systemPrompt += "\n\n" + sections
 	}
 
 	if len(agentTools) > 0 {
@@ -866,6 +862,13 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				callContext,
 				filterToolsForChannel(a.tools.Copy(), call.Channel, mcp.GetStates()),
 			)
+
+			// Hide the schemas of MCP tools this session has not loaded yet.
+			// The tools stay executable, so replaying an older turn that
+			// named one still works; only the request shrinks.
+			if names, ok := a.exposedToolNames(call.SessionID, prepared.Tools); ok {
+				prepared.ActiveTools = names
+			}
 
 			// Drain queued follow-up prompts for this step. Calls covered
 			// by a cancel recorded while they sat in the queue are dropped:
@@ -1723,20 +1726,33 @@ func (a *sessionAgent) filterDisabledMCPTools(ctx context.Context, toolList []fa
 	if len(disabledServers) == 0 {
 		return toolList
 	}
-	disabled := make(map[string]struct{}, len(disabledServers))
-	for _, name := range disabledServers {
-		disabled[name] = struct{}{}
-	}
+	// Compare model-facing tool names rather than type-asserting the tool:
+	// hook interception wraps every tool in an unexported decorator, which
+	// an assertion would silently miss.
+	hidden := mcp.NamesForServers(disabledServers)
 	filtered := make([]fantasy.AgentTool, 0, len(toolList))
 	for _, t := range toolList {
-		if mcpTool, ok := t.(*tools.Tool); ok {
-			if _, off := disabled[mcpTool.MCP()]; off {
-				continue
-			}
+		if _, off := hidden[t.Info().Name]; off {
+			continue
 		}
 		filtered = append(filtered, t)
 	}
 	return filtered
+}
+
+// exposedToolNames returns the tools whose schemas should go into this
+// step's model request. Every MCP tool the session has not loaded is
+// dropped, which is how laziness keeps MCP schemas out of context while the
+// tools themselves stay registered and executable.
+//
+// Names come from Info() rather than a type assertion because hook
+// interception wraps tools in an unexported decorator.
+func (a *sessionAgent) exposedToolNames(sessionID string, toolList []fantasy.AgentTool) ([]string, bool) {
+	names := make([]string, 0, len(toolList))
+	for _, t := range toolList {
+		names = append(names, t.Info().Name)
+	}
+	return mcp.ExposedNames(a.cfg, sessionID, names)
 }
 
 // filterFileParts removes fantasy.FilePart entries from a slice of message

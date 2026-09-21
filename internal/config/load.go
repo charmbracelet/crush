@@ -351,6 +351,18 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 				}
 				continue
 			}
+			// Region is opt-in via explicit config only. We do not read
+			// AWS_REGION/AWS_DEFAULT_REGION here on purpose: not every
+			// region hosts every model, and silently honoring an ambient
+			// env var was a source of confusion (charmbracelet/crush#2985).
+			if config.AWSRegion != "" {
+				region, err := resolver.ResolveValue(config.AWSRegion)
+				if err != nil {
+					slog.Warn("Failed to resolve Bedrock region, using default", "provider", p.ID, "error", err)
+				} else if region != "" {
+					prepared.ExtraParams["region"] = region
+				}
+			}
 		case catwalk.InferenceProvider("hyper"):
 			if apiKey := env.Get("HYPER_API_KEY"); apiKey != "" {
 				prepared.APIKey = apiKey

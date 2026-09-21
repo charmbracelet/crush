@@ -321,7 +321,7 @@ When running non-trivial bash commands (especially those that modify the system)
 - Briefly explain what the command does and why you're running it
 - This ensures the user understands potentially dangerous operations
 - Simple read-only commands (ls, cat, etc.) don't need explanation
-- Use `&` for background processes that won't stop on their own (e.g., `node server.js &`)
+- For processes that won't stop on their own (servers, watchers), set run_in_background=true rather than appending `&`, then keep working instead of immediately reading the job's output
 - Avoid interactive commands - use non-interactive versions (e.g., `npm init -y` not `npm init`)
 - Combine related commands to save time (e.g., `git status && git diff HEAD && git log -n 3`)
 </bash_commands>

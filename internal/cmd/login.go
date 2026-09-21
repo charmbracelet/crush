@@ -21,7 +21,7 @@ var loginCmd = &cobra.Command{
 	Short:   "Login Crush to a platform",
 	Long: `Login Crush to a specified platform.
 The platform should be provided as an argument.
-Available platforms are: hyper, copilot, openai.`,
+Available platforms are: hyper, copilot, openai, honcho.`,
 	Example: `
 # Authenticate with Charm Hyper
 crush login
@@ -31,6 +31,9 @@ crush login copilot
 
 # Authenticate with a ChatGPT (OpenAI) account
 crush login openai
+
+# Connect Honcho so Crush remembers across sessions
+crush login honcho
 
 # Force re-authentication even if already logged in
 crush login -f copilot
@@ -42,6 +45,8 @@ crush login -f copilot
 		"github-copilot",
 		"openai",
 		"chatgpt",
+		"honcho",
+		"memory",
 	},
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -63,6 +68,8 @@ crush login -f copilot
 			return loginCopilot(ws, force)
 		case "openai", "chatgpt":
 			return loginOpenAI(ws, force)
+		case "honcho", "memory":
+			return loginHoncho(force)
 		default:
 			return fmt.Errorf("unknown platform: %s", args[0])
 		}

@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/crush/internal/filepathext"
 	"github.com/charmbracelet/crush/internal/gitutil"
 	"github.com/charmbracelet/crush/internal/home"
+	"github.com/charmbracelet/crush/internal/honcho"
 	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/skills"
 )
@@ -197,6 +198,11 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 
 	// Deduplicate: user skills override builtins with the same name.
 	allSkills = skills.Deduplicate(allSkills)
+
+	// Hide skills whose required integration is switched off. A skill
+	// that documents tools the model cannot call is pure system-prompt
+	// overhead on every turn.
+	allSkills = skills.FilterUnavailable(allSkills, honcho.Features(cfg))
 
 	// Filter out disabled skills.
 	allSkills = skills.Filter(allSkills, cfg.Options.DisabledSkills)

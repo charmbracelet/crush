@@ -23,6 +23,7 @@ func NewOAuthCopilot(
 }
 
 type OAuthCopilot struct {
+	oauthAPIKey
 	deviceCode *copilot.DeviceCode
 	cancelFunc func()
 }

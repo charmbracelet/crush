@@ -39,6 +39,7 @@ import (
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/home"
+	"github.com/charmbracelet/crush/internal/honcho"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -2099,6 +2100,23 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			m.toggleYoloMode()
 		}
 		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionDisconnectMemory:
+		m.dialog.CloseDialog(dialog.CommandsID)
+		if err := honcho.DeleteToken(); err != nil {
+			cmds = append(cmds, util.ReportError(err))
+		} else {
+			// Refresh the agent so memory stops now rather than at
+			// the next restart, matching how connecting behaves.
+			cmds = append(cmds, func() tea.Msg {
+				if err := m.com.Workspace.UpdateAgentModel(context.Background()); err != nil {
+					slog.Warn("Failed to refresh agent after disconnecting memory", "error", err)
+				}
+				return util.InfoMsg{
+					Type: util.InfoTypeInfo,
+					Msg:  "Memory disconnected. Stored memory is untouched.",
+				}
+			})
+		}
 	case dialog.ActionSelectNotificationStyle:
 		cfg := m.com.Config()
 		if cfg != nil && cfg.Options != nil {
@@ -5333,11 +5351,31 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openQuitDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.OAuthHonchoID:
+		if cmd := m.openHonchoDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	default:
 		// Unknown dialog
 		break
 	}
 	return tea.Batch(cmds...)
+}
+
+// openHonchoDialog starts the Honcho memory sign-in.
+//
+// It goes through showDialog like every other authorization flow, so
+// it inherits the input grace period. Without it the keypress that
+// chose the command from the palette can carry straight into the
+// dialog and open a browser the user never asked for.
+func (m *UI) openHonchoDialog() tea.Cmd {
+	dlg, cmd := dialog.NewOAuthHoncho(m.com)
+	if m.dialog.ContainsDialog(dlg.ID()) {
+		m.dialog.BringToFront(dlg.ID())
+		return nil
+	}
+	m.dialog.OpenDialogWithGrace(dlg)
+	return cmd
 }
 
 // openQuitDialog opens the quit confirmation dialog.

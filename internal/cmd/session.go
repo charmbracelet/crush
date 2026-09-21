@@ -125,12 +125,13 @@ func sessionSetup(cmd *cobra.Command) (context.Context, *sessionServices, func()
 	}
 
 	queries := db.New(conn)
+	sessions := session.NewService(queries, conn)
 	svc := &sessionServices{
-		sessions: session.NewService(queries, conn),
-		messages: message.NewService(queries),
+		sessions: sessions,
+		messages: message.NewService(queries, message.WithWriterGuard(sessions.AcquireWriter)),
 		cfg:      cfg,
 	}
-	return ctx, svc, func() { conn.Close() }, nil
+	return ctx, svc, func() { _ = db.Release(dataDir) }, nil
 }
 
 func runSessionList(cmd *cobra.Command, _ []string) error {

@@ -18,6 +18,10 @@ type mockSessionService struct {
 	created  []session.Session
 }
 
+func (m *mockSessionService) AcquireWriter(context.Context, string) error {
+	return nil
+}
+
 func (m *mockSessionService) Subscribe(context.Context) <-chan pubsub.Event[session.Session] {
 	return make(chan pubsub.Event[session.Session])
 }

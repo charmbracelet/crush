@@ -496,6 +496,13 @@ tool/prompt/resource list-changed notifications.
 Crush has preliminary support for hooks. For details, see
 [the hook guide](./docs/hooks/).
 
+### Memory
+
+Crush can remember what you work on across sessions, backed by
+[Honcho](https://honcho.dev). Pick **Connect Memory** in the command
+palette, or run `crush login honcho`. It is off by default. For
+details, see [the memory guide](./docs/memory/).
+
 ### Sharing a workspace across clients
 
 When Crush is run against a shared backend (for example two TUIs talking to

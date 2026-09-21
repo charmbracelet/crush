@@ -2,6 +2,7 @@ package styles
 
 import (
 	"image/color"
+	"math"
 
 	"charm.land/bubbles/v2/filepicker"
 	"charm.land/bubbles/v2/help"
@@ -62,6 +63,10 @@ type quickStyleOpts struct {
 	// Diff view. Inserted (positive) and deleted (negative) lines. The
 	// gutter (line-number column) uses the darker gutter background
 	// while the code and symbol columns use the lighter one.
+	//
+	// All six are optional: unset foregrounds default to the success and
+	// destructive hues, and unset backgrounds blend the foreground over
+	// bgBase (see deriveDiffColors).
 	insertFg       color.Color // diff insert symbols and line numbers.
 	insertBg       color.Color // diff insert code and symbol background.
 	insertGutterBg color.Color // diff insert line-number background.
@@ -88,6 +93,7 @@ type quickStyleOpts struct {
 	ansiMagenta color.Color
 	ansiCyan    color.Color
 	ansiWhite   color.Color
+
 	// Bright intensity.
 	ansiBrightBlack   color.Color
 	ansiBrightRed     color.Color
@@ -99,12 +105,61 @@ type quickStyleOpts struct {
 	ansiBrightWhite   color.Color
 }
 
+// Diff tint blend ratios: the fraction of the insert/delete foreground
+// hue blended over bgBase for the code area and the line-number gutter.
+// The gutter stays subtler than the code area, and the delete tints are
+// more muted than the insert ones, matching the tints the built-in
+// themes used when these colors were picked by hand.
+const (
+	diffInsertCodeBlend   = 0.22
+	diffInsertGutterBlend = 0.17
+	diffDeleteCodeBlend   = 0.16
+	diffDeleteGutterBlend = 0.11
+)
+
+// deriveDiffColors fills unset diff tokens: foregrounds default to the
+// success and destructive hues, and backgrounds blend the foreground
+// over bgBase.
+func (o *quickStyleOpts) deriveDiffColors() {
+	if o.insertFg == nil {
+		o.insertFg = o.success
+	}
+	if o.deleteFg == nil {
+		o.deleteFg = o.destructive
+	}
+	if o.insertBg == nil && o.insertFg != nil && o.bgBase != nil {
+		o.insertBg = blendTint(o.insertFg, o.bgBase, diffInsertCodeBlend)
+	}
+	if o.insertGutterBg == nil && o.insertFg != nil && o.bgBase != nil {
+		o.insertGutterBg = blendTint(o.insertFg, o.bgBase, diffInsertGutterBlend)
+	}
+	if o.deleteBg == nil && o.deleteFg != nil && o.bgBase != nil {
+		o.deleteBg = blendTint(o.deleteFg, o.bgBase, diffDeleteCodeBlend)
+	}
+	if o.deleteGutterBg == nil && o.deleteFg != nil && o.bgBase != nil {
+		o.deleteGutterBg = blendTint(o.deleteFg, o.bgBase, diffDeleteGutterBlend)
+	}
+}
+
+// blendTint blends fg over bg in CIELAB (via lipgloss.Blend1D) with the
+// given fraction of fg: 0 returns bg, 1 returns fg.
+func blendTint(fg, bg color.Color, fraction float64) color.Color {
+	const steps = 101
+	gradient := lipgloss.Blend1D(steps, fg, bg)
+	// Blend1D's first stop is pure fg, so the gradient index counts fg
+	// share down from 1.
+	i := min(int(math.Round((1-fraction)*(steps-1))), steps-1)
+	return gradient[i]
+}
+
 // quickStyle builds the default Styles (that is, the default theme, Charmtone
 // Pantera) from a palette of semi-semanticly-named colors.
 //
 // The idea here is that you can do most of the work on a theme with quickStyle,
 // then add overrides as needed.
 func quickStyle(o quickStyleOpts) Styles {
+	o.deriveDiffColors()
+
 	var (
 		base   = lipgloss.NewStyle().Foreground(o.fgBase)
 		muted  = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)

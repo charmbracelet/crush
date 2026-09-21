@@ -174,8 +174,10 @@ type Palette struct {
 }
 
 // PaletteFromOpts extracts a Palette from quickStyleOpts, converting
-// each color.Color to its "#rrggbb" hex representation.
+// each color.Color to its "#rrggbb" hex representation. Diff colors
+// left unset are derived first so the extracted palette is complete.
 func PaletteFromOpts(o quickStyleOpts) Palette {
+	o.deriveDiffColors()
 	return Palette{
 		Primary:   colorToHex(o.primary),
 		Secondary: colorToHex(o.secondary),

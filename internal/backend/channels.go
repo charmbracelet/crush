@@ -46,7 +46,7 @@ func (b *Backend) startChannelRouter() {
 
 // routeChannelMessage delivers one channel push to every hosted workspace
 // that both declares the originating MCP server in its config and opted it
-// in via --channels. The MCP event broker is process-global, so the
+// in via --channels or channel_enabled. The MCP event broker is process-global, so the
 // config check is what scopes a push to the workspace(s) that actually
 // enabled the channel. Delivery to each workspace is dispatched on its
 // own goroutine so a slow agent init on one does not block the rest.
@@ -60,11 +60,9 @@ func (b *Backend) routeChannelMessage(ev mcptools.Event) {
 		if !mcptools.ChannelOptIn(mcpCfg, ws.Cfg.Overrides().EnabledChannels, ev.Name) {
 			continue
 		}
-		wg.Add(1)
-		go func(ws *Workspace) {
-			defer wg.Done()
+		wg.Go(func() {
 			b.injectChannelMessage(ws, ev.Name, ev.ChannelMessage)
-		}(ws)
+		})
 	}
 	wg.Wait()
 }

@@ -268,7 +268,7 @@ func SubscribeEvents(ctx context.Context) <-chan pubsub.Event[Event] {
 // events (EventChannelMessage). The MCP broker is process-global, so these
 // events are not scoped to any workspace: every consumer must check that the
 // originating server is declared in the target workspace's MCP config and
-// opted in (ChannelEnabled) before delivering, otherwise one workspace's
+// opted in (ChannelOptIn) before delivering, otherwise one workspace's
 // channel messages leak into another — the injection path SubscribeEvents
 // filters out.
 func SubscribeChannelEvents(ctx context.Context) <-chan pubsub.Event[Event] {
@@ -994,8 +994,9 @@ func createSession(ctx context.Context, cfg *config.ConfigStore, name string, m 
 	// gate starts undecided: notifications that arrive during capability
 	// negotiation are buffered. After Connect resolves, the gate is opened
 	// (and the buffer drained) only when the server declares the channel
-	// capability AND was opted in via --channels; otherwise it is closed
-	// (buffer discarded). This prevents early notifications from being lost.
+	// capability AND was opted in (--channels or channel_enabled);
+	// otherwise it is closed (buffer discarded). This prevents early
+	// notifications from being lost.
 	channelGate := newChannelGate()
 	transport = &channelTransport{inner: transport, name: name, gate: channelGate}
 

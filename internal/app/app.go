@@ -689,7 +689,8 @@ func (app *App) setupEvents() {
 }
 
 // subscribeScopedChannelEvents forwards channel message events for servers
-// this workspace both declares in its MCP config and opted in via --channels.
+// this workspace both declares in its MCP config and opted in (via
+// --channels or channel_enabled; see mcp.ChannelOptIn).
 // The MCP broker is process-global and channel events carry no workspace
 // identity, so this per-app scoping is what keeps another workspace's channel
 // messages out of this app's event stream (see mcp.SubscribeChannelEvents).

@@ -220,9 +220,10 @@ func discoverReplyFromTools(tools []*mcp.Tool) *config.MCPChannelReply {
 	return reply
 }
 
-// autoReplyDelivered reports whether the model already delivered a reply
-// through a discovered auto-route tool during the turn. It checks the
-// discovered reply's tools plus any additional suppress tools.
+// autoReplyDelivered is channelReplyDelivered with a nil guard, so a
+// channel with no reply routes (neither configured nor discovered) never
+// counts as already replied. It serves explicit and auto-discovered
+// routes alike.
 func autoReplyDelivered(reply *config.MCPChannelReply, channel string, completedTools map[string]struct{}) bool {
 	if reply == nil {
 		return false

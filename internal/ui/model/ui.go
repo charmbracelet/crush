@@ -483,14 +483,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 
 	// Attachments component
 	attachments := attachments.New(
-		attachments.NewRenderer(
-			com.Styles.Attachments.Normal,
-			com.Styles.Attachments.Deleting,
-			com.Styles.Attachments.Image,
-			com.Styles.Attachments.Text,
-			com.Styles.Attachments.Skill,
-			com.Styles.Attachments.Remove,
-		),
+		attachments.NewRenderer(com.Styles.Attachments),
 		attachments.Keymap{
 			DeleteMode: keyMap.Editor.AttachmentDeleteMode,
 			DeleteAll:  keyMap.Editor.DeleteAllAttachments,
@@ -4896,14 +4889,7 @@ func (m *UI) refreshStyles() {
 	}
 	m.textarea.SetStyles(t.Editor.Textarea)
 	m.completions.SetStyles(t.Completions.Normal, t.Completions.Focused, t.Completions.Match)
-	m.attachments.Renderer().SetStyles(
-		t.Attachments.Normal,
-		t.Attachments.Deleting,
-		t.Attachments.Image,
-		t.Attachments.Text,
-		t.Attachments.Skill,
-		t.Attachments.Remove,
-	)
+	m.attachments.SetStyles(t.Attachments)
 	m.todoSpinner.Style = t.Pills.TodoSpinner
 	m.status.help.Styles = t.Help
 	if d := m.dialog.Dialog(dialog.ThemeID); d != nil {

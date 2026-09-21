@@ -622,14 +622,7 @@ type Styles struct {
 	}
 
 	// Attachments styles
-	Attachments struct {
-		Normal   lipgloss.Style
-		Image    lipgloss.Style
-		Text     lipgloss.Style
-		Skill    lipgloss.Style
-		Remove   lipgloss.Style
-		Deleting lipgloss.Style
-	}
+	Attachments AttachmentStyles
 
 	// Pills styles for todo/queue pills
 	Pills struct {
@@ -689,6 +682,19 @@ func (s *Styles) ChromaTheme() chroma.StyleEntries {
 		chroma.GenericSubheading:   chromaStyle(rules.Chroma.GenericSubheading),
 		chroma.Background:          chromaStyle(rules.Chroma.Background),
 	}
+}
+
+// AttachmentStyles are the styles for one attachment chip row. They are
+// passed to the attachments renderer as a unit so adding a style does not
+// mean touching every construction site.
+type AttachmentStyles struct {
+	Normal   lipgloss.Style
+	Image    lipgloss.Style
+	Text     lipgloss.Style
+	Skill    lipgloss.Style
+	Remove   lipgloss.Style
+	Deleting lipgloss.Style
+	More     lipgloss.Style // "N more…" hint for chips that didn't fit
 }
 
 // DialogHelpStyles returns the styles for dialog help.

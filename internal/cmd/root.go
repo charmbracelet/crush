@@ -29,6 +29,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/event"
+	"github.com/charmbracelet/crush/internal/honcho"
 	"github.com/charmbracelet/crush/internal/lock"
 	crushlog "github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/projects"
@@ -354,10 +355,11 @@ func localSkillsDiscoveryConfig(store *config.ConfigStore) skills.DiscoveryConfi
 		resolver = r.ResolveValue
 	}
 	return skills.DiscoveryConfig{
-		SkillsPaths:    paths,
-		DisabledSkills: disabled,
-		WorkingDir:     store.WorkingDir(),
-		Resolver:       resolver,
+		SkillsPaths:       paths,
+		DisabledSkills:    disabled,
+		WorkingDir:        store.WorkingDir(),
+		Resolver:          resolver,
+		AvailableFeatures: honcho.Features(store.Config()),
 	}
 }
 

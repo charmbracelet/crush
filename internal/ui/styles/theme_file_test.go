@@ -131,6 +131,15 @@ func TestThemeDirs_HasOnlyGlobalUserDirectory(t *testing.T) {
 	require.NotEqual(t, filepath.Join(".crush", "themes"), dirs[0])
 }
 
+func TestThemeDirs_HonorsGlobalConfigEnv(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CRUSH_GLOBAL_CONFIG", dir)
+
+	dirs := ThemeDirs()
+	require.Len(t, dirs, 1)
+	require.Equal(t, filepath.Join(dir, "themes"), dirs[0])
+}
+
 func TestListUserThemes_ReadsDirectory(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

@@ -8,10 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 
-	"github.com/charmbracelet/crush/internal/home"
+	"github.com/charmbracelet/crush/internal/config"
 )
 
 // ThemeFile represents a standalone theme definition stored as JSON.
@@ -91,19 +90,14 @@ var themeDirsOverride []string
 
 // ThemeDirs returns the user theme directory. Theme files are global so
 // launching Crush from different working directories always resolves the same
-// themes.
+// themes. Themes live in the Crush config directory (the one holding the
+// global config file) under themes/, which honors CRUSH_GLOBAL_CONFIG and
+// matches the README on every platform.
 func ThemeDirs() []string {
 	if themeDirsOverride != nil {
 		return themeDirsOverride
 	}
-	if runtime.GOOS == "windows" {
-		localAppData := os.Getenv("LOCALAPPDATA")
-		if localAppData == "" {
-			localAppData = filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Local")
-		}
-		return []string{filepath.Join(localAppData, "crush", "themes")}
-	}
-	return []string{filepath.Join(home.Config(), "crush", "themes")}
+	return []string{filepath.Join(filepath.Dir(config.GlobalConfig()), "themes")}
 }
 
 // ThemePath returns the path for a validated global user theme name.

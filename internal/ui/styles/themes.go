@@ -2,6 +2,7 @@ package styles
 
 import (
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 
@@ -319,10 +320,13 @@ func LoadTheme(name string) (Styles, error) {
 }
 
 // ThemeFromConfig resolves the configured theme name, falling back to the
-// default Charmtone theme when the config value is empty or invalid.
+// default Charmtone theme when the config value is empty or invalid. The
+// fallback is logged so a missing or broken theme file is not silently
+// replaced by different colors.
 func ThemeFromConfig(name string) Styles {
 	s, err := LoadTheme(name)
 	if err != nil {
+		slog.Warn("Falling back to the default theme", "configured_theme", name, "reason", err)
 		return CharmtonePantera()
 	}
 	return s

@@ -83,6 +83,30 @@ func TestLoadTheme_RejectsInheritanceCycle(t *testing.T) {
 	require.Contains(t, err.Error(), "inheritance cycle")
 }
 
+func TestForkedTheme_KeepsLoadingAfterSourceBaseDeleted(t *testing.T) {
+	dir := t.TempDir()
+	setTestThemeDirs(t, []string{dir})
+
+	require.NoError(t, SaveThemeFile(filepath.Join(dir, "parent.json"), &ThemeFile{
+		Base:    "gruvbox-dark",
+		Palette: Palette{Primary: "#111111"},
+	}))
+
+	// Fork the user theme the way the theme dialog does when creating a
+	// new theme: the exported Base must stay pinned to the built-in root.
+	exported, err := ExportResolvedPalette("parent")
+	require.NoError(t, err)
+	require.Equal(t, "gruvbox-dark", exported.Base)
+	require.NoError(t, SaveThemeFile(filepath.Join(dir, "forked.json"), exported))
+
+	// Deleting the source user theme must not break the fork.
+	require.NoError(t, os.Remove(filepath.Join(dir, "parent.json")))
+
+	s, err := LoadTheme("forked")
+	require.NoError(t, err)
+	require.NotNil(t, s.WorkingGradFromColor)
+}
+
 func TestLoadTheme_OverriddenBuiltinKeepsThemeOverrides(t *testing.T) {
 	dir := t.TempDir()
 	setTestThemeDirs(t, []string{dir})

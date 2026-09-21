@@ -2225,14 +2225,6 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		m.previewTheme(newStyles)
 	case dialog.ActionSaveThemePalette:
-		newStyles, err := styles.LoadPaletteTheme(msg.Base, msg.Palette)
-		if err != nil {
-			cmds = append(cmds, util.ReportError(err))
-			break
-		}
-		m.applyTheme(newStyles)
-		m.preThemeStyles = nil
-
 		// The theme is stored under its own name; Base only identifies the
 		// built-in palette its colors are derived from.
 		themeName := msg.Name
@@ -2240,6 +2232,8 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			themeName = msg.Base
 		}
 
+		// Write the file before touching the UI so a failed save never
+		// leaves colors applied that did not reach disk.
 		savePath, err := styles.ThemePath(themeName)
 		if err != nil {
 			cmds = append(cmds, util.ReportError(err))
@@ -2249,6 +2243,25 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		if err := styles.SaveThemeFile(savePath, tf); err != nil {
 			cmds = append(cmds, util.ReportError(err))
 			break
+		}
+
+		// Only take over the whole UI when the saved theme is the active
+		// one (or the implicit default). Otherwise the preview backup
+		// stays intact so esc restores the user's real theme instead of
+		// leaving the edited colors applied until restart.
+		activeTheme := common.ThemeNameFromConfig(m.com.Config())
+		isActive := strings.EqualFold(activeTheme, themeName)
+		if activeTheme == "" {
+			isActive = strings.EqualFold(themeName, "charmtone-panther")
+		}
+		if isActive {
+			newStyles, err := styles.LoadTheme(themeName)
+			if err != nil {
+				cmds = append(cmds, util.ReportError(err))
+				break
+			}
+			m.applyTheme(newStyles)
+			m.preThemeStyles = nil
 		}
 		cmds = append(cmds, util.ReportInfo("Theme saved"))
 		m.dialog.CloseDialog(dialog.ThemeEditorID)
@@ -2304,7 +2317,10 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, util.ReportError(err))
 			break
 		}
-		exported.Base = base
+		// ExportResolvedPalette already pins Base to the built-in root the
+		// palette was resolved from. Keep it so the new theme stays
+		// loadable even if a user theme used as the source is later
+		// deleted or renamed.
 		if err := styles.SaveThemeFile(savePath, exported); err != nil {
 			cmds = append(cmds, util.ReportError(err))
 			break

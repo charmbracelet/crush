@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -114,6 +115,15 @@ func channelReplyDelivered(reply *config.MCPChannelReply, channel string, comple
 		}
 	}
 	return false
+}
+
+// channelErrorReplyWanted reports whether a failed turn should notify the
+// channel sender that something went wrong. Only channel-originated turns
+// qualify, and cancellation is excluded: it is the operator stopping the
+// turn (Esc, or CancelAll on shutdown), not a failure, and answering it
+// would message every in-flight sender each time Crush quits.
+func channelErrorReplyWanted(channel string, err error) bool {
+	return channel != "" && !errors.Is(err, context.Canceled)
 }
 
 // discoverChannelReply scans the tool list of the MCP server named channel

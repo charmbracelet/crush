@@ -1,6 +1,9 @@
 package agent
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
@@ -141,6 +144,19 @@ func TestChannelReplyDelivered(t *testing.T) {
 	// A same-named tool on a different server does not count as a reply.
 	require.False(t, channelReplyDelivered(reply, "signal", completed("mcp_other_send_message_to_user")))
 	require.False(t, channelReplyDelivered(reply, "signal", completed()))
+}
+
+func TestChannelErrorReplyWanted(t *testing.T) {
+	t.Parallel()
+	providerErr := errors.New("provider exploded")
+	require.True(t, channelErrorReplyWanted("signal", providerErr))
+	require.True(t, channelErrorReplyWanted("signal", context.DeadlineExceeded))
+	// Local turns have no channel sender to notify.
+	require.False(t, channelErrorReplyWanted("", providerErr))
+	// Cancellation (Esc, or CancelAll on shutdown) is not a failure, even
+	// when wrapped.
+	require.False(t, channelErrorReplyWanted("signal", context.Canceled))
+	require.False(t, channelErrorReplyWanted("signal", fmt.Errorf("stream: %w", context.Canceled)))
 }
 
 // signalTools returns a mock tool list resembling a Signal MCP server.

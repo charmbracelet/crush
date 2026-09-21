@@ -131,6 +131,9 @@ func parseUnifiedDiff(content string) []parsedDiffFile {
 }
 
 func toolOutputDiffContentFromUnified(sty *styles.Styles, content string, width int, expanded bool) string {
+	// Bound before parsing and formatting: both walk every line, and a
+	// collapsed card only shows collapsedMaxLines of the result.
+	content, hidden := boundForFormatting(content, expanded)
 	files := parseUnifiedDiff(content)
 	if len(files) == 0 {
 		bodyWidth := width - toolBodyLeftPaddingTotal
@@ -161,7 +164,10 @@ func toolOutputDiffContentFromUnified(sty *styles.Styles, content string, width 
 	if expanded {
 		maxLines = len(lines)
 	}
-	if len(lines) > maxLines && !expanded {
+	switch {
+	case hidden > 0:
+		combined = combined + "\n" + diffTruncationNotice(sty, width, hidden)
+	case len(lines) > maxLines && !expanded:
 		truncMsg := sty.Tool.DiffTruncation.
 			Width(bodyWidth).
 			Render(fmt.Sprintf(assistantMessageTruncateFormat, len(lines)-maxLines))

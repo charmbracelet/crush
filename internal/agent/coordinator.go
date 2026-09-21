@@ -33,6 +33,7 @@ import (
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/history"
+	"github.com/charmbracelet/crush/internal/honcho"
 	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp"
@@ -166,6 +167,12 @@ type coordinator struct {
 	mainAgentName string
 	agents        map[string]SessionAgent
 	hookRunner    *hooks.Runner
+	// memory yields the cross-session recall backend for every agent
+	// this coordinator builds. It is asked again on each build, so a
+	// backend connected mid-session is picked up by the same refresh a
+	// model change triggers. Nil, or a provider returning nil, means
+	// no memory.
+	memory MemoryProvider
 
 	// models is shared by every agent; rebuildMu serializes rebuilds of it.
 	models    csync.Value[coordinatorModels]
@@ -245,6 +252,11 @@ type CoordinatorOptions struct {
 	// ShellOwner tags the background shells the bash tool starts, so the
 	// owner can stop its own shells without touching anyone else's.
 	ShellOwner any
+
+	// Memory yields the cross-session recall backend. Nil, or a
+	// provider returning nil, disables it. Use StaticMemory for a
+	// value that never changes.
+	Memory MemoryProvider
 }
 
 func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, error) {
@@ -257,7 +269,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		allSkills = opts.Skills.AllSkills()
 		activeSkills = opts.Skills.ActiveSkills()
 	} else {
-		allSkills, activeSkills = discoverSkills(opts.Config)
+		allSkills, activeSkills = discoverSkills(opts.Config, opts.Memory.get())
 	}
 	skillTracker := skills.NewTracker(activeSkills)
 
@@ -282,6 +294,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		shellOwner:      opts.ShellOwner,
 		dispatched:      csync.NewMap[string, *dispatchedAgent](),
 		backgroundAfter: subAgentBackgroundAfter,
+		memory:          opts.Memory,
 	}
 
 	agentCfg, ok := opts.Config.Config().Agents[config.AgentCoder]
@@ -295,7 +308,10 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	}
 	c.promptTexts = promptTexts
 
-	coderPrompt, err := c.newPrompt("coder", c.skillOverrideOptions()...)
+	coderPrompt, err := c.newPrompt("coder", append(
+		c.skillOverrideOptions(),
+		prompt.WithFeatures(c.liveMemoryFeatures),
+	)...)
 	if err != nil {
 		return nil, err
 	}
@@ -314,6 +330,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	planSystemPrompt, err := c.newPrompt("plan", append(
 		c.skillOverrideOptions(),
 		prompt.WithToolNames(c.effectiveToolNames(planCfg, false)),
+		prompt.WithFeatures(c.liveMemoryFeatures),
 	)...)
 	if err != nil {
 		return nil, err
@@ -1027,6 +1044,10 @@ func (c *coordinator) buildAgentWithModels(ctx context.Context, ready *errgroup.
 		RunComplete:          c.runComplete,
 		Hooks:                c.hookRunner,
 		titles:               &c.titles,
+		// Sub-agents share the parent's memory session but must not
+		// write to it: their turns are scaffolding for the main
+		// conversation, not statements the user made.
+		Memory: memoryForAgent(c.memory.get(), isSubAgent),
 	})
 
 	// The readiness goroutines below perform one-time setup — building the
@@ -1191,6 +1212,26 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		}
 	}
 
+	// Memory tools are attached after the allow-list filter, like MCP
+	// tools, because they exist only when a memory backend is
+	// configured and so are not part of the static tool catalogue.
+	// Sub-agents are skipped: they read memory but never write to it,
+	// so honcho_remember would silently mean something different there.
+	//
+	// Resolved once and shared with the wrapper below, so a backend
+	// connecting mid-build cannot produce a tool list that has the
+	// memory tools without the memory wrapper, or the reverse.
+	mem := c.memory.get()
+	if svc, ok := mem.(*honcho.Service); ok && svc != nil && !isSubAgent {
+		filteredTools = append(
+			filteredTools,
+			tools.NewHonchoSearchTool(svc),
+			tools.NewHonchoChatTool(svc),
+			tools.NewHonchoRememberTool(svc),
+			tools.NewHonchoStatusTool(svc),
+		)
+	}
+
 	for _, tool := range tools.GetMCPTools(c.permissions, c.cfg, c.cfg.WorkingDir()) {
 		if agent.AllowedMCP == nil {
 			// No MCP restrictions
@@ -1224,6 +1265,10 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	// per delegated turn. The top-level invocation of the subagent tool
 	// itself is still wrapped from the coder's side.
 	filteredTools = wrapToolsWithHooks(filteredTools, c.hookRunner, isSubAgent)
+
+	// Memory wraps outside hooks so it observes the call as it
+	// actually ran, including any input a PreToolUse hook rewrote.
+	filteredTools = wrapToolsWithMemory(filteredTools, mem, isSubAgent)
 
 	return filteredTools, nil
 }
@@ -1741,6 +1786,12 @@ func (c *coordinator) updateAgentModels(ctx context.Context, agent SessionAgent,
 		return err
 	}
 
+	// Re-ask for memory on the way through. This is the path a
+	// mid-session connect or disconnect travels: without it the agent
+	// would gain the memory tools while its own recall stayed as it
+	// was at startup, which is worse than either state alone.
+	agent.SetMemory(c.memory.get())
+
 	agentCfg, ok := c.cfg.Config().Agents[name]
 	if !ok {
 		return fmt.Errorf("%w: %s", errMainAgentNotFound, name)
@@ -2103,7 +2154,7 @@ func (c *coordinator) updateParentSessionCost(ctx context.Context, childSessionI
 // NOT publish to the package-level broker — there are no subscribers in
 // that case, so doing so would be misleading without delivering the
 // snapshot anywhere useful.
-func discoverSkills(cfg *config.ConfigStore) (allSkills, activeSkills []*skills.Skill) {
+func discoverSkills(cfg *config.ConfigStore, memory Memory) (allSkills, activeSkills []*skills.Skill) {
 	opts := cfg.Config().Options
 	var paths, disabled []string
 	if opts != nil {
@@ -2118,6 +2169,9 @@ func discoverSkills(cfg *config.ConfigStore) (allSkills, activeSkills []*skills.
 		SkillsPaths:    paths,
 		DisabledSkills: disabled,
 		Resolver:       resolver,
+		// Memory-specific skills stay hidden when no backend is
+		// configured, so they cost nothing in the system prompt.
+		AvailableFeatures: memoryFeatures(memory),
 	})
 	logDiscoveryStats(states, paths, allSkills, activeSkills, disabled)
 	return allSkills, activeSkills

@@ -551,6 +551,10 @@ flag needed on each launch:
 }
 ```
 
+Once a server is opted in, a **Channels** section on the landing page and in
+the sidebar shows its state, and the **Channels** command lists every opted-in
+server along with channel-capable servers that are not enabled yet.
+
 The `source` attribute is always the (trusted) server name. Payloads are
 untrusted, server-initiated input: Crush validates their structure, caps the
 body and attribute sizes, restricts `meta` keys to identifiers

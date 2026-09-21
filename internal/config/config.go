@@ -220,6 +220,12 @@ type MCPConfig struct {
 	EnabledTools  []string          `json:"enabled_tools,omitempty" jsonschema:"description=Allow list of tools from this MCP server,example=get-library-doc"`
 	Timeout       int               `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds for MCP server connections,default=10,example=30,example=60,example=120"`
 
+	// Lazy keeps this server's tool schemas out of the model context
+	// until the agent loads them with mcp_search. When nil the server
+	// follows options.lazy_mcp (default true). Set it to false to pin
+	// every tool from this server into context on every turn.
+	Lazy *bool `json:"lazy,omitempty" jsonschema:"description=Keep this server's tools out of context until the agent loads them. Unset follows options.lazy_mcp. Set false to always show them,default=true"`
+
 	// Sessionless marks a server that does not maintain an MCP session (it
 	// never issues a Mcp-Session-Id). When true, Crush omits the
 	// tools/prompts/resources list-changed handlers: the go-sdk opens a
@@ -473,7 +479,16 @@ type Options struct {
 	Progress                  *bool        `json:"progress,omitempty" jsonschema:"description=Show indeterminate progress updates during long operations,default=true"`
 	Notifications             string       `json:"notifications,omitempty" jsonschema:"description=Notification style to use. Options: auto (default)\\, native\\, osc\\, bell\\, disabled. Auto selects based on environment: native for local sessions\\, osc for SSH (with automatic OSC 99/777 detection).,enum=auto,enum=native,enum=osc,enum=bell,enum=disabled,default=auto"`
 	DisabledSkills            []string     `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=crush-config"`
+	LazyMCP                   *bool        `json:"lazy_mcp,omitempty" jsonschema:"description=Keep MCP tools out of the model context until the agent loads them with mcp_search. Individual servers override it with mcp.<name>.lazy,default=true"`
 	RequestTimeout            *int         `json:"request_timeout,omitempty" jsonschema:"description=Timeout in seconds for each LLM API request. Streaming responses are aborted only after this much inactivity\\, so slow but active streams are never killed. 0 disables it\\, negative values are invalid.,default=60,example=120,example=300,example=0"`
+}
+
+// GetLazyMCP reports whether MCP tool schemas are kept out of the model
+// context until the agent asks for them. Both the nil receiver and the
+// unset field mean enabled, so laziness is on by default for every
+// existing config.
+func (o *Options) GetLazyMCP() bool {
+	return o == nil || o.LazyMCP == nil || *o.LazyMCP
 }
 
 // DefaultRequestTimeout bounds each LLM API request when the user has not
@@ -1028,6 +1043,7 @@ func allToolNames() []string {
 		"view",
 		"write",
 		"list_mcp_resources",
+		"mcp_search",
 		"read_mcp_resource",
 	}
 }

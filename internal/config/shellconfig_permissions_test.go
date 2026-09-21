@@ -92,3 +92,23 @@ permissions deny bash`)
 	require.NotContains(t, cfg.Agents[config.AgentCoder].AllowedTools, "bash")
 	require.Contains(t, cfg.Agents[config.AgentCoder].AllowedTools, "view")
 }
+
+func TestShellConfigPermissionsYolo(t *testing.T) {
+	store := loadCrushSh(t, `permissions yolo`)
+	require.NotNil(t, store.Config().Permissions)
+	require.True(t, store.Config().Permissions.SkipRequests)
+
+	store = loadCrushSh(t, `permissions yolo true`)
+	require.NotNil(t, store.Config().Permissions)
+	require.True(t, store.Config().Permissions.SkipRequests)
+
+	store = loadCrushSh(t, `permissions yolo false`)
+	require.NotNil(t, store.Config().Permissions)
+	require.False(t, store.Config().Permissions.SkipRequests)
+}
+
+func TestShellConfigPermissionsYoloInvalid(t *testing.T) {
+	_, err := loadCrushShErr(t, `permissions yolo maybe`)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid value")
+}

@@ -350,19 +350,17 @@ func writeSkills(b *strings.Builder, allSkills []*skills.Skill, activeSkills []*
 func writePermissions(b *strings.Builder, cfg *config.ConfigStore) {
 	c := cfg.Config()
 	overrides := cfg.Overrides()
+	yolo := overrides.SkipPermissionRequests || (c.Permissions != nil && c.Permissions.SkipRequests)
+	hasAllowedTools := c.Permissions != nil && len(c.Permissions.AllowedTools) > 0
 
-	if c.Permissions == nil {
-		if !overrides.SkipPermissionRequests {
-			return
-		}
-	} else if !overrides.SkipPermissionRequests && len(c.Permissions.AllowedTools) == 0 {
+	if !yolo && !hasAllowedTools {
 		return
 	}
 	b.WriteString("[permissions]\n")
-	if overrides.SkipPermissionRequests {
+	if yolo {
 		b.WriteString("mode = yolo\n")
 	}
-	if c.Permissions != nil && len(c.Permissions.AllowedTools) > 0 {
+	if hasAllowedTools {
 		sorted := slices.Clone(c.Permissions.AllowedTools)
 		slices.Sort(sorted)
 		fmt.Fprintf(b, "allowed_tools = %s\n", strings.Join(sorted, ", "))

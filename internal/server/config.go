@@ -288,14 +288,16 @@ func (c *controllerV1) handleGetWorkspaceMCPStates(w http.ResponseWriter, r *htt
 	result := make(map[string]proto.MCPClientInfo, len(states))
 	for k, v := range states {
 		result[k] = proto.MCPClientInfo{
-			Name:          v.Name,
-			State:         proto.MCPState(v.State),
-			Error:         v.Error,
-			ToolCount:     v.Counts.Tools,
-			PromptCount:   v.Counts.Prompts,
-			ResourceCount: v.Counts.Resources,
-			ConnectedAt:   v.ConnectedAt,
-			Channel:       v.Channel,
+			Name:           v.Name,
+			State:          proto.MCPState(v.State),
+			Error:          v.Error,
+			ToolCount:      v.Counts.Tools,
+			PromptCount:    v.Counts.Prompts,
+			ResourceCount:  v.Counts.Resources,
+			ConnectedAt:    v.ConnectedAt,
+			Channel:        v.Channel,
+			ChannelOptIn:   v.ChannelOptIn,
+			ChannelCapable: v.ChannelCapable,
 		}
 	}
 	jsonEncode(w, result)

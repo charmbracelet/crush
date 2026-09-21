@@ -677,8 +677,10 @@ func (w *ClientWorkspace) MCPGetStates() map[string]mcp.ClientInfo {
 				Prompts:   v.PromptCount,
 				Resources: v.ResourceCount,
 			},
-			ConnectedAt: v.ConnectedAt,
-			Channel:     v.Channel,
+			ConnectedAt:    v.ConnectedAt,
+			Channel:        v.Channel,
+			ChannelOptIn:   v.ChannelOptIn,
+			ChannelCapable: v.ChannelCapable,
 		}
 	}
 	return result

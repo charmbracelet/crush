@@ -117,9 +117,12 @@ mcp remove <name>                              # alias: rm
 
 Flags: `--command CMD`, `--args ARG` (repeatable), `--env KEY VALUE`
 (repeatable), `--url URL`, `--header KEY VALUE` (repeatable), `--timeout N`,
-`--disabled BOOL`, `--disabled-tools TOOL` (repeatable), `--enabled-tools TOOL`
+`--disabled BOOL`, `--lazy BOOL`, `--disabled-tools TOOL` (repeatable), `--enabled-tools TOOL`
 (repeatable), `--oauth BOOL`, `--oauth-client-id ID`, `--oauth-client-secret SECRET`,
 `--oauth-callback-port PORT`.
+
+`--lazy false` pins a server's tools into the model context instead of hiding
+them until `mcp_search` loads them; it never reconnects the server.
 
 ```bash
 mcp add github --type http \
@@ -178,7 +181,7 @@ option reset <list-key>    # clear a list option back to empty
 ```
 
 - **Boolean keys** (value optional, defaults `true`): `debug`, `debug-lsp`,
-  `auto-lsp`, `progress`.
+  `auto-lsp`, `progress`, `lazy-mcp`.
 - **Boolean keys phrased positively** (stored as the negated field): `metrics`,
   `auto-summarize`, `provider-auto-update`,
   `default-providers`. Example: `option metrics false` disables metrics.
@@ -344,6 +347,7 @@ The `$schema` property enables IDE autocomplete but is optional.
 | `model add openai/gpt-x --name X`    | append to `providers.openai.models[]`                  |
 | `model large openai/gpt-x`           | `models.large = {"provider":"openai","model":"gpt-x"}` |
 | `mcp add gh --type http --url U`     | `mcp.gh = {"type":"http","url":"U"}`                   |
+| `mcp add gh --lazy false`             | `mcp.gh.lazy = false`                                    |
 | `lsp add go --command gopls`         | `lsp.go = {"command":"gopls"}`                         |
 | `hook add PreToolUse --command C`    | append to `hooks.PreToolUse[]`                         |
 | `permissions allow view ls`          | `permissions.allowed_tools = ["view","ls"]`            |

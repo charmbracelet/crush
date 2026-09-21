@@ -295,6 +295,7 @@ Flags:
       --header key value         HTTP header (repeatable)
       --timeout int              startup timeout in seconds
       --disabled bool            disable without removing
+      --lazy bool                 hide this server's tools until the agent loads them
       --disabled-tools string       deny a server tool (repeatable)
       --enabled-tools string        allow only these server tools (repeatable)
       --oauth bool                  enable OAuth 2.1 flow (HTTP only)
@@ -321,6 +322,39 @@ Usage:
   mcp remove <name>
   mcp rm <name>
 ```
+
+### Lazy MCP tools
+
+MCP servers connect at startup, but their tool schemas stay out of the
+model's context until the agent asks for them. Every server counts here,
+including the built-in Docker catalog.
+
+Without laziness a few servers cost tens of thousands of input tokens on
+every step of every turn, whether or not the conversation uses them. With
+it the model sees a one-line index instead:
+
+```text
+<available_mcp>
+MCP servers are connected, but their tool schemas are hidden to save context.
+Call mcp_search with what you need, e.g. "create a pull request"; loaded
+tools are callable on your next step.
+- github: 28 tools hidden, use mcp_search to load them
+</available_mcp>
+```
+
+`mcp_search` returns the best matches and makes them callable on the next
+step. Loaded tools stay available for the rest of the session, up to 32 at a
+time, and a tool the model calls by an exact name still runs even if it was
+never listed.
+
+```bash
+option lazy-mcp false                       # show every tool again
+mcp add github --type http --lazy false      # pin one server into context
+```
+
+Pinning suits tools needed in nearly every turn: it trades context for one
+fewer round trip. A server stays connected either way, so pinning never
+reconnects it, and its prompts, resources, and `/mcp` status are unchanged.
 
 ### lsp
 
@@ -472,6 +506,7 @@ Boolean Keys:
   debug                          enable debug logging
   debug-lsp                      enable LSP debug logging
   auto-lsp                       automatically configure language servers
+  lazy-mcp                       hide MCP tools until the agent loads them
   progress                       show progress indicators
   metrics                        send anonymous usage metrics
   auto-summarize                 automatically summarize long conversations

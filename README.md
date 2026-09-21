@@ -477,6 +477,20 @@ and authenticates as the specified client. When omitted, Crush attempts
 dynamic registration automatically (works with Linear, Notion, and other
 servers that support RFC 7591).
 
+#### Lazy MCP tools
+
+MCP servers connect at startup, but their tool schemas stay out of context
+until the agent needs them. Without this, a few servers cost tens of
+thousands of input tokens on every step of every turn; with it the model sees
+one index line per server and calls `mcp_search` to load the handful of tools
+a task actually needs. Loaded tools remain available for the rest of the
+session, and every server counts here, including the built-in Docker catalog.
+
+Turn it off globally with `"lazy_mcp": false`, or pin one server into context
+with `"lazy": false` (or `--lazy false`). Pinning suits tools needed in nearly
+every turn: it trades context for one fewer round trip and never reconnects
+the server.
+
 #### Sessionless servers
 
 Some HTTP MCP servers are sessionless — they never issue a

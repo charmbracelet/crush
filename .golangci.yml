@@ -2,6 +2,7 @@ version: "2"
 linters:
   enable:
     - bodyclose
+    - contextcheck
     # - exhaustive
     # - goconst
     # - godot

@@ -164,11 +164,11 @@ func (c *Client) registerInitial() {
 
 // Close releases the agent's authority on the pane and shuts down
 // the background writer. Safe to call on a nil client.
-func (c *Client) Close() {
+func (c *Client) Close(ctx context.Context) {
 	if c == nil {
 		return
 	}
-	c.releaseAgent()
+	c.releaseAgent(ctx)
 	c.snd.close()
 }
 
@@ -176,11 +176,11 @@ func (c *Client) Close() {
 // pane is freed for a new agent to claim authority. This is the
 // clean-shutdown protocol per herdr's socket API. Sends directly
 // on the socket to ensure delivery even if the write loop is busy.
-func (c *Client) releaseAgent() {
+func (c *Client) releaseAgent(ctx context.Context) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	req := c.newRequestLocked("pane.release_agent", "release", "")
-	if err := dialSend(c.socketPath, req); err != nil {
+	if err := dialSend(context.WithoutCancel(ctx), c.socketPath, req); err != nil {
 		slog.Debug("Herdr release_agent failed", "error", err)
 	}
 }
@@ -361,7 +361,7 @@ func (s *unixSender) writeLoop(ctx context.Context) {
 			if !ok {
 				return
 			}
-			if err := dialSend(s.socketPath, req); err != nil {
+			if err := dialSend(ctx, s.socketPath, req); err != nil {
 				slog.Debug("Herdr report failed", "error", err)
 			}
 		case <-ctx.Done():
@@ -372,8 +372,8 @@ func (s *unixSender) writeLoop(ctx context.Context) {
 
 // dialSend opens a short-lived Unix socket connection to herdr,
 // sends a single JSON-RPC request, and drains the response.
-func dialSend(socketPath string, req reportRequest) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+func dialSend(ctx context.Context, socketPath string, req reportRequest) error {
+	ctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
 	defer cancel()
 
 	dialer := net.Dialer{}

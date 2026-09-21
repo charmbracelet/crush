@@ -44,10 +44,10 @@ func planPrompt(opts ...prompt.Option) (*prompt.Prompt, error) {
 	return systemPrompt, nil
 }
 
-func InitializePrompt(cfg *config.ConfigStore) (string, error) {
+func InitializePrompt(ctx context.Context, cfg *config.ConfigStore) (string, error) {
 	systemPrompt, err := prompt.NewPrompt("initialize", string(initializePromptTmpl))
 	if err != nil {
 		return "", err
 	}
-	return systemPrompt.Build(context.Background(), "", "", cfg)
+	return systemPrompt.Build(ctx, "", "", cfg)
 }

@@ -166,7 +166,7 @@ func TestSetProviderAPIKeyOpenAIIsEitherOr(t *testing.T) {
 			}
 		}`)
 
-		require.NoError(t, store.SetProviderAPIKey(ScopeGlobal, "openai", token))
+		require.NoError(t, store.SetProviderAPIKey(context.Background(), ScopeGlobal, "openai", token))
 
 		pc, ok := store.Config().Providers.Get("openai")
 		require.True(t, ok)
@@ -193,7 +193,7 @@ func TestSetProviderAPIKeyOpenAIIsEitherOr(t *testing.T) {
 			}
 		}`)
 
-		require.NoError(t, store.SetProviderAPIKey(ScopeGlobal, "openai", "sk-new"))
+		require.NoError(t, store.SetProviderAPIKey(context.Background(), ScopeGlobal, "openai", "sk-new"))
 
 		pc, ok := store.Config().Providers.Get("openai")
 		require.True(t, ok)
@@ -210,7 +210,7 @@ func TestSetProviderAPIKeyOpenAIIsEitherOr(t *testing.T) {
 	t.Run("copilot", func(t *testing.T) {
 		store := newStore(t, "copilot", `{"providers":{"copilot":{"id":"copilot"}}}`)
 
-		require.NoError(t, store.SetProviderAPIKey(ScopeGlobal, "copilot", token))
+		require.NoError(t, store.SetProviderAPIKey(context.Background(), ScopeGlobal, "copilot", token))
 
 		pc, ok := store.Config().Providers.Get("copilot")
 		require.True(t, ok)

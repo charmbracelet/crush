@@ -32,8 +32,10 @@ type YesNo struct {
 	keyNo        key.Binding
 	keyClose     key.Binding
 
-	lastResponse question.Answer
-	lastWidth    int
+	lastResponse       question.Answer
+	lastWidth          int
+	lastWidthMethod    ansi.Method
+	lastWidthMethodSet bool
 }
 
 // NewYesNo creates a new inline yes/no question component.
@@ -127,8 +129,9 @@ func (d *YesNo) Height(width int) int {
 		w = choiceListMaxWidth
 	}
 	iconPrompt := questionIconPrompt(d.Styles, d.focused)
-	h := sectionHeight(d.Request.Text, w-lipgloss.Width(iconPrompt)) // question
-	h++                                                              // blank
+	method := layoutWidthMethod(d.lastWidthMethodSet, d.lastWidthMethod)
+	h := sectionHeightAt(d.Request.Text, w-lipgloss.Width(iconPrompt), method) // question
+	h++                                                                        // blank
 	if d.Request.Description != "" {
 		r := common.MarkdownRenderer(d.Styles, w)
 		mu := common.LockMarkdownRenderer(r)
@@ -139,7 +142,7 @@ func (d *YesNo) Height(width int) int {
 			out = strings.TrimSuffix(out, "\n")
 			h += strings.Count(out, "\n") + 1
 		} else {
-			h += sectionHeight(d.Request.Description, w)
+			h += sectionHeightAt(d.Request.Description, w, method)
 		}
 		h++ // blank
 	}
@@ -160,12 +163,15 @@ func (d *YesNo) Height(width int) int {
 // Returns the cursor position when the note editor is active, or nil.
 func (d *YesNo) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	d.lastWidth = area.Dx()
+	d.lastWidthMethod = screenWidthMethod(scr)
+	d.lastWidthMethodSet = true
+	method := d.lastWidthMethod
 	y := area.Min.Y
 
 	// Draw question header.
 	iconPrompt := questionIconPrompt(d.Styles, d.focused)
 	qText := iconPrompt + d.Styles.Editor.QuestionUnselected.Render(
-		ansi.Wrap(d.Request.Text, area.Dx()-lipgloss.Width(iconPrompt), ""),
+		wrapAt(d.Request.Text, area.Dx()-lipgloss.Width(iconPrompt), "", method),
 	)
 	y += drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, area.Max.Y), qText)
 	y++ // blank

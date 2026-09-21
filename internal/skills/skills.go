@@ -36,17 +36,23 @@ var (
 
 // Skill represents a parsed SKILL.md file.
 type Skill struct {
-	Name                   string            `yaml:"name" json:"name"`
-	Description            string            `yaml:"description" json:"description"`
-	UserInvocable          bool              `yaml:"user-invocable" json:"user_invocable"`
-	DisableModelInvocation bool              `yaml:"disable-model-invocation" json:"disable_model_invocation"`
-	License                string            `yaml:"license,omitempty" json:"license,omitempty"`
-	Compatibility          string            `yaml:"compatibility,omitempty" json:"compatibility,omitempty"`
-	Metadata               map[string]string `yaml:"metadata,omitempty" json:"metadata,omitempty"`
-	Instructions           string            `yaml:"-" json:"instructions"`
-	Path                   string            `yaml:"-" json:"path"`
-	SkillFilePath          string            `yaml:"-" json:"skill_file_path"`
-	Builtin                bool              `yaml:"-" json:"builtin"`
+	Name                   string `yaml:"name" json:"name"`
+	Description            string `yaml:"description" json:"description"`
+	UserInvocable          bool   `yaml:"user-invocable" json:"user_invocable"`
+	DisableModelInvocation bool   `yaml:"disable-model-invocation" json:"disable_model_invocation"`
+	License                string `yaml:"license,omitempty" json:"license,omitempty"`
+	Compatibility          string `yaml:"compatibility,omitempty" json:"compatibility,omitempty"`
+	// Requires names a feature that must be available for this skill
+	// to be offered. A skill that documents an integration is noise
+	// when that integration is switched off, and every skill costs
+	// system-prompt tokens on every turn, so gating keeps the catalog
+	// honest. Empty means always available.
+	Requires      string            `yaml:"requires,omitempty" json:"requires,omitempty"`
+	Metadata      map[string]string `yaml:"metadata,omitempty" json:"metadata,omitempty"`
+	Instructions  string            `yaml:"-" json:"instructions"`
+	Path          string            `yaml:"-" json:"path"`
+	SkillFilePath string            `yaml:"-" json:"skill_file_path"`
+	Builtin       bool              `yaml:"-" json:"builtin"`
 }
 
 // DiscoveryState represents the outcome of discovering a single skill file.
@@ -403,6 +409,30 @@ func Filter(all []*Skill, disabled []string) []*Skill {
 		if !disabledSet[s.Name] {
 			result = append(result, s)
 		}
+	}
+	return result
+}
+
+// FilterUnavailable drops skills whose Requires feature is not in
+// available.
+//
+// A skill that explains how to use an integration is worse than
+// useless when that integration is off: it spends system-prompt
+// tokens on every turn describing tools the model cannot call.
+func FilterUnavailable(all []*Skill, available []string) []*Skill {
+	availableSet := make(map[string]bool, len(available))
+	for _, name := range available {
+		availableSet[name] = true
+	}
+
+	result := make([]*Skill, 0, len(all))
+	for _, s := range all {
+		if s.Requires != "" && !availableSet[s.Requires] {
+			slog.Debug("Skill hidden, required feature unavailable",
+				"skill", s.Name, "requires", s.Requires)
+			continue
+		}
+		result = append(result, s)
 	}
 	return result
 }

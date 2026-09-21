@@ -610,7 +610,9 @@ func toolParamList(sty *styles.Styles, params []string, width int, opts *ToolRen
 	if len(kvPairs) > 0 {
 		partsStr := strings.Join(kvPairs, ", ")
 		if remaining := width - lipgloss.Width(partsStr) - 3; remaining >= minSpaceForMainParam {
-			output = fmt.Sprintf("%s (%s)", mainParam, partsStr)
+			// main param is syntax highlighted so style the param as well
+			pairs := sty.Tool.ParamMain.Render(fmt.Sprintf("(%s)", partsStr))
+			output = fmt.Sprintf("%s %s", mainParam, pairs)
 		}
 	}
 

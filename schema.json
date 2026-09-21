@@ -100,12 +100,91 @@
           "type": "object",
           "description": "User-defined shell commands that fire on hook events (e.g. PreToolUse)"
         },
+        "honcho": {
+          "$ref": "#/$defs/Honcho",
+          "description": "Honcho memory integration; gives Crush recall across sessions"
+        },
         "env": {
           "additionalProperties": {
             "type": "string"
           },
           "type": "object",
           "description": "Environment variables to set on startup"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "Honcho": {
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable the Honcho memory integration"
+        },
+        "api_key": {
+          "type": "string",
+          "description": "Honcho API key; prefer the HONCHO_API_KEY environment variable"
+        },
+        "base_url": {
+          "type": "string",
+          "description": "Honcho deployment URL; empty means Honcho Cloud"
+        },
+        "workspace": {
+          "type": "string",
+          "description": "Honcho workspace to store memory in"
+        },
+        "peer_name": {
+          "type": "string",
+          "description": "Peer name identifying you in Honcho"
+        },
+        "agent_peer": {
+          "type": "string",
+          "description": "Peer name identifying Crush in Honcho"
+        },
+        "recall_mode": {
+          "type": "string",
+          "enum": [
+            "hybrid",
+            "context",
+            "tools"
+          ],
+          "description": "How memory reaches the model"
+        },
+        "observation_mode": {
+          "type": "string",
+          "enum": [
+            "unified",
+            "directional"
+          ],
+          "description": "Which conclusion collection to use"
+        },
+        "session_strategy": {
+          "type": "string",
+          "enum": [
+            "per-directory",
+            "per-repo",
+            "git-branch",
+            "per-session",
+            "global"
+          ],
+          "description": "What maps onto a Honcho session"
+        },
+        "agent_observe_me": {
+          "type": "boolean",
+          "description": "Also build a representation of Crush itself"
+        },
+        "capture_tools": {
+          "type": "boolean",
+          "description": "Record a summary of meaningful tool calls",
+          "default": true
+        },
+        "max_conclusions": {
+          "type": "integer",
+          "description": "Maximum conclusions to inject per memory block"
+        },
+        "context_tokens": {
+          "type": "integer",
+          "description": "Token budget for the per-turn memory block"
         }
       },
       "additionalProperties": false,
@@ -651,6 +730,20 @@
             120,
             300,
             0
+          ]
+        },
+        "custom_prompt_path": {
+          "type": "string",
+          "description": "Path to a custom system prompt template file. Overrides the built-in coder template when set.",
+          "examples": [
+            "~/.config/crush/prompts/coder.md.tpl"
+          ]
+        },
+        "custom_summary_prompt_path": {
+          "type": "string",
+          "description": "Path to a custom summary prompt file. Overrides the built-in summary prompt when set.",
+          "examples": [
+            "~/.config/crush/prompts/summary.md"
           ]
         }
       },

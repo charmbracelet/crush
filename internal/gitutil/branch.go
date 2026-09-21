@@ -5,6 +5,7 @@ package gitutil
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -43,41 +44,74 @@ func readBranch(dir string) string {
 	return name
 }
 
-// findGitDir walks up from dir looking for a .git directory. It also resolves
-// "gitdir:" pointers, which .git files contain in worktrees and submodules.
-// Returns an empty string when dir is not inside a Git repository.
-func findGitDir(dir string) string {
-	dir, err := filepath.Abs(dir)
+// RepoRoot walks up from dir looking for a .git entry and returns the
+// directory that contains it, or the empty string when there is none.
+//
+// The directory is not trusted: in server mode it is a workspace path a
+// client sent over the API. A path that climbs with ".." is refused rather
+// than resolved, since walking from it would inspect directories other than
+// the one the caller named.
+func RepoRoot(dir string) string {
+	if dir == "" || hasDotDot(dir) {
+		return ""
+	}
+	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return ""
 	}
-
+	cur := filepath.Clean(abs)
+	if !strings.HasPrefix(cur, filepath.VolumeName(cur)+string(filepath.Separator)) {
+		return ""
+	}
 	for {
-		gitPath := filepath.Join(dir, ".git")
-		info, statErr := os.Stat(gitPath)
-		if statErr == nil {
-			if info.IsDir() {
-				return gitPath
-			}
-			content, readErr := os.ReadFile(gitPath)
-			if readErr != nil {
-				return ""
-			}
-			gitDir, ok := strings.CutPrefix(strings.TrimSpace(string(content)), "gitdir:")
-			if !ok {
-				return ""
-			}
-			gitDir = strings.TrimSpace(gitDir)
-			if !filepath.IsAbs(gitDir) {
-				gitDir = filepath.Join(dir, gitDir)
-			}
-			return gitDir
+		if _, err := os.Stat(filepath.Join(cur, ".git")); err == nil {
+			return cur
 		}
-
-		parent := filepath.Dir(dir)
-		if parent == dir {
+		parent := filepath.Dir(cur)
+		if parent == cur {
 			return ""
 		}
-		dir = parent
+		cur = parent
 	}
+}
+
+// hasDotDot reports whether p contains a ".." path element. Names that
+// merely contain two dots, such as "a..b", are allowed. Both separators are
+// checked so a Windows-style path is refused on every platform.
+func hasDotDot(p string) bool {
+	return slices.Contains(strings.FieldsFunc(p, func(r rune) bool {
+		return r == '/' || r == '\\'
+	}), "..")
+}
+
+// findGitDir returns the git directory for the repository containing dir. It
+// resolves "gitdir:" pointers, which .git files contain in worktrees and
+// submodules. Returns an empty string when dir is not inside a repository.
+func findGitDir(dir string) string {
+	root := RepoRoot(dir)
+	if root == "" {
+		return ""
+	}
+
+	gitPath := filepath.Join(root, ".git")
+	info, err := os.Stat(gitPath)
+	if err != nil {
+		return ""
+	}
+	if info.IsDir() {
+		return gitPath
+	}
+	content, err := os.ReadFile(gitPath)
+	if err != nil {
+		return ""
+	}
+	gitDir, ok := strings.CutPrefix(strings.TrimSpace(string(content)), "gitdir:")
+	if !ok {
+		return ""
+	}
+	gitDir = strings.TrimSpace(gitDir)
+	if !filepath.IsAbs(gitDir) {
+		gitDir = filepath.Join(root, gitDir)
+	}
+	return gitDir
 }

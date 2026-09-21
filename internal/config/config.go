@@ -850,10 +850,63 @@ type Config struct {
 
 	Hooks map[string][]HookConfig `json:"hooks,omitempty" jsonschema:"description=User-defined shell commands that fire on hook events (e.g. PreToolUse)"`
 
+	Honcho *Honcho `json:"honcho,omitempty" jsonschema:"description=Honcho memory integration; gives Crush recall across sessions"`
+
 	// Env is a map of environment variables set on startup.
 	Env map[string]string `json:"env,omitempty" jsonschema:"description=Environment variables to set on startup"`
 
 	Agents map[string]Agent `json:"-"`
+}
+
+// Honcho configures the Honcho memory integration.
+//
+// Fields left empty fall back to the shared cross-harness config file
+// (~/.honcho/config.json) and then to built-in defaults, so a user who has
+// already set up Honcho for another tool needs nothing here but to enable it.
+type Honcho struct {
+	// Enabled turns the integration on. Supplying an API key or a custom base
+	// URL also enables it, since either is an unambiguous statement of intent.
+	Enabled bool `json:"enabled,omitempty" jsonschema:"description=Enable the Honcho memory integration"`
+
+	// APIKey authenticates to Honcho. Prefer $HONCHO_API_KEY over writing a
+	// credential into a config file.
+	APIKey string `json:"api_key,omitempty" jsonschema:"description=Honcho API key; prefer the HONCHO_API_KEY environment variable"`
+
+	// BaseURL points at a self-hosted deployment. Empty means Honcho Cloud.
+	BaseURL string `json:"base_url,omitempty" jsonschema:"description=Honcho deployment URL; empty means Honcho Cloud"`
+
+	// Workspace isolates this application's memory.
+	Workspace string `json:"workspace,omitempty" jsonschema:"description=Honcho workspace to store memory in"`
+
+	// PeerName identifies the human whose representation Honcho builds.
+	PeerName string `json:"peer_name,omitempty" jsonschema:"description=Peer name identifying you in Honcho"`
+
+	// AgentPeer identifies Crush itself.
+	AgentPeer string `json:"agent_peer,omitempty" jsonschema:"description=Peer name identifying Crush in Honcho"`
+
+	// RecallMode selects how memory reaches the model: hybrid injects context
+	// automatically, tools leaves it to the model to ask.
+	RecallMode string `json:"recall_mode,omitempty" jsonschema:"enum=hybrid,enum=context,enum=tools,description=How memory reaches the model"`
+
+	// ObservationMode selects whose conclusion collection is used.
+	ObservationMode string `json:"observation_mode,omitempty" jsonschema:"enum=unified,enum=directional,description=Which conclusion collection to use"`
+
+	// SessionStrategy selects what maps onto a Honcho session.
+	SessionStrategy string `json:"session_strategy,omitempty" jsonschema:"enum=per-directory,enum=per-repo,enum=git-branch,enum=per-session,enum=global,description=What maps onto a Honcho session"`
+
+	// AgentObserveMe asks Honcho to model Crush itself, not just the user.
+	AgentObserveMe bool `json:"agent_observe_me,omitempty" jsonschema:"description=Also build a representation of Crush itself"`
+
+	// CaptureTools records one-line summaries of meaningful tool calls.
+	// A pointer so an omitted field ("use the default", which is on)
+	// stays distinguishable from an explicit false.
+	CaptureTools *bool `json:"capture_tools,omitempty" jsonschema:"description=Record a summary of meaningful tool calls,default=true"`
+
+	// MaxConclusions caps how many conclusions enter an injected block.
+	MaxConclusions int `json:"max_conclusions,omitempty" jsonschema:"description=Maximum conclusions to inject per memory block"`
+
+	// ContextTokens caps the size of the per-turn recall block.
+	ContextTokens int `json:"context_tokens,omitempty" jsonschema:"description=Token budget for the per-turn memory block"`
 }
 
 // cloneForWrite returns a copy of c that the store's typed field mutators

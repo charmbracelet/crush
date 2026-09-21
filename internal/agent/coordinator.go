@@ -400,16 +400,9 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	result, originalErr := run()
 	logTurnSkillUsage(sessionID, prompt, c.activeSkills, c.skillTracker, beforeLoaded)
 
-	// Notify only if still unauthorized after retry — a successful
-	// retry means the user doesn't need to re-authenticate. AWS SSO is
-	// handled transparently inside OnAuthRefresh, so it needs no post-run
-	// notification here.
-	if originalErr != nil && isUnauthorized(originalErr) && c.notify != nil && model.ModelCfg.Provider == hyper.Name {
-		c.notify.Publish(pubsub.CreatedEvent, notify.Notification{
-			Type:       notify.TypeReAuthenticate,
-			ProviderID: model.ModelCfg.Provider,
-		})
-	}
+	// Notify only if still unauthorized after the retries inside run() —
+	// a successful retry means the user doesn't need to re-authenticate.
+	c.publishReauthNotification(originalErr, providerCfg)
 
 	if hasLatest && c.runComplete != nil {
 		c.runComplete.PublishMustDeliver(ctx, pubsub.UpdatedEvent, latest)
@@ -1531,10 +1524,39 @@ func (c *coordinator) waitForInteractiveReauth(ctx context.Context, providerID s
 	return nil
 }
 
-// isUnauthorized reports whether err is an HTTP 401 from a provider.
-func isUnauthorized(err error) bool {
+// isAuthFailure reports whether err is an authentication failure from a
+// provider: an HTTP 401, or an error the provider flagged with
+// [fantasy.ProviderError.AuthError] because refreshing credentials could
+// resolve it.
+func isAuthFailure(err error) bool {
 	var providerErr *fantasy.ProviderError
-	return errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusUnauthorized
+	return errors.As(err, &providerErr) &&
+		(providerErr.StatusCode == http.StatusUnauthorized || providerErr.AuthError)
+}
+
+// canPromptForCredentials reports whether the re-authentication dialog can
+// fix this provider's credential. Providers that authenticate through an
+// external process (Bedrock's AWS SSO refresh) have no in-app credential to
+// edit, so prompting for one would mislead the user.
+func canPromptForCredentials(providerCfg config.ProviderConfig) bool {
+	return providerCfg.AWSAuthRefresh == ""
+}
+
+// publishReauthNotification opens the re-authentication flow for
+// providerCfg's provider when err is an auth failure that survived the
+// automatic refresh and retry inside run. Every provider gets the prompt,
+// not just Hyper, so a rejected or expired API key opens the credential
+// dialog instead of leaving the user staring at a raw provider error. It
+// is a no-op when there is no notification broker (headless runs) or when
+// the dialog cannot fix the provider's credential.
+func (c *coordinator) publishReauthNotification(err error, providerCfg config.ProviderConfig) {
+	if err == nil || c.notify == nil || !isAuthFailure(err) || !canPromptForCredentials(providerCfg) {
+		return
+	}
+	c.notify.Publish(pubsub.CreatedEvent, notify.Notification{
+		Type:       notify.TypeReAuthenticate,
+		ProviderID: providerCfg.ID,
+	})
 }
 
 // makeAuthRefreshCallback returns an OnAuthRefresh callback for fantasy that
@@ -1647,14 +1669,7 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 		})
 	}
 	result, err := run()
-	// Notify only if still unauthorized after retry. AWS SSO is handled
-	// transparently inside OnAuthRefresh, so it needs no post-run notice.
-	if err != nil && isUnauthorized(err) && c.notify != nil && model.ModelCfg.Provider == hyper.Name {
-		c.notify.Publish(pubsub.CreatedEvent, notify.Notification{
-			Type:       notify.TypeReAuthenticate,
-			ProviderID: model.ModelCfg.Provider,
-		})
-	}
+	c.publishReauthNotification(err, providerCfg)
 	if err != nil {
 		return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to generate response: %s", err)), nil
 	}

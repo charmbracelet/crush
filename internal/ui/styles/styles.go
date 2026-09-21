@@ -77,7 +77,7 @@ const (
 	ScrollbarThumb string = "┃"
 	ScrollbarTrack string = "│"
 
-	ChannelIcon string = "󰍩"
+	ChannelIcon string = "↳"
 
 	// LSP severity icons are Nerd Font glyphs, shown only when the terminal
 	// is expected to render them. Each glyph carries a trailing space as a

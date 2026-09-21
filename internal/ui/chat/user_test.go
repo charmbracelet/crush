@@ -3,6 +3,7 @@ package chat
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/ui/attachments"
@@ -253,4 +254,48 @@ func TestChannelInfo_RenderHasSectionHeader(t *testing.T) {
 
 	// The rendered output should start with at least 2 spaces (paddingLeft(2)).
 	require.True(t, strings.HasPrefix(out, "  "), "ChannelInfoItem.Render must apply SectionHeader padding")
+}
+
+// TestExtractMessageItems_ChannelInfoOnlyWithMetadata verifies the info line
+// is added below a channel message only when there is metadata to show, so a
+// malformed or bare element does not leave a blank row in the chat.
+func TestExtractMessageItems_ChannelInfoOnlyWithMetadata(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	extract := func(text string, createdAt int64) []MessageItem {
+		msg := &message.Message{
+			ID:        "test-id",
+			Role:      message.User,
+			CreatedAt: createdAt,
+			Parts:     []message.ContentPart{message.TextContent{Text: text}},
+		}
+		return ExtractMessageItems(&sty, msg, nil, "")
+	}
+
+	require.Len(t, extract(`<channel source="signal" sender_name="Alice">hi</channel>`, 0), 2)
+	// No attributes and no CreatedAt: nothing to show.
+	require.Len(t, extract(`<channel>hi</channel>`, 0), 1)
+	// Malformed element: no info line either.
+	require.Len(t, extract(`<channel source="signal">unterminated`, 1752456000), 1)
+	// CreatedAt alone is enough for an "at HH:MM:SS" line.
+	require.Len(t, extract(`<channel>hi</channel>`, 1752456000), 2)
+}
+
+func TestFormatChannelTime(t *testing.T) {
+	t.Parallel()
+
+	const epoch = int64(1752456000)
+	want := time.Unix(epoch, 0).Format(time.TimeOnly)
+	rfc := time.Unix(epoch, 0).UTC().Format(time.RFC3339)
+
+	require.Equal(t, want, formatChannelTime(rfc, 0), "RFC 3339 is reformatted to local HH:MM:SS")
+	require.Equal(t, want, formatChannelTime("1752456000", 0), "epoch seconds")
+	require.Equal(t, want, formatChannelTime("1752456000000", 0), "epoch milliseconds")
+	require.Equal(t, want, formatChannelTime("", epoch), "empty falls back to CreatedAt")
+	require.Empty(t, formatChannelTime("", 0))
+	// Values that are not timestamps are shown as the server sent them.
+	require.Equal(t, "14:30", formatChannelTime("14:30", epoch))
+	require.Equal(t, "1430", formatChannelTime("1430", 0), "short numbers are not treated as epochs")
+	require.Equal(t, "yesterday", formatChannelTime(" yesterday ", 0))
 }

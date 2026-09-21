@@ -5491,7 +5491,7 @@ func (m *UI) openChannelsDialog() {
 		m.dialog.BringToFront(dialog.ChannelsID)
 		return
 	}
-	channelsDialog := dialog.NewChannels(m.com, m.com.Workspace)
+	channelsDialog := dialog.NewChannels(m.com, m.mcpStates)
 	m.dialog.OpenDialog(channelsDialog)
 }
 

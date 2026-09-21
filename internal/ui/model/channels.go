@@ -2,8 +2,6 @@ package model
 
 import (
 	"fmt"
-	"slices"
-	"strings"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
@@ -11,9 +9,10 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/styles"
 )
 
-// channelsInfo renders the channel status section showing MCP servers that are
-// connected as channels (via the claude/channel capability + --channels opt-in).
-func (m *UI) channelsInfo(width, maxItems int, isSection bool) string {
+// channelsInfo renders the channel status section for items, as built by
+// channelStatusItems. Callers build the list once and pass it in, since they
+// also use it to size the section or decide whether to show it at all.
+func (m *UI) channelsInfo(items []channelStatusItem, width, maxItems int, isSection bool) string {
 	t := m.com.Styles
 
 	title := t.Resource.Heading.Render("Channels")
@@ -21,13 +20,12 @@ func (m *UI) channelsInfo(width, maxItems int, isSection bool) string {
 		title = common.Section(t, title, width)
 	}
 
-	channels := m.channelStatusItems()
-	if len(channels) == 0 {
+	if len(items) == 0 {
 		list := t.Resource.AdditionalText.Render("None")
 		return lipgloss.NewStyle().Width(width).Render(fmt.Sprintf("%s\n\n%s", title, list))
 	}
 
-	list := channelList(t, channels, width, maxItems)
+	list := channelList(t, items, width, maxItems)
 	return lipgloss.NewStyle().Width(width).Render(fmt.Sprintf("%s\n\n%s", title, list))
 }
 
@@ -39,15 +37,17 @@ type channelStatusItem struct {
 	description string
 }
 
-// channelStatusItems collects all MCP servers that are active channels and
-// returns them sorted by name.
+// channelStatusItems collects the MCP servers opted in as channels (via
+// --channels or channel_enabled) in whatever state they are in, so a channel
+// that is starting, has crashed, or needs auth stays listed rather than
+// dropping out. Items come back in name order, as MCP.Sorted returns them.
 func (m *UI) channelStatusItems() []channelStatusItem {
 	t := m.com.Styles
 	var items []channelStatusItem
 
 	for _, mcpCfg := range m.com.Config().MCP.Sorted() {
 		state, ok := m.mcpStates[mcpCfg.Name]
-		if !ok || !state.Channel {
+		if !ok || (!state.ChannelOptIn && !state.Channel) {
 			continue
 		}
 
@@ -58,17 +58,24 @@ func (m *UI) channelStatusItems() []channelStatusItem {
 			icon = t.Resource.BusyIcon.String()
 			description = t.Resource.StatusText.Render("starting...")
 		case mcp.StateConnected:
-			icon = t.Resource.OnlineIcon.String()
-			description = t.Resource.StatusText.Render("connected")
+			if state.Channel {
+				icon = t.Resource.OnlineIcon.String()
+				description = t.Resource.StatusText.Render("connected")
+			} else {
+				// Opted in, but the server never declared claude/channel,
+				// so its pushes are ignored.
+				icon = t.Resource.ErrorIcon.String()
+				description = t.Resource.StatusText.Render("no channel capability")
+			}
 		case mcp.StateError:
 			icon = t.Resource.ErrorIcon.String()
 			description = t.Resource.StatusText.Render("error")
 			if state.Error != nil {
 				description = t.Resource.StatusText.Render(fmt.Sprintf("error: %s", state.Error.Error()))
 			}
-		case mcp.StateDisabled:
-			icon = t.Resource.DisabledIcon.String()
-			description = t.Resource.StatusText.Render("disabled")
+		case mcp.StateNeedsAuth:
+			icon = t.Resource.NeedsAuthIcon.String()
+			description = t.Resource.StatusText.Render("needs authentication")
 		default:
 			icon = t.Resource.OfflineIcon.String()
 			description = t.Resource.StatusText.Render("offline")
@@ -81,10 +88,6 @@ func (m *UI) channelStatusItems() []channelStatusItem {
 			description: description,
 		})
 	}
-
-	slices.SortStableFunc(items, func(a, b channelStatusItem) int {
-		return strings.Compare(a.name, b.name)
-	})
 
 	return items
 }

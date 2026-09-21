@@ -994,6 +994,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+		if channels, ok := m.dialog.Dialog(dialog.ChannelsID).(*dialog.Channels); ok {
+			channels.SetStates(msg.states)
+		}
 		cmds = append(cmds, m.applyMCPStates(msg)...)
 	case mcpStartingRetryMsg:
 		// A server was still connecting when the last fetch landed; re-probe

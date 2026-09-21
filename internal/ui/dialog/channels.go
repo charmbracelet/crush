@@ -2,7 +2,7 @@ package dialog
 
 import (
 	"fmt"
-	"sort"
+	"slices"
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
@@ -88,19 +88,41 @@ func (c *ChannelItem) Render(width int) string {
 		InfoTextFocused: c.t.Dialog.ListItem.InfoFocused,
 	}
 
-	info := fmt.Sprintf("%s  %dt", c.info.State.String(), c.info.Counts.Tools)
-
-	return renderItem(itemStyles, c.info.Name, info, c.focused, width, c.cache, &c.m)
+	return renderItem(itemStyles, c.info.Name, c.infoText(), c.focused, width, c.cache, &c.m)
 }
 
-// Channels is a dialog that lists channel-capable MCP servers and their
-// connection state.
+// infoText is the status shown beside the server name: its connection state,
+// or why a connected server is not acting as a channel, plus its tool count
+// while connected.
+func (c *ChannelItem) infoText() string {
+	status := c.info.State.String()
+	switch {
+	case c.info.Channel:
+	case !c.info.ChannelOptIn:
+		// Declares claude/channel but was never opted in.
+		status = "not enabled"
+	case c.info.State == mcp.StateConnected:
+		// Opted in, but the server never declared claude/channel.
+		status = "no channel capability"
+	}
+	if c.info.State != mcp.StateConnected {
+		return status
+	}
+	tools := "tools"
+	if c.info.Counts.Tools == 1 {
+		tools = "tool"
+	}
+	return fmt.Sprintf("%s  %d %s", status, c.info.Counts.Tools, tools)
+}
+
+// Channels is a dialog that lists MCP servers that are, or could be,
+// channels: every server opted in via --channels or channel_enabled, in any
+// connection state, plus channel-capable servers that were never opted in.
 type Channels struct {
 	com    *common.Common
 	help   help.Model
 	list   *list.FilterableList
 	input  textinput.Model
-	ws     workspace.Workspace
 	keyMap struct {
 		Next,
 		Previous,
@@ -115,14 +137,13 @@ var _ Dialog = (*Channels)(nil)
 func NewChannels(com *common.Common, ws workspace.Workspace) *Channels {
 	d := &Channels{
 		com: com,
-		ws:  ws,
 	}
 
 	help := help.New()
 	help.Styles = com.Styles.DialogHelpStyles()
 	d.help = help
 
-	d.list = list.NewFilterableList(d.channelItems()...)
+	d.list = list.NewFilterableList(channelItems(com.Styles, ws.MCPGetStates())...)
 	d.list.Focus()
 	d.list.SetSelected(0)
 
@@ -151,24 +172,45 @@ func NewChannels(com *common.Common, ws workspace.Workspace) *Channels {
 	return d
 }
 
-// channelItems builds the list items from current MCP server states, filtered
-// to only show channel-capable servers, sorted by name.
-func (d *Channels) channelItems() []list.FilterableItem {
-	states := d.ws.MCPGetStates()
+// channelItems builds the list items from MCP server states, sorted by name.
+// It keeps active channels, servers opted in as channels whatever their
+// state (so a crashed or starting channel stays visible), and servers that
+// declare the channel capability but were never opted in.
+func channelItems(sty *styles.Styles, states map[string]mcp.ClientInfo) []list.FilterableItem {
 	names := make([]string, 0, len(states))
 	for name, info := range states {
-		if info.Channel {
+		if info.Channel || info.ChannelOptIn || info.ChannelCapable {
 			names = append(names, name)
 		}
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 	items := make([]list.FilterableItem, 0, len(names))
 	for _, name := range names {
 		info := states[name]
 		info.Name = name
-		items = append(items, NewChannelItem(d.com.Styles, info))
+		items = append(items, NewChannelItem(sty, info))
 	}
 	return items
+}
+
+// SetStates refreshes the list from new MCP server states, so a channel that
+// connects or drops while the dialog is open is reflected. The current
+// filter and, when it is still listed, the selected server are kept.
+func (d *Channels) SetStates(states map[string]mcp.ClientInfo) {
+	selectedID := ""
+	if sel := d.selectedChannel(); sel != nil {
+		selectedID = sel.ID()
+	}
+	d.list.SetItems(channelItems(d.com.Styles, states)...)
+	d.list.SetFilter(d.input.Value())
+	d.list.SetSelected(0)
+	for i, item := range d.list.FilteredItems() {
+		if ci, ok := item.(*ChannelItem); ok && ci.ID() == selectedID {
+			d.list.SetSelected(i)
+			d.list.ScrollToSelected()
+			break
+		}
+	}
 }
 
 // ID implements Dialog.

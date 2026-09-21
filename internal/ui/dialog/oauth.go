@@ -19,6 +19,9 @@ import (
 	"github.com/pkg/browser"
 )
 
+// OAuthProvider drives one authorization flow for the shared OAuth
+// dialog. The dialog owns the chrome — spinner, instructions, code
+// box, error state — and delegates everything provider-specific here.
 type OAuthProvider interface {
 	name() string
 	initiateAuth() tea.Msg
@@ -32,7 +35,28 @@ type OAuthProvider interface {
 	// submitCode exchanges a pasted code (or full callback URL) for a
 	// token. Only called when supportsCodeEntry is true.
 	submitCode(input string) tea.Cmd
+	// persist stores whatever the authorization produced. Most
+	// providers are authenticating an LLM provider and save the token
+	// as its API key; see oauthAPIKey for that default.
+	persist(m *OAuth) tea.Cmd
+	// savingMessage is shown while persist runs, so the wait explains
+	// itself rather than claiming work the provider is not doing.
+	savingMessage() string
+	// completed is the action taken when the user acknowledges the
+	// success screen.
+	completed(m *OAuth) Action
 }
+
+// oauthAPIKey is the default outcome for a provider whose token is an
+// LLM provider API key: store the key, then resume model selection.
+// Providers embed it so only the ones that differ carry their own.
+type oauthAPIKey struct{}
+
+func (oauthAPIKey) persist(m *OAuth) tea.Cmd { return m.saveProviderAPIKey() }
+
+func (oauthAPIKey) savingMessage() string { return " Fetching models..." }
+
+func (oauthAPIKey) completed(m *OAuth) Action { return m.confirmAndSelectModel() }
 
 // OAuthState represents the current state of the device flow.
 type OAuthState int
@@ -45,8 +69,13 @@ const (
 	OAuthStateError
 )
 
-// OAuthID is the identifier for the model selection dialog.
+// OAuthID is the identifier for the OAuth dialog.
 const OAuthID = "oauth"
+
+// OAuthHonchoID requests the Honcho memory sign-in. It is a command
+// target rather than a dialog ID: the dialog it opens registers as
+// OAuthID like every other authorization flow.
+const OAuthHonchoID = "oauth_honcho"
 
 // OAuth handles the OAuth flow authentication.
 type OAuth struct {
@@ -188,7 +217,7 @@ func (m *OAuth) HandleMsg(msg tea.Msg) Action {
 		case key.Matches(msg, m.keyMap.Submit), key.Matches(msg, CloseKey):
 			switch m.State {
 			case OAuthStateSuccess:
-				return m.confirmAndSelectModel()
+				return m.oAuthProvider.completed(m)
 
 			case OAuthStateSaving:
 				// Save in progress; ignore enter and esc until it finishes.
@@ -223,7 +252,7 @@ func (m *OAuth) HandleMsg(msg tea.Msg) Action {
 		return ActionCmd{tea.Batch(
 			m.oAuthProvider.stopPolling,
 			m.spinner.Tick,
-			m.saveCredential(),
+			m.oAuthProvider.persist(m),
 		)}
 
 	case ActionOAuthErrored:
@@ -356,7 +385,7 @@ func (m *OAuth) body(innerWidth int) (string, *tea.Cursor) {
 		return authSuccessBlock(t, innerWidth), nil
 
 	case OAuthStateSaving:
-		status := authSpinnerLine(t, m.spinner, innerWidth, "Fetching models...")
+		status := authSpinnerLine(t, m.spinner, innerWidth, strings.TrimSpace(m.oAuthProvider.savingMessage()))
 		// No keys work while saving, so the empty help row below
 		// stands in for the trailing blank line.
 		return lipgloss.JoinVertical(lipgloss.Left, "", status), nil
@@ -497,7 +526,7 @@ func (m *OAuth) copyCodeAndOpenURL() tea.Cmd {
 // saveCredential returns a command that persists the OAuth token and
 // triggers the config reload (including model discovery) off the UI update
 // loop. It reports completion via oauthSaveDoneMsg or oauthSaveErrMsg.
-func (m *OAuth) saveCredential() tea.Cmd {
+func (m *OAuth) saveProviderAPIKey() tea.Cmd {
 	// Capture the fields the command needs so it does not race with
 	// dialog state.
 	var (

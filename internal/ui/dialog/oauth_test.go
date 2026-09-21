@@ -15,7 +15,10 @@ import (
 )
 
 // testOAuthProvider is a no-op OAuth provider for rendering tests.
-type testOAuthProvider struct{ codeEntry bool }
+type testOAuthProvider struct {
+	oauthAPIKey
+	codeEntry bool
+}
 
 func (p testOAuthProvider) name() string { return "Grok" }
 

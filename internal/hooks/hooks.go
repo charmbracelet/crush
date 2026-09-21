@@ -10,9 +10,14 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-// Hook event name constants.
+// Hook event names, matching Claude Code's so existing hook scripts work
+// unchanged.
 const (
-	EventPreToolUse = "PreToolUse"
+	EventSessionStart     = "SessionStart"
+	EventUserPromptSubmit = "UserPromptSubmit"
+	EventPreToolUse       = "PreToolUse"
+	EventPostToolUse      = "PostToolUse"
+	EventStop             = "Stop"
 )
 
 // HaltExitCode is the exit code that halts the whole turn. 2 blocks the

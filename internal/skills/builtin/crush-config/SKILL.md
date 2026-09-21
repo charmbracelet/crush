@@ -212,14 +212,16 @@ option ui exit-banner compact
 
 ## Hooks runtime
 
-Hooks are user-defined shell commands that fire on agent events. Currently only
-`PreToolUse` is supported, which runs before a tool executes. This behavior is
-the same however the hook is defined (`hook add` or JSON).
+Hooks are user-defined shell commands that fire on agent events. `PreToolUse`
+and `PostToolUse` run around tool calls; `SessionStart`, `UserPromptSubmit`,
+and `Stop` run on a turn's lifecycle. This behavior is the same however the
+hook is defined (`hook add` or JSON).
 
 ### How hooks work
 
 1. When a tool is about to be called, all `PreToolUse` hooks with a matching
-   `matcher` (or no matcher) run in parallel.
+   `matcher` (or no matcher) run in parallel; `PostToolUse` hooks do the same
+   once the tool settles, failures included.
 2. Duplicate commands are deduplicated — each unique command runs at most once.
 3. The hook receives JSON on **stdin** and hook-specific **environment
    variables**.
@@ -248,6 +250,7 @@ Event names are case-insensitive and accept snake_case: `PreToolUse`,
 | `CRUSH_SESSION_ID`           | Current session ID                                |
 | `CRUSH_CWD`                  | Current working directory                         |
 | `CRUSH_PROJECT_DIR`          | Project root directory                            |
+| `CRUSH_PROMPT`               | Prompt text on `UserPromptSubmit`                 |
 | `CRUSH_TOOL_INPUT_COMMAND`   | Value of `command` from tool input (if present)   |
 | `CRUSH_TOOL_INPUT_FILE_PATH` | Value of `file_path` from tool input (if present) |
 

@@ -16,62 +16,109 @@ import (
 // an older version. Unknown higher versions are still parsed but logged.
 const SupportedOutputVersion = 1
 
-// Payload is the JSON structure piped to hook commands via stdin.
-// ToolInput is emitted as a parsed JSON object for compatibility with
-// Claude Code hooks (which expect tool_input to be an object, not a
-// string).
+// Payload is the JSON structure piped to hook commands via stdin. ToolInput is
+// an object, not a string, for Claude Code compatibility, and HookEventName
+// duplicates Event under Claude Code's field name.
 type Payload struct {
-	Event     string          `json:"event"`
-	SessionID string          `json:"session_id"`
-	CWD       string          `json:"cwd"`
-	ToolName  string          `json:"tool_name"`
-	ToolInput json.RawMessage `json:"tool_input"`
+	Event         string          `json:"event"`
+	HookEventName string          `json:"hook_event_name"`
+	SessionID     string          `json:"session_id"`
+	CWD           string          `json:"cwd"`
+	ToolName      string          `json:"tool_name"`
+	ToolInput     json.RawMessage `json:"tool_input"`
+	ToolResponse  string          `json:"tool_response,omitempty"`
+	Prompt        string          `json:"prompt,omitempty"`
 }
 
-// BuildPayload constructs the JSON stdin payload for a hook command.
+// EventData holds the per-event fields a payload and environment are built
+// from. Only tool events set the tool fields, and only UserPromptSubmit sets
+// Prompt.
+type EventData struct {
+	SessionID    string
+	CWD          string
+	ToolName     string
+	ToolInput    string
+	ToolResponse string
+	Prompt       string
+}
+
+// BuildPayload constructs the payload for a tool-related hook command.
 func BuildPayload(eventName, sessionID, cwd, toolName, toolInputJSON string) []byte {
-	toolInput := json.RawMessage(toolInputJSON)
+	return BuildPayloadFor(eventName, EventData{
+		SessionID: sessionID,
+		CWD:       cwd,
+		ToolName:  toolName,
+		ToolInput: toolInputJSON,
+	})
+}
+
+// BuildPayloadFor constructs the payload for any hook event.
+func BuildPayloadFor(eventName string, data EventData) []byte {
+	toolInput := json.RawMessage(data.ToolInput)
 	if !json.Valid(toolInput) {
 		toolInput = json.RawMessage("{}")
 	}
 	p := Payload{
-		Event:     eventName,
-		SessionID: sessionID,
-		CWD:       cwd,
-		ToolName:  toolName,
-		ToolInput: toolInput,
+		Event:         eventName,
+		HookEventName: eventName,
+		SessionID:     data.SessionID,
+		CWD:           data.CWD,
+		ToolName:      data.ToolName,
+		ToolInput:     toolInput,
+		ToolResponse:  data.ToolResponse,
+		Prompt:        data.Prompt,
 	}
-	data, err := json.Marshal(p)
+	out, err := json.Marshal(p)
 	if err != nil {
 		return []byte("{}")
 	}
-	return data
+	return out
 }
 
-// BuildEnv constructs the environment variable slice for a hook command.
-// It includes all current process env vars plus hook-specific ones.
+// BuildEnv constructs the environment for a tool-related hook command.
 func BuildEnv(eventName, toolName, sessionID, cwd, projectDir, toolInputJSON string) []string {
+	return BuildEnvFor(eventName, projectDir, EventData{
+		SessionID: sessionID,
+		CWD:       cwd,
+		ToolName:  toolName,
+		ToolInput: toolInputJSON,
+	})
+}
+
+// BuildEnvFor constructs the environment for any hook event, including every
+// current process variable.
+func BuildEnvFor(eventName, projectDir string, data EventData) []string {
 	env := os.Environ()
 	env = append(env, shell.CrushEnvMarkers()...)
 	env = append(
 		env,
 		fmt.Sprintf("CRUSH_EVENT=%s", eventName),
-		fmt.Sprintf("CRUSH_TOOL_NAME=%s", toolName),
-		fmt.Sprintf("CRUSH_SESSION_ID=%s", sessionID),
-		fmt.Sprintf("CRUSH_CWD=%s", cwd),
+		fmt.Sprintf("CRUSH_TOOL_NAME=%s", data.ToolName),
+		fmt.Sprintf("CRUSH_SESSION_ID=%s", data.SessionID),
+		fmt.Sprintf("CRUSH_CWD=%s", data.CWD),
 		fmt.Sprintf("CRUSH_PROJECT_DIR=%s", projectDir),
 	)
-
-	// Extract tool-specific env vars from the JSON input.
-	if toolInputJSON != "" {
-		if cmd := gjson.Get(toolInputJSON, "command"); cmd.Exists() {
-			env = append(env, fmt.Sprintf("CRUSH_TOOL_INPUT_COMMAND=%s", cmd.String()))
-		}
-		if fp := gjson.Get(toolInputJSON, "file_path"); fp.Exists() {
-			env = append(env, fmt.Sprintf("CRUSH_TOOL_INPUT_FILE_PATH=%s", fp.String()))
-		}
+	if data.Prompt != "" {
+		env = append(env, fmt.Sprintf("CRUSH_PROMPT=%s", data.Prompt))
 	}
+	env = append(env, toolInputEnv(data.ToolInput)...)
 
+	return env
+}
+
+// toolInputEnv mirrors the tool fields scripts read most often into their own
+// variables, so a hook does not have to parse stdin for them.
+func toolInputEnv(toolInput string) []string {
+	if toolInput == "" {
+		return nil
+	}
+	var env []string
+	if cmd := gjson.Get(toolInput, "command"); cmd.Exists() {
+		env = append(env, fmt.Sprintf("CRUSH_TOOL_INPUT_COMMAND=%s", cmd.String()))
+	}
+	if fp := gjson.Get(toolInput, "file_path"); fp.Exists() {
+		env = append(env, fmt.Sprintf("CRUSH_TOOL_INPUT_FILE_PATH=%s", fp.String()))
+	}
 	return env
 }
 

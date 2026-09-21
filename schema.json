@@ -98,7 +98,7 @@
             "type": "array"
           },
           "type": "object",
-          "description": "User-defined shell commands that fire on hook events (e.g. PreToolUse)"
+          "description": "User-defined shell commands that fire on hook events (SessionStart / UserPromptSubmit / PreToolUse / PostToolUse / Stop)"
         },
         "env": {
           "additionalProperties": {

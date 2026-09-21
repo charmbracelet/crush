@@ -27,6 +27,7 @@ func NewOAuthGrok(
 }
 
 type OAuthGrok struct {
+	oauthAPIKey
 	flow       *grok.BrowserFlow
 	cancelFunc context.CancelFunc
 }

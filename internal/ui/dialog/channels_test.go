@@ -58,17 +58,95 @@ func TestChannels_FilterNarrowsList(t *testing.T) {
 	require.Equal(t, "signal", item.info.Name)
 }
 
-func TestChannels_OnlyShowsChannelServers(t *testing.T) {
+func TestChannels_ListsActiveOptedInAndCapableServers(t *testing.T) {
 	t.Parallel()
 
 	d := newTestChannels(t, map[string]mcp.ClientInfo{
-		"signal":     {Name: "signal", State: mcp.StateConnected, Channel: true},
-		"nonchannel": {Name: "nonchannel", State: mcp.StateConnected, Channel: false},
+		"signal": {Name: "signal", State: mcp.StateConnected, Channel: true, ChannelOptIn: true},
+		// Opted in but crashed: must stay listed rather than vanish.
+		"slack": {Name: "slack", State: mcp.StateError, ChannelOptIn: true},
+		// Declares claude/channel but was never opted in: listed so the user
+		// can see it could be enabled.
+		"webhook":    {Name: "webhook", State: mcp.StateConnected, ChannelCapable: true},
+		"nonchannel": {Name: "nonchannel", State: mcp.StateConnected},
 	})
 
 	items := d.list.FilteredItems()
-	require.Len(t, items, 1, "only channel-capable servers should appear")
-	require.Equal(t, "signal", items[0].(*ChannelItem).info.Name)
+	names := make([]string, 0, len(items))
+	for _, it := range items {
+		names = append(names, it.(*ChannelItem).info.Name)
+	}
+	require.Equal(t, []string{"signal", "slack", "webhook"}, names)
+}
+
+func TestChannelItem_InfoText(t *testing.T) {
+	t.Parallel()
+
+	s := styles.CharmtonePantera()
+	for name, tc := range map[string]struct {
+		info mcp.ClientInfo
+		want string
+	}{
+		"active channel": {
+			mcp.ClientInfo{State: mcp.StateConnected, Channel: true, ChannelOptIn: true, Counts: mcp.Counts{Tools: 3}},
+			"connected  3 tools",
+		},
+		"singular tool": {
+			mcp.ClientInfo{State: mcp.StateConnected, Channel: true, ChannelOptIn: true, Counts: mcp.Counts{Tools: 1}},
+			"connected  1 tool",
+		},
+		"capable, not opted in": {
+			mcp.ClientInfo{State: mcp.StateConnected, ChannelCapable: true, Counts: mcp.Counts{Tools: 2}},
+			"not enabled  2 tools",
+		},
+		"opted in, no capability": {
+			mcp.ClientInfo{State: mcp.StateConnected, ChannelOptIn: true},
+			"no channel capability  0 tools",
+		},
+		"opted in, errored": {
+			mcp.ClientInfo{State: mcp.StateError, ChannelOptIn: true},
+			"error",
+		},
+		"opted in, starting": {
+			mcp.ClientInfo{State: mcp.StateStarting, ChannelOptIn: true},
+			"starting",
+		},
+	} {
+		require.Equal(t, tc.want, NewChannelItem(&s, tc.info).infoText(), name)
+	}
+}
+
+func TestChannels_SetStatesRefreshesAndKeepsSelection(t *testing.T) {
+	t.Parallel()
+
+	d := newTestChannels(t, map[string]mcp.ClientInfo{
+		"alpha": {Name: "alpha", State: mcp.StateConnected, Channel: true, ChannelOptIn: true},
+		"beta":  {Name: "beta", State: mcp.StateStarting, ChannelOptIn: true},
+	})
+	d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyDown})
+	require.Equal(t, "beta", d.selectedChannel().info.Name)
+
+	// beta finishes connecting and a new channel appears while the dialog
+	// is open: the list reflects both, and beta stays selected.
+	d.SetStates(map[string]mcp.ClientInfo{
+		"alpha": {Name: "alpha", State: mcp.StateConnected, Channel: true, ChannelOptIn: true},
+		"beta":  {Name: "beta", State: mcp.StateConnected, Channel: true, ChannelOptIn: true},
+		"aaa":   {Name: "aaa", State: mcp.StateConnected, Channel: true, ChannelOptIn: true},
+	})
+	require.Len(t, d.list.FilteredItems(), 3)
+	sel := d.selectedChannel()
+	require.Equal(t, "beta", sel.info.Name)
+	require.Equal(t, mcp.StateConnected, sel.info.State, "refreshed item carries the new state")
+
+	// A filter typed into the dialog survives a refresh.
+	d.HandleMsg(keyMsg('b'))
+	d.SetStates(map[string]mcp.ClientInfo{
+		"alpha": {Name: "alpha", State: mcp.StateConnected, Channel: true, ChannelOptIn: true},
+		"beta":  {Name: "beta", State: mcp.StateError, ChannelOptIn: true},
+	})
+	filtered := d.list.FilteredItems()
+	require.Len(t, filtered, 1)
+	require.Equal(t, "beta", filtered[0].(*ChannelItem).info.Name)
 }
 
 func TestChannels_ChannelsSortedByName(t *testing.T) {

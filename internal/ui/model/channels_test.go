@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+	"image"
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
@@ -10,15 +11,22 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/dialog"
 	"github.com/charmbracelet/crush/internal/workspace"
+	uv "github.com/charmbracelet/ultraviolet"
 )
 
 type channelsTestWorkspace struct {
 	workspace.Workspace
-	cfg *config.Config
+	cfg    *config.Config
+	states map[string]mcp.ClientInfo
 }
 
 func (w *channelsTestWorkspace) Config() *config.Config { return w.cfg }
+
+func (w *channelsTestWorkspace) MCPGetStates() map[string]mcp.ClientInfo { return w.states }
+
+func (w *channelsTestWorkspace) MCPPendingAuth() []mcp.PendingAuthServer { return nil }
 
 // newChannelsTestUI builds a UI whose Config lists the given MCP names and
 // whose mcpStates map holds the given per-server ClientInfo.
@@ -121,4 +129,31 @@ func TestChannelList_Truncation(t *testing.T) {
 
 	// Non-positive budget renders nothing.
 	require.Empty(t, channelList(styles, items, 80, 0))
+}
+
+// TestMCPStateChangeRefreshesOpenChannelsDialog drives a real state-change
+// message through Update and checks the open Channels dialog picks it up,
+// covering the wiring rather than just the dialog's own SetStates.
+func TestMCPStateChangeRefreshesOpenChannelsDialog(t *testing.T) {
+	t.Parallel()
+
+	m := newChannelsTestUI(t, []string{"signal"}, nil)
+	m.dialog = dialog.NewOverlay()
+	ws := m.com.Workspace.(*channelsTestWorkspace)
+	ws.states = map[string]mcp.ClientInfo{
+		"signal": {Name: "signal", State: mcp.StateStarting, ChannelOptIn: true},
+	}
+	d := dialog.NewChannels(m.com, ws)
+	m.dialog.OpenDialog(d)
+
+	m.Update(mcpStateChangedMsg{states: map[string]mcp.ClientInfo{
+		"signal":  {Name: "signal", State: mcp.StateConnected, Channel: true, ChannelOptIn: true},
+		"webhook": {Name: "webhook", State: mcp.StateConnected, ChannelCapable: true},
+	}})
+
+	scr := uv.NewScreenBuffer(100, 30)
+	d.Draw(scr, image.Rect(0, 0, 100, 30))
+	out := ansi.Strip(scr.String())
+	require.Contains(t, out, "webhook", "a server that appeared after opening should be listed")
+	require.Contains(t, out, "connected", "signal's refreshed state should be shown")
 }

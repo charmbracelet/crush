@@ -1787,7 +1787,7 @@ func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.S
 		}
 	}
 
-	msgs, err = a.repairInterruptedToolCalls(ctx, session.ID, msgs)
+	msgs, err = repairInterruptedToolCalls(ctx, a.messages, msgs)
 	if err != nil {
 		return nil, err
 	}

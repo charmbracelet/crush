@@ -352,6 +352,11 @@
             120
           ]
         },
+        "lazy": {
+          "type": "boolean",
+          "description": "Keep this server's tools out of context until the agent loads them. Unset follows options.lazy_mcp. Set false to always show them",
+          "default": true
+        },
         "sessionless": {
           "type": "boolean",
           "description": "Mark a sessionless MCP server (no Mcp-Session-Id) so Crush skips the subscriptions/listen stream it would otherwise reject. Leave unset to auto-detect known sessionless servers (e.g. GitHub MCP)",
@@ -642,6 +647,11 @@
           },
           "type": "array",
           "description": "List of skill names to disable and hide from the agent"
+        },
+        "lazy_mcp": {
+          "type": "boolean",
+          "description": "Keep MCP tools out of the model context until the agent loads them with mcp_search. Individual servers override it with mcp.\u003cname\u003e.lazy",
+          "default": true
         },
         "request_timeout": {
           "type": "integer",

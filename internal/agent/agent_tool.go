@@ -119,6 +119,7 @@ func (c *coordinator) buildTaskAgent(ctx context.Context, ready *errgroup.Group,
 	pr, err := taskPrompt(
 		prompt.WithWorkingDir(c.cfg.WorkingDir()),
 		prompt.WithCanWrite(canWrite),
+		prompt.WithFeatures(c.liveMemoryFeatures),
 	)
 	if err != nil {
 		return nil, err

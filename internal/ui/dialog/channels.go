@@ -13,7 +13,6 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
-	"github.com/charmbracelet/crush/internal/workspace"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/sahilm/fuzzy"
 )
@@ -133,8 +132,11 @@ type Channels struct {
 
 var _ Dialog = (*Channels)(nil)
 
-// NewChannels creates a new channels dialog.
-func NewChannels(com *common.Common, ws workspace.Workspace) *Channels {
+// NewChannels creates a new channels dialog from the MCP server states the
+// UI already holds. It takes them rather than fetching them because it is
+// called from Update, where MCPGetStates would be a blocking HTTP round-trip
+// in client/server mode; later changes arrive through SetStates.
+func NewChannels(com *common.Common, states map[string]mcp.ClientInfo) *Channels {
 	d := &Channels{
 		com: com,
 	}
@@ -143,7 +145,7 @@ func NewChannels(com *common.Common, ws workspace.Workspace) *Channels {
 	help.Styles = com.Styles.DialogHelpStyles()
 	d.help = help
 
-	d.list = list.NewFilterableList(channelItems(com.Styles, ws.MCPGetStates())...)
+	d.list = list.NewFilterableList(channelItems(com.Styles, states)...)
 	d.list.Focus()
 	d.list.SetSelected(0)
 

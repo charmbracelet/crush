@@ -81,6 +81,10 @@ const pasteColsThreshold = 1000
 // Session details panel max height.
 const sessionDetailsMaxHeight = 20
 
+// hyperCreditsPollInterval is how often the Hyper credits balance is
+// refreshed while no session is running.
+const hyperCreditsPollInterval = 60 * time.Second
+
 // TextareaMaxHeight is the maximum height of the prompt textarea.
 const TextareaMaxHeight = 15
 
@@ -176,6 +180,16 @@ type (
 	sessionFilesUpdatesMsg struct {
 		sessionFiles []SessionFile
 	}
+
+	// creditsUpdatedMsg is sent when the remaining Hyper credits have been
+	// fetched from the API. credits is nil when the team has hypercredit
+	// display disabled.
+	creditsUpdatedMsg struct {
+		credits *int
+	}
+
+	// hyperCreditsPollMsg is sent by the Hyper credits poll timer.
+	hyperCreditsPollMsg struct{}
 )
 
 // UI represents the main user interface model.
@@ -601,6 +615,13 @@ func (m *UI) Init() tea.Cmd {
 	if cmd := m.dispatchBusyRefresh(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
+	// The credits balance is shown from the first frame on, so fetch it
+	// right away and keep polling it while Crush sits idle. The poll runs
+	// for every provider: it is a no-op unless Hyper is selected.
+	if m.com.IsHyper() {
+		cmds = append(cmds, m.fetchHyperCredits())
+	}
+	cmds = append(cmds, m.hyperCreditsTicker())
 	cmds = append(cmds, m.checkPendingMCPAuth())
 	return tea.Batch(cmds...)
 }
@@ -1432,6 +1453,16 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd := m.handleSelectModel(msg.action); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case creditsUpdatedMsg:
+		m.hyperCredits = msg.credits
+	case hyperCreditsPollMsg:
+		// While a session runs every response refreshes the balance, so
+		// the poll only has to cover idle time. Re-arm it either way: the
+		// next poll may well land after the agent went idle again.
+		if m.com.IsHyper() && !m.isAgentBusy() {
+			cmds = append(cmds, m.fetchHyperCredits())
+		}
+		cmds = append(cmds, m.hyperCreditsTicker())
 	case util.InfoMsg:
 		if msg.Type == util.InfoTypeError {
 			slog.Error("Error reported", "error", msg.Msg)
@@ -2539,14 +2570,69 @@ func (m *UI) refreshHyperAndRetrySelect(msg dialog.ActionSelectModel) tea.Cmd {
 }
 
 // updateHyperCredits refreshes the displayed Hyper balance from the most
-// recent /v1/credits fetch. The agent fetches the balance after every
-// request, so reading the stored value here is enough: until the first
-// fetch lands the balance is unknown and stays hidden.
+// recent /v1/credits fetch. The balance is fetched on startup, polled
+// while idle and refreshed on every response during a session, so reading
+// the stored value here is enough: until the first fetch lands the
+// balance is unknown and stays hidden.
 func (m *UI) updateHyperCredits() {
 	if !m.com.IsHyper() {
 		return
 	}
 	m.hyperCredits = hyper.Balance()
+}
+
+// fetchHyperCredits returns a command that asynchronously fetches the
+// remaining Hyper credits from the /v1/credits endpoint. An expired
+// OAuth token is refreshed first so a long-running session keeps
+// reporting a balance.
+func (m *UI) fetchHyperCredits() tea.Cmd {
+	return func() tea.Msg {
+		var (
+			apiKey      string
+			cfg         *config.Config
+			providerCfg config.ProviderConfig
+		)
+		getAPIKey := func() (ok bool) {
+			if cfg = m.com.Config(); cfg == nil || cfg.Providers == nil {
+				return false
+			}
+			if providerCfg, ok = cfg.Providers.Get(hyper.Name); !ok {
+				return false
+			}
+			var err error
+			apiKey, err = m.com.Workspace.Resolver().ResolveValue(providerCfg.APIKey)
+			return err == nil && apiKey != ""
+		}
+		if !getAPIKey() {
+			return nil
+		}
+
+		if providerCfg.OAuthToken != nil && providerCfg.OAuthToken.IsExpired() {
+			ctxRefresh, cancelRefresh := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancelRefresh()
+			if err := m.com.Workspace.RefreshOAuthToken(ctxRefresh, config.ScopeGlobal, hyper.Name); err != nil {
+				slog.Warn("Hyper OAuth refresh failed before fetching credits, trying with existing token", "error", err)
+			} else if !getAPIKey() {
+				return nil
+			}
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		credits, err := hyper.FetchCredits(ctx, apiKey)
+		if err != nil {
+			slog.Warn("Failed to fetch Hyper credits", "error", err)
+			return nil
+		}
+		return creditsUpdatedMsg{credits: credits}
+	}
+}
+
+// hyperCreditsTicker schedules the next Hyper credits poll.
+func (m *UI) hyperCreditsTicker() tea.Cmd {
+	return tea.Tick(hyperCreditsPollInterval, func(time.Time) tea.Msg {
+		return hyperCreditsPollMsg{}
+	})
 }
 
 // restoreModelFromSession checks the last assistant message in the
@@ -2737,7 +2823,7 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 	} else if m.com.IsHyper() {
-		m.updateHyperCredits()
+		cmds = append(cmds, m.fetchHyperCredits())
 	}
 
 	return tea.Batch(cmds...)
@@ -5481,7 +5567,13 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 			Title:   "Crush is waiting...",
 			Message: fmt.Sprintf("Agent's turn completed in \"%s\"", n.SessionTitle),
 		}))
+		// Show what the stored balance says right away, and fetch again:
+		// the refresh for the turn's last response is only kicked off once
+		// its request finishes, so it may still be in flight here.
 		m.updateHyperCredits()
+		if m.com.IsHyper() {
+			cmds = append(cmds, m.fetchHyperCredits())
+		}
 	case notify.TypeAgentError:
 		// Terminal edge like TypeAgentFinished; fall through to the
 		// busy/queue refresh below.

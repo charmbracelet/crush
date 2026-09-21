@@ -58,6 +58,9 @@ type ClientSession struct {
 	// the claude/channel capability and was opted in via --channels or
 	// channel_enabled in config).
 	channel bool
+	// channelCapable reports whether the server declared the claude/channel
+	// capability, whether or not it was opted in.
+	channelCapable bool
 }
 
 // Close cancels the session context and then closes the underlying session.
@@ -234,6 +237,17 @@ type ClientInfo struct {
 	// claude/channel capability and opted in via --channels or
 	// channel_enabled in config).
 	Channel bool
+
+	// ChannelOptIn reports whether the server is opted in as a channel (via
+	// --channels or channel_enabled), whatever its connection state. It is
+	// recorded when a connect attempt starts, so a channel that is still
+	// starting, has errored, or needs auth is still reported as one.
+	ChannelOptIn bool
+
+	// ChannelCapable reports whether the server declared the claude/channel
+	// capability on its last connect, whether or not it is opted in, so the
+	// UI can point out servers that could be channels but were never enabled.
+	ChannelCapable bool
 }
 
 // SubscribeEvents returns a channel for MCP events.
@@ -472,7 +486,7 @@ func AuthenticateMCP(ctx context.Context, cfg *config.ConfigStore, name string) 
 		return fmt.Errorf("mcp '%s' does not use OAuth authentication", name)
 	}
 
-	updateState(name, StateStarting, nil, nil, Counts{}, withPending(m))
+	updateState(name, StateStarting, nil, nil, Counts{}, withPending(m), withChannelOptIn(cfg, name, m))
 
 	// This is the user-initiated flow, so permit the interactive browser
 	// authorization the handler otherwise withholds during startup.
@@ -572,7 +586,7 @@ func BeginAuth(cfg *config.ConfigStore, name string) (finish func(ctx context.Co
 // runAuthFlow executes the OAuth connect for BeginAuth with browser
 // suppression enabled on the freshly created handler.
 func runAuthFlow(ctx context.Context, cfg *config.ConfigStore, name string, m config.MCPConfig) error {
-	updateState(name, StateStarting, nil, nil, Counts{}, withPending(m))
+	updateState(name, StateStarting, nil, nil, Counts{}, withPending(m), withChannelOptIn(cfg, name, m))
 	_, err := connectAndRegister(ctx, cfg, name, m, currentGen(name), cfg.Resolver(), ChannelOptIn(m, cfg.Overrides().EnabledChannels, name))
 	return err
 }
@@ -602,13 +616,13 @@ func initClient(ctx context.Context, cfg *config.ConfigStore, name string, m con
 		if m.OAuthToken != nil {
 			clearOAuthToken(cfg, name)
 		}
-		updateState(name, StateNeedsAuth, nil, nil, Counts{})
+		updateState(name, StateNeedsAuth, nil, nil, Counts{}, withChannelOptIn(cfg, name, m))
 		clearMCPData(name)
 		slog.Info("MCP server requires OAuth authentication", "name", name)
 		return nil
 	}
 
-	updateState(name, StateStarting, nil, nil, Counts{}, withPending(m))
+	updateState(name, StateStarting, nil, nil, Counts{}, withPending(m), withChannelOptIn(cfg, name, m))
 	_, err := connectAndRegister(ctx, cfg, name, m, gen, resolver, ChannelOptIn(m, cfg.Overrides().EnabledChannels, name))
 	if err != nil {
 		// If an OAuth MCP fails because the saved token is no longer
@@ -951,6 +965,14 @@ func withPending(m config.MCPConfig) stateOpt {
 	}
 }
 
+// withChannelOptIn records whether the server is opted in as a channel.
+// Applied on every connect attempt so it tracks the current config and the
+// --channels overrides.
+func withChannelOptIn(cfg *config.ConfigStore, name string, m config.MCPConfig) stateOpt {
+	optIn := ChannelOptIn(m, cfg.Overrides().EnabledChannels, name)
+	return func(i *ClientInfo) { i.ChannelOptIn = optIn }
+}
+
 // updateState updates the state of an MCP client and publishes an event.
 //
 // Config bookkeeping is split between the caller and the state machine:
@@ -969,6 +991,9 @@ func updateState(name string, state State, err error, client *ClientSession, cou
 	info.Client = client
 	info.Counts = counts
 	info.Channel = client != nil && client.channel
+	if client != nil {
+		info.ChannelCapable = client.channelCapable
+	}
 	for _, opt := range opts {
 		opt(&info)
 	}
@@ -978,6 +1003,9 @@ func updateState(name string, state State, err error, client *ClientSession, cou
 	case StateDisabled:
 		info.Config = config.MCPConfig{}
 		info.PendingConfig = nil
+		// A disabled server is not a channel, whatever its config says.
+		info.ChannelOptIn = false
+		info.ChannelCapable = false
 	case StateError:
 		// A session that has errored is dead to us: close it so the child
 		// process and its stdio pipes are released, and clear its registry
@@ -1117,7 +1145,8 @@ func createSession(ctx context.Context, cfg *config.ConfigStore, name string, m 
 	// enough. Otherwise close the gate (fail closed). Resolving drains buffered messages
 	// that arrived during negotiation so a fast server does not lose early
 	// events.
-	isChannel := channelOptIn && hasChannelCapability(session.InitializeResult())
+	channelCapable := hasChannelCapability(session.InitializeResult())
+	isChannel := channelOptIn && channelCapable
 	if isChannel {
 		buffered := channelGate.resolve(true)
 		for _, raw := range buffered {
@@ -1129,10 +1158,11 @@ func createSession(ctx context.Context, cfg *config.ConfigStore, name string, m 
 	}
 
 	return &ClientSession{
-		ClientSession: session,
-		cancel:        cancel,
-		oauthHandler:  oauthHandler,
-		channel:       isChannel,
+		ClientSession:  session,
+		cancel:         cancel,
+		oauthHandler:   oauthHandler,
+		channel:        isChannel,
+		channelCapable: channelCapable,
 	}, nil
 }
 

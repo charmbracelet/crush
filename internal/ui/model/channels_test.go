@@ -18,13 +18,10 @@ import (
 
 type channelsTestWorkspace struct {
 	workspace.Workspace
-	cfg    *config.Config
-	states map[string]mcp.ClientInfo
+	cfg *config.Config
 }
 
 func (w *channelsTestWorkspace) Config() *config.Config { return w.cfg }
-
-func (w *channelsTestWorkspace) MCPGetStates() map[string]mcp.ClientInfo { return w.states }
 
 func (w *channelsTestWorkspace) MCPPendingAuth() []mcp.PendingAuthServer { return nil }
 
@@ -139,11 +136,10 @@ func TestMCPStateChangeRefreshesOpenChannelsDialog(t *testing.T) {
 
 	m := newChannelsTestUI(t, []string{"signal"}, nil)
 	m.dialog = dialog.NewOverlay()
-	ws := m.com.Workspace.(*channelsTestWorkspace)
-	ws.states = map[string]mcp.ClientInfo{
+	m.mcpStates = map[string]mcp.ClientInfo{
 		"signal": {Name: "signal", State: mcp.StateStarting, ChannelOptIn: true},
 	}
-	d := dialog.NewChannels(m.com, ws)
+	d := dialog.NewChannels(m.com, m.mcpStates)
 	m.dialog.OpenDialog(d)
 
 	m.Update(mcpStateChangedMsg{states: map[string]mcp.ClientInfo{

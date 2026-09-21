@@ -109,7 +109,7 @@
         "high",
         "max"
       ],
-      "default_reasoning_effort": "max",
+      "default_reasoning_effort": "high",
       "supports_attachments": true
     },
     {
@@ -386,17 +386,13 @@
       "cost_per_1m_out": 0.68,
       "cost_per_1m_in_cached": 0,
       "cost_per_1m_out_cached": 0.089,
-      "context_window": 128072,
+      "context_window": 131072,
       "default_max_tokens": 13107,
       "can_reason": true,
       "reasoning_levels": [
-        "none",
-        "minimal",
         "low",
         "medium",
-        "high",
-        "xhigh",
-        "max"
+        "high"
       ],
       "default_reasoning_effort": "medium",
       "supports_attachments": false

@@ -3,7 +3,7 @@
 // An [Endpoint] is the single source of truth for one route: the same
 // value drives mux registration and documentation generation, so the
 // two cannot drift. Endpoints are constructed with the method builders
-// ([Get], [Post], [Put], [Patch], [Delete]) and finalized with
+// ([Get], [Post], [Put], [Delete]) and finalized with
 // [endpointBuilder.Handle], the only way to produce an Endpoint. A
 // chain without Handle does not compile into a []Endpoint, so
 // incomplete definitions fail at build time.
@@ -106,11 +106,6 @@ func Post(path string) endpointBuilder {
 // Put begins a PUT endpoint for path.
 func Put(path string) endpointBuilder {
 	return endpointBuilder{Endpoint{method: http.MethodPut, path: path}}
-}
-
-// Patch begins a PATCH endpoint for path.
-func Patch(path string) endpointBuilder {
-	return endpointBuilder{Endpoint{method: http.MethodPatch, path: path}}
 }
 
 // Delete begins a DELETE endpoint for path.

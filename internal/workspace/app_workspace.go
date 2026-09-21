@@ -60,10 +60,6 @@ func (w *AppWorkspace) SaveSession(ctx context.Context, sess session.Session) (s
 	return w.app.Sessions.Save(ctx, sess)
 }
 
-func (w *AppWorkspace) SetSessionChannel(ctx context.Context, sessionID, channel string) (session.Session, error) {
-	return w.app.Sessions.SetChannel(ctx, sessionID, channel)
-}
-
 func (w *AppWorkspace) DeleteSession(ctx context.Context, sessionID string) error {
 	return w.app.Sessions.Delete(ctx, sessionID)
 }

@@ -27,7 +27,6 @@ type channelWorkspace struct {
 	createCalls  int
 	runCalls     []channelRun
 	runErr       error
-	channels     []string
 }
 
 type channelRun struct {
@@ -55,11 +54,6 @@ func (w *channelWorkspace) AgentRun(_ context.Context, sessionID, prompt string,
 func (w *channelWorkspace) AgentRunChannel(_ context.Context, channel, sessionID, prompt string, _ ...message.Attachment) error {
 	w.runCalls = append(w.runCalls, channelRun{channel: channel, sessionID: sessionID, prompt: prompt})
 	return w.runErr
-}
-
-func (w *channelWorkspace) SetSessionChannel(_ context.Context, sessionID, channel string) (session.Session, error) {
-	w.channels = append(w.channels, channel)
-	return session.Session{ID: sessionID, Channel: channel}, nil
 }
 
 func (w *channelWorkspace) Config() *config.Config { return nil }
@@ -101,12 +95,6 @@ func TestHandleChannelMessageExistingSession(t *testing.T) {
 	}
 	if ws.runCalls[0].channel != "s" {
 		t.Errorf("AgentRun channel = %q, want s", ws.runCalls[0].channel)
-	}
-	// The coordinator sets the channel binding during the turn
-	// (syncSessionChannel), so the TUI no longer calls
-	// SetSessionChannel itself.
-	if len(ws.channels) != 0 {
-		t.Errorf("TUI should not set session channel; got %v", ws.channels)
 	}
 	if ws.runCalls[0].sessionID != "sess-1" {
 		t.Errorf("AgentRun sessionID = %q, want sess-1", ws.runCalls[0].sessionID)

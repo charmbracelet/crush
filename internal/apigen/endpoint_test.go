@@ -133,7 +133,6 @@ func TestBuilderVerbsAndSSE(t *testing.T) {
 		http.MethodGet:    Get,
 		http.MethodPost:   Post,
 		http.MethodPut:    Put,
-		http.MethodPatch:  Patch,
 		http.MethodDelete: Delete,
 	} {
 		e := build("/x").Handle(func(http.ResponseWriter, *http.Request) {})

@@ -150,12 +150,6 @@ type AgentMessage struct {
 	Attachments       []Attachment `json:"attachments,omitempty"`
 }
 
-// SessionChannelRequest is the request body for setting a session's
-// channel binding. An empty Channel clears the binding.
-type SessionChannelRequest struct {
-	Channel string `json:"channel"`
-}
-
 // ShellCommandRequest represents a request to run a shell command directly.
 type ShellCommandRequest struct {
 	SessionID string `json:"session_id"`

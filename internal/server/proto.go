@@ -380,32 +380,6 @@ func (c *controllerV1) handleDeleteWorkspaceSession(w http.ResponseWriter, r *ht
 	w.WriteHeader(http.StatusOK)
 }
 
-// handlePatchWorkspaceSessionChannel sets the channel binding on a session
-// via a targeted UPDATE, avoiding the read-then-full-save race of the
-// PUT session endpoint.
-func (c *controllerV1) handlePatchWorkspaceSessionChannel(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	sid := r.PathValue("sid")
-
-	var body proto.SessionChannelRequest
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		c.server.logError(r, "Failed to decode request", "error", err)
-		jsonError(w, http.StatusBadRequest, "failed to decode request")
-		return
-	}
-
-	sess, err := c.backend.SetSessionChannel(r.Context(), id, sid, body.Channel)
-	if err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-	ws, _ := c.backend.GetWorkspace(id)
-	out := sessionToProto(sess)
-	out.IsBusy = isSessionBusy(ws, sess.ID)
-	out.AttachedClients = attachedClients(ws, sess.ID)
-	jsonEncode(w, out)
-}
-
 // handleGetWorkspaceSessionUserMessages returns user messages for a session.
 func (c *controllerV1) handleGetWorkspaceSessionUserMessages(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")

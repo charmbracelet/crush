@@ -240,10 +240,6 @@ func (c *Client) put(ctx context.Context, path string, query url.Values, body io
 	return c.sendReq(ctx, http.MethodPut, path, query, body, headers)
 }
 
-func (c *Client) patch(ctx context.Context, path string, query url.Values, body io.Reader, headers http.Header) (*http.Response, error) {
-	return c.sendReq(ctx, http.MethodPatch, path, query, body, headers)
-}
-
 func (c *Client) sendReq(ctx context.Context, method, path string, query url.Values, body io.Reader, headers http.Header) (*http.Response, error) {
 	url := (&url.URL{
 		Path:     stdpath.Join("/v1", path),

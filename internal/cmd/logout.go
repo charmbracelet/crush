@@ -14,13 +14,32 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// providerDisplayNames maps OAuth-capable provider IDs to display names.
-// Keep this list in sync with the switch in RunE and the login command.
+// canonicalLogoutPlatform resolves a platform alias to its provider ID.
+func canonicalLogoutPlatform(alias string) (string, bool) {
+	switch alias {
+	case "hyper":
+		return "hyper", true
+	case "copilot", "github", "github-copilot":
+		return "copilot", true
+	case "openai", "chatgpt":
+		return "openai", true
+	case "honcho", "memory":
+		return "honcho", true
+	default:
+		return "", false
+	}
+}
+
+// loggedInProviderIDs are the providers the interactive picker offers.
+var loggedInProviderIDs = []string{"hyper", "copilot", "openai"}
+
+// providerDisplayNames maps provider IDs to display names.
 var providerDisplayNames = map[string]string{
 	"hyper":   "Charm Hyper",
 	"copilot": "GitHub Copilot",
 	"openai":  "ChatGPT",
 	"xai":     "Grok",
+	"honcho":  "Honcho memory",
 }
 
 var logoutCmd = &cobra.Command{
@@ -53,6 +72,8 @@ crush logout grok
 		"chatgpt",
 		"grok",
 		"xai",
+		"honcho",
+		"memory",
 	},
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -118,6 +139,8 @@ crush logout grok
 			return logoutOpenAI(c, ws.ID)
 		case "xai":
 			return logoutXAI(c, ws.ID)
+		case "honcho":
+			return logoutHoncho()
 		default:
 			return fmt.Errorf("unknown platform: %s", provider)
 		}

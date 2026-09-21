@@ -84,8 +84,8 @@ func charmtoneOpts() quickStyleOpts {
 
 		// Muted diff foreground hues; the backgrounds derive from these
 		// over bgBase.
-		insertFg: lipgloss.Color("#629657"),
-		deleteFg: lipgloss.Color("#a45c59"),
+		diffInsertFg: lipgloss.Color("#629657"),
+		diffDeleteFg: lipgloss.Color("#a45c59"),
 
 		button:         charmtone.Dolly,
 		buttonSubtle:   charmtone.Char,

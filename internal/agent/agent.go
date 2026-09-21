@@ -178,6 +178,7 @@ type SessionAgent interface {
 	BeginAccepted(sessionID string) *AcceptedRun
 	SetTools(tools []fantasy.AgentTool)
 	SetSystemPrompt(systemPrompt string)
+	SetMemory(memory Memory)
 	Cancel(sessionID string)
 	CancelAll()
 	IsSessionBusy(sessionID string) bool
@@ -240,6 +241,15 @@ type sessionAgent struct {
 	// session, to add to the next prompt. They are not chat messages.
 	notes *csync.Map[string, []string]
 
+	// memory supplies cross-session recall. Nil when no memory
+	// backend is configured, which is the default; every call site
+	// tolerates nil rather than branching on a feature flag.
+	//
+	// It is swappable because the user can connect or disconnect a
+	// backend from the command palette mid-session, and the agent
+	// running at that moment is the one that has to notice.
+	memory *memoryHolder
+
 	// dispatchMu holds a per-session mutex that serializes the
 	// accepted -> (cancel-on-entry | queued | active) transition in
 	// Run against a concurrent Cancel. The lock is held only during
@@ -295,6 +305,8 @@ type SessionAgentOptions struct {
 	RunComplete          pubsub.Publisher[notify.RunComplete]
 	// Hooks runs lifecycle hooks for turns and compaction. Nil runs none.
 	Hooks *hooks.Runner
+	// Memory supplies cross-session recall. Nil disables it.
+	Memory Memory
 }
 
 func NewSessionAgent(
@@ -314,6 +326,7 @@ func NewSessionAgent(
 		notify:               opts.Notify,
 		runComplete:          opts.RunComplete,
 		hooks:                opts.Hooks,
+		memory:               newMemoryHolder(opts.Memory),
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		notes:                csync.NewMap[string, []string](),
 		activeRequests:       csync.NewMap[string, *activeCancel](),
@@ -803,6 +816,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		systemPrompt += "\n\n<mcp-instructions>\n" + s + "\n</mcp-instructions>"
 	}
 
+	// The memory snapshot is session-stable, so sealing it into the
+	// system prompt costs one cache write on the first turn and
+	// nothing afterwards.
+	systemPrompt = withMemorySnapshot(ctx, a.memory.get(), systemPrompt)
+
 	if len(agentTools) > 0 {
 		// Add Anthropic caching to the last tool.
 		agentTools[len(agentTools)-1].SetProviderOptions(a.getCacheControlOptions())
@@ -921,21 +939,14 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			prepared.Messages = dropEmptyToolMedia(prepared.Messages)
 			prepared.Messages = a.workaroundProviderMediaLimitations(prepared.Messages, largeModel)
 
-			lastSystemRoleInx := 0
-			systemMessageUpdated := false
-			for i, msg := range prepared.Messages {
-				// Only add cache control to the last message.
-				if msg.Role == fantasy.MessageRoleSystem {
-					lastSystemRoleInx = i
-				} else if !systemMessageUpdated {
-					prepared.Messages[lastSystemRoleInx].ProviderOptions = a.getCacheControlOptions()
-					systemMessageUpdated = true
-				}
-				// Than add cache control to the last 2 messages.
-				if i > len(prepared.Messages)-3 {
-					prepared.Messages[i].ProviderOptions = a.getCacheControlOptions()
-				}
-			}
+			// Volatile memory recall goes last, after everything
+			// worth caching, and is excluded from the breakpoints
+			// below. See markCacheBreakpoints for why position and
+			// exclusion both matter.
+			var recallAppended bool
+			prepared.Messages, recallAppended = appendRecall(callContext, a.memory.get(), prepared.Messages, call.Prompt)
+
+			markCacheBreakpoints(prepared.Messages, a.getCacheControlOptions(), recallAppended)
 
 			if promptPrefix != "" {
 				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(promptPrefix)}, prepared.Messages...)
@@ -1109,6 +1120,12 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			currentAssistant.AddFinish(finishReason, "", "")
 			currentAssistant.PrismModelID, currentAssistant.PrismModelName = extractPrismModel(stepResult.ProviderMetadata)
 			currentAssistant.PrismHypercreditSavings, currentAssistant.PrismDollarSavings = extractPrismSavings(stepResult.ProviderMetadata)
+			// Record the reply once the turn is actually over. Steps
+			// that end in tool calls are mid-thought and would teach
+			// memory a partial answer.
+			if mem := a.memory.get(); mem != nil && finishReason == message.FinishReasonEndTurn {
+				mem.RecordAssistant(currentAssistant.Content().Text)
+			}
 			sessionLock.Lock()
 			defer sessionLock.Unlock()
 
@@ -1606,6 +1623,11 @@ func (a *sessionAgent) createUserMessage(ctx context.Context, call SessionAgentC
 	})
 	if err != nil {
 		return message.Message{}, fmt.Errorf("failed to create user message: %w", err)
+	}
+	// Hidden prompts are harness scaffolding rather than something
+	// the user said, so they are not worth remembering.
+	if mem := a.memory.get(); mem != nil && !call.HiddenUserMessage {
+		mem.RecordUser(call.Prompt)
 	}
 	return msg, nil
 }
@@ -2208,6 +2230,13 @@ func (a *sessionAgent) SetTools(tools []fantasy.AgentTool) {
 
 func (a *sessionAgent) SetSystemPrompt(systemPrompt string) {
 	a.systemPrompt.Set(systemPrompt)
+}
+
+// SetMemory swaps the recall backend under a running agent, so a
+// connect or disconnect from the command palette takes effect on the
+// next turn instead of the next launch.
+func (a *sessionAgent) SetMemory(memory Memory) {
+	a.memory.set(memory)
 }
 
 func (a *sessionAgent) Model() Model {

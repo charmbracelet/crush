@@ -96,7 +96,7 @@ func (a *sessionAgent) closeUnfinishedToolCalls(ctx context.Context, assistant *
 			unfinished = append(unfinished, tc)
 		}
 	}
-	_, err := a.settleToolCalls(ctx, assistant, unfinished, unfinishedToolCallResult(assistant))
+	_, err := settleToolCalls(ctx, a.messages, assistant, unfinished, unfinishedToolCallResult(assistant))
 	return err
 }
 
@@ -115,7 +115,7 @@ func (a *sessionAgent) closeUnfinishedToolCalls(ctx context.Context, assistant *
 // making them valid JSON is the send path's job.
 //
 // The created reply messages are returned in the order they were written.
-func (a *sessionAgent) settleToolCalls(ctx context.Context, assistant *message.Message, calls []message.ToolCall, reason string) ([]message.Message, error) {
+func settleToolCalls(ctx context.Context, messages message.Service, assistant *message.Message, calls []message.ToolCall, reason string) ([]message.Message, error) {
 	if len(calls) == 0 {
 		return nil, nil
 	}
@@ -130,13 +130,13 @@ func (a *sessionAgent) settleToolCalls(ctx context.Context, assistant *message.M
 			assistant.AddToolCall(tc)
 		}
 	}
-	if err := a.messages.Update(ctx, *assistant); err != nil {
+	if err := messages.Update(ctx, *assistant); err != nil {
 		return nil, fmt.Errorf("failed to settle tool calls: %w", err)
 	}
 
 	settled := make([]message.Message, 0, len(calls))
 	for _, tc := range calls {
-		created, err := a.messages.Create(ctx, assistant.SessionID, message.CreateMessageParams{
+		created, err := messages.Create(ctx, assistant.SessionID, message.CreateMessageParams{
 			Role: message.Tool,
 			Parts: []message.ContentPart{message.ToolResult{
 				ToolCallID: tc.ID,
@@ -168,7 +168,7 @@ func (a *sessionAgent) settleToolCalls(ctx context.Context, assistant *message.M
 // that has already claimed the session: both callers check IsSessionBusy
 // first and refuse if another run holds it, so a call found without a reply
 // here cannot belong to a run still in flight.
-func (a *sessionAgent) repairInterruptedToolCalls(ctx context.Context, sessionID string, msgs []message.Message) ([]message.Message, error) {
+func repairInterruptedToolCalls(ctx context.Context, messages message.Service, msgs []message.Message) ([]message.Message, error) {
 	resolved := make(map[string]struct{})
 	for _, msg := range msgs {
 		for _, tr := range msg.ToolResults() {
@@ -199,7 +199,7 @@ func (a *sessionAgent) repairInterruptedToolCalls(ctx context.Context, sessionID
 		if !msg.IsFinished() {
 			msg.AddFinishAt(message.FinishReasonError, interruptedTurnMessage, "", msg.UpdatedAt)
 		}
-		settled, err := a.settleToolCalls(ctx, msg, orphans, interruptedToolResult)
+		settled, err := settleToolCalls(ctx, messages, msg, orphans, interruptedToolResult)
 		if err != nil {
 			return nil, err
 		}
@@ -208,4 +208,25 @@ func (a *sessionAgent) repairInterruptedToolCalls(ctx context.Context, sessionID
 	// Replies pair with their request by ID rather than by position, so the
 	// repaired rows can simply follow the transcript.
 	return append(msgs, repaired...), nil
+}
+
+// SettleInterruptedCalls writes down the ending of tool calls a dead
+// process left dangling, before anyone reads the transcript.
+//
+// The turn loop settles these on the next run, which is correct but
+// visible: a session opened after a crash shows the call as still in
+// flight, then rewrites itself the moment the next prompt goes out.
+// Settling at read time means the transcript a user opens is already
+// the transcript every later reader sees.
+//
+// Callers that may race a live run must check IsSessionBusy first: a
+// call without a reply is only orphaned once nothing can still answer
+// it.
+func SettleInterruptedCalls(ctx context.Context, messages message.Service, sessionID string) error {
+	msgs, err := messages.List(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to list messages: %w", err)
+	}
+	_, err = repairInterruptedToolCalls(ctx, messages, msgs)
+	return err
 }

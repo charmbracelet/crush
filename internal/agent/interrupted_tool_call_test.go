@@ -3,6 +3,7 @@ package agent
 import (
 	"testing"
 
+	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/stretchr/testify/require"
@@ -247,4 +248,94 @@ func TestRepairInterruptedToolCalls_HandlesParallelCalls(t *testing.T) {
 	require.Equal(t, "file", results["call_2"].Content, "the real result is left alone")
 	require.True(t, results["call_1"].IsError)
 	require.True(t, results["call_3"].IsError)
+}
+
+// A reader of the transcript settles orphans too, not just the next run.
+// Without this a session opened after a crash shows the call as still in
+// flight, and the first message of the next run rewrites the transcript
+// under the user.
+func TestSettleInterruptedCalls_SettlesBeforeAnyRun(t *testing.T) {
+	env := testEnv(t)
+	ctx := t.Context()
+
+	sess, assistant := killedTurn(t, env, false)
+
+	require.NoError(t, SettleInterruptedCalls(ctx, env.messages, sess.ID))
+
+	stored, err := env.messages.List(ctx, sess.ID)
+	require.NoError(t, err)
+	var result *message.ToolResult
+	for _, msg := range stored {
+		for _, tr := range msg.ToolResults() {
+			if tr.ToolCallID == "call_killed" {
+				tr := tr
+				result = &tr
+			}
+		}
+	}
+	require.NotNil(t, result, "opening the session must settle the orphan")
+
+	reloaded, err := env.messages.Get(ctx, assistant.ID)
+	require.NoError(t, err)
+	require.Empty(t, reloaded.ToolCalls()[0].Input)
+	require.True(t, reloaded.IsFinished())
+}
+
+// Arguments can stop arriving halfway through. What the model managed to
+// write stays in the transcript; only what goes to the provider is repaired.
+func TestSettleInterruptedCalls_KeepsHalfWrittenArguments(t *testing.T) {
+	env := testEnv(t)
+	ctx := t.Context()
+
+	const partial = `{"command":"sleep 3`
+
+	sess, err := env.sessions.Create(ctx, "half-written")
+	require.NoError(t, err)
+	assistant, err := env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role:  message.Assistant,
+		Parts: []message.ContentPart{message.ToolCall{ID: "call_partial", Name: "bash", Input: partial}},
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, SettleInterruptedCalls(ctx, env.messages, sess.ID))
+
+	reloaded, err := env.messages.Get(ctx, assistant.ID)
+	require.NoError(t, err)
+	call := reloaded.ToolCalls()[0]
+	require.True(t, call.Finished, "the call is settled")
+	require.Equal(t, partial, call.Input, "the transcript keeps what the model wrote")
+
+	for _, part := range reloaded.ToAIMessage()[0].Content {
+		if tc, ok := fantasy.AsMessagePart[fantasy.ToolCallPart](part); ok {
+			require.Equal(t, "{}", tc.Input, "the send path is what makes it valid JSON")
+		}
+	}
+}
+
+func TestSettleInterruptedCalls_HealthySessionIsUntouched(t *testing.T) {
+	env := testEnv(t)
+	ctx := t.Context()
+
+	sess, err := env.sessions.Create(ctx, "healthy")
+	require.NoError(t, err)
+	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.ToolCall{ID: "call_ok", Name: "bash", Input: `{"command":"ls"}`, Finished: true},
+			message.Finish{Reason: message.FinishReasonEndTurn, Time: 1000},
+		},
+	})
+	require.NoError(t, err)
+	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role:  message.Tool,
+		Parts: []message.ContentPart{message.ToolResult{ToolCallID: "call_ok", Name: "bash", Content: "ok"}},
+	})
+	require.NoError(t, err)
+
+	before, err := env.messages.List(ctx, sess.ID)
+	require.NoError(t, err)
+	require.NoError(t, SettleInterruptedCalls(ctx, env.messages, sess.ID))
+	after, err := env.messages.List(ctx, sess.ID)
+	require.NoError(t, err)
+	require.Len(t, after, len(before), "settling a healthy session writes nothing")
 }

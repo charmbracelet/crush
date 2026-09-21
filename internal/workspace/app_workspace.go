@@ -89,6 +89,18 @@ func (w *AppWorkspace) RoutesChannelEvents() bool { return false }
 // -- Messages --
 
 func (w *AppWorkspace) ListMessages(ctx context.Context, sessionID string) ([]message.Message, error) {
+	// Settle calls a dead process left dangling before the transcript
+	// is shown. The turn loop settles them on the next run, but that
+	// reads as the history rewriting itself: open a crashed session,
+	// send a message, and the pending call flips to an error under
+	// you. A session a live run holds is left alone, since its
+	// unanswered calls are not orphans yet.
+	if w.app.AgentCoordinator != nil && !w.app.AgentCoordinator.IsSessionBusy(sessionID) {
+		if err := agent.SettleInterruptedCalls(ctx, w.app.Messages, sessionID); err != nil {
+			slog.Warn("Failed to settle interrupted tool calls", "session_id", sessionID, "error", err)
+		}
+	}
+
 	// Drain any debounced updates so the caller observes the latest
 	// in-memory state. message.Service buffers streaming deltas and a
 	// cold List would otherwise miss them at session-switch time.

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -31,6 +32,10 @@ import (
 type AppWorkspace struct {
 	app   *app.App
 	store *config.ConfigStore
+
+	sessionLockMu   sync.Mutex
+	sessionLock     *session.Lock
+	sessionLockedID string
 }
 
 // NewAppWorkspace creates a new AppWorkspace wrapping the given app
@@ -78,6 +83,25 @@ func (w *AppWorkspace) ParseAgentToolSessionID(sessionID string) (string, string
 // to know which session is live to support agent resume.
 func (w *AppWorkspace) SetCurrentSession(ctx context.Context, sessionID string) error {
 	w.app.ReportCurrentSession(sessionID)
+	return nil
+}
+
+func (w *AppWorkspace) AcquireSessionLock(sessionID string) error {
+	w.sessionLockMu.Lock()
+	defer w.sessionLockMu.Unlock()
+
+	if sessionID == w.sessionLockedID {
+		return nil
+	}
+
+	newLock, err := session.AcquireLock(w.store.Config().Options.DataDirectory, sessionID)
+	if err != nil {
+		return err
+	}
+
+	w.sessionLock.Release()
+	w.sessionLock = newLock
+	w.sessionLockedID = sessionID
 	return nil
 }
 
@@ -500,6 +524,11 @@ func (w *AppWorkspace) Subscribe(program *tea.Program) {
 }
 
 func (w *AppWorkspace) Shutdown() {
+	w.sessionLockMu.Lock()
+	w.sessionLock.Release()
+	w.sessionLock = nil
+	w.sessionLockedID = ""
+	w.sessionLockMu.Unlock()
 	w.app.Shutdown()
 }
 

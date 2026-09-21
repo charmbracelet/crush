@@ -73,6 +73,10 @@ type SessionFile struct {
 // UI never blocks on the call.
 func (m *UI) loadSession(sessionID string) tea.Cmd {
 	load := func() tea.Msg {
+		if err := m.com.Workspace.AcquireSessionLock(sessionID); err != nil {
+			return util.ReportError(err)
+		}
+
 		session, err := m.com.Workspace.GetSession(context.Background(), sessionID)
 		if err != nil {
 			return util.ReportError(err)

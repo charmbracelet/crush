@@ -129,6 +129,7 @@ type Workspace interface {
 	// mode it informs the server's per-client presence map so other
 	// observers can compute attached-client counts per session.
 	SetCurrentSession(ctx context.Context, sessionID string) error
+	AcquireSessionLock(sessionID string) error
 
 	// Messages
 	ListMessages(ctx context.Context, sessionID string) ([]message.Message, error)

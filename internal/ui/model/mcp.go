@@ -167,8 +167,16 @@ func anyMCPStarting(states map[string]mcp.ClientInfo) bool {
 func (m *UI) mcpInfo(width, maxItems int, isSection bool) string {
 	var mcps []mcp.ClientInfo
 	t := m.com.Styles
+	cfg := m.com.Config()
+	opts := cfg.Options
 
-	for _, mcp := range m.com.Config().MCP.Sorted() {
+	// Which servers hide their tools until the agent searches for them.
+	lazyServers := make(map[string]bool, len(m.mcpStates))
+	for name, mcpCfg := range cfg.MCP {
+		lazyServers[name] = mcpCfg.IsLazy(opts)
+	}
+
+	for _, mcp := range cfg.MCP.Sorted() {
 		if state, ok := m.mcpStates[mcp.Name]; ok {
 			mcps = append(mcps, state)
 		}
@@ -180,7 +188,7 @@ func (m *UI) mcpInfo(width, maxItems int, isSection bool) string {
 	}
 	list := t.Resource.AdditionalText.Render("None")
 	if len(mcps) > 0 {
-		list = mcpList(t, mcps, width, maxItems)
+		list = mcpList(t, mcps, lazyServers, width, maxItems)
 	}
 
 	return lipgloss.NewStyle().Width(width).Render(fmt.Sprintf("%s\n\n%s", title, list))
@@ -202,8 +210,9 @@ func mcpCounts(t *styles.Styles, counts mcp.Counts) string {
 }
 
 // mcpList renders a list of MCP clients with their status and counts,
-// truncating to maxItems if needed.
-func mcpList(t *styles.Styles, mcps []mcp.ClientInfo, width, maxItems int) string {
+// truncating to maxItems if needed. Servers marked lazy show their tools as
+// available on demand instead of counting them as loaded context.
+func mcpList(t *styles.Styles, mcps []mcp.ClientInfo, lazyServers map[string]bool, width, maxItems int) string {
 	if maxItems <= 0 {
 		return ""
 	}
@@ -234,6 +243,10 @@ func mcpList(t *styles.Styles, mcps []mcp.ClientInfo, width, maxItems int) strin
 				} else {
 					extraContent = badge
 				}
+			}
+			if lazyServers[m.Name] {
+				extraContent = strings.TrimSpace(extraContent + " " +
+					t.Resource.AdditionalText.Render("· lazy"))
 			}
 		case mcp.StateError:
 			icon = t.Resource.ErrorIcon.String()

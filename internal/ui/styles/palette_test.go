@@ -229,9 +229,9 @@ func TestMergePalette_BgBaseOverrideDerivesLightDiffTints(t *testing.T) {
 	p, err := MergePalette("charmtone-panther", Palette{BgBase: "#ffffff"})
 	require.NoError(t, err)
 	require.Equal(t, "#ffffff", p.BgBase)
-	require.Greater(t, luminance(p.InsertBg), 180.0, "insert_bg %s should be light on white bg", p.InsertBg)
+	require.Greater(t, luminance(p.InsertCodeBg), 180.0, "insert_code_bg %s should be light on white bg", p.InsertCodeBg)
 	require.Greater(t, luminance(p.InsertGutterBg), 180.0, "insert_gutter_bg %s should be light on white bg", p.InsertGutterBg)
-	require.Greater(t, luminance(p.DeleteBg), 180.0, "delete_bg %s should be light on white bg", p.DeleteBg)
+	require.Greater(t, luminance(p.DeleteCodeBg), 180.0, "delete_code_bg %s should be light on white bg", p.DeleteCodeBg)
 	require.Greater(t, luminance(p.DeleteGutterBg), 180.0, "delete_gutter_bg %s should be light on white bg", p.DeleteGutterBg)
 }
 
@@ -251,10 +251,10 @@ func TestMergePalette_CompletesDiffTokens(t *testing.T) {
 		got  string
 	}{
 		{"insert_fg", p.InsertFg},
-		{"insert_bg", p.InsertBg},
+		{"insert_code_bg", p.InsertCodeBg},
 		{"insert_gutter_bg", p.InsertGutterBg},
 		{"delete_fg", p.DeleteFg},
-		{"delete_bg", p.DeleteBg},
+		{"delete_code_bg", p.DeleteCodeBg},
 		{"delete_gutter_bg", p.DeleteGutterBg},
 	} {
 		require.NotEmpty(t, f.got, "%s should be derived in a fully resolved palette", f.name)

@@ -7,25 +7,14 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
-	"github.com/charmbracelet/crush/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
-
-type stubChannelsWorkspace struct {
-	workspace.Workspace
-	states map[string]mcp.ClientInfo
-}
-
-func (w *stubChannelsWorkspace) MCPGetStates() map[string]mcp.ClientInfo {
-	return w.states
-}
 
 func newTestChannels(t *testing.T, states map[string]mcp.ClientInfo) *Channels {
 	t.Helper()
 	s := styles.CharmtonePantera()
 	com := &common.Common{Styles: &s}
-	ws := &stubChannelsWorkspace{states: states}
-	return NewChannels(com, ws)
+	return NewChannels(com, states)
 }
 
 func TestChannels_EscClosesDialog(t *testing.T) {

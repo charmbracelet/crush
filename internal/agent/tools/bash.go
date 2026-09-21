@@ -71,6 +71,7 @@ type bashDescriptionData struct {
 	ModelID         string
 	RgAvailable     bool
 	GhAvailable     bool
+	Yolo            bool
 }
 
 var bannedCommands = []string{
@@ -146,7 +147,7 @@ var bannedCommands = []string{
 	"ufw",
 }
 
-func bashDescription(attribution *config.Attribution, modelID string) string {
+func bashDescription(attribution *config.Attribution, modelID string, yolo bool) string {
 	bannedCommandsStr := strings.Join(bannedCommands, ", ")
 	var out bytes.Buffer
 	if err := bashDescriptionTpl.Execute(&out, bashDescriptionData{
@@ -156,6 +157,7 @@ func bashDescription(attribution *config.Attribution, modelID string) string {
 		ModelID:         modelID,
 		RgAvailable:     getRg() != "",
 		GhAvailable:     ghAvailable,
+		Yolo:            yolo,
 	}); err != nil {
 		// this should never happen.
 		panic("failed to execute bash description template: " + err.Error())
@@ -203,7 +205,7 @@ func blockFuncs(permissions permission.Service) []shell.BlockFunc {
 func NewBashTool(permissions permission.Service, workingDir, spillDir string, attribution *config.Attribution, modelID string) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		BashToolName,
-		string(bashDescription(attribution, modelID)),
+		string(bashDescription(attribution, modelID, permissions.SkipRequests())),
 		func(ctx context.Context, params BashParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Command == "" {
 				return fantasy.NewTextErrorResponse("missing command"), nil

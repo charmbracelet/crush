@@ -17,6 +17,7 @@ import (
 
 type mockBashPermissionService struct {
 	*pubsub.Broker[permission.PermissionRequest]
+	skip bool
 }
 
 func (m *mockBashPermissionService) Request(ctx context.Context, req permission.CreatePermissionRequest) (bool, error) {
@@ -36,7 +37,7 @@ func (m *mockBashPermissionService) AutoApproveSession(sessionID string) {}
 func (m *mockBashPermissionService) SetSkipRequests(skip bool) {}
 
 func (m *mockBashPermissionService) SkipRequests() bool {
-	return false
+	return m.skip
 }
 
 func (m *mockBashPermissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[permission.PermissionNotification] {
@@ -127,6 +128,50 @@ func newBashToolWithRecordingPerms(workingDir string, allow bool) (fantasy.Agent
 	}
 	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
 	return NewBashTool(perms, workingDir, workingDir, attribution, "test-model"), perms
+}
+
+func TestBashTool_YoloModeSkipsBlockFuncs(t *testing.T) {
+	perms := &mockBashPermissionService{
+		Broker: pubsub.NewBroker[permission.PermissionRequest](),
+		skip:   true,
+	}
+	require.Empty(t, blockFuncs(perms), "YOLO mode should not install any command blockers")
+
+	perms.skip = false
+	require.NotEmpty(t, blockFuncs(perms), "non-YOLO mode should install command blockers")
+}
+
+func TestBashTool_YoloModeDescriptionOmitsBlocklist(t *testing.T) {
+	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
+
+	yolo := bashDescription(attribution, "test-model", true)
+	require.Contains(t, yolo, "YOLO mode active")
+	require.NotContains(t, yolo, "Banned commands", "YOLO description should not claim commands are banned")
+	require.NotContains(t, yolo, "curl", "YOLO description should not list blocklisted commands")
+
+	normal := bashDescription(attribution, "test-model", false)
+	require.Contains(t, normal, "Banned commands")
+	require.Contains(t, normal, "curl")
+	require.NotContains(t, normal, "YOLO mode active")
+}
+
+func TestBashTool_YoloModeAllowsBannedCommand(t *testing.T) {
+	workingDir := t.TempDir()
+	perms := &mockBashPermissionService{
+		Broker: pubsub.NewBroker[permission.PermissionRequest](),
+		skip:   true,
+	}
+	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
+	tool := NewBashTool(perms, workingDir, workingDir, attribution, "test-model")
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+	resp := runBashTool(t, tool, ctx, BashParams{
+		Description: "yolo banned command",
+		Command:     "netstat -an | head -1",
+	})
+
+	require.False(t, resp.IsError)
+	require.NotContains(t, resp.Content, "not allowed")
 }
 
 func TestBashTool_ChainedCommandsRequirePermission(t *testing.T) {

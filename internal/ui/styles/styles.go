@@ -74,7 +74,7 @@ const (
 	ScrollbarThumb string = "┃"
 	ScrollbarTrack string = "│"
 
-	ChannelIcon string = "󰍩"
+	ChannelIcon string = "↳"
 
 	LSPErrorIcon   string = "E"
 	LSPWarningIcon string = "W"

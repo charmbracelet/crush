@@ -30,7 +30,7 @@ func handlePermissions(ctx context.Context, args []string, stdin io.Reader, stdo
 		return nil
 	}
 	if len(args) < 2 {
-		return usage(stderr, "usage: permissions allow|deny <tool> [<tool> ...]")
+		return usage(stderr, "usage: permissions allow|deny <tool> [<tool> ...] | permissions yolo [true|false]")
 	}
 
 	switch args[1] {
@@ -46,6 +46,9 @@ func handlePermissions(ctx context.Context, args []string, stdin io.Reader, stdo
 }
 
 func permissionsYolo(b *ConfigBuilder, args []string, stderr io.Writer) error {
+	if len(args) > 3 {
+		return usage(stderr, "usage: permissions yolo [true|false]")
+	}
 	value := true
 	if len(args) > 2 {
 		parsed, err := strconv.ParseBool(args[2])

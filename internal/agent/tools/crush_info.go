@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/lsp"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/skills"
 )
 
@@ -24,6 +25,7 @@ type CrushInfoParams struct{}
 
 func NewCrushInfoTool(
 	cfg *config.ConfigStore,
+	permissions permission.Service,
 	lspManager *lsp.Manager,
 	allSkills []*skills.Skill,
 	activeSkills []*skills.Skill,
@@ -33,12 +35,12 @@ func NewCrushInfoTool(
 		CrushInfoToolName,
 		crushInfoDescription,
 		func(ctx context.Context, _ CrushInfoParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			return fantasy.NewTextResponse(buildCrushInfo(cfg, lspManager, allSkills, activeSkills, skillTracker)), nil
+			return fantasy.NewTextResponse(buildCrushInfo(cfg, permissions, lspManager, allSkills, activeSkills, skillTracker)), nil
 		},
 	)
 }
 
-func buildCrushInfo(cfg *config.ConfigStore, lspManager *lsp.Manager, allSkills []*skills.Skill, activeSkills []*skills.Skill, skillTracker *skills.Tracker) string {
+func buildCrushInfo(cfg *config.ConfigStore, permissions permission.Service, lspManager *lsp.Manager, allSkills []*skills.Skill, activeSkills []*skills.Skill, skillTracker *skills.Tracker) string {
 	var b strings.Builder
 
 	writeConfigFiles(&b, cfg)
@@ -49,7 +51,7 @@ func buildCrushInfo(cfg *config.ConfigStore, lspManager *lsp.Manager, allSkills 
 	writeMCP(&b, mcp.GetStates(), cfg)
 	writeSkills(&b, allSkills, activeSkills, skillTracker, cfg)
 	writeHooks(&b, cfg)
-	writePermissions(&b, cfg)
+	writePermissions(&b, cfg, permissions)
 	writeDisabledTools(&b, cfg)
 	writeOptions(&b, cfg)
 	writeAttribution(&b, cfg)
@@ -347,10 +349,16 @@ func writeSkills(b *strings.Builder, allSkills []*skills.Skill, activeSkills []*
 	b.WriteString("\n")
 }
 
-func writePermissions(b *strings.Builder, cfg *config.ConfigStore) {
+// writePermissions reports the effective permission state. The live
+// permission service, when available, is authoritative: it starts from the
+// --yolo flag and config skip_requests, and reflects runtime toggles.
+func writePermissions(b *strings.Builder, cfg *config.ConfigStore, permissions permission.Service) {
 	c := cfg.Config()
 	overrides := cfg.Overrides()
 	yolo := overrides.SkipPermissionRequests || (c.Permissions != nil && c.Permissions.SkipRequests)
+	if permissions != nil {
+		yolo = permissions.SkipRequests()
+	}
 	hasAllowedTools := c.Permissions != nil && len(c.Permissions.AllowedTools) > 0
 
 	if !yolo && !hasAllowedTools {

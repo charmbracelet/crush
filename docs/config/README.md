@@ -453,7 +453,9 @@ Usage:
 #### `permissions yolo`
 
 Start in YOLO mode: every permission prompt is skipped, including previously
-blocked commands. Optional boolean value, default `true`.
+blocked commands. Optional boolean value, default `true`. Note that
+`permissions deny` still hides tools from the agent entirely in YOLO mode;
+denying is not a permission prompt.
 
 ```text
 Usage:

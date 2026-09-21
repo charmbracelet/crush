@@ -112,3 +112,15 @@ func TestShellConfigPermissionsYoloInvalid(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "invalid value")
 }
+
+func TestShellConfigPermissionsYoloTooManyArgs(t *testing.T) {
+	_, err := loadCrushShErr(t, `permissions yolo true extra`)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "permissions yolo")
+}
+
+func TestShellConfigPermissionsUsageMentionsYolo(t *testing.T) {
+	_, err := loadCrushShErr(t, `permissions`)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "yolo")
+}

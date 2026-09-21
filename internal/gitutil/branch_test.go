@@ -162,3 +162,41 @@ func TestCurrentBranch(t *testing.T) {
 		require.Equal(t, "worktree-branch", branch)
 	})
 }
+
+func TestRepoRootRejectsTraversal(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(repo, ".git"), 0o755))
+	sub := filepath.Join(repo, "pkg", "a")
+	dotted := filepath.Join(repo, "a..b")
+	require.NoError(t, os.MkdirAll(sub, 0o755))
+	require.NoError(t, os.MkdirAll(dotted, 0o755))
+	repo, err := filepath.EvalSymlinks(repo)
+	require.NoError(t, err)
+	sub = filepath.Join(repo, "pkg", "a")
+	dotted = filepath.Join(repo, "a..b")
+
+	cases := []struct {
+		name string
+		dir  string
+		want string
+	}{
+		{name: "repository root", dir: repo, want: repo},
+		{name: "nested directory", dir: sub, want: repo},
+		{name: "name containing two dots", dir: dotted, want: repo},
+		{name: "empty", dir: "", want: ""},
+		{name: "climbs back into the repo", dir: sub + "/../..", want: ""},
+		{name: "climbs out of the repo", dir: sub + "/../../..", want: ""},
+		{name: "relative parent", dir: "..", want: ""},
+		{name: "relative climb", dir: "../../etc", want: ""},
+		{name: "backslash climb", dir: `pkg\..\..\etc`, want: ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tc.want, RepoRoot(tc.dir))
+		})
+	}
+}

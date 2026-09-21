@@ -398,6 +398,8 @@ type Options struct {
 	Notifications             string       `json:"notifications,omitempty" jsonschema:"description=Notification style to use. Options: auto (default)\\, native\\, osc\\, bell\\, disabled. Auto selects based on environment: native for local sessions\\, osc for SSH (with automatic OSC 99/777 detection).,enum=auto,enum=native,enum=osc,enum=bell,enum=disabled,default=auto"`
 	DisabledSkills            []string     `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=crush-config"`
 	RequestTimeout            *int         `json:"request_timeout,omitempty" jsonschema:"description=Timeout in seconds for each LLM API request. Streaming responses are aborted only after this much inactivity\\, so slow but active streams are never killed. 0 disables it\\, negative values are invalid.,default=60,example=120,example=300,example=0"`
+	TrustProjectConfigs       *bool        `json:"trust_project_configs,omitempty" jsonschema:"description=When false\\, project-level config files (crush.json\\, crushrc) are ignored entirely. When unset (default)\\, Crush prompts the user to trust each new or changed project config."`
+	AutoTrustAll              bool         `json:"auto_trust_all,omitempty" jsonschema:"description=DANGEROUS: Automatically trust all project configs without prompting. This bypasses the trust verification system entirely. Only use in fully controlled environments where you trust every repository you open.,default=false"`
 }
 
 // DefaultRequestTimeout bounds each LLM API request when the user has not

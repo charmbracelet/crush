@@ -1395,6 +1395,67 @@ func (c *coordinator) UpdateModels(ctx context.Context) error {
 	return c.updateAgentModels(ctx, agent, name)
 }
 
+// RefreshSkills re-discovers skills from the current config and rebuilds
+// both agents' system prompts and tool lists in place. It exists so
+// skills that only become visible after a runtime config change (most
+// importantly, skills_paths contributed by a project config the user
+// just trusted) are applied without restarting the session. It never
+// touches readyWg, so it is safe to call after initial setup has
+// completed.
+func (c *coordinator) RefreshSkills(ctx context.Context) error {
+	allSkills, activeSkills := discoverSkills(c.cfg)
+	c.allSkills = allSkills
+	c.activeSkills = activeSkills
+	c.skillTracker = skills.NewTracker(activeSkills)
+
+	c.agentMu.RLock()
+	coder, hasCoder := c.agents[config.AgentCoder]
+	plan, hasPlan := c.agents[config.AgentPlan]
+	c.agentMu.RUnlock()
+
+	agentPrompts := make(map[string]*prompt.Prompt)
+	if hasCoder {
+		coderPrompt, err := coderPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
+		if err != nil {
+			return err
+		}
+		agentPrompts[config.AgentCoder] = coderPrompt
+	}
+	if hasPlan {
+		planPrompt, err := planPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
+		if err != nil {
+			return err
+		}
+		agentPrompts[config.AgentPlan] = planPrompt
+	}
+
+	for name, agent := range map[string]SessionAgent{
+		config.AgentCoder: coder,
+		config.AgentPlan:  plan,
+	} {
+		if agentPrompts[name] == nil {
+			continue
+		}
+		model := agent.Model()
+		systemPrompt, err := agentPrompts[name].Build(ctx, model.Model.Provider(), model.Model.Model(), c.cfg)
+		if err != nil {
+			return err
+		}
+		agent.SetSystemPrompt(systemPrompt)
+
+		agentCfg, ok := c.cfg.Config().Agents[name]
+		if !ok {
+			return fmt.Errorf("%w: %s", errMainAgentNotFound, name)
+		}
+		tools, err := c.buildTools(ctx, agentCfg, false)
+		if err != nil {
+			return err
+		}
+		agent.SetTools(tools)
+	}
+	return nil
+}
+
 // updateAgentModels rebuilds the model and tool configuration for the
 // given agent from the current config.
 func (c *coordinator) updateAgentModels(ctx context.Context, agent SessionAgent, name string) error {

@@ -42,14 +42,26 @@ func (m *UI) landingView() string {
 		layout.Fill(1),
 	).Split(m.layout.main).Assign(new(image.Rectangle), &remainingHeightArea)
 
-	mcpLspSectionWidth := min(30, (width-3)/4)
+	// Channels are experimental and opt-in, so their column only appears
+	// once a server is opted in; otherwise the other columns keep their
+	// full width.
+	channels := m.channelStatusItems()
+	columns := 3
+	if len(channels) > 0 {
+		columns = 4
+	}
+	mcpLspSectionWidth := min(30, (width-(columns-1))/columns)
+	sectionHeight := max(1, remainingHeightArea.Dy())
 
-	lspSection := m.lspInfo(mcpLspSectionWidth, max(1, remainingHeightArea.Dy()), false)
-	mcpSection := m.mcpInfo(mcpLspSectionWidth, max(1, remainingHeightArea.Dy()), false)
-	skillsSection := m.skillsInfo(mcpLspSectionWidth, max(1, remainingHeightArea.Dy()), false)
-	channelsSection := m.channelsInfo(mcpLspSectionWidth, max(1, remainingHeightArea.Dy()), false)
+	lspSection := m.lspInfo(mcpLspSectionWidth, sectionHeight, false)
+	mcpSection := m.mcpInfo(mcpLspSectionWidth, sectionHeight, false)
+	skillsSection := m.skillsInfo(mcpLspSectionWidth, sectionHeight, false)
+	sections := []string{lspSection, " ", mcpSection, " ", skillsSection}
+	if len(channels) > 0 {
+		sections = append(sections, " ", m.channelsInfo(channels, mcpLspSectionWidth, sectionHeight, false))
+	}
 
-	content := lipgloss.JoinHorizontal(lipgloss.Left, lspSection, " ", mcpSection, " ", skillsSection, " ", channelsSection)
+	content := lipgloss.JoinHorizontal(lipgloss.Left, sections...)
 
 	return lipgloss.NewStyle().
 		Width(width).

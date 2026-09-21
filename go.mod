@@ -5,9 +5,9 @@ go 1.27.0
 require (
 	charm.land/bubbles/v2 v2.2.1
 	charm.land/bubbletea/v2 v2.0.9
-	charm.land/catwalk v0.52.28
+	charm.land/catwalk v0.52.49
 	charm.land/fang/v2 v2.0.1
-	charm.land/fantasy v0.43.1
+	charm.land/fantasy v0.45.0
 	charm.land/glamour/v2 v2.0.1
 	charm.land/lipgloss/v2 v2.0.6
 	charm.land/log/v2 v2.0.1
@@ -21,6 +21,7 @@ require (
 	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/charlievieth/fastwalk v1.0.14
 	github.com/charmbracelet/colorprofile v0.4.3
+	github.com/charmbracelet/openai-go v0.0.0-20260921175203-216db9e71b83
 	github.com/charmbracelet/ultraviolet v0.0.0-20260811164956-006e29f97886
 	github.com/charmbracelet/x/ansi v0.11.8
 	github.com/charmbracelet/x/editor v0.2.0
@@ -49,7 +50,6 @@ require (
 	github.com/modelcontextprotocol/go-sdk v1.7.1-0.20260825092617-32404652e60b
 	github.com/ncruces/go-sqlite3 v0.35.4
 	github.com/nxadm/tail v1.4.11
-	github.com/openai/openai-go/v3 v3.56.0
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
 	github.com/posthog/posthog-go v1.25.1
 	github.com/pressly/goose/v3 v3.28.0
@@ -107,6 +107,7 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
+	github.com/coder/websocket v1.8.15 // indirect
 	github.com/cyphar/filepath-securejoin v0.6.1 // indirect
 	github.com/dlclark/regexp2/v2 v2.2.1 // indirect
 	github.com/ebitengine/purego v0.11.0-alpha.9 // indirect

@@ -72,12 +72,12 @@ func PaletteFields() []PaletteField {
 		{"success", func(p Palette) string { return p.Success }, func(p *Palette, v string) { p.Success = v }},
 		{"success_more_subtle", func(p Palette) string { return p.SuccessMoreSubtle }, func(p *Palette, v string) { p.SuccessMoreSubtle = v }},
 		{"success_most_subtle", func(p Palette) string { return p.SuccessMostSubtle }, func(p *Palette, v string) { p.SuccessMostSubtle = v }},
-		{"insert_fg", func(p Palette) string { return p.InsertFg }, func(p *Palette, v string) { p.InsertFg = v }},
-		{"insert_code_bg", func(p Palette) string { return p.InsertCodeBg }, func(p *Palette, v string) { p.InsertCodeBg = v }},
-		{"insert_gutter_bg", func(p Palette) string { return p.InsertGutterBg }, func(p *Palette, v string) { p.InsertGutterBg = v }},
-		{"delete_fg", func(p Palette) string { return p.DeleteFg }, func(p *Palette, v string) { p.DeleteFg = v }},
-		{"delete_code_bg", func(p Palette) string { return p.DeleteCodeBg }, func(p *Palette, v string) { p.DeleteCodeBg = v }},
-		{"delete_gutter_bg", func(p Palette) string { return p.DeleteGutterBg }, func(p *Palette, v string) { p.DeleteGutterBg = v }},
+		{"diff_insert_fg", func(p Palette) string { return p.DiffInsertFg }, func(p *Palette, v string) { p.DiffInsertFg = v }},
+		{"diff_insert_code_bg", func(p Palette) string { return p.DiffInsertCodeBg }, func(p *Palette, v string) { p.DiffInsertCodeBg = v }},
+		{"diff_insert_gutter_bg", func(p Palette) string { return p.DiffInsertGutterBg }, func(p *Palette, v string) { p.DiffInsertGutterBg = v }},
+		{"diff_delete_fg", func(p Palette) string { return p.DiffDeleteFg }, func(p *Palette, v string) { p.DiffDeleteFg = v }},
+		{"diff_delete_code_bg", func(p Palette) string { return p.DiffDeleteCodeBg }, func(p *Palette, v string) { p.DiffDeleteCodeBg = v }},
+		{"diff_delete_gutter_bg", func(p Palette) string { return p.DiffDeleteGutterBg }, func(p *Palette, v string) { p.DiffDeleteGutterBg = v }},
 		{"yolo", func(p Palette) string { return p.Yolo }, func(p *Palette, v string) { p.Yolo = v }},
 		{"plan", func(p Palette) string { return p.Plan }, func(p *Palette, v string) { p.Plan = v }},
 		{"plan_more_subtle", func(p Palette) string { return p.PlanMoreSubtle }, func(p *Palette, v string) { p.PlanMoreSubtle = v }},
@@ -139,12 +139,12 @@ type Palette struct {
 	SuccessMoreSubtle string `json:"success_more_subtle,omitempty"`
 	SuccessMostSubtle string `json:"success_most_subtle,omitempty"`
 
-	InsertFg       string `json:"insert_fg,omitempty"`
-	InsertCodeBg   string `json:"insert_code_bg,omitempty"`
-	InsertGutterBg string `json:"insert_gutter_bg,omitempty"`
-	DeleteFg       string `json:"delete_fg,omitempty"`
-	DeleteCodeBg   string `json:"delete_code_bg,omitempty"`
-	DeleteGutterBg string `json:"delete_gutter_bg,omitempty"`
+	DiffInsertFg       string `json:"diff_insert_fg,omitempty"`
+	DiffInsertCodeBg   string `json:"diff_insert_code_bg,omitempty"`
+	DiffInsertGutterBg string `json:"diff_insert_gutter_bg,omitempty"`
+	DiffDeleteFg       string `json:"diff_delete_fg,omitempty"`
+	DiffDeleteCodeBg   string `json:"diff_delete_code_bg,omitempty"`
+	DiffDeleteGutterBg string `json:"diff_delete_gutter_bg,omitempty"`
 
 	Yolo           string `json:"yolo,omitempty"`
 	Plan           string `json:"plan,omitempty"`
@@ -211,12 +211,12 @@ func PaletteFromOpts(o quickStyleOpts) Palette {
 		SuccessMoreSubtle: colorToHex(o.successMoreSubtle),
 		SuccessMostSubtle: colorToHex(o.successMostSubtle),
 
-		InsertFg:       colorToHex(o.insertFg),
-		InsertCodeBg:   colorToHex(o.insertCodeBg),
-		InsertGutterBg: colorToHex(o.insertGutterBg),
-		DeleteFg:       colorToHex(o.deleteFg),
-		DeleteCodeBg:   colorToHex(o.deleteCodeBg),
-		DeleteGutterBg: colorToHex(o.deleteGutterBg),
+		DiffInsertFg:       colorToHex(o.diffInsertFg),
+		DiffInsertCodeBg:   colorToHex(o.diffInsertCodeBg),
+		DiffInsertGutterBg: colorToHex(o.diffInsertGutterBg),
+		DiffDeleteFg:       colorToHex(o.diffDeleteFg),
+		DiffDeleteCodeBg:   colorToHex(o.diffDeleteCodeBg),
+		DiffDeleteGutterBg: colorToHex(o.diffDeleteGutterBg),
 
 		Yolo:           colorToHex(o.yolo),
 		Plan:           colorToHex(o.plan),
@@ -282,12 +282,12 @@ func (p Palette) ToQuickStyleOpts(base quickStyleOpts) quickStyleOpts {
 		successMoreSubtle: resolveColor(p.SuccessMoreSubtle, base.successMoreSubtle),
 		successMostSubtle: resolveColor(p.SuccessMostSubtle, base.successMostSubtle),
 
-		insertFg:       resolveColor(p.InsertFg, base.insertFg),
-		insertCodeBg:   resolveColor(p.InsertCodeBg, base.insertCodeBg),
-		insertGutterBg: resolveColor(p.InsertGutterBg, base.insertGutterBg),
-		deleteFg:       resolveColor(p.DeleteFg, base.deleteFg),
-		deleteCodeBg:   resolveColor(p.DeleteCodeBg, base.deleteCodeBg),
-		deleteGutterBg: resolveColor(p.DeleteGutterBg, base.deleteGutterBg),
+		diffInsertFg:       resolveColor(p.DiffInsertFg, base.diffInsertFg),
+		diffInsertCodeBg:   resolveColor(p.DiffInsertCodeBg, base.diffInsertCodeBg),
+		diffInsertGutterBg: resolveColor(p.DiffInsertGutterBg, base.diffInsertGutterBg),
+		diffDeleteFg:       resolveColor(p.DiffDeleteFg, base.diffDeleteFg),
+		diffDeleteCodeBg:   resolveColor(p.DiffDeleteCodeBg, base.diffDeleteCodeBg),
+		diffDeleteGutterBg: resolveColor(p.DiffDeleteGutterBg, base.diffDeleteGutterBg),
 
 		yolo:           resolveColor(p.Yolo, base.yolo),
 		plan:           resolveColor(p.Plan, base.plan),

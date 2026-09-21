@@ -16,7 +16,7 @@ import (
 
 const (
 	ThemeEditorID              = "theme_editor"
-	themeEditorDialogMaxWidth  = 72
+	themeEditorDialogMaxWidth  = 74
 	themeEditorDialogMaxHeight = 24
 )
 
@@ -133,8 +133,8 @@ func (ed *ThemeEditor) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	ed.keepSelectedVisible(listHeight)
 
 	listWidth := max(0, innerWidth-3) // Reserve space for scrollbar.
-	// Compute label prefix width: 20-char name + space + swatch + space
-	labelPrefix := fmt.Sprintf("%-20s %s ", "", styles.ColorSwatchIcon)
+	// Compute label prefix width: 22-char name + space + swatch + space
+	labelPrefix := fmt.Sprintf("%-22s %s ", "", styles.ColorSwatchIcon)
 	inputPrefixWidth := lipgloss.Width(labelPrefix)
 	inputWidth := listWidth - t.Dialog.NormalItem.GetPaddingLeft() - t.Dialog.NormalItem.GetPaddingRight() - inputPrefixWidth
 	ed.input.SetWidth(max(0, inputWidth))
@@ -301,11 +301,11 @@ func (ed *ThemeEditor) renderSlots(width, height int) string {
 		var line string
 		if selected {
 			// Render input inline at the value position.
-			label := fmt.Sprintf("%-20s %s ", slot.name, swatch)
+			label := fmt.Sprintf("%-22s %s ", slot.name, swatch)
 			line = ed.com.Styles.Dialog.NormalItem.Width(width).Render(label + ed.input.View())
 		} else {
 			value := slot.get(ed.palette)
-			label := fmt.Sprintf("%-20s %s %s", slot.name, swatch, value)
+			label := fmt.Sprintf("%-22s %s %s", slot.name, swatch, value)
 			line = ed.com.Styles.Dialog.NormalItem.Width(width).Render(label)
 		}
 		lines = append(lines, line)

@@ -112,6 +112,39 @@ func TestPalette_JSON_Serialization(t *testing.T) {
 	require.Empty(t, decoded.Accent)
 }
 
+func TestPalette_JSON_DiffFields(t *testing.T) {
+	t.Parallel()
+	input := `{
+		"diff_insert_fg": "#112233",
+		"diff_insert_code_bg": "#223344",
+		"diff_insert_gutter_bg": "#334455",
+		"diff_delete_fg": "#445566",
+		"diff_delete_code_bg": "#556677",
+		"diff_delete_gutter_bg": "#667788"
+	}`
+	var palette Palette
+	require.NoError(t, json.Unmarshal([]byte(input), &palette))
+	require.NoError(t, palette.Validate())
+
+	recovered := PaletteFromOpts(palette.ToQuickStyleOpts(quickStyleOpts{}))
+	data, err := json.Marshal(recovered)
+	require.NoError(t, err)
+	require.JSONEq(t, input, string(data))
+
+	styles, err := LoadPaletteTheme("gruvbox-dark", palette)
+	require.NoError(t, err)
+	require.Equal(t, "#112233", colorToHex(styles.Diff.InsertLine.Symbol.GetForeground()))
+	require.Equal(t, "#112233", colorToHex(styles.Diff.InsertLine.LineNumber.GetForeground()))
+	require.Equal(t, "#223344", colorToHex(styles.Diff.InsertLine.Code.GetBackground()))
+	require.Equal(t, "#223344", colorToHex(styles.Diff.InsertLine.Symbol.GetBackground()))
+	require.Equal(t, "#334455", colorToHex(styles.Diff.InsertLine.LineNumber.GetBackground()))
+	require.Equal(t, "#445566", colorToHex(styles.Diff.DeleteLine.Symbol.GetForeground()))
+	require.Equal(t, "#445566", colorToHex(styles.Diff.DeleteLine.LineNumber.GetForeground()))
+	require.Equal(t, "#556677", colorToHex(styles.Diff.DeleteLine.Code.GetBackground()))
+	require.Equal(t, "#556677", colorToHex(styles.Diff.DeleteLine.Symbol.GetBackground()))
+	require.Equal(t, "#667788", colorToHex(styles.Diff.DeleteLine.LineNumber.GetBackground()))
+}
+
 func TestPalette_JSON_OmitsEmpty(t *testing.T) {
 	t.Parallel()
 	p := Palette{Primary: "#FF0000"}
@@ -213,7 +246,7 @@ func TestLoadPaletteTheme_BgBaseOverrideDerivesDiffTints(t *testing.T) {
 	require.Greater(t, luminance(del), 180.0, "delete background on white should be light, got %s", del)
 }
 
-func TestLoadPaletteTheme_SuccessOverrideDerivesInsertFg(t *testing.T) {
+func TestLoadPaletteTheme_SuccessOverrideDerivesDiffInsertFg(t *testing.T) {
 	t.Parallel()
 
 	// Regression: derived diff foregrounds used to be baked into the
@@ -229,17 +262,17 @@ func TestMergePalette_BgBaseOverrideDerivesLightDiffTints(t *testing.T) {
 	p, err := MergePalette("charmtone-panther", Palette{BgBase: "#ffffff"})
 	require.NoError(t, err)
 	require.Equal(t, "#ffffff", p.BgBase)
-	require.Greater(t, luminance(p.InsertCodeBg), 180.0, "insert_code_bg %s should be light on white bg", p.InsertCodeBg)
-	require.Greater(t, luminance(p.InsertGutterBg), 180.0, "insert_gutter_bg %s should be light on white bg", p.InsertGutterBg)
-	require.Greater(t, luminance(p.DeleteCodeBg), 180.0, "delete_code_bg %s should be light on white bg", p.DeleteCodeBg)
-	require.Greater(t, luminance(p.DeleteGutterBg), 180.0, "delete_gutter_bg %s should be light on white bg", p.DeleteGutterBg)
+	require.Greater(t, luminance(p.DiffInsertCodeBg), 180.0, "diff_insert_code_bg %s should be light on white bg", p.DiffInsertCodeBg)
+	require.Greater(t, luminance(p.DiffInsertGutterBg), 180.0, "diff_insert_gutter_bg %s should be light on white bg", p.DiffInsertGutterBg)
+	require.Greater(t, luminance(p.DiffDeleteCodeBg), 180.0, "diff_delete_code_bg %s should be light on white bg", p.DiffDeleteCodeBg)
+	require.Greater(t, luminance(p.DiffDeleteGutterBg), 180.0, "diff_delete_gutter_bg %s should be light on white bg", p.DiffDeleteGutterBg)
 }
 
-func TestMergePalette_SuccessOverrideDerivesInsertFg(t *testing.T) {
+func TestMergePalette_SuccessOverrideDerivesDiffInsertFg(t *testing.T) {
 	t.Parallel()
 	p, err := MergePalette("gruvbox-dark", Palette{Success: "#ff0000"})
 	require.NoError(t, err)
-	require.Equal(t, "#ff0000", p.InsertFg)
+	require.Equal(t, "#ff0000", p.DiffInsertFg)
 }
 
 func TestMergePalette_CompletesDiffTokens(t *testing.T) {
@@ -250,12 +283,12 @@ func TestMergePalette_CompletesDiffTokens(t *testing.T) {
 		name string
 		got  string
 	}{
-		{"insert_fg", p.InsertFg},
-		{"insert_code_bg", p.InsertCodeBg},
-		{"insert_gutter_bg", p.InsertGutterBg},
-		{"delete_fg", p.DeleteFg},
-		{"delete_code_bg", p.DeleteCodeBg},
-		{"delete_gutter_bg", p.DeleteGutterBg},
+		{"diff_insert_fg", p.DiffInsertFg},
+		{"diff_insert_code_bg", p.DiffInsertCodeBg},
+		{"diff_insert_gutter_bg", p.DiffInsertGutterBg},
+		{"diff_delete_fg", p.DiffDeleteFg},
+		{"diff_delete_code_bg", p.DiffDeleteCodeBg},
+		{"diff_delete_gutter_bg", p.DiffDeleteGutterBg},
 	} {
 		require.NotEmpty(t, f.got, "%s should be derived in a fully resolved palette", f.name)
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -258,6 +259,49 @@ func TestRenderChannelDeterministicMetaOrder(t *testing.T) {
 	ci := strings.Index(out, `c="3"`)
 	if ai >= bi || bi >= ci {
 		t.Errorf("meta not sorted: %q", out)
+	}
+}
+
+func TestUpdateStateTracksChannelOptInAndCapability(t *testing.T) {
+	const name = "test-channel-optin"
+	t.Cleanup(func() { states.Del(name) })
+
+	cfg := config.NewTestStore(&config.Config{})
+	cfg.Overrides().EnabledChannels = []string{name}
+	m := config.MCPConfig{Type: config.MCPStdio}
+
+	// Opt-in is recorded on the connect attempt and survives the attempt
+	// failing, so a crashed channel is still listed as one.
+	updateState(name, StateStarting, nil, nil, Counts{}, withChannelOptIn(cfg, name, m))
+	updateState(name, StateError, errors.New("boom"), nil, Counts{})
+	if info, _ := GetState(name); !info.ChannelOptIn || info.Channel {
+		t.Fatalf("after failed attempt: ChannelOptIn=%v Channel=%v, want true/false", info.ChannelOptIn, info.Channel)
+	}
+
+	// Capability comes from the connected session and is remembered after
+	// the session dies.
+	updateState(name, StateConnected, nil, &ClientSession{channelCapable: true}, Counts{})
+	updateState(name, StateError, errors.New("gone"), nil, Counts{})
+	if info, _ := GetState(name); !info.ChannelCapable {
+		t.Fatal("ChannelCapable should persist after the session errors")
+	}
+
+	// channel_enabled alone opts in; neither source means not opted in.
+	cfg.Overrides().EnabledChannels = nil
+	updateState(name, StateStarting, nil, nil, Counts{}, withChannelOptIn(cfg, name, config.MCPConfig{ChannelEnabled: true}))
+	if info, _ := GetState(name); !info.ChannelOptIn {
+		t.Fatal("channel_enabled should opt the server in")
+	}
+	updateState(name, StateStarting, nil, nil, Counts{}, withChannelOptIn(cfg, name, m))
+	if info, _ := GetState(name); info.ChannelOptIn {
+		t.Fatal("a later attempt without any opt-in must clear ChannelOptIn")
+	}
+
+	// Disabling clears both: a disabled server is not a channel.
+	updateState(name, StateStarting, nil, nil, Counts{}, withChannelOptIn(cfg, name, config.MCPConfig{ChannelEnabled: true}))
+	updateState(name, StateDisabled, nil, nil, Counts{})
+	if info, _ := GetState(name); info.ChannelOptIn || info.ChannelCapable {
+		t.Fatalf("after disable: ChannelOptIn=%v ChannelCapable=%v, want false/false", info.ChannelOptIn, info.ChannelCapable)
 	}
 }
 

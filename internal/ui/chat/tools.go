@@ -615,11 +615,37 @@ func toolParamList(sty *styles.Styles, params []string, width int, opts *ToolRen
 	}
 
 	if width >= 0 && (opts == nil || !opts.ExpandedContent) {
-		output = ansi.Truncate(output, width, "…")
-	} else if opts != nil && opts.ExpandedContent && width > 0 && lipgloss.Width(output) > width {
-		output = ansi.Hardwrap(output, width, false)
+		return sty.Tool.ParamMain.Render(ansi.Truncate(output, width, "…"))
+	}
+	if opts != nil && opts.ExpandedContent && width > 0 && lipgloss.Width(output) > width {
+		// Let Lip Gloss do the wrapping rather than wrapping and styling in
+		// separate steps. A parameter is often syntax highlighted, and a
+		// wrap falls wherever the width runs out, usually part-way through a
+		// coloured token. Lip Gloss carries the colours that are open at the
+		// break and re-opens them on the next line, on top of the parameter
+		// style. Hard-wrapping first and styling after would emit only the
+		// parameter colour there and drop the highlight; styling first and
+		// hard-wrapping after would emit nothing there and drop both.
+		return capLineWidths(sty.Tool.ParamMain.Width(width).Render(output), width)
 	}
 	return sty.Tool.ParamMain.Render(output)
+}
+
+// capLineWidths holds every line of s to width.
+//
+// Word wrapping keeps the space it broke on, so a word that ends exactly at
+// the edge leaves its line a column wider than the space it was given, and
+// the header spills past the pane. The space is invisible and sits before
+// the closing reset, out of reach of a plain trim, so the line is cut with
+// the escape sequences accounted for.
+func capLineWidths(s string, width int) string {
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		if lipgloss.Width(line) > width {
+			lines[i] = ansi.Truncate(line, width, "")
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // toolHeader builds the tool header line: "● ToolName params..."

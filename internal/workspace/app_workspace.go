@@ -115,7 +115,7 @@ func (w *AppWorkspace) AgentRunShellCommand(ctx context.Context, sessionID, comm
 	var persist shell.PersistFunc
 	if sessionID != "" {
 		persist = func(cmd, output string, exitCode int) error {
-			return shell.PersistOutput(ctx, w.app.Messages, sessionID, cmd, output, exitCode)
+			return shell.PersistOutput(ctx, w.app.Messages, sessionID, cmd, output, exitCode, w.store.Config().Options.DataDirectory)
 		}
 	}
 
@@ -368,6 +368,10 @@ func (w *AppWorkspace) SetProviderAPIKey(scope config.Scope, providerID string, 
 
 func (w *AppWorkspace) SetConfigField(scope config.Scope, key string, value any) error {
 	return w.store.SetConfigField(scope, key, value)
+}
+
+func (w *AppWorkspace) SetConfigFields(scope config.Scope, fields map[string]any) error {
+	return w.store.SetConfigFields(scope, fields)
 }
 
 func (w *AppWorkspace) RemoveConfigField(scope config.Scope, key string) error {

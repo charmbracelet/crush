@@ -107,35 +107,45 @@ func copyHeaderField(header http.Header, metadata *openai.ProviderMetadata, head
 	metadata.ExtraFields[fieldName] = json.RawMessage(strconv.Quote(value))
 }
 
-// lastKnownBalance stores the most recently extracted hypercredit balance
-// from API response metadata. FetchCredits checks this before making a
-// separate HTTP call.
-var lastKnownBalance atomic.Int64
+// balanceValue stores the hypercredit balance most recently fetched from
+// the /v1/credits endpoint; balanceKnown tracks whether any fetch has
+// reported one.
+var (
+	balanceValue atomic.Int64
+	balanceKnown atomic.Bool
+)
 
-// hasBalance tracks whether lastKnownBalance has been set.
-var hasBalance atomic.Bool
-
-// SetBalance stores a credit balance extracted from API response metadata.
-func SetBalance(balance int) {
-	lastKnownBalance.Store(int64(balance))
-	hasBalance.Store(true)
+// setBalance stores the hypercredit balance reported by the /v1/credits
+// endpoint.
+func setBalance(balance int) {
+	balanceValue.Store(int64(balance))
+	balanceKnown.Store(true)
 }
 
-// FetchCredits returns the remaining hypercredit balance. It first checks
-// for a balance extracted from the most recent API response's usage
-// metadata. If none is available, it falls back to calling the /v1/credits
-// endpoint directly.
-//
-// It returns nil when the team has hypercredit display disabled, in which
-// case Hyper reports the balance in dollars instead and there is no
-// hypercredit figure to show.
-func FetchCredits(ctx context.Context, apiKey string) (*int, error) {
-	if hasBalance.Load() {
-		hasBalance.Store(false)
-		balance := int(lastKnownBalance.Load())
-		return &balance, nil
-	}
+// clearBalance forgets the stored balance, so a team that turns
+// hypercredit display off stops showing a stale figure.
+func clearBalance() {
+	balanceKnown.Store(false)
+}
 
+// Balance returns the hypercredit balance most recently fetched from the
+// /v1/credits endpoint, or nil when no fetch has reported one yet. That
+// includes teams with hypercredit display disabled: their balance is
+// reported in dollars instead, so there is never a hypercredit figure to
+// show.
+func Balance() *int {
+	if !balanceKnown.Load() {
+		return nil
+	}
+	balance := int(balanceValue.Load())
+	return &balance
+}
+
+// FetchCredits fetches the remaining hypercredit balance from the
+// /v1/credits endpoint and stores it for [Balance] to return. It returns
+// nil when the team has hypercredit display disabled: Hyper reports the
+// balance in dollars for them, so there is no hypercredit figure to show.
+func FetchCredits(ctx context.Context, apiKey string) (*int, error) {
 	req, err := http.NewRequestWithContext(
 		ctx,
 		http.MethodGet,
@@ -167,5 +177,10 @@ func FetchCredits(ctx context.Context, apiKey string) (*int, error) {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
+	if result.Balance == nil {
+		clearBalance()
+		return nil, nil
+	}
+	setBalance(*result.Balance)
 	return result.Balance, nil
 }

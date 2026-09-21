@@ -3,12 +3,15 @@ package chat
 import (
 	"fmt"
 	"image/color"
+	"strings"
 	"testing"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 )
 
@@ -69,6 +72,60 @@ func TestAssistantMessageItem_PlanCardKeepsIntentionalBackgrounds(t *testing.T) 
 	require.True(t, foundItalic, "italic Markdown styling must survive background composition")
 	require.True(t, foundLink, "Markdown hyperlinks must survive background composition")
 	require.True(t, foundEmoji, "Unicode grapheme clusters must survive background composition")
+}
+
+// The plan box must be sized so its content area matches the width glamour
+// wrapped at. In lipgloss v2 Width is the total box width (border and
+// padding live inside it); sizing the box to the inner width makes lipgloss
+// re-wrap every glamour line narrower, spilling a word or two per line.
+func TestAssistantMessageItem_PlanCardDoesNotReWrapContent(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	paragraph := strings.TrimSpace(strings.Repeat("lorem ipsum dolor sit amet ", 30))
+	msg := &message.Message{
+		ID:   "plan-wrap",
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.TextContent{Text: paragraph + "\n\n<!-- CRUSH_PLAN_READY -->"},
+			message.Finish{Reason: message.FinishReasonEndTurn, Time: 1},
+		},
+	}
+	item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
+
+	const width = 72
+	_, innerWidth := planBoxLayout(sty.Messages.PlanBox, cappedMessageWidth(width))
+
+	renderer := common.PlanMarkdownRenderer(&sty, innerWidth)
+	mu := common.LockMarkdownRenderer(renderer)
+	mu.Lock()
+	glamourOut, err := renderer.Render(paragraph)
+	mu.Unlock()
+	require.NoError(t, err)
+	var expected []string
+	for line := range strings.Lines(strings.TrimSpace(ansi.Strip(glamourOut))) {
+		line = strings.TrimSuffix(line, "\n")
+		expected = append(expected, strings.TrimRight(line, " "))
+	}
+
+	var actual []string
+	for line := range strings.Lines(ansi.Strip(item.RawRender(width))) {
+		line = strings.TrimSuffix(line, "\n")
+		content, ok := strings.CutPrefix(line, "│  ")
+		if !ok {
+			continue
+		}
+		content, ok = strings.CutSuffix(content, "  │")
+		if !ok {
+			continue
+		}
+		if content = strings.TrimRight(content, " "); content != "" {
+			actual = append(actual, content)
+		}
+	}
+
+	require.Equal(t, expected, actual,
+		"plan card content must match glamour's wrapping exactly; a mismatch means the box re-wrapped it")
 }
 
 func TestAssistantMessageItem_PlanCardFitsAvailableWidth(t *testing.T) {

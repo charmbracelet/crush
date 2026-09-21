@@ -412,7 +412,13 @@ func ExportResolvedPalette(name string) (*ThemeFile, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &ThemeFile{Base: root, Palette: palette}, nil
+	rootOpts, err := builtinThemeOpts(root)
+	if err != nil {
+		return nil, err
+	}
+	opts := palette.ToQuickStyleOpts(rootOpts)
+	opts.deriveDiffColors()
+	return &ThemeFile{Base: root, Palette: PaletteFromOpts(opts)}, nil
 }
 
 // IsBuiltinTheme reports whether the given name matches a built-in theme.

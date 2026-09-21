@@ -108,13 +108,15 @@ type quickStyleOpts struct {
 // Diff tint blend ratios: the fraction of the insert/delete foreground
 // hue blended over bgBase for the code area and the line-number gutter.
 // The gutter stays subtler than the code area, and the delete tints are
-// more muted than the insert ones, matching the tints the built-in
-// themes used when these colors were picked by hand.
+// more muted than the insert ones. These approximate the tints the
+// built-in themes used when they were picked by hand; no single set of
+// CIELAB ratios can reproduce those per-theme RGB choices exactly, so
+// these are fitted to land closest to both built-in themes.
 const (
-	diffInsertCodeBlend   = 0.22
-	diffInsertGutterBlend = 0.17
-	diffDeleteCodeBlend   = 0.16
-	diffDeleteGutterBlend = 0.11
+	diffInsertCodeBlend   = 0.20
+	diffInsertGutterBlend = 0.13
+	diffDeleteCodeBlend   = 0.15
+	diffDeleteGutterBlend = 0.08
 )
 
 // deriveDiffColors fills unset diff tokens: foregrounds default to the

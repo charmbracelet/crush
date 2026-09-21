@@ -174,10 +174,11 @@ type Palette struct {
 }
 
 // PaletteFromOpts extracts a Palette from quickStyleOpts, converting
-// each color.Color to its "#rrggbb" hex representation. Diff colors
-// left unset are derived first so the extracted palette is complete.
+// each color.Color to its "#rrggbb" hex representation. Diff tokens
+// left unset stay empty so overrides can flow through the merge chain;
+// derivation happens once, after all overrides are applied (see
+// deriveDiffColors).
 func PaletteFromOpts(o quickStyleOpts) Palette {
-	o.deriveDiffColors()
 	return Palette{
 		Primary:   colorToHex(o.primary),
 		Secondary: colorToHex(o.secondary),
@@ -398,7 +399,9 @@ func ThemePalette(name string) (Palette, error) {
 	if !ok {
 		return Palette{}, fmt.Errorf("unknown theme %q; available themes: %s", name, strings.Join(BuiltinThemeNames(), ", "))
 	}
-	return PaletteFromOpts(optsFn()), nil
+	opts := optsFn()
+	opts.deriveDiffColors()
+	return PaletteFromOpts(opts), nil
 }
 
 // MergePalette applies palette overrides on top of a built-in base theme
@@ -417,7 +420,9 @@ func MergePalette(baseName string, palette Palette) (Palette, error) {
 	if err != nil {
 		return Palette{}, err
 	}
-	return PaletteFromOpts(palette.ToQuickStyleOpts(base.ToQuickStyleOpts(rootOpts))), nil
+	opts := palette.ToQuickStyleOpts(base.ToQuickStyleOpts(rootOpts))
+	opts.deriveDiffColors()
+	return PaletteFromOpts(opts), nil
 }
 
 // baseThemeOpts returns the quickStyleOpts of the named built-in theme.

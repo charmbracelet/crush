@@ -2,6 +2,7 @@ package styles
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"charm.land/lipgloss/v2"
@@ -179,6 +180,85 @@ func TestLoadPaletteTheme_InvalidPalette(t *testing.T) {
 func TestColorToHex_Nil(t *testing.T) {
 	t.Parallel()
 	require.Empty(t, colorToHex(nil))
+}
+
+// luminance parses a "#rrggbb" hex color and returns the average channel
+// value; non-hex colors return -1.
+func luminance(s string) float64 {
+	var r, g, b int
+	if _, err := fmt.Sscanf(s, "#%02x%02x%02x", &r, &g, &b); err != nil {
+		return -1
+	}
+	return float64(r+g+b) / 3
+}
+
+func TestLoadPaletteTheme_BgBaseOverrideDerivesDiffTints(t *testing.T) {
+	t.Parallel()
+
+	// Regression: derived diff backgrounds used to be baked into the
+	// base palette before user overrides merged, so overriding bg_base
+	// on a dark built-in theme kept the built-in theme's dark tints.
+	builtin := quickStyle(charmtoneOpts())
+	light, err := LoadPaletteTheme("charmtone-panther", Palette{BgBase: "#ffffff"})
+	require.NoError(t, err)
+
+	builtinInsert := colorToHex(builtin.Diff.InsertLine.Code.GetBackground())
+	builtinDelete := colorToHex(builtin.Diff.DeleteLine.Code.GetBackground())
+	insert := colorToHex(light.Diff.InsertLine.Code.GetBackground())
+	del := colorToHex(light.Diff.DeleteLine.Code.GetBackground())
+
+	require.NotEqual(t, builtinInsert, insert, "insert background should re-derive from the overridden bg_base")
+	require.NotEqual(t, builtinDelete, del, "delete background should re-derive from the overridden bg_base")
+	require.Greater(t, luminance(insert), 180.0, "insert background on white should be light, got %s", insert)
+	require.Greater(t, luminance(del), 180.0, "delete background on white should be light, got %s", del)
+}
+
+func TestLoadPaletteTheme_SuccessOverrideDerivesInsertFg(t *testing.T) {
+	t.Parallel()
+
+	// Regression: derived diff foregrounds used to be baked into the
+	// base palette, so overriding success on a built-in theme left the
+	// insert foreground at the built-in theme's old green.
+	s, err := LoadPaletteTheme("gruvbox-dark", Palette{Success: "#ff0000"})
+	require.NoError(t, err)
+	require.Equal(t, "#ff0000", colorToHex(s.Diff.InsertLine.Symbol.GetForeground()))
+}
+
+func TestMergePalette_BgBaseOverrideDerivesLightDiffTints(t *testing.T) {
+	t.Parallel()
+	p, err := MergePalette("charmtone-panther", Palette{BgBase: "#ffffff"})
+	require.NoError(t, err)
+	require.Equal(t, "#ffffff", p.BgBase)
+	require.Greater(t, luminance(p.InsertBg), 180.0, "insert_bg %s should be light on white bg", p.InsertBg)
+	require.Greater(t, luminance(p.InsertGutterBg), 180.0, "insert_gutter_bg %s should be light on white bg", p.InsertGutterBg)
+	require.Greater(t, luminance(p.DeleteBg), 180.0, "delete_bg %s should be light on white bg", p.DeleteBg)
+	require.Greater(t, luminance(p.DeleteGutterBg), 180.0, "delete_gutter_bg %s should be light on white bg", p.DeleteGutterBg)
+}
+
+func TestMergePalette_SuccessOverrideDerivesInsertFg(t *testing.T) {
+	t.Parallel()
+	p, err := MergePalette("gruvbox-dark", Palette{Success: "#ff0000"})
+	require.NoError(t, err)
+	require.Equal(t, "#ff0000", p.InsertFg)
+}
+
+func TestMergePalette_CompletesDiffTokens(t *testing.T) {
+	t.Parallel()
+	p, err := MergePalette("gruvbox-dark", Palette{})
+	require.NoError(t, err)
+	for _, f := range []struct {
+		name string
+		got  string
+	}{
+		{"insert_fg", p.InsertFg},
+		{"insert_bg", p.InsertBg},
+		{"insert_gutter_bg", p.InsertGutterBg},
+		{"delete_fg", p.DeleteFg},
+		{"delete_bg", p.DeleteBg},
+		{"delete_gutter_bg", p.DeleteGutterBg},
+	} {
+		require.NotEmpty(t, f.got, "%s should be derived in a fully resolved palette", f.name)
+	}
 }
 
 func TestResolveColor_EmptyReturnsFallback(t *testing.T) {

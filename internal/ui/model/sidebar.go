@@ -97,12 +97,11 @@ func (m *UI) updateSidebarScrollState() {
 	lspSection := m.lspInfo(contentWidth, len(m.lspStates), true)
 	mcpSection := m.mcpInfo(contentWidth, mcpCount(m.com.Config().MCP.Sorted(), m.mcpStates), true)
 	skillsSection := m.skillsInfo(contentWidth, len(m.skillStatusItems()), true)
-	channelsSection := m.channelsInfo(contentWidth, len(m.channelStatusItems()), true)
+	channels := m.channelStatusItems()
 	filesSection := m.filesInfo(m.com.Workspace.WorkingDir(), contentWidth, fileChangeCount(m.sessionFiles), true)
 
 	// Build the scrollable content.
-	content := lipgloss.JoinVertical(
-		lipgloss.Left,
+	sections := []string{
 		title,
 		"",
 		cwd,
@@ -116,9 +115,13 @@ func (m *UI) updateSidebarScrollState() {
 		mcpSection,
 		"",
 		skillsSection,
-		"",
-		channelsSection,
-	)
+	}
+	// Channels are experimental and opt-in: only give them a section once
+	// at least one server is opted in.
+	if len(channels) > 0 {
+		sections = append(sections, "", m.channelsInfo(channels, contentWidth, len(channels), true))
+	}
+	content := lipgloss.JoinVertical(lipgloss.Left, sections...)
 
 	totalLines := strings.Count(content, "\n") + 1
 	m.sidebarContent = content

@@ -35,66 +35,70 @@ func newChannelsTestUI(t *testing.T, mcpNames []string, states map[string]mcp.Cl
 	return &UI{com: com, mcpStates: states}
 }
 
-// TestChannelStatusItems_FiltersSortsAndMapsState covers the core logic: only
-// MCP servers that are active channels (Channel==true) with a known state are
-// listed, they are sorted by name, and each connection state maps to the
-// expected status text (including the error message).
+// TestChannelStatusItems_FiltersSortsAndMapsState covers the core logic:
+// servers opted in as channels are listed whatever their connection state,
+// in name order, and each state maps to the expected status text (including
+// the error message). Servers that are merely channel-capable, or plain MCP
+// servers, are not listed.
 func TestChannelStatusItems_FiltersSortsAndMapsState(t *testing.T) {
 	t.Parallel()
 
 	states := map[string]mcp.ClientInfo{
-		"zeta-chan":  {Name: "zeta-chan", State: mcp.StateConnected, Channel: true},
-		"alpha-chan": {Name: "alpha-chan", State: mcp.StateError, Channel: true, Error: errors.New("boom")},
-		"plain-mcp":  {Name: "plain-mcp", State: mcp.StateConnected, Channel: false}, // not a channel
+		"zeta-chan": {Name: "zeta-chan", State: mcp.StateConnected, Channel: true, ChannelOptIn: true},
+		// Opted in but crashed: Channel is false, yet it must stay listed.
+		"alpha-chan": {Name: "alpha-chan", State: mcp.StateError, ChannelOptIn: true, Error: errors.New("boom")},
+		// Opted in and connected, but the server never declared claude/channel.
+		"mid-chan":  {Name: "mid-chan", State: mcp.StateConnected, ChannelOptIn: true},
+		"capable":   {Name: "capable", State: mcp.StateConnected, ChannelCapable: true}, // not opted in
+		"plain-mcp": {Name: "plain-mcp", State: mcp.StateConnected},                     // not a channel
 		// "orphan" has an MCP config but no entry in mcpStates → excluded.
 	}
-	m := newChannelsTestUI(t, []string{"zeta-chan", "alpha-chan", "plain-mcp", "orphan"}, states)
+	m := newChannelsTestUI(t, []string{"zeta-chan", "alpha-chan", "mid-chan", "capable", "plain-mcp", "orphan"}, states)
 
 	items := m.channelStatusItems()
 
-	// Only the two Channel==true servers that have a state, sorted by name.
-	require.Len(t, items, 2, "only active channels with a known state are listed")
+	require.Len(t, items, 3, "only opted-in channels with a known state are listed")
 	require.Equal(t, "alpha-chan", items[0].name)
-	require.Equal(t, "zeta-chan", items[1].name)
+	require.Equal(t, "mid-chan", items[1].name)
+	require.Equal(t, "zeta-chan", items[2].name)
 
-	// Error channel surfaces its error text; connected channel shows "connected".
 	require.Contains(t, ansi.Strip(items[0].description), "error: boom")
-	require.Contains(t, ansi.Strip(items[1].description), "connected")
+	require.Contains(t, ansi.Strip(items[1].description), "no channel capability")
+	require.Contains(t, ansi.Strip(items[2].description), "connected")
 }
 
 // TestChannelStatusItems_StateVariants exercises the remaining state → text
-// mappings (starting, disabled, and an unknown state → offline).
+// mappings for opted-in channels (starting, needs auth, a bare error, and an
+// unknown state → offline).
 func TestChannelStatusItems_StateVariants(t *testing.T) {
 	t.Parallel()
 
 	states := map[string]mcp.ClientInfo{
-		"starting":  {Name: "starting", State: mcp.StateStarting, Channel: true},
-		"disabled":  {Name: "disabled", State: mcp.StateDisabled, Channel: true},
-		"errorless": {Name: "errorless", State: mcp.StateError, Channel: true}, // error state, nil Error
-		"unknown":   {Name: "unknown", State: mcp.State(99), Channel: true},    // out-of-range → offline
+		"starting":  {Name: "starting", State: mcp.StateStarting, ChannelOptIn: true},
+		"auth":      {Name: "auth", State: mcp.StateNeedsAuth, ChannelOptIn: true},
+		"errorless": {Name: "errorless", State: mcp.StateError, ChannelOptIn: true}, // error state, nil Error
+		"unknown":   {Name: "unknown", State: mcp.State(99), ChannelOptIn: true},    // out-of-range → offline
 	}
-	m := newChannelsTestUI(t, []string{"starting", "disabled", "errorless", "unknown"}, states)
+	m := newChannelsTestUI(t, []string{"starting", "auth", "errorless", "unknown"}, states)
 
 	got := map[string]string{}
 	for _, it := range m.channelStatusItems() {
 		got[it.name] = ansi.Strip(it.description)
 	}
 	require.Contains(t, got["starting"], "starting")
-	require.Contains(t, got["disabled"], "disabled")
+	require.Contains(t, got["auth"], "needs authentication")
 	require.Equal(t, "error", got["errorless"], "error state with no Error shows bare 'error'")
 	require.Contains(t, got["unknown"], "offline", "unknown state falls back to offline")
 }
 
-// TestChannelsInfo_EmptyShowsNone verifies the empty state renders the section
-// title plus "None" when no channels are configured.
+// TestChannelsInfo_EmptyShowsNone verifies an empty list renders the section
+// title plus "None" rather than a blank section.
 func TestChannelsInfo_EmptyShowsNone(t *testing.T) {
 	t.Parallel()
 
-	m := newChannelsTestUI(t, []string{"plain"}, map[string]mcp.ClientInfo{
-		"plain": {Name: "plain", State: mcp.StateConnected, Channel: false},
-	})
+	m := newChannelsTestUI(t, nil, nil)
 
-	out := ansi.Strip(m.channelsInfo(40, 10, false))
+	out := ansi.Strip(m.channelsInfo(nil, 40, 10, false))
 	require.Contains(t, out, "Channels")
 	require.Contains(t, out, "None")
 }

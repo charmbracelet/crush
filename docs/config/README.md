@@ -477,6 +477,7 @@ Boolean Keys:
   auto-summarize                 automatically summarize long conversations
   provider-auto-update           update the provider catalog automatically
   default-providers              include built-in providers
+  update-check                   check GitHub for new Crush releases
   attribution-generated-with     add the Generated with Crush line
 
 String Keys:

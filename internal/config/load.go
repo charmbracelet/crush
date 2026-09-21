@@ -627,6 +627,10 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 		c.Options.DisableDefaultProviders, _ = strconv.ParseBool(str)
 	}
 
+	if str, ok := os.LookupEnv("CRUSH_DISABLE_UPDATE_CHECK"); ok {
+		c.Options.DisableUpdateCheck, _ = strconv.ParseBool(str)
+	}
+
 	if c.Options.Attribution == nil {
 		c.Options.Attribution = &Attribution{
 			TrailerStyle:  TrailerStyleAssistedBy,

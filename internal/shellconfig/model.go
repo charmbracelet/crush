@@ -71,11 +71,13 @@ var modelAddFlags = []flagSpec{
 	{name: "--price-cache-create", jsonKey: "cost_per_1m_in_cached", kind: flagFloat, op: opSet},
 	{name: "--price-cache-hit", jsonKey: "cost_per_1m_out_cached", kind: flagFloat, op: opSet},
 	{name: "--reasoning-effort", jsonKey: "default_reasoning_effort", kind: flagString, op: opSet},
+	{name: "--reasoning-levels", jsonKey: "reasoning_levels", kind: flagStringSlice, op: opAppend},
+	{name: "--reasoning-level", jsonKey: "reasoning_levels", kind: flagStringSlice, op: opAppend},
 }
 
 func modelAdd(b *ConfigBuilder, args []string, stderr io.Writer) error {
 	if len(args) < 3 {
-		return usage(stderr, "usage: model add <provider>/<id> [--name NAME] [--context-window N] [--default-max-tokens N] [--can-reason true|false] [--supports-images true|false] [--price-input F] [--price-output F] [--price-cache-create F] [--price-cache-hit F] [--reasoning-effort low|medium|high]")
+		return usage(stderr, "usage: model add <provider>/<id> [--name NAME] [--context-window N] [--default-max-tokens N] [--can-reason true|false] [--supports-images true|false] [--price-input F] [--price-output F] [--price-cache-create F] [--price-cache-hit F] [--reasoning-effort EFFORT] [--reasoning-levels LEVEL,...]")
 	}
 	provider, id, ok := splitProviderModel(args[2])
 	if !ok {
@@ -90,6 +92,41 @@ func modelAdd(b *ConfigBuilder, args []string, stderr io.Writer) error {
 	model := map[string]any{"id": id}
 	if err := applyFlags(modelAddFlags, args, 3, model, "model add", stderr); err != nil {
 		return err
+	}
+
+	if levels, ok := model["reasoning_levels"].([]any); ok {
+		seen := make(map[any]bool, len(levels))
+		dedup := make([]any, 0, len(levels))
+		for _, l := range levels {
+			if !seen[l] {
+				seen[l] = true
+				dedup = append(dedup, l)
+			}
+		}
+		model["reasoning_levels"] = dedup
+	}
+
+	if levels, ok := model["reasoning_levels"].([]any); ok && len(levels) > 0 {
+		if _, hasCanReason := model["can_reason"]; !hasCanReason {
+			model["can_reason"] = true
+		}
+		if effort, ok := model["default_reasoning_effort"].(string); ok && effort != "" {
+			found := false
+			for _, l := range levels {
+				if s, ok := l.(string); ok && s == effort {
+					found = true
+					break
+				}
+			}
+			if !found {
+				model["reasoning_levels"] = append(levels, effort)
+			}
+		}
+	} else if effort, ok := model["default_reasoning_effort"].(string); ok && effort != "" {
+		model["reasoning_levels"] = []any{effort}
+		if _, hasCanReason := model["can_reason"]; !hasCanReason {
+			model["can_reason"] = true
+		}
 	}
 
 	p := childMap(providers, provider)

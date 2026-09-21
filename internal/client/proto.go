@@ -207,6 +207,18 @@ func (c *Client) SubscribeEvents(ctx context.Context, id string) (<-chan any, er
 				if !sendEvent(ctx, events, e) {
 					return
 				}
+			case pubsub.PayloadTypePinentryPromptRequest:
+				var e pubsub.Event[proto.PinentryPromptRequest]
+				_ = json.Unmarshal(p.Payload, &e)
+				if !sendEvent(ctx, events, e) {
+					return
+				}
+			case pubsub.PayloadTypePinentryNotification:
+				var e pubsub.Event[proto.PinentryNotification]
+				_ = json.Unmarshal(p.Payload, &e)
+				if !sendEvent(ctx, events, e) {
+					return
+				}
 			case pubsub.PayloadTypeMessage:
 				var e pubsub.Event[proto.Message]
 				_ = json.Unmarshal(p.Payload, &e)
@@ -742,6 +754,44 @@ func (c *Client) CancelQuestionBatch(ctx context.Context, id string) (bool, erro
 	var resp proto.QuestionAnswerResponse
 	if err := json.NewDecoder(rsp.Body).Decode(&resp); err != nil {
 		return false, fmt.Errorf("failed to decode cancel question batch response: %w", err)
+	}
+	return resp.Resolved, nil
+}
+
+// AnswerPinentry submits a secret for the pending integrated pinentry
+// prompt on a workspace. Returns true if this call resolved the
+// pending prompt, false if already resolved by another caller.
+func (c *Client) AnswerPinentry(ctx context.Context, id string, req proto.PinentryAnswer) (bool, error) {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/pinentry/answer", id), nil, jsonBody(req), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return false, fmt.Errorf("failed to answer pinentry prompt: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("failed to answer pinentry prompt: status code %d", rsp.StatusCode)
+	}
+	var resp proto.PinentryResponse
+	if err := json.NewDecoder(rsp.Body).Decode(&resp); err != nil {
+		return false, fmt.Errorf("failed to decode answer pinentry prompt response: %w", err)
+	}
+	return resp.Resolved, nil
+}
+
+// CancelPinentry dismisses the pending integrated pinentry prompt on
+// a workspace. Returns true if a prompt was cancelled, false if none
+// was pending.
+func (c *Client) CancelPinentry(ctx context.Context, id string, req proto.PinentryCancel) (bool, error) {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/pinentry/cancel", id), nil, jsonBody(req), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return false, fmt.Errorf("failed to cancel pinentry prompt: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("failed to cancel pinentry prompt: status code %d", rsp.StatusCode)
+	}
+	var resp proto.PinentryResponse
+	if err := json.NewDecoder(rsp.Body).Decode(&resp); err != nil {
+		return false, fmt.Errorf("failed to decode cancel pinentry prompt response: %w", err)
 	}
 	return resp.Resolved, nil
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/pinentry"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
@@ -279,6 +280,16 @@ func (w *AppWorkspace) QuestionAnswer(responses []question.Answer) bool {
 
 func (w *AppWorkspace) QuestionCancel() bool {
 	return w.app.Questions.Cancel()
+}
+
+// -- Pinentry --
+
+func (w *AppWorkspace) PinentryRespond(id, secret string) bool {
+	return pinentry.DefaultPrompts().Respond(id, secret)
+}
+
+func (w *AppWorkspace) PinentryCancel(id string) bool {
+	return pinentry.DefaultPrompts().Cancel(id)
 }
 
 // -- FileTracker --

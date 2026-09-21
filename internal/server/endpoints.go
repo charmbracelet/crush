@@ -289,6 +289,24 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 			Fails(400, 404, 500).
 			Handle(c.handlePostWorkspaceQuestionsCancel),
 
+		apigen.Post("/v1/workspaces/{id}/pinentry/answer").
+			Summary("Answer pinentry prompt").
+			Tags("pinentry").
+			PathParam("id", "Workspace ID").
+			Accepts(proto.PinentryAnswer{}).
+			Responds(proto.PinentryResponse{}).
+			Fails(400, 404, 500).
+			Handle(c.handlePostWorkspacePinentryAnswer),
+
+		apigen.Post("/v1/workspaces/{id}/pinentry/cancel").
+			Summary("Cancel pinentry prompt").
+			Tags("pinentry").
+			PathParam("id", "Workspace ID").
+			Accepts(proto.PinentryCancel{}).
+			Responds(proto.PinentryResponse{}).
+			Fails(400, 404, 500).
+			Handle(c.handlePostWorkspacePinentryCancel),
+
 		apigen.Get("/v1/workspaces/{id}/agent").
 			Summary("Get agent info").
 			Tags("agent").

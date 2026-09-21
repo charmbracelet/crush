@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/pinentry"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
@@ -99,6 +100,25 @@ func wrapEvent(ev any) *pubsub.Payload {
 				BatchID: e.Payload.BatchID,
 			},
 		})
+	case pubsub.Event[pinentry.PromptRequest]:
+		return envelope(pubsub.PayloadTypePinentryPromptRequest, pubsub.Event[proto.PinentryPromptRequest]{
+			Type: e.Type,
+			Payload: proto.PinentryPromptRequest{
+				ID:         e.Payload.ID,
+				Prompt:     e.Payload.Prompt,
+				KeyInfo:    e.Payload.KeyInfo,
+				Kind:       string(e.Payload.Kind),
+				RetryCount: e.Payload.RetryCount,
+				Error:      e.Payload.Error,
+			},
+		})
+	case pubsub.Event[pinentry.Notification]:
+		return envelope(pubsub.PayloadTypePinentryNotification, pubsub.Event[proto.PinentryNotification]{
+			Type: e.Type,
+			Payload: proto.PinentryNotification{
+				RequestID: e.Payload.RequestID,
+			},
+		})
 	case pubsub.Event[message.Message]:
 		return envelope(pubsub.PayloadTypeMessage, pubsub.Event[proto.Message]{
 			Type:    e.Type,
@@ -163,6 +183,11 @@ func wrapEvent(ev any) *pubsub.Payload {
 			Type:    e.Type,
 			Payload: skillsEventToProto(e.Payload),
 		})
+	case pubsub.Event[pinentry.Event]:
+		// Terminal handover for GPG passphrase prompts is a local concern
+		// of the host running the watcher; the pinentry dialog would not
+		// draw on a remote client's terminal.
+		return nil
 	default:
 		slog.Warn("Unrecognized event type for SSE wrapping", "type", fmt.Sprintf("%T", ev))
 		return nil

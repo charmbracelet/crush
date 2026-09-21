@@ -264,6 +264,42 @@ type QuestionNotification struct {
 	BatchID string `json:"batch_id"`
 }
 
+// PinentryPromptRequest is the SSE wire format for an integrated
+// pinentry credential prompt (a GPG passphrase or security key PIN).
+// The resolved secret is never carried on this type.
+type PinentryPromptRequest struct {
+	ID         string `json:"id"`
+	Prompt     string `json:"prompt"`
+	KeyInfo    string `json:"key_info,omitempty"`
+	Kind       string `json:"kind"`
+	RetryCount int    `json:"retry_count,omitempty"`
+	Error      string `json:"error,omitempty"`
+}
+
+// PinentryAnswer is the wire format for answering a pinentry prompt,
+// sent from client to server via REST.
+type PinentryAnswer struct {
+	RequestID string `json:"request_id"`
+	Secret    string `json:"secret"`
+}
+
+// PinentryCancel is the wire format for dismissing a pinentry prompt.
+type PinentryCancel struct {
+	RequestID string `json:"request_id"`
+}
+
+// PinentryResponse is the server's response to pinentry answer and
+// cancel calls.
+type PinentryResponse struct {
+	Resolved bool `json:"resolved"`
+}
+
+// PinentryNotification is published when a pinentry prompt is resolved
+// so non-answering clients can dismiss their dialogs.
+type PinentryNotification struct {
+	RequestID string `json:"request_id"`
+}
+
 // PermissionSkipRequest represents a request to skip permission prompts.
 type PermissionSkipRequest struct {
 	Skip bool `json:"skip"`

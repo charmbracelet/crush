@@ -68,9 +68,19 @@ type (
 	ActionSelectReasoningEffort struct {
 		Effort string
 	}
+	// ActionPermissionResponse carries the user's decision on a
+	// permission request.
 	ActionPermissionResponse struct {
 		Permission permission.PermissionRequest
 		Action     PermissionAction
+	}
+	// Messages for the integrated pinentry dialog.
+	ActionPinentrySubmit struct {
+		RequestID string
+		Secret    string
+	}
+	ActionPinentryCancel struct {
+		RequestID string
 	}
 	// ActionRunCustomCommand is a message to run a custom command.
 	ActionRunCustomCommand struct {

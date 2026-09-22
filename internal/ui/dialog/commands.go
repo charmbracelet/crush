@@ -545,7 +545,9 @@ func (c *Commands) defaultCommandGroups() []CommandGroup {
 		}
 	}
 
-	settings := []*CommandItem{}
+	settings := []*CommandItem{
+		NewCommandItem(t, "switch_theme", "Themes", "", ActionOpenDialog{DialogID: ThemeID}),
+	}
 
 	// Only show toggle compact mode command if window width is larger than compact breakpoint (120)
 	if c.windowWidth >= sidebarCompactModeBreakpoint && c.hasSession {
@@ -585,6 +587,13 @@ func (c *Commands) defaultCommandGroups() []CommandGroup {
 		transparentLabel = "Enable Background Color"
 	}
 	settings = append(settings, NewCommandItem(t, "toggle_transparent", transparentLabel, "", ActionToggleTransparentBackground{}))
+
+	// Add mouse support toggle.
+	mouseLabel := "Disable Mouse"
+	if cfg != nil && cfg.Options != nil && cfg.Options.TUI.Mouse != nil && !*cfg.Options.TUI.Mouse {
+		mouseLabel = "Enable Mouse"
+	}
+	settings = append(settings, NewCommandItem(t, "toggle_mouse", mouseLabel, "", ActionToggleMouseSupport{}))
 
 	application := []*CommandItem{}
 

@@ -232,6 +232,41 @@ func TestMCPChannelMessageNotWrappedAsStateChange(t *testing.T) {
 	require.Nil(t, env, "EventChannelMessage must not be wrapped as an SSE event (no proto representation yet)")
 }
 
+// TestMCPStateChangedEventForwardsCounts verifies that the SSE envelope
+// carries prompt and resource counts, not only tool counts. The client TUI
+// renders all three, so dropping the other two made client/server mode
+// under-report what a connected server offers.
+func TestMCPStateChangedEventForwardsCounts(t *testing.T) {
+	t.Parallel()
+
+	src := pubsub.Event[mcp.Event]{
+		Type: pubsub.UpdatedEvent,
+		Payload: mcp.Event{
+			Type:  mcp.EventStateChanged,
+			Name:  "ctx",
+			State: mcp.StateConnected,
+			Counts: mcp.Counts{
+				Tools:     4,
+				Prompts:   2,
+				Resources: 3,
+			},
+		},
+	}
+
+	env := wrapEvent(src)
+	require.NotNil(t, env)
+	require.Equal(t, pubsub.PayloadTypeMCPEvent, env.Type)
+
+	var decoded pubsub.Event[proto.MCPEvent]
+	require.NoError(t, json.Unmarshal(env.Payload, &decoded))
+	require.Equal(t, proto.MCPEventStateChanged, decoded.Payload.Type)
+	require.Equal(t, "ctx", decoded.Payload.Name)
+	require.Equal(t, proto.MCPStateConnected, decoded.Payload.State)
+	require.Equal(t, 4, decoded.Payload.ToolCount)
+	require.Equal(t, 2, decoded.Payload.PromptCount)
+	require.Equal(t, 3, decoded.Payload.ResourceCount)
+}
+
 // TestMCPUnknownEventTypeNotMappedToStateChange verifies that any
 // unrecognized MCP event type is not silently coerced to state_changed —
 // the mapping must return ok=false so wrapEvent can drop it instead of

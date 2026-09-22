@@ -653,6 +653,7 @@ func (w *ClientWorkspace) ReadSkill(ctx context.Context, skillID string) ([]byte
 func (w *ClientWorkspace) MCPGetStates() map[string]mcp.ClientInfo {
 	states, err := w.client.MCPGetStates(context.Background(), w.workspaceID())
 	if err != nil {
+		slog.Warn("Failed to fetch MCP states", "error", err)
 		return nil
 	}
 	result := make(map[string]mcp.ClientInfo, len(states))

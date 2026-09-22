@@ -26,6 +26,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/discover"
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/filetracker"
@@ -129,7 +130,7 @@ type Coordinator interface {
 	BeginAccepted(sessionID string) *AcceptedRun
 	Cancel(sessionID string)
 	CancelAll()
-	IsSessionBusy(sessionID string) bool
+	HasPendingWork(sessionID string) bool
 	IsBusy() bool
 	QueuedPrompts(sessionID string) int
 	QueuedPromptsList(sessionID string) []string
@@ -140,18 +141,27 @@ type Coordinator interface {
 	GenerateTitle(ctx context.Context, sessionID, prompt string)
 }
 
+// maxSubAgentDepth bounds how far ownership is followed when resolving a
+// sub-agent's session to the run that owns it.
+const maxSubAgentDepth = 8
+
 type coordinator struct {
-	cfg         *config.ConfigStore
-	sessions    session.Service
-	messages    message.Service
-	permissions permission.Service
-	questions   question.Service
-	history     history.Service
-	filetracker filetracker.Service
-	lspManager  *lsp.Manager
-	notify      pubsub.Publisher[notify.Notification]
-	runComplete pubsub.Publisher[notify.RunComplete]
-	interactive bool
+	cfg      *config.ConfigStore
+	sessions session.Service
+	// subSessionParents maps a live sub-agent's session to the session
+	// whose run owns it. Entries exist only while the sub-agent is
+	// running, which is what makes a lookup here answer "is anything
+	// running for this session" without reading the database.
+	subSessionParents *csync.Map[string, string]
+	messages          message.Service
+	permissions       permission.Service
+	questions         question.Service
+	history           history.Service
+	filetracker       filetracker.Service
+	lspManager        *lsp.Manager
+	notify            pubsub.Publisher[notify.Notification]
+	runComplete       pubsub.Publisher[notify.RunComplete]
+	interactive       bool
 
 	// agentMu guards mainAgent and mainAgentName: SetMainAgent runs on
 	// HTTP handler goroutines while runs, cancels, and probes read the
@@ -202,21 +212,22 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	skillTracker := skills.NewTracker(activeSkills)
 
 	c := &coordinator{
-		cfg:          opts.Config,
-		sessions:     opts.Sessions,
-		messages:     opts.Messages,
-		permissions:  opts.Permissions,
-		questions:    opts.Questions,
-		history:      opts.History,
-		filetracker:  opts.FileTracker,
-		lspManager:   opts.LSPManager,
-		notify:       opts.Notify,
-		runComplete:  opts.RunComplete,
-		agents:       make(map[string]SessionAgent),
-		allSkills:    allSkills,
-		activeSkills: activeSkills,
-		skillTracker: skillTracker,
-		interactive:  opts.Interactive,
+		cfg:               opts.Config,
+		sessions:          opts.Sessions,
+		subSessionParents: csync.NewMap[string, string](),
+		messages:          opts.Messages,
+		permissions:       opts.Permissions,
+		questions:         opts.Questions,
+		history:           opts.History,
+		filetracker:       opts.FileTracker,
+		lspManager:        opts.LSPManager,
+		notify:            opts.Notify,
+		runComplete:       opts.RunComplete,
+		agents:            make(map[string]SessionAgent),
+		allSkills:         allSkills,
+		activeSkills:      activeSkills,
+		skillTracker:      skillTracker,
+		interactive:       opts.Interactive,
 	}
 
 	agentCfg, ok := opts.Config.Config().Agents[config.AgentCoder]
@@ -1392,8 +1403,37 @@ func (c *coordinator) IsBusy() bool {
 	return c.currentAgent().IsBusy()
 }
 
-func (c *coordinator) IsSessionBusy(sessionID string) bool {
-	return c.currentAgent().IsSessionBusy(sessionID)
+// HasPendingWork reports whether sessionID may be modified: false only
+// when nothing is running for it and nothing is about to.
+//
+// A sub-agent runs in its own session against its own agent instance, so
+// asking an agent about a sub-session directly always answers no. The run
+// holding it is its parent's, so ownership is followed up the chain that
+// runSubAgent records while a sub-agent is live. Only live sub-agents are
+// in that chain, which is the whole question: a sub-session left on disk
+// by a dead process has nothing running for it.
+func (c *coordinator) HasPendingWork(sessionID string) bool {
+	agent := c.currentAgent()
+	// Bounded rather than while-true: the chain is built from live runs,
+	// and a cycle would hang every caller.
+	for range maxSubAgentDepth {
+		if agent.HasPendingWork(sessionID) {
+			return true
+		}
+		parentID, ok := c.subSessionParents.Get(sessionID)
+		if !ok {
+			return false
+		}
+		sessionID = parentID
+	}
+	return false
+}
+
+// trackSubSession records that childID's run is owned by parentID, and
+// returns the func that forgets it once the sub-agent is done.
+func (c *coordinator) trackSubSession(childID, parentID string) func() {
+	c.subSessionParents.Set(childID, parentID)
+	return func() { c.subSessionParents.Del(childID) }
 }
 
 func (c *coordinator) Model() Model {
@@ -1628,6 +1668,10 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 	if err != nil {
 		return fantasy.ToolResponse{}, fmt.Errorf("create session: %w", err)
 	}
+
+	// Track ownership while the sub-agent runs so observers asking about
+	// its session are told the parent's run holds it.
+	defer c.trackSubSession(session.ID, params.SessionID)()
 
 	// Call session setup function if provided
 	if params.SessionSetup != nil {

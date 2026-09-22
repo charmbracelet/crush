@@ -40,7 +40,7 @@ func (c *errorCoordinator) BeginAccepted(sessionID string) *agent.AcceptedRun { 
 func (c *errorCoordinator) Cancel(string)                                     {}
 func (c *errorCoordinator) CancelAll()                                        {}
 func (c *errorCoordinator) IsBusy() bool                                      { return false }
-func (c *errorCoordinator) IsSessionBusy(string) bool                         { return false }
+func (c *errorCoordinator) HasPendingWork(string) bool                        { return false }
 func (c *errorCoordinator) QueuedPrompts(string) int                          { return 0 }
 func (c *errorCoordinator) QueuedPromptsList(string) []string                 { return nil }
 func (c *errorCoordinator) ClearQueue(string)                                 {}

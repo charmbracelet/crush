@@ -5583,6 +5583,12 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 		return m.handleAWSSSOAuth(n.AWSSOCommand, n.AWSSOURL)
 	case notify.TypeAWSSSOAuthResult:
 		return m.handleAWSSSOAuthResult(n.Message)
+	case notify.TypeSummarizing:
+		// Summarization is about to start; show a "Summarizing..." banner
+		// so the user understands why the agent stopped and is processing.
+		if m.status != nil {
+			m.status.SetInfoMsg(util.NewInfoMsg("Summarizing..."))
+		}
 	default:
 		return nil
 	}

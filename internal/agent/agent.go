@@ -1210,6 +1210,15 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 	if shouldSummarize {
 		a.activeRequests.Del(call.SessionID)
+		// Notify the UI that summarization is about to start so it can
+		// show a "Summarizing..." banner to the user.
+		if a.notify != nil {
+			a.notify.Publish(pubsub.CreatedEvent, notify.Notification{
+				SessionID:    call.SessionID,
+				SessionTitle: currentSession.Title,
+				Type:         notify.TypeSummarizing,
+			})
+		}
 		if summarizeErr := a.Summarize(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh); summarizeErr != nil {
 			return nil, summarizeErr
 		}
@@ -1230,6 +1239,15 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// tea.Msg arrives, so the cleanup must precede the notify or
 	// subscribers see stale busy state at the moment of receipt.
 	a.activeRequests.Del(call.SessionID)
+		// Notify the UI that summarization is about to start so it can
+		// show a "Summarizing..." banner to the user.
+		if a.notify != nil {
+			a.notify.Publish(pubsub.CreatedEvent, notify.Notification{
+				SessionID:    call.SessionID,
+				SessionTitle: currentSession.Title,
+				Type:         notify.TypeSummarizing,
+			})
+		}
 	cancel()
 
 	// Send notification that agent has finished its turn (skip for

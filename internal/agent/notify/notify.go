@@ -25,6 +25,9 @@ const (
 	// finished. Message carries the error text when it failed, empty on
 	// success.
 	TypeAWSSSOAuthResult Type = "aws_sso_auth_result"
+	// TypeSummarizing indicates the agent is summarizing the session
+	// so the conversation can continue.
+	TypeSummarizing Type = "summarizing"
 )
 
 // Notification represents a domain event published by the agent.

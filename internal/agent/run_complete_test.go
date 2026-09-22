@@ -3,12 +3,72 @@ package agent
 import (
 	"context"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/session"
 	"github.com/stretchr/testify/require"
 )
+
+type canceledPreparationSession struct {
+	session.Service
+}
+
+func newQueueTestAgent(t *testing.T) *sessionAgent {
+	t.Helper()
+	env := testEnv(t)
+	agent, ok := NewSessionAgent(SessionAgentOptions{
+		Sessions: env.sessions,
+		Messages: env.messages,
+	}).(*sessionAgent)
+	require.True(t, ok)
+	return agent
+}
+
+func (s canceledPreparationSession) Get(ctx context.Context, id string) (session.Session, error) {
+	return session.Session{}, ctx.Err()
+}
+
+func TestRun_OwnerlessPreparationCancellationPublishesWithBackpressure(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		broker := pubsub.NewBrokerWithOptions[notify.RunComplete](0)
+		defer broker.Shutdown()
+		completions := broker.Subscribe(t.Context())
+		sa := NewSessionAgent(SessionAgentOptions{
+			Sessions: canceledPreparationSession{}, RunComplete: broker,
+		})
+		// A promoted call inherits the outer dispatch's context marker.
+		// Publishing its completion must not mark that outer call complete.
+		ctx, cancel := context.WithCancel(WithRunCompleteMarker(WithRunID(t.Context(), "outer")))
+		cancel()
+		done := make(chan error, 1)
+		go func() {
+			_, err := sa.Run(ctx, SessionAgentCall{SessionID: "session", RunID: "promoted", Prompt: "queued"})
+			done <- err
+		}()
+		synctest.Wait()
+		select {
+		case err := <-done:
+			t.Fatalf("Run returned before its terminal event could be delivered: %v", err)
+		default:
+		}
+		select {
+		case event := <-completions:
+			require.Equal(t, "promoted", event.Payload.RunID)
+			require.Equal(t, "session", event.Payload.SessionID)
+			require.True(t, event.Payload.Cancelled)
+			require.Contains(t, event.Payload.Error, context.Canceled.Error())
+		case <-time.After(time.Second):
+			t.Fatal("cancelled preparation lost its terminal event")
+		}
+		require.ErrorIs(t, <-done, context.Canceled)
+		require.False(t, RunCompletePublished(ctx))
+		require.False(t, sa.IsSessionBusy("session"))
+	})
+}
 
 // TestSessionAgentRun_QueueStripsOnComplete verifies that when a Run
 // call is enqueued (because the session is already busy), the
@@ -21,11 +81,7 @@ import (
 func TestSessionAgentRun_QueueStripsOnComplete(t *testing.T) {
 	t.Parallel()
 
-	env := testEnv(t)
-	a := NewSessionAgent(SessionAgentOptions{
-		Sessions: env.sessions,
-		Messages: env.messages,
-	}).(*sessionAgent)
+	a := newQueueTestAgent(t)
 
 	const sessionID = "queued-session"
 	// Mark the session as busy so Run takes the queue branch
@@ -69,11 +125,7 @@ func TestSessionAgentRun_QueueStripsOnComplete(t *testing.T) {
 func TestDrainQueueForStep_FiltersUnderDispatchLock(t *testing.T) {
 	t.Parallel()
 
-	env := testEnv(t)
-	a := NewSessionAgent(SessionAgentOptions{
-		Sessions: env.sessions,
-		Messages: env.messages,
-	}).(*sessionAgent)
+	a := newQueueTestAgent(t)
 
 	const sessionID = "drain-session"
 	a.messageQueue.Set(sessionID, []SessionAgentCall{
@@ -102,11 +154,7 @@ func TestDrainQueueForStep_FiltersUnderDispatchLock(t *testing.T) {
 func TestDrainQueueForStep_NoMarkFoldsAllNonRunID(t *testing.T) {
 	t.Parallel()
 
-	env := testEnv(t)
-	a := NewSessionAgent(SessionAgentOptions{
-		Sessions: env.sessions,
-		Messages: env.messages,
-	}).(*sessionAgent)
+	a := newQueueTestAgent(t)
 
 	const sessionID = "drain-nomark"
 	a.messageQueue.Set(sessionID, []SessionAgentCall{
@@ -129,11 +177,7 @@ func TestDrainQueueForStep_NoMarkFoldsAllNonRunID(t *testing.T) {
 func TestDrainQueueForStep_KeepsRunIDPromptsQueued(t *testing.T) {
 	t.Parallel()
 
-	env := testEnv(t)
-	a := NewSessionAgent(SessionAgentOptions{
-		Sessions: env.sessions,
-		Messages: env.messages,
-	}).(*sessionAgent)
+	a := newQueueTestAgent(t)
 
 	const sessionID = "drain-runid"
 	a.messageQueue.Set(sessionID, []SessionAgentCall{
@@ -163,11 +207,7 @@ func TestDrainQueueForStep_KeepsRunIDPromptsQueued(t *testing.T) {
 func TestDrainQueueForStep_ReportsCanceledRunIDDrops(t *testing.T) {
 	t.Parallel()
 
-	env := testEnv(t)
-	a := NewSessionAgent(SessionAgentOptions{
-		Sessions: env.sessions,
-		Messages: env.messages,
-	}).(*sessionAgent)
+	a := newQueueTestAgent(t)
 
 	const sessionID = "drain-cancel-runid"
 	a.messageQueue.Set(sessionID, []SessionAgentCall{

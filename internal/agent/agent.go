@@ -806,7 +806,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	if call.MaxOutputTokens > 0 {
 		maxOutputTokens = &call.MaxOutputTokens
 	}
-	result, err = agent.Stream(genCtx, fantasy.AgentStreamCall{
+
+	// Stream the request with retry for timeout errors. Extracted into a
+	// local function so the retry loop only needs to call it once.
+	streamOnce := func() (*fantasy.AgentResult, error) {
+			return agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:           message.PromptWithTextAttachments(call.Prompt, call.Attachments),
 		Files:            files,
 		Messages:         history,
@@ -1075,6 +1079,39 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			},
 		},
 	})
+	}
+
+	// Retry loop for request timeout errors. The timeout wrapper may abort
+	// a streaming request when no data arrives for the configured window.
+	// A single retry (up to 2 attempts total) gives a slow or heavily
+	// reasoning model another chance before the run fails.
+	const maxTimeoutRetries = 2
+	for attempt := 0; attempt <= maxTimeoutRetries; attempt++ {
+		if attempt > 0 {
+			slog.Warn("Request timed out, retrying",
+				"session_id", call.SessionID,
+				"attempt", attempt+1,
+				"max_retries", maxTimeoutRetries,
+			)
+			reasoningDeltaCount.Store(0)
+			currentAssistant.ResetStreamedContent()
+			if updateErr := a.messages.Update(genCtx, *currentAssistant); updateErr != nil {
+				slog.Error("Failed to reset message on retry", "error", updateErr)
+			}
+			time.Sleep(time.Duration(attempt) * 2 * time.Second)
+		}
+		result, err = streamOnce()
+		if err == nil {
+			break
+		}
+		var timeoutErr *requestTimeoutError
+		if !errors.As(err, &timeoutErr) {
+			break // only retry timeout errors
+		}
+		if attempt >= maxTimeoutRetries {
+			break // max retries exhausted, fall through to error handling
+		}
+	}
 
 	a.eventPromptResponded(call.SessionID, time.Since(startTime).Truncate(time.Second))
 
@@ -1219,7 +1256,25 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				Type:         notify.TypeSummarizing,
 			})
 		}
-		if summarizeErr := a.Summarize(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh); summarizeErr != nil {
+		// Retry summarization on transient errors. A single retry
+		// (up to 2 attempts total) gives slow models another chance
+		// before the run fails.
+		var summarizeErr error
+		for attempt := 0; attempt <= 1; attempt++ {
+			if attempt > 0 {
+				slog.Warn("Summarization failed, retrying",
+					"session_id", call.SessionID,
+					"attempt", attempt+1,
+				)
+				time.Sleep(2 * time.Second)
+			}
+			summarizeErr = a.Summarize(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh)
+			if summarizeErr == nil {
+				break
+			}
+			slog.Warn("Summarization error", "error", summarizeErr, "attempt", attempt+1)
+		}
+		if summarizeErr != nil {
 			return nil, summarizeErr
 		}
 		// If the agent wasn't done...

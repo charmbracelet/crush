@@ -19,6 +19,21 @@ func (s *ConfigStore) SetMCPServerDisabledConfig(scope Scope, name string, disab
 	})
 }
 
+// SetLazyMCPConfig persists the global lazy-MCP default in the given scope.
+// Laziness is on unless something writes it false, so this is the switch the
+// TUI toggle flips. Like the per-server flag it changes only what the model
+// is shown, never which servers are connected.
+func (s *ConfigStore) SetLazyMCPConfig(scope Scope, enabled bool) error {
+	return s.update(scope, func(c *Config) map[string]any {
+		if c.Options == nil {
+			c.Options = &Options{}
+		}
+		lazy := enabled
+		c.Options.LazyMCP = &lazy
+		return map[string]any{"options.lazy_mcp": enabled}
+	})
+}
+
 // IsLazy reports whether this server's tool schemas are kept out of the
 // model context until the agent loads them with mcp_search. The per-server
 // flag wins; when it is unset the global options.lazy_mcp default applies.

@@ -243,6 +243,10 @@ type Workspace interface {
 	MCPServersDisabled(ctx context.Context) ([]string, error)
 	MCPSetServerDisabled(ctx context.Context, name string, disabled bool) error
 	MCPSetServerConfigDisabled(ctx context.Context, name string, disabled bool) error
+	// MCPSetLazy updates the lazy-MCP policy. An empty name flips the
+	// global options.lazy_mcp default; otherwise the named server gets its
+	// own override.
+	MCPSetLazy(ctx context.Context, name string, lazy bool) error
 	MCPServersEnabled(ctx context.Context) ([]string, error)
 	MCPStartServer(ctx context.Context, name string) error
 	MCPAuthenticate(ctx context.Context, name string) error

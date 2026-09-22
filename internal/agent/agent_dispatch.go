@@ -356,7 +356,7 @@ func (d *dispatchedAgent) awaitDeliverable(ctx context.Context) bool {
 		if !d.running() || d.stopping() {
 			return false
 		}
-		if d.runner().IsSessionBusy(d.SessionID) {
+		if d.runner().HasActiveTurn(d.SessionID) {
 			return true
 		}
 		select {

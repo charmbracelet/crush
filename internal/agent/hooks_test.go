@@ -128,7 +128,7 @@ func TestCompactHooks_PreCompactBlocks(t *testing.T) {
 	require.ErrorIs(t, err, ErrCompactionBlocked)
 	require.Contains(t, err.Error(), "not now")
 	require.NoFileExists(t, filepath.Join(dir, "post"))
-	require.False(t, sa.IsSessionBusy(sess.ID))
+	require.False(t, sa.HasActiveTurn(sess.ID))
 }
 
 func TestCompactHooks_PostCompactFires(t *testing.T) {

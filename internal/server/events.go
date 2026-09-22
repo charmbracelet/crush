@@ -224,7 +224,7 @@ func isSessionBusy(ws *backend.Workspace, sessionID string) bool {
 	if ws == nil || ws.App == nil || ws.AgentCoordinator == nil {
 		return false
 	}
-	return ws.AgentCoordinator.IsSessionBusy(sessionID)
+	return ws.AgentCoordinator.HasPendingWork(sessionID)
 }
 
 // attachedClients returns the number of clients currently viewing

@@ -140,7 +140,8 @@ type SessionAgent interface {
 	SetSystemPrompt(systemPrompt string)
 	Cancel(sessionID string)
 	CancelAll()
-	IsSessionBusy(sessionID string) bool
+	HasActiveTurn(sessionID string) bool
+	HasPendingWork(sessionID string) bool
 	IsBusy() bool
 	QueuedPrompts(sessionID string) int
 	QueuedPromptsList(sessionID string) []string
@@ -617,7 +618,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		return nil, nil
 	}
 
-	if a.IsSessionBusy(call.SessionID) {
+	if a.HasActiveTurn(call.SessionID) {
 		// Busy: an earlier prompt is active. Queue this call so it is
 		// folded into (or sequenced after) the active turn, and release any
 		// accept reservation. A Cancel arriving after this point sees the
@@ -1213,7 +1214,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	}
 
 	// Release active request before publishing the notification.
-	// TUI handlers poll IsSessionBusy() and only re-evaluate when a
+	// TUI handlers poll the busy state and only re-evaluate when a
 	// tea.Msg arrives, so the cleanup must precede the notify or
 	// subscribers see stale busy state at the moment of receipt.
 	a.activeRequests.Del(call.SessionID)
@@ -1333,7 +1334,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 }
 
 func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error) error {
-	if a.IsSessionBusy(sessionID) {
+	if a.HasActiveTurn(sessionID) {
 		return ErrSessionBusy
 	}
 
@@ -2069,9 +2070,26 @@ func (a *sessionAgent) IsBusy() bool {
 	return busy
 }
 
-func (a *sessionAgent) IsSessionBusy(sessionID string) bool {
+// HasActiveTurn reports whether a turn is already running for sessionID.
+// It deliberately ignores accepted-but-unstarted runs: Run and Summarize
+// use it to decide whether to queue behind an existing turn, and a caller
+// holding its own accept reservation would otherwise queue behind itself.
+// Observers asking whether a session is safe to touch want HasPendingWork.
+func (a *sessionAgent) HasActiveTurn(sessionID string) bool {
 	_, busy := a.activeRequests.Get(sessionID)
 	return busy
+}
+
+// HasPendingWork reports whether sessionID may be modified: a run for it
+// is active, or has been accepted and is about to start. A prompt is
+// accepted before it registers as active, so an answer based on active
+// runs alone calls a session idle in the window between the two.
+func (a *sessionAgent) HasPendingWork(sessionID string) bool {
+	if a.HasActiveTurn(sessionID) {
+		return true
+	}
+	accepted, _ := a.acceptedRuns.Get(sessionID)
+	return accepted > 0
 }
 
 func (a *sessionAgent) QueuedPrompts(sessionID string) int {

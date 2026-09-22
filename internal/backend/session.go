@@ -53,7 +53,7 @@ func (b *Backend) GetAgentSession(ctx context.Context, workspaceID, sessionID st
 
 	var isSessionBusy bool
 	if ws.AgentCoordinator != nil {
-		isSessionBusy = ws.AgentCoordinator.IsSessionBusy(sessionID)
+		isSessionBusy = ws.AgentCoordinator.HasPendingWork(sessionID)
 	}
 
 	return proto.AgentSession{

@@ -41,7 +41,7 @@ func (s *stubCoordinator) BeginAccepted(sessionID string) *agent.AcceptedRun {
 func (s *stubCoordinator) Cancel(string) {}
 func (s *stubCoordinator) CancelAll()    {}
 func (s *stubCoordinator) IsBusy() bool  { return false }
-func (s *stubCoordinator) IsSessionBusy(id string) bool {
+func (s *stubCoordinator) HasPendingWork(id string) bool {
 	return s.busy[id]
 }
 func (s *stubCoordinator) QueuedPrompts(string) int          { return 0 }

@@ -336,8 +336,8 @@ it the model sees a one-line index instead:
 ```text
 <available_mcp>
 MCP servers are connected, but their tool schemas are hidden to save context.
-Call mcp_search with what you need, e.g. "create a pull request"; loaded
-tools are callable on your next step.
+Call mcp_search with what you need, e.g. "create a pull request".
+Loaded tools are callable on your next step, so continue the task rather than asking the user to proceed.
 - github: 28 tools hidden, use mcp_search to load them
 </available_mcp>
 ```
@@ -347,14 +347,27 @@ step. Loaded tools stay available for the rest of the session, up to 32 at a
 time, and a tool the model calls by an exact name still runs even if it was
 never listed.
 
+### Controlling laziness
+
+Laziness is on by default. Switch it from the command palette:
+
+- **Disable Lazy MCP Tools** / **Enable Lazy MCP Tools** flips the global
+  default for every server that has no override of its own.
+- **Toggle MCPs** lists each server with its state, rendered as
+  `connected · lazy` or `connected · pinned`; press `l` to pin or unpin the
+  selected server.
+
+The same settings in config:
+
 ```bash
 option lazy-mcp false                       # show every tool again
 mcp add github --type http --lazy false      # pin one server into context
 ```
 
 Pinning suits tools needed in nearly every turn: it trades context for one
-fewer round trip. A server stays connected either way, so pinning never
-reconnects it, and its prompts, resources, and `/mcp` status are unchanged.
+fewer round trip. Either change only decides what the model is shown, so a
+server is never reconnected and its prompts, resources, and `/mcp` status are
+unaffected. Both take effect on the next prompt.
 
 ### lsp
 

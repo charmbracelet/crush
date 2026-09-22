@@ -143,6 +143,13 @@ type MCPSetServerDisabledRequest struct {
 	Disabled bool   `json:"disabled"`
 }
 
+// MCPSetLazyRequest changes the lazy-MCP policy. An empty Name sets the
+// global options.lazy_mcp default; a named server gets its own override.
+type MCPSetLazyRequest struct {
+	Name string `json:"name,omitempty"`
+	Lazy bool   `json:"lazy"`
+}
+
 // MCPPendingAuthServer describes an MCP server awaiting OAuth
 // authentication, returned to clients so they can prompt the user.
 type MCPPendingAuthServer struct {

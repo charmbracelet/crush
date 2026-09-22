@@ -645,6 +645,14 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 			Fails(400, 404, 500).
 			Handle(c.handlePostWorkspaceMCPSetServerConfigDisabled),
 
+		apigen.Post("/v1/workspaces/{id}/mcp/lazy").
+			Summary("Set MCP lazy loading").
+			Tags("mcp").
+			PathParam("id", "Workspace ID").
+			Accepts(proto.MCPSetLazyRequest{}).
+			Fails(400, 404, 500).
+			Handle(c.handlePostWorkspaceMCPSetLazy),
+
 		apigen.Post("/v1/workspaces/{id}/mcp/start").
 			Summary("Start an MCP server").
 			Tags("mcp").

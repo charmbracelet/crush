@@ -147,6 +147,29 @@ func (b *Backend) SetMCPServerConfigDisabled(ctx context.Context, workspaceID, n
 	return mcptools.SetConfigDisabled(ctx, ws.Cfg, config.ScopeGlobal, name, disabled)
 }
 
+// SetMCPLazy changes the lazy-MCP policy for a workspace. An empty name
+// flips the global options.lazy_mcp default; otherwise the named server gets
+// its own override. This is a context-presentation setting, so unlike the
+// disabled flag it never restarts a server: clients just need to refresh
+// their cached config.
+func (b *Backend) SetMCPLazy(workspaceID, name string, lazy bool) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+
+	if name == "" {
+		if err := ws.Cfg.SetLazyMCPConfig(config.ScopeGlobal, lazy); err != nil {
+			return err
+		}
+	} else if err := ws.Cfg.SetMCPServerLazyConfig(config.ScopeGlobal, name, &lazy); err != nil {
+		return err
+	}
+
+	publishConfigChanged(ws)
+	return nil
+}
+
 // StartMCPServer starts the named MCP server for the given workspace even
 // when its config entry is disabled. Runtime-only.
 func (b *Backend) StartMCPServer(ctx context.Context, workspaceID, name string) error {

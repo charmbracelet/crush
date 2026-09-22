@@ -776,6 +776,10 @@ func (w *ClientWorkspace) MCPSetServerConfigDisabled(ctx context.Context, name s
 	return w.client.SetMCPServerConfigDisabled(ctx, w.workspaceID(), name, disabled)
 }
 
+func (w *ClientWorkspace) MCPSetLazy(ctx context.Context, name string, lazy bool) error {
+	return w.client.SetMCPLazy(ctx, w.workspaceID(), name, lazy)
+}
+
 func (w *ClientWorkspace) MCPStartServer(ctx context.Context, name string) error {
 	return w.client.StartMCPServer(ctx, w.workspaceID(), name)
 }

@@ -134,3 +134,58 @@ func TestMCPToggles_NavigationClamps(t *testing.T) {
 
 	require.IsType(t, ActionClose{}, m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEscape}))
 }
+
+func TestMCPToggles_LazyToggle(t *testing.T) {
+	t.Parallel()
+
+	m := newMCPTogglesForTest([]MCPToggleItem{
+		{Name: "docker", Status: "connected", Lazy: true},
+		{Name: "serena", Status: "connected"},
+	})
+
+	// Laziness is the default, so the first row starts lazy and the second
+	// is pinned; "l" flips either way.
+	action := m.HandleMsg(tea.KeyPressMsg{Code: 'l'})
+	pinned, ok := action.(ActionToggleMCPLazy)
+	require.True(t, ok, "l must emit a lazy toggle")
+	require.Equal(t, "docker", pinned.Name)
+	require.False(t, pinned.Lazy, "l should pin a lazy server")
+	require.False(t, m.Items()[0].Lazy)
+
+	m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyDown})
+	action = m.HandleMsg(tea.KeyPressMsg{Code: 'l'})
+	pinned, ok = action.(ActionToggleMCPLazy)
+	require.True(t, ok)
+	require.Equal(t, "serena", pinned.Name)
+	require.True(t, pinned.Lazy, "l should unpin a pinned server")
+	require.True(t, m.Items()[1].Lazy)
+
+	// The lazy key must stay distinct from the enable/disable toggle.
+	action = m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.IsType(t, ActionToggleMCP{}, action)
+}
+
+func TestMCPToggles_LazyLabel(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, "lazy", MCPToggleItem{Status: "connected", Lazy: true}.lazyLabel())
+	require.Equal(t, "pinned", MCPToggleItem{Status: "connected"}.lazyLabel())
+	// A disabled server has no tools to hide, so it carries no marker.
+	require.Empty(t, MCPToggleItem{Status: "disabled", ConfigDisabled: true, Lazy: true}.lazyLabel())
+}
+
+func TestMCPToggles_SetItemLazy(t *testing.T) {
+	t.Parallel()
+
+	m := newMCPTogglesForTest([]MCPToggleItem{
+		{Name: "docker", Status: "connected", Lazy: true},
+	})
+
+	m.SetItemLazy("docker", false)
+	require.False(t, m.Items()[0].Lazy)
+	require.Equal(t, "connected", m.Items()[0].Status, "status must survive")
+
+	// Unknown names are ignored rather than panicking.
+	m.SetItemLazy("nope", true)
+	require.Len(t, m.Items(), 1)
+}

@@ -177,6 +177,7 @@ func (m *UI) mcpToggleItems() ([]dialog.MCPToggleItem, error) {
 			ConfigDisabled:  configured.MCP.Disabled,
 			EnabledOverride: enabledOverride,
 			Status:          mcpStatusText(m.mcpStates[configured.Name]),
+			Lazy:            configured.MCP.IsLazy(m.com.Config().Options),
 		}
 		if _, off := disabled[configured.Name]; off {
 			item.Disabled = true
@@ -217,6 +218,41 @@ func (m *UI) applyMCPToggle(msg dialog.ActionToggleMCP) tea.Cmd {
 			return util.NewErrorMsg(err)
 		}
 		return util.NewInfoMsg(fmt.Sprintf("MCP %q %s for this repository", name, status))
+	}
+}
+
+// applyMCPLazyToggle pins or unpins one server's tools by writing
+// mcp.<name>.lazy. Nothing reconnects: the change only decides whether the
+// server's schemas go into the model's next request.
+func (m *UI) applyMCPLazyToggle(msg dialog.ActionToggleMCPLazy) tea.Cmd {
+	state := "loaded on demand"
+	if !msg.Lazy {
+		state = "always shown"
+	}
+	return func() tea.Msg {
+		if err := m.com.Workspace.MCPSetLazy(context.TODO(), msg.Name, msg.Lazy); err != nil {
+			return util.NewErrorMsg(err)
+		}
+		return util.NewInfoMsg(fmt.Sprintf("MCP %q tools %s", msg.Name, state))
+	}
+}
+
+// applyLazyMCPGlobal flips the options.lazy_mcp default. Servers with their
+// own mcp.<name>.lazy override are unaffected, which is the point of a
+// default rather than a kill switch.
+func (m *UI) applyLazyMCPGlobal() tea.Cmd {
+	// No busy guard: the switch takes effect on the next prompt, so flipping
+	// it while the agent works is harmless.
+	next := !m.com.Config().Options.GetLazyMCP()
+	state := "enabled"
+	if !next {
+		state = "disabled"
+	}
+	return func() tea.Msg {
+		if err := m.com.Workspace.MCPSetLazy(context.TODO(), "", next); err != nil {
+			return util.NewErrorMsg(err)
+		}
+		return util.NewInfoMsg("Lazy MCP tools " + state)
 	}
 }
 

@@ -19,13 +19,17 @@ const SupportedOutputVersion = 1
 // Payload is the JSON structure piped to hook commands via stdin.
 // ToolInput is emitted as a parsed JSON object for compatibility with
 // Claude Code hooks (which expect tool_input to be an object, not a
-// string).
+// string). The event name is emitted twice for the same reason: a Claude
+// Code hook is a single command wired to every event and reads
+// hook_event_name to tell them apart, so without that key it takes its
+// default branch and silently does nothing.
 type Payload struct {
-	Event     string          `json:"event"`
-	SessionID string          `json:"session_id"`
-	CWD       string          `json:"cwd"`
-	ToolName  string          `json:"tool_name"`
-	ToolInput json.RawMessage `json:"tool_input"`
+	Event         string          `json:"event"`
+	HookEventName string          `json:"hook_event_name"`
+	SessionID     string          `json:"session_id"`
+	CWD           string          `json:"cwd"`
+	ToolName      string          `json:"tool_name"`
+	ToolInput     json.RawMessage `json:"tool_input"`
 }
 
 // BuildPayload constructs the JSON stdin payload for a hook command.
@@ -35,11 +39,12 @@ func BuildPayload(eventName, sessionID, cwd, toolName, toolInputJSON string) []b
 		toolInput = json.RawMessage("{}")
 	}
 	p := Payload{
-		Event:     eventName,
-		SessionID: sessionID,
-		CWD:       cwd,
-		ToolName:  toolName,
-		ToolInput: toolInput,
+		Event:         eventName,
+		HookEventName: eventName,
+		SessionID:     sessionID,
+		CWD:           cwd,
+		ToolName:      toolName,
+		ToolInput:     toolInput,
 	}
 	data, err := json.Marshal(p)
 	if err != nil {

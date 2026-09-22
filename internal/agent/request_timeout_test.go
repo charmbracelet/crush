@@ -19,6 +19,7 @@ type fakeLanguageModel struct {
 	generateCtx context.Context
 	streamCtx   context.Context
 	stream      func(yield func(fantasy.StreamPart) bool)
+	provider    string
 }
 
 func (f *fakeLanguageModel) Generate(ctx context.Context, _ fantasy.Call) (*fantasy.Response, error) {
@@ -44,8 +45,13 @@ func (f *fakeLanguageModel) StreamObject(context.Context, fantasy.ObjectCall) (f
 	return nil, nil
 }
 
-func (f *fakeLanguageModel) Provider() string { return "fake" }
-func (f *fakeLanguageModel) Model() string    { return "fake-model" }
+func (f *fakeLanguageModel) Provider() string {
+	if f.provider != "" {
+		return f.provider
+	}
+	return "fake"
+}
+func (f *fakeLanguageModel) Model() string { return "fake-model" }
 
 func TestNewRequestTimeoutModel_Disabled(t *testing.T) {
 	t.Parallel()

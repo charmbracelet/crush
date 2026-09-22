@@ -31,6 +31,7 @@ import (
 	"charm.land/fantasy/providers/bedrock"
 	"charm.land/fantasy/providers/google"
 	"charm.land/fantasy/providers/openai"
+	"charm.land/fantasy/providers/openaicompat"
 	"charm.land/fantasy/providers/openrouter"
 	"charm.land/fantasy/providers/vercel"
 	"charm.land/lipgloss/v2"
@@ -836,6 +837,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			}
 
 			prepared.Messages = a.workaroundProviderMediaLimitations(prepared.Messages, largeModel)
+			prepared.Messages = a.workaroundReasoningReplay(prepared.Messages, largeModel)
 
 			lastSystemRoleInx := 0
 			systemMessageUpdated := false
@@ -1395,6 +1397,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		},
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 			prepared.Messages = options.Messages
+			prepared.Messages = a.workaroundReasoningReplay(prepared.Messages, largeModel)
 			if systemPromptPrefix != "" {
 				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(systemPromptPrefix)}, prepared.Messages...)
 			}
@@ -2259,6 +2262,42 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 	}
 
 	return convertedMessages
+}
+
+// workaroundReasoningReplay satisfies the DeepSeek/Kimi thinking-mode
+// replay contract on strict OpenAI-compatible upstreams: when the request
+// carries tools, an assistant tool-call turn without a reasoning_content
+// field is rejected ("The reasoning_content in the thinking mode must be
+// passed back to the API"), and the failure repeats on every retry because
+// the offending message stays in history. Turns where the model skipped
+// thinking, or whose reasoning was lost to a stream error, have no
+// reasoning part to replay, so we inject an empty one; the openaicompat
+// provider then emits the field ("reasoning_content": ""), which strict
+// upstreams accept.
+func (a *sessionAgent) workaroundReasoningReplay(messages []fantasy.Message, largeModel Model) []fantasy.Message {
+	if largeModel.Model.Provider() != openaicompat.Name {
+		return messages
+	}
+	for i, msg := range messages {
+		if msg.Role != fantasy.MessageRoleAssistant {
+			continue
+		}
+		hasToolCall := false
+		hasReasoning := false
+		for _, part := range msg.Content {
+			switch part.GetType() {
+			case fantasy.ContentTypeToolCall:
+				hasToolCall = true
+			case fantasy.ContentTypeReasoning:
+				hasReasoning = true
+			}
+		}
+		if !hasToolCall || hasReasoning {
+			continue
+		}
+		messages[i].Content = append([]fantasy.MessagePart{fantasy.ReasoningPart{}}, msg.Content...)
+	}
+	return messages
 }
 
 // buildSummaryPrompt constructs the prompt text for session summarization.

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -13,6 +14,7 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
+	"charm.land/fantasy/providers/openaicompat"
 	"charm.land/x/vcr"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
@@ -1319,6 +1321,89 @@ func TestWorkaroundProviderMediaLimitations_AnthropicProvider(t *testing.T) {
 	media, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentMedia](tr.Output)
 	require.True(t, ok)
 	require.Equal(t, "image/png", media.MediaType)
+}
+
+func TestWorkaroundReasoningReplay(t *testing.T) {
+	t.Parallel()
+
+	agent := &sessionAgent{}
+
+	openaiCompat := Model{Model: &fakeLanguageModel{provider: "openai-compat"}}
+	other := Model{Model: &fakeLanguageModel{provider: "anthropic"}}
+
+	toolCall := fantasy.ToolCallPart{ToolCallID: "call_1", ToolName: "bash", Input: "{}"}
+
+	t.Run("injects empty reasoning on a tool-call turn", func(t *testing.T) {
+		messages := []fantasy.Message{
+			{Role: fantasy.MessageRoleAssistant, Content: []fantasy.MessagePart{toolCall}},
+		}
+
+		result := agent.workaroundReasoningReplay(messages, openaiCompat)
+		require.Len(t, result, 1)
+		require.Len(t, result[0].Content, 2)
+		reasoning, ok := fantasy.AsMessagePart[fantasy.ReasoningPart](result[0].Content[0])
+		require.True(t, ok, "reasoning part must come first")
+		require.Empty(t, reasoning.Text)
+		_, ok = fantasy.AsMessagePart[fantasy.ToolCallPart](result[0].Content[1])
+		require.True(t, ok)
+	})
+
+	t.Run("injected reasoning reaches the wire", func(t *testing.T) {
+		messages := []fantasy.Message{
+			{Role: fantasy.MessageRoleAssistant, Content: []fantasy.MessagePart{toolCall}},
+		}
+
+		result := agent.workaroundReasoningReplay(messages, openaiCompat)
+		out, _ := openaicompat.ToPromptFunc(fantasy.Prompt(result), "", "")
+		raw, err := json.Marshal(out)
+		require.NoError(t, err)
+		// Strict thinking-mode upstreams reject a tool-call turn whose
+		// assistant message lacks the field, even when there is nothing to
+		// replay.
+		require.Contains(t, string(raw), `"reasoning_content":""`)
+	})
+
+	t.Run("keeps an existing reasoning part", func(t *testing.T) {
+		messages := []fantasy.Message{
+			{
+				Role: fantasy.MessageRoleAssistant,
+				Content: []fantasy.MessagePart{
+					fantasy.ReasoningPart{Text: "let me check"},
+					toolCall,
+				},
+			},
+		}
+
+		result := agent.workaroundReasoningReplay(messages, openaiCompat)
+		require.Len(t, result[0].Content, 2)
+		reasoning, ok := fantasy.AsMessagePart[fantasy.ReasoningPart](result[0].Content[0])
+		require.True(t, ok)
+		require.Equal(t, "let me check", reasoning.Text)
+	})
+
+	t.Run("leaves non openai-compat providers alone", func(t *testing.T) {
+		messages := []fantasy.Message{
+			{Role: fantasy.MessageRoleAssistant, Content: []fantasy.MessagePart{toolCall}},
+		}
+
+		result := agent.workaroundReasoningReplay(messages, other)
+		require.Len(t, result[0].Content, 1)
+		_, ok := fantasy.AsMessagePart[fantasy.ToolCallPart](result[0].Content[0])
+		require.True(t, ok)
+	})
+
+	t.Run("leaves turns without tool calls alone", func(t *testing.T) {
+		messages := []fantasy.Message{
+			{Role: fantasy.MessageRoleAssistant, Content: []fantasy.MessagePart{fantasy.TextPart{Text: "hi"}}},
+			{Role: fantasy.MessageRoleUser, Content: []fantasy.MessagePart{fantasy.TextPart{Text: "hey"}}},
+		}
+
+		result := agent.workaroundReasoningReplay(messages, openaiCompat)
+		require.Len(t, result[0].Content, 1)
+		_, ok := fantasy.AsMessagePart[fantasy.TextPart](result[0].Content[0])
+		require.True(t, ok)
+		require.Len(t, result[1].Content, 1)
+	})
 }
 
 func TestProviderRetryLogFields(t *testing.T) {

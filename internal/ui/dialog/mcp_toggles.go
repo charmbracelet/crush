@@ -31,6 +31,21 @@ type MCPToggleItem struct {
 	EnabledOverride bool
 	// Status is the human-readable connection status.
 	Status string
+	// Lazy is the effective lazy state: the server's tool schemas stay out
+	// of the model context until mcp_search loads them.
+	Lazy bool
+}
+
+// lazyLabel names the lazy state for the row. A disabled server has no tools
+// to hide, so it carries no label at all.
+func (i MCPToggleItem) lazyLabel() string {
+	if i.localDisabled() {
+		return ""
+	}
+	if i.Lazy {
+		return "lazy"
+	}
+	return "pinned"
 }
 
 // localDisabled returns the effective local state: a config-disabled
@@ -47,6 +62,14 @@ type ActionToggleMCP struct {
 	Name     string
 	Disabled bool
 	Global   bool
+}
+
+// ActionToggleMCPLazy is sent when the user pins or unpins one server's
+// tools. Lazy is the new state, which the dialog has already applied to its
+// row. This writes the config and never reconnects the server.
+type ActionToggleMCPLazy struct {
+	Name string
+	Lazy bool
 }
 
 // MCPToggleScope selects which store a toggle affects.
@@ -68,7 +91,8 @@ func (s MCPToggleScope) String() string {
 }
 
 // MCPToggles lets the user enable and disable MCP servers, either for
-// the current repository (Local, the default) or in the config (Global).
+// the current repository (Local, the default) or in the config (Global),
+// and pin or unpin individual servers' tools in the model context.
 type MCPToggles struct {
 	com    *common.Common
 	width  int
@@ -77,11 +101,12 @@ type MCPToggles struct {
 	scope  MCPToggleScope
 	help   help.Model
 	keyMap struct {
-		Up     key.Binding
-		Down   key.Binding
-		Toggle key.Binding
-		Scope  key.Binding
-		Close  key.Binding
+		Up         key.Binding
+		Down       key.Binding
+		Toggle     key.Binding
+		ToggleLazy key.Binding
+		Scope      key.Binding
+		Close      key.Binding
 	}
 }
 
@@ -110,6 +135,10 @@ func NewMCPToggles(com *common.Common, items []MCPToggleItem) *MCPToggles {
 	m.keyMap.Toggle = key.NewBinding(
 		key.WithKeys("enter", " ", "space"),
 		key.WithHelp("enter", "toggle"),
+	)
+	m.keyMap.ToggleLazy = key.NewBinding(
+		key.WithKeys("l"),
+		key.WithHelp("l", "lazy"),
 	)
 	m.keyMap.Scope = key.NewBinding(
 		key.WithKeys("tab"),
@@ -180,6 +209,14 @@ func (m *MCPToggles) HandleMsg(msg tea.Msg) Action {
 				Disabled: newState,
 				Global:   m.scope == MCPToggleScopeGlobal,
 			}
+		case key.Matches(msg, m.keyMap.ToggleLazy):
+			if m.cursor < 0 || m.cursor >= len(m.items) {
+				return nil
+			}
+			item := m.items[m.cursor]
+			newLazy := !item.Lazy
+			m.items[m.cursor].Lazy = newLazy
+			return ActionToggleMCPLazy{Name: item.Name, Lazy: newLazy}
 		case key.Matches(msg, m.keyMap.Close):
 			return ActionClose{}
 		}
@@ -202,7 +239,11 @@ func (m *MCPToggles) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 func (m *MCPToggles) requiredWidth(t *styles.Styles) int {
 	widest := 48 // Comfortable minimum so short names don't shrink the dialog.
 	for _, item := range m.items {
-		row := 2 /* dot + space */ + lipgloss.Width(item.Name) + 1 + lipgloss.Width(m.itemStatus(item))
+		status := m.itemStatus(item)
+		if label := item.lazyLabel(); label != "" {
+			status += " · " + label
+		}
+		row := 2 /* dot + space */ + lipgloss.Width(item.Name) + 1 + lipgloss.Width(status)
 		widest = max(widest, row)
 	}
 	return widest + 2 /* row padding */ + t.Dialog.View.GetHorizontalFrameSize()
@@ -254,6 +295,9 @@ func (m *MCPToggles) innerContent() string {
 		// their own "●" via SetString, so Render() yields just the dot.
 		// It sits left of the name, like the sidebar rows.
 		dot := statusDot(t, status)
+		if label := item.lazyLabel(); label != "" {
+			status += " · " + label
+		}
 		gap := max(1, rowWidth-2 /* dot + space */ -lipgloss.Width(item.Name)-lipgloss.Width(status))
 
 		if i == m.cursor {
@@ -340,6 +384,17 @@ func (m *MCPToggles) SetItemStatus(name, status string) {
 	}
 }
 
+// SetItemLazy refreshes one item's lazy state without disturbing anything
+// else, so an open dialog reflects a config reload or a global flip.
+func (m *MCPToggles) SetItemLazy(name string, lazy bool) {
+	for i, item := range m.items {
+		if item.Name == name {
+			m.items[i].Lazy = lazy
+			return
+		}
+	}
+}
+
 // FullHelp implements help.KeyMap.
 func (m *MCPToggles) FullHelp() [][]key.Binding {
 	return [][]key.Binding{m.ShortHelp()}
@@ -347,5 +402,5 @@ func (m *MCPToggles) FullHelp() [][]key.Binding {
 
 // ShortHelp implements help.KeyMap.
 func (m *MCPToggles) ShortHelp() []key.Binding {
-	return []key.Binding{m.keyMap.Up, m.keyMap.Down, m.keyMap.Toggle, m.keyMap.Scope, m.keyMap.Close}
+	return []key.Binding{m.keyMap.Up, m.keyMap.Down, m.keyMap.Toggle, m.keyMap.ToggleLazy, m.keyMap.Scope, m.keyMap.Close}
 }

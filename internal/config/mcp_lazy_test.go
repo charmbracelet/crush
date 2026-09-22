@@ -97,6 +97,28 @@ func TestConfigAnyMCPLazy(t *testing.T) {
 	}.AnyMCPLazy(), "one unpinned server is enough")
 }
 
+func TestSetLazyMCPConfigWrites(t *testing.T) {
+	t.Parallel()
+
+	globalPath := filepath.Join(t.TempDir(), "crush.json")
+	store := &ConfigStore{
+		config:         &Config{MCP: map[string]MCPConfig{"docker": {Type: MCPStdio}}},
+		globalDataPath: globalPath,
+	}
+
+	require.NoError(t, store.SetLazyMCPConfig(ScopeGlobal, false))
+	data, err := os.ReadFile(globalPath)
+	require.NoError(t, err)
+	require.Equal(t, false, gjson.GetBytes(data, "options.lazy_mcp").Bool())
+	require.False(t, store.Config().Options.GetLazyMCP())
+
+	// Flipping the default must leave per-server entries alone.
+	require.False(t, gjson.GetBytes(data, "mcp.docker.lazy").Exists())
+
+	require.NoError(t, store.SetLazyMCPConfig(ScopeGlobal, true))
+	require.True(t, store.Config().Options.GetLazyMCP())
+}
+
 func TestSetMCPServerLazyConfigRequiresConfiguredServer(t *testing.T) {
 	t.Parallel()
 

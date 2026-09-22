@@ -522,6 +522,15 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_mcps", "Toggle MCPs", "", ActionOpenDialog{
 			DialogID: MCPTogglesID,
 		}))
+
+		// The label carries the current state so the switch is legible
+		// without opening anything. Laziness is on unless something has
+		// written it false.
+		lazyLabel := "Disable Lazy MCP Tools"
+		if !cfg.Options.GetLazyMCP() {
+			lazyLabel = "Enable Lazy MCP Tools"
+		}
+		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_lazy_mcp", lazyLabel, "", ActionToggleLazyMCP{}))
 	}
 
 	if c.hasTodos || c.hasQueue {

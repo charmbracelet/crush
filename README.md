@@ -486,10 +486,11 @@ one index line per server and calls `mcp_search` to load the handful of tools
 a task actually needs. Loaded tools remain available for the rest of the
 session, and every server counts here, including the built-in Docker catalog.
 
-Turn it off globally with `"lazy_mcp": false`, or pin one server into context
-with `"lazy": false` (or `--lazy false`). Pinning suits tools needed in nearly
-every turn: it trades context for one fewer round trip and never reconnects
-the server.
+Turn it off from the command palette with **Disable Lazy MCP Tools**, or pin a
+single server with `l` in the **Toggle MCPs** dialog. The config equivalents
+are `"lazy_mcp": false` and `"lazy": false` (or `--lazy false`). Pinning suits
+tools needed in nearly every turn: it trades context for one fewer round trip
+and never reconnects the server.
 
 #### Sessionless servers
 

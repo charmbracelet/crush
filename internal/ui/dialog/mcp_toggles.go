@@ -172,7 +172,7 @@ func (m *MCPToggles) HandleMsg(msg tea.Msg) Action {
 				// for the connection state event.
 				if item.ConfigDisabled && !newState {
 					m.items[m.cursor].EnabledOverride = true
-					m.items[m.cursor].Status = "starting..."
+					m.items[m.cursor].Status = "starting"
 				}
 			}
 			return ActionToggleMCP{
@@ -195,14 +195,14 @@ func (m *MCPToggles) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	return nil
 }
 
-// requiredWidth returns the width needed to fit the widest row (name, at
-// least one space, and status) on a single line, plus row padding and the
-// dialog frame. A fixed 64-column cap word-wraps long server names onto a
-// second line.
+// requiredWidth returns the width needed to fit the widest row (status
+// dot, name, at least one space, and status) on a single line, plus row
+// padding and the dialog frame. A fixed 64-column cap word-wraps long
+// server names onto a second line.
 func (m *MCPToggles) requiredWidth(t *styles.Styles) int {
 	widest := 48 // Comfortable minimum so short names don't shrink the dialog.
 	for _, item := range m.items {
-		row := lipgloss.Width(item.Name) + 1 + lipgloss.Width(m.itemStatus(item))
+		row := 2 /* dot + space */ + lipgloss.Width(item.Name) + 1 + lipgloss.Width(m.itemStatus(item))
 		widest = max(widest, row)
 	}
 	return widest + 2 /* row padding */ + t.Dialog.View.GetHorizontalFrameSize()
@@ -249,43 +249,64 @@ func (m *MCPToggles) innerContent() string {
 	rows := make([]string, 0, len(m.items))
 	for i, item := range m.items {
 		status := m.itemStatus(item)
-		gap := max(1, rowWidth-lipgloss.Width(item.Name)-lipgloss.Width(status))
+		// The status dot mirrors the sidebar: green connected, yellow
+		// starting, red error, gray disabled/offline. Icon styles carry
+		// their own "●" via SetString, so Render() yields just the dot.
+		// It sits left of the name, like the sidebar rows.
+		dot := statusDot(t, status)
+		gap := max(1, rowWidth-2 /* dot + space */ -lipgloss.Width(item.Name)-lipgloss.Width(status))
 
 		if i == m.cursor {
-			// Render the full row (name + gap + status) through the
-			// selection style so the highlight covers both columns.
+			// The full row goes through the selection style in plain
+			// text: a styled dot or status inside the content would emit
+			// ANSI resets that clear the selection background for the
+			// rest of the line, leaving the status unhighlighted.
 			rows = append(rows, t.Dialog.SelectedItem.Render(
-				item.Name+strings.Repeat(" ", gap)+status,
+				"● "+item.Name+strings.Repeat(" ", gap)+status,
 			))
 			continue
 		}
 
-		// Enabled servers share the green used by the home-page MCP list.
-		// OnlineText (not OnlineIcon) carries no "●" prefix: rendering
-		// through the icon style would prepend the icon and push the row
-		// over the dialog width.
+		// OnlineText (not OnlineIcon) is the text style; the dot is
+		// rendered separately so no "●" prefix sneaks into the text
+		// and pushes the row over the dialog width.
 		statusStyle := t.Resource.OnlineText
 		if status == "disabled" {
 			// UnsetPadding: SecondaryText carries its own Padding(0, 1),
 			// which would widen the row one column past every other row.
 			statusStyle = t.Dialog.SecondaryText.UnsetPadding()
 		}
-		row := t.Dialog.NormalItem.UnsetPadding().Render(item.Name) +
+		row := dot.Render() + " " +
+			t.Dialog.NormalItem.UnsetPadding().Render(item.Name) +
 			strings.Repeat(" ", gap) +
 			statusStyle.Render(status)
-		// Match the selected branch: a single Padding(0, 1) around the row.
-		// NormalItem already carries its own padding, so using it to render
-		// the name plus an outer padding doubled the insets and pushed the
-		// row over the dialog width.
+		// A single Padding(0, 1) around the row.
 		rows = append(rows, lipgloss.NewStyle().Padding(0, 1).Render(row))
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, "", strings.Join(rows, "\n"), "")
 }
 
+// statusDot maps a status label to the sidebar's status icon style.
+func statusDot(t *styles.Styles, status string) lipgloss.Style {
+	switch {
+	case status == "connected":
+		return t.Resource.OnlineIcon
+	case status == "starting":
+		return t.Resource.BusyIcon
+	case status == "error" || strings.HasPrefix(status, "error:"):
+		return t.Resource.ErrorIcon
+	case status == "needs authentication":
+		return t.Resource.NeedsAuthIcon
+	default:
+		// disabled, offline
+		return t.Resource.DisabledIcon
+	}
+}
+
 // itemStatus returns the right-hand status label for an item. The live
 // connection state speaks for itself: a config-disabled server that was
-// runtime-enabled shows "starting..."/"connected", an untouched one shows
+// runtime-enabled shows "starting"/"connected", an untouched one shows
 // "disabled" via its connection state. Only a repository override (local
 // scope) or the config flag (global scope) forces the "disabled" label
 // over a live connection.

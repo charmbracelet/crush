@@ -56,7 +56,7 @@ func TestMCPToggles_ConfigDisabledCanBeEnabled(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "frozen", toggled.Name)
 	require.False(t, toggled.Disabled, "config-disabled servers must be enable-able")
-	require.Equal(t, "starting...", m.Items()[1].Status, "enabling a config-disabled server must show immediate feedback")
+	require.Equal(t, "starting", m.Items()[1].Status, "enabling a config-disabled server must show immediate feedback")
 }
 
 func TestMCPToggles_ScopeSwitchAndGlobalToggle(t *testing.T) {

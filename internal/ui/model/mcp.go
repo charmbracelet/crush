@@ -211,7 +211,9 @@ func (m *UI) applyMCPToggle(msg dialog.ActionToggleMCP) tea.Cmd {
 func mcpStatusText(info mcp.ClientInfo) string {
 	switch info.State {
 	case mcp.StateStarting:
-		return "starting..."
+		// No ellipsis: the text stays put when the state transitions,
+		// instead of jumping as the trailing dots appear and vanish.
+		return "starting"
 	case mcp.StateConnected:
 		return "connected"
 	case mcp.StateError:

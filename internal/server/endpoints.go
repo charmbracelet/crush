@@ -104,7 +104,11 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 			Summary("Stream workspace events (SSE)").
 			Description("Streams workspace events as Server-Sent Events. The client must "+
 				"identify itself with the client_id query parameter; the stream attaches "+
-				"the client to the workspace until it disconnects.").
+				"the client to the workspace until it disconnects. Permission and "+
+				"question prompts are scoped to the session the client currently "+
+				"views (see POST current-session): they are only delivered to clients "+
+				"viewing the session that raised them, and clients viewing no session "+
+				"receive none. All other events are workspace-wide.").
 			Tags("workspaces").
 			PathParam("id", "Workspace ID").
 			RequiredQueryParam("client_id", "Client ID (UUID)").

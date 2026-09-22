@@ -914,7 +914,9 @@ func (b *Backend) DeleteWorkspace(id, clientID string) error {
 // SetCurrentSession records which session the given client is
 // currently viewing within the workspace. Passing an empty sessionID
 // clears the client's current-session entry (e.g. the client has
-// returned to the landing screen).
+// returned to the landing screen). The recorded session scopes the
+// client's SSE stream: permission and question prompts are only
+// delivered to clients viewing the session that raised them.
 //
 // The client must be actually attached — i.e. its [clientState] entry
 // must exist and have at least one live stream. A bare creation hold
@@ -922,7 +924,7 @@ func (b *Backend) DeleteWorkspace(id, clientID string) error {
 // guards against zombie writes from a client that has detached and
 // against ghost presence from a hold-only client that never opened an
 // SSE stream.
-func (b *Backend) SetCurrentSession(workspaceID, clientID, sessionID string) error {
+func (b *Backend) SetCurrentSession(ctx context.Context, workspaceID, clientID, sessionID string) error {
 	if _, err := validateClientID(clientID); err != nil {
 		return err
 	}
@@ -931,17 +933,44 @@ func (b *Backend) SetCurrentSession(workspaceID, clientID, sessionID string) err
 		return ErrWorkspaceNotFound
 	}
 	ws.clientsMu.Lock()
-	defer ws.clientsMu.Unlock()
 	cs, ok := ws.clients[clientID]
 	if !ok || cs.streams == 0 {
 		// No entry, or hold-only (no live stream): refuse the
 		// write. The presence record this is meant to feed
 		// should only reflect clients that can actually observe
 		// session events.
+		ws.clientsMu.Unlock()
 		return ErrClientNotAttached
 	}
 	cs.currentSessionID = sessionID
+	ws.clientsMu.Unlock()
+
+	// A prompt that was raised while no client viewed the session
+	// would otherwise stay unanswered until the run is cancelled.
+	// Re-publish any pending prompt for the session the client just
+	// switched to; the per-client stream filter limits delivery to
+	// that session's viewers.
+	if sessionID != "" {
+		b.republishPendingPrompts(ctx, ws, sessionID)
+	}
 	return nil
+}
+
+// ClientCurrentSession returns the session the given client is
+// currently viewing within the workspace, or "" when the client has
+// no session selected (e.g. the landing screen) or is unknown.
+func (b *Backend) ClientCurrentSession(workspaceID, clientID string) string {
+	ws, ok := b.workspaces.Get(workspaceID)
+	if !ok {
+		return ""
+	}
+	ws.clientsMu.Lock()
+	defer ws.clientsMu.Unlock()
+	cs, ok := ws.clients[clientID]
+	if !ok {
+		return ""
+	}
+	return cs.currentSessionID
 }
 
 // AttachedClients returns the number of clients currently viewing

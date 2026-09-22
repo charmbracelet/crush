@@ -271,7 +271,7 @@ func (m *MCPToggles) innerContent() string {
 		// rendered separately so no "●" prefix sneaks into the text
 		// and pushes the row over the dialog width.
 		statusStyle := t.Resource.OnlineText
-		if status == "disabled" {
+		if status == "disabled" || status == "starting" {
 			// UnsetPadding: SecondaryText carries its own Padding(0, 1),
 			// which would widen the row one column past every other row.
 			statusStyle = t.Dialog.SecondaryText.UnsetPadding()

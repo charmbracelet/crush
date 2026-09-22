@@ -285,6 +285,143 @@ func TestEventBridge_PromptMetaEcho(t *testing.T) {
 	require.Empty(t, n.Meta)
 }
 
+// TestEventBridge_PlanUpdateFromTodos verifies a todos tool result is surfaced
+// as a full-replace plan update with mapped statuses (S4).
+func TestEventBridge_PlanUpdateFromTodos(t *testing.T) {
+	c2aR, c2aW := io.Pipe()
+	a2cR, a2cW := io.Pipe()
+	defer c2aR.Close()
+	defer c2aW.Close()
+	defer a2cR.Close()
+	defer a2cW.Close()
+
+	app := &app.App{Sessions: &stubSessionService{}}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := NewServer(app, log, c2aR, a2cW)
+	b := newEventBridge(srv.conn, app, log)
+
+	cc := &captureClient{ch: make(chan acp.SessionUpdate, 4)}
+	client := acp.NewClientSideConnection(cc, c2aW, a2cR)
+	go func() {
+		_, _ = client.Initialize(context.Background(), acp.InitializeRequest{ProtocolVersion: acp.ProtocolVersionNumber})
+	}()
+
+	toolMsg := message.Message{
+		ID:        "msg-todos",
+		SessionID: "sess-1",
+		Role:      message.Tool,
+		Parts: []message.ContentPart{
+			message.ToolResult{
+				ToolCallID: "call-todos",
+				Name:       "todos",
+				Content:    "Todo list updated successfully.",
+				Metadata:   `{"todos":[{"content":"First","status":"completed"},{"content":"Second","status":"in_progress"},{"content":"Third","status":"pending"}]}`,
+			},
+		},
+	}
+	b.handleMessage(context.Background(), toolMsg)
+
+	var sawPlan bool
+	for i := 0; i < 2; i++ {
+		var u acp.SessionUpdate
+		select {
+		case u = <-cc.ch:
+		case <-time.After(2 * time.Second):
+			t.Fatal("no update received")
+		}
+		if u.Plan == nil {
+			continue
+		}
+		sawPlan = true
+		require.Len(t, u.Plan.Entries, 3)
+		require.Equal(t, acp.PlanEntryStatusCompleted, u.Plan.Entries[0].Status)
+		require.Equal(t, acp.PlanEntryStatusInProgress, u.Plan.Entries[1].Status)
+		require.Equal(t, acp.PlanEntryStatusPending, u.Plan.Entries[2].Status)
+		require.Equal(t, acp.PlanEntryPriorityMedium, u.Plan.Entries[0].Priority)
+		require.Equal(t, "First", u.Plan.Entries[0].Content)
+	}
+	require.True(t, sawPlan, "plan update emitted for todos result")
+
+	// Non-todos results must not produce plan updates.
+	b.handleMessage(context.Background(), message.Message{
+		ID: "msg-other", SessionID: "sess-1", Role: message.Tool,
+		Parts: []message.ContentPart{
+			message.ToolResult{ToolCallID: "call-other", Name: "bash", Content: "out"},
+		},
+	})
+	select {
+	case u := <-cc.ch:
+		require.Nil(t, u.Plan, "plan update emitted for non-todos result")
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+// TestEventBridge_DiffContentForEdit verifies an edit tool result carries a
+// diff content block built from its old/new content metadata (S10 diff).
+func TestEventBridge_DiffContentForEdit(t *testing.T) {
+	c2aR, c2aW := io.Pipe()
+	a2cR, a2cW := io.Pipe()
+	defer c2aR.Close()
+	defer c2aW.Close()
+	defer a2cR.Close()
+	defer a2cW.Close()
+
+	app := &app.App{Sessions: &stubSessionService{}}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := NewServer(app, log, c2aR, a2cW)
+	b := newEventBridge(srv.conn, app, log)
+
+	cc := &captureClient{ch: make(chan acp.SessionUpdate, 4)}
+	client := acp.NewClientSideConnection(cc, c2aW, a2cR)
+	go func() {
+		_, _ = client.Initialize(context.Background(), acp.InitializeRequest{ProtocolVersion: acp.ProtocolVersionNumber})
+	}()
+
+	assistantMsg := message.Message{
+		ID: "msg-edit", SessionID: "sess-1", Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.ToolCall{ID: "call-edit", Name: "edit", Input: `{"file_path":"/tmp/f.go"}`},
+		},
+	}
+	b.handleMessage(context.Background(), assistantMsg)
+
+	toolMsg := message.Message{
+		ID: "msg-tool", SessionID: "sess-1", Role: message.Tool,
+		Parts: []message.ContentPart{
+			message.ToolResult{
+				ToolCallID: "call-edit",
+				Name:       "edit",
+				Content:    "File updated",
+				Metadata:   `{"old_content":"a\nb","new_content":"a\nc","additions":1,"removals":1}`,
+			},
+		},
+	}
+	b.handleMessage(context.Background(), toolMsg)
+
+	for i := 0; i < 2; i++ {
+		var u acp.SessionUpdate
+		select {
+		case u = <-cc.ch:
+		case <-time.After(2 * time.Second):
+			t.Fatal("no update received")
+		}
+		if u.ToolCallUpdate == nil || u.ToolCallUpdate.Content == nil {
+			continue
+		}
+		for _, c := range u.ToolCallUpdate.Content {
+			if c.Diff == nil {
+				continue
+			}
+			require.Equal(t, "/tmp/f.go", c.Diff.Path)
+			require.Equal(t, "a\nc", c.Diff.NewText)
+			require.NotNil(t, c.Diff.OldText)
+			require.Equal(t, "a\nb", *c.Diff.OldText)
+			return
+		}
+	}
+	t.Fatal("no diff content block emitted")
+}
+
 func TestSplitDelta_Spaces(t *testing.T) {
 	chunks := splitDelta("alpha bravo charlie delta echo foxtrot golf hotel")
 	if len(chunks) != 2 {

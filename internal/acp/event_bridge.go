@@ -43,6 +43,7 @@ type eventBridge struct {
 	toolCalls       map[string]map[string]bool // msgID -> toolCallID -> finished
 	toolResultSent  map[string]bool            // toolCallID -> content already sent
 	finished        map[string]bool            // toolCallID -> terminal status already reported
+	toolInputs      map[string]string          // toolCallID -> raw input JSON, for diff content
 	attachmentsSent map[string]int             // msgID -> binary content parts already sent
 	promptMeta      map[string]map[string]any  // sessionID -> _meta from session/prompt
 
@@ -90,6 +91,7 @@ func newEventBridge(conn *acp.AgentSideConnection, app *app.App, log *slog.Logge
 		toolCalls:       make(map[string]map[string]bool),
 		toolResultSent:  make(map[string]bool),
 		finished:        make(map[string]bool),
+		toolInputs:      make(map[string]string),
 		attachmentsSent: make(map[string]int),
 		promptMeta:      make(map[string]map[string]any),
 		pendingText:     make(map[string]bool),
@@ -255,7 +257,17 @@ func (b *eventBridge) streamToolResults(ctx context.Context, m message.Message) 
 			continue
 		}
 		b.toolResultSent[tr.ToolCallID] = true
+		input := b.toolInputs[tr.ToolCallID]
 		b.mu.Unlock()
+
+		// A todos tool result carries the full plan state; surface it as a
+		// plan update so clients render the agent's task list (S4).
+		if plan := planUpdateFor(tr); plan != nil {
+			note := b.note(acp.SessionId(m.SessionID), acp.SessionUpdate{Plan: plan})
+			if err := b.conn.SessionUpdate(ctx, note); err != nil {
+				b.log.Warn("Failed to send plan update", "error", err)
+			}
+		}
 
 		status := acp.ToolCallStatusCompleted
 		text := tr.Content
@@ -263,12 +275,17 @@ func (b *eventBridge) streamToolResults(ctx context.Context, m message.Message) 
 			status = acp.ToolCallStatusFailed
 			text = "Error: " + text
 		}
-		opts := []acp.ToolCallUpdateOpt{acp.WithUpdateStatus(status)}
+		var contents []acp.ToolCallContent
 		if text != "" {
+			contents = append(contents, acp.ToolContent(acp.TextBlock(text)))
+		}
+		if diff := diffContentFor(tr.Name, input, tr); diff != nil {
+			contents = append(contents, *diff)
+		}
+		opts := []acp.ToolCallUpdateOpt{acp.WithUpdateStatus(status)}
+		if len(contents) > 0 {
 			opts = append(opts,
-				acp.WithUpdateContent([]acp.ToolCallContent{
-					acp.ToolContent(acp.TextBlock(text)),
-				}),
+				acp.WithUpdateContent(contents),
 				acp.WithUpdateRawOutput(tr.Content),
 			)
 		}
@@ -430,6 +447,7 @@ func (b *eventBridge) streamToolCalls(ctx context.Context, m message.Message) {
 		prev, ok := seen[tc.ID]
 		if !ok {
 			seen[tc.ID] = tc.Finished
+			b.toolInputs[tc.ID] = tc.Input
 			starts = append(starts, action{id: tc.ID, name: tc.Name, input: tc.Input, finished: tc.Finished})
 		} else if prev != tc.Finished {
 			seen[tc.ID] = tc.Finished
@@ -471,6 +489,70 @@ func (b *eventBridge) streamToolCalls(ctx context.Context, m message.Message) {
 			b.log.Warn("Failed to send tool call update", "error", err)
 		}
 	}
+}
+
+// planUpdateFor converts a todos tool result's metadata into a plan update
+// (S4). Every notification carries the full entry list, which clients must
+// replace completely. Returns nil when the result is not a usable todos
+// result. Crush todos carry no priority, so medium is used for all entries.
+func planUpdateFor(tr message.ToolResult) *acp.SessionUpdatePlan {
+	if tr.Name != "todos" || tr.IsError {
+		return nil
+	}
+	var meta struct {
+		Todos []struct {
+			Content string `json:"content"`
+			Status  string `json:"status"`
+		} `json:"todos"`
+	}
+	if err := json.Unmarshal([]byte(tr.Metadata), &meta); err != nil || len(meta.Todos) == 0 {
+		return nil
+	}
+	entries := make([]acp.PlanEntry, 0, len(meta.Todos))
+	for _, todo := range meta.Todos {
+		status := acp.PlanEntryStatusPending
+		switch todo.Status {
+		case "in_progress":
+			status = acp.PlanEntryStatusInProgress
+		case "completed":
+			status = acp.PlanEntryStatusCompleted
+		}
+		entries = append(entries, acp.PlanEntry{
+			Content:  todo.Content,
+			Priority: acp.PlanEntryPriorityMedium,
+			Status:   status,
+		})
+	}
+	return &acp.SessionUpdatePlan{Entries: entries}
+}
+
+// diffContentFor builds ACP diff tool-call content for file-modifying tool
+// results (edit/multiedit) from their old/new content metadata. Returns nil
+// when no diff data is available. An empty old content means the file was
+// created, which the protocol represents as a diff without oldText.
+func diffContentFor(name, input string, tr message.ToolResult) *acp.ToolCallContent {
+	if tr.IsError || (name != "edit" && name != "multiedit") {
+		return nil
+	}
+	var meta struct {
+		OldContent string `json:"old_content"`
+		NewContent string `json:"new_content"`
+	}
+	if err := json.Unmarshal([]byte(tr.Metadata), &meta); err != nil || meta.NewContent == "" {
+		return nil
+	}
+	var params struct {
+		FilePath string `json:"file_path"`
+	}
+	if err := json.Unmarshal([]byte(input), &params); err != nil || params.FilePath == "" {
+		return nil
+	}
+	if meta.OldContent == "" {
+		content := acp.ToolDiffContent(params.FilePath, meta.NewContent)
+		return &content
+	}
+	content := acp.ToolDiffContent(params.FilePath, meta.NewContent, meta.OldContent)
+	return &content
 }
 
 // toolTitle derives a human-readable tool_call title from the tool name and

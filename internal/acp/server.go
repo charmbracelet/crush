@@ -119,9 +119,9 @@ func (d *dispatcher) LoadSession(ctx context.Context, req acp.LoadSessionRequest
 	}
 
 	// started tracks tool calls whose tool_call start update was already sent,
-	// so results arriving without a visible start (e.g. compacted history)
-	// still render correctly.
-	started := map[string]bool{}
+	// mapped to their raw input JSON so file-modifying results can carry diff
+	// content even when the call is missing from history.
+	started := map[string]string{}
 	send := func(update acp.SessionUpdate) error {
 		note := acp.SessionNotification{SessionId: req.SessionId, Update: update}
 		if len(req.Meta) > 0 {
@@ -131,9 +131,16 @@ func (d *dispatcher) LoadSession(ctx context.Context, req acp.LoadSessionRequest
 	}
 	emitToolResult := func(tr message.ToolResult) error {
 		id := acp.ToolCallId(tr.ToolCallID)
-		if !started[tr.ToolCallID] {
-			started[tr.ToolCallID] = true
+		input, seen := started[tr.ToolCallID]
+		if !seen {
+			started[tr.ToolCallID] = ""
 			if err := send(acp.StartToolCall(id, toolTitle(tr.Name, ""), acp.WithStartKind(toolKindFor(tr.Name)))); err != nil {
+				return err
+			}
+		}
+		// A todos result carries the full plan state; replay it (S4).
+		if plan := planUpdateFor(tr); plan != nil {
+			if err := send(acp.SessionUpdate{Plan: plan}); err != nil {
 				return err
 			}
 		}
@@ -143,11 +150,16 @@ func (d *dispatcher) LoadSession(ctx context.Context, req acp.LoadSessionRequest
 			status = acp.ToolCallStatusFailed
 			text = "Error: " + text
 		}
-		opts := []acp.ToolCallUpdateOpt{acp.WithUpdateStatus(status)}
+		var contents []acp.ToolCallContent
 		if text != "" {
-			opts = append(opts, acp.WithUpdateContent([]acp.ToolCallContent{
-				acp.ToolContent(acp.TextBlock(text)),
-			}))
+			contents = append(contents, acp.ToolContent(acp.TextBlock(text)))
+		}
+		if diff := diffContentFor(tr.Name, input, tr); diff != nil {
+			contents = append(contents, *diff)
+		}
+		opts := []acp.ToolCallUpdateOpt{acp.WithUpdateStatus(status)}
+		if len(contents) > 0 {
+			opts = append(opts, acp.WithUpdateContent(contents))
 		}
 		return send(acp.UpdateToolCall(id, opts...))
 	}
@@ -174,7 +186,7 @@ func (d *dispatcher) LoadSession(ctx context.Context, req acp.LoadSessionRequest
 				if m.Role != message.Assistant || p.ID == "" {
 					continue
 				}
-				started[p.ID] = true
+				started[p.ID] = p.Input
 				status := acp.ToolCallStatusInProgress
 				if p.Finished {
 					status = acp.ToolCallStatusCompleted

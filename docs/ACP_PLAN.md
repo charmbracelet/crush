@@ -107,7 +107,7 @@ The spec distinguishes `session/load` (MUST replay history via these) from
 | `agent_thought_chunk` | SHOULD (reasoning) | ✅ emitted via `streamThoughts` (S3) |
 | `tool_call` | SHOULD | ✅ emitted on tool start (S1) |
 | `tool_call_update` | SHOULD (`pending`/`in_progress`/`completed`/`failed`) | ✅ full lifecycle: `pending` emitted by `CheckPermission` before the permission request; `in_progress`/`completed` by the event bridge; `failed` on tool errors and permission denial (S10) |
-| `plan` | SHOULD | ❌ not emitted — no structured plan data model (SDK `UpdatePlan`/`SessionUpdatePlan` stable) |
+| `plan` | SHOULD | ✅ emitted as a full-replace update whenever the `todos` tool runs (S4): entries map from `session.Todo{Content, Status}` with `priority: medium` (todos carry no priority) |
 | `available_commands_update` | MAY | ✅ emitted on `session/new` (S8). Covers **custom markdown commands** (`commands.LoadCustomCommands`) + MCP prompts only. **Shell builtins** (`provider`, `model`, `mcp`, `lsp`, `permissions`, `hook`, `option`) are **not** advertised as ACP commands — see §4.2 |
 | `current_mode_update` | MAY | ✅ emitted on `session/set_mode` (S9) |
 | `config_option_update` | MAY | ✅ emitted on config change (S9) |
@@ -135,7 +135,7 @@ it** (SDK v0.13.5 still marks `MessageId` UNSTABLE; track on SDK bump).
 |---|---|---|
 | Emit `tool_call` + `tool_call_update` during execution | SHOULD | ✅ `StartToolCall`/`UpdateToolCall` from event bridge (S1); full status lifecycle (S10) |
 | Tool kinds: `read/edit/delete/move/search/execute/think/fetch/switch_mode/other` | OPTIONAL taxonomy | ✅ `toolKindFor` maps Crush tools to all kinds incl. `switch_mode` |
-| Tool content: `content` / `diff` / `terminal` | SHOULD | ⚠️ `content` (raw input as text) only; `diff`/`terminal` not emitted |
+| Tool content: `content` / `diff` / `terminal` | SHOULD | ⚠️ `content` always; `diff` emitted for `edit`/`multiedit` results (from old/new content metadata); `terminal` not emitted (deferred, O8) |
 | `toolCallId`, `name`, `title`, `kind`, `status`, `locations`, `rawInput`, `rawOutput` | `title` required, rest optional; **all fields except `toolCallId` are optional in updates** | ✅ human-readable `title` (tool + primary argument), `kind`, `status`, `locations` (input `path`/`file_path`), `rawInput` (decoded JSON), `rawOutput` (tool result content). `name` still unset (no SDK helper); `diff`/`terminal` content not emitted |
 | `session/request_permission` (4 option kinds: `allow_once`/`allow_always`/`reject_once`/`reject_always`) | MUST when needed | ✅ bridge implemented |
 | Client MUST respond `cancelled` to pending permission on `session/cancel` | MUST (client-side duty) | ⚠️ applies to the peer client; agent-side only aborts + returns `cancelled` stop reason |
@@ -441,7 +441,12 @@ current code state from §3.
   Test: `TestEventBridge_ToolCallEnrichment`, `TestEventBridge_ToolResultFailedStatus`.
 - [ ] **S2. `user_message_chunk` live-turn echo** on `session/prompt`. → **NOT ECHOED** (I-1 race; the client already holds the input). Still emitted on `session/load` replay — see §6.1 S2.
 - [x] **S3. `agent_thought_chunk`** for reasoning deltas. (`event_bridge.go`.)
-- [ ] **S4. `plan` updates** — each notification is a FULL replace. (`event_bridge.go`.)
+- [x] **S4. `plan` updates** — ✅ IMPLEMENTED (2026-09-22): the `todos` tool's
+  result metadata carries the full `session.Todo` list; the bridge emits it as a
+  full-replace `plan` update (entries map to `PlanEntry{Content, Priority:
+  medium, Status}`), both live and during `session/load` replay.
+  (`event_bridge.go` `planUpdateFor`, `server.go`.)
+  Test: `TestEventBridge_PlanUpdateFromTodos`.
 - [ ] **S5. `messageId`** on chunks (SDK field currently UNSTABLE; set once the SDK ships it).
 - [ ] **S6. Elicitation** — `elicitation/create` + `elicitation/complete`
   (form+url, `accept`/`decline`/`cancel`, unique `elicitationId`, no url→form
@@ -458,8 +463,8 @@ current code state from §3.
 - [x] **S10. Enrich `tool_call` events** — ✅ IMPLEMENTED (2026-09-22): `pending`
   on permission wait (emitted by `CheckPermission`), `failed` on denial and tool
   errors, human-readable `title` (tool + primary argument), `rawInput`,
-  `locations`, `rawOutput`. `name` and `diff`/`terminal` content remain unset
-  (`name` lacks an SDK helper; `diff` needs old/new text plumbing).
+  `locations`, `rawOutput`, and `diff` content for `edit`/`multiedit` results.
+  `name` remains unset (no SDK helper) and `terminal` content awaits O8.
   (`event_bridge.go`, `permission.go`.)
 
 **Tier 3 — Optional (MAY): full parity**
@@ -493,7 +498,8 @@ current code state from §3.
 >   methods (`clientCapabilities.auth.terminal`, `type:"terminal"`) are likewise
 >   not modelled. Revisit on the next SDK release.
 > - **Missing Crush subsystem (NOT SDK-gated — implementable with product work):**
->   **S4** `plan` updates (no plan data model to emit), **O8** terminals (could be
+>   ~~**S4** `plan` updates~~ (done 2026-09-22 — the existing `session.Todo`
+>   data model feeds `acp.UpdatePlan`), **O8** terminals (could be
 >   backed by `internal/shell` instead of a PTY lib — re-evaluate the deferral),
 >   **O9** per-session MCP — **decided Option B**: session-scoped `mcp.Initialize`
 >   at session start. No dynamic add/remove after start.
@@ -661,8 +667,7 @@ on load. See §3.3/§3.5 status and §4.
 
 Genuinely still open:
 - **MCP stdio connect at session setup** (§3.12) — spec MUST baseline, met via Option B (session-scoped `mcp.Initialize`).
-- **`plan` updates** (S4) — plan mode exists (produces markdown via `plan` agent + `plan.md.tpl`), but no structured `PlanEntry{Content, Priority, Status}` data model feeds `acp.UpdatePlan`. Blocker is the missing structured data layer, not the SDK (both `UpdatePlan` and `SessionUpdatePlan` are stable).
-- **Tool `name` field and `diff`/`terminal` tool content** (§3.5, §4.1) — `name` lacks an SDK helper; `diff` needs old/new text plumbing; `terminal` needs the deferred terminal subsystem.
+- **Tool `name` field and `terminal` tool content** (§3.5, §4.1) — `name` lacks an SDK helper; `terminal` needs the deferred terminal subsystem (O8).
 - **Boolean client-capability gate** (SDK-blocked, §4.1).
 - **`messageId`** on chunks (stable in spec; UNSTABLE in pinned SDK — S5).
 - **Elicitation** (`elicitation/create`/`complete`) on either side (S6) — UNSTABLE in SDK.
@@ -671,7 +676,7 @@ Genuinely still open:
 - **Terminal callbacks** in client track (O8, deferred) + terminal-auth methods (§4.1).
 - **Annotations on content blocks** (O16, MAY, low priority).
 
-Resolved 2026-09-22: `session/load` full-history replay (R7, tool/thought/result parts), tool-call `pending`/`failed` lifecycle (S10), tool `title`/`locations`/`rawInput`/`rawOutput`, `_meta` echo (S7), `session/resume` (O5), config `category` (O14), output-side image/audio (O15).
+Resolved 2026-09-22: `session/load` full-history replay (R7, tool/thought/result parts), tool-call `pending`/`failed` lifecycle (S10), tool `title`/`locations`/`rawInput`/`rawOutput`/`diff`, `plan` updates from todos results (S4), `_meta` echo (S7), `session/resume` (O5), config `category` (O14), output-side image/audio (O15).
 
 All baseline methods, permission bridge, fs read/write, text/resource_link/embedded
 content, `session/close`/`list`/`delete`, stdio transport, and capability advertising

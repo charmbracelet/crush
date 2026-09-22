@@ -788,6 +788,19 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	var stepMessages []fantasy.Message
 	var shouldSummarize bool
 	sanitizedToolCalls := make(map[string]bool)
+
+	// Track reasoning deltas so the timeout wrapper can reset its idle
+	// timer while the model is actively thinking.
+	var reasoningDeltaCount atomic.Int32
+	reasoningDeltaCount.Store(0)
+	reasoningDelta := func(delta string) {
+		reasoningDeltaCount.Add(1)
+	}
+	// If the underlying model supports SetReasoningDeltaCallback, wire it
+	// so the timeout wrapper resets its idle timer during thinking.
+	if setReasoning, ok := largeModel.Model.(reasoningDeltaSetter); ok {
+		setReasoning.SetReasoningDeltaCallback(reasoningDelta)
+	}
 	// Don't send MaxOutputTokens if 0 — some providers (e.g. LM Studio) reject it
 	var maxOutputTokens *int64
 	if call.MaxOutputTokens > 0 {

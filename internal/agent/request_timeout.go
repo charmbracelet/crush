@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"fmt"
 	"time"
 
@@ -52,6 +53,8 @@ func (e *requestTimeoutError) userMessage() string {
 // part arrives and only fires when the provider goes silent, so a slow but
 // actively streaming response is never aborted.
 type requestTimeoutModel struct {
+	reasoningCount  *atomic.Int32
+	onReasoningDelta func(string)
 	fantasy.LanguageModel
 	timeout time.Duration
 }
@@ -63,6 +66,40 @@ func newRequestTimeoutModel(m fantasy.LanguageModel, timeout time.Duration) fant
 		return m
 	}
 	return requestTimeoutModel{LanguageModel: m, timeout: timeout}
+}
+
+// newRequestTimeoutModelWithReasoning wraps m with the given timeout and a
+// reasoning delta callback. When the model is in a reasoning/thinking block,
+// the idle timer resets on each reasoning delta so timeouts don't fire while
+// the model is actively processing.
+func newRequestTimeoutModelWithReasoning(m fantasy.LanguageModel, timeout time.Duration,
+	onReasoningDelta func(string),
+) fantasy.LanguageModel {
+	if m == nil || timeout <= 0 {
+		return m
+	}
+	return requestTimeoutModel{
+		LanguageModel:      m,
+		timeout:            timeout,
+		reasoningCount:     &atomic.Int32{},
+		onReasoningDelta:   onReasoningDelta,
+	}
+}
+
+// SetReasoningDeltaCallback sets the callback that fires on each reasoning
+// delta chunk. Used to wire up the reasoning callback after the wrapper is
+// created, so the timeout model can reset its idle timer during thinking.
+func (m *requestTimeoutModel) SetReasoningDeltaCallback(onReasoningDelta func(string)) {
+	m.onReasoningDelta = onReasoningDelta
+	if m.reasoningCount == nil {
+		m.reasoningCount = &atomic.Int32{}
+	}
+}
+
+// reasoningDeltaSetter is an optional interface that timeout wrappers
+// implement so callers can inject the reasoning delta callback.
+type reasoningDeltaSetter interface {
+	SetReasoningDeltaCallback(func(string))
 }
 
 // wrapTimedOut replaces err with the requestTimeoutError when this model's
@@ -116,7 +153,28 @@ func (m requestTimeoutModel) Stream(ctx context.Context, call fantasy.Call) (fan
 		defer cancel(nil)
 		inner(func(part fantasy.StreamPart) bool {
 			timer.Reset(m.timeout)
-			part.Error = wrapTimedOut(ctx, timeoutErr, part.Error)
+			if part.Error != nil {
+				part.Error = wrapTimedOut(ctx, timeoutErr, part.Error)
+			}
+			// Track reasoning activity: when the model is thinking,
+			// reset the idle timer on each reasoning delta so timeouts
+			// don't fire while the model is actively processing.
+			switch part.Type {
+			case fantasy.StreamPartTypeReasoningStart:
+				m.reasoningCount.Add(1)
+			case fantasy.StreamPartTypeReasoningDelta:
+				if m.reasoningCount != nil && m.onReasoningDelta != nil {
+					m.reasoningCount.Add(1)
+					m.onReasoningDelta(part.Delta)
+					m.reasoningCount.Add(-1)
+				}
+				// Always reset timer on reasoning delta
+				timer.Reset(m.timeout)
+			case fantasy.StreamPartTypeReasoningEnd:
+				if m.reasoningCount != nil {
+					m.reasoningCount.Add(-1)
+				}
+			}
 			return yield(part)
 		})
 	}, nil

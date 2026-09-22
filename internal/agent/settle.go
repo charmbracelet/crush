@@ -230,3 +230,37 @@ func SettleInterruptedCalls(ctx context.Context, messages message.Service, sessi
 	_, err = repairInterruptedToolCalls(ctx, messages, msgs)
 	return err
 }
+
+// SessionBusyFunc reports whether a session has work in flight. A nil func
+// means nothing can be running, which is only true for a reader with no
+// agent attached.
+type SessionBusyFunc func(sessionID string) bool
+
+// ReadSettledMessages returns a session's transcript with any tool calls a
+// dead process left dangling already settled.
+//
+// Every reader wants the same three steps in the same order, so they live
+// here rather than at each call site: drain the debounce buffer, settle
+// orphaned calls when nothing is running, then read. The local and
+// client/server readers used to do this separately and only one of them
+// remembered to settle, so a remote client saw interrupted calls as still
+// running forever.
+func ReadSettledMessages(
+	ctx context.Context,
+	messages message.Service,
+	busy SessionBusyFunc,
+	sessionID string,
+) ([]message.Message, error) {
+	// Drain first so the settle pass sees the state the caller will,
+	// rather than racing the debounce timer in message.Service.
+	if err := messages.FlushAll(ctx); err != nil {
+		return nil, err
+	}
+	if busy == nil || !busy(sessionID) {
+		if err := SettleInterruptedCalls(ctx, messages, sessionID); err != nil {
+			slog.Warn("Failed to settle interrupted tool calls",
+				"session_id", sessionID, "error", err)
+		}
+	}
+	return messages.List(ctx, sessionID)
+}

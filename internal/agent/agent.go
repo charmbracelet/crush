@@ -1787,10 +1787,10 @@ func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.S
 		}
 	}
 
-	msgs, err = repairInterruptedToolCalls(ctx, a.messages, msgs)
-	if err != nil {
-		return nil, err
-	}
+	// Orphans are not repaired here. toolResultsForCalls answers every
+	// unanswered call on the way out, and ReadSettledMessages owns the
+	// durable repair, so this path never writes back the slice it has
+	// just rewritten in memory.
 	return msgs, nil
 }
 

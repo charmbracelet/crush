@@ -3,6 +3,7 @@ package backend
 import (
 	"context"
 
+	"github.com/charmbracelet/crush/internal/agent"
 	mcptools "github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
@@ -75,12 +76,14 @@ func (b *Backend) ListSessionMessages(ctx context.Context, workspaceID, sessionI
 	}
 
 	// Drain debounced updates so HTTP clients (and the TUI on session
-	// switch) observe the latest in-memory state rather than racing the
-	// debounce timer in message.Service.
-	if err := ws.Messages.FlushAll(ctx); err != nil {
-		return nil, err
+	// switch) observe the latest in-memory state, and settle any calls a
+	// dead process left dangling. Every remote client reads through here,
+	// so skipping the settle showed interrupted calls as still running.
+	var busy agent.SessionBusyFunc
+	if ws.AgentCoordinator != nil {
+		busy = ws.AgentCoordinator.IsSessionBusy
 	}
-	return ws.Messages.List(ctx, sessionID)
+	return agent.ReadSettledMessages(ctx, ws.Messages, busy, sessionID)
 }
 
 // ListSessionHistory returns the history items for a session.

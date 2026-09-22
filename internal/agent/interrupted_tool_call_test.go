@@ -47,15 +47,12 @@ func killedTurn(t *testing.T, env fakeEnv, finished bool) (session.Session, mess
 
 func TestRepairInterruptedToolCalls_WritesTheRepair(t *testing.T) {
 	env := testEnv(t)
-	agent := testSessionAgent(env, nil, nil, "test prompt").(*sessionAgent)
 	ctx := t.Context()
 
 	sess, assistant := killedTurn(t, env, false)
 
-	msgs, err := agent.getSessionMessages(ctx, sess)
-	require.NoError(t, err)
+	require.NoError(t, SettleInterruptedCalls(ctx, env.messages, sess.ID))
 
-	// The repair is durable, not just applied to the slice we were handed.
 	stored, err := env.messages.List(ctx, sess.ID)
 	require.NoError(t, err)
 
@@ -79,16 +76,6 @@ func TestRepairInterruptedToolCalls_WritesTheRepair(t *testing.T) {
 	require.True(t, calls[0].Finished, "a call that never got its arguments is settled")
 	require.Empty(t, calls[0].Input, "arguments that never arrived are not invented")
 	require.True(t, reloaded.IsFinished(), "the turn is marked finished")
-
-	// The returned slice carries the repair too, so the turn about to be
-	// built sees a complete transcript without re-reading.
-	var found bool
-	for _, msg := range msgs {
-		for _, tr := range msg.ToolResults() {
-			found = found || tr.ToolCallID == "call_killed"
-		}
-	}
-	require.True(t, found, "the repaired result must be in the returned messages")
 }
 
 // The finish part records when the turn actually stopped. Stamping it with
@@ -96,7 +83,6 @@ func TestRepairInterruptedToolCalls_WritesTheRepair(t *testing.T) {
 // took months to answer.
 func TestRepairInterruptedToolCalls_BackdatesTheFinish(t *testing.T) {
 	env := testEnv(t)
-	agent := testSessionAgent(env, nil, nil, "test prompt").(*sessionAgent)
 	ctx := t.Context()
 
 	sess, assistant := killedTurn(t, env, true)
@@ -104,8 +90,7 @@ func TestRepairInterruptedToolCalls_BackdatesTheFinish(t *testing.T) {
 	before, err := env.messages.Get(ctx, assistant.ID)
 	require.NoError(t, err)
 
-	_, err = agent.getSessionMessages(ctx, sess)
-	require.NoError(t, err)
+	require.NoError(t, SettleInterruptedCalls(ctx, env.messages, sess.ID))
 
 	reloaded, err := env.messages.Get(ctx, assistant.ID)
 	require.NoError(t, err)
@@ -118,7 +103,6 @@ func TestRepairInterruptedToolCalls_BackdatesTheFinish(t *testing.T) {
 // part must not be taken as proof that nothing is dangling.
 func TestRepairInterruptedToolCalls_RepairsFinishedTurn(t *testing.T) {
 	env := testEnv(t)
-	agent := testSessionAgent(env, nil, nil, "test prompt").(*sessionAgent)
 	ctx := t.Context()
 
 	sess, err := env.sessions.Create(ctx, "finished-but-orphaned")
@@ -133,8 +117,7 @@ func TestRepairInterruptedToolCalls_RepairsFinishedTurn(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = agent.getSessionMessages(ctx, sess)
-	require.NoError(t, err)
+	require.NoError(t, SettleInterruptedCalls(ctx, env.messages, sess.ID))
 
 	stored, err := env.messages.List(ctx, sess.ID)
 	require.NoError(t, err)
@@ -153,7 +136,6 @@ func TestRepairInterruptedToolCalls_RepairsFinishedTurn(t *testing.T) {
 
 func TestRepairInterruptedToolCalls_LeavesSettledCallsAlone(t *testing.T) {
 	env := testEnv(t)
-	agent := testSessionAgent(env, nil, nil, "test prompt").(*sessionAgent)
 	ctx := t.Context()
 
 	sess, err := env.sessions.Create(ctx, "healthy")
@@ -176,7 +158,8 @@ func TestRepairInterruptedToolCalls_LeavesSettledCallsAlone(t *testing.T) {
 	before, err := env.messages.List(ctx, sess.ID)
 	require.NoError(t, err)
 
-	msgs, err := agent.getSessionMessages(ctx, sess)
+	require.NoError(t, SettleInterruptedCalls(ctx, env.messages, sess.ID))
+	msgs, err := env.messages.List(ctx, sess.ID)
 	require.NoError(t, err)
 	require.Len(t, msgs, len(before), "a healthy session gains no rows")
 
@@ -189,18 +172,15 @@ func TestRepairInterruptedToolCalls_LeavesSettledCallsAlone(t *testing.T) {
 // session.
 func TestRepairInterruptedToolCalls_IsIdempotent(t *testing.T) {
 	env := testEnv(t)
-	agent := testSessionAgent(env, nil, nil, "test prompt").(*sessionAgent)
 	ctx := t.Context()
 
 	sess, _ := killedTurn(t, env, true)
 
-	_, err := agent.getSessionMessages(ctx, sess)
-	require.NoError(t, err)
+	require.NoError(t, SettleInterruptedCalls(ctx, env.messages, sess.ID))
 	first, err := env.messages.List(ctx, sess.ID)
 	require.NoError(t, err)
 
-	_, err = agent.getSessionMessages(ctx, sess)
-	require.NoError(t, err)
+	require.NoError(t, SettleInterruptedCalls(ctx, env.messages, sess.ID))
 	second, err := env.messages.List(ctx, sess.ID)
 	require.NoError(t, err)
 
@@ -211,7 +191,6 @@ func TestRepairInterruptedToolCalls_IsIdempotent(t *testing.T) {
 // provider rejects the whole message.
 func TestRepairInterruptedToolCalls_HandlesParallelCalls(t *testing.T) {
 	env := testEnv(t)
-	agent := testSessionAgent(env, nil, nil, "test prompt").(*sessionAgent)
 	ctx := t.Context()
 
 	sess, err := env.sessions.Create(ctx, "parallel")
@@ -233,8 +212,7 @@ func TestRepairInterruptedToolCalls_HandlesParallelCalls(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = agent.getSessionMessages(ctx, sess)
-	require.NoError(t, err)
+	require.NoError(t, SettleInterruptedCalls(ctx, env.messages, sess.ID))
 
 	stored, err := env.messages.List(ctx, sess.ID)
 	require.NoError(t, err)

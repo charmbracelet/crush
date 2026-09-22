@@ -693,10 +693,28 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	sessMu.Unlock()
 
 	defer cancel()
-	// Conditional cleanup: only remove our entry if it hasn't been replaced
-	// by a newer run. Without this guard, the deferred Del fires after a
-	// concurrent run registers in the completion window, silently wiping
-	// the new run's cancel and breaking cancellation.
+
+	// Promoted queued calls have no callback or backend caller left to
+	// complete them if preparation fails. Initial calls with a callback
+	// still leave these failures to the backend's terminal fallback.
+	preparing := true
+	defer func() {
+		if !preparing || call.OnComplete != nil || retErr == nil {
+			return
+		}
+		completeCtx, completeCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer completeCancel()
+		a.publishRunComplete(completeCtx, call, notify.RunComplete{
+			SessionID: call.SessionID,
+			RunID:     call.RunID,
+			Error:     retErr.Error(),
+			Cancelled: errors.Is(retErr, context.Canceled),
+		})
+	}()
+
+	// Release ownership before publishing a preparation failure: a client
+	// receiving that completion may immediately submit another turn.
+	// Compare-and-delete prevents an older run from removing a newer owner.
 	defer a.activeRequests.CompareAndDelete(call.SessionID, ac)
 
 	// Copy mutable fields under lock to avoid races with SetTools/SetModels.
@@ -822,6 +840,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		// non-interactive clients waiting on RunComplete.
 		a.publishRunComplete(ctx, call, complete)
 	}()
+	preparing = false
 
 	history, files := a.preparePrompt(msgs, largeModel.CatwalkCfg.SupportsImages, call.Attachments...)
 

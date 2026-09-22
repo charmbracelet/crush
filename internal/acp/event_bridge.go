@@ -4,16 +4,20 @@ package acp
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"log/slog"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	notify "github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/x/ansi"
 	acp "github.com/coder/acp-go-sdk"
 )
 
@@ -33,11 +37,14 @@ type eventBridge struct {
 	// mu guards the per-message tracking maps below. Message events carry a
 	// whole-message snapshot rather than a delta, so the difference against the
 	// last snapshot is the new content.
-	mu             sync.Mutex
-	streamed       map[string]int             // msgID -> text bytes already sent
-	thoughts       map[string]int             // msgID -> reasoning bytes already sent
-	toolCalls      map[string]map[string]bool // msgID -> toolCallID -> finished
-	toolResultSent map[string]bool            // toolCallID -> content already sent
+	mu              sync.Mutex
+	streamed        map[string]int             // msgID -> text bytes already sent
+	thoughts        map[string]int             // msgID -> reasoning bytes already sent
+	toolCalls       map[string]map[string]bool // msgID -> toolCallID -> finished
+	toolResultSent  map[string]bool            // toolCallID -> content already sent
+	finished        map[string]bool            // toolCallID -> terminal status already reported
+	attachmentsSent map[string]int             // msgID -> binary content parts already sent
+	promptMeta      map[string]map[string]any  // sessionID -> _meta from session/prompt
 
 	// pendingText tracks messages where thinking has started but not finished.
 	// Text for these messages is held back until thinking completes (FinishedAt > 0)
@@ -75,15 +82,42 @@ func toolKindFor(name string) acp.ToolKind {
 // forwards them as ACP session/update notifications.
 func newEventBridge(conn *acp.AgentSideConnection, app *app.App, log *slog.Logger) *eventBridge {
 	return &eventBridge{
-		conn:           conn,
-		app:            app,
-		log:            log,
-		streamed:       make(map[string]int),
-		thoughts:       make(map[string]int),
-		toolCalls:      make(map[string]map[string]bool),
-		toolResultSent: make(map[string]bool),
-		pendingText:    make(map[string]bool),
+		conn:            conn,
+		app:             app,
+		log:             log,
+		streamed:        make(map[string]int),
+		thoughts:        make(map[string]int),
+		toolCalls:       make(map[string]map[string]bool),
+		toolResultSent:  make(map[string]bool),
+		finished:        make(map[string]bool),
+		attachmentsSent: make(map[string]int),
+		promptMeta:      make(map[string]map[string]any),
+		pendingText:     make(map[string]bool),
 	}
+}
+
+// SetPromptMeta records the _meta object received on the session/prompt request
+// so it is echoed on every outgoing session/update for that turn.
+func (b *eventBridge) SetPromptMeta(sessionID string, meta map[string]any) {
+	if len(meta) == 0 {
+		return
+	}
+	b.mu.Lock()
+	b.promptMeta[sessionID] = meta
+	b.mu.Unlock()
+}
+
+// note builds a session notification, attaching any prompt-scoped _meta
+// captured for the current turn of that session.
+func (b *eventBridge) note(sessionID acp.SessionId, update acp.SessionUpdate) acp.SessionNotification {
+	note := acp.SessionNotification{SessionId: sessionID, Update: update}
+	b.mu.Lock()
+	meta := b.promptMeta[string(sessionID)]
+	b.mu.Unlock()
+	if len(meta) > 0 {
+		note.Meta = meta
+	}
+	return note
 }
 
 // Start begins listening for agent events. It returns when ctx is cancelled.
@@ -155,15 +189,57 @@ func (b *eventBridge) handleMessage(ctx context.Context, m message.Message) {
 
 	b.streamText(ctx, m)
 	b.streamToolCalls(ctx, m)
+	b.streamAttachments(ctx, m)
+}
+
+// streamAttachments emits binary content parts (images/audio produced by the
+// assistant, e.g. provider-executed tools) as agent_message_chunk content
+// blocks (O15). Part counts are tracked per message so re-snapshots do not
+// re-emit.
+func (b *eventBridge) streamAttachments(ctx context.Context, m message.Message) {
+	if m.Role != message.Assistant || m.SessionID == "" {
+		return
+	}
+	var bins []message.BinaryContent
+	for _, part := range m.Parts {
+		if bc, ok := part.(message.BinaryContent); ok && len(bc.Data) > 0 {
+			bins = append(bins, bc)
+		}
+	}
+	if len(bins) == 0 {
+		return
+	}
+
+	b.mu.Lock()
+	sent := b.attachmentsSent[m.ID]
+	if len(bins) < sent {
+		sent = 0
+	}
+	b.attachmentsSent[m.ID] = len(bins)
+	b.mu.Unlock()
+
+	sessionID := acp.SessionId(m.SessionID)
+	for _, bc := range bins[sent:] {
+		encoded := base64.StdEncoding.EncodeToString(bc.Data)
+		var block acp.ContentBlock
+		if strings.HasPrefix(bc.MIMEType, "audio/") {
+			block = acp.AudioBlock(encoded, bc.MIMEType)
+		} else {
+			block = acp.ImageBlock(encoded, bc.MIMEType)
+		}
+		if err := b.conn.SessionUpdate(ctx, b.note(sessionID, acp.UpdateAgentMessage(block))); err != nil {
+			b.log.Warn("Failed to send attachment update", "error", err)
+		}
+	}
 }
 
 // streamToolResults surfaces executed tool output on its tool_call_update so
 // the client can observe tool results as they complete (O9). Without this a
 // tool-heavy turn is silent between the first tool batch and the final
-// assistant message, which reads as a stall. Output is attached via the ACP
-// tool_call_update raw-output/content fields rather than the agent message
-// stream, so it does not pollute the assistant text. A per-toolCallID guard
-// prevents re-emitting the same content when a tool message is re-snapshotted.
+// assistant message, which reads as a stall. The terminal status is reported
+// here too: failed for tool errors, completed otherwise (S10). A per-toolCallID
+// guard prevents re-emitting the same result when a tool message is
+// re-snapshotted.
 func (b *eventBridge) streamToolResults(ctx context.Context, m message.Message) {
 	if m.Role != message.Tool || m.SessionID == "" {
 		return
@@ -181,26 +257,29 @@ func (b *eventBridge) streamToolResults(ctx context.Context, m message.Message) 
 		b.toolResultSent[tr.ToolCallID] = true
 		b.mu.Unlock()
 
+		status := acp.ToolCallStatusCompleted
 		text := tr.Content
 		if tr.IsError {
+			status = acp.ToolCallStatusFailed
 			text = "Error: " + text
 		}
-		if text == "" {
-			continue
+		opts := []acp.ToolCallUpdateOpt{acp.WithUpdateStatus(status)}
+		if text != "" {
+			opts = append(opts,
+				acp.WithUpdateContent([]acp.ToolCallContent{
+					acp.ToolContent(acp.TextBlock(text)),
+				}),
+				acp.WithUpdateRawOutput(tr.Content),
+			)
 		}
-		update := acp.UpdateToolCall(
-			acp.ToolCallId(tr.ToolCallID),
-			acp.WithUpdateContent([]acp.ToolCallContent{
-				acp.ToolContent(acp.TextBlock(text)),
-			}),
-		)
-		notification := acp.SessionNotification{
-			SessionId: acp.SessionId(m.SessionID),
-			Update:    update,
-		}
-		if err := b.conn.SessionUpdate(ctx, notification); err != nil {
+		note := b.note(acp.SessionId(m.SessionID), acp.UpdateToolCall(acp.ToolCallId(tr.ToolCallID), opts...))
+		if err := b.conn.SessionUpdate(ctx, note); err != nil {
 			b.log.Warn("Failed to send tool result update", "error", err)
 		}
+
+		b.mu.Lock()
+		b.finished[tr.ToolCallID] = true
+		b.mu.Unlock()
 	}
 }
 
@@ -323,13 +402,15 @@ func (b *eventBridge) streamThoughts(ctx context.Context, m message.Message) {
 
 // streamToolCalls diffs the tool calls in a message snapshot and emits
 // tool_call / tool_call_update notifications as tools start and finish (S1).
+// Starts carry a human-readable title, tool kind, file locations, and rawInput
+// (S10). The pending status while a tool waits for permission approval is
+// emitted by the permission bridge (see permission.go).
 func (b *eventBridge) streamToolCalls(ctx context.Context, m message.Message) {
 	type action struct {
 		id       string
 		name     string
 		input    string
 		finished bool
-		started  bool
 	}
 	var starts, updates []action
 
@@ -340,6 +421,12 @@ func (b *eventBridge) streamToolCalls(ctx context.Context, m message.Message) {
 		b.toolCalls[m.ID] = seen
 	}
 	for _, tc := range m.ToolCalls() {
+		// A terminal status reported via the tool-result path wins; skip the
+		// redundant completed update for this call.
+		if b.finished[tc.ID] {
+			seen[tc.ID] = true
+			continue
+		}
 		prev, ok := seen[tc.ID]
 		if !ok {
 			seen[tc.ID] = tc.Finished
@@ -360,33 +447,95 @@ func (b *eventBridge) streamToolCalls(ctx context.Context, m message.Message) {
 		opts := []acp.ToolCallStartOpt{
 			acp.WithStartStatus(status),
 			acp.WithStartKind(toolKindFor(a.name)),
+			acp.WithStartRawInput(toolRawInput(a.input)),
+		}
+		if locs := toolLocations(a.input); len(locs) > 0 {
+			opts = append(opts, acp.WithStartLocations(locs))
 		}
 		if a.input != "" {
 			opts = append(opts, acp.WithStartContent([]acp.ToolCallContent{
 				acp.ToolContent(acp.TextBlock(a.input)),
 			}))
 		}
-		update := acp.SessionNotification{
-			SessionId: sessionID,
-			Update:    acp.StartToolCall(acp.ToolCallId(a.id), a.name, opts...),
-		}
-		if err := b.conn.SessionUpdate(ctx, update); err != nil {
+		note := b.note(sessionID, acp.StartToolCall(acp.ToolCallId(a.id), toolTitle(a.name, a.input), opts...))
+		if err := b.conn.SessionUpdate(ctx, note); err != nil {
 			b.log.Warn("Failed to send tool call update", "error", err)
 		}
 	}
 	for _, a := range updates {
-		status := acp.ToolCallStatusInProgress
-		if a.finished {
-			status = acp.ToolCallStatusCompleted
-		}
 		update := acp.SessionNotification{
 			SessionId: sessionID,
-			Update:    acp.UpdateToolCall(acp.ToolCallId(a.id), acp.WithUpdateStatus(status)),
+			Update:    acp.UpdateToolCall(acp.ToolCallId(a.id), acp.WithUpdateStatus(acp.ToolCallStatusCompleted)),
 		}
 		if err := b.conn.SessionUpdate(ctx, update); err != nil {
 			b.log.Warn("Failed to send tool call update", "error", err)
 		}
 	}
+}
+
+// toolTitle derives a human-readable tool_call title from the tool name and
+// its JSON input. The first meaningful argument (path, command, query, ...) is
+// appended so clients can show what the tool is acting on.
+func toolTitle(name, input string) string {
+	arg := toolPrimaryArg(input)
+	if arg == "" {
+		return capitalize(name)
+	}
+	arg = ansi.Truncate(arg, 80, "...")
+	return capitalize(name) + ": " + arg
+}
+
+// toolPrimaryArg extracts the most descriptive string field from a tool input
+// JSON object for display in the tool title.
+func toolPrimaryArg(input string) string {
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(input), &obj); err != nil {
+		return ""
+	}
+	for _, key := range []string{"command", "path", "file_path", "pattern", "query", "url", "description"} {
+		if v, ok := obj[key].(string); ok && v != "" {
+			return strings.ReplaceAll(v, "\n", " ")
+		}
+	}
+	return ""
+}
+
+// toolLocations extracts file paths from a tool input JSON object as ACP
+// tool-call locations so clients can follow the agent across files.
+func toolLocations(input string) []acp.ToolCallLocation {
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(input), &obj); err != nil {
+		return nil
+	}
+	var locs []acp.ToolCallLocation
+	for _, key := range []string{"path", "file_path", "notebook_path"} {
+		if v, ok := obj[key].(string); ok && v != "" {
+			locs = append(locs, acp.ToolCallLocation{Path: v})
+		}
+	}
+	return locs
+}
+
+// toolRawInput decodes a tool input JSON string into a raw JSON value for the
+// tool_call rawInput field. Non-JSON input is passed through as a string.
+func toolRawInput(input string) any {
+	if input == "" {
+		return nil
+	}
+	var v any
+	if err := json.Unmarshal([]byte(input), &v); err != nil {
+		return input
+	}
+	return v
+}
+
+// capitalize uppercases the first rune of s.
+func capitalize(s string) string {
+	if s == "" {
+		return ""
+	}
+	r := []rune(s)
+	return string(unicode.ToUpper(r[0])) + string(r[1:])
 }
 
 func (b *eventBridge) subscribeNotifications(ctx context.Context, broker *pubsub.Broker[notify.Notification]) {
@@ -450,16 +599,13 @@ func (b *eventBridge) handleRunComplete(ctx context.Context, rc notify.RunComple
 
 	b.mu.Lock()
 	b.pendingText = make(map[string]bool)
+	delete(b.promptMeta, rc.SessionID)
 	b.mu.Unlock()
 }
 
 // sendText emits an agent_message_chunk carrying the given text.
 func (b *eventBridge) sendText(ctx context.Context, sessionID acp.SessionId, text string) {
-	update := acp.SessionNotification{
-		SessionId: sessionID,
-		Update:    acp.UpdateAgentMessageText(text),
-	}
-	if err := b.conn.SessionUpdate(ctx, update); err != nil {
+	if err := b.conn.SessionUpdate(ctx, b.note(sessionID, acp.UpdateAgentMessageText(text))); err != nil {
 		b.log.Warn("Failed to send session update", "error", err)
 	}
 }

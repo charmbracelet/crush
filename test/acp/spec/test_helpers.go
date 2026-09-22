@@ -100,6 +100,10 @@ func (s *stubMessageStore) List(_ context.Context, sessionID string) ([]message.
 	return s.bySession[sessionID], nil
 }
 
+func (s *stubMessageStore) ListFromSummary(_ context.Context, sessionID, _ string) ([]message.Message, error) {
+	return s.bySession[sessionID], nil
+}
+
 func (s *stubMessageStore) ListUserMessages(_ context.Context, sessionID string) ([]message.Message, error) {
 	return s.bySession[sessionID], nil
 }

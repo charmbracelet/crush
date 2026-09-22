@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"strings"
 
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/message"
@@ -52,6 +51,7 @@ func NewServer(a *app.App, log *slog.Logger, stdin io.Reader, stdout io.Writer) 
 
 	// Create event bridge for streaming notifications.
 	eventBridge := newEventBridge(conn, a, log)
+	ca.bridge = eventBridge
 
 	return &Server{
 		conn:        conn,
@@ -107,38 +107,92 @@ func (d *dispatcher) ResumeSession(ctx context.Context, req acp.ResumeSessionReq
 }
 
 // LoadSession implements acp.AgentLoader. It replays the session's stored
-// message history as session/update notifications (user_message_chunk /
-// agent_message_chunk) before returning, satisfying the spec requirement that
-// session/load MUST stream the full history before its response.
+// message history as session/update notifications before returning, satisfying
+// the spec requirement that session/load MUST stream the entire conversation:
+// user/agent text chunks, agent thought chunks, and tool calls with their
+// terminal status and result content.
 func (d *dispatcher) LoadSession(ctx context.Context, req acp.LoadSessionRequest) (acp.LoadSessionResponse, error) {
 	sessionID := string(req.SessionId)
 	msgs, err := d.app.Messages.List(ctx, sessionID)
 	if err != nil {
 		return acp.LoadSessionResponse{}, fmt.Errorf("list messages: %w", err)
 	}
-	for _, m := range msgs {
-		var sb strings.Builder
-		for _, part := range m.Parts {
-			if tc, ok := part.(message.TextContent); ok {
-				sb.WriteString(tc.Text)
+
+	// started tracks tool calls whose tool_call start update was already sent,
+	// so results arriving without a visible start (e.g. compacted history)
+	// still render correctly.
+	started := map[string]bool{}
+	send := func(update acp.SessionUpdate) error {
+		note := acp.SessionNotification{SessionId: req.SessionId, Update: update}
+		if len(req.Meta) > 0 {
+			note.Meta = req.Meta
+		}
+		return d.conn.SessionUpdate(ctx, note)
+	}
+	emitToolResult := func(tr message.ToolResult) error {
+		id := acp.ToolCallId(tr.ToolCallID)
+		if !started[tr.ToolCallID] {
+			started[tr.ToolCallID] = true
+			if err := send(acp.StartToolCall(id, toolTitle(tr.Name, ""), acp.WithStartKind(toolKindFor(tr.Name)))); err != nil {
+				return err
 			}
 		}
-		text := sb.String()
-		if text == "" {
-			continue
+		status := acp.ToolCallStatusCompleted
+		text := tr.Content
+		if tr.IsError {
+			status = acp.ToolCallStatusFailed
+			text = "Error: " + text
 		}
-		var update acp.SessionUpdate
-		switch m.Role {
-		case message.User:
-			update = acp.UpdateUserMessageText(text)
-		case message.Assistant:
-			update = acp.UpdateAgentMessageText(text)
-		default:
-			continue
+		opts := []acp.ToolCallUpdateOpt{acp.WithUpdateStatus(status)}
+		if text != "" {
+			opts = append(opts, acp.WithUpdateContent([]acp.ToolCallContent{
+				acp.ToolContent(acp.TextBlock(text)),
+			}))
 		}
-		note := acp.SessionNotification{SessionId: req.SessionId, Update: update}
-		if err := d.conn.SessionUpdate(ctx, note); err != nil {
-			return acp.LoadSessionResponse{}, fmt.Errorf("stream loaded message: %w", err)
+		return send(acp.UpdateToolCall(id, opts...))
+	}
+
+	for _, m := range msgs {
+		for _, part := range m.Parts {
+			var err error
+			switch p := part.(type) {
+			case message.TextContent:
+				if p.Text == "" {
+					continue
+				}
+				switch m.Role {
+				case message.User:
+					err = send(acp.UpdateUserMessageText(p.Text))
+				case message.Assistant:
+					err = send(acp.UpdateAgentMessageText(p.Text))
+				}
+			case message.ReasoningContent:
+				if m.Role == message.Assistant && p.Thinking != "" {
+					err = send(acp.UpdateAgentThoughtText(p.Thinking))
+				}
+			case message.ToolCall:
+				if m.Role != message.Assistant || p.ID == "" {
+					continue
+				}
+				started[p.ID] = true
+				status := acp.ToolCallStatusInProgress
+				if p.Finished {
+					status = acp.ToolCallStatusCompleted
+				}
+				err = send(acp.StartToolCall(acp.ToolCallId(p.ID), toolTitle(p.Name, p.Input),
+					acp.WithStartKind(toolKindFor(p.Name)),
+					acp.WithStartStatus(status),
+					acp.WithStartRawInput(toolRawInput(p.Input)),
+				))
+			case message.ToolResult:
+				if m.Role != message.Tool || p.ToolCallID == "" {
+					continue
+				}
+				err = emitToolResult(p)
+			}
+			if err != nil {
+				return acp.LoadSessionResponse{}, fmt.Errorf("stream loaded message: %w", err)
+			}
 		}
 	}
 	return acp.LoadSessionResponse{}, nil

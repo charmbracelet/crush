@@ -7,9 +7,11 @@ import (
 	"testing"
 	"time"
 
+	notify "github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/message"
 	acp "github.com/coder/acp-go-sdk"
+	"github.com/stretchr/testify/require"
 )
 
 func TestEventBridge_StartAndStop(t *testing.T) {
@@ -147,6 +149,140 @@ func TestEventBridge_ToolResultStreaming(t *testing.T) {
 		}
 	case <-time.After(200 * time.Millisecond):
 	}
+}
+
+// TestEventBridge_ToolResultFailedStatus verifies an errored tool result is
+// reported with the failed status (S10), not just error-prefixed content.
+func TestEventBridge_ToolResultFailedStatus(t *testing.T) {
+	c2aR, c2aW := io.Pipe()
+	a2cR, a2cW := io.Pipe()
+	defer c2aR.Close()
+	defer c2aW.Close()
+	defer a2cR.Close()
+	defer a2cW.Close()
+
+	app := &app.App{Sessions: &stubSessionService{}}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := NewServer(app, log, c2aR, a2cW)
+	b := newEventBridge(srv.conn, app, log)
+
+	cc := &captureClient{ch: make(chan acp.SessionUpdate, 2)}
+	client := acp.NewClientSideConnection(cc, c2aW, a2cR)
+	go func() {
+		_, _ = client.Initialize(context.Background(), acp.InitializeRequest{ProtocolVersion: acp.ProtocolVersionNumber})
+	}()
+
+	toolMsg := message.Message{
+		ID:        "msg-tool-err",
+		SessionID: "sess-1",
+		Role:      message.Tool,
+		Parts: []message.ContentPart{
+			message.ToolResult{ToolCallID: "call-err", Name: "bash", Content: "boom", IsError: true},
+			message.ToolResult{ToolCallID: "call-ok", Name: "view", Content: "fine"},
+		},
+	}
+	b.handleMessage(context.Background(), toolMsg)
+
+	for i := 0; i < 2; i++ {
+		var u acp.SessionUpdate
+		select {
+		case u = <-cc.ch:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("no tool_call_update %d received", i)
+		}
+		require.NotNil(t, u.ToolCallUpdate)
+		require.NotNil(t, u.ToolCallUpdate.Status, "terminal status must be reported")
+		switch string(u.ToolCallUpdate.ToolCallId) {
+		case "call-err":
+			require.Equal(t, acp.ToolCallStatusFailed, *u.ToolCallUpdate.Status)
+		case "call-ok":
+			require.Equal(t, acp.ToolCallStatusCompleted, *u.ToolCallUpdate.Status)
+		}
+	}
+}
+
+// TestEventBridge_ToolCallEnrichment verifies a tool_call start carries a
+// human-readable title, the tool kind, file locations, and rawInput (S10).
+func TestEventBridge_ToolCallEnrichment(t *testing.T) {
+	c2aR, c2aW := io.Pipe()
+	a2cR, a2cW := io.Pipe()
+	defer c2aR.Close()
+	defer c2aW.Close()
+	defer a2cR.Close()
+	defer a2cW.Close()
+
+	app := &app.App{Sessions: &stubSessionService{}}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := NewServer(app, log, c2aR, a2cW)
+	b := newEventBridge(srv.conn, app, log)
+
+	cc := &captureClient{ch: make(chan acp.SessionUpdate, 2)}
+	client := acp.NewClientSideConnection(cc, c2aW, a2cR)
+	go func() {
+		_, _ = client.Initialize(context.Background(), acp.InitializeRequest{ProtocolVersion: acp.ProtocolVersionNumber})
+	}()
+
+	assistantMsg := message.Message{
+		ID:        "msg-a",
+		SessionID: "sess-1",
+		Role:      message.Assistant,
+		Parts: []message.ContentPart{
+			message.ToolCall{ID: "call-9", Name: "view", Input: `{"path":"/tmp/x.go","limit":10}`},
+		},
+	}
+	b.handleMessage(context.Background(), assistantMsg)
+
+	var u acp.SessionUpdate
+	select {
+	case u = <-cc.ch:
+	case <-time.After(2 * time.Second):
+		t.Fatal("no tool_call start received")
+	}
+	require.NotNil(t, u.ToolCall)
+	require.Equal(t, acp.ToolCallId("call-9"), u.ToolCall.ToolCallId)
+	require.Equal(t, acp.ToolKindRead, u.ToolCall.Kind)
+	require.Contains(t, u.ToolCall.Title, "/tmp/x.go")
+	require.Equal(t, acp.ToolCallStatusInProgress, u.ToolCall.Status)
+	require.NotEmpty(t, u.ToolCall.Locations)
+	require.Equal(t, "/tmp/x.go", u.ToolCall.Locations[0].Path)
+	require.NotNil(t, u.ToolCall.RawInput)
+	require.Contains(t, u.ToolCall.Title, "View")
+}
+
+// TestEventBridge_PromptMetaEcho verifies the _meta object captured from a
+// session/prompt request is echoed on outgoing session/update notifications
+// for that turn only (S7).
+func TestEventBridge_PromptMetaEcho(t *testing.T) {
+	c2aR, c2aW := io.Pipe()
+	a2cR, a2cW := io.Pipe()
+	defer c2aR.Close()
+	defer c2aW.Close()
+	defer a2cR.Close()
+	defer a2cW.Close()
+
+	app := &app.App{Sessions: &stubSessionService{}}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := NewServer(app, log, c2aR, a2cW)
+	b := newEventBridge(srv.conn, app, log)
+
+	b.SetPromptMeta("sess-1", map[string]any{"traceparent": "tp"})
+
+	n := b.note("sess-1", acp.UpdateAgentMessageText("hi"))
+	require.Equal(t, "tp", n.Meta["traceparent"])
+
+	n = b.note("sess-2", acp.UpdateAgentMessageText("hi"))
+	require.Empty(t, n.Meta)
+
+	// Run completion clears the recorded meta.
+	b.SetPromptMeta("sess-1", map[string]any{"k": "v"})
+	cc := &captureClient{ch: make(chan acp.SessionUpdate, 8)}
+	client := acp.NewClientSideConnection(cc, c2aW, a2cR)
+	go func() {
+		_, _ = client.Initialize(context.Background(), acp.InitializeRequest{ProtocolVersion: acp.ProtocolVersionNumber})
+	}()
+	b.handleRunComplete(context.Background(), notify.RunComplete{SessionID: "sess-1"})
+	n = b.note("sess-1", acp.UpdateAgentMessageText("hi"))
+	require.Empty(t, n.Meta)
 }
 
 func TestSplitDelta_Spaces(t *testing.T) {

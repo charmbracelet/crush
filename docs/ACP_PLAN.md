@@ -89,7 +89,7 @@ Status legend: ✅ done · ⚠️ partial/stub · ❌ not implemented.
 | `session/close` | OPTIONAL (advertise `sessionCapabilities.close`) | ✅ implemented + advertised |
 | `session/list` | OPTIONAL (advertise `sessionCapabilities.list`) | ✅ implemented + advertised; `cwd` set, `additionalDirectories` echoed back. **Pagination**: cursor-based; client MUST treat missing `nextCursor` as end of results, MUST treat cursors as opaque tokens. `SessionInfo` includes optional `_meta` for agent-specific metadata. |
 | `session/load` | OPTIONAL (advertise `loadSession`) | ⚠️ B: implement — replays text only; tool/thought parts stored in `message.Parts` are skipped (see §4.1) |
-| `session/resume` | OPTIONAL (advertise `sessionCapabilities.resume`) | ❌ not implemented — returns error; capability not advertised (intentional, see §6.1 O5) |
+| `session/resume` | OPTIONAL (advertise `sessionCapabilities.resume`) | ✅ implemented (Option B, §6.2 O5): returns mode/config state without replaying history; capability advertised |
 | `session/delete` | OPTIONAL (advertise `sessionCapabilities.delete`) | ✅ implemented + advertised (`UnstableDeleteSession`). **Semantics**: deleting an already-deleted session SHOULD succeed silently; deleting an active session is implementation-defined. |
 | `session/set_mode` | OPTIONAL (legacy; prefer config options; spec notes modes will be removed in a future version) | ✅ echoes `modeId` + emits `current_mode_update` (no real mode switch) |
 | `session/set_config_option` | OPTIONAL | ✅ applies thinking/model, returns the complete `configOptions` list (spec MUST). Spec also: Agents **MUST** always provide a default value for every option (agent must operate correctly if the Client ignores/hides options or sends an unrecognized type). |
@@ -106,7 +106,7 @@ The spec distinguishes `session/load` (MUST replay history via these) from
 | `agent_message_chunk` | baseline | ✅ emitted on happy path (`subscribeMessages`) |
 | `agent_thought_chunk` | SHOULD (reasoning) | ✅ emitted via `streamThoughts` (S3) |
 | `tool_call` | SHOULD | ✅ emitted on tool start (S1) |
-| `tool_call_update` | SHOULD (`pending`/`in_progress`/`completed`/`failed`) | ⚠️ only `in_progress`/`completed` used; `pending`/`failed` defined in §3.5 and DECIDED (2026-09-18) but NOT implemented |
+| `tool_call_update` | SHOULD (`pending`/`in_progress`/`completed`/`failed`) | ✅ full lifecycle: `pending` emitted by `CheckPermission` before the permission request; `in_progress`/`completed` by the event bridge; `failed` on tool errors and permission denial (S10) |
 | `plan` | SHOULD | ❌ not emitted — no structured plan data model (SDK `UpdatePlan`/`SessionUpdatePlan` stable) |
 | `available_commands_update` | MAY | ✅ emitted on `session/new` (S8). Covers **custom markdown commands** (`commands.LoadCustomCommands`) + MCP prompts only. **Shell builtins** (`provider`, `model`, `mcp`, `lsp`, `permissions`, `hook`, `option`) are **not** advertised as ACP commands — see §4.2 |
 | `current_mode_update` | MAY | ✅ emitted on `session/set_mode` (S9) |
@@ -133,10 +133,10 @@ it** (SDK v0.13.5 still marks `MessageId` UNSTABLE; track on SDK bump).
 
 | Requirement | Level | Crush status |
 |---|---|---|
-| Emit `tool_call` + `tool_call_update` during execution | SHOULD | ⚠️ `StartToolCall`/`UpdateToolCall` from event bridge (S1). **Status lifecycle DECIDED but NOT IMPLEMENTED:** `pending` (§3.5, in `CheckPermission`) and `failed` are defined but never emitted. Only `in_progress`/`completed` are used. |
+| Emit `tool_call` + `tool_call_update` during execution | SHOULD | ✅ `StartToolCall`/`UpdateToolCall` from event bridge (S1); full status lifecycle (S10) |
 | Tool kinds: `read/edit/delete/move/search/execute/think/fetch/switch_mode/other` | OPTIONAL taxonomy | ✅ `toolKindFor` maps Crush tools to all kinds incl. `switch_mode` |
 | Tool content: `content` / `diff` / `terminal` | SHOULD | ⚠️ `content` (raw input as text) only; `diff`/`terminal` not emitted |
-| `toolCallId`, `name`, `title`, `kind`, `status`, `locations`, `rawInput`, `rawOutput` | `title` required, rest optional; **all fields except `toolCallId` are optional in updates** | ⚠️ id/kind/status/content sent; `title` carries the tool's programmatic name (not human-readable). No `name` (no SDK helper), `locations`, `rawInput`, or `rawOutput` |
+| `toolCallId`, `name`, `title`, `kind`, `status`, `locations`, `rawInput`, `rawOutput` | `title` required, rest optional; **all fields except `toolCallId` are optional in updates** | ✅ human-readable `title` (tool + primary argument), `kind`, `status`, `locations` (input `path`/`file_path`), `rawInput` (decoded JSON), `rawOutput` (tool result content). `name` still unset (no SDK helper); `diff`/`terminal` content not emitted |
 | `session/request_permission` (4 option kinds: `allow_once`/`allow_always`/`reject_once`/`reject_always`) | MUST when needed | ✅ bridge implemented |
 | Client MUST respond `cancelled` to pending permission on `session/cancel` | MUST (client-side duty) | ⚠️ applies to the peer client; agent-side only aborts + returns `cancelled` stop reason |
 
@@ -200,13 +200,16 @@ Agent MUST `release` terminals it creates.
 ### 3.10 Capability advertising summary
 
 Advertised today: `loadSession:true`, `promptCapabilities{image,audio,embeddedContext:true}`,
-`sessionCapabilities{close,list,additionalDirectories,delete}`, `auth.logout`. **Missing
-optional:** `sessionCapabilities.resume`, `authMethods:[]` (configured but serializes per SDK defaults).
+`sessionCapabilities{close,list,additionalDirectories,delete,resume}`, `auth.logout`. **Missing
+optional:** `authMethods:[]` is configured but serializes per SDK defaults.
 
 ### 3.11 Extensibility (`_meta`)
 
-Every type has a `_meta` field. ❌ Crush does not propagate it. Reserved root
-keys `traceparent`/`tracestate`/`baggage` are for W3C trace context. Custom
+Every type has a `_meta` field. ⚠️ Crush echoes `_meta` on the message paths (S7):
+`session/prompt` `_meta` is returned on the `PromptResponse` and attached to
+every `session/update` notification for that turn; `session/load` replays echo
+the load request's `_meta`. W3C trace-context values (`traceparent`/
+`tracestate`/`baggage`) are reserved but never generated. Custom
 capabilities advertised via `_meta` on capability objects; custom methods start
 with `_`.
 
@@ -239,22 +242,16 @@ ACP uses JSON-RPC 2.0 for all message exchange. Key requirements:
 Scraped the v1 spec end-to-end; items where the current implementation still
 diverges from a spec requirement (independent of the §4 completion checkboxes):
 
-- **Tool status lifecycle.** DECIDED (2026-09-18): `pending` emitted while waiting for permission approval (in `CheckPermission`, before `RequestPermission`); `failed` emitted when permission denied or tool command errors (with result content); otherwise `in_progress`/`completed`. **NOT YET IMPLEMENTED.** See S10. Current code only emits `in_progress`/`completed`.
-- **Tool `title`/`name`/`locations`/`rawInput`.** `title` (required) is populated
-  with the programmatic tool name, not a human-readable description; `name`,
-  `locations`, and `rawInput` are not set (the SDK's own `read`/`edit` helpers
-  show `ToolCallStatusPending` + `WithStartLocations` + `WithStartRawInput`).
-  `diff`/`terminal` tool content never emitted.
-- **Config option `category`.** `model`/`thinking` options omit `category`
-  (`model`/`thought_level`); optional but improves client UX.
+- **Tool status lifecycle.** IMPLEMENTED (2026-09-22): `pending` emitted in `CheckPermission` before `RequestPermission`; `failed` emitted on permission denial and tool errors (with result content); `in_progress`/`completed` from the event bridge. See S10.
+- **Tool `title`/`name`/`locations`/`rawInput`.** `title` is now human-readable (tool name + primary input argument); `locations` (input `path`/`file_path`), `rawInput` (decoded JSON), and `rawOutput` (tool result content) are populated. `name` is still not set (the SDK exposes no `WithStartName` helper), and `diff`/`terminal` tool content is never emitted.
+- **Config option `category`.** ✅ IMPLEMENTED: `model`/`thought_level` categories on the model select and thinking boolean.
 - **Boolean option client-capability gate.** Spec: Agent MUST NOT emit
   `type:"boolean"` options unless the client advertises
   `session.configOptions.boolean`. **SDK-blocked:** pinned `acp-go-sdk` v0.13.5
   `ClientCapabilities` has no `session` field, so the gate can't be read yet.
   Revisit on SDK bump (same class as `messageId`/elicitation).
 - **MCP stdio connect** (see §3.12) — ✅ B: session-scoped `mcp.Initialize`
-- **`session/load` replay completeness.** Replays text only; tool calls/thoughts/
-  plan are not replayed, though spec says replay the *entire* conversation.
+- **`session/load` replay completeness.** ✅ IMPLEMENTED (R7): full history replays — user/agent text, thought chunks, tool calls (kind/title/rawInput), and tool results with terminal status and content.
 - **`$/cancel_request` / error `-32800`.** Relies on SDK context cancellation;
   Crush does not explicitly emit the `-32800` Request-Cancelled error.
 - **`_meta` passthrough** + reserved W3C trace keys (see §3.11) — not propagated.
@@ -336,7 +333,7 @@ have the SDK surface + Crush infrastructure today?
 | `text` / `resource_link` content in prompts | MUST | ✅ | — |
 | `authenticate` method | MUST | ⚠️ S2: register provider auth methods as `authMethods` entries (type `agent`); trigger OAuth on `authenticate` | Yes — return `auth_required` |
 | `logout` when `auth.logout` advertised | MUST | ✅ no-op | — |
-| `session/load` when advertised | MUST | ✅ works; replay incomplete | Text-only today; full replay needs tool/thought streaming in load path |
+| `session/load` when advertised | MUST | ✅ works; full replay (R7) | — |
 | `authMethods:[]` in response | MUST (field present) | ✅ `[]` | — |
 | Agent MUST respond with agreed protocol version | MUST | ✅ | — |
 
@@ -345,16 +342,16 @@ have the SDK surface + Crush infrastructure today?
 | Gap | Spec basis | Implementable? | Blocker |
 |---|---|---|---|
 | MCP stdio connect at session setup | §3.12: stdio is a MUST baseline for every Agent | **Yes** — B: `mcp.Initialize` at session start (all servers known upfront) | No dynamic add/remove after session start |
-| `loadSession` capability match | If advertised, `session/load` must work | ✅ it works | Replay is text-only (SHOULD replay *entire* conversation per spec — see §4.1) |
+| `loadSession` capability match | If advertised, `session/load` must work | ✅ it works | Full history replay implemented (R7) |
 
 **SHOULD (§3):**
 
 | Feature | Status | Implementable? | Notes |
 |---|---|---|---|
 | `agent_thought_chunk` | ✅ `streamThoughts` | — | |
-| `tool_call` | ⚠️ basic only | **Yes** | S10: `pending`/`failed` status, `title`, `locations`, `rawInput`, `diff`/`terminal` — SDK exposes `ToolCallStatusPending/Failed`, `WithStartLocations`, `WithStartRawInput`. No SDK gate. |
-| `tool_call_update` | ⚠️ missing `pending`/`failed` | **Yes** | Same as S10 |
-| `session/load` full replay | ⚠️ text only | **Yes** | Stream tools/thoughts during load via same `pendingText` pattern |
+| `tool_call` | ✅ incl. lifecycle | — | S10: `pending`/`failed` status, human-readable `title`, `locations`, `rawInput`, `rawOutput` implemented; `name`/`diff`/`terminal` remain unset |
+| `tool_call_update` | ✅ | — | Full status lifecycle implemented (S10) |
+| `session/load` full replay | ✅ | — | R7: text/thought/tool_call/tool_result replayed |
 | `user_message_chunk` on load | ✅ `UpdateUserMessageText` | — | |
 
 **MAY (§3):**
@@ -364,15 +361,15 @@ have the SDK surface + Crush infrastructure today?
 | `available_commands_update` (builtins) | ⚠️ custom cmds only | **Yes** | Need prompt-prefix dispatch path (Q1 path 1) or tool-call wrapper |
 | `usage_update` | ✅ | — | |
 | `current_mode_update` / `config_option_update` / `session_info_update` | ✅ | — | |
-| `session/resume` | ❌ (deliberate) | Yes if needed | Wire `SessionCapabilities.Resume`; currently errors by design |
-| Boolean config options (`type:"boolean"`) | ❌ (thinking+gated) | **Yes** (same as thinking) | SDK gating: `ClientCapabilities.session.configOptions.boolean` missing in v0.13.5 |
-| Config option `category` | ❌ (none set) | **Yes** | SDK exposes `SessionConfigOptionCategory{Mode,Model,ThoughtLevel}` + custom `_` prefix |
-| `_meta` passthrough | ❌ | **Yes** | `Meta map[string]any` stable on all 183 SDK types; only W3C trace *generation* needs new code |
+| `session/resume` | ✅ (Option B) | — | Returns mode/config state without replay; capability advertised |
+| Boolean config options (`type:"boolean"`) | ✅ (thinking+gated) | — | SDK gating: `ClientCapabilities.session.configOptions.boolean` missing in v0.13.5 |
+| Config option `category` | ✅ | — | `model`/`thought_level` set (O14) |
+| `_meta` passthrough | ✅ (echo) | — | Prompt/load `_meta` echoed (S7); W3C trace *generation* still needs new code |
 | `messageId` on chunks | ❌ | No | SDK field UNSTABLE in v0.13.5 |
 | Elicitation (`create`/`complete`) | ❌ | No | SDK has only `Unstable*` variants |
 | `plan` updates | ❌ | No | Needs Crush plan data model; SDK `planCapabilities` UNSTABLE |
 | Terminals (`terminal/*`) | ❌ | No (deferred) | No PTY lib; `connect` is stdio REPL with no terminal surface |
-| Image/audio content on output | ⚠️ input only | **Yes** | `buildPrompt` already decodes base64 on input |
+| Image/audio content on output | ✅ (O15) | — | Assistant `BinaryContent` parts stream as content blocks |
 | Annotations on content blocks | ❌ (ignored) | Yes | Optional in spec |
 | `$/cancel_request` → `-32800` | ❌ | No | SDK-level; relies on context cancellation |
 | Terminal auth methods | ❌ | No | SDK doesn't model `auth.terminal` |
@@ -431,17 +428,17 @@ current code state from §3.
 - [x] **R6. `session/update` baseline on replay** — `session/load` MUST stream the
   full history before its response (superset of R1). Text chunks replay today;
   tool/thought parts do not — the remaining MUST gap is tracked as R7.
-- [ ] **R7. `session/load` full-history replay** — spec MUST: replay the *entire*
-  conversation (§4.1, §8). Only text is replayed; `tool_call` /
-  `agent_thought_chunk` (and plan) parts stored in `message.Parts` are skipped.
-  Iterate the stored parts during load (`agent.go` `LoadSession`,
-  `event_bridge.go`). Gate: `TestConformanceSessionLoad`.
+- [x] **R7. `session/load` full-history replay** — spec MUST: replay the *entire*
+  conversation. ✅ IMPLEMENTED (2026-09-22): user/agent text chunks,
+  `agent_thought_chunk`, `tool_call` starts (kind/title/rawInput), and tool
+  results with terminal status + content, including synthesized starts for
+  results whose call is missing from history. (`server.go` `LoadSession`.)
+  Test: `TestLoadSessionReplaysFullHistory`.
 
 **Tier 2 — Recommended (SHOULD): core UX**
-- [ ] **S1. Tool progress** — emit `tool_call` + `tool_call_update`
-  (in_progress/completed only; pending/failed NOT implemented). Most visible
-  "frozen agent" gap. (`event_bridge.go`.)
-  Test: `TestPromptStreamsToolCalls`.
+- [x] **S1. Tool progress** — emit `tool_call` + `tool_call_update`.
+  ✅ IMPLEMENTED, incl. full status lifecycle (S10). (`event_bridge.go`.)
+  Test: `TestEventBridge_ToolCallEnrichment`, `TestEventBridge_ToolResultFailedStatus`.
 - [ ] **S2. `user_message_chunk` live-turn echo** on `session/prompt`. → **NOT ECHOED** (I-1 race; the client already holds the input). Still emitted on `session/load` replay — see §6.1 S2.
 - [x] **S3. `agent_thought_chunk`** for reasoning deltas. (`event_bridge.go`.)
 - [ ] **S4. `plan` updates** — each notification is a FULL replace. (`event_bridge.go`.)
@@ -450,17 +447,20 @@ current code state from §3.
   (form+url, `accept`/`decline`/`cancel`, unique `elicitationId`, no url→form
   downgrade, no secrets in form). Client callback + server stub. (`client.go`, `agent.go`.)
   Test: `TestElicitationFormMode`.
-- [ ] **S7. `_meta` passthrough** on message paths; reserve W3C trace keys
-  `traceparent`/`tracestate`/`baggage`. (`agent.go`, `event_bridge.go`.)
+- [x] **S7. `_meta` passthrough** — ✅ IMPLEMENTED: `session/prompt` `_meta` is
+  echoed on the `PromptResponse` and attached to every `session/update`
+  notification for that turn (cleared on run completion); `session/load` replays
+  echo the load request's `_meta`. W3C trace keys are reserved (not generated).
 - [x] **S8. `available_commands_update`** after session creation. (`agent.go`.)
 - [x] **S9. Config/mode/info notifications** — `config_option_update` on
   `set_config_option`; `current_mode_update` on `set_mode`; `session_info_update`
   to keep `session/list` in sync. (`agent.go`.)
-- [ ] **S10. Enrich `tool_call` events** — send `pending` on the first report, `failed`
-  on error (correlate `message.ToolResult`), a human-readable `title`, plus
-  `rawInput`, `locations`, and `diff`/`terminal` content. The SDK already exposes
-  `ToolCallStatusPending/Failed`, `WithStartLocations`, `WithStartRawInput` — this is
-  **not** SDK-gated, just unimplemented. (`event_bridge.go`.)
+- [x] **S10. Enrich `tool_call` events** — ✅ IMPLEMENTED (2026-09-22): `pending`
+  on permission wait (emitted by `CheckPermission`), `failed` on denial and tool
+  errors, human-readable `title` (tool + primary argument), `rawInput`,
+  `locations`, `rawOutput`. `name` and `diff`/`terminal` content remain unset
+  (`name` lacks an SDK helper; `diff` needs old/new text plumbing).
+  (`event_bridge.go`, `permission.go`.)
 
 **Tier 3 — Optional (MAY): full parity**
 - [x] **O1.** Return `modes` + `configOptions` in `session/new` response.
@@ -468,7 +468,10 @@ current code state from §3.
   `SelectedModel.Think` via `UpdatePreferredModel` + `UpdateAgentModel`). See §6.1. (`agent.go`.)
 - [x] **O3.** `additionalDirectories` capability + handling in `/new`, `/list` (echo back via `SessionInfo`). See §6.2. (`agent.go`.)
 - [x] **O4.** `session/delete` + `sessionCapabilities.delete` — **IMPLEMENT** (`UnstableDeleteSession`). See §6.2. (`agent.go`, `server.go`.)
-- [ ] **O5.** `session/resume` decision: OPTION B (decided 2026-09-18) — **NOT IMPLEMENTED.** `ResumeSession` returns error; capability not advertised. Implement when required. See §6.2. (`agent.go`.)
+- [x] **O5.** `session/resume` decision: OPTION B (decided 2026-09-18) — ✅ IMPLEMENTED
+  (2026-09-22): `ResumeSession` returns mode/config state without replaying;
+  `sessionCapabilities.resume` advertised; conformance test updated to expect
+  success. See §6.2. (`agent.go`.)
 - [x] **O6.** `auth.logout` capability + `logout` behavior — **IMPLEMENT** (advertise + success no-op). See §6.2. (`agent.go`, `server.go`.)
 - [x] **O7.** Image/audio/resource content parse + stream — **IMPLEMENT**
   (`buildPrompt` → `message.Attachment` → `Coordinator.Run`). See §6.1. (`agent.go`.)
@@ -494,13 +497,15 @@ current code state from §3.
 >   backed by `internal/shell` instead of a PTY lib — re-evaluate the deferral),
 >   **O9** per-session MCP — **decided Option B**: session-scoped `mcp.Initialize`
 >   at session start. No dynamic add/remove after start.
-> - **Conformance test adjustment needed for O5:** `TestConformanceSessionSetupAndUnsupportedMethods` at `conformance_test.go:392` pins `ResumeSession` as unsupported (must error). After implementing O5 (B), this test must be updated to expect success.
+> - **Conformance test adjustment needed for O5:** done 2026-09-22 (see below).
 >
 > - **Effort-deferred, NOT SDK-gated:** **S7** `_meta` — `Meta map[string]any` is
 >   stable on every SDK type, so basic round-tripping is implementable today; only
 >   W3C trace-context *generation* needs a tracing layer.
-> - **Ready to implement now:** **S10** tool enrichment, **O14** config `category`
->   (both fully SDK-supported).
+> - **Ready to implement now:** ~~**S10** tool enrichment~~ (done 2026-09-22),
+>   ~~**O14** config `category`~~ (done 2026-09-22).
+> - **Conformance test for O5:** updated — `TestConformanceSessionSetupAndUnsupportedMethods`
+>   now expects `ResumeSession` to succeed (Option B).
 > - **O12/O13** File System + Session Usage — implemented (see §6.2).
 
 ## 6. Decision Logs
@@ -581,12 +586,9 @@ implementation batch). Each entry records the finding that drove the call.
   agent implements the `UnstableDeleteSession` method (interface assertion in
   `agent_gen.go`).
 
-- **O5 — `session/resume`: OPTION B (DECISION 2026-09-18), NOT IMPLEMENTED.** `ResumeSession` returns error; capability not advertised. The conformance suite
-  `TestConformanceSessionSetupAndUnsupportedMethods` previously pinned resume as
-  unsupported (must error). With O5 now Option B, `ResumeSession` returns success —
-  `session/prompt` already continues any session id without replaying history
+- **O5 — `session/resume`: OPTION B (DECISION 2026-09-18), IMPLEMENTED 2026-09-22.** `ResumeSession` returns the current mode/config state and succeeds without replaying history — `session/prompt` already continues any session id
   (same as `crush --continue`). `sessionCapabilities.resume` IS advertised.
-  `TestConformanceSessionSetupAndUnsupportedMethods` must be updated to expect success.
+  `TestConformanceSessionSetupAndUnsupportedMethods` now expects success.
 
 - **O6 — `auth.logout`: IMPLEMENT (advertise + no-op).** Advertise
   `agentCapabilities.auth.logout` and make `Logout` a successful no-op — Crush
@@ -615,10 +617,12 @@ implementation batch). Each entry records the finding that drove the call.
   unsupported. (`agent.go`, `event_bridge.go`.)
 - [x] **O13.** Session Usage update — `usage_update` — **IMPLEMENT** (emitted at run completion with tokens-used + cost). See §6.2. (`event_bridge.go`.)
   and cumulative cost. (`event_bridge.go`.)
-- [ ] **O14. Config option `category`** — set `category: "model"` on the model select
-  and `category: "thought_level"` on the thinking boolean so clients place/icon them
-  consistently. The SDK exposes `SessionConfigOptionCategory{Mode,Model,ThoughtLevel}`
-  — **not** SDK-gated. (`agent.go` `configOptionsFor`.)
+- [x] **O14. Config option `category`** — ✅ IMPLEMENTED: `category: "model"` on the
+  model select and `category: "thought_level"` on the thinking boolean.
+  (`agent.go` `configOptionsFor`.)
+- [x] **O15. Image/audio content on output** — ✅ IMPLEMENTED (2026-09-22):
+  assistant `BinaryContent` parts stream as image/audio `agent_message_chunk`
+  content blocks, deduped per message. (`event_bridge.go` `streamAttachments`.)
 - [ ] **O15. Image/audio content on output** — O7 covers input decode only;
   streaming image/audio blocks in output `agent_message_chunk`/tool content is
   not implemented (§4.2 MAY table: "input only"). (`event_bridge.go`.)
@@ -657,17 +661,17 @@ on load. See §3.3/§3.5 status and §4.
 
 Genuinely still open:
 - **MCP stdio connect at session setup** (§3.12) — spec MUST baseline, met via Option B (session-scoped `mcp.Initialize`).
-- **`session/load` replay completeness** (§4.1) — spec MUST replay full history; currently text-only. Option B: iterate `message.Parts` to also stream tool_call/thought_chunk (data stored, just not iterated).
 - **`plan` updates** (S4) — plan mode exists (produces markdown via `plan` agent + `plan.md.tpl`), but no structured `PlanEntry{Content, Priority, Status}` data model feeds `acp.UpdatePlan`. Blocker is the missing structured data layer, not the SDK (both `UpdatePlan` and `SessionUpdatePlan` are stable).
-- **Tool `locations`/`rawInput`, and `diff`/`terminal` tool content** (§3.5, §4.1).
-  **Tool `pending`/`failed` status** — DECIDED, see §4.1.
-- **Config option `category`** and the boolean client-capability gate (SDK-blocked, §4.1).
-- **`load` replay completeness** — text only, not tool/thought/plan entries (§4.1).
+- **Tool `name` field and `diff`/`terminal` tool content** (§3.5, §4.1) — `name` lacks an SDK helper; `diff` needs old/new text plumbing; `terminal` needs the deferred terminal subsystem.
+- **Boolean client-capability gate** (SDK-blocked, §4.1).
 - **`messageId`** on chunks (stable in spec; UNSTABLE in pinned SDK — S5).
 - **Elicitation** (`elicitation/create`/`complete`) on either side (S6) — UNSTABLE in SDK.
-- **`_meta`/trace passthrough** (S7, §3.11).
+- **W3C trace-context generation** (`traceparent`/`tracestate`/`baggage` values are reserved but never generated; `_meta` echo itself is implemented, S7).
 - **`$/cancel_request` → `-32800`** explicit handling (§3.9).
 - **Terminal callbacks** in client track (O8, deferred) + terminal-auth methods (§4.1).
+- **Annotations on content blocks** (O16, MAY, low priority).
+
+Resolved 2026-09-22: `session/load` full-history replay (R7, tool/thought/result parts), tool-call `pending`/`failed` lifecycle (S10), tool `title`/`locations`/`rawInput`/`rawOutput`, `_meta` echo (S7), `session/resume` (O5), config `category` (O14), output-side image/audio (O15).
 
 All baseline methods, permission bridge, fs read/write, text/resource_link/embedded
 content, `session/close`/`list`/`delete`, stdio transport, and capability advertising

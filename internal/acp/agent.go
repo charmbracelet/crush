@@ -25,6 +25,9 @@ type crushAgent struct {
 	app  *app.App
 	log  *slog.Logger
 	conn *acp.AgentSideConnection
+	// bridge streams prompt-turn events as session/update notifications; used
+	// to propagate request _meta onto outgoing notifications (S7).
+	bridge *eventBridge
 
 	// clientCaps holds the capabilities the connected client advertised during
 	// initialize. Used to gate optional server track features (fs).
@@ -69,6 +72,7 @@ func (a *crushAgent) Initialize(_ context.Context, req acp.InitializeRequest) (a
 				Close:                 &acp.SessionCloseCapabilities{},
 				Delete:                &acp.SessionDeleteCapabilities{},
 				List:                  &acp.SessionListCapabilities{},
+				Resume:                &acp.SessionResumeCapabilities{},
 			},
 			McpCapabilities: acp.McpCapabilities{},
 		},
@@ -178,11 +182,16 @@ func (a *crushAgent) CloseSession(_ context.Context, req acp.CloseSessionRequest
 	return acp.CloseSessionResponse{}, nil
 }
 
-// ResumeSession is not supported. Per the spec a resume capability that is not
-// advertised must return an error; Crush continues any session id via
-// session/prompt, so resume is intentionally left unimplemented.
-func (a *crushAgent) ResumeSession(_ context.Context, _ acp.ResumeSessionRequest) (acp.ResumeSessionResponse, error) {
-	return acp.ResumeSessionResponse{}, fmt.Errorf("session/resume is not supported")
+// ResumeSession restores a session without replaying history (spec: unlike
+// session/load, resume MUST NOT stream session/update notifications). Crush
+// continues any session id on the next session/prompt (same as `crush
+// --continue`), so resume returns the current mode/config state and succeeds.
+func (a *crushAgent) ResumeSession(_ context.Context, req acp.ResumeSessionRequest) (acp.ResumeSessionResponse, error) {
+	a.log.Info("ACP resume session", "sessionId", req.SessionId)
+	return acp.ResumeSessionResponse{
+		Modes:         a.modeState(),
+		ConfigOptions: a.configOptions(),
+	}, nil
 }
 
 // Logout terminates the current authentication session. Crush has no auth
@@ -223,20 +232,27 @@ func (a *crushAgent) Cancel(_ context.Context, req acp.CancelNotification) error
 func (a *crushAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.PromptResponse, error) {
 	sessionID := string(req.SessionId)
 
+	// Record any _meta the client sent so it is echoed on session/update
+	// notifications streamed for this turn (S7).
+	if a.bridge != nil {
+		a.bridge.SetPromptMeta(sessionID, req.Meta)
+	}
+
 	prompt, attachments := buildPrompt(req.Prompt)
 	a.log.Info("ACP prompt", "sessionId", sessionID, "promptLen", len(prompt))
 
+	// Prompt result.
 	result, err := a.app.AgentCoordinator.Run(ctx, sessionID, prompt, attachments...)
 	if err != nil {
 		if ctx.Err() != nil {
-			return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
+			return acp.PromptResponse{StopReason: acp.StopReasonCancelled, Meta: req.Meta}, nil
 		}
 		return acp.PromptResponse{}, fmt.Errorf("run prompt: %w", err)
 	}
 
 	stopReason := mapFinishReason(result.Response.FinishReason)
 	a.log.Info("ACP prompt done", "sessionId", sessionID, "stopReason", stopReason)
-	return acp.PromptResponse{StopReason: stopReason}, nil
+	return acp.PromptResponse{StopReason: stopReason, Meta: req.Meta}, nil
 }
 
 // SetSessionMode acknowledges a mode change and notifies the client.
@@ -469,6 +485,7 @@ func configOptionsFor(cfg *config.Config) []acp.SessionConfigOption {
 			Type:         "boolean",
 			CurrentValue: thinkingEnabled(cfg),
 			Description:  acp.Ptr("Enable extended reasoning for supported models"),
+			Category:     acp.Ptr(acp.SessionConfigOptionCategoryThoughtLevel),
 		},
 	})
 	modelOpts := modelOptionsFor(cfg)
@@ -484,6 +501,7 @@ func configOptionsFor(cfg *config.Config) []acp.SessionConfigOption {
 				Name:         "Model",
 				Type:         "select",
 				CurrentValue: cur,
+				Category:     acp.Ptr(acp.SessionConfigOptionCategoryModel),
 				Options: acp.SessionConfigSelectOptions{
 					Ungrouped: &ungroupedModels,
 				},

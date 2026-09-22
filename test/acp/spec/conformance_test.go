@@ -12,9 +12,9 @@ import (
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/session"
 	acp "github.com/coder/acp-go-sdk"
 
 	acpsrv "github.com/charmbracelet/crush/internal/acp"
@@ -51,6 +51,7 @@ func (c *stubCoordinator) RunAccepted(ctx context.Context, accept *agent.Accepte
 }
 
 func (c *stubCoordinator) BeginAccepted(sessionID string) *agent.AcceptedRun { return nil }
+func (c *stubCoordinator) SetMainAgent(_ string) error                       { return nil }
 func (c *stubCoordinator) Cancel(sessionID string)                           {}
 func (c *stubCoordinator) CancelAll()                                        {}
 func (c *stubCoordinator) IsSessionBusy(sessionID string) bool               { return false }
@@ -96,6 +97,7 @@ func (c *stubBlockingCoordinator) RunAccepted(ctx context.Context, accept *agent
 }
 
 func (c *stubBlockingCoordinator) BeginAccepted(sessionID string) *agent.AcceptedRun { return nil }
+func (c *stubBlockingCoordinator) SetMainAgent(_ string) error                       { return nil }
 func (c *stubBlockingCoordinator) Cancel(sessionID string)                           {}
 func (c *stubBlockingCoordinator) CancelAll()                                        {}
 func (c *stubBlockingCoordinator) IsSessionBusy(sessionID string) bool               { return true }
@@ -388,9 +390,10 @@ func TestConformanceSessionSetupAndUnsupportedMethods(t *testing.T) {
 		t.Errorf("SetSessionConfigOption: %v", err)
 	}
 
-	// Genuinely unimplemented methods must still report failure.
-	if _, err := client.ResumeSession(t.Context(), acp.ResumeSessionRequest{SessionId: ns.SessionId, Cwd: "/workspace"}); err == nil {
-		t.Error("ResumeSession should error")
+	// session/resume (Option B, 2026-09-18): succeeds without replaying
+	// history; session/prompt continues any session id like `crush --continue`.
+	if _, err := client.ResumeSession(t.Context(), acp.ResumeSessionRequest{SessionId: ns.SessionId, Cwd: "/workspace"}); err != nil {
+		t.Errorf("ResumeSession: %v", err)
 	}
 
 	c2aW.Close()

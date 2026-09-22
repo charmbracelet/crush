@@ -61,6 +61,10 @@ func (b *permissionBridge) CheckPermission(ctx context.Context, req permission.P
 		Title:      &title,
 	}
 
+	// Report the pending status while the user decides (S10 lifecycle: a tool
+	// call sits in pending from its first report until permission resolves).
+	b.pushToolCallStatus(ctx, req.SessionID, req.ToolCallID, title, acp.ToolCallStatusPending, "")
+
 	options := buildPermissionOptions(req.Action)
 
 	permissionReq := acp.RequestPermissionRequest{
@@ -91,8 +95,36 @@ func (b *permissionBridge) CheckPermission(ctx context.Context, req permission.P
 		b.mu.Unlock()
 	}
 
+	// A denied permission terminates the tool call: report it as failed so the
+	// client does not show a tool stuck in pending/in_progress (S10).
+	if !granted && resp.Outcome.Cancelled == nil {
+		b.pushToolCallStatus(ctx, req.SessionID, req.ToolCallID, title,
+			acp.ToolCallStatusFailed, "Permission denied by user")
+	}
+
 	b.log.Info("ACP permission result", "sessionId", req.SessionID, "granted", granted)
 	return granted, nil
+}
+
+// pushToolCallStatus emits a tool_call_update so the client observes the
+// pending/failed transitions around a permission request.
+func (b *permissionBridge) pushToolCallStatus(ctx context.Context, sessionID, toolCallID, title string, status acp.ToolCallStatus, content string) {
+	opts := []acp.ToolCallUpdateOpt{acp.WithUpdateStatus(status)}
+	if title != "" {
+		opts = append(opts, acp.WithUpdateTitle(title))
+	}
+	if content != "" {
+		opts = append(opts, acp.WithUpdateContent([]acp.ToolCallContent{
+			acp.ToolContent(acp.TextBlock(content)),
+		}))
+	}
+	note := acp.SessionNotification{
+		SessionId: acp.SessionId(sessionID),
+		Update:    acp.UpdateToolCall(acp.ToolCallId(toolCallID), opts...),
+	}
+	if err := b.conn.SessionUpdate(ctx, note); err != nil {
+		b.log.Warn("Failed to send tool call status update", "error", err)
+	}
 }
 
 // buildPermissionOptions creates ACP permission options from Crush's action type.

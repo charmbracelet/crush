@@ -59,6 +59,10 @@ func (s *stubMessageService) List(_ context.Context, _ string) ([]message.Messag
 	return nil, nil
 }
 
+func (s *stubMessageService) ListFromSummary(_ context.Context, _, _ string) ([]message.Message, error) {
+	return nil, nil
+}
+
 func (s *stubMessageService) ListUserMessages(_ context.Context, _ string) ([]message.Message, error) {
 	return nil, nil
 }

@@ -41,6 +41,7 @@ import (
 	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/sshaskpass"
+	"github.com/charmbracelet/crush/internal/terminal"
 	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/update"
@@ -62,6 +63,7 @@ type App struct {
 	History     history.Service
 	Permissions permission.Service
 	Questions   question.Service
+	Terminal    terminal.Service
 	FileTracker filetracker.Service
 	Pinentry    *pinentry.Service
 
@@ -144,6 +146,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		History:     files,
 		Permissions: permSvc,
 		Questions:   question.NewService(),
+		Terminal:    terminal.NewService(),
 		FileTracker: filetracker.NewService(q, store.WorkingDir()),
 		Pinentry:    pinentry.DefaultService(),
 		LSPManager:  lsp.NewManager(store),
@@ -762,6 +765,7 @@ func (app *App) setupEvents() {
 	app.subscribeMustDeliver(ctx, "ssh-prompts", sshaskpass.DefaultPrompts().Subscribe)
 	app.subscribeMustDeliver(ctx, "ssh-notifications", sshaskpass.DefaultPrompts().SubscribeNotifications)
 	app.subscribeMustDeliver(ctx, "permissions-mode", app.Permissions.SubscribeModeChanges)
+	app.subscribeMustDeliver(ctx, "terminal-sessions", app.Terminal.Subscribe)
 	app.subscribe(ctx, "history", app.History.Subscribe)
 	app.subscribe(ctx, "agent-notifications", app.agentNotifications.Subscribe)
 	// Pinentry transitions are rare and drive the terminal handover, so
@@ -949,6 +953,7 @@ func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 		Messages:     app.Messages,
 		Permissions:  app.Permissions,
 		Questions:    app.Questions,
+		Terminal:     app.Terminal,
 		History:      app.History,
 		FileTracker:  app.FileTracker,
 		LSPManager:   app.LSPManager,
@@ -998,6 +1003,12 @@ func (app *App) Subscribe(program *tea.Program) {
 		return nil
 	})
 	defer app.tuiWG.Done()
+
+	// An interactive UI is attached: interactive terminal sessions can now
+	// be driven by a person instead of failing fast.
+	if app.Terminal != nil {
+		app.Terminal.SetAvailable(true)
+	}
 
 	events := app.events.Subscribe(tuiCtx)
 	for {
@@ -1054,6 +1065,11 @@ func (app *App) Shutdown() {
 	// workspace, so other workspaces' shells must keep running.
 	wg.Go(func() {
 		shell.GetBackgroundShellManager().KillOwned(shutdownCtx, app)
+	})
+
+	// Kill all interactive terminal sessions.
+	wg.Go(func() {
+		shell.GetInteractiveSessionManager().KillAll()
 	})
 
 	// Close herdr client to stop its background writer.

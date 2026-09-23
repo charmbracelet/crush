@@ -1211,6 +1211,25 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Pills.HelpText = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
 	s.Pills.Area = base
 
+	// Terminal styles. The embedded interactive terminal gets a
+	// low-contrast frame like the pills, and its emulator defaults come
+	// from the theme so child output stays legible on the themed
+	// background.
+	s.Terminal.Border = base.
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(o.bgMostVisible).
+		Background(o.bgBase)
+	s.Terminal.Header = lipgloss.NewStyle().
+		Foreground(o.fgBase).
+		Background(o.bgBase)
+	s.Terminal.Hint = lipgloss.NewStyle().
+		Foreground(o.fgMostSubtle).
+		Background(o.bgBase)
+	s.Terminal.TooSmall = lipgloss.NewStyle().Foreground(o.fgSubtle)
+	s.Terminal.Fg = o.fgBase
+	s.Terminal.Bg = o.bgBase
+	s.Terminal.Cursor = o.secondary
+
 	return s
 }
 

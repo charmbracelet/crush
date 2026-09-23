@@ -649,6 +649,17 @@ type Styles struct {
 		HelpText           lipgloss.Style // Help action text style
 		Area               lipgloss.Style // Pills area container
 	}
+
+	// Terminal styles for the embedded interactive terminal.
+	Terminal struct {
+		Border   lipgloss.Style // Frame around the embedded terminal.
+		Header   lipgloss.Style // Header row: prompt and command.
+		Hint     lipgloss.Style // Header keybinding hint, right-aligned.
+		TooSmall lipgloss.Style // Message shown when the window is too small.
+		Fg       color.Color    // Default terminal foreground.
+		Bg       color.Color    // Default terminal background.
+		Cursor   color.Color    // Terminal cursor color.
+	}
 }
 
 // ChromaTheme converts the current markdown chroma styles to a chroma

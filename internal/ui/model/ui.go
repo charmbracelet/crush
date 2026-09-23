@@ -45,8 +45,10 @@ import (
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/stringext"
+	"github.com/charmbracelet/crush/internal/terminal"
 	"github.com/charmbracelet/crush/internal/ui/attachments"
 	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/common"
@@ -139,6 +141,32 @@ type shellStreamMsg struct {
 	PendingID string
 	Chunk     string
 	streamCh  <-chan string // unexported; used to continue draining
+}
+
+type (
+	// terminalSessionMsg delivers a freshly spawned interactive terminal
+	// session. Request is set when the agent asked for it; UserCommand is
+	// set when the user opened it from the input line.
+	terminalSessionMsg struct {
+		Session     *shell.InteractiveSession
+		Request     *terminal.Request
+		UserCommand string
+	}
+
+	// terminalSpawnErrorMsg reports a failure to start an interactive
+	// terminal session.
+	terminalSpawnErrorMsg struct {
+		Request *terminal.Request
+		Err     error
+	}
+)
+
+// activeTerminalSession tracks the embedded interactive terminal currently
+// on screen. Only one exists at a time.
+type activeTerminalSession struct {
+	session     *shell.InteractiveSession
+	request     *terminal.Request // nil when the user started it
+	userCommand string
 }
 
 type (
@@ -279,6 +307,15 @@ type UI struct {
 	// shellResultMsg. Checked by isAgentBusy and cancelAgent so that
 	// Escape works for bang commands the same way it does for agent runs.
 	bangCancel context.CancelFunc
+
+	// interactiveBang tracks whether the bang-mode prompt is set up to run
+	// the command in the embedded interactive terminal (typed with a
+	// second leading "!", or bang mode with an empty command).
+	interactiveBang bool
+
+	// activeTerminal is the embedded interactive terminal session the
+	// terminal dialog is showing. Nil when no session is open.
+	activeTerminal *activeTerminalSession
 
 	header *header
 
@@ -1093,6 +1130,32 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case pubsub.Event[question.Notification]:
 		m.handleQuestionNotification(msg.Payload)
+	case pubsub.Event[terminal.Request]:
+		m.chat.ScrollToBottom()
+		cmds = append(cmds, m.spawnTerminalSession(&msg.Payload))
+		if cmd := m.sendNotification(notification.Notification{
+			Title:   "Crush is waiting...",
+			Message: "The agent opened an interactive terminal for you",
+		}); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case pubsub.Event[terminal.Notification]:
+		// The pending session resolved elsewhere (cancelled with its
+		// run, or superseded); tear ours down.
+		if m.activeTerminal != nil {
+			cmds = append(cmds, m.teardownTerminal())
+		}
+	case terminalSessionMsg:
+		cmds = append(cmds, m.attachTerminalDialog(msg))
+	case terminalSpawnErrorMsg:
+		cmds = append(cmds, m.handleTerminalSpawnError(msg))
+	case dialog.TerminalOutputMsg:
+		if m.activeTerminal != nil {
+			cmds = append(cmds, m.watchTerminalSession(m.activeTerminal.session))
+		}
+		cmds = append(cmds, m.handleDialogMsg(msg))
+	case dialog.TerminalExitMsg:
+		cmds = append(cmds, m.handleDialogMsg(msg))
 	case cancelTimerExpiredMsg:
 		m.isCanceling = false
 	case tea.TerminalVersionMsg:
@@ -2072,6 +2135,29 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		if msg.Cmd != nil {
 			cmds = append(cmds, msg.Cmd)
 		}
+
+	// Terminal dialog actions.
+	case dialog.ActionTerminalInput:
+		// Run the input application off the update loop: a wedged child
+		// process must never block rendering.
+		if m.activeTerminal != nil && msg.Apply != nil {
+			apply := msg.Apply
+			cmds = append(cmds, func() tea.Msg {
+				apply()
+				return nil
+			})
+		}
+	case dialog.ActionTerminalKill:
+		if m.activeTerminal != nil {
+			session := m.activeTerminal.session
+			cmds = append(cmds, func() tea.Msg {
+				_ = session.Kill()
+				_ = session.Close()
+				return nil
+			})
+		}
+	case dialog.ActionTerminalComplete:
+		cmds = append(cmds, m.completeTerminal(msg.Result))
 
 	// Session dialog messages.
 	case dialog.ActionSelectSession:
@@ -3124,11 +3210,18 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					return m.openQuitDialog()
 				}
 
-				if m.bangMode && value != "" {
+				if m.bangMode {
+					interactive := m.interactiveBang
 					m.bangMode = false
+					m.interactiveBang = false
 					m.setEditorPrompt(m.yoloModeCached())
 					m.randomizePlaceholders()
 					m.historyReset()
+					if interactive || value == "" {
+						// "!!command" runs it in the embedded interactive
+						// terminal; a bare "!" opens a shell there.
+						return tea.Batch(m.openInteractiveShell(value))
+					}
 					return tea.Batch(m.runShellCommand(value))
 				}
 
@@ -3276,6 +3369,15 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					m.textarea.SetValue(stripped)
 					m.textarea.SetCursorColumn(max(0, col-(len(newVal)-len(stripped))))
 					_ = line // cursor line doesn't change; prefix removed
+					m.setEditorPrompt(m.yoloModeCached())
+				} else if m.bangMode && !m.interactiveBang && strings.HasPrefix(trimmedNew, "!") && !strings.HasPrefix(trimmedCur, "!") {
+					// A second leading "!" engages the embedded interactive
+					// terminal ("!!command"); strip it like the first.
+					m.interactiveBang = true
+					col := m.textarea.Column()
+					stripped := trimmedNew[1:]
+					m.textarea.SetValue(stripped)
+					m.textarea.SetCursorColumn(max(0, col-(len(newVal)-len(stripped))))
 					m.setEditorPrompt(m.yoloModeCached())
 				} else if m.bangMode && newVal == "" && curValue != "" {
 					// Just cleared last character; mark empty, stay in bang mode.
@@ -5416,6 +5518,176 @@ func (m *UI) handleQuestionNotification(_ question.Notification) {
 		m.activeInline = nil
 		m.textarea.Focus()
 		m.updateLayoutAndSize()
+	}
+}
+
+// spawnTerminalSession starts an interactive terminal the agent requested
+// through the bash tool. The tool already applied the deny-list, so no
+// block functions are needed here.
+func (m *UI) spawnTerminalSession(req *terminal.Request) tea.Cmd {
+	cols, rows := m.terminalDialogSize()
+	return func() tea.Msg {
+		session, err := shell.NewInteractiveSession(shell.InteractiveSessionOptions{
+			Command:    req.Command,
+			WorkingDir: req.WorkingDir,
+			Cols:       cols,
+			Rows:       rows,
+		})
+		if err != nil {
+			return terminalSpawnErrorMsg{Request: req, Err: err}
+		}
+		return terminalSessionMsg{Session: session, Request: req}
+	}
+}
+
+// openInteractiveShell starts an interactive terminal the user asked for
+// with the bang prefix. An empty command opens a bare interactive shell.
+func (m *UI) openInteractiveShell(command string) tea.Cmd {
+	if m.activeTerminal != nil {
+		return util.ReportError(errors.New("an interactive terminal session is already open"))
+	}
+
+	workingDir := m.com.Workspace.WorkingDir()
+	cols, rows := m.terminalDialogSize()
+	return func() tea.Msg {
+		session, err := shell.NewInteractiveSession(shell.InteractiveSessionOptions{
+			Command:    command,
+			WorkingDir: workingDir,
+			Cols:       cols,
+			Rows:       rows,
+		})
+		if err != nil {
+			return terminalSpawnErrorMsg{Err: err}
+		}
+		return terminalSessionMsg{Session: session, UserCommand: command}
+	}
+}
+
+// terminalDialogSize is the initial emulator size for a new terminal
+// dialog: the window minus the dialog frame and header line.
+func (m *UI) terminalDialogSize() (cols, rows int) {
+	cols = max(m.width-2, shell.MinInteractiveCols)
+	rows = max(m.height-3, shell.MinInteractiveRows)
+	return cols, rows
+}
+
+// attachTerminalDialog opens the terminal dialog around a freshly spawned
+// session and starts watching it.
+func (m *UI) attachTerminalDialog(msg terminalSessionMsg) tea.Cmd {
+	m.activeTerminal = &activeTerminalSession{
+		session:     msg.Session,
+		request:     msg.Request,
+		userCommand: msg.UserCommand,
+	}
+
+	command := msg.UserCommand
+	if msg.Request != nil {
+		command = msg.Request.Command
+	}
+
+	m.textarea.Blur()
+	m.dialog.OpenDialogWithGrace(dialog.NewTerminalDialog(m.com, msg.Session, command))
+	return m.watchTerminalSession(msg.Session)
+}
+
+// watchTerminalSession waits for the session to change or exit and turns
+// that into a message so the UI repaints and eventually completes.
+func (m *UI) watchTerminalSession(session *shell.InteractiveSession) tea.Cmd {
+	return func() tea.Msg {
+		select {
+		case <-session.Dirty():
+			return dialog.TerminalOutputMsg{}
+		case <-session.Done():
+			return dialog.TerminalExitMsg{}
+		}
+	}
+}
+
+// handleTerminalSpawnError reports a failed spawn. When the agent was
+// waiting on it, resolve its request so the tool call does not hang.
+func (m *UI) handleTerminalSpawnError(msg terminalSpawnErrorMsg) tea.Cmd {
+	if msg.Request != nil {
+		m.com.Workspace.TerminalComplete(terminal.Result{
+			Output:   fmt.Sprintf("Failed to start interactive session: %v", msg.Err),
+			ExitCode: 1,
+		})
+	}
+	return util.ReportError(fmt.Errorf("interactive terminal: %w", msg.Err))
+}
+
+// teardownTerminal kills the active session and dismisses the dialog
+// without resolving a pending request; the request was resolved elsewhere.
+func (m *UI) teardownTerminal() tea.Cmd {
+	active := m.activeTerminal
+	m.activeTerminal = nil
+	m.dialog.CloseDialog(dialog.TerminalID)
+
+	if active == nil {
+		return nil
+	}
+
+	session := active.session
+	return func() tea.Msg {
+		_ = session.Kill()
+		_ = session.Close()
+		return nil
+	}
+}
+
+// completeTerminal finishes the active session: resolves the agent's
+// request, or persists the user's command like a bang-mode shell, then
+// cleans up the process.
+func (m *UI) completeTerminal(result terminal.Result) tea.Cmd {
+	active := m.activeTerminal
+	m.activeTerminal = nil
+	m.dialog.CloseDialog(dialog.TerminalID)
+
+	if active == nil {
+		return nil
+	}
+
+	session := active.session
+	cleanup := func() tea.Msg {
+		_ = session.Kill()
+		_ = session.Close()
+		return nil
+	}
+
+	if active.request != nil {
+		m.com.Workspace.TerminalComplete(result)
+		return cleanup
+	}
+
+	command := cmp.Or(active.userCommand, "interactive shell")
+	var cmds []tea.Cmd
+	cmds = append(cmds, cleanup, m.persistTerminalResult(command, result))
+	if m.focus == uiFocusEditor {
+		cmds = append(cmds, m.textarea.Focus())
+	}
+	return tea.Batch(cmds...)
+}
+
+// persistTerminalResult stores a user-run interactive session the same way
+// bang-mode shell commands are stored: as a shell command message the
+// agent sees, plus a transcript item.
+func (m *UI) persistTerminalResult(command string, result terminal.Result) tea.Cmd {
+	return func() tea.Msg {
+		if m.hasSession() {
+			if err := m.com.Workspace.PersistShellCommand(
+				context.Background(),
+				m.session.ID,
+				command,
+				result.Output,
+				result.ExitCode,
+			); err != nil {
+				return util.InfoMsg{Type: util.InfoTypeError, Msg: fmt.Sprintf("shell: %v", err)}
+			}
+		}
+		return shellResultMsg{
+			Command:  command,
+			Output:   result.Output,
+			ExitCode: result.ExitCode,
+		}
 	}
 }
 

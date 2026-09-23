@@ -23,6 +23,7 @@ import (
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/charmbracelet/crush/internal/terminal"
 )
 
 // Reasons the coder agent may be unavailable, returned by
@@ -182,6 +183,18 @@ type Workspace interface {
 
 	// QuestionCancel cancels the pending question.
 	QuestionCancel() bool
+
+	// Terminal
+	//
+	// TerminalComplete resolves the pending interactive terminal session
+	// with the result the user produced. Interactive sessions run in the
+	// client's process, so this is a no-op (false) in remote mode.
+	TerminalComplete(result terminal.Result) bool
+
+	// PersistShellCommand stores a user-run shell command result as a user
+	// message, like bang-mode commands. Remote workspaces return an error
+	// because the session database lives on the server.
+	PersistShellCommand(ctx context.Context, sessionID, command, output string, exitCode int) error
 
 	// FileTracker
 	FileTrackerRecordRead(ctx context.Context, sessionID, path string)

@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/charmbracelet/crush/internal/terminal"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/ui/util"
@@ -133,6 +134,25 @@ type (
 	ActionEnableDockerMCP struct{}
 	// ActionDisableDockerMCP is a message to disable Docker MCP.
 	ActionDisableDockerMCP struct{}
+
+	// ActionTerminalInput carries interactive terminal input. The apply
+	// function feeds the embedded emulator; the model runs it off the
+	// update loop because a wedged child process could otherwise block
+	// rendering.
+	ActionTerminalInput struct {
+		Apply func()
+	}
+
+	// ActionTerminalKill asks the model to terminate the interactive
+	// session's process. The result still arrives through the exit
+	// message path.
+	ActionTerminalKill struct{}
+
+	// ActionTerminalComplete resolves the pending interactive terminal
+	// session with the given result.
+	ActionTerminalComplete struct {
+		Result terminal.Result
+	}
 )
 
 // Messages for MCP OAuth authentication dialog.

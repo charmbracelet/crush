@@ -42,6 +42,7 @@ import (
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/charmbracelet/crush/internal/terminal"
 	"golang.org/x/sync/errgroup"
 
 	"charm.land/fantasy/providers/anthropic"
@@ -146,6 +147,7 @@ type coordinator struct {
 	messages    message.Service
 	permissions permission.Service
 	questions   question.Service
+	terminal    terminal.Service
 	history     history.Service
 	filetracker filetracker.Service
 	lspManager  *lsp.Manager
@@ -178,6 +180,7 @@ type CoordinatorOptions struct {
 	Messages    message.Service
 	Permissions permission.Service
 	Questions   question.Service
+	Terminal    terminal.Service
 	History     history.Service
 	FileTracker filetracker.Service
 	LSPManager  *lsp.Manager
@@ -207,6 +210,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		messages:     opts.Messages,
 		permissions:  opts.Permissions,
 		questions:    opts.Questions,
+		terminal:     opts.Terminal,
 		history:      opts.History,
 		filetracker:  opts.FileTracker,
 		lspManager:   opts.LSPManager,
@@ -838,7 +842,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 
 	allTools = append(
 		allTools,
-		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.DataDirectory, c.cfg.Config().Options.Attribution, modelID),
+		tools.NewBashTool(c.permissions, c.terminal, c.cfg.WorkingDir(), c.cfg.Config().Options.DataDirectory, c.cfg.Config().Options.Attribution, modelID),
 		tools.NewCrushInfoTool(c.cfg, c.lspManager, c.allSkills, c.activeSkills, c.skillTracker),
 		tools.NewCrushLogsTool(logFile),
 		tools.NewJobOutputTool(c.cfg.Config().Options.DataDirectory),

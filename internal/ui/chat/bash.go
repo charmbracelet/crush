@@ -54,6 +54,12 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		params.Command = "failed to parse command"
 	}
 
+	// An interactive call that has not finished yet is waiting on the
+	// user, not on the machine; say so instead of a bare spinner.
+	if params.Interactive && !opts.HasResult() {
+		return pendingTool(sty, "Bash (interactive terminal, waiting for user)", opts.Anim, opts.Compact)
+	}
+
 	// Check if this is a background job.
 	var meta tools.BashResponseMetadata
 	if opts.HasResult() {
@@ -75,6 +81,9 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		cmd = highlighted
 	}
 	toolParams := []string{cmd}
+	if params.Interactive {
+		toolParams = append(toolParams, "interactive", "true")
+	}
 	if params.RunInBackground {
 		toolParams = append(toolParams, "background", "true")
 	}

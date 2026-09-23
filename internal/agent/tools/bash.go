@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"html/template"
 	"log/slog"
@@ -20,6 +21,7 @@ import (
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/shell"
+	"github.com/charmbracelet/crush/internal/terminal"
 )
 
 type BashParams struct {
@@ -28,6 +30,7 @@ type BashParams struct {
 	WorkingDir          string `json:"working_dir,omitempty" description:"The working directory to execute the command in (defaults to current directory)"`
 	RunInBackground     bool   `json:"run_in_background,omitempty" description:"Set to true (boolean) to run this command in the background. Use job_output to read the output later."`
 	AutoBackgroundAfter int    `json:"auto_background_after,omitempty" description:"Seconds to wait before automatically moving the command to a background job (default: 60)"`
+	Interactive         bool   `json:"interactive,omitempty" description:"Set to true (boolean) when the command needs the user's input: a prompt, a confirmation, or a full-screen terminal UI. Opens an interactive terminal in the UI and returns its scrollback, final screen and exit code. Do not use for ordinary commands."`
 }
 
 type BashPermissionsParams struct {
@@ -36,6 +39,7 @@ type BashPermissionsParams struct {
 	WorkingDir          string `json:"working_dir"`
 	RunInBackground     bool   `json:"run_in_background"`
 	AutoBackgroundAfter int    `json:"auto_background_after"`
+	Interactive         bool   `json:"interactive"`
 }
 
 type BashResponseMetadata struct {
@@ -46,6 +50,7 @@ type BashResponseMetadata struct {
 	WorkingDirectory string `json:"working_directory"`
 	Background       bool   `json:"background,omitempty"`
 	ShellID          string `json:"shell_id,omitempty"`
+	Interactive      bool   `json:"interactive,omitempty"`
 }
 
 const (
@@ -195,7 +200,10 @@ func blockFuncs() []shell.BlockFunc {
 	}
 }
 
-func NewBashTool(permissions permission.Service, workingDir, spillDir string, attribution *config.Attribution, modelID string) fantasy.AgentTool {
+// NewBashTool creates the bash tool. terminals is the interactive terminal
+// service backing the `interactive` parameter; nil disables that mode (for
+// example in headless runs with no attached UI).
+func NewBashTool(permissions permission.Service, terminals terminal.Service, workingDir, spillDir string, attribution *config.Attribution, modelID string) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		BashToolName,
 		string(bashDescription(attribution, modelID)),
@@ -244,6 +252,13 @@ func NewBashTool(permissions permission.Service, workingDir, spillDir string, at
 				if !p {
 					return NewPermissionDeniedResponse(), nil
 				}
+			}
+
+			// Interactive mode hands the command to an embedded terminal
+			// the user drives. It runs after the permission check so an
+			// interactive command is approved like any other execution.
+			if params.Interactive {
+				return runInteractiveCommand(ctx, terminals, sessionID, call, params, execWorkingDir, spillDir)
 			}
 
 			// If explicitly requested as background, start immediately with detached context
@@ -385,6 +400,80 @@ func NewBashTool(permissions permission.Service, workingDir, spillDir string, at
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(response), metadata), nil
 		},
 	)
+}
+
+// runInteractiveCommand hands the command to the interactive terminal
+// service and blocks until the user is done. The response carries the
+// session transcript (scrollback plus final screen) rather than raw PTY
+// bytes, because a full-screen app's redraw stream would otherwise read as
+// repeated garbage.
+func runInteractiveCommand(
+	ctx context.Context,
+	terminals terminal.Service,
+	sessionID string,
+	call fantasy.ToolCall,
+	params BashParams,
+	workingDir, spillDir string,
+) (fantasy.ToolResponse, error) {
+	if terminals == nil {
+		return fantasy.NewTextErrorResponse(
+			"interactive mode is unavailable in this environment: no terminal is attached. Run the command without interactive, or ask the user to run it themselves",
+		), nil
+	}
+
+	// The interactive session spawns a real shell, so the deny-list that
+	// normally runs inside the interpreter never sees this command; check
+	// it here instead.
+	if err := shell.CheckBlocked(params.Command, blockFuncs()); err != nil {
+		return fantasy.NewTextErrorResponse(fmt.Sprintf(
+			"%v. This command is blocked for safety; run a non-interactive alternative instead",
+			err,
+		)), nil
+	}
+
+	startTime := time.Now()
+
+	result, err := terminals.Run(ctx, terminal.Request{
+		SessionID:   sessionID,
+		ToolCallID:  call.ID,
+		Command:     params.Command,
+		WorkingDir:  workingDir,
+		Description: params.Description,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, terminal.ErrCancelled), errors.Is(err, terminal.ErrBusy):
+			return fantasy.NewTextErrorResponse(fmt.Sprintf("interactive terminal: %v", err)), nil
+		case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+			return fantasy.ToolResponse{}, err
+		default:
+			return fantasy.NewTextErrorResponse(fmt.Sprintf("interactive terminal: %v", err)), nil
+		}
+	}
+
+	resultDir := cmp.Or(result.WorkingDir, workingDir)
+	output := truncateOutput(result.Output, spillDir)
+	metadata := BashResponseMetadata{
+		StartTime:        startTime.UnixMilli(),
+		EndTime:          time.Now().UnixMilli(),
+		Output:           output,
+		Description:      params.Description,
+		WorkingDirectory: resultDir,
+		Interactive:      true,
+	}
+
+	if output == "" {
+		output = BashNoOutput
+	}
+	if result.ExitCode != 0 {
+		output += fmt.Sprintf("\n\nExit code %d", result.ExitCode)
+	}
+	if result.Terminated {
+		output += "\n\nThe user ended the interactive session before the command exited."
+	}
+	output += fmt.Sprintf("\n\n<cwd>%s</cwd>", normalizeWorkingDir(resultDir))
+
+	return fantasy.WithResponseMetadata(fantasy.NewTextResponse(output), metadata), nil
 }
 
 // formatOutput formats the output of a completed command with error handling

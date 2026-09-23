@@ -23,6 +23,7 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/charmbracelet/crush/internal/terminal"
 )
 
 // AppWorkspace implements the Workspace interface by delegating
@@ -279,6 +280,16 @@ func (w *AppWorkspace) QuestionAnswer(responses []question.Answer) bool {
 
 func (w *AppWorkspace) QuestionCancel() bool {
 	return w.app.Questions.Cancel()
+}
+
+// -- Terminal --
+
+func (w *AppWorkspace) TerminalComplete(result terminal.Result) bool {
+	return w.app.Terminal.Complete(result)
+}
+
+func (w *AppWorkspace) PersistShellCommand(ctx context.Context, sessionID, command, output string, exitCode int) error {
+	return shell.PersistOutput(ctx, w.app.Messages, sessionID, command, output, exitCode, w.store.Config().Options.DataDirectory)
 }
 
 // -- FileTracker --

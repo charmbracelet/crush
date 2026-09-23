@@ -174,6 +174,12 @@ func unmarshalToolParams(toolName string, raw json.RawMessage) (any, error) {
 			return nil, err
 		}
 		return params, nil
+	case TerminalToolName:
+		var params TerminalPermissionsParams
+		if err := json.Unmarshal(raw, &params); err != nil {
+			return nil, err
+		}
+		return params, nil
 	default:
 		// For unknown tools, keep the params as the generic JSON value
 		// they hold. That is not always an object: MCP tools send their

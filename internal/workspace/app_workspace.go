@@ -325,6 +325,12 @@ func (w *AppWorkspace) SSHCancel(id string) bool {
 	return sshaskpass.DefaultPrompts().Cancel(id)
 }
 
+// -- Terminal --
+
+func (w *AppWorkspace) PersistShellCommand(ctx context.Context, sessionID, command, output string, exitCode int) error {
+	return shell.PersistOutput(ctx, w.app.Messages, sessionID, command, output, exitCode, w.store.Config().Options.DataDirectory)
+}
+
 // -- FileTracker --
 
 func (w *AppWorkspace) FileTrackerRecordRead(ctx context.Context, sessionID, path string) {

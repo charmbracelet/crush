@@ -242,37 +242,9 @@ var nonInteractiveEnvVars = []string{
 // process never leak through. The returned slice is a new allocation
 // safe to use concurrently with the input.
 func withNonInteractiveEnv(env []string) []string {
-	// Build a set of override keys for fast lookup.
-	overrideKeys := make(map[string]bool, len(nonInteractiveEnvVars)+4)
-	for _, kv := range nonInteractiveEnvVars {
-		if key, _, ok := strings.Cut(kv, "="); ok {
-			overrideKeys[key] = true
-		}
-	}
-	for _, kv := range pinentry.GitWrapperEnv() {
-		if key, _, ok := strings.Cut(kv, "="); ok {
-			overrideKeys[key] = true
-		}
-	}
-	for _, kv := range sshaskpass.AskpassEnv() {
-		if key, _, ok := strings.Cut(kv, "="); ok {
-			overrideKeys[key] = true
-		}
-	}
-
-	// Copy env, filtering out any keys we will override.
-	result := make([]string, 0, len(env)+len(nonInteractiveEnvVars)+4)
-	for _, e := range env {
-		if key, _, ok := strings.Cut(e, "="); ok && overrideKeys[key] {
-			continue
-		}
-		result = append(result, e)
-	}
-
-	result = append(result, nonInteractiveEnvVars...)
-	result = append(result, pinentry.GitWrapperEnv()...)
-	result = append(result, sshaskpass.AskpassEnv()...)
-	return result
+	overrides := append(slices.Clone(nonInteractiveEnvVars), pinentry.GitWrapperEnv()...)
+	overrides = append(overrides, sshaskpass.AskpassEnv()...)
+	return withEnvOverrides(env, overrides)
 }
 
 // herdrEnvVars are the environment variables herdr injects into panes

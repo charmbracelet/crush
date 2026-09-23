@@ -225,6 +225,12 @@ func (c *Client) SubscribeEvents(ctx context.Context, id string) (<-chan any, er
 				if !sendEvent(ctx, events, e) {
 					return
 				}
+			case pubsub.PayloadTypeTerminalCall:
+				var e pubsub.Event[proto.TerminalCall]
+				_ = json.Unmarshal(p.Payload, &e)
+				if !sendEvent(ctx, events, e) {
+					return
+				}
 			case pubsub.PayloadTypeMessage:
 				var e pubsub.Event[proto.Message]
 				_ = json.Unmarshal(p.Payload, &e)
@@ -877,6 +883,40 @@ func (c *Client) CancelSSH(ctx context.Context, id string, req proto.SSHCancel) 
 		return false, fmt.Errorf("failed to decode cancel ssh prompt response: %w", err)
 	}
 	return resp.Resolved, nil
+}
+
+// RespondTerminal answers a terminal call the server forwarded to this
+// client with the result of running it here. Returns true if the call was
+// still waiting for the answer.
+func (c *Client) RespondTerminal(ctx context.Context, id string, req proto.TerminalResult) (bool, error) {
+	q := url.Values{"client_id": []string{c.clientID}}
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/terminal/result", id), q, jsonBody(req), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return false, fmt.Errorf("failed to answer terminal call: %w", err)
+	}
+	defer rsp.Body.Close()
+	if err := checkStatus(rsp); err != nil {
+		return false, fmt.Errorf("failed to answer terminal call: %w", err)
+	}
+	var resp proto.TerminalResponse
+	if err := json.NewDecoder(rsp.Body).Decode(&resp); err != nil {
+		return false, fmt.Errorf("failed to decode terminal call response: %w", err)
+	}
+	return resp.Resolved, nil
+}
+
+// RecordShellCommand stores a shell command the user ran on this machine
+// as a message in the session.
+func (c *Client) RecordShellCommand(ctx context.Context, id, sessionID string, req proto.ShellCommandRecord) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent/sessions/%s/shell/record", id, sessionID), nil, jsonBody(req), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return fmt.Errorf("failed to record shell command: %w", err)
+	}
+	defer rsp.Body.Close()
+	if err := checkStatus(rsp); err != nil {
+		return fmt.Errorf("failed to record shell command: %w", err)
+	}
+	return nil
 }
 
 // SetPermissionMode sets the permission mode for a workspace.

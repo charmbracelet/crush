@@ -47,6 +47,7 @@ import (
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/charmbracelet/crush/internal/terminal"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
 
@@ -148,6 +149,7 @@ type coordinator struct {
 	messages    message.Service
 	permissions permission.Service
 	questions   question.Service
+	terminal    terminal.Service
 	history     history.Service
 	filetracker filetracker.Service
 	lspManager  *lsp.Manager
@@ -218,6 +220,7 @@ type CoordinatorOptions struct {
 	Messages    message.Service
 	Permissions permission.Service
 	Questions   question.Service
+	Terminal    terminal.Service
 	History     history.Service
 	FileTracker filetracker.Service
 	LSPManager  *lsp.Manager
@@ -251,6 +254,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		messages:        opts.Messages,
 		permissions:     opts.Permissions,
 		questions:       opts.Questions,
+		terminal:        opts.Terminal,
 		history:         opts.History,
 		filetracker:     opts.FileTracker,
 		lspManager:      opts.LSPManager,
@@ -983,7 +987,7 @@ func (c *coordinator) buildAgentWithModels(ctx context.Context, ready *errgroup.
 func (c *coordinator) effectiveToolNames(agentCfg config.Agent, isSubAgent bool) []string {
 	return slices.DeleteFunc(slices.Clone(agentCfg.AllowedTools), func(name string) bool {
 		switch name {
-		case tools.QuestionToolName:
+		case tools.QuestionToolName, tools.TerminalToolName:
 			return isSubAgent || !c.interactive
 		case AgentToolName:
 			return isSubAgent || c.interactive
@@ -1066,6 +1070,9 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	// is what decides both.
 	if slices.Contains(allowed, tools.QuestionToolName) {
 		allTools = append(allTools, tools.NewQuestionTool(c.questions))
+	}
+	if slices.Contains(allowed, tools.TerminalToolName) {
+		allTools = append(allTools, tools.NewTerminalTool(c.permissions, c.terminal, c.cfg.WorkingDir(), c.cfg.Config().Options.DataDirectory, c.cfg.Config().Permissions))
 	}
 
 	// Add LSP tools if user has configured LSPs or auto_lsp is enabled (nil or true).

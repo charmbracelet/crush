@@ -12,11 +12,13 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/agent/notify"
+	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/client"
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/herdr"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/log"
@@ -30,8 +32,10 @@ import (
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/server"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/sshaskpass"
+	"github.com/charmbracelet/crush/internal/terminal"
 	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
@@ -73,7 +77,12 @@ type ClientWorkspace struct {
 	// herdrClient reports agent state to herdr when running inside
 	// a herdr-managed pane. Nil when not in a herdr environment.
 	herdrClient *herdr.Client
-
+	// terminals shows the interactive terminals this client runs for the
+	// agent to the TUI, and terminalCalls cancels the calls in flight by
+	// call ID. Terminals open here, on the user's machine, not on the
+	// server's.
+	terminals     terminal.Service
+	terminalCalls *csync.Map[string, context.CancelFunc]
 	// respawnServer brings a server back on the client's address after the
 	// previous one died. Nil leaves the loop retrying the address.
 	respawnServer func(context.Context) error
@@ -119,13 +128,15 @@ func NewClientWorkspace(c *client.Client, ws proto.Workspace, opts ...ClientWork
 	mgr := skills.NewManager(nil, nil, states, skills.WithGlobalMirror())
 	subCtx, subCancel := context.WithCancel(context.Background())
 	w := &ClientWorkspace{
-		client:      c,
-		ws:          ws,
-		skills:      mgr,
-		subCtx:      subCtx,
-		subCancel:   subCancel,
-		subDone:     make(chan struct{}),
-		herdrClient: herdr.Init(),
+		client:        c,
+		ws:            ws,
+		skills:        mgr,
+		subCtx:        subCtx,
+		subCancel:     subCancel,
+		subDone:       make(chan struct{}),
+		herdrClient:   herdr.Init(),
+		terminals:     terminal.NewService(),
+		terminalCalls: csync.NewMap[string, context.CancelFunc](),
 	}
 	for _, opt := range opts {
 		opt(w)
@@ -552,6 +563,70 @@ func (w *ClientWorkspace) SSHCancel(id string) bool {
 	return cancelled
 }
 
+// -- Terminal --
+
+// PersistShellCommand stores a shell command the user ran on this machine
+// as a message in the session, which lives on the server.
+func (w *ClientWorkspace) PersistShellCommand(ctx context.Context, sessionID, command, output string, exitCode int) error {
+	return w.client.RecordShellCommand(ctx, w.workspaceID(), sessionID, proto.ShellCommandRecord{
+		Command:  command,
+		Output:   output,
+		ExitCode: exitCode,
+	})
+}
+
+// handleTerminalCall runs a terminal call the agent forwarded to this
+// client, so the terminal opens on the user's machine, and sends the
+// result back. A cancel call stops the call it names; the server has
+// stopped waiting for it.
+func (w *ClientWorkspace) handleTerminalCall(call proto.TerminalCall) {
+	if call.Op == terminal.OpCancel {
+		if cancel, ok := w.terminalCalls.Take(call.ID); ok {
+			cancel()
+		}
+		return
+	}
+
+	ctx, cancel := context.WithCancel(w.subCtx)
+	w.terminalCalls.Set(call.ID, cancel)
+	go func() {
+		defer cancel()
+		defer w.terminalCalls.Del(call.ID)
+
+		result, err := tools.ExecTerminal(ctx, w.terminals, w.WorkingDir(), terminal.Call{
+			ID:         call.ID,
+			ClientID:   call.ClientID,
+			SessionID:  call.SessionID,
+			ToolCallID: call.ToolCallID,
+			Op:         call.Op,
+			Params:     call.Params,
+		})
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			result = terminal.Result{Content: err.Error(), IsError: true}
+		}
+
+		if _, err := w.client.RespondTerminal(ctx, w.workspaceID(), proto.TerminalResult{
+			CallID:   call.ID,
+			Content:  result.Content,
+			Metadata: result.Metadata,
+			IsError:  result.IsError,
+		}); err != nil {
+			slog.Error("Failed to answer terminal call", "op", call.Op, "error", err)
+		}
+	}()
+}
+
+// forwardTerminals shows the terminals this client opens for the agent in
+// the TUI.
+func (w *ClientWorkspace) forwardTerminals(send func(tea.Msg)) {
+	for ev := range w.terminals.Subscribe(w.subCtx) {
+		send(ev)
+	}
+}
+
 // -- FileTracker --
 
 func (w *ClientWorkspace) FileTrackerRecordRead(ctx context.Context, sessionID, path string) {
@@ -969,6 +1044,8 @@ func (w *ClientWorkspace) Subscribe(program *tea.Program) {
 		program.Quit()
 	})
 
+	w.terminals.SetAvailable(true)
+	go w.forwardTerminals(program.Send)
 	w.runSubscription(program.Send)
 }
 
@@ -1265,6 +1342,10 @@ func (w *ClientWorkspace) consumeEvents(evc <-chan any, send func(tea.Msg)) {
 			w.refreshWorkspace()
 			continue
 		}
+		if call, ok := ev.(pubsub.Event[proto.TerminalCall]); ok {
+			w.handleTerminalCall(call.Payload)
+			continue
+		}
 		translated := w.translateEvent(ev)
 		if translated != nil && send != nil {
 			send(translated)
@@ -1298,6 +1379,10 @@ func (w *ClientWorkspace) Shutdown() {
 	}
 	w.awaitSubscription()
 	w.herdrClient.Close()
+
+	// The interactive terminals run in this process; do not leave orphan
+	// processes behind.
+	shell.GetInteractiveSessionManager().KillAll()
 
 	// Retiring the client releases every claim it holds, on every workspace,
 	// and blocks any further create from this client ID. That is what makes

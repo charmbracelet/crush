@@ -72,6 +72,16 @@ type SessionFile struct {
 // That report is fire-and-forget: errors are logged at debug and the
 // UI never blocks on the call.
 func (m *UI) loadSession(sessionID string) tea.Cmd {
+	// Hide the terminal immediately when it belongs to another session:
+	// loading can take a moment, and the panel would linger otherwise. The
+	// loadSessionMsg handler restores it when this session owns it.
+	var prefixCmds []tea.Cmd
+	if m.activeTerminal != nil && m.activeTerminal.chatSessionID != sessionID {
+		if cmd := m.detachTerminal(); cmd != nil {
+			prefixCmds = append(prefixCmds, cmd)
+		}
+	}
+
 	load := func() tea.Msg {
 		session, err := m.com.Workspace.GetSession(context.Background(), sessionID)
 		if err != nil {
@@ -102,7 +112,7 @@ func (m *UI) loadSession(sessionID string) tea.Cmd {
 			messages:  messages,
 		}
 	}
-	return tea.Batch(load, m.reportCurrentSession(sessionID))
+	return tea.Batch(append(prefixCmds, load, m.reportCurrentSession(sessionID))...)
 }
 
 // reportCurrentSession returns a fire-and-forget tea.Cmd that

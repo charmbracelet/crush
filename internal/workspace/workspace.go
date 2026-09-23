@@ -225,6 +225,12 @@ type Workspace interface {
 	// is pending.
 	SSHRespond(id, secret string) bool
 	SSHCancel(id string) bool
+	// Terminal
+	//
+	// PersistShellCommand stores a user-run shell command result as a user
+	// message, like bang-mode commands. Remote workspaces send it to the
+	// server, where the session database lives.
+	PersistShellCommand(ctx context.Context, sessionID, command, output string, exitCode int) error
 
 	// FileTracker
 	FileTrackerRecordRead(ctx context.Context, sessionID, path string)

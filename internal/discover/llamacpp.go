@@ -41,7 +41,7 @@ type llamacppMeta struct {
 type llamacppEnricher struct{}
 
 func (e *llamacppEnricher) EnrichModels(ctx context.Context, cfg Config, resolver Resolver, models []catwalk.Model) ([]catwalk.Model, error) {
-	resp, err := doRequest(ctx, http.MethodGet, cfg.BaseURL, "/v1/models", cfg.APIKey, cfg.ExtraHeaders, resolver, nil)
+	resp, err := doRequest(ctx, http.MethodGet, stripV1Suffix(cfg.BaseURL), "/v1/models", cfg.APIKey, cfg.ExtraHeaders, resolver, nil)
 	if err != nil {
 		return models, nil
 	}

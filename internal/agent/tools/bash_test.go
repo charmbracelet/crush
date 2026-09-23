@@ -314,6 +314,14 @@ func TestIsDangerousCommand(t *testing.T) {
 func runBashTool(t *testing.T, tool fantasy.AgentTool, ctx context.Context, params BashParams) fantasy.ToolResponse {
 	t.Helper()
 
+	resp, err := runBashToolRaw(t, tool, ctx, params)
+	require.NoError(t, err)
+	return resp
+}
+
+func runBashToolRaw(t *testing.T, tool fantasy.AgentTool, ctx context.Context, params BashParams) (fantasy.ToolResponse, error) {
+	t.Helper()
+
 	input, err := json.Marshal(params)
 	require.NoError(t, err)
 
@@ -323,9 +331,7 @@ func runBashTool(t *testing.T, tool fantasy.AgentTool, ctx context.Context, para
 		Input: string(input),
 	}
 
-	resp, err := tool.Run(ctx, call)
-	require.NoError(t, err)
-	return resp
+	return tool.Run(ctx, call)
 }
 
 func TestTruncateOutputValidUTF8(t *testing.T) {

@@ -55,6 +55,46 @@ func TestLoadShellConfig_FlagBoolCaseInsensitive(t *testing.T) {
 	require.Equal(t, true, openai["disable"])
 }
 
+// TestLoadShellConfig_UseResponsesAPI verifies that --use-responses-api is
+// recorded on the provider so openai-compatible providers can opt into the
+// Responses API.
+func TestLoadShellConfig_UseResponsesAPI(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := `provider add litellm --type litellm --api-key key --use-responses-api true`
+	path := filepath.Join(dir, "crushrc")
+
+	jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(script))
+	require.NoError(t, err)
+
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &result))
+
+	litellm := result["providers"].(map[string]any)["litellm"].(map[string]any)
+	require.Equal(t, true, litellm["use_responses_api"])
+}
+
+// TestLoadShellConfig_UseResponsesAPIDefaultsOff verifies that the option is
+// absent when the flag is not passed, so existing providers keep using Chat
+// Completions.
+func TestLoadShellConfig_UseResponsesAPIDefaultsOff(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := `provider add litellm --type litellm --api-key key`
+	path := filepath.Join(dir, "crushrc")
+
+	jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(script))
+	require.NoError(t, err)
+
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &result))
+
+	litellm := result["providers"].(map[string]any)["litellm"].(map[string]any)
+	require.NotContains(t, litellm, "use_responses_api")
+}
+
 // TestLoadShellConfig_MultipleProviders verifies that multiple provider calls
 // each produce separate entries.
 func TestLoadShellConfig_MultipleProviders(t *testing.T) {

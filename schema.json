@@ -654,6 +654,10 @@
           "description": "Provider type that determines the API format",
           "default": "openai"
         },
+        "use_responses_api": {
+          "type": "boolean",
+          "description": "Route requests through the OpenAI Responses API instead of Chat Completions (openai-compatible providers)"
+        },
         "api_key": {
           "type": "string",
           "description": "API key for authentication with the provider",

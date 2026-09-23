@@ -545,6 +545,38 @@ func TestConfig_configureProvidersWithNewProvider(t *testing.T) {
 	require.True(t, ok, "OpenAI provider should still be present")
 }
 
+// TestConfig_configureProvidersCustomProviderUseResponsesAPI verifies that a
+// custom provider's use_responses_api opt-in survives provider configuration,
+// so the coordinator can honor it when building the fantasy provider.
+func TestConfig_configureProvidersCustomProviderUseResponsesAPI(t *testing.T) {
+	knownProviders := []catwalk.Provider{}
+
+	cfg := &Config{
+		Providers: csync.NewMapFrom(map[string]ProviderConfig{
+			"litellm": {
+				Type:            "litellm",
+				APIKey:          "xyz",
+				BaseURL:         "https://litellm.internal/v1",
+				UseResponsesAPI: true,
+				Models: []catwalk.Model{
+					{
+						ID: "azure/openai/gpt-5.4",
+					},
+				},
+			},
+		}),
+	}
+	cfg.setDefaults("/tmp", "")
+	env := env.NewFromMap(map[string]string{})
+	resolver := NewShellVariableResolver(env)
+	err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, knownProviders)
+	require.NoError(t, err)
+
+	pc, ok := cfg.Providers.Get("litellm")
+	require.True(t, ok)
+	require.True(t, pc.UseResponsesAPI, "use_responses_api should be preserved")
+}
+
 func TestConfig_configureProvidersBedrockWithCredentials(t *testing.T) {
 	knownProviders := []catwalk.Provider{
 		{

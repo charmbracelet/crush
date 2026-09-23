@@ -155,6 +155,7 @@ Flags:
       --disable bool                disable without removing
       --flat-rate bool              use flat-rate billing
       --discover-models bool        auto-discover and merge provider models
+      --use-responses-api bool      route requests through the Responses API
       --system-prompt-prefix string text prepended to the system prompt
       --extra-header key value      add an HTTP header (repeatable)
       --extra-body JSON             merge a JSON object into request bodies
@@ -167,6 +168,17 @@ provider add deepseek \
   --base-url "https://api.deepseek.com/v1" \
   --api-key "${DEEPSEEK_API_KEY:?set DEEPSEEK_API_KEY}"
 ```
+
+```bash
+provider add litellm \
+  --type litellm \
+  --base-url "http://localhost:4000/v1" \
+  --api-key "${LITELLM_API_KEY:?set LITELLM_API_KEY}" \
+  --use-responses-api true
+```
+
+Use `--use-responses-api true` when the provider or gateway serves the
+OpenAI Responses API and should route all models through `/v1/responses`.
 
 Headers whose value resolves to the empty string (an unset `$VAR`, a
 `$(...)` that prints nothing, or a literal `""`) are dropped from the

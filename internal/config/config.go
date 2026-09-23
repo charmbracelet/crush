@@ -98,6 +98,12 @@ type ProviderConfig struct {
 	BaseURL string `json:"base_url,omitempty" jsonschema:"description=Base URL for the provider's API,format=uri,example=https://api.openai.com/v1"`
 	// The provider type, e.g. "openai", "anthropic", etc. if empty it defaults to openai.
 	Type catwalk.Type `json:"type,omitempty" jsonschema:"description=Provider type that determines the API format,default=openai"`
+	// UseResponsesAPI routes this provider's requests through the OpenAI
+	// Responses API instead of Chat Completions. It exists for
+	// openai-compatible and custom providers (litellm, ollama, ...),
+	// which otherwise always use Chat Completions: without it there is no
+	// way to reach a gateway that only serves the responses endpoint.
+	UseResponsesAPI bool `json:"use_responses_api,omitempty" jsonschema:"description=Route requests through the OpenAI Responses API instead of Chat Completions (openai-compatible providers)"`
 	// The provider's API key.
 	APIKey string `json:"api_key,omitempty" jsonschema:"description=API key for authentication with the provider,example=$OPENAI_API_KEY"`
 	// The original API key template before resolution (for re-resolution on auth errors).

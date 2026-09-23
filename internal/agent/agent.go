@@ -40,6 +40,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
@@ -174,6 +175,7 @@ type sessionAgent struct {
 	tools              *csync.Slice[fantasy.AgentTool]
 
 	isSubAgent           bool
+	promptHookRunner     *hooks.Runner
 	sessions             session.Service
 	messages             message.Service
 	disableAutoSummarize bool
@@ -228,6 +230,7 @@ type SessionAgentOptions struct {
 	SystemPromptPrefix   string
 	SystemPrompt         string
 	IsSubAgent           bool
+	PromptHookRunner     *hooks.Runner
 	DisableAutoSummarize bool
 	IsYolo               bool
 	Sessions             session.Service
@@ -246,6 +249,7 @@ func NewSessionAgent(
 		systemPromptPrefix:   csync.NewValue(opts.SystemPromptPrefix),
 		systemPrompt:         csync.NewValue(opts.SystemPrompt),
 		isSubAgent:           opts.IsSubAgent,
+		promptHookRunner:     opts.PromptHookRunner,
 		sessions:             opts.Sessions,
 		messages:             opts.Messages,
 		disableAutoSummarize: opts.DisableAutoSummarize,
@@ -716,6 +720,21 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	}
 	userMsgCreated = true
 
+	// Fire UserPromptSubmit hooks and prepend any injected context to the
+	// outbound prompt. The stored user message keeps the original text, so
+	// the transcript still shows exactly what the user typed; only the
+	// copy sent to the model carries the extra context.
+	outboundPrompt := call.Prompt
+	if a.promptHookRunner != nil {
+		agg, hookErr := a.promptHookRunner.RunPrompt(ctx, call.SessionID, call.Prompt)
+		if hookErr != nil {
+			slog.Warn("Prompt hook execution error, proceeding with prompt", "error", hookErr)
+		}
+		if hookContext := strings.TrimSpace(agg.Context); hookContext != "" {
+			outboundPrompt = hookContext + "\n\n" + outboundPrompt
+		}
+	}
+
 	// Add the session to the context. The run context (genCtx) and its
 	// cancel func were already created and registered under the dispatch
 	// mutex above for both the accepted and in-process paths.
@@ -794,7 +813,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		maxOutputTokens = &call.MaxOutputTokens
 	}
 	result, err = agent.Stream(genCtx, fantasy.AgentStreamCall{
-		Prompt:           message.PromptWithTextAttachments(call.Prompt, call.Attachments),
+		Prompt:           message.PromptWithTextAttachments(outboundPrompt, call.Attachments),
 		Files:            files,
 		Messages:         history,
 		Headers:          sessionHeaders(call.SessionID),

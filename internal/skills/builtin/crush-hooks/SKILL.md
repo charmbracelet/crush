@@ -6,18 +6,27 @@ description: Use when the user wants to add, write, debug, or configure a Crush 
 # Crush Hooks
 
 Hooks are user-defined commands in `crush.json` that fire at specific points
-during execution, giving deterministic control over tool behavior. They run
-**before** permission checks and **only on the top-level agent's** tool calls —
-sub-agent calls (task tool, agentic_fetch, etc.) are not intercepted, though
-the sub-agent tool call itself is.
+during execution, giving deterministic control over tool behavior. `PreToolUse`
+hooks run **before** permission checks and **only on the top-level agent's** tool
+calls — sub-agent calls (task tool, agentic_fetch, etc.) are not intercepted,
+though the sub-agent tool call itself is. `UserPromptSubmit` hooks run on the
+top-level agent on every submitted prompt.
 
 For the full reference, see `docs/hooks/README.md`. This skill covers what you
 need to author correct hooks.
 
 ## Supported Events
 
-Only `PreToolUse` is currently supported. Event names are case-insensitive and
-accept snake_case (`PreToolUse`, `pretooluse`, `pre_tool_use` all work).
+`PreToolUse` and `UserPromptSubmit` are currently supported. Event names are
+case-insensitive and accept snake_case (`PreToolUse`, `pretooluse`,
+`pre_tool_use` all work).
+
+- `PreToolUse` — fires before a tool call. Can block, halt, rewrite tool input,
+  auto-approve, and append context to the tool result.
+- `UserPromptSubmit` — fires after the user message is recorded and before the
+  turn reaches the model. Currently only the `context` field is honored: it is
+  prepended to the outbound prompt. `decision`, `halt`, and `updated_prompt` are
+  parsed but not enforced, and `matcher` is ignored (there is no tool name).
 
 ## Configuration
 

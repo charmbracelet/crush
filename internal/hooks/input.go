@@ -28,6 +28,16 @@ type Payload struct {
 	ToolInput json.RawMessage `json:"tool_input"`
 }
 
+// PromptPayload is the JSON structure piped to UserPromptSubmit hook
+// commands via stdin. There is no tool at this point in the turn, so the
+// payload carries the prompt instead of tool_name/tool_input.
+type PromptPayload struct {
+	Event     string `json:"event"`
+	SessionID string `json:"session_id"`
+	CWD       string `json:"cwd"`
+	Prompt    string `json:"prompt"`
+}
+
 // BuildPayload constructs the JSON stdin payload for a hook command.
 func BuildPayload(eventName, sessionID, cwd, toolName, toolInputJSON string) []byte {
 	toolInput := json.RawMessage(toolInputJSON)
@@ -72,6 +82,38 @@ func BuildEnv(eventName, toolName, sessionID, cwd, projectDir, toolInputJSON str
 		}
 	}
 
+	return env
+}
+
+// BuildPromptPayload constructs the JSON stdin payload for a
+// UserPromptSubmit hook command.
+func BuildPromptPayload(eventName, sessionID, cwd, prompt string) []byte {
+	p := PromptPayload{
+		Event:     eventName,
+		SessionID: sessionID,
+		CWD:       cwd,
+		Prompt:    prompt,
+	}
+	data, err := json.Marshal(p)
+	if err != nil {
+		return []byte("{}")
+	}
+	return data
+}
+
+// BuildPromptEnv constructs the environment variable slice for a
+// UserPromptSubmit hook command. Tool-specific variables are omitted
+// because no tool is being called.
+func BuildPromptEnv(eventName, sessionID, cwd, projectDir string) []string {
+	env := os.Environ()
+	env = append(env, shell.CrushEnvMarkers()...)
+	env = append(
+		env,
+		fmt.Sprintf("CRUSH_EVENT=%s", eventName),
+		fmt.Sprintf("CRUSH_SESSION_ID=%s", sessionID),
+		fmt.Sprintf("CRUSH_CWD=%s", cwd),
+		fmt.Sprintf("CRUSH_PROJECT_DIR=%s", projectDir),
+	)
 	return env
 }
 

@@ -2,6 +2,7 @@ package dialog
 
 import (
 	"cmp"
+	"image"
 	"image/color"
 	"strings"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	uv "github.com/charmbracelet/ultraviolet"
 )
 
 // dialogInputTextWidth returns the text-area width for a dialog input so
@@ -103,6 +105,47 @@ const (
 	sessionInfoMaxPercent = 35
 	commandInfoMaxPercent = 25
 )
+
+// dialogListArea computes the screen rectangle a dialog's list occupies.
+// The dialog view is centered in area (clamped to it), and the list is the
+// last content part above the help footer, so the list's top is derived
+// bottom-up from the dialog's bottom edge minus the bottom frame, the help
+// height, and the list view height. The result is clamped to both the dialog
+// and the given area.
+func dialogListArea(
+	area uv.Rectangle,
+	view, bodyView, helpView string,
+	viewStyle, bodyStyle lipgloss.Style,
+	bodyWidth, bodyHeight int,
+) image.Rectangle {
+	viewWidth, viewHeight := lipgloss.Size(view)
+	dialogArea := common.CenterRect(area, min(viewWidth, area.Dx()), min(viewHeight, area.Dy()))
+	bodyViewTop := dialogArea.Max.Y -
+		viewStyle.GetMarginBottom() -
+		viewStyle.GetBorderBottomSize() -
+		viewStyle.GetPaddingBottom() -
+		lipgloss.Height(helpView) -
+		lipgloss.Height(bodyView)
+	bodyMin := image.Pt(
+		dialogArea.Min.X+
+			viewStyle.GetMarginLeft()+
+			viewStyle.GetBorderLeftSize()+
+			viewStyle.GetPaddingLeft()+
+			bodyStyle.GetMarginLeft()+
+			bodyStyle.GetBorderLeftSize()+
+			bodyStyle.GetPaddingLeft(),
+		bodyViewTop+
+			bodyStyle.GetMarginTop()+
+			bodyStyle.GetBorderTopSize()+
+			bodyStyle.GetPaddingTop(),
+	)
+	return image.Rect(
+		bodyMin.X,
+		bodyMin.Y,
+		bodyMin.X+bodyWidth,
+		bodyMin.Y+bodyHeight,
+	).Intersect(dialogArea).Intersect(area)
+}
 
 // infoColumnItem is a list item with a secondary info column (a session
 // timestamp, a command shortcut) that can be hidden when space is tight.

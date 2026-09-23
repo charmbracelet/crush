@@ -142,7 +142,7 @@ func TestSessionMouseDoubleClickExpires(t *testing.T) {
 	})
 
 	require.Nil(t, dialog.HandleMsg(click))
-	dialog.lastClickTime = time.Now().Add(-sessionDoubleClickThreshold - time.Millisecond)
+	dialog.lastClickTime = time.Now().Add(-dialogDoubleClickThreshold - time.Millisecond)
 	require.Nil(t, dialog.HandleMsg(click))
 	require.Equal(t, "s2", dialog.selectedSessionItem().ID())
 }

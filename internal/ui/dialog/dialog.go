@@ -28,6 +28,10 @@ var CloseKey = key.NewBinding(
 	key.WithHelp("esc", "exit"),
 )
 
+// dialogDoubleClickThreshold is the maximum delay between two clicks for
+// them to count as a double-click in dialogs with clickable list items.
+const dialogDoubleClickThreshold = 400 * time.Millisecond
+
 // Action represents an action taken in a dialog after handling a message.
 type Action any
 

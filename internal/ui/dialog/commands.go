@@ -1,8 +1,10 @@
 package dialog
 
 import (
+	"image"
 	"os"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
@@ -72,6 +74,12 @@ type Commands struct {
 	list  *CommandsList
 
 	windowWidth int
+
+	// bodyArea is the screen rectangle of the command list, tracked during
+	// Draw so mouse events can be mapped to list items.
+	bodyArea      image.Rectangle
+	lastClickTime time.Time
+	lastClickID   string
 
 	customCommands []commands.CustomCommand
 	mcpPrompts     []commands.MCPPrompt
@@ -247,8 +255,58 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 			}
 			return ActionCmd{cmd}
 		}
+	case common.CoalescedWheelMsg:
+		if image.Pt(msg.Mouse.X, msg.Mouse.Y).In(c.bodyArea) {
+			c.list.ScrollBy(int(msg.DeltaY))
+		}
+	case tea.MouseClickMsg:
+		return c.handleMouseClick(msg)
 	}
 	return nil
+}
+
+// handleMouseClick selects the command under a left click, or runs it when
+// the same command is clicked twice in quick succession. Clicks that miss the
+// list, land on a section header or spacer, or use another button are
+// ignored so the dialog only reacts to commands the user can act on.
+func (c *Commands) handleMouseClick(msg tea.MouseClickMsg) Action {
+	if msg.Button != tea.MouseLeft {
+		c.resetMouseClick()
+		return nil
+	}
+	area := c.bodyArea
+	area.Max.X = min(area.Max.X, area.Min.X+c.list.Width())
+	point := image.Pt(msg.X, msg.Y)
+	if !point.In(area) {
+		c.resetMouseClick()
+		return nil
+	}
+	index, _ := c.list.ItemIndexAtPosition(point.X-area.Min.X, point.Y-area.Min.Y)
+	if index < 0 {
+		c.resetMouseClick()
+		return nil
+	}
+	item, ok := c.list.ItemAt(index).(*CommandItem)
+	if !ok || item == nil {
+		c.resetMouseClick()
+		return nil
+	}
+	now := time.Now()
+	if c.lastClickID == item.ID() && now.Sub(c.lastClickTime) <= dialogDoubleClickThreshold {
+		c.resetMouseClick()
+		return item.Action()
+	}
+	c.lastClickTime = now
+	c.lastClickID = item.ID()
+	c.list.SetSelected(index)
+	return nil
+}
+
+// resetMouseClick forgets the pending click so the next one starts a fresh
+// double-click window.
+func (c *Commands) resetMouseClick() {
+	c.lastClickTime = time.Time{}
+	c.lastClickID = ""
 }
 
 func checkDockerMCPAvailabilityCmd() tea.Cmd {
@@ -339,6 +397,7 @@ func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	}
 
 	view := rc.Render()
+	c.bodyArea = dialogListArea(area, view, listView, rc.Help, rc.ViewStyle, t.Dialog.List, innerWidth, listHeight)
 
 	cur := c.Cursor()
 	DrawCenterCursor(scr, area, view, cur)

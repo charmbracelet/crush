@@ -21,8 +21,6 @@ import (
 // SessionsID is the identifier for the session selector dialog.
 const SessionsID = "session"
 
-const sessionDoubleClickThreshold = 400 * time.Millisecond
-
 type sessionsMode uint8
 
 // Possible modes a session item can be in
@@ -256,7 +254,7 @@ func (s *Session) handleMouseClick(msg tea.MouseClickMsg) Action {
 	}
 	sessionItem := s.list.ItemAt(index).(*SessionItem)
 	now := time.Now()
-	if s.lastClickID == sessionItem.ID() && now.Sub(s.lastClickTime) <= sessionDoubleClickThreshold {
+	if s.lastClickID == sessionItem.ID() && now.Sub(s.lastClickTime) <= dialogDoubleClickThreshold {
 		s.resetMouseClick()
 		return ActionSelectSession{sessionItem.Session}
 	}
@@ -332,49 +330,10 @@ func (s *Session) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	rc.Help = renderDialogHelp(t, &s.help, s, innerWidth)
 
 	view := rc.Render()
-	s.updateSessionListArea(area, view, bodyView, rc.Help, rc.ViewStyle, t.Dialog.List, innerWidth, listHeight)
+	s.bodyArea = dialogListArea(area, view, bodyView, rc.Help, rc.ViewStyle, t.Dialog.List, innerWidth, listHeight)
 
 	DrawCenterCursor(scr, area, view, cur)
 	return cur
-}
-
-func (s *Session) updateSessionListArea(
-	area uv.Rectangle,
-	view string,
-	bodyView string,
-	helpView string,
-	viewStyle lipgloss.Style,
-	bodyStyle lipgloss.Style,
-	bodyWidth int,
-	bodyHeight int,
-) {
-	viewWidth, viewHeight := lipgloss.Size(view)
-	dialogArea := common.CenterRect(area, min(viewWidth, area.Dx()), min(viewHeight, area.Dy()))
-	bodyViewTop := dialogArea.Max.Y -
-		viewStyle.GetMarginBottom() -
-		viewStyle.GetBorderBottomSize() -
-		viewStyle.GetPaddingBottom() -
-		lipgloss.Height(helpView) -
-		lipgloss.Height(bodyView)
-	bodyMin := image.Pt(
-		dialogArea.Min.X+
-			viewStyle.GetMarginLeft()+
-			viewStyle.GetBorderLeftSize()+
-			viewStyle.GetPaddingLeft()+
-			bodyStyle.GetMarginLeft()+
-			bodyStyle.GetBorderLeftSize()+
-			bodyStyle.GetPaddingLeft(),
-		bodyViewTop+
-			bodyStyle.GetMarginTop()+
-			bodyStyle.GetBorderTopSize()+
-			bodyStyle.GetPaddingTop(),
-	)
-	s.bodyArea = image.Rect(
-		bodyMin.X,
-		bodyMin.Y,
-		bodyMin.X+bodyWidth,
-		bodyMin.Y+bodyHeight,
-	).Intersect(dialogArea).Intersect(area)
 }
 
 func (s *Session) sessionListArea() image.Rectangle {

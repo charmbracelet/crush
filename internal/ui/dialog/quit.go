@@ -1,6 +1,10 @@
 package dialog
 
 import (
+	"fmt"
+	"image"
+	"strings"
+
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -15,6 +19,9 @@ const QuitID = "quit"
 type Quit struct {
 	com        *common.Common
 	selectedNo bool // true if "No" button is selected
+	compositor *lipgloss.Compositor
+	hoverX     int
+	hoverY     int
 	keyMap     struct {
 		LeftRight,
 		EnterSpace,
@@ -39,7 +46,7 @@ func NewQuit(com *common.Common) *Quit {
 		key.WithHelp("←/→", "switch options"),
 	)
 	q.keyMap.EnterSpace = key.NewBinding(
-		key.WithKeys("enter", " "),
+		key.WithKeys("enter", " ", "space"),
 		key.WithHelp("enter/space", "confirm"),
 	)
 	q.keyMap.Yes = key.NewBinding(
@@ -70,6 +77,10 @@ func (*Quit) ID() string {
 // HandleMsg implements [Model].
 func (q *Quit) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
+	case tea.MouseMotionMsg:
+		q.hoverX, q.hoverY = msg.X, msg.Y
+	case tea.MouseClickMsg:
+		return q.handleMouseClick(msg)
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, q.keyMap.Quit):
@@ -93,12 +104,38 @@ func (q *Quit) HandleMsg(msg tea.Msg) Action {
 	return nil
 }
 
+// handleMouseClick selects the clicked button. Clicking the already
+// selected button activates it.
+func (q *Quit) handleMouseClick(msg tea.MouseClickMsg) Action {
+	if msg.Button != tea.MouseLeft {
+		return nil
+	}
+	switch common.HitButtonIndex(q.compositor, msg.X, msg.Y) {
+	case 0: // "Yep!"
+		if q.selectedNo {
+			q.selectedNo = false
+			return nil
+		}
+		return ActionQuit{}
+	case 1: // "Nope"
+		if !q.selectedNo {
+			q.selectedNo = true
+			return nil
+		}
+		return ActionClose{}
+	}
+	return nil
+}
+
 // Draw implements [Dialog].
 func (q *Quit) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	const (
 		question    = "Are you sure you want to quit?"
 		hintLineOne = "To quit without confirmation"
 		hintLineTwo = "press ctrl+c twice."
+		// buttonLine is the index of the content line reserved for the
+		// buttons, which are drawn as layers on top of the frame.
+		buttonLine = 2
 	)
 	var (
 		baseStyle = q.com.Styles.Dialog.Quit.Content
@@ -108,13 +145,23 @@ func (q *Quit) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		{Text: "Yep!", Selected: !q.selectedNo, Padding: 3},
 		{Text: "Nope", Selected: q.selectedNo, Padding: 3},
 	}
-	buttons := common.ButtonGroup(q.com.Styles, buttonOpts, " ")
+	if hovered := common.HitButtonIndex(q.compositor, q.hoverX, q.hoverY); hovered >= 0 {
+		buttonOpts[hovered].Hovered = true
+	}
+	buttonViews := make([]string, len(buttonOpts))
+	for i, o := range buttonOpts {
+		buttonViews[i] = common.Button(q.com.Styles, o)
+	}
+	buttonsWidth := lipgloss.Width(strings.Join(buttonViews, " "))
+
+	// Reserve the button row as blank space; the buttons themselves are
+	// painted as layers so their bounds double as mouse hit regions.
 	content := baseStyle.Render(
 		lipgloss.JoinVertical(
 			lipgloss.Center,
 			question,
 			"",
-			buttons,
+			strings.Repeat(" ", buttonsWidth),
 			"",
 			hintStyle.Render(hintLineOne),
 			hintStyle.Render(hintLineTwo),
@@ -127,8 +174,43 @@ func (q *Quit) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		frameStyle = frameStyle.Padding(1, 0)
 	}
 	view := frameStyle.Render(content)
+
+	width, height := lipgloss.Size(view)
+	width = min(width, area.Dx())
+	height = min(height, area.Dy())
+	center := common.CenterRect(area, width, height)
 	DrawCenter(scr, area, view)
+
+	// Offset the content by every frame the two styles add around it.
+	contentX := center.Min.X +
+		baseStyle.GetMarginLeft() + baseStyle.GetBorderLeftSize() + baseStyle.GetPaddingLeft() +
+		frameStyle.GetMarginLeft() + frameStyle.GetBorderLeftSize() + frameStyle.GetPaddingLeft()
+	contentY := center.Min.Y +
+		baseStyle.GetMarginTop() + baseStyle.GetBorderTopSize() + baseStyle.GetPaddingTop() +
+		frameStyle.GetMarginTop() + frameStyle.GetBorderTopSize() + frameStyle.GetPaddingTop()
+	buttonsX := contentX + (lipgloss.Width(content)-buttonsWidth)/2
+	buttonsY := contentY + buttonLine
+
+	q.compositor = nil
+	buttonsRect := image.Rect(buttonsX, buttonsY, buttonsX+buttonsWidth, buttonsY+1)
+	if buttonsRect.In(center) {
+		q.compositor = drawButtons(scr, buttonsX, buttonsY, buttonViews)
+	}
 	return nil
+}
+
+// drawButtons paints the buttons as layers at the given position and returns
+// a compositor whose layer bounds serve as mouse hit regions.
+func drawButtons(scr uv.Screen, x, y int, views []string) *lipgloss.Compositor {
+	layers := make([]*lipgloss.Layer, len(views))
+	bx := x
+	for i, v := range views {
+		layers[i] = lipgloss.NewLayer(v).X(bx).Y(y).ID(fmt.Sprintf("btn_%d", i))
+		bx += lipgloss.Width(v) + 1 // one cell between buttons
+	}
+	compositor := lipgloss.NewCompositor(layers...)
+	compositor.Draw(scr, scr.Bounds())
+	return compositor
 }
 
 // ShortHelp implements [help.KeyMap].

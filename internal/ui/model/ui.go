@@ -1131,6 +1131,15 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pubsub.Event[question.Notification]:
 		m.handleQuestionNotification(msg.Payload)
 	case pubsub.Event[terminal.Request]:
+		if m.activeTerminal != nil {
+			// A user-initiated terminal is already on screen; reject the
+			// request so the tool call fails fast instead of blocking.
+			m.com.Workspace.TerminalComplete(terminal.Result{
+				Output:   "Another interactive terminal session is already open. Close it first (ctrl+q) and retry.",
+				ExitCode: 1,
+			})
+			break
+		}
 		m.chat.ScrollToBottom()
 		cmds = append(cmds, m.spawnTerminalSession(&msg.Payload))
 		if cmd := m.sendNotification(notification.Notification{
@@ -1141,8 +1150,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case pubsub.Event[terminal.Notification]:
 		// The pending session resolved elsewhere (cancelled with its
-		// run, or superseded); tear ours down.
-		if m.activeTerminal != nil {
+		// run, or superseded); tear ours down. User-initiated sessions
+		// have no request to resolve, so notifications are not theirs.
+		if m.activeTerminal != nil && m.activeTerminal.request != nil {
 			cmds = append(cmds, m.teardownTerminal())
 		}
 	case terminalSessionMsg:

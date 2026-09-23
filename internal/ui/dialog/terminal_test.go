@@ -190,3 +190,41 @@ func drawTerminal(t *testing.T, dialog *TerminalDialog, width, height int) (uv.S
 	dialog.Draw(scr, area)
 	return scr, area
 }
+
+func TestTerminalDialogCursorVisibility(t *testing.T) {
+	t.Parallel()
+
+	dialog, session := newTerminalDialogForTest(t, `printf '\033[?25l hidden\033[?25h\n'`)
+
+	select {
+	case <-session.Done():
+	case <-time.After(15 * time.Second):
+		t.Fatal("session did not exit in time")
+	}
+
+	// The child left the cursor visible again.
+	_, area := drawTerminal(t, dialog, 80, 24)
+	cur := dialog.Draw(mustScreen(t), area)
+	require.NotNil(t, cur, "cursor should be shown when the child shows it")
+}
+
+func TestTerminalDialogCursorHiddenWhenChildHides(t *testing.T) {
+	t.Parallel()
+
+	dialog, session := newTerminalDialogForTest(t, `printf '\033[?25l hidden\n'`)
+
+	select {
+	case <-session.Done():
+	case <-time.After(15 * time.Second):
+		t.Fatal("session did not exit in time")
+	}
+
+	_, area := drawTerminal(t, dialog, 80, 24)
+	cur := dialog.Draw(mustScreen(t), area)
+	require.Nil(t, cur, "cursor must be hidden when the child hides it")
+}
+
+func mustScreen(t *testing.T) uv.ScreenBuffer {
+	t.Helper()
+	return uv.NewScreenBuffer(80, 24)
+}

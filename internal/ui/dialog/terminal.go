@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/vt"
 )
 
 // TerminalID is the identifier for the interactive terminal dialog.
@@ -227,12 +228,34 @@ func (t *TerminalDialog) renderHeader(width int) string {
 	return left + strings.Repeat(" ", pad) + hint
 }
 
-// cursor returns the emulator cursor position offset by the content area.
+// cursor returns the emulator cursor, offset by the content area. It
+// returns nil when the child hid its cursor: TUIs hide it constantly, and
+// showing one anyway puts a phantom cursor somewhere on screen.
 func (t *TerminalDialog) cursor() *tea.Cursor {
-	pos := t.session.Emulator().CursorPosition()
+	emu := t.session.Emulator()
+	if emu.CursorHidden() {
+		return nil
+	}
+
+	style, blink := emu.CursorStyle()
+	pos := emu.CursorPosition()
+
 	return &tea.Cursor{
 		Position: tea.Position{X: t.contentRect.Min.X + pos.X, Y: t.contentRect.Min.Y + pos.Y},
 		Color:    t.com.Styles.Terminal.Cursor,
-		Blink:    true,
+		Shape:    cursorShape(style),
+		Blink:    blink,
+	}
+}
+
+// cursorShape maps an emulator cursor style onto Bubble Tea's.
+func cursorShape(style vt.CursorStyle) tea.CursorShape {
+	switch style {
+	case vt.CursorUnderline:
+		return tea.CursorUnderline
+	case vt.CursorBar:
+		return tea.CursorBar
+	default:
+		return tea.CursorBlock
 	}
 }

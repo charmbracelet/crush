@@ -1334,6 +1334,7 @@ func TestWorkaroundReasoningReplay(t *testing.T) {
 	toolCall := fantasy.ToolCallPart{ToolCallID: "call_1", ToolName: "bash", Input: "{}"}
 
 	t.Run("injects empty reasoning on a tool-call turn", func(t *testing.T) {
+		t.Parallel()
 		messages := []fantasy.Message{
 			{Role: fantasy.MessageRoleAssistant, Content: []fantasy.MessagePart{toolCall}},
 		}
@@ -1349,6 +1350,7 @@ func TestWorkaroundReasoningReplay(t *testing.T) {
 	})
 
 	t.Run("injected reasoning reaches the wire", func(t *testing.T) {
+		t.Parallel()
 		messages := []fantasy.Message{
 			{Role: fantasy.MessageRoleAssistant, Content: []fantasy.MessagePart{toolCall}},
 		}
@@ -1364,6 +1366,7 @@ func TestWorkaroundReasoningReplay(t *testing.T) {
 	})
 
 	t.Run("keeps an existing reasoning part", func(t *testing.T) {
+		t.Parallel()
 		messages := []fantasy.Message{
 			{
 				Role: fantasy.MessageRoleAssistant,
@@ -1382,6 +1385,7 @@ func TestWorkaroundReasoningReplay(t *testing.T) {
 	})
 
 	t.Run("leaves non openai-compat providers alone", func(t *testing.T) {
+		t.Parallel()
 		messages := []fantasy.Message{
 			{Role: fantasy.MessageRoleAssistant, Content: []fantasy.MessagePart{toolCall}},
 		}
@@ -1393,6 +1397,7 @@ func TestWorkaroundReasoningReplay(t *testing.T) {
 	})
 
 	t.Run("leaves turns without tool calls alone", func(t *testing.T) {
+		t.Parallel()
 		messages := []fantasy.Message{
 			{Role: fantasy.MessageRoleAssistant, Content: []fantasy.MessagePart{fantasy.TextPart{Text: "hi"}}},
 			{Role: fantasy.MessageRoleUser, Content: []fantasy.MessagePart{fantasy.TextPart{Text: "hey"}}},

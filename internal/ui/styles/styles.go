@@ -655,6 +655,8 @@ type Styles struct {
 		Border   lipgloss.Style // Frame around the embedded terminal.
 		Header   lipgloss.Style // Header row: prompt and command.
 		Hint     lipgloss.Style // Header keybinding hint, right-aligned.
+		Status   lipgloss.Style // Header status chip (running/exited).
+		Agent    lipgloss.Style // Header tag marking an agent-started session.
 		TooSmall lipgloss.Style // Message shown when the window is too small.
 		Fg       color.Color    // Default terminal foreground.
 		Bg       color.Color    // Default terminal background.

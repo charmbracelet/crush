@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/terminal"
+	"github.com/charmbracelet/crush/internal/ui/attachments"
 	"github.com/charmbracelet/crush/internal/ui/dialog"
 	"github.com/charmbracelet/crush/internal/workspace"
 	uv "github.com/charmbracelet/ultraviolet"
@@ -174,11 +175,11 @@ func TestTerminalRequestAttachesDialogAndClosesOnExit(t *testing.T) {
 
 func TestTerminalRequestIgnoredWhenDialogOpen(t *testing.T) {
 	u, _ := newTerminalTestUI(t)
-	first := newAgentSession(t, "sleep 30")
+	first := newAgentSession(t, "sh -c 'printf first; sleep 30'")
 
 	_, cmd := u.Update(pubsubEventTerminalRequest(terminal.Request{
 		ID:      "req-1",
-		Command: "sleep 30",
+		Command: "sh -c 'printf first; sleep 30'",
 		Session: first,
 	}))
 	_ = runCmdSync(cmd)
@@ -286,30 +287,180 @@ func TestTerminalDockContentRespectsMinInteractiveRows(t *testing.T) {
 	require.GreaterOrEqual(t, term.Dy()-terminalDockChrome, shell.MinInteractiveRows)
 }
 
-// terminalStubDialog stands in for the interactive terminal dialog in
-// input-routing tests.
-type terminalStubDialog struct{}
+// newAttachedTerminalUI returns a chat UI with a docked interactive
+// terminal around a live session. The command prints first so the session
+// watcher resolves without waiting for the sleep to end.
+func newAttachedTerminalUI(t *testing.T) (*UI, *shell.InteractiveSession) {
+	return newTerminalUIOfKind(t, false)
+}
 
-func (terminalStubDialog) ID() string { return dialog.TerminalID }
+// newAgentDrivenTerminalUI returns a chat UI with a docked terminal the
+// agent owns: a read-only view the user cannot type into.
+func newAgentDrivenTerminalUI(t *testing.T) (*UI, *shell.InteractiveSession) {
+	return newTerminalUIOfKind(t, true)
+}
 
-func (terminalStubDialog) HandleMsg(tea.Msg) dialog.Action { return nil }
+func newTerminalUIOfKind(t *testing.T, agentDriven bool) (*UI, *shell.InteractiveSession) {
+	t.Helper()
 
-func (terminalStubDialog) Draw(uv.Screen, uv.Rectangle) *tea.Cursor { return nil }
+	u, _ := newTerminalTestUI(t)
+	session := newAgentSession(t, "sh -c 'printf attached; sleep 30'")
+	_, cmd := u.Update(pubsubEventTerminalRequest(terminal.Request{
+		ID:          "req-" + t.Name(),
+		ToolCallID:  "call-" + t.Name(),
+		Command:     "sh -c 'printf attached; sleep 30'",
+		AgentDriven: agentDriven,
+		Session:     session,
+	}))
+	_ = runCmdSync(cmd)
+	require.True(t, u.dialog.ContainsDialog(dialog.TerminalID))
+	if !agentDriven {
+		require.Equal(t, uiFocusTerminal, u.focus, "attaching a user-owned terminal focuses it")
+	}
+	return u, session
+}
 
-func TestDockedTerminalPassesWheelOutsidePanel(t *testing.T) {
+func TestTerminalTakesMouseInsidePanelOnly(t *testing.T) {
+	u, _ := newAttachedTerminalUI(t)
+	term := u.layout.terminal
+	require.False(t, term.Empty())
+
+	// A click inside the panel is the terminal's, and focuses it.
+	u.focus = uiFocusEditor
+	require.True(t, u.terminalTakesMouse(image.Pt(term.Min.X+1, term.Min.Y+1), true))
+	require.Equal(t, uiFocusTerminal, u.focus)
+
+	// Hover inside the panel never steals focus.
+	u.focus = uiFocusEditor
+	require.True(t, u.terminalTakesMouse(image.Pt(term.Min.X+1, term.Min.Y+1), false))
+	require.Equal(t, uiFocusEditor, u.focus)
+
+	// Over the chat, the event falls through to the chat.
+	require.False(t, u.terminalTakesMouse(image.Pt(u.layout.main.Min.X+1, u.layout.main.Min.Y+1), true))
+}
+
+func TestAgentDrivenTerminalIsReadOnly(t *testing.T) {
+	u, _ := newAgentDrivenTerminalUI(t)
+
+	// Attaching leaves the current focus alone: the panel is a view.
+	require.Equal(t, uiFocusEditor, u.focus)
+	require.True(t, u.activeTerminal.agentStarted)
+	require.False(t, u.terminalUserOwned())
+
+	// Clicks inside the panel are consumed but never focus it.
+	u.focus = uiFocusEditor
+	require.True(t, u.terminalTakesMouse(image.Pt(u.layout.terminal.Min.X+1, u.layout.terminal.Min.Y+1), true))
+	require.Equal(t, uiFocusEditor, u.focus)
+
+	// Tab keeps cycling editor and chat; the terminal stays out of the ring.
+	_ = u.cycleTerminalFocus()
+	require.Equal(t, uiFocusMain, u.focus)
+	_ = u.cycleTerminalFocus()
+	require.Equal(t, uiFocusEditor, u.focus)
+	_ = u.cycleTerminalFocus()
+	require.Equal(t, uiFocusMain, u.focus)
+}
+
+func TestAgentDrivenTerminalFullscreenAbsorbsKeys(t *testing.T) {
+	u, _ := newAgentDrivenTerminalUI(t)
+
+	// Fullscreen covers everything, so the terminal absorbs the keyboard
+	// even though the agent owns the session.
+	u.setTerminalFullscreen(true)
+	require.Equal(t, uiFocusTerminal, u.focus)
+	require.True(t, u.activeTerminal.fullscreen)
+
+	_ = u.cycleTerminalFocus()
+	require.False(t, u.activeTerminal.fullscreen)
+	require.Equal(t, uiFocusEditor, u.focus)
+}
+
+func TestTerminalTakesEverythingWhenFullscreen(t *testing.T) {
+	u, _ := newAttachedTerminalUI(t)
+
+	u.setTerminalFullscreen(true)
+	require.True(t, u.activeTerminal.fullscreen)
+	require.True(t, u.layout.terminal.Empty(), "fullscreen covers the whole window")
+	require.True(t, u.terminalTakesMouse(image.Pt(2, 2), true))
+	require.Equal(t, uiFocusTerminal, u.focus, "fullscreen keeps the keyboard on the terminal")
+
+	u.setTerminalFullscreen(false)
+	require.False(t, u.activeTerminal.fullscreen)
+	require.False(t, u.layout.terminal.Empty())
+}
+
+func TestTerminalFocusCycle(t *testing.T) {
+	u, _ := newAttachedTerminalUI(t)
+	require.Equal(t, uiFocusTerminal, u.focus)
+
+	// terminal -> editor
+	_ = u.cycleTerminalFocus()
+	require.Equal(t, uiFocusEditor, u.focus)
+
+	// editor -> chat
+	_ = u.cycleTerminalFocus()
+	require.Equal(t, uiFocusMain, u.focus)
+
+	// chat -> terminal
+	_ = u.cycleTerminalFocus()
+	require.Equal(t, uiFocusTerminal, u.focus)
+}
+
+func TestTerminalFullscreenDropsWhenCyclingAway(t *testing.T) {
+	u, _ := newAttachedTerminalUI(t)
+	u.setTerminalFullscreen(true)
+
+	_ = u.cycleTerminalFocus()
+	require.False(t, u.activeTerminal.fullscreen, "leaving the terminal docks it again")
+	require.Equal(t, uiFocusEditor, u.focus)
+}
+
+func TestTerminalCloseReturnsEditorFocus(t *testing.T) {
+	u, _ := newAttachedTerminalUI(t)
+	require.Equal(t, uiFocusTerminal, u.focus)
+
+	_, cmd := u.Update(dialog.TerminalExitMsg{})
+	_ = runCmdSync(cmd)
+	require.Nil(t, u.activeTerminal)
+	require.Equal(t, uiFocusEditor, u.focus, "closing hands focus back to the editor")
+}
+
+func TestTerminalFocusRoutesKeys(t *testing.T) {
+	u, _ := newAttachedTerminalUI(t)
+	u.attachments = attachments.New(nil, attachments.Keymap{})
+	u.keyMap = DefaultKeyMap()
+
+	// While the terminal holds focus, global shortcuts belong to the child
+	// process, not the UI.
+	require.Equal(t, uiFocusTerminal, u.focus)
+	u.handleKeyPressMsg(tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
+	require.False(t, u.status.ShowingAll(), "focused terminal swallows ctrl+g")
+
+	// Tabbed away, the editor gets its keys back.
+	_ = u.cycleTerminalFocus()
+	require.Equal(t, uiFocusEditor, u.focus)
+	u.handleKeyPressMsg(tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
+	require.True(t, u.status.ShowingAll(), "tabbed away, ctrl+g reaches the UI again")
+}
+
+func TestDrawTerminalHintsReplacesEditor(t *testing.T) {
 	t.Parallel()
 
 	u := newTestUI()
 	u.dialog = dialog.NewOverlay()
-	u.dialog.OpenDialog(terminalStubDialog{})
+	u.keyMap = DefaultKeyMap()
 	u.activeTerminal = &activeTerminalSession{}
+	u.focus = uiFocusTerminal
 	u.updateLayoutAndSize()
+	require.False(t, u.layout.terminal.Empty(), "a docked terminal leaves the editor visible")
 
-	term := u.layout.terminal
-	require.False(t, term.Empty())
+	scr := uv.NewScreenBuffer(u.width, u.height)
+	u.drawTerminalHints(scr, u.layout.editor)
 
-	// Inside the panel the terminal gets the wheel event, but over the
-	// chat above it the event falls through and scrolls the chat.
-	require.False(t, u.dockedTerminalPassesWheel(image.Pt(term.Min.X+1, term.Min.Y+1)))
-	require.True(t, u.dockedTerminalPassesWheel(image.Pt(u.layout.main.Min.X+1, u.layout.main.Min.Y+1)))
+	rendered := scr.Render()
+	require.Contains(t, rendered, "quit")
+	require.Contains(t, rendered, "fullscreen")
+	// The blurred textarea prompt (the row of colons) is what the hints
+	// replace.
+	require.NotContains(t, rendered, ":::")
 }

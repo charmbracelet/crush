@@ -22,6 +22,11 @@ const (
 	// session to exit.
 	TerminalMaxReadWait = 5 * time.Minute
 
+	// TerminalStartWait bounds how long a waiting start blocks before
+	// handing control back to the agent while the user keeps working. The
+	// agent resumes waiting with a follow-up read.
+	TerminalStartWait = TerminalMaxReadWait
+
 	// terminalKillWait bounds how long a kill waits for the process to be
 	// reaped so the final screen can be captured.
 	terminalKillWait = 5 * time.Second
@@ -45,6 +50,7 @@ type TerminalParams struct {
 	Command     string `json:"command,omitempty" description:"The command to run in the terminal (start only)"`
 	WorkingDir  string `json:"working_dir,omitempty" description:"The working directory for the command (start only, defaults to the project directory)"`
 	Description string `json:"description,omitempty" description:"A brief description of what the command does (start only, try to keep it under 30 characters or so)"`
+	Wait        *bool  `json:"wait,omitempty" description:"Wait for the user to finish before returning (start only, default true). The user owns the terminal and can type in it; the call blocks until the command exits, the user closes the terminal, or the wait budget elapses, and returns the transcript. Set false when you own the terminal: the user sees a read-only view they cannot type into, and you drive it with write/read or let it run"`
 
 	// write
 	Text     string   `json:"text,omitempty" description:"The exact text/keystrokes to send (write only). Use \\r for Enter, \\u0003 for Ctrl+C, and escape sequences for arrow keys (\\u001b[A/B/C/D)"`
@@ -93,7 +99,7 @@ func NewTerminalTool(permissions permission.Service, terminals terminal.Service,
 		func(ctx context.Context, params TerminalParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			switch params.Action {
 			case terminalActionStart:
-				return terminalStart(ctx, permissions, terminals, params, call, workingDir)
+				return terminalStart(ctx, permissions, terminals, params, call, workingDir, spillDir)
 			case terminalActionRead:
 				return terminalRead(ctx, params, spillDir)
 			case terminalActionWrite:
@@ -119,6 +125,7 @@ func terminalStart(
 	params TerminalParams,
 	call fantasy.ToolCall,
 	workingDir string,
+	spillDir string,
 ) (fantasy.ToolResponse, error) {
 	if params.Command == "" {
 		return fantasy.NewTextErrorResponse("missing command"), nil
@@ -196,6 +203,7 @@ func terminalStart(
 		Command:     params.Command,
 		WorkingDir:  execWorkingDir,
 		Description: params.Description,
+		AgentDriven: !terminalStartWaits(params),
 		Session:     session,
 	}); err != nil {
 		// Nobody can display it; do not leave a stray process behind.
@@ -211,14 +219,82 @@ func terminalStart(
 		Command:   params.Command,
 	}
 
+	// By default a start waits for the user: the agent pauses here until
+	// the user finishes their work in the terminal.
+	if terminalStartWaits(params) {
+		return terminalWaitForUser(ctx, session, spillDir, metadata)
+	}
+
 	output := fmt.Sprintf(
 		"Terminal session %s started with command: %s\n\n"+
-			"The terminal is now open on the user's screen; they can type into it too.\n\n"+
+			"The terminal is open on the user's screen in read-only mode: they can watch but not type into it.\n\n"+
 			"Next steps: read to see the current screen (set wait_seconds to block until it exits instead of polling), "+
 			"write to send keystrokes (for example %q to answer a prompt), and kill to end the session.\n\n"+
 			"The session keeps running until the command exits or it is killed.",
 		session.ID(), params.Command, "y\\r",
 	)
+
+	return fantasy.WithResponseMetadata(fantasy.NewTextResponse(output), metadata), nil
+}
+
+// terminalStartWaits reports whether a start call should block until the
+// user finishes in the terminal. Waiting is the default: the agent should
+// pause whenever a human is the one working in the session.
+func terminalStartWaits(params TerminalParams) bool {
+	return params.Wait == nil || *params.Wait
+}
+
+// terminalStartWaitBudget is the cut-off for a waiting start. It is a var
+// so tests can shorten it.
+var terminalStartWaitBudget = TerminalStartWait
+
+// terminalWaitForUser pauses the agent while the user works in the
+// terminal. The call returns once the command exits, the user closes the
+// terminal (which kills the session), the wait budget elapses, or the run
+// is canceled.
+func terminalWaitForUser(
+	ctx context.Context,
+	session *shell.InteractiveSession,
+	spillDir string,
+	metadata TerminalResponseMetadata,
+) (fantasy.ToolResponse, error) {
+	if !session.Exited() {
+		select {
+		case <-session.Done():
+		case <-time.After(terminalStartWaitBudget):
+		case <-ctx.Done():
+			return fantasy.ToolResponse{}, ctx.Err()
+		}
+	}
+
+	metadata.Exited = session.Exited()
+	metadata.ExitCode = session.ExitCode()
+
+	var output string
+	if session.Exited() {
+		transcript := TruncateOutput(session.CaptureText(), spillDir)
+		if transcript == "" {
+			transcript = BashNoOutput
+		}
+		output = fmt.Sprintf(
+			"Terminal session %s finished (command: %s, exit code %d).\n\n<transcript>\n%s\n</transcript>",
+			session.ID(), session.Command(), session.ExitCode(), transcript,
+		)
+	} else {
+		// The wait budget elapsed with the user still working. Hand control
+		// back with the current screen so the agent can decide to keep
+		// waiting (read wait_seconds) or take over (write).
+		screen := session.ScreenText()
+		if screen == "" {
+			screen = BashNoOutput
+		}
+		output = fmt.Sprintf(
+			"Terminal session %s (command: %s) is still running after %s; the user may still be working in it.\n\n"+
+				"Keep waiting with read (wait_seconds) or take over with write. The session ends when the command exits or it is killed.\n\n"+
+				"<screen>\n%s\n</screen>",
+			session.ID(), session.Command(), terminalStartWaitBudget, screen,
+		)
+	}
 
 	return fantasy.WithResponseMetadata(fantasy.NewTextResponse(output), metadata), nil
 }

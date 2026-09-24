@@ -30,6 +30,10 @@ type Request struct {
 	Command     string                    `json:"command"`
 	WorkingDir  string                    `json:"working_dir"`
 	Description string                    `json:"description,omitempty"`
+	// AgentDriven marks sessions the agent owns and drives itself: the
+	// panel is a read-only view and user input is refused. When false the
+	// session belongs to the user and the terminal accepts their input.
+	AgentDriven bool                      `json:"agent_driven,omitempty"`
 	Session     *shell.InteractiveSession `json:"-"`
 }
 

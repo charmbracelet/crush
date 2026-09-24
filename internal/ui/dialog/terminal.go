@@ -1,6 +1,7 @@
 package dialog
 
 import (
+	"fmt"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -34,35 +35,64 @@ const (
 	terminalMinRows = shell.MinInteractiveRows + 3
 )
 
+// TerminalDialogOptions configures a terminal dialog.
+type TerminalDialogOptions struct {
+	// Command is displayed in the header; for a bare interactive shell
+	// pass the user's shell path.
+	Command string
+	// AgentStarted marks sessions the agent opened, labeled in the header
+	// so the user can tell who created the session.
+	AgentStarted bool
+	// AgentDriven marks sessions the agent owns and drives itself: user
+	// keystrokes and mouse events are refused so the panel is a read-only
+	// view of the agent's work.
+	AgentDriven bool
+}
+
 // TerminalDialog embeds a live PTY session and forwards all input to it.
 // The model owns the session lifecycle; the dialog only forwards input and
 // paints the emulator.
 type TerminalDialog struct {
-	com         *common.Common
-	session     *shell.InteractiveSession
-	command     string
-	terminated  bool
-	contentRect uv.Rectangle
-	closeKey    key.Binding
+	com          *common.Common
+	session      *shell.InteractiveSession
+	command      string
+	agentStarted bool
+	agentDriven  bool
+	terminated   bool
+	fullscreen   bool
+	contentRect  uv.Rectangle
+	closeKey     key.Binding
+	fullKey      key.Binding
 }
 
 var _ Dialog = (*TerminalDialog)(nil)
 
 // NewTerminalDialog creates an interactive terminal dialog around an
-// already-running session. command is displayed in the header; for a bare
-// interactive shell pass the user's shell path.
-func NewTerminalDialog(com *common.Common, session *shell.InteractiveSession, command string) *TerminalDialog {
+// already-running session.
+func NewTerminalDialog(com *common.Common, session *shell.InteractiveSession, opts TerminalDialogOptions) *TerminalDialog {
 	t := &TerminalDialog{
-		com:     com,
-		session: session,
-		command: command,
+		com:          com,
+		session:      session,
+		command:      opts.Command,
+		agentStarted: opts.AgentStarted,
+		agentDriven:  opts.AgentDriven,
 	}
 	t.closeKey = key.NewBinding(
 		key.WithKeys("ctrl+q"),
-		key.WithHelp("ctrl+q", "kill"),
+		key.WithHelp("ctrl+q", "quit"),
+	)
+	t.fullKey = key.NewBinding(
+		key.WithKeys("ctrl+f"),
+		key.WithHelp("ctrl+f", "fullscreen"),
 	)
 	t.applyTheme()
 	return t
+}
+
+// SetFullscreen records whether the terminal currently covers the whole
+// window, so the header can show the matching toggle hint.
+func (t *TerminalDialog) SetFullscreen(fullscreen bool) {
+	t.fullscreen = fullscreen
 }
 
 // applyTheme points the emulator at the theme palette so child output is
@@ -87,6 +117,12 @@ func (t *TerminalDialog) Session() *shell.InteractiveSession { return t.session 
 // Command returns the command displayed in the header.
 func (t *TerminalDialog) Command() string { return t.command }
 
+// Keys returns the terminal's own key bindings so the host UI can match
+// them and show them in its hints.
+func (t *TerminalDialog) Keys() (close, fullscreen key.Binding) {
+	return t.closeKey, t.fullKey
+}
+
 // HandleMsg implements [Dialog].
 func (t *TerminalDialog) HandleMsg(msg tea.Msg) Action {
 	emu := t.session.Emulator()
@@ -97,17 +133,32 @@ func (t *TerminalDialog) HandleMsg(msg tea.Msg) Action {
 			t.terminated = true
 			return ActionTerminalKill{}
 		}
+		if key.Matches(msg, t.fullKey) {
+			return ActionTerminalFullscreen{}
+		}
+		// Agent-driven sessions are read-only for the user: their keys must
+		// not reach a command the agent is driving. The agent's write tool
+		// bypasses the dialog entirely.
+		if t.agentDriven {
+			return nil
+		}
 		return ActionTerminalInput{Apply: func() {
 			emu.SendKey(uv.KeyPressEvent(uv.Key(msg)))
 		}}
 
 	case tea.PasteMsg:
+		if t.agentDriven {
+			return nil
+		}
 		content := msg.Content
 		return ActionTerminalInput{Apply: func() {
 			emu.Paste(content)
 		}}
 
 	case tea.MouseClickMsg:
+		if t.agentDriven {
+			return nil
+		}
 		m, ok := t.translateMouse(uv.Mouse(msg))
 		if !ok {
 			return nil
@@ -117,6 +168,9 @@ func (t *TerminalDialog) HandleMsg(msg tea.Msg) Action {
 		}}
 
 	case tea.MouseReleaseMsg:
+		if t.agentDriven {
+			return nil
+		}
 		m, ok := t.translateMouse(uv.Mouse(msg))
 		if !ok {
 			return nil
@@ -126,6 +180,9 @@ func (t *TerminalDialog) HandleMsg(msg tea.Msg) Action {
 		}}
 
 	case tea.MouseWheelMsg:
+		if t.agentDriven {
+			return nil
+		}
 		m, ok := t.translateMouse(uv.Mouse(msg))
 		if !ok {
 			return nil
@@ -135,6 +192,9 @@ func (t *TerminalDialog) HandleMsg(msg tea.Msg) Action {
 		}}
 
 	case tea.MouseMotionMsg:
+		if t.agentDriven {
+			return nil
+		}
 		m, ok := t.translateMouse(uv.Mouse(msg))
 		if !ok {
 			return nil
@@ -219,20 +279,51 @@ func (t *TerminalDialog) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	return t.cursor()
 }
 
-// renderHeader builds the one-line header: "$ command" on the left, the
-// close hint on the right.
+// renderHeader builds the one-line header: "$ command" on the left, then
+// the live status chip and the keybinding hints on the right.
 func (t *TerminalDialog) renderHeader(width int) string {
 	sty := t.com.Styles
 
-	hint := sty.Terminal.Hint.Render(t.closeKey.Help().Key + " " + t.closeKey.Help().Desc)
-	hintWidth := lipgloss.Width(hint)
+	fullHint := t.fullKey.Help().Key + " " + t.fullKey.Help().Desc
+	if t.fullscreen {
+		fullHint = t.fullKey.Help().Key + " docked"
+	}
+	hintText := t.closeKey.Help().Key + " " + t.closeKey.Help().Desc + " · " + fullHint
+	if t.agentDriven {
+		// The user watches but does not type here; say so plainly.
+		hintText = "read-only · " + hintText
+	}
+	hint := sty.Terminal.Hint.Render(hintText)
 
-	commandWidth := max(width-hintWidth-2, 1)
+	status := t.renderStatus()
+	rightWidth := lipgloss.Width(hint) + lipgloss.Width(status)
+
+	commandWidth := max(width-rightWidth-2, 1)
 	command := ansi.Truncate(t.command, commandWidth, "…")
 	left := sty.Terminal.Header.Render("$ " + command)
 
-	pad := max(width-lipgloss.Width(left)-hintWidth, 0)
-	return left + strings.Repeat(" ", pad) + hint
+	pad := max(width-lipgloss.Width(left)-rightWidth, 0)
+	// The status chip and hints can outgrow a narrow panel; keep the header
+	// to a single row so the frame height stays predictable.
+	return ansi.Truncate(left+strings.Repeat(" ", pad)+status+hint, width, "…")
+}
+
+// renderStatus builds the live status chip shown before the hint: whether
+// the command is still running, and whether the agent opened this session
+// or the user did. The emulator below shows the activity itself; the chip
+// makes it clear at a glance who is driving and that work is happening.
+func (t *TerminalDialog) renderStatus() string {
+	sty := t.com.Styles
+
+	state := "● running"
+	if t.session.Exited() {
+		state = fmt.Sprintf("exited %d", t.session.ExitCode())
+	}
+	status := sty.Terminal.Status.Render(state)
+	if t.agentStarted {
+		status = sty.Terminal.Agent.Render("agent") + " " + status
+	}
+	return status + " "
 }
 
 // cursor returns the emulator cursor, offset by the content area. It

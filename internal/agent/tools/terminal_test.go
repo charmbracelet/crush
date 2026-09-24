@@ -83,6 +83,13 @@ func newTerminalToolForTest(t *testing.T) (fantasy.AgentTool, *fakeTerminalServi
 	return NewTerminalTool(permissions, terminals, workingDir, workingDir), terminals
 }
 
+// agentDriven marks a start the agent intends to drive itself, which must
+// not block waiting for the user.
+func agentDriven() *bool {
+	noWait := false
+	return &noWait
+}
+
 func TestTerminalToolStart(t *testing.T) {
 	resetTerminalManager(t)
 
@@ -95,13 +102,15 @@ func TestTerminalToolStart(t *testing.T) {
 
 	require.False(t, resp.IsError)
 	require.Contains(t, resp.Content, "Terminal session")
-	require.Contains(t, resp.Content, "read")
+	require.Contains(t, resp.Content, "finished")
+	require.Contains(t, resp.Content, "prompt-answer", "the transcript should be returned")
 	require.Len(t, terminals.shown, 1)
 
 	var meta TerminalResponseMetadata
 	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
 	require.Equal(t, "start", meta.Action)
 	require.NotEmpty(t, meta.SessionID)
+	require.True(t, meta.Exited)
 
 	session, ok := shell.GetInteractiveSessionManager().Get(meta.SessionID)
 	require.True(t, ok)
@@ -110,6 +119,107 @@ func TestTerminalToolStart(t *testing.T) {
 		_ = session.Close()
 	})
 	require.Same(t, session, terminals.shown[0].Session)
+	require.False(t, terminals.shown[0].AgentDriven, "a waiting start hands the terminal to the user")
+}
+
+func TestTerminalStartAgentDrivenMarksRequest(t *testing.T) {
+	resetTerminalManager(t)
+
+	tool, terminals := newTerminalToolForTest(t)
+
+	resp := runTerminalTool(t, tool, TerminalParams{
+		Action:  "start",
+		Command: "sleep 30",
+		Wait:    agentDriven(),
+	})
+	require.False(t, resp.IsError)
+	require.Len(t, terminals.shown, 1)
+	require.True(t, terminals.shown[0].AgentDriven, "a non-waiting start gives the terminal to the agent")
+	require.Contains(t, resp.Content, "read-only")
+}
+
+func TestTerminalStartWaitsForUserWork(t *testing.T) {
+	resetTerminalManager(t)
+
+	tool, _ := newTerminalToolForTest(t)
+
+	resp := runTerminalTool(t, tool, TerminalParams{
+		Action:  "start",
+		Command: "sh -c 'printf \"user-work\\n\"; exit 3'",
+	})
+	require.False(t, resp.IsError)
+	require.Contains(t, resp.Content, "user-work", "the transcript should be returned")
+	require.Contains(t, resp.Content, "exit code 3")
+
+	var meta TerminalResponseMetadata
+	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
+	require.True(t, meta.Exited)
+	require.Equal(t, 3, meta.ExitCode)
+}
+
+func TestTerminalStartUnblocksWhenUserClosesTerminal(t *testing.T) {
+	resetTerminalManager(t)
+
+	tool, _ := newTerminalToolForTest(t)
+
+	type result struct {
+		resp fantasy.ToolResponse
+		err  error
+	}
+	done := make(chan result, 1)
+	go func() {
+		input, _ := json.Marshal(TerminalParams{Action: "start", Command: "sleep 60"})
+		ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+		resp, err := tool.Run(ctx, fantasy.ToolCall{
+			ID:    "test-call",
+			Name:  TerminalToolName,
+			Input: string(input),
+		})
+		done <- result{resp, err}
+	}()
+
+	// Wait for the session to register, then end it the way the UI does
+	// when the user quits the docked terminal.
+	var session *shell.InteractiveSession
+	require.Eventually(t, func() bool {
+		for _, id := range shell.GetInteractiveSessionManager().List() {
+			if s, ok := shell.GetInteractiveSessionManager().Get(id); ok {
+				session = s
+				return true
+			}
+		}
+		return false
+	}, 10*time.Second, 20*time.Millisecond)
+
+	require.NoError(t, session.Kill())
+	_ = session.Close()
+
+	select {
+	case r := <-done:
+		require.NoError(t, r.err)
+		require.False(t, r.resp.IsError)
+		require.Contains(t, r.resp.Content, "finished")
+	case <-time.After(15 * time.Second):
+		t.Fatal("a waiting start did not unblock when the session was killed")
+	}
+}
+
+func TestTerminalStartWaitBudgetElapses(t *testing.T) {
+	resetTerminalManager(t)
+
+	old := terminalStartWaitBudget
+	terminalStartWaitBudget = 100 * time.Millisecond
+	t.Cleanup(func() { terminalStartWaitBudget = old })
+
+	tool, _ := newTerminalToolForTest(t)
+
+	resp := runTerminalTool(t, tool, TerminalParams{Action: "start", Command: "sleep 60"})
+	require.False(t, resp.IsError)
+	require.Contains(t, resp.Content, "still running")
+
+	var meta TerminalResponseMetadata
+	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
+	require.False(t, meta.Exited)
 }
 
 func TestTerminalToolStartRequiresCommand(t *testing.T) {
@@ -126,10 +236,10 @@ func TestTerminalToolStartBusy(t *testing.T) {
 
 	tool, _ := newTerminalToolForTest(t)
 
-	first := runTerminalTool(t, tool, TerminalParams{Action: "start", Command: "sleep 30"})
+	first := runTerminalTool(t, tool, TerminalParams{Action: "start", Command: "sleep 30", Wait: agentDriven()})
 	require.False(t, first.IsError)
 
-	second := runTerminalTool(t, tool, TerminalParams{Action: "start", Command: "sleep 30"})
+	second := runTerminalTool(t, tool, TerminalParams{Action: "start", Command: "sleep 30", Wait: agentDriven()})
 	require.True(t, second.IsError)
 	require.Contains(t, second.Content, "already running")
 }
@@ -219,7 +329,7 @@ func TestTerminalWrite(t *testing.T) {
 
 	tool, _ := newTerminalToolForTest(t)
 
-	resp := runTerminalTool(t, tool, TerminalParams{Action: "start", Command: `read line; echo "got:$line"`})
+	resp := runTerminalTool(t, tool, TerminalParams{Action: "start", Command: `read line; echo "got:$line"`, Wait: agentDriven()})
 	require.False(t, resp.IsError)
 
 	var meta TerminalResponseMetadata
@@ -262,7 +372,7 @@ func TestTerminalKill(t *testing.T) {
 	resetTerminalManager(t)
 
 	tool, _ := newTerminalToolForTest(t)
-	resp := runTerminalTool(t, tool, TerminalParams{Action: "start", Command: `sh -c 'echo kill-me; sleep 60'`})
+	resp := runTerminalTool(t, tool, TerminalParams{Action: "start", Command: `sh -c 'echo kill-me; sleep 60'`, Wait: agentDriven()})
 	require.False(t, resp.IsError)
 
 	var meta TerminalResponseMetadata
@@ -297,6 +407,7 @@ func TestTerminalWriteKeysNavigateTUIs(t *testing.T) {
 	resp := runTerminalTool(t, tool, TerminalParams{
 		Action:  "start",
 		Command: "sh -c 'stty raw -echo; printf \"\\033[?1h\"; dd bs=1 count=3 2>/dev/null | od -An -tx1; printf \"\\033[?1l\"; stty sane'",
+		Wait:    agentDriven(),
 	})
 	require.False(t, resp.IsError)
 
@@ -319,7 +430,7 @@ func TestTerminalWriteCtrlCInterrupts(t *testing.T) {
 	resetTerminalManager(t)
 
 	tool, _ := newTerminalToolForTest(t)
-	resp := runTerminalTool(t, tool, TerminalParams{Action: "start", Command: "sleep 60"})
+	resp := runTerminalTool(t, tool, TerminalParams{Action: "start", Command: "sleep 60", Wait: agentDriven()})
 	require.False(t, resp.IsError)
 
 	var meta TerminalResponseMetadata
@@ -342,7 +453,7 @@ func TestTerminalWriteUnknownKey(t *testing.T) {
 	resetTerminalManager(t)
 
 	tool, _ := newTerminalToolForTest(t)
-	resp := runTerminalTool(t, tool, TerminalParams{Action: "start", Command: "sleep 30"})
+	resp := runTerminalTool(t, tool, TerminalParams{Action: "start", Command: "sleep 30", Wait: agentDriven()})
 	require.False(t, resp.IsError)
 
 	var meta TerminalResponseMetadata
@@ -357,7 +468,7 @@ func TestTerminalWriteNothingToSend(t *testing.T) {
 	resetTerminalManager(t)
 
 	tool, _ := newTerminalToolForTest(t)
-	resp := runTerminalTool(t, tool, TerminalParams{Action: "start", Command: "sleep 30"})
+	resp := runTerminalTool(t, tool, TerminalParams{Action: "start", Command: "sleep 30", Wait: agentDriven()})
 	require.False(t, resp.IsError)
 
 	var meta TerminalResponseMetadata
@@ -377,6 +488,7 @@ func TestTerminalWriteMouseReachesTUIs(t *testing.T) {
 	resp := runTerminalTool(t, tool, TerminalParams{
 		Action:  "start",
 		Command: "sh -c 'stty raw -echo; printf \"\\033[?1000h\\033[?1006h\"; dd bs=1 count=9 2>/dev/null | od -An -tx1; stty sane'",
+		Wait:    agentDriven(),
 	})
 	require.False(t, resp.IsError)
 

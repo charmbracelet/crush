@@ -147,6 +147,10 @@ type (
 	// message path.
 	ActionTerminalKill struct{}
 
+	// ActionTerminalFullscreen asks the model to toggle the terminal
+	// between the docked panel and a full-window overlay.
+	ActionTerminalFullscreen struct{}
+
 	// ActionTerminalComplete is sent when an interactive terminal's
 	// process exited, carrying the final transcript.
 	ActionTerminalComplete struct {

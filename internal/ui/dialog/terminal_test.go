@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -33,7 +34,7 @@ func newTerminalDialogForTest(t *testing.T, command string) (*TerminalDialog, *s
 	})
 
 	s := styles.CharmtonePantera()
-	dialog := NewTerminalDialog(&common.Common{Styles: &s}, session, command)
+	dialog := NewTerminalDialog(&common.Common{Styles: &s}, session, TerminalDialogOptions{Command: command})
 	return dialog, session
 }
 
@@ -74,6 +75,139 @@ func TestTerminalDialogCloseKeyKills(t *testing.T) {
 	_, ok := action.(ActionTerminalKill)
 	require.True(t, ok, "ctrl+q should ask to terminate, got %T", action)
 	require.False(t, session.Exited(), "the dialog must not kill the session itself")
+}
+
+func TestTerminalDialogFullscreenKeyToggles(t *testing.T) {
+	t.Parallel()
+
+	dialog, _ := newTerminalDialogForTest(t, "sleep 5")
+
+	action := dialog.HandleMsg(tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
+	_, ok := action.(ActionTerminalFullscreen)
+	require.True(t, ok, "ctrl+f should ask to toggle fullscreen, got %T", action)
+
+	// The header reflects the current mode after the model applies it.
+	scr, _ := drawTerminal(t, dialog, 80, 24)
+	require.Contains(t, scr.Render(), "ctrl+f fullscreen")
+	dialog.SetFullscreen(true)
+	scr, _ = drawTerminal(t, dialog, 80, 24)
+	require.Contains(t, scr.Render(), "ctrl+f docked")
+}
+
+func TestTerminalDialogQuitHint(t *testing.T) {
+	t.Parallel()
+
+	dialog, _ := newTerminalDialogForTest(t, "sleep 5")
+	scr, _ := drawTerminal(t, dialog, 80, 24)
+	require.Contains(t, scr.Render(), "ctrl+q quit")
+}
+
+func TestTerminalDialogHeaderFitsNarrowPanel(t *testing.T) {
+	t.Parallel()
+
+	dialog, _ := newTerminalDialogForTest(t, "a-very-long-command-name-here")
+
+	// Status chip and hints must not wrap the header on narrow panels.
+	for _, width := range []int{10, 20, 40, 80} {
+		require.LessOrEqual(t, lipgloss.Width(dialog.renderHeader(width)), width,
+			"header must fit a %d-column panel", width)
+	}
+}
+
+func TestTerminalDialogStatusChip(t *testing.T) {
+	t.Parallel()
+
+	dialog, session := newTerminalDialogForTest(t, "printf 'status-done\\n'")
+	select {
+	case <-session.Done():
+	case <-time.After(15 * time.Second):
+		t.Fatal("session did not exit in time")
+	}
+
+	scr, _ := drawTerminal(t, dialog, 80, 24)
+	require.Contains(t, scr.Render(), "exited", "an exited session is labelled")
+}
+
+func TestTerminalDialogAgentTag(t *testing.T) {
+	t.Parallel()
+
+	session, err := shell.NewInteractiveSession(shell.InteractiveSessionOptions{
+		Command:    "sleep 30",
+		WorkingDir: t.TempDir(),
+		Cols:       40,
+		Rows:       10,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = session.Kill()
+		_ = session.Close()
+	})
+
+	s := styles.CharmtonePantera()
+	dialog := NewTerminalDialog(&common.Common{Styles: &s}, session,
+		TerminalDialogOptions{Command: "sleep 30", AgentStarted: true})
+
+	scr, _ := drawTerminal(t, dialog, 80, 24)
+	rendered := scr.Render()
+	require.Contains(t, rendered, "agent", "an agent-started session is labelled")
+	require.Contains(t, rendered, "running")
+}
+
+func TestTerminalDialogAgentDrivenRefusesInput(t *testing.T) {
+	t.Parallel()
+
+	session, err := shell.NewInteractiveSession(shell.InteractiveSessionOptions{
+		Command:    "sleep 30",
+		WorkingDir: t.TempDir(),
+		Cols:       40,
+		Rows:       10,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = session.Kill()
+		_ = session.Close()
+	})
+
+	s := styles.CharmtonePantera()
+	dialog := NewTerminalDialog(&common.Common{Styles: &s}, session,
+		TerminalDialogOptions{Command: "sleep 30", AgentStarted: true, AgentDriven: true})
+
+	// Typing, pasting, and mouse input never reach a command the agent is
+	// driving.
+	action := dialog.HandleMsg(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	require.Nil(t, action, "keys must be refused on an agent-driven terminal")
+	require.Nil(t, dialog.HandleMsg(tea.PasteMsg{Content: "pasted"}))
+	require.Nil(t, dialog.HandleMsg(tea.MouseClickMsg{}))
+	require.Nil(t, dialog.HandleMsg(tea.MouseMotionMsg{}))
+
+	// The escape hatches still work.
+	action = dialog.HandleMsg(tea.KeyPressMsg{Code: 'q', Mod: tea.ModCtrl})
+	require.IsType(t, ActionTerminalKill{}, action)
+	action = dialog.HandleMsg(tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
+	require.IsType(t, ActionTerminalFullscreen{}, action)
+}
+
+func TestTerminalDialogAgentDrivenReadonlyHint(t *testing.T) {
+	t.Parallel()
+
+	session, err := shell.NewInteractiveSession(shell.InteractiveSessionOptions{
+		Command:    "sleep 30",
+		WorkingDir: t.TempDir(),
+		Cols:       40,
+		Rows:       10,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = session.Kill()
+		_ = session.Close()
+	})
+
+	s := styles.CharmtonePantera()
+	dialog := NewTerminalDialog(&common.Common{Styles: &s}, session,
+		TerminalDialogOptions{Command: "sleep 30", AgentStarted: true, AgentDriven: true})
+
+	scr, _ := drawTerminal(t, dialog, 100, 24)
+	require.Contains(t, scr.Render(), "read-only")
 }
 
 func TestTerminalDialogExitCompletes(t *testing.T) {

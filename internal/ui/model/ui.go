@@ -106,6 +106,9 @@ const (
 	uiFocusEditor
 	uiFocusMain
 	uiFocusSidebar
+	// uiFocusTerminal is the docked interactive terminal's slot in the
+	// focus ring. While it holds focus, keys go to the child process.
+	uiFocusTerminal
 )
 
 type uiState uint8
@@ -165,7 +168,14 @@ type activeTerminalSession struct {
 	// agentStarted marks sessions requested by a tool: their output is
 	// read back through the terminal tools rather than persisted.
 	agentStarted bool
-	userCommand  string
+	// agentDriven marks sessions the agent owns and drives itself. The
+	// panel is a read-only view: user keys and mouse events never reach
+	// the command, and the terminal stays out of the focus ring.
+	agentDriven bool
+	userCommand string
+	// fullscreen is true while the terminal covers the whole window
+	// instead of docking in the chat column.
+	fullscreen bool
 }
 
 type (
@@ -1136,10 +1146,14 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 		m.chat.ScrollToBottom()
-		cmds = append(cmds, m.attachTerminalDialog(msg.Payload.Session, msg.Payload.Command, true))
+		cmds = append(cmds, m.attachTerminalDialog(msg.Payload.Session, msg.Payload.Command, true, msg.Payload.AgentDriven))
+		note := "The agent opened a terminal for you to act in"
+		if msg.Payload.AgentDriven {
+			note = "The agent is working in a terminal you can watch"
+		}
 		if cmd := m.sendNotification(notification.Notification{
 			Title:   "Interactive terminal",
-			Message: "The agent opened a terminal for you to act in",
+			Message: note,
 		}); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -1147,7 +1161,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.activeTerminal != nil {
 			break
 		}
-		cmds = append(cmds, m.attachTerminalDialog(msg.Session, msg.UserCommand, false))
+		cmds = append(cmds, m.attachTerminalDialog(msg.Session, msg.UserCommand, false, false))
 	case terminalSpawnErrorMsg:
 		cmds = append(cmds, util.ReportError(fmt.Errorf("interactive terminal: %w", msg.Err)))
 	case dialog.TerminalOutputMsg:
@@ -1190,8 +1204,17 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Handle delayed single-click action (e.g., expansion).
 		m.chat.HandleDelayedClick(msg)
 	case tea.MouseClickMsg:
-		// Pass mouse events to dialogs first if any are open.
-		if m.dialog.HasDialogs() {
+		// Pass mouse events to the docked terminal when they land in its
+		// panel, focusing it so typing follows the click; events outside
+		// fall through to the view behind it. Other dialogs still own the
+		// whole screen.
+		if m.terminalTakesMouse(image.Pt(msg.X, msg.Y), true) {
+			if cmd := m.handleDialogMsg(msg); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			return m, tea.Batch(cmds...)
+		}
+		if m.dialog.HasDialogs() && m.frontTerminal() == nil {
 			if cmd := m.handleDialogMsg(msg); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
@@ -1262,8 +1285,14 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.MouseMotionMsg:
-		// Pass mouse events to dialogs first if any are open.
-		if m.dialog.HasDialogs() {
+		// Pass mouse events to the docked terminal when they land in its
+		// panel; everything else goes to the view behind it. Other dialogs
+		// still own the whole screen.
+		if m.terminalTakesMouse(image.Pt(msg.X, msg.Y), false) {
+			m.dialog.Update(msg)
+			return m, tea.Batch(cmds...)
+		}
+		if m.dialog.HasDialogs() && m.frontTerminal() == nil {
 			m.dialog.Update(msg)
 			return m, tea.Batch(cmds...)
 		}
@@ -1321,8 +1350,14 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.MouseReleaseMsg:
-		// Pass mouse events to dialogs first if any are open.
-		if m.dialog.HasDialogs() {
+		// Pass mouse events to the docked terminal when they land in its
+		// panel; everything else goes to the view behind it. Other dialogs
+		// still own the whole screen.
+		if m.terminalTakesMouse(image.Pt(msg.X, msg.Y), false) {
+			m.dialog.Update(msg)
+			return m, tea.Batch(cmds...)
+		}
+		if m.dialog.HasDialogs() && m.frontTerminal() == nil {
 			m.dialog.Update(msg)
 			return m, tea.Batch(cmds...)
 		}
@@ -1373,9 +1408,14 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Pass wheel events to dialogs first if any are open, unless a
-		// docked terminal lets this event scroll the chat behind it.
-		if m.dialog.HasDialogs() && !m.dockedTerminalPassesWheel(image.Pt(msg.Mouse.X, msg.Mouse.Y)) {
+		// Pass wheel events to the docked terminal when they land in its
+		// panel so full-screen programs scroll; elsewhere they scroll the
+		// chat behind it.
+		if m.terminalTakesMouse(image.Pt(msg.Mouse.X, msg.Mouse.Y), false) {
+			m.dialog.Update(msg)
+			return m, tea.Batch(cmds...)
+		}
+		if m.dialog.HasDialogs() && m.frontTerminal() == nil {
 			m.dialog.Update(msg)
 			return m, tea.Batch(cmds...)
 		}
@@ -2157,6 +2197,10 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 				_ = session.Close()
 				return nil
 			})
+		}
+	case dialog.ActionTerminalFullscreen:
+		if m.activeTerminal != nil {
+			m.setTerminalFullscreen(!m.activeTerminal.fullscreen)
 		}
 	case dialog.ActionTerminalComplete:
 		cmds = append(cmds, m.closeTerminalDialog(msg.Result))
@@ -3069,6 +3113,26 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		return false
 	}
 
+	// The interactive terminal joins the focus ring as an exception to
+	// normal dialog routing. While it holds focus it takes every key
+	// (ctrl+c must reach the child process, so this runs before the quit
+	// check); while docked and unfocused only tab, its quit key, and (away
+	// from the editor) fullscreen are intercepted, so the editor and chat
+	// keep working around it.
+	if terminal := m.frontTerminal(); terminal != nil {
+		quit, fullscreen := terminal.Keys()
+		switch {
+		case key.Matches(msg, m.keyMap.Tab):
+			return m.cycleTerminalFocus()
+		case key.Matches(msg, quit):
+			return m.handleDialogMsg(msg)
+		case key.Matches(msg, fullscreen) && m.focus != uiFocusEditor:
+			return m.handleDialogMsg(msg)
+		case m.focus == uiFocusTerminal:
+			return m.handleDialogMsg(msg)
+		}
+	}
+
 	if key.Matches(msg, m.keyMap.Quit) && !m.dialog.ContainsDialog(dialog.QuitID) {
 		// Always handle quit keys first
 		if cmd := m.openQuitDialog(); cmd != nil {
@@ -3078,8 +3142,10 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		return tea.Batch(cmds...)
 	}
 
-	// Route all messages to dialog if one is open.
-	if m.dialog.HasDialogs() {
+	// Route all messages to dialog if one is open. A terminal the user has
+	// tabbed away from no longer swallows keys; its own shortcuts were
+	// handled above and everything else belongs to the focused view.
+	if m.dialog.HasDialogs() && m.frontTerminal() == nil {
 		return m.handleDialogMsg(msg)
 	}
 
@@ -3616,7 +3682,13 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			uv.NewStyledString(m.pillsView).Draw(scr, layout.pills)
 		}
 
-		if m.activeInline != nil {
+		switch {
+		case m.focus == uiFocusTerminal && layout.terminal.Dy() > 0:
+			// The textarea is blurred while the terminal holds focus, so
+			// show the terminal's keybinds where the prompt sits.
+			m.drawTerminalHints(scr, layout.editor)
+			m.inlineCursor = nil
+		case m.activeInline != nil:
 			m.activeInline.SetFocused(m.focus == uiFocusEditor)
 			if collapsed, ok := m.collapsedInlineEditor(); ok {
 				collapsed.DrawCollapsed(scr, layout.editor)
@@ -3624,7 +3696,7 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			} else {
 				m.inlineCursor = m.activeInline.Draw(scr, layout.editor)
 			}
-		} else {
+		default:
 			editorWidth := scr.Bounds().Dx()
 			if !m.isCompact {
 				editorWidth -= layout.sidebar.Dx()
@@ -3683,10 +3755,18 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	// docked it draws inside its slice of the chat column so the rest of the
 	// UI stays visible.
 	if m.dialog.HasDialogs() {
-		if m.activeTerminal != nil && m.layout.terminal.Dy() > 0 {
-			return m.dialog.DrawDocked(scr, scr.Bounds(), m.layout.terminal, dialog.TerminalID)
+		switch {
+		case m.activeTerminal != nil && m.layout.terminal.Dy() > 0:
+			cur := m.dialog.DrawDocked(scr, scr.Bounds(), m.layout.terminal, dialog.TerminalID)
+			// A docked terminal only owns the cursor while it holds focus.
+			// Tabbed away from, the focused view (usually the editor) shows
+			// its own; a different dialog on top owns it regardless.
+			if m.focus == uiFocusTerminal || m.frontTerminal() == nil {
+				return cur
+			}
+		default:
+			return m.dialog.Draw(scr, scr.Bounds())
 		}
-		return m.dialog.Draw(scr, scr.Bounds())
 	}
 
 	switch m.focus {
@@ -3794,6 +3874,15 @@ func (m *UI) ShortHelp() []key.Binding {
 	var binds []key.Binding
 	k := &m.keyMap
 
+	// While the interactive terminal holds focus, its controls are the only
+	// ones that matter.
+	if m.focus == uiFocusTerminal {
+		quit, fullscreen := m.terminalHelpBindings()
+		tab := k.Tab
+		tab.SetHelp("tab", "editor")
+		return []key.Binding{quit, fullscreen, tab}
+	}
+
 	// When an inline editor is active, show its help.
 	if m.activeInline != nil {
 		if m.focus == uiFocusEditor {
@@ -3832,7 +3921,14 @@ func (m *UI) ShortHelp() []key.Binding {
 		case uiFocusEditor:
 			tab.SetHelp("tab", "focus chat")
 		default:
-			tab.SetHelp("tab", "focus editor")
+			// The user-owned terminal sits between the chat and the editor
+			// in the focus ring; an agent-owned one is read-only and
+			// skipped.
+			if m.terminalUserOwned() {
+				tab.SetHelp("tab", "focus terminal")
+			} else {
+				tab.SetHelp("tab", "focus editor")
+			}
 		}
 
 		binds = append(
@@ -3892,6 +3988,15 @@ func (m *UI) ShortHelp() []key.Binding {
 
 // FullHelp implements [help.KeyMap].
 func (m *UI) FullHelp() [][]key.Binding {
+	// While the interactive terminal holds focus, its controls are the only
+	// ones that matter.
+	if m.focus == uiFocusTerminal {
+		quit, fullscreen := m.terminalHelpBindings()
+		tab := m.keyMap.Tab
+		tab.SetHelp("tab", "editor")
+		return [][]key.Binding{{quit, fullscreen, tab}}
+	}
+
 	// When an inline editor is active, show its help.
 	if m.activeInline != nil {
 		if m.focus == uiFocusEditor {
@@ -4415,7 +4520,7 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 			// Add bottom margin to main
 			uiLayout.main.Max.Y -= 1
 			uiLayout.editor = editorRect
-			if m.activeTerminal != nil {
+			if m.activeTerminal != nil && !m.activeTerminal.fullscreen {
 				uiLayout.main, uiLayout.terminal = dockTerminalPanel(uiLayout.main)
 			}
 		} else {
@@ -4458,7 +4563,7 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 			// Add bottom margin to main
 			uiLayout.main.Max.Y -= 1
 			uiLayout.editor = editorRect
-			if m.activeTerminal != nil {
+			if m.activeTerminal != nil && !m.activeTerminal.fullscreen {
 				uiLayout.main, uiLayout.terminal = dockTerminalPanel(uiLayout.main)
 			}
 		}
@@ -5616,20 +5721,148 @@ func (m *UI) openInteractiveShell(command string) tea.Cmd {
 	}
 }
 
-// dockedTerminalPassesWheel reports whether a wheel event at pos should
-// scroll the UI behind the dialogs instead of going to the terminal. A
-// docked interactive terminal only takes wheel events inside its panel so
-// the chat above it stays scrollable; every other dialog (and the terminal
-// when it cannot dock) captures everything.
-func (m *UI) dockedTerminalPassesWheel(pos image.Point) bool {
-	front := m.dialog.DialogLast()
-	if front == nil || front.ID() != dialog.TerminalID {
+// frontTerminal returns the interactive terminal dialog when it is the
+// front-most dialog, so key and mouse routing can treat it specially.
+func (m *UI) frontTerminal() *dialog.TerminalDialog {
+	if m.dialog == nil {
+		return nil
+	}
+	t, ok := m.dialog.DialogLast().(*dialog.TerminalDialog)
+	if !ok {
+		return nil
+	}
+	return t
+}
+
+// focusTerminal gives the interactive terminal the keyboard focus.
+func (m *UI) focusTerminal() {
+	if m.focus == uiFocusTerminal {
+		return
+	}
+	m.focus = uiFocusTerminal
+	m.textarea.Blur()
+	m.chat.Blur()
+	m.sidebarScrollbarVisible = false
+}
+
+// terminalTakesMouse reports whether the interactive terminal should
+// consume a mouse event at pos. A full-screen terminal owns everything; a
+// docked one owns its panel only, so the chat and editor around it stay
+// interactive. When focus is set, landing inside a user-owned panel also
+// moves keyboard focus there (used for clicks, never for hover or drag).
+// Agent-owned panels are read-only: their events are consumed to protect
+// the command the agent is driving, but never focus the terminal.
+func (m *UI) terminalTakesMouse(pos image.Point, focus bool) bool {
+	if m.frontTerminal() == nil || m.activeTerminal == nil {
 		return false
 	}
-	if m.layout.terminal.Dy() == 0 {
+	if !m.activeTerminal.fullscreen && !pos.In(m.layout.terminal) {
 		return false
 	}
-	return !pos.In(m.layout.terminal)
+	if focus && m.terminalUserOwned() {
+		m.focusTerminal()
+	}
+	return true
+}
+
+// terminalUserOwned reports whether the terminal on screen accepts user
+// input. Agent-owned terminals are read-only views of the agent's work.
+func (m *UI) terminalUserOwned() bool {
+	return m.activeTerminal != nil && !m.activeTerminal.agentDriven
+}
+
+// cycleTerminalFocus moves focus around the editor → chat ring, plus the
+// terminal when the user owns it. Leaving the terminal drops the
+// full-screen view first so the view it returns to is visible. An
+// agent-owned terminal is a read-only view and is skipped entirely.
+func (m *UI) cycleTerminalFocus() tea.Cmd {
+	if m.focus == uiFocusTerminal {
+		if m.activeTerminal != nil && m.activeTerminal.fullscreen {
+			m.setTerminalFullscreen(false)
+		}
+		m.focus = uiFocusEditor
+		m.sidebarScrollbarVisible = false
+		return m.textarea.Focus()
+	}
+
+	if m.focus == uiFocusEditor {
+		// Editor -> chat, matching the existing tab behavior.
+		m.setState(m.state, uiFocusMain)
+		m.textarea.Blur()
+		m.chat.Focus()
+		m.chat.SetSelected(m.chat.Len() - 1)
+		return nil
+	}
+
+	if !m.terminalUserOwned() {
+		// Chat (or sidebar) -> editor; the terminal is not focusable.
+		m.focus = uiFocusEditor
+		m.sidebarScrollbarVisible = false
+		return m.textarea.Focus()
+	}
+
+	// Chat (or sidebar) -> terminal.
+	m.focus = uiFocusTerminal
+	m.textarea.Blur()
+	m.chat.Blur()
+	m.sidebarScrollbarVisible = false
+	return nil
+}
+
+// setTerminalFullscreen toggles the interactive terminal between the
+// docked panel and a full-window overlay. The dialog matches the PTY to
+// the area it draws into on the next frame, so no explicit resize is
+// needed here.
+func (m *UI) setTerminalFullscreen(fullscreen bool) {
+	if m.activeTerminal == nil || m.activeTerminal.fullscreen == fullscreen {
+		return
+	}
+	m.activeTerminal.fullscreen = fullscreen
+	if terminal := m.frontTerminal(); terminal != nil {
+		terminal.SetFullscreen(fullscreen)
+	}
+	if fullscreen {
+		// Nothing else is visible, so the terminal keeps the keyboard.
+		m.focusTerminal()
+	}
+	m.updateLayoutAndSize()
+}
+
+// terminalHelpBindings returns the interactive terminal's quit and
+// fullscreen bindings for hint and help display, falling back to the
+// defaults when the dialog is not reachable.
+func (m *UI) terminalHelpBindings() (quit, fullscreen key.Binding) {
+	quit = key.NewBinding(key.WithKeys("ctrl+q"), key.WithHelp("ctrl+q", "quit"))
+	fullscreen = key.NewBinding(key.WithKeys("ctrl+f"), key.WithHelp("ctrl+f", "fullscreen"))
+	if terminal := m.frontTerminal(); terminal != nil {
+		quit, fullscreen = terminal.Keys()
+	}
+	return quit, fullscreen
+}
+
+// drawTerminalHints fills the editor area with the docked terminal's
+// keybind hints while the terminal holds focus. The textarea is blurred
+// then, so leaving its prompt on screen would only invite confusion.
+func (m *UI) drawTerminalHints(scr uv.Screen, area uv.Rectangle) {
+	if area.Dy() <= 0 {
+		return
+	}
+
+	quit, fullscreen := m.terminalHelpBindings()
+	tab := m.keyMap.Tab
+	tab.SetHelp("tab", "editor")
+
+	hints := strings.Join([]string{
+		quit.Help().Key + " " + quit.Help().Desc,
+		fullscreen.Help().Key + " " + fullscreen.Help().Desc,
+		tab.Help().Key + " " + tab.Help().Desc,
+	}, "   ")
+	row := m.com.Styles.Terminal.Hint.Render(hints)
+
+	// Keep the row where the editor's first prompt line sits, below the
+	// attachments row.
+	y := area.Min.Y + 1
+	uv.NewStyledString(row).Draw(scr, image.Rect(area.Min.X, y, area.Max.X, y+1))
 }
 
 // terminalDialogSize is the initial emulator size for a new terminal: the
@@ -5648,8 +5881,11 @@ func (m *UI) terminalDialogSize() (cols, rows int) {
 }
 
 // attachTerminalDialog opens the terminal dialog around an already-running
-// session and starts watching it.
-func (m *UI) attachTerminalDialog(session *shell.InteractiveSession, command string, agentStarted bool) tea.Cmd {
+// session and starts watching it. agentStarted marks sessions the agent
+// opened (their output returns through the terminal tools); agentDriven
+// marks sessions the agent owns: their panel is a read-only view, so the
+// terminal never takes the keyboard and stays out of the focus ring.
+func (m *UI) attachTerminalDialog(session *shell.InteractiveSession, command string, agentStarted, agentDriven bool) tea.Cmd {
 	if session == nil {
 		return nil
 	}
@@ -5657,11 +5893,22 @@ func (m *UI) attachTerminalDialog(session *shell.InteractiveSession, command str
 	m.activeTerminal = &activeTerminalSession{
 		session:      session,
 		agentStarted: agentStarted,
+		agentDriven:  agentDriven,
 		userCommand:  command,
 	}
 
-	m.textarea.Blur()
-	m.dialog.OpenDialogWithGrace(dialog.NewTerminalDialog(m.com, session, command))
+	m.dialog.OpenDialogWithGrace(dialog.NewTerminalDialog(m.com, session, dialog.TerminalDialogOptions{
+		Command:      command,
+		AgentStarted: agentStarted,
+		AgentDriven:  agentDriven,
+	}))
+	// A user-owned terminal opens for the user to act in, so it takes the
+	// keyboard until they tab away; an agent-driven one is a read-only view
+	// and leaves the current focus alone.
+	if !agentDriven {
+		m.textarea.Blur()
+		m.focusTerminal()
+	}
 
 	// Size the PTY to its draw area before the first frame so full-screen
 	// programs start with the space they will actually have: the docked
@@ -5706,6 +5953,10 @@ func (m *UI) closeTerminalDialog(result dialog.TerminalResult) tea.Cmd {
 	if !active.agentStarted {
 		command := cmp.Or(active.userCommand, "interactive shell")
 		cmds = append(cmds, m.persistTerminalResult(command, result))
+	}
+	// The terminal held the keyboard; hand it back to the editor.
+	if m.focus == uiFocusTerminal {
+		m.focus = uiFocusEditor
 	}
 	if m.focus == uiFocusEditor {
 		cmds = append(cmds, m.textarea.Focus())
@@ -6042,7 +6293,9 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 	// Normalize \r\n before the textarea sanitizer sees it.
 	msg.Content = strings.ReplaceAll(msg.Content, "\r\n", "\n")
 
-	if m.dialog.HasDialogs() {
+	// The focused terminal takes the paste; a terminal the user tabbed away
+	// from does not, so the paste lands in the focused view instead.
+	if m.dialog.HasDialogs() && (m.focus == uiFocusTerminal || m.frontTerminal() == nil) {
 		return m.handleDialogMsg(msg)
 	}
 

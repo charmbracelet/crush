@@ -217,6 +217,11 @@ func (q *Quit) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	return nil
 }
 
+// HandlesHover implements [HoverDialog].
+func (*Quit) HandlesHover() bool {
+	return true
+}
+
 // drawButtons paints the buttons as layers at the given position and returns
 // a compositor whose layer bounds serve as mouse hit regions.
 func drawButtons(scr uv.Screen, x, y int, views []string) *lipgloss.Compositor {

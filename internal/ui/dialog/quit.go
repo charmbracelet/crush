@@ -197,7 +197,11 @@ func (q *Quit) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	contentY := center.Min.Y +
 		baseStyle.GetMarginTop() + baseStyle.GetBorderTopSize() + baseStyle.GetPaddingTop() +
 		frameStyle.GetMarginTop() + frameStyle.GetBorderTopSize() + frameStyle.GetPaddingTop()
-	buttonsX := contentX + (lipgloss.Width(content)-buttonsWidth)/2
+	// The buttons row is centered within the rendered content, exactly like
+	// lipgloss.JoinVertical centers it: the inner width excludes the
+	// content frame, and an odd gap rounds the left padding up.
+	innerWidth := lipgloss.Width(content) - baseStyle.GetHorizontalFrameSize()
+	buttonsX := contentX + (innerWidth-buttonsWidth+1)/2
 	buttonsY := contentY + buttonLine
 
 	q.compositor = nil

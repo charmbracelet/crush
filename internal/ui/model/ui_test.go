@@ -131,6 +131,7 @@ type testWorkspace struct {
 	runPrompts        []string
 	yolo              bool
 	runHidden         []bool
+	compactCalls      []bool
 }
 
 func (w *testWorkspace) Config() *config.Config {
@@ -173,6 +174,11 @@ func (w *testWorkspace) AgentReadyErr() error {
 func (w *testWorkspace) AgentRun(ctx context.Context, _ string, prompt string, _ ...message.Attachment) error {
 	w.runPrompts = append(w.runPrompts, prompt)
 	w.runHidden = append(w.runHidden, message.HiddenUserMessage(ctx))
+	return nil
+}
+
+func (w *testWorkspace) SetCompactMode(scope config.Scope, compact bool) error {
+	w.compactCalls = append(w.compactCalls, compact)
 	return nil
 }
 
@@ -257,6 +263,66 @@ func TestHandlePlanHandoff_MarkerOpensInline(t *testing.T) {
 		Text:      "Here is the plan.\n<!-- CRUSH_PLAN_READY -->",
 	})
 	require.True(t, isPlanHandoffInline(u))
+}
+
+func TestToggleSidebarKeyBinding(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	ws := &testWorkspace{cfg: &config.Config{
+		Providers: csync.NewMap[string, config.ProviderConfig](),
+	}}
+	com := &common.Common{Workspace: ws, Styles: &sty}
+	keyMap := DefaultKeyMap()
+	att := attachments.New(nil, attachments.Keymap{
+		DeleteMode: keyMap.Editor.AttachmentDeleteMode,
+		DeleteAll:  keyMap.Editor.DeleteAllAttachments,
+		Escape:     keyMap.Editor.Escape,
+	})
+	u := &UI{
+		com:         com,
+		keyMap:      keyMap,
+		state:       uiChat,
+		focus:       uiFocusSidebar,
+		session:     &session.Session{ID: "sess-1"},
+		chat:        NewChat(com, config.ScrollbarDefault),
+		textarea:    textarea.New(),
+		dialog:      dialog.NewOverlay(),
+		attachments: att,
+		width:       140,
+		height:      45,
+	}
+	u.status = NewStatus(com, u)
+
+	// Ctrl+b hides the sidebar and moves focus off it, persisting compact
+	// mode.
+	u.handleKeyPressMsg(tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
+	require.True(t, u.forceCompactMode)
+	require.True(t, u.isCompact)
+	require.Equal(t, uiFocusEditor, u.focus)
+	require.Equal(t, []bool{true}, ws.compactCalls)
+
+	// Ctrl+b again shows the sidebar.
+	u.handleKeyPressMsg(tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
+	require.False(t, u.forceCompactMode)
+	require.False(t, u.isCompact)
+	require.Equal(t, []bool{true, false}, ws.compactCalls)
+
+	// The binding is advertised in the help bar while the sidebar is
+	// available.
+	var shortHelp []string
+	for _, b := range u.ShortHelp() {
+		shortHelp = append(shortHelp, b.Help().Desc)
+	}
+	require.Contains(t, shortHelp, "toggle sidebar")
+
+	var fullHelp []string
+	for _, row := range u.FullHelp() {
+		for _, b := range row {
+			fullHelp = append(fullHelp, b.Help().Desc)
+		}
+	}
+	require.Contains(t, fullHelp, "toggle sidebar")
 }
 
 func TestHandlePlanHandoff_NoMarkerNoInline(t *testing.T) {

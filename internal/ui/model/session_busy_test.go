@@ -11,6 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/charmbracelet/crush/internal/agent/notify"
+	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
+	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
@@ -29,13 +31,15 @@ import (
 type countingWorkspace struct {
 	workspace.Workspace
 
-	ready     bool
-	agentBusy bool
-	yolo      bool
-	queued    []string
-	model     workspace.AgentModel
-	lspStates map[string]workspace.LSPClientInfo
-	lspDiags  map[string]lsp.DiagnosticCounts
+	ready          bool
+	agentBusy      bool
+	yolo           bool
+	queued         []string
+	model          workspace.AgentModel
+	lspStates      map[string]workspace.LSPClientInfo
+	lspDiags       map[string]lsp.DiagnosticCounts
+	mcpStates      map[string]mcp.ClientInfo
+	mcpPendingAuth []mcp.PendingAuthServer
 
 	readyCalls      int
 	agentBusyCalls  int
@@ -48,6 +52,8 @@ type countingWorkspace struct {
 	modelCalls      int
 	lspStateCalls   int
 	lspDiagCalls    int
+	mcpStateCalls   int
+	mcpPendingCalls int
 }
 
 func (w *countingWorkspace) AgentIsReady() bool { w.readyCalls++; return w.ready }
@@ -96,6 +102,22 @@ func (w *countingWorkspace) LSPGetDiagnosticCounts(name string) lsp.DiagnosticCo
 	return w.lspDiags[name]
 }
 
+func (w *countingWorkspace) MCPGetStates() map[string]mcp.ClientInfo {
+	w.mcpStateCalls++
+	return w.mcpStates
+}
+
+func (w *countingWorkspace) ListMCPPrompts(context.Context) ([]commands.MCPPrompt, error) {
+	return nil, nil
+}
+
+func (w *countingWorkspace) MCPPendingAuth() []mcp.PendingAuthServer {
+	w.mcpPendingCalls++
+	return w.mcpPendingAuth
+}
+
+func (w *countingWorkspace) MCPAuthURL(string) string { return "" }
+
 func (w *countingWorkspace) ListMessages(context.Context, string) ([]message.Message, error) {
 	return nil, nil
 }
@@ -116,7 +138,8 @@ func (w *countingWorkspace) Config() *config.Config { return nil }
 func (w *countingWorkspace) syncProbes() int {
 	return w.readyCalls + w.agentBusyCalls +
 		w.queuedCalls + w.queueListCalls + w.permCalls +
-		w.modelCalls + w.lspStateCalls + w.lspDiagCalls
+		w.modelCalls + w.lspStateCalls + w.lspDiagCalls +
+		w.mcpStateCalls
 }
 
 func (w *countingWorkspace) resetCounters() {
@@ -124,6 +147,7 @@ func (w *countingWorkspace) resetCounters() {
 	w.queuedCalls, w.queueListCalls, w.permCalls = 0, 0, 0
 	w.permSetCalls, w.clearQueueCalls, w.cancelCalls = 0, 0, 0
 	w.modelCalls, w.lspStateCalls, w.lspDiagCalls = 0, 0, 0
+	w.mcpStateCalls, w.mcpPendingCalls = 0, 0
 }
 
 // newBusyUI builds a UI wired to the stub workspace with an active session
@@ -151,11 +175,14 @@ func newBusyUI(ws *countingWorkspace) *UI {
 // boundary (the tests using it must not call t.Parallel).
 func pinTTLs(t *testing.T) {
 	t.Helper()
-	oldBusy, oldQueue, oldLSP := busyCacheTTL, promptQueueTTL, lspStatesTTL
+	oldBusy, oldQueue, oldLSP, oldMCP := busyCacheTTL, promptQueueTTL, lspStatesTTL, mcpStatesTTL
 	busyCacheTTL = time.Hour
 	promptQueueTTL = time.Hour
 	lspStatesTTL = time.Hour
-	t.Cleanup(func() { busyCacheTTL, promptQueueTTL, lspStatesTTL = oldBusy, oldQueue, oldLSP })
+	mcpStatesTTL = time.Hour
+	t.Cleanup(func() {
+		busyCacheTTL, promptQueueTTL, lspStatesTTL, mcpStatesTTL = oldBusy, oldQueue, oldLSP, oldMCP
+	})
 }
 
 // warmCaches marks all memoized workspace state fresh so only explicit
@@ -166,6 +193,7 @@ func warmCaches(m *UI, busy bool) {
 	m.agentReady = true
 	m.promptQueueCheckedAt = time.Now()
 	m.lspCheckedAt = time.Now()
+	m.mcpCheckedAt = time.Now()
 }
 
 // runCmds executes a command tree the way the Bubble Tea runtime would,
@@ -180,7 +208,7 @@ func runCmds(m *UI, cmd tea.Cmd) {
 		for _, c := range msg {
 			runCmds(m, c)
 		}
-	case busyStateMsg, promptQueueMsg, agentRunSubmittedMsg, lspStatesMsg, agentModelChangedMsg:
+	case busyStateMsg, promptQueueMsg, agentRunSubmittedMsg, lspStatesMsg, agentModelChangedMsg, mcpStateChangedMsg:
 		_, next := m.Update(msg)
 		runCmds(m, next)
 	}
@@ -728,29 +756,41 @@ func TestAgentModelChangedRefreshesModel(t *testing.T) {
 		"the refreshed model must land in the cache")
 }
 
-// TestMCPStateChangedRefreshesModel pins the fourth UpdateAgentModel call
-// site: an MCP state change rebuilds the agent, which can change the
-// effective model, so the memoized ready/model state must be re-fetched
-// off-thread afterwards — the edge the updateAgentModelCmd helper exists to
-// make unforgettable.
+// TestMCPStateChangedRefreshesModel pins two edges of an MCP state change:
+// the memoized sidebar states refresh off-thread (an authoritative re-fetch
+// rather than the event payload), and the agent rebuild — the fourth
+// UpdateAgentModel call site — can change the effective model, so the
+// memoized ready/model state must be re-fetched off-thread afterwards; the
+// updateAgentModelCmd helper makes that unforgettable.
 func TestMCPStateChangedRefreshesModel(t *testing.T) {
 	pinTTLs(t)
 
 	ws := &countingWorkspace{
 		ready: true,
 		model: workspace.AgentModel{ModelCfg: config.SelectedModel{Model: "post-mcp-model"}},
+		mcpStates: map[string]mcp.ClientInfo{
+			"ctx": {Name: "ctx", State: mcp.StateConnected, Counts: mcp.Counts{Tools: 4}},
+		},
 	}
 	m := newBusyUI(ws)
 	warmCaches(m, false)
 	m.agentModel = workspace.AgentModel{ModelCfg: config.SelectedModel{Model: "pre-mcp-model"}}
 	ws.resetCounters()
 
-	// handleStateChanged sequences the rebuild with agentModelChangedCmd;
-	// tea.Sequence's wrapper msg is unexported, so drive the two steps the
-	// way the runtime would: run the cmd (the stub records the call), then
-	// deliver the invalidation message.
-	_ = m.handleStateChanged()()
-	_, cmd := m.Update(agentModelChangedMsg{})
+	_, cmd := m.Update(pubsub.Event[mcp.Event]{
+		Type:    pubsub.UpdatedEvent,
+		Payload: mcp.Event{Type: mcp.EventStateChanged, Name: "ctx", State: mcp.StateConnected},
+	})
+	require.Zero(t, ws.syncProbes(), "the MCP event handler must not probe synchronously")
+	require.True(t, m.mcpFetchInFlight, "an MCP state change must schedule a state refresh")
+	runCmds(m, cmd)
+	require.False(t, m.mcpFetchInFlight)
+	require.Equal(t, mcp.StateConnected, m.mcpStates["ctx"].State, "fetched states must land in the cache")
+
+	// The rebuild is sequenced with agentModelChangedCmd; tea.Sequence's
+	// wrapper msg is unexported, so deliver the invalidation message the
+	// way the runtime would once the sequence finishes.
+	_, cmd = m.Update(agentModelChangedMsg{})
 	require.True(t, m.busyFetchInFlight, "an MCP state change must schedule a ready/model refresh")
 	runCmds(m, cmd)
 

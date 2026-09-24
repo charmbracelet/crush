@@ -49,11 +49,13 @@ func wrapEvent(ev any) *pubsub.Payload {
 		return envelope(pubsub.PayloadTypeMCPEvent, pubsub.Event[proto.MCPEvent]{
 			Type: e.Type,
 			Payload: proto.MCPEvent{
-				Type:      pt,
-				Name:      e.Payload.Name,
-				State:     proto.MCPState(e.Payload.State),
-				Error:     e.Payload.Error,
-				ToolCount: e.Payload.Counts.Tools,
+				Type:          pt,
+				Name:          e.Payload.Name,
+				State:         proto.MCPState(e.Payload.State),
+				Error:         e.Payload.Error,
+				ToolCount:     e.Payload.Counts.Tools,
+				PromptCount:   e.Payload.Counts.Prompts,
+				ResourceCount: e.Payload.Counts.Resources,
 			},
 		})
 	case pubsub.Event[permission.PermissionRequest]:

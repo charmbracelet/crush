@@ -339,8 +339,17 @@ type UI struct {
 	lspRefreshQueued bool
 	lspCheckedAt     time.Time
 
-	// mcp
-	mcpStates map[string]mcp.ClientInfo
+	// mcpStates memoizes the workspace MCP state (a synchronous probe in
+	// client/server mode) and its off-thread refresh bookkeeping. MCP
+	// state_changed events refresh it off-thread with a TTL backstop and a
+	// retry loop while servers are starting; see mcp.go.
+	mcpStates        map[string]mcp.ClientInfo
+	mcpFetchInFlight bool
+	// mcpRefreshQueued records that a refresh was requested while a fetch
+	// was already in flight; applyMCPStates re-dispatches so the freshest
+	// state still lands.
+	mcpRefreshQueued bool
+	mcpCheckedAt     time.Time
 
 	// skills
 	skillStates []*skills.SkillState
@@ -622,7 +631,14 @@ func (m *UI) Init() tea.Cmd {
 		cmds = append(cmds, m.fetchHyperCredits())
 	}
 	cmds = append(cmds, m.hyperCreditsTicker())
-	cmds = append(cmds, m.checkPendingMCPAuth())
+	// Prime the memoized MCP state off-thread. There is deliberately no
+	// wait for server-side MCP initialization: the init gate is
+	// process-local and only armed where mcp.Initialize runs (the server),
+	// so waiting here is a no-op in client/server mode. The retry loop and
+	// TTL backstop in mcp.go converge on the settled states instead.
+	if cmd := m.requestMCPRefresh(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
 	return tea.Batch(cmds...)
 }
 
@@ -939,9 +955,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case mcpStateChangedMsg:
-		m.mcpStates = msg.states
-		// Auto-open the MCP auth dialog if any servers need authentication.
-		if cmd := m.openMCPAuthDialog(); cmd != nil {
+		cmds = append(cmds, m.applyMCPStates(msg)...)
+	case mcpStartingRetryMsg:
+		// A server was still connecting when the last fetch landed; re-probe
+		// so "starting..." converges without depending on state_changed
+		// events (which can be missed in client/server mode).
+		if cmd := m.requestMCPRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	case mcpPromptsLoadedMsg:
@@ -1059,10 +1078,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pubsub.Event[mcp.Event]:
 		switch msg.Payload.Type {
 		case mcp.EventStateChanged:
-			return m, tea.Batch(
-				m.handleStateChanged(),
-				m.loadMCPrompts,
-			)
+			return m, tea.Batch(m.handleStateChanged()...)
 		case mcp.EventPromptsListChanged:
 			return m, handleMCPPromptsEvent(m.com.Workspace, msg.Payload.Name)
 		case mcp.EventToolsListChanged:
@@ -1502,6 +1518,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case dialog.ActionMCPAuthStarted:
 		cmds = append(cmds, m.authenticateMCP(msg.Ctx, msg.Name))
 	case dialog.ActionMCPAuthComplete, dialog.ActionMCPAuthErrored:
+		// The OAuth flow finished server-side: refresh the memoized states
+		// so the sidebar reflects the outcome even when the state_changed
+		// event was missed.
+		if cmd := m.requestMCPRefresh(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 		if m.dialog.HasDialogs() {
 			if cmd := m.handleDialogMsg(msg); cmd != nil {
 				cmds = append(cmds, cmd)
@@ -1663,8 +1685,15 @@ func (m *UI) handleConnectionEvent(msg workspace.ConnectionEvent) []tea.Cmd {
 	}
 	m.status.SetInfoMsg(info)
 	cmds := []tea.Cmd{clearInfoMsgCmd(info.TTL)}
-	if msg.State == workspace.ConnectionRecovered && m.session != nil {
-		cmds = append(cmds, m.loadSession(m.session.ID))
+	if msg.State == workspace.ConnectionRecovered {
+		// Events published while the stream was down are gone: re-sync the
+		// memoized MCP states alongside the session reload.
+		if cmd := m.requestMCPRefresh(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		if m.session != nil {
+			cmds = append(cmds, m.loadSession(m.session.ID))
+		}
 	}
 	return cmds
 }
@@ -6043,13 +6072,19 @@ func (m *UI) runMCPPrompt(clientID, promptID string, arguments map[string]string
 	return tea.Sequence(cmds...)
 }
 
-func (m *UI) handleStateChanged() tea.Cmd {
-	return m.updateAgentModelCmd(func() tea.Msg {
-		m.com.Workspace.UpdateAgentModel(context.Background())
-		return mcpStateChangedMsg{
-			states: m.com.Workspace.MCPGetStates(),
-		}
-	})
+// handleStateChanged reacts to an MCP state change: the memoized sidebar
+// states refresh off-thread (an authoritative re-fetch rather than the event
+// payload, so a missed field cannot drift), the coordinator rebuilds to pick
+// up newly registered tools, and the MCP prompts reload.
+func (m *UI) handleStateChanged() []tea.Cmd {
+	return []tea.Cmd{
+		m.requestMCPRefresh(),
+		m.updateAgentModelCmd(func() tea.Msg {
+			m.com.Workspace.UpdateAgentModel(context.Background())
+			return nil
+		}),
+		m.loadMCPrompts,
+	}
 }
 
 func handleMCPPromptsEvent(ws workspace.Workspace, name string) tea.Cmd {

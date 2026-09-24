@@ -62,6 +62,25 @@ func (h *HTTPRoundTripLogger) RoundTrip(req *http.Request) (*http.Response, erro
 		return resp, err
 	}
 
+	// Event streams must not be drained: reading the body to completion
+	// here would hand the caller a buffered stream, so nothing renders
+	// until the whole response has arrived. Log status and headers only
+	// and pass the live body straight through.
+	contentType := strings.ToLower(resp.Header.Get("Content-Type"))
+	if strings.HasPrefix(contentType, "text/event-stream") {
+		if slog.Default().Enabled(req.Context(), slog.LevelDebug) {
+			slog.Debug(
+				"HTTP Response",
+				"status_code", resp.StatusCode,
+				"status", resp.Status,
+				"headers", formatHeaders(resp.Header),
+				"content_length", resp.ContentLength,
+				"duration_ms", duration.Milliseconds(),
+			)
+		}
+		return resp, nil
+	}
+
 	save, resp.Body, err = drainBody(resp.Body)
 	if err != nil {
 		slog.Error("Failed to drain response body", "error", err)

@@ -835,6 +835,15 @@
           "description": "Chat scrollbar visibility",
           "default": "default"
         },
+        "scroll_speed": {
+          "type": "number",
+          "description": "Multiplier applied to mouse wheel scroll distance in the TUI (1 disables acceleration, lower values scroll slower, higher values scroll faster)",
+          "default": 1,
+          "examples": [
+            2,
+            3
+          ]
+        },
         "mouse": {
           "type": "boolean",
           "description": "Enable terminal mouse capture for selection, clicks, and scrolling in the TUI. Disable to let the terminal emulator or tmux handle text selection and copy/paste",

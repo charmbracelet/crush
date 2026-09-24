@@ -198,6 +198,10 @@ type UI struct {
 	session      *session.Session
 	sessionFiles []SessionFile
 
+	// wheelRemainder carries the fractional part of scaled wheel deltas so
+	// scroll speeds below 1 still accumulate into whole lines over time.
+	wheelRemainder float64
+
 	// keeps track of read files while we don't have a session id
 	sessionFileReads []string
 
@@ -762,6 +766,20 @@ func (m *UI) loadCustomCommands() tea.Cmd {
 	}
 }
 
+// scaledWheelLines converts a coalesced wheel delta into whole scroll lines
+// using the configured scroll speed multiplier. Fractional results below one
+// line are accumulated so sub-1 speeds still scroll over successive events.
+func (m *UI) scaledWheelLines(delta float64) int {
+	speed := config.DefaultScrollSpeed
+	if cfg := m.com.Config(); cfg != nil && cfg.Options != nil {
+		speed = cfg.Options.TUI.ScrollSpeedValue()
+	}
+	scaled := delta*speed + m.wheelRemainder
+	lines := int(scaled)
+	m.wheelRemainder = scaled - float64(lines)
+	return lines
+}
+
 // applyChatScroll scrolls the chat by lines and, if the selection is then
 // outside the viewport, moves it to the nearest visible edge. The selection
 // is moved rather than scrolled to so a large coalesced delta is applied in
@@ -1315,15 +1333,15 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(cmds...)
 		}
 
-		// Otherwise handle mouse wheel for chat. Use the coalesced delta
-		// directly as the line count. Terminals like Ghostty send DeltaY=3
-		// per physical wheel tick (matching their native scrollback), while
-		// others send DeltaY=1.
+		// Otherwise handle mouse wheel for chat. The coalesced delta is
+		// scaled by the configured scroll speed before being used as the line
+		// count. Terminals like Ghostty send DeltaY=3 per physical wheel tick
+		// (matching their native scrollback), while others send DeltaY=1.
 		switch m.state {
 		case uiChat:
 			// When sidebar is focused, route wheel events to sidebar scrolling.
 			if m.focus == uiFocusSidebar {
-				lines := int(msg.DeltaY)
+				lines := m.scaledWheelLines(msg.DeltaY)
 				if lines != 0 {
 					m.sidebarOffset = max(0, min(m.sidebarOffset+lines, m.sidebarMaxOffsetVal))
 					m.sidebarScrollbarSeq++
@@ -1335,7 +1353,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.DeltaX != 0 {
 				m.chat.ScrollSelectedShellHorizontal(int(msg.DeltaX))
 			}
-			lines := int(msg.DeltaY)
+			lines := m.scaledWheelLines(msg.DeltaY)
 			if lines == 0 {
 				break
 			}

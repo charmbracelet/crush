@@ -295,6 +295,7 @@ type TUIOptions struct {
 	Completions Completions `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
 	Transparent *bool       `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
 	Scrollbar   string      `json:"scrollbar,omitempty" jsonschema:"description=Chat scrollbar visibility,enum=default,enum=always,enum=never,default=default"`
+	ScrollSpeed *float64    `json:"scroll_speed,omitempty" jsonschema:"description=Multiplier applied to mouse wheel scroll distance in the TUI (1 disables acceleration\\, lower values scroll slower\\, higher values scroll faster),default=1,example=2,example=3"`
 	Mouse       *bool       `json:"mouse,omitempty" jsonschema:"description=Enable terminal mouse capture for selection\\, clicks\\, and scrolling in the TUI. Disable to let the terminal emulator or tmux handle text selection and copy/paste,default=true"`
 	ExitBanner  ExitBanner  `json:"exit_banner,omitempty" jsonschema:"description=Exit banner style after quitting Crush,enum=default,enum=compact,enum=none,default=default"`
 }
@@ -304,6 +305,20 @@ type TUIOptions struct {
 // without unwrapping either.
 func (t *TUIOptions) IsTransparent() bool {
 	return t != nil && t.Transparent != nil && *t.Transparent
+}
+
+// DefaultScrollSpeed is the wheel-to-lines multiplier used when the user has
+// not configured one.
+const DefaultScrollSpeed = 1.0
+
+// ScrollSpeedValue returns the configured scroll speed multiplier. The nil
+// receiver and the unset pointer both mean the default. Values are clamped to
+// a small positive minimum so scrolling never inverts or stalls.
+func (t *TUIOptions) ScrollSpeedValue() float64 {
+	if t == nil || t.ScrollSpeed == nil {
+		return DefaultScrollSpeed
+	}
+	return max(*t.ScrollSpeed, 0.1)
 }
 
 // UnmarshalJSON tolerates the legacy string form of the "theme" field.

@@ -1447,6 +1447,40 @@ func TestConfig_configureProvidersEnhancedCredentialValidation(t *testing.T) {
 }
 
 func TestConfig_defaultModelSelection(t *testing.T) {
+	t.Run("Copilot OAuth uses its credential-scoped catalog", func(t *testing.T) {
+		knownProviders := []catwalk.Provider{{
+			ID:                  catwalk.InferenceProviderCopilot,
+			DefaultLargeModelID: "static-large",
+			DefaultSmallModelID: "static-small",
+		}}
+		cfg := &Config{
+			Providers: csync.NewMapFrom(map[string]ProviderConfig{
+				"copilot": {
+					ID:            "copilot",
+					OAuthToken:    &oauth.Token{AccessToken: "token"},
+					Models:        []catwalk.Model{{ID: "static-large"}, {ID: "static-small"}},
+					CopilotModels: []catwalk.Model{{ID: "auto", Name: "Auto"}},
+				},
+			}),
+		}
+
+		large, small, err := cfg.defaultModelSelection(knownProviders)
+		require.NoError(t, err)
+		require.Equal(t, "auto", large.Model)
+		require.Equal(t, "auto", small.Model)
+
+		cfg.Models = map[SelectedModelType]SelectedModel{
+			SelectedModelTypeLarge: {Provider: "copilot", Model: "static-large"},
+			SelectedModelTypeSmall: {Provider: "copilot", Model: "static-small"},
+		}
+		resolved, err := resolveSelectedModels(cfg, knownProviders)
+		require.NoError(t, err)
+		require.True(t, resolved.LargeFallback)
+		require.True(t, resolved.SmallFallback)
+		require.Equal(t, "auto", resolved.Large.Model)
+		require.Equal(t, "auto", resolved.Small.Model)
+	})
+
 	t.Run("default behavior uses the default models for given provider", func(t *testing.T) {
 		knownProviders := []catwalk.Provider{
 			{

@@ -154,6 +154,16 @@ type ProviderConfig struct {
 	// the provider's whole catalog in that case: the API-key models in
 	// Models are not served by the subscription.
 	ChatGPTModels []catwalk.Model `json:"chatgpt_models,omitempty" jsonschema:"-"`
+
+	// CopilotModels lists the models the GitHub Copilot subscription
+	// grants, fetched from the Copilot API with the OAuth token. It
+	// reflects the models enabled in the user's Copilot plan rather
+	// than the provider's static catalog.
+	CopilotModels []catwalk.Model `json:"copilot_models,omitempty" jsonschema:"-"`
+
+	// CopilotModelsFetchAt records when CopilotModels was last fetched
+	// so the catalog is only refreshed once it grows stale.
+	CopilotModelsFetchAt time.Time `json:"copilot_models_fetch_at,omitempty" jsonschema:"-"`
 }
 
 // ToProvider converts the [ProviderConfig] to a [catwalk.Provider].
@@ -188,6 +198,52 @@ func (c *ProviderConfig) ToProvider() catwalk.Provider {
 
 func (c *ProviderConfig) SetupGitHubCopilot() {
 	maps.Copy(c.ExtraHeaders, copilot.Headers())
+}
+
+// AvailableModels returns the catalog served by the provider's active
+// credential. OAuth subscriptions use their credential-scoped catalogs rather
+// than the static API-key catalog.
+func (c ProviderConfig) AvailableModels() []catwalk.Model {
+	if c.UsesCredentialScopedModels() {
+		switch c.ID {
+		case string(catwalk.InferenceProviderOpenAI):
+			// Model discovery is best effort. Keep startup viable until the
+			// lazy refetch can repair an empty cached catalog.
+			if len(c.ChatGPTModels) == 0 {
+				return c.Models
+			}
+			return c.withStaticModelMetadata(c.ChatGPTModels)
+		case string(catwalk.InferenceProviderCopilot):
+			if len(c.CopilotModels) == 0 {
+				return []catwalk.Model{copilot.AutoModel()}
+			}
+			return c.withStaticModelMetadata(c.CopilotModels)
+		}
+	}
+	return c.Models
+}
+
+func (c ProviderConfig) withStaticModelMetadata(scoped []catwalk.Model) []catwalk.Model {
+	models := slices.Clone(scoped)
+	for i, model := range models {
+		for _, static := range c.Models {
+			if static.ID == model.ID {
+				models[i] = static
+				break
+			}
+		}
+	}
+	return models
+}
+
+// UsesCredentialScopedModels reports whether the active credential determines
+// the provider's complete model catalog.
+func (c ProviderConfig) UsesCredentialScopedModels() bool {
+	if c.OAuthToken == nil {
+		return false
+	}
+	return c.ID == string(catwalk.InferenceProviderOpenAI) ||
+		c.ID == string(catwalk.InferenceProviderCopilot)
 }
 
 // HasAPIKey reports whether the provider's api_key resolves to a usable
@@ -866,12 +922,7 @@ func (c *Config) IsConfigured() bool {
 
 func (c *Config) GetModel(provider, model string) *catwalk.Model {
 	if providerConfig, ok := c.Providers.Get(provider); ok {
-		for _, m := range providerConfig.Models {
-			if m.ID == model {
-				return &m
-			}
-		}
-		for _, m := range providerConfig.ChatGPTModels {
+		for _, m := range providerConfig.AvailableModels() {
 			if m.ID == model {
 				return &m
 			}
@@ -901,13 +952,14 @@ func (c *Config) ValidateReasoningEffort(provider, modelID, effort string) error
 }
 
 // IsModelAvailable returns true if the provider is enabled and the model
-// exists in its catalog. Unlike GetModel, it rejects disabled providers.
+// exists in its catalog, including the credential-scoped OAuth catalogs
+// . Unlike GetModel, it rejects disabled providers.
 func (c *Config) IsModelAvailable(provider, model string) bool {
 	providerConfig, ok := c.Providers.Get(provider)
 	if !ok || providerConfig.Disable {
 		return false
 	}
-	for _, m := range providerConfig.Models {
+	for _, m := range providerConfig.AvailableModels() {
 		if m.ID == model {
 			return true
 		}

@@ -605,7 +605,7 @@ func restoreModelFromSession(ctx context.Context, c *client.Client, ws *proto.Wo
 		return fmt.Errorf("failed to set large model: %w", err)
 	}
 
-	if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
+	if small, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok || !cfg.IsModelAvailable(small.Provider, small.Model) {
 		sm, err := c.GetDefaultSmallModel(ctx, ws.ID, lastAssistant.Provider)
 		if err != nil {
 			slog.Warn("Failed to get default small model", "error", err)
@@ -663,7 +663,7 @@ func findModelMatches(providers map[string]config.ProviderConfig, largeModel, sm
 		if provider.Disable {
 			continue
 		}
-		for _, m := range provider.Models {
+		for _, m := range provider.AvailableModels() {
 			if matchesModel(largeID, largeFilter, m.ID, name) {
 				largeMatches = append(largeMatches, modelMatch{provider: name, modelID: m.ID})
 			}

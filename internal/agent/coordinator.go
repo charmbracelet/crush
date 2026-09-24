@@ -959,19 +959,11 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 		return Model{}, Model{}, err
 	}
 
-	var largeCatwalkModel *catwalk.Model
-	var smallCatwalkModel *catwalk.Model
-
-	for _, m := range largeProviderCfg.Models {
-		if m.ID == largeModelCfg.Model {
-			largeCatwalkModel = &m
-		}
-	}
-	for _, m := range smallProviderCfg.Models {
-		if m.ID == smallModelCfg.Model {
-			smallCatwalkModel = &m
-		}
-	}
+	// The credential-scoped OAuth catalogs (ChatGPT, Copilot) hold models
+	// the static provider catalog does not, e.g. Copilot's "auto", so the
+	// lookup must go through GetModel rather than providerCfg.Models.
+	largeCatwalkModel := c.cfg.Config().GetModel(largeModelCfg.Provider, largeModelCfg.Model)
+	smallCatwalkModel := c.cfg.Config().GetModel(smallModelCfg.Provider, smallModelCfg.Model)
 
 	if largeCatwalkModel == nil {
 		return Model{}, Model{}, errLargeModelNotFound
@@ -1141,14 +1133,25 @@ func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers 
 
 	// Set HTTP client based on provider and debug mode.
 	var httpClient *http.Client
+	var autoResolver *copilot.AutoResolver
 	switch providerID {
 	case string(catwalk.InferenceProviderCopilot):
+		token := func() *oauth.Token {
+			// Read the token lazily: the provider client outlives the
+			// token, which the refresh flow replaces.
+			cfg, ok := c.cfg.Config().Providers.Get(string(catwalk.InferenceProviderCopilot))
+			if !ok {
+				return nil
+			}
+			return cfg.OAuthToken
+		}
+		autoResolver = copilot.NewAutoResolver(token, func(modelID string) bool {
+			return copilotResponsesModels[modelID]
+		})
 		opts = append(
 			opts,
 			openaicompat.WithUseResponsesAPI(),
-			openaicompat.WithResponsesAPIFunc(func(modelID string) bool {
-				return copilotResponsesModels[modelID]
-			}),
+			openaicompat.WithResponsesAPIFunc(autoResolver.UsesResponsesAPI),
 		)
 		httpClient = copilot.NewClient(isSubAgent, c.cfg.Config().Options.Debug)
 
@@ -1184,7 +1187,14 @@ func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers 
 		opts = append(opts, openaicompat.WithSDKOptions(openaisdk.WithJSONSet(extraKey, extraValue)))
 	}
 
-	return openaicompat.New(opts...)
+	provider, err := openaicompat.New(opts...)
+	if err != nil {
+		return nil, err
+	}
+	if autoResolver != nil {
+		return copilot.NewAutoProvider(provider, autoResolver), nil
+	}
+	return provider, nil
 }
 
 func (c *coordinator) buildAzureProvider(baseURL, apiKey string, headers map[string]string, options map[string]string) (fantasy.Provider, error) {
@@ -1406,6 +1416,10 @@ func (c *coordinator) UpdateModels(ctx context.Context) error {
 	// dialog's ChatGPT section empty. Fill it in lazily; the guard makes
 	// this a no-op once the catalog exists.
 	c.cfg.RefetchOpenAIChatGPTModels(ctx)
+
+	// Same for GitHub Copilot: refresh the subscription's model catalog
+	// once it grows stale. TTL-gated, so a no-op while it is fresh.
+	c.cfg.RefetchCopilotModels(ctx)
 
 	agent, name := c.activeAgent()
 	return c.updateAgentModels(ctx, agent, name)

@@ -122,11 +122,6 @@ type ConfigStore struct {
 	// back to the real provider clients.
 	exchangeToken func(ctx context.Context, providerID, refreshToken string) (*oauth.Token, error)
 
-	// fetchOpenAIModels fetches the ChatGPT model catalog. A field for the
-	// same reason as exchangeToken: tests stub it to avoid network calls,
-	// production leaves it nil and refetchOpenAIModels calls the real one.
-	fetchOpenAIModels func(ctx context.Context, token *oauth.Token) ([]catwalk.Model, error)
-
 	// authSignalMu guards authSignals, which maps provider IDs to
 	// channels that WaitForTokenChange blocks on. SignalAuthComplete
 	// closes the channel to unblock waiters; a new channel is created
@@ -685,31 +680,44 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 	return nil
 }
 
+// fetchOpenAIModels fetches the ChatGPT model catalog from the Codex
+// backend. A package variable so tests can stub the network call,
+// matching how the catwalk and hyper syncers are swappable globals.
+var fetchOpenAIModels = openai.Models
+
 // refetchOpenAIModels stores the Codex model catalog the ChatGPT plan
 // grants next to the provider's API-key models. Best effort: a failure
 // leaves the existing catalog in place and the login still succeeds.
 func (s *ConfigStore) refetchOpenAIModels(ctx context.Context, scope Scope) {
-	cfg := s.Config()
-	pc, ok := cfg.Providers.Get(string(catwalk.InferenceProviderOpenAI))
+	const providerID = string(catwalk.InferenceProviderOpenAI)
+	pc, ok := s.Config().Providers.Get(providerID)
 	if !ok || pc.OAuthToken == nil {
 		return
 	}
-	fetchModels := s.fetchOpenAIModels
-	if fetchModels == nil {
-		fetchModels = openai.Models
+	// The access token may have expired since login, so renew it before
+	// asking for the catalog: the models endpoint rejects stale tokens
+	// with a 401. A failed refresh falls through and lets the fetch run
+	// on the old token, which keeps the existing catalog in place.
+	if pc.OAuthToken.IsExpired() {
+		if err := s.RefreshOAuthToken(ctx, scope, providerID); err != nil {
+			slog.Warn("Failed to refresh the ChatGPT token before fetching the model catalog", "error", err)
+		}
+		if refreshed, ok := s.Config().Providers.Get(providerID); ok && refreshed.OAuthToken != nil {
+			pc = refreshed
+		}
 	}
-	models, err := fetchModels(ctx, pc.OAuthToken)
+	models, err := fetchOpenAIModels(ctx, pc.OAuthToken)
 	if err != nil {
 		slog.Warn("Failed to fetch ChatGPT model catalog after auth", "error", err)
 		return
 	}
 	if err := s.update(scope, func(c *Config) map[string]any {
-		p, ok := c.Providers.Get(string(catwalk.InferenceProviderOpenAI))
+		p, ok := c.Providers.Get(providerID)
 		if !ok {
 			return nil
 		}
 		p.ChatGPTModels = models
-		c.Providers.Set(string(catwalk.InferenceProviderOpenAI), p)
+		c.Providers.Set(providerID, p)
 		return map[string]any{
 			"providers.openai.chatgpt_models": models,
 		}
@@ -721,7 +729,9 @@ func (s *ConfigStore) refetchOpenAIModels(ctx context.Context, scope Scope) {
 // RefetchOpenAIChatGPTModels fills in the ChatGPT model catalog when the
 // OpenAI provider is signed in but has none — because the fetch at login
 // time failed, or the credentials predate the catalog. A no-op once the
-// catalog exists, so callers can invoke it freely on model updates.
+// catalog exists, so callers can invoke it freely on model updates: an
+// existing catalog is refreshed at startup instead, when Catwalk delivers
+// a new one (see Load).
 func (s *ConfigStore) RefetchOpenAIChatGPTModels(ctx context.Context) {
 	cfg := s.Config()
 	pc, ok := cfg.Providers.Get(string(catwalk.InferenceProviderOpenAI))

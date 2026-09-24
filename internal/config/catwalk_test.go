@@ -246,3 +246,67 @@ func TestCatwalkSync_GetCalledMultipleTimesUsesOnce(t *testing.T) {
 	// Client should only be called once due to sync.Once.
 	require.Equal(t, 1, client.callCount)
 }
+
+func TestCatwalkSync_Updated(t *testing.T) {
+	t.Parallel()
+
+	t.Run("fresh fetch marks the catalog updated", func(t *testing.T) {
+		t.Parallel()
+
+		syncer := &catwalkSync{}
+		client := &mockCatwalkClient{
+			providers: []catwalk.Provider{{Name: "Fresh Provider", ID: "fresh"}},
+		}
+		syncer.Init(client, t.TempDir()+"/providers.json", true)
+
+		_, err := syncer.Get(t.Context())
+		require.NoError(t, err)
+		require.True(t, syncer.Updated())
+	})
+
+	t.Run("not modified keeps the catalog unchanged", func(t *testing.T) {
+		t.Parallel()
+
+		path := t.TempDir() + "/providers.json"
+		require.NoError(t, os.WriteFile(path, []byte(`[{"name":"Cached","id":"cached"}]`), 0o644))
+
+		syncer := &catwalkSync{}
+		syncer.Init(&mockCatwalkClient{err: catwalk.ErrNotModified}, path, true)
+
+		_, err := syncer.Get(t.Context())
+		require.NoError(t, err)
+		require.False(t, syncer.Updated())
+	})
+
+	t.Run("network error falls back without updating", func(t *testing.T) {
+		t.Parallel()
+
+		syncer := &catwalkSync{}
+		syncer.Init(&mockCatwalkClient{err: errors.New("network error")}, t.TempDir()+"/providers.json", true)
+
+		_, err := syncer.Get(t.Context())
+		require.NoError(t, err)
+		require.False(t, syncer.Updated())
+	})
+
+	t.Run("auto update disabled never updates", func(t *testing.T) {
+		t.Parallel()
+
+		syncer := &catwalkSync{}
+		syncer.Init(&mockCatwalkClient{
+			providers: []catwalk.Provider{{Name: "Fresh Provider", ID: "fresh"}},
+		}, t.TempDir()+"/providers.json", false)
+
+		_, err := syncer.Get(t.Context())
+		require.NoError(t, err)
+		require.False(t, syncer.Updated())
+	})
+
+	t.Run("false before Get runs", func(t *testing.T) {
+		t.Parallel()
+
+		syncer := &catwalkSync{}
+		syncer.Init(&mockCatwalkClient{}, t.TempDir()+"/providers.json", true)
+		require.False(t, syncer.Updated())
+	})
+}

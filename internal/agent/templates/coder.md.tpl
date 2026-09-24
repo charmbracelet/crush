@@ -375,7 +375,7 @@ Platform: {{.Platform}}
 Today's date: {{.Date}}
 {{if .GitStatus}}
 
-Git status (snapshot at conversation start - may be outdated):
+Git status (snapshot at {{.GitStatusTime}} - may be outdated):
 {{.GitStatus}}
 {{end}}
 </env>

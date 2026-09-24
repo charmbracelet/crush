@@ -37,6 +37,7 @@ type PromptDat struct {
 	Platform           string
 	Date               string
 	GitStatus          string
+	GitStatusTime      string
 	ContextFiles       []ContextFile
 	GlobalContextFiles []ContextFile
 	AvailSkillXML      string
@@ -221,6 +222,10 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 		if err != nil {
 			return PromptDat{}, err
 		}
+		// Record when the snapshot was captured. The prompt is rebuilt from
+		// live git state on every app init, including session resume, so the
+		// snapshot is not necessarily from the conversation start.
+		data.GitStatusTime = p.now().UTC().Format("2006-01-02 15:04 MST")
 	}
 
 	for _, files := range contextFiles {

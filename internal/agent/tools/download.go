@@ -52,15 +52,7 @@ func downloadDescription() string {
 
 func NewDownloadTool(permissions permission.Service, workingDir string, client *http.Client) fantasy.AgentTool {
 	if client == nil {
-		transport := http.DefaultTransport.(*http.Transport).Clone()
-		transport.MaxIdleConns = 100
-		transport.MaxIdleConnsPerHost = 10
-		transport.IdleConnTimeout = 90 * time.Second
-
-		client = &http.Client{
-			Timeout:   5 * time.Minute, // Default 5 minute timeout for downloads
-			Transport: transport,
-		}
+		client = NewHTTPClient(5 * time.Minute) // Default 5 minute timeout for downloads
 	}
 	return fantasy.NewParallelAgentTool(
 		DownloadToolName,

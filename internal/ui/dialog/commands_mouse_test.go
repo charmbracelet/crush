@@ -185,27 +185,34 @@ func TestCommandsMouseClickSkipsSectionHeaders(t *testing.T) {
 func TestCommandsMouseClickIgnoresUnsupportedClicks(t *testing.T) {
 	t.Parallel()
 
-	d := newOverflowingCommandsDialog(t)
-	area := drawCommands(t, d)
-	inList := image.Pt(area.Min.X, area.Min.Y+1)
-
 	tests := []struct {
-		name  string
-		click tea.MouseClickMsg
+		name string
+		// click builds the click against the dialog's rendered list.
+		click func(image.Point) tea.MouseClickMsg
 	}{
 		{
-			name:  "outside list",
-			click: tea.MouseClickMsg(tea.Mouse{X: 0, Y: 0, Button: tea.MouseLeft}),
+			name: "outside list",
+			click: func(image.Point) tea.MouseClickMsg {
+				return tea.MouseClickMsg(tea.Mouse{X: 0, Y: 0, Button: tea.MouseLeft})
+			},
 		},
 		{
-			name:  "right button",
-			click: tea.MouseClickMsg(tea.Mouse{X: inList.X, Y: inList.Y, Button: tea.MouseRight}),
+			name: "right button",
+			click: func(inList image.Point) tea.MouseClickMsg {
+				return tea.MouseClickMsg(tea.Mouse{X: inList.X, Y: inList.Y, Button: tea.MouseRight})
+			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			action := d.HandleMsg(tt.click)
+			t.Parallel()
+
+			d := newOverflowingCommandsDialog(t)
+			area := drawCommands(t, d)
+			inList := image.Pt(area.Min.X, area.Min.Y+1)
+
+			action := d.HandleMsg(tt.click(inList))
 
 			require.Nil(t, action)
 			require.Zero(t, d.list.Selected())

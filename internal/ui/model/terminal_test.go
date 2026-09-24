@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"errors"
+	"image"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/charmbracelet/crush/internal/terminal"
 	"github.com/charmbracelet/crush/internal/ui/dialog"
 	"github.com/charmbracelet/crush/internal/workspace"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/stretchr/testify/require"
 )
 
@@ -215,4 +217,99 @@ func TestTerminalSpawnErrorReportsInfo(t *testing.T) {
 	_, cmd := u.Update(terminalSpawnErrorMsg{Err: errTestSpawn})
 	require.NotNil(t, cmd)
 	_ = runCmdSync(cmd)
+}
+
+func TestTerminalDockPanelHeight(t *testing.T) {
+	t.Parallel()
+
+	// Plenty of room: the content height is capped at
+	// terminalDockMaxContentRows and chrome is added on top.
+	require.Equal(t, terminalDockMaxContentRows+terminalDockChrome, terminalDockPanelHeight(80))
+
+	// Mid-size: the panel takes about half the column, never less than
+	// the minimum emulator height.
+	require.Equal(t, max(shell.MinInteractiveRows, 15/2-terminalDockChrome)+terminalDockChrome, terminalDockPanelHeight(15))
+
+	// Too short: no room for a usable chat above the panel.
+	require.Zero(t, terminalDockPanelHeight(terminalDockChrome+shell.MinInteractiveRows+terminalDockMinChatRows-1))
+	require.NotZero(t, terminalDockPanelHeight(terminalDockChrome+shell.MinInteractiveRows+terminalDockMinChatRows))
+}
+
+func TestTerminalDocksIntoChatColumn(t *testing.T) {
+	t.Parallel()
+
+	u := newTestUI()
+	u.updateLayoutAndSize()
+	fullMain := u.layout.main
+	require.True(t, u.layout.terminal.Empty())
+
+	// A live terminal session is docked; generateLayout only needs the
+	// non-nil marker.
+	u.activeTerminal = &activeTerminalSession{}
+	u.updateLayoutAndSize()
+
+	term := u.layout.terminal
+	require.False(t, term.Empty())
+	// The chat column keeps a usable slice above the panel.
+	require.GreaterOrEqual(t, u.layout.main.Dy(), terminalDockMinChatRows)
+	// The panel sits at the bottom of the original chat column.
+	require.Equal(t, fullMain.Max.Y, term.Max.Y)
+	require.Equal(t, fullMain.Min.Y, u.layout.main.Min.Y)
+	require.Equal(t, fullMain.Min.X, term.Min.X)
+	require.Equal(t, fullMain.Max.X, term.Max.X)
+}
+
+func TestTerminalFallsBackWhenChatTooShort(t *testing.T) {
+	t.Parallel()
+
+	u := newTestUI()
+	// Shrink the window until the chat column cannot host the docked
+	// panel and a usable chat.
+	u.height = 12
+	u.activeTerminal = &activeTerminalSession{}
+	u.updateLayoutAndSize()
+
+	require.True(t, u.layout.terminal.Empty(), "no room to dock: terminal must stay an overlay")
+}
+
+func TestTerminalDockContentRespectsMinInteractiveRows(t *testing.T) {
+	t.Parallel()
+
+	u := newTestUI()
+	u.activeTerminal = &activeTerminalSession{}
+	u.updateLayoutAndSize()
+
+	term := u.layout.terminal
+	require.False(t, term.Empty())
+	// The emulator always keeps at least MinInteractiveRows of content
+	// inside the panel chrome.
+	require.GreaterOrEqual(t, term.Dy()-terminalDockChrome, shell.MinInteractiveRows)
+}
+
+// terminalStubDialog stands in for the interactive terminal dialog in
+// input-routing tests.
+type terminalStubDialog struct{}
+
+func (terminalStubDialog) ID() string { return dialog.TerminalID }
+
+func (terminalStubDialog) HandleMsg(tea.Msg) dialog.Action { return nil }
+
+func (terminalStubDialog) Draw(uv.Screen, uv.Rectangle) *tea.Cursor { return nil }
+
+func TestDockedTerminalPassesWheelOutsidePanel(t *testing.T) {
+	t.Parallel()
+
+	u := newTestUI()
+	u.dialog = dialog.NewOverlay()
+	u.dialog.OpenDialog(terminalStubDialog{})
+	u.activeTerminal = &activeTerminalSession{}
+	u.updateLayoutAndSize()
+
+	term := u.layout.terminal
+	require.False(t, term.Empty())
+
+	// Inside the panel the terminal gets the wheel event, but over the
+	// chat above it the event falls through and scrolls the chat.
+	require.False(t, u.dockedTerminalPassesWheel(image.Pt(term.Min.X+1, term.Min.Y+1)))
+	require.True(t, u.dockedTerminalPassesWheel(image.Pt(u.layout.main.Min.X+1, u.layout.main.Min.Y+1)))
 }

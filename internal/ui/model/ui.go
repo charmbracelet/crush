@@ -1373,8 +1373,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Pass mouse events to dialogs first if any are open.
-		if m.dialog.HasDialogs() {
+		// Pass wheel events to dialogs first if any are open, unless a
+		// docked terminal lets this event scroll the chat behind it.
+		if m.dialog.HasDialogs() && !m.dockedTerminalPassesWheel(image.Pt(msg.Mouse.X, msg.Mouse.Y)) {
 			m.dialog.Update(msg)
 			return m, tea.Batch(cmds...)
 		}
@@ -3678,8 +3679,13 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	// This needs to come last to overlay on top of everything. We always pass
 	// the full screen bounds because the dialogs will position themselves
-	// accordingly.
+	// accordingly. The interactive terminal is the exception: when it is
+	// docked it draws inside its slice of the chat column so the rest of the
+	// UI stays visible.
 	if m.dialog.HasDialogs() {
+		if m.activeTerminal != nil && m.layout.terminal.Dy() > 0 {
+			return m.dialog.DrawDocked(scr, scr.Bounds(), m.layout.terminal, dialog.TerminalID)
+		}
 		return m.dialog.Draw(scr, scr.Bounds())
 	}
 
@@ -4409,6 +4415,9 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 			// Add bottom margin to main
 			uiLayout.main.Max.Y -= 1
 			uiLayout.editor = editorRect
+			if m.activeTerminal != nil {
+				uiLayout.main, uiLayout.terminal = dockTerminalPanel(uiLayout.main)
+			}
 		} else {
 			// Layout
 			//
@@ -4449,10 +4458,58 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 			// Add bottom margin to main
 			uiLayout.main.Max.Y -= 1
 			uiLayout.editor = editorRect
+			if m.activeTerminal != nil {
+				uiLayout.main, uiLayout.terminal = dockTerminalPanel(uiLayout.main)
+			}
 		}
 	}
 
 	return uiLayout
+}
+
+// Docked interactive terminal sizing. The panel shares the chat column
+// instead of covering the whole window, so it must stay small enough that a
+// usable slice of chat remains visible above it.
+const (
+	// terminalDockMaxContentRows caps the docked emulator height so the
+	// terminal never dominates the chat column.
+	terminalDockMaxContentRows = 16
+	// terminalDockChrome is the vertical space the panel spends on its
+	// border and header around the emulator.
+	terminalDockChrome = 3
+	// terminalDockMinChatRows keeps a usable slice of chat visible above
+	// the docked terminal; below this the terminal falls back to a
+	// full-window overlay.
+	terminalDockMinChatRows = 4
+)
+
+// terminalDockPanelHeight returns the docked terminal panel height (chrome
+// included) for a chat column of the given height, or 0 when there is not
+// enough room to keep a usable chat visible above the panel.
+func terminalDockPanelHeight(avail int) int {
+	content := min(terminalDockMaxContentRows, max(shell.MinInteractiveRows, avail/2-terminalDockChrome))
+	panel := content + terminalDockChrome
+	if avail-panel < terminalDockMinChatRows {
+		return 0
+	}
+	return panel
+}
+
+// dockTerminalPanel splits main (the chat column) to reserve a docked
+// interactive terminal panel at its bottom. When main is too short to leave
+// a usable chat above the panel it returns the original main and a zero
+// rect; the terminal then draws as a full-window overlay.
+func dockTerminalPanel(main image.Rectangle) (image.Rectangle, image.Rectangle) {
+	panel := terminalDockPanelHeight(main.Dy())
+	if panel <= 0 {
+		return main, image.Rectangle{}
+	}
+	var chat, terminal image.Rectangle
+	layout.Vertical(
+		layout.Len(main.Dy()-panel),
+		layout.Fill(1),
+	).Split(main).Assign(&chat, &terminal)
+	return chat, terminal
 }
 
 // uiLayout defines the positioning of UI elements.
@@ -4468,6 +4525,11 @@ type uiLayout struct {
 
 	// main is the area for the main pane. (e.x chat, configure, landing)
 	main uv.Rectangle
+
+	// terminal is the area for the docked interactive terminal panel.
+	// Empty when no terminal is docked; the terminal then draws as a
+	// full-window overlay instead.
+	terminal uv.Rectangle
 
 	// pills is the area for the pills panel.
 	pills uv.Rectangle
@@ -5554,12 +5616,35 @@ func (m *UI) openInteractiveShell(command string) tea.Cmd {
 	}
 }
 
-// terminalDialogSize is the initial emulator size for a new terminal
-// dialog: the window minus the dialog frame and header line.
+// dockedTerminalPassesWheel reports whether a wheel event at pos should
+// scroll the UI behind the dialogs instead of going to the terminal. A
+// docked interactive terminal only takes wheel events inside its panel so
+// the chat above it stays scrollable; every other dialog (and the terminal
+// when it cannot dock) captures everything.
+func (m *UI) dockedTerminalPassesWheel(pos image.Point) bool {
+	front := m.dialog.DialogLast()
+	if front == nil || front.ID() != dialog.TerminalID {
+		return false
+	}
+	if m.layout.terminal.Dy() == 0 {
+		return false
+	}
+	return !pos.In(m.layout.terminal)
+}
+
+// terminalDialogSize is the initial emulator size for a new terminal: the
+// docked panel's content area when there is room for it, otherwise the
+// window minus the dialog frame and header line. It is only a starting
+// point; attachTerminalDialog resizes the session to the exact draw area.
 func (m *UI) terminalDialogSize() (cols, rows int) {
 	cols = max(m.width-2, shell.MinInteractiveCols)
-	rows = max(m.height-3, shell.MinInteractiveRows)
-	return cols, rows
+	// Mirror generateLayout's chat-column height closely enough to pick
+	// the docked or the full-window size.
+	avail := m.height - (m.textarea.Height() + editorHeightMargin) - 4
+	if panel := terminalDockPanelHeight(avail); panel > 0 {
+		return cols, max(panel-terminalDockChrome, shell.MinInteractiveRows)
+	}
+	return cols, max(m.height-3, shell.MinInteractiveRows)
 }
 
 // attachTerminalDialog opens the terminal dialog around an already-running
@@ -5575,13 +5660,20 @@ func (m *UI) attachTerminalDialog(session *shell.InteractiveSession, command str
 		userCommand:  command,
 	}
 
-	// Size the PTY to the dialog before the first frame so full-screen
-	// programs start with the space they will actually have.
-	cols, rows := m.terminalDialogSize()
-	session.Resize(cols, rows)
-
 	m.textarea.Blur()
 	m.dialog.OpenDialogWithGrace(dialog.NewTerminalDialog(m.com, session, command))
+
+	// Size the PTY to its draw area before the first frame so full-screen
+	// programs start with the space they will actually have: the docked
+	// panel when there is room for it, otherwise the full window.
+	m.updateLayoutAndSize()
+	if r := m.layout.terminal; r.Dy() > 0 {
+		session.Resize(max(r.Dx()-2, shell.MinInteractiveCols), max(r.Dy()-terminalDockChrome, shell.MinInteractiveRows))
+	} else {
+		cols, rows := m.terminalDialogSize()
+		session.Resize(cols, rows)
+	}
+
 	return m.watchTerminalSession(session)
 }
 

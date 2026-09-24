@@ -26,10 +26,10 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.8
 	github.com/charmbracelet/x/editor v0.2.0
 	github.com/charmbracelet/x/etag v0.2.0
-	github.com/charmbracelet/x/exp/charmtone v0.0.0-20260602025833-85a30b5e440a
-	github.com/charmbracelet/x/exp/golden v0.0.0-20250806222409-83e3a29d542f
+	github.com/charmbracelet/x/exp/charmtone v0.1.0
+	github.com/charmbracelet/x/exp/golden v0.1.0
 	github.com/charmbracelet/x/exp/ordered v0.1.0
-	github.com/charmbracelet/x/exp/slice v0.0.0-20260730164118-7e2d3e6c5238
+	github.com/charmbracelet/x/exp/slice v0.1.0
 	github.com/charmbracelet/x/exp/strings v0.1.0
 	github.com/charmbracelet/x/powernap v0.1.6
 	github.com/charmbracelet/x/term v0.2.2

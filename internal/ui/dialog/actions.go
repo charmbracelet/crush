@@ -47,13 +47,19 @@ type ActionSelectModel struct {
 
 // Messages for commands
 type (
-	ActionNewSession              struct{}
-	ActionToggleHelp              struct{}
-	ActionToggleCompactMode       struct{}
-	ActionToggleThinking          struct{}
-	ActionTogglePills             struct{}
-	ActionExternalEditor          struct{}
-	ActionToggleYoloMode          struct{}
+	ActionNewSession        struct{}
+	ActionToggleHelp        struct{}
+	ActionToggleCompactMode struct{}
+	ActionToggleThinking    struct{}
+	ActionTogglePills       struct{}
+	ActionExternalEditor    struct{}
+	ActionToggleYoloMode    struct{}
+	// ActionToggleAutoMode toggles the native auto mode via the toggle
+	// path (mirrors ActionToggleYoloMode).
+	ActionToggleAutoMode struct{}
+	// ActionOpenAutoModeModels opens the models dialog preset to the
+	// auto-mode classifier selection.
+	ActionOpenAutoModeModels      struct{}
 	ActionToggleNotifications     struct{}
 	ActionSelectNotificationStyle struct {
 		Style string

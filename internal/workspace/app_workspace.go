@@ -271,6 +271,16 @@ func (w *AppWorkspace) PermissionSetSkipRequests(skip bool) {
 	w.app.Permissions.SetSkipRequests(skip)
 }
 
+// PermissionAutoMode reports the runtime auto-mode state.
+func (w *AppWorkspace) PermissionAutoMode() bool {
+	return w.app.Permissions.AutoMode()
+}
+
+// PermissionSetAutoMode sets the runtime auto-mode state.
+func (w *AppWorkspace) PermissionSetAutoMode(enabled bool) {
+	w.app.Permissions.SetAutoMode(enabled)
+}
+
 // -- Questions --
 
 func (w *AppWorkspace) QuestionAnswer(responses []question.Answer) bool {

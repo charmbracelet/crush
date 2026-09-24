@@ -61,11 +61,22 @@ func GetModelNameFromContext(ctx context.Context) string {
 	return getContextValue(ctx, ModelNameContextKey, "")
 }
 
-// NewPermissionDeniedResponse returns a tool response indicating the user
-// denied permission, with StopTurn set so the agent loop does not retry.
-func NewPermissionDeniedResponse() fantasy.ToolResponse {
-	resp := fantasy.NewTextErrorResponse("User denied permission")
-	resp.StopTurn = true
+// NewPermissionDeniedResponse builds the error response tools return
+// when a permission request is denied. A denial with a recorded reason
+// (a PrePermission hook or the native auto mode) surfaces the reason and
+// lets the agent continue so it can adapt with a safer approach; only a
+// human denial (no recorded reason) sets StopTurn so the agent loop
+// stops instead of hammering the same call. Classifier runaway loops are
+// bounded by the auto-mode quota pause instead.
+func NewPermissionDeniedResponse(reason ...string) fantasy.ToolResponse {
+	msg := "User denied permission"
+	stop := true
+	if len(reason) > 0 && reason[0] != "" {
+		msg = "Permission denied: " + reason[0]
+		stop = false
+	}
+	resp := fantasy.NewTextErrorResponse(msg)
+	resp.StopTurn = stop
 	return resp
 }
 

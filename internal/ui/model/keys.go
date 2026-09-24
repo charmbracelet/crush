@@ -119,7 +119,7 @@ func DefaultKeyMap() KeyMap {
 		),
 		ToggleYolo: key.NewBinding(
 			key.WithKeys("ctrl+y"),
-			key.WithHelp("ctrl+y", "toggle yolo"),
+			key.WithHelp("ctrl+y", "cycle mode (normal/auto/yolo)"),
 		),
 		ShiftTab: key.NewBinding(
 			key.WithKeys("shift+tab"),

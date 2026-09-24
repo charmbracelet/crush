@@ -576,6 +576,16 @@
           },
           "type": "array",
           "description": "List of skill names to disable and hide from the agent"
+        },
+        "request_timeout": {
+          "type": "integer",
+          "description": "Timeout in seconds for each LLM API request. Streaming responses are aborted only after this much inactivity, so slow but active streams are never killed. 0 disables it, negative values are invalid.",
+          "default": 60,
+          "examples": [
+            120,
+            300,
+            0
+          ]
         }
       },
       "additionalProperties": false,
@@ -797,6 +807,15 @@
           ],
           "description": "Diff mode for the TUI interface"
         },
+        "active_theme": {
+          "type": "string",
+          "description": "Name of the currently active theme",
+          "default": "charmtone-panther",
+          "examples": [
+            "charmtone-panther",
+            "gruvbox-dark"
+          ]
+        },
         "completions": {
           "$ref": "#/$defs/Completions",
           "description": "Completions UI options"
@@ -815,6 +834,11 @@
           ],
           "description": "Chat scrollbar visibility",
           "default": "default"
+        },
+        "mouse": {
+          "type": "boolean",
+          "description": "Enable terminal mouse capture for selection, clicks, and scrolling in the TUI. Disable to let the terminal emulator or tmux handle text selection and copy/paste",
+          "default": true
         },
         "exit_banner": {
           "type": "string",
@@ -836,6 +860,12 @@
           "type": "string"
         },
         "refresh_token": {
+          "type": "string"
+        },
+        "id_token": {
+          "type": "string"
+        },
+        "account_id": {
           "type": "string"
         },
         "expires_in": {

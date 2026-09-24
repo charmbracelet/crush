@@ -267,20 +267,24 @@ func fileToProto(f history.File) proto.File {
 
 func messageToProto(m message.Message) proto.Message {
 	msg := proto.Message{
-		ID:               m.ID,
-		SessionID:        m.SessionID,
-		Role:             proto.MessageRole(m.Role),
-		Model:            m.Model,
-		Provider:         m.Provider,
-		CreatedAt:        m.CreatedAt,
-		UpdatedAt:        m.UpdatedAt,
-		IsSummaryMessage: m.IsSummaryMessage,
+		ID:                      m.ID,
+		SessionID:               m.SessionID,
+		Role:                    proto.MessageRole(m.Role),
+		Model:                   m.Model,
+		Provider:                m.Provider,
+		PrismModelID:            m.PrismModelID,
+		PrismModelName:          m.PrismModelName,
+		PrismHypercreditSavings: m.PrismHypercreditSavings,
+		PrismDollarSavings:      m.PrismDollarSavings,
+		CreatedAt:               m.CreatedAt,
+		UpdatedAt:               m.UpdatedAt,
+		IsSummaryMessage:        m.IsSummaryMessage,
 	}
 
 	for _, p := range m.Parts {
 		switch v := p.(type) {
 		case message.TextContent:
-			msg.Parts = append(msg.Parts, proto.TextContent{Text: v.Text})
+			msg.Parts = append(msg.Parts, proto.TextContent{Text: v.Text, Hidden: v.Hidden})
 		case message.ReasoningContent:
 			msg.Parts = append(msg.Parts, proto.ReasoningContent{
 				Thinking:   v.Thinking,

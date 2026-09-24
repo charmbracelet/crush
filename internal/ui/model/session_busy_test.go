@@ -468,10 +468,10 @@ func TestBackstopRefreshesStaleCaches(t *testing.T) {
 }
 
 // TestSetSessionMessagesGatesAnimationsOnBusy verifies that reloading a
-// session does not start spinner animations when the agent is not busy.
+// session does not run spinner animations when the agent is not busy.
 // A session that was killed mid-generation can persist an assistant message
-// with no Finish part, which still reports isSpinning() even though nothing
-// is running. Starting animations for it would leave a ghost "working"
+// with no Finish part, which still reports Spinning() even though nothing
+// is running. Arming the clock for it would leave a ghost "working"
 // spinner after the session is reloaded.
 func TestSetSessionMessagesGatesAnimationsOnBusy(t *testing.T) {
 	pinTTLs(t)
@@ -492,14 +492,67 @@ func TestSetSessionMessagesGatesAnimationsOnBusy(t *testing.T) {
 		},
 	}
 
-	// When the agent is not busy, setSessionMessages must not start animations.
+	// When the agent is not busy, setSessionMessages must freeze the
+	// animation clock so the ghost spinner stays still.
 	cmd := m.setSessionMessages(msgs)
 	require.Nil(t, cmd, "setSessionMessages must not start animations when agent is idle")
+	require.False(t, m.chat.animAllowed, "an idle session reload must freeze the animation clock")
+	require.Nil(t, m.chat.EnsureAnimating(), "a frozen clock must not arm while idle")
+	require.False(t, m.chat.animRunning)
 
-	// When the agent is busy, animations should start.
+	// When the agent is busy, the clock may run for the same message.
 	warmCaches(m, true)
 	cmd = m.setSessionMessages(msgs)
-	require.NotNil(t, cmd, "setSessionMessages must start animations when agent is busy")
+	require.Nil(t, cmd, "setSessionMessages must not arm the clock itself")
+	require.True(t, m.chat.animAllowed, "setSessionMessages must allow animations when agent is busy")
+	require.NotNil(t, m.chat.EnsureAnimating(), "a visible spinning message must arm the clock")
+	require.True(t, m.chat.animRunning)
+}
+
+// TestBusyProbeReEnablesFrozenAnimationClock pins the boot race: a session
+// loaded before the first busy probe lands reads the zero-value memoized
+// cache and freezes the animation clock even though the agent is working,
+// so the spinner rendered on boot never ticks. When the authoritative
+// busy result arrives it must re-enable the clock so the Update tail can
+// arm it for the freshly rendered spinner.
+func TestBusyProbeReEnablesFrozenAnimationClock(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true, agentBusy: true}
+	m := newBusyUI(ws)
+
+	// An unfinished assistant turn (no Finish part) renders with a spinner.
+	msgs := []message.Message{
+		{
+			ID:        "m1",
+			SessionID: "s1",
+			Role:      message.Assistant,
+			Parts: []message.ContentPart{
+				message.ReasoningContent{Thinking: "thinking..."},
+			},
+		},
+	}
+
+	// Boot: the busy cache still reads its zero value, so the session load
+	// freezes the animation clock even though the agent is working.
+	require.False(t, m.isAgentBusy(), "boot: the memoized busy state is not populated yet")
+	cmd := m.setSessionMessages(msgs)
+	require.Nil(t, cmd)
+	require.False(t, m.chat.animAllowed, "the boot reload must freeze the clock off the unpopulated cache")
+	require.Nil(t, m.chat.EnsureAnimating(), "the frozen clock must not arm")
+	require.False(t, m.chat.animRunning)
+
+	// The authoritative probe lands: the agent is busy. The gate must
+	// re-open so the visible spinner ticks.
+	m.applyBusyState(busyStateMsg{gen: m.busyFetchGen, ready: true, agentBusy: true})
+	require.True(t, m.chat.animAllowed, "a busy probe must re-enable the animation gate")
+	require.NotNil(t, m.chat.EnsureAnimating(), "a visible spinning item must arm the clock once allowed")
+	require.True(t, m.chat.animRunning)
+
+	// An idle probe must not re-freeze the clock on its own: the ghost
+	// guard belongs to the session reload, not to the probe.
+	m.applyBusyState(busyStateMsg{gen: m.busyFetchGen, ready: true, agentBusy: false})
+	require.True(t, m.chat.animAllowed, "an idle probe must leave the gate alone")
 }
 
 // TestStaleBusyRefreshDiscardedAndReDispatched pins the generation guard for
@@ -769,7 +822,7 @@ func TestRemoteYoloToggleUpdatesEditorPrompt(t *testing.T) {
 	yoloPrompt := ansi.Strip(m.textarea.View())
 	require.NotEqual(t, normalPrompt, yoloPrompt,
 		"a remote yolo toggle must change the rendered editor prompt")
-	require.Contains(t, yoloPrompt, "Y",
+	require.Contains(t, yoloPrompt, "!",
 		"the yolo prompt icon must render after a remote toggle")
 
 	// Flipping back off must restore the normal prompt.

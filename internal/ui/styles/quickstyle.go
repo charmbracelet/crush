@@ -2,6 +2,7 @@ package styles
 
 import (
 	"image/color"
+	"math"
 
 	"charm.land/bubbles/v2/filepicker"
 	"charm.land/bubbles/v2/help"
@@ -12,7 +13,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/ui/diffview"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/charmbracelet/x/exp/charmtone"
 )
 
 // quickStyleOpts is the palette of colors used by quickStyle to simplify the
@@ -56,6 +56,33 @@ type quickStyleOpts struct {
 	success           color.Color
 	successMoreSubtle color.Color
 	successMostSubtle color.Color
+	yolo              color.Color
+	plan              color.Color
+	planMoreSubtle    color.Color
+
+	// Diff view. Inserted (positive) and deleted (negative) lines. Each
+	// line paints two background bands: the gutter (line-number column)
+	// uses the darker gutter background, and the code band, which the
+	// sign column sits inside, uses the lighter one. The foreground is
+	// ink for everything outside the code itself, that is the signs and
+	// the line numbers.
+	//
+	// All six are optional: unset foregrounds default to the success and
+	// destructive hues, and unset backgrounds blend the foreground over
+	// bgBase (see deriveDiffColors).
+	diffInsertFg       color.Color // diff insert signs and line-number ink.
+	diffInsertCodeBg   color.Color // diff insert code and sign band background.
+	diffInsertGutterBg color.Color // diff insert line-number band background.
+	diffDeleteFg       color.Color // diff delete signs and line-number ink.
+	diffDeleteCodeBg   color.Color // diff delete code and sign band background.
+	diffDeleteGutterBg color.Color // diff delete line-number band background.
+
+	// Buttons. Backgrounds for each button state; the foregrounds are
+	// derived from onPrimary / fgBase.
+	button         color.Color // focused/primary button background.
+	buttonSubtle   color.Color // blurred button background.
+	buttonInactive color.Color // inactive (unfocused pane) button background.
+	buttonHovered  color.Color // hovered button background.
 
 	// ANSI 16-color palette. These remap the basic terminal colors that
 	// programs emit (e.g. bang-mode shell output) onto legible, on-brand
@@ -69,6 +96,7 @@ type quickStyleOpts struct {
 	ansiMagenta color.Color
 	ansiCyan    color.Color
 	ansiWhite   color.Color
+
 	// Bright intensity.
 	ansiBrightBlack   color.Color
 	ansiBrightRed     color.Color
@@ -80,12 +108,63 @@ type quickStyleOpts struct {
 	ansiBrightWhite   color.Color
 }
 
+// Diff tint blend ratios: the fraction of the insert/delete foreground
+// hue blended over bgBase for the code area and the line-number gutter.
+// The gutter stays subtler than the code area, and the delete tints are
+// more muted than the insert ones. These approximate the tints the
+// built-in themes used when they were picked by hand; no single set of
+// CIELAB ratios can reproduce those per-theme RGB choices exactly, so
+// these are fitted to land closest to both built-in themes.
+const (
+	diffInsertCodeBlend   = 0.20
+	diffInsertGutterBlend = 0.13
+	diffDeleteCodeBlend   = 0.15
+	diffDeleteGutterBlend = 0.08
+)
+
+// deriveDiffColors fills unset diff tokens: foregrounds default to the
+// success and destructive hues, and backgrounds blend the foreground
+// over bgBase.
+func (o *quickStyleOpts) deriveDiffColors() {
+	if o.diffInsertFg == nil {
+		o.diffInsertFg = o.success
+	}
+	if o.diffDeleteFg == nil {
+		o.diffDeleteFg = o.destructive
+	}
+	if o.diffInsertCodeBg == nil && o.diffInsertFg != nil && o.bgBase != nil {
+		o.diffInsertCodeBg = blendTint(o.diffInsertFg, o.bgBase, diffInsertCodeBlend)
+	}
+	if o.diffInsertGutterBg == nil && o.diffInsertFg != nil && o.bgBase != nil {
+		o.diffInsertGutterBg = blendTint(o.diffInsertFg, o.bgBase, diffInsertGutterBlend)
+	}
+	if o.diffDeleteCodeBg == nil && o.diffDeleteFg != nil && o.bgBase != nil {
+		o.diffDeleteCodeBg = blendTint(o.diffDeleteFg, o.bgBase, diffDeleteCodeBlend)
+	}
+	if o.diffDeleteGutterBg == nil && o.diffDeleteFg != nil && o.bgBase != nil {
+		o.diffDeleteGutterBg = blendTint(o.diffDeleteFg, o.bgBase, diffDeleteGutterBlend)
+	}
+}
+
+// blendTint blends fg over bg in CIELAB (via lipgloss.Blend1D) with the
+// given fraction of fg: 0 returns bg, 1 returns fg.
+func blendTint(fg, bg color.Color, fraction float64) color.Color {
+	const steps = 101
+	gradient := lipgloss.Blend1D(steps, fg, bg)
+	// Blend1D's first stop is pure fg, so the gradient index counts fg
+	// share down from 1.
+	i := min(int(math.Round((1-fraction)*(steps-1))), steps-1)
+	return gradient[i]
+}
+
 // quickStyle builds the default Styles (that is, the default theme, Charmtone
 // Pantera) from a palette of semi-semanticly-named colors.
 //
 // The idea here is that you can do most of the work on a theme with quickStyle,
 // then add overrides as needed.
 func quickStyle(o quickStyleOpts) Styles {
+	o.deriveDiffColors()
+
 	var (
 		base   = lipgloss.NewStyle().Foreground(o.fgBase)
 		muted  = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
@@ -234,7 +313,7 @@ func quickStyle(o quickStyleOpts) Styles {
 			Unticked:       "[ ] ",
 		},
 		Link: ansi.StylePrimitive{
-			Color:     hex(charmtone.Zinc),
+			Color:     hex(o.info),
 			Underline: new(true),
 		},
 		LinkText: ansi.StylePrimitive{
@@ -242,7 +321,7 @@ func quickStyle(o quickStyleOpts) Styles {
 			Bold:  new(true),
 		},
 		Image: ansi.StylePrimitive{
-			Color:     hex(charmtone.Cheeky),
+			Color:     hex(o.accent),
 			Underline: new(true),
 		},
 		ImageText: ansi.StylePrimitive{
@@ -251,8 +330,18 @@ func quickStyle(o quickStyleOpts) Styles {
 		},
 		Code: ansi.StyleBlock{
 			StylePrimitive: ansi.StylePrimitive{
-				Prefix:          " ",
-				Suffix:          " ",
+				// Pad inline code with a no-break-space sentinel instead of
+				// a plain space. It displays identically, but selection
+				// copies turn it back into the original backticks (see
+				// [CodespanPadding] and list.HighlightContent); a plain
+				// space is indistinguishable from real text, so copies lost
+				// the backticks ("this is  code "). The sentinel carries a
+				// variation selector so copies can tell it apart from a
+				// real no-break space in the message text, and being
+				// non-breaking it keeps word wrap from tearing a codespan
+				// between its padding and its text.
+				Prefix:          CodespanPadding,
+				Suffix:          CodespanPadding,
 				Color:           hex(o.destructive),
 				BackgroundColor: hex(o.bgLessVisible),
 			},
@@ -276,22 +365,22 @@ func quickStyle(o quickStyleOpts) Styles {
 					Color: hex(o.fgMostSubtle),
 				},
 				CommentPreproc: ansi.StylePrimitive{
-					Color: hex(charmtone.Bengal),
+					Color: hex(o.accent),
 				},
 				Keyword: ansi.StylePrimitive{
 					Color: hex(o.info),
 				},
 				KeywordReserved: ansi.StylePrimitive{
-					Color: hex(charmtone.Pony),
+					Color: hex(o.keyword),
 				},
 				KeywordNamespace: ansi.StylePrimitive{
-					Color: hex(charmtone.Pony),
+					Color: hex(o.keyword),
 				},
 				KeywordType: ansi.StylePrimitive{
-					Color: hex(charmtone.Guppy),
+					Color: hex(o.infoMoreSubtle),
 				},
 				Operator: ansi.StylePrimitive{
-					Color: hex(charmtone.Salmon),
+					Color: hex(o.fgSubtle),
 				},
 				Punctuation: ansi.StylePrimitive{
 					Color: hex(o.warningSubtle),
@@ -300,21 +389,21 @@ func quickStyle(o quickStyleOpts) Styles {
 					Color: hex(o.fgSubtle),
 				},
 				NameBuiltin: ansi.StylePrimitive{
-					Color: hex(charmtone.Cheeky),
+					Color: hex(o.accent),
 				},
 				NameTag: ansi.StylePrimitive{
-					Color: hex(charmtone.Mauve),
+					Color: hex(o.secondary),
 				},
 				NameAttribute: ansi.StylePrimitive{
-					Color: hex(charmtone.Hazy),
+					Color: hex(o.infoMoreSubtle),
 				},
 				NameClass: ansi.StylePrimitive{
-					Color:     hex(charmtone.Salt),
+					Color:     hex(o.primary),
 					Underline: new(true),
 					Bold:      new(true),
 				},
 				NameDecorator: ansi.StylePrimitive{
-					Color: hex(charmtone.Citron),
+					Color: hex(o.attention),
 				},
 				NameFunction: ansi.StylePrimitive{
 					Color: hex(o.successMostSubtle),
@@ -323,7 +412,7 @@ func quickStyle(o quickStyleOpts) Styles {
 					Color: hex(o.success),
 				},
 				LiteralString: ansi.StylePrimitive{
-					Color: hex(charmtone.Cumin),
+					Color: hex(o.warningSubtle),
 				},
 				LiteralStringEscape: ansi.StylePrimitive{
 					Color: hex(o.successMoreSubtle),
@@ -357,6 +446,34 @@ func quickStyle(o quickStyleOpts) Styles {
 			BlockPrefix: "\n ",
 		},
 	}
+
+	// PlanMarkdown keeps the rich markdown colors for the plan card. H2–H5 in
+	// s.Markdown only set Prefix and rely on glamour inheriting Color/Bold
+	// from the base Heading style; copy them explicitly so section headings
+	// stand out inside the card.
+	planMD := s.Markdown
+	headingColor := hex(o.info)
+	headingBold := new(true)
+	for _, h := range []*ansi.StyleBlock{&planMD.H2, &planMD.H3, &planMD.H4, &planMD.H5} {
+		if h.Color == nil {
+			h.Color = headingColor
+		}
+		if h.Bold == nil {
+			h.Bold = headingBold
+		}
+	}
+	// Replace raw markdown prefixes ("## ", "### ", …) with clean indentation so
+	// the plan card doesn't show literal ## / ### characters. H1 keeps its own
+	// distinct box styling; H2 gets no prefix (top-level sections stand on their
+	// own with bold+color); H3–H5 use increasing indentation for hierarchy.
+	planMD.H2.Prefix = ""
+	planMD.H3.Prefix = "  "
+	planMD.H4.Prefix = "    "
+	planMD.H5.Prefix = "      "
+	planMD.Code.Color = hex(o.destructive)
+	planMD.Code.Bold = new(true)
+	planMD.CodeBlock.Color = hex(o.fgBase)
+	s.PlanMarkdown = planMD
 
 	// QuietMarkdown style - muted colors on subtle background for thinking content.
 	plainBg := hex(o.bgLeastVisible)
@@ -489,12 +606,17 @@ func quickStyle(o quickStyleOpts) Styles {
 			Color:           plainFg,
 			BackgroundColor: plainBg,
 		},
+		// Inline code is the one primitive that must NOT take plainFg/plainBg:
+		// with both matching the surrounding text it renders identically to it,
+		// leaving only the Prefix/Suffix spaces to hint at a code span. A step up
+		// in background (and a slightly brighter foreground) keeps the quiet
+		// palette while making the chip readable.
 		Code: ansi.StyleBlock{
 			StylePrimitive: ansi.StylePrimitive{
-				Prefix:          " ",
-				Suffix:          " ",
-				Color:           plainFg,
-				BackgroundColor: plainBg,
+				Prefix:          CodespanPadding,
+				Suffix:          CodespanPadding,
+				Color:           hex(o.fgSubtle),
+				BackgroundColor: hex(o.bgLessVisible),
 			},
 		},
 		CodeBlock: ansi.StyleCodeBlock{
@@ -556,23 +678,23 @@ func quickStyle(o quickStyleOpts) Styles {
 		},
 		InsertLine: diffview.LineStyle{
 			LineNumber: lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#629657")).
-				Background(lipgloss.Color("#2b322a")),
+				Foreground(o.diffInsertFg).
+				Background(o.diffInsertGutterBg),
 			Symbol: lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#629657")).
-				Background(lipgloss.Color("#323931")),
+				Foreground(o.diffInsertFg).
+				Background(o.diffInsertCodeBg),
 			Code: lipgloss.NewStyle().
-				Background(lipgloss.Color("#323931")),
+				Background(o.diffInsertCodeBg),
 		},
 		DeleteLine: diffview.LineStyle{
 			LineNumber: lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#a45c59")).
-				Background(lipgloss.Color("#312929")),
+				Foreground(o.diffDeleteFg).
+				Background(o.diffDeleteGutterBg),
 			Symbol: lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#a45c59")).
-				Background(lipgloss.Color("#383030")),
+				Foreground(o.diffDeleteFg).
+				Background(o.diffDeleteCodeBg),
 			Code: lipgloss.NewStyle().
-				Background(lipgloss.Color("#383030")),
+				Background(o.diffDeleteCodeBg),
 		},
 		Filename: diffview.LineStyle{
 			LineNumber: lipgloss.NewStyle().
@@ -715,15 +837,25 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Tool.ResultItemDesc = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
 
 	// Buttons
-	s.Button.Focused = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.secondary)
-	s.Button.Blurred = lipgloss.NewStyle().Foreground(o.fgBase).Background(o.bgLessVisible)
-	s.Button.Hovered = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.fgMostSubtle)
+	s.Button.Focused = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.button)
+	s.Button.Blurred = lipgloss.NewStyle().Foreground(o.fgBase).Background(o.buttonSubtle)
+	s.Button.Inactive = lipgloss.NewStyle().Foreground(o.fgBase).Background(o.buttonInactive)
+	s.Button.Hovered = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.buttonHovered)
 	s.Button.Negative = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.error)
 
 	// Editor
+	s.Editor.PromptNormalIconFocused = lipgloss.NewStyle().Foreground(o.success).Bold(true).SetString("  > ")
+	s.Editor.PromptNormalIconBlurred = s.Editor.PromptNormalIconFocused.Foreground(o.fgMoreSubtle).Bold(false)
 	s.Editor.PromptNormalFocused = lipgloss.NewStyle().Foreground(o.successMostSubtle).SetString("::: ")
 	s.Editor.PromptNormalBlurred = s.Editor.PromptNormalFocused.Foreground(o.fgMoreSubtle)
-	s.Editor.PromptYoloIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.fgMostSubtle).Background(o.busy).Bold(true).SetString(" Y ")
+	// The bullet is 1 cell everywhere (unlike ⏸, whose rendered width is
+	// terminal-dependent), so the badge fills the 4-cell prompt column
+	// exactly and stays flush with the ":::" continuation dots.
+	s.Editor.PromptPlanIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.onPrimary).Background(o.primary).Bold(true).SetString(" ⏸ ")
+	s.Editor.PromptPlanIconBlurred = s.Editor.PromptPlanIconFocused.Foreground(o.bgBase).Background(o.fgMoreSubtle)
+	s.Editor.PromptPlanDotsFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.primary).SetString(":::")
+	s.Editor.PromptPlanDotsBlurred = s.Editor.PromptPlanDotsFocused.Foreground(o.fgMoreSubtle)
+	s.Editor.PromptYoloIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.bgBase).Background(o.busy).Bold(true).SetString(" ! ")
 	s.Editor.PromptYoloIconBlurred = s.Editor.PromptYoloIconFocused.Foreground(o.bgBase).Background(o.fgMoreSubtle)
 	s.Editor.PromptYoloDotsFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.warningSubtle).SetString(":::")
 	s.Editor.PromptYoloDotsBlurred = s.Editor.PromptYoloDotsFocused.Foreground(o.fgMoreSubtle)
@@ -907,7 +1039,17 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Messages.AssistantInfoModel = muted
 	s.Messages.AssistantInfoProvider = subtle
 	s.Messages.AssistantInfoDuration = subtle
+	s.Messages.SubduedHypercreditIcon = subtle
 	s.Messages.AssistantCanceled = lipgloss.NewStyle().Foreground(o.fgSubtle).Italic(true)
+
+	// Plan section styles. The plan card is a bordered box with no background
+	// fill: the terminal background shows through, and only intentional chips
+	// (inline code, H1 badge) keep a background of their own.
+	s.Messages.PlanBox = lipgloss.NewStyle().
+		Foreground(o.fgBase).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(o.plan).
+		Padding(1, 2)
 
 	// Thinking section styles
 	s.Messages.ThinkingBox = subtle.Background(o.bgLeastVisible)
@@ -972,6 +1114,12 @@ func quickStyle(o quickStyleOpts) Styles {
 	// API key input dialog
 	s.Dialog.APIKey.Spinner = base.Foreground(o.success)
 
+	// Auth method choice dialog: the selected card lights up in the success
+	// color while the other stays quiet.
+	s.Dialog.AuthMethod.Prompt = base.Padding(0, 1)
+	s.Dialog.AuthMethod.CardBlurred = base.Border(lipgloss.RoundedBorder()).BorderForeground(o.separator).Foreground(o.fgMostSubtle)
+	s.Dialog.AuthMethod.CardFocused = base.Border(lipgloss.RoundedBorder()).BorderForeground(o.success).Foreground(o.success)
+
 	// OAuth dialog
 	s.Dialog.OAuth.Spinner = base.Foreground(o.successMoreSubtle)
 	s.Dialog.OAuth.Instructions = lipgloss.NewStyle().Foreground(o.fgBase)
@@ -1010,6 +1158,12 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Dialog.Sessions.InfoFocused = lipgloss.NewStyle().Foreground(o.fgBase)
 
 	s.Status.Help = lipgloss.NewStyle().Padding(0, 1)
+	s.Status.ModeBadgePlan = lipgloss.NewStyle().Foreground(o.fgBase).Background(o.primary).Padding(0, 1).Bold(true).SetString("PLAN MODE")
+	s.Status.ModeBadgeYolo = lipgloss.NewStyle().Foreground(o.bgBase).Background(o.busy).Padding(0, 1).Bold(true).SetString("YOLO MODE")
+	s.Status.ModeBannerPlanBadge = s.Status.ModeBadgePlan
+	s.Status.ModeBannerPlan = lipgloss.NewStyle().Foreground(o.fgBase).Background(o.planMoreSubtle).Padding(0, 1)
+	s.Status.ModeBannerYoloBadge = s.Status.ModeBadgeYolo
+	s.Status.ModeBannerYolo = lipgloss.NewStyle().Foreground(o.bgBase).Background(o.yolo).Padding(0, 1)
 	s.Status.SuccessIndicator = base.Foreground(o.bgLessVisible).Background(o.success).Padding(0, 1).Bold(true).SetString("OKAY!")
 	s.Status.InfoIndicator = s.Status.SuccessIndicator
 	s.Status.UpdateIndicator = s.Status.SuccessIndicator.SetString("HEY!")
@@ -1059,3 +1213,8 @@ func quickStyle(o quickStyleOpts) Styles {
 
 	return s
 }
+
+// withMarkdownBackground returns a copy of cfg with bg applied to every style
+// primitive that does not already set its own background, so glamour paints an
+// uninterrupted background under all rendered text. Primitives that carry an
+// intentional background of their own (e.g. H1, inline code) keep it.

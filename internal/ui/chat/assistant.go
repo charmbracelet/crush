@@ -184,6 +184,13 @@ type AssistantMessageItem struct {
 	thinkingViewMode  thinkingViewMode
 	thinkingBoxHeight int // Tracks the rendered thinking box height for click detection.
 
+	// planAgent marks this item as plan-agent output. While the plan
+	// streams (the message is not finished) and the plan-start marker
+	// has arrived, the content renders as an open plan card: top and
+	// side borders only, with the bottom border withheld until the
+	// plan-ready marker lands.
+	planAgent bool
+
 	// Incremental FNV-64a hash of the thinking text. Avoids
 	// re-hashing the entire accumulated text on every streaming
 	// tick. thinkingHashSample holds a short prefix of the hashed
@@ -214,6 +221,13 @@ type AssistantMessageItem struct {
 	// thinking text, which burns CPU and starves the terminal emulator
 	// during long reasoning traces.
 	streamingThinking streamingMarkdown
+
+	// streamingPlan applies the same stable-prefix caching to the plan
+	// card while the plan streams, so each streaming flush only
+	// re-renders the trailing partial of the plan document. Kept apart
+	// from streamingContent because it renders through the plan
+	// renderer, whose cached prefix is not interchangeable.
+	streamingPlan streamingMarkdown
 }
 
 var _ Expandable = (*AssistantMessageItem)(nil)
@@ -245,27 +259,24 @@ func NewAssistantMessageItem(sty *styles.Styles, message *message.Message) Messa
 	return a
 }
 
-// StartAnimation starts the assistant message animation if it should be spinning.
-func (a *AssistantMessageItem) StartAnimation() tea.Cmd {
-	if !a.isSpinning() {
-		return nil
-	}
-	return a.anim.Start()
+// Spinning implements [Animatable].
+func (a *AssistantMessageItem) Spinning() bool {
+	return a.isSpinning()
 }
 
-// Animate progresses the assistant message animation if it should be spinning.
-func (a *AssistantMessageItem) Animate(msg anim.StepMsg) tea.Cmd {
-	if !a.isSpinning() {
-		return nil
+// Advance implements [Animatable].
+func (a *AssistantMessageItem) Advance() bool {
+	if !a.isSpinning() || !a.anim.Advance() {
+		return false
 	}
 	// Bump the F6 list-cache version so the next draw re-renders
-	// this item: a spinner tick mutates anim's internal frame
-	// counter, which changes the rendered output but is invisible
-	// to the per-section content hashes. Without the bump the
-	// list cache would serve the previously rendered frame
-	// indefinitely and the spinner would appear frozen.
+	// this item: a spinner frame mutates anim's internal counter,
+	// which changes the rendered output but is invisible to the
+	// per-section content hashes. Without the bump the list cache
+	// would serve the previously rendered frame indefinitely and
+	// the spinner would appear frozen.
 	a.Bump()
-	return a.anim.Animate(msg)
+	return true
 }
 
 // ID implements MessageItem.
@@ -411,11 +422,27 @@ func (a *AssistantMessageItem) renderMessageContent(width int) (string, int) {
 	}
 
 	if a.message.IsFinished() {
+		var banner string
 		switch {
 		case a.message.FinishReason() == message.FinishReasonCanceled:
-			messageParts = append(messageParts, a.sty.Messages.AssistantCanceled.Render("Canceled"))
+			// Tool calls render below this item, and cancelling a turn
+			// closes each unfinished one out with its own interrupted
+			// result. Saying it here too would put "Canceled" above the
+			// tools it is describing.
+			if len(a.message.ToolCalls()) > 0 {
+				break
+			}
+			banner = a.sty.Messages.AssistantCanceled.Render("Canceled")
 		case a.message.IsErrorLike():
-			messageParts = append(messageParts, a.cachedError(width))
+			banner = a.cachedError(width)
+		}
+		if banner != "" {
+			// Set the banner off from the text above it, or it reads as
+			// the end of the sentence the model was in the middle of.
+			if len(messageParts) > 0 {
+				messageParts = append(messageParts, "")
+			}
+			messageParts = append(messageParts, banner)
 		}
 	}
 
@@ -487,9 +514,34 @@ func (a *AssistantMessageItem) thinkingHashIncremental(thinking string) uint64 {
 }
 
 // contentKey returns the (srcHash, extra) cache key components for the
-// main content section.
+// main content section. extra folds in the streaming-plan state so a
+// message flips between the plain, open-card, and closed-card renders
+// as the plan run progresses.
 func (a *AssistantMessageItem) contentKey() (uint64, uint64) {
-	return fnv64(a.message.Content().Text), 0
+	var planStreaming byte
+	if a.planStreaming() {
+		planStreaming = 1
+	}
+	return fnv64(a.message.Content().Text), uint64(planStreaming)
+}
+
+// SetPlanAgent flags this item as plan-agent output (or clears the
+// flag). The flag scopes plan-card rendering to plan mode; the plan
+// start marker decides which message is the plan.
+func (a *AssistantMessageItem) SetPlanAgent(plan bool) {
+	if a.planAgent == plan {
+		return
+	}
+	a.planAgent = plan
+	a.Bump()
+}
+
+// planStreaming reports whether the plan is still streaming into
+// this message: the item belongs to the plan agent and the message
+// has not finished. The bottom border is withheld until the
+// plan-ready marker lands.
+func (a *AssistantMessageItem) planStreaming() bool {
+	return a.planAgent && !a.message.IsFinished()
 }
 
 // errorKey returns the (srcHash, extra) cache key components for the
@@ -531,9 +583,91 @@ func (a *AssistantMessageItem) cachedContent(width int) string {
 	if a.contentSec.hit(width, srcHash, extra) {
 		return a.contentSec.out
 	}
-	out := a.renderMarkdown(a.message.Content().Text, width)
+	text := a.message.Content().Text
+	// In plan mode the agent ends its final plan with a sentinel marker.
+	// Hide the end plan marker and wrap the message in a background "card" so
+	// the plan stands out from regular assistant replies. Mirrors the
+	// ThinkingBox treatment.
+	var out string
+	switch {
+	case common.PlanReadyMarkerPresent(text):
+		out = a.renderPlanCard(common.StripPlanMarkers(text), width)
+	case a.planStreaming() && common.PlanStartMarkerPresent(text):
+		// While the plan streams, draw the card as an open box: top
+		// and side borders only. The bottom border closes once the
+		// plan-ready marker arrives. The plan-start marker gates the
+		// card so intermediate exploratory replies in plan mode never
+		// grow a border.
+		out = a.renderPlanCardStreaming(common.StripPlanMarkers(text), width)
+	default:
+		out = a.renderMarkdown(common.StripPlanMarkers(text), width)
+	}
 	a.contentSec.store(width, srcHash, extra, out, 0)
 	return out
+}
+
+// renderPlanCard renders the final plan message as a full-width bordered
+// card. The markdown is rendered at the card's inner width (accounting for
+// PlanBox's horizontal frame) with the PlanMarkdown style; PlanBox then
+// draws the border and padding and pads each line out to full width. The
+// plan is final by the time the marker appears, so this bypasses the
+// streaming-markdown cache and renders directly, like renderThinking.
+func (a *AssistantMessageItem) renderPlanCard(text string, width int) string {
+	box, innerWidth := planBoxLayout(a.sty.Messages.PlanBox, width)
+	renderer := common.PlanMarkdownRenderer(a.sty, innerWidth)
+	mu := common.LockMarkdownRenderer(renderer)
+	mu.Lock()
+	rendered, err := renderer.Render(text)
+	mu.Unlock()
+	if err != nil {
+		rendered = text
+	}
+	return renderPlanBox(box, rendered, width, true)
+}
+
+// renderPlanCardStreaming renders the plan while it is still streaming
+// as an open card: top and side borders only, no bottom border. It
+// routes through the stable-prefix streaming cache so each streaming
+// flush only re-renders the trailing partial of the plan document.
+func (a *AssistantMessageItem) renderPlanCardStreaming(text string, width int) string {
+	box, innerWidth := planBoxLayout(a.sty.Messages.PlanBox, width)
+	renderer := common.PlanMarkdownRenderer(a.sty, innerWidth)
+	rendered := a.streamingPlan.Render(text, innerWidth, renderer)
+	return renderPlanBox(box, rendered, width, false)
+}
+
+// renderPlanBox applies the card layout: an un-filled bordered box whose
+// padding lets the terminal background show through. Only intentional
+// backgrounds (the inline-code chip, the H1 badge) keep a color of their
+// own; everything else renders on the terminal background. With closed
+// false the bottom border is withheld, leaving the card open while the
+// plan streams.
+func renderPlanBox(style lipgloss.Style, content string, width int, closed bool) string {
+	style, innerWidth := planBoxLayout(style, width)
+	if !closed {
+		style = style.BorderBottom(false)
+	}
+	lines := strings.Split(strings.TrimSpace(content), "\n")
+	for i, line := range lines {
+		lines[i] = ansi.Truncate(line, innerWidth, "")
+	}
+	// In lipgloss v2 Width is the total box width: border and padding live
+	// inside it, so the content area ends up Width minus the frame. Glamour
+	// already wrapped at innerWidth (width minus the frame), so size the box
+	// to the full width or every line gets re-wrapped narrower.
+	return style.Width(max(1, width)).Render(strings.Join(lines, "\n"))
+}
+
+// planBoxLayout returns a style and content width whose combined horizontal
+// frame fits within the available message width.
+func planBoxLayout(style lipgloss.Style, width int) (lipgloss.Style, int) {
+	width = max(1, width)
+	frameWidth := style.GetHorizontalFrameSize()
+	if frameWidth >= width {
+		style = style.PaddingLeft(0).PaddingRight(0)
+		frameWidth = style.GetHorizontalFrameSize()
+	}
+	return style, max(1, width-frameWidth)
 }
 
 // cachedError returns the rendered error section.
@@ -558,6 +692,9 @@ func (a *AssistantMessageItem) renderThinking(thinking string, width int) string
 	renderer := common.QuietMarkdownRenderer(a.sty, width)
 	rendered := a.streamingThinking.Render(thinking, width, renderer)
 	rendered = strings.TrimSpace(rendered)
+	// The renderer already knows this count from its cached prefix, so
+	// take it rather than rescanning a document that only grows.
+	renderedLines := a.streamingThinking.LastLines()
 
 	// Count lines and, for the windowed view modes, slice the tail
 	// WITHOUT splitting the entire rendered document. Splitting a
@@ -568,8 +705,9 @@ func (a *AssistantMessageItem) renderThinking(thinking string, width int) string
 	var totalLines int
 	switch a.thinkingViewMode {
 	case thinkingCollapsed:
-		totalLines = countLines(rendered)
-		if totalLines > maxCollapsedThinkingHeight {
+		totalLines = renderedLines
+		// Avoid hiding a single line; showing it beats the hint.
+		if totalLines > maxCollapsedThinkingHeight+1 {
 			tail, hidden := tailLines(rendered, maxCollapsedThinkingHeight, totalLines)
 			hint := a.sty.Messages.ThinkingTruncationHint.Render(
 				fmt.Sprintf(assistantMessageTruncateFormat, hidden),
@@ -579,8 +717,8 @@ func (a *AssistantMessageItem) renderThinking(thinking string, width int) string
 			lines = strings.Split(rendered, "\n")
 		}
 	case thinkingTailWindow:
-		totalLines = countLines(rendered)
-		if totalLines > maxExpandedThinkingTailLines {
+		totalLines = renderedLines
+		if totalLines > maxExpandedThinkingTailLines+1 {
 			tail, hidden := tailLines(rendered, maxExpandedThinkingTailLines, totalLines)
 			hint := a.sty.Messages.ThinkingTruncationHint.Render(
 				fmt.Sprintf(assistantMessageTailWindowFormat, hidden),
@@ -671,8 +809,7 @@ func (a *AssistantMessageItem) isSpinning() bool {
 // sub-section caches whose source text or extras changed are
 // invalidated; the others survive and serve cache hits on the next
 // RawRender.
-func (a *AssistantMessageItem) SetMessage(msg *message.Message) tea.Cmd {
-	wasSpinning := a.isSpinning()
+func (a *AssistantMessageItem) SetMessage(msg *message.Message) {
 	a.message = msg
 	// Bump the F6 version even if the underlying *message.Message
 	// pointer is identical: callers may have mutated the message in
@@ -684,16 +821,14 @@ func (a *AssistantMessageItem) SetMessage(msg *message.Message) tea.Cmd {
 	// section's source hash, so an unchanged section keeps its prefix
 	// cache valid while a changed section forces a miss naturally.
 	// Section caches themselves are content-keyed, so they do not
-	// need an explicit drop here either.
-	if !wasSpinning && a.isSpinning() {
-		return a.StartAnimation()
-	}
-	return nil
+	// need an explicit drop here either. If the message started
+	// spinning the UI's animation clock picks it up on the next
+	// update.
 }
 
 // Finished implements list.Item. The assistant message is freezable
 // once the message reports IsFinished() and is no longer spinning
-// (no animation tick remains pending). Streaming tail animation is
+// (no animation frame remains pending). Streaming tail animation is
 // caught by isSpinning, so freezing only kicks in once the turn is
 // fully terminal. The list cache invalidates the entry on the next
 // version bump if anything (focus, highlight, expansion) changes.
@@ -714,6 +849,7 @@ func (a *AssistantMessageItem) clearCache() {
 	a.errorSec.reset()
 	a.streamingContent.Reset()
 	a.streamingThinking.Reset()
+	a.streamingPlan.Reset()
 	a.thinkingHash = 0
 	a.thinkingHashLen = 0
 	a.thinkingHashSample = ""

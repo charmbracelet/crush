@@ -107,6 +107,12 @@ type AgentInitRequest struct {
 	Interactive bool `json:"interactive"`
 }
 
+// AgentSetMainRequest requests switching the workspace's active agent
+// (e.g. "coder" or "plan").
+type AgentSetMainRequest struct {
+	AgentID string `json:"agent_id"`
+}
+
 // LSPStartRequest represents a request to start an LSP for a path.
 type LSPStartRequest struct {
 	Path string `json:"path"`

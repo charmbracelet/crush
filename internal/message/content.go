@@ -69,6 +69,8 @@ func (ReasoningContent) isPart() {}
 
 type TextContent struct {
 	Text string `json:"text"`
+	// Hidden marks generated user continuations that remain in model history.
+	Hidden bool `json:"hidden,omitempty"`
 }
 
 func (tc TextContent) String() string {
@@ -176,6 +178,17 @@ type Message struct {
 	CreatedAt        int64
 	UpdatedAt        int64
 	IsSummaryMessage bool
+	// PrismModelID and PrismModelName identify the model that actually
+	// served the turn, as reported by the Hyper Prism model router
+	// headers. Empty when the turn was not routed through Prism.
+	PrismModelID   string
+	PrismModelName string
+	// PrismHypercreditSavings and PrismDollarSavings are the savings
+	// from routing through Prism, as reported by its savings trailers.
+	// Nil when not reported. When both are present the hypercredit
+	// figure is the one shown.
+	PrismHypercreditSavings *float64
+	PrismDollarSavings      *float64
 }
 
 func (m *Message) Content() TextContent {
@@ -285,7 +298,7 @@ func (m *Message) AppendContent(delta string) {
 	found := false
 	for i, part := range m.Parts {
 		if c, ok := part.(TextContent); ok {
-			m.Parts[i] = TextContent{Text: c.Text + delta}
+			m.Parts[i] = TextContent{Text: c.Text + delta, Hidden: c.Hidden}
 			found = true
 		}
 	}

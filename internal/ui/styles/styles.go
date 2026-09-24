@@ -2,8 +2,10 @@
 package styles
 
 import (
+	"encoding/json"
 	"fmt"
 	"image/color"
+	"log/slog"
 	"strings"
 
 	"charm.land/bubbles/v2/filepicker"
@@ -26,6 +28,26 @@ const (
 
 	ArrowRightIcon string = "→"
 
+	// CodespanPadding is the padding rendered around inline code spans in
+	// markdown. It displays identically to the blank padding it replaced,
+	// but selection copies recognize it and turn it back into the original
+	// backticks (see list.HighlightContent).
+	//
+	// It is a no-break space tagged with the text-presentation variation
+	// selector (U+FE0E): the pair is a single one-cell grapheme that
+	// renders as a blank and, being non-breaking, keeps word wrap from
+	// tearing a codespan between its padding and its text. The selector
+	// makes the sentinel distinct from a real no-break space in message
+	// text (pasted text, some LLM output), which a selection copy must
+	// preserve verbatim.
+	//
+	// The selector must be U+FE0E, not the emoji-presentation U+FE0F:
+	// ansi.StringWidth measures any cluster ending in U+FE0F as two
+	// cells wide, while terminals render it as one, and that mismatch
+	// makes the frame differ repaint the line on every frame (visible
+	// as flicker).
+	CodespanPadding string = "\u00a0\ufe0e"
+
 	ToolPending string = "●"
 	ToolSuccess string = "✓"
 	ToolError   string = "×"
@@ -46,6 +68,8 @@ const (
 	TextIcon   string = "≡"
 	SkillIcon  string = "▲"
 	RemoveIcon string = "✕"
+
+	ColorSwatchIcon string = "■"
 
 	ScrollbarThumb string = "┃"
 	ScrollbarTrack string = "│"
@@ -103,6 +127,7 @@ type Styles struct {
 	// Markdown & Chroma
 	Markdown      ansi.StyleConfig
 	QuietMarkdown ansi.StyleConfig
+	PlanMarkdown  ansi.StyleConfig
 
 	// Inputs
 	TextInput textinput.Styles
@@ -118,8 +143,12 @@ type Styles struct {
 
 	// Buttons
 	Button struct {
-		Focused  lipgloss.Style
-		Blurred  lipgloss.Style
+		Focused lipgloss.Style
+		Blurred lipgloss.Style
+		// Inactive styles buttons of a prompt that is not in the
+		// active pane: slightly lighter than Blurred so the choices
+		// stay legible while the chat has focus.
+		Inactive lipgloss.Style
 		Hovered  lipgloss.Style
 		Negative lipgloss.Style // Selected negative/destructive action.
 	}
@@ -128,11 +157,19 @@ type Styles struct {
 	Editor struct {
 		Textarea textarea.Styles
 
-		// Normal mode prompt (default "::: ").
-		PromptNormalFocused lipgloss.Style
-		PromptNormalBlurred lipgloss.Style
+		// Normal mode prompt ("> " icon on the first line, "::: " after).
+		PromptNormalIconFocused lipgloss.Style
+		PromptNormalIconBlurred lipgloss.Style
+		PromptNormalFocused     lipgloss.Style
+		PromptNormalBlurred     lipgloss.Style
 
-		// YOLO mode prompt (" ! " icon + ":::" dots).
+		// Plan mode prompt.
+		PromptPlanIconFocused lipgloss.Style
+		PromptPlanIconBlurred lipgloss.Style
+		PromptPlanDotsFocused lipgloss.Style
+		PromptPlanDotsBlurred lipgloss.Style
+
+		// YOLO mode prompt.
 		PromptYoloIconFocused lipgloss.Style
 		PromptYoloIconBlurred lipgloss.Style
 		PromptYoloDotsFocused lipgloss.Style
@@ -302,6 +339,9 @@ type Styles struct {
 		ShellTruncation    lipgloss.Style // "N more lines" hint.
 		SectionHeader      lipgloss.Style
 
+		// Plan section styles
+		PlanBox lipgloss.Style // Border+padding for the final plan message
+
 		// Thinking section styles
 		ThinkingBox            lipgloss.Style // Background for thinking content
 		ThinkingTruncationHint lipgloss.Style // "… (N lines hidden)" hint
@@ -311,6 +351,7 @@ type Styles struct {
 		AssistantInfoModel     lipgloss.Style
 		AssistantInfoProvider  lipgloss.Style
 		AssistantInfoDuration  lipgloss.Style
+		SubduedHypercreditIcon lipgloss.Style // Subdued ◆ for hypercredit figures within subdued text
 		AssistantCanceled      lipgloss.Style // Italic "Canceled" footer
 	}
 
@@ -500,6 +541,13 @@ type Styles struct {
 			Spinner lipgloss.Style // Loading spinner while validating the key
 		}
 
+		// AuthMethod styles the OAuth-vs-API-key choice dialog.
+		AuthMethod struct {
+			Prompt      lipgloss.Style // "How would you like to authenticate?" question line
+			CardBlurred lipgloss.Style // Unselected choice card frame and label
+			CardFocused lipgloss.Style // Selected choice card frame and label
+		}
+
 		OAuth struct {
 			Spinner      lipgloss.Style // Loading spinner
 			Instructions lipgloss.Style // Emphasized instruction text
@@ -542,6 +590,16 @@ type Styles struct {
 	// Status bar and help
 	Status struct {
 		Help lipgloss.Style
+
+		// Mode badges shown before the help hints.
+		ModeBadgePlan lipgloss.Style
+		ModeBadgeYolo lipgloss.Style
+
+		// Full-width banners shown when switching modes.
+		ModeBannerPlan      lipgloss.Style
+		ModeBannerPlanBadge lipgloss.Style
+		ModeBannerYolo      lipgloss.Style
+		ModeBannerYoloBadge lipgloss.Style
 
 		ErrorIndicator   lipgloss.Style
 		WarnIndicator    lipgloss.Style
@@ -636,6 +694,35 @@ func (s *Styles) ChromaTheme() chroma.StyleEntries {
 // DialogHelpStyles returns the styles for dialog help.
 func (s *Styles) DialogHelpStyles() help.Styles {
 	return help.Styles(s.Dialog.Help)
+}
+
+// Clone returns a deep copy of the Styles struct, ensuring pointer fields
+// (particularly within ansi.StyleConfig) are not aliased. This is used to
+// safely snapshot styles before a theme preview.
+func (s *Styles) Clone() Styles {
+	clone := *s
+	clone.Markdown = cloneStyleConfig(s.Markdown)
+	clone.QuietMarkdown = cloneStyleConfig(s.QuietMarkdown)
+	return clone
+}
+
+// cloneStyleConfig deep-copies an ansi.StyleConfig by JSON round-tripping.
+//
+// NOTE: This assumes ansi.StyleConfig remains fully JSON-round-trippable.
+// If the glamour library adds non-serializable fields, this approach will
+// need to be replaced with a reflect-based deep copy.
+func cloneStyleConfig(src ansi.StyleConfig) ansi.StyleConfig {
+	data, err := json.Marshal(src)
+	if err != nil {
+		slog.Error("Failed to marshal markdown styles for theme preview", "error", err)
+		return src
+	}
+	var dst ansi.StyleConfig
+	if err := json.Unmarshal(data, &dst); err != nil {
+		slog.Error("Failed to unmarshal markdown styles for theme preview", "error", err)
+		return src
+	}
+	return dst
 }
 
 // hex returns a pointer to the "#rrggbb" representation of c. It's used to

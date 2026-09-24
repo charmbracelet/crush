@@ -23,7 +23,7 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/chat"
-	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/charmbracelet/x/term"
@@ -108,7 +108,12 @@ func sessionSetup(cmd *cobra.Command) (context.Context, *sessionServices, func()
 	dataDir, _ := cmd.Flags().GetString("data-dir")
 	ctx := cmd.Context()
 
-	cfg, err := config.Init("", dataDir, false)
+	cwd, err := ResolveCwd(cmd)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	cfg, err := config.Init(cwd, dataDir, false)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to initialize config: %w", err)
 	}
@@ -440,11 +445,7 @@ func outputSessionJSON(w io.Writer, sess session.Session, msgs []*message.Messag
 }
 
 func outputSessionHuman(ctx context.Context, cfg *config.ConfigStore, sess session.Session, msgs []*message.Message) error {
-	var providerID string
-	if cfg != nil {
-		providerID = cfg.Config().Models[config.SelectedModelTypeLarge].Provider
-	}
-	styles := styles.ThemeForProvider(providerID)
+	styles := common.ThemeStylesFromConfig(cfg.Config())
 	toolResults := chat.BuildToolResultMap(msgs)
 
 	width := sessionOutputWidth

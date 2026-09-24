@@ -49,6 +49,9 @@ type Service interface {
 	Update(ctx context.Context, message Message) error
 	Get(ctx context.Context, id string) (Message, error)
 	List(ctx context.Context, sessionID string) ([]Message, error)
+	// ListFromSummary returns the messages at or after summaryMessageID,
+	// which is all a compacted session still sends.
+	ListFromSummary(ctx context.Context, sessionID, summaryMessageID string) ([]Message, error)
 	ListUserMessages(ctx context.Context, sessionID string) ([]Message, error)
 	ListAllUserMessages(ctx context.Context) ([]Message, error)
 	GetLastAssistantMessage(ctx context.Context, sessionID string) (Message, error)
@@ -91,14 +94,39 @@ type pendingState struct {
 	// the debounce window.
 	timer *time.Timer
 
-	// lastFlushed is the snapshot most recently written to SQL. Used
-	// as the baseline for terminal-state detection.
-	lastFlushed Message
+	// baseline is the projection of the snapshot most recently
+	// written to SQL that terminal-state detection needs. Used as the
+	// baseline for [shouldFlushNow].
+	baseline flushBaseline
 
 	// hasFlushed is false until the first successful write for this
-	// ID; until then lastFlushed is the zero value and must not be
+	// ID; until then baseline is the zero value and must not be
 	// treated as a real prior state.
 	hasFlushed bool
+}
+
+// flushBaseline is the compact projection of a flushed [Message] that
+// [shouldFlushNow] compares against. Pending state lives for as long
+// as the process does, so it retains this instead of the whole
+// Message: a finished stream would otherwise pin its parts — reasoning
+// text, tool inputs, tool results — on the heap forever.
+type flushBaseline struct {
+	toolCallsFinished   []bool
+	reasoningFinishedAt int64
+}
+
+// newFlushBaseline projects the fields [shouldFlushNow] reads out of a
+// flushed message.
+func newFlushBaseline(m *Message) flushBaseline {
+	calls := m.ToolCalls()
+	finished := make([]bool, len(calls))
+	for i, c := range calls {
+		finished[i] = c.Finished
+	}
+	return flushBaseline{
+		toolCallsFinished:   finished,
+		reasoningFinishedAt: m.ReasoningContent().FinishedAt,
+	}
 }
 
 type service struct {
@@ -243,9 +271,9 @@ func (s *service) Update(ctx context.Context, msg Message) error {
 	p.latest = cloned
 	p.dirty = true
 
-	var prev *Message
+	var prev *flushBaseline
 	if p.hasFlushed {
-		prev = &p.lastFlushed
+		prev = &p.baseline
 	}
 	terminal := shouldFlushNow(prev, &cloned)
 
@@ -303,15 +331,16 @@ func (s *service) FlushAll(ctx context.Context) error {
 
 // flushOne drains a single message ID. When syncCaller is true the
 // caller is willing to wait through a concurrent in-flight flush so
-// that, on return, lastFlushed equals latest at the moment of return.
+// that, on return, the flushed state equals latest at the moment of
+// return.
 // When false (timer-fired path) we bail if another flusher is already
 // running; that flusher will pick up the trailing dirty bit.
 //
 // Order matters: a sync caller must wait for any in-flight flush to
 // drain even when the buffer is currently clean — that in-flight
 // write has not yet updated the SQL row, so returning early would
-// violate the contract that on success lastFlushed reflects the most
-// recent state.
+// violate the contract that on success the flushed state reflects the
+// most recent state.
 func (s *service) flushOne(ctx context.Context, id string, syncCaller bool) error {
 	for {
 		s.mu.Lock()
@@ -342,11 +371,11 @@ func (s *service) flushOne(ctx context.Context, id string, syncCaller bool) erro
 		snap := p.latest
 		// Decide whether this snapshot represents a terminal event
 		// against the prior baseline. We must do this before resetting
-		// dirty/flushing because shouldFlushNow looks at p.lastFlushed
+		// dirty/flushing because shouldFlushNow looks at p.baseline
 		// (which is what was on disk before this write).
-		var prev *Message
+		var prev *flushBaseline
 		if p.hasFlushed {
-			prev = &p.lastFlushed
+			prev = &p.baseline
 		}
 		isTerminal := shouldFlushNow(prev, &snap)
 		p.flushing = true
@@ -358,7 +387,7 @@ func (s *service) flushOne(ctx context.Context, id string, syncCaller bool) erro
 		s.mu.Lock()
 		p.flushing = false
 		if err == nil {
-			p.lastFlushed = snap
+			p.baseline = newFlushBaseline(&snap)
 			p.hasFlushed = true
 		} else {
 			// Restore dirty so the next caller retries.
@@ -367,6 +396,13 @@ func (s *service) flushOne(ctx context.Context, id string, syncCaller bool) erro
 		// If a delta arrived during the SQL write and we are a sync
 		// caller, the user expects that delta to land too.
 		wasDirty := p.dirty
+		if !wasDirty {
+			// Nothing left to write, so drop the snapshot. Pending
+			// entries outlive the streams that created them; holding
+			// latest here would pin every finished message's parts
+			// for the life of the process.
+			p.latest = Message{}
+		}
 		s.mu.Unlock()
 
 		if err != nil {
@@ -402,13 +438,32 @@ func (s *service) write(ctx context.Context, msg Message) error {
 		finishedAt.Valid = true
 	}
 	if err := s.q.UpdateMessage(ctx, db.UpdateMessageParams{
-		ID:         msg.ID,
-		Parts:      string(parts),
-		FinishedAt: finishedAt,
+		ID:                      msg.ID,
+		Parts:                   string(parts),
+		PrismModelID:            sql.NullString{String: msg.PrismModelID, Valid: msg.PrismModelID != ""},
+		PrismModelName:          sql.NullString{String: msg.PrismModelName, Valid: msg.PrismModelName != ""},
+		PrismHypercreditSavings: nullableFloat(msg.PrismHypercreditSavings),
+		PrismDollarSavings:      nullableFloat(msg.PrismDollarSavings),
+		FinishedAt:              finishedAt,
 	}); err != nil {
 		return err
 	}
 	return nil
+}
+
+func nullableFloat(v *float64) sql.NullFloat64 {
+	if v == nil {
+		return sql.NullFloat64{}
+	}
+	return sql.NullFloat64{Float64: *v, Valid: true}
+}
+
+func floatPtr(v sql.NullFloat64) *float64 {
+	if !v.Valid {
+		return nil
+	}
+	value := v.Float64
+	return &value
 }
 
 // shouldFlushNow returns true when next represents a structural
@@ -416,16 +471,16 @@ func (s *service) write(ctx context.Context, msg Message) error {
 // finished, the tool-call set grew, a tool call transitioned to
 // finished, or reasoning just finished. prev is the last-flushed
 // snapshot (or nil if no write has landed yet).
-func shouldFlushNow(prev, next *Message) bool {
+func shouldFlushNow(prev *flushBaseline, next *Message) bool {
 	if next.IsFinished() {
 		return true
 	}
 
-	var prevCalls []ToolCall
+	var prevCalls []bool
 	var prevReasoningFinishedAt int64
 	if prev != nil {
-		prevCalls = prev.ToolCalls()
-		prevReasoningFinishedAt = prev.ReasoningContent().FinishedAt
+		prevCalls = prev.toolCallsFinished
+		prevReasoningFinishedAt = prev.reasoningFinishedAt
 	}
 	nextCalls := next.ToolCalls()
 	if len(nextCalls) != len(prevCalls) {
@@ -433,7 +488,7 @@ func shouldFlushNow(prev, next *Message) bool {
 	}
 	for i := range nextCalls {
 		// Bounds-safe: lengths are equal here.
-		if nextCalls[i].Finished != prevCalls[i].Finished {
+		if nextCalls[i].Finished != prevCalls[i] {
 			return true
 		}
 		// A tool call's input only matters once it has landed (Finished
@@ -458,6 +513,32 @@ func (s *service) List(ctx context.Context, sessionID string) ([]Message, error)
 	dbMessages, err := s.q.ListMessagesBySession(ctx, sessionID)
 	if err != nil {
 		return nil, err
+	}
+	messages := make([]Message, len(dbMessages))
+	for i, dbMessage := range dbMessages {
+		messages[i], err = s.fromDBItem(dbMessage)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return messages, nil
+}
+
+func (s *service) ListFromSummary(ctx context.Context, sessionID, summaryMessageID string) ([]Message, error) {
+	if summaryMessageID == "" {
+		return s.List(ctx, sessionID)
+	}
+	dbMessages, err := s.q.ListMessagesBySessionFromSummary(ctx, db.ListMessagesBySessionFromSummaryParams{
+		SessionID: sessionID,
+		ID:        summaryMessageID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	// No rows means the summary message is gone; fall back to the whole
+	// session rather than sending nothing.
+	if len(dbMessages) == 0 {
+		return s.List(ctx, sessionID)
 	}
 	messages := make([]Message, len(dbMessages))
 	for i, dbMessage := range dbMessages {
@@ -513,15 +594,19 @@ func (s *service) fromDBItem(item db.Message) (Message, error) {
 		return Message{}, err
 	}
 	return Message{
-		ID:               item.ID,
-		SessionID:        item.SessionID,
-		Role:             MessageRole(item.Role),
-		Parts:            parts,
-		Model:            item.Model.String,
-		Provider:         item.Provider.String,
-		CreatedAt:        item.CreatedAt,
-		UpdatedAt:        item.UpdatedAt,
-		IsSummaryMessage: item.IsSummaryMessage != 0,
+		ID:                      item.ID,
+		SessionID:               item.SessionID,
+		Role:                    MessageRole(item.Role),
+		Parts:                   parts,
+		Model:                   item.Model.String,
+		Provider:                item.Provider.String,
+		CreatedAt:               item.CreatedAt,
+		UpdatedAt:               item.UpdatedAt,
+		IsSummaryMessage:        item.IsSummaryMessage != 0,
+		PrismModelID:            item.PrismModelID.String,
+		PrismModelName:          item.PrismModelName.String,
+		PrismHypercreditSavings: floatPtr(item.PrismHypercreditSavings),
+		PrismDollarSavings:      floatPtr(item.PrismDollarSavings),
 	}, nil
 }
 
@@ -578,78 +663,61 @@ func marshalParts(parts []ContentPart) ([]byte, error) {
 	return json.Marshal(wrappedParts)
 }
 
-func unmarshalParts(data []byte) ([]ContentPart, error) {
-	temp := []json.RawMessage{}
+// rawPartWrapper is [partWrapper] for decoding: the payload stays encoded
+// until the type tag says what to decode it into.
+type rawPartWrapper struct {
+	Type partType        `json:"type"`
+	Data json.RawMessage `json:"data"`
+}
 
-	if err := json.Unmarshal(data, &temp); err != nil {
+func unmarshalParts(data []byte) ([]ContentPart, error) {
+	// One pass gets every type tag and its still-encoded payload. Splitting
+	// into []json.RawMessage first would walk the same bytes twice.
+	var wrapped []rawPartWrapper
+	if err := json.Unmarshal(data, &wrapped); err != nil {
 		return nil, err
 	}
 
-	parts := make([]ContentPart, 0)
-
-	for _, rawPart := range temp {
-		var wrapper struct {
-			Type partType        `json:"type"`
-			Data json.RawMessage `json:"data"`
-		}
-
-		if err := json.Unmarshal(rawPart, &wrapper); err != nil {
+	parts := make([]ContentPart, 0, len(wrapped))
+	for _, w := range wrapped {
+		part, err := unmarshalPart(w.Type, w.Data)
+		if err != nil {
 			return nil, err
 		}
-
-		switch wrapper.Type {
-		case reasoningType:
-			part := ReasoningContent{}
-			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
-				return nil, err
-			}
-			parts = append(parts, part)
-		case textType:
-			part := TextContent{}
-			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
-				return nil, err
-			}
-			parts = append(parts, part)
-		case imageURLType:
-			part := ImageURLContent{}
-			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
-				return nil, err
-			}
-			parts = append(parts, part)
-		case binaryType:
-			part := BinaryContent{}
-			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
-				return nil, err
-			}
-			parts = append(parts, part)
-		case toolCallType:
-			part := ToolCall{}
-			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
-				return nil, err
-			}
-			parts = append(parts, part)
-		case toolResultType:
-			part := ToolResult{}
-			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
-				return nil, err
-			}
-			parts = append(parts, part)
-		case finishType:
-			part := Finish{}
-			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
-				return nil, err
-			}
-			parts = append(parts, part)
-		case shellCommandType:
-			part := ShellCommand{}
-			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
-				return nil, err
-			}
-			parts = append(parts, part)
-		default:
-			return nil, fmt.Errorf("unknown part type: %s", wrapper.Type)
-		}
+		parts = append(parts, part)
 	}
 
 	return parts, nil
+}
+
+// unmarshalPart decodes a single part's payload according to its type tag.
+func unmarshalPart(typ partType, data json.RawMessage) (ContentPart, error) {
+	switch typ {
+	case reasoningType:
+		return decodePart[ReasoningContent](data)
+	case textType:
+		return decodePart[TextContent](data)
+	case imageURLType:
+		return decodePart[ImageURLContent](data)
+	case binaryType:
+		return decodePart[BinaryContent](data)
+	case toolCallType:
+		return decodePart[ToolCall](data)
+	case toolResultType:
+		return decodePart[ToolResult](data)
+	case finishType:
+		return decodePart[Finish](data)
+	case shellCommandType:
+		return decodePart[ShellCommand](data)
+	default:
+		return nil, fmt.Errorf("unknown part type: %s", typ)
+	}
+}
+
+func decodePart[T ContentPart](data json.RawMessage) (ContentPart, error) {
+	var part T
+	if err := json.Unmarshal(data, &part); err != nil {
+		return nil, err
+	}
+	return part, nil
 }

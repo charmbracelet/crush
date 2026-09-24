@@ -62,10 +62,37 @@ func TestCatwalkSync_GetWithAutoUpdateDisabled(t *testing.T) {
 	require.NotEmpty(t, providers)
 	require.Equal(t, 0, client.callCount, "Client should not be called when autoupdate is disabled")
 
-	// Should return embedded providers.
+	// No cache file: fall back to embedded providers.
 	for _, p := range providers {
 		require.NotEqual(t, "should-not-be-used", p.Name)
 	}
+}
+
+func TestCatwalkSync_GetWithAutoUpdateDisabledUsesCache(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	path := tmpDir + "/providers.json"
+
+	cachedProviders := []catwalk.Provider{
+		{Name: "Cached Manual Update", ID: "cached-manual"},
+	}
+	data, err := json.Marshal(cachedProviders)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, data, 0o644))
+
+	syncer := &catwalkSync{}
+	client := &mockCatwalkClient{
+		providers: []catwalk.Provider{{Name: "should-not-be-used"}},
+	}
+
+	syncer.Init(client, path, false)
+
+	providers, err := syncer.Get(t.Context())
+	require.NoError(t, err)
+	require.Len(t, providers, 1)
+	require.Equal(t, "Cached Manual Update", providers[0].Name)
+	require.Equal(t, 0, client.callCount, "Client should not be called when autoupdate is disabled")
 }
 
 func TestCatwalkSync_GetFreshProviders(t *testing.T) {

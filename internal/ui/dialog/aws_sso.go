@@ -78,6 +78,9 @@ func NewAWSSSO(com *common.Common, command string) (*AWSSSO, tea.Cmd) {
 		key.WithHelp("enter", "open in browser"),
 	)
 	m.keyMap.Close = CloseKey
+	applyDialogKeybinds(com, map[string]*key.Binding{
+		"select": &m.keyMap.Open,
+	})
 
 	return m, m.spinner.Tick
 }

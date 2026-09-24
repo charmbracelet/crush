@@ -181,6 +181,21 @@ func NewPermissions(com *common.Common, perm permission.PermissionRequest, opts 
 	h.Styles = com.Styles.DialogHelpStyles()
 
 	km := defaultPermissionsKeyMap()
+	applyDialogKeybinds(com, map[string]*key.Binding{
+		"permissions.left":              &km.Left,
+		"permissions.right":             &km.Right,
+		"tab":                           &km.Tab,
+		"select":                        &km.Select,
+		"permissions.allow":             &km.Allow,
+		"permissions.allow_session":     &km.AllowSession,
+		"permissions.deny":              &km.Deny,
+		"permissions.toggle_diff":       &km.ToggleDiffMode,
+		"permissions.toggle_fullscreen": &km.ToggleFullscreen,
+		"permissions.scroll_up":         &km.ScrollUp,
+		"permissions.scroll_down":       &km.ScrollDown,
+		"permissions.scroll_left":       &km.ScrollLeft,
+		"permissions.scroll_right":      &km.ScrollRight,
+	})
 
 	// Configure viewport with matching keybindings.
 	vp := viewport.New()

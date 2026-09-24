@@ -98,7 +98,7 @@ func NewPlanHandoffInline(com *common.Common) *PlanHandoffInline {
 	editor.MaxHeight = 8
 	editor.SetHeight(3)
 
-	return &PlanHandoffInline{
+	p := &PlanHandoffInline{
 		com:            com,
 		selectedChoice: choiceStartCoding,
 		editor:         editor,
@@ -128,6 +128,16 @@ func NewPlanHandoffInline(com *common.Common) *PlanHandoffInline {
 		),
 		keyClose: CloseKey,
 	}
+	// Apply user overrides after defaults stand, like other dialogs.
+	applyDialogKeybinds(com, map[string]*key.Binding{
+		"select":              &p.keyEnter,
+		"question.newline":    &p.keyNewline,
+		"close":               &p.keyClose,
+		"plan_handoff.coding": &p.keyCoding,
+		"plan_handoff.yolo":   &p.keyYolo,
+		"plan_handoff.no":     &p.keyNo,
+	})
+	return p
 }
 
 // HandleKey processes a key press. Returns done=true when the user has

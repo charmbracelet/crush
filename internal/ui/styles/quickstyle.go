@@ -1050,6 +1050,9 @@ func quickStyle(o quickStyleOpts) Styles {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(o.plan).
 		Padding(1, 2)
+	// The saved-plan footer sits under the card, aligned with the card's
+	// border, dimmed so it reads as metadata rather than plan content.
+	s.Messages.PlanBoxFooter = subtle
 
 	// Thinking section styles
 	s.Messages.ThinkingBox = subtle.Background(o.bgLeastVisible)

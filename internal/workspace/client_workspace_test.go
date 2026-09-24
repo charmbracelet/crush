@@ -13,6 +13,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/client"
 	"github.com/charmbracelet/crush/internal/commands"
@@ -973,4 +974,13 @@ func TestClientWorkspace_RecoveryCreateIsBounded(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("recoverWorkspace blocked on an unresponsive server")
 	}
+}
+
+func TestRunCompletePlanPathFromProto(t *testing.T) {
+	t.Parallel()
+	w := &ClientWorkspace{}
+	got := w.translateEvent(pubsub.Event[proto.RunComplete]{Type: pubsub.UpdatedEvent, Payload: proto.RunComplete{SessionID: "s", MessageID: "m", PlanPath: ".crush/plans/план.md"}})
+	event, ok := got.(pubsub.Event[notify.RunComplete])
+	require.True(t, ok)
+	require.Equal(t, ".crush/plans/план.md", event.Payload.PlanPath)
 }

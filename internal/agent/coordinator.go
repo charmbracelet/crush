@@ -141,17 +141,18 @@ type Coordinator interface {
 }
 
 type coordinator struct {
-	cfg         *config.ConfigStore
-	sessions    session.Service
-	messages    message.Service
-	permissions permission.Service
-	questions   question.Service
-	history     history.Service
-	filetracker filetracker.Service
-	lspManager  *lsp.Manager
-	notify      pubsub.Publisher[notify.Notification]
-	runComplete pubsub.Publisher[notify.RunComplete]
-	interactive bool
+	cfg          *config.ConfigStore
+	sessions     session.Service
+	messages     message.Service
+	permissions  permission.Service
+	questions    question.Service
+	history      history.Service
+	filetracker  filetracker.Service
+	lspManager   *lsp.Manager
+	notify       pubsub.Publisher[notify.Notification]
+	runComplete  pubsub.Publisher[notify.RunComplete]
+	planComplete pubsub.Publisher[notify.RunComplete]
+	interactive  bool
 
 	// agentMu guards mainAgent and mainAgentName: SetMainAgent runs on
 	// HTTP handler goroutines while runs, cancels, and probes read the
@@ -218,6 +219,13 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		skillTracker: skillTracker,
 		interactive:  opts.Interactive,
 	}
+	if c.runComplete != nil {
+		c.planComplete = &planRunCompletePublisher{
+			workingDir: c.cfg.WorkingDir(),
+			notify:     c.notify,
+			downstream: c.runComplete,
+		}
+	}
 
 	agentCfg, ok := opts.Config.Config().Agents[config.AgentCoder]
 	if !ok {
@@ -229,7 +237,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		return nil, err
 	}
 
-	agent, err := c.buildAgent(ctx, coderPrompt, agentCfg, false)
+	agent, err := c.buildAgent(ctx, coderPrompt, agentCfg, false, c.runComplete)
 	if err != nil {
 		return nil, err
 	}
@@ -245,7 +253,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		return nil, err
 	}
 
-	planAgent, err := c.buildAgent(ctx, planSystemPrompt, planCfg, false)
+	planAgent, err := c.buildAgent(ctx, planSystemPrompt, planCfg, false, c.planComplete)
 	if err != nil {
 		return nil, err
 	}
@@ -411,8 +419,12 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 		})
 	}
 
-	if hasLatest && c.runComplete != nil {
-		c.runComplete.PublishMustDeliver(ctx, pubsub.UpdatedEvent, latest)
+	completionPublisher := c.runComplete
+	if agentName == config.AgentPlan {
+		completionPublisher = c.planComplete
+	}
+	if hasLatest && completionPublisher != nil {
+		completionPublisher.PublishMustDeliver(ctx, pubsub.UpdatedEvent, latest)
 		// Signal to the dispatcher (backend.runAgent) that the
 		// authoritative terminal RunComplete for this run was already
 		// emitted, so it does not publish a duplicate fallback for the
@@ -747,7 +759,7 @@ func mergeCallOptions(model Model, cfg config.ProviderConfig) (fantasy.ProviderO
 	return modelOptions, temp, topP, topK, freqPenalty, presPenalty
 }
 
-func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, agent config.Agent, isSubAgent bool) (SessionAgent, error) {
+func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, agent config.Agent, isSubAgent bool, runComplete pubsub.Publisher[notify.RunComplete]) (SessionAgent, error) {
 	large, small, err := c.buildAgentModels(ctx, isSubAgent)
 	if err != nil {
 		return nil, err
@@ -766,7 +778,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		Messages:             c.messages,
 		Tools:                nil,
 		Notify:               c.notify,
-		RunComplete:          c.runComplete,
+		RunComplete:          runComplete,
 	})
 
 	// The readiness goroutines below perform one-time setup — building the

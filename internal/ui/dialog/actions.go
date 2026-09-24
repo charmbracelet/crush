@@ -16,7 +16,6 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
-	"github.com/charmbracelet/crush/internal/terminal"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/ui/util"
@@ -148,10 +147,10 @@ type (
 	// message path.
 	ActionTerminalKill struct{}
 
-	// ActionTerminalComplete resolves the pending interactive terminal
-	// session with the given result.
+	// ActionTerminalComplete is sent when an interactive terminal's
+	// process exited, carrying the final transcript.
 	ActionTerminalComplete struct {
-		Result terminal.Result
+		Result TerminalResult
 	}
 )
 

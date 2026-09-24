@@ -29,7 +29,6 @@ import (
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
-	"github.com/charmbracelet/crush/internal/terminal"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/pkg/browser"
@@ -438,14 +437,6 @@ func (w *ClientWorkspace) QuestionCancel() bool {
 		return false
 	}
 	return cancelled
-}
-
-// TerminalComplete is a no-op in remote mode: interactive terminal
-// sessions run in the client's process, so the server-side service never
-// published a request that this result could resolve.
-func (w *ClientWorkspace) TerminalComplete(terminal.Result) bool {
-	slog.Warn("Ignoring interactive terminal result: interactive mode is local-only")
-	return false
 }
 
 // PersistShellCommand is unsupported in remote mode: the session database

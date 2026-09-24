@@ -842,7 +842,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 
 	allTools = append(
 		allTools,
-		tools.NewBashTool(c.permissions, c.terminal, c.cfg.WorkingDir(), c.cfg.Config().Options.DataDirectory, c.cfg.Config().Options.Attribution, modelID),
+		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.DataDirectory, c.cfg.Config().Options.Attribution, modelID),
 		tools.NewCrushInfoTool(c.cfg, c.lspManager, c.allSkills, c.activeSkills, c.skillTracker),
 		tools.NewCrushLogsTool(logFile),
 		tools.NewJobOutputTool(c.cfg.Config().Options.DataDirectory),
@@ -860,9 +860,13 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		tools.NewWriteTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 	)
 
-	// Question tool is interactive-only and not available to sub-agents.
+	// Question and terminal tools are interactive-only and not available
+	// to sub-agents.
 	if !isSubAgent && c.interactive {
-		allTools = append(allTools, tools.NewQuestionTool(c.questions))
+		allTools = append(allTools,
+			tools.NewQuestionTool(c.questions),
+			tools.NewTerminalTool(c.permissions, c.terminal, c.cfg.WorkingDir(), c.cfg.Config().Options.DataDirectory),
+		)
 	}
 
 	// Add LSP tools if user has configured LSPs or auto_lsp is enabled (nil or true).

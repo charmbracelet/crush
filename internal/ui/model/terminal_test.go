@@ -1,29 +1,32 @@
 package model
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/terminal"
 	"github.com/charmbracelet/crush/internal/ui/dialog"
 	"github.com/charmbracelet/crush/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
 
+var errTestSpawn = errors.New("spawn failed")
+
 func pubsubEventTerminalRequest(req terminal.Request) pubsub.Event[terminal.Request] {
 	return pubsub.Event[terminal.Request]{Type: pubsub.CreatedEvent, Payload: req}
 }
 
-func pubsubEventTerminalNotification(n terminal.Notification) pubsub.Event[terminal.Notification] {
-	return pubsub.Event[terminal.Notification]{Type: pubsub.CreatedEvent, Payload: n}
-}
-
 // runCmdSync executes a tea.Cmd (or batch) and collects the messages it
-// produces. Ancillary refresh commands that need more of the workspace
-// than this minimal mock provides are skipped.
+// produces, recursively unwrapping nested batches. Ancillary refresh
+// commands that need more of the workspace than this minimal mock provides
+// are skipped.
 func runCmdSync(cmd tea.Cmd) []tea.Msg {
 	if cmd == nil {
 		return nil
@@ -35,9 +38,7 @@ func runCmdSync(cmd tea.Cmd) []tea.Msg {
 			if sub == nil {
 				continue
 			}
-			if m := safeRunCmd(sub); m != nil {
-				msgs = append(msgs, m)
-			}
+			msgs = append(msgs, runCmdSync(sub)...)
 		}
 		return msgs
 	}
@@ -56,36 +57,28 @@ func safeRunCmd(cmd tea.Cmd) (msg tea.Msg) {
 	return cmd()
 }
 
-func findMsg[T any](msgs []tea.Msg) (T, bool) {
-	for _, msg := range msgs {
-		if v, ok := msg.(T); ok {
-			return v, true
-		}
-	}
-	var zero T
-	return zero, false
-}
-
-// terminalTestWorkspace records how the UI resolves interactive terminal
-// sessions.
+// terminalTestWorkspace provides the few workspace methods the terminal
+// flow touches.
 type terminalTestWorkspace struct {
 	workspace.Workspace
 
-	completed  *terminal.Result
+	persisted  *shellCommandRecord
 	workingDir string
 }
 
-func (w *terminalTestWorkspace) TerminalComplete(result terminal.Result) bool {
-	w.completed = &result
-	return true
+type shellCommandRecord struct {
+	command  string
+	output   string
+	exitCode int
 }
 
-func (w *terminalTestWorkspace) WorkingDir() string {
-	return w.workingDir
-}
+func (w *terminalTestWorkspace) WorkingDir() string { return w.workingDir }
 
-func (w *terminalTestWorkspace) Config() *config.Config {
-	return &config.Config{}
+func (w *terminalTestWorkspace) Config() *config.Config { return &config.Config{} }
+
+func (w *terminalTestWorkspace) PersistShellCommand(_ context.Context, _, command, output string, exitCode int) error {
+	w.persisted = &shellCommandRecord{command: command, output: output, exitCode: exitCode}
+	return nil
 }
 
 func (*terminalTestWorkspace) AgentIsReady() bool { return false }
@@ -94,99 +87,132 @@ func (*terminalTestWorkspace) AgentIsBusy() bool { return false }
 
 func (*terminalTestWorkspace) PermissionSkipRequests() bool { return false }
 
-func TestTerminalRequestSpawnsDialogAndResolvesOnExit(t *testing.T) {
-	t.Parallel()
+// drainInteractiveManager empties the global interactive session manager.
+// Sessions it owns are global, so these tests must not run in parallel.
+func drainInteractiveManager(t *testing.T) {
+	t.Helper()
 
-	u := newTestUI()
-	u.dialog = dialog.NewOverlay()
-	ws := &terminalTestWorkspace{workingDir: t.TempDir()}
-	u.com.Workspace = ws
-
-	// The agent asked for an interactive session.
-	_, cmd := u.Update(pubsubEventTerminalRequest(terminal.Request{
-		ID:         "req-1",
-		SessionID:  "session-1",
-		ToolCallID: "call-1",
-		Command:    "printf 'integration-flow\\n'",
-		WorkingDir: ws.workingDir,
-	}))
-	require.NotNil(t, cmd)
-
-	// Run the spawn command synchronously.
-	msgs := runCmdSync(cmd)
-	msg, ok := findMsg[terminalSessionMsg](msgs)
-	require.True(t, ok, "expected a spawned session, got %v", msgs)
-
-	t.Cleanup(func() {
-		_ = msg.Session.Kill()
-		_ = msg.Session.Close()
-	})
-	require.NotNil(t, msg.Request)
-
-	// Attaching opens the dialog and arms the watcher.
-	_, watchCmd := u.Update(msg)
-	require.NotNil(t, watchCmd)
-	require.True(t, u.dialog.ContainsDialog(dialog.TerminalID))
-	require.NotNil(t, u.activeTerminal)
-
-	// Drive the watcher until the session exits.
-	deadline := time.Now().Add(15 * time.Second)
-	for {
-		watchMsg := watchCmd()
-		if _, exited := watchMsg.(dialog.TerminalExitMsg); exited {
-			break
+	mgr := shell.GetInteractiveSessionManager()
+	for _, id := range mgr.List() {
+		if session, ok := mgr.Get(id); ok {
+			_ = session.Kill()
+			_ = session.Close()
 		}
-		// Output messages repaint and re-arm the watcher.
-		if _, output := watchMsg.(dialog.TerminalOutputMsg); output {
-			_, watchCmd = u.Update(watchMsg)
-			continue
-		}
-		require.True(t, time.Now().Before(deadline), "terminal session did not exit in time")
+		mgr.Remove(id)
 	}
-
-	// The exit message flows through the dialog and resolves the request.
-	_, done := u.Update(dialog.TerminalExitMsg{})
-	require.NotNil(t, done)
-	_ = done()
-
-	require.False(t, u.dialog.ContainsDialog(dialog.TerminalID))
-	require.Nil(t, u.activeTerminal)
-	require.NotNil(t, ws.completed)
-	require.Contains(t, ws.completed.Output, "integration-flow")
-	require.Equal(t, 0, ws.completed.ExitCode)
 }
 
-func TestTerminalNotificationTearsDownWithoutResolving(t *testing.T) {
-	t.Parallel()
+func newTerminalTestUI(t *testing.T) (*UI, *terminalTestWorkspace) {
+	t.Helper()
+
+	drainInteractiveManager(t)
 
 	u := newTestUI()
 	u.dialog = dialog.NewOverlay()
 	ws := &terminalTestWorkspace{workingDir: t.TempDir()}
 	u.com.Workspace = ws
+	return u, ws
+}
+
+func newAgentSession(t *testing.T, command string) *shell.InteractiveSession {
+	t.Helper()
+
+	session, err := shell.NewInteractiveSession(shell.InteractiveSessionOptions{
+		Command:    command,
+		WorkingDir: t.TempDir(),
+	})
+	require.NoError(t, err)
+	require.NoError(t, shell.GetInteractiveSessionManager().Register(session))
+	t.Cleanup(func() {
+		_ = session.Kill()
+		_ = session.Close()
+		shell.GetInteractiveSessionManager().Remove(session.ID())
+	})
+	return session
+}
+
+func TestTerminalRequestAttachesDialogAndClosesOnExit(t *testing.T) {
+	u, _ := newTerminalTestUI(t)
+	session := newAgentSession(t, "printf 'flow-output\\n'")
 
 	_, cmd := u.Update(pubsubEventTerminalRequest(terminal.Request{
-		ID:         "req-2",
-		Command:    "sleep 60",
-		WorkingDir: ws.workingDir,
+		ID:         "req-1",
+		ToolCallID: "call-1",
+		Command:    "printf 'flow-output\\n'",
+		WorkingDir: session.WorkingDir(),
+		Session:    session,
 	}))
-	msg, ok := findMsg[terminalSessionMsg](runCmdSync(cmd))
-	require.True(t, ok)
-	t.Cleanup(func() {
-		_ = msg.Session.Kill()
-		_ = msg.Session.Close()
-	})
 
-	_, watchCmd := u.Update(msg)
-	require.NotNil(t, watchCmd)
+	// The dialog opens around the session that came with the request.
+	require.NotNil(t, cmd)
 	require.True(t, u.dialog.ContainsDialog(dialog.TerminalID))
+	require.NotNil(t, u.activeTerminal)
+	require.True(t, u.activeTerminal.agentStarted)
 
-	// The run was cancelled elsewhere: the notification must tear the
-	// dialog down without resolving the request.
-	_, teardown := u.Update(pubsubEventTerminalNotification(terminal.Notification{ID: "req-2"}))
-	require.NotNil(t, teardown)
-	_ = teardown()
+	// Drive the watcher until the session exits.
+	watchCmd := u.watchTerminalSession(session)
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		msg := watchCmd()
+		if exitMsg, exited := msg.(dialog.TerminalExitMsg); exited {
+			_, _ = u.Update(exitMsg)
+			break
+		}
+		if outputMsg, output := msg.(dialog.TerminalOutputMsg); output {
+			_, watchCmd = u.Update(outputMsg)
+			require.True(t, time.Now().Before(deadline), "session did not exit in time")
+			continue
+		}
+		require.True(t, time.Now().Before(deadline), "session did not exit in time")
+	}
 
 	require.False(t, u.dialog.ContainsDialog(dialog.TerminalID))
 	require.Nil(t, u.activeTerminal)
-	require.Nil(t, ws.completed, "a cancelled session must not resolve")
+}
+
+func TestTerminalRequestIgnoredWhenDialogOpen(t *testing.T) {
+	u, _ := newTerminalTestUI(t)
+	first := newAgentSession(t, "sleep 30")
+
+	_, cmd := u.Update(pubsubEventTerminalRequest(terminal.Request{
+		ID:      "req-1",
+		Command: "sleep 30",
+		Session: first,
+	}))
+	_ = runCmdSync(cmd)
+	require.True(t, u.dialog.ContainsDialog(dialog.TerminalID))
+	require.Same(t, first, u.activeTerminal.session)
+}
+
+func TestUserInteractiveShellPersistsOnExit(t *testing.T) {
+	u, ws := newTerminalTestUI(t)
+	u.session = &session.Session{ID: "user-session"}
+
+	session := newAgentSession(t, "printf 'user-shell\\n'")
+	_, cmd := u.Update(terminalSessionMsg{Session: session, UserCommand: "printf 'user-shell\\n'"})
+	_ = runCmdSync(cmd)
+	require.NotNil(t, u.activeTerminal)
+	require.False(t, u.activeTerminal.agentStarted)
+
+	// The process exits; the dialog resolves and the result is persisted
+	// like a bang-mode command.
+	select {
+	case <-session.Done():
+	case <-time.After(15 * time.Second):
+		t.Fatal("session did not exit")
+	}
+
+	_, done := u.Update(dialog.TerminalExitMsg{})
+	_ = runCmdSync(done)
+	require.Nil(t, u.activeTerminal)
+	require.NotNil(t, ws.persisted, "user sessions are persisted")
+	require.Equal(t, "printf 'user-shell\\n'", ws.persisted.command)
+	require.Contains(t, ws.persisted.output, "user-shell")
+}
+
+func TestTerminalSpawnErrorReportsInfo(t *testing.T) {
+	u, _ := newTerminalTestUI(t)
+	_, cmd := u.Update(terminalSpawnErrorMsg{Err: errTestSpawn})
+	require.NotNil(t, cmd)
+	_ = runCmdSync(cmd)
 }

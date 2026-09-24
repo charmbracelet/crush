@@ -10,8 +10,10 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/vt"
 	"github.com/charmbracelet/x/xpty"
 	"mvdan.cc/sh/v3/syntax"
@@ -26,6 +28,11 @@ const (
 	// so a tiny window still yields a usable screen.
 	MinInteractiveCols = 20
 	MinInteractiveRows = 5
+	// DefaultInteractiveCols and DefaultInteractiveRows size a session
+	// spawned before the UI has attached; the dialog resizes it to the
+	// real window on the first frame.
+	DefaultInteractiveCols = 80
+	DefaultInteractiveRows = 24
 	// interactiveReadBufferSize is the per-read buffer for PTY output.
 	interactiveReadBufferSize = 32 * 1024
 )
@@ -75,6 +82,14 @@ type InteractiveSession struct {
 	pty     xpty.Pty
 	cmd     *exec.Cmd
 	command string
+
+	// id is assigned by the manager; empty for sessions that never
+	// registered.
+	id string
+
+	// registeredAt and completedAt (Unix minutes) drive retention.
+	registeredAt int64
+	completedAt  atomic.Int64
 
 	// input is the emulator's input pipe. Everything the emulator encodes
 	// (keys, mouse, paste) is read from it and written to the PTY. Closing
@@ -191,14 +206,17 @@ func NewInteractiveSession(opts InteractiveSessionOptions) (*InteractiveSession,
 	// input forwarding goroutine, so keep a closable reference.
 	input, _ := emulator.InputPipe().(io.Closer)
 
+	startTime := time.Now().Unix() / 60
+
 	session := &InteractiveSession{
-		emu:      emulator,
-		pty:      pty,
-		input:    input,
-		command:  opts.Command,
-		dirty:    make(chan struct{}, 1),
-		done:     make(chan struct{}),
-		readDone: make(chan struct{}),
+		emu:          emulator,
+		pty:          pty,
+		input:        input,
+		command:      opts.Command,
+		dirty:        make(chan struct{}, 1),
+		done:         make(chan struct{}),
+		readDone:     make(chan struct{}),
+		registeredAt: startTime,
 	}
 
 	emulator.SetCallbacks(vt.Callbacks{
@@ -276,6 +294,7 @@ func (s *InteractiveSession) waitLoop() {
 	s.mu.Lock()
 	s.exitErr = err
 	s.mu.Unlock()
+	s.completedAt.Store(time.Now().Unix() / 60)
 	syncWorkDir(s)
 
 	close(s.done)
@@ -387,6 +406,29 @@ func (s *InteractiveSession) Write(p []byte) error {
 	return nil
 }
 
+// SendKey sends a semantic keystroke to the child. It goes through the
+// emulator's input path, so the encoding matches the modes the child
+// enabled (application cursor keys, keypad, mouse), which is what makes
+// full-screen programs controllable.
+func (s *InteractiveSession) SendKey(key uv.KeyPressEvent) error {
+	if s.Exited() {
+		return fmt.Errorf("interactive session: session %s has exited", s.ID())
+	}
+	s.emu.SendKey(key)
+	return nil
+}
+
+// SendMouse sends a mouse event to the child, encoded for the mouse modes
+// the child enabled. Programs that never asked for mouse tracking receive
+// nothing, just like a real terminal.
+func (s *InteractiveSession) SendMouse(event uv.MouseEvent) error {
+	if s.Exited() {
+		return fmt.Errorf("interactive session: session %s has exited", s.ID())
+	}
+	s.emu.SendMouse(event)
+	return nil
+}
+
 // Resize resizes both the emulator and the underlying PTY.
 func (s *InteractiveSession) Resize(cols, rows int) {
 	cols = max(cols, MinInteractiveCols)
@@ -464,6 +506,56 @@ func (s *InteractiveSession) CaptureText() string {
 
 	b.WriteString(strings.TrimRight(s.emu.String(), " \n"))
 	return strings.TrimRight(b.String(), " \n")
+}
+
+// ID returns the session's manager-assigned ID, or the empty string for
+// sessions that never registered with a manager.
+func (s *InteractiveSession) ID() string { return s.id }
+
+// Command returns the command the session is running. An empty string
+// means the session is a bare interactive shell.
+func (s *InteractiveSession) Command() string { return s.command }
+
+// completedAgeMinutes is how many minutes have passed since the process
+// exited; 0 while it is still running.
+func (s *InteractiveSession) completedAgeMinutes() int64 {
+	completed := s.completedAt.Load()
+	if completed == 0 {
+		return 0
+	}
+	return time.Now().Unix()/60 - completed
+}
+
+// ScreenText returns the emulator's current visible screen as plain text.
+func (s *InteractiveSession) ScreenText() string {
+	s.emuMu.RLock()
+	defer s.emuMu.RUnlock()
+	return strings.TrimRight(s.emu.String(), " \n")
+}
+
+// ScrollbackText returns every line that scrolled off the visible screen.
+func (s *InteractiveSession) ScrollbackText() string {
+	s.emuMu.RLock()
+	defer s.emuMu.RUnlock()
+
+	var b strings.Builder
+	if scrollback := s.emu.Scrollback(); scrollback != nil {
+		for i := range scrollback.Len() {
+			line := scrollback.Line(i)
+			if line == nil {
+				continue
+			}
+			b.WriteString(strings.TrimRight(line.String(), " \t"))
+			b.WriteByte('\n')
+		}
+	}
+	return strings.TrimRight(b.String(), " \n")
+}
+
+// Cursor returns the emulator cursor position and whether it is hidden.
+func (s *InteractiveSession) Cursor() (x, y int, hidden bool) {
+	pos := s.emu.CursorPosition()
+	return pos.X, pos.Y, s.emu.CursorHidden()
 }
 
 // interactiveShellCommand resolves the shell that will host the command. An

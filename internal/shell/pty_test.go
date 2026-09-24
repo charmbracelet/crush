@@ -5,8 +5,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/stretchr/testify/require"
 )
+
+func newSessionMap() *csync.Map[string, *InteractiveSession] {
+	return csync.NewMap[string, *InteractiveSession]()
+}
 
 func newTestSession(t *testing.T, command string) *InteractiveSession {
 	t.Helper()

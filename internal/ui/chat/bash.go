@@ -54,12 +54,6 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		params.Command = "failed to parse command"
 	}
 
-	// An interactive call that has not finished yet is waiting on the
-	// user, not on the machine; say so instead of a bare spinner.
-	if params.Interactive && !opts.HasResult() {
-		return pendingTool(sty, "Bash (interactive terminal, waiting for user)", opts.Anim, opts.Compact)
-	}
-
 	// Check if this is a background job.
 	var meta tools.BashResponseMetadata
 	if opts.HasResult() {
@@ -81,9 +75,6 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		cmd = highlighted
 	}
 	toolParams := []string{cmd}
-	if params.Interactive {
-		toolParams = append(toolParams, "interactive", "true")
-	}
 	if params.RunInBackground {
 		toolParams = append(toolParams, "background", "true")
 	}
@@ -241,13 +232,45 @@ func renderJobTool(sty *styles.Styles, opts *ToolRenderOpts, width int, action, 
 	return joinToolParts(header, body)
 }
 
+// renderTerminalTool renders an interactive terminal session row using
+// the same pattern as [renderJobTool].
+func renderTerminalTool(sty *styles.Styles, opts *ToolRenderOpts, width int, action, sessionID, description, content string) string {
+	header := terminalHeader(sty, opts.Status, action, sessionID, description, width)
+	if opts.Compact {
+		return header
+	}
+
+	if earlyState, ok := toolEarlyStateContent(sty, opts, width); ok {
+		return joinToolParts(header, earlyState)
+	}
+
+	if content == "" {
+		return header
+	}
+
+	bodyWidth := width - toolBodyLeftPaddingTotal
+	body := sty.Tool.Body.Render(toolOutputPlainContent(sty, content, bodyWidth, opts.ExpandedContent))
+	return joinToolParts(header, body)
+}
+
+// terminalHeader builds the header for interactive terminal sessions.
+// Format: "● Terminal (Action) ID sessionID description..."
+func terminalHeader(sty *styles.Styles, status ToolStatus, action, sessionID, description string, width int) string {
+	return toolRowHeader(sty, status, "Terminal", action, "ID "+sessionID, description, width)
+}
+
 // jobHeader builds a header for job-related tools.
 // Format: "● Job (Action) PID shellID description..."
 func jobHeader(sty *styles.Styles, status ToolStatus, action, shellID, description string, width int) string {
+	return toolRowHeader(sty, status, "Job", action, "PID "+shellID, description, width)
+}
+
+// toolRowHeader builds the common icon + label + action + id row.
+func toolRowHeader(sty *styles.Styles, status ToolStatus, label, action, idText, description string, width int) string {
 	icon := toolIcon(sty, status)
-	jobPart := sty.Tool.JobToolName.Render("Job")
+	jobPart := sty.Tool.JobToolName.Render(label)
 	actionPart := sty.Tool.JobAction.Render("(" + action + ")")
-	pidPart := sty.Tool.JobPID.Render("PID " + shellID)
+	pidPart := sty.Tool.JobPID.Render(idText)
 
 	prefix := fmt.Sprintf("%s %s %s %s", icon, jobPart, actionPart, pidPart)
 

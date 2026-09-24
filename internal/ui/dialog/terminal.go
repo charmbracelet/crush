@@ -7,7 +7,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/shell"
-	"github.com/charmbracelet/crush/internal/terminal"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
@@ -60,7 +59,7 @@ func NewTerminalDialog(com *common.Common, session *shell.InteractiveSession, co
 	}
 	t.closeKey = key.NewBinding(
 		key.WithKeys("ctrl+q"),
-		key.WithHelp("ctrl+q", "close"),
+		key.WithHelp("ctrl+q", "kill"),
 	)
 	t.applyTheme()
 	return t
@@ -167,9 +166,17 @@ func (t *TerminalDialog) translateMouse(m uv.Mouse) (uv.Mouse, bool) {
 	return m, true
 }
 
+// TerminalResult is the final transcript of an interactive session.
+type TerminalResult struct {
+	Output     string
+	ExitCode   int
+	WorkingDir string
+	Terminated bool
+}
+
 // result builds the outcome for the finished session.
-func (t *TerminalDialog) result() terminal.Result {
-	return terminal.Result{
+func (t *TerminalDialog) result() TerminalResult {
+	return TerminalResult{
 		Output:     t.session.CaptureText(),
 		ExitCode:   t.session.ExitCode(),
 		WorkingDir: t.session.WorkingDir(),

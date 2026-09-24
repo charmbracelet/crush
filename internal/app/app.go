@@ -674,7 +674,6 @@ func (app *App) setupEvents() {
 	app.subscribeMustDeliver(ctx, "question-batches", app.Questions.Subscribe)
 	app.subscribeMustDeliver(ctx, "question-notifications", app.Questions.SubscribeNotifications)
 	app.subscribeMustDeliver(ctx, "terminal-sessions", app.Terminal.Subscribe)
-	app.subscribeMustDeliver(ctx, "terminal-notifications", app.Terminal.SubscribeNotifications)
 	app.subscribe(ctx, "history", app.History.Subscribe)
 	app.subscribe(ctx, "agent-notifications", app.agentNotifications.Subscribe)
 	app.subscribeMustDeliver(ctx, "run-completions", app.runCompletions.Subscribe)
@@ -863,6 +862,11 @@ func (app *App) Shutdown() {
 	// Kill all background shells.
 	wg.Go(func() {
 		shell.GetBackgroundShellManager().KillAll(shutdownCtx)
+	})
+
+	// Kill all interactive terminal sessions.
+	wg.Go(func() {
+		shell.GetInteractiveSessionManager().KillAll()
 	})
 
 	// Close herdr client to stop its background writer.

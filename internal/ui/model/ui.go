@@ -145,28 +145,27 @@ type shellStreamMsg struct {
 
 type (
 	// terminalSessionMsg delivers a freshly spawned interactive terminal
-	// session. Request is set when the agent asked for it; UserCommand is
-	// set when the user opened it from the input line.
+	// session for the user's own shell ("!!").
 	terminalSessionMsg struct {
 		Session     *shell.InteractiveSession
-		Request     *terminal.Request
 		UserCommand string
 	}
 
 	// terminalSpawnErrorMsg reports a failure to start an interactive
 	// terminal session.
 	terminalSpawnErrorMsg struct {
-		Request *terminal.Request
-		Err     error
+		Err error
 	}
 )
 
 // activeTerminalSession tracks the embedded interactive terminal currently
 // on screen. Only one exists at a time.
 type activeTerminalSession struct {
-	session     *shell.InteractiveSession
-	request     *terminal.Request // nil when the user started it
-	userCommand string
+	session *shell.InteractiveSession
+	// agentStarted marks sessions requested by a tool: their output is
+	// read back through the terminal tools rather than persisted.
+	agentStarted bool
+	userCommand  string
 }
 
 type (
@@ -1132,33 +1131,25 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.handleQuestionNotification(msg.Payload)
 	case pubsub.Event[terminal.Request]:
 		if m.activeTerminal != nil {
-			// A user-initiated terminal is already on screen; reject the
-			// request so the tool call fails fast instead of blocking.
-			m.com.Workspace.TerminalComplete(terminal.Result{
-				Output:   "Another interactive terminal session is already open. Close it first (ctrl+q) and retry.",
-				ExitCode: 1,
-			})
+			// One terminal at a time: the session stays alive (the model
+			// can still read it) but there is nothing to show.
 			break
 		}
 		m.chat.ScrollToBottom()
-		cmds = append(cmds, m.spawnTerminalSession(&msg.Payload))
+		cmds = append(cmds, m.attachTerminalDialog(msg.Payload.Session, msg.Payload.Command, true))
 		if cmd := m.sendNotification(notification.Notification{
-			Title:   "Crush is waiting...",
-			Message: "The agent opened an interactive terminal for you",
+			Title:   "Interactive terminal",
+			Message: "The agent opened a terminal for you to act in",
 		}); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-	case pubsub.Event[terminal.Notification]:
-		// The pending session resolved elsewhere (cancelled with its
-		// run, or superseded); tear ours down. User-initiated sessions
-		// have no request to resolve, so notifications are not theirs.
-		if m.activeTerminal != nil && m.activeTerminal.request != nil {
-			cmds = append(cmds, m.teardownTerminal())
-		}
 	case terminalSessionMsg:
-		cmds = append(cmds, m.attachTerminalDialog(msg))
+		if m.activeTerminal != nil {
+			break
+		}
+		cmds = append(cmds, m.attachTerminalDialog(msg.Session, msg.UserCommand, false))
 	case terminalSpawnErrorMsg:
-		cmds = append(cmds, m.handleTerminalSpawnError(msg))
+		cmds = append(cmds, util.ReportError(fmt.Errorf("interactive terminal: %w", msg.Err)))
 	case dialog.TerminalOutputMsg:
 		if m.activeTerminal != nil {
 			cmds = append(cmds, m.watchTerminalSession(m.activeTerminal.session))
@@ -2167,7 +2158,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			})
 		}
 	case dialog.ActionTerminalComplete:
-		cmds = append(cmds, m.completeTerminal(msg.Result))
+		cmds = append(cmds, m.closeTerminalDialog(msg.Result))
 
 	// Session dialog messages.
 	case dialog.ActionSelectSession:
@@ -5531,30 +5522,11 @@ func (m *UI) handleQuestionNotification(_ question.Notification) {
 	}
 }
 
-// spawnTerminalSession starts an interactive terminal the agent requested
-// through the bash tool. The tool already applied the deny-list, so no
-// block functions are needed here.
-func (m *UI) spawnTerminalSession(req *terminal.Request) tea.Cmd {
-	cols, rows := m.terminalDialogSize()
-	return func() tea.Msg {
-		session, err := shell.NewInteractiveSession(shell.InteractiveSessionOptions{
-			Command:    req.Command,
-			WorkingDir: req.WorkingDir,
-			Cols:       cols,
-			Rows:       rows,
-		})
-		if err != nil {
-			return terminalSpawnErrorMsg{Request: req, Err: err}
-		}
-		return terminalSessionMsg{Session: session, Request: req}
-	}
-}
-
 // openInteractiveShell starts an interactive terminal the user asked for
 // with the bang prefix. An empty command opens a bare interactive shell.
 func (m *UI) openInteractiveShell(command string) tea.Cmd {
 	if m.activeTerminal != nil {
-		return util.ReportError(errors.New("an interactive terminal session is already open"))
+		return util.ReportError(errors.New("an interactive terminal session is already running"))
 	}
 
 	workingDir := m.com.Workspace.WorkingDir()
@@ -5569,6 +5541,15 @@ func (m *UI) openInteractiveShell(command string) tea.Cmd {
 		if err != nil {
 			return terminalSpawnErrorMsg{Err: err}
 		}
+
+		// Register with the manager so the agent can see and drive this
+		// session with the terminal tools too.
+		if err := shell.GetInteractiveSessionManager().Register(session); err != nil {
+			_ = session.Kill()
+			_ = session.Close()
+			return terminalSpawnErrorMsg{Err: err}
+		}
+
 		return terminalSessionMsg{Session: session, UserCommand: command}
 	}
 }
@@ -5581,27 +5562,31 @@ func (m *UI) terminalDialogSize() (cols, rows int) {
 	return cols, rows
 }
 
-// attachTerminalDialog opens the terminal dialog around a freshly spawned
+// attachTerminalDialog opens the terminal dialog around an already-running
 // session and starts watching it.
-func (m *UI) attachTerminalDialog(msg terminalSessionMsg) tea.Cmd {
-	m.activeTerminal = &activeTerminalSession{
-		session:     msg.Session,
-		request:     msg.Request,
-		userCommand: msg.UserCommand,
+func (m *UI) attachTerminalDialog(session *shell.InteractiveSession, command string, agentStarted bool) tea.Cmd {
+	if session == nil {
+		return nil
 	}
 
-	command := msg.UserCommand
-	if msg.Request != nil {
-		command = msg.Request.Command
+	m.activeTerminal = &activeTerminalSession{
+		session:      session,
+		agentStarted: agentStarted,
+		userCommand:  command,
 	}
+
+	// Size the PTY to the dialog before the first frame so full-screen
+	// programs start with the space they will actually have.
+	cols, rows := m.terminalDialogSize()
+	session.Resize(cols, rows)
 
 	m.textarea.Blur()
-	m.dialog.OpenDialogWithGrace(dialog.NewTerminalDialog(m.com, msg.Session, command))
-	return m.watchTerminalSession(msg.Session)
+	m.dialog.OpenDialogWithGrace(dialog.NewTerminalDialog(m.com, session, command))
+	return m.watchTerminalSession(session)
 }
 
 // watchTerminalSession waits for the session to change or exit and turns
-// that into a message so the UI repaints and eventually completes.
+// that into a message so the UI repaints and eventually closes the dialog.
 func (m *UI) watchTerminalSession(session *shell.InteractiveSession) tea.Cmd {
 	return func() tea.Msg {
 		select {
@@ -5613,21 +5598,10 @@ func (m *UI) watchTerminalSession(session *shell.InteractiveSession) tea.Cmd {
 	}
 }
 
-// handleTerminalSpawnError reports a failed spawn. When the agent was
-// waiting on it, resolve its request so the tool call does not hang.
-func (m *UI) handleTerminalSpawnError(msg terminalSpawnErrorMsg) tea.Cmd {
-	if msg.Request != nil {
-		m.com.Workspace.TerminalComplete(terminal.Result{
-			Output:   fmt.Sprintf("Failed to start interactive session: %v", msg.Err),
-			ExitCode: 1,
-		})
-	}
-	return util.ReportError(fmt.Errorf("interactive terminal: %w", msg.Err))
-}
-
-// teardownTerminal kills the active session and dismisses the dialog
-// without resolving a pending request; the request was resolved elsewhere.
-func (m *UI) teardownTerminal() tea.Cmd {
+// closeTerminalDialog dismisses the dialog when its session ended. Agent
+// sessions are read back through the terminal tools; user sessions are
+// persisted like bang-mode commands.
+func (m *UI) closeTerminalDialog(result dialog.TerminalResult) tea.Cmd {
 	active := m.activeTerminal
 	m.activeTerminal = nil
 	m.dialog.CloseDialog(dialog.TerminalID)
@@ -5636,41 +5610,11 @@ func (m *UI) teardownTerminal() tea.Cmd {
 		return nil
 	}
 
-	session := active.session
-	return func() tea.Msg {
-		_ = session.Kill()
-		_ = session.Close()
-		return nil
-	}
-}
-
-// completeTerminal finishes the active session: resolves the agent's
-// request, or persists the user's command like a bang-mode shell, then
-// cleans up the process.
-func (m *UI) completeTerminal(result terminal.Result) tea.Cmd {
-	active := m.activeTerminal
-	m.activeTerminal = nil
-	m.dialog.CloseDialog(dialog.TerminalID)
-
-	if active == nil {
-		return nil
-	}
-
-	session := active.session
-	cleanup := func() tea.Msg {
-		_ = session.Kill()
-		_ = session.Close()
-		return nil
-	}
-
-	if active.request != nil {
-		m.com.Workspace.TerminalComplete(result)
-		return cleanup
-	}
-
-	command := cmp.Or(active.userCommand, "interactive shell")
 	var cmds []tea.Cmd
-	cmds = append(cmds, cleanup, m.persistTerminalResult(command, result))
+	if !active.agentStarted {
+		command := cmp.Or(active.userCommand, "interactive shell")
+		cmds = append(cmds, m.persistTerminalResult(command, result))
+	}
 	if m.focus == uiFocusEditor {
 		cmds = append(cmds, m.textarea.Focus())
 	}
@@ -5680,7 +5624,7 @@ func (m *UI) completeTerminal(result terminal.Result) tea.Cmd {
 // persistTerminalResult stores a user-run interactive session the same way
 // bang-mode shell commands are stored: as a shell command message the
 // agent sees, plus a transcript item.
-func (m *UI) persistTerminalResult(command string, result terminal.Result) tea.Cmd {
+func (m *UI) persistTerminalResult(command string, result dialog.TerminalResult) tea.Cmd {
 	return func() tea.Msg {
 		if m.hasSession() {
 			if err := m.com.Workspace.PersistShellCommand(

@@ -46,25 +46,8 @@ Common shell builtins and core utils available on Windows.
 </background_execution>
 
 <interactive_execution>
-- Set interactive=true ONLY when the command cannot run unattended: it prompts
-  for input (logins, tokens, passwords, confirmations), or it opens a
-  full-screen terminal UI the user has to navigate.
-- The command runs in a real terminal embedded in Crush's UI and the user
-  drives it. It opens automatically, so tell the user what to do in your
-  message BEFORE calling the tool.
-- Only one interactive session runs at a time.
-- When the command exits, you receive its scrollback, its final screen, and
-  its exit code. The user can also close the terminal early, which ends the
-  session and returns what was captured so far.
-- Do NOT use interactive mode for ordinary commands: it is slower and puts
-  the user in the loop for nothing. Reading a file, running tests, or
-  inspecting git state all belong in the normal path.
-- Examples that need interactive mode:
-  * `gh auth login`, `npm login`, `docker login`
-  * `ssh-keygen` passphrase prompts, `gpg --gen-key`
-  * Interactive REPLs or TUIs the user must inspect (e.g. `htop`, `lazygit`)
-- When in doubt, run the command normally first. Escalate to interactive mode
-  only if it fails because it needed a terminal.
+- Commands that need a terminal (prompts for input, logins, passwords,
+  confirmations, or full-screen TUIs) belong in the terminal tool, not here.
 </interactive_execution>
 
 <git_message_quality>

@@ -428,23 +428,6 @@ func (m *OAuth) innerDialogContent() string {
 			elements = append(elements, codeBox, "")
 		}
 
-		if m.codeEntryActive() {
-			// The manual fallback: the authorization page shows a code
-			// to paste when the redirect cannot come back on its own.
-			m.codeInput.SetWidth(max(0, innerWidth-4))
-			elements = append(elements,
-				statusTextStyle.
-					Width(innerWidth).
-					Padding(0, 1).
-					Render("Declined or browser didn't connect? Enter the code from the page:"),
-				lipgloss.NewStyle().
-					Width(innerWidth).
-					Padding(0, 1).
-					Render(m.codeInput.View()),
-				"",
-			)
-		}
-
 		link := linkStyle.Hyperlink(m.verificationURL, "id=oauth-verify").Render(m.verificationURL)
 		url := statusTextStyle.
 			Width(innerWidth).
@@ -463,6 +446,23 @@ func (m *OAuth) innerDialogContent() string {
 			)
 
 		elements = append(elements, url, "", waiting, "")
+
+		if m.codeEntryActive() {
+			// The manual fallback: the authorization page shows a code
+			// to paste when the redirect cannot come back on its own.
+			m.codeInput.SetWidth(max(0, innerWidth-4))
+			elements = append(elements,
+				statusTextStyle.
+					Width(innerWidth).
+					Padding(0, 1).
+					Render("Declined or browser didn't connect? Enter the code from the page:"),
+				lipgloss.NewStyle().
+					Width(innerWidth).
+					Padding(0, 1).
+					Render(m.codeInput.View()),
+				"",
+			)
+		}
 
 		return lipgloss.JoinVertical(lipgloss.Left, elements...)
 

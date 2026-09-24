@@ -15,6 +15,13 @@ import (
 // QuitID is the identifier for the quit dialog.
 const QuitID = "quit"
 
+// Dialog content lines.
+const (
+	quitQuestion    = "Are you sure you want to quit?"
+	quitHintLineOne = "To quit without confirmation"
+	quitHintLineTwo = "press ctrl+c twice."
+)
+
 // Quit represents a confirmation dialog for quitting the application.
 type Quit struct {
 	com        *common.Common
@@ -130,9 +137,6 @@ func (q *Quit) handleMouseClick(msg tea.MouseClickMsg) Action {
 // Draw implements [Dialog].
 func (q *Quit) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	const (
-		question    = "Are you sure you want to quit?"
-		hintLineOne = "To quit without confirmation"
-		hintLineTwo = "press ctrl+c twice."
 		// buttonLine is the index of the content line reserved for the
 		// buttons, which are drawn as layers on top of the frame.
 		buttonLine = 2
@@ -152,21 +156,27 @@ func (q *Quit) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	for i, o := range buttonOpts {
 		buttonViews[i] = common.Button(q.com.Styles, o)
 	}
-	buttonsWidth := lipgloss.Width(strings.Join(buttonViews, " "))
+	buttons := strings.Join(buttonViews, " ")
+	buttonsWidth := lipgloss.Width(buttons)
 
-	// Reserve the button row as blank space; the buttons themselves are
+	// renderContent builds the dialog body around the given button row. A
+	// blank row of the same width reserves space for the buttons, which are
 	// painted as layers so their bounds double as mouse hit regions.
-	content := baseStyle.Render(
-		lipgloss.JoinVertical(
-			lipgloss.Center,
-			question,
-			"",
-			strings.Repeat(" ", buttonsWidth),
-			"",
-			hintStyle.Render(hintLineOne),
-			hintStyle.Render(hintLineTwo),
-		),
-	)
+	renderContent := func(buttonRow string) string {
+		return baseStyle.Render(
+			lipgloss.JoinVertical(
+				lipgloss.Center,
+				quitQuestion,
+				"",
+				buttonRow,
+				"",
+				hintStyle.Render(quitHintLineOne),
+				hintStyle.Render(quitHintLineTwo),
+			),
+		)
+	}
+
+	content := renderContent(strings.Repeat(" ", buttonsWidth))
 
 	frameStyle := q.com.Styles.Dialog.Quit.Frame
 	maxWidth := area.Dx() - frameStyle.GetHorizontalBorderSize()
@@ -179,7 +189,6 @@ func (q *Quit) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	width = min(width, area.Dx())
 	height = min(height, area.Dy())
 	center := common.CenterRect(area, width, height)
-	DrawCenter(scr, area, view)
 
 	// Offset the content by every frame the two styles add around it.
 	contentX := center.Min.X +
@@ -194,7 +203,12 @@ func (q *Quit) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	q.compositor = nil
 	buttonsRect := image.Rect(buttonsX, buttonsY, buttonsX+buttonsWidth, buttonsY+1)
 	if buttonsRect.In(center) {
+		DrawCenter(scr, area, view)
 		q.compositor = drawButtons(scr, buttonsX, buttonsY, buttonViews)
+	} else {
+		// The buttons don't fit on screen as layers, so render them inline
+		// as part of the content instead: the user always sees them.
+		DrawCenter(scr, area, frameStyle.Render(renderContent(buttons)))
 	}
 	return nil
 }

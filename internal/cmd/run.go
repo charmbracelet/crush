@@ -459,13 +459,11 @@ func (s *runStream) handle(ev any, stopSpinner func()) (done bool, err error) {
 		// Attribute the error to our run before treating it as
 		// fatal. Async errors from an unrelated workspace run share
 		// this channel, so a foreign failure must not abort us:
-		//   - if the event carries a RunID, it is the authoritative
-		//     correlator: it must match our run exactly, otherwise it
-		//     belongs to a different request and we ignore it.
-		//   - if the event carries no RunID (older server), fall back
-		//     to SessionID: it must be present and match our session,
-		//     otherwise we ignore it.
-		if e.Payload.RunID != "" {
+		//   - if either side carries a RunID, require an exact match.
+		//     An anonymous queued error cannot terminate a correlated run.
+		//   - only when neither side has a RunID, fall back to a nonempty,
+		//     matching SessionID.
+		if s.runID != "" || e.Payload.RunID != "" {
 			if e.Payload.RunID != s.runID {
 				return false, nil
 			}

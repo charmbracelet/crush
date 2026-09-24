@@ -29,8 +29,9 @@ import (
 // fails during the promoted turn's preparation, not during streaming.
 type preparationSessions struct {
 	session.Service
-	ready atomic.Bool
-	err   error
+	ready         atomic.Bool
+	err           error
+	beforeFailure func()
 }
 
 func (s *preparationSessions) Save(ctx context.Context, sess session.Session) (session.Session, error) {
@@ -43,6 +44,9 @@ func (s *preparationSessions) Save(ctx context.Context, sess session.Session) (s
 
 func (s *preparationSessions) Get(ctx context.Context, id string) (session.Session, error) {
 	if s.ready.Load() && s.err != nil {
+		if s.beforeFailure != nil {
+			s.beforeFailure()
+		}
 		return session.Session{}, s.err
 	}
 	return s.Service.Get(ctx, id)
@@ -73,6 +77,7 @@ func (m *preparationMessages) Create(ctx context.Context, sessionID string, para
 type completedDispatch struct {
 	runID  string
 	marked bool
+	err    error
 }
 
 // Observe the real coordinator's completion marker without changing its
@@ -84,7 +89,7 @@ type observedCoordinator struct {
 
 func (c *observedCoordinator) RunAccepted(ctx context.Context, accept *agent.AcceptedRun, sessionID, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
 	result, err := c.Coordinator.RunAccepted(ctx, accept, sessionID, prompt, attachments...)
-	c.returned <- completedDispatch{agent.RunIDFromContext(ctx), agent.RunCompletePublished(ctx)}
+	c.returned <- completedDispatch{agent.RunIDFromContext(ctx), agent.RunCompletePublished(ctx), err}
 	return result, err
 }
 
@@ -171,6 +176,7 @@ func TestSendMessage_PreparationFailureCompletion(t *testing.T) {
 				coord, err := agent.NewCoordinator(ctx, agent.CoordinatorOptions{
 					Config: cfg, Sessions: sessions, Messages: messages,
 					Permissions: permission.NewPermissionService(workingDir, true, nil),
+					Notify:      ws.AgentNotifications(),
 					RunComplete: ws.RunCompletions(),
 					Skills:      skills.NewManager(nil, nil, nil),
 				})
@@ -178,6 +184,14 @@ func TestSendMessage_PreparationFailureCompletion(t *testing.T) {
 				observed := &observedCoordinator{Coordinator: coord, returned: make(chan completedDispatch, 2)}
 				ws.AgentCoordinator = observed
 				completions := ws.RunCompletions().Subscribe(ctx)
+				notifications := ws.AgentNotifications().Subscribe(ctx)
+				if promoted && stage == "session" {
+					sessions.beforeFailure = func() {
+						if len(completions) != 0 {
+							t.Error("initial completion was published before synchronous queue execution finished")
+						}
+					}
+				}
 
 				if promoted {
 					require.NoError(t, backend.SendMessage(ws.ID, proto.AgentMessage{SessionID: sess.ID, RunID: "first", Prompt: "first"}))
@@ -190,8 +204,14 @@ func TestSendMessage_PreparationFailureCompletion(t *testing.T) {
 				require.NoError(t, backend.SendMessage(ws.ID, proto.AgentMessage{SessionID: sess.ID, RunID: "failing", Prompt: "second"}))
 				select {
 				case returned := <-observed.returned:
-					require.Equal(t, completedDispatch{runID: "failing", marked: !promoted && stage == "assistant"}, returned,
+					require.Equal(t, "failing", returned.runID)
+					require.Equal(t, !promoted && stage == "assistant", returned.marked,
 						"only the normal completion path transfers ownership from the backend")
+					if promoted {
+						require.NoError(t, returned.err, "a queued submission returns before execution")
+					} else {
+						require.ErrorIs(t, returned.err, failure)
+					}
 				case <-ctx.Done():
 					t.Fatal("second dispatch did not return")
 				}
@@ -200,12 +220,24 @@ func TestSendMessage_PreparationFailureCompletion(t *testing.T) {
 					close(gate)
 					select {
 					case returned := <-observed.returned:
-						require.Equal(t, completedDispatch{runID: "first", marked: true}, returned)
+						require.Equal(t, "first", returned.runID)
+						require.True(t, returned.marked)
+						require.NoError(t, returned.err, "the queued failure must not become the initial caller's error")
 					case <-ctx.Done():
 						t.Fatal("queue promotion did not return")
 					}
 				}
 				ws.runWG.Wait()
+				var reported []notify.Notification
+				for len(notifications) > 0 {
+					n := (<-notifications).Payload
+					if n.Type == notify.TypeAgentError {
+						reported = append(reported, n)
+					}
+				}
+				require.Len(t, reported, 1)
+				require.Equal(t, "failing", reported[0].RunID)
+				require.Contains(t, reported[0].Message, failure.Error())
 
 				// All publishers have returned. Read buffered events without
 				// sleeps, counting duplicates rather than overwriting by RunID.

@@ -83,7 +83,9 @@ func (b *toolErrorBoundary) Run(ctx context.Context, call fantasy.ToolCall) (fan
 		// the abort as a cancel while the tool's own text is kept.
 		return resp, errors.Join(ctxErr, err)
 	}
-	slog.Warn("Tool returned an error; reporting it to the model",
+	// Debug, not Warn: a tool error is now an ordinary result the model
+	// handles, and its text is already in the session.
+	slog.Debug("Tool returned an error; reporting it to the model",
 		"tool", call.Name,
 		"tool_call_id", call.ID,
 		"error", err,

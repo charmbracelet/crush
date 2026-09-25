@@ -60,7 +60,18 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		clone.Header.Del("chatgpt-account-id")
 	}
 
-	return base.RoundTrip(clone)
+	resp, err := base.RoundTrip(clone)
+
+	// Every plan-billed response reports where the plan's usage windows
+	// stand. Read it on the way past so the rest of Crush can show it
+	// without asking for it. Only the real backend is trusted for this, so
+	// a custom base URL cannot feed the readout invented numbers.
+	if host == "chatgpt.com" && resp != nil {
+		if u, ok := ParseUsage(resp.Header); ok {
+			RecordUsage(u)
+		}
+	}
+	return resp, err
 }
 
 // codexRequestBody strips request fields the Codex backend rejects.

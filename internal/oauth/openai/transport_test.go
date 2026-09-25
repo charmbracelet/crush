@@ -120,3 +120,72 @@ func TestTransport_NilTokenPassThrough(t *testing.T) {
 	resp.Body.Close()
 	require.Equal(t, "Bearer user-key", gotReq.Header.Get("Authorization"))
 }
+
+// TestTransport_RecordsPlanUsage covers the free half of the feature: the
+// figures ride along on responses Crush already makes, so no fetch is needed
+// to keep the readout current during a session.
+func TestTransport_RecordsPlanUsage(t *testing.T) {
+	// Not parallel: the snapshot is process-global.
+	resetUsage(t)
+
+	base := roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       http.NoBody,
+			Header:     planHeaders(),
+		}, nil
+	})
+
+	tr := &Transport{Base: base, Token: &oauth.Token{AccessToken: "at", AccountID: "acct"}}
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost,
+		"https://chatgpt.com/backend-api/codex/responses", http.NoBody)
+	require.NoError(t, err)
+
+	resp, err := tr.RoundTrip(req)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+
+	u, ok := LatestUsage()
+	require.True(t, ok, "a plan-billed response must record its usage")
+	require.Equal(t, 1.0, u.Spent())
+	require.Len(t, u.Windows, 2)
+}
+
+// TestTransport_IgnoresPlanUsageFromOtherHosts keeps a custom base URL from
+// feeding the readout numbers it made up.
+func TestTransport_IgnoresPlanUsageFromOtherHosts(t *testing.T) {
+	resetUsage(t)
+
+	base := roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       http.NoBody,
+			Header:     planHeaders(),
+		}, nil
+	})
+
+	tr := &Transport{Base: base, Token: &oauth.Token{AccessToken: "at"}}
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost,
+		"https://evil.example.com/v1/responses", http.NoBody)
+	require.NoError(t, err)
+
+	resp, err := tr.RoundTrip(req)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+
+	_, ok := LatestUsage()
+	require.False(t, ok, "only the real backend is trusted for plan usage")
+}
+
+// resetUsage clears the process-global snapshot around a test that writes it.
+func resetUsage(t *testing.T) {
+	t.Helper()
+	usageMu.Lock()
+	latestUsage = nil
+	usageMu.Unlock()
+	t.Cleanup(func() {
+		usageMu.Lock()
+		latestUsage = nil
+		usageMu.Unlock()
+	})
+}

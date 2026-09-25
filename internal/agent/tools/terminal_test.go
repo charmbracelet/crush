@@ -50,6 +50,13 @@ func resetTerminalManager(t *testing.T) {
 		for _, id := range mgr.List() {
 			if session, ok := mgr.Get(id); ok {
 				_ = session.Kill()
+				// Wait for the process to be reaped: a live session keeps its
+				// working directory locked on Windows, which would fail the
+				// temporary directory cleanup that runs right after this one.
+				select {
+				case <-session.Done():
+				case <-time.After(5 * time.Second):
+				}
 				_ = session.Close()
 			}
 			mgr.Remove(id)
@@ -77,6 +84,11 @@ func newTerminalToolForTest(t *testing.T) (fantasy.AgentTool, *fakeTerminalServi
 	t.Helper()
 
 	workingDir := t.TempDir()
+	// Register the teardown after the temporary directory: cleanups run in
+	// reverse order, so sessions are killed and reaped before Go removes the
+	// directory a live session would still hold open on Windows.
+	resetTerminalManager(t)
+
 	permissions := &mockBashPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}
 	terminals := newFakeTerminalService()
 

@@ -17,7 +17,7 @@ func TestInteractiveSessionManagerStartAssignsID(t *testing.T) {
 		WorkingDir: t.TempDir(),
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = session.Kill(); _ = session.Close() })
+	t.Cleanup(func() { stopTestSession(session) })
 
 	require.NotEmpty(t, session.ID())
 	require.Equal(t, session.ID(), session.ID())
@@ -79,7 +79,7 @@ func TestInteractiveSessionManagerRegister(t *testing.T) {
 		WorkingDir: t.TempDir(),
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = session.Kill(); _ = session.Close() })
+	t.Cleanup(func() { stopTestSession(session) })
 
 	require.Empty(t, session.ID())
 	require.NoError(t, m.Register(session))

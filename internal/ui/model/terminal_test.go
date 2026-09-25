@@ -90,6 +90,18 @@ func (*terminalTestWorkspace) AgentIsBusy() bool { return false }
 
 func (*terminalTestWorkspace) PermissionSkipRequests() bool { return false }
 
+// stopInteractiveSession ends a session and waits for its process to be
+// reaped, so the working directory it held is released before Go removes
+// the temporary directory: Windows locks a live process's directory.
+func stopInteractiveSession(session *shell.InteractiveSession) {
+	_ = session.Kill()
+	select {
+	case <-session.Done():
+	case <-time.After(5 * time.Second):
+	}
+	_ = session.Close()
+}
+
 // drainInteractiveManager empties the global interactive session manager.
 // Sessions it owns are global, so these tests must not run in parallel.
 func drainInteractiveManager(t *testing.T) {
@@ -98,8 +110,7 @@ func drainInteractiveManager(t *testing.T) {
 	mgr := shell.GetInteractiveSessionManager()
 	for _, id := range mgr.List() {
 		if session, ok := mgr.Get(id); ok {
-			_ = session.Kill()
-			_ = session.Close()
+			stopInteractiveSession(session)
 		}
 		mgr.Remove(id)
 	}
@@ -127,8 +138,7 @@ func newAgentSession(t *testing.T, command string) *shell.InteractiveSession {
 	require.NoError(t, err)
 	require.NoError(t, shell.GetInteractiveSessionManager().Register(session))
 	t.Cleanup(func() {
-		_ = session.Kill()
-		_ = session.Close()
+		stopInteractiveSession(session)
 		shell.GetInteractiveSessionManager().Remove(session.ID())
 	})
 	return session

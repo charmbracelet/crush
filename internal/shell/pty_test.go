@@ -25,11 +25,22 @@ func newTestSession(t *testing.T, command string) *InteractiveSession {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_ = session.Kill()
-		_ = session.Close()
+		stopTestSession(session)
 	})
 
 	return session
+}
+
+// stopTestSession ends a session and waits for its process to be reaped, so
+// the working directory it held is released before Go removes the temporary
+// directory: a live process keeps its directory locked on Windows.
+func stopTestSession(session *InteractiveSession) {
+	_ = session.Kill()
+	select {
+	case <-session.Done():
+	case <-time.After(5 * time.Second):
+	}
+	_ = session.Close()
 }
 
 func waitForExit(t *testing.T, session *InteractiveSession) {
@@ -106,8 +117,7 @@ func TestInteractiveSessionMinimumSize(t *testing.T) {
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_ = session.Kill()
-		_ = session.Close()
+		stopTestSession(session)
 	})
 
 	cols, rows := session.Size()

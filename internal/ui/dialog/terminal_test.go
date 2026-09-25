@@ -42,8 +42,7 @@ func newSizedTerminalDialogForTest(t *testing.T, command string, cols, rows int,
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_ = session.Kill()
-		_ = session.Close()
+		stopTestSession(session)
 	})
 
 	s := styles.CharmtonePantera()
@@ -451,4 +450,16 @@ func TestTerminalDialogUnfocusedPaintsGhostCursor(t *testing.T) {
 func mustScreen(t *testing.T) uv.ScreenBuffer {
 	t.Helper()
 	return uv.NewScreenBuffer(80, 24)
+}
+
+// stopTestSession ends a session and waits for its process to be reaped, so
+// the working directory it held is released before Go removes the temporary
+// directory: a live process keeps its directory locked on Windows.
+func stopTestSession(session *shell.InteractiveSession) {
+	_ = session.Kill()
+	select {
+	case <-session.Done():
+	case <-time.After(5 * time.Second):
+	}
+	_ = session.Close()
 }

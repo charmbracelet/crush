@@ -3,6 +3,7 @@
 package shell
 
 import (
+	"context"
 	"os/exec"
 	"testing"
 
@@ -37,7 +38,7 @@ func TestSignaledExitCode(t *testing.T) {
 	_, ok := signaledExitCode(nil)
 	require.False(t, ok)
 
-	cmd := exec.Command("sh", "-c", "kill -TERM $$")
+	cmd := exec.CommandContext(context.Background(), "sh", "-c", "kill -TERM $$")
 	err := cmd.Run()
 	require.Error(t, err)
 

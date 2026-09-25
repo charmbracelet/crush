@@ -138,6 +138,10 @@ type InteractiveSession struct {
 	palette   [16]color.Color
 	paletteOK bool
 	overrides map[int]color.Color
+
+	// cancel tears the child down with the session. It is released once the
+	// process is reaped or killed.
+	cancel context.CancelFunc
 }
 
 // ErrCommandBlocked is returned when a block function rejects the command
@@ -352,9 +356,14 @@ func NewInteractiveSession(opts InteractiveSessionOptions) (*InteractiveSession,
 	registerOscHandlers(session)
 
 	shellPath, args := interactiveShellCommand(opts.Command)
-	cmd := exec.Command(shellPath, args...) // #nosec G204 -- the command is the caller's intent.
+	// The child runs for as long as the session does: the context exists so
+	// the process cannot outlive it, and it is released once the child is
+	// reaped or killed.
+	ctx, cancel := context.WithCancel(context.Background())
+	cmd := exec.CommandContext(ctx, shellPath, args...) // #nosec G204 -- the command is the caller's intent.
 	cmd.Dir = opts.WorkingDir
 	cmd.Env = interactiveEnv(opts.Env)
+	session.cancel = cancel
 
 	if err := configureInteractiveProcess(cmd, pty); err != nil {
 		_ = pty.Close()
@@ -477,6 +486,11 @@ func (s *InteractiveSession) waitLoop() {
 	s.mu.Unlock()
 	s.completedAt.Store(time.Now().Unix() / 60)
 	syncWorkDir(s)
+
+	// The child is gone: release the context that would otherwise kill it.
+	if s.cancel != nil {
+		s.cancel()
+	}
 
 	close(s.done)
 	s.signalDirty()
@@ -785,7 +799,11 @@ func (s *InteractiveSession) Kill() error {
 	if closed {
 		return nil
 	}
-	return killInteractiveProcess(s.cmd)
+	err := killInteractiveProcess(s.cmd)
+	if s.cancel != nil {
+		s.cancel()
+	}
+	return err
 }
 
 // Close releases the PTY and unblocks the emulator's input pipe. The child

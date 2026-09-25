@@ -21,6 +21,7 @@ func (s *stubDialog) HandleMsg(msg tea.Msg) Action {
 	s.received = append(s.received, msg)
 	return nil
 }
+
 func (s *stubDialog) Draw(_ uv.Screen, area uv.Rectangle) *tea.Cursor {
 	s.areas = append(s.areas, area)
 	return nil

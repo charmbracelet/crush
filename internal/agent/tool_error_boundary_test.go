@@ -4,12 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sync/atomic"
+	"syscall"
 	"testing"
-	"time"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent/tools"
@@ -339,7 +340,6 @@ type boundaryRun struct {
 	finish      *message.Finish
 	toolResults []message.ToolResult
 	runErr      error
-	elapsed     time.Duration
 }
 
 // boundaryHarness runs one prompt through sessionAgent.Run with the given
@@ -372,9 +372,8 @@ func runBoundaryHarness(t *testing.T, toolName, input string, buildTool func(h *
 	require.NoError(t, err)
 	h.sessionID = sess.ID
 
-	start := time.Now()
 	_, runErr := h.agent.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, Prompt: "go"})
-	out := boundaryRun{llmCalls: model.calls.Load(), runErr: runErr, elapsed: time.Since(start)}
+	out := boundaryRun{llmCalls: model.calls.Load(), runErr: runErr}
 
 	msgs, err := env.messages.List(t.Context(), sess.ID)
 	require.NoError(t, err)
@@ -431,34 +430,27 @@ func TestToolErrorBoundary_UnwrappedGoErrorAbortsTurn(t *testing.T) {
 func TestToolErrorBoundary_NetworkErrorDoesNotTriggerModelRetries(t *testing.T) {
 	t.Parallel()
 
+	// The error download.go returns for a refused connection: a *url.Error
+	// wrapping a *net.OpError wrapping an errno, which satisfies net.Error
+	// at every level. Built directly rather than dialed, so the test does
+	// not depend on how fast the runner refuses a connection.
+	toolErr := fmt.Errorf("failed to download from URL: %w", &url.Error{
+		Op:  "Get",
+		URL: "http://127.0.0.1:1/",
+		Err: &net.OpError{Op: "dial", Net: "tcp", Err: &os.SyscallError{Syscall: "connect", Err: syscall.ECONNREFUSED}},
+	})
 	res := runBoundaryHarness(t, "boom", `{"x":1}`, func(*boundaryHarness) fantasy.AgentTool {
-		return boundaryTool("boom", func(ctx context.Context) (fantasy.ToolResponse, error) {
-			// Same shape as download.go: a *url.Error wrapping a net.Error,
-			// which fantasy's retry loop would otherwise treat as retryable
-			// and replay the whole step (model request included) for.
-			req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://127.0.0.1:1/", nil)
-			if err != nil {
-				return fantasy.ToolResponse{}, err
-			}
-			resp, err := (&http.Client{Timeout: 2 * time.Second}).Do(req)
-			if resp != nil {
-				resp.Body.Close()
-			}
-			return fantasy.ToolResponse{}, fmt.Errorf("failed to download from URL: %w", err)
+		return boundaryTool("boom", func(context.Context) (fantasy.ToolResponse, error) {
+			return fantasy.ToolResponse{}, toolErr
 		})
 	}, true)
 
 	require.NoError(t, res.runErr)
 	require.Equal(t, int32(2), res.llmCalls, "no retry: one request to get the call, one to recover")
-	require.Less(t, res.elapsed, 5*time.Second, "no exponential backoff must run for a tool failure")
 	require.Equal(t, message.FinishReasonEndTurn, res.finish.Reason)
 	require.Len(t, res.toolResults, 1)
 	require.True(t, res.toolResults[0].IsError)
-	// The OS-specific wording of a refused connection differs (Windows
-	// says "actively refused"), so assert on the tool's own prefix and the
-	// address instead.
-	require.Contains(t, res.toolResults[0].Content, "failed to download from URL")
-	require.Contains(t, res.toolResults[0].Content, "127.0.0.1:1")
+	require.Equal(t, toolErr.Error(), res.toolResults[0].Content)
 }
 
 func TestToolErrorBoundary_UserCancelDuringToolStillCancelsTurn(t *testing.T) {

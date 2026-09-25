@@ -106,6 +106,23 @@ func TestToolErrorBoundary_KeepsStopTurnAndMetadataOnError(t *testing.T) {
 	require.JSONEq(t, `{"hook":{"halt":true}}`, resp.Metadata)
 }
 
+func TestToolErrorBoundary_KeepsPartialOutputAheadOfError(t *testing.T) {
+	t.Parallel()
+
+	run := func(content string) fantasy.ToolResponse {
+		inner := boundaryTool("boom", func(context.Context) (fantasy.ToolResponse, error) {
+			return fantasy.NewTextResponse(content), errors.New("exit status 1")
+		})
+		resp, err := newToolErrorBoundary(inner).Run(t.Context(), fantasy.ToolCall{ID: "tc1", Name: "boom", Input: `{"x":1}`})
+		require.NoError(t, err)
+		require.True(t, resp.IsError)
+		return resp
+	}
+
+	require.Equal(t, "line 1\nline 2\n\nexit status 1", run("line 1\nline 2\n").Content)
+	require.Equal(t, "exit status 1", run(" \n").Content, "whitespace alone is not output")
+}
+
 func TestToolErrorBoundary_DelegatesInfoAndProviderOptions(t *testing.T) {
 	t.Parallel()
 

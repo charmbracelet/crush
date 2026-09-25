@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
+	"unicode"
 
 	"charm.land/fantasy"
 )
@@ -14,20 +16,14 @@ import (
 //
 // fantasy treats any error returned from AgentTool.Run as critical: the
 // whole step is discarded, the agent loop returns the error, and the model
-// never sees what went wrong. Errors that satisfy net.Error additionally
-// trip fantasy's retry loop, which re-requests the model and re-runs the
-// tool before giving up. That covers far more than network failures: a
-// syscall.Errno implements both Timeout and Temporary, so any wrapped
-// filesystem error (ENOENT, ENOTDIR, EACCES from os.Stat, os.ReadFile or
-// os.WriteFile) matches net.Error through errors.As as well. Measured
-// against fantasy v0.43.x with a real model, a view of a path under a
-// regular file cost 3 retries with 5s, 10s and 20s backoff and 4 model
-// requests before the turn ended with "Provider Error". Most tool errors
-// in crush are ordinary failures the model can recover from (an invalid
-// enum value, an unreachable URL, a path it cannot write), so they are
-// converted into error responses here. The text is unchanged; only the
-// channel differs. Because the error never reaches fantasy, the retry
-// loop never sees it either.
+// never sees what went wrong. (Before fantasy v0.45.1 it was worse: any
+// error matching net.Error, which includes every wrapped syscall.Errno,
+// also tripped the retry loop, so a view of a path under a regular file
+// cost 3 retries and 4 model requests before "Provider Error".) Most tool
+// errors in crush are ordinary failures the model can recover from (an
+// invalid enum value, an unreachable URL, a path it cannot write), so they
+// are converted into error responses here. The error text is unchanged;
+// any output the tool produced before failing is kept ahead of it.
 //
 // Cancellation is the exception. When the run context is already done the
 // error passes through untouched, so fantasy aborts the turn and the
@@ -90,7 +86,13 @@ func (b *toolErrorBoundary) Run(ctx context.Context, call fantasy.ToolCall) (fan
 		"tool_call_id", call.ID,
 		"error", err,
 	)
-	out := fantasy.NewTextErrorResponse(err.Error())
+	// Keep any output the tool produced before it failed, ahead of the
+	// error, so the model sees both.
+	content := err.Error()
+	if partial := strings.TrimRightFunc(resp.Content, unicode.IsSpace); partial != "" {
+		content = partial + "\n\n" + content
+	}
+	out := fantasy.NewTextErrorResponse(content)
 	// Keep whatever the inner tool decided about the turn and its metadata
 	// (a hook halt, for example) so the error result behaves like any other
 	// error response from that tool.

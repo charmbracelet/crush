@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -446,7 +447,7 @@ func TestPathDedupe_DifferentPaths_DifferentWorkspaces(t *testing.T) {
 
 // TestPathDedupe_FirstWinsKeepsOriginalEnv verifies that the second
 // create at the same path returns the *originating* client's Env in
-// its proto and does not mutate the existing workspace's YOLO/Debug
+// its proto and does not mutate the existing workspace's PermissionMode/Debug
 // flags.
 func TestPathDedupe_FirstWinsKeepsOriginalEnv(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
@@ -463,23 +464,23 @@ func TestPathDedupe_FirstWinsKeepsOriginalEnv(t *testing.T) {
 
 	originalEnv := []string{"FOO=bar"}
 	argsA := protoWS(cwd, dataDir, uuid.New().String())
-	argsA.YOLO = true
+	argsA.PermissionMode = proto.WorkspacePermissionModeYolo
 	argsA.Env = originalEnv
 	wsA, protoA, err := b.CreateWorkspace(argsA)
 	require.NoError(t, err)
-	require.True(t, protoA.YOLO)
+	require.Equal(t, proto.WorkspacePermissionModeYolo, protoA.PermissionMode)
 	require.Equal(t, originalEnv, protoA.Env)
 
 	argsB := protoWS(cwd, dataDir, uuid.New().String())
-	argsB.YOLO = false
+	argsB.PermissionMode = proto.WorkspacePermissionModeNormal
 	argsB.Debug = true
 	argsB.Env = []string{"BAZ=qux"}
 	_, protoB, err := b.CreateWorkspace(argsB)
 	require.NoError(t, err)
 	require.Equal(t, protoA.ID, protoB.ID)
-	require.True(t, protoB.YOLO, "first wins: YOLO must remain true")
+	require.Equal(t, proto.WorkspacePermissionModeYolo, protoB.PermissionMode, "first wins: PermissionMode must remain yolo")
 	require.Equal(t, originalEnv, protoB.Env, "proto must carry the originating client's Env")
-	require.Equal(t, wsA.Cfg.Overrides().SkipPermissionRequests, true)
+	require.Equal(t, permission.PermissionModeYolo, wsA.Cfg.Overrides().PermissionMode)
 }
 
 // TestPathDedupe_Symlink confirms two paths that resolve to the same
@@ -686,7 +687,7 @@ func xdgIsolated(t *testing.T) {
 }
 
 // TestFirstWinsMismatch_LogsOnFlagDifferences verifies that the
-// debug mismatch line is emitted when any of YOLO, Debug, DataDir,
+// debug mismatch line is emitted when any of PermissionMode, Debug, DataDir,
 // or Env differs between the first and second CreateWorkspace at
 // the same path, and that the existing workspace's Debug flag is
 // not overwritten.
@@ -697,7 +698,7 @@ func TestFirstWinsMismatch_LogsOnFlagDifferences(t *testing.T) {
 	}{
 		{
 			name:   "yolo",
-			mutate: func(p *proto.Workspace) { p.YOLO = true },
+			mutate: func(p *proto.Workspace) { p.PermissionMode = proto.WorkspacePermissionModeYolo },
 		},
 		{
 			name:   "debug",
@@ -729,7 +730,7 @@ func TestFirstWinsMismatch_LogsOnFlagDifferences(t *testing.T) {
 			wsA, _, err := b.CreateWorkspace(argsA)
 			require.NoError(t, err)
 			originalDebug := wsA.Cfg.Config().Options.Debug
-			originalYOLO := wsA.Cfg.Overrides().SkipPermissionRequests
+			originalMode := wsA.Cfg.Overrides().PermissionMode
 
 			argsB := protoWS(cwd, dataDir, uuid.New().String())
 			argsB.Env = []string{"FOO=bar"} // identical by default
@@ -742,8 +743,8 @@ func TestFirstWinsMismatch_LogsOnFlagDifferences(t *testing.T) {
 				"Workspace flag mismatch on duplicate create",
 				"expected debug log for mismatching %s", tc.name,
 			)
-			// Existing workspace's YOLO and Debug must not change.
-			require.Equal(t, originalYOLO, wsA.Cfg.Overrides().SkipPermissionRequests, "YOLO must be immutable on first-wins")
+			// Existing workspace's PermissionMode and Debug must not change.
+			require.Equal(t, originalMode, wsA.Cfg.Overrides().PermissionMode, "PermissionMode must be immutable on first-wins")
 			require.Equal(t, originalDebug, wsA.Cfg.Config().Options.Debug, "Debug must be immutable on first-wins")
 		})
 	}

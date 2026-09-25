@@ -425,6 +425,24 @@ const (
 
 type Permissions struct {
 	AllowedTools []string `json:"allowed_tools,omitempty" jsonschema:"description=List of tools that don't require permission prompts,example=bash,example=view"`
+	// BlockedCommands adds to the built-in list of commands treated as
+	// dangerous. Dangerous commands are prompted for in normal mode, and
+	// blocked at exec time when they turn up indirectly.
+	BlockedCommands []string `json:"blocked_commands,omitempty" jsonschema:"description=Extra shell commands to treat as dangerous (prompted for in normal mode),example=kubectl,example=terraform"`
+	// AllowedCommands removes entries from the effective dangerous list,
+	// including the built-in defaults.
+	AllowedCommands []string `json:"allowed_commands,omitempty" jsonschema:"description=Shell commands to drop from the dangerous list so they stop prompting,example=curl,example=ssh"`
+	// SafeCommands are exact command lines that skip the permission prompt
+	// entirely, e.g. "go build" or "cargo check". An entry matches only when
+	// the command is written exactly as given, with no extra arguments and
+	// no flags, so "go build" never covers "go build -o /usr/local/bin/x".
+	//
+	// This is the narrow form on purpose. The built-in list carries a flag
+	// policy per command, which is what lets `git log` through while holding
+	// back `git push` and `git diff --output=FILE`. Expressing that in
+	// configuration would be a small security language, and the thing people
+	// actually want to say is "the exact command I run fifty times a day".
+	SafeCommands []string `json:"safe_commands,omitempty" jsonschema:"description=Exact command lines that skip the permission prompt. Matched literally with no extra arguments,example=go build,example=cargo check"`
 }
 
 type TrailerStyle string

@@ -959,19 +959,11 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 		return Model{}, Model{}, err
 	}
 
-	var largeCatwalkModel *catwalk.Model
-	var smallCatwalkModel *catwalk.Model
-
-	for _, m := range largeProviderCfg.Models {
-		if m.ID == largeModelCfg.Model {
-			largeCatwalkModel = &m
-		}
-	}
-	for _, m := range smallProviderCfg.Models {
-		if m.ID == smallModelCfg.Model {
-			smallCatwalkModel = &m
-		}
-	}
+	// Resolve through GetModel so credential-scoped catalogs (OAuth
+	// providers like Copilot keep subscription-granted models outside
+	// the static Models list) are usable for agent selection.
+	largeCatwalkModel := c.cfg.Config().GetModel(largeModelCfg.Provider, largeModelCfg.Model)
+	smallCatwalkModel := c.cfg.Config().GetModel(smallModelCfg.Provider, smallModelCfg.Model)
 
 	if largeCatwalkModel == nil {
 		return Model{}, Model{}, errLargeModelNotFound
@@ -1406,6 +1398,10 @@ func (c *coordinator) UpdateModels(ctx context.Context) error {
 	// dialog's ChatGPT section empty. Fill it in lazily; the guard makes
 	// this a no-op once the catalog exists.
 	c.cfg.RefetchOpenAIChatGPTModels(ctx)
+
+	// Same for GitHub Copilot: refresh the subscription's model catalog
+	// once it grows stale. TTL-gated, so a no-op while it is fresh.
+	c.cfg.RefetchCopilotModels(ctx)
 
 	agent, name := c.activeAgent()
 	return c.updateAgentModels(ctx, agent, name)

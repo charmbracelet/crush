@@ -396,6 +396,7 @@ dialog.
 | --- | --- |
 | Charmtone Pantera | `charmtone-panther` (default) |
 | Gruvbox Dark | `gruvbox-dark` |
+| Matrix Dark | `matrix-dark` |
 
 ### LSPs
 

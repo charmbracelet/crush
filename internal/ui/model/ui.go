@@ -661,6 +661,9 @@ func (m *UI) Init() tea.Cmd {
 	// polling for checkouts made outside Crush.
 	cmds = append(cmds, m.fetchGitBranch(), m.gitBranchTicker())
 	cmds = append(cmds, m.hyperCreditsTicker())
+	// Plan usage is likewise shown from the first frame on. The fetch is a
+	// no-op unless a ChatGPT plan is signed in.
+	cmds = append(cmds, m.fetchPlanUsage(), m.planUsageTicker())
 	// Prime the memoized MCP state off-thread. There is deliberately no
 	// wait for server-side MCP initialization: the init gate is
 	// process-local and only armed where mcp.Initialize runs (the server),
@@ -1524,6 +1527,16 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.gitBranch = msg.branch
 	case gitBranchPollMsg:
 		cmds = append(cmds, m.fetchGitBranch(), m.gitBranchTicker())
+	case planUsageUpdatedMsg:
+		// The snapshot lives in the openai package; this message only
+		// says a new one arrived so the header redraws.
+	case planUsagePollMsg:
+		// As with credits, responses keep the figures current while a
+		// session runs, so the poll only covers idle time.
+		if !m.isAgentBusy() {
+			cmds = append(cmds, m.fetchPlanUsage())
+		}
+		cmds = append(cmds, m.planUsageTicker())
 	case util.InfoMsg:
 		if msg.Type == util.InfoTypeError {
 			slog.Error("Error reported", "error", msg.Msg)
@@ -2944,6 +2957,10 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 	} else if m.com.IsHyper() {
 		cmds = append(cmds, m.fetchHyperCredits())
 	}
+
+	// A sign-in or a model switch may have just made a ChatGPT plan the
+	// one in use, so read its usage rather than waiting for the poll.
+	cmds = append(cmds, m.fetchPlanUsage())
 
 	return tea.Batch(cmds...)
 }

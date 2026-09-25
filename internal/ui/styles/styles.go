@@ -26,6 +26,15 @@ const (
 	ModelIcon       string = "◇"
 	HypercreditIcon string = "◆"
 
+	// Plan usage readouts are marked with a glyph that echoes the
+	// provider's own. Only the selected provider's plan is ever shown, so
+	// these never appear side by side and can each lean into their brand.
+	//
+	// The text-presentation selector on the sparkle keeps terminals from
+	// drawing it as a wide colour emoji.
+	ClaudeUsageIcon  string = "\u2747\ufe0e" // Anthropic's asterisk
+	ChatGPTUsageIcon string = "\u058e"       // eternity sign, a knot like OpenAI's
+
 	ArrowRightIcon string = "→"
 
 	// CodespanPadding is the padding rendered around inline code spans in
@@ -102,6 +111,7 @@ type Styles struct {
 		Diagonals         lipgloss.Style // Style for diagonal separators (╱)
 		Percentage        lipgloss.Style // Style for context percentage
 		HypercreditIcon   lipgloss.Style // Style for Hypercredit count (◆ N)
+		PlanUsage         PlanUsage      // Subscription plan usage readout
 		Keystroke         lipgloss.Style // Style for keystroke hints (e.g., "ctrl+d")
 		KeystrokeTip      lipgloss.Style // Style for keystroke action text (e.g., "open", "close")
 		WorkingDir        lipgloss.Style // Style for current working directory
@@ -281,6 +291,7 @@ type Styles struct {
 		Cost                 lipgloss.Style // "$0.42" cost readout
 		HypercreditIcon      lipgloss.Style // Hypercredit icon (◆)
 		HypercreditText      lipgloss.Style // Remaining Hypercredits text
+		PlanUsage            PlanUsage      // Subscription plan usage readout
 	}
 
 	// Resource styles the LSP/MCP/skills sidebar lists: their heading,
@@ -643,6 +654,37 @@ type Styles struct {
 		HelpKey            lipgloss.Style // Keystroke hint style
 		HelpText           lipgloss.Style // Help action text style
 		Area               lipgloss.Style // Pills area container
+	}
+}
+
+// PlanUsage styles a subscription plan's usage readout. The same figures
+// appear in the header and in the sidebar, so the thresholds that colour
+// them live here rather than at either call site.
+type PlanUsage struct {
+	Icon lipgloss.Style // Usage icon, in the plan's default colour
+	// ChatGPTIcon draws OpenAI's mark in its own colour. Only one plan is
+	// ever on screen, so each provider's mark can carry its own tint
+	// without the two clashing.
+	ChatGPTIcon lipgloss.Style
+	Spent       lipgloss.Style // A window with room left
+	Elevated    lipgloss.Style // A window past 75% spent
+	High        lipgloss.Style // A window past 85% spent
+	Critical    lipgloss.Style // A window past 95% spent
+	Label       lipgloss.Style // Window names and separators
+}
+
+// Window returns the style for a window that is spent fraction used, so a
+// glance says how much room is left without reading the number.
+func (p PlanUsage) Window(spent float64) lipgloss.Style {
+	switch {
+	case spent >= 0.95:
+		return p.Critical
+	case spent >= 0.85:
+		return p.High
+	case spent >= 0.75:
+		return p.Elevated
+	default:
+		return p.Spent
 	}
 }
 

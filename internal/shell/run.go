@@ -291,18 +291,28 @@ type execMiddleware = func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc
 
 // standardHandlers returns the exec-handler middleware chain used by both
 // [Run] and [Shell]. Order matters:
-//  1. builtins first (so Crush's in-process jq wins over any PATH binary);
-//  2. script dispatch (shebang / binary / shell-source for path-prefixed
-//     argv[0], no-op for bare commands) — runs before the block list so
-//     that deny rules see the already-resolved argv of anything the
-//     script exec's rather than the outer path-prefixed wrapper;
-//  3. block list;
+//  1. block list first, so nothing downstream can route around it. A
+//     builtin, a shebang script, and a binary are all subject to the same
+//     rules, and a script named after a denied command is caught by the
+//     name it was invoked under;
+//  2. builtins (so Crush's in-process jq wins over any PATH binary);
+//  3. script dispatch (shebang / binary / shell-source for path-prefixed
+//     argv[0], no-op for bare commands). The shell-source branch builds a
+//     nested runner carrying the same block list, so deny rules keep
+//     applying to commands an in-process script invokes;
 //  4. optional Go coreutils (only when useGoCoreUtils is on).
+//
+// What this chain can and cannot see is worth stating plainly, because it
+// is easy to assume more: it observes commands this interpreter dispatches
+// itself. A command that runs inside a *child process* — a shebang script's
+// interpreter, `sh -c`, make, a language runtime — is invisible to it. The
+// block list is a guardrail against invoking something dangerous by
+// accident, not a sandbox.
 func standardHandlers(blockFuncs []BlockFunc) []execMiddleware {
 	handlers := []execMiddleware{
+		blockHandler(blockFuncs),
 		builtinHandler(),
 		scriptDispatchHandler(blockFuncs),
-		blockHandler(blockFuncs),
 	}
 	if useGoCoreUtils && coreUtilsExecHandler != nil {
 		handlers = append(handlers, coreUtilsExecHandler)
@@ -340,7 +350,10 @@ func blockHandler(blockFuncs []BlockFunc) execMiddleware {
 			}
 			for _, blockFunc := range blockFuncs {
 				if blockFunc(args) {
-					return fmt.Errorf("command is not allowed for security reasons: %q", args[0])
+					// Name the command that was recognised, not the wrapper
+					// in front of it, so this agrees with the warning the
+					// static check would have shown for the same command.
+					return fmt.Errorf("blocked: %s is a dangerous command", normalizeCommand(ResolveArgv(args)[0]))
 				}
 			}
 			return next(ctx, args)

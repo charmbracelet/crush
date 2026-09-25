@@ -727,6 +727,15 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Header.Diagonals = base.Foreground(o.primary)
 	s.Header.Percentage = muted
 	s.Header.HypercreditIcon = base.Foreground(o.secondary)
+	s.Header.PlanUsage = PlanUsage{
+		Icon:        base.Foreground(o.attention),
+		ChatGPTIcon: base.Foreground(o.infoMoreSubtle),
+		Spent:       muted,
+		Elevated:    base.Foreground(o.warningSubtle),
+		High:        base.Foreground(o.attention),
+		Critical:    base.Foreground(o.error),
+		Label:       subtle,
+	}
 	s.Header.Keystroke = muted
 	s.Header.KeystrokeTip = subtle
 	s.Header.WorkingDir = muted
@@ -980,6 +989,15 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.ModelInfo.Cost = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
 	s.ModelInfo.HypercreditIcon = lipgloss.NewStyle().Foreground(o.secondary)
 	s.ModelInfo.HypercreditText = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
+	s.ModelInfo.PlanUsage = PlanUsage{
+		Icon:        lipgloss.NewStyle().Foreground(o.attention),
+		ChatGPTIcon: lipgloss.NewStyle().Foreground(o.infoMoreSubtle),
+		Spent:       lipgloss.NewStyle().Foreground(o.fgMoreSubtle),
+		Elevated:    lipgloss.NewStyle().Foreground(o.warningSubtle),
+		High:        lipgloss.NewStyle().Foreground(o.attention),
+		Critical:    lipgloss.NewStyle().Foreground(o.error),
+		Label:       lipgloss.NewStyle().Foreground(o.fgMostSubtle),
+	}
 
 	// ResourceGroup
 	s.Resource.DefaultTitleFg = o.fgMoreSubtle

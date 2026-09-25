@@ -57,7 +57,15 @@ func (m *UI) modelInfo(width int) string {
 	if model != nil {
 		modelName = model.CatwalkCfg.Name
 	}
-	return common.ModelInfo(m.com.Styles, modelName, providerName, reasoningInfo, modelContext, width, m.hyperCredits)
+	// Plan usage is shown only for the provider actually selected, so a
+	// second plan signed in elsewhere does not leave stale figures here.
+	var plan *common.PlanReadout
+	if model != nil {
+		if r, ok := common.PlanUsageFor(model.ModelCfg.Provider); ok {
+			plan = &r
+		}
+	}
+	return common.ModelInfo(m.com.Styles, modelName, providerName, reasoningInfo, modelContext, width, m.hyperCredits, plan)
 }
 
 // updateSidebarScrollState renders the sidebar content and computes scroll

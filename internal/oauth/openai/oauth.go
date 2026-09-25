@@ -31,9 +31,13 @@ const (
 	// Issuer is OpenAI's authorization server.
 	Issuer = "https://auth.openai.com"
 
+	// BackendBaseURL is the root of the ChatGPT backend API. Codex
+	// requests are one service under it; plan usage is another.
+	BackendBaseURL = "https://chatgpt.com/backend-api"
+
 	// CodexBaseURL is the ChatGPT backend that serves Codex requests
 	// for ChatGPT-plan accounts. It speaks the Responses API.
-	CodexBaseURL = "https://chatgpt.com/backend-api/codex"
+	CodexBaseURL = BackendBaseURL + "/codex"
 
 	// Scope requests the claims needed to identify the account plus a
 	// refresh token via offline_access.

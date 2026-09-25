@@ -160,6 +160,13 @@ func renderHeaderDetails(
 		parts = append(parts, hc)
 	}
 
+	// Show how much of the selected provider's plan is spent. The provider
+	// reports it on every response, so this needs no fetch and is as
+	// current as the last message.
+	if plan, ok := common.PlanUsageFor(com.SelectedProviderID()); ok {
+		parts = append(parts, plan.Compact(t.Header.PlanUsage))
+	}
+
 	const keystroke = "ctrl+d"
 	if detailsOpen {
 		parts = append(parts, t.Header.Keystroke.Render(keystroke)+t.Header.KeystrokeTip.Render(" close"))

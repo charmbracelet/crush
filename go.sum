@@ -124,8 +124,8 @@ github.com/charmbracelet/x/term v0.2.2 h1:xVRT/S2ZcKdhhOuSP4t5cLi5o+JxklsoEObBSg
 github.com/charmbracelet/x/term v0.2.2/go.mod h1:kF8CY5RddLWrsgVwpw4kAa6TESp6EB5y3uxGLeCqzAI=
 github.com/charmbracelet/x/termios v0.1.1 h1:o3Q2bT8eqzGnGPOYheoYS8eEleT5ZVNYNy8JawjaNZY=
 github.com/charmbracelet/x/termios v0.1.1/go.mod h1:rB7fnv1TgOPOyyKRJ9o+AsTU/vK5WHJ2ivHeut/Pcwo=
-github.com/charmbracelet/x/vt v0.0.0-20260920004010-53e2afe73ae5 h1:Zsy7QX/GcTt7RJw8Hy9SiemYvheLimtK8dF+yx4MbVU=
-github.com/charmbracelet/x/vt v0.0.0-20260920004010-53e2afe73ae5/go.mod h1:u1LOIABor9JqY54oZdktK3TCRrgzP6tzHrDYx1nd3wY=
+github.com/charmbracelet/x/vt v0.0.0-20260925121430-ef6c49202246 h1:GDIFQnDu4m8CjLzXjMkSzGpmKcfIxXwue+FYChrizMM=
+github.com/charmbracelet/x/vt v0.0.0-20260925121430-ef6c49202246/go.mod h1:u1LOIABor9JqY54oZdktK3TCRrgzP6tzHrDYx1nd3wY=
 github.com/charmbracelet/x/windows v0.2.2 h1:IofanmuvaxnKHuV04sC0eBy/smG6kIKrWG2/jYn2GuM=
 github.com/charmbracelet/x/windows v0.2.2/go.mod h1:/8XtdKZzedat74NQFn0NGlGL4soHB0YQZrETF96h75k=
 github.com/charmbracelet/x/xpty v0.1.4 h1:4jaW7u+8AHQMxesiVc+zUMsspu7GyDwtJO+gy/tFtW4=

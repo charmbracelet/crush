@@ -33,6 +33,8 @@ require (
 	github.com/charmbracelet/x/exp/strings v0.1.0
 	github.com/charmbracelet/x/powernap v0.1.6
 	github.com/charmbracelet/x/term v0.2.2
+	github.com/charmbracelet/x/vt v0.0.0-20260925121430-ef6c49202246
+	github.com/charmbracelet/x/xpty v0.1.4
 	github.com/clipperhouse/displaywidth v0.11.0
 	github.com/clipperhouse/uax29/v2 v2.7.0
 	github.com/denisbrodbeck/machineid v1.0.1
@@ -107,9 +109,7 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/charmbracelet/x/conpty v0.2.0 // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
-	github.com/charmbracelet/x/vt v0.0.0-20260925121430-ef6c49202246 // indirect
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
-	github.com/charmbracelet/x/xpty v0.1.4 // indirect
 	github.com/coder/websocket v1.8.15 // indirect
 	github.com/creack/pty v1.1.24 // indirect
 	github.com/cyphar/filepath-securejoin v0.6.1 // indirect

@@ -173,6 +173,9 @@ type activeTerminalSession struct {
 	// command, so the user cannot interfere with the agent's work.
 	agentDriven bool
 	userCommand string
+	// chatSessionID is the chat session the terminal was opened in. It
+	// decides when the panel is hidden and restored.
+	chatSessionID string
 	// fullscreen is true while the terminal covers the whole window
 	// instead of docking in the chat column.
 	fullscreen bool
@@ -325,6 +328,11 @@ type UI struct {
 	// activeTerminal is the embedded interactive terminal session the
 	// terminal dialog is showing. Nil when no session is open.
 	activeTerminal *activeTerminalSession
+
+	// detachedTerminal holds a terminal whose panel was hidden because the
+	// user switched to another chat session. The process keeps running; the
+	// panel comes back when that session is opened again.
+	detachedTerminal *activeTerminalSession
 
 	// lastTerminalBell is the last child bell the status bar surfaced.
 	lastTerminalBell time.Time
@@ -915,6 +923,17 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.session = msg.session
 		m.sidebarOffset = 0
 		m.sessionFiles = msg.files
+
+		// The interactive terminal belongs to the chat session it was opened
+		// in: switching sessions hides it (the process keeps running), and
+		// returning to that session brings the panel back.
+		if m.activeTerminal != nil && m.activeTerminal.chatSessionID != msg.session.ID {
+			if cmd := m.detachTerminal(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		} else if cmd := m.restoreDetachedTerminal(msg.session.ID); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 		// Session switch: the memoized busy state and queued prompts
 		// belong to the previous session. Drop them and re-fetch
 		// off-thread so the queue pill and esc behavior track the new
@@ -1149,7 +1168,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 		m.chat.ScrollToBottom()
-		cmds = append(cmds, m.attachTerminalDialog(msg.Payload.Session, msg.Payload.Command, true, msg.Payload.AgentDriven))
+		cmds = append(cmds, m.attachTerminalDialog(msg.Payload.Session, msg.Payload.Command, true, msg.Payload.AgentDriven, msg.Payload.SessionID))
 		note := "The agent opened a terminal for you to act in"
 		if msg.Payload.AgentDriven {
 			note = "The agent is working in a terminal you can watch"
@@ -1164,7 +1183,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.activeTerminal != nil {
 			break
 		}
-		cmds = append(cmds, m.attachTerminalDialog(msg.Session, msg.UserCommand, false, false))
+		chatSessionID := ""
+		if m.session != nil {
+			chatSessionID = m.session.ID
+		}
+		cmds = append(cmds, m.attachTerminalDialog(msg.Session, msg.UserCommand, false, false, chatSessionID))
 	case terminalSpawnErrorMsg:
 		cmds = append(cmds, util.ReportError(fmt.Errorf("interactive terminal: %w", msg.Err)))
 	case dialog.TerminalOutputMsg:
@@ -5879,16 +5902,23 @@ func (m *UI) terminalDialogSize() (cols, rows int) {
 // opened (their output returns through the terminal tools); agentDriven
 // marks sessions the agent owns: their panel is a read-only view, so the
 // terminal never takes the keyboard and stays out of the focus ring.
-func (m *UI) attachTerminalDialog(session *shell.InteractiveSession, command string, agentStarted, agentDriven bool) tea.Cmd {
+// chatSessionID is the chat session the terminal belongs to, which decides
+// when the panel is hidden and restored.
+func (m *UI) attachTerminalDialog(session *shell.InteractiveSession, command string, agentStarted, agentDriven bool, chatSessionID string) tea.Cmd {
 	if session == nil {
 		return nil
 	}
 
+	// A new panel implies the previously detached terminal is gone: the
+	// single-session rule would have refused this attach otherwise.
+	m.detachedTerminal = nil
+
 	m.activeTerminal = &activeTerminalSession{
-		session:      session,
-		agentStarted: agentStarted,
-		agentDriven:  agentDriven,
-		userCommand:  command,
+		session:       session,
+		agentStarted:  agentStarted,
+		agentDriven:   agentDriven,
+		userCommand:   command,
+		chatSessionID: chatSessionID,
 	}
 
 	m.dialog.OpenDialogWithGrace(dialog.NewTerminalDialog(m.com, session, dialog.TerminalDialogOptions{
@@ -5918,6 +5948,50 @@ func (m *UI) attachTerminalDialog(session *shell.InteractiveSession, command str
 	}
 
 	return m.watchTerminalSession(session)
+}
+
+// detachTerminal hides the interactive terminal panel without ending the
+// session: the process keeps running in the background, and the panel can
+// be restored when the chat session it belongs to is opened again.
+func (m *UI) detachTerminal() tea.Cmd {
+	if m.activeTerminal == nil {
+		return nil
+	}
+
+	m.detachedTerminal = m.activeTerminal
+	m.activeTerminal = nil
+	m.dialog.CloseDialog(dialog.TerminalID)
+
+	var cmds []tea.Cmd
+	if m.focus == uiFocusTerminal {
+		m.focus = uiFocusEditor
+		cmds = append(cmds, m.textarea.Focus())
+	}
+	m.updateLayoutAndSize()
+	return tea.Batch(cmds...)
+}
+
+// restoreDetachedTerminal brings back a terminal panel that was hidden for
+// this chat session, if its process is still alive.
+func (m *UI) restoreDetachedTerminal(chatSessionID string) tea.Cmd {
+	t := m.detachedTerminal
+	if t == nil || t.chatSessionID != chatSessionID {
+		return nil
+	}
+	m.detachedTerminal = nil
+
+	if t.session.Exited() {
+		// The program is gone; there is nothing to show. Drop it so a new
+		// terminal can be started for this session.
+		shell.GetInteractiveSessionManager().Remove(t.session.ID())
+		return nil
+	}
+
+	cmd := m.attachTerminalDialog(t.session, t.userCommand, t.agentStarted, t.agentDriven, t.chatSessionID)
+	if t.fullscreen {
+		m.setTerminalFullscreen(true)
+	}
+	return cmd
 }
 
 // syncAgentTerminalSize keeps an agent-driven session at its ghost size:
@@ -6276,6 +6350,10 @@ func (m *UI) newSession() tea.Cmd {
 		return nil
 	}
 
+	// The terminal belongs to the session it was opened in: hide it while
+	// its process keeps running in the background.
+	detachCmd := m.detachTerminal()
+
 	planCmd := m.resetPlanModeState()
 	m.session = nil
 	m.sidebarOffset = 0
@@ -6296,6 +6374,7 @@ func (m *UI) newSession() tea.Cmd {
 	m.historyReset()
 	agenttools.ResetCache()
 	return tea.Batch(
+		detachCmd,
 		planCmd,
 		func() tea.Msg {
 			m.com.Workspace.LSPStopAll(context.Background())

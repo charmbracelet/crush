@@ -291,16 +291,16 @@ func TestTerminalDockContentRespectsMinInteractiveRows(t *testing.T) {
 // terminal around a live session. The command prints first so the session
 // watcher resolves without waiting for the sleep to end.
 func newAttachedTerminalUI(t *testing.T) (*UI, *shell.InteractiveSession) {
-	return newTerminalUIOfKind(t, false)
+	return newTerminalUIOfKind(t, false, "sess-A")
 }
 
 // newAgentDrivenTerminalUI returns a chat UI with a docked terminal the
 // agent owns: a read-only view the user cannot type into.
 func newAgentDrivenTerminalUI(t *testing.T) (*UI, *shell.InteractiveSession) {
-	return newTerminalUIOfKind(t, true)
+	return newTerminalUIOfKind(t, true, "sess-A")
 }
 
-func newTerminalUIOfKind(t *testing.T, agentDriven bool) (*UI, *shell.InteractiveSession) {
+func newTerminalUIOfKind(t *testing.T, agentDriven bool, chatSessionID string) (*UI, *shell.InteractiveSession) {
 	t.Helper()
 
 	u, _ := newTerminalTestUI(t)
@@ -308,12 +308,14 @@ func newTerminalUIOfKind(t *testing.T, agentDriven bool) (*UI, *shell.Interactiv
 	_, cmd := u.Update(pubsubEventTerminalRequest(terminal.Request{
 		ID:          "req-" + t.Name(),
 		ToolCallID:  "call-" + t.Name(),
+		SessionID:   chatSessionID,
 		Command:     "sh -c 'printf attached; sleep 30'",
 		AgentDriven: agentDriven,
 		Session:     session,
 	}))
 	_ = runCmdSync(cmd)
 	require.True(t, u.dialog.ContainsDialog(dialog.TerminalID))
+	require.Equal(t, chatSessionID, u.activeTerminal.chatSessionID)
 	if !agentDriven {
 		require.Equal(t, uiFocusTerminal, u.focus, "attaching a user-owned terminal focuses it")
 	}
@@ -414,6 +416,89 @@ func TestUserTerminalCtrlFStaysEditorKey(t *testing.T) {
 
 	u.handleKeyPressMsg(tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
 	require.False(t, u.activeTerminal.fullscreen, "ctrl+f must stay the editor's attach key")
+}
+
+// TestNewSessionHidesTerminalKeepingProcess checks that starting a new
+// session hides the terminal panel, while the process keeps running in the
+// background. (Before, the panel was drawn fullscreen: with no chat area to
+// dock into, the terminal took over the window.)
+func TestNewSessionHidesTerminalKeepingProcess(t *testing.T) {
+	u, term := newAttachedTerminalUI(t)
+	u.session = &session.Session{ID: "sess-A"}
+	require.True(t, u.dialog.ContainsDialog(dialog.TerminalID))
+
+	_ = runCmdSync(u.newSession())
+
+	require.Nil(t, u.activeTerminal, "no terminal is shown on the landing state")
+	require.False(t, u.dialog.ContainsDialog(dialog.TerminalID))
+	require.Equal(t, uiLanding, u.state)
+	require.Equal(t, uiFocusEditor, u.focus, "focus returns to the editor")
+
+	require.NotNil(t, u.detachedTerminal, "the session is kept for later")
+	require.Same(t, term, u.detachedTerminal.session)
+	require.Equal(t, "sess-A", u.detachedTerminal.chatSessionID)
+	require.False(t, term.Exited(), "the process keeps running")
+}
+
+// TestSessionSwitchHidesAndRestoresTerminal checks that the panel belongs to
+// the chat session it was opened in: switching away hides it, coming back
+// brings it back.
+func TestSessionSwitchHidesAndRestoresTerminal(t *testing.T) {
+	u, term := newAttachedTerminalUI(t)
+	u.session = &session.Session{ID: "sess-A"}
+
+	// Switch to another chat session.
+	_, _ = u.Update(loadSessionMsg{session: &session.Session{ID: "sess-B"}})
+	require.Nil(t, u.activeTerminal, "the panel hides on the switch")
+	require.False(t, u.dialog.ContainsDialog(dialog.TerminalID))
+	require.NotNil(t, u.detachedTerminal)
+	require.False(t, term.Exited(), "switching does not end the process")
+
+	// Come back to the session that owns it.
+	_, _ = u.Update(loadSessionMsg{session: &session.Session{ID: "sess-A"}})
+	require.NotNil(t, u.activeTerminal, "the panel comes back")
+	require.Same(t, term, u.activeTerminal.session, "the same process is shown")
+	require.True(t, u.dialog.ContainsDialog(dialog.TerminalID))
+	require.Nil(t, u.detachedTerminal)
+}
+
+// TestSessionSwitchRestoresFullscreen checks that the fullscreen view is
+// restored along with the panel.
+func TestSessionSwitchRestoresFullscreen(t *testing.T) {
+	u, _ := newAgentDrivenTerminalUI(t)
+	u.session = &session.Session{ID: "sess-A"}
+
+	u.focusTerminal()
+	u.setTerminalFullscreen(true)
+	require.True(t, u.activeTerminal.fullscreen)
+
+	_, _ = u.Update(loadSessionMsg{session: &session.Session{ID: "sess-B"}})
+	require.Nil(t, u.activeTerminal)
+
+	_, _ = u.Update(loadSessionMsg{session: &session.Session{ID: "sess-A"}})
+	require.NotNil(t, u.activeTerminal)
+	require.True(t, u.activeTerminal.fullscreen, "the fullscreen view is restored")
+}
+
+// TestSessionSwitchDropsDeadTerminal checks that a terminal whose process
+// ended while hidden is not restored, and is cleared so a new one can start.
+func TestSessionSwitchDropsDeadTerminal(t *testing.T) {
+	u, term := newAttachedTerminalUI(t)
+	u.session = &session.Session{ID: "sess-A"}
+
+	_ = runCmdSync(u.detachTerminal())
+	require.NoError(t, term.Kill())
+	select {
+	case <-term.Done():
+	case <-time.After(15 * time.Second):
+		t.Fatal("session did not exit in time")
+	}
+
+	_, _ = u.Update(loadSessionMsg{session: &session.Session{ID: "sess-A"}})
+	require.Nil(t, u.activeTerminal, "a dead terminal is not restored")
+	require.Nil(t, u.detachedTerminal)
+	_, stillRegistered := shell.GetInteractiveSessionManager().Get(term.ID())
+	require.False(t, stillRegistered, "the dead session is dropped from the manager")
 }
 
 func TestAgentDrivenTerminalFullscreenAbsorbsKeys(t *testing.T) {

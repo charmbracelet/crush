@@ -90,6 +90,7 @@ func TestUserMessageItem_MutatorsBumpVersion(t *testing.T) {
 		Role: message.User,
 		Parts: []message.ContentPart{
 			message.TextContent{Text: "Hello"},
+			message.BinaryContent{Path: "paste_1.txt", MIMEType: "text/plain", Data: []byte("hi")},
 		},
 	}
 	item := NewUserMessageItem(&sty, msg, r).(*UserMessageItem)
@@ -99,6 +100,9 @@ func TestUserMessageItem_MutatorsBumpVersion(t *testing.T) {
 	})
 	requireBump(t, "SetHighlight", item, func() {
 		item.SetHighlight(0, 0, 0, 3)
+	})
+	requireBump(t, "ToggleExpanded", item, func() {
+		item.ToggleExpanded()
 	})
 }
 

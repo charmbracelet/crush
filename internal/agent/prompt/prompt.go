@@ -26,6 +26,7 @@ type Prompt struct {
 	now        func() time.Time
 	platform   string
 	workingDir string
+	features   func() []string
 }
 
 type PromptDat struct {
@@ -58,6 +59,25 @@ func WithTimeFunc(fn func() time.Time) Option {
 func WithPlatform(platform string) Option {
 	return func(p *Prompt) {
 		p.platform = platform
+	}
+}
+
+// WithFeatures supplies the optional integrations that are actually
+// live, which decides whether a skill gated behind `requires:` is shown.
+//
+// This is a function rather than a slice because the answer can change
+// within a session: connecting memory from the command palette is meant
+// to work without a restart. A slice captured when the prompt was
+// constructed would freeze the answer given at startup, so the option is
+// re-asked on every build instead.
+//
+// Leaving it unset reports no features, which hides every gated skill.
+// That is the right default for the callers that do not set it — one-off
+// prompts like initialize and agentic_fetch, which have no memory
+// backend attached and so could not honor such a skill anyway.
+func WithFeatures(fn func() []string) Option {
+	return func(p *Prompt) {
+		p.features = fn
 	}
 }
 
@@ -196,6 +216,21 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 
 	// Deduplicate: user skills override builtins with the same name.
 	allSkills = skills.Deduplicate(allSkills)
+
+	// Hide skills whose required integration is switched off. A skill
+	// that documents tools the model cannot call is pure system-prompt
+	// overhead on every turn, and worse, it promises the model a tool
+	// that is not on its tool list.
+	//
+	// The features come from the live integration rather than from
+	// config, because the two can disagree: an integration the user
+	// enabled can still fail to start, and config alone would advertise
+	// the skill anyway.
+	var features []string
+	if p.features != nil {
+		features = p.features()
+	}
+	allSkills = skills.FilterUnavailable(allSkills, features)
 
 	// Filter out disabled skills.
 	allSkills = skills.Filter(allSkills, cfg.Options.DisabledSkills)

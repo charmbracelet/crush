@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/honcho"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -528,6 +529,15 @@ func (c *Commands) defaultCommands() []*CommandItem {
 			label = "Toggle To-Dos"
 		}
 		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_pills", label, "ctrl+t", ActionTogglePills{}))
+	}
+
+	// Offer memory sign-in when it is not yet connected, and a way
+	// out when it is. Reading the token file here is cheap and keeps
+	// the label truthful without watching for changes.
+	if honcho.SignedIn() {
+		commands = append(commands, NewCommandItem(c.com.Styles, "disconnect_memory", "Disconnect Memory", "", ActionDisconnectMemory{}))
+	} else {
+		commands = append(commands, NewCommandItem(c.com.Styles, "connect_memory", "Connect Memory", "", ActionOpenDialog{DialogID: OAuthHonchoID}).WithAliases("honcho"))
 	}
 
 	// Add a command for selecting notification style via picker dialog.

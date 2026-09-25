@@ -3,37 +3,40 @@
 package clipboard
 
 import (
-	"bytes"
 	"context"
+	"sync"
 
 	"golang.design/x/clipboard"
 )
 
-// ready reports whether the native clipboard is usable. Touching the clipboard
-// after a failed initialization may panic, and golang.design's Init is
-// idempotent and cheap once it has run, so every entry point asks it again
-// rather than tracking initialization state of our own.
+// initOnce single-flights initialization: golang.design's Init starts the
+// platform watcher (a pasteboard poll on macOS, a message listener on
+// Windows), and paying that on every write added a visible delay to every
+// copy. The exported Init goes through initClipboard, so repeated calls
+// return the cached result without touching the watcher again.
+var initOnce = sync.OnceValue(func() error {
+	return clipboard.Init()
+})
+
+// ready reports whether the native clipboard is usable.
 func ready() bool {
-	return clipboard.Init() == nil
+	return initOnce() == nil
 }
 
 func initClipboard() error {
-	return clipboard.Init()
+	return initOnce()
 }
 
 func writeText(text string) error {
 	if !ready() {
 		return ErrUnsupported
 	}
-	// A write error means the backend never took the clipboard; reading back
-	// catches the rest, where the write is accepted but the text is not served
-	// afterwards. Neither check subsumes the other: a failed write leaves an
-	// earlier identical copy in place, which reads back as a success.
+	// The write's own error is the failure signal. A read-back check here
+	// cost a full clipboard round-trip per copy — a synchronous
+	// NSPasteboard read on macOS, and an open-for-read that blocks while
+	// another app holds the clipboard on Windows — which made every copy
+	// feel delayed by hundreds of milliseconds.
 	if _, err := clipboard.Write(context.Background(), clipboard.FmtText, []byte(text)); err != nil {
-		return ErrWriteFailed
-	}
-	data, err := clipboard.Read(context.Background(), clipboard.FmtText)
-	if err != nil || !bytes.Equal(data, []byte(text)) {
 		return ErrWriteFailed
 	}
 	return nil

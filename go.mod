@@ -107,7 +107,7 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/charmbracelet/x/conpty v0.2.0 // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
-	github.com/charmbracelet/x/vt v0.0.0-20260920004010-53e2afe73ae5 // indirect
+	github.com/charmbracelet/x/vt v0.0.0-20260925121430-ef6c49202246 // indirect
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
 	github.com/charmbracelet/x/xpty v0.1.4 // indirect
 	github.com/coder/websocket v1.8.15 // indirect
@@ -208,5 +208,3 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )
-
-replace github.com/charmbracelet/x/vt => ../x/vt

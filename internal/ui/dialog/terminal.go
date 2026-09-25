@@ -2,6 +2,7 @@ package dialog
 
 import (
 	"fmt"
+	"image/color"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -40,12 +41,9 @@ type TerminalDialogOptions struct {
 	// Command is displayed in the header; for a bare interactive shell
 	// pass the user's shell path.
 	Command string
-	// AgentStarted marks sessions the agent opened, labeled in the header
-	// so the user can tell who created the session.
-	AgentStarted bool
-	// AgentDriven marks sessions the agent owns and drives itself: user
-	// keystrokes and mouse events are refused so the panel is a read-only
-	// view of the agent's work.
+	// AgentDriven marks sessions the agent owns and drives itself: the
+	// header names the agent as owner, and user keystrokes and mouse events
+	// are refused so the panel is a read-only view of the agent's work.
 	AgentDriven bool
 }
 
@@ -53,15 +51,15 @@ type TerminalDialogOptions struct {
 // The model owns the session lifecycle; the dialog only forwards input and
 // paints the emulator.
 type TerminalDialog struct {
-	com          *common.Common
-	session      *shell.InteractiveSession
-	command      string
-	agentStarted bool
-	agentDriven  bool
-	terminated   bool
-	contentRect  uv.Rectangle
-	closeKey     key.Binding
-	fullKey      key.Binding
+	com         *common.Common
+	session     *shell.InteractiveSession
+	command     string
+	agentDriven bool
+	terminated  bool
+	focused     bool
+	contentRect uv.Rectangle
+	closeKey    key.Binding
+	fullKey     key.Binding
 }
 
 var _ Dialog = (*TerminalDialog)(nil)
@@ -70,11 +68,10 @@ var _ Dialog = (*TerminalDialog)(nil)
 // already-running session.
 func NewTerminalDialog(com *common.Common, session *shell.InteractiveSession, opts TerminalDialogOptions) *TerminalDialog {
 	t := &TerminalDialog{
-		com:          com,
-		session:      session,
-		command:      opts.Command,
-		agentStarted: opts.AgentStarted,
-		agentDriven:  opts.AgentDriven,
+		com:         com,
+		session:     session,
+		command:     opts.Command,
+		agentDriven: opts.AgentDriven,
 	}
 	t.closeKey = key.NewBinding(
 		key.WithKeys("ctrl+q"),
@@ -267,9 +264,106 @@ func (t *TerminalDialog) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	uv.NewStyledString(box).Draw(scr, area)
 
 	t.contentRect = uv.Rect(area.Min.X+1, area.Min.Y+1+terminalHeaderLines, contentWidth, contentHeight)
-	t.session.Emulator().Draw(scr, t.contentRect)
+	t.paintEmulator(scr)
 
+	// The focused terminal shows the real host cursor; an unfocused one
+	// paints a ghost cursor instead so the caret (often the agent's, for
+	// read-only panels) stays visible.
+	if !t.focused {
+		t.paintGhostCursor(scr)
+		return nil
+	}
 	return t.cursor()
+}
+
+// paintEmulator draws the session's emulator and resolves the ANSI colors
+// in the cells through the emulator's palette. vt keeps SGR color codes as
+// indices in the cells it draws, and the host terminal would paint those
+// with its own palette; resolving them here keeps the embedded terminal on
+// the theme's colors instead.
+func (t *TerminalDialog) paintEmulator(scr uv.Screen) {
+	emu := t.session.Emulator()
+	emu.Draw(scr, t.contentRect)
+
+	area := t.contentRect
+	for y := area.Min.Y; y < area.Max.Y; y++ {
+		for x := area.Min.X; x < area.Max.X; x++ {
+			cell := scr.CellAt(x, y)
+			if cell == nil {
+				continue
+			}
+
+			fg, fgSet := resolveIndexed(cell.Style.Fg, emu)
+			bg, bgSet := resolveIndexed(cell.Style.Bg, emu)
+			if !fgSet && !bgSet {
+				continue
+			}
+
+			clone := cell.Clone()
+			if fgSet {
+				clone.Style.Fg = fg
+			}
+			if bgSet {
+				clone.Style.Bg = bg
+			}
+			scr.SetCell(x, y, clone)
+		}
+	}
+}
+
+// focused reports whether the terminal currently owns the keyboard. The
+// host UI sets it before each draw.
+func (t *TerminalDialog) SetFocused(focused bool) {
+	t.focused = focused
+}
+
+// paintGhostCursor inverts the cell under the emulator cursor so the caret
+// stays visible when the terminal does not own the keyboard and cannot
+// show the real cursor. On a read-only panel this is what makes the
+// agent's typing visible: the caret jumps to wherever it is writing.
+func (t *TerminalDialog) paintGhostCursor(scr uv.Screen) {
+	emu := t.session.Emulator()
+	if emu.CursorHidden() {
+		return
+	}
+
+	pos := emu.CursorPosition()
+	sx := t.contentRect.Min.X + pos.X
+	sy := t.contentRect.Min.Y + pos.Y
+	if !uv.Pos(sx, sy).In(t.contentRect) {
+		return
+	}
+
+	cell := scr.CellAt(sx, sy)
+	if cell == nil {
+		return
+	}
+
+	clone := cell.Clone()
+	clone.Style.Fg, clone.Style.Bg = clone.Style.Bg, clone.Style.Fg
+	scr.SetCell(sx, sy, clone)
+}
+
+// resolveIndexed maps a cell color that names an ANSI color slot onto the
+// emulator's palette. True colors and unset colors report false, and so does
+// a slot whose palette entry is the plain indexed color every terminal
+// starts with.
+func resolveIndexed(c color.Color, emu *vt.SafeEmulator) (color.Color, bool) {
+	var index int
+	switch c := c.(type) {
+	case ansi.BasicColor:
+		index = int(c)
+	case ansi.IndexedColor:
+		index = int(c)
+	default:
+		return nil, false
+	}
+
+	resolved := emu.IndexedColor(index)
+	if resolved == nil || resolved == c {
+		return nil, false
+	}
+	return resolved, true
 }
 
 // renderHeader builds the one-line header: "$ command" on the left, then
@@ -290,26 +384,23 @@ func (t *TerminalDialog) renderHeader(width int) string {
 	return ansi.Truncate(left+strings.Repeat(" ", pad)+status, width, "…")
 }
 
-// renderStatus builds the live status chip shown on the right: whether the
-// command is still running, and whether the agent opened this session or
-// the user did. The emulator below shows the activity itself; the chip
-// makes it clear at a glance who is driving and that work is happening.
+// renderStatus builds the live status chip shown on the right: who owns the
+// session and whether the command is still running. The emulator below
+// shows the activity itself; the chip makes it clear at a glance who is
+// driving and that work is happening.
 func (t *TerminalDialog) renderStatus() string {
 	sty := t.com.Styles
 
-	state := "● running"
-	if t.session.Exited() {
-		state = fmt.Sprintf("exited %d", t.session.ExitCode())
-	}
-	status := sty.Terminal.Status.Render(state)
-	if t.agentStarted {
-		status = sty.Terminal.Agent.Render("agent") + " " + status
-	}
+	owner := sty.Terminal.Owner.Render("user")
 	if t.agentDriven {
-		// The user watches but does not type here; say so plainly.
-		status = sty.Terminal.Hint.Render("read-only") + " " + status
+		owner = sty.Terminal.Owner.Render("agent")
 	}
-	return status + " "
+
+	state := sty.Terminal.Running.Render("● running")
+	if t.session.Exited() {
+		state = sty.Terminal.Exited.Render(fmt.Sprintf("exited %d", t.session.ExitCode()))
+	}
+	return owner + " " + state + " "
 }
 
 // cursor returns the emulator cursor, offset by the content area. It

@@ -64,7 +64,27 @@ func (t *TerminalToolRenderContext) RenderTool(sty *styles.Styles, width int, op
 		action = params.Action
 	}
 
-	return renderTerminalTool(sty, opts, cappedWidth, terminalActionLabel(action), sessionID, terminalActionDetail(meta, params), toolResultContent(opts))
+	content := toolResultContent(opts)
+	if opts.HasResult() && !opts.Result.IsError && !terminalShowsBody(action) {
+		// The screen read and write actions report is what the docked
+		// terminal is already showing live; keeping it would only
+		// duplicate the panel.
+		content = ""
+	}
+
+	return renderTerminalTool(sty, opts, cappedWidth, action, sessionID, terminalActionDetail(sty, meta, params), content)
+}
+
+// terminalShowsBody reports whether a terminal action's result should be
+// shown under the header. Read and write return the emulator screen the
+// user is watching live; errors always surface.
+func terminalShowsBody(action string) bool {
+	switch action {
+	case "read", "write":
+		return false
+	default:
+		return true
+	}
 }
 
 // terminalActionLabel renders an action name for a header.
@@ -76,8 +96,9 @@ func terminalActionLabel(action string) string {
 }
 
 // terminalActionDetail describes what the action did, shown next to the
-// session ID in the header.
-func terminalActionDetail(meta tools.TerminalResponseMetadata, params tools.TerminalParams) string {
+// session ID in the header. Keystrokes the agent sent get their own
+// accent so they stand out.
+func terminalActionDetail(sty *styles.Styles, meta tools.TerminalResponseMetadata, params tools.TerminalParams) string {
 	switch meta.Action {
 	case "start":
 		return fmt.Sprintf("run %s", params.Command)
@@ -90,7 +111,11 @@ func terminalActionDetail(meta tools.TerminalResponseMetadata, params tools.Term
 		}
 		return "read screen"
 	case "write":
-		return fmt.Sprintf("send %s", quoteKeystrokes(params.Text))
+		keys := quoteKeystrokes(params.Text)
+		if len(params.Keys) > 0 {
+			keys = strings.Join(params.Keys, ", ")
+		}
+		return "send " + sty.Tool.TerminalKeys.Render(keys)
 	case "kill":
 		return "terminate session"
 	default:

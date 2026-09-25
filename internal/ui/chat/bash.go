@@ -253,10 +253,45 @@ func renderTerminalTool(sty *styles.Styles, opts *ToolRenderOpts, width int, act
 	return joinToolParts(header, body)
 }
 
-// terminalHeader builds the header for interactive terminal sessions.
-// Format: "● Terminal (Action) ID sessionID description..."
+// terminalHeader builds the header for interactive terminal sessions:
+// "● Terminal (Write) ID <id> <detail>", with the action chip colored by
+// what the agent did to the session.
 func terminalHeader(sty *styles.Styles, status ToolStatus, action, sessionID, description string, width int) string {
-	return toolRowHeader(sty, status, "Terminal", action, "ID "+sessionID, description, width)
+	icon := toolIcon(sty, status)
+	label := sty.Tool.JobToolName.Render("Terminal")
+	actionPart := terminalActionStyle(sty, action).Render("(" + terminalActionLabel(action) + ")")
+	prefix := fmt.Sprintf("%s %s %s %s", icon, label, actionPart, sty.Tool.JobPID.Render("ID "+sessionID))
+
+	if description == "" {
+		return prefix
+	}
+
+	prefixWidth := lipgloss.Width(prefix)
+	availableWidth := width - prefixWidth - 1
+	if availableWidth < 10 {
+		return prefix
+	}
+
+	truncatedDesc := ansi.Truncate(description, availableWidth, "…")
+	return prefix + " " + sty.Tool.JobDescription.Render(truncatedDesc)
+}
+
+// terminalActionStyle picks the header style for a terminal action. Start
+// is green, write carries the info accent, read stays muted, and kill is
+// red.
+func terminalActionStyle(sty *styles.Styles, action string) lipgloss.Style {
+	switch action {
+	case "start":
+		return sty.Tool.TerminalActionStart
+	case "write":
+		return sty.Tool.TerminalActionWrite
+	case "read":
+		return sty.Tool.TerminalActionRead
+	case "kill":
+		return sty.Tool.TerminalActionKill
+	default:
+		return sty.Tool.JobAction
+	}
 }
 
 // jobHeader builds a header for job-related tools.

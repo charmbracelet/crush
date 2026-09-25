@@ -412,6 +412,15 @@ type Styles struct {
 		JobPID         lipgloss.Style // PID text
 		JobDescription lipgloss.Style // Description text
 
+		// Terminal tool header styles. The action chip is colored by what
+		// the agent did to the session; keystrokes it sent get their own
+		// accent.
+		TerminalActionStart lipgloss.Style // Start (green)
+		TerminalActionWrite lipgloss.Style // Write (info blue)
+		TerminalActionRead  lipgloss.Style // Read (muted)
+		TerminalActionKill  lipgloss.Style // Kill (red)
+		TerminalKeys        lipgloss.Style // Keystrokes the agent sent
+
 		// Agent task styles
 		AgentTaskTag lipgloss.Style // Agent task tag (blue background, bold)
 		AgentPrompt  lipgloss.Style // Agent prompt text
@@ -655,8 +664,9 @@ type Styles struct {
 		Border   lipgloss.Style // Frame around the embedded terminal.
 		Header   lipgloss.Style // Header row: prompt and command.
 		Hint     lipgloss.Style // Header keybinding hint, right-aligned.
-		Status   lipgloss.Style // Header status chip (running/exited).
-		Agent    lipgloss.Style // Header tag marking an agent-started session.
+		Owner    lipgloss.Style // Header chip naming who owns the session.
+		Running  lipgloss.Style // Header chip for a running session.
+		Exited   lipgloss.Style // Header chip for an exited session.
 		TooSmall lipgloss.Style // Message shown when the window is too small.
 		Fg       color.Color    // Default terminal foreground.
 		Bg       color.Color    // Default terminal background.

@@ -24,12 +24,12 @@ var ErrUnavailable = errors.New("no interactive terminal is attached")
 
 // Request asks the attached TUI to show a running interactive session.
 type Request struct {
-	ID          string                    `json:"id"`
-	SessionID   string                    `json:"session_id"`
-	ToolCallID  string                    `json:"tool_call_id"`
-	Command     string                    `json:"command"`
-	WorkingDir  string                    `json:"working_dir"`
-	Description string                    `json:"description,omitempty"`
+	ID          string `json:"id"`
+	SessionID   string `json:"session_id"`
+	ToolCallID  string `json:"tool_call_id"`
+	Command     string `json:"command"`
+	WorkingDir  string `json:"working_dir"`
+	Description string `json:"description,omitempty"`
 	// AgentDriven marks sessions the agent owns and drives itself: the
 	// panel is a read-only view and user input is refused. When false the
 	// session belongs to the user and the terminal accepts their input.

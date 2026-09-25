@@ -20,6 +20,11 @@ func uvScreenBuffer(width, height int) uv.ScreenBuffer {
 
 func newTerminalDialogForTest(t *testing.T, command string) (*TerminalDialog, *shell.InteractiveSession) {
 	t.Helper()
+	return newTerminalDialogForTestOptions(t, command, TerminalDialogOptions{Command: command})
+}
+
+func newTerminalDialogForTestOptions(t *testing.T, command string, opts TerminalDialogOptions) (*TerminalDialog, *shell.InteractiveSession) {
+	t.Helper()
 
 	session, err := shell.NewInteractiveSession(shell.InteractiveSessionOptions{
 		Command:    command,
@@ -34,7 +39,7 @@ func newTerminalDialogForTest(t *testing.T, command string) (*TerminalDialog, *s
 	})
 
 	s := styles.CharmtonePantera()
-	dialog := NewTerminalDialog(&common.Common{Styles: &s}, session, TerminalDialogOptions{Command: command})
+	dialog := NewTerminalDialog(&common.Common{Styles: &s}, session, opts)
 	return dialog, session
 }
 
@@ -126,49 +131,32 @@ func TestTerminalDialogStatusChip(t *testing.T) {
 	require.Contains(t, scr.Render(), "exited", "an exited session is labelled")
 }
 
-func TestTerminalDialogAgentTag(t *testing.T) {
+func TestTerminalDialogOwnsLabel(t *testing.T) {
 	t.Parallel()
 
-	session, err := shell.NewInteractiveSession(shell.InteractiveSessionOptions{
-		Command:    "sleep 30",
-		WorkingDir: t.TempDir(),
-		Cols:       40,
-		Rows:       10,
+	// A terminal the agent drives is labelled "agent"; one the user works
+	// in says "user" even when the agent opened it.
+	agent, _ := newTerminalDialogForTestOptions(t, "sleep 30", TerminalDialogOptions{
+		Command:     "sleep 30",
+		AgentDriven: true,
 	})
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		_ = session.Kill()
-		_ = session.Close()
-	})
-
-	s := styles.CharmtonePantera()
-	dialog := NewTerminalDialog(&common.Common{Styles: &s}, session,
-		TerminalDialogOptions{Command: "sleep 30", AgentStarted: true})
-
-	scr, _ := drawTerminal(t, dialog, 80, 24)
+	scr, _ := drawTerminal(t, agent, 80, 24)
 	rendered := scr.Render()
-	require.Contains(t, rendered, "agent", "an agent-started session is labelled")
+	require.Contains(t, rendered, "agent", "an agent-driven session is labelled")
 	require.Contains(t, rendered, "running")
+
+	user, _ := newTerminalDialogForTestOptions(t, "sleep 30", TerminalDialogOptions{Command: "sleep 30"})
+	scr, _ = drawTerminal(t, user, 80, 24)
+	require.Contains(t, scr.Render(), "user", "a user-owned session is labelled")
 }
 
 func TestTerminalDialogAgentDrivenRefusesInput(t *testing.T) {
 	t.Parallel()
 
-	session, err := shell.NewInteractiveSession(shell.InteractiveSessionOptions{
-		Command:    "sleep 30",
-		WorkingDir: t.TempDir(),
-		Cols:       40,
-		Rows:       10,
+	dialog, _ := newTerminalDialogForTestOptions(t, "sleep 30", TerminalDialogOptions{
+		Command:     "sleep 30",
+		AgentDriven: true,
 	})
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		_ = session.Kill()
-		_ = session.Close()
-	})
-
-	s := styles.CharmtonePantera()
-	dialog := NewTerminalDialog(&common.Common{Styles: &s}, session,
-		TerminalDialogOptions{Command: "sleep 30", AgentStarted: true, AgentDriven: true})
 
 	// Typing, pasting, and mouse input never reach a command the agent is
 	// driving.
@@ -188,24 +176,38 @@ func TestTerminalDialogAgentDrivenRefusesInput(t *testing.T) {
 func TestTerminalDialogAgentDrivenReadonlyHint(t *testing.T) {
 	t.Parallel()
 
-	session, err := shell.NewInteractiveSession(shell.InteractiveSessionOptions{
-		Command:    "sleep 30",
-		WorkingDir: t.TempDir(),
-		Cols:       40,
-		Rows:       10,
+	dialog, _ := newTerminalDialogForTestOptions(t, "sleep 30", TerminalDialogOptions{
+		Command:     "sleep 30",
+		AgentDriven: true,
 	})
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		_ = session.Kill()
-		_ = session.Close()
-	})
-
-	s := styles.CharmtonePantera()
-	dialog := NewTerminalDialog(&common.Common{Styles: &s}, session,
-		TerminalDialogOptions{Command: "sleep 30", AgentStarted: true, AgentDriven: true})
 
 	scr, _ := drawTerminal(t, dialog, 100, 24)
-	require.Contains(t, scr.Render(), "read-only")
+	require.Contains(t, scr.Render(), "agent")
+}
+
+func TestTerminalDialogResolvesThemedColors(t *testing.T) {
+	t.Parallel()
+
+	// The child paints a letter with the basic ANSI red code. The host
+	// terminal's palette must not decide that color: it has to resolve
+	// through the theme's palette so the embedded terminal matches the
+	// rest of Crush.
+	dialog, session := newTerminalDialogForTest(t, "sh -c 'printf \"\\033[31mR\\033[0m\"; sleep 5'")
+	select {
+	case <-session.Dirty():
+	case <-time.After(15 * time.Second):
+		t.Fatal("session did not produce output in time")
+	}
+
+	scr := uvScreenBuffer(80, 24)
+	dialog.Draw(scr, image.Rect(0, 0, 80, 24))
+
+	// Emulator content starts inside the frame, below the header row.
+	cell := scr.CellAt(1, 2)
+	require.NotNil(t, cell)
+	require.Equal(t, "R", cell.Content)
+	require.Equal(t, styles.CharmtonePantera().ANSI[1], cell.Style.Fg,
+		"ANSI red must resolve through the theme palette")
 }
 
 func TestTerminalDialogExitCompletes(t *testing.T) {
@@ -327,6 +329,7 @@ func TestTerminalDialogCursorVisibility(t *testing.T) {
 	t.Parallel()
 
 	dialog, session := newTerminalDialogForTest(t, `printf '\033[?25l hidden\033[?25h\n'`)
+	dialog.SetFocused(true)
 
 	select {
 	case <-session.Done():
@@ -344,6 +347,7 @@ func TestTerminalDialogCursorHiddenWhenChildHides(t *testing.T) {
 	t.Parallel()
 
 	dialog, session := newTerminalDialogForTest(t, `printf '\033[?25l hidden\n'`)
+	dialog.SetFocused(true)
 
 	select {
 	case <-session.Done():
@@ -354,6 +358,46 @@ func TestTerminalDialogCursorHiddenWhenChildHides(t *testing.T) {
 	_, area := drawTerminal(t, dialog, 80, 24)
 	cur := dialog.Draw(mustScreen(t), area)
 	require.Nil(t, cur, "cursor must be hidden when the child hides it")
+}
+
+func TestTerminalDialogUnfocusedPaintsGhostCursor(t *testing.T) {
+	t.Parallel()
+
+	// An unfocused terminal cannot use the host cursor, but the caret must
+	// stay visible: it is what makes the agent's (or the session's)
+	// position legible on a read-only panel.
+	dialog, session := newTerminalDialogForTest(t, `printf '\033[?25l hidden\033[?25h\n'`)
+
+	select {
+	case <-session.Done():
+	case <-time.After(15 * time.Second):
+		t.Fatal("session did not exit in time")
+	}
+
+	// Reference draw with the terminal focused: real cursor, no inversion.
+	dialog.SetFocused(true)
+	scrFocused := uvScreenBuffer(80, 24)
+	dialog.Draw(scrFocused, image.Rect(0, 0, 80, 24))
+	require.NotNil(t, dialog.Draw(mustScreen(t), image.Rect(0, 0, 80, 24)),
+		"a focused terminal shows the real cursor")
+
+	// Unfocused: the ghost caret inverts the cell under the emulator
+	// cursor instead of claiming the host cursor.
+	dialog.SetFocused(false)
+	scr := uvScreenBuffer(80, 24)
+	require.Nil(t, dialog.Draw(scr, image.Rect(0, 0, 80, 24)))
+
+	emu := session.Emulator()
+	pos := emu.CursorPosition()
+	x := 1 + pos.X
+	y := 2 + pos.Y
+
+	want := scrFocused.CellAt(x, y)
+	got := scr.CellAt(x, y)
+	require.NotNil(t, want)
+	require.NotNil(t, got)
+	require.Equal(t, want.Style.Fg, got.Style.Bg, "the ghost caret swaps the cell's colors")
+	require.Equal(t, want.Style.Bg, got.Style.Fg)
 }
 
 func mustScreen(t *testing.T) uv.ScreenBuffer {

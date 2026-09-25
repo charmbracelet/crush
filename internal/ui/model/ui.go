@@ -3750,6 +3750,11 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	// docked it draws inside its slice of the chat column so the rest of the
 	// UI stays visible.
 	if m.dialog.HasDialogs() {
+		// Tell the terminal whether it owns the keyboard: it shows the
+		// real cursor when it does and paints a ghost caret otherwise.
+		if terminal := m.frontTerminal(); terminal != nil {
+			terminal.SetFocused(m.focus == uiFocusTerminal)
+		}
 		switch {
 		case m.activeTerminal != nil && m.layout.terminal.Dy() > 0:
 			cur := m.dialog.DrawDocked(scr, scr.Bounds(), m.layout.terminal, dialog.TerminalID)
@@ -5890,9 +5895,8 @@ func (m *UI) attachTerminalDialog(session *shell.InteractiveSession, command str
 	}
 
 	m.dialog.OpenDialogWithGrace(dialog.NewTerminalDialog(m.com, session, dialog.TerminalDialogOptions{
-		Command:      command,
-		AgentStarted: agentStarted,
-		AgentDriven:  agentDriven,
+		Command:     command,
+		AgentDriven: agentDriven,
 	}))
 	// A user-owned terminal opens for the user to act in, so it takes the
 	// keyboard until they tab away; an agent-driven one is a read-only view

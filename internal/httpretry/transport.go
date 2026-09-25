@@ -1,7 +1,8 @@
 // Package httpretry provides an [http.RoundTripper] that retries requests
 // which failed for transient, transport-level reasons: a connection that
 // was reset or refused, a server that closed the connection before
-// answering, a temporary DNS failure, or a 429/502/503/504 response.
+// answering, a temporary DNS failure, a 408/502/503/504 response, or a 429
+// that says when to retry.
 //
 // Only requests that are safe to replay are retried: idempotent methods
 // (GET, HEAD, OPTIONS, TRACE), or any method whose context was marked with
@@ -24,7 +25,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -39,8 +39,12 @@ const (
 	DefaultMaxDelay = 2 * time.Second
 
 	// maxRetryAfter caps a Retry-After header. A server asking for longer
-	// than this is treated as not worth waiting for in a tool call.
+	// than this gets its response back unretried: the wait does not fit a
+	// tool call, and retrying sooner would ignore what the server asked.
 	maxRetryAfter = 10 * time.Second
+	// minAttemptTime is how much time must be left before the deadline,
+	// after the backoff, for a retry to be worth starting.
+	minAttemptTime = time.Second
 	// drainLimit bounds how much of a discarded response body is read so
 	// the connection can be reused.
 	drainLimit = 64 << 10
@@ -126,14 +130,32 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 			if attempt >= maxAttempts {
 				return resp, nil
 			}
+			ra, hasRetryAfter := retryAfter(resp.Header)
+			if ra > maxRetryAfter {
+				return resp, nil
+			}
+			// A rate limit rarely lifts within the backoff, so a 429 is
+			// retried only when the server says when to come back.
+			if !hasRetryAfter && resp.StatusCode == http.StatusTooManyRequests {
+				return resp, nil
+			}
 			reason = resp.Status
 			delay = t.backoff(attempt)
-			if ra, ok := retryAfter(resp.Header); ok {
+			if ra > 0 {
 				delay = ra
 			}
-			drain(resp.Body)
 		default:
 			return resp, nil
+		}
+
+		// A retry without time to finish before the deadline would most
+		// likely fail with "context deadline exceeded" and hide why the
+		// request failed. Report this attempt's outcome instead.
+		if !fitsBeforeDeadline(ctx, delay) {
+			return resp, err
+		}
+		if resp != nil {
+			drain(resp.Body)
 		}
 
 		slog.Debug("Retrying HTTP request",
@@ -164,29 +186,15 @@ func Replayable(req *http.Request) bool {
 	return req.Body == nil || req.Body == http.NoBody || req.GetBody != nil
 }
 
-// connErrnos are the connection-level errors worth a second attempt. They
-// are listed explicitly rather than derived from net.Error's Temporary or
-// Timeout methods, which syscall.Errno implements for every value.
-var connErrnos = []syscall.Errno{
-	syscall.ECONNRESET,
-	syscall.ECONNREFUSED,
-	syscall.ECONNABORTED,
-	syscall.EPIPE,
-	syscall.EHOSTUNREACH,
-	syscall.ENETUNREACH,
-}
-
 // transportErrorFragments match transport failures that only surface as
-// text: Go's bundled HTTP/2 error types are unexported, and Windows
-// reports socket errors with WSA codes that the syscall.Errno constants
-// above do not match.
+// text: Go's bundled HTTP/2 error types and net/http's idle-connection
+// error are unexported. Socket errors are matched by errno instead (see
+// connErrnos), since their text is localized on some platforms.
 var transportErrorFragments = []string{
 	"http2: server sent GOAWAY",
 	"stream error:",
 	"connection error:",
 	"server closed idle connection",
-	"forcibly closed by the remote host",
-	"target machine actively refused it",
 }
 
 // RetryableError reports whether err is a transient transport failure. It
@@ -229,9 +237,13 @@ func RetryableError(err error) bool {
 }
 
 // RetryableStatus reports whether a response status is worth retrying.
+// 500 is left out: from an arbitrary site it usually repeats, and the
+// caller still sees the response. RoundTrip retries a 429 only when it
+// carries a Retry-After header.
 func RetryableStatus(code int) bool {
 	switch code {
-	case http.StatusTooManyRequests,
+	case http.StatusRequestTimeout,
+		http.StatusTooManyRequests,
 		http.StatusBadGateway,
 		http.StatusServiceUnavailable,
 		http.StatusGatewayTimeout:
@@ -240,25 +252,24 @@ func RetryableStatus(code int) bool {
 	return false
 }
 
-// retryAfter parses a Retry-After header, in seconds or as an HTTP date,
-// and reports whether it is present, positive and within maxRetryAfter.
+// retryAfter parses a Retry-After header, in whole seconds or as an HTTP
+// date (RFC 9110, section 10.2.3), and reports whether it is present and
+// well formed. A date in the past yields a duration of zero or less.
 func retryAfter(h http.Header) (time.Duration, bool) {
 	v := strings.TrimSpace(h.Get("Retry-After"))
 	if v == "" {
 		return 0, false
 	}
-	var d time.Duration
-	if secs, err := strconv.ParseFloat(v, 64); err == nil {
-		d = time.Duration(secs * float64(time.Second))
-	} else if at, err := http.ParseTime(v); err == nil {
-		d = time.Until(at)
-	} else {
-		return 0, false
+	// A value too large for 32 bits is still a valid, very long wait:
+	// ParseUint reports ErrRange and returns the largest value, which
+	// converts to a Duration without overflow.
+	if secs, err := strconv.ParseUint(v, 10, 32); err == nil || errors.Is(err, strconv.ErrRange) {
+		return time.Duration(secs) * time.Second, true
 	}
-	if d <= 0 || d > maxRetryAfter {
-		return 0, false
+	if at, err := http.ParseTime(v); err == nil {
+		return time.Until(at), true
 	}
-	return d, true
+	return 0, false
 }
 
 func (t *Transport) backoff(attempt int) time.Duration {
@@ -277,6 +288,14 @@ func (t *Transport) backoff(attempt int) time.Duration {
 	// ±25% jitter so simultaneous callers do not retry in lockstep.
 	jitter := time.Duration((rand.Float64() - 0.5) * 0.5 * float64(d))
 	return d + jitter
+}
+
+// fitsBeforeDeadline reports whether, after waiting d, at least
+// minAttemptTime would remain before ctx's deadline for another attempt.
+// http.Client.Timeout sets that deadline, so it bounds the retries as well.
+func fitsBeforeDeadline(ctx context.Context, d time.Duration) bool {
+	deadline, ok := ctx.Deadline()
+	return !ok || time.Until(deadline) > d+minAttemptTime
 }
 
 func (t *Transport) wait(ctx context.Context, d time.Duration) error {

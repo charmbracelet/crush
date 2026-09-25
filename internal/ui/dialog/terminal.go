@@ -59,7 +59,6 @@ type TerminalDialog struct {
 	agentStarted bool
 	agentDriven  bool
 	terminated   bool
-	fullscreen   bool
 	contentRect  uv.Rectangle
 	closeKey     key.Binding
 	fullKey      key.Binding
@@ -87,12 +86,6 @@ func NewTerminalDialog(com *common.Common, session *shell.InteractiveSession, op
 	)
 	t.applyTheme()
 	return t
-}
-
-// SetFullscreen records whether the terminal currently covers the whole
-// window, so the header can show the matching toggle hint.
-func (t *TerminalDialog) SetFullscreen(fullscreen bool) {
-	t.fullscreen = fullscreen
 }
 
 // applyTheme points the emulator at the theme palette so child output is
@@ -280,37 +273,26 @@ func (t *TerminalDialog) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 }
 
 // renderHeader builds the one-line header: "$ command" on the left, then
-// the live status chip and the keybinding hints on the right.
+// the live status chip on the right. Keybinds live in the status bar and
+// the editor hint row instead of on the panel.
 func (t *TerminalDialog) renderHeader(width int) string {
 	sty := t.com.Styles
 
-	fullHint := t.fullKey.Help().Key + " " + t.fullKey.Help().Desc
-	if t.fullscreen {
-		fullHint = t.fullKey.Help().Key + " docked"
-	}
-	hintText := t.closeKey.Help().Key + " " + t.closeKey.Help().Desc + " · " + fullHint
-	if t.agentDriven {
-		// The user watches but does not type here; say so plainly.
-		hintText = "read-only · " + hintText
-	}
-	hint := sty.Terminal.Hint.Render(hintText)
-
 	status := t.renderStatus()
-	rightWidth := lipgloss.Width(hint) + lipgloss.Width(status)
 
-	commandWidth := max(width-rightWidth-2, 1)
+	commandWidth := max(width-lipgloss.Width(status)-2, 1)
 	command := ansi.Truncate(t.command, commandWidth, "…")
 	left := sty.Terminal.Header.Render("$ " + command)
 
-	pad := max(width-lipgloss.Width(left)-rightWidth, 0)
-	// The status chip and hints can outgrow a narrow panel; keep the header
-	// to a single row so the frame height stays predictable.
-	return ansi.Truncate(left+strings.Repeat(" ", pad)+status+hint, width, "…")
+	pad := max(width-lipgloss.Width(left)-lipgloss.Width(status), 0)
+	// The status chip can outgrow a narrow panel; keep the header to a
+	// single row so the frame height stays predictable.
+	return ansi.Truncate(left+strings.Repeat(" ", pad)+status, width, "…")
 }
 
-// renderStatus builds the live status chip shown before the hint: whether
-// the command is still running, and whether the agent opened this session
-// or the user did. The emulator below shows the activity itself; the chip
+// renderStatus builds the live status chip shown on the right: whether the
+// command is still running, and whether the agent opened this session or
+// the user did. The emulator below shows the activity itself; the chip
 // makes it clear at a glance who is driving and that work is happening.
 func (t *TerminalDialog) renderStatus() string {
 	sty := t.com.Styles
@@ -322,6 +304,10 @@ func (t *TerminalDialog) renderStatus() string {
 	status := sty.Terminal.Status.Render(state)
 	if t.agentStarted {
 		status = sty.Terminal.Agent.Render("agent") + " " + status
+	}
+	if t.agentDriven {
+		// The user watches but does not type here; say so plainly.
+		status = sty.Terminal.Hint.Render("read-only") + " " + status
 	}
 	return status + " "
 }

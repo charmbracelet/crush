@@ -3683,11 +3683,6 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		}
 
 		switch {
-		case m.focus == uiFocusTerminal && layout.terminal.Dy() > 0:
-			// The textarea is blurred while the terminal holds focus, so
-			// show the terminal's keybinds where the prompt sits.
-			m.drawTerminalHints(scr, layout.editor)
-			m.inlineCursor = nil
 		case m.activeInline != nil:
 			m.activeInline.SetFocused(m.focus == uiFocusEditor)
 			if collapsed, ok := m.collapsedInlineEditor(); ok {
@@ -5818,9 +5813,6 @@ func (m *UI) setTerminalFullscreen(fullscreen bool) {
 		return
 	}
 	m.activeTerminal.fullscreen = fullscreen
-	if terminal := m.frontTerminal(); terminal != nil {
-		terminal.SetFullscreen(fullscreen)
-	}
 	if fullscreen {
 		// Nothing else is visible, so the terminal keeps the keyboard.
 		m.focusTerminal()

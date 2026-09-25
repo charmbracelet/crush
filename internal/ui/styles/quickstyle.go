@@ -1217,20 +1217,11 @@ func quickStyle(o quickStyleOpts) Styles {
 	// background.
 	s.Terminal.Border = base.
 		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(o.bgMostVisible).
-		Background(o.bgBase)
-	s.Terminal.Header = lipgloss.NewStyle().
-		Foreground(o.fgBase).
-		Background(o.bgBase)
-	s.Terminal.Hint = lipgloss.NewStyle().
-		Foreground(o.fgMostSubtle).
-		Background(o.bgBase)
-	s.Terminal.Status = lipgloss.NewStyle().
-		Foreground(o.fgMoreSubtle).
-		Background(o.bgBase)
-	s.Terminal.Agent = lipgloss.NewStyle().
-		Foreground(o.secondary).
-		Background(o.bgBase)
+		BorderForeground(o.bgMostVisible)
+	s.Terminal.Header = lipgloss.NewStyle().Foreground(o.fgBase)
+	s.Terminal.Hint = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
+	s.Terminal.Status = lipgloss.NewStyle().Foreground(o.ansiBrightGreen)
+	s.Terminal.Agent = lipgloss.NewStyle().Foreground(o.secondary)
 	s.Terminal.TooSmall = lipgloss.NewStyle().Foreground(o.fgSubtle)
 	s.Terminal.Fg = o.fgBase
 	s.Terminal.Bg = o.bgBase

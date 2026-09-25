@@ -85,21 +85,19 @@ func TestTerminalDialogFullscreenKeyToggles(t *testing.T) {
 	action := dialog.HandleMsg(tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
 	_, ok := action.(ActionTerminalFullscreen)
 	require.True(t, ok, "ctrl+f should ask to toggle fullscreen, got %T", action)
-
-	// The header reflects the current mode after the model applies it.
-	scr, _ := drawTerminal(t, dialog, 80, 24)
-	require.Contains(t, scr.Render(), "ctrl+f fullscreen")
-	dialog.SetFullscreen(true)
-	scr, _ = drawTerminal(t, dialog, 80, 24)
-	require.Contains(t, scr.Render(), "ctrl+f docked")
 }
 
-func TestTerminalDialogQuitHint(t *testing.T) {
+func TestTerminalDialogHeaderShowsNoKeybinds(t *testing.T) {
 	t.Parallel()
 
 	dialog, _ := newTerminalDialogForTest(t, "sleep 5")
 	scr, _ := drawTerminal(t, dialog, 80, 24)
-	require.Contains(t, scr.Render(), "ctrl+q quit")
+	rendered := scr.Render()
+	// Keybinds live in the status bar and editor hint row, not on the
+	// panel.
+	require.NotContains(t, rendered, "ctrl+q")
+	require.NotContains(t, rendered, "ctrl+f")
+	require.Contains(t, rendered, "sleep 5", "the command still shows")
 }
 
 func TestTerminalDialogHeaderFitsNarrowPanel(t *testing.T) {
@@ -289,9 +287,9 @@ func TestTerminalDialogDraw(t *testing.T) {
 	scr, _ := drawTerminal(t, dialog, 100, 30)
 	rendered := scr.Render()
 
-	require.Contains(t, rendered, "ctrl+q", "hint should be drawn")
 	require.Contains(t, rendered, "printf", "command should be drawn")
 	require.Contains(t, rendered, "drawn-output", "emulator content should be drawn")
+	require.NotContains(t, rendered, "ctrl+q", "keybinds are not drawn on the panel")
 }
 
 func TestTerminalDialogTooSmall(t *testing.T) {

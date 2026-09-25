@@ -1592,8 +1592,14 @@ If not, please feel free to ignore. Again do not mention this message to the use
 		if len(m.Parts) == 0 {
 			continue
 		}
-		// Assistant message without content or tool calls (cancelled before it returned anything).
-		if m.Role == message.Assistant && len(m.ToolCalls()) == 0 && m.Content().Text == "" && m.ReasoningContent().String() == "" {
+		// Assistant message without content or tool calls (cancelled before it
+		// returned anything). Reasoning content alone does not count: a
+		// turn cancelled while the model was still thinking leaves a
+		// reasoning-only message with nothing else, and forwarding it as-is
+		// produces a wire message with neither content nor tool_calls, which
+		// strict upstreams reject outright, breaking the session on every
+		// later request. https://github.com/charmbracelet/crush/issues/3933
+		if m.Role == message.Assistant && len(m.ToolCalls()) == 0 && m.Content().Text == "" {
 			continue
 		}
 		// Tool results are emitted right after their assistant message.

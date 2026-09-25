@@ -716,6 +716,46 @@ func TestPreparePrompt_FiltersImageAttachments(t *testing.T) {
 	require.Equal(t, "screenshot.png", files[0].Filename)
 }
 
+// https://github.com/charmbracelet/crush/issues/3928
+// https://github.com/charmbracelet/crush/issues/3933
+func TestPreparePrompt_DropsReasoningOnlyAssistantMessage(t *testing.T) {
+	env := testEnv(t)
+	sa := testSessionAgent(env, nil, nil, "test prompt")
+	agent := sa.(*sessionAgent)
+
+	ctx := t.Context()
+	sess, err := env.sessions.Create(ctx, "test")
+	require.NoError(t, err)
+
+	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role:  message.User,
+		Parts: []message.ContentPart{message.TextContent{Text: "hello"}},
+	})
+	require.NoError(t, err)
+
+	// A turn cancelled (Esc / Ctrl+C) while the model was still thinking: no
+	// tool calls, no text, only a partial reasoning fragment. This must not
+	// be forwarded to the provider: a wire message with neither content nor
+	// tool_calls is what strict upstreams reject with "Invalid assistant
+	// message: content or tool_calls must be set", permanently breaking the
+	// session on every later request.
+	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role:  message.Assistant,
+		Parts: []message.ContentPart{message.ReasoningContent{Thinking: "let me think about this..."}},
+	})
+	require.NoError(t, err)
+
+	msgs, err := env.messages.List(ctx, sess.ID)
+	require.NoError(t, err)
+
+	history, _ := agent.preparePrompt(msgs, false)
+
+	for _, m := range history {
+		require.NotEqual(t, fantasy.MessageRoleAssistant, m.Role,
+			"reasoning-only assistant turn must be dropped, not forwarded")
+	}
+}
+
 func TestCreateUserMessage_RetainsAllAttachments(t *testing.T) {
 	env := testEnv(t)
 	sa := testSessionAgent(env, nil, nil, "test prompt")

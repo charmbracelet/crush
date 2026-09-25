@@ -77,6 +77,8 @@ func NewTerminalDialog(com *common.Common, session *shell.InteractiveSession, op
 		key.WithKeys("ctrl+q"),
 		key.WithHelp("ctrl+q", "quit"),
 	)
+	// A user-owned terminal only toggles fullscreen; an agent-driven one
+	// does too, it is just read-only for typing.
 	t.fullKey = key.NewBinding(
 		key.WithKeys("ctrl+f"),
 		key.WithHelp("ctrl+f", "fullscreen"),
@@ -211,8 +213,10 @@ func (t *TerminalDialog) translateMouse(m uv.Mouse) (uv.Mouse, bool) {
 	if !uv.Pos(m.X, m.Y).In(t.contentRect) {
 		return uv.Mouse{}, false
 	}
-	m.X -= t.contentRect.Min.X
-	m.Y -= t.contentRect.Min.Y
+	// Map onto the logical screen, not the panel slice, so events land
+	// where the child expects them.
+	m.X = m.X - t.contentRect.Min.X
+	m.Y = m.Y - t.contentRect.Min.Y
 	return m, true
 }
 
@@ -248,11 +252,14 @@ func (t *TerminalDialog) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	contentWidth := area.Dx() - 2
 	contentHeight := area.Dy() - 2 - terminalHeaderLines
 
-	// The emulator must exactly fill the content area; resizing it here
-	// keeps PTY, emulator, and layout in sync without an extra message
-	// round-trip.
-	if cols, rows := t.session.Size(); cols != contentWidth || rows != contentHeight {
-		t.session.Resize(contentWidth, contentHeight)
+	// A user-owned terminal must match the panel exactly so what the user
+	// types lands where they see it. An agent-driven session keeps its own
+	// logical size (the ghost fullscreen the host UI maintains) and the
+	// panel shows a slice of it.
+	if !t.agentDriven {
+		if cols, rows := t.session.Size(); cols != contentWidth || rows != contentHeight {
+			t.session.Resize(contentWidth, contentHeight)
+		}
 	}
 
 	header := t.renderHeader(contentWidth)
@@ -276,39 +283,65 @@ func (t *TerminalDialog) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	return t.cursor()
 }
 
-// paintEmulator draws the session's emulator and resolves the ANSI colors
-// in the cells through the emulator's palette. vt keeps SGR color codes as
-// indices in the cells it draws, and the host terminal would paint those
-// with its own palette; resolving them here keeps the embedded terminal on
-// the theme's colors instead.
+// paintEmulator paints the panel from the session's emulator. The session
+// can be logically larger than the panel: agent-driven terminals run at the
+// full-window "ghost fullscreen" size so the agent reads the whole screen,
+// while the panel shows the top slice of it. Cells carrying ANSI color
+// codes are resolved through the emulator's palette; vt leaves those as
+// indices, and the host terminal would paint them with its own palette
+// instead of the theme's.
 func (t *TerminalDialog) paintEmulator(scr uv.Screen) {
 	emu := t.session.Emulator()
-	emu.Draw(scr, t.contentRect)
-
 	area := t.contentRect
-	for y := area.Min.Y; y < area.Max.Y; y++ {
-		for x := area.Min.X; x < area.Max.X; x++ {
-			cell := scr.CellAt(x, y)
-			if cell == nil {
-				continue
-			}
+	fg := emu.ForegroundColor()
+	bg := emu.BackgroundColor()
 
-			fg, fgSet := resolveIndexed(cell.Style.Fg, emu)
-			bg, bgSet := resolveIndexed(cell.Style.Bg, emu)
-			if !fgSet && !bgSet {
-				continue
-			}
-
-			clone := cell.Clone()
-			if fgSet {
-				clone.Style.Fg = fg
-			}
-			if bgSet {
-				clone.Style.Bg = bg
-			}
-			scr.SetCell(x, y, clone)
+	// Top-left aligned: programs draw from the top-left corner, so the
+	// first rows and columns of the logical screen fill the panel. Rows
+	// beyond the logical screen height paint as blanks.
+	for y := range area.Dy() {
+		for x := range area.Dx() {
+			cell := t.panelCell(emu, fg, bg, x, y)
+			scr.SetCell(area.Min.X+x, area.Min.Y+y, cell)
 		}
 	}
+}
+
+// panelCell copies one emulator cell for the panel, substituting the
+// emulator's default colors and resolving its ANSI color indices through
+// the palette.
+func (t *TerminalDialog) panelCell(emu *vt.SafeEmulator, fg, bg color.Color, x, y int) *uv.Cell {
+	var cell *uv.Cell
+	if src := emu.CellAt(x, y); src != nil {
+		cell = src.Clone()
+		if cell.Style.Fg == nil {
+			cell.Style.Fg = fg
+		}
+		if cell.Style.Bg == nil {
+			cell.Style.Bg = bg
+		}
+	} else {
+		cell = uv.EmptyCell.Clone()
+		cell.Style.Fg = fg
+		cell.Style.Bg = bg
+	}
+
+	if resolved, ok := resolveIndexed(cell.Style.Fg, emu); ok {
+		cell.Style.Fg = resolved
+	}
+	if resolved, ok := resolveIndexed(cell.Style.Bg, emu); ok {
+		cell.Style.Bg = resolved
+	}
+	return cell
+}
+
+// viewOffset maps an emulator cell coordinate onto the panel, clipped to
+// the visible slice. ok is false when the position lies outside it.
+func (t *TerminalDialog) viewOffset(x, y int) (int, int, bool) {
+	if x < 0 || y < 0 || x >= t.contentRect.Dx() || y >= t.contentRect.Dy() {
+		return 0, 0, false
+	}
+	return t.contentRect.Min.X + x, t.contentRect.Min.Y + y, true
 }
 
 // focused reports whether the terminal currently owns the keyboard. The
@@ -328,9 +361,8 @@ func (t *TerminalDialog) paintGhostCursor(scr uv.Screen) {
 	}
 
 	pos := emu.CursorPosition()
-	sx := t.contentRect.Min.X + pos.X
-	sy := t.contentRect.Min.Y + pos.Y
-	if !uv.Pos(sx, sy).In(t.contentRect) {
+	sx, sy, ok := t.viewOffset(pos.X, pos.Y)
+	if !ok {
 		return
 	}
 
@@ -403,9 +435,10 @@ func (t *TerminalDialog) renderStatus() string {
 	return owner + " " + state + " "
 }
 
-// cursor returns the emulator cursor, offset by the content area. It
-// returns nil when the child hid its cursor: TUIs hide it constantly, and
-// showing one anyway puts a phantom cursor somewhere on screen.
+// cursor returns the emulator cursor, mapped through the visible slice;
+// it returns nil when the child hid its cursor or when it sits outside the
+// slice: showing a phantom cursor somewhere else on screen would only
+// confuse.
 func (t *TerminalDialog) cursor() *tea.Cursor {
 	emu := t.session.Emulator()
 	if emu.CursorHidden() {
@@ -414,9 +447,13 @@ func (t *TerminalDialog) cursor() *tea.Cursor {
 
 	style, blink := emu.CursorStyle()
 	pos := emu.CursorPosition()
+	sx, sy, ok := t.viewOffset(pos.X, pos.Y)
+	if !ok {
+		return nil
+	}
 
 	return &tea.Cursor{
-		Position: tea.Position{X: t.contentRect.Min.X + pos.X, Y: t.contentRect.Min.Y + pos.Y},
+		Position: tea.Position{X: sx, Y: sy},
 		Color:    t.com.Styles.Terminal.Cursor,
 		Shape:    cursorShape(style),
 		Blink:    blink,

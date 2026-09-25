@@ -340,9 +340,7 @@ func terminalRead(ctx context.Context, params TerminalParams, spillDir string) (
 	}
 	parts = append(parts, fmt.Sprintf("Session %s: %s", session.ID(), status))
 
-	if x, y, hidden := session.Cursor(); !hidden {
-		parts = append(parts, fmt.Sprintf("Cursor at row %d, column %d", y+1, x+1))
-	}
+	parts = append(parts, sessionGeometry(session))
 
 	output := TruncateOutput(strings.Join(parts, "\n\n"), spillDir)
 
@@ -355,6 +353,24 @@ func terminalRead(ctx context.Context, params TerminalParams, spillDir string) (
 	}
 
 	return fantasy.WithResponseMetadata(fantasy.NewTextResponse(output), metadata), nil
+}
+
+// sessionGeometry reports the session's logical size and cursor position.
+// The position is included even when the child hid its cursor: apps move
+// the hidden cursor while drawing, so it still tells you where the program
+// is focused. The logical size matters because a session can be larger
+// than the panel the user watches.
+func sessionGeometry(session *shell.InteractiveSession) string {
+	cols, rows := session.Size()
+	geom := fmt.Sprintf("Screen is %d columns by %d rows", cols, rows)
+	if x, y, hidden := session.Cursor(); x >= 0 {
+		cursor := fmt.Sprintf("Cursor at row %d, column %d", y+1, x+1)
+		if hidden {
+			cursor += " (the program hid its cursor)"
+		}
+		geom += ". " + cursor
+	}
+	return geom
 }
 
 // defaultTerminalWriteSettle is how long a write waits for the session to
@@ -437,8 +453,8 @@ func terminalWrite(ctx context.Context, params TerminalParams) (fantasy.ToolResp
 	}
 
 	response := fmt.Sprintf(
-		"Sent %d bytes to terminal session %s. Session: %s.\n\n<screen>\n%s\n</screen>",
-		len(params.Text), session.ID(), status, screen,
+		"Sent %d bytes to terminal session %s. Session: %s.\n\n<screen>\n%s\n</screen>\n\n%s",
+		len(params.Text), session.ID(), status, screen, sessionGeometry(session),
 	)
 	return fantasy.WithResponseMetadata(fantasy.NewTextResponse(response), metadata), nil
 }

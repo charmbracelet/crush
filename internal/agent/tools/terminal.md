@@ -4,12 +4,12 @@ Use this tool when a command needs a terminal: it prompts for input (logins, tok
 
 There are two kinds of terminal, chosen by the wait parameter on start:
 
-- User-owned (default): the user acts in it — writing a commit message, logging in, finishing a TUI. You wait: the start call does not return until the command exits, the user closes the terminal, or a 5-minute budget elapses, and the response is the transcript.
-- Agent-owned (wait: false): you drive it with write/read while the user watches. The panel is read-only for them: their keystrokes and mouse events do not reach the command, so they cannot interfere with what you are doing.
+- User-owned (default): the user acts in it — writing a commit message, logging in, finishing a TUI. You wait: the start call does not return until the command exits, the user closes the terminal, or a 5-minute budget elapses, and the response is the transcript. The session runs at the size of the panel the user sees.
+- Agent-owned (wait: false): you drive it with write/read while the user watches. The panel is read-only for them: their keystrokes and mouse events do not reach the command, so they cannot interfere with what you are doing. The session runs full-window height (a ghost fullscreen) while the user's panel shows only the top slice of it — you see far more rows than the panel displays, and the geometry line in every result tells you the real size. The user can focus the panel and press ctrl+f to see the whole logical screen fullscreen.
 
 <actions>
 - start: run a command in a new terminal session. Blocks for the user by default (see above); with wait: false it returns a session ID immediately and the user gets a read-only view.
-- read: show the session's current screen, its status (running / exited with code), and the cursor position. include_scrollback adds everything that scrolled off; wait_seconds blocks until the session exits.
+- read: show the session's current screen, its status (running / exited with code), its size, and the cursor position (reported even when the program hid its cursor). include_scrollback adds everything that scrolled off; wait_seconds blocks until the session exits.
 - write: drive the session. Send literal text (text), named keys (keys), and/or a mouse event (mouse), then it returns the screen after the session has redrawn (settle_ms, default 250). Writes are not echoed back on their own.
 - kill: terminate the session and get its final transcript (screen, scrollback, exit code). The terminal closes in the UI.
 </actions>

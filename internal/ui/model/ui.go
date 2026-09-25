@@ -169,8 +169,8 @@ type activeTerminalSession struct {
 	// read back through the terminal tools rather than persisted.
 	agentStarted bool
 	// agentDriven marks sessions the agent owns and drives itself. The
-	// panel is a read-only view: user keys and mouse events never reach
-	// the command, and the terminal stays out of the focus ring.
+	// panel is read-only: user keys and mouse events never reach the
+	// command, so the user cannot interfere with the agent's work.
 	agentDriven bool
 	userCommand string
 	// fullscreen is true while the terminal covers the whole window
@@ -3116,9 +3116,9 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 	// The interactive terminal joins the focus ring as an exception to
 	// normal dialog routing. While it holds focus it takes every key
 	// (ctrl+c must reach the child process, so this runs before the quit
-	// check); while docked and unfocused only tab, its quit key, and (away
-	// from the editor) fullscreen are intercepted, so the editor and chat
-	// keep working around it.
+	// check); while docked and unfocused only tab, its quit key, and
+	// fullscreen (away from the editor, where ctrl+f attaches files) are
+	// intercepted, so the editor and chat keep working around it.
 	if terminal := m.frontTerminal(); terminal != nil {
 		quit, fullscreen := terminal.Keys()
 		switch {
@@ -3924,7 +3924,9 @@ func (m *UI) ShortHelp() []key.Binding {
 			// The user-owned terminal sits between the chat and the editor
 			// in the focus ring; an agent-owned one is read-only and
 			// skipped.
-			if m.terminalUserOwned() {
+			// A docked terminal sits between the chat and the editor in the
+			// focus ring.
+			if m.activeTerminal != nil && !m.activeTerminal.fullscreen {
 				tab.SetHelp("tab", "focus terminal")
 			} else {
 				tab.SetHelp("tab", "focus editor")
@@ -4256,6 +4258,10 @@ func (m *UI) updateLayoutAndSize() {
 		m.layout = m.generateLayout(m.width, m.height)
 		m.updateSize()
 	}
+
+	// Agent-driven terminals read the whole screen, so they keep their
+	// ghost fullscreen size as the window and panel change.
+	m.syncAgentTerminalSize()
 }
 
 // handleTextareaHeightChange checks whether the textarea height changed and,
@@ -5759,22 +5765,15 @@ func (m *UI) terminalTakesMouse(pos image.Point, focus bool) bool {
 	if !m.activeTerminal.fullscreen && !pos.In(m.layout.terminal) {
 		return false
 	}
-	if focus && m.terminalUserOwned() {
+	if focus {
 		m.focusTerminal()
 	}
 	return true
 }
 
-// terminalUserOwned reports whether the terminal on screen accepts user
-// input. Agent-owned terminals are read-only views of the agent's work.
-func (m *UI) terminalUserOwned() bool {
-	return m.activeTerminal != nil && !m.activeTerminal.agentDriven
-}
-
-// cycleTerminalFocus moves focus around the editor → chat ring, plus the
-// terminal when the user owns it. Leaving the terminal drops the
-// full-screen view first so the view it returns to is visible. An
-// agent-owned terminal is a read-only view and is skipped entirely.
+// cycleTerminalFocus moves focus around the editor → chat → terminal ring
+// while an interactive terminal is showing. Leaving the terminal drops the
+// full-screen view first so the view it returns to is visible.
 func (m *UI) cycleTerminalFocus() tea.Cmd {
 	if m.focus == uiFocusTerminal {
 		if m.activeTerminal != nil && m.activeTerminal.fullscreen {
@@ -5794,13 +5793,6 @@ func (m *UI) cycleTerminalFocus() tea.Cmd {
 		return nil
 	}
 
-	if !m.terminalUserOwned() {
-		// Chat (or sidebar) -> editor; the terminal is not focusable.
-		m.focus = uiFocusEditor
-		m.sidebarScrollbarVisible = false
-		return m.textarea.Focus()
-	}
-
 	// Chat (or sidebar) -> terminal.
 	m.focus = uiFocusTerminal
 	m.textarea.Blur()
@@ -5810,9 +5802,8 @@ func (m *UI) cycleTerminalFocus() tea.Cmd {
 }
 
 // setTerminalFullscreen toggles the interactive terminal between the
-// docked panel and a full-window overlay. The dialog matches the PTY to
-// the area it draws into on the next frame, so no explicit resize is
-// needed here.
+// docked panel and a full-window overlay. The PTY is resized to the new
+// view on the next layout update.
 func (m *UI) setTerminalFullscreen(fullscreen bool) {
 	if m.activeTerminal == nil || m.activeTerminal.fullscreen == fullscreen {
 		return
@@ -5908,16 +5899,48 @@ func (m *UI) attachTerminalDialog(session *shell.InteractiveSession, command str
 
 	// Size the PTY to its draw area before the first frame so full-screen
 	// programs start with the space they will actually have: the docked
-	// panel when there is room for it, otherwise the full window.
+	// panel for a user-owned terminal, or the full-window ghost size for an
+	// agent-driven one (synced by updateLayoutAndSize).
 	m.updateLayoutAndSize()
-	if r := m.layout.terminal; r.Dy() > 0 {
-		session.Resize(max(r.Dx()-2, shell.MinInteractiveCols), max(r.Dy()-terminalDockChrome, shell.MinInteractiveRows))
-	} else {
-		cols, rows := m.terminalDialogSize()
-		session.Resize(cols, rows)
+	if !agentDriven {
+		if r := m.layout.terminal; r.Dy() > 0 {
+			session.Resize(max(r.Dx()-2, shell.MinInteractiveCols), max(r.Dy()-terminalDockChrome, shell.MinInteractiveRows))
+		} else {
+			cols, rows := m.terminalDialogSize()
+			session.Resize(cols, rows)
+		}
 	}
 
 	return m.watchTerminalSession(session)
+}
+
+// syncAgentTerminalSize keeps an agent-driven session at its ghost size:
+// the full window's height so the agent reads the whole screen, at the
+// width of the view the user is watching so nothing is cut off
+// horizontally. The docked panel shows the top slice of that screen.
+func (m *UI) syncAgentTerminalSize() {
+	if m.activeTerminal == nil || !m.activeTerminal.agentDriven {
+		return
+	}
+	cols, rows := m.terminalGhostSize()
+	if c, r := m.activeTerminal.session.Size(); c != cols || r != rows {
+		m.activeTerminal.session.Resize(cols, rows)
+	}
+}
+
+// terminalGhostSize is the logical size of an agent-driven session. The
+// width follows the view being displayed (docked panel or fullscreen); the
+// height is the full window, so the agent sees more rows than the panel
+// shows and a fullscreen view matches the logical screen exactly.
+func (m *UI) terminalGhostSize() (cols, rows int) {
+	cols = max(m.width-2, shell.MinInteractiveCols)
+	if !m.activeTerminal.fullscreen {
+		if r := m.layout.terminal; r.Dy() > 0 {
+			cols = max(r.Dx()-2, shell.MinInteractiveCols)
+		}
+	}
+	rows = max(m.height-3, shell.MinInteractiveRows)
+	return cols, rows
 }
 
 // watchTerminalSession waits for the session to change or exit and turns

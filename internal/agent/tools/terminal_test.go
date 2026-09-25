@@ -289,6 +289,52 @@ func TestTerminalRead(t *testing.T) {
 	require.False(t, read.IsError)
 	require.Contains(t, read.Content, "read-me")
 	require.Contains(t, read.Content, "exited")
+	require.Contains(t, read.Content, "Screen is", "the logical size is reported")
+}
+
+// TestTerminalReadReportsHiddenCursor checks that a read reports the cursor
+// position even when the program hid its cursor: apps move the hidden
+// cursor while drawing, so the position still says where the program is
+// focused.
+func TestTerminalReadReportsHiddenCursor(t *testing.T) {
+	resetTerminalManager(t)
+
+	tool, _ := newTerminalToolForTest(t)
+	resp := runTerminalTool(t, tool, TerminalParams{
+		Action:  "start",
+		Command: "sh -c 'printf \"\\033[?25l\"; sleep 30'",
+		Wait:    agentDriven(),
+	})
+
+	var meta TerminalResponseMetadata
+	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
+
+	// The child needs a moment to emit the escape sequence.
+	require.Eventually(t, func() bool {
+		read := runTerminalTool(t, tool, TerminalParams{Action: "read", SessionID: meta.SessionID})
+		return !read.IsError && strings.Contains(read.Content, "Cursor at row") && strings.Contains(read.Content, "hid its cursor")
+	}, 10*time.Second, 100*time.Millisecond)
+}
+
+// TestTerminalWriteReportsGeometry checks that a write result carries the
+// session geometry so the agent knows where its typing landed.
+func TestTerminalWriteReportsGeometry(t *testing.T) {
+	resetTerminalManager(t)
+
+	tool, _ := newTerminalToolForTest(t)
+	resp := runTerminalTool(t, tool, TerminalParams{
+		Action:  "start",
+		Command: "sleep 30",
+		Wait:    agentDriven(),
+	})
+
+	var meta TerminalResponseMetadata
+	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
+
+	write := runTerminalTool(t, tool, TerminalParams{Action: "write", SessionID: meta.SessionID, Text: "hi\r"})
+	require.False(t, write.IsError)
+	require.Contains(t, write.Content, "Cursor at row", "write results report the cursor")
+	require.Contains(t, write.Content, "Screen is", "write results report the size")
 }
 
 func TestTerminalReadWaitForExit(t *testing.T) {

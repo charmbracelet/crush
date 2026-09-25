@@ -340,25 +340,80 @@ func TestTerminalTakesMouseInsidePanelOnly(t *testing.T) {
 }
 
 func TestAgentDrivenTerminalIsReadOnly(t *testing.T) {
-	u, _ := newAgentDrivenTerminalUI(t)
+	u, session := newAgentDrivenTerminalUI(t)
 
 	// Attaching leaves the current focus alone: the panel is a view.
 	require.Equal(t, uiFocusEditor, u.focus)
 	require.True(t, u.activeTerminal.agentStarted)
-	require.False(t, u.terminalUserOwned())
 
-	// Clicks inside the panel are consumed but never focus it.
+	// The session keeps its ghost fullscreen size, which is what the agent
+	// reads, while the docked panel shows only a slice of it.
+	cols, rows := u.terminalGhostSize()
+	gotCols, gotRows := session.Size()
+	require.Equal(t, cols, gotCols, "ghost fullscreen width")
+	require.Equal(t, rows, gotRows, "ghost fullscreen height")
+	require.Less(t, u.layout.terminal.Dy()-terminalDockChrome, rows,
+		"the docked panel is a slice of the ghost screen")
+
+	// The pane is focusable like a user-owned one: a click focuses it.
 	u.focus = uiFocusEditor
 	require.True(t, u.terminalTakesMouse(image.Pt(u.layout.terminal.Min.X+1, u.layout.terminal.Min.Y+1), true))
+	require.Equal(t, uiFocusTerminal, u.focus)
+
+	// Tab cycles editor -> chat -> terminal -> editor.
+	u.focus = uiFocusEditor
+	_ = u.cycleTerminalFocus()
+	require.Equal(t, uiFocusMain, u.focus)
+	_ = u.cycleTerminalFocus()
+	require.Equal(t, uiFocusTerminal, u.focus)
+	_ = u.cycleTerminalFocus()
+	require.Equal(t, uiFocusEditor, u.focus)
+}
+
+// TestAgentDrivenTerminalCtrlFTogglesFullscreen checks that the focused
+// agent-driven pane toggles fullscreen like a user-owned one.
+func TestAgentDrivenTerminalCtrlFTogglesFullscreen(t *testing.T) {
+	u, session := newAgentDrivenTerminalUI(t)
+	u.attachments = attachments.New(nil, attachments.Keymap{})
+	u.keyMap = DefaultKeyMap()
+
+	// The dialog absorbs keystrokes during its input grace period after
+	// opening; wait it out before pressing keys.
+	time.Sleep(1700 * time.Millisecond)
+
+	// Focus the pane, then ctrl+f toggles fullscreen on and off.
+	u.focusTerminal()
+
+	u.handleKeyPressMsg(tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
+	require.True(t, u.activeTerminal.fullscreen)
+	require.True(t, u.layout.terminal.Empty(), "fullscreen is not docked")
+	gotCols, gotRows := session.Size()
+	require.Equal(t, u.width-2, gotCols, "fullscreen width")
+	require.Equal(t, u.height-3, gotRows, "fullscreen height")
+
+	u.handleKeyPressMsg(tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
+	require.False(t, u.activeTerminal.fullscreen)
+	require.False(t, u.layout.terminal.Empty())
+	gotCols, gotRows = session.Size()
+	ghostCols, ghostRows := u.terminalGhostSize()
+	require.Equal(t, ghostCols, gotCols)
+	require.Equal(t, ghostRows, gotRows)
+}
+
+// TestUserTerminalCtrlFStaysEditorKey checks that a user-owned terminal
+// keeps ctrl+f as the editor's attachment key while the user is typing;
+// only a focused terminal toggles fullscreen.
+func TestUserTerminalCtrlFStaysEditorKey(t *testing.T) {
+	u, _ := newAttachedTerminalUI(t)
+	u.attachments = attachments.New(nil, attachments.Keymap{})
+	u.keyMap = DefaultKeyMap()
+
+	// The user tabbed away to the editor.
+	_ = u.cycleTerminalFocus()
 	require.Equal(t, uiFocusEditor, u.focus)
 
-	// Tab keeps cycling editor and chat; the terminal stays out of the ring.
-	_ = u.cycleTerminalFocus()
-	require.Equal(t, uiFocusMain, u.focus)
-	_ = u.cycleTerminalFocus()
-	require.Equal(t, uiFocusEditor, u.focus)
-	_ = u.cycleTerminalFocus()
-	require.Equal(t, uiFocusMain, u.focus)
+	u.handleKeyPressMsg(tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
+	require.False(t, u.activeTerminal.fullscreen, "ctrl+f must stay the editor's attach key")
 }
 
 func TestAgentDrivenTerminalFullscreenAbsorbsKeys(t *testing.T) {

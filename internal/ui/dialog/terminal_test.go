@@ -2,6 +2,7 @@ package dialog
 
 import (
 	"image"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,12 +26,19 @@ func newTerminalDialogForTest(t *testing.T, command string) (*TerminalDialog, *s
 
 func newTerminalDialogForTestOptions(t *testing.T, command string, opts TerminalDialogOptions) (*TerminalDialog, *shell.InteractiveSession) {
 	t.Helper()
+	return newSizedTerminalDialogForTest(t, command, 40, 10, opts)
+}
+
+// newSizedTerminalDialogForTest creates a dialog around a session with an
+// explicit emulator size.
+func newSizedTerminalDialogForTest(t *testing.T, command string, cols, rows int, opts TerminalDialogOptions) (*TerminalDialog, *shell.InteractiveSession) {
+	t.Helper()
 
 	session, err := shell.NewInteractiveSession(shell.InteractiveSessionOptions{
 		Command:    command,
 		WorkingDir: t.TempDir(),
-		Cols:       40,
-		Rows:       10,
+		Cols:       cols,
+		Rows:       rows,
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -171,6 +179,21 @@ func TestTerminalDialogAgentDrivenRefusesInput(t *testing.T) {
 	require.IsType(t, ActionTerminalKill{}, action)
 	action = dialog.HandleMsg(tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
 	require.IsType(t, ActionTerminalFullscreen{}, action)
+}
+
+// TestTerminalDialogViewKeyHelp checks both terminal kinds expose the same
+// ctrl+f fullscreen hint: an agent-driven pane is toggled, not cycled.
+func TestTerminalDialogViewKeyHelp(t *testing.T) {
+	t.Parallel()
+
+	for _, opts := range []TerminalDialogOptions{
+		{Command: "sleep 30", AgentDriven: true},
+		{Command: "sleep 30"},
+	} {
+		dialog, _ := newTerminalDialogForTestOptions(t, "sleep 30", opts)
+		_, full := dialog.Keys()
+		require.Equal(t, "fullscreen", full.Help().Desc)
+	}
 }
 
 func TestTerminalDialogAgentDrivenReadonlyHint(t *testing.T) {
@@ -314,6 +337,31 @@ func TestTerminalDialogResizesSessionToContentArea(t *testing.T) {
 	cols, rows := session.Size()
 	require.Equal(t, 78, cols, "width minus frame")
 	require.Equal(t, 21, rows, "height minus frame and header")
+}
+
+func TestTerminalDialogGhostFullscreen(t *testing.T) {
+	t.Parallel()
+
+	// An agent-driven session keeps its full logical size — the ghost
+	// fullscreen the agent reads — while the panel shows the bottom slice.
+	dialog, session := newSizedTerminalDialogForTest(t,
+		"sh -c 'seq -w 1 20; sleep 30'", 40, 20,
+		TerminalDialogOptions{Command: "sh -c 'seq -w 1 20; sleep 30'", AgentDriven: true})
+
+	require.Eventually(t, func() bool {
+		return strings.Contains(session.ScreenText(), "20")
+	}, 15*time.Second, 20*time.Millisecond)
+
+	scr, _ := drawTerminal(t, dialog, 30, 12)
+	rendered := scr.Render()
+
+	cols, rows := session.Size()
+	require.Equal(t, 40, cols, "the logical width is kept")
+	require.Equal(t, 20, rows, "the logical height is kept")
+
+	require.Contains(t, rendered, "03", "the top of the screen is visible")
+	require.NotContains(t, rendered, "19", "the bottom of the screen is cropped")
+	require.NotContains(t, rendered, "01", "scrolled-off content is cropped")
 }
 
 func drawTerminal(t *testing.T, dialog *TerminalDialog, width, height int) (uv.ScreenBuffer, image.Rectangle) {

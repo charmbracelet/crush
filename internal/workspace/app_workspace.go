@@ -81,6 +81,10 @@ func (w *AppWorkspace) SetCurrentSession(ctx context.Context, sessionID string) 
 	return nil
 }
 
+// RoutesChannelEvents reports false: in-process mode has no server to
+// route channel events, so the frontend injects them itself.
+func (w *AppWorkspace) RoutesChannelEvents() bool { return false }
+
 // -- Messages --
 
 func (w *AppWorkspace) ListMessages(ctx context.Context, sessionID string) ([]message.Message, error) {
@@ -108,6 +112,14 @@ func (w *AppWorkspace) AgentRun(ctx context.Context, sessionID, prompt string, a
 		return errors.New("agent coordinator not initialized")
 	}
 	_, err := w.app.AgentCoordinator.Run(ctx, sessionID, prompt, attachments...)
+	return err
+}
+
+func (w *AppWorkspace) AgentRunChannel(ctx context.Context, channel, sessionID, prompt string, attachments ...message.Attachment) error {
+	if w.app.AgentCoordinator == nil {
+		return errors.New("agent coordinator not initialized")
+	}
+	_, err := w.app.AgentCoordinator.Run(agent.WithChannel(ctx, channel), sessionID, prompt, attachments...)
 	return err
 }
 

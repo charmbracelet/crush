@@ -207,13 +207,18 @@ func NewViewTool(
 						fileInfo.Size(), MaxViewSize)), nil
 				}
 				if !GetSupportsImagesFromContext(ctx) {
-					modelName := GetModelNameFromContext(ctx)
-					return fantasy.NewTextErrorResponse(fmt.Sprintf("This model (%s) does not support image data.", modelName)), nil
+					return UnsupportedMediaResponse(GetModelNameFromContext(ctx)), nil
 				}
 
 				imageData, readErr := os.ReadFile(filePath)
 				if readErr != nil {
 					return fantasy.ToolResponse{}, fmt.Errorf("error reading image file: %w", readErr)
+				}
+				// Unlike a tool that simply had nothing to show, a read of
+				// an empty file failed to do what was asked, so it is
+				// reported as an error.
+				if len(imageData) == 0 {
+					return fantasy.NewTextErrorResponse(fmt.Sprintf("Image file is empty: %s", filePath)), nil
 				}
 
 				// Some tools save files with a mismatched extension

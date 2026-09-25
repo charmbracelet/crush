@@ -277,13 +277,13 @@ func terminalHeader(sty *styles.Styles, status ToolStatus, action, sessionID, de
 }
 
 // terminalActionStyle picks the header style for a terminal action. Start
-// is green, write carries the info accent, read stays muted, and kill is
-// red.
+// is green, write and paste carry the info accent, read stays muted, and
+// kill is red.
 func terminalActionStyle(sty *styles.Styles, action string) lipgloss.Style {
 	switch action {
 	case "start":
 		return sty.Tool.TerminalActionStart
-	case "write":
+	case "write", "paste":
 		return sty.Tool.TerminalActionWrite
 	case "read":
 		return sty.Tool.TerminalActionRead

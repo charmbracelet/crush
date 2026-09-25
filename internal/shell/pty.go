@@ -4,16 +4,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"image/color"
 	"io"
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/vt"
 	"github.com/charmbracelet/x/xpty"
 	"mvdan.cc/sh/v3/syntax"
@@ -96,6 +99,12 @@ type InteractiveSession struct {
 	// it ends the forwarding goroutine.
 	input io.Closer
 
+	// inputCh serializes input into a single writer goroutine so callers
+	// never block on a wedged child: enqueueing stops with an error once
+	// the queue is full instead of blocking on a PTY write forever.
+	inputCh   chan func()
+	inputStop chan struct{}
+
 	dirty    chan struct{}
 	done     chan struct{}
 	readDone chan struct{}
@@ -113,6 +122,22 @@ type InteractiveSession struct {
 	title   string
 	cwdMu   sync.Mutex
 	cwd     string
+	focusMu sync.Mutex
+	focused bool
+
+	// altScreen tracks whether the child switched to the alternate screen
+	// (a full-screen TUI is running).
+	altScreen atomic.Bool
+
+	// lastBell is when the child last rang the terminal bell, zero never.
+	lastBell atomic.Int64
+
+	// paletteMu guards the theme palette and per-session palette overrides
+	// (OSC 4), which OSC 104 uses to restore defaults.
+	paletteMu sync.Mutex
+	palette   [16]color.Color
+	paletteOK bool
+	overrides map[int]color.Color
 }
 
 // ErrCommandBlocked is returned when a block function rejects the command
@@ -120,15 +145,30 @@ type InteractiveSession struct {
 var ErrCommandBlocked = fmt.Errorf("command blocked")
 
 // CheckBlocked parses command and applies blockFuncs to the literal argv of
-// every simple command it contains. It exists because interactive sessions
-// spawn a real shell, so the deny-list that normally runs inside the mvdan
-// exec middleware never sees these commands.
+// every simple command it contains, recursing into the bodies of shell
+// interpreters ("sh -c ...", "bash -lc ...") and literal "eval" arguments:
+// without that, a denied command could simply be wrapped. It exists because
+// interactive sessions spawn a real shell, so the deny-list that normally
+// runs inside the mvdan exec middleware never sees these commands.
 //
 // Commands that cannot be parsed are passed through: the spawned shell
 // reports the syntax error itself, and an unparsable command cannot be
 // matched against the deny-list anyway.
 func CheckBlocked(command string, blockFuncs []BlockFunc) error {
 	if len(blockFuncs) == 0 {
+		return nil
+	}
+	return checkScript(command, blockFuncs, 0)
+}
+
+// checkBlockDepth bounds how deep the checker recurses into nested shell
+// bodies; a pathological "sh -c 'sh -c ...'" chain stops being checked
+// rather than hanging the spawn.
+const checkBlockDepth = 8
+
+// checkScript parses a script and walks its commands.
+func checkScript(command string, blockFuncs []BlockFunc, depth int) error {
+	if depth > checkBlockDepth {
 		return nil
 	}
 
@@ -153,6 +193,15 @@ func CheckBlocked(command string, blockFuncs []BlockFunc) error {
 				return false
 			}
 		}
+
+		// A shell interpreter running a literal body executes that body as
+		// a script; check it the same way.
+		if body, ok := shellBody(args); ok {
+			if err := checkScript(body, blockFuncs, depth+1); err != nil {
+				blocked = args[0]
+				return false
+			}
+		}
 		return true
 	})
 
@@ -162,22 +211,94 @@ func CheckBlocked(command string, blockFuncs []BlockFunc) error {
 	return nil
 }
 
+// shellBody extracts a literal script body from a shell interpreter or
+// eval invocation, so the deny-list can recurse into it.
+func shellBody(args []string) (string, bool) {
+	if len(args) == 0 {
+		return "", false
+	}
+
+	base := filepath.Base(args[0])
+	switch base {
+	case "sh", "bash", "dash", "zsh", "ksh", "ash":
+		// The script is the argument right after a flag that asks the shell
+		// to read it from the command line: -c, and combined forms like -lc
+		// or -ec.
+		for i, arg := range args[1:] {
+			if len(arg) < 2 || arg[0] != '-' || strings.HasPrefix(arg, "--") {
+				continue
+			}
+			if !strings.Contains(arg[1:], "c") {
+				continue
+			}
+			if i+2 < len(args) {
+				return args[i+2], true
+			}
+			return "", false
+		}
+		return "", false
+	case "eval":
+		// eval joins its arguments with spaces; a single literal argument is
+		// safe to parse.
+		if len(args) == 2 {
+			return args[1], true
+		}
+		return "", false
+	default:
+		return "", false
+	}
+}
+
 // literalArgs returns the literal argv of a call expression. It reports
 // false when any word requires expansion (a variable, glob, or command
-// substitution), since those cannot be resolved before execution.
+// substitution), since those cannot be resolved before execution. Quoted
+// words resolve when their content is fixed: single quotes never expand,
+// and double quotes resolve when they contain only literals.
 func literalArgs(call *syntax.CallExpr) ([]string, bool) {
 	if len(call.Args) == 0 {
 		return nil, false
 	}
 	args := make([]string, 0, len(call.Args))
 	for _, word := range call.Args {
-		lit := word.Lit()
-		if lit == "" {
+		lit, ok := wordValue(word)
+		if !ok {
 			return nil, false
 		}
 		args = append(args, lit)
 	}
 	return args, true
+}
+
+// wordValue resolves a word to its literal value, or reports false when it
+// contains anything that expands at runtime.
+func wordValue(word *syntax.Word) (string, bool) {
+	if lit := word.Lit(); lit != "" {
+		return lit, true
+	}
+
+	var b strings.Builder
+	for _, part := range word.Parts {
+		switch p := part.(type) {
+		case *syntax.Lit:
+			b.WriteString(p.Value)
+		case *syntax.SglQuoted:
+			b.WriteString(p.Value)
+		case *syntax.DblQuoted:
+			if p.Dollar {
+				return "", false
+			}
+			for _, dp := range p.Parts {
+				lit, ok := dp.(*syntax.Lit)
+				if !ok {
+					return "", false
+				}
+				b.WriteString(lit.Value)
+			}
+		default:
+			return "", false
+		}
+	}
+	return b.String(), true
 }
 
 // NewInteractiveSession spawns command on a new PTY with a terminal
@@ -216,13 +337,19 @@ func NewInteractiveSession(opts InteractiveSessionOptions) (*InteractiveSession,
 		dirty:        make(chan struct{}, 1),
 		done:         make(chan struct{}),
 		readDone:     make(chan struct{}),
+		inputCh:      make(chan func(), interactiveInputQueueSize),
+		inputStop:    make(chan struct{}),
 		registeredAt: startTime,
+		overrides:    make(map[int]color.Color),
 	}
 
 	emulator.SetCallbacks(vt.Callbacks{
 		Title:            session.setTitle,
 		WorkingDirectory: session.setWorkingDir,
+		AltScreen:        session.setAltScreen,
+		Bell:             session.ringBell,
 	})
+	registerOscHandlers(session)
 
 	shellPath, args := interactiveShellCommand(opts.Command)
 	cmd := exec.Command(shellPath, args...) // #nosec G204 -- the command is the caller's intent.
@@ -240,6 +367,10 @@ func NewInteractiveSession(opts InteractiveSessionOptions) (*InteractiveSession,
 		return nil, fmt.Errorf("interactive session: could not start %s: %w", shellPath, err)
 	}
 
+	// Serialize all input (keys, mouse, paste, palette replies) through one
+	// writer goroutine so a wedged child can never block a caller forever.
+	go session.inputLoop()
+
 	// Forward everything the emulator encodes (keys, mouse, paste) to the
 	// PTY. The emulator exposes its input as a reader, so this is the
 	// inverse of the output loop below.
@@ -251,6 +382,56 @@ func NewInteractiveSession(opts InteractiveSessionOptions) (*InteractiveSession,
 	go session.waitLoop()
 
 	return session, nil
+}
+
+// interactiveInputQueueSize bounds the pending input operations; a wedged
+// child fills the queue, and further writes fail instead of blocking.
+const interactiveInputQueueSize = 128
+
+// inputWriteTimeout bounds how long a caller waits for room in the input
+// queue before giving up.
+const inputWriteTimeout = 2 * time.Second
+
+// inputLoop applies queued input operations in order. Operations that
+// cannot run (closed PTY) fail fast; a single wedged write blocks this
+// goroutine and the queue, never the callers.
+func (s *InteractiveSession) inputLoop() {
+	for {
+		select {
+		case fn := <-s.inputCh:
+			fn()
+		case <-s.inputStop:
+			return
+		}
+	}
+}
+
+// enqueue schedules an input operation. It fails instead of blocking when
+// the child stopped consuming input and the queue is full.
+func (s *InteractiveSession) enqueue(fn func()) error {
+	s.mu.Lock()
+	closed := s.closed
+	s.mu.Unlock()
+	if closed {
+		return fmt.Errorf("interactive session: session is closed")
+	}
+
+	select {
+	case s.inputCh <- fn:
+		return nil
+	case <-time.After(inputWriteTimeout):
+		return fmt.Errorf("interactive session: the child is not reading input")
+	}
+}
+
+// tryEnqueue schedules a best-effort input operation, dropping it when the
+// queue is full. Used for replies the child asked for, where silence is
+// better than stalling the PTY reader.
+func (s *InteractiveSession) tryEnqueue(fn func()) {
+	select {
+	case s.inputCh <- fn:
+	default:
+	}
 }
 
 // readLoop mirrors PTY output into the emulator and signals the UI. It
@@ -400,10 +581,11 @@ func InteractiveExitCode(err error) int {
 
 // Write sends raw bytes to the child, bypassing the emulator's encoding.
 func (s *InteractiveSession) Write(p []byte) error {
-	if _, err := s.pty.Write(p); err != nil {
-		return fmt.Errorf("interactive session: write failed: %w", err)
-	}
-	return nil
+	return s.enqueue(func() {
+		if _, err := s.pty.Write(p); err != nil {
+			slog.Debug("Failed to write to interactive session", "error", err)
+		}
+	})
 }
 
 // SendKey sends a semantic keystroke to the child. It goes through the
@@ -411,22 +593,166 @@ func (s *InteractiveSession) Write(p []byte) error {
 // enabled (application cursor keys, keypad, mouse), which is what makes
 // full-screen programs controllable.
 func (s *InteractiveSession) SendKey(key uv.KeyPressEvent) error {
-	if s.Exited() {
-		return fmt.Errorf("interactive session: session %s has exited", s.ID())
-	}
-	s.emu.SendKey(key)
-	return nil
+	return s.enqueue(func() {
+		s.emu.SendKey(key)
+	})
 }
 
 // SendMouse sends a mouse event to the child, encoded for the mouse modes
 // the child enabled. Programs that never asked for mouse tracking receive
 // nothing, just like a real terminal.
 func (s *InteractiveSession) SendMouse(event uv.MouseEvent) error {
-	if s.Exited() {
-		return fmt.Errorf("interactive session: session %s has exited", s.ID())
+	return s.enqueue(func() {
+		s.emu.SendMouse(event)
+	})
+}
+
+// Paste sends text as a paste: when the child enabled bracketed paste mode
+// the text is wrapped in the paste markers, so multi-line pastes are
+// inserted instead of executed line by line.
+func (s *InteractiveSession) Paste(text string) error {
+	return s.enqueue(func() {
+		s.emu.Paste(text)
+	})
+}
+
+// Focus tells the child it gained focus, if it asked for focus events.
+func (s *InteractiveSession) Focus() {
+	s.setFocused(true)
+}
+
+// Blur tells the child it lost focus, if it asked for focus events.
+func (s *InteractiveSession) Blur() {
+	s.setFocused(false)
+}
+
+// focused tracks the last focus state sent to the child so repeated calls
+// do not re-send the event.
+func (s *InteractiveSession) setFocused(focused bool) {
+	s.focusMu.Lock()
+	had := s.focused
+	s.focusMu.Unlock()
+	if had == focused {
+		return
 	}
-	s.emu.SendMouse(event)
-	return nil
+	s.focusMu.Lock()
+	s.focused = focused
+	s.focusMu.Unlock()
+
+	s.tryEnqueue(func() {
+		if focused {
+			s.emu.Focus()
+		} else {
+			s.emu.Blur()
+		}
+	})
+}
+
+// SetPalette records the theme palette backing the emulator's default ANSI
+// colors, which OSC 104 uses to restore defaults after a program changes
+// them.
+func (s *InteractiveSession) SetPalette(palette [16]color.Color) {
+	s.paletteMu.Lock()
+	defer s.paletteMu.Unlock()
+	s.palette = palette
+	s.paletteOK = true
+}
+
+// effectiveColor returns the color an index currently resolves to: a
+// program-set override, else the theme palette, else the plain palette.
+func (s *InteractiveSession) effectiveColor(i int) color.Color {
+	s.paletteMu.Lock()
+	defer s.paletteMu.Unlock()
+	return s.effectiveColorLocked(i)
+}
+
+// effectiveColorLocked is effectiveColor for callers that already hold the
+// palette mutex.
+func (s *InteractiveSession) effectiveColorLocked(i int) color.Color {
+	if c, ok := s.overrides[i]; ok {
+		return c
+	}
+	if i < 16 && s.paletteOK {
+		return s.palette[i]
+	}
+	return ansi.IndexedColor(i)
+}
+
+// setOverride records a program's palette change and schedules it on the
+// emulator. The emulator update is deferred: OSC handlers run inside the
+// emulator's write lock, so touching it here would deadlock.
+func (s *InteractiveSession) setOverride(i int, c color.Color) {
+	s.paletteMu.Lock()
+	s.overrides[i] = c
+	s.paletteMu.Unlock()
+
+	s.tryEnqueue(func() {
+		s.emu.SetIndexedColor(i, c)
+	})
+}
+
+// clearOverride drops a program's palette change and restores the default.
+func (s *InteractiveSession) clearOverride(i int) {
+	s.paletteMu.Lock()
+	delete(s.overrides, i)
+	c := s.effectiveColorLocked(i)
+	s.paletteMu.Unlock()
+
+	s.tryEnqueue(func() {
+		s.emu.SetIndexedColor(i, c)
+	})
+}
+
+// clearOverrides drops every program palette change and restores defaults.
+func (s *InteractiveSession) clearOverrides() {
+	s.paletteMu.Lock()
+	overrides := s.overrides
+	s.overrides = make(map[int]color.Color)
+	palette := s.palette
+	paletteOK := s.paletteOK
+	s.paletteMu.Unlock()
+
+	if len(overrides) == 0 {
+		return
+	}
+	s.tryEnqueue(func() {
+		for i := range overrides {
+			if i < 16 && paletteOK {
+				s.emu.SetIndexedColor(i, palette[i])
+			} else {
+				s.emu.SetIndexedColor(i, ansi.IndexedColor(i))
+			}
+		}
+	})
+}
+
+// InAltScreen reports whether the child switched to the alternate screen,
+// which means a full-screen TUI is drawing.
+func (s *InteractiveSession) InAltScreen() bool {
+	return s.altScreen.Load()
+}
+
+// LastBell is when the child last rang the terminal bell, zero never.
+func (s *InteractiveSession) LastBell() time.Time {
+	n := s.lastBell.Load()
+	if n == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, n)
+}
+
+// setAltScreen tracks alternate-screen changes and repaints the panel,
+// whose header shows whether a full-screen TUI is running.
+func (s *InteractiveSession) setAltScreen(on bool) {
+	if s.altScreen.Swap(on) != on {
+		s.signalDirty()
+	}
+}
+
+// ringBell records a terminal bell and repaints so the UI can surface it.
+func (s *InteractiveSession) ringBell() {
+	s.lastBell.Store(time.Now().UnixNano())
+	s.signalDirty()
 }
 
 // Resize resizes both the emulator and the underlying PTY.
@@ -480,6 +806,10 @@ func (s *InteractiveSession) Close() error {
 	if s.input != nil {
 		_ = s.input.Close()
 	}
+	// Stop applying queued input. The channel is never closed so a sender
+	// that raced past the closed check cannot panic; its operation is just
+	// dropped.
+	close(s.inputStop)
 	return s.pty.Close()
 }
 

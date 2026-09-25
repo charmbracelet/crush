@@ -40,6 +40,7 @@ const (
 	terminalActionStart = "start"
 	terminalActionRead  = "read"
 	terminalActionWrite = "write"
+	terminalActionPaste = "paste"
 	terminalActionKill  = "kill"
 )
 
@@ -53,9 +54,9 @@ type TerminalParams struct {
 	Wait        *bool  `json:"wait,omitempty" description:"Wait for the user to finish before returning (start only, default true). The user owns the terminal and can type in it; the call blocks until the command exits, the user closes the terminal, or the wait budget elapses, and returns the transcript. Set false when you own the terminal: the user sees a read-only view they cannot type into, and you drive it with write/read or let it run"`
 
 	// write
-	Text     string   `json:"text,omitempty" description:"The exact text/keystrokes to send (write only). Use \\r for Enter, \\u0003 for Ctrl+C, and escape sequences for arrow keys (\\u001b[A/B/C/D)"`
+	Text     string   `json:"text,omitempty" description:"The exact text/keystrokes to send (write/paste). Use \\r for Enter, \\u0003 for Ctrl+C, and escape sequences for arrow keys (\\u001b[A/B/C/D)"`
 	Keys     []string `json:"keys,omitempty" description:"Named keys to send instead of text (write only): \"enter\", \"up\"/\"down\"/\"left\"/\"right\", \"tab\", \"esc\", \"ctrl+c\", \"f5\", \"pageup\"/\"pagedown\", \"home\"/\"end\". Prefer this for full-screen apps, whose arrow keys only work when the terminal encodes them for the mode the app enabled"`
-	SettleMs int      `json:"settle_ms,omitempty" description:"How long to wait for the session to redraw after writing before reporting the screen (write only, default 250)"`
+	SettleMs int      `json:"settle_ms,omitempty" description:"How long to wait for the session to redraw after writing or pasting before reporting the screen (default 250)"`
 
 	// read
 	IncludeScrollback bool `json:"include_scrollback,omitempty" description:"Also return everything that scrolled off the visible screen (read only)"`
@@ -104,12 +105,14 @@ func NewTerminalTool(permissions permission.Service, terminals terminal.Service,
 				return terminalRead(ctx, params, spillDir)
 			case terminalActionWrite:
 				return terminalWrite(ctx, params)
+			case terminalActionPaste:
+				return terminalPaste(ctx, params)
 			case terminalActionKill:
 				return terminalKill(ctx, params, spillDir)
 			default:
 				return fantasy.NewTextErrorResponse(fmt.Sprintf(
-					"unknown action %q; expected one of: %s, %s, %s, %s",
-					params.Action, terminalActionStart, terminalActionRead, terminalActionWrite, terminalActionKill,
+					"unknown action %q; expected one of: %s, %s, %s, %s, %s",
+					params.Action, terminalActionStart, terminalActionRead, terminalActionWrite, terminalActionPaste, terminalActionKill,
 				)), nil
 			}
 		},
@@ -355,11 +358,11 @@ func terminalRead(ctx context.Context, params TerminalParams, spillDir string) (
 	return fantasy.WithResponseMetadata(fantasy.NewTextResponse(output), metadata), nil
 }
 
-// sessionGeometry reports the session's logical size and cursor position.
-// The position is included even when the child hid its cursor: apps move
-// the hidden cursor while drawing, so it still tells you where the program
-// is focused. The logical size matters because a session can be larger
-// than the panel the user watches.
+// sessionGeometry reports the session's state an agent needs between
+// keystrokes: its logical size (which can be larger than the panel the
+// user watches), the cursor position (even when hidden, since apps still
+// move it while drawing), the working directory the child last reported,
+// and whether a full-screen TUI is drawing.
 func sessionGeometry(session *shell.InteractiveSession) string {
 	cols, rows := session.Size()
 	geom := fmt.Sprintf("Screen is %d columns by %d rows", cols, rows)
@@ -369,6 +372,15 @@ func sessionGeometry(session *shell.InteractiveSession) string {
 			cursor += " (the program hid its cursor)"
 		}
 		geom += ". " + cursor
+	}
+	if dir := session.WorkingDir(); dir != "" {
+		geom += ". Working dir: " + dir
+	}
+	if session.InAltScreen() {
+		geom += ". The program is drawing a full-screen TUI (alternate screen)"
+	}
+	if bell := session.LastBell(); !bell.IsZero() && time.Since(bell) < 10*time.Second {
+		geom += ". The program rang the terminal bell just now"
 	}
 	return geom
 }
@@ -419,6 +431,39 @@ func terminalWrite(ctx context.Context, params TerminalParams) (fantasy.ToolResp
 		}
 	}
 
+	sent := fmt.Sprintf("Sent %d bytes and %d keystrokes to terminal session %s",
+		len(params.Text), len(params.Keys), session.ID())
+	return terminalWriteResult(ctx, session, terminalActionWrite, sent, params)
+}
+
+// terminalPaste sends text as a paste: when the child enabled bracketed
+// paste mode the text is wrapped in paste markers, so multi-line pastes
+// are inserted into an editor or command line instead of executed line by
+// line.
+func terminalPaste(ctx context.Context, params TerminalParams) (fantasy.ToolResponse, error) {
+	session, err := resolveInteractiveSession(params.SessionID)
+	if err != nil {
+		return fantasy.NewTextErrorResponse(err.Error()), nil
+	}
+
+	if session.Exited() {
+		return fantasy.NewTextErrorResponse(fmt.Sprintf(
+			"session %s has already exited; nothing was pasted", session.ID(),
+		)), nil
+	}
+	if params.Text == "" {
+		return fantasy.NewTextErrorResponse("nothing to paste: provide text"), nil
+	}
+
+	if err := session.Paste(params.Text); err != nil {
+		return fantasy.NewTextErrorResponse(fmt.Sprintf("could not paste to session %s: %v", session.ID(), err)), nil
+	}
+	return terminalWriteResult(ctx, session, terminalActionPaste, fmt.Sprintf("Pasted %d characters into terminal session %s", len(params.Text), session.ID()), params)
+}
+
+// terminalWriteResult waits for the session to redraw and reports the
+// resulting screen.
+func terminalWriteResult(ctx context.Context, session *shell.InteractiveSession, action, sent string, params TerminalParams) (fantasy.ToolResponse, error) {
 	// Let the session redraw before reporting the screen.
 	settle := defaultTerminalWriteSettle
 	if params.SettleMs > 0 {
@@ -445,7 +490,7 @@ func terminalWrite(ctx context.Context, params TerminalParams) (fantasy.ToolResp
 	}
 
 	metadata := TerminalResponseMetadata{
-		Action:    terminalActionWrite,
+		Action:    action,
 		SessionID: session.ID(),
 		Command:   session.Command(),
 		Exited:    session.Exited(),
@@ -453,8 +498,8 @@ func terminalWrite(ctx context.Context, params TerminalParams) (fantasy.ToolResp
 	}
 
 	response := fmt.Sprintf(
-		"Sent %d bytes to terminal session %s. Session: %s.\n\n<screen>\n%s\n</screen>\n\n%s",
-		len(params.Text), session.ID(), status, screen, sessionGeometry(session),
+		"%s. Session: %s.\n\n<screen>\n%s\n</screen>\n\n%s",
+		sent, status, screen, sessionGeometry(session),
 	)
 	return fantasy.WithResponseMetadata(fantasy.NewTextResponse(response), metadata), nil
 }

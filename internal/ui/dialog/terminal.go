@@ -95,6 +95,9 @@ func (t *TerminalDialog) applyTheme() {
 	emu.SetForegroundColor(sty.Terminal.Fg)
 	emu.SetBackgroundColor(sty.Terminal.Bg)
 	emu.SetCursorColor(sty.Terminal.Cursor)
+	// The session keeps the palette too, so OSC 104 can restore it when a
+	// program resets colors it changed.
+	t.session.SetPalette(sty.ANSI)
 	for i, c := range sty.ANSI {
 		emu.SetIndexedColor(i, c)
 	}
@@ -117,8 +120,6 @@ func (t *TerminalDialog) Keys() (close, fullscreen key.Binding) {
 
 // HandleMsg implements [Dialog].
 func (t *TerminalDialog) HandleMsg(msg tea.Msg) Action {
-	emu := t.session.Emulator()
-
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		if key.Matches(msg, t.closeKey) {
@@ -135,7 +136,9 @@ func (t *TerminalDialog) HandleMsg(msg tea.Msg) Action {
 			return nil
 		}
 		return ActionTerminalInput{Apply: func() {
-			emu.SendKey(uv.KeyPressEvent(uv.Key(msg)))
+			// Routed through the session's input queue, so a wedged child
+			// fails the write instead of hanging the UI goroutine.
+			_ = t.session.SendKey(uv.KeyPressEvent(uv.Key(msg)))
 		}}
 
 	case tea.PasteMsg:
@@ -144,7 +147,9 @@ func (t *TerminalDialog) HandleMsg(msg tea.Msg) Action {
 		}
 		content := msg.Content
 		return ActionTerminalInput{Apply: func() {
-			emu.Paste(content)
+			// Paste is mode-aware: bracketed paste markers are added when
+			// the child enabled them.
+			_ = t.session.Paste(content)
 		}}
 
 	case tea.MouseClickMsg:
@@ -156,7 +161,7 @@ func (t *TerminalDialog) HandleMsg(msg tea.Msg) Action {
 			return nil
 		}
 		return ActionTerminalInput{Apply: func() {
-			emu.SendMouse(uv.MouseClickEvent(m))
+			_ = t.session.SendMouse(uv.MouseClickEvent(m))
 		}}
 
 	case tea.MouseReleaseMsg:
@@ -168,7 +173,7 @@ func (t *TerminalDialog) HandleMsg(msg tea.Msg) Action {
 			return nil
 		}
 		return ActionTerminalInput{Apply: func() {
-			emu.SendMouse(uv.MouseReleaseEvent(m))
+			_ = t.session.SendMouse(uv.MouseReleaseEvent(m))
 		}}
 
 	case tea.MouseWheelMsg:
@@ -180,7 +185,7 @@ func (t *TerminalDialog) HandleMsg(msg tea.Msg) Action {
 			return nil
 		}
 		return ActionTerminalInput{Apply: func() {
-			emu.SendMouse(uv.MouseWheelEvent(m))
+			_ = t.session.SendMouse(uv.MouseWheelEvent(m))
 		}}
 
 	case tea.MouseMotionMsg:
@@ -192,7 +197,7 @@ func (t *TerminalDialog) HandleMsg(msg tea.Msg) Action {
 			return nil
 		}
 		return ActionTerminalInput{Apply: func() {
-			emu.SendMouse(uv.MouseMotionEvent(m))
+			_ = t.session.SendMouse(uv.MouseMotionEvent(m))
 		}}
 
 	case TerminalOutputMsg:
@@ -347,6 +352,13 @@ func (t *TerminalDialog) viewOffset(x, y int) (int, int, bool) {
 // focused reports whether the terminal currently owns the keyboard. The
 // host UI sets it before each draw.
 func (t *TerminalDialog) SetFocused(focused bool) {
+	// Tell the child when it gains or loses focus, so programs that listen
+	// for focus events (tmux, editors) see the pane come and go.
+	if focused {
+		t.session.Focus()
+	} else {
+		t.session.Blur()
+	}
 	t.focused = focused
 }
 
@@ -398,17 +410,23 @@ func resolveIndexed(c color.Color, emu *vt.SafeEmulator) (color.Color, bool) {
 	return resolved, true
 }
 
-// renderHeader builds the one-line header: "$ command" on the left, then
-// the live status chip on the right. Keybinds live in the status bar and
-// the editor hint row instead of on the panel.
+// renderHeader builds the one-line header: the child's title (or the
+// command) on the left, then the live status chip on the right. Keybinds
+// live in the status bar and the editor hint row instead of on the panel.
 func (t *TerminalDialog) renderHeader(width int) string {
 	sty := t.com.Styles
 
 	status := t.renderStatus()
 
+	// Programs set their own titles (nvim, tmux, shells); when one does,
+	// that is a better label than the raw command.
+	label := "$ " + t.command
+	if title := t.session.Title(); title != "" {
+		label = title
+	}
+
 	commandWidth := max(width-lipgloss.Width(status)-2, 1)
-	command := ansi.Truncate(t.command, commandWidth, "…")
-	left := sty.Terminal.Header.Render("$ " + command)
+	left := sty.Terminal.Header.Render(ansi.Truncate(label, commandWidth, "…"))
 
 	pad := max(width-lipgloss.Width(left)-lipgloss.Width(status), 0)
 	// The status chip can outgrow a narrow panel; keep the header to a
@@ -431,6 +449,12 @@ func (t *TerminalDialog) renderStatus() string {
 	state := sty.Terminal.Running.Render("● running")
 	if t.session.Exited() {
 		state = sty.Terminal.Exited.Render(fmt.Sprintf("exited %d", t.session.ExitCode()))
+	}
+
+	// A full-screen program is drawing; say so, since the panel then shows
+	// a frame rather than a transcript.
+	if t.session.InAltScreen() {
+		state = sty.Terminal.Hint.Render("TUI") + " " + state
 	}
 	return owner + " " + state + " "
 }

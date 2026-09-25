@@ -9,8 +9,9 @@ There are two kinds of terminal, chosen by the wait parameter on start:
 
 <actions>
 - start: run a command in a new terminal session. Blocks for the user by default (see above); with wait: false it returns a session ID immediately and the user gets a read-only view.
-- read: show the session's current screen, its status (running / exited with code), its size, and the cursor position (reported even when the program hid its cursor). include_scrollback adds everything that scrolled off; wait_seconds blocks until the session exits.
+- read: show the session's current screen, its status (running / exited with code), its size, and the cursor position (reported even when the program hid its cursor), plus the working directory it last reported and whether a full-screen TUI is drawing. include_scrollback adds everything that scrolled off; wait_seconds blocks until the session exits.
 - write: drive the session. Send literal text (text), named keys (keys), and/or a mouse event (mouse), then it returns the screen after the session has redrawn (settle_ms, default 250). Writes are not echoed back on their own.
+- paste: send text as a paste. When the program enabled bracketed paste mode the text is wrapped in paste markers, so a multi-line paste is inserted into an editor or command line instead of being executed line by line. Prefer this over write for multi-line text.
 - kill: terminate the session and get its final transcript (screen, scrollback, exit code). The terminal closes in the UI.
 </actions>
 

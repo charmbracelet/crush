@@ -274,6 +274,64 @@ func TestTerminalToolUnknownAction(t *testing.T) {
 	require.Contains(t, resp.Content, "unknown action")
 }
 
+// TestTerminalPasteUsesBracketedPaste checks the paste action end to end:
+// the child enables bracketed paste, and the pasted text arrives wrapped in
+// the paste markers so multi-line input is inserted, not executed.
+func TestTerminalPasteUsesBracketedPaste(t *testing.T) {
+	resetTerminalManager(t)
+
+	tool, _ := newTerminalToolForTest(t)
+	resp := runTerminalTool(t, tool, TerminalParams{
+		Action:  "start",
+		Command: `sh -c 'stty raw -echo; printf "\033[?2004hready"; dd bs=1 count=19 2>/dev/null | od -An -tx1; stty sane'`,
+		Wait:    agentDriven(),
+	})
+
+	var meta TerminalResponseMetadata
+	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
+
+	// Paste only once the mode is on; the ready marker proves it.
+	require.Eventually(t, func() bool {
+		read := runTerminalTool(t, tool, TerminalParams{Action: "read", SessionID: meta.SessionID})
+		return strings.Contains(read.Content, "ready")
+	}, 15*time.Second, 50*time.Millisecond)
+
+	paste := runTerminalTool(t, tool, TerminalParams{
+		Action:    "paste",
+		SessionID: meta.SessionID,
+		Text:      "one\ntwo",
+	})
+	require.False(t, paste.IsError)
+
+	var pasteMeta TerminalResponseMetadata
+	require.NoError(t, json.Unmarshal([]byte(paste.Metadata), &pasteMeta))
+	require.Equal(t, "paste", pasteMeta.Action)
+
+	require.Eventually(t, func() bool {
+		read := runTerminalTool(t, tool, TerminalParams{Action: "read", SessionID: meta.SessionID})
+		screen := strings.Join(strings.Fields(read.Content), " ")
+		return strings.Contains(screen, "1b 5b 32 30 30 7e") && strings.Contains(screen, "1b 5b 32 30 31 7e")
+	}, 15*time.Second, 50*time.Millisecond, "the pasted bytes carry the bracketed paste markers")
+}
+
+func TestTerminalPasteNeedsText(t *testing.T) {
+	resetTerminalManager(t)
+
+	tool, _ := newTerminalToolForTest(t)
+	resp := runTerminalTool(t, tool, TerminalParams{
+		Action:  "start",
+		Command: "sleep 30",
+		Wait:    agentDriven(),
+	})
+
+	var meta TerminalResponseMetadata
+	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
+
+	paste := runTerminalTool(t, tool, TerminalParams{Action: "paste", SessionID: meta.SessionID})
+	require.True(t, paste.IsError)
+	require.Contains(t, paste.Content, "nothing to paste")
+}
+
 func TestTerminalRead(t *testing.T) {
 	resetTerminalManager(t)
 

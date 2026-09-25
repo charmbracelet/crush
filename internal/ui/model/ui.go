@@ -326,6 +326,9 @@ type UI struct {
 	// terminal dialog is showing. Nil when no session is open.
 	activeTerminal *activeTerminalSession
 
+	// lastTerminalBell is the last child bell the status bar surfaced.
+	lastTerminalBell time.Time
+
 	header *header
 
 	// sendProgressBar instructs the TUI to send progress bar updates to the
@@ -1167,6 +1170,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case dialog.TerminalOutputMsg:
 		if m.activeTerminal != nil {
 			cmds = append(cmds, m.watchTerminalSession(m.activeTerminal.session))
+			if cmd := m.flashTerminalBell(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 		}
 		cmds = append(cmds, m.handleDialogMsg(msg))
 	case dialog.TerminalExitMsg:
@@ -5941,6 +5947,20 @@ func (m *UI) terminalGhostSize() (cols, rows int) {
 	}
 	rows = max(m.height-3, shell.MinInteractiveRows)
 	return cols, rows
+}
+
+// flashTerminalBell surfaces a terminal bell the child just rang, which
+// otherwise disappears inside the embedded panel.
+func (m *UI) flashTerminalBell() tea.Cmd {
+	if m.activeTerminal == nil {
+		return nil
+	}
+	bell := m.activeTerminal.session.LastBell()
+	if bell.IsZero() || !bell.After(m.lastTerminalBell) {
+		return nil
+	}
+	m.lastTerminalBell = bell
+	return util.ReportInfo("Terminal bell")
 }
 
 // watchTerminalSession waits for the session to change or exit and turns

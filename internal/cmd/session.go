@@ -151,7 +151,11 @@ func sessionSetup(cmd *cobra.Command) (context.Context, *sessionServices, func()
 		return ctx, &sessionServices{sessions: store, messages: store, cfg: cfg}, cleanup, nil
 	}
 
-	cfg, err := config.Init("", dataDir, false)
+	cwd, err := ResolveCwd(cmd)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	cfg, err := config.Init(cwd, dataDir, false)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to initialize config: %w", err)
 	}

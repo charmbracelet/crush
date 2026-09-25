@@ -1,8 +1,11 @@
 package chat
 
 import (
+	"cmp"
+	"encoding/xml"
 	"fmt"
 	"image"
+	"strconv"
 	"strings"
 	"time"
 
@@ -392,6 +395,153 @@ func (a *AssistantInfoItem) renderContent(width int) string {
 	return common.Section(a.sty, assistant, width)
 }
 
+// ChannelInfoID returns a stable ID for channel-info items.
+func ChannelInfoID(messageID string) string {
+	return fmt.Sprintf("%s:channel-info", messageID)
+}
+
+// ChannelInfoItem renders sender/channel/timestamp metadata for a
+// channel-originated user message. It is emitted as a separate list item
+// below the message body, mirroring how AssistantInfoItem appears below
+// assistant messages.
+type ChannelInfoItem struct {
+	*list.Versioned
+	*cachedMessageItem
+
+	id      string
+	message *message.Message
+	sty     *styles.Styles
+}
+
+// NewChannelInfoItem creates a new ChannelInfoItem.
+func NewChannelInfoItem(sty *styles.Styles, msg *message.Message) MessageItem {
+	return &ChannelInfoItem{
+		Versioned:         list.NewVersioned(),
+		cachedMessageItem: &cachedMessageItem{},
+		id:                ChannelInfoID(msg.ID),
+		message:           msg,
+		sty:               sty,
+	}
+}
+
+// Finished implements list.Item. Channel metadata is immutable once
+// rendered, so the entry is always safe to freeze.
+func (c *ChannelInfoItem) Finished() bool {
+	return true
+}
+
+// ID implements MessageItem.
+func (c *ChannelInfoItem) ID() string {
+	return c.id
+}
+
+// RawRender implements MessageItem.
+func (c *ChannelInfoItem) RawRender(width int) string {
+	innerWidth := max(0, width-MessageLeftPaddingTotal)
+	content, _, ok := c.getCachedRender(innerWidth)
+	if !ok {
+		content = c.renderContent(innerWidth)
+		height := lipgloss.Height(content)
+		c.setCachedRender(content, innerWidth, height)
+	}
+	return content
+}
+
+// Render implements MessageItem.
+func (c *ChannelInfoItem) Render(width int) string {
+	if cached, ok := c.getCachedPrefixedRender(width, 0); ok {
+		return cached
+	}
+	prefix := c.sty.Messages.SectionHeader.Render()
+	lines := strings.Split(c.RawRender(width), "\n")
+	for i, line := range lines {
+		lines[i] = prefix + line
+	}
+	out := strings.Join(lines, "\n")
+	c.setCachedPrefixedRender(out, width, 0)
+	return out
+}
+
+func (c *ChannelInfoItem) renderContent(width int) string {
+	info, ok := parseChannelInfo(c.message)
+	if !ok {
+		return ""
+	}
+
+	parts := make([]string, 0, 3)
+	if info.sender != "" {
+		parts = append(parts, c.sty.Messages.ChannelInfoSender.Render(info.sender))
+	}
+	if info.source != "" {
+		parts = append(parts, c.sty.Messages.ChannelInfoProvider.Render(fmt.Sprintf("via %s", info.source)))
+	}
+	if info.time != "" {
+		parts = append(parts, c.sty.Messages.ChannelInfoTimestamp.Render(fmt.Sprintf("at %s", info.time)))
+	}
+
+	icon := c.sty.Messages.ChannelInfoIcon.Render(styles.ChannelIcon)
+	metaStr := fmt.Sprintf("%s %s", icon, strings.Join(parts, " "))
+	return common.Section(c.sty, metaStr, width)
+}
+
+// channelInfo is the metadata shown on a channel message's info line.
+type channelInfo struct {
+	sender string
+	source string
+	time   string
+}
+
+// parseChannelInfo extracts the info-line metadata from a channel-originated
+// message. ok is false when the content is not a well-formed <channel>
+// element or carries nothing to show, in which case no info line is added.
+func parseChannelInfo(msg *message.Message) (channelInfo, bool) {
+	var ch channelMessage
+	if err := xml.Unmarshal([]byte(strings.TrimSpace(msg.Content().Text)), &ch); err != nil {
+		return channelInfo{}, false
+	}
+	info := channelInfo{
+		sender: cmp.Or(ch.SenderName, ch.Sender),
+		source: ch.Source,
+		time:   formatChannelTime(ch.Time, msg.CreatedAt),
+	}
+	return info, info != channelInfo{}
+}
+
+// formatChannelTime renders a push's time attribute the way the CreatedAt
+// fallback is rendered: local HH:MM:SS. The attribute is whatever the server
+// put in its meta, so RFC 3339 timestamps and Unix epochs (seconds or
+// milliseconds) are reformatted, and anything else is shown as sent rather
+// than dropped.
+func formatChannelTime(raw string, createdAt int64) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		if createdAt > 0 {
+			return time.Unix(createdAt, 0).Format(time.TimeOnly)
+		}
+		return ""
+	}
+	if t, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+		return t.Local().Format(time.TimeOnly)
+	}
+	// Only values in epoch range, so a short number such as "1430" is not
+	// mistaken for a 1970 timestamp.
+	if n, err := strconv.ParseInt(raw, 10, 64); err == nil {
+		switch {
+		case n >= 1e12:
+			return time.UnixMilli(n).Format(time.TimeOnly)
+		case n >= 1e9:
+			return time.Unix(n, 0).Format(time.TimeOnly)
+		}
+	}
+	return raw
+}
+
+// IsChannelMessage reports whether the given message content is a
+// channel-originated message (i.e. starts with the <channel XML tag).
+func IsChannelMessage(msg *message.Message) bool {
+	return strings.HasPrefix(strings.TrimSpace(msg.Content().Text), "<channel")
+}
+
 // cappedMessageWidth returns the maximum width for message content for readability.
 func cappedMessageWidth(availableWidth int) int {
 	return min(availableWidth-MessageLeftPaddingTotal, maxTextWidth)
@@ -453,7 +603,15 @@ func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults m
 			sty.Attachments.Skill,
 			sty.Attachments.Remove,
 		)
-		return []MessageItem{NewUserMessageItem(sty, msg, r)}
+		items = []MessageItem{NewUserMessageItem(sty, msg, r)}
+		// Skip the info line when there is no metadata to show (or the
+		// element is malformed), rather than adding a blank row.
+		if IsChannelMessage(msg) {
+			if _, ok := parseChannelInfo(msg); ok {
+				items = append(items, NewChannelInfoItem(sty, msg))
+			}
+		}
+		return items
 	case message.Assistant:
 		var items []MessageItem
 		if ShouldRenderAssistantMessage(msg) {

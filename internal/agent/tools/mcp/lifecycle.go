@@ -148,7 +148,7 @@ func reconcileOnce(ctx context.Context, cfg *config.ConfigStore) {
 			// m as PendingConfig so a subsequent reconcile can tell whether
 			// the attempt now in flight matches the latest config.
 			teardown(name)
-			updateState(name, StateStarting, nil, nil, Counts{}, withPending(m))
+			updateState(name, StateStarting, nil, nil, Counts{}, withPending(m), withChannelOptIn(cfg, name, m))
 			goInitClient(ctx, cfg, name, m, nil)
 		}
 	}
@@ -184,7 +184,8 @@ func mcpConfigEqual(a, b config.MCPConfig) bool {
 		a.OAuth == b.OAuth &&
 		a.OAuthClientID == b.OAuthClientID &&
 		a.OAuthClientSecret == b.OAuthClientSecret &&
-		a.OAuthCallbackPort == b.OAuthCallbackPort
+		a.OAuthCallbackPort == b.OAuthCallbackPort &&
+		a.ChannelEnabled == b.ChannelEnabled
 }
 
 // boolPtrEqual compares two *bool by value, treating two nils as equal.

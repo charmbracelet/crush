@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"io"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -260,6 +262,75 @@ func TestRenderChannelDeterministicMetaOrder(t *testing.T) {
 	}
 }
 
+func TestUpdateStateTracksChannelOptInAndCapability(t *testing.T) {
+	const name = "test-channel-optin"
+	t.Cleanup(func() { states.Del(name) })
+
+	cfg := config.NewTestStore(&config.Config{})
+	cfg.Overrides().EnabledChannels = []string{name}
+	m := config.MCPConfig{Type: config.MCPStdio}
+
+	// Opt-in is recorded on the connect attempt and survives the attempt
+	// failing, so a crashed channel is still listed as one.
+	updateState(name, StateStarting, nil, nil, Counts{}, withChannelOptIn(cfg, name, m))
+	updateState(name, StateError, errors.New("boom"), nil, Counts{})
+	if info, _ := GetState(name); !info.ChannelOptIn || info.Channel {
+		t.Fatalf("after failed attempt: ChannelOptIn=%v Channel=%v, want true/false", info.ChannelOptIn, info.Channel)
+	}
+
+	// Capability comes from the connected session and is remembered after
+	// the session dies.
+	updateState(name, StateConnected, nil, &ClientSession{channelCapable: true}, Counts{})
+	updateState(name, StateError, errors.New("gone"), nil, Counts{})
+	if info, _ := GetState(name); !info.ChannelCapable {
+		t.Fatal("ChannelCapable should persist after the session errors")
+	}
+
+	// channel_enabled alone opts in; neither source means not opted in.
+	cfg.Overrides().EnabledChannels = nil
+	updateState(name, StateStarting, nil, nil, Counts{}, withChannelOptIn(cfg, name, config.MCPConfig{ChannelEnabled: true}))
+	if info, _ := GetState(name); !info.ChannelOptIn {
+		t.Fatal("channel_enabled should opt the server in")
+	}
+	updateState(name, StateStarting, nil, nil, Counts{}, withChannelOptIn(cfg, name, m))
+	if info, _ := GetState(name); info.ChannelOptIn {
+		t.Fatal("a later attempt without any opt-in must clear ChannelOptIn")
+	}
+
+	// Disabling clears both: a disabled server is not a channel.
+	updateState(name, StateStarting, nil, nil, Counts{}, withChannelOptIn(cfg, name, config.MCPConfig{ChannelEnabled: true}))
+	updateState(name, StateDisabled, nil, nil, Counts{})
+	if info, _ := GetState(name); info.ChannelOptIn || info.ChannelCapable {
+		t.Fatalf("after disable: ChannelOptIn=%v ChannelCapable=%v, want false/false", info.ChannelOptIn, info.ChannelCapable)
+	}
+}
+
+func TestUpdateStatePropagatesChannel(t *testing.T) {
+	const name = "test-channel-propagation"
+	t.Cleanup(func() { states.Del(name) })
+
+	updateState(name, StateConnected, nil, &ClientSession{channel: true}, Counts{Tools: 1})
+	info, ok := GetState(name)
+	if !ok {
+		t.Fatal("expected state to be recorded")
+	}
+	if !info.Channel {
+		t.Error("ClientInfo.Channel should reflect the session's channel flag")
+	}
+
+	// A non-channel session must not report as a channel.
+	updateState(name, StateConnected, nil, &ClientSession{channel: false}, Counts{})
+	if info, _ := GetState(name); info.Channel {
+		t.Error("non-channel session must not report Channel=true")
+	}
+
+	// A nil client (e.g. error/disabled state) must not panic or report a channel.
+	updateState(name, StateError, nil, nil, Counts{})
+	if info, _ := GetState(name); info.Channel {
+		t.Error("nil client must not report Channel=true")
+	}
+}
+
 func TestChannelEnabled(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -275,9 +346,36 @@ func TestChannelEnabled(t *testing.T) {
 		{[]string{"SERVER:webhook"}, "webhook", true},
 	}
 	for _, tt := range tests {
-		if got := channelEnabled(tt.enabled, tt.name); got != tt.want {
-			t.Errorf("channelEnabled(%v, %q) = %v, want %v", tt.enabled, tt.name, got, tt.want)
+		if got := ChannelEnabled(tt.enabled, tt.name); got != tt.want {
+			t.Errorf("ChannelEnabled(%v, %q) = %v, want %v", tt.enabled, tt.name, got, tt.want)
 		}
+	}
+}
+
+func TestChannelOptIn(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		cfgEnabled bool
+		overrides  []string
+		server     string
+		want       bool
+	}{
+		{"neither source", false, nil, "webhook", false},
+		{"config only", true, nil, "webhook", true},
+		{"override only", false, []string{"webhook"}, "webhook", true},
+		{"both sources", true, []string{"webhook"}, "webhook", true},
+		{"override for a different server", false, []string{"other"}, "webhook", false},
+		{"config-enabled with unrelated override", true, []string{"server:other"}, "webhook", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			m := config.MCPConfig{ChannelEnabled: tt.cfgEnabled}
+			if got := ChannelOptIn(m, tt.overrides, tt.server); got != tt.want {
+				t.Errorf("ChannelOptIn(%+v, %v, %q) = %v, want %v", m, tt.overrides, tt.server, got, tt.want)
+			}
+		})
 	}
 }
 

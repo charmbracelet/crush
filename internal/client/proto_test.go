@@ -98,7 +98,22 @@ func TestSendMessageAcceptsStatusAccepted(t *testing.T) {
 	defer srv.Close()
 
 	c := captureClient(t, srv)
-	require.NoError(t, c.SendMessage(context.Background(), "ws1", "sess1", "", "hello"))
+	require.NoError(t, c.SendMessage(context.Background(), "ws1", "sess1", "", "", "hello"))
+}
+
+func TestSendMessageIncludesChannelOrigin(t *testing.T) {
+	t.Parallel()
+
+	var got proto.AgentMessage
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer srv.Close()
+
+	c := captureClient(t, srv)
+	require.NoError(t, c.SendMessage(context.Background(), "ws1", "sess1", "", "signal", "hello"))
+	require.Equal(t, "signal", got.Channel)
 }
 
 func TestSendMessageAcceptsStatusOK(t *testing.T) {
@@ -110,7 +125,7 @@ func TestSendMessageAcceptsStatusOK(t *testing.T) {
 	defer srv.Close()
 
 	c := captureClient(t, srv)
-	require.NoError(t, c.SendMessage(context.Background(), "ws1", "sess1", "", "hello"))
+	require.NoError(t, c.SendMessage(context.Background(), "ws1", "sess1", "", "", "hello"))
 }
 
 func TestSendMessageDecodesErrorBody(t *testing.T) {
@@ -123,7 +138,7 @@ func TestSendMessageDecodesErrorBody(t *testing.T) {
 	defer srv.Close()
 
 	c := captureClient(t, srv)
-	err := c.SendMessage(context.Background(), "ws1", "", "", "hello")
+	err := c.SendMessage(context.Background(), "ws1", "", "", "", "hello")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "status code 400")
 	require.Contains(t, err.Error(), "session id is required")
@@ -139,7 +154,7 @@ func TestSendMessageFallsBackOnMalformedErrorBody(t *testing.T) {
 	defer srv.Close()
 
 	c := captureClient(t, srv)
-	err := c.SendMessage(context.Background(), "ws1", "sess1", "", "hello")
+	err := c.SendMessage(context.Background(), "ws1", "sess1", "", "", "hello")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "status code 500")
 	require.NotContains(t, err.Error(), "not json")
@@ -154,7 +169,7 @@ func TestSendMessageFallsBackOnEmptyErrorBody(t *testing.T) {
 	defer srv.Close()
 
 	c := captureClient(t, srv)
-	err := c.SendMessage(context.Background(), "ws1", "sess1", "", "hello")
+	err := c.SendMessage(context.Background(), "ws1", "sess1", "", "", "hello")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "status code 500")
 }
@@ -224,7 +239,7 @@ func TestSendHiddenContinuation(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := captureClient(t, srv)
-	require.NoError(t, c.SendMessage(message.WithHiddenUserMessage(t.Context()), "ws1", "sess1", "", "Implement the plan."))
+	require.NoError(t, c.SendMessage(message.WithHiddenUserMessage(t.Context()), "ws1", "sess1", "", "", "Implement the plan."))
 	msg := <-requests
 	require.True(t, msg.HiddenUserMessage)
 	require.Equal(t, "Implement the plan.", msg.Prompt)

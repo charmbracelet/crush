@@ -32,6 +32,12 @@ func Tools() iter.Seq2[string, []*Tool] {
 	return allTools.Seq2()
 }
 
+// GetTools returns the tool list for a single MCP server by name, or
+// ok=false if the server is not registered.
+func GetTools(name string) ([]*Tool, bool) {
+	return allTools.Get(name)
+}
+
 // RunTool runs an MCP tool with the given input parameters.
 func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string, input string) (ToolResult, error) {
 	var args map[string]any

@@ -184,6 +184,10 @@ type AssistantMessageItem struct {
 	thinkingViewMode  thinkingViewMode
 	thinkingBoxHeight int // Tracks the rendered thinking box height for click detection.
 
+	// spinnerSuffix is an optional suffix appended to the working spinner
+	// line (e.g. the Prism-routed model that is answering).
+	spinnerSuffix string
+
 	// planAgent marks this item as plan-agent output. While the plan
 	// streams (the message is not finished) and the plan-start marker
 	// has arrived, the content renders as an open plan card: top and
@@ -257,6 +261,15 @@ func NewAssistantMessageItem(sty *styles.Styles, message *message.Message) Messa
 		SuffixColor: sty.WorkingTimerColor,
 	})
 	return a
+}
+
+// SetSpinnerSuffix sets an optional suffix appended to the working
+// spinner line (e.g. the Prism-routed model that is answering).
+func (a *AssistantMessageItem) SetSpinnerSuffix(suffix string) {
+	if a.spinnerSuffix != suffix {
+		a.spinnerSuffix = suffix
+		a.Bump()
+	}
 }
 
 // Spinning implements [Animatable].
@@ -772,7 +785,11 @@ func (a *AssistantMessageItem) renderSpinning() string {
 	} else if a.message.IsSummaryMessage {
 		a.anim.SetLabel("Summarizing")
 	}
-	return a.anim.Render()
+	line := a.anim.Render()
+	if a.spinnerSuffix != "" {
+		line += " " + a.spinnerSuffix
+	}
+	return line
 }
 
 // renderError renders an error or provider-refusal banner.

@@ -940,6 +940,24 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			}
 		},
 		OnAuthRefresh: call.OnAuthRefresh,
+		OnChunk: func(part fantasy.StreamPart) error {
+			// The Prism model router headers arrive with the response
+			// headers, before any content: surface the routed model on the
+			// message as soon as it is known, while the turn is streaming.
+			if part.Type != fantasy.StreamPartTypeProviderMetadata {
+				return nil
+			}
+			modelID, modelName := extractPrismModel(part.ProviderMetadata)
+			if modelID == "" && modelName == "" {
+				return nil
+			}
+			if currentAssistant.PrismModelID == modelID && currentAssistant.PrismModelName == modelName {
+				return nil
+			}
+			currentAssistant.PrismModelID = modelID
+			currentAssistant.PrismModelName = modelName
+			return a.messages.Update(genCtx, *currentAssistant)
+		},
 		ModelProvider: func() fantasy.LanguageModel {
 			m := a.largeModel.Get()
 			slog.Info("ModelProvider called",

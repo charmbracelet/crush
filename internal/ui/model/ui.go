@@ -1605,7 +1605,9 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 			m.lastUserMessageTime = msg.CreatedAt
 			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap, m.com.Workspace.WorkingDir())...)
 		case message.Assistant:
-			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap, m.com.Workspace.WorkingDir())...)
+			extracted := chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap, m.com.Workspace.WorkingDir())
+			m.setPrismSpinnerSuffix(extracted, msg)
+			items = append(items, extracted...)
 			if chat.ShouldShowAssistantInfo(msg) {
 				infoItem := chat.NewAssistantInfoItem(m.com.Styles, msg, m.com.Config(), time.Unix(m.lastUserMessageTime, 0))
 				items = append(items, infoItem)
@@ -1774,6 +1776,7 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 	case message.Assistant:
 		items := chat.ExtractMessageItems(m.com.Styles, &msg, nil, m.com.Workspace.WorkingDir())
 		m.setMessagePlanFlags(items)
+		m.setPrismSpinnerSuffix(items, &msg)
 		m.chat.AppendMessages(items...)
 		if m.chat.Follow() {
 			m.chat.ScrollToBottom()
@@ -1862,6 +1865,18 @@ func (m *UI) focusActiveInline(focus uiFocusState) {
 	}
 }
 
+// setPrismSpinnerSuffix passes the Prism-routed model info to items with
+// a working spinner line (the assistant item and tool items) so it can
+// ride the spinner while the turn is in progress.
+func (m *UI) setPrismSpinnerSuffix(items []chat.MessageItem, msg *message.Message) {
+	suffix := chat.PrismModelSuffix(m.com.Styles, m.com.Config(), msg)
+	for _, item := range items {
+		if setter, ok := item.(interface{ SetSpinnerSuffix(string) }); ok {
+			setter.SetSpinnerSuffix(suffix)
+		}
+	}
+}
+
 // updateSessionMessage updates an existing message in the current session in
 // the chat when an assistant message is updated it may include updated tool
 // calls as well that is why we need to handle creating/updating each tool call
@@ -1877,6 +1892,7 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 		if assistantItem, ok := existingItem.(*chat.AssistantMessageItem); ok {
 			assistantItem.SetMessage(&msg)
 			assistantItem.SetPlanAgent(m.mode == uiInputModePlan)
+			assistantItem.SetSpinnerSuffix(chat.PrismModelSuffix(m.com.Styles, m.com.Config(), &msg))
 		}
 	}
 
@@ -1888,11 +1904,19 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 		m.chat.RemoveMessage(msg.ID)
 	}
 
-	// The info item shows for every turn with a Prism-routed model, and
-	// for the final turn of the prompt. It is removed again when the
-	// turn no longer qualifies (e.g. a retry reset the stream).
+	// The info item shows for every turn with a Prism-routed model (which
+	// is known as soon as the turn starts, from the router headers), and
+	// for the final turn of the prompt. It is removed again when the turn
+	// no longer qualifies (e.g. a retry reset the stream). When the turn
+	// finishes, an item that was created while streaming is rebuilt so it
+	// gains the full footer (provider, duration, separator).
 	if infoItem := m.chat.MessageItem(chat.AssistantInfoID(msg.ID)); chat.ShouldShowAssistantInfo(&msg) {
-		if infoItem == nil {
+		rebuild := false
+		if existing, ok := infoItem.(*chat.AssistantInfoItem); ok && !existing.HasFinishedMessage() && msg.FinishPart() != nil {
+			rebuild = true
+			m.chat.RemoveMessage(chat.AssistantInfoID(msg.ID))
+		}
+		if infoItem == nil || rebuild {
 			newInfoItem := chat.NewAssistantInfoItem(m.com.Styles, &msg, m.com.Config(), time.Unix(m.lastUserMessageTime, 0))
 			m.chat.AppendMessages(newInfoItem)
 		}
@@ -1901,6 +1925,7 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 	}
 
 	var items []chat.MessageItem
+	suffix := chat.PrismModelSuffix(m.com.Styles, m.com.Config(), &msg)
 	for _, tc := range msg.ToolCalls() {
 		existingToolItem := m.chat.MessageItem(tc.ID)
 		if toolItem, ok := existingToolItem.(chat.ToolMessageItem); ok {
@@ -1911,11 +1936,15 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 				toolItem.SetToolCall(tc)
 			}
 		}
+		if setter, ok := existingToolItem.(interface{ SetSpinnerSuffix(string) }); ok {
+			setter.SetSpinnerSuffix(suffix)
+		}
 		if existingToolItem == nil {
 			items = append(items, chat.NewToolMessageItem(m.com.Styles, msg.ID, tc, nil, false, m.com.Workspace.WorkingDir()))
 		}
 	}
 
+	m.setPrismSpinnerSuffix(items, &msg)
 	m.chat.AppendMessages(items...)
 	if m.chat.Follow() {
 		m.chat.ScrollToBottom()

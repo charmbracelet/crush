@@ -36,17 +36,17 @@ var (
 
 // Skill represents a parsed SKILL.md file.
 type Skill struct {
-	Name                   string            `yaml:"name" json:"name"`
-	Description            string            `yaml:"description" json:"description"`
-	UserInvocable          bool              `yaml:"user-invocable" json:"user_invocable"`
-	DisableModelInvocation bool              `yaml:"disable-model-invocation" json:"disable_model_invocation"`
-	License                string            `yaml:"license,omitempty" json:"license,omitempty"`
-	Compatibility          string            `yaml:"compatibility,omitempty" json:"compatibility,omitempty"`
-	Metadata               map[string]string `yaml:"metadata,omitempty" json:"metadata,omitempty"`
-	Instructions           string            `yaml:"-" json:"instructions"`
-	Path                   string            `yaml:"-" json:"path"`
-	SkillFilePath          string            `yaml:"-" json:"skill_file_path"`
-	Builtin                bool              `yaml:"-" json:"builtin"`
+	Name                   string         `yaml:"name" json:"name"`
+	Description            string         `yaml:"description" json:"description"`
+	UserInvocable          bool           `yaml:"user-invocable" json:"user_invocable"`
+	DisableModelInvocation bool           `yaml:"disable-model-invocation" json:"disable_model_invocation"`
+	License                string         `yaml:"license,omitempty" json:"license,omitempty"`
+	Compatibility          string         `yaml:"compatibility,omitempty" json:"compatibility,omitempty"`
+	Metadata               map[string]any `yaml:"metadata,omitempty" json:"metadata,omitempty"`
+	Instructions           string         `yaml:"-" json:"instructions"`
+	Path                   string         `yaml:"-" json:"path"`
+	SkillFilePath          string         `yaml:"-" json:"skill_file_path"`
+	Builtin                bool           `yaml:"-" json:"builtin"`
 }
 
 // DiscoveryState represents the outcome of discovering a single skill file.

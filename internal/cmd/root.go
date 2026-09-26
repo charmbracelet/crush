@@ -400,7 +400,7 @@ func connectToServer(cmd *cobra.Command) (*client.Client, *proto.Workspace, func
 	channels, _ := cmd.Flags().GetStringSlice("channels")
 	dataDir, _ := cmd.Flags().GetString("data-dir")
 
-	cwd, err := ResolveCwd(cmd)
+	cwd, err := resolveClientCwd(cmd)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -969,17 +969,42 @@ func resolveWorkspaceSessionID(ctx context.Context, ws workspace.Workspace, id s
 func ResolveCwd(cmd *cobra.Command) (string, error) {
 	cwd, _ := cmd.Flags().GetString("cwd")
 	if cwd != "" {
-		err := os.Chdir(cwd)
+		abs, err := filepath.Abs(cwd)
+		if err != nil {
+			return "", fmt.Errorf("failed to resolve working directory: %v", err)
+		}
+		err = os.Chdir(abs)
 		if err != nil {
 			return "", fmt.Errorf("failed to change directory: %v", err)
 		}
-		return cwd, nil
+		return abs, nil
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
 		return "", fmt.Errorf("failed to get current working directory: %v", err)
 	}
 	return cwd, nil
+}
+
+// resolveClientCwd is the thin-client counterpart of [ResolveCwd]: the
+// workspace path it returns lives on the SERVER, so a --cwd value is
+// accepted verbatim (made absolute against the client's process cwd)
+// without requiring the directory to exist locally or chdirring into
+// it. A bogus path surfaces where it belongs, as an error from the
+// server's workspace creation.
+func resolveClientCwd(cmd *cobra.Command) (string, error) {
+	cwd, _ := cmd.Flags().GetString("cwd")
+	if cwd == "" {
+		var err error
+		if cwd, err = os.Getwd(); err != nil {
+			return "", fmt.Errorf("failed to get current working directory: %v", err)
+		}
+	}
+	abs, err := filepath.Abs(cwd)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve working directory: %v", err)
+	}
+	return abs, nil
 }
 
 func createDotCrushDir(dir string) error {

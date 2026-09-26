@@ -1,5 +1,7 @@
 # Hooks
 
+## General Info
+
 > [!NOTE]
 > This document was designed for both humans and agents.
 
@@ -13,19 +15,19 @@ forward.
 ### Hot Hook Facts
 
 - Hooks are just shell commands
-- Hooks can be written in any language because they’re just executables: Bash, Python, Node, Rust, Haskell, whatever
+- Hooks can be written in any language because they're just executables: Bash, Python, Node, Rust, Haskell, whatever
 - Hooks are Claude Code-compatible
-- Crush ships with a builtin `crush-hook` skill write, edit, and configure
+- Crush ships with a builtin `crush-hook` skill to write, edit, and configure
   hooks; just tell Crush how to configure Crush
 - Crush currently supports just one hook, `PreToolUse`, with plans to support
   the full gamut; please let us know which hooks you'd like to see next
 - Hooks run in parallel for speed, but their results compose in config order
   for determinism
 
-### Some things you can do with hooks:
+### Some things you can do with hooks
 
 - Block "dangerous" commands: no more `git push -f` or `cabal init`
-- Rewrite tool input: turn `node` calls info `deno`, scrub secrets from
+- Rewrite tool input: turn `node` calls into `deno`, scrub secrets from
   commands, rewrite all mentions of "Haskell" into "Haskell, The Best
   Language", and so on
 - Inject context: add notes to the model's context whenever certain tools are
@@ -43,28 +45,22 @@ disallow the use of Haskell (but we love you, Simon Peyton Jones).
 
 ### Config
 
-The first thing we need to do is hook up our hook. Let's add the following to
-our **project-level** `crush.json`. Relative paths like `./no-haskell.sh` work
+The first thing we need to do is set up our hook. Let's add the following to
+our **project-level** `crushrc`. Relative paths like `./no-haskell.sh` work
 here because the project root is your working directory. If you're configuring
-a global hook (`~/.config/crush/crush.json`), use an absolute path instead.
+a global hook (`~/.config/crush/crushrc`), use an absolute path instead.
 
-```jsonc
-{
-  // As expected, hooks go in a "hooks" object.
-  "hooks": {
-    // PreToolUse is an event that fires before a tool is used.
-    "PreToolUse": [
-      {
-        // What tool do we want to hook into? In this case, Bash, because it
-        // runs the stuff we wanna block.
-        "matcher": "^bash$",
-
-        // The path to our actual hook script.
-        "command": "./no-haskell.sh",
-      },
-    ],
-  },
-}
+```bash
+# PreToolUse is a hook that fires before a tool is used
+# Matcher sets the tool we want to hook into
+# Command holds the path to the actual hook script
+# Name provides a friendly name to show in the TUI
+# Timeout ensures a reasonable cancellation window in case something goes wrong
+hook add PreToolUse \
+  --matcher '^bash$' \
+  --command "./no-haskell.sh" \
+  --name "no-haskell" \
+  --timeout 30
 ```
 
 Now, let's make our `no-haskell.sh` hook script.
@@ -131,44 +127,32 @@ What this means in practice:
 
 ## Configuration
 
-Hooks can be added to your `crush.json` (or `.crush.json`) at both the global
+Hooks can be added to your `crushrc` (or `.crushrc`) at both the global
 and project-level, with project level hooks taking precedence.
 
-```jsonc
-{
-  "hooks": {
-    "PreToolUse": [
-      {
-        "name": "no-rm-rf", // friendly name shown in the TUI
-        "matcher": "bash", // regex tested against the tool name
-        "command": "./hooks/my-hot-hook.sh", // the path to the hook
-        "timeout": 10, // in seconds; default 30
-      },
-    ],
-  },
-}
+```bash
+hook add PreToolUse \
+  --name "no-rm-rf" \
+  --matcher '^bash$' \
+  --command "./hooks/my-hot-hook.sh" \
+  --timeout 10
 ```
 
 > [!IMPORTANT]
 > The `command` is resolved relative to your **current working directory** —
 > not relative to the config file. Relative paths like `./hooks/whatever.sh`
-> work fine in project-level `crush.json` because the project root is also
+> work fine in project-level `.crushrc` because the project root is also
 > your working directory. For **global** config (`~/.config/crush/`),
 > however, you must use either an absolute path or an inline command:
 >
-> ```jsonc
-> // Global ~/.config/crush/crush.json
-> {
->   "hooks": {
->     "PreToolUse": [
->       {
->         "command": "/home/you/.config/crush/hooks/no-haskell.sh"
->         // or use an inline command:
->         // "command": "echo '{\"decision\":\"allow\"}'"
->       }
->     ]
->   }
-> }
+> ```bash
+> # Global ~/.config/crush/crushrc with absolute path
+> hook add PreToolUse \
+>   --command "/home/you/.config/crush/hooks/no-haskell.sh"
+>
+> # Or use an inline command:
+> # hook add PreToolUse \
+> #   --command "echo '{\"decision\":\"allow\"}'"
 > ```
 
 Remember, hooks will run in parallel but resolve in config order. Last hook
@@ -382,7 +366,7 @@ EOF
 
 Hooks run in parallel, but their results compose in config order. Whichever hook
 finishes first doesn't get to "win" by virtue of timing; composition is
-deterministic based on the order hooks appear in `crush.json`.
+deterministic based on the order hooks appear in `crushrc`.
 
 When multiple hooks match the same tool call:
 
@@ -412,17 +396,10 @@ should honor context cancellation or run out-of-process via a shebang.
 
 Prevent the agent from running `rm -rf` in bash:
 
-```json
-{
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "^bash$",
-        "command": "./hooks/no-rm-rf.sh"
-      }
-    ]
-  }
-}
+```bash
+hook add PreToolUse \
+  --matcher '^bash$' \
+  --command "./hooks/no-rm-rf.sh"
 ```
 
 `hooks/no-rm-rf.sh`:
@@ -445,17 +422,10 @@ exit 0
 Skip the permission prompt for tools that can't change anything. The hook
 returns `decision: "allow"`, which tells Crush to pre-approve the call:
 
-```jsonc
-{
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "^(view|ls|grep|glob)$",
-        "command": "echo '{\"decision\":\"allow\"}'",
-      },
-    ],
-  },
-}
+```bash
+hook add PreToolUse \
+  --matcher '^(view|ls|grep|glob)$' \
+  --command "echo '{\"decision\":\"allow\"}'"
 ```
 
 No script file needed — the command is inline. Every `view`/`ls`/`grep`/`glob`
@@ -481,17 +451,10 @@ esac
 
 Add a reminder to the model whenever it writes a Go file:
 
-```json
-{
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "^(edit|write|multiedit)$",
-        "command": "./hooks/go-context.sh"
-      }
-    ]
-  }
-}
+```bash
+hook add PreToolUse \
+  --matcher '^(edit|write|multiedit)$' \
+  --command "./hooks/go-context.sh"
 ```
 
 `hooks/go-context.sh`:
@@ -514,8 +477,10 @@ fi
 The `command` can be inline. This one-liner matches all MCP tools and blocks
 them:
 
-```jsonc
-{ "matcher": "^mcp_", "command": "echo 'MCP tools are disabled' >&2; exit 2" }
+```bash
+hook add PreToolUse \
+  --matcher '^mcp_' \
+  --command "echo 'MCP tools are disabled' >&2; exit 2"
 ```
 
 ### Log every tool call
@@ -523,11 +488,12 @@ them:
 With no `matcher` this fires for every tool. It exits 0 with no stdout so the
 tool call always proceeds.
 
-```jsonc
-{ "command": "echo \"$(date -Iseconds) $CRUSH_TOOL_NAME\" >> ./tools.log" }
+```bash
+hook add PreToolUse \
+  --command "echo \"$(date -Iseconds) $CRUSH_TOOL_NAME\" >> ./tools.log"
 ```
 
-### A real-world Example:
+### A real-world Example
 
 For a more practical example, see [`rtk-rewrite.sh`](./examples/rtk-rewrite.sh),
 which demonstrates how to rewrite tool input using
@@ -540,7 +506,11 @@ Hooks aren't limited to shell scripts: any executable works. Here's the same
 
 #### Lua
 
-`{"matcher": "^bash$", "command": "lua ./hooks/no-rm-rf.lua"}`
+```bash
+hook add PreToolUse \
+  --matcher '^bash$' \
+  --command "lua ./hooks/no-rm-rf.lua"
+```
 
 ```lua
 local input = io.read("*a")
@@ -554,7 +524,11 @@ end
 
 #### JavaScript
 
-`{"matcher": "^bash$", "command": "node ./hooks/no-rm-rf.js"}`
+```bash
+hook add PreToolUse \
+  --matcher '^bash$' \
+  --command "node ./hooks/no-rm-rf.js"
+```
 
 ```js
 let input = "";
@@ -723,12 +697,12 @@ Universal rules:
 
 PreToolUse-specific rules:
 
-4. `decision` precedence: `deny` > `allow` > `null`. First deny determines the
+1. `decision` precedence: `deny` > `allow` > `null`. First deny determines the
    outcome; subsequent allows don't override. If the final aggregated decision
    is `allow`, Crush pre-approves the tool call and skips the permission
    prompt. If it's `null` (no hook allowed), the tool goes through the normal
    permission flow.
-5. `updated_input` patches shallow-merge sequentially against the original
+2. `updated_input` patches shallow-merge sequentially against the original
    `tool_input`. Later patches override earlier ones on colliding keys. Patches
    are **ignored** if the final decision is deny or halt.
 

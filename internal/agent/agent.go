@@ -41,6 +41,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/stringext"
@@ -95,6 +96,9 @@ type SessionAgentCall struct {
 	FrequencyPenalty  *float64
 	PresencePenalty   *float64
 	NonInteractive    bool
+	// PermissionPolicy is the permission behavior for this turn. Unlike the
+	// caller's context, it is retained when the turn is queued.
+	PermissionPolicy permission.RequestPolicy
 	// OnComplete, when non-nil, replaces the default RunComplete
 	// publish path: the inner Run hands the terminal payload to this
 	// callback instead of emitting it on the RunComplete broker. The
@@ -443,9 +447,10 @@ func (a *sessionAgent) enqueueCall(call SessionAgentCall) {
 // carry a RunID are returned in canceledWithRunID so the caller can
 // publish their terminal cancelled RunComplete (a caller waiting on that
 // RunID, e.g. `crush run`, would otherwise hang). Ordinary calls without a
-// RunID are folded into the active turn, preserving follow-up behavior.
-// Correlated calls and internal continuations stay queued for independent
-// execution. fold is processed by the caller without the lock held.
+// RunID and with the same permission policy are folded into the active turn.
+// Correlated calls, internal continuations and different policies stay queued
+// for independent execution, without blocking later eligible steering calls.
+// fold is processed by the caller without the lock held.
 func (a *sessionAgent) drainQueueForStep(ctx context.Context, sessionID string) (fold, canceledWithRunID []SessionAgentCall) {
 	dispatchLock := a.sessionMu(sessionID)
 	dispatchLock.Lock()
@@ -455,6 +460,7 @@ func (a *sessionAgent) drainQueueForStep(ctx context.Context, sessionID string) 
 	if ctx.Err() != nil {
 		return nil, nil
 	}
+	activePolicy := permission.RequestPolicyFromContext(ctx)
 	queuedCalls, _ := a.messageQueue.Get(sessionID)
 	var keep []SessionAgentCall
 	for _, queued := range queuedCalls {
@@ -464,7 +470,7 @@ func (a *sessionAgent) drainQueueForStep(ctx context.Context, sessionID string) 
 			}
 			continue
 		}
-		if queued.RunID != "" || queued.turn != nil {
+		if queued.PermissionPolicy != activePolicy || queued.RunID != "" || queued.turn != nil {
 			keep = append(keep, queued)
 			continue
 		}
@@ -709,6 +715,7 @@ func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall, owner *ac
 	if err := ValidateCall(call); err != nil {
 		return nil, err
 	}
+	ctx = permission.WithRequestPolicy(ctx, call.PermissionPolicy)
 
 	if call.Channel != "" && call.channelMeta == nil {
 		call.channelMeta, _ = parseChannelMeta(call.Prompt)
@@ -850,7 +857,8 @@ func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall, owner *ac
 		owner.unsuccessful = owner.unsuccessful || call.turn.err != nil
 	}()
 	owner.notification = notify.Notification{SessionID: call.SessionID, RunID: call.RunID, Type: notify.TypeAgentFinished}
-	genCtx, cancel := context.WithCancel(owner.ctx)
+	// Cancellation is shared across handoffs; permission authority is not.
+	genCtx, cancel := context.WithCancel(permission.WithRequestPolicy(owner.ctx, call.PermissionPolicy))
 	defer cancel()
 
 	// Detached calls and continuations must complete preparation failures
@@ -1048,10 +1056,8 @@ func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall, owner *ac
 			// sequence so a follow-up queued after the cancel (higher seq)
 			// is not dropped. A dropped prompt carrying a RunID still gets
 			// its terminal cancelled RunComplete so a caller waiting on it
-			// does not hang. Uncanceled prompts without a RunID are folded
-			// into this turn; uncanceled prompts with a RunID are left
-			// queued so each runs as its own turn (with its own
-			// RunComplete) via the recursive run path below.
+			// does not hang. Fold only the matching-policy prefix before a
+			// RunID, continuation or policy barrier; leave the rest queued.
 			fold, canceledRunIDs := a.drainQueueForStep(callContext, call.SessionID)
 			a.publishCanceledQueueDrops(canceledRunIDs)
 			for _, queued := range fold {

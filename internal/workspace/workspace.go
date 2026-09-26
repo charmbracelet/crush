@@ -193,6 +193,13 @@ type Workspace interface {
 	// QuestionCancel cancels the pending question.
 	QuestionCancel() bool
 
+	// Terminal
+	//
+	// PersistShellCommand stores a user-run shell command result as a user
+	// message, like bang-mode commands. Remote workspaces return an error
+	// because the session database lives on the server.
+	PersistShellCommand(ctx context.Context, sessionID, command, output string, exitCode int) error
+
 	// FileTracker
 	FileTrackerRecordRead(ctx context.Context, sessionID, path string)
 	FileTrackerLastReadTime(ctx context.Context, sessionID, path string) time.Time

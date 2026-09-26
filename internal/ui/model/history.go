@@ -117,19 +117,22 @@ func (m *UI) updateHistoryDraft(oldValue string) {
 // syncBangModeFromTextarea engages or disengages bang mode based on
 // whether the current textarea value starts with "!". The "!" prefix
 // is stripped when entering bang mode and re-added when leaving it so
-// the visible text always reflects the correct state.
+// the visible text always reflects the correct state. A second "!"
+// while already in bang mode engages the interactive terminal ("!!").
 func (m *UI) syncBangModeFromTextarea() {
 	val := m.textarea.Value()
 	hasBang := strings.HasPrefix(val, "!")
 	if hasBang {
-		if !m.bangMode {
-			m.bangMode = true
-			m.bangWasEmpty = false
+		if m.bangMode {
+			m.interactiveBang = true
 		}
+		m.bangMode = true
+		m.bangWasEmpty = false
 		m.textarea.SetValue(strings.TrimPrefix(val, "!"))
 		m.textarea.MoveToBegin()
 	} else if m.bangMode {
 		m.bangMode = false
+		m.interactiveBang = false
 		m.bangWasEmpty = false
 	}
 	m.setEditorPrompt(m.yoloModeCached())

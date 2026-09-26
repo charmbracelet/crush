@@ -295,9 +295,26 @@ func DrawOnboardingCursor(scr uv.Screen, area uv.Rectangle, view string, cur *te
 
 // Draw renders the overlay and its dialogs.
 func (d *Overlay) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
+	return d.draw(scr, area, area, "")
+}
+
+// DrawDocked renders the overlay like [Overlay.Draw], except the dialog with
+// the given ID draws into dockedArea instead of area. Use it for dialogs that
+// share the screen with the content behind them (e.g. the docked interactive
+// terminal) instead of covering it. The cursor, if any, comes from the
+// front-most dialog, matching [Overlay.Draw].
+func (d *Overlay) DrawDocked(scr uv.Screen, area, dockedArea uv.Rectangle, dockedID string) *tea.Cursor {
+	return d.draw(scr, area, dockedArea, dockedID)
+}
+
+func (d *Overlay) draw(scr uv.Screen, area, dockedArea uv.Rectangle, dockedID string) *tea.Cursor {
 	var cur *tea.Cursor
 	for _, dialog := range d.dialogs {
-		cur = dialog.Draw(scr, area)
+		drawArea := area
+		if dockedID != "" && dialog.ID() == dockedID {
+			drawArea = dockedArea
+		}
+		cur = dialog.Draw(scr, drawArea)
 	}
 	return cur
 }

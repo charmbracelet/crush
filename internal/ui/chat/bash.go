@@ -232,13 +232,80 @@ func renderJobTool(sty *styles.Styles, opts *ToolRenderOpts, width int, action, 
 	return joinToolParts(header, body)
 }
 
+// renderTerminalTool renders an interactive terminal session row using
+// the same pattern as [renderJobTool].
+func renderTerminalTool(sty *styles.Styles, opts *ToolRenderOpts, width int, action, sessionID, description, content string) string {
+	header := terminalHeader(sty, opts.Status, action, sessionID, description, width)
+	if opts.Compact {
+		return header
+	}
+
+	if earlyState, ok := toolEarlyStateContent(sty, opts, width); ok {
+		return joinToolParts(header, earlyState)
+	}
+
+	if content == "" {
+		return header
+	}
+
+	bodyWidth := width - toolBodyLeftPaddingTotal
+	body := sty.Tool.Body.Render(toolOutputPlainContent(sty, content, bodyWidth, opts.ExpandedContent))
+	return joinToolParts(header, body)
+}
+
+// terminalHeader builds the header for interactive terminal sessions:
+// "● Terminal (Write) ID <id> <detail>", with the action chip colored by
+// what the agent did to the session.
+func terminalHeader(sty *styles.Styles, status ToolStatus, action, sessionID, description string, width int) string {
+	icon := toolIcon(sty, status)
+	label := sty.Tool.JobToolName.Render("Terminal")
+	actionPart := terminalActionStyle(sty, action).Render("(" + terminalActionLabel(action) + ")")
+	prefix := fmt.Sprintf("%s %s %s %s", icon, label, actionPart, sty.Tool.JobPID.Render("ID "+sessionID))
+
+	if description == "" {
+		return prefix
+	}
+
+	prefixWidth := lipgloss.Width(prefix)
+	availableWidth := width - prefixWidth - 1
+	if availableWidth < 10 {
+		return prefix
+	}
+
+	truncatedDesc := ansi.Truncate(description, availableWidth, "…")
+	return prefix + " " + sty.Tool.JobDescription.Render(truncatedDesc)
+}
+
+// terminalActionStyle picks the header style for a terminal action. Start
+// is green, write and paste carry the info accent, read stays muted, and
+// kill is red.
+func terminalActionStyle(sty *styles.Styles, action string) lipgloss.Style {
+	switch action {
+	case "start":
+		return sty.Tool.TerminalActionStart
+	case "write", "paste":
+		return sty.Tool.TerminalActionWrite
+	case "read":
+		return sty.Tool.TerminalActionRead
+	case "kill":
+		return sty.Tool.TerminalActionKill
+	default:
+		return sty.Tool.JobAction
+	}
+}
+
 // jobHeader builds a header for job-related tools.
 // Format: "● Job (Action) PID shellID description..."
 func jobHeader(sty *styles.Styles, status ToolStatus, action, shellID, description string, width int) string {
+	return toolRowHeader(sty, status, "Job", action, "PID "+shellID, description, width)
+}
+
+// toolRowHeader builds the common icon + label + action + id row.
+func toolRowHeader(sty *styles.Styles, status ToolStatus, label, action, idText, description string, width int) string {
 	icon := toolIcon(sty, status)
-	jobPart := sty.Tool.JobToolName.Render("Job")
+	jobPart := sty.Tool.JobToolName.Render(label)
 	actionPart := sty.Tool.JobAction.Render("(" + action + ")")
-	pidPart := sty.Tool.JobPID.Render("PID " + shellID)
+	pidPart := sty.Tool.JobPID.Render(idText)
 
 	prefix := fmt.Sprintf("%s %s %s %s", icon, jobPart, actionPart, pidPart)
 

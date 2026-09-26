@@ -13,6 +13,7 @@ import (
 type stubDialog struct {
 	id       string
 	received []tea.Msg
+	areas    []uv.Rectangle
 }
 
 func (s *stubDialog) ID() string { return s.id }
@@ -20,7 +21,10 @@ func (s *stubDialog) HandleMsg(msg tea.Msg) Action {
 	s.received = append(s.received, msg)
 	return nil
 }
-func (s *stubDialog) Draw(_ uv.Screen, _ uv.Rectangle) *tea.Cursor { return nil }
+func (s *stubDialog) Draw(_ uv.Screen, area uv.Rectangle) *tea.Cursor {
+	s.areas = append(s.areas, area)
+	return nil
+}
 
 func keyMsg(r rune) tea.KeyPressMsg {
 	return tea.KeyPressMsg{Code: r, Text: string(r)}
@@ -186,4 +190,38 @@ func TestOverlay_ReopenAfterWindowExpiresKeepsGrace(t *testing.T) {
 
 	o.Update(keyMsg('a'))
 	require.Empty(t, d2.received, "reopened dialog after window expires should have grace")
+}
+
+// TestOverlay_DrawDockedRoutesRectPerDialog verifies that DrawDocked draws
+// the dialog matching the docked ID into the docked area and every other
+// dialog into the full area.
+func TestOverlay_DrawDockedRoutesRectPerDialog(t *testing.T) {
+	t.Parallel()
+
+	docked := &stubDialog{id: "terminal"}
+	other := &stubDialog{id: "permissions"}
+	o := NewOverlay()
+	o.OpenDialog(docked)
+	o.OpenDialog(other)
+
+	full := uv.Rect(0, 0, 100, 40)
+	dockArea := uv.Rect(0, 28, 100, 40)
+	o.DrawDocked(mustScreen(t), full, dockArea, "terminal")
+
+	require.Equal(t, []uv.Rectangle{dockArea}, docked.areas)
+	require.Equal(t, []uv.Rectangle{full}, other.areas)
+}
+
+// TestOverlay_DrawUnchanged verifies the plain Draw still uses one area for
+// every dialog.
+func TestOverlay_DrawUnchanged(t *testing.T) {
+	t.Parallel()
+
+	d := &stubDialog{id: "terminal"}
+	o := NewOverlay()
+	o.OpenDialog(d)
+
+	full := uv.Rect(0, 0, 100, 40)
+	o.Draw(mustScreen(t), full)
+	require.Equal(t, []uv.Rectangle{full}, d.areas)
 }

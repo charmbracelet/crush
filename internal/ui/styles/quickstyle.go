@@ -788,6 +788,14 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Tool.JobPID = muted
 	s.Tool.JobDescription = subtle
 
+	// Terminal tool header styles. The action chip is colored by what the
+	// agent did to the session; keystrokes it sent get their own accent.
+	s.Tool.TerminalActionStart = base.Foreground(o.success)
+	s.Tool.TerminalActionWrite = base.Foreground(o.info)
+	s.Tool.TerminalActionRead = base.Foreground(o.fgMoreSubtle)
+	s.Tool.TerminalActionKill = base.Foreground(o.destructive)
+	s.Tool.TerminalKeys = base.Foreground(o.secondary)
+
 	// Agent task styles
 	s.Tool.AgentTaskTag = base.Bold(true).Padding(0, 1).MarginLeft(2).Background(o.infoMoreSubtle).Foreground(o.onPrimary)
 	s.Tool.AgentPrompt = muted
@@ -1210,6 +1218,23 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Pills.HelpKey = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
 	s.Pills.HelpText = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
 	s.Pills.Area = base
+
+	// Terminal styles. The embedded interactive terminal gets a
+	// low-contrast frame like the pills, and its emulator defaults come
+	// from the theme so child output stays legible on the themed
+	// background.
+	s.Terminal.Border = base.
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(o.bgMostVisible)
+	s.Terminal.Header = lipgloss.NewStyle().Foreground(o.fgBase)
+	s.Terminal.Hint = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
+	s.Terminal.Owner = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
+	s.Terminal.Running = lipgloss.NewStyle().Foreground(o.ansiBrightGreen)
+	s.Terminal.Exited = lipgloss.NewStyle().Foreground(o.error)
+	s.Terminal.TooSmall = lipgloss.NewStyle().Foreground(o.fgSubtle)
+	s.Terminal.Fg = o.fgBase
+	s.Terminal.Bg = o.bgBase
+	s.Terminal.Cursor = o.secondary
 
 	return s
 }

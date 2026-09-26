@@ -43,6 +43,7 @@ import (
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/charmbracelet/crush/internal/terminal"
 	"golang.org/x/sync/errgroup"
 
 	"charm.land/fantasy/providers/anthropic"
@@ -147,6 +148,7 @@ type coordinator struct {
 	messages    message.Service
 	permissions permission.Service
 	questions   question.Service
+	terminal    terminal.Service
 	history     history.Service
 	filetracker filetracker.Service
 	lspManager  *lsp.Manager
@@ -179,6 +181,7 @@ type CoordinatorOptions struct {
 	Messages    message.Service
 	Permissions permission.Service
 	Questions   question.Service
+	Terminal    terminal.Service
 	History     history.Service
 	FileTracker filetracker.Service
 	LSPManager  *lsp.Manager
@@ -208,6 +211,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		messages:     opts.Messages,
 		permissions:  opts.Permissions,
 		questions:    opts.Questions,
+		terminal:     opts.Terminal,
 		history:      opts.History,
 		filetracker:  opts.FileTracker,
 		lspManager:   opts.LSPManager,
@@ -892,9 +896,13 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		tools.NewWriteTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 	)
 
-	// Question tool is interactive-only and not available to sub-agents.
+	// Question and terminal tools are interactive-only and not available
+	// to sub-agents.
 	if !isSubAgent && c.interactive {
-		allTools = append(allTools, tools.NewQuestionTool(c.questions))
+		allTools = append(allTools,
+			tools.NewQuestionTool(c.questions),
+			tools.NewTerminalTool(c.permissions, c.terminal, c.cfg.WorkingDir(), c.cfg.Config().Options.DataDirectory),
+		)
 	}
 
 	// Add LSP tools if user has configured LSPs or auto_lsp is enabled (nil or true).

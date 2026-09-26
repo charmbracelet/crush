@@ -133,6 +133,29 @@ type (
 	ActionEnableDockerMCP struct{}
 	// ActionDisableDockerMCP is a message to disable Docker MCP.
 	ActionDisableDockerMCP struct{}
+
+	// ActionTerminalInput carries interactive terminal input. The apply
+	// function feeds the embedded emulator; the model runs it off the
+	// update loop because a wedged child process could otherwise block
+	// rendering.
+	ActionTerminalInput struct {
+		Apply func()
+	}
+
+	// ActionTerminalKill asks the model to terminate the interactive
+	// session's process. The result still arrives through the exit
+	// message path.
+	ActionTerminalKill struct{}
+
+	// ActionTerminalFullscreen asks the model to toggle the terminal
+	// between the docked panel and a full-window overlay.
+	ActionTerminalFullscreen struct{}
+
+	// ActionTerminalComplete is sent when an interactive terminal's
+	// process exited, carrying the final transcript.
+	ActionTerminalComplete struct {
+		Result TerminalResult
+	}
 )
 
 // Messages for MCP OAuth authentication dialog.

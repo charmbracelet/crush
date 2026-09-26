@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/agent/notify"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/stretchr/testify/require"
@@ -136,10 +137,11 @@ func TestSessionAgentRun_QueueStripsOnComplete(t *testing.T) {
 	hook := func(notify.RunComplete) { called = true }
 
 	res, err := a.Run(t.Context(), SessionAgentCall{
-		SessionID:  sessionID,
-		RunID:      "run-xyz",
-		Prompt:     "queued prompt",
-		OnComplete: hook,
+		SessionID:        sessionID,
+		RunID:            "run-xyz",
+		Prompt:           "queued prompt",
+		PermissionPolicy: permission.RequestPolicyAutoApprove,
+		OnComplete:       hook,
 	})
 	require.NoError(t, err)
 	require.Nil(t, res, "queued Run must return (nil, nil)")
@@ -156,6 +158,8 @@ func TestSessionAgentRun_QueueStripsOnComplete(t *testing.T) {
 	require.Equal(t, "run-xyz", queued[0].RunID,
 		"RunID must be preserved on the queued copy so the drained turn's "+
 			"RunComplete still correlates with the originating SendMessage")
+	require.Equal(t, permission.RequestPolicyAutoApprove, queued[0].PermissionPolicy,
+		"permission policy must be preserved so the queued turn does not inherit the active turn's policy")
 }
 
 // TestDrainQueueForStep_FiltersUnderDispatchLock verifies that the queue
@@ -211,6 +215,57 @@ func TestDrainQueueForStep_NoMarkFoldsAllNonRunID(t *testing.T) {
 	require.Empty(t, canceledWithRunID)
 }
 
+func TestDrainQueueForStep_KeepsDifferentPermissionPolicyQueued(t *testing.T) {
+	t.Parallel()
+
+	a := newQueueTestAgent(t)
+
+	const sessionID = "drain-permission-policy"
+	calls := []SessionAgentCall{
+		{
+			SessionID:        sessionID,
+			Prompt:           "steer-before-queued",
+			PermissionPolicy: permission.RequestPolicyPrompt,
+		},
+		{
+			SessionID:        sessionID,
+			Prompt:           "different-policy",
+			PermissionPolicy: permission.RequestPolicyAutoApprove,
+		},
+		{
+			SessionID:        sessionID,
+			Prompt:           "steer-after-queued",
+			PermissionPolicy: permission.RequestPolicyPrompt,
+		},
+	}
+	a.messageQueue.Set(sessionID, calls)
+
+	fold, canceledWithRunID := a.drainQueueForStep(t.Context(), sessionID)
+	require.Len(t, fold, 2)
+	require.Equal(t, "steer-before-queued", fold[0].Prompt)
+	require.Equal(t, "steer-after-queued", fold[1].Prompt)
+	require.Empty(t, canceledWithRunID)
+
+	kept, ok := a.messageQueue.Get(sessionID)
+	require.True(t, ok)
+	require.Len(t, kept, 1)
+	require.Equal(t, "different-policy", kept[0].Prompt)
+	require.Equal(t, permission.RequestPolicyAutoApprove, kept[0].PermissionPolicy)
+
+	// Reversing the active policy must not auto-approve interactive steering.
+	a.messageQueue.Set(sessionID, calls)
+	ctx := permission.WithRequestPolicy(t.Context(), permission.RequestPolicyAutoApprove)
+	fold, canceledWithRunID = a.drainQueueForStep(ctx, sessionID)
+	require.Len(t, fold, 1)
+	require.Equal(t, "different-policy", fold[0].Prompt)
+	require.Empty(t, canceledWithRunID)
+	kept, ok = a.messageQueue.Get(sessionID)
+	require.True(t, ok)
+	require.Len(t, kept, 2)
+	require.Equal(t, "steer-before-queued", kept[0].Prompt)
+	require.Equal(t, "steer-after-queued", kept[1].Prompt)
+}
+
 // TestDrainQueueForStep_KeepsRunIDPromptsQueued is the core of fix 2: a
 // queued prompt that carries a RunID must NOT be folded into the active
 // turn. Folding it would silently absorb it into another turn and never
@@ -227,20 +282,49 @@ func TestDrainQueueForStep_KeepsRunIDPromptsQueued(t *testing.T) {
 	a.messageQueue.Set(sessionID, []SessionAgentCall{
 		{SessionID: sessionID, Prompt: "fold-me", acceptSeq: 1},
 		{SessionID: sessionID, RunID: "run-a", Prompt: "keep-me", acceptSeq: 2},
+		{SessionID: sessionID, Prompt: "fold-after-queued", acceptSeq: 3},
 		{SessionID: sessionID, RunID: "run-b", Prompt: "keep-me-too", acceptSeq: 3},
+		{SessionID: sessionID, Prompt: "continuation", turn: &turnOutcome{}, acceptSeq: 4},
+		{SessionID: sessionID, Prompt: "fold-after-continuation", acceptSeq: 5},
 	})
 
 	fold, canceledWithRunID := a.drainQueueForStep(t.Context(), sessionID)
 
-	require.Len(t, fold, 1, "only the non-RunID prompt is folded into the active turn")
+	require.Len(t, fold, 3, "steering must pass queued turns and continuations")
 	require.Equal(t, "fold-me", fold[0].Prompt)
+	require.Equal(t, "fold-after-queued", fold[1].Prompt)
+	require.Equal(t, "fold-after-continuation", fold[2].Prompt)
 	require.Empty(t, canceledWithRunID)
 
 	kept, ok := a.messageQueue.Get(sessionID)
 	require.True(t, ok, "RunID-bearing prompts must remain queued for the recursive run path")
-	require.Len(t, kept, 2)
+	require.Len(t, kept, 3)
 	require.Equal(t, "run-a", kept[0].RunID)
 	require.Equal(t, "run-b", kept[1].RunID)
+	require.Equal(t, "continuation", kept[2].Prompt)
+	require.NotNil(t, kept[2].turn)
+}
+
+func TestDrainQueueForStep_CanceledRunIDDoesNotCreateBarrier(t *testing.T) {
+	t.Parallel()
+
+	a := newQueueTestAgent(t)
+
+	const sessionID = "drain-canceled-barrier"
+	a.messageQueue.Set(sessionID, []SessionAgentCall{
+		{SessionID: sessionID, RunID: "canceled-run", Prompt: "canceled", acceptSeq: 1},
+		{SessionID: sessionID, Prompt: "fold-after-canceled", acceptSeq: 3},
+	})
+	a.cancelMark.Set(sessionID, 2)
+
+	fold, canceledWithRunID := a.drainQueueForStep(t.Context(), sessionID)
+	require.Len(t, fold, 1)
+	require.Equal(t, "fold-after-canceled", fold[0].Prompt)
+	require.Len(t, canceledWithRunID, 1)
+	require.Equal(t, "canceled-run", canceledWithRunID[0].RunID)
+
+	_, ok := a.messageQueue.Get(sessionID)
+	require.False(t, ok)
 }
 
 // TestDrainQueueForStep_ReportsCanceledRunIDDrops verifies that a queued

@@ -16,6 +16,9 @@ import (
 type mockSessionService struct {
 	sessions []session.Session
 	created  []session.Session
+	// gets records every Get lookup, so tests can assert that a
+	// caller did not read a session it had no use for.
+	gets []string
 }
 
 func (m *mockSessionService) Subscribe(context.Context) <-chan pubsub.Event[session.Session] {
@@ -37,6 +40,7 @@ func (m *mockSessionService) CreateTaskSession(context.Context, string, string, 
 }
 
 func (m *mockSessionService) Get(_ context.Context, id string) (session.Session, error) {
+	m.gets = append(m.gets, id)
 	for _, s := range m.sessions {
 		if s.ID == id {
 			return s, nil

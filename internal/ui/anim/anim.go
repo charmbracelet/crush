@@ -337,6 +337,15 @@ func (a *Anim) SetLabel(newLabel string) {
 	a.renderLabel(newLabel)
 }
 
+// SetSuffix sets an optional function returning a suffix rendered after the
+// animation (e.g. elapsed time or the model that is answering). The suffix
+// is rendered with SuffixColor when one is configured; otherwise it is
+// rendered as-is, so pre-styled content keeps its formatting. Pass nil to
+// remove it.
+func (a *Anim) SetSuffix(fn func() string) {
+	a.suffix = fn
+}
+
 // renderLabel renders the label with the current label color.
 func (a *Anim) renderLabel(label string) {
 	if a.labelWidth > 0 {

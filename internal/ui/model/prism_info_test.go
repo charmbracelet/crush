@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/chat"
@@ -19,8 +20,10 @@ type prismWorkspace struct {
 	workspace.Workspace
 }
 
-func (w *prismWorkspace) Config() *config.Config { return &config.Config{} }
-func (w *prismWorkspace) WorkingDir() string     { return "/" }
+func (w *prismWorkspace) Config() *config.Config {
+	return &config.Config{Providers: csync.NewMap[string, config.ProviderConfig]()}
+}
+func (w *prismWorkspace) WorkingDir() string { return "/" }
 
 func newPrismTestUI() *UI {
 	com := common.DefaultCommon(&prismWorkspace{})
@@ -89,4 +92,66 @@ func TestUpdateSessionMessage_NoPrismInfoWithoutName(t *testing.T) {
 	_ = m.appendSessionMessage(prismToolTurn(false, ""))
 	_ = m.updateSessionMessage(prismToolTurn(true, ""))
 	require.Nil(t, m.chat.MessageItem(chat.AssistantInfoID("a1")))
+}
+
+// TestUpdateSessionMessage_PrismInfoWhileStreaming verifies that the routed
+// model shows while the turn is still streaming, and that the streaming
+// item is rebuilt into the full footer when the turn finishes.
+func TestUpdateSessionMessage_PrismInfoWhileStreaming(t *testing.T) {
+	m := newPrismTestUI()
+
+	// The routed model name is known from the router headers as soon as
+	// the stream starts: the info item shows while the turn streams.
+	_ = m.appendSessionMessage(prismToolTurn(false, "GLM 5.3"))
+	item := m.chat.MessageItem(chat.AssistantInfoID("a1"))
+	require.NotNil(t, item, "expected info item while streaming")
+	infoItem, ok := item.(*chat.AssistantInfoItem)
+	require.True(t, ok)
+	require.False(t, infoItem.HasFinishedMessage())
+
+	// When the turn finishes, the streaming item is rebuilt with the
+	// full footer.
+	_ = m.updateSessionMessage(prismToolTurn(true, "GLM 5.3"))
+	item = m.chat.MessageItem(chat.AssistantInfoID("a1"))
+	require.NotNil(t, item)
+	infoItem, ok = item.(*chat.AssistantInfoItem)
+	require.True(t, ok)
+	require.True(t, infoItem.HasFinishedMessage())
+}
+
+// prismStreamingTurn builds an assistant turn that is still streaming:
+// optional text content, no finish part.
+func prismStreamingTurn(prismName, text string) message.Message {
+	var parts []message.ContentPart
+	if text != "" {
+		parts = append(parts, message.TextContent{Text: text})
+	}
+	return message.Message{
+		ID:             "a1",
+		SessionID:      "s1",
+		Role:           message.Assistant,
+		Model:          "prism",
+		Provider:       "hyper",
+		Parts:          parts,
+		PrismModelName: prismName,
+	}
+}
+
+// TestUpdateSessionMessage_PrismInfoRidesSpinner pins that while the
+// assistant item is spinning (no content, no tool calls) the routed model
+// info rides the spinner line and no standalone info item is rendered;
+// the info item appears once content starts streaming.
+func TestUpdateSessionMessage_PrismInfoRidesSpinner(t *testing.T) {
+	m := newPrismTestUI()
+
+	_ = m.appendSessionMessage(prismStreamingTurn("GLM 5.3", ""))
+	require.Nil(t, m.chat.MessageItem(chat.AssistantInfoID("a1")), "info item must not show while spinning")
+
+	_ = m.updateSessionMessage(prismStreamingTurn("GLM 5.3", ""))
+	require.Nil(t, m.chat.MessageItem(chat.AssistantInfoID("a1")))
+
+	// Content starts streaming: the info item appears (the spinner, and
+	// with it the suffix, is gone).
+	_ = m.updateSessionMessage(prismStreamingTurn("GLM 5.3", "hello"))
+	require.NotNil(t, m.chat.MessageItem(chat.AssistantInfoID("a1")))
 }

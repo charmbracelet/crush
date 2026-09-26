@@ -71,6 +71,47 @@ func TestSessionChannelPersists(t *testing.T) {
 	require.Equal(t, "signal", fetched.Channel)
 }
 
+func TestMCPServerDisabledRoundTrip(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Cleanup(func() {
+		require.NoError(t, db.Release(dataDir))
+		db.ResetPool()
+	})
+
+	conn, err := db.Connect(t.Context(), dataDir)
+	require.NoError(t, err)
+
+	sessions := NewService(db.New(conn), conn)
+
+	disabled, err := sessions.MCPDisabledServers(t.Context())
+	require.NoError(t, err)
+	require.Empty(t, disabled, "a new repository must default to the config")
+
+	require.NoError(t, sessions.SetMCPServerDisabled(t.Context(), "docker", true))
+	require.NoError(t, sessions.SetMCPServerDisabled(t.Context(), "serena", true))
+	require.NoError(t, sessions.SetMCPServerDisabled(t.Context(), "docker", true), "disabling twice must be idempotent")
+
+	disabled, err = sessions.MCPDisabledServers(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, []string{"docker", "serena"}, disabled)
+
+	require.NoError(t, sessions.SetMCPServerDisabled(t.Context(), "docker", false))
+	disabled, err = sessions.MCPDisabledServers(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, []string{"serena"}, disabled)
+
+	// Enabling records an enabled override so a config-disabled server
+	// stays enabled across restarts; disabling removes it again.
+	enabled, err := sessions.MCPServersEnabled(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, []string{"docker"}, enabled)
+
+	require.NoError(t, sessions.SetMCPServerDisabled(t.Context(), "docker", true))
+	enabled, err = sessions.MCPServersEnabled(t.Context())
+	require.NoError(t, err)
+	require.Empty(t, enabled)
+}
+
 func TestEstimatedUsageStateCanBeClearedByExplicitSave(t *testing.T) {
 	dataDir := t.TempDir()
 	t.Cleanup(func() {

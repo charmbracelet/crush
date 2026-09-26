@@ -5117,8 +5117,8 @@ func (m *UI) handleChannelMessage(ev mcp.Event) tea.Cmd {
 	}
 	loadCmd, err := m.ensureSession()
 	if err != nil {
-		slog.Debug("Failed to create session for channel message", "error", err)
-		return nil
+		slog.Debug("Failed to create session for channel message", "error", err, "channel", ev.Name)
+		return channelErrorCmd(ev.Name, fmt.Errorf("create session: %w", err))
 	}
 	if !m.hasSession() {
 		slog.Debug("Channel message dropped: no active session after ensureSession", "channel", ev.Name)
@@ -5132,15 +5132,33 @@ func (m *UI) handleChannelMessage(ev mcp.Event) tea.Cmd {
 	channel := ev.Name
 	content := ev.ChannelMessage
 	runCmd := func() tea.Msg {
-		if err := m.com.Workspace.AgentRunChannel(context.Background(), channel, sessionID, content); err != nil {
-			slog.Debug("Failed to inject channel message", "error", err, "session", sessionID)
+		err := m.com.Workspace.AgentRunChannel(context.Background(), channel, sessionID, content)
+		if err == nil {
+			return nil
 		}
-		return nil
+		slog.Debug("Failed to inject channel message", "error", err, "session", sessionID, "channel", channel)
+		if errors.Is(err, context.Canceled) {
+			return nil
+		}
+		// Surface the failure the way a typed prompt's is surfaced.
+		// Otherwise a session driven by channel events that fails every
+		// turn looks healthy in the TUI.
+		return channelErrorCmd(channel, err)()
 	}
 	if loadCmd != nil {
 		return tea.Batch(loadCmd, runCmd)
 	}
 	return runCmd
+}
+
+// channelErrorCmd reports a failure handling a channel event to the UI,
+// prefixed with the channel name so it reads as coming from that channel
+// rather than from something the user typed.
+func channelErrorCmd(channel string, err error) tea.Cmd {
+	if channel == "" {
+		channel = "channel"
+	}
+	return util.ReportError(fmt.Errorf("%s: %w", channel, err))
 }
 
 // runShellCommand executes a shell command server-side without triggering

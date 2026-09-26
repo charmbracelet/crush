@@ -320,10 +320,24 @@ func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	// Size to the tallest tab plus a couple of spare rows so the palette
 	// keeps one height as tabs and filters change, bounded by the dialog
 	// maximum and by what the screen has room for.
+	contentHeight := c.tallestTabHeight(innerWidth)
 	height := min(
-		fitDialogHeight(t, c.tallestTabHeight(innerWidth), commandsSpareRows, area.Dy()),
+		fitDialogHeight(t, contentHeight, commandsSpareRows, area.Dy()),
 		commandsMaxHeight,
 	)
+
+	// The list is laid out one column narrower than innerWidth when its
+	// content overflows and a scrollbar shows, and items can wrap taller at
+	// the narrower width. When the tallest tab overflows the viewport it
+	// will get, remeasure at the width the list will actually be laid out
+	// at instead.
+	if innerWidth > 0 && contentHeight > height-dialogChromeHeight(t) {
+		contentHeight = c.tallestTabHeight(innerWidth - 1)
+		height = min(
+			fitDialogHeight(t, contentHeight, commandsSpareRows, area.Dy()),
+			commandsMaxHeight,
+		)
+	}
 
 	listHeight, listTotalHeight, listWidth := sizeDialogList(t, c.list, innerWidth, height)
 

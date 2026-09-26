@@ -999,3 +999,27 @@ func TestClientWorkspace_RecoveryCreateIsBounded(t *testing.T) {
 		t.Fatal("recoverWorkspace blocked on an unresponsive server")
 	}
 }
+
+// TestTranslateEvent_PermissionNotification verifies that the
+// notification's session ID survives the proto-to-domain translation,
+// keeping it available for session-scoped consumers.
+func TestTranslateEvent_PermissionNotification(t *testing.T) {
+	t.Parallel()
+
+	w := NewClientWorkspace(nil, proto.Workspace{})
+	ev := pubsub.Event[proto.PermissionNotification]{
+		Type: pubsub.CreatedEvent,
+		Payload: proto.PermissionNotification{
+			SessionID:  "s1",
+			ToolCallID: "tc-1",
+			Granted:    true,
+		},
+	}
+
+	out := w.translateEvent(ev)
+	got, ok := out.(pubsub.Event[permission.PermissionNotification])
+	require.True(t, ok, "expected pubsub.Event[permission.PermissionNotification], got %T", out)
+	require.Equal(t, "s1", got.Payload.SessionID)
+	require.Equal(t, "tc-1", got.Payload.ToolCallID)
+	require.True(t, got.Payload.Granted)
+}

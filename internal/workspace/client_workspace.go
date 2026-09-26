@@ -186,9 +186,12 @@ func (w *ClientWorkspace) ParseAgentToolSessionID(sessionID string) (string, str
 }
 
 // SetCurrentSession reports the session this client is currently
-// viewing to the server. Empty sessionID clears the entry. Errors
-// are propagated to the caller; the TUI logs and ignores them since
-// the presence record is a hint, not correctness-critical state.
+// viewing to the server. Empty sessionID clears the entry. The report
+// scopes the client's event stream: permission and question prompts
+// are only delivered to clients viewing the session that raised them.
+// Errors are propagated to the caller; the TUI logs and ignores them
+// since the presence record is best-effort, not correctness-critical
+// state.
 func (w *ClientWorkspace) SetCurrentSession(ctx context.Context, sessionID string) error {
 	w.herdrClient.SetSessionID(sessionID)
 	w.mu.Lock()
@@ -1143,6 +1146,7 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 		return pubsub.Event[permission.PermissionNotification]{
 			Type: e.Type,
 			Payload: permission.PermissionNotification{
+				SessionID:  e.Payload.SessionID,
 				ToolCallID: e.Payload.ToolCallID,
 				Granted:    e.Payload.Granted,
 				Denied:     e.Payload.Denied,

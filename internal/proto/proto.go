@@ -262,7 +262,8 @@ type QuestionAnswerResponse struct {
 // QuestionNotification is published when a question batch is
 // resolved so non-answering clients can dismiss their forms.
 type QuestionNotification struct {
-	BatchID string `json:"batch_id"`
+	BatchID   string `json:"batch_id"`
+	SessionID string `json:"session_id"`
 }
 
 // PermissionSkipRequest represents a request to skip permission prompts.

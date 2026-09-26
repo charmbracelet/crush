@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strconv"
 )
 
 // handlePermissions implements the `permissions` builtin.
@@ -13,10 +14,13 @@ import (
 //
 //	permissions allow <tool> [<tool> ...]
 //	permissions deny <tool> [<tool> ...]
+//	permissions yolo [true|false]
 //
 // "allow" adds tools to the allow-list (tools that skip permission prompts).
 // "deny" hides tools from the agent entirely (options.disabled_tools) — the
 // inverse of allow. Adding the same tool twice is a no-op.
+// "yolo" skips all permission prompts at startup (permissions.skip_requests);
+// a bare `permissions yolo` is the same as `permissions yolo true`.
 //
 // Precedence: deny wins. If a tool appears in both allow and deny, it is
 // still removed from the agent's effective tool set via disabled_tools.
@@ -26,7 +30,7 @@ func handlePermissions(ctx context.Context, args []string, stdin io.Reader, stdo
 		return nil
 	}
 	if len(args) < 2 {
-		return usage(stderr, "usage: permissions allow|deny <tool> [<tool> ...]")
+		return usage(stderr, "usage: permissions allow|deny <tool> [<tool> ...] | permissions yolo [true|false]")
 	}
 
 	switch args[1] {
@@ -34,9 +38,29 @@ func handlePermissions(ctx context.Context, args []string, stdin io.Reader, stdo
 		return permissionsAllow(b, args, stderr)
 	case "deny":
 		return permissionsDeny(b, args, stderr)
+	case "yolo":
+		return permissionsYolo(b, args, stderr)
 	default:
-		return usage(stderr, fmt.Sprintf("permissions: unknown subcommand %q (expected allow or deny)", args[1]))
+		return usage(stderr, fmt.Sprintf("permissions: unknown subcommand %q (expected allow, deny, or yolo)", args[1]))
 	}
+}
+
+func permissionsYolo(b *ConfigBuilder, args []string, stderr io.Writer) error {
+	if len(args) > 3 {
+		return usage(stderr, "usage: permissions yolo [true|false]")
+	}
+	value := true
+	if len(args) > 2 {
+		parsed, err := strconv.ParseBool(args[2])
+		if err != nil {
+			return usage(stderr, fmt.Sprintf("permissions yolo: invalid value %q (expected true or false)", args[2]))
+		}
+		value = parsed
+	}
+	perms := b.section("permissions")
+	perms["skip_requests"] = value
+	slog.Info("Permissions yolo set in shell config", "skip_requests", value)
+	return nil
 }
 
 func permissionsAllow(b *ConfigBuilder, args []string, stderr io.Writer) error {

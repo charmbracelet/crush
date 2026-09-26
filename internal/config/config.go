@@ -425,6 +425,7 @@ const (
 
 type Permissions struct {
 	AllowedTools []string `json:"allowed_tools,omitempty" jsonschema:"description=List of tools that don't require permission prompts,example=bash,example=view"`
+	SkipRequests bool     `json:"skip_requests,omitempty" jsonschema:"description=Skip all permission prompts at startup, enabling YOLO mode by default (same as the --yolo flag)"`
 }
 
 type TrailerStyle string

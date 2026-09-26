@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -113,5 +115,121 @@ func TestFilterTools(t *testing.T) {
 		t.Parallel()
 		result := filterTools(config.MCPConfig{EnabledTools: []string{"non_existent"}}, tools)
 		require.Len(t, result, 0)
+	})
+}
+
+func TestContentToResult(t *testing.T) {
+	t.Parallel()
+
+	t.Run("text and image blocks keep their existing shape", func(t *testing.T) {
+		t.Parallel()
+
+		result := contentToResult([]mcp.Content{
+			&mcp.TextContent{Text: "first"},
+			&mcp.TextContent{Text: "second"},
+			&mcp.ImageContent{Data: []byte{0x89, 0x50, 0x4E, 0x47}, MIMEType: "image/png"},
+		})
+		require.Equal(t, "image", result.Type)
+		require.Equal(t, "first\nsecond", result.Content)
+		require.Equal(t, "image/png", result.MediaType)
+		require.Equal(t, []byte{0x89, 0x50, 0x4E, 0x47}, result.Data)
+	})
+
+	// Regression test for #3846: an embedded resource fell through to the
+	// `%v` default and reached the model as "&{0x1399715f00a0 map[] <nil>}".
+	t.Run("embedded text resource contributes its text", func(t *testing.T) {
+		t.Parallel()
+
+		result := contentToResult([]mcp.Content{
+			&mcp.EmbeddedResource{Resource: &mcp.ResourceContents{
+				URI:  "qmd://notes/brief.md",
+				Text: "# Brief\nthe body",
+			}},
+		})
+		require.Equal(t, "text", result.Type)
+		require.Equal(t, "# Brief\nthe body", result.Content)
+	})
+
+	t.Run("embedded text resource joins surrounding text", func(t *testing.T) {
+		t.Parallel()
+
+		result := contentToResult([]mcp.Content{
+			&mcp.TextContent{Text: "before"},
+			&mcp.EmbeddedResource{Resource: &mcp.ResourceContents{URI: "file:///a", Text: "body"}},
+			&mcp.TextContent{Text: "after"},
+		})
+		require.Equal(t, "before\nbody\nafter", result.Content)
+	})
+
+	t.Run("image resource is returned as image data", func(t *testing.T) {
+		t.Parallel()
+
+		result := contentToResult([]mcp.Content{
+			&mcp.EmbeddedResource{Resource: &mcp.ResourceContents{
+				URI:      "file:///shot.png",
+				MIMEType: "image/png",
+				Blob:     []byte{0x89, 0x50, 0x4E, 0x47},
+			}},
+		})
+		require.Equal(t, "image", result.Type)
+		require.Equal(t, "image/png", result.MediaType)
+		require.Equal(t, []byte{0x89, 0x50, 0x4E, 0x47}, result.Data)
+	})
+
+	t.Run("audio resource is returned as media data", func(t *testing.T) {
+		t.Parallel()
+
+		result := contentToResult([]mcp.Content{
+			&mcp.EmbeddedResource{Resource: &mcp.ResourceContents{
+				URI:      "file:///clip.mp3",
+				MIMEType: "audio/mpeg",
+				Blob:     []byte{0xFF, 0xD8, 0xFF, 0xE0},
+			}},
+		})
+		require.Equal(t, "media", result.Type)
+		require.Equal(t, "audio/mpeg", result.MediaType)
+		require.Equal(t, []byte{0xFF, 0xD8, 0xFF, 0xE0}, result.Data)
+	})
+
+	t.Run("other blob resources describe what was left out", func(t *testing.T) {
+		t.Parallel()
+
+		result := contentToResult([]mcp.Content{
+			&mcp.EmbeddedResource{Resource: &mcp.ResourceContents{
+				URI:      "file:///doc.pdf",
+				MIMEType: "application/pdf",
+				Blob:     []byte("not really a pdf"),
+			}},
+		})
+		require.Equal(t, "text", result.Type)
+		require.Equal(t, "[resource: file:///doc.pdf (application/pdf, 16 bytes)]", result.Content)
+	})
+
+	t.Run("empty resource is described, not stringified", func(t *testing.T) {
+		t.Parallel()
+
+		result := contentToResult([]mcp.Content{&mcp.EmbeddedResource{}})
+		require.Equal(t, "text", result.Type)
+		require.Equal(t, "[empty resource]", result.Content)
+
+		result = contentToResult([]mcp.Content{
+			&mcp.EmbeddedResource{Resource: &mcp.ResourceContents{URI: "file:///empty.md"}},
+		})
+		require.Equal(t, "[resource: file:///empty.md, 0 bytes]", result.Content)
+	})
+
+	t.Run("resource link names its target", func(t *testing.T) {
+		t.Parallel()
+
+		result := contentToResult([]mcp.Content{
+			&mcp.ResourceLink{URI: "file:///data.csv", Name: "data"},
+		})
+		require.Equal(t, "text", result.Type)
+		require.Equal(t, "[resource link: data (file:///data.csv)]", result.Content)
+
+		result = contentToResult([]mcp.Content{
+			&mcp.ResourceLink{URI: "file:///data.csv"},
+		})
+		require.Equal(t, "[resource link: file:///data.csv]", result.Content)
 	})
 }

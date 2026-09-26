@@ -82,6 +82,12 @@ type Commands struct {
 	userItems    []*CommandItem
 	mcpItems     []*CommandItem
 
+	// tabHeights memoizes tallestTabHeight per width. Measuring renders
+	// every item on every tab, so it is only recomputed when the command
+	// items are rebuilt, which happens in setCommandItems.
+	tabHeights   map[int]int
+	tabHeightsOK bool
+
 	dockerMCPAvailable     *bool
 	dockerMCPCheckInFlight bool
 }
@@ -418,6 +424,8 @@ func (c *Commands) setCommandItems(commandType CommandType) {
 	c.systemGroups = c.defaultCommandGroups()
 	c.userItems = c.customCommandItems()
 	c.mcpItems = c.mcpPromptItems()
+	// The cached heights describe the previous items.
+	c.tabHeightsOK = false
 
 	switch c.selected {
 	case SystemCommands:
@@ -474,13 +482,24 @@ func (c *Commands) mcpPromptItems() []*CommandItem {
 }
 
 // tallestTabHeight returns the content height of the tab with the most rows
-// at the given width, so switching tabs never resizes the dialog.
+// at the given width, so switching tabs never resizes the dialog. Results are
+// memoized per width and only recomputed when the command items are rebuilt,
+// so Draw does not re-render every item on every tab on every frame.
 func (c *Commands) tallestTabHeight(width int) int {
-	return max(
+	if !c.tabHeightsOK {
+		c.tabHeights = make(map[int]int)
+		c.tabHeightsOK = true
+	}
+	if height, ok := c.tabHeights[width]; ok {
+		return height
+	}
+	height := max(
 		groupsContentHeight(width, c.systemGroups),
 		itemsContentHeight(width, c.userItems),
 		itemsContentHeight(width, c.mcpItems),
 	)
+	c.tabHeights[width] = height
+	return height
 }
 
 // defaultCommandGroups returns the default system commands grouped into

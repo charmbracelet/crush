@@ -396,6 +396,9 @@ dialog.
 | --- | --- |
 | Charmtone Pantera | `charmtone-panther` (default) |
 | Gruvbox Dark | `gruvbox-dark` |
+| Rosé Pine | `rose-pine` |
+| Rosé Pine Moon | `rose-pine-moon` |
+| Rosé Pine Dawn | `rose-pine-dawn` |
 
 ### LSPs
 

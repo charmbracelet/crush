@@ -471,7 +471,6 @@ var builtinThemes = map[string]func() quickStyleOpts{
 	"rose-pine":         rosePineOpts,
 	"rose-pine-moon":    rosePineMoonOpts,
 	"rose-pine-dawn":    rosePineDawnOpts,
-	"nord":              nordOpts,
 }
 
 // builtinThemeOverrides maps theme names to functions that apply

@@ -17,6 +17,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
+	"github.com/charmbracelet/crush/internal/oauth/grok"
 	"github.com/charmbracelet/crush/internal/oauth/hyper"
 	"github.com/charmbracelet/crush/internal/oauth/openai"
 )
@@ -26,6 +27,7 @@ const (
 	PlatformHyper   = "hyper"
 	PlatformCopilot = "copilot"
 	PlatformOpenAI  = "openai"
+	PlatformGrok    = "grok"
 )
 
 // startMessages are the first lines printed by the non-interactive flow.
@@ -33,6 +35,7 @@ var startMessages = map[string]string{
 	PlatformHyper:   "Initiating device authorization...",
 	PlatformCopilot: "Requesting device code from GitHub...",
 	PlatformOpenAI:  "Starting browser authorization...",
+	PlatformGrok:    "Starting browser authorization...",
 }
 
 // titles are the provider names shown in the mini TUI header.
@@ -40,6 +43,7 @@ var titles = map[string]string{
 	PlatformHyper:   "Charm Hyper",
 	PlatformCopilot: "GitHub Copilot",
 	PlatformOpenAI:  "ChatGPT",
+	PlatformGrok:    "Grok",
 }
 
 // flow is the provider-agnostic surface the login UIs drive. Start is
@@ -50,6 +54,15 @@ type flow interface {
 	Start(ctx context.Context) (url string, userCode string, err error)
 	Wait(ctx context.Context) (*oauth.Token, error)
 	Close()
+}
+
+// codeEntryFlow is a flow whose browser authorization can also finish
+// with a code pasted back from the provider's page — for when the user
+// declines the permission or the browser cannot reach the loopback
+// callback.
+type codeEntryFlow interface {
+	flow
+	CompleteWithCode(ctx context.Context, input string) (*oauth.Token, error)
 }
 
 // Run authenticates with the given platform and returns the resulting
@@ -117,6 +130,8 @@ func flowFor(platform string) (func() flow, error) {
 		return func() flow { return &copilotFlow{} }, nil
 	case PlatformOpenAI:
 		return func() flow { return &openaiFlow{} }, nil
+	case PlatformGrok:
+		return func() flow { return &grokFlow{} }, nil
 	default:
 		return nil, fmt.Errorf("unknown platform: %s", platform)
 	}
@@ -204,6 +219,57 @@ func (f *openaiFlow) Wait(ctx context.Context) (*oauth.Token, error) {
 }
 
 func (f *openaiFlow) Close() {
+	if f.f != nil {
+		f.f.Close()
+	}
+}
+
+// grokFlow runs the Grok (xAI) authorization code flow with a loopback
+// callback server. When the loopback listener cannot start (remote
+// machine, no free port), it falls back to the device flow, whose code
+// the user enters on accounts.x.ai.
+type grokFlow struct {
+	f          *grok.BrowserFlow
+	deviceCode string
+	expiresIn  int
+}
+
+func (f *grokFlow) Start(ctx context.Context) (string, string, error) {
+	bf, err := grok.StartBrowserFlow()
+	if err != nil {
+		dc, deviceErr := grok.RequestDeviceCode(ctx)
+		if deviceErr != nil {
+			return "", "", err
+		}
+		f.deviceCode = dc.DeviceCode
+		f.expiresIn = dc.ExpiresIn
+		return dc.VerificationURI, dc.UserCode, nil
+	}
+	f.f = bf
+	// The handoff page opens the authorization URL in a tab that can close
+	// itself when finished; opening the raw URL would leave the tab behind,
+	// since browsers refuse to close it after a consent flow.
+	return bf.StartURL(), "", nil
+}
+
+func (f *grokFlow) Wait(ctx context.Context) (*oauth.Token, error) {
+	if f.deviceCode != "" {
+		return grok.PollForToken(ctx, f.deviceCode, f.expiresIn)
+	}
+	return f.f.Wait(ctx)
+}
+
+// CompleteWithCode finishes the browser flow with a code pasted from
+// the authorization page. The device fallback has nothing to paste:
+// its code is copied out, never entered here.
+func (f *grokFlow) CompleteWithCode(ctx context.Context, input string) (*oauth.Token, error) {
+	if f.f == nil {
+		return nil, errors.New("no browser flow in progress")
+	}
+	return f.f.CompleteWithCode(ctx, input)
+}
+
+func (f *grokFlow) Close() {
 	if f.f != nil {
 		f.f.Close()
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -124,31 +125,61 @@ func TestSubscribeEventsContextCancelClosesEvents(t *testing.T) {
 	}
 }
 
-func TestSendMessageAcceptsStatusAccepted(t *testing.T) {
+func TestSendMessageWire(t *testing.T) {
 	t.Parallel()
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusAccepted)
-	}))
-	defer srv.Close()
-
-	c := captureClient(t, srv)
-	require.NoError(t, c.SendMessage(context.Background(), "ws1", "sess1", "", "", "hello"))
-}
-
-func TestSendMessageIncludesChannelOrigin(t *testing.T) {
-	t.Parallel()
-
-	var got proto.AgentMessage
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
-		w.WriteHeader(http.StatusAccepted)
-	}))
-	defer srv.Close()
-
-	c := captureClient(t, srv)
-	require.NoError(t, c.SendMessage(context.Background(), "ws1", "sess1", "", "signal", "hello"))
-	require.Equal(t, "signal", got.Channel)
+	for _, tc := range []struct {
+		name           string
+		policy         proto.PermissionRequestPolicy
+		hidden         bool
+		runID, channel string
+		withAttachment bool
+	}{
+		{name: "plain", policy: proto.PermissionRequestPolicyPrompt},
+		{name: "prompt policy", policy: proto.PermissionRequestPolicyPrompt, hidden: true, runID: "run", channel: "channel", withAttachment: true},
+		{name: "auto approval", policy: proto.PermissionRequestPolicyAutoApprove, hidden: true, runID: "run", channel: "channel", withAttachment: true},
+		{name: "channel only", policy: proto.PermissionRequestPolicyPrompt, channel: "signal"},
+		{name: "hidden only", policy: proto.PermissionRequestPolicyPrompt, hidden: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			bodies := make(chan []byte, 1)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, err := io.ReadAll(r.Body)
+				if err != nil {
+					t.Error(err)
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				bodies <- body
+				w.WriteHeader(http.StatusAccepted)
+			}))
+			defer srv.Close()
+			var attachments []message.Attachment
+			var wantAttachments []proto.Attachment
+			if tc.withAttachment {
+				attachments = []message.Attachment{{FilePath: "/tmp/input", FileName: "input", MimeType: "text/plain", Content: []byte("payload")}}
+				wantAttachments = []proto.Attachment{{FilePath: "/tmp/input", FileName: "input", MimeType: "text/plain", Content: []byte("payload")}}
+			}
+			c := captureClient(t, srv)
+			ctx := t.Context()
+			if tc.hidden {
+				ctx = message.WithHiddenUserMessage(ctx)
+			}
+			require.NoError(t, c.SendMessage(ctx, "workspace", "session", tc.runID, tc.channel, "prompt", tc.policy, attachments...))
+			body := <-bodies
+			var got proto.AgentMessage
+			require.NoError(t, json.Unmarshal(body, &got))
+			require.Equal(t, proto.AgentMessage{
+				SessionID: "session", RunID: tc.runID, Channel: tc.channel, Prompt: "prompt", HiddenUserMessage: tc.hidden,
+				PermissionPolicy: tc.policy, Attachments: wantAttachments,
+			}, got)
+			if tc.policy == proto.PermissionRequestPolicyPrompt {
+				require.NotContains(t, string(body), "permission_policy")
+			} else {
+				require.Contains(t, string(body), `"permission_policy":"auto_approve"`)
+			}
+		})
+	}
 }
 
 func TestSendMessageAcceptsStatusOK(t *testing.T) {
@@ -160,7 +191,7 @@ func TestSendMessageAcceptsStatusOK(t *testing.T) {
 	defer srv.Close()
 
 	c := captureClient(t, srv)
-	require.NoError(t, c.SendMessage(context.Background(), "ws1", "sess1", "", "", "hello"))
+	require.NoError(t, c.SendMessage(context.Background(), "ws1", "sess1", "", "", "hello", proto.PermissionRequestPolicyPrompt))
 }
 
 func TestSendMessageDecodesErrorBody(t *testing.T) {
@@ -173,7 +204,7 @@ func TestSendMessageDecodesErrorBody(t *testing.T) {
 	defer srv.Close()
 
 	c := captureClient(t, srv)
-	err := c.SendMessage(context.Background(), "ws1", "", "", "", "hello")
+	err := c.SendMessage(context.Background(), "ws1", "", "", "", "hello", proto.PermissionRequestPolicyPrompt)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "status code 400")
 	require.Contains(t, err.Error(), "session id is required")
@@ -189,7 +220,7 @@ func TestSendMessageFallsBackOnMalformedErrorBody(t *testing.T) {
 	defer srv.Close()
 
 	c := captureClient(t, srv)
-	err := c.SendMessage(context.Background(), "ws1", "sess1", "", "", "hello")
+	err := c.SendMessage(context.Background(), "ws1", "sess1", "", "", "hello", proto.PermissionRequestPolicyPrompt)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "status code 500")
 	require.NotContains(t, err.Error(), "not json")
@@ -204,7 +235,7 @@ func TestSendMessageFallsBackOnEmptyErrorBody(t *testing.T) {
 	defer srv.Close()
 
 	c := captureClient(t, srv)
-	err := c.SendMessage(context.Background(), "ws1", "sess1", "", "", "hello")
+	err := c.SendMessage(context.Background(), "ws1", "sess1", "", "", "hello", proto.PermissionRequestPolicyPrompt)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "status code 500")
 }
@@ -258,24 +289,4 @@ func marshalSSEPayload(t *testing.T) []byte {
 	})
 	require.NoError(t, err)
 	return payload
-}
-
-func TestSendHiddenContinuation(t *testing.T) {
-	t.Parallel()
-	requests := make(chan proto.AgentMessage, 1)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var msg proto.AgentMessage
-		if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		requests <- msg
-		w.WriteHeader(http.StatusAccepted)
-	}))
-	defer srv.Close()
-	c := captureClient(t, srv)
-	require.NoError(t, c.SendMessage(message.WithHiddenUserMessage(t.Context()), "ws1", "sess1", "", "", "Implement the plan."))
-	msg := <-requests
-	require.True(t, msg.HiddenUserMessage)
-	require.Equal(t, "Implement the plan.", msg.Prompt)
 }

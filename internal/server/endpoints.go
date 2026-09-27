@@ -301,7 +301,9 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 			Summary("Send message to agent").
 			Description("Validates and accepts the prompt, then dispatches the run "+
 				"detached from the requesting HTTP connection: the run survives client "+
-				"disconnects and is only ended by the explicit cancel endpoint.").
+				"disconnects and is only ended by the explicit cancel endpoint. "+
+				"permission_policy may be omitted or empty for normal permission handling, "+
+				"or auto_approve to approve this turn and its descendants.").
 			Tags("agent").
 			PathParam("id", "Workspace ID").
 			Accepts(proto.AgentMessage{}).

@@ -34,6 +34,7 @@ var (
 	ErrAgentBusy               = errors.New("agent is busy with a run")
 	ErrPathRequired            = errors.New("path is required")
 	ErrInvalidPermissionAction = errors.New("invalid permission action")
+	ErrInvalidPermissionPolicy = errors.New("invalid permission policy")
 	ErrUnknownCommand          = errors.New("unknown command")
 	ErrInvalidClientID         = errors.New("invalid client_id")
 	ErrClientNotAttached       = errors.New("client not attached")
@@ -990,11 +991,12 @@ func (b *Backend) GetWorkspaceProto(id string) (proto.Workspace, error) {
 // VersionInfo returns server version information.
 func (b *Backend) VersionInfo() proto.VersionInfo {
 	return proto.VersionInfo{
-		Version:   version.Version,
-		Commit:    version.Commit,
-		BuildID:   version.BuildID,
-		GoVersion: runtime.Version(),
-		Platform:  fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH),
+		Version:                         version.Version,
+		Commit:                          version.Commit,
+		BuildID:                         version.BuildID,
+		GoVersion:                       runtime.Version(),
+		Platform:                        fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH),
+		SupportsPerTurnPermissionPolicy: true,
 	}
 }
 

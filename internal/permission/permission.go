@@ -49,6 +49,13 @@ const (
 	PermissionModeSysadmin
 )
 
+// SkipsPrompts reports whether the mode answers requests itself instead of
+// putting them in front of the user. Yolo and sysadmin both do; they part
+// ways only later, at exec time, over the block list.
+func (m PermissionMode) SkipsPrompts() bool {
+	return m == PermissionModeYolo || m == PermissionModeSysadmin
+}
+
 type CreatePermissionRequest struct {
 	SessionID   string `json:"session_id"`
 	ToolCallID  string `json:"tool_call_id"`
@@ -250,7 +257,7 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	// time: yolo keeps the block list armed for commands the static check
 	// did not flag, and sysadmin disarms it entirely. Normal mode is the
 	// only one that still puts a dangerous command in front of the user.
-	if mode == PermissionModeYolo || mode == PermissionModeSysadmin {
+	if mode.SkipsPrompts() {
 		return true, nil
 	}
 

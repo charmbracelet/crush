@@ -798,6 +798,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		DisableAutoSummarize: c.cfg.Config().Options.DisableAutoSummarize,
 		Sessions:             c.sessions,
 		Messages:             c.messages,
+		Permissions:          c.permissions,
 		Cfg:                  c.cfg,
 		Tools:                nil,
 		Notify:               c.notify,

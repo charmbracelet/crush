@@ -179,6 +179,7 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 			// the user's hooks N times per delegated turn.
 
 			agent := NewSessionAgent(SessionAgentOptions{
+				Config:               c.cfg,
 				LargeModel:           small, // Use small model for both (fetch doesn't need large)
 				SmallModel:           small,
 				SystemPromptPrefix:   smallProviderCfg.SystemPromptPrefix,

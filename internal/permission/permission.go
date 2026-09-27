@@ -257,7 +257,7 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	// time: yolo keeps the block list armed for commands the static check
 	// did not flag, and sysadmin disarms it entirely. Normal mode is the
 	// only one that still puts a dangerous command in front of the user.
-	if mode == PermissionModeYolo || mode == PermissionModeSysadmin {
+	if mode.SkipsPrompts() {
 		return true, nil
 	}
 

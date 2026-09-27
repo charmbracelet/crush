@@ -83,6 +83,14 @@ type Handler struct {
 	// blocking initialization.
 	interactive bool
 
+	// metadata is the round tripper the OAuth flow's HTTP client is built
+	// on. Besides its fixups it records the canonical resource the server
+	// advertises, which decides whether the RFC 8707 resource parameter
+	// survives into the browser authorization URL. It is set at
+	// construction and never reassigned; its own state is synchronised
+	// internally.
+	metadata *metadataFixupRoundTripper
+
 	mu             sync.Mutex
 	cachedToken    *oauth2.Token
 	authURL        string
@@ -159,6 +167,7 @@ func NewHandler(
 		openURL:        browser.OpenURL,
 		interactive:    interactive,
 		onTokenRefresh: onTokenRefresh,
+		metadata:       newMetadataFixupRoundTripper(http.DefaultTransport),
 	}
 	receiver.handler = h
 
@@ -190,7 +199,7 @@ func NewHandler(
 		// validation. Also rewrite internal-cluster redirects back to the
 		// external hostname so the flow works outside the cluster.
 		// Based on Bruno Krugel's fix from PR #3396.
-		Client: newOAuthMetadataClient(http.DefaultTransport, serverURL),
+		Client: newOAuthMetadataClient(h.metadata, serverURL),
 		DynamicClientRegistrationConfig: &auth.DynamicClientRegistrationConfig{
 			Metadata: &oauthex.ClientRegistrationMetadata{
 				ClientName:   "Crush",
@@ -597,17 +606,17 @@ func (r *callbackReceiver) fetchAuthorizationCode(ctx context.Context, args *aut
 	}
 	defer r.end(flight)
 
-	// Some authorization servers reject the "resource" query parameter in
-	// the authorization URL (RFC 8707) but accept it during token exchange.
-	// Strip it from the browser URL to avoid server_error responses.
-	authURL := stripResourceParam(args.URL)
-	slog.Info("Opening browser for MCP OAuth authorization")
-
+	// Decide whether the RFC 8707 "resource" parameter stays on the browser
+	// URL. The SDK always sends it at token exchange, so the two requests
+	// must agree (see resolveAuthorizeResourceParam).
 	r.handler.mu.Lock()
+	authURL := resolveAuthorizeResourceParam(args.URL, r.handler.metadata)
 	r.handler.authURL = authURL
 	open := r.handler.openURL
 	suppress := r.handler.suppressBrowser
 	r.handler.mu.Unlock()
+
+	slog.Info("Opening browser for MCP OAuth authorization")
 
 	if suppress {
 		slog.Info("Browser suppressed; remote client must open the authorization URL", "url", authURL)
@@ -674,12 +683,47 @@ func (r *callbackReceiver) close() {
 // that doesn't match the URL the metadata was fetched from, causing the
 // SDK's strict RFC 8414 validation to reject it. Based on Bruno Krugel's
 // fix from PR #3396.
+//
+// It also records the canonical resource identifiers advertised by the
+// protected resource metadata it passes through (RFC 9728). Discovery
+// always runs before the authorization URL is built, so by the time the
+// browser is opened the round tripper knows whether the server claims the
+// resource the SDK is about to send (see resolveAuthorizeResourceParam).
 type metadataFixupRoundTripper struct {
 	base http.RoundTripper
+
+	mu sync.Mutex
+	// advertised holds the "resource" values seen in protected resource
+	// metadata responses, as a set.
+	advertised map[string]struct{}
 }
 
 func newMetadataFixupRoundTripper(base http.RoundTripper) *metadataFixupRoundTripper {
 	return &metadataFixupRoundTripper{base: base}
+}
+
+// recordAdvertisedResource remembers a canonical resource identifier the
+// server published in its protected resource metadata.
+func (rt *metadataFixupRoundTripper) recordAdvertisedResource(resource string) {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if rt.advertised == nil {
+		rt.advertised = make(map[string]struct{})
+	}
+	rt.advertised[resource] = struct{}{}
+}
+
+// advertisesResource reports whether the server published protected
+// resource metadata naming resource as its canonical identifier. A nil
+// round tripper (no discovery went through it) advertises nothing.
+func (rt *metadataFixupRoundTripper) advertisesResource(resource string) bool {
+	if rt == nil || resource == "" {
+		return false
+	}
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	_, ok := rt.advertised[resource]
+	return ok
 }
 
 func (rt *metadataFixupRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -701,6 +745,17 @@ func (rt *metadataFixupRoundTripper) RoundTrip(req *http.Request) (*http.Respons
 	if json.Unmarshal(body, &raw) != nil {
 		resp.Body = io.NopCloser(bytes.NewReader(body))
 		return resp, nil
+	}
+
+	// A protected resource document is the server declaring which canonical
+	// resource identifier it answers to, i.e. that it understands resource
+	// indicators. Note it before handing the body on untouched.
+	if isProtectedResourceEndpoint(req.URL.Path) {
+		if resource, ok := raw["resource"].(string); ok && resource != "" {
+			rt.recordAdvertisedResource(resource)
+			slog.Debug("Recorded advertised canonical resource",
+				"url", req.URL.String(), "resource", resource)
+		}
 	}
 
 	issuer, ok := raw["issuer"].(string)
@@ -737,14 +792,17 @@ func (rt *metadataFixupRoundTripper) RoundTrip(req *http.Request) (*http.Respons
 //     redirect back to the original MCP host. Token, registration, and
 //     authorize requests are left untouched, so a separately hosted
 //     identity provider keeps working.
-func newOAuthMetadataClient(base http.RoundTripper, serverURL string) *http.Client {
+//
+// The caller owns rt so it can consult what discovery advertised after
+// the flow has run.
+func newOAuthMetadataClient(rt *metadataFixupRoundTripper, serverURL string) *http.Client {
 	var originalHost, originalScheme string
 	if u, err := url.Parse(serverURL); err == nil {
 		originalHost = u.Host
 		originalScheme = u.Scheme
 	}
 	return &http.Client{
-		Transport: newMetadataFixupRoundTripper(base),
+		Transport: rt,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			// Supplying CheckRedirect replaces net/http's default, so
 			// re-enforce its 10-redirect cap here.
@@ -765,23 +823,50 @@ func newOAuthMetadataClient(base http.RoundTripper, serverURL string) *http.Clie
 
 func isMetadataEndpoint(path string) bool {
 	return strings.Contains(path, "/.well-known/oauth-authorization-server") ||
-		strings.Contains(path, "/.well-known/oauth-protected-resource")
+		isProtectedResourceEndpoint(path)
 }
 
-// stripResourceParam removes the "resource" query parameter from an
-// authorization URL. Some authorization servers reject it in the
-// authorize request but accept it during token exchange. Based on Bruno
-// Krugel's fix from PR #3396.
-func stripResourceParam(rawURL string) string {
+func isProtectedResourceEndpoint(path string) bool {
+	return strings.Contains(path, "/.well-known/oauth-protected-resource")
+}
+
+// resolveAuthorizeResourceParam decides whether the RFC 8707 "resource"
+// query parameter survives into the browser authorization URL.
+//
+// Both behaviors exist in the wild. The MCP authorization spec requires
+// the parameter on the authorization request as well as the token request,
+// and the SDK always sends it at token exchange; a server that takes
+// resource indicators seriously therefore rejects a login that omits it at
+// authorize time — Render answers the redirect with
+// "invalid_target: resource is not a canonical resource server for this
+// API" (#3941). Other servers reject the parameter on the authorize
+// request while accepting it at token exchange, which is why it was
+// stripped unconditionally (PR #3396).
+//
+// Metadata tells the two apart. A server that publishes protected resource
+// metadata naming itself as the canonical resource (RFC 9728) has opted
+// into resource indicators, so the parameter is kept and both requests
+// agree. Without a matching advertisement the SDK derived the value from
+// the MCP endpoint alone, as the pre-2025-06-18 fallback allows, and the
+// parameter is dropped exactly as before.
+func resolveAuthorizeResourceParam(rawURL string, rt *metadataFixupRoundTripper) string {
 	u, err := url.Parse(rawURL)
 	if err != nil {
+		slog.Warn("Failed to parse OAuth authorization URL; leaving it unchanged", "error", err)
 		return rawURL
 	}
 	q := u.Query()
-	if q.Has("resource") {
-		q.Del("resource")
-		u.RawQuery = q.Encode()
-		slog.Debug("Stripped resource parameter from authorization URL")
+	resource := q.Get("resource")
+	if resource == "" {
+		return rawURL
 	}
+	if rt.advertisesResource(resource) {
+		slog.Debug("Keeping resource parameter on authorization URL", "resource", resource)
+		return rawURL
+	}
+	q.Del("resource")
+	u.RawQuery = q.Encode()
+	slog.Debug("Stripped resource parameter from authorization URL",
+		"resource", resource, "reason", "server advertises no matching canonical resource")
 	return u.String()
 }

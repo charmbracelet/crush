@@ -110,6 +110,9 @@ func (c *Client) VersionInfo(ctx context.Context) (*proto.VersionInfo, error) {
 		return nil, err
 	}
 	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to get server version: %s", rsp.Status)
+	}
 	if err := json.NewDecoder(rsp.Body).Decode(&vi); err != nil {
 		return nil, err
 	}

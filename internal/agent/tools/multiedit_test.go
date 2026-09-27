@@ -241,6 +241,103 @@ func TestMultiEditAllEditsFail(t *testing.T) {
 	require.Equal(t, content, currentContent, "Content should be unchanged")
 }
 
+// The file on disk stays CRLF, and the metadata has to carry the bytes that
+// were actually written so the diff the UI draws matches the file the agent
+// leaves behind. This mirrors TestReplaceContentPreservesCRLFAndMetadata, which
+// pins the same contract for the single-edit tool.
+func TestProcessMultiEditPreservesCRLFAndMetadata(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "test.txt")
+	require.NoError(t, os.WriteFile(filePath, []byte("alpha\r\nbeta\r\n"), 0o644))
+
+	edit := editContext{
+		ctx:         context.WithValue(t.Context(), SessionIDContextKey, "session"),
+		permissions: &mockPermissionService{},
+		files:       &mockHistoryService{},
+		filetracker: &mockEditFileTracker{lastRead: time.Now().Add(time.Second)},
+		workingDir:  dir,
+	}
+	params := MultiEditParams{
+		FilePath: filePath,
+		Edits:    []MultiEditOperation{{OldString: "beta", NewString: "BETA"}},
+	}
+
+	resp, err := processMultiEditExistingFile(edit, params, fantasy.ToolCall{ID: "call"})
+	require.NoError(t, err)
+	require.False(t, resp.IsError)
+
+	content, err := os.ReadFile(filePath)
+	require.NoError(t, err)
+	require.Equal(t, "alpha\r\nBETA\r\n", string(content))
+
+	var meta MultiEditResponseMetadata
+	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
+	require.Equal(t, "alpha\nbeta\n", meta.OldContent)
+	require.Equal(t, "alpha\r\nBETA\r\n", meta.NewContent)
+}
+
+// Multiedit applies its edits one at a time to the LF form of the file and
+// writes the result back once, so a single CRLF anywhere in the file used to
+// turn every line ending in it into CRLF. Whatever the edits were, the bytes
+// around them are the file's own.
+func TestProcessMultiEditKeepsOtherLineEndingsIntact(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		content string
+		edits   []MultiEditOperation
+		want    string
+	}{
+		{
+			name:    "two edits in a mixed file",
+			content: "a\nb\r\nc\n",
+			edits: []MultiEditOperation{
+				{OldString: "a", NewString: "A"},
+				{OldString: "c", NewString: "C"},
+			},
+			want: "A\nb\r\nC\n",
+		},
+		{
+			name:    "an edit that adds a line",
+			content: "a\r\nb\nc\r\n",
+			edits: []MultiEditOperation{
+				{OldString: "b", NewString: "b\nB"},
+			},
+			want: "a\r\nb\nB\nc\r\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			filePath := filepath.Join(dir, "test.txt")
+			require.NoError(t, os.WriteFile(filePath, []byte(tt.content), 0o644))
+
+			edit := editContext{
+				ctx:         context.WithValue(t.Context(), SessionIDContextKey, "session"),
+				permissions: &mockPermissionService{},
+				files:       &mockHistoryService{},
+				filetracker: &mockEditFileTracker{lastRead: time.Now().Add(time.Second)},
+				workingDir:  dir,
+			}
+			params := MultiEditParams{FilePath: filePath, Edits: tt.edits}
+
+			resp, err := processMultiEditExistingFile(edit, params, fantasy.ToolCall{ID: "call"})
+			require.NoError(t, err)
+			require.False(t, resp.IsError, resp.Content)
+
+			content, err := os.ReadFile(filePath)
+			require.NoError(t, err)
+			require.Equal(t, tt.want, string(content), "every byte outside the edits has to survive verbatim")
+		})
+	}
+}
+
 func TestProcessMultiEditExistingFilePartialFailure(t *testing.T) {
 	t.Parallel()
 

@@ -27,6 +27,7 @@ import (
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
+	"github.com/charmbracelet/crush/internal/router"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/version"
@@ -277,6 +278,50 @@ func (w *ClientWorkspace) AgentModel() AgentModel {
 		CatwalkCfg: info.Model,
 		ModelCfg:   info.ModelCfg,
 	}
+}
+
+func (w *ClientWorkspace) AgentLastRouterDecision() (router.Decision, bool) {
+	info, err := w.client.GetAgentInfo(context.Background(), w.workspaceID())
+	if err != nil {
+		return router.Decision{}, false
+	}
+	return router.Decision{
+		ReasoningEffort: info.RouterEffort,
+		Confidence:      info.RouterConfidence,
+		LowConfidence:   info.RouterLowConfidence,
+	}, info.HasRouterDecision
+}
+
+func (w *ClientWorkspace) AgentRouterQuerying() (string, bool) {
+	info, err := w.client.GetAgentInfo(context.Background(), w.workspaceID())
+	if err != nil {
+		return "", false
+	}
+	return info.RouterQueryingModel, info.RouterQuerying
+}
+
+func (w *ClientWorkspace) AgentRouterModel() string {
+	info, err := w.client.GetAgentInfo(context.Background(), w.workspaceID())
+	if err != nil {
+		return ""
+	}
+	return info.RouterModel
+}
+
+func (w *ClientWorkspace) AgentRouterError() string {
+	info, err := w.client.GetAgentInfo(context.Background(), w.workspaceID())
+	if err != nil {
+		return ""
+	}
+	return info.RouterError
+}
+
+func (w *ClientWorkspace) AgentRouterSavings(sessionID string) float64 {
+	info, err := w.client.GetAgentSessionInfo(context.Background(), w.workspaceID(), sessionID)
+	if err != nil {
+		return 0
+	}
+	return info.RouterSavings
 }
 
 func (w *ClientWorkspace) AgentIsReady() bool {

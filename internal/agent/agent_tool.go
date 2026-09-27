@@ -62,6 +62,8 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 				ToolCallID:     call.ID,
 				Prompt:         params.Prompt,
 				SessionTitle:   "New Agent Session",
+				EffortOverride: RouterSubAgentEffortFromContext(ctx),
+				ModelOverride:  RouterSubAgentModelFromContext(ctx),
 			})
 		},
 	), nil

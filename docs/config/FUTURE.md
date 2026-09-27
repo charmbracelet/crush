@@ -289,6 +289,29 @@ file untouched. Successfully migrated files can be renamed to
 `crush.json.migrated`; corrupt files should be quarantined as timestamped
 `state.json.corrupt-*` files and replaced with defaults.
 
+## `option reset router.model-pool`
+
+**Status:** not implemented; gap found while documenting `option router`.
+
+### Motivation
+
+`option reset <key>` clears a list option back to empty, and every list
+option under top-level `option` supports it (`context-path`, `skill-path`,
+etc. — see `optionKeys` in `internal/shellconfig/options.go`). `router
+model-pool` is a list too (appended the same way, via `appendArr`), but it
+lives under the separate `option router <key> <value>` sub-builtin, whose
+keys aren't registered in `optionKeys`, so `option reset` doesn't know
+about it. There is currently no way to clear a `crushrc`-configured
+`model-pool` other than removing the `option router model-pool …` lines
+from the script (or `source`d base config) that set it.
+
+### Proposed shape
+
+Either extend `option reset` to accept a dotted/nested key
+(`option reset router.model-pool`), or give `option router` its own
+`reset` subcommand (`option router reset model-pool`), mirroring
+`option reset`'s existing behavior: values added after the reset are kept.
+
 ## Permission-level hard deny
 
 **Status:** not implemented; probably unnecessary until a real use case

@@ -21,6 +21,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/question"
+	"github.com/charmbracelet/crush/internal/router"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
 )
@@ -152,6 +153,22 @@ type Workspace interface {
 	AgentIsBusy() bool
 	AgentIsSessionBusy(sessionID string) bool
 	AgentModel() AgentModel
+	AgentLastRouterDecision() (router.Decision, bool)
+	// AgentRouterQuerying reports whether a router HTTP call is currently
+	// in flight, and which model it was sent to, for a live "consulting"
+	// indicator distinct from AgentLastRouterDecision's last completed
+	// result.
+	AgentRouterQuerying() (string, bool)
+	// AgentRouterModel returns the router backend's own model id used
+	// for the most recent router call, or "" if none has happened yet.
+	AgentRouterModel() string
+	// AgentRouterSavings returns the router's cumulative estimated dollar
+	// savings for sessionID this process — see Coordinator.RouterSavings.
+	AgentRouterSavings(sessionID string) float64
+	// AgentRouterError returns the most recent router failure message
+	// while the router is enabled, or "" if the last consulted call
+	// succeeded (or the router has never been consulted).
+	AgentRouterError() string
 	AgentIsReady() bool
 	// AgentReadyErr reports nil when the coder agent is ready to accept
 	// work, or a descriptive error otherwise: ErrAgentNotInitialized

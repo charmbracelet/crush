@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/crush/internal/backend"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/proto"
+	"github.com/charmbracelet/crush/internal/router"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -54,6 +55,13 @@ func (s *stubCoordinator) Model() agent.Model                            { retur
 func (s *stubCoordinator) UpdateModels(context.Context) error            { return nil }
 func (s *stubCoordinator) SetMainAgent(string) error                     { return nil }
 func (s *stubCoordinator) GenerateTitle(context.Context, string, string) {}
+func (s *stubCoordinator) LastRouterDecision() (router.Decision, bool) {
+	return router.Decision{}, false
+}
+func (s *stubCoordinator) RouterQuerying() (string, bool) { return "", false }
+func (s *stubCoordinator) LastRouterModel() string        { return "" }
+func (s *stubCoordinator) LastRouterError() string        { return "" }
+func (s *stubCoordinator) RouterSavings(string) float64   { return 0 }
 
 // stubSessions is a minimal session.Service that returns a fixed list
 // (and supports Get by ID). All other methods return zero values; the

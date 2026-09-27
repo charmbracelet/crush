@@ -39,6 +39,13 @@ func (m *UI) modelInfo(width int) string {
 				} else {
 					reasoningEffort := cmp.Or(model.ModelCfg.ReasoningEffort, model.CatwalkCfg.DefaultReasoningEffort)
 					reasoningInfo = fmt.Sprintf("Reasoning %s", common.FormatReasoningEffort(reasoningEffort))
+					if m.status.hasRouterDecision && m.status.routerDecision.ReasoningEffort != "" {
+						// The router overrides this per-message; label the
+						// static config value as the default so it isn't
+						// read as the effort actually used last message —
+						// that's the Router line below.
+						reasoningInfo += " (default)"
+					}
 				}
 			}
 		}
@@ -58,6 +65,84 @@ func (m *UI) modelInfo(width int) string {
 		modelName = model.CatwalkCfg.Name
 	}
 	return common.ModelInfo(m.com.Styles, modelName, providerName, reasoningInfo, modelContext, width, m.hyperCredits)
+}
+
+// routerInfo renders the model router's live status as a single line
+// styled like the model block's reasoning line, so it sits directly under
+// the model/provider/reasoning info rather than as its own sidebar
+// section: a "consulting" indicator naming the router's configured model
+// while a call is in flight, or the most recently applied decision
+// (chosen model and/or reasoning effort, with confidence) once one
+// exists. Returns "" when the router has never been consulted for this
+// session, so the model block gets no extra line at all.
+func (m *UI) routerInfo(width int) string {
+	t := m.com.Styles
+
+	var body string
+	switch {
+	case m.routerQuerying:
+		if m.routerQueryingModel != "" {
+			body = fmt.Sprintf("Router: consulting %s…", m.routerQueryingModel)
+		} else {
+			body = "Router: consulting…"
+		}
+	case m.status.hasRouterDecision:
+		d := m.status.routerDecision
+		var parts []string
+		if d.ModelID != "" {
+			parts = append(parts, shortModelName(d.ModelID))
+		}
+		if d.ReasoningEffort != "" {
+			parts = append(parts, d.ReasoningEffort)
+		}
+		if len(parts) == 0 {
+			return ""
+		}
+		body = "Router: " + strings.Join(parts, " · ")
+		if d.Confidence > 0 {
+			body += fmt.Sprintf(" (%.0f%%)", d.Confidence*100)
+		}
+		if m.routerModel != "" {
+			body += fmt.Sprintf(" via %s", shortModelName(m.routerModel))
+		}
+	case m.routerError != "":
+		body = fmt.Sprintf("Router: error — %s", m.routerError)
+		return lipgloss.NewStyle().Width(width).Render(t.LSP.ErrorDiagnostic.Render(body))
+	default:
+		return ""
+	}
+
+	return lipgloss.NewStyle().Width(width).Render(t.ModelInfo.Reasoning.Render(body))
+}
+
+// routerSavingsInfo renders the router's cumulative estimated dollar
+// figure for the whole session as its own line, separate from
+// routerInfo's per-message decision line — a session-level running
+// total isn't "part of" any one decision, and mixing the two made the
+// total hard to spot at the end of a longer decision line. Shown
+// whenever the total is non-zero, regardless of whether the router is
+// currently mid-call, just applied a decision, or just failed — the
+// accumulated total from earlier in the session stays relevant either
+// way. Returns "" when nothing has been saved or cost yet (e.g. the
+// router has never been consulted, or model_pool isn't configured so
+// there's nothing but reasoning-effort routing to price).
+func (m *UI) routerSavingsInfo(width int) string {
+	if m.routerSavings == 0 {
+		return ""
+	}
+	t := m.com.Styles
+
+	var body string
+	if m.routerSavings > 0 {
+		body = fmt.Sprintf("Router savings (session): $%.4f", m.routerSavings)
+	} else {
+		// A negative cumulative value means the router's choices cost
+		// more than the session's default model would have, e.g.
+		// escalating to a pricier model for "high" effort more often
+		// than it saved by dropping to "low".
+		body = fmt.Sprintf("Router savings (session): -$%.4f", -m.routerSavings)
+	}
+	return lipgloss.NewStyle().Width(width).Render(t.ModelInfo.Reasoning.Render(body))
 }
 
 // updateSidebarScrollState renders the sidebar content and computes scroll
@@ -100,13 +185,20 @@ func (m *UI) updateSidebarScrollState() {
 	filesSection := m.filesInfo(m.com.Workspace.WorkingDir(), contentWidth, fileChangeCount(m.sessionFiles), true)
 
 	// Build the scrollable content.
-	content := lipgloss.JoinVertical(
-		lipgloss.Left,
+	parts := []string{
 		title,
 		"",
 		cwd,
 		"",
 		m.modelInfo(contentWidth),
+	}
+	if routerLine := m.routerInfo(contentWidth); routerLine != "" {
+		parts = append(parts, routerLine)
+	}
+	if savingsLine := m.routerSavingsInfo(contentWidth); savingsLine != "" {
+		parts = append(parts, savingsLine)
+	}
+	parts = append(parts,
 		"",
 		filesSection,
 		"",
@@ -116,6 +208,7 @@ func (m *UI) updateSidebarScrollState() {
 		"",
 		skillsSection,
 	)
+	content := lipgloss.JoinVertical(lipgloss.Left, parts...)
 
 	totalLines := strings.Count(content, "\n") + 1
 	m.sidebarContent = content

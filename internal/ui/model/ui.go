@@ -406,6 +406,24 @@ type UI struct {
 	// agentBusyCache.
 	agentReady bool
 	agentModel workspace.AgentModel
+	// routerQueryingModel / routerQuerying memoize a router HTTP call in
+	// flight right now, refreshed by the same off-thread probe as
+	// agentModel, and rendered by the sidebar's router section.
+	routerQueryingModel string
+	routerQuerying      bool
+	// routerModel is the router backend's own model id used for the
+	// most recent router call, kept around after routerQueryingModel
+	// clears so the sidebar can still say which model produced the
+	// last decision.
+	routerModel string
+	// routerSavings is the router's cumulative estimated dollar savings
+	// for the current session, refreshed by the same off-thread probe.
+	routerSavings float64
+	// routerError is the router's most recent failure message while
+	// enabled, refreshed by the same off-thread probe and rendered by
+	// the sidebar's router section so a broken router is visible
+	// instead of just showing nothing.
+	routerError string
 	// busyFetchGen is bumped by every busy/permission state transition;
 	// like promptQueueGen it lets a stale in-flight probe result be
 	// discarded and re-fetched instead of clobbering newer state.
@@ -820,6 +838,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case pubsub.Event[notify.RunComplete]:
 		if cmd := m.handlePlanHandoff(msg.Payload); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		m.invalidateBusyCaches()
+		if cmd := m.dispatchBusyRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	case busyStateMsg:
@@ -5315,6 +5337,18 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openReasoningDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.RouterID:
+		if cmd := m.openRouterDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.RouterModelPoolID:
+		if cmd := m.openRouterModelPoolDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.RouterModelID:
+		if cmd := m.openRouterModelDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.NotificationsID:
 		if cmd := m.openNotificationsDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -5412,6 +5446,45 @@ func (m *UI) openReasoningDialog() tea.Cmd {
 
 	m.dialog.OpenDialog(reasoningDialog)
 	return nil
+}
+
+// openRouterDialog opens the router settings dialog.
+func (m *UI) openRouterDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.RouterID) {
+		m.dialog.BringToFront(dialog.RouterID)
+		return nil
+	}
+
+	routerDialog := dialog.NewRouter(m.com)
+	m.dialog.OpenDialog(routerDialog)
+	return nil
+}
+
+// openRouterModelPoolDialog opens the router model-pool picker, stacked
+// on top of Router Settings (which stays open beneath it and picks up
+// the new pool via its own Draw-time refresh once this dialog closes).
+func (m *UI) openRouterModelPoolDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.RouterModelPoolID) {
+		m.dialog.BringToFront(dialog.RouterModelPoolID)
+		return nil
+	}
+
+	poolDialog := dialog.NewRouterModelPool(m.com)
+	m.dialog.OpenDialog(poolDialog)
+	return nil
+}
+
+// openRouterModelDialog opens the router decision-model picker, stacked
+// on top of Router Settings, and returns the command that loads its list.
+func (m *UI) openRouterModelDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.RouterModelID) {
+		m.dialog.BringToFront(dialog.RouterModelID)
+		return nil
+	}
+
+	modelDialog := dialog.NewRouterModel(m.com)
+	m.dialog.OpenDialog(modelDialog)
+	return modelDialog.Init()
 }
 
 // openNotificationsDialog opens the notification style picker dialog.

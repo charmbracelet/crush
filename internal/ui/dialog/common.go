@@ -200,6 +200,17 @@ func InputCursor(t *styles.Styles, cur *tea.Cursor) *tea.Cursor {
 	return cur
 }
 
+// offsetInputCursor shifts an input cursor down by rows for plain content
+// lines rendered between the title and the input (e.g. a purpose line).
+// InputCursor only accounts for the title and input frames, so dialogs
+// that prepend extra parts must shift the cursor themselves.
+func offsetInputCursor(cur *tea.Cursor, rows int) *tea.Cursor {
+	if cur != nil {
+		cur.Y += rows
+	}
+	return cur
+}
+
 // adjustOnboardingInputCursor removes the dialog view frame offset from an
 // input cursor. Onboarding dialogs render without Dialog.View frame, while
 // InputCursor includes that frame offset for regular dialogs.

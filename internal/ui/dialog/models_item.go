@@ -78,6 +78,18 @@ type ModelItem struct {
 	m            fuzzy.Match
 	focused      bool
 	showProvider bool
+
+	// info overrides the right-hand column text when set. Multi-select
+	// pickers (the router model pool) use it to show per-1M pricing,
+	// which the regular switcher does not need.
+	info string
+
+	// checkable/checked support multi-select pickers (e.g. the router
+	// model pool dialog) that reuse this item to stay visually and
+	// behaviorally identical to the regular single-select model
+	// switcher, just with a checkbox in front of the title.
+	checkable bool
+	checked   bool
 }
 
 // Finished implements list.Item. Model items are render-stable
@@ -126,11 +138,68 @@ func (m *ModelItem) ID() string {
 	return modelKey(string(m.prov.ID), m.model.ID)
 }
 
+// ModelID returns the raw catalog id of the underlying model (e.g. an
+// OpenRouter model id), independent of the provider it's grouped under.
+func (m *ModelItem) ModelID() string {
+	return m.model.ID
+}
+
+// SetInfo overrides the right-hand column text, replacing the provider
+// name that showProvider would otherwise render.
+func (m *ModelItem) SetInfo(info string) {
+	if m.info == info {
+		return
+	}
+	m.info = info
+	m.cache = nil
+	if m.Versioned != nil {
+		m.Bump()
+	}
+}
+
+// SetCheckable turns this item into a checkbox row, used by multi-select
+// pickers such as the router model pool dialog.
+func (m *ModelItem) SetCheckable(checkable bool) {
+	if m.checkable == checkable {
+		return
+	}
+	m.checkable = checkable
+	m.cache = nil
+	if m.Versioned != nil {
+		m.Bump()
+	}
+}
+
+// Checked reports whether a checkable item is currently checked.
+func (m *ModelItem) Checked() bool {
+	return m.checked
+}
+
+// SetChecked sets a checkable item's checkbox state.
+func (m *ModelItem) SetChecked(checked bool) {
+	if m.checked == checked {
+		return
+	}
+	m.checked = checked
+	m.cache = nil
+	if m.Versioned != nil {
+		m.Bump()
+	}
+}
+
 // Render implements ListItem.
 func (m *ModelItem) Render(width int) string {
-	var providerInfo string
-	if m.showProvider {
-		providerInfo = string(m.prov.Name)
+	info := m.info
+	if info == "" && m.showProvider {
+		info = string(m.prov.Name)
+	}
+	title := m.model.Name
+	if m.checkable {
+		box := "[ ]"
+		if m.checked {
+			box = "[x]"
+		}
+		title = box + " " + title
 	}
 	styles := ListItemStyles{
 		ItemBlurred:     m.t.Dialog.NormalItem,
@@ -138,7 +207,7 @@ func (m *ModelItem) Render(width int) string {
 		InfoTextBlurred: m.t.Dialog.ListItem.InfoBlurred,
 		InfoTextFocused: m.t.Dialog.ListItem.InfoFocused,
 	}
-	return renderItem(styles, m.model.Name, providerInfo, m.focused, width, m.cache, &m.m)
+	return renderItem(styles, title, info, m.focused, width, m.cache, &m.m)
 }
 
 // SetFocused implements ListItem.

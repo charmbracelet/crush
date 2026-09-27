@@ -19,6 +19,7 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/router"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
@@ -222,6 +223,13 @@ func (c *scriptedCoordinator) Model() agent.Model                            { r
 func (c *scriptedCoordinator) UpdateModels(context.Context) error            { return nil }
 func (c *scriptedCoordinator) SetMainAgent(string) error                     { return nil }
 func (c *scriptedCoordinator) GenerateTitle(context.Context, string, string) {}
+func (c *scriptedCoordinator) LastRouterDecision() (router.Decision, bool) {
+	return router.Decision{}, false
+}
+func (c *scriptedCoordinator) RouterQuerying() (string, bool) { return "", false }
+func (c *scriptedCoordinator) LastRouterModel() string        { return "" }
+func (c *scriptedCoordinator) LastRouterError() string        { return "" }
+func (c *scriptedCoordinator) RouterSavings(string) float64   { return 0 }
 
 // agentE2EHarness extends the SSE harness with a scripted coordinator
 // wired into the workspace's embedded app.App, so POST /agent drives a

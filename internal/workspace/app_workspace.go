@@ -20,6 +20,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/question"
+	"github.com/charmbracelet/crush/internal/router"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/skills"
@@ -198,6 +199,41 @@ func (w *AppWorkspace) AgentModel() AgentModel {
 		CatwalkCfg: m.CatwalkCfg,
 		ModelCfg:   m.ModelCfg,
 	}
+}
+
+func (w *AppWorkspace) AgentLastRouterDecision() (router.Decision, bool) {
+	if w.app.AgentCoordinator == nil {
+		return router.Decision{}, false
+	}
+	return w.app.AgentCoordinator.LastRouterDecision()
+}
+
+func (w *AppWorkspace) AgentRouterQuerying() (string, bool) {
+	if w.app.AgentCoordinator == nil {
+		return "", false
+	}
+	return w.app.AgentCoordinator.RouterQuerying()
+}
+
+func (w *AppWorkspace) AgentRouterModel() string {
+	if w.app.AgentCoordinator == nil {
+		return ""
+	}
+	return w.app.AgentCoordinator.LastRouterModel()
+}
+
+func (w *AppWorkspace) AgentRouterError() string {
+	if w.app.AgentCoordinator == nil {
+		return ""
+	}
+	return w.app.AgentCoordinator.LastRouterError()
+}
+
+func (w *AppWorkspace) AgentRouterSavings(sessionID string) float64 {
+	if w.app.AgentCoordinator == nil {
+		return 0
+	}
+	return w.app.AgentCoordinator.RouterSavings(sessionID)
 }
 
 func (w *AppWorkspace) AgentIsReady() bool {

@@ -46,7 +46,7 @@ func (m *mockSessionAgent) IsBusy() bool                                { return
 func (m *mockSessionAgent) QueuedPrompts(sessionID string) int          { return 0 }
 func (m *mockSessionAgent) QueuedPromptsList(sessionID string) []string { return nil }
 func (m *mockSessionAgent) ClearQueue(sessionID string)                 {}
-func (m *mockSessionAgent) Summarize(context.Context, string, fantasy.ProviderOptions, func(context.Context, *fantasy.ProviderError) error) error {
+func (m *mockSessionAgent) Summarize(context.Context, string, fantasy.ProviderOptions, func(context.Context, *fantasy.ProviderError) error, *Model) error {
 	return nil
 }
 func (m *mockSessionAgent) GenerateTitle(context.Context, string, string) {}
@@ -56,6 +56,13 @@ func newTestCoordinator(t *testing.T, env fakeEnv, providerID string, providerCf
 	cfg, err := config.Init(env.workingDir, "", false)
 	require.NoError(t, err)
 	cfg.Config().Providers.Set(providerID, providerCfg)
+	// config.Init merges in whatever the developer's machine has in its
+	// real global/local config (including a real router setup, if one is
+	// configured for manual testing) — isolate every test from that so
+	// behavior here never depends on ambient machine state. Tests that
+	// specifically want a router in play set Options.Router explicitly
+	// afterward (see newRouterDecisionTestCoordinator).
+	cfg.Config().Options.Router = nil
 	return &coordinator{
 		cfg:      cfg,
 		sessions: env.sessions,
@@ -523,7 +530,7 @@ func TestGetProviderOptionsReasoningEffort(t *testing.T) {
 			}
 			providerCfg := config.ProviderConfig{ID: "test", Type: tc.providerType}
 
-			opts := getProviderOptions(model, providerCfg)
+			opts := getProviderOptions(model, providerCfg, "")
 
 			raw, ok := opts[anthropic.Name]
 			require.True(t, ok, "options should be keyed under anthropic.Name for type %q", tc.providerType)
@@ -531,6 +538,51 @@ func TestGetProviderOptionsReasoningEffort(t *testing.T) {
 			require.True(t, ok)
 			require.NotNil(t, parsed.Effort)
 			assert.Equal(t, anthropic.Effort("max"), *parsed.Effort)
+		})
+	}
+}
+
+func TestGetProviderOptionsEffortOverride(t *testing.T) {
+	// The router passes its chosen effort as effortOverride. A member of the
+	// model's ReasoningLevels replaces the configured effort; anything else
+	// is ignored, exactly as if no override had been passed.
+	tests := []struct {
+		name       string
+		override   string
+		wantEffort anthropic.Effort
+	}{
+		{"valid override replaces configured effort", "high", anthropic.Effort("high")},
+		{"override outside reasoning levels is ignored", "max", anthropic.Effort("medium")},
+		{"empty override keeps configured effort", "", anthropic.Effort("medium")},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			model := Model{
+				CatwalkCfg: catwalk.Model{
+					ID:              "claude-opus-4-7",
+					CanReason:       true,
+					ReasoningLevels: []string{"low", "medium", "high"},
+				},
+				ModelCfg: config.SelectedModel{
+					Provider:        "test",
+					ReasoningEffort: "medium",
+				},
+			}
+			providerCfg := config.ProviderConfig{ID: "test", Type: catwalk.Type(anthropic.Name)}
+
+			opts := getProviderOptions(model, providerCfg, tc.override)
+
+			raw, ok := opts[anthropic.Name]
+			require.True(t, ok)
+			parsed, ok := raw.(*anthropic.ProviderOptions)
+			require.True(t, ok)
+			require.NotNil(t, parsed.Effort)
+			assert.Equal(t, tc.wantEffort, *parsed.Effort)
+
+			if tc.wantEffort == anthropic.Effort(effectiveReasoningEffort(model)) {
+				// Ignored overrides must be indistinguishable from "".
+				assert.Equal(t, getProviderOptions(model, providerCfg, ""), opts)
+			}
 		})
 	}
 }
@@ -581,7 +633,7 @@ func TestGetProviderOptionsReasoningEffortCustomProvider(t *testing.T) {
 			}
 			providerCfg := config.ProviderConfig{ID: "local", Type: catwalk.Type(providerType)}
 
-			opts := getProviderOptions(model, providerCfg)
+			opts := getProviderOptions(model, providerCfg, "")
 
 			raw, ok := opts[openaicompat.Name]
 			require.True(t, ok, "options should be keyed under openaicompat.Name for type %q", providerType)
@@ -609,7 +661,7 @@ func TestGetProviderOptionsReasoningEffortFallback(t *testing.T) {
 		Type: openaicompat.Name,
 	}
 
-	opts := getProviderOptions(model, providerCfg)
+	opts := getProviderOptions(model, providerCfg, "")
 
 	raw, ok := opts[openaicompat.Name]
 	require.True(t, ok)
@@ -634,7 +686,7 @@ func TestGetProviderOptionsTopKExtraBody(t *testing.T) {
 			ModelCfg:   config.SelectedModel{Provider: "ollama", TopK: ptr(int64(40))},
 		}
 
-		opts := getProviderOptions(model, knownCustomProviderCfg)
+		opts := getProviderOptions(model, knownCustomProviderCfg, "")
 
 		raw, ok := opts[openaicompat.Name]
 		require.True(t, ok)
@@ -654,7 +706,7 @@ func TestGetProviderOptionsTopKExtraBody(t *testing.T) {
 			ModelCfg: config.SelectedModel{Provider: "ollama"},
 		}
 
-		opts := getProviderOptions(model, knownCustomProviderCfg)
+		opts := getProviderOptions(model, knownCustomProviderCfg, "")
 
 		raw, ok := opts[openaicompat.Name]
 		require.True(t, ok)
@@ -671,7 +723,7 @@ func TestGetProviderOptionsTopKExtraBody(t *testing.T) {
 			ModelCfg:   config.SelectedModel{Provider: "ollama"},
 		}
 
-		opts := getProviderOptions(model, knownCustomProviderCfg)
+		opts := getProviderOptions(model, knownCustomProviderCfg, "")
 
 		raw, ok := opts[openaicompat.Name]
 		require.True(t, ok)
@@ -693,7 +745,7 @@ func TestGetProviderOptionsTopKExtraBody(t *testing.T) {
 			},
 		}
 
-		opts := getProviderOptions(model, knownCustomProviderCfg)
+		opts := getProviderOptions(model, knownCustomProviderCfg, "")
 
 		raw, ok := opts[openaicompat.Name]
 		require.True(t, ok)
@@ -709,7 +761,7 @@ func TestGetProviderOptionsTopKExtraBody(t *testing.T) {
 		}
 		providerCfg := config.ProviderConfig{ID: string(catwalk.InferenceProviderZAI), Type: openaicompat.Name}
 
-		opts := getProviderOptions(model, providerCfg)
+		opts := getProviderOptions(model, providerCfg, "")
 
 		raw, ok := opts[openaicompat.Name]
 		require.True(t, ok)
@@ -731,7 +783,7 @@ func TestGetProviderOptionsMalformedFallback(t *testing.T) {
 	}
 	providerCfg := config.ProviderConfig{ID: "test", Type: "ollama"}
 
-	opts := getProviderOptions(model, providerCfg)
+	opts := getProviderOptions(model, providerCfg, "")
 
 	raw, ok := opts[openaicompat.Name]
 	require.True(t, ok, "malformed provider_options should still fall back to top_k")

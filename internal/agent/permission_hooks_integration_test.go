@@ -187,12 +187,15 @@ func TestPrePermissionBridge_NoHooksConfigured(t *testing.T) {
 // TestPermissionDeniedBridge verifies a PermissionDenied hook fires after
 // a user denial, end to end through the dispatcher.
 func TestPermissionDeniedBridge(t *testing.T) {
-	logFile := filepath.Join(t.TempDir(), "denials.log")
+	// The redirect target is relative to the hook's cwd (the workspace):
+	// an absolute Windows path would carry backslashes that are invalid
+	// JSON escapes before the config even loads.
 	store, workDir := loadStoreWithHooks(t, `{
 		"PermissionDenied": [
-			{"command": "echo denied >> `+logFile+`"}
+			{"command": "echo denied >> denials.log"}
 		]
 	}`)
+	logFile := filepath.Join(workDir, "denials.log")
 
 	svc := permission.NewPermissionService(workDir, false, nil)
 	svc.SetPermissionHooks(newPermissionHookDispatcher(store, nil))

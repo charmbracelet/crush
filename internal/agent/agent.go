@@ -832,9 +832,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	var shouldSummarize bool
 	sanitizedToolCalls := make(map[string]bool)
 	// Full names of tool calls that completed without error this turn.
-	// Written only from the streaming callbacks (which run sequentially)
-	// and read after Stream returns, where sendChannelReply uses it to
-	// tell whether the model already replied on the originating channel.
+	// Parallel tools call OnToolResult from separate goroutines, so the
+	// writes are serialized. The map is read only after Stream returns,
+	// where sendChannelReply uses it to tell whether the model already
+	// replied on the originating channel.
+	var completedToolCallsMu sync.Mutex
 	completedToolCalls := make(map[string]struct{})
 	// Don't send MaxOutputTokens if 0 — some providers (e.g. LM Studio) reject it
 	var maxOutputTokens *int64
@@ -1020,7 +1022,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				toolResult.IsError = true
 			}
 			if !toolResult.IsError && toolResult.Name != "" {
+				completedToolCallsMu.Lock()
 				completedToolCalls[toolResult.Name] = struct{}{}
+				completedToolCallsMu.Unlock()
 			}
 			// Use parent ctx instead of genCtx to ensure the message is created
 			// even if the request is canceled mid-stream

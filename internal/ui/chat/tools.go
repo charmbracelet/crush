@@ -168,6 +168,9 @@ type baseToolMessageItem struct {
 	sty             *styles.Styles
 	anim            *anim.Anim
 	expandedContent bool
+	// spinnerSuffix is an optional suffix rendered after the pending
+	// spinner line (e.g. the Prism-routed model that is answering).
+	spinnerSuffix string
 }
 
 var _ Expandable = (*baseToolMessageItem)(nil)
@@ -308,6 +311,21 @@ func (t *baseToolMessageItem) SetCompact(compact bool) {
 // ID returns the unique identifier for this tool message item.
 func (t *baseToolMessageItem) ID() string {
 	return t.toolCall.ID
+}
+
+// SetSpinnerSuffix sets an optional suffix rendered after the pending
+// spinner line (e.g. the Prism-routed model that is answering).
+func (t *baseToolMessageItem) SetSpinnerSuffix(suffix string) {
+	if t.spinnerSuffix == suffix {
+		return
+	}
+	t.spinnerSuffix = suffix
+	if suffix == "" {
+		t.anim.SetSuffix(nil)
+	} else {
+		t.anim.SetSuffix(func() string { return suffix })
+	}
+	t.Bump()
 }
 
 // Spinning implements [Animatable].

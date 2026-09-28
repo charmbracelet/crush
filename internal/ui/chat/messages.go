@@ -273,13 +273,39 @@ func AssistantInfoID(messageID string) string {
 // render its info footer. The turn that ends the prompt always gets one;
 // intermediate turns only get one when a Prism-routed model name is
 // available, since that is the only case where the footer adds
-// per-turn information.
+// per-turn information. While the turn is streaming, the routed model
+// name may already be known from the Prism response headers; while the
+// assistant item is still spinning (no content and no tool calls yet)
+// the model info rides the spinner line instead.
 func ShouldShowAssistantInfo(msg *message.Message) bool {
 	finishData := msg.FinishPart()
 	if finishData == nil {
-		return false
+		if msg.PrismModelName == "" {
+			return false
+		}
+		hasContent := strings.TrimSpace(msg.Content().Text) != ""
+		hasToolCalls := len(msg.ToolCalls()) > 0
+		return hasContent || hasToolCalls
 	}
 	return finishData.Reason == message.FinishReasonEndTurn || msg.PrismModelName != ""
+}
+
+// PrismModelSuffix renders the model info for a Prism-routed turn — the
+// configured model name, a subdued arrow, and the model that actually
+// served the request — or an empty string when the turn was not routed
+// through a Prism model.
+func PrismModelSuffix(sty *styles.Styles, cfg *config.Config, msg *message.Message) string {
+	if msg.PrismModelName == "" {
+		return ""
+	}
+	mainModelName := "Unknown Model"
+	if model := cfg.GetModel(msg.Provider, msg.Model); model != nil {
+		mainModelName = model.Name
+	}
+	mainModel := sty.Messages.AssistantInfoModel.Render(mainModelName)
+	routedModel := sty.Messages.AssistantInfoModel.Render(msg.PrismModelName)
+	arrow := sty.Messages.AssistantInfoProvider.Render("\u2192")
+	return fmt.Sprintf("%s %s %s", mainModel, arrow, routedModel)
 }
 
 // AssistantInfoItem renders model info and response time after assistant completes.
@@ -305,6 +331,13 @@ func NewAssistantInfoItem(sty *styles.Styles, message *message.Message, cfg *con
 		cfg:                 cfg,
 		lastUserMessageTime: lastUserMessageTime,
 	}
+}
+
+// HasFinishedMessage reports whether the item was built from a finished
+// message, i.e. whether it renders the full footer rather than the
+// compact streaming header.
+func (a *AssistantInfoItem) HasFinishedMessage() bool {
+	return a.message.FinishPart() != nil
 }
 
 // Finished implements list.Item. Assistant info blocks render a fixed
@@ -351,12 +384,11 @@ func (a *AssistantInfoItem) Render(width int) string {
 
 func (a *AssistantInfoItem) renderContent(width int) string {
 	finishData := a.message.FinishPart()
-	if finishData == nil {
-		return ""
-	}
 	// The final turn of a prompt keeps the full footer (duration and
-	// separator line); intermediate turns render a compact header.
-	isFinalTurn := finishData.Reason == message.FinishReasonEndTurn
+	// separator line); intermediate turns render a compact header. While
+	// the turn is streaming (no finish part yet), only the routed model
+	// and the compact header are known.
+	isFinalTurn := finishData != nil && finishData.Reason == message.FinishReasonEndTurn
 
 	icon := a.sty.Messages.AssistantInfoIcon.Render(styles.ModelIcon)
 	mainModelName := "Unknown Model"
@@ -366,10 +398,8 @@ func (a *AssistantInfoItem) renderContent(width int) string {
 	modelFormatted := a.sty.Messages.AssistantInfoModel.Render(mainModelName)
 	// A Prism-routed turn shows the model that actually served the
 	// request, with the arrow and any savings suffix subdued.
-	if a.message.PrismModelName != "" {
-		routedModel := a.sty.Messages.AssistantInfoModel.Render(a.message.PrismModelName)
-		arrow := a.sty.Messages.AssistantInfoProvider.Render("→")
-		modelFormatted = fmt.Sprintf("%s %s %s", modelFormatted, arrow, routedModel)
+	if prismModel := PrismModelSuffix(a.sty, a.cfg, a.message); prismModel != "" {
+		modelFormatted = prismModel
 	}
 	savings := prismSavingsSuffix(a.sty, a.message)
 	if !isFinalTurn {

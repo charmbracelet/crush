@@ -84,12 +84,16 @@ func TestRunnerTranscriptProviderNotCalledWithoutOptIn(t *testing.T) {
 
 func TestRunnerTranscriptDeliveredWhenOptedIn(t *testing.T) {
 	t.Parallel()
-	out := filepath.Join(t.TempDir(), "payload.txt")
+	// Redirect relative to the runner's cwd: an absolute Windows path
+	// would carry backslashes that the embedded POSIX shell treats as
+	// escape characters, mangling the redirect target.
+	cwd := t.TempDir()
+	out := filepath.Join(cwd, "payload.txt")
 	var calls atomic.Int64
 	r := NewRunner([]config.HookConfig{
-		{Command: "cat > " + out},
+		{Command: "cat > payload.txt"},
 		{Command: `echo '{"decision":"allow"}'`, IncludeTranscript: true},
-	}, t.TempDir(), t.TempDir())
+	}, cwd, t.TempDir())
 	r.WithTranscriptProvider(func(context.Context, string) string {
 		calls.Add(1)
 		return "User: please run the tests"

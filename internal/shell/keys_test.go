@@ -76,6 +76,8 @@ func TestParseKey(t *testing.T) {
 func TestInteractiveSessionSendKey(t *testing.T) {
 	t.Parallel()
 
+	needsPOSIXShell(t)
+
 	session := newTestSession(t, `read line; echo "keys:$line"`)
 
 	require.NoError(t, session.SendKey(mustKey(t, "h")))

@@ -463,9 +463,9 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	if agentCfg, ok := cfg.Agents[config.AgentCoder]; ok {
 		providerCfg := cfg.GetProviderForModel(agentCfg.Model)
 		model := cfg.GetModelByType(agentCfg.Model)
-		if providerCfg != nil && model != nil && config.ModelCanReason(*model) {
+		if providerCfg != nil && model != nil && model.CanReason() {
 			selectedModel := cfg.Models[agentCfg.Model]
-			effortLevels := config.ReasoningEffortLevels(*model)
+			effortLevels := model.ReasoningEffortLevels()
 
 			// Anthropic models: thinking toggle
 			if len(effortLevels) == 0 {

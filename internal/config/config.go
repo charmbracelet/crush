@@ -905,22 +905,6 @@ func (c *Config) GetModel(provider, model string) *catwalk.Model {
 	return nil
 }
 
-// ReasoningEffortLevels returns the selectable reasoning effort values of
-// the model, or nil when it does not support effort levels.
-func ReasoningEffortLevels(model catwalk.Model) []string {
-	levels := model.Reasoning.EffortLevels
-	values := make([]string, 0, len(levels))
-	for _, level := range levels {
-		values = append(values, level.Value)
-	}
-	return values
-}
-
-// ModelCanReason reports whether the model supports reasoning at all.
-func ModelCanReason(model catwalk.Model) bool {
-	return model.Reasoning.Thinking != "" && model.Reasoning.Thinking != catwalk.ThinkingNever
-}
-
 // ValidateReasoningEffort checks that effort is a reasoning level the
 // given provider/model supports. It returns an error listing the accepted
 // levels when the model cannot use it.
@@ -929,7 +913,7 @@ func (c *Config) ValidateReasoningEffort(provider, modelID, effort string) error
 	if model == nil {
 		return fmt.Errorf("model %q not found for provider %q", modelID, provider)
 	}
-	levels := ReasoningEffortLevels(*model)
+	levels := model.ReasoningEffortLevels()
 	if len(levels) == 0 {
 		return fmt.Errorf("model %q does not support reasoning effort", modelID)
 	}

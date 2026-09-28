@@ -456,11 +456,11 @@ func (c *coordinator) syncSessionChannel(ctx context.Context, sessionID, channel
 // It prefers the user-selected effort when valid, otherwise the model default when
 // valid, and finally falls back to the first configured reasoning level.
 func effectiveReasoningEffort(model Model) string {
-	if !config.ModelCanReason(model.CatwalkCfg) {
+	if !model.CatwalkCfg.CanReason() {
 		return ""
 	}
 
-	levels := config.ReasoningEffortLevels(model.CatwalkCfg)
+	levels := model.CatwalkCfg.ReasoningEffortLevels()
 	if effort := model.ModelCfg.ReasoningEffort; effort != "" && slices.Contains(levels, effort) {
 		return effort
 	}
@@ -522,8 +522,8 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 	}
 
 	reasoningEffort := effectiveReasoningEffort(model)
-	levels := config.ReasoningEffortLevels(model.CatwalkCfg)
-	shouldSetEffort := config.ModelCanReason(model.CatwalkCfg) &&
+	levels := model.CatwalkCfg.ReasoningEffortLevels()
+	shouldSetEffort := model.CatwalkCfg.CanReason() &&
 		reasoningEffort != "" &&
 		slices.Contains(levels, reasoningEffort)
 
@@ -585,7 +585,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 			switch {
 			case !hasEffort && shouldSetEffort:
 				extraBody["reasoning_effort"] = reasoningEffort
-			case !hasThink && config.ModelCanReason(model.CatwalkCfg):
+			case !hasThink && model.CatwalkCfg.CanReason():
 				if model.ModelCfg.Think {
 					extraBody["thinking"] = map[string]any{"type": "enabled"}
 				} else {
@@ -682,7 +682,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		case hyper.Name:
 			extraBody["thinking"] = model.ModelCfg.Think
 		case string(catwalk.InferenceProviderIoNet):
-			if _, ok := extraBody["reasoning"]; !ok && config.ModelCanReason(model.CatwalkCfg) {
+			if _, ok := extraBody["reasoning"]; !ok && model.CatwalkCfg.CanReason() {
 				if model.ModelCfg.Think {
 					extraBody["reasoning"] = map[string]string{"effort": "medium"}
 				} else {
@@ -717,7 +717,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 			// "reasoning_split" must be true so thinking content is returned
 			// in the "reasoning_content" field instead of inline in "content".
 			if strings.HasPrefix(strings.ToLower(model.CatwalkCfg.ID), "minimax") {
-				if config.ModelCanReason(model.CatwalkCfg) && (model.ModelCfg.Think || reasoningEffort != "") {
+				if model.CatwalkCfg.CanReason() && (model.ModelCfg.Think || reasoningEffort != "") {
 					extraBody["thinking"] = map[string]any{"type": "adaptive"}
 					extraBody["reasoning_split"] = true
 				} else {
@@ -726,7 +726,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 			}
 
 		case string(catwalk.InferenceProviderAlibabaSingapore), string(catwalk.InferenceProviderAlibabaUS):
-			if config.ModelCanReason(model.CatwalkCfg) && !shouldSetEffort {
+			if model.CatwalkCfg.CanReason() && !shouldSetEffort {
 				extraBody["enable_thinking"] = model.ModelCfg.Think
 			}
 		}

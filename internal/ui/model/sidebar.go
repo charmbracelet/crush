@@ -29,7 +29,7 @@ func (m *UI) modelInfo(width int) string {
 			providerName = providerConfig.Name
 
 			// Only check reasoning if model can reason
-			if config.ModelCanReason(model.CatwalkCfg) {
+			if model.CatwalkCfg.CanReason() {
 				if len(model.CatwalkCfg.Reasoning.EffortLevels) == 0 {
 					if model.ModelCfg.Think {
 						reasoningInfo = "Thinking On"

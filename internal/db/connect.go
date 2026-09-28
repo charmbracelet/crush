@@ -160,7 +160,12 @@ func Connect(ctx context.Context, dataDir string, opts ...ConnectOption) (*sql.D
 		return nil, fmt.Errorf("failed to initialize goose: %w", err)
 	}
 
-	if err := goose.Up(conn, "migrations"); err != nil {
+	// Merged pull requests can land migrations timestamped before a
+	// workspace's already-applied version (the MCP toggle tables are
+	// dated 20260905/20260906 while 20260912 was already applied).
+	// Goose refuses those as "missing" by default; allowing them lets
+	// startup apply the pending migrations out of order.
+	if err := goose.Up(conn, "migrations", goose.WithAllowMissing()); err != nil {
 		conn.Close()
 		releaseLock()
 		slog.Error("Failed to apply migrations", "error", err)

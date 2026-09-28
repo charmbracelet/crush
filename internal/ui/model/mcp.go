@@ -187,54 +187,62 @@ func (m *UI) mcpToggleItems() ([]dialog.MCPToggleItem, error) {
 	return items, nil
 }
 
-// applyMCPToggle persists an MCP toggle. Local toggles write a
-// repository-scoped override; enabling a config-disabled server also starts
-// it now and records an enabled override, so it stays enabled across
-// restarts. Global toggles write the disabled flag to the config and apply
-// the change to the running client. The dialog keeps its own optimistic
-// state; failures surface as an error toast.
-func (m *UI) applyMCPToggle(msg dialog.ActionToggleMCP) tea.Cmd {
+// applyMCPServerSetting persists a tri-state choice for one MCP server.
+// The connection half follows the dialog's scope: a local change writes a
+// repository-scoped override (and force-starts a config-disabled server so
+// it stays connected across restarts), while a global change writes the
+// config's disabled flag and applies it to the running client.
+//
+// The two connected settings then also carry the lazy half, which always
+// lives in the global config because it only decides whether the server's
+// schemas go into the model's next request, never which servers connect.
+// Disabled leaves the lazy flag untouched so cycling back restores the
+// server's previous placement. Failures surface as an error toast; the
+// dialog keeps its own optimistic state meanwhile.
+func (m *UI) applyMCPServerSetting(msg dialog.ActionSetMCPServerSetting) tea.Cmd {
 	name := msg.Name
-	disable := msg.Disabled
-	status := "enabled"
-	if disable {
-		status = "disabled"
-	}
 	return func() tea.Msg {
-		if msg.Global {
-			if err := m.com.Workspace.MCPSetServerConfigDisabled(context.TODO(), name, disable); err != nil {
+		switch msg.Setting {
+		case dialog.MCPServerSettingDisabled:
+			// Take the server offline for this scope; the lazy placement is
+			// preserved for when it is cycled back to a connected setting.
+			if err := m.setMCPServerConnected(name, false, msg.Global); err != nil {
 				return util.NewErrorMsg(err)
 			}
-			return util.NewInfoMsg(fmt.Sprintf("MCP %q %s globally", name, status))
-		}
-		if !disable {
-			if configured, ok := m.com.Config().MCP[name]; ok && configured.Disabled {
-				if err := m.com.Workspace.MCPStartServer(context.TODO(), name); err != nil {
-					return util.NewErrorMsg(err)
-				}
+			return util.NewInfoMsg(fmt.Sprintf("MCP %q disabled", name))
+		default:
+			if err := m.setMCPServerConnected(name, true, msg.Global); err != nil {
+				return util.NewErrorMsg(err)
 			}
+			lazy := msg.Setting == dialog.MCPServerSettingLazy
+			if err := m.com.Workspace.MCPSetLazy(context.TODO(), name, lazy); err != nil {
+				return util.NewErrorMsg(err)
+			}
+			if msg.Setting == dialog.MCPServerSettingLazy {
+				return util.NewInfoMsg(fmt.Sprintf("MCP %q lazy loading: tools served on demand", name))
+			}
+			return util.NewInfoMsg(fmt.Sprintf("MCP %q enabled: tools always shown", name))
 		}
-		if err := m.com.Workspace.MCPSetServerDisabled(context.TODO(), name, disable); err != nil {
-			return util.NewErrorMsg(err)
-		}
-		return util.NewInfoMsg(fmt.Sprintf("MCP %q %s for this repository", name, status))
 	}
 }
 
-// applyMCPLazyToggle pins or unpins one server's tools by writing
-// mcp.<name>.lazy. Nothing reconnects: the change only decides whether the
-// server's schemas go into the model's next request.
-func (m *UI) applyMCPLazyToggle(msg dialog.ActionToggleMCPLazy) tea.Cmd {
-	state := "loaded on demand"
-	if !msg.Lazy {
-		state = "always shown"
+// setMCPServerConnected turns a server's connection on or off for the given
+// scope. Enabling a config-disabled server locally also force-starts it so
+// the running client reflects the change immediately, mirroring the startup
+// path that reads the repository overrides.
+func (m *UI) setMCPServerConnected(name string, enabled, global bool) error {
+	disabled := !enabled
+	if global {
+		return m.com.Workspace.MCPSetServerConfigDisabled(context.TODO(), name, disabled)
 	}
-	return func() tea.Msg {
-		if err := m.com.Workspace.MCPSetLazy(context.TODO(), msg.Name, msg.Lazy); err != nil {
-			return util.NewErrorMsg(err)
+	if enabled {
+		if configured, ok := m.com.Config().MCP[name]; ok && configured.Disabled {
+			if err := m.com.Workspace.MCPStartServer(context.TODO(), name); err != nil {
+				return err
+			}
 		}
-		return util.NewInfoMsg(fmt.Sprintf("MCP %q tools %s", msg.Name, state))
 	}
+	return m.com.Workspace.MCPSetServerDisabled(context.TODO(), name, disabled)
 }
 
 // applyLazyMCPGlobal flips the options.lazy_mcp default. Servers with their

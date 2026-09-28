@@ -535,10 +535,11 @@ func mergeStats(projectStats []ProjectStats) *Stats {
 		return merged.ToolUsage[i].CallCount > merged.ToolUsage[j].CallCount
 	})
 
-	// Map iteration order is random. These series are read in sequence,
-	// so order them by time rather than leaving them in map order.
+	// Map iteration order is random. Order the series so a run is stable.
+	// UsageByDay is newest first, matching GetUsageByDay and the daily table,
+	// which keeps only the first 30 rows.
 	sort.Slice(merged.UsageByDay, func(i, j int) bool {
-		return merged.UsageByDay[i].Day < merged.UsageByDay[j].Day
+		return merged.UsageByDay[i].Day > merged.UsageByDay[j].Day
 	})
 	sort.Slice(merged.UsageByHour, func(i, j int) bool {
 		return merged.UsageByHour[i].Hour < merged.UsageByHour[j].Hour

@@ -34,7 +34,7 @@ func TestMergeStatsOrdersTimeSeries(t *testing.T) {
 	for range 10 {
 		merged := mergeStats(projects)
 		for i := 1; i < len(merged.UsageByDay); i++ {
-			require.LessOrEqual(t, merged.UsageByDay[i-1].Day, merged.UsageByDay[i].Day)
+			require.GreaterOrEqual(t, merged.UsageByDay[i-1].Day, merged.UsageByDay[i].Day)
 		}
 		for i := 1; i < len(merged.RecentActivity); i++ {
 			require.LessOrEqual(t, merged.RecentActivity[i-1].Day, merged.RecentActivity[i].Day)

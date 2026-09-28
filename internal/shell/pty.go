@@ -654,6 +654,12 @@ func (s *InteractiveSession) setFocused(focused bool) {
 	s.focusMu.Unlock()
 
 	s.tryEnqueue(func() {
+		// Focus and Blur are not wrapped by [vt.SafeEmulator], so they would
+		// race with the read loop's writes to the emulator's modes. The
+		// session mutex serializes them like SendKey and Paste are by the
+		// emulator's own lock.
+		s.emuMu.Lock()
+		defer s.emuMu.Unlock()
 		if focused {
 			s.emu.Focus()
 		} else {

@@ -27,6 +27,7 @@ import (
 	"github.com/charmbracelet/crush/internal/filepathext"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/home"
+	"github.com/charmbracelet/crush/internal/oauth/antigravity"
 	"github.com/charmbracelet/crush/internal/shellconfig"
 	powernapConfig "github.com/charmbracelet/x/powernap/pkg/config"
 	"github.com/qjebbs/go-jsons"
@@ -149,6 +150,11 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 		return nil, fmt.Errorf("failed to configure providers: %w", err)
 	}
 
+	// Retire the per-tier Google subscription model ids that older builds
+	// saved as selections, before resolveSelectedModels treats them as unknown
+	// and drops the user onto another provider.
+	cfg.migrateSubscriptionModelSelections()
+
 	if !cfg.IsConfigured() {
 		slog.Warn("No providers configured")
 		return store, nil
@@ -189,6 +195,71 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 
 // mustMarshalConfig marshals the config to JSON bytes, returning empty JSON on
 // error.
+// migrateSubscriptionModelSelections rewrites saved Google subscription model
+// choices that name a reasoning tier directly, e.g. `gemini-3.8-flash-high`.
+//
+// Those ids no longer exist: the catalog lists one model per family and moves
+// the tiers into the reasoning selector. Carrying the effort across keeps the
+// user on the tier they were using instead of letting the selection fall back
+// to something else on upgrade.
+func (c *Config) migrateSubscriptionModelSelections() {
+	pc, ok := c.Providers.Get(antigravity.ProviderID)
+	if !ok {
+		return
+	}
+	available := make(map[string]struct{}, len(pc.Models))
+	for _, m := range pc.Models {
+		available[m.ID] = struct{}{}
+	}
+
+	migrate := func(selected SelectedModel) (SelectedModel, bool) {
+		if selected.Provider != antigravity.ProviderID {
+			return selected, false
+		}
+		if _, ok := available[selected.Model]; ok {
+			return selected, false
+		}
+		family, level := antigravity.SplitEffort(selected.Model)
+		if level == "" {
+			return selected, false
+		}
+		if _, ok := available[family]; !ok {
+			return selected, false
+		}
+		selected.Model = family
+		if selected.ReasoningEffort == "" {
+			selected.ReasoningEffort = level
+		}
+		return selected, true
+	}
+
+	for modelType, selected := range c.Models {
+		if next, changed := migrate(selected); changed {
+			c.Models[modelType] = next
+		}
+	}
+	for modelType, recents := range c.RecentModels {
+		updated := make([]SelectedModel, 0, len(recents))
+		seen := make(map[string]struct{}, len(recents))
+		changed := false
+		for _, selected := range recents {
+			next, did := migrate(selected)
+			changed = changed || did
+			// Two tiers of one family collapse onto the same entry, so keep the
+			// first and drop the rest rather than listing a model twice.
+			key := next.Provider + "/" + next.Model
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			updated = append(updated, next)
+		}
+		if changed {
+			c.RecentModels[modelType] = updated
+		}
+	}
+}
+
 func mustMarshalConfig(cfg *Config) []byte {
 	data, err := json.Marshal(cfg)
 	if err != nil {
@@ -333,6 +404,20 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 
 		switch p.ID {
 		// Handle specific providers that require additional configuration
+		case catwalk.InferenceProvider(antigravity.ProviderID):
+			if config.OAuthToken == nil {
+				// No login, no credential of any kind: treated like every other
+				// keyless provider, which is to say not configured.
+				if configExists {
+					c.Providers.Del(string(p.ID))
+				}
+				continue
+			}
+			// Earlier builds listed every reasoning tier as its own model. This
+			// folds them again, so a catalog persisted by one of those builds
+			// still shows one model with the tiers in the reasoning selector.
+			// CollapseModels is idempotent, so a fresh catalog is unaffected.
+			prepared.Models = antigravity.CollapseModels(prepared.Models)
 		case catwalk.InferenceProviderVertexAI:
 			var (
 				project  = env.Get("VERTEXAI_PROJECT")

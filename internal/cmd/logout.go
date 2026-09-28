@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/crush/internal/client"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/logout"
+	"github.com/charmbracelet/crush/internal/oauth/antigravity"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/spf13/cobra"
 )
@@ -20,6 +21,11 @@ var providerDisplayNames = map[string]string{
 	"hyper":   "Charm Hyper",
 	"copilot": "GitHub Copilot",
 	"openai":  "ChatGPT",
+	// The Google subscription reaches the same backend as the Antigravity
+	// CLI, so every spelling users reach for is an alias for one provider.
+	"gemini":      "Google AI Subscription",
+	"antigravity": "Google AI Subscription",
+	"gemini-sub":  "Google AI Subscription",
 }
 
 var logoutCmd = &cobra.Command{
@@ -29,7 +35,7 @@ var logoutCmd = &cobra.Command{
 	Long: `Logout Crush from a specified platform, removing stored credentials.
 The platform should be provided as an argument.
 If no argument is given, a list of logged-in platforms will be shown.
-Available platforms are: hyper, copilot, openai.`,
+Available platforms are: hyper, copilot, openai, gemini.`,
 	Example: `
 # Sign out from Charm Hyper
 crush logout hyper
@@ -39,6 +45,9 @@ crush logout copilot
 
 # Sign out from your ChatGPT (OpenAI) account
 crush logout openai
+
+# Sign out from your Google AI subscription
+crush logout gemini
   `,
 	ValidArgs: []cobra.Completion{
 		"hyper",
@@ -47,6 +56,9 @@ crush logout openai
 		"github-copilot",
 		"openai",
 		"chatgpt",
+		"gemini",
+		"antigravity",
+		"gemini-sub",
 	},
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -83,6 +95,8 @@ crush logout openai
 			provider = "copilot"
 		case "openai", "chatgpt":
 			provider = "openai"
+		case "gemini", "antigravity", "gemini-sub":
+			provider = "gemini"
 		default:
 			return fmt.Errorf("unknown platform: %s", provider)
 		}
@@ -108,6 +122,8 @@ crush logout openai
 			return logoutCopilot(c, ws.ID)
 		case "openai":
 			return logoutOpenAI(c, ws.ID)
+		case "gemini":
+			return logoutGemini(c, ws.ID)
 		default:
 			return fmt.Errorf("unknown platform: %s", provider)
 		}
@@ -161,6 +177,24 @@ func logoutOpenAI(c *client.Client, wsID string) error {
 	return nil
 }
 
+// logoutGemini clears a Google AI subscription: the OAuth token, the model
+// catalog it unlocked, and the access token mirrored into api_key.
+func logoutGemini(c *client.Client, wsID string) error {
+	ctx := getLogoutContext()
+	provider := antigravity.ProviderID
+
+	if err := cmp.Or(
+		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers."+provider+".oauth"),
+		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers."+provider+".models"),
+		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers."+provider+".api_key"),
+	); err != nil {
+		return err
+	}
+
+	fmt.Printf("Successfully logged out of %s.\n", providerDisplayNames["gemini"])
+	return nil
+}
+
 // pickLoggedInProvider returns the provider to log out of and whether the
 // user explicitly picked it from a list of logged-in platforms.
 func pickLoggedInProvider(c *client.Client, wsID string) (string, bool, error) {
@@ -177,7 +211,7 @@ func pickLoggedInProvider(c *client.Client, wsID string) (string, bool, error) {
 		id   string
 		name string
 	}
-	for _, id := range []string{"hyper", "copilot", "openai"} {
+	for _, id := range []string{"hyper", "copilot", "openai", antigravity.ProviderID} {
 		if p, ok := cfg.Providers.Get(id); ok && p.OAuthToken != nil {
 			loggedIn = append(loggedIn, struct {
 				id   string

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"image"
+	"runtime"
 	"testing"
 	"time"
 
@@ -198,6 +199,8 @@ func TestTerminalRequestIgnoredWhenDialogOpen(t *testing.T) {
 }
 
 func TestUserInteractiveShellPersistsOnExit(t *testing.T) {
+	needsPOSIXShell(t)
+
 	u, ws := newTerminalTestUI(t)
 	u.session = &session.Session{ID: "user-session"}
 
@@ -433,6 +436,8 @@ func TestUserTerminalCtrlFStaysEditorKey(t *testing.T) {
 // background. (Before, the panel was drawn fullscreen: with no chat area to
 // dock into, the terminal took over the window.)
 func TestNewSessionHidesTerminalKeepingProcess(t *testing.T) {
+	needsPOSIXShell(t)
+
 	u, term := newAttachedTerminalUI(t)
 	u.session = &session.Session{ID: "sess-A"}
 	require.True(t, u.dialog.ContainsDialog(dialog.TerminalID))
@@ -454,6 +459,8 @@ func TestNewSessionHidesTerminalKeepingProcess(t *testing.T) {
 // the chat session it was opened in: switching away hides it, coming back
 // brings it back.
 func TestSessionSwitchHidesAndRestoresTerminal(t *testing.T) {
+	needsPOSIXShell(t)
+
 	u, term := newAttachedTerminalUI(t)
 	u.session = &session.Session{ID: "sess-A"}
 
@@ -475,6 +482,8 @@ func TestSessionSwitchHidesAndRestoresTerminal(t *testing.T) {
 // TestSessionSwitchRestoresFullscreen checks that the fullscreen view is
 // restored along with the panel.
 func TestSessionSwitchRestoresFullscreen(t *testing.T) {
+	needsPOSIXShell(t)
+
 	u, _ := newAgentDrivenTerminalUI(t)
 	u.session = &session.Session{ID: "sess-A"}
 
@@ -613,4 +622,14 @@ func TestDrawTerminalHintsReplacesEditor(t *testing.T) {
 	// The blurred textarea prompt (the row of colons) is what the hints
 	// replace.
 	require.NotContains(t, rendered, ":::")
+}
+
+// needsPOSIXShell skips tests that drive a command through the interactive
+// session: on Windows those run through cmd.exe, which has none of the
+// tools these tests use (sh, stty, dd, od, seq, printf, read).
+func needsPOSIXShell(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("needs a POSIX shell; cmd.exe has no sh, stty, dd or od")
+	}
 }

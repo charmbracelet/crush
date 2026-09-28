@@ -1,6 +1,7 @@
 package shell
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -56,6 +57,8 @@ func waitForExit(t *testing.T, session *InteractiveSession) {
 func TestInteractiveSessionCapturesOutput(t *testing.T) {
 	t.Parallel()
 
+	needsPOSIXShell(t)
+
 	session := newTestSession(t, "printf 'hello world\\n'")
 	waitForExit(t, session)
 
@@ -66,6 +69,8 @@ func TestInteractiveSessionCapturesOutput(t *testing.T) {
 func TestInteractiveSessionExitCode(t *testing.T) {
 	t.Parallel()
 
+	needsPOSIXShell(t)
+
 	session := newTestSession(t, "exit 3")
 	waitForExit(t, session)
 
@@ -74,6 +79,8 @@ func TestInteractiveSessionExitCode(t *testing.T) {
 
 func TestInteractiveSessionAcceptsInput(t *testing.T) {
 	t.Parallel()
+
+	needsPOSIXShell(t)
 
 	session := newTestSession(t, `read line; echo "got:$line"`)
 
@@ -92,6 +99,8 @@ func TestInteractiveSessionAcceptsInput(t *testing.T) {
 func TestInteractiveSessionResize(t *testing.T) {
 	t.Parallel()
 
+	needsPOSIXShell(t)
+
 	session := newTestSession(t, "cat")
 
 	cols, rows := session.Size()
@@ -108,6 +117,8 @@ func TestInteractiveSessionResize(t *testing.T) {
 
 func TestInteractiveSessionMinimumSize(t *testing.T) {
 	t.Parallel()
+
+	needsPOSIXShell(t)
 
 	session, err := NewInteractiveSession(InteractiveSessionOptions{
 		Command:    "cat",
@@ -202,4 +213,14 @@ func TestInteractiveExitCode(t *testing.T) {
 
 	require.Equal(t, 0, InteractiveExitCode(nil))
 	require.Equal(t, 1, InteractiveExitCode(ErrCommandBlocked))
+}
+
+// needsPOSIXShell skips tests that drive a command through the interactive
+// session: on Windows those run through cmd.exe, which has none of the
+// tools these tests use (sh, stty, dd, od, seq, printf, read).
+func needsPOSIXShell(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("needs a POSIX shell; cmd.exe has no sh, stty, dd or od")
+	}
 }

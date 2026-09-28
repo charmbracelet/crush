@@ -2,6 +2,7 @@ package dialog
 
 import (
 	"image"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -210,6 +211,8 @@ func TestTerminalDialogAgentDrivenReadonlyHint(t *testing.T) {
 func TestTerminalDialogResolvesThemedColors(t *testing.T) {
 	t.Parallel()
 
+	needsPOSIXShell(t)
+
 	// The child paints a letter with the basic ANSI red code. The host
 	// terminal's palette must not decide that color: it has to resolve
 	// through the theme's palette so the embedded terminal matches the
@@ -234,6 +237,8 @@ func TestTerminalDialogResolvesThemedColors(t *testing.T) {
 
 func TestTerminalDialogExitCompletes(t *testing.T) {
 	t.Parallel()
+
+	needsPOSIXShell(t)
 
 	dialog, session := newTerminalDialogForTest(t, "printf 'hello-terminal\\n'")
 
@@ -300,6 +305,8 @@ func TestTerminalDialogMouseTranslation(t *testing.T) {
 func TestTerminalDialogDraw(t *testing.T) {
 	t.Parallel()
 
+	needsPOSIXShell(t)
+
 	dialog, session := newTerminalDialogForTest(t, "printf 'drawn-output\\n'")
 
 	select {
@@ -341,6 +348,8 @@ func TestTerminalDialogResizesSessionToContentArea(t *testing.T) {
 func TestTerminalDialogGhostFullscreen(t *testing.T) {
 	t.Parallel()
 
+	needsPOSIXShell(t)
+
 	// An agent-driven session keeps its full logical size — the ghost
 	// fullscreen the agent reads — while the panel shows the bottom slice.
 	dialog, session := newSizedTerminalDialogForTest(t,
@@ -375,6 +384,8 @@ func drawTerminal(t *testing.T, dialog *TerminalDialog, width, height int) (uv.S
 func TestTerminalDialogCursorVisibility(t *testing.T) {
 	t.Parallel()
 
+	needsPOSIXShell(t)
+
 	dialog, session := newTerminalDialogForTest(t, `printf '\033[?25l hidden\033[?25h\n'`)
 	dialog.SetFocused(true)
 
@@ -393,6 +404,8 @@ func TestTerminalDialogCursorVisibility(t *testing.T) {
 func TestTerminalDialogCursorHiddenWhenChildHides(t *testing.T) {
 	t.Parallel()
 
+	needsPOSIXShell(t)
+
 	dialog, session := newTerminalDialogForTest(t, `printf '\033[?25l hidden\n'`)
 	dialog.SetFocused(true)
 
@@ -409,6 +422,8 @@ func TestTerminalDialogCursorHiddenWhenChildHides(t *testing.T) {
 
 func TestTerminalDialogUnfocusedPaintsGhostCursor(t *testing.T) {
 	t.Parallel()
+
+	needsPOSIXShell(t)
 
 	// An unfocused terminal cannot use the host cursor, but the caret must
 	// stay visible: it is what makes the agent's (or the session's)
@@ -462,4 +477,14 @@ func stopTestSession(session *shell.InteractiveSession) {
 	case <-time.After(5 * time.Second):
 	}
 	_ = session.Close()
+}
+
+// needsPOSIXShell skips tests that drive a command through the interactive
+// session: on Windows those run through cmd.exe, which has none of the
+// tools these tests use (sh, stty, dd, od, seq, printf, read).
+func needsPOSIXShell(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("needs a POSIX shell; cmd.exe has no sh, stty, dd or od")
+	}
 }

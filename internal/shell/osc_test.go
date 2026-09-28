@@ -33,6 +33,8 @@ func waitForScreen(t *testing.T, session *InteractiveSession, want string) {
 func TestPaletteQueryAnswersWithThemeColors(t *testing.T) {
 	t.Parallel()
 
+	needsPOSIXShell(t)
+
 	// The child is in raw mode like a TUI (which is what queries the
 	// palette): query index 1, then echo the reply bytes back as hex so the
 	// test can assert on the response without depending on rendering.
@@ -82,6 +84,8 @@ func TestClipboardHandlerIgnoresQueries(t *testing.T) {
 func TestPasteHonorsBracketedPasteMode(t *testing.T) {
 	t.Parallel()
 
+	needsPOSIXShell(t)
+
 	// The child enables bracketed paste, prints a ready marker once the
 	// emulator has seen that, and reads the pasted bytes back in raw mode,
 	// printing them as hex.
@@ -119,6 +123,8 @@ func TestCheckBlockedRecursesIntoShellBodies(t *testing.T) {
 func TestSessionStatesAreVisible(t *testing.T) {
 	t.Parallel()
 
+	needsPOSIXShell(t)
+
 	session := newTestSession(t, `printf '\033[?1049h\a'; sleep 30`)
 
 	require.Eventually(t, func() bool {
@@ -135,6 +141,8 @@ func TestSessionStatesAreVisible(t *testing.T) {
 // the next write times out.
 func TestWriteDoesNotBlockOnWedgedChild(t *testing.T) {
 	t.Parallel()
+
+	needsPOSIXShell(t)
 
 	// The child never reads its input, and raw mode keeps the kernel from
 	// draining it through echo.

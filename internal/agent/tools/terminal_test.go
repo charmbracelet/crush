@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -103,6 +104,8 @@ func agentDriven() *bool {
 }
 
 func TestTerminalToolStart(t *testing.T) {
+	needsPOSIXShell(t)
+
 	resetTerminalManager(t)
 
 	tool, terminals := newTerminalToolForTest(t)
@@ -124,12 +127,10 @@ func TestTerminalToolStart(t *testing.T) {
 	require.NotEmpty(t, meta.SessionID)
 	require.True(t, meta.Exited)
 
+	// The manager teardown registered by the helpers reaps the session
+	// before the temporary directories are removed.
 	session, ok := shell.GetInteractiveSessionManager().Get(meta.SessionID)
 	require.True(t, ok)
-	t.Cleanup(func() {
-		_ = session.Kill()
-		_ = session.Close()
-	})
 	require.Same(t, session, terminals.shown[0].Session)
 	require.False(t, terminals.shown[0].AgentDriven, "a waiting start hands the terminal to the user")
 }
@@ -151,6 +152,8 @@ func TestTerminalStartAgentDrivenMarksRequest(t *testing.T) {
 }
 
 func TestTerminalStartWaitsForUserWork(t *testing.T) {
+	needsPOSIXShell(t)
+
 	resetTerminalManager(t)
 
 	tool, _ := newTerminalToolForTest(t)
@@ -170,6 +173,8 @@ func TestTerminalStartWaitsForUserWork(t *testing.T) {
 }
 
 func TestTerminalStartUnblocksWhenUserClosesTerminal(t *testing.T) {
+	needsPOSIXShell(t)
+
 	resetTerminalManager(t)
 
 	tool, _ := newTerminalToolForTest(t)
@@ -217,6 +222,8 @@ func TestTerminalStartUnblocksWhenUserClosesTerminal(t *testing.T) {
 }
 
 func TestTerminalStartWaitBudgetElapses(t *testing.T) {
+	needsPOSIXShell(t)
+
 	resetTerminalManager(t)
 
 	old := terminalStartWaitBudget
@@ -244,6 +251,8 @@ func TestTerminalToolStartRequiresCommand(t *testing.T) {
 }
 
 func TestTerminalToolStartBusy(t *testing.T) {
+	needsPOSIXShell(t)
+
 	resetTerminalManager(t)
 
 	tool, _ := newTerminalToolForTest(t)
@@ -290,6 +299,8 @@ func TestTerminalToolUnknownAction(t *testing.T) {
 // the child enables bracketed paste, and the pasted text arrives wrapped in
 // the paste markers so multi-line input is inserted, not executed.
 func TestTerminalPasteUsesBracketedPaste(t *testing.T) {
+	needsPOSIXShell(t)
+
 	resetTerminalManager(t)
 
 	tool, _ := newTerminalToolForTest(t)
@@ -345,6 +356,8 @@ func TestTerminalPasteNeedsText(t *testing.T) {
 }
 
 func TestTerminalRead(t *testing.T) {
+	needsPOSIXShell(t)
+
 	resetTerminalManager(t)
 
 	tool, _ := newTerminalToolForTest(t)
@@ -367,6 +380,8 @@ func TestTerminalRead(t *testing.T) {
 // cursor while drawing, so the position still says where the program is
 // focused.
 func TestTerminalReadReportsHiddenCursor(t *testing.T) {
+	needsPOSIXShell(t)
+
 	resetTerminalManager(t)
 
 	tool, _ := newTerminalToolForTest(t)
@@ -389,6 +404,8 @@ func TestTerminalReadReportsHiddenCursor(t *testing.T) {
 // TestTerminalWriteReportsGeometry checks that a write result carries the
 // session geometry so the agent knows where its typing landed.
 func TestTerminalWriteReportsGeometry(t *testing.T) {
+	needsPOSIXShell(t)
+
 	resetTerminalManager(t)
 
 	tool, _ := newTerminalToolForTest(t)
@@ -408,6 +425,8 @@ func TestTerminalWriteReportsGeometry(t *testing.T) {
 }
 
 func TestTerminalReadWaitForExit(t *testing.T) {
+	needsPOSIXShell(t)
+
 	resetTerminalManager(t)
 
 	tool, _ := newTerminalToolForTest(t)
@@ -441,6 +460,8 @@ func TestTerminalReadNotFound(t *testing.T) {
 }
 
 func TestTerminalWrite(t *testing.T) {
+	needsPOSIXShell(t)
+
 	resetTerminalManager(t)
 
 	tool, _ := newTerminalToolForTest(t)
@@ -462,6 +483,8 @@ func TestTerminalWrite(t *testing.T) {
 }
 
 func TestTerminalWriteExited(t *testing.T) {
+	needsPOSIXShell(t)
+
 	resetTerminalManager(t)
 
 	tool, _ := newTerminalToolForTest(t)
@@ -485,6 +508,8 @@ func TestTerminalWriteExited(t *testing.T) {
 }
 
 func TestTerminalKill(t *testing.T) {
+	needsPOSIXShell(t)
+
 	resetTerminalManager(t)
 
 	tool, _ := newTerminalToolForTest(t)
@@ -513,6 +538,8 @@ func TestTerminalKill(t *testing.T) {
 }
 
 func TestTerminalWriteKeysNavigateTUIs(t *testing.T) {
+	needsPOSIXShell(t)
+
 	resetTerminalManager(t)
 
 	tool, _ := newTerminalToolForTest(t)
@@ -543,6 +570,8 @@ func TestTerminalWriteKeysNavigateTUIs(t *testing.T) {
 }
 
 func TestTerminalWriteCtrlCInterrupts(t *testing.T) {
+	needsPOSIXShell(t)
+
 	resetTerminalManager(t)
 
 	tool, _ := newTerminalToolForTest(t)
@@ -596,6 +625,8 @@ func TestTerminalWriteNothingToSend(t *testing.T) {
 }
 
 func TestTerminalWriteMouseReachesTUIs(t *testing.T) {
+	needsPOSIXShell(t)
+
 	resetTerminalManager(t)
 
 	tool, _ := newTerminalToolForTest(t)
@@ -650,4 +681,14 @@ func TestTerminalMouseValidation(t *testing.T) {
 	require.Equal(t, 1, click.X, "1-based input becomes 0-based emulator coordinates")
 	require.Equal(t, 2, click.Y)
 	require.Equal(t, uv.MouseLeft, click.Button)
+}
+
+// needsPOSIXShell skips tests that drive a command through the interactive
+// session: on Windows those run through cmd.exe, which has none of the
+// tools these tests use (sh, stty, dd, od, seq, printf, read).
+func needsPOSIXShell(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("needs a POSIX shell; cmd.exe has no sh, stty, dd or od")
+	}
 }

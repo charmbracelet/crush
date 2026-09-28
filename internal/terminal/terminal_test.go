@@ -2,6 +2,7 @@ package terminal
 
 import (
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/shell"
@@ -18,6 +19,13 @@ func testSession(t *testing.T) *shell.InteractiveSession {
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_ = session.Kill()
+		// Wait for the process to be reaped: a live session keeps its
+		// working directory locked on Windows, which would fail the
+		// temporary directory cleanup that runs right after this one.
+		select {
+		case <-session.Done():
+		case <-time.After(5 * time.Second):
+		}
 		_ = session.Close()
 	})
 	return session

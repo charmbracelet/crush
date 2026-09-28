@@ -10,6 +10,8 @@ import (
 func TestInteractiveSessionManagerStartAssignsID(t *testing.T) {
 	t.Parallel()
 
+	needsPOSIXShell(t)
+
 	m := &InteractiveSessionManager{sessions: newSessionMap()}
 
 	session, err := m.Start(InteractiveSessionOptions{
@@ -33,6 +35,8 @@ func TestInteractiveSessionManagerStartAssignsID(t *testing.T) {
 
 func TestInteractiveSessionManagerRejectsSecondSession(t *testing.T) {
 	t.Parallel()
+
+	needsPOSIXShell(t)
 
 	m := &InteractiveSessionManager{sessions: newSessionMap()}
 
@@ -60,7 +64,7 @@ func TestInteractiveSessionManagerAllowsNewSessionAfterExit(t *testing.T) {
 
 	second, err := m.Start(InteractiveSessionOptions{Command: "sleep 30", WorkingDir: t.TempDir()})
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = second.Kill(); _ = second.Close() })
+	t.Cleanup(func() { stopTestSession(second) })
 
 	require.NotEqual(t, first.ID(), second.ID())
 
@@ -71,6 +75,8 @@ func TestInteractiveSessionManagerAllowsNewSessionAfterExit(t *testing.T) {
 
 func TestInteractiveSessionManagerRegister(t *testing.T) {
 	t.Parallel()
+
+	needsPOSIXShell(t)
 
 	m := &InteractiveSessionManager{sessions: newSessionMap()}
 
@@ -101,6 +107,7 @@ func TestInteractiveSessionManagerCleanupDropsExitedOverCap(t *testing.T) {
 		case <-time.After(15 * time.Second):
 			t.Fatal("session did not exit")
 		}
+		_ = session.Close()
 	}
 
 	require.LessOrEqual(t, len(m.List()), MaxInteractiveSessions)

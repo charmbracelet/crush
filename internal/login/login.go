@@ -16,6 +16,7 @@ import (
 	"github.com/pkg/browser"
 
 	"github.com/charmbracelet/crush/internal/oauth"
+	"github.com/charmbracelet/crush/internal/oauth/antigravity"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/charmbracelet/crush/internal/oauth/grok"
 	"github.com/charmbracelet/crush/internal/oauth/hyper"
@@ -28,6 +29,7 @@ const (
 	PlatformCopilot = "copilot"
 	PlatformOpenAI  = "openai"
 	PlatformGrok    = "grok"
+	PlatformGemini  = "gemini"
 )
 
 // startMessages are the first lines printed by the non-interactive flow.
@@ -36,6 +38,7 @@ var startMessages = map[string]string{
 	PlatformCopilot: "Requesting device code from GitHub...",
 	PlatformOpenAI:  "Starting browser authorization...",
 	PlatformGrok:    "Starting browser authorization...",
+	PlatformGemini:  "Starting Google subscription authorization...",
 }
 
 // titles are the provider names shown in the mini TUI header.
@@ -44,6 +47,7 @@ var titles = map[string]string{
 	PlatformCopilot: "GitHub Copilot",
 	PlatformOpenAI:  "ChatGPT",
 	PlatformGrok:    "Grok",
+	PlatformGemini:  "Google AI Subscription",
 }
 
 // flow is the provider-agnostic surface the login UIs drive. Start is
@@ -65,11 +69,31 @@ type codeEntryFlow interface {
 	CompleteWithCode(ctx context.Context, input string) (*oauth.Token, error)
 }
 
+// Option configures a login before it starts.
+type Option func(*loginOptions)
+
+type loginOptions struct {
+	clientSecret string
+}
+
+// WithClientSecret supplies the OAuth client secret that a provider needs
+// alongside its public client id. Only the Google AI subscription requires
+// one; it is configuration rather than a constant here because it cannot be
+// committed.
+func WithClientSecret(secret string) Option {
+	return func(o *loginOptions) { o.clientSecret = secret }
+}
+
 // Run authenticates with the given platform and returns the resulting
 // OAuth token. It runs the mini TUI when stdin is a terminal and the plain
 // non-interactive flow otherwise.
-func Run(ctx context.Context, platform string) (*oauth.Token, error) {
-	newFlow, err := flowFor(platform)
+func Run(ctx context.Context, platform string, options ...Option) (*oauth.Token, error) {
+	var opts loginOptions
+	for _, option := range options {
+		option(&opts)
+	}
+
+	newFlow, err := flowFor(platform, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +146,7 @@ func openBrowser(rawURL string) {
 }
 
 // flowFor returns the constructor for the platform's flow.
-func flowFor(platform string) (func() flow, error) {
+func flowFor(platform string, opts loginOptions) (func() flow, error) {
 	switch platform {
 	case PlatformHyper:
 		return func() flow { return &hyperFlow{} }, nil
@@ -132,6 +156,8 @@ func flowFor(platform string) (func() flow, error) {
 		return func() flow { return &openaiFlow{} }, nil
 	case PlatformGrok:
 		return func() flow { return &grokFlow{} }, nil
+	case PlatformGemini:
+		return func() flow { return &geminiFlow{clientSecret: opts.clientSecret} }, nil
 	default:
 		return nil, fmt.Errorf("unknown platform: %s", platform)
 	}
@@ -270,6 +296,35 @@ func (f *grokFlow) CompleteWithCode(ctx context.Context, input string) (*oauth.T
 }
 
 func (f *grokFlow) Close() {
+	if f.f != nil {
+		f.f.Close()
+	}
+}
+
+// geminiFlow runs the Google subscription authorization code flow with a
+// loopback callback server.
+type geminiFlow struct {
+	f            *antigravity.BrowserFlow
+	clientSecret string
+}
+
+func (f *geminiFlow) Start(_ context.Context) (string, string, error) {
+	bf, err := antigravity.StartBrowserFlow(f.clientSecret)
+	if err != nil {
+		return "", "", err
+	}
+	f.f = bf
+	// The handoff page opens the authorization URL in a tab that can close
+	// itself when finished, which browsers refuse to do for a URL opened
+	// directly.
+	return bf.StartURL(), "", nil
+}
+
+func (f *geminiFlow) Wait(ctx context.Context) (*oauth.Token, error) {
+	return f.f.Wait(ctx)
+}
+
+func (f *geminiFlow) Close() {
 	if f.f != nil {
 		f.f.Close()
 	}

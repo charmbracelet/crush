@@ -37,6 +37,7 @@ import (
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/oauth"
+	"github.com/charmbracelet/crush/internal/oauth/antigravity"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	openaioauth "github.com/charmbracelet/crush/internal/oauth/openai"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -1260,13 +1261,33 @@ func (c *coordinator) buildBedrockProvider(apiKey string, headers map[string]str
 	return bedrock.New(opts...)
 }
 
-func (c *coordinator) buildGoogleProvider(baseURL, apiKey string, headers map[string]string) (fantasy.Provider, error) {
+func (c *coordinator) buildGoogleProvider(baseURL, apiKey string, headers map[string]string, token *oauth.Token) (fantasy.Provider, error) {
+	// A subscription login carries no API key — the credential is the OAuth
+	// token, and the gateway is a different service from the one a key
+	// addresses. The SDK refuses to build a client without a key at all, so
+	// a placeholder satisfies the presence check while the transport supplies
+	// the real authorization header.
+	if token != nil && apiKey == "" {
+		apiKey = antigravity.KeyPlaceholder
+	}
 	opts := []google.Option{
 		google.WithBaseURL(baseURL),
 		google.WithGeminiAPIKey(apiKey),
 	}
+	var httpClient *http.Client
 	if c.cfg.Config().Options.Debug {
-		httpClient := log.NewHTTPClient()
+		httpClient = log.NewHTTPClient()
+	}
+	if token != nil {
+		if httpClient == nil {
+			httpClient = &http.Client{}
+		}
+		httpClient.Transport = &antigravity.Transport{
+			Base:  httpClient.Transport,
+			Token: token,
+		}
+	}
+	if httpClient != nil {
 		opts = append(opts, google.WithHTTPClient(httpClient))
 	}
 	if len(headers) > 0 {
@@ -1352,7 +1373,10 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 	case bedrock.Name:
 		return c.buildBedrockProvider(apiKey, headers, providerCfg.ID)
 	case google.Name:
-		return c.buildGoogleProvider(baseURL, apiKey, headers)
+		// A Google subscription reaches the same API through an internal
+		// gateway with its own request envelope, which the token-bearing
+		// transport handles.
+		return c.buildGoogleProvider(baseURL, apiKey, headers, providerCfg.OAuthToken)
 	case "google-vertex":
 		return c.buildGoogleVertexProvider(headers, providerCfg.ExtraParams)
 	case openaicompat.Name, hyper.Name:
@@ -1436,6 +1460,10 @@ func (c *coordinator) UpdateModels(ctx context.Context) error {
 	// guards make this a no-op once a catalog exists.
 	c.cfg.RefetchOpenAIChatGPTModels(ctx)
 	c.cfg.RefetchGrokModels(ctx)
+	// A Google subscription's model list is specific to the account, so a
+	// sign-in that predated the fetch or whose fetch failed leaves only the
+	// built-in placeholder list.
+	c.cfg.RefetchGeminiSubscriptionModels(ctx)
 
 	agent, name := c.activeAgent()
 	return c.updateAgentModels(ctx, agent, name)

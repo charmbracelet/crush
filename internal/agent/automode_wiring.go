@@ -120,6 +120,21 @@ func (h compositeHooks) OnAutoModeGrant(sessionID string) {
 	}
 }
 
+// SetAutoModeEnabled forwards the runtime auto-mode toggle to members
+// that support it. The permission service reaches togglers through a type
+// assertion on the installed hooks, so without this method the composite
+// silently swallowed every toggle and the native classifier kept running
+// regardless of the reported state: auto mode active while the UI said it
+// was off, and inert when the user turned it on.
+func (h compositeHooks) SetAutoModeEnabled(enabled bool) {
+	if toggler, ok := h.primary.(permission.AutoModeToggler); ok {
+		toggler.SetAutoModeEnabled(enabled)
+	}
+	if toggler, ok := h.secondary.(permission.AutoModeToggler); ok {
+		toggler.SetAutoModeEnabled(enabled)
+	}
+}
+
 // AutoModeEnabled reports whether the native auto mode is enabled in the
 // current config. Note: `auto_mode.enabled` is intended to be honored
 // from user-level config only — a repository should not be able to grant

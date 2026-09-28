@@ -121,6 +121,30 @@ func TestCrushLogs_MaxCap(t *testing.T) {
 	require.Len(t, lines, 100)
 }
 
+func TestCrushLogs_EntriesAcrossChunkBoundaries(t *testing.T) {
+	t.Parallel()
+	// Entries of about 360 bytes cross several 8KB read boundaries, and
+	// entry 150 is longer than two chunks.
+	var entries []map[string]any
+	for i := range 200 {
+		pad := strings.Repeat("x", 250)
+		if i == 150 {
+			pad = strings.Repeat("x", 20000)
+		}
+		entries = append(entries, makeLogEntry("INFO", fmt.Sprintf("Entry %d", i), "app.go", i, map[string]any{"pad": pad}))
+	}
+
+	logFile := createTestLogFile(t, entries)
+
+	result := runCrushLogs(logFile, CrushLogsParams{Lines: 100})
+
+	lines := strings.Split(result, "\n")
+	require.Len(t, lines, 100)
+	for i, line := range lines {
+		require.Contains(t, line, fmt.Sprintf("Entry %d pad=", 100+i))
+	}
+}
+
 func TestCrushLogs_MissingFile(t *testing.T) {
 	t.Parallel()
 	result := runCrushLogs("/nonexistent/path/crush.log", CrushLogsParams{Lines: 50})

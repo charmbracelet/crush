@@ -273,6 +273,9 @@ type UI struct {
 	// cycleYolo is true while YOLO was enabled by the Shift+Tab input-mode
 	// cycle, which is the only case where the cycle may disable it again.
 	cycleYolo bool
+	// cycleAuto is the same ownership marker for native auto mode: only the
+	// auto the Shift+Tab cycle switched on may the cycle switch it back off.
+	cycleAuto bool
 
 	keyMap KeyMap
 	keyenh tea.KeyboardEnhancementsMsg
@@ -2155,7 +2158,12 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleAutoMode:
-		m.toggleAutoMode()
+		auto := m.toggleAutoMode()
+		if auto {
+			cmds = append(cmds, util.CmdHandler(util.InfoMsg{Type: util.InfoTypeAuto, Msg: autoModeBannerMsg}))
+		} else {
+			cmds = append(cmds, util.ReportInfo("Auto mode disabled"))
+		}
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionSelectNotificationStyle:
 		cfg := m.com.Config()
@@ -3073,7 +3081,12 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				}
 				return true
 			}
-			cmds = append(cmds, util.ReportInfo(m.cyclePermissionMode()))
+			yolo := m.toggleYoloMode()
+			if yolo {
+				cmds = append(cmds, util.CmdHandler(util.InfoMsg{Type: util.InfoTypeYolo, Msg: yoloModeBannerMsg}))
+			} else {
+				cmds = append(cmds, util.ReportInfo("Yolo mode disabled"))
+			}
 			return true
 		}
 		return false
@@ -3639,7 +3652,7 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	// Add status and help layer
 	m.status.SetHideHelp(isOnboarding)
-	m.status.SetMode(m.mode, m.yoloModeCached())
+	m.status.SetMode(m.mode, m.yoloModeCached(), m.autoModeCached())
 	m.status.Draw(scr, layout.status)
 
 	// Draw completions popup if open
@@ -4659,11 +4672,13 @@ func (m *UI) toggleInputMode() tea.Cmd {
 		return util.ReportWarn("Agent is busy, please wait before switching input mode...")
 	}
 	if m.mode == uiInputModePlan {
-		// Second step of the Shift+Tab cycle: plan -> YOLO. Enabling YOLO
-		// here is the only case where the cycle may disable it again.
-		if !m.com.Workspace.PermissionSkipRequests() {
-			m.toggleYoloMode()
-			m.cycleYolo = true
+		// Second step of the Shift+Tab cycle: plan -> auto. Leave planning
+		// with the coder, but gate its permission prompts behind the
+		// classifier instead of jumping straight to YOLO. A permission the
+		// user already owns is left for them, so the cycle does not claim it.
+		if !m.autoModeCached() && !m.com.Workspace.PermissionSkipRequests() {
+			m.setAutoMode(true)
+			m.cycleAuto = true
 		}
 		return m.setInputMode(uiInputModeCode)
 	}
@@ -4672,6 +4687,17 @@ func (m *UI) toggleInputMode() tea.Cmd {
 	if m.com.Workspace.PermissionSkipRequests() && m.cycleYolo {
 		m.toggleYoloMode()
 		return util.ReportInfo("input mode: code")
+	}
+	// Third step of the cycle: auto -> yolo. The cycle hands the classifier's
+	// authority to the blunt instrument, which it now owns.
+	if m.autoModeCached() && m.cycleAuto {
+		m.setAutoMode(false)
+		m.cycleAuto = false
+		if !m.com.Workspace.PermissionSkipRequests() {
+			m.toggleYoloMode()
+			m.cycleYolo = true
+		}
+		return util.CmdHandler(util.InfoMsg{Type: util.InfoTypeYolo, Msg: yoloModeBannerMsg})
 	}
 	return m.setInputMode(uiInputModePlan)
 }
@@ -4698,6 +4724,7 @@ func (m *UI) switchPlanToYolo() tea.Cmd {
 const (
 	planModeBannerMsg = "Plan with Crush before generating any code."
 	yoloModeBannerMsg = "Skip permission prompts. System level commands will be blocked."
+	autoModeBannerMsg = "A classifier reviews each action: safe ones run, risky ones still ask."
 )
 
 func (m *UI) setInputMode(target uiInputMode) tea.Cmd {
@@ -4747,6 +4774,10 @@ func (m *UI) applyModeSwitch(msg modeSwitchedMsg) []tea.Cmd {
 		cmds = append(cmds, util.CmdHandler(util.InfoMsg{Type: util.InfoTypePlan, Msg: planModeBannerMsg}))
 	case msg.yolo:
 		cmds = append(cmds, util.CmdHandler(util.InfoMsg{Type: util.InfoTypeYolo, Msg: yoloModeBannerMsg}))
+	case m.autoModeCached():
+		// Leaving plan into the coder with auto engaged deserves the same
+		// banner as any other entry into auto mode.
+		cmds = append(cmds, util.CmdHandler(util.InfoMsg{Type: util.InfoTypeAuto, Msg: autoModeBannerMsg}))
 	default:
 		cmds = append(cmds, util.ReportInfo("input mode: code"))
 	}

@@ -35,7 +35,7 @@ func TestStatusDrawExpandedHelpRowsAlignWithBadge(t *testing.T) {
 	st.helpKm = u
 	st.SetWidth(100)
 	st.ToggleHelp()
-	st.SetMode(uiInputModePlan, false)
+	st.SetMode(uiInputModePlan, false, false)
 
 	lines := drawStatusLines(t, st, 100, 6)
 	require.True(t, strings.HasPrefix(lines[0], strings.Repeat(" ", badgeLeftInset)+" "+"PLAN MODE"),
@@ -63,7 +63,7 @@ func TestStatusDrawExpandedHelpRowsAlignWithoutBadge(t *testing.T) {
 	st.helpKm = u
 	st.SetWidth(100)
 	st.ToggleHelp()
-	st.SetMode(uiInputModeCode, false)
+	st.SetMode(uiInputModeCode, false, false)
 
 	lines := drawStatusLines(t, st, 100, 6)
 	wantCol := u.com.Styles.Status.Help.GetPaddingLeft()

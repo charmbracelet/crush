@@ -337,6 +337,9 @@ func (m *UI) toggleAutoMode() bool {
 	m.autoCache.set(auto)
 	m.busyFetchGen++
 	m.setEditorPrompt(m.yoloModeCached())
+	// Any explicit toggle hands auto-mode ownership back to the user;
+	// the Shift+Tab cycle re-claims it right after its own call.
+	m.cycleAuto = false
 	return auto
 }
 
@@ -354,28 +357,6 @@ func (m *UI) setAutoMode(enabled bool) {
 	m.autoCache.set(enabled)
 	m.busyFetchGen++
 	m.setEditorPrompt(m.yoloModeCached())
-}
-
-// cyclePermissionMode cycles the permission mode through normal ->
-// auto -> yolo -> normal, mirroring the single-key mode cycle in other
-// agentic CLIs. Returns a human-readable description of the new mode.
-func (m *UI) cyclePermissionMode() string {
-	yolo := m.yoloModeCached()
-	auto := m.autoModeCached()
-	switch {
-	case !yolo && !auto:
-		m.setAutoMode(true)
-		return "Auto mode: classifier gates permission prompts"
-	case auto:
-		// Auto -> yolo.
-		m.setAutoMode(false)
-		m.toggleYoloMode()
-		return "Yolo mode: all permissions bypassed"
-	default:
-		// Yolo -> normal (disable both).
-		m.toggleYoloMode()
-		return "Permission prompts enabled"
-	}
 }
 
 // yoloModeCached reports the memoized permission-skip ("yolo") mode. Toggles

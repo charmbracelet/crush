@@ -602,12 +602,15 @@ type Styles struct {
 		// Mode badges shown before the help hints.
 		ModeBadgePlan lipgloss.Style
 		ModeBadgeYolo lipgloss.Style
+		ModeBadgeAuto lipgloss.Style
 
 		// Full-width banners shown when switching modes.
 		ModeBannerPlan      lipgloss.Style
 		ModeBannerPlanBadge lipgloss.Style
 		ModeBannerYolo      lipgloss.Style
 		ModeBannerYoloBadge lipgloss.Style
+		ModeBannerAuto      lipgloss.Style
+		ModeBannerAutoBadge lipgloss.Style
 
 		ErrorIndicator   lipgloss.Style
 		WarnIndicator    lipgloss.Style

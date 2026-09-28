@@ -130,6 +130,7 @@ type testWorkspace struct {
 	agentBusy         bool
 	runPrompts        []string
 	yolo              bool
+	auto              bool
 	runHidden         []bool
 	compactCalls      []bool
 }
@@ -155,6 +156,10 @@ func (w *testWorkspace) UpdateAgentModel(context.Context) error {
 func (w *testWorkspace) PermissionSkipRequests() bool { return w.yolo }
 
 func (w *testWorkspace) PermissionSetSkipRequests(skip bool) { w.yolo = skip }
+
+func (w *testWorkspace) PermissionAutoMode() bool { return w.auto }
+
+func (w *testWorkspace) PermissionSetAutoMode(enabled bool) { w.auto = enabled }
 
 func (w *testWorkspace) AgentIsReady() bool {
 	return w.agentReady
@@ -193,20 +198,45 @@ func TestToggleInputMode(t *testing.T) {
 	t.Parallel()
 	ui, ws := newPlanUI(t, "sess-1")
 	ui.mode = uiInputModeCode
+	// The Shift+Tab cycle walks code -> plan -> auto -> yolo -> code,
+	// treating auto mode as a first-class stop alongside plan and YOLO.
 	for _, want := range []struct {
 		mode    uiInputMode
 		yolo    bool
+		auto    bool
 		updates int
 	}{
-		{uiInputModePlan, false, 1},
-		{uiInputModeCode, true, 2},
-		{uiInputModeCode, false, 2},
+		{uiInputModePlan, false, false, 1},
+		{uiInputModeCode, false, true, 2},
+		{uiInputModeCode, true, false, 2},
+		{uiInputModeCode, false, false, 2},
 	} {
 		applyModeSwitchMsg(ui, ui.toggleInputMode())
 		require.Equal(t, want.mode, ui.mode)
 		require.Equal(t, want.yolo, ws.yolo)
+		require.Equal(t, want.auto, ws.auto)
 		require.Equal(t, want.updates, ws.updateCalls)
 	}
+}
+
+// Auto enabled by the user (Ctrl+Y, the command palette) must survive the
+// Shift+Tab cycle: the cycle only rotates code and plan around it rather than
+// toggling a permission state the user owns.
+func TestToggleInputModePreservesExplicitAuto(t *testing.T) {
+	t.Parallel()
+	u, ws := newPlanUI(t, "sess-1")
+	u.mode = uiInputModeCode
+	ws.auto = true
+	u.autoCache.set(true)
+
+	applyModeSwitchMsg(u, u.toggleInputMode())
+	require.Equal(t, uiInputModePlan, u.mode)
+	require.True(t, ws.auto)
+
+	applyModeSwitchMsg(u, u.toggleInputMode())
+	require.Equal(t, uiInputModeCode, u.mode)
+	require.True(t, ws.auto, "the cycle must not disable user-owned auto mode")
+	require.False(t, u.cycleAuto)
 }
 
 func newPlanUI(t *testing.T, sessionID string) (*UI, *testWorkspace) {

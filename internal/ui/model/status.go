@@ -31,6 +31,7 @@ type Status struct {
 	// inputMode and yolo drive the mode badge shown before the help hints.
 	inputMode uiInputMode
 	yolo      bool
+	auto      bool
 }
 
 // NewStatus creates a new status bar and help model.
@@ -53,10 +54,11 @@ func (s *Status) ClearInfoMsg() {
 	s.msg = util.InfoMsg{}
 }
 
-// SetMode sets the input mode and YOLO state used for the mode badge.
-func (s *Status) SetMode(mode uiInputMode, yolo bool) {
+// SetMode sets the input mode, YOLO, and auto state used for the mode badge.
+func (s *Status) SetMode(mode uiInputMode, yolo, auto bool) {
 	s.inputMode = mode
 	s.yolo = yolo
+	s.auto = auto
 }
 
 // modeBadge renders the badge for the current mode, or an empty string in
@@ -64,12 +66,15 @@ func (s *Status) SetMode(mode uiInputMode, yolo bool) {
 func (s *Status) modeBadge() string {
 	t := s.com.Styles
 	// Mirror the editor prompt precedence: planning wins over YOLO, which
-	// can be carried into plan mode.
+	// can be carried into plan mode, which in turn wins over auto.
 	if s.inputMode == uiInputModePlan {
 		return t.Status.ModeBadgePlan.String()
 	}
 	if s.yolo {
 		return t.Status.ModeBadgeYolo.String()
+	}
+	if s.auto {
+		return t.Status.ModeBadgeAuto.String()
 	}
 	return ""
 }
@@ -138,6 +143,10 @@ func (s *Status) Draw(scr uv.Screen, area uv.Rectangle) {
 	case util.InfoTypeYolo:
 		indStyle = s.com.Styles.Status.ModeBannerYoloBadge
 		msgStyle = s.com.Styles.Status.ModeBannerYolo
+		indInset = badgeLeftInset
+	case util.InfoTypeAuto:
+		indStyle = s.com.Styles.Status.ModeBannerAutoBadge
+		msgStyle = s.com.Styles.Status.ModeBannerAuto
 		indInset = badgeLeftInset
 	case util.InfoTypeError:
 		indStyle = s.com.Styles.Status.ErrorIndicator

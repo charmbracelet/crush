@@ -154,6 +154,11 @@ type ProviderConfig struct {
 	// the provider's whole catalog in that case: the API-key models in
 	// Models are not served by the subscription.
 	ChatGPTModels []catwalk.Model `json:"chatgpt_models,omitempty" jsonschema:"-"`
+
+	// GrokModels lists the models the Grok plan grants when the provider
+	// is authenticated with a Grok account. Like ChatGPTModels, it is
+	// the provider's whole catalog in that case.
+	GrokModels []catwalk.Model `json:"grok_models,omitempty" jsonschema:"-"`
 }
 
 // ToProvider converts the [ProviderConfig] to a [catwalk.Provider].
@@ -918,6 +923,11 @@ func (c *Config) GetModel(provider, model string) *catwalk.Model {
 			}
 		}
 		for _, m := range providerConfig.ChatGPTModels {
+			if m.ID == model {
+				return &m
+			}
+		}
+		for _, m := range providerConfig.GrokModels {
 			if m.ID == model {
 				return &m
 			}

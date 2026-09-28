@@ -1437,11 +1437,12 @@ func (c *coordinator) Model() Model {
 }
 
 func (c *coordinator) UpdateModels(ctx context.Context) error {
-	// A ChatGPT login without its model catalog — the fetch at login
-	// failed, or the credentials predate it — would leave the models
-	// dialog's ChatGPT section empty. Fill it in lazily; the guard makes
-	// this a no-op once the catalog exists.
+	// A ChatGPT or Grok login without its model catalog — the fetch at
+	// login failed, or the credentials predate it — would leave the
+	// models dialog's subscription section empty. Fill it in lazily; the
+	// guards make this a no-op once a catalog exists.
 	c.cfg.RefetchOpenAIChatGPTModels(ctx)
+	c.cfg.RefetchGrokModels(ctx)
 
 	agent, name := c.activeAgent()
 	return c.updateAgentModels(ctx, agent, name)

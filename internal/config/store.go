@@ -590,6 +590,7 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 				// replaces a previous Grok login, whose refreshes would
 				// otherwise overwrite the key again.
 				providerConfig.OAuthToken = nil
+				providerConfig.GrokModels = nil
 			}
 		}
 		if providerID == string(catwalk.InferenceProviderOpenAI) {
@@ -608,8 +609,12 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 			if err := s.RemoveConfigField(scope, fmt.Sprintf("providers.%s.oauth", providerID)); err != nil {
 				return err
 			}
+			if err := s.RemoveConfigField(scope, fmt.Sprintf("providers.%s.grok_models", providerID)); err != nil {
+				return err
+			}
 		}
 	case *oauth.Token:
+		isToken = true
 		// Hold the refresh lock across the write so a peer's in-flight
 		// token exchange cannot land on top of a credential the user just
 		// obtained interactively — which would silently invalidate the
@@ -635,7 +640,6 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 		setKeyOrToken = func() {
 			providerConfig.OAuthToken = v
 			if providerID == string(catwalk.InferenceProviderOpenAI) {
-				isToken = true
 				providerConfig.APIKey = ""
 				return
 			}
@@ -690,6 +694,11 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 	// dialog can offer it beside the API-key catalog.
 	if providerID == string(catwalk.InferenceProviderOpenAI) && isToken {
 		s.refetchOpenAIModels(context.Background(), scope)
+	}
+	// Same for a Grok account: fetch the model catalog the Grok plan
+	// grants and persist it.
+	if providerID == string(catwalk.InferenceProviderXAI) && isToken {
+		s.refetchGrokModels(context.Background(), scope)
 	}
 	return nil
 }
@@ -753,6 +762,67 @@ func (s *ConfigStore) RefetchOpenAIChatGPTModels(ctx context.Context) {
 		return
 	}
 	s.refetchOpenAIModels(ctx, ScopeGlobal)
+}
+
+// fetchGrokModels fetches the Grok model catalog from the xAI API. A
+// package variable so tests can stub the network call, matching how the
+// catwalk and hyper syncers are swappable globals.
+var fetchGrokModels = grok.Models
+
+// refetchGrokModels stores the model catalog the Grok plan grants next
+// to the provider's API-key models. Best effort: a failure leaves the
+// existing catalog in place and the login still succeeds.
+func (s *ConfigStore) refetchGrokModels(ctx context.Context, scope Scope) {
+	const providerID = string(catwalk.InferenceProviderXAI)
+	pc, ok := s.Config().Providers.Get(providerID)
+	if !ok || pc.OAuthToken == nil {
+		return
+	}
+	// The access token may have expired since login, so renew it before
+	// asking for the catalog: the models endpoint rejects stale tokens
+	// with a 401. A failed refresh falls through and lets the fetch run
+	// on the old token, which keeps the existing catalog in place.
+	if pc.OAuthToken.IsExpired() {
+		if err := s.RefreshOAuthToken(ctx, scope, providerID); err != nil {
+			slog.Warn("Failed to refresh the Grok token before fetching the model catalog", "error", err)
+		}
+		if refreshed, ok := s.Config().Providers.Get(providerID); ok && refreshed.OAuthToken != nil {
+			pc = refreshed
+		}
+	}
+	models, err := fetchGrokModels(ctx, pc.OAuthToken)
+	if err != nil {
+		slog.Warn("Failed to fetch Grok model catalog after auth", "error", err)
+		return
+	}
+	if err := s.update(scope, func(c *Config) map[string]any {
+		p, ok := c.Providers.Get(providerID)
+		if !ok {
+			return nil
+		}
+		p.GrokModels = models
+		c.Providers.Set(providerID, p)
+		return map[string]any{
+			"providers.xai.grok_models": models,
+		}
+	}); err != nil {
+		slog.Warn("Failed to persist Grok model catalog", "error", err)
+	}
+}
+
+// RefetchGrokModels fills in the Grok model catalog when the xAI
+// provider is signed in but has none — because the fetch at login time
+// failed, or the credentials predate the catalog. A no-op once the
+// catalog exists, so callers can invoke it freely on model updates: an
+// existing catalog is refreshed at startup instead, when Catwalk
+// delivers a new one (see Load).
+func (s *ConfigStore) RefetchGrokModels(ctx context.Context) {
+	cfg := s.Config()
+	pc, ok := cfg.Providers.Get(string(catwalk.InferenceProviderXAI))
+	if !ok || pc.OAuthToken == nil || len(pc.GrokModels) > 0 {
+		return
+	}
+	s.refetchGrokModels(ctx, ScopeGlobal)
 }
 
 // RefreshOAuthToken refreshes the OAuth token for the given provider.

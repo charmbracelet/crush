@@ -174,11 +174,12 @@ func logoutOpenAI(c *client.Client, wsID string) error {
 func logoutXAI(c *client.Client, wsID string) error {
 	ctx := getLogoutContext()
 
-	// Logout clears both stored xAI credentials: the OAuth token and the
-	// API key, which mirrors the OAuth access token when the sign-in
-	// wrote it.
+	// Logout clears both stored xAI credentials: the OAuth token, its
+	// model catalog, and the API key, which mirrors the OAuth access
+	// token when the sign-in wrote it.
 	if err := cmp.Or(
 		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers.xai.oauth"),
+		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers.xai.grok_models"),
 		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers.xai.api_key"),
 	); err != nil {
 		return err

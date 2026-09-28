@@ -367,11 +367,16 @@ func TestCrushLogs_OversizedLines(t *testing.T) {
 func TestCrushLogs_ScanBackPastOversizedLine(t *testing.T) {
 	t.Parallel()
 	// The big entry is longer than maxLogLineSize by more than one 8KB
-	// chunk, so the reader must scan back to its start. The entries
-	// before it cross chunk boundaries too.
+	// chunk, so the reader must scan back to its start. Padded entries
+	// before it cross chunk boundaries, and the short ones share the
+	// chunk where the big entry starts.
 	var entries []map[string]any
-	for i := range 3 {
-		entries = append(entries, makeLogEntry("INFO", fmt.Sprintf("Before %d", i), "app.go", i, map[string]any{"pad": strings.Repeat("x", 5000)}))
+	for i := range 6 {
+		pad := "short"
+		if i < 3 {
+			pad = strings.Repeat("x", 5000)
+		}
+		entries = append(entries, makeLogEntry("INFO", fmt.Sprintf("Before %d", i), "app.go", i, map[string]any{"pad": pad}))
 	}
 	entries = append(entries, makeLogEntry("INFO", "Big message", "big.go", 1, map[string]any{"data": strings.Repeat("x", maxLogLineSize+20000)}))
 	entries = append(entries, makeLogEntry("INFO", "After", "app.go", 3, nil))
@@ -381,11 +386,11 @@ func TestCrushLogs_ScanBackPastOversizedLine(t *testing.T) {
 	result := runCrushLogs(logFile, CrushLogsParams{Lines: 10})
 
 	lines := strings.Split(result, "\n")
-	require.Len(t, lines, 4)
-	for i := range 3 {
+	require.Len(t, lines, 7)
+	for i := range 6 {
 		require.Contains(t, lines[i], fmt.Sprintf("Before %d pad=", i))
 	}
-	require.Contains(t, lines[3], "After")
+	require.Contains(t, lines[6], "After")
 }
 
 func TestCrushLogs_PartialTrailingLine(t *testing.T) {

@@ -785,9 +785,10 @@ func (s *ConfigStore) refetchOpenAIModels(ctx context.Context, scope Scope) {
 // the fetch at sign-in did not happen or failed.
 //
 // The provider always resolves *some* models, because it is registered with a
-// small built-in list; checking whether a catalog was ever persisted is what
-// distinguishes "this account's list" from that placeholder, and getting it
-// wrong would mean hammering the endpoint on every model refresh.
+// small built-in list; what distinguishes "this account's list" from that
+// placeholder is a non-empty catalog persisted at sign-in. Getting this wrong
+// would mean hammering the endpoint on every model refresh, so the on-disk
+// config is consulted through HasConfigField rather than in-memory state alone.
 func (s *ConfigStore) RefetchGeminiSubscriptionModels(ctx context.Context) {
 	cfg := s.Config()
 	pc, ok := cfg.Providers.Get(antigravity.ProviderID)
@@ -795,15 +796,8 @@ func (s *ConfigStore) RefetchGeminiSubscriptionModels(ctx context.Context) {
 		return
 	}
 
-	path, err := s.configPath(ScopeGlobal)
-	if err != nil {
-		return
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return
-	}
-	if models := gjson.Get(string(data), "providers."+antigravity.ProviderID+".models"); models.Exists() && models.IsArray() && len(models.Array()) > 0 {
+	modelsKey := "providers." + antigravity.ProviderID + ".models"
+	if len(pc.Models) > 0 && s.HasConfigField(ScopeGlobal, modelsKey) {
 		return
 	}
 

@@ -999,3 +999,36 @@ func TestClientWorkspace_RecoveryCreateIsBounded(t *testing.T) {
 		t.Fatal("recoverWorkspace blocked on an unresponsive server")
 	}
 }
+
+// TestClientWorkspace_GitBranch verifies that GitBranch fetches the
+// branch from the server without blocking the caller, caches the
+// result, and only re-fetches after the refresh interval expires.
+func TestClientWorkspace_GitBranch(t *testing.T) {
+	t.Parallel()
+
+	var hits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/v1/workspaces/ws-1/git/branch", r.URL.Path)
+		hits.Add(1)
+		require.NoError(t, json.NewEncoder(w).Encode(proto.GitBranchResponse{Branch: "feature/x"}))
+	}))
+	defer srv.Close()
+
+	u, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	c, err := client.NewClient(t.TempDir(), "tcp", u.Host)
+	require.NoError(t, err)
+
+	ws := NewClientWorkspace(c, proto.Workspace{ID: "ws-1"})
+	t.Cleanup(ws.Shutdown)
+
+	require.Empty(t, ws.GitBranch(), "first call must not block on the network")
+	require.Eventually(t, func() bool {
+		return ws.GitBranch() == "feature/x"
+	}, 2*time.Second, 10*time.Millisecond, "background fetch must populate the cache")
+
+	for range 10 {
+		require.Equal(t, "feature/x", ws.GitBranch())
+	}
+	require.Equal(t, int64(1), hits.Load(), "cached value must not re-hit the server within the TTL")
+}

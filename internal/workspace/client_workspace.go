@@ -66,6 +66,14 @@ type ClientWorkspace struct {
 	// herdrClient reports agent state to herdr when running inside
 	// a herdr-managed pane. Nil when not in a herdr environment.
 	herdrClient *herdr.Client
+
+	// branchMu guards the cached git branch state below. GitBranch is
+	// called during TUI renders, so it never blocks on the network;
+	// stale values are refreshed by a background goroutine instead.
+	branchMu    sync.Mutex
+	branch      string
+	branchRead  time.Time
+	branchFetch bool
 }
 
 // SSE reconnect backoff bounds for the workspace event stream. Declared
@@ -539,11 +547,43 @@ func (w *ClientWorkspace) WorkingDir() string {
 	return w.cached().Path
 }
 
-// GitBranch always returns an empty string. In client/server mode the
-// workspace may live on a remote machine, and the server does not currently
-// expose git metadata, so the branch cannot be resolved on the client side.
+// gitBranchRefreshInterval mirrors gitutil's server-side cache TTL so
+// the client does not poll faster than the server can produce fresh
+// values.
+const gitBranchRefreshInterval = 5 * time.Second
+
+// GitBranch returns the workspace's current Git branch as reported by
+// the server. The value is cached locally and refreshed in the
+// background at most once every gitBranchRefreshInterval, so render
+// paths never block on the network. It returns an empty string until
+// the first fetch completes, when the workspace is not a Git
+// repository, or when HEAD is detached.
 func (w *ClientWorkspace) GitBranch() string {
-	return ""
+	w.branchMu.Lock()
+	defer w.branchMu.Unlock()
+	if time.Since(w.branchRead) >= gitBranchRefreshInterval && !w.branchFetch {
+		w.branchFetch = true
+		go w.fetchGitBranch()
+	}
+	return w.branch
+}
+
+// fetchGitBranch retrieves the branch from the server and updates the
+// local cache. Errors keep the previous value and only postpone the
+// next attempt so a flaky connection does not cause a request storm.
+func (w *ClientWorkspace) fetchGitBranch() {
+	ctx, cancel := context.WithTimeout(w.subCtx, gitBranchRefreshInterval)
+	defer cancel()
+	branch, err := w.client.GitBranch(ctx, w.workspaceID())
+
+	w.branchMu.Lock()
+	defer w.branchMu.Unlock()
+	w.branchFetch = false
+	w.branchRead = time.Now()
+	if err != nil {
+		return
+	}
+	w.branch = branch
 }
 
 func (w *ClientWorkspace) Resolver() config.VariableResolver {

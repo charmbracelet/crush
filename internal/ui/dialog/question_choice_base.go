@@ -45,6 +45,8 @@ type choiceList struct {
 	scrollOffset     int // lines scrolled past the top of the viewport
 	focused          bool
 	lastWidth        int
+	widthMethod      ansi.Method // active screen width method from the last draw
+	widthMethodSet   bool
 	choiceCompositor *lipgloss.Compositor
 	suppressScroll   bool // skip scroll clamping after mouse click
 	wheelActive      bool // wheel-scroll mode: skip cursor snap until next keyboard nav
@@ -243,20 +245,53 @@ func newContentLine(text string) contentLine {
 	return contentLine{text: text, choiceIdx: -1}
 }
 
+// screenWidthMethod returns the active screen width method, defaulting
+// to GraphemeWidth when the screen doesn't report an ansi.Method.
+func screenWidthMethod(scr uv.Screen) ansi.Method {
+	if m, ok := scr.WidthMethod().(ansi.Method); ok {
+		return m
+	}
+	return ansi.GraphemeWidth
+}
+
+// layoutWidthMethod returns the width method to use for layout. When no
+// screen draw has happened yet, default to GraphemeWidth.
+func layoutWidthMethod(set bool, method ansi.Method) ansi.Method {
+	if !set {
+		return ansi.GraphemeWidth
+	}
+	return method
+}
+
+// wrapAt wraps text using the given width method so layout matches
+// uv.StyledString.Draw on a screen using the same method.
+func wrapAt(text string, width int, breakpoints string, method ansi.Method) string {
+	if method == ansi.WcWidth {
+		return ansi.WrapWc(text, width, breakpoints)
+	}
+	return ansi.Wrap(text, width, breakpoints)
+}
+
 // sectionHeight returns the visual line count of a text block
-// wrapped at width.
+// wrapped at width under GraphemeWidth.
 func sectionHeight(text string, width int) int {
+	return sectionHeightAt(text, width, ansi.GraphemeWidth)
+}
+
+// sectionHeightAt returns the visual line count of a text block
+// wrapped at width using the given width method.
+func sectionHeightAt(text string, width int, method ansi.Method) int {
 	if text == "" {
 		return 0
 	}
-	return strings.Count(ansi.Wrap(text, width, ""), "\n") + 1
+	return strings.Count(wrapAt(text, width, "", method), "\n") + 1
 }
 
 // wrapIndent wraps text at width and prefixes every continuation
 // line with indent so multi-line content aligns under the first
 // line's content rather than flush left.
-func wrapIndent(text string, width int, indent string) string {
-	wrapped := ansi.Wrap(text, width, "")
+func wrapIndent(text string, width int, indent string, method ansi.Method) string {
+	wrapped := wrapAt(text, width, "", method)
 	lines := strings.Split(wrapped, "\n")
 	for i := 1; i < len(lines); i++ {
 		lines[i] = indent + lines[i]
@@ -307,7 +342,8 @@ func (c *choiceList) buildLines(innerWidth int, fillInPrefix string, itemFn choi
 	icon := c.iconPrompt()
 	iconWidth := lipgloss.Width(icon)
 	qIndent := strings.Repeat(" ", iconWidth)
-	push(icon + c.Styles.Editor.QuestionUnselected.Render(wrapIndent(c.Request.Text, innerWidth-iconWidth, qIndent)))
+	method := layoutWidthMethod(c.widthMethodSet, c.widthMethod)
+	push(icon + c.Styles.Editor.QuestionUnselected.Render(wrapIndent(c.Request.Text, innerWidth-iconWidth, qIndent, method)))
 	push("")
 
 	// Optional markdown description + blank separator.
@@ -336,7 +372,7 @@ func (c *choiceList) buildLines(innerWidth int, fillInPrefix string, itemFn choi
 		}
 
 		if ch.Description != "" {
-			descContent := bodyStyle.Render(wrapIndent(ch.Description, innerWidth-lipgloss.Width(bar), ""))
+			descContent := bodyStyle.Render(wrapIndent(ch.Description, innerWidth-lipgloss.Width(bar), "", method))
 			for j, ln := range strings.Split(descContent, "\n") {
 				b := bar
 				if j > 0 && !active {
@@ -468,6 +504,8 @@ func (c *choiceList) iconPrompt() string {
 // hardware cursor position, or nil.
 func (c *choiceList) drawContent(scr uv.Screen, area uv.Rectangle, fillInPrefix string, itemFn choiceItemRenderer) *tea.Cursor {
 	c.lastWidth = area.Dx()
+	c.widthMethod = screenWidthMethod(scr)
+	c.widthMethodSet = true
 	viewport := area.Dy()
 
 	// Build lines at the wide width first (matching height(),

@@ -226,6 +226,7 @@ func (d *MultiChoice) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		checkWidth := lipgloss.Width(check)
 		barWidth := 2 // "┃ " or "  ", applied by buildLines
 		labelIndent := strings.Repeat(" ", checkWidth)
-		return check + style.Render(wrapIndent(ch.Label, innerWidth-barWidth-checkWidth, labelIndent))
+		method := layoutWidthMethod(d.widthMethodSet, d.widthMethod)
+		return check + style.Render(wrapIndent(ch.Label, innerWidth-barWidth-checkWidth, labelIndent, method))
 	})
 }

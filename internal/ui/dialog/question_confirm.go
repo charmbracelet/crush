@@ -37,12 +37,14 @@ type ConfirmComponent struct {
 	keyUp    key.Binding
 	keyDown  key.Binding
 
-	focused      bool
-	lastWidth    int
-	scrollOffset int
-	compositor   *lipgloss.Compositor
-	hoverX       int
-	hoverY       int
+	focused            bool
+	lastWidth          int
+	lastWidthMethod    ansi.Method
+	lastWidthMethodSet bool
+	scrollOffset       int
+	compositor         *lipgloss.Compositor
+	hoverX             int
+	hoverY             int
 
 	// OnConfirm is called when the user confirms.
 	OnConfirm func()
@@ -148,8 +150,9 @@ func (c *ConfirmComponent) Height(width int) int {
 		w = choiceListMaxWidth
 	}
 	iconPrompt := questionIconPrompt(c.Styles, c.focused)
-	h := sectionHeight(c.Title, w-lipgloss.Width(iconPrompt)) // title
-	h++                                                       // blank
+	method := layoutWidthMethod(c.lastWidthMethodSet, c.lastWidthMethod)
+	h := sectionHeightAt(c.Title, w-lipgloss.Width(iconPrompt), method) // title
+	h++                                                                 // blank
 	if c.Description != "" {
 		r := common.MarkdownRenderer(c.Styles, w)
 		mu := common.LockMarkdownRenderer(r)
@@ -160,7 +163,7 @@ func (c *ConfirmComponent) Height(width int) int {
 			out = strings.TrimSuffix(out, "\n")
 			h += strings.Count(out, "\n") + 1
 		} else {
-			h += sectionHeight(c.Description, w)
+			h += sectionHeightAt(c.Description, w, method)
 		}
 		h++ // blank
 	}
@@ -178,6 +181,9 @@ func (c *ConfirmComponent) Height(width int) int {
 // Draw renders the confirmation content with scroll support.
 func (c *ConfirmComponent) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	c.lastWidth = area.Dx()
+	c.lastWidthMethod = screenWidthMethod(scr)
+	c.lastWidthMethodSet = true
+	method := c.lastWidthMethod
 	viewport := area.Dy()
 
 	// Build all content lines into a virtual buffer.
@@ -191,7 +197,7 @@ func (c *ConfirmComponent) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	iconWidth := lipgloss.Width(iconPrompt)
 
 	// Title.
-	titleWrapped := ansi.Wrap(c.Title, area.Dx()-iconWidth, "")
+	titleWrapped := wrapAt(c.Title, area.Dx()-iconWidth, "", method)
 	for _, l := range strings.Split(titleWrapped, "\n") {
 		lines = append(lines, line{text: iconPrompt + c.Styles.Editor.QuestionUnselected.Render(l)})
 	}

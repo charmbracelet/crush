@@ -731,6 +731,10 @@
           "$ref": "#/$defs/Token",
           "description": "OAuth2 token for authentication with the provider"
         },
+        "oauth_client_secret": {
+          "type": "string",
+          "description": "OAuth client secret for login-based providers such as the Google AI subscription"
+        },
         "disable": {
           "type": "boolean",
           "description": "Whether this provider is disabled",

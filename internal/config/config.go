@@ -112,7 +112,7 @@ type ProviderConfig struct {
 	// it, and the value is not shipped in the binary. Unlike api_key this is
 	// taken literally, never shell-expanded, so that a secret containing $
 	// survives.
-	OAuthClientSecret string `json:"oauth_client_secret,omitempty" jsonschema:"description=OAuth client secret required by a login-based provider, such as the Google AI subscription. Read literally, unlike api_key it is never shell-expanded; CRUSH_ANTIGRAVITY_CLIENT_SECRET is used when unset"`
+	OAuthClientSecret string `json:"oauth_client_secret,omitempty" jsonschema:"description=OAuth client secret for login-based providers such as the Google AI subscription"`
 	// Marks the provider as disabled.
 	Disable bool `json:"disable,omitempty" jsonschema:"description=Whether this provider is disabled,default=false"`
 

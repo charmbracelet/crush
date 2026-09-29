@@ -314,7 +314,7 @@ func chatGPTLoginToken() *oauth.Token {
 	}
 }
 
-// newCatwalkStub serves the given response for /v2/providers so Load's
+// newCatwalkStub serves the given response for /v3/providers so Load's
 // catalog fetch can be driven without the network. CATWALK_URL and
 // HYPER_URL are pointed at the stub: Hyper fails fast against it instead
 // of reaching the real service.
@@ -325,7 +325,7 @@ func newCatwalkStub(t *testing.T, status int, catalog []catwalk.Provider) {
 	require.NoError(t, err)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v2/providers" && status == http.StatusOK {
+		if r.URL.Path == "/v3/providers" && status == http.StatusOK {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write(catalogJSON)
 			return

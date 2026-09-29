@@ -189,7 +189,7 @@ func Providers(cfg *Config, opts ...HyperTokenRefresher) ([]catwalk.Provider, er
 			// providers at all over a transient disk or network problem.
 			items, err := catwalkSyncer.Get(ctx)
 			if err != nil {
-				catwalkURL := fmt.Sprintf("%s/v2/providers", cmp.Or(os.Getenv("CATWALK_URL"), defaultCatwalkURL))
+				catwalkURL := fmt.Sprintf("%s/v3/providers", cmp.Or(os.Getenv("CATWALK_URL"), defaultCatwalkURL))
 				catwalkErr = fmt.Errorf("Crush was unable to fetch an updated list of providers from %s. Consider setting CRUSH_DISABLE_PROVIDER_AUTO_UPDATE=1 to use the embedded providers bundled at the time of this Crush release. You can also update providers manually. For more info see crush update-providers --help.\n\nCause: %w", catwalkURL, err) //nolint:staticcheck
 			}
 			providers.Append(items...)

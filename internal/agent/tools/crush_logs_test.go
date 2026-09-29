@@ -145,6 +145,28 @@ func TestCrushLogs_EntriesAcrossChunkBoundaries(t *testing.T) {
 	}
 }
 
+func TestCrushLogs_LinesAlignedToChunks(t *testing.T) {
+	t.Parallel()
+	// Each line is 512 bytes with its newline, so every 8KB chunk starts
+	// at the start of a line and the carried first line is complete.
+	var b strings.Builder
+	for i := range 40 {
+		line := fmt.Sprintf(`{"msg":"Entry %02d","pad":"%s"}`, i, strings.Repeat("x", 484))
+		require.Len(t, line, 511)
+		b.WriteString(line + "\n")
+	}
+	logFile := filepath.Join(t.TempDir(), "crush.log")
+	require.NoError(t, os.WriteFile(logFile, []byte(b.String()), 0o644))
+
+	result := runCrushLogs(logFile, CrushLogsParams{Lines: 40})
+
+	lines := strings.Split(result, "\n")
+	require.Len(t, lines, 40)
+	for i, line := range lines {
+		require.Contains(t, line, fmt.Sprintf("Entry %02d ", i))
+	}
+}
+
 func TestCrushLogs_MissingFile(t *testing.T) {
 	t.Parallel()
 	result := runCrushLogs("/nonexistent/path/crush.log", CrushLogsParams{Lines: 50})

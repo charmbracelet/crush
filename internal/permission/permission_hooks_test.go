@@ -262,7 +262,7 @@ func TestPermissionService_EscalationNote(t *testing.T) {
 
 	t.Run("granted escalation leaves a note for the tool", func(t *testing.T) {
 		t.Parallel()
-		service := NewPermissionService("/tmp", false, nil)
+		service := NewPermissionService("/tmp", false, nil, nil)
 
 		events := service.Subscribe(t.Context())
 		var (
@@ -293,7 +293,7 @@ func TestPermissionService_EscalationNote(t *testing.T) {
 
 	t.Run("automatic grants leave no note", func(t *testing.T) {
 		t.Parallel()
-		service := NewPermissionService("/tmp", false, []string{"bash"})
+		service := NewPermissionService("/tmp", false, []string{"bash"}, nil)
 
 		granted, err := service.Request(t.Context(), CreatePermissionRequest{
 			SessionID:  "s1",
@@ -309,7 +309,7 @@ func TestPermissionService_EscalationNote(t *testing.T) {
 
 	t.Run("denied escalation leaves no note", func(t *testing.T) {
 		t.Parallel()
-		service := NewPermissionService("/tmp", false, nil)
+		service := NewPermissionService("/tmp", false, nil, nil)
 
 		events := service.Subscribe(t.Context())
 		var wg sync.WaitGroup

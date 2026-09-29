@@ -50,7 +50,7 @@ func TestAutoModeToggleReachesNativeClassifier(t *testing.T) {
 	}
 
 	newSvc := func(autoEnabled bool) (permission.Service, <-chan pubsub.Event[permission.PermissionRequest]) {
-		svc := permission.NewPermissionService("/work", false, nil)
+		svc := permission.NewPermissionService("/work", false, nil, nil)
 		svc.SetPermissionHooks(compositeHooks{
 			primary:   automode.New(automode.Options{}),
 			secondary: stubHooks{},

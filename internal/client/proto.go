@@ -15,6 +15,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
@@ -788,6 +789,42 @@ func (c *Client) GetPermissionsAutoMode(ctx context.Context, id string) (bool, e
 		return false, fmt.Errorf("failed to decode permissions auto mode: %w", err)
 	}
 	return req.Enabled, nil
+}
+
+// SetPermissionsLevel sets the approval level for a workspace: how far it
+// may go without asking a human. Which agent serves the turn is a separate
+// axis and is left alone.
+func (c *Client) SetPermissionsLevel(ctx context.Context, id string, level permission.Level) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/permissions/level", id), nil, jsonBody(proto.PermissionLevelRequest{Level: level.String()}), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return fmt.Errorf("failed to set permissions level: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to set permissions level: status code %d", rsp.StatusCode)
+	}
+	return nil
+}
+
+// GetPermissionsLevel retrieves the approval level in effect for a workspace.
+func (c *Client) GetPermissionsLevel(ctx context.Context, id string) (permission.Level, error) {
+	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/permissions/level", id), nil, nil)
+	if err != nil {
+		return permission.LevelPrompt, fmt.Errorf("failed to get permissions level: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return permission.LevelPrompt, fmt.Errorf("failed to get permissions level: status code %d", rsp.StatusCode)
+	}
+	var req proto.PermissionLevelRequest
+	if err := json.NewDecoder(rsp.Body).Decode(&req); err != nil {
+		return permission.LevelPrompt, fmt.Errorf("failed to decode permissions level: %w", err)
+	}
+	level, ok := permission.ParseLevel(req.Level)
+	if !ok {
+		return permission.LevelPrompt, fmt.Errorf("unknown permissions level %q from server", req.Level)
+	}
+	return level, nil
 }
 
 // GetPermissionsSkipRequests retrieves the skip-requests flag for a workspace.

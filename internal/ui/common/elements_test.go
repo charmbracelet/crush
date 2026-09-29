@@ -33,3 +33,17 @@ func TestFormatTokensAndCostOmitsEstimatedPrefix(t *testing.T) {
 	require.Contains(t, actual, "12%")
 	require.NotContains(t, actual, "~12%")
 }
+
+func TestFormatTokensAndCostWarnsWhenContextNearlyFull(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+
+	full := formatTokensAndCost(&sty, 850, 1000, 0, false)
+	roomy := formatTokensAndCost(&sty, 120, 1000, 0, false)
+
+	// The warning is colour only, so the text itself gains nothing.
+	require.Equal(t, "85% (850) $0.00", ansi.Strip(full))
+	require.Contains(t, full, sty.ModelInfo.TokenPercentageWarn.Render("85%"))
+	require.Contains(t, roomy, sty.ModelInfo.TokenPercentage.Render("12%"))
+}

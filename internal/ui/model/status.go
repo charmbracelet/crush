@@ -7,6 +7,8 @@ import (
 	"charm.land/bubbles/v2/help"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/util"
 	uv "github.com/charmbracelet/ultraviolet"
@@ -31,10 +33,11 @@ type Status struct {
 	// msgSeq identifies the message on screen; expiry timers carry it.
 	msgSeq uint64
 
-	// inputMode and yolo drive the mode badge shown before the help hints.
-	inputMode uiInputMode
-	yolo      bool
-	auto      bool
+	// purpose and level drive the mode badges shown before the help hints.
+	// They are independent axes, so both render when both are noteworthy:
+	// "[PLANNING] [AUTO MODE]".
+	purpose string
+	level   permission.Level
 }
 
 // NewStatus creates a new status bar and help model.
@@ -69,29 +72,38 @@ func (s *Status) ClearInfoMsg(seq uint64) {
 	}
 }
 
-// SetMode sets the input mode, YOLO, and auto state used for the mode badge.
-func (s *Status) SetMode(mode uiInputMode, yolo, auto bool) {
-	s.inputMode = mode
-	s.yolo = yolo
-	s.auto = auto
+// Dismiss removes the message on screen without knowing its sequence number,
+// for the case where an outcome arrives before the message's own timer. The
+// counter is bumped so a timer already in flight for the dismissed message
+// fails to match, rather than later clearing whatever replaced it.
+func (s *Status) Dismiss() {
+	s.msg = util.InfoMsg{}
+	s.msgSeq++
 }
 
-// modeBadge renders the badge for the current mode, or an empty string in
-// the default coding mode.
+// SetMode records the two axes the badges render: which agent serves the
+// turn, and how far it may go without asking.
+func (s *Status) SetMode(purpose string, level permission.Level) {
+	s.purpose = purpose
+	s.level = level
+}
+
+// modeBadge renders one badge per non-default axis. The standard purpose and
+// the ask-every-time level are the defaults, so an ordinary session shows
+// nothing.
 func (s *Status) modeBadge() string {
 	t := s.com.Styles
-	// Mirror the editor prompt precedence: planning wins over YOLO, which
-	// can be carried into plan mode, which in turn wins over auto.
-	if s.inputMode == uiInputModePlan {
-		return t.Status.ModeBadgePlan.String()
+	var badges []string
+	if s.purpose == config.AgentPlan {
+		badges = append(badges, t.Status.ModeBadgePlan.String())
 	}
-	if s.yolo {
-		return t.Status.ModeBadgeYolo.String()
+	switch s.level {
+	case permission.LevelBypass:
+		badges = append(badges, t.Status.ModeBadgeYolo.String())
+	case permission.LevelAuto:
+		badges = append(badges, t.Status.ModeBadgeAuto.String())
 	}
-	if s.auto {
-		return t.Status.ModeBadgeAuto.String()
-	}
-	return ""
+	return strings.Join(badges, " ")
 }
 
 // SetWidth sets the width of the status bar and help view.

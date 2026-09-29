@@ -77,15 +77,18 @@ type KeyMap struct {
 	}
 
 	// Global key maps
-	Quit       key.Binding
-	Help       key.Binding
-	Commands   key.Binding
-	Models     key.Binding
-	Suspend    key.Binding
-	Sessions   key.Binding
-	Tab        key.Binding
-	ToggleYolo key.Binding
-	ShiftTab   key.Binding
+	Quit     key.Binding
+	Help     key.Binding
+	Commands key.Binding
+	Models   key.Binding
+	Suspend  key.Binding
+	Sessions key.Binding
+	Tab      key.Binding
+	// CyclePermissionLevel walks the permission axis (ask → auto → bypass).
+	// It is independent from ShiftTab, which walks which agent serves the
+	// turn.
+	CyclePermissionLevel key.Binding
+	ShiftTab             key.Binding
 }
 
 func DefaultKeyMap() KeyMap {
@@ -118,13 +121,13 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("tab"),
 			key.WithHelp("tab", "change focus"),
 		),
-		ToggleYolo: key.NewBinding(
+		CyclePermissionLevel: key.NewBinding(
 			key.WithKeys("ctrl+y"),
-			key.WithHelp("ctrl+y", "toggle yolo"),
+			key.WithHelp("ctrl+y", "cycle permissions"),
 		),
 		ShiftTab: key.NewBinding(
 			key.WithKeys("shift+tab"),
-			key.WithHelp("shift+tab", "cycle mode (plan/auto/yolo)"),
+			key.WithHelp("shift+tab", "cycle mode"),
 		),
 	}
 

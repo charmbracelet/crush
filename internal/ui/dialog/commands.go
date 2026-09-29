@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -29,6 +30,33 @@ func (c CommandType) String() string { return []string{"System", "User", "MCP"}[
 const (
 	sidebarCompactModeBreakpoint = 120
 )
+
+// permissionLevelEntries lists the permission axis in the order Ctrl+Y
+// cycles it. The levels themselves belong to the permission service; this is
+// only the palette's wording.
+var permissionLevelEntries = []struct {
+	id    string
+	level permission.Level
+	label string
+}{
+	{"permissions_ask", permission.LevelPrompt, "Permissions: ask before acting"},
+	{"permissions_auto", permission.LevelAuto, "Permissions: auto (classifier decides)"},
+	{"permissions_bypass", permission.LevelBypass, "Permissions: never ask (yolo)"},
+}
+
+// PurposeLabel names an agent for display. An unknown id is reported
+// verbatim, so a purpose added upstream still reads sensibly before the TUI
+// has a word for it.
+func PurposeLabel(agentID string) string {
+	switch agentID {
+	case config.AgentCoder:
+		return "standard"
+	case config.AgentPlan:
+		return "planning"
+	default:
+		return agentID
+	}
+}
 
 const (
 	SystemCommands CommandType = iota
@@ -543,9 +571,35 @@ func (c *Commands) defaultCommands() []*CommandItem {
 
 	commands = append(
 		commands,
-		NewCommandItem(c.com.Styles, "toggle_yolo", "Toggle Yolo Mode", "ctrl+y", ActionToggleYoloMode{}),
-		NewCommandItem(c.com.Styles, "toggle_auto_mode", "Toggle Auto Mode", "", ActionToggleAutoMode{}),
 		NewCommandItem(c.com.Styles, "auto_mode_model", "Auto Mode Model", "", ActionOpenAutoModeModels{}),
+	)
+
+	// Permission axis: one entry per level with the current one marked, so
+	// the palette says where the axis stands instead of offering a blind
+	// toggle. Ctrl+Y walks this same order.
+	currentLevel := c.com.Workspace.PermissionLevel()
+	for _, entry := range permissionLevelEntries {
+		label := entry.label
+		if entry.level == currentLevel {
+			label += " (current)"
+		}
+		commands = append(commands, NewCommandItem(c.com.Styles, entry.id, label, "", ActionSetPermissionLevel{Level: entry.level}))
+	}
+
+	// Purpose axis: one entry per agent that can serve the main turn, read
+	// from the workspace so a purpose added upstream appears here without a
+	// TUI change.
+	currentPurpose := c.com.Workspace.AgentMainID()
+	for _, agentID := range c.com.Workspace.AgentMainCandidates() {
+		label := "Mode: " + PurposeLabel(agentID)
+		if agentID == currentPurpose {
+			label += " (current)"
+		}
+		commands = append(commands, NewCommandItem(c.com.Styles, "set_mode_"+agentID, label, "", ActionSetPurpose{AgentID: agentID}))
+	}
+
+	commands = append(
+		commands,
 		NewCommandItem(c.com.Styles, "toggle_help", "Toggle Help", "ctrl+g", ActionToggleHelp{}),
 		NewCommandItem(c.com.Styles, "init", "Initialize Project", "", ActionInitializeProject{}),
 	)

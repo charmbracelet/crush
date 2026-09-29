@@ -40,7 +40,7 @@ func PrettyPathWithBranch(t *styles.Styles, path, branch string, width int) stri
 func PrettyPathInline(t *styles.Styles, path, branch string, width int) string {
 	formatted := home.Short(path)
 	if branch != "" {
-		combined := styles.GitBranchIcon + " " + branch + " " + formatted
+		combined := styles.GitBranchIcon + " " + branch + " • " + formatted
 		formatted = ansi.Truncate(combined, width, "…")
 	}
 	return t.Sidebar.WorkingDir.Width(width).Render(formatted)

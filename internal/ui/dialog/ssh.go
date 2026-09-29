@@ -140,7 +140,7 @@ func (m *SSH) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	if m.confirm {
 		lines = append(lines, m.descriptionView(), "", m.hintView())
 	} else {
-		lines = append(lines, inputStyle.Render(m.input.View()), m.descriptionView())
+		lines = append(lines, inputStyle.Render(m.input.View()), "", m.descriptionView())
 	}
 	lines = append(lines, "", helpView)
 

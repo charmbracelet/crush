@@ -28,7 +28,7 @@ func PrettyPath(t *styles.Styles, path string, width int) string {
 func PrettyPathWithBranch(t *styles.Styles, path, branch string, width int) string {
 	formatted := home.Short(path)
 	if branch != "" {
-		branchLine := t.Sidebar.WorkingDir.Width(width).Render(branch)
+		branchLine := t.Sidebar.WorkingDir.Width(width).Render(styles.GitBranchIcon + " " + branch)
 		pathLine := t.Sidebar.WorkingDir.Width(width).Render(formatted)
 		return branchLine + "\n" + pathLine
 	}
@@ -40,7 +40,7 @@ func PrettyPathWithBranch(t *styles.Styles, path, branch string, width int) stri
 func PrettyPathInline(t *styles.Styles, path, branch string, width int) string {
 	formatted := home.Short(path)
 	if branch != "" {
-		combined := branch + " " + formatted
+		combined := styles.GitBranchIcon + " " + branch + " " + formatted
 		formatted = ansi.Truncate(combined, width, "…")
 	}
 	return t.Sidebar.WorkingDir.Width(width).Render(formatted)

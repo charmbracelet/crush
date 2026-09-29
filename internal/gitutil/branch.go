@@ -3,11 +3,11 @@
 package gitutil
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
-
-	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing"
 )
 
 const refreshInterval = 5 * time.Second
@@ -48,26 +48,65 @@ func CurrentBranch(dir string) string {
 	return branch
 }
 
+// readBranch reads the current branch name straight from the repository's
+// HEAD file. Going through the filesystem is both cheaper and more tolerant
+// than opening the repository with a Git library, which can reject repos with
+// unusual configuration.
 func readBranch(dir string) string {
-	repo, err := git.PlainOpenWithOptions(dir, &git.PlainOpenOptions{
-		DetectDotGit: true,
-	})
+	gitDir := findGitDir(dir)
+	if gitDir == "" {
+		return ""
+	}
+
+	head, err := os.ReadFile(filepath.Join(gitDir, "HEAD"))
 	if err != nil {
 		return ""
 	}
 
-	head, err := repo.Head()
-	if err != nil {
-		return ""
-	}
-
-	if head.Type() != plumbing.HashReference {
-		return ""
-	}
-
-	name := head.Name().Short()
-	if name == "HEAD" {
+	// HEAD is either a symbolic ref ("ref: refs/heads/<branch>") or, when
+	// detached, a raw commit hash. Only the former names a branch.
+	name, ok := strings.CutPrefix(strings.TrimSpace(string(head)), "ref: refs/heads/")
+	if !ok {
 		return ""
 	}
 	return name
+}
+
+// findGitDir walks up from dir looking for a .git directory. It also resolves
+// "gitdir:" pointers, which .git files contain in worktrees and submodules.
+// Returns an empty string when dir is not inside a Git repository.
+func findGitDir(dir string) string {
+	dir, err := filepath.Abs(dir)
+	if err != nil {
+		return ""
+	}
+
+	for {
+		gitPath := filepath.Join(dir, ".git")
+		info, statErr := os.Stat(gitPath)
+		if statErr == nil {
+			if info.IsDir() {
+				return gitPath
+			}
+			content, readErr := os.ReadFile(gitPath)
+			if readErr != nil {
+				return ""
+			}
+			gitDir, ok := strings.CutPrefix(strings.TrimSpace(string(content)), "gitdir:")
+			if !ok {
+				return ""
+			}
+			gitDir = strings.TrimSpace(gitDir)
+			if !filepath.IsAbs(gitDir) {
+				gitDir = filepath.Join(dir, gitDir)
+			}
+			return gitDir
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
 }

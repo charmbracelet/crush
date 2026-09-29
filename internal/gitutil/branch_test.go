@@ -129,6 +129,52 @@ func TestCurrentBranch(t *testing.T) {
 		require.Equal(t, "develop", branch)
 	})
 
+	t.Run("ignores unusual branch config entries", func(t *testing.T) {
+		testDir := t.TempDir()
+		runGit(t, testDir, "init")
+		runGit(t, testDir, "config", "user.email", "test@test.com")
+		runGit(t, testDir, "config", "user.name", "Test User")
+
+		testFile := filepath.Join(testDir, "test.txt")
+		require.NoError(t, os.WriteFile(testFile, []byte("test"), 0o644))
+		runGit(t, testDir, "add", ".")
+		runGit(t, testDir, "commit", "-m", "initial commit")
+		runGit(t, testDir, "checkout", "-b", "odd-config")
+
+		// Some repositories have branch entries that point at non-branch
+		// refs, which config parsers can reject outright.
+		runGit(t, testDir, "config", "branch.odd-config.merge", "refs/pull/1234/head")
+
+		resetCache()
+
+		branch := CurrentBranch(testDir)
+		require.Equal(t, "odd-config", branch)
+	})
+
+	t.Run("follows gitdir pointer in worktree", func(t *testing.T) {
+		root := t.TempDir()
+		gitDir := filepath.Join(root, "repo", ".git", "worktrees", "wt")
+		require.NoError(t, os.MkdirAll(gitDir, 0o755))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(gitDir, "HEAD"),
+			[]byte("ref: refs/heads/worktree-branch\n"),
+			0o644,
+		))
+
+		worktree := filepath.Join(root, "wt")
+		require.NoError(t, os.MkdirAll(worktree, 0o755))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(worktree, ".git"),
+			[]byte("gitdir: ../repo/.git/worktrees/wt\n"),
+			0o644,
+		))
+
+		resetCache()
+
+		branch := CurrentBranch(worktree)
+		require.Equal(t, "worktree-branch", branch)
+	})
+
 	t.Run("caches result within refresh interval", func(t *testing.T) {
 		testDir := t.TempDir()
 		runGit(t, testDir, "init")

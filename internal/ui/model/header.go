@@ -177,12 +177,13 @@ func renderHeaderDetails(
 
 	branch := com.Workspace.GitBranch()
 	if branch != "" {
-		// Reserve space for at least some of the path.
+		// Reserve space for the branch icon, its trailing space, the space
+		// before the path, and at least some of the path.
 		metadataWidth := lipgloss.Width(metadata)
-		maxBranchWidth := max(0, availWidth-metadataWidth-lipgloss.Width(cwd)-1)
+		maxBranchWidth := max(0, availWidth-metadataWidth-lipgloss.Width(cwd)-ansi.StringWidth(styles.GitBranchIcon)-2)
 		if maxBranchWidth > 0 {
 			truncBranch := ansi.Truncate(branch, maxBranchWidth, "…")
-			cwd = t.Header.GitBranch.Render(truncBranch) + " " + cwd
+			cwd = t.Header.GitBranch.Render(styles.GitBranchIcon+" "+truncBranch) + " " + cwd
 		}
 	}
 

@@ -97,7 +97,7 @@ func NewShell(opts *Options) *Shell {
 	// Strip herdr pane-ownership vars so subprocesses (including test
 	// binaries and nested crush instances) can't attach to or release
 	// the parent pane's agent authority.
-	env = withoutHerdrEnv(env)
+	env = WithoutHerdrEnv(env)
 
 	// Allow tools to detect execution by Crush.
 	env = append(env, CrushEnvMarkers()...)

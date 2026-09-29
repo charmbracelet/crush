@@ -33,6 +33,7 @@ var AllNotificationStyles = []NotificationStyle{
 	{ID: "native", Title: "Native", Description: "Use system notifications (macOS/Linux/Windows)"},
 	{ID: "osc", Title: "OSC", Description: "Use terminal OSC escape sequences"},
 	{ID: "bell", Title: "Bell", Description: "Use terminal bell character"},
+	{ID: "herdr", Title: "Herdr", Description: "Surface toasts in herdr's UI (inside a herdr pane)"},
 	{ID: "disabled", Title: "Disabled", Description: "Turn off notifications"},
 }
 

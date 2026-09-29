@@ -483,7 +483,7 @@ String Keys:
   data-directory string            directory for project data and state
   initialize-as string             context filename created by crush init
   notifications string             notification style: auto, native, osc, bell,
-                                   or disabled
+                                   herdr, or disabled
   attribution-trailer-style string attribution trailer: none, co-authored-by,
                                    or assisted-by
 

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/herdr"
 	crushlog "github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/server"
 	"github.com/charmbracelet/x/term"
@@ -28,6 +29,12 @@ var serverCmd = &cobra.Command{
 	Use:   "server",
 	Short: "Start the Crush server",
 	RunE: func(cmd *cobra.Command, _ []string) error {
+		// The server hosts workspaces on behalf of clients and must
+		// never claim the pane of the terminal that launched it:
+		// reporting would fight the client's own reports, and
+		// shutdown would release the client's agent authority.
+		herdr.Disable()
+
 		dataDir, err := cmd.Flags().GetString("data-dir")
 		if err != nil {
 			return fmt.Errorf("failed to get data directory: %v", err)

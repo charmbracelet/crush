@@ -730,6 +730,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Header.Keystroke = muted
 	s.Header.KeystrokeTip = subtle
 	s.Header.WorkingDir = muted
+	s.Header.GitBranch = base.Foreground(o.secondary)
 	s.Header.Separator = subtle
 	s.Header.Wrapper = lipgloss.NewStyle().Foreground(o.fgBase)
 	s.Header.LogoGradCanvas = lipgloss.NewStyle()

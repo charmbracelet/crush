@@ -173,7 +173,7 @@ func renderHeaderDetails(
 
 	const dirTrimLimit = 4
 	workingDir := com.Workspace.WorkingDir()
-	cwd := fsext.DirTrim(fsext.PrettyPath(workingDir), dirTrimLimit)
+	cwd := t.Header.WorkingDir.Render(fsext.DirTrim(fsext.PrettyPath(workingDir), dirTrimLimit))
 
 	branch := com.Workspace.GitBranch()
 	if branch != "" {
@@ -182,10 +182,10 @@ func renderHeaderDetails(
 		maxBranchWidth := max(0, availWidth-metadataWidth-lipgloss.Width(cwd)-1)
 		if maxBranchWidth > 0 {
 			truncBranch := ansi.Truncate(branch, maxBranchWidth, "…")
-			cwd = truncBranch + " " + cwd
+			cwd = t.Header.GitBranch.Render(truncBranch) + " " + cwd
 		}
 	}
 
-	result := t.Header.WorkingDir.Render(cwd) + metadata
+	result := cwd + metadata
 	return ansi.Truncate(result, max(0, availWidth), "…")
 }

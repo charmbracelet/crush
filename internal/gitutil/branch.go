@@ -12,34 +12,37 @@ import (
 
 const refreshInterval = 5 * time.Second
 
+// cachedBranch stores the last read branch name per directory. Keying the
+// cache by directory keeps callers that operate on different directories from
+// overwriting each other's entries.
 type cachedBranch struct {
-	mu       sync.RWMutex
+	mu      sync.RWMutex
+	entries map[string]cacheEntry
+}
+
+type cacheEntry struct {
 	value    string
-	dir      string
 	lastRead time.Time
 }
 
-var cache = &cachedBranch{}
+var cache = &cachedBranch{entries: make(map[string]cacheEntry)}
 
 // CurrentBranch returns the current Git branch name for the given directory.
-// The result is cached and refreshed at most once every 5 seconds. Returns an
-// empty string if the directory is not in a Git repository, the repository is
-// in a detached HEAD state, or any error occurs.
+// The result is cached per directory and refreshed at most once every 5
+// seconds. Returns an empty string if the directory is not in a Git
+// repository, the repository is in a detached HEAD state, or any error occurs.
 func CurrentBranch(dir string) string {
 	cache.mu.RLock()
-	if cache.dir == dir && time.Since(cache.lastRead) < refreshInterval {
-		v := cache.value
-		cache.mu.RUnlock()
-		return v
-	}
+	entry, ok := cache.entries[dir]
 	cache.mu.RUnlock()
+	if ok && time.Since(entry.lastRead) < refreshInterval {
+		return entry.value
+	}
 
 	branch := readBranch(dir)
 
 	cache.mu.Lock()
-	cache.dir = dir
-	cache.value = branch
-	cache.lastRead = time.Now()
+	cache.entries[dir] = cacheEntry{value: branch, lastRead: time.Now()}
 	cache.mu.Unlock()
 
 	return branch

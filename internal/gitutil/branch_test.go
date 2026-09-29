@@ -6,7 +6,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -157,8 +156,6 @@ func TestCurrentBranch(t *testing.T) {
 // resetCache clears the global cache for testing.
 func resetCache() {
 	cache.mu.Lock()
-	cache.dir = ""
-	cache.value = ""
-	cache.lastRead = time.Time{}
+	cache.entries = make(map[string]cacheEntry)
 	cache.mu.Unlock()
 }

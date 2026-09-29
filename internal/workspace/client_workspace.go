@@ -539,6 +539,9 @@ func (w *ClientWorkspace) WorkingDir() string {
 	return w.cached().Path
 }
 
+// GitBranch always returns an empty string. In client/server mode the
+// workspace may live on a remote machine, and the server does not currently
+// expose git metadata, so the branch cannot be resolved on the client side.
 func (w *ClientWorkspace) GitBranch() string {
 	return ""
 }

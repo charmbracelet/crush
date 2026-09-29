@@ -249,6 +249,12 @@ type Workspace interface {
 	MCPPendingAuth() []mcptools.PendingAuthServer
 	MCPAuthURL(name string) string
 
+	// Skills toggles
+	SkillsDisabled(ctx context.Context) ([]string, error)
+	SkillSetDisabled(ctx context.Context, name string, disabled bool) error
+	SkillsEnabled(ctx context.Context) ([]string, error)
+	SkillSetConfigDisabled(ctx context.Context, name string, disabled bool) error
+
 	// Events
 	Subscribe(program *tea.Program)
 	Shutdown()

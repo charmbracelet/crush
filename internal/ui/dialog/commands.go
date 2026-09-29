@@ -524,6 +524,13 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		}))
 	}
 
+	// Toggle skills for this repository when any are configured.
+	if len(cfg.Options.SkillsPaths) > 0 {
+		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_skills", "Toggle Skills", "", ActionOpenDialog{
+			DialogID: SkillsTogglesID,
+		}))
+	}
+
 	if c.hasTodos || c.hasQueue {
 		var label string
 		switch {

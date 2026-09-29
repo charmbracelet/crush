@@ -12,67 +12,47 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 )
 
-// MCPTogglesID is the identifier for the MCP toggles dialog.
-const MCPTogglesID = "mcp_toggles"
+// SkillsTogglesID is the identifier for the skills toggles dialog.
+const SkillsTogglesID = "skills_toggles"
 
-// MCPToggleItem describes one configured MCP server in the toggles dialog.
-type MCPToggleItem struct {
+// SkillToggleItem describes one skill in the toggles dialog.
+type SkillToggleItem struct {
 	Name string
-	// Disabled is the repository-scoped override: when true the server's
-	// tools are hidden from every session in this repository.
+	// Disabled is the repository-scoped override: when true the skill is
+	// hidden from the agent in this repository.
 	Disabled bool
-	// ConfigDisabled is the server's disabled flag in the config, before
+	// ConfigDisabled is the skill's disabled state in the config, before
 	// any repository-scoped override. The Global scope reads and writes
 	// this flag.
 	ConfigDisabled bool
-	// EnabledOverride is the repository-scoped enabled override: a config
-	// server enabled locally for this repository. Only the Local scope
+	// EnabledOverride is the repository-scoped enabled override: a
+	// config-disabled skill the user enabled here. Only the Local scope
 	// considers it.
 	EnabledOverride bool
-	// Status is the human-readable connection status.
-	Status string
 }
 
 // localDisabled returns the effective local state: a config-disabled
-// server stays disabled locally unless the repository enabled override
+// skill stays disabled locally unless the repository enabled override
 // turned it on.
-func (i MCPToggleItem) localDisabled() bool {
+func (i SkillToggleItem) localDisabled() bool {
 	return i.Disabled || (i.ConfigDisabled && !i.EnabledOverride)
 }
 
-// ActionToggleMCP is sent when the user toggles an MCP server. Local
-// toggles persist a repository-scoped override; global toggles write the
-// disabled flag to the global config.
-type ActionToggleMCP struct {
+// ActionToggleSkill is sent when the user toggles a skill. Local toggles
+// persist a repository-scoped override; global toggles edit the config's
+// options.disabled_skills list.
+type ActionToggleSkill struct {
 	Name     string
 	Disabled bool
 	Global   bool
 }
 
-// MCPToggleScope selects which store a toggle affects.
-type MCPToggleScope int
-
-const (
-	// MCPToggleScopeLocal persists repository-scoped overrides.
-	MCPToggleScopeLocal MCPToggleScope = iota
-	// MCPToggleScopeGlobal writes the disabled flag to the config.
-	MCPToggleScopeGlobal
-)
-
-// String returns the radio label for the scope.
-func (s MCPToggleScope) String() string {
-	if s == MCPToggleScopeGlobal {
-		return "Global"
-	}
-	return "Local"
-}
-
-// MCPToggles lets the user enable and disable MCP servers, either for
-// the current repository (Local, the default) or in the config (Global).
-type MCPToggles struct {
+// SkillToggles lets the user enable and disable skills, either for the
+// current repository (Local, the default) or in the config (Global).
+type SkillToggles struct {
 	com    *common.Common
 	width  int
-	items  []MCPToggleItem
+	items  []SkillToggleItem
 	cursor int
 	// offset is the first visible row; the window follows the cursor.
 	offset int
@@ -87,12 +67,12 @@ type MCPToggles struct {
 	}
 }
 
-var _ Dialog = (*MCPToggles)(nil)
+var _ Dialog = (*SkillToggles)(nil)
 
-// NewMCPToggles creates a new MCP toggles dialog.
-func NewMCPToggles(com *common.Common, items []MCPToggleItem) *MCPToggles {
+// NewSkillsToggles creates a new skills toggles dialog.
+func NewSkillsToggles(com *common.Common, items []SkillToggleItem) *SkillToggles {
 	t := com.Styles
-	m := &MCPToggles{
+	m := &SkillToggles{
 		com:   com,
 		width: 0, // Set dynamically in Draw().
 		items: items,
@@ -123,22 +103,29 @@ func NewMCPToggles(com *common.Common, items []MCPToggleItem) *MCPToggles {
 }
 
 // ID implements Dialog.
-func (m *MCPToggles) ID() string {
-	return MCPTogglesID
+func (m *SkillToggles) ID() string {
+	return SkillsTogglesID
 }
 
 // Items returns the current items.
-func (m *MCPToggles) Items() []MCPToggleItem {
+func (m *SkillToggles) Items() []SkillToggleItem {
 	return m.items
 }
 
+// SetItems replaces the items, keeping the cursor clamped, so an open
+// dialog updates after a toggle or an overrides refresh.
+func (m *SkillToggles) SetItems(items []SkillToggleItem) {
+	m.items = items
+	m.cursor = min(m.cursor, max(0, len(items)-1))
+}
+
 // Scope returns the selected toggle scope.
-func (m *MCPToggles) Scope() MCPToggleScope {
+func (m *SkillToggles) Scope() MCPToggleScope {
 	return m.scope
 }
 
 // HandleMsg implements Dialog.
-func (m *MCPToggles) HandleMsg(msg tea.Msg) Action {
+func (m *SkillToggles) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		switch {
@@ -159,9 +146,6 @@ func (m *MCPToggles) HandleMsg(msg tea.Msg) Action {
 				return nil
 			}
 			item := m.items[m.cursor]
-			// Toggle based on the effective state for the active scope:
-			// local considers the repository overrides, global reads the
-			// config's raw disabled flag.
 			currentlyDisabled := item.localDisabled()
 			if m.scope == MCPToggleScopeGlobal {
 				currentlyDisabled = item.ConfigDisabled
@@ -171,15 +155,11 @@ func (m *MCPToggles) HandleMsg(msg tea.Msg) Action {
 				m.items[m.cursor].ConfigDisabled = newState
 			} else {
 				m.items[m.cursor].Disabled = newState
-				// A config-disabled server enabled locally must be started
-				// at runtime; surface that immediately instead of waiting
-				// for the connection state event.
 				if item.ConfigDisabled && !newState {
 					m.items[m.cursor].EnabledOverride = true
-					m.items[m.cursor].Status = "starting"
 				}
 			}
-			return ActionToggleMCP{
+			return ActionToggleSkill{
 				Name:     item.Name,
 				Disabled: newState,
 				Global:   m.scope == MCPToggleScopeGlobal,
@@ -192,7 +172,7 @@ func (m *MCPToggles) HandleMsg(msg tea.Msg) Action {
 }
 
 // Draw implements Dialog.
-func (m *MCPToggles) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
+func (m *SkillToggles) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := m.com.Styles
 	m.width = max(0, min(m.requiredWidth(t), area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
 	DrawCenter(scr, area, m.dialogContent())
@@ -201,9 +181,8 @@ func (m *MCPToggles) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 // requiredWidth returns the width needed to fit the widest row (status
 // dot, name, at least one space, and status) on a single line, plus row
-// padding and the dialog frame. A fixed 64-column cap word-wraps long
-// server names onto a second line.
-func (m *MCPToggles) requiredWidth(t *styles.Styles) int {
+// padding and the dialog frame.
+func (m *SkillToggles) requiredWidth(t *styles.Styles) int {
 	widest := minToggleDialogWidth
 	for _, item := range m.items {
 		row := 2 /* dot + space */ + lipgloss.Width(item.Name) + 1 + lipgloss.Width(m.itemStatus(item))
@@ -212,11 +191,11 @@ func (m *MCPToggles) requiredWidth(t *styles.Styles) int {
 	return widest + 2 /* row padding */ + t.Dialog.View.GetHorizontalFrameSize()
 }
 
-func (m *MCPToggles) dialogContent() string {
+func (m *SkillToggles) dialogContent() string {
 	t := m.com.Styles
 	innerWidth := m.width - t.Dialog.View.GetHorizontalFrameSize()
 	rc := NewRenderContext(t, m.width)
-	rc.Title = "Toggle MCPs"
+	rc.Title = "Toggle Skills"
 	rc.TitleInfo = m.scopeRadioView(t)
 	rc.AddPart(m.innerContent())
 	rc.Help = renderDialogHelp(t, &m.help, m, innerWidth)
@@ -225,7 +204,7 @@ func (m *MCPToggles) dialogContent() string {
 
 // scopeRadioView renders the Local/Global radio selector, mirroring the
 // command palette's System/User switch on the title line.
-func (m *MCPToggles) scopeRadioView(t *styles.Styles) string {
+func (m *SkillToggles) scopeRadioView(t *styles.Styles) string {
 	radio := func(s MCPToggleScope) string {
 		bullet := t.Radio.Off
 		if s == m.scope {
@@ -236,7 +215,7 @@ func (m *MCPToggles) scopeRadioView(t *styles.Styles) string {
 	return " " + radio(MCPToggleScopeLocal) + " " + radio(MCPToggleScopeGlobal)
 }
 
-func (m *MCPToggles) innerContent() string {
+func (m *SkillToggles) innerContent() string {
 	t := m.com.Styles
 	innerWidth := m.width - t.Dialog.View.GetHorizontalFrameSize()
 
@@ -244,13 +223,13 @@ func (m *MCPToggles) innerContent() string {
 		return t.Dialog.SecondaryText.
 			Width(innerWidth).
 			Padding(0, 1).
-			Render("No MCP servers configured.")
+			Render("No skills configured.")
 	}
 
-	// Cap the visible rows so a long server list cannot make the dialog
+	// Cap the visible rows so a long skill list cannot make the dialog
 	// grow past the screen; the window follows the cursor.
 	visible := min(maxVisibleToggleRows, len(m.items))
-	first := max(0, min(m.offset, len(m.items)-visible))
+	first := m.visibleOffset(visible)
 	last := min(len(m.items), first+visible)
 
 	// The row style adds Padding(0, 1), so the text area is two columns
@@ -266,10 +245,10 @@ func (m *MCPToggles) innerContent() string {
 	for i := first; i < last; i++ {
 		item := m.items[i]
 		status := m.itemStatus(item)
-		// The status dot mirrors the sidebar: green connected, yellow
-		// starting, red error, gray disabled/offline. Icon styles carry
-		// their own "●" via SetString, so Render() yields just the dot.
-		// It sits left of the name, like the sidebar rows.
+		// The status dot mirrors the sidebar: green active, gray
+		// disabled/offline. Icon styles carry their own "●" via
+		// SetString, so Render() yields just the dot. It sits left of
+		// the name, like the sidebar rows.
 		dot := statusDot(t, status)
 		gap := max(1, rowWidth-2 /* dot + space */ -lipgloss.Width(item.Name)-lipgloss.Width(status))
 
@@ -284,80 +263,50 @@ func (m *MCPToggles) innerContent() string {
 			continue
 		}
 
-		// OnlineText (not OnlineIcon) is the text style; the dot is
-		// rendered separately so no "●" prefix sneaks into the text
-		// and pushes the row over the dialog width.
+		// Active skills share the green used by the home-page skills
+		// list; disabled ones fall back to the muted text style.
 		statusStyle := t.Resource.OnlineText
-		if status == "disabled" || status == "starting" {
-			// UnsetPadding: SecondaryText carries its own Padding(0, 1),
-			// which would widen the row one column past every other row.
+		if status == "disabled" {
 			statusStyle = t.Dialog.SecondaryText.UnsetPadding()
 		}
 		row := dot.Render() + " " +
 			t.Dialog.NormalItem.UnsetPadding().Render(item.Name) +
 			strings.Repeat(" ", gap) +
 			statusStyle.Render(status)
-		// A single Padding(0, 1) around the row.
 		rows = append(rows, lipgloss.NewStyle().Padding(0, 1).Render(row))
 	}
 
 	return joinToggleRows(t, rows, len(m.items), visible, first)
 }
 
-// statusDot maps a status label to the sidebar's status icon style.
-func statusDot(t *styles.Styles, status string) lipgloss.Style {
-	switch {
-	case status == "connected" || status == "active":
-		return t.Resource.OnlineIcon
-	case status == "starting":
-		return t.Resource.BusyIcon
-	case status == "error" || strings.HasPrefix(status, "error:"):
-		return t.Resource.ErrorIcon
-	case status == "needs authentication":
-		return t.Resource.NeedsAuthIcon
-	default:
-		// disabled, offline
-		return t.Resource.DisabledIcon
-	}
+// visibleOffset returns the stored first visible row index, clamped to
+// the current item count.
+func (m *SkillToggles) visibleOffset(visible int) int {
+	return max(0, min(m.offset, len(m.items)-visible))
 }
 
-// itemStatus returns the right-hand status label for an item. The live
-// connection state speaks for itself: a config-disabled server that was
-// runtime-enabled shows "starting"/"connected", an untouched one shows
-// "disabled" via its connection state. Only a repository override (local
-// scope) or the config flag (global scope) forces the "disabled" label
-// over a live connection.
-func (m *MCPToggles) itemStatus(item MCPToggleItem) string {
+// itemStatus returns the right-hand status label for an item. The Local
+// scope reads the repository overrides; the Global scope reads the
+// config's raw disabled flag.
+func (m *SkillToggles) itemStatus(item SkillToggleItem) string {
 	if m.scope == MCPToggleScopeGlobal {
 		if item.ConfigDisabled {
 			return "disabled"
 		}
-		return item.Status
+		return "active"
 	}
 	if item.localDisabled() {
 		return "disabled"
 	}
-	return item.Status
-}
-
-// SetItemStatus refreshes one item's live connection status without
-// touching its Disabled override, so an open dialog updates as servers
-// finish connecting.
-func (m *MCPToggles) SetItemStatus(name, status string) {
-	for i, item := range m.items {
-		if item.Name == name {
-			m.items[i].Status = status
-			return
-		}
-	}
+	return "active"
 }
 
 // FullHelp implements help.KeyMap.
-func (m *MCPToggles) FullHelp() [][]key.Binding {
+func (m *SkillToggles) FullHelp() [][]key.Binding {
 	return [][]key.Binding{m.ShortHelp()}
 }
 
 // ShortHelp implements help.KeyMap.
-func (m *MCPToggles) ShortHelp() []key.Binding {
+func (m *SkillToggles) ShortHelp() []key.Binding {
 	return []key.Binding{m.keyMap.Up, m.keyMap.Down, m.keyMap.Toggle, m.keyMap.Scope, m.keyMap.Close}
 }

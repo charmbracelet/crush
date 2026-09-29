@@ -54,6 +54,12 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.deleteSessionMessagesStmt, err = db.PrepareContext(ctx, deleteSessionMessages); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteSessionMessages: %w", err)
 	}
+	if q.deleteSkillsDisabledStmt, err = db.PrepareContext(ctx, deleteSkillsDisabled); err != nil {
+		return nil, fmt.Errorf("error preparing query DeleteSkillsDisabled: %w", err)
+	}
+	if q.deleteSkillsEnabledStmt, err = db.PrepareContext(ctx, deleteSkillsEnabled); err != nil {
+		return nil, fmt.Errorf("error preparing query DeleteSkillsEnabled: %w", err)
+	}
 	if q.getAverageResponseTimeStmt, err = db.PrepareContext(ctx, getAverageResponseTime); err != nil {
 		return nil, fmt.Errorf("error preparing query GetAverageResponseTime: %w", err)
 	}
@@ -108,6 +114,12 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.insertMCPEnabledServerStmt, err = db.PrepareContext(ctx, insertMCPEnabledServer); err != nil {
 		return nil, fmt.Errorf("error preparing query InsertMCPEnabledServer: %w", err)
 	}
+	if q.insertSkillsDisabledStmt, err = db.PrepareContext(ctx, insertSkillsDisabled); err != nil {
+		return nil, fmt.Errorf("error preparing query InsertSkillsDisabled: %w", err)
+	}
+	if q.insertSkillsEnabledStmt, err = db.PrepareContext(ctx, insertSkillsEnabled); err != nil {
+		return nil, fmt.Errorf("error preparing query InsertSkillsEnabled: %w", err)
+	}
 	if q.listAllUserMessagesStmt, err = db.PrepareContext(ctx, listAllUserMessages); err != nil {
 		return nil, fmt.Errorf("error preparing query ListAllUserMessages: %w", err)
 	}
@@ -140,6 +152,12 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.listSessionsStmt, err = db.PrepareContext(ctx, listSessions); err != nil {
 		return nil, fmt.Errorf("error preparing query ListSessions: %w", err)
+	}
+	if q.listSkillsDisabledStmt, err = db.PrepareContext(ctx, listSkillsDisabled); err != nil {
+		return nil, fmt.Errorf("error preparing query ListSkillsDisabled: %w", err)
+	}
+	if q.listSkillsEnabledStmt, err = db.PrepareContext(ctx, listSkillsEnabled); err != nil {
+		return nil, fmt.Errorf("error preparing query ListSkillsEnabled: %w", err)
 	}
 	if q.listUserMessagesBySessionStmt, err = db.PrepareContext(ctx, listUserMessagesBySession); err != nil {
 		return nil, fmt.Errorf("error preparing query ListUserMessagesBySession: %w", err)
@@ -215,6 +233,16 @@ func (q *Queries) Close() error {
 	if q.deleteSessionMessagesStmt != nil {
 		if cerr := q.deleteSessionMessagesStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing deleteSessionMessagesStmt: %w", cerr)
+		}
+	}
+	if q.deleteSkillsDisabledStmt != nil {
+		if cerr := q.deleteSkillsDisabledStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing deleteSkillsDisabledStmt: %w", cerr)
+		}
+	}
+	if q.deleteSkillsEnabledStmt != nil {
+		if cerr := q.deleteSkillsEnabledStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing deleteSkillsEnabledStmt: %w", cerr)
 		}
 	}
 	if q.getAverageResponseTimeStmt != nil {
@@ -307,6 +335,16 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing insertMCPEnabledServerStmt: %w", cerr)
 		}
 	}
+	if q.insertSkillsDisabledStmt != nil {
+		if cerr := q.insertSkillsDisabledStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing insertSkillsDisabledStmt: %w", cerr)
+		}
+	}
+	if q.insertSkillsEnabledStmt != nil {
+		if cerr := q.insertSkillsEnabledStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing insertSkillsEnabledStmt: %w", cerr)
+		}
+	}
 	if q.listAllUserMessagesStmt != nil {
 		if cerr := q.listAllUserMessagesStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listAllUserMessagesStmt: %w", cerr)
@@ -360,6 +398,16 @@ func (q *Queries) Close() error {
 	if q.listSessionsStmt != nil {
 		if cerr := q.listSessionsStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listSessionsStmt: %w", cerr)
+		}
+	}
+	if q.listSkillsDisabledStmt != nil {
+		if cerr := q.listSkillsDisabledStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listSkillsDisabledStmt: %w", cerr)
+		}
+	}
+	if q.listSkillsEnabledStmt != nil {
+		if cerr := q.listSkillsEnabledStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listSkillsEnabledStmt: %w", cerr)
 		}
 	}
 	if q.listUserMessagesBySessionStmt != nil {
@@ -446,6 +494,8 @@ type Queries struct {
 	deleteSessionStmt                    *sql.Stmt
 	deleteSessionFilesStmt               *sql.Stmt
 	deleteSessionMessagesStmt            *sql.Stmt
+	deleteSkillsDisabledStmt             *sql.Stmt
+	deleteSkillsEnabledStmt              *sql.Stmt
 	getAverageResponseTimeStmt           *sql.Stmt
 	getFileStmt                          *sql.Stmt
 	getFileByPathAndSessionStmt          *sql.Stmt
@@ -464,6 +514,8 @@ type Queries struct {
 	getUsageByModelStmt                  *sql.Stmt
 	insertMCPDisabledServerStmt          *sql.Stmt
 	insertMCPEnabledServerStmt           *sql.Stmt
+	insertSkillsDisabledStmt             *sql.Stmt
+	insertSkillsEnabledStmt              *sql.Stmt
 	listAllUserMessagesStmt              *sql.Stmt
 	listFilesByPathStmt                  *sql.Stmt
 	listFilesBySessionStmt               *sql.Stmt
@@ -475,6 +527,8 @@ type Queries struct {
 	listNewFilesStmt                     *sql.Stmt
 	listSessionReadFilesStmt             *sql.Stmt
 	listSessionsStmt                     *sql.Stmt
+	listSkillsDisabledStmt               *sql.Stmt
+	listSkillsEnabledStmt                *sql.Stmt
 	listUserMessagesBySessionStmt        *sql.Stmt
 	recordFileReadStmt                   *sql.Stmt
 	renameSessionStmt                    *sql.Stmt
@@ -498,6 +552,8 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		deleteSessionStmt:                    q.deleteSessionStmt,
 		deleteSessionFilesStmt:               q.deleteSessionFilesStmt,
 		deleteSessionMessagesStmt:            q.deleteSessionMessagesStmt,
+		deleteSkillsDisabledStmt:             q.deleteSkillsDisabledStmt,
+		deleteSkillsEnabledStmt:              q.deleteSkillsEnabledStmt,
 		getAverageResponseTimeStmt:           q.getAverageResponseTimeStmt,
 		getFileStmt:                          q.getFileStmt,
 		getFileByPathAndSessionStmt:          q.getFileByPathAndSessionStmt,
@@ -516,6 +572,8 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getUsageByModelStmt:                  q.getUsageByModelStmt,
 		insertMCPDisabledServerStmt:          q.insertMCPDisabledServerStmt,
 		insertMCPEnabledServerStmt:           q.insertMCPEnabledServerStmt,
+		insertSkillsDisabledStmt:             q.insertSkillsDisabledStmt,
+		insertSkillsEnabledStmt:              q.insertSkillsEnabledStmt,
 		listAllUserMessagesStmt:              q.listAllUserMessagesStmt,
 		listFilesByPathStmt:                  q.listFilesByPathStmt,
 		listFilesBySessionStmt:               q.listFilesBySessionStmt,
@@ -527,6 +585,8 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listNewFilesStmt:                     q.listNewFilesStmt,
 		listSessionReadFilesStmt:             q.listSessionReadFilesStmt,
 		listSessionsStmt:                     q.listSessionsStmt,
+		listSkillsDisabledStmt:               q.listSkillsDisabledStmt,
+		listSkillsEnabledStmt:                q.listSkillsEnabledStmt,
 		listUserMessagesBySessionStmt:        q.listUserMessagesBySessionStmt,
 		recordFileReadStmt:                   q.recordFileReadStmt,
 		renameSessionStmt:                    q.renameSessionStmt,

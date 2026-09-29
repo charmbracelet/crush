@@ -524,3 +524,109 @@ func (c *controllerV1) handlePostWorkspaceMCPRefreshResources(w http.ResponseWri
 	c.backend.MCPRefreshResources(r.Context(), id, req.Name)
 	w.WriteHeader(http.StatusOK)
 }
+
+// handleGetWorkspaceSkillsDisabled returns the skills disabled for the
+// workspace's repository.
+//
+//	@Summary		List disabled skills
+//	@Tags			skills
+//	@Param			id	path	string	true	"Workspace ID"
+//	@Success		200	{array}	string
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/skills/disabled [get]
+func (c *controllerV1) handleGetWorkspaceSkillsDisabled(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	names, err := c.backend.SkillsDisabled(r.Context(), id)
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	jsonEncode(w, names)
+}
+
+// handlePostWorkspaceSetSkillDisabled toggles a repository-scoped skill
+// override.
+//
+//	@Summary		Toggle a skill for the repository
+//	@Tags			skills
+//	@Accept			json
+//	@Param			id		path	string						true	"Workspace ID"
+//	@Param			request	body	proto.SkillSetDisabledRequest	true	"Toggle request"
+//	@Success		200
+//	@Failure		400	{object}	proto.Error
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/skills/disabled [post]
+func (c *controllerV1) handlePostWorkspaceSetSkillDisabled(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	var req proto.SkillSetDisabledRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		c.server.logError(r, "Failed to decode request", "error", err)
+		jsonError(w, http.StatusBadRequest, "failed to decode request")
+		return
+	}
+	if req.Name == "" {
+		jsonError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	if err := c.backend.SetSkillDisabled(r.Context(), id, req.Name, req.Disabled); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+// handleGetWorkspaceSkillsEnabled returns the skills with a
+// repository-scoped enabled override for the workspace's repository.
+//
+//	@Summary		List enabled-override skills
+//	@Tags			skills
+//	@Param			id	path	string	true	"Workspace ID"
+//	@Success		200	{array}	string
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/skills/enabled [get]
+func (c *controllerV1) handleGetWorkspaceSkillsEnabled(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	names, err := c.backend.SkillsEnabled(r.Context(), id)
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	jsonEncode(w, names)
+}
+
+// handlePostWorkspaceSetSkillConfigDisabled toggles a skill's disabled
+// flag in the global config.
+//
+//	@Summary		Toggle a skill in the config
+//	@Tags			skills
+//	@Accept			json
+//	@Param			id		path	string						true	"Workspace ID"
+//	@Param			request	body	proto.SkillSetDisabledRequest	true	"Toggle request"
+//	@Success		200
+//	@Failure		400	{object}	proto.Error
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/skills/config-disabled [post]
+func (c *controllerV1) handlePostWorkspaceSetSkillConfigDisabled(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	var req proto.SkillSetDisabledRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		c.server.logError(r, "Failed to decode request", "error", err)
+		jsonError(w, http.StatusBadRequest, "failed to decode request")
+		return
+	}
+	if req.Name == "" {
+		jsonError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	if err := c.backend.SetSkillConfigDisabled(r.Context(), id, req.Name, req.Disabled); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}

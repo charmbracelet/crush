@@ -943,12 +943,12 @@ updates your local configuration.
 
 You can also override [Catwalk](https://github.com/charmbracelet/catwalk) default URL (for testing, using a fork).
 
-You can do so by setting `CATWALK_URL` enviromental variable. (e.g. `export CATWALK_URL=http://localhost:8000`)
+You can do so by setting the `CATWALK_URL` environment variable. (e.g. `export CATWALK_URL=http://localhost:8000`)
 
 ### Disabling automatic provider updates
 
 For those with restricted internet access, or those who prefer to work in
-air-gapped environments, this might not be want you want, and this feature can
+air-gapped environments, this might not be what you want, and this feature can
 be disabled.
 
 To disable automatic provider updates in your `crushrc`:

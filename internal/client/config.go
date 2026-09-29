@@ -445,3 +445,73 @@ func (c *Client) GetMCPPrompt(ctx context.Context, id, clientID, promptID string
 	}
 	return result.Prompt, nil
 }
+
+// SkillsDisabled returns the skills disabled for the workspace's
+// repository.
+func (c *Client) SkillsDisabled(ctx context.Context, id string) ([]string, error) {
+	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/skills/disabled", id), nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get disabled skills: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to get disabled skills: status code %d", rsp.StatusCode)
+	}
+	var names []string
+	if err := json.NewDecoder(rsp.Body).Decode(&names); err != nil {
+		return nil, fmt.Errorf("failed to decode disabled skills: %w", err)
+	}
+	return names, nil
+}
+
+// SkillsEnabled returns the skills with a repository-scoped enabled
+// override for the workspace's repository.
+func (c *Client) SkillsEnabled(ctx context.Context, id string) ([]string, error) {
+	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/skills/enabled", id), nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get enabled skills: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to get enabled skills: status code %d", rsp.StatusCode)
+	}
+	var names []string
+	if err := json.NewDecoder(rsp.Body).Decode(&names); err != nil {
+		return nil, fmt.Errorf("failed to decode enabled skills: %w", err)
+	}
+	return names, nil
+}
+
+// SetSkillDisabled toggles a repository-scoped skill override on the
+// workspace.
+func (c *Client) SetSkillDisabled(ctx context.Context, id, name string, disabled bool) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/skills/disabled", id), nil, jsonBody(proto.SkillSetDisabledRequest{
+		Name:     name,
+		Disabled: disabled,
+	}), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return fmt.Errorf("failed to set disabled skill: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to set disabled skill: status code %d", rsp.StatusCode)
+	}
+	return nil
+}
+
+// SetSkillConfigDisabled toggles a skill's disabled flag in the global
+// config on the workspace's server.
+func (c *Client) SetSkillConfigDisabled(ctx context.Context, id, name string, disabled bool) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/skills/config-disabled", id), nil, jsonBody(proto.SkillSetDisabledRequest{
+		Name:     name,
+		Disabled: disabled,
+	}), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return fmt.Errorf("failed to set config-disabled skill: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to set config-disabled skill: status code %d", rsp.StatusCode)
+	}
+	return nil
+}

@@ -116,10 +116,18 @@ type SkillReadResult struct {
 
 // AgentInfo represents information about the agent.
 type AgentInfo struct {
-	IsBusy   bool                 `json:"is_busy"`
-	IsReady  bool                 `json:"is_ready"`
-	Model    catwalk.Model        `json:"model"`
-	ModelCfg config.SelectedModel `json:"model_cfg"`
+	// Name is the id of the agent this snapshot describes ("coder",
+	// "plan"). Without it the purpose axis is write-only: a client can set
+	// the active agent but never confirm which one is running, so a second
+	// client or a reconnect leaves the two disagreeing.
+	Name string `json:"name,omitempty"`
+	// Selectable lists the agent ids that can serve the main turn, in the
+	// order a purpose cycle should visit them.
+	Selectable []string             `json:"selectable,omitempty"`
+	IsBusy     bool                 `json:"is_busy"`
+	IsReady    bool                 `json:"is_ready"`
+	Model      catwalk.Model        `json:"model"`
+	ModelCfg   config.SelectedModel `json:"model_cfg"`
 }
 
 // IsZero checks if the AgentInfo is zero-valued.
@@ -273,6 +281,14 @@ type PermissionSkipRequest struct {
 // PermissionAutoModeRequest represents a request to toggle native auto mode.
 type PermissionAutoModeRequest struct {
 	Enabled bool `json:"enabled"`
+}
+
+// PermissionLevelRequest carries the workspace approval level: "prompt"
+// asks a human about each action, "auto" lets the safety classifier
+// decide and escalate when unsure, "bypass" never asks. Which agent serves
+// the turn is a separate axis and is not changed by this request.
+type PermissionLevelRequest struct {
+	Level string `json:"level"`
 }
 
 // LSPEventType represents the type of LSP event.

@@ -91,6 +91,9 @@ func (s *runCoordinator) SetMainAgent(agentName string) error {
 	return s.setMainAgentErr
 }
 
+func (s *runCoordinator) MainAgentName() string    { return "" }
+func (s *runCoordinator) MainAgentNames() []string { return nil }
+
 func (s *runCoordinator) capturedCtx() context.Context {
 	s.mu.Lock()
 	defer s.mu.Unlock()

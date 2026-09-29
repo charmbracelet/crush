@@ -327,6 +327,22 @@ func (w *ClientWorkspace) AgentSetMain(agentID string) error {
 	return w.client.SetMainAgent(context.Background(), w.workspaceID(), agentID)
 }
 
+func (w *ClientWorkspace) AgentMainID() string {
+	info, err := w.client.GetAgentInfo(context.Background(), w.workspaceID())
+	if err != nil {
+		return ""
+	}
+	return info.Name
+}
+
+func (w *ClientWorkspace) AgentMainCandidates() []string {
+	info, err := w.client.GetAgentInfo(context.Background(), w.workspaceID())
+	if err != nil {
+		return nil
+	}
+	return info.Selectable
+}
+
 func (w *ClientWorkspace) AgentSummarize(ctx context.Context, sessionID string) error {
 	return w.client.AgentSummarizeSession(ctx, w.workspaceID(), sessionID)
 }
@@ -428,6 +444,22 @@ func (w *ClientWorkspace) PermissionAutoMode() bool {
 // PermissionSetAutoMode sets the runtime auto-mode state.
 func (w *ClientWorkspace) PermissionSetAutoMode(enabled bool) {
 	_ = w.client.SetPermissionsAutoMode(context.Background(), w.workspaceID(), enabled)
+}
+
+// PermissionLevel reports the approval level in effect.
+func (w *ClientWorkspace) PermissionLevel() permission.Level {
+	level, err := w.client.GetPermissionsLevel(context.Background(), w.workspaceID())
+	if err != nil {
+		// Fail toward asking: an unread level must not read as approval to
+		// act without a human.
+		return permission.LevelPrompt
+	}
+	return level
+}
+
+// PermissionSetLevel sets the approval level.
+func (w *ClientWorkspace) PermissionSetLevel(level permission.Level) {
+	_ = w.client.SetPermissionsLevel(context.Background(), w.workspaceID(), level)
 }
 
 // -- Questions --

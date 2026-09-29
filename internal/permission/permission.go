@@ -116,6 +116,54 @@ type AutoModeGrantObserver interface {
 	OnAutoModeGrant(sessionID string)
 }
 
+// Level is how much the assistant asks before it acts. It is one of two
+// independent axes: what the assistant is doing is decided by the active
+// agent, how far it may go without asking is decided here. Switching
+// agents never changes the level, and changing the level never switches
+// agents.
+type Level uint8
+
+const (
+	// LevelPrompt asks a human about every action that the cheaper rules
+	// (tool allowlists, session grants) have already settled. This is the
+	// default.
+	LevelPrompt Level = iota
+	// LevelAuto has a safety classifier decide each action, escalating to
+	// a human prompt when it is unsure.
+	LevelAuto
+	// LevelBypass never asks. Tools still refuse system-level commands on
+	// their own.
+	LevelBypass
+)
+
+// String names the level for logs and for the wire format.
+func (l Level) String() string {
+	switch l {
+	case LevelAuto:
+		return "auto"
+	case LevelBypass:
+		return "bypass"
+	default:
+		return "prompt"
+	}
+}
+
+// ParseLevel maps a wire name back to a Level. Unknown names report false
+// so callers reject the request instead of silently accepting the zero
+// value.
+func ParseLevel(name string) (Level, bool) {
+	switch name {
+	case LevelPrompt.String():
+		return LevelPrompt, true
+	case LevelAuto.String():
+		return LevelAuto, true
+	case LevelBypass.String():
+		return LevelBypass, true
+	default:
+		return LevelPrompt, false
+	}
+}
+
 type Service interface {
 	pubsub.Subscriber[PermissionRequest]
 	// GrantPersistent grants a permission request and remembers the grant
@@ -135,6 +183,12 @@ type Service interface {
 	AutoApproveSession(sessionID string)
 	SetSkipRequests(skip bool)
 	SkipRequests() bool
+	// SetLevel sets the approval level; Level reports the level in effect.
+	// Both derive from the same state as SetSkipRequests/AutoMode, where
+	// bypass outranks auto and auto outranks prompting, so reading the
+	// level always describes what Request will do.
+	SetLevel(level Level)
+	Level() Level
 	// SetPermissionHooks installs optional external policy hooks. It may
 	// be called once at startup; calls after the service is in use should
 	// be avoided.
@@ -507,6 +561,40 @@ func (s *permissionService) SetSkipRequests(skip bool) {
 
 func (s *permissionService) SkipRequests() bool {
 	return s.skip.Load()
+}
+
+// SetLevel moves between the three approval levels, keeping the two
+// underlying switches consistent so no state exists that the UI cannot
+// name.
+func (s *permissionService) SetLevel(level Level) {
+	switch level {
+	case LevelBypass:
+		// The classifier cannot run under bypass — Request returns before
+		// hooks — so leaving it armed would only make the state lie.
+		s.SetSkipRequests(true)
+		s.SetAutoMode(false)
+	case LevelAuto:
+		// Drop the bypass first: a reader watching mid-call should never
+		// see a moment of unconditional approval on the way to auto.
+		s.SetSkipRequests(false)
+		s.SetAutoMode(true)
+	default:
+		s.SetSkipRequests(false)
+		s.SetAutoMode(false)
+	}
+}
+
+// Level reports the approval level in effect, derived from the same state
+// Request consults.
+func (s *permissionService) Level() Level {
+	switch {
+	case s.skip.Load():
+		return LevelBypass
+	case s.autoMode.Load():
+		return LevelAuto
+	default:
+		return LevelPrompt
+	}
 }
 
 func NewPermissionService(workingDir string, skip bool, allowedTools []string) Service {

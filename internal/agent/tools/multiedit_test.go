@@ -53,6 +53,10 @@ func (m *mockPermissionService) SkipRequests() bool {
 	return false
 }
 
+func (m *mockPermissionService) SetLevel(permission.Level) {}
+
+func (m *mockPermissionService) Level() permission.Level { return permission.LevelPrompt }
+
 func (m *mockPermissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[permission.PermissionNotification] {
 	return make(<-chan pubsub.Event[permission.PermissionNotification])
 }

@@ -164,6 +164,13 @@ type Workspace interface {
 	AgentQueuedPromptsList(sessionID string) []string
 	AgentClearQueue(sessionID string)
 	AgentSetMain(agentID string) error
+	// AgentMainID reports which agent currently serves the main turn and
+	// AgentMainCandidates lists the selectable ones in cycle order. A
+	// client can already set the purpose; without a read-back it can only
+	// assume the server agreed, which leaves two clients and a reconnect
+	// free to disagree about what mode they are in.
+	AgentMainID() string
+	AgentMainCandidates() []string
 	AgentSummarize(ctx context.Context, sessionID string) error
 	UpdateAgentModel(ctx context.Context) error
 	InitCoderAgent(ctx context.Context) error
@@ -186,6 +193,13 @@ type Workspace interface {
 	PermissionSetSkipRequests(skip bool)
 	PermissionAutoMode() bool
 	PermissionSetAutoMode(enabled bool)
+	// PermissionLevel reports how far the workspace may go without asking a
+	// human; PermissionSetLevel sets it. This is the permission axis and is
+	// independent of which agent serves the turn, so planning and coding
+	// can each run at any level instead of the level being an artifact of
+	// the mode the key cycle happens to be on.
+	PermissionLevel() permission.Level
+	PermissionSetLevel(level permission.Level)
 
 	// Questions
 	//

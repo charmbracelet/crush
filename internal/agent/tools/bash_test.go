@@ -53,6 +53,10 @@ func (m *mockBashPermissionService) SkipRequests() bool {
 	return false
 }
 
+func (m *mockBashPermissionService) SetLevel(permission.Level) {}
+
+func (m *mockBashPermissionService) Level() permission.Level { return permission.LevelPrompt }
+
 func (m *mockBashPermissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[permission.PermissionNotification] {
 	return make(<-chan pubsub.Event[permission.PermissionNotification])
 }
@@ -137,6 +141,10 @@ func (m *recordingPermissionService) EscalationNote(toolCallID string) string {
 func (m *recordingPermissionService) SkipRequests() bool {
 	return false
 }
+
+func (m *recordingPermissionService) SetLevel(permission.Level) {}
+
+func (m *recordingPermissionService) Level() permission.Level { return permission.LevelPrompt }
 
 func (m *recordingPermissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[permission.PermissionNotification] {
 	return make(<-chan pubsub.Event[permission.PermissionNotification])

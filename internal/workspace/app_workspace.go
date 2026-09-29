@@ -239,6 +239,20 @@ func (w *AppWorkspace) AgentSetMain(agentID string) error {
 	return w.app.AgentCoordinator.SetMainAgent(agentID)
 }
 
+func (w *AppWorkspace) AgentMainID() string {
+	if w.app.AgentCoordinator == nil {
+		return ""
+	}
+	return w.app.AgentCoordinator.MainAgentName()
+}
+
+func (w *AppWorkspace) AgentMainCandidates() []string {
+	if w.app.AgentCoordinator == nil {
+		return nil
+	}
+	return w.app.AgentCoordinator.MainAgentNames()
+}
+
 func (w *AppWorkspace) AgentSummarize(ctx context.Context, sessionID string) error {
 	if w.app.AgentCoordinator == nil {
 		return errors.New("agent coordinator not initialized")
@@ -292,6 +306,16 @@ func (w *AppWorkspace) PermissionAutoMode() bool {
 // PermissionSetAutoMode sets the runtime auto-mode state.
 func (w *AppWorkspace) PermissionSetAutoMode(enabled bool) {
 	w.app.Permissions.SetAutoMode(enabled)
+}
+
+// PermissionLevel reports the approval level in effect.
+func (w *AppWorkspace) PermissionLevel() permission.Level {
+	return w.app.Permissions.Level()
+}
+
+// PermissionSetLevel sets the approval level.
+func (w *AppWorkspace) PermissionSetLevel(level permission.Level) {
+	w.app.Permissions.SetLevel(level)
 }
 
 // -- Questions --

@@ -79,3 +79,25 @@ func (b *Backend) GetPermissionsAutoMode(workspaceID string) (bool, error) {
 
 	return ws.Permissions.AutoMode(), nil
 }
+
+// SetPermissionsLevel sets how far the workspace may go without asking.
+// Which agent serves the turn is a separate axis and is left alone.
+func (b *Backend) SetPermissionsLevel(workspaceID string, level permission.Level) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+
+	ws.Permissions.SetLevel(level)
+	return nil
+}
+
+// GetPermissionsLevel returns the approval level in effect.
+func (b *Backend) GetPermissionsLevel(workspaceID string) (permission.Level, error) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return permission.LevelPrompt, err
+	}
+
+	return ws.Permissions.Level(), nil
+}

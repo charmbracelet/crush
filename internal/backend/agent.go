@@ -139,10 +139,12 @@ func (b *Backend) GetAgentInfo(workspaceID string) (proto.AgentInfo, error) {
 	if ws.AgentCoordinator != nil {
 		m := ws.AgentCoordinator.Model()
 		agentInfo = proto.AgentInfo{
-			Model:    m.CatwalkCfg,
-			ModelCfg: m.ModelCfg,
-			IsBusy:   ws.AgentCoordinator.IsBusy(),
-			IsReady:  true,
+			Name:       ws.AgentCoordinator.MainAgentName(),
+			Selectable: ws.AgentCoordinator.MainAgentNames(),
+			Model:      m.CatwalkCfg,
+			ModelCfg:   m.ModelCfg,
+			IsBusy:     ws.AgentCoordinator.IsBusy(),
+			IsReady:    true,
 		}
 	}
 	return agentInfo, nil

@@ -44,12 +44,8 @@ func runSSHAskpass(ctx context.Context, args []string) error {
 		return errors.New("crush: no ssh prompt socket configured (askpass unavailable)")
 	}
 
-	kind, keyInfo := sshaskpass.ClassifyPrompt(prompt)
-	secret, err := sshaskpass.AskCredentialOverSocket(ctx, socketPath, sshaskpass.PromptRequest{
-		Prompt:  prompt,
-		KeyInfo: keyInfo,
-		Kind:    kind,
-	})
+	req := sshaskpass.ParsePrompt(prompt)
+	secret, err := sshaskpass.AskCredentialOverSocket(ctx, socketPath, req)
 	if err != nil {
 		// OpenSSH aborts the authentication attempt when askpass exits
 		// non-zero, which is the correct outcome for a cancelled or

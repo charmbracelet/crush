@@ -1103,6 +1103,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Dialog.NormalItem = base.Padding(0, 1).Foreground(o.fgBase)
 	s.Dialog.SelectedItem = base.Padding(0, 1).Background(o.primary).Foreground(o.onPrimary)
 	s.Dialog.InputPrompt = base.Margin(1, 1)
+	s.Dialog.SSHMessage = base.Foreground(o.primary)
 
 	s.Dialog.List = base.Margin(0, 0, 1, 0)
 	s.Dialog.ContentPanel = base.Background(o.bgLessVisible).Foreground(o.fgBase).Padding(1, 2)

@@ -43,9 +43,7 @@ var _ Dialog = (*SSH)(nil)
 
 // NewSSH creates a dialog for the given credential request.
 func NewSSH(com *common.Common, req sshaskpass.PromptRequest) *SSH {
-	m := SSH{}
-	m.com = com
-	m.req = req
+	m := SSH{com: com, req: req}
 	m.width = 0 // Set dynamically in Draw().
 	m.confirm = req.Kind == sshaskpass.KindConfirm
 
@@ -162,7 +160,7 @@ func (m *SSH) headerView() string {
 	headerOffset := titleStyle.GetHorizontalFrameSize() + t.Dialog.View.GetHorizontalFrameSize()
 	var title string
 	if m.confirm {
-		title = textStyle.Render("Confirm.")
+		title = textStyle.Render(cmp.Or(m.req.Title, "Confirm") + ".")
 	} else {
 		title = textStyle.Render("Enter your ") + accentStyle.Render(m.noun()) + textStyle.Render(".")
 	}
@@ -170,15 +168,23 @@ func (m *SSH) headerView() string {
 }
 
 func (m *SSH) descriptionView() string {
-	lines := []string{m.req.Prompt}
+	t := m.com.Styles
+	lines := []string{t.Dialog.SSHMessage.Render(m.messageView())}
 	if m.req.KeyInfo != "" {
-		if m.req.Kind == sshaskpass.KindPassword {
-			lines = append(lines, "Account: "+m.req.KeyInfo)
-		} else {
-			lines = append(lines, "Key: "+m.req.KeyInfo)
-		}
+		label := sshaskpass.KeyInfoLabel(m.req.Prompt, m.req.Kind)
+		lines = append(lines, label+": "+m.req.KeyInfo)
 	}
 	return strings.Join(lines, "\n")
+}
+
+// messageView returns the friendly description of what OpenSSH is
+// asking for, falling back to the raw prompt text when the request
+// carries no parsed copy.
+func (m *SSH) messageView() string {
+	if msg := strings.TrimSpace(m.req.Message); msg != "" {
+		return msg
+	}
+	return strings.TrimSpace(m.req.Prompt)
 }
 
 // hintView tells the user what a confirmation prompt is waiting for.
@@ -192,6 +198,9 @@ func (m *SSH) hintView() string {
 
 // noun returns the credential noun for titles.
 func (m *SSH) noun() string {
+	if m.req.Title != "" {
+		return m.req.Title
+	}
 	if m.req.Kind == sshaskpass.KindConfirm {
 		return "Confirmation"
 	}

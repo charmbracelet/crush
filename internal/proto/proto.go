@@ -274,6 +274,8 @@ type SSHPromptRequest struct {
 	Prompt  string `json:"prompt"`
 	KeyInfo string `json:"key_info,omitempty"`
 	Kind    string `json:"kind"`
+	Title   string `json:"title,omitempty"`
+	Message string `json:"message,omitempty"`
 }
 
 // SSHAnswer is the wire format for answering an SSH prompt, sent from

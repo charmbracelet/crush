@@ -108,6 +108,8 @@ func wrapEvent(ev any) *pubsub.Payload {
 				Prompt:  e.Payload.Prompt,
 				KeyInfo: e.Payload.KeyInfo,
 				Kind:    string(e.Payload.Kind),
+				Title:   e.Payload.Title,
+				Message: e.Payload.Message,
 			},
 		})
 	case pubsub.Event[sshaskpass.Notification]:

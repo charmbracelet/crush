@@ -50,6 +50,7 @@ type connEntry struct {
 	db       *sql.DB
 	refCount int
 	lock     *dataDirLock
+	writers  map[string]func()
 }
 
 var (
@@ -196,6 +197,7 @@ func Release(dataDir string) error {
 
 	delete(pool, absPath)
 	closeErr := entry.db.Close()
+	entry.releaseWriters()
 	if entry.lock != nil {
 		entry.lock.release()
 	}
@@ -209,6 +211,7 @@ func ResetPool() {
 	defer poolMu.Unlock()
 	for path, entry := range pool {
 		entry.db.Close()
+		entry.releaseWriters()
 		if entry.lock != nil {
 			entry.lock.release()
 		}

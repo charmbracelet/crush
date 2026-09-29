@@ -87,6 +87,97 @@ func TestCurrentModelSupportsImages(t *testing.T) {
 	})
 }
 
+func TestCurrentModelSupportsAudio(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns false when config is nil", func(t *testing.T) {
+		t.Parallel()
+
+		ui := newTestUIWithConfig(t, nil)
+		require.False(t, ui.currentModelSupportsAudio())
+	})
+
+	t.Run("returns false when coder agent is missing", func(t *testing.T) {
+		t.Parallel()
+
+		cfg := &config.Config{
+			Providers: csync.NewMap[string, config.ProviderConfig](),
+			Agents:    map[string]config.Agent{},
+		}
+		ui := newTestUIWithConfig(t, cfg)
+		require.False(t, ui.currentModelSupportsAudio())
+	})
+
+	t.Run("returns false when model is not found", func(t *testing.T) {
+		t.Parallel()
+
+		cfg := &config.Config{
+			Providers: csync.NewMap[string, config.ProviderConfig](),
+			Agents: map[string]config.Agent{
+				config.AgentCoder: {Model: config.SelectedModelTypeLarge},
+			},
+		}
+		ui := newTestUIWithConfig(t, cfg)
+		require.False(t, ui.currentModelSupportsAudio())
+	})
+
+	t.Run("returns true when current model supports audio", func(t *testing.T) {
+		t.Parallel()
+
+		providers := csync.NewMap[string, config.ProviderConfig]()
+		providers.Set("test-provider", config.ProviderConfig{
+			ID: "test-provider",
+			Models: []catwalk.Model{
+				{ID: "test-model", Capabilities: catwalk.Capabilities{Audio: true}},
+			},
+		})
+
+		cfg := &config.Config{
+			Models: map[config.SelectedModelType]config.SelectedModel{
+				config.SelectedModelTypeLarge: {
+					Provider: "test-provider",
+					Model:    "test-model",
+				},
+			},
+			Providers: providers,
+			Agents: map[string]config.Agent{
+				config.AgentCoder: {Model: config.SelectedModelTypeLarge},
+			},
+		}
+
+		ui := newTestUIWithConfig(t, cfg)
+		require.True(t, ui.currentModelSupportsAudio())
+	})
+
+	t.Run("returns false when audio capability is unset", func(t *testing.T) {
+		t.Parallel()
+
+		providers := csync.NewMap[string, config.ProviderConfig]()
+		providers.Set("test-provider", config.ProviderConfig{
+			ID: "test-provider",
+			Models: []catwalk.Model{
+				{ID: "test-model", Capabilities: catwalk.Capabilities{Vision: true}},
+			},
+		})
+
+		cfg := &config.Config{
+			Models: map[config.SelectedModelType]config.SelectedModel{
+				config.SelectedModelTypeLarge: {
+					Provider: "test-provider",
+					Model:    "test-model",
+				},
+			},
+			Providers: providers,
+			Agents: map[string]config.Agent{
+				config.AgentCoder: {Model: config.SelectedModelTypeLarge},
+			},
+		}
+
+		ui := newTestUIWithConfig(t, cfg)
+		require.False(t, ui.currentModelSupportsAudio())
+	})
+}
+
 func TestAttachmentsLimit(t *testing.T) {
 	t.Parallel()
 

@@ -29,6 +29,29 @@ func TestIsImagePath(t *testing.T) {
 	}
 }
 
+func TestIsAudioPath(t *testing.T) {
+	t.Parallel()
+
+	for _, path := range []string{
+		"audio.mp3",
+		"audio.wav",
+		"audio.M4A",
+		"dir/Audio.OGG",
+		"/abs/path/to/recording.FLAC",
+	} {
+		require.True(t, IsAudioPath(path), "expected %q to be an audio path", path)
+	}
+
+	for _, path := range []string{
+		"file.txt",
+		"audio.mp4",
+		"audio.wav.txt",
+		"",
+	} {
+		require.False(t, IsAudioPath(path), "expected %q to not be an audio path", path)
+	}
+}
+
 func TestPlanReadyMarkerPresent(t *testing.T) {
 	t.Parallel()
 

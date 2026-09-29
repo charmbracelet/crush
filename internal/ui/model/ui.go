@@ -4024,6 +4024,19 @@ func (m *UI) currentModelSupportsImages() bool {
 	return model != nil && model.Capabilities.Vision
 }
 
+func (m *UI) currentModelSupportsAudio() bool {
+	cfg := m.com.Config()
+	if cfg == nil {
+		return false
+	}
+	agentCfg, ok := cfg.Agents[config.AgentCoder]
+	if !ok {
+		return false
+	}
+	model := cfg.GetModelByType(agentCfg.Model)
+	return model != nil && model.Capabilities.Audio
+}
+
 // currentModelMaxAttachments returns the maximum number of attachments the
 // current model accepts in a single request. Zero means the provider does
 // not enforce a hard limit.
@@ -4726,6 +4739,9 @@ func (m *UI) insertFileCompletion(path string) tea.Cmd {
 		if !m.currentModelSupportsImages() && common.IsImagePath(path) {
 			return util.NewWarnMsg("The current model does not support image attachments")
 		}
+		if !m.currentModelSupportsAudio() && common.IsAudioPath(path) {
+			return util.NewWarnMsg("The current model does not support audio attachments")
+		}
 
 		absPath, _ := filepath.Abs(path)
 
@@ -4806,6 +4822,9 @@ func (m *UI) insertMCPResourceCompletion(item completions.ResourceCompletionValu
 
 		if !m.currentModelSupportsImages() && strings.HasPrefix(mimeType, "image/") {
 			return util.NewWarnMsg("The current model does not support image attachments")
+		}
+		if !m.currentModelSupportsAudio() && strings.HasPrefix(mimeType, "audio/") {
+			return util.NewWarnMsg("The current model does not support audio attachments")
 		}
 
 		return message.Attachment{
@@ -5904,7 +5923,7 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 			if _, err := os.Stat(path); os.IsNotExist(err) {
 				return false
 			}
-			if !common.IsImagePath(path) {
+			if !common.IsImagePath(path) && !common.IsAudioPath(path) {
 				return false
 			}
 		}
@@ -5916,8 +5935,11 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 		m.checkBangModeAfterPaste()
 		return cmd
 	}
-	if !m.currentModelSupportsImages() {
+	if !m.currentModelSupportsImages() && slices.ContainsFunc(paths, common.IsImagePath) {
 		return util.ReportWarn("The current model does not support image attachments")
+	}
+	if !m.currentModelSupportsAudio() && slices.ContainsFunc(paths, common.IsAudioPath) {
+		return util.ReportWarn("The current model does not support audio attachments")
 	}
 
 	var cmds []tea.Cmd

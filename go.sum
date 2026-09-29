@@ -6,6 +6,8 @@ charm.land/catwalk v0.52.24-0.20260915093130-70265f8c9678 h1:c+afuCy9sHIl5+yYa4M
 charm.land/catwalk v0.52.24-0.20260915093130-70265f8c9678/go.mod h1:T0YPUZkPd60T9bvvHwEqALivY+0FoHmMWvaUGTJalHk=
 charm.land/catwalk v0.52.43-0.20260928131908-a62d6f2b411c h1:581cyKRivvGPWsto1vprx8Hx7YDDDOPVfgtmF/Ulso0=
 charm.land/catwalk v0.52.43-0.20260928131908-a62d6f2b411c/go.mod h1:T0YPUZkPd60T9bvvHwEqALivY+0FoHmMWvaUGTJalHk=
+charm.land/catwalk v0.52.43-0.20260929081311-13df9b7e2589 h1:VOuIsGaXfBwqjDbHC6aq6ePbQTdPCfqWFbZMYKq1mPI=
+charm.land/catwalk v0.52.43-0.20260929081311-13df9b7e2589/go.mod h1:T0YPUZkPd60T9bvvHwEqALivY+0FoHmMWvaUGTJalHk=
 charm.land/fang/v2 v2.0.1 h1:zQCM8JQJ1JnQX/66B5jlCYBUxL2as5JXQZ2KJ6EL0mY=
 charm.land/fang/v2 v2.0.1/go.mod h1:S1GmkpcvK+OB5w9caywUnJcsMew45Ot8FXqoz8ALrII=
 charm.land/fantasy v0.45.1 h1:JWrBDftLfA08JLJlgHVFVgVk5y00vlyBFIxDtGP+YSI=

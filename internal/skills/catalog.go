@@ -54,7 +54,7 @@ func Catalog(active []*Skill, skillPaths []string, workingDir string) []CatalogE
 			Description:   skill.Description,
 			Label:         label,
 			Source:        source,
-			UserInvocable: skill.UserInvocable,
+			UserInvocable: skill.IsUserInvocable(),
 		})
 	}
 	return entries

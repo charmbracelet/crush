@@ -88,6 +88,18 @@ func (m *mockSessionService) MCPServersEnabled(context.Context) ([]string, error
 	return nil, nil
 }
 
+func (m *mockSessionService) SkillsDisabled(context.Context) ([]string, error) {
+	return nil, nil
+}
+
+func (m *mockSessionService) SetSkillDisabled(context.Context, string, bool) error {
+	return nil
+}
+
+func (m *mockSessionService) SkillsEnabled(context.Context) ([]string, error) {
+	return nil, nil
+}
+
 func (m *mockSessionService) CreateAgentToolSessionID(messageID, toolCallID string) string {
 	return fmt.Sprintf("%s$$%s", messageID, toolCallID)
 }

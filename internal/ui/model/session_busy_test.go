@@ -225,6 +225,9 @@ func runCmds(m *UI, cmd tea.Cmd) {
 	case busyStateMsg, promptQueueMsg, agentRunSubmittedMsg, lspStatesMsg, agentModelChangedMsg, mcpStateChangedMsg:
 		_, next := m.Update(msg)
 		runCmds(m, next)
+	case util.InfoMsg:
+		// Observe the status without waiting for its expiry timer.
+		m.Update(msg)
 	}
 }
 
@@ -341,6 +344,38 @@ func TestManualSummaryPresentation(t *testing.T) {
 			require.True(t, ok)
 			require.Equal(t, tc.kind, info.Type)
 			require.Equal(t, tc.text, info.Msg)
+		})
+	}
+}
+
+func TestAgentErrorNotificationDisplaysFailure(t *testing.T) {
+	pinTTLs(t)
+
+	for _, text := range []string{"failed to load messages: queued history unavailable", ""} {
+		t.Run(text, func(t *testing.T) {
+			ws := &countingWorkspace{ready: true, agentBusy: true}
+			m := newBusyUI(ws)
+			warmCaches(m, true)
+			m.status.helpKm = m
+
+			_, cmd := m.Update(pubsub.Event[notify.Notification]{
+				Type: pubsub.CreatedEvent,
+				Payload: notify.Notification{
+					Type: notify.TypeAgentError, SessionID: "s1", Message: text,
+				},
+			})
+			require.Zero(t, ws.syncProbes())
+			runCmds(m, cmd)
+			require.True(t, m.isAgentBusy(), "another queued turn can still be running")
+			require.Equal(t, 1, ws.agentBusyCalls)
+			require.Equal(t, 1, ws.queueListCalls)
+			if text == "" {
+				require.True(t, m.status.msg.IsEmpty(), "empty notifications must not replace the status")
+				return
+			}
+			require.Equal(t, util.InfoTypeError, m.status.msg.Type)
+			require.Equal(t, text, m.status.msg.Msg)
+			require.Contains(t, drawStatusLines(t, m.status, 100, 1)[0], text)
 		})
 	}
 }

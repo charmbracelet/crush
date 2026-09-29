@@ -5826,8 +5826,10 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 		}
 	case notify.TypeAgentError:
 		m.turnOutcome = tea.ProgramStateError
-		// Terminal edge like TypeAgentFinished; fall through to the
-		// busy/queue refresh below.
+		// Queued runs have no waiting caller to display their errors.
+		if n.Message != "" {
+			cmds = append(cmds, util.ReportError(errors.New(n.Message)))
+		}
 	case notify.TypeReAuthenticate:
 		return m.handleReAuthenticate(n.ProviderID)
 	case notify.TypeAWSSSOAuth:

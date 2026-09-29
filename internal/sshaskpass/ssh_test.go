@@ -27,6 +27,12 @@ func TestClassifyPrompt(t *testing.T) {
 			keyInfo: "deploy@example.com",
 		},
 		{
+			name:    "host password preserves account casing",
+			prompt:  "Deploy@Example.com's password: ",
+			want:    KindPassword,
+			keyInfo: "Deploy@Example.com",
+		},
+		{
 			name:    "key passphrase",
 			prompt:  "Enter passphrase for key '/home/user/.ssh/id_ed25519': ",
 			want:    KindPassword,
@@ -66,6 +72,116 @@ func TestClassifyPrompt(t *testing.T) {
 			require.Equal(t, c.keyInfo, keyInfo)
 		})
 	}
+}
+
+func TestParsePrompt(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		prompt  string
+		kind    Kind
+		keyInfo string
+		title   string
+		message string
+	}{
+		{
+			name:    "host password",
+			prompt:  "deploy@example.com's password: ",
+			kind:    KindPassword,
+			keyInfo: "deploy@example.com",
+			title:   "SSH Password",
+			message: "OpenSSH needs the password for deploy@example.com.",
+		},
+		{
+			name:    "key passphrase",
+			prompt:  "Enter passphrase for key '/home/user/.ssh/id_ed25519': ",
+			kind:    KindPassword,
+			keyInfo: "/home/user/.ssh/id_ed25519",
+			title:   "SSH Passphrase",
+			message: "Unlock the SSH key at /home/user/.ssh/id_ed25519.",
+		},
+		{
+			name:    "security key pin",
+			prompt:  "Enter PIN for key '/home/user/.ssh/id_ed25519_sk': ",
+			kind:    KindPassword,
+			keyInfo: "/home/user/.ssh/id_ed25519_sk",
+			title:   "Security Key PIN",
+			message: "Your security key wants its PIN.",
+		},
+		{
+			name:    "host key acceptance",
+			prompt:  "Are you sure you want to continue connecting (yes/no/[fingerprint])?",
+			kind:    KindConfirm,
+			title:   "New Host",
+			message: "OpenSSH has not seen this host before. Trust its key?",
+		},
+		{
+			name:    "ssh-add key use",
+			prompt:  "Allow use of key /home/user/.ssh/id_ed25519?\nKey fingerprint: SHA256:abcdef",
+			kind:    KindConfirm,
+			keyInfo: "/home/user/.ssh/id_ed25519",
+			title:   "Use SSH Key",
+			message: "Something wants to use the SSH key at /home/user/.ssh/id_ed25519.",
+		},
+		{
+			name:    "fido user presence",
+			prompt:  "Confirm user presence for key ECDSA-SK SHA256:abcdef",
+			kind:    KindTouch,
+			title:   "Touch Your Security Key",
+			message: "Tap your security key to continue.",
+		},
+		{
+			name:    "unknown prompt falls back to the raw text",
+			prompt:  "Verification code: ",
+			kind:    KindPassword,
+			title:   "SSH Password",
+			message: "Verification code:",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			req := ParsePrompt(c.prompt)
+			require.Equal(t, c.kind, req.Kind)
+			require.Equal(t, c.keyInfo, req.KeyInfo)
+			require.Equal(t, c.title, req.Title)
+			require.True(t, strings.HasPrefix(req.Message, c.message),
+				"message %q should start with %q", req.Message, c.message)
+			// Every message gets a playful aside appended.
+			require.NotEqual(t, c.message, req.Message)
+			require.Equal(t, c.prompt, req.Prompt)
+		})
+	}
+}
+
+func TestKeyInfoLabel(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, "Account", KeyInfoLabel("deploy@example.com's password: ", KindPassword))
+	require.Equal(t, "Key", KeyInfoLabel("Enter passphrase for key '/k': ", KindPassword))
+	require.Equal(t, "Key", KeyInfoLabel("Enter PIN for key '/k': ", KindPassword))
+	require.Equal(t, "Key", KeyInfoLabel("Allow use of key /k?", KindConfirm))
+}
+
+func TestDescribeFillsInParsedCopy(t *testing.T) {
+	t.Parallel()
+
+	req := Describe(PromptRequest{Prompt: "git@example.com's password: "})
+	require.Equal(t, KindPassword, req.Kind)
+	require.Equal(t, "git@example.com", req.KeyInfo)
+	require.Equal(t, "SSH Password", req.Title)
+	require.True(t, strings.HasPrefix(req.Message, "OpenSSH needs the password for git@example.com."))
+
+	// Pre-parsed copy is preserved untouched.
+	filled := PromptRequest{
+		Prompt:  "prompt",
+		Kind:    KindPassword,
+		KeyInfo: "key",
+		Title:   "T",
+		Message: "M",
+	}
+	require.Equal(t, filled, Describe(filled))
 }
 
 func TestWriteAskpassWrapper(t *testing.T) {

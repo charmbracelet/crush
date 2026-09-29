@@ -51,6 +51,12 @@ type PromptRequest struct {
 	KeyInfo string `json:"key_info,omitempty"`
 	// Kind reports whether this is a password or a confirmation.
 	Kind Kind `json:"kind"`
+	// Title is a short, friendly heading for the dialog, e.g. "SSH
+	// Passphrase". Parsed from the raw prompt.
+	Title string `json:"title,omitempty"`
+	// Message is a friendly one-line description of what OpenSSH is
+	// asking for, shown in place of the raw prompt text.
+	Message string `json:"message,omitempty"`
 }
 
 // Notification is published when a prompt is resolved so that clients

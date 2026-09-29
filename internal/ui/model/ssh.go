@@ -15,15 +15,17 @@ import (
 func (m *UI) handleSSHPrompt(req sshaskpass.PromptRequest) []tea.Cmd {
 	var cmds []tea.Cmd
 
+	req = sshaskpass.Describe(req)
+
 	if req.Kind == sshaskpass.KindTouch {
 		// The physical touch is the approval; OpenSSH's askpass
 		// confirmation only means "proceed", so answer it and annotate
 		// the status with a warning instead of opening an input dialog.
 		m.com.Workspace.SSHRespond(req.ID, "yes")
-		cmds = append(cmds, util.ReportWarn("Touch your security key to continue."))
+		cmds = append(cmds, util.ReportWarn(req.Message))
 		if cmd := m.sendNotification(notification.Notification{
 			Title:   "Crush is waiting...",
-			Message: "Touch your security key to continue",
+			Message: req.Message,
 		}); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -61,6 +63,9 @@ func (m *UI) handleSSHNotification(_ sshaskpass.Notification) {
 // sshWaitingMessage describes the pending prompt for desktop
 // notifications, phrased for the credential kind.
 func sshWaitingMessage(req sshaskpass.PromptRequest) string {
+	if req.Message != "" {
+		return req.Message
+	}
 	switch req.Kind {
 	case sshaskpass.KindConfirm:
 		return "SSH is waiting for you to confirm the security key or host"

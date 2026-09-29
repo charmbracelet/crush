@@ -185,7 +185,7 @@ func (m *SkillToggles) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 func (m *SkillToggles) requiredWidth(t *styles.Styles) int {
 	widest := minToggleDialogWidth
 	for _, item := range m.items {
-		row := 2 /* dot + space */ + lipgloss.Width(item.Name) + 1 + lipgloss.Width(m.itemStatus(item))
+		row := 2 /* check column */ + lipgloss.Width(item.Name)
 		widest = max(widest, row)
 	}
 	return widest + 2 /* row padding */ + t.Dialog.View.GetHorizontalFrameSize()
@@ -244,35 +244,29 @@ func (m *SkillToggles) innerContent() string {
 	rows := make([]string, 0, visible)
 	for i := first; i < last; i++ {
 		item := m.items[i]
-		status := m.itemStatus(item)
-		// The status dot mirrors the sidebar: green active, gray
-		// disabled/offline. Icon styles carry their own "●" via
-		// SetString, so Render() yields just the dot. It sits left of
-		// the name, like the sidebar rows.
-		dot := statusDot(t, status)
-		gap := max(1, rowWidth-2 /* dot + space */ -lipgloss.Width(item.Name)-lipgloss.Width(status))
+		// Enabled skills get a green check in a fixed-width column so
+		// names align; disabled skills show nothing in it — skills have
+		// no connection state worth a status column like MCPs.
+		mark := " " // Reserved check column so names align.
+		if !m.itemDisabled(item) {
+			mark = t.Tool.IconSuccess.Render()
+		}
 
 		if i == m.cursor {
 			// The full row goes through the selection style in plain
-			// text: a styled dot or status inside the content would emit
-			// ANSI resets that clear the selection background for the
-			// rest of the line, leaving the status unhighlighted.
-			rows = append(rows, t.Dialog.SelectedItem.Render(
-				"● "+item.Name+strings.Repeat(" ", gap)+status,
-			))
+			// text: a styled check inside the content would emit ANSI
+			// resets that clear the selection background for the rest of
+			// the line. Padding to rowWidth keeps the highlight spanning
+			// the row and the scrollbar column at the right edge.
+			row := styles.CheckIcon + " " + item.Name +
+				strings.Repeat(" ", max(0, rowWidth-2-lipgloss.Width(item.Name)))
+			rows = append(rows, t.Dialog.SelectedItem.Render(row))
 			continue
 		}
 
-		// Active skills share the green used by the home-page skills
-		// list; disabled ones fall back to the muted text style.
-		statusStyle := t.Resource.OnlineText
-		if status == "disabled" {
-			statusStyle = t.Dialog.SecondaryText.UnsetPadding()
-		}
-		row := dot.Render() + " " +
+		row := mark + " " +
 			t.Dialog.NormalItem.UnsetPadding().Render(item.Name) +
-			strings.Repeat(" ", gap) +
-			statusStyle.Render(status)
+			strings.Repeat(" ", max(0, rowWidth-2-lipgloss.Width(item.Name)))
 		rows = append(rows, lipgloss.NewStyle().Padding(0, 1).Render(row))
 	}
 
@@ -285,20 +279,14 @@ func (m *SkillToggles) visibleOffset(visible int) int {
 	return max(0, min(m.offset, len(m.items)-visible))
 }
 
-// itemStatus returns the right-hand status label for an item. The Local
-// scope reads the repository overrides; the Global scope reads the
+// itemDisabled reports whether the item shows as disabled given the
+// active scope: Local reads the repository overrides, Global reads the
 // config's raw disabled flag.
-func (m *SkillToggles) itemStatus(item SkillToggleItem) string {
+func (m *SkillToggles) itemDisabled(item SkillToggleItem) bool {
 	if m.scope == MCPToggleScopeGlobal {
-		if item.ConfigDisabled {
-			return "disabled"
-		}
-		return "active"
+		return item.ConfigDisabled
 	}
-	if item.localDisabled() {
-		return "disabled"
-	}
-	return "active"
+	return item.localDisabled()
 }
 
 // FullHelp implements help.KeyMap.

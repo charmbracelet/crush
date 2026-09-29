@@ -382,9 +382,9 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	}
 
 	// Automatically approve all permission requests for this
-	// non-interactive session — except when auto mode is active, in
-	// which case requests flow through the native classifier instead.
-	if !app.Permissions.AutoMode() {
+	// non-interactive session — except at the auto level, where requests
+	// flow through the native classifier instead of being waved through.
+	if app.Permissions.Level() != permission.LevelAuto {
 		app.Permissions.AutoApproveSession(sess.ID)
 	}
 

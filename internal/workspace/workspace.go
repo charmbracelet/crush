@@ -25,6 +25,11 @@ import (
 	"github.com/charmbracelet/crush/internal/skills"
 )
 
+// DefaultMainAgents is the purpose list used when a workspace cannot say
+// which agents are selectable: an older server that predates the read-back,
+// or a coordinator that has not been constructed yet.
+var DefaultMainAgents = []string{config.AgentCoder, config.AgentPlan}
+
 // Reasons the coder agent may be unavailable, returned by
 // Workspace.AgentReadyErr so callers can tell a genuinely
 // uninitialized agent apart from a lost server connection.
@@ -189,15 +194,11 @@ type Workspace interface {
 	PermissionGrant(perm permission.PermissionRequest) bool
 	PermissionGrantPersistent(perm permission.PermissionRequest) bool
 	PermissionDeny(perm permission.PermissionRequest) bool
-	PermissionSkipRequests() bool
-	PermissionSetSkipRequests(skip bool)
-	PermissionAutoMode() bool
-	PermissionSetAutoMode(enabled bool)
 	// PermissionLevel reports how far the workspace may go without asking a
 	// human; PermissionSetLevel sets it. This is the permission axis and is
-	// independent of which agent serves the turn, so planning and coding
-	// can each run at any level instead of the level being an artifact of
-	// the mode the key cycle happens to be on.
+	// independent of which agent serves the turn, so planning and coding can
+	// each run at any level instead of the level being a side effect of
+	// wherever the key cycle happens to be.
 	PermissionLevel() permission.Level
 	PermissionSetLevel(level permission.Level)
 

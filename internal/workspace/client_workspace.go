@@ -337,8 +337,11 @@ func (w *ClientWorkspace) AgentMainID() string {
 
 func (w *ClientWorkspace) AgentMainCandidates() []string {
 	info, err := w.client.GetAgentInfo(context.Background(), w.workspaceID())
-	if err != nil {
-		return nil
+	if err != nil || len(info.Selectable) == 0 {
+		// An older server reports no candidate list; guessing "coder, plan"
+		// keeps the cycle usable instead of leaving the user stuck on
+		// whichever purpose they started in.
+		return DefaultMainAgents
 	}
 	return info.Selectable
 }
@@ -420,46 +423,37 @@ func (w *ClientWorkspace) PermissionDeny(perm permission.PermissionRequest) bool
 	return resolved
 }
 
-func (w *ClientWorkspace) PermissionSkipRequests() bool {
-	skip, err := w.client.GetPermissionsSkipRequests(context.Background(), w.workspaceID())
-	if err != nil {
-		return false
-	}
-	return skip
-}
-
-func (w *ClientWorkspace) PermissionSetSkipRequests(skip bool) {
-	_ = w.client.SetPermissionsSkipRequests(context.Background(), w.workspaceID(), skip)
-}
-
-// PermissionAutoMode reports the runtime auto-mode state.
-func (w *ClientWorkspace) PermissionAutoMode() bool {
-	enabled, err := w.client.GetPermissionsAutoMode(context.Background(), w.workspaceID())
-	if err != nil {
-		return false
-	}
-	return enabled
-}
-
-// PermissionSetAutoMode sets the runtime auto-mode state.
-func (w *ClientWorkspace) PermissionSetAutoMode(enabled bool) {
-	_ = w.client.SetPermissionsAutoMode(context.Background(), w.workspaceID(), enabled)
-}
-
 // PermissionLevel reports the approval level in effect.
 func (w *ClientWorkspace) PermissionLevel() permission.Level {
-	level, err := w.client.GetPermissionsLevel(context.Background(), w.workspaceID())
-	if err != nil {
-		// Fail toward asking: an unread level must not read as approval to
-		// act without a human.
-		return permission.LevelPrompt
+	ctx := context.Background()
+	level, err := w.client.GetPermissionsLevel(ctx, w.workspaceID())
+	if err == nil {
+		return level
 	}
-	return level
+	// A server from before the level endpoint still reports the two
+	// switches it has. Derive the level from those rather than answering
+	// "prompt", which would tell the user they are about to be asked while
+	// the server quietly approves everything.
+	if skip, err := w.client.GetPermissionsSkipRequests(ctx, w.workspaceID()); err == nil && skip {
+		return permission.LevelBypass
+	}
+	if enabled, err := w.client.GetPermissionsAutoMode(ctx, w.workspaceID()); err == nil && enabled {
+		return permission.LevelAuto
+	}
+	return permission.LevelPrompt
 }
 
 // PermissionSetLevel sets the approval level.
 func (w *ClientWorkspace) PermissionSetLevel(level permission.Level) {
-	_ = w.client.SetPermissionsLevel(context.Background(), w.workspaceID(), level)
+	ctx := context.Background()
+	if err := w.client.SetPermissionsLevel(ctx, w.workspaceID(), level); err == nil {
+		return
+	}
+	// Older server: reproduce the level from the two switches it knows.
+	// Skip is cleared before auto is armed so there is no moment of
+	// unasked approval on the way to the classifier.
+	_ = w.client.SetPermissionsSkipRequests(ctx, w.workspaceID(), level == permission.LevelBypass)
+	_ = w.client.SetPermissionsAutoMode(ctx, w.workspaceID(), level == permission.LevelAuto)
 }
 
 // -- Questions --

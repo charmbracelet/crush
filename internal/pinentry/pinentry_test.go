@@ -274,6 +274,36 @@ func TestWatcherDialogReappearsDuringTouchWait(t *testing.T) {
 	require.Equal(t, Event{Active: true}, s.last)
 }
 
+func TestWatcherReleasePrecedesTouchHint(t *testing.T) {
+	t.Parallel()
+
+	s := newTestService()
+	s.reopenWindow = 100 * time.Millisecond
+	s.touchGrace = 100 * time.Millisecond
+	now := time.Now()
+	pinAndGPG := []Proc{{PID: 10, Name: "pinentry-curses"}, {PID: 20, Name: "gpg"}}
+	gpgOnly := []Proc{{PID: 20, Name: "gpg"}}
+
+	s.tick(now, pinAndGPG)
+	require.Equal(t, Event{Active: true, CtrlLRedraw: true}, s.last)
+
+	// The dialog disappears; the closing window starts on this tick.
+	now = now.Add(20 * time.Millisecond)
+	s.tick(now, gpgOnly)
+	require.Equal(t, Event{Active: true, CtrlLRedraw: true}, s.last)
+
+	// A slow poll makes the reopen window and the touch grace expire in
+	// the same tick. The handover release must still be published on its
+	// own before the touch hint, or a subscriber waiting for the release
+	// never sees it.
+	now = now.Add(300 * time.Millisecond)
+	s.tick(now, gpgOnly)
+	require.Equal(t, Event{}, s.last, "release is published even when the grace expires in the same tick")
+
+	s.tick(now.Add(20*time.Millisecond), gpgOnly)
+	require.Equal(t, Event{TouchPending: true}, s.last)
+}
+
 func TestTrackCommand(t *testing.T) {
 	t.Parallel()
 

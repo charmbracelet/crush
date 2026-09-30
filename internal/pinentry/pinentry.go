@@ -206,6 +206,11 @@ func (s *Service) tick(now time.Time, procs []Proc) {
 	pin, ctrlL, gpg := classify(procs)
 
 	s.mu.Lock()
+	// justReleased marks the tick in which the handover is released.
+	// A slow poll can make the reopen window and the touch grace expire
+	// in the same tick; the release must still be published on its own
+	// before any touch hint, so subscribers see both events.
+	var justReleased bool
 	switch s.state {
 	case stateIdle:
 		if pin {
@@ -221,6 +226,7 @@ func (s *Service) tick(now time.Time, procs []Proc) {
 			s.state = stateDialog
 		} else if now.Sub(s.closingAt) >= s.reopenWindow {
 			s.state = stateIdle
+			justReleased = true
 		}
 	}
 
@@ -244,7 +250,7 @@ func (s *Service) tick(now time.Time, procs []Proc) {
 	waiting := !s.gpgWait.IsZero() && now.Sub(s.gpgWait) >= s.touchGrace && now.Sub(s.gpgWait) <= s.touchMax
 	ev := Event{
 		Active:       s.state != stateIdle,
-		TouchPending: s.state == stateIdle && gpg && waiting,
+		TouchPending: s.state == stateIdle && !justReleased && gpg && waiting,
 		CtrlLRedraw:  s.state != stateIdle && s.ctrlL,
 	}
 	changed := ev != s.last

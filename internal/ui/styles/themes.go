@@ -248,9 +248,87 @@ func gruvboxDarkOverrides(s Styles) Styles {
 	return s
 }
 
+// charmtoneLightOpts returns the quickStyleOpts for the Charmtone light
+// theme, for black-on-white terminals. Foregrounds are darkened and
+// backgrounds lightened until they clear WCAG AA on the near-white
+// background. primary and secondary stay mid-tone so they work both as
+// text on the light background and as backgrounds for the white onPrimary
+// text. Diff colors are left unset so they derive from success and
+// destructive over bgBase.
+func charmtoneLightOpts() quickStyleOpts {
+	return quickStyleOpts{
+		primary:   lipgloss.Color("#6c5ce7"), // purple
+		secondary: lipgloss.Color("#bf3989"), // magenta
+		accent:    lipgloss.Color("#1a7f37"), // green
+		keyword:   lipgloss.Color("#7c3aed"), // violet
+
+		fgBase:       lipgloss.Color("#1f2328"), // ink
+		fgSubtle:     lipgloss.Color("#3d444d"),
+		fgMoreSubtle: lipgloss.Color("#57606a"),
+		fgMostSubtle: lipgloss.Color("#8c959f"),
+
+		onPrimary: lipgloss.Color("#ffffff"),
+
+		bgBase:         lipgloss.Color("#ffffff"),
+		bgLeastVisible: lipgloss.Color("#f6f8fa"),
+		bgLessVisible:  lipgloss.Color("#eff2f5"),
+		bgMostVisible:  lipgloss.Color("#8c959f"),
+
+		separator: lipgloss.Color("#d0d7de"),
+
+		destructive:       lipgloss.Color("#cf222e"), // red
+		error:             lipgloss.Color("#a40e26"), // dark red
+		warningSubtle:     lipgloss.Color("#4d3c00"), // dark amber
+		warning:           lipgloss.Color("#9a6700"), // amber
+		attention:         lipgloss.Color("#bc4c00"), // orange
+		busy:              lipgloss.Color("#9a6700"), // amber
+		info:              lipgloss.Color("#0550ae"), // dark blue
+		infoMoreSubtle:    lipgloss.Color("#0969da"), // blue
+		infoMostSubtle:    lipgloss.Color("#388bfd"), // light blue
+		success:           lipgloss.Color("#1a7f37"), // green
+		successMoreSubtle: lipgloss.Color("#116329"), // dark green
+		successMostSubtle: lipgloss.Color("#2da44e"), // light green
+
+		yolo:           lipgloss.Color("#9a6700"), // amber
+		plan:           lipgloss.Color("#8250df"), // purple
+		planMoreSubtle: lipgloss.Color("#b4a6f8"), // light purple
+
+		// Diff colors derive from success/destructive over bgBase.
+
+		button:         lipgloss.Color("#6c5ce7"), // purple
+		buttonSubtle:   lipgloss.Color("#d9d4f0"), // pale purple
+		buttonInactive: lipgloss.Color("#e9e7f6"), // palest purple
+		buttonHovered:  lipgloss.Color("#5f4fd0"), // dark purple
+
+		// ANSI 16-color palette for remapping raw terminal output
+		// (e.g. bang-mode shell commands) onto legible light-mode colors.
+		// White maps to ink and bright white to black, as in standard
+		// light terminal palettes, so bright text stays readable on the
+		// white background.
+		ansiBlack:   lipgloss.Color("#24292f"),
+		ansiRed:     lipgloss.Color("#cf222e"),
+		ansiGreen:   lipgloss.Color("#1a7f37"),
+		ansiYellow:  lipgloss.Color("#9a6700"),
+		ansiBlue:    lipgloss.Color("#0969da"),
+		ansiMagenta: lipgloss.Color("#bf3989"),
+		ansiCyan:    lipgloss.Color("#0e7490"),
+		ansiWhite:   lipgloss.Color("#24292f"),
+
+		ansiBrightBlack:   lipgloss.Color("#57606a"),
+		ansiBrightRed:     lipgloss.Color("#a40e26"),
+		ansiBrightGreen:   lipgloss.Color("#116329"),
+		ansiBrightYellow:  lipgloss.Color("#7d4e00"),
+		ansiBrightBlue:    lipgloss.Color("#0550ae"),
+		ansiBrightMagenta: lipgloss.Color("#a43570"),
+		ansiBrightCyan:    lipgloss.Color("#155e75"),
+		ansiBrightWhite:   lipgloss.Color("#010409"),
+	}
+}
+
 // builtinThemes maps theme names to their quickStyleOpts palette definitions.
 var builtinThemes = map[string]func() quickStyleOpts{
 	"charmtone-panther": charmtoneOpts,
+	"charmtone-light":   charmtoneLightOpts,
 	"gruvbox-dark":      gruvboxDarkOpts,
 }
 

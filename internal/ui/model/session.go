@@ -107,9 +107,10 @@ func (m *UI) loadSession(sessionID string) tea.Cmd {
 
 // reportCurrentSession returns a fire-and-forget tea.Cmd that
 // informs the workspace which session this client is currently
-// viewing. Errors are logged at debug only; the call is a hint
-// for server-side presence tracking, not correctness-critical
-// state.
+// viewing. In client/server mode the report scopes the event stream:
+// permission and question prompts are only delivered to clients
+// viewing the session that raised them. Errors are logged at debug
+// only; the call is best-effort, not correctness-critical state.
 func (m *UI) reportCurrentSession(sessionID string) tea.Cmd {
 	return func() tea.Msg {
 		if err := m.com.Workspace.SetCurrentSession(context.Background(), sessionID); err != nil {

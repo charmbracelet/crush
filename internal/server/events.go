@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -74,6 +75,7 @@ func wrapEvent(ev any) *pubsub.Payload {
 		return envelope(pubsub.PayloadTypePermissionNotification, pubsub.Event[proto.PermissionNotification]{
 			Type: e.Type,
 			Payload: proto.PermissionNotification{
+				SessionID:  e.Payload.SessionID,
 				ToolCallID: e.Payload.ToolCallID,
 				Granted:    e.Payload.Granted,
 				Denied:     e.Payload.Denied,
@@ -96,7 +98,8 @@ func wrapEvent(ev any) *pubsub.Payload {
 		return envelope(pubsub.PayloadTypeQuestionNotification, pubsub.Event[proto.QuestionNotification]{
 			Type: e.Type,
 			Payload: proto.QuestionNotification{
-				BatchID: e.Payload.BatchID,
+				BatchID:   e.Payload.BatchID,
+				SessionID: e.Payload.SessionID,
 			},
 		})
 	case pubsub.Event[message.Message]:
@@ -167,6 +170,57 @@ func wrapEvent(ev any) *pubsub.Payload {
 		slog.Warn("Unrecognized event type for SSE wrapping", "type", fmt.Sprintf("%T", ev))
 		return nil
 	}
+}
+
+// sessionScopedEventID extracts the session ID from events that
+// belong to a single session's interactive prompts (permission and
+// question requests and their resolution notifications). The second
+// return value reports whether the event is session-scoped at all.
+func sessionScopedEventID(ev any) (string, bool) {
+	switch e := ev.(type) {
+	case pubsub.Event[permission.PermissionRequest]:
+		return e.Payload.SessionID, true
+	case pubsub.Event[permission.PermissionNotification]:
+		return e.Payload.SessionID, true
+	case pubsub.Event[question.Request]:
+		return e.Payload.SessionID, true
+	case pubsub.Event[question.Notification]:
+		return e.Payload.SessionID, true
+	}
+	return "", false
+}
+
+// deliverToClient reports whether a workspace event should be written
+// to the given client's SSE stream. Session-scoped prompt events are
+// only delivered to clients currently viewing the session that raised
+// them: a permission dialog or question form is only actionable there,
+// and broadcasting it to every client in the workspace lets sessions
+// steal each other's prompts. Prompts raised by sub-agent sessions
+// (agent tool, agentic fetch) resolve to the top-level session so the
+// viewer of the parent session can answer them. Clients that have
+// reported no current session (e.g. the landing screen) receive no
+// prompts. All other events are delivered unfiltered.
+func (c *controllerV1) deliverToClient(ctx context.Context, workspaceID, clientID string, ev any) bool {
+	sessionID, scoped := sessionScopedEventID(ev)
+	if !scoped {
+		return true
+	}
+	current := c.backend.ClientCurrentSession(workspaceID, clientID)
+	if current == "" {
+		return false
+	}
+	if sessionID == current {
+		return true
+	}
+	root, err := c.backend.RootSessionID(ctx, workspaceID, sessionID)
+	if err != nil {
+		// Fail open: an unresolvable session is delivered as before
+		// rather than stranding a prompt nobody can answer.
+		slog.Debug("Failed to resolve root session for event routing",
+			"session_id", sessionID, "error", err)
+		return true
+	}
+	return root == current
 }
 
 // envelope marshals the inner event and wraps it in a pubsub.Payload.

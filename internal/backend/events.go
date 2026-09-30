@@ -2,13 +2,16 @@ package backend
 
 import (
 	"context"
+	"log/slog"
 
 	tea "charm.land/bubbletea/v2"
 
 	mcptools "github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/question"
 )
 
 // SubscribeEvents returns a per-caller event channel for a workspace.
@@ -20,6 +23,98 @@ func (b *Backend) SubscribeEvents(ctx context.Context, workspaceID string) (<-ch
 	}
 
 	return ws.Events(ctx), nil
+}
+
+// maxSessionAncestryDepth bounds how far [Backend.RootSessionID] walks
+// the parent chain when resolving a session to its top-level session.
+// Sub-agents cannot spawn sub-agents today, so one hop suffices in
+// practice; the extra slack guards against cycles and future nesting.
+const maxSessionAncestryDepth = 4
+
+// RootSessionID resolves sessionID to its top-level session by walking
+// the parent chain. Sub-agent sessions (created by the agent tool or
+// agentic fetch) carry derived IDs; their interactive prompts are
+// scoped to the top-level session a user can actually view. A session
+// with no parent resolves to itself. The sessionID is returned
+// unchanged alongside any error, so callers can fall back to the
+// unresolved ID.
+func (b *Backend) RootSessionID(ctx context.Context, workspaceID, sessionID string) (string, error) {
+	if sessionID == "" {
+		return sessionID, nil
+	}
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return sessionID, err
+	}
+	return rootSessionID(ctx, ws, sessionID)
+}
+
+// rootSessionID is the workspace-resolved variant of
+// [Backend.RootSessionID]. Workspaces without an app (synthetic test
+// workspaces) treat every session as top-level.
+func rootSessionID(ctx context.Context, ws *Workspace, sessionID string) (string, error) {
+	if sessionID == "" || ws.App == nil || ws.Sessions == nil {
+		return sessionID, nil
+	}
+	id := sessionID
+	for range maxSessionAncestryDepth {
+		sess, err := ws.Sessions.Get(ctx, id)
+		if err != nil {
+			return sessionID, err
+		}
+		if sess.ParentSessionID == "" || sess.ParentSessionID == id {
+			return id, nil
+		}
+		id = sess.ParentSessionID
+	}
+	return id, nil
+}
+
+// republishPendingPrompts re-publishes the workspace's pending
+// permission request and question batch when their session matches the
+// one a client just switched to. Without this, a prompt raised while
+// nobody viewed the session would remain invisible — and therefore
+// unanswerable — until the run was cancelled. Delivery is still scoped
+// by the per-client SSE filter, so only the session's viewers (re)see
+// the prompt.
+func (b *Backend) republishPendingPrompts(ctx context.Context, ws *Workspace, sessionID string) {
+	if ws.App == nil {
+		return
+	}
+	// The individual services are nil on workspaces with a stubbed app
+	// (tests); treat those as having no pending prompts.
+	if ws.Permissions != nil {
+		if req, ok := ws.Permissions.ActiveRequest(); ok && b.sessionMatches(ctx, ws, req.SessionID, sessionID) {
+			ws.SendEvent(pubsub.Event[permission.PermissionRequest]{
+				Type:    pubsub.CreatedEvent,
+				Payload: req,
+			})
+		}
+	}
+	if ws.Questions != nil {
+		if req, ok := ws.Questions.Pending(); ok && b.sessionMatches(ctx, ws, req.SessionID, sessionID) {
+			ws.SendEvent(pubsub.Event[question.Request]{
+				Type:    pubsub.CreatedEvent,
+				Payload: req,
+			})
+		}
+	}
+}
+
+// sessionMatches reports whether an event scoped to eventSessionID
+// belongs to the given (top-level) session, either directly or through
+// the event session's ancestry. Resolution failures fail closed here:
+// the caller simply refrains from re-publishing.
+func (b *Backend) sessionMatches(ctx context.Context, ws *Workspace, eventSessionID, sessionID string) bool {
+	if eventSessionID == sessionID {
+		return true
+	}
+	root, err := rootSessionID(ctx, ws, eventSessionID)
+	if err != nil {
+		slog.Debug("Failed to resolve root session", "session_id", eventSessionID, "error", err)
+		return false
+	}
+	return root == sessionID
 }
 
 // GetLSPStates returns the state of all LSP clients.

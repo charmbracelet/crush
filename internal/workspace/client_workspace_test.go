@@ -1000,9 +1000,9 @@ func TestClientWorkspace_RecoveryCreateIsBounded(t *testing.T) {
 	}
 }
 
-// TestClientWorkspace_GitBranch verifies that GitBranch fetches the
-// branch from the server without blocking the caller, caches the
-// result, and only re-fetches after the refresh interval expires.
+// TestClientWorkspace_GitBranch verifies that GitBranch asks the server and
+// returns what it reports. Caching and scheduling are the TUI's business, so
+// nothing here pretends otherwise.
 func TestClientWorkspace_GitBranch(t *testing.T) {
 	t.Parallel()
 
@@ -1022,13 +1022,31 @@ func TestClientWorkspace_GitBranch(t *testing.T) {
 	ws := NewClientWorkspace(c, proto.Workspace{ID: "ws-1"})
 	t.Cleanup(ws.Shutdown)
 
-	require.Empty(t, ws.GitBranch(), "first call must not block on the network")
-	require.Eventually(t, func() bool {
-		return ws.GitBranch() == "feature/x"
-	}, 2*time.Second, 10*time.Millisecond, "background fetch must populate the cache")
+	branch, err := ws.GitBranch(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, "feature/x", branch)
+	require.Equal(t, int64(1), hits.Load(), "one call must make exactly one request")
+}
 
-	for range 10 {
-		require.Equal(t, "feature/x", ws.GitBranch())
-	}
-	require.Equal(t, int64(1), hits.Load(), "cached value must not re-hit the server within the TTL")
+// TestClientWorkspace_GitBranchServerError verifies that a failing server
+// surfaces as an error rather than a silently empty branch, so the caller can
+// decide whether to keep what it already had.
+func TestClientWorkspace_GitBranchServerError(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	u, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	c, err := client.NewClient(t.TempDir(), "tcp", u.Host)
+	require.NoError(t, err)
+
+	ws := NewClientWorkspace(c, proto.Workspace{ID: "ws-1"})
+	t.Cleanup(ws.Shutdown)
+
+	_, err = ws.GitBranch(t.Context())
+	require.Error(t, err)
 }

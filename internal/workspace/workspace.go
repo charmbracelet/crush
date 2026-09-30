@@ -210,7 +210,7 @@ type Workspace interface {
 	// Config (read-only data)
 	Config() *config.Config
 	WorkingDir() string
-	GitBranch() string
+	GitBranch(ctx context.Context) (string, error)
 	Resolver() config.VariableResolver
 
 	// Config mutations (proxied to server in client mode)

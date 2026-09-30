@@ -50,8 +50,6 @@ func TestCurrentBranch(t *testing.T) {
 			runGit(t, testDir, "checkout", "-b", "main")
 		}
 
-		resetCache()
-
 		branch := CurrentBranch(testDir)
 		require.Equal(t, "main", branch)
 	})
@@ -67,8 +65,6 @@ func TestCurrentBranch(t *testing.T) {
 		runGit(t, testDir, "add", ".")
 		runGit(t, testDir, "commit", "-m", "initial commit")
 		runGit(t, testDir, "checkout", "-b", "feature/git-branch-display")
-
-		resetCache()
 
 		branch := CurrentBranch(testDir)
 		require.Equal(t, "feature/git-branch-display", branch)
@@ -93,16 +89,12 @@ func TestCurrentBranch(t *testing.T) {
 
 		runGit(t, testDir, "checkout", commitHash)
 
-		resetCache()
-
 		branch := CurrentBranch(testDir)
 		require.Empty(t, branch)
 	})
 
 	t.Run("returns empty string for non-git directory", func(t *testing.T) {
 		testDir := t.TempDir()
-
-		resetCache()
 
 		branch := CurrentBranch(testDir)
 		require.Empty(t, branch)
@@ -123,8 +115,6 @@ func TestCurrentBranch(t *testing.T) {
 		subDir := filepath.Join(testDir, "src", "internal", "pkg")
 		require.NoError(t, os.MkdirAll(subDir, 0o755))
 
-		resetCache()
-
 		branch := CurrentBranch(subDir)
 		require.Equal(t, "develop", branch)
 	})
@@ -144,8 +134,6 @@ func TestCurrentBranch(t *testing.T) {
 		// Some repositories have branch entries that point at non-branch
 		// refs, which config parsers can reject outright.
 		runGit(t, testDir, "config", "branch.odd-config.merge", "refs/pull/1234/head")
-
-		resetCache()
 
 		branch := CurrentBranch(testDir)
 		require.Equal(t, "odd-config", branch)
@@ -169,39 +157,7 @@ func TestCurrentBranch(t *testing.T) {
 			0o644,
 		))
 
-		resetCache()
-
 		branch := CurrentBranch(worktree)
 		require.Equal(t, "worktree-branch", branch)
 	})
-
-	t.Run("caches result within refresh interval", func(t *testing.T) {
-		testDir := t.TempDir()
-		runGit(t, testDir, "init")
-		runGit(t, testDir, "config", "user.email", "test@test.com")
-		runGit(t, testDir, "config", "user.name", "Test User")
-
-		testFile := filepath.Join(testDir, "test.txt")
-		require.NoError(t, os.WriteFile(testFile, []byte("test"), 0o644))
-		runGit(t, testDir, "add", ".")
-		runGit(t, testDir, "commit", "-m", "initial commit")
-		runGit(t, testDir, "checkout", "-b", "cached-branch")
-
-		resetCache()
-
-		branch1 := CurrentBranch(testDir)
-		require.Equal(t, "cached-branch", branch1)
-
-		// Switch branch externally — cache should still return old value.
-		runGit(t, testDir, "checkout", "-b", "other-branch")
-		branch2 := CurrentBranch(testDir)
-		require.Equal(t, "cached-branch", branch2)
-	})
-}
-
-// resetCache clears the global cache for testing.
-func resetCache() {
-	cache.mu.Lock()
-	cache.entries = make(map[string]cacheEntry)
-	cache.mu.Unlock()
 }

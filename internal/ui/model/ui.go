@@ -85,6 +85,15 @@ const sessionDetailsMaxHeight = 20
 // refreshed while no session is running.
 const hyperCreditsPollInterval = 60 * time.Second
 
+// gitBranchPollInterval is how often the workspace's checked-out branch is
+// re-read. A checkout emits no event Crush can subscribe to, so the branch
+// has to be polled to stay current.
+const gitBranchPollInterval = 5 * time.Second
+
+// gitBranchFetchTimeout bounds one branch read. Locally this is a file
+// read; in client/server mode it is a request to the server.
+const gitBranchFetchTimeout = 10 * time.Second
+
 // TextareaMaxHeight is the maximum height of the prompt textarea.
 const TextareaMaxHeight = 15
 
@@ -190,6 +199,16 @@ type (
 
 	// hyperCreditsPollMsg is sent by the Hyper credits poll timer.
 	hyperCreditsPollMsg struct{}
+
+	// gitBranchUpdatedMsg carries the workspace's checked-out branch. branch
+	// is empty when the workspace is not a Git repository or HEAD is
+	// detached.
+	gitBranchUpdatedMsg struct {
+		branch string
+	}
+
+	// gitBranchPollMsg is sent by the git branch poll timer.
+	gitBranchPollMsg struct{}
 )
 
 // UI represents the main user interface model.
@@ -430,6 +449,12 @@ type UI struct {
 	// no balance is rendered in either case.
 	hyperCredits *int
 
+	// gitBranch is the workspace's checked-out branch as of the last poll,
+	// empty when there is none to show. Reading it costs a file read
+	// locally and a request in client/server mode, so renders take it from
+	// here rather than asking the workspace per frame.
+	gitBranch string
+
 	// Prompt history for up/down navigation through previous messages.
 	promptHistory struct {
 		messages []string
@@ -621,6 +646,9 @@ func (m *UI) Init() tea.Cmd {
 	if m.com.IsHyper() {
 		cmds = append(cmds, m.fetchHyperCredits())
 	}
+	// The branch is shown from the first frame on, so read it now and keep
+	// polling for checkouts made outside Crush.
+	cmds = append(cmds, m.fetchGitBranch(), m.gitBranchTicker())
 	cmds = append(cmds, m.hyperCreditsTicker())
 	cmds = append(cmds, m.checkPendingMCPAuth())
 	return tea.Batch(cmds...)
@@ -1472,6 +1500,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.fetchHyperCredits())
 		}
 		cmds = append(cmds, m.hyperCreditsTicker())
+	case gitBranchUpdatedMsg:
+		m.gitBranch = msg.branch
+	case gitBranchPollMsg:
+		cmds = append(cmds, m.fetchGitBranch(), m.gitBranchTicker())
 	case util.InfoMsg:
 		if msg.Type == util.InfoTypeError {
 			slog.Error("Error reported", "error", msg.Msg)
@@ -2646,6 +2678,28 @@ func (m *UI) hyperCreditsTicker() tea.Cmd {
 	})
 }
 
+// fetchGitBranch reads the workspace's checked-out branch off the render
+// path. A failed read keeps whatever the last poll reported.
+func (m *UI) fetchGitBranch() tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), gitBranchFetchTimeout)
+		defer cancel()
+		branch, err := m.com.Workspace.GitBranch(ctx)
+		if err != nil {
+			slog.Warn("Failed to read the git branch", "error", err)
+			return nil
+		}
+		return gitBranchUpdatedMsg{branch: branch}
+	}
+}
+
+// gitBranchTicker schedules the next git branch poll.
+func (m *UI) gitBranchTicker() tea.Cmd {
+	return tea.Tick(gitBranchPollInterval, func(time.Time) tea.Msg {
+		return gitBranchPollMsg{}
+	})
+}
+
 // restoreModelFromSession checks the last assistant message in the
 // loaded session and, if it used a different provider/model than the
 // current config, restores that model/provider provided it is still
@@ -3458,6 +3512,7 @@ func (m *UI) drawHeader(scr uv.Screen, area uv.Rectangle) {
 		area.Dx(),
 		m.lspErrorCount(),
 		m.hyperCredits,
+		m.gitBranch,
 	)
 }
 

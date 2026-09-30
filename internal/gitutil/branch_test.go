@@ -19,7 +19,8 @@ func gitAvailable() bool {
 // helper to run git commands in a directory.
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.CommandContext(context.Background(), "git", args...)
+	gitArgs := append([]string{"-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false"}, args...)
+	cmd := exec.CommandContext(context.Background(), "git", gitArgs...)
 	cmd.Dir = dir
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, "git %v failed: %s", args, string(output))

@@ -494,6 +494,12 @@ type Styles struct {
 		SelectedItem lipgloss.Style
 		InputPrompt  lipgloss.Style
 
+		// SSHMessage is the friendly description of what an integrated
+		// SSH askpass prompt is asking for.
+		SSHMessage lipgloss.Style
+		// SSHKey styles the labeled account/key row shown under it.
+		SSHKey lipgloss.Style
+
 		List lipgloss.Style
 
 		Spinner lipgloss.Style

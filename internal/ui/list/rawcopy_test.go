@@ -1,11 +1,13 @@
 package list
 
 import (
+	"strings"
 	"testing"
 
 	"charm.land/glamour/v2"
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 
 	"github.com/charmbracelet/crush/internal/stringext"
@@ -95,7 +97,7 @@ func linkURLStart(rendered string) (int, int) {
 		line := buf.Line(y)
 		var runs []int
 		inRun := false
-		for x := 0; x < 80; x++ {
+		for x := range 80 {
 			c := line.At(x)
 			tagged := c != nil && c.Link.URL != ""
 			switch {
@@ -198,11 +200,73 @@ func TestRawCopyPipeInTextNotATable(t *testing.T) {
 	t.Parallel()
 
 	sty := styles.CharmtonePantera()
-	// A lone line containing the │ box rune with no neighboring border
-	// row must not be rebuilt as a table.
+	// A lone line containing the │ box rune with no neighboring table
+	// structure must not be rebuilt as a table.
 	copied := renderAndCopy(t, &sty, "the │ rune is not a table\n", 80)
 	require.Contains(t, copied, "the │ rune is not a table", got(copied))
 	require.NotContains(t, copied, "| the")
+}
+
+func TestRawCopyTableSelectionStartsMidTable(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	r, err := glamour.NewTermRenderer(glamour.WithStyles(sty.Markdown), glamour.WithWordWrap(80))
+	require.NoError(t, err)
+	rendered, err := r.Render("| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n")
+	require.NoError(t, err)
+
+	// Select from the first data row only: the header and border rows
+	// are outside the selection, but the data rows chain together and
+	// must still rebuild as pipe syntax.
+	tableRow := -1
+	for y, line := range strings.Split(ansi.Strip(rendered), "\n") {
+		if strings.Contains(line, " 1 ") {
+			tableRow = y
+			break
+		}
+	}
+	require.GreaterOrEqual(t, tableRow, 0, "expected a data row containing 1, got:\n%s", ansi.Strip(rendered))
+
+	copied := HighlightContent(rendered, uv.Rect(0, 0, 80, lipgloss.Height(rendered)), tableRow, 0, -1, -1)
+	require.Contains(t, copied, "| 1 | 2 |", "mid-table selection must rebuild pipe rows, got:\n%s", copied)
+	require.Contains(t, copied, "| 3 | 4 |", got(copied))
+}
+
+func TestRawCopyTableManyColumns(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	copied := renderAndCopy(t, &sty, "| a | b | c |\n|---|---|---|\n| 1 | 2 | 3 |\n", 80)
+	require.Contains(t, copied, "| a | b | c |\n", got(copied))
+	require.Contains(t, copied, "|---|---|---|\n", got(copied))
+	require.Contains(t, copied, "| 1 | 2 | 3 |", got(copied))
+}
+
+func TestRawCopyTableWrappedCell(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	// A cell too wide for its column wraps onto continuation rows;
+	// the continuation text is appended to the cell it belongs to so
+	// the copy keeps every word.
+	copied := renderAndCopy(t, &sty, "| key | value |\n|---|---|\n| short | a fairly long value that will wrap inside its narrow column |\n", 60)
+	require.Contains(t, copied, "| key | value |", got(copied))
+	require.Contains(t, copied, "a fairly long value that will wrap", "wrapped cell text must survive the copy, got:\n%s", copied)
+	require.Contains(t, copied, "inside its narrow column", got(copied))
+}
+
+func TestRawCopyTableQuietStyle(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	r, err := glamour.NewTermRenderer(glamour.WithStyles(sty.QuietMarkdown), glamour.WithWordWrap(80))
+	require.NoError(t, err)
+	rendered, err := r.Render("| a | b |\n|---|---|\n| 1 | 2 |\n")
+	require.NoError(t, err)
+	copied := HighlightContent(rendered, uv.Rect(0, 0, 80, lipgloss.Height(rendered)), 0, 0, -1, -1)
+	require.Contains(t, copied, "| a | b |\n", got(copied))
+	require.Contains(t, copied, "| 1 | 2 |", got(copied))
 }
 
 func TestRawCopyFullDocument(t *testing.T) {

@@ -394,18 +394,23 @@ func (b *rowsBuilder) trimSuffix(suffix string) {
 // text checklist like "[ ] fix bug" is never mistaken for a rendered
 // task.
 func restoreLineStart(text string) string {
+	// Blockquote bars are written by glamour's indent writer at column
+	// 0, never after leading spaces. Table cell continuation rows also
+	// start with cell padding before their │ bar, so requiring column 0
+	// here keeps those bars intact for the table reconstruction.
+	var quotePrefix strings.Builder
+	for strings.HasPrefix(text, "│ ") {
+		quotePrefix.WriteString("> ")
+		text = text[len("│ "):]
+	}
 	i := strings.IndexFunc(text, func(r rune) bool { return r != ' ' })
 	if i < 0 {
-		return text
+		return quotePrefix.String() + text
 	}
-	prefix, rest := text[:i], text[i:]
+	prefix, rest := quotePrefix.String()+text[:i], text[i:]
 	for changed := true; changed; {
 		changed = false
 		switch {
-		case strings.HasPrefix(rest, "│ "):
-			prefix += "> "
-			rest = rest[len("│ "):]
-			changed = true
 		case strings.HasPrefix(rest, "• "):
 			prefix += "- "
 			rest = rest[len("• "):]
@@ -497,29 +502,38 @@ func isBoxRow(text string) bool {
 
 // assembleMarkdownRows rebuilds raw pipe-table syntax from rendered
 // table rows. A table is recognized structurally: content rows
-// containing the │ column separator adjacent to an all-box-drawing
-// border row. Border rows are dropped, cells are recovered by splitting
-// on │, and the header separator row is synthesized after the first
-// row. Plain text rows that merely contain │ (with no neighboring
-// border) pass through untouched.
+// containing the │ column separator next to table structure — an
+// all-box-drawing border row or another pipe row, so a selection that
+// starts mid-table keeps reconstructing pipe syntax. Border rows are
+// dropped, cells are recovered by splitting on │, wrapped-cell
+// continuation rows are folded back into the cell they continue, and
+// the header separator row is synthesized after the first reconstructed
+// row. Rows of plain text that merely contain │ with no neighboring
+// table structure pass through untouched.
 func assembleMarkdownRows(rows []markdownRow) []string {
 	out := make([]string, 0, len(rows))
-	var table []string
+	var table [][]string
 	inTable := false
 
 	isBorder := func(i int) bool {
 		return i >= 0 && i < len(rows) && rows[i].kind == rowTableBorder
 	}
+	// isTableNeighbor reports whether the row at i is table structure a
+	// pipe row can latch onto: a border row, or another pipe row (which
+	// also lets a selection that starts mid-table keep reconstructing
+	// pipe syntax, since the data rows chain together).
+	isTableNeighbor := func(i int) bool {
+		return isBorder(i) || (i >= 0 && i < len(rows) && rows[i].kind == rowTablePipe)
+	}
 	flush := func() {
 		if len(table) == 0 {
 			return
 		}
-		cols := strings.Count(table[0], "|") - 1
-		if cols < 1 {
-			cols = 1
+		cols := max(len(table[0]), 1)
+		out = append(out, pipeCells(table[0]), "|"+strings.Repeat("---|", cols))
+		for _, row := range table[1:] {
+			out = append(out, pipeCells(row))
 		}
-		out = append(out, table[0], "|"+strings.Repeat("---|", cols))
-		out = append(out, table[1:]...)
 		table = nil
 		inTable = false
 	}
@@ -531,14 +545,14 @@ func assembleMarkdownRows(rows []markdownRow) []string {
 			case rowTableBorder:
 				// Border row: structure only, dropped from the copy.
 			case rowTablePipe:
-				table = append(table, pipeRow(r.text))
+				table = append(table, mergeContinuation(table, splitPipeCells(r.text)))
 			default:
 				flush()
 				out = append(out, r.text)
 			}
-		case r.kind == rowTablePipe && (isBorder(i+1) || isBorder(i-1)):
+		case r.kind == rowTablePipe && (isTableNeighbor(i+1) || isTableNeighbor(i-1)):
 			inTable = true
-			table = append(table, pipeRow(r.text))
+			table = append(table, splitPipeCells(r.text))
 		default:
 			out = append(out, r.text)
 		}
@@ -547,12 +561,49 @@ func assembleMarkdownRows(rows []markdownRow) []string {
 	return out
 }
 
-// pipeRow converts one rendered table content row into a raw pipe row by
-// splitting on the column separator and trimming the cell padding.
-func pipeRow(text string) string {
-	cells := strings.Split(text, "│")
-	for i, cell := range cells {
-		cells[i] = strings.TrimSpace(cell)
+// splitPipeCells splits one rendered table content row into its cell
+// texts, trimmed of the cell padding.
+func splitPipeCells(text string) []string {
+	parts := strings.Split(text, "│")
+	cells := make([]string, len(parts))
+	for i, part := range parts {
+		cells[i] = strings.TrimSpace(part)
 	}
+	return cells
+}
+
+// mergeContinuation folds a wrapped-cell continuation row into the row
+// it continues. A wrapped cell renders its continuation on its own row
+// with every other cell blank, so a row with exactly one non-blank cell
+// is folded into that cell of the previous row. A genuinely empty cell
+// in a real row matches the same shape and folds too; blank cells are
+// rare next to wrapped ones.
+func mergeContinuation(table [][]string, cells []string) []string {
+	if len(table) == 0 {
+		return cells
+	}
+	prev := table[len(table)-1]
+	nonBlank := -1
+	for i, c := range cells {
+		if c == "" {
+			continue
+		}
+		if nonBlank >= 0 {
+			return cells // more than one cell carries text: a new row
+		}
+		nonBlank = i
+	}
+	if nonBlank < 0 || nonBlank >= len(prev) {
+		return cells
+	}
+	if prev[nonBlank] == "" {
+		return cells // continuation of an empty cell is a new row
+	}
+	prev[nonBlank] += " " + cells[nonBlank]
+	return prev
+}
+
+// pipeCells formats one table row's cells as a raw pipe row.
+func pipeCells(cells []string) string {
 	return "| " + strings.Join(cells, " | ") + " |"
 }

@@ -66,14 +66,14 @@ func (d *MultiChoice) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	}
 
 	if done, cmd, handled := d.handleFillInFocused(msg, d.keyDone, func() (bool, tea.Cmd) {
+		// Esc leaves editing but keeps the typed text, returning
+		// to selection on the same question.
 		d.fillIn.Blur()
 		return false, nil
 	}, func() (bool, tea.Cmd) {
-		val := strings.TrimSpace(d.fillIn.Value())
-		if val != "" {
-			d.answer(d.respond())
-			return true, nil
-		}
+		// Enter accepts the typed text and returns to selection;
+		// the question itself is submitted from a choice row.
+		d.fillIn.Blur()
 		return false, nil
 	}); handled {
 		return done, cmd
@@ -153,7 +153,7 @@ func (d *MultiChoice) ShortHelp() []key.Binding {
 		return []key.Binding{d.keyClose, key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "save note"))}
 	}
 	if d.isFillIn() && d.fillIn.Focused() {
-		return []key.Binding{d.navUp, d.keyDone, d.keyClose}
+		return []key.Binding{d.navUp, d.keyDone, d.keyBack}
 	}
 	return []key.Binding{d.keyUp, d.keyDown, d.keyToggle, numKeyBinding(len(d.Request.Choices)), d.keyNote, d.keyDone, d.keyClose}
 }

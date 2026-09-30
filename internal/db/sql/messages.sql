@@ -17,7 +17,7 @@ SELECT m.*
 FROM messages m
 WHERE m.session_id = ?
   AND m.created_at >= (SELECT s.created_at FROM messages s WHERE s.id = ?)
-ORDER BY m.created_at ASC;
+ORDER BY m.created_at ASC, m.rowid ASC;
 
 -- name: CreateMessage :one
 INSERT INTO messages (

@@ -50,6 +50,7 @@ SET
     prompt_tokens = ?,
     completion_tokens = ?,
     summary_message_id = ?,
+    summary_cut_message_id = ?,
     cost = ?,
     todos = ?
 WHERE id = ?

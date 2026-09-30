@@ -1316,6 +1316,7 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 		if !json.Valid(wsData) {
 			return fmt.Errorf("invalid JSON in config file %s", workspacePath)
 		}
+		wsData = migrateCatwalkV2File(workspacePath, wsData)
 		merged, mergeErr := loadFromBytes(append([][]byte{mustMarshalConfig(cfg)}, wsData))
 		if mergeErr == nil {
 			dataDir := cfg.Options.DataDirectory

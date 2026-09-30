@@ -38,6 +38,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
+	"github.com/charmbracelet/crush/internal/compaction"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/hooks"
@@ -53,11 +54,6 @@ import (
 
 const (
 	DefaultSessionName = "Untitled Session"
-
-	// Constants for auto-summarization thresholds
-	largeContextWindowThreshold = 200_000
-	largeContextWindowBuffer    = 20_000
-	smallContextWindowRatio     = 0.2
 )
 
 var userAgent = fmt.Sprintf("Charm-Crush/%s (https://charm.land/crush)", version.Version)
@@ -1124,25 +1120,22 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		},
 		StopWhen: []fantasy.StopCondition{
 			func(_ []fantasy.StepResult) bool {
-				cw := int64(largeModel.CatwalkCfg.ContextWindow)
-				// If context window is unknown (0), skip auto-summarize
-				// to avoid immediately truncating custom/local models.
-				if cw == 0 {
+				if a.disableAutoSummarize {
 					return false
 				}
-				tokens := currentSession.CompletionTokens + currentSession.PromptTokens
-				remaining := cw - tokens
-				var threshold int64
-				if cw > largeContextWindowThreshold {
-					threshold = largeContextWindowBuffer
-				} else {
-					threshold = int64(float64(cw) * smallContextWindowRatio)
+				// A context window of zero means unknown: custom and local
+				// models are then never summarized out from under the user.
+				// The reserve also covers the completion this turn would ask
+				// for, which the raw buffer did not.
+				if !compaction.ShouldCompact(
+					currentSession.PromptTokens+currentSession.CompletionTokens,
+					int64(largeModel.CatwalkCfg.ContextWindow),
+					call.MaxOutputTokens,
+				) {
+					return false
 				}
-				if (remaining <= threshold) && !a.disableAutoSummarize {
-					shouldSummarize = true
-					return true
-				}
-				return false
+				shouldSummarize = true
+				return true
 			},
 			func(steps []fantasy.StepResult) bool {
 				return hasRepeatedToolCalls(steps, loopDetectionWindowSize, loopDetectionMaxRepeats)
@@ -1429,7 +1422,23 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID, trigger string,
 		return fmt.Errorf("%w: %s", ErrCompactionBlocked, pre.Reason)
 	}
 
-	aiMsgs, _ := a.preparePrompt(msgs, largeModel.CatwalkCfg.Capabilities.Vision, largeModel.CatwalkCfg.Capabilities.Audio)
+	// Merge the checkpoint already in context instead of summarizing it a
+	// second time, and measure the cut against the live transcript ahead of
+	// it.
+	previousCheckpoint, body := splitCheckpoint(msgs)
+	cut := compaction.Plan(body, compaction.DefaultPolicy)
+	region := body
+	if cut.Found {
+		// Keep the recent turns verbatim. The next model sees them as written
+		// instead of as somebody else's description of them, and this request
+		// stops re-sending a tail it is about to discard anyway.
+		region = body[:cut.Index]
+	}
+	if len(region) == 0 {
+		return nil
+	}
+
+	aiMsgs, _ := a.preparePrompt(region, largeModel.CatwalkCfg.Capabilities.Vision, largeModel.CatwalkCfg.Capabilities.Audio)
 
 	genCtx, cancel := context.WithCancel(ctx)
 	ac := &activeCancel{cancel: cancel}
@@ -1457,7 +1466,20 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID, trigger string,
 		return err
 	}
 
-	summaryPromptText := buildSummaryPrompt(currentSession.Todos)
+	// Move the text this checkpoint is about to replace out of the context
+	// window rather than away from it. Best-effort: when it fails the
+	// checkpoint simply carries no pointer.
+	transcriptPath := ""
+	if path, err := compaction.WriteTranscript(
+		a.compactionTranscriptDir(), sessionID, summaryMessage.ID, region,
+	); err != nil {
+		slog.Warn("Failed to preserve the pre-checkpoint transcript",
+			"session_id", sessionID, "error", err)
+	} else {
+		transcriptPath = path
+	}
+
+	summaryPromptText := buildSummaryPrompt(currentSession.Todos, previousCheckpoint, transcriptPath)
 
 	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:          summaryPromptText,
@@ -1510,6 +1532,17 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID, trigger string,
 		return err
 	}
 
+	// Say what this checkpoint stands in for and where the displaced text
+	// went. The footer is generated rather than model-written so the numbers
+	// and the path can be trusted.
+	summaryMessage.AppendContent("\n\n" + compaction.Info{
+		ReplacedMessages: len(region),
+		ReplacedTokens:   compaction.EstimateAll(region),
+		KeptMessages:     cut.Kept,
+		KeptTokens:       cut.KeptTokens,
+		TranscriptPath:   transcriptPath,
+	}.Render())
+
 	var openrouterCost *float64
 	for _, step := range resp.Steps {
 		summaryMessage.PrismModelID, summaryMessage.PrismModelName = extractPrismModel(step.ProviderMetadata)
@@ -1535,8 +1568,18 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID, trigger string,
 	// Just in case, get just the last usage info.
 	usage := resp.Response.Usage
 	currentSession.SummaryMessageID = summaryMessage.ID
+	currentSession.SummaryCutMessageID = ""
+	if cut.Found {
+		currentSession.SummaryCutMessageID = cut.MessageID
+		// The next request sends this checkpoint plus the turns the cut kept,
+		// so count both. Zeroing the prompt counter used to advertise an empty
+		// context, which let a session be compacted again before it had done
+		// any work.
+		currentSession.PromptTokens = compaction.Tokens(summaryMessage.Content().Text) + cut.KeptTokens
+	} else {
+		currentSession.PromptTokens = 0
+	}
 	currentSession.CompletionTokens = summaryCompletionTokens(usage, summaryMessage)
-	currentSession.PromptTokens = 0
 	currentSession.EstimatedUsage = usageIsZero(usage)
 	_, err = a.sessions.Save(genCtx, currentSession)
 	if err != nil {
@@ -1762,25 +1805,80 @@ func filterFileParts(parts []fantasy.MessagePart) []fantasy.MessagePart {
 func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.Session) ([]message.Message, error) {
 	// Read only the tail a compacted session actually sends. The full
 	// transcript can be tens of megabytes on the single shared connection.
-	msgs, err := a.messages.ListFromSummary(ctx, session.ID, session.SummaryMessageID)
+	//
+	// A checkpoint that kept turns verbatim sits after them in creation order
+	// but must be sent before them, so the boundary read is the cut and the
+	// checkpoint is moved back to the front afterwards.
+	boundaryID := session.SummaryMessageID
+	if session.SummaryCutMessageID != "" {
+		boundaryID = session.SummaryCutMessageID
+	}
+	msgs, err := a.messages.ListFromSummary(ctx, session.ID, boundaryID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list messages: %w", err)
 	}
+	if boundaryID == "" {
+		return msgs, nil
+	}
 
-	if session.SummaryMessageID != "" {
-		summaryMsgIndex := -1
-		for i, msg := range msgs {
-			if msg.ID == session.SummaryMessageID {
-				summaryMsgIndex = i
-				break
-			}
-		}
-		if summaryMsgIndex != -1 {
-			msgs = msgs[summaryMsgIndex:]
-			msgs[0].Role = message.User
+	summaryIndex, cutIndex := -1, -1
+	for i, msg := range msgs {
+		switch msg.ID {
+		case session.SummaryMessageID:
+			summaryIndex = i
+		case session.SummaryCutMessageID:
+			cutIndex = i
 		}
 	}
-	return msgs, nil
+
+	if session.SummaryCutMessageID == "" {
+		if summaryIndex != -1 {
+			msgs = msgs[summaryIndex:]
+			msgs[0].Role = message.User
+		}
+		return msgs, nil
+	}
+
+	if summaryIndex == -1 || cutIndex == -1 {
+		// A dangling checkpoint or cut must not silently erase history.
+		return a.messages.List(ctx, session.ID)
+	}
+
+	// The checkpoint is presented as the user turn carrying it, which is how
+	// every earlier summary was shown to the model.
+	checkpoint := msgs[summaryIndex]
+	checkpoint.Role = message.User
+	view := make([]message.Message, 0, len(msgs))
+	view = append(view, checkpoint)
+	for i, msg := range msgs {
+		if i < cutIndex || i == summaryIndex {
+			continue
+		}
+		view = append(view, msg)
+	}
+	return view, nil
+}
+
+// splitCheckpoint separates a checkpoint already in the session view from the
+// live transcript ahead of it.
+func splitCheckpoint(msgs []message.Message) (previous string, body []message.Message) {
+	if len(msgs) > 0 && msgs[0].IsSummaryMessage {
+		return compaction.Body(msgs[0].Content().Text), msgs[1:]
+	}
+	return "", msgs
+}
+
+// compactionTranscriptDir is where displaced transcript regions are kept, or
+// "" when the session has no data directory to keep them in.
+func (a *sessionAgent) compactionTranscriptDir() string {
+	if a.cfg == nil {
+		return ""
+	}
+	cfg := a.cfg.Config()
+	if cfg == nil {
+		return ""
+	}
+	return compaction.TranscriptDir(cfg.Options.DataDirectory)
 }
 
 // hasUserTextMessage reports whether any user message in msgs contains
@@ -2367,9 +2465,19 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 }
 
 // buildSummaryPrompt constructs the prompt text for session summarization.
-func buildSummaryPrompt(todos []session.Todo) string {
+func buildSummaryPrompt(todos []session.Todo, previousCheckpoint, transcriptPath string) string {
 	var sb strings.Builder
-	sb.WriteString("Provide a detailed summary of our conversation above.")
+	sb.WriteString("Write the checkpoint for the conversation above.")
+
+	if previousCheckpoint != "" {
+		sb.WriteString("\n\n<previous_checkpoint>\n")
+		sb.WriteString(previousCheckpoint)
+		sb.WriteString("\n</previous_checkpoint>\n\n")
+		sb.WriteString("A model earlier in this session wrote the checkpoint above, and the messages it replaced are gone. ")
+		sb.WriteString("Carry forward everything in it that still matters, correct anything the conversation above contradicts, and drop only what has clearly been settled. ")
+		sb.WriteString("Do not compress it into a shorter restatement.")
+	}
+
 	if len(todos) > 0 {
 		sb.WriteString("\n\n## Current Todo List\n\n")
 		for _, t := range todos {
@@ -2378,6 +2486,13 @@ func buildSummaryPrompt(todos []session.Todo) string {
 		sb.WriteString("\nInclude these tasks and their statuses in your summary. ")
 		sb.WriteString("Instruct the resuming assistant to use the `todos` tool to continue tracking progress on these tasks.")
 	}
+
+	if transcriptPath != "" {
+		sb.WriteString("\n\nThe full text of the conversation being replaced is saved at:\n\n")
+		sb.WriteString(transcriptPath)
+		sb.WriteString("\n\nDo not copy that transcript into the checkpoint. Record its path so the next model can look something up verbatim, and prefer keeping exact identifiers, error strings, and file paths over paraphrasing them.")
+	}
+
 	return sb.String()
 }
 

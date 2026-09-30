@@ -54,8 +54,10 @@ func (b *Backend) GetAgentSession(ctx context.Context, workspaceID, sessionID st
 	}
 
 	var isSessionBusy bool
+	var routerSavings float64
 	if ws.AgentCoordinator != nil {
 		isSessionBusy = ws.AgentCoordinator.IsSessionBusy(sessionID)
+		routerSavings = ws.AgentCoordinator.RouterSavings(sessionID)
 	}
 
 	return proto.AgentSession{
@@ -63,7 +65,8 @@ func (b *Backend) GetAgentSession(ctx context.Context, workspaceID, sessionID st
 			ID:    se.ID,
 			Title: se.Title,
 		},
-		IsBusy: isSessionBusy,
+		IsBusy:        isSessionBusy,
+		RouterSavings: routerSavings,
 	}, nil
 }
 

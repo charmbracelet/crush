@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -41,6 +42,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
+	"github.com/charmbracelet/crush/internal/router"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
 	"golang.org/x/sync/errgroup"
@@ -137,6 +139,11 @@ type Coordinator interface {
 	ClearQueue(sessionID string)
 	Summarize(context.Context, string) error
 	Model() Model
+	LastRouterDecision() (router.Decision, bool)
+	RouterQuerying() (string, bool)
+	LastRouterModel() string
+	LastRouterError() string
+	RouterSavings(sessionID string) float64
 	UpdateModels(ctx context.Context) error
 	GenerateTitle(ctx context.Context, sessionID, prompt string)
 }
@@ -161,6 +168,39 @@ type coordinator struct {
 	mainAgent     SessionAgent
 	mainAgentName string
 	agents        map[string]SessionAgent
+
+	// routerMu guards lastRouterDecision/hasRouterDecision, recorded by
+	// run() after each router call and read by LastRouterDecision from a
+	// future status-bar indicator. It also guards
+	// routerQuerying/routerQueryingModel, set for the duration of the
+	// in-flight router HTTP call so the sidebar can show a live
+	// "consulting" indicator.
+	routerMu            sync.RWMutex
+	lastRouterDecision  router.Decision
+	hasRouterDecision   bool
+	routerQuerying      bool
+	routerQueryingModel string
+	// lastRouterModel is the router backend's own model id (the
+	// classifier, e.g. "~typesafe/jev-latest") used for the most recent
+	// router call, kept around after routerQueryingModel clears so the
+	// sidebar can still say which model produced the last decision.
+	lastRouterModel string
+	// lastRouterError is the most recent router failure message (a
+	// consulted-but-failed call, an unrecognized provider, or a missing
+	// base URL for a local provider) while the router is enabled, so the
+	// UI can show that the router isn't working instead of just quietly
+	// showing nothing. Cleared to "" on the next successful call.
+	lastRouterError string
+
+	// savingsMu guards routerSavingsBySession: cumulative estimated
+	// dollar savings from the router's per-message reasoning/model
+	// override, vs. what the session's statically configured model would
+	// have cost for the same token usage. Session-scoped (not
+	// coordinator-wide like the fields above) and in-memory only — it
+	// resets on process restart, which matches "this session's savings"
+	// rather than a durable ledger.
+	savingsMu              sync.Mutex
+	routerSavingsBySession map[string]float64
 
 	// Skills discovery results (session-start snapshot).
 	allSkills    []*skills.Skill // Pre-filter: all discovered after dedup.
@@ -203,21 +243,22 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	skillTracker := skills.NewTracker(activeSkills)
 
 	c := &coordinator{
-		cfg:          opts.Config,
-		sessions:     opts.Sessions,
-		messages:     opts.Messages,
-		permissions:  opts.Permissions,
-		questions:    opts.Questions,
-		history:      opts.History,
-		filetracker:  opts.FileTracker,
-		lspManager:   opts.LSPManager,
-		notify:       opts.Notify,
-		runComplete:  opts.RunComplete,
-		agents:       make(map[string]SessionAgent),
-		allSkills:    allSkills,
-		activeSkills: activeSkills,
-		skillTracker: skillTracker,
-		interactive:  opts.Interactive,
+		cfg:                    opts.Config,
+		sessions:               opts.Sessions,
+		messages:               opts.Messages,
+		permissions:            opts.Permissions,
+		questions:              opts.Questions,
+		history:                opts.History,
+		filetracker:            opts.FileTracker,
+		lspManager:             opts.LSPManager,
+		notify:                 opts.Notify,
+		runComplete:            opts.RunComplete,
+		agents:                 make(map[string]SessionAgent),
+		routerSavingsBySession: make(map[string]float64),
+		allSkills:              allSkills,
+		activeSkills:           activeSkills,
+		skillTracker:           skillTracker,
+		interactive:            opts.Interactive,
 	}
 
 	agentCfg, ok := opts.Config.Config().Agents[config.AgentCoder]
@@ -271,6 +312,122 @@ func (c *coordinator) activeAgent() (SessionAgent, string) {
 func (c *coordinator) currentAgent() SessionAgent {
 	agent, _ := c.activeAgent()
 	return agent
+}
+
+// setLastRouterDecision records the most recent router decision so a
+// future status-bar indicator can read it. It is coordinator-wide, not
+// per-session, matching how Model() already exposes a single "current"
+// snapshot rather than per-session state.
+func (c *coordinator) setLastRouterDecision(d router.Decision) {
+	c.routerMu.Lock()
+	defer c.routerMu.Unlock()
+	c.lastRouterDecision = d
+	c.hasRouterDecision = true
+}
+
+// clearLastRouterDecision marks that no router decision was actually
+// applied to the most recent message — either the router failed open, or
+// its chosen effort was not supported by the model in use. The status
+// bar must reflect "no decision was applied to the last message", not a
+// stale decision from an earlier message.
+func (c *coordinator) clearLastRouterDecision() {
+	c.routerMu.Lock()
+	defer c.routerMu.Unlock()
+	c.lastRouterDecision = router.Decision{}
+	c.hasRouterDecision = false
+}
+
+// LastRouterDecision returns the most recent router decision and whether
+// one has been made yet in this process.
+func (c *coordinator) LastRouterDecision() (router.Decision, bool) {
+	c.routerMu.RLock()
+	defer c.routerMu.RUnlock()
+	return c.lastRouterDecision, c.hasRouterDecision
+}
+
+// setRouterQuerying records whether a router HTTP call is currently in
+// flight, and which model it was sent to, so the sidebar can show a live
+// "consulting" indicator instead of only the decision the call eventually
+// produces. Cleared (active=false) once the call returns, whether it
+// succeeded or failed.
+func (c *coordinator) setRouterQuerying(model string, active bool) {
+	c.routerMu.Lock()
+	defer c.routerMu.Unlock()
+	c.routerQuerying = active
+	if active {
+		c.routerQueryingModel = model
+		c.lastRouterModel = model
+	} else {
+		c.routerQueryingModel = ""
+	}
+}
+
+// RouterQuerying returns the model a router call is currently in flight
+// against, and whether one is in flight at all.
+func (c *coordinator) RouterQuerying() (string, bool) {
+	c.routerMu.RLock()
+	defer c.routerMu.RUnlock()
+	return c.routerQueryingModel, c.routerQuerying
+}
+
+// LastRouterModel returns the router backend's own model id used for the
+// most recent router call (regardless of whether a decision from it was
+// applied), or "" if the router has never been called this process.
+func (c *coordinator) LastRouterModel() string {
+	c.routerMu.RLock()
+	defer c.routerMu.RUnlock()
+	return c.lastRouterModel
+}
+
+// setLastRouterError records the most recent router failure message, or
+// clears it ("") after a successful call.
+func (c *coordinator) setLastRouterError(msg string) {
+	c.routerMu.Lock()
+	defer c.routerMu.Unlock()
+	c.lastRouterError = msg
+}
+
+// LastRouterError returns the most recent router failure message while
+// the router is enabled, or "" if the last consulted call succeeded (or
+// the router has never been consulted this process).
+func (c *coordinator) LastRouterError() string {
+	c.routerMu.RLock()
+	defer c.routerMu.RUnlock()
+	return c.lastRouterError
+}
+
+// addRouterSavings accumulates an estimated dollar savings (or, when
+// negative, an overspend) for sessionID from one router-applied message.
+func (c *coordinator) addRouterSavings(sessionID string, delta float64) {
+	c.savingsMu.Lock()
+	defer c.savingsMu.Unlock()
+	if c.routerSavingsBySession == nil {
+		c.routerSavingsBySession = make(map[string]float64)
+	}
+	c.routerSavingsBySession[sessionID] += delta
+}
+
+// RouterSavings returns the cumulative estimated dollar savings the
+// router has produced for sessionID this process, by comparing what each
+// router-applied message actually cost against what the session's
+// statically configured model would have cost for the same token usage.
+// It is an estimate, not a measured figure — the counterfactual call is
+// never actually made — and is 0 for a session the router has never
+// affected.
+func (c *coordinator) RouterSavings(sessionID string) float64 {
+	c.savingsMu.Lock()
+	defer c.savingsMu.Unlock()
+	return c.routerSavingsBySession[sessionID]
+}
+
+// estimateModelCost prices usage against model's catalog rates, the same
+// formula sessionAgent.updateSessionUsage uses for the real session
+// cost, so a router-savings estimate stays comparable to it.
+func estimateModelCost(model catwalk.Model, usage fantasy.Usage) float64 {
+	return model.CostPer1MInCached/1e6*float64(usage.CacheCreationTokens) +
+		model.CostPer1MOutCached/1e6*float64(usage.CacheReadTokens) +
+		model.CostPer1MIn/1e6*float64(usage.InputTokens) +
+		model.CostPer1MOut/1e6*float64(usage.OutputTokens)
 }
 
 func (c *coordinator) SetMainAgent(agentName string) error {
@@ -331,14 +488,100 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	// its model settings, and the model refresh below must all target the
 	// same agent even if SetMainAgent swaps the main agent mid-flight.
 	agent, agentName := c.activeAgent()
+
+	routerCfg := c.cfg.Config().Options.Router
+	providerAPIKey := ""
+	if p, ok := c.cfg.Config().Providers.Get(routerProviderName(routerCfg)); ok {
+		providerAPIKey = p.APIKey
+
+	}
+	decision, decisionOK, routerErr := resolveRouterDecision(ctx, routerCfg, providerAPIKey, prompt, c.setRouterQuerying)
+	if routerCfg != nil && routerCfg.Enabled {
+		// Only surface an error while the router is actually turned on —
+		// routerErr is nil (not an error) when it's simply disabled, but
+		// this also guards against a future resolveRouterDecision that
+		// returns a stray non-nil error on the disabled path.
+		if routerErr != nil {
+			c.setLastRouterError(routerErr.Error())
+		} else {
+			c.setLastRouterError("")
+		}
+	}
+	if decisionOK {
+		// The classifier call happened and cost this regardless of
+		// whether its decision is applied below, or of whether the main
+		// LLM call that follows even succeeds — charge it now rather
+		// than deferring to where the rest of the savings math lives
+		// further down, which is gated on that call having succeeded.
+		c.addRouterSavings(sessionID, -decision.CallCost)
+	}
+
 	if err := c.updateAgentModels(ctx, agent, agentName); err != nil {
 		return nil, fmt.Errorf("failed to update models: %w", err)
 	}
 
 	model := agent.Model()
+	// baselineModel is the "what if" the router savings estimate below
+	// prices the same usage against. With a model pool configured, that's
+	// the pool's priciest model — "how much do I save vs. always sending
+	// this to the top model" — since the pool is the actual alternative
+	// the router is choosing between. Without one (reasoning-effort-only
+	// routing, no model switching), it falls back to the session's
+	// statically configured model, which is the only alternative there
+	// is.
+	baselineModel := model.CatwalkCfg
+	if routerCfg != nil && len(routerCfg.ModelPool) > 0 {
+		if priciest, ok := c.mostExpensivePoolModelAcrossProviders(routerCfg.ModelPool); ok {
+			baselineModel = priciest
+		}
+	}
+	var modelOverride *Model
+	// Gate on the model_choice answer's own confidence being at least
+	// somewhat better than picking blindly among the pool — not on
+	// routerCfg's confidence_threshold (that one is calibrated for "is
+	// this a good decision", a soft LowConfidence flag applied either
+	// way; a classifier can be well-calibrated there while essentially
+	// guessing on model_choice, since it was never trained to judge
+	// unfamiliar model ids). Below the random-chance floor isn't "low
+	// confidence", it's noise indistinguishable from a coin flip across
+	// the pool, and applying it every single message just because a
+	// low bar like 0.42 is normally still meaningful signal would defeat
+	// routing entirely. See router.Decision.ModelConfidence and
+	// RouterOptions.MinModelConfidence (the floor itself is configurable
+	// per EffectiveMinModelConfidence — 0/unset computes 1/pool size).
+	if decisionOK && routerCfg != nil && len(routerCfg.ModelPool) > 0 &&
+		decision.ModelConfidence > routerCfg.EffectiveMinModelConfidence(len(routerCfg.ModelPool)) {
+		if override, ok := c.resolveRouterModelOverride(ctx, routerCfg.ModelPool, decision.ModelID); ok {
+			modelOverride = &override
+			model = override
+		}
+	}
+
 	maxTokens := model.CatwalkCfg.DefaultMaxTokens
 	if model.ModelCfg.MaxTokens != 0 {
 		maxTokens = model.ModelCfg.MaxTokens
+	}
+
+	var effortOverride string
+	appliedDecision := router.Decision{}
+	appliedAny := false
+	if decisionOK {
+		appliedDecision.Confidence = decision.Confidence
+		appliedDecision.LowConfidence = decision.LowConfidence
+	}
+	if decisionOK && slices.Contains(model.CatwalkCfg.ReasoningLevels, decision.ReasoningEffort) {
+		effortOverride = decision.ReasoningEffort
+		appliedDecision.ReasoningEffort = decision.ReasoningEffort
+		appliedAny = true
+	}
+	if modelOverride != nil {
+		appliedDecision.ModelID = decision.ModelID
+		appliedAny = true
+	}
+	if appliedAny {
+		c.setLastRouterDecision(appliedDecision)
+	} else {
+		c.clearLastRouterDecision()
 	}
 
 	providerCfg, ok := c.cfg.Config().Providers.Get(model.ModelCfg.Provider)
@@ -346,7 +589,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 		return nil, errModelProviderNotConfigured
 	}
 
-	mergedOptions, temp, topP, topK, freqPenalty, presPenalty := mergeCallOptions(model, providerCfg)
+	mergedOptions, temp, topP, topK, freqPenalty, presPenalty := mergeCallOptions(model, providerCfg, effortOverride)
 
 	if err := c.refreshTokenIfExpired(ctx, providerCfg); err != nil {
 		// NOTE(@andreynering): We don't return here because the event handling to ask the user to reauthenticate
@@ -380,6 +623,18 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	runID := RunIDFromContext(ctx)
 	channel := ChannelFromContext(ctx)
 	c.syncSessionChannel(ctx, sessionID, channel)
+	// Propagate the applied reasoning-effort and model decisions to "task"
+	// sub-agents spawned during this turn, but only when the router
+	// opted into it (RouterOptions.ApplySubagents) — sub-agents keep
+	// their own statically configured model/effort otherwise.
+	if routerCfg != nil && routerCfg.ApplySubagents {
+		if effortOverride != "" {
+			ctx = WithRouterSubAgentEffort(ctx, effortOverride)
+		}
+		if modelOverride != nil {
+			ctx = WithRouterSubAgentModel(ctx, modelOverride)
+		}
+	}
 	run := func() (*fantasy.AgentResult, error) {
 		return agent.Run(ctx, SessionAgentCall{
 			SessionID:         sessionID,
@@ -390,6 +645,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 			Attachments:       attachments,
 			MaxOutputTokens:   maxTokens,
 			ProviderOptions:   mergedOptions,
+			ModelOverride:     modelOverride,
 			Temperature:       temp,
 			TopP:              topP,
 			TopK:              callTopK(providerCfg, topK),
@@ -403,6 +659,36 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	beforeLoaded := c.skillTracker.LoadedNames()
 	result, originalErr := run()
 	logTurnSkillUsage(sessionID, prompt, c.activeSkills, c.skillTracker, beforeLoaded)
+
+	// Estimate what the router saved (or cost extra) on this message: the
+	// same usage priced at the model actually used vs. baselineModel.
+	// appliedAny (set above) is the router-savings signal that also
+	// gates setLastRouterDecision, so this only accumulates when the
+	// router actually changed something about the call, never merely
+	// because it was consulted.
+	if decisionOK && result != nil {
+		usage := result.TotalUsage
+		fields := []any{
+			"session", sessionID, "model", model.CatwalkCfg.ID,
+			"input_tokens", usage.InputTokens, "output_tokens", usage.OutputTokens,
+			"cache_creation_tokens", usage.CacheCreationTokens, "cache_read_tokens", usage.CacheReadTokens,
+			"router_call_cost_usd", decision.CallCost,
+			"router_model_choice", decision.ModelID, "router_model_confidence", decision.ModelConfidence,
+			"router_model_applied", modelOverride != nil,
+		}
+		if appliedAny {
+			actualCost := estimateModelCost(model.CatwalkCfg, usage)
+			baselineCost := estimateModelCost(baselineModel, usage)
+			delta := baselineCost - actualCost
+			c.addRouterSavings(sessionID, delta)
+			fields = append(fields,
+				"baseline_model", baselineModel.ID,
+				"reasoning_effort", appliedDecision.ReasoningEffort, "confidence", appliedDecision.Confidence,
+				"delta_usd", delta)
+		}
+		fields = append(fields, "session_total_usd", c.RouterSavings(sessionID))
+		slog.Info("Router turn usage", fields...)
+	}
 
 	// Notify only if still unauthorized after retry — a successful
 	// retry means the user doesn't need to re-authenticate. AWS SSO is
@@ -477,7 +763,259 @@ func effectiveReasoningEffort(model Model) string {
 	return ""
 }
 
-func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.ProviderOptions {
+// resolveRouterDecision asks the configured router backend how much
+// reasoning effort to use for prompt, when the router is enabled. It
+// returns ok=false whenever the decision cannot be trusted or applied:
+// router disabled, an unrecognized provider, no base URL for a local
+// provider, request failure or timeout, or an unusable response. All of
+// these fail open — the caller keeps using its currently active agent and
+// that agent's normally configured reasoning effort, unchanged. The router
+// never selects which agent handles the call — only its reasoning effort —
+// because Crush's per-turn dispatch state (Cancel, IsSessionBusy, the
+// message queue) lives per active agent, and switching agents mid-router
+// would leave that state pointing at the wrong agent.
+//
+// querying, when non-nil, is called with the endpoint's model and true
+// right before the HTTP call, and with the same model and false once it
+// returns (success or failure) — a live "consulting" signal for the UI,
+// entirely separate from the decision this function returns.
+func resolveRouterDecision(ctx context.Context, cfg *config.RouterOptions, providerAPIKey string, prompt string, querying func(model string, active bool)) (router.Decision, bool, error) {
+	if cfg == nil || !cfg.Enabled {
+		return router.Decision{}, false, nil
+	}
+
+	endpoint, err := resolveRouterEndpoint(cfg, providerAPIKey)
+	if err != nil {
+		return router.Decision{}, false, err
+	}
+
+	if querying != nil {
+		querying(endpoint.model, true)
+		defer querying(endpoint.model, false)
+	}
+
+	var clientOpts []router.Option
+	if endpoint.nestedInput {
+		clientOpts = append(clientOpts, router.WithNestedInput())
+	}
+	client := router.NewClient(endpoint.baseURL, endpoint.path, endpoint.apiKey, endpoint.model, cfg.EffectiveTimeout(), clientOpts...)
+	callCtx, cancel := context.WithTimeout(ctx, cfg.EffectiveTimeout())
+	defer cancel()
+
+	answers, callCost, err := client.Decide(callCtx, prompt, router.BuildQuestions(cfg.ModelPool))
+	if err != nil {
+		slog.Warn("Router call failed, keeping current effort", "error", err)
+		return router.Decision{}, false, fmt.Errorf("router call failed: %w", err)
+	}
+
+	decision, err := router.MapDecision(answers, cfg.EffectiveConfidenceThreshold())
+	if err != nil {
+		slog.Warn("Router returned an unusable decision, keeping current effort", "error", err)
+		return router.Decision{}, false, fmt.Errorf("router returned an unusable decision: %w", err)
+	}
+	decision.CallCost = callCost
+
+	return decision, true, nil
+}
+
+// resolveSubAgentRouterOverrides asks the router for a fresh decision
+// scoped to a sub-agent's own task prompt — not the parent turn's prompt —
+// so a "task" sub-agent handling a small, simple piece of a larger turn
+// can get a cheaper model/effort than whatever the parent turn needed,
+// and vice versa. Gates effort and model_choice independently, exactly
+// like coordinator.run does for the top-level turn: an unsupported effort
+// or a model_choice below EffectiveMinModelConfidence comes back as a
+// legitimate "no override" for that field, not a failure.
+//
+// decisionOK is false only when the router call itself didn't produce a
+// usable decision at all (disabled, erroring, timing out) — callers use
+// this to fall back a tier, to the parent turn's already-applied
+// decision, rather than to defaults every field individually.
+func (c *coordinator) resolveSubAgentRouterOverrides(ctx context.Context, routerCfg *config.RouterOptions, providerAPIKey, prompt string, model Model) (effortOverride string, modelOverride *Model, decisionOK bool) {
+	decision, ok, _ := resolveRouterDecision(ctx, routerCfg, providerAPIKey, prompt, nil)
+	if !ok {
+		return "", nil, false
+	}
+
+	if slices.Contains(model.CatwalkCfg.ReasoningLevels, decision.ReasoningEffort) {
+		effortOverride = decision.ReasoningEffort
+	}
+	if len(routerCfg.ModelPool) > 0 && decision.ModelConfidence > routerCfg.EffectiveMinModelConfidence(len(routerCfg.ModelPool)) {
+		if override, ok := c.resolveRouterModelOverride(ctx, routerCfg.ModelPool, decision.ModelID); ok {
+			modelOverride = &override
+		}
+	}
+	return effortOverride, modelOverride, true
+}
+
+// routerPoolProvider finds modelID in every configured provider's catalog
+// and returns the provider that offers it along with its catalog entry,
+// so the pool may name a chat model from any provider, not just
+// OpenRouter. Providers are searched in a stable (id-sorted) order so a
+// model id present under more than one provider always resolves to the
+// same one.
+func (c *coordinator) routerPoolProvider(modelID string) (config.ProviderConfig, catwalk.Model, bool) {
+	providers := c.cfg.Config().Providers
+	ids := make([]string, 0, providers.Len())
+	for id := range providers.Seq2() {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+
+	for _, id := range ids {
+		providerCfg, ok := providers.Get(id)
+		if !ok || providerCfg.Disable {
+			continue
+		}
+		for _, m := range providerCfg.Models {
+			if m.ID == modelID {
+				return providerCfg, m, true
+			}
+		}
+	}
+	return config.ProviderConfig{}, catwalk.Model{}, false
+}
+
+// resolveRouterModelOverride builds a one-off Model for a router-chosen
+// model id, without mutating any shared sessionAgent state. It returns
+// ok=false — meaning the caller must fail open and keep using the agent's
+// normally configured model — when modelID is empty, isn't a member of
+// pool, isn't in any configured provider's known model catalog, or when
+// building its provider/language-model client fails for any reason.
+func (c *coordinator) resolveRouterModelOverride(ctx context.Context, pool []string, modelID string) (Model, bool) {
+	if modelID == "" || !slices.Contains(pool, modelID) {
+		return Model{}, false
+	}
+
+	providerCfg, catwalkModel, ok := c.routerPoolProvider(modelID)
+	if !ok {
+		slog.Warn("Router chose a model outside every configured provider's catalog, keeping current model", "model", modelID)
+		return Model{}, false
+	}
+
+	selected := config.SelectedModel{Model: modelID, Provider: providerCfg.ID}
+	provider, err := c.buildProvider(providerCfg, selected, false)
+	if err != nil {
+		slog.Warn("Router-chosen model's provider failed to build, keeping current model", "model", modelID, "error", err)
+		return Model{}, false
+	}
+
+	langModel, err := provider.LanguageModel(ctx, modelID)
+	if err != nil {
+		slog.Warn("Router-chosen model's client failed to build, keeping current model", "model", modelID, "error", err)
+		return Model{}, false
+	}
+	langModel = newRequestTimeoutModel(langModel, c.cfg.Config().Options.GetRequestTimeout())
+
+	return Model{
+		Model:      langModel,
+		CatwalkCfg: catwalkModel,
+		ModelCfg:   selected,
+		FlatRate:   providerCfg.FlatRate,
+	}, true
+}
+
+// mostExpensivePoolModelAcrossProviders returns the catalog entry for
+// whichever pool model has the highest combined per-1M input+output rate
+// across every configured provider, so the savings estimate prices the
+// pool's top model regardless of which provider it lives on.
+func (c *coordinator) mostExpensivePoolModelAcrossProviders(pool []string) (catwalk.Model, bool) {
+	var priciest catwalk.Model
+	found := false
+	for id := range c.cfg.Config().Providers.Seq2() {
+		providerCfg, ok := c.cfg.Config().Providers.Get(id)
+		if !ok || providerCfg.Disable {
+			continue
+		}
+		for _, m := range providerCfg.Models {
+			if !slices.Contains(pool, m.ID) {
+				continue
+			}
+			if !found || m.CostPer1MIn+m.CostPer1MOut > priciest.CostPer1MIn+priciest.CostPer1MOut {
+				priciest = m
+				found = true
+			}
+		}
+	}
+	return priciest, found
+}
+
+// mostExpensivePoolModel returns the catalog entry for whichever model in
+// pool has the highest combined per-1M input+output rate, so the router
+// savings estimate can answer "how much did picking a cheaper model save
+// vs. always using the top of this pool" — the actual alternative the
+// router is choosing between, unlike the session's static default model
+// (which may be on an unrelated, unpriced, or flat-rate provider). ok is
+// false when none of pool's ids are in the provider's known catalog.
+func mostExpensivePoolModel(providerCfg config.ProviderConfig, pool []string) (catwalk.Model, bool) {
+	var priciest catwalk.Model
+	found := false
+	for _, id := range pool {
+		for _, m := range providerCfg.Models {
+			if m.ID != id {
+				continue
+			}
+			if !found || m.CostPer1MIn+m.CostPer1MOut > priciest.CostPer1MIn+priciest.CostPer1MOut {
+				priciest = m
+				found = true
+			}
+			break
+		}
+	}
+	return priciest, found
+}
+
+// routerEndpoint is the resolved backend a router call is sent to.
+type routerEndpoint struct {
+	baseURL     string
+	path        string
+	apiKey      string
+	model       string
+	nestedInput bool
+}
+
+// resolveRouterEndpoint maps the router config onto a concrete backend
+// from router.Backends. It is split out from resolveRouterDecision so the
+// provider switch (per-backend model default, the API key fallback to
+// Crush's own provider of the same name, and the fail-open on unrecognized
+// providers) can be tested without any network call. providerAPIKey is the
+// key Crush already has for the provider named like cfg.Provider (e.g.
+// "openrouter" or "opencode-zen"), used when the router has no key of its
+// own. It returns ok=false for an unrecognized provider or a provider that
+// needs a base URL but has none.
+func resolveRouterEndpoint(cfg *config.RouterOptions, providerAPIKey string) (routerEndpoint, error) {
+	backend, ok := router.Backends[routerProviderName(cfg)]
+	if !ok {
+		slog.Warn("Router enabled with unrecognized provider, keeping current effort", "provider", cfg.Provider)
+		return routerEndpoint{}, fmt.Errorf("unrecognized router provider %q", cfg.Provider)
+	}
+
+	endpoint := routerEndpoint{
+		baseURL:     cmp.Or(cfg.BaseURL, backend.BaseURL),
+		path:        backend.Path,
+		apiKey:      cmp.Or(cfg.APIKey, providerAPIKey),
+		model:       cmp.Or(cfg.Model, backend.DefaultModel),
+		nestedInput: backend.NestedInput,
+	}
+	if backend.FixedBaseURL {
+		endpoint.baseURL = backend.BaseURL
+	}
+	if endpoint.baseURL == "" {
+		slog.Warn("Router enabled but no base URL configured", "provider", cfg.Provider)
+		return routerEndpoint{}, fmt.Errorf("router provider %q needs a base_url and none is configured", cfg.Provider)
+	}
+	return endpoint, nil
+}
+
+// routerProviderName returns cfg.Provider, or "openrouter" when unset.
+func routerProviderName(cfg *config.RouterOptions) string {
+	if cfg == nil || cfg.Provider == "" {
+		return "openrouter"
+	}
+	return cfg.Provider
+}
+
+func getProviderOptions(model Model, providerCfg config.ProviderConfig, effortOverride string) fantasy.ProviderOptions {
 	options := fantasy.ProviderOptions{}
 
 	cfgOpts := []byte("{}")
@@ -526,6 +1064,9 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 	}
 
 	reasoningEffort := effectiveReasoningEffort(model)
+	if effortOverride != "" && slices.Contains(model.CatwalkCfg.ReasoningLevels, effortOverride) {
+		reasoningEffort = effortOverride
+	}
 	shouldSetEffort := model.CatwalkCfg.CanReason &&
 		reasoningEffort != "" &&
 		slices.Contains(model.CatwalkCfg.ReasoningLevels, reasoningEffort)
@@ -772,8 +1313,8 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 	return options
 }
 
-func mergeCallOptions(model Model, cfg config.ProviderConfig) (fantasy.ProviderOptions, *float64, *float64, *int64, *float64, *float64) {
-	modelOptions := getProviderOptions(model, cfg)
+func mergeCallOptions(model Model, cfg config.ProviderConfig, effortOverride string) (fantasy.ProviderOptions, *float64, *float64, *int64, *float64, *float64) {
+	modelOptions := getProviderOptions(model, cfg, effortOverride)
 	temp := cmp.Or(model.ModelCfg.Temperature, model.CatwalkCfg.Options.Temperature)
 	topP := cmp.Or(model.ModelCfg.TopP, model.CatwalkCfg.Options.TopP)
 	topK := cmp.Or(model.ModelCfg.TopK, model.CatwalkCfg.Options.TopK)
@@ -1491,7 +2032,7 @@ func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
 
 	// Auth failures during summarize flow through fantasy's OnAuthRefresh,
 	// the same path used by regular turns.
-	return agent.Summarize(ctx, sessionID, getProviderOptions(agent.Model(), providerCfg), c.makeAuthRefreshCallback(providerCfg))
+	return agent.Summarize(ctx, sessionID, getProviderOptions(agent.Model(), providerCfg, ""), c.makeAuthRefreshCallback(providerCfg), nil)
 }
 
 // GenerateTitle generates a session title using the current agent.
@@ -1641,6 +2182,22 @@ type subAgentParams struct {
 	// SessionSetup is an optional callback invoked after session creation
 	// but before agent execution, for custom session configuration.
 	SessionSetup func(sessionID string)
+	// EffortOverride is the parent turn's already-applied router effort,
+	// tagged onto the context in coordinator.run when
+	// RouterOptions.ApplySubagents is enabled. runSubAgent only falls
+	// back to it (tier 2) when its own fresh, prompt-scoped router call
+	// (tier 1) is unavailable; empty means no override at either tier,
+	// so the sub-agent keeps its own configured effort (tier 3) exactly
+	// as before this field existed. Ignored outright for models whose
+	// ReasoningLevels doesn't contain it.
+	EffortOverride string
+	// ModelOverride is the parent turn's already-applied router model
+	// choice, same tiering as EffortOverride: runSubAgent prefers its
+	// own fresh decision for this sub-agent's own prompt, and only falls
+	// back to this parent-turn value when that fresh call is
+	// unavailable. nil means no override at either tier — the sub-agent
+	// keeps its statically configured model.
+	ModelOverride *Model
 }
 
 // callTopK returns topK for use on fantasy.Call.TopK, suppressing it for
@@ -1672,6 +2229,41 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 
 	// Get model configuration
 	model := params.Agent.Model()
+	staticModelID := model.CatwalkCfg.ID
+
+	// Resilience chain when ApplySubagents is enabled: prefer a decision
+	// scoped to this sub-agent's own prompt (tier 1); if the router call
+	// itself is unavailable, fall back to the parent turn's already-applied
+	// decision, passed in via params.EffortOverride/ModelOverride from the
+	// context the coordinator tagged in run() (tier 2); if that's also
+	// empty, the zero values below leave the sub-agent on its own static
+	// model/effort, exactly as before ApplySubagents existed (tier 3).
+	effortOverride := params.EffortOverride
+	modelOverride := params.ModelOverride
+	if routerCfg := c.cfg.Config().Options.Router; routerCfg != nil && routerCfg.Enabled && routerCfg.ApplySubagents {
+		providerAPIKey := ""
+		if p, ok := c.cfg.Config().Providers.Get(routerProviderName(routerCfg)); ok {
+			providerAPIKey = p.APIKey
+		}
+		if effort, modelOv, ok := c.resolveSubAgentRouterOverrides(ctx, routerCfg, providerAPIKey, params.Prompt, model); ok {
+			effortOverride, modelOverride = effort, modelOv
+		}
+	}
+	params.EffortOverride = effortOverride
+	params.ModelOverride = modelOverride
+
+	// Apply model override from router if present and ApplySubagents is enabled.
+	if params.ModelOverride != nil {
+		model = *params.ModelOverride
+	}
+	if params.ModelOverride != nil || params.EffortOverride != "" {
+		slog.Info("Router applied to sub-agent",
+			"session", session.ID,
+			"static_model", staticModelID,
+			"applied_model", model.CatwalkCfg.ID,
+			"router_effort_override", params.EffortOverride,
+		)
+	}
 	maxTokens := model.CatwalkCfg.DefaultMaxTokens
 	if model.ModelCfg.MaxTokens != 0 {
 		maxTokens = model.ModelCfg.MaxTokens
@@ -1688,7 +2280,8 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 			SessionID:        session.ID,
 			Prompt:           params.Prompt,
 			MaxOutputTokens:  maxTokens,
-			ProviderOptions:  getProviderOptions(model, providerCfg),
+			ProviderOptions:  getProviderOptions(model, providerCfg, params.EffortOverride),
+			ModelOverride:    params.ModelOverride,
 			Temperature:      model.ModelCfg.Temperature,
 			TopP:             model.ModelCfg.TopP,
 			TopK:             callTopK(providerCfg, model.ModelCfg.TopK),

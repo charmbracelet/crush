@@ -595,6 +595,10 @@
           "$ref": "#/$defs/Attribution",
           "description": "Attribution settings for generated content"
         },
+        "router": {
+          "$ref": "#/$defs/RouterOptions",
+          "description": "Pre-call model/reasoning router settings"
+        },
         "disable_metrics": {
           "type": "boolean",
           "description": "Disable sending metrics",
@@ -774,6 +778,77 @@
           },
           "type": "array",
           "description": "List of models available from this provider"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "RouterOptions": {
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable the pre-call model/reasoning router",
+          "default": false
+        },
+        "provider": {
+          "type": "string",
+          "enum": [
+            "openrouter",
+            "opencode-zen",
+            "typesafe",
+            "vercel",
+            "cloudflare",
+            "local"
+          ],
+          "description": "Router backend",
+          "default": "openrouter"
+        },
+        "base_url": {
+          "type": "string",
+          "description": "Base URL of a System One-compatible server; required for provider=local and provider=cloudflare, and overrides the default for opencode-zen, typesafe and vercel"
+        },
+        "api_key": {
+          "type": "string",
+          "description": "Bearer token for the router backend"
+        },
+        "model": {
+          "type": "string",
+          "description": "Decision model id sent to the router backend; defaults per provider (e.g. ~typesafe/jev-latest on openrouter)",
+          "examples": [
+            "~typesafe/jev-latest",
+            "jev-1.13",
+            "jaredpalmer/kev-4b"
+          ]
+        },
+        "confidence_threshold": {
+          "type": "number",
+          "description": "Confidence threshold below which a decision is flagged but still applied",
+          "default": 0.7
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "description": "Router request timeout in milliseconds",
+          "default": 1500
+        },
+        "model_pool": {
+          "items": {
+            "type": "string",
+            "examples": [
+              "anthropic/claude-opus-4",
+              "anthropic/claude-haiku-4"
+            ]
+          },
+          "type": "array",
+          "description": "Chat model ids the router may pivot between"
+        },
+        "min_model_confidence": {
+          "type": "number",
+          "description": "Minimum model_choice confidence required to switch models; 0 (default) computes 1/len(model_pool) automatically"
+        },
+        "apply_subagents": {
+          "type": "boolean",
+          "description": "Ask the router for its own decision on each task sub-agent's own prompt",
+          "default": false
         }
       },
       "additionalProperties": false,

@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/router"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/attachments"
 	"github.com/charmbracelet/crush/internal/ui/common"
@@ -37,6 +38,14 @@ type countingWorkspace struct {
 	lspStates map[string]workspace.LSPClientInfo
 	lspDiags  map[string]lsp.DiagnosticCounts
 
+	routerDecision      router.Decision
+	hasRouterDecision   bool
+	routerQueryingModel string
+	routerQuerying      bool
+	lastRouterModel     string
+	lastRouterError     string
+	routerSavings       float64
+
 	readyCalls      int
 	agentBusyCalls  int
 	queuedCalls     int
@@ -48,6 +57,7 @@ type countingWorkspace struct {
 	modelCalls      int
 	lspStateCalls   int
 	lspDiagCalls    int
+	routerCalls     int
 }
 
 func (w *countingWorkspace) AgentIsReady() bool { w.readyCalls++; return w.ready }
@@ -86,6 +96,27 @@ func (w *countingWorkspace) AgentModel() workspace.AgentModel {
 	return w.model
 }
 
+func (w *countingWorkspace) AgentLastRouterDecision() (router.Decision, bool) {
+	w.routerCalls++
+	return w.routerDecision, w.hasRouterDecision
+}
+
+func (w *countingWorkspace) AgentRouterQuerying() (string, bool) {
+	return w.routerQueryingModel, w.routerQuerying
+}
+
+func (w *countingWorkspace) AgentRouterModel() string {
+	return w.lastRouterModel
+}
+
+func (w *countingWorkspace) AgentRouterError() string {
+	return w.lastRouterError
+}
+
+func (w *countingWorkspace) AgentRouterSavings(string) float64 {
+	return w.routerSavings
+}
+
 func (w *countingWorkspace) LSPGetStates() map[string]workspace.LSPClientInfo {
 	w.lspStateCalls++
 	return w.lspStates
@@ -116,7 +147,7 @@ func (w *countingWorkspace) Config() *config.Config { return nil }
 func (w *countingWorkspace) syncProbes() int {
 	return w.readyCalls + w.agentBusyCalls +
 		w.queuedCalls + w.queueListCalls + w.permCalls +
-		w.modelCalls + w.lspStateCalls + w.lspDiagCalls
+		w.modelCalls + w.lspStateCalls + w.lspDiagCalls + w.routerCalls
 }
 
 func (w *countingWorkspace) resetCounters() {
@@ -124,6 +155,7 @@ func (w *countingWorkspace) resetCounters() {
 	w.queuedCalls, w.queueListCalls, w.permCalls = 0, 0, 0
 	w.permSetCalls, w.clearQueueCalls, w.cancelCalls = 0, 0, 0
 	w.modelCalls, w.lspStateCalls, w.lspDiagCalls = 0, 0, 0
+	w.routerCalls = 0
 }
 
 // newBusyUI builds a UI wired to the stub workspace with an active session
@@ -703,6 +735,30 @@ func TestBusyRefreshCarriesReadyAndModel(t *testing.T) {
 	require.Equal(t, "test-model", sel.ModelCfg.Model, "the probe must land the model in the cache")
 }
 
+// TestBusyRefreshCarriesRouterQuerying: the off-thread busy probe must also
+// deliver whether a router HTTP call is currently in flight and which
+// model it was sent to, so the sidebar's live "consulting" indicator
+// renders from memoized state without a per-frame probe, same as the
+// model and router-decision fields it already carries.
+func TestBusyRefreshCarriesRouterQuerying(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{
+		ready:               true,
+		routerQuerying:      true,
+		routerQueryingModel: "typesafe/jev-latest",
+	}
+	m := newBusyUI(ws)
+	require.False(t, m.routerQuerying, "before any probe the querying state is unknown")
+
+	_, cmd := m.Update(plainMsg{}) // stale caches: the backstop dispatches
+	runCmds(m, cmd)
+
+	require.True(t, m.routerQuerying, "the probe must land the querying flag in the cache")
+	require.Equal(t, "typesafe/jev-latest", m.routerQueryingModel,
+		"the probe must land the querying model in the cache")
+}
+
 // TestAgentModelChangedRefreshesModel: after a model change
 // (selection/thinking/reasoning cmds sequence agentModelChangedCmd), the
 // handler must re-fetch ready/model off-thread — no synchronous probe — and
@@ -798,6 +854,54 @@ func TestLSPEventRefreshIsOffThreadAndDeduped(t *testing.T) {
 	require.Equal(t, 2, m.lspDiagnostics["gopls"].Error, "fetched severity counts must land in the cache")
 	require.Equal(t, 3, m.lspErrorCount())
 	require.Equal(t, 2, ws.lspStateCalls, "one fetch plus the queued re-fetch")
+}
+
+// TestBusyRefreshCarriesRouterDecision pins the fix for the synchronous
+// RPC that used to run inside Update's RunComplete handler
+// (AgentLastRouterDecision is a synchronous HTTP round-trip in
+// client/server mode). The router decision must now arrive as part of the
+// off-thread busyStateMsg probe and be applied to the status bar by
+// applyBusyState, never fetched directly from Update.
+func TestBusyRefreshCarriesRouterDecision(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{
+		ready:             true,
+		routerDecision:    router.Decision{ReasoningEffort: "high", Confidence: 0.9},
+		hasRouterDecision: true,
+	}
+	m := newBusyUI(ws)
+	require.NotContains(t, m.status.routerBadge(), "router:", "before any probe there is no decision")
+
+	_, cmd := m.Update(plainMsg{}) // stale caches: the backstop dispatches
+	runCmds(m, cmd)
+
+	require.Equal(t, 1, ws.routerCalls, "the router decision must be fetched by the busy probe")
+	require.Contains(t, m.status.routerBadge(), "router: high",
+		"the fetched decision must be applied to the status bar via applyBusyState")
+}
+
+// TestApplyBusyStateDirectlyAppliesRouterDecision exercises applyBusyState
+// on its own (not via the Update/backstop path) to pin that it, not the
+// RunComplete handler, is what writes the router decision into the status
+// bar.
+func TestApplyBusyStateDirectlyAppliesRouterDecision(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true}
+	m := newBusyUI(ws)
+
+	m.applyBusyState(busyStateMsg{
+		gen:               m.busyFetchGen,
+		ready:             true,
+		routerDecision:    router.Decision{ReasoningEffort: "low", Confidence: 0.3, LowConfidence: true},
+		hasRouterDecision: true,
+	})
+	require.Contains(t, m.status.routerBadge(), "router: low")
+
+	// A subsequent probe reporting no decision must clear the badge.
+	m.applyBusyState(busyStateMsg{gen: m.busyFetchGen, ready: true})
+	require.NotContains(t, m.status.routerBadge(), "router:")
 }
 
 // TestRemoteYoloToggleUpdatesEditorPrompt pins the second fix: when an

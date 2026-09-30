@@ -571,6 +571,93 @@ option ui completions-max-items 200
 > launch (see [Where config lives](#where-config-lives)), so the toggle can
 > look like it silently reverted.
 
+#### `option router`
+
+Configure the pre-call model/reasoning router: a fast decision endpoint
+asked, once per user message, which reasoning effort (and optionally which
+model) to use for the turn. Disabled by default; when disabled or when a
+call fails, times out, or comes back below confidence, Crush falls back to
+the session's configured effort and model (fail-open).
+
+```text
+Usage:
+  option router <key> <value>
+
+Keys:
+  enabled bool                    enable the router (default false)
+  provider string                 openrouter, opencode-zen, typesafe,
+                                  vercel, cloudflare, or local (default
+                                  openrouter)
+  base-url string                 required for provider=local and
+                                  provider=cloudflare; overrides the default
+                                  base URL for opencode-zen, typesafe and
+                                  vercel; ignored for openrouter
+  api-key string                  bearer token for the router backend; if
+                                  unset, reuses the API key of Crush's own
+                                  provider with the same name (openrouter,
+                                  opencode-zen)
+  model string                    decision model id sent to the router
+                                  backend; defaults per provider
+  confidence-threshold float      below this, a reasoning-effort decision
+                                  is flagged but still applied (default 0.7)
+  min-model-confidence float      below this, a model_choice decision is
+                                  ignored and the current model is kept; 0
+                                  (default) computes 1/len(model-pool)
+                                  automatically
+  timeout-ms int                  router request timeout in milliseconds
+                                  (default 1500)
+  model-pool string               append a model id the router may switch
+                                  to for a single message (repeatable); ids
+                                  may come from any configured provider;
+                                  empty means the router only ever picks
+                                  reasoning effort
+  apply-subagents bool            ask the router again for each "task"
+                                  sub-agent, scoped to that sub-agent's own
+                                  prompt (default false); falls back to the
+                                  parent turn's own decision if that call
+                                  fails, then to the sub-agent's static
+                                  config if neither is available
+```
+
+```bash
+option router enabled true
+option router provider openrouter
+option router model-pool anthropic/claude-opus-4
+option router model-pool anthropic/claude-haiku-4
+option router confidence-threshold 0.75
+```
+
+`opencode-zen`, `typesafe`, and `local` all speak the same "System
+One" HTTP contract at `POST {base_url}/v1/systemone`; `openrouter` uses
+OpenRouter's own Decisions API instead. `vercel` reaches TypeSafe's Jev
+through Vercel AI Gateway at `POST
+{base_url}/typesafe/v1/systemone`; `cloudflare` reaches it through
+Workers AI, whose run URL is account-scoped and whose request nests
+`state` and `questions` under an `input` object:
+
+```bash
+option router provider vercel
+option router api-key $AI_GATEWAY_API_KEY
+
+option router provider cloudflare
+option router base-url https://api.cloudflare.com/client/v4/accounts/<id>/ai/run
+option router api-key $CLOUDFLARE_API_TOKEN
+```
+
+`local` ships with no built-in presets — point it at any self-hosted
+server implementing that contract:
+
+```bash
+option router provider local
+option router base-url http://127.0.0.1:8080
+option router model my-decision-model
+```
+
+`model` is the single decision model that classifies each prompt;
+`model-pool` is the set of chat models the router may switch the turn
+to. They are independent: a pool entry is never used as a decision
+model.
+
 ## Composing configs
 
 Because it's Bash, a shared base config is just a `source`:

@@ -13,6 +13,7 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/ui/util"
 	uv "github.com/charmbracelet/ultraviolet"
 )
@@ -345,24 +346,23 @@ func (m *Models) isSelectedConfigured() bool {
 	return isConfigured
 }
 
-// setProviderItems sets the provider items in the list.
-func (m *Models) setProviderItems() error {
-	t := m.com.Styles
-	cfg := m.com.Config()
-
+// providerModelGroups assembles the provider sections shared by the model
+// dialogs: providers the user defined that the catalog does not know,
+// followed by every provider in the catalog with the user's overrides
+// applied. current is the currently selected (provider, model) whose row
+// ID is returned for pre-selection, or the zero value when the caller
+// manages selection itself. The returned map is keyed by ModelItem.ID().
+func providerModelGroups(
+	t *styles.Styles,
+	cfg *config.Config,
+	providers []catwalk.Provider,
+	modelType ModelType,
+	current config.SelectedModel,
+) ([]ModelGroup, map[string]*ModelItem, string) {
 	var selectedItemID string
-	selectedType := m.modelType.Config()
-	currentModel := cfg.Models[selectedType]
-	recentItems := cfg.RecentModels[selectedType]
 
-	// Track providers already added to avoid duplicates
+	// Track providers already added to avoid duplicates.
 	addedProviders := make(map[string]bool)
-
-	// Get a list of known providers to compare against
-	knownProviders, err := config.Providers(cfg)
-	if err != nil && len(knownProviders) == 0 {
-		return fmt.Errorf("failed to get providers: %w", err)
-	}
 
 	containsProviderFunc := func(id string) func(p catwalk.Provider) bool {
 		return func(p catwalk.Provider) bool {
@@ -372,28 +372,30 @@ func (m *Models) setProviderItems() error {
 
 	// itemsMap contains the keys of added model items.
 	itemsMap := make(map[string]*ModelItem)
+	// modelIDCounts tracks how many providers have each model ID.
+	modelIDCounts := make(map[string]int)
 	groups := []ModelGroup{}
 	for id, p := range cfg.Providers.Seq2() {
 		if p.Disable {
 			continue
 		}
 
-		// Check if this provider is not in the known providers list
-		if !slices.ContainsFunc(knownProviders, containsProviderFunc(id)) ||
-			!slices.ContainsFunc(m.providers, containsProviderFunc(id)) {
+		// Check if this provider is not in the known providers list.
+		if !slices.ContainsFunc(providers, containsProviderFunc(id)) {
 			provider := p.ToProvider()
 
-			// Add this unknown provider to the list
+			// Add this unknown provider to the list.
 			name := cmp.Or(p.Name, id)
 
 			addedProviders[id] = true
 
 			group := NewModelGroup(t, name, true)
 			for _, model := range p.Models {
-				item := NewModelItem(t, provider, model, m.modelType, false)
+				item := NewModelItem(t, provider, model, modelType, false)
 				group.AppendItems(item)
 				itemsMap[item.ID()] = item
-				if model.ID == currentModel.Model && string(provider.ID) == currentModel.Provider {
+				modelIDCounts[model.ID]++
+				if model.ID == current.Model && string(provider.ID) == current.Provider {
 					selectedItemID = item.ID()
 				}
 			}
@@ -405,7 +407,7 @@ func (m *Models) setProviderItems() error {
 
 	// Now add known providers from the predefined list.
 	// Providers already has Hyper at the front of the list.
-	for _, provider := range m.providers {
+	for _, provider := range providers {
 		providerID := string(provider.ID)
 		if addedProviders[providerID] {
 			continue
@@ -448,10 +450,11 @@ func (m *Models) setProviderItems() error {
 		if provider.ID == catwalk.InferenceProviderOpenAI && providerConfig.OAuthToken != nil {
 			group := NewModelGroup(t, name, true)
 			for _, model := range providerConfig.ChatGPTModels {
-				item := NewModelItem(t, provider, model, m.modelType, false)
+				item := NewModelItem(t, provider, model, modelType, false)
 				group.AppendItems(item)
 				itemsMap[item.ID()] = item
-				if model.ID == currentModel.Model && string(provider.ID) == currentModel.Provider {
+				modelIDCounts[model.ID]++
+				if model.ID == current.Model && string(provider.ID) == current.Provider {
 					selectedItemID = item.ID()
 				}
 			}
@@ -463,16 +466,41 @@ func (m *Models) setProviderItems() error {
 
 		group := NewModelGroup(t, name, providerConfigured)
 		for _, model := range displayProvider.Models {
-			item := NewModelItem(t, provider, model, m.modelType, false)
+			item := NewModelItem(t, provider, model, modelType, false)
 			group.AppendItems(item)
 			itemsMap[item.ID()] = item
-			if model.ID == currentModel.Model && string(provider.ID) == currentModel.Provider {
+			modelIDCounts[model.ID]++
+			if model.ID == current.Model && string(provider.ID) == current.Provider {
 				selectedItemID = item.ID()
 			}
 		}
 
 		groups = append(groups, group)
 	}
+
+	// Mark duplicate models with their provider name for disambiguation.
+	for i := range groups {
+		for j := range groups[i].Items {
+			item := groups[i].Items[j]
+			if modelIDCounts[item.model.ID] > 1 {
+				item.showProvider = true
+			}
+		}
+	}
+
+	return groups, itemsMap, selectedItemID
+}
+
+// setProviderItems sets the provider items in the list.
+func (m *Models) setProviderItems() error {
+	t := m.com.Styles
+	cfg := m.com.Config()
+
+	selectedType := m.modelType.Config()
+	currentModel := cfg.Models[selectedType]
+	recentItems := cfg.RecentModels[selectedType]
+
+	groups, itemsMap, selectedItemID := providerModelGroups(t, cfg, m.providers, m.modelType, currentModel)
 
 	if len(recentItems) > 0 {
 		recentGroup := NewModelGroup(t, "Recently used", false)

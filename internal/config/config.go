@@ -450,6 +450,110 @@ func (Attribution) JSONSchemaExtend(schema *jsonschema.Schema) {
 	}
 }
 
+// RouterOptions configures the pre-call model/reasoning router: a fast
+// System One-compatible decision endpoint asked, once per user message,
+// which reasoning effort to apply to the currently active agent.
+type RouterOptions struct {
+	Enabled bool `json:"enabled,omitempty" jsonschema:"description=Enable the pre-call model/reasoning router,default=false"`
+	// Provider picks the router backend. openrouter uses OpenRouter's
+	// Decisions API; every other backend is a System One decision-model
+	// host (opencode-zen, typesafe, vercel, cloudflare, or a self-hosted
+	// local server). When no api_key is set, the key of Crush's own
+	// provider with the same name (openrouter, opencode-zen) is reused.
+	Provider string `json:"provider,omitempty" jsonschema:"description=Router backend,enum=openrouter,enum=opencode-zen,enum=typesafe,enum=vercel,enum=cloudflare,enum=local,default=openrouter"`
+	// BaseURL is required when Provider is "local" or "cloudflare" (whose
+	// run URL is account-scoped); for the other backends it overrides the
+	// public default. Ignored when Provider is "openrouter".
+	BaseURL string `json:"base_url,omitempty" jsonschema:"description=Base URL of a System One-compatible server; required for provider=local and provider=cloudflare\\, and overrides the default for opencode-zen\\, typesafe and vercel"`
+	APIKey  string `json:"api_key,omitempty" jsonschema:"description=Bearer token for the router backend"`
+	Model   string `json:"model,omitempty" jsonschema:"description=Decision model id sent to the router backend; defaults per provider (e.g. ~typesafe/jev-latest on openrouter),example=~typesafe/jev-latest,example=jev-1.13,example=jaredpalmer/kev-4b"`
+	// ConfidenceThreshold: below this, the decision is still applied but
+	// flagged (e.g. in the status bar) rather than discarded.
+	ConfidenceThreshold float64 `json:"confidence_threshold,omitempty" jsonschema:"description=Confidence threshold below which a decision is flagged but still applied,default=0.7"`
+	// TimeoutMS bounds the router HTTP call. Router failures/timeouts fail
+	// open to the currently active agent and its configured reasoning
+	// effort.
+	TimeoutMS int `json:"timeout_ms,omitempty" jsonschema:"description=Router request timeout in milliseconds,default=1500"`
+
+	// ModelPool lists the chat model ids the router may pivot between
+	// for a single message, in addition to choosing reasoning effort.
+	// Ids may come from any configured provider. Empty (the default)
+	// means the router only ever chooses reasoning effort, exactly as
+	// before this field existed.
+	ModelPool []string `json:"model_pool,omitempty" jsonschema:"description=Chat model ids the router may pivot between, drawn from any configured provider,example=anthropic/claude-opus-4,example=anthropic/claude-haiku-4"`
+
+	// MinModelConfidence: below this, a model_choice answer is ignored
+	// and the currently active model is kept — even though model_pool is
+	// configured. Unlike ConfidenceThreshold (which only flags a
+	// reasoning_effort decision, never discards it), this one is a hard
+	// gate, because a classifier can be well-calibrated on reasoning
+	// effort while never having learned to judge unfamiliar model ids'
+	// relative capability — some small local classifiers answer
+	// model_choice at only marginally-above-chance confidence on every
+	// single message, regardless of content, which would otherwise pivot
+	// models on pure noise. 0 (the default) computes 1/len(model_pool)
+	// automatically — "better than picking blindly among the pool" —
+	// instead of a fixed number that would need retuning whenever the
+	// pool's size changes.
+	MinModelConfidence float64 `json:"min_model_confidence,omitempty" jsonschema:"description=Minimum model_choice confidence required to switch models; 0 (default) computes 1/len(model_pool) automatically"`
+
+	// ApplySubagents controls whether "task" sub-agents spawned by the
+	// coordinator get their own router decision at all. False (the
+	// default) keeps sub-agents on their statically configured
+	// model/effort, exactly as before this field existed — the router
+	// only ever touches the active top-level agent.
+	//
+	// True asks the router again for each sub-agent call, scoped to that
+	// sub-agent's own task prompt rather than the parent turn's — a
+	// small delegated task can get a cheaper decision than the turn that
+	// spawned it, and vice versa — with a three-tier resilience chain
+	// per sub-agent call: (1) that fresh, prompt-scoped decision when the
+	// router call succeeds; (2) the parent turn's own already-applied
+	// decision when the fresh call is unavailable (disabled, erroring,
+	// timing out); (3) the sub-agent's statically configured model/effort
+	// when neither is available. See
+	// coordinator.resolveSubAgentRouterOverrides and runSubAgent.
+	ApplySubagents bool `json:"apply_subagents,omitempty" jsonschema:"description=Ask the router for its own decision on each task sub-agent's own prompt, falling back to the parent turn's decision and then the sub-agent's static config,default=false"`
+}
+
+const (
+	defaultRouterConfidenceThreshold = 0.7
+	defaultRouterTimeout             = 1500 * time.Millisecond
+)
+
+// EffectiveConfidenceThreshold returns o.ConfidenceThreshold, or the
+// default when o is nil or the field was left at its zero value.
+func (o *RouterOptions) EffectiveConfidenceThreshold() float64 {
+	if o == nil || o.ConfidenceThreshold == 0 {
+		return defaultRouterConfidenceThreshold
+	}
+	return o.ConfidenceThreshold
+}
+
+// EffectiveMinModelConfidence returns o.MinModelConfidence, or
+// 1/poolSize (better than picking blindly among the pool) when o is nil
+// or the field was left at its zero value. poolSize should be
+// len(o.ModelPool); a poolSize <= 0 returns 1 (never applied), since
+// there's no pool to pick from at all.
+func (o *RouterOptions) EffectiveMinModelConfidence(poolSize int) float64 {
+	if poolSize <= 0 {
+		return 1
+	}
+	if o == nil || o.MinModelConfidence == 0 {
+		return 1.0 / float64(poolSize)
+	}
+	return o.MinModelConfidence
+}
+
+// EffectiveTimeout returns o.TimeoutMS as a Duration, or the default when
+// o is nil or the field was left at its zero value.
+func (o *RouterOptions) EffectiveTimeout() time.Duration {
+	if o == nil || o.TimeoutMS == 0 {
+		return defaultRouterTimeout
+	}
+	return time.Duration(o.TimeoutMS) * time.Millisecond
+}
+
 type Options struct {
 	ContextPaths         []string    `json:"context_paths,omitempty" jsonschema:"description=Paths to files containing context information for the AI,example=.cursorrules,example=CRUSH.md"`
 	GlobalContextPaths   []string    `json:"global_context_paths,omitempty" jsonschema:"description=Paths to files containing global context information for the AI,default=~/.config/crush/CRUSH.md,default=~/.config/AGENTS.md"`
@@ -462,18 +566,19 @@ type Options struct {
 	// the SQLite database and workspace overrides. Relative paths are
 	// resolved against the working directory; absolute paths are used
 	// verbatim. After defaulting the stored value is always absolute.
-	DataDirectory             string       `json:"data_directory,omitempty" jsonschema:"description=Directory for storing application data. Relative paths are resolved against the working directory; absolute paths are used as-is.,default=.crush,example=.crush"`
-	DisabledTools             []string     `json:"disabled_tools,omitempty" jsonschema:"description=List of built-in tools to disable and hide from the agent,example=bash,example=sourcegraph"`
-	DisableProviderAutoUpdate bool         `json:"disable_provider_auto_update,omitempty" jsonschema:"description=Disable providers auto-update,default=false"`
-	DisableDefaultProviders   bool         `json:"disable_default_providers,omitempty" jsonschema:"description=Ignore all default/embedded providers. When enabled\\, providers must be fully specified in the config file with base_url\\, models\\, and api_key - no merging with defaults occurs,default=false"`
-	Attribution               *Attribution `json:"attribution,omitempty" jsonschema:"description=Attribution settings for generated content"`
-	DisableMetrics            bool         `json:"disable_metrics,omitempty" jsonschema:"description=Disable sending metrics,default=false"`
-	InitializeAs              string       `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization,default=AGENTS.md,example=AGENTS.md,example=CRUSH.md,example=CLAUDE.md,example=docs/LLMs.md"`
-	AutoLSP                   *bool        `json:"auto_lsp,omitempty" jsonschema:"description=Automatically setup LSPs based on root markers,default=true"`
-	Progress                  *bool        `json:"progress,omitempty" jsonschema:"description=Show indeterminate progress updates during long operations,default=true"`
-	Notifications             string       `json:"notifications,omitempty" jsonschema:"description=Notification style to use. Options: auto (default)\\, native\\, osc\\, bell\\, disabled. Auto selects based on environment: native for local sessions\\, osc for SSH (with automatic OSC 99/777 detection).,enum=auto,enum=native,enum=osc,enum=bell,enum=disabled,default=auto"`
-	DisabledSkills            []string     `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=crush-config"`
-	RequestTimeout            *int         `json:"request_timeout,omitempty" jsonschema:"description=Timeout in seconds for each LLM API request. Streaming responses are aborted only after this much inactivity\\, so slow but active streams are never killed. 0 disables it\\, negative values are invalid.,default=60,example=120,example=300,example=0"`
+	DataDirectory             string         `json:"data_directory,omitempty" jsonschema:"description=Directory for storing application data. Relative paths are resolved against the working directory; absolute paths are used as-is.,default=.crush,example=.crush"`
+	DisabledTools             []string       `json:"disabled_tools,omitempty" jsonschema:"description=List of built-in tools to disable and hide from the agent,example=bash,example=sourcegraph"`
+	DisableProviderAutoUpdate bool           `json:"disable_provider_auto_update,omitempty" jsonschema:"description=Disable providers auto-update,default=false"`
+	DisableDefaultProviders   bool           `json:"disable_default_providers,omitempty" jsonschema:"description=Ignore all default/embedded providers. When enabled\\, providers must be fully specified in the config file with base_url\\, models\\, and api_key - no merging with defaults occurs,default=false"`
+	Attribution               *Attribution   `json:"attribution,omitempty" jsonschema:"description=Attribution settings for generated content"`
+	Router                    *RouterOptions `json:"router,omitempty" jsonschema:"description=Pre-call model/reasoning router settings"`
+	DisableMetrics            bool           `json:"disable_metrics,omitempty" jsonschema:"description=Disable sending metrics,default=false"`
+	InitializeAs              string         `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization,default=AGENTS.md,example=AGENTS.md,example=CRUSH.md,example=CLAUDE.md,example=docs/LLMs.md"`
+	AutoLSP                   *bool          `json:"auto_lsp,omitempty" jsonschema:"description=Automatically setup LSPs based on root markers,default=true"`
+	Progress                  *bool          `json:"progress,omitempty" jsonschema:"description=Show indeterminate progress updates during long operations,default=true"`
+	Notifications             string         `json:"notifications,omitempty" jsonschema:"description=Notification style to use. Options: auto (default)\\, native\\, osc\\, bell\\, disabled. Auto selects based on environment: native for local sessions\\, osc for SSH (with automatic OSC 99/777 detection).,enum=auto,enum=native,enum=osc,enum=bell,enum=disabled,default=auto"`
+	DisabledSkills            []string       `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=crush-config"`
+	RequestTimeout            *int           `json:"request_timeout,omitempty" jsonschema:"description=Timeout in seconds for each LLM API request. Streaming responses are aborted only after this much inactivity\\, so slow but active streams are never killed. 0 disables it\\, negative values are invalid.,default=60,example=120,example=300,example=0"`
 }
 
 // DefaultRequestTimeout bounds each LLM API request when the user has not

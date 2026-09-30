@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/proto"
+	"github.com/charmbracelet/crush/internal/router"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
@@ -46,9 +47,16 @@ func (c *errorCoordinator) QueuedPromptsList(string) []string                 { 
 func (c *errorCoordinator) ClearQueue(string)                                 {}
 func (c *errorCoordinator) Summarize(context.Context, string) error           { return nil }
 func (c *errorCoordinator) Model() agent.Model                                { return agent.Model{} }
-func (c *errorCoordinator) UpdateModels(context.Context) error                { return nil }
-func (c *errorCoordinator) SetMainAgent(string) error                         { return nil }
-func (c *errorCoordinator) GenerateTitle(context.Context, string, string)     {}
+func (c *errorCoordinator) LastRouterDecision() (router.Decision, bool) {
+	return router.Decision{}, false
+}
+func (c *errorCoordinator) RouterQuerying() (string, bool)                { return "", false }
+func (c *errorCoordinator) LastRouterModel() string                       { return "" }
+func (c *errorCoordinator) LastRouterError() string                       { return "" }
+func (c *errorCoordinator) RouterSavings(string) float64                  { return 0 }
+func (c *errorCoordinator) UpdateModels(context.Context) error            { return nil }
+func (c *errorCoordinator) SetMainAgent(string) error                     { return nil }
+func (c *errorCoordinator) GenerateTitle(context.Context, string, string) {}
 
 // insertRunCompleteWorkspace installs a workspace backed by a real
 // app.App (so the runCompletions broker exists) with the given

@@ -30,6 +30,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/charmbracelet/crush/internal/router"
 	"github.com/charmbracelet/crush/internal/workspace"
 )
 
@@ -79,6 +80,29 @@ type busyStateMsg struct {
 	// so the sidebar/landing model info renders from memoized state. Zero
 	// (and ignored) when ready is false.
 	model workspace.AgentModel
+	// routerDecision and hasRouterDecision are the coordinator's most
+	// recent model-router decision, fetched by the same probe so the
+	// status bar renders from memoized state rather than a synchronous
+	// RPC inside Update.
+	routerDecision    router.Decision
+	hasRouterDecision bool
+	// routerQueryingModel and routerQuerying report a router HTTP call
+	// in flight right now, fetched by the same probe so the sidebar can
+	// show a live "consulting" indicator between calls.
+	routerQueryingModel string
+	routerQuerying      bool
+	// routerModel is the router backend's own model id used for the
+	// most recent router call, fetched by the same probe so the sidebar
+	// can show it even once routerQueryingModel has cleared.
+	routerModel string
+	// routerSavings is the router's cumulative estimated dollar savings
+	// for the session this probe was dispatched for; 0 when there was
+	// no active session at dispatch time.
+	routerSavings float64
+	// routerError is the router's most recent failure message while
+	// enabled, fetched by the same probe so the sidebar can show that
+	// the router isn't working instead of just showing nothing.
+	routerError string
 }
 
 // promptQueueMsg delivers the queued prompts fetched off-thread.
@@ -146,6 +170,10 @@ func (m *UI) dispatchBusyRefresh() tea.Cmd {
 	m.busyFetchInFlight = true
 	ws := m.com.Workspace
 	gen := m.busyFetchGen
+	var sessionID string
+	if m.hasSession() {
+		sessionID = m.session.ID
+	}
 	return func() tea.Msg {
 		st := busyStateMsg{gen: gen}
 		if ws.AgentIsReady() {
@@ -154,6 +182,13 @@ func (m *UI) dispatchBusyRefresh() tea.Cmd {
 			st.model = ws.AgentModel()
 		}
 		st.yolo = ws.PermissionSkipRequests()
+		st.routerDecision, st.hasRouterDecision = ws.AgentLastRouterDecision()
+		st.routerQueryingModel, st.routerQuerying = ws.AgentRouterQuerying()
+		st.routerModel = ws.AgentRouterModel()
+		st.routerError = ws.AgentRouterError()
+		if sessionID != "" {
+			st.routerSavings = ws.AgentRouterSavings(sessionID)
+		}
 		return st
 	}
 }
@@ -188,6 +223,12 @@ func (m *UI) applyBusyState(msg busyStateMsg) []tea.Cmd {
 	m.yoloCache.set(msg.yolo)
 	m.agentReady = msg.ready
 	m.agentModel = msg.model
+	m.status.SetRouterDecision(msg.routerDecision, msg.hasRouterDecision)
+	m.routerQueryingModel = msg.routerQueryingModel
+	m.routerQuerying = msg.routerQuerying
+	m.routerModel = msg.routerModel
+	m.routerSavings = msg.routerSavings
+	m.routerError = msg.routerError
 	if prevYolo != msg.yolo {
 		// A remote/async toggle changed yolo mode: update the editor
 		// prompt function so the prompt icon/style tracks the new mode.

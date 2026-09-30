@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/proto"
+	"github.com/charmbracelet/crush/internal/router"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
@@ -28,6 +29,14 @@ type blockingCoordinator struct {
 	setMainAgentErr  error
 	lastMainAgentSet atomic.Value
 	busy             bool
+
+	routerDecision      router.Decision
+	hasRouterDecision   bool
+	routerQueryingModel string
+	routerQuerying      bool
+	lastRouterModel     string
+	lastRouterError     string
+	routerSavings       float64
 }
 
 func newBlockingCoordinator() *blockingCoordinator {
@@ -61,8 +70,23 @@ func (c *blockingCoordinator) QueuedPromptsList(string) []string                
 func (c *blockingCoordinator) ClearQueue(string)                                 {}
 func (c *blockingCoordinator) Summarize(context.Context, string) error           { return nil }
 func (c *blockingCoordinator) Model() agent.Model                                { return agent.Model{} }
-func (c *blockingCoordinator) UpdateModels(context.Context) error                { return nil }
-func (c *blockingCoordinator) GenerateTitle(context.Context, string, string)     {}
+func (c *blockingCoordinator) LastRouterDecision() (router.Decision, bool) {
+	return c.routerDecision, c.hasRouterDecision
+}
+func (c *blockingCoordinator) LastRouterModel() string {
+	return c.lastRouterModel
+}
+func (c *blockingCoordinator) LastRouterError() string {
+	return c.lastRouterError
+}
+func (c *blockingCoordinator) RouterSavings(string) float64 {
+	return c.routerSavings
+}
+func (c *blockingCoordinator) RouterQuerying() (string, bool) {
+	return c.routerQueryingModel, c.routerQuerying
+}
+func (c *blockingCoordinator) UpdateModels(context.Context) error            { return nil }
+func (c *blockingCoordinator) GenerateTitle(context.Context, string, string) {}
 func (c *blockingCoordinator) SetMainAgent(agentName string) error {
 	c.lastMainAgentSet.Store(agentName)
 	return c.setMainAgentErr
@@ -220,4 +244,59 @@ func TestSetMainAgent_PropagatesCoordinatorError(t *testing.T) {
 
 	err := b.SetMainAgent(ws.ID, "123")
 	require.ErrorIs(t, err, wantErr)
+}
+
+// TestGetAgentInfo_NoRouterDecision asserts that when the coordinator has
+// not yet made a router decision, GetAgentInfo reports
+// HasRouterDecision as false and leaves the other router fields zeroed.
+func TestGetAgentInfo_NoRouterDecision(t *testing.T) {
+	t.Parallel()
+	b, _ := newTestBackend(t)
+	coord := newBlockingCoordinator()
+	ws := insertAgentWorkspace(t, b, coord)
+
+	info, err := b.GetAgentInfo(ws.ID)
+	require.NoError(t, err)
+	require.False(t, info.HasRouterDecision)
+	require.Empty(t, info.RouterEffort)
+}
+
+// TestGetAgentInfo_RouterDecision asserts that GetAgentInfo surfaces the
+// coordinator's most recent router decision on the wire struct.
+func TestGetAgentInfo_RouterDecision(t *testing.T) {
+	t.Parallel()
+	b, _ := newTestBackend(t)
+	coord := newBlockingCoordinator()
+	coord.hasRouterDecision = true
+	coord.routerDecision = router.Decision{
+		ReasoningEffort: "high",
+		Confidence:      0.75,
+		LowConfidence:   true,
+	}
+	ws := insertAgentWorkspace(t, b, coord)
+
+	info, err := b.GetAgentInfo(ws.ID)
+	require.NoError(t, err)
+	require.True(t, info.HasRouterDecision)
+	require.Equal(t, "high", info.RouterEffort)
+	require.Equal(t, 0.75, info.RouterConfidence)
+	require.True(t, info.RouterLowConfidence)
+}
+
+// TestGetAgentInfo_RouterQuerying proves GetAgentInfo carries the
+// coordinator's live "consulting" state through to proto.AgentInfo, so
+// client/server mode's ClientWorkspace.AgentRouterQuerying (a single
+// GetAgentInfo round-trip, not a separate endpoint) has the field to read.
+func TestGetAgentInfo_RouterQuerying(t *testing.T) {
+	t.Parallel()
+	b, _ := newTestBackend(t)
+	coord := newBlockingCoordinator()
+	coord.routerQuerying = true
+	coord.routerQueryingModel = "typesafe/jev-latest"
+	ws := insertAgentWorkspace(t, b, coord)
+
+	info, err := b.GetAgentInfo(ws.ID)
+	require.NoError(t, err)
+	require.True(t, info.RouterQuerying)
+	require.Equal(t, "typesafe/jev-latest", info.RouterQueryingModel)
 }

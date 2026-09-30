@@ -120,6 +120,35 @@ type AgentInfo struct {
 	IsReady  bool                 `json:"is_ready"`
 	Model    catwalk.Model        `json:"model"`
 	ModelCfg config.SelectedModel `json:"model_cfg"`
+
+	// RouterEffort, RouterConfidence, and RouterLowConfidence carry the
+	// most recent model-router decision (see internal/router), when one
+	// has been made. HasRouterDecision distinguishes "no decision yet"
+	// from a zero-value decision.
+	RouterEffort        string  `json:"router_effort,omitempty"`
+	RouterConfidence    float64 `json:"router_confidence,omitempty"`
+	RouterLowConfidence bool    `json:"router_low_confidence,omitempty"`
+	HasRouterDecision   bool    `json:"has_router_decision,omitempty"`
+
+	// RouterQuerying and RouterQueryingModel report whether a router HTTP
+	// call is in flight right now, and which model it was sent to, so the
+	// UI can show a live "consulting" indicator distinct from the last
+	// completed decision above.
+	RouterQuerying      bool   `json:"router_querying,omitempty"`
+	RouterQueryingModel string `json:"router_querying_model,omitempty"`
+
+	// RouterModel is the router backend's own model id (the classifier,
+	// e.g. "~typesafe/jev-latest") used for the most recent router call,
+	// kept around after RouterQueryingModel clears so the UI can still
+	// say which model produced the decision above.
+	RouterModel string `json:"router_model,omitempty"`
+
+	// RouterError is the most recent router failure message while the
+	// router is enabled (a failed call, an unrecognized provider, or a
+	// missing base URL for a local provider), or "" if the last
+	// consulted call succeeded. Lets the UI show that the router isn't
+	// working instead of just quietly showing nothing.
+	RouterError string `json:"router_error,omitempty"`
 }
 
 // IsZero checks if the AgentInfo is zero-valued.
@@ -167,6 +196,10 @@ type ShellCommandResponse struct {
 type AgentSession struct {
 	Session
 	IsBusy bool `json:"is_busy"`
+	// RouterSavings is the router's cumulative estimated dollar savings
+	// for this session (see agent.Coordinator.RouterSavings): 0 when the
+	// router has never affected a message in it.
+	RouterSavings float64 `json:"router_savings,omitempty"`
 }
 
 // IsZero checks if the AgentSession is zero-valued.

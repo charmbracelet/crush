@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
+
+	routerbackend "github.com/charmbracelet/crush/internal/router"
 )
 
 // handleOption implements the `option` builtin.
@@ -49,6 +51,10 @@ func handleOption(ctx context.Context, args []string, stdin io.Reader, stdout, s
 
 	if key == "ui" {
 		return optionUI(o, args, stderr)
+	}
+
+	if key == "router" {
+		return optionRouter(o, args, stderr)
 	}
 
 	// "option reset <key>" wipes a list back to empty. Because the builder
@@ -272,6 +278,82 @@ func optionUI(options map[string]any, args []string, stderr io.Writer) error {
 	}
 
 	slog.Info("UI option set in shell config", "key", key, "value", value)
+	return nil
+}
+
+// optionRouter implements "option router <key> <value>" for the pre-call
+// model/reasoning router settings that live under options.router.
+func optionRouter(options map[string]any, args []string, stderr io.Writer) error {
+	if len(args) != 4 {
+		return usage(stderr, "usage: option router <enabled|provider|base-url|api-key|model|confidence-threshold|min-model-confidence|timeout-ms|model-pool|apply-subagents> <value>")
+	}
+
+	key := args[2]
+	value := args[3]
+	router := childMap(options, "router")
+
+	switch key {
+	case "enabled":
+		parsed, err := parseBool(value)
+		if err != nil {
+			return usage(stderr, fmt.Sprintf("option router enabled expects true/false, got %q", value))
+		}
+		router["enabled"] = parsed
+
+	case "provider":
+		if _, ok := routerbackend.Backends[value]; !ok {
+			return usage(stderr, fmt.Sprintf("option router provider expects one of %s, got %q", strings.Join(routerbackend.ProviderNames(), ", "), value))
+		}
+		router["provider"] = value
+
+	case "base-url":
+		router["base_url"] = value
+
+	case "api-key":
+		router["api_key"] = value
+
+	case "model":
+		router["model"] = value
+
+	case "confidence-threshold":
+		parsed, err := strconv.ParseFloat(value, 64)
+		if err != nil || parsed < 0 || parsed > 1 {
+			return usage(stderr, fmt.Sprintf("option router confidence-threshold expects a number between 0 and 1, got %q", value))
+		}
+		router["confidence_threshold"] = parsed
+
+	case "min-model-confidence":
+		parsed, err := strconv.ParseFloat(value, 64)
+		if err != nil || parsed < 0 || parsed > 1 {
+			return usage(stderr, fmt.Sprintf("option router min-model-confidence expects a number between 0 and 1, got %q", value))
+		}
+		router["min_model_confidence"] = parsed
+
+	case "timeout-ms":
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed <= 0 {
+			return usage(stderr, fmt.Sprintf("option router timeout-ms expects a positive integer, got %q", value))
+		}
+		router["timeout_ms"] = parsed
+
+	case "model-pool":
+		if value == "" {
+			return usage(stderr, "option router model-pool requires a value")
+		}
+		router["model_pool"] = appendArr(router, "model_pool", value)
+
+	case "apply-subagents":
+		parsed, err := parseBool(value)
+		if err != nil {
+			return usage(stderr, fmt.Sprintf("option router apply-subagents expects true/false, got %q", value))
+		}
+		router["apply_subagents"] = parsed
+
+	default:
+		return usage(stderr, fmt.Sprintf("option router: unknown key %q", key))
+	}
+
+	slog.Info("Router option set in shell config", "key", key, "value", value)
 	return nil
 }
 

@@ -137,6 +137,13 @@ type SessionAgentCall struct {
 	// is rewritten and no longer carries the element, so the reply
 	// target is not lost when a long channel turn is summarized.
 	channelMeta map[string]string
+	// ModelOverride, when non-nil, is used in place of the agent's
+	// normally configured large model for this call only. It is never
+	// written back to the sessionAgent's own a.largeModel — mutating that
+	// shared field would race every other session sharing this same
+	// named agent. Set by the model router (internal/agent/coordinator.go)
+	// when it pivots to a different OpenRouter model for one message.
+	ModelOverride *Model
 }
 
 // filterToolsForChannel scopes the tool list for a turn. A channel-originated
@@ -178,7 +185,7 @@ type SessionAgent interface {
 	QueuedPrompts(sessionID string) int
 	QueuedPromptsList(sessionID string) []string
 	ClearQueue(sessionID string)
-	Summarize(context.Context, string, fantasy.ProviderOptions, func(context.Context, *fantasy.ProviderError) error) error
+	Summarize(context.Context, string, fantasy.ProviderOptions, func(context.Context, *fantasy.ProviderError) error, *Model) error
 	Model() Model
 	GenerateTitle(ctx context.Context, sessionID, userPrompt string)
 }
@@ -702,6 +709,13 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// Copy mutable fields under lock to avoid races with SetTools/SetModels.
 	agentTools := filterToolsForChannel(a.tools.Copy(), call.Channel, mcp.GetStates())
 	largeModel := a.largeModel.Get()
+
+	if call.ModelOverride != nil {
+		// A one-off model chosen by the router for this call only — never
+		// written back to a.largeModel, which every session sharing this
+		// named agent reads.
+		largeModel = *call.ModelOverride
+	}
 	systemPrompt := a.systemPrompt.Get()
 	promptPrefix := a.systemPromptPrefix.Get()
 	var instructions strings.Builder
@@ -995,11 +1009,17 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		},
 		OnAuthRefresh: call.OnAuthRefresh,
 		ModelProvider: func() fantasy.LanguageModel {
-			m := a.largeModel.Get()
-			slog.Info("ModelProvider called",
-				"provider", m.ModelCfg.Provider,
-				"model", m.ModelCfg.Model)
-			return m.Model
+			// A router-chosen model is a one-off override for this call
+			// only: always return it, exactly as resolved at the top of
+			// Run. Otherwise, re-read a.largeModel fresh on every call —
+			// not the local `largeModel` snapshot — so that a retry
+			// following OnAuthRefresh's mid-call a.largeModel.Set(...)
+			// picks up the refreshed client instead of replaying the
+			// stale, pre-refresh one.
+			if call.ModelOverride != nil {
+				return largeModel.Model
+			}
+			return a.largeModel.Get().Model
 		},
 		OnToolCall: func(tc fantasy.ToolCallContent) error {
 			input, wasSanitized := sanitizeToolInput(tc.ToolName, tc.ToolCallID, tc.Input)
@@ -1263,7 +1283,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 	if shouldSummarize {
 		a.activeRequests.Del(call.SessionID)
-		if summarizeErr := a.Summarize(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh); summarizeErr != nil {
+		if summarizeErr := a.Summarize(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh, call.ModelOverride); summarizeErr != nil {
 			return nil, summarizeErr
 		}
 		// If the agent wasn't done...
@@ -1408,13 +1428,18 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	return a.Run(ctx, firstQueuedMessage)
 }
 
-func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error) error {
+func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error, modelOverride *Model) error {
 	if a.IsSessionBusy(sessionID) {
 		return ErrSessionBusy
 	}
 
 	// Copy mutable fields under lock to avoid races with SetModels.
 	largeModel := a.largeModel.Get()
+	if modelOverride != nil {
+		// Mirrors Run's own override handling: a one-off model for this
+		// summarize call only, never written back to a.largeModel.
+		largeModel = *modelOverride
+	}
 	systemPromptPrefix := a.systemPromptPrefix.Get()
 
 	currentSession, err := a.sessions.Get(ctx, sessionID)
@@ -1467,6 +1492,9 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		ProviderOptions: opts,
 		OnAuthRefresh:   onAuthRefresh,
 		ModelProvider: func() fantasy.LanguageModel {
+			if modelOverride != nil {
+				return largeModel.Model
+			}
 			return a.largeModel.Get().Model
 		},
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {

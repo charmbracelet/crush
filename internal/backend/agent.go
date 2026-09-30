@@ -138,11 +138,21 @@ func (b *Backend) GetAgentInfo(workspaceID string) (proto.AgentInfo, error) {
 	var agentInfo proto.AgentInfo
 	if ws.AgentCoordinator != nil {
 		m := ws.AgentCoordinator.Model()
+		decision, hasDecision := ws.AgentCoordinator.LastRouterDecision()
+		queryingModel, querying := ws.AgentCoordinator.RouterQuerying()
 		agentInfo = proto.AgentInfo{
-			Model:    m.CatwalkCfg,
-			ModelCfg: m.ModelCfg,
-			IsBusy:   ws.AgentCoordinator.IsBusy(),
-			IsReady:  true,
+			Model:               m.CatwalkCfg,
+			ModelCfg:            m.ModelCfg,
+			IsBusy:              ws.AgentCoordinator.IsBusy(),
+			IsReady:             true,
+			RouterEffort:        decision.ReasoningEffort,
+			RouterConfidence:    decision.Confidence,
+			RouterLowConfidence: decision.LowConfidence,
+			HasRouterDecision:   hasDecision,
+			RouterQuerying:      querying,
+			RouterQueryingModel: queryingModel,
+			RouterModel:         ws.AgentCoordinator.LastRouterModel(),
+			RouterError:         ws.AgentCoordinator.LastRouterError(),
 		}
 	}
 	return agentInfo, nil

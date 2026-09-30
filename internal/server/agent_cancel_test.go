@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/crush/internal/backend"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/proto"
+	"github.com/charmbracelet/crush/internal/router"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
@@ -90,6 +91,13 @@ func (s *runCoordinator) SetMainAgent(agentName string) error {
 	s.lastMainAgentSet.Store(agentName)
 	return s.setMainAgentErr
 }
+func (s *runCoordinator) LastRouterDecision() (router.Decision, bool) {
+	return router.Decision{}, false
+}
+func (s *runCoordinator) RouterQuerying() (string, bool) { return "", false }
+func (s *runCoordinator) LastRouterModel() string        { return "" }
+func (s *runCoordinator) LastRouterError() string        { return "" }
+func (s *runCoordinator) RouterSavings(string) float64   { return 0 }
 
 func (s *runCoordinator) capturedCtx() context.Context {
 	s.mu.Lock()

@@ -7,6 +7,7 @@ import (
 	"charm.land/bubbles/v2/help"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/router"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/util"
 	uv "github.com/charmbracelet/ultraviolet"
@@ -31,6 +32,12 @@ type Status struct {
 	// inputMode and yolo drive the mode badge shown before the help hints.
 	inputMode uiInputMode
 	yolo      bool
+
+	// routerDecision and hasRouterDecision drive the router badge shown
+	// after the help hints: the reasoning effort applied to the last
+	// dispatched message, flagged when the router's confidence was low.
+	routerDecision    router.Decision
+	hasRouterDecision bool
 }
 
 // NewStatus creates a new status bar and help model.
@@ -74,6 +81,51 @@ func (s *Status) modeBadge() string {
 	return ""
 }
 
+// SetRouterDecision sets the most recent model-router decision shown as a
+// compact badge in the status bar. ok mirrors the router's own fail-open
+// semantics: false means no trustworthy decision exists yet (router
+// disabled, or every call so far failed open), and the badge is hidden.
+func (s *Status) SetRouterDecision(d router.Decision, ok bool) {
+	s.routerDecision = d
+	s.hasRouterDecision = ok
+}
+
+// routerBadge renders the compact "router: <effort>" badge, styled with
+// the warn token when the router's confidence was low, or an empty string
+// when no decision has been made yet.
+func (s *Status) routerBadge() string {
+	if !s.hasRouterDecision {
+		return ""
+	}
+	t := s.com.Styles
+	label := "router: "
+	if s.routerDecision.ModelID != "" {
+		label += shortModelName(s.routerDecision.ModelID)
+		if s.routerDecision.ReasoningEffort != "" {
+			label += " · "
+		}
+	}
+	label += s.routerDecision.ReasoningEffort
+	if s.routerDecision.LowConfidence {
+		// WarnIndicator has a baked-in SetString("WARNING") label (used
+		// elsewhere as a standalone indicator icon); clear it so
+		// Render doesn't prepend "WARNING " ahead of our own text.
+		return t.Status.WarnIndicator.SetString("").Render(label)
+	}
+	// InfoIndicator similarly carries a baked-in "OKAY!" label.
+	return t.Status.InfoIndicator.SetString("").Render(label)
+}
+
+// shortModelName returns the last path segment of an OpenRouter model
+// id (e.g. "anthropic/claude-haiku-4" -> "claude-haiku-4"), so the badge
+// stays compact. Ids with no "/" are returned unchanged.
+func shortModelName(id string) string {
+	if i := strings.LastIndex(id, "/"); i >= 0 {
+		return id[i+1:]
+	}
+	return id
+}
+
 // SetWidth sets the width of the status bar and help view.
 func (s *Status) SetWidth(width int) {
 	helpStyle := s.com.Styles.Status.Help
@@ -102,13 +154,20 @@ func (s *Status) Draw(scr uv.Screen, area uv.Rectangle) {
 		helpStyle := s.com.Styles.Status.Help
 		helpWidth := area.Dx() - helpStyle.GetPaddingLeft() - helpStyle.GetPaddingRight()
 		badge := s.modeBadge()
+		routerBadge := s.routerBadge()
 		if badge != "" {
 			// Shrink the hints so the badge does not push them past the
 			// status area.
 			helpWidth -= lipgloss.Width(badge) + 1 + badgeLeftInset
 		}
+		if routerBadge != "" {
+			helpWidth -= lipgloss.Width(routerBadge) + 1
+		}
 		s.help.SetWidth(max(0, helpWidth))
 		helpView := helpStyle.Render(s.help.View(s.helpKm))
+		if routerBadge != "" {
+			helpView += " " + routerBadge
+		}
 		if badge != "" {
 			// Indent the rows after the first so the expanded help lines up
 			// with the hints on the badge row.

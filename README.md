@@ -377,6 +377,8 @@ You can also select a theme directly in your config with `active_theme`:
 }
 ```
 
+Use `charmtone-light` for black-on-white (light mode) terminals.
+
 Custom theme palettes are stored as JSON files in the global theme directory.
 For example, `~/.config/crush/themes/my-theme.json`:
 
@@ -393,11 +395,12 @@ dialog.
 
 #### Built-In Themes
 
-| Theme             | Name                          |
-| ----------------- | ----------------------------- |
-| Charmtone Pantera | `charmtone-panther` (default) |
-| Gruvbox Dark      | `gruvbox-dark`                |
-| Keanu             | `keanu`                       |
+| Theme             | Name                               |
+| ----------------- | ---------------------------------- |
+| Charmtone Pantera | `charmtone-panther` (default)      |
+| Charmtone Light   | `charmtone-light` (black-on-white) |
+| Gruvbox Dark      | `gruvbox-dark`                     |
+| Keanu             | `keanu`                            |
 
 ### LSPs
 

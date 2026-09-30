@@ -1,6 +1,8 @@
 package attachments
 
 import (
+	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -8,6 +10,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 )
 
@@ -387,4 +390,200 @@ func TestHandleClick_EmptyListIgnored(t *testing.T) {
 
 	handled := m.HandleClick(5)
 	require.False(t, handled)
+}
+
+// testAttachments builds n image attachments with short, predictable names.
+func testAttachments(n int) []message.Attachment {
+	atts := make([]message.Attachment, n)
+	for i := range atts {
+		atts[i] = message.Attachment{
+			FileName: fmt.Sprintf("f%d.png", i),
+			MimeType: "image/png",
+		}
+	}
+	return atts
+}
+
+// chipW is the rendered width of a single test chip, measured rather than
+// assumed: Render fits the row by real chip widths, and these filenames are
+// far shorter than the truncation cap.
+func chipW(t *testing.T, r *Renderer, showRemove bool) int {
+	t.Helper()
+	w := lipgloss.Width(r.Render(testAttachments(1), false, showRemove, 1000))
+	require.Positive(t, w)
+	return w
+}
+
+// indicatorW is the width Render reserves for the "N more…" indicator.
+func indicatorW(r *Renderer, total int) int {
+	return lipgloss.Width(r.normalStyle.UnsetBackground().Render(fmt.Sprintf("%d more…", total)))
+}
+
+// shownCount counts how many of the first n chips appear in the output.
+func shownCount(out string, n int) int {
+	shown := 0
+	for i := range n {
+		if strings.Contains(out, fmt.Sprintf("f%d.png", i)) {
+			shown++
+		}
+	}
+	return shown
+}
+
+// hiddenFromMsg extracts N from a rendered "N more…" indicator.
+func hiddenFromMsg(t *testing.T, out string) int {
+	t.Helper()
+	idx := strings.Index(out, " more…")
+	require.GreaterOrEqual(t, idx, 0, "expected a %q indicator in %q", "more…", out)
+	fields := strings.Fields(ansi.Strip(out[:idx]))
+	require.NotEmpty(t, fields)
+	n, err := strconv.Atoi(fields[len(fields)-1])
+	require.NoError(t, err)
+	return n
+}
+
+func TestRender_MoreIndicatorCountIsAccurate(t *testing.T) {
+	t.Parallel()
+
+	// The indicator must describe the chips actually omitted. It used to be
+	// computed from the index of the last drawn chip rather than the count
+	// of drawn chips, so it was always one too high — a single attachment in
+	// a narrow pane reported "1 more…" with nothing hidden at all.
+	for _, showRemove := range []bool{true, false} {
+		r := newTestRenderer()
+		cw := chipW(t, r, showRemove)
+
+		tests := []struct {
+			name       string
+			total      int
+			width      func(total int) int
+			wantShown  int
+			wantHidden int // 0 means no indicator should be drawn
+		}{
+			{"one chip, exact fit", 1, func(int) int { return cw }, 1, 0},
+			{"three chips, exact fit", 3, func(int) int { return 3 * cw }, 3, 0},
+			{"three chips, room to spare", 3, func(int) int { return 4 * cw }, 3, 0},
+			{"three chips, room for one", 3, func(n int) int { return cw + indicatorW(r, n) }, 1, 2},
+			{"five chips, room for two", 5, func(n int) int { return 2*cw + indicatorW(r, n) }, 2, 3},
+			{"two chips, one short", 2, func(int) int { return 2*cw - 1 }, 1, 1},
+			{"three chips, no room at all", 3, func(n int) int { return cw + indicatorW(r, n) - 1 }, 0, 3},
+		}
+
+		for _, tt := range tests {
+			t.Run(fmt.Sprintf("showRemove=%v/%s", showRemove, tt.name), func(t *testing.T) {
+				out := r.Render(testAttachments(tt.total), false, showRemove, tt.width(tt.total))
+				shown := shownCount(out, tt.total)
+
+				require.Equal(t, tt.wantShown, shown, "wrong number of chips drawn")
+
+				if tt.wantHidden == 0 {
+					require.NotContains(t, out, "more…",
+						"nothing is hidden, so no indicator should be drawn")
+					return
+				}
+				require.Equal(t, tt.wantHidden, hiddenFromMsg(t, out),
+					"the indicator must match the chips actually omitted")
+				require.Equal(t, tt.total-shown, hiddenFromMsg(t, out))
+			})
+		}
+	}
+}
+
+func TestRender_ShowsAsManyChipsAsFit(t *testing.T) {
+	t.Parallel()
+
+	// Regression for over-eager truncation: budgeting a full worst-case
+	// slot per chip plus a whole slot for the indicator collapsed panes
+	// that had room for a chip, leaving the user staring at "2 more…" with
+	// no attachment visible at all.
+	for _, showRemove := range []bool{true, false} {
+		r := newTestRenderer()
+		cw := chipW(t, r, showRemove)
+
+		for _, total := range []int{2, 3, 5} {
+			// Exactly enough room for one chip and the indicator.
+			width := cw + indicatorW(r, total)
+			out := r.Render(testAttachments(total), false, showRemove, width)
+
+			require.Equal(t, 1, shownCount(out, total),
+				"showRemove=%v total=%d: a pane with room for a chip must show one",
+				showRemove, total)
+			require.LessOrEqual(t, lipgloss.Width(out), width)
+		}
+	}
+}
+
+func TestRender_NeverExceedsGivenWidth(t *testing.T) {
+	t.Parallel()
+
+	// Truncation exists to keep the row inside its pane, so the rendered
+	// width must never exceed the width Render was given — including narrow
+	// panes where only the indicator fits, and the posted-message path
+	// whose chips carry an extra trailing margin.
+	for _, showRemove := range []bool{true, false} {
+		r := newTestRenderer()
+		cw := chipW(t, r, showRemove)
+
+		for _, total := range []int{1, 2, 3, 5, 12, 200} {
+			for _, width := range []int{
+				0, 1, cw / 2, cw - 1, cw, cw + 1, 2 * cw, 2*cw + 3, 3 * cw, 7 * cw, 200,
+			} {
+				out := r.Render(testAttachments(total), false, showRemove, width)
+				require.LessOrEqual(t, lipgloss.Width(out), width,
+					"showRemove=%v total=%d width=%d: row overflowed its pane",
+					showRemove, total, width)
+			}
+		}
+	}
+}
+
+func TestRender_CollapsedPaneRendersNothing(t *testing.T) {
+	t.Parallel()
+
+	// lipgloss ignores MaxWidth at non-positive values, so without an early
+	// return a collapsed pane renders the "N more…" hint at full width.
+	for _, showRemove := range []bool{true, false} {
+		r := newTestRenderer()
+		for _, width := range []int{0, -1, -80} {
+			out := r.Render(testAttachments(3), false, showRemove, width)
+			require.Empty(t, out,
+				"showRemove=%v width=%d: nothing fits, so nothing should render",
+				showRemove, width)
+			require.Empty(t, r.bounds,
+				"no remove bounds should survive a collapsed render")
+		}
+	}
+}
+
+func TestRender_MoreIndicatorIsThemed(t *testing.T) {
+	t.Parallel()
+
+	// The indicator used to render with a bare lipgloss.Style, so it showed
+	// in the terminal's default foreground next to themed chips.
+	r := newTestRenderer()
+	out := r.Render(testAttachments(3), false, true, chipW(t, r, true))
+
+	idx := strings.Index(out, "more…")
+	require.GreaterOrEqual(t, idx, 0)
+	require.Contains(t, out[:idx], "\x1b[",
+		"the indicator must carry the theme's styling, not render bare")
+}
+
+func TestRender_TruncatesBelowOneChip(t *testing.T) {
+	t.Parallel()
+
+	// A pane narrower than a single chip used to disable truncation
+	// entirely: the slot count went negative, the break condition could
+	// never match, and every chip rendered past the edge.
+	for _, showRemove := range []bool{true, false} {
+		r := newTestRenderer()
+		width := chipW(t, r, showRemove) - 1
+		out := r.Render(testAttachments(5), false, showRemove, width)
+
+		require.Equal(t, 0, shownCount(out, 5),
+			"showRemove=%v: no chip fits, so none should be drawn", showRemove)
+		require.Contains(t, out, "5 more…",
+			"the row must still report what it is hiding")
+		require.LessOrEqual(t, lipgloss.Width(out), width)
+	}
 }

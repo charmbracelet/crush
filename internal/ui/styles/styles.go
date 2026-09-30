@@ -497,6 +497,8 @@ type Styles struct {
 		// SSHMessage is the friendly description of what an integrated
 		// SSH askpass prompt is asking for.
 		SSHMessage lipgloss.Style
+		// SSHKey styles the labeled account/key row shown under it.
+		SSHKey lipgloss.Style
 
 		List lipgloss.Style
 

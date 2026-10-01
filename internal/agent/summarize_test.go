@@ -15,8 +15,9 @@ import (
 // recordingModel is a [fantasy.LanguageModel] that keeps a rendering of every
 // call it receives, so tests can assert on what actually reached the model.
 type recordingModel struct {
-	calls []string
-	text  string
+	calls     []string
+	maxOutput []int64
+	text      string
 }
 
 func (m *recordingModel) Generate(context.Context, fantasy.Call) (*fantasy.Response, error) {
@@ -25,6 +26,7 @@ func (m *recordingModel) Generate(context.Context, fantasy.Call) (*fantasy.Respo
 
 func (m *recordingModel) Stream(_ context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
 	m.calls = append(m.calls, fmt.Sprintf("%+v", call))
+	m.maxOutput = append(m.maxOutput, derefMaxTokens(call.MaxOutputTokens))
 	text := m.text
 	return func(yield func(fantasy.StreamPart) bool) {
 		yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextStart, ID: "1"})
@@ -44,6 +46,14 @@ func (m *recordingModel) StreamObject(context.Context, fantasy.ObjectCall) (fant
 
 func (m *recordingModel) Provider() string { return "fake" }
 func (m *recordingModel) Model() string    { return "fake-model" }
+
+// derefMaxTokens reports 0 when the caller left max_tokens to the provider.
+func derefMaxTokens(tokens *int64) int64 {
+	if tokens == nil {
+		return 0
+	}
+	return *tokens
+}
 
 // seedSizedTurns creates turns user/assistant pairs whose text is about the
 // given number of context tokens each.
@@ -82,6 +92,8 @@ func TestSummarizeKeepsRecentTurnsVerbatim(t *testing.T) {
 	require.Positive(t, updated.PromptTokens, "a compacted session does not start from an empty context")
 
 	require.Len(t, model.calls, 1)
+	require.Equal(t, int64(compaction.MaxCheckpointTokens), model.maxOutput[0],
+		"the checkpoint request must not inherit an unbounded provider default")
 	require.NotContains(t, model.calls[0], "turn 7", "the retained tail must not be re-sent to be summarized")
 	require.Contains(t, model.calls[0], "turn 0", "the replaced region is what the checkpoint is built from")
 

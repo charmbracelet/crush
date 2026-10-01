@@ -29,17 +29,17 @@ func (c *initFakeCoordinator) Run(context.Context, string, string, ...message.At
 func (c *initFakeCoordinator) RunAccepted(context.Context, *agent.AcceptedRun, string, string, ...message.Attachment) (*fantasy.AgentResult, error) {
 	return nil, nil
 }
-func (c *initFakeCoordinator) BeginAccepted(string) *agent.AcceptedRun { return nil }
-func (c *initFakeCoordinator) Cancel(string)                           {}
-func (c *initFakeCoordinator) CancelAll()                              { c.cancelCalls++ }
-func (c *initFakeCoordinator) IsSessionBusy(string) bool               { return false }
-func (c *initFakeCoordinator) IsBusy() bool                            { return c.busy }
-func (c *initFakeCoordinator) QueuedPrompts(string) int                { return 0 }
-func (c *initFakeCoordinator) QueuedPromptsList(string) []string       { return nil }
-func (c *initFakeCoordinator) ClearQueue(string)                       {}
-func (c *initFakeCoordinator) Summarize(context.Context, string) error { return nil }
-func (c *initFakeCoordinator) Model() agent.Model                      { return agent.Model{} }
-func (c *initFakeCoordinator) UpdateModels(context.Context) error      { return nil }
+func (c *initFakeCoordinator) BeginAccepted(string) *agent.AcceptedRun         { return nil }
+func (c *initFakeCoordinator) Cancel(string)                                   {}
+func (c *initFakeCoordinator) CancelAll()                                      { c.cancelCalls++ }
+func (c *initFakeCoordinator) IsSessionBusy(string) bool                       { return false }
+func (c *initFakeCoordinator) IsBusy() bool                                    { return c.busy }
+func (c *initFakeCoordinator) QueuedPrompts(string) int                        { return 0 }
+func (c *initFakeCoordinator) QueuedPromptsList(string) []string               { return nil }
+func (c *initFakeCoordinator) ClearQueue(string)                               {}
+func (c *initFakeCoordinator) Summarize(context.Context, string, string) error { return nil }
+func (c *initFakeCoordinator) Model() agent.Model                              { return agent.Model{} }
+func (c *initFakeCoordinator) UpdateModels(context.Context) error              { return nil }
 func (c *initFakeCoordinator) GenerateTitle(context.Context, string, string) {
 }
 

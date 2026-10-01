@@ -277,7 +277,7 @@ func (b *Backend) CancelSession(workspaceID, sessionID string) error {
 }
 
 // SummarizeSession triggers a session summarization.
-func (b *Backend) SummarizeSession(ctx context.Context, workspaceID, sessionID string) error {
+func (b *Backend) SummarizeSession(ctx context.Context, workspaceID, sessionID, instructions string) error {
 	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {
 		return err
@@ -288,7 +288,7 @@ func (b *Backend) SummarizeSession(ctx context.Context, workspaceID, sessionID s
 		return ErrAgentNotInitialized
 	}
 
-	return coord.Summarize(ctx, sessionID)
+	return coord.Summarize(ctx, sessionID, instructions)
 }
 
 // QueuedPrompts returns the number of queued prompts for the session.

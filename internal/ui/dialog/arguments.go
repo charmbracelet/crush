@@ -218,6 +218,10 @@ func (a *Arguments) HandleMsg(msg tea.Msg) Action {
 				case ActionRunMCPPrompt:
 					action.Args = args
 					return action
+				case ActionSummarize:
+					action.Args = args
+					action.Instructions = args[CompactInstructionsArg]
+					return action
 				}
 			}
 			a.focusInput(a.focused + 1)

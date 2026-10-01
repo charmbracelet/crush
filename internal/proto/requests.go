@@ -109,6 +109,13 @@ type GitBranchResponse struct {
 	Branch string `json:"branch"`
 }
 
+// SessionSummarizeRequest represents a request to compact a session.
+// Instructions are optional emphasis supplied by the user, e.g. "focus on the
+// failing tests"; an empty value keeps the default summarization.
+type SessionSummarizeRequest struct {
+	Instructions string `json:"instructions,omitempty"`
+}
+
 // AgentInitRequest represents a request to initialize the agent.
 type AgentInitRequest struct {
 	Interactive bool `json:"interactive"`

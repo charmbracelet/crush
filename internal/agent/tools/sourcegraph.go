@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"charm.land/fantasy"
+
+	"github.com/charmbracelet/crush/internal/httpretry"
 )
 
 type SourcegraphParams struct {
@@ -49,15 +51,7 @@ func sourcegraphDescription() string {
 
 func NewSourcegraphTool(client *http.Client) fantasy.AgentTool {
 	if client == nil {
-		transport := http.DefaultTransport.(*http.Transport).Clone()
-		transport.MaxIdleConns = 100
-		transport.MaxIdleConnsPerHost = 10
-		transport.IdleConnTimeout = 90 * time.Second
-
-		client = &http.Client{
-			Timeout:   30 * time.Second,
-			Transport: transport,
-		}
+		client = NewHTTPClient(30 * time.Second)
 	}
 	return fantasy.NewParallelAgentTool(
 		SourcegraphToolName,
@@ -108,7 +102,7 @@ func NewSourcegraphTool(client *http.Client) fantasy.AgentTool {
 			graphqlQuery := string(graphqlQueryBytes)
 
 			req, err := http.NewRequestWithContext(
-				requestCtx,
+				httpretry.MarkIdempotent(requestCtx), // read-only GraphQL query; safe to replay on a network blip
 				"POST",
 				"https://sourcegraph.com/.api/graphql",
 				bytes.NewBuffer([]byte(graphqlQuery)),

@@ -53,7 +53,7 @@ func (m *mockSessionAgent) GenerateTitle(context.Context, string, string) {}
 
 // newTestCoordinator creates a minimal coordinator for unit testing runSubAgent.
 func newTestCoordinator(t *testing.T, env fakeEnv, providerID string, providerCfg config.ProviderConfig) *coordinator {
-	cfg, err := config.Init(env.workingDir, "", false)
+	cfg, err := config.Init(context.Background(), env.workingDir, "", false)
 	require.NoError(t, err)
 	cfg.Config().Providers.Set(providerID, providerCfg)
 	return &coordinator{
@@ -394,7 +394,7 @@ func TestRunSubAgent(t *testing.T) {
 func TestUpdateParentSessionCost(t *testing.T) {
 	t.Run("accumulates cost correctly", func(t *testing.T) {
 		env := testEnv(t)
-		cfg, err := config.Init(env.workingDir, "", false)
+		cfg, err := config.Init(context.Background(), env.workingDir, "", false)
 		require.NoError(t, err)
 		coord := &coordinator{cfg: cfg, sessions: env.sessions}
 
@@ -419,7 +419,7 @@ func TestUpdateParentSessionCost(t *testing.T) {
 
 	t.Run("accumulates multiple child costs", func(t *testing.T) {
 		env := testEnv(t)
-		cfg, err := config.Init(env.workingDir, "", false)
+		cfg, err := config.Init(context.Background(), env.workingDir, "", false)
 		require.NoError(t, err)
 		coord := &coordinator{cfg: cfg, sessions: env.sessions}
 
@@ -450,7 +450,7 @@ func TestUpdateParentSessionCost(t *testing.T) {
 
 	t.Run("child session not found", func(t *testing.T) {
 		env := testEnv(t)
-		cfg, err := config.Init(env.workingDir, "", false)
+		cfg, err := config.Init(context.Background(), env.workingDir, "", false)
 		require.NoError(t, err)
 		coord := &coordinator{cfg: cfg, sessions: env.sessions}
 
@@ -464,7 +464,7 @@ func TestUpdateParentSessionCost(t *testing.T) {
 
 	t.Run("parent session not found", func(t *testing.T) {
 		env := testEnv(t)
-		cfg, err := config.Init(env.workingDir, "", false)
+		cfg, err := config.Init(context.Background(), env.workingDir, "", false)
 		require.NoError(t, err)
 		coord := &coordinator{cfg: cfg, sessions: env.sessions}
 
@@ -480,7 +480,7 @@ func TestUpdateParentSessionCost(t *testing.T) {
 
 	t.Run("zero cost handled correctly", func(t *testing.T) {
 		env := testEnv(t)
-		cfg, err := config.Init(env.workingDir, "", false)
+		cfg, err := config.Init(context.Background(), env.workingDir, "", false)
 		require.NoError(t, err)
 		coord := &coordinator{cfg: cfg, sessions: env.sessions}
 

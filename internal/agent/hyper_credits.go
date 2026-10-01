@@ -45,7 +45,7 @@ func newHyperCreditsModel(m fantasy.LanguageModel, apiKey func() string) fantasy
 func (m *hyperCreditsModel) Generate(ctx context.Context, call fantasy.Call) (*fantasy.Response, error) {
 	resp, err := m.LanguageModel.Generate(ctx, call)
 	if err == nil {
-		m.refreshBalance()
+		m.refreshBalance(ctx)
 	}
 	return resp, err
 }
@@ -59,14 +59,14 @@ func (m *hyperCreditsModel) Stream(ctx context.Context, call fantasy.Call) (fant
 		return nil, err
 	}
 	return func(yield func(fantasy.StreamPart) bool) {
-		defer m.refreshBalance()
+		defer m.refreshBalance(ctx)
 		stream(yield)
 	}, nil
 }
 
 // refreshBalance starts a background fetch of the hypercredit balance, or
 // marks one pending when a fetch is already running.
-func (m *hyperCreditsModel) refreshBalance() {
+func (m *hyperCreditsModel) refreshBalance(ctx context.Context) {
 	m.mu.Lock()
 	if m.inflight {
 		m.pending = true
@@ -76,15 +76,16 @@ func (m *hyperCreditsModel) refreshBalance() {
 	m.inflight = true
 	m.mu.Unlock()
 
-	go m.fetchBalance()
+	go m.fetchBalance(ctx)
 }
 
-// fetchBalance fetches the balance on a detached context so a cancelled
-// or finished run still lands its final refresh. Fetch failures are
-// logged and otherwise ignored: a stale balance beats no balance.
-func (m *hyperCreditsModel) fetchBalance() {
+// fetchBalance fetches the balance on a context detached from cancellation
+// (WithoutCancel) so a cancelled or finished run still lands its final
+// refresh. Fetch failures are logged and otherwise ignored: a stale balance
+// beats no balance.
+func (m *hyperCreditsModel) fetchBalance(ctx context.Context) {
 	if apiKey := m.apiKey(); apiKey != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		if _, err := m.fetch(ctx, apiKey); err != nil {
 			slog.Warn("Failed to fetch Hyper credits", "error", err)
 		}
@@ -98,6 +99,6 @@ func (m *hyperCreditsModel) fetchBalance() {
 	m.mu.Unlock()
 
 	if pending {
-		m.refreshBalance()
+		m.refreshBalance(ctx)
 	}
 }

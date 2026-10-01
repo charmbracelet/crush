@@ -63,7 +63,7 @@ func extractRawString(t *testing.T, cmd tea.Cmd) string {
 func TestOSCBackend_Send_OSC99(t *testing.T) {
 	t.Parallel()
 
-	backend := notification.NewOSCBackend(nil, true)
+	backend := notification.NewOSCBackend(nil, true, false)
 	s := extractRawString(t, backend.Send(notification.Notification{
 		Title:   "Crush is waiting...",
 		Message: "Agent's turn completed",
@@ -81,7 +81,7 @@ func TestOSCBackend_Send_OSC99(t *testing.T) {
 func TestOSCBackend_Send_OSC99_TitleOnly(t *testing.T) {
 	t.Parallel()
 
-	backend := notification.NewOSCBackend(nil, true)
+	backend := notification.NewOSCBackend(nil, true, false)
 	s := extractRawString(t, backend.Send(notification.Notification{
 		Title: "Crush is waiting...",
 	}))
@@ -96,7 +96,7 @@ func TestOSCBackend_Send_OSC99_WithIcon(t *testing.T) {
 	t.Parallel()
 
 	iconData := []byte("fake-png-data")
-	backend := notification.NewOSCBackend(iconData, true)
+	backend := notification.NewOSCBackend(iconData, true, false)
 	s := extractRawString(t, backend.Send(notification.Notification{
 		Title:   "Test",
 		Message: "With icon",
@@ -114,7 +114,7 @@ func TestOSCBackend_Send_OSC99_WithIcon(t *testing.T) {
 func TestOSCBackend_Send_OSC777(t *testing.T) {
 	t.Parallel()
 
-	backend := notification.NewOSCBackend(nil, false)
+	backend := notification.NewOSCBackend(nil, false, false)
 	s := extractRawString(t, backend.Send(notification.Notification{
 		Title:   "Test",
 		Message: "With body",
@@ -122,6 +122,75 @@ func TestOSCBackend_Send_OSC777(t *testing.T) {
 
 	require.Equal(t, "\x1b]777;notify;Test;With body\x07", s)
 	require.NotContains(t, s, "\x1b]99;")
+	require.NotContains(t, s, "\x1b]9;")
+}
+
+func TestOSCBackend_Send_OSC9(t *testing.T) {
+	t.Parallel()
+
+	backend := notification.NewOSCBackend(nil, false, true)
+	s := extractRawString(t, backend.Send(notification.Notification{
+		Title:   "Crush is waiting...",
+		Message: "Agent's turn completed",
+	}))
+
+	require.Equal(t, "\x1b]9;Crush is waiting...: Agent's turn completed\x07", s)
+}
+
+func TestOSCBackend_Send_OSC9_TitleOnly(t *testing.T) {
+	t.Parallel()
+
+	backend := notification.NewOSCBackend(nil, false, true)
+	s := extractRawString(t, backend.Send(notification.Notification{
+		Title: "Crush is waiting...",
+	}))
+
+	require.Equal(t, "\x1b]9;Crush is waiting...\x07", s)
+}
+
+func TestOSCBackend_Send_OSC9_MessageOnly(t *testing.T) {
+	t.Parallel()
+
+	backend := notification.NewOSCBackend(nil, false, true)
+	s := extractRawString(t, backend.Send(notification.Notification{
+		Message: "Agent's turn completed",
+	}))
+
+	require.Equal(t, "\x1b]9;Agent's turn completed\x07", s)
+}
+
+func TestOSCBackend_Send_OSC9_SanitizesControlChars(t *testing.T) {
+	t.Parallel()
+
+	backend := notification.NewOSCBackend(nil, false, true)
+	s := extractRawString(t, backend.Send(notification.Notification{
+		Title:   "Title",
+		Message: "line1\nline2\x1b]0;injected\x07",
+	}))
+
+	require.Equal(t, "\x1b]9;Title: line1 line2 ]0;injected \x07", s)
+}
+
+func TestOSCBackend_Send_OSC9_GuardsProgressCollision(t *testing.T) {
+	t.Parallel()
+
+	backend := notification.NewOSCBackend(nil, false, true)
+	s := extractRawString(t, backend.Send(notification.Notification{
+		Message: "4;50",
+	}))
+
+	require.Equal(t, "\x1b]9;Notification: 4;50\x07", s)
+}
+
+func TestOSCBackend_PrefersOSC99OverOSC9(t *testing.T) {
+	t.Parallel()
+
+	backend := notification.NewOSCBackend(nil, true, true)
+	s := extractRawString(t, backend.Send(notification.Notification{
+		Title: "Test",
+	}))
+
+	require.Contains(t, s, "\x1b]99;")
 	require.NotContains(t, s, "\x1b]9;")
 }
 

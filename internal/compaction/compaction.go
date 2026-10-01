@@ -40,6 +40,43 @@ var DefaultPolicy = Policy{
 	MinTailTurns:     2,
 }
 
+const (
+	// MinCheckpointTokens is the smallest output budget ever handed to a
+	// checkpoint request. Below this the summary is not worth its latency, so
+	// the request is sent anyway and the caller warns.
+	MinCheckpointTokens = 1_024
+	// MaxCheckpointTokens is the largest output budget a checkpoint request
+	// asks for. A checkpoint that needs more than this is transcribing the
+	// session rather than distilling it.
+	MaxCheckpointTokens = 8_192
+)
+
+// CheckpointOutputBudget returns the max_tokens a summarization request should
+// ask for, and whether the window could not even afford the floor.
+//
+// Left unset, the provider applies its own default, and a model whose default
+// is generous can push prompt plus completion past the context window. A
+// request to summarize a nearly-full session is then rejected for being too
+// long, which is exactly the failure compaction exists to prevent. The
+// reserve for future turns is deliberately not subtracted here: this request
+// only has to fit itself.
+func CheckpointOutputBudget(contextWindow, promptTokens, modelDefaultMaxTokens int64) (int64, bool) {
+	budget := int64(MaxCheckpointTokens)
+	if modelDefaultMaxTokens > 0 && modelDefaultMaxTokens < budget {
+		budget = modelDefaultMaxTokens
+	}
+
+	tight := false
+	if contextWindow > 0 {
+		if room := contextWindow - promptTokens; room < budget {
+			budget = room
+		}
+		tight = budget < MinCheckpointTokens
+	}
+
+	return max(budget, MinCheckpointTokens), tight
+}
+
 // Reserve returns the number of tokens that must stay free before another
 // round trip is worth attempting.
 //

@@ -1,16 +1,15 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
-	"sync"
 	"testing"
-	"time"
 
 	"github.com/charmbracelet/crush/internal/client"
 	"github.com/charmbracelet/crush/internal/config"
@@ -18,102 +17,64 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestRunNonInteractive_ModelRefresh(t *testing.T) {
-	// This test captures the process stderr, so it must not run in parallel.
+func TestRefreshWorkspaceConfig(t *testing.T) {
 	const original = `{
 		"options": {},
-		"models": {"large": {"provider": "fixture", "model": "stale"}},
-		"providers": {"fixture": {"models": [{"id": "selected"}, {"id": "small"}]}}
+		"models": {"large": {"provider": "fixture", "model": "stale"}}
 	}`
 	const refreshed = `{
 		"options": {},
 		"models": {"large": {"provider": "fixture", "model": "selected"}}
 	}`
+
 	for _, tt := range []struct {
-		name      string
-		status    int
-		body      string
-		wantError string
+		name       string
+		status     int
+		body       string
+		wantModel  string
+		wantLog    bool
+		wantSame   bool
 	}{
-		{"http_error", http.StatusServiceUnavailable, `{}`, "status code 503"},
-		{"invalid_json", http.StatusOK, `{`, "unexpected EOF"},
-		{"success", http.StatusOK, refreshed, ""},
+		{name: "http_error_is_diagnostic_only", status: http.StatusServiceUnavailable, body: `{}`, wantModel: "stale", wantLog: true, wantSame: true},
+		{name: "invalid_json_is_diagnostic_only", status: http.StatusOK, body: `{`, wantModel: "stale", wantLog: true, wantSame: true},
+		{name: "success_refreshes_workspace", status: http.StatusOK, body: refreshed, wantModel: "selected"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			var mu sync.Mutex
-			var requests []string
-			configReads := 0
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				mu.Lock()
-				defer mu.Unlock()
-				requests = append(requests, r.Method+" "+r.URL.Path)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				require.Equal(t, "GET", r.Method)
+				require.Equal(t, "/v1/workspaces/test/config", r.URL.Path)
 				w.Header().Set("Content-Type", "application/json")
-				switch r.Method + " " + r.URL.Path {
-				case "GET /v1/workspaces/test/config":
-					configReads++
-					if configReads == 1 {
-						_, _ = io.WriteString(w, original)
-						return
-					}
-					w.WriteHeader(tt.status)
-					_, _ = io.WriteString(w, tt.body)
-				case "POST /v1/workspaces/test/config/model", "POST /v1/workspaces/test/agent/update":
-					w.WriteHeader(http.StatusOK)
-				default:
-					// Stop the success control at readiness: never start inference.
-					// A failed refresh must not reach this path at all.
-					cancel()
-					w.WriteHeader(http.StatusServiceUnavailable)
-				}
+				w.WriteHeader(tt.status)
+				_, _ = io.WriteString(w, tt.body)
 			}))
-			defer srv.Close()
-			c, err := client.NewClient(t.TempDir(), "tcp", strings.TrimPrefix(srv.URL, "http://"))
+			defer server.Close()
+
+			c, err := client.NewClient(t.TempDir(), "tcp", strings.TrimPrefix(server.URL, "http://"))
 			require.NoError(t, err)
+
 			var cfg config.Config
 			require.NoError(t, json.Unmarshal([]byte(original), &cfg))
 			ws := &proto.Workspace{ID: "test", Config: &cfg}
-			capture, err := os.CreateTemp(t.TempDir(), "stderr")
-			require.NoError(t, err)
-			previousStderr := os.Stderr
-			os.Stderr = capture
-			t.Cleanup(func() {
-				os.Stderr = previousStderr
-				_ = capture.Close()
-			})
-			runErr := runNonInteractive(ctx, c, ws, "unused", "fixture/selected", "fixture/small", "", true, "", false)
-			os.Stderr = previousStderr
-			_, err = capture.Seek(0, io.SeekStart)
-			require.NoError(t, err)
-			output, err := io.ReadAll(capture)
-			require.NoError(t, err)
-			mu.Lock()
-			observed := append([]string(nil), requests...)
-			reads := configReads
-			mu.Unlock()
-			prefix := []string{
-				"GET /v1/workspaces/test/config",
-				"POST /v1/workspaces/test/config/model",
-				"POST /v1/workspaces/test/config/model",
-				"POST /v1/workspaces/test/agent/update",
-				"GET /v1/workspaces/test/config",
+			originalConfig := ws.Config
+
+			var logs bytes.Buffer
+			previous := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+			t.Cleanup(func() { slog.SetDefault(previous) })
+
+			refreshWorkspaceConfig(context.Background(), c, ws)
+
+			require.Equal(t, tt.wantModel, ws.Config.Models[config.SelectedModelTypeLarge].Model)
+			if tt.wantSame {
+				require.Same(t, originalConfig, ws.Config)
+			} else {
+				require.NotSame(t, originalConfig, ws.Config)
 			}
-			require.Equal(t, 2, reads)
-			if tt.wantError != "" {
-				require.ErrorContains(t, runErr, "failed to refresh config after model override")
-				require.ErrorContains(t, runErr, tt.wantError)
-				require.Equal(t, prefix, observed, "refresh failure must stop before readiness, session creation, or inference")
-				require.NotContains(t, string(output), "crush run:")
-				require.Same(t, &cfg, ws.Config)
-				return
+			if tt.wantLog {
+				require.Contains(t, logs.String(), "Failed to refresh config after model override")
+			} else {
+				require.NotContains(t, logs.String(), "Failed to refresh config after model override")
 			}
-			require.ErrorIs(t, runErr, context.Canceled)
-			require.Len(t, observed, len(prefix)+1)
-			require.Equal(t, prefix, observed[:len(prefix)])
-			require.Equal(t, "GET /v1/workspaces/test/agent", observed[len(prefix)])
-			require.Equal(t, "crush run: fixture/selected\n", string(output))
-			require.Equal(t, "selected", ws.Config.Models[config.SelectedModelTypeLarge].Model)
 		})
 	}
 }

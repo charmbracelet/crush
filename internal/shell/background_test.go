@@ -161,7 +161,7 @@ func TestBackgroundShell_WithBlockFuncs(t *testing.T) {
 
 	// The command should have been blocked
 	output := stdout + stderr
-	if !strings.Contains(output, "not allowed") && execErr == nil {
+	if !strings.Contains(output, "is a dangerous command") && execErr == nil {
 		t.Errorf("expected command to be blocked, got stdout: %s, stderr: %s, err: %v", stdout, stderr, execErr)
 	}
 

@@ -738,7 +738,59 @@ func TestSummarize_ClearedInteractiveAdmissionNotifiesIdle(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 			}
-			require.Equal(t, []notify.Notification{{SessionID: sess.ID, SessionTitle: "summary session", Type: notify.TypeAgentFinished}}, events)
+			state := notify.FinishIdleSuccess
+			if cancel {
+				state = notify.FinishIdleUnsuccessful
+			}
+			require.Equal(t, []notify.Notification{{SessionID: sess.ID, SessionTitle: "summary session", Type: notify.TypeAgentFinished, FinishState: state}}, events)
+		})
+	}
+}
+
+func TestRun_IdleOutcomeAcrossQueuedTurns(t *testing.T) {
+	t.Parallel()
+	for _, failure := range []int{0, 1, 2} {
+		t.Run(fmt.Sprint(failure), func(t *testing.T) {
+			t.Parallel()
+			_, sess, model, sa := newLifecycleTestAgent(t, "session")
+			broker := pubsub.NewBroker[notify.Notification]()
+			defer broker.Shutdown()
+			var states []notify.FinishState
+			sa.notify = observingNotifications{Broker: broker, observe: func(n notify.Notification) {
+				if n.Type == notify.TypeAgentFinished {
+					states = append(states, n.FinishState)
+					require.Equal(t, n.FinishState == notify.FinishContinuing, sa.IsSessionBusy(sess.ID))
+				}
+			}}
+			calls := 0
+			model.stream = func(ctx context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
+				calls++
+				if calls == 1 {
+					_, err := sa.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, Prompt: "B", RunID: "B"})
+					require.NoError(t, err)
+				}
+				if calls == failure {
+					return nil, errors.New("model failed")
+				}
+				return (&finishStreamModel{text: "done"}).Stream(ctx, call)
+			}
+			_, err := sa.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, Prompt: "A", RunID: "A"})
+			if failure == 1 {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+			require.Equal(t, 2, calls)
+			require.NotEmpty(t, states)
+			want := notify.FinishIdleSuccess
+			if failure != 0 {
+				want = notify.FinishIdleUnsuccessful
+			}
+			require.Equal(t, want, states[len(states)-1])
+			// A new busy interval does not inherit the previous failure.
+			_, err = sa.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, Prompt: "C"})
+			require.NoError(t, err)
+			require.Equal(t, notify.FinishIdleSuccess, states[len(states)-1])
 		})
 	}
 }

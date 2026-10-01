@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"runtime"
 	"testing"
 	"time"
@@ -283,4 +285,115 @@ func TestRequestTimeoutRunFinishMessage(t *testing.T) {
 	require.Equal(t, "Request timed out", finish.Message)
 	require.Contains(t, finish.Details, "stopped sending data for 1s")
 	require.Contains(t, finish.Details, "request-timeout")
+}
+
+// slowTool blocks for its delay, mirroring a long-running bash command, and
+// records whether the context it was handed carries a deadline.
+type slowTool struct {
+	delay       time.Duration
+	ran         bool
+	hadDeadline bool
+}
+
+func (*slowTool) Info() fantasy.ToolInfo {
+	return fantasy.ToolInfo{
+		Name:       "sleeper",
+		Parameters: map[string]any{"type": "object", "properties": map[string]any{}},
+	}
+}
+
+func (*slowTool) ProviderOptions() fantasy.ProviderOptions   { return nil }
+func (*slowTool) SetProviderOptions(fantasy.ProviderOptions) {}
+
+func (t *slowTool) Run(ctx context.Context, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
+	t.ran = true
+	_, t.hadDeadline = ctx.Deadline()
+	select {
+	case <-time.After(t.delay):
+		return fantasy.NewTextResponse("slept"), nil
+	case <-ctx.Done():
+		return fantasy.ToolResponse{}, ctx.Err()
+	}
+}
+
+// oneToolCallModel streams a single tool call on the first agent step and
+// ends the turn afterwards. Side calls (title generation) carry no tools and
+// must not consume the scripted tool call.
+type oneToolCallModel struct {
+	fakeLanguageModel
+	calls    int
+	toolSent bool
+}
+
+func (m *oneToolCallModel) Stream(_ context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
+	m.calls++
+	first := len(call.Tools) > 0 && !m.toolSent
+	if first {
+		m.toolSent = true
+	}
+	return func(yield func(fantasy.StreamPart) bool) {
+		if first {
+			if !yield(fantasy.StreamPart{
+				Type:          fantasy.StreamPartTypeToolCall,
+				ID:            "call-1",
+				ToolCallName:  "sleeper",
+				ToolCallInput: `{}`,
+			}) {
+				return
+			}
+			yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonToolCalls})
+			return
+		}
+		yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop})
+	}, nil
+}
+
+// TestRequestTimeoutModel_DoesNotBoundToolCalls pins the invariant that
+// request_timeout covers LLM requests only: a tool that runs far past the
+// timeout must finish normally, and its context must carry no deadline.
+func TestRequestTimeoutModel_DoesNotBoundToolCalls(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on windows for now")
+	}
+
+	env := testEnv(t)
+
+	inner := &oneToolCallModel{}
+	slow := &slowTool{delay: 500 * time.Millisecond}
+	agent := testSessionAgent(env, newRequestTimeoutModel(inner, 100*time.Millisecond), inner, "", slow)
+
+	session, err := env.sessions.Create(t.Context(), "tool timeout session")
+	require.NoError(t, err)
+
+	_, err = agent.Run(t.Context(), SessionAgentCall{
+		Prompt:          "Hello",
+		SessionID:       session.ID,
+		MaxOutputTokens: 1000,
+	})
+	require.NoError(t, err)
+	require.True(t, slow.ran, "the tool call should have run")
+	require.False(t, slow.hadDeadline, "a tool call must not inherit the request timeout deadline")
+}
+
+// TestWrapTimedOutBreaksCycle guards against a cyclic error chain: a provider
+// that surfaces the context cause hands the sentinel back to us, and linking
+// it to itself makes every errors.Is/As walk spin forever (see issue #3840).
+func TestWrapTimedOutBreaksCycle(t *testing.T) {
+	t.Parallel()
+
+	timeoutErr := &requestTimeoutError{timeout: time.Minute, idle: true}
+	ctx, cancel := context.WithTimeoutCause(context.Background(), 10*time.Millisecond, timeoutErr)
+	t.Cleanup(cancel)
+	<-ctx.Done()
+
+	err := wrapTimedOut(ctx, timeoutErr, fmt.Errorf("stream aborted: %w", context.Cause(ctx)))
+
+	terminated := make(chan bool, 1)
+	go func() { terminated <- errors.Is(err, context.DeadlineExceeded) }()
+	select {
+	case matched := <-terminated:
+		require.True(t, matched, "a timeout must still match context.DeadlineExceeded")
+	case <-time.After(2 * time.Second):
+		t.Fatal("errors.Is never returned: the error chain is cyclic")
+	}
 }

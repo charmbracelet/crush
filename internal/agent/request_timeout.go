@@ -74,7 +74,12 @@ func wrapTimedOut(ctx context.Context, timeoutErr *requestTimeoutError, err erro
 	if err == nil || context.Cause(ctx) != timeoutErr {
 		return err
 	}
-	if errors.Is(err, context.Canceled) {
+	// A provider that reports the context cause hands back this very
+	// sentinel. Linking the sentinel to itself builds a cyclic chain, and
+	// every errors.Is/As walk of it — in fantasy's retry classification and
+	// in our own — then spins forever, so report the generic deadline
+	// instead.
+	if errors.Is(err, timeoutErr) || errors.Is(err, context.Canceled) {
 		timeoutErr.cause = context.DeadlineExceeded
 	} else {
 		timeoutErr.cause = err

@@ -207,6 +207,8 @@ type activeCancel struct {
 	ctx          context.Context
 	cancel       context.CancelFunc
 	notification notify.Notification
+	// Sticky across the busy interval, independent of any caller's outcome.
+	unsuccessful bool
 	// Guarded by the session dispatch mutex until removal from activeRequests.
 	// Remember interactive admissions even if they fold or are cleared.
 	interactive bool
@@ -634,8 +636,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 func (a *sessionAgent) finishOwner(ctx context.Context, sessionID string, owner *activeCancel) {
 	mu := a.sessionMu(sessionID)
 	for {
-		owner.cancel()
 		mu.Lock()
+		owner.unsuccessful = owner.unsuccessful || owner.ctx.Err() != nil
+		owner.cancel()
 		queued, _ := a.messageQueue.Get(sessionID)
 		if ctx.Err() != nil {
 			a.clearQueueAndNotify(sessionID)
@@ -645,6 +648,10 @@ func (a *sessionAgent) finishOwner(ctx context.Context, sessionID string, owner 
 			a.activeRequests.CompareAndDelete(sessionID, owner)
 			mu.Unlock()
 			if owner.interactive && a.notify != nil {
+				owner.notification.FinishState = notify.FinishIdleSuccess
+				if owner.unsuccessful {
+					owner.notification.FinishState = notify.FinishIdleUnsuccessful
+				}
 				a.notify.Publish(pubsub.CreatedEvent, owner.notification)
 			}
 			return
@@ -652,7 +659,7 @@ func (a *sessionAgent) finishOwner(ctx context.Context, sessionID string, owner 
 		call := queued[0]
 		a.messageQueue.Set(sessionID, queued[1:])
 		ownerCtx, cancel := context.WithCancel(context.WithValue(ctx, tools.SessionIDContextKey, sessionID))
-		owner = &activeCancel{ctx: ownerCtx, cancel: cancel, interactive: owner.interactive}
+		owner = &activeCancel{ctx: ownerCtx, cancel: cancel, interactive: owner.interactive, unsuccessful: owner.unsuccessful}
 		a.activeRequests.Set(sessionID, owner)
 		mu.Unlock()
 		// This detached submission has already returned to its caller.
@@ -723,6 +730,7 @@ func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall, owner *ac
 	ownerCanceled := owner != nil && owner.ctx.Err() != nil
 	if ownerCanceled || (call.Accepted != nil && a.canceledBySeq(call.SessionID, call.Accepted.seq)) {
 		if owner != nil {
+			owner.unsuccessful = true
 			owner.interactive = owner.interactive || !call.NonInteractive
 			owner.notification.SessionID = call.SessionID
 			owner.notification.RunID = call.RunID
@@ -746,6 +754,7 @@ func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall, owner *ac
 			defer func() {
 				notification := notify.Notification{
 					SessionID: call.SessionID, RunID: call.RunID, Type: notify.TypeAgentFinished,
+					FinishState: notify.FinishIdleUnsuccessful,
 				}
 				readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 				defer cancel()
@@ -836,7 +845,10 @@ func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall, owner *ac
 	if call.turn == nil {
 		call.turn = &turnOutcome{}
 	}
-	defer func() { a.finishTurn(call, result, retErr) }()
+	defer func() {
+		a.finishTurn(call, result, retErr)
+		owner.unsuccessful = owner.unsuccessful || call.turn.err != nil
+	}()
 	owner.notification = notify.Notification{SessionID: call.SessionID, RunID: call.RunID, Type: notify.TypeAgentFinished}
 	genCtx, cancel := context.WithCancel(owner.ctx)
 	defer cancel()
@@ -1473,6 +1485,7 @@ func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall, owner *ac
 				SessionID:    call.SessionID,
 				SessionTitle: currentSession.Title,
 				Type:         notify.TypeAgentFinished,
+				FinishState:  notify.FinishContinuing,
 			})
 		}
 	}
@@ -1586,7 +1599,10 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	return a.summarize(ctx, sessionID, opts, onAuthRefresh, owner, false, nil)
 }
 
-func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error, owner *activeCancel, retain bool, onSummaryHandoff func()) error {
+func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error, owner *activeCancel, retain bool, onSummaryHandoff func()) (retErr error) {
+	defer func() {
+		owner.unsuccessful = owner.unsuccessful || retErr != nil
+	}()
 	// Copy mutable fields under lock to avoid races with SetModels.
 	largeModel := a.largeModel.Get()
 	systemPromptPrefix := a.systemPromptPrefix.Get()

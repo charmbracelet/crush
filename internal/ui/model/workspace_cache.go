@@ -25,11 +25,15 @@ package model
 // Update, no model mutation inside commands).
 
 import (
+	"context"
+	"errors"
 	"slices"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/charmbracelet/crush/internal/agent/notify"
+	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/workspace"
 )
 
@@ -96,7 +100,85 @@ type promptQueueMsg struct {
 // agentRunSubmittedMsg reports that AgentRun accepted a prompt (it either
 // started a run or was enqueued behind one), so busy and queue state should
 // be re-fetched.
-type agentRunSubmittedMsg struct{}
+type agentRunSubmittedMsg struct {
+	sessionID string
+	gen       uint64
+	err       error
+}
+
+// summaryFinishedMsg releases the optimistic busy state even on failure.
+type summaryFinishedMsg struct {
+	sessionID string
+	gen       uint64
+	err       error
+}
+
+// completionCheckedMsg carries a session-scoped idle probe for a successful
+// completion. Its generation prevents newer observed work being overwritten.
+type completionCheckedMsg struct {
+	busyGen      uint64
+	busy         bool
+	notification *notify.Notification
+}
+
+// sessionActivity retains only submissions and completion checks still pending.
+type sessionActivity struct {
+	pending    int
+	gen        uint64
+	completion *notify.Notification
+}
+
+func (m *UI) activityFor(sessionID string) *sessionActivity {
+	if m.sessionActivities == nil {
+		m.sessionActivities = make(map[string]*sessionActivity)
+	}
+	if activity := m.sessionActivities[sessionID]; activity != nil {
+		return activity
+	}
+	activity := &sessionActivity{}
+	m.sessionActivities[sessionID] = activity
+	return activity
+}
+
+func (m *UI) pruneActivity(sessionID string) {
+	if activity := m.sessionActivities[sessionID]; activity != nil && activity.pending == 0 && activity.completion == nil {
+		delete(m.sessionActivities, sessionID)
+	}
+}
+
+func (m *UI) submissionFinished(sessionID string, gen uint64, err error, summary bool) tea.Cmd {
+	activity := m.activityFor(sessionID)
+	defer m.pruneActivity(sessionID)
+	if activity.pending > 0 {
+		activity.pending--
+	}
+	if m.pendingSubmissions > 0 {
+		m.pendingSubmissions--
+	}
+	if gen == activity.gen && err != nil {
+		activity.completion = nil
+		if sessionID == m.currentSessionID() && !errors.Is(err, context.Canceled) {
+			m.turnOutcome = tea.ProgramStateError
+		}
+	}
+	if gen == m.submissionGen && (err != nil || summary) {
+		m.turnStopPending = true
+	}
+	m.invalidateBusyCaches()
+	m.invalidatePromptQueue()
+	var completion tea.Cmd
+	if activity.pending == 0 && activity.completion != nil {
+		completion = m.dispatchCompletionCheck(activity.completion)
+	}
+	return tea.Batch(completion, m.dispatchBusyRefresh(), m.dispatchPromptQueueRefresh())
+}
+
+func (m *UI) dispatchCompletionCheck(n *notify.Notification) tea.Cmd {
+	busyGen, ws := m.busyFetchGen, m.com.Workspace
+	return func() tea.Msg {
+		return completionCheckedMsg{busyGen: busyGen, busy: ws.AgentIsSessionBusy(n.SessionID), notification: n}
+	}
+}
 
 // agentModelChangedMsg reports that the coordinator's model was updated
 // (model selection, thinking toggle, reasoning effort), so the memoized
@@ -184,6 +266,7 @@ func (m *UI) applyBusyState(msg busyStateMsg) []tea.Cmd {
 	}
 	prevBusy := m.isAgentBusy()
 	prevYolo := m.yoloModeCached()
+	msg.agentBusy = msg.agentBusy || m.pendingSubmissions > 0
 	m.agentBusyCache.set(msg.agentBusy)
 	m.yoloCache.set(msg.yolo)
 	m.agentReady = msg.ready
@@ -198,6 +281,10 @@ func (m *UI) applyBusyState(msg busyStateMsg) []tea.Cmd {
 
 	var cmds []tea.Cmd
 	busy := m.isAgentBusy()
+	if !busy && m.turnStopPending {
+		common.StopTurn()
+		m.turnStopPending = false
+	}
 	if busy {
 		// A session reload that raced an unpopulated busy cache (the
 		// zero-value read at boot) froze the animation clock even though

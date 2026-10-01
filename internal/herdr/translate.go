@@ -35,7 +35,7 @@ func Translate(ev any) Event {
 		return translateMessage(
 			e.Payload.Role == proto.Assistant,
 			e.Payload.SessionID,
-			false,
+			e.Payload.IsSummaryMessage,
 		)
 	case pubsub.Event[proto.RunComplete]:
 		return RunComplete{SessionID: e.Payload.SessionID}

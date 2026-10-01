@@ -22,14 +22,7 @@ func newTestChannelUserItem(text string, createdAt int64) *UserMessageItem {
 		CreatedAt: createdAt,
 		Parts:     []message.ContentPart{message.TextContent{Text: text}},
 	}
-	r := attachments.NewRenderer(
-		sty.Attachments.Normal,
-		sty.Attachments.Deleting,
-		sty.Attachments.Image,
-		sty.Attachments.Text,
-		sty.Attachments.Skill,
-		sty.Attachments.Remove,
-	)
+	r := attachments.NewRenderer(sty.Attachments)
 	return NewUserMessageItem(&sty, msg, r).(*UserMessageItem)
 }
 

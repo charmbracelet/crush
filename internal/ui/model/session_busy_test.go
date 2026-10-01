@@ -36,6 +36,7 @@ type countingWorkspace struct {
 	model     workspace.AgentModel
 	lspStates map[string]workspace.LSPClientInfo
 	lspDiags  map[string]lsp.DiagnosticCounts
+	cfg       *config.Config
 
 	readyCalls      int
 	agentBusyCalls  int
@@ -108,7 +109,7 @@ func (w *countingWorkspace) WorkingDir() string { return "" }
 
 func (w *countingWorkspace) LSPStart(context.Context, string) {}
 
-func (w *countingWorkspace) Config() *config.Config { return nil }
+func (w *countingWorkspace) Config() *config.Config { return w.cfg }
 
 // syncProbes sums every synchronous counter; Update/View must keep this at
 // zero — the invariant is that no workspace call ever happens on the Update

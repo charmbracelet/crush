@@ -185,6 +185,15 @@ func init() {
 
 // runNonInteractive executes the agent via the server and streams output
 // to stdout.
+func refreshWorkspaceConfig(ctx context.Context, c *client.Client, ws *proto.Workspace) {
+	cfg, err := c.GetConfig(ctx, ws.ID)
+	if err != nil {
+		slog.Debug("Failed to refresh config after model override", "error", err)
+		return
+	}
+	ws.Config = cfg
+}
+
 func runNonInteractive(
 	ctx context.Context,
 	c *client.Client,
@@ -203,11 +212,7 @@ func runNonInteractive(
 		if err := overrideModels(ctx, c, ws, largeModel, smallModel); err != nil {
 			return fmt.Errorf("failed to override models: %w", err)
 		}
-		cfg, err := c.GetConfig(ctx, ws.ID)
-		if err != nil {
-			return fmt.Errorf("failed to refresh config after model override: %w", err)
-		}
-		ws.Config = cfg
+		refreshWorkspaceConfig(ctx, c, ws)
 	}
 
 	// The reasoning effort applies to the model that will actually run.

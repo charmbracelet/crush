@@ -47,13 +47,26 @@ type ActionSelectModel struct {
 
 // Messages for commands
 type (
-	ActionNewSession              struct{}
-	ActionToggleHelp              struct{}
-	ActionToggleCompactMode       struct{}
-	ActionToggleThinking          struct{}
-	ActionTogglePills             struct{}
-	ActionExternalEditor          struct{}
-	ActionToggleYoloMode          struct{}
+	ActionNewSession        struct{}
+	ActionToggleHelp        struct{}
+	ActionToggleCompactMode struct{}
+	ActionToggleThinking    struct{}
+	ActionTogglePills       struct{}
+	ActionExternalEditor    struct{}
+	// ActionSetPermissionLevel moves the permission axis to one level. It
+	// names a level instead of toggling: with ask, auto, and bypass sharing
+	// an axis, "toggle" no longer says where you land.
+	ActionSetPermissionLevel struct {
+		Level permission.Level
+	}
+	// ActionSetPurpose switches which agent serves the main turn and leaves
+	// the permission level alone; purpose and level are independent axes.
+	ActionSetPurpose struct {
+		AgentID string
+	}
+	// ActionOpenAutoModeModels opens the models dialog preset to the
+	// auto-mode classifier selection.
+	ActionOpenAutoModeModels      struct{}
 	ActionToggleNotifications     struct{}
 	ActionSelectNotificationStyle struct {
 		Style string

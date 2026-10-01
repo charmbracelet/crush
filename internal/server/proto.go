@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/charmbracelet/crush/internal/backend"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/google/uuid"
@@ -740,6 +741,111 @@ func (c *controllerV1) handleGetWorkspacePermissionsSkip(w http.ResponseWriter, 
 		return
 	}
 	jsonEncode(w, proto.PermissionSkipRequest{Skip: skip})
+}
+
+// handlePostWorkspacePermissionsAutoMode sets the native auto-mode state.
+//
+//	@Summary		Set auto mode state
+//	@Tags			permissions
+//	@Accept			json
+//	@Produce		json
+//	@Param			id		path		string							true	"Workspace ID"
+//	@Param			request	body		proto.PermissionAutoModeRequest	true	"Auto mode state"
+//	@Success		200
+//	@Failure		400	{object}	proto.Error
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/permissions/auto-mode [post]
+func (c *controllerV1) handlePostWorkspacePermissionsAutoMode(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	var req proto.PermissionAutoModeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		c.server.logError(r, "Failed to decode request", "error", err)
+		jsonError(w, http.StatusBadRequest, "failed to decode request")
+		return
+	}
+
+	if err := c.backend.SetPermissionsAutoMode(id, req.Enabled); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+}
+
+// handleGetWorkspacePermissionsAutoMode returns the native auto-mode state.
+//
+//	@Summary		Get auto mode state
+//	@Tags			permissions
+//	@Produce		json
+//	@Param			id	path		string							true	"Workspace ID"
+//	@Success		200	{object}	proto.PermissionAutoModeRequest
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/permissions/auto-mode [get]
+func (c *controllerV1) handleGetWorkspacePermissionsAutoMode(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	enabled, err := c.backend.GetPermissionsAutoMode(id)
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	jsonEncode(w, proto.PermissionAutoModeRequest{Enabled: enabled})
+}
+
+// handlePostWorkspacePermissionsLevel sets how far the workspace may go
+// without asking a human. It is the permission axis: changing it never
+// changes which agent serves the turn.
+//
+//	@Summary		Set approval level
+//	@Tags			permissions
+//	@Accept			json
+//	@Param			id		path		string						true	"Workspace ID"
+//	@Param			request	body		proto.PermissionLevelRequest	true	"Approval level"
+//	@Success		200
+//	@Failure		400	{object}	proto.Error
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/permissions/level [post]
+func (c *controllerV1) handlePostWorkspacePermissionsLevel(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	var req proto.PermissionLevelRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		c.server.logError(r, "Failed to decode request", "error", err)
+		jsonError(w, http.StatusBadRequest, "failed to decode request")
+		return
+	}
+
+	level, ok := permission.ParseLevel(req.Level)
+	if !ok {
+		jsonError(w, http.StatusBadRequest, "unknown permission level: "+req.Level)
+		return
+	}
+
+	if err := c.backend.SetPermissionsLevel(id, level); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+}
+
+// handleGetWorkspacePermissionsLevel returns the approval level in effect.
+//
+//	@Summary		Get approval level
+//	@Tags			permissions
+//	@Produce		json
+//	@Param			id	path		string						true	"Workspace ID"
+//	@Success		200	{object}	proto.PermissionLevelRequest
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/permissions/level [get]
+func (c *controllerV1) handleGetWorkspacePermissionsLevel(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	level, err := c.backend.GetPermissionsLevel(id)
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	jsonEncode(w, proto.PermissionLevelRequest{Level: level.String()})
 }
 
 // handleError maps backend errors to HTTP status codes and writes the

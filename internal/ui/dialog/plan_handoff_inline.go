@@ -45,10 +45,11 @@ type PlanHandoffInline struct {
 
 	heightChanged bool
 
-	// OnConfirm receives whether the user chose coding with YOLO.
-	// The returned tea.Cmd is queued by the UI to perform the switch and
+	// OnConfirm receives which permission level the user picked by starting
+	// coding: true selects bypass (never ask), false selects asking. The
+	// returned tea.Cmd is queued by the UI to perform the agent switch and
 	// start the coder agent.
-	OnConfirm func(yolo bool) tea.Cmd
+	OnConfirm func(bypassPermissions bool) tea.Cmd
 	// OnRequestChanges is called with the user's feedback when they submit it.
 	OnRequestChanges func(string) tea.Cmd
 

@@ -13,6 +13,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/permission"
 )
 
 // channelReplyTimeout bounds the auto-reply tool call so a wedged MCP
@@ -281,11 +282,11 @@ func (a *sessionAgent) sendChannelReply(ctx context.Context, call SessionAgentCa
 	}
 	// An explicit channel_reply config is itself the consent to use the
 	// tool for replies. An auto-discovered route, however, was not
-	// explicitly opted into — only proceed when permissions are globally
-	// skipped (--dangerously-skip-permissions), so a user who has
-	// declined the tool in a normal turn does not get a message sent on
-	// their behalf without consent.
-	if autoDiscovered && !a.isYolo {
+	// explicitly opted into — only proceed when the workspace never asks,
+	// i.e. the bypass level (--dangerously-skip-permissions), so a user
+	// who has declined the tool in a normal turn does not get a message
+	// sent on their behalf without consent.
+	if autoDiscovered && a.permissionLevel() != permission.LevelBypass {
 		slog.Info("Channel reply skipped: auto-discovered route requires --dangerously-skip-permissions or explicit channel_reply config",
 			"channel", call.Channel, "tool", tool)
 		return

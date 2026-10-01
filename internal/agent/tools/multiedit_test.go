@@ -35,9 +35,27 @@ func (m *mockPermissionService) AutoApproveSession(sessionID string) {}
 
 func (m *mockPermissionService) SetSkipRequests(skip bool) {}
 
+func (m *mockPermissionService) SetPermissionHooks(hooks permission.PermissionHooks) {}
+
+func (m *mockPermissionService) DenialReason(toolCallID string) string {
+	return ""
+}
+
+func (m *mockPermissionService) SetAutoMode(enabled bool) {}
+
+func (m *mockPermissionService) AutoMode() bool { return false }
+
+func (m *mockPermissionService) EscalationNote(toolCallID string) string {
+	return ""
+}
+
 func (m *mockPermissionService) SkipRequests() bool {
 	return false
 }
+
+func (m *mockPermissionService) SetLevel(permission.Level) {}
+
+func (m *mockPermissionService) Level() permission.Level { return permission.LevelPrompt }
 
 func (m *mockPermissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[permission.PermissionNotification] {
 	return make(<-chan pubsub.Event[permission.PermissionNotification])

@@ -29,6 +29,86 @@
       "additionalProperties": false,
       "type": "object"
     },
+    "AutoModeClassifier": {
+      "properties": {
+        "provider": {
+          "type": "string",
+          "description": "Provider id from the providers config",
+          "examples": [
+            "local-llama"
+          ]
+        },
+        "model": {
+          "type": "string",
+          "description": "Model id on that provider",
+          "examples": [
+            "gemma4-e4b"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "AutoModeConfig": {
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable native auto mode. Intended to be set in user-level config only: a repository should not be able to grant itself auto mode",
+          "default": false
+        },
+        "classifier": {
+          "$ref": "#/$defs/AutoModeClassifier",
+          "description": "Classifier model selection"
+        },
+        "max_tokens": {
+          "type": "integer",
+          "description": "Max completion tokens for the classifier",
+          "default": 1024
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "description": "Per-evaluation timeout in seconds",
+          "default": 60
+        },
+        "fail_open": {
+          "type": "boolean",
+          "description": "Allow on classifier failure instead of escalating",
+          "default": false
+        },
+        "max_consecutive_denials": {
+          "type": "integer",
+          "description": "Consecutive denials before auto mode pauses",
+          "default": 3
+        },
+        "max_total_denials": {
+          "type": "integer",
+          "description": "Total denials before auto mode pauses",
+          "default": 20
+        },
+        "environment": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Prose describing the trusted environment"
+        },
+        "prompt_stage1_file": {
+          "type": "string",
+          "description": "Optional stage 1 (fast filter) prompt template file"
+        },
+        "prompt_stage2_file": {
+          "type": "string",
+          "description": "Optional stage 2 (chain of thought) prompt template file"
+        },
+        "transcript_max_chars": {
+          "type": "integer",
+          "description": "Max characters of transcript passed to the classifier",
+          "default": 24000
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
     "Completions": {
       "properties": {
         "max_depth": {
@@ -86,6 +166,10 @@
           "$ref": "#/$defs/Permissions",
           "description": "Permission settings for tool usage"
         },
+        "auto_mode": {
+          "$ref": "#/$defs/AutoModeConfig",
+          "description": "Native auto mode: an in-process safety classifier that runs before permission prompts"
+        },
         "tools": {
           "$ref": "#/$defs/Tools",
           "description": "Tool configurations"
@@ -129,6 +213,10 @@
           "type": "integer",
           "description": "Timeout in seconds for the hook command",
           "default": 30
+        },
+        "include_transcript": {
+          "type": "boolean",
+          "description": "When true"
         }
       },
       "additionalProperties": false,

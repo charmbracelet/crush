@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/attachments"
 	"github.com/charmbracelet/crush/internal/ui/chat"
@@ -129,9 +130,13 @@ type testWorkspace struct {
 	agentReady        bool
 	agentBusy         bool
 	runPrompts        []string
-	yolo              bool
-	runHidden         []bool
-	compactCalls      []bool
+	// level is the permission axis and mainAgent the purpose axis, so a test
+	// can assert which one an action moved.
+	level        permission.Level
+	mainAgent    string
+	mainAgents   []string
+	runHidden    []bool
+	compactCalls []bool
 }
 
 func (w *testWorkspace) Config() *config.Config {
@@ -152,9 +157,23 @@ func (w *testWorkspace) UpdateAgentModel(context.Context) error {
 	return nil
 }
 
-func (w *testWorkspace) PermissionSkipRequests() bool { return w.yolo }
+func (w *testWorkspace) PermissionLevel() permission.Level { return w.level }
 
-func (w *testWorkspace) PermissionSetSkipRequests(skip bool) { w.yolo = skip }
+func (w *testWorkspace) PermissionSetLevel(level permission.Level) { w.level = level }
+
+func (w *testWorkspace) AgentMainID() string {
+	if w.mainAgent == "" {
+		return config.AgentCoder
+	}
+	return w.mainAgent
+}
+
+func (w *testWorkspace) AgentMainCandidates() []string {
+	if len(w.mainAgents) > 0 {
+		return w.mainAgents
+	}
+	return workspace.DefaultMainAgents
+}
 
 func (w *testWorkspace) AgentIsReady() bool {
 	return w.agentReady
@@ -189,24 +208,54 @@ func TestDefaultKeyMapHasShiftTab(t *testing.T) {
 	require.Equal(t, []string{"shift+tab"}, km.ShiftTab.Keys())
 }
 
-func TestToggleInputMode(t *testing.T) {
+// TestCyclePurposeWalksPublishedAgents pins the purpose axis: Shift+Tab moves
+// which agent serves the turn and never touches the permission level.
+func TestCyclePurposeWalksPublishedAgents(t *testing.T) {
 	t.Parallel()
 	ui, ws := newPlanUI(t, "sess-1")
-	ui.mode = uiInputModeCode
-	for _, want := range []struct {
-		mode    uiInputMode
-		yolo    bool
-		updates int
-	}{
-		{uiInputModePlan, false, 1},
-		{uiInputModeCode, true, 2},
-		{uiInputModeCode, false, 2},
-	} {
-		applyModeSwitchMsg(ui, ui.toggleInputMode())
-		require.Equal(t, want.mode, ui.mode)
-		require.Equal(t, want.yolo, ws.yolo)
-		require.Equal(t, want.updates, ws.updateCalls)
+	ui.purpose = config.AgentCoder
+	ui.levelCache.set(permission.LevelAuto)
+	ws.level = permission.LevelAuto
+
+	for _, want := range []string{config.AgentPlan, config.AgentCoder} {
+		applyPurposeSwitchMsg(ui, ui.cyclePurpose())
+		require.Equal(t, want, ui.purpose)
+		require.Equal(t, permission.LevelAuto, ws.level,
+			"the purpose cycle must leave the permission axis alone")
 	}
+}
+
+// TestCyclePurposeFollowsTheWorkspaceList: candidates come from the
+// workspace, so a purpose added upstream joins the cycle without any TUI
+// change and the loop still returns to where it started.
+func TestCyclePurposeFollowsTheWorkspaceList(t *testing.T) {
+	t.Parallel()
+	u, ws := newPlanUI(t, "sess-1")
+	u.purpose = config.AgentCoder
+	ws.mainAgents = []string{config.AgentCoder, config.AgentPlan, "sysadmin"}
+
+	var seen []string
+	for range len(ws.mainAgents) {
+		applyPurposeSwitchMsg(u, u.cyclePurpose())
+		seen = append(seen, u.purpose)
+	}
+	require.Equal(t, []string{config.AgentPlan, "sysadmin", config.AgentCoder}, seen)
+}
+
+// TestCyclePermissionLevelWalksLevels pins the permission axis: Ctrl+Y moves
+// ask -> auto -> bypass -> ask and never touches the purpose, including while
+// planning, where the old single cycle used to route out through code.
+func TestCyclePermissionLevelWalksLevels(t *testing.T) {
+	t.Parallel()
+	u, ws := newPlanUI(t, "sess-1")
+	u.purpose = config.AgentPlan
+
+	for _, want := range []permission.Level{permission.LevelAuto, permission.LevelBypass, permission.LevelPrompt} {
+		require.Equal(t, want, u.cyclePermissionLevel())
+		require.Equal(t, want, ws.level)
+	}
+	require.Equal(t, config.AgentPlan, u.purpose,
+		"the permission cycle must leave the purpose axis alone")
 }
 
 func newPlanUI(t *testing.T, sessionID string) (*UI, *testWorkspace) {
@@ -227,7 +276,7 @@ func newPlanUI(t *testing.T, sessionID string) (*UI, *testWorkspace) {
 	}
 	u := &UI{
 		com:      com,
-		mode:     uiInputModePlan,
+		purpose:  config.AgentPlan,
 		textarea: textarea.New(),
 		dialog:   dialog.NewOverlay(),
 		session:  sess,
@@ -236,18 +285,18 @@ func newPlanUI(t *testing.T, sessionID string) (*UI, *testWorkspace) {
 	return u, ws
 }
 
-// applyModeSwitchMsg runs a setInputMode command to completion the way the
+// applyPurposeSwitchMsg runs a setPurpose command to completion the way the
 // real event loop does: execute the async switch, then feed the resulting
 // modeSwitchedMsg through the finalizer. Returns the finalizer's cmds so
 // tests can execute them when they care about the queued work.
-func applyModeSwitchMsg(u *UI, cmd tea.Cmd) []tea.Cmd {
+func applyPurposeSwitchMsg(u *UI, cmd tea.Cmd) []tea.Cmd {
 	t := cmd()
 	switched, ok := t.(modeSwitchedMsg)
 	if !ok {
 		return nil
 	}
 	u.modeSwitching = false
-	return u.applyModeSwitch(switched)
+	return u.applyPurposeSwitch(switched)
 }
 
 func isPlanHandoffInline(u *UI) bool {
@@ -393,7 +442,7 @@ func TestHandlePlanHandoff_SessionMismatchNoInline(t *testing.T) {
 func TestHandlePlanHandoff_CodeModeNoInline(t *testing.T) {
 	t.Parallel()
 	u, _ := newPlanUI(t, "sess-1")
-	u.mode = uiInputModeCode
+	u.purpose = config.AgentCoder
 	u.handlePlanHandoff(notify.RunComplete{
 		SessionID: "sess-1",
 		Text:      "plan\n<!-- CRUSH_PLAN_READY -->",
@@ -431,7 +480,7 @@ func TestHandlePlanHandoff_RequestChangesSendsFeedbackInPlanMode(t *testing.T) {
 
 	cmd := inline.OnRequestChanges("Revise the scope")
 	require.NotNil(t, cmd)
-	require.Equal(t, uiInputModePlan, u.mode)
+	require.Equal(t, config.AgentPlan, u.purpose)
 
 	batch, ok := cmd().(tea.BatchMsg)
 	require.True(t, ok)
@@ -441,7 +490,7 @@ func TestHandlePlanHandoff_RequestChangesSendsFeedbackInPlanMode(t *testing.T) {
 		}
 	}
 	require.Equal(t, []string{"Revise the scope"}, ws.runPrompts)
-	require.Equal(t, uiInputModePlan, u.mode)
+	require.Equal(t, config.AgentPlan, u.purpose)
 }
 
 func TestPlanHandoffBlurPreservesAndRestoresInline(t *testing.T) {
@@ -555,35 +604,35 @@ func TestPlanHandoffRequestChangesRoutesEditorTextSelection(t *testing.T) {
 	require.NotNil(t, cmd)
 }
 
-func TestSetInputMode_SwitchesToCode(t *testing.T) {
+func TestSetPurpose_SwitchesToCode(t *testing.T) {
 	t.Parallel()
 	cfg := &config.Config{Providers: csync.NewMap[string, config.ProviderConfig]()}
 	ws := &testWorkspace{cfg: cfg}
 	u := &UI{
 		com:      &common.Common{Workspace: ws},
-		mode:     uiInputModePlan,
+		purpose:  config.AgentPlan,
 		textarea: textarea.New(),
 	}
-	applyModeSwitchMsg(u, u.setInputMode(uiInputModeCode))
-	require.Equal(t, uiInputModeCode, u.mode)
+	applyPurposeSwitchMsg(u, u.setPurpose(config.AgentCoder))
+	require.Equal(t, config.AgentCoder, u.purpose)
 	require.Equal(t, config.AgentCoder, ws.setMainCalledWith)
 }
 
-func TestSetInputMode_SwitchesToPlan(t *testing.T) {
+func TestSetPurpose_SwitchesToPlan(t *testing.T) {
 	t.Parallel()
 	cfg := &config.Config{Providers: csync.NewMap[string, config.ProviderConfig]()}
 	ws := &testWorkspace{cfg: cfg}
 	u := &UI{
 		com:      &common.Common{Workspace: ws},
-		mode:     uiInputModeCode,
+		purpose:  config.AgentCoder,
 		textarea: textarea.New(),
 	}
-	applyModeSwitchMsg(u, u.setInputMode(uiInputModePlan))
-	require.Equal(t, uiInputModePlan, u.mode)
+	applyPurposeSwitchMsg(u, u.setPurpose(config.AgentPlan))
+	require.Equal(t, config.AgentPlan, u.purpose)
 	require.Equal(t, config.AgentPlan, ws.setMainCalledWith)
 }
 
-func TestToggleInputMode_BlockedWhileAgentBusy(t *testing.T) {
+func TestCyclePurpose_BlockedWhileAgentBusy(t *testing.T) {
 	t.Parallel()
 	u, ws := newPlanUI(t, "sess-1")
 	ws.agentReady = true
@@ -592,26 +641,25 @@ func TestToggleInputMode_BlockedWhileAgentBusy(t *testing.T) {
 	// the workspace stub reports.
 	u.agentBusyCache.set(true)
 
-	msg := u.toggleInputMode()()
-	require.Equal(t, uiInputModePlan, u.mode, "mode must not change while the agent is busy")
+	msg := u.cyclePurpose()()
+	require.Equal(t, config.AgentPlan, u.purpose, "mode must not change while the agent is busy")
 	require.Empty(t, ws.setMainCalledWith)
 	info, ok := msg.(util.InfoMsg)
 	require.True(t, ok)
 	require.Equal(t, util.InfoTypeWarn, info.Type)
 }
 
-func TestSetInputMode_TracksModeSwitching(t *testing.T) {
+func TestSetPurpose_TracksModeSwitching(t *testing.T) {
 	t.Parallel()
 	u, _ := newPlanUI(t, "sess-1")
 
-	cmd := u.setInputMode(uiInputModeCode)
+	cmd := u.setPurpose(config.AgentCoder)
 	require.True(t, u.modeSwitching, "flag must be set until the async model update completes")
 
 	msg, ok := cmd().(modeSwitchedMsg)
 	require.True(t, ok)
 	require.NoError(t, msg.err)
-	require.Equal(t, uiInputModeCode, msg.mode)
-	require.False(t, msg.yolo)
+	require.Equal(t, config.AgentCoder, msg.agentID)
 }
 
 func TestHandlePlanHandoff_SetsPendingPlan(t *testing.T) {
@@ -656,9 +704,9 @@ func TestPlanHandoffConfirm_ClearsPendingAndSwitchesMode(t *testing.T) {
 	cmd := inline.OnConfirm(false)
 	require.NotNil(t, cmd)
 	// The switch is async: the mode only changes once the backend settles.
-	require.Equal(t, uiInputModePlan, u.mode)
-	cmds := applyModeSwitchMsg(u, cmd)
-	require.Equal(t, uiInputModeCode, u.mode)
+	require.Equal(t, config.AgentPlan, u.purpose)
+	cmds := applyPurposeSwitchMsg(u, cmd)
+	require.Equal(t, config.AgentCoder, u.purpose)
 	require.Equal(t, config.AgentCoder, ws.setMainCalledWith)
 	require.Empty(t, u.planReadySessionID)
 
@@ -699,8 +747,8 @@ func TestResetPlanModeState(t *testing.T) {
 
 	cmd := u.resetPlanModeState()
 	require.NotNil(t, cmd)
-	applyModeSwitchMsg(u, cmd)
-	require.Equal(t, uiInputModeCode, u.mode)
+	applyPurposeSwitchMsg(u, cmd)
+	require.Equal(t, config.AgentCoder, u.purpose)
 	require.Equal(t, config.AgentCoder, ws.setMainCalledWith)
 	require.Empty(t, u.planReadySessionID)
 	require.Nil(t, u.activeInline)
@@ -709,23 +757,36 @@ func TestResetPlanModeState(t *testing.T) {
 func TestResetPlanModeState_NoopInCodeMode(t *testing.T) {
 	t.Parallel()
 	u, ws := newPlanUI(t, "sess-1")
-	u.mode = uiInputModeCode
+	u.purpose = config.AgentCoder
 
 	cmd := u.resetPlanModeState()
 	require.Nil(t, cmd)
-	require.Equal(t, uiInputModeCode, u.mode)
+	require.Equal(t, config.AgentCoder, u.purpose)
 	require.Empty(t, ws.setMainCalledWith)
 }
 
 func TestPlanHandoffExplicitPermissionMode(t *testing.T) {
 	t.Parallel()
-	for _, yolo := range []bool{false, true} {
+	for _, bypass := range []bool{false, true} {
 		u, ws := newPlanUI(t, "sess-1")
-		ws.yolo = !yolo
+		// Start from the opposite level so the assertion shows that the
+		// handoff actually sets it rather than leaving whatever was there.
+		start := permission.LevelBypass
+		if bypass {
+			start = permission.LevelPrompt
+		}
+		ws.level = start
+		u.levelCache.set(start)
+
 		u.openPlanHandoff()
 		inline := u.activeInline.(*dialog.PlanHandoffInline)
-		cmd := inline.OnConfirm(yolo)
-		require.Equal(t, yolo, ws.yolo)
+		cmd := inline.OnConfirm(bypass)
+
+		want := permission.LevelPrompt
+		if bypass {
+			want = permission.LevelBypass
+		}
+		require.Equal(t, want, ws.level)
 		require.Empty(t, ws.runPrompts, "wait for the coder model to finish switching")
 		switched := cmd().(modeSwitchedMsg)
 		require.NoError(t, switched.err)
@@ -733,12 +794,15 @@ func TestPlanHandoffExplicitPermissionMode(t *testing.T) {
 	}
 }
 
-func TestPlanPromptIgnoresYOLO(t *testing.T) {
+// TestPlanPromptIgnoresBypassLevel: planning has no mutating tools, so its
+// prompt stays the plan prompt even at the bypass level.
+func TestPlanPromptIgnoresBypassLevel(t *testing.T) {
 	t.Parallel()
 	u, _ := newPlanUI(t, "sess-1")
 	u.textarea.SetWidth(40)
 	u.textarea.Focus()
-	u.setEditorPrompt(true)
+	u.levelCache.set(permission.LevelBypass)
+	u.setEditorPrompt()
 	require.Contains(t, u.textarea.View(), "⏸")
 	require.NotContains(t, u.textarea.View(), " ! ")
 }
@@ -759,27 +823,33 @@ func TestGeneratedPlanContinuationIsHidden(t *testing.T) {
 	require.Equal(t, []string{"Implement the plan.", "Implement the plan."}, ws.runPrompts)
 }
 
-func TestToggleInputModePreservesExistingYOLOOnEntry(t *testing.T) {
+// TestCyclePurposePreservesPermissionLevel: entering planning must not touch
+// the permission axis, whatever the user had it at.
+func TestCyclePurposePreservesPermissionLevel(t *testing.T) {
 	t.Parallel()
-	u, ws := newPlanUI(t, "sess-1")
-	u.mode = uiInputModeCode
-	ws.yolo = true
-	applyModeSwitchMsg(u, u.toggleInputMode())
-	require.Equal(t, uiInputModePlan, u.mode)
-	require.True(t, ws.yolo)
+	for _, level := range []permission.Level{permission.LevelPrompt, permission.LevelAuto, permission.LevelBypass} {
+		u, ws := newPlanUI(t, "sess-1")
+		u.purpose = config.AgentCoder
+		u.levelCache.set(level)
+		ws.level = level
+
+		applyPurposeSwitchMsg(u, u.cyclePurpose())
+		require.Equal(t, config.AgentPlan, u.purpose)
+		require.Equal(t, level, ws.level, "planning must not change the permission level")
+	}
 }
 
-func TestSwitchPlanToYolo(t *testing.T) {
+// TestCyclePermissionLevelWhilePlanning is what the old plan-to-YOLO shortcut
+// stood in for: the permission key now works from every purpose, so planning
+// is no longer a special case that has to be escaped to change it.
+func TestCyclePermissionLevelWhilePlanning(t *testing.T) {
 	t.Parallel()
-	for _, carriedYolo := range []bool{false, true} {
-		u, ws := newPlanUI(t, "sess-1")
-		ws.yolo = carriedYolo
-		u.cycleYolo = carriedYolo
+	u, ws := newPlanUI(t, "sess-1")
+	u.purpose = config.AgentPlan
+	u.levelCache.set(permission.LevelAuto)
 
-		applyModeSwitchMsg(u, u.switchPlanToYolo())
-		require.Equal(t, uiInputModeCode, u.mode, "activating YOLO leaves plan mode")
-		require.True(t, ws.yolo, "YOLO ends up enabled regardless of the carried state")
-		require.False(t, u.cycleYolo, "explicit activation must not be undone by the Shift+Tab cycle")
-		require.Equal(t, config.AgentCoder, ws.setMainCalledWith)
-	}
+	require.Equal(t, permission.LevelBypass, u.cyclePermissionLevel())
+	require.Equal(t, permission.LevelBypass, ws.level)
+	require.Equal(t, config.AgentPlan, u.purpose, "the permission cycle must stay in planning")
+	require.Empty(t, ws.setMainCalledWith, "and must not switch agents")
 }

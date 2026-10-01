@@ -125,13 +125,6 @@ const (
 	uiChat
 )
 
-type uiInputMode uint8
-
-const (
-	uiInputModeCode uiInputMode = iota
-	uiInputModePlan
-)
-
 type openEditorMsg struct {
 	Text string
 }
@@ -252,7 +245,12 @@ type UI struct {
 
 	focus uiFocusState
 	state uiState
-	mode  uiInputMode
+	// purpose is the id of the agent serving the main turn
+	// (config.AgentCoder, config.AgentPlan, ...). It is one of two
+	// independent axes: how much the assistant asks before acting is the
+	// permission level, memoized in levelCache. Changing one never changes
+	// the other.
+	purpose string
 
 	// Frame memoization (see framecache.go). scrollOnlyUpdate is set by
 	// handlers that change nothing but the chat scroll position; frameDirty
@@ -267,12 +265,8 @@ type UI struct {
 	// lets the user reopen the handoff prompt after dismissing it.
 	planReadySessionID string
 	// modeSwitching is true while the async agent-model update kicked off
-	// by setInputMode is still in flight; sending is blocked meanwhile.
+	// by setPurpose is still in flight; sending is blocked meanwhile.
 	modeSwitching bool
-
-	// cycleYolo is true while YOLO was enabled by the Shift+Tab input-mode
-	// cycle, which is the only case where the cycle may disable it again.
-	cycleYolo bool
 
 	keyMap KeyMap
 	keyenh tea.KeyboardEnhancementsMsg
@@ -412,11 +406,11 @@ type UI struct {
 	// in-flight fetch captures it at dispatch and its result is discarded
 	// if the generation has moved on (see workspace_cache.go).
 	promptQueueGen uint64
-	// agentBusyCache / yoloCache memoize the workspace busy and permission
+	// agentBusyCache / levelCache memoize the workspace busy and permission
 	// probes (synchronous HTTP round-trips in client/server mode). Reads
 	// never probe; refreshes happen off-thread (see workspace_cache.go).
-	agentBusyCache    ttlCache
-	yoloCache         ttlCache
+	agentBusyCache    ttlCache[bool]
+	levelCache        ttlCache[permission.Level]
 	busyFetchInFlight bool
 	// agentReady / agentModel memoize the coordinator readiness and
 	// selected model (AgentIsReady/AgentModel are synchronous HTTP GETs in
@@ -547,11 +541,10 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		ui.userThemeSelected = common.ThemeNameFromConfig(cfg) != ""
 	}
 
-	// Seed the yolo cache once at construction; afterwards it is kept
-	// fresh by write-through toggles and off-thread refreshes so Update
+	// Seed the permission-level cache once at construction; afterwards it is
+	// kept fresh by write-through toggles and off-thread refreshes so Update
 	// and View never probe the workspace synchronously.
-	yolo := com.Workspace.PermissionSkipRequests()
-	ui.yoloCache.set(yolo)
+	ui.levelCache.set(com.Workspace.PermissionLevel())
 
 	// Seed the memoized agent ready/model state the same way so the first
 	// frame renders the model info; the busy probe keeps it fresh
@@ -560,8 +553,14 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		ui.agentReady = true
 		ui.agentModel = com.Workspace.AgentModel()
 	}
-	ui.mode = uiInputModeCode
-	ui.setEditorPrompt(yolo)
+	// Read back which agent is serving the turn instead of assuming the
+	// coder: a workspace restored mid-plan, or one driven by another
+	// client, would otherwise be displayed as a mode it is not in.
+	ui.purpose = com.Workspace.AgentMainID()
+	if ui.purpose == "" {
+		ui.purpose = config.AgentCoder
+	}
+	ui.setEditorPrompt()
 	ui.randomizePlaceholders()
 	ui.textarea.Placeholder = ui.readyPlaceholder
 	ui.status = status
@@ -942,7 +941,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case modeSwitchedMsg:
 		m.modeSwitching = false
-		cmds = append(cmds, m.applyModeSwitch(msg)...)
+		cmds = append(cmds, m.applyPurposeSwitch(msg)...)
 
 	case sendMessageMsg:
 		cmds = append(cmds, m.sendMessage(msg.Content, msg.Attachments...))
@@ -1111,7 +1110,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 	case pubsub.Event[permission.PermissionNotification]:
-		m.handlePermissionNotification(msg.Payload)
+		if cmd := m.handlePermissionNotification(msg.Payload); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case pubsub.Event[question.Request]:
 		m.openBatchFormDialog(msg.Payload)
 		m.chat.ScrollToBottom()
@@ -1559,13 +1560,18 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.textarea.Placeholder = "Run a shell command"
 		} else if m.isAgentBusy() {
 			m.textarea.Placeholder = m.workingPlaceholder
-		} else if m.mode == uiInputModePlan {
+		} else if m.planning() {
 			m.textarea.Placeholder = "Let's plan"
 		} else {
 			m.textarea.Placeholder = m.readyPlaceholder
 		}
-		if !m.bangMode && m.mode != uiInputModePlan && m.yoloModeCached() {
-			m.textarea.Placeholder = "Go crazy"
+		if !m.bangMode && !m.planning() {
+			switch m.levelCached() {
+			case permission.LevelBypass:
+				m.textarea.Placeholder = "Go crazy"
+			case permission.LevelAuto:
+				m.textarea.Placeholder = "Auto mode!"
+			}
 		}
 	}
 	if m.textarea.Placeholder != prevPlaceholder {
@@ -1766,7 +1772,7 @@ func (m *UI) loadNestedToolCalls(items []chat.MessageItem) {
 // open plan card. Finished non-plan messages ignore the flag, so reloading
 // an old session in plan mode never grows spurious cards.
 func (m *UI) setMessagePlanFlags(items []chat.MessageItem) {
-	if m.mode != uiInputModePlan {
+	if !m.planning() {
 		return
 	}
 	for _, item := range items {
@@ -1910,7 +1916,7 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 	if existingItem != nil {
 		if assistantItem, ok := existingItem.(*chat.AssistantMessageItem); ok {
 			assistantItem.SetMessage(&msg)
-			assistantItem.SetPlanAgent(m.mode == uiInputModePlan)
+			assistantItem.SetPlanAgent(m.planning())
 		}
 	}
 
@@ -2118,17 +2124,20 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		if cmd := m.openDialog(msg.DialogID); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.ActionOpenAutoModeModels:
+		m.dialog.CloseDialog(dialog.CommandsID)
+		if cmd := m.openModelsDialogPreset(dialog.ModelTypeAutoMode); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 
 	// Command dialog messages.
-	case dialog.ActionToggleYoloMode:
-		if m.mode == uiInputModePlan {
-			// Same as Ctrl+Y in plan mode: YOLO only exists as YOLO
-			// coding, so activating it leaves plan mode.
-			if cmd := m.switchPlanToYolo(); cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-		} else {
-			m.toggleYoloMode()
+	case dialog.ActionSetPermissionLevel:
+		m.setPermissionLevel(msg.Level)
+		cmds = append(cmds, levelBanner(msg.Level))
+		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionSetPurpose:
+		if cmd := m.setPurpose(msg.AgentID); cmd != nil {
+			cmds = append(cmds, cmd)
 		}
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionSelectNotificationStyle:
@@ -2788,6 +2797,20 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		}
 	}
 
+	// The auto-mode classifier is stored under auto_mode.classifier, not
+	// the models map, and does not re-authenticate or swap agent models.
+	if msg.ModelType == config.SelectedModelTypeAutoMode {
+		m.dialog.CloseDialog(dialog.ModelsID)
+		providerID := string(msg.Provider.ID)
+		if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "auto_mode.classifier.provider", providerID); err != nil {
+			return util.ReportError(err)
+		}
+		if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "auto_mode.classifier.model", msg.Model.Model); err != nil {
+			return util.ReportError(err)
+		}
+		return util.ReportInfo(fmt.Sprintf("Auto mode classifier set to %s/%s", providerID, msg.Model.Model))
+	}
+
 	// Attempt to import GitHub Copilot tokens from VSCode if available.
 	if isCopilot && !isConfigured() && !msg.ReAuthenticate {
 		m.com.Workspace.ImportCopilot()
@@ -3024,21 +3047,11 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			}
 			cmds = append(cmds, tea.Suspend)
 			return true
-		case key.Matches(msg, m.keyMap.ToggleYolo):
-			if m.mode == uiInputModePlan {
-				// YOLO has no meaning while planning; activating it
-				// switches straight to YOLO coding.
-				if cmd := m.switchPlanToYolo(); cmd != nil {
-					cmds = append(cmds, cmd)
-				}
-				return true
-			}
-			yolo := m.toggleYoloMode()
-			if yolo {
-				cmds = append(cmds, util.CmdHandler(util.InfoMsg{Type: util.InfoTypeYolo, Msg: yoloModeBannerMsg}))
-			} else {
-				cmds = append(cmds, util.ReportInfo("Yolo mode disabled"))
-			}
+		case key.Matches(msg, m.keyMap.CyclePermissionLevel):
+			// Ctrl+Y walks the permission axis only. Which agent serves the
+			// turn is Shift+Tab's business, so this key no longer diverts out
+			// of planning.
+			cmds = append(cmds, levelBanner(m.cyclePermissionLevel()))
 			return true
 		}
 		return false
@@ -3141,7 +3154,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 			switch {
 			case key.Matches(msg, m.keyMap.ShiftTab):
-				if cmd := m.toggleInputMode(); cmd != nil {
+				if cmd := m.cyclePurpose(); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
 			case key.Matches(msg, m.keyMap.Editor.AddImage):
@@ -3189,7 +3202,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 				if m.bangMode && value != "" {
 					m.bangMode = false
-					m.setEditorPrompt(m.yoloModeCached())
+					m.setEditorPrompt()
 					m.randomizePlaceholders()
 					m.historyReset()
 					return tea.Batch(m.runShellCommand(value))
@@ -3200,7 +3213,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				if len(value) == 0 && !message.ContainsTextAttachment(attachments) {
 					// Enter on an empty editor while a ready plan is pending
 					// reopens the dismissed handoff prompt.
-					if m.mode == uiInputModePlan && m.hasSession() && m.planReadySessionID == m.session.ID {
+					if m.planning() && m.hasSession() && m.planReadySessionID == m.session.ID {
 						m.openPlanHandoff()
 					}
 					return nil
@@ -3290,7 +3303,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				if m.bangMode && m.bangWasEmpty && msg.Code == tea.KeyBackspace {
 					m.bangMode = false
 					m.bangWasEmpty = false
-					m.setEditorPrompt(m.yoloModeCached())
+					m.setEditorPrompt()
 					break
 				}
 
@@ -3339,7 +3352,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					m.textarea.SetValue(stripped)
 					m.textarea.SetCursorColumn(max(0, col-(len(newVal)-len(stripped))))
 					_ = line // cursor line doesn't change; prefix removed
-					m.setEditorPrompt(m.yoloModeCached())
+					m.setEditorPrompt()
 				} else if m.bangMode && newVal == "" && curValue != "" {
 					// Just cleared last character; mark empty, stay in bang mode.
 					m.bangWasEmpty = true
@@ -3377,7 +3390,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		case uiFocusMain:
 			switch {
 			case key.Matches(msg, m.keyMap.ShiftTab):
-				if cmd := m.toggleInputMode(); cmd != nil {
+				if cmd := m.cyclePurpose(); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
 			case key.Matches(msg, m.keyMap.Tab):
@@ -3604,7 +3617,7 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	// Add status and help layer
 	m.status.SetHideHelp(isOnboarding)
-	m.status.SetMode(m.mode, m.yoloModeCached())
+	m.status.SetMode(m.purpose, m.levelCached())
 	m.status.Draw(scr, layout.status)
 
 	// Draw completions popup if open
@@ -3918,7 +3931,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 			commands,
 			k.Models,
 			k.Sessions,
-			k.ToggleYolo,
+			k.CyclePermissionLevel,
 		)
 		if hasSession {
 			mainBinds = append(mainBinds, k.Chat.NewSession, k.Chat.EndFollow)
@@ -4004,7 +4017,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 					commands,
 					k.Models,
 					k.Sessions,
-					k.ToggleYolo,
+					k.CyclePermissionLevel,
 				},
 			)
 			editorBinds := []key.Binding{
@@ -4517,22 +4530,27 @@ func (m *UI) openEditor(value string) tea.Cmd {
 	})
 }
 
-// setEditorPrompt configures the textarea prompt function based on whether
-// plan, yolo, or bang mode is enabled.
-func (m *UI) setEditorPrompt(yolo bool) {
+// setEditorPrompt configures the textarea prompt function from the two
+// axes: bang mode overrides everything, then the purpose (planning has no
+// mutating tools, so its look is not a permission signal), then the
+// permission level.
+func (m *UI) setEditorPrompt() {
 	if m.bangMode {
 		m.textarea.SetPromptFunc(4, m.bangPromptFunc)
 		return
 	}
-	if m.mode == uiInputModePlan {
+	if m.planning() {
 		m.textarea.SetPromptFunc(4, m.planPromptFunc)
 		return
 	}
-	if yolo {
+	switch m.levelCached() {
+	case permission.LevelBypass:
 		m.textarea.SetPromptFunc(4, m.yoloPromptFunc)
-		return
+	case permission.LevelAuto:
+		m.textarea.SetPromptFunc(4, m.autoPromptFunc)
+	default:
+		m.textarea.SetPromptFunc(4, m.normalPromptFunc)
 	}
-	m.textarea.SetPromptFunc(4, m.normalPromptFunc)
 }
 
 // normalPromptFunc returns the normal editor prompt style ("> " on the
@@ -4583,6 +4601,22 @@ func (m *UI) yoloPromptFunc(info textarea.PromptInfo) string {
 	return t.Editor.PromptYoloDotsBlurred.Render()
 }
 
+// autoPromptFunc returns the auto mode editor prompt style with an "A"
+// icon and colored dots.
+func (m *UI) autoPromptFunc(info textarea.PromptInfo) string {
+	t := m.com.Styles
+	if info.LineNumber == 0 {
+		if info.Focused {
+			return t.Editor.PromptAutoIconFocused.Render()
+		}
+		return t.Editor.PromptAutoIconBlurred.Render()
+	}
+	if info.Focused {
+		return t.Editor.PromptAutoDotsFocused.Render()
+	}
+	return t.Editor.PromptAutoDotsBlurred.Render()
+}
+
 // bangPromptFunc returns the bang mode editor prompt style with Turtle-colored
 // icon and dots.
 func (m *UI) bangPromptFunc(info textarea.PromptInfo) string {
@@ -4599,111 +4633,116 @@ func (m *UI) bangPromptFunc(info textarea.PromptInfo) string {
 	return t.Editor.PromptBangDotsBlurred.Render()
 }
 
-func (m *UI) toggleInputMode() tea.Cmd {
-	if m.isAgentBusy() || m.modeSwitching {
-		return util.ReportWarn("Agent is busy, please wait before switching input mode...")
+// planning reports whether the purpose axis is on the planning agent. The
+// permission level says nothing about it: planning is safe because that
+// agent has no mutating tools, not because of any level setting.
+func (m *UI) planning() bool {
+	return m.purpose == config.AgentPlan
+}
+
+// purposeLabel names a purpose for status messages, shared with the command
+// palette so the two cannot drift.
+func purposeLabel(agentID string) string {
+	return dialog.PurposeLabel(agentID)
+}
+
+// purposeCandidates lists the agents the purpose cycle may visit. The
+// coordinator publishes them, so a new purpose appears in the cycle without
+// a TUI change; the fallback only applies to a workspace that predates the
+// read-back.
+func (m *UI) purposeCandidates() []string {
+	if candidates := m.com.Workspace.AgentMainCandidates(); len(candidates) > 0 {
+		return candidates
 	}
-	if m.mode == uiInputModePlan {
-		// Second step of the Shift+Tab cycle: plan -> YOLO. Enabling YOLO
-		// here is the only case where the cycle may disable it again.
-		if !m.com.Workspace.PermissionSkipRequests() {
-			m.toggleYoloMode()
-			m.cycleYolo = true
+	return workspace.DefaultMainAgents
+}
+
+// cyclePurpose walks the purpose axis (Shift+Tab): standard, planning, and
+// whatever else the coordinator offers. It never touches the permission
+// level, so a level the user picked survives every mode switch — which is
+// what made the old cycle's "only the cycle may turn this back off"
+// bookkeeping necessary.
+func (m *UI) cyclePurpose() tea.Cmd {
+	if m.isAgentBusy() || m.modeSwitching {
+		return util.ReportWarn("Agent is busy, please wait before switching mode...")
+	}
+	candidates := m.purposeCandidates()
+	next := candidates[0]
+	for i, candidate := range candidates {
+		if candidate == m.purpose && i+1 < len(candidates) {
+			next = candidates[i+1]
+			break
 		}
-		return m.setInputMode(uiInputModeCode)
 	}
-	// Only the cycle may turn YOLO back off: YOLO the user enabled himself
-	// (Ctrl+Y, the command palette) survives entering plan mode.
-	if m.com.Workspace.PermissionSkipRequests() && m.cycleYolo {
-		m.toggleYoloMode()
-		return util.ReportInfo("input mode: code")
-	}
-	return m.setInputMode(uiInputModePlan)
+	return m.setPurpose(next)
 }
 
-// switchPlanToYolo handles activating YOLO while in plan mode: YOLO is a
-// coding concern, so instead of a "plan + yolo" state the UI switches
-// straight to the coder with YOLO enabled. Activation is idempotent — YOLO
-// carried into plan mode stays on, and the user ends up in full YOLO mode
-// either way.
-func (m *UI) switchPlanToYolo() tea.Cmd {
-	if m.isAgentBusy() || m.modeSwitching {
-		return util.ReportWarn("Agent is busy, please wait before switching input mode...")
+// setPurpose switches the agent serving the main turn. The switch is an HTTP
+// round-trip in client/server mode, so it runs off the update loop together
+// with the model update, and the UI adopts the new purpose only once it
+// succeeds (applyPurposeSwitch). A failed switch therefore never leaves the
+// editor claiming a mode the server's active agent does not match.
+func (m *UI) setPurpose(agentID string) tea.Cmd {
+	if agentID == "" || agentID == m.purpose {
+		return nil
 	}
-	if !m.com.Workspace.PermissionSkipRequests() {
-		m.toggleYoloMode()
-	}
-	// Explicit activation pins YOLO: the Shift+Tab cycle must not disable
-	// it on the next pass.
-	m.cycleYolo = false
-	return m.setInputMode(uiInputModeCode)
-}
-
-// Mode banner copy shown in the status bar after switching modes.
-const (
-	planModeBannerMsg = "Plan with Crush before generating any code."
-	yoloModeBannerMsg = "Skip permission prompts. System level commands will be blocked."
-)
-
-func (m *UI) setInputMode(target uiInputMode) tea.Cmd {
-	agentID := config.AgentPlan
-	if target == uiInputModeCode {
-		agentID = config.AgentCoder
-	}
-
-	// YOLO is orthogonal to the input mode, so report it alongside the mode
-	// instead of treating a YOLO-enabled coder as plain "code".
-	yolo := target == uiInputModeCode && m.com.Workspace.PermissionSkipRequests()
-
-	// The agent switch is an HTTP round-trip in client/server mode, so it
-	// runs off the update loop together with the model update. The mode and
-	// editor prompt only change once the switch succeeds (applyModeSwitch),
-	// so a failed switch never leaves the editor claiming a mode the
-	// server's active agent does not match.
 	m.modeSwitching = true
 	return func() tea.Msg {
 		err := m.com.Workspace.AgentSetMain(agentID)
 		if err == nil {
 			err = m.com.Workspace.UpdateAgentModel(context.Background())
 		}
-		return modeSwitchedMsg{
-			mode: target,
-			yolo: yolo,
-			err:  err,
-		}
+		return modeSwitchedMsg{agentID: agentID, err: err}
 	}
 }
 
-// applyModeSwitch finalizes an input-mode switch once the backend has
-// settled. On error the previous mode is kept so the editor never claims a
-// mode the server's active agent does not match.
-func (m *UI) applyModeSwitch(msg modeSwitchedMsg) []tea.Cmd {
+// Mode banner copy shown in the status bar after switching modes.
+const (
+	planModeBannerMsg = "Plan with Crush before generating any code."
+	yoloModeBannerMsg = "Skip permission prompts. System level commands will be blocked."
+	autoModeBannerMsg = "A classifier reviews each action: safe ones run, risky ones still ask."
+	promptLevelMsg    = "Permission prompts enabled."
+)
+
+// levelBanner is how each permission level explains itself, kept in one
+// place so the keybinding, the palette, and the plan handoff cannot drift.
+func levelBanner(level permission.Level) tea.Cmd {
+	switch level {
+	case permission.LevelAuto:
+		return util.CmdHandler(util.InfoMsg{Type: util.InfoTypeAuto, Msg: autoModeBannerMsg})
+	case permission.LevelBypass:
+		return util.CmdHandler(util.InfoMsg{Type: util.InfoTypeYolo, Msg: yoloModeBannerMsg})
+	default:
+		return util.ReportInfo(promptLevelMsg)
+	}
+}
+
+// applyPurposeSwitch finalizes a purpose switch once the backend has
+// settled. On error the previous purpose is kept so the editor never claims
+// a mode the server's active agent does not match.
+func (m *UI) applyPurposeSwitch(msg modeSwitchedMsg) []tea.Cmd {
 	if msg.err != nil {
 		return []tea.Cmd{util.ReportError(msg.err)}
 	}
-	m.mode = msg.mode
-	m.setEditorPrompt(m.yoloModeCached())
+	m.purpose = msg.agentID
+	m.setEditorPrompt()
 	var cmds []tea.Cmd
 	if msg.continueSessionID != "" && m.session != nil && m.session.ID == msg.continueSessionID {
 		cmds = append(cmds, m.sendMessageInternal("Implement the plan.", true))
 	}
-	switch {
-	case msg.mode == uiInputModePlan:
+	if msg.agentID == config.AgentPlan {
 		cmds = append(cmds, util.CmdHandler(util.InfoMsg{Type: util.InfoTypePlan, Msg: planModeBannerMsg}))
-	case msg.yolo:
-		cmds = append(cmds, util.CmdHandler(util.InfoMsg{Type: util.InfoTypeYolo, Msg: yoloModeBannerMsg}))
-	default:
-		cmds = append(cmds, util.ReportInfo("input mode: code"))
+	} else {
+		cmds = append(cmds, util.ReportInfo("mode: "+purposeLabel(msg.agentID)))
 	}
 	return cmds
 }
 
 // modeSwitchedMsg reports that the async agent switch started by
-// setInputMode has finished (successfully or not).
+// setPurpose has finished (successfully or not).
 type modeSwitchedMsg struct {
 	continueSessionID string
-	mode              uiInputMode
-	yolo              bool
+	agentID           string
 	err               error
 }
 
@@ -5426,6 +5465,27 @@ func (m *UI) openModelsDialog() tea.Cmd {
 	return nil
 }
 
+// openModelsDialogPreset opens the models dialog with the given model
+// type preselected (e.g. the auto-mode classifier slot).
+func (m *UI) openModelsDialogPreset(mt dialog.ModelType) tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.ModelsID) {
+		m.dialog.BringToFront(dialog.ModelsID)
+		return nil
+	}
+
+	isOnboarding := m.state == uiOnboarding
+	modelsDialog, err := dialog.NewModels(m.com, isOnboarding)
+	if err != nil {
+		return util.ReportError(err)
+	}
+	if err := modelsDialog.SetModelType(mt); err != nil {
+		return util.ReportError(err)
+	}
+
+	m.dialog.OpenDialog(modelsDialog)
+	return nil
+}
+
 // openCommandsDialog opens the commands dialog.
 func (m *UI) openCommandsDialog() tea.Cmd {
 	if m.dialog.ContainsDialog(dialog.CommandsID) {
@@ -5600,8 +5660,19 @@ func (m *UI) collapsedInlineEditor() (dialog.CollapsibleInlineEditor, bool) {
 	return collapsible, true
 }
 
-// handlePermissionNotification updates tool items when permission state changes.
-func (m *UI) handlePermissionNotification(notification permission.PermissionNotification) {
+// autoModeEvaluatingMsg is the status message shown while the native
+// auto mode classifier is evaluating a permission request.
+const autoModeEvaluatingMsg = "Auto mode: evaluating command…"
+
+// autoModeEvaluatingTTL bounds how long the evaluating status line
+// lingers if the outcome never arrives (e.g. classifier hang).
+const autoModeEvaluatingTTL = 90 * time.Second
+
+// handlePermissionNotification updates tool items when permission state
+// changes. When auto mode is active, it surfaces an "evaluating" status
+// while the classifier runs so the prompt doesn't look hung during the
+// (potentially slow) LLM call.
+func (m *UI) handlePermissionNotification(notification permission.PermissionNotification) tea.Cmd {
 	if toolItem := m.chat.MessageItem(notification.ToolCallID); toolItem != nil {
 		if permItem, ok := toolItem.(chat.ToolMessageItem); ok {
 			if notification.Granted {
@@ -5612,23 +5683,36 @@ func (m *UI) handlePermissionNotification(notification permission.PermissionNoti
 		}
 	}
 
+	// "Requested" ping (no outcome yet): auto mode is evaluating. Show a
+	// status line that persists until the outcome arrives.
+	if !notification.Granted && !notification.Denied {
+		if m.levelCached() == permission.LevelAuto {
+			m.status.SetInfoMsg(util.InfoMsg{Type: util.InfoTypeInfo, Msg: autoModeEvaluatingMsg, TTL: autoModeEvaluatingTTL})
+			return clearInfoMsgCmd(autoModeEvaluatingTTL)
+		}
+		return nil
+	}
+
+	// Final resolution: clear the evaluating status if it was showing.
+	if m.levelCached() == permission.LevelAuto {
+		m.status.ClearInfoMsg()
+	}
+
 	// If this notification reflects a final resolution (granted or denied),
 	// dismiss any open permissions dialog whose tool call ID matches. This
 	// covers the case where another client resolved the request remotely.
-	if !notification.Granted && !notification.Denied {
-		return
-	}
 	if d := m.dialog.Dialog(dialog.PermissionsID); d != nil {
 		if perm, ok := d.(*dialog.Permissions); ok && perm.ToolCallID() == notification.ToolCallID {
 			m.dialog.CloseDialog(dialog.PermissionsID)
 		}
 	}
+	return nil
 }
 
 // handlePlanHandoff checks whether a completed run in plan mode contained the
 // plan-ready sentinel marker and, if so, opens the plan handoff dialog.
 func (m *UI) handlePlanHandoff(rc notify.RunComplete) tea.Cmd {
-	if m.mode != uiInputModePlan {
+	if !m.planning() {
 		return nil
 	}
 	if rc.Error != "" || rc.Cancelled {
@@ -5658,17 +5742,17 @@ func (m *UI) resetPlanModeState() tea.Cmd {
 		m.activeInline = nil
 		m.textarea.Focus()
 	}
-	if m.mode != uiInputModePlan {
+	if !m.planning() {
 		return nil
 	}
 	// The backend rejects agent switches while a run is active (409). When
 	// one is, keep the mode as-is: the server's active agent still matches
-	// what the editor shows, and the next Shift+Tab lands back in code mode
-	// once the run finishes.
+	// what the editor shows, and the next Shift+Tab lands back in the
+	// standard purpose once the run finishes.
 	if m.isAgentBusy() {
 		return nil
 	}
-	return m.setInputMode(uiInputModeCode)
+	return m.setPurpose(config.AgentCoder)
 }
 
 // setPlanReadyPending records (or clears, with an empty ID) the session that
@@ -5682,13 +5766,19 @@ func (m *UI) setPlanReadyPending(sessionID string) {
 // by pressing enter on an empty editor while still in plan mode.
 func (m *UI) openPlanHandoff() {
 	inline := dialog.NewPlanHandoffInline(m.com)
-	inline.OnConfirm = func(yolo bool) tea.Cmd {
-		if m.com.Workspace.PermissionSkipRequests() != yolo {
-			m.toggleYoloMode()
+	inline.OnConfirm = func(bypassPermissions bool) tea.Cmd {
+		// The handoff offers "start coding" and "start coding without
+		// asking", so the choice names a level and the confirm applies it
+		// either way. The two axes stay independent: this sets the
+		// permission level and the purpose below, one after the other.
+		level := permission.LevelPrompt
+		if bypassPermissions {
+			level = permission.LevelBypass
 		}
+		m.setPermissionLevel(level)
 		m.setPlanReadyPending("")
 		sessionID := m.session.ID
-		cmd := m.setInputMode(uiInputModeCode)
+		cmd := m.setPurpose(config.AgentCoder)
 		return func() tea.Msg {
 			result := cmd()
 			if switched, ok := result.(modeSwitchedMsg); ok {
@@ -5870,7 +5960,7 @@ func (m *UI) checkBangModeAfterPaste() {
 	m.textarea.SetValue(stripped)
 	col := m.textarea.Column()
 	m.textarea.SetCursorColumn(max(0, col-(len(val)-len(stripped))))
-	m.setEditorPrompt(m.yoloModeCached())
+	m.setEditorPrompt()
 }
 
 // handlePasteMsg handles a paste message.

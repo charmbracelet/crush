@@ -26,6 +26,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
+	"github.com/charmbracelet/crush/internal/automode"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/discover"
 	"github.com/charmbracelet/crush/internal/event"
@@ -118,6 +119,12 @@ func isOpenCodeResponsesModel(modelID string) bool {
 
 type Coordinator interface {
 	SetMainAgent(agentName string) error
+	// MainAgentName reports which agent currently serves the main turn;
+	// MainAgentNames lists the selectable ones in cycle order. Together
+	// they let a client read back the purpose axis it just changed. Without
+	// them the active agent is write-only and the UI can only guess it.
+	MainAgentName() string
+	MainAgentNames() []string
 	Run(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error)
 	// RunAccepted runs a call that was already accepted via
 	// BeginAccepted on the fire-and-forget dispatch path. The handle is
@@ -161,6 +168,9 @@ type coordinator struct {
 	mainAgent     SessionAgent
 	mainAgentName string
 	agents        map[string]SessionAgent
+	// mainAgentNames is the selectable set in cycle order, so the UI can
+	// walk the purpose axis without hard-coding which agents exist.
+	mainAgentNames []string
 
 	// Skills discovery results (session-start snapshot).
 	allSkills    []*skills.Skill // Pre-filter: all discovered after dedup.
@@ -220,6 +230,24 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		interactive:  opts.Interactive,
 	}
 
+	// Bridge external policy hooks (PrePermission, PermissionDenied)
+	// from the permission service to the hooks runner. Reading config
+	// fresh per dispatch means reloads apply to these hooks too.
+	if opts.Permissions != nil && opts.Messages != nil {
+		var policyHooks permission.PermissionHooks = newPermissionHookDispatcher(opts.Config, opts.Messages)
+		// Native auto mode is always installed so the TUI mode cycle can
+		// toggle it at runtime; its initial state comes from config. It
+		// runs as the primary policy hook, with external hooks as
+		// fallback.
+		native := automode.New(c.automodeOptions(amOrDefault(opts.Config)))
+		policyHooks = compositeHooks{primary: native, secondary: policyHooks}
+		opts.Permissions.SetPermissionHooks(policyHooks)
+		// Seed the runtime auto-mode state (also forwards to the native
+		// toggler) so headless gating and the TUI toggle agree with the
+		// config's initial value.
+		opts.Permissions.SetAutoMode(c.AutoModeEnabled())
+	}
+
 	agentCfg, ok := opts.Config.Config().Agents[config.AgentCoder]
 	if !ok {
 		return nil, errCoderAgentNotConfigured
@@ -254,6 +282,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 
 	c.mainAgent = agent
 	c.mainAgentName = config.AgentCoder
+	c.mainAgentNames = []string{config.AgentCoder, config.AgentPlan}
 	return c, nil
 }
 
@@ -283,6 +312,19 @@ func (c *coordinator) SetMainAgent(agentName string) error {
 	c.mainAgent = agent
 	c.mainAgentName = agentName
 	return nil
+}
+
+// MainAgentName implements Coordinator.
+func (c *coordinator) MainAgentName() string {
+	_, name := c.activeAgent()
+	return name
+}
+
+// MainAgentNames implements Coordinator.
+func (c *coordinator) MainAgentNames() []string {
+	c.agentMu.RLock()
+	defer c.agentMu.RUnlock()
+	return slices.Clone(c.mainAgentNames)
 }
 
 // Run implements Coordinator.
@@ -796,7 +838,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		SystemPrompt:         "",
 		IsSubAgent:           isSubAgent,
 		DisableAutoSummarize: c.cfg.Config().Options.DisableAutoSummarize,
-		IsYolo:               c.permissions.SkipRequests(),
+		Permissions:          c.permissions,
 		Sessions:             c.sessions,
 		Messages:             c.messages,
 		Cfg:                  c.cfg,
@@ -869,7 +911,8 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	// Build hook runner if PreToolUse hooks are configured.
 	var hookRunner *hooks.Runner
 	if preToolHooks := c.cfg.Config().Hooks[hooks.EventPreToolUse]; len(preToolHooks) > 0 {
-		hookRunner = hooks.NewRunner(preToolHooks, c.cfg.WorkingDir(), c.cfg.WorkingDir())
+		hookRunner = hooks.NewRunner(preToolHooks, c.cfg.WorkingDir(), c.cfg.WorkingDir()).
+			WithTranscriptProvider(transcriptProvider(c.messages))
 	}
 
 	allTools = append(
@@ -960,6 +1003,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	// per delegated turn. The top-level invocation of the sub-agent tool
 	// itself is still wrapped from the coder's side.
 	filteredTools = wrapToolsWithHooks(filteredTools, hookRunner, isSubAgent)
+	filteredTools = wrapToolsWithEscalationNotes(filteredTools, c.permissions)
 
 	return filteredTools, nil
 }

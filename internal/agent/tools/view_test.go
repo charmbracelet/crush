@@ -228,9 +228,27 @@ func (m *mockViewPermissionService) AutoApproveSession(sessionID string) {}
 
 func (m *mockViewPermissionService) SetSkipRequests(skip bool) {}
 
+func (m *mockViewPermissionService) SetPermissionHooks(hooks permission.PermissionHooks) {}
+
+func (m *mockViewPermissionService) DenialReason(toolCallID string) string {
+	return ""
+}
+
+func (m *mockViewPermissionService) SetAutoMode(enabled bool) {}
+
+func (m *mockViewPermissionService) AutoMode() bool { return false }
+
+func (m *mockViewPermissionService) EscalationNote(toolCallID string) string {
+	return ""
+}
+
 func (m *mockViewPermissionService) SkipRequests() bool {
 	return false
 }
+
+func (m *mockViewPermissionService) SetLevel(permission.Level) {}
+
+func (m *mockViewPermissionService) Level() permission.Level { return permission.LevelPrompt }
 
 func (m *mockViewPermissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[permission.PermissionNotification] {
 	return make(<-chan pubsub.Event[permission.PermissionNotification])

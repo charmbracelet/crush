@@ -157,18 +157,21 @@ func (c *recordingCoordinator) RunAccepted(ctx context.Context, _ *agent.Accepte
 	return nil, nil
 }
 
-func (c *recordingCoordinator) BeginAccepted(string) *agent.AcceptedRun       { return nil }
-func (c *recordingCoordinator) Cancel(string)                                 {}
-func (c *recordingCoordinator) CancelAll()                                    {}
-func (c *recordingCoordinator) IsBusy() bool                                  { return false }
-func (c *recordingCoordinator) IsSessionBusy(string) bool                     { return false }
-func (c *recordingCoordinator) QueuedPrompts(string) int                      { return 0 }
-func (c *recordingCoordinator) QueuedPromptsList(string) []string             { return nil }
-func (c *recordingCoordinator) ClearQueue(string)                             {}
-func (c *recordingCoordinator) Summarize(context.Context, string) error       { return nil }
-func (c *recordingCoordinator) Model() agent.Model                            { return agent.Model{} }
-func (c *recordingCoordinator) UpdateModels(context.Context) error            { return nil }
-func (c *recordingCoordinator) SetMainAgent(string) error                     { return nil }
+func (c *recordingCoordinator) BeginAccepted(string) *agent.AcceptedRun { return nil }
+func (c *recordingCoordinator) Cancel(string)                           {}
+func (c *recordingCoordinator) CancelAll()                              {}
+func (c *recordingCoordinator) IsBusy() bool                            { return false }
+func (c *recordingCoordinator) IsSessionBusy(string) bool               { return false }
+func (c *recordingCoordinator) QueuedPrompts(string) int                { return 0 }
+func (c *recordingCoordinator) QueuedPromptsList(string) []string       { return nil }
+func (c *recordingCoordinator) ClearQueue(string)                       {}
+func (c *recordingCoordinator) Summarize(context.Context, string) error { return nil }
+func (c *recordingCoordinator) Model() agent.Model                      { return agent.Model{} }
+func (c *recordingCoordinator) UpdateModels(context.Context) error      { return nil }
+func (c *recordingCoordinator) SetMainAgent(string) error               { return nil }
+
+func (c *recordingCoordinator) MainAgentName() string                         { return "" }
+func (c *recordingCoordinator) MainAgentNames() []string                      { return nil }
 func (c *recordingCoordinator) GenerateTitle(context.Context, string, string) {}
 
 // fullFakeSessions adapts fakeChannelSessions to the full session.Service

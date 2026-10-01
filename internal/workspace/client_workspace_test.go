@@ -13,6 +13,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/client"
@@ -24,6 +25,20 @@ import (
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/stretchr/testify/require"
 )
+
+func TestFinishedEventTranslation(t *testing.T) {
+	t.Parallel()
+	w := &ClientWorkspace{}
+	for _, state := range []notify.FinishState{"", notify.FinishContinuing, notify.FinishIdleSuccess, notify.FinishIdleUnsuccessful} {
+		translated := w.translateEvent(pubsub.Event[proto.AgentEvent]{Payload: proto.AgentEvent{
+			Type: proto.AgentEventType(notify.TypeAgentFinished), SessionID: "session", FinishState: state,
+		}})
+		event, ok := translated.(pubsub.Event[notify.Notification])
+		require.True(t, ok)
+		require.Equal(t, state, event.Payload.FinishState)
+		require.Equal(t, "session", event.Payload.SessionID)
+	}
+}
 
 // TestProtoToMessageToolResult ensures that ToolResult metadata,
 // data, and MIME type survive the conversion from proto on the

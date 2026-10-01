@@ -28,12 +28,12 @@ func TestRefreshWorkspaceConfig(t *testing.T) {
 	}`
 
 	for _, tt := range []struct {
-		name       string
-		status     int
-		body       string
-		wantModel  string
-		wantLog    bool
-		wantSame   bool
+		name      string
+		status    int
+		body      string
+		wantModel string
+		wantLog   bool
+		wantSame  bool
 	}{
 		{name: "http_error_is_diagnostic_only", status: http.StatusServiceUnavailable, body: `{}`, wantModel: "stale", wantLog: true, wantSame: true},
 		{name: "invalid_json_is_diagnostic_only", status: http.StatusOK, body: `{`, wantModel: "stale", wantLog: true, wantSame: true},

@@ -114,7 +114,8 @@ func TestFormatSourcegraphResultsTruncatesHugeFileContent(t *testing.T) {
 
 	got, err := formatSourcegraphResults(result, 1, 10)
 	require.NoError(t, err)
-	require.Contains(t, got, "lines truncated]")
+	require.Contains(t, got, "lines truncated")
+	require.Contains(t, got, "full output:")
 	require.LessOrEqual(t, len(got), MaxOutputLength+128)
 	require.NotContains(t, got, huge)
 }

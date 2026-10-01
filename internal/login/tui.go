@@ -382,7 +382,7 @@ func (m authModel) content() string {
 		if m.codeEntry {
 			b.WriteString("\n\n  ")
 			b.WriteString(wrap.Render("Declined or browser didn't connect? Enter the code from the page:"))
-			b.WriteString("\n  ")
+			b.WriteString("\n\n  ")
 			b.WriteString(m.codeInput.View())
 			if m.codeErr != "" {
 				b.WriteString("\n\n  ")

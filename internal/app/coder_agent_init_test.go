@@ -21,6 +21,7 @@ func (c *initFakeCoordinator) SetMainAgent(string) error { return nil }
 func (c *initFakeCoordinator) Run(context.Context, string, string, ...message.Attachment) (*fantasy.AgentResult, error) {
 	return nil, nil
 }
+
 func (c *initFakeCoordinator) RunAccepted(context.Context, *agent.AcceptedRun, string, string, ...message.Attachment) (*fantasy.AgentResult, error) {
 	return nil, nil
 }

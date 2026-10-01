@@ -141,11 +141,17 @@ func (a AgentInfo) IsZero() bool {
 // callers must fall back to SessionID-only filtering, which
 // remains correct only when no other turns are in flight for the
 // same session.
+//
+// Channel origin is deliberately absent from this wire type: a client
+// must never be able to mark its own turn as channel-originated (that
+// would route the turn's reply back through the channel's messaging
+// tool with no permission prompt). The channel binding for a run is
+// set server-side, in the backend's channel injection path, and
+// travels with the run internally rather than on the request.
 type AgentMessage struct {
 	HiddenUserMessage bool         `json:"hidden_user_message,omitempty"`
 	SessionID         string       `json:"session_id"`
 	RunID             string       `json:"run_id,omitempty"`
-	Channel           string       `json:"channel,omitempty"`
 	Prompt            string       `json:"prompt"`
 	Attachments       []Attachment `json:"attachments,omitempty"`
 }

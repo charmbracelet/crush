@@ -4504,17 +4504,22 @@ func (m *UI) openEditor(value string) tea.Cmd {
 		if err != nil {
 			return util.ReportError(err)
 		}
-		content, err := os.ReadFile(tmpPath)
-		if err != nil {
-			return util.ReportError(err)
-		}
-		if len(content) == 0 {
-			return util.ReportWarn("Message is empty")
-		}
-		return openEditorMsg{
-			Text: strings.TrimSpace(string(content)),
-		}
+		return editorFileMsg(tmpPath)
 	})
+}
+
+// editorFileMsg reads the file the external editor was supposed to write and
+// turns it into the message that replaces the composer text. An emptied buffer
+// yields an empty Text, which clears the composer just like deleting every
+// character in-app does.
+func editorFileMsg(path string) tea.Msg {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return util.ReportError(err)
+	}
+	return openEditorMsg{
+		Text: strings.TrimSpace(string(content)),
+	}
 }
 
 // setEditorPrompt configures the textarea prompt function based on whether

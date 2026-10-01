@@ -59,6 +59,9 @@ type Querier interface {
 	RenameSession(ctx context.Context, arg RenameSessionParams) error
 	SetSessionChannel(ctx context.Context, arg SetSessionChannelParams) (Session, error)
 	UpdateMessage(ctx context.Context, arg UpdateMessageParams) error
+	// channel is deliberately not written here: SetSessionChannel owns the
+	// binding, so a load-modify-Save cycle with a stale session cannot
+	// clobber the channel the coordinator just set.
 	UpdateSession(ctx context.Context, arg UpdateSessionParams) (Session, error)
 	UpdateSessionTitleAndUsage(ctx context.Context, arg UpdateSessionTitleAndUsageParams) error
 }

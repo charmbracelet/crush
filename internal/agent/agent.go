@@ -1476,8 +1476,30 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID, trigger string,
 
 	summaryPromptText := buildSummaryPrompt(currentSession.Todos, previousCheckpoint, transcriptPath)
 
+	// The checkpoint request has to fit the window it is summarizing into.
+	// Left unset, the provider applies its own default, and a nearly-full
+	// session then fails as too long: the one failure compaction exists to
+	// prevent. The estimate omits tool definitions, so it runs a little
+	// optimistic rather than a little pessimistic.
+	checkpointTokens, tight := compaction.CheckpointOutputBudget(
+		int64(largeModel.CatwalkCfg.ContextWindow),
+		compaction.EstimateAll(region)+
+			compaction.Tokens(string(summaryPrompt))+
+			compaction.Tokens(systemPromptPrefix)+
+			compaction.Tokens(summaryPromptText),
+		largeModel.CatwalkCfg.DefaultMaxTokens,
+	)
+	if tight {
+		slog.Warn("Very little room left for a session checkpoint",
+			"session_id", sessionID,
+			"context_window", largeModel.CatwalkCfg.ContextWindow,
+			"max_output_tokens", checkpointTokens,
+		)
+	}
+
 	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:          summaryPromptText,
+		MaxOutputTokens: &checkpointTokens,
 		Messages:        aiMsgs,
 		Headers:         sessionHeaders(sessionID),
 		ProviderOptions: opts,

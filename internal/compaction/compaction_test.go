@@ -177,6 +177,41 @@ func TestPlanIgnoresNonPositiveBudgets(t *testing.T) {
 	require.False(t, Plan(nil, Policy{KeepRecentTokens: 1_000}).Found)
 }
 
+func TestCheckpointOutputBudget(t *testing.T) {
+	t.Parallel()
+
+	// A model whose default is smaller than the cap keeps its default.
+	tokens, tight := CheckpointOutputBudget(200_000, 10_000, 4_096)
+	require.Equal(t, int64(4_096), tokens)
+	require.False(t, tight)
+
+	// A generous default is capped: a checkpoint longer than this is a
+	// transcript rather than a distillation.
+	tokens, tight = CheckpointOutputBudget(200_000, 10_000, 64_000)
+	require.Equal(t, int64(MaxCheckpointTokens), tokens)
+	require.False(t, tight)
+
+	// An unset model default falls back to the cap.
+	tokens, _ = CheckpointOutputBudget(200_000, 10_000, 0)
+	require.Equal(t, int64(MaxCheckpointTokens), tokens)
+
+	// A nearly-full window only gets what is actually left.
+	tokens, tight = CheckpointOutputBudget(200_000, 196_000, 0)
+	require.Equal(t, int64(4_000), tokens)
+	require.False(t, tight)
+
+	// Below the floor the request is still sent, flagged so the caller can
+	// warn that the checkpoint will be thin.
+	tokens, tight = CheckpointOutputBudget(200_000, 199_900, 0)
+	require.Equal(t, int64(MinCheckpointTokens), tokens)
+	require.True(t, tight)
+
+	// An unknown window cannot constrain anything.
+	tokens, tight = CheckpointOutputBudget(0, 0, 0)
+	require.Equal(t, int64(MaxCheckpointTokens), tokens)
+	require.False(t, tight)
+}
+
 func TestEstimate(t *testing.T) {
 	t.Parallel()
 

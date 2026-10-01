@@ -1440,6 +1440,16 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID, trigger string,
 
 	aiMsgs, _ := a.preparePrompt(region, largeModel.CatwalkCfg.Capabilities.Vision, largeModel.CatwalkCfg.Capabilities.Audio)
 
+	// Compaction is a visible pause, and a failed one is worse than a silent
+	// one, so observers are told when it starts and - always, including on
+	// cancel and failure - when the session is usable again. Registered
+	// before the other defers so the closing event follows the flush.
+	a.publishSummarizing(sessionID, currentSession.Title, false, "Compacting the session")
+	outcome := "Compaction failed"
+	defer func() {
+		a.publishSummarizing(sessionID, currentSession.Title, true, outcome)
+	}()
+
 	genCtx, cancel := context.WithCancel(ctx)
 	ac := &activeCancel{cancel: cancel}
 	a.activeRequests.Set(sessionID, ac)
@@ -1542,6 +1552,7 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID, trigger string,
 		isCancelErr := errors.Is(err, context.Canceled)
 		if isCancelErr {
 			// User cancelled summarize we need to remove the summary message.
+			outcome = "Compaction canceled"
 			deleteErr := a.messages.Delete(ctx, summaryMessage.ID)
 			return deleteErr
 		}
@@ -1608,6 +1619,9 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID, trigger string,
 		return err
 	}
 	a.hooks.Run(ctx, hooks.Event{Name: hooks.EventPostCompact, SessionID: sessionID, Trigger: trigger})
+
+	outcome = fmt.Sprintf("Compacted %d messages, kept %d verbatim", len(region), cut.Kept)
+	a.eventSessionCompacted(sessionID, len(region), cut.Kept)
 
 	// Release the active request before processing queued messages so that
 	// Run() does not see the session as busy.
@@ -1888,6 +1902,22 @@ func splitCheckpoint(msgs []message.Message) (previous string, body []message.Me
 		return compaction.Body(msgs[0].Content().Text), msgs[1:]
 	}
 	return "", msgs
+}
+
+// publishSummarizing tells observers that a session is being compacted, and
+// again when it is not. Without the closing event a compaction that fails or
+// is canceled leaves observers showing "summarizing" indefinitely.
+func (a *sessionAgent) publishSummarizing(sessionID, title string, done bool, progress string) {
+	if a.notify == nil {
+		return
+	}
+	a.notify.Publish(pubsub.CreatedEvent, notify.Notification{
+		SessionID:    sessionID,
+		SessionTitle: title,
+		Type:         notify.TypeSummarizing,
+		Done:         done,
+		Progress:     progress,
+	})
 }
 
 // compactionTranscriptDir is where displaced transcript regions are kept, or

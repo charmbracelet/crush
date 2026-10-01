@@ -173,6 +173,8 @@ func wrapEvent(ev any) *pubsub.Payload {
 			Type:         proto.AgentEventType(e.Payload.Type),
 			AWSSOCommand: e.Payload.AWSSOCommand,
 			AWSSOURL:     e.Payload.AWSSOURL,
+			Progress:     e.Payload.Progress,
+			Done:         e.Payload.Done,
 		}
 		// Carry any human-readable message across the wire; the client
 		// maps Error back into Notification.Message.

@@ -5985,6 +5985,15 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 		return m.handleAWSSSOAuth(n.AWSSOCommand, n.AWSSOURL)
 	case notify.TypeAWSSSOAuthResult:
 		return m.handleAWSSSOAuthResult(n.Message)
+	case notify.TypeSummarizing:
+		// Compaction is quiet work with a visible result. Report what it did
+		// once it ends, so a long pause is not mistaken for a hang and a
+		// failed compaction is not silently ignored. The chat already spins
+		// while it runs, and the session update refreshes the context meter.
+		if !n.Done || n.Progress == "" {
+			return nil
+		}
+		return util.ReportInfo(n.Progress)
 	default:
 		return nil
 	}

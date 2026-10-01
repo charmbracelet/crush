@@ -55,4 +55,4 @@ Be specific. Don't write "implement authentication" - write:
 
 **Tone**: Write as if briefing a teammate taking over mid-task. Include everything they'd need to continue without asking questions. No emojis ever.
 
-**Length**: No limit. Err on the side of too much detail rather than too little. Critical context is worth the tokens.
+**Length**: You have a fixed output budget for this response. Spend it where it pays: rationale, rejected approaches, constraints, exact identifiers, and next steps. Do not spend it on transcript replay, file bodies, or restating what the retained turns already show.

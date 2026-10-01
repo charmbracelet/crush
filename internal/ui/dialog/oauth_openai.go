@@ -26,6 +26,7 @@ func NewOAuthOpenAI(
 }
 
 type OAuthOpenAI struct {
+	oauthAPIKey
 	flow       *openai.BrowserFlow
 	cancelFunc context.CancelFunc
 }

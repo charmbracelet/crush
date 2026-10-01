@@ -293,6 +293,7 @@ func runNonInteractive(
 		sessionID: sess.ID,
 		runID:     runID,
 		out:       os.Stdout,
+		errOut:    os.Stderr,
 		read:      make(map[string]int),
 	}
 
@@ -359,6 +360,7 @@ type runStream struct {
 	sessionID string
 	runID     string
 	out       io.Writer
+	errOut    io.Writer
 	read      map[string]int
 	printed   bool
 }
@@ -453,6 +455,12 @@ func (s *runStream) handle(ev any, stopSpinner func()) (done bool, err error) {
 		return true, nil
 
 	case pubsub.Event[proto.AgentEvent]:
+		if e.Payload.Type == proto.AgentEventType("retry") {
+			if s.errOut != nil && !e.Payload.Done && (e.Payload.RunID == "" || e.Payload.RunID == s.runID) && e.Payload.SessionID == s.sessionID {
+				fmt.Fprintf(s.errOut, "Retrying model request %d/%d in %dms\n", e.Payload.RetryAttempt, e.Payload.RetryMaxAttempts, e.Payload.RetryDelayMS)
+			}
+			return false, nil
+		}
 		if e.Payload.Error == nil {
 			return false, nil
 		}

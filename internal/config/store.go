@@ -407,7 +407,15 @@ func (s *ConfigStore) writeConfigFields(scope Scope, kv map[string]any) error {
 				return nil, fmt.Errorf("failed to set config field %s: %w", key, sErr)
 			}
 		}
-		return []byte(v), nil
+		updated := []byte(v)
+		if current := s.Config(); current != nil {
+			if _, err := loadFromBytes([][]byte{mustMarshalConfig(current), updated}); err != nil {
+				return nil, fmt.Errorf("invalid config update: %w", err)
+			}
+		} else if _, err := loadFromBytes([][]byte{updated}); err != nil {
+			return nil, fmt.Errorf("invalid config update: %w", err)
+		}
+		return updated, nil
 	})
 }
 
@@ -1325,6 +1333,9 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 		}
 	}
 
+	if err := cfg.ValidateRetry(); err != nil {
+		return err
+	}
 	// Validate hooks after all config merging is complete so matcher
 	// regexes are recompiled on the reloaded config (mirrors Load).
 	if err := cfg.ValidateHooks(); err != nil {

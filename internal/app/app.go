@@ -408,6 +408,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	}(ctx, sess.ID, prompt)
 
 	messageEvents := app.Messages.Subscribe(ctx)
+	retryEvents := app.agentNotifications.Subscribe(ctx)
 	messageReadBytes := make(map[string]int)
 	var printed bool
 
@@ -439,6 +440,11 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 				return fmt.Errorf("agent processing failed: %w", result.err)
 			}
 			return nil
+
+		case event := <-retryEvents:
+			if event.Payload.SessionID == sess.ID && event.Payload.Type == notify.TypeRetry && !event.Payload.Done {
+				fmt.Fprintf(os.Stderr, "Retrying model request %d/%d in %dms\n", event.Payload.Attempt, event.Payload.MaxAttempts, event.Payload.DelayMS)
+			}
 
 		case event := <-messageEvents:
 			msg := event.Payload

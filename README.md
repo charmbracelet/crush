@@ -253,6 +253,13 @@ Crush’s default model listing is managed in [Catwalk](https://github.com/charm
 Crush runs great with no configuration. That said, if you do need or want to
 customize Crush, you can, with a `crushrc`.
 
+Transient model request retries can be tuned globally with
+`option retry max-retries 5` or per provider with
+`provider add <id> --retry '{"max_retries":5}'`. The default retries a
+failed model stream twice with bounded jittered backoff;
+`option retry max-retries 0` disables retries.
+See [configuration options](docs/config/README.md#option) for the full policy.
+
 A `crushrc` is just Bash with some Crush-specific builtins. It’s a lot like
 a `.bashrc`, just for your Crush. Because Crush has a native, built-in Bash
 interpreter, Bash-based config works identically across all platforms, including

@@ -456,6 +456,7 @@ func (m *OAuth) innerDialogContent() string {
 					Width(innerWidth).
 					Padding(0, 1).
 					Render("Declined or browser didn't connect? Enter the code from the page:"),
+				"",
 				lipgloss.NewStyle().
 					Width(innerWidth).
 					Padding(0, 1).

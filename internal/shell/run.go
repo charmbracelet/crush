@@ -234,24 +234,7 @@ var nonInteractiveEnvVars = []string{
 // replacing any existing values for those keys. The returned slice is a
 // new allocation safe to use concurrently with the input.
 func withNonInteractiveEnv(env []string) []string {
-	// Build a set of override keys for fast lookup.
-	overrideKeys := make(map[string]bool, len(nonInteractiveEnvVars))
-	for _, kv := range nonInteractiveEnvVars {
-		if key, _, ok := strings.Cut(kv, "="); ok {
-			overrideKeys[key] = true
-		}
-	}
-
-	// Copy env, filtering out any keys we will override.
-	result := make([]string, 0, len(env)+len(nonInteractiveEnvVars))
-	for _, e := range env {
-		if key, _, ok := strings.Cut(e, "="); ok && overrideKeys[key] {
-			continue
-		}
-		result = append(result, e)
-	}
-
-	return append(result, nonInteractiveEnvVars...)
+	return withEnvOverrides(env, nonInteractiveEnvVars)
 }
 
 // herdrEnvVars are the environment variables herdr injects into panes

@@ -9,6 +9,7 @@ import (
 	"html/template"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -182,7 +183,7 @@ func formatSourcegraphResults(result map[string]any, contextWindow, maxResults i
 		formatSourcegraphResult(&buffer, i, res, contextWindow)
 	}
 
-	return TruncateOutput(buffer.String()), nil
+	return TruncateOutput(buffer.String(), os.TempDir()), nil
 }
 
 func writeSourcegraphErrors(buffer *strings.Builder, result map[string]any) bool {

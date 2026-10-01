@@ -128,15 +128,16 @@ func TestSubscribeEventsContextCancelClosesEvents(t *testing.T) {
 func TestSendMessageWire(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
-		name           string
-		policy         proto.PermissionRequestPolicy
-		hidden         bool
-		runID, channel string
-		withAttachment bool
+		name             string
+		policy           proto.PermissionRequestPolicy
+		hidden, steering bool
+		runID, channel   string
+		withAttachment   bool
 	}{
 		{name: "plain", policy: proto.PermissionRequestPolicyPrompt},
 		{name: "prompt policy", policy: proto.PermissionRequestPolicyPrompt, hidden: true, runID: "run", channel: "channel", withAttachment: true},
 		{name: "auto approval", policy: proto.PermissionRequestPolicyAutoApprove, hidden: true, runID: "run", channel: "channel", withAttachment: true},
+		{name: "operator steering", policy: proto.PermissionRequestPolicyPrompt, steering: true},
 		{name: "channel only", policy: proto.PermissionRequestPolicyPrompt, channel: "signal"},
 		{name: "hidden only", policy: proto.PermissionRequestPolicyPrompt, hidden: true},
 	} {
@@ -161,7 +162,7 @@ func TestSendMessageWire(t *testing.T) {
 				wantAttachments = []proto.Attachment{{FilePath: "/tmp/input", FileName: "input", MimeType: "text/plain", Content: []byte("payload")}}
 			}
 			c := captureClient(t, srv)
-			ctx := t.Context()
+			ctx := message.WithOperatorSteering(t.Context(), tc.steering)
 			if tc.hidden {
 				ctx = message.WithHiddenUserMessage(ctx)
 			}
@@ -170,7 +171,7 @@ func TestSendMessageWire(t *testing.T) {
 			var got proto.AgentMessage
 			require.NoError(t, json.Unmarshal(body, &got))
 			require.Equal(t, proto.AgentMessage{
-				SessionID: "session", RunID: tc.runID, Channel: tc.channel, Prompt: "prompt", HiddenUserMessage: tc.hidden,
+				SessionID: "session", RunID: tc.runID, Channel: tc.channel, Prompt: "prompt", HiddenUserMessage: tc.hidden, OperatorSteering: tc.steering,
 				PermissionPolicy: tc.policy, Attachments: wantAttachments,
 			}, got)
 			if tc.policy == proto.PermissionRequestPolicyPrompt {

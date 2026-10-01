@@ -18,10 +18,7 @@ func TestRun_PostCancelAcceptedTurnRetainsSummarySequence(t *testing.T) {
 	t.Parallel()
 	env, sess, model, sa := newLifecycleTestAgent(t, "session")
 	seedUserMessage(t, env.messages, sess.ID, "earlier")
-	broker := pubsub.NewBroker[notify.RunComplete]()
-	defer broker.Shutdown()
-	sa.runComplete = broker
-	events := broker.Subscribe(t.Context())
+	events := subscribeRunCompletions(t, sa)
 	pending := sa.BeginAccepted(sess.ID)
 	defer pending.Close()
 	sa.Cancel(sess.ID)
@@ -74,10 +71,7 @@ func TestRun_IndependentTurnOutcomes(t *testing.T) {
 					t.Run(fmt.Sprintf("ids=%v/summary=%t/initial-error=%t/queued-error=%t", ids, summarize, failInitial, failQueued), func(t *testing.T) {
 						t.Parallel()
 						_, sess, model, sa := newLifecycleTestAgent(t, "session")
-						completions := pubsub.NewBroker[notify.RunComplete]()
-						defer completions.Shutdown()
-						sa.runComplete = completions
-						queuedEvents := completions.Subscribe(t.Context())
+						queuedEvents := subscribeRunCompletions(t, sa)
 						notifications := pubsub.NewBroker[notify.Notification]()
 						defer notifications.Shutdown()
 						sa.notify = notifications
@@ -272,10 +266,7 @@ func TestRun_QueuedFailureDoesNotStrandContinuation(t *testing.T) {
 			if !nested {
 				sa.messages = failedQueuedPreparation{Service: env.messages, err: failure}
 			}
-			broker := pubsub.NewBroker[notify.RunComplete]()
-			defer broker.Shutdown()
-			sa.runComplete = broker
-			events := broker.Subscribe(t.Context())
+			events := subscribeRunCompletions(t, sa)
 			calls := 0
 			model.stream = func(ctx context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
 				calls++
@@ -337,10 +328,7 @@ func TestSummarize_DoesNotReturnQueuedFailure(t *testing.T) {
 	seedUserMessage(t, env.messages, sess.ID, "earlier")
 	failure := errors.New("queued preparation failed")
 	sa.messages = failedQueuedPreparation{Service: env.messages, err: failure}
-	broker := pubsub.NewBroker[notify.RunComplete]()
-	defer broker.Shutdown()
-	sa.runComplete = broker
-	events := broker.Subscribe(t.Context())
+	events := subscribeRunCompletions(t, sa)
 	model.stream = func(ctx context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
 		_, err := sa.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, RunID: "B", Prompt: "B"})
 		require.NoError(t, err)
@@ -442,14 +430,9 @@ func TestRun_NestedContinuationCancellationAgreesWithCompletion(t *testing.T) {
 						require.NoError(t, err)
 					}
 				}}
-				broker := pubsub.NewBroker[notify.Notification]()
-				defer broker.Shutdown()
-				completionBroker := pubsub.NewBroker[notify.RunComplete]()
-				defer completionBroker.Shutdown()
-				sa.runComplete = completionBroker
-				events := completionBroker.Subscribe(t.Context())
+				events := subscribeRunCompletions(t, sa)
 				armed, canceled := false, false
-				sa.notify = observingNotifications{Broker: broker, observe: func(n notify.Notification) {
+				observeNotifications(t, sa, func(n notify.Notification) {
 					if armed && n.Type == notify.TypeAgentFinished {
 						armed = false
 						if cancelAtFinish {
@@ -458,7 +441,7 @@ func TestRun_NestedContinuationCancellationAgreesWithCompletion(t *testing.T) {
 							sa.Cancel(sess.ID)
 						}
 					}
-				}}
+				})
 				calls := 0
 				model.stream = func(ctx context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
 					calls++
@@ -540,10 +523,7 @@ func TestRun_FinishedAutomaticSummaryDoesNotInheritQueuedCancellation(t *testing
 			t.Parallel()
 			env, sess, model, sa := newLifecycleTestAgent(t, "session")
 			seedUserMessage(t, env.messages, sess.ID, "earlier")
-			broker := pubsub.NewBroker[notify.RunComplete]()
-			defer broker.Shutdown()
-			sa.runComplete = broker
-			events := broker.Subscribe(t.Context())
+			events := subscribeRunCompletions(t, sa)
 			calls := 0
 			model.stream = func(ctx context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
 				calls++

@@ -164,7 +164,7 @@ type Workspace interface {
 	AgentQueuedPromptsList(sessionID string) []string
 	AgentClearQueue(sessionID string)
 	AgentSetMain(agentID string) error
-	AgentSummarize(ctx context.Context, sessionID string) error
+	AgentSummarize(ctx context.Context, sessionID, instructions string) error
 	UpdateAgentModel(ctx context.Context) error
 	InitCoderAgent(ctx context.Context) error
 	InitCoderAgentNonInteractive(ctx context.Context) error

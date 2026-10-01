@@ -577,8 +577,9 @@ func (c *Client) GetAgentSessionInfo(ctx context.Context, id string, sessionID s
 }
 
 // AgentSummarizeSession requests a session summarization.
-func (c *Client) AgentSummarizeSession(ctx context.Context, id string, sessionID string) error {
-	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent/sessions/%s/summarize", id, sessionID), nil, nil, nil)
+func (c *Client) AgentSummarizeSession(ctx context.Context, id string, sessionID string, instructions string) error {
+	body := jsonBody(proto.SessionSummarizeRequest{Instructions: instructions})
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent/sessions/%s/summarize", id, sessionID), nil, body, nil)
 	if err != nil {
 		return fmt.Errorf("failed to summarize session: %w", err)
 	}

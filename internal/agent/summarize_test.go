@@ -9,6 +9,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/compaction"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/session"
 	"github.com/stretchr/testify/require"
 )
 
@@ -87,7 +88,7 @@ func TestSummarizeKeepsRecentTurnsVerbatim(t *testing.T) {
 	// Eight turns well past the retained-tail budget.
 	seedSizedTurns(t, env, sess.ID, 8, 5_000)
 
-	require.NoError(t, sa.Summarize(ctx, sess.ID, fantasy.ProviderOptions{}, nil))
+	require.NoError(t, sa.Summarize(ctx, sess.ID, "", fantasy.ProviderOptions{}, nil))
 
 	updated, err := env.sessions.Get(ctx, sess.ID)
 	require.NoError(t, err)
@@ -125,12 +126,12 @@ func TestSummarizeMergesThePreviousCheckpoint(t *testing.T) {
 	sess, err := env.sessions.Create(ctx, "test")
 	require.NoError(t, err)
 	seedSizedTurns(t, env, sess.ID, 8, 5_000)
-	require.NoError(t, sa.Summarize(ctx, sess.ID, fantasy.ProviderOptions{}, nil))
+	require.NoError(t, sa.Summarize(ctx, sess.ID, "", fantasy.ProviderOptions{}, nil))
 
 	// Grow the session and compact again.
 	seedSizedTurns(t, env, sess.ID, 2, 5_000)
 	model.text = "checkpoint two"
-	require.NoError(t, sa.Summarize(ctx, sess.ID, fantasy.ProviderOptions{}, nil))
+	require.NoError(t, sa.Summarize(ctx, sess.ID, "", fantasy.ProviderOptions{}, nil))
 
 	require.Len(t, model.calls, 2)
 	require.Contains(t, model.calls[1], "<previous_checkpoint>",
@@ -149,7 +150,7 @@ func TestSummarizeOnAnEmptySessionDoesNothing(t *testing.T) {
 	sess, err := env.sessions.Create(ctx, "test")
 	require.NoError(t, err)
 
-	require.NoError(t, sa.Summarize(ctx, sess.ID, fantasy.ProviderOptions{}, nil))
+	require.NoError(t, sa.Summarize(ctx, sess.ID, "", fantasy.ProviderOptions{}, nil))
 	require.Empty(t, model.calls)
 
 	updated, err := env.sessions.Get(ctx, sess.ID)
@@ -167,4 +168,49 @@ func TestCompactionTranscriptDirFollowsTheDataDirectory(t *testing.T) {
 	require.Empty(t, sa.compactionTranscriptDir())
 	require.Equal(t, "/data/compaction", compaction.TranscriptDir("/data"))
 	require.Empty(t, compaction.TranscriptDir(""))
+}
+
+func TestSummarizeAppliesUserInstructions(t *testing.T) {
+	env := testEnv(t)
+	model := &recordingModel{text: "the checkpoint"}
+	sa := testSessionAgent(env, model, nil, "test prompt").(*sessionAgent)
+	ctx := t.Context()
+
+	sess, err := env.sessions.Create(ctx, "test")
+	require.NoError(t, err)
+	seedSizedTurns(t, env, sess.ID, 8, 5_000)
+
+	require.NoError(t, sa.Summarize(ctx, sess.ID, "focus on the failing tests", fantasy.ProviderOptions{}, nil))
+
+	require.Len(t, model.calls, 1)
+	require.Contains(t, model.calls[0], "<instructions>")
+	require.Contains(t, model.calls[0], "focus on the failing tests")
+	require.NotContains(t, model.calls[0], "<previous_checkpoint>", "there is no checkpoint to merge yet")
+}
+
+func TestBuildSummaryPromptOrdersItsSections(t *testing.T) {
+	t.Parallel()
+
+	out := buildSummaryPrompt(
+		[]session.Todo{{Content: "ship it", Status: session.TodoStatusPending}},
+		"focus on the failing tests",
+		"earlier work",
+		"/data/compaction/sess/1-checkpoint.txt",
+	)
+
+	instructions := strings.Index(out, "<instructions>")
+	previous := strings.Index(out, "<previous_checkpoint>")
+	todos := strings.Index(out, "## Current Todo List")
+	pointer := strings.Index(out, "/data/compaction/sess/1-checkpoint.txt")
+	require.Less(t, instructions, previous, "the user's emphasis leads")
+	require.Less(t, previous, todos, "the merged checkpoint precedes the task list")
+	require.Less(t, todos, pointer, "the recovery pointer is last")
+	require.Contains(t, out, "ship it")
+
+	// Every block is optional and independent.
+	bare := buildSummaryPrompt(nil, "", "", "")
+	require.NotContains(t, bare, "<instructions>")
+	require.NotContains(t, bare, "<previous_checkpoint>")
+	require.NotContains(t, bare, "Current Todo List")
+	require.Equal(t, "Write the checkpoint for the conversation above.", bare)
 }

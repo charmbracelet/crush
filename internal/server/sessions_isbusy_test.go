@@ -47,7 +47,7 @@ func (s *stubCoordinator) IsSessionBusy(id string) bool {
 func (s *stubCoordinator) QueuedPrompts(string) int          { return 0 }
 func (s *stubCoordinator) QueuedPromptsList(string) []string { return nil }
 func (s *stubCoordinator) ClearQueue(string)                 {}
-func (s *stubCoordinator) Summarize(context.Context, string) error {
+func (s *stubCoordinator) Summarize(context.Context, string, string) error {
 	return nil
 }
 func (s *stubCoordinator) Model() agent.Model                            { return agent.Model{} }

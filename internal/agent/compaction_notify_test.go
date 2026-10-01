@@ -59,7 +59,7 @@ func TestSummarizeAnnouncesStartAndOutcome(t *testing.T) {
 	require.NoError(t, err)
 	seedSizedTurns(t, env, sess.ID, 8, 5_000)
 
-	require.NoError(t, sa.Summarize(ctx, sess.ID, fantasy.ProviderOptions{}, nil))
+	require.NoError(t, sa.Summarize(ctx, sess.ID, "", fantasy.ProviderOptions{}, nil))
 
 	events := notifier.byType(notify.TypeSummarizing)
 	require.Len(t, events, 2, "one event when compaction starts and one when it ends")
@@ -83,7 +83,7 @@ func TestSummarizeAnnouncesFailure(t *testing.T) {
 	require.NoError(t, err)
 	seedSizedTurns(t, env, sess.ID, 4, 5_000)
 
-	require.Error(t, sa.Summarize(ctx, sess.ID, fantasy.ProviderOptions{}, nil))
+	require.Error(t, sa.Summarize(ctx, sess.ID, "", fantasy.ProviderOptions{}, nil))
 
 	// A failed compaction must still close the pair, or observers keep
 	// showing the session as summarizing forever.
@@ -103,6 +103,6 @@ func TestSummarizeAnnouncesNothingWhenThereIsNothingToDo(t *testing.T) {
 	sess, err := env.sessions.Create(ctx, "test")
 	require.NoError(t, err)
 
-	require.NoError(t, sa.Summarize(ctx, sess.ID, fantasy.ProviderOptions{}, nil))
+	require.NoError(t, sa.Summarize(ctx, sess.ID, "", fantasy.ProviderOptions{}, nil))
 	require.Empty(t, notifier.byType(notify.TypeSummarizing))
 }

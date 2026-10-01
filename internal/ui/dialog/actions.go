@@ -95,8 +95,15 @@ type (
 		Name string
 	}
 	ActionInitializeProject struct{}
-	ActionSummarize         struct {
-		SessionID string
+	// ActionSummarize compacts a session. Arguments and Args follow the
+	// custom-command pattern: Arguments describes what to collect before
+	// compacting, a non-nil Args marks that the values arrived, and
+	// Instructions carries the user's emphasis for the checkpoint.
+	ActionSummarize struct {
+		SessionID    string
+		Arguments    []commands.Argument
+		Args         map[string]string
+		Instructions string
 	}
 	// ActionSelectReasoningEffort is a message indicating a reasoning effort
 	// has been selected.
@@ -134,6 +141,10 @@ type (
 	// ActionDisableDockerMCP is a message to disable Docker MCP.
 	ActionDisableDockerMCP struct{}
 )
+
+// CompactInstructionsArg is the argument the compact dialog collects the
+// user's emphasis under, so the collected value can be read back there.
+const CompactInstructionsArg = "instructions"
 
 // Messages for MCP OAuth authentication dialog.
 type (

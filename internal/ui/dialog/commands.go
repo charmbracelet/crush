@@ -455,7 +455,13 @@ func (c *Commands) defaultCommands() []*CommandItem {
 
 	// Only show compact command if there's an active session
 	if c.hasSession {
-		commands = append(commands, NewCommandItem(c.com.Styles, "summarize", "Summarize Session", "", ActionSummarize{SessionID: c.sessionID}))
+		commands = append(commands, NewCommandItem(
+			c.com.Styles, "compact", "Compact Session", "",
+			ActionSummarize{
+				SessionID: c.sessionID,
+				Arguments: compactArguments(),
+			},
+		).WithAliases("summarize", "compress").WithDescription("Replace older turns with a checkpoint, keeping the most recent ones verbatim"))
 	}
 
 	// Add reasoning toggle for models that support it
@@ -600,4 +606,15 @@ func (c *Commands) StartLoading() tea.Cmd {
 // StopLoading implements [LoadingDialog].
 func (c *Commands) StopLoading() {
 	c.loading = false
+}
+
+// compactArguments describes what the compact dialog collects before it
+// compacts. It is a package-level function because defaultCommands shadows the
+// commands package with its own local slice of items.
+func compactArguments() []commands.Argument {
+	return []commands.Argument{{
+		ID:          CompactInstructionsArg,
+		Title:       "Instructions",
+		Description: `What the checkpoint should emphasize, e.g. "focus on the failing tests". Leave empty to summarize everything as usual.`,
+	}}
 }

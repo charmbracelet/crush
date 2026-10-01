@@ -175,7 +175,7 @@ type SessionAgent interface {
 	QueuedPrompts(sessionID string) int
 	QueuedPromptsList(sessionID string) []string
 	ClearQueue(sessionID string)
-	Summarize(context.Context, string, fantasy.ProviderOptions, func(context.Context, *fantasy.ProviderError) error) error
+	Summarize(context.Context, string, string, fantasy.ProviderOptions, func(context.Context, *fantasy.ProviderError) error) error
 	Model() Model
 	GenerateTitle(ctx context.Context, sessionID, userPrompt string)
 }
@@ -1215,7 +1215,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 	if shouldSummarize {
 		a.activeRequests.Del(call.SessionID)
-		if summarizeErr := a.Summarize(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh); summarizeErr != nil {
+		if summarizeErr := a.Summarize(genCtx, call.SessionID, "", call.ProviderOptions, call.OnAuthRefresh); summarizeErr != nil {
 			return nil, summarizeErr
 		}
 		// If the agent wasn't done...
@@ -1360,7 +1360,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	return a.Run(ctx, firstQueuedMessage)
 }
 
-func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error) error {
+func (a *sessionAgent) Summarize(ctx context.Context, sessionID, instructions string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error) error {
 	if a.IsSessionBusy(sessionID) {
 		return ErrSessionBusy
 	}
@@ -1449,7 +1449,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		transcriptPath = path
 	}
 
-	summaryPromptText := buildSummaryPrompt(currentSession.Todos, previousCheckpoint, transcriptPath)
+	summaryPromptText := buildSummaryPrompt(currentSession.Todos, instructions, previousCheckpoint, transcriptPath)
 
 	// The checkpoint request has to fit the window it is summarizing into.
 	// Left unset, the provider applies its own default, and a nearly-full
@@ -2457,9 +2457,17 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 }
 
 // buildSummaryPrompt constructs the prompt text for session summarization.
-func buildSummaryPrompt(todos []session.Todo, previousCheckpoint, transcriptPath string) string {
+func buildSummaryPrompt(todos []session.Todo, instructions, previousCheckpoint, transcriptPath string) string {
 	var sb strings.Builder
 	sb.WriteString("Write the checkpoint for the conversation above.")
+
+	if instructions != "" {
+		sb.WriteString("\n\n<instructions>\n")
+		sb.WriteString(instructions)
+		sb.WriteString("\n</instructions>\n\n")
+		sb.WriteString("The user asked that this checkpoint emphasize the above. ")
+		sb.WriteString("It changes what to foreground, not what to preserve: every constraint the user stated and every rejected approach still have to survive. ")
+	}
 
 	if previousCheckpoint != "" {
 		sb.WriteString("\n\n<previous_checkpoint>\n")

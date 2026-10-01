@@ -12,6 +12,7 @@ require (
 	charm.land/lipgloss/v2 v2.0.6
 	charm.land/log/v2 v2.0.1
 	charm.land/tone v0.1.0
+	charm.land/x/nerdfont v0.1.0
 	charm.land/x/vcr v0.1.1
 	github.com/JohannesKaufmann/html-to-markdown v1.6.0
 	github.com/MakeNowJust/heredoc v1.0.0

@@ -21,7 +21,7 @@ var loginCmd = &cobra.Command{
 	Short:   "Login Crush to a platform",
 	Long: `Login Crush to a specified platform.
 	The platform should be provided as an argument.
-	Available platforms are: hyper, copilot, openai, grok.`,
+	Available platforms are: hyper, copilot, openai (chatgpt), grok (xai).`,
 	Example: `
 	# Authenticate with Charm Hyper
 	crush login

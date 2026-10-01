@@ -30,7 +30,7 @@ var logoutCmd = &cobra.Command{
 	Long: `Logout Crush from a specified platform, removing stored credentials.
 The platform should be provided as an argument.
 If no argument is given, a list of logged-in platforms will be shown.
-Available platforms are: hyper, copilot, openai, grok.`,
+Available platforms are: hyper, copilot, openai (chatgpt), grok (xai).`,
 	Example: `
 # Sign out from Charm Hyper
 crush logout hyper

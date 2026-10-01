@@ -135,7 +135,7 @@ func (e *questionEditor) handlePaste(msg tea.PasteMsg) tea.Cmd {
 // styleFilled controls whether non-empty fill-in text gets the
 // selected (pink) style. Pass true for single-choice where the
 // fill-in IS the answer; false for multi-choice where it's supplementary.
-func (e *questionEditor) drawFillIn(lines *[]contentLine, innerWidth int, bar, barInactive, fillPrefix string, isActive bool, styleFilled bool) {
+func (e *questionEditor) drawFillIn(lines *[]contentLine, innerWidth int, bar, fillPrefix string, isActive bool, styleFilled bool) {
 	bodyStyle := e.Styles.Editor.QuestionBody
 	prefixWidth := lipgloss.Width(fillPrefix)
 
@@ -143,9 +143,12 @@ func (e *questionEditor) drawFillIn(lines *[]contentLine, innerWidth int, bar, b
 		e.fillIn.SetWidth(innerWidth - 2 - prefixWidth)
 		indent := strings.Repeat(" ", prefixWidth)
 		for j, tl := range strings.Split(e.fillIn.View(), "\n") {
+			// The prompt leads only the first row, but the bar runs the
+			// whole height: a typed answer that spans lines is one item,
+			// and a gutter that stops partway reads as several.
 			text := bar + fillPrefix + tl
 			if j > 0 {
-				text = barInactive + indent + tl
+				text = bar + indent + tl
 			}
 			*lines = append(*lines, contentLine{text: text, fillInRow: j == 0, cursorItem: true, choiceIdx: -1})
 		}
@@ -167,7 +170,7 @@ func (e *questionEditor) drawFillIn(lines *[]contentLine, innerWidth int, bar, b
 // drawNote appends note rows to lines for the given key. When the
 // note editor is active, renders the live textarea; otherwise shows
 // saved note text or nothing.
-func (e *questionEditor) drawNote(lines *[]contentLine, innerWidth int, bar, barInactive, noteKey string, isActive bool) {
+func (e *questionEditor) drawNote(lines *[]contentLine, innerWidth int, bar, noteKey string, isActive bool) {
 	noteStyle := e.Styles.Editor.QuestionNote
 	isEditing := e.activeNoteKey == noteKey && e.noteEditor.Focused()
 	const notePrefix = "> "
@@ -177,9 +180,11 @@ func (e *questionEditor) drawNote(lines *[]contentLine, innerWidth int, bar, bar
 		e.noteEditor.SetWidth(innerWidth - 2 - prefixWidth)
 		indent := strings.Repeat(" ", prefixWidth)
 		for j, tl := range strings.Split(e.noteEditor.View(), "\n") {
+			// As with the fill-in: prompt on the first row, bar on all
+			// of them.
 			text := bar + notePrefix + tl
 			if j > 0 {
-				text = barInactive + indent + tl
+				text = bar + indent + tl
 			}
 			*lines = append(*lines, contentLine{text: text, noteRow: j == 0, cursorItem: true, choiceIdx: -1})
 		}

@@ -498,6 +498,181 @@ func TestConfig_configureProvidersWithOverride(t *testing.T) {
 	require.Equal(t, "Updated", pc.Models[0].Name)
 }
 
+func TestConfig_configureProviders_MergesCatalogModelMetadata(t *testing.T) {
+	temp := 0.5
+	knownProviders := []catwalk.Provider{
+		{
+			ID:          "zai",
+			APIKey:      "$ZAI_API_KEY",
+			APIEndpoint: "https://api.zai.com/v1",
+			Models: []catwalk.Model{
+				{
+					ID:                     "glm-5.3-flash",
+					Name:                   "GLM-5.3 Flash",
+					CostPer1MIn:            0.1,
+					CostPer1MOut:           0.2,
+					CostPer1MInCached:      0.05,
+					CostPer1MOutCached:     0.1,
+					ContextWindow:          128000,
+					DefaultMaxTokens:       4096,
+					CanReason:              true,
+					ReasoningLevels:        []string{"low", "high", "max"},
+					DefaultReasoningEffort: "high",
+					SupportsImages:         true,
+					Options: catwalk.ModelOptions{
+						Temperature: &temp,
+					},
+				},
+			},
+		},
+	}
+
+	cfg := &Config{
+		Providers: csync.NewMap[string, ProviderConfig](),
+	}
+	cfg.Providers.Set("zai", ProviderConfig{
+		Models: []catwalk.Model{
+			{
+				ID:                     "glm-5.3-flash",
+				DefaultReasoningEffort: "xhigh",
+			},
+		},
+	})
+	cfg.setDefaults(t.TempDir(), "")
+
+	env := env.NewFromMap(map[string]string{
+		"ZAI_API_KEY": "test-key",
+	})
+	resolver := NewShellVariableResolver(env)
+	err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, knownProviders)
+	require.NoError(t, err)
+
+	pc, ok := cfg.Providers.Get("zai")
+	require.True(t, ok)
+	require.Len(t, pc.Models, 1)
+
+	m := pc.Models[0]
+	require.Equal(t, "glm-5.3-flash", m.ID)
+	require.Equal(t, "GLM-5.3 Flash", m.Name)
+	require.Equal(t, 0.1, m.CostPer1MIn)
+	require.Equal(t, 0.2, m.CostPer1MOut)
+	require.Equal(t, 0.05, m.CostPer1MInCached)
+	require.Equal(t, 0.1, m.CostPer1MOutCached)
+	require.Equal(t, int64(128000), m.ContextWindow)
+	require.Equal(t, int64(4096), m.DefaultMaxTokens)
+	require.True(t, m.CanReason)
+	require.True(t, m.SupportsImages)
+	require.Equal(t, "xhigh", m.DefaultReasoningEffort)
+	require.Equal(t, []string{"low", "high", "max", "xhigh"}, m.ReasoningLevels)
+	require.NotNil(t, m.Options.Temperature)
+	require.Equal(t, 0.5, *m.Options.Temperature)
+}
+
+func TestConfig_configureProviders_OverridesCatalogModelExplicitFields(t *testing.T) {
+	knownProviders := []catwalk.Provider{
+		{
+			ID:          "zai",
+			APIKey:      "$ZAI_API_KEY",
+			APIEndpoint: "https://api.zai.com/v1",
+			Models: []catwalk.Model{
+				{
+					ID:               "glm-5.3-flash",
+					Name:             "GLM-5.3 Flash",
+					ContextWindow:    128000,
+					DefaultMaxTokens: 4096,
+					CanReason:        true,
+					ReasoningLevels:  []string{"low", "high", "max"},
+					SupportsImages:   true,
+				},
+			},
+		},
+	}
+
+	cfg := &Config{
+		Providers: csync.NewMap[string, ProviderConfig](),
+	}
+	cfg.Providers.Set("zai", ProviderConfig{
+		Models: []catwalk.Model{
+			{
+				ID:              "glm-5.3-flash",
+				Name:            "My Custom GLM",
+				ContextWindow:   65536,
+				ReasoningLevels: []string{"minimal", "extreme"},
+			},
+		},
+	})
+	cfg.setDefaults(t.TempDir(), "")
+
+	env := env.NewFromMap(map[string]string{
+		"ZAI_API_KEY": "test-key",
+	})
+	resolver := NewShellVariableResolver(env)
+	err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, knownProviders)
+	require.NoError(t, err)
+
+	pc, ok := cfg.Providers.Get("zai")
+	require.True(t, ok)
+	require.Len(t, pc.Models, 1)
+
+	m := pc.Models[0]
+	require.Equal(t, "My Custom GLM", m.Name)
+	require.Equal(t, int64(65536), m.ContextWindow)
+	require.Equal(t, int64(4096), m.DefaultMaxTokens)
+	require.True(t, m.CanReason)
+	require.True(t, m.SupportsImages)
+	require.Equal(t, []string{"low", "high", "max", "minimal", "extreme"}, m.ReasoningLevels)
+}
+
+func TestConfig_configureProviders_ReasoningEffortValidationWithShadowedModel(t *testing.T) {
+	knownProviders := []catwalk.Provider{
+		{
+			ID:          "zai",
+			APIKey:      "$ZAI_API_KEY",
+			APIEndpoint: "https://api.zai.com/v1",
+			Models: []catwalk.Model{
+				{
+					ID:              "glm-5.3-flash",
+					CanReason:       true,
+					ReasoningLevels: []string{"low", "high", "max"},
+				},
+			},
+		},
+	}
+
+	cfg := &Config{
+		Providers: csync.NewMap[string, ProviderConfig](),
+	}
+	cfg.Providers.Set("zai", ProviderConfig{
+		Models: []catwalk.Model{
+			{
+				ID:                     "glm-5.3-flash",
+				DefaultReasoningEffort: "xhigh",
+			},
+		},
+	})
+	cfg.setDefaults(t.TempDir(), "")
+
+	env := env.NewFromMap(map[string]string{
+		"ZAI_API_KEY": "test-key",
+	})
+	resolver := NewShellVariableResolver(env)
+	err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, knownProviders)
+	require.NoError(t, err)
+
+	// Catalog level should pass
+	require.NoError(t, cfg.ValidateReasoningEffort("zai", "glm-5.3-flash", "low"))
+	require.NoError(t, cfg.ValidateReasoningEffort("zai", "glm-5.3-flash", "high"))
+	require.NoError(t, cfg.ValidateReasoningEffort("zai", "glm-5.3-flash", "max"))
+
+	// User-specified effort level should pass
+	require.NoError(t, cfg.ValidateReasoningEffort("zai", "glm-5.3-flash", "xhigh"))
+
+	// Non-existent level should fail with list of all accepted values
+	err = cfg.ValidateReasoningEffort("zai", "glm-5.3-flash", "invalid")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "accepted values: low, high, max, xhigh")
+}
+
 func TestConfig_configureProvidersWithNewProvider(t *testing.T) {
 	knownProviders := []catwalk.Provider{
 		{

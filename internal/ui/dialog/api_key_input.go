@@ -12,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/keyring"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/ui/util"
@@ -50,6 +51,10 @@ type APIKeyInput struct {
 	input   textinput.Model
 	spinner spinner.Model
 	help    help.Model
+
+	// keychainAvailable is probed once at dialog creation so the Draw
+	// path never waits on a keyring daemon.
+	keychainAvailable bool
 }
 
 var _ Dialog = (*APIKeyInput)(nil)
@@ -91,6 +96,7 @@ func NewAPIKeyInput(
 		key.WithHelp("enter", "submit"),
 	)
 	m.keyMap.Close = CloseKey
+	m.keychainAvailable = keyring.Available()
 
 	return &m, nil
 }
@@ -169,14 +175,24 @@ func (m *APIKeyInput) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	m.input.Prompt = m.spinner.View()
 
-	content := strings.Join([]string{
+	lines := []string{
 		m.headerView(),
 		inputStyle.Render(m.inputView()),
-		textStyle.Render("This will be written in your global configuration:"),
-		textStyle.Render(config.GlobalConfigData()),
-		"",
-		helpView,
-	}, "\n")
+	}
+	if m.keychainAvailable {
+		lines = append(lines,
+			textStyle.Render("This will be stored in your system keychain."),
+			textStyle.Render(fmt.Sprintf("Keychain service: %q", keyring.Service)),
+		)
+	} else {
+		lines = append(lines,
+			textStyle.Render("This will be written in your global configuration:"),
+			textStyle.Render(config.GlobalConfigData()),
+		)
+	}
+	lines = append(lines, "", helpView)
+
+	content := strings.Join(lines, "\n")
 
 	cur := m.Cursor()
 
@@ -307,14 +323,29 @@ func (m *APIKeyInput) verifyAPIKey() tea.Msg {
 }
 
 func (m *APIKeyInput) saveKeyAndContinue() Action {
-	err := m.com.Workspace.SetProviderAPIKey(config.ScopeGlobal, string(m.provider.ID), m.input.Value())
+	providerID := string(m.provider.ID)
+	secret := m.input.Value()
+	err := m.com.Workspace.SetProviderAPIKey(config.ScopeGlobal, providerID, secret)
 	if err != nil {
 		return ActionCmd{util.ReportError(fmt.Errorf("failed to save API key: %w", err))}
 	}
 
-	return ActionSelectModel{
+	selectModel := ActionSelectModel{
 		Provider:  m.provider,
 		Model:     m.model,
 		ModelType: m.modelType,
 	}
+	// The dialog promised keychain storage based on the availability
+	// probe; confirm the secret actually landed there. A write the
+	// backend refuses silently falls back to the config file, and the
+	// user must not walk away believing the key is in the keychain.
+	// In client/server mode this checks the client's keyring, matching
+	// the probe that drove the dialog's storage label.
+	if m.keychainAvailable && !keyring.Verify(providerID, secret) {
+		return ActionCmd{Cmd: tea.Batch(
+			util.ReportWarn("Keychain write failed; the API key was saved to your config file instead."),
+			util.CmdHandler(selectModel),
+		)}
+	}
+	return selectModel
 }

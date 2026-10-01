@@ -32,6 +32,7 @@ import (
 	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/hooks"
+	"github.com/charmbracelet/crush/internal/keyring"
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
@@ -1538,7 +1539,7 @@ func (c *coordinator) retryAfterUnauthorized(ctx context.Context, providerCfg co
 		return nil
 	case providerCfg.AWSAuthRefresh != "":
 		return c.refreshAWSCredentials(ctx, providerCfg)
-	case strings.Contains(providerCfg.APIKeyTemplate, "$"):
+	case strings.Contains(providerCfg.APIKeyTemplate, "$"), keyring.IsRef(providerCfg.APIKeyTemplate):
 		slog.Debug("Received 401. Refreshing API Key template and retrying", "provider", providerCfg.ID)
 		return c.refreshApiKeyTemplate(ctx, providerCfg)
 	default:
@@ -1595,6 +1596,7 @@ func isUnauthorized(err error) bool {
 func (c *coordinator) makeAuthRefreshCallback(providerCfg config.ProviderConfig) func(context.Context, *fantasy.ProviderError) error {
 	if providerCfg.OAuthToken == nil &&
 		!strings.Contains(providerCfg.APIKeyTemplate, "$") &&
+		!keyring.IsRef(providerCfg.APIKeyTemplate) &&
 		providerCfg.AWSAuthRefresh == "" {
 		return nil
 	}

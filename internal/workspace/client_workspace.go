@@ -1261,6 +1261,8 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 			Type:         notify.Type(e.Payload.Type),
 			AWSSOCommand: e.Payload.AWSSOCommand,
 			AWSSOURL:     e.Payload.AWSSOURL,
+			Progress:     e.Payload.Progress,
+			Done:         e.Payload.Done,
 		}
 		if e.Payload.Error != nil {
 			n.Message = e.Payload.Error.Error()

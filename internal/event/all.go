@@ -33,6 +33,15 @@ func SessionSwitched() {
 	send("session switched")
 }
 
+// SessionCompacted reports that a session's transcript was replaced by a
+// checkpoint, with how much it replaced and how much stayed verbatim.
+func SessionCompacted(props ...any) {
+	send(
+		"session compacted",
+		props...,
+	)
+}
+
 func FilePickerOpened() {
 	send("filepicker opened")
 }

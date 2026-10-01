@@ -37,6 +37,18 @@ func (a *sessionAgent) eventTokensUsed(sessionID string, model Model, usage fant
 	)
 }
 
+// eventSessionCompacted records that a session was compacted and how much of
+// it the checkpoint stands in for.
+func (a *sessionAgent) eventSessionCompacted(sessionID string, replaced, kept int) {
+	event.SessionCompacted(
+		append(
+			a.eventCommon(sessionID, a.largeModel.Get()),
+			"messages replaced", replaced,
+			"messages kept", kept,
+		)...,
+	)
+}
+
 func (a *sessionAgent) eventCommon(sessionID string, model Model) []any {
 	m := model.ModelCfg
 

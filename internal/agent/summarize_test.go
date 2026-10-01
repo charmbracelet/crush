@@ -18,6 +18,7 @@ type recordingModel struct {
 	calls     []string
 	maxOutput []int64
 	text      string
+	fail      error
 }
 
 func (m *recordingModel) Generate(context.Context, fantasy.Call) (*fantasy.Response, error) {
@@ -25,6 +26,9 @@ func (m *recordingModel) Generate(context.Context, fantasy.Call) (*fantasy.Respo
 }
 
 func (m *recordingModel) Stream(_ context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
+	if m.fail != nil {
+		return nil, m.fail
+	}
 	m.calls = append(m.calls, fmt.Sprintf("%+v", call))
 	m.maxOutput = append(m.maxOutput, derefMaxTokens(call.MaxOutputTokens))
 	text := m.text

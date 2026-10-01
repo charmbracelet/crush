@@ -14,9 +14,7 @@ concurrency:
 
 jobs:
   snapshot:
-    runs-on:
-      # Use our own large runners with more CPU and RAM for faster builds
-      group: releasers
+    runs-on: blacksmith-8vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

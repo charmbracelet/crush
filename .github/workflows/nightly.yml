@@ -27,9 +27,7 @@ jobs:
   nightly:
     needs: check
     if: needs.check.outputs.should_run == 'true' && github.actor != 'dependabot[bot]'
-    runs-on:
-      # Use our own large runners with more CPU and RAM for faster builds
-      group: releasers
+    runs-on: blacksmith-8vcpu-ubuntu-2404
     permissions:
       contents: write
       id-token: write

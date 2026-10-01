@@ -88,6 +88,14 @@ type App struct {
 	// herdrClient reports agent state to herdr when running inside
 	// a herdr-managed pane. Nil when not in a herdr environment.
 	herdrClient *herdr.Client
+
+	// agentInitMu guards AgentCoordinator creation so concurrent
+	// initializers (a client attaching while the server-side channel
+	// injection initializes a headless workspace) cannot build two
+	// coordinators for one workspace. agentInteractive records which
+	// variant the current coordinator was built with.
+	agentInitMu    sync.Mutex
+	agentInteractive bool
 }
 
 // New initializes a new application instance. skillsMgr carries the
@@ -800,13 +808,32 @@ func (app *App) InitCoderAgentNonInteractive(ctx context.Context) error {
 	return app.initCoderAgent(ctx, false)
 }
 
+// initCoderAgent builds the workspace's coder coordinator. It is
+// create-only: once a coordinator exists the call is a no-op, so a
+// channel push initializing the agent headlessly cannot race a client
+// attach into building a second coordinator. The one refinement is an
+// upgrade: an interactive initializer replaces a coordinator that was
+// built headlessly, so an attached client regains the interactive-only
+// tools (notably question). A downgrade or a re-init while a run is in
+// flight keeps the existing coordinator, because swapping it then
+// would strand the run.
 func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
+	app.agentInitMu.Lock()
+	defer app.agentInitMu.Unlock()
+	if app.AgentCoordinator != nil {
+		if !interactive || app.agentInteractive {
+			return nil
+		}
+		if app.AgentCoordinator.IsBusy() {
+			slog.Warn("Keeping headless coder agent: interactive init raced a running turn")
+			return nil
+		}
+	}
 	coderAgentCfg := app.config.Config().Agents[config.AgentCoder]
 	if coderAgentCfg.ID == "" {
 		return fmt.Errorf("coder agent configuration is missing")
 	}
-	var err error
-	app.AgentCoordinator, err = agent.NewCoordinator(ctx, agent.CoordinatorOptions{
+	coord, err := agent.NewCoordinator(ctx, agent.CoordinatorOptions{
 		Config:      app.config,
 		Sessions:    app.Sessions,
 		Messages:    app.Messages,
@@ -824,6 +851,8 @@ func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 		slog.Error("Failed to create coder agent", "err", err)
 		return err
 	}
+	app.AgentCoordinator = coord
+	app.agentInteractive = interactive
 	return nil
 }
 

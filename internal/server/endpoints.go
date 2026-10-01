@@ -484,7 +484,9 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 			Tags("agent").
 			PathParam("id", "Workspace ID").
 			PathParam("sid", "Session ID").
-			Fails(404, 500).
+			Description("The request body is optional, and so is its emphasis. A body left empty, or an instructions field left empty, keeps the default summarization.").
+			Accepts(proto.SessionSummarizeRequest{}).
+			Fails(400, 404, 500).
 			Handle(c.handlePostWorkspaceAgentSessionSummarize),
 
 		apigen.Post("/v1/workspaces/{id}/agent/sessions/{sid}/shell").

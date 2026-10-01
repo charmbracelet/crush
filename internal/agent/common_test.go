@@ -12,6 +12,7 @@ import (
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/openaicompat"
 	"charm.land/x/vcr"
+	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
@@ -22,6 +23,7 @@ import (
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/stretchr/testify/require"
 
@@ -97,6 +99,18 @@ func testEnv(t *testing.T) fakeEnv {
 }
 
 func testSessionAgent(env fakeEnv, large, small fantasy.LanguageModel, systemPrompt string, tools ...fantasy.AgentTool) SessionAgent {
+	return testSessionAgentWithNotifier(env, large, small, systemPrompt, nil, tools...)
+}
+
+// testSessionAgentWithNotifier is testSessionAgent with an agent notification
+// sink, so tests can observe events such as compaction.
+func testSessionAgentWithNotifier(
+	env fakeEnv,
+	large, small fantasy.LanguageModel,
+	systemPrompt string,
+	notifier pubsub.Publisher[notify.Notification],
+	tools ...fantasy.AgentTool,
+) SessionAgent {
 	largeModel := Model{
 		Model: large,
 		CatwalkCfg: catwalk.Model{
@@ -119,6 +133,7 @@ func testSessionAgent(env fakeEnv, large, small fantasy.LanguageModel, systemPro
 		Sessions:     env.sessions,
 		Messages:     env.messages,
 		Tools:        tools,
+		Notify:       notifier,
 	})
 	return agent
 }

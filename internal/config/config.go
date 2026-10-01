@@ -963,7 +963,21 @@ func (c *Config) IsModelAvailable(provider, model string) bool {
 	if !ok || providerConfig.Disable {
 		return false
 	}
+	// A model is available in any of the provider's catalogs: the
+	// API-key list, or the ChatGPT/Grok subscription list fetched on
+	// login. Subscription models live outside Models, so checking only
+	// there would reject a model that is selectable and usable.
 	for _, m := range providerConfig.Models {
+		if m.ID == model {
+			return true
+		}
+	}
+	for _, m := range providerConfig.ChatGPTModels {
+		if m.ID == model {
+			return true
+		}
+	}
+	for _, m := range providerConfig.GrokModels {
 		if m.ID == model {
 			return true
 		}

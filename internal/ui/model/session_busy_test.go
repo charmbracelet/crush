@@ -19,6 +19,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/attachments"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/dialog"
+	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/crush/internal/workspace"
 )
 
@@ -29,13 +30,14 @@ import (
 type countingWorkspace struct {
 	workspace.Workspace
 
-	ready     bool
-	agentBusy bool
-	yolo      bool
-	queued    []string
-	model     workspace.AgentModel
-	lspStates map[string]workspace.LSPClientInfo
-	lspDiags  map[string]lsp.DiagnosticCounts
+	ready        bool
+	agentBusy    bool
+	yolo         bool
+	queued       []string
+	model        workspace.AgentModel
+	lspStates    map[string]workspace.LSPClientInfo
+	lspDiags     map[string]lsp.DiagnosticCounts
+	summarizeErr error
 
 	readyCalls      int
 	agentBusyCalls  int
@@ -52,6 +54,10 @@ type countingWorkspace struct {
 
 func (w *countingWorkspace) AgentIsReady() bool { w.readyCalls++; return w.ready }
 func (w *countingWorkspace) AgentIsBusy() bool  { w.agentBusyCalls++; return w.agentBusy }
+
+func (w *countingWorkspace) AgentSummarize(context.Context, string) error {
+	return w.summarizeErr
+}
 
 func (w *countingWorkspace) AgentReadyErr() error {
 	w.readyCalls++
@@ -278,6 +284,29 @@ func TestMessageCreatedEventRefreshesBusyAndQueue(t *testing.T) {
 	require.Equal(t, 1, m.promptQueue, "refreshed queue count must land in the cache")
 	require.False(t, m.busyFetchInFlight)
 	require.False(t, m.promptQueueInFlight)
+}
+
+func TestManualSummaryPresentation(t *testing.T) {
+	pinTTLs(t)
+	for _, tc := range []struct {
+		name string
+		err  error
+		text string
+		kind util.InfoType
+	}{
+		{"cancelled", context.Canceled, "Summary cancelled", util.InfoTypeInfo},
+		{"failure", context.DeadlineExceeded, context.DeadlineExceeded.Error(), util.InfoTypeError},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newBusyUI(&countingWorkspace{ready: true, summarizeErr: tc.err})
+			warmCaches(m, false)
+			msg := m.summarizeSession("s1")()
+			info, ok := msg.(util.InfoMsg)
+			require.True(t, ok)
+			require.Equal(t, tc.kind, info.Type)
+			require.Equal(t, tc.text, info.Msg)
+		})
+	}
 }
 
 // TestAgentTerminalNotificationsRefreshBusy pins the busy→idle edge: the

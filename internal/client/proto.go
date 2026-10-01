@@ -583,6 +583,15 @@ func (c *Client) AgentSummarizeSession(ctx context.Context, id string, sessionID
 		return fmt.Errorf("failed to summarize session: %w", err)
 	}
 	defer rsp.Body.Close()
+	if rsp.StatusCode == http.StatusConflict {
+		var outcome proto.SummaryResponse
+		if err := json.NewDecoder(rsp.Body).Decode(&outcome); err != nil {
+			return fmt.Errorf("failed to decode summary conflict: %w", err)
+		}
+		if outcome.Cancelled {
+			return context.Canceled
+		}
+	}
 	if rsp.StatusCode != http.StatusOK {
 		return fmt.Errorf("failed to summarize session: status code %d", rsp.StatusCode)
 	}

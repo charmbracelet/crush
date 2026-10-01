@@ -5,6 +5,11 @@ import (
 	"errors"
 )
 
+// SummaryResponse distinguishes cancellation from other HTTP conflicts.
+type SummaryResponse struct {
+	Cancelled bool `json:"cancelled"`
+}
+
 // AgentEventType represents the type of agent event.
 type AgentEventType string
 

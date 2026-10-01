@@ -2158,13 +2158,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before summarizing session..."))
 			break
 		}
-		cmds = append(cmds, func() tea.Msg {
-			err := m.com.Workspace.AgentSummarize(context.Background(), msg.SessionID)
-			if err != nil {
-				return util.ReportError(err)()
-			}
-			return nil
-		})
+		cmds = append(cmds, m.summarizeSession(msg.SessionID))
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleHelp:
 		m.status.ToggleHelp()
@@ -5707,6 +5701,20 @@ func (m *UI) openPlanHandoff() {
 	m.activeInline.SetFocused(true)
 	if m.status != nil {
 		m.updateLayoutAndSize()
+	}
+}
+
+func (m *UI) summarizeSession(sessionID string) tea.Cmd {
+	ws := m.com.Workspace
+	return func() tea.Msg {
+		err := ws.AgentSummarize(context.Background(), sessionID)
+		if errors.Is(err, context.Canceled) {
+			return util.NewInfoMsg("Summary cancelled")
+		}
+		if err != nil {
+			return util.NewErrorMsg(err)
+		}
+		return nil
 	}
 }
 

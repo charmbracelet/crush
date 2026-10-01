@@ -143,3 +143,33 @@ func TestEstimatedUsageStateCanBeClearedByExplicitSave(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, refetched.EstimatedUsage)
 }
+
+func TestSaveDoesNotClobberChannelBinding(t *testing.T) {
+	t.Parallel()
+	dataDir := t.TempDir()
+	t.Cleanup(func() {
+		require.NoError(t, db.Release(dataDir))
+		db.ResetPool()
+	})
+
+	conn, err := db.Connect(t.Context(), dataDir)
+	require.NoError(t, err)
+	sessions := NewService(db.New(conn), conn)
+
+	created, err := sessions.Create(t.Context(), "channel")
+	require.NoError(t, err)
+	_, err = sessions.SetChannel(t.Context(), created.ID, "signal")
+	require.NoError(t, err)
+
+	// A fetch-modify-Save cycle whose snapshot predates the binding
+	// must not clear it: UpdateSession no longer writes the channel,
+	// SetSessionChannel owns it.
+	created.Title = "renamed"
+	saved, err := sessions.Save(t.Context(), created)
+	require.NoError(t, err)
+	require.Equal(t, "renamed", saved.Title)
+
+	fetched, err := sessions.Get(t.Context(), created.ID)
+	require.NoError(t, err)
+	require.Equal(t, "signal", fetched.Channel)
+}

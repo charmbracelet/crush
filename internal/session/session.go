@@ -213,10 +213,6 @@ func (s *service) Save(ctx context.Context, session Session) (Session, error) {
 			String: todosJSON,
 			Valid:  todosJSON != "",
 		},
-		Channel: sql.NullString{
-			String: session.Channel,
-			Valid:  session.Channel != "",
-		},
 	})
 	if err != nil {
 		return Session{}, err

@@ -101,6 +101,7 @@ func (b *Backend) runAgent(ws *Workspace, msg proto.AgentMessage, policy permiss
 	defer accept.Close()
 
 	ctx := permission.WithRequestPolicy(ws.ctx, policy)
+	ctx = message.WithOperatorSteering(ctx, msg.OperatorSteering)
 	if msg.HiddenUserMessage {
 		ctx = message.WithHiddenUserMessage(ctx)
 	}

@@ -506,6 +506,7 @@ func (c *Client) SetMainAgent(ctx context.Context, id, agentID string) error {
 // turn on the same session (e.g. interactive TUI usage).
 func (c *Client) SendMessage(ctx context.Context, id string, sessionID, runID, channel, prompt string, policy proto.PermissionRequestPolicy, attachments ...message.Attachment) error {
 	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent", id), nil, jsonBody(proto.AgentMessage{
+		OperatorSteering:  message.OperatorSteering(ctx),
 		HiddenUserMessage: message.HiddenUserMessage(ctx),
 		SessionID:         sessionID,
 		RunID:             runID,

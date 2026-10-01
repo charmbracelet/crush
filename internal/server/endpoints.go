@@ -303,7 +303,10 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 				"detached from the requesting HTTP connection: the run survives client "+
 				"disconnects and is only ended by the explicit cancel endpoint. "+
 				"permission_policy may be omitted or empty for normal permission handling, "+
-				"or auto_approve to approve this turn and its descendants.").
+				"or auto_approve to approve this turn and its descendants. "+
+				"operator_steering allows input without run_id or channel to join an active "+
+				"turn under its existing permission policy. If idle, permission_policy "+
+				"applies to the new turn as usual.").
 			Tags("agent").
 			PathParam("id", "Workspace ID").
 			Accepts(proto.AgentMessage{}).

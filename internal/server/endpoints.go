@@ -380,10 +380,11 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 
 		apigen.Post("/v1/workspaces/{id}/agent/sessions/{sid}/summarize").
 			Summary("Summarize session").
+			Description("Returns HTTP 409 with {\"cancelled\": true} if summarization is canceled.").
 			Tags("agent").
 			PathParam("id", "Workspace ID").
 			PathParam("sid", "Session ID").
-			Fails(404, 500).
+			Fails(404, 409, 500).
 			Handle(c.handlePostWorkspaceAgentSessionSummarize),
 
 		apigen.Post("/v1/workspaces/{id}/agent/sessions/{sid}/shell").

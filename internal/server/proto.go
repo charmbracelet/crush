@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -612,6 +613,12 @@ func (c *controllerV1) handlePostWorkspaceAgentSessionSummarize(w http.ResponseW
 	id := r.PathValue("id")
 	sid := r.PathValue("sid")
 	if err := c.backend.SummarizeSession(r.Context(), id, sid); err != nil {
+		if errors.Is(err, context.Canceled) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			jsonEncode(w, proto.SummaryResponse{Cancelled: true})
+			return
+		}
 		c.handleError(w, r, err)
 		return
 	}

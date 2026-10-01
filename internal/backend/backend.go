@@ -31,6 +31,7 @@ var (
 	ErrWorkspaceNotFound       = errors.New("workspace not found")
 	ErrLSPClientNotFound       = errors.New("LSP client not found")
 	ErrAgentNotInitialized     = errors.New("agent coordinator not initialized")
+	ErrAgentBusy               = errors.New("agent is busy with a run")
 	ErrPathRequired            = errors.New("path is required")
 	ErrInvalidPermissionAction = errors.New("invalid permission action")
 	ErrUnknownCommand          = errors.New("unknown command")
@@ -256,9 +257,11 @@ func (w *Workspace) Shutdown() {
 	}
 }
 
-// New creates a new [Backend].
+// New creates a new [Backend]. The returned backend routes MCP channel
+// events into hosted workspaces for its lifetime (until ctx is
+// canceled); see [Backend.startChannelRouter].
 func New(ctx context.Context, cfg *config.ConfigStore, shutdownFn ShutdownFunc) *Backend {
-	return &Backend{
+	b := &Backend{
 		workspaces:  csync.NewMap[string, *Workspace](),
 		pathIndex:   make(map[string]string),
 		retired:     make(map[string]struct{}),
@@ -269,6 +272,8 @@ func New(ctx context.Context, cfg *config.ConfigStore, shutdownFn ShutdownFunc) 
 		lingerDelay: idleShutdownDelayFromEnv(),
 		detachGrace: durationFromEnv("CRUSH_SERVER_DETACH_GRACE", DefaultDetachGrace),
 	}
+	b.startChannelRouter()
+	return b
 }
 
 // idleShutdownDelayFromEnv returns the idle-shutdown delay, honoring a

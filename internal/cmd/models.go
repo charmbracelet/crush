@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2/tree"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/mattn/go-isatty"
@@ -56,7 +57,18 @@ crush models gpt5`,
 				name:       provider.Name,
 				configured: true,
 			}
-			for _, model := range provider.Models {
+
+			// The OpenAI provider holds exactly one credential. Signed
+			// in with ChatGPT, only the models the subscription grants are
+			// usable; an API key lists the regular catalog.
+			var models []catwalk.Model
+			if providerID == string(catwalk.InferenceProviderOpenAI) && provider.OAuthToken != nil {
+				models = provider.ChatGPTModels
+			} else {
+				models = provider.Models
+			}
+
+			for _, model := range models {
 				if term != "" {
 					matched := false
 					for _, s := range []string{provider.ID, provider.Name, model.ID, model.Name} {

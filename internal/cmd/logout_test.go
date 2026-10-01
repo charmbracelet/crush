@@ -32,6 +32,8 @@ func TestLogoutCmd_ValidArgs(t *testing.T) {
 	require.True(t, validPlatforms["copilot"])
 	require.True(t, validPlatforms["github"])
 	require.True(t, validPlatforms["github-copilot"])
+	require.True(t, validPlatforms["openai"])
+	require.True(t, validPlatforms["chatgpt"])
 }
 
 func TestLogoutContext_CreatesValidContext(t *testing.T) {

@@ -34,11 +34,20 @@ const closeDelay = 5 * time.Second
 // user can cause, so panicking here fails fast and loudly.
 var tmpl = template.Must(template.ParseFS(assets, "page.html"))
 
-// Result describes the outcome of an authorization attempt.
+// Result describes the outcome of an authorization attempt, or the
+// handoff page that precedes one.
 type Result struct {
 	// Subject names what was being authorized, such as an MCP server name.
 	// Optional; when empty the page simply omits it.
 	Subject string
+
+	// ContinueURL, when set, renders the page as a handoff: one button
+	// that opens the real authorization URL in a new tab. The new tab
+	// keeps this page as its opener, which is what lets it close itself
+	// once authorization finishes. Without the handoff, the browser
+	// refuses window.close() because the consent screens behind it
+	// lengthen the tab's history.
+	ContinueURL string
 
 	// ErrorCode is the OAuth error code (for example "access_denied").
 	// A non-empty value renders the page in its failure state.
@@ -84,6 +93,7 @@ func Write(w io.Writer, r Result) error {
 		Heading          string
 		Detail           string
 		Subject          string
+		ContinueURL      string
 		ErrorCode        string
 		ErrorDescription string
 		Status           string
@@ -95,6 +105,7 @@ func Write(w io.Writer, r Result) error {
 		Favicon          template.URL
 	}{
 		Subject:          r.Subject,
+		ContinueURL:      r.ContinueURL,
 		ErrorCode:        r.ErrorCode,
 		ErrorDescription: r.ErrorDescription,
 		CSS:              template.CSS(css),
@@ -112,7 +123,16 @@ func Write(w io.Writer, r Result) error {
 	data.Heartbit = template.HTML(art)
 	data.Favicon = template.URL("data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString(art))
 
-	if r.Failed() {
+	if r.ContinueURL != "" {
+		data.Title = "Authorize — Crush"
+		data.Kind = "continue"
+		data.Heading = "One more click"
+		data.Detail = "Continue to the authorization page for"
+		if r.Subject == "" {
+			data.Detail = "Continue to the authorization page."
+		}
+		data.Status = "The authorization page will close itself when you’re done."
+	} else if r.Failed() {
 		data.Title = "Authorization failed — Crush"
 		data.Kind = "failed"
 		data.Heading = "Authorization failed"

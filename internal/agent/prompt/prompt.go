@@ -14,6 +14,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/filepathext"
+	"github.com/charmbracelet/crush/internal/gitutil"
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/skills"
@@ -258,10 +259,7 @@ func getGitStatus(ctx context.Context, dir string) (string, error) {
 	sh := shell.NewShell(&shell.Options{
 		WorkingDir: dir,
 	})
-	branch, err := getGitBranch(ctx, sh)
-	if err != nil {
-		return "", err
-	}
+	branch := getGitBranch(dir)
 	status, err := getGitStatusSummary(ctx, sh)
 	if err != nil {
 		return "", err
@@ -273,16 +271,16 @@ func getGitStatus(ctx context.Context, dir string) (string, error) {
 	return branch + status + commits, nil
 }
 
-func getGitBranch(ctx context.Context, sh *shell.Shell) (string, error) {
-	out, _, err := sh.Exec(ctx, "git branch --show-current 2>/dev/null")
-	if err != nil {
-		return "", nil
+// getGitBranch reads the checked-out branch straight from the repository.
+// This runs on every prompt build, so it stays off the shell: spawning git
+// each turn is wasted work, and a detail of prompt assembly has no business
+// passing through command blocking and permission policy.
+func getGitBranch(dir string) string {
+	branch := gitutil.CurrentBranch(dir)
+	if branch == "" {
+		return ""
 	}
-	out = strings.TrimSpace(out)
-	if out == "" {
-		return "", nil
-	}
-	return fmt.Sprintf("Current branch: %s\n", out), nil
+	return fmt.Sprintf("Current branch: %s\n", branch)
 }
 
 func getGitStatusSummary(ctx context.Context, sh *shell.Shell) (string, error) {

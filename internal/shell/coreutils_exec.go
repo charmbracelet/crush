@@ -3,7 +3,7 @@
 package shell
 
 import (
-	"mvdan.cc/sh/moreinterp/coreutils"
+	"mvdan.cc/sh/x/coreutils"
 )
 
 // coreUtilsExecHandler installs mvdan.cc/sh's Go coreutils. It is only wired

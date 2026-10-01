@@ -49,6 +49,12 @@ type LoadingDialog interface {
 	StopLoading()
 }
 
+// HoverDialog is a dialog that reacts to mouse hover. While one is open,
+// the terminal must report all mouse motion events, not just clicks.
+type HoverDialog interface {
+	HandlesHover() bool
+}
+
 // Grace period constants for dialogs that open asynchronously and may
 // receive in-flight keystrokes from a previously focused component.
 const (
@@ -88,6 +94,17 @@ func NewOverlay(dialogs ...Dialog) *Overlay {
 // HasDialogs checks if there are any active dialogs.
 func (d *Overlay) HasDialogs() bool {
 	return len(d.dialogs) > 0
+}
+
+// HandlesHover reports whether any open dialog reacts to mouse hover, in
+// which case the terminal should report all mouse motion events.
+func (d *Overlay) HandlesHover() bool {
+	for _, dialog := range d.dialogs {
+		if hd, ok := dialog.(HoverDialog); ok && hd.HandlesHover() {
+			return true
+		}
+	}
+	return false
 }
 
 // ContainsDialog checks if a dialog with the specified ID exists.

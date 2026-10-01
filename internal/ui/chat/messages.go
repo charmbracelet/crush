@@ -10,7 +10,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/attachments"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
@@ -29,10 +28,17 @@ type Identifiable interface {
 	ID() string
 }
 
-// Animatable is an interface for items that support animation.
+// Animatable is an interface for items that support animation. Items do
+// not schedule their own frames: the UI runs a single animation clock and
+// calls Advance on every visible item that reports Spinning.
 type Animatable interface {
-	StartAnimation() tea.Cmd
-	Animate(msg anim.StepMsg) tea.Cmd
+	// Spinning reports whether the item currently shows a running
+	// animation and therefore needs clock ticks.
+	Spinning() bool
+	// Advance moves the animation forward by one frame and reports
+	// whether the rendered output changed. Implementations must bump
+	// their version when it did so the list cache re-renders the item.
+	Advance() bool
 }
 
 // Expandable is an interface for items that can be expanded or collapsed.
@@ -426,6 +432,9 @@ func formatHypercreditSavings(v float64) string {
 func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults map[string]message.ToolResult, workingDir string) []MessageItem {
 	switch msg.Role {
 	case message.User:
+		if msg.Content().Hidden {
+			return nil
+		}
 		// Reconstruct shell command items from ShellCommand parts.
 		var items []MessageItem
 		for _, part := range msg.Parts {
@@ -436,14 +445,7 @@ func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults m
 		if len(items) > 0 {
 			return items
 		}
-		r := attachments.NewRenderer(
-			sty.Attachments.Normal,
-			sty.Attachments.Deleting,
-			sty.Attachments.Image,
-			sty.Attachments.Text,
-			sty.Attachments.Skill,
-			sty.Attachments.Remove,
-		)
+		r := attachments.NewRenderer(sty.Attachments)
 		return []MessageItem{NewUserMessageItem(sty, msg, r)}
 	case message.Assistant:
 		var items []MessageItem

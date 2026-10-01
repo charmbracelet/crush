@@ -129,7 +129,7 @@ func NewSessions(com *common.Common, selectedSessionID string) (*Session, error)
 		key.WithHelp("esc", "cancel"),
 	)
 	s.keyMap.ConfirmDelete = key.NewBinding(
-		key.WithKeys("y"),
+		key.WithKeys("y", "enter"),
 		key.WithHelp("y", "delete"),
 	)
 	s.keyMap.CancelDelete = key.NewBinding(
@@ -156,8 +156,6 @@ func (s *Session) HandleMsg(msg tea.Msg) Action {
 			case key.Matches(msg, s.keyMap.ConfirmDelete):
 				action := s.confirmDeleteSession()
 				s.list.SetItems(sessionItems(s.com.Styles, sessionsModeNormal, s.sessions...)...)
-				s.list.SelectFirst()
-				s.list.ScrollToSelected()
 				return action
 			case key.Matches(msg, s.keyMap.CancelDelete):
 				s.sessionsMode = sessionsModeNormal
@@ -321,39 +319,8 @@ func (s *Session) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			return nil
 		}
 		cur = item.Cursor()
-		if cur == nil {
-			break
-		}
-
 		start, end := s.list.VisibleItemIndices()
-		selectedIndex := s.list.Selected()
-
-		titleStyle := t.Dialog.Sessions.RenamingingTitle
-		dialogStyle := t.Dialog.Sessions.RenamingView
-		inputStyle := t.Dialog.InputPrompt
-
-		// Adjust cursor position to account for dialog layout + message
-		cur.X += inputStyle.GetBorderLeftSize() +
-			inputStyle.GetMarginLeft() +
-			inputStyle.GetPaddingLeft() +
-			dialogStyle.GetBorderLeftSize() +
-			dialogStyle.GetPaddingLeft() +
-			dialogStyle.GetMarginLeft()
-		cur.Y += titleStyle.GetVerticalFrameSize() +
-			inputStyle.GetBorderTopSize() +
-			inputStyle.GetMarginTop() +
-			inputStyle.GetPaddingTop() +
-			inputStyle.GetBorderBottomSize() +
-			inputStyle.GetMarginBottom() +
-			inputStyle.GetPaddingBottom() +
-			dialogStyle.GetPaddingTop() +
-			dialogStyle.GetBorderTopSize() +
-			lipgloss.Height(message) - 1
-
-		// move the cursor by one down until we see the selectedIndex
-		for ; start <= end && start != selectedIndex && selectedIndex > -1; start++ {
-			cur.Y += 1
-		}
+		cur = renameCursorOffset(t, cur, lipgloss.Height(message), start, end, s.list.Selected())
 	default:
 		inputView := t.Dialog.InputPrompt.Render(s.input.View())
 		cur = s.Cursor()

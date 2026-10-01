@@ -49,6 +49,9 @@ type Service interface {
 	Update(ctx context.Context, message Message) error
 	Get(ctx context.Context, id string) (Message, error)
 	List(ctx context.Context, sessionID string) ([]Message, error)
+	// ListFromSummary returns the messages at or after summaryMessageID,
+	// which is all a compacted session still sends.
+	ListFromSummary(ctx context.Context, sessionID, summaryMessageID string) ([]Message, error)
 	ListUserMessages(ctx context.Context, sessionID string) ([]Message, error)
 	ListAllUserMessages(ctx context.Context) ([]Message, error)
 	GetLastAssistantMessage(ctx context.Context, sessionID string) (Message, error)
@@ -521,6 +524,32 @@ func (s *service) List(ctx context.Context, sessionID string) ([]Message, error)
 	return messages, nil
 }
 
+func (s *service) ListFromSummary(ctx context.Context, sessionID, summaryMessageID string) ([]Message, error) {
+	if summaryMessageID == "" {
+		return s.List(ctx, sessionID)
+	}
+	dbMessages, err := s.q.ListMessagesBySessionFromSummary(ctx, db.ListMessagesBySessionFromSummaryParams{
+		SessionID: sessionID,
+		ID:        summaryMessageID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	// No rows means the summary message is gone; fall back to the whole
+	// session rather than sending nothing.
+	if len(dbMessages) == 0 {
+		return s.List(ctx, sessionID)
+	}
+	messages := make([]Message, len(dbMessages))
+	for i, dbMessage := range dbMessages {
+		messages[i], err = s.fromDBItem(dbMessage)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return messages, nil
+}
+
 func (s *service) ListUserMessages(ctx context.Context, sessionID string) ([]Message, error) {
 	dbMessages, err := s.q.ListUserMessagesBySession(ctx, sessionID)
 	if err != nil {
@@ -634,78 +663,61 @@ func marshalParts(parts []ContentPart) ([]byte, error) {
 	return json.Marshal(wrappedParts)
 }
 
-func unmarshalParts(data []byte) ([]ContentPart, error) {
-	temp := []json.RawMessage{}
+// rawPartWrapper is [partWrapper] for decoding: the payload stays encoded
+// until the type tag says what to decode it into.
+type rawPartWrapper struct {
+	Type partType        `json:"type"`
+	Data json.RawMessage `json:"data"`
+}
 
-	if err := json.Unmarshal(data, &temp); err != nil {
+func unmarshalParts(data []byte) ([]ContentPart, error) {
+	// One pass gets every type tag and its still-encoded payload. Splitting
+	// into []json.RawMessage first would walk the same bytes twice.
+	var wrapped []rawPartWrapper
+	if err := json.Unmarshal(data, &wrapped); err != nil {
 		return nil, err
 	}
 
-	parts := make([]ContentPart, 0)
-
-	for _, rawPart := range temp {
-		var wrapper struct {
-			Type partType        `json:"type"`
-			Data json.RawMessage `json:"data"`
-		}
-
-		if err := json.Unmarshal(rawPart, &wrapper); err != nil {
+	parts := make([]ContentPart, 0, len(wrapped))
+	for _, w := range wrapped {
+		part, err := unmarshalPart(w.Type, w.Data)
+		if err != nil {
 			return nil, err
 		}
-
-		switch wrapper.Type {
-		case reasoningType:
-			part := ReasoningContent{}
-			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
-				return nil, err
-			}
-			parts = append(parts, part)
-		case textType:
-			part := TextContent{}
-			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
-				return nil, err
-			}
-			parts = append(parts, part)
-		case imageURLType:
-			part := ImageURLContent{}
-			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
-				return nil, err
-			}
-			parts = append(parts, part)
-		case binaryType:
-			part := BinaryContent{}
-			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
-				return nil, err
-			}
-			parts = append(parts, part)
-		case toolCallType:
-			part := ToolCall{}
-			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
-				return nil, err
-			}
-			parts = append(parts, part)
-		case toolResultType:
-			part := ToolResult{}
-			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
-				return nil, err
-			}
-			parts = append(parts, part)
-		case finishType:
-			part := Finish{}
-			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
-				return nil, err
-			}
-			parts = append(parts, part)
-		case shellCommandType:
-			part := ShellCommand{}
-			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
-				return nil, err
-			}
-			parts = append(parts, part)
-		default:
-			return nil, fmt.Errorf("unknown part type: %s", wrapper.Type)
-		}
+		parts = append(parts, part)
 	}
 
 	return parts, nil
+}
+
+// unmarshalPart decodes a single part's payload according to its type tag.
+func unmarshalPart(typ partType, data json.RawMessage) (ContentPart, error) {
+	switch typ {
+	case reasoningType:
+		return decodePart[ReasoningContent](data)
+	case textType:
+		return decodePart[TextContent](data)
+	case imageURLType:
+		return decodePart[ImageURLContent](data)
+	case binaryType:
+		return decodePart[BinaryContent](data)
+	case toolCallType:
+		return decodePart[ToolCall](data)
+	case toolResultType:
+		return decodePart[ToolResult](data)
+	case finishType:
+		return decodePart[Finish](data)
+	case shellCommandType:
+		return decodePart[ShellCommand](data)
+	default:
+		return nil, fmt.Errorf("unknown part type: %s", typ)
+	}
+}
+
+func decodePart[T ContentPart](data json.RawMessage) (ContentPart, error) {
+	var part T
+	if err := json.Unmarshal(data, &part); err != nil {
+		return nil, err
+	}
+	return part, nil
 }

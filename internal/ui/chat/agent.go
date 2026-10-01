@@ -4,12 +4,10 @@ import (
 	"encoding/json"
 	"strings"
 
-	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"charm.land/lipgloss/v2/tree"
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 )
 
@@ -52,34 +50,37 @@ func NewAgentToolMessageItem(
 	return t
 }
 
-// Animate progresses the message animation if it should be spinning.
+// Advance implements [Animatable].
 //
-// Bumps the parent's F6 list-cache version on both the parent-tick and
-// nested-tick branches. Nested tools are not list entries of their
-// own — their IDs map to this parent's index in idInxMap
-// (internal/ui/model/chat.go:240-246) and their renders are embedded
-// inline in this parent's output — so the list only checks the
-// parent's version. Without the bump, the list cache would serve the
-// previously rendered frame indefinitely and the spinner would appear
-// frozen.
-func (a *AgentToolMessageItem) Animate(msg anim.StepMsg) tea.Cmd {
+// Advances the parent's own spinner and every spinning nested tool in
+// one frame, bumping the parent's F6 list-cache version. Nested tools
+// are not list entries of their own — their IDs map to this parent's
+// index in idInxMap and their renders are embedded inline in this
+// parent's output — so the list only checks the parent's version.
+// Without the bump, the list cache would serve the previously rendered
+// frame indefinitely and the spinner would appear frozen.
+func (a *AgentToolMessageItem) Advance() bool {
 	if a.result != nil || a.Status() == ToolStatusCanceled {
-		return nil
+		return false
 	}
-	if msg.ID == a.ID() {
+	changed := a.anim.Advance()
+	changed = advanceNested(a.nestedTools) || changed
+	if changed {
 		a.Bump()
-		return a.anim.Animate(msg)
 	}
-	for _, nestedTool := range a.nestedTools {
-		if msg.ID != nestedTool.ID() {
-			continue
-		}
-		if s, ok := nestedTool.(Animatable); ok {
-			a.Bump()
-			return s.Animate(msg)
+	return changed
+}
+
+// advanceNested advances every spinning animatable tool in tools and
+// reports whether any of them changed.
+func advanceNested(tools []ToolMessageItem) bool {
+	changed := false
+	for _, nestedTool := range tools {
+		if s, ok := nestedTool.(Animatable); ok && s.Spinning() && s.Advance() {
+			changed = true
 		}
 	}
-	return nil
+	return changed
 }
 
 // NestedTools returns the nested tools.
@@ -224,31 +225,19 @@ func NewAgenticFetchToolMessageItem(
 	return t
 }
 
-// Animate progresses the message animation if it should be spinning.
-// See [AgentToolMessageItem.Animate] for the parent-bump rationale —
-// without an override, the embedded base.Animate would (a) drop
-// StepMsgs whose ID matches a nested child instead of the parent
-// (anim.Animate's ID check at internal/ui/anim/anim.go:326-329
-// silently returns nil), and (b) never invalidate the parent's
-// list-cache entry on a parent tick.
-func (a *AgenticFetchToolMessageItem) Animate(msg anim.StepMsg) tea.Cmd {
+// Advance implements [Animatable]. See [AgentToolMessageItem.Advance]
+// for the parent-bump rationale; without an override the embedded base
+// Advance would never advance the nested children.
+func (a *AgenticFetchToolMessageItem) Advance() bool {
 	if a.result != nil || a.Status() == ToolStatusCanceled {
-		return nil
+		return false
 	}
-	if msg.ID == a.ID() {
+	changed := a.anim.Advance()
+	changed = advanceNested(a.nestedTools) || changed
+	if changed {
 		a.Bump()
-		return a.anim.Animate(msg)
 	}
-	for _, nestedTool := range a.nestedTools {
-		if msg.ID != nestedTool.ID() {
-			continue
-		}
-		if s, ok := nestedTool.(Animatable); ok {
-			a.Bump()
-			return s.Animate(msg)
-		}
-	}
-	return nil
+	return changed
 }
 
 // NestedTools returns the nested tools.

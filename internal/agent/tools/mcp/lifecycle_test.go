@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -483,6 +484,14 @@ type testTransportWrapper struct {
 
 func (t *testTransportWrapper) unwrapTransport() mcp.Transport { return t.inner }
 
+// withLongStdioCheckTimeout raises stdioCheck's timeout for the test.
+func withLongStdioCheckTimeout(t *testing.T) {
+	t.Helper()
+	orig := stdioCheckTimeout
+	stdioCheckTimeout = time.Minute
+	t.Cleanup(func() { stdioCheckTimeout = orig })
+}
+
 // TestMaybeStdioErr_UnwrapsChannelTransport pins that maybeStdioErr sees
 // through the channelTransport wrapper to the inner CommandTransport.
 //
@@ -493,6 +502,7 @@ func (t *testTransportWrapper) unwrapTransport() mcp.Transport { return t.inner 
 // both that the unwrap reaches the command (the error is no longer bare EOF)
 // and that the re-executed child's output surfaces in the joined error.
 func TestMaybeStdioErr_UnwrapsChannelTransport(t *testing.T) {
+	withLongStdioCheckTimeout(t)
 	cmd := exec.CommandContext(t.Context(), "sh", "-c", "echo 'startup failed: bad config'; exit 3")
 	inner := &mcp.CommandTransport{Command: cmd}
 	wrapped := &channelTransport{inner: inner, name: "t", gate: newChannelGate()}
@@ -507,6 +517,7 @@ func TestMaybeStdioErr_UnwrapsChannelTransport(t *testing.T) {
 // TestMaybeStdioErr_UnwrapsEveryWrapper pins the unwrap against future
 // decorators: it must peel the whole stack, not a fixed number of layers.
 func TestMaybeStdioErr_UnwrapsEveryWrapper(t *testing.T) {
+	withLongStdioCheckTimeout(t)
 	cmd := exec.CommandContext(t.Context(), "sh", "-c", "echo boom-diagnostic >&2; exit 3")
 	var transport mcp.Transport = &mcp.CommandTransport{Command: cmd}
 	transport = &channelTransport{inner: transport, name: "t", gate: newChannelGate()}
@@ -523,6 +534,7 @@ func TestMaybeStdioErr_UnwrapsEveryWrapper(t *testing.T) {
 // whole re-ran "sh sh -c ..." — and the error reported that malformed
 // command's failure instead of the child's real startup output.
 func TestStdioCheck_DoesNotDuplicateArgv0(t *testing.T) {
+	withLongStdioCheckTimeout(t)
 	cmd := exec.CommandContext(t.Context(), "sh", "-c", "echo 'real startup error'; exit 3")
 
 	err := stdioCheck(cmd)

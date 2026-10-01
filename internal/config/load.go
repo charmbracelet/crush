@@ -116,6 +116,21 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	}
 	store.knownProviders = providers
 
+	// When Catwalk refreshed its catalog this run, give the ChatGPT model
+	// catalog the same treatment: it is otherwise only fetched at login
+	// and would freeze there while Catwalk keeps moving. Best effort; a
+	// failed fetch keeps the catalog loaded from config.
+	//
+	// refetchOpenAIModels publishes a copy-on-write config, so re-read it
+	// afterwards: the mutations below must land on the live config rather
+	// than a snapshot the store has already replaced.
+	if CatwalkUpdated() {
+		fetchCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		store.refetchOpenAIModels(fetchCtx, ScopeGlobal)
+		cancel()
+		cfg = store.Config()
+	}
+
 	env := env.New()
 	// Configure providers
 	valueResolver := NewShellVariableResolver(env)
@@ -366,6 +381,12 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 				}
 			}
 		default:
+			// An OAuth login is a credential too: providers signed in
+			// through OAuth (e.g. OpenAI with a ChatGPT account) are
+			// configured even when no API key is present.
+			if config.OAuthToken != nil {
+				break
+			}
 			// if the provider api or endpoint are missing we skip them
 			v, err := resolver.ResolveValue(p.APIKey)
 			if v == "" || err != nil {

@@ -103,7 +103,8 @@ func (ReasoningContent) isPart() {}
 
 // TextContent represents a text part of a message.
 type TextContent struct {
-	Text string `json:"text"`
+	Text   string `json:"text"`
+	Hidden bool   `json:"hidden,omitempty"`
 }
 
 // String returns the text content as a string.
@@ -331,7 +332,7 @@ func (m *Message) AppendContent(delta string) {
 	found := false
 	for i, part := range m.Parts {
 		if c, ok := part.(TextContent); ok {
-			m.Parts[i] = TextContent{Text: c.Text + delta}
+			m.Parts[i] = TextContent{Text: c.Text + delta, Hidden: c.Hidden}
 			found = true
 		}
 	}

@@ -11,7 +11,6 @@ import (
 
 	"github.com/zeebo/xxh3"
 
-	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/lucasb-eyer/go-colorful"
 
@@ -59,8 +58,8 @@ var (
 	ellipsisFrames = []string{".", "..", "...", ""}
 )
 
-// Internal ID management. Used during animating to ensure that frame messages
-// are received only by spinner components that sent them.
+// Internal ID management. The ID seeds the deterministic birth schedule so
+// two spinners built from the same settings do not animate in lockstep.
 var lastID atomic.Int64
 
 func nextID() int {
@@ -87,15 +86,11 @@ func settingsHash(opts Settings) string {
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
-// StepMsg is a message type used to trigger the next step in the animation.
-// Gen carries the generation of the tick chain that produced it. A chain
-// started by a later Start() bumps the Anim's generation, so ticks from an
-// older chain (mismatched Gen) are dropped instead of advancing the frame.
-// This is what keeps a single spinner from being driven by two concurrent
-// tick chains (which would render as a doubled, double-speed animation).
-type StepMsg struct {
-	ID  string
-	Gen int64
+// FrameInterval returns how long each animation frame stays on screen. The
+// UI drives every Anim from one clock ticking at this interval; Anim
+// instances never schedule themselves.
+func FrameInterval() time.Duration {
+	return time.Second / time.Duration(fps)
 }
 
 // Settings defines settings for the animation.
@@ -138,19 +133,12 @@ type Anim struct {
 	initialized      atomic.Bool
 	cyclingFrames    [][]string           // frames for the cycling characters
 	step             atomic.Int64         // current main frame step (wraps)
-	framesSinceStart atomic.Int64         // total Animate ticks (does not wrap)
+	framesSinceStart atomic.Int64         // total Advance frames (does not wrap)
 	ellipsisStep     atomic.Int64         // current ellipsis frame step
 	ellipsisFrames   *csync.Slice[string] // ellipsis animation frames
 	id               string
 	suffix           func() string
 	suffixColor      color.Color
-
-	// gen identifies the currently armed tick chain. Start() bumps it and
-	// stamps every emitted StepMsg with the new value; Animate() drops ticks
-	// whose Gen does not match (unless Gen is the zero wildcard). Re-arming
-	// therefore supersedes any in-flight chain instead of running a second
-	// one concurrently, and Stop() bumps it to kill a chain outright.
-	gen atomic.Int64
 }
 
 // New creates a new Anim instance with the specified width and label.
@@ -394,34 +382,10 @@ func (a *Anim) Width() (w int) {
 	return w
 }
 
-// Start starts the animation. It bumps the generation so any tick chain
-// started by a previous Start() is superseded: its in-flight StepMsgs carry
-// the old generation and are dropped by Animate() instead of advancing the
-// frame a second time. Without this, re-arming a spinner that still has a
-// live chain (e.g. reloading a session whose message never got a Finish
-// part) would run two chains concurrently and render a doubled animation.
-func (a *Anim) Start() tea.Cmd {
-	a.gen.Add(1)
-	return a.Step()
-}
-
-// Stop kills any in-flight tick chain without starting a new one. It bumps
-// the generation so outstanding StepMsgs no longer match; the next one to
-// arrive is dropped and the chain terminates.
-func (a *Anim) Stop() {
-	a.gen.Add(1)
-}
-
-// Animate advances the animation to the next step.
-func (a *Anim) Animate(msg StepMsg) tea.Cmd {
-	if msg.ID != a.id {
-		return nil
-	}
-	// Drop ticks from a superseded chain.
-	if msg.Gen != a.gen.Load() {
-		return nil
-	}
-
+// Advance moves the animation forward by one frame. It is called by the
+// UI's shared animation clock for every visible spinner; the Anim itself
+// never schedules ticks.
+func (a *Anim) Advance() bool {
 	step := a.step.Add(1)
 	if int(step) >= len(a.cyclingFrames) {
 		a.step.Store(0)
@@ -437,7 +401,7 @@ func (a *Anim) Animate(msg StepMsg) tea.Cmd {
 	} else if !a.initialized.Load() && int(frames) >= maxBirthSteps {
 		a.initialized.Store(true)
 	}
-	return a.Step()
+	return true
 }
 
 // Render renders the current state of the animation.
@@ -495,16 +459,6 @@ func (a *Anim) Render() string {
 	}
 
 	return b.String()
-}
-
-// Step is a command that triggers the next step in the animation. The
-// emitted StepMsg carries the current generation so Animate() can tell
-// whether this tick still belongs to the armed chain.
-func (a *Anim) Step() tea.Cmd {
-	gen := a.gen.Load()
-	return tea.Tick(time.Second/time.Duration(fps), func(t time.Time) tea.Msg {
-		return StepMsg{ID: a.id, Gen: gen}
-	})
 }
 
 // makeGradientRamp() returns a slice of colors blended between the given keys.

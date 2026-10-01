@@ -121,21 +121,18 @@ func (s *ShellItem) ID() string          { return s.id }
 func (s *ShellItem) FilterValue() string { return s.command }
 func (s *ShellItem) Finished() bool      { return !s.pending }
 
-// StartAnimation starts the spinner animation for pending shell items.
-func (s *ShellItem) StartAnimation() tea.Cmd {
-	if !s.pending {
-		return nil
-	}
-	return s.anim.Start()
+// Spinning implements [Animatable].
+func (s *ShellItem) Spinning() bool {
+	return s.pending
 }
 
-// Animate advances the spinner animation for pending shell items.
-func (s *ShellItem) Animate(msg anim.StepMsg) tea.Cmd {
-	if !s.pending {
-		return nil
+// Advance advances the spinner animation for pending shell items.
+func (s *ShellItem) Advance() bool {
+	if !s.pending || !s.anim.Advance() {
+		return false
 	}
 	s.Bump()
-	return s.anim.Animate(msg)
+	return true
 }
 
 func (s *ShellItem) Render(width int) string {

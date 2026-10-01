@@ -150,8 +150,11 @@ SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, 
 FROM messages
 WHERE role = 'user'
 ORDER BY created_at DESC
+LIMIT 200
 `
 
+// Backs prompt history when no session is open. Needs
+// idx_messages_role_created_at to seek rather than scan the table.
 func (q *Queries) ListAllUserMessages(ctx context.Context) ([]Message, error) {
 	rows, err := q.query(ctx, q.listAllUserMessagesStmt, listAllUserMessages)
 	if err != nil {
@@ -235,13 +238,69 @@ func (q *Queries) ListMessagesBySession(ctx context.Context, sessionID string) (
 	return items, nil
 }
 
+const listMessagesBySessionFromSummary = `-- name: ListMessagesBySessionFromSummary :many
+SELECT m.id, m.session_id, m.role, m.parts, m.model, m.created_at, m.updated_at, m.finished_at, m.provider, m.is_summary_message, m.prism_model_id, m.prism_model_name, m.prism_hypercredit_savings, m.prism_dollar_savings
+FROM messages m
+WHERE m.session_id = ?
+  AND m.created_at >= (SELECT s.created_at FROM messages s WHERE s.id = ?)
+ORDER BY m.created_at ASC
+`
+
+type ListMessagesBySessionFromSummaryParams struct {
+	SessionID string `json:"session_id"`
+	ID        string `json:"id"`
+}
+
+// Messages from the summary onward, which is all a compacted session sends.
+// created_at has one-second resolution, so a few messages preceding the
+// summary can come back too; the caller slices from the summary by ID.
+func (q *Queries) ListMessagesBySessionFromSummary(ctx context.Context, arg ListMessagesBySessionFromSummaryParams) ([]Message, error) {
+	rows, err := q.query(ctx, q.listMessagesBySessionFromSummaryStmt, listMessagesBySessionFromSummary, arg.SessionID, arg.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Message{}
+	for rows.Next() {
+		var i Message
+		if err := rows.Scan(
+			&i.ID,
+			&i.SessionID,
+			&i.Role,
+			&i.Parts,
+			&i.Model,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.FinishedAt,
+			&i.Provider,
+			&i.IsSummaryMessage,
+			&i.PrismModelID,
+			&i.PrismModelName,
+			&i.PrismHypercreditSavings,
+			&i.PrismDollarSavings,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUserMessagesBySession = `-- name: ListUserMessagesBySession :many
 SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message, prism_model_id, prism_model_name, prism_hypercredit_savings, prism_dollar_savings
 FROM messages
 WHERE session_id = ? AND role = 'user'
 ORDER BY created_at DESC
+LIMIT 200
 `
 
+// Backs prompt history, which steps back one entry at a time.
 func (q *Queries) ListUserMessagesBySession(ctx context.Context, sessionID string) ([]Message, error) {
 	rows, err := q.query(ctx, q.listUserMessagesBySessionStmt, listUserMessagesBySession, sessionID)
 	if err != nil {

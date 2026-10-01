@@ -73,6 +73,10 @@ body {
   --accent: var(--coral);
 }
 
+.card.continue {
+  --accent: var(--blush);
+}
+
 .mark {
   width: 4.5rem;
   margin: 0 auto 1.75rem;
@@ -104,6 +108,35 @@ h1 {
 
 .detail .subject {
   color: var(--hazy);
+}
+
+/* The handoff page's call to action. The link deliberately omits
+   rel=noopener: the authorization tab it opens may only close itself
+   once you're done while it keeps an opener, which is the whole point of
+   the handoff. */
+.continue {
+  margin-top: 1.75rem;
+}
+
+.continue a {
+  display: inline-block;
+  background: var(--accent);
+  color: #f7f6fb; /* Salt — stays white on the accent in either scheme. */
+  font-weight: 700;
+  font-size: 0.9375rem;
+  letter-spacing: 0.01em;
+  text-decoration: none;
+  border-radius: 8px;
+  padding: 0.625rem 1.875rem;
+}
+
+.continue a:hover {
+  filter: brightness(1.05);
+}
+
+.continue a:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
 }
 
 .reason {
@@ -197,6 +230,9 @@ h1 {
 
 .brand a {
   display: inline-block;
+  /* The wordmark sits directly on the card; never let the continue
+     button's pill styling reach it. */
+  background: none;
   color: inherit;
   text-decoration: none;
 }

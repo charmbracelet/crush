@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{.Info.Title}}</title>
+<style>
+body { font-family: system-ui, sans-serif; max-width: 60em; margin: 2em auto; padding: 0 1em; color: #222; }
+h1 { margin-bottom: 0; }
+h2 { margin-top: 2em; border-bottom: 1px solid #ccc; padding-bottom: .2em; }
+.endpoint { margin: 1.5em 0; }
+.route { font-family: ui-monospace, monospace; font-size: 1.05em; }
+.method { display: inline-block; min-width: 4.5em; font-weight: bold; }
+table { border-collapse: collapse; margin: .5em 0; }
+th, td { text-align: left; padding: .2em 1em .2em 0; vertical-align: top; }
+pre { background: #f5f5f5; padding: .8em; overflow-x: auto; font-size: .85em; }
+.desc { color: #555; }
+h4 { margin: .8em 0 .2em; font-weight: 600; }
+</style>
+</head>
+<body>
+<h1>{{.Info.Title}}</h1>
+{{if .Info.Description}}<p class="desc">{{.Info.Description}}</p>{{end}}
+<p class="desc">Version {{.Info.Version}} &middot; Base path <code>{{.Base}}</code> &middot; <a href="openapi.json">openapi.json</a></p>
+{{range .Tags}}
+<h2>{{.Name}}</h2>
+{{range .Endpoints}}
+<div class="endpoint">
+<div class="route"><span class="method">{{.Method}}</span> {{.Path}}</div>
+<div>{{.Summary}}</div>
+{{if .Description}}<div class="desc">{{.Description}}</div>{{end}}
+<div class="desc">Success: {{.Status}}</div>
+{{if .Params}}
+<h4>Parameters</h4>
+<table>
+<tr><th>Name</th><th>In</th><th>Required</th><th>Description</th></tr>
+{{range .Params}}<tr><td><code>{{.Name}}</code></td><td>{{.In}}</td><td>{{if .Required}}yes{{else}}no{{end}}</td><td>{{.Description}}</td></tr>
+{{end}}</table>
+{{end}}
+{{if .Request}}<h4>Request body</h4><pre>{{.Request}}</pre>{{end}}
+{{if .SSE}}<h4>Response</h4><p>Streams <code>text/event-stream</code>.</p>{{end}}
+{{if .Response}}<h4>Response body</h4><pre>{{.Response}}</pre>{{end}}
+{{if .Errors}}<h4>Errors</h4><p>{{range $i, $c := .Errors}}{{if $i}}, {{end}}{{$c}}{{end}} &mdash; JSON error object</p>{{end}}
+</div>
+{{end}}
+{{end}}
+</body>
+</html>

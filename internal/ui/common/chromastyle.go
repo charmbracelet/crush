@@ -22,6 +22,26 @@ var (
 	chromaStyleByBg map[[3]uint8]*chroma.Style
 )
 
+// InvalidateChromaStyleCache drops the memoized chroma style so the next
+// call to ChromaStyle rebuilds it from the current theme. Call it when the
+// active theme is mutated in place (the *styles.Styles pointer is reused),
+// which the pointer-keyed memoization cannot otherwise detect.
+func InvalidateChromaStyleCache() {
+	chromaStyleMu.Lock()
+	defer chromaStyleMu.Unlock()
+	chromaStyleFor = nil
+	chromaStyleBase = nil
+	chromaStyleByBg = nil
+}
+
+// InvalidateStyleCaches drops every style-derived cache that the pointer
+// identity of the active *styles.Styles cannot invalidate on its own when
+// the theme is swapped in place. Call it after applying a new theme.
+func InvalidateStyleCaches() {
+	InvalidateMarkdownRendererCache()
+	InvalidateChromaStyleCache()
+}
+
 // ChromaStyle returns the chroma style for the given theme, memoized. When
 // bg is non-nil the style's background is overridden with it (also
 // memoized per color). The cache resets whenever the active theme changes.

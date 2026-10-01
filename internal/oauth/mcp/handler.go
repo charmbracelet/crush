@@ -181,6 +181,10 @@ func NewHandler(
 		AuthorizationCodeFetcher: receiver.fetchAuthorizationCode,
 		RequestRefreshToken:      true,
 		NewTokenSource:           newTokenSource,
+		// Some servers (e.g. Sentry) send the RFC 9207 iss parameter
+		// without advertising it in their metadata. Accept a matching
+		// unadvertised iss instead of failing the flow.
+		AcceptUnadvertisedIss: true,
 		// Use a metadata-fixing HTTP client so trailing-slash issuers in
 		// OAuth metadata responses don't trip the SDK's strict RFC 8414
 		// validation. Also rewrite internal-cluster redirects back to the

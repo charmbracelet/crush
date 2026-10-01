@@ -64,6 +64,8 @@ type QuestionForm struct {
 	OnCancel func()
 }
 
+var _ CollapsibleInlineEditor = (*QuestionForm)(nil)
+
 // NewQuestionForm creates a tabbed multi-question form from a
 // batch request. Each question is wrapped in its existing
 // component type (YesNo, SingleChoice, MultiChoice, FreeText).
@@ -364,6 +366,15 @@ func (f *QuestionForm) Height(width int) int {
 // CollapsedHeight returns the height of the collapsed summary
 // line shown when the editor area is not focused.
 func (f *QuestionForm) CollapsedHeight() int { return 1 }
+
+// ShouldCollapse reports whether the form should use its compact summary
+// while the chat has focus.
+func (f *QuestionForm) ShouldCollapse(width, terminalHeight int) bool {
+	return terminalHeight > 0 && f.Height(width) > terminalHeight*2/5
+}
+
+// CollapsedHelp returns the help description for restoring the form.
+func (f *QuestionForm) CollapsedHelp() string { return "answer questions" }
 
 // DrawCollapsed renders a compact one-line summary of the form
 // when the user has tabbed away to the chat. For multi-question

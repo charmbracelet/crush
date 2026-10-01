@@ -94,7 +94,7 @@ type App struct {
 	// injection initializes a headless workspace) cannot build two
 	// coordinators for one workspace. agentInteractive records which
 	// variant the current coordinator was built with.
-	agentInitMu    sync.Mutex
+	agentInitMu      sync.Mutex
 	agentInteractive bool
 }
 

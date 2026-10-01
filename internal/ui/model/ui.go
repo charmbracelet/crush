@@ -5152,7 +5152,7 @@ func (m *UI) sendMessageInternal(content string, hidden bool, attachments ...mes
 	cmds = append(cmds, func() tea.Msg {
 		// Remote runs return on admission; local runs can execute here.
 		// Both must release optimistic busy state, including on failure.
-		runCtx := context.Background()
+		runCtx := message.WithOperatorSteering(context.Background(), true)
 		if hidden {
 			runCtx = message.WithHiddenUserMessage(runCtx)
 		}

@@ -33,6 +33,7 @@ type channelRun struct {
 	channel   string
 	sessionID string
 	prompt    string
+	steering  bool
 }
 
 func (w *channelWorkspace) AgentIsReady() bool        { return w.ready }
@@ -51,8 +52,8 @@ func (w *channelWorkspace) AgentRun(_ context.Context, sessionID, prompt string,
 	return w.runErr
 }
 
-func (w *channelWorkspace) AgentRunChannel(_ context.Context, channel, sessionID, prompt string, _ ...message.Attachment) error {
-	w.runCalls = append(w.runCalls, channelRun{channel: channel, sessionID: sessionID, prompt: prompt})
+func (w *channelWorkspace) AgentRunChannel(ctx context.Context, channel, sessionID, prompt string, _ ...message.Attachment) error {
+	w.runCalls = append(w.runCalls, channelRun{channel: channel, sessionID: sessionID, prompt: prompt, steering: message.OperatorSteering(ctx)})
 	return w.runErr
 }
 
@@ -101,6 +102,9 @@ func TestHandleChannelMessageExistingSession(t *testing.T) {
 	}
 	if ws.runCalls[0].prompt != "<channel source=\"s\">hi</channel>" {
 		t.Errorf("AgentRun prompt = %q", ws.runCalls[0].prompt)
+	}
+	if ws.runCalls[0].steering {
+		t.Error("channel input must not carry operator steering authority")
 	}
 }
 

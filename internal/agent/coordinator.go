@@ -387,6 +387,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 			Channel:           channel,
 			Prompt:            prompt,
 			HiddenUserMessage: message.HiddenUserMessage(ctx),
+			OperatorSteering:  message.OperatorSteering(ctx),
 			PermissionPolicy:  permission.RequestPolicyFromContext(ctx),
 			Attachments:       attachments,
 			MaxOutputTokens:   maxTokens,

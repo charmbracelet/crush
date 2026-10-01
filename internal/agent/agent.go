@@ -99,6 +99,9 @@ type SessionAgentCall struct {
 	// PermissionPolicy is the permission behavior for this turn. Unlike the
 	// caller's context, it is retained when the turn is queued.
 	PermissionPolicy permission.RequestPolicy
+	// OperatorSteering permits anonymous operator input to amend the active
+	// turn without changing its permission policy. Channel input is excluded.
+	OperatorSteering bool
 	// OnComplete, when non-nil, replaces the default RunComplete
 	// publish path: the inner Run hands the terminal payload to this
 	// callback instead of emitting it on the RunComplete broker. The
@@ -448,8 +451,9 @@ func (a *sessionAgent) enqueueCall(call SessionAgentCall) {
 // publish their terminal cancelled RunComplete (a caller waiting on that
 // RunID, e.g. `crush run`, would otherwise hang). Ordinary calls without a
 // RunID and with the same permission policy are folded into the active turn.
-// Correlated calls, internal continuations and different policies stay queued
-// for independent execution, without blocking later eligible steering calls.
+// Explicit operator steering may also fold across policy differences, under
+// the active policy. Correlated calls, continuations and other mismatched
+// policies stay queued without blocking later eligible steering calls.
 // fold is processed by the caller without the lock held.
 func (a *sessionAgent) drainQueueForStep(ctx context.Context, sessionID string) (fold, canceledWithRunID []SessionAgentCall) {
 	dispatchLock := a.sessionMu(sessionID)
@@ -470,7 +474,8 @@ func (a *sessionAgent) drainQueueForStep(ctx context.Context, sessionID string) 
 			}
 			continue
 		}
-		if queued.PermissionPolicy != activePolicy || queued.RunID != "" || queued.turn != nil {
+		operatorSteering := queued.OperatorSteering && queued.Channel == ""
+		if (!operatorSteering && queued.PermissionPolicy != activePolicy) || queued.RunID != "" || queued.turn != nil {
 			keep = append(keep, queued)
 			continue
 		}
@@ -1056,8 +1061,8 @@ func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall, owner *ac
 			// sequence so a follow-up queued after the cancel (higher seq)
 			// is not dropped. A dropped prompt carrying a RunID still gets
 			// its terminal cancelled RunComplete so a caller waiting on it
-			// does not hang. Fold only the matching-policy prefix before a
-			// RunID, continuation or policy barrier; leave the rest queued.
+			// does not hang. Eligible steering may pass queued independent
+			// turns, but never changes the active turn's permission policy.
 			fold, canceledRunIDs := a.drainQueueForStep(callContext, call.SessionID)
 			a.publishCanceledQueueDrops(canceledRunIDs)
 			for _, queued := range fold {

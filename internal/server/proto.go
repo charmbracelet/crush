@@ -647,7 +647,16 @@ func (c *controllerV1) handlePostWorkspaceAgentSessionPromptClear(w http.Respons
 func (c *controllerV1) handlePostWorkspaceAgentSessionSummarize(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	sid := r.PathValue("sid")
-	if err := c.backend.SummarizeSession(r.Context(), id, sid); err != nil {
+	// The body is optional: clients that predate instructions, and clients
+	// that simply want the default summarization, send nothing.
+	var req proto.SessionSummarizeRequest
+	if r.Body != nil && r.ContentLength > 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			jsonError(w, http.StatusBadRequest, "failed to decode request body: "+err.Error())
+			return
+		}
+	}
+	if err := c.backend.SummarizeSession(r.Context(), id, sid, req.Instructions); err != nil {
 		c.handleError(w, r, err)
 		return
 	}

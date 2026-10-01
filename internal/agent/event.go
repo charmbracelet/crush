@@ -42,7 +42,7 @@ func (a *sessionAgent) eventTokensUsed(sessionID string, model Model, usage fant
 func (a *sessionAgent) eventSessionCompacted(sessionID string, replaced, kept int) {
 	event.SessionCompacted(
 		append(
-			a.eventCommon(sessionID, a.largeModel.Get()),
+			a.eventCommon(sessionID, a.models().Large),
 			"messages replaced", replaced,
 			"messages kept", kept,
 		)...,

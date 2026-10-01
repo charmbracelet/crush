@@ -80,7 +80,7 @@ func (s *runCoordinator) IsSessionBusy(string) bool {
 func (s *runCoordinator) QueuedPrompts(string) int          { return 0 }
 func (s *runCoordinator) QueuedPromptsList(string) []string { return nil }
 func (s *runCoordinator) ClearQueue(string)                 {}
-func (s *runCoordinator) Summarize(context.Context, string) error {
+func (s *runCoordinator) Summarize(context.Context, string, string) error {
 	return nil
 }
 func (s *runCoordinator) Model() agent.Model                            { return agent.Model{} }

@@ -32,6 +32,41 @@ func TestSendEventAfterContextCancelIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestSummaryOutcome(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name      string
+		status    int
+		body      string
+		cancelled bool
+	}{
+		{"success", http.StatusOK, "", false},
+		{"cancelled", http.StatusConflict, `{"cancelled":true}`, true},
+		{"unrelated conflict", http.StatusConflict, `{"message":"workspace closing"}`, false},
+		{"malformed conflict", http.StatusConflict, `{`, false},
+		{"failure", http.StatusInternalServerError, `{"message":"cleanup failed"}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				require.Equal(t, "/v1/workspaces/workspace/agent/sessions/session/summarize", r.URL.Path)
+				w.WriteHeader(tc.status)
+				fmt.Fprint(w, tc.body)
+			}))
+			defer server.Close()
+			err := captureClient(t, server).AgentSummarizeSession(t.Context(), "workspace", "session")
+			if tc.cancelled {
+				require.ErrorIs(t, err, context.Canceled)
+			} else if tc.status == http.StatusOK {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				require.NotErrorIs(t, err, context.Canceled)
+			}
+		})
+	}
+}
+
 func TestSubscribeEventsContextCancelClosesEvents(t *testing.T) {
 	t.Parallel()
 

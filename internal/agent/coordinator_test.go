@@ -89,15 +89,6 @@ func agentResultWithText(text string) *fantasy.AgentResult {
 	}
 }
 
-func TestCopilotResponsesModels(t *testing.T) {
-	t.Parallel()
-
-	for _, modelID := range []string{"gpt-6-astra", "grok-4.5", "grok-4.6"} {
-		assert.True(t, copilotResponsesModels[modelID], modelID)
-	}
-	assert.False(t, copilotResponsesModels["gpt-4.1"])
-}
-
 func TestRunSubAgent(t *testing.T) {
 	const providerID = "test-provider"
 	providerCfg := config.ProviderConfig{ID: providerID}
@@ -512,9 +503,11 @@ func TestGetProviderOptionsReasoningEffort(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			model := Model{
 				CatwalkCfg: catwalk.Model{
-					ID:              "claude-opus-4-7",
-					CanReason:       true,
-					ReasoningLevels: []string{"max"},
+					ID: "claude-opus-4-7",
+					Reasoning: catwalk.Reasoning{
+						Thinking:     catwalk.ThinkingToggleable,
+						EffortLevels: catwalk.NewEffortLevels("max"),
+					},
 				},
 				ModelCfg: config.SelectedModel{
 					Provider:        "test",
@@ -569,9 +562,11 @@ func TestGetProviderOptionsReasoningEffortCustomProvider(t *testing.T) {
 		t.Run(providerType, func(t *testing.T) {
 			model := Model{
 				CatwalkCfg: catwalk.Model{
-					ID:              "qwen/qwen3-8b",
-					CanReason:       true,
-					ReasoningLevels: []string{"low", "medium", "high"},
+					ID: "qwen/qwen3-8b",
+					Reasoning: catwalk.Reasoning{
+						Thinking:     catwalk.ThinkingToggleable,
+						EffortLevels: catwalk.NewEffortLevels("low", "medium", "high"),
+					},
 				},
 				ModelCfg: config.SelectedModel{
 					Provider:        "local",
@@ -596,9 +591,11 @@ func TestGetProviderOptionsReasoningEffortCustomProvider(t *testing.T) {
 func TestGetProviderOptionsReasoningEffortFallback(t *testing.T) {
 	model := Model{
 		CatwalkCfg: catwalk.Model{
-			ID:              "glm-5.2",
-			CanReason:       true,
-			ReasoningLevels: []string{"high", "max"},
+			ID: "glm-5.2",
+			Reasoning: catwalk.Reasoning{
+				Thinking:     catwalk.ThinkingToggleable,
+				EffortLevels: catwalk.NewEffortLevels("high", "max"),
+			},
 		},
 		ModelCfg: config.SelectedModel{
 			Provider: "zai",

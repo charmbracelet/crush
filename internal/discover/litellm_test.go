@@ -62,8 +62,8 @@ func TestLitellmEnricher(t *testing.T) {
 		// gpt-4o should have all fields populated.
 		require.Equal(t, int64(128000), result[0].ContextWindow)
 		require.Equal(t, int64(16384), result[0].DefaultMaxTokens)
-		require.InDelta(t, 2.5, result[0].CostPer1MIn, 0.01)
-		require.InDelta(t, 10.0, result[0].CostPer1MOut, 0.01)
+		require.InDelta(t, 2.5, result[0].Pricing.Input, 0.01)
+		require.InDelta(t, 10.0, result[0].Pricing.Output, 0.01)
 
 		// claude-3-opus should have context window and max tokens.
 		require.Equal(t, int64(200000), result[1].ContextWindow)

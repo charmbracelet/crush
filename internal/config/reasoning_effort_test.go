@@ -25,9 +25,11 @@ func TestConfig_ValidateReasoningEffort(t *testing.T) {
 	t.Run("supported effort passes", func(t *testing.T) {
 		t.Parallel()
 		cfg := newConfig(catwalk.Model{
-			ID:              "gpt-5",
-			CanReason:       true,
-			ReasoningLevels: []string{"low", "medium", "high"},
+			ID: "gpt-5",
+			Reasoning: catwalk.Reasoning{
+				Thinking:     catwalk.ThinkingToggleable,
+				EffortLevels: catwalk.NewEffortLevels("low", "medium", "high"),
+			},
 		})
 		require.NoError(t, cfg.ValidateReasoningEffort("openai", "gpt-5", "high"))
 	})
@@ -35,9 +37,11 @@ func TestConfig_ValidateReasoningEffort(t *testing.T) {
 	t.Run("unsupported effort lists accepted values", func(t *testing.T) {
 		t.Parallel()
 		cfg := newConfig(catwalk.Model{
-			ID:              "gpt-5",
-			CanReason:       true,
-			ReasoningLevels: []string{"low", "medium", "high"},
+			ID: "gpt-5",
+			Reasoning: catwalk.Reasoning{
+				Thinking:     catwalk.ThinkingToggleable,
+				EffortLevels: catwalk.NewEffortLevels("low", "medium", "high"),
+			},
 		})
 		err := cfg.ValidateReasoningEffort("openai", "gpt-5", "ultra")
 		require.Error(t, err)
@@ -65,9 +69,11 @@ func TestConfig_ValidateReasoningEffort(t *testing.T) {
 	t.Run("empty effort is rejected like any other value", func(t *testing.T) {
 		t.Parallel()
 		cfg := newConfig(catwalk.Model{
-			ID:              "gpt-5",
-			CanReason:       true,
-			ReasoningLevels: []string{"low", "medium", "high"},
+			ID: "gpt-5",
+			Reasoning: catwalk.Reasoning{
+				Thinking:     catwalk.ThinkingToggleable,
+				EffortLevels: catwalk.NewEffortLevels("low", "medium", "high"),
+			},
 		})
 		require.Error(t, cfg.ValidateReasoningEffort("openai", "gpt-5", ""))
 	})

@@ -823,7 +823,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		a.publishRunComplete(ctx, call, complete)
 	}()
 
-	history, files := a.preparePrompt(msgs, largeModel.CatwalkCfg.SupportsImages, call.Attachments...)
+	history, files := a.preparePrompt(msgs, largeModel.CatwalkCfg.Capabilities.Vision, largeModel.CatwalkCfg.Capabilities.Audio, call.Attachments...)
 
 	startTime := time.Now()
 	a.eventPromptSent(call.SessionID)
@@ -926,7 +926,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			}
 			callContext = context.WithValue(callContext, tools.MessageIDContextKey, assistantMsg.ID)
 			callContext = context.WithValue(callContext, tools.ChannelContextKey, call.Channel)
-			callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, largeModel.CatwalkCfg.SupportsImages)
+			callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, largeModel.CatwalkCfg.Capabilities.Vision)
 			callContext = context.WithValue(callContext, tools.ModelNameContextKey, largeModel.CatwalkCfg.Name)
 			currentAssistant = &assistantMsg
 			return callContext, prepared, err
@@ -1430,7 +1430,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		return nil
 	}
 
-	aiMsgs, _ := a.preparePrompt(msgs, largeModel.CatwalkCfg.SupportsImages)
+	aiMsgs, _ := a.preparePrompt(msgs, largeModel.CatwalkCfg.Capabilities.Vision, largeModel.CatwalkCfg.Capabilities.Audio)
 
 	genCtx, cancel := context.WithCancel(ctx)
 	ac := &activeCancel{cancel: cancel}
@@ -1605,7 +1605,7 @@ func (a *sessionAgent) createUserMessage(ctx context.Context, call SessionAgentC
 	return msg, nil
 }
 
-func (a *sessionAgent) preparePrompt(msgs []message.Message, supportsImages bool, attachments ...message.Attachment) ([]fantasy.Message, []fantasy.FilePart) {
+func (a *sessionAgent) preparePrompt(msgs []message.Message, supportsImages, supportsAudio bool, attachments ...message.Attachment) ([]fantasy.Message, []fantasy.FilePart) {
 	var history []fantasy.Message
 	if !a.isSubAgent {
 		history = append(history, fantasy.NewUserMessage(
@@ -1696,7 +1696,11 @@ If not, please feel free to ignore. Again do not mention this message to the use
 		if attachment.IsText() {
 			continue
 		}
-		if !supportsImages {
+		if attachment.IsAudio() {
+			if !supportsAudio {
+				continue
+			}
+		} else if !supportsImages {
 			continue
 		}
 		files = append(files, fantasy.FilePart{
@@ -1890,7 +1894,7 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 	var success bool
 	for _, attempt := range attempts {
 		tok := int64(40)
-		if attempt.model.CatwalkCfg.CanReason {
+		if attempt.model.CatwalkCfg.CanReason() {
 			tok = attempt.model.CatwalkCfg.DefaultMaxTokens
 		}
 		agent := newAgent(attempt.model.Model, titlePrompt, tok)
@@ -1947,10 +1951,10 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 	}
 
 	modelConfig := model.CatwalkCfg
-	cost := modelConfig.CostPer1MInCached/1e6*float64(resp.TotalUsage.CacheCreationTokens) +
-		modelConfig.CostPer1MOutCached/1e6*float64(resp.TotalUsage.CacheReadTokens) +
-		modelConfig.CostPer1MIn/1e6*float64(resp.TotalUsage.InputTokens) +
-		modelConfig.CostPer1MOut/1e6*float64(resp.TotalUsage.OutputTokens)
+	cost := modelConfig.Pricing.CacheCreate/1e6*float64(resp.TotalUsage.CacheCreationTokens) +
+		modelConfig.Pricing.CacheHit/1e6*float64(resp.TotalUsage.CacheReadTokens) +
+		modelConfig.Pricing.Input/1e6*float64(resp.TotalUsage.InputTokens) +
+		modelConfig.Pricing.Output/1e6*float64(resp.TotalUsage.OutputTokens)
 
 	// Use override cost if available (e.g., from OpenRouter).
 	if openrouterCost != nil {
@@ -2039,10 +2043,10 @@ func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session,
 	}
 
 	modelConfig := model.CatwalkCfg
-	cost := modelConfig.CostPer1MInCached/1e6*float64(usage.CacheCreationTokens) +
-		modelConfig.CostPer1MOutCached/1e6*float64(usage.CacheReadTokens) +
-		modelConfig.CostPer1MIn/1e6*float64(usage.InputTokens) +
-		modelConfig.CostPer1MOut/1e6*float64(usage.OutputTokens)
+	cost := modelConfig.Pricing.CacheCreate/1e6*float64(usage.CacheCreationTokens) +
+		modelConfig.Pricing.CacheHit/1e6*float64(usage.CacheReadTokens) +
+		modelConfig.Pricing.Input/1e6*float64(usage.InputTokens) +
+		modelConfig.Pricing.Output/1e6*float64(usage.OutputTokens)
 
 	if !estimated {
 		a.eventTokensUsed(session.ID, model, usage, cost)
@@ -2301,7 +2305,7 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 		return messages
 	}
 
-	supportsImages := largeModel.CatwalkCfg.SupportsImages
+	supportsImages := largeModel.CatwalkCfg.Capabilities.Vision
 
 	convertedMessages := make([]fantasy.Message, 0, len(messages))
 

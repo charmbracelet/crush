@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -1238,7 +1239,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 				"custom": {
 					APIKey:  "test-key",
 					BaseURL: "https://api.custom.com/v1",
-					Type:    catwalk.TypeOpenAI,
+					Type:    catwalk.TypeResponses,
 					Models: []catwalk.Model{{
 						ID: "test-model",
 					}},
@@ -1266,7 +1267,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 				"custom-anthropic": {
 					APIKey:  "test-key",
 					BaseURL: "https://api.anthropic.com/v1",
-					Type:    catwalk.TypeAnthropic,
+					Type:    catwalk.TypeMessages,
 					Models: []catwalk.Model{{
 						ID: "claude-3-sonnet",
 					}},
@@ -1286,7 +1287,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 		require.Equal(t, "custom-anthropic", customProvider.ID)
 		require.Equal(t, "test-key", customProvider.APIKey)
 		require.Equal(t, "https://api.anthropic.com/v1", customProvider.BaseURL)
-		require.Equal(t, catwalk.TypeAnthropic, customProvider.Type)
+		require.Equal(t, catwalk.TypeMessages, customProvider.Type)
 	})
 
 	t.Run("disabled custom provider is removed", func(t *testing.T) {
@@ -1295,7 +1296,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 				"custom": {
 					APIKey:  "test-key",
 					BaseURL: "https://api.custom.com/v1",
-					Type:    catwalk.TypeOpenAI,
+					Type:    catwalk.TypeResponses,
 					Disable: true,
 					Models: []catwalk.Model{{
 						ID: "test-model",
@@ -2341,7 +2342,7 @@ func TestConfig_configureProviders_LiteralEmptyHeaderDropped(t *testing.T) {
 			"my-llm": {
 				APIKey:  "test-key",
 				BaseURL: "https://my-llm.example.com/v1",
-				Type:    catwalk.TypeOpenAI,
+				Type:    catwalk.TypeResponses,
 				Models:  []catwalk.Model{{ID: "m"}},
 				ExtraHeaders: map[string]string{
 					"X-Custom": "",
@@ -2546,4 +2547,175 @@ func TestConfig_LoadFromBytes_EnvMerge(t *testing.T) {
 	require.NotNil(t, loadedConfig.Env)
 	require.Equal(t, "second", loadedConfig.Env["AWS_PROFILE"])
 	require.Equal(t, "us-east-1", loadedConfig.Env["AWS_REGION"])
+}
+
+func TestConfig_LoadFromBytes_MigratesCatwalkV2Models(t *testing.T) {
+	data := []byte(`{
+		"providers": {
+			"openrouter": {
+				"type": "openrouter",
+				"models": [
+					{
+						"id": "reasoning-model",
+						"name": "Reasoning Model",
+						"cost_per_1m_in": 1.5,
+						"cost_per_1m_out": 6,
+						"cost_per_1m_in_cached": 0.15,
+						"cost_per_1m_out_cached": 0.6,
+						"context_window": 200000,
+						"default_max_tokens": 8192,
+						"can_reason": true,
+						"reasoning_levels": ["low", "high"],
+						"default_reasoning_effort": "high",
+						"supports_attachments": true
+					},
+					{
+						"id": "dumb-model",
+						"name": "Dumb Model",
+						"cost_per_1m_in": 0.5,
+						"cost_per_1m_out": 2,
+						"can_reason": false
+					}
+				]
+			}
+		}
+	}`)
+
+	cfg, err := loadFromBytes([][]byte{data})
+
+	require.NoError(t, err)
+	provider, ok := cfg.Providers.Get("openrouter")
+	require.True(t, ok)
+
+	require.Len(t, provider.Models, 2)
+
+	reasoning := provider.Models[0]
+	require.Equal(t, "reasoning-model", reasoning.ID)
+	require.Equal(t, 1.5, reasoning.Pricing.Input)
+	require.Equal(t, 6.0, reasoning.Pricing.Output)
+	require.Equal(t, 0.15, reasoning.Pricing.CacheCreate)
+	require.Equal(t, 0.6, reasoning.Pricing.CacheHit)
+	require.True(t, reasoning.Capabilities.Vision)
+	require.Equal(t, catwalk.ThinkingToggleable, reasoning.Reasoning.Thinking)
+	require.Equal(t, []string{"low", "high"}, reasoning.ReasoningEffortLevels())
+	require.Equal(t, "high", reasoning.Reasoning.DefaultEffortLevel)
+	require.Equal(t, int64(200000), reasoning.ContextWindow)
+	require.Equal(t, int64(8192), reasoning.DefaultMaxTokens)
+
+	dumb := provider.Models[1]
+	require.Equal(t, 0.5, dumb.Pricing.Input)
+	require.Equal(t, 2.0, dumb.Pricing.Output)
+	require.False(t, dumb.Capabilities.Vision)
+	require.Equal(t, catwalk.ThinkingNever, dumb.Reasoning.Thinking)
+}
+
+func TestConfig_LoadFromBytes_KeepsCatwalkV3Models(t *testing.T) {
+	data := []byte(`{
+		"providers": {
+			"custom": {
+				"type": "completions",
+				"models": [
+					{
+						"id": "v3-model",
+						"name": "V3 Model",
+						"pricing": {"input": 3, "output": 15},
+						"capabilities": {"vision": true},
+						"reasoning": {"thinking": "always"}
+					}
+				]
+			}
+		}
+	}`)
+
+	cfg, err := loadFromBytes([][]byte{data})
+
+	require.NoError(t, err)
+	provider, ok := cfg.Providers.Get("custom")
+	require.True(t, ok)
+	require.Len(t, provider.Models, 1)
+	model := provider.Models[0]
+	require.Equal(t, 3.0, model.Pricing.Input)
+	require.Equal(t, 15.0, model.Pricing.Output)
+	require.True(t, model.Capabilities.Vision)
+	require.Equal(t, catwalk.ThinkingAlways, model.Reasoning.Thinking)
+}
+
+func TestLoadFromConfigPaths_PersistsCatwalkV2Migration(t *testing.T) {
+	t.Run("rewrites v2 config files on disk", func(t *testing.T) {
+		t.Parallel()
+		tmpDir := t.TempDir()
+		path := filepath.Join(tmpDir, "crush.json")
+		require.NoError(t, os.WriteFile(path, []byte(`{
+			"providers": {
+				"openrouter": {
+					"type": "openrouter",
+					"models": [
+						{
+							"id": "reasoning-model",
+							"name": "Reasoning Model",
+							"cost_per_1m_in": 1.5,
+							"cost_per_1m_out": 6,
+							"can_reason": true,
+							"reasoning_levels": ["low", "high"],
+							"default_reasoning_effort": "high",
+							"supports_attachments": true
+						}
+					]
+				}
+			}
+		}`), 0o644))
+
+		cfg, loaded, err := loadFromConfigPaths(context.Background(), []string{path})
+		require.NoError(t, err)
+		require.Contains(t, loaded, path)
+		provider, ok := cfg.Providers.Get("openrouter")
+		require.True(t, ok)
+		require.Len(t, provider.Models, 1)
+		require.Equal(t, 1.5, provider.Models[0].Pricing.Input)
+		require.Equal(t, catwalk.ThinkingToggleable, provider.Models[0].Reasoning.Thinking)
+
+		// The file itself is rewritten with the v3 schema and the legacy
+		// fields are gone.
+		rewritten, err := os.ReadFile(path)
+		require.NoError(t, err)
+		var raw map[string]any
+		require.NoError(t, json.Unmarshal(rewritten, &raw))
+		model := raw["providers"].(map[string]any)["openrouter"].(map[string]any)["models"].([]any)[0]
+		m := model.(map[string]any)
+		require.Contains(t, m, "pricing")
+		require.Contains(t, m, "reasoning")
+		require.Contains(t, m, "capabilities")
+		require.NotContains(t, m, "cost_per_1m_in")
+		require.NotContains(t, m, "can_reason")
+		require.NotContains(t, m, "supports_attachments")
+		require.NotContains(t, m, "reasoning_levels")
+	})
+
+	t.Run("leaves v3 config files untouched", func(t *testing.T) {
+		t.Parallel()
+		tmpDir := t.TempDir()
+		path := filepath.Join(tmpDir, "crush.json")
+		original := []byte(`{
+			"providers": {
+				"custom": {
+					"type": "completions",
+					"models": [
+						{
+							"id": "v3-model",
+							"name": "V3 Model",
+							"pricing": {"input": 3, "output": 15},
+							"reasoning": {"thinking": "always"}
+						}
+					]
+				}
+			}
+		}`)
+		require.NoError(t, os.WriteFile(path, original, 0o644))
+
+		_, _, err := loadFromConfigPaths(context.Background(), []string{path})
+		require.NoError(t, err)
+		rewritten, err := os.ReadFile(path)
+		require.NoError(t, err)
+		require.JSONEq(t, string(original), string(rewritten))
+	})
 }

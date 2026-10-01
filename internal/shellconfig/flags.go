@@ -44,6 +44,9 @@ const (
 	// opMergeChild merges a JSON object into childMap(target, child), e.g.
 	// --provider-options '{...}'.
 	opMergeChild
+	// opSetInChild assigns childMap(target, child)[jsonKey] = value, e.g.
+	// --price-input F stored under pricing.input.
+	opSetInChild
 )
 
 // flagSpec declares one command-line flag: how it parses, where it writes,
@@ -203,5 +206,7 @@ func storeFlag(target map[string]any, spec flagSpec, val any) {
 		if obj, ok := val.(map[string]any); ok {
 			maps.Copy(childMap(target, spec.child), obj)
 		}
+	case opSetInChild:
+		childMap(target, spec.child)[spec.jsonKey] = val
 	}
 }

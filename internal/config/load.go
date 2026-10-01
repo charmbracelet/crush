@@ -36,6 +36,191 @@ import (
 
 const defaultCatwalkURL = "https://catwalk.charm.land"
 
+// legacyProviderTypes maps provider type values from the catwalk v2
+// schema onto the v3 endpoint types that describe the same API format, so
+// configs written before the migration keep working. Custom provider
+// types with registered enrichers (ollama, litellm, ...) are not listed
+// here and pass through unchanged.
+var legacyProviderTypes = map[catwalk.Type]catwalk.Type{
+	"openai":        catwalk.TypeResponses,
+	"openai-compat": catwalk.TypeCompletions,
+	"openrouter":    catwalk.TypeCompletions,
+	"vercel":        catwalk.TypeCompletions,
+	"anthropic":     catwalk.TypeMessages,
+	"azure":         catwalk.TypeResponses,
+	"bedrock":       catwalk.TypeMessages,
+	"google":        catwalk.TypeCompletions,
+	"google-vertex": catwalk.TypeCompletions,
+}
+
+// legacyModelPricingFields maps catwalk v2 model cost fields onto their
+// v3 pricing counterparts.
+var legacyModelPricingFields = map[string]string{
+	"cost_per_1m_in":         "input",
+	"cost_per_1m_out":        "output",
+	"cost_per_1m_in_cached":  "cache_create",
+	"cost_per_1m_out_cached": "cache_hit",
+}
+
+// migrateCatwalkV2 rewrites a merged user config from the catwalk v2
+// schema onto the v3 schema so pre-migration configs decode correctly.
+// In v3, flat model fields moved into nested structures: the cost
+// fields became pricing, supports_attachments became
+// capabilities.vision, and the can_reason/reasoning_levels/
+// default_reasoning_effort trio became the reasoning object. The
+// rewrite is pure and is a no-op for configs already written with v3
+// fields; use migrateCatwalkV2File to persist the result.
+func migrateCatwalkV2(data []byte) ([]byte, bool) {
+	var root map[string]any
+	if err := json.Unmarshal(data, &root); err != nil {
+		return data, false
+	}
+	providers, ok := root["providers"].(map[string]any)
+	if !ok {
+		return data, false
+	}
+
+	changed := false
+	for _, raw := range providers {
+		provider, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		for _, key := range []string{"models", "chatgpt_models"} {
+			models, ok := provider[key].([]any)
+			if !ok {
+				continue
+			}
+			for i, rawModel := range models {
+				model, ok := rawModel.(map[string]any)
+				if !ok {
+					continue
+				}
+				if migrateCatwalkV2Model(model) {
+					models[i] = model
+					changed = true
+				}
+			}
+		}
+	}
+	if !changed {
+		return data, false
+	}
+
+	out, err := json.Marshal(root)
+	if err != nil {
+		return data, false
+	}
+	return out, true
+}
+
+// migrateCatwalkV2File migrates a JSON config file from the catwalk v2
+// model schema onto v3 and persists the rewrite atomically, preserving
+// the file's permissions. The returned bytes are always the migrated
+// form, so loading continues even when the write fails.
+func migrateCatwalkV2File(path string, data []byte) []byte {
+	migrated, changed := migrateCatwalkV2(data)
+	if !changed {
+		return data
+	}
+	perm := os.FileMode(0o600)
+	if info, err := os.Stat(path); err == nil {
+		perm = info.Mode().Perm()
+	}
+	if err := atomicWriteFile(path, migrated, perm); err != nil {
+		slog.Warn("Failed to write migrated config", "path", path, "error", err)
+	} else {
+		slog.Info("Migrated config file to the catwalk v3 model schema", "path", path)
+	}
+	return migrated
+}
+
+// migrateCatwalkV2Model migrates a single model object in place and
+// reports whether anything changed. Legacy fields are removed after
+// being folded into their v3 counterparts so they never leak back into
+// the decoded config.
+func migrateCatwalkV2Model(model map[string]any) bool {
+	changed := false
+
+	if _, ok := model["pricing"]; !ok {
+		pricing := map[string]any{}
+		for legacy, field := range legacyModelPricingFields {
+			value, ok := model[legacy]
+			if !ok {
+				continue
+			}
+			pricing[field] = value
+			delete(model, legacy)
+			changed = true
+		}
+		if len(pricing) > 0 {
+			model["pricing"] = pricing
+		}
+	} else {
+		for legacy := range legacyModelPricingFields {
+			if _, ok := model[legacy]; ok {
+				delete(model, legacy)
+				changed = true
+			}
+		}
+	}
+
+	if value, ok := model["supports_attachments"]; ok {
+		delete(model, "supports_attachments")
+		capabilities, ok := model["capabilities"].(map[string]any)
+		if !ok {
+			capabilities = map[string]any{}
+			model["capabilities"] = capabilities
+		}
+		if _, ok := capabilities["vision"]; !ok {
+			capabilities["vision"] = value
+		}
+		changed = true
+	}
+
+	canReason, hasCanReason := model["can_reason"]
+	levels, hasLevels := model["reasoning_levels"]
+	defaultEffort, hasDefaultEffort := model["default_reasoning_effort"]
+	for _, legacy := range []string{"can_reason", "reasoning_levels", "default_reasoning_effort"} {
+		if _, ok := model[legacy]; ok {
+			delete(model, legacy)
+			changed = true
+		}
+	}
+	if _, ok := model["reasoning"]; !ok && (hasCanReason || hasLevels || hasDefaultEffort) {
+		reasoning := map[string]any{}
+		if can, ok := canReason.(bool); ok && !can {
+			reasoning["thinking"] = catwalk.ThinkingNever
+		} else {
+			reasoning["thinking"] = catwalk.ThinkingToggleable
+			if raw, ok := levels.([]any); ok && len(raw) > 0 {
+				values := make([]string, 0, len(raw))
+				for _, level := range raw {
+					if value, ok := level.(string); ok {
+						values = append(values, value)
+					}
+				}
+				if len(values) > 0 {
+					effortLevels := make([]any, 0, len(values))
+					for _, level := range catwalk.NewEffortLevels(values...) {
+						effortLevels = append(effortLevels, map[string]any{
+							"value":   level.Value,
+							"display": level.Display,
+						})
+					}
+					reasoning["effort_levels"] = effortLevels
+					if effort, ok := defaultEffort.(string); ok && effort != "" {
+						reasoning["default_effort_level"] = effort
+					}
+				}
+			}
+		}
+		model["reasoning"] = reasoning
+	}
+
+	return changed
+}
+
 // Load loads the configuration from the default paths and returns a
 // ConfigStore that owns both the pure-data Config and all runtime state.
 func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
@@ -68,6 +253,7 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 		if !json.Valid(wsData) {
 			return nil, fmt.Errorf("invalid JSON in config file %s", store.workspacePath)
 		}
+		wsData = migrateCatwalkV2File(store.workspacePath, wsData)
 		merged, mergeErr := loadFromBytes(append([][]byte{mustMarshalConfig(cfg)}, wsData))
 		if mergeErr == nil {
 			// Preserve defaults that setDefaults already applied.
@@ -433,7 +619,7 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 			ExtraHeaders:   pc.ExtraHeaders,
 			ExistingModels: pc.Models,
 		}
-		providerType := cmp.Or(pc.Type, catwalk.TypeOpenAICompat)
+		providerType := cmp.Or(pc.Type, catwalk.TypeCompletions)
 		wg.Go(func() {
 			models, err := discover.DiscoverModels(discoverCtx, cfg, resolver)
 			if err == nil && len(models) > 0 {
@@ -458,8 +644,12 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 		// Make sure the provider ID is set.
 		providerConfig.ID = id
 		providerConfig.Name = cmp.Or(providerConfig.Name, id) // Use ID as name if not set
-		// Default to OpenAI if not set.
-		providerConfig.Type = cmp.Or(providerConfig.Type, catwalk.TypeOpenAICompat)
+		// Migrate legacy provider types onto the catwalk v3 endpoint types.
+		if mapped, ok := legacyProviderTypes[providerConfig.Type]; ok {
+			providerConfig.Type = mapped
+		}
+		// Default to OpenAI chat completions if not set.
+		providerConfig.Type = cmp.Or(providerConfig.Type, catwalk.TypeCompletions)
 		if !slices.Contains(catwalk.KnownProviderTypes(), providerConfig.Type) &&
 			providerConfig.Type != hyper.Name &&
 			!discover.IsKnownCustomProvider(string(providerConfig.Type)) {
@@ -750,7 +940,7 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (large
 			Provider:        string(p.ID),
 			Model:           defaultLargeModel.ID,
 			MaxTokens:       defaultLargeModel.DefaultMaxTokens,
-			ReasoningEffort: defaultLargeModel.DefaultReasoningEffort,
+			ReasoningEffort: defaultLargeModel.Reasoning.DefaultEffortLevel,
 		}
 
 		defaultSmallModel := c.GetModel(string(p.ID), p.DefaultSmallModelID)
@@ -765,7 +955,7 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (large
 			Provider:        string(p.ID),
 			Model:           defaultSmallModel.ID,
 			MaxTokens:       defaultSmallModel.DefaultMaxTokens,
-			ReasoningEffort: defaultSmallModel.DefaultReasoningEffort,
+			ReasoningEffort: defaultSmallModel.Reasoning.DefaultEffortLevel,
 		}
 		return largeModel, smallModel, err
 	}
@@ -843,7 +1033,7 @@ func resolveSelectedModels(cfg *Config, knownProviders []catwalk.Provider) (reso
 			if largeModelSelected.ReasoningEffort != "" {
 				large.ReasoningEffort = largeModelSelected.ReasoningEffort
 			} else {
-				large.ReasoningEffort = model.DefaultReasoningEffort
+				large.ReasoningEffort = model.Reasoning.DefaultEffortLevel
 			}
 			large.Think = largeModelSelected.Think
 			if largeModelSelected.Temperature != nil {
@@ -888,7 +1078,7 @@ func resolveSelectedModels(cfg *Config, knownProviders []catwalk.Provider) (reso
 			if smallModelSelected.ReasoningEffort != "" {
 				small.ReasoningEffort = smallModelSelected.ReasoningEffort
 			} else {
-				small.ReasoningEffort = model.DefaultReasoningEffort
+				small.ReasoningEffort = model.Reasoning.DefaultEffortLevel
 			}
 			if smallModelSelected.Temperature != nil {
 				small.Temperature = smallModelSelected.Temperature
@@ -1019,6 +1209,7 @@ func loadFromConfigPaths(ctx context.Context, configPaths []string) (*Config, []
 			if !json.Valid(data) {
 				return nil, nil, fmt.Errorf("invalid JSON in config file %s", path)
 			}
+			data = migrateCatwalkV2File(path, data)
 			addTopLevelKeys(jsonDirKeys, dir, data)
 			configs = append(configs, data)
 			loaded = append(loaded, path)
@@ -1076,6 +1267,10 @@ func loadFromBytes(configs [][]byte) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Safety net for sources that cannot be rewritten on disk (e.g.
+	// crushrc builtins producing JSON): migrate the merged result in
+	// memory so decoding always sees the v3 schema.
+	data, _ = migrateCatwalkV2(data)
 	var config Config
 	if err := json.Unmarshal(data, &config); err != nil {
 		return nil, err

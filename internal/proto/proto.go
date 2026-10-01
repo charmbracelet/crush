@@ -153,6 +153,10 @@ const (
 // remains correct only when no other turns are in flight for the
 // same session.
 type AgentMessage struct {
+	// OperatorSteering allows an uncorrelated, non-channel submission to
+	// steer the active turn under its existing permission policy. If idle,
+	// the submission starts a turn with PermissionPolicy as usual.
+	OperatorSteering  bool                    `json:"operator_steering,omitempty"`
 	HiddenUserMessage bool                    `json:"hidden_user_message,omitempty"`
 	SessionID         string                  `json:"session_id"`
 	RunID             string                  `json:"run_id,omitempty"`

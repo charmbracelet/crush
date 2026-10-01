@@ -131,6 +131,7 @@ type testWorkspace struct {
 	runPrompts        []string
 	yolo              bool
 	runHidden         []bool
+	runSteering       []bool
 	compactCalls      []bool
 }
 
@@ -174,6 +175,7 @@ func (w *testWorkspace) AgentReadyErr() error {
 func (w *testWorkspace) AgentRun(ctx context.Context, _ string, prompt string, _ ...message.Attachment) error {
 	w.runPrompts = append(w.runPrompts, prompt)
 	w.runHidden = append(w.runHidden, message.HiddenUserMessage(ctx))
+	w.runSteering = append(w.runSteering, message.OperatorSteering(ctx))
 	return nil
 }
 
@@ -756,6 +758,7 @@ func TestGeneratedPlanContinuationIsHidden(t *testing.T) {
 		}
 	}
 	require.Equal(t, []bool{true, false}, ws.runHidden)
+	require.Equal(t, []bool{true, true}, ws.runSteering)
 	require.Equal(t, []string{"Implement the plan.", "Implement the plan."}, ws.runPrompts)
 }
 

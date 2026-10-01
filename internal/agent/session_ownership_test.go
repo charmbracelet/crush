@@ -54,6 +54,21 @@ func (p observingNotifications) Publish(kind pubsub.EventType, notification noti
 	p.Broker.Publish(kind, notification)
 }
 
+func subscribeRunCompletions(t *testing.T, agent *sessionAgent) <-chan pubsub.Event[notify.RunComplete] {
+	t.Helper()
+	broker := pubsub.NewBroker[notify.RunComplete]()
+	t.Cleanup(broker.Shutdown)
+	agent.runComplete = broker
+	return broker.Subscribe(t.Context())
+}
+
+func observeNotifications(t *testing.T, agent *sessionAgent, observe func(notify.Notification)) {
+	t.Helper()
+	broker := pubsub.NewBroker[notify.Notification]()
+	t.Cleanup(broker.Shutdown)
+	agent.notify = observingNotifications{Broker: broker, observe: observe}
+}
+
 func compactionStream(yield func(fantasy.StreamPart) bool) {
 	if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeToolCall, ID: "tool-1", ToolCallName: "unused", ToolCallInput: "{}"}) {
 		return
@@ -145,14 +160,12 @@ func TestRun_CanceledAcceptedInteractiveAdmissionNotifiesIdle(t *testing.T) {
 			t.Parallel()
 			env, sess, model, sa := newLifecycleTestAgent(t, "session")
 			seedUserMessage(t, env.messages, sess.ID, "earlier")
-			broker := pubsub.NewBroker[notify.Notification]()
-			defer broker.Shutdown()
 			var events []notify.Notification
 			var busy []bool
-			sa.notify = observingNotifications{Broker: broker, observe: func(n notify.Notification) {
+			observeNotifications(t, sa, func(n notify.Notification) {
 				busy = append(busy, sa.IsSessionBusy(sess.ID))
 				events = append(events, n)
-			}}
+			})
 			started := make(chan struct{})
 			releaseOwner := make(chan struct{})
 			ownerGone := make(chan struct{})
@@ -220,15 +233,10 @@ func TestRun_CancelAtQueueHandoff(t *testing.T) {
 			t.Parallel()
 			env, sess, model, sa := newLifecycleTestAgent(t, "session")
 			seedUserMessage(t, env.messages, sess.ID, "earlier")
-			broker := pubsub.NewBroker[notify.Notification]()
-			defer broker.Shutdown()
-			completions := pubsub.NewBroker[notify.RunComplete]()
-			defer completions.Shutdown()
-			events := completions.Subscribe(t.Context())
-			sa.runComplete = completions
+			events := subscribeRunCompletions(t, sa)
 			notified := false
 			lastBusy := true
-			sa.notify = observingNotifications{Broker: broker, observe: func(n notify.Notification) {
+			observeNotifications(t, sa, func(n notify.Notification) {
 				lastBusy = sa.IsSessionBusy(sess.ID)
 				if n.Type != notify.TypeAgentFinished || notified {
 					return
@@ -236,7 +244,7 @@ func TestRun_CancelAtQueueHandoff(t *testing.T) {
 				notified = true
 				require.True(t, sa.IsSessionBusy(sess.ID), "the handoff must retain cancellation ownership")
 				sa.Cancel(sess.ID)
-			}}
+			})
 			calls := 0
 			model.stream = func(ctx context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
 				calls++
@@ -286,15 +294,10 @@ func TestRun_CanceledHandoffPersistenceFailureIsReported(t *testing.T) {
 			if failPersistence {
 				sa.messages = failedQueuedPreparation{Service: env.messages, err: failure}
 			}
-			completions := pubsub.NewBroker[notify.RunComplete]()
-			defer completions.Shutdown()
-			sa.runComplete = completions
-			events := completions.Subscribe(t.Context())
-			notifications := pubsub.NewBroker[notify.Notification]()
-			defer notifications.Shutdown()
+			events := subscribeRunCompletions(t, sa)
 			cancelled := false
 			var reported []notify.Notification
-			sa.notify = observingNotifications{Broker: notifications, observe: func(n notify.Notification) {
+			observeNotifications(t, sa, func(n notify.Notification) {
 				if n.Type == notify.TypeAgentError {
 					reported = append(reported, n)
 				}
@@ -302,7 +305,7 @@ func TestRun_CanceledHandoffPersistenceFailureIsReported(t *testing.T) {
 					cancelled = true
 					sa.Cancel(sess.ID)
 				}
-			}}
+			})
 			calls := 0
 			model.stream = func(ctx context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
 				calls++
@@ -348,10 +351,8 @@ func TestRun_CanceledHandoffPersistenceFailureIsReported(t *testing.T) {
 func TestRun_PublicSubmissionCannotStealQueueHandoff(t *testing.T) {
 	t.Parallel()
 	env, sess, model, sa := newLifecycleTestAgent(t, "session")
-	broker := pubsub.NewBroker[notify.Notification]()
-	defer broker.Shutdown()
 	var busy []bool
-	sa.notify = observingNotifications{Broker: broker, observe: func(n notify.Notification) {
+	observeNotifications(t, sa, func(n notify.Notification) {
 		if n.Type != notify.TypeAgentFinished {
 			return
 		}
@@ -361,7 +362,7 @@ func TestRun_PublicSubmissionCannotStealQueueHandoff(t *testing.T) {
 			require.NoError(t, err)
 			require.Nil(t, result, "a public submission during handoff must queue, not execute")
 		}
-	}}
+	})
 	calls := 0
 	model.stream = func(ctx context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
 		calls++
@@ -464,8 +465,6 @@ func TestRun_PostCancelSubmissionGetsNewOwner(t *testing.T) {
 			t.Run(fmt.Sprintf("summary=%t/pending=%t", summarize, pendingAccept), func(t *testing.T) {
 				t.Parallel()
 				_, sess, model, sa := newLifecycleTestAgent(t, "session")
-				broker := pubsub.NewBroker[notify.Notification]()
-				defer broker.Shutdown()
 				var pending *AcceptedRun
 				if pendingAccept {
 					pending = sa.BeginAccepted(sess.ID)
@@ -473,7 +472,7 @@ func TestRun_PostCancelSubmissionGetsNewOwner(t *testing.T) {
 				}
 				cancelled := false
 				lastBusy := true
-				sa.notify = observingNotifications{Broker: broker, observe: func(n notify.Notification) {
+				observeNotifications(t, sa, func(n notify.Notification) {
 					lastBusy = sa.IsSessionBusy(sess.ID)
 					if cancelled || n.Type != notify.TypeAgentFinished {
 						return
@@ -486,7 +485,7 @@ func TestRun_PostCancelSubmissionGetsNewOwner(t *testing.T) {
 					})
 					require.NoError(t, err)
 					require.Nil(t, result)
-				}}
+				})
 				calls := 0
 				model.stream = func(ctx context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
 					calls++
@@ -570,12 +569,10 @@ func TestRun_MixedModeFinalIdleNotification(t *testing.T) {
 				t.Run(fmt.Sprintf("initial=%t/queued=%t/cancel=%t", initialNonInteractive, queuedNonInteractive, cancel), func(t *testing.T) {
 					t.Parallel()
 					_, sess, model, sa := newLifecycleTestAgent(t, "session")
-					broker := pubsub.NewBroker[notify.Notification]()
-					defer broker.Shutdown()
 					var busy []bool
-					sa.notify = observingNotifications{Broker: broker, observe: func(notify.Notification) {
+					observeNotifications(t, sa, func(notify.Notification) {
 						busy = append(busy, sa.IsSessionBusy(sess.ID))
-					}}
+					})
 					calls := 0
 					model.stream = func(ctx context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
 						calls++
@@ -622,12 +619,10 @@ func TestRun_InteractiveAdmissionRetainsIdleNotification(t *testing.T) {
 			t.Parallel()
 			_, sess, model, sa := newLifecycleTestAgent(t, "session")
 			sa.disableAutoSummarize = true
-			broker := pubsub.NewBroker[notify.Notification]()
-			defer broker.Shutdown()
 			var busy []bool
-			sa.notify = observingNotifications{Broker: broker, observe: func(notify.Notification) {
+			observeNotifications(t, sa, func(notify.Notification) {
 				busy = append(busy, sa.IsSessionBusy(sess.ID))
-			}}
+			})
 			calls := 0
 			model.stream = func(ctx context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
 				calls++
@@ -666,10 +661,7 @@ func TestSummarize_QueuedTurnToolsReceiveSession(t *testing.T) {
 	sa := testSessionAgent(env, model, &finishStreamModel{text: "title"}, "system", tools.NewTodosTool(env.sessions))
 	a, ok := sa.(*sessionAgent)
 	require.True(t, ok)
-	completions := pubsub.NewBroker[notify.RunComplete]()
-	defer completions.Shutdown()
-	a.runComplete = completions
-	events := completions.Subscribe(t.Context())
+	events := subscribeRunCompletions(t, a)
 	calls := 0
 	model.stream = func(ctx context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
 		calls++
@@ -715,13 +707,11 @@ func TestSummarize_ClearedInteractiveAdmissionNotifiesIdle(t *testing.T) {
 			t.Parallel()
 			env, sess, model, sa := newLifecycleTestAgent(t, "summary session")
 			seedUserMessage(t, env.messages, sess.ID, "earlier")
-			broker := pubsub.NewBroker[notify.Notification]()
-			defer broker.Shutdown()
 			var events []notify.Notification
-			sa.notify = observingNotifications{Broker: broker, observe: func(n notify.Notification) {
+			observeNotifications(t, sa, func(n notify.Notification) {
 				require.False(t, sa.IsSessionBusy(sess.ID))
 				events = append(events, n)
-			}}
+			})
 			model.stream = func(ctx context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
 				_, err := sa.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, Prompt: "B"})
 				require.NoError(t, err)
@@ -753,15 +743,13 @@ func TestRun_IdleOutcomeAcrossQueuedTurns(t *testing.T) {
 		t.Run(fmt.Sprint(failure), func(t *testing.T) {
 			t.Parallel()
 			_, sess, model, sa := newLifecycleTestAgent(t, "session")
-			broker := pubsub.NewBroker[notify.Notification]()
-			defer broker.Shutdown()
 			var states []notify.FinishState
-			sa.notify = observingNotifications{Broker: broker, observe: func(n notify.Notification) {
+			observeNotifications(t, sa, func(n notify.Notification) {
 				if n.Type == notify.TypeAgentFinished {
 					states = append(states, n.FinishState)
 					require.Equal(t, n.FinishState == notify.FinishContinuing, sa.IsSessionBusy(sess.ID))
 				}
-			}}
+			})
 			calls := 0
 			model.stream = func(ctx context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
 				calls++

@@ -18,6 +18,7 @@ import (
 	"charm.land/catwalk/pkg/embedded"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/oauth/antigravity"
 	"github.com/charmbracelet/x/etag"
 )
 
@@ -226,11 +227,17 @@ func Providers(cfg *Config, opts ...HyperTokenRefresher) ([]catwalk.Provider, er
 
 		wg.Wait()
 
-		if hyperProvider.ID != "" {
-			providerList = append([]catwalk.Provider{hyperProvider}, slices.Collect(providers.Seq())...)
-		} else {
-			providerList = slices.Collect(providers.Seq())
+		list := slices.Collect(providers.Seq())
+		if !customProvidersOnly {
+			// The Google subscription provider is crush-owned rather than
+			// part of the fetched catalog, so it joins the list the same way
+			// Hyper does: at the front, to sort to the top of the picker.
+			list = append([]catwalk.Provider{antigravity.ProviderDefinition()}, list...)
 		}
+		if hyperProvider.ID != "" {
+			list = append([]catwalk.Provider{hyperProvider}, list...)
+		}
+		providerList = list
 		providerErr = errors.Join(catwalkErr, hyperErr)
 	})
 	return providerList, providerErr

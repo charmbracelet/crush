@@ -9,6 +9,7 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/oauth"
+	"github.com/charmbracelet/crush/internal/oauth/antigravity"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/invopop/jsonschema"
 )
@@ -104,6 +106,13 @@ type ProviderConfig struct {
 	APIKeyTemplate string `json:"-"`
 	// OAuthToken for providers that use OAuth2 authentication.
 	OAuthToken *oauth.Token `json:"oauth,omitempty" jsonschema:"description=OAuth2 token for authentication with the provider"`
+	// OAuthClientSecret is the client secret a login-based provider needs
+	// alongside its public client id. Today only the Google AI subscription
+	// uses it: Google's token endpoint rejects sign-in and refresh without
+	// it, and the value is not shipped in the binary. Unlike api_key this is
+	// taken literally, never shell-expanded, so that a secret containing $
+	// survives.
+	OAuthClientSecret string `json:"oauth_client_secret,omitempty" jsonschema:"description=OAuth client secret for login-based providers such as the Google AI subscription"`
 	// Marks the provider as disabled.
 	Disable bool `json:"disable,omitempty" jsonschema:"description=Whether this provider is disabled,default=false"`
 
@@ -1114,6 +1123,21 @@ func (c *Config) SetupAgents() {
 	c.Agents = agents
 }
 
+// GoogleSubscriptionClientSecret returns the OAuth client secret the Google AI
+// subscription login needs, preferring the configured value over
+// CRUSH_ANTIGRAVITY_CLIENT_SECRET.
+//
+// An empty result means the user has supplied it nowhere; callers pass that
+// along to the login, which reports how to provide it.
+func (c *Config) GoogleSubscriptionClientSecret() string {
+	if c != nil {
+		if pc, ok := c.Providers.Get(antigravity.ProviderID); ok && pc.OAuthClientSecret != "" {
+			return pc.OAuthClientSecret
+		}
+	}
+	return os.Getenv(antigravity.ClientSecretEnv)
+}
+
 func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 	var (
 		providerID = catwalk.InferenceProvider(c.ID)
@@ -1125,6 +1149,18 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 	switch providerID {
 	case catwalk.InferenceProviderMiniMax, catwalk.InferenceProviderMiniMaxChina:
 		// NOTE: MiniMax has no good endpoint we can use to validate the API key.
+		return nil
+	case catwalk.InferenceProvider(antigravity.ProviderID):
+		// A subscription has no key to poke; what proves it works is being
+		// able to list the models the account grants.
+		if c.OAuthToken == nil {
+			return fmt.Errorf("no Google AI subscription login is configured")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		if _, err := antigravity.Models(ctx, c.OAuthToken); err != nil {
+			return fmt.Errorf("the Google subscription check failed: %w", err)
+		}
 		return nil
 	case catwalk.InferenceProviderAlibabaSingapore:
 		// NOTE: Alibaba has no good endpoint we can use to validate the API key.

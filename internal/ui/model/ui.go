@@ -41,6 +41,7 @@ import (
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/oauth/antigravity"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
@@ -2102,6 +2103,14 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		if cmd := m.openAuthenticationDialogWithMethod(msg.Provider, msg.Model, msg.ModelType, msg.UseOAuth); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.ActionGoogleSecretSaved:
+		// The sign-in that asked for the client secret can proceed now that
+		// it is configured, so reopen in its place rather than closing and
+		// making the user start over.
+		m.dialog.CloseDialog(dialog.GoogleSecretInputID)
+		if cmd := m.openAuthenticationDialog(msg.Provider, msg.Model, msg.ModelType); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.ActionCmd:
 		if msg.Cmd != nil {
 			cmds = append(cmds, msg.Cmd)
@@ -2900,6 +2909,16 @@ func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.Se
 		dlg, cmd = dialog.NewOAuthHyper(m.com, isOnboarding, provider, model, modelType)
 	case catwalk.InferenceProviderCopilot:
 		dlg, cmd = dialog.NewOAuthCopilot(m.com, isOnboarding, provider, model, modelType)
+	case catwalk.InferenceProvider(antigravity.ProviderID):
+		// A subscription has no API key to enter: the login is the
+		// credential, so signing in again is the only thing this dialog can
+		// usefully do. That login also needs a client secret nobody can ship,
+		// so collect it first when nothing supplies it.
+		if m.com.Config().GoogleSubscriptionClientSecret() == "" {
+			dlg, cmd = dialog.NewGoogleSecretInput(m.com, isOnboarding, provider, model, modelType)
+		} else {
+			dlg, cmd = dialog.NewOAuthGemini(m.com, isOnboarding, provider, model, modelType)
+		}
 	case catwalk.InferenceProviderOpenAI:
 		providerCfg, _ := m.com.Config().Providers.Get(string(provider.ID))
 		hasAPIKey := providerCfg.HasAPIKey(m.com.Workspace.Resolver())
@@ -2942,7 +2961,7 @@ func (m *UI) openAuthenticationDialogWithMethod(provider catwalk.Provider, model
 	)
 	if useOAuth {
 		model.Model = ""
-		dlg, cmd = dialog.NewOAuthOpenAI(m.com, isOnboarding, provider, model, modelType)
+		dlg, cmd = m.newOAuthDialog(provider, model, modelType, isOnboarding)
 	} else {
 		dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, model, modelType)
 	}
@@ -2954,6 +2973,31 @@ func (m *UI) openAuthenticationDialogWithMethod(provider catwalk.Provider, model
 
 	m.dialog.OpenDialogWithGrace(dlg)
 	return cmd
+}
+
+// newOAuthDialog returns the sign-in dialog for a provider that
+// authenticates with a login. The method picker only offers OAuth where a key
+// is also possible, so this has to stay in step with
+// openAuthenticationDialog.
+func (m *UI) newOAuthDialog(
+	provider catwalk.Provider,
+	model config.SelectedModel,
+	modelType config.SelectedModelType,
+	isOnboarding bool,
+) (dialog.Dialog, tea.Cmd) {
+	switch provider.ID {
+	case catwalk.InferenceProvider(antigravity.ProviderID):
+		if m.com.Config().GoogleSubscriptionClientSecret() == "" {
+			return dialog.NewGoogleSecretInput(m.com, isOnboarding, provider, model, modelType)
+		}
+		return dialog.NewOAuthGemini(m.com, isOnboarding, provider, model, modelType)
+	case catwalk.InferenceProviderCopilot:
+		return dialog.NewOAuthCopilot(m.com, isOnboarding, provider, model, modelType)
+	case "hyper":
+		return dialog.NewOAuthHyper(m.com, isOnboarding, provider, model, modelType)
+	default:
+		return dialog.NewOAuthOpenAI(m.com, isOnboarding, provider, model, modelType)
+	}
 }
 
 func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {

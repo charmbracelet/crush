@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/oauth"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 )
 
@@ -59,7 +60,10 @@ func waitingModel(t *testing.T) authModel {
 
 func TestAuthTUIPasteFieldShowsForCodeEntryFlows(t *testing.T) {
 	m := waitingModel(t)
-	view := m.content()
+	// The focused paste field renders its block cursor over the first
+	// placeholder glyph, splitting the plain text with SGR codes. Strip
+	// styling so the assertions check the content, not the escape codes.
+	view := ansi.Strip(m.content())
 	require.Contains(t, view, "Enter the code from the page")
 	require.Contains(t, view, "Paste the code from the browser...")
 }

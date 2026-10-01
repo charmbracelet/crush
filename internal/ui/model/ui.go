@@ -2781,6 +2781,26 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		return tea.Batch(cmds...)
 	}
 
+	// A ChatGPT or Grok sign-in swaps the provider's catalog for the one
+	// the account serves, so a model chosen before the flow may no longer
+	// exist afterward. Apply the remembered choice only when the refreshed
+	// catalog still offers it; otherwise reopen the list and say so rather
+	// than silently falling back to a default.
+	if providerID == string(catwalk.InferenceProviderOpenAI) ||
+		providerID == string(catwalk.InferenceProviderXAI) {
+		if !cfg.IsModelAvailable(providerID, msg.Model.Model) {
+			m.dialog.CloseDialog(dialog.ModelsID)
+			cmds = append(cmds, util.ReportError(fmt.Errorf(
+				"%s isn't offered by your %s account; choose another model",
+				msg.Model.Model, cmp.Or(msg.Provider.Name, providerID),
+			)))
+			if cmd := m.openModelsDialog(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			return tea.Batch(cmds...)
+		}
+	}
+
 	if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, msg.ModelType, msg.Model); err != nil {
 		cmds = append(cmds, util.ReportError(err))
 	} else {
@@ -2898,11 +2918,10 @@ func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.Se
 }
 
 // openAuthenticationDialogWithMethod opens the authentication dialog for
-// the method the user chose in the auth method picker. Choosing OAuth
-// clears the model for providers whose catalog depends on the sign-in
-// (OpenAI's ChatGPT models), so the flow ends by reopening the models
-// list rather than selecting the API-key model the user happened to
-// start from.
+// the method the user chose in the auth method picker. The model the
+// user selected is carried through the OAuth flow so the choice persists;
+// handleSelectModel applies it only when the signed-in catalog still
+// offers it and errors otherwise.
 func (m *UI) openAuthenticationDialogWithMethod(provider catwalk.Provider, model config.SelectedModel, modelType config.SelectedModelType, useOAuth bool) tea.Cmd {
 	isOnboarding := m.state == uiOnboarding
 
@@ -2911,7 +2930,6 @@ func (m *UI) openAuthenticationDialogWithMethod(provider catwalk.Provider, model
 		cmd tea.Cmd
 	)
 	if useOAuth {
-		model.Model = ""
 		switch provider.ID {
 		case catwalk.InferenceProviderOpenAI:
 			dlg, cmd = dialog.NewOAuthOpenAI(m.com, isOnboarding, provider, model, modelType)

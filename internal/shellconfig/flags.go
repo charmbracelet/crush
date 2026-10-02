@@ -28,6 +28,8 @@ const (
 	flagJSONObject
 	// flagJSONAny parses the value as arbitrary JSON.
 	flagJSONAny
+	// flagStringSlice parses comma-separated strings or JSON arrays of strings.
+	flagStringSlice
 )
 
 // flagOp is how a parsed flag value is written into the target map.
@@ -174,6 +176,26 @@ func parseFlagValue(spec flagSpec, args []string, i int) (any, int, error) {
 		}
 		return parsed, i + 2, nil
 
+	case flagStringSlice:
+		v, err := nextArg(args, i, name)
+		if err != nil {
+			return nil, 0, err
+		}
+		if strings.HasPrefix(v, "[") && strings.HasSuffix(v, "]") {
+			var raw []any
+			if err := json.Unmarshal([]byte(v), &raw); err == nil {
+				return raw, i + 2, nil
+			}
+		}
+		var list []any
+		for _, part := range strings.Split(v, ",") {
+			part = strings.TrimSpace(part)
+			if part != "" {
+				list = append(list, part)
+			}
+		}
+		return list, i + 2, nil
+
 	default:
 		return nil, 0, fmt.Errorf("%s: --%s has unknown flag kind", args[0], name)
 	}
@@ -194,7 +216,11 @@ func storeFlag(target map[string]any, spec flagSpec, val any) {
 		target[spec.jsonKey] = val
 	case opAppend:
 		arr, _ := target[spec.jsonKey].([]any)
-		target[spec.jsonKey] = append(arr, val)
+		if slice, ok := val.([]any); ok {
+			target[spec.jsonKey] = append(arr, slice...)
+		} else {
+			target[spec.jsonKey] = append(arr, val)
+		}
 	case opSetChild:
 		if kv, ok := val.([2]string); ok {
 			childMap(target, spec.child)[kv[0]] = kv[1]

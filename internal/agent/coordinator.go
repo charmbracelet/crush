@@ -305,18 +305,32 @@ func (c *coordinator) SetMainAgent(agentName string) error {
 	return nil
 }
 
+// transientFireRetryDelay is how long a task waits after a transient
+// fire failure (database hiccup, canceled context) before retrying.
+const transientFireRetryDelay = 30 * time.Second
+
 // fireScheduledTask runs a due scheduled task's prompt against its
 // session. The prompt is injected as a normal user turn so it respects
 // the session's busy queue: it fires between turns, never mid-response,
 // matching Claude Code's scheduler semantics.
 func (c *coordinator) fireScheduledTask(ctx context.Context, task scheduler.Task) error {
+	// A canceled context (shutdown) must never be mistaken for a dead
+	// session: the lookup below would fail with anything, and dropping
+	// durable tasks on exit would lose them.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return &scheduler.TransientError{Err: ctxErr, RetryIn: transientFireRetryDelay}
+	}
 	if _, err := c.sessions.Get(ctx, task.SessionID); err != nil {
-		// The session is gone (deleted or never persisted), so nothing
-		// this task fires can ever land. Drop the whole session's tasks,
-		// durable ones included: leaving them behind means the scheduler
-		// retries a dead session on every fire, forever.
-		c.cronStore.DropSession(task.SessionID)
-		return fmt.Errorf("session %s for scheduled task %s no longer exists", task.SessionID, task.ID)
+		// Only a session that is genuinely gone retires its tasks:
+		// leaving them behind means the scheduler retries a dead session
+		// on every fire, forever. Any other lookup failure (a brief
+		// database hiccup, a canceled context) is transient, so the task
+		// is retried instead of dropped.
+		if errors.Is(err, sql.ErrNoRows) {
+			c.cronStore.DropSession(task.SessionID)
+			return fmt.Errorf("session %s for scheduled task %s no longer exists", task.SessionID, task.ID)
+		}
+		return &scheduler.TransientError{Err: err, RetryIn: transientFireRetryDelay}
 	}
 
 	prompt := task.Prompt

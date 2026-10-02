@@ -87,6 +87,16 @@ func binaryTokens(p message.BinaryContent) int64 {
 	return imageTokens
 }
 
+// TokensForChars converts a byte count already written by a streaming
+// request into the same token measure Tokens applies to text, so progress and
+// budget speak one unit without keeping a string around to count.
+func TokensForChars(chars int64) int64 {
+	if chars <= 0 {
+		return 0
+	}
+	return (chars + charsPerToken - 1) / charsPerToken
+}
+
 // Tokens returns the approximate context cost of a plain string, using the
 // same measure as Estimate so checkpoint bookkeeping adds up.
 func Tokens(s string) int64 {

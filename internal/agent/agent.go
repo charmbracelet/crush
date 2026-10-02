@@ -1540,6 +1540,12 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID, trigger, instru
 		)
 	}
 
+	progress := &compactionProgress{
+		replaced: len(region),
+		goal:     checkpointTokens,
+		last:     time.Now().Add(-progressInterval), // the first delta always reports
+	}
+
 	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:          summaryPromptText,
 		MaxOutputTokens: &checkpointTokens,
@@ -1559,6 +1565,9 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID, trigger, instru
 		},
 		OnReasoningDelta: func(id string, text string) error {
 			summaryMessage.AppendReasoningContent(text)
+			if note := progress.advance(0); note != "" {
+				a.publishSummarizing(sessionID, currentSession.Title, false, note)
+			}
 			return a.messages.Update(genCtx, summaryMessage)
 		},
 		OnReasoningEnd: func(id string, reasoning fantasy.ReasoningContent) error {
@@ -1573,6 +1582,9 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID, trigger, instru
 		},
 		OnTextDelta: func(id, text string) error {
 			summaryMessage.AppendContent(text)
+			if note := progress.advance(len(text)); note != "" {
+				a.publishSummarizing(sessionID, currentSession.Title, false, note)
+			}
 			return a.messages.Update(genCtx, summaryMessage)
 		},
 	})
@@ -1935,6 +1947,46 @@ func splitCheckpoint(msgs []message.Message) (previous string, body []message.Me
 // publishSummarizing tells observers that a session is being compacted, and
 // again when it is not. Without the closing event a compaction that fails or
 // is canceled leaves observers showing "summarizing" indefinitely.
+// progressInterval is how often a streaming compaction is allowed to say
+// something. Checkpoint deltas arrive many times a second, and a status line
+// that fast reads as noise and costs a wire event each.
+const progressInterval = 750 * time.Millisecond
+
+// compactionProgress reports how much of a checkpoint has arrived, in the
+// units the budget was set in. Reasoning models spend a long moment thinking
+// before the first token of the checkpoint exists, so the report names that
+// phase rather than claiming zero progress on a job that is clearly running.
+type compactionProgress struct {
+	replaced int
+	goal     int64
+	written  int64
+	last     time.Time
+}
+
+func (p *compactionProgress) advance(n int) string {
+	p.written += int64(n)
+	if time.Since(p.last) < progressInterval {
+		return ""
+	}
+	p.last = time.Now()
+	if p.written == 0 {
+		return fmt.Sprintf("Compacting %d messages \u00b7 thinking\u2026", p.replaced)
+	}
+	return fmt.Sprintf(
+		"Compacting %d messages \u00b7 checkpoint %s/%s tokens",
+		p.replaced,
+		humanTokens(compaction.TokensForChars(p.written)),
+		humanTokens(p.goal),
+	)
+}
+
+func humanTokens(n int64) string {
+	if n < 1000 {
+		return strconv.FormatInt(n, 10)
+	}
+	return fmt.Sprintf("%.1fk", float64(n)/1000)
+}
+
 func (a *sessionAgent) publishSummarizing(sessionID, title string, done bool, progress string) {
 	if a.notify == nil {
 		return

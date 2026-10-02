@@ -289,6 +289,13 @@ type UI struct {
 
 	// isCanceling tracks whether the user has pressed escape once to cancel.
 	isCanceling bool
+	// summarizingNote is the in-flight status of a compaction, surfaced
+	// through the editor placeholder, and summarizingNoteSession is the
+	// session it belongs to. The pair rather than a bare string because a
+	// compaction keeps running when the user switches away, and its status
+	// must not follow them to the next session.
+	summarizingNote        string
+	summarizingNoteSession string
 
 	// bangMode tracks whether the editor is in bang (!) shell mode.
 	bangMode     bool
@@ -1657,6 +1664,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Textarea placeholder logic
 		if m.bangMode {
 			m.textarea.Placeholder = "Run a shell command"
+		} else if m.compactionVisible() {
+			m.textarea.Placeholder = m.summarizingNote
 		} else if m.isAgentBusy() {
 			m.textarea.Placeholder = m.workingPlaceholder
 		} else if m.mode == uiInputModePlan {
@@ -1664,7 +1673,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.textarea.Placeholder = m.readyPlaceholder
 		}
-		if !m.bangMode && m.mode != uiInputModePlan && m.yoloModeCached() {
+		if m.summarizingNote == "" && !m.bangMode && m.mode != uiInputModePlan && m.yoloModeCached() {
 			m.textarea.Placeholder = "Go crazy"
 		}
 	}
@@ -5973,6 +5982,13 @@ func (m *UI) openPlanHandoff() {
 
 // handleAgentNotification translates domain agent events into desktop
 // notifications using the UI notification backend.
+// compactionVisible reports whether the in-flight compaction note describes
+// the session the user is looking at. A compaction keeps running when they
+// switch away, and its status must not follow them to the next session.
+func (m *UI) compactionVisible() bool {
+	return m.summarizingNote != "" && m.session != nil && m.summarizingNoteSession == m.session.ID
+}
+
 func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 	var cmds []tea.Cmd
 	switch n.Type {
@@ -5999,11 +6015,23 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 	case notify.TypeAWSSSOAuthResult:
 		return m.handleAWSSSOAuthResult(n.Message)
 	case notify.TypeSummarizing:
-		// Compaction is quiet work with a visible result. Report what it did
-		// once it ends, so a long pause is not mistaken for a hang and a
-		// failed compaction is not silently ignored. The chat already spins
-		// while it runs, and the session update refreshes the context meter.
-		if !n.Done || n.Progress == "" {
+		// While a compaction runs the placeholder says what it is doing and
+		// how far along it is, so minutes of streaming are not mistaken for a
+		// hang; when it ends the toast reports the outcome. The chat already
+		// spins, and the session update refreshes the context meter.
+		if m.session == nil || n.SessionID != m.session.ID {
+			return nil
+		}
+		if !n.Done {
+			m.summarizingNote = n.Progress
+			m.summarizingNoteSession = n.SessionID
+			m.invalidateFrames()
+			return nil
+		}
+		m.summarizingNote = ""
+		m.summarizingNoteSession = ""
+		m.invalidateFrames()
+		if n.Progress == "" {
 			return nil
 		}
 		return util.ReportInfo(n.Progress)

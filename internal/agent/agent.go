@@ -1386,7 +1386,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID, instructions st
 	// second time, and measure the cut against the live transcript ahead of
 	// it.
 	previousCheckpoint, body := splitCheckpoint(msgs)
-	cut := compaction.Plan(body, compaction.DefaultPolicy)
+	cut := compaction.Plan(body, a.compactionPolicy(int64(largeModel.CatwalkCfg.ContextWindow)))
 	region := body
 	if cut.Found {
 		// Keep the recent turns verbatim. The next model sees them as written
@@ -1871,6 +1871,32 @@ func (a *sessionAgent) publishSummarizing(sessionID, title string, done bool, pr
 		Done:         done,
 		Progress:     progress,
 	})
+}
+
+// compactionOptions returns the configured compaction options, or nil when
+// the agent has no config store.
+func (a *sessionAgent) compactionOptions() *config.CompactionOptions {
+	if a.cfg == nil {
+		return nil
+	}
+	cfg := a.cfg.Config()
+	if cfg == nil {
+		return nil
+	}
+	return cfg.Options.Compaction
+}
+
+// compactionPolicy is the checkpoint policy in force for a model with the
+// given context window. The window is a caller argument rather than agent
+// state because an agent's model can change underneath it.
+func (a *sessionAgent) compactionPolicy(contextWindow int64) compaction.Policy {
+	var configured int64
+	if opts := a.compactionOptions(); opts != nil {
+		configured = int64(opts.TailTokens)
+	}
+	p := compaction.DefaultPolicy
+	p.KeepRecentTokens = compaction.TailBudget(contextWindow, configured)
+	return p
 }
 
 // compactionTranscriptDir is where displaced transcript regions are kept, or

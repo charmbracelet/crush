@@ -28,16 +28,47 @@ type Policy struct {
 	// KeepRecentTokens is the budget of most recent conversation retained
 	// verbatim instead of summarized.
 	KeepRecentTokens int64
-	// MinTailTurns is the number of recent user turns always retained,
-	// however large they are. It keeps the cut out of a run of tiny turns.
+	// MinTailTurns is the number of recent user turns to retain when they fit.
+	// It is a preference, not a guarantee: one agentic turn now routinely runs
+	// to a hundred tool calls, and treating the floor as unconditional lets a
+	// single turn swallow the whole budget, which is how a compaction ends up
+	// keeping everything it meant to free.
 	MinTailTurns int
+	// MaxTailTokens is how large the retained tail may grow while honoring
+	// MinTailTurns. Zero means twice KeepRecentTokens.
+	MaxTailTokens int64
 }
 
-// DefaultPolicy keeps the most recent ~20k tokens and never fewer than two
-// user turns.
+// DefaultPolicy keeps the most recent ~20k tokens and, when they fit, no fewer
+// than two user turns. Use TailBudget to size the tail for a real model.
 var DefaultPolicy = Policy{
 	KeepRecentTokens: 20_000,
 	MinTailTurns:     2,
+}
+
+const (
+	// TailWindowRatio is the share of a model's context window a retained tail
+	// may claim. A fixed token count is wrong in both directions: 20k is a
+	// rounding error on a 600k window and most of a 65k one, and the tail has
+	// to leave room for the fixed cost every request carries - system prompt
+	// and tool definitions - on top of the checkpoint.
+	TailWindowRatio = 0.15
+	// MinTailTokens is the smallest tail ever retained, below which the model
+	// is left with no working set at all.
+	MinTailTokens = 4_096
+)
+
+// TailBudget returns how many tokens of recent conversation a compaction keeps
+// verbatim: an explicit configuration always wins, otherwise a fraction of the
+// model's context window.
+func TailBudget(contextWindow, configured int64) int64 {
+	if configured > 0 {
+		return configured
+	}
+	if contextWindow <= 0 {
+		return DefaultPolicy.KeepRecentTokens
+	}
+	return max(int64(float64(contextWindow)*TailWindowRatio), MinTailTokens)
 }
 
 const (
@@ -143,7 +174,8 @@ type Cut struct {
 // The cut is always a user turn boundary, so the summarized region is a whole
 // number of turns and can never split a tool call from its result. Within
 // that constraint it keeps as close to Policy.KeepRecentTokens as it can, then
-// walks the cut backwards until at least Policy.MinTailTurns are retained.
+// walks the cut backwards until at least Policy.MinTailTurns are retained, so
+// long as that keeps the tail inside Policy.MaxTailTokens.
 func Plan(msgs []message.Message, policy Policy) Cut {
 	if policy.KeepRecentTokens <= 0 || len(msgs) < 2 {
 		return Cut{}
@@ -172,21 +204,29 @@ func Plan(msgs []message.Message, policy Policy) Cut {
 		return Cut{}
 	}
 
+	// Widen to honor the turn floor, but only while the tail stays inside its
+	// ceiling. One agentic turn routinely carries a hundred tool calls, and
+	// honoring the floor regardless of size is what let a 250-message tail
+	// stand in for a 20k one.
+	ceiling := policy.MaxTailTokens
+	if ceiling <= 0 {
+		ceiling = policy.KeepRecentTokens * 2
+	}
+	keptTokens := EstimateAll(msgs[cut:])
 	for policy.MinTailTurns > 0 && countTurns(msgs[cut:]) < policy.MinTailTurns {
 		prev := snapBackward(cuts, cut)
-		if prev < 0 || prev == cut {
+		if prev < 0 || prev >= cut {
 			break
 		}
-		cut = prev
+		if wider := keptTokens + EstimateAll(msgs[prev:cut]); wider <= ceiling {
+			cut, keptTokens = prev, wider
+		} else {
+			break
+		}
 	}
 
 	if cut <= 0 {
 		return Cut{}
-	}
-
-	var keptTokens int64
-	for _, msg := range msgs[cut:] {
-		keptTokens += Estimate(msg)
 	}
 
 	return Cut{

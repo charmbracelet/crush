@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"charm.land/fantasy"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/scheduler"
 )
 
@@ -65,15 +66,18 @@ func formatTaskTime(t time.Time) string {
 	return t.Local().Format("2006-01-02 15:04:05 MST")
 }
 
-// NewCronCreateTool creates the CronCreate tool.
-func NewCronCreateTool(store *scheduler.Store) fantasy.AgentTool {
+// NewCronCreateTool creates the CronCreate tool. Creating a task is a
+// side effect with a delayed blast radius (a prompt runs later, when
+// nobody may be watching), so it goes through the permission prompt
+// like every other side-effecting tool rather than running silently.
+func NewCronCreateTool(store *scheduler.Store, permissions permission.Service) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		CronCreateToolName,
 		cronCreateDescription,
 		func(ctx context.Context, params CronCreateParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			sessionID, err := cronSessionID(ctx)
 			if err != nil {
-				return fantasy.ToolResponse{}, err
+				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
 
 			recurring := true
@@ -81,15 +85,37 @@ func NewCronCreateTool(store *scheduler.Store) fantasy.AgentTool {
 				recurring = *params.Recurring
 			}
 
-			task, err := store.Create(sessionID, params.Cron, params.Prompt, recurring, params.Durable)
+			kind := "recurring"
+			if !recurring {
+				kind = "one-shot"
+			}
+			granted, err := permissions.Request(
+				ctx,
+				permission.CreatePermissionRequest{
+					SessionID:   sessionID,
+					ToolCallID:  call.ID,
+					ToolName:    CronCreateToolName,
+					Action:      "create",
+					Description: fmt.Sprintf("Schedule %s task (%s): %s", kind, params.Cron, params.Prompt),
+					Params:      params,
+				},
+			)
 			if err != nil {
 				return fantasy.ToolResponse{}, err
 			}
-
-			kind := "recurring"
-			if !task.Recurring {
-				kind = "one-shot"
+			if !granted {
+				return NewPermissionDeniedResponse(), nil
 			}
+
+			// Validation failures (bad cron expression, fire time
+			// already passed, session at the task limit) are returned as
+			// error responses the model can read and retry, matching the
+			// other tools.
+			task, err := store.Create(sessionID, params.Cron, params.Prompt, recurring, params.Durable)
+			if err != nil {
+				return fantasy.NewTextErrorResponse(err.Error()), nil
+			}
+
 			storage := "session-only (in-memory)"
 			if task.Durable {
 				storage = "durable (persisted to disk)"
@@ -115,7 +141,7 @@ func NewCronListTool(store *scheduler.Store) fantasy.AgentTool {
 		func(ctx context.Context, params struct{}, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			sessionID, err := cronSessionID(ctx)
 			if err != nil {
-				return fantasy.ToolResponse{}, err
+				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
 
 			tasks := store.List(sessionID)
@@ -157,15 +183,15 @@ func NewCronDeleteTool(store *scheduler.Store) fantasy.AgentTool {
 		func(ctx context.Context, params CronDeleteParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			sessionID, err := cronSessionID(ctx)
 			if err != nil {
-				return fantasy.ToolResponse{}, err
+				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
 			if params.ID == "" {
-				return fantasy.ToolResponse{}, errors.New("id is required")
+				return fantasy.NewTextErrorResponse("id is required"), nil
 			}
 
 			task, err := store.Delete(sessionID, params.ID)
 			if errors.Is(err, scheduler.ErrTaskNotFound) {
-				return fantasy.ToolResponse{}, fmt.Errorf("no scheduled task with ID %q in this session", params.ID)
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("no scheduled task with ID %q in this session", params.ID)), nil
 			}
 			if err != nil {
 				return fantasy.ToolResponse{}, err

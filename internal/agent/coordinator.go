@@ -536,8 +536,12 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig, sessionI
 		if !hasReasoningEffort && shouldSetEffort {
 			mergedOptions["reasoning_effort"] = reasoningEffort
 		}
-		if _, hasCacheKey := mergedOptions["prompt_cache_key"]; !hasCacheKey && sessionID != "" {
-			mergedOptions["prompt_cache_key"] = sessionID
+		// OpenAI uses prompt_cache_key to route requests that share a
+		// prefix to the same cache. Other providers sharing this API
+		// shape may not accept the field, so leave them alone.
+		isOpenAI := providerCfg.ID == string(catwalk.InferenceProviderOpenAI)
+		if _, hasCacheKey := mergedOptions["prompt_cache_key"]; !hasCacheKey && isOpenAI && sessionID != "" {
+			mergedOptions["prompt_cache_key"] = session.HashID(sessionID)
 		}
 		if openai.IsResponsesModel(model.CatwalkCfg.ID) {
 			if openai.IsResponsesReasoningModel(model.CatwalkCfg.ID) {

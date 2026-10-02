@@ -342,9 +342,15 @@ type LSPConfig struct {
 // CompactionOptions controls how a long session is compressed to fit its
 // context window.
 type CompactionOptions struct {
+	// PruneToolResults replaces the output of tool calls that are no longer
+	// part of the recent working set with a one-line skeleton naming what ran
+	// and how much was dropped. The tool call itself stays, so the model
+	// knows what it already tried and can run it again. Stored transcripts
+	// are never modified.
+	PruneToolResults *bool `json:"prune_tool_results,omitempty" jsonschema:"description=Replace the output of stale tool calls with a one-line skeleton naming what ran; stored history is never modified,default=true"`
 	// TailTokens is how much of the most recent conversation a compaction
 	// keeps verbatim instead of folding into its checkpoint.
-	TailTokens int `json:"tail_tokens,omitempty" jsonschema:"description=Tokens of recent conversation a compaction keeps verbatim,default=20000,example=8000,example=40000"`
+	TailTokens int `json:"tail_tokens,omitempty" jsonschema:"description=Tokens of recent conversation a compaction keeps verbatim. When unset this is 15% of the model's context window,example=8000,example=40000"`
 }
 
 type TUIOptions struct {

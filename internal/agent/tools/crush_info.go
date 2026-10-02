@@ -400,6 +400,22 @@ func writeOptions(b *strings.Builder, cfg *config.ConfigStore) {
 	autoSummarize := !c.Options.DisableAutoSummarize
 	opts = append(opts, kv{"auto_summarize", fmt.Sprintf("%v", autoSummarize)})
 
+	// A compaction sizes its retained tail from the model's context window, so
+	// report the override when there is one rather than a number that would be
+	// wrong for most models.
+	tail := "15% of the context window"
+	pruneToolResults := true
+	if co := c.Options.Compaction; co != nil {
+		if co.TailTokens > 0 {
+			tail = fmt.Sprintf("%d tokens", co.TailTokens)
+		}
+		if co.PruneToolResults != nil {
+			pruneToolResults = *co.PruneToolResults
+		}
+	}
+	opts = append(opts, kv{"compaction_tail", tail})
+	opts = append(opts, kv{"compaction_prune_tool_results", fmt.Sprintf("%v", pruneToolResults)})
+
 	if c.Options.TUI != nil {
 		opts = append(opts, kv{"compact_mode", fmt.Sprintf("%v", c.Options.TUI.CompactMode)})
 		// An empty DiffMode means "follow the terminal width"; report that

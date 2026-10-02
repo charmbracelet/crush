@@ -71,6 +71,18 @@ func (a *AgentToolMessageItem) Advance() bool {
 	return changed
 }
 
+// restyleAnim implements [animRestyler]. It also reaches nested tools,
+// which are not list entries of their own and therefore never receive
+// the call directly.
+func (a *AgentToolMessageItem) restyleAnim() {
+	a.baseToolMessageItem.restyleAnim()
+	for _, nested := range a.nestedTools {
+		if ar, ok := nested.(animRestyler); ok {
+			ar.restyleAnim()
+		}
+	}
+}
+
 // advanceNested advances every spinning animatable tool in tools and
 // reports whether any of them changed.
 func advanceNested(tools []ToolMessageItem) bool {
@@ -238,6 +250,17 @@ func (a *AgenticFetchToolMessageItem) Advance() bool {
 		a.Bump()
 	}
 	return changed
+}
+
+// restyleAnim implements [animRestyler]. See
+// [AgentToolMessageItem.restyleAnim] for the nested-tool rationale.
+func (a *AgenticFetchToolMessageItem) restyleAnim() {
+	a.baseToolMessageItem.restyleAnim()
+	for _, nested := range a.nestedTools {
+		if ar, ok := nested.(animRestyler); ok {
+			ar.restyleAnim()
+		}
+	}
 }
 
 // NestedTools returns the nested tools.

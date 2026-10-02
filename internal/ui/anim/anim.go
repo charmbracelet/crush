@@ -139,6 +139,7 @@ type Anim struct {
 	id               string
 	suffix           func() string
 	suffixColor      color.Color
+	settings         Settings
 }
 
 // New creates a new Anim instance with the specified width and label.
@@ -185,6 +186,19 @@ func New(opts Settings) *Anim {
 	if opts.NoScramble {
 		a.initialized.Store(true)
 	}
+
+	a.settings = opts
+	a.buildFrames()
+
+	return a
+}
+
+// buildFrames generates or fetches from the cache all pre-rendered
+// animation frames for the current settings. Calling it again after
+// SetColors rebuilds the frames while the step counters keep advancing,
+// so a theme swap mid-animation does not restart the spinner.
+func (a *Anim) buildFrames() {
+	opts := a.settings
 
 	// Check cache first
 	cacheKey := settingsHash(opts)
@@ -310,18 +324,21 @@ func New(opts Settings) *Anim {
 	// different ids — distinct assistant messages, different tool
 	// calls, "Thinking" vs "Generating" labels — fade in with
 	// different patterns instead of marching in lock-step.
-	birthSeed := xxh3.HashString(a.id + "|" + cacheKey)
-	birthRng := rand.New(rand.NewPCG(birthSeed, ^birthSeed))
-	a.birthSteps = make([]int, a.width)
-	for i := range a.birthSteps {
-		a.birthSteps[i] = birthRng.IntN(maxBirthSteps)
+	// A rebuild only for new colors keeps the existing schedule so
+	// an in-flight fade-in is not disturbed.
+	if len(a.birthSteps) != a.width {
+		birthSeed := xxh3.HashString(a.id + "|" + cacheKey)
+		birthRng := rand.New(rand.NewPCG(birthSeed, ^birthSeed))
+		a.birthSteps = make([]int, a.width)
+		for i := range a.birthSteps {
+			a.birthSteps[i] = birthRng.IntN(maxBirthSteps)
+		}
 	}
-
-	return a
 }
 
 // SetLabel updates the label text and re-renders it.
 func (a *Anim) SetLabel(newLabel string) {
+	a.settings.Label = newLabel
 	a.labelWidth = lipgloss.Width(newLabel)
 
 	// Update total width. Skip the label gap when there are no cycling chars.
@@ -335,6 +352,33 @@ func (a *Anim) SetLabel(newLabel string) {
 
 	// Re-render the label
 	a.renderLabel(newLabel)
+}
+
+// SetColors updates the animation's colors and rebuilds its pre-rendered
+// frames. It is used when the theme changes while a spinner is live, so
+// the animation picks up the new gradient, label, and suffix colors
+// without restarting mid-flight. A nil suffixColor falls back to the
+// label color; unset gradient colors fall back to the defaults.
+func (a *Anim) SetColors(labelColor, gradColorA, gradColorB, suffixColor color.Color) {
+	opts := a.settings
+	opts.LabelColor = labelColor
+	opts.GradColorA = gradColorA
+	opts.GradColorB = gradColorB
+	opts.SuffixColor = suffixColor
+	if colorIsUnset(opts.GradColorA) {
+		opts.GradColorA = defaultGradColorA
+	}
+	if colorIsUnset(opts.GradColorB) {
+		opts.GradColorB = defaultGradColorB
+	}
+	a.settings = opts
+	a.labelColor = opts.LabelColor
+	if opts.SuffixColor != nil {
+		a.suffixColor = opts.SuffixColor
+	} else {
+		a.suffixColor = opts.LabelColor
+	}
+	a.buildFrames()
 }
 
 // renderLabel renders the label with the current label color.

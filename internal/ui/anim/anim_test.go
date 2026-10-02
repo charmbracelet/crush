@@ -1,6 +1,8 @@
 package anim
 
 import (
+	"image/color"
+	"slices"
 	"testing"
 	"time"
 
@@ -70,4 +72,47 @@ func TestAdvanceIndependentInstances(t *testing.T) {
 
 	a2.Advance()
 	require.Equal(t, int64(1), a2.framesSinceStart.Load())
+}
+
+// TestSetColorsRebuildsFrames verifies that a theme swap on a live spinner
+// rebuilds the pre-rendered frames with the new colors while preserving
+// animation progress.
+func TestSetColorsRebuildsFrames(t *testing.T) {
+	t.Parallel()
+
+	red := color.RGBA{R: 0xff, A: 0xff}
+	blue := color.RGBA{B: 0xff, A: 0xff}
+	green := color.RGBA{G: 0xff, A: 0xff}
+	yellow := color.RGBA{R: 0xff, G: 0xff, A: 0xff}
+
+	a := New(Settings{
+		ID:         "theme-swap",
+		Size:       5,
+		Label:      "Working",
+		LabelColor: red,
+		GradColorA: red,
+		GradColorB: blue,
+	})
+	for range 3 {
+		a.Advance()
+	}
+
+	step := a.step.Load()
+	widthBefore := a.width
+	birthBefore := slices.Clone(a.birthSteps)
+
+	a.SetColors(green, green, yellow, yellow)
+
+	require.Equal(t, step, a.step.Load(), "color swaps must not reset the animation")
+	require.Equal(t, widthBefore, a.width, "color swaps must not change the layout")
+	require.Equal(t, birthBefore, a.birthSteps, "the birth schedule must survive a color swap")
+	_, rebuilt := animCacheMap.Get(settingsHash(a.settings))
+	require.True(t, rebuilt, "the pre-rendered frames must be rebuilt for the new colors")
+	require.Equal(t, color.Color(green), a.labelColor)
+	require.Equal(t, color.Color(yellow), a.suffixColor)
+
+	// A nil suffix color falls back to the label color, matching New.
+	b := New(Settings{ID: "suffix-fallback", Size: 5, LabelColor: red, GradColorA: red, GradColorB: blue})
+	b.SetColors(green, green, yellow, nil)
+	require.Equal(t, color.Color(green), b.suffixColor)
 }

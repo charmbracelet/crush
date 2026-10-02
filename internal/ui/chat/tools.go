@@ -315,6 +315,11 @@ func (t *baseToolMessageItem) Spinning() bool {
 	return t.isSpinning()
 }
 
+// restyleAnim implements [animRestyler].
+func (t *baseToolMessageItem) restyleAnim() {
+	t.anim.SetColors(t.sty.WorkingLabelColor, t.sty.WorkingGradFromColor, t.sty.WorkingGradToColor, nil)
+}
+
 // Advance implements [Animatable].
 //
 // Bumps the F6 list-cache version so the next draw re-renders this

@@ -1079,14 +1079,19 @@ func toolOutputMultiEditDiffContent(sty *styles.Styles, file string, meta tools.
 	return sty.Tool.Body.Render(formatted)
 }
 
+// roundedTree styles a tool tree so multiline children stay aligned: the
+// enumerator draws each branch and the indenter continues it down the child's
+// wrapped lines. They share one width because the continuation bar only lines
+// up with the branch when their geometry matches.
+func roundedTree(t *tree.Tree, width int) *tree.Tree {
+	return t.
+		Enumerator(roundedEnumerator(2, width)).
+		Indenter(roundedIndenter(2, width))
+}
+
 // roundedEnumerator creates a tree enumerator with rounded corners.
 func roundedEnumerator(lPadding, width int) tree.Enumerator {
-	if width == 0 {
-		width = 2
-	}
-	if lPadding == 0 {
-		lPadding = 1
-	}
+	lPadding, width = enumeratorDims(lPadding, width)
 	return func(children tree.Children, index int) string {
 		line := strings.Repeat("─", width)
 		padding := strings.Repeat(" ", lPadding)
@@ -1095,6 +1100,31 @@ func roundedEnumerator(lPadding, width int) tree.Enumerator {
 		}
 		return padding + "├" + line
 	}
+}
+
+// roundedIndenter continues a branch down a child's wrapped lines, matching
+// roundedEnumerator's geometry so the bar stays under the branch.
+func roundedIndenter(lPadding, width int) tree.Indenter {
+	lPadding, width = enumeratorDims(lPadding, width)
+	return func(children tree.Children, index int) string {
+		padding := strings.Repeat(" ", lPadding)
+		if children.Length()-1 == index {
+			return padding + " " + strings.Repeat(" ", width)
+		}
+		return padding + "│" + strings.Repeat(" ", width)
+	}
+}
+
+// enumeratorDims applies the shared defaults so the enumerator and indenter
+// agree on geometry.
+func enumeratorDims(lPadding, width int) (int, int) {
+	if width == 0 {
+		width = 2
+	}
+	if lPadding == 0 {
+		lPadding = 1
+	}
+	return lPadding, width
 }
 
 // toolOutputMarkdownContent renders markdown content with optional truncation.

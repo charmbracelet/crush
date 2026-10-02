@@ -33,7 +33,22 @@ func Estimate(msg message.Message) int64 {
 		case message.ToolCall:
 			total += framingTokens + textTokens(p.Name) + textTokens(p.Input)
 		case message.ToolResult:
-			total += framingTokens + textTokens(p.Content) + textTokens(p.Data) + textTokens(p.Metadata)
+			// Metadata is not counted on purpose: it is UI bookkeeping, where
+			// tools park exit status and spill paths for the TUI to render,
+			// and it never reaches a provider. Including it made one real
+			// session estimate at 4x what the provider billed for it, which
+			// in turn made compaction fire at a quarter of the window.
+			total += framingTokens + textTokens(p.Content)
+			switch {
+			case p.Data == "":
+			case strings.HasPrefix(p.MIMEType, "image/"):
+				// Images are billed by tile rather than by the length of
+				// their base64 encoding, which is three quarters bigger than
+				// the bytes themselves.
+				total += imageTokens
+			default:
+				total += textTokens(p.Data)
+			}
 		case message.ShellCommand:
 			total += framingTokens + textTokens(p.Command) + textTokens(p.Output)
 		case message.ImageURLContent:

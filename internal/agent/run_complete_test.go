@@ -3,12 +3,117 @@ package agent
 import (
 	"context"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/agent/notify"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/session"
 	"github.com/stretchr/testify/require"
 )
+
+type canceledPreparationSession struct {
+	session.Service
+}
+
+func newQueueTestAgent(t *testing.T) *sessionAgent {
+	t.Helper()
+	env := testEnv(t)
+	agent, ok := NewSessionAgent(SessionAgentOptions{
+		Sessions: env.sessions,
+		Messages: env.messages,
+	}).(*sessionAgent)
+	require.True(t, ok)
+	return agent
+}
+
+func TestPublishRunComplete_CanceledContextWithBackpressure(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		broker := pubsub.NewBrokerWithOptions[notify.RunComplete](0)
+		defer broker.Shutdown()
+		events := broker.Subscribe(t.Context())
+		a := &sessionAgent{runComplete: broker}
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		done := make(chan struct{})
+		go func() {
+			a.publishRunComplete(ctx, SessionAgentCall{}, notify.RunComplete{RunID: "queued", Cancelled: true})
+			close(done)
+		}()
+		synctest.Wait()
+		select {
+		case <-done:
+			t.Fatal("publication returned before the canceled turn's event could be delivered")
+		default:
+		}
+		event := <-events
+		require.Equal(t, "queued", event.Payload.RunID)
+		require.True(t, event.Payload.Cancelled)
+		<-done
+	})
+}
+
+func TestPublishCanceledQueueDrops_SharedDeadline(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		broker := pubsub.NewBrokerWithOptions[notify.RunComplete](0)
+		broker.SetMustDeliverTimeout(10 * time.Second)
+		defer broker.Shutdown()
+		broker.Subscribe(t.Context())
+		a := &sessionAgent{runComplete: broker}
+		start := time.Now()
+		a.publishCanceledQueueDrops([]SessionAgentCall{
+			{SessionID: "session", RunID: "A"},
+			{SessionID: "session", RunID: "B"},
+		})
+		require.Equal(t, 5*time.Second, time.Since(start), "queue clearing has one budget, not one per dropped prompt")
+	})
+}
+
+func (s canceledPreparationSession) Get(ctx context.Context, id string) (session.Session, error) {
+	return session.Session{}, ctx.Err()
+}
+
+func TestRun_OwnerlessPreparationCancellationPublishesWithBackpressure(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		broker := pubsub.NewBrokerWithOptions[notify.RunComplete](0)
+		defer broker.Shutdown()
+		completions := broker.Subscribe(t.Context())
+		sa := NewSessionAgent(SessionAgentOptions{
+			Sessions: canceledPreparationSession{}, RunComplete: broker,
+		})
+		// A promoted call inherits the outer dispatch's context marker.
+		// Publishing its completion must not mark that outer call complete.
+		ctx, cancel := context.WithCancel(WithRunCompleteMarker(WithRunID(t.Context(), "outer")))
+		cancel()
+		done := make(chan error, 1)
+		go func() {
+			_, err := sa.Run(ctx, SessionAgentCall{SessionID: "session", RunID: "promoted", Prompt: "queued"})
+			done <- err
+		}()
+		synctest.Wait()
+		select {
+		case err := <-done:
+			t.Fatalf("Run returned before its terminal event could be delivered: %v", err)
+		default:
+		}
+		select {
+		case event := <-completions:
+			require.Equal(t, "promoted", event.Payload.RunID)
+			require.Equal(t, "session", event.Payload.SessionID)
+			require.True(t, event.Payload.Cancelled)
+			require.Contains(t, event.Payload.Error, context.Canceled.Error())
+		case <-time.After(time.Second):
+			t.Fatal("cancelled preparation lost its terminal event")
+		}
+		require.ErrorIs(t, <-done, context.Canceled)
+		require.False(t, RunCompletePublished(ctx))
+		require.False(t, sa.IsSessionBusy("session"))
+	})
+}
 
 // TestSessionAgentRun_QueueStripsOnComplete verifies that when a Run
 // call is enqueued (because the session is already busy), the
@@ -21,11 +126,7 @@ import (
 func TestSessionAgentRun_QueueStripsOnComplete(t *testing.T) {
 	t.Parallel()
 
-	env := testEnv(t)
-	a := NewSessionAgent(SessionAgentOptions{
-		Sessions: env.sessions,
-		Messages: env.messages,
-	}).(*sessionAgent)
+	a := newQueueTestAgent(t)
 
 	const sessionID = "queued-session"
 	// Mark the session as busy so Run takes the queue branch
@@ -36,10 +137,11 @@ func TestSessionAgentRun_QueueStripsOnComplete(t *testing.T) {
 	hook := func(notify.RunComplete) { called = true }
 
 	res, err := a.Run(t.Context(), SessionAgentCall{
-		SessionID:  sessionID,
-		RunID:      "run-xyz",
-		Prompt:     "queued prompt",
-		OnComplete: hook,
+		SessionID:        sessionID,
+		RunID:            "run-xyz",
+		Prompt:           "queued prompt",
+		PermissionPolicy: permission.RequestPolicyAutoApprove,
+		OnComplete:       hook,
 	})
 	require.NoError(t, err)
 	require.Nil(t, res, "queued Run must return (nil, nil)")
@@ -56,6 +158,8 @@ func TestSessionAgentRun_QueueStripsOnComplete(t *testing.T) {
 	require.Equal(t, "run-xyz", queued[0].RunID,
 		"RunID must be preserved on the queued copy so the drained turn's "+
 			"RunComplete still correlates with the originating SendMessage")
+	require.Equal(t, permission.RequestPolicyAutoApprove, queued[0].PermissionPolicy,
+		"permission policy must be preserved so the queued turn does not inherit the active turn's policy")
 }
 
 // TestDrainQueueForStep_FiltersUnderDispatchLock verifies that the queue
@@ -69,11 +173,7 @@ func TestSessionAgentRun_QueueStripsOnComplete(t *testing.T) {
 func TestDrainQueueForStep_FiltersUnderDispatchLock(t *testing.T) {
 	t.Parallel()
 
-	env := testEnv(t)
-	a := NewSessionAgent(SessionAgentOptions{
-		Sessions: env.sessions,
-		Messages: env.messages,
-	}).(*sessionAgent)
+	a := newQueueTestAgent(t)
 
 	const sessionID = "drain-session"
 	a.messageQueue.Set(sessionID, []SessionAgentCall{
@@ -85,7 +185,7 @@ func TestDrainQueueForStep_FiltersUnderDispatchLock(t *testing.T) {
 	// Cancel high-water mark at seq 2: seq <= 2 and seq == 0 are covered.
 	a.cancelMark.Set(sessionID, 2)
 
-	fold, canceledWithRunID := a.drainQueueForStep(sessionID)
+	fold, canceledWithRunID := a.drainQueueForStep(t.Context(), sessionID)
 
 	require.Len(t, fold, 1,
 		"only the follow-up queued after the cancel (seq > mark) must be folded")
@@ -102,11 +202,7 @@ func TestDrainQueueForStep_FiltersUnderDispatchLock(t *testing.T) {
 func TestDrainQueueForStep_NoMarkFoldsAllNonRunID(t *testing.T) {
 	t.Parallel()
 
-	env := testEnv(t)
-	a := NewSessionAgent(SessionAgentOptions{
-		Sessions: env.sessions,
-		Messages: env.messages,
-	}).(*sessionAgent)
+	a := newQueueTestAgent(t)
 
 	const sessionID = "drain-nomark"
 	a.messageQueue.Set(sessionID, []SessionAgentCall{
@@ -114,9 +210,55 @@ func TestDrainQueueForStep_NoMarkFoldsAllNonRunID(t *testing.T) {
 		{SessionID: sessionID, Prompt: "b", acceptSeq: 5},
 	})
 
-	fold, canceledWithRunID := a.drainQueueForStep(sessionID)
+	fold, canceledWithRunID := a.drainQueueForStep(t.Context(), sessionID)
 	require.Len(t, fold, 2, "no cancel mark means all non-RunID queued calls are folded")
 	require.Empty(t, canceledWithRunID)
+}
+
+func TestDrainQueueForStep_KeepsDifferentPermissionPolicyQueued(t *testing.T) {
+	t.Parallel()
+
+	a := newQueueTestAgent(t)
+
+	const sessionID = "drain-permission-policy"
+	calls := []SessionAgentCall{
+		{
+			SessionID:        sessionID,
+			Prompt:           "steer-before-queued",
+			PermissionPolicy: permission.RequestPolicyPrompt,
+		},
+		{
+			SessionID:        sessionID,
+			Prompt:           "different-policy",
+			PermissionPolicy: permission.RequestPolicyAutoApprove,
+		},
+		{
+			SessionID:        sessionID,
+			Prompt:           "steer-after-queued",
+			PermissionPolicy: permission.RequestPolicyPrompt,
+		},
+	}
+	promptCalls := []SessionAgentCall{calls[0], calls[2]}
+	autoApproveCalls := []SessionAgentCall{calls[1]}
+	a.messageQueue.Set(sessionID, calls)
+
+	fold, canceledWithRunID := a.drainQueueForStep(t.Context(), sessionID)
+	require.Equal(t, promptCalls, fold)
+	require.Empty(t, canceledWithRunID)
+
+	kept, ok := a.messageQueue.Get(sessionID)
+	require.True(t, ok)
+	require.Equal(t, autoApproveCalls, kept)
+
+	// Reversing the active policy must not auto-approve interactive steering.
+	a.messageQueue.Set(sessionID, calls)
+	ctx := permission.WithRequestPolicy(t.Context(), permission.RequestPolicyAutoApprove)
+	fold, canceledWithRunID = a.drainQueueForStep(ctx, sessionID)
+	require.Equal(t, autoApproveCalls, fold)
+	require.Empty(t, canceledWithRunID)
+	kept, ok = a.messageQueue.Get(sessionID)
+	require.True(t, ok)
+	require.Equal(t, promptCalls, kept)
 }
 
 // TestDrainQueueForStep_KeepsRunIDPromptsQueued is the core of fix 2: a
@@ -129,65 +271,82 @@ func TestDrainQueueForStep_NoMarkFoldsAllNonRunID(t *testing.T) {
 func TestDrainQueueForStep_KeepsRunIDPromptsQueued(t *testing.T) {
 	t.Parallel()
 
-	env := testEnv(t)
-	a := NewSessionAgent(SessionAgentOptions{
-		Sessions: env.sessions,
-		Messages: env.messages,
-	}).(*sessionAgent)
+	a := newQueueTestAgent(t)
 
 	const sessionID = "drain-runid"
-	a.messageQueue.Set(sessionID, []SessionAgentCall{
+	calls := []SessionAgentCall{
 		{SessionID: sessionID, Prompt: "fold-me", acceptSeq: 1},
 		{SessionID: sessionID, RunID: "run-a", Prompt: "keep-me", acceptSeq: 2},
+		{SessionID: sessionID, Prompt: "fold-after-queued", acceptSeq: 3},
 		{SessionID: sessionID, RunID: "run-b", Prompt: "keep-me-too", acceptSeq: 3},
-	})
+		{SessionID: sessionID, Prompt: "continuation", turn: &turnOutcome{}, acceptSeq: 4},
+		{SessionID: sessionID, Prompt: "fold-after-continuation", acceptSeq: 5},
+	}
+	wantFold := []SessionAgentCall{calls[0], calls[2], calls[5]}
+	wantKeep := []SessionAgentCall{calls[1], calls[3], calls[4]}
+	a.messageQueue.Set(sessionID, calls)
 
-	fold, canceledWithRunID := a.drainQueueForStep(sessionID)
+	fold, canceledWithRunID := a.drainQueueForStep(t.Context(), sessionID)
 
-	require.Len(t, fold, 1, "only the non-RunID prompt is folded into the active turn")
-	require.Equal(t, "fold-me", fold[0].Prompt)
+	require.Equal(t, wantFold, fold, "steering must pass queued turns and continuations")
 	require.Empty(t, canceledWithRunID)
 
 	kept, ok := a.messageQueue.Get(sessionID)
 	require.True(t, ok, "RunID-bearing prompts must remain queued for the recursive run path")
-	require.Len(t, kept, 2)
-	require.Equal(t, "run-a", kept[0].RunID)
-	require.Equal(t, "run-b", kept[1].RunID)
+	require.Equal(t, wantKeep, kept)
 }
 
-// TestDrainQueueForStep_ReportsCanceledRunIDDrops verifies that a queued
-// prompt carrying a RunID that is dropped because a cancel covers it is
-// reported in canceledWithRunID so the caller can publish its terminal
-// cancelled RunComplete. A canceled prompt without a RunID is dropped
-// silently as before.
-func TestDrainQueueForStep_ReportsCanceledRunIDDrops(t *testing.T) {
+func TestDrainQueueForStep_OperatorSteeringInheritsActivePolicy(t *testing.T) {
+	t.Parallel()
+	for _, active := range []permission.RequestPolicy{permission.RequestPolicyPrompt, permission.RequestPolicyAutoApprove} {
+		a := newQueueTestAgent(t)
+		incoming := permission.RequestPolicyAutoApprove
+		if active == permission.RequestPolicyAutoApprove {
+			incoming = permission.RequestPolicyPrompt
+		}
+		const sessionID = "steering"
+		calls := []SessionAgentCall{
+			{SessionID: sessionID, Prompt: "independent", RunID: "run", OperatorSteering: true, PermissionPolicy: incoming},
+			{SessionID: sessionID, Prompt: "channel", Channel: "inbox", OperatorSteering: true, PermissionPolicy: incoming},
+			{SessionID: sessionID, Prompt: "operator", OperatorSteering: true, PermissionPolicy: incoming},
+			{SessionID: sessionID, Prompt: "legacy", PermissionPolicy: incoming},
+			{SessionID: sessionID, Prompt: "continuation", OperatorSteering: true, PermissionPolicy: incoming, turn: &turnOutcome{}},
+		}
+		for _, call := range calls {
+			a.enqueueCall(call)
+		}
+		ctx := permission.WithRequestPolicy(t.Context(), active)
+		fold, canceled := a.drainQueueForStep(ctx, sessionID)
+		require.Len(t, fold, 1)
+		require.Equal(t, "operator", fold[0].Prompt)
+		require.Empty(t, canceled)
+		require.Equal(t, active, permission.RequestPolicyFromContext(ctx), "steering must not upgrade or downgrade the active policy")
+		kept, ok := a.messageQueue.Get(sessionID)
+		require.True(t, ok)
+		require.Equal(t, []SessionAgentCall{calls[0], calls[1], calls[3], calls[4]}, kept)
+	}
+}
+
+func TestDrainQueueForStep_CanceledRunIDDoesNotCreateBarrier(t *testing.T) {
 	t.Parallel()
 
-	env := testEnv(t)
-	a := NewSessionAgent(SessionAgentOptions{
-		Sessions: env.sessions,
-		Messages: env.messages,
-	}).(*sessionAgent)
+	a := newQueueTestAgent(t)
 
-	const sessionID = "drain-cancel-runid"
+	const sessionID = "drain-canceled-barrier"
 	a.messageQueue.Set(sessionID, []SessionAgentCall{
-		{SessionID: sessionID, RunID: "run-canceled", Prompt: "canceled", acceptSeq: 1},
-		{SessionID: sessionID, Prompt: "canceled-no-runid", acceptSeq: 1},
-		{SessionID: sessionID, RunID: "run-survives", Prompt: "survives", acceptSeq: 5},
+		{SessionID: sessionID, RunID: "canceled-run", Prompt: "canceled", acceptSeq: 1},
+		{SessionID: sessionID, Prompt: "fold-after-canceled", acceptSeq: 3},
 	})
 	a.cancelMark.Set(sessionID, 2)
 
-	fold, canceledWithRunID := a.drainQueueForStep(sessionID)
+	fold, canceledWithRunID := a.drainQueueForStep(t.Context(), sessionID)
+	require.Len(t, fold, 1)
+	require.Equal(t, "fold-after-canceled", fold[0].Prompt)
+	require.Len(t, canceledWithRunID, 1)
+	require.Equal(t, "canceled-run", canceledWithRunID[0].RunID)
 
-	require.Empty(t, fold, "no uncanceled non-RunID prompts to fold")
-	require.Len(t, canceledWithRunID, 1,
-		"only the dropped RunID-bearing prompt needs a terminal RunComplete")
-	require.Equal(t, "run-canceled", canceledWithRunID[0].RunID)
-
-	kept, ok := a.messageQueue.Get(sessionID)
-	require.True(t, ok)
-	require.Len(t, kept, 1, "the uncanceled RunID prompt stays queued")
-	require.Equal(t, "run-survives", kept[0].RunID)
+	_, ok := a.messageQueue.Get(sessionID)
+	require.False(t, ok)
 }
 
 // TestRunCompletePublisher_MustDeliverOverTakesPublish exercises the
@@ -287,9 +446,8 @@ func TestCancel_QueuedRunIDPromptPublishesCancelledRunComplete(t *testing.T) {
 // the production drain sequence (drainQueueForStep then
 // publishCanceledQueueDrops, mirroring the PrepareStep handoff) and
 // asserts the dropped RunID-bearing prompt actually publishes exactly one
-// cancelled RunComplete on the broker. The companion bookkeeping test
-// covers the returned slice; this one covers the observable terminal
-// event.
+// cancelled RunComplete on the broker. Uncanceled prompts remain queued;
+// canceled prompts without a RunID are dropped silently.
 func TestDrainQueueForStep_DroppedRunIDPublishesCancelledRunComplete(t *testing.T) {
 	t.Parallel()
 
@@ -308,14 +466,21 @@ func TestDrainQueueForStep_DroppedRunIDPublishesCancelledRunComplete(t *testing.
 	ch := broker.Subscribe(subCtx)
 
 	const sessionID = "drain-drop-runid"
+	dropped := SessionAgentCall{SessionID: sessionID, RunID: "run-dropped", Prompt: "dropped", acceptSeq: 1}
+	survivor := SessionAgentCall{SessionID: sessionID, RunID: "run-survives", Prompt: "survives", acceptSeq: 5}
 	a.messageQueue.Set(sessionID, []SessionAgentCall{
-		{SessionID: sessionID, RunID: "run-dropped", Prompt: "dropped", acceptSeq: 1},
+		dropped,
 		{SessionID: sessionID, Prompt: "dropped-no-runid", acceptSeq: 1},
+		survivor,
 	})
 	a.cancelMark.Set(sessionID, 2)
 
-	_, canceledWithRunID := a.drainQueueForStep(sessionID)
-	require.Len(t, canceledWithRunID, 1)
+	fold, canceledWithRunID := a.drainQueueForStep(t.Context(), sessionID)
+	require.Empty(t, fold)
+	require.Equal(t, []SessionAgentCall{dropped}, canceledWithRunID)
+	kept, ok := a.messageQueue.Get(sessionID)
+	require.True(t, ok)
+	require.Equal(t, []SessionAgentCall{survivor}, kept)
 	a.publishCanceledQueueDrops(canceledWithRunID)
 
 	requireSingleCancelledRunComplete(t, ch, sessionID, "run-dropped")

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/stretchr/testify/require"
 )
@@ -22,10 +24,11 @@ import (
 // Subsequent Stream calls (e.g. the recursive run draining the queue)
 // proceed immediately.
 type gatedStreamModel struct {
-	text    string
-	gate    chan struct{}
-	entered chan struct{}
-	calls   atomic.Int64
+	text     string
+	gate     chan struct{}
+	entered  chan struct{}
+	policies chan permission.RequestPolicy
+	calls    atomic.Int64
 }
 
 func (m *gatedStreamModel) Provider() string { return "fake" }
@@ -39,6 +42,9 @@ func (m *gatedStreamModel) Generate(ctx context.Context, call fantasy.Call) (*fa
 }
 
 func (m *gatedStreamModel) Stream(ctx context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
+	if m.policies != nil {
+		m.policies <- permission.RequestPolicyFromContext(ctx)
+	}
 	if m.calls.Add(1) == 1 {
 		close(m.entered)
 		select {
@@ -178,4 +184,179 @@ func TestRun_QueuedRunIDPromptRunsRecursivelyAndPublishesRunComplete(t *testing.
 	}
 	require.Equal(t, 2, assistants, "the active turn and the recursive turn each produce one assistant message")
 	require.Equal(t, 1, follows, "the follow-up prompt is its own user turn")
+}
+
+func TestRun_QueuedTurnUsesItsOwnPermissionPolicy(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		activePolicy permission.RequestPolicy
+		queuedPolicy permission.RequestPolicy
+	}{
+		{
+			name:         "queued auto approval does not inherit prompting",
+			activePolicy: permission.RequestPolicyPrompt,
+			queuedPolicy: permission.RequestPolicyAutoApprove,
+		},
+		{
+			name:         "queued prompt does not inherit auto approval",
+			activePolicy: permission.RequestPolicyAutoApprove,
+			queuedPolicy: permission.RequestPolicyPrompt,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			env := testEnv(t)
+			large := &gatedStreamModel{
+				text:     "done",
+				gate:     make(chan struct{}),
+				entered:  make(chan struct{}),
+				policies: make(chan permission.RequestPolicy, 2),
+			}
+			small := &finishStreamModel{text: "title"}
+			sa, ok := testSessionAgent(env, large, small, "").(*sessionAgent)
+			require.True(t, ok)
+
+			sess, err := env.sessions.Create(t.Context(), "session")
+			require.NoError(t, err)
+
+			mainDone := make(chan error, 1)
+			go func() {
+				_, runErr := sa.Run(t.Context(), SessionAgentCall{
+					SessionID:        sess.ID,
+					Prompt:           "main",
+					PermissionPolicy: tt.activePolicy,
+				})
+				mainDone <- runErr
+			}()
+
+			select {
+			case <-large.entered:
+			case <-time.After(5 * time.Second):
+				t.Fatal("main run never entered Stream")
+			}
+			requirePolicy(t, large.policies, tt.activePolicy)
+
+			result, err := sa.Run(t.Context(), SessionAgentCall{
+				SessionID:        sess.ID,
+				Prompt:           "queued",
+				PermissionPolicy: tt.queuedPolicy,
+			})
+			require.NoError(t, err)
+			require.Nil(t, result)
+			require.Equal(t, 1, sa.QueuedPrompts(sess.ID))
+
+			close(large.gate)
+			require.NoError(t, <-mainDone)
+			requirePolicy(t, large.policies, tt.queuedPolicy)
+			require.Equal(t, int64(2), large.calls.Load())
+		})
+	}
+}
+
+func requirePolicy(
+	t *testing.T,
+	policies <-chan permission.RequestPolicy,
+	want permission.RequestPolicy,
+) {
+	t.Helper()
+
+	select {
+	case got := <-policies:
+		require.Equal(t, want, got)
+	case <-time.After(5 * time.Second):
+		t.Fatal("run did not reach Stream with the expected permission policy")
+	}
+}
+
+func TestRun_PermissionRequestsAcrossHandoffs(t *testing.T) {
+	t.Parallel()
+	for _, activePolicy := range []permission.RequestPolicy{permission.RequestPolicyPrompt, permission.RequestPolicyAutoApprove} {
+		for _, phase := range []string{"handoff", "summary", "cancel"} {
+			t.Run(fmt.Sprintf("policy=%d/%s", activePolicy, phase), func(t *testing.T) {
+				t.Parallel()
+				ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+				defer cancel()
+				env := testEnv(t)
+				sess, err := env.sessions.Create(ctx, "session")
+				require.NoError(t, err)
+				permissions := permission.NewPermissionService(env.workingDir, false, nil)
+				requests := permissions.Subscribe(ctx)
+				var prompted atomic.Int64
+				denierDone := make(chan struct{})
+				go func() {
+					defer close(denierDone)
+					for event := range requests {
+						prompted.Add(1)
+						permissions.Deny(event.Payload)
+					}
+				}()
+				t.Cleanup(func() { cancel(); <-denierDone })
+				queuedPolicy := permission.RequestPolicyPrompt
+				if activePolicy == permission.RequestPolicyPrompt {
+					queuedPolicy = permission.RequestPolicyAutoApprove
+				}
+				model := &lifecycleModel{}
+				sa := testSessionAgent(env, model, &finishStreamModel{text: "title"}, "system")
+				calls := 0
+				var wantPrompts int64
+				model.stream = func(runCtx context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
+					calls++
+					if phase == "summary" && calls == 2 {
+						return (&finishStreamModel{text: "summary"}).Stream(runCtx, call)
+					}
+					wantPolicy := queuedPolicy
+					if calls == 1 || (phase == "summary" && calls == 4) {
+						wantPolicy = activePolicy
+					}
+					granted, err := permissions.Request(runCtx, permission.CreatePermissionRequest{
+						SessionID: sess.ID, ToolCallID: fmt.Sprintf("permission-%d", calls),
+						ToolName: "ls", Action: "list", Path: env.workingDir,
+					})
+					require.NoError(t, err)
+					require.Equal(t, wantPolicy == permission.RequestPolicyAutoApprove, granted,
+						"turn %d must use its own authority", calls)
+					if wantPolicy == permission.RequestPolicyPrompt {
+						wantPrompts++
+					}
+					if calls == 1 {
+						if phase == "cancel" {
+							sa.Cancel(sess.ID)
+						}
+						result, err := sa.Run(ctx, SessionAgentCall{
+							SessionID: sess.ID, Prompt: "queued", PermissionPolicy: queuedPolicy,
+							Accepted: sa.BeginAccepted(sess.ID),
+						})
+						require.NoError(t, err)
+						require.Nil(t, result)
+						switch phase {
+						case "cancel":
+							return nil, runCtx.Err()
+						case "summary":
+							return compactionStream, nil
+						}
+					}
+					return (&finishStreamModel{text: "done"}).Stream(runCtx, call)
+				}
+				_, err = sa.Run(ctx, SessionAgentCall{SessionID: sess.ID, Prompt: "active", PermissionPolicy: activePolicy})
+				if phase == "cancel" {
+					require.ErrorIs(t, err, context.Canceled)
+				} else {
+					require.NoError(t, err)
+				}
+				wantCalls := 2
+				if phase == "summary" {
+					wantCalls = 4
+				}
+				require.Equal(t, wantCalls, calls)
+				require.Equal(t, wantPrompts, prompted.Load())
+				require.False(t, sa.IsSessionBusy(sess.ID))
+				require.Zero(t, sa.QueuedPrompts(sess.ID))
+			})
+		}
+	}
 }

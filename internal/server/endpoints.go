@@ -301,7 +301,12 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 			Summary("Send message to agent").
 			Description("Validates and accepts the prompt, then dispatches the run "+
 				"detached from the requesting HTTP connection: the run survives client "+
-				"disconnects and is only ended by the explicit cancel endpoint.").
+				"disconnects and is only ended by the explicit cancel endpoint. "+
+				"permission_policy may be omitted or empty for normal permission handling, "+
+				"or auto_approve to approve this turn and its descendants. "+
+				"operator_steering allows input without run_id or channel to join an active "+
+				"turn under its existing permission policy. If idle, permission_policy "+
+				"applies to the new turn as usual.").
 			Tags("agent").
 			PathParam("id", "Workspace ID").
 			Accepts(proto.AgentMessage{}).
@@ -380,10 +385,11 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 
 		apigen.Post("/v1/workspaces/{id}/agent/sessions/{sid}/summarize").
 			Summary("Summarize session").
+			Description("Returns HTTP 409 with {\"cancelled\": true} if summarization is canceled.").
 			Tags("agent").
 			PathParam("id", "Workspace ID").
 			PathParam("sid", "Session ID").
-			Fails(404, 500).
+			Fails(404, 409, 500).
 			Handle(c.handlePostWorkspaceAgentSessionSummarize),
 
 		apigen.Post("/v1/workspaces/{id}/agent/sessions/{sid}/shell").

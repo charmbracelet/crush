@@ -50,6 +50,31 @@ func handleOption(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	if key == "ui" {
 		return optionUI(o, args, stderr)
 	}
+	if key == "retry" {
+		if len(args) != 4 {
+			return usage(stderr, "usage: option retry <field> <value>")
+		}
+		var value any = args[3]
+		switch args[2] {
+		case "max-retries", "initial-delay-ms", "max-delay-ms", "max-elapsed-ms":
+			parsed, err := strconv.Atoi(args[3])
+			if err != nil {
+				return usage(stderr, "option retry: expected an integer")
+			}
+			value = parsed
+		case "backoff-multiplier":
+			parsed, err := strconv.ParseFloat(args[3], 64)
+			if err != nil {
+				return usage(stderr, "option retry: expected a number")
+			}
+			value = parsed
+		case "jitter", "stream-policy":
+		default:
+			return usage(stderr, "option retry: unknown field")
+		}
+		childMap(o, "retry")[strings.ReplaceAll(args[2], "-", "_")] = value
+		return nil
+	}
 
 	// "option reset <key>" wipes a list back to empty. Because the builder
 	// applies operations in execution order, this is just an assignment:

@@ -52,6 +52,7 @@ var providerAddFlags = []flagSpec{
 	{name: "--extra-header", child: "extra_headers", kind: flagKeyValue, op: opSetChild},
 	{name: "--extra-body", child: "extra_body", kind: flagJSONObject, op: opMergeChild},
 	{name: "--provider-options", child: "provider_options", kind: flagJSONObject, op: opMergeChild},
+	{name: "--retry", child: "retry", kind: flagJSONObject, op: opMergeChild},
 }
 
 func providerAdd(b *ConfigBuilder, args []string, stderr io.Writer) error {

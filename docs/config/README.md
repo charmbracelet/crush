@@ -459,6 +459,30 @@ permissions deny bash
 Configure general Crush behavior, paths, attribution, and the terminal UI.
 Boolean values are optional and default to `true`.
 
+Transient model requests default to two retries with full-jitter backoff. Set
+`option retry max-retries 0` to disable them. `safe_step` buffers at most 4 MiB
+of each model response until the provider finishes, then commits it before
+running tools, so a partial stream can be replaced safely. `before_output`
+streams immediately but does not retry after any output. The retry episode is
+bounded by `max-elapsed-ms`; provider `Retry-After` headers impose a minimum
+wait. These options apply to primary, subagent, summary, and title requests.
+
+```bash
+option retry max-retries 5
+option retry initial-delay-ms 2000
+option retry backoff-multiplier 2
+option retry max-delay-ms 30000
+option retry max-elapsed-ms 120000
+option retry jitter full
+option retry stream-policy safe_step
+provider add example --retry '{"max_retries":3,"stream_policy":"before_output"}'
+```
+
+The equivalent JSON fields are `options.retry` and `providers.<id>.retry`;
+provider fields override global fields individually. A provider-executed tool
+response is streamed without replay because its remote side effects cannot
+be rolled back. Local tool calls are dispatched only after a complete stream.
+
 ```text
 Usage:
   option <key> [value]

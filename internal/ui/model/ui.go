@@ -5736,6 +5736,16 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 	case notify.TypeAgentError:
 		// Terminal edge like TypeAgentFinished; fall through to the
 		// busy/queue refresh below.
+	case notify.TypeRetry:
+		if m.session == nil || m.session.ID != n.SessionID {
+			return nil
+		}
+		if n.Done {
+			m.status.ClearInfoMsg()
+			return nil
+		}
+		m.status.SetInfoMsg(util.InfoMsg{Type: util.InfoTypeWarn, Msg: fmt.Sprintf("Retrying model request (%d/%d) in %s", n.Attempt, n.MaxAttempts, time.Duration(n.DelayMS)*time.Millisecond)})
+		return nil
 	case notify.TypeReAuthenticate:
 		return m.handleReAuthenticate(n.ProviderID)
 	case notify.TypeAWSSSOAuth:

@@ -25,6 +25,7 @@ const (
 	// finished. Message carries the error text when it failed, empty on
 	// success.
 	TypeAWSSSOAuthResult Type = "aws_sso_auth_result"
+	TypeRetry            Type = "retry"
 )
 
 // Notification represents a domain event published by the agent.
@@ -46,7 +47,13 @@ type Notification struct {
 	AWSSOCommand string
 	// AWSSOURL carries the SSO verification URL for TypeAWSSSOAuth once it
 	// appears in the refresh command's output.
-	AWSSOURL string
+	AWSSOURL    string
+	Attempt     int
+	MaxAttempts int
+	DelayMS     int64
+	Category    string
+	Phase       string
+	Done        bool
 }
 
 // RunComplete is the authoritative end-of-run signal for a session.

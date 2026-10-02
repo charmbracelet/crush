@@ -128,6 +128,7 @@ type ProviderConfig struct {
 	ExtraBody map[string]any `json:"extra_body,omitempty" jsonschema:"description=Additional fields to include in request bodies\\, only works with openai-compatible providers"`
 
 	ProviderOptions map[string]any `json:"provider_options,omitempty" jsonschema:"description=Additional provider-specific options for this provider"`
+	Retry           *RetryConfig   `json:"retry,omitempty" jsonschema:"description=Overrides for transient model request retries"`
 
 	// Used to pass extra parameters to the provider.
 	ExtraParams map[string]string `json:"-"`
@@ -474,6 +475,7 @@ type Options struct {
 	Notifications             string       `json:"notifications,omitempty" jsonschema:"description=Notification style to use. Options: auto (default)\\, native\\, osc\\, bell\\, disabled. Auto selects based on environment: native for local sessions\\, osc for SSH (with automatic OSC 99/777 detection).,enum=auto,enum=native,enum=osc,enum=bell,enum=disabled,default=auto"`
 	DisabledSkills            []string     `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=crush-config"`
 	RequestTimeout            *int         `json:"request_timeout,omitempty" jsonschema:"description=Timeout in seconds for each LLM API request. Streaming responses are aborted only after this much inactivity\\, so slow but active streams are never killed. 0 disables it\\, negative values are invalid.,default=60,example=120,example=300,example=0"`
+	Retry                     *RetryConfig `json:"retry,omitempty" jsonschema:"description=Transient model request retry settings"`
 }
 
 // DefaultRequestTimeout bounds each LLM API request when the user has not

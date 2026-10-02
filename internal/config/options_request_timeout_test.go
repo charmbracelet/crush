@@ -8,8 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func ptr[T any](v T) *T { return &v }
-
 func TestOptionsGetRequestTimeout(t *testing.T) {
 	t.Parallel()
 

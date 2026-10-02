@@ -21,8 +21,9 @@ func NewCallHierarchyToolMessageItem(
 	toolCall message.ToolCall,
 	result *message.ToolResult,
 	canceled bool,
+	reduceAnimations bool,
 ) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &CallHierarchyToolRenderContext{}, canceled)
+	return newBaseToolMessageItem(sty, toolCall, result, &CallHierarchyToolRenderContext{}, canceled, reduceAnimations)
 }
 
 // CallHierarchyToolRenderContext renders call hierarchy tool messages.

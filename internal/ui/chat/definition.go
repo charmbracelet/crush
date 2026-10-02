@@ -21,8 +21,9 @@ func NewDefinitionToolMessageItem(
 	toolCall message.ToolCall,
 	result *message.ToolResult,
 	canceled bool,
+	reduceAnimations bool,
 ) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &DefinitionToolRenderContext{}, canceled)
+	return newBaseToolMessageItem(sty, toolCall, result, &DefinitionToolRenderContext{}, canceled, reduceAnimations)
 }
 
 // DefinitionToolRenderContext renders definition tool messages.

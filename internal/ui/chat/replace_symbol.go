@@ -22,8 +22,9 @@ func NewReplaceSymbolToolMessageItem(
 	toolCall message.ToolCall,
 	result *message.ToolResult,
 	canceled bool,
+	reduceAnimations bool,
 ) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &ReplaceSymbolToolRenderContext{}, canceled)
+	return newBaseToolMessageItem(sty, toolCall, result, &ReplaceSymbolToolRenderContext{}, canceled, reduceAnimations)
 }
 
 // ReplaceSymbolToolRenderContext renders replace symbol tool messages.

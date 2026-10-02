@@ -335,14 +335,16 @@ type LSPConfig struct {
 }
 
 type TUIOptions struct {
-	CompactMode bool        `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
-	DiffMode    string      `json:"diff_mode,omitempty" jsonschema:"description=Diff mode for the TUI interface,enum=unified,enum=split"`
-	ActiveTheme string      `json:"active_theme,omitempty" jsonschema:"description=Name of the currently active theme,default=charmtone-panther,example=charmtone-panther,example=gruvbox-dark"`
-	Completions Completions `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
-	Transparent *bool       `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
-	Scrollbar   string      `json:"scrollbar,omitempty" jsonschema:"description=Chat scrollbar visibility,enum=default,enum=always,enum=never,default=default"`
-	Mouse       *bool       `json:"mouse,omitempty" jsonschema:"description=Enable terminal mouse capture for selection\\, clicks\\, and scrolling in the TUI. Disable to let the terminal emulator or tmux handle text selection and copy/paste,default=true"`
-	ExitBanner  ExitBanner  `json:"exit_banner,omitempty" jsonschema:"description=Exit banner style after quitting Crush,enum=default,enum=compact,enum=none,default=default"`
+	CompactMode      bool        `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
+	DiffMode         string      `json:"diff_mode,omitempty" jsonschema:"description=Diff mode for the TUI interface,enum=unified,enum=split"`
+	ActiveTheme      string      `json:"active_theme,omitempty" jsonschema:"description=Name of the currently active theme,default=charmtone-panther,example=charmtone-panther,example=gruvbox-dark"`
+	ReduceAnimations *bool       `json:"reduce_animations,omitempty" jsonschema:"description=Reduce animations in the TUI,default=false"`
+	SSHAnimationMode string      `json:"ssh_animation_mode,omitempty" jsonschema:"description=SSH animation behavior,enum=ask,enum=reduce,enum=never"`
+	Completions      Completions `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
+	Transparent      *bool       `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
+	Scrollbar        string      `json:"scrollbar,omitempty" jsonschema:"description=Chat scrollbar visibility,enum=default,enum=always,enum=never,default=default"`
+	Mouse            *bool       `json:"mouse,omitempty" jsonschema:"description=Enable terminal mouse capture for selection\\, clicks\\, and scrolling in the TUI. Disable to let the terminal emulator or tmux handle text selection and copy/paste,default=true"`
+	ExitBanner       ExitBanner  `json:"exit_banner,omitempty" jsonschema:"description=Exit banner style after quitting Crush,enum=default,enum=compact,enum=none,default=default"`
 }
 
 // IsTransparent reports whether the TUI draws a transparent background. The
@@ -996,6 +998,17 @@ func (c *Config) SmallModel() *catwalk.Model {
 	return c.GetModel(model.Provider, model.Model)
 }
 
+func (c *Config) SetSSHAnimationMode(mode string) error {
+	if c.Options == nil {
+		c.Options = &Options{}
+	}
+	if c.Options.TUI == nil {
+		c.Options.TUI = &TUIOptions{}
+	}
+	c.Options.TUI.SSHAnimationMode = mode
+	return nil
+}
+
 const maxRecentModelsPerType = 5
 
 func allToolNames() []string {
@@ -1247,4 +1260,8 @@ func ptrValOr[T any](t *T, el T) T {
 		return el
 	}
 	return *t
+}
+
+func ptr[T any](v T) *T {
+	return &v
 }

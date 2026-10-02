@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 
@@ -62,14 +63,26 @@ func TestSummarizeAnnouncesStartAndOutcome(t *testing.T) {
 	require.NoError(t, sa.Summarize(ctx, sess.ID, "", fantasy.ProviderOptions{}, nil))
 
 	events := notifier.byType(notify.TypeSummarizing)
-	require.Len(t, events, 2, "one event when compaction starts and one when it ends")
 	require.False(t, events[0].Done)
-	require.NotEmpty(t, events[0].Progress)
-	require.True(t, events[1].Done)
-	require.Equal(t, sess.ID, events[1].SessionID)
-	require.Equal(t, "compact me", events[1].SessionTitle)
-	require.Contains(t, events[1].Progress, "Compacted ")
-	require.Contains(t, events[1].Progress, " verbatim")
+	require.Equal(t, "Compacting the session", events[0].Progress)
+
+	// A streaming compaction reports how far along it is, throttled rather
+	// than once per delta, and none of that may read as the end.
+	var sawProgress bool
+	for _, e := range events[:len(events)-1] {
+		require.False(t, e.Done)
+		if strings.Contains(e.Progress, "checkpoint ") {
+			sawProgress = true
+		}
+	}
+	require.True(t, sawProgress, "a streaming compaction must say how far along it is")
+
+	last := events[len(events)-1]
+	require.True(t, last.Done)
+	require.Equal(t, sess.ID, last.SessionID)
+	require.Equal(t, "compact me", last.SessionTitle)
+	require.Contains(t, last.Progress, "Compacted ")
+	require.Contains(t, last.Progress, " verbatim")
 }
 
 func TestSummarizeAnnouncesFailure(t *testing.T) {

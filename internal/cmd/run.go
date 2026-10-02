@@ -166,6 +166,12 @@ crush run --continue "Follow up on your last response"
 
 func init() {
 	runCmd.Flags().BoolP("quiet", "q", false, "Hide spinner")
+	// yolo is registered on runCmd itself rather than made persistent on
+	// the root: cobra hands the whole argv (including flags placed before
+	// the subcommand, as in `crush --yolo run …`) to the leaf command for
+	// parsing, so both spellings work while the flag stays off every
+	// other subcommand.
+	runCmd.Flags().BoolP("yolo", "y", false, "Automatically accept all permissions (dangerous mode)")
 	runCmd.Flags().BoolP("verbose", "v", false, "Show logs")
 	runCmd.Flags().StringP("model", "m", "", "Model to use. Accepts 'model' or 'provider/model' to disambiguate models with the same name across providers")
 	runCmd.Flags().String("small-model", "", "Small model to use. If not provided, uses the default small model for the provider")

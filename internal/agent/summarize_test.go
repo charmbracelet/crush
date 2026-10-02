@@ -188,6 +188,73 @@ func TestSummarizeAppliesUserInstructions(t *testing.T) {
 	require.NotContains(t, model.calls[0], "<previous_checkpoint>", "there is no checkpoint to merge yet")
 }
 
+// seedToolTurn creates one user turn whose tool call returns a blob of roughly
+// tokens tokens, so pruning has something stale enough to be worth removing.
+func seedToolTurn(t *testing.T, env fakeEnv, sessionID, label string, tokens int) {
+	t.Helper()
+	ctx := t.Context()
+	call := "call-" + label
+
+	_, err := env.messages.Create(ctx, sessionID, message.CreateMessageParams{
+		Role:  message.User,
+		Parts: []message.ContentPart{message.TextContent{Text: "read " + label}},
+	})
+	require.NoError(t, err)
+	_, err = env.messages.Create(ctx, sessionID, message.CreateMessageParams{
+		Role:  message.Assistant,
+		Parts: []message.ContentPart{message.ToolCall{ID: call, Name: "view"}},
+	})
+	require.NoError(t, err)
+	_, err = env.messages.Create(ctx, sessionID, message.CreateMessageParams{
+		Role: message.Tool,
+		Parts: []message.ContentPart{message.ToolResult{
+			ToolCallID: call, Name: "view", Content: strings.Repeat("o", tokens*4),
+		}},
+	})
+	require.NoError(t, err)
+}
+
+// TestSummarizeKeepsFullTextWhenItFits is half the design: a checkpoint is the
+// last moment the text is in hand, so a region that still fits the request is
+// summarized whole rather than from skeletons.
+func TestSummarizeKeepsFullTextWhenItFits(t *testing.T) {
+	env := testEnv(t)
+	model := &recordingModel{text: "the checkpoint"}
+	sa := testSessionAgent(env, model, nil, "test prompt").(*sessionAgent)
+	ctx := t.Context()
+	sess, err := env.sessions.Create(ctx, "test")
+	require.NoError(t, err)
+
+	seedToolTurn(t, env, sess.ID, "old", 60_000)
+	seedSizedTurns(t, env, sess.ID, 2, 10)
+
+	require.NoError(t, sa.Summarize(ctx, sess.ID, "", fantasy.ProviderOptions{}, nil))
+	require.Len(t, model.calls, 1)
+	require.Contains(t, model.calls[0], strings.Repeat("o", 4_000))
+	require.NotContains(t, model.calls[0], "[tool output pruned:")
+}
+
+// TestSummarizeFallsBackToTheSentView covers the other half: a region no
+// request can carry is truncated by some providers rather than rejected, which
+// would write a checkpoint that never saw most of what it replaced. Pruning at
+// least keeps the request honest about what is missing.
+func TestSummarizeFallsBackToTheSentView(t *testing.T) {
+	env := testEnv(t)
+	model := &recordingModel{text: "the checkpoint"}
+	sa := testSessionAgent(env, model, nil, "test prompt").(*sessionAgent)
+	ctx := t.Context()
+	sess, err := env.sessions.Create(ctx, "test")
+	require.NoError(t, err)
+
+	seedToolTurn(t, env, sess.ID, "ancient", 300_000)
+	seedSizedTurns(t, env, sess.ID, 2, 10)
+
+	require.NoError(t, sa.Summarize(ctx, sess.ID, "", fantasy.ProviderOptions{}, nil))
+	require.Len(t, model.calls, 1)
+	require.Contains(t, model.calls[0], "[tool output pruned: view")
+	require.NotContains(t, model.calls[0], strings.Repeat("o", 4_000))
+}
+
 func TestBuildSummaryPromptOrdersItsSections(t *testing.T) {
 	t.Parallel()
 

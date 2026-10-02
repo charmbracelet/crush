@@ -108,6 +108,20 @@ func CheckpointOutputBudget(contextWindow, promptTokens, modelDefaultMaxTokens i
 	return max(budget, MinCheckpointTokens), tight
 }
 
+// RegionWindowRatio is the share of a context window the text being summarized
+// may claim. The rest has to hold the system prompt, the tool definitions, and
+// the checkpoint the request is writing.
+const RegionWindowRatio = 0.6
+
+// RegionLimit returns the largest transcript region a single summarization
+// request may carry, or 0 when the window is unknown and nothing can be said.
+func RegionLimit(contextWindow int64) int64 {
+	if contextWindow <= 0 {
+		return 0
+	}
+	return int64(float64(contextWindow) * RegionWindowRatio)
+}
+
 // Reserve returns the number of tokens that must stay free before another
 // round trip is worth attempting.
 //

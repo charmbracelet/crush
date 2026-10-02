@@ -206,6 +206,8 @@ func TestCrushInfo_Options(t *testing.T) {
 	require.Contains(t, output, "[options]")
 	require.Contains(t, output, "auto_lsp = true")
 	require.Contains(t, output, "auto_summarize = false")
+	require.Contains(t, output, "compaction_prune_tool_results = true")
+	require.Contains(t, output, "compaction_tail = 15% of the context window")
 	require.Contains(t, output, "data_directory = /Users/user/project/.crush")
 	require.Contains(t, output, "debug = true")
 }

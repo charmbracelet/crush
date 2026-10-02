@@ -150,12 +150,32 @@ func TestPlanEnforcesMinimumTailTurns(t *testing.T) {
 	msgs = append(msgs, turn("3", 10)...)
 
 	// The budget is satisfied inside turn 3, but the policy insists on two
-	// turns, so the cut walks back to the start of turn 2.
-	plan := Plan(msgs, Policy{KeepRecentTokens: 5, MinTailTurns: 2})
+	// turns and there is room for them, so the cut walks back to the start of
+	// turn 2.
+	plan := Plan(msgs, Policy{KeepRecentTokens: 5, MinTailTurns: 2, MaxTailTokens: 5_000})
 	require.True(t, plan.Found)
 	require.Equal(t, 2, plan.Index)
 	require.Equal(t, "u-2", plan.MessageID)
 	require.Equal(t, 2, countTurns(msgs[plan.Index:]))
+}
+
+// TestPlanTurnFloorCannotBreakTheBudget is the regression that left a session
+// at 98% after compacting: one agentic turn is now routinely worth more than
+// the entire tail budget, so insisting on two of them retains the working set
+// the compaction was meant to free.
+func TestPlanTurnFloorCannotBreakTheBudget(t *testing.T) {
+	t.Parallel()
+
+	msgs := append(turn("1", 5_000), turn("2", 40_000)...)
+	msgs = append(msgs, turn("3", 30_000)...)
+
+	plan := Plan(msgs, Policy{KeepRecentTokens: 5_000, MinTailTurns: 2})
+	require.True(t, plan.Found)
+	require.Equal(t, 1, countTurns(msgs[plan.Index:]),
+		"a second turn is dropped rather than doubling an already oversized tail")
+	require.Equal(t, "u-3", plan.MessageID)
+	require.Less(t, plan.KeptTokens, EstimateAll(msgs),
+		"turns stay whole, but the compaction still has to free something")
 }
 
 func TestPlanNeedsAUserBoundary(t *testing.T) {
@@ -248,4 +268,60 @@ func TestEstimateAll(t *testing.T) {
 
 	require.Equal(t, Estimate(userMsg("hello"))+Estimate(assistantMsg("world")),
 		EstimateAll([]message.Message{userMsg("hello"), assistantMsg("world")}))
+}
+
+// TestEstimateIgnoresToolMetadata is the difference between a session that
+// compacts when it is nearly full and one that compacts at a quarter of its
+// window: tool metadata is bookkeeping for the TUI and never reaches a
+// provider, so counting it invented hundreds of thousands of tokens.
+func TestEstimateIgnoresToolMetadata(t *testing.T) {
+	t.Parallel()
+
+	withMeta := message.Message{
+		Role: message.Tool,
+		Parts: []message.ContentPart{message.ToolResult{
+			Name: "bash", Content: "abcd", Metadata: strings.Repeat("m", 100_000),
+		}},
+	}
+	without := message.Message{
+		Role:  message.Tool,
+		Parts: []message.ContentPart{message.ToolResult{Name: "bash", Content: "abcd"}},
+	}
+	require.Equal(t, Estimate(without), Estimate(withMeta))
+}
+
+// TestEstimateBillsToolResultImagesByTile keeps a screenshot from being priced
+// at the length of its base64 encoding, which is three quarters bigger than
+// the bytes and unrelated to what a provider charges.
+func TestEstimateBillsToolResultImagesByTile(t *testing.T) {
+	t.Parallel()
+
+	screenshot := message.Message{
+		Role: message.Tool,
+		Parts: []message.ContentPart{message.ToolResult{
+			Name: "view", MIMEType: "image/png", Data: strings.Repeat("Q", 400_000),
+		}},
+	}
+	require.Equal(t, int64(framingTokens+imageTokens), Estimate(screenshot))
+
+	raw := message.Message{
+		Role:  message.Tool,
+		Parts: []message.ContentPart{message.ToolResult{Name: "read_mcp_resource", Data: strings.Repeat("Q", 4_000)}},
+	}
+	require.Equal(t, int64(framingTokens+1_000), Estimate(raw))
+}
+
+func TestTailBudget(t *testing.T) {
+	t.Parallel()
+
+	// An explicit configuration is what the user asked for.
+	require.Equal(t, int64(8_000), TailBudget(600_000, 8_000))
+	// Otherwise the window decides, because a fifth of a frontier model is not
+	// a fifth of a phone model.
+	require.Equal(t, int64(90_000), TailBudget(600_000, 0))
+	require.Equal(t, int64(9_830), TailBudget(65_536, 0))
+	// Small windows still keep something usable, and an unknown window falls
+	// back to the documented default.
+	require.Equal(t, int64(MinTailTokens), TailBudget(8_192, 0))
+	require.Equal(t, DefaultPolicy.KeepRecentTokens, TailBudget(0, 0))
 }

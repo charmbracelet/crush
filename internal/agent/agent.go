@@ -41,6 +41,7 @@ import (
 	"github.com/charmbracelet/crush/internal/compaction"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
@@ -213,6 +214,7 @@ type sessionAgent struct {
 	disableAutoSummarize bool
 	isYolo               bool
 	notify               pubsub.Publisher[notify.Notification]
+	compactionHooks      func(event string) CompactionHookRunner
 	runComplete          pubsub.Publisher[notify.RunComplete]
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
@@ -270,6 +272,12 @@ type SessionAgentOptions struct {
 	Tools                []fantasy.AgentTool
 	Notify               pubsub.Publisher[notify.Notification]
 	RunComplete          pubsub.Publisher[notify.RunComplete]
+
+	// CompactionHooks returns the runner for a compaction event, or nil when
+	// the user configured none for it. It is a function because each event has
+	// its own configured command list, and it is nil for sub-agents, which
+	// never compact.
+	CompactionHooks func(event string) CompactionHookRunner
 }
 
 func NewSessionAgent(
@@ -288,6 +296,7 @@ func NewSessionAgent(
 		tools:                csync.NewSliceFrom(opts.Tools),
 		isYolo:               opts.IsYolo,
 		notify:               opts.Notify,
+		compactionHooks:      opts.CompactionHooks,
 		runComplete:          opts.RunComplete,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:       csync.NewMap[string, *activeCancel](),
@@ -1223,7 +1232,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 	if shouldSummarize {
 		a.activeRequests.Del(call.SessionID)
-		if summarizeErr := a.Summarize(genCtx, call.SessionID, "", call.ProviderOptions, call.OnAuthRefresh); summarizeErr != nil {
+		if summarizeErr := a.Summarize(compactionTriggerContext(genCtx), call.SessionID, "", call.ProviderOptions, call.OnAuthRefresh); summarizeErr != nil {
 			return nil, summarizeErr
 		}
 		// If the agent wasn't done...
@@ -1426,6 +1435,23 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID, instructions st
 		region = view[:len(region)]
 	}
 
+	detail := hooks.CompactionDetail{
+		Trigger:      compactionTrigger(ctx),
+		Instructions: instructions,
+		Messages:     len(region),
+		Tokens:       compaction.EstimateAll(region),
+	}
+	if result, ok := a.runCompactionHook(ctx, hooks.EventPreCompact, sessionID, detail); ok &&
+		result.Decision == hooks.DecisionDeny {
+		// Denying skips this compaction rather than cancelling anything the
+		// user asked for. Nothing is latched, so the next turn that needs the
+		// room asks again - which is right, because a hook usually objects to
+		// this compaction at this moment, not to compaction forever.
+		slog.Info("Compaction denied by hook",
+			"session_id", sessionID, "reason", result.Reason)
+		return nil
+	}
+
 	aiMsgs, _ := a.preparePrompt(region, largeModel.CatwalkCfg.SupportsImages)
 
 	// Compaction is a visible pause, and a failed one is worse than a silent
@@ -1607,6 +1633,9 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID, instructions st
 
 	outcome = fmt.Sprintf("Compacted %d messages, kept %d verbatim", len(region), cut.Kept)
 	a.eventSessionCompacted(sessionID, len(region), cut.Kept)
+	if _, ok := a.runCompactionHook(ctx, hooks.EventPostCompact, sessionID, detail); ok {
+		slog.Debug("Compaction hooks completed", "session_id", sessionID)
+	}
 
 	// Release the active request before processing queued messages so that
 	// Run() does not see the session as busy.
@@ -1899,6 +1928,46 @@ func (a *sessionAgent) publishSummarizing(sessionID, title string, done bool, pr
 		Done:         done,
 		Progress:     progress,
 	})
+}
+
+// CompactionHookRunner is the seam the agent needs from the user's compaction
+// hooks: a way to ask whether a compaction may happen.
+type CompactionHookRunner interface {
+	RunCompaction(ctx context.Context, eventName, sessionID string, detail hooks.CompactionDetail) (hooks.AggregateResult, error)
+}
+
+// compactionTriggerContext marks a compaction as machine-initiated, so a hook
+// can treat "the window filled up" differently from "the user asked".
+func compactionTriggerContext(ctx context.Context) context.Context {
+	return context.WithValue(ctx, compactionTriggerKey{}, true)
+}
+
+type compactionTriggerKey struct{}
+
+func compactionTrigger(ctx context.Context) string {
+	if ctx.Value(compactionTriggerKey{}) != nil {
+		return "auto"
+	}
+	return "manual"
+}
+
+// runCompactionHook fires one compaction event and reports whether anything
+// ran. A failing hook never blocks a compaction: only an explicit deny does.
+func (a *sessionAgent) runCompactionHook(ctx context.Context, event, sessionID string, detail hooks.CompactionDetail) (hooks.AggregateResult, bool) {
+	if a.compactionHooks == nil {
+		return hooks.AggregateResult{}, false
+	}
+	runner := a.compactionHooks(event)
+	if runner == nil {
+		return hooks.AggregateResult{}, false
+	}
+	result, err := runner.RunCompaction(ctx, event, sessionID, detail)
+	if err != nil {
+		slog.Warn("Compaction hook failed; continuing without it",
+			"event", event, "session_id", sessionID, "error", err)
+		return hooks.AggregateResult{}, false
+	}
+	return result, true
 }
 
 // compactionOptions returns the configured compaction options, or nil when

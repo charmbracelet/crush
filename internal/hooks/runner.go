@@ -88,6 +88,18 @@ func (r *Runner) Hooks() []config.HookConfig {
 // Run executes all matching hooks for the given event and tool, returning
 // an aggregated result.
 func (r *Runner) Run(ctx context.Context, eventName, sessionID, toolName, toolInputJSON string) (AggregateResult, error) {
+	return r.run(ctx, eventName, sessionID, toolName, toolInputJSON)
+}
+
+// RunCompaction executes the hooks registered for a compaction event. There is
+// no tool to match against, so every hook configured for the event runs, and
+// the only decisions that mean anything are deny - skip this compaction - and
+// halt. The detail describes what the checkpoint would replace.
+func (r *Runner) RunCompaction(ctx context.Context, eventName, sessionID string, detail CompactionDetail) (AggregateResult, error) {
+	return r.run(ctx, eventName, sessionID, "", BuildCompactionPayload(detail))
+}
+
+func (r *Runner) run(ctx context.Context, eventName, sessionID, toolName, toolInputJSON string) (AggregateResult, error) {
 	matching := r.matchingHooks(toolName)
 	if len(matching) == 0 {
 		return AggregateResult{Decision: DecisionNone}, nil

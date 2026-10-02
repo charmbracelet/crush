@@ -810,6 +810,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		Tools:                nil,
 		Notify:               c.notify,
 		RunComplete:          c.runComplete,
+		CompactionHooks:      c.compactionHooks(isSubAgent),
 	})
 
 	// The readiness goroutines below perform one-time setup — building the
@@ -972,6 +973,22 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 }
 
 // TODO: when we support multiple agents we need to change this so that we pass in the agent specific model config
+// compactionHooks hands the agent a way to fire compaction events. Sub-agents
+// never compact, so they are given nothing; for the main agent each event
+// resolves to its own configured command list, or to nothing at all.
+func (c *coordinator) compactionHooks(isSubAgent bool) func(string) CompactionHookRunner {
+	if isSubAgent {
+		return nil
+	}
+	return func(event string) CompactionHookRunner {
+		configured := c.cfg.Config().Hooks[event]
+		if len(configured) == 0 {
+			return nil
+		}
+		return hooks.NewRunner(configured, c.cfg.WorkingDir(), c.cfg.WorkingDir())
+	}
+}
+
 func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Model, Model, error) {
 	largeModelCfg, ok := c.cfg.Config().Models[config.SelectedModelTypeLarge]
 	if !ok {

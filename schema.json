@@ -879,7 +879,8 @@
           "default": "charmtone-panther",
           "examples": [
             "charmtone-panther",
-            "gruvbox-dark"
+            "gruvbox-dark",
+            "matrix-dark"
           ]
         },
         "completions": {

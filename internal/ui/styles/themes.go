@@ -248,10 +248,126 @@ func gruvboxDarkOverrides(s Styles) Styles {
 	return s
 }
 
+// matrixDarkOpts returns the quickStyleOpts for the Matrix Dark theme, a
+// black terminal with phosphor-green text in the spirit of the Matrix
+// films' digital rain. Statuses keep their conventional hues (red for
+// errors, amber for warnings) so they stay readable against the green.
+func matrixDarkOpts() quickStyleOpts {
+	return quickStyleOpts{
+		primary:   lipgloss.Color("#00ff41"), // neon matrix green
+		secondary: lipgloss.Color("#7dffa6"), // pale phosphor green
+		accent:    lipgloss.Color("#00d78f"), // spring green
+		keyword:   lipgloss.Color("#c8ff4d"), // electric lime
+
+		fgBase:       lipgloss.Color("#00ff41"), // neon green text
+		fgMoreSubtle: lipgloss.Color("#00a838"), // dim green
+		fgSubtle:     lipgloss.Color("#00d447"), // mid green
+		fgMostSubtle: lipgloss.Color("#008a30"), // faintest green
+
+		onPrimary: lipgloss.Color("#001507"), // near-black ink on bright chips
+
+		bgBase:         lipgloss.Color("#000000"), // pure black terminal
+		bgLeastVisible: lipgloss.Color("#0e2415"), // darkest green surface
+		bgLessVisible:  lipgloss.Color("#183c22"), // elevated green surface
+		bgMostVisible:  lipgloss.Color("#24572f"), // brightest green surface
+
+		separator: lipgloss.Color("#183c22"), // elevated green surface
+
+		destructive:       lipgloss.Color("#ff5252"), // bright red
+		error:             lipgloss.Color("#d43d3d"), // deep red
+		warningSubtle:     lipgloss.Color("#d7f75b"), // lime
+		warning:           lipgloss.Color("#b8d43d"), // dark lime
+		attention:         lipgloss.Color("#ff9f43"), // amber
+		busy:              lipgloss.Color("#c8ff4d"), // electric lime
+		info:              lipgloss.Color("#00d9c3"), // teal
+		infoMoreSubtle:    lipgloss.Color("#00b3a1"), // mid teal
+		infoMostSubtle:    lipgloss.Color("#008f7f"), // dark teal
+		success:           lipgloss.Color("#00ff41"), // neon matrix green
+		successMoreSubtle: lipgloss.Color("#00c443"), // mid green
+		successMostSubtle: lipgloss.Color("#009637"), // dark green
+
+		yolo:           lipgloss.Color("#c8ff4d"), // electric lime
+		plan:           lipgloss.Color("#4dffb8"), // bright teal-green
+		planMoreSubtle: lipgloss.Color("#0d332b"), // deep teal
+
+		// Diff colors derive from success/destructive over bgBase.
+
+		button:         lipgloss.Color("#00ff41"), // neon matrix green
+		buttonSubtle:   lipgloss.Color("#183c22"), // elevated green surface
+		buttonInactive: lipgloss.Color("#24572f"), // brightest green surface
+		buttonHovered:  lipgloss.Color("#00d447"), // mid green
+
+		// ANSI 16-color palette for remapping raw terminal output
+		// (e.g. bang-mode shell commands) onto legible Matrix colors.
+		ansiBlack:   lipgloss.Color("#0e2415"),
+		ansiRed:     lipgloss.Color("#ff5252"),
+		ansiGreen:   lipgloss.Color("#00d447"),
+		ansiYellow:  lipgloss.Color("#d7f75b"),
+		ansiBlue:    lipgloss.Color("#00b8d9"),
+		ansiMagenta: lipgloss.Color("#b98cff"),
+		ansiCyan:    lipgloss.Color("#00e0c3"),
+		ansiWhite:   lipgloss.Color("#a8d9b8"),
+
+		ansiBrightBlack:   lipgloss.Color("#24572f"),
+		ansiBrightRed:     lipgloss.Color("#ff7a7a"),
+		ansiBrightGreen:   lipgloss.Color("#00ff41"),
+		ansiBrightYellow:  lipgloss.Color("#eaff66"),
+		ansiBrightBlue:    lipgloss.Color("#33cfff"),
+		ansiBrightMagenta: lipgloss.Color("#d1a6ff"),
+		ansiBrightCyan:    lipgloss.Color("#66ffe0"),
+		ansiBrightWhite:   lipgloss.Color("#e6ffe6"),
+	}
+}
+
+// matrixDarkOverrides applies Matrix Dark tweaks that don't fit the token
+// model. The theme is monochrome green, so the default contrast pairings
+// between a bright foreground and the neon-green background collapse into
+// green-on-green and need explicit dark ink instead.
+func matrixDarkOverrides(s Styles) Styles {
+	// fgBase and primary are both neon green, so the shared "fgBase on
+	// primary" pairings (file picker selection, question badge, plan
+	// badge) would render invisible. Use the near-black onPrimary ink.
+	ink := lipgloss.Color("#001507")
+	s.FilePicker.Selected = s.FilePicker.Selected.Foreground(ink)
+	s.Editor.PromptQuestionIconFocused = s.Editor.PromptQuestionIconFocused.Foreground(ink)
+	s.Status.ModeBadgePlan = s.Status.ModeBadgePlan.Foreground(ink)
+	// The banner badges were copied from the badges inside quickStyle
+	// before this override ran, so re-copy the fixed plan badge; the
+	// banner copy otherwise keeps the green-on-green pairing.
+	s.Status.ModeBannerPlanBadge = s.Status.ModeBadgePlan
+
+	// H1 is a badge that pairs the lime warning foreground with the neon
+	// green background, which is far below WCAG AA. Use the dark ink.
+	// PlanMarkdown copies Markdown before overrides run, so fix both.
+	s.Markdown.H1.Color = hex(ink)
+	s.PlanMarkdown.H1.Color = hex(ink)
+
+	// Inline code defaults to the destructive red on the elevated green
+	// background, which sits below WCAG AA. Use pale lime on the elevated
+	// green surface instead: the chip stays legible and stands out from
+	// the pure-black message background.
+	codeFg := lipgloss.Color("#c8ff8f")
+	codeBg := lipgloss.Color("#183c22")
+	s.Markdown.Code.Color = hex(codeFg)
+	s.Markdown.Code.BackgroundColor = hex(codeBg)
+	s.PlanMarkdown.Code.Color = hex(codeFg)
+	s.PlanMarkdown.Code.BackgroundColor = hex(codeBg)
+
+	// Punctuation and string literals both default to the lime warning
+	// hue, which blends code structure into strings. Dim punctuation to
+	// the mid green the operator style already uses.
+	if chroma := s.Markdown.CodeBlock.Chroma; chroma != nil {
+		chroma.Punctuation.Color = hex(lipgloss.Color("#00d447"))
+	}
+
+	return s
+}
+
 // builtinThemes maps theme names to their quickStyleOpts palette definitions.
 var builtinThemes = map[string]func() quickStyleOpts{
 	"charmtone-panther": charmtoneOpts,
 	"gruvbox-dark":      gruvboxDarkOpts,
+	"matrix-dark":       matrixDarkOpts,
 }
 
 // builtinThemeOverrides maps theme names to functions that apply
@@ -260,6 +376,7 @@ var builtinThemes = map[string]func() quickStyleOpts{
 var builtinThemeOverrides = map[string]func(Styles) Styles{
 	"charmtone-panther": charmtoneOverrides,
 	"gruvbox-dark":      gruvboxDarkOverrides,
+	"matrix-dark":       matrixDarkOverrides,
 }
 
 // deprecatedThemeNames maps legacy built-in theme names to their current

@@ -118,7 +118,7 @@ type Chat struct {
 	mouseDragItem int // Current item index being dragged over
 	mouseDragX    int // Current X in item content
 	mouseDragY    int // Current Y in item
-	mouseDragged  bool // Whether the selection was extended by dragging
+	mouseDragged  bool
 
 	// Click tracking for double/triple clicks
 	lastClickTime time.Time

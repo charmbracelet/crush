@@ -8,6 +8,7 @@
 package scheduler
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -20,6 +21,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/charmbracelet/crush/internal/lock"
 )
 
 // MaxTasksPerSession caps the number of scheduled tasks a single session
@@ -72,51 +75,253 @@ var ErrNeverFires = errors.New("cron expression is valid but will never fire")
 // the discrepancy visible.
 var ErrOneShotInPast = errors.New("one-shot schedule's fire time has already passed today")
 
+// fileLockTimeout bounds the wait on the scheduled-tasks file lock. The
+// lock is only ever held for the duration of one read-modify-write, so
+// a healthy peer releases it in milliseconds; anything longer is a
+// wedged process and is better reported as a persist failure than
+// blocked on.
+const fileLockTimeout = 5 * time.Second
+
+// ownershipRetryInterval is how often a process that lost (or never
+// held) the scheduler ownership lock retries it. The kernel drops the
+// lock when the owning process exits, so this is how a remaining
+// window takes over firing durable tasks instead of waiting for a
+// restart.
+const ownershipRetryInterval = 30 * time.Second
+
 // Store keeps scheduled tasks for all sessions. Session tasks live only
 // in memory; durable tasks are additionally persisted to a JSON file so
 // they survive restarts.
+//
+// The file is shared by every Crush process working on the same
+// project, so the store guards it two ways: an ownership lock (held for
+// the process lifetime) elects the single process that fires durable
+// tasks, and a short-held file lock serializes every read-modify-write
+// so concurrent processes merge their changes instead of overwriting
+// each other's.
 type Store struct {
 	mu       sync.RWMutex
 	tasks    map[string]*Task // keyed by ID
 	filePath string           // durable persistence path; "" disables durable tasks
 	now      func() time.Time // for tests
+
+	// owner reports whether this process holds the ownership lock for
+	// the persistence path. Only the owner fires durable tasks; every
+	// process still serves its own sessions' cron tools.
+	owner        bool
+	ownerRelease func()
+
+	// removedSinceSync tracks durable task IDs deleted in this process
+	// since the last successful on-disk sync, so a merge write removes
+	// them even if another process rewrote the file in between.
+	removedSinceSync map[string]bool
+	// lastDiskIDs holds the task IDs present on disk as of the last
+	// successful sync, so a durable task another process deleted from
+	// the file is not resurrected by this process's next write.
+	lastDiskIDs map[string]bool
+	// lastModTime is the persistence file's mtime as of the last read,
+	// gating refreshes to one stat call per tick when nothing changed.
+	lastModTime time.Time
+	// lastOwnerAttempt throttles ownership lock retries.
+	lastOwnerAttempt time.Time
 }
 
 // NewStore returns a Store persisting durable tasks at filePath. An
 // empty filePath keeps every task in memory only.
 func NewStore(filePath string) *Store {
 	return &Store{
-		tasks:    make(map[string]*Task),
-		filePath: filePath,
-		now:      time.Now,
+		tasks:            make(map[string]*Task),
+		filePath:         filePath,
+		now:              time.Now,
+		removedSinceSync: make(map[string]bool),
+		lastDiskIDs:      make(map[string]bool),
 	}
 }
 
-// Load reads durable tasks from the store's persistence file. Missing
-// files are not an error. Tasks whose next run is far in the past are
-// rescheduled from now rather than firing a backlog of missed runs —
-// there is no catch-up for missed fires.
+// opLockPath is the short-held lock file serializing file access.
+func (s *Store) opLockPath() string { return s.filePath + ".lock" }
+
+// ownerLockPath is the lifetime lock file electing the firing process.
+func (s *Store) ownerLockPath() string { return s.filePath + ".owner.lock" }
+
+// Owner reports whether this process holds the scheduler ownership
+// lock. When several Crush processes share a project's data directory,
+// exactly one of them is the owner; the others never fire durable
+// tasks, so a task cannot run twice.
+func (s *Store) Owner() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.owner
+}
+
+// Close releases the ownership lock. The kernel already releases it on
+// process exit (including crash); Close exists for tests and explicit
+// teardown. In-memory stores (no persistence path) are a no-op.
+func (s *Store) Close() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ownerRelease != nil {
+		s.ownerRelease()
+		s.ownerRelease = nil
+		s.owner = false
+		s.lastOwnerAttempt = time.Time{}
+	}
+}
+
+// Load reads durable tasks from the persistence file, taking the
+// scheduler ownership lock along the way. Missing files are not an
+// error. Tasks whose next run is far in the past are rescheduled from
+// now rather than firing a backlog of missed runs — there is no
+// catch-up for missed fires.
 func (s *Store) Load() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.loadLocked()
+}
 
-	data, err := os.ReadFile(s.filePath)
-	if errors.Is(err, os.ErrNotExist) {
+func (s *Store) loadLocked() error {
+	if s.filePath == "" {
 		return nil
 	}
-	if err != nil {
-		return fmt.Errorf("failed to read scheduled tasks: %w", err)
+	if err := os.MkdirAll(filepath.Dir(s.filePath), 0o755); err != nil {
+		return fmt.Errorf("failed to create scheduled tasks directory: %w", err)
 	}
+
+	s.acquireOwnershipLocked()
 
 	var durable []Task
-	if err := json.Unmarshal(data, &durable); err != nil {
-		return fmt.Errorf("failed to parse scheduled tasks: %w", err)
+	err := s.withOpLock(func() error {
+		var err error
+		durable, err = readDurableFile(s.filePath)
+		return err
+	})
+	if err != nil {
+		return err
 	}
+	s.adoptDurableLocked(durable)
+	if fi, err := os.Stat(s.filePath); err == nil {
+		s.lastModTime = fi.ModTime()
+		s.rememberDiskIDsLocked(durable)
+	}
+	return nil
+}
 
+// acquireOwnershipLocked tries to take the ownership lock, marking this
+// process as the one that fires durable tasks. It is throttled by
+// ownershipRetryInterval so a non-owning store can retry cheaply from
+// DueTasks without hammering the lock on every tick. Callers must hold
+// s.mu.
+func (s *Store) acquireOwnershipLocked() {
+	if s.filePath == "" || s.owner {
+		return
+	}
+	now := s.now()
+	if !s.lastOwnerAttempt.IsZero() && now.Sub(s.lastOwnerAttempt) < ownershipRetryInterval {
+		return
+	}
+	s.lastOwnerAttempt = now
+	release, err := lock.TryFile(s.ownerLockPath())
+	if err != nil {
+		if !errors.Is(err, lock.ErrContended) {
+			// Another window owns firing, which is normal; anything else
+			// (permissions, full disk) is worth surfacing.
+			slog.Error("Failed to acquire scheduled-tasks ownership lock", "error", err)
+		}
+		return
+	}
+	s.owner = true
+	s.ownerRelease = release
+}
+
+// withOpLock runs f while holding the short-lived file lock that
+// serializes every scheduled-tasks read-modify-write across processes.
+func (s *Store) withOpLock(f func() error) error {
+	ctx, cancel := context.WithTimeout(context.Background(), fileLockTimeout)
+	defer cancel()
+	release, err := lock.File(ctx, s.opLockPath())
+	if err != nil {
+		return fmt.Errorf("failed to lock scheduled tasks file: %w", err)
+	}
+	defer release()
+	return f()
+}
+
+// refreshDurableLocked adopts durable tasks other processes added to the
+// file and forgets ones they deleted, so a task created in a second
+// Crush window still fires here. It costs one stat call when the file
+// has not changed. Callers must hold s.mu.
+func (s *Store) refreshDurableLocked() {
+	if s.filePath == "" {
+		return
+	}
+	fi, err := os.Stat(s.filePath)
+	if err != nil || !fi.ModTime().After(s.lastModTime) {
+		return
+	}
+	modTime := fi.ModTime()
+	var durable []Task
+	err = s.withOpLock(func() error {
+		var err error
+		durable, err = readDurableFile(s.filePath)
+		return err
+	})
+	if err != nil {
+		slog.Error("Failed to refresh scheduled tasks", "error", err)
+		return
+	}
+	for id, t := range s.tasks {
+		if !t.Durable {
+			continue
+		}
+		if _, onDisk := lookupTask(durable, id); !onDisk && !s.removedSinceSync[id] {
+			// Another process deleted it from the file.
+			delete(s.tasks, id)
+		}
+	}
+	s.adoptDurableLocked(durable)
+	s.lastModTime = modTime
+	s.rememberDiskIDsLocked(durable)
+}
+
+// lookupTask finds a task by ID in a slice.
+func lookupTask(tasks []Task, id string) (Task, bool) {
+	for _, t := range tasks {
+		if t.ID == id {
+			return t, true
+		}
+	}
+	return Task{}, false
+}
+
+// rememberDiskIDsLocked records which task IDs the file held as of the
+// last read, so a later persist can tell "new task of mine" from
+// "another process removed it". Callers must hold s.mu.
+func (s *Store) rememberDiskIDsLocked(durable []Task) {
+	clear(s.lastDiskIDs)
+	for _, t := range durable {
+		if t.ID != "" {
+			s.lastDiskIDs[t.ID] = true
+		}
+	}
+}
+
+// adoptDurableLocked validates durable tasks read from disk and merges
+// the ones this store does not already hold into memory. Tasks already
+// present are left alone: this process's view of its own tasks wins.
+// Callers must hold s.mu.
+func (s *Store) adoptDurableLocked(durable []Task) {
 	perSession := make(map[string]int)
+	for _, t := range s.tasks {
+		if t.Durable {
+			perSession[t.SessionID]++
+		}
+	}
 	for i := range durable {
 		t := durable[i]
 		if !t.Durable || t.ID == "" {
+			continue
+		}
+		if _, exists := s.tasks[t.ID]; exists {
 			continue
 		}
 		sched, err := Parse(t.Cron)
@@ -138,10 +343,18 @@ func (s *Store) Load() error {
 			continue
 		}
 		perSession[t.SessionID]++
-		task := t
-		s.tasks[task.ID] = &task
+		s.tasks[t.ID] = &t
 	}
-	return nil
+}
+
+// deleteTaskLocked removes a task and, when it was durable, records the
+// removal so the next merge write also drops it from the file even if
+// another process rewrote the file in between. Callers must hold s.mu.
+func (s *Store) deleteTaskLocked(id string) {
+	if t, ok := s.tasks[id]; ok && t.Durable {
+		s.removedSinceSync[id] = true
+	}
+	delete(s.tasks, id)
 }
 
 // Create validates and registers a new task for sessionID.
@@ -268,7 +481,7 @@ func (s *Store) Delete(sessionID, id string) (Task, error) {
 		return Task{}, ErrTaskNotFound
 	}
 	deleted := *t
-	delete(s.tasks, id)
+	s.deleteTaskLocked(id)
 	if err := s.persistLocked(); err != nil {
 		// Put it back so memory and disk stay in agreement; otherwise the
 		// task is gone from this process but returns on the next restart.
@@ -288,20 +501,35 @@ func (s *Store) Remove(id string) {
 	if _, ok := s.tasks[id]; !ok {
 		return
 	}
-	delete(s.tasks, id)
+	s.deleteTaskLocked(id)
 	if err := s.persistLocked(); err != nil {
 		slog.Error("Failed to persist scheduled tasks after removal", "id", id, "error", err)
 	}
 }
 
 // DueTasks returns every task whose next run time has passed as of now.
+//
+// Durable tasks are shared by every process on the project, so only the
+// ownership lock holder gets them back; a second Crush window running
+// the same file would otherwise fire them a second time. The owner also
+// refreshes from disk first, adopting tasks other windows created.
 func (s *Store) DueTasks() []Task {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.filePath != "" {
+		s.acquireOwnershipLocked()
+		if s.owner {
+			s.refreshDurableLocked()
+		}
+	}
 
 	now := s.now()
 	var out []Task
 	for _, t := range s.tasks {
+		if t.Durable && !s.owner {
+			continue
+		}
 		if !t.NextRunAt.After(now) {
 			out = append(out, *t)
 		}
@@ -325,7 +553,7 @@ func (s *Store) MarkFired(id string) {
 	t.RunCount++
 	t.LastError = ""
 	if !t.Recurring {
-		delete(s.tasks, id)
+		s.deleteTaskLocked(id)
 		s.persistBestEffort(id)
 		return
 	}
@@ -343,13 +571,13 @@ func (s *Store) rescheduleLocked(t *Task, now time.Time) {
 	sched, err := Parse(t.Cron)
 	if err != nil {
 		slog.Warn("Deleting scheduled task with unparseable cron expression", "id", t.ID, "cron", t.Cron, "error", err)
-		delete(s.tasks, t.ID)
+		s.deleteTaskLocked(t.ID)
 		return
 	}
 	next := sched.Next(now)
 	if next.IsZero() {
 		slog.Warn("Deleting scheduled task that can never fire again", "id", t.ID, "cron", t.Cron)
-		delete(s.tasks, t.ID)
+		s.deleteTaskLocked(t.ID)
 		return
 	}
 	t.NextRunAt = next.Truncate(time.Minute)
@@ -378,7 +606,7 @@ func (s *Store) MarkError(id string, fireErr error) {
 	if t.Recurring {
 		s.rescheduleLocked(t, now)
 	} else {
-		delete(s.tasks, id)
+		s.deleteTaskLocked(id)
 	}
 	s.persistBestEffort(id)
 }
@@ -397,7 +625,7 @@ func (s *Store) DropSession(sessionID string) {
 	dropped := false
 	for id, t := range s.tasks {
 		if t.SessionID == sessionID {
-			delete(s.tasks, id)
+			s.deleteTaskLocked(id)
 			dropped = true
 		}
 	}
@@ -407,28 +635,89 @@ func (s *Store) DropSession(sessionID string) {
 }
 
 // persistLocked writes durable tasks to disk. Callers must hold s.mu.
+//
+// The write is a read-modify-write under the short-held file lock:
+// durable tasks belonging to other Crush processes on the same project
+// are preserved rather than clobbered, tasks this process deleted are
+// dropped, and this process's versions of its own tasks win. Without
+// the merge, two windows on one project would each write their own view
+// and the last rename would silently discard the other's tasks.
 func (s *Store) persistLocked() error {
 	if s.filePath == "" {
 		return nil
 	}
 
-	var durable []Task
-	for _, t := range s.tasks {
-		if t.Durable {
-			durable = append(durable, *t)
+	if err := s.withOpLock(func() error {
+		disk, err := readDurableFile(s.filePath)
+		if err != nil {
+			return err
 		}
+		merged := make([]Task, 0, len(disk)+len(s.tasks))
+		onDisk := make(map[string]bool, len(disk))
+		for _, t := range disk {
+			onDisk[t.ID] = true
+			if s.removedSinceSync[t.ID] {
+				continue
+			}
+			if cur, ok := s.tasks[t.ID]; ok && cur.Durable {
+				merged = append(merged, *cur)
+				continue
+			}
+			merged = append(merged, t)
+		}
+		for _, t := range s.tasks {
+			// A task absent from the file that the file never held is
+			// new here; one the file used to hold was removed by
+			// another process, so honor the removal instead of
+			// resurrecting it.
+			if t.Durable && !onDisk[t.ID] && !s.lastDiskIDs[t.ID] {
+				merged = append(merged, *t)
+			}
+		}
+		sortTasks(merged)
+		if err := writeDurableFile(s.filePath, merged); err != nil {
+			return err
+		}
+		if fi, err := os.Stat(s.filePath); err == nil {
+			s.lastModTime = fi.ModTime()
+		}
+		s.rememberDiskIDsLocked(merged)
+		clear(s.removedSinceSync)
+		return nil
+	}); err != nil {
+		return err
 	}
-	sortTasks(durable)
+	return nil
+}
 
-	data, err := json.MarshalIndent(durable, "", "  ")
+// readDurableFile reads and parses the persistence file. A missing file
+// is an empty task list, not an error.
+func readDurableFile(path string) ([]Task, error) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to read scheduled tasks: %w", err)
+	}
+	var durable []Task
+	if err := json.Unmarshal(data, &durable); err != nil {
+		return nil, fmt.Errorf("failed to parse scheduled tasks: %w", err)
+	}
+	return durable, nil
+}
+
+// writeDurableFile atomically replaces the persistence file.
+func writeDurableFile(path string, tasks []Task) error {
+	data, err := json.MarshalIndent(tasks, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to encode scheduled tasks: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(s.filePath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("failed to create scheduled tasks directory: %w", err)
 	}
 
-	tmp, err := os.CreateTemp(filepath.Dir(s.filePath), ".scheduled_tasks-*.json")
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".scheduled_tasks-*.json")
 	if err != nil {
 		return fmt.Errorf("failed to create scheduled tasks temp file: %w", err)
 	}
@@ -446,7 +735,7 @@ func (s *Store) persistLocked() error {
 		os.Remove(tmpName)
 		return fmt.Errorf("failed to secure scheduled tasks file: %w", err)
 	}
-	if err := os.Rename(tmpName, s.filePath); err != nil {
+	if err := os.Rename(tmpName, path); err != nil {
 		os.Remove(tmpName)
 		return fmt.Errorf("failed to replace scheduled tasks file: %w", err)
 	}

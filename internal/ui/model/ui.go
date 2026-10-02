@@ -165,6 +165,13 @@ type (
 	mcpStateChangedMsg struct {
 		states map[string]mcp.ClientInfo
 	}
+	// skillsOverridesLoadedMsg carries the repository-scoped skill toggle
+	// sets after a workspace fetch so the sidebar and the toggles dialog
+	// can filter without blocking on workspace calls during render.
+	skillsOverridesLoadedMsg struct {
+		disabled map[string]bool
+		enabled  map[string]bool
+	}
 	// sendMessageMsg is sent to send a message.
 	// currently only used for mcp prompts.
 	sendMessageMsg struct {
@@ -363,6 +370,12 @@ type UI struct {
 
 	// skills
 	skillStates []*skills.SkillState
+	// skillsDisabledOverrides mirrors the repository-scoped disabled set
+	// so the sidebar can filter without blocking on workspace calls.
+	skillsDisabledOverrides map[string]bool
+	// skillsEnabledOverrides mirrors the repository-scoped enabled set
+	// (config-disabled skills re-enabled for this repository).
+	skillsEnabledOverrides map[string]bool
 
 	// sidebarLogo keeps a cached version of the sidebar sidebarLogo.
 	sidebarLogo string
@@ -971,6 +984,14 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Auto-open the MCP auth dialog if any servers need authentication.
 		if cmd := m.openMCPAuthDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
+		}
+	case skillsOverridesLoadedMsg:
+		m.skillsDisabledOverrides = msg.disabled
+		m.skillsEnabledOverrides = msg.enabled
+		if dia := m.dialog.Dialog(dialog.SkillsTogglesID); dia != nil {
+			if toggles, ok := dia.(*dialog.SkillToggles); ok {
+				toggles.SetItems(m.skillsTogglesList())
+			}
 		}
 	case mcpPromptsLoadedMsg:
 		m.mcpPrompts = msg.Prompts
@@ -2466,6 +2487,11 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		cmds = append(cmds, m.disableDockerMCP)
 	case dialog.ActionToggleMCP:
 		cmds = append(cmds, m.applyMCPToggle(msg))
+	case dialog.ActionToggleSkill:
+		// Sequence apply then refresh: the refresh must read the
+		// overrides after the toggle commits, or the dialog shows stale
+		// state.
+		cmds = append(cmds, tea.Sequence(m.applySkillToggle(msg), m.refreshSkillOverrides()))
 	case dialog.ActionInitializeProject:
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before summarizing session..."))
@@ -5376,6 +5402,10 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		}
 	case dialog.MCPTogglesID:
 		if cmd := m.openMCPTogglesDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.SkillsTogglesID:
+		if cmd := m.openSkillsTogglesDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	case dialog.FilePickerID:

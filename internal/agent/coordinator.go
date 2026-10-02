@@ -225,7 +225,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		return nil, errCoderAgentNotConfigured
 	}
 
-	coderPrompt, err := coderPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
+	coderPrompt, err := coderPrompt(c.skillOverrideOptions()...)
 	if err != nil {
 		return nil, err
 	}
@@ -241,7 +241,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		return nil, errPlanAgentNotConfigured
 	}
 
-	planSystemPrompt, err := planPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
+	planSystemPrompt, err := planPrompt(c.skillOverrideOptions()...)
 	if err != nil {
 		return nil, err
 	}
@@ -780,6 +780,33 @@ func mergeCallOptions(model Model, cfg config.ProviderConfig) (fantasy.ProviderO
 	freqPenalty := cmp.Or(model.ModelCfg.FrequencyPenalty, model.CatwalkCfg.Options.FrequencyPenalty)
 	presPenalty := cmp.Or(model.ModelCfg.PresencePenalty, model.CatwalkCfg.Options.PresencePenalty)
 	return modelOptions, temp, topP, topK, freqPenalty, presPenalty
+}
+
+// skillOverrideOptions returns the prompt options carrying the
+// repository-scoped skill toggle overrides. They read the DB at Build
+// time, the same point where the config's disabled list is applied, so a
+// running agent picks up toggles on its next rebuild (agent build).
+func (c *coordinator) skillOverrideOptions() []prompt.Option {
+	disabled := func(ctx context.Context) []string {
+		names, err := c.sessions.SkillsDisabled(ctx)
+		if err != nil {
+			slog.Error("Failed to list disabled skills for prompt", "error", err)
+			return nil
+		}
+		return names
+	}
+	enabled := func(ctx context.Context) []string {
+		names, err := c.sessions.SkillsEnabled(ctx)
+		if err != nil {
+			slog.Error("Failed to list enabled skills for prompt", "error", err)
+			return nil
+		}
+		return names
+	}
+	return []prompt.Option{
+		prompt.WithWorkingDir(c.cfg.WorkingDir()),
+		prompt.WithSkillOverrides(disabled, enabled),
+	}
 }
 
 func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, agent config.Agent, isSubAgent bool) (SessionAgent, error) {

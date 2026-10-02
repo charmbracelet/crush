@@ -79,6 +79,9 @@ type Service interface {
 	MCPDisabledServers(ctx context.Context) ([]string, error)
 	SetMCPServerDisabled(ctx context.Context, name string, disabled bool) error
 	MCPServersEnabled(ctx context.Context) ([]string, error)
+	SkillsDisabled(ctx context.Context) ([]string, error)
+	SetSkillDisabled(ctx context.Context, name string, disabled bool) error
+	SkillsEnabled(ctx context.Context) ([]string, error)
 
 	// Agent tool session management
 	CreateAgentToolSessionID(messageID, toolCallID string) string
@@ -397,6 +400,38 @@ func (s *service) SetMCPServerDisabled(ctx context.Context, name string, disable
 // repository. Startup force-starts them so the override survives restarts.
 func (s *service) MCPServersEnabled(ctx context.Context) ([]string, error) {
 	return s.q.ListMCPEnabledServers(ctx)
+}
+
+// SkillsDisabled returns the skills disabled for this repository.
+// Same semantics as MCPDisabledServers: project-scoped, shared by every
+// session in the repository.
+func (s *service) SkillsDisabled(ctx context.Context) ([]string, error) {
+	return s.q.ListSkillsDisabled(ctx)
+}
+
+// SetSkillDisabled adds or removes a repository-scoped skill override.
+// Enabling a config-disabled skill records an enabled override so it
+// stays enabled across restarts; disabling removes it again.
+func (s *service) SetSkillDisabled(ctx context.Context, name string, disabled bool) error {
+	var err error
+	if disabled {
+		err = s.q.InsertSkillsDisabled(ctx, name)
+	} else {
+		err = s.q.DeleteSkillsDisabled(ctx, name)
+	}
+	if err != nil {
+		return err
+	}
+	if disabled {
+		return s.q.DeleteSkillsEnabled(ctx, name)
+	}
+	return s.q.InsertSkillsEnabled(ctx, name)
+}
+
+// SkillsEnabled returns the skills with a repository-scoped enabled
+// override: config-disabled skills the user enabled for this repository.
+func (s *service) SkillsEnabled(ctx context.Context) ([]string, error) {
+	return s.q.ListSkillsEnabled(ctx)
 }
 
 func NewService(q *db.Queries, conn *sql.DB) Service {

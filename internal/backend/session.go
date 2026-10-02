@@ -147,6 +147,50 @@ func (b *Backend) SetMCPServerConfigDisabled(ctx context.Context, workspaceID, n
 	return mcptools.SetConfigDisabled(ctx, ws.Cfg, config.ScopeGlobal, name, disabled)
 }
 
+// SkillsDisabled returns the skills disabled for the given workspace's
+// repository.
+func (b *Backend) SkillsDisabled(ctx context.Context, workspaceID string) ([]string, error) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+
+	return ws.Sessions.SkillsDisabled(ctx)
+}
+
+// SetSkillDisabled toggles a repository-scoped skill override for the
+// given workspace.
+func (b *Backend) SetSkillDisabled(ctx context.Context, workspaceID, name string, disabled bool) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+
+	return ws.Sessions.SetSkillDisabled(ctx, name, disabled)
+}
+
+// SkillsEnabled returns the skills with a repository-scoped enabled
+// override for the given workspace's repository.
+func (b *Backend) SkillsEnabled(ctx context.Context, workspaceID string) ([]string, error) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+
+	return ws.Sessions.SkillsEnabled(ctx)
+}
+
+// SetSkillConfigDisabled toggles a skill's disabled flag in the global
+// config's options.disabled_skills list.
+func (b *Backend) SetSkillConfigDisabled(ctx context.Context, workspaceID, name string, disabled bool) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+
+	return ws.Cfg.SetSkillDisabledConfig(config.ScopeGlobal, name, disabled)
+}
+
 // StartMCPServer starts the named MCP server for the given workspace even
 // when its config entry is disabled. Runtime-only.
 func (b *Backend) StartMCPServer(ctx context.Context, workspaceID, name string) error {

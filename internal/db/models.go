@@ -63,3 +63,11 @@ type Session struct {
 	Todos            sql.NullString `json:"todos"`
 	Channel          sql.NullString `json:"channel"`
 }
+
+type SkillsDisabledServer struct {
+	Name string `json:"name"`
+}
+
+type SkillsEnabledServer struct {
+	Name string `json:"name"`
+}

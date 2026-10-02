@@ -74,6 +74,8 @@ type MCPToggles struct {
 	width  int
 	items  []MCPToggleItem
 	cursor int
+	// offset is the first visible row; the window follows the cursor.
+	offset int
 	scope  MCPToggleScope
 	help   help.Model
 	keyMap struct {
@@ -142,8 +144,10 @@ func (m *MCPToggles) HandleMsg(msg tea.Msg) Action {
 		switch {
 		case key.Matches(msg, m.keyMap.Up):
 			m.cursor = max(0, m.cursor-1)
+			m.offset = toggleVisibleOffset(m.cursor, m.offset, len(m.items), maxVisibleToggleRows)
 		case key.Matches(msg, m.keyMap.Down):
 			m.cursor = min(len(m.items)-1, m.cursor+1)
+			m.offset = toggleVisibleOffset(m.cursor, m.offset, len(m.items), maxVisibleToggleRows)
 		case key.Matches(msg, m.keyMap.Scope):
 			if m.scope == MCPToggleScopeLocal {
 				m.scope = MCPToggleScopeGlobal
@@ -200,7 +204,7 @@ func (m *MCPToggles) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 // padding and the dialog frame. A fixed 64-column cap word-wraps long
 // server names onto a second line.
 func (m *MCPToggles) requiredWidth(t *styles.Styles) int {
-	widest := 48 // Comfortable minimum so short names don't shrink the dialog.
+	widest := minToggleDialogWidth
 	for _, item := range m.items {
 		row := 2 /* dot + space */ + lipgloss.Width(item.Name) + 1 + lipgloss.Width(m.itemStatus(item))
 		widest = max(widest, row)
@@ -243,11 +247,24 @@ func (m *MCPToggles) innerContent() string {
 			Render("No MCP servers configured.")
 	}
 
+	// Cap the visible rows so a long server list cannot make the dialog
+	// grow past the screen; the window follows the cursor.
+	visible := min(maxVisibleToggleRows, len(m.items))
+	first := max(0, min(m.offset, len(m.items)-visible))
+	last := min(len(m.items), first+visible)
+
 	// The row style adds Padding(0, 1), so the text area is two columns
-	// narrower than the dialog's inner width.
+	// narrower than the dialog's inner width. When the list scrolls,
+	// reserve the scrollbar column so row lines do not wrap and knock
+	// the track out of alignment.
 	rowWidth := max(0, innerWidth-2)
-	rows := make([]string, 0, len(m.items))
-	for i, item := range m.items {
+	if len(m.items) > visible {
+		rowWidth = max(0, rowWidth-scrollbarColumnWidth)
+	}
+
+	rows := make([]string, 0, visible)
+	for i := first; i < last; i++ {
+		item := m.items[i]
 		status := m.itemStatus(item)
 		// The status dot mirrors the sidebar: green connected, yellow
 		// starting, red error, gray disabled/offline. Icon styles carry
@@ -284,13 +301,13 @@ func (m *MCPToggles) innerContent() string {
 		rows = append(rows, lipgloss.NewStyle().Padding(0, 1).Render(row))
 	}
 
-	return lipgloss.JoinVertical(lipgloss.Left, "", strings.Join(rows, "\n"), "")
+	return joinToggleRows(t, rows, len(m.items), visible, first)
 }
 
 // statusDot maps a status label to the sidebar's status icon style.
 func statusDot(t *styles.Styles, status string) lipgloss.Style {
 	switch {
-	case status == "connected":
+	case status == "connected" || status == "active":
 		return t.Resource.OnlineIcon
 	case status == "starting":
 		return t.Resource.BusyIcon

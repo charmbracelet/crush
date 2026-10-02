@@ -835,7 +835,15 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// mutex above for both the accepted and in-process paths.
 	ctx = context.WithValue(ctx, tools.SessionIDContextKey, call.SessionID)
 
-	history, files := a.preparePrompt(msgs, largeModel.CatwalkCfg.SupportsImages, call.Attachments...)
+	// Stale tool output is dropped from the request rather than from storage:
+	// it is the largest thing a long session carries, the least likely to
+	// still matter, and trivially re-derivable by re-running the call.
+	view, pruned := compaction.Prune(msgs, a.prunePolicy(int64(largeModel.CatwalkCfg.ContextWindow)))
+	if pruned > 0 {
+		slog.Debug("Pruned stale tool output from the request",
+			"session_id", call.SessionID, "tokens", pruned)
+	}
+	history, files := a.preparePrompt(view, largeModel.CatwalkCfg.SupportsImages, call.Attachments...)
 
 	startTime := time.Now()
 	a.eventPromptSent(call.SessionID)
@@ -1421,7 +1429,13 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID, trigger, instru
 	// second time, and measure the cut against the live transcript ahead of
 	// it.
 	previousCheckpoint, body := splitCheckpoint(msgs)
-	cut := compaction.Plan(body, a.compactionPolicy(int64(largeModel.CatwalkCfg.ContextWindow)))
+
+	// Plan against what the model actually sees. Pruning has already trimmed
+	// stale tool output from every request, so sizing a tail from the unpruned
+	// transcript would budget for a session nobody receives. Indices are
+	// unaffected: pruning rewrites messages, it never removes them.
+	view, _ := compaction.Prune(body, a.prunePolicy(int64(largeModel.CatwalkCfg.ContextWindow)))
+	cut := compaction.Plan(view, a.compactionPolicy(int64(largeModel.CatwalkCfg.ContextWindow)))
 	region := body
 	if cut.Found {
 		// Keep the recent turns verbatim. The next model sees them as written
@@ -1431,6 +1445,20 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID, trigger, instru
 	}
 	if len(region) == 0 {
 		return nil
+	}
+	// A checkpoint wants the full text, because this is the last moment it is
+	// in hand. But a region larger than the request can carry is truncated by
+	// some servers rather than rejected, which would write a checkpoint that
+	// never saw most of what it replaced; when it cannot fit, summarize what
+	// the model was actually shown.
+	if limit := compaction.RegionLimit(int64(largeModel.CatwalkCfg.ContextWindow)); limit > 0 &&
+		compaction.EstimateAll(region) > limit {
+		slog.Debug("Summarizing the pruned view because the full region will not fit",
+			"session_id", sessionID,
+			"region_tokens", compaction.EstimateAll(region),
+			"limit", limit,
+		)
+		region = view[:len(region)]
 	}
 
 	aiMsgs, _ := a.preparePrompt(region, largeModel.CatwalkCfg.SupportsImages)
@@ -1934,6 +1962,22 @@ func (a *sessionAgent) compactionPolicy(contextWindow int64) compaction.Policy {
 	}
 	p := compaction.DefaultPolicy
 	p.KeepRecentTokens = compaction.TailBudget(contextWindow, configured)
+	return p
+}
+
+// prunePolicy is the tool-output pruning policy in force for a model with the
+// given context window. Pruning is enabled unless the config says otherwise,
+// matching other tri-state options.
+func (a *sessionAgent) prunePolicy(contextWindow int64) compaction.PrunePolicy {
+	var configuredTail int64
+	if opts := a.compactionOptions(); opts != nil {
+		configuredTail = int64(opts.TailTokens)
+	}
+
+	p := compaction.PrunePolicyForWindow(contextWindow, configuredTail)
+	if opts := a.compactionOptions(); opts != nil && opts.PruneToolResults != nil {
+		p.Disabled = !*opts.PruneToolResults
+	}
 	return p
 }
 

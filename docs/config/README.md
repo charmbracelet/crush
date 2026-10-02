@@ -538,6 +538,10 @@ Available Keys:
                                 selection, and scrolling in the TUI (default
                                 true); disable to let the terminal emulator
                                 or tmux handle text selection and copy/paste
+  nerd-fonts bool               override Nerd Font glyph detection: true
+                                forces glyphs on, false forces them off, and
+                                unset keeps automatic detection (the NERDFONT
+                                environment variable wins when both are set)
   scrollbar string              control chat scrollbar visibility: default,
                                 always, or never
   exit-banner default|compact|none
@@ -553,6 +557,7 @@ option ui compact true
 option ui diff unified
 option ui transparent true
 option ui mouse false
+option ui nerd-fonts false
 option ui scrollbar always
 option ui exit-banner compact
 option ui completions-max-depth 4

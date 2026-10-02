@@ -420,7 +420,7 @@ Flags:
 ### permissions
 
 Configure tool permissions. `allow` skips approval prompts; `deny` hides tools
-from the agent entirely.
+from the agent entirely; `yolo` starts in YOLO mode (all prompts skipped).
 
 ```text
 Usage:
@@ -429,6 +429,7 @@ Usage:
 Available Commands:
   allow     Allow tools without prompting
   deny      Hide tools from the agent
+  yolo      Start in YOLO mode (skip all prompts)
 ```
 
 #### `permissions allow`
@@ -449,9 +450,22 @@ Usage:
   permissions deny <tool> [<tool> ...]
 ```
 
+#### `permissions yolo`
+
+Start in YOLO mode: every permission prompt is skipped, including previously
+blocked commands. Optional boolean value, default `true`. Note that
+`permissions deny` still hides tools from the agent entirely in YOLO mode;
+denying is not a permission prompt.
+
+```text
+Usage:
+  permissions yolo [true|false]
+```
+
 ```bash
 permissions allow view ls grep edit
 permissions deny bash
+permissions yolo
 ```
 
 ### option
@@ -603,7 +617,7 @@ to Bash-based config.
   "models": {
     "large": { "provider": "anthropic", "model": "claude-sonnet-4-20250514" },
   },
-  "permissions": { "allowed_tools": ["view", "ls", "grep"] },
+  "permissions": { "allowed_tools": ["view", "ls", "grep"], "skip_requests": true },
 }
 ```
 

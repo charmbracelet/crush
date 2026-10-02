@@ -54,3 +54,6 @@ manpages/
 completions/crush.*sh
 .prettierignore
 .task
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/

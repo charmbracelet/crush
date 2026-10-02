@@ -92,11 +92,23 @@ func (c *eventCollector) reset() {
 	c.events = nil
 }
 
+// waitFor blocks until at least n events have been collected. Tests use
+// this instead of sleeping before reset: the collector appends from its
+// own goroutine, so a fixed sleep can expire before an already-published
+// event lands and the reset then fails to drop it.
+func (c *eventCollector) waitFor(t *testing.T, n int) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		return len(c.snapshot()) >= n
+	}, time.Second, time.Millisecond)
+}
+
 func TestUpdate_DebouncesTextDeltas(t *testing.T) {
 	t.Parallel()
 
 	// Long-enough debounce that we can verify nothing flushes prematurely.
-	svc, sessionID := newTestService(t, WithDebounce(50*time.Millisecond))
+	const debounce = 50 * time.Millisecond
+	svc, sessionID := newTestService(t, WithDebounce(debounce))
 
 	subCtx, cancelSub := context.WithCancel(t.Context())
 	defer cancelSub()
@@ -108,18 +120,24 @@ func TestUpdate_DebouncesTextDeltas(t *testing.T) {
 	})
 	require.NoError(t, err)
 	// Drop the CreatedEvent emitted by Create.
-	time.Sleep(5 * time.Millisecond)
+	collector.waitFor(t, 1)
 	collector.reset()
 
 	// Push 5 deltas inside a single debounce window.
+	start := time.Now()
 	for i := 0; i < 5; i++ {
 		msg.AppendContent("a")
 		require.NoError(t, svc.Update(t.Context(), msg))
 	}
 
 	// Before the debounce expires no UpdatedEvent should have landed.
+	// The check holds only while the window is still open: a loaded
+	// runner can wake this goroutine after the timer has already fired.
 	time.Sleep(10 * time.Millisecond)
-	require.Empty(t, collector.snapshot(), "no events should land before debounce window expires")
+	early := collector.snapshot()
+	if time.Since(start) < debounce {
+		require.Empty(t, early, "no events should land before debounce window expires")
+	}
 
 	// Wait for the debounce timer to fire.
 	require.Eventually(t, func() bool {
@@ -148,7 +166,8 @@ func TestUpdate_TerminalUpdatesFlushSynchronously(t *testing.T) {
 
 	msg, err := svc.Create(t.Context(), sessionID, CreateMessageParams{Role: Assistant})
 	require.NoError(t, err)
-	time.Sleep(5 * time.Millisecond)
+	// Drop the CreatedEvent emitted by Create.
+	collector.waitFor(t, 1)
 	collector.reset()
 
 	// AddFinish makes the message terminal; Update must flush

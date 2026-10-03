@@ -97,6 +97,12 @@ func (g *GrepToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	cappedWidth := cappedMessageWidth(width)
 	var params tools.GrepParams
 	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
+		if opts.IsPending() {
+			// While the tool call input is still streaming it is usually
+			// incomplete and not valid JSON yet, so fall back to the plain
+			// spinner instead of showing an "Invalid parameters" error.
+			return pendingTool(sty, "Grep", opts.Anim, opts.Compact)
+		}
 		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, cappedWidth)
 	}
 

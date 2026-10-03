@@ -58,6 +58,24 @@ const (
 	smallContextWindowRatio     = 0.2
 )
 
+// autoSummarizeThreshold returns how many tokens may remain in a context
+// window of cw tokens before the session is summarized. Windows above
+// largeContextWindowThreshold keep a flat buffer, smaller ones reserve a
+// share of the window. A configured buffer or ratio only replaces the
+// default of its own regime.
+func autoSummarizeThreshold(cw int64, ratio float64, buffer int64) int64 {
+	if cw > largeContextWindowThreshold {
+		if buffer > 0 {
+			return buffer
+		}
+		return largeContextWindowBuffer
+	}
+	if ratio > 0 {
+		return int64(float64(cw) * ratio)
+	}
+	return int64(float64(cw) * smallContextWindowRatio)
+}
+
 var userAgent = fmt.Sprintf("Charm-Crush/%s (https://charm.land/crush)", version.Version)
 
 //go:embed templates/title.md
@@ -214,6 +232,8 @@ type sessionAgent struct {
 	// turns; sendChannelReply treats nil as "routing disabled".
 	cfg                  *config.ConfigStore
 	disableAutoSummarize bool
+	autoSummarizeRatio   float64
+	autoSummarizeBuffer  int64
 	isYolo               bool
 	notify               pubsub.Publisher[notify.Notification]
 	runComplete          pubsub.Publisher[notify.RunComplete]
@@ -266,6 +286,8 @@ type SessionAgentOptions struct {
 	SystemPrompt         string
 	IsSubAgent           bool
 	DisableAutoSummarize bool
+	AutoSummarizeRatio   float64
+	AutoSummarizeBuffer  int64
 	IsYolo               bool
 	Sessions             session.Service
 	Messages             message.Service
@@ -288,6 +310,8 @@ func NewSessionAgent(
 		messages:             opts.Messages,
 		cfg:                  opts.Cfg,
 		disableAutoSummarize: opts.DisableAutoSummarize,
+		autoSummarizeRatio:   opts.AutoSummarizeRatio,
+		autoSummarizeBuffer:  opts.AutoSummarizeBuffer,
 		tools:                csync.NewSliceFrom(opts.Tools),
 		isYolo:               opts.IsYolo,
 		notify:               opts.Notify,
@@ -1102,12 +1126,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				}
 				tokens := currentSession.CompletionTokens + currentSession.PromptTokens
 				remaining := cw - tokens
-				var threshold int64
-				if cw > largeContextWindowThreshold {
-					threshold = largeContextWindowBuffer
-				} else {
-					threshold = int64(float64(cw) * smallContextWindowRatio)
-				}
+				threshold := autoSummarizeThreshold(cw, a.autoSummarizeRatio, a.autoSummarizeBuffer)
 				if (remaining <= threshold) && !a.disableAutoSummarize {
 					shouldSummarize = true
 					return true

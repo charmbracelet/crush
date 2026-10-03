@@ -32,6 +32,9 @@ func openDB(dbPath string) (*sql.DB, error) {
 	for name, value := range pragmas {
 		params.Add("_pragma", fmt.Sprintf("%s(%s)", name, value))
 	}
+	if secureDeleteEnabled() {
+		params.Add("_pragma", "secure_delete(ON)")
+	}
 	// Use BEGIN IMMEDIATE so writers acquire the reserved lock up front,
 	// preventing deferred-to-writer upgrade deadlocks.
 	params.Set("_txlock", "immediate")

@@ -653,7 +653,7 @@ func TestPlanHandoffConfirm_ClearsPendingAndSwitchesMode(t *testing.T) {
 	inline, ok := u.activeInline.(*dialog.PlanHandoffInline)
 	require.True(t, ok)
 
-	cmd := inline.OnConfirm(false)
+	cmd := inline.OnConfirm(dialog.PlanHandoffOptions{})
 	require.NotNil(t, cmd)
 	// The switch is async: the mode only changes once the backend settles.
 	require.Equal(t, uiInputModePlan, u.mode)
@@ -724,7 +724,7 @@ func TestPlanHandoffExplicitPermissionMode(t *testing.T) {
 		ws.yolo = !yolo
 		u.openPlanHandoff()
 		inline := u.activeInline.(*dialog.PlanHandoffInline)
-		cmd := inline.OnConfirm(yolo)
+		cmd := inline.OnConfirm(dialog.PlanHandoffOptions{YOLO: yolo})
 		require.Equal(t, yolo, ws.yolo)
 		require.Empty(t, ws.runPrompts, "wait for the coder model to finish switching")
 		switched := cmd().(modeSwitchedMsg)

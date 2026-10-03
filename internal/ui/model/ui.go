@@ -266,6 +266,9 @@ type UI struct {
 	// plan-ready marker but has not been confirmed for execution yet. It
 	// lets the user reopen the handoff prompt after dismissing it.
 	planReadySessionID string
+	planReadyMessageID string
+	planReadyText      string
+	planImplementation *planImplementation
 	// modeSwitching is true while the async agent-model update kicked off
 	// by setInputMode is still in flight; sending is blocked meanwhile.
 	modeSwitching bool
@@ -931,6 +934,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.historyReset()
 		cmds = append(cmds, m.loadPromptHistory())
 		m.updateLayoutAndSize()
+
+	case planSessionPreparedMsg:
+		cmds = append(cmds, m.applyPlanSessionPrepared(msg)...)
+	case planCoderReadyMsg:
+		cmds = append(cmds, m.startPlanImplementation(msg)...)
 
 	case sessionFilesUpdatesMsg:
 		m.sessionFiles = msg.sessionFiles
@@ -5686,8 +5694,14 @@ func (m *UI) handlePlanHandoff(rc notify.RunComplete) tea.Cmd {
 		slog.Debug("Plan run completed without ready marker", "session_id", rc.SessionID)
 		return nil
 	}
-	m.setPlanReadyPending(rc.SessionID)
-	if _, ok := m.activeInline.(*dialog.PlanHandoffInline); ok {
+	text := strings.TrimSpace(common.StripPlanMarkers(rc.Text))
+	duplicate := m.planReadySessionID == rc.SessionID && m.planReadyMessageID == rc.MessageID && m.planReadyText == text
+	if !duplicate {
+		m.setPlanReadyPending(rc.SessionID)
+		m.planReadyMessageID = rc.MessageID
+		m.planReadyText = text
+	}
+	if _, ok := m.activeInline.(*dialog.PlanHandoffInline); ok && duplicate {
 		return nil
 	}
 	m.openPlanHandoff()
@@ -5719,7 +5733,16 @@ func (m *UI) resetPlanModeState() tea.Cmd {
 // setPlanReadyPending records (or clears, with an empty ID) the session that
 // has an unconfirmed ready plan.
 func (m *UI) setPlanReadyPending(sessionID string) {
+	if m.planImplementation != nil {
+		m.planImplementation.cancel()
+		m.planImplementation = nil
+		m.modeSwitching = false
+	}
 	m.planReadySessionID = sessionID
+	if sessionID == "" {
+		m.planReadyText = ""
+		m.planReadyMessageID = ""
+	}
 }
 
 // openPlanHandoff replaces the textarea with the inline "switch to code"
@@ -5727,7 +5750,11 @@ func (m *UI) setPlanReadyPending(sessionID string) {
 // by pressing enter on an empty editor while still in plan mode.
 func (m *UI) openPlanHandoff() {
 	inline := dialog.NewPlanHandoffInline(m.com)
-	inline.OnConfirm = func(yolo bool) tea.Cmd {
+	inline.OnConfirm = func(options dialog.PlanHandoffOptions) tea.Cmd {
+		if options.NewSession {
+			return m.prepareNewSessionForPlanImpl(options)
+		}
+		yolo := options.YOLO
 		if m.com.Workspace.PermissionSkipRequests() != yolo {
 			m.toggleYoloMode()
 		}

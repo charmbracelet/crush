@@ -122,7 +122,7 @@ func TestRun_QueuedRunIDPromptRunsRecursivelyAndPublishesRunComplete(t *testing.
 	case <-time.After(5 * time.Second):
 		t.Fatal("main run never entered Stream")
 	}
-	require.True(t, sa.IsSessionBusy(sess.ID), "main run must be active before enqueueing the follow-up")
+	require.True(t, sa.HasActiveTurn(sess.ID), "main run must be active before enqueueing the follow-up")
 
 	// Enqueue a RunID-bearing follow-up behind the busy session.
 	res, err := sa.Run(t.Context(), SessionAgentCall{

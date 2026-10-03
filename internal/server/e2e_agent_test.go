@@ -213,7 +213,7 @@ func (c *scriptedCoordinator) CancelAll() {
 }
 
 func (c *scriptedCoordinator) IsBusy() bool                                  { return false }
-func (c *scriptedCoordinator) IsSessionBusy(string) bool                     { return false }
+func (c *scriptedCoordinator) HasPendingWork(string) bool                    { return false }
 func (c *scriptedCoordinator) QueuedPrompts(string) int                      { return 0 }
 func (c *scriptedCoordinator) QueuedPromptsList(string) []string             { return nil }
 func (c *scriptedCoordinator) ClearQueue(string)                             {}

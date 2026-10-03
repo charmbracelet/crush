@@ -55,7 +55,7 @@ func (c *blockingCoordinator) BeginAccepted(sessionID string) *agent.AcceptedRun
 func (c *blockingCoordinator) Cancel(string)                                     {}
 func (c *blockingCoordinator) CancelAll()                                        {}
 func (c *blockingCoordinator) IsBusy() bool                                      { return c.busy }
-func (c *blockingCoordinator) IsSessionBusy(string) bool                         { return false }
+func (c *blockingCoordinator) HasPendingWork(string) bool                        { return false }
 func (c *blockingCoordinator) QueuedPrompts(string) int                          { return 0 }
 func (c *blockingCoordinator) QueuedPromptsList(string) []string                 { return nil }
 func (c *blockingCoordinator) ClearQueue(string)                                 {}

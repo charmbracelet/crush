@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -553,10 +554,17 @@ func TestCallbackReceiver_ConcurrentAuthorizeOpensOneTab(t *testing.T) {
 	base := serveReceiver(t, r)
 
 	// Stand in for the browser: record the open, then redirect back as the
-	// authorization server would once the user consents.
+	// authorization server would once the user consents. The mock consent
+	// is held until every caller has joined the in-flight authorization;
+	// otherwise the login would complete in microseconds and a straggler
+	// goroutine could still start a second authorization and open a second
+	// tab. In production the tab stays open for as long as the human takes
+	// to consent, so concurrent callers always find the flight in progress.
 	var opens atomic.Int64
+	release := make(chan struct{})
 	r.handler = &Handler{openURL: func(string) error {
 		opens.Add(1)
+		<-release
 		go func() {
 			resp, gerr := http.Get(base + callbackPath + "?code=abc&state=xyz") //nolint:noctx
 			if gerr == nil {
@@ -567,16 +575,29 @@ func TestCallbackReceiver_ConcurrentAuthorizeOpensOneTab(t *testing.T) {
 	}}
 
 	const callers = 4
-	var wg sync.WaitGroup
+	var started, wg sync.WaitGroup
+	started.Add(callers)
 	results := make(chan *auth.AuthorizationResult, callers)
 	errs := make(chan error, callers)
 	for range callers {
 		wg.Go(func() {
+			started.Done()
 			result, ferr := r.fetchAuthorizationCode(t.Context(), &auth.AuthorizationArgs{URL: base + "/authorize"})
 			results <- result
 			errs <- ferr
 		})
 	}
+	started.Wait()
+
+	// Hold the redirect until every caller is parked on the flight, so none
+	// of them can arrive after it settled and open a second tab.
+	require.Eventually(t, func() bool {
+		buf := make([]byte, 1<<20)
+		n := runtime.Stack(buf, true)
+		return bytes.Count(buf[:n], []byte("callbackReceiver).await(")) == callers-1
+	}, 5*time.Second, time.Millisecond, "every caller must join the in-flight authorization")
+
+	close(release)
 	wg.Wait()
 	close(results)
 	close(errs)

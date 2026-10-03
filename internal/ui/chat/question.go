@@ -3,6 +3,7 @@ package chat
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/crush/internal/agent/tools"
@@ -195,22 +196,51 @@ func formatQuestionAnswers(sty *styles.Styles, content string, width int) string
 	return strings.Join(lines, "\n")
 }
 
-// styleAnswer extracts the meaningful part of an answer string and styles it.
-// styleAnswer extracts the meaningful part of an answer string and styles it.
-// An answer may span multiple lines (e.g. multi-choice selections plus a
-// custom fill-in), so each line is styled independently and rejoined.
+// styleAnswer splits an answer into its distinct parts (e.g. a multi-choice
+// selection plus a custom fill-in) and styles each, rejoining with commas.
 func styleAnswer(sty *styles.Styles, answer string) string {
 	answer = strings.TrimSpace(answer)
-	lines := strings.Split(answer, "\n")
-	styled := make([]string, 0, len(lines))
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
+	segments := splitAnswerSegments(answer)
+	styled := make([]string, 0, len(segments))
+	for _, seg := range segments {
+		seg = strings.TrimSpace(seg)
+		if seg == "" {
 			continue
 		}
-		styled = append(styled, styleAnswerLine(sty, line))
+		styled = append(styled, styleAnswerLine(sty, seg))
 	}
 	return strings.Join(styled, sty.Tool.TodoStatusNote.Render(", "))
+}
+
+// answerMarkers prefix each distinct answer part the question tool emits.
+var answerMarkers = []string{
+	"User answered:",
+	"User selected:",
+	"User provided:",
+	"User skipped",
+}
+
+// splitAnswerSegments groups answer lines into segments that each begin with
+// a known marker. Free-text ("User provided:") answers may span multiple
+// lines, so continuation lines stay attached to their marker instead of being
+// treated as separate selections.
+func splitAnswerSegments(answer string) []string {
+	var segments []string
+	var current []string
+	for _, line := range strings.Split(answer, "\n") {
+		isMarker := slices.ContainsFunc(answerMarkers, func(m string) bool {
+			return strings.HasPrefix(line, m)
+		})
+		if isMarker && len(current) > 0 {
+			segments = append(segments, strings.Join(current, "\n"))
+			current = nil
+		}
+		current = append(current, line)
+	}
+	if len(current) > 0 {
+		segments = append(segments, strings.Join(current, "\n"))
+	}
+	return segments
 }
 
 // styleAnswerLine styles a single answer line.
@@ -227,6 +257,9 @@ func styleAnswerLine(sty *styles.Styles, answer string) string {
 		return sty.Tool.ParamMain.Render(selected)
 	case strings.HasPrefix(answer, "User provided:"):
 		text := strings.TrimPrefix(answer, "User provided: ")
+		// Free-text may span multiple lines; collapse whitespace so the
+		// answer renders as a single truncatable line.
+		text = strings.Join(strings.Fields(text), " ")
 		return sty.Tool.ParamMain.Render(text)
 	case answer == "User skipped this question":
 		return sty.Tool.StateCancelled.Render("Skipped")

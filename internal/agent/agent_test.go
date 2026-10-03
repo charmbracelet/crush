@@ -716,6 +716,109 @@ func TestPreparePrompt_FiltersImageAttachments(t *testing.T) {
 	require.Equal(t, "screenshot.png", files[0].Filename)
 }
 
+func TestPreparePrompt_WhitespaceOnlyAssistantDropped(t *testing.T) {
+	env := testEnv(t)
+	sa := testSessionAgent(env, nil, nil, "test prompt")
+	agent := sa.(*sessionAgent)
+
+	ctx := t.Context()
+	sess, err := env.sessions.Create(ctx, "test")
+	require.NoError(t, err)
+
+	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role: message.User,
+		Parts: []message.ContentPart{
+			message.TextContent{Text: "hello"},
+		},
+	})
+	require.NoError(t, err)
+
+	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.TextContent{Text: "\n"},
+			message.Finish{Reason: message.FinishReasonEndTurn},
+		},
+	})
+	require.NoError(t, err)
+
+	msgs, err := env.messages.List(ctx, sess.ID)
+	require.NoError(t, err)
+
+	history, _ := agent.preparePrompt(msgs, true)
+	for _, msg := range history {
+		require.NotEqual(t, fantasy.MessageRoleAssistant, msg.Role, "whitespace-only assistant must be omitted")
+	}
+	foundUser := false
+	for _, msg := range history {
+		if msg.Role == fantasy.MessageRoleUser {
+			for _, part := range msg.Content {
+				if text, ok := fantasy.AsMessagePart[fantasy.TextPart](part); ok && strings.Contains(text.Text, "hello") {
+					foundUser = true
+				}
+			}
+		}
+	}
+	require.True(t, foundUser, "user hello must remain")
+
+	okSess, err := env.sessions.Create(ctx, "ok")
+	require.NoError(t, err)
+	_, err = env.messages.Create(ctx, okSess.ID, message.CreateMessageParams{
+		Role:  message.User,
+		Parts: []message.ContentPart{message.TextContent{Text: "hello"}},
+	})
+	require.NoError(t, err)
+	_, err = env.messages.Create(ctx, okSess.ID, message.CreateMessageParams{
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.TextContent{Text: "ok"},
+			message.Finish{Reason: message.FinishReasonEndTurn},
+		},
+	})
+	require.NoError(t, err)
+	okMsgs, err := env.messages.List(ctx, okSess.ID)
+	require.NoError(t, err)
+	okHistory, _ := agent.preparePrompt(okMsgs, true)
+	foundOK := false
+	for _, msg := range okHistory {
+		if msg.Role != fantasy.MessageRoleAssistant {
+			continue
+		}
+		for _, part := range msg.Content {
+			if text, ok := fantasy.AsMessagePart[fantasy.TextPart](part); ok && text.Text == "ok" {
+				foundOK = true
+			}
+		}
+	}
+	require.True(t, foundOK, "non-empty assistant text must remain")
+
+	reasonSess, err := env.sessions.Create(ctx, "reason")
+	require.NoError(t, err)
+	_, err = env.messages.Create(ctx, reasonSess.ID, message.CreateMessageParams{
+		Role:  message.User,
+		Parts: []message.ContentPart{message.TextContent{Text: "hello"}},
+	})
+	require.NoError(t, err)
+	_, err = env.messages.Create(ctx, reasonSess.ID, message.CreateMessageParams{
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.ReasoningContent{Thinking: "plan"},
+			message.Finish{Reason: message.FinishReasonEndTurn},
+		},
+	})
+	require.NoError(t, err)
+	reasonMsgs, err := env.messages.List(ctx, reasonSess.ID)
+	require.NoError(t, err)
+	reasonHistory, _ := agent.preparePrompt(reasonMsgs, true)
+	foundReason := false
+	for _, msg := range reasonHistory {
+		if msg.Role == fantasy.MessageRoleAssistant {
+			foundReason = true
+		}
+	}
+	require.True(t, foundReason, "reasoning-only assistant must remain")
+}
+
 func TestCreateUserMessage_RetainsAllAttachments(t *testing.T) {
 	env := testEnv(t)
 	sa := testSessionAgent(env, nil, nil, "test prompt")

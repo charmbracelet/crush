@@ -196,6 +196,11 @@ func NewHandler(
 				ClientName:   "Crush",
 				RedirectURIs: []string{redirectURL},
 				GrantTypes:   []string{"authorization_code", "refresh_token"},
+				// RFC 7591 makes response_types optional, but some
+				// servers (e.g. Neon) reject a registration that omits
+				// it. The authorization-code flow only ever uses the
+				// code response type, so state it explicitly.
+				ResponseTypes: []string{"code"},
 			},
 		},
 	}

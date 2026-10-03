@@ -31,6 +31,14 @@ type fakeASOpts struct {
 	refreshToken   string // refresh_token returned by /token
 	tokenExpiresIn int    // expires_in returned by /token (0 => 3600)
 	failRegister   bool   // make /register return 500 (server has no DCR)
+	// requireResponseTypes makes /register reject the registration the way
+	// some servers do (e.g. Neon): it returns invalid_request unless the
+	// client metadata carries response_types, which RFC 7591 §2 makes
+	// optional but those servers demand.
+	requireResponseTypes bool
+	// onRegister, when set, receives the raw body of the dynamic client
+	// registration request so a test can inspect the metadata Crush sent.
+	onRegister func(body []byte)
 	// issSupported advertises RFC 9207: the server promises to name itself
 	// in the authorization response, and the SDK rejects the authorization
 	// if no issuer comes back.
@@ -79,6 +87,25 @@ func newFakeAS(t *testing.T, opts fakeASOpts) (base, mcpURL string) {
 		if opts.failRegister {
 			http.Error(w, "registration not supported", http.StatusInternalServerError)
 			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		if opts.onRegister != nil {
+			opts.onRegister(body)
+		}
+		if opts.requireResponseTypes {
+			var meta struct {
+				ResponseTypes []string `json:"response_types"`
+			}
+			_ = json.Unmarshal(body, &meta)
+			if len(meta.ResponseTypes) == 0 {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				writeJSON(w, map[string]any{
+					"error":             "invalid_request",
+					"error_description": "response_types is required and must only include supported response types",
+				})
+				return
+			}
 		}
 		writeJSON(w, map[string]any{
 			"client_id":                  opts.clientID,
@@ -677,6 +704,54 @@ func TestHandler_PassesIssuerThrough(t *testing.T) {
 	require.Equal(t, int64(1), opens.Load())
 	require.NotNil(t, h.Token())
 	require.Equal(t, "a", h.Token().AccessToken)
+}
+
+// TestHandler_DynamicRegistrationSendsResponseTypes is a regression test for
+// logins failing against authorization servers that insist on response_types
+// in the dynamic client registration request (e.g. Neon). RFC 7591 §2 makes
+// the field optional, but a client that never sets it is rejected outright by
+// those servers, so Crush must send the code response type it actually uses.
+func TestHandler_DynamicRegistrationSendsResponseTypes(t *testing.T) {
+	var (
+		mu   sync.Mutex
+		body []byte
+	)
+	base, mcpURL := newFakeAS(t, fakeASOpts{
+		clientID:             "response-types-client",
+		accessToken:          "response-types-access",
+		refreshToken:         "response-types-refresh",
+		requireResponseTypes: true,
+		onRegister: func(b []byte) {
+			mu.Lock()
+			body = b
+			mu.Unlock()
+		},
+	})
+
+	h, err := NewHandler("test", mcpURL, nil, nil, func(*oauth.Token) {}, true, 0)
+	require.NoError(t, err)
+	t.Cleanup(h.Close)
+	h.openURL = browserRedirect("response-types-code")
+
+	// The server rejects the registration unless response_types is present,
+	// so a successful authorize proves the field was sent.
+	require.NoError(t, authorizeWith401(t, h, base, mcpURL))
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.NotEmpty(t, body, "registration request body must be captured")
+
+	var meta struct {
+		ClientName    string   `json:"client_name"`
+		RedirectURIs  []string `json:"redirect_uris"`
+		GrantTypes    []string `json:"grant_types"`
+		ResponseTypes []string `json:"response_types"`
+	}
+	require.NoError(t, json.Unmarshal(body, &meta))
+	require.Equal(t, []string{"code"}, meta.ResponseTypes)
+	require.Equal(t, "Crush", meta.ClientName)
+	require.Equal(t, []string{"authorization_code", "refresh_token"}, meta.GrantTypes)
+	require.Len(t, meta.RedirectURIs, 1)
 }
 
 // TestHandler_RejectsWrongIssuer confirms the issuer is passed through for

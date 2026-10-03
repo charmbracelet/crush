@@ -918,6 +918,12 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 			tools.NewListMCPResourcesTool(c.cfg, c.permissions),
 			tools.NewReadMCPResourceTool(c.cfg, c.permissions),
 		)
+		// mcp_search only earns a slot when something is actually hidden.
+		// With every server pinned the eager list already carries the
+		// schemas, so a search would have nothing to load.
+		if c.cfg.Config().AnyMCPLazy() {
+			allTools = append(allTools, tools.NewMCPSearchTool(c.cfg))
+		}
 	}
 
 	var filteredTools []fantasy.AgentTool

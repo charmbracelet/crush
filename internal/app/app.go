@@ -157,6 +157,26 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	}
 	go mcp.Initialize(ctx, app.Permissions, store, forceStart...)
 
+	// A session that loaded MCP tools holds those activations for as long
+	// as it exists. Deleting the session must reclaim them, otherwise a
+	// long-lived server process accumulates one entry per conversation.
+	go func() {
+		deleted := app.Sessions.Subscribe(ctx)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case event, ok := <-deleted:
+				if !ok {
+					return
+				}
+				if event.Type == pubsub.DeletedEvent {
+					mcp.ClearSession(event.Payload.ID)
+				}
+			}
+		}
+	}()
+
 	// Start herdr integration when running inside a herdr pane.
 	app.herdrClient = herdr.Init()
 	herdr.BridgeLocal(ctx, app.herdrClient, herdr.BridgeSources{

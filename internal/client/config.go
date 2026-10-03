@@ -372,6 +372,23 @@ func (c *Client) SetMCPServerConfigDisabled(ctx context.Context, id, name string
 	return nil
 }
 
+// SetMCPLazy updates the lazy-MCP policy on the workspace's server. An empty
+// name flips the global default; otherwise it sets one server's override.
+func (c *Client) SetMCPLazy(ctx context.Context, id, name string, lazy bool) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/mcp/lazy", id), nil, jsonBody(proto.MCPSetLazyRequest{
+		Name: name,
+		Lazy: lazy,
+	}), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return fmt.Errorf("failed to set MCP lazy loading: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to set MCP lazy loading: status code %d", rsp.StatusCode)
+	}
+	return nil
+}
+
 // RefreshMCPTools refreshes tools for a named MCP server.
 func (c *Client) RefreshMCPTools(ctx context.Context, id, name string) error {
 	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/mcp/refresh-tools", id), nil, jsonBody(struct {

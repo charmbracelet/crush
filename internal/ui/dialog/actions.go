@@ -133,6 +133,10 @@ type (
 	ActionEnableDockerMCP struct{}
 	// ActionDisableDockerMCP is a message to disable Docker MCP.
 	ActionDisableDockerMCP struct{}
+	// ActionToggleLazyMCP flips the global lazy-MCP default, which decides
+	// whether MCP tool schemas stay out of the model context until
+	// mcp_search loads them.
+	ActionToggleLazyMCP struct{}
 )
 
 // Messages for MCP OAuth authentication dialog.

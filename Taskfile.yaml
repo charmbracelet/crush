@@ -81,6 +81,8 @@ tasks:
 
   test:
     desc: Run tests
+    env:
+      CGO_ENABLED: 1
     cmds:
       - go test -race -failfast ./... {{.CLI_ARGS}}
 

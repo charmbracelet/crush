@@ -83,6 +83,17 @@ type contentTooLargeError struct {
 	Max  int
 }
 
+type discoveredSkillFile struct {
+	skill  *skills.Skill
+	target string
+}
+
+type discoveredSkillDirectory struct {
+	path          string
+	target        string
+	skillFileRoot string
+}
+
 func (e contentTooLargeError) Error() string {
 	return fmt.Sprintf("content section is too large (%d bytes). Maximum size is %d bytes", e.Size, e.Max)
 }
@@ -93,8 +104,34 @@ func NewViewTool(
 	filetracker filetracker.Service,
 	skillTracker *skills.Tracker,
 	workingDir string,
-	skillsPaths ...string,
+	activeSkills []*skills.Skill,
 ) fantasy.AgentTool {
+	skillFiles := make(map[string]discoveredSkillFile)
+	var skillDirectories []discoveredSkillDirectory
+	for _, skill := range activeSkills {
+		if skill.Builtin {
+			continue
+		}
+		path, err := filepath.Abs(skill.SkillFilePath)
+		if err != nil {
+			continue
+		}
+		target, err := filepath.EvalSymlinks(path)
+		if err != nil {
+			continue
+		}
+		skillFiles[path] = discoveredSkillFile{skill: skill, target: target}
+		directory := filepath.Dir(path)
+		directoryTarget, err := filepath.EvalSymlinks(directory)
+		if err != nil {
+			continue
+		}
+		skillDirectories = append(skillDirectories, discoveredSkillDirectory{
+			path:          directory,
+			target:        directoryTarget,
+			skillFileRoot: filepath.Dir(target),
+		})
+	}
 	return fantasy.NewAgentTool(
 		ViewToolName,
 		viewDescription(),
@@ -124,16 +161,24 @@ func NewViewTool(
 			}
 
 			relPath, err := filepath.Rel(absWorkingDir, absFilePath)
-			isOutsideWorkDir := err != nil || strings.HasPrefix(relPath, "..")
-			isSkillFile := isInSkillsPath(absFilePath, skillsPaths)
+			isOutsideWorkDir := err != nil || relPath == ".." || strings.HasPrefix(relPath, ".."+string(filepath.Separator))
+			registeredSkill, isSkillFile := skillFiles[absFilePath]
+			if isSkillFile {
+				target, err := filepath.EvalSymlinks(absFilePath)
+				isSkillFile = err == nil && target == registeredSkill.target
+			}
+			isSkillResource := false
+			if isOutsideWorkDir && !isSkillFile {
+				isSkillResource = isInDiscoveredSkillDirectory(absFilePath, skillDirectories)
+			}
 
 			sessionID := GetSessionFromContext(ctx)
 			if sessionID == "" {
 				return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for accessing files outside working directory")
 			}
 
-			// Request permission for files outside working directory, unless it's a skill file.
-			if isOutsideWorkDir && !isSkillFile {
+			// Request permission outside the working directory unless the file belongs to a discovered skill.
+			if isOutsideWorkDir && !isSkillFile && !isSkillResource {
 				granted, permReqErr := permissions.Request(
 					ctx,
 					permission.CreatePermissionRequest{
@@ -263,7 +308,7 @@ func NewViewTool(
 				Content:  content,
 			}
 			if isSkillFile {
-				if skill, err := skills.Parse(filePath); err == nil {
+				if skill, err := skills.Parse(filePath); err == nil && skill.Validate() == nil && skill.Name == registeredSkill.skill.Name {
 					meta.ResourceType = ViewResourceSkill
 					meta.ResourceName = skill.Name
 					meta.ResourceDescription = skill.Description
@@ -399,44 +444,30 @@ func sniffImageMimeType(data []byte, fallback string) string {
 	return fallback
 }
 
-// isInSkillsPath checks if filePath is within any of the configured skills
-// directories. Returns true for files that can be read without permission
-// prompts and without size limits.
-//
-// Note that symlinks are resolved to prevent path traversal attacks via
-// symbolic links.
-func isInSkillsPath(filePath string, skillsPaths []string) bool {
-	if len(skillsPaths) == 0 {
+func isInDiscoveredSkillDirectory(filePath string, directories []discoveredSkillDirectory) bool {
+	if filepath.Base(filePath) == skills.SkillFileName {
 		return false
 	}
-
-	absFilePath, err := filepath.Abs(filePath)
-	if err != nil {
-		return false
-	}
-
-	evalFilePath, err := filepath.EvalSymlinks(absFilePath)
-	if err != nil {
-		return false
-	}
-
-	for _, skillsPath := range skillsPaths {
-		absSkillsPath, err := filepath.Abs(skillsPath)
-		if err != nil {
+	for _, directory := range directories {
+		relPath, err := filepath.Rel(directory.path, filePath)
+		if err != nil || relPath == "." || relPath == ".." || strings.HasPrefix(relPath, ".."+string(filepath.Separator)) {
 			continue
 		}
-
-		evalSkillsPath, err := filepath.EvalSymlinks(absSkillsPath)
-		if err != nil {
+		currentTarget, err := filepath.EvalSymlinks(directory.path)
+		if err != nil || currentTarget != directory.target {
 			continue
 		}
-
-		relPath, err := filepath.Rel(evalSkillsPath, evalFilePath)
-		if err == nil && !strings.HasPrefix(relPath, "..") {
-			return true
+		target, err := filepath.EvalSymlinks(filePath)
+		if err != nil || target == filepath.Join(directory.skillFileRoot, skills.SkillFileName) {
+			continue
+		}
+		for _, root := range []string{directory.target, directory.skillFileRoot} {
+			targetRelPath, err := filepath.Rel(root, target)
+			if err == nil && targetRelPath != ".." && !strings.HasPrefix(targetRelPath, ".."+string(filepath.Separator)) {
+				return true
+			}
 		}
 	}
-
 	return false
 }
 

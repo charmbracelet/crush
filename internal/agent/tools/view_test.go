@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/stretchr/testify/require"
 )
 
@@ -210,9 +211,11 @@ func TestReadTextFileAllowsExactMaxContentSize(t *testing.T) {
 
 type mockViewPermissionService struct {
 	*pubsub.Broker[permission.PermissionRequest]
+	requests int
 }
 
 func (m *mockViewPermissionService) Request(ctx context.Context, req permission.CreatePermissionRequest) (bool, error) {
+	m.requests++
 	return true, nil
 }
 
@@ -250,7 +253,7 @@ func (m mockFileTracker) ListReadFiles(ctx context.Context, sessionID string) ([
 
 func newViewToolForTest(workingDir string) fantasy.AgentTool {
 	permissions := &mockViewPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}
-	return NewViewTool(nil, permissions, mockFileTracker{}, nil, workingDir)
+	return NewViewTool(nil, permissions, mockFileTracker{}, nil, workingDir, nil)
 }
 
 func runViewTool(t *testing.T, tool fantasy.AgentTool, ctx context.Context, params ViewParams) fantasy.ToolResponse {
@@ -271,6 +274,147 @@ func runViewTool(t *testing.T, tool fantasy.AgentTool, ctx context.Context, para
 }
 
 var _ filetracker.Service = mockFileTracker{}
+
+const exampleSkillContent = "---\nname: example\ndescription: A test skill\n---\n\nInstructions\n"
+
+func discoveredSkillViewTool(t *testing.T, workingDir, skillsDir string) (fantasy.AgentTool, *mockViewPermissionService, *skills.Tracker) {
+	t.Helper()
+
+	activeSkills := skills.Discover([]string{skillsDir})
+	require.Len(t, activeSkills, 1)
+	permissions := &mockViewPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}
+	tracker := skills.NewTracker(activeSkills)
+	return NewViewTool(nil, permissions, mockFileTracker{}, tracker, workingDir, activeSkills), permissions, tracker
+}
+
+func TestViewToolRecognizesDiscoveredSymlinkedSkill(t *testing.T) {
+	t.Parallel()
+
+	workingDir := t.TempDir()
+	skillsDir := t.TempDir()
+	targetDir := t.TempDir()
+	skillDir := filepath.Join(skillsDir, "example")
+	require.NoError(t, os.Mkdir(skillDir, 0o755))
+	target := filepath.Join(targetDir, "SKILL.md")
+	require.NoError(t, os.WriteFile(target, []byte(exampleSkillContent), 0o644))
+	skillPath := filepath.Join(skillDir, "SKILL.md")
+	require.NoError(t, os.Symlink(target, skillPath))
+
+	tool, permissions, tracker := discoveredSkillViewTool(t, workingDir, skillsDir)
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+	resp := runViewTool(t, tool, ctx, ViewParams{FilePath: skillPath})
+
+	require.False(t, resp.IsError)
+	require.Equal(t, 0, permissions.requests)
+	var meta ViewResponseMetadata
+	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
+	require.Equal(t, ViewResourceSkill, meta.ResourceType)
+	require.Equal(t, "example", meta.ResourceName)
+	require.True(t, tracker.IsLoaded("example"))
+
+	otherPath := filepath.Join(skillDir, "notes.txt")
+	require.NoError(t, os.Symlink(target, otherPath))
+	resp = runViewTool(t, tool, ctx, ViewParams{FilePath: otherPath})
+	require.False(t, resp.IsError)
+	require.Equal(t, 1, permissions.requests)
+	meta = ViewResponseMetadata{}
+	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
+	require.Empty(t, meta.ResourceType)
+}
+
+func TestViewToolReadsDiscoveredSkillResources(t *testing.T) {
+	t.Parallel()
+
+	workingDir := t.TempDir()
+	skillsDir := t.TempDir()
+	targetDir := filepath.Join(t.TempDir(), "example")
+	require.NoError(t, os.MkdirAll(filepath.Join(targetDir, "references"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(targetDir, "SKILL.md"), []byte(exampleSkillContent), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(targetDir, "references", "prompt.md"), []byte("reference content"), 0o644))
+	skillDir := filepath.Join(skillsDir, "example")
+	require.NoError(t, os.Symlink(targetDir, skillDir))
+	tool, permissions, _ := discoveredSkillViewTool(t, workingDir, skillsDir)
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+	resp := runViewTool(t, tool, ctx, ViewParams{FilePath: filepath.Join(skillDir, "SKILL.md")})
+	require.False(t, resp.IsError)
+	require.Equal(t, 0, permissions.requests)
+	var meta ViewResponseMetadata
+	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
+	require.Equal(t, ViewResourceSkill, meta.ResourceType)
+
+	resp = runViewTool(t, tool, ctx, ViewParams{FilePath: filepath.Join(skillDir, "references", "prompt.md")})
+	require.False(t, resp.IsError)
+	require.Equal(t, 0, permissions.requests)
+	require.Contains(t, resp.Content, "reference content")
+	meta = ViewResponseMetadata{}
+	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
+	require.Empty(t, meta.ResourceType)
+
+	outside := filepath.Join(t.TempDir(), "private.txt")
+	require.NoError(t, os.WriteFile(outside, []byte("private content"), 0o644))
+	require.NoError(t, os.Symlink(outside, filepath.Join(targetDir, "references", "private.txt")))
+	resp = runViewTool(t, tool, ctx, ViewParams{FilePath: filepath.Join(skillsDir, "example", "references", "private.txt")})
+	require.False(t, resp.IsError)
+	require.Equal(t, 1, permissions.requests)
+}
+
+func TestViewToolReadsIndividuallyLinkedSkillResources(t *testing.T) {
+	t.Parallel()
+
+	workingDir := t.TempDir()
+	skillsDir := t.TempDir()
+	skillDir := filepath.Join(skillsDir, "example")
+	require.NoError(t, os.MkdirAll(filepath.Join(skillDir, "references"), 0o755))
+	targetDir := filepath.Join(t.TempDir(), "example")
+	require.NoError(t, os.MkdirAll(filepath.Join(targetDir, "references"), 0o755))
+	skillTarget := filepath.Join(targetDir, "SKILL.md")
+	require.NoError(t, os.WriteFile(skillTarget, []byte(exampleSkillContent), 0o644))
+	require.NoError(t, os.Symlink(skillTarget, filepath.Join(skillDir, "SKILL.md")))
+	referenceTarget := filepath.Join(targetDir, "references", "explorer-prompt.md")
+	require.NoError(t, os.WriteFile(referenceTarget, []byte("explorer prompt"), 0o644))
+	require.NoError(t, os.Symlink(referenceTarget, filepath.Join(skillDir, "references", "explorer-prompt.md")))
+
+	tool, permissions, _ := discoveredSkillViewTool(t, workingDir, skillsDir)
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+	resp := runViewTool(t, tool, ctx, ViewParams{FilePath: filepath.Join(skillDir, "references", "explorer-prompt.md")})
+	require.False(t, resp.IsError)
+	require.Equal(t, 0, permissions.requests)
+	require.Contains(t, resp.Content, "explorer prompt")
+
+	outside := filepath.Join(t.TempDir(), "private.txt")
+	require.NoError(t, os.WriteFile(outside, []byte("private content"), 0o644))
+	require.NoError(t, os.Symlink(outside, filepath.Join(skillDir, "references", "private.txt")))
+	resp = runViewTool(t, tool, ctx, ViewParams{FilePath: filepath.Join(skillDir, "references", "private.txt")})
+	require.False(t, resp.IsError)
+	require.Equal(t, 1, permissions.requests)
+}
+
+func TestViewToolChecksChangedSkillTarget(t *testing.T) {
+	t.Parallel()
+
+	workingDir := t.TempDir()
+	skillsDir := t.TempDir()
+	skillDir := filepath.Join(skillsDir, "example")
+	require.NoError(t, os.Mkdir(skillDir, 0o755))
+	targetA := filepath.Join(t.TempDir(), "SKILL.md")
+	targetB := filepath.Join(t.TempDir(), "SKILL.md")
+	require.NoError(t, os.WriteFile(targetA, []byte(exampleSkillContent), 0o644))
+	require.NoError(t, os.WriteFile(targetB, []byte(exampleSkillContent), 0o644))
+	skillPath := filepath.Join(skillDir, "SKILL.md")
+	require.NoError(t, os.Symlink(targetA, skillPath))
+	tool, permissions, tracker := discoveredSkillViewTool(t, workingDir, skillsDir)
+	require.NoError(t, os.Remove(skillPath))
+	require.NoError(t, os.Symlink(targetB, skillPath))
+
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+	resp := runViewTool(t, tool, ctx, ViewParams{FilePath: skillPath})
+	require.False(t, resp.IsError)
+	require.Equal(t, 1, permissions.requests)
+	var meta ViewResponseMetadata
+	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
+	require.Empty(t, meta.ResourceType)
+	require.False(t, tracker.IsLoaded("example"))
+}
 
 func TestReadBuiltinFile(t *testing.T) {
 	t.Parallel()

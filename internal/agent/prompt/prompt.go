@@ -149,18 +149,57 @@ func expandPath(path string, store *config.ConfigStore) string {
 	return path
 }
 
-// loadContextFiles loads and deduplicates context files from a list of paths.
+// loadContextFiles loads context files from paths.
+//
+// A candidate is included at most once per os.SameFile identity, so a symlink
+// such as CLAUDE.md -> AGENTS.md is not sent twice. A missing candidate is
+// not recorded; storing an empty slice under strings.ToLower(path) used to
+// suppress a later existing file (AGENTS.md missing, agents.md present).
 func loadContextFiles(paths []string, store *config.ConfigStore) map[string][]ContextFile {
 	files := map[string][]ContextFile{}
+	var seen []os.FileInfo
 	for _, pth := range paths {
 		expanded := expandPath(pth, store)
-		pathKey := strings.ToLower(expanded)
-		if _, ok := files[pathKey]; ok {
+		fullPath := filepathext.SmartJoin(store.WorkingDir(), expanded)
+		info, err := os.Stat(fullPath)
+		if err != nil {
 			continue
 		}
-		files[pathKey] = processContextPath(expanded, store)
+		if contextFileSeen(info, seen) {
+			continue
+		}
+		loaded := processContextPath(expanded, store)
+		kept := make([]ContextFile, 0, len(loaded))
+		for _, cf := range loaded {
+			fi, statErr := os.Stat(cf.Path)
+			if statErr != nil {
+				continue
+			}
+			if contextFileSeen(fi, seen) {
+				continue
+			}
+			seen = append(seen, fi)
+			kept = append(kept, cf)
+		}
+		if len(kept) == 0 {
+			// The candidate exists but contributed no readable file. Remember
+			// the identity so a later alias is not loaded twice, and do not
+			// store an empty slice that would suppress a different path.
+			seen = append(seen, info)
+			continue
+		}
+		files[expanded] = kept
 	}
 	return files
+}
+
+func contextFileSeen(info os.FileInfo, seen []os.FileInfo) bool {
+	for _, prev := range seen {
+		if os.SameFile(prev, info) {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *Prompt) promptData(ctx context.Context, provider, model string, store *config.ConfigStore) (PromptDat, error) {

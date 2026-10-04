@@ -43,8 +43,8 @@ func FetchURLAndConvert(ctx context.Context, client *http.Client, url string) (s
 		return "", fmt.Errorf("request failed with status code: %d", resp.StatusCode)
 	}
 
-	maxSize := int64(5 * 1024 * 1024) // 5MB
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxSize))
+	maxSize := 5 * 1024 * 1024 // 5MB
+	body, _, err := readUTF8Bounded(resp.Body, maxSize)
 	if err != nil {
 		return "", fmt.Errorf("failed to read response body: %w", err)
 	}
@@ -54,6 +54,7 @@ func FetchURLAndConvert(ctx context.Context, client *http.Client, url string) (s
 	if !utf8.ValidString(content) {
 		return "", errors.New("response content is not valid UTF-8")
 	}
+	content = truncateUTF8(content, maxSize)
 
 	contentType := resp.Header.Get("Content-Type")
 
@@ -76,6 +77,30 @@ func FetchURLAndConvert(ctx context.Context, client *http.Client, url string) (s
 	}
 
 	return content, nil
+}
+
+// readUTF8Bounded reads enough lookahead to validate the character crossing the
+// byte limit, without including a partial character in the returned bytes.
+func readUTF8Bounded(reader io.Reader, limit int) ([]byte, bool, error) {
+	body, err := io.ReadAll(io.LimitReader(reader, int64(limit+utf8.UTFMax)))
+	if len(body) <= limit {
+		return body, false, err
+	}
+	end := limit
+	for end < len(body) && !utf8.RuneStart(body[end]) {
+		end++
+	}
+	return body[:end], true, err
+}
+
+func truncateUTF8(content string, limit int) string {
+	if len(content) <= limit {
+		return content
+	}
+	for limit > 0 && !utf8.RuneStart(content[limit]) {
+		limit--
+	}
+	return content[:limit]
 }
 
 // removeNoisyElements removes script, style, nav, header, footer, and other

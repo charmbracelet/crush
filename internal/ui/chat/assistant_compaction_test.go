@@ -31,6 +31,27 @@ func checkpointItem(t *testing.T, sty *styles.Styles, info *compaction.Info, bod
 	return item.(*AssistantMessageItem)
 }
 
+// footedItem builds a finished summary message carrying an arbitrary footer, so
+// the fallback can be exercised with text this build would never write.
+func footedItem(t *testing.T, sty *styles.Styles, footer string) *AssistantMessageItem {
+	t.Helper()
+
+	body := "Summary\n\ncheckpoint prose."
+	if footer != "" {
+		body += "\n\n" + footer
+	}
+	msg := &message.Message{
+		ID:   "checkpoint",
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.TextContent{Text: body},
+			message.Finish{Reason: message.FinishReasonEndTurn, Time: 1},
+		},
+		IsSummaryMessage: true,
+	}
+	return NewAssistantMessageItem(sty, msg).(*AssistantMessageItem)
+}
+
 var sampleInfo = compaction.Info{
 	ReplacedMessages: 332,
 	ReplacedTokens:   756_906,
@@ -127,4 +148,33 @@ func TestCompactionCardStripsOnlyTheFooter(t *testing.T) {
 		"the footer prose is superseded by the card's note")
 	require.NotContains(t, out, "read that file instead of guessing",
 		"the instruction to the model is not a message to the user")
+}
+
+// TestCompactionCardDoesNotInventCounts covers a footer that is present but
+// unreadable - reworded by a future build, cut short, or imitated - where the
+// prose fallback recovers nothing. Zeros would be a statement about the session.
+func TestCompactionCardDoesNotInventCounts(t *testing.T) {
+	sty := styles.CharmtonePantera()
+	item := footedItem(t, &sty, "<compaction_info>\nsomething changed here\n</compaction_info>")
+
+	out := ansi.Strip(item.RawRender(76))
+
+	require.Contains(t, out, "Session Summary")
+	require.NotContains(t, out, "Replaced 0")
+	require.NotContains(t, out, "Kept the 0")
+}
+
+// TestCompactionCardShowsWhatSurvivesOfAPartialFooter: the counts are reported
+// independently, so a footer that only got as far as the first sentence says
+// that much and nothing more.
+func TestCompactionCardShowsWhatSurvivesOfAPartialFooter(t *testing.T) {
+	sty := styles.CharmtonePantera()
+	item := footedItem(t, &sty, "<compaction_info>\n"+
+		"This checkpoint replaces 12 earlier messages (~4000 tokens).\n"+
+		"</compaction_info>")
+
+	out := ansi.Strip(item.RawRender(76))
+
+	require.Contains(t, out, "Replaced 12 earlier messages (~4K tokens)")
+	require.NotContains(t, out, "Kept the")
 }

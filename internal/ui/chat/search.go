@@ -92,16 +92,33 @@ func NewGrepToolMessageItem(
 // GrepToolRenderContext renders grep tool messages.
 type GrepToolRenderContext struct{}
 
+// partialGrepParams recovers the grep parameters that already finished
+// streaming from a partial tool call input.
+func partialGrepParams(input string) tools.GrepParams {
+	fields := partialJSONFields(input)
+	var params tools.GrepParams
+	params.Pattern, _ = fields["pattern"].(string)
+	params.Path, _ = fields["path"].(string)
+	params.Include, _ = fields["include"].(string)
+	params.LiteralText, _ = fields["literal_text"].(bool)
+	return params
+}
+
 // RenderTool implements the [ToolRenderer] interface.
 func (g *GrepToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
-	if opts.IsPending() {
-		return pendingTool(sty, "Grep", opts.Anim, opts.Compact)
-	}
-
 	var params tools.GrepParams
 	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
-		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, cappedWidth)
+		if !opts.IsPending() {
+			return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, cappedWidth)
+		}
+		// While the tool call input is still streaming it is incomplete
+		// and not valid JSON yet. Show whatever fields already arrived,
+		// or the plain spinner until the pattern is complete.
+		params = partialGrepParams(opts.ToolCall.Input)
+		if params.Pattern == "" {
+			return pendingTool(sty, "Grep", opts.Anim, opts.Compact)
+		}
 	}
 
 	toolParams := []string{params.Pattern}
@@ -113,6 +130,15 @@ func (g *GrepToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	}
 	if params.LiteralText {
 		toolParams = append(toolParams, "literal", "true")
+	}
+
+	if opts.IsPending() {
+		header := toolHeader(sty, opts.Status, "Grep", cappedWidth, opts, toolParams...)
+		var animView string
+		if opts.Anim != nil {
+			animView = opts.Anim.Render()
+		}
+		return header + " " + animView
 	}
 
 	header := toolHeader(sty, opts.Status, "Grep", cappedWidth, opts, toolParams...)

@@ -2239,7 +2239,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			m.dialog.OpenDialog(dialog.NewArguments(
 				m.com,
 				"Compact Session",
-				"Tell Crush what the checkpoint should emphasize, or leave it empty to summarize everything as usual.",
+				"Optional: tell the checkpoint what to emphasize. Empty is fine, and means a general summary of the whole session.",
 				msg.Arguments,
 				msg,
 			))
@@ -2256,7 +2256,11 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			}
 			return nil
 		})
-		m.dialog.CloseDialog(dialog.CommandsID)
+		// Whatever is on top is what the user submitted: from the palette
+		// that is the command list, from the arguments dialog it is that
+		// dialog, and closing the wrong one leaves the box hanging over a
+		// compaction that is already running.
+		m.dialog.CloseFrontDialog()
 	case dialog.ActionToggleHelp:
 		m.status.ToggleHelp()
 		m.dialog.CloseDialog(dialog.CommandsID)

@@ -615,6 +615,6 @@ func compactArguments() []commands.Argument {
 	return []commands.Argument{{
 		ID:          CompactInstructionsArg,
 		Title:       "Instructions",
-		Description: `What the checkpoint should emphasize, e.g. "focus on the failing tests". Leave empty to summarize everything as usual.`,
+		Description: `e.g. "focus on the failing tests"`,
 	}}
 }

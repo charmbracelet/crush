@@ -75,9 +75,13 @@ func TestNonOwnerSkipsDurableTasks(t *testing.T) {
 	require.Equal(t, "in-memory task", secondDue[0].Prompt)
 
 	// Ownership is retried, so a non-owner takes over once the owner is
-	// gone rather than waiting for a restart.
+	// gone rather than waiting for a restart. The throttle is compared
+	// against the store's injected clock, so backdate it from clock.t,
+	// never from real time.Now.
 	owner.Close()
-	second.lastOwnerAttempt = time.Now().Add(-ownershipRetryInterval)
+	second.mu.Lock()
+	second.lastOwnerAttempt = clock.t.Add(-ownershipRetryInterval - time.Second)
+	second.mu.Unlock()
 	secondDue = second.DueTasks()
 	require.True(t, second.Owner(), "the surviving store must take over firing")
 	require.Len(t, secondDue, 2, "the new owner fires the durable task and its own in-memory task")

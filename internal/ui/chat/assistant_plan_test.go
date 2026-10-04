@@ -94,7 +94,7 @@ func TestAssistantMessageItem_PlanCardDoesNotReWrapContent(t *testing.T) {
 	item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
 
 	const width = 72
-	_, innerWidth := planBoxLayout(sty.Messages.PlanBox, cappedMessageWidth(width))
+	_, innerWidth := boxLayout(sty.Messages.PlanBox, cappedMessageWidth(width))
 
 	renderer := common.PlanMarkdownRenderer(&sty, innerWidth)
 	mu := common.LockMarkdownRenderer(renderer)

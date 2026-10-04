@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"runtime"
 	"testing"
 	"time"
@@ -211,6 +213,35 @@ func TestRequestTimeoutModel_ParentCancelPassesThrough(t *testing.T) {
 
 	var timeoutErr *requestTimeoutError
 	require.NotErrorAs(t, err, &timeoutErr, "user cancellation must not be reported as a timeout")
+}
+
+
+func TestWrapTimedOut_NoErrorsIsCycle(t *testing.T) {
+	t.Parallel()
+
+	timeoutErr := &requestTimeoutError{timeout: time.Second, idle: true}
+	ctx, cancel := context.WithCancelCause(context.Background())
+	cancel(timeoutErr)
+
+	// Provider-shaped error: wraps the cancel cause (timeoutErr).
+	providerErr := fmt.Errorf("stream failed: %w", timeoutErr)
+	wrapped := wrapTimedOut(ctx, timeoutErr, providerErr)
+
+	require.Same(t, timeoutErr, wrapped)
+	require.Equal(t, context.DeadlineExceeded, timeoutErr.cause)
+	require.ErrorIs(t, wrapped, context.DeadlineExceeded)
+
+	done := make(chan struct{})
+	go func() {
+		_ = errors.Is(wrapped, context.Canceled)
+		_ = errors.Is(wrapped, context.DeadlineExceeded)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("errors.Is hung; requestTimeoutError unwrap cycle likely")
+	}
 }
 
 func TestRequestTimeoutErrorMessages(t *testing.T) {

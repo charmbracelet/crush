@@ -37,7 +37,8 @@ const maxSessionAncestryDepth = 4
 // scoped to the top-level session a user can actually view. A session
 // with no parent resolves to itself. The sessionID is returned
 // unchanged alongside any error, so callers can fall back to the
-// unresolved ID.
+// unresolved ID. Successful resolutions are memoized on the workspace:
+// parentage is fixed at creation, so cached entries never go stale.
 func (b *Backend) RootSessionID(ctx context.Context, workspaceID, sessionID string) (string, error) {
 	if sessionID == "" {
 		return sessionID, nil
@@ -56,6 +57,9 @@ func rootSessionID(ctx context.Context, ws *Workspace, sessionID string) (string
 	if sessionID == "" || ws.App == nil || ws.Sessions == nil {
 		return sessionID, nil
 	}
+	if root, ok := ws.rootCache.Load(sessionID); ok {
+		return root.(string), nil
+	}
 	id := sessionID
 	for range maxSessionAncestryDepth {
 		sess, err := ws.Sessions.Get(ctx, id)
@@ -63,10 +67,11 @@ func rootSessionID(ctx context.Context, ws *Workspace, sessionID string) (string
 			return sessionID, err
 		}
 		if sess.ParentSessionID == "" || sess.ParentSessionID == id {
-			return id, nil
+			break
 		}
 		id = sess.ParentSessionID
 	}
+	ws.rootCache.Store(sessionID, id)
 	return id, nil
 }
 

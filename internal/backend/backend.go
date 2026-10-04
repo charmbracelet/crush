@@ -210,6 +210,12 @@ type Workspace struct {
 	// is a derived value: len(clients).
 	clients map[string]*clientState
 
+	// rootCache memoizes [Backend.RootSessionID] resolutions, keyed by
+	// session ID. Session parentage is fixed at creation, so entries
+	// never go stale; the cache keeps a DB read per event per client
+	// off the SSE hot path.
+	rootCache sync.Map // map[string]string
+
 	// shutdownFn is the function invoked by [Backend.teardown] to
 	// release the workspace's underlying resources. It defaults to the
 	// embedded [app.App.Shutdown]; tests may override it to avoid

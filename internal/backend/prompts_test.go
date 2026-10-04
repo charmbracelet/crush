@@ -134,6 +134,37 @@ func TestRootSessionID(t *testing.T) {
 		root, err = b.RootSessionID(ctx, ws.ID, "ghost")
 		require.Error(t, err, "unknown session must surface the lookup error")
 		require.Equal(t, "ghost", root, "input is returned alongside the error")
+
+		_, err = b.RootSessionID(ctx, ws.ID, "ghost")
+		require.Error(t, err, "failed lookups must not be cached")
+	})
+
+	t.Run("memoizes successful resolutions", func(t *testing.T) {
+		t.Parallel()
+		dataDir := t.TempDir()
+		conn, err := db.Connect(ctx, dataDir)
+		require.NoError(t, err)
+		t.Cleanup(func() { conn.Close() })
+		sessions := session.NewService(db.New(conn), conn)
+
+		ws := &Workspace{ID: uuid.New().String(), Path: t.TempDir(), App: &app.App{Sessions: sessions}}
+		InsertWorkspaceForTest(b, ws)
+
+		top, err := sessions.Create(ctx, "top")
+		require.NoError(t, err)
+		child, err := sessions.CreateTaskSession(ctx, "child-1", top.ID, "child")
+		require.NoError(t, err)
+
+		root, err := b.RootSessionID(ctx, ws.ID, child.ID)
+		require.NoError(t, err)
+		require.Equal(t, top.ID, root)
+
+		// With the child row gone, a second resolution would fail if
+		// it hit the DB; the memoized answer is served instead.
+		require.NoError(t, sessions.Delete(ctx, child.ID))
+		root, err = b.RootSessionID(ctx, ws.ID, child.ID)
+		require.NoError(t, err)
+		require.Equal(t, top.ID, root)
 	})
 }
 

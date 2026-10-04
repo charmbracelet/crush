@@ -5,6 +5,8 @@ import (
 	_ "embed"
 	"fmt"
 	"log/slog"
+	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -142,7 +144,7 @@ func getDiagnostics(filePath string, manager *lsp.Manager) string {
 				slog.Error("Failed to convert diagnostic location URI to path", "uri", location, "error", err)
 				continue
 			}
-			isCurrentFile := path == filePath
+			isCurrentFile := pathsEqual(path, filePath)
 			for _, diag := range diags {
 				formattedDiag := formatDiagnostic(path, diag, lspName)
 				if isCurrentFile {
@@ -175,6 +177,23 @@ func getDiagnostics(filePath string, manager *lsp.Manager) string {
 	out := output.String()
 	slog.Debug("Diagnostics", "output", out)
 	return out
+}
+
+func pathsEqual(a, b string) bool {
+	if runtime.GOOS != "windows" {
+		return a == b
+	}
+
+	return strings.EqualFold(cleanDiagnosticPath(a), cleanDiagnosticPath(b))
+}
+
+func cleanDiagnosticPath(path string) string {
+	if strings.HasPrefix(strings.ToLower(path), "file://") {
+		if parsed, err := protocol.DocumentURI(path).Path(); err == nil {
+			path = parsed
+		}
+	}
+	return filepath.Clean(path)
 }
 
 func writeDiagnostics(output *strings.Builder, tag string, in []string) {

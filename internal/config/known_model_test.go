@@ -67,6 +67,24 @@ func TestConfig_FindModelProvider(t *testing.T) {
 	}
 }
 
+func TestConfig_FindModelProvider_SimilarHint(t *testing.T) {
+	t.Parallel()
+
+	cfg := newConfigWithProviders(t, map[string][]string{
+		"openai":    {"gpt-4o", "gpt-4o-mini"},
+		"anthropic": {"claude-opus-4-7", "claude-sonnet-4-6"},
+	})
+
+	_, _, err := cfg.FindModelProvider("", "Sonnet")
+	require.EqualError(t, err, `model "Sonnet" is not offered by any configured provider; similar: claude-sonnet-4-6`)
+
+	_, _, err = cfg.FindModelProvider("openai", "gpt-4")
+	require.EqualError(t, err, `model "gpt-4" is not offered by provider "openai"; similar: gpt-4o, gpt-4o-mini`)
+
+	_, _, err = cfg.FindModelProvider("", "imaginary-99")
+	require.EqualError(t, err, `model "imaginary-99" is not offered by any configured provider`)
+}
+
 func TestConfig_FindModelProvider_NoProviders(t *testing.T) {
 	t.Parallel()
 

@@ -1027,7 +1027,7 @@ func (c *Config) FindModelProvider(providerID, modelID string) (ProviderConfig, 
 		}
 		m := c.GetModel(providerID, modelID)
 		if m == nil {
-			return ProviderConfig{}, catwalk.Model{}, fmt.Errorf("model %q is not offered by provider %q", modelID, providerID)
+			return ProviderConfig{}, catwalk.Model{}, fmt.Errorf("model %q is not offered by provider %q%s", modelID, providerID, similarModelsHint([]ProviderConfig{p}, modelID))
 		}
 		return p, *m, nil
 	}
@@ -1044,7 +1044,7 @@ func (c *Config) FindModelProvider(providerID, modelID string) (ProviderConfig, 
 	}
 	switch len(ids) {
 	case 0:
-		return ProviderConfig{}, catwalk.Model{}, fmt.Errorf("model %q is not offered by any configured provider", modelID)
+		return ProviderConfig{}, catwalk.Model{}, fmt.Errorf("model %q is not offered by any configured provider%s", modelID, similarModelsHint(c.EnabledProviders(), modelID))
 	case 1:
 		return found, model, nil
 	default:
@@ -1054,6 +1054,35 @@ func (c *Config) FindModelProvider(providerID, modelID string) (ProviderConfig, 
 			modelID, strings.Join(ids, ", "),
 		)
 	}
+}
+
+// maxSimilarModels caps the suggestions in similarModelsHint.
+const maxSimilarModels = 10
+
+// similarModelsHint lists model ids from providers whose id or name contains
+// query (case-insensitive), so a loose name like "sonnet" in an error points at
+// the real ids. It returns "" when nothing matches.
+func similarModelsHint(providers []ProviderConfig, query string) string {
+	q := strings.ToLower(query)
+	var ids []string
+	for _, p := range providers {
+		for _, models := range [][]catwalk.Model{p.Models, p.ChatGPTModels, p.GrokModels} {
+			for _, m := range models {
+				if strings.Contains(strings.ToLower(m.ID), q) || strings.Contains(strings.ToLower(m.Name), q) {
+					ids = append(ids, m.ID)
+				}
+			}
+		}
+	}
+	if len(ids) == 0 {
+		return ""
+	}
+	slices.Sort(ids)
+	ids = slices.Compact(ids)
+	if len(ids) > maxSimilarModels {
+		ids = ids[:maxSimilarModels]
+	}
+	return "; similar: " + strings.Join(ids, ", ")
 }
 
 // ValidateModel reports why a model id (optionally pinned to a provider)

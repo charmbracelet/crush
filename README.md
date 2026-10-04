@@ -717,6 +717,15 @@ You are a careful code reviewer. Report problems with file:line references.
 | `permissionMode`  | `default`, or `bypassPermissions` to skip permission prompts (project subagents ask first).           |
 | `color`           | `red`, `orange`, `yellow`, `green`, `cyan`, `blue`, `purple` or `pink`.                               |
 
+Any other key is an error, so a misspelled `tools:` can't silently grant
+every tool. A file copied from Claude Code may need its tool names changed
+and Claude-only keys removed.
+
+To run one dispatch on a different model, ask for it ("use the
+code-reviewer with gpt-5"). That model, which also works with the built-in
+`task` agent, overrides `model:`. If the name is unknown or offered by more
+than one provider, Crush asks you which one to use.
+
 A subagent can never use more than the agent that dispatches it: tools and
 MCP servers are capped by the dispatching agent, so a subagent dispatched in
 plan mode stays read-only.

@@ -24,7 +24,7 @@ import (
 func TestBuildAgentDispatchInfo_NoSubagents(t *testing.T) {
 	t.Parallel()
 
-	info := buildAgentDispatchInfo(nil)
+	info := buildAgentDispatchInfo(nil, nil)
 
 	require.Equal(t, "agent", info.Name)
 	require.True(t, info.Parallel)
@@ -52,7 +52,7 @@ func TestBuildAgentDispatchInfo_WithSubagents(t *testing.T) {
 		{Name: "tester", Description: "Writes tests"},
 	}
 
-	info := buildAgentDispatchInfo(activeSubagents)
+	info := buildAgentDispatchInfo(activeSubagents, nil)
 
 	subagentTypeParam, ok := info.Parameters["subagent_type"]
 	require.True(t, ok, "Parameters should have a subagent_type key")
@@ -81,7 +81,7 @@ func TestBuildAgentDispatchInfo_WithSubagents(t *testing.T) {
 func TestBuildAgentDispatchInfo_PromptRequired(t *testing.T) {
 	t.Parallel()
 
-	info := buildAgentDispatchInfo(nil)
+	info := buildAgentDispatchInfo(nil, nil)
 
 	require.Contains(t, info.Required, "prompt")
 
@@ -97,7 +97,7 @@ func TestBuildAgentDispatchInfo_PromptRequired(t *testing.T) {
 func TestDispatcherTool_Info_ReturnsBuildInfo(t *testing.T) {
 	t.Parallel()
 
-	info := buildAgentDispatchInfo([]*subagents.Subagent{{Name: "my-agent", Description: "Does stuff"}})
+	info := buildAgentDispatchInfo([]*subagents.Subagent{{Name: "my-agent", Description: "Does stuff"}}, nil)
 	dt := &dispatcherTool{info: info}
 
 	got := dt.Info()
@@ -110,7 +110,7 @@ func TestDispatcherTool_Run_ParsesJSONAndCallsDispatch(t *testing.T) {
 
 	var capturedParams AgentParams
 	dt := &dispatcherTool{
-		info: buildAgentDispatchInfo(nil),
+		info: buildAgentDispatchInfo(nil, nil),
 		dispatch: func(_ context.Context, params AgentParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			capturedParams = params
 			return fantasy.NewTextResponse("ok"), nil
@@ -130,7 +130,7 @@ func TestDispatcherTool_Run_InvalidJSON_ReturnsErrorResponse(t *testing.T) {
 	t.Parallel()
 
 	dt := &dispatcherTool{
-		info: buildAgentDispatchInfo(nil),
+		info: buildAgentDispatchInfo(nil, nil),
 		dispatch: func(_ context.Context, _ AgentParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			t.Fatal("dispatch should not be called for invalid JSON")
 			return fantasy.ToolResponse{}, nil
@@ -148,7 +148,7 @@ func TestDispatcherTool_Run_EmptySubagentType_RoutesToTask(t *testing.T) {
 
 	var capturedParams AgentParams
 	dt := &dispatcherTool{
-		info: buildAgentDispatchInfo(nil),
+		info: buildAgentDispatchInfo(nil, nil),
 		dispatch: func(_ context.Context, params AgentParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			capturedParams = params
 			return fantasy.NewTextResponse("ok"), nil
@@ -165,7 +165,7 @@ func TestDispatcherTool_Run_EmptySubagentType_RoutesToTask(t *testing.T) {
 func TestDispatcherTool_ProviderOptions_RoundTrip(t *testing.T) {
 	t.Parallel()
 
-	dt := &dispatcherTool{info: buildAgentDispatchInfo(nil)}
+	dt := &dispatcherTool{info: buildAgentDispatchInfo(nil, nil)}
 	require.Nil(t, dt.ProviderOptions())
 
 	opts := fantasy.ProviderOptions{}
@@ -200,7 +200,7 @@ func TestDispatcherTool_Run_UnknownSubagent_ReturnsErrorResponse(t *testing.T) {
 	}
 
 	dt := &dispatcherTool{
-		info: buildAgentDispatchInfo(active),
+		info: buildAgentDispatchInfo(active, nil),
 		dispatch: func(_ context.Context, params AgentParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			sa := findSubagentByName(active, params.SubagentType)
 			if sa == nil {
@@ -614,6 +614,104 @@ func TestAgentTool_TaskDispatch_BuildsOnLocalGroup(t *testing.T) {
 // build does not stick for the tool's lifetime: once the config problem is
 // fixed, the next dispatch builds and runs instead of replaying the cached
 // error (sync.Once semantics would fail every later dispatch the same way).
+func TestBuildAgentDispatchInfo_ModelParams(t *testing.T) {
+	t.Parallel()
+
+	info := buildAgentDispatchInfo(nil, map[config.SelectedModelType]config.SelectedModel{
+		config.SelectedModelTypeLarge: {Provider: "p", Model: "big-model"},
+		config.SelectedModelTypeSmall: {Provider: "p", Model: "tiny-model"},
+	})
+
+	modelParam, ok := info.Parameters["model"].(map[string]any)
+	require.True(t, ok)
+	desc, _ := modelParam["description"].(string)
+	require.Contains(t, desc, `"big-model"`)
+	require.Contains(t, desc, `"tiny-model"`)
+	require.Contains(t, desc, "ONLY when the user explicitly asks")
+	require.Contains(t, info.Parameters, "provider")
+	require.Equal(t, []string{"prompt"}, info.Required)
+}
+
+// TestAgentTool_DispatchModelOverride checks that a dispatch-time model wins
+// over the task default and a subagent's frontmatter, and that a bad choice is
+// a tool error telling the model to ask the user.
+func TestAgentTool_DispatchModelOverride(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	coord := newOfflineCoordinator(t, env)
+	require.NoError(t, coord.readyWg.Wait())
+
+	// Offer a second model so an override has something valid to resolve.
+	p, ok := coord.cfg.Config().Providers.Get("test-openai-compat")
+	require.True(t, ok)
+	p.Models = append(p.Models, catwalk.Model{ID: "other-model", DefaultMaxTokens: 4096})
+	coord.cfg.Config().Providers.Set(p.ID, p)
+	coord.activeSubagents = []*subagents.Subagent{
+		{Name: "broken", Description: "bad frontmatter model", Model: "no-such-model"},
+		{Name: "rev", Description: "valid frontmatter model"},
+	}
+
+	parentSession, err := env.sessions.Create(t.Context(), "Parent")
+	require.NoError(t, err)
+	tool, err := coord.agentTool(t.Context(), coord.cfg.Config().Agents[config.AgentCoder])
+	require.NoError(t, err)
+	dt := tool.(*dispatcherTool)
+
+	tests := []struct {
+		name   string
+		params AgentParams
+		want   []string
+	}{
+		{
+			name:   "task_unknown_model_asks_user",
+			params: AgentParams{Prompt: "x", Model: "other"},
+			want:   []string{"build task agent", "similar: other-model", askUserForModel},
+		},
+		{
+			name:   "provider_without_model_asks_user",
+			params: AgentParams{Prompt: "x", Provider: "test-openai-compat"},
+			want:   []string{"provider requires model", askUserForModel},
+		},
+		{
+			// Builds on the requested model and runs; the run then fails on
+			// the unreachable provider.
+			name:   "task_valid_model_runs",
+			params: AgentParams{Prompt: "x", Model: "other-model"},
+			want:   []string{"Failed to generate response"},
+		},
+		{
+			name:   "param_overrides_bad_frontmatter",
+			params: AgentParams{SubagentType: "broken", Prompt: "x", Model: "other-model"},
+			want:   []string{"Failed to generate response"},
+		},
+		{
+			name:   "subagent_unknown_model_asks_user",
+			params: AgentParams{SubagentType: "rev", Prompt: "x", Model: "no-such-model"},
+			want:   []string{`build subagent "rev"`, askUserForModel},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			// Deadline-bound: the unreachable provider is retried with backoff.
+			runCtx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+			defer cancel()
+			ctx := context.WithValue(runCtx, tools.SessionIDContextKey, parentSession.ID)
+			ctx = context.WithValue(ctx, tools.MessageIDContextKey, "msg-1")
+
+			input, err := json.Marshal(tt.params)
+			require.NoError(t, err)
+			resp, err := dt.Run(ctx, fantasy.ToolCall{ID: "call-" + tt.name, Input: string(input)})
+			require.NoError(t, err)
+			require.True(t, resp.IsError)
+			for _, w := range tt.want {
+				require.Contains(t, resp.Content, w)
+			}
+		})
+	}
+}
+
 func TestAgentTool_TaskBuildFailureIsRetryable(t *testing.T) {
 	t.Parallel()
 

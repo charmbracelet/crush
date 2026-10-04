@@ -46,6 +46,10 @@ func TestSessionScopedEventID(t *testing.T) {
 		{"session event", pubsub.Event[session.Session]{Payload: session.Session{ID: "s1"}}},
 		{"config changed", pubsub.Event[struct{}]{}},
 		{"string", "not an event"},
+		{"empty permission request", pubsub.Event[permission.PermissionRequest]{}},
+		{"empty permission notification", pubsub.Event[permission.PermissionNotification]{}},
+		{"empty question request", pubsub.Event[question.Request]{}},
+		{"empty question notification", pubsub.Event[question.Notification]{}},
 	}
 	for _, tc := range unscoped {
 		t.Run("unscoped/"+tc.name, func(t *testing.T) {
@@ -134,6 +138,14 @@ func TestDeliverToClient(t *testing.T) {
 		require.NoError(t, c.backend.SetCurrentSession(t.Context(), ws.ID, cidA, ""))
 		require.True(t, c.deliverToClient(t.Context(), ws.ID, cidA, sessionEv))
 		require.True(t, c.deliverToClient(t.Context(), ws.ID, cidB, sessionEv))
+	})
+
+	t.Run("prompt events with an empty session ID broadcast", func(t *testing.T) {
+		t.Parallel()
+		c, ws, cidA, cidB := deliverFixture(t)
+		emptyReq := pubsub.Event[permission.PermissionRequest]{}
+		require.True(t, c.deliverToClient(t.Context(), ws.ID, cidA, emptyReq))
+		require.True(t, c.deliverToClient(t.Context(), ws.ID, cidB, emptyReq))
 	})
 }
 

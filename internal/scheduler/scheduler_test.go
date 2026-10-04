@@ -27,6 +27,17 @@ func testStore(t *testing.T) *Store {
 	return store
 }
 
+// durableStore returns a store persisting at path, closed when the
+// test ends. The close matters on Windows: a store that loaded (or
+// fired) keeps an open handle on its .owner.lock file, which a
+// t.TempDir cleanup running before process exit cannot delete.
+func durableStore(t *testing.T, path string) *Store {
+	t.Helper()
+	store := NewStore(path)
+	t.Cleanup(store.Close)
+	return store
+}
+
 func TestCreateValidation(t *testing.T) {
 	t.Parallel()
 
@@ -207,7 +218,7 @@ func TestDropSessionDropsDurableTasksToo(t *testing.T) {
 	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "scheduled_tasks.json")
-	store := NewStore(path)
+	store := durableStore(t, path)
 
 	_, err := store.Create("s1", "* * * * *", "session task", true, false)
 	require.NoError(t, err)
@@ -224,7 +235,7 @@ func TestDropSessionDropsDurableTasksToo(t *testing.T) {
 
 	// The durable task must be gone from disk as well, or a restart
 	// resurrects a task pinned to a session that no longer exists.
-	reloaded := NewStore(path)
+	reloaded := durableStore(t, path)
 	require.NoError(t, reloaded.Load())
 	after := reloaded.ListAll()
 	require.Len(t, after, 1)
@@ -236,7 +247,7 @@ func TestDurablePersistenceRoundTrip(t *testing.T) {
 
 	path := filepath.Join(t.TempDir(), "scheduled_tasks.json")
 
-	store := NewStore(path)
+	store := durableStore(t, path)
 	durableTask, err := store.Create("s1", "0 9 * * *", "durable", true, true)
 	require.NoError(t, err)
 	_, err = store.Create("s1", "* * * * *", "in-memory only", true, false)
@@ -251,7 +262,7 @@ func TestDurablePersistenceRoundTrip(t *testing.T) {
 	require.Equal(t, durableTask.ID, persisted[0].ID)
 
 	// A fresh store loads the durable task back.
-	reloaded := NewStore(path)
+	reloaded := durableStore(t, path)
 	require.NoError(t, reloaded.Load())
 	tasks := reloaded.ListAll()
 	require.Len(t, tasks, 1)
@@ -262,7 +273,7 @@ func TestDurablePersistenceRoundTrip(t *testing.T) {
 func TestLoadMissingFileIsNotAnError(t *testing.T) {
 	t.Parallel()
 
-	store := NewStore(filepath.Join(t.TempDir(), "does-not-exist.json"))
+	store := durableStore(t, filepath.Join(t.TempDir(), "does-not-exist.json"))
 	require.NoError(t, store.Load())
 }
 
@@ -270,14 +281,14 @@ func TestDeletePersists(t *testing.T) {
 	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "scheduled_tasks.json")
-	store := NewStore(path)
+	store := durableStore(t, path)
 
 	task, err := store.Create("s1", "0 9 * * *", "durable", true, true)
 	require.NoError(t, err)
 	_, err = store.Delete("s1", task.ID)
 	require.NoError(t, err)
 
-	reloaded := NewStore(path)
+	reloaded := durableStore(t, path)
 	require.NoError(t, reloaded.Load())
 	require.Len(t, reloaded.ListAll(), 0)
 }
@@ -472,7 +483,7 @@ func TestRemoveDropsDurableTaskAndPersists(t *testing.T) {
 	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "scheduled_tasks.json")
-	store := NewStore(path)
+	store := durableStore(t, path)
 
 	task, err := store.Create("s1", "* * * * *", "durable", true, true)
 	require.NoError(t, err)
@@ -480,7 +491,7 @@ func TestRemoveDropsDurableTaskAndPersists(t *testing.T) {
 	store.Remove(task.ID)
 	require.Empty(t, store.ListAll())
 
-	reloaded := NewStore(path)
+	reloaded := durableStore(t, path)
 	require.NoError(t, reloaded.Load())
 	require.Empty(t, reloaded.ListAll())
 
@@ -506,7 +517,7 @@ func TestLoadSkipsUnusableTasks(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(path, data, 0o600))
 
-	store := NewStore(path)
+	store := durableStore(t, path)
 	require.NoError(t, store.Load())
 
 	loaded := store.ListAll()
@@ -539,7 +550,7 @@ func TestLoadEnforcesSessionLimit(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(path, data, 0o600))
 
-	store := NewStore(path)
+	store := durableStore(t, path)
 	require.NoError(t, store.Load())
 	require.Len(t, store.ListAll(), MaxTasksPerSession)
 }
@@ -555,7 +566,7 @@ func TestDurableFileIsNotWorldReadable(t *testing.T) {
 	}
 
 	path := filepath.Join(t.TempDir(), "scheduled_tasks.json")
-	store := NewStore(path)
+	store := durableStore(t, path)
 	_, err := store.Create("s1", "* * * * *", "secret prompt", true, true)
 	require.NoError(t, err)
 
@@ -570,7 +581,7 @@ func TestDurableFileIsNotWorldReadable(t *testing.T) {
 func TestStoreIsRaceFree(t *testing.T) {
 	t.Parallel()
 
-	store := NewStore(filepath.Join(t.TempDir(), "scheduled_tasks.json"))
+	store := durableStore(t, filepath.Join(t.TempDir(), "scheduled_tasks.json"))
 	var wg sync.WaitGroup
 	for worker := range 8 {
 		wg.Add(1)

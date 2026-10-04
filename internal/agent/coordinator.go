@@ -166,6 +166,12 @@ type coordinator struct {
 
 	cronStore *scheduler.Store
 
+	// schedCancel and schedDone stop and join the cron scheduler
+	// goroutine, so Close can release the cron store's ownership lock
+	// deterministically instead of relying on process exit.
+	schedCancel context.CancelFunc
+	schedDone   chan struct{}
+
 	// Skills discovery results (session-start snapshot).
 	allSkills    []*skills.Skill // Pre-filter: all discovered after dedup.
 	activeSkills []*skills.Skill // Post-filter: active skills only.
@@ -272,9 +278,28 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	c.mainAgentName = config.AgentCoder
 
 	cronScheduler := scheduler.NewScheduler(c.cronStore, c.fireScheduledTask)
-	go cronScheduler.Run(ctx)
+	schedCtx, schedCancel := context.WithCancel(ctx)
+	c.schedCancel = schedCancel
+	c.schedDone = make(chan struct{})
+	go func() {
+		defer close(c.schedDone)
+		cronScheduler.Run(schedCtx)
+	}()
 
 	return c, nil
+}
+
+// Close stops the cron scheduler and releases the cron store's
+// ownership lock, so an explicit shutdown (or a test's TempDir cleanup,
+// which runs before process exit) does not leave a lock file handle
+// behind. It is an optional capability outside the Coordinator
+// interface: callers that need it type-assert to interface{ Close() }.
+func (c *coordinator) Close() {
+	if c.schedCancel != nil {
+		c.schedCancel()
+		<-c.schedDone
+	}
+	c.cronStore.Close()
 }
 
 // activeAgent returns the coordinator's current main agent and its config

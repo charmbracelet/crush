@@ -37,7 +37,7 @@ func (e *requestTimeoutError) Unwrap() error { return e.cause }
 // userMessage explains the timeout in the UI, including how long the request
 // ran before giving up and how to change the limit.
 func (e *requestTimeoutError) userMessage() string {
-	hint := "Increase the limit with \"option request-timeout SECONDS\" or set it to 0 to disable the timeout."
+	hint := "Increase the limit with \"option request-timeout SECONDS\" in your crushrc file, or set it to 0 to disable the timeout."
 	if e.idle {
 		return fmt.Sprintf("The model stopped sending data for %s. %s", e.timeout, hint)
 	}

@@ -9,6 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/compaction"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/common"
@@ -228,6 +229,10 @@ type AssistantMessageItem struct {
 	// from streamingContent because it renders through the plan
 	// renderer, whose cached prefix is not interchangeable.
 	streamingPlan streamingMarkdown
+
+	// streamingSummary applies the same stable-prefix caching to a session
+	// checkpoint while it streams.
+	streamingSummary streamingMarkdown
 }
 
 var _ Expandable = (*AssistantMessageItem)(nil)
@@ -517,11 +522,14 @@ func (a *AssistantMessageItem) thinkingHashIncremental(thinking string) uint64 {
 // message flips between the plain, open-card, and closed-card renders
 // as the plan run progresses.
 func (a *AssistantMessageItem) contentKey() (uint64, uint64) {
-	var planStreaming byte
+	var extra byte
 	if a.planStreaming() {
-		planStreaming = 1
+		extra = 1
 	}
-	return fnv64(a.message.Content().Text), uint64(planStreaming)
+	if a.message.IsSummaryMessage && !a.message.IsFinished() {
+		extra |= 2
+	}
+	return fnv64(a.message.Content().Text), uint64(extra)
 }
 
 // SetPlanAgent flags this item as plan-agent output (or clears the
@@ -589,6 +597,8 @@ func (a *AssistantMessageItem) cachedContent(width int) string {
 	// ThinkingBox treatment.
 	var out string
 	switch {
+	case a.message.IsSummaryMessage:
+		out = a.renderCompactionCard(width)
 	case common.PlanReadyMarkerPresent(text):
 		out = a.renderPlanCard(common.StripPlanMarkers(text), width)
 	case a.planStreaming() && common.PlanStartMarkerPresent(text):
@@ -612,7 +622,7 @@ func (a *AssistantMessageItem) cachedContent(width int) string {
 // plan is final by the time the marker appears, so this bypasses the
 // streaming-markdown cache and renders directly, like renderThinking.
 func (a *AssistantMessageItem) renderPlanCard(text string, width int) string {
-	box, innerWidth := planBoxLayout(a.sty.Messages.PlanBox, width)
+	box, innerWidth := boxLayout(a.sty.Messages.PlanBox, width)
 	renderer := common.PlanMarkdownRenderer(a.sty, innerWidth)
 	mu := common.LockMarkdownRenderer(renderer)
 	mu.Lock()
@@ -629,7 +639,7 @@ func (a *AssistantMessageItem) renderPlanCard(text string, width int) string {
 // routes through the stable-prefix streaming cache so each streaming
 // flush only re-renders the trailing partial of the plan document.
 func (a *AssistantMessageItem) renderPlanCardStreaming(text string, width int) string {
-	box, innerWidth := planBoxLayout(a.sty.Messages.PlanBox, width)
+	box, innerWidth := boxLayout(a.sty.Messages.PlanBox, width)
 	renderer := common.PlanMarkdownRenderer(a.sty, innerWidth)
 	rendered := a.streamingPlan.Render(text, innerWidth, renderer)
 	return renderPlanBox(box, rendered, width, false)
@@ -642,7 +652,7 @@ func (a *AssistantMessageItem) renderPlanCardStreaming(text string, width int) s
 // false the bottom border is withheld, leaving the card open while the
 // plan streams.
 func renderPlanBox(style lipgloss.Style, content string, width int, closed bool) string {
-	style, innerWidth := planBoxLayout(style, width)
+	style, innerWidth := boxLayout(style, width)
 	if !closed {
 		style = style.BorderBottom(false)
 	}
@@ -659,7 +669,7 @@ func renderPlanBox(style lipgloss.Style, content string, width int, closed bool)
 
 // planBoxLayout returns a style and content width whose combined horizontal
 // frame fits within the available message width.
-func planBoxLayout(style lipgloss.Style, width int) (lipgloss.Style, int) {
+func boxLayout(style lipgloss.Style, width int) (lipgloss.Style, int) {
 	width = max(1, width)
 	frameWidth := style.GetHorizontalFrameSize()
 	if frameWidth >= width {
@@ -760,6 +770,89 @@ func (a *AssistantMessageItem) renderThinking(thinking string, width int) string
 // turn), and falls back to a full render whenever boundary
 // detection has the slightest doubt — see
 // findSafeMarkdownBoundary.
+// renderCompactionCard paints a checkpoint inside a bordered box, the way the
+// plan card paints a plan. Without it a summary is plain assistant text in the
+// middle of a conversation, and the natural reading is that the agent said it
+// about the last message rather than that it replaced everything above.
+func (a *AssistantMessageItem) renderCompactionCard(width int) string {
+	text := a.message.Content().Text
+	box, innerWidth := boxLayout(a.sty.Messages.CompactionBox, width)
+	streaming := !a.message.IsFinished()
+
+	title := "Session Summary"
+	if streaming {
+		// The footer lands last, so there is nothing to report about what was
+		// replaced until the checkpoint is finished.
+		title = "Summarizing\u2026"
+	}
+	parts := []string{a.sty.Messages.CompactionHeader.Render(title)}
+	if body := strings.TrimSpace(compaction.Body(text)); body != "" {
+		parts = append(parts, "")
+		if streaming {
+			renderer := common.MarkdownRenderer(a.sty, innerWidth)
+			parts = append(parts, a.streamingSummary.Render(body, innerWidth, renderer))
+		} else {
+			parts = append(parts, a.renderMarkdownAt(body, innerWidth))
+		}
+	}
+	if note := a.compactionNote(text, streaming); len(note) > 0 {
+		parts = append(parts, "")
+		parts = append(parts, note...)
+	}
+	content := strings.Join(parts, "\n")
+
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		lines[i] = ansi.Truncate(line, innerWidth, "")
+	}
+	if streaming {
+		// An open box, as with a streaming plan: the bottom edge would imply
+		// the checkpoint is finished before it is.
+		box = box.BorderBottom(false)
+	}
+	return box.Width(max(1, width)).Render(strings.Join(lines, "\n"))
+}
+
+// compactionNote answers the question a summary in the middle of a session
+// provokes: how much of the conversation did this replace, and is anything of
+// it still around?
+func (a *AssistantMessageItem) compactionNote(text string, streaming bool) []string {
+	if streaming {
+		return nil
+	}
+	info, ok := compaction.ParseInfo(text)
+	if !ok {
+		return nil
+	}
+	// One fact per line: the note is the first thing a reader looks for, and
+	// a single long sentence gets truncated at ordinary terminal widths.
+	lines := []string{
+		fmt.Sprintf("Replaced %d earlier messages (~%s tokens)", info.ReplacedMessages, formatTokenCount(info.ReplacedTokens)),
+		fmt.Sprintf("Kept the %d most recent (~%s) verbatim", info.KeptMessages, formatTokenCount(info.KeptTokens)),
+	}
+	if info.TranscriptPath != "" {
+		lines = append(lines, "Full transcript: "+info.TranscriptPath)
+	}
+	for i, line := range lines {
+		lines[i] = a.sty.Messages.CompactionNote.Render(line)
+	}
+	return lines
+}
+
+// renderMarkdownAt renders finished markdown at an explicit width, for text
+// that lives inside a box rather than directly in the message column.
+func (a *AssistantMessageItem) renderMarkdownAt(content string, width int) string {
+	renderer := common.MarkdownRenderer(a.sty, width)
+	mu := common.LockMarkdownRenderer(renderer)
+	mu.Lock()
+	rendered, err := renderer.Render(content)
+	mu.Unlock()
+	if err != nil {
+		return content
+	}
+	return strings.TrimSpace(rendered)
+}
+
 func (a *AssistantMessageItem) renderMarkdown(content string, width int) string {
 	renderer := common.MarkdownRenderer(a.sty, width)
 	return a.streamingContent.Render(content, width, renderer)
@@ -849,6 +942,7 @@ func (a *AssistantMessageItem) clearCache() {
 	a.streamingContent.Reset()
 	a.streamingThinking.Reset()
 	a.streamingPlan.Reset()
+	a.streamingSummary.Reset()
 	a.thinkingHash = 0
 	a.thinkingHashLen = 0
 	a.thinkingHashSample = ""
@@ -936,4 +1030,17 @@ func (a *AssistantMessageItem) HandleKeyEvent(key tea.KeyMsg) (bool, tea.Cmd) {
 		return true, common.CopyToClipboard(text, "Message copied to clipboard")
 	}
 	return false, nil
+}
+
+// formatTokenCount shortens a token count the way the context meter does, so a
+// checkpoint's note and the status bar never disagree about the same number.
+func formatTokenCount(tokens int64) string {
+	switch {
+	case tokens >= 1_000_000:
+		return strings.Replace(fmt.Sprintf("%.1fM", float64(tokens)/1_000_000), ".0M", "M", 1)
+	case tokens >= 1_000:
+		return strings.Replace(fmt.Sprintf("%.1fK", float64(tokens)/1_000), ".0K", "K", 1)
+	default:
+		return fmt.Sprintf("%d", tokens)
+	}
 }

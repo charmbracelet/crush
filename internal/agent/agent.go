@@ -1975,7 +1975,9 @@ func humanTokens(n int64) string {
 	if n < 1000 {
 		return strconv.FormatInt(n, 10)
 	}
-	return fmt.Sprintf("%.1fk", float64(n)/1000)
+	// Upper case, to match the context meter: the same number should never
+	// appear two ways on one screen.
+	return strings.Replace(fmt.Sprintf("%.1fK", float64(n)/1000), ".0K", "K", 1)
 }
 
 func (a *sessionAgent) publishSummarizing(sessionID, title string, done bool, progress string) {

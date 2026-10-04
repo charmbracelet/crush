@@ -1,15 +1,166 @@
 package model
 
 import (
+	"context"
 	"fmt"
 	"strings"
+	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/dialog"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/crush/internal/ui/util"
 )
+
+// mcpStatesTTL bounds how long the memoized MCP state may go without a
+// re-probe being scheduled; MCP events normally refresh it much sooner. The
+// backstop covers state_changed events missed in client/server mode: the
+// SSE pipeline is events-only, so a transition that completes before the
+// stream attaches, or while it is down, is otherwise invisible until the
+// next state change. A few seconds of stale MCP status is invisible,
+// matching the LSP backstop's cadence; see lsp.go. Package var so tests
+// can pin it.
+var mcpStatesTTL = 5 * time.Second
+
+// mcpStartingRetryDelay is the initial cadence of the retry loop that keeps
+// re-probing MCP states while any server is still connecting, so a
+// "starting..." entry converges to the server's settled state even when
+// the state_changed event never arrives. The cadence backs off
+// exponentially to mcpStartingRetryMaxDelay so a server that never settles
+// cannot drive a round-trip per second for the whole session. Package vars
+// so tests can pin them.
+var mcpStartingRetryDelay = 1 * time.Second
+
+// mcpStartingRetryMaxDelay caps the starting-retry backoff. Once the loop
+// has backed off this far, the TTL backstop (mcpStatesTTL) dominates the
+// probe cadence anyway.
+var mcpStartingRetryMaxDelay = 30 * time.Second
+
+// mcpStartingRetryBackoff returns the retry delay for the given
+// zero-based attempt, doubling from mcpStartingRetryDelay and clamping at
+// mcpStartingRetryMaxDelay.
+func mcpStartingRetryBackoff(attempt int) time.Duration {
+	delay := mcpStartingRetryDelay
+	for i := 0; i < attempt && delay < mcpStartingRetryMaxDelay; i++ {
+		delay *= 2
+	}
+	return min(delay, mcpStartingRetryMaxDelay)
+}
+
+// mcpStartingRetryMsg re-dispatches an MCP state refresh after the retry
+// delay; applyMCPStates arms it while any server is in StateStarting.
+type mcpStartingRetryMsg struct{}
+
+// requestMCPRefresh schedules an off-thread refresh of the memoized MCP
+// states. While a fetch is already in flight it only marks the state dirty;
+// applyMCPStates re-dispatches so the freshest data still lands.
+func (m *UI) requestMCPRefresh() tea.Cmd {
+	if m.mcpFetchInFlight {
+		m.mcpRefreshQueued = true
+		return nil
+	}
+	return m.dispatchMCPRefresh()
+}
+
+// dispatchMCPRefresh returns a command that fetches the MCP states off the
+// Update goroutine (a synchronous HTTP round-trip in client/server mode),
+// delivering an mcpStateChangedMsg. It returns nil while a fetch is already
+// in flight. The closure captures only locals (never m) so it is safe
+// off-thread.
+func (m *UI) dispatchMCPRefresh() tea.Cmd {
+	if m.mcpFetchInFlight || m.com == nil || m.com.Workspace == nil {
+		return nil
+	}
+	m.mcpFetchInFlight = true
+	// Stamp the check time at dispatch too so the TTL backstop doesn't
+	// keep re-requesting while this fetch is in flight.
+	m.mcpCheckedAt = time.Now()
+	ws := m.com.Workspace
+	return func() tea.Msg {
+		return mcpStateChangedMsg{
+			states: ws.MCPGetStates(),
+		}
+	}
+}
+
+// applyMCPStates stores an off-thread MCP fetch result, re-dispatches when
+// a refresh was requested while it was in flight, and keeps the retry loop
+// running while any server is still connecting. A failed fetch keeps the
+// last-known-good states instead of blanking the sidebar. Runs on the
+// Update goroutine.
+func (m *UI) applyMCPStates(msg mcpStateChangedMsg) []tea.Cmd {
+	m.mcpFetchInFlight = false
+	m.mcpCheckedAt = time.Now()
+	if msg.states == nil {
+		// A failed fetch (e.g. a transient HTTP error in client/server
+		// mode) keeps the last-known-good states on screen.
+		if m.mcpRefreshQueued {
+			m.mcpRefreshQueued = false
+			if cmd := m.dispatchMCPRefresh(); cmd != nil {
+				return []tea.Cmd{cmd}
+			}
+		}
+		return nil
+	}
+
+	// Auto-open the MCP auth dialog when a server newly needs
+	// authentication. Comparing against the previous states keeps
+	// backstop-driven refreshes from re-opening a dialog the user already
+	// dismissed while a server stays in StateNeedsAuth.
+	newlyNeedsAuth := false
+	for name, info := range msg.states {
+		if info.State != mcp.StateNeedsAuth {
+			continue
+		}
+		if prev, ok := m.mcpStates[name]; !ok || prev.State != mcp.StateNeedsAuth {
+			newlyNeedsAuth = true
+			break
+		}
+	}
+	m.mcpStates = msg.states
+
+	var cmds []tea.Cmd
+	if newlyNeedsAuth {
+		if cmd := m.openMCPAuthDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
+	if m.mcpRefreshQueued {
+		m.mcpRefreshQueued = false
+		if cmd := m.dispatchMCPRefresh(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
+	// A server still connecting keeps the refresh loop armed: the next
+	// re-probe lands within the backoff delay even if the state_changed
+	// event is never delivered (late SSE attach, a reconnect gap, or a
+	// lossy broker in client/server mode). The delay doubles per
+	// consecutive starting observation up to mcpStartingRetryMaxDelay so
+	// a server that never settles stops driving per-second round-trips.
+	if anyMCPStarting(msg.states) {
+		cmds = append(cmds, tea.Tick(mcpStartingRetryBackoff(m.mcpStartingRetries), func(time.Time) tea.Msg {
+			return mcpStartingRetryMsg{}
+		}))
+		m.mcpStartingRetries++
+	} else {
+		m.mcpStartingRetries = 0
+	}
+	return cmds
+}
+
+// anyMCPStarting reports whether any MCP client is still connecting.
+func anyMCPStarting(states map[string]mcp.ClientInfo) bool {
+	for _, info := range states {
+		if info.State == mcp.StateStarting {
+			return true
+		}
+	}
+	return false
+}
 
 // mcpInfo renders the MCP status section showing active MCP clients and their
 // tool/prompt counts.
@@ -115,4 +266,113 @@ func mcpList(t *styles.Styles, mcps []mcp.ClientInfo, width, maxItems int) strin
 		return lipgloss.JoinVertical(lipgloss.Left, visibleItems...)
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, renderedMcps...)
+}
+
+// openMCPTogglesDialog opens the repository-scoped MCP toggles dialog.
+func (m *UI) openMCPTogglesDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.MCPTogglesID) {
+		m.dialog.BringToFront(dialog.MCPTogglesID)
+		return nil
+	}
+	items, err := m.mcpToggleItems()
+	if err != nil {
+		return util.ReportError(err)
+	}
+	m.dialog.OpenDialog(dialog.NewMCPToggles(m.com, items))
+	return nil
+}
+
+// mcpToggleItems builds the dialog items from the configured servers, the
+// live connection states, and the repository's disabled overrides.
+func (m *UI) mcpToggleItems() ([]dialog.MCPToggleItem, error) {
+	disabledServers, err := m.com.Workspace.MCPServersDisabled(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	disabled := make(map[string]struct{}, len(disabledServers))
+	for _, name := range disabledServers {
+		disabled[name] = struct{}{}
+	}
+	// A repository-scoped enabled override turns a config-disabled server
+	// back on for this repository; it is force-started at startup.
+	enabledServers, err := m.com.Workspace.MCPServersEnabled(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	enabled := make(map[string]struct{}, len(enabledServers))
+	for _, name := range enabledServers {
+		enabled[name] = struct{}{}
+	}
+	items := make([]dialog.MCPToggleItem, 0, len(m.com.Config().MCP))
+	for _, configured := range m.com.Config().MCP.Sorted() {
+		_, enabledOverride := enabled[configured.Name]
+		item := dialog.MCPToggleItem{
+			Name:            configured.Name,
+			ConfigDisabled:  configured.MCP.Disabled,
+			EnabledOverride: enabledOverride,
+			Status:          mcpStatusText(m.mcpStates[configured.Name]),
+		}
+		if _, off := disabled[configured.Name]; off {
+			item.Disabled = true
+		}
+		items = append(items, item)
+	}
+	return items, nil
+}
+
+// applyMCPToggle persists an MCP toggle. Local toggles write a
+// repository-scoped override; enabling a config-disabled server also starts
+// it now and records an enabled override, so it stays enabled across
+// restarts. Global toggles write the disabled flag to the config and apply
+// the change to the running client. The dialog keeps its own optimistic
+// state; failures surface as an error toast.
+func (m *UI) applyMCPToggle(msg dialog.ActionToggleMCP) tea.Cmd {
+	name := msg.Name
+	disable := msg.Disabled
+	status := "enabled"
+	if disable {
+		status = "disabled"
+	}
+	return func() tea.Msg {
+		if msg.Global {
+			if err := m.com.Workspace.MCPSetServerConfigDisabled(context.TODO(), name, disable); err != nil {
+				return util.NewErrorMsg(err)
+			}
+			return util.NewInfoMsg(fmt.Sprintf("MCP %q %s globally", name, status))
+		}
+		if !disable {
+			if configured, ok := m.com.Config().MCP[name]; ok && configured.Disabled {
+				if err := m.com.Workspace.MCPStartServer(context.TODO(), name); err != nil {
+					return util.NewErrorMsg(err)
+				}
+			}
+		}
+		if err := m.com.Workspace.MCPSetServerDisabled(context.TODO(), name, disable); err != nil {
+			return util.NewErrorMsg(err)
+		}
+		return util.NewInfoMsg(fmt.Sprintf("MCP %q %s for this repository", name, status))
+	}
+}
+
+// mcpStatusText renders a connection state as plain dialog text.
+func mcpStatusText(info mcp.ClientInfo) string {
+	switch info.State {
+	case mcp.StateStarting:
+		// No ellipsis: the text stays put when the state transitions,
+		// instead of jumping as the trailing dots appear and vanish.
+		return "starting"
+	case mcp.StateConnected:
+		return "connected"
+	case mcp.StateError:
+		if info.Error != nil {
+			return fmt.Sprintf("error: %s", info.Error.Error())
+		}
+		return "error"
+	case mcp.StateNeedsAuth:
+		return "needs authentication"
+	case mcp.StateDisabled:
+		return "disabled"
+	default:
+		return "offline"
+	}
 }

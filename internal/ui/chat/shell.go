@@ -126,6 +126,14 @@ func (s *ShellItem) Spinning() bool {
 	return s.pending
 }
 
+// restyleAnim implements [animRestyler].
+func (s *ShellItem) restyleAnim() {
+	if s.anim == nil {
+		return
+	}
+	s.anim.SetColors(s.sty.WorkingLabelColor, s.sty.WorkingGradFromColor, s.sty.WorkingGradToColor, nil)
+}
+
 // Advance advances the spinner animation for pending shell items.
 func (s *ShellItem) Advance() bool {
 	if !s.pending || !s.anim.Advance() {

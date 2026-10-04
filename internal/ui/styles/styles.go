@@ -105,6 +105,7 @@ type Styles struct {
 		Keystroke         lipgloss.Style // Style for keystroke hints (e.g., "ctrl+d")
 		KeystrokeTip      lipgloss.Style // Style for keystroke action text (e.g., "open", "close")
 		WorkingDir        lipgloss.Style // Style for current working directory
+		GitBranch         lipgloss.Style // Style for the current git branch name
 		Separator         lipgloss.Style // Style for separator dots (•)
 		Wrapper           lipgloss.Style // Outer container for the entire header row
 		LogoGradCanvas    lipgloss.Style // Canvas for the compact "CRUSH" gradient
@@ -293,6 +294,7 @@ type Styles struct {
 		BusyIcon        lipgloss.Style // Busy/starting status icon
 		ErrorIcon       lipgloss.Style // Error status icon
 		OnlineIcon      lipgloss.Style // Online/ready status icon
+		OnlineText      lipgloss.Style // Online/ready status text (e.g. "connected"), no icon
 		NeedsAuthIcon   lipgloss.Style // Needs authentication status icon
 		AdditionalText  lipgloss.Style // "None" and "…and N more" text
 		CapabilityCount lipgloss.Style // "N tools" / "N prompts" / "N resources"
@@ -622,14 +624,7 @@ type Styles struct {
 	}
 
 	// Attachments styles
-	Attachments struct {
-		Normal   lipgloss.Style
-		Image    lipgloss.Style
-		Text     lipgloss.Style
-		Skill    lipgloss.Style
-		Remove   lipgloss.Style
-		Deleting lipgloss.Style
-	}
+	Attachments AttachmentStyles
 
 	// Pills styles for todo/queue pills
 	Pills struct {
@@ -689,6 +684,19 @@ func (s *Styles) ChromaTheme() chroma.StyleEntries {
 		chroma.GenericSubheading:   chromaStyle(rules.Chroma.GenericSubheading),
 		chroma.Background:          chromaStyle(rules.Chroma.Background),
 	}
+}
+
+// AttachmentStyles are the styles for one attachment chip row. They are
+// passed to the attachments renderer as a unit so adding a style does not
+// mean touching every construction site.
+type AttachmentStyles struct {
+	Normal   lipgloss.Style
+	Image    lipgloss.Style
+	Text     lipgloss.Style
+	Skill    lipgloss.Style
+	Remove   lipgloss.Style
+	Deleting lipgloss.Style
+	More     lipgloss.Style // "N more…" hint for chips that didn't fit
 }
 
 // DialogHelpStyles returns the styles for dialog help.

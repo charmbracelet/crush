@@ -597,6 +597,13 @@ func (c *Commands) defaultCommandGroups() []CommandGroup {
 		settings = append(settings, NewCommandItem(t, "disable_docker_mcp", "Disable Docker MCP Catalog", "", ActionDisableDockerMCP{}))
 	}
 
+	// Toggle MCP servers for this repository when any are configured.
+	if len(cfg.MCP) > 0 {
+		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_mcps", "Toggle MCPs", "", ActionOpenDialog{
+			DialogID: MCPTogglesID,
+		}))
+	}
+
 	if c.hasTodos || c.hasQueue {
 		var label string
 		switch {

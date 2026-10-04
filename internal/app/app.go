@@ -142,7 +142,20 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	// blocks for the in-flight init instead of racing the goroutine and
 	// returning before any MCP tools register.
 	mcp.ArmInit()
-	go mcp.Initialize(ctx, app.Permissions, store)
+	// Config-disabled servers the user enabled via Toggle MCPs have a
+	// repository-scoped enabled override; force-start them so the toggle
+	// survives restarts. A read failure only means the override is skipped.
+	var forceStart []string
+	if enabled, err := app.Sessions.MCPServersEnabled(ctx); err != nil {
+		slog.Warn("Failed to list enabled MCP overrides; config-disabled servers stay disabled", "error", err)
+	} else {
+		for _, name := range enabled {
+			if m, ok := store.Config().MCP[name]; ok && m.Disabled {
+				forceStart = append(forceStart, name)
+			}
+		}
+	}
+	go mcp.Initialize(ctx, app.Permissions, store, forceStart...)
 
 	// Start herdr integration when running inside a herdr pane.
 	app.herdrClient = herdr.Init()
@@ -619,20 +632,30 @@ func (app *App) GetDefaultSmallModel(providerID string) config.SelectedModel {
 		return largeModelCfg
 	}
 
-	// A ChatGPT-authenticated OpenAI provider only serves the models the
+	// A subscription-authenticated provider only serves the models its
 	// subscription grants, so the default small model must come from that
-	// catalog as well.
-	if providerID == string(catwalk.InferenceProviderOpenAI) && largeModelCfg.Provider == providerID {
-		if pc, ok := cfg.Providers.Get(providerID); ok && pc.OAuthToken != nil {
-			if small := chatGPTSmallModel(pc); small != nil {
-				return config.SelectedModel{
-					Provider:        providerID,
-					Model:           small.ID,
-					MaxTokens:       small.DefaultMaxTokens,
-					ReasoningEffort: small.DefaultReasoningEffort,
+	// catalog as well. This applies to ChatGPT-authenticated OpenAI and
+	// Grok-authenticated xAI alike.
+	if largeModelCfg.Provider == providerID {
+		var pick func(config.ProviderConfig) *catwalk.Model
+		switch providerID {
+		case string(catwalk.InferenceProviderOpenAI):
+			pick = chatGPTSmallModel
+		case string(catwalk.InferenceProviderXAI):
+			pick = grokSmallModel
+		}
+		if pick != nil {
+			if pc, ok := cfg.Providers.Get(providerID); ok && pc.OAuthToken != nil {
+				if small := pick(pc); small != nil {
+					return config.SelectedModel{
+						Provider:        providerID,
+						Model:           small.ID,
+						MaxTokens:       small.DefaultMaxTokens,
+						ReasoningEffort: small.DefaultReasoningEffort,
+					}
 				}
+				return largeModelCfg
 			}
-			return largeModelCfg
 		}
 	}
 
@@ -657,6 +680,24 @@ func chatGPTSmallModel(pc config.ProviderConfig) *catwalk.Model {
 	}
 	if len(pc.ChatGPTModels) > 0 {
 		return &pc.ChatGPTModels[len(pc.ChatGPTModels)-1]
+	}
+	return nil
+}
+
+// grokSmallModel picks a lightweight model from the Grok catalog,
+// preferring a "fast" or "mini" variant and falling back to the last
+// entry (the catalog lists heavier models first). Returns nil when the
+// catalog is empty.
+func grokSmallModel(pc config.ProviderConfig) *catwalk.Model {
+	for _, marker := range []string{"fast", "mini"} {
+		for i := range pc.GrokModels {
+			if strings.Contains(pc.GrokModels[i].ID, marker) {
+				return &pc.GrokModels[i]
+			}
+		}
+	}
+	if len(pc.GrokModels) > 0 {
+		return &pc.GrokModels[len(pc.GrokModels)-1]
 	}
 	return nil
 }

@@ -304,6 +304,11 @@ func (m *UI) staleWorkspaceRefreshCmds() []tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 	}
+	if time.Since(m.mcpCheckedAt) >= mcpStatesTTL {
+		if cmd := m.dispatchMCPRefresh(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
 	return cmds
 }
 

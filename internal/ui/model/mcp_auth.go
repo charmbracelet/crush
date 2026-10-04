@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
@@ -42,10 +41,12 @@ func (m *UI) authenticateMCP(ctx context.Context, name string) tea.Cmd {
 }
 
 // openMCPAuthDialog opens the MCP authentication dialog if any servers
-// are pending auth. If the dialog is already open, it brings it to the
-// front instead.
+// are pending auth. Servers disabled for this repository or in the
+// config are skipped: disabling a server that requires auth must not
+// keep asking for authentication. If the dialog is already open, it is
+// brought to the front instead.
 func (m *UI) openMCPAuthDialog() tea.Cmd {
-	pending := m.com.Workspace.MCPPendingAuth()
+	pending := m.filterAuthPending(m.com.Workspace.MCPPendingAuth())
 	if len(pending) == 0 {
 		return nil
 	}
@@ -58,18 +59,36 @@ func (m *UI) openMCPAuthDialog() tea.Cmd {
 	return cmd
 }
 
-// checkPendingMCPAuth waits for MCP initialization to finish and then
-// checks whether any OAuth MCPs need authentication. This runs as a
-// Bubble Tea command so it doesn't block the UI.
-func (m *UI) checkPendingMCPAuth() tea.Cmd {
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		if err := mcp.WaitForInit(ctx); err != nil {
-			return nil
-		}
-		return mcpStateChangedMsg{
-			states: m.com.Workspace.MCPGetStates(),
-		}
+// filterAuthPending drops servers the user disabled from the auth
+// prompt. A read failure fails open: better to prompt for a live server
+// than to silently hide one.
+func (m *UI) filterAuthPending(pending []mcp.PendingAuthServer) []mcp.PendingAuthServer {
+	if len(pending) == 0 {
+		return pending
 	}
+	disabled, err := m.com.Workspace.MCPServersDisabled(context.Background())
+	if err != nil {
+		return pending
+	}
+	// Enabled overrides turn config-disabled servers back on for this
+	// repository, so those still need authentication.
+	enabled, err := m.com.Workspace.MCPServersEnabled(context.Background())
+	if err != nil {
+		return pending
+	}
+	off := make(map[string]struct{}, len(disabled))
+	for _, name := range disabled {
+		off[name] = struct{}{}
+	}
+	for _, name := range enabled {
+		delete(off, name)
+	}
+	filtered := make([]mcp.PendingAuthServer, 0, len(pending))
+	for _, server := range pending {
+		if _, disabled := off[server.Name]; disabled {
+			continue
+		}
+		filtered = append(filtered, server)
+	}
+	return filtered
 }

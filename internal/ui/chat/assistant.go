@@ -824,11 +824,22 @@ func (a *AssistantMessageItem) compactionNote(text string, streaming bool) []str
 	if !ok {
 		return nil
 	}
-	// One fact per line: the note is the first thing a reader looks for, and
-	// a single long sentence gets truncated at ordinary terminal widths.
-	lines := []string{
-		fmt.Sprintf("Replaced %d earlier messages (~%s tokens)", info.ReplacedMessages, formatTokenCount(info.ReplacedTokens)),
-		fmt.Sprintf("Kept the %d most recent (~%s) verbatim", info.KeptMessages, formatTokenCount(info.KeptTokens)),
+	// One fact per line: the note is the first thing a reader looks for, and a
+	// single long sentence gets truncated at ordinary terminal widths. Each
+	// line is also conditional, because a footer that was reworded, cut short,
+	// or written by a build that counted differently yields partial data - and
+	// "Replaced 0 earlier messages" is a false statement about the session
+	// where saying nothing is merely quiet.
+	var lines []string
+	if info.ReplacedMessages > 0 {
+		lines = append(lines, fmt.Sprintf(
+			"Replaced %d earlier messages (~%s tokens)",
+			info.ReplacedMessages, formatTokenCount(info.ReplacedTokens)))
+	}
+	if info.KeptMessages > 0 {
+		lines = append(lines, fmt.Sprintf(
+			"Kept the %d most recent (~%s) verbatim",
+			info.KeptMessages, formatTokenCount(info.KeptTokens)))
 	}
 	if info.TranscriptPath != "" {
 		lines = append(lines, "Full transcript: "+info.TranscriptPath)

@@ -599,7 +599,7 @@ func (c *Commands) defaultCommandGroups() []CommandGroup {
 
 	// Toggle MCP servers for this repository when any are configured.
 	if len(cfg.MCP) > 0 {
-		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_mcps", "Toggle MCPs", "", ActionOpenDialog{
+		settings = append(settings, NewCommandItem(t, "toggle_mcps", "Toggle MCPs", "", ActionOpenDialog{
 			DialogID: MCPTogglesID,
 		}))
 	}

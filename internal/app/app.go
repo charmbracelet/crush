@@ -142,7 +142,20 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	// blocks for the in-flight init instead of racing the goroutine and
 	// returning before any MCP tools register.
 	mcp.ArmInit()
-	go mcp.Initialize(ctx, app.Permissions, store)
+	// Config-disabled servers the user enabled via Toggle MCPs have a
+	// repository-scoped enabled override; force-start them so the toggle
+	// survives restarts. A read failure only means the override is skipped.
+	var forceStart []string
+	if enabled, err := app.Sessions.MCPServersEnabled(ctx); err != nil {
+		slog.Warn("Failed to list enabled MCP overrides; config-disabled servers stay disabled", "error", err)
+	} else {
+		for _, name := range enabled {
+			if m, ok := store.Config().MCP[name]; ok && m.Disabled {
+				forceStart = append(forceStart, name)
+			}
+		}
+	}
+	go mcp.Initialize(ctx, app.Permissions, store, forceStart...)
 
 	// Start herdr integration when running inside a herdr pane.
 	app.herdrClient = herdr.Init()
@@ -619,20 +632,30 @@ func (app *App) GetDefaultSmallModel(providerID string) config.SelectedModel {
 		return largeModelCfg
 	}
 
-	// A ChatGPT-authenticated OpenAI provider only serves the models the
+	// A subscription-authenticated provider only serves the models its
 	// subscription grants, so the default small model must come from that
-	// catalog as well.
-	if providerID == string(catwalk.InferenceProviderOpenAI) && largeModelCfg.Provider == providerID {
-		if pc, ok := cfg.Providers.Get(providerID); ok && pc.OAuthToken != nil {
-			if small := chatGPTSmallModel(pc); small != nil {
-				return config.SelectedModel{
-					Provider:        providerID,
-					Model:           small.ID,
-					MaxTokens:       small.DefaultMaxTokens,
-					ReasoningEffort: small.DefaultReasoningEffort,
+	// catalog as well. This applies to ChatGPT-authenticated OpenAI and
+	// Grok-authenticated xAI alike.
+	if largeModelCfg.Provider == providerID {
+		var pick func(config.ProviderConfig) *catwalk.Model
+		switch providerID {
+		case string(catwalk.InferenceProviderOpenAI):
+			pick = chatGPTSmallModel
+		case string(catwalk.InferenceProviderXAI):
+			pick = grokSmallModel
+		}
+		if pick != nil {
+			if pc, ok := cfg.Providers.Get(providerID); ok && pc.OAuthToken != nil {
+				if small := pick(pc); small != nil {
+					return config.SelectedModel{
+						Provider:        providerID,
+						Model:           small.ID,
+						MaxTokens:       small.DefaultMaxTokens,
+						ReasoningEffort: small.DefaultReasoningEffort,
+					}
 				}
+				return largeModelCfg
 			}
-			return largeModelCfg
 		}
 	}
 
@@ -661,6 +684,24 @@ func chatGPTSmallModel(pc config.ProviderConfig) *catwalk.Model {
 	return nil
 }
 
+// grokSmallModel picks a lightweight model from the Grok catalog,
+// preferring a "fast" or "mini" variant and falling back to the last
+// entry (the catalog lists heavier models first). Returns nil when the
+// catalog is empty.
+func grokSmallModel(pc config.ProviderConfig) *catwalk.Model {
+	for _, marker := range []string{"fast", "mini"} {
+		for i := range pc.GrokModels {
+			if strings.Contains(pc.GrokModels[i].ID, marker) {
+				return &pc.GrokModels[i]
+			}
+		}
+	}
+	if len(pc.GrokModels) > 0 {
+		return &pc.GrokModels[len(pc.GrokModels)-1]
+	}
+	return nil
+}
+
 func (app *App) setupEvents() {
 	ctx, cancel := context.WithCancel(app.globalCtx)
 	app.eventsCtx = ctx
@@ -674,6 +715,7 @@ func (app *App) setupEvents() {
 	app.subscribe(ctx, "agent-notifications", app.agentNotifications.Subscribe)
 	app.subscribeMustDeliver(ctx, "run-completions", app.runCompletions.Subscribe)
 	app.subscribe(ctx, "mcp", mcp.SubscribeEvents)
+	app.subscribe(ctx, "mcp-channels", app.subscribeScopedChannelEvents)
 	app.subscribe(ctx, "lsp", SubscribeLSPEvents)
 	if app.Skills != nil {
 		app.subscribe(ctx, "skills", app.Skills.SubscribeEvents)
@@ -685,6 +727,37 @@ func (app *App) setupEvents() {
 		return nil
 	}
 	app.cleanupFuncs = append(app.cleanupFuncs, cleanupFunc)
+}
+
+// subscribeScopedChannelEvents forwards channel message events for servers
+// this workspace both declares in its MCP config and opted in (via
+// --channels or channel_enabled; see mcp.ChannelOptIn).
+// The MCP broker is process-global and channel events carry no workspace
+// identity, so this per-app scoping is what keeps another workspace's channel
+// messages out of this app's event stream (see mcp.SubscribeChannelEvents).
+// The scoped events feed the TUI's in-process injection and, in server mode,
+// the SSE stream to attached clients.
+func (app *App) subscribeScopedChannelEvents(ctx context.Context) <-chan pubsub.Event[mcp.Event] {
+	raw := mcp.SubscribeChannelEvents(ctx)
+	scoped := make(chan pubsub.Event[mcp.Event], 64)
+	go func() {
+		defer close(scoped)
+		for ev := range raw {
+			mcpCfg, declared := app.config.Config().MCP[ev.Payload.Name]
+			if !declared {
+				continue
+			}
+			if !mcp.ChannelOptIn(mcpCfg, app.config.Overrides().EnabledChannels, ev.Payload.Name) {
+				continue
+			}
+			select {
+			case scoped <- ev:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return scoped
 }
 
 // subscribe fans a service's event stream into the shared app.events

@@ -215,6 +215,34 @@ func TestUpdateSessionUsageSkipsEstimatedCost(t *testing.T) {
 	require.True(t, currentSession.EstimatedUsage)
 }
 
+func TestUpdateSessionUsageCountsCacheTokensAsContext(t *testing.T) {
+	t.Parallel()
+
+	agent := &sessionAgent{}
+	model := Model{CatwalkCfg: catwalk.Model{CostPer1MIn: 10, CostPer1MOut: 20}}
+
+	// Steady state: most of the prompt is served from cache and the newly
+	// appended tail is written to it. All three buckets are context.
+	currentSession := &session.Session{ID: "session-id"}
+	agent.updateSessionUsage(model, currentSession, fantasy.Usage{
+		InputTokens:         100,
+		CacheReadTokens:     40_000,
+		CacheCreationTokens: 5_000,
+		OutputTokens:        10,
+	}, nil, false)
+	require.Equal(t, int64(45_100), currentSession.PromptTokens)
+
+	// Cache expired (e.g. after idling past the TTL): nothing is read and
+	// the whole prompt is re-created. The context is just as large.
+	currentSession = &session.Session{ID: "session-id"}
+	agent.updateSessionUsage(model, currentSession, fantasy.Usage{
+		InputTokens:         200,
+		CacheCreationTokens: 45_000,
+		OutputTokens:        10,
+	}, nil, false)
+	require.Equal(t, int64(45_200), currentSession.PromptTokens)
+}
+
 func TestUpdateSessionUsageKeepsCountersForZeroUsage(t *testing.T) {
 	t.Parallel()
 

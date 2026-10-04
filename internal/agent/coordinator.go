@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -377,10 +378,13 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	// the coalesce closure publishes the final outcome under that
 	// same correlator.
 	runID := RunIDFromContext(ctx)
+	channel := ChannelFromContext(ctx)
+	c.syncSessionChannel(ctx, sessionID, channel)
 	run := func() (*fantasy.AgentResult, error) {
 		return agent.Run(ctx, SessionAgentCall{
 			SessionID:         sessionID,
 			RunID:             runID,
+			Channel:           channel,
 			Prompt:            prompt,
 			HiddenUserMessage: message.HiddenUserMessage(ctx),
 			Attachments:       attachments,
@@ -420,6 +424,37 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 		MarkRunCompletePublished(ctx)
 	}
 	return result, originalErr
+}
+
+// syncSessionChannel reconciles the session's persisted channel binding with
+// the origin of the turn about to run. A channel-originated turn (re)binds
+// the session to that channel — the newest push wins — and a local turn
+// clears a stale binding, since the session is no longer channel-driven once
+// the user takes it over directly. This is the binding's whole lifecycle:
+// it is only ever a reflection of the most recent turn's origin, and the
+// column is dropped with the session row when the session is deleted, so
+// there is no separate state to reap.
+//
+// Failures are logged and the turn proceeds: the binding is provenance for
+// reply routing, not a precondition for running.
+func (c *coordinator) syncSessionChannel(ctx context.Context, sessionID, channel string) {
+	sess, err := c.sessions.Get(ctx, sessionID)
+	if err != nil {
+		// A missing session is expected (it may be created later in the
+		// run), but a real database failure would otherwise be silent.
+		if !errors.Is(err, sql.ErrNoRows) {
+			slog.Warn("Failed to load session for channel binding sync",
+				"session", sessionID, "channel", channel, "error", err)
+		}
+		return
+	}
+	if sess.Channel == channel {
+		return
+	}
+	if _, err := c.sessions.SetChannel(ctx, sessionID, channel); err != nil {
+		slog.Warn("Failed to sync session channel binding",
+			"session", sessionID, "channel", channel, "error", err)
+	}
 }
 
 // effectiveReasoningEffort returns the reasoning effort to apply for provider calls.
@@ -764,6 +799,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		IsYolo:               c.permissions.SkipRequests(),
 		Sessions:             c.sessions,
 		Messages:             c.messages,
+		Cfg:                  c.cfg,
 		Tools:                nil,
 		Notify:               c.notify,
 		RunComplete:          c.runComplete,
@@ -959,19 +995,12 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 		return Model{}, Model{}, err
 	}
 
-	var largeCatwalkModel *catwalk.Model
-	var smallCatwalkModel *catwalk.Model
-
-	for _, m := range largeProviderCfg.Models {
-		if m.ID == largeModelCfg.Model {
-			largeCatwalkModel = &m
-		}
-	}
-	for _, m := range smallProviderCfg.Models {
-		if m.ID == smallModelCfg.Model {
-			smallCatwalkModel = &m
-		}
-	}
+	// Resolve the selected model from the provider's whole catalog: an
+	// API-key model, a ChatGPT subscription model, or a Grok one. The
+	// subscription catalogs live outside Models, so looking only there
+	// strands a Grok/ChatGPT model that catwalk doesn't also publish.
+	largeCatwalkModel := c.cfg.Config().GetModel(largeModelCfg.Provider, largeModelCfg.Model)
+	smallCatwalkModel := c.cfg.Config().GetModel(smallModelCfg.Provider, smallModelCfg.Model)
 
 	if largeCatwalkModel == nil {
 		return Model{}, Model{}, errLargeModelNotFound
@@ -1401,11 +1430,12 @@ func (c *coordinator) Model() Model {
 }
 
 func (c *coordinator) UpdateModels(ctx context.Context) error {
-	// A ChatGPT login without its model catalog — the fetch at login
-	// failed, or the credentials predate it — would leave the models
-	// dialog's ChatGPT section empty. Fill it in lazily; the guard makes
-	// this a no-op once the catalog exists.
+	// A ChatGPT or Grok login without its model catalog — the fetch at
+	// login failed, or the credentials predate it — would leave the
+	// models dialog's subscription section empty. Fill it in lazily; the
+	// guards make this a no-op once a catalog exists.
 	c.cfg.RefetchOpenAIChatGPTModels(ctx)
+	c.cfg.RefetchGrokModels(ctx)
 
 	agent, name := c.activeAgent()
 	return c.updateAgentModels(ctx, agent, name)

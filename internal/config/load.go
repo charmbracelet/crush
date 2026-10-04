@@ -116,6 +116,23 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	}
 	store.knownProviders = providers
 
+	// When Catwalk refreshed its catalog this run, give the model
+	// catalogs that shadow Catwalk's the same treatment: the ChatGPT and
+	// Grok catalogs are otherwise only fetched at login and would freeze
+	// there while Catwalk keeps moving. Best effort; a failed fetch keeps
+	// the catalog loaded from config.
+	//
+	// The refetches publish a copy-on-write config, so re-read it
+	// afterwards: the mutations below must land on the live config rather
+	// than a snapshot the store has already replaced.
+	if CatwalkUpdated() {
+		fetchCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		store.refetchOpenAIModels(fetchCtx, ScopeGlobal)
+		store.refetchGrokModels(fetchCtx, ScopeGlobal)
+		cancel()
+		cfg = store.Config()
+	}
+
 	env := env.New()
 	// Configure providers
 	valueResolver := NewShellVariableResolver(env)

@@ -9,6 +9,7 @@ import (
 	mcptools "github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/gitutil"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -170,6 +171,17 @@ func (b *Backend) InitializePrompt(workspaceID string) (string, error) {
 		return "", err
 	}
 	return agent.InitializePrompt(ws.Cfg)
+}
+
+// GitBranch returns the current Git branch of the workspace's working
+// directory, or an empty string when it is not a Git repository or HEAD
+// is detached.
+func (b *Backend) GitBranch(workspaceID string) (string, error) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return "", err
+	}
+	return gitutil.CurrentBranch(ws.Cfg.WorkingDir()), nil
 }
 
 // ReadSkill reads a skill's content by ID.

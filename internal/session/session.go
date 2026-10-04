@@ -58,6 +58,7 @@ type Session struct {
 	SummaryMessageID string
 	Cost             float64
 	Todos            []Todo
+	Channel          string
 	CreatedAt        int64
 	UpdatedAt        int64
 }
@@ -71,9 +72,13 @@ type Service interface {
 	GetLast(ctx context.Context) (Session, error)
 	List(ctx context.Context) ([]Session, error)
 	Save(ctx context.Context, session Session) (Session, error)
+	SetChannel(ctx context.Context, sessionID, channel string) (Session, error)
 	UpdateTitleAndUsage(ctx context.Context, sessionID, title string, promptTokens, completionTokens int64, cost float64) error
 	Rename(ctx context.Context, id string, title string) error
 	Delete(ctx context.Context, id string) error
+	MCPDisabledServers(ctx context.Context) ([]string, error)
+	SetMCPServerDisabled(ctx context.Context, name string, disabled bool) error
+	MCPServersEnabled(ctx context.Context) ([]string, error)
 
 	// Agent tool session management
 	CreateAgentToolSessionID(messageID, toolCallID string) string
@@ -208,6 +213,10 @@ func (s *service) Save(ctx context.Context, session Session) (Session, error) {
 			String: todosJSON,
 			Valid:  todosJSON != "",
 		},
+		Channel: sql.NullString{
+			String: session.Channel,
+			Valid:  session.Channel != "",
+		},
 	})
 	if err != nil {
 		return Session{}, err
@@ -216,6 +225,23 @@ func (s *service) Save(ctx context.Context, session Session) (Session, error) {
 	s.setEstimatedUsageState(session.ID, estimatedUsage)
 	session = s.fromDBItem(dbSession)
 	session.EstimatedUsage = estimatedUsage
+	s.Publish(pubsub.UpdatedEvent, session)
+	return session, nil
+}
+
+func (s *service) SetChannel(ctx context.Context, sessionID, channel string) (Session, error) {
+	dbSession, err := s.q.SetSessionChannel(ctx, db.SetSessionChannelParams{
+		ID: sessionID,
+		Channel: sql.NullString{
+			String: channel,
+			Valid:  channel != "",
+		},
+	})
+	if err != nil {
+		return Session{}, err
+	}
+	session := s.fromDBItem(dbSession)
+	s.applyEstimatedUsageState(&session)
 	s.Publish(pubsub.UpdatedEvent, session)
 	return session, nil
 }
@@ -310,6 +336,7 @@ func (s *service) fromDBItem(item db.Session) Session {
 		SummaryMessageID: item.SummaryMessageID.String,
 		Cost:             item.Cost,
 		Todos:            todos,
+		Channel:          item.Channel.String,
 		CreatedAt:        item.CreatedAt,
 		UpdatedAt:        item.UpdatedAt,
 	}
@@ -335,6 +362,41 @@ func unmarshalTodos(data string) ([]Todo, error) {
 		return []Todo{}, err
 	}
 	return todos, nil
+}
+
+// MCPDisabledServers returns the MCP servers disabled for this
+// repository. The database is scoped to the project, so the override set
+// is shared by every session in the repository, including sub-agent
+// sessions. New repositories start empty and follow the config.
+func (s *service) MCPDisabledServers(ctx context.Context) ([]string, error) {
+	return s.q.ListMCPDisabledServers(ctx)
+}
+
+// SetMCPServerDisabled adds or removes a repository-scoped MCP override.
+// Enabling a config-disabled server also records an enabled override so the
+// runtime start survives a restart; the override is removed when the server
+// is disabled again.
+func (s *service) SetMCPServerDisabled(ctx context.Context, name string, disabled bool) error {
+	var err error
+	if disabled {
+		err = s.q.InsertMCPDisabledServer(ctx, name)
+	} else {
+		err = s.q.DeleteMCPDisabledServer(ctx, name)
+	}
+	if err != nil {
+		return err
+	}
+	if disabled {
+		return s.q.DeleteMCPEnabledServer(ctx, name)
+	}
+	return s.q.InsertMCPEnabledServer(ctx, name)
+}
+
+// MCPServersEnabled returns the MCP servers with a repository-scoped
+// enabled override: config-disabled servers the user enabled for this
+// repository. Startup force-starts them so the override survives restarts.
+func (s *service) MCPServersEnabled(ctx context.Context) ([]string, error) {
+	return s.q.ListMCPEnabledServers(ctx)
 }
 
 func NewService(q *db.Queries, conn *sql.DB) Service {

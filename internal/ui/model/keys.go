@@ -45,8 +45,6 @@ type KeyMap struct {
 		Details        key.Binding
 		TogglePills    key.Binding
 		ToggleSidebar  key.Binding
-		PillLeft       key.Binding
-		PillRight      key.Binding
 		Down           key.Binding
 		Up             key.Binding
 		UpDown         key.Binding
@@ -221,14 +219,6 @@ func DefaultKeyMap() KeyMap {
 	km.Chat.ToggleSidebar = key.NewBinding(
 		key.WithKeys("ctrl+b"),
 		key.WithHelp("ctrl+b", "toggle sidebar"),
-	)
-	km.Chat.PillLeft = key.NewBinding(
-		key.WithKeys("left"),
-		key.WithHelp("←/→", "switch section"),
-	)
-	km.Chat.PillRight = key.NewBinding(
-		key.WithKeys("right"),
-		key.WithHelp("←/→", "switch section"),
 	)
 
 	km.Chat.Down = key.NewBinding(

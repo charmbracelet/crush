@@ -41,6 +41,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
+	"github.com/charmbracelet/crush/internal/scheduler"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
 	"golang.org/x/sync/errgroup"
@@ -135,6 +136,7 @@ type Coordinator interface {
 	QueuedPrompts(sessionID string) int
 	QueuedPromptsList(sessionID string) []string
 	ClearQueue(sessionID string)
+	ListCronTasks(sessionID string) []scheduler.Task
 	Summarize(context.Context, string) error
 	Model() Model
 	UpdateModels(ctx context.Context) error
@@ -161,6 +163,14 @@ type coordinator struct {
 	mainAgent     SessionAgent
 	mainAgentName string
 	agents        map[string]SessionAgent
+
+	cronStore *scheduler.Store
+
+	// schedCancel and schedDone stop and join the cron scheduler
+	// goroutine, so Close can release the cron store's ownership lock
+	// deterministically instead of relying on process exit.
+	schedCancel context.CancelFunc
+	schedDone   chan struct{}
 
 	// Skills discovery results (session-start snapshot).
 	allSkills    []*skills.Skill // Pre-filter: all discovered after dedup.
@@ -202,6 +212,11 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	}
 	skillTracker := skills.NewTracker(activeSkills)
 
+	cronStore := scheduler.NewStore(filepath.Join(opts.Config.Config().Options.DataDirectory, "scheduled_tasks.json"))
+	if err := cronStore.Load(); err != nil {
+		slog.Error("Failed to load scheduled tasks", "error", err)
+	}
+
 	c := &coordinator{
 		cfg:          opts.Config,
 		sessions:     opts.Sessions,
@@ -214,6 +229,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		notify:       opts.Notify,
 		runComplete:  opts.RunComplete,
 		agents:       make(map[string]SessionAgent),
+		cronStore:    cronStore,
 		allSkills:    allSkills,
 		activeSkills: activeSkills,
 		skillTracker: skillTracker,
@@ -225,7 +241,13 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		return nil, errCoderAgentNotConfigured
 	}
 
-	coderPrompt, err := coderPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
+	// TODO: make this dynamic when we support multiple agents
+	// The cron tools below are registered unconditionally in buildAgent, so
+	// the matching prompt guidance is always on for the coder agent.
+	coderPrompt, err := coderPrompt(
+		prompt.WithWorkingDir(c.cfg.WorkingDir()),
+		prompt.WithScheduling(),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -254,7 +276,30 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 
 	c.mainAgent = agent
 	c.mainAgentName = config.AgentCoder
+
+	cronScheduler := scheduler.NewScheduler(c.cronStore, c.fireScheduledTask)
+	schedCtx, schedCancel := context.WithCancel(ctx)
+	c.schedCancel = schedCancel
+	c.schedDone = make(chan struct{})
+	go func() {
+		defer close(c.schedDone)
+		cronScheduler.Run(schedCtx)
+	}()
+
 	return c, nil
+}
+
+// Close stops the cron scheduler and releases the cron store's
+// ownership lock, so an explicit shutdown (or a test's TempDir cleanup,
+// which runs before process exit) does not leave a lock file handle
+// behind. It is an optional capability outside the Coordinator
+// interface: callers that need it type-assert to interface{ Close() }.
+func (c *coordinator) Close() {
+	if c.schedCancel != nil {
+		c.schedCancel()
+		<-c.schedDone
+	}
+	c.cronStore.Close()
 }
 
 // activeAgent returns the coordinator's current main agent and its config
@@ -282,6 +327,43 @@ func (c *coordinator) SetMainAgent(agentName string) error {
 	}
 	c.mainAgent = agent
 	c.mainAgentName = agentName
+	return nil
+}
+
+// transientFireRetryDelay is how long a task waits after a transient
+// fire failure (database hiccup, canceled context) before retrying.
+const transientFireRetryDelay = 30 * time.Second
+
+// fireScheduledTask runs a due scheduled task's prompt against its
+// session. The prompt is injected as a normal user turn so it respects
+// the session's busy queue: it fires between turns, never mid-response,
+// matching Claude Code's scheduler semantics.
+func (c *coordinator) fireScheduledTask(ctx context.Context, task scheduler.Task) error {
+	// A canceled context (shutdown) must never be mistaken for a dead
+	// session: the lookup below would fail with anything, and dropping
+	// durable tasks on exit would lose them.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return &scheduler.TransientError{Err: ctxErr, RetryIn: transientFireRetryDelay}
+	}
+	if _, err := c.sessions.Get(ctx, task.SessionID); err != nil {
+		// Only a session that is genuinely gone retires its tasks:
+		// leaving them behind means the scheduler retries a dead session
+		// on every fire, forever. Any other lookup failure (a brief
+		// database hiccup, a canceled context) is transient, so the task
+		// is retried instead of dropped.
+		if errors.Is(err, sql.ErrNoRows) {
+			c.cronStore.DropSession(task.SessionID)
+			return fmt.Errorf("session %s for scheduled task %s no longer exists", task.SessionID, task.ID)
+		}
+		return &scheduler.TransientError{Err: err, RetryIn: transientFireRetryDelay}
+	}
+
+	prompt := task.Prompt
+	go func() {
+		if _, err := c.run(ctx, nil, task.SessionID, prompt); err != nil {
+			slog.Error("Scheduled task run failed", "id", task.ID, "session_id", task.SessionID, "error", err)
+		}
+	}()
 	return nil
 }
 
@@ -877,6 +959,9 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.DataDirectory, c.cfg.Config().Options.Attribution, modelID),
 		tools.NewCrushInfoTool(c.cfg, c.lspManager, c.allSkills, c.activeSkills, c.skillTracker),
 		tools.NewCrushLogsTool(logFile),
+		tools.NewCronCreateTool(c.cronStore, c.permissions),
+		tools.NewCronListTool(c.cronStore),
+		tools.NewCronDeleteTool(c.cronStore),
 		tools.NewJobOutputTool(c.cfg.Config().Options.DataDirectory),
 		tools.NewJobKillTool(),
 		tools.NewDownloadTool(c.permissions, c.cfg.WorkingDir(), nil),
@@ -1415,6 +1500,11 @@ func (c *coordinator) CancelAll() {
 
 func (c *coordinator) ClearQueue(sessionID string) {
 	c.currentAgent().ClearQueue(sessionID)
+}
+
+// ListCronTasks returns the scheduled tasks belonging to sessionID.
+func (c *coordinator) ListCronTasks(sessionID string) []scheduler.Task {
+	return c.cronStore.List(sessionID)
 }
 
 func (c *coordinator) IsBusy() bool {

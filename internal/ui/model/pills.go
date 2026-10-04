@@ -3,9 +3,11 @@ package model
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/scheduler"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -19,14 +21,6 @@ const (
 	maxTaskDisplayLength = 40
 	// maxQueueDisplayLength is the maximum length of a queue item in the list.
 	maxQueueDisplayLength = 60
-)
-
-// pillSection represents which section of the pills panel is focused.
-type pillSection int
-
-const (
-	pillSectionTodos pillSection = iota
-	pillSectionQueue
 )
 
 // hasIncompleteTodos returns true if there are any non-completed todos.
@@ -62,7 +56,9 @@ func queuePill(queue int, t *styles.Styles) string {
 }
 
 // todoPill renders the todo progress pill with optional spinner and task name.
-func todoPill(todos []session.Todo, spinnerView string, panelFocused bool, t *styles.Styles) string {
+// When the panel is expanded the current task is omitted from the pill, since
+// the list below already shows it.
+func todoPill(todos []session.Todo, spinnerView string, expanded bool, t *styles.Styles) string {
 	if !hasIncompleteTodos(todos) {
 		return ""
 	}
@@ -86,7 +82,7 @@ func todoPill(todos []session.Todo, spinnerView string, panelFocused bool, t *st
 	progress := t.Pills.TodoProgress.Render(fmt.Sprintf("%d/%d", completed, total))
 
 	var content string
-	if panelFocused {
+	if expanded {
 		content = fmt.Sprintf("%s %s", label, progress)
 	} else if currentTodo != nil {
 		taskText := currentTodo.Content
@@ -129,6 +125,65 @@ func queueList(queueItems []string, t *styles.Styles) string {
 	return strings.Join(lines, "\n")
 }
 
+// cronPill renders the scheduled-task count pill. The glyph matches the
+// stopwatch used by the harness TUI for scheduled entries, not a clock
+// emoji — keeping the pills panel visually consistent with the rest of
+// the TUI's geometric icon set.
+func cronPill(tasks []scheduler.Task, t *styles.Styles) string {
+	if len(tasks) == 0 {
+		return ""
+	}
+	icon := t.Pills.QueueLabel.Render(styles.CronOneShotIcon)
+	label := t.Pills.QueueLabel.Render(fmt.Sprintf("%d Scheduled", len(tasks)))
+	content := fmt.Sprintf("%s %s", icon, label)
+	return t.Pills.Focused.Render(content)
+}
+
+// cronList renders the expanded scheduled-task list. Each item's prefix
+// glyph distinguishes recurring (↻) from one-shot (⏱) tasks so the
+// recurrence state is legible at a glance without expanding the full
+// tool-call body.
+func cronList(tasks []scheduler.Task, t *styles.Styles) string {
+	if len(tasks) == 0 {
+		return ""
+	}
+
+	var lines []string
+	for _, task := range tasks {
+		nextRun := task.NextRunAt.Local().Format("15:04")
+		if task.NextRunAt.Local().Day() != time.Now().Local().Day() {
+			nextRun = task.NextRunAt.Local().Format("Jan 2 15:04")
+		}
+		prompt := task.Prompt
+		if ansi.StringWidth(prompt) > maxQueueDisplayLength {
+			prompt = ansi.Truncate(prompt, maxQueueDisplayLength-1, "…")
+		}
+		// Recurrence is carried by the prefix glyph; repeating it inline
+		// would print ↻ twice on the same row.
+		text := fmt.Sprintf("%s %s — %s", task.ID, nextRun, prompt)
+		// The prefix glyph distinguishes recurring from one-shot tasks,
+		// keeping scheduled items visually distinct from the queued-prompt
+		// list directly above them when both sections are expanded.
+		prefix := cronItemPrefix(task, t) + " "
+		lines = append(lines, prefix+t.Pills.QueueItemText.Render(text))
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+// cronItemPrefix returns the glyph prefix for a scheduled-task list
+// item: ↻ for recurring, ⏱ for one-shot.
+func cronItemPrefix(task scheduler.Task, t *styles.Styles) string {
+	if task.Recurring {
+		// Tool.CronRecurringIcon carries no SetString — unlike the Pills
+		// styles, which do — so the glyph has to be passed in. Rendering
+		// it with no argument styles the empty string and the row loses
+		// its prefix entirely.
+		return t.Tool.CronRecurringIcon.Render(styles.CronRecurringIcon)
+	}
+	return t.Pills.CronItemPrefix.Render()
+}
+
 // pillsHeightReasonableTerminalHeight is the minimum terminal height at which
 // we auto-expand pills when there are incomplete todos.
 const pillsHeightReasonableTerminalHeight = 40
@@ -145,7 +200,7 @@ func (m *UI) autoExpandPillsIfReasonable() tea.Cmd {
 	if m.height < pillsHeightReasonableTerminalHeight {
 		return nil
 	}
-	hasPills := hasIncompleteTodos(m.session.Todos) || m.promptQueue > 0
+	hasPills := hasIncompleteTodos(m.session.Todos) || m.promptQueue > 0 || len(m.cronTasks) > 0
 	if !hasPills {
 		return nil
 	}
@@ -157,11 +212,6 @@ func (m *UI) autoExpandPillsIfReasonable() tea.Cmd {
 	}
 	m.pillsExpanded = true
 	m.pillsAutoExpanded = true
-	if hasIncompleteTodos(m.session.Todos) {
-		m.focusedPillSection = pillSectionTodos
-	} else {
-		m.focusedPillSection = pillSectionQueue
-	}
 	m.updateLayoutAndSize()
 	if m.chat.Follow() {
 		m.chat.ScrollToBottom()
@@ -174,18 +224,11 @@ func (m *UI) togglePillsExpanded() tea.Cmd {
 	if !m.hasSession() {
 		return nil
 	}
-	hasPills := hasIncompleteTodos(m.session.Todos) || m.promptQueue > 0
+	hasPills := hasIncompleteTodos(m.session.Todos) || m.promptQueue > 0 || len(m.cronTasks) > 0
 	if !hasPills {
 		return nil
 	}
 	m.pillsExpanded = !m.pillsExpanded
-	if m.pillsExpanded {
-		if hasIncompleteTodos(m.session.Todos) {
-			m.focusedPillSection = pillSectionTodos
-		} else {
-			m.focusedPillSection = pillSectionQueue
-		}
-	}
 	m.updateLayoutAndSize()
 
 	// Make sure to follow scroll if follow is enabled when toggling pills.
@@ -196,54 +239,6 @@ func (m *UI) togglePillsExpanded() tea.Cmd {
 	}
 
 	return nil
-}
-
-// switchPillSection changes focus between todo and queue sections.
-func (m *UI) switchPillSection(dir int) tea.Cmd {
-	if !m.pillsExpanded || !m.hasSession() {
-		return nil
-	}
-	hasIncompleteTodos := hasIncompleteTodos(m.session.Todos)
-	hasQueue := m.promptQueue > 0
-
-	if dir < 0 && m.focusedPillSection == pillSectionQueue && hasIncompleteTodos {
-		m.focusedPillSection = pillSectionTodos
-		m.updateLayoutAndSize()
-		return nil
-	}
-	if dir > 0 && m.focusedPillSection == pillSectionTodos && hasQueue {
-		m.focusedPillSection = pillSectionQueue
-		m.updateLayoutAndSize()
-		return nil
-	}
-	return nil
-}
-
-// effectiveFocusedSection returns the pill section that should be treated as
-// focused for rendering. The stored focusedPillSection can go stale when its
-// section loses all content (for example todos complete while the panel is open,
-// or it defaults to todos before any todos exist). In that case we fall through
-// to whichever section still has content so the expanded list stays populated.
-func (m *UI) effectiveFocusedSection() pillSection {
-	hasIncomplete := hasIncompleteTodos(m.session.Todos)
-	hasQueue := m.promptQueue > 0
-	switch m.focusedPillSection {
-	case pillSectionQueue:
-		if hasQueue {
-			return pillSectionQueue
-		}
-		if hasIncomplete {
-			return pillSectionTodos
-		}
-	default: // pillSectionTodos
-		if hasIncomplete {
-			return pillSectionTodos
-		}
-		if hasQueue {
-			return pillSectionQueue
-		}
-	}
-	return m.focusedPillSection
 }
 
 // pillsAreaHeight calculates the total height needed for the pills area.
@@ -258,22 +253,24 @@ func (m *UI) pillsAreaHeight() int {
 	}
 	hasIncomplete := hasIncompleteTodos(m.session.Todos)
 	hasQueue := m.promptQueue > 0
-	hasPills := hasIncomplete || hasQueue
+	hasCron := len(m.cronTasks) > 0
+	hasPills := hasIncomplete || hasQueue || hasCron
 	if !hasPills {
 		return 0
 	}
 
 	pillsAreaHeight := pillHeightWithBorder
 	if m.pillsExpanded {
-		switch m.effectiveFocusedSection() {
-		case pillSectionTodos:
-			if hasIncomplete {
-				pillsAreaHeight += len(m.session.Todos)
-			}
-		case pillSectionQueue:
-			if hasQueue {
-				pillsAreaHeight += m.promptQueue
-			}
+		// Every section with content expands, so the panel needs room for all
+		// of their lists stacked, not just one.
+		if hasIncomplete {
+			pillsAreaHeight += len(m.session.Todos)
+		}
+		if hasQueue {
+			pillsAreaHeight += m.promptQueue
+		}
+		if hasCron {
+			pillsAreaHeight += len(m.cronTasks)
 		}
 	}
 	return pillsAreaHeight
@@ -300,15 +297,13 @@ func (m *UI) renderPills() {
 
 	hasIncomplete := hasIncompleteTodos(m.session.Todos)
 	hasQueue := m.promptQueue > 0
+	hasCron := len(m.cronTasks) > 0
 
-	if !hasIncomplete && !hasQueue {
+	if !hasIncomplete && !hasQueue && !hasCron {
 		return
 	}
 
 	t := m.com.Styles
-	effective := m.effectiveFocusedSection()
-	todosFocused := m.pillsExpanded && effective == pillSectionTodos
-	queueFocused := m.pillsExpanded && effective == pillSectionQueue
 
 	inProgressIcon := t.Tool.TodoInProgressIcon.Render(styles.SpinnerIcon)
 	if m.todoIsSpinning {
@@ -322,20 +317,28 @@ func (m *UI) renderPills() {
 	if hasQueue {
 		pills = append(pills, queuePill(m.promptQueue, t))
 	}
+	if hasCron {
+		pills = append(pills, cronPill(m.cronTasks, t))
+	}
 
-	var expandedList string
+	// Expanding shows every section that has content, stacked in the same order
+	// as the pills above them, so the panel matches what the pills advertise.
+	var expandedSections []string
 	if m.pillsExpanded {
-		if todosFocused && hasIncomplete {
-			expandedList = todoList(m.session.Todos, inProgressIcon, t, contentWidth)
-		} else if queueFocused && hasQueue {
-			// Render from the memoized queue (fetched off-thread, see
-			// workspace_cache.go): renderPills runs on the Update/View
-			// path and must never block on a workspace round-trip.
-			if len(m.promptQueueItems) > 0 {
-				expandedList = queueList(m.promptQueueItems, t)
-			}
+		if hasIncomplete {
+			expandedSections = append(expandedSections, todoList(m.session.Todos, inProgressIcon, t, contentWidth))
+		}
+		// Render from the memoized queue (fetched off-thread, see
+		// workspace_cache.go): renderPills runs on the Update/View
+		// path and must never block on a workspace round-trip.
+		if hasQueue && len(m.promptQueueItems) > 0 {
+			expandedSections = append(expandedSections, queueList(m.promptQueueItems, t))
+		}
+		if hasCron {
+			expandedSections = append(expandedSections, cronList(m.cronTasks, t))
 		}
 	}
+	expandedList := lipgloss.JoinVertical(lipgloss.Left, expandedSections...)
 
 	if len(pills) == 0 {
 		return

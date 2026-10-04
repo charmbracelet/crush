@@ -95,32 +95,36 @@ func TestCommandsList_SelectionSkipsHeadersAndSpacers(t *testing.T) {
 	require.Equal(t, "new_session", selectedID())
 }
 
-func TestCommandsList_FilterKeepsHeadersForMatchedGroups(t *testing.T) {
+func TestCommandsList_FilterDropsHeadersAndRanksMatches(t *testing.T) {
 	t.Parallel()
 
 	l, sty := testCommandsList(t)
-	g1 := NewCommandGroup(sty, "Session",
-		NewCommandItem(sty, "new_session", "New Session", "", nil),
+	g1 := NewCommandGroup(sty, "Settings",
+		NewCommandItem(sty, "toggle_stats", "Toggle Stats", "", nil),
 	)
 	g2 := NewCommandGroup(sty, "Application",
-		NewCommandItem(sty, "quit", "Quit", "", nil).WithAliases("exit"),
+		NewCommandItem(sty, "stats", "Stats", "", nil),
 	)
 	l.SetGroups(g1, g2)
 
-	// A query matching only the second group keeps its header and drops the
-	// first group entirely.
-	l.SetFilter("quit")
+	// Searching drops the section headers and pools every section's
+	// matches into one list, best match first: "Stats" outranks "Toggle
+	// Stats" even though its section comes second.
+	l.SetFilter("stats")
 	visible := l.VisibleItems()
-	requireVisibleTypes(t, visible, &CommandGroup{}, &CommandItem{})
-	header := visible[0].(*CommandGroup)
-	require.Equal(t, "Application", header.Title)
+	requireVisibleTypes(t, visible, &CommandItem{}, &CommandItem{})
+	require.Equal(t, "stats", visible[0].(*CommandItem).ID())
+	require.Equal(t, "toggle_stats", visible[1].(*CommandItem).ID())
+
+	// Highlights are adjusted for the dropped section title prefix, so
+	// they land on the item text itself.
+	require.Equal(t, []int{0, 1, 2, 3, 4}, visible[0].(*CommandItem).m.MatchedIndexes)
 
 	// Typing a section name surfaces all of its commands.
-	l.SetFilter("session")
+	l.SetFilter("settings")
 	visible = l.VisibleItems()
-	requireVisibleTypes(t, visible, &CommandGroup{}, &CommandItem{})
-	header = visible[0].(*CommandGroup)
-	require.Equal(t, "Session", header.Title)
+	requireVisibleTypes(t, visible, &CommandItem{})
+	require.Equal(t, "toggle_stats", visible[0].(*CommandItem).ID())
 
 	// Clearing the filter restores all groups.
 	l.SetFilter("")

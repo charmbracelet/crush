@@ -1,7 +1,6 @@
 package dialog
 
 import (
-	"sort"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -14,7 +13,8 @@ import (
 // mirrors [ModelsList]: groups are flattened into the item list as section
 // headers interleaved with their items, and selection skips headers and
 // spacers. When no groups are set the list behaves like a plain filterable
-// list of commands.
+// list of commands. While filtering, the headers are dropped and matches
+// from every section are ranked by score so the best match comes first.
 type CommandsList struct {
 	*list.List
 	groups []CommandGroup
@@ -213,8 +213,10 @@ func (f *CommandsList) ScrollToSelected() {
 	}
 }
 
-// VisibleItems returns the visible items after filtering, with group headers
-// for sections that contain visible items.
+// VisibleItems returns the visible items after filtering. Without a
+// query, group headers are interleaved with their commands. With one, the
+// sections are dropped and matches from every section are ranked by match
+// score, so the best match for what the user typed is the first item.
 func (f *CommandsList) VisibleItems() []list.Item {
 	// Flat mode: no section headers, plain fuzzy filtering.
 	if f.groups == nil {
@@ -240,54 +242,46 @@ func (f *CommandsList) VisibleItems() []list.Item {
 		return items
 	}
 
+	// Pool every section's items into one ranked list. The section title is
+	// still prefixed to each item, so typing a section name surfaces all of
+	// its commands.
 	query := strings.ToLower(strings.ReplaceAll(f.query, " ", ""))
-	items := []list.Item{}
+	names := make([]string, 0, f.Len())
+	items := make([]*CommandItem, 0, f.Len())
+	prefixLens := make([]int, 0, f.Len())
 	for gi := range f.groups {
 		g := &f.groups[gi]
 		if len(g.Items) == 0 {
 			continue
 		}
-
-		// Match against the section title prefixed to each item so typing a
-		// section name surfaces all of its commands.
 		name := strings.ToLower(g.Title) + " "
-		names := make([]string, len(g.Items))
-		for i, item := range g.Items {
-			names[i] = name + item.Filter()
-		}
-
-		matches := fuzzy.Find(query, names)
-
-		// Sort by original index to preserve order within the group.
-		sort.SliceStable(matches, func(i, j int) bool {
-			return matches[i].Index < matches[j].Index
-		})
-
-		if len(matches) == 0 {
-			continue
-		}
-
-		if len(items) > 0 {
-			items = append(items, list.NewSpacerItem(1))
-		}
-		items = append(items, g)
-		for _, match := range matches {
-			item := g.Items[match.Index]
-			idxs := []int{}
-			for _, idx := range match.MatchedIndexes {
-				// Adjusts removing section title highlights.
-				if idx < len(name) {
-					continue
-				}
-				idxs = append(idxs, idx-len(name))
-			}
-			match.MatchedIndexes = idxs
-			item.SetMatch(match)
+		for _, item := range g.Items {
+			names = append(names, name+item.Filter())
 			items = append(items, item)
+			prefixLens = append(prefixLens, len(name))
 		}
 	}
 
-	return items
+	// fuzzy.Find returns matches best score first, so the best match for
+	// the query leads the list instead of its section's original order.
+	matches := fuzzy.Find(query, names)
+	visible := make([]list.Item, 0, len(matches))
+	for _, match := range matches {
+		item := items[match.Index]
+		idxs := []int{}
+		for _, idx := range match.MatchedIndexes {
+			// Adjusts removing section title highlights.
+			if idx < prefixLens[match.Index] {
+				continue
+			}
+			idxs = append(idxs, idx-prefixLens[match.Index])
+		}
+		match.MatchedIndexes = idxs
+		item.SetMatch(match)
+		visible = append(visible, item)
+	}
+
+	return visible
 }
 
 // visibleFlatItems returns the visible items for the ungrouped (flat) mode.

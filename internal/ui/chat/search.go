@@ -92,18 +92,33 @@ func NewGrepToolMessageItem(
 // GrepToolRenderContext renders grep tool messages.
 type GrepToolRenderContext struct{}
 
+// partialGrepParams recovers the grep parameters that already finished
+// streaming from a partial tool call input.
+func partialGrepParams(input string) tools.GrepParams {
+	fields := partialJSONFields(input)
+	var params tools.GrepParams
+	params.Pattern, _ = fields["pattern"].(string)
+	params.Path, _ = fields["path"].(string)
+	params.Include, _ = fields["include"].(string)
+	params.LiteralText, _ = fields["literal_text"].(bool)
+	return params
+}
+
 // RenderTool implements the [ToolRenderer] interface.
 func (g *GrepToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
 	var params tools.GrepParams
 	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
-		if opts.IsPending() {
-			// While the tool call input is still streaming it is usually
-			// incomplete and not valid JSON yet, so fall back to the plain
-			// spinner instead of showing an "Invalid parameters" error.
+		if !opts.IsPending() {
+			return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, cappedWidth)
+		}
+		// While the tool call input is still streaming it is incomplete
+		// and not valid JSON yet. Show whatever fields already arrived,
+		// or the plain spinner until the pattern is complete.
+		params = partialGrepParams(opts.ToolCall.Input)
+		if params.Pattern == "" {
 			return pendingTool(sty, "Grep", opts.Anim, opts.Compact)
 		}
-		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, cappedWidth)
 	}
 
 	toolParams := []string{params.Pattern}

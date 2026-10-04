@@ -37,15 +37,15 @@ func TestGrepToolMessageItem_PendingShowsSearchParameters(t *testing.T) {
 }
 
 // TestGrepToolMessageItem_PendingPartialInputFallsBackToSpinner guards that
-// while the tool call input is still streaming (and therefore not valid JSON
-// yet) the pending state falls back to the plain spinner instead of flashing
-// an "Invalid parameters" error.
+// while the tool call input is still streaming and no field usable for the
+// header has completed yet, the pending state falls back to the plain
+// spinner instead of flashing an "Invalid parameters" error.
 func TestGrepToolMessageItem_PendingPartialInputFallsBackToSpinner(t *testing.T) {
 	t.Parallel()
 
 	sty := styles.CharmtonePantera()
 	ctx := &GrepToolRenderContext{}
-	streamingPrefixes := []string{"", "{", `{"pattern":"fo`, `{"pattern":"fo"`}
+	streamingPrefixes := []string{"", "{", `{"pattern"`, `{"pattern":`, `{"pattern":"fo`}
 
 	for _, compact := range []bool{false, true} {
 		for _, input := range streamingPrefixes {
@@ -64,6 +64,72 @@ func TestGrepToolMessageItem_PendingPartialInputFallsBackToSpinner(t *testing.T)
 			require.Equal(t, pendingTool(&sty, "Grep", a, compact), out,
 				"pending grep with partial input %q must render the plain spinner (compact=%v)", input, compact)
 		}
+	}
+}
+
+// TestGrepToolMessageItem_PendingPartialInputShowsCompleteFields guards that
+// fields whose JSON value already closed are rendered while the rest of the
+// input is still streaming, so the search context appears progressively.
+func TestGrepToolMessageItem_PendingPartialInputShowsCompleteFields(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	ctx := &GrepToolRenderContext{}
+
+	tests := []struct {
+		name     string
+		input    string
+		contains []string
+		missing  []string
+	}{
+		{
+			name:     "pattern closed, object not",
+			input:    `{"pattern":"fo"`,
+			contains: []string{"fo"},
+			missing:  []string{"path=", "include=", "literal="},
+		},
+		{
+			name:     "path closed, object not",
+			input:    `{"pattern":"foo","path":"."`,
+			contains: []string{"foo", "path=."},
+			missing:  []string{"include=", "literal="},
+		},
+		{
+			name:     "all fields closed, closing brace missing",
+			input:    `{"pattern":"foo","path":".","include":"*.go","literal_text":true`,
+			contains: []string{"foo", "path=.", "include=*.go", "literal=true"},
+			missing:  []string{},
+		},
+		{
+			name:     "wrongly typed pattern shows no header at all",
+			input:    `{"pattern":123,"path":"."`,
+			contains: []string{"Grep"},
+			missing:  []string{"123", "path="},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			out := ansi.Strip(ctx.RenderTool(&sty, 120, &ToolRenderOpts{
+				ToolCall: message.ToolCall{
+					ID:       "grep5",
+					Name:     "grep",
+					Input:    tt.input,
+					Finished: false,
+				},
+				Status: ToolStatusRunning,
+			}))
+
+			for _, want := range tt.contains {
+				require.Contains(t, out, want)
+			}
+			for _, notWant := range tt.missing {
+				require.NotContains(t, out, notWant)
+			}
+			require.NotContains(t, out, "Invalid parameters")
+		})
 	}
 }
 

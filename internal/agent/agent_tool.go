@@ -30,10 +30,17 @@ var agentToolDescription string
 type AgentParams struct {
 	SubagentType string `json:"subagent_type,omitempty"`
 	Prompt       string `json:"prompt"`
+	Model        string `json:"model,omitempty"`
+	Provider     string `json:"provider,omitempty"`
 }
 
 const (
 	AgentToolName = "agent"
+
+	// askUserForModel ends every dispatch error caused by a requested model,
+	// so an unknown or ambiguous choice goes back to the user instead of
+	// being guessed.
+	askUserForModel = "Do not guess or fall back: ask the user which model/provider to use and wait for their answer."
 )
 
 // dispatcherTool implements fantasy.AgentTool with a dynamically-built schema.
@@ -111,7 +118,9 @@ func (c *coordinator) confirmBypassPermissions(ctx context.Context, sa *subagent
 
 // buildAgentDispatchInfo builds the ToolInfo for the agent dispatcher tool with
 // a dynamic subagent_type enum derived from the currently active subagents.
-func buildAgentDispatchInfo(activeSubagents []*subagents.Subagent) fantasy.ToolInfo {
+// models supplies the selected large/small ids named in the model parameter's
+// description as examples.
+func buildAgentDispatchInfo(activeSubagents []*subagents.Subagent, models map[config.SelectedModelType]config.SelectedModel) fantasy.ToolInfo {
 	enumValues := []string{"task"}
 	for _, sa := range activeSubagents {
 		enumValues = append(enumValues, sa.Name)
@@ -126,6 +135,14 @@ func buildAgentDispatchInfo(activeSubagents []*subagents.Subagent) fantasy.ToolI
 		typeDesc += "\n\nAvailable specialized agents:\n" + strings.Join(lines, "\n")
 	}
 
+	modelDesc := `Model for this dispatch only, overriding the agent's default: "large", "small", or a model ID from a configured provider`
+	if large, small := models[config.SelectedModelTypeLarge].Model, models[config.SelectedModelTypeSmall].Model; large != "" && small != "" {
+		modelDesc += fmt.Sprintf(" (currently large is %q and small is %q)", large, small)
+	}
+	modelDesc += ". Set it ONLY when the user explicitly asks for a model; otherwise omit it. " +
+		"If the dispatch fails because the model is unknown or ambiguous, do not guess another ID, " +
+		"drop this parameter, or do the work yourself: show the user the options from the error and wait for their choice."
+
 	return fantasy.ToolInfo{
 		Name:        AgentToolName,
 		Description: agentToolDescription,
@@ -138,6 +155,14 @@ func buildAgentDispatchInfo(activeSubagents []*subagents.Subagent) fantasy.ToolI
 			"prompt": map[string]any{
 				"type":        "string",
 				"description": "The task for the agent to perform",
+			},
+			"model": map[string]any{
+				"type":        "string",
+				"description": modelDesc,
+			},
+			"provider": map[string]any{
+				"type":        "string",
+				"description": "Provider for model. Set it only when the user names one, e.g. after choosing between providers that offer the same model ID.",
 			},
 		},
 		Required: []string{"prompt"},
@@ -210,13 +235,23 @@ func (c *coordinator) agentTool(_ context.Context, owner config.Agent) (fantasy.
 	// turn. Dispatch lookups use the live list (activeSubagentsList) so a
 	// name removed mid-turn fails cleanly and a newly added one still
 	// resolves — the enum is advisory only.
-	info := buildAgentDispatchInfo(c.activeSubagentsList())
+	info := buildAgentDispatchInfo(c.activeSubagentsList(), c.cfg.Config().Models)
 
 	return &dispatcherTool{
 		info: info,
 		dispatch: func(ctx context.Context, params AgentParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Prompt == "" {
 				return fantasy.NewTextErrorResponse("prompt is required"), nil
+			}
+			if params.Provider != "" && params.Model == "" {
+				return fantasy.NewTextErrorResponse("provider requires model. " + askUserForModel), nil
+			}
+			buildFailed := func(what string, err error) (fantasy.ToolResponse, error) {
+				msg := fmt.Sprintf("build %s: %v", what, err)
+				if params.Model != "" {
+					msg += ". " + askUserForModel
+				}
+				return fantasy.NewTextErrorResponse(msg), nil
 			}
 
 			sessionID := tools.GetSessionFromContext(ctx)
@@ -230,9 +265,21 @@ func (c *coordinator) agentTool(_ context.Context, owner config.Agent) (fantasy.
 
 			subagentType := params.SubagentType
 			if subagentType == "" || subagentType == config.AgentTask {
-				taskAgent, err := buildTaskAgent(ctx)
+				var taskAgent SessionAgent
+				var err error
+				if params.Model == "" {
+					taskAgent, err = buildTaskAgent(ctx)
+				} else {
+					// A requested model gets its own agent per dispatch; the
+					// model itself is memoized by resolveModelByID.
+					var wg errgroup.Group
+					taskAgent, err = c.buildAgent(ctx, taskPr, taskCfg, true, subagentModel{Model: params.Model, Provider: params.Provider}, &wg)
+					if err == nil {
+						err = wg.Wait()
+					}
+				}
 				if err != nil {
-					return fantasy.NewTextErrorResponse(fmt.Sprintf("build task agent: %v", err)), nil
+					return buildFailed("task agent", err)
 				}
 				return c.runSubAgent(ctx, subAgentParams{
 					Agent:          taskAgent,
@@ -284,13 +331,17 @@ func (c *coordinator) agentTool(_ context.Context, owner config.Agent) (fantasy.
 			// not start promptless/toolless, and a build failure must land
 			// here as a tool error rather than in the coordinator-wide
 			// readyWg, whose sticky error would fail every subsequent turn.
-			var buildWg errgroup.Group
-			agent, err := c.buildAgent(ctx, subPr, agentCfg, true, subagentModel{Effort: sa.Effort, Model: sa.Model, Provider: sa.Provider}, &buildWg)
-			if err != nil {
-				return fantasy.NewTextErrorResponse(fmt.Sprintf("build subagent %q: %v", sa.Name, err)), nil
+			sm := subagentModel{Effort: sa.Effort, Model: sa.Model, Provider: sa.Provider}
+			if params.Model != "" {
+				sm.Model, sm.Provider = params.Model, params.Provider
 			}
-			if err := buildWg.Wait(); err != nil {
-				return fantasy.NewTextErrorResponse(fmt.Sprintf("build subagent %q: %v", sa.Name, err)), nil
+			var buildWg errgroup.Group
+			agent, err := c.buildAgent(ctx, subPr, agentCfg, true, sm, &buildWg)
+			if err == nil {
+				err = buildWg.Wait()
+			}
+			if err != nil {
+				return buildFailed(fmt.Sprintf("subagent %q", sa.Name), err)
 			}
 
 			return c.runSubAgent(ctx, subAgentParams{

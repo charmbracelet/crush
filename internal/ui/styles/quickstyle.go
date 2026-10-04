@@ -1053,6 +1053,18 @@ func quickStyle(o quickStyleOpts) Styles {
 		BorderForeground(o.plan).
 		Padding(1, 2)
 
+	// Compaction section styles. A checkpoint is not a reply, and the box is
+	// how the transcript says so; info rather than plan's hue keeps the two
+	// cards distinguishable when a plan gets summarized later.
+	s.Messages.CompactionBox = lipgloss.NewStyle().
+		Foreground(o.fgBase).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(o.info).
+		Padding(1, 2)
+	s.Messages.CompactionHeader = lipgloss.NewStyle().
+		Foreground(o.info).Bold(true)
+	s.Messages.CompactionNote = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
+
 	// Thinking section styles
 	s.Messages.ThinkingBox = subtle.Background(o.bgLeastVisible)
 	s.Messages.ThinkingTruncationHint = muted

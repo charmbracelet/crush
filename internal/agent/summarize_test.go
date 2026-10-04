@@ -107,7 +107,7 @@ func TestSummarizeKeepsRecentTurnsVerbatim(t *testing.T) {
 	require.True(t, view[0].IsSummaryMessage)
 	require.Equal(t, message.User, view[0].Role)
 	require.Contains(t, view[0].Content().Text, "the new checkpoint")
-	require.Contains(t, view[0].Content().Text, "<compaction_info>")
+	require.Contains(t, view[0].Content().Text, `<compaction_info replaced_messages=`)
 	require.NotContains(t, view[0].Content().Text, "Full text of the replaced region",
 		"no pointer is promised when no transcript was written")
 
@@ -137,7 +137,7 @@ func TestSummarizeMergesThePreviousCheckpoint(t *testing.T) {
 	require.Contains(t, model.calls[1], "<previous_checkpoint>",
 		"an existing checkpoint is merged, not compressed a second time")
 	require.Contains(t, model.calls[1], "checkpoint one")
-	require.NotContains(t, model.calls[1], "<compaction_info>",
+	require.NotContains(t, model.calls[1], "<compaction_info",
 		"generated bookkeeping is not fed back to the model as prose")
 }
 

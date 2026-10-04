@@ -537,6 +537,53 @@ func pendingTool(sty *styles.Styles, name string, anim *anim.Anim, nested bool) 
 	return fmt.Sprintf("%s %s %s", icon, toolName, animView)
 }
 
+// partialJSONFields extracts every complete top-level scalar field of a
+// JSON object that may be cut off mid-stream, e.g. while a tool call
+// input is still being streamed. The value currently streaming is
+// omitted; it appears once its closing quote arrives. Nested objects
+// and arrays are skipped: tool parameter schemas are flat.
+func partialJSONFields(input string) map[string]any {
+	fields := make(map[string]any)
+	dec := json.NewDecoder(strings.NewReader(input))
+	var key string
+	depth := 0
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return fields
+		}
+		switch v := tok.(type) {
+		case json.Delim:
+			if v == '{' || v == '[' {
+				depth++
+			} else {
+				depth--
+				if depth == 1 {
+					// A nested value of the top-level object just closed;
+					// drop its dangling key so the next key/value pair stays
+					// in sync.
+					key = ""
+				}
+			}
+		case string:
+			if depth != 1 {
+				continue
+			}
+			if key == "" {
+				key = v
+			} else {
+				fields[key] = v
+				key = ""
+			}
+		default:
+			if depth == 1 && key != "" {
+				fields[key] = v
+				key = ""
+			}
+		}
+	}
+}
+
 // toolEarlyStateContent handles error/cancelled/pending states before content rendering.
 // Returns the rendered output and true if early state was handled.
 func toolEarlyStateContent(sty *styles.Styles, opts *ToolRenderOpts, width int) (string, bool) {

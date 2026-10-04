@@ -450,6 +450,12 @@ func (w *ClientWorkspace) QuestionCancel() bool {
 	return cancelled
 }
 
+// PersistShellCommand is unsupported in remote mode: the session database
+// lives on the server.
+func (w *ClientWorkspace) PersistShellCommand(_ context.Context, _, _, _ string, _ int) error {
+	return errors.New("interactive shell is only available in local mode")
+}
+
 // -- FileTracker --
 
 func (w *ClientWorkspace) FileTrackerRecordRead(ctx context.Context, sessionID, path string) {

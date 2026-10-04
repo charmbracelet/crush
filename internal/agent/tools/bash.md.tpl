@@ -45,6 +45,11 @@ Common shell builtins and core utils available on Windows.
   * Short-lived scripts
 </background_execution>
 
+<interactive_execution>
+- Commands that need a terminal (prompts for input, logins, passwords,
+  confirmations, or full-screen TUIs) belong in the terminal tool, not here.
+</interactive_execution>
+
 <git_message_quality>
 These rules apply whenever creating or updating commit messages, PR titles, or PR bodies:
 

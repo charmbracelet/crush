@@ -52,8 +52,10 @@ func TestSessionChannelPersists(t *testing.T) {
 	t.Parallel()
 	dataDir := t.TempDir()
 	t.Cleanup(func() {
+		// Release only this test's pooled connection; a global
+		// db.ResetPool() here would close the databases of tests still
+		// running in parallel.
 		require.NoError(t, db.Release(dataDir))
-		db.ResetPool()
 	})
 
 	conn, err := db.Connect(t.Context(), dataDir)
@@ -142,4 +144,36 @@ func TestEstimatedUsageStateCanBeClearedByExplicitSave(t *testing.T) {
 	refetched, err := sessions.Get(t.Context(), created.ID)
 	require.NoError(t, err)
 	require.False(t, refetched.EstimatedUsage)
+}
+
+func TestSaveDoesNotClobberChannelBinding(t *testing.T) {
+	t.Parallel()
+	dataDir := t.TempDir()
+	t.Cleanup(func() {
+		// Release only this test's pooled connection; a global
+		// db.ResetPool() here would close the databases of tests still
+		// running in parallel.
+		require.NoError(t, db.Release(dataDir))
+	})
+
+	conn, err := db.Connect(t.Context(), dataDir)
+	require.NoError(t, err)
+	sessions := NewService(db.New(conn), conn)
+
+	created, err := sessions.Create(t.Context(), "channel")
+	require.NoError(t, err)
+	_, err = sessions.SetChannel(t.Context(), created.ID, "signal")
+	require.NoError(t, err)
+
+	// A fetch-modify-Save cycle whose snapshot predates the binding
+	// must not clear it: UpdateSession no longer writes the channel,
+	// SetSessionChannel owns it.
+	created.Title = "renamed"
+	saved, err := sessions.Save(t.Context(), created)
+	require.NoError(t, err)
+	require.Equal(t, "renamed", saved.Title)
+
+	fetched, err := sessions.Get(t.Context(), created.ID)
+	require.NoError(t, err)
+	require.Equal(t, "signal", fetched.Channel)
 }

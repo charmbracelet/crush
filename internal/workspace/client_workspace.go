@@ -237,11 +237,17 @@ func (w *ClientWorkspace) AgentRun(ctx context.Context, sessionID, prompt string
 	// completion detection (it observes message events directly),
 	// so passing an empty RunID is correct here: it skips the
 	// correlator stamping path without functional consequences.
-	return w.client.SendMessage(ctx, w.workspaceID(), sessionID, "", "", prompt, attachments...)
+	return w.client.SendMessage(ctx, w.workspaceID(), sessionID, "", prompt, attachments...)
 }
 
+// AgentRunChannel is unreachable in client/server mode: the TUI skips
+// local injection when the workspace routes channel events itself, so
+// the server's injection path owns every channel-originated turn.
+// Returning an error rather than sending the channel over the wire
+// keeps the channel binding of a run server-side only — a client must
+// not be able to mark its own turn as channel-originated.
 func (w *ClientWorkspace) AgentRunChannel(ctx context.Context, channel, sessionID, prompt string, attachments ...message.Attachment) error {
-	return w.client.SendMessage(ctx, w.workspaceID(), sessionID, "", channel, prompt, attachments...)
+	return errors.New("channel-originated runs are injected server-side in client/server mode")
 }
 
 func (w *ClientWorkspace) AgentRunShellCommand(ctx context.Context, sessionID, command string, termWidth int, _ func(string), _ bool) (proto.ShellCommandResponse, error) {
@@ -684,8 +690,10 @@ func (w *ClientWorkspace) MCPGetStates() map[string]mcp.ClientInfo {
 				Prompts:   v.PromptCount,
 				Resources: v.ResourceCount,
 			},
-			ConnectedAt: v.ConnectedAt,
-			Channel:     v.Channel,
+			ConnectedAt:    v.ConnectedAt,
+			Channel:        v.Channel,
+			ChannelOptIn:   v.ChannelOptIn,
+			ChannelCapable: v.ChannelCapable,
 		}
 	}
 	return result

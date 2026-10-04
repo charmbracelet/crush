@@ -22,18 +22,18 @@ func TestStoreOwnershipIsExclusive(t *testing.T) {
 
 	path := filepath.Join(t.TempDir(), "scheduled_tasks.json")
 
-	owner := NewStore(path)
+	owner := durableStore(t, path)
 	require.NoError(t, owner.Load())
 	require.True(t, owner.Owner(), "the first store must own firing")
 
-	second := NewStore(path)
+	second := durableStore(t, path)
 	require.NoError(t, second.Load())
 	require.False(t, second.Owner(), "a second store must not own firing")
 
 	owner.Close()
 	require.False(t, owner.Owner())
 
-	third := NewStore(path)
+	third := durableStore(t, path)
 	require.NoError(t, third.Load())
 	require.True(t, third.Owner(), "ownership must transfer after release")
 }
@@ -48,14 +48,14 @@ func TestNonOwnerSkipsDurableTasks(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "scheduled_tasks.json")
 	clock := &dueClock{t: time.Date(2026, 10, 2, 10, 30, 0, 0, time.Local)}
 
-	owner := NewStore(path)
+	owner := durableStore(t, path)
 	owner.now = clock.now
 	require.NoError(t, owner.Load())
 
 	_, err := owner.Create("s1", "* * * * *", "durable task", true, true)
 	require.NoError(t, err)
 
-	second := NewStore(path)
+	second := durableStore(t, path)
 	second.now = clock.now
 	require.NoError(t, second.Load())
 	require.False(t, second.Owner())
@@ -94,12 +94,12 @@ func TestConcurrentStoresMergeWrites(t *testing.T) {
 
 	path := filepath.Join(t.TempDir(), "scheduled_tasks.json")
 
-	owner := NewStore(path)
+	owner := durableStore(t, path)
 	require.NoError(t, owner.Load())
 	task1, err := owner.Create("s1", "* * * * *", "owner task", true, true)
 	require.NoError(t, err)
 
-	second := NewStore(path)
+	second := durableStore(t, path)
 	require.NoError(t, second.Load())
 	_, err = second.Create("s2", "0 9 * * *", "second window task", true, true)
 	require.NoError(t, err)
@@ -129,13 +129,13 @@ func TestDeletionPropagatesToOwner(t *testing.T) {
 
 	path := filepath.Join(t.TempDir(), "scheduled_tasks.json")
 
-	owner := NewStore(path)
+	owner := durableStore(t, path)
 	require.NoError(t, owner.Load())
 	task, err := owner.Create("s1", "* * * * *", "delete me", true, true)
 	require.NoError(t, err)
 	taskID := task.ID
 
-	second := NewStore(path)
+	second := durableStore(t, path)
 	require.NoError(t, second.Load())
 	_, err = second.Delete("s1", taskID)
 	require.NoError(t, err)

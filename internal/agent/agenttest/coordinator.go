@@ -7,6 +7,7 @@ package agenttest
 
 import (
 	"context"
+	"testing"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy/providers/openaicompat"
@@ -32,11 +33,14 @@ import (
 // notify, runComplete, skills) are nil: run guards the publisher fields
 // and the cancel-on-entry path never touches the others.
 func NewCoordinator(
+	t *testing.T,
 	ctx context.Context,
 	workingDir string,
 	sessions session.Service,
 	messages message.Service,
 ) (agent.Coordinator, error) {
+	t.Helper()
+
 	cfg, err := config.Init(workingDir, "", false)
 	if err != nil {
 		return nil, err
@@ -64,10 +68,23 @@ func NewCoordinator(
 	coderCfg.AllowedTools = nil
 	cfg.Config().Agents[config.AgentCoder] = coderCfg
 
-	return agent.NewCoordinator(ctx, agent.CoordinatorOptions{
+	coord, err := agent.NewCoordinator(ctx, agent.CoordinatorOptions{
 		Config:      cfg,
 		Sessions:    sessions,
 		Messages:    messages,
 		Permissions: permission.NewPermissionService(workingDir, true, nil),
 	})
+	if err != nil {
+		return nil, err
+	}
+
+	// The coordinator's cron store holds an open handle on its
+	// ownership-lock file for the process lifetime, and on Windows an
+	// open handle blocks deleting the file. Release it before the
+	// caller's TempDir cleanup runs.
+	if closer, ok := coord.(interface{ Close() }); ok {
+		t.Cleanup(closer.Close)
+	}
+
+	return coord, nil
 }

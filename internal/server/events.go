@@ -197,15 +197,23 @@ func sessionScopedEventID(ev any) (string, bool) {
 // and broadcasting it to every client in the workspace lets sessions
 // steal each other's prompts. Prompts raised by sub-agent sessions
 // (agent tool, agentic fetch) resolve to the top-level session so the
-// viewer of the parent session can answer them. Clients that have
-// reported no current session (e.g. the landing screen) receive no
-// prompts. All other events are delivered unfiltered.
+// viewer of the parent session can answer them. Clients on the landing
+// screen (an explicitly cleared session) receive no prompts, while
+// clients that never reported a session at all (e.g. API clients
+// predating session reporting) fail open so their prompts are not
+// stranded. All other events are delivered unfiltered.
 func (c *controllerV1) deliverToClient(ctx context.Context, workspaceID, clientID string, ev any) bool {
 	sessionID, scoped := sessionScopedEventID(ev)
 	if !scoped {
 		return true
 	}
-	current := c.backend.ClientCurrentSession(workspaceID, clientID)
+	current, reported := c.backend.ClientCurrentSession(workspaceID, clientID)
+	if !reported {
+		// The client never reported a current session, so there is
+		// nothing to scope against. Fail open rather than stranding a
+		// prompt nobody can answer.
+		return true
+	}
 	if current == "" {
 		return false
 	}

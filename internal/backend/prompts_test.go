@@ -54,19 +54,29 @@ func TestClientCurrentSession(t *testing.T) {
 	t.Parallel()
 	b, ws, _ := newPromptsTestBackend(t)
 
-	require.Empty(t, b.ClientCurrentSession("no-such-workspace", "cid"), "unknown workspace")
+	current, reported := b.ClientCurrentSession("no-such-workspace", "cid")
+	require.Empty(t, current, "unknown workspace")
+	require.False(t, reported, "unknown workspace")
 
 	cid := uuid.New().String()
-	require.Empty(t, b.ClientCurrentSession(ws.ID, cid), "unknown client")
+	current, reported = b.ClientCurrentSession(ws.ID, cid)
+	require.Empty(t, current, "unknown client")
+	require.False(t, reported, "unknown client")
 
 	require.NoError(t, b.AttachClient(ws.ID, cid))
-	require.Empty(t, b.ClientCurrentSession(ws.ID, cid), "no session reported yet")
+	current, reported = b.ClientCurrentSession(ws.ID, cid)
+	require.Empty(t, current, "no session reported yet")
+	require.False(t, reported, "no session reported yet")
 
 	require.NoError(t, b.SetCurrentSession(t.Context(), ws.ID, cid, "S1"))
-	require.Equal(t, "S1", b.ClientCurrentSession(ws.ID, cid))
+	current, reported = b.ClientCurrentSession(ws.ID, cid)
+	require.Equal(t, "S1", current)
+	require.True(t, reported)
 
 	require.NoError(t, b.SetCurrentSession(t.Context(), ws.ID, cid, ""))
-	require.Empty(t, b.ClientCurrentSession(ws.ID, cid), "cleared session")
+	current, reported = b.ClientCurrentSession(ws.ID, cid)
+	require.Empty(t, current, "cleared session")
+	require.True(t, reported, "clearing the selection is still a report")
 }
 
 func TestRootSessionID(t *testing.T) {

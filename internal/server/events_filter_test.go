@@ -114,6 +114,20 @@ func TestDeliverToClient(t *testing.T) {
 		}
 	})
 
+	t.Run("client that never reported a session fails open", func(t *testing.T) {
+		t.Parallel()
+		c := newTestController()
+		ws := installSyntheticWorkspace(t, c)
+		cid := uuid.New().String()
+		require.NoError(t, c.backend.AttachClient(ws.ID, cid))
+		t.Cleanup(func() { c.backend.DetachClient(ws.ID, cid) })
+		// Intentionally no SetCurrentSession: clients that predate
+		// session reporting must still receive their prompts.
+		for _, ev := range []any{permReq, permNotif, qReq, qNotif} {
+			require.True(t, c.deliverToClient(t.Context(), ws.ID, cid, ev), "%T must reach a never-reporting client", ev)
+		}
+	})
+
 	t.Run("unscoped events always pass", func(t *testing.T) {
 		t.Parallel()
 		c, ws, cidA, cidB := deliverFixture(t)

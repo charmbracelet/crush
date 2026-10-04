@@ -151,6 +151,11 @@ type Backend struct {
 //     viewing. Empty string means the client has no session selected
 //     (e.g. the landing screen). Cleared automatically when the
 //     clientState entry is removed.
+//   - sessionReported records whether the client has ever reported a
+//     current session via [Backend.SetCurrentSession]. Clients that
+//     never report one (e.g. API clients predating session reporting)
+//     are indistinguishable from landing-screen clients by session ID
+//     alone; this flag lets the SSE filter fail open for them.
 //   - released marks that the client gave up its claim explicitly while
 //     streams were still open, which a clean exit does. The final stream
 //     detach then tears down immediately instead of waiting out the
@@ -163,6 +168,7 @@ type clientState struct {
 	streams          int
 	holdTimer        *time.Timer
 	currentSessionID string
+	sessionReported  bool
 	released         bool
 }
 
@@ -701,16 +707,16 @@ func (b *Backend) registerClient(ws *Workspace, clientID string) {
 			return
 		}
 		old.holdTimer.Stop()
-		ws.clients[clientID] = b.newHeldClient(ws, clientID, old.currentSessionID, b.createGrace)
+		ws.clients[clientID] = b.newHeldClient(ws, clientID, old.currentSessionID, old.sessionReported, b.createGrace)
 		return
 	}
-	ws.clients[clientID] = b.newHeldClient(ws, clientID, "", b.createGrace)
+	ws.clients[clientID] = b.newHeldClient(ws, clientID, "", false, b.createGrace)
 }
 
 // newHeldClient builds a clientState whose claim is held only by a timer
 // that releases it after grace. Callers must hold ws.clientsMu.
-func (b *Backend) newHeldClient(ws *Workspace, clientID, sessionID string, grace time.Duration) *clientState {
-	cs := &clientState{currentSessionID: sessionID}
+func (b *Backend) newHeldClient(ws *Workspace, clientID, sessionID string, reported bool, grace time.Duration) *clientState {
+	cs := &clientState{currentSessionID: sessionID, sessionReported: reported}
 	cs.holdTimer = time.AfterFunc(grace, func() {
 		b.expireHold(ws, clientID, cs)
 	})
@@ -943,6 +949,7 @@ func (b *Backend) SetCurrentSession(ctx context.Context, workspaceID, clientID, 
 		return ErrClientNotAttached
 	}
 	cs.currentSessionID = sessionID
+	cs.sessionReported = true
 	ws.clientsMu.Unlock()
 
 	// A prompt that was raised while no client viewed the session
@@ -958,19 +965,23 @@ func (b *Backend) SetCurrentSession(ctx context.Context, workspaceID, clientID, 
 
 // ClientCurrentSession returns the session the given client is
 // currently viewing within the workspace, or "" when the client has
-// no session selected (e.g. the landing screen) or is unknown.
-func (b *Backend) ClientCurrentSession(workspaceID, clientID string) string {
+// no session selected (e.g. the landing screen) or is unknown. The
+// second return value reports whether the client has ever reported a
+// session: a client that never did (e.g. an API client predating
+// session reporting) is treated differently from one that explicitly
+// cleared its selection.
+func (b *Backend) ClientCurrentSession(workspaceID, clientID string) (string, bool) {
 	ws, ok := b.workspaces.Get(workspaceID)
 	if !ok {
-		return ""
+		return "", false
 	}
 	ws.clientsMu.Lock()
 	defer ws.clientsMu.Unlock()
 	cs, ok := ws.clients[clientID]
 	if !ok {
-		return ""
+		return "", false
 	}
-	return cs.currentSessionID
+	return cs.currentSessionID, cs.sessionReported
 }
 
 // AttachedClients returns the number of clients currently viewing

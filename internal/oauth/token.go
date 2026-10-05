@@ -1,6 +1,8 @@
 package oauth
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -67,8 +69,87 @@ func (t *Token) SetExpiresAt() {
 // uses a buffer of max(expires_in/10, minRefreshBuffer) seconds to
 // trigger proactive refresh before the token actually expires.
 func (t *Token) IsExpired() bool {
-	buffer := max(int64(t.ExpiresIn)/10, minRefreshBuffer)
-	return time.Now().Unix() >= (t.ExpiresAt - buffer)
+	return time.Now().Unix() >= (t.ExpiresAt - t.refreshBuffer())
+}
+
+// aheadRefreshMultiplier widens the expiry buffer to open a window in
+// which a credential is renewed early, before anything is waiting on it.
+// Inside that window the current token is still perfectly good, so the
+// renewal runs off the critical path; only once the token crosses the
+// IsExpired line does a turn have to stop and wait for one.
+//
+// Renewing early also keeps sessions from converging on the same moment.
+// Providers that rotate refresh tokens retire the old one on every
+// exchange, so two sessions that both wait for expiry and then exchange
+// race to present the same credential, and the loser's is already dead.
+const aheadRefreshMultiplier = 2
+
+// ShouldRefreshAhead reports whether the token is near enough to its
+// refresh deadline to be worth renewing now, while it is still usable.
+// Callers renew in the background and carry on with the current token,
+// so a turn only ever waits on an exchange when this window was missed.
+func (t *Token) ShouldRefreshAhead() bool {
+	if t.IsExpired() {
+		return false
+	}
+	return time.Now().Unix() >= (t.ExpiresAt - t.refreshBuffer()*aheadRefreshMultiplier)
+}
+
+// Fingerprint identifies a refresh token in logs without disclosing it: the
+// first six bytes of its SHA-256, hex encoded. Enough to tell one credential
+// from another, and to follow one across processes and restarts, which is
+// how a rotation lost between the exchange and the write to disk becomes
+// visible. Returns "none" when there is no refresh token to name.
+func (t *Token) Fingerprint() string {
+	if t == nil || t.RefreshToken == "" {
+		return "none"
+	}
+	return FingerprintSecret(t.RefreshToken)
+}
+
+// FingerprintSecret names a secret for logs without disclosing it.
+func FingerprintSecret(secret string) string {
+	if secret == "" {
+		return "none"
+	}
+	sum := sha256.Sum256([]byte(secret))
+	return hex.EncodeToString(sum[:6])
+}
+
+// ExpiresInSeconds reports how long the access token has left, negative once
+// it has lapsed. Logged at decision points so a session that refuses to
+// refresh can be told apart from one that never looked.
+func (t *Token) ExpiresInSeconds() int64 {
+	if t == nil {
+		return 0
+	}
+	return t.ExpiresAt - time.Now().Unix()
+}
+
+// refreshBuffer is how long before actual expiry a token is treated as
+// needing renewal.
+func (t *Token) refreshBuffer() int64 {
+	return max(int64(t.ExpiresIn)/10, minRefreshBuffer)
+}
+
+// JustIssued reports whether the provider minted this token within the
+// given window, derived from its stated lifetime.
+//
+// It answers "has an exchange already happened here a moment ago", which
+// is what separates a credential worth renewing from one that several
+// independent triggers are all reacting to at once. A provider that
+// rotates refresh tokens retires the previous one on every exchange, so
+// renewing a credential that is seconds old gains nothing and costs the
+// peers still carrying its predecessor.
+//
+// A token that does not state a lifetime has no issue time to reason
+// about, so it is never considered fresh.
+func (t *Token) JustIssued(window time.Duration) bool {
+	if t == nil || t.ExpiresIn <= 0 || t.ExpiresAt <= 0 {
+		return false
+	}
+	age := time.Since(time.Unix(t.ExpiresAt-int64(t.ExpiresIn), 0))
+	return age >= 0 && age < window
 }
 
 // SetExpiresIn calculates and sets the ExpiresIn field based on the ExpiresAt field.

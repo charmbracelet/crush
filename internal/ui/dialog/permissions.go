@@ -517,14 +517,8 @@ func (p *Permissions) renderKeyValue(key, value string, width int) string {
 func (p *Permissions) renderToolName(width int) string {
 	toolName := p.permission.ToolName
 
-	// Check if this is an MCP tool (format: mcp_<mcpname>_<toolname>).
-	if strings.HasPrefix(toolName, "mcp_") {
-		parts := strings.SplitN(toolName, "_", 3)
-		if len(parts) == 3 {
-			mcpName := prettyName(parts[1])
-			toolPart := prettyName(parts[2])
-			toolName = fmt.Sprintf("%s %s %s", mcpName, styles.ArrowRightIcon, toolPart)
-		}
+	if server, tool, ok := tools.ParseMCPToolName(toolName); ok {
+		toolName = fmt.Sprintf("%s %s %s", prettyName(server), styles.ArrowRightIcon, prettyName(tool))
 	}
 
 	return p.renderKeyValue("Tool", toolName, width)

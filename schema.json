@@ -29,6 +29,140 @@
       "additionalProperties": false,
       "type": "object"
     },
+    "AuthSpec": {
+      "properties": {
+        "kind": {
+          "type": "string",
+          "description": "Authentication mode",
+          "default": "oauth"
+        },
+        "flow": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "browser",
+            "device"
+          ],
+          "description": "OAuth flow to run",
+          "default": "auto"
+        },
+        "issuer": {
+          "type": "string",
+          "format": "uri",
+          "description": "Authorization server issuer URL",
+          "examples": [
+            "https://auth.example.com"
+          ]
+        },
+        "client_id": {
+          "type": "string",
+          "description": "OAuth client ID"
+        },
+        "client_secret": {
+          "type": "string",
+          "description": "OAuth client secret"
+        },
+        "scopes": {
+          "items": {
+            "type": "string",
+            "examples": [
+              "offline_access"
+            ]
+          },
+          "type": "array",
+          "description": "OAuth scopes to request"
+        },
+        "authorize_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Authorization endpoint URL"
+        },
+        "token_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Token endpoint URL"
+        },
+        "device_auth_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Device authorization endpoint URL (RFC 8628)"
+        },
+        "redirect_uri": {
+          "type": "string",
+          "description": "Loopback redirect URI for the browser flow",
+          "examples": [
+            "http://127.0.0.1:8979/callback"
+          ]
+        },
+        "callback_port": {
+          "type": "integer",
+          "description": "Loopback callback port for the browser flow"
+        },
+        "extra_params": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object",
+          "description": "Extra parameters added to the authorization request"
+        },
+        "token_headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object",
+          "description": "HTTP headers sent to the token endpoint"
+        },
+        "token_encoding": {
+          "type": "string",
+          "description": "How token requests are encoded",
+          "default": "form"
+        },
+        "client_secret_basic": {
+          "type": "boolean",
+          "description": "Send client credentials using HTTP Basic auth instead of in the request body"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "CatalogSpec": {
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Endpoint listing the provider's models",
+          "examples": [
+            "https://api.example.com/v1/models"
+          ]
+        },
+        "method": {
+          "type": "string",
+          "description": "HTTP method for the catalog request",
+          "default": "GET"
+        },
+        "body": {
+          "type": "string",
+          "description": "Request body for the catalog call"
+        },
+        "program": {
+          "type": "string",
+          "description": "jq program reading the listing into model objects"
+        },
+        "headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object",
+          "description": "Headers sent only with the catalog request"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "url",
+        "program"
+      ]
+    },
     "Completions": {
       "properties": {
         "max_depth": {
@@ -110,6 +244,28 @@
       },
       "additionalProperties": false,
       "type": "object"
+    },
+    "GatewaySpec": {
+      "properties": {
+        "request": {
+          "type": "string",
+          "description": "jq program rewriting each request"
+        },
+        "response": {
+          "type": "string",
+          "description": "jq program rewriting each response or stream event"
+        },
+        "http1": {
+          "type": "boolean",
+          "description": "Force HTTP/1.1 instead of negotiating HTTP/2"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "request",
+        "response"
+      ]
     },
     "HookConfig": {
       "properties": {
@@ -731,6 +887,22 @@
           "$ref": "#/$defs/Token",
           "description": "OAuth2 token for authentication with the provider"
         },
+        "auth": {
+          "$ref": "#/$defs/AuthSpec",
+          "description": "OAuth configuration that lets crush login authenticate this provider"
+        },
+        "usage": {
+          "$ref": "#/$defs/UsageSpec",
+          "description": "Endpoint that reports the quota remaining on this provider's plan"
+        },
+        "gateway": {
+          "$ref": "#/$defs/GatewaySpec",
+          "description": "jq programs rewriting requests and responses to the provider's wire format"
+        },
+        "catalog": {
+          "$ref": "#/$defs/CatalogSpec",
+          "description": "Endpoint and jq program that read the provider's model catalog"
+        },
         "disable": {
           "type": "boolean",
           "description": "Whether this provider is disabled",
@@ -1008,6 +1180,96 @@
       },
       "additionalProperties": false,
       "type": "object"
+    },
+    "UsageSpec": {
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "URL of the endpoint that reports remaining quota",
+          "examples": [
+            "https://api.example.com/v1internal:retrieveUserQuotaSummary"
+          ]
+        },
+        "method": {
+          "type": "string",
+          "description": "HTTP method for the quota request",
+          "default": "GET"
+        },
+        "body": {
+          "type": "string",
+          "description": "Request body for the quota call"
+        },
+        "groups": {
+          "type": "string",
+          "description": "gjson path to the groups holding the meters",
+          "examples": [
+            "groups"
+          ]
+        },
+        "group_label": {
+          "type": "string",
+          "description": "Field naming each group",
+          "default": "displayName"
+        },
+        "meters": {
+          "type": "string",
+          "description": "gjson path to the meters",
+          "default": "buckets",
+          "examples": [
+            "buckets"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "description": "Label for meters that carry no label",
+          "default": "Remaining",
+          "examples": [
+            "Credits"
+          ]
+        },
+        "window": {
+          "type": "string",
+          "description": "Field carrying a short tag for the meter",
+          "default": "window"
+        },
+        "model_groups": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object",
+          "description": "Model id prefix to group label mapping"
+        },
+        "label": {
+          "type": "string",
+          "description": "Field naming each meter",
+          "default": "displayName"
+        },
+        "remaining": {
+          "type": "string",
+          "description": "Field carrying the fraction or amount left",
+          "default": "remainingFraction"
+        },
+        "reset": {
+          "type": "string",
+          "description": "Field carrying the RFC 3339 reset time",
+          "examples": [
+            "resetTime"
+          ]
+        },
+        "spent_percent": {
+          "type": "string",
+          "description": "Field carrying the percentage of the allowance already used",
+          "examples": [
+            "percent"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "url"
+      ]
     }
   }
 }

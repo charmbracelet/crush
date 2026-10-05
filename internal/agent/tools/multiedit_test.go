@@ -37,6 +37,8 @@ func (m *mockPermissionService) ActiveRequest() (permission.PermissionRequest, b
 	return permission.PermissionRequest{}, false
 }
 
+func (m *mockPermissionService) IsSessionAutoApproved(sessionID string) bool { return false }
+
 func (m *mockPermissionService) SetSkipRequests(skip bool) {}
 
 func (m *mockPermissionService) SkipRequests() bool {

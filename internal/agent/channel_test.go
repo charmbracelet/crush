@@ -7,6 +7,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/db"
+	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/stretchr/testify/require"
 )
@@ -36,6 +37,13 @@ func TestFilterToolsForChannel(t *testing.T) {
 
 	// A different channel's turn does not see signal's tools.
 	other := filterToolsForChannel([]fantasy.AgentTool{channelTool, plainTool}, "switchboard", states)
+	require.Len(t, other, 1)
+	require.Equal(t, "plain", other[0].Info().Name)
+
+	// A hook-wrapped MCP tool is still recognized as belonging to its
+	// server.
+	wrapped := wrapToolsWithHooks([]fantasy.AgentTool{channelTool, plainTool}, &hooks.Runner{}, false)
+	other = filterToolsForChannel(wrapped, "switchboard", states)
 	require.Len(t, other, 1)
 	require.Equal(t, "plain", other[0].Info().Name)
 }

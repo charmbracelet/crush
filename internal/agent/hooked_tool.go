@@ -41,6 +41,19 @@ func wrapToolsWithHooks(tools []fantasy.AgentTool, runner *hooks.Runner, skipHoo
 	return out
 }
 
+// mcpServerOf returns the MCP server name of t, looking through a
+// hookedTool wrapper, and false when t is not an MCP tool.
+func mcpServerOf(t fantasy.AgentTool) (string, bool) {
+	if h, ok := t.(*hookedTool); ok {
+		t = h.inner
+	}
+	mcpTool, ok := t.(interface{ MCP() string })
+	if !ok {
+		return "", false
+	}
+	return mcpTool.MCP(), true
+}
+
 func (h *hookedTool) Info() fantasy.ToolInfo {
 	return h.inner.Info()
 }

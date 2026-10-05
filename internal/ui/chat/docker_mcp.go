@@ -8,6 +8,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"charm.land/lipgloss/v2/table"
+	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/stringext"
@@ -43,7 +44,7 @@ func (d *DockerMCPToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 		params = make(map[string]any)
 	}
 
-	tool := strings.TrimPrefix(opts.ToolCall.Name, "mcp_"+config.DockerMCPName+"_")
+	tool := strings.TrimPrefix(opts.ToolCall.Name, tools.MCPToolPrefix(config.DockerMCPName))
 
 	mainParam := opts.ToolCall.Input
 	extraArgs := map[string]string{}
@@ -279,5 +280,5 @@ func (d *DockerMCPToolRenderContext) makeCompactHeader(sty *styles.Styles, tool 
 
 // IsDockerMCPTool returns true if the tool name is a Docker MCP tool.
 func IsDockerMCPTool(name string) bool {
-	return strings.HasPrefix(name, "mcp_"+config.DockerMCPName+"_")
+	return strings.HasPrefix(name, tools.MCPToolPrefix(config.DockerMCPName))
 }

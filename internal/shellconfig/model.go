@@ -17,7 +17,8 @@ import (
 //	    [--default-max-tokens N] [--thinking always|never|toggleable]
 //	    [--supports-images true|false] [--price-input F]
 //	    [--price-output F] [--price-cache-create F]
-//	    [--price-cache-hit F] [--reasoning-effort low|medium|high]
+//	    [--price-cache-hit F] [--reasoning-level L]
+//	    [--reasoning-effort low|medium|high]
 //	    [--max-attachments N]
 //	model remove <provider>/<id>   (alias: rm)
 //	model large [<provider>/<id>] [--think] [--reasoning-effort L]
@@ -81,11 +82,15 @@ var modelAddFlags = []flagSpec{
 	{name: "--price-cache-hit", jsonKey: "cache_hit", child: "pricing", kind: flagFloat, op: opSetInChild},
 	{name: "--reasoning-effort", jsonKey: "default_effort_level", child: "reasoning", kind: flagString, op: opSetInChild},
 	{name: "--max-attachments", jsonKey: "max_attachments", kind: flagInt, op: opSet},
+	// --reasoning-level lists the selectable effort tiers behind one model
+	// entry, which is how a family that sells one model per tier collapses
+	// into a single picker row.
+	{name: "--reasoning-level", jsonKey: "effort_levels", child: "reasoning", kind: flagString, op: opAppendChild},
 }
 
 func modelAdd(b *ConfigBuilder, args []string, stderr io.Writer) error {
 	if len(args) < 3 {
-		return usage(stderr, "usage: model add <provider>/<id> [--name NAME] [--context-window N] [--default-max-tokens N] [--thinking always|never|toggleable] [--supports-images true|false] [--price-input F] [--price-output F] [--price-cache-create F] [--price-cache-hit F] [--reasoning-effort low|medium|high] [--max-attachments N]")
+		return usage(stderr, "usage: model add <provider>/<id> [--name NAME] [--context-window N] [--default-max-tokens N] [--thinking always|never|toggleable] [--supports-images true|false] [--price-input F] [--price-output F] [--price-cache-create F] [--price-cache-hit F] [--reasoning-level L] [--reasoning-effort low|medium|high] [--max-attachments N]")
 	}
 	provider, id, ok := splitProviderModel(args[2])
 	if !ok {

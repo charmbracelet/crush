@@ -39,8 +39,9 @@ import (
 type AppWorkspace struct {
 	app   *app.App
 	store *config.ConfigStore
-	// subagentToggleMu serializes SetSubagentDisabled's read-modify-write
-	// of the workspace config; Library toggles run as concurrent commands.
+	// subagentToggleMu serializes the Library's read-modify-writes of the
+	// workspace config (SetSubagentDisabled, DeleteUserSubagent); Library
+	// actions run as concurrent commands.
 	subagentToggleMu sync.Mutex
 }
 
@@ -629,8 +630,13 @@ func subagentScope(filePath, workingDir string, projectDirs []string) string {
 // DeleteUserSubagent removes a user-scoped subagent by name. It returns an
 // error if the subagent is not found or its file is not inside one of the
 // global (user-scope) subagents directories. On success it deletes the file
-// from disk and reloads the Subagents manager.
+// from disk, drops the name from the workspace enable/disable lists so a
+// later definition with the same name doesn't inherit them, and reloads the
+// Subagents manager. A file already removed outside Crush counts as deleted.
 func (w *AppWorkspace) DeleteUserSubagent(name string) error {
+	w.subagentToggleMu.Lock()
+	defer w.subagentToggleMu.Unlock()
+
 	var target *SubagentDefInfo
 	for _, info := range w.AllSubagents() {
 		// Broken (unparseable/invalid) entries are informational only.
@@ -652,8 +658,18 @@ func (w *AppWorkspace) DeleteUserSubagent(name string) error {
 	if !subagents.InGlobalDir(target.FilePath) {
 		return fmt.Errorf("subagent %q is not in a user subagents directory and cannot be deleted", name)
 	}
-	if err := os.Remove(target.FilePath); err != nil {
+	if err := os.Remove(target.FilePath); err != nil && !os.IsNotExist(err) {
 		return err
+	}
+	disabled := w.store.StringSliceConfigField(config.ScopeWorkspace, "options.disabled_subagents")
+	enabled := w.store.StringSliceConfigField(config.ScopeWorkspace, "options.enabled_subagents")
+	if slices.Contains(disabled, name) || slices.Contains(enabled, name) {
+		if err := w.store.SetConfigFields(config.ScopeWorkspace, map[string]any{
+			"options.disabled_subagents": addOrRemove(disabled, name, false),
+			"options.enabled_subagents":  addOrRemove(enabled, name, false),
+		}); err != nil {
+			return err
+		}
 	}
 	w.reloadSubagents()
 	return nil
@@ -717,10 +733,14 @@ func (w *AppWorkspace) SetSubagentDisabled(name string, disabled bool) error {
 // model and skill validation) identical to startup discovery in cmd/root.go
 // and backend.go.
 func (w *AppWorkspace) reloadSubagents() {
-	all, active, states := subagents.DiscoverFromConfig(
-		subagents.DiscoveryConfigFromStore(w.store, w.app.Skills),
-	)
-	w.app.Subagents.Reload(all, active, states)
+	// The autoReload after a config write is skipped while another write or
+	// reload holds the store, so reload explicitly before discovering.
+	if err := w.store.ReloadFromDisk(context.Background()); err != nil {
+		slog.Warn("Failed to reload config before subagent discovery", "error", err)
+	}
+	w.app.Subagents.Rediscover(func() subagents.DiscoveryConfig {
+		return subagents.DiscoveryConfigFromStore(w.store, w.app.Skills)
+	})
 }
 
 // countOf returns how many times name occurs in list.

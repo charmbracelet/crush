@@ -501,13 +501,9 @@ func (app *App) UpdateAgentModel(ctx context.Context) error {
 // reloadSubagents reruns subagent discovery from the current config and
 // swaps the Manager's snapshot, publishing a discovery event.
 func (app *App) reloadSubagents() {
-	if app.Subagents == nil {
-		return
-	}
-	all, active, states := subagents.DiscoverFromConfig(
-		subagents.DiscoveryConfigFromStore(app.config, app.Skills),
-	)
-	app.Subagents.Reload(all, active, states)
+	app.Subagents.Rediscover(func() subagents.DiscoveryConfig {
+		return subagents.DiscoveryConfigFromStore(app.config, app.Skills)
+	})
 }
 
 // restoreModelFromSession reads the last assistant message in the

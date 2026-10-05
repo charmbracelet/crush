@@ -22,6 +22,9 @@ type Manager struct {
 	activeSubagents []*Subagent
 	states          []*SubagentState
 
+	// rediscoverMu serializes Rediscover's discover-then-apply.
+	rediscoverMu sync.Mutex
+
 	broker *pubsub.Broker[Event]
 }
 
@@ -85,6 +88,19 @@ func (m *Manager) Reload(all, active []*Subagent, states []*SubagentState) {
 	m.states = cloneStates(states)
 	m.mu.Unlock()
 	m.broker.Publish(pubsub.UpdatedEvent, Event{States: cloneStates(states)})
+}
+
+// Rediscover runs DiscoverFromConfig on cfg() and applies the result. Calls
+// are serialized end to end, so a discovery that read newer config is never
+// overwritten by an older one that finished later. It is a no-op when m is
+// nil.
+func (m *Manager) Rediscover(cfg func() DiscoveryConfig) {
+	if m == nil {
+		return
+	}
+	m.rediscoverMu.Lock()
+	defer m.rediscoverMu.Unlock()
+	m.Reload(DiscoverFromConfig(cfg()))
 }
 
 // Shutdown releases broker resources. It is a no-op when m is nil, matching

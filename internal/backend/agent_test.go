@@ -10,6 +10,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/app"
+	"github.com/charmbracelet/crush/internal/compaction"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/google/uuid"
@@ -67,6 +68,13 @@ func (c *blockingCoordinator) UpdateModels(context.Context) error               
 func (c *blockingCoordinator) GenerateTitle(context.Context, string, string)     {}
 func (c *blockingCoordinator) SetHostContext(proto.HostContext)                  {}
 func (c *blockingCoordinator) HostContext() proto.HostContext                    { return proto.HostContext{} }
+func (c *blockingCoordinator) SummarizePreview(context.Context, string, string) (compaction.Preview, error) {
+	return compaction.Preview{}, nil
+}
+func (c *blockingCoordinator) ConfirmSummarize(context.Context, string, compaction.Preview) error {
+	return nil
+}
+func (c *blockingCoordinator) DiscardSummarize(context.Context, string, string) error { return nil }
 
 func (c *blockingCoordinator) SetMainAgent(agentName string) error {
 	c.lastMainAgentSet.Store(agentName)

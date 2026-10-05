@@ -164,13 +164,25 @@ type coordinator struct {
 	mainAgentName string
 	agents        map[string]SessionAgent
 
-	cronStore *scheduler.Store
+	cronStore *scheduler.Store // nil when the scheduler is disabled (headless runs)
 
 	// schedCancel and schedDone stop and join the cron scheduler
 	// goroutine, so Close can release the cron store's ownership lock
-	// deterministically instead of relying on process exit.
+	// deterministically instead of relying on process exit. Both are nil
+	// when the scheduler never started.
 	schedCancel context.CancelFunc
 	schedDone   chan struct{}
+
+	// fireWg tracks in-flight runs started by fireScheduledTask, so
+	// Close can cancel them (they carry the scheduler's context) and
+	// wait for them before releasing the cron store.
+	fireWg sync.WaitGroup
+
+	// servedMu guards servedSessions: the set of sessions this process
+	// is actively serving, used to decide where a durable task may fire
+	// (see fireScheduledTask).
+	servedMu       sync.Mutex
+	servedSessions map[string]bool
 
 	// Skills discovery results (session-start snapshot).
 	allSkills    []*skills.Skill // Pre-filter: all discovered after dedup.
@@ -196,6 +208,14 @@ type CoordinatorOptions struct {
 	RunComplete pubsub.Publisher[notify.RunComplete]
 	Skills      *skills.Manager
 	Interactive bool
+	// EnableScheduler starts the scheduled-tasks scheduler loop and
+	// takes the ownership lock for durable tasks. Only long-lived
+	// interactive surfaces (the TUI and the server) set it: a short-lived
+	// headless `crush run` must not take the ownership lock and start
+	// firing other sessions' durable tasks — with --yolo that would
+	// auto-approve every prompt they run. When false the cron tools are
+	// still registered but report that scheduled tasks are unavailable.
+	EnableScheduler bool
 }
 
 func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, error) {
@@ -212,9 +232,12 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	}
 	skillTracker := skills.NewTracker(activeSkills)
 
-	cronStore := scheduler.NewStore(filepath.Join(opts.Config.Config().Options.DataDirectory, "scheduled_tasks.json"))
-	if err := cronStore.Load(); err != nil {
-		slog.Error("Failed to load scheduled tasks", "error", err)
+	var cronStore *scheduler.Store
+	if opts.EnableScheduler {
+		cronStore = scheduler.NewStore(filepath.Join(opts.Config.Config().Options.DataDirectory, "scheduled_tasks.json"))
+		if err := cronStore.Load(); err != nil {
+			slog.Error("Failed to load scheduled tasks", "error", err)
+		}
 	}
 
 	c := &coordinator{
@@ -277,29 +300,36 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	c.mainAgent = agent
 	c.mainAgentName = config.AgentCoder
 
-	cronScheduler := scheduler.NewScheduler(c.cronStore, c.fireScheduledTask)
-	schedCtx, schedCancel := context.WithCancel(ctx)
-	c.schedCancel = schedCancel
-	c.schedDone = make(chan struct{})
-	go func() {
-		defer close(c.schedDone)
-		cronScheduler.Run(schedCtx)
-	}()
+	if cronStore != nil {
+		cronScheduler := scheduler.NewScheduler(c.cronStore, c.fireScheduledTask)
+		schedCtx, schedCancel := context.WithCancel(ctx)
+		c.schedCancel = schedCancel
+		c.schedDone = make(chan struct{})
+		go func() {
+			defer close(c.schedDone)
+			cronScheduler.Run(schedCtx)
+		}()
+	}
 
 	return c, nil
 }
 
-// Close stops the cron scheduler and releases the cron store's
-// ownership lock, so an explicit shutdown (or a test's TempDir cleanup,
-// which runs before process exit) does not leave a lock file handle
-// behind. It is an optional capability outside the Coordinator
-// interface: callers that need it type-assert to interface{ Close() }.
+// Close stops the cron scheduler, waits for in-flight fired runs (they
+// carry the scheduler's context, so they are asked to abort first), and
+// releases the cron store's ownership lock, so an explicit shutdown (or
+// a test's TempDir cleanup, which runs before process exit) does not
+// leave a lock file handle behind. It is an optional capability outside
+// the Coordinator interface: callers that need it type-assert to
+// interface{ Close() }.
 func (c *coordinator) Close() {
 	if c.schedCancel != nil {
 		c.schedCancel()
 		<-c.schedDone
 	}
-	c.cronStore.Close()
+	c.fireWg.Wait()
+	if c.cronStore != nil {
+		c.cronStore.Close()
+	}
 }
 
 // activeAgent returns the coordinator's current main agent and its config
@@ -334,6 +364,10 @@ func (c *coordinator) SetMainAgent(agentName string) error {
 // fire failure (database hiccup, canceled context) before retrying.
 const transientFireRetryDelay = 30 * time.Second
 
+// unservedSessionRetryDelay is how long a durable task whose session is
+// not served by any process waits before its fire is retried.
+const unservedSessionRetryDelay = time.Minute
+
 // fireScheduledTask runs a due scheduled task's prompt against its
 // session. The prompt is injected as a normal user turn so it respects
 // the session's busy queue: it fires between turns, never mid-response,
@@ -358,22 +392,70 @@ func (c *coordinator) fireScheduledTask(ctx context.Context, task scheduler.Task
 		return &scheduler.TransientError{Err: err, RetryIn: transientFireRetryDelay}
 	}
 
+	// Durable tasks are visible to every process sharing the tasks file,
+	// but only the ownership-lock holder is offered them, and that holder
+	// may not be the process showing the session. A session is "served"
+	// here from the moment the TUI loads it (ListCronTasks) or a user
+	// turn runs in it (Run/RunAccepted). Firing into an unserved session
+	// would run a prompt with nobody watching, and any permission request
+	// it raises would hang until someone answers it. So the fire is
+	// deferred instead: a TransientError keeps the task, skips this fire,
+	// and records no failure; it retries until some process serves the
+	// session again. When nobody ever does, the task simply waits.
+	if !c.sessionServed(task.SessionID) {
+		return &scheduler.TransientError{
+			Err:     fmt.Errorf("session %s is not open in a process that can run it", task.SessionID),
+			RetryIn: unservedSessionRetryDelay,
+		}
+	}
+
 	prompt := task.Prompt
+	// The run is dispatched in the background and tracked on fireWg so a
+	// slow or permission-blocked run can never stall the scheduler loop
+	// or other tasks: the fire returns immediately, MarkFired advances
+	// the schedule, and the run's own outcome is recorded afterwards via
+	// SetLastError. A permission request nobody answers blocks only this
+	// goroutine, and only until its context (the scheduler's) is canceled
+	// on Close.
+	c.fireWg.Add(1)
 	go func() {
+		defer c.fireWg.Done()
 		if _, err := c.run(ctx, nil, task.SessionID, prompt); err != nil {
 			slog.Error("Scheduled task run failed", "id", task.ID, "session_id", task.SessionID, "error", err)
+			c.cronStore.SetLastError(task.ID, err)
 		}
 	}()
 	return nil
 }
 
+// markSessionServed records that this process is actively serving
+// sessionID, making it eligible to fire that session's scheduled tasks.
+func (c *coordinator) markSessionServed(sessionID string) {
+	c.servedMu.Lock()
+	defer c.servedMu.Unlock()
+	if c.servedSessions == nil {
+		c.servedSessions = make(map[string]bool)
+	}
+	c.servedSessions[sessionID] = true
+}
+
+// sessionServed reports whether this process is actively serving
+// sessionID.
+func (c *coordinator) sessionServed(sessionID string) bool {
+	c.servedMu.Lock()
+	defer c.servedMu.Unlock()
+	return c.servedSessions[sessionID]
+}
+
 // Run implements Coordinator.
 func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
+	c.markSessionServed(sessionID)
 	return c.run(ctx, nil, sessionID, prompt, attachments...)
 }
 
 // RunAccepted implements Coordinator.
 func (c *coordinator) RunAccepted(ctx context.Context, accept *AcceptedRun, sessionID string, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
+	c.markSessionServed(sessionID)
 	return c.run(ctx, accept, sessionID, prompt, attachments...)
 }
 
@@ -1503,7 +1585,13 @@ func (c *coordinator) ClearQueue(sessionID string) {
 }
 
 // ListCronTasks returns the scheduled tasks belonging to sessionID.
+// The TUI calls it when a session loads, which also marks the session as
+// served in this process, making it eligible to fire its durable tasks.
 func (c *coordinator) ListCronTasks(sessionID string) []scheduler.Task {
+	c.markSessionServed(sessionID)
+	if c.cronStore == nil {
+		return nil
+	}
 	return c.cronStore.List(sessionID)
 }
 

@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -21,6 +22,15 @@ const (
 	maxTaskDisplayLength = 40
 	// maxQueueDisplayLength is the maximum length of a queue item in the list.
 	maxQueueDisplayLength = 60
+)
+
+// pillSection represents which section of the pills panel is focused.
+type pillSection int
+
+const (
+	pillSectionTodos pillSection = iota
+	pillSectionQueue
+	pillSectionCron
 )
 
 // hasIncompleteTodos returns true if there are any non-completed todos.
@@ -212,6 +222,7 @@ func (m *UI) autoExpandPillsIfReasonable() tea.Cmd {
 	}
 	m.pillsExpanded = true
 	m.pillsAutoExpanded = true
+	m.focusFirstPillSection()
 	m.updateLayoutAndSize()
 	if m.chat.Follow() {
 		m.chat.ScrollToBottom()
@@ -229,6 +240,9 @@ func (m *UI) togglePillsExpanded() tea.Cmd {
 		return nil
 	}
 	m.pillsExpanded = !m.pillsExpanded
+	if m.pillsExpanded {
+		m.focusFirstPillSection()
+	}
 	m.updateLayoutAndSize()
 
 	// Make sure to follow scroll if follow is enabled when toggling pills.
@@ -239,6 +253,68 @@ func (m *UI) togglePillsExpanded() tea.Cmd {
 	}
 
 	return nil
+}
+
+// focusFirstPillSection points the panel's focus at the first section
+// that has content, in display order: todos, queued prompts, then
+// scheduled tasks.
+func (m *UI) focusFirstPillSection() {
+	if sections := m.pillSectionsWithContent(); len(sections) > 0 {
+		m.focusedPillSection = sections[0]
+	}
+}
+
+// pillSectionsWithContent lists the pill sections that currently have
+// something to show, in display order.
+func (m *UI) pillSectionsWithContent() []pillSection {
+	var sections []pillSection
+	if hasIncompleteTodos(m.session.Todos) {
+		sections = append(sections, pillSectionTodos)
+	}
+	if m.promptQueue > 0 {
+		sections = append(sections, pillSectionQueue)
+	}
+	if len(m.cronTasks) > 0 {
+		sections = append(sections, pillSectionCron)
+	}
+	return sections
+}
+
+// switchPillSection moves focus between the pill sections that have
+// content (todos, queued prompts, scheduled tasks) in display order.
+func (m *UI) switchPillSection(dir int) tea.Cmd {
+	if !m.pillsExpanded || !m.hasSession() {
+		return nil
+	}
+	sections := m.pillSectionsWithContent()
+	if len(sections) < 2 {
+		return nil
+	}
+	idx := slices.Index(sections, m.focusedPillSection)
+	if idx < 0 {
+		m.focusedPillSection = sections[0]
+	} else {
+		m.focusedPillSection = sections[(idx+len(sections)+dir)%len(sections)]
+	}
+	m.updateLayoutAndSize()
+	return nil
+}
+
+// effectiveFocusedSection returns the pill section that should be treated
+// as focused for rendering. The stored focusedPillSection can go stale when
+// its section loses all content (for example todos complete while the panel
+// is open, or it defaults to todos before any todos exist). In that case we
+// fall through to whichever section still has content so the expanded list
+// stays populated.
+func (m *UI) effectiveFocusedSection() pillSection {
+	sections := m.pillSectionsWithContent()
+	if len(sections) == 0 {
+		return m.focusedPillSection
+	}
+	if slices.Contains(sections, m.focusedPillSection) {
+		return m.focusedPillSection
+	}
+	return sections[0]
 }
 
 // pillsAreaHeight calculates the total height needed for the pills area.
@@ -261,16 +337,19 @@ func (m *UI) pillsAreaHeight() int {
 
 	pillsAreaHeight := pillHeightWithBorder
 	if m.pillsExpanded {
-		// Every section with content expands, so the panel needs room for all
-		// of their lists stacked, not just one.
-		if hasIncomplete {
-			pillsAreaHeight += len(m.session.Todos)
-		}
-		if hasQueue {
-			pillsAreaHeight += m.promptQueue
-		}
-		if hasCron {
-			pillsAreaHeight += len(m.cronTasks)
+		switch m.effectiveFocusedSection() {
+		case pillSectionTodos:
+			if hasIncomplete {
+				pillsAreaHeight += len(m.session.Todos)
+			}
+		case pillSectionQueue:
+			if hasQueue {
+				pillsAreaHeight += m.promptQueue
+			}
+		case pillSectionCron:
+			if hasCron {
+				pillsAreaHeight += len(m.cronTasks)
+			}
 		}
 	}
 	return pillsAreaHeight
@@ -304,6 +383,10 @@ func (m *UI) renderPills() {
 	}
 
 	t := m.com.Styles
+	effective := m.effectiveFocusedSection()
+	todosFocused := m.pillsExpanded && effective == pillSectionTodos
+	queueFocused := m.pillsExpanded && effective == pillSectionQueue
+	cronFocused := m.pillsExpanded && effective == pillSectionCron
 
 	inProgressIcon := t.Tool.TodoInProgressIcon.Render(styles.SpinnerIcon)
 	if m.todoIsSpinning {
@@ -321,24 +404,23 @@ func (m *UI) renderPills() {
 		pills = append(pills, cronPill(m.cronTasks, t))
 	}
 
-	// Expanding shows every section that has content, stacked in the same order
-	// as the pills above them, so the panel matches what the pills advertise.
-	var expandedSections []string
+	// The expanded panel shows the focused section's list; ←/→ switches
+	// between the sections that have content.
+	var expandedList string
 	if m.pillsExpanded {
-		if hasIncomplete {
-			expandedSections = append(expandedSections, todoList(m.session.Todos, inProgressIcon, t, contentWidth))
-		}
-		// Render from the memoized queue (fetched off-thread, see
-		// workspace_cache.go): renderPills runs on the Update/View
-		// path and must never block on a workspace round-trip.
-		if hasQueue && len(m.promptQueueItems) > 0 {
-			expandedSections = append(expandedSections, queueList(m.promptQueueItems, t))
-		}
-		if hasCron {
-			expandedSections = append(expandedSections, cronList(m.cronTasks, t))
+		if todosFocused && hasIncomplete {
+			expandedList = todoList(m.session.Todos, inProgressIcon, t, contentWidth)
+		} else if queueFocused && hasQueue {
+			// Render from the memoized queue (fetched off-thread, see
+			// workspace_cache.go): renderPills runs on the Update/View
+			// path and must never block on a workspace round-trip.
+			if len(m.promptQueueItems) > 0 {
+				expandedList = queueList(m.promptQueueItems, t)
+			}
+		} else if cronFocused && hasCron {
+			expandedList = cronList(m.cronTasks, t)
 		}
 	}
-	expandedList := lipgloss.JoinVertical(lipgloss.Left, expandedSections...)
 
 	if len(pills) == 0 {
 		return

@@ -328,8 +328,12 @@ func (w *ClientWorkspace) AgentSetMain(agentID string) error {
 	return w.client.SetMainAgent(context.Background(), w.workspaceID(), agentID)
 }
 
-// AgentListCronTasks returns nil in client/server mode: the cron store
-// lives server-side and there is no client API for it yet.
+// AgentListCronTasks returns nil in client/server mode.
+//
+// TODO: the cron store lives server-side, but there is no client API for
+// listing a session's scheduled tasks, so the scheduled-tasks pill never
+// appears in client/server mode. Add a workspace RPC that forwards to the
+// server-side coordinator so the pill works there too.
 func (w *ClientWorkspace) AgentListCronTasks(sessionID string) []scheduler.Task {
 	return nil
 }

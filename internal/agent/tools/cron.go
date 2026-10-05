@@ -14,14 +14,20 @@ import (
 )
 
 const (
-	// CronCreateToolName is the name of the scheduled-task creation tool,
-	// matching the tool name in Claude Code and Codex.
-	CronCreateToolName = "CronCreate"
+	// CronCreateToolName is the name of the scheduled-task creation
+	// tool, matching the snake_case naming of the other built-in tools.
+	CronCreateToolName = "cron_create"
 	// CronListToolName is the name of the scheduled-task listing tool.
-	CronListToolName = "CronList"
+	CronListToolName = "cron_list"
 	// CronDeleteToolName is the name of the scheduled-task deletion tool.
-	CronDeleteToolName = "CronDelete"
+	CronDeleteToolName = "cron_delete"
 )
+
+// errSchedulerDisabled is returned by the cron tools when no scheduler is
+// wired up: headless `crush run` coordinators create no cron store (they
+// must not take the ownership lock or fire durable tasks), so the tools
+// exist but explain that instead of failing obscurely.
+var errSchedulerDisabled = errors.New("scheduled tasks are not available in non-interactive mode; run Crush interactively to manage them")
 
 //go:embed croncreate.md
 var cronCreateDescription string
@@ -75,6 +81,9 @@ func NewCronCreateTool(store *scheduler.Store, permissions permission.Service) f
 		CronCreateToolName,
 		cronCreateDescription,
 		func(ctx context.Context, params CronCreateParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			if store == nil {
+				return fantasy.NewTextErrorResponse(errSchedulerDisabled.Error()), nil
+			}
 			sessionID, err := cronSessionID(ctx)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil
@@ -139,6 +148,9 @@ func NewCronListTool(store *scheduler.Store) fantasy.AgentTool {
 		CronListToolName,
 		cronListDescription,
 		func(ctx context.Context, params struct{}, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			if store == nil {
+				return fantasy.NewTextErrorResponse(errSchedulerDisabled.Error()), nil
+			}
 			sessionID, err := cronSessionID(ctx)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil
@@ -181,6 +193,9 @@ func NewCronDeleteTool(store *scheduler.Store) fantasy.AgentTool {
 		CronDeleteToolName,
 		cronDeleteDescription,
 		func(ctx context.Context, params CronDeleteParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			if store == nil {
+				return fantasy.NewTextErrorResponse(errSchedulerDisabled.Error()), nil
+			}
 			sessionID, err := cronSessionID(ctx)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil

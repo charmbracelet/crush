@@ -1,4 +1,4 @@
-Schedule a new scheduled task that re-runs a prompt automatically on a cron schedule, mimicking the CronCreate tool in Claude Code and Codex.
+Schedule a new scheduled task that re-runs a prompt automatically on a cron schedule, mimicking the cron_create tool in Claude Code and Codex.
 
 Takes a 5-field cron expression (minute hour day-of-month month day-of-week) evaluated in the user's local timezone. Supports wildcards (* and ?), single values (5), steps (*/15), ranges (1-5), comma lists (1,15,30), and three-letter names (JAN, MON). There is no seconds field, descriptors like @daily are not accepted, and extended syntax (L, W) is not supported. Day-of-week: 0 or 7 = Sunday through 6 = Saturday; when both day-of-month and day-of-week are restricted, the task fires when either matches.
 
@@ -13,10 +13,10 @@ To schedule N minutes from now, add N to the current minute (handling hour/day r
 - "Check every hour": "0 * * * *", recurring: true
 - "Every day at 9am": "0 9 * * *", recurring: true
 - "At 2:30pm today": "30 14 <today_dom> <today_month> *", recurring: false
-- "Run every 5 minutes for the next 2 hours": "*/5 * * * *", recurring: true — then CronDelete when the work is done. Do NOT create 24 separate one-shots.
+- "Run every 5 minutes for the next 2 hours": "*/5 * * * *", recurring: true — then cron_delete when the work is done. Do NOT create 24 separate one-shots.
 
 Expressions that are syntactically valid but can never match — "0 0 30 2 *", February 30th — are rejected rather than accepted as a task that silently never runs.
 
 A one-shot (recurring: false) whose pinned time has already passed today is also rejected: its next match would jump to tomorrow or next year, which is never what a one-shot means. Recompute the cron fields against the current time and try again. Recurring schedules are unaffected — a daily 9am task created at 10:30 legitimately fires tomorrow.
 
-Set recurring to false for a one-shot reminder that fires once and deletes itself (pin minute/hour/day-of-month/month to specific values). Set durable to true to persist the task to disk so it survives restarts; otherwise it lives only in this session. A session can hold up to 50 scheduled tasks. Returns a task ID you can pass to CronDelete.
+Set recurring to false for a one-shot reminder that fires once and deletes itself (pin minute/hour/day-of-month/month to specific values). Set durable to true to persist the task to disk so it survives restarts; otherwise it lives only in this session. A session can hold up to 50 scheduled tasks. Returns a task ID you can pass to cron_delete.

@@ -54,6 +54,30 @@ func TestCronToolNames(t *testing.T) {
 	require.Equal(t, CronDeleteToolName, NewCronDeleteTool(store).Info().Name)
 }
 
+// TestCronToolsUnavailableWithoutStore covers the headless coordinator,
+// which wires no cron store (EnableScheduler=false): the tools stay
+// registered but must answer with a clear, model-readable error instead
+// of failing obscurely or silently succeeding.
+func TestCronToolsUnavailableWithoutStore(t *testing.T) {
+	t.Parallel()
+
+	ctx := cronTestContext("test-session")
+
+	createResp, err := runCronTool(t, NewCronCreateTool(nil, allowPermissions()), CronCreateToolName, ctx, CronCreateParams{
+		Cron: "* * * * *", Prompt: "ping",
+	})
+	require.NoError(t, err)
+	require.Contains(t, createResp.Content, "not available in non-interactive mode")
+
+	listResp, err := runCronTool(t, NewCronListTool(nil), CronListToolName, ctx, struct{}{})
+	require.NoError(t, err)
+	require.Contains(t, listResp.Content, "not available in non-interactive mode")
+
+	deleteResp, err := runCronTool(t, NewCronDeleteTool(nil), CronDeleteToolName, ctx, CronDeleteParams{ID: "abc"})
+	require.NoError(t, err)
+	require.Contains(t, deleteResp.Content, "not available in non-interactive mode")
+}
+
 func TestCronCreateRequiresSession(t *testing.T) {
 	t.Parallel()
 

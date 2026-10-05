@@ -834,6 +834,16 @@ func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 		return fmt.Errorf("coder agent configuration is missing")
 	}
 	var err error
+	// Close the previous coordinator, if any, before replacing it: it
+	// would otherwise keep its cron scheduler goroutine running and hold
+	// the scheduled-tasks ownership lock until process exit — most
+	// visibly when a headless run re-initializes the agent
+	// non-interactively.
+	if app.AgentCoordinator != nil {
+		if closer, ok := app.AgentCoordinator.(interface{ Close() }); ok {
+			closer.Close()
+		}
+	}
 	app.AgentCoordinator, err = agent.NewCoordinator(ctx, agent.CoordinatorOptions{
 		Config:      app.config,
 		Sessions:    app.Sessions,
@@ -847,6 +857,9 @@ func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 		RunComplete: app.runCompletions,
 		Skills:      app.Skills,
 		Interactive: interactive,
+		// Only interactive surfaces (the TUI, the server) fire scheduled
+		// tasks; headless runs must not take the ownership lock.
+		EnableScheduler: interactive,
 	})
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)

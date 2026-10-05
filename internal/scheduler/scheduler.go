@@ -115,6 +115,13 @@ type Store struct {
 	// since the last successful on-disk sync, so a merge write removes
 	// them even if another process rewrote the file in between.
 	removedSinceSync map[string]bool
+	// dirtySinceSync tracks durable task IDs this process has modified
+	// since the last successful on-disk sync, so a merge write only
+	// overwrites a task's disk entry when this process actually changed
+	// it. A non-owner process holding a stale in-memory copy (loaded at
+	// startup, advanced on disk by the owner since) must not let that
+	// copy win over the owner's newer NextRunAt / RunCount / LastError.
+	dirtySinceSync map[string]bool
 	// lastDiskIDs holds the task IDs present on disk as of the last
 	// successful sync, so a durable task another process deleted from
 	// the file is not resurrected by this process's next write.
@@ -134,6 +141,7 @@ func NewStore(filePath string) *Store {
 		filePath:         filePath,
 		now:              time.Now,
 		removedSinceSync: make(map[string]bool),
+		dirtySinceSync:   make(map[string]bool),
 		lastDiskIDs:      make(map[string]bool),
 	}
 }
@@ -247,9 +255,11 @@ func (s *Store) withOpLock(f func() error) error {
 }
 
 // refreshDurableLocked adopts durable tasks other processes added to the
-// file and forgets ones they deleted, so a task created in a second
-// Crush window still fires here. It costs one stat call when the file
-// has not changed. Callers must hold s.mu.
+// file, forgets ones they deleted, and takes the disk version of durable
+// tasks this process has not modified since its last sync, so a
+// non-owner's CronList does not show tasks that already fired or were
+// deleted elsewhere. It costs one stat call when the file has not
+// changed. Callers must hold s.mu.
 func (s *Store) refreshDurableLocked() {
 	if s.filePath == "" {
 		return
@@ -277,6 +287,30 @@ func (s *Store) refreshDurableLocked() {
 			// Another process deleted it from the file.
 			delete(s.tasks, id)
 		}
+	}
+	// Adopt the disk version of durable tasks this process has not
+	// modified since its last sync: the owner may have fired, rescheduled,
+	// or errored them since, and a stale local copy would otherwise win in
+	// this process's next merge write and show up in CronList.
+	for i := range durable {
+		dt := durable[i]
+		if !dt.Durable || dt.ID == "" {
+			continue
+		}
+		cur, ok := s.tasks[dt.ID]
+		if !ok || !cur.Durable || s.dirtySinceSync[dt.ID] {
+			continue
+		}
+		if _, err := Parse(dt.Cron); err != nil {
+			continue
+		}
+		// A zero next run is always "due", so a task carrying one would
+		// fire on every tick forever. Keep the local copy over a corrupt
+		// disk entry; the next persist drops it.
+		if dt.NextRunAt.IsZero() {
+			continue
+		}
+		s.tasks[dt.ID] = &dt
 	}
 	s.adoptDurableLocked(durable)
 	s.lastModTime = modTime
@@ -419,9 +453,14 @@ func (s *Store) Create(sessionID, cronExpr, prompt string, recurring, durable bo
 		NextRunAt: nextRun,
 	}
 	s.tasks[id] = task
-	if err := s.persistLocked(); err != nil {
-		delete(s.tasks, id)
-		return Task{}, err
+	// Session-only tasks never touch the file: a disk or lock problem
+	// must not be able to block creating (or later deleting) a task that
+	// needs no persistence at all.
+	if durable {
+		if err := s.persistLocked(); err != nil {
+			delete(s.tasks, id)
+			return Task{}, err
+		}
 	}
 	return *task, nil
 }
@@ -443,9 +482,14 @@ func matchedEarlierToday(sched *Schedule, now time.Time) bool {
 }
 
 // List returns the tasks belonging to sessionID, ordered by next run.
+// Durable tasks are refreshed from disk first (mtime-gated, one stat call
+// when nothing changed) so a non-owner process does not list tasks that
+// fired or were deleted elsewhere since its last sync.
 func (s *Store) List(sessionID string) []Task {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.refreshDurableLocked()
 
 	var out []Task
 	for _, t := range s.tasks {
@@ -459,8 +503,10 @@ func (s *Store) List(sessionID string) []Task {
 
 // ListAll returns every task in the store, ordered by next run.
 func (s *Store) ListAll() []Task {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.refreshDurableLocked()
 
 	out := make([]Task, 0, len(s.tasks))
 	for _, t := range s.tasks {
@@ -482,11 +528,13 @@ func (s *Store) Delete(sessionID, id string) (Task, error) {
 	}
 	deleted := *t
 	s.deleteTaskLocked(id)
-	if err := s.persistLocked(); err != nil {
-		// Put it back so memory and disk stay in agreement; otherwise the
-		// task is gone from this process but returns on the next restart.
-		s.tasks[id] = t
-		return Task{}, err
+	if t.Durable {
+		if err := s.persistLocked(); err != nil {
+			// Put it back so memory and disk stay in agreement; otherwise the
+			// task is gone from this process but returns on the next restart.
+			s.tasks[id] = t
+			return Task{}, err
+		}
 	}
 	return deleted, nil
 }
@@ -498,12 +546,15 @@ func (s *Store) Remove(id string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if _, ok := s.tasks[id]; !ok {
+	t, ok := s.tasks[id]
+	if !ok {
 		return
 	}
 	s.deleteTaskLocked(id)
-	if err := s.persistLocked(); err != nil {
-		slog.Error("Failed to persist scheduled tasks after removal", "id", id, "error", err)
+	if t.Durable {
+		if err := s.persistLocked(); err != nil {
+			slog.Error("Failed to persist scheduled tasks after removal", "id", id, "error", err)
+		}
 	}
 }
 
@@ -539,7 +590,10 @@ func (s *Store) DueTasks() []Task {
 }
 
 // MarkFired records a successful firing: recurring tasks reschedule
-// themselves, one-shots delete themselves.
+// themselves, one-shots delete themselves. Durable mutations are
+// tracked as dirty so this process's next merge write overwrites the
+// disk entry (a fire is exactly the kind of change a stale copy in
+// another process must not clobber).
 func (s *Store) MarkFired(id string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -548,17 +602,25 @@ func (s *Store) MarkFired(id string) {
 	if !ok {
 		return
 	}
+	durable := t.Durable
+	if durable {
+		s.dirtySinceSync[id] = true
+	}
 	now := s.now()
 	t.LastRunAt = &now
 	t.RunCount++
 	t.LastError = ""
 	if !t.Recurring {
 		s.deleteTaskLocked(id)
-		s.persistBestEffort(id)
+		if durable {
+			s.persistBestEffort(id)
+		}
 		return
 	}
 	s.rescheduleLocked(t, now)
-	s.persistBestEffort(id)
+	if durable {
+		s.persistBestEffort(id)
+	}
 }
 
 // rescheduleLocked advances a recurring task to its next fire time,
@@ -601,6 +663,10 @@ func (s *Store) MarkError(id string, fireErr error) {
 	if !ok {
 		return
 	}
+	durable := t.Durable
+	if durable {
+		s.dirtySinceSync[id] = true
+	}
 	now := s.now()
 	t.LastError = fireErr.Error()
 	if t.Recurring {
@@ -608,7 +674,29 @@ func (s *Store) MarkError(id string, fireErr error) {
 	} else {
 		s.deleteTaskLocked(id)
 	}
-	s.persistBestEffort(id)
+	if durable {
+		s.persistBestEffort(id)
+	}
+}
+
+// SetLastError records a failure that happened after the fire itself was
+// accepted: the scheduler already called MarkFired (rescheduling the
+// task), so unlike MarkError this must not touch the schedule or delete
+// a one-shot that has already run — it only stamps LastError so
+// CronList surfaces what happened to the run.
+func (s *Store) SetLastError(id string, runErr error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	t, ok := s.tasks[id]
+	if !ok {
+		return
+	}
+	t.LastError = runErr.Error()
+	if t.Durable {
+		s.dirtySinceSync[id] = true
+		s.persistBestEffort(id)
+	}
 }
 
 // DropSession removes every task belonging to a session, durable ones
@@ -622,14 +710,16 @@ func (s *Store) DropSession(sessionID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	dropped := false
+	droppedDurable := false
 	for id, t := range s.tasks {
 		if t.SessionID == sessionID {
 			s.deleteTaskLocked(id)
-			dropped = true
+			if t.Durable {
+				droppedDurable = true
+			}
 		}
 	}
-	if dropped {
+	if droppedDurable {
 		s.persistBestEffort("")
 	}
 }
@@ -639,9 +729,12 @@ func (s *Store) DropSession(sessionID string) {
 // The write is a read-modify-write under the short-held file lock:
 // durable tasks belonging to other Crush processes on the same project
 // are preserved rather than clobbered, tasks this process deleted are
-// dropped, and this process's versions of its own tasks win. Without
-// the merge, two windows on one project would each write their own view
-// and the last rename would silently discard the other's tasks.
+// dropped, and this process's version of a task wins only when it has
+// actually modified that task since its last successful sync — a stale
+// copy must not overwrite the owner's newer NextRunAt / RunCount /
+// LastError. Without the merge, two windows on one project would each
+// write their own view and the last rename would silently discard the
+// other's tasks.
 func (s *Store) persistLocked() error {
 	if s.filePath == "" {
 		return nil
@@ -659,7 +752,7 @@ func (s *Store) persistLocked() error {
 			if s.removedSinceSync[t.ID] {
 				continue
 			}
-			if cur, ok := s.tasks[t.ID]; ok && cur.Durable {
+			if cur, ok := s.tasks[t.ID]; ok && cur.Durable && s.dirtySinceSync[t.ID] {
 				merged = append(merged, *cur)
 				continue
 			}
@@ -683,6 +776,7 @@ func (s *Store) persistLocked() error {
 		}
 		s.rememberDiskIDsLocked(merged)
 		clear(s.removedSinceSync)
+		clear(s.dirtySinceSync)
 		return nil
 	}); err != nil {
 		return err

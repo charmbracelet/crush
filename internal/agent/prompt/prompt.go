@@ -72,7 +72,7 @@ func WithWorkingDir(workingDir string) Option {
 }
 
 // WithScheduling enables the template's scheduling guidance, which tells the
-// model to reach for the CronCreate / CronList / CronDelete tools instead of
+// model to reach for the cron_create / cron_list / cron_delete tools instead of
 // bash sleep loops. Guidance follows the tool: callers that build a coder
 // prompt without registering the cron tools — the agent package's own tests
 // among them — leave it off, so the model is never pointed at a tool it does

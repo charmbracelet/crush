@@ -23,8 +23,8 @@ func renderCoderTemplate(t *testing.T, dat prompt.PromptDat) string {
 
 // Scheduling section gate
 //
-// The <scheduling> section points the model at CronCreate / CronList /
-// CronDelete. Guidance follows the tool, so it is gated the same way the
+// The <scheduling> section points the model at cron_create / cron_list /
+// cron_delete. Guidance follows the tool, so it is gated the same way the
 // A2UI section is: the coordinator turns it on because it registers the
 // cron tools, and callers that do not — the recorded agent tests among
 // them — leave it off.
@@ -42,11 +42,11 @@ func TestCoderPromptSchedulingGate(t *testing.T) {
 
 	off := renderCoderTemplate(t, prompt.PromptDat{})
 	require.NotContains(t, off, "<scheduling>")
-	require.NotContains(t, off, "CronCreate")
+	require.NotContains(t, off, "cron_create")
 
 	on := renderCoderTemplate(t, prompt.PromptDat{Scheduling: true})
 	require.Contains(t, on, "<scheduling>")
-	require.Contains(t, on, "CronCreate / CronList / CronDelete")
+	require.Contains(t, on, "cron_create / cron_list / cron_delete")
 }
 
 // With the section off, the rendered prompt must be byte-identical to what

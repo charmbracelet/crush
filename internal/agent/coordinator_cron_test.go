@@ -238,3 +238,90 @@ func TestScheduledTaskPrompt(t *testing.T) {
 	task := scheduler.Task{Prompt: "check the deploy"}
 	require.Equal(t, "check the deploy", task.Prompt)
 }
+
+// TestFireScheduledTaskDefersUnservedSession covers the durable-task
+// routing rule: a task whose session exists but is not served by this
+// process must be deferred, not fired and not failed — the fire comes
+// back as a TransientError so the scheduler keeps the task and retries
+// later without recording an error.
+func TestFireScheduledTaskDefersUnservedSession(t *testing.T) {
+	env := testEnv(t)
+
+	cfg, err := config.Init(env.workingDir, "", false)
+	require.NoError(t, err)
+
+	c := &coordinator{
+		cfg:         cfg,
+		sessions:    env.sessions,
+		messages:    env.messages,
+		permissions: env.permissions,
+		cronStore:   scheduler.NewStore(""),
+	}
+
+	sess, err := env.sessions.Create(t.Context(), "unserved")
+	require.NoError(t, err)
+	task, err := c.cronStore.Create(sess.ID, "* * * * *", "ping", true, false)
+	require.NoError(t, err)
+
+	var transient *scheduler.TransientError
+	require.ErrorAs(t, c.fireScheduledTask(t.Context(), task), &transient)
+	require.Len(t, c.cronStore.List(sess.ID), 1, "a deferred fire must keep the task")
+}
+
+// TestFireScheduledTaskRunFailureRecorded covers what happens after the
+// fire is accepted for a served session: the run happens in the
+// background, and its failure is recorded on the task via SetLastError
+// so CronList surfaces it — without rescheduling or deleting anything.
+// The run here fails immediately because the test config selects no
+// models; what matters is that the failure lands on the task and the
+// fire itself returned nil without blocking.
+func TestFireScheduledTaskRunFailureRecorded(t *testing.T) {
+	env := testEnv(t)
+
+	cfg, err := config.Init(env.workingDir, "", false)
+	require.NoError(t, err)
+
+	c := &coordinator{
+		cfg:         cfg,
+		sessions:    env.sessions,
+		messages:    env.messages,
+		permissions: env.permissions,
+		cronStore:   scheduler.NewStore(""),
+		interactive: true,
+	}
+
+	sess, err := env.sessions.Create(t.Context(), "served")
+	require.NoError(t, err)
+	task, err := c.cronStore.Create(sess.ID, "* * * * *", "ping", true, false)
+	require.NoError(t, err)
+
+	// Serving the session (the TUI loads it via ListCronTasks) makes it
+	// eligible to fire.
+	require.Len(t, c.ListCronTasks(sess.ID), 1)
+
+	require.NoError(t, c.fireScheduledTask(t.Context(), task))
+	c.fireWg.Wait()
+
+	tasks := c.cronStore.List(sess.ID)
+	require.Len(t, tasks, 1)
+	require.NotEmpty(t, tasks[0].LastError, "the background run's failure must be recorded on the task")
+	require.Equal(t, task.NextRunAt, tasks[0].NextRunAt, "a recorded run failure must not reschedule the task")
+}
+
+// TestListCronTasksWithoutSchedulerStore covers the headless
+// coordinator (EnableScheduler=false wires no cron store): listing must
+// be a safe nil instead of a panic.
+func TestListCronTasksWithoutSchedulerStore(t *testing.T) {
+	env := testEnv(t)
+
+	cfg, err := config.Init(env.workingDir, "", false)
+	require.NoError(t, err)
+
+	c := &coordinator{
+		cfg:         cfg,
+		sessions:    env.sessions,
+		messages:    env.messages,
+		permissions: env.permissions,
+	}
+	require.Nil(t, c.ListCronTasks("any-session"))
+}

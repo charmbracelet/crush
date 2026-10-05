@@ -526,8 +526,8 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		}))
 	}
 
-	// ctrl+t expands every section that has content, so the label names all of
-	// them rather than just the first.
+	// ctrl+t expands the pills panel, whose sections the label names so
+	// the command is discoverable whatever content is present.
 	if c.hasTodos || c.hasQueue || c.hasCron {
 		var sections []string
 		if c.hasTodos {

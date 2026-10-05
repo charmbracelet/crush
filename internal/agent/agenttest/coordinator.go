@@ -78,10 +78,9 @@ func NewCoordinator(
 		return nil, err
 	}
 
-	// The coordinator's cron store holds an open handle on its
-	// ownership-lock file for the process lifetime, and on Windows an
-	// open handle blocks deleting the file. Release it before the
-	// caller's TempDir cleanup runs.
+	// EnableScheduler stays false, so the coordinator wires no cron store
+	// and never takes the scheduled-tasks ownership lock; the Close
+	// cleanup below is a harmless no-op for it.
 	if closer, ok := coord.(interface{ Close() }); ok {
 		t.Cleanup(closer.Close)
 	}

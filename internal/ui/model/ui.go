@@ -411,8 +411,9 @@ type UI struct {
 	detailsOpen bool
 
 	// pills state
-	pillsExpanded     bool
-	pillsAutoExpanded bool
+	pillsExpanded      bool
+	pillsAutoExpanded  bool
+	focusedPillSection pillSection
 	// promptQueue / promptQueueItems mirror the session's queued prompts.
 	// They are event-driven with a TTL backstop, fetched off-thread by
 	// dispatchPromptQueueRefresh (see workspace_cache.go); promptQueue is
@@ -1878,7 +1879,7 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 				// Refresh cron tasks after a cron tool result so the
 				// pill stays current.
 				toolName := toolMsgItem.ToolCall().Name
-				if toolName == "CronCreate" || toolName == "CronList" || toolName == "CronDelete" {
+				if toolName == agenttools.CronCreateToolName || toolName == agenttools.CronListToolName || toolName == agenttools.CronDeleteToolName {
 					m.refreshCronTasks()
 				}
 			}
@@ -3093,6 +3094,20 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				}
 				return true
 			}
+		case key.Matches(msg, m.keyMap.Chat.PillLeft):
+			if m.state == uiChat && m.hasSession() && m.pillsExpanded && m.focus != uiFocusEditor {
+				if cmd := m.switchPillSection(-1); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+				return true
+			}
+		case key.Matches(msg, m.keyMap.Chat.PillRight):
+			if m.state == uiChat && m.hasSession() && m.pillsExpanded && m.focus != uiFocusEditor {
+				if cmd := m.switchPillSection(1); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+				return true
+			}
 		case key.Matches(msg, m.keyMap.Suspend):
 			if m.isAgentBusy() {
 				cmds = append(cmds, util.ReportWarn("Agent is busy, please wait..."))
@@ -3899,6 +3914,9 @@ func (m *UI) ShortHelp() []key.Binding {
 				k.Chat.PageDown,
 				k.Chat.Copy,
 			)
+			if m.pillsExpanded && len(m.pillSectionsWithContent()) > 1 {
+				binds = append(binds, k.Chat.PillLeft)
+			}
 		}
 	default:
 		// TODO: other states
@@ -4063,6 +4081,9 @@ func (m *UI) FullHelp() [][]key.Binding {
 					k.Chat.ClearHighlight,
 				},
 			)
+			if m.pillsExpanded && len(m.pillSectionsWithContent()) > 1 {
+				binds = append(binds, []key.Binding{k.Chat.PillLeft})
+			}
 		}
 	default:
 		if m.session == nil {

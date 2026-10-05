@@ -52,7 +52,10 @@ func (s *Store) Retry(id string, delay time.Duration) {
 		return
 	}
 	t.NextRunAt = next
-	s.persistBestEffort(id)
+	if t.Durable {
+		s.dirtySinceSync[id] = true
+		s.persistBestEffort(id)
+	}
 }
 
 // Scheduler polls a Store and fires due tasks. Fired prompts run

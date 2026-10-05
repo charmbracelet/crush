@@ -27,6 +27,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
+	"github.com/charmbracelet/crush/internal/compaction"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/discover"
@@ -135,6 +136,9 @@ type Coordinator interface {
 	AddNote(sessionID, text string)
 	Summarize(context.Context, string, string) error
 	RestoreSummarize(context.Context, string) error
+	SummarizePreview(context.Context, string, string) (compaction.Preview, error)
+	ConfirmSummarize(context.Context, string, compaction.Preview) error
+	DiscardSummarize(context.Context, string, string) error
 	Model() Model
 	UpdateModels(ctx context.Context) error
 	GenerateTitle(ctx context.Context, sessionID, prompt string)
@@ -1780,6 +1784,29 @@ func (c *coordinator) Summarize(ctx context.Context, sessionID, instructions str
 	opts := getProviderOptions(model, providerCfg)
 	injectOpenrouterSessionID(opts, sessionID)
 	return agent.Summarize(ctx, sessionID, model, instructions, opts, c.makeAuthRefreshCallback(providerCfg))
+}
+
+// SummarizePreview writes a checkpoint for a session without adopting it.
+func (c *coordinator) SummarizePreview(ctx context.Context, sessionID, instructions string) (compaction.Preview, error) {
+	agent := c.currentAgent()
+	model := agent.Model()
+	providerCfg, ok := c.cfg.Config().Providers.Get(model.ModelCfg.Provider)
+	if !ok {
+		return compaction.Preview{}, errModelProviderNotConfigured
+	}
+	opts := getProviderOptions(model, providerCfg)
+	injectOpenrouterSessionID(opts, sessionID)
+	return agent.SummarizePreview(ctx, sessionID, model, instructions, opts, c.makeAuthRefreshCallback(providerCfg))
+}
+
+// ConfirmSummarize adopts a previewed checkpoint.
+func (c *coordinator) ConfirmSummarize(ctx context.Context, sessionID string, preview compaction.Preview) error {
+	return c.currentAgent().ConfirmSummarize(ctx, sessionID, preview)
+}
+
+// DiscardSummarize throws away a previewed checkpoint.
+func (c *coordinator) DiscardSummarize(ctx context.Context, sessionID, checkpointID string) error {
+	return c.currentAgent().DiscardSummarize(ctx, sessionID, checkpointID)
 }
 
 // RestoreSummarize undoes the last compaction of a session. No model is

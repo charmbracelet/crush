@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent"
 	mcptools "github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
+	"github.com/charmbracelet/crush/internal/compaction"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/proto"
@@ -176,6 +177,13 @@ func (c *recordingCoordinator) MainAgent() string                               
 func (c *recordingCoordinator) GenerateTitle(context.Context, string, string)   {}
 func (c *recordingCoordinator) SetHostContext(proto.HostContext)                {}
 func (c *recordingCoordinator) HostContext() proto.HostContext                  { return proto.HostContext{} }
+func (c *recordingCoordinator) SummarizePreview(context.Context, string, string) (compaction.Preview, error) {
+	return compaction.Preview{}, nil
+}
+func (c *recordingCoordinator) ConfirmSummarize(context.Context, string, compaction.Preview) error {
+	return nil
+}
+func (c *recordingCoordinator) DiscardSummarize(context.Context, string, string) error { return nil }
 
 // fullFakeSessions adapts fakeChannelSessions to the full session.Service
 // interface by embedding it; only the channelSessionStore subset is

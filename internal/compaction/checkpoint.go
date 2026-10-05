@@ -64,6 +64,30 @@ func (i Info) Render() string {
 	return tag + ">\n" + strings.Join(lines, "\n") + "\n" + infoEnd
 }
 
+// Preview is a checkpoint that has been written but not adopted.
+//
+// Previewing exists because a checkpoint is a lossy rewrite of the session, and
+// discovering it dropped something important after the fact is worse than
+// waiting a moment to read it. Staging keeps the row so accepting costs no
+// second model call, and keeps every field the commit would have written, so
+// accepting cannot disagree with the plan that produced the text.
+type Preview struct {
+	// CheckpointID is the staged row. CutID is the first message the retained
+	// tail starts at, empty when the whole transcript was summarized.
+	CheckpointID string
+	CutID        string
+	Text         string
+	// Replaced and Kept count messages on each side of the cut.
+	Replaced int
+	Kept     int
+	// PromptTokens and the fields beside it are exactly what the session
+	// counters become on acceptance, recomputed here rather than at commit so
+	// the two paths can never drift.
+	PromptTokens     int64
+	CompletionTokens int64
+	EstimatedUsage   bool
+}
+
 // Body returns summary with any footer removed, so a later compaction can
 // merge the prose it wrote without re-summarizing bookkeeping about where the
 // transcript went.

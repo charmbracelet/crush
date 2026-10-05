@@ -60,6 +60,7 @@ func (c *blockingCoordinator) QueuedPrompts(string) int                         
 func (c *blockingCoordinator) QueuedPromptsList(string) []string                 { return nil }
 func (c *blockingCoordinator) ClearQueue(string)                                 {}
 func (c *blockingCoordinator) Summarize(context.Context, string, string) error   { return nil }
+func (c *blockingCoordinator) RestoreSummarize(context.Context, string) error    { return nil }
 func (c *blockingCoordinator) Model() agent.Model                                { return agent.Model{} }
 func (c *blockingCoordinator) UpdateModels(context.Context) error                { return nil }
 func (c *blockingCoordinator) GenerateTitle(context.Context, string, string)     {}

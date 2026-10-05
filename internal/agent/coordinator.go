@@ -141,6 +141,7 @@ type Coordinator interface {
 	QueuedPromptsList(sessionID string) []string
 	ClearQueue(sessionID string)
 	Summarize(context.Context, string, string) error
+	RestoreSummarize(context.Context, string) error
 	Model() Model
 	UpdateModels(ctx context.Context) error
 	GenerateTitle(ctx context.Context, sessionID, prompt string)
@@ -1485,6 +1486,12 @@ func (c *coordinator) Summarize(ctx context.Context, sessionID, instructions str
 	opts := getProviderOptions(agent.Model(), providerCfg)
 	injectOpenrouterSessionID(opts, sessionID)
 	return agent.Summarize(ctx, sessionID, instructions, opts, c.makeAuthRefreshCallback(providerCfg))
+}
+
+// RestoreSummarize undoes the last compaction of a session. No model is
+// involved, so no token refresh is either.
+func (c *coordinator) RestoreSummarize(ctx context.Context, sessionID string) error {
+	return c.currentAgent().RestoreSummarize(ctx, sessionID)
 }
 
 // GenerateTitle generates a session title using the current agent.

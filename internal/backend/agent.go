@@ -220,6 +220,20 @@ func (b *Backend) SummarizeSession(ctx context.Context, workspaceID, sessionID, 
 	return ws.AgentCoordinator.Summarize(ctx, sessionID, instructions)
 }
 
+// RestoreSummarizeSession undoes a session's most recent compaction.
+func (b *Backend) RestoreSummarizeSession(ctx context.Context, workspaceID, sessionID string) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+
+	if ws.AgentCoordinator == nil {
+		return ErrAgentNotInitialized
+	}
+
+	return ws.AgentCoordinator.RestoreSummarize(ctx, sessionID)
+}
+
 // QueuedPrompts returns the number of queued prompts for the session.
 func (b *Backend) QueuedPrompts(workspaceID, sessionID string) (int, error) {
 	ws, err := b.GetWorkspace(workspaceID)

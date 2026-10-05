@@ -51,7 +51,9 @@ func TestNonOwnerMergeDoesNotResurrectStaleTasks(t *testing.T) {
 	require.Len(t, tasks, 1)
 	require.Equal(t, fired.ID, tasks[0].ID)
 	require.Equal(t, firedAfter.RunCount, tasks[0].RunCount, "the owner's fired copy must win over the non-owner's stale one")
-	require.Equal(t, firedAfter.NextRunAt, tasks[0].NextRunAt)
+	require.True(t, firedAfter.NextRunAt.Equal(tasks[0].NextRunAt),
+		"the owner's fired NextRunAt must win over the non-owner's stale one: want %s, got %s",
+		firedAfter.NextRunAt, tasks[0].NextRunAt)
 }
 
 // TestNonOwnerListRefreshesFromDisk verifies a non-owner's CronList
@@ -115,7 +117,9 @@ func TestSetLastErrorKeepsSchedule(t *testing.T) {
 	tasks := store.List("s1")
 	require.Len(t, tasks, 1)
 	require.Equal(t, errRunFailed.Error(), tasks[0].LastError)
-	require.Equal(t, afterFire.NextRunAt, tasks[0].NextRunAt, "SetLastError must not reschedule")
+	require.True(t, afterFire.NextRunAt.Equal(tasks[0].NextRunAt),
+		"SetLastError must not reschedule: want %s, got %s",
+		afterFire.NextRunAt, tasks[0].NextRunAt)
 	require.Equal(t, afterFire.RunCount, tasks[0].RunCount)
 
 	// The error must reach disk too, so another window's CronList sees it.

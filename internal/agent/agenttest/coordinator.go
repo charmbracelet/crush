@@ -79,8 +79,8 @@ func NewCoordinator(
 	}
 
 	// EnableScheduler stays false, so the coordinator wires no cron store
-	// and never takes the scheduled-tasks ownership lock; the Close
-	// cleanup below is a harmless no-op for it.
+	// and never starts the scheduler goroutine; the Close cleanup below
+	// is a harmless no-op for it.
 	if closer, ok := coord.(interface{ Close() }); ok {
 		t.Cleanup(closer.Close)
 	}

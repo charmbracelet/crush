@@ -27,15 +27,12 @@ func testStore(t *testing.T) *Store {
 	return store
 }
 
-// durableStore returns a store persisting at path, closed when the
-// test ends. The close matters on Windows: a store that loaded (or
-// fired) keeps an open handle on its .owner.lock file, which a
-// t.TempDir cleanup running before process exit cannot delete.
+// durableStore returns a store persisting at path. All file locks it
+// takes are short-held and released within each operation, so TempDir
+// cleanup never races an open handle.
 func durableStore(t *testing.T, path string) *Store {
 	t.Helper()
-	store := NewStore(path)
-	t.Cleanup(store.Close)
-	return store
+	return NewStore(path)
 }
 
 func TestCreateValidation(t *testing.T) {
@@ -139,12 +136,12 @@ func TestDueTasksAndMarkFiredOneShot(t *testing.T) {
 	}
 	task, err := store.Create("s1", "29 10 27 7 *", "p", false, false)
 	require.NoError(t, err)
-	require.Len(t, store.DueTasks(), 0)
+	require.Len(t, store.DueTasks(nil), 0)
 
 	store.now = func() time.Time {
 		return time.Date(2026, 7, 27, 10, 29, 30, 0, time.Local)
 	}
-	due := store.DueTasks()
+	due := store.DueTasks(nil)
 	require.Len(t, due, 1)
 	require.Equal(t, task.ID, due[0].ID)
 
@@ -308,7 +305,7 @@ func TestSchedulerTickFiresDueTasks(t *testing.T) {
 		require.Equal(t, task.ID, firedTask.ID)
 		fired.Add(1)
 		return nil
-	})
+	}, nil)
 
 	store.now = func() time.Time {
 		return time.Date(2026, 7, 27, 10, 30, 0, 0, time.Local)
@@ -333,7 +330,7 @@ func TestSchedulerTickRecordsErrors(t *testing.T) {
 
 	sched := NewScheduler(store, func(_ context.Context, _ Task) error {
 		return errors.New("fire failed")
-	})
+	}, nil)
 
 	store.now = func() time.Time {
 		return time.Date(2026, 7, 27, 10, 30, 0, 0, time.Local)
@@ -525,7 +522,7 @@ func TestLoadSkipsUnusableTasks(t *testing.T) {
 	require.Equal(t, "good0001", loaded[0].ID)
 
 	// Nothing loaded may be due immediately.
-	require.Empty(t, store.DueTasks())
+	require.Empty(t, store.DueTasks(nil))
 }
 
 // A durable file holding more than the per-session cap must not let a
@@ -596,7 +593,7 @@ func TestStoreIsRaceFree(t *testing.T) {
 				}
 				store.List(session)
 				store.ListAll()
-				store.DueTasks()
+				store.DueTasks(nil)
 				store.MarkFired(task.ID)
 				store.MarkError(task.ID, errors.New("boom"))
 				if _, err := store.Delete(session, task.ID); err != nil {

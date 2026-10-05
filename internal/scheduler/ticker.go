@@ -64,11 +64,16 @@ func (s *Store) Retry(id string, delay time.Duration) {
 type Scheduler struct {
 	store *Store
 	fire  FireFunc
+	// serves reports whether this process is actively serving a session,
+	// gating where a due durable task may fire (see Store.DueTasks). A
+	// nil serves lets every session's tasks fire.
+	serves func(sessionID string) bool
 }
 
 // NewScheduler returns a Scheduler that fires the store's due tasks.
-func NewScheduler(store *Store, fire FireFunc) *Scheduler {
-	return &Scheduler{store: store, fire: fire}
+// serves may be nil, in which case every session counts as served.
+func NewScheduler(store *Store, fire FireFunc, serves func(sessionID string) bool) *Scheduler {
+	return &Scheduler{store: store, fire: fire, serves: serves}
 }
 
 // Run starts the tick loop and blocks until ctx is canceled.
@@ -92,7 +97,7 @@ func (s *Scheduler) Tick(ctx context.Context) {
 }
 
 func (s *Scheduler) tick(ctx context.Context) {
-	for _, task := range s.store.DueTasks() {
+	for _, task := range s.store.DueTasks(s.serves) {
 		slog.Debug("Firing scheduled task", "id", task.ID, "session_id", task.SessionID)
 		if err := s.fire(ctx, task); err != nil {
 			var transient *TransientError

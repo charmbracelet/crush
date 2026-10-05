@@ -167,9 +167,9 @@ type coordinator struct {
 	cronStore *scheduler.Store // nil when the scheduler is disabled (headless runs)
 
 	// schedCancel and schedDone stop and join the cron scheduler
-	// goroutine, so Close can release the cron store's ownership lock
-	// deterministically instead of relying on process exit. Both are nil
-	// when the scheduler never started.
+	// goroutine, so Close can shut it down deterministically instead of
+	// relying on process exit. Both are nil when the scheduler never
+	// started.
 	schedCancel context.CancelFunc
 	schedDone   chan struct{}
 
@@ -301,7 +301,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	c.mainAgentName = config.AgentCoder
 
 	if cronStore != nil {
-		cronScheduler := scheduler.NewScheduler(c.cronStore, c.fireScheduledTask)
+		cronScheduler := scheduler.NewScheduler(c.cronStore, c.fireScheduledTask, c.sessionServed)
 		schedCtx, schedCancel := context.WithCancel(ctx)
 		c.schedCancel = schedCancel
 		c.schedDone = make(chan struct{})
@@ -315,21 +315,16 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 }
 
 // Close stops the cron scheduler, waits for in-flight fired runs (they
-// carry the scheduler's context, so they are asked to abort first), and
-// releases the cron store's ownership lock, so an explicit shutdown (or
-// a test's TempDir cleanup, which runs before process exit) does not
-// leave a lock file handle behind. It is an optional capability outside
-// the Coordinator interface: callers that need it type-assert to
-// interface{ Close() }.
+// carry the scheduler's context, so they are asked to abort first), so
+// an explicit shutdown does not leave the goroutine running. It is an
+// optional capability outside the Coordinator interface: callers that
+// need it type-assert to interface{ Close() }.
 func (c *coordinator) Close() {
 	if c.schedCancel != nil {
 		c.schedCancel()
 		<-c.schedDone
 	}
 	c.fireWg.Wait()
-	if c.cronStore != nil {
-		c.cronStore.Close()
-	}
 }
 
 // activeAgent returns the coordinator's current main agent and its config
@@ -392,16 +387,17 @@ func (c *coordinator) fireScheduledTask(ctx context.Context, task scheduler.Task
 		return &scheduler.TransientError{Err: err, RetryIn: transientFireRetryDelay}
 	}
 
-	// Durable tasks are visible to every process sharing the tasks file,
-	// but only the ownership-lock holder is offered them, and that holder
-	// may not be the process showing the session. A session is "served"
-	// here from the moment the TUI loads it (ListCronTasks) or a user
-	// turn runs in it (Run/RunAccepted). Firing into an unserved session
-	// would run a prompt with nobody watching, and any permission request
-	// it raises would hang until someone answers it. So the fire is
-	// deferred instead: a TransientError keeps the task, skips this fire,
-	// and records no failure; it retries until some process serves the
-	// session again. When nobody ever does, the task simply waits.
+	// The scheduler only hands this coordinator a durable task when this
+	// process is serving the task's session (see DueTasks): a session is
+	// "served" from the moment the TUI loads it (ListCronTasks) or a user
+	// turn runs in it (Run/RunAccepted), so the fire lands where somebody
+	// can see it, and the on-disk claim keeps it exactly-once. Firing into
+	// an unserved session would run a prompt with nobody watching, and any
+	// permission request it raises would hang until someone answers it.
+	// The check below is the second line of defense — it also covers
+	// session-only tasks and direct calls — and defers instead of failing:
+	// a TransientError keeps the task, skips this fire, and records no
+	// failure. When no process ever serves the session, the task waits.
 	if !c.sessionServed(task.SessionID) {
 		return &scheduler.TransientError{
 			Err:     fmt.Errorf("session %s is not open in a process that can run it", task.SessionID),

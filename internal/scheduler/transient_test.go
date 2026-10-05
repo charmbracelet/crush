@@ -32,7 +32,7 @@ func TestTransientFireErrorRetries(t *testing.T) {
 			return &TransientError{Err: errors.New("database hiccup"), RetryIn: 30 * time.Second}
 		}
 		return nil
-	})
+	}, nil)
 
 	clock.t = clock.t.Add(16 * time.Minute)
 	s.Tick(t.Context())
@@ -61,7 +61,7 @@ func TestPermanentFireErrorStillRetiresOneShot(t *testing.T) {
 
 	s := NewScheduler(store, func(ctx context.Context, task Task) error {
 		return errors.New("real failure")
-	})
+	}, nil)
 
 	clock.t = clock.t.Add(16 * time.Minute)
 	s.Tick(t.Context())

@@ -184,7 +184,6 @@ func TestFireScheduledTaskDropsDurableTaskForDeletedSession(t *testing.T) {
 
 	// And it must not come back on the next start.
 	reloaded := scheduler.NewStore(path)
-	t.Cleanup(reloaded.Close)
 	require.NoError(t, reloaded.Load())
 	require.Empty(t, reloaded.ListAll(), "the drop must reach disk")
 }
@@ -227,7 +226,6 @@ func TestFireScheduledTaskTransientLookupErrorKeepsTasks(t *testing.T) {
 	require.Len(t, tasks, 2, "a transient lookup failure must not drop the session's tasks")
 
 	reloaded := scheduler.NewStore(path)
-	t.Cleanup(reloaded.Close)
 	require.NoError(t, reloaded.Load())
 	require.Len(t, reloaded.ListAll(), 2, "nothing may reach disk either")
 }

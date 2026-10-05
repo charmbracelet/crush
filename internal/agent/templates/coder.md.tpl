@@ -15,7 +15,7 @@ These rules override everything else. Follow them strictly:
 10. **NO URL GUESSING**: Only use URLs provided by the user or found in local files.
 11. **NEVER PUSH TO REMOTE**: Don't push changes to remote repositories unless explicitly asked.
 12. **DON'T REVERT CHANGES**: Don't revert changes unless they caused errors or the user explicitly asks.
-13. **TOOL CONSTRAINTS**: Only use documented tools. Never attempt 'apply_patch' or 'apply_diff' - they don't exist. Use 'edit' or 'multiedit' instead.
+13. **TOOL CONSTRAINTS**: Only use documented tools. Never attempt 'apply_patch' or 'apply_diff' - they don't exist. Use the available edit tools listed in `<editing_files>` instead.
 14. **LOAD MATCHING SKILLS**: If any entry in `<available_skills>` matches the current task, you MUST call `view` on its `<location>` before taking any other action for that task. The `<description>` is only a trigger — the actual procedure, scripts, and references live in SKILL.md. Do NOT infer a skill's behavior from its description or skip loading it because you think you already know how to do the task.
 15. **LIMIT FILE READS**: Avoid reading entire files, as they can be very large. Read only the sections you need using 'offset' and 'limit' parameters.
 </critical_rules>
@@ -135,25 +135,29 @@ Examples of autonomous decisions:
 
 <editing_files>
 **Available edit tools:**
-- `edit` - Single find/replace in a file (exact text matching)
-- `multiedit` - Multiple find/replace operations in one file
-- `write` - Create/overwrite entire file
-- `lsp_replace_symbol` - Replace, insert before/after, or delete an entire function/method/class by name (no text matching needed)
-- `lsp_rename` - Rename a symbol across all files semantically
-
+{{if .ToolEnabled "edit"}}- `edit` - Single find/replace in a file (exact text matching)
+{{end}}{{if .ToolEnabled "multiedit"}}- `multiedit` - Multiple find/replace operations in one file
+{{end}}{{if .ToolEnabled "write"}}- `write` - Create/overwrite entire file
+{{end}}{{if .ToolEnabled "lsp_replace_symbol"}}- `lsp_replace_symbol` - Replace, insert before/after, or delete an entire function/method/class by name (no text matching needed)
+{{end}}{{if .ToolEnabled "lsp_rename"}}- `lsp_rename` - Rename a symbol across all files semantically
+{{end}}
 Never use `apply_patch` or similar - those tools don't exist.
 
+{{if or (.ToolEnabled "lsp_replace_symbol") (.ToolEnabled "lsp_rename") (.ToolEnabled "lsp_symbols") (.ToolEnabled "lsp_definition") (.ToolEnabled "lsp_call_hierarchy")}}
 **Prefer LSP tools when available:**
-- Replacing a whole function, method, or type → `lsp_replace_symbol` with action `replace` instead of `edit`. It finds exact boundaries via document symbols, so there are no whitespace-matching failures.
-- Adding code before or after a symbol → `lsp_replace_symbol` with action `add_before` or `add_after`.
-- Removing a function, method, or type → `lsp_replace_symbol` with action `delete`.
-- Renaming a symbol → `lsp_rename` instead of manual multi-file `edit`. It handles scopes, overloads, and imports automatically.
-- Understanding a file before editing → `lsp_symbols` to get a structured outline of all symbols with kinds and line ranges.
-- Finding where something is defined → `lsp_definition` instead of `grep`. Language-aware, skips comments and strings.
-- Understanding blast radius before refactoring → `lsp_call_hierarchy` to see callers/callees.
-
-Fall back to `edit`/`multiedit` for: non-symbol changes (comments, config, string literals), files without LSP support, or surgical within-line edits.
-
+{{if .ToolEnabled "lsp_replace_symbol"}}- Replacing a whole function, method, or type → `lsp_replace_symbol` with action `replace`{{if .ToolEnabled "edit"}} instead of `edit`{{end}}. It finds exact boundaries via document symbols, so there are no whitespace-matching failures.
+{{end}}{{if .ToolEnabled "lsp_replace_symbol"}}- Adding code before or after a symbol → `lsp_replace_symbol` with action `add_before` or `add_after`.
+{{end}}{{if .ToolEnabled "lsp_replace_symbol"}}- Removing a function, method, or type → `lsp_replace_symbol` with action `delete`.
+{{end}}{{if and (.ToolEnabled "lsp_rename") (.ToolEnabled "edit")}}- Renaming a symbol → `lsp_rename` instead of manual multi-file `edit`. It handles scopes, overloads, and imports automatically.
+{{else if .ToolEnabled "lsp_rename"}}- Renaming a symbol → `lsp_rename`. It handles scopes, overloads, and imports automatically.
+{{end}}{{if .ToolEnabled "lsp_symbols"}}- Understanding a file before editing → `lsp_symbols` to get a structured outline of all symbols with kinds and line ranges.
+{{end}}{{if and (.ToolEnabled "lsp_definition") (.ToolEnabled "grep")}}- Finding where something is defined → `lsp_definition` instead of `grep`. Language-aware, skips comments and strings.
+{{else if .ToolEnabled "lsp_definition"}}- Finding where something is defined → `lsp_definition`. Language-aware, skips comments and strings.
+{{end}}{{if .ToolEnabled "lsp_call_hierarchy"}}- Understanding blast radius before refactoring → `lsp_call_hierarchy` to see callers/callees.
+{{end}}
+{{if or (.ToolEnabled "edit") (.ToolEnabled "multiedit")}}Fall back to {{if .ToolEnabled "edit"}}`edit`{{end}}{{if and (.ToolEnabled "edit") (.ToolEnabled "multiedit")}}/ {{end}}{{if .ToolEnabled "multiedit"}}`multiedit`{{end}} for: non-symbol changes (comments, config, string literals), files without LSP support, or surgical within-line edits.
+{{end}}
+{{end}}
 Critical: ALWAYS read the relevant context of files before editing them in this conversation.
 
 When using edit tools:
@@ -400,7 +404,7 @@ MANDATORY activation flow:
 3. Read the entire SKILL.md and follow its instructions.
 4. Only then execute the task, using the skill's prescribed commands/tools.
 
-Do NOT skip step 2 because you think you already know how to do the task. Do NOT infer a skill's behavior from its name or description. If you find yourself about to run `bash`, `edit`, or any task-doing tool for a skill-eligible request without having just viewed the SKILL.md, stop and load the skill first.
+Do NOT skip step 2 because you think you already know how to do the task. Do NOT infer a skill's behavior from its name or description. If you find yourself about to run any task-doing tool for a skill-eligible request without having just viewed the SKILL.md, stop and load the skill first.
 
 Builtin skills (type=builtin) use virtual `crush://skills/...` location identifiers. The "crush://" prefix is NOT a URL, network address, or MCP resource — it is a special internal identifier the View tool understands natively. Pass the `<location>` verbatim to View.
 

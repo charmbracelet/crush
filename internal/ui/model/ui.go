@@ -188,6 +188,9 @@ type (
 
 	// sessionFilesUpdatesMsg is sent when the files for this session have been updated
 	sessionFilesUpdatesMsg struct {
+		// forSession is the session the files were loaded for; a result
+		// that lands after the user switched sessions is dropped.
+		forSession   string
 		sessionFiles []SessionFile
 	}
 
@@ -1028,6 +1031,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case sessionFilesUpdatesMsg:
+		if msg.forSession != m.currentSessionID() {
+			break
+		}
 		m.sessionFiles = msg.sessionFiles
 		var paths []string
 		for _, f := range msg.sessionFiles {

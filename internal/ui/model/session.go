@@ -212,14 +212,18 @@ func (m *UI) handleFileEvent(file history.File) tea.Cmd {
 		return nil
 	}
 
+	// Capture the ID now: the command runs off the update loop, where
+	// m.session may already have been replaced or cleared.
+	sessionID := m.session.ID
 	return func() tea.Msg {
-		sessionFiles, err := m.loadSessionFiles(m.session.ID)
+		sessionFiles, err := m.loadSessionFiles(sessionID)
 		// could not load session files
 		if err != nil {
 			return util.NewErrorMsg(err)
 		}
 
 		return sessionFilesUpdatesMsg{
+			forSession:   sessionID,
 			sessionFiles: sessionFiles,
 		}
 	}

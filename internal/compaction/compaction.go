@@ -82,6 +82,47 @@ const (
 	MaxCheckpointTokens = 8_192
 )
 
+// maxOverheadRatio bounds how much of a window the fixed part of a request may
+// be charged with. Tool definitions and a system prompt are genuinely large -
+// tens of thousands of tokens once MCP servers are loaded - but an overhead
+// measured from a stale usage report should not be allowed to eat the window.
+const maxOverheadRatio = 0.5
+
+// Overhead is the part of a request that no message accounts for: the system
+// prompt and the tool definitions. It is measured rather than guessed, from
+// the provider's own count of the last request against the conversation text
+// that request carried.
+//
+// Every estimate of a tail is short by this much, and the gap is not small:
+// a session with a full set of tools can carry twenty-odd percent of its
+// window before the first message. Returning 0 when either side is unknown
+// keeps the caller's arithmetic honest instead of inventing a constant.
+func Overhead(reportedPromptTokens, estimatedMessages, contextWindow int64) int64 {
+	if reportedPromptTokens <= 0 || estimatedMessages <= 0 {
+		return 0
+	}
+	overhead := reportedPromptTokens - estimatedMessages
+	if overhead <= 0 {
+		return 0
+	}
+	if contextWindow > 0 && overhead > int64(float64(contextWindow)*maxOverheadRatio) {
+		// Almost always a usage report from a larger earlier request, such as
+		// a model swap. Better to under-account than to starve the tail.
+		return int64(float64(contextWindow) * maxOverheadRatio)
+	}
+	return overhead
+}
+
+// UsableWindow is how much of a context window conversation text may occupy
+// once the fixed cost of a request is subtracted. Never reduced below half the
+// window, so a wild overhead measurement degrades gracefully.
+func UsableWindow(contextWindow, overhead int64) int64 {
+	if contextWindow <= 0 {
+		return 0
+	}
+	return max(contextWindow-overhead, contextWindow/2)
+}
+
 // CheckpointOutputBudget returns the max_tokens a summarization request should
 // ask for, and whether the window could not even afford the floor.
 //
@@ -180,62 +221,96 @@ type Cut struct {
 	Kept       int
 	// KeptTokens is the estimated size of the retained tail.
 	KeptTokens int64
+	// SplitTurn is true when the tail begins inside a user turn rather than at
+	// a turn boundary, which happens only when no whole-turn tail fits the
+	// ceiling. The summarized region still ends at a point where every tool
+	// call has its result, so nothing is orphaned.
+	SplitTurn bool
+}
+
+// OverCeiling reports whether the retained tail is larger than the policy
+// allows. It is possible when no safe boundary inside the oversized turn would
+// leave a working set worth keeping, and callers should surface it rather than
+// pretend the budget was honored.
+func (c Cut) OverCeiling(policy Policy) bool {
+	if !c.Found {
+		return false
+	}
+	return c.KeptTokens > ceilingFor(policy)
+}
+
+// ceilingFor is the most a tail may claim. Honoring MinTailTurns is a
+// preference bounded by it; without a ceiling a single agentic turn can stand
+// in for the whole budget.
+func ceilingFor(policy Policy) int64 {
+	if policy.MaxTailTokens > 0 {
+		return policy.MaxTailTokens
+	}
+	return policy.KeepRecentTokens * 2
 }
 
 // Plan picks the cut point for compacting msgs, which must be the session
 // view in send order and must not include an earlier checkpoint.
 //
-// The cut is always a user turn boundary, so the summarized region is a whole
-// number of turns and can never split a tool call from its result. Within
-// that constraint it keeps as close to Policy.KeepRecentTokens as it can, then
-// walks the cut backwards until at least Policy.MinTailTurns are retained, so
-// long as that keeps the tail inside Policy.MaxTailTokens.
+// It prefers a user turn boundary, keeping the summarized region a whole number
+// of turns, and holds to that whenever the result fits the ceiling. When the
+// smallest whole-turn tail does not fit, it cuts at the nearest safe boundary
+// inside the turn instead: a long-running turn with hundreds of tool calls
+// would otherwise be retained entire, and "keep 8k of recent work" would mean
+// "keep 25k", which is how compaction stops freeing anything.
+//
+// Either way a cut never separates a tool call from its result.
 func Plan(msgs []message.Message, policy Policy) Cut {
 	if policy.KeepRecentTokens <= 0 || len(msgs) < 2 {
 		return Cut{}
 	}
 
-	var (
-		cuts  = validCuts(msgs)
-		cut   int
-		total int64
-	)
-	if len(cuts) == 0 {
+	boundaries := validCuts(msgs)
+	if len(boundaries) == 0 {
 		return Cut{}
 	}
 
-	found := false
-	for i := len(msgs) - 1; i >= 0; i-- {
-		total += Estimate(msgs[i])
-		if total >= policy.KeepRecentTokens {
-			cut, found = snapForward(cuts, i), true
+	// One pass of estimates, so every range below is a subtraction rather than
+	// a rescan. A session can hold three thousand messages and a compaction
+	// should not have to revisit each of them once per candidate cut.
+	prefix := prefixEstimates(msgs)
+	n := len(msgs)
+	kept := func(from int) int64 { return prefix[n] - prefix[from] }
+
+	// Land on the first turn boundary at or after the point where the running
+	// total from the end reaches the budget.
+	cut := -1
+	for i := n - 1; i >= 0; i-- {
+		if prefix[n]-prefix[i] >= policy.KeepRecentTokens {
+			cut = snapForward(boundaries, i)
 			break
 		}
 	}
 	// The whole transcript fits inside the tail budget, so summarizing it
 	// would trade fidelity for no space at all.
-	if !found {
+	if cut < 0 {
 		return Cut{}
 	}
 
 	// Widen to honor the turn floor, but only while the tail stays inside its
-	// ceiling. One agentic turn routinely carries a hundred tool calls, and
-	// honoring the floor regardless of size is what let a 250-message tail
-	// stand in for a 20k one.
-	ceiling := policy.MaxTailTokens
-	if ceiling <= 0 {
-		ceiling = policy.KeepRecentTokens * 2
-	}
-	keptTokens := EstimateAll(msgs[cut:])
+	// ceiling.
+	ceiling := ceilingFor(policy)
 	for policy.MinTailTurns > 0 && countTurns(msgs[cut:]) < policy.MinTailTurns {
-		prev := snapBackward(cuts, cut)
-		if prev < 0 || prev >= cut {
+		prev := snapBackward(boundaries, cut)
+		if prev < 0 || prev >= cut || kept(prev) > ceiling {
 			break
 		}
-		if wider := keptTokens + EstimateAll(msgs[prev:cut]); wider <= ceiling {
-			cut, keptTokens = prev, wider
-		} else {
-			break
+		cut = prev
+	}
+
+	// The ceiling is a post-condition, not only a limit on widening: the cut
+	// above can land before a turn far larger than the budget, and honoring
+	// that silently is the overshoot this whole path exists to stop.
+	split := false
+	if kept(cut) > ceiling {
+		if inner := tighten(safeCuts(msgs), cut, kept, ceiling); inner > cut {
+			cut = inner
+			split = !startsTurn(msgs[cut])
 		}
 	}
 
@@ -248,15 +323,73 @@ func Plan(msgs []message.Message, policy Policy) Cut {
 		Index:      cut,
 		MessageID:  msgs[cut].ID,
 		Summarized: cut,
-		Kept:       len(msgs) - cut,
-		KeptTokens: keptTokens,
+		Kept:       n - cut,
+		KeptTokens: kept(cut),
+		SplitTurn:  split,
 	}
 }
 
-// validCuts returns the indices a compaction may cut at: every message that
-// starts a fresh user turn. Cutting before a user message keeps the
-// summarized region on complete turns and leaves every tool call with the
-// results that follow it.
+// tighten moves a cut forward to the first safe boundary that fits the ceiling.
+// Boundaries arrive in order and a later cut always keeps less, so the first
+// one that fits is also the one that keeps the most context while still
+// honoring the ceiling. Returns the original cut when nothing inside the turn
+// fits: a working set that is too large beats a working set that is gone.
+func tighten(safe []int, cut int, kept func(int) int64, ceiling int64) int {
+	for _, c := range safe {
+		if c <= cut {
+			continue
+		}
+		if kept(c) <= ceiling {
+			return c
+		}
+	}
+	return cut
+}
+
+// safeCuts returns every index that begins a step: a point where each tool call
+// already made has its result on the same side of the cut.
+//
+// A call and its result live in separate messages, so an arbitrary interior
+// index would strand a result without its call and the provider would reject
+// the request. Turn boundaries satisfy this by construction.
+func safeCuts(msgs []message.Message) []int {
+	var (
+		pending = make(map[string]bool)
+		out     []int
+	)
+	for i, msg := range msgs {
+		if i > 0 && len(pending) == 0 {
+			out = append(out, i)
+		}
+		for _, part := range msg.Parts {
+			switch part := part.(type) {
+			case message.ToolCall:
+				// Provider-executed calls never produce a local result, so
+				// waiting on one would forbid every boundary after it.
+				if !part.ProviderExecuted {
+					pending[part.ID] = true
+				}
+			case message.ToolResult:
+				delete(pending, part.ToolCallID)
+			}
+		}
+	}
+	return out
+}
+
+// prefixEstimates holds the running estimate of msgs[:i], so the size of any
+// range is a subtraction.
+func prefixEstimates(msgs []message.Message) []int64 {
+	prefix := make([]int64, len(msgs)+1)
+	for i, msg := range msgs {
+		prefix[i+1] = prefix[i] + Estimate(msg)
+	}
+	return prefix
+}
+
+// validCuts returns the indices a compaction prefers to cut at: every message
+// that starts a fresh user turn, which keeps the summarized region a whole
+// number of turns and leaves every tool call with the results that follow it.
 func validCuts(msgs []message.Message) []int {
 	cuts := make([]int, 0, len(msgs))
 	for i := 1; i < len(msgs); i++ {

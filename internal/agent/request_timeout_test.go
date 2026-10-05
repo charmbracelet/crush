@@ -2,7 +2,9 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"runtime"
+	"strconv"
 	"testing"
 	"time"
 
@@ -55,6 +57,27 @@ func TestNewRequestTimeoutModel_Disabled(t *testing.T) {
 	require.Same(t, inner, newRequestTimeoutModel(inner, -time.Second))
 }
 
+// newTestRequestTimeoutModel builds a model whose first-part budget equals
+// the idle window, so deadline tests fire in milliseconds instead of
+// waiting out [defaultFirstPartTimeout].
+func newTestRequestTimeoutModel(m fantasy.LanguageModel, timeout time.Duration) requestTimeoutModel {
+	return requestTimeoutModel{LanguageModel: m, timeout: timeout, firstPart: timeout}
+}
+
+func TestNewRequestTimeoutModel_FirstPartBudget(t *testing.T) {
+	t.Parallel()
+
+	// A tight idle window still grants the full first-part floor: prefill
+	// on a large context must not be mistaken for a stalled provider.
+	short := newRequestTimeoutModel(&fakeLanguageModel{}, time.Second).(requestTimeoutModel)
+	require.Equal(t, time.Second, short.timeout)
+	require.Equal(t, defaultFirstPartTimeout, short.firstPart)
+
+	// A budget larger than the floor is used as configured.
+	long := newRequestTimeoutModel(&fakeLanguageModel{}, 10*time.Minute).(requestTimeoutModel)
+	require.Equal(t, 10*time.Minute, long.firstPart)
+}
+
 func TestRequestTimeoutModel_GenerateDeadline(t *testing.T) {
 	t.Parallel()
 
@@ -90,20 +113,26 @@ func TestRequestTimeoutModel_StreamAbortsWhenIdle(t *testing.T) {
 
 	inner := &fakeLanguageModel{}
 	// A stream that outlives the idle window: it waits for the context to
-	// be done and reports what it observed.
+	// be done and reports what it observed. Note that it never yields an
+	// error part of its own, the way a provider that simply stops
+	// delivering on cancellation does.
 	streamObserved := make(chan error, 1)
 	inner.stream = func(yield func(fantasy.StreamPart) bool) {
 		<-inner.streamCtx.Done()
 		streamObserved <- inner.streamCtx.Err()
 	}
-	m := newRequestTimeoutModel(inner, 10*time.Millisecond)
+	m := newTestRequestTimeoutModel(inner, 10*time.Millisecond)
 	stream, err := m.Stream(t.Context(), fantasy.Call{})
 	require.NoError(t, err)
 
 	done := make(chan struct{})
+	var streamErr error
 	go func() {
 		defer close(done)
-		for range stream {
+		for part := range stream {
+			if part.Error != nil {
+				streamErr = part.Error
+			}
 		}
 	}()
 
@@ -114,6 +143,124 @@ func TestRequestTimeoutModel_StreamAbortsWhenIdle(t *testing.T) {
 		t.Fatal("stream was not aborted by the idle timeout")
 	}
 	<-done
+
+	// The abort must be visible to the consumer even though the provider
+	// ended the stream silently.
+	var timeoutErr *requestTimeoutError
+	require.ErrorAs(t, streamErr, &timeoutErr)
+	require.True(t, timeoutErr.first, "a deadline before the first part is a no-data timeout")
+	require.Contains(t, streamErr.Error(), "received no data")
+}
+
+func TestRequestTimeoutModel_FirstPartWindowOutlivesIdle(t *testing.T) {
+	t.Parallel()
+
+	inner := &fakeLanguageModel{}
+	// Silence longer than the inter-part window, but within the budget
+	// granted to the first part: a model still prefilling a large context
+	// is not a hung provider.
+	inner.stream = func(yield func(fantasy.StreamPart) bool) {
+		time.Sleep(80 * time.Millisecond)
+		yield(fantasy.StreamPart{Delta: "hello"})
+	}
+	m := requestTimeoutModel{LanguageModel: inner, timeout: 20 * time.Millisecond, firstPart: 200 * time.Millisecond}
+	stream, err := m.Stream(t.Context(), fantasy.Call{})
+	require.NoError(t, err)
+
+	parts := 0
+	for part := range stream {
+		require.NoError(t, part.Error)
+		parts++
+	}
+	require.Equal(t, 1, parts, "the first part must not be cut off by the idle window")
+}
+
+func TestRequestTimeoutModel_AbortsOnInterPartGap(t *testing.T) {
+	t.Parallel()
+
+	inner := &fakeLanguageModel{}
+	// One part, then silence for the rest of the stream: the abort must be
+	// attributed to the inter-part window, not to the first-part budget.
+	inner.stream = func(yield func(fantasy.StreamPart) bool) {
+		if !yield(fantasy.StreamPart{Delta: "first"}) {
+			return
+		}
+		<-inner.streamCtx.Done()
+		yield(fantasy.StreamPart{Error: inner.streamCtx.Err()})
+	}
+	m := requestTimeoutModel{LanguageModel: inner, timeout: 10 * time.Millisecond, firstPart: time.Hour}
+	stream, err := m.Stream(t.Context(), fantasy.Call{})
+	require.NoError(t, err)
+
+	var got error
+	for part := range stream {
+		if part.Error != nil {
+			got = part.Error
+		}
+	}
+
+	var timeoutErr *requestTimeoutError
+	require.ErrorAs(t, got, &timeoutErr)
+	require.False(t, timeoutErr.first, "data already arrived, so this is not a first-part timeout")
+	require.Equal(t, 10*time.Millisecond, timeoutErr.window())
+	require.Contains(t, got.Error(), "received no data for 10ms")
+}
+
+func TestRequestTimeoutModel_SlowConsumerDoesNotAbort(t *testing.T) {
+	t.Parallel()
+
+	inner := &fakeLanguageModel{}
+	// A provider that delivers everything at once. The consumer drains the
+	// buffer far slower than the idle window, which used to read as
+	// provider silence and killed healthy streams.
+	inner.stream = func(yield func(fantasy.StreamPart) bool) {
+		for i := range 20 {
+			if !yield(fantasy.StreamPart{Delta: strconv.Itoa(i)}) {
+				return
+			}
+		}
+	}
+	m := newTestRequestTimeoutModel(inner, 10*time.Millisecond)
+	stream, err := m.Stream(t.Context(), fantasy.Call{})
+	require.NoError(t, err)
+
+	var got []string
+	for part := range stream {
+		time.Sleep(30 * time.Millisecond)
+		require.NoError(t, part.Error, "consumer backpressure must not be reported as a timeout")
+		got = append(got, part.Delta)
+	}
+
+	require.Len(t, got, 20)
+	for i, delta := range got {
+		require.Equal(t, strconv.Itoa(i), delta, "parts must arrive in order")
+	}
+}
+
+func TestRequestTimeoutModel_ConsumerStopReleasesStream(t *testing.T) {
+	t.Parallel()
+
+	inner := &fakeLanguageModel{}
+	inner.stream = func(yield func(fantasy.StreamPart) bool) {
+		if !yield(fantasy.StreamPart{Delta: "first"}) {
+			return
+		}
+		<-inner.streamCtx.Done()
+	}
+	m := requestTimeoutModel{LanguageModel: inner, timeout: time.Minute, firstPart: time.Minute}
+	stream, err := m.Stream(t.Context(), fantasy.Call{})
+	require.NoError(t, err)
+
+	seen := 0
+	for range stream {
+		seen++
+		break
+	}
+	require.Equal(t, 1, seen)
+
+	require.Eventually(t, func() bool {
+		return errors.Is(inner.streamCtx.Err(), context.Canceled)
+	}, 2*time.Second, 5*time.Millisecond, "stopping iteration must release the provider request")
 }
 
 func TestRequestTimeoutModel_ActiveStreamSurvives(t *testing.T) {
@@ -178,7 +325,7 @@ func TestRequestTimeoutModel_StreamReportsTimeout(t *testing.T) {
 		<-inner.streamCtx.Done()
 		yield(fantasy.StreamPart{Error: inner.streamCtx.Err()})
 	}
-	m := newRequestTimeoutModel(inner, 10*time.Millisecond)
+	m := newTestRequestTimeoutModel(inner, 10*time.Millisecond)
 	stream, err := m.Stream(t.Context(), fantasy.Call{})
 	require.NoError(t, err)
 
@@ -228,6 +375,13 @@ func TestRequestTimeoutErrorMessages(t *testing.T) {
 	require.Equal(t, "LLM stream received no data for 2s", idle.Error())
 	require.Contains(t, idle.userMessage(), "stopped sending data for 2s")
 	require.Contains(t, idle.userMessage(), "request-timeout")
+
+	// The wait for the first part runs under a longer budget, and the
+	// message reports that budget rather than the inter-part window.
+	first := &requestTimeoutError{timeout: time.Second, fired: 5 * time.Minute, idle: true, first: true}
+	require.Equal(t, "LLM stream received no data for 5m0s", first.Error())
+	require.Contains(t, first.userMessage(), "did not send any data for 5m0s")
+	require.Contains(t, first.userMessage(), "request-timeout")
 }
 
 // timeoutOnlyModel streams a single error part shaped exactly like the one

@@ -26,7 +26,7 @@ func TestReloadSubagents_PicksUpNewProviderModel(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(saDir, "late.md"),
 		[]byte("---\nname: late\ndescription: d.\nmodel: late-model\n---\n\nBody.\n"), 0o644))
 
-	store, err := config.Init(t.TempDir(), "", false)
+	store, err := config.Init(t.Context(), t.TempDir(), "", false)
 	require.NoError(t, err)
 	mgr := subagents.NewManager(nil, nil, nil)
 	t.Cleanup(mgr.Shutdown)

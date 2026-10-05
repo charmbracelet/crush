@@ -191,11 +191,12 @@ type coordinator struct {
 	runtime *subagents.Runtime
 
 	// subagentModelCache memoizes resolveModelByID results. rebuildModels
-	// clears it through resetSubagentModelCache, which also bumps
-	// subagentModelGen: entries are keyed by the generation they were built in,
-	// so a build that started before a rebuild cannot be read after it.
+	// clears it through resetSubagentModelCache.
 	subagentModelCache *csync.Map[subagentModelKey, Model]
-	subagentModelGen   atomic.Uint64
+	// subagentModelGen counts cache resets, so a build that straddles one
+	// is not stored. Guarded by subagentModelMu.
+	subagentModelGen uint64
+	subagentModelMu  sync.Mutex
 
 	// subagentCancels maps a running subagent's child session ID to the cancel
 	// func for its run. Dispatched subagents run on ad-hoc SessionAgents whose
@@ -893,7 +894,7 @@ func (c *coordinator) activeSkillsList() []*skills.Skill {
 // rebuilt (see resetSubagentModelCache), so a refreshed credential is picked up
 // by the next call.
 func (c *coordinator) resolveModelByID(ctx context.Context, modelID, providerOverride string, isSubAgent bool) (Model, error) {
-	key := subagentModelKey{modelID: modelID, provider: providerOverride, isSubAgent: isSubAgent, gen: c.subagentModelGen.Load()}
+	key := subagentModelKey{modelID: modelID, provider: providerOverride, isSubAgent: isSubAgent}
 
 	if c.subagentModelCache != nil {
 		if m, ok := c.subagentModelCache.Get(key); ok {
@@ -901,11 +902,24 @@ func (c *coordinator) resolveModelByID(ctx context.Context, modelID, providerOve
 		}
 	}
 
-	providerCfg, catwalkModel, err := c.cfg.Config().FindModelProvider(providerOverride, modelID)
+	c.subagentModelMu.Lock()
+	gen := c.subagentModelGen
+	c.subagentModelMu.Unlock()
+
+	cfg := c.cfg.Config()
+	providerCfg, catwalkModel, err := cfg.FindModelProvider(providerOverride, modelID)
 	if err != nil {
 		return Model{}, err
 	}
+	// Naming the configured large or small model by id keeps its settings
+	// (think, max_tokens, provider_options, ...), as the alias would.
 	selModel := config.SelectedModel{Provider: providerCfg.ID, Model: modelID}
+	for _, t := range []config.SelectedModelType{config.SelectedModelTypeLarge, config.SelectedModelTypeSmall} {
+		if sel := cfg.Models[t]; sel.Provider == selModel.Provider && sel.Model == modelID {
+			selModel = sel
+			break
+		}
+	}
 	provider, err := c.buildProvider(providerCfg, selModel, isSubAgent)
 	if err != nil {
 		return Model{}, err
@@ -914,9 +928,16 @@ func (c *coordinator) resolveModelByID(ctx context.Context, modelID, providerOve
 	if err != nil {
 		return Model{}, err
 	}
+	if resolveModelBuiltHook != nil {
+		resolveModelBuiltHook()
+	}
 
 	if c.subagentModelCache != nil {
-		c.subagentModelCache.Set(key, m)
+		c.subagentModelMu.Lock()
+		if c.subagentModelGen == gen {
+			c.subagentModelCache.Set(key, m)
+		}
+		c.subagentModelMu.Unlock()
 	}
 	return m, nil
 }
@@ -924,7 +945,9 @@ func (c *coordinator) resolveModelByID(ctx context.Context, modelID, providerOve
 // resetSubagentModelCache drops every memoized subagent model so the next
 // resolveModelByID builds from the live config and credentials.
 func (c *coordinator) resetSubagentModelCache() {
-	c.subagentModelGen.Add(1)
+	c.subagentModelMu.Lock()
+	defer c.subagentModelMu.Unlock()
+	c.subagentModelGen++
 	if c.subagentModelCache != nil {
 		c.subagentModelCache.Reset(make(map[subagentModelKey]Model))
 	}
@@ -950,7 +973,7 @@ func (c *coordinator) subagentModels(ctx context.Context, base func() ModelSet, 
 
 	initial, err := c.resolveModelByID(ctx, sm.Model, sm.Provider, isSubAgent)
 	if err != nil {
-		return nil, err
+		return nil, modelResolveError{err}
 	}
 	var last atomic.Pointer[Model]
 	last.Store(&initial)
@@ -970,6 +993,10 @@ func (c *coordinator) subagentModels(ctx context.Context, base func() ModelSet, 
 		return set
 	}, nil
 }
+
+// resolveModelBuiltHook, when set by tests, runs after resolveModelByID
+// builds a model and before it is cached.
+var resolveModelBuiltHook func()
 
 // buildAgent constructs a SessionAgent. sm carries the model-selection fields
 // from subagent frontmatter (zero value for the coder/task agents); see
@@ -999,8 +1026,9 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	primary := models().Large
 
 	if subagents.EffortIgnored(sm.Effort, primary.CatwalkCfg) {
-		slog.Warn("Subagent effort ignored: model does not support reasoning",
-			"model", primary.ModelCfg.Model, "effort", sm.Effort)
+		slog.Warn("Subagent effort ignored: model does not support this reasoning level",
+			"model", primary.ModelCfg.Model, "effort", sm.Effort,
+			"levels", primary.CatwalkCfg.ReasoningLevels)
 	}
 	if sm.Effort != "" {
 		shared := models
@@ -1878,27 +1906,6 @@ func (c *coordinator) waitForInteractiveReauth(ctx context.Context, providerID s
 	return nil
 }
 
-// rebuildSubagentModels rebuilds a subagent's models from the current config,
-// keeping its large model's selection (provider, model and effort), so
-// refreshed credentials reach its provider client.
-func (c *coordinator) rebuildSubagentModels(ctx context.Context, agent SessionAgent) error {
-	cur := agent.Model()
-	providerCfg, ok := c.cfg.Config().Providers.Get(cur.ModelCfg.Provider)
-	if !ok {
-		return errModelProviderNotConfigured
-	}
-	large, err := c.buildModel(ctx, providerCfg, cur.ModelCfg, cur.CatwalkCfg, true)
-	if err != nil {
-		return err
-	}
-	small, err := c.buildNamedModel(ctx, config.SelectedModelTypeSmall, true)
-	if err != nil {
-		return err
-	}
-	agent.SetModels(large, small)
-	return nil
-}
-
 // isUnauthorized reports whether err is an HTTP 401 from a provider.
 func isUnauthorized(err error) bool {
 	var providerErr *fantasy.ProviderError
@@ -1959,14 +1966,17 @@ type subagentModel struct {
 	Provider string
 }
 
+// modelResolveError marks a buildAgent failure caused by resolving the
+// requested model id, as opposed to any other part of the build.
+type modelResolveError struct{ error }
+
+func (e modelResolveError) Unwrap() error { return e.error }
+
 // subagentModelKey is the cache key for resolveModelByID results.
 type subagentModelKey struct {
 	modelID    string
 	provider   string
 	isSubAgent bool
-	// gen is the cache generation the model was built in; see
-	// coordinator.subagentModelGen.
-	gen uint64
 }
 
 // subAgentParams holds the parameters for running a sub-agent.
@@ -2062,12 +2072,9 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 			if err := inner(ctx, pe); err != nil {
 				return err
 			}
-			// The refresh rebuilds only the main agent's models; rebuild
-			// this subagent's too so fantasy's retry sends the fresh
-			// credentials instead of failing on the stale client again.
-			if err := c.rebuildSubagentModels(ctx, params.Agent); err != nil {
-				return err
-			}
+			// The refresh rebuilt the shared models; the subagent reads them
+			// through its Models func, so fantasy's retry sends the fresh
+			// credentials.
 			c.runtime.SetStatus(session.ID, subagents.StatusRunning)
 			return nil
 		}
@@ -2115,6 +2122,7 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 
 	output := subAgentOutput(result)
 	if output == "" {
+		finalStatus = subagents.StatusFailed
 		return fantasy.NewTextErrorResponse("Sub-agent completed but produced no text output."), nil
 	}
 	return fantasy.NewTextResponse(output), nil

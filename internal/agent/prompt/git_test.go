@@ -10,10 +10,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// runGit runs a git command in dir and fails the test if it errors.
+// runGit runs a git command in dir and fails the test if it errors. Signing
+// is forced off so a host config with commit.gpgsign=true cannot shell out to
+// gpg and block the suite on a passphrase prompt.
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.CommandContext(context.Background(), "git", args...)
+	gitArgs := append([]string{"-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false"}, args...)
+	cmd := exec.CommandContext(context.Background(), "git", gitArgs...)
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, "git %v: %s", args, out)

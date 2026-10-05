@@ -1,10 +1,13 @@
 package model
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/diff"
+	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/stretchr/testify/require"
@@ -108,6 +111,47 @@ func TestFileList(t *testing.T) {
 		}
 		got := fileList(st, "/", files, 20, 0)
 		require.Empty(t, got)
+	})
+}
+
+func TestLoadSessionFilesNormalizesLineEndings(t *testing.T) {
+	t.Parallel()
+
+	makeContent := func(sep string) string {
+		var b strings.Builder
+		for i := 0; i < 1000; i++ {
+			b.WriteString(fmt.Sprintf("line %d", i))
+			b.WriteString(sep)
+		}
+		return b.String()
+	}
+
+	t.Run("CRLF vs LF reports the real delta, not the line ending swap", func(t *testing.T) {
+		t.Parallel()
+
+		first := history.File{Path: "main.go", Content: makeContent("\r\n"), Version: 0}
+		last := history.File{Path: "main.go", Content: makeContent("\n") + "added\n", Version: 1}
+
+		firstContent, _ := fsext.ToUnixLineEndings(first.Content)
+		lastContent, _ := fsext.ToUnixLineEndings(last.Content)
+		_, additions, removals := diff.GenerateDiff(firstContent, lastContent, first.Path)
+
+		require.Equal(t, 1, additions, "expected one addition for the appended line, got %d", additions)
+		require.Equal(t, 0, removals, "expected zero removals, got %d", removals)
+	})
+
+	t.Run("identical content with mismatched line endings reports no changes", func(t *testing.T) {
+		t.Parallel()
+
+		first := history.File{Path: "main.go", Content: makeContent("\r\n"), Version: 0}
+		last := history.File{Path: "main.go", Content: makeContent("\n"), Version: 1}
+
+		firstContent, _ := fsext.ToUnixLineEndings(first.Content)
+		lastContent, _ := fsext.ToUnixLineEndings(last.Content)
+		_, additions, removals := diff.GenerateDiff(firstContent, lastContent, first.Path)
+
+		require.Equal(t, 0, additions)
+		require.Equal(t, 0, removals)
 	})
 }
 

@@ -51,6 +51,17 @@ var reservedNames = map[string]bool{
 	"task":  true,
 	"coder": true,
 	"mcp":   true,
+	"plan":  true,
+}
+
+// neverGrantedTools are built-in tools no subagent receives: the dispatcher
+// is never exposed to subagents, and the MCP resource tools are only built
+// for agents with unrestricted MCP access, which a subagent never has.
+// Listing one in `tools:` would silently match nothing.
+var neverGrantedTools = map[string]bool{
+	"agent":              true,
+	"list_mcp_resources": true,
+	"read_mcp_resource":  true,
 }
 
 // warnIfShadowsToolName logs when a subagent's name matches a built-in tool
@@ -143,8 +154,8 @@ type Subagent struct {
 	DisallowedTools ToolList `yaml:"disallowedTools"`
 	Model           string   `yaml:"model"`
 	Effort          string   `yaml:"effort"`
-	Skills          []string `yaml:"skills"`
-	MCPServers      []string `yaml:"mcpServers"`
+	Skills          ToolList `yaml:"skills"`
+	MCPServers      ToolList `yaml:"mcpServers"`
 	PermissionMode  string   `yaml:"permissionMode"`
 	Color           string   `yaml:"color"`
 	Provider        string   `yaml:"provider"`
@@ -289,10 +300,10 @@ func Parse(path string) (*Subagent, error) {
 // validateModel is non-nil and Model is a non-empty value other than the
 // "large"/"small" aliases, its error (unknown id, or an id several providers
 // offer with no `provider:` set) fails validation. When isKnownSkill is
-// non-nil, every name in Skills must resolve to a known skill. A nil
-// resolver skips the corresponding check (used when the caller has no config
-// or skills context).
-func (s *Subagent) ValidateAgainst(validateModel func(provider, model string) error, isKnownSkill func(name string) bool) error {
+// non-nil, every name in Skills must resolve to a known skill; likewise
+// isKnownMCP for MCPServers. A nil resolver skips the corresponding check
+// (used when the caller has no config or skills context).
+func (s *Subagent) ValidateAgainst(validateModel func(provider, model string) error, isKnownSkill, isKnownMCP func(name string) bool) error {
 	errs := []error{s.Validate()}
 	if validateModel != nil && s.Model != "" && s.Model != ModelAliasLarge && s.Model != ModelAliasSmall {
 		if err := validateModel(s.Provider, s.Model); err != nil {
@@ -303,6 +314,13 @@ func (s *Subagent) ValidateAgainst(validateModel func(provider, model string) er
 		for _, name := range s.Skills {
 			if !isKnownSkill(name) {
 				errs = append(errs, fmt.Errorf("skill %q is not an invocable active skill (unknown or model-invocation disabled)", name))
+			}
+		}
+	}
+	if isKnownMCP != nil {
+		for _, name := range s.MCPServers {
+			if !isKnownMCP(name) {
+				errs = append(errs, fmt.Errorf("MCP server %q is not configured", name))
 			}
 		}
 	}
@@ -375,6 +393,11 @@ func (s *Subagent) Validate() error {
 	}
 
 	errs = append(errs, unknownToolErrors("tools", s.Tools)...)
+	for _, tool := range s.Tools {
+		if neverGrantedTools[tool] {
+			errs = append(errs, fmt.Errorf("tools references %q, which subagents never receive", tool))
+		}
+	}
 	errs = append(errs, unknownToolErrors("disallowedTools", s.DisallowedTools)...)
 
 	if len(s.Tools) > 0 && len(s.DisallowedTools) > 0 {
@@ -545,15 +568,16 @@ func DeduplicateStates(all []*SubagentState) []*SubagentState {
 // given paths recursively, and returns both the discovered subagents and a
 // per-file state slice describing parse/validation outcomes. When
 // validateModel is non-nil it is used to validate non-alias model ids; when
-// isKnownSkill is non-nil it is used to validate skills references; a nil
-// func skips the corresponding check.
+// isKnownSkill / isKnownMCP are non-nil they validate skills and mcpServers
+// references; a nil func skips the corresponding check. Dot-prefixed files
+// and directories (editor lock files, .git) are skipped.
 //
 // The returned agents preserve the caller's path order: all subagents from
 // paths[0] (sorted by file path), then paths[1], and so on. Deduplicate keeps
 // the last occurrence of a name, so this ordering is what makes later paths —
 // the working directory, per ProjectSubagentsDir — override earlier ones
 // (monorepo root, global dirs) on a name collision.
-func DiscoverWithStates(paths []string, validateModel func(provider, model string) error, isKnownSkill func(name string) bool) ([]*Subagent, []*SubagentState) {
+func DiscoverWithStates(paths []string, validateModel func(provider, model string) error, isKnownSkill, isKnownMCP func(name string) bool) ([]*Subagent, []*SubagentState) {
 	var agents []*Subagent
 	var states []*SubagentState
 	var mu sync.Mutex
@@ -582,6 +606,12 @@ func DiscoverWithStates(paths []string, validateModel func(provider, model strin
 				addState("", path, StateError, err)
 				return nil
 			}
+			if path != base && strings.HasPrefix(d.Name(), ".") {
+				if d.IsDir() {
+					return fastwalk.SkipDir
+				}
+				return nil
+			}
 			if d.IsDir() || !strings.HasSuffix(d.Name(), ".md") {
 				return nil
 			}
@@ -599,7 +629,7 @@ func DiscoverWithStates(paths []string, validateModel func(provider, model strin
 				addState("", path, StateError, err)
 				return nil
 			}
-			if err := agent.ValidateAgainst(validateModel, isKnownSkill); err != nil {
+			if err := agent.ValidateAgainst(validateModel, isKnownSkill, isKnownMCP); err != nil {
 				slog.Warn("Subagent validation failed", "path", path, "error", err)
 				addState(agent.Name, path, StateError, err)
 				return nil
@@ -620,10 +650,7 @@ func DiscoverWithStates(paths []string, validateModel func(provider, model strin
 		// sort each base's results for stable output. Sorting per base (never
 		// across bases) preserves the caller's path-order precedence.
 		slices.SortStableFunc(baseAgents, func(a, b *Subagent) int {
-			if c := strings.Compare(strings.ToLower(a.FilePath), strings.ToLower(b.FilePath)); c != 0 {
-				return c
-			}
-			return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
+			return comparePaths(a.FilePath, b.FilePath)
 		})
 		// States are sorted and appended on the same per-base schedule as the
 		// agents above. Deduplicate and DeduplicateStates both keep the last
@@ -632,11 +659,20 @@ func DiscoverWithStates(paths []string, validateModel func(provider, model strin
 		// while the Library shows the other file's state. (Error states opt
 		// out of that collapse entirely; see DeduplicateStates.)
 		slices.SortStableFunc(baseStates, func(a, b *SubagentState) int {
-			return strings.Compare(strings.ToLower(a.Path), strings.ToLower(b.Path))
+			return comparePaths(a.Path, b.Path)
 		})
 		agents = append(agents, baseAgents...)
 		states = append(states, baseStates...)
 	}
 
 	return agents, states
+}
+
+// comparePaths orders paths case-insensitively, tie-breaking on the exact
+// path so case variants (Reviewer.md, reviewer.md) sort deterministically.
+func comparePaths(a, b string) int {
+	if c := strings.Compare(strings.ToLower(a), strings.ToLower(b)); c != 0 {
+		return c
+	}
+	return strings.Compare(a, b)
 }

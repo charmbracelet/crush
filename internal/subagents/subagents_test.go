@@ -237,10 +237,10 @@ description: Never closed.
 				require.Equal(t, tt.wantModel, agent.Model)
 			}
 			if tt.wantSkills != nil {
-				require.Equal(t, tt.wantSkills, agent.Skills)
+				require.Equal(t, tt.wantSkills, []string(agent.Skills))
 			}
 			if tt.wantMCPServers != nil {
-				require.Equal(t, tt.wantMCPServers, agent.MCPServers)
+				require.Equal(t, tt.wantMCPServers, []string(agent.MCPServers))
 			}
 			require.Equal(t, tt.wantPermMode, agent.PermissionMode)
 			if tt.wantBody != "" {
@@ -464,7 +464,7 @@ func TestValidateAgainst(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			err := tt.agent.ValidateAgainst(isKnown, nil)
+			err := tt.agent.ValidateAgainst(isKnown, nil, nil)
 			if tt.wantErr {
 				require.Error(t, err)
 				require.Contains(t, err.Error(), tt.errMsg)
@@ -487,10 +487,10 @@ func TestValidateAgainst_SurfacesResolverError(t *testing.T) {
 		return errors.New(`model "gpt-5" is offered by multiple providers (azure, openai); set provider to choose one`)
 	}
 	s := Subagent{Name: "a", Description: "d", Model: "gpt-5"}
-	require.ErrorContains(t, s.ValidateAgainst(ambiguous, nil), "offered by multiple providers (azure, openai)")
+	require.ErrorContains(t, s.ValidateAgainst(ambiguous, nil, nil), "offered by multiple providers (azure, openai)")
 
 	s.Provider = "openai"
-	require.NoError(t, s.ValidateAgainst(ambiguous, nil))
+	require.NoError(t, s.ValidateAgainst(ambiguous, nil, nil))
 }
 
 func TestValidateAgainst_NilResolver_AcceptsAnyNonEmptyModel(t *testing.T) {
@@ -499,7 +499,7 @@ func TestValidateAgainst_NilResolver_AcceptsAnyNonEmptyModel(t *testing.T) {
 	// Without a resolver, model id strings cannot be validated; ValidateAgainst
 	// should accept any non-empty model string and defer enforcement.
 	s := Subagent{Name: "a", Description: "d", Model: "gpt-99-future"}
-	require.NoError(t, s.ValidateAgainst(nil, nil))
+	require.NoError(t, s.ValidateAgainst(nil, nil, nil))
 }
 
 // TestValidateAgainst_ProviderPropagated verifies that ValidateAgainst forwards
@@ -515,7 +515,7 @@ func TestValidateAgainst_ProviderPropagated(t *testing.T) {
 	}
 
 	s := Subagent{Name: "a", Description: "d", Provider: "openai", Model: "gpt-4o"}
-	require.NoError(t, s.ValidateAgainst(isKnown, nil))
+	require.NoError(t, s.ValidateAgainst(isKnown, nil, nil))
 	require.Equal(t, "openai", capturedProvider)
 	require.Equal(t, "gpt-4o", capturedModel)
 }
@@ -533,7 +533,7 @@ func TestValidateAgainst_EmptyProviderPropagated(t *testing.T) {
 	}
 
 	s := Subagent{Name: "a", Description: "d", Provider: "", Model: "gpt-4o"}
-	require.NoError(t, s.ValidateAgainst(isKnown, nil))
+	require.NoError(t, s.ValidateAgainst(isKnown, nil, nil))
 	require.Equal(t, "", capturedProvider)
 }
 
@@ -939,7 +939,7 @@ func TestDiscoverWithStates(t *testing.T) {
 			0o644,
 		))
 
-		agents, states := DiscoverWithStates([]string{tmp}, nil, nil)
+		agents, states := DiscoverWithStates([]string{tmp}, nil, nil, nil)
 
 		require.Len(t, agents, 2)
 		names := make([]string, 0, len(agents))
@@ -974,7 +974,7 @@ func TestDiscoverWithStates(t *testing.T) {
 		// Repeat: a single pass can pass by luck when the order happens to
 		// come out sorted.
 		for range 20 {
-			agents, states := DiscoverWithStates([]string{tmp}, nil, nil)
+			agents, states := DiscoverWithStates([]string{tmp}, nil, nil, nil)
 			require.Len(t, agents, 2)
 			require.Len(t, states, 2)
 
@@ -1000,7 +1000,7 @@ func TestDiscoverWithStates(t *testing.T) {
 			0o644,
 		))
 
-		agents, states := DiscoverWithStates([]string{tmp}, nil, nil)
+		agents, states := DiscoverWithStates([]string{tmp}, nil, nil, nil)
 		require.Len(t, agents, 1)
 		require.Equal(t, "fetch", agents[0].Name)
 		require.Len(t, states, 1)
@@ -1066,7 +1066,7 @@ func TestDiscoverWithStates(t *testing.T) {
 			0o644,
 		))
 
-		agents, states := DiscoverWithStates([]string{tmp}, nil, nil)
+		agents, states := DiscoverWithStates([]string{tmp}, nil, nil, nil)
 
 		require.Empty(t, agents)
 		require.Len(t, states, 1)
@@ -1077,7 +1077,7 @@ func TestDiscoverWithStates(t *testing.T) {
 	t.Run("nonexistent_path_silently_skipped", func(t *testing.T) {
 		t.Parallel()
 
-		agents, states := DiscoverWithStates([]string{filepath.Join(t.TempDir(), "does-not-exist")}, nil, nil)
+		agents, states := DiscoverWithStates([]string{filepath.Join(t.TempDir(), "does-not-exist")}, nil, nil, nil)
 
 		require.Empty(t, agents)
 		require.Empty(t, states)
@@ -1086,7 +1086,7 @@ func TestDiscoverWithStates(t *testing.T) {
 	t.Run("empty_dir_returns_no_results", func(t *testing.T) {
 		t.Parallel()
 
-		agents, states := DiscoverWithStates([]string{t.TempDir()}, nil, nil)
+		agents, states := DiscoverWithStates([]string{t.TempDir()}, nil, nil, nil)
 
 		require.Empty(t, agents)
 		require.Empty(t, states)
@@ -1102,7 +1102,7 @@ func TestDiscoverWithStates(t *testing.T) {
 			0o644,
 		))
 
-		agents, states := DiscoverWithStates([]string{tmp}, nil, nil)
+		agents, states := DiscoverWithStates([]string{tmp}, nil, nil, nil)
 
 		require.Empty(t, agents)
 		require.Empty(t, states)
@@ -1125,7 +1125,7 @@ func TestDiscoverWithStates(t *testing.T) {
 			return nil
 		}
 
-		agents, states := DiscoverWithStates([]string{tmp}, isKnown, nil)
+		agents, states := DiscoverWithStates([]string{tmp}, isKnown, nil, nil)
 
 		require.Len(t, agents, 1)
 		require.Len(t, states, 1)
@@ -1146,7 +1146,7 @@ func TestDiscoverWithStates(t *testing.T) {
 
 		isKnown := func(provider, model string) error { return errors.New("unknown model") }
 
-		agents, states := DiscoverWithStates([]string{tmp}, isKnown, nil)
+		agents, states := DiscoverWithStates([]string{tmp}, isKnown, nil, nil)
 
 		require.Empty(t, agents)
 		require.Len(t, states, 1)
@@ -1192,7 +1192,7 @@ func TestDiscoverWithStates(t *testing.T) {
 			0o644,
 		))
 
-		agents, _ := DiscoverWithStates([]string{parent, nested}, nil, nil)
+		agents, _ := DiscoverWithStates([]string{parent, nested}, nil, nil, nil)
 
 		kept := Deduplicate(agents)
 		require.Len(t, kept, 1)
@@ -1371,13 +1371,84 @@ func TestValidateAgainst_SkillsValidated(t *testing.T) {
 	}
 	isKnown := func(name string) bool { return name == "known-skill" }
 
-	err := s.ValidateAgainst(nil, isKnown)
+	err := s.ValidateAgainst(nil, isKnown, nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), `skill "unknown-skill" is not an invocable active skill`)
 	require.NotContains(t, err.Error(), `skill "known-skill"`)
 
-	require.NoError(t, s.ValidateAgainst(nil, nil), "nil resolver must skip the skills check")
+	require.NoError(t, s.ValidateAgainst(nil, nil, nil), "nil resolver must skip the skills check")
 
 	s.Skills = []string{"known-skill"}
-	require.NoError(t, s.ValidateAgainst(nil, isKnown))
+	require.NoError(t, s.ValidateAgainst(nil, isKnown, nil))
+}
+
+// TestValidate_ToolsNeverGrantedToSubagents verifies tools a subagent can
+// never receive are rejected instead of silently matching nothing.
+func TestValidate_ToolsNeverGrantedToSubagents(t *testing.T) {
+	t.Parallel()
+
+	for _, tool := range []string{"agent", "list_mcp_resources", "read_mcp_resource"} {
+		s := Subagent{Name: "x", Description: "d", Tools: ToolList{tool}}
+		require.ErrorContains(t, s.Validate(), tool, tool)
+
+		s = Subagent{Name: "x", Description: "d", DisallowedTools: ToolList{tool}}
+		require.NoError(t, s.Validate(), "disallowing %s is harmless", tool)
+	}
+}
+
+// TestParseContent_ScalarSkillsAndMCPServers verifies skills and mcpServers
+// accept the comma-separated scalar form tools: does.
+func TestParseContent_ScalarSkillsAndMCPServers(t *testing.T) {
+	t.Parallel()
+
+	s, err := ParseContent([]byte("---\nname: x\ndescription: d\nskills: a, b\nmcpServers: docs\n---\nbody\n"))
+	require.NoError(t, err)
+	require.Equal(t, []string{"a", "b"}, []string(s.Skills))
+	require.Equal(t, []string{"docs"}, []string(s.MCPServers))
+}
+
+// TestValidateAgainst_MCPServersValidated verifies an unknown mcpServers
+// entry fails validation instead of leaving the subagent without MCP tools.
+func TestValidateAgainst_MCPServersValidated(t *testing.T) {
+	t.Parallel()
+
+	isKnown := func(name string) bool { return name == "github" }
+	s := Subagent{Name: "x", Description: "d", MCPServers: []string{"github-mcp"}}
+	require.ErrorContains(t, s.ValidateAgainst(nil, nil, isKnown), `MCP server "github-mcp"`)
+
+	s.MCPServers = []string{"github"}
+	require.NoError(t, s.ValidateAgainst(nil, nil, isKnown))
+}
+
+// TestReservedName_Plan verifies the built-in plan agent's ID is reserved.
+func TestReservedName_Plan(t *testing.T) {
+	t.Parallel()
+
+	s := Subagent{Name: "plan", Description: "d"}
+	require.ErrorContains(t, s.Validate(), `name "plan" is reserved`)
+}
+
+// TestComparePaths_CaseVariants verifies paths differing only by case sort
+// the same way regardless of input order.
+func TestComparePaths_CaseVariants(t *testing.T) {
+	t.Parallel()
+
+	a, b := "/x/Reviewer.md", "/x/reviewer.md"
+	require.Equal(t, -comparePaths(b, a), comparePaths(a, b))
+	require.NotZero(t, comparePaths(a, b))
+}
+
+// TestDiscoverWithStates_SkipsHiddenFiles verifies editor lock files and
+// hidden directories are not parsed as definitions.
+func TestDiscoverWithStates_SkipsHiddenFiles(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(tmp, ".#a.md"), []byte("lock"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(tmp, ".git"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(tmp, ".git", "b.md"), []byte("x"), 0o644))
+
+	agents, states := DiscoverWithStates([]string{tmp}, nil, nil, nil)
+	require.Empty(t, agents)
+	require.Empty(t, states)
 }

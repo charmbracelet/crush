@@ -74,7 +74,7 @@ func (s *runCoordinator) BeginAccepted(sessionID string) *agent.AcceptedRun {
 func (s *runCoordinator) Cancel(string) {}
 func (s *runCoordinator) CancelAll()    {}
 func (s *runCoordinator) IsBusy() bool  { return s.busy }
-func (s *runCoordinator) IsSessionBusy(string) bool {
+func (s *runCoordinator) HasPendingWork(string) bool {
 	return false
 }
 func (s *runCoordinator) QueuedPrompts(string) int          { return 0 }

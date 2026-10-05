@@ -48,14 +48,16 @@ crush models gpt5`,
 
 		entries := make(map[string]*providerEntry)
 
-		// Add configured providers first.
+		// Add configured providers first. A provider that declares an OAuth
+		// flow it has not completed is not configured yet: its models are
+		// listed, but a sign-in is what turns them on.
 		for providerID, provider := range cfg.Config().Providers.Seq2() {
 			if provider.Disable {
 				continue
 			}
 			entry := &providerEntry{
 				name:       provider.Name,
-				configured: true,
+				configured: !provider.NeedsSignIn(),
 			}
 
 			// The OpenAI and xAI providers each hold exactly one

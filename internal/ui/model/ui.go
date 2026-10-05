@@ -34,6 +34,7 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/clipboard"
 	"github.com/charmbracelet/crush/internal/commands"
+	"github.com/charmbracelet/crush/internal/compaction"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/fsext"
@@ -287,7 +288,10 @@ type UI struct {
 	// session it belongs to. The pair rather than a bare string because a
 	// compaction keeps running when the user switches away, and its status
 	// must not follow them to the next session.
-	summarizingNote        string
+	summarizingNote string
+	// pendingPreview is a checkpoint the user has been shown but has not yet
+	// accepted. The session still has its full history while it is set.
+	pendingPreview         *compaction.Preview
 	summarizingNoteSession string
 
 	// bangMode tracks whether the editor is in bang (!) shell mode.
@@ -1181,6 +1185,18 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sendProgressBar = xstrings.ContainsAnyOf(termVersion, "ghostty", "iterm2", "rio")
 		}
 		return m, nil
+	case previewCheckpointMsg:
+		// Hold the staged checkpoint so the palette can offer keep and discard,
+		// and surface what it would replace so the decision has a number next
+		// to it rather than only the prose.
+		preview := msg.preview
+		m.pendingPreview = &preview
+		cmds = append(cmds, util.ReportInfo(fmt.Sprintf(
+			"Checkpoint previewed: %d messages would be replaced, %d kept verbatim. Choose keep or discard checkpoint.",
+			preview.Replaced, preview.Kept,
+		)))
+	case discardPreviewMsg:
+		m.pendingPreview = nil
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		// Suppress the chat's full-height scan during the resize so a drag
@@ -2261,6 +2277,48 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		// dialog, and closing the wrong one leaves the box hanging over a
 		// compaction that is already running.
 		m.dialog.CloseFrontDialog()
+	case dialog.ActionPreviewSummarize:
+		// The palette collects emphasis first, exactly as compact does; the
+		// action handed back carries Args and runs straight through.
+		if len(msg.Arguments) > 0 && msg.Args == nil {
+			m.dialog.CloseFrontDialog()
+			m.dialog.OpenDialog(dialog.NewArguments(
+				m.com,
+				"Compact (Preview First)",
+				"Optional: tell the checkpoint what to emphasize. The result is written for reading, and only applied if you keep it.",
+				msg.Arguments,
+				msg,
+			))
+			break
+		}
+		if m.isAgentBusy() {
+			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before previewing a checkpoint..."))
+			break
+		}
+		cmds = append(cmds, func() tea.Msg {
+			preview, err := m.com.Workspace.AgentSummarizePreview(context.Background(), msg.SessionID, msg.Instructions)
+			if err != nil {
+				return util.ReportError(err)()
+			}
+			return previewCheckpointMsg{preview: preview}
+		})
+		m.dialog.CloseFrontDialog()
+	case dialog.ActionAcceptPreview:
+		cmds = append(cmds, func() tea.Msg {
+			if err := m.com.Workspace.AgentConfirmSummarize(context.Background(), msg.SessionID, msg.Preview); err != nil {
+				return util.ReportError(err)()
+			}
+			return discardPreviewMsg{}
+		}, m.loadSession(msg.SessionID))
+		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionDiscardPreview:
+		cmds = append(cmds, func() tea.Msg {
+			if err := m.com.Workspace.AgentDiscardSummarize(context.Background(), msg.SessionID, msg.CheckpointID); err != nil {
+				return util.ReportError(err)()
+			}
+			return discardPreviewMsg{}
+		}, m.loadSession(msg.SessionID))
+		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionRestoreSummarize:
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before restoring the checkpoint..."))
@@ -5701,6 +5759,7 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 		return util.ReportError(err)
 	}
 
+	commands.SetPendingPreview(m.pendingPreview)
 	commands.SetHasCheckpoint(m.session != nil && m.session.SummaryMessageID != "")
 
 	m.dialog.OpenDialog(commands)
@@ -6525,3 +6584,11 @@ func renderLogo(t *styles.Styles, compact, hyper bool, width int) string {
 		Hyper:        hyper,
 	})
 }
+
+// previewCheckpointMsg carries a staged checkpoint back from the workspace so
+// the model can hold it for the accept/discard commands.
+type previewCheckpointMsg struct{ preview compaction.Preview }
+
+// discardPreviewMsg clears the staged checkpoint once it has been accepted or
+// thrown away, so the palette stops offering a decision that is already made.
+type discardPreviewMsg struct{}

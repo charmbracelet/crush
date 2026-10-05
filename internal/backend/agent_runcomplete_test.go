@@ -9,6 +9,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/app"
+	"github.com/charmbracelet/crush/internal/compaction"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/google/uuid"
@@ -37,19 +38,42 @@ func (c *errorCoordinator) RunAccepted(ctx context.Context, accept *agent.Accept
 }
 
 func (c *errorCoordinator) BeginAccepted(sessionID string) *agent.AcceptedRun { return nil }
-func (c *errorCoordinator) Cancel(string)                                     {}
-func (c *errorCoordinator) CancelAll()                                        {}
-func (c *errorCoordinator) IsBusy() bool                                      { return false }
-func (c *errorCoordinator) IsSessionBusy(string) bool                         { return false }
-func (c *errorCoordinator) QueuedPrompts(string) int                          { return 0 }
-func (c *errorCoordinator) QueuedPromptsList(string) []string                 { return nil }
-func (c *errorCoordinator) ClearQueue(string)                                 {}
-func (c *errorCoordinator) Summarize(context.Context, string, string) error   { return nil }
-func (c *errorCoordinator) RestoreSummarize(context.Context, string) error    { return nil }
-func (c *errorCoordinator) Model() agent.Model                                { return agent.Model{} }
-func (c *errorCoordinator) UpdateModels(context.Context) error                { return nil }
-func (c *errorCoordinator) SetMainAgent(string) error                         { return nil }
-func (c *errorCoordinator) GenerateTitle(context.Context, string, string)     {}
+
+func (c *errorCoordinator) Cancel(string) {}
+
+func (c *errorCoordinator) CancelAll() {}
+
+func (c *errorCoordinator) IsBusy() bool { return false }
+
+func (c *errorCoordinator) IsSessionBusy(string) bool { return false }
+
+func (c *errorCoordinator) QueuedPrompts(string) int { return 0 }
+
+func (c *errorCoordinator) QueuedPromptsList(string) []string { return nil }
+
+func (c *errorCoordinator) ClearQueue(string) {}
+
+func (c *errorCoordinator) Summarize(context.Context, string, string) error { return nil }
+
+func (c *errorCoordinator) SummarizePreview(context.Context, string, string) (compaction.Preview, error) {
+	return compaction.Preview{}, nil
+}
+
+func (c *errorCoordinator) ConfirmSummarize(context.Context, string, compaction.Preview) error {
+	return nil
+}
+
+func (c *errorCoordinator) DiscardSummarize(context.Context, string, string) error { return nil }
+
+func (c *errorCoordinator) RestoreSummarize(context.Context, string) error { return nil }
+
+func (c *errorCoordinator) Model() agent.Model { return agent.Model{} }
+
+func (c *errorCoordinator) UpdateModels(context.Context) error { return nil }
+
+func (c *errorCoordinator) SetMainAgent(string) error { return nil }
+
+func (c *errorCoordinator) GenerateTitle(context.Context, string, string) {}
 
 // insertRunCompleteWorkspace installs a workspace backed by a real
 // app.App (so the runCompletions broker exists) with the given

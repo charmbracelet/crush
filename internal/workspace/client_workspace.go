@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/client"
 	"github.com/charmbracelet/crush/internal/commands"
+	"github.com/charmbracelet/crush/internal/compaction"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/herdr"
 	"github.com/charmbracelet/crush/internal/history"
@@ -327,6 +328,24 @@ func (w *ClientWorkspace) AgentClearQueue(sessionID string) {
 
 func (w *ClientWorkspace) AgentSetMain(agentID string) error {
 	return w.client.SetMainAgent(context.Background(), w.workspaceID(), agentID)
+}
+
+// errPreviewOverWireIsUnsupported marks the checkpoint-preview methods as
+// local-only. A remote workspace could stage through a new endpoint, but until
+// it exists the honest answer is "not here" rather than a preview that quietly
+// commits.
+var errPreviewOverWireIsUnsupported = errors.New("checkpoint preview requires a local workspace")
+
+func (w *ClientWorkspace) AgentSummarizePreview(context.Context, string, string) (compaction.Preview, error) {
+	return compaction.Preview{}, errPreviewOverWireIsUnsupported
+}
+
+func (w *ClientWorkspace) AgentConfirmSummarize(context.Context, string, compaction.Preview) error {
+	return errPreviewOverWireIsUnsupported
+}
+
+func (w *ClientWorkspace) AgentDiscardSummarize(context.Context, string, string) error {
+	return errPreviewOverWireIsUnsupported
 }
 
 func (w *ClientWorkspace) AgentRestoreSummarize(ctx context.Context, sessionID string) error {

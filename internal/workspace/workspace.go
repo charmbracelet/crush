@@ -13,6 +13,7 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	mcptools "github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/commands"
+	"github.com/charmbracelet/crush/internal/compaction"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/lsp"
@@ -168,6 +169,10 @@ type Workspace interface {
 	// AgentRestoreSummarize undoes the session's most recent compaction,
 	// bringing back the messages its checkpoint replaced.
 	AgentRestoreSummarize(ctx context.Context, sessionID string) error
+	// AgentSummarizePreview writes a checkpoint the user can accept or discard.
+	AgentSummarizePreview(ctx context.Context, sessionID, instructions string) (compaction.Preview, error)
+	AgentConfirmSummarize(ctx context.Context, sessionID string, preview compaction.Preview) error
+	AgentDiscardSummarize(ctx context.Context, sessionID, checkpointID string) error
 	UpdateAgentModel(ctx context.Context) error
 	InitCoderAgent(ctx context.Context) error
 	InitCoderAgentNonInteractive(ctx context.Context) error

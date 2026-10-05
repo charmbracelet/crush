@@ -10,6 +10,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/app"
+	"github.com/charmbracelet/crush/internal/compaction"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/google/uuid"
@@ -52,18 +53,41 @@ func (c *blockingCoordinator) RunAccepted(ctx context.Context, accept *agent.Acc
 }
 
 func (c *blockingCoordinator) BeginAccepted(sessionID string) *agent.AcceptedRun { return nil }
-func (c *blockingCoordinator) Cancel(string)                                     {}
-func (c *blockingCoordinator) CancelAll()                                        {}
-func (c *blockingCoordinator) IsBusy() bool                                      { return c.busy }
-func (c *blockingCoordinator) IsSessionBusy(string) bool                         { return false }
-func (c *blockingCoordinator) QueuedPrompts(string) int                          { return 0 }
-func (c *blockingCoordinator) QueuedPromptsList(string) []string                 { return nil }
-func (c *blockingCoordinator) ClearQueue(string)                                 {}
-func (c *blockingCoordinator) Summarize(context.Context, string, string) error   { return nil }
-func (c *blockingCoordinator) RestoreSummarize(context.Context, string) error    { return nil }
-func (c *blockingCoordinator) Model() agent.Model                                { return agent.Model{} }
-func (c *blockingCoordinator) UpdateModels(context.Context) error                { return nil }
-func (c *blockingCoordinator) GenerateTitle(context.Context, string, string)     {}
+
+func (c *blockingCoordinator) Cancel(string) {}
+
+func (c *blockingCoordinator) CancelAll() {}
+
+func (c *blockingCoordinator) IsBusy() bool { return c.busy }
+
+func (c *blockingCoordinator) IsSessionBusy(string) bool { return false }
+
+func (c *blockingCoordinator) QueuedPrompts(string) int { return 0 }
+
+func (c *blockingCoordinator) QueuedPromptsList(string) []string { return nil }
+
+func (c *blockingCoordinator) ClearQueue(string) {}
+
+func (c *blockingCoordinator) Summarize(context.Context, string, string) error { return nil }
+
+func (c *blockingCoordinator) SummarizePreview(context.Context, string, string) (compaction.Preview, error) {
+	return compaction.Preview{}, nil
+}
+
+func (c *blockingCoordinator) ConfirmSummarize(context.Context, string, compaction.Preview) error {
+	return nil
+}
+
+func (c *blockingCoordinator) DiscardSummarize(context.Context, string, string) error { return nil }
+
+func (c *blockingCoordinator) RestoreSummarize(context.Context, string) error { return nil }
+
+func (c *blockingCoordinator) Model() agent.Model { return agent.Model{} }
+
+func (c *blockingCoordinator) UpdateModels(context.Context) error { return nil }
+
+func (c *blockingCoordinator) GenerateTitle(context.Context, string, string) {}
+
 func (c *blockingCoordinator) SetMainAgent(agentName string) error {
 	c.lastMainAgentSet.Store(agentName)
 	return c.setMainAgentErr

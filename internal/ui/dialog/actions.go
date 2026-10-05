@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/commands"
+	"github.com/charmbracelet/crush/internal/compaction"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/oauth"
@@ -110,6 +111,32 @@ type (
 	// back the messages its checkpoint replaced.
 	ActionRestoreSummarize struct {
 		SessionID string
+	}
+
+	// ActionPreviewSummarize writes a checkpoint without adopting it, so the
+	// user can read what would be kept before the session gives up the text it
+	// replaces. Accepting and discarding are separate actions because the
+	// answer may not arrive until later: the preview stays staged until then.
+	ActionPreviewSummarize struct {
+		SessionID    string
+		Arguments    []commands.Argument
+		Args         map[string]string
+		Instructions string
+	}
+
+	// ActionAcceptPreview adopts a staged checkpoint. Preview carries the
+	// counters computed when it was written, so acceptance cannot disagree
+	// with the plan that produced the text.
+	ActionAcceptPreview struct {
+		SessionID string
+		Preview   compaction.Preview
+	}
+
+	// ActionDiscardPreview throws away a staged checkpoint. The session was
+	// never pointed at it, which is the whole safety of previewing.
+	ActionDiscardPreview struct {
+		SessionID    string
+		CheckpointID string
 	}
 	// ActionSelectReasoningEffort is a message indicating a reasoning effort
 	// has been selected.

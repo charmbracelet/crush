@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/backend"
+	"github.com/charmbracelet/crush/internal/compaction"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/google/uuid"
@@ -71,23 +72,45 @@ func (s *runCoordinator) RunAccepted(ctx context.Context, accept *agent.Accepted
 func (s *runCoordinator) BeginAccepted(sessionID string) *agent.AcceptedRun {
 	return nil
 }
+
 func (s *runCoordinator) Cancel(string) {}
-func (s *runCoordinator) CancelAll()    {}
-func (s *runCoordinator) IsBusy() bool  { return s.busy }
+
+func (s *runCoordinator) CancelAll() {}
+
+func (s *runCoordinator) IsBusy() bool { return s.busy }
+
 func (s *runCoordinator) IsSessionBusy(string) bool {
 	return false
 }
-func (s *runCoordinator) QueuedPrompts(string) int                       { return 0 }
-func (s *runCoordinator) QueuedPromptsList(string) []string              { return nil }
-func (s *runCoordinator) ClearQueue(string)                              {}
+
+func (s *runCoordinator) QueuedPrompts(string) int { return 0 }
+
+func (s *runCoordinator) QueuedPromptsList(string) []string { return nil }
+
+func (s *runCoordinator) ClearQueue(string) {}
+
+func (s *runCoordinator) SummarizePreview(context.Context, string, string) (compaction.Preview, error) {
+	return compaction.Preview{}, nil
+}
+
+func (s *runCoordinator) ConfirmSummarize(context.Context, string, compaction.Preview) error {
+	return nil
+}
+
+func (s *runCoordinator) DiscardSummarize(context.Context, string, string) error { return nil }
+
 func (s *runCoordinator) RestoreSummarize(context.Context, string) error { return nil }
 
 func (s *runCoordinator) Summarize(context.Context, string, string) error {
 	return nil
 }
-func (s *runCoordinator) Model() agent.Model                            { return agent.Model{} }
-func (s *runCoordinator) UpdateModels(context.Context) error            { return nil }
+
+func (s *runCoordinator) Model() agent.Model { return agent.Model{} }
+
+func (s *runCoordinator) UpdateModels(context.Context) error { return nil }
+
 func (s *runCoordinator) GenerateTitle(context.Context, string, string) {}
+
 func (s *runCoordinator) SetMainAgent(agentName string) error {
 	s.lastMainAgentSet.Store(agentName)
 	return s.setMainAgentErr

@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent"
 	mcptools "github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
+	"github.com/charmbracelet/crush/internal/compaction"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
@@ -157,20 +158,43 @@ func (c *recordingCoordinator) RunAccepted(ctx context.Context, _ *agent.Accepte
 	return nil, nil
 }
 
-func (c *recordingCoordinator) BeginAccepted(string) *agent.AcceptedRun         { return nil }
-func (c *recordingCoordinator) Cancel(string)                                   {}
-func (c *recordingCoordinator) CancelAll()                                      {}
-func (c *recordingCoordinator) IsBusy() bool                                    { return false }
-func (c *recordingCoordinator) IsSessionBusy(string) bool                       { return false }
-func (c *recordingCoordinator) QueuedPrompts(string) int                        { return 0 }
-func (c *recordingCoordinator) QueuedPromptsList(string) []string               { return nil }
-func (c *recordingCoordinator) ClearQueue(string)                               {}
+func (c *recordingCoordinator) BeginAccepted(string) *agent.AcceptedRun { return nil }
+
+func (c *recordingCoordinator) Cancel(string) {}
+
+func (c *recordingCoordinator) CancelAll() {}
+
+func (c *recordingCoordinator) IsBusy() bool { return false }
+
+func (c *recordingCoordinator) IsSessionBusy(string) bool { return false }
+
+func (c *recordingCoordinator) QueuedPrompts(string) int { return 0 }
+
+func (c *recordingCoordinator) QueuedPromptsList(string) []string { return nil }
+
+func (c *recordingCoordinator) ClearQueue(string) {}
+
 func (c *recordingCoordinator) Summarize(context.Context, string, string) error { return nil }
-func (c *recordingCoordinator) RestoreSummarize(context.Context, string) error  { return nil }
-func (c *recordingCoordinator) Model() agent.Model                              { return agent.Model{} }
-func (c *recordingCoordinator) UpdateModels(context.Context) error              { return nil }
-func (c *recordingCoordinator) SetMainAgent(string) error                       { return nil }
-func (c *recordingCoordinator) GenerateTitle(context.Context, string, string)   {}
+
+func (c *recordingCoordinator) SummarizePreview(context.Context, string, string) (compaction.Preview, error) {
+	return compaction.Preview{}, nil
+}
+
+func (c *recordingCoordinator) ConfirmSummarize(context.Context, string, compaction.Preview) error {
+	return nil
+}
+
+func (c *recordingCoordinator) DiscardSummarize(context.Context, string, string) error { return nil }
+
+func (c *recordingCoordinator) RestoreSummarize(context.Context, string) error { return nil }
+
+func (c *recordingCoordinator) Model() agent.Model { return agent.Model{} }
+
+func (c *recordingCoordinator) UpdateModels(context.Context) error { return nil }
+
+func (c *recordingCoordinator) SetMainAgent(string) error { return nil }
+
+func (c *recordingCoordinator) GenerateTitle(context.Context, string, string) {}
 
 // fullFakeSessions adapts fakeChannelSessions to the full session.Service
 // interface by embedding it; only the channelSessionStore subset is

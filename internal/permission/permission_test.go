@@ -613,3 +613,40 @@ func TestPermissionService_ResolveIdempotency(t *testing.T) {
 		}
 	})
 }
+
+// TestPermissionService_AutoApprovedSessionDoesNotWaitOnPendingPrompt
+// verifies that a request from an auto-approved session (a bypassPermissions
+// subagent) is answered while another session's prompt is still waiting for
+// the user, instead of queueing behind it on requestMu.
+func TestPermissionService_AutoApprovedSessionDoesNotWaitOnPendingPrompt(t *testing.T) {
+	t.Parallel()
+	service := NewPermissionService("/tmp", false, nil)
+	service.AutoApproveSession("writer")
+
+	events := service.Subscribe(t.Context())
+	pending := make(chan bool, 1)
+	go func() {
+		granted, _ := service.Request(t.Context(), CreatePermissionRequest{
+			SessionID: "linter", ToolName: "bash", Action: "execute", Path: "/tmp",
+		})
+		pending <- granted
+	}()
+	prompt := (<-events).Payload // linter's prompt is now open and holds requestMu
+
+	done := make(chan bool, 1)
+	go func() {
+		granted, _ := service.Request(t.Context(), CreatePermissionRequest{
+			SessionID: "writer", ToolName: "edit", Action: "write", Path: "/tmp",
+		})
+		done <- granted
+	}()
+	select {
+	case granted := <-done:
+		require.True(t, granted)
+	case <-time.After(2 * time.Second):
+		t.Fatal("auto-approved request blocked behind another session's pending prompt")
+	}
+
+	service.Deny(prompt)
+	require.False(t, <-pending)
+}

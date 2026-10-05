@@ -29,7 +29,7 @@ Use a package manager:
 # Homebrew
 brew install charmbracelet/tap/crush
 
-# NPM
+# NPM (macOS, Linux, and Windows)
 npm install -g @charmland/crush
 
 # Arch Linux (btw)

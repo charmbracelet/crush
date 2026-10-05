@@ -12,6 +12,7 @@ import (
 	mcptools "github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/commands"
+	"github.com/charmbracelet/crush/internal/compaction"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/gitutil"
 	"github.com/charmbracelet/crush/internal/history"
@@ -237,6 +238,27 @@ func (w *AppWorkspace) AgentSetMain(agentID string) error {
 		return errors.New("agent coordinator not initialized")
 	}
 	return w.app.AgentCoordinator.SetMainAgent(agentID)
+}
+
+func (w *AppWorkspace) AgentSummarizePreview(ctx context.Context, sessionID, instructions string) (compaction.Preview, error) {
+	if w.app.AgentCoordinator == nil {
+		return compaction.Preview{}, errors.New("agent coordinator not initialized")
+	}
+	return w.app.AgentCoordinator.SummarizePreview(ctx, sessionID, instructions)
+}
+
+func (w *AppWorkspace) AgentConfirmSummarize(ctx context.Context, sessionID string, preview compaction.Preview) error {
+	if w.app.AgentCoordinator == nil {
+		return errors.New("agent coordinator not initialized")
+	}
+	return w.app.AgentCoordinator.ConfirmSummarize(ctx, sessionID, preview)
+}
+
+func (w *AppWorkspace) AgentDiscardSummarize(ctx context.Context, sessionID, checkpointID string) error {
+	if w.app.AgentCoordinator == nil {
+		return errors.New("agent coordinator not initialized")
+	}
+	return w.app.AgentCoordinator.DiscardSummarize(ctx, sessionID, checkpointID)
 }
 
 func (w *AppWorkspace) AgentRestoreSummarize(ctx context.Context, sessionID string) error {

@@ -183,6 +183,9 @@ type SessionAgent interface {
 	ClearQueue(sessionID string)
 	Summarize(context.Context, string, string, fantasy.ProviderOptions, func(context.Context, *fantasy.ProviderError) error) error
 	RestoreSummarize(context.Context, string) error
+	SummarizePreview(context.Context, string, string, fantasy.ProviderOptions, func(context.Context, *fantasy.ProviderError) error) (compaction.Preview, error)
+	ConfirmSummarize(context.Context, string, compaction.Preview) error
+	DiscardSummarize(context.Context, string, string) error
 	Model() Model
 	GenerateTitle(ctx context.Context, sessionID, userPrompt string)
 }
@@ -1247,7 +1250,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	continued := false
 	if shouldSummarize {
 		a.activeRequests.Del(call.SessionID)
-		summarizeErr := a.summarize(genCtx, call.SessionID, compactTriggerAuto, "", call.ProviderOptions, call.OnAuthRefresh)
+		_, summarizeErr := a.runSummarize(genCtx, call.SessionID, compactTriggerAuto, "", call.ProviderOptions, call.OnAuthRefresh, true)
 		switch {
 		case errors.Is(summarizeErr, ErrCompactionBlocked):
 			// Uncompacted, the next step would only hit the limit
@@ -1395,15 +1398,24 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	return a.Run(ctx, firstQueuedMessage)
 }
 
-// Summarize compacts the session on the user's request. It returns
-// ErrCompactionBlocked when a PreCompact hook blocks it.
+// Summarize compacts the session on the user's request and adopts the
+// checkpoint it writes. It returns ErrCompactionBlocked when a PreCompact
+// hook blocks it.
 func (a *sessionAgent) Summarize(ctx context.Context, sessionID, instructions string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error) error {
-	return a.summarize(ctx, sessionID, compactTriggerManual, instructions, opts, onAuthRefresh)
+	_, err := a.runSummarize(ctx, sessionID, compactTriggerManual, instructions, opts, onAuthRefresh, true)
+	return err
 }
 
-func (a *sessionAgent) summarize(ctx context.Context, sessionID, trigger, instructions string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error) error {
+// SummarizePreview writes a checkpoint without adopting it. The session keeps
+// its full history until ConfirmSummarize, so a preview the user rejects or
+// abandons costs the row and nothing else.
+func (a *sessionAgent) SummarizePreview(ctx context.Context, sessionID, instructions string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error) (compaction.Preview, error) {
+	return a.runSummarize(ctx, sessionID, compactTriggerManual, instructions, opts, onAuthRefresh, false)
+}
+
+func (a *sessionAgent) runSummarize(ctx context.Context, sessionID, trigger, instructions string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error, commit bool) (compaction.Preview, error) {
 	if a.IsSessionBusy(sessionID) {
-		return ErrSessionBusy
+		return compaction.Preview{}, ErrSessionBusy
 	}
 
 	largeModel := a.models().Large
@@ -1411,19 +1423,19 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID, trigger, instru
 
 	currentSession, err := a.sessions.Get(ctx, sessionID)
 	if err != nil {
-		return fmt.Errorf("failed to get session: %w", err)
+		return compaction.Preview{}, fmt.Errorf("failed to get session: %w", err)
 	}
 	msgs, err := a.getSessionMessages(ctx, currentSession)
 	if err != nil {
-		return err
+		return compaction.Preview{}, err
 	}
 	if len(msgs) == 0 {
 		// Nothing to summarize.
-		return nil
+		return compaction.Preview{}, nil
 	}
 
 	if pre := a.hooks.Run(ctx, hooks.Event{Name: hooks.EventPreCompact, SessionID: sessionID, Trigger: trigger}); pre.Blocked() {
-		return fmt.Errorf("%w: %s", ErrCompactionBlocked, pre.Reason)
+		return compaction.Preview{}, fmt.Errorf("%w: %s", ErrCompactionBlocked, pre.Reason)
 	}
 
 	// Merge the checkpoint already in context instead of summarizing it a
@@ -1464,7 +1476,7 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID, trigger, instru
 		region = body[:cut.Index]
 	}
 	if len(region) == 0 {
-		return nil
+		return compaction.Preview{}, nil
 	}
 	// A checkpoint wants the full text, because this is the last moment it is
 	// in hand. But a region larger than the request can carry is truncated by
@@ -1516,7 +1528,7 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID, trigger, instru
 		IsSummaryMessage: true,
 	})
 	if err != nil {
-		return err
+		return compaction.Preview{}, err
 	}
 
 	// Move the text this checkpoint is about to replace out of the context
@@ -1609,15 +1621,15 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID, trigger, instru
 			// User cancelled summarize we need to remove the summary message.
 			outcome = "Compaction canceled"
 			deleteErr := a.messages.Delete(ctx, summaryMessage.ID)
-			return deleteErr
+			return compaction.Preview{}, deleteErr
 		}
 		// Mark the summary message as finished with an error so the UI
 		// stops spinning.
 		summaryMessage.AddFinish(message.FinishReasonError, "Summarization Error", err.Error())
 		if updateErr := a.messages.Update(ctx, summaryMessage); updateErr != nil {
-			return updateErr
+			return compaction.Preview{}, updateErr
 		}
-		return err
+		return compaction.Preview{}, err
 	}
 
 	// Say what this checkpoint stands in for and where the displaced text
@@ -1648,31 +1660,48 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID, trigger, instru
 	summaryMessage.AddFinish(message.FinishReasonEndTurn, "", "")
 	err = a.messages.Update(genCtx, summaryMessage)
 	if err != nil {
-		return err
+		return compaction.Preview{}, err
 	}
 
 	a.updateSessionUsage(largeModel, &currentSession, resp.TotalUsage, openrouterCost, false)
 
 	// Just in case, get just the last usage info.
 	usage := resp.Response.Usage
-	currentSession.SummaryMessageID = summaryMessage.ID
-	currentSession.SummaryCutMessageID = ""
+	preview := compaction.Preview{
+		CheckpointID:     summaryMessage.ID,
+		Text:             summaryMessage.Content().Text,
+		Replaced:         len(region),
+		Kept:             cut.Kept,
+		CompletionTokens: summaryCompletionTokens(usage, summaryMessage),
+		EstimatedUsage:   usageIsZero(usage),
+	}
 	if cut.Found {
-		currentSession.SummaryCutMessageID = cut.MessageID
+		preview.CutID = cut.MessageID
 		// The next request sends this checkpoint plus the turns the cut kept,
 		// so count both. Zeroing the prompt counter used to advertise an empty
 		// context, which let a session be compacted again before it had done
 		// any work.
-		currentSession.PromptTokens = compaction.Tokens(summaryMessage.Content().Text) +
+		preview.PromptTokens = compaction.Tokens(summaryMessage.Content().Text) +
 			cut.KeptTokens + overhead
-	} else {
-		currentSession.PromptTokens = 0
 	}
-	currentSession.CompletionTokens = summaryCompletionTokens(usage, summaryMessage)
-	currentSession.EstimatedUsage = usageIsZero(usage)
+
+	// A preview stops here. The row is written, but nothing points at it, so
+	// the session keeps reading its full history and rejecting the preview
+	// costs one stale row rather than a lost conversation. Hooks and telemetry
+	// describe compactions that happened, so they wait for acceptance.
+	if !commit {
+		outcome = fmt.Sprintf("Previewed a checkpoint over %d messages", len(region))
+		return preview, nil
+	}
+
+	currentSession.SummaryMessageID = preview.CheckpointID
+	currentSession.SummaryCutMessageID = preview.CutID
+	currentSession.PromptTokens = preview.PromptTokens
+	currentSession.CompletionTokens = preview.CompletionTokens
+	currentSession.EstimatedUsage = preview.EstimatedUsage
 	_, err = a.sessions.Save(genCtx, currentSession)
 	if err != nil {
-		return err
+		return compaction.Preview{}, err
 	}
 	a.hooks.Run(ctx, hooks.Event{Name: hooks.EventPostCompact, SessionID: sessionID, Trigger: trigger})
 
@@ -1687,12 +1716,53 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID, trigger, instru
 	// Process any messages that were queued while summarizing.
 	queuedMessages, ok := a.messageQueue.Get(sessionID)
 	if !ok || len(queuedMessages) == 0 {
-		return nil
+		return compaction.Preview{}, nil
 	}
 	firstQueuedMessage := queuedMessages[0]
 	a.messageQueue.Set(sessionID, queuedMessages[1:])
 	_, qErr := a.Run(ctx, firstQueuedMessage)
-	return qErr
+	return compaction.Preview{}, qErr
+}
+
+// ConfirmSummarize adopts a previewed checkpoint, which is the moment the
+// session's older turns stop being sent.
+func (a *sessionAgent) ConfirmSummarize(ctx context.Context, sessionID string, preview compaction.Preview) error {
+	if preview.CheckpointID == "" {
+		return errors.New("nothing to accept")
+	}
+	currentSession, err := a.sessions.Get(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to get session: %w", err)
+	}
+	if _, err := a.messages.Get(ctx, preview.CheckpointID); err != nil {
+		return fmt.Errorf("the previewed checkpoint is gone: %w", err)
+	}
+
+	currentSession.SummaryMessageID = preview.CheckpointID
+	currentSession.SummaryCutMessageID = preview.CutID
+	currentSession.PromptTokens = preview.PromptTokens
+	currentSession.CompletionTokens = preview.CompletionTokens
+	currentSession.EstimatedUsage = preview.EstimatedUsage
+	if _, err := a.sessions.Save(ctx, currentSession); err != nil {
+		return fmt.Errorf("failed to save session: %w", err)
+	}
+
+	a.eventSessionCompacted(sessionID, preview.Replaced, preview.Kept)
+	slog.Info("Adopted a previewed checkpoint", "session_id", sessionID,
+		"replaced", preview.Replaced, "kept", preview.Kept)
+	return nil
+}
+
+// DiscardSummarize throws away a previewed checkpoint. The session was never
+// pointed at it, so this only removes the row.
+func (a *sessionAgent) DiscardSummarize(ctx context.Context, sessionID, checkpointID string) error {
+	if checkpointID == "" {
+		return errors.New("nothing to discard")
+	}
+	if err := a.messages.Delete(ctx, checkpointID); err != nil {
+		return fmt.Errorf("failed to discard the previewed checkpoint: %w", err)
+	}
+	return nil
 }
 
 func (a *sessionAgent) getCacheControlOptions() fantasy.ProviderOptions {

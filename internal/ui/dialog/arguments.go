@@ -222,6 +222,10 @@ func (a *Arguments) HandleMsg(msg tea.Msg) Action {
 					action.Args = args
 					action.Instructions = args[CompactInstructionsArg]
 					return action
+				case ActionPreviewSummarize:
+					action.Args = args
+					action.Instructions = args[CompactInstructionsArg]
+					return action
 				}
 			}
 			a.focusInput(a.focused + 1)

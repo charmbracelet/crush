@@ -40,9 +40,9 @@ func TestReloadSubagents_ExpandsEnvVarPath(t *testing.T) {
 	store, err := config.Init(t.TempDir(), "", false)
 	require.NoError(t, err)
 
-	store.Config().Options.SubagentsPaths = append(
-		store.Config().Options.SubagentsPaths, "$CRUSH_TEST_SA_DIR",
-	)
+	// Persisted rather than set in memory: reloadSubagents rereads config
+	// from disk first.
+	require.NoError(t, store.SetConfigField(config.ScopeWorkspace, "options.subagents_paths", []string{"$CRUSH_TEST_SA_DIR"}))
 
 	mgr := subagents.NewManager(nil, nil, nil)
 	t.Cleanup(mgr.Shutdown)

@@ -230,3 +230,89 @@ func TestSetSubagentDisabled_BroaderEnableRefusesDisable(t *testing.T) {
 	require.ErrorContains(t, w.SetSubagentDisabled("reviewer", true), "enabled_subagents")
 	require.Empty(t, workspaceDisabledSubagents(t, store))
 }
+
+// newSubagentTestWorkspace builds a workspace over a real store with one
+// global subagent definition per name, discovered into the manager.
+func newSubagentTestWorkspace(t *testing.T, names ...string) (*AppWorkspace, string) {
+	t.Helper()
+	isolateConfigHome(t)
+	dir := os.Getenv("CRUSH_SUBAGENTS_DIR")
+	for _, n := range names {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, n+".md"),
+			[]byte("---\nname: "+n+"\ndescription: d\n---\nbody\n"), 0o644))
+	}
+	store, err := config.Init(t.TempDir(), "", false)
+	require.NoError(t, err)
+	mgr := subagents.NewManager(nil, nil, nil)
+	t.Cleanup(mgr.Shutdown)
+	w := &AppWorkspace{app: &app.App{Subagents: mgr}, store: store}
+	w.reloadSubagents()
+	require.Len(t, mgr.ActiveSubagents(), len(names))
+	return w, dir
+}
+
+func activeNames(w *AppWorkspace) []string {
+	var names []string
+	for _, s := range w.app.Subagents.ActiveSubagents() {
+		names = append(names, s.Name)
+	}
+	return names
+}
+
+// TestSubagentMutations_ConcurrentMatchDisk verifies concurrent toggles and
+// deletes, racing other config writes that make autoReload skip, leave the
+// manager's active set matching what is on disk.
+func TestSubagentMutations_ConcurrentMatchDisk(t *testing.T) {
+	for range 20 {
+		w, _ := newSubagentTestWorkspace(t, "a", "b", "c", "d", "e", "f")
+
+		stop := make(chan struct{})
+		var hammer sync.WaitGroup
+		hammer.Go(func() {
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+					// Holds the store's write lock, so a concurrent
+					// write's autoReload skips.
+					w.store.OverridePreferredModel(config.SelectedModelTypeLarge, config.SelectedModel{})
+				}
+			}
+		})
+		var wg sync.WaitGroup
+		for _, n := range []string{"a", "b", "c"} {
+			wg.Go(func() { require.NoError(t, w.SetSubagentDisabled(n, true)) })
+		}
+		wg.Go(func() { require.NoError(t, w.DeleteUserSubagent("d")) })
+		wg.Wait()
+		close(stop)
+		hammer.Wait()
+
+		require.ElementsMatch(t, []string{"e", "f"}, activeNames(w))
+	}
+}
+
+// TestDeleteUserSubagent_AlreadyRemoved verifies deleting a definition that
+// was removed outside Crush succeeds and clears it from the manager.
+func TestDeleteUserSubagent_AlreadyRemoved(t *testing.T) {
+	w, dir := newSubagentTestWorkspace(t, "gone", "kept")
+	require.NoError(t, os.Remove(filepath.Join(dir, "gone.md")))
+
+	require.NoError(t, w.DeleteUserSubagent("gone"))
+	require.Equal(t, []string{"kept"}, activeNames(w))
+}
+
+// TestDeleteUserSubagent_ClearsConfigEntries verifies a deleted name does not
+// linger in the workspace enable/disable lists, where it would silently
+// apply to a later definition with the same name.
+func TestDeleteUserSubagent_ClearsConfigEntries(t *testing.T) {
+	w, _ := newSubagentTestWorkspace(t, "reviewer")
+	require.NoError(t, w.SetSubagentDisabled("reviewer", true))
+	require.NoError(t, w.store.SetConfigField(config.ScopeWorkspace, "options.enabled_subagents", []string{"reviewer"}))
+
+	require.NoError(t, w.DeleteUserSubagent("reviewer"))
+	opts := workspaceSubagentOptions(t, w.store)
+	require.Empty(t, opts.DisabledSubagents)
+	require.Empty(t, opts.EnabledSubagents)
+}

@@ -114,6 +114,9 @@ type DiscoveryConfig struct {
 	// instead of being silently dropped at dispatch time. May be nil when no
 	// skills context is available; in that case the check is skipped.
 	IsKnownSkill func(name string) bool
+	// IsKnownMCP validates that an `mcpServers:` reference names a
+	// configured MCP server. May be nil, skipping the check.
+	IsKnownMCP func(name string) bool
 }
 
 // DiscoveryConfigFromStore adapts a config store (plus the workspace's skills
@@ -137,6 +140,10 @@ func DiscoveryConfigFromStore(store *config.ConfigStore, skillsMgr *skills.Manag
 		Resolver:          resolver,
 		ValidateModel:     store.Config().ValidateModel,
 		IsKnownSkill:      knownSkillFunc(skillsMgr),
+		IsKnownMCP: func(name string) bool {
+			_, ok := store.Config().MCP[name]
+			return ok
+		},
 	}
 }
 
@@ -197,12 +204,12 @@ func (c DiscoveryConfig) ResolvePaths() []string {
 //   - states: per-file discovery outcome for diagnostics/UI.
 func DiscoverFromConfig(cfg DiscoveryConfig) (all, active []*Subagent, states []*SubagentState) {
 	userPaths := cfg.ResolvePaths()
-	discovered, allStates := DiscoverWithStates(userPaths, cfg.ValidateModel, cfg.IsKnownSkill)
+	discovered, allStates := DiscoverWithStates(userPaths, cfg.ValidateModel, cfg.IsKnownSkill, cfg.IsKnownMCP)
 	all = Deduplicate(discovered)
 	active = Filter(all, cfg.DisabledSubagents)
 	allStates = DeduplicateStates(allStates)
 	slices.SortStableFunc(allStates, func(a, b *SubagentState) int {
-		return strings.Compare(strings.ToLower(a.Path), strings.ToLower(b.Path))
+		return comparePaths(a.Path, b.Path)
 	})
 	return all, active, allStates
 }

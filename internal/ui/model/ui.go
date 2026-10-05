@@ -949,13 +949,23 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// to another session falls back to code mode and drops any pending
 		// plan handoff. (Loading the session that was just created for the
 		// first plan-mode prompt is not a switch; the IDs match then.)
-		if m.session == nil || m.session.ID != msg.session.ID {
+		// Moving between a session and its subagent children isn't one
+		// either, but the handoff continues the parent's run, so it is
+		// only shown there.
+		returningFromChild := m.session != nil && m.session.ParentSessionID == msg.session.ID
+		if m.session == nil || sessionFamily(m.session) != sessionFamily(msg.session) {
 			if cmd := m.resetPlanModeState(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
+		} else if _, ok := m.activeInline.(*dialog.PlanHandoffInline); ok && msg.session.ParentSessionID != "" {
+			m.activeInline = nil
+			m.textarea.Focus()
 		}
 		m.setState(uiChat, m.focus)
 		m.session = msg.session
+		if returningFromChild && m.mode == uiInputModePlan && m.planReadySessionID == m.session.ID {
+			m.openPlanHandoff()
+		}
 		m.sidebarOffset = 0
 		m.sessionFiles = msg.files
 		// Session switch: the memoized busy state and queued prompts
@@ -2361,6 +2371,11 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.dialog.CloseDialog(dialog.CommandsID)
 		cmds = append(cmds, m.loadSession(msg.SessionID))
 	case dialog.ActionSummarize:
+		if cmd := m.readOnlySessionCmd(); cmd != nil {
+			cmds = append(cmds, cmd)
+			m.dialog.CloseDialog(dialog.CommandsID)
+			break
+		}
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before summarizing session..."))
 			break
@@ -3440,9 +3455,12 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 				// Refuse before the editor is cleared so the typed prompt
 				// survives, and before bang mode can run in the child session.
-				if cmd := m.readOnlySessionCmd(); cmd != nil {
-					cmds = append(cmds, cmd)
-					break
+				// Quit commands and an empty Enter keep their usual behavior.
+				if v := strings.TrimSpace(value); v != "exit" && v != "quit" && (v != "" || len(m.attachments.List()) > 0) {
+					if cmd := m.readOnlySessionCmd(); cmd != nil {
+						cmds = append(cmds, cmd)
+						break
+					}
 				}
 
 				// Otherwise, send the message
@@ -5628,7 +5646,12 @@ func (m *UI) cancelAgent() tea.Cmd {
 			m.bangCancel = nil
 		}
 
-		m.com.Workspace.AgentCancel(m.session.ID)
+		var cancelCmd tea.Cmd
+		if parentID := m.session.ParentSessionID; parentID != "" {
+			cancelCmd = m.cancelChildCmd(parentID, m.session.ID)
+		} else {
+			m.com.Workspace.AgentCancel(m.session.ID)
+		}
 		// Stop the spinning todo indicator and drop the memoized busy
 		// state the cancel just changed; the pill re-renders now from
 		// last-known state and again when the off-thread refresh (and
@@ -5636,7 +5659,7 @@ func (m *UI) cancelAgent() tea.Cmd {
 		m.todoIsSpinning = false
 		m.invalidateBusyCaches()
 		m.renderPills()
-		return m.dispatchBusyRefresh()
+		return tea.Batch(cancelCmd, m.dispatchBusyRefresh())
 	}
 
 	// Queued prompts pending: esc clears the queue. Decide from the cached
@@ -5656,6 +5679,23 @@ func (m *UI) cancelAgent() tea.Cmd {
 	// First escape press - set canceling state and start timer.
 	m.isCanceling = true
 	return cancelTimerCmd()
+}
+
+// cancelChildCmd cancels a subagent child session's run, or reports that it
+// already finished: a child view's busy state is its parent's, so Esc-Esc is
+// offered after the subagent itself is done, when cancelling it is a no-op.
+func (m *UI) cancelChildCmd(parentID, childID string) tea.Cmd {
+	ws := m.com.Workspace
+	parentKey := m.keyMap.ParentSession.Help().Key
+	return func() tea.Msg {
+		for _, r := range ws.RunningSubagents(parentID) {
+			if r.ChildSessionID == childID {
+				ws.AgentCancel(childID)
+				return nil
+			}
+		}
+		return util.ReportInfo("Subagent finished; press " + parentKey + " to manage the parent run.")()
+	}
 }
 
 // openDialog opens a dialog by its ID.
@@ -5835,6 +5875,11 @@ func (m *UI) openSubagentsDialog() tea.Cmd {
 	sessionID := ""
 	if m.session != nil {
 		sessionID = m.session.ID
+		// From a child view, list its siblings: the dispatching session's
+		// subagents.
+		if m.session.ParentSessionID != "" {
+			sessionID = m.session.ParentSessionID
+		}
 	}
 	d := dialog.NewSubagents(m.com, sessionID)
 	m.dialog.OpenDialog(d)
@@ -5971,7 +6016,8 @@ func (m *UI) handlePlanHandoff(rc notify.RunComplete) tea.Cmd {
 	if rc.Error != "" || rc.Cancelled {
 		return nil
 	}
-	if m.session == nil || rc.SessionID != m.session.ID {
+	// A parent's run also completes while one of its children is viewed.
+	if m.session == nil || (rc.SessionID != m.session.ID && rc.SessionID != m.session.ParentSessionID) {
 		return nil
 	}
 	if !common.PlanReadyMarkerPresent(rc.Text) {
@@ -5979,11 +6025,24 @@ func (m *UI) handlePlanHandoff(rc notify.RunComplete) tea.Cmd {
 		return nil
 	}
 	m.setPlanReadyPending(rc.SessionID)
+	// From a child view the prompt opens on return to the parent.
+	if rc.SessionID != m.session.ID {
+		return nil
+	}
 	if _, ok := m.activeInline.(*dialog.PlanHandoffInline); ok {
 		return nil
 	}
 	m.openPlanHandoff()
 	return nil
+}
+
+// sessionFamily returns the top-level session a session belongs to: its
+// parent for a subagent child session, itself otherwise.
+func sessionFamily(s *session.Session) string {
+	if s.ParentSessionID != "" {
+		return s.ParentSessionID
+	}
+	return s.ID
 }
 
 // resetPlanModeState drops any pending plan handoff and, when plan mode is

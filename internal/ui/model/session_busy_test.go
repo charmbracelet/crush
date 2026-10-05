@@ -21,6 +21,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/attachments"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/dialog"
+	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/crush/internal/workspace"
 )
 
@@ -1022,4 +1023,37 @@ func TestRemoteYoloToggleUpdatesEditorPrompt(t *testing.T) {
 	require.False(t, m.yoloModeCached())
 	require.Equal(t, normalPrompt, ansi.Strip(m.textarea.View()),
 		"toggling yolo off must restore the normal editor prompt")
+}
+
+// TestCancelAgentInChildSession verifies Esc-Esc in a child view cancels the
+// subagent only while it runs; once it has finished (the busy state is the
+// parent's) it reports how to reach the parent run instead.
+func TestCancelAgentInChildSession(t *testing.T) {
+	pinTTLs(t)
+
+	for _, running := range []bool{true, false} {
+		ws := &countingWorkspace{ready: true, agentBusy: true}
+		if running {
+			ws.runningSubagent = []workspace.RunningSubagentInfo{{ChildSessionID: "child-1", ParentSessionID: "parent-1"}}
+		}
+		m := newBusyUI(ws)
+		m.session = &session.Session{ID: "child-1", ParentSessionID: "parent-1"}
+		warmCaches(m, true)
+
+		m.cancelAgent()
+		var infos []string
+		for _, msg := range flattenTeaMsgs(m.cancelAgent()) {
+			if info, ok := msg.(util.InfoMsg); ok {
+				infos = append(infos, info.Msg)
+			}
+		}
+		if running {
+			require.Equal(t, 1, ws.cancelCalls)
+			require.Empty(t, infos)
+		} else {
+			require.Zero(t, ws.cancelCalls)
+			require.Len(t, infos, 1)
+			require.Contains(t, infos[0], "Subagent finished")
+		}
+	}
 }

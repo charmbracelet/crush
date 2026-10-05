@@ -1,12 +1,15 @@
 package model
 
 import (
+	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
+	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/message"
@@ -16,6 +19,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/dialog"
 	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/crush/internal/workspace"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/stretchr/testify/require"
 )
 
@@ -206,4 +210,112 @@ func flattenTeaMsgs(cmd tea.Cmd) []tea.Msg {
 		return msgs
 	}
 	return []tea.Msg{msg}
+}
+
+// actionDialog is a dialog that answers every message with a fixed action.
+type actionDialog struct{ action dialog.Action }
+
+func (d actionDialog) ID() string                               { return dialog.CommandsID }
+func (d actionDialog) HandleMsg(tea.Msg) dialog.Action          { return d.action }
+func (d actionDialog) Draw(uv.Screen, uv.Rectangle) *tea.Cursor { return nil }
+
+type summarizeWorkspace struct {
+	*testWorkspace
+	summarized []string
+}
+
+func (w *summarizeWorkspace) AgentSummarize(_ context.Context, sessionID string) error {
+	w.summarized = append(w.summarized, sessionID)
+	return nil
+}
+
+// TestSummarizeInChildSessionIsReadOnly verifies Summarize Session can't
+// rewrite a subagent's transcript.
+func TestSummarizeInChildSessionIsReadOnly(t *testing.T) {
+	t.Parallel()
+
+	ws := &summarizeWorkspace{testWorkspace: &testWorkspace{cfg: sessionRestoreConfig(), agentReady: true}}
+	ui := newRestoreModelUI(ws, &session.Session{ID: "child-1", ParentSessionID: "parent-1"})
+	ui.dialog.OpenDialog(actionDialog{dialog.ActionSummarize{SessionID: "child-1"}})
+
+	msgs := flattenTeaMsgs(ui.handleDialogMsg(tea.KeyPressMsg{Code: tea.KeyEnter}))
+	require.Empty(t, ws.summarized)
+	require.Condition(t, func() bool {
+		for _, msg := range msgs {
+			if info, ok := msg.(util.InfoMsg); ok && strings.Contains(info.Msg, "read-only") {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+// TestEnterInChildSessionKeepsNormalBehavior verifies quit commands and an
+// empty Enter are not refused as read-only sends.
+func TestEnterInChildSessionKeepsNormalBehavior(t *testing.T) {
+	t.Parallel()
+
+	for _, value := range []string{"quit", "exit", "", "  "} {
+		t.Run(fmt.Sprintf("%q", value), func(t *testing.T) {
+			t.Parallel()
+
+			ws := &testWorkspace{cfg: sessionRestoreConfig(), agentReady: true}
+			ui := newRestoreModelUI(ws, &session.Session{ID: "child-1", ParentSessionID: "parent-1"})
+			ui.textarea.SetValue(value)
+
+			cmd := ui.handleKeyPressMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
+			for _, msg := range flattenTeaMsgs(cmd) {
+				_, isInfo := msg.(util.InfoMsg)
+				require.False(t, isInfo, "unexpected info message %v", msg)
+			}
+			if strings.TrimSpace(value) != "" {
+				require.True(t, ui.dialog.ContainsDialog(dialog.QuitID))
+			}
+		})
+	}
+}
+
+type subagentsDialogWorkspace struct {
+	*testWorkspace
+	runningFor []string
+}
+
+func (w *subagentsDialogWorkspace) RunningSubagents(parentSessionID string) []workspace.RunningSubagentInfo {
+	w.runningFor = append(w.runningFor, parentSessionID)
+	return nil
+}
+
+func (w *subagentsDialogWorkspace) AllSubagents() []workspace.SubagentDefInfo { return nil }
+
+// TestSubagentsDialogFromChildUsesParent verifies ctrl+x from a child view
+// lists the parent's subagents (the child's siblings), not the child's own.
+func TestSubagentsDialogFromChildUsesParent(t *testing.T) {
+	t.Parallel()
+
+	ws := &subagentsDialogWorkspace{testWorkspace: &testWorkspace{cfg: sessionRestoreConfig()}}
+	ui := newRestoreModelUI(ws, &session.Session{ID: "child-1", ParentSessionID: "parent-1"})
+
+	flattenTeaMsgs(ui.openSubagentsDialog())
+	require.Equal(t, []string{"parent-1"}, ws.runningFor)
+}
+
+// TestPlanModeSurvivesChildSessionRoundTrip verifies viewing a subagent's
+// child session and returning is not a session switch for plan mode, and a
+// plan that completes meanwhile still offers the handoff on return.
+func TestPlanModeSurvivesChildSessionRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	ws := &restoreModelWorkspace{cfg: sessionRestoreConfig()}
+	parent := &session.Session{ID: "parent-1"}
+	ui := newRestoreModelUI(ws, parent)
+	ui.mode = uiInputModePlan
+
+	ui.Update(loadSessionMsg{session: &session.Session{ID: "child-1", ParentSessionID: "parent-1"}})
+	ui.handlePlanHandoff(notify.RunComplete{SessionID: "parent-1", Text: "Plan.\n" + common.PlanReadyMarker})
+	require.False(t, isPlanHandoffInline(ui), "the handoff continues the parent; it waits for the return")
+
+	ui.Update(loadSessionMsg{session: parent})
+	require.Equal(t, uiInputModePlan, ui.mode)
+	require.Equal(t, "parent-1", ui.planReadySessionID)
+	require.True(t, isPlanHandoffInline(ui))
 }

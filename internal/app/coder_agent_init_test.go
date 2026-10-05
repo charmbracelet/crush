@@ -38,6 +38,7 @@ func (c *initFakeCoordinator) QueuedPrompts(string) int                        {
 func (c *initFakeCoordinator) QueuedPromptsList(string) []string               { return nil }
 func (c *initFakeCoordinator) ClearQueue(string)                               {}
 func (c *initFakeCoordinator) Summarize(context.Context, string, string) error { return nil }
+func (c *initFakeCoordinator) RestoreSummarize(context.Context, string) error  { return nil }
 func (c *initFakeCoordinator) Model() agent.Model                              { return agent.Model{} }
 func (c *initFakeCoordinator) UpdateModels(context.Context) error              { return nil }
 func (c *initFakeCoordinator) GenerateTitle(context.Context, string, string) {

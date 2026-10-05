@@ -106,6 +106,12 @@ type (
 		Args         map[string]string
 		Instructions string
 	}
+
+	// ActionRestoreSummarize undoes the last compaction of a session, bringing
+	// back the messages its checkpoint replaced.
+	ActionRestoreSummarize struct {
+		SessionID string
+	}
 	// ActionSelectReasoningEffort is a message indicating a reasoning effort
 	// has been selected.
 	ActionSelectReasoningEffort struct {

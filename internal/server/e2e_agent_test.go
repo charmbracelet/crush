@@ -218,6 +218,7 @@ func (c *scriptedCoordinator) QueuedPrompts(string) int                        {
 func (c *scriptedCoordinator) QueuedPromptsList(string) []string               { return nil }
 func (c *scriptedCoordinator) ClearQueue(string)                               {}
 func (c *scriptedCoordinator) AddNote(string, string)                          {}
+func (c *scriptedCoordinator) RestoreSummarize(context.Context, string) error  { return nil }
 func (c *scriptedCoordinator) Summarize(context.Context, string, string) error { return nil }
 func (c *scriptedCoordinator) Model() agent.Model                              { return agent.Model{} }
 func (c *scriptedCoordinator) UpdateModels(context.Context) error              { return nil }

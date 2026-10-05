@@ -168,6 +168,7 @@ func (c *recordingCoordinator) QueuedPromptsList(string) []string               
 func (c *recordingCoordinator) ClearQueue(string)                               {}
 func (c *recordingCoordinator) AddNote(string, string)                          {}
 func (c *recordingCoordinator) Summarize(context.Context, string, string) error { return nil }
+func (c *recordingCoordinator) RestoreSummarize(context.Context, string) error  { return nil }
 func (c *recordingCoordinator) Model() agent.Model                              { return agent.Model{} }
 func (c *recordingCoordinator) UpdateModels(context.Context) error              { return nil }
 func (c *recordingCoordinator) SetMainAgent(string) error                       { return nil }

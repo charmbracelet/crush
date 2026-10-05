@@ -334,7 +334,7 @@ func TestAssistantMessageItem_PlanCardBordersAlign(t *testing.T) {
 					item.SetPlanAgent(true)
 					rendered := item.RawRender(width)
 					if name == "family_emoji" || name == "oversize_only" {
-						_, inner := planBoxLayout(sty.Messages.PlanBox, cappedMessageWidth(width))
+						_, inner := boxLayout(sty.Messages.PlanBox, cappedMessageWidth(width))
 						if inner >= 8 {
 							require.Contains(t, rendered, "👨‍👩‍👧‍👦")
 						} else {

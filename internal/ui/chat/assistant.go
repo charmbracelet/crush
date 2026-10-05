@@ -800,7 +800,7 @@ func wrapPlanLine(line uv.Line, width int) []uv.Line {
 	return append(rows, row)
 }
 
-// planBoxLayout returns a style and content width whose combined horizontal
+// boxLayout returns a style and content width whose combined horizontal
 // frame fits within the available message width.
 func boxLayout(style lipgloss.Style, width int) (lipgloss.Style, int) {
 	width = max(1, width)

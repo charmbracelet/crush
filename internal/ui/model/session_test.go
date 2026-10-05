@@ -252,6 +252,49 @@ func TestHandleFileEvent_KnownChildSessionID_Allowed(t *testing.T) {
 	require.True(t, ok, "expected sessionFilesUpdatesMsg")
 }
 
+// TestHandleFileEvent_CapturesSessionAtDispatch verifies that the command
+// loads files for the session that was current when the event arrived, even
+// if the user switches or clears the session before it runs, and tags its
+// result with that session.
+func TestHandleFileEvent_CapturesSessionAtDispatch(t *testing.T) {
+	t.Parallel()
+
+	ws := &getSessionWorkspace{sessionFiles: []history.File{}}
+	m := &UI{
+		session: &session.Session{ID: "parent-1"},
+		com:     &common.Common{Workspace: ws},
+	}
+
+	cmd := m.handleFileEvent(history.File{SessionID: "parent-1"})
+	require.NotNil(t, cmd)
+	m.session = nil // ctrl+n before the command runs
+
+	msg, ok := cmd().(sessionFilesUpdatesMsg)
+	require.True(t, ok, "expected sessionFilesUpdatesMsg")
+	require.Equal(t, "parent-1", msg.forSession)
+}
+
+// TestStaleSessionFilesUpdateDiscarded verifies that a file list loaded for
+// a session the user has since left does not replace the current session's
+// Modified Files.
+func TestStaleSessionFilesUpdateDiscarded(t *testing.T) {
+	pinTTLs(t)
+
+	m := newBusyUI(&countingWorkspace{ready: true})
+	m.session = &session.Session{ID: "s2"}
+	current := []SessionFile{{LatestVersion: history.File{Path: "s2.go"}}}
+	m.sessionFiles = current
+
+	m.Update(sessionFilesUpdatesMsg{
+		forSession:   "s1",
+		sessionFiles: []SessionFile{{LatestVersion: history.File{Path: "s1.go"}}},
+	})
+	require.Equal(t, current, m.sessionFiles)
+
+	m.Update(sessionFilesUpdatesMsg{forSession: "s2"})
+	require.Empty(t, m.sessionFiles, "a result for the current session must still apply")
+}
+
 func TestHandleFileEvent_UnknownSessionID_Ignored(t *testing.T) {
 	t.Parallel()
 

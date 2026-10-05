@@ -1905,6 +1905,12 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 		return fantasy.ToolResponse{}, fmt.Errorf("create session: %w", err)
 	}
 
+	// A child of an auto-approved session is auto-approved too: in
+	// non-interactive mode nothing could answer the child's prompts.
+	if c.permissions != nil && c.permissions.IsSessionAutoApproved(params.SessionID) {
+		c.permissions.AutoApproveSession(session.ID)
+	}
+
 	// Call session setup function if provided
 	if params.SessionSetup != nil {
 		params.SessionSetup(session.ID)

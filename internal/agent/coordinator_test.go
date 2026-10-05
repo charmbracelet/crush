@@ -64,6 +64,7 @@ func newTestCoordinator(t *testing.T, env fakeEnv, providerID string, providerCf
 		cfg:                cfg,
 		sessions:           env.sessions,
 		messages:           env.messages,
+		permissions:        env.permissions,
 		subagentModelCache: csync.NewMap[subagentModelKey, Model](),
 	}
 }
@@ -131,6 +132,38 @@ func TestRunSubAgent(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "done", resp.Content)
 		assert.False(t, resp.IsError)
+	})
+
+	// A child of an auto-approved session (crush run) must be auto-approved
+	// too, or its first permission prompt blocks forever with no UI.
+	t.Run("child inherits parent auto-approve", func(t *testing.T) {
+		env := testEnv(t)
+		coord := newTestCoordinator(t, env, providerID, providerCfg)
+
+		for i, parentApproved := range []bool{false, true} {
+			parentSession, err := env.sessions.Create(t.Context(), "Parent")
+			require.NoError(t, err)
+			if parentApproved {
+				coord.permissions.AutoApproveSession(parentSession.ID)
+			}
+
+			var childApproved bool
+			agent := newMockAgent(providerID, 4096, func(_ context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
+				childApproved = coord.permissions.IsSessionAutoApproved(call.SessionID)
+				return agentResultWithText("done"), nil
+			})
+
+			_, err = coord.runSubAgent(t.Context(), subAgentParams{
+				Agent:          agent,
+				SessionID:      parentSession.ID,
+				AgentMessageID: fmt.Sprintf("msg-%d", i),
+				ToolCallID:     "call-1",
+				Prompt:         "do something",
+				SessionTitle:   "Test Session",
+			})
+			require.NoError(t, err)
+			require.Equal(t, parentApproved, childApproved)
+		}
 	})
 
 	t.Run("cost update failure preserves output", func(t *testing.T) {

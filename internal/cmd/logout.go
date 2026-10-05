@@ -4,6 +4,8 @@ import (
 	"cmp"
 	"fmt"
 	"os"
+	"slices"
+	"strings"
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/logout"
@@ -21,6 +23,12 @@ var providerDisplayNames = map[string]string{
 	"xai":     "Grok",
 }
 
+// platformChoice is a logged-in provider offered by the logout picker.
+type platformChoice struct {
+	id   string
+	name string
+}
+
 var logoutCmd = &cobra.Command{
 	Aliases: []string{"signout"},
 	Use:     "logout [platform]",
@@ -28,7 +36,8 @@ var logoutCmd = &cobra.Command{
 	Long: `Logout Crush from a specified platform, removing stored credentials.
 The platform should be provided as an argument.
 If no argument is given, a list of logged-in platforms will be shown.
-Available platforms are: hyper, copilot, openai (chatgpt), grok (xai).`,
+Available platforms are: hyper, copilot, openai (chatgpt), grok (xai), plus
+any provider whose OAuth flow is declared in config.`,
 	Example: `
 # Sign out from Charm Hyper
 crush logout hyper
@@ -91,14 +100,18 @@ crush logout grok
 		case "grok", "xai":
 			provider = "xai"
 		default:
-			return fmt.Errorf("unknown platform: %s", provider)
+			// A provider whose OAuth flow comes from config, which is how a
+			// plugin provider signs in, is logged out like any other.
+			if p, ok := cfg.Providers.Get(provider); !ok || !p.UsesOAuth() {
+				return fmt.Errorf("unknown platform: %s", provider)
+			}
 		}
 
 		force, _ := cmd.Flags().GetBool("force")
 		// Picking a platform from the list is an explicit choice already,
 		// so only ask for confirmation when no choice was made.
 		if !force && !chose {
-			ok, err := logout.Confirm(fmt.Sprintf("Are you sure you want to log out of %s?", providerDisplayNames[provider]))
+			ok, err := logout.Confirm(fmt.Sprintf("Are you sure you want to log out of %s?", logoutDisplayName(cfg, provider)))
 			if err != nil {
 				return err
 			}
@@ -118,9 +131,36 @@ crush logout grok
 		case "xai":
 			return logoutXAI(ws)
 		default:
-			return fmt.Errorf("unknown platform: %s", provider)
+			return logoutConfiguredProvider(ws, provider)
 		}
 	},
+}
+
+// logoutDisplayName is the human name used in logout prompts, falling back
+// to the configured provider name so plugin providers read properly.
+func logoutDisplayName(cfg *config.Config, provider string) string {
+	if name, ok := providerDisplayNames[provider]; ok {
+		return name
+	}
+	if p, ok := cfg.Providers.Get(provider); ok && p.Name != "" {
+		return p.Name
+	}
+	return provider
+}
+
+// logoutConfiguredProvider clears the stored credentials of a provider that
+// declares its own OAuth flow. Both fields go: the token, and the API key
+// that mirrors its access token.
+func logoutConfiguredProvider(ws workspace.Workspace, provider string) error {
+	if err := cmp.Or(
+		ws.RemoveConfigField(config.ScopeGlobal, fmt.Sprintf("providers.%s.oauth", provider)),
+		ws.RemoveConfigField(config.ScopeGlobal, fmt.Sprintf("providers.%s.api_key", provider)),
+	); err != nil {
+		return err
+	}
+
+	fmt.Printf("Successfully logged out of %s.\n", logoutDisplayName(ws.Config(), provider))
+	return nil
 }
 
 func logoutHyper(ws workspace.Workspace) error {
@@ -183,20 +223,27 @@ func logoutXAI(ws workspace.Workspace) error {
 // pickLoggedInProvider returns the provider to log out of and whether the
 // user explicitly picked it from a list of logged-in platforms.
 func pickLoggedInProvider(cfg *config.Config) (string, bool, error) {
-	// Only OAuth-based providers support login/logout. Keep this list in
-	// sync with the switch in RunE and the login command.
-	var loggedIn []struct {
-		id   string
-		name string
-	}
-	for _, id := range []string{"hyper", "copilot", "openai", "xai"} {
-		if p, ok := cfg.Providers.Get(id); ok && p.OAuthToken != nil {
-			loggedIn = append(loggedIn, struct {
-				id   string
-				name string
-			}{id: id, name: providerDisplayNames[id]})
+	// A stored OAuth token means the platform is logged in: the built-in
+	// subscription providers plus any provider that declares its own flow,
+	// which is how a plugin provider signs in.
+	var loggedIn []platformChoice
+	for id, p := range cfg.Providers.Seq2() {
+		if p.OAuthToken == nil {
+			continue
 		}
+		if _, builtin := providerDisplayNames[id]; !builtin && !p.UsesOAuth() {
+			continue
+		}
+		loggedIn = append(loggedIn, platformChoice{
+			id:   id,
+			name: logoutDisplayName(cfg, id),
+		})
 	}
+	// Providers come out of the config in map order; the picker reads best
+	// sorted by name.
+	slices.SortFunc(loggedIn, func(a, b platformChoice) int {
+		return strings.Compare(a.name, b.name)
+	})
 
 	if len(loggedIn) == 0 {
 		fmt.Println("You are not logged in to any platform.")

@@ -177,6 +177,7 @@ type SessionAgent interface {
 	QueuedPromptsList(sessionID string) []string
 	ClearQueue(sessionID string)
 	Summarize(context.Context, string, string, fantasy.ProviderOptions, func(context.Context, *fantasy.ProviderError) error) error
+	RestoreSummarize(context.Context, string) error
 	Model() Model
 	GenerateTitle(ctx context.Context, sessionID, userPrompt string)
 }
@@ -1935,6 +1936,45 @@ func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.S
 		view = append(view, msg)
 	}
 	return view, nil
+}
+
+// RestoreSummarize undoes the session's most recent compaction.
+//
+// A checkpoint never deletes the text it replaced, so undo is a pointer write
+// rather than a recovery: the region comes back exactly as it was written. The
+// checkpoint row goes away because nothing refers to it any more, and the
+// prompt counter is re-estimated from the restored transcript, since leaving
+// the compacted figure in place would tell the next check that the session
+// still has room it has just stopped having.
+func (a *sessionAgent) RestoreSummarize(ctx context.Context, sessionID string) error {
+	currentSession, err := a.sessions.Get(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to get session: %w", err)
+	}
+	checkpointID := currentSession.SummaryMessageID
+	if checkpointID == "" {
+		return errors.New("this session has no compaction to undo")
+	}
+
+	if err := a.messages.Delete(ctx, checkpointID); err != nil {
+		return fmt.Errorf("failed to remove the checkpoint: %w", err)
+	}
+	msgs, err := a.messages.List(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to list messages: %w", err)
+	}
+
+	currentSession.SummaryMessageID = ""
+	currentSession.SummaryCutMessageID = ""
+	currentSession.PromptTokens = compaction.EstimateAll(msgs)
+	currentSession.EstimatedUsage = true
+	if _, err := a.sessions.Save(ctx, currentSession); err != nil {
+		return fmt.Errorf("failed to save session: %w", err)
+	}
+
+	slog.Info("Restored a session from its checkpoint",
+		"session_id", sessionID, "messages", len(msgs))
+	return nil
 }
 
 // splitCheckpoint separates a checkpoint already in the session view from the

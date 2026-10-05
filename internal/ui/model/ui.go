@@ -2261,6 +2261,18 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		// dialog, and closing the wrong one leaves the box hanging over a
 		// compaction that is already running.
 		m.dialog.CloseFrontDialog()
+	case dialog.ActionRestoreSummarize:
+		if m.isAgentBusy() {
+			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before restoring the checkpoint..."))
+			break
+		}
+		cmds = append(cmds, func() tea.Msg {
+			if err := m.com.Workspace.AgentRestoreSummarize(context.Background(), msg.SessionID); err != nil {
+				return util.ReportError(err)()
+			}
+			return nil
+		}, m.loadSession(msg.SessionID))
+		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleHelp:
 		m.status.ToggleHelp()
 		m.dialog.CloseDialog(dialog.CommandsID)
@@ -5688,6 +5700,8 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 	if err != nil {
 		return util.ReportError(err)
 	}
+
+	commands.SetHasCheckpoint(m.session != nil && m.session.SummaryMessageID != "")
 
 	m.dialog.OpenDialog(commands)
 

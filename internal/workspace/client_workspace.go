@@ -329,6 +329,10 @@ func (w *ClientWorkspace) AgentSetMain(agentID string) error {
 	return w.client.SetMainAgent(context.Background(), w.workspaceID(), agentID)
 }
 
+func (w *ClientWorkspace) AgentRestoreSummarize(ctx context.Context, sessionID string) error {
+	return w.client.AgentRestoreSummarizeSession(ctx, w.workspaceID(), sessionID)
+}
+
 func (w *ClientWorkspace) AgentSummarize(ctx context.Context, sessionID, instructions string) error {
 	return w.client.AgentSummarizeSession(ctx, w.workspaceID(), sessionID, instructions)
 }

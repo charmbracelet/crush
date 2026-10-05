@@ -44,9 +44,11 @@ func (s *stubCoordinator) IsBusy() bool  { return false }
 func (s *stubCoordinator) IsSessionBusy(id string) bool {
 	return s.busy[id]
 }
-func (s *stubCoordinator) QueuedPrompts(string) int          { return 0 }
-func (s *stubCoordinator) QueuedPromptsList(string) []string { return nil }
-func (s *stubCoordinator) ClearQueue(string)                 {}
+func (s *stubCoordinator) QueuedPrompts(string) int                       { return 0 }
+func (s *stubCoordinator) QueuedPromptsList(string) []string              { return nil }
+func (s *stubCoordinator) ClearQueue(string)                              {}
+func (s *stubCoordinator) RestoreSummarize(context.Context, string) error { return nil }
+
 func (s *stubCoordinator) Summarize(context.Context, string, string) error {
 	return nil
 }

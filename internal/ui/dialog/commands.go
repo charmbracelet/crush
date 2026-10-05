@@ -57,7 +57,10 @@ type Commands struct {
 	hasSession bool
 	hasTodos   bool
 	hasQueue   bool
-	selected   CommandType
+	// hasCheckpoint gates the undo entry: a session with no checkpoint has
+	// nothing to bring back.
+	hasCheckpoint bool
+	selected      CommandType
 
 	spinner spinner.Model
 	loading bool
@@ -463,6 +466,16 @@ func (c *Commands) defaultCommands() []*CommandItem {
 			},
 		).WithAliases("summarize", "compress").WithDescription("Replace older turns with a checkpoint, keeping the most recent ones verbatim"))
 	}
+	// Compaction never deletes what it replaced, so the way back is offered
+	// whenever a checkpoint exists rather than only just after one.
+	if c.hasSession && c.hasCheckpoint {
+		commands = append(commands, NewCommandItem(
+			c.com.Styles, "restore", "Restore Checkpoint", "",
+			ActionRestoreSummarize{
+				SessionID: c.sessionID,
+			},
+		).WithAliases("uncompact", "undo").WithDescription("Undo the last compaction and bring back the messages it replaced"))
+	}
 
 	// Add reasoning toggle for models that support it
 	cfg := c.com.Config()
@@ -611,6 +624,13 @@ func (c *Commands) StopLoading() {
 // compactArguments describes what the compact dialog collects before it
 // compacts. It is a package-level function because defaultCommands shadows the
 // commands package with its own local slice of items.
+// SetHasCheckpoint records whether the current session has a checkpoint to
+// undo. The palette is built before any command runs, so the entry appears only
+// when there is something behind it to restore.
+func (c *Commands) SetHasCheckpoint(has bool) {
+	c.hasCheckpoint = has
+}
+
 func compactArguments() []commands.Argument {
 	return []commands.Argument{{
 		ID:          CompactInstructionsArg,

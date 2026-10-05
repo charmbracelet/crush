@@ -165,6 +165,9 @@ type Workspace interface {
 	AgentClearQueue(sessionID string)
 	AgentSetMain(agentID string) error
 	AgentSummarize(ctx context.Context, sessionID, instructions string) error
+	// AgentRestoreSummarize undoes the session's most recent compaction,
+	// bringing back the messages its checkpoint replaced.
+	AgentRestoreSummarize(ctx context.Context, sessionID string) error
 	UpdateAgentModel(ctx context.Context) error
 	InitCoderAgent(ctx context.Context) error
 	InitCoderAgentNonInteractive(ctx context.Context) error

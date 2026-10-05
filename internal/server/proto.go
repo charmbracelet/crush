@@ -630,6 +630,15 @@ func (c *controllerV1) handlePostWorkspaceAgentSessionSummarize(w http.ResponseW
 	w.WriteHeader(http.StatusOK)
 }
 
+// handleDeleteWorkspaceAgentSessionSummarize undoes a session compaction.
+func (c *controllerV1) handleDeleteWorkspaceAgentSessionSummarize(w http.ResponseWriter, r *http.Request) {
+	if err := c.backend.RestoreSummarizeSession(r.Context(), r.PathValue("id"), r.PathValue("sid")); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
 // handlePostWorkspaceAgentSessionShell runs a shell command in the workspace.
 func (c *controllerV1) handlePostWorkspaceAgentSessionShell(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")

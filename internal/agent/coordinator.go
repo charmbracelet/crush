@@ -1805,6 +1805,27 @@ func (c *coordinator) waitForInteractiveReauth(ctx context.Context, providerID s
 	return nil
 }
 
+// rebuildSubagentModels rebuilds a subagent's models from the current config,
+// keeping its large model's selection (provider, model and effort), so
+// refreshed credentials reach its provider client.
+func (c *coordinator) rebuildSubagentModels(ctx context.Context, agent SessionAgent) error {
+	cur := agent.Model()
+	providerCfg, ok := c.cfg.Config().Providers.Get(cur.ModelCfg.Provider)
+	if !ok {
+		return errModelProviderNotConfigured
+	}
+	large, err := c.buildModel(ctx, providerCfg, cur.ModelCfg, cur.CatwalkCfg, true)
+	if err != nil {
+		return err
+	}
+	small, err := c.buildNamedModel(ctx, config.SelectedModelTypeSmall, true)
+	if err != nil {
+		return err
+	}
+	agent.SetModels(large, small)
+	return nil
+}
+
 // isUnauthorized reports whether err is an HTTP 401 from a provider.
 func isUnauthorized(err error) bool {
 	var providerErr *fantasy.ProviderError
@@ -1957,11 +1978,17 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 		inner := authRefresh
 		authRefresh = func(ctx context.Context, pe *fantasy.ProviderError) error {
 			c.runtime.SetStatus(session.ID, subagents.StatusRetrying)
-			err := inner(ctx, pe)
-			if err == nil {
-				c.runtime.SetStatus(session.ID, subagents.StatusRunning)
+			if err := inner(ctx, pe); err != nil {
+				return err
 			}
-			return err
+			// The refresh rebuilds only the main agent's models; rebuild
+			// this subagent's too so fantasy's retry sends the fresh
+			// credentials instead of failing on the stale client again.
+			if err := c.rebuildSubagentModels(ctx, params.Agent); err != nil {
+				return err
+			}
+			c.runtime.SetStatus(session.ID, subagents.StatusRunning)
+			return nil
 		}
 	}
 

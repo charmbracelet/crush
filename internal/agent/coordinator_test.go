@@ -1679,3 +1679,61 @@ func TestResolveModelByID_ModelNotFound(t *testing.T) {
 	require.ErrorContains(t, err, "not offered by any configured provider")
 	require.Equal(t, 0, coord.subagentModelCache.Len())
 }
+
+// modelRecordingAgent records SetModels calls on top of mockSessionAgent.
+type modelRecordingAgent struct {
+	*mockSessionAgent
+	setModels []Model
+}
+
+func (m *modelRecordingAgent) SetModels(large, _ Model) {
+	m.setModels = append(m.setModels, large)
+}
+
+// TestRunSubAgent_AuthRefreshRebuildsSubagentModels verifies that a 401
+// refresh inside a subagent rebuilds the subagent's own models, keeping its
+// selection, so fantasy's retry uses the refreshed credentials rather than
+// the stale provider client. The refresh path itself only rebuilds the main
+// agent's models.
+//
+// Not parallel: t.Setenv.
+func TestRunSubAgent_AuthRefreshRebuildsSubagentModels(t *testing.T) {
+	t.Setenv("CRUSH_TEST_ROTATED_KEY", "fresh")
+	env := testEnv(t)
+	coord := newOfflineCoordinator(t, env)
+	require.NoError(t, coord.readyWg.Wait())
+
+	p, ok := coord.cfg.Config().Providers.Get("test-openai-compat")
+	require.True(t, ok)
+	p.APIKeyTemplate = "$CRUSH_TEST_ROTATED_KEY"
+	coord.cfg.Config().Providers.Set(p.ID, p)
+
+	parentSession, err := env.sessions.Create(t.Context(), "Parent")
+	require.NoError(t, err)
+
+	sel := config.SelectedModel{Provider: p.ID, Model: "test-model", ReasoningEffort: "high"}
+	agent := &modelRecordingAgent{mockSessionAgent: newMockAgent(p.ID, 4096, nil)}
+	agent.model.ModelCfg = sel
+	agent.model.CatwalkCfg = catwalk.Model{ID: "test-model", DefaultMaxTokens: 4096}
+	agent.runFunc = func(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
+		require.NotNil(t, call.OnAuthRefresh)
+		require.NoError(t, call.OnAuthRefresh(ctx, &fantasy.ProviderError{StatusCode: http.StatusUnauthorized}))
+		return agentResultWithText("ok"), nil
+	}
+
+	resp, err := coord.runSubAgent(t.Context(), subAgentParams{
+		Agent:          agent,
+		SessionID:      parentSession.ID,
+		AgentMessageID: "msg-1",
+		ToolCallID:     "call-1",
+		Prompt:         "x",
+		SessionTitle:   "Test",
+	})
+	require.NoError(t, err)
+	require.False(t, resp.IsError, resp.Content)
+
+	require.Len(t, agent.setModels, 1, "the subagent's models must be rebuilt after the refresh")
+	require.Equal(t, sel, agent.setModels[0].ModelCfg, "the rebuild must keep the subagent's selection")
+	p, _ = coord.cfg.Config().Providers.Get(p.ID)
+	require.Equal(t, "fresh", p.APIKey)
+}

@@ -137,12 +137,12 @@ func TestChannelReplyDelivered(t *testing.T) {
 		return set
 	}
 
-	require.True(t, channelReplyDelivered(reply, "signal", completed("mcp_signal_send_message_to_user")))
-	require.True(t, channelReplyDelivered(reply, "signal", completed("mcp_signal_send_message_to_group")))
-	require.True(t, channelReplyDelivered(reply, "signal", completed("mcp_signal_send")))
-	require.False(t, channelReplyDelivered(reply, "signal", completed("mcp_signal_mark_read", "bash")))
+	require.True(t, channelReplyDelivered(reply, "signal", completed("mcp__signal__send_message_to_user")))
+	require.True(t, channelReplyDelivered(reply, "signal", completed("mcp__signal__send_message_to_group")))
+	require.True(t, channelReplyDelivered(reply, "signal", completed("mcp__signal__send")))
+	require.False(t, channelReplyDelivered(reply, "signal", completed("mcp__signal__mark_read", "bash")))
 	// A same-named tool on a different server does not count as a reply.
-	require.False(t, channelReplyDelivered(reply, "signal", completed("mcp_other_send_message_to_user")))
+	require.False(t, channelReplyDelivered(reply, "signal", completed("mcp__other__send_message_to_user")))
 	require.False(t, channelReplyDelivered(reply, "signal", completed()))
 }
 
@@ -344,14 +344,14 @@ func TestDiscoverReplyFromTools_DeliveredCheck(t *testing.T) {
 	}
 
 	// The model called the discovered tool — counts as delivered.
-	require.True(t, autoReplyDelivered(reply, "signal", completed("mcp_signal_send_message_to_user")))
-	require.True(t, autoReplyDelivered(reply, "signal", completed("mcp_signal_send_message_to_group")))
+	require.True(t, autoReplyDelivered(reply, "signal", completed("mcp__signal__send_message_to_user")))
+	require.True(t, autoReplyDelivered(reply, "signal", completed("mcp__signal__send_message_to_group")))
 	// A different tool does not count.
-	require.False(t, autoReplyDelivered(reply, "signal", completed("mcp_signal_mark_read")))
+	require.False(t, autoReplyDelivered(reply, "signal", completed("mcp__signal__mark_read")))
 	// Empty set.
 	require.False(t, autoReplyDelivered(reply, "signal", completed()))
 	// Nil reply.
-	require.False(t, autoReplyDelivered(nil, "signal", completed("mcp_signal_send")))
+	require.False(t, autoReplyDelivered(nil, "signal", completed("mcp__signal__send")))
 }
 
 func TestDiscoverReplyFromTools_EdgeCases(t *testing.T) {

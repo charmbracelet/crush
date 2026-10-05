@@ -104,6 +104,24 @@ type ProviderConfig struct {
 	APIKeyTemplate string `json:"-"`
 	// OAuthToken for providers that use OAuth2 authentication.
 	OAuthToken *oauth.Token `json:"oauth,omitempty" jsonschema:"description=OAuth2 token for authentication with the provider"`
+	// Auth describes an OAuth flow for a provider that Crush does not
+	// ship, so signing in needs no code: declare the issuer and client,
+	// then run crush login. Absent means the provider authenticates with
+	// APIKey alone, which is how every custom provider always has.
+	Auth *oauth.AuthSpec `json:"auth,omitempty" jsonschema:"description=OAuth configuration that lets crush login authenticate this provider"`
+	// Usage declares an endpoint that reports the quota left on a
+	// subscription plan, so a plugin can surface remaining allowance with no
+	// Crush code. See [oauth.UsageSpec].
+	Usage *oauth.UsageSpec `json:"usage,omitempty" jsonschema:"description=Endpoint that reports the quota remaining on this provider's plan"`
+	// Gateway rewrites the provider's traffic through jq programs a plugin
+	// declares, which is how a provider whose wire format differs from what
+	// its SDK speaks is added from configuration. See [oauth.GatewaySpec].
+	Gateway *oauth.GatewaySpec `json:"gateway,omitempty" jsonschema:"description=jq programs rewriting requests and responses to the provider's wire format"`
+	// Catalog reads the provider's own model listing at load time through a
+	// jq program a plugin declares, which is how a provider whose catalog
+	// names fields Crush has never seen still reports context windows and
+	// capability lists. See [oauth.CatalogSpec].
+	Catalog *oauth.CatalogSpec `json:"catalog,omitempty" jsonschema:"description=Endpoint and jq program that read the provider's model catalog"`
 	// Marks the provider as disabled.
 	Disable bool `json:"disable,omitempty" jsonschema:"description=Whether this provider is disabled,default=false"`
 
@@ -204,6 +222,12 @@ func (c *ProviderConfig) HasAPIKey(resolver VariableResolver) bool {
 	}
 	v, err := resolver.ResolveValue(c.APIKey)
 	return err == nil && v != ""
+}
+
+// UsesOAuth reports whether the provider signs in through an OAuth flow
+// declared in its config rather than a static API key.
+func (c *ProviderConfig) UsesOAuth() bool {
+	return c != nil && c.Auth.UsesOAuth()
 }
 
 type MCPType string
@@ -900,6 +924,9 @@ func (c *Config) ensureTUI() *TUIOptions {
 	return c.Options.TUI
 }
 
+// EnabledProviders returns the providers declared and not disabled. A
+// provider that declares an OAuth flow but has not signed in yet still
+// counts: its models belong in the picker, behind a sign-in prompt.
 func (c *Config) EnabledProviders() []ProviderConfig {
 	var enabled []ProviderConfig
 	for p := range c.Providers.Seq() {
@@ -908,6 +935,41 @@ func (c *Config) EnabledProviders() []ProviderConfig {
 		}
 	}
 	return enabled
+}
+
+// UsableProviders returns the providers that can serve a request right now:
+// enabled and holding a credential. A provider waiting on a sign-in is
+// excluded, because there is nothing to authenticate with and some SDKs
+// refuse to even construct a client for it, which would make every startup
+// fail before the sign-in could run.
+func (c *Config) UsableProviders() []ProviderConfig {
+	var usable []ProviderConfig
+	for p := range c.Providers.Seq() {
+		if p.Disable || p.NeedsSignIn() {
+			continue
+		}
+		usable = append(usable, p)
+	}
+	return usable
+}
+
+// NeedsSignIn reports whether the provider declares an OAuth flow and holds
+// neither a token nor a key: it is configured, but signing in is the only
+// path to serving a request.
+func (c *ProviderConfig) NeedsSignIn() bool {
+	return c != nil && c.UsesOAuth() && c.OAuthToken == nil && c.APIKey == ""
+}
+
+// HasUsableSelection reports whether the large model selection points at a
+// provider that can serve a request. It is false while the selected
+// provider waits on a sign-in, or when nothing is selected yet.
+func (c *Config) HasUsableSelection() bool {
+	large, ok := c.Models[SelectedModelTypeLarge]
+	if !ok || large.Provider == "" {
+		return false
+	}
+	pc, ok := c.Providers.Get(large.Provider)
+	return ok && !pc.NeedsSignIn()
 }
 
 // IsConfigured  return true if at least one provider is configured

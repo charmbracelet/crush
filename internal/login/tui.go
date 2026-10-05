@@ -74,9 +74,11 @@ func (m *authModel) updateAuthKeymap() {
 
 // authModel is the Bubble Tea model for the OAuth authorization flow.
 type authModel struct {
-	platform string
-	newFlow  func() flow
-	flow     flow
+	// title is the platform name shown in the header, e.g. "GitHub
+	// Copilot" or a plugin provider's display name.
+	title   string
+	newFlow func() flow
+	flow    flow
 
 	state authState
 
@@ -131,16 +133,16 @@ type authErrMsg struct {
 	err error
 }
 
-func newAuthModel(platform string, newFlow func() flow) authModel {
+func newAuthModel(title string, newFlow func() flow) authModel {
 	s := spinner.New(spinner.WithSpinner(spinner.Dot))
 	s.Style = lipgloss.NewStyle().Foreground(charmtone.Julep)
 	m := authModel{
-		platform: platform,
-		newFlow:  newFlow,
-		state:    authStateIntro,
-		spinner:  s,
-		help:     help.New(),
-		keymap:   defaultAuthKeybinds(),
+		title:   title,
+		newFlow: newFlow,
+		state:   authStateIntro,
+		spinner: s,
+		help:    help.New(),
+		keymap:  defaultAuthKeybinds(),
 	}
 	m.updateAuthKeymap()
 	return m
@@ -148,8 +150,8 @@ func newAuthModel(platform string, newFlow func() flow) authModel {
 
 // runTUI runs the OAuth authorization flow with a small TUI that guides
 // the user through opening a browser and waiting for the callback.
-func runTUI(platform string, newFlow func() flow) (*oauth.Token, error) {
-	p := tea.NewProgram(newAuthModel(platform, newFlow))
+func runTUI(title string, newFlow func() flow) (*oauth.Token, error) {
+	p := tea.NewProgram(newAuthModel(title, newFlow))
 	final, err := p.Run()
 	if err != nil {
 		return nil, fmt.Errorf("running auth program: %w", err)
@@ -299,7 +301,7 @@ func (m authModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m authModel) authHeader() string {
-	title := "Let’s authenticate with " + titles[m.platform]
+	title := "Let’s authenticate with " + m.title
 	w := m.authWidth()
 	if lipgloss.Width(title) > w {
 		title = ansi.Truncate(title, w, "…")

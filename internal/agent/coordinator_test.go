@@ -238,6 +238,9 @@ func TestRunSubAgent(t *testing.T) {
 	t.Run("empty result returns error response", func(t *testing.T) {
 		env := testEnv(t)
 		coord := newTestCoordinator(t, env, providerID, providerCfg)
+		coord.runtime = subagents.NewRuntime()
+		t.Cleanup(coord.runtime.Shutdown)
+		events := coord.runtime.Subscribe(t.Context())
 
 		parentSession, err := env.sessions.Create(t.Context(), "Parent")
 		require.NoError(t, err)
@@ -257,6 +260,18 @@ func TestRunSubAgent(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, resp.IsError)
 		assert.Equal(t, "Sub-agent completed but produced no text output.", resp.Content)
+
+		var finished *subagents.RunningEntry
+		for finished == nil {
+			select {
+			case ev := <-events:
+				finished = ev.Payload.Finished
+			case <-time.After(2 * time.Second):
+				t.Fatal("Finish did not publish a RuntimeEvent")
+			}
+		}
+		assert.Equal(t, subagents.StatusFailed, finished.Status,
+			"an error response must not be reported completed")
 	})
 
 	t.Run("ModelCfg.MaxTokens overrides default", func(t *testing.T) {

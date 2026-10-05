@@ -185,6 +185,10 @@ type coordinator struct {
 	// subagentModelCache memoizes resolveModelByID results within a config
 	// generation. Cleared by UpdateModels to avoid reusing stale clients.
 	subagentModelCache *csync.Map[subagentModelKey, Model]
+	// subagentModelGen counts cache resets, so a build that straddles one
+	// is not stored. Guarded by subagentModelMu.
+	subagentModelGen uint64
+	subagentModelMu  sync.Mutex
 
 	// subagentCancels maps a running subagent's child session ID to the cancel
 	// func for its run. Dispatched subagents run on ad-hoc SessionAgents whose
@@ -938,21 +942,45 @@ func (c *coordinator) resolveModelByID(ctx context.Context, modelID, providerOve
 		}
 	}
 
-	providerCfg, catwalkModel, err := c.cfg.Config().FindModelProvider(providerOverride, modelID)
+	c.subagentModelMu.Lock()
+	gen := c.subagentModelGen
+	c.subagentModelMu.Unlock()
+
+	cfg := c.cfg.Config()
+	providerCfg, catwalkModel, err := cfg.FindModelProvider(providerOverride, modelID)
 	if err != nil {
 		return Model{}, err
 	}
+	// Naming the configured large or small model by id keeps its settings
+	// (think, max_tokens, provider_options, ...), as the alias would.
 	selModel := config.SelectedModel{Provider: providerCfg.ID, Model: modelID}
+	for _, t := range []config.SelectedModelType{config.SelectedModelTypeLarge, config.SelectedModelTypeSmall} {
+		if sel := cfg.Models[t]; sel.Provider == selModel.Provider && sel.Model == modelID {
+			selModel = sel
+			break
+		}
+	}
 	m, err := c.buildModel(ctx, providerCfg, selModel, catwalkModel, isSubAgent)
 	if err != nil {
 		return Model{}, err
 	}
+	if resolveModelBuiltHook != nil {
+		resolveModelBuiltHook()
+	}
 
 	if c.subagentModelCache != nil {
-		c.subagentModelCache.Set(key, m)
+		c.subagentModelMu.Lock()
+		if c.subagentModelGen == gen {
+			c.subagentModelCache.Set(key, m)
+		}
+		c.subagentModelMu.Unlock()
 	}
 	return m, nil
 }
+
+// resolveModelBuiltHook, when set by tests, runs after resolveModelByID
+// builds a model and before it is cached.
+var resolveModelBuiltHook func()
 
 // buildAgent constructs a SessionAgent. sm carries the model-selection fields
 // from subagent frontmatter (zero value for the coder/task agents): sm.Model is
@@ -981,14 +1009,18 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		primary, err = c.buildNamedModel(ctx, config.SelectedModelTypeLarge, isSubAgent)
 	default:
 		primary, err = c.resolveModelByID(ctx, sm.Model, sm.Provider, isSubAgent)
+		if err != nil {
+			err = modelResolveError{err}
+		}
 	}
 	if err != nil {
 		return nil, err
 	}
 
 	if subagents.EffortIgnored(sm.Effort, primary.CatwalkCfg) {
-		slog.Warn("Subagent effort ignored: model does not support reasoning",
-			"model", primary.ModelCfg.Model, "effort", sm.Effort)
+		slog.Warn("Subagent effort ignored: model does not support this reasoning level",
+			"model", primary.ModelCfg.Model, "effort", sm.Effort,
+			"levels", primary.CatwalkCfg.ReasoningLevels)
 	}
 	primary.ModelCfg = subagents.ApplyEffortToModel(sm.Effort, primary.ModelCfg, primary.CatwalkCfg)
 
@@ -1605,7 +1637,10 @@ func (c *coordinator) UpdateModels(ctx context.Context) error {
 	// Clear the subagent model cache so that any stale LanguageModel instances
 	// (built against the old config) are not reused after a config reload.
 	if c.subagentModelCache != nil {
+		c.subagentModelMu.Lock()
+		c.subagentModelGen++
 		c.subagentModelCache.Reset(make(map[subagentModelKey]Model))
+		c.subagentModelMu.Unlock()
 	}
 
 	agent, name := c.activeAgent()
@@ -1881,6 +1916,12 @@ type subagentModel struct {
 	Provider string
 }
 
+// modelResolveError marks a buildAgent failure caused by resolving the
+// requested model id, as opposed to any other part of the build.
+type modelResolveError struct{ error }
+
+func (e modelResolveError) Unwrap() error { return e.error }
+
 // subagentModelKey is the cache key for resolveModelByID results.
 type subagentModelKey struct {
 	modelID    string
@@ -2039,6 +2080,7 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 
 	output := subAgentOutput(result)
 	if output == "" {
+		finalStatus = subagents.StatusFailed
 		return fantasy.NewTextErrorResponse("Sub-agent completed but produced no text output."), nil
 	}
 	return fantasy.NewTextResponse(output), nil

@@ -231,6 +231,28 @@ func TestSubagentPrompt_Build_RendersBody(t *testing.T) {
 	require.Contains(t, got, body)
 }
 
+// TestSubagentPrompt_Build_RendersCriticalRules confirms the fixed safety
+// rules render regardless of the user-written body, since a subagent can
+// inherit bash and edit tools.
+func TestSubagentPrompt_Build_RendersCriticalRules(t *testing.T) {
+	t.Parallel()
+
+	for _, body := range []string{"", "Fix the tests."} {
+		p, err := subagentPrompt(newTestSubagent("rules", nil, body), nil)
+		require.NoError(t, err)
+
+		got, err := p.Build(context.Background(), "p", "m", newPromptTestStore(t))
+		require.NoError(t, err)
+		require.Contains(t, got, "<critical_rules>")
+		require.Contains(t, got, "NEVER COMMIT")
+		require.Contains(t, got, "NEVER PUSH")
+		if body != "" {
+			require.Less(t, strings.Index(got, body), strings.Index(got, "<critical_rules>"),
+				"user body must lead the prompt")
+		}
+	}
+}
+
 // TestSubagentPrompt_Build_RendersUserContextAndSkillsUsage confirms the
 // subagent prompt carries the user's global context files and the skill
 // activation instructions alongside the available-skills list.

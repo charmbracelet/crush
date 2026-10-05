@@ -11,9 +11,11 @@ import (
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/anthropic"
 	"charm.land/fantasy/providers/bedrock"
+	"charm.land/fantasy/providers/openai"
 	"charm.land/fantasy/providers/openaicompat"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/discover"
+	"github.com/charmbracelet/crush/internal/session"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -523,7 +525,7 @@ func TestGetProviderOptionsReasoningEffort(t *testing.T) {
 			}
 			providerCfg := config.ProviderConfig{ID: "test", Type: tc.providerType}
 
-			opts := getProviderOptions(model, providerCfg)
+			opts := getProviderOptions(model, providerCfg, "")
 
 			raw, ok := opts[anthropic.Name]
 			require.True(t, ok, "options should be keyed under anthropic.Name for type %q", tc.providerType)
@@ -581,7 +583,7 @@ func TestGetProviderOptionsReasoningEffortCustomProvider(t *testing.T) {
 			}
 			providerCfg := config.ProviderConfig{ID: "local", Type: catwalk.Type(providerType)}
 
-			opts := getProviderOptions(model, providerCfg)
+			opts := getProviderOptions(model, providerCfg, "")
 
 			raw, ok := opts[openaicompat.Name]
 			require.True(t, ok, "options should be keyed under openaicompat.Name for type %q", providerType)
@@ -609,7 +611,7 @@ func TestGetProviderOptionsReasoningEffortFallback(t *testing.T) {
 		Type: openaicompat.Name,
 	}
 
-	opts := getProviderOptions(model, providerCfg)
+	opts := getProviderOptions(model, providerCfg, "")
 
 	raw, ok := opts[openaicompat.Name]
 	require.True(t, ok)
@@ -634,7 +636,7 @@ func TestGetProviderOptionsTopKExtraBody(t *testing.T) {
 			ModelCfg:   config.SelectedModel{Provider: "ollama", TopK: ptr(int64(40))},
 		}
 
-		opts := getProviderOptions(model, knownCustomProviderCfg)
+		opts := getProviderOptions(model, knownCustomProviderCfg, "")
 
 		raw, ok := opts[openaicompat.Name]
 		require.True(t, ok)
@@ -654,7 +656,7 @@ func TestGetProviderOptionsTopKExtraBody(t *testing.T) {
 			ModelCfg: config.SelectedModel{Provider: "ollama"},
 		}
 
-		opts := getProviderOptions(model, knownCustomProviderCfg)
+		opts := getProviderOptions(model, knownCustomProviderCfg, "")
 
 		raw, ok := opts[openaicompat.Name]
 		require.True(t, ok)
@@ -671,7 +673,7 @@ func TestGetProviderOptionsTopKExtraBody(t *testing.T) {
 			ModelCfg:   config.SelectedModel{Provider: "ollama"},
 		}
 
-		opts := getProviderOptions(model, knownCustomProviderCfg)
+		opts := getProviderOptions(model, knownCustomProviderCfg, "")
 
 		raw, ok := opts[openaicompat.Name]
 		require.True(t, ok)
@@ -693,7 +695,7 @@ func TestGetProviderOptionsTopKExtraBody(t *testing.T) {
 			},
 		}
 
-		opts := getProviderOptions(model, knownCustomProviderCfg)
+		opts := getProviderOptions(model, knownCustomProviderCfg, "")
 
 		raw, ok := opts[openaicompat.Name]
 		require.True(t, ok)
@@ -709,7 +711,7 @@ func TestGetProviderOptionsTopKExtraBody(t *testing.T) {
 		}
 		providerCfg := config.ProviderConfig{ID: string(catwalk.InferenceProviderZAI), Type: openaicompat.Name}
 
-		opts := getProviderOptions(model, providerCfg)
+		opts := getProviderOptions(model, providerCfg, "")
 
 		raw, ok := opts[openaicompat.Name]
 		require.True(t, ok)
@@ -731,7 +733,7 @@ func TestGetProviderOptionsMalformedFallback(t *testing.T) {
 	}
 	providerCfg := config.ProviderConfig{ID: "test", Type: "ollama"}
 
-	opts := getProviderOptions(model, providerCfg)
+	opts := getProviderOptions(model, providerCfg, "")
 
 	raw, ok := opts[openaicompat.Name]
 	require.True(t, ok, "malformed provider_options should still fall back to top_k")
@@ -820,5 +822,85 @@ func TestCoordinatorSetMainAgent(t *testing.T) {
 		err := coord.SetMainAgent("unknown")
 		require.Error(t, err)
 		assert.ErrorIs(t, err, errMainAgentNotFound)
+	})
+}
+
+func TestGetProviderOptionsPromptCacheKey(t *testing.T) {
+	const sessionID = "session-123"
+	openaiCfg := config.ProviderConfig{
+		ID:   string(catwalk.InferenceProviderOpenAI),
+		Type: catwalk.TypeOpenAI,
+	}
+
+	t.Run("responses model uses hashed session id", func(t *testing.T) {
+		model := Model{
+			CatwalkCfg: catwalk.Model{ID: "gpt-5"},
+		}
+
+		opts := getProviderOptions(model, openaiCfg, sessionID)
+
+		parsed, ok := opts[openai.Name].(*openai.ResponsesProviderOptions)
+		require.True(t, ok)
+		require.NotNil(t, parsed.PromptCacheKey)
+		assert.Equal(t, session.HashID(sessionID), *parsed.PromptCacheKey)
+	})
+
+	t.Run("chat completions model uses hashed session id", func(t *testing.T) {
+		model := Model{
+			CatwalkCfg: catwalk.Model{ID: "legacy-chat-model"},
+		}
+
+		opts := getProviderOptions(model, openaiCfg, sessionID)
+
+		parsed, ok := opts[openai.Name].(*openai.ProviderOptions)
+		require.True(t, ok)
+		require.NotNil(t, parsed.PromptCacheKey)
+		assert.Equal(t, session.HashID(sessionID), *parsed.PromptCacheKey)
+	})
+
+	t.Run("preserves explicit prompt cache key", func(t *testing.T) {
+		model := Model{
+			CatwalkCfg: catwalk.Model{ID: "gpt-5"},
+			ModelCfg: config.SelectedModel{
+				ProviderOptions: map[string]any{
+					"prompt_cache_key": "configured-cache-key",
+				},
+			},
+		}
+
+		opts := getProviderOptions(model, openaiCfg, sessionID)
+
+		parsed, ok := opts[openai.Name].(*openai.ResponsesProviderOptions)
+		require.True(t, ok)
+		require.NotNil(t, parsed.PromptCacheKey)
+		assert.Equal(t, "configured-cache-key", *parsed.PromptCacheKey)
+	})
+
+	t.Run("skips when session id is empty", func(t *testing.T) {
+		model := Model{
+			CatwalkCfg: catwalk.Model{ID: "gpt-5"},
+		}
+
+		opts := getProviderOptions(model, openaiCfg, "")
+
+		parsed, ok := opts[openai.Name].(*openai.ResponsesProviderOptions)
+		require.True(t, ok)
+		assert.Nil(t, parsed.PromptCacheKey)
+	})
+
+	t.Run("skips providers other than openai", func(t *testing.T) {
+		model := Model{
+			CatwalkCfg: catwalk.Model{ID: "gpt-5"},
+		}
+		for _, providerCfg := range []config.ProviderConfig{
+			{ID: "custom", Type: catwalk.TypeOpenAI},
+			{ID: string(catwalk.InferenceProviderAzure), Type: catwalk.TypeAzure},
+		} {
+			opts := getProviderOptions(model, providerCfg, sessionID)
+
+			parsed, ok := opts[openai.Name].(*openai.ResponsesProviderOptions)
+			require.True(t, ok, "provider %q", providerCfg.ID)
+			assert.Nil(t, parsed.PromptCacheKey, "provider %q", providerCfg.ID)
+		}
 	})
 }

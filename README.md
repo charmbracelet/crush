@@ -712,9 +712,9 @@ You are a careful code reviewer. Report problems with file:line references.
 | `model`           | `large`, `small`, or a model ID. Defaults to `large`.                                                 |
 | `provider`        | Provider for `model`. Required when more than one configured provider offers that model ID.          |
 | `effort`          | Reasoning effort: `none`, `minimal`, `low`, `medium`, `high`, `xhigh` or `max`.                      |
-| `skills`          | Skills to load into the subagent's prompt. Only these are offered to it.                              |
-| `mcpServers`      | MCP servers the subagent may use. None by default.                                                    |
-| `permissionMode`  | `default`, or `bypassPermissions` to skip permission prompts (project subagents ask first).           |
+| `skills`          | Skills to load into the subagent's prompt (list or comma-separated). Only these are offered to it.    |
+| `mcpServers`      | Configured MCP servers the subagent may use (list or comma-separated). None by default.               |
+| `permissionMode`  | `default`, or `bypassPermissions` to skip permission prompts (non-global subagents ask first).        |
 | `color`           | `red`, `orange`, `yellow`, `green`, `cyan`, `blue`, `purple` or `pink`.                               |
 
 Any other key is an error, so a misspelled `tools:` can't silently grant
@@ -732,10 +732,15 @@ plan mode stays read-only.
 
 Global subagents are loaded from:
 
-- `$CRUSH_SUBAGENTS_DIR`
 - `$XDG_CONFIG_HOME/crush/subagents` or `~/.config/crush/subagents/`
 - `$XDG_CONFIG_HOME/agents/subagents` or `~/.config/agents/subagents/`
 - `~/.agents/subagents/`
+- On Windows, also `%LOCALAPPDATA%\crush\subagents` and
+  `%LOCALAPPDATA%\agents\subagents`
+
+Setting `$CRUSH_SUBAGENTS_DIR` replaces all of these with that one
+directory. A `bypassPermissions` subagent from anywhere else asks before
+it runs.
 
 Project subagents are loaded from `.agents/subagents` and `.crush/subagents`
 in the working directory and, inside a git repository, at the repository
@@ -746,7 +751,7 @@ directories, or turn subagents off and on, in your config:
 ```bash
 option subagent-path "$HOME/my-subagents"
 option disable-subagent code-reviewer
-option enable-subagent code-reviewer # Overrides a disable from a broader config.
+option enable-subagent code-reviewer # Overrides a disable from any config.
 ```
 
 Press <kbd>ctrl+x</kbd> to see running subagents and to browse, enable,

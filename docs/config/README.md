@@ -490,7 +490,9 @@ String Keys:
 Integer Keys:
   request-timeout int              seconds before an LLM request is aborted;
                                    streaming responses are only aborted after
-                                   this much inactivity; 0 waits forever
+                                   this much inactivity between tokens, while
+                                   the wait for the first token gets at least
+                                   five minutes; 0 waits forever
                                    (default 60)
 
 List Keys:

@@ -178,3 +178,50 @@ func TestCompactionCardShowsWhatSurvivesOfAPartialFooter(t *testing.T) {
 	require.Contains(t, out, "Replaced 12 earlier messages (~4K tokens)")
 	require.NotContains(t, out, "Kept the")
 }
+
+// TestFailedSummarizationIsNotCarded covers the partial checkpoint a failed
+// compaction leaves behind. Presenting it as a "Session Summary" would say the
+// conversation above it had been replaced, when nothing was written and the
+// session still holds all of it.
+func TestFailedSummarizationIsNotCarded(t *testing.T) {
+	sty := styles.CharmtonePantera()
+	msg := &message.Message{
+		ID:   "failed-checkpoint",
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.TextContent{Text: "a half-written summary tha"},
+			message.Finish{Reason: message.FinishReasonError, Message: "provider exploded", Time: 1},
+		},
+		IsSummaryMessage: true,
+	}
+	item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
+
+	out := ansi.Strip(item.RawRender(76))
+
+	require.NotContains(t, out, "Session Summary")
+	require.NotContains(t, out, "╭", "a failure is not a checkpoint")
+	require.Contains(t, out, "provider exploded", "the failure has to stay visible")
+}
+
+// TestCardDroppedWhenASummaryFailsMidFlight pins the cache key. The summary's
+// text does not change when the failure lands, only its finish part, so without
+// a bit for the error state the cached card would keep vouching for a summary
+// that never completed.
+func TestCardDroppedWhenASummaryFailsMidFlight(t *testing.T) {
+	sty := styles.CharmtonePantera()
+	msg := &message.Message{
+		ID:               "flipping-checkpoint",
+		Role:             message.Assistant,
+		Parts:            []message.ContentPart{message.TextContent{Text: "the summary text"}},
+		IsSummaryMessage: true,
+	}
+	item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
+
+	require.Contains(t, ansi.Strip(item.RawRender(76)), "Summarizing")
+
+	msg.AddFinish(message.FinishReasonError, "provider exploded", "")
+
+	out := ansi.Strip(item.RawRender(76))
+	require.NotContains(t, out, "Summarizing")
+	require.NotContains(t, out, "╭")
+}

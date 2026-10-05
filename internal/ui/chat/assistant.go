@@ -529,6 +529,13 @@ func (a *AssistantMessageItem) contentKey() (uint64, uint64) {
 	if a.message.IsSummaryMessage && !a.message.IsFinished() {
 		extra |= 2
 	}
+	if a.message.IsSummaryMessage && a.message.IsErrorLike() {
+		// A compaction that fails flips from card to plain text without the
+		// text itself changing, so without this bit the cached card would
+		// outlive the failure and keep vouching for a summary that never
+		// landed.
+		extra |= 4
+	}
 	return fnv64(a.message.Content().Text), uint64(extra)
 }
 
@@ -597,7 +604,7 @@ func (a *AssistantMessageItem) cachedContent(width int) string {
 	// ThinkingBox treatment.
 	var out string
 	switch {
-	case a.message.IsSummaryMessage:
+	case a.hasCheckpoint():
 		out = a.renderCompactionCard(width)
 	case common.PlanReadyMarkerPresent(text):
 		out = a.renderPlanCard(common.StripPlanMarkers(text), width)
@@ -761,15 +768,18 @@ func (a *AssistantMessageItem) renderThinking(thinking string, width int) string
 	return result
 }
 
-// renderMarkdown renders content as markdown. F8 routes the call
-// through streamingContent, which caches the glamour render of a
-// "stable prefix" so each streaming flush only re-renders the
-// trailing partial. The streaming cache invalidates itself on
-// width change and on any content that is not a prefix-extension
-// of the previously rendered content (e.g. user retried the
-// turn), and falls back to a full render whenever boundary
-// detection has the slightest doubt — see
-// findSafeMarkdownBoundary.
+// hasCheckpoint reports whether this message should present itself as a session
+// checkpoint.
+//
+// A summarization that fails partway leaves a half-written summary in the
+// transcript with no footer and no cut pointing at it. Framing that as a
+// "Session Summary" would claim the conversation above it had been replaced,
+// when nothing of the sort happened, so it renders as ordinary text under its
+// error banner instead, where the failure is at least legible.
+func (a *AssistantMessageItem) hasCheckpoint() bool {
+	return a.message.IsSummaryMessage && !a.message.IsErrorLike()
+}
+
 // renderCompactionCard paints a checkpoint inside a bordered box, the way the
 // plan card paints a plan. Without it a summary is plain assistant text in the
 // middle of a conversation, and the natural reading is that the agent said it
@@ -864,6 +874,15 @@ func (a *AssistantMessageItem) renderMarkdownAt(content string, width int) strin
 	return strings.TrimSpace(rendered)
 }
 
+// renderMarkdown renders content as markdown. F8 routes the call
+// through streamingContent, which caches the glamour render of a
+// "stable prefix" so each streaming flush only re-renders the
+// trailing partial. The streaming cache invalidates itself on
+// width change and on any content that is not a prefix-extension
+// of the previously rendered content (e.g. user retried the
+// turn), and falls back to a full render whenever boundary
+// detection has the slightest doubt — see
+// findSafeMarkdownBoundary.
 func (a *AssistantMessageItem) renderMarkdown(content string, width int) string {
 	renderer := common.MarkdownRenderer(a.sty, width)
 	return a.streamingContent.Render(content, width, renderer)

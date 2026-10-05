@@ -780,3 +780,16 @@ func TestSubagentsDialog_RunningListUsesFullInnerWidthWhenShort(t *testing.T) {
 	require.Contains(t, raw, name,
 		"a short list (no scrollbar needed) must size rows to the full inner width, not innerWidth-3")
 }
+
+// TestSubagentsDialog_DropsStaleInitialData verifies initial data fetched for
+// another session's dialog cannot fill this one.
+func TestSubagentsDialog_DropsStaleInitialData(t *testing.T) {
+	t.Parallel()
+
+	d := newTestSubagentsDialog(t, &subagentsWorkspace{})
+	d.HandleMsg(SubagentsInitialDataMsg{
+		ParentSessionID: "other-session",
+		Running:         []workspace.RunningSubagentInfo{{ChildSessionID: "child-x", Name: "x"}},
+	})
+	require.Nil(t, d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter}))
+}

@@ -58,7 +58,13 @@ func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string
 		return ToolResult{}, err
 	}
 
-	return toolResultFromCall(result), nil
+	tr := toolResultFromCall(result)
+	// The cap bounds what a server may place in the conversation, so it is
+	// applied here rather than inside the fold: translating a reply's content
+	// blocks stays a pure function, and only this path knows the data
+	// directory that oversized text spills to.
+	tr.Content = capResult(tr.Content, cfg.Config().Options.DataDirectory)
+	return tr, nil
 }
 
 // toolResultFromCall folds the content blocks of an MCP reply into the one
@@ -82,7 +88,7 @@ func toolResultFromCall(result *mcp.CallToolResult) ToolResult {
 			textParts = append(textParts, fmt.Sprintf("%v", v))
 		}
 	}
-	textContent := capResult(strings.Join(textParts, "\n"), cfg.Config().Options.DataDirectory)
+	textContent := strings.Join(textParts, "\n")
 
 	switch {
 	case image.seen && (len(image.data) > 0 || !audio.seen):

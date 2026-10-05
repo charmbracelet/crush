@@ -1,6 +1,8 @@
 package subagents
 
 import (
+	"slices"
+
 	"charm.land/catwalk/pkg/catwalk"
 
 	"github.com/charmbracelet/crush/internal/config"
@@ -18,11 +20,13 @@ const (
 	EffortMax     = "max"
 )
 
-// EffortIgnored reports whether a non-empty effort would be silently dropped
-// because the model cannot reason. Callers use it to warn on misconfiguration;
-// ApplyEffortToModel no-ops in the same case.
+// EffortIgnored reports whether a non-empty effort would be dropped because
+// the model cannot reason or does not list it among its ReasoningLevels.
+// Callers use it to warn on misconfiguration; ApplyEffortToModel no-ops in
+// the same case.
 func EffortIgnored(effort string, catwalkModel catwalk.Model) bool {
-	return effort != "" && !catwalkModel.CanReason
+	return effort != "" &&
+		(!catwalkModel.CanReason || !slices.Contains(catwalkModel.ReasoningLevels, effort))
 }
 
 // ApplyEffortToModel applies the given effort level to a copy of selectedModel
@@ -31,12 +35,12 @@ func EffortIgnored(effort string, catwalkModel catwalk.Model) bool {
 //
 // Rules:
 //   - Empty effort is a no-op: the copy is returned unchanged.
-//   - Models where CanReason is false are never modified.
-//   - All other models: ReasoningEffort is set directly to the effort string.
-//     The coordinator's shouldSetEffort check (slices.Contains(ReasoningLevels,
-//     ReasoningEffort)) handles unsupported levels gracefully at dispatch time.
+//   - Ignored efforts (see EffortIgnored) keep the user's ReasoningEffort;
+//     overwriting it would make the call-time fallback pick the catwalk
+//     default instead of either the request or the user's setting.
+//   - Otherwise ReasoningEffort is set directly to the effort string.
 func ApplyEffortToModel(effort string, selectedModel config.SelectedModel, catwalkModel catwalk.Model) config.SelectedModel {
-	if effort == "" || !catwalkModel.CanReason {
+	if effort == "" || EffortIgnored(effort, catwalkModel) {
 		return selectedModel
 	}
 	result := selectedModel

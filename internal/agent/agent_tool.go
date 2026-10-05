@@ -246,9 +246,12 @@ func (c *coordinator) agentTool(_ context.Context, owner config.Agent) (fantasy.
 			if params.Provider != "" && params.Model == "" {
 				return fantasy.NewTextErrorResponse("provider requires model. " + askUserForModel), nil
 			}
+			if params.Provider != "" && (params.Model == subagents.ModelAliasLarge || params.Model == subagents.ModelAliasSmall) {
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("provider requires a specific model id, not %q. %s", params.Model, askUserForModel)), nil
+			}
 			buildFailed := func(what string, err error) (fantasy.ToolResponse, error) {
 				msg := fmt.Sprintf("build %s: %v", what, err)
-				if params.Model != "" {
+				if params.Model != "" && errors.As(err, new(modelResolveError)) {
 					msg += ". " + askUserForModel
 				}
 				return fantasy.NewTextErrorResponse(msg), nil
@@ -299,10 +302,6 @@ func (c *coordinator) agentTool(_ context.Context, owner config.Agent) (fantasy.
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("unknown subagent type: %q", subagentType)), nil
 			}
 
-			if resp, ok := c.confirmBypassPermissions(ctx, sa, sessionID, call.ID); !ok {
-				return resp, nil
-			}
-
 			agentCfg := sa.ToConfigAgent(owner)
 			// Config-driven setup failures (prompt build, model/provider that
 			// passed discovery but fails at build) are surfaced as tool-error
@@ -342,6 +341,11 @@ func (c *coordinator) agentTool(_ context.Context, owner config.Agent) (fantasy.
 			}
 			if err != nil {
 				return buildFailed(fmt.Sprintf("subagent %q", sa.Name), err)
+			}
+			// Confirm only once the build succeeded, so a model error and its
+			// retry don't ask for the same approval twice.
+			if resp, ok := c.confirmBypassPermissions(ctx, sa, sessionID, call.ID); !ok {
+				return resp, nil
 			}
 
 			return c.runSubAgent(ctx, subAgentParams{

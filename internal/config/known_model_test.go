@@ -67,6 +67,45 @@ func TestConfig_FindModelProvider(t *testing.T) {
 	}
 }
 
+// TestConfig_FindModelProvider_PrefersSelectedProvider verifies an id
+// several providers offer resolves to the selected large model's provider,
+// then the small one's, and stays ambiguous when neither offers it.
+func TestConfig_FindModelProvider_PrefersSelectedProvider(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		large, small string
+		wantProvider string
+	}{
+		{name: "large_provider", large: "openai", small: "anthropic", wantProvider: "openai"},
+		{name: "small_provider", large: "anthropic", small: "azure", wantProvider: "azure"},
+		{name: "large_wins_over_small", large: "azure", small: "openai", wantProvider: "azure"},
+		{name: "neither_selected", large: "anthropic", small: "anthropic"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := newConfigWithProviders(t, map[string][]string{
+				"openai":    {"shared"},
+				"azure":     {"shared"},
+				"anthropic": {"claude-opus-4-7"},
+			})
+			cfg.Models = map[SelectedModelType]SelectedModel{
+				SelectedModelTypeLarge: {Provider: tt.large},
+				SelectedModelTypeSmall: {Provider: tt.small},
+			}
+			p, _, err := cfg.FindModelProvider("", "shared")
+			if tt.wantProvider == "" {
+				require.ErrorContains(t, err, "offered by multiple providers")
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tt.wantProvider, p.ID)
+		})
+	}
+}
+
 func TestConfig_FindModelProvider_SimilarHint(t *testing.T) {
 	t.Parallel()
 

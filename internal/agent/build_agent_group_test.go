@@ -226,3 +226,41 @@ func TestRefreshCoderSystemPrompt_HidesXMLWhenDispatcherNotAllowed(t *testing.T)
 	sa := coord.currentAgent().(*sessionAgent)
 	require.NotContains(t, sa.systemPrompt.Get(), "<available_subagents>")
 }
+
+// TestResolveModelByID_KeepsSelectedModelSettings verifies that dispatching
+// by the id of the configured large model keeps the user's per-model
+// settings instead of building a bare SelectedModel.
+func TestResolveModelByID_KeepsSelectedModelSettings(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	coord := newOfflineCoordinator(t, env)
+	require.NoError(t, coord.readyWg.Wait())
+
+	large := coord.cfg.Config().Models[config.SelectedModelTypeLarge]
+	large.Think = true
+	large.MaxTokens = 32000
+	coord.cfg.Config().Models[config.SelectedModelTypeLarge] = large
+
+	m, err := coord.resolveModelByID(t.Context(), large.Model, "", true)
+	require.NoError(t, err)
+	require.True(t, m.ModelCfg.Think)
+	require.Equal(t, int64(32000), m.ModelCfg.MaxTokens)
+}
+
+// TestResolveModelByID_ResetDuringBuildSkipsCache verifies that a model
+// built while UpdateModels resets the cache is not stored, so a model built
+// from old credentials cannot outlive the reset. Not parallel: it sets a
+// package-level hook.
+func TestResolveModelByID_ResetDuringBuildSkipsCache(t *testing.T) {
+	env := testEnv(t)
+	coord := newOfflineCoordinator(t, env)
+	require.NoError(t, coord.readyWg.Wait())
+
+	resolveModelBuiltHook = func() { require.NoError(t, coord.UpdateModels(t.Context())) }
+	t.Cleanup(func() { resolveModelBuiltHook = nil })
+
+	_, err := coord.resolveModelByID(t.Context(), "test-model", "", true)
+	require.NoError(t, err)
+	require.Zero(t, coord.subagentModelCache.Len())
+}

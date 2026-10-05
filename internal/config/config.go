@@ -1013,9 +1013,10 @@ func (c *Config) IsModelAvailable(provider, model string) bool {
 // FindModelProvider resolves a model id to the enabled provider that offers
 // it, searching every catalog GetModel does (including the ChatGPT and Grok
 // subscription lists). A non-empty providerID restricts the search to that
-// provider. With no providerID the id must be offered by exactly one enabled
-// provider: an id several providers share is an error rather than a guess,
-// so the caller has to name the provider.
+// provider. With no providerID an id several providers share resolves to the
+// selected large model's provider, then the small one's, if either offers
+// it; otherwise it is an error rather than a guess, so the caller has to name
+// the provider.
 func (c *Config) FindModelProvider(providerID, modelID string) (ProviderConfig, catwalk.Model, error) {
 	if modelID == "" {
 		return ProviderConfig{}, catwalk.Model{}, errors.New("model id is empty")
@@ -1048,6 +1049,11 @@ func (c *Config) FindModelProvider(providerID, modelID string) (ProviderConfig, 
 	case 1:
 		return found, model, nil
 	default:
+		for _, t := range []SelectedModelType{SelectedModelTypeLarge, SelectedModelTypeSmall} {
+			if p := c.Models[t].Provider; slices.Contains(ids, p) {
+				return c.FindModelProvider(p, modelID)
+			}
+		}
 		slices.Sort(ids)
 		return ProviderConfig{}, catwalk.Model{}, fmt.Errorf(
 			"model %q is offered by multiple providers (%s); set provider to choose one",

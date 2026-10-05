@@ -686,6 +686,11 @@ func TestAgentTool_DispatchModelOverride(t *testing.T) {
 			want:   []string{"Failed to generate response"},
 		},
 		{
+			name:   "alias_with_provider_asks_user",
+			params: AgentParams{Prompt: "x", Model: "large", Provider: "test-openai-compat"},
+			want:   []string{"provider requires a specific model id", askUserForModel},
+		},
+		{
 			name:   "subagent_unknown_model_asks_user",
 			params: AgentParams{SubagentType: "rev", Prompt: "x", Model: "no-such-model"},
 			want:   []string{`build subagent "rev"`, askUserForModel},
@@ -710,6 +715,67 @@ func TestAgentTool_DispatchModelOverride(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestAgentTool_BuildFailureUnrelatedToModel verifies that a build failure
+// not caused by the requested model does not tell the LLM to ask the user
+// for a model.
+func TestAgentTool_BuildFailureUnrelatedToModel(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	coord := newOfflineCoordinator(t, env)
+	require.NoError(t, coord.readyWg.Wait())
+	tool, err := coord.agentTool(t.Context(), coord.cfg.Config().Agents[config.AgentCoder])
+	require.NoError(t, err)
+	parentSession, err := env.sessions.Create(t.Context(), "Parent")
+	require.NoError(t, err)
+
+	// Break the small model, which every build needs.
+	delete(coord.cfg.Config().Models, config.SelectedModelTypeSmall)
+
+	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, parentSession.ID)
+	ctx = context.WithValue(ctx, tools.MessageIDContextKey, "msg-1")
+	input, err := json.Marshal(AgentParams{Prompt: "x", Model: "test-model"})
+	require.NoError(t, err)
+	resp, err := tool.Run(ctx, fantasy.ToolCall{ID: "call-1", Input: string(input)})
+	require.NoError(t, err)
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "build task agent")
+	require.NotContains(t, resp.Content, askUserForModel)
+}
+
+// TestAgentTool_BypassConfirmAfterBuild verifies a bypassPermissions
+// subagent whose build fails never asks for the bypass approval, so a retry
+// after the user picks a model doesn't ask twice.
+func TestAgentTool_BypassConfirmAfterBuild(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	coord := newOfflineCoordinator(t, env)
+	require.NoError(t, coord.readyWg.Wait())
+	perms := &stubRequestPermissions{grant: true}
+	coord.permissions = perms
+	coord.activeSubagents = []*subagents.Subagent{{
+		Name:           "byp",
+		Description:    "bypass subagent",
+		PermissionMode: subagents.PermissionModeBypassPermissions,
+		FilePath:       filepath.Join(env.workingDir, ".crush", "subagents", "byp.md"),
+	}}
+	tool, err := coord.agentTool(t.Context(), coord.cfg.Config().Agents[config.AgentCoder])
+	require.NoError(t, err)
+	parentSession, err := env.sessions.Create(t.Context(), "Parent")
+	require.NoError(t, err)
+
+	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, parentSession.ID)
+	ctx = context.WithValue(ctx, tools.MessageIDContextKey, "msg-1")
+	input, err := json.Marshal(AgentParams{SubagentType: "byp", Prompt: "x", Model: "no-such-model"})
+	require.NoError(t, err)
+	resp, err := tool.Run(ctx, fantasy.ToolCall{ID: "call-1", Input: string(input)})
+	require.NoError(t, err)
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, `build subagent "byp"`)
+	require.Empty(t, perms.requests)
 }
 
 func TestAgentTool_TaskBuildFailureIsRetryable(t *testing.T) {

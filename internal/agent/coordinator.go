@@ -31,6 +31,7 @@ import (
 	"github.com/charmbracelet/crush/internal/discover"
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/filetracker"
+	"github.com/charmbracelet/crush/internal/gateway"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/log"
@@ -425,6 +426,22 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	beforeLoaded := c.skillTracker.LoadedNames()
 	result, originalErr := run()
 	logTurnSkillUsage(sessionID, prompt, c.activeSkills, c.skillTracker, beforeLoaded)
+
+	// A provider error the SDK could not decode arrives without its HTTP
+	// status, so fantasy never recognises it as a 401 and never calls the
+	// auth-refresh hook. On a provider that signs in by OAuth the likeliest
+	// cause is a credential this session no longer shares with its peers,
+	// so renew it here. The turn still fails — retrying it would replay a
+	// prompt whose cost the user has already paid — but the next one starts
+	// from a good credential instead of failing the same way.
+	if originalErr != nil && isUndecodableProviderError(originalErr) && providerCfg.OAuthToken != nil {
+		slog.Warn("Provider sent an error body the SDK could not decode; refreshing credentials",
+			"provider", providerCfg.ID, "error", originalErr)
+		if err := c.retryAfterUnauthorized(ctx, providerCfg); err != nil {
+			slog.Error("Failed to refresh credentials after an undecodable provider error",
+				"provider", providerCfg.ID, "error", err)
+		}
+	}
 
 	c.askToSignInAgain(originalErr, model)
 
@@ -1052,10 +1069,17 @@ func (c *coordinator) hyperAPIKey() string {
 	return config.ResolveHyperAPIKey(c.cfg.Config())
 }
 
-func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map[string]string, providerID string) (fantasy.Provider, error) {
+func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map[string]string, providerID string, token *oauth.Token, gw *oauth.GatewaySpec) (fantasy.Provider, error) {
 	var opts []anthropic.Option
 
 	switch {
+	case token != nil:
+		// A subscription login: the OAuth access token is the credential,
+		// carried as a bearer header, with no API key at all. Sending
+		// x-api-key too would make the API answer 401.
+		// NOTE: Prevent the SDK from picking up the API key from env.
+		os.Setenv("ANTHROPIC_API_KEY", "")
+		headers["Authorization"] = "Bearer " + token.AccessToken
 	case strings.HasPrefix(apiKey, "Bearer "):
 		// NOTE: Prevent the SDK from picking up the API key from env.
 		os.Setenv("ANTHROPIC_API_KEY", "")
@@ -1077,8 +1101,31 @@ func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map
 		opts = append(opts, anthropic.WithBaseURL(baseURL))
 	}
 
+	var httpClient *http.Client
 	if c.cfg.Config().Options.Debug {
-		httpClient := log.NewHTTPClient()
+		httpClient = log.NewHTTPClient()
+	}
+	if gw != nil {
+		// The provider declares that its traffic needs rewriting, so the
+		// adapter sits under the client and sees the requests the SDK built.
+		gatewayToken := apiKey
+		if token != nil {
+			gatewayToken = token.AccessToken
+		}
+		var base http.RoundTripper
+		if httpClient != nil {
+			base = httpClient.Transport
+		}
+		adapter, err := gateway.New(gw, gatewayToken, base)
+		if err != nil {
+			return nil, fmt.Errorf("gateway adapter for provider %s: %w", providerID, err)
+		}
+		if httpClient == nil {
+			httpClient = &http.Client{}
+		}
+		httpClient.Transport = adapter
+	}
+	if httpClient != nil {
 		opts = append(opts, anthropic.WithHTTPClient(httpClient))
 	}
 	return anthropic.New(opts...)
@@ -1260,13 +1307,36 @@ func (c *coordinator) buildBedrockProvider(apiKey string, headers map[string]str
 	return bedrock.New(opts...)
 }
 
-func (c *coordinator) buildGoogleProvider(baseURL, apiKey string, headers map[string]string) (fantasy.Provider, error) {
+func (c *coordinator) buildGoogleProvider(baseURL, apiKey string, headers map[string]string, providerCfg config.ProviderConfig) (fantasy.Provider, error) {
 	opts := []google.Option{
 		google.WithBaseURL(baseURL),
 		google.WithGeminiAPIKey(apiKey),
 	}
+	var httpClient *http.Client
 	if c.cfg.Config().Options.Debug {
-		httpClient := log.NewHTTPClient()
+		httpClient = log.NewHTTPClient()
+	}
+	if providerCfg.Gateway != nil {
+		// The provider declares that its traffic needs rewriting, so the
+		// adapter sits under the client and sees the requests the SDK built.
+		token := apiKey
+		if providerCfg.OAuthToken != nil {
+			token = providerCfg.OAuthToken.AccessToken
+		}
+		var base http.RoundTripper
+		if httpClient != nil {
+			base = httpClient.Transport
+		}
+		adapter, err := gateway.New(providerCfg.Gateway, token, base)
+		if err != nil {
+			return nil, fmt.Errorf("gateway adapter for provider %s: %w", providerCfg.ID, err)
+		}
+		if httpClient == nil {
+			httpClient = &http.Client{}
+		}
+		httpClient.Transport = adapter
+	}
+	if httpClient != nil {
 		opts = append(opts, google.WithHTTPClient(httpClient))
 	}
 	if len(headers) > 0 {
@@ -1291,6 +1361,18 @@ func (c *coordinator) buildGoogleVertexProvider(headers map[string]string, optio
 	opts = append(opts, google.WithVertex(project, location))
 
 	return google.New(opts...)
+}
+
+// notifiesOnRevokedToken reports whether a provider should ask the user to
+// sign in again once its OAuth token stops working: the ones Crush knows and
+// any provider that declares its own login, which has no recovery path other
+// than re-authenticating.
+func (c *coordinator) notifiesOnRevokedToken(providerID string) bool {
+	if providerID == hyper.Name {
+		return true
+	}
+	pc, ok := c.cfg.Config().Providers.Get(providerID)
+	return ok && pc.UsesOAuth()
 }
 
 func (c *coordinator) isAnthropicThinking(model config.SelectedModel) bool {
@@ -1323,7 +1405,7 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 	case string(catwalk.InferenceProviderOpenCodeGo), string(catwalk.InferenceProviderOpenCodeZen):
 		if isOpenCodeMessagesModel(providerCfg.ID, model.Model) {
 			baseURL = strings.TrimSuffix(baseURL, "/v1")
-			return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID)
+			return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID, nil, providerCfg.Gateway)
 		}
 	}
 
@@ -1342,7 +1424,14 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		}
 		return c.buildOpenaiProvider(baseURL, apiKey, headers, token)
 	case anthropic.Name:
-		return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID)
+		// A provider that declares its own OAuth flow authenticates with the
+		// login's bearer token rather than an API key; Claude Pro and Max
+		// subscriptions work this way.
+		var token *oauth.Token
+		if providerCfg.UsesOAuth() {
+			token = providerCfg.OAuthToken
+		}
+		return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID, token, providerCfg.Gateway)
 	case openrouter.Name:
 		return c.buildOpenrouterProvider(baseURL, apiKey, headers)
 	case vercel.Name:
@@ -1352,7 +1441,7 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 	case bedrock.Name:
 		return c.buildBedrockProvider(apiKey, headers, providerCfg.ID)
 	case google.Name:
-		return c.buildGoogleProvider(baseURL, apiKey, headers)
+		return c.buildGoogleProvider(baseURL, apiKey, headers, providerCfg)
 	case "google-vertex":
 		return c.buildGoogleVertexProvider(headers, providerCfg.ExtraParams)
 	case openaicompat.Name, hyper.Name:
@@ -1497,12 +1586,89 @@ func (c *coordinator) GenerateTitle(ctx context.Context, sessionID, prompt strin
 }
 
 // refreshTokenIfExpired proactively refreshes the OAuth token if it has expired.
+// aheadRefreshTimeout bounds an OAuth renewal that runs ahead of expiry.
+// It is detached from the turn, so nothing else would ever stop it.
+const aheadRefreshTimeout = 2 * time.Minute
+
+// refreshTokenIfExpired brings the OAuth credential up to date before a
+// turn uses it.
+//
+// It reconciles with disk first, then renews: early and in the background
+// when the token is merely nearing its deadline, and inline only once it
+// has crossed it.
+//
+// Every outcome is logged. A turn that should have refreshed and did not
+// looks exactly like one that had nothing to do, so without the skip line
+// there is no way to tell a broken expiry check from a healthy token.
 func (c *coordinator) refreshTokenIfExpired(ctx context.Context, providerCfg config.ProviderConfig) error {
-	if providerCfg.OAuthToken == nil || !providerCfg.OAuthToken.IsExpired() {
+	if providerCfg.OAuthToken == nil {
 		return nil
 	}
-	slog.Debug("Token needs to be refreshed", "provider", providerCfg.ID)
-	return c.refreshOAuth2Token(ctx, providerCfg)
+
+	// Disk is the authority on which credential is current, since a peer
+	// may have rotated ours away while this session sat idle. Reconcile
+	// before judging expiry so the decision is made against the live
+	// token rather than against a snapshot from hours ago. Presenting a
+	// retired refresh token to a provider that rotates them costs the
+	// whole token family rather than just the attempt.
+	if adopted, err := c.cfg.AdoptNewerDiskToken(config.ScopeGlobal, providerCfg.ID); err != nil {
+		slog.Warn("Failed to reconcile the OAuth token with disk",
+			"provider", providerCfg.ID, "error", err)
+	} else if adopted {
+		if current, ok := c.cfg.Config().Providers.Get(providerCfg.ID); ok {
+			providerCfg = current
+		}
+		if err := c.UpdateModels(ctx); err != nil {
+			return err
+		}
+	}
+
+	token := providerCfg.OAuthToken
+	if token.IsExpired() {
+		slog.Info("OAuth token expired, refreshing before the turn",
+			"provider", providerCfg.ID,
+			"refresh_token", token.Fingerprint(),
+			"expires_in_s", token.ExpiresInSeconds())
+		return c.refreshOAuth2Token(ctx, providerCfg)
+	}
+
+	if token.ShouldRefreshAhead() {
+		c.refreshOAuth2TokenAhead(ctx, providerCfg)
+		return nil
+	}
+
+	slog.Debug("OAuth token still valid, not refreshing",
+		"provider", providerCfg.ID,
+		"refresh_token", token.Fingerprint(),
+		"expires_in_s", token.ExpiresInSeconds())
+	return nil
+}
+
+// refreshOAuth2TokenAhead renews a credential that is nearing its deadline
+// without making the turn wait for it. The current token is still good, so
+// a failure here costs nothing: the turn proceeds, and if the renewal never
+// lands the inline path picks it up once the token actually expires.
+//
+// The work is detached from the turn's context so that finishing or
+// cancelling the turn does not abort an exchange already in flight —
+// abandoning one halfway is how a rotated token gets lost. Concurrent
+// attempts collapse in the store's single-flight, so a burst of turns
+// inside the window still produces one exchange.
+func (c *coordinator) refreshOAuth2TokenAhead(ctx context.Context, providerCfg config.ProviderConfig) {
+	token := providerCfg.OAuthToken
+	slog.Info("OAuth token nearing expiry, refreshing ahead of the turn",
+		"provider", providerCfg.ID,
+		"refresh_token", token.Fingerprint(),
+		"expires_in_s", token.ExpiresInSeconds())
+
+	detached, cancel := context.WithTimeout(context.WithoutCancel(ctx), aheadRefreshTimeout)
+	go func() {
+		defer cancel()
+		if err := c.refreshOAuth2Token(detached, providerCfg); err != nil {
+			slog.Warn("Ahead-of-time OAuth refresh failed; continuing with the current token",
+				"provider", providerCfg.ID, "error", err)
+		}
+	}()
 }
 
 // retryAfterUnauthorized attempts to refresh credentials after an auth error
@@ -1582,6 +1748,29 @@ func isUnauthorized(err error) bool {
 	return errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusUnauthorized
 }
 
+// isUndecodableProviderError reports whether err is the provider SDK
+// failing to decode an error response body.
+//
+// A provider that answers with something other than its documented error
+// envelope — a bare string from a gateway, say — leaves the SDK unable to
+// build the typed error it reports status codes through, so it returns the
+// decode failure instead and the HTTP status is lost with it. An expired
+// credential then arrives looking like a JSON problem rather than a 401,
+// which is enough for every recovery path keyed on that status to sit out:
+// no refresh is attempted, no sign-in is offered, and the raw decoder
+// message is what the user is left holding.
+//
+// Matching on the target type keeps this to the case worth catching. A
+// decode failure anywhere else in the response is a different bug and is
+// better left visible.
+func isUndecodableProviderError(err error) bool {
+	var typeErr *json.UnmarshalTypeError
+	if !errors.As(err, &typeErr) || typeErr.Type == nil {
+		return false
+	}
+	return strings.HasSuffix(typeErr.Type.String(), "apierror.Error")
+}
+
 // makeAuthRefreshCallback returns an OnAuthRefresh callback for fantasy that
 // delegates to the coordinator's existing credential refresh logic. Returns
 // nil if no refresh mechanism is configured for the provider.
@@ -1619,7 +1808,8 @@ func (c *coordinator) refreshApiKeyTemplate(ctx context.Context, providerCfg con
 // askToSignInAgain asks the user to sign in again when an OAuth credential
 // is still refused after the refresh-and-retry.
 func (c *coordinator) askToSignInAgain(err error, model Model) {
-	if err == nil || !isUnauthorized(err) || c.notify == nil || !model.OAuth {
+	if err == nil || !isUnauthorized(err) || c.notify == nil ||
+		!(model.OAuth || c.notifiesOnRevokedToken(model.ModelCfg.Provider)) {
 		return
 	}
 	c.notify.Publish(pubsub.CreatedEvent, notify.Notification{

@@ -41,7 +41,7 @@ type discoveredModels struct {
 func discoveryJobs(c *Config, known map[string]bool) []discoveryJob {
 	var jobs []discoveryJob
 	for id, pc := range c.Providers.Seq2() {
-		if known[id] || pc.Disable || pc.BaseURL == "" {
+		if known[id] || pc.Disable || pc.BaseURL == "" || pc.Catalog != nil {
 			continue
 		}
 		wanted := len(pc.Models) == 0

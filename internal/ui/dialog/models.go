@@ -383,12 +383,15 @@ func (m *Models) setProviderItems() error {
 			!slices.ContainsFunc(m.providers, containsProviderFunc(id)) {
 			provider := p.ToProvider()
 
-			// Add this unknown provider to the list
+			// Add this unknown provider to the list. The badge means the
+			// provider can serve a request now, so one that declares an
+			// OAuth flow it has not completed reads as unconfigured: its
+			// models are listed, and selecting one opens the sign-in.
 			name := cmp.Or(p.Name, id)
 
 			addedProviders[id] = true
 
-			group := NewModelGroup(t, name, true)
+			group := NewModelGroup(t, name, !p.NeedsSignIn())
 			for _, model := range p.Models {
 				item := NewModelItem(t, provider, model, m.modelType, false)
 				group.AppendItems(item)

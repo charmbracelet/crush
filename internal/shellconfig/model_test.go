@@ -35,6 +35,21 @@ model add openai/gpt-5.6-sol --name "GPT 5.6 Sol" --context-window 200000 --can-
 	require.Equal(t, true, m["can_reason"])
 }
 
+func TestModelAddReasoningLevels(t *testing.T) {
+	t.Parallel()
+
+	// A family that sells one model per tier collapses into a single entry
+	// with the tiers behind the reasoning selector.
+	result := loadScript(t, `provider add gemini-sub --api-key k
+model add gemini-sub/flash --name "Flash" --can-reason true \
+  --reasoning-level low --reasoning-level medium --reasoning-level high \
+  --reasoning-effort medium`)
+
+	model := result["providers"].(map[string]any)["gemini-sub"].(map[string]any)["models"].([]any)[0].(map[string]any)
+	require.Equal(t, []any{"low", "medium", "high"}, model["reasoning_levels"].([]any))
+	require.Equal(t, "medium", model["default_reasoning_effort"])
+}
+
 // TestModelAddReplacesDuplicateID verifies that re-adding a model id updates
 // the existing entry in place rather than appending a duplicate, matching the
 // update-in-place behavior of `provider add` and `lsp add`.

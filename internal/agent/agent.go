@@ -1434,8 +1434,27 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID, trigger, instru
 	// stale tool output from every request, so sizing a tail from the unpruned
 	// transcript would budget for a session nobody receives. Indices are
 	// unaffected: pruning rewrites messages, it never removes them.
-	view, _ := compaction.Prune(body, a.prunePolicy(int64(largeModel.CatwalkCfg.ContextWindow)))
-	cut := compaction.Plan(view, a.compactionPolicy(int64(largeModel.CatwalkCfg.ContextWindow)))
+	contextWindow := int64(largeModel.CatwalkCfg.ContextWindow)
+	view, _ := compaction.Prune(body, a.prunePolicy(contextWindow))
+
+	// The system prompt and tool definitions occupy the window without
+	// appearing in any message, so a tail sized against the raw window is
+	// sized against space that is not there.
+	overhead := compaction.Overhead(
+		currentSession.PromptTokens,
+		compaction.Tokens(previousCheckpoint)+compaction.EstimateAll(view),
+		contextWindow,
+	)
+	usable := compaction.UsableWindow(contextWindow, overhead)
+	if usable != contextWindow {
+		slog.Debug("Sizing the checkpoint from the usable window",
+			"session_id", sessionID,
+			"context_window", contextWindow,
+			"estimated_overhead", overhead,
+			"usable_window", usable,
+		)
+	}
+	cut := compaction.Plan(view, a.compactionPolicy(usable))
 	region := body
 	if cut.Found {
 		// Keep the recent turns verbatim. The next model sees them as written
@@ -1451,7 +1470,7 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID, trigger, instru
 	// some servers rather than rejected, which would write a checkpoint that
 	// never saw most of what it replaced; when it cannot fit, summarize what
 	// the model was actually shown.
-	if limit := compaction.RegionLimit(int64(largeModel.CatwalkCfg.ContextWindow)); limit > 0 &&
+	if limit := compaction.RegionLimit(usable); limit > 0 &&
 		compaction.EstimateAll(region) > limit {
 		slog.Debug("Summarizing the pruned view because the full region will not fit",
 			"session_id", sessionID,
@@ -1643,7 +1662,8 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID, trigger, instru
 		// so count both. Zeroing the prompt counter used to advertise an empty
 		// context, which let a session be compacted again before it had done
 		// any work.
-		currentSession.PromptTokens = compaction.Tokens(summaryMessage.Content().Text) + cut.KeptTokens
+		currentSession.PromptTokens = compaction.Tokens(summaryMessage.Content().Text) +
+			cut.KeptTokens + overhead
 	} else {
 		currentSession.PromptTokens = 0
 	}

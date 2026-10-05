@@ -754,7 +754,7 @@ option disable-subagent code-reviewer
 option enable-subagent code-reviewer # Overrides a disable from any config.
 ```
 
-Press <kbd>ctrl+x</kbd> to see running subagents and to browse, enable,
+Press <kbd>ctrl+q</kbd> to see running subagents and to browse, enable,
 disable or delete definitions in the Library. The Library toggle writes
 `disabled_subagents` and `enabled_subagents` for the current workspace;
 an `enabled_subagents` entry wins over a disable from any config, so the

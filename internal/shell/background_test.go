@@ -116,6 +116,30 @@ func TestBackgroundShellManager_KillNonExistent(t *testing.T) {
 	}
 }
 
+func TestBackgroundShellManager_Kill_Timeout(t *testing.T) {
+	t.Parallel()
+
+	workingDir := t.TempDir()
+	manager := newBackgroundShellManager()
+
+	// Start a shell that traps signals and ignores cancellation.
+	bgShell, err := manager.Start(t.Context(), workingDir, nil, "trap '' TERM INT; sleep 60", "")
+	require.NoError(t, err)
+
+	// Give the trap a moment to be set up.
+	time.Sleep(100 * time.Millisecond)
+
+	start := time.Now()
+	err = manager.Kill(bgShell.ID)
+	elapsed := time.Since(start)
+
+	// Must not return an error (abandonment is not an error).
+	require.NoError(t, err)
+
+	// Must return within a reasonable time after KillGracePeriod, not hang for 60 seconds.
+	require.Less(t, elapsed, KillGracePeriod+2*time.Second)
+}
+
 func TestBackgroundShell_IsDone(t *testing.T) {
 	t.Parallel()
 

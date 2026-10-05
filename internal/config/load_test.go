@@ -574,6 +574,70 @@ func TestConfig_configureProvidersBedrockWithCredentials(t *testing.T) {
 	require.Equal(t, "anthropic.claude-sonnet-4-20250514-v1:0", bedrockProvider.Models[0].ID)
 }
 
+func TestConfig_configureProvidersBedrockRegionOverride(t *testing.T) {
+	knownProviders := []catwalk.Provider{
+		{
+			ID:          catwalk.InferenceProviderBedrock,
+			APIKey:      "",
+			APIEndpoint: "",
+			Models: []catwalk.Model{{
+				ID: "anthropic.claude-sonnet-4-20250514-v1:0",
+			}},
+		},
+	}
+
+	cfg := &Config{}
+	cfg.setDefaults("/tmp", "")
+	// Seed a user provider config with an explicit region override.
+	cfg.Providers.Set("bedrock", ProviderConfig{
+		ID:        "bedrock",
+		AWSRegion: "ap-southeast-2",
+	})
+	env := env.NewFromMap(map[string]string{
+		"AWS_ACCESS_KEY_ID":     "test-key-id",
+		"AWS_SECRET_ACCESS_KEY": "test-secret-key",
+	})
+	resolver := NewShellVariableResolver(env)
+	err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, knownProviders)
+	require.NoError(t, err)
+
+	bedrockProvider, ok := cfg.Providers.Get("bedrock")
+	require.True(t, ok, "Bedrock provider should be present")
+	require.Equal(t, "ap-southeast-2", bedrockProvider.ExtraParams["region"],
+		"explicit aws_region should be propagated to ExtraParams")
+}
+
+func TestConfig_configureProvidersBedrockRegionDefaultUnset(t *testing.T) {
+	knownProviders := []catwalk.Provider{
+		{
+			ID:          catwalk.InferenceProviderBedrock,
+			APIKey:      "",
+			APIEndpoint: "",
+			Models: []catwalk.Model{{
+				ID: "anthropic.claude-sonnet-4-20250514-v1:0",
+			}},
+		},
+	}
+
+	cfg := &Config{}
+	cfg.setDefaults("/tmp", "")
+	// AWS_REGION in the environment must NOT be honored implicitly: region
+	// is opt-in via config only (charmbracelet/crush#2985).
+	env := env.NewFromMap(map[string]string{
+		"AWS_ACCESS_KEY_ID":     "test-key-id",
+		"AWS_SECRET_ACCESS_KEY": "test-secret-key",
+		"AWS_REGION":            "ap-southeast-2",
+	})
+	resolver := NewShellVariableResolver(env)
+	err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, knownProviders)
+	require.NoError(t, err)
+
+	bedrockProvider, ok := cfg.Providers.Get("bedrock")
+	require.True(t, ok, "Bedrock provider should be present")
+	require.Empty(t, bedrockProvider.ExtraParams["region"],
+		"AWS_REGION env var must not be honored implicitly for Bedrock region")
+}
+
 func TestConfig_configureProvidersBedrockWithoutCredentials(t *testing.T) {
 	knownProviders := []catwalk.Provider{
 		{

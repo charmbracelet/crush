@@ -14,7 +14,7 @@ import (
 //	provider add <id> [--name NAME] [--type TYPE] [--api-key KEY]
 //	    [--base-url URL] [--disable true|false] [--flat-rate true|false]
 //	    [--discover-models true|false] [--system-prompt-prefix TEXT]
-//	    [--extra-header KEY VALUE] [--extra-body JSON]
+//	    [--aws-region REGION] [--extra-header KEY VALUE] [--extra-body JSON]
 //	    [--provider-options JSON]
 //	provider remove <id>   (alias: rm)
 //
@@ -49,6 +49,7 @@ var providerAddFlags = []flagSpec{
 	{name: "--flat-rate", jsonKey: "flat_rate", kind: flagBool, op: opSet},
 	{name: "--discover-models", jsonKey: "discover_models", kind: flagBool, op: opSet},
 	{name: "--system-prompt-prefix", jsonKey: "system_prompt_prefix", kind: flagString, op: opSet},
+	{name: "--aws-region", jsonKey: "aws_region", kind: flagString, op: opSet},
 	{name: "--extra-header", child: "extra_headers", kind: flagKeyValue, op: opSetChild},
 	{name: "--extra-body", child: "extra_body", kind: flagJSONObject, op: opMergeChild},
 	{name: "--provider-options", child: "provider_options", kind: flagJSONObject, op: opMergeChild},
@@ -56,7 +57,7 @@ var providerAddFlags = []flagSpec{
 
 func providerAdd(b *ConfigBuilder, args []string, stderr io.Writer) error {
 	if len(args) < 3 {
-		return usage(stderr, "usage: provider add <id> [--name NAME] [--type TYPE] [--api-key KEY] [--base-url URL] [--disable true|false] [--flat-rate true|false] [--discover-models true|false] [--system-prompt-prefix TEXT] [--extra-header KEY VALUE] [--extra-body JSON] [--provider-options JSON]")
+		return usage(stderr, "usage: provider add <id> [--name NAME] [--type TYPE] [--api-key KEY] [--base-url URL] [--disable true|false] [--flat-rate true|false] [--discover-models true|false] [--system-prompt-prefix TEXT] [--aws-region REGION] [--extra-header KEY VALUE] [--extra-body JSON] [--provider-options JSON]")
 	}
 	id := args[2]
 	slog.Info("Provider defined in shell config", "provider", id)

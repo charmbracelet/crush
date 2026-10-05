@@ -3,8 +3,8 @@ package chat
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 
+	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 )
@@ -32,12 +32,12 @@ type MCPToolRenderContext struct{}
 // RenderTool implements the [ToolRenderer] interface.
 func (b *MCPToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
-	toolNameParts := strings.SplitN(opts.ToolCall.Name, "_", 3)
-	if len(toolNameParts) != 3 {
+	server, tool, ok := tools.ParseMCPToolName(opts.ToolCall.Name)
+	if !ok {
 		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid tool name"}, cappedWidth)
 	}
-	mcpName := humanizedToolName(toolNameParts[1])
-	toolName := humanizedToolName(toolNameParts[2])
+	mcpName := humanizedToolName(server)
+	toolName := humanizedToolName(tool)
 
 	mcpName = sty.Tool.MCPName.Render(mcpName)
 	toolName = sty.Tool.MCPToolName.Render(toolName)

@@ -13,14 +13,18 @@
 
 ## Features
 
-- **Multi-Model:** choose from a wide range of LLMs or add your own via OpenAI- or Anthropic-compatible APIs
+- **Multi-Model:** choose from a wide range of LLMs or add your own via OpenAI-
+  or Anthropic-compatible APIs
 - **Flexible:** switch LLMs mid-session while preserving context
 - **Session-Based:** maintain multiple work sessions and contexts per project
 - **LSP-Enhanced:** Crush uses LSPs for additional context, just like you do
 - **Extensible:** add capabilities via MCPs (`http`, `stdio`, and `sse`)
 - **Channel-Ready:** MCP servers can push real-time events into your session via [Claude Channels](https://code.claude.com/docs/en/channels-reference) — CI failures, webhooks, and more, acting on them without you typing a thing
-- **Works Everywhere:** first-class support in every terminal on macOS, Linux, Windows (PowerShell and WSL), Android, FreeBSD, OpenBSD, and NetBSD
-- **Industrial Grade:** built on the Charm ecosystem, powering 25k+ applications, from leading open source projects to business-critical infrastructure
+- **Works Everywhere:** first-class support in every terminal on macOS, Linux,
+  Windows (PowerShell and WSL), Android, FreeBSD, OpenBSD, and NetBSD
+- **Industrial Grade:** built on the Charm ecosystem, powering 25k+
+  applications, from leading open source projects to business-critical
+  infrastructure
 
 ## Installation
 
@@ -57,7 +61,9 @@ scoop install crush
 <details>
 <summary><strong>Nix (NUR)</strong></summary>
 
-Crush is available via the official Charm [NUR](https://github.com/nix-community/NUR) in `nur.repos.charmbracelet.crush`, which is the most up-to-date way to get Crush in Nix.
+Crush is available via the official Charm
+[NUR](https://github.com/nix-community/NUR) in `nur.repos.charmbracelet.crush`,
+which is the most up-to-date way to get Crush in Nix.
 
 You can also try out Crush via the NUR with `nix-shell`:
 
@@ -72,8 +78,10 @@ nix-shell -p '(import <nur> { pkgs = import <nixpkgs> {}; }).repos.charmbracelet
 
 ### NixOS & Home Manager Module Usage via NUR
 
-Crush provides NixOS and Home Manager modules via NUR.
-You can use these modules directly in your flake by importing them from NUR. Since it auto detects whether it's a home manager or nixos context you can use the import the exact same way :)
+Crush provides NixOS and Home Manager modules via NUR. You can use these modules
+directly in your flake by importing them from NUR. Since it auto detects whether
+it's a home manager or nixos context you can use the import the exact same way
+:)
 
 ```nix
 {
@@ -157,7 +165,8 @@ sudo yum install crush
 Or, download it:
 
 - [Packages][releases] are available in Debian and RPM formats
-- [Binaries][releases] are available for Linux, macOS, Windows, FreeBSD, OpenBSD, and NetBSD
+- [Binaries][releases] are available for Linux, macOS, Windows, FreeBSD,
+  OpenBSD, and NetBSD
 
 [releases]: https://github.com/charmbracelet/crush/releases
 
@@ -167,34 +176,33 @@ Or just install it with Go:
 go install github.com/charmbracelet/crush@latest
 ```
 
-On illumos (OpenIndiana, OmniOS), the command above works as-is. Only native
-OS notifications are unavailable there; terminal-based notifications (OSC) and
-the terminal bell still work. On Oracle Solaris, add `-tags sqlite3_dotlk` so
-the local database uses dot-file locking:
+On illumos (OpenIndiana, OmniOS), the command above works as-is. Only native OS
+notifications are unavailable there; terminal-based notifications (OSC) and the
+terminal bell still work. On Oracle Solaris, add `-tags sqlite3_dotlk` so the
+local database uses dot-file locking:
 
 ```
 go install -tags sqlite3_dotlk github.com/charmbracelet/crush@latest
 ```
 
-> [!WARNING]
-> Productivity may increase when using Crush and you may find yourself nerd
-> sniped when first using the application. If the symptoms persist, join the
-> [Slack][slack] or [Discord][discord] and nerd snipe the rest of us.
+> [!WARNING] Productivity may increase when using Crush and you may find
+> yourself nerd sniped when first using the application. If the symptoms
+> persist, join the [Slack][slack] or [Discord][discord] and nerd snipe the rest
+> of us.
 
 ## Getting Started
 
-The quickest way to get started is to choose a [Hyper][hyper] model from the 
+The quickest way to get started is to choose a [Hyper][hyper] model from the
 little model picker. Follow the steps to authenticate and you're ready to go.
 
 <p><a href="https://hyper.charm.land"><img width="340" height="200" alt="Charm Hyper" src="https://github.com/user-attachments/assets/50875289-7992-454d-9f14-9f790413fb5e" /></a></p>
 
-[Hyper][hyper], from Charm, is the official model provider for Crush. It’s 
-built  on open-weight models and is optimized for Crush, with an emphasis 
-on high-quality inference. There are subscription and prepaid options, including zero data retention 
-(ZDR). It's also GDPR compliant!
+[Hyper][hyper], from Charm, is the official model provider for Crush. It’s built
+on open-weight models and is optimized for Crush, with an emphasis on
+high-quality inference. There are subscription and prepaid options, including
+zero data retention (ZDR). It's also GDPR compliant!
 
 [More on Hyper][hyper].
-
 
 ## API Keys
 
@@ -244,23 +252,26 @@ Also note that Crush can support nearly any provider, including
 
 ### By the Way
 
-Is there a provider you’d like to see in Crush? Is there an existing model that needs an update?
+Is there a provider you’d like to see in Crush? Is there an existing model that
+needs an update?
 
-Crush’s default model listing is managed in [Catwalk](https://github.com/charmbracelet/catwalk), a community-supported, open source repository of Crush-compatible models, and you’re welcome to contribute.
+Crush’s default model listing is managed in
+[Catwalk](https://github.com/charmbracelet/catwalk), a community-supported, open
+source repository of Crush-compatible models, and you’re welcome to contribute.
 
 <a href="https://github.com/charmbracelet/catwalk"><img width="174" height="174" alt="Catwalk Badge" src="https://github.com/user-attachments/assets/95b49515-fe82-4409-b10d-5beb0873787d" /></a>
 
 ## Configuration
 
-> [!TIP]
-> Crush ships with a builtin skill for configuring itself. Most of the time
-> you can just tell what you want it to configure and it will get the job done.
+> [!TIP] Crush ships with a builtin skill for configuring itself. Most of the
+> time you can just tell what you want it to configure and it will get the job
+> done.
 
 Crush runs great with no configuration. That said, if you do need or want to
 customize Crush, you can, with a `crushrc`.
 
-A `crushrc` is just Bash with some Crush-specific builtins. It’s a lot like
-a `.bashrc`, just for your Crush. Because Crush has a native, built-in Bash
+A `crushrc` is just Bash with some Crush-specific builtins. It’s a lot like a
+`.bashrc`, just for your Crush. Because Crush has a native, built-in Bash
 interpreter, Bash-based config works identically across all platforms, including
 Windows.
 
@@ -288,8 +299,8 @@ mcp add github \
   --header Authorization "Bearer $(op read 'op://my-secret-key')"
 ```
 
-Configuration can be added either local to the project itself, or globally,
-with the following priority:
+Configuration can be added either local to the project itself, or globally, with
+the following priority:
 
 | Priority | Unix-like                 | Windows                               |
 | -------- | ------------------------- | ------------------------------------- |
@@ -297,18 +308,18 @@ with the following priority:
 | 2        | `./crushrc`               | `.\crushrc`                           |
 | 3        | `~/.config/crush/crushrc` | `%USERPROFILE%\.config\crush\crushrc` |
 
-(Crush respects the [XDG Base Directory Specification][xdg], so your paths
-may differ depending on your `XDG_CONFIG_HOME` value. Data directories such as
+(Crush respects the [XDG Base Directory Specification][xdg], so your paths may
+differ depending on your `XDG_CONFIG_HOME` value. Data directories such as
 `~/.local/share/crush` and `%LOCALAPPDATA%\crush` contain JSON state only; Crush
 does not execute a `crushrc` from them.)
 
-[xdg]: https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html
+[xdg]:
+  https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html
 
 What about the old JSON format? It’s still supported, but it should be
 considered deprecated. See: [the config docs](./docs/config/) for details.
 
-> [!TIP]
-> You can override the user and data config locations by setting:
+> [!TIP] You can override the user and data config locations by setting:
 >
 > - `CRUSH_GLOBAL_CONFIG`
 > - `CRUSH_GLOBAL_DATA`
@@ -329,16 +340,16 @@ $HOME/.local/share/crush/crush.json
 #### A note on security
 
 Both `crushrc` and `crush.json` are trusted code; `crushrc` runs in a full
-shell, and any `$(...)` in `crush.json` runs at load time. Don't launch Crush
-in a directory whose config you haven't reviewed, and don't randomly `source`
-files from the internet into your config.
+shell, and any `$(...)` in `crush.json` runs at load time. Don't launch Crush in
+a directory whose config you haven't reviewed, and don't randomly `source` files
+from the internet into your config.
 
 ### Environment Variables
 
 The top-level `env` field sets environment variables at startup, before
 providers are configured. This is useful for variables that affect provider
-authentication (e.g. the AWS SDK credential chain) without wrapping the
-`crush` command in a shell script or exporting them in your shell profile:
+authentication (e.g. the AWS SDK credential chain) without wrapping the `crush`
+command in a shell script or exporting them in your shell profile:
 
 ```json
 {
@@ -350,8 +361,8 @@ authentication (e.g. the AWS SDK credential chain) without wrapping the
 ```
 
 Values support the same `$VAR` and `$(command)` expansion as other config
-fields, so you can reference existing environment variables or shell out for
-a value.
+fields, so you can reference existing environment variables or shell out for a
+value.
 
 ### Themes
 
@@ -359,16 +370,16 @@ Crush ships with built-in color themes.
 
 #### Switching Themes
 
-Open the command palette with `ctrl+p`, select **Themes**, and browse the
-list. The UI previews each theme as you navigate, and pressing `enter`
-confirms the selection. Press `esc` to cancel and revert.
+Open the command palette with `ctrl+p`, select **Themes**, and browse the list.
+The UI previews each theme as you navigate, and pressing `enter` confirms the
+selection. Press `esc` to cancel and revert.
 
 #### Editing Themes
 
-Open **Themes**, highlight the theme to customize, and press `ctrl+e`.
-Changes preview live as you type. Press `enter` or `ctrl+s` to save, or `esc`
-to cancel and revert. User themes are stored globally in the Crush config
-directory under `themes/`.
+Open **Themes**, highlight the theme to customize, and press `ctrl+e`. Changes
+preview live as you type. Press `enter` or `ctrl+s` to save, or `esc` to cancel
+and revert. User themes are stored globally in the Crush config directory under
+`themes/`.
 
 You can also select a theme directly in your config with `active_theme`:
 
@@ -394,8 +405,7 @@ For example, `~/.config/crush/themes/my-theme.json`:
 }
 ```
 
-Select it by setting `active_theme` to `my-theme` or from the **Themes**
-dialog.
+Select it by setting `active_theme` to `my-theme` or from the **Themes** dialog.
 
 #### Built-In Themes
 
@@ -465,9 +475,9 @@ authorization-code flow instead of a static `Authorization` header. Set
 
 ##### Pre-registered clients
 
-Some servers (GitHub, Slack) don't support dynamic client registration.
-For those, register an OAuth app with the provider and supply the
-credentials directly. All values support shell expansion:
+Some servers (GitHub, Slack) don't support dynamic client registration. For
+those, register an OAuth app with the provider and supply the credentials
+directly. All values support shell expansion:
 
 ```json
 {
@@ -484,24 +494,23 @@ credentials directly. All values support shell expansion:
 }
 ```
 
-When `oauth_client_id` is set, Crush skips dynamic client registration
-and authenticates as the specified client. When omitted, Crush attempts
-dynamic registration automatically (works with Linear, Notion, and other
-servers that support RFC 7591).
+When `oauth_client_id` is set, Crush skips dynamic client registration and
+authenticates as the specified client. When omitted, Crush attempts dynamic
+registration automatically (works with Linear, Notion, and other servers that
+support RFC 7591).
 
 #### Sessionless servers
 
-Some HTTP MCP servers are sessionless — they never issue a
-`Mcp-Session-Id` and reject the `subscriptions/listen` stream Crush opens
-for list-changed notifications, which would otherwise break the
-connection. Crush auto-detects known sessionless servers (GitHub MCP,
-`api.githubcopilot.com/mcp`), so those need no extra configuration.
+Some HTTP MCP servers are sessionless — they never issue a `Mcp-Session-Id` and
+reject the `subscriptions/listen` stream Crush opens for list-changed
+notifications, which would otherwise break the connection. Crush auto-detects
+known sessionless servers (GitHub MCP, `api.githubcopilot.com/mcp`), so those
+need no extra configuration.
 
-For other sessionless servers, mark them explicitly with
-`"sessionless": true` (or `--sessionless true` in `crushrc`); set it to
-`false` to force the default behavior for an auto-detected URL. The
-tradeoff is that a sessionless server won't push live
-tool/prompt/resource list-changed notifications.
+For other sessionless servers, mark them explicitly with `"sessionless": true`
+(or `--sessionless true` in `crushrc`); set it to `false` to force the default
+behavior for an auto-detected URL. The tradeoff is that a sessionless server
+won't push live tool/prompt/resource list-changed notifications.
 
 #### Channels (experimental)
 
@@ -516,37 +525,36 @@ Crush has preliminary support for hooks. For details, see
 
 ### Sharing a workspace across clients
 
-When Crush is run against a shared backend (for example two TUIs talking to
-the same `crush serve`), clients are grouped into **workspaces** keyed by
-their resolved `--cwd`. Two clients with the same `--cwd` join the same
-underlying workspace, so they share the session list, message history,
-permission queue, LSP, and MCP state.
+When Crush is run against a shared backend (for example two TUIs talking to the
+same `crush serve`), clients are grouped into **workspaces** keyed by their
+resolved `--cwd`. Two clients with the same `--cwd` join the same underlying
+workspace, so they share the session list, message history, permission queue,
+LSP, and MCP state.
 
 Joining is implicit: pointing a second client at the same working directory
-attaches it to the existing workspace. Each new invocation, however, starts
-in its own fresh session by default. To pick up the conversation another
-client already has open, use the session manager (the session picker) and
-select it. Sessions surface two signals there:
+attaches it to the existing workspace. Each new invocation, however, starts in
+its own fresh session by default. To pick up the conversation another client
+already has open, use the session manager (the session picker) and select it.
+Sessions surface two signals there:
 
 - `IsBusy` is set while an agent turn is in flight for that session.
 - `AttachedClients` reports how many clients are currently viewing it.
 
 A non-zero `AttachedClients` (often combined with `IsBusy`) is the cue that a
-session is "in progress" on another client and joining it will mirror that
-view live.
+session is "in progress" on another client and joining it will mirror that view
+live.
 
 The first client to create a workspace fixes its process-wide flags. In
-particular, `--yolo` and `--debug` follow a **first-wins** rule: later
-clients that arrive at the same `--cwd` with different values for those
-flags do not change the running workspace. A debug log line is emitted
-recording the mismatch, and the workspace keeps the flags it was created
-with.
+particular, `--yolo` and `--debug` follow a **first-wins** rule: later clients
+that arrive at the same `--cwd` with different values for those flags do not
+change the running workspace. A debug log line is emitted recording the
+mismatch, and the workspace keeps the flags it was created with.
 
-A workspace lives as long as at least one client has an SSE event stream
-open against it. When the last stream disconnects, the workspace is torn
-down. There is a short grace window right after `POST /v1/workspaces` so a
-client that has created the workspace but not yet opened its event stream
-does not get reaped before it can attach.
+A workspace lives as long as at least one client has an SSE event stream open
+against it. When the last stream disconnects, the workspace is torn down. There
+is a short grace window right after `POST /v1/workspaces` so a client that has
+created the workspace but not yet opened its event stream does not get reaped
+before it can attach.
 
 ### Global context files
 
@@ -617,8 +625,7 @@ You can also skip all permission prompts completely by running Crush with the
 ### Disabling Skills
 
 You can prevent Crush from using certain skills entirely. Disabled skills are
-hidden from the agent, including builtin skills and skills discovered from
-disk.
+hidden from the agent, including builtin skills and skills discovered from disk.
 
 ```bash
 option disable-skill crush-config
@@ -639,8 +646,10 @@ The global paths we looks for skills are:
 - `~/.agents/skills/`
 - `~/.claude/skills/`
 - On Windows, we _also_ look at
-  - `%LOCALAPPDATA%\agents\skills\` or `%USERPROFILE%\AppData\Local\agents\skills\`
-  - `%LOCALAPPDATA%\crush\skills\` or `%USERPROFILE%\AppData\Local\crush\skills\`
+  - `%LOCALAPPDATA%\agents\skills\` or
+    `%USERPROFILE%\AppData\Local\agents\skills\`
+  - `%LOCALAPPDATA%\crush\skills\` or
+    `%USERPROFILE%\AppData\Local\crush\skills\`
 - Additional paths configured via `options.skills_paths`
 
 On top of that, we _also_ load skills in your project from the following
@@ -657,7 +666,8 @@ Or load directories of skills specifically in your config:
 option skill-path "$HOME/squid-skills" "./other-skills"
 ```
 
-You can get started with example skills from [anthropics/skills](https://github.com/anthropics/skills):
+You can get started with example skills from
+[anthropics/skills](https://github.com/anthropics/skills):
 
 ```bash
 # Unix
@@ -678,8 +688,7 @@ mv _temp/skills/* . ; rm -r -force _temp
 #### User-Invocable Skills
 
 Skills can be made invocable as commands from the commands palette
-(<kbd>ctrl+p</kbd>). Add `user-invocable: true` to the skill's YAML
-frontmatter:
+(<kbd>ctrl+p</kbd>). Add `user-invocable: true` to the skill's YAML frontmatter:
 
 ```yaml
 ---
@@ -689,14 +698,16 @@ user-invocable: true
 ---
 ```
 
-User-invocable skills appear in the commands palette with a `user:` or `project:` prefix:
+User-invocable skills appear in the commands palette with a `user:` or
+`project:` prefix:
 
 - Skills from global directories show as `user:skill-name`
 - Skills from project directories show as `project:skill-name`
 
 When invoked, the skill's instructions are loaded into the conversation context.
 
-To prevent the model from auto-triggering a skill (while still allowing user invocation), add `disable-model-invocation: true`:
+To prevent the model from auto-triggering a skill (while still allowing user
+invocation), add `disable-model-invocation: true`:
 
 ```yaml
 ---
@@ -707,7 +718,8 @@ disable-model-invocation: true
 ---
 ```
 
-Skills with `disable-model-invocation` won't appear in the model's available skills list but can still be invoked manually by users.
+Skills with `disable-model-invocation` won't appear in the model's available
+skills list but can still be invoked manually by users.
 
 ### Desktop notifications
 
@@ -725,10 +737,10 @@ supported.
 
 ### Initialization
 
-When you initialize a project, Crush analyzes your codebase and creates
-a context file that helps it work more effectively in future sessions. By
-default, this file is named `AGENTS.md`, but you can customize the name and
-location with the `initialize-as` option:
+When you initialize a project, Crush analyzes your codebase and creates a
+context file that helps it work more effectively in future sessions. By default,
+this file is named `AGENTS.md`, but you can customize the name and location with
+the `initialize-as` option:
 
 ```bash
 # crushrc
@@ -752,7 +764,8 @@ option attribution-generated-with true
 
 - `trailer_style`: Controls the attribution trailer added to commit messages
   (default: `assisted-by`)
-  - `assisted-by`: Adds `Assisted-by: Crush:[ModelID]` as specified in [the convention](https://docs.kernel.org/process/coding-assistants.html#attribution)
+  - `assisted-by`: Adds `Assisted-by: Crush:[ModelID]` as specified in
+    [the convention](https://docs.kernel.org/process/coding-assistants.html#attribution)
   - `co-authored-by`: Adds `Co-Authored-By: Crush <crush@charm.land>`
   - `none`: No attribution trailer
 - `generated_with`: When true (default), adds `💘 Generated with Crush` line to
@@ -763,12 +776,12 @@ option attribution-generated-with true
 Crush supports custom provider configurations for both OpenAI-compatible and
 Anthropic-compatible APIs.
 
-> [!NOTE]
-> The provider type describes the API format the provider speaks. Make sure
-> to choose the right one to ensure the best experience!
+> [!NOTE] The provider type describes the API format the provider speaks. Make
+> sure to choose the right one to ensure the best experience!
 >
 > - `responses` should be used when proxying or routing requests through OpenAI.
-> - `completions` should be used when using non-OpenAI providers that have OpenAI-compatible APIs.
+> - `completions` should be used when using non-OpenAI providers that have
+>   OpenAI-compatible APIs.
 > - `messages` should be used for Anthropic-compatible APIs.
 >
 > Legacy values (`openai`, `openai-compat`, `anthropic`) are still accepted and
@@ -817,9 +830,91 @@ model add custom-anthropic/claude-sonnet-4-20250514 \
   --price-cache-hit 0.3
 ```
 
+#### Provider Plugins
+
+A provider plugin is a Bash script that declares a provider with the same
+crushrc builtins, so a new provider needs no Go code and no Crush release. Drop
+a `*.sh` file into a plugins directory and Crush runs it at config load:
+
+- `~/.config/crush/plugins/` — user-wide
+- `.crush/plugins/` — project-local; a project plugin overrides a global one,
+  and your own crushrc overrides both
+
+Both directories also run the scripts one level down, which is where an
+installed repository lives. `crush plugin install` fetches one from GitHub
+rather than making you copy files:
+
+```bash
+crush plugin install example/crush-plugins             # default branch, user-wide
+crush plugin install example/crush-plugins@v1.2.3      # a tag, branch, or commit
+crush plugin install example/crush-plugins --project   # .crush/plugins, so a team shares it
+crush plugin update                                    # every installed repository, or:
+crush plugin update example/crush-plugins
+crush plugin list                                      # the ref and commit each one pins
+crush plugin trust example/crush-plugins               # accept edits you made after installing
+crush plugin uninstall example/crush-plugins
+```
+
+The plugins of a repository are the non-hidden `*.sh` files at its root; the
+rest of the repository is the author's own business. Every install records the
+exact commit its files came from, so `crush plugin update` reports the move from
+one commit to the next and deletes plugins the repository has dropped. An
+install you edited locally is left alone until you `trust` those edits or pass
+`--force`. `GITHUB_TOKEN`, or `GH_TOKEN`, is sent when set, which is how a
+private repository installs.
+
+Crush does not sign, sandbox, or review plugins, and neither does the install:
+it prints the commit to read and then runs what it fetched as Bash, with your
+shell privileges.
+
+Key-based providers work exactly like the examples above:
+
+```bash
+# .crush/plugins/example.sh
+provider add example \
+  --type openai-compat \
+  --base-url "https://api.example.com/v1" \
+  --api-key "$EXAMPLE_API_KEY"
+model add example/code-1 --name "Code 1"
+```
+
+OAuth sign-in needs the authorization server and the client, after which
+`crush login example` — and the models dialog — run the flow for you:
+
+```bash
+provider add example \
+  --type openai-compat \
+  --base-url "https://api.example.com/v1" \
+  --oauth-issuer "https://auth.example.com" \
+  --oauth-client-id "crush" \
+  --oauth-scope openid \
+  --oauth-scope offline_access
+```
+
+Crush discovers the authorization and token endpoints from the issuer's
+well-known documents (RFC 8414) and supports the browser flow (PKCE plus a
+loopback redirect) and the device flow (RFC 8628); choose with
+`--oauth-flow auto|browser|device`, defaulting to auto. Tokens refresh
+automatically, exactly like the built-in subscription providers. When the server
+does not publish its endpoints, or registers a fixed redirect, declare them with
+`--oauth-auth-url`, `--oauth-token-url`, `--oauth-device-url`, and
+`--oauth-redirect-uri`.
+
+Plugins are trusted code that runs at load time with your shell privileges,
+whether you dropped the file in yourself or installed it from a repository — so
+review one before you use it.
+
+```text
+$ crush usage
+AI Subscription
+  Models · Weekly Limit Remaining: 99% left · resets in 6d 22h
+  Models · Five Hour Limit Remaining: 99% left · resets in 3h 57m
+```
+
 ### Amazon Bedrock
 
-Crush currently supports running Anthropic models through Bedrock, with caching disabled.
+Crush currently supports running Anthropic models through Bedrock, with caching
+disabled.
 
 A Bedrock provider appears once Crush can find AWS credentials. You can
 authenticate in one of two ways:
@@ -828,16 +923,16 @@ authenticate in one of two ways:
 simplest option and never expires mid-session.
 
 **AWS credential chain (SSO, profiles, access keys).** Configure AWS the usual
-way with `aws configure` or `aws configure sso`. Crush picks up whatever the
-AWS SDK credential chain resolves, including `AWS_PROFILE`, `AWS_ACCESS_KEY_ID`
-/ `AWS_SECRET_ACCESS_KEY`, or an SSO session. To select a specific profile,
-set `AWS_PROFILE` in your shell (`AWS_PROFILE=myprofile crush`) or in the
-top-level [`env`](#environment-variables) config.
+way with `aws configure` or `aws configure sso`. Crush picks up whatever the AWS
+SDK credential chain resolves, including `AWS_PROFILE`, `AWS_ACCESS_KEY_ID` /
+`AWS_SECRET_ACCESS_KEY`, or an SSO session. To select a specific profile, set
+`AWS_PROFILE` in your shell (`AWS_PROFILE=myprofile crush`) or in the top-level
+[`env`](#environment-variables) config.
 
 If you authenticate via AWS SSO, your session expires periodically. Set
 `aws_auth_refresh` to a command that refreshes it. When Bedrock returns a
-credential error, Crush runs the command, then retries the request in place
-(no duplicate messages, no manual restart):
+credential error, Crush runs the command, then retries the request in place (no
+duplicate messages, no manual restart):
 
 ```json
 {
@@ -856,11 +951,13 @@ credential error, Crush runs the command, then retries the request in place
 }
 ```
 
-- `aws_auth_refresh` — shell command run when AWS credentials expire (e.g. `aws sso login`)
+- `aws_auth_refresh` — shell command run when AWS credentials expire (e.g.
+  `aws sso login`)
 
 ### Vertex AI Platform
 
-Vertex AI will appear in the list of available providers when `VERTEXAI_PROJECT` and `VERTEXAI_LOCATION` are set. You will also need to be authenticated:
+Vertex AI will appear in the list of available providers when `VERTEXAI_PROJECT`
+and `VERTEXAI_LOCATION` are set. You will also need to be authenticated:
 
 ```bash
 $ gcloud auth application-default login
@@ -886,10 +983,9 @@ model add vertexai/claude-sonnet-4@20250514 \
 
 ### Local Models
 
-Crush can auto-discovers models from local providers. Add a custom provider
-with `type` set to `llamacpp`, `omlx`, `lmstudio`, `litellm`, or `ollama`
-and leave out the models list. Crush will populate the model list
-automatically.
+Crush can auto-discovers models from local providers. Add a custom provider with
+`type` set to `llamacpp`, `omlx`, `lmstudio`, `litellm`, or `ollama` and leave
+out the models list. Crush will populate the model list automatically.
 
 ```bash
 # Piece of cake.
@@ -910,9 +1006,9 @@ provider add llamacpp \
 
 #### Manual Model Configuration
 
-You can still list models explicitly. User-defined models always take
-precedence over discovered ones, and any fields you set won't be overwritten
-by auto-discovery. Auto discovery will run if the model list is empty for any
+You can still list models explicitly. User-defined models always take precedence
+over discovered ones, and any fields you set won't be overwritten by
+auto-discovery. Auto discovery will run if the model list is empty for any
 `openai-compat` provider or if you pass `"discover_models": true` it will merge
 the found models with your hand configured ones.
 
@@ -935,8 +1031,8 @@ your explicit model fields win on conflicts.
 
 ## Logging
 
-Sometimes you need to look at logs. Luckily, Crush logs all sorts of
-stuff. Logs are stored in `./.crush/logs/crush.log` relative to the project.
+Sometimes you need to look at logs. Luckily, Crush logs all sorts of stuff. Logs
+are stored in `./.crush/logs/crush.log` relative to the project.
 
 The CLI also contains some helper commands to make perusing recent logs easier:
 
@@ -970,9 +1066,11 @@ updates your local configuration.
 
 ### Custom provider catalog
 
-You can also override [Catwalk](https://github.com/charmbracelet/catwalk) default URL (for testing, using a fork).
+You can also override [Catwalk](https://github.com/charmbracelet/catwalk)
+default URL (for testing, using a fork).
 
-You can do so by setting the `CATWALK_URL` environment variable. (e.g. `export CATWALK_URL=http://localhost:8000`)
+You can do so by setting the `CATWALK_URL` environment variable. (e.g.
+`export CATWALK_URL=http://localhost:8000`)
 
 ### Disabling automatic provider updates
 
@@ -1016,20 +1114,21 @@ crush update-providers --help
 
 ## Metrics
 
-Crush records pseudonymous usage metrics (tied to a device-specific hash),
-which maintainers rely on to inform development and support priorities. The
-metrics include solely usage metadata; prompts and responses are NEVER
-collected.
+Crush records pseudonymous usage metrics (tied to a device-specific hash), which
+maintainers rely on to inform development and support priorities. The metrics
+include solely usage metadata; prompts and responses are NEVER collected.
 
-Details on exactly what’s collected are in the source code ([here](https://github.com/charmbracelet/crush/tree/main/internal/event)
-and [here](https://github.com/charmbracelet/crush/blob/main/internal/llm/agent/event.go)).
+Details on exactly what’s collected are in the source code
+([here](https://github.com/charmbracelet/crush/tree/main/internal/event) and
+[here](https://github.com/charmbracelet/crush/blob/main/internal/llm/agent/event.go)).
 
-Also, when you use Crush with [Hyper][hyper], your Crush usage metrics may 
-be associated with your Hyper account to help us improve the service and
-diagnose issues. For more information, see [the Hyper Privacy Policy](https://hyper.charm.land/legal/privacy-policy).
+Also, when you use Crush with [Hyper][hyper], your Crush usage metrics may be
+associated with your Hyper account to help us improve the service and diagnose
+issues. For more information, see
+[the Hyper Privacy Policy](https://hyper.charm.land/legal/privacy-policy).
 
-Either way, you can opt out of metrics collection at any time by setting 
-the following  in your environment:
+Either way, you can opt out of metrics collection at any time by setting the
+following in your environment:
 
 ```bash
 export CRUSH_DISABLE_METRICS=1
@@ -1053,11 +1152,13 @@ Installing an extra tool might be needed on Unix-like environments.
 
 ## Contributing
 
-See the [contributing guide](https://github.com/charmbracelet/crush?tab=contributing-ov-file#contributing).
+See the
+[contributing guide](https://github.com/charmbracelet/crush?tab=contributing-ov-file#contributing).
 
 ## Whatcha think?
 
-We’d love to hear your thoughts on this project. Need help? We gotchu. You can find us on:
+We’d love to hear your thoughts on this project. Need help? We gotchu. You can
+find us on:
 
 - [Twitter](https://twitter.com/charmcli)
 - [Slack][slack]

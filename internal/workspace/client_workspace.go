@@ -539,6 +539,13 @@ func (w *ClientWorkspace) WorkingDir() string {
 	return w.cached().Path
 }
 
+// GitBranch asks the server for the branch checked out in the workspace's
+// working directory. Callers keep this off the render path; the TUI polls it
+// on a ticker and renders from its own state.
+func (w *ClientWorkspace) GitBranch(ctx context.Context) (string, error) {
+	return w.client.GitBranch(ctx, w.workspaceID())
+}
+
 func (w *ClientWorkspace) Resolver() config.VariableResolver {
 	return config.IdentityResolver()
 }
@@ -661,9 +668,19 @@ func (w *ClientWorkspace) ReadSkill(ctx context.Context, skillID string) ([]byte
 
 // -- MCP operations --
 
+// mcpStatesTimeout bounds a single MCP state probe. The client SDK sets no
+// request timeout of its own, and the UI serializes refreshes behind an
+// in-flight flag: without a deadline a hung request would wedge that flag
+// forever, queueing every later refresh behind it and silently freezing the
+// MCP sidebar. A var, not a const, so tests can shrink it.
+var mcpStatesTimeout = 10 * time.Second
+
 func (w *ClientWorkspace) MCPGetStates() map[string]mcp.ClientInfo {
-	states, err := w.client.MCPGetStates(context.Background(), w.workspaceID())
+	ctx, cancel := context.WithTimeout(context.Background(), mcpStatesTimeout)
+	defer cancel()
+	states, err := w.client.MCPGetStates(ctx, w.workspaceID())
 	if err != nil {
+		slog.Warn("Failed to fetch MCP states", "error", err)
 		return nil
 	}
 	result := make(map[string]mcp.ClientInfo, len(states))

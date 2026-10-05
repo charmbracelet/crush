@@ -25,14 +25,7 @@ func newAttachmentClickTestUI(t *testing.T) (*UI, int) {
 	u.com.Workspace = attachmentClickWorkspace{}
 	u.dialog = dialog.NewOverlay()
 	sty := u.com.Styles.Attachments
-	renderer := attachments.NewRenderer(
-		sty.Normal,
-		sty.Deleting,
-		sty.Image,
-		sty.Text,
-		sty.Skill,
-		sty.Remove,
-	)
+	renderer := attachments.NewRenderer(sty)
 	u.attachments = attachments.New(renderer, attachments.Keymap{})
 	u.updateLayoutAndSize()
 	require.True(t, u.attachments.Update(message.Attachment{FileName: "test.txt"}))

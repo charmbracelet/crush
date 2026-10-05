@@ -485,6 +485,14 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 			Fails(404, 500).
 			Handle(c.handleGetWorkspaceProjectInitPrompt),
 
+		apigen.Get("/v1/workspaces/{id}/git/branch").
+			Summary("Get current Git branch").
+			Tags("git").
+			PathParam("id", "Workspace ID").
+			Responds(proto.GitBranchResponse{}).
+			Fails(404, 500).
+			Handle(c.handleGetWorkspaceGitBranch),
+
 		apigen.Get("/v1/workspaces/{id}/skills").
 			Summary("List visible skills").
 			Tags("skills").

@@ -85,6 +85,15 @@ const sessionDetailsMaxHeight = 20
 // refreshed while no session is running.
 const hyperCreditsPollInterval = 60 * time.Second
 
+// gitBranchPollInterval is how often the workspace's checked-out branch is
+// re-read. A checkout emits no event Crush can subscribe to, so the branch
+// has to be polled to stay current.
+const gitBranchPollInterval = 5 * time.Second
+
+// gitBranchFetchTimeout bounds one branch read. Locally this is a file
+// read; in client/server mode it is a request to the server.
+const gitBranchFetchTimeout = 10 * time.Second
+
 // TextareaMaxHeight is the maximum height of the prompt textarea.
 const TextareaMaxHeight = 15
 
@@ -190,6 +199,16 @@ type (
 
 	// hyperCreditsPollMsg is sent by the Hyper credits poll timer.
 	hyperCreditsPollMsg struct{}
+
+	// gitBranchUpdatedMsg carries the workspace's checked-out branch. branch
+	// is empty when the workspace is not a Git repository or HEAD is
+	// detached.
+	gitBranchUpdatedMsg struct {
+		branch string
+	}
+
+	// gitBranchPollMsg is sent by the git branch poll timer.
+	gitBranchPollMsg struct{}
 )
 
 // UI represents the main user interface model.
@@ -339,8 +358,21 @@ type UI struct {
 	lspRefreshQueued bool
 	lspCheckedAt     time.Time
 
-	// mcp
-	mcpStates map[string]mcp.ClientInfo
+	// mcpStates memoizes the workspace MCP state (a synchronous probe in
+	// client/server mode) and its off-thread refresh bookkeeping. MCP
+	// state_changed events refresh it off-thread with a TTL backstop and a
+	// retry loop while servers are starting; see mcp.go.
+	mcpStates        map[string]mcp.ClientInfo
+	mcpFetchInFlight bool
+	// mcpRefreshQueued records that a refresh was requested while a fetch
+	// was already in flight; applyMCPStates re-dispatches so the freshest
+	// state still lands.
+	mcpRefreshQueued bool
+	mcpCheckedAt     time.Time
+	// mcpStartingRetries counts the consecutive starting-state re-probes
+	// driving the retry loop's exponential backoff. Event-driven refreshes
+	// renew the budget; settled states reset it.
+	mcpStartingRetries int
 
 	// skills
 	skillStates []*skills.SkillState
@@ -430,6 +462,12 @@ type UI struct {
 	// no balance is rendered in either case.
 	hyperCredits *int
 
+	// gitBranch is the workspace's checked-out branch as of the last poll,
+	// empty when there is none to show. Reading it costs a file read
+	// locally and a request in client/server mode, so renders take it from
+	// here rather than asking the workspace per frame.
+	gitBranch string
+
 	// Prompt history for up/down navigation through previous messages.
 	promptHistory struct {
 		messages []string
@@ -483,14 +521,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 
 	// Attachments component
 	attachments := attachments.New(
-		attachments.NewRenderer(
-			com.Styles.Attachments.Normal,
-			com.Styles.Attachments.Deleting,
-			com.Styles.Attachments.Image,
-			com.Styles.Attachments.Text,
-			com.Styles.Attachments.Skill,
-			com.Styles.Attachments.Remove,
-		),
+		attachments.NewRenderer(com.Styles.Attachments),
 		attachments.Keymap{
 			DeleteMode: keyMap.Editor.AttachmentDeleteMode,
 			DeleteAll:  keyMap.Editor.DeleteAllAttachments,
@@ -621,8 +652,18 @@ func (m *UI) Init() tea.Cmd {
 	if m.com.IsHyper() {
 		cmds = append(cmds, m.fetchHyperCredits())
 	}
+	// The branch is shown from the first frame on, so read it now and keep
+	// polling for checkouts made outside Crush.
+	cmds = append(cmds, m.fetchGitBranch(), m.gitBranchTicker())
 	cmds = append(cmds, m.hyperCreditsTicker())
-	cmds = append(cmds, m.checkPendingMCPAuth())
+	// Prime the memoized MCP state off-thread. There is deliberately no
+	// wait for server-side MCP initialization: the init gate is
+	// process-local and only armed where mcp.Initialize runs (the server),
+	// so waiting here is a no-op in client/server mode. The retry loop and
+	// TTL backstop in mcp.go converge on the settled states instead.
+	if cmd := m.requestMCPRefresh(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
 	return tea.Batch(cmds...)
 }
 
@@ -939,7 +980,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case mcpStateChangedMsg:
-		m.mcpStates = msg.states
 		if dia := m.dialog.Dialog(dialog.MCPTogglesID); dia != nil {
 			if toggles, ok := dia.(*dialog.MCPToggles); ok {
 				for name, info := range msg.states {
@@ -947,8 +987,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		// Auto-open the MCP auth dialog if any servers need authentication.
-		if cmd := m.openMCPAuthDialog(); cmd != nil {
+		cmds = append(cmds, m.applyMCPStates(msg)...)
+	case mcpStartingRetryMsg:
+		// A server was still connecting when the last fetch landed; re-probe
+		// so "starting..." converges without depending on state_changed
+		// events (which can be missed in client/server mode).
+		if cmd := m.requestMCPRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	case mcpPromptsLoadedMsg:
@@ -1066,10 +1110,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pubsub.Event[mcp.Event]:
 		switch msg.Payload.Type {
 		case mcp.EventStateChanged:
-			return m, tea.Batch(
-				m.handleStateChanged(),
-				m.loadMCPrompts,
-			)
+			return m, tea.Batch(m.handleStateChanged()...)
 		case mcp.EventPromptsListChanged:
 			return m, handleMCPPromptsEvent(m.com.Workspace, msg.Payload.Name)
 		case mcp.EventToolsListChanged:
@@ -1472,6 +1513,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.fetchHyperCredits())
 		}
 		cmds = append(cmds, m.hyperCreditsTicker())
+	case gitBranchUpdatedMsg:
+		m.gitBranch = msg.branch
+	case gitBranchPollMsg:
+		cmds = append(cmds, m.fetchGitBranch(), m.gitBranchTicker())
 	case util.InfoMsg:
 		if msg.Type == util.InfoTypeError {
 			slog.Error("Error reported", "error", msg.Msg)
@@ -1511,6 +1556,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case dialog.ActionMCPAuthStarted:
 		cmds = append(cmds, m.authenticateMCP(msg.Ctx, msg.Name))
 	case dialog.ActionMCPAuthComplete, dialog.ActionMCPAuthErrored:
+		// The OAuth flow finished server-side: refresh the memoized states
+		// so the sidebar reflects the outcome even when the state_changed
+		// event was missed.
+		if cmd := m.requestMCPRefresh(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 		if m.dialog.HasDialogs() {
 			if cmd := m.handleDialogMsg(msg); cmd != nil {
 				cmds = append(cmds, cmd)
@@ -1672,8 +1723,15 @@ func (m *UI) handleConnectionEvent(msg workspace.ConnectionEvent) []tea.Cmd {
 	}
 	m.status.SetInfoMsg(info)
 	cmds := []tea.Cmd{clearInfoMsgCmd(info.TTL)}
-	if msg.State == workspace.ConnectionRecovered && m.session != nil {
-		cmds = append(cmds, m.loadSession(m.session.ID))
+	if msg.State == workspace.ConnectionRecovered {
+		// Events published while the stream was down are gone: re-sync the
+		// memoized MCP states alongside the session reload.
+		if cmd := m.requestMCPRefresh(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		if m.session != nil {
+			cmds = append(cmds, m.loadSession(m.session.ID))
+		}
 	}
 	return cmds
 }
@@ -2646,6 +2704,28 @@ func (m *UI) hyperCreditsTicker() tea.Cmd {
 	})
 }
 
+// fetchGitBranch reads the workspace's checked-out branch off the render
+// path. A failed read keeps whatever the last poll reported.
+func (m *UI) fetchGitBranch() tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), gitBranchFetchTimeout)
+		defer cancel()
+		branch, err := m.com.Workspace.GitBranch(ctx)
+		if err != nil {
+			slog.Warn("Failed to read the git branch", "error", err)
+			return nil
+		}
+		return gitBranchUpdatedMsg{branch: branch}
+	}
+}
+
+// gitBranchTicker schedules the next git branch poll.
+func (m *UI) gitBranchTicker() tea.Cmd {
+	return tea.Tick(gitBranchPollInterval, func(time.Time) tea.Msg {
+		return gitBranchPollMsg{}
+	})
+}
+
 // restoreModelFromSession checks the last assistant message in the
 // loaded session and, if it used a different provider/model than the
 // current config, restores that model/provider provided it is still
@@ -2746,18 +2826,19 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		m.com.Workspace.ImportCopilot()
 	}
 
-	// The OpenAI provider holds exactly one credential: a ChatGPT login
-	// or an API key. The empty model ID marks the OAuth flow's hand-off
-	// message (sign-in completed, or the method choice going to OAuth),
-	// and a catalog model needs one of the credentials before it can
-	// serve.
-	if providerID == string(catwalk.InferenceProviderOpenAI) {
+	// The OpenAI and xAI providers hold exactly one credential: an
+	// account login or an API key. The empty model ID marks the OAuth
+	// flow's hand-off message (sign-in completed, or the method choice
+	// going to OAuth), and a catalog model needs one of the credentials
+	// before it can serve.
+	if providerID == string(catwalk.InferenceProviderOpenAI) ||
+		providerID == string(catwalk.InferenceProviderXAI) {
 		providerCfg, _ := cfg.Providers.Get(providerID)
 		if msg.Model.Model == "" {
 			m.dialog.CloseDialog(dialog.ModelsID)
 			if providerCfg.OAuthToken != nil && !msg.ReAuthenticate {
 				// A sign-in just completed: reopen the list so the user
-				// can pick one of the freshly fetched subscription models.
+				// can pick from the now-available catalog.
 				m.dialog.CloseDialog(dialog.OAuthID)
 				if cmd := m.openModelsDialog(); cmd != nil {
 					return cmd
@@ -2778,6 +2859,26 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 		return tea.Batch(cmds...)
+	}
+
+	// A ChatGPT or Grok sign-in swaps the provider's catalog for the one
+	// the account serves, so a model chosen before the flow may no longer
+	// exist afterward. Apply the remembered choice only when the refreshed
+	// catalog still offers it; otherwise reopen the list and say so rather
+	// than silently falling back to a default.
+	if providerID == string(catwalk.InferenceProviderOpenAI) ||
+		providerID == string(catwalk.InferenceProviderXAI) {
+		if !cfg.IsModelAvailable(providerID, msg.Model.Model) {
+			m.dialog.CloseDialog(dialog.ModelsID)
+			cmds = append(cmds, util.ReportError(fmt.Errorf(
+				"%s isn't offered by your %s account; choose another model",
+				msg.Model.Model, cmp.Or(msg.Provider.Name, providerID),
+			)))
+			if cmd := m.openModelsDialog(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			return tea.Batch(cmds...)
+		}
 	}
 
 	if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, msg.ModelType, msg.Model); err != nil {
@@ -2868,6 +2969,21 @@ func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.Se
 			// An API key is the credential in force: edit it.
 			dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, model, modelType)
 		}
+	case catwalk.InferenceProviderXAI:
+		providerCfg, _ := m.com.Config().Providers.Get(string(provider.ID))
+		hasAPIKey := providerCfg.HasAPIKey(m.com.Workspace.Resolver())
+		switch {
+		case model.Model == "" || providerCfg.OAuthToken != nil:
+			// The sign-in flow's hand-off, or a re-authentication while
+			// the Grok login is the credential in force.
+			dlg, cmd = dialog.NewOAuthGrok(m.com, isOnboarding, provider, model, modelType)
+		case !hasAPIKey:
+			// No credential at all: let the user pick the method.
+			dlg = dialog.NewAuthMethod(m.com, isOnboarding, provider, model, modelType)
+		default:
+			// An API key is the credential in force: edit it.
+			dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, model, modelType)
+		}
 	default:
 		dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, model, modelType)
 	}
@@ -2882,10 +2998,10 @@ func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.Se
 }
 
 // openAuthenticationDialogWithMethod opens the authentication dialog for
-// the method the user chose in the auth method picker. Choosing OAuth
-// clears the model: the ChatGPT catalog is only known after sign-in, so
-// the flow ends by reopening the models list rather than selecting the
-// API-key model the user happened to start from.
+// the method the user chose in the auth method picker. The model the
+// user selected is carried through the OAuth flow so the choice persists;
+// handleSelectModel applies it only when the signed-in catalog still
+// offers it and errors otherwise.
 func (m *UI) openAuthenticationDialogWithMethod(provider catwalk.Provider, model config.SelectedModel, modelType config.SelectedModelType, useOAuth bool) tea.Cmd {
 	isOnboarding := m.state == uiOnboarding
 
@@ -2894,8 +3010,12 @@ func (m *UI) openAuthenticationDialogWithMethod(provider catwalk.Provider, model
 		cmd tea.Cmd
 	)
 	if useOAuth {
-		model.Model = ""
-		dlg, cmd = dialog.NewOAuthOpenAI(m.com, isOnboarding, provider, model, modelType)
+		switch provider.ID {
+		case catwalk.InferenceProviderOpenAI:
+			dlg, cmd = dialog.NewOAuthOpenAI(m.com, isOnboarding, provider, model, modelType)
+		case catwalk.InferenceProviderXAI:
+			dlg, cmd = dialog.NewOAuthGrok(m.com, isOnboarding, provider, model, modelType)
+		}
 	} else {
 		dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, model, modelType)
 	}
@@ -3458,6 +3578,7 @@ func (m *UI) drawHeader(scr uv.Screen, area uv.Rectangle) {
 		area.Dx(),
 		m.lspErrorCount(),
 		m.hyperCredits,
+		m.gitBranch,
 	)
 }
 
@@ -4456,17 +4577,22 @@ func (m *UI) openEditor(value string) tea.Cmd {
 		if err != nil {
 			return util.ReportError(err)
 		}
-		content, err := os.ReadFile(tmpPath)
-		if err != nil {
-			return util.ReportError(err)
-		}
-		if len(content) == 0 {
-			return util.ReportWarn("Message is empty")
-		}
-		return openEditorMsg{
-			Text: strings.TrimSpace(string(content)),
-		}
+		return editorFileMsg(tmpPath)
 	})
+}
+
+// editorFileMsg reads the file the external editor was supposed to write and
+// turns it into the message that replaces the composer text. An emptied buffer
+// yields an empty Text, which clears the composer just like deleting every
+// character in-app does.
+func editorFileMsg(path string) tea.Msg {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return util.ReportError(err)
+	}
+	return openEditorMsg{
+		Text: strings.TrimSpace(string(content)),
+	}
 }
 
 // setEditorPrompt configures the textarea prompt function based on whether
@@ -4941,14 +5067,7 @@ func (m *UI) refreshStyles() {
 	}
 	m.textarea.SetStyles(t.Editor.Textarea)
 	m.completions.SetStyles(t.Completions.Normal, t.Completions.Focused, t.Completions.Match)
-	m.attachments.Renderer().SetStyles(
-		t.Attachments.Normal,
-		t.Attachments.Deleting,
-		t.Attachments.Image,
-		t.Attachments.Text,
-		t.Attachments.Skill,
-		t.Attachments.Remove,
-	)
+	m.attachments.SetStyles(t.Attachments)
 	m.todoSpinner.Style = t.Pills.TodoSpinner
 	m.status.help.Styles = t.Help
 	if d := m.dialog.Dialog(dialog.ThemeID); d != nil {
@@ -6122,13 +6241,19 @@ func (m *UI) runMCPPrompt(clientID, promptID string, arguments map[string]string
 	return tea.Sequence(cmds...)
 }
 
-func (m *UI) handleStateChanged() tea.Cmd {
-	return m.updateAgentModelCmd(func() tea.Msg {
-		m.com.Workspace.UpdateAgentModel(context.Background())
-		return mcpStateChangedMsg{
-			states: m.com.Workspace.MCPGetStates(),
-		}
-	})
+// handleStateChanged reacts to an MCP state change: the memoized sidebar
+// states refresh off-thread (an authoritative re-fetch rather than the event
+// payload, so a missed field cannot drift), the coordinator rebuilds to pick
+// up newly registered tools, and the MCP prompts reload.
+func (m *UI) handleStateChanged() []tea.Cmd {
+	return []tea.Cmd{
+		m.requestMCPRefresh(),
+		m.updateAgentModelCmd(func() tea.Msg {
+			m.com.Workspace.UpdateAgentModel(context.Background())
+			return nil
+		}),
+		m.loadMCPrompts,
+	}
 }
 
 func handleMCPPromptsEvent(ws workspace.Workspace, name string) tea.Cmd {

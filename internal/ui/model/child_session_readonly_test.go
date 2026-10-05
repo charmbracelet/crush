@@ -287,7 +287,7 @@ func (w *subagentsDialogWorkspace) RunningSubagents(parentSessionID string) []wo
 
 func (w *subagentsDialogWorkspace) AllSubagents() []workspace.SubagentDefInfo { return nil }
 
-// TestSubagentsDialogFromChildUsesParent verifies ctrl+x from a child view
+// TestSubagentsDialogFromChildUsesParent verifies ctrl+q from a child view
 // lists the parent's subagents (the child's siblings), not the child's own.
 func TestSubagentsDialogFromChildUsesParent(t *testing.T) {
 	t.Parallel()

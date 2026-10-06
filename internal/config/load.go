@@ -79,6 +79,9 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 		}
 	}
 
+	if err := cfg.ValidateRetry(); err != nil {
+		return nil, err
+	}
 	// Validate hooks after all config merging is complete so workspace
 	// hooks also get their matcher regexes compiled.
 	if err := cfg.ValidateHooks(); err != nil {
@@ -1080,6 +1083,9 @@ func loadFromBytes(configs [][]byte) (*Config, error) {
 	}
 	var config Config
 	if err := json.Unmarshal(data, &config); err != nil {
+		return nil, err
+	}
+	if err := config.ValidateRetry(); err != nil {
 		return nil, err
 	}
 	return &config, nil

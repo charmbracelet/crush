@@ -20,6 +20,21 @@ import (
 // fields the TUI cannot render rich tool output (e.g. syntax-
 // highlighted code from view, diffs from edit, images, etc.) and
 // falls back to the raw LLM-facing string.
+func TestRetryEventWireFields(t *testing.T) {
+	t.Parallel()
+	event := pubsub.Event[notify.Notification]{Type: pubsub.UpdatedEvent, Payload: notify.Notification{Type: notify.TypeRetry, SessionID: "session", RunID: "run", Attempt: 2, MaxAttempts: 3, DelayMS: 150, Category: "transient", Phase: "waiting"}}
+	wrapped := wrapEvent(event)
+	require.NotNil(t, wrapped)
+	var decoded pubsub.Event[proto.AgentEvent]
+	require.NoError(t, json.Unmarshal(wrapped.Payload, &decoded))
+	require.Equal(t, proto.AgentEventType("retry"), decoded.Payload.Type)
+	require.Equal(t, "session", decoded.Payload.SessionID)
+	require.Equal(t, "run", decoded.Payload.RunID)
+	require.Equal(t, 2, decoded.Payload.RetryAttempt)
+	require.Equal(t, int64(150), decoded.Payload.RetryDelayMS)
+	require.Nil(t, decoded.Payload.Error)
+}
+
 func TestMessageToProtoToolResult(t *testing.T) {
 	t.Parallel()
 

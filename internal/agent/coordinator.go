@@ -1036,6 +1036,20 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 	requestTimeout := c.cfg.Config().Options.GetRequestTimeout()
 	largeModel = newRequestTimeoutModel(largeModel, requestTimeout)
 	smallModel = newRequestTimeoutModel(smallModel, requestTimeout)
+	var globalRetry *config.RetryConfig
+	if options := c.cfg.Config().Options; options != nil {
+		globalRetry = options.Retry
+	}
+	largeRetry, err := config.ResolveRetry(globalRetry, largeProviderCfg.Retry)
+	if err != nil {
+		return Model{}, Model{}, err
+	}
+	smallRetry, err := config.ResolveRetry(globalRetry, smallProviderCfg.Retry)
+	if err != nil {
+		return Model{}, Model{}, err
+	}
+	largeModel = newRetryModel(largeModel, largeRetry, c.notify)
+	smallModel = newRetryModel(smallModel, smallRetry, c.notify)
 
 	// Hyper completions no longer report the hypercredit balance, so wrap
 	// the Hyper models to fetch it from /v1/credits on every request.

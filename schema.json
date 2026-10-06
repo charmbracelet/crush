@@ -652,6 +652,10 @@
             300,
             0
           ]
+        },
+        "retry": {
+          "$ref": "#/$defs/RetryConfig",
+          "description": "Transient model request retry settings"
         }
       },
       "additionalProperties": false,
@@ -755,6 +759,10 @@
           "type": "object",
           "description": "Additional provider-specific options for this provider"
         },
+        "retry": {
+          "$ref": "#/$defs/RetryConfig",
+          "description": "Overrides for transient model request retries"
+        },
         "aws_auth_refresh": {
           "type": "string",
           "description": "Shell command to run when AWS credentials expire (Bedrock only)."
@@ -774,6 +782,51 @@
           },
           "type": "array",
           "description": "List of models available from this provider"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "RetryConfig": {
+      "properties": {
+        "max_retries": {
+          "type": "integer",
+          "maximum": 20,
+          "minimum": 0
+        },
+        "initial_delay_ms": {
+          "type": "integer",
+          "maximum": 3600000,
+          "minimum": 0
+        },
+        "backoff_multiplier": {
+          "type": "number",
+          "maximum": 100,
+          "minimum": 1
+        },
+        "max_delay_ms": {
+          "type": "integer",
+          "maximum": 3600000,
+          "minimum": 1
+        },
+        "jitter": {
+          "type": "string",
+          "enum": [
+            "full",
+            "none"
+          ]
+        },
+        "max_elapsed_ms": {
+          "type": "integer",
+          "maximum": 86400000,
+          "minimum": 1
+        },
+        "stream_policy": {
+          "type": "string",
+          "enum": [
+            "safe_step",
+            "before_output"
+          ]
         }
       },
       "additionalProperties": false,

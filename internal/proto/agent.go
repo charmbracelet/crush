@@ -39,10 +39,15 @@ type AgentEvent struct {
 	RunID string `json:"run_id,omitempty"`
 
 	// When summarizing.
-	SessionID    string `json:"session_id,omitempty"`
-	SessionTitle string `json:"session_title,omitempty"`
-	Progress     string `json:"progress,omitempty"`
-	Done         bool   `json:"done,omitempty"`
+	SessionID        string `json:"session_id,omitempty"`
+	SessionTitle     string `json:"session_title,omitempty"`
+	Progress         string `json:"progress,omitempty"`
+	Done             bool   `json:"done,omitempty"`
+	RetryAttempt     int    `json:"retry_attempt,omitempty"`
+	RetryMaxAttempts int    `json:"retry_max_attempts,omitempty"`
+	RetryDelayMS     int64  `json:"retry_delay_ms,omitempty"`
+	RetryCategory    string `json:"retry_category,omitempty"`
+	RetryPhase       string `json:"retry_phase,omitempty"`
 
 	// AWS SSO progress fields, carried for TypeAWSSSOAuth and
 	// TypeAWSSSOAuthResult so the refresh dialog works in client/server

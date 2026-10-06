@@ -1227,6 +1227,12 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 			Type:         notify.Type(e.Payload.Type),
 			AWSSOCommand: e.Payload.AWSSOCommand,
 			AWSSOURL:     e.Payload.AWSSOURL,
+			Attempt:      e.Payload.RetryAttempt,
+			MaxAttempts:  e.Payload.RetryMaxAttempts,
+			DelayMS:      e.Payload.RetryDelayMS,
+			Category:     e.Payload.RetryCategory,
+			Phase:        e.Payload.RetryPhase,
+			Done:         e.Payload.Done,
 		}
 		if e.Payload.Error != nil {
 			n.Message = e.Payload.Error.Error()

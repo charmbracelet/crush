@@ -168,6 +168,63 @@ func TestBashTool_ChainedCommandsDenied(t *testing.T) {
 	require.Contains(t, resp.Content, "User denied permission")
 }
 
+// TestBashTool_GhReadOnlySafeCommands — the GitHub CLI's read-only queries
+// are auto-approved like the git read-only list, so non-interactive sessions
+// no longer stall on a permission prompt for `gh pr view`. Mutating gh
+// commands stay gated.
+func TestBashTool_GhReadOnlySafeCommands(t *testing.T) {
+	workingDir := t.TempDir()
+
+	for _, tc := range []struct {
+		name    string
+		command string
+		want    int // permission requests
+	}{
+		{"gh pr view", "gh pr view 123", 0},
+		{"gh pr list", "gh pr list --json number,title", 0},
+		{"gh issue list", "gh issue list --state open", 0},
+		{"gh repo view", "gh repo view charmbracelet/crush", 0},
+		{"gh auth status", "gh auth status", 0},
+		{"gh search", "gh search repos crush", 0},
+		{"gh mutating create stays gated", "gh pr create --title x", 1},
+		{"gh mutating release stays gated", "gh release create v1.0", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tool, perms := newBashToolWithRecordingPerms(workingDir, true)
+			ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+			resp := runBashTool(t, tool, ctx, BashParams{Description: "gh", Command: tc.command})
+			require.False(t, resp.IsError)
+			require.Equal(t, tc.want, perms.requestCount, "permission requests for %q", tc.command)
+		})
+	}
+}
+
+// TestBashTool_BrewReadOnlySafeCommands — read-only Homebrew inspections are
+// auto-approved, but `brew install` stays blocked by its ArgumentsBlocker.
+func TestBashTool_BrewReadOnlySafeCommands(t *testing.T) {
+	workingDir := t.TempDir()
+
+	for _, tc := range []struct {
+		name    string
+		command string
+		want    int // permission requests
+	}{
+		{"brew info", "brew info crush", 0},
+		{"brew list", "brew list", 0},
+		{"brew outdated", "brew outdated", 0},
+		{"brew search", "brew search crush", 0},
+		{"brew install stays gated", "brew install charmbracelet/crush/crush", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tool, perms := newBashToolWithRecordingPerms(workingDir, true)
+			ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+			resp := runBashTool(t, tool, ctx, BashParams{Description: "brew", Command: tc.command})
+			require.False(t, resp.IsError)
+			require.Equal(t, tc.want, perms.requestCount, "permission requests for %q", tc.command)
+		})
+	}
+}
+
 func runBashTool(t *testing.T, tool fantasy.AgentTool, ctx context.Context, params BashParams) fantasy.ToolResponse {
 	t.Helper()
 

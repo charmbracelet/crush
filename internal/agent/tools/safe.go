@@ -56,6 +56,48 @@ var safeCommands = []string{
 	"git show",
 	"git status",
 	"git tag",
+
+	// GitHub CLI — read-only queries only. `gh` is otherwise entirely absent
+	// from the safe list, so even `gh pr view` hits the permission gate and
+	// stalls non-interactive sessions waiting for an answer that never comes.
+	// Mutating subcommands (pr create, release create, api POST, …) are NOT
+	// listed, so they still require explicit approval.
+	"gh auth status",
+	"gh alias list",
+	"gh cache list",
+	"gh codespace list",
+	"gh extension list",
+	"gh gist list",
+	"gh issue list",
+	"gh issue view",
+	"gh label list",
+	"gh pr diff",
+	"gh pr list",
+	"gh pr view",
+	"gh repo list",
+	"gh repo view",
+	"gh run list",
+	"gh run view",
+	"gh search",
+	"gh secret list",
+	"gh ssh-key list",
+	"gh variable list",
+	"gh workflow list",
+
+	// Homebrew — read-only inspections only. `brew install` stays blocked by
+	// its ArgumentsBlocker; these merely let an agent look before it asks.
+	"brew --version",
+	"brew config",
+	"brew deps",
+	"brew doctor",
+	"brew info",
+	"brew leaves",
+	"brew list",
+	"brew outdated",
+	"brew search",
+	"brew services list",
+	"brew tap",
+	"brew uses",
 }
 
 var chainingMetacharacters = []string{

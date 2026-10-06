@@ -8,6 +8,8 @@ import (
 type KeyMap struct {
 	Down,
 	Up,
+	PageDown,
+	PageUp,
 	Select,
 	Cancel key.Binding
 	DownInsert,
@@ -24,6 +26,14 @@ func DefaultKeyMap() KeyMap {
 		Up: key.NewBinding(
 			key.WithKeys("up"),
 			key.WithHelp("up", "move up"),
+		),
+		PageDown: key.NewBinding(
+			key.WithKeys("pgdown"),
+			key.WithHelp("pgdown", "page down"),
+		),
+		PageUp: key.NewBinding(
+			key.WithKeys("pgup"),
+			key.WithHelp("pgup", "page up"),
 		),
 		Select: key.NewBinding(
 			key.WithKeys("enter", "tab", "ctrl+y"),

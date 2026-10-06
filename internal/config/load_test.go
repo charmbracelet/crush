@@ -24,9 +24,20 @@ import (
 
 func TestMain(m *testing.M) {
 	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	os.Exit(runIsolated(m))
+}
 
-	exitVal := m.Run()
-	os.Exit(exitVal)
+// runIsolated runs the tests with the global config and data paths in a
+// temp dir, so no test can rewrite the developer's real config.
+func runIsolated(m *testing.M) int {
+	home, err := os.MkdirTemp("", "crush-config-test")
+	if err != nil {
+		panic(err)
+	}
+	defer os.RemoveAll(home)
+	os.Setenv("CRUSH_GLOBAL_CONFIG", filepath.Join(home, "config"))
+	os.Setenv("CRUSH_GLOBAL_DATA", filepath.Join(home, "data"))
+	return m.Run()
 }
 
 func TestConfig_LoadFromBytes(t *testing.T) {

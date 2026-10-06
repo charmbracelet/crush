@@ -189,6 +189,7 @@ func newRunner(cwd string, env []string, stdin io.Reader, stdout, stderr io.Writ
 		interp.Interactive(false),
 		interp.Env(expand.ListEnviron(env...)),
 		interp.Dir(cwd),
+		callHandlerOption(blockFuncs),
 		execHandlerOption(blockFuncs),
 	)
 }
@@ -346,4 +347,35 @@ func blockHandler(blockFuncs []BlockFunc) execMiddleware {
 			return next(ctx, args)
 		}
 	}
+}
+
+// callHandlerOption rewrites commands that the interpreter claims as
+// builtins but does not implement. kill is the one Crush users actually
+// run: mvdan.cc/sh lists it as a builtin and then returns "unsupported
+// builtin", so the external kill binary is never reached.
+//
+// The block list is applied to the original name first. Rewriting to an
+// absolute path happens afterwards, and the exec-layer blocker would
+// otherwise see /bin/kill rather than kill.
+func callHandlerOption(blockFuncs []BlockFunc) interp.RunnerOption {
+	return interp.CallHandler(func(ctx context.Context, args []string) ([]string, error) {
+		if len(args) == 0 || args[0] != "kill" {
+			return args, nil
+		}
+		for _, blockFunc := range blockFuncs {
+			if blockFunc(args) {
+				return nil, fmt.Errorf("command is not allowed for security reasons: %q", args[0])
+			}
+		}
+		hc := interp.HandlerCtx(ctx)
+		path, err := interp.LookPathDir(hc.Dir, hc.Env, "kill")
+		if err != nil {
+			// No external kill, for example on Windows. Leave the name
+			// unchanged so the interpreter reports the unsupported builtin.
+			return args, nil
+		}
+		rewritten := slices.Clone(args)
+		rewritten[0] = path
+		return rewritten, nil
+	})
 }

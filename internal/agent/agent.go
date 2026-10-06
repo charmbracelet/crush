@@ -866,6 +866,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				callContext,
 				filterToolsForChannel(a.tools.Copy(), call.Channel, mcp.GetStates()),
 			)
+			if len(prepared.Tools) > 0 {
+				prepared.Tools[len(prepared.Tools)-1].SetProviderOptions(a.getCacheControlOptions())
+			}
 
 			// Drain queued follow-up prompts for this step. Calls covered
 			// by a cancel recorded while they sat in the queue are dropped:
@@ -909,6 +912,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			if promptPrefix != "" {
 				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(promptPrefix)}, prepared.Messages...)
 			}
+			prepared.Tools = wrapToolsWithCacheWarmer(
+				prepared.Tools,
+				newCacheWarmer(largeModel, prepared.Messages, prepared.Tools, call.ProviderOptions),
+			)
 
 			sessionLock.Lock()
 			stepMessages = cloneFantasyMessages(prepared.Messages)

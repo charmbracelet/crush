@@ -156,6 +156,16 @@ func (c *Client) GetOffsetEncoding() powernap.OffsetEncoding {
 	return c.client.GetOffsetEncoding()
 }
 
+// SupportsDocumentSymbols reports document symbol support.
+func (c *Client) SupportsDocumentSymbols() bool {
+	provider := c.client.GetCapabilities().DocumentSymbolProvider
+	if provider == nil || provider.Value == nil {
+		return false
+	}
+	enabled, ok := provider.Value.(bool)
+	return !ok || enabled
+}
+
 // Close closes all open files in the client, then shuts down gracefully.
 // If shutdown takes longer than closeTimeout, it falls back to Kill().
 func (c *Client) Close(ctx context.Context) error {

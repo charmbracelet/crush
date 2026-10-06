@@ -258,7 +258,13 @@ func (m *SkillToggles) innerContent() string {
 			// resets that clear the selection background for the rest of
 			// the line. Padding to rowWidth keeps the highlight spanning
 			// the row and the scrollbar column at the right edge.
-			row := styles.CheckIcon + " " + item.Name +
+			// Disabled skills keep the empty gutter here too, so a check
+			// never appears just because the row happens to be selected.
+			glyph := styles.CheckIcon
+			if m.itemDisabled(item) {
+				glyph = " "
+			}
+			row := glyph + " " + item.Name +
 				strings.Repeat(" ", max(0, rowWidth-2-lipgloss.Width(item.Name)))
 			rows = append(rows, t.Dialog.SelectedItem.Render(row))
 			continue

@@ -532,6 +532,28 @@ func (w *AppWorkspace) MCPStartServer(ctx context.Context, name string) error {
 	return mcptools.InitializeSingleForced(ctx, name, w.store)
 }
 
+// SkillsDisabled returns the skills disabled for this repository.
+func (w *AppWorkspace) SkillsDisabled(ctx context.Context) ([]string, error) {
+	return w.app.Sessions.SkillsDisabled(ctx)
+}
+
+// SkillsEnabled returns the skills with a repository-scoped enabled
+// override (config-disabled skills re-enabled here).
+func (w *AppWorkspace) SkillsEnabled(ctx context.Context) ([]string, error) {
+	return w.app.Sessions.SkillsEnabled(ctx)
+}
+
+// SkillSetDisabled adds or removes a repository-scoped skill override.
+func (w *AppWorkspace) SkillSetDisabled(ctx context.Context, name string, disabled bool) error {
+	return w.app.Sessions.SetSkillDisabled(ctx, name, disabled)
+}
+
+// SkillSetConfigDisabled toggles a skill's disabled flag in the global
+// config's options.disabled_skills list.
+func (w *AppWorkspace) SkillSetConfigDisabled(ctx context.Context, name string, disabled bool) error {
+	return w.store.SetSkillDisabledConfig(config.ScopeGlobal, name, disabled)
+}
+
 func (w *AppWorkspace) MCPAuthenticate(ctx context.Context, name string) error {
 	return mcptools.AuthenticateMCP(ctx, w.store, name)
 }

@@ -652,5 +652,37 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 			Accepts(proto.MCPNameRequest{}).
 			Fails(400, 404, 500).
 			Handle(c.handlePostWorkspaceMCPStartServer),
+
+		apigen.Get("/v1/workspaces/{id}/skills/disabled").
+			Summary("List disabled skills").
+			Tags("skills").
+			PathParam("id", "Workspace ID").
+			Responds([]string{}).
+			Fails(404, 500).
+			Handle(c.handleGetWorkspaceSkillsDisabled),
+
+		apigen.Post("/v1/workspaces/{id}/skills/disabled").
+			Summary("Toggle a skill for the repository").
+			Tags("skills").
+			PathParam("id", "Workspace ID").
+			Accepts(proto.SkillSetDisabledRequest{}).
+			Fails(400, 404, 500).
+			Handle(c.handlePostWorkspaceSetSkillDisabled),
+
+		apigen.Get("/v1/workspaces/{id}/skills/enabled").
+			Summary("List enabled-override skills").
+			Tags("skills").
+			PathParam("id", "Workspace ID").
+			Responds([]string{}).
+			Fails(404, 500).
+			Handle(c.handleGetWorkspaceSkillsEnabled),
+
+		apigen.Post("/v1/workspaces/{id}/skills/config-disabled").
+			Summary("Toggle a skill in the config").
+			Tags("skills").
+			PathParam("id", "Workspace ID").
+			Accepts(proto.SkillSetDisabledRequest{}).
+			Fails(400, 404, 500).
+			Handle(c.handlePostWorkspaceSetSkillConfigDisabled),
 	}
 }

@@ -5,7 +5,6 @@ import (
 	_ "embed"
 	"fmt"
 	"html/template"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -127,7 +126,7 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("Request failed with status code: %d", resp.StatusCode)), nil
 			}
 
-			body, err := io.ReadAll(io.LimitReader(resp.Body, MaxFetchSize))
+			body, truncated, err := readUTF8Bounded(resp.Body, MaxFetchSize)
 			if err != nil {
 				return fantasy.NewTextErrorResponse("Failed to read response body: " + err.Error()), nil
 			}
@@ -138,6 +137,7 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 			if !validUTF8 {
 				return fantasy.NewTextErrorResponse("Response content is not valid UTF-8"), nil
 			}
+			content = truncateUTF8(content, MaxFetchSize)
 			contentType := resp.Header.Get("Content-Type")
 
 			switch format {
@@ -178,9 +178,12 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 					content = "<html>\n<body>\n" + body + "\n</body>\n</html>"
 				}
 			}
-			// truncate content if it exceeds max read size
-			if int64(len(content)) >= MaxFetchSize {
-				content = content[:MaxFetchSize]
+			// Truncate formatted content without splitting a UTF-8 character.
+			if len(content) > MaxFetchSize {
+				content = truncateUTF8(content, MaxFetchSize)
+				truncated = true
+			}
+			if truncated {
 				content += fmt.Sprintf("\n\n[Content truncated to %d bytes]", MaxFetchSize)
 			}
 

@@ -133,6 +133,8 @@ You can use these modules directly in your flake by importing them from NUR. Sin
 sudo mkdir -p /etc/apt/keyrings
 curl -fsSL https://repo.charm.sh/apt/gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/charm.gpg
 echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" | sudo tee /etc/apt/sources.list.d/charm.list
+# Optional: make apt resilient to transient 429 / TLS resets from the Gemfury/Heroku edge
+echo 'Acquire::Retries "5"; Acquire::http::Timeout "30"; Acquire::https::Timeout "30";' | sudo tee /etc/apt/apt.conf.d/80-charm-retries >/dev/null
 sudo apt update && sudo apt install crush
 ```
 
@@ -147,9 +149,22 @@ name=Charm
 baseurl=https://repo.charm.sh/yum/
 enabled=1
 gpgcheck=1
-gpgkey=https://repo.charm.sh/yum/gpg.key' | sudo tee /etc/yum.repos.d/charm.repo
-sudo yum install crush
+gpgkey=https://repo.charm.sh/yum/gpg.key
+repo_gpgcheck=1
+retries=5
+timeout=30
+skip_if_unavailable=1
+metadata_expire=6h' | sudo tee /etc/yum.repos.d/charm.repo
+sudo dnf makecache --refresh || sudo yum makecache --refresh
+sudo dnf install crush
 ```
+
+> **Note:** `repo.charm.sh` is served via Gemfury on Heroku (`repo.charm.sh.furyns.com`). If you hit intermittent
+> `Curl error (35): SSL connect error`, `PR_END_OF_FILE_ERROR`, or `HTTP 429 Too Many Requests` (Heroku router `retry-after`),
+> the added `retries` / `timeout` / `skip_if_unavailable` options make `dnf`/`yum` resilient to transient edge throttling and
+> short `repomd.xml` desync windows during releases. `skip_if_unavailable` prevents a transient 429 from failing the whole
+> `dnf` transaction; if the Charm repo is truly down, verify with `dnf repolist -v` or `sudo dnf clean all && sudo dnf makecache --refresh`.
+> As a fallback, download RPMs directly from [Releases](https://github.com/charmbracelet/crush/releases).
 
 </details>
 

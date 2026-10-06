@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -183,6 +184,24 @@ func runBashTool(t *testing.T, tool fantasy.AgentTool, ctx context.Context, para
 	resp, err := tool.Run(ctx, call)
 	require.NoError(t, err)
 	return resp
+}
+
+func TestFormatOutputGpgSigningHint(t *testing.T) {
+	t.Parallel()
+
+	stderr := "error: gpg failed to sign the data\nfatal: failed to write commit object"
+	out := formatOutput("", stderr, errors.New("exit status 1"))
+
+	require.Contains(t, out, "gpg failed to sign the data")
+	require.Contains(t, out, "Hint:", "should explain why signing failed in a non-interactive tool")
+	require.Contains(t, out, "gpg.format ssh", "should suggest the TTY-free SSH signing workaround")
+}
+
+func TestFormatOutputNoHintForUnrelatedFailure(t *testing.T) {
+	t.Parallel()
+
+	out := formatOutput("", "command not found: foo", errors.New("exit status 127"))
+	require.NotContains(t, out, "Hint:")
 }
 
 func TestTruncateOutputValidUTF8(t *testing.T) {

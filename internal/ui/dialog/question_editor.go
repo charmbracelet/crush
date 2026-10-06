@@ -113,6 +113,14 @@ func (e *questionEditor) handleNoteKey(msg tea.KeyPressMsg, closeKey key.Binding
 	}
 }
 
+// Editing reports whether a textarea (the fill-in or an open note
+// editor) is actively being edited. QuestionForm uses it to
+// suspend its tab-navigation bindings so characters like [ and ]
+// reach the input instead of switching tabs.
+func (e *questionEditor) Editing() bool {
+	return e.fillIn.Focused() || (e.activeNoteKey != "" && e.noteEditor.Focused())
+}
+
 // handlePaste forwards a paste message to the currently focused
 // textarea (note editor or fill-in). Returns nil if no textarea
 // is focused.

@@ -1141,8 +1141,9 @@ const pluginDirName = "plugins"
 // provider gets added without a Crush release.
 //
 // ponytail: only the working directory's .crush/plugins is scanned, not
-// every level up to the project boundary, and only top-level *.sh files run.
-// Extend both if plugins start shipping subdirectories.
+// every level up to the project boundary. Scripts one directory deep are
+// included, because that is where `crush plugin install` puts a repository,
+// but nothing deeper is. Extend the walk if plugins start nesting.
 func lookupPlugins(cwd string) []string {
 	dirs := []string{
 		filepath.Join(filepath.Dir(GlobalConfig()), pluginDirName),
@@ -1156,7 +1157,9 @@ func lookupPlugins(cwd string) []string {
 }
 
 // pluginScripts lists the runnable scripts in a plugin directory, sorted by
-// name so load order is stable across platforms. A missing directory simply
+// name so load order is stable across platforms. Both the directory's own
+// scripts and those of its immediate subdirectories are returned, so an
+// installed plugin repository loads as a group. A missing directory simply
 // contributes nothing.
 func pluginScripts(dir string) []string {
 	entries, err := os.ReadDir(dir)
@@ -1166,16 +1169,41 @@ func pluginScripts(dir string) []string {
 	var found []string
 	for _, entry := range entries {
 		name := entry.Name()
-		if entry.IsDir() || !strings.HasSuffix(name, ".sh") {
+		if strings.HasPrefix(name, ".") {
+			// Hidden entries are lock files and editor droppings, not
+			// plugins.
 			continue
 		}
-		if strings.HasPrefix(name, ".") {
-			// Hidden files are editor droppings, not plugins.
+		if entry.IsDir() {
+			// One level only: a subdirectory is an installed repository, and
+			// anything nested inside it is that repository's own business.
+			found = append(found, topLevelScripts(filepath.Join(dir, name))...)
+			continue
+		}
+		if !strings.HasSuffix(name, ".sh") {
 			continue
 		}
 		found = append(found, filepath.Join(dir, name))
 	}
 	slices.Sort(found)
+	return found
+}
+
+// topLevelScripts lists the runnable scripts directly inside one plugin
+// repository directory.
+func topLevelScripts(dir string) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var found []string
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || strings.HasPrefix(name, ".") || !strings.HasSuffix(name, ".sh") {
+			continue
+		}
+		found = append(found, filepath.Join(dir, name))
+	}
 	return found
 }
 

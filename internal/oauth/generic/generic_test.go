@@ -266,7 +266,7 @@ func TestBrowserFlow(t *testing.T) {
 	// The browser redirecting back with the code and state finishes the
 	// flow, exactly as the consent page would.
 	callback := flow.RedirectURI() + "?code=abc&state=" + url.QueryEscape(authURL.Query().Get("state"))
-	resp, err := http.Get(callback) //nolint:gosec // test reaches its own loopback listener
+	resp, err := get(t, callback)
 	require.NoError(t, err)
 	resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -318,7 +318,7 @@ func TestBrowserFlowStateMismatch(t *testing.T) {
 	_, _, err = flow.Start(context.Background())
 	require.NoError(t, err)
 
-	resp, err := http.Get(flow.RedirectURI() + "?code=abc&state=forged") //nolint:gosec // test reaches its own loopback listener
+	resp, err := get(t, flow.RedirectURI()+"?code=abc&state=forged")
 	require.NoError(t, err)
 	resp.Body.Close()
 
@@ -503,7 +503,7 @@ func TestBrowserFlowAcceptsAbsentState(t *testing.T) {
 	_, _, err = flow.Start(context.Background())
 	require.NoError(t, err)
 
-	resp, err := http.Get(flow.RedirectURI() + "?code=real-code") //nolint:gosec // test reaches its own loopback listener
+	resp, err := get(t, flow.RedirectURI()+"?code=real-code")
 	require.NoError(t, err)
 	resp.Body.Close()
 
@@ -554,4 +554,12 @@ func TestJSONTokenEncoding(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "refresh_token", received["grant_type"])
 	require.Equal(t, "user:inference user:profile", received["scope"])
+}
+
+// get fetches url from the flow's own loopback listener.
+func get(t *testing.T, rawURL string) (*http.Response, error) {
+	t.Helper()
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, rawURL, nil)
+	require.NoError(t, err)
+	return http.DefaultClient.Do(req) //nolint:gosec // test reaches its own loopback listener
 }

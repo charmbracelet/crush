@@ -1,7 +1,7 @@
 charm.land/bubbles/v2 v2.2.1 h1:Fq1+qm5hV6GkvzLQDhCBpXXE5tLgvh1PRriCLwSvIQU=
 charm.land/bubbles/v2 v2.2.1/go.mod h1:wdMgn+sje1KNXdwFizIWjbf328fIUBxqEmJ/vYPo8yc=
-charm.land/bubbletea/v2 v2.0.11-0.20261008084256-29562892e0b6 h1:eRewKP2yVDMEwayDcAFTMAx3q/H+ADYB0lP4Cro0NMI=
-charm.land/bubbletea/v2 v2.0.11-0.20261008084256-29562892e0b6/go.mod h1:wULD1z81lKQBLc7/Owp14UJR4w8NU1I/rdN3crJXfBY=
+charm.land/bubbletea/v2 v2.1.0 h1:A9fj9h5LFrvQhQHFNggp8K8rvY6CUfgn9dMbb6p2HIw=
+charm.land/bubbletea/v2 v2.1.0/go.mod h1:xWHeyxIX9/wiFU2kgPW04ojOZyTzrWf+8lGjUCaftiU=
 charm.land/catwalk v0.52.49 h1:ir0gOZJBwbdCyflHgnb2MvMJXAO08/mYpfEL+eTtoDg=
 charm.land/catwalk v0.52.49/go.mod h1:T0YPUZkPd60T9bvvHwEqALivY+0FoHmMWvaUGTJalHk=
 charm.land/fang/v2 v2.0.1 h1:zQCM8JQJ1JnQX/66B5jlCYBUxL2as5JXQZ2KJ6EL0mY=
@@ -98,10 +98,10 @@ github.com/charmbracelet/colorprofile v0.4.3 h1:QPa1IWkYI+AOB+fE+mg/5/4HRMZcaXex
 github.com/charmbracelet/colorprofile v0.4.3/go.mod h1:/zT4BhpD5aGFpqQQqw7a+VtHCzu+zrQtt1zhMt9mR4Q=
 github.com/charmbracelet/openai-go v0.0.0-20260921175203-216db9e71b83 h1:7k30XdmBd71VAErGCjTTiOAE9F1KUthN9jdCeqQtvZ4=
 github.com/charmbracelet/openai-go v0.0.0-20260921175203-216db9e71b83/go.mod h1:8xPfrTomjYl827L3QQay36djXcEkXc80bpH+790o8/A=
-github.com/charmbracelet/ultraviolet v0.0.0-20261008083718-81e46302c0fb h1:btvAGZDB6lhVcjr4fS9VxCQmqS3VDR6ru+jrPj1Dxkc=
-github.com/charmbracelet/ultraviolet v0.0.0-20261008083718-81e46302c0fb/go.mod h1:zWMLSkUXtrC5cCo6GqBURjcxGFaySLaudLLFdRJ6vZw=
-github.com/charmbracelet/x/ansi v0.11.9-0.20261008082244-a4a2f9b961a0 h1:S2rX7/fXbupwo7ViWOi/yQrgCbJUqXeXTRjo6DtsDUw=
-github.com/charmbracelet/x/ansi v0.11.9-0.20261008082244-a4a2f9b961a0/go.mod h1:DG/hpOnaI2QJ/KMMqLL2h0KVhluuJLazf8973P+Vy5w=
+github.com/charmbracelet/ultraviolet v0.0.0-20261008173134-6b8d4baf91b4 h1:hISLzUbwcvJbGoNR6A3L/TpguRRnACBmZOee8LcHLJw=
+github.com/charmbracelet/ultraviolet v0.0.0-20261008173134-6b8d4baf91b4/go.mod h1:aJDVk+WOVM1K04rdc/71PMPoUGfjxjhvXfP3Pjz1Zio=
+github.com/charmbracelet/x/ansi v0.11.9 h1:kIrqLBxtTVbLyyHO2Evoi93EjQo1mylWmpNEsfPxXAM=
+github.com/charmbracelet/x/ansi v0.11.9/go.mod h1:DG/hpOnaI2QJ/KMMqLL2h0KVhluuJLazf8973P+Vy5w=
 github.com/charmbracelet/x/editor v0.2.0 h1:7XLUKtaRaB8jN7bWU2p2UChiySyaAuIfYiIRg8gGWwk=
 github.com/charmbracelet/x/editor v0.2.0/go.mod h1:p3oQ28TSL3YPd+GKJ1fHWcp+7bVGpedHpXmo0D6t1dY=
 github.com/charmbracelet/x/etag v0.2.0 h1:Euj1VkheoHfTYA9y+TCwkeXF/hN8Fb9l4LqZl79pt04=

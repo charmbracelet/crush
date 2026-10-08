@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
+	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/compaction"
 	"github.com/stretchr/testify/require"
 )
@@ -285,4 +287,67 @@ func TestAppendixAccompaniesTheSummary(t *testing.T) {
 	require.Contains(t, text, `observed="1"`)
 	require.NotContains(t, text, `rendered="`,
 		"a summarized checkpoint must not claim to have been rendered")
+}
+
+// TestObserverFiresOnTheTerminalEventTheCoordinatorUses is the regression test
+// for a wiring bug that made this whole feature inert: the observer was called
+// after an early return that every ordinary interactive turn takes, because the
+// coordinator always supplies an OnComplete hook. The tests above all passed
+// while nothing was ever observed, since they drove the distillation directly
+// instead of the event that is supposed to trigger it.
+func TestObserverFiresOnTheTerminalEventTheCoordinatorUses(t *testing.T) {
+	env := testEnv(t)
+	observer := &recordingModel{text: `[{"kind":"reflection","text":"Memory must be observed from the turn event, not called directly","relevance":2,"sources":[]}]`}
+	sa := testSessionAgent(env, &recordingModel{text: "unused"}, observer, "test prompt").(*sessionAgent)
+	sa.ledger = env.ledger
+	sa.observeMemory = true
+	ctx := t.Context()
+
+	sess, err := env.sessions.Create(ctx, "test")
+	require.NoError(t, err)
+	seedSizedTurns(t, env, sess.ID, 2, 2_000)
+
+	// This is the shape an interactive turn arrives in: the coordinator always
+	// sets OnComplete so it can coalesce retries.
+	var hookRan bool
+	sa.publishRunComplete(ctx, SessionAgentCall{
+		SessionID:  sess.ID,
+		OnComplete: func(notify.RunComplete) { hookRan = true },
+	}, notify.RunComplete{SessionID: sess.ID})
+
+	require.True(t, hookRan, "the caller's hook still runs")
+
+	require.Eventually(t, func() bool {
+		led, err := env.ledger.Ledger(ctx, sess.ID)
+		return err == nil && len(led.Entries) > 0
+	}, 10*time.Second, 20*time.Millisecond,
+		"a completed turn must be observed even when the caller supplied a hook")
+}
+
+// TestObserverSkipsFailedAndCancelledTurns: a turn that errored or was
+// cancelled is not memory. Skipping costs nothing, because its messages stay
+// unobserved and a later turn picks them up.
+func TestObserverSkipsFailedAndCancelledTurns(t *testing.T) {
+	env := testEnv(t)
+	observer := &recordingModel{text: `[{"kind":"observation","text":"should never be recorded","relevance":2}]`}
+	sa := testSessionAgent(env, &recordingModel{text: "unused"}, observer, "test prompt").(*sessionAgent)
+	sa.ledger = env.ledger
+	sa.observeMemory = true
+	ctx := t.Context()
+
+	sess, err := env.sessions.Create(ctx, "test")
+	require.NoError(t, err)
+	seedSizedTurns(t, env, sess.ID, 2, 2_000)
+
+	sa.publishRunComplete(ctx, SessionAgentCall{SessionID: sess.ID},
+		notify.RunComplete{SessionID: sess.ID, Error: "provider exploded"})
+	sa.publishRunComplete(ctx, SessionAgentCall{SessionID: sess.ID},
+		notify.RunComplete{SessionID: sess.ID, Cancelled: true})
+
+	require.Never(t, func() bool {
+		led, err := env.ledger.Ledger(ctx, sess.ID)
+		return err == nil && len(led.Entries) > 0
+	}, 750*time.Millisecond, 50*time.Millisecond,
+		"a failed or cancelled turn is not memory")
+	require.Empty(t, observer.calls)
 }

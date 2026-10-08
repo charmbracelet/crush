@@ -1,6 +1,7 @@
 package dialog
 
 import (
+	"fmt"
 	"image"
 	"image/color"
 	"strings"
@@ -160,7 +161,7 @@ func TestPlanHandoffEscapePreservesDraft(t *testing.T) {
 	require.False(t, p.editor.Focused())
 	require.Equal(t, "Keep this draft", p.editor.Value())
 	require.True(t, p.HeightChanged())
-	require.Equal(t, 5, p.Height(80))
+	require.Equal(t, 6, p.Height(80))
 
 	done, _ = p.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.False(t, done)
@@ -338,7 +339,8 @@ func TestPlanHandoffStartCoding(t *testing.T) {
 
 	p := newTestPlanHandoff()
 	confirmed := 0
-	p.OnConfirm = func(yolo bool) tea.Cmd {
+	p.OnConfirm = func(options PlanHandoffOptions) tea.Cmd {
+		yolo := options.YOLO
 		require.False(t, yolo)
 		return func() tea.Msg {
 			confirmed++
@@ -372,7 +374,8 @@ func TestPlanHandoffCodingKeys(t *testing.T) {
 
 			p := newTestPlanHandoff()
 			confirmed := false
-			p.OnConfirm = func(yolo bool) tea.Cmd {
+			p.OnConfirm = func(options PlanHandoffOptions) tea.Cmd {
+				yolo := options.YOLO
 				require.Equal(t, tt.yolo, yolo)
 				confirmed = true
 				return nil
@@ -390,7 +393,7 @@ func TestPlanHandoffShortHelpShowsCodingKeys(t *testing.T) {
 
 	p := newTestPlanHandoff()
 	help := p.ShortHelp()
-	require.Len(t, help, 5)
+	require.Len(t, help, 6)
 	require.Contains(t, help[2].Help().Key, "c")
 	require.Contains(t, help[3].Help().Key, "y")
 }
@@ -429,7 +432,8 @@ func TestPlanHandoffYOLO(t *testing.T) {
 	for _, mouse := range []bool{false, true} {
 		p := newTestPlanHandoff()
 		confirmed := false
-		p.OnConfirm = func(yolo bool) tea.Cmd {
+		p.OnConfirm = func(options PlanHandoffOptions) tea.Cmd {
+			yolo := options.YOLO
 			require.True(t, yolo)
 			confirmed = true
 			return nil
@@ -463,4 +467,90 @@ func TestPlanHandoffChoiceWrapAndBottomGap(t *testing.T) {
 		lines := strings.Split(ansi.Strip(scr.Render()), "\n")
 		require.Empty(t, strings.TrimSpace(lines[len(lines)-1]))
 	}
+}
+
+func TestPlanHandoffNewSessionToggle(t *testing.T) {
+	t.Parallel()
+	for _, width := range []int{80, 24} {
+		t.Run(fmt.Sprint(width), func(t *testing.T) {
+			t.Parallel()
+			p := newTestPlanHandoff()
+			p.SetFocused(true)
+			require.False(t, p.NewSession)
+			for _, key := range []string{"s", "S"} {
+				done, cmd := p.HandleKey(tea.KeyPressMsg{Code: rune(key[0]), Text: key})
+				require.False(t, done)
+				require.Nil(t, cmd)
+			}
+			require.False(t, p.NewSession)
+			scr := uv.NewScreenBuffer(width, p.Height(width))
+			p.Draw(scr, image.Rect(0, 0, width, p.Height(width)))
+			require.Contains(t, ansi.Strip(scr.Render()), "[ ] New session")
+			done, handled := p.HandleMouseClick(p.sessionArea.Min.X, p.sessionArea.Min.Y)
+			require.True(t, handled)
+			require.False(t, done, "toggling must not confirm the plan")
+			require.True(t, p.NewSession)
+			p.SetFocused(false)
+			p.SetFocused(true)
+			p.HandleKey(tea.KeyPressMsg{Code: 'n', Text: "n"})
+			p.HandleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
+			require.True(t, p.NewSession, "feedback and focus changes preserve the choice")
+			p.Draw(scr, image.Rect(0, 0, width, p.Height(width)))
+			require.Contains(t, ansi.Strip(scr.Render()), "[✓] New session")
+			for _, line := range strings.Split(ansi.Strip(scr.Render()), "\n") {
+				require.LessOrEqual(t, ansi.StringWidth(line), width)
+			}
+			help := p.ShortHelp()
+			require.Equal(t, "s", help[len(help)-1].Help().Key)
+		})
+	}
+}
+
+func TestPlanHandoffNewSessionConfirmation(t *testing.T) {
+	t.Parallel()
+	for _, yolo := range []bool{false, true} {
+		for _, mouse := range []bool{false, true} {
+			p := newTestPlanHandoff()
+			p.SetFocused(true)
+			p.HandleKey(tea.KeyPressMsg{Code: 's', Text: "s"})
+			called := 0
+			p.OnConfirm = func(options PlanHandoffOptions) tea.Cmd {
+				called++
+				require.Equal(t, PlanHandoffOptions{YOLO: yolo, NewSession: true}, options)
+				return nil
+			}
+			if mouse {
+				scr := uv.NewScreenBuffer(24, p.Height(24))
+				p.Draw(scr, scr.Bounds())
+				index := choiceStartCoding
+				if yolo {
+					index = choiceCodeYOLO
+				}
+				x, y := planHandoffButtonPoint(t, p, index)
+				done, handled := p.HandleMouseClick(x, y)
+				require.True(t, done)
+				require.True(t, handled)
+			} else {
+				key := 'c'
+				if yolo {
+					key = 'y'
+				}
+				done, _ := p.HandleKey(tea.KeyPressMsg{Code: key, Text: string(key)})
+				require.True(t, done)
+			}
+			require.Equal(t, 1, called)
+		}
+	}
+}
+
+func TestPlanHandoffNewSessionHitAreaIsClipped(t *testing.T) {
+	t.Parallel()
+	p := newTestPlanHandoff()
+	scr := uv.NewScreenBuffer(24, 10)
+	p.Draw(scr, image.Rect(0, 0, 24, 1))
+	require.True(t, p.sessionArea.Empty())
+	done, handled := p.HandleMouseClick(2, 1)
+	require.False(t, done)
+	require.False(t, handled)
+	require.False(t, p.NewSession)
 }

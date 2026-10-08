@@ -16,6 +16,12 @@ import (
 	"github.com/rivo/uniseg"
 )
 
+// PlanHandoffOptions controls how an approved plan starts coding.
+type PlanHandoffOptions struct {
+	YOLO       bool
+	NewSession bool
+}
+
 // Indices of the handoff buttons, in render order.
 const (
 	choiceStartCoding = iota
@@ -29,7 +35,11 @@ const (
 // It replaces the textarea temporarily, asking the user to switch to code
 // mode or request changes to the plan.
 type PlanHandoffInline struct {
+	// NewSession selects a fresh session for either coding action.
+	NewSession bool
+
 	com             *common.Common
+	sessionArea     image.Rectangle
 	selectedChoice  int
 	editing         bool
 	focused         bool
@@ -45,10 +55,10 @@ type PlanHandoffInline struct {
 
 	heightChanged bool
 
-	// OnConfirm receives whether the user chose coding with YOLO.
+	// OnConfirm receives the selected coding and session options.
 	// The returned tea.Cmd is queued by the UI to perform the switch and
 	// start the coder agent.
-	OnConfirm func(yolo bool) tea.Cmd
+	OnConfirm func(PlanHandoffOptions) tea.Cmd
 	// OnRequestChanges is called with the user's feedback when they submit it.
 	OnRequestChanges func(string) tea.Cmd
 
@@ -59,6 +69,7 @@ type PlanHandoffInline struct {
 	keyNewline   key.Binding
 	keyCoding    key.Binding
 	keyYolo      key.Binding
+	keySession   key.Binding
 	keyNo        key.Binding
 	keyClose     key.Binding
 }
@@ -122,6 +133,10 @@ func NewPlanHandoffInline(com *common.Common) *PlanHandoffInline {
 			key.WithKeys("y", "Y"),
 			key.WithHelp("y", "yolo coding"),
 		),
+		keySession: key.NewBinding(
+			key.WithKeys("s", "S"),
+			key.WithHelp("s", "new session"),
+		),
 		keyNo: key.NewBinding(
 			key.WithKeys("n", "N"),
 			key.WithHelp("n", "revise plan"),
@@ -170,6 +185,9 @@ func (p *PlanHandoffInline) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	switch {
 	case key.Matches(msg, p.keyClose):
 		return false, func() tea.Msg { return CollapseInlineMsg{} }
+	case key.Matches(msg, p.keySession):
+		p.NewSession = !p.NewSession
+		return false, nil
 	case key.Matches(msg, p.keyNo):
 		return false, p.startEditing()
 	case key.Matches(msg, p.keyLeftRight):
@@ -207,7 +225,9 @@ func (p *PlanHandoffInline) startEditing() tea.Cmd {
 
 func (p *PlanHandoffInline) runConfirm() tea.Cmd {
 	if p.OnConfirm != nil {
-		cmd := p.OnConfirm(p.selectedChoice == choiceCodeYOLO)
+		cmd := p.OnConfirm(PlanHandoffOptions{
+			YOLO: p.selectedChoice == choiceCodeYOLO, NewSession: p.NewSession,
+		})
 		p.pendingCmd = cmd
 		return cmd
 	}
@@ -284,7 +304,7 @@ func (p *PlanHandoffInline) choiceLayout(width int) planHandoffChoiceLayout {
 		question: question,
 		buttons:  buttons,
 		spacing:  spacing,
-		height:   lipgloss.Height(question) + 1 + buttonHeight + 2,
+		height:   lipgloss.Height(question) + 2 + buttonHeight + 2,
 	}
 }
 
@@ -297,6 +317,23 @@ func (p *PlanHandoffInline) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	y := area.Min.Y
 	layout := p.choiceLayout(area.Dx())
 	y += drawStyledText(scr, image.Rect(area.Min.X+planHandoffIndent, y, area.Max.X, area.Max.Y), layout.question)
+	checked := "[ ]"
+	checkStyle := p.com.Styles.Editor.QuestionUnselected.
+		Foreground(p.com.Styles.Editor.QuestionCheckOff.GetForeground())
+	if p.NewSession {
+		checked = "[✓]"
+		checkStyle = checkStyle.Foreground(p.com.Styles.Editor.QuestionCheckOn.GetForeground())
+	}
+	label := ansi.Truncate(
+		checkStyle.Render(checked)+p.com.Styles.Editor.QuestionUnselected.Render(" New session (s)"),
+		max(0, area.Dx()-planHandoffIndent), "…",
+	)
+	p.sessionArea = image.Rectangle{
+		Min: image.Pt(area.Min.X+planHandoffIndent, y),
+		Max: image.Pt(area.Min.X+planHandoffIndent+ansi.StringWidth(label), y+1),
+	}.Intersect(area)
+	drawStyledText(scr, p.sessionArea, label)
+	y++
 	y++ // blank
 
 	buttonsX := area.Min.X + planHandoffIndent
@@ -393,7 +430,7 @@ func (p *PlanHandoffInline) ShortHelp() []key.Binding {
 	if p.editing {
 		return []key.Binding{p.keyEnter, p.keyNewline, p.keyClose}
 	}
-	return []key.Binding{p.keyLeftRight, p.keyEnter, p.keyCoding, p.keyYolo, p.keyNo}
+	return []key.Binding{p.keyLeftRight, p.keyEnter, p.keyCoding, p.keyYolo, p.keyNo, p.keySession}
 }
 
 // SetHover implements MouseClickableEditor.
@@ -405,6 +442,10 @@ func (p *PlanHandoffInline) SetHover(x, y int) { p.hoverX = x; p.hoverY = y }
 func (p *PlanHandoffInline) HandleMouseClick(x, y int) (bool, bool) {
 	if p.editing {
 		return false, false
+	}
+	if image.Pt(x, y).In(p.sessionArea) {
+		p.NewSession = !p.NewSession
+		return false, true
 	}
 	switch idx := common.HitButtonIndex(p.compositor, x, y); idx {
 	case choiceStartCoding, choiceCodeYOLO:

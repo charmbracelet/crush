@@ -66,10 +66,14 @@ var providerAddFlags = []flagSpec{
 	{name: "--provider-options", child: "provider_options", kind: flagJSONObject, op: opMergeChild},
 	// OAuth declarations. Any of these marks the provider as signing in
 	// rather than taking a key, so `crush login <id>` can authenticate it.
-	{name: "--oauth-kind", child: "auth", jsonKey: "kind", kind: flagString, op: opSetChildValue,
-		validate: oneOf("--oauth-kind", "oauth", "api_key")},
-	{name: "--oauth-flow", child: "auth", jsonKey: "flow", kind: flagString, op: opSetChildValue,
-		validate: oneOf("--oauth-flow", "auto", "browser", "device")},
+	{
+		name: "--oauth-kind", child: "auth", jsonKey: "kind", kind: flagString, op: opSetChildValue,
+		validate: oneOf("--oauth-kind", "oauth", "api_key"),
+	},
+	{
+		name: "--oauth-flow", child: "auth", jsonKey: "flow", kind: flagString, op: opSetChildValue,
+		validate: oneOf("--oauth-flow", "auto", "browser", "device"),
+	},
 	{name: "--oauth-issuer", child: "auth", jsonKey: "issuer", kind: flagString, op: opSetChildValue},
 	{name: "--oauth-client-id", child: "auth", jsonKey: "client_id", kind: flagString, op: opSetChildValue},
 	{name: "--oauth-client-secret", child: "auth", jsonKey: "client_secret", kind: flagString, op: opSetChildValue},
@@ -82,8 +86,10 @@ var providerAddFlags = []flagSpec{
 	{name: "--oauth-param", child: "auth.extra_params", kind: flagKeyValue, op: opSetChild},
 	{name: "--oauth-secret-basic", child: "auth", jsonKey: "client_secret_basic", kind: flagBool, op: opSetChildValue},
 	{name: "--oauth-token-header", child: "auth.token_headers", kind: flagKeyValue, op: opSetChild},
-	{name: "--oauth-token-encoding", child: "auth", jsonKey: "token_encoding", kind: flagString, op: opSetChildValue,
-		validate: oneOf("--oauth-token-encoding", "form", "json")},
+	{
+		name: "--oauth-token-encoding", child: "auth", jsonKey: "token_encoding", kind: flagString, op: opSetChildValue,
+		validate: oneOf("--oauth-token-encoding", "form", "json"),
+	},
 	// Quota reporting. These declare where the provider reports the allowance
 	// left on a subscription plan, which `crush usage` then reads.
 	{name: "--usage-url", child: "usage", jsonKey: "url", kind: flagString, op: opSetChildValue},

@@ -82,7 +82,7 @@ func (m *UI) fetchUsage() tea.Cmd {
 		if bearer == "" {
 			resolved, err := m.com.Workspace.Resolver().ResolveValue(pc.APIKey)
 			if err != nil {
-				slog.Warn("Usage refresh: could not resolve the provider credential", "provider", pc.ID, "error", err)
+				slog.Warn("Usage refresh: could not resolve the provider credential", "provider", pc.ID)
 				return nil
 			}
 			bearer = resolved

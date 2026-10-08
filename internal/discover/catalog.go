@@ -133,7 +133,7 @@ func orDefault(value, fallback string) string {
 // when config pins a favourite first.
 func merge(declared, found []catwalk.Model) []catwalk.Model {
 	byID := make(map[string]int, len(declared))
-	out := make([]catwalk.Model, 0, len(declared)+len(found))
+	out := make([]catwalk.Model, 0, len(declared))
 	for _, model := range declared {
 		byID[model.ID] = len(out)
 		out = append(out, model)

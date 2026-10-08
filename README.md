@@ -798,6 +798,33 @@ Drop a `*.sh` file into a plugins directory and Crush runs it at config load:
 - `.crush/plugins/` — project-local; a project plugin overrides a global one,
   and your own crushrc overrides both
 
+Both directories also run the scripts one level down, which is where an
+installed repository lives. `crush plugin install` fetches one from GitHub
+rather than making you copy files:
+
+```bash
+crush plugin install example/crush-plugins             # default branch, user-wide
+crush plugin install example/crush-plugins@v1.2.3      # a tag, branch, or commit
+crush plugin install example/crush-plugins --project   # .crush/plugins, so a team shares it
+crush plugin update                                    # every installed repository, or:
+crush plugin update example/crush-plugins
+crush plugin list                                      # the ref and commit each one pins
+crush plugin trust example/crush-plugins               # accept edits you made after installing
+crush plugin uninstall example/crush-plugins
+```
+
+The plugins of a repository are the non-hidden `*.sh` files at its root; the
+rest of the repository is the author's own business. Every install records the
+exact commit its files came from, so `crush plugin update` reports the move from
+one commit to the next and deletes plugins the repository has dropped. An
+install you edited locally is left alone until you `trust` those edits or pass
+`--force`. `GITHUB_TOKEN`, or `GH_TOKEN`, is sent when set, which is how a
+private repository installs.
+
+Crush does not sign, sandbox, or review plugins, and neither does the install:
+it prints the commit to read and then runs what it fetched as Bash, with your
+shell privileges.
+
 Key-based providers work exactly like the examples above:
 
 ```bash
@@ -832,7 +859,8 @@ them with `--oauth-auth-url`, `--oauth-token-url`, `--oauth-device-url`, and
 `--oauth-redirect-uri`.
 
 Plugins are trusted code that runs at load time with your shell privileges,
-so review one before dropping it into either directory.
+whether you dropped the file in yourself or installed it from a repository — so
+review one before you use it.
 
 A full example: a `gemini-sub.sh` in your plugins directory declares the
 Google AI subscription (Antigravity) provider — the OAuth client, scopes, the

@@ -212,3 +212,93 @@ model add broken/m1 --name M1`),
 	_, err := config.Load(workDir, t.TempDir(), false)
 	require.ErrorContains(t, err, "invalid gateway adapter for provider broken")
 }
+
+// isolateConfig points every config and data location at a temporary home, so
+// a test cannot read a real user's plugins.
+func isolateConfig(t *testing.T) string {
+	t.Helper()
+	isolated := t.TempDir()
+	t.Setenv("HOME", isolated)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(isolated, ".config"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(isolated, ".local", "share"))
+	t.Setenv("CRUSH_GLOBAL_CONFIG", filepath.Join(isolated, ".config", "crush"))
+	t.Setenv("CRUSH_GLOBAL_DATA", filepath.Join(isolated, ".local", "share", "crush"))
+	require.NoError(t, os.MkdirAll(filepath.Join(isolated, ".config", "crush"), 0o755))
+	return isolated
+}
+
+// writePluginDir drops scripts into a subdirectory of a plugins directory,
+// which is where an installed plugin repository lives.
+func writePluginDir(t *testing.T, dir string, files map[string]string) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	for name, script := range files {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(script), 0o755))
+	}
+}
+
+// TestPluginSubdirectoriesLoad pins the directory shape an installed
+// repository brings: the scripts one level deep run, the hidden lock file
+// beside them does not, and anything nested deeper stays ignored.
+func TestPluginSubdirectoriesLoad(t *testing.T) {
+	isolated := isolateConfig(t)
+	workDir := t.TempDir()
+
+	writePlugin(t, workDir, "top.sh", `provider add topsrc --type openai-compat --base-url "https://top.example/v1" --api-key k --discover-models false
+model add topsrc/m1 --name M1`)
+	writePluginDir(t, filepath.Join(workDir, ".crush", "plugins", "example__repo"), map[string]string{
+		"repo.sh": `provider add repoone --type openai-compat --base-url "https://repo.example/v1" --api-key k --discover-models false
+model add repoone/m1 --name M1`,
+		".hidden.sh": `provider add hiddenone --type openai-compat --base-url "https://hidden.example/v1" --api-key k --discover-models false
+model add hiddenone/m1 --name M1`,
+		".plugin.json": `{"source":"example/repo","commit":"deadbeef"}`,
+	})
+	writePluginDir(t, filepath.Join(workDir, ".crush", "plugins", "example__repo", "nested"), map[string]string{
+		"deep.sh": `provider add repotwo --type openai-compat --base-url "https://deep.example/v1" --api-key k --discover-models false
+model add repotwo/m1 --name M1`,
+	})
+	writePluginDir(t, filepath.Join(isolated, ".config", "crush", "plugins", "global__repo"), map[string]string{
+		"global.sh": `provider add globalone --type openai-compat --base-url "https://globalrepo.example/v1" --api-key k --discover-models false
+model add globalone/m1 --name M1`,
+	})
+
+	store, err := config.Load(workDir, t.TempDir(), false)
+	require.NoError(t, err)
+
+	cfg := store.Config()
+	for _, id := range []string{"topsrc", "repoone", "globalone"} {
+		_, ok := cfg.Providers.Get(id)
+		require.True(t, ok, "%s should load from a plugin subdirectory", id)
+	}
+	for _, id := range []string{"repotwo", "hiddenone"} {
+		_, ok := cfg.Providers.Get(id)
+		require.False(t, ok, "%s is nested deeper or hidden and must not run", id)
+	}
+}
+
+// TestPluginSubdirectoryOrder keeps load order predictable: scripts sort by
+// their full name across a plugins directory, so a repository that comes later
+// alphabetically wins a declaration both of them make.
+func TestPluginSubdirectoryOrder(t *testing.T) {
+	isolateConfig(t)
+	workDir := t.TempDir()
+
+	declare := func(url string) string {
+		return `provider add shared --type openai-compat --base-url "` + url + `" --api-key k --discover-models false
+model add shared/m1 --name M1`
+	}
+	plugins := filepath.Join(workDir, ".crush", "plugins")
+	writePlugin(t, workDir, "shared.sh", declare("https://loose.example/v1"))
+	writePluginDir(t, filepath.Join(plugins, "a__repo"), map[string]string{
+		"shared.sh": declare("https://first.example/v1"),
+	})
+	writePluginDir(t, filepath.Join(plugins, "z__repo"), map[string]string{
+		"shared.sh": declare("https://last.example/v1"),
+	})
+
+	store, err := config.Load(workDir, t.TempDir(), false)
+	require.NoError(t, err)
+	pc, ok := store.Config().Providers.Get("shared")
+	require.True(t, ok)
+	require.Equal(t, "https://last.example/v1", pc.BaseURL, "the last script in name order should win")
+}

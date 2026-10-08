@@ -131,8 +131,14 @@ provider add example \
 A plugin is a Bash script in `$XDG_CONFIG_HOME/crush/plugins/` or
 `.crush/plugins/` that uses the same builtins and runs at config load; it is
 how a provider is added without a Crush release. Non-hidden `*.sh` files run
-in name order; project plugins override global ones, and the crushrc
-overrides both.
+in name order, along with those one directory down, and project plugins
+override global ones, with the crushrc overriding both.
+
+`crush plugin install <author>/<repo>[@ref]` fetches the `*.sh` files at a
+GitHub repository's root and records the commit they came from, so
+`crush plugin update` can report the commit it moved to; `crush plugin list`
+shows what is installed and which files no longer match. Read a plugin before
+treating it as configured: it is Bash with the user's shell privileges.
 
 ### models
 

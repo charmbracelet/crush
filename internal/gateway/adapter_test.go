@@ -55,7 +55,7 @@ func TestRequestRewrite(t *testing.T) {
 	}, "at-123", nil)
 	require.NoError(t, err)
 
-	req, err := http.NewRequest(http.MethodPost, "https://sdk.example.com/v1beta/models/m:generateContent",
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "https://sdk.example.com/v1beta/models/m:generateContent",
 		strings.NewReader(`{"model":"m","contents":[]}`))
 	require.NoError(t, err)
 	req.Header.Set("x-goog-api-key", "at-123")
@@ -95,7 +95,7 @@ func TestResponseRewriteUnary(t *testing.T) {
 	}, "", nil)
 	require.NoError(t, err)
 
-	resp, err := (&http.Client{Transport: adapter}).Post(server.URL, "application/json", strings.NewReader(`{}`))
+	resp, err := postEmpty(t, adapter, server.URL)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -131,7 +131,7 @@ data: {"response":{"candidates":[{"content":{"parts":[{"text":"b"}]},"finishReas
 	}, "", nil)
 	require.NoError(t, err)
 
-	resp, err := (&http.Client{Transport: adapter}).Post(server.URL, "application/json", strings.NewReader(`{}`))
+	resp, err := postEmpty(t, adapter, server.URL)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -170,7 +170,7 @@ func TestStreamSynthesizesMissingFinish(t *testing.T) {
 	}, "", nil)
 	require.NoError(t, err)
 
-	resp, err := (&http.Client{Transport: adapter}).Post(server.URL, "application/json", strings.NewReader(`{}`))
+	resp, err := postEmpty(t, adapter, server.URL)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -194,7 +194,7 @@ func TestStreamPassesNonJSONThrough(t *testing.T) {
 	}, "", nil)
 	require.NoError(t, err)
 
-	resp, err := (&http.Client{Transport: adapter}).Post(server.URL, "application/json", strings.NewReader(`{}`))
+	resp, err := postEmpty(t, adapter, server.URL)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -236,7 +236,7 @@ func TestStreamPreservesEventNames(t *testing.T) {
 	}, "", nil)
 	require.NoError(t, err)
 
-	resp, err := (&http.Client{Transport: adapter}).Post(server.URL, "application/json", strings.NewReader(`{}`))
+	resp, err := postEmpty(t, adapter, server.URL)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -266,7 +266,7 @@ func TestProgramFunctions(t *testing.T) {
 	}, "", nil)
 	require.NoError(t, err)
 
-	req, err := http.NewRequest(http.MethodPost, server.URL, strings.NewReader(`{"text":"hello"}`))
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL, strings.NewReader(`{"text":"hello"}`))
 	require.NoError(t, err)
 	req.Header.Set("X-Existing", "v")
 	resp, err := (&http.Client{Transport: adapter}).Do(req)
@@ -320,4 +320,13 @@ func firstText(t *testing.T, event map[string]any) string {
 	content := candidates[0].(map[string]any)["content"].(map[string]any)
 	parts := content["parts"].([]any)
 	return parts[0].(map[string]any)["text"].(string)
+}
+
+// postEmpty POSTs an empty JSON object to url through rt.
+func postEmpty(t *testing.T, rt http.RoundTripper, url string) (*http.Response, error) {
+	t.Helper()
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, url, strings.NewReader(`{}`))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	return (&http.Client{Transport: rt}).Do(req)
 }

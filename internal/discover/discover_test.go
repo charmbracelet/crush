@@ -39,6 +39,64 @@ func TestDiscoverModels(t *testing.T) {
 	require.Equal(t, "model-b", models[1].ID)
 }
 
+func TestDiscoverModels_TokenLimits(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		body     string
+		existing []catwalk.Model
+		want     []catwalk.Model
+	}{
+		{
+			name: "no limits in listing",
+			body: `{"data": [{"id": "m1", "object": "model"}]}`,
+			want: []catwalk.Model{{ID: "m1", Name: "m1"}},
+		},
+		{
+			name: "openai-shaped litellm listing",
+			body: `{"data": [{"id": "m1", "object": "model", "max_input_tokens": 1000000, "max_output_tokens": 128000}]}`,
+			want: []catwalk.Model{{ID: "m1", Name: "m1", ContextWindow: 1000000, DefaultMaxTokens: 128000}},
+		},
+		{
+			name: "anthropic models api listing",
+			body: `{"data": [{"type": "model", "id": "m1", "max_input_tokens": 200000, "max_tokens": 64000}]}`,
+			want: []catwalk.Model{{ID: "m1", Name: "m1", ContextWindow: 200000, DefaultMaxTokens: 64000}},
+		},
+		{
+			name: "max_output_tokens wins over max_tokens",
+			body: `{"data": [{"id": "m1", "max_output_tokens": 128000, "max_tokens": 4096}]}`,
+			want: []catwalk.Model{{ID: "m1", Name: "m1", DefaultMaxTokens: 128000}},
+		},
+		{
+			name:     "existing model limits win",
+			body:     `{"data": [{"id": "m1", "max_input_tokens": 1000000, "max_output_tokens": 128000}]}`,
+			existing: []catwalk.Model{{ID: "m1", Name: "Mine", DefaultMaxTokens: 32000}},
+			want:     []catwalk.Model{{ID: "m1", Name: "Mine", DefaultMaxTokens: 32000}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer server.Close()
+
+			cfg := Config{
+				ID:             "test",
+				BaseURL:        server.URL + "/v1",
+				ExistingModels: tt.existing,
+			}
+
+			models, err := DiscoverModels(context.Background(), cfg, &mockResolver{})
+			require.NoError(t, err)
+			require.Equal(t, tt.want, models)
+		})
+	}
+}
+
 func TestDiscoverModels_ExistingModelsWin(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

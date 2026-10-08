@@ -136,7 +136,27 @@ func (a *sessionAgent) distill(ctx context.Context, sessionID string) error {
 		return err
 	}
 	if len(entries) == 0 {
-		return nil
+		// A batch the observer found nothing durable in still has to be marked
+		// read. Without this the same messages look unobserved on every later
+		// turn and the observer pays a model call each time to reach the same
+		// conclusion.
+		entries = []compaction.Entry{{
+			Kind:    compaction.KindDrop,
+			Text:    "observed; nothing durable to record",
+			Sources: idsOf(selected),
+		}}
+	}
+
+	// Reading a message and citing it are different things: the observer reads
+	// a whole batch and cites only what it used. Anything read but not cited is
+	// marked covered, or the next turn reads it again to reach the same
+	// conclusion - the same wasted call, one batch at a time.
+	if uncited := uncitedOf(selected, entries); len(uncited) > 0 {
+		entries = append(entries, compaction.Entry{
+			Kind:    compaction.KindDrop,
+			Text:    "observed; nothing durable to record",
+			Sources: uncited,
+		})
 	}
 
 	stored, err := a.ledger.Append(ctx, sessionID, entries)
@@ -145,6 +165,23 @@ func (a *sessionAgent) distill(ctx context.Context, sessionID string) error {
 	}
 	slog.Debug("Memory observed", "session", sessionID, "entries", len(stored))
 	return nil
+}
+
+// uncitedOf lists the messages a pass read that no entry claims to rest on.
+func uncitedOf(selected []message.Message, entries []compaction.Entry) []string {
+	cited := make(map[string]bool)
+	for _, e := range entries {
+		for _, id := range e.Sources {
+			cited[id] = true
+		}
+	}
+	var uncited []string
+	for _, m := range selected {
+		if !cited[m.ID] {
+			uncited = append(uncited, m.ID)
+		}
+	}
+	return uncited
 }
 
 // askObserver runs the distillation on the small model. Unlike title
@@ -309,6 +346,16 @@ func renderForObservation(msgs []message.Message) string {
 		}
 	}
 	return b.String()
+}
+
+// idsOf lists the messages an observation pass read, so a batch that produced
+// no entries can still be recorded as covered.
+func idsOf(msgs []message.Message) []string {
+	ids := make([]string, 0, len(msgs))
+	for _, m := range msgs {
+		ids = append(ids, m.ID)
+	}
+	return ids
 }
 
 func writeCapped(b *strings.Builder, s string, limit int) {

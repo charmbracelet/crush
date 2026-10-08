@@ -232,6 +232,10 @@ func TestObserverDropsUnknownSources(t *testing.T) {
 
 	led, err := env.ledger.Ledger(ctx, sess.ID)
 	require.NoError(t, err)
-	require.Len(t, led.Entries, 1)
-	require.Empty(t, led.Entries[0].Sources)
+	require.Len(t, led.Entries, 2, "the entry plus the pass's coverage marker")
+	require.Empty(t, led.Entries[0].Sources, "the invented citation is dropped")
+
+	// The marker says the batch was read without inventing anything about it.
+	require.Equal(t, compaction.KindDrop, led.Entries[1].Kind)
+	require.NotEmpty(t, led.Entries[1].Sources, "the batch is marked covered")
 }

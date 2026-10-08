@@ -225,3 +225,33 @@ func TestCardDroppedWhenASummaryFailsMidFlight(t *testing.T) {
 	require.NotContains(t, out, "Summarizing")
 	require.NotContains(t, out, "╭")
 }
+
+// TestCompactionCardSaysWhenItWasRendered: a checkpoint built from recorded
+// memory is a different claim from one a model wrote, and a reader deciding
+// whether to trust it should be able to tell which they are looking at.
+func TestCompactionCardSaysWhenItWasRendered(t *testing.T) {
+	sty := styles.CharmtonePantera()
+	item := footedItem(t, &sty, `<compaction_info replaced_messages="40" replaced_tokens="90000" kept_messages="6" kept_tokens="8000" rendered="12">`+"\n"+
+		"This checkpoint replaces 40 earlier messages (~90000 tokens).\n"+
+		"</compaction_info>")
+
+	out := ansi.Strip(item.RawRender(76))
+
+	require.Contains(t, out, "Rendered from 12 recorded memories")
+	require.Contains(t, out, "Replaced 40 earlier messages")
+}
+
+// TestCompactionCardStaysQuietAboutRenderingWhenSummarized is the other half:
+// a model-written checkpoint must not claim to have been rendered, and the
+// note is driven by the footer rather than assumed.
+func TestCompactionCardStaysQuietAboutRenderingWhenSummarized(t *testing.T) {
+	sty := styles.CharmtonePantera()
+	item := footedItem(t, &sty, `<compaction_info replaced_messages="40" replaced_tokens="90000" kept_messages="6" kept_tokens="8000">`+"\n"+
+		"This checkpoint replaces 40 earlier messages (~90000 tokens).\n"+
+		"</compaction_info>")
+
+	out := ansi.Strip(item.RawRender(76))
+
+	require.Contains(t, out, "Replaced 40 earlier messages")
+	require.NotContains(t, out, "Rendered from")
+}

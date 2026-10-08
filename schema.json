@@ -43,6 +43,16 @@
             8000,
             40000
           ]
+        },
+        "observe_memory": {
+          "type": "boolean",
+          "description": "Record session memory at the end of each turn so compactions can render a checkpoint instead of summarizing one",
+          "default": false
+        },
+        "render_from_ledger": {
+          "type": "boolean",
+          "description": "Build compaction checkpoints from recorded session memory instead of asking a model to summarize",
+          "default": false
         }
       },
       "additionalProperties": false,

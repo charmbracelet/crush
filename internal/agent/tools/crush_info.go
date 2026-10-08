@@ -405,6 +405,8 @@ func writeOptions(b *strings.Builder, cfg *config.ConfigStore) {
 	// wrong for most models.
 	tail := "15% of the context window"
 	pruneToolResults := true
+	observeMemory := false
+	renderFromLedger := false
 	if co := c.Options.Compaction; co != nil {
 		if co.TailTokens > 0 {
 			tail = fmt.Sprintf("%d tokens", co.TailTokens)
@@ -412,9 +414,17 @@ func writeOptions(b *strings.Builder, cfg *config.ConfigStore) {
 		if co.PruneToolResults != nil {
 			pruneToolResults = *co.PruneToolResults
 		}
+		if co.ObserveMemory != nil {
+			observeMemory = *co.ObserveMemory
+		}
+		if co.RenderFromLedger != nil {
+			renderFromLedger = *co.RenderFromLedger
+		}
 	}
 	opts = append(opts, kv{"compaction_tail", tail})
 	opts = append(opts, kv{"compaction_prune_tool_results", fmt.Sprintf("%v", pruneToolResults)})
+	opts = append(opts, kv{"observe_memory", fmt.Sprintf("%v", observeMemory)})
+	opts = append(opts, kv{"render_from_ledger", fmt.Sprintf("%v", renderFromLedger)})
 
 	if c.Options.TUI != nil {
 		opts = append(opts, kv{"compact_mode", fmt.Sprintf("%v", c.Options.TUI.CompactMode)})

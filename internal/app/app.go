@@ -32,6 +32,7 @@ import (
 	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp"
+	"github.com/charmbracelet/crush/internal/ledger"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -57,6 +58,7 @@ type UpdateAvailableMsg struct {
 type App struct {
 	Sessions    session.Service
 	Messages    message.Service
+	Ledger      ledger.Service
 	History     history.Service
 	Permissions permission.Service
 	Questions   question.Service
@@ -123,6 +125,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	app := &App{
 		Sessions:    sessions,
 		Messages:    messages,
+		Ledger:      ledger.NewService(q),
 		History:     files,
 		Permissions: permission.NewPermissionService(store.WorkingDir(), skipPermissionsRequests, allowedTools, permissionHooks{hookRunner}),
 		Questions:   question.NewService(),
@@ -856,6 +859,7 @@ func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 		Skills:      app.Skills,
 		HookRunner:  app.hookRunner,
 		Interactive: interactive,
+		Ledger:      app.Ledger,
 	})
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)

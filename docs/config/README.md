@@ -487,11 +487,31 @@ can be added without a Crush release. Two directories are scanned:
 - `$XDG_CONFIG_HOME/crush/plugins/` — user-wide
 - `.crush/plugins/` — the working directory's project folder
 
-Every non-hidden `*.sh` file runs in name order. A project plugin overrides
-a global one, and your own crushrc overrides both, so a plugin never traps a
-project. A failing plugin fails the load, exactly like a failing crushrc —
-and like a crushrc, a plugin is trusted code with your shell privileges:
-review it before you install it.
+Every non-hidden `*.sh` file runs in name order, along with the files one
+directory down, which is where an installed repository lives. A project plugin
+overrides a global one, and your own crushrc overrides both, so a plugin never
+traps a project. A failing plugin fails the load, exactly like a failing
+crushrc — and like a crushrc, a plugin is trusted code with your shell
+privileges: review it before you install it.
+
+`crush plugin` installs them from GitHub instead of by hand:
+
+```bash
+crush plugin install <author>/<repo>[@ref]   # every *.sh at the repository root
+crush plugin update [<author>/<repo>[@ref]]  # one repository, or all of them
+crush plugin list [--json]                   # the ref and commit each one pins
+crush plugin trust <author>/<repo>           # accept edits made after installing
+crush plugin uninstall <author>/<repo>
+```
+
+An install writes the scripts into `<plugins>/<author>__<repo>/` and records
+the exact commit they came from in a hidden `.plugin.json` beside them, which
+is what makes an update able to say which commit it moved from and to, and to
+delete a plugin the repository dropped. `--project` installs into
+`.crush/plugins` so a team can commit one pinned version together. Nothing is
+prompted for and nothing is verified: the recorded commit URL is the thing to
+read before the next load runs it. `GITHUB_TOKEN` or `GH_TOKEN` is sent when
+set, which is how a private repository installs.
 
 A provider that declares an OAuth flow is a sign-in candidate until
 `crush login <id>` stores its token: it appears in the model picker but is

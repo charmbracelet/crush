@@ -110,3 +110,41 @@ func TestLedgerSurvivesRetirementAndRenders(t *testing.T) {
 	// promise of this store, so assert the render twice.
 	require.Equal(t, rendered.Text, l.Render(0).Text)
 }
+
+func TestDecayRetiresLowRelevanceEntriesBeyondBudget(t *testing.T) {
+	t.Parallel()
+
+	svc, sessionID := newTestService(t)
+
+	_, err := svc.Append(t.Context(), sessionID, []compaction.Entry{
+		{
+			ID: "a", Kind: compaction.KindObservation, Relevance: compaction.RelevanceContext,
+			Text: "Listed files in directory",
+		},
+		{
+			ID: "b", Kind: compaction.KindObservation, Relevance: compaction.RelevanceNotable,
+			Text: "Applied migration 20261007",
+		},
+		{
+			ID: "c", Kind: compaction.KindReflection, Relevance: compaction.RelevanceDecision,
+			Text: "Always prefer append-only ledger rows to prevent rationale loss",
+		},
+	})
+	require.NoError(t, err)
+
+	// Budget of 16 tokens fits only the 16-token decision. The lower relevance
+	// entries (7 tokens each) should both be dropped and retired.
+	retired, err := svc.Decay(t.Context(), sessionID, compaction.RenderBudget(16))
+	require.NoError(t, err)
+	require.Equal(t, 2, retired, "context and notable entries should decay")
+
+	// Render after decay: only the decision remains active.
+	l, err := svc.Ledger(t.Context(), sessionID)
+	require.NoError(t, err)
+
+	rendered := l.Render(0)
+	require.Contains(t, rendered.Text, "Always prefer append-only ledger rows")
+	require.NotContains(t, rendered.Text, "Listed files")
+	require.NotContains(t, rendered.Text, "Applied migration 20261007")
+}
+

@@ -42,9 +42,6 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.deleteFileStmt, err = db.PrepareContext(ctx, deleteFile); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteFile: %w", err)
 	}
-	if q.deleteLedgerEntriesForSessionStmt, err = db.PrepareContext(ctx, deleteLedgerEntriesForSession); err != nil {
-		return nil, fmt.Errorf("error preparing query DeleteLedgerEntriesForSession: %w", err)
-	}
 	if q.deleteMCPDisabledServerStmt, err = db.PrepareContext(ctx, deleteMCPDisabledServer); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteMCPDisabledServer: %w", err)
 	}
@@ -210,11 +207,6 @@ func (q *Queries) Close() error {
 	if q.deleteFileStmt != nil {
 		if cerr := q.deleteFileStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing deleteFileStmt: %w", cerr)
-		}
-	}
-	if q.deleteLedgerEntriesForSessionStmt != nil {
-		if cerr := q.deleteLedgerEntriesForSessionStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing deleteLedgerEntriesForSessionStmt: %w", cerr)
 		}
 	}
 	if q.deleteMCPDisabledServerStmt != nil {
@@ -482,7 +474,6 @@ type Queries struct {
 	createMessageStmt                    *sql.Stmt
 	createSessionStmt                    *sql.Stmt
 	deleteFileStmt                       *sql.Stmt
-	deleteLedgerEntriesForSessionStmt    *sql.Stmt
 	deleteMCPDisabledServerStmt          *sql.Stmt
 	deleteMCPEnabledServerStmt           *sql.Stmt
 	deleteMessageStmt                    *sql.Stmt
@@ -539,7 +530,6 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		createMessageStmt:                    q.createMessageStmt,
 		createSessionStmt:                    q.createSessionStmt,
 		deleteFileStmt:                       q.deleteFileStmt,
-		deleteLedgerEntriesForSessionStmt:    q.deleteLedgerEntriesForSessionStmt,
 		deleteMCPDisabledServerStmt:          q.deleteMCPDisabledServerStmt,
 		deleteMCPEnabledServerStmt:           q.deleteMCPEnabledServerStmt,
 		deleteMessageStmt:                    q.deleteMessageStmt,

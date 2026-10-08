@@ -45,17 +45,28 @@ func TestLedgerRenderIsDeterministic(t *testing.T) {
 	require.Equal(t, 40, first.CoversThrough)
 }
 
-func TestLedgerRenderKeepsDecisionsWhenBudgetIsTight(t *testing.T) {
+func TestLedgerRenderShedsOldestDecisionsOnlyWhenDecisionsAloneOverflow(t *testing.T) {
 	t.Parallel()
 
-	// Room for roughly one entry. Losing background detail is acceptable;
-	// losing why a choice was made is the failure this ordering prevents.
+	// Room for roughly one decision. The two decisions together do not fit, so
+	// the older one gives way and is counted - never silently. Background
+	// detail is gone either way.
 	got := ledgerFixture().Render(RenderBudget(30))
 	require.Positive(t, got.Dropped)
-	require.Zero(t, got.DroppedHigh,
-		"every dropped entry should have been low relevance: %s", got.Text)
-	require.Contains(t, got.Text, "append-only rows")
-	require.NotContains(t, got.Text, "Listed files")
+	require.Equal(t, 1, got.DroppedHigh,
+		"the older decision was shed to fit and must be reported")
+	require.Contains(t, got.Text, "User rejected splitting",
+		"the newest decision survives")
+	require.NotContains(t, got.Text, "append-only rows",
+		"the older decision is the one shed")
+	require.NotContains(t, got.Text, "Listed files",
+		"background detail is always droppable")
+
+	// With room for both, nothing of consequence is lost.
+	generous := ledgerFixture().Render(RenderBudget(4096))
+	require.Zero(t, generous.DroppedHigh)
+	require.Contains(t, generous.Text, "append-only rows")
+	require.Contains(t, generous.Text, "User rejected splitting")
 }
 
 func TestLedgerRenderOrdersChronologicallyWithinSections(t *testing.T) {

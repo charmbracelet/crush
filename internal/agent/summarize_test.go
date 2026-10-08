@@ -263,6 +263,7 @@ func TestBuildSummaryPromptOrdersItsSections(t *testing.T) {
 		"focus on the failing tests",
 		"earlier work",
 		"/data/compaction/sess/1-checkpoint.txt",
+		"",
 	)
 
 	instructions := strings.Index(out, "<instructions>")
@@ -275,7 +276,7 @@ func TestBuildSummaryPromptOrdersItsSections(t *testing.T) {
 	require.Contains(t, out, "ship it")
 
 	// Every block is optional and independent.
-	bare := buildSummaryPrompt(nil, "", "", "")
+	bare := buildSummaryPrompt(nil, "", "", "", "")
 	require.NotContains(t, bare, "<instructions>")
 	require.NotContains(t, bare, "<previous_checkpoint>")
 	require.NotContains(t, bare, "Current Todo List")

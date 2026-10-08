@@ -27,7 +27,9 @@ const (
 	// the entries it rests on. Reflections outlive the evidence that formed
 	// them, which is why they are a separate kind rather than a longer note.
 	KindReflection EntryKind = "reflection"
-	// KindDrop retires earlier entries without deleting them.
+	// KindDrop retires earlier entries without deleting them. A drop that
+	// retires nothing is a coverage marker: it records that a region was read
+	// and held nothing durable, so the observer does not read it again.
 	KindDrop EntryKind = "drop"
 )
 

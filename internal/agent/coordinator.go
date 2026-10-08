@@ -35,6 +35,7 @@ import (
 	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/hooks"
+	"github.com/charmbracelet/crush/internal/ledger"
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
@@ -162,6 +163,7 @@ type coordinator struct {
 	toolProgress pubsub.Publisher[tools.ToolProgress]
 	interactive  bool
 	shellOwner   any
+	ledger       ledger.Service
 
 	// agentMu guards mainAgent and mainAgentName: SetMainAgent runs on
 	// HTTP handler goroutines while runs, cancels, and probes read the
@@ -250,6 +252,9 @@ type CoordinatorOptions struct {
 	// ShellOwner tags the background shells the bash tool starts, so the
 	// owner can stop its own shells without touching anyone else's.
 	ShellOwner any
+	// Ledger persists session memory. Nil disables observation and leaves
+	// compaction summarizing with a model, which is the default.
+	Ledger ledger.Service
 }
 
 func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, error) {
@@ -287,6 +292,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		shellOwner:      opts.ShellOwner,
 		dispatched:      csync.NewMap[string, *dispatchedAgent](),
 		backgroundAfter: subAgentBackgroundAfter,
+		ledger:          opts.Ledger,
 	}
 
 	agentCfg, ok := opts.Config.Config().Agents[config.AgentCoder]
@@ -1032,6 +1038,9 @@ func (c *coordinator) buildAgentWithModels(ctx context.Context, ready *errgroup.
 		RunComplete:          c.runComplete,
 		Hooks:                c.hookRunner,
 		titles:               &c.titles,
+		Ledger:               c.ledger,
+		ObserveMemory:        c.observesMemory(isSubAgent),
+		RenderFromLedger:     c.rendersFromLedger(isSubAgent),
 	})
 
 	// The readiness goroutines below perform one-time setup — building the
@@ -1231,6 +1240,30 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	filteredTools = wrapToolsWithHooks(filteredTools, c.hookRunner, isSubAgent)
 
 	return filteredTools, nil
+}
+
+// rendersFromLedger reports whether a compaction should build its checkpoint
+// from recorded memory. It shares the ledger-availability condition with
+// observation but not the enable flag, because the two are useful apart: an
+// observer that is running while the renderer is off is how memory gets
+// evaluated before anything depends on it.
+func (c *coordinator) rendersFromLedger(isSubAgent bool) bool {
+	if isSubAgent || c.ledger == nil {
+		return false
+	}
+	co := c.cfg.Config().Options.Compaction
+	return co != nil && co.RenderFromLedger != nil && *co.RenderFromLedger
+}
+
+// observesMemory reports whether this agent should distill its turns into the
+// memory ledger. Sub-agents never do: they are the compaction's own machinery
+// and a memory of a memory is the erosion the ledger exists to prevent.
+func (c *coordinator) observesMemory(isSubAgent bool) bool {
+	if isSubAgent || c.ledger == nil {
+		return false
+	}
+	co := c.cfg.Config().Options.Compaction
+	return co != nil && co.ObserveMemory != nil && *co.ObserveMemory
 }
 
 // buildModel builds the model selected for one slot from the live config.

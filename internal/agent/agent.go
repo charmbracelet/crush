@@ -609,6 +609,19 @@ func (a *sessionAgent) persistCanceledTurn(ctx context.Context, call SessionAgen
 // observes exactly one terminal event regardless of which Run branch ends
 // the turn.
 func (a *sessionAgent) publishRunComplete(ctx context.Context, call SessionAgentCall, complete notify.RunComplete) {
+	// Memory is distilled before either terminal path is taken. The
+	// coordinator always supplies an OnComplete hook, so a call placed after
+	// the branch below never runs for an ordinary session - which is how this
+	// feature sat inert while its own tests passed, because they drove the
+	// distillation directly rather than through the event that triggers it.
+	//
+	// Firing on both paths is safe because observation is idempotent: a
+	// retried attempt reports the same messages, entry ids are content
+	// addressed, and covered messages are not read twice.
+	if complete.Error == "" && !complete.Cancelled {
+		a.observeTurn(complete)
+	}
+
 	if call.OnComplete != nil {
 		call.OnComplete(complete)
 		return
@@ -617,16 +630,6 @@ func (a *sessionAgent) publishRunComplete(ctx context.Context, call SessionAgent
 		return
 	}
 	a.runComplete.PublishMustDeliver(ctx, pubsub.UpdatedEvent, complete)
-
-	// The turn is over and nothing waits on this, so memory is distilled here
-	// rather than on the OnComplete path above: that path is the coordinator
-	// coalescing retries, where observing would record an attempt the user is
-	// about to see replaced. A turn that errored is skipped for the same
-	// reason it is safe to skip one: its messages stay unobserved and the next
-	// turn picks them up.
-	if complete.Error == "" {
-		a.observeTurn(call.SessionID, complete)
-	}
 }
 
 // ValidateCall performs the cheap structural validation that

@@ -42,6 +42,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/hooks"
+	"github.com/charmbracelet/crush/internal/ledger"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -230,6 +231,10 @@ type sessionAgent struct {
 	notify               pubsub.Publisher[notify.Notification]
 	runComplete          pubsub.Publisher[notify.RunComplete]
 	hooks                *hooks.Runner
+	// ledger is the session memory store; nil when observation is off.
+	ledger           ledger.Service
+	observeMemory    bool
+	renderFromLedger bool
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, *activeCancel]
@@ -286,10 +291,20 @@ type SessionAgentOptions struct {
 	IsYolo               bool
 	Sessions             session.Service
 	Messages             message.Service
-	Cfg                  *config.ConfigStore
-	Tools                []fantasy.AgentTool
-	Notify               pubsub.Publisher[notify.Notification]
-	RunComplete          pubsub.Publisher[notify.RunComplete]
+	// Ledger persists session memory for the observer and the renderer. Nil
+	// leaves observation off entirely, which is the default: this feature is
+	// opt-in until it has measured well enough to trust.
+	Ledger ledger.Service
+	// ObserveMemory distills each completed turn into the ledger when true.
+	ObserveMemory bool
+	// RenderFromLedger lets a compaction build its checkpoint from the ledger
+	// instead of asking a model to summarize. It falls back to summarizing
+	// whenever the ledger is empty, so it is safe to enable on its own.
+	RenderFromLedger bool
+	Cfg              *config.ConfigStore
+	Tools            []fantasy.AgentTool
+	Notify           pubsub.Publisher[notify.Notification]
+	RunComplete      pubsub.Publisher[notify.RunComplete]
 	// Hooks runs lifecycle hooks for turns and compaction. Nil runs none.
 	Hooks *hooks.Runner
 }
@@ -311,6 +326,9 @@ func NewSessionAgent(
 		notify:               opts.Notify,
 		runComplete:          opts.RunComplete,
 		hooks:                opts.Hooks,
+		ledger:               opts.Ledger,
+		observeMemory:        opts.ObserveMemory,
+		renderFromLedger:     opts.RenderFromLedger,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		notes:                csync.NewMap[string, []string](),
 		activeRequests:       csync.NewMap[string, *activeCancel](),
@@ -604,6 +622,16 @@ func (a *sessionAgent) publishRunComplete(ctx context.Context, call SessionAgent
 		return
 	}
 	a.runComplete.PublishMustDeliver(ctx, pubsub.UpdatedEvent, complete)
+
+	// The turn is over and nothing waits on this, so memory is distilled here
+	// rather than on the OnComplete path above: that path is the coordinator
+	// coalescing retries, where observing would record an attempt the user is
+	// about to see replaced. A turn that errored is skipped for the same
+	// reason it is safe to skip one: its messages stay unobserved and the next
+	// turn picks them up.
+	if complete.Error == "" {
+		a.observeTurn(call.SessionID, complete)
+	}
 }
 
 // ValidateCall performs the cheap structural validation that
@@ -1549,7 +1577,26 @@ func (a *sessionAgent) runSummarize(ctx context.Context, sessionID, trigger, ins
 		transcriptPath = path
 	}
 
-	summaryPromptText := buildSummaryPrompt(currentSession.Todos, instructions, previousCheckpoint, transcriptPath)
+	// Memory renders before the prompt is built so it can do two jobs at once:
+	// guide the summary, and take part of the room the summary would have had.
+	// Its budget is what a checkpoint over this region could occupy, so prose
+	// and memory share one allocation and carrying both cannot overflow the
+	// window either was sized for.
+	appendixBase, _ := compaction.CheckpointOutputBudget(
+		int64(largeModel.CatwalkCfg.ContextWindow),
+		compaction.EstimateAll(region),
+		largeModel.CatwalkCfg.DefaultMaxTokens,
+	)
+	appendixBudget := compaction.RenderBudget(appendixBase)
+	appendixText, appendixCount := a.renderedCheckpoint(genCtx, sessionID, appendixBudget)
+
+	// render_only is the opt-in fast path: memory stands in for the summary
+	// entirely. The default is the opposite division of labor - the model
+	// narrates the state of the work, memory carries the decisions that must
+	// not drift - and both modes read the same ledger through this one call.
+	renderOnly := a.renderFromLedger && appendixText != ""
+
+	summaryPromptText := buildSummaryPrompt(currentSession.Todos, instructions, previousCheckpoint, transcriptPath, appendixText)
 
 	// The checkpoint request has to fit the window it is summarizing into.
 	// Left unset, the provider applies its own default, and a nearly-full
@@ -1561,7 +1608,8 @@ func (a *sessionAgent) runSummarize(ctx context.Context, sessionID, trigger, ins
 		compaction.EstimateAll(region)+
 			compaction.Tokens(string(summaryPrompt))+
 			compaction.Tokens(systemPromptPrefix)+
-			compaction.Tokens(summaryPromptText),
+			compaction.Tokens(summaryPromptText)+
+			compaction.Tokens(appendixText),
 		largeModel.CatwalkCfg.DefaultMaxTokens,
 	)
 	if tight {
@@ -1578,63 +1626,96 @@ func (a *sessionAgent) runSummarize(ctx context.Context, sessionID, trigger, ins
 		last:     time.Now().Add(-progressInterval), // the first delta always reports
 	}
 
-	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
-		Prompt:          summaryPromptText,
-		MaxOutputTokens: &checkpointTokens,
-		Messages:        aiMsgs,
-		Headers:         sessionHeaders(sessionID),
-		ProviderOptions: opts,
-		OnAuthRefresh:   onAuthRefresh,
-		ModelProvider: func() fantasy.LanguageModel {
-			return a.currentBuildOf(largeModel)
-		},
-		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
-			prepared.Messages = options.Messages
-			if systemPromptPrefix != "" {
-				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(systemPromptPrefix)}, prepared.Messages...)
-			}
-			return callContext, prepared, nil
-		},
-		OnReasoningDelta: func(id string, text string) error {
-			summaryMessage.AppendReasoningContent(text)
-			if note := progress.advance(0); note != "" {
-				a.publishSummarizing(sessionID, currentSession.Title, false, note)
-			}
-			return a.messages.Update(genCtx, summaryMessage)
-		},
-		OnReasoningEnd: func(id string, reasoning fantasy.ReasoningContent) error {
-			// Handle anthropic signature.
-			if anthropicData, ok := reasoning.ProviderMetadata["anthropic"]; ok {
-				if signature, ok := anthropicData.(*anthropic.ReasoningOptionMetadata); ok && signature.Signature != "" {
-					summaryMessage.AppendReasoningSignature(signature.Signature)
+	// On the fast path memory replaces the model call outright: a checkpoint
+	// rendered from decisions and constraints recorded as they happened is both
+	// faster and less lossy than one a model reconstructs from the same
+	// transcript. The model is only consulted when memory is empty, which is
+	// exactly how a session behaved before any of this existed.
+	if renderOnly {
+		summaryMessage.AppendContent(appendixText)
+	}
+
+	var resp *fantasy.AgentResult
+	if !renderOnly {
+		resp, err = agent.Stream(genCtx, fantasy.AgentStreamCall{
+			Prompt:          summaryPromptText,
+			MaxOutputTokens: &checkpointTokens,
+			Messages:        aiMsgs,
+			Headers:         sessionHeaders(sessionID),
+			ProviderOptions: opts,
+			OnAuthRefresh:   onAuthRefresh,
+			ModelProvider: func() fantasy.LanguageModel {
+				return a.currentBuildOf(largeModel)
+			},
+			PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
+				prepared.Messages = options.Messages
+				if systemPromptPrefix != "" {
+					prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(systemPromptPrefix)}, prepared.Messages...)
 				}
+				return callContext, prepared, nil
+			},
+			OnReasoningDelta: func(id string, text string) error {
+				summaryMessage.AppendReasoningContent(text)
+				if note := progress.advance(0); note != "" {
+					a.publishSummarizing(sessionID, currentSession.Title, false, note)
+				}
+				return a.messages.Update(genCtx, summaryMessage)
+			},
+			OnReasoningEnd: func(id string, reasoning fantasy.ReasoningContent) error {
+				// Handle anthropic signature.
+				if anthropicData, ok := reasoning.ProviderMetadata["anthropic"]; ok {
+					if signature, ok := anthropicData.(*anthropic.ReasoningOptionMetadata); ok && signature.Signature != "" {
+						summaryMessage.AppendReasoningSignature(signature.Signature)
+					}
+				}
+				summaryMessage.FinishThinking()
+				return a.messages.Update(genCtx, summaryMessage)
+			},
+			OnTextDelta: func(id, text string) error {
+				summaryMessage.AppendContent(text)
+				if note := progress.advance(len(text)); note != "" {
+					a.publishSummarizing(sessionID, currentSession.Title, false, note)
+				}
+				return a.messages.Update(genCtx, summaryMessage)
+			},
+		})
+		if err != nil {
+			isCancelErr := errors.Is(err, context.Canceled)
+			if isCancelErr {
+				// User cancelled summarize we need to remove the summary message.
+				outcome = "Compaction canceled"
+				deleteErr := a.messages.Delete(ctx, summaryMessage.ID)
+				return compaction.Preview{}, deleteErr
 			}
-			summaryMessage.FinishThinking()
-			return a.messages.Update(genCtx, summaryMessage)
-		},
-		OnTextDelta: func(id, text string) error {
-			summaryMessage.AppendContent(text)
-			if note := progress.advance(len(text)); note != "" {
-				a.publishSummarizing(sessionID, currentSession.Title, false, note)
+			// Mark the summary message as finished with an error so the UI
+			// stops spinning.
+			summaryMessage.AddFinish(message.FinishReasonError, "Summarization Error", err.Error())
+			if updateErr := a.messages.Update(ctx, summaryMessage); updateErr != nil {
+				return compaction.Preview{}, updateErr
 			}
-			return a.messages.Update(genCtx, summaryMessage)
-		},
-	})
-	if err != nil {
-		isCancelErr := errors.Is(err, context.Canceled)
-		if isCancelErr {
-			// User cancelled summarize we need to remove the summary message.
-			outcome = "Compaction canceled"
-			deleteErr := a.messages.Delete(ctx, summaryMessage.ID)
-			return compaction.Preview{}, deleteErr
+			return compaction.Preview{}, err
 		}
-		// Mark the summary message as finished with an error so the UI
-		// stops spinning.
-		summaryMessage.AddFinish(message.FinishReasonError, "Summarization Error", err.Error())
-		if updateErr := a.messages.Update(ctx, summaryMessage); updateErr != nil {
-			return compaction.Preview{}, updateErr
+	}
+
+	// In the default mode the appendix follows the summary: it is appended
+	// after the model finishes so deterministic text can never interleave with
+	// streaming deltas, and it rides inside the checkpoint row, which is what
+	// makes recorded memory survive every later compaction.
+	if !renderOnly && appendixText != "" {
+		summaryMessage.AppendContent("\n\n" + appendixText)
+	}
+
+	// Which provenance the footer records depends on the mode: a checkpoint
+	// rendered from memory claims Rendered; one carrying memory beside a
+	// summary claims Observed. A reader can then tell what produced the text
+	// and what merely rides along with it.
+	renderedCount, observedCount := 0, 0
+	if appendixText != "" {
+		if renderOnly {
+			renderedCount = appendixCount
+		} else {
+			observedCount = appendixCount
 		}
-		return compaction.Preview{}, err
 	}
 
 	// Say what this checkpoint stands in for and where the displaced text
@@ -1646,21 +1727,9 @@ func (a *sessionAgent) runSummarize(ctx context.Context, sessionID, trigger, ins
 		KeptMessages:     cut.Kept,
 		KeptTokens:       cut.KeptTokens,
 		TranscriptPath:   transcriptPath,
+		Rendered:         renderedCount,
+		Observed:         observedCount,
 	}.Render())
-
-	var openrouterCost *float64
-	for _, step := range resp.Steps {
-		summaryMessage.PrismModelID, summaryMessage.PrismModelName = extractPrismModel(step.ProviderMetadata)
-		summaryMessage.PrismHypercreditSavings, summaryMessage.PrismDollarSavings = extractPrismSavings(step.ProviderMetadata)
-		stepCost := a.openrouterCost(step.ProviderMetadata)
-		if stepCost != nil {
-			newCost := *stepCost
-			if openrouterCost != nil {
-				newCost += *openrouterCost
-			}
-			openrouterCost = &newCost
-		}
-	}
 
 	summaryMessage.AddFinish(message.FinishReasonEndTurn, "", "")
 	err = a.messages.Update(genCtx, summaryMessage)
@@ -1668,10 +1737,31 @@ func (a *sessionAgent) runSummarize(ctx context.Context, sessionID, trigger, ins
 		return compaction.Preview{}, err
 	}
 
-	a.updateSessionUsage(largeModel, &currentSession, resp.TotalUsage, openrouterCost, false)
+	var (
+		openrouterCost *float64
+		usage          fantasy.Usage
+	)
+	// A rendered checkpoint never reached a model, so it has no steps to price
+	// and no usage to bill; the zero usage below is what marks it estimated.
+	if resp != nil {
+		for _, step := range resp.Steps {
+			summaryMessage.PrismModelID, summaryMessage.PrismModelName = extractPrismModel(step.ProviderMetadata)
+			summaryMessage.PrismHypercreditSavings, summaryMessage.PrismDollarSavings = extractPrismSavings(step.ProviderMetadata)
+			stepCost := a.openrouterCost(step.ProviderMetadata)
+			if stepCost != nil {
+				newCost := *stepCost
+				if openrouterCost != nil {
+					newCost += *openrouterCost
+				}
+				openrouterCost = &newCost
+			}
+		}
 
-	// Just in case, get just the last usage info.
-	usage := resp.Response.Usage
+		a.updateSessionUsage(largeModel, &currentSession, resp.TotalUsage, openrouterCost, false)
+
+		// Just in case, get just the last usage info.
+		usage = resp.Response.Usage
+	}
 	preview := compaction.Preview{
 		CheckpointID:     summaryMessage.ID,
 		Text:             summaryMessage.Content().Text,
@@ -2771,9 +2861,18 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 }
 
 // buildSummaryPrompt constructs the prompt text for session summarization.
-func buildSummaryPrompt(todos []session.Todo, instructions, previousCheckpoint, transcriptPath string) string {
+func buildSummaryPrompt(todos []session.Todo, instructions, previousCheckpoint, transcriptPath, durableMemory string) string {
 	var sb strings.Builder
 	sb.WriteString("Write the checkpoint for the conversation above.")
+
+	if durableMemory != "" {
+		sb.WriteString("\n\n<recorded_memory>\n")
+		sb.WriteString(durableMemory)
+		sb.WriteString("\n</recorded_memory>\n\n")
+		sb.WriteString("The entries above were recorded as the session happened and are attached to this checkpoint verbatim, so do not restate them. ")
+		sb.WriteString("Use them as the ground truth for decisions and constraints: narrate the current state of the work, the order it happened in, and what the conversation did that the recorded memory does not already carry. ")
+		sb.WriteString("If the conversation above contradicts a recorded entry, say so explicitly rather than quietly following either. ")
+	}
 
 	if instructions != "" {
 		sb.WriteString("\n\n<instructions>\n")

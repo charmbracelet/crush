@@ -851,6 +851,16 @@ func (a *AssistantMessageItem) compactionNote(text string, streaming bool) []str
 			"Kept the %d most recent (~%s) verbatim",
 			info.KeptMessages, formatTokenCount(info.KeptTokens)))
 	}
+	if info.Rendered > 0 {
+		lines = append(lines, fmt.Sprintf(
+			"Rendered from %d recorded memories, no model call",
+			info.Rendered))
+	}
+	if info.Observed > 0 {
+		lines = append(lines, fmt.Sprintf(
+			"Keeps %d recorded memories verbatim across compactions",
+			info.Observed))
+	}
 	if info.TranscriptPath != "" {
 		lines = append(lines, "Full transcript: "+info.TranscriptPath)
 	}

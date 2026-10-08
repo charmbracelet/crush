@@ -284,6 +284,8 @@ func TestAppendixAccompaniesTheSummary(t *testing.T) {
 		"the prose summary is still the checkpoint")
 	require.Contains(t, text, "rejected splitting the ledger",
 		"memory accompanies it verbatim")
+	require.Contains(t, text, "- [e-",
+		"rendered memory entries print their bracketed ids so recall can use them")
 	require.Contains(t, text, `observed="1"`)
 	require.NotContains(t, text, `rendered="`,
 		"a summarized checkpoint must not claim to have been rendered")

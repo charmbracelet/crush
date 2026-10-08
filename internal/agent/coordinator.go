@@ -950,6 +950,13 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		tools.NewWriteTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 	)
 
+	// Memory recall is only offered where memory exists. A session that records
+	// nothing has nothing to recall, and the tool's description would be prompt
+	// weight paid on every request for no capability.
+	if c.ledger != nil && c.observesMemory(isSubAgent) {
+		allTools = append(allTools, tools.NewRecallTool(c.ledger, c.messages))
+	}
+
 	// Question tool is interactive-only and not available to sub-agents.
 	if !isSubAgent && c.interactive {
 		allTools = append(allTools, tools.NewQuestionTool(c.questions))

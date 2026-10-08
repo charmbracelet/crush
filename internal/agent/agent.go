@@ -1590,7 +1590,11 @@ func (a *sessionAgent) runSummarize(ctx context.Context, sessionID, trigger, ins
 		compaction.EstimateAll(region),
 		largeModel.CatwalkCfg.DefaultMaxTokens,
 	)
-	appendixBudget := compaction.RenderBudget(appendixBase)
+	// Memory keeps a small share of the window that is actually usable rather
+	// than everything a checkpoint could have held, so it cannot crowd out the
+	// verbatim tail; the share is a percentage because the same session moves
+	// between models with very different windows.
+	appendixBudget := compaction.RenderBudget(compaction.MemoryBudget(usable, appendixBase))
 	appendixText, appendixCount := a.renderedCheckpoint(genCtx, sessionID, appendixBudget)
 
 	// render_only is the opt-in fast path: memory stands in for the summary
@@ -1805,6 +1809,17 @@ func (a *sessionAgent) runSummarize(ctx context.Context, sessionID, trigger, ins
 
 	outcome = fmt.Sprintf("Compacted %d messages, kept %d verbatim", len(region), cut.Kept)
 	a.eventSessionCompacted(sessionID, len(region), cut.Kept)
+
+	// Memory decays when a checkpoint lands rather than on every turn: this is
+	// the moment that knows the window, and previewing must never mutate what
+	// a later checkpoint would be built from.
+	if a.ledger != nil && appendixText != "" {
+		if retired, err := a.ledger.Decay(genCtx, sessionID, appendixBudget); err != nil {
+			slog.Warn("Memory decay failed", "session_id", sessionID, "error", err)
+		} else if retired > 0 {
+			slog.Debug("Memory decayed", "session_id", sessionID, "entries", retired)
+		}
+	}
 
 	// Release the active request before processing queued messages so that
 	// Run() does not see the session as busy.

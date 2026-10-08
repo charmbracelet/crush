@@ -4488,14 +4488,16 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 			// main  |
 			// ------| side
 			// editor|
-			// ----------
-			// help
+			// ------|
+			// help  |
 
 			var mainRect, sideRect image.Rectangle
 			layout.Horizontal(
 				layout.Len(appRect.Dx()-sidebarWidth),
 				layout.Fill(1),
 			).Split(appRect).Assign(&mainRect, &sideRect)
+			sideRect.Max.Y = helpRect.Max.Y - 1
+			uiLayout.status.Max.X = mainRect.Max.X
 			// Add padding left
 			sideRect.Min.X += 1
 			var editorRect image.Rectangle

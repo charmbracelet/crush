@@ -30,10 +30,14 @@ func TestAppendAssignsSeqAndRoundTrips(t *testing.T) {
 	svc, sessionID := newTestService(t)
 
 	stored, err := svc.Append(t.Context(), sessionID, []compaction.Entry{
-		{ID: "a", Kind: compaction.KindObservation, Relevance: compaction.RelevanceNotable,
-			Text: "Migration applied cleanly", Sources: []string{"m-1"}},
-		{ID: "b", Kind: compaction.KindReflection, Relevance: compaction.RelevanceDecision,
-			Text: "Ledger stays append-only so an earlier reading can be reconstructed"},
+		{
+			ID: "a", Kind: compaction.KindObservation, Relevance: compaction.RelevanceNotable,
+			Text: "Migration applied cleanly", Sources: []string{"m-1"},
+		},
+		{
+			ID: "b", Kind: compaction.KindReflection, Relevance: compaction.RelevanceDecision,
+			Text: "Ledger stays append-only so an earlier reading can be reconstructed",
+		},
 	})
 	require.NoError(t, err)
 	require.Len(t, stored, 2)
@@ -82,10 +86,14 @@ func TestLedgerSurvivesRetirementAndRenders(t *testing.T) {
 	svc, sessionID := newTestService(t)
 
 	_, err := svc.Append(t.Context(), sessionID, []compaction.Entry{
-		{ID: "a", Kind: compaction.KindObservation, Relevance: compaction.RelevanceContext,
-			Text: "Listed files"},
-		{ID: "b", Kind: compaction.KindObservation, Relevance: compaction.RelevanceDecision,
-			Text: "User rejected splitting the ledger across sessions"},
+		{
+			ID: "a", Kind: compaction.KindObservation, Relevance: compaction.RelevanceContext,
+			Text: "Listed files",
+		},
+		{
+			ID: "b", Kind: compaction.KindObservation, Relevance: compaction.RelevanceDecision,
+			Text: "User rejected splitting the ledger across sessions",
+		},
 		{ID: "c", Kind: compaction.KindDrop, Text: "superseded", Retires: []int{1}},
 	})
 	require.NoError(t, err)

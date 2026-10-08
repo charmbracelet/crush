@@ -42,6 +42,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/hooks"
+	"github.com/charmbracelet/crush/internal/ledger"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
@@ -220,6 +221,10 @@ type sessionAgent struct {
 	notify               pubsub.Publisher[notify.Notification]
 	compactionHooks      func(event string) CompactionHookRunner
 	runComplete          pubsub.Publisher[notify.RunComplete]
+	// ledger is the session memory store; nil when observation is off.
+	ledger           ledger.Service
+	observeMemory    bool
+	renderFromLedger bool
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, *activeCancel]
@@ -272,10 +277,20 @@ type SessionAgentOptions struct {
 	IsYolo               bool
 	Sessions             session.Service
 	Messages             message.Service
-	Cfg                  *config.ConfigStore
-	Tools                []fantasy.AgentTool
-	Notify               pubsub.Publisher[notify.Notification]
-	RunComplete          pubsub.Publisher[notify.RunComplete]
+	// Ledger persists session memory for the observer and the renderer. Nil
+	// leaves observation off entirely, which is the default: this feature is
+	// opt-in until it has measured well enough to trust.
+	Ledger ledger.Service
+	// ObserveMemory distills each completed turn into the ledger when true.
+	ObserveMemory bool
+	// RenderFromLedger lets a compaction build its checkpoint from the ledger
+	// instead of asking a model to summarize. It falls back to summarizing
+	// whenever the ledger is empty, so it is safe to enable on its own.
+	RenderFromLedger bool
+	Cfg              *config.ConfigStore
+	Tools            []fantasy.AgentTool
+	Notify           pubsub.Publisher[notify.Notification]
+	RunComplete      pubsub.Publisher[notify.RunComplete]
 
 	// CompactionHooks returns the runner for a compaction event, or nil when
 	// the user configured none for it. It is a function because each event has
@@ -302,6 +317,9 @@ func NewSessionAgent(
 		notify:               opts.Notify,
 		compactionHooks:      opts.CompactionHooks,
 		runComplete:          opts.RunComplete,
+		ledger:               opts.Ledger,
+		observeMemory:        opts.ObserveMemory,
+		renderFromLedger:     opts.RenderFromLedger,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:       csync.NewMap[string, *activeCancel](),
 		dispatchMu:           csync.NewMap[string, *sync.Mutex](),
@@ -594,6 +612,16 @@ func (a *sessionAgent) publishRunComplete(ctx context.Context, call SessionAgent
 		return
 	}
 	a.runComplete.PublishMustDeliver(ctx, pubsub.UpdatedEvent, complete)
+
+	// The turn is over and nothing waits on this, so memory is distilled here
+	// rather than on the OnComplete path above: that path is the coordinator
+	// coalescing retries, where observing would record an attempt the user is
+	// about to see replaced. A turn that errored is skipped for the same
+	// reason it is safe to skip one: its messages stay unobserved and the next
+	// turn picks them up.
+	if complete.Error == "" {
+		a.observeTurn(call.SessionID, complete)
+	}
 }
 
 // ValidateCall performs the cheap structural validation that
@@ -1562,69 +1590,86 @@ func (a *sessionAgent) runSummarize(ctx context.Context, sessionID, instructions
 		)
 	}
 
+	// A rendered checkpoint gets the room the summary would have had, so the
+	// two mechanisms are sized alike and switching between them cannot change
+	// how much of a session a checkpoint may occupy.
+	renderBudget := compaction.RenderBudget(checkpointTokens)
+
 	progress := &compactionProgress{
 		replaced: len(region),
 		goal:     checkpointTokens,
 		last:     time.Now().Add(-progressInterval), // the first delta always reports
 	}
 
-	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
-		Prompt:          summaryPromptText,
-		MaxOutputTokens: &checkpointTokens,
-		Messages:        aiMsgs,
-		Headers:         sessionHeaders(sessionID),
-		ProviderOptions: opts,
-		OnAuthRefresh:   onAuthRefresh,
-		ModelProvider: func() fantasy.LanguageModel {
-			return a.largeModel.Get().Model
-		},
-		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
-			prepared.Messages = options.Messages
-			if systemPromptPrefix != "" {
-				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(systemPromptPrefix)}, prepared.Messages...)
-			}
-			return callContext, prepared, nil
-		},
-		OnReasoningDelta: func(id string, text string) error {
-			summaryMessage.AppendReasoningContent(text)
-			if note := progress.advance(0); note != "" {
-				a.publishSummarizing(sessionID, currentSession.Title, false, note)
-			}
-			return a.messages.Update(genCtx, summaryMessage)
-		},
-		OnReasoningEnd: func(id string, reasoning fantasy.ReasoningContent) error {
-			// Handle anthropic signature.
-			if anthropicData, ok := reasoning.ProviderMetadata["anthropic"]; ok {
-				if signature, ok := anthropicData.(*anthropic.ReasoningOptionMetadata); ok && signature.Signature != "" {
-					summaryMessage.AppendReasoningSignature(signature.Signature)
+	// Recorded memory, when there is any, replaces the model call
+	// outright: a checkpoint rendered from decisions and constraints that were
+	// written down as they happened is both faster and less lossy than one a
+	// model reconstructs from the same transcript.
+	renderedText, renderedCount := a.renderedCheckpoint(genCtx, sessionID, renderBudget)
+	if renderedText != "" {
+		summaryMessage.AppendContent(renderedText)
+	}
+
+	var resp *fantasy.AgentResult
+	if renderedText == "" {
+		resp, err = agent.Stream(genCtx, fantasy.AgentStreamCall{
+			Prompt:          summaryPromptText,
+			MaxOutputTokens: &checkpointTokens,
+			Messages:        aiMsgs,
+			Headers:         sessionHeaders(sessionID),
+			ProviderOptions: opts,
+			OnAuthRefresh:   onAuthRefresh,
+			ModelProvider: func() fantasy.LanguageModel {
+				return a.largeModel.Get().Model
+			},
+			PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
+				prepared.Messages = options.Messages
+				if systemPromptPrefix != "" {
+					prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(systemPromptPrefix)}, prepared.Messages...)
 				}
+				return callContext, prepared, nil
+			},
+			OnReasoningDelta: func(id string, text string) error {
+				summaryMessage.AppendReasoningContent(text)
+				if note := progress.advance(0); note != "" {
+					a.publishSummarizing(sessionID, currentSession.Title, false, note)
+				}
+				return a.messages.Update(genCtx, summaryMessage)
+			},
+			OnReasoningEnd: func(id string, reasoning fantasy.ReasoningContent) error {
+				// Handle anthropic signature.
+				if anthropicData, ok := reasoning.ProviderMetadata["anthropic"]; ok {
+					if signature, ok := anthropicData.(*anthropic.ReasoningOptionMetadata); ok && signature.Signature != "" {
+						summaryMessage.AppendReasoningSignature(signature.Signature)
+					}
+				}
+				summaryMessage.FinishThinking()
+				return a.messages.Update(genCtx, summaryMessage)
+			},
+			OnTextDelta: func(id, text string) error {
+				summaryMessage.AppendContent(text)
+				if note := progress.advance(len(text)); note != "" {
+					a.publishSummarizing(sessionID, currentSession.Title, false, note)
+				}
+				return a.messages.Update(genCtx, summaryMessage)
+			},
+		})
+		if err != nil {
+			isCancelErr := errors.Is(err, context.Canceled)
+			if isCancelErr {
+				// User cancelled summarize we need to remove the summary message.
+				outcome = "Compaction canceled"
+				deleteErr := a.messages.Delete(ctx, summaryMessage.ID)
+				return compaction.Preview{}, deleteErr
 			}
-			summaryMessage.FinishThinking()
-			return a.messages.Update(genCtx, summaryMessage)
-		},
-		OnTextDelta: func(id, text string) error {
-			summaryMessage.AppendContent(text)
-			if note := progress.advance(len(text)); note != "" {
-				a.publishSummarizing(sessionID, currentSession.Title, false, note)
+			// Mark the summary message as finished with an error so the UI
+			// stops spinning.
+			summaryMessage.AddFinish(message.FinishReasonError, "Summarization Error", err.Error())
+			if updateErr := a.messages.Update(ctx, summaryMessage); updateErr != nil {
+				return compaction.Preview{}, updateErr
 			}
-			return a.messages.Update(genCtx, summaryMessage)
-		},
-	})
-	if err != nil {
-		isCancelErr := errors.Is(err, context.Canceled)
-		if isCancelErr {
-			// User cancelled summarize we need to remove the summary message.
-			outcome = "Compaction canceled"
-			deleteErr := a.messages.Delete(ctx, summaryMessage.ID)
-			return compaction.Preview{}, deleteErr
+			return compaction.Preview{}, err
 		}
-		// Mark the summary message as finished with an error so the UI
-		// stops spinning.
-		summaryMessage.AddFinish(message.FinishReasonError, "Summarization Error", err.Error())
-		if updateErr := a.messages.Update(ctx, summaryMessage); updateErr != nil {
-			return compaction.Preview{}, updateErr
-		}
-		return compaction.Preview{}, err
 	}
 
 	// Say what this checkpoint stands in for and where the displaced text
@@ -1636,6 +1681,7 @@ func (a *sessionAgent) runSummarize(ctx context.Context, sessionID, instructions
 		KeptMessages:     cut.Kept,
 		KeptTokens:       cut.KeptTokens,
 		TranscriptPath:   transcriptPath,
+		Rendered:         renderedCount,
 	}.Render())
 
 	summaryMessage.AddFinish(message.FinishReasonEndTurn, "", "")
@@ -1644,22 +1690,29 @@ func (a *sessionAgent) runSummarize(ctx context.Context, sessionID, instructions
 		return compaction.Preview{}, err
 	}
 
-	var openrouterCost *float64
-	for _, step := range resp.Steps {
-		stepCost := a.openrouterCost(step.ProviderMetadata)
-		if stepCost != nil {
-			newCost := *stepCost
-			if openrouterCost != nil {
-				newCost += *openrouterCost
+	var (
+		openrouterCost *float64
+		usage          fantasy.Usage
+	)
+	// A rendered checkpoint never reached a model, so it has no steps to price
+	// and no usage to bill; the zero usage below is what marks it estimated.
+	if resp != nil {
+		for _, step := range resp.Steps {
+			stepCost := a.openrouterCost(step.ProviderMetadata)
+			if stepCost != nil {
+				newCost := *stepCost
+				if openrouterCost != nil {
+					newCost += *openrouterCost
+				}
+				openrouterCost = &newCost
 			}
-			openrouterCost = &newCost
 		}
+
+		a.updateSessionUsage(largeModel, &currentSession, resp.TotalUsage, openrouterCost, false)
+
+		// Just in case, get just the last usage info.
+		usage = resp.Response.Usage
 	}
-
-	a.updateSessionUsage(largeModel, &currentSession, resp.TotalUsage, openrouterCost, false)
-
-	// Just in case, get just the last usage info.
-	usage := resp.Response.Usage
 	preview := compaction.Preview{
 		CheckpointID:     summaryMessage.ID,
 		Text:             summaryMessage.Content().Text,

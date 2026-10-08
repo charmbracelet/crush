@@ -20,6 +20,7 @@ import (
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/history"
+	"github.com/charmbracelet/crush/internal/ledger"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -38,7 +39,10 @@ type fakeEnv struct {
 	permissions permission.Service
 	history     history.Service
 	filetracker *filetracker.Service
-	lspClients  *csync.Map[string, *lsp.Client]
+	// ledger is the session memory store; tests that exercise the render
+	// path attach it to the agent under test.
+	ledger     ledger.Service
+	lspClients *csync.Map[string, *lsp.Client]
 }
 
 type builderFunc func(t *testing.T, r *vcr.Recorder) (fantasy.LanguageModel, error)
@@ -76,6 +80,7 @@ func testEnv(t *testing.T) fakeEnv {
 	q := db.New(conn)
 	sessions := session.NewService(q, conn)
 	messages := message.NewService(q)
+	memory := ledger.NewService(q)
 
 	permissions := permission.NewPermissionService(workingDir, true, []string{})
 	history := history.NewService(q, conn)
@@ -88,13 +93,14 @@ func testEnv(t *testing.T) fakeEnv {
 	})
 
 	return fakeEnv{
-		workingDir,
-		sessions,
-		messages,
-		permissions,
-		history,
-		&filetrackerService,
-		lspClients,
+		workingDir:  workingDir,
+		sessions:    sessions,
+		messages:    messages,
+		permissions: permissions,
+		history:     history,
+		filetracker: &filetrackerService,
+		ledger:      memory,
+		lspClients:  lspClients,
 	}
 }
 

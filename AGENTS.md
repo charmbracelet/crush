@@ -47,6 +47,7 @@ internal/
                                    pinentry (native passphrase dialogs via loopback pinentry)
   sshaskpass/                      Integrated SSH askpass: OpenSSH credential prompts and security key
                                    touches rendered as native dialogs and warnings
+  plugins/                         GitHub plugin installs, commit pinning, updates
   skills/                          Skill file discovery and loading
   shell/                           Bash command execution with background job support
   event/                           Telemetry (PostHog)
@@ -85,6 +86,16 @@ internal/
   `shell.RegisterBuiltin` and gated by a `ConfigBuilder` on the context —
   they are no-ops during normal bash tool execution. See
   `internal/shellconfig/`.
+- **Provider plugins**: `*.sh` files in `~/.config/crush/plugins/` or
+  `.crush/plugins/`, including the scripts one directory down, run at config
+  load as crushrc and are trusted code with the user's shell privileges.
+  `crush plugin install <author>/<repo>[@ref]` (`internal/plugins`,
+  `internal/cmd/plugin.go`) fetches the `*.sh` files at a GitHub repository's
+  root into `<plugins>/<author>__<repo>/` and records the resolved commit and
+  per-file digests in a hidden `.plugin.json` beside them. That lock is what
+  `crush plugin update` compares against and what makes an install of a
+  project's `.crush/plugins` committable. There is no prompt, signature check,
+  or load-time verification: trust is documented, not enforced.
 - **Persistence**: SQLite + sqlc. All queries live in `internal/db/sql/`,
   generated code in `internal/db/`. Migrations in `internal/db/migrations/`.
 - **Pub/sub**: `internal/pubsub` for decoupled communication between agent,

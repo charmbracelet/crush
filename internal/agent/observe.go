@@ -62,11 +62,15 @@ Prefer a few high-value entries over many. An empty array is a valid answer.`
 // Every failure here is a no-op by design: the messages stay unobserved and the
 // next turn picks them up. Memory that occasionally lags is a smaller problem
 // than a turn that fails because bookkeeping did.
-func (a *sessionAgent) observeTurn(sessionID string, complete notify.RunComplete) {
+func (a *sessionAgent) observeTurn(complete notify.RunComplete) {
 	if a.ledger == nil || !a.observeMemory || a.isSubAgent {
 		return
 	}
-	if complete.Cancelled || complete.SessionID == "" {
+	// The terminal payload names the session, and it is the only field
+	// guaranteed to be set: reading the session off the call instead would
+	// silently observe nothing when a caller left it empty.
+	sessionID := complete.SessionID
+	if complete.Cancelled || sessionID == "" {
 		return
 	}
 

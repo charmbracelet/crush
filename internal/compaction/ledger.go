@@ -145,6 +145,54 @@ type Rendered struct {
 	CoversThrough int
 }
 
+// Select splits the ledger into what a budget can hold and what it cannot.
+//
+// Decisions claim the budget first and give way last: they are the reason the
+// ledger exists, so they are shed only when they alone overflow the budget, and
+// then oldest-first, with the newest kept whatever it costs. The caller counts
+// those, because losing a decision is the one outcome this mechanism exists to
+// avoid and it should never happen quietly.
+func (l Ledger) Select(budget RenderBudget) (kept, dropped []Entry) {
+	var decisions, rest []Entry
+	for _, e := range l.active() {
+		if e.Relevance == RelevanceDecision {
+			decisions = append(decisions, e)
+		} else {
+			rest = append(rest, e)
+		}
+	}
+	sort.SliceStable(decisions, func(i, j int) bool { return decisions[i].Seq > decisions[j].Seq })
+	sort.SliceStable(rest, func(i, j int) bool {
+		if rest[i].Relevance != rest[j].Relevance {
+			return rest[i].Relevance > rest[j].Relevance
+		}
+		return rest[i].Seq > rest[j].Seq
+	})
+
+	var tokens int64
+	for i, e := range decisions {
+		cost := textTokens(e.Text)
+		if budget > 0 && tokens+cost > int64(budget) && i > 0 {
+			dropped = append(dropped, decisions[i:]...)
+			break
+		}
+		kept = append(kept, e)
+		tokens += cost
+	}
+	for _, e := range rest {
+		cost := textTokens(e.Text)
+		if budget > 0 && tokens+cost > int64(budget) {
+			dropped = append(dropped, e)
+			continue
+		}
+		kept = append(kept, e)
+		tokens += cost
+	}
+
+	sort.SliceStable(kept, func(i, j int) bool { return kept[i].Seq < kept[j].Seq })
+	return kept, dropped
+}
+
 // Render turns the ledger into checkpoint text without consulting a model.
 //
 // Selection is by weight then recency, but emission is chronological within
@@ -153,63 +201,37 @@ type Rendered struct {
 //
 // A budget of 0 means no limit, which is what preview wants: show everything
 // and let the caller decide if it is too much.
+//
+// Each line carries its entry id, because that id is the handle a reader needs
+// to ask for the evidence behind the claim. Memory that cannot be followed back
+// to its sources is a rumour the session has to take on faith.
 func (l Ledger) Render(budget RenderBudget) Rendered {
-	entries := l.active()
+	kept, dropped := l.Select(budget)
 
-	// Fill the budget from the facts that cost the most to lose, newest first
-	// among equals.
-	ranked := make([]Entry, len(entries))
-	copy(ranked, entries)
-	sort.SliceStable(ranked, func(i, j int) bool {
-		if ranked[i].Relevance != ranked[j].Relevance {
-			return ranked[i].Relevance > ranked[j].Relevance
-		}
-		return ranked[i].Seq > ranked[j].Seq
-	})
-
-	kept := make([]Entry, 0, len(ranked))
 	var tokens int64
-	for _, e := range ranked {
-		cost := textTokens(e.Text)
-		if budget > 0 && tokens+cost > int64(budget) {
-			// Decisions are the point of the exercise, so spend whatever the
-			// budget has left on them rather than dropping one to fit a
-			// lesser entry that happened to come first.
-			if e.Relevance == RelevanceDecision {
-				kept = append(kept, e)
-				tokens += cost
-			}
-			continue
-		}
-		kept = append(kept, e)
-		tokens += cost
+	droppedHigh := 0
+	for _, e := range kept {
+		tokens += textTokens(e.Text)
 	}
-
-	sort.SliceStable(kept, func(i, j int) bool { return kept[i].Seq < kept[j].Seq })
+	for _, e := range dropped {
+		if e.Relevance == RelevanceDecision {
+			droppedHigh++
+		}
+	}
 
 	var b strings.Builder
-	dropped, droppedHigh := 0, 0
-	for _, e := range entries {
-		if !containsSeq(kept, e.Seq) {
-			dropped++
-			if e.Relevance == RelevanceDecision {
-				droppedHigh++
-			}
-		}
-	}
-
 	section(&b, "Durable conclusions", kept, KindReflection)
 	section(&b, "What happened", kept, KindObservation)
-	if dropped > 0 {
+	if len(dropped) > 0 {
 		fmt.Fprintf(&b,
 			"%d lower-priority details were left out of this rendering to fit its "+
-				"budget; they remain in the full transcript.\n", dropped)
+				"budget; they remain in the full transcript.\n", len(dropped))
 	}
 
 	return Rendered{
 		Text:          strings.TrimRight(b.String(), "\n"),
 		Kept:          len(kept),
-		Dropped:       dropped,
+		Dropped:       len(dropped),
 		DroppedHigh:   droppedHigh,
 		Tokens:        tokens,
 		CoversThrough: l.CoversThrough,
@@ -220,7 +242,7 @@ func section(b *strings.Builder, title string, kept []Entry, kind EntryKind) {
 	var lines []string
 	for _, e := range kept {
 		if e.Kind == kind {
-			lines = append(lines, "- "+e.Text)
+			lines = append(lines, fmt.Sprintf("- [%s] %s", e.ID, e.Text))
 		}
 	}
 	if len(lines) == 0 {

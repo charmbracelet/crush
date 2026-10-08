@@ -11,6 +11,3 @@ SELECT COUNT(*) FROM compaction_ledger WHERE session_id = ?;
 
 -- name: MaxLedgerSeq :one
 SELECT CAST(COALESCE(MAX(seq), 0) AS INTEGER) FROM compaction_ledger WHERE session_id = ?;
-
--- name: DeleteLedgerEntriesForSession :execrows
-DELETE FROM compaction_ledger WHERE session_id = ?;

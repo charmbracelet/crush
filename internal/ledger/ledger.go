@@ -17,6 +17,11 @@ import (
 
 // Service persists the memory ledger for a session.
 type Service interface {
+	// Decay records what a bounded render could not keep, as retirement rows.
+	// It runs when a checkpoint lands, so the decision about what memory is
+	// still worth carrying is made by the same event that knows the window.
+	// It returns how many entries were retired.
+	Decay(ctx context.Context, sessionID string, budget compaction.RenderBudget) (int, error)
 	// Append records entries and returns the rows actually stored, in
 	// insertion order. Seq numbers are assigned here rather than by callers,
 	// so the ledger's only clock cannot fork under concurrent observers.
@@ -57,7 +62,7 @@ func (s *service) Append(ctx context.Context, sessionID string, entries []compac
 			// re-emits an entry while coverage is incomplete records it once,
 			// not once per pass. The id is the identity of the claim, and the
 			// same claim twice is one memory.
-			sum := sha256.Sum256([]byte(string(e.Kind) + "\x00" + e.Text))
+			sum := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%v", e.Kind, e.Text, e.Retires)))
 			e.ID = fmt.Sprintf("e-%x", sum[:8])
 		}
 		e.Seq = next
@@ -110,6 +115,59 @@ func (s *service) Ledger(ctx context.Context, sessionID string) (compaction.Ledg
 		return compaction.Ledger{}, fmt.Errorf("ledger watermark: %w", err)
 	}
 	return compaction.Ledger{Entries: entries, CoversThrough: int(watermark)}, nil
+}
+
+// markerKeep is how many coverage markers are retained. They exist to record
+// that a region was read, never to render, so the oldest are retired once there
+// are more than any later reader would consult.
+const markerKeep = 200
+
+func (s *service) Decay(ctx context.Context, sessionID string, budget compaction.RenderBudget) (int, error) {
+	current, err := s.Ledger(ctx, sessionID)
+	if err != nil {
+		return 0, err
+	}
+	_, dropped := current.Select(budget)
+
+	retire := make([]int, 0, len(dropped))
+	for _, e := range dropped {
+		// A decision that no longer fits stays in the ledger. It is the class
+		// of memory this exists to keep, and a later render - on a larger
+		// window, or after other entries are retired - can still carry it.
+		if e.Relevance == compaction.RelevanceDecision {
+			continue
+		}
+		retire = append(retire, e.Seq)
+	}
+	retire = append(retire, staleMarkers(current)...)
+	if len(retire) == 0 {
+		return 0, nil
+	}
+
+	if _, err := s.Append(ctx, sessionID, []compaction.Entry{{
+		Kind:    compaction.KindDrop,
+		Text:    "decayed: beyond the memory budget",
+		Retires: retire,
+	}}); err != nil {
+		return 0, err
+	}
+	return len(retire), nil
+}
+
+// staleMarkers lists coverage markers beyond the newest markerKeep, oldest
+// first. A marker is a drop that retires nothing; those that retire something
+// are real history and are never aged out here.
+func staleMarkers(l compaction.Ledger) []int {
+	var markers []int
+	for _, e := range l.Entries {
+		if e.Kind == compaction.KindDrop && len(e.Retires) == 0 {
+			markers = append(markers, e.Seq)
+		}
+	}
+	if len(markers) <= markerKeep {
+		return nil
+	}
+	return markers[:len(markers)-markerKeep]
 }
 
 func (s *service) Count(ctx context.Context, sessionID string) (int, error) {

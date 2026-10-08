@@ -436,3 +436,24 @@ func countTurns(msgs []message.Message) int {
 	}
 	return turns
 }
+
+// memorySharePercent is how much of the usable window recorded memory may
+// occupy beside a checkpoint's summary. It is a share rather than a fixed
+// number of tokens because the same session moves between models: a cap tuned
+// for a 200k window would swallow a 64k one whole.
+const memorySharePercent = 4
+
+// MemoryBudget is the room a checkpoint's memory appendix may occupy, given the
+// window that is actually usable and an upper bound from the checkpoint's own
+// allocation. A non-positive window or cap is treated as no constraint from
+// that side.
+func MemoryBudget(usableWindow, ceiling int64) int64 {
+	if usableWindow <= 0 {
+		return ceiling
+	}
+	share := usableWindow * memorySharePercent / 100
+	if ceiling > 0 && ceiling < share {
+		return ceiling
+	}
+	return share
+}

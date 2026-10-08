@@ -56,18 +56,6 @@ func (q *Queries) CreateLedgerEntry(ctx context.Context, arg CreateLedgerEntryPa
 	return result.RowsAffected()
 }
 
-const deleteLedgerEntriesForSession = `-- name: DeleteLedgerEntriesForSession :execrows
-DELETE FROM compaction_ledger WHERE session_id = ?
-`
-
-func (q *Queries) DeleteLedgerEntriesForSession(ctx context.Context, sessionID string) (int64, error) {
-	result, err := q.exec(ctx, q.deleteLedgerEntriesForSessionStmt, deleteLedgerEntriesForSession, sessionID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
-}
-
 const listLedgerEntries = `-- name: ListLedgerEntries :many
 SELECT id, session_id, seq, kind, text, relevance, sources, retires, created_at FROM compaction_ledger WHERE session_id = ? ORDER BY seq ASC
 `

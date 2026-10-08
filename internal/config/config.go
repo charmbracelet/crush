@@ -352,15 +352,18 @@ type CompactionOptions struct {
 	// keeps verbatim instead of folding into its checkpoint.
 	TailTokens int `json:"tail_tokens,omitempty" jsonschema:"description=Tokens of recent conversation a compaction keeps verbatim. When unset this is 15% of the model's context window,example=8000,example=40000"`
 	// ObserveMemory distills each completed turn into a session memory
-	// ledger using the small model. This is what lets a compaction render
-	// its checkpoint instead of rewriting the past, so it costs one cheap
-	// model call per turn with enough new material to be worth reading.
-	ObserveMemory *bool `json:"observe_memory,omitempty" jsonschema:"description=Record session memory at the end of each turn so compactions can render a checkpoint instead of summarizing one,default=false"`
-	// RenderFromLedger lets a compaction render its checkpoint from recorded
-	// memory, skipping the summarization model call entirely. It falls back
-	// to summarizing whenever memory is empty, so enabling it without
-	// observe_memory changes nothing.
-	RenderFromLedger *bool `json:"render_from_ledger,omitempty" jsonschema:"description=Build compaction checkpoints from recorded session memory instead of asking a model to summarize,default=false"`
+	// ledger using the small model. Recorded memory is attached to every
+	// checkpoint verbatim, so decisions and constraints persist across
+	// compactions instead of being re-summarized generation after
+	// generation. It costs one cheap model call per turn with enough new
+	// material to be worth reading.
+	ObserveMemory *bool `json:"observe_memory,omitempty" jsonschema:"description=Record session memory at the end of each turn; memory is kept verbatim beside every checkpoint, so decisions survive compaction,default=false"`
+	// RenderFromLedger replaces the summarization model call with a
+	// deterministic render of recorded memory when any exists, so a
+	// compaction is instant at the price of compressing nothing. The
+	// default keeps the summary and attaches memory beside it; this flag
+	// opts into memory standing in for the summary entirely.
+	RenderFromLedger *bool `json:"render_from_ledger,omitempty" jsonschema:"description=Build compaction checkpoints entirely from recorded session memory, replacing the summarization model call,default=false"`
 }
 
 type TUIOptions struct {

@@ -1567,7 +1567,26 @@ func (a *sessionAgent) runSummarize(ctx context.Context, sessionID, instructions
 		transcriptPath = path
 	}
 
-	summaryPromptText := buildSummaryPrompt(currentSession.Todos, instructions, previousCheckpoint, transcriptPath)
+	// Memory renders before the prompt is built so it can do two jobs at once:
+	// guide the summary, and take part of the room the summary would have had.
+	// Its budget is what a checkpoint over this region could occupy, so prose
+	// and memory share one allocation and carrying both cannot overflow the
+	// window either was sized for.
+	appendixBase, _ := compaction.CheckpointOutputBudget(
+		int64(largeModel.CatwalkCfg.ContextWindow),
+		compaction.EstimateAll(region),
+		largeModel.CatwalkCfg.DefaultMaxTokens,
+	)
+	appendixBudget := compaction.RenderBudget(appendixBase)
+	appendixText, appendixCount := a.renderedCheckpoint(genCtx, sessionID, appendixBudget)
+
+	// render_only is the opt-in fast path: memory stands in for the summary
+	// entirely. The default is the opposite division of labor - the model
+	// narrates the state of the work, memory carries the decisions that must
+	// not drift - and both modes read the same ledger through this one call.
+	renderOnly := a.renderFromLedger && appendixText != ""
+
+	summaryPromptText := buildSummaryPrompt(currentSession.Todos, instructions, previousCheckpoint, transcriptPath, appendixText)
 
 	// The checkpoint request has to fit the window it is summarizing into.
 	// Left unset, the provider applies its own default, and a nearly-full
@@ -1579,7 +1598,8 @@ func (a *sessionAgent) runSummarize(ctx context.Context, sessionID, instructions
 		compaction.EstimateAll(region)+
 			compaction.Tokens(string(summaryPrompt))+
 			compaction.Tokens(systemPromptPrefix)+
-			compaction.Tokens(summaryPromptText),
+			compaction.Tokens(summaryPromptText)+
+			compaction.Tokens(appendixText),
 		largeModel.CatwalkCfg.DefaultMaxTokens,
 	)
 	if tight {
@@ -1590,28 +1610,23 @@ func (a *sessionAgent) runSummarize(ctx context.Context, sessionID, instructions
 		)
 	}
 
-	// A rendered checkpoint gets the room the summary would have had, so the
-	// two mechanisms are sized alike and switching between them cannot change
-	// how much of a session a checkpoint may occupy.
-	renderBudget := compaction.RenderBudget(checkpointTokens)
-
 	progress := &compactionProgress{
 		replaced: len(region),
 		goal:     checkpointTokens,
 		last:     time.Now().Add(-progressInterval), // the first delta always reports
 	}
 
-	// Recorded memory, when there is any, replaces the model call
-	// outright: a checkpoint rendered from decisions and constraints that were
-	// written down as they happened is both faster and less lossy than one a
-	// model reconstructs from the same transcript.
-	renderedText, renderedCount := a.renderedCheckpoint(genCtx, sessionID, renderBudget)
-	if renderedText != "" {
-		summaryMessage.AppendContent(renderedText)
+	// On the fast path memory replaces the model call outright: a checkpoint
+	// rendered from decisions and constraints recorded as they happened is both
+	// faster and less lossy than one a model reconstructs from the same
+	// transcript. The model is only consulted when memory is empty, which is
+	// exactly how a session behaved before any of this existed.
+	if renderOnly {
+		summaryMessage.AppendContent(appendixText)
 	}
 
 	var resp *fantasy.AgentResult
-	if renderedText == "" {
+	if !renderOnly {
 		resp, err = agent.Stream(genCtx, fantasy.AgentStreamCall{
 			Prompt:          summaryPromptText,
 			MaxOutputTokens: &checkpointTokens,
@@ -1672,6 +1687,27 @@ func (a *sessionAgent) runSummarize(ctx context.Context, sessionID, instructions
 		}
 	}
 
+	// In the default mode the appendix follows the summary: it is appended
+	// after the model finishes so deterministic text can never interleave with
+	// streaming deltas, and it rides inside the checkpoint row, which is what
+	// makes recorded memory survive every later compaction.
+	if !renderOnly && appendixText != "" {
+		summaryMessage.AppendContent("\n\n" + appendixText)
+	}
+
+	// Which provenance the footer records depends on the mode: a checkpoint
+	// rendered from memory claims Rendered; one carrying memory beside a
+	// summary claims Observed. A reader can then tell what produced the text
+	// and what merely rides along with it.
+	renderedCount, observedCount := 0, 0
+	if appendixText != "" {
+		if renderOnly {
+			renderedCount = appendixCount
+		} else {
+			observedCount = appendixCount
+		}
+	}
+
 	// Say what this checkpoint stands in for and where the displaced text
 	// went. The footer is generated rather than model-written so the numbers
 	// and the path can be trusted.
@@ -1682,6 +1718,7 @@ func (a *sessionAgent) runSummarize(ctx context.Context, sessionID, instructions
 		KeptTokens:       cut.KeptTokens,
 		TranscriptPath:   transcriptPath,
 		Rendered:         renderedCount,
+		Observed:         observedCount,
 	}.Render())
 
 	summaryMessage.AddFinish(message.FinishReasonEndTurn, "", "")
@@ -2837,9 +2874,18 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 }
 
 // buildSummaryPrompt constructs the prompt text for session summarization.
-func buildSummaryPrompt(todos []session.Todo, instructions, previousCheckpoint, transcriptPath string) string {
+func buildSummaryPrompt(todos []session.Todo, instructions, previousCheckpoint, transcriptPath, durableMemory string) string {
 	var sb strings.Builder
 	sb.WriteString("Write the checkpoint for the conversation above.")
+
+	if durableMemory != "" {
+		sb.WriteString("\n\n<recorded_memory>\n")
+		sb.WriteString(durableMemory)
+		sb.WriteString("\n</recorded_memory>\n\n")
+		sb.WriteString("The entries above were recorded as the session happened and are attached to this checkpoint verbatim, so do not restate them. ")
+		sb.WriteString("Use them as the ground truth for decisions and constraints: narrate the current state of the work, the order it happened in, and what the conversation did that the recorded memory does not already carry. ")
+		sb.WriteString("If the conversation above contradicts a recorded entry, say so explicitly rather than quietly following either. ")
+	}
 
 	if instructions != "" {
 		sb.WriteString("\n\n<instructions>\n")

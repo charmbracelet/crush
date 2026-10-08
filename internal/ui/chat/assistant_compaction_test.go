@@ -255,3 +255,18 @@ func TestCompactionCardStaysQuietAboutRenderingWhenSummarized(t *testing.T) {
 	require.Contains(t, out, "Replaced 40 earlier messages")
 	require.NotContains(t, out, "Rendered from")
 }
+
+// TestCompactionCardSaysWhatMemoryItKeeps: in the default mode the card must
+// say the checkpoint carries recorded memory across compactions, which is the
+// promise the appendix exists to make.
+func TestCompactionCardSaysWhatMemoryItKeeps(t *testing.T) {
+	sty := styles.CharmtonePantera()
+	item := footedItem(t, &sty, `<compaction_info replaced_messages="40" replaced_tokens="90000" kept_messages="6" kept_tokens="8000" observed="9">`+"\n"+
+		"This checkpoint replaces 40 earlier messages (~90000 tokens).\n"+
+		"</compaction_info>")
+
+	out := ansi.Strip(item.RawRender(76))
+
+	require.Contains(t, out, "Keeps 9 recorded memories verbatim across compactions")
+	require.NotContains(t, out, "Rendered from", "a summary carries memory, it was not built from it")
+}

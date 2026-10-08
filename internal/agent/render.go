@@ -7,14 +7,16 @@ import (
 	"github.com/charmbracelet/crush/internal/compaction"
 )
 
-// renderedCheckpoint builds a checkpoint from recorded session memory.
+// renderedCheckpoint renders the session's recorded memory within a budget.
 //
-// It returns "" when there is nothing to render from, which is the caller's
-// signal to summarize with a model instead. That fallback is the whole reason
-// this can be enabled without risk: a session that has never been observed, or
-// one whose memory was retired, behaves exactly as it did before.
+// It returns "" when there is nothing to render from. The caller decides what
+// the text is for: appended verbatim beside a model-written summary, which is
+// the default, or standing in for the summary entirely when render_from_ledger
+// is set. Both uses share this function because both need the same two
+// properties - bounded size, and the entries that cost the most to lose kept
+// first.
 func (a *sessionAgent) renderedCheckpoint(ctx context.Context, sessionID string, budget compaction.RenderBudget) (string, int) {
-	if a.ledger == nil || !a.renderFromLedger {
+	if a.ledger == nil {
 		return "", 0
 	}
 

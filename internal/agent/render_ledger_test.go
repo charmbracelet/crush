@@ -239,3 +239,50 @@ func TestObserverDropsUnknownSources(t *testing.T) {
 	require.Equal(t, compaction.KindDrop, led.Entries[1].Kind)
 	require.NotEmpty(t, led.Entries[1].Sources, "the batch is marked covered")
 }
+
+// TestAppendixAccompaniesTheSummary is the default mode: the model still writes
+// the narrative, and recorded memory rides along with it instead of replacing
+// it. That split is what lets memory persist across compactions without
+// discarding the summarizer's ability to compress what was never observed.
+func TestAppendixAccompaniesTheSummary(t *testing.T) {
+	env := testEnv(t)
+	model := &recordingModel{text: "the session built a ledger and then used it"}
+	sa := testSessionAgent(env, model, nil, "test prompt").(*sessionAgent)
+	sa.ledger = env.ledger
+	// Observation on, fast path off: the shape a session reaches with only
+	// observe_memory set.
+	sa.renderFromLedger = false
+	ctx := t.Context()
+
+	sess, err := env.sessions.Create(ctx, "test")
+	require.NoError(t, err)
+	seedSizedTurns(t, env, sess.ID, 4, 3_000)
+
+	_, err = env.ledger.Append(ctx, sess.ID, []compaction.Entry{
+		{Kind: compaction.KindObservation, Relevance: compaction.RelevanceDecision,
+			Text: "User rejected splitting the ledger across sessions"},
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, sa.Summarize(ctx, sess.ID, "", fantasy.ProviderOptions{}, nil))
+
+	require.NotEmpty(t, model.calls, "the default keeps the summarizing model")
+	require.Contains(t, model.calls[0], "<recorded_memory>",
+		"memory guides the summary rather than only decorating it")
+	require.Contains(t, model.calls[0], "do not restate them",
+		"the prompt must divide the labor, or the appendix is paid for twice")
+
+	updated, err := env.sessions.Get(ctx, sess.ID)
+	require.NoError(t, err)
+	view, err := sa.getSessionMessages(ctx, updated)
+	require.NoError(t, err)
+	text := view[0].Content().Text
+
+	require.Contains(t, text, "the session built a ledger and then used it",
+		"the prose summary is still the checkpoint")
+	require.Contains(t, text, "rejected splitting the ledger",
+		"memory accompanies it verbatim")
+	require.Contains(t, text, `observed="1"`)
+	require.NotContains(t, text, `rendered="`,
+		"a summarized checkpoint must not claim to have been rendered")
+}

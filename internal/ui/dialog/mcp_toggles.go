@@ -167,10 +167,10 @@ func (m *MCPToggles) HandleMsg(msg tea.Msg) Action {
 				m.items[m.cursor].ConfigDisabled = newState
 			} else {
 				m.items[m.cursor].Disabled = newState
-				// A config-disabled server enabled locally must be started
-				// at runtime; surface that immediately instead of waiting
-				// for the connection state event.
-				if item.ConfigDisabled && !newState {
+				// A server enabled locally is started at runtime; surface
+				// that immediately instead of waiting for the connection
+				// state event.
+				if !newState {
 					m.items[m.cursor].EnabledOverride = true
 					m.items[m.cursor].Status = "starting"
 				}
@@ -314,6 +314,11 @@ func (m *MCPToggles) itemStatus(item MCPToggleItem) string {
 	if m.scope == MCPToggleScopeGlobal {
 		if item.ConfigDisabled {
 			return "disabled"
+		}
+		// The live connection reflects the local override, which takes
+		// precedence; the global setting itself is still enabled.
+		if item.localDisabled() {
+			return "enabled"
 		}
 		return item.Status
 	}

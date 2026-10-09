@@ -1145,6 +1145,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.updateSessionMessage(msg.Payload))
 		case pubsub.DeletedEvent:
 			m.chat.RemoveMessage(msg.Payload.ID)
+			m.chat.RemoveMessage(chat.AssistantInfoID(msg.Payload.ID))
 		}
 		// start the spinner if there is a new message
 		if hasInProgressTodo(m.session.Todos) && m.isAgentBusy() && !m.todoIsSpinning {
@@ -1240,6 +1241,14 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.openCheckpointHandoff()
 	case discardPreviewMsg:
 		m.pendingPreview = nil
+		// Every decision - keep, discard, whatever the path - lands here, so
+		// the reload does too: the feed then reflects the session as it is,
+		// not as it was while a staged checkpoint was still a row. Skipping
+		// this left the viewport scrolled past content that had just been
+		// deleted, which read as an empty page.
+		if m.session != nil {
+			cmds = append(cmds, m.loadSession(m.session.ID))
+		}
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		// Suppress the chat's full-height scan during the resize so a drag
@@ -2358,12 +2367,12 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.dialog.CloseFrontDialog()
 	case dialog.ActionAcceptPreview:
 		if cmd := m.acceptCheckpoint(msg.Preview); cmd != nil {
-			cmds = append(cmds, cmd, m.loadSession(msg.SessionID))
+			cmds = append(cmds, cmd)
 		}
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionDiscardPreview:
 		if cmd := m.discardCheckpoint(msg.CheckpointID); cmd != nil {
-			cmds = append(cmds, cmd, m.loadSession(msg.SessionID))
+			cmds = append(cmds, cmd)
 		}
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionRestoreSummarize:

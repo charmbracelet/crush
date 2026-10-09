@@ -305,31 +305,29 @@ func TestModeRowIsFilterable(t *testing.T) {
 	}
 }
 
-// TestAxisRowsCarryNoSubtext: the two axis rows are single-line settings like
-// every other system command. They were the only entries in the list with a
-// line of prose under them, which made them read as a different kind of thing.
+// TestNoSystemCommandCarriesSubtext is the palette convention: every system
+// command is a single line. The approval and mode rows were the first entries
+// to break it, and the compaction rows were the last, so the rule is asserted
+// over the whole list rather than row by row - a new row with a line of prose
+// under it should fail here rather than set the precedent again.
 //
-// This is deliberately narrow. A rule that no system command may carry a
-// description would be the stronger statement, but it is not true of the
-// merged build, where the compaction row brings one of its own.
-func TestAxisRowsCarryNoSubtext(t *testing.T) {
+// The custom-commands tab is a different list and keeps its descriptions: those
+// come from skills and say what a skill does, which the row cannot show.
+func TestNoSystemCommandCarriesSubtext(t *testing.T) {
 	t.Parallel()
 
 	dia, _ := newApprovalPalette(t, permission.LevelAuto)
 
-	for _, id := range []string{approvalCommandID, purposeCommandID} {
-		var found bool
-		for _, item := range dia.list.FilteredItems() {
-			cmd, ok := item.(*CommandItem)
-			if !ok || cmd.id != id {
-				continue
-			}
-			found = true
-			require.Empty(t, cmd.description,
-				"%s must stay a single-line row", id)
-			require.Zero(t, strings.Count(cmd.Render(62), "\n"),
-				"%s must render on one line", id)
+	seen := 0
+	for _, item := range dia.list.FilteredItems() {
+		cmd, ok := item.(*CommandItem)
+		if !ok {
+			continue
 		}
-		require.True(t, found, "%s must be in the palette", id)
+		seen++
+		require.Empty(t, cmd.description, "%s must stay a single-line row", cmd.id)
+		require.Zero(t, strings.Count(cmd.Render(62), "\n"),
+			"%s must render on one line", cmd.id)
 	}
+	require.Positive(t, seen, "the palette must actually have rows to check")
 }

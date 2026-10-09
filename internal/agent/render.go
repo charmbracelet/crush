@@ -9,12 +9,10 @@ import (
 
 // renderedCheckpoint renders the session's recorded memory within a budget.
 //
-// It returns "" when there is nothing to render from. The caller decides what
-// the text is for: appended verbatim beside a model-written summary, which is
-// the default, or standing in for the summary entirely when render_from_ledger
-// is set. Both uses share this function because both need the same two
-// properties - bounded size, and the entries that cost the most to lose kept
-// first.
+// It returns "" when there is nothing to render from. The text is appended
+// verbatim beside the summary a model writes, and needs the same two
+// properties that make it worth rendering rather than summarizing: a bounded
+// size, and the entries that cost the most to lose kept first.
 func (a *sessionAgent) renderedCheckpoint(ctx context.Context, sessionID string, budget compaction.RenderBudget) (string, int) {
 	if a.ledger == nil {
 		return "", 0

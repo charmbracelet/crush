@@ -147,4 +147,3 @@ func TestDecayRetiresLowRelevanceEntriesBeyondBudget(t *testing.T) {
 	require.NotContains(t, rendered.Text, "Listed files")
 	require.NotContains(t, rendered.Text, "Applied migration 20261007")
 }
-

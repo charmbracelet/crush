@@ -232,9 +232,8 @@ type sessionAgent struct {
 	runComplete          pubsub.Publisher[notify.RunComplete]
 	hooks                *hooks.Runner
 	// ledger is the session memory store; nil when observation is off.
-	ledger           ledger.Service
-	observeMemory    bool
-	renderFromLedger bool
+	ledger        ledger.Service
+	observeMemory bool
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, *activeCancel]
@@ -297,14 +296,10 @@ type SessionAgentOptions struct {
 	Ledger ledger.Service
 	// ObserveMemory distills each completed turn into the ledger when true.
 	ObserveMemory bool
-	// RenderFromLedger lets a compaction build its checkpoint from the ledger
-	// instead of asking a model to summarize. It falls back to summarizing
-	// whenever the ledger is empty, so it is safe to enable on its own.
-	RenderFromLedger bool
-	Cfg              *config.ConfigStore
-	Tools            []fantasy.AgentTool
-	Notify           pubsub.Publisher[notify.Notification]
-	RunComplete      pubsub.Publisher[notify.RunComplete]
+	Cfg           *config.ConfigStore
+	Tools         []fantasy.AgentTool
+	Notify        pubsub.Publisher[notify.Notification]
+	RunComplete   pubsub.Publisher[notify.RunComplete]
 	// Hooks runs lifecycle hooks for turns and compaction. Nil runs none.
 	Hooks *hooks.Runner
 }
@@ -328,7 +323,6 @@ func NewSessionAgent(
 		hooks:                opts.Hooks,
 		ledger:               opts.Ledger,
 		observeMemory:        opts.ObserveMemory,
-		renderFromLedger:     opts.RenderFromLedger,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		notes:                csync.NewMap[string, []string](),
 		activeRequests:       csync.NewMap[string, *activeCancel](),
@@ -1597,12 +1591,11 @@ func (a *sessionAgent) runSummarize(ctx context.Context, sessionID, trigger, ins
 	appendixBudget := compaction.RenderBudget(compaction.MemoryBudget(usable, appendixBase))
 	appendixText, appendixCount := a.renderedCheckpoint(genCtx, sessionID, appendixBudget)
 
-	// render_only is the opt-in fast path: memory stands in for the summary
-	// entirely. The default is the opposite division of labor - the model
-	// narrates the state of the work, memory carries the decisions that must
-	// not drift - and both modes read the same ledger through this one call.
-	renderOnly := a.renderFromLedger && appendixText != ""
-
+	// The division of labour is fixed: the model narrates the state of the
+	// work and compresses what was never observed, memory carries the decisions
+	// that must not drift. Neither can do the other's job - a summary cannot
+	// recover a rationale that was never recorded, and a render cannot compress
+	// what it never saw - so there is no mode to choose between.
 	summaryPromptText := buildSummaryPrompt(currentSession.Todos, instructions, previousCheckpoint, transcriptPath, appendixText)
 
 	// The checkpoint request has to fit the window it is summarizing into.
@@ -1633,96 +1626,71 @@ func (a *sessionAgent) runSummarize(ctx context.Context, sessionID, trigger, ins
 		last:     time.Now().Add(-progressInterval), // the first delta always reports
 	}
 
-	// On the fast path memory replaces the model call outright: a checkpoint
-	// rendered from decisions and constraints recorded as they happened is both
-	// faster and less lossy than one a model reconstructs from the same
-	// transcript. The model is only consulted when memory is empty, which is
-	// exactly how a session behaved before any of this existed.
-	if renderOnly {
-		summaryMessage.AppendContent(appendixText)
-	}
-
-	var resp *fantasy.AgentResult
-	if !renderOnly {
-		resp, err = agent.Stream(genCtx, fantasy.AgentStreamCall{
-			Prompt:          summaryPromptText,
-			MaxOutputTokens: &checkpointTokens,
-			Messages:        aiMsgs,
-			Headers:         sessionHeaders(sessionID),
-			ProviderOptions: opts,
-			OnAuthRefresh:   onAuthRefresh,
-			ModelProvider: func() fantasy.LanguageModel {
-				return a.currentBuildOf(largeModel)
-			},
-			PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
-				prepared.Messages = options.Messages
-				if systemPromptPrefix != "" {
-					prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(systemPromptPrefix)}, prepared.Messages...)
-				}
-				return callContext, prepared, nil
-			},
-			OnReasoningDelta: func(id string, text string) error {
-				summaryMessage.AppendReasoningContent(text)
-				if note := progress.advance(0); note != "" {
-					a.publishSummarizing(sessionID, currentSession.Title, false, note)
-				}
-				return a.messages.Update(genCtx, summaryMessage)
-			},
-			OnReasoningEnd: func(id string, reasoning fantasy.ReasoningContent) error {
-				// Handle anthropic signature.
-				if anthropicData, ok := reasoning.ProviderMetadata["anthropic"]; ok {
-					if signature, ok := anthropicData.(*anthropic.ReasoningOptionMetadata); ok && signature.Signature != "" {
-						summaryMessage.AppendReasoningSignature(signature.Signature)
-					}
-				}
-				summaryMessage.FinishThinking()
-				return a.messages.Update(genCtx, summaryMessage)
-			},
-			OnTextDelta: func(id, text string) error {
-				summaryMessage.AppendContent(text)
-				if note := progress.advance(len(text)); note != "" {
-					a.publishSummarizing(sessionID, currentSession.Title, false, note)
-				}
-				return a.messages.Update(genCtx, summaryMessage)
-			},
-		})
-		if err != nil {
-			isCancelErr := errors.Is(err, context.Canceled)
-			if isCancelErr {
-				// User cancelled summarize we need to remove the summary message.
-				outcome = "Compaction canceled"
-				deleteErr := a.messages.Delete(ctx, summaryMessage.ID)
-				return compaction.Preview{}, deleteErr
+	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
+		Prompt:          summaryPromptText,
+		MaxOutputTokens: &checkpointTokens,
+		Messages:        aiMsgs,
+		Headers:         sessionHeaders(sessionID),
+		ProviderOptions: opts,
+		OnAuthRefresh:   onAuthRefresh,
+		ModelProvider: func() fantasy.LanguageModel {
+			return a.currentBuildOf(largeModel)
+		},
+		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
+			prepared.Messages = options.Messages
+			if systemPromptPrefix != "" {
+				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(systemPromptPrefix)}, prepared.Messages...)
 			}
-			// Mark the summary message as finished with an error so the UI
-			// stops spinning.
-			summaryMessage.AddFinish(message.FinishReasonError, "Summarization Error", err.Error())
-			if updateErr := a.messages.Update(ctx, summaryMessage); updateErr != nil {
-				return compaction.Preview{}, updateErr
+			return callContext, prepared, nil
+		},
+		OnReasoningDelta: func(id string, text string) error {
+			summaryMessage.AppendReasoningContent(text)
+			if note := progress.advance(0); note != "" {
+				a.publishSummarizing(sessionID, currentSession.Title, false, note)
 			}
-			return compaction.Preview{}, err
+			return a.messages.Update(genCtx, summaryMessage)
+		},
+		OnReasoningEnd: func(id string, reasoning fantasy.ReasoningContent) error {
+			// Handle anthropic signature.
+			if anthropicData, ok := reasoning.ProviderMetadata["anthropic"]; ok {
+				if signature, ok := anthropicData.(*anthropic.ReasoningOptionMetadata); ok && signature.Signature != "" {
+					summaryMessage.AppendReasoningSignature(signature.Signature)
+				}
+			}
+			summaryMessage.FinishThinking()
+			return a.messages.Update(genCtx, summaryMessage)
+		},
+		OnTextDelta: func(id, text string) error {
+			summaryMessage.AppendContent(text)
+			if note := progress.advance(len(text)); note != "" {
+				a.publishSummarizing(sessionID, currentSession.Title, false, note)
+			}
+			return a.messages.Update(genCtx, summaryMessage)
+		},
+	})
+	if err != nil {
+		isCancelErr := errors.Is(err, context.Canceled)
+		if isCancelErr {
+			// User cancelled summarize we need to remove the summary message.
+			outcome = "Compaction canceled"
+			deleteErr := a.messages.Delete(ctx, summaryMessage.ID)
+			return compaction.Preview{}, deleteErr
 		}
+		// Mark the summary message as finished with an error so the UI
+		// stops spinning.
+		summaryMessage.AddFinish(message.FinishReasonError, "Summarization Error", err.Error())
+		if updateErr := a.messages.Update(ctx, summaryMessage); updateErr != nil {
+			return compaction.Preview{}, updateErr
+		}
+		return compaction.Preview{}, err
 	}
 
 	// In the default mode the appendix follows the summary: it is appended
 	// after the model finishes so deterministic text can never interleave with
 	// streaming deltas, and it rides inside the checkpoint row, which is what
 	// makes recorded memory survive every later compaction.
-	if !renderOnly && appendixText != "" {
-		summaryMessage.AppendContent("\n\n" + appendixText)
-	}
-
-	// Which provenance the footer records depends on the mode: a checkpoint
-	// rendered from memory claims Rendered; one carrying memory beside a
-	// summary claims Observed. A reader can then tell what produced the text
-	// and what merely rides along with it.
-	renderedCount, observedCount := 0, 0
 	if appendixText != "" {
-		if renderOnly {
-			renderedCount = appendixCount
-		} else {
-			observedCount = appendixCount
-		}
+		summaryMessage.AppendContent("\n\n" + appendixText)
 	}
 
 	// Say what this checkpoint stands in for and where the displaced text
@@ -1734,8 +1702,7 @@ func (a *sessionAgent) runSummarize(ctx context.Context, sessionID, trigger, ins
 		KeptMessages:     cut.Kept,
 		KeptTokens:       cut.KeptTokens,
 		TranscriptPath:   transcriptPath,
-		Rendered:         renderedCount,
-		Observed:         observedCount,
+		Observed:         appendixCount,
 	}.Render())
 
 	summaryMessage.AddFinish(message.FinishReasonEndTurn, "", "")

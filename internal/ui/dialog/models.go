@@ -391,8 +391,20 @@ func (m *Models) setProviderItems() error {
 
 			addedProviders[id] = true
 
+			// A nameless model is a config override (a reasoning effort,
+			// say) for one the catalog has not listed yet: nothing to show.
+			models := slices.DeleteFunc(slices.Clone(p.Models), func(model catwalk.Model) bool {
+				return model.Name == ""
+			})
+
 			group := NewModelGroup(t, name, !p.NeedsSignIn())
-			for _, model := range p.Models {
+			if len(models) == 0 && p.UsesOAuth() {
+				// The catalog sits behind the login, which may also be
+				// stale or have failed to list models. The empty model ID
+				// marks the sign-in hand-off, as for ChatGPT and Grok.
+				group.AppendItems(NewModelItem(t, provider, catwalk.Model{Name: "Sign in to view the models"}, m.modelType, false))
+			}
+			for _, model := range models {
 				item := NewModelItem(t, provider, model, m.modelType, false)
 				group.AppendItems(item)
 				itemsMap[item.ID()] = item

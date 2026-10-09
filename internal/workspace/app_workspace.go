@@ -236,6 +236,9 @@ func (w *AppWorkspace) AgentSetMain(agentID string) error {
 	if w.app.AgentCoordinator == nil {
 		return errors.New("agent coordinator not initialized")
 	}
+	if w.app.AgentCoordinator.IsBusy() {
+		return errors.New("agent is busy with a run")
+	}
 	return w.app.AgentCoordinator.SetMainAgent(agentID)
 }
 

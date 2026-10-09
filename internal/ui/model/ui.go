@@ -2221,6 +2221,17 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 
 	// Command dialog messages.
+	case dialog.ActionCyclePermissionLevel:
+		level := m.cyclePermissionLevel()
+		cmds = append(cmds, levelBanner(level))
+		// The palette stays open and only its approval row redraws, so the user
+		// watches the highlight move to the next option. Closing here would
+		// leave them to take the change on faith.
+		if dia := m.dialog.Dialog(dialog.CommandsID); dia != nil {
+			if commands, ok := dia.(*dialog.Commands); ok {
+				commands.RefreshApprovalMode(level)
+			}
+		}
 	case dialog.ActionSetPermissionLevel:
 		m.setPermissionLevel(msg.Level)
 		cmds = append(cmds, levelBanner(msg.Level))

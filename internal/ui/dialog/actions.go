@@ -53,6 +53,11 @@ type (
 	ActionToggleThinking    struct{}
 	ActionTogglePills       struct{}
 	ActionExternalEditor    struct{}
+	// ActionCyclePermissionLevel advances the permission axis one step, the
+	// same step Ctrl+Y takes. The palette keeps showing the row afterwards so
+	// the user can watch the highlight move.
+	ActionCyclePermissionLevel struct{}
+
 	// ActionSetPermissionLevel moves the permission axis to one level. It
 	// names a level instead of toggling: with ask, auto, and bypass sharing
 	// an axis, "toggle" no longer says where you land.

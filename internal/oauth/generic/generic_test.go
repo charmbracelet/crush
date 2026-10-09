@@ -360,10 +360,12 @@ func TestBrowserFlowCompleteWithCode(t *testing.T) {
 	require.Equal(t, "fresh", token.AccessToken)
 }
 
+// The device tests run in parallel, so the poll interval is shortened once,
+// before any of them read it.
+func init() { pollInterval = 10 * time.Millisecond }
+
 func TestDeviceFlow(t *testing.T) {
 	t.Parallel()
-
-	pollInterval = 10 * time.Millisecond
 
 	var polls int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -411,8 +413,6 @@ func TestDeviceFlow(t *testing.T) {
 
 func TestDeviceFlowDenied(t *testing.T) {
 	t.Parallel()
-
-	pollInterval = 10 * time.Millisecond
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

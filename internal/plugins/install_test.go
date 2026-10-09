@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -56,7 +57,9 @@ func TestInstallWritesPluginsAndLock(t *testing.T) {
 
 	info, err := os.Stat(filepath.Join(dir, "one.sh"))
 	require.NoError(t, err)
-	require.Equal(t, os.FileMode(0o755), info.Mode().Perm(), "a plugin is a script")
+	if runtime.GOOS != "windows" {
+		require.Equal(t, os.FileMode(0o755), info.Mode().Perm(), "a plugin is a script")
+	}
 
 	require.Equal(t, testRepo, res.Manifest.Source)
 	require.Equal(t, DefaultRef, res.Manifest.Ref)

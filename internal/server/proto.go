@@ -759,6 +759,8 @@ func (c *controllerV1) handleError(w http.ResponseWriter, r *http.Request, err e
 		status = http.StatusNotFound
 	case errors.Is(err, backend.ErrLSPClientNotFound):
 		status = http.StatusNotFound
+	case errors.Is(err, backend.ErrMCPToolNotFound):
+		status = http.StatusNotFound
 	case errors.Is(err, backend.ErrAgentNotInitialized):
 		status = http.StatusBadRequest
 	case errors.Is(err, backend.ErrAgentBusy):

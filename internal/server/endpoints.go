@@ -526,6 +526,23 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 			Fails(400, 404, 500).
 			Handle(c.handlePostWorkspaceMCPReadResource),
 
+		apigen.Get("/v1/workspaces/{id}/mcp/tools").
+			Summary("Get MCP tools").
+			Tags("mcp").
+			PathParam("id", "Workspace ID").
+			Responds(map[string][]proto.MCPTool{}).
+			Fails(404, 500).
+			Handle(c.handleGetWorkspaceMCPTools),
+
+		apigen.Post("/v1/workspaces/{id}/mcp/call-tool").
+			Summary("Call MCP tool").
+			Tags("mcp").
+			PathParam("id", "Workspace ID").
+			Accepts(proto.MCPCallToolRequest{}).
+			Responds(proto.MCPCallToolResponse{}).
+			Fails(400, 404, 500).
+			Handle(c.handlePostWorkspaceMCPCallTool),
+
 		apigen.Get("/v1/workspaces/{id}/mcp/prompts").
 			Summary("Get MCP prompts").
 			Tags("mcp").

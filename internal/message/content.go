@@ -620,6 +620,17 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 				ProviderExecuted: call.ProviderExecuted,
 			})
 		}
+
+		// Ensure assistant messages with only reasoning are still valid.
+		// When a model hits max_tokens with only reasoning output, add a placeholder
+		// text so the message can be serialized and sent to the provider.
+		if len(parts) > 0 && text == "" && len(m.ToolCalls()) == 0 {
+			// Only reasoning content, add placeholder
+			parts = append([]fantasy.MessagePart{
+				fantasy.TextPart{Text: "[Response incomplete - context window exceeded]"},
+			}, parts...)
+		}
+
 		messages = append(messages, fantasy.Message{
 			Role:    fantasy.MessageRoleAssistant,
 			Content: parts,

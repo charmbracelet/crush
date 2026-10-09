@@ -854,6 +854,52 @@ func (h *HookConfig) TimeoutDuration() time.Duration {
 	return time.Duration(h.Timeout) * time.Second
 }
 
+// CustomToolConfig declares an agent tool whose implementation is a shell
+// command, which is how a plugin adds a tool without a Crush release. The
+// command runs in the embedded shell with the call's JSON input on stdin.
+type CustomToolConfig struct {
+	// Description tells the model what the tool does and when to use it.
+	Description string `json:"description" jsonschema:"required,description=What the tool does, shown to the model"`
+	// Command is the shell source run on every call.
+	Command string `json:"command" jsonschema:"required,description=Shell command run when the agent calls the tool; the call's JSON input arrives on stdin"`
+	// Schema is a full JSON Schema object for the input. Mutually exclusive
+	// with Params.
+	Schema map[string]any `json:"schema,omitempty" jsonschema:"description=JSON Schema object describing the tool input"`
+	// Params is shorthand for string parameters: name to description.
+	Params map[string]string `json:"params,omitempty" jsonschema:"description=String parameters by name, mapped to their descriptions"`
+	// Required lists the parameters the model must supply.
+	Required []string `json:"required,omitempty" jsonschema:"description=Names of required parameters"`
+	// Timeout in seconds. Default 60.
+	Timeout int `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds for one call,default=60"`
+	// Env is extra environment for the command.
+	Env map[string]string `json:"env,omitempty" jsonschema:"description=Extra environment variables for the command"`
+	// Disabled hides the tool from every agent.
+	Disabled bool `json:"disabled,omitempty" jsonschema:"description=Hide the tool from agents"`
+	// Source is the script that declared the command, recorded at load.
+	Source string `json:"source,omitempty" jsonschema:"-"`
+}
+
+// TimeoutDuration returns the tool timeout, defaulting to 60s.
+func (t CustomToolConfig) TimeoutDuration() time.Duration {
+	if t.Timeout <= 0 {
+		return 60 * time.Second
+	}
+	return time.Duration(t.Timeout) * time.Second
+}
+
+// enabledCustomToolNames returns the names of the custom tools not disabled,
+// sorted so agent tool lists are stable.
+func (c *Config) enabledCustomToolNames() []string {
+	var names []string
+	for name, t := range c.CustomTools {
+		if !t.Disabled {
+			names = append(names, name)
+		}
+	}
+	slices.Sort(names)
+	return names
+}
+
 // Config holds the configuration for crush.
 type Config struct {
 	Schema string `json:"$schema,omitempty"`
@@ -878,6 +924,8 @@ type Config struct {
 	Tools Tools `json:"tools,omitzero" jsonschema:"description=Tool configurations"`
 
 	Hooks map[string][]HookConfig `json:"hooks,omitempty" jsonschema:"description=User-defined shell commands that fire on hook events (e.g. PreToolUse)"`
+
+	CustomTools map[string]CustomToolConfig `json:"custom_tools,omitempty" jsonschema:"description=Agent tools backed by shell commands, usually declared by plugins"`
 
 	// Env is a map of environment variables set on startup.
 	Env map[string]string `json:"env,omitempty" jsonschema:"description=Environment variables to set on startup"`
@@ -1163,7 +1211,9 @@ func filterSlice(data []string, mask []string, include bool) []string {
 }
 
 func (c *Config) SetupAgents() {
-	allowedTools := resolveAllowedTools(allToolNames(), c.Options.DisabledTools)
+	// Custom tools join the coder's list only: the task and plan agents
+	// filter to fixed read-only sets, so they never see them.
+	allowedTools := resolveAllowedTools(append(allToolNames(), c.enabledCustomToolNames()...), c.Options.DisabledTools)
 
 	agents := map[string]Agent{
 		AgentCoder: {

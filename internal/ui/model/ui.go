@@ -1612,33 +1612,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// This logic gets triggered on any message type, but should it?
-	prevPlaceholder := m.textarea.Placeholder
-	switch m.focus {
-	case uiFocusMain:
-	case uiFocusEditor:
-		// Textarea placeholder logic
-		if m.bangMode {
-			m.textarea.Placeholder = "Run a shell command"
-		} else if m.isAgentBusy() {
-			m.textarea.Placeholder = m.workingPlaceholder
-		} else if m.planning() {
-			m.textarea.Placeholder = "Let's plan"
-		} else {
-			m.textarea.Placeholder = m.readyPlaceholder
-		}
-		if !m.bangMode && !m.planning() {
-			switch m.levelCached() {
-			case permission.LevelBypass:
-				m.textarea.Placeholder = "Go crazy"
-			case permission.LevelAuto:
-				m.textarea.Placeholder = "Auto mode!"
-			}
-		}
-	}
-	if m.textarea.Placeholder != prevPlaceholder {
-		m.invalidateFrames()
-	}
+	m.updatePlaceholder()
 
 	// TTL backstop: schedule an off-thread re-probe for any memoized
 	// workspace state that has gone stale. Never does IO on this
@@ -4696,6 +4670,43 @@ func (m *UI) setEditorPrompt() {
 		m.textarea.SetPromptFunc(4, m.autoPromptFunc)
 	default:
 		m.textarea.SetPromptFunc(4, m.normalPromptFunc)
+	}
+}
+
+// updatePlaceholder sets the editor's placeholder for the state the editor is
+// in: a running command, a busy agent, a mode that changes what the turn is
+// for, and the posture the permission level implies.
+//
+// The placeholder is the editor's own voice, so the permission levels read as
+// postures rather than as names of mechanisms: never asking is "Go crazy", and
+// letting a classifier decide is "Go carefully".
+func (m *UI) updatePlaceholder() {
+	if m.focus != uiFocusEditor {
+		return
+	}
+	prev := m.textarea.Placeholder
+	switch {
+	case m.bangMode:
+		m.textarea.Placeholder = "Run a shell command"
+	case m.isAgentBusy():
+		m.textarea.Placeholder = m.workingPlaceholder
+	case m.planning():
+		m.textarea.Placeholder = "Let's plan"
+	default:
+		m.textarea.Placeholder = m.readyPlaceholder
+	}
+	// The level speaks last, exactly as it did before this was extracted: it
+	// is the thing that changes most often and the thing the user is choosing.
+	if !m.bangMode && !m.planning() {
+		switch m.levelCached() {
+		case permission.LevelBypass:
+			m.textarea.Placeholder = "Go crazy"
+		case permission.LevelAuto:
+			m.textarea.Placeholder = "Go carefully"
+		}
+	}
+	if m.textarea.Placeholder != prev {
+		m.invalidateFrames()
 	}
 }
 

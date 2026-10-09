@@ -358,12 +358,6 @@ type CompactionOptions struct {
 	// generation. It costs one cheap model call per turn with enough new
 	// material to be worth reading.
 	ObserveMemory *bool `json:"observe_memory,omitempty" jsonschema:"description=Record session memory at the end of each turn; memory is kept verbatim beside every checkpoint, so decisions survive compaction,default=false"`
-	// RenderFromLedger replaces the summarization model call with a
-	// deterministic render of recorded memory when any exists, so a
-	// compaction is instant at the price of compressing nothing. The
-	// default keeps the summary and attaches memory beside it; this flag
-	// opts into memory standing in for the summary entirely.
-	RenderFromLedger *bool `json:"render_from_ledger,omitempty" jsonschema:"description=Build compaction checkpoints entirely from recorded session memory, replacing the summarization model call,default=false"`
 }
 
 type TUIOptions struct {

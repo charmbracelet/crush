@@ -519,18 +519,13 @@ func (c *Commands) defaultCommands() []*CommandItem {
 
 	// Toggle MCP servers for this repository when any are configured.
 	if len(cfg.MCP) > 0 {
+		// Laziness is not a separate switch here: each server's setting
+		// (enabled, disabled, or lazy) lives in the dialog this opens, so a
+		// global toggle in the palette would be a second, conflicting door to
+		// the same decision.
 		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_mcps", "Toggle MCPs", "", ActionOpenDialog{
 			DialogID: MCPTogglesID,
 		}))
-
-		// The label carries the current state so the switch is legible
-		// without opening anything. Laziness is on unless something has
-		// written it false.
-		lazyLabel := "Disable Lazy MCP Tools"
-		if !cfg.Options.GetLazyMCP() {
-			lazyLabel = "Enable Lazy MCP Tools"
-		}
-		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_lazy_mcp", lazyLabel, "", ActionToggleLazyMCP{}))
 	}
 
 	if c.hasTodos || c.hasQueue {

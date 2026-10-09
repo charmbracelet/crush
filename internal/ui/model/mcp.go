@@ -395,25 +395,6 @@ func (m *UI) setMCPServerConnected(name string, enabled, global bool) error {
 	return m.com.Workspace.MCPSetServerDisabled(context.TODO(), name, disabled)
 }
 
-// applyLazyMCPGlobal flips the options.lazy_mcp default. Servers with their
-// own mcp.<name>.lazy override are unaffected, which is the point of a
-// default rather than a kill switch.
-func (m *UI) applyLazyMCPGlobal() tea.Cmd {
-	// No busy guard: the switch takes effect on the next prompt, so flipping
-	// it while the agent works is harmless.
-	next := !m.com.Config().Options.GetLazyMCP()
-	state := "enabled"
-	if !next {
-		state = "disabled"
-	}
-	return func() tea.Msg {
-		if err := m.com.Workspace.MCPSetLazy(context.TODO(), "", next); err != nil {
-			return util.NewErrorMsg(err)
-		}
-		return util.NewInfoMsg("Lazy MCP tools " + state)
-	}
-}
-
 // mcpStatusText renders a connection state as plain dialog text.
 func mcpStatusText(info mcp.ClientInfo) string {
 	switch info.State {

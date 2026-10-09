@@ -853,3 +853,47 @@ func TestCyclePermissionLevelWhilePlanning(t *testing.T) {
 	require.Equal(t, config.AgentPlan, u.purpose, "the permission cycle must stay in planning")
 	require.Empty(t, ws.setMainCalledWith, "and must not switch agents")
 }
+
+// TestHelpBarAdvertisesBothAxes: the two axes are independent, so the bar has
+// to name both. It advertised the mode cycle and not the approval cycle, which
+// left the approval axis discoverable only by pressing the key or opening the
+// expanded help.
+func TestHelpBarAdvertisesBothAxes(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	ws := &testWorkspace{cfg: &config.Config{
+		Providers: csync.NewMap[string, config.ProviderConfig](),
+	}}
+	com := &common.Common{Workspace: ws, Styles: &sty}
+	u := &UI{
+		com:         com,
+		keyMap:      DefaultKeyMap(),
+		state:       uiChat,
+		focus:       uiFocusEditor,
+		session:     &session.Session{ID: "sess-1"},
+		chat:        NewChat(com, config.ScrollbarDefault),
+		textarea:    textarea.New(),
+		dialog:      dialog.NewOverlay(),
+		attachments: attachments.New(nil, attachments.Keymap{}),
+		width:       140,
+		height:      45,
+	}
+	u.status = NewStatus(com, u)
+
+	bar := make([]string, 0)
+	for _, b := range u.ShortHelp() {
+		bar = append(bar, b.Help().Desc)
+	}
+	require.Contains(t, bar, "cycle mode", "the mode axis is advertised")
+	require.Contains(t, bar, "cycle approval", "the approval axis is advertised too")
+
+	// Both keys must be named, or the bar tells the user an axis exists
+	// without saying how to reach it.
+	keys := make([]string, 0)
+	for _, b := range u.ShortHelp() {
+		keys = append(keys, b.Help().Key)
+	}
+	require.Contains(t, keys, "shift+tab")
+	require.Contains(t, keys, "ctrl+y")
+}

@@ -123,7 +123,7 @@ func DefaultKeyMap() KeyMap {
 		),
 		CyclePermissionLevel: key.NewBinding(
 			key.WithKeys("ctrl+y"),
-			key.WithHelp("ctrl+y", "cycle permissions"),
+			key.WithHelp("ctrl+y", "cycle approval"),
 		),
 		ShiftTab: key.NewBinding(
 			key.WithKeys("shift+tab"),

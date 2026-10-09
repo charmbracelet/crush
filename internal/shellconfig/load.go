@@ -36,7 +36,7 @@ func LoadShellConfig(ctx context.Context, path string, src []byte) ([]byte, erro
 	ctx, cancel := context.WithTimeout(ctx, loadTimeout)
 	defer cancel()
 
-	builder := newConfigBuilder()
+	builder := newConfigBuilder(path)
 	runCtx := withConfigBuilder(ctx, builder)
 
 	cwd := filepath.Dir(path)

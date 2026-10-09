@@ -86,6 +86,9 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	if err := cfg.ValidateHooks(); err != nil {
 		return nil, fmt.Errorf("invalid hook configuration: %w", err)
 	}
+	if err := cfg.ValidateCustomTools(); err != nil {
+		return nil, fmt.Errorf("invalid tool configuration: %w", err)
+	}
 
 	if !isInsideWorktree() {
 		const depth = 2
@@ -1695,6 +1698,48 @@ func (c *Config) ValidateHooks() error {
 			}
 			if _, err := regexp.Compile(h.Matcher); err != nil {
 				return fmt.Errorf("hook %s[%d]: invalid matcher regex %q: %w", event, i, h.Matcher, err)
+			}
+		}
+	}
+	return nil
+}
+
+// customToolName is what a tool name may look like on the wire: the strictest
+// provider (Anthropic) rejects a whole request over one bad name.
+var customToolName = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
+
+// ValidateCustomTools checks every declared custom tool so a broken plugin
+// fails the load naming the tool, rather than failing the first request.
+func (c *Config) ValidateCustomTools() error {
+	builtin := allToolNames()
+	for name, t := range c.CustomTools {
+		switch {
+		case !customToolName.MatchString(name):
+			return fmt.Errorf("tool %q: name must match %s", name, customToolName)
+		case slices.Contains(builtin, name):
+			return fmt.Errorf("tool %q: name is taken by a built-in tool", name)
+		case strings.HasPrefix(name, "mcp_"):
+			return fmt.Errorf("tool %q: the mcp_ prefix is reserved for MCP tools", name)
+		case t.Description == "":
+			return fmt.Errorf("tool %q: description is required", name)
+		case t.Command == "":
+			return fmt.Errorf("tool %q: command is required", name)
+		case t.Schema != nil && len(t.Params) > 0:
+			return fmt.Errorf("tool %q: use either a schema or params, not both", name)
+		}
+		props := map[string]any{}
+		for p := range t.Params {
+			props[p] = true
+		}
+		if t.Schema != nil {
+			var ok bool
+			if props, ok = t.Schema["properties"].(map[string]any); !ok {
+				return fmt.Errorf("tool %q: schema must have a properties object", name)
+			}
+		}
+		for _, r := range t.Required {
+			if _, ok := props[r]; !ok {
+				return fmt.Errorf("tool %q: required parameter %q is not declared", name, r)
 			}
 		}
 	}

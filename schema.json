@@ -234,6 +234,13 @@
           "type": "object",
           "description": "User-defined shell commands that fire on hook events (e.g. PreToolUse)"
         },
+        "custom_tools": {
+          "additionalProperties": {
+            "$ref": "#/$defs/CustomToolConfig"
+          },
+          "type": "object",
+          "description": "Agent tools backed by shell commands"
+        },
         "env": {
           "additionalProperties": {
             "type": "string"
@@ -244,6 +251,58 @@
       },
       "additionalProperties": false,
       "type": "object"
+    },
+    "CustomToolConfig": {
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "What the tool does"
+        },
+        "command": {
+          "type": "string",
+          "description": "Shell command run when the agent calls the tool; the call's JSON input arrives on stdin"
+        },
+        "schema": {
+          "type": "object",
+          "description": "JSON Schema object describing the tool input"
+        },
+        "params": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object",
+          "description": "String parameters by name"
+        },
+        "required": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Names of required parameters"
+        },
+        "timeout": {
+          "type": "integer",
+          "description": "Timeout in seconds for one call",
+          "default": 60
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object",
+          "description": "Extra environment variables for the command"
+        },
+        "disabled": {
+          "type": "boolean",
+          "description": "Hide the tool from agents"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "description",
+        "command"
+      ]
     },
     "GatewaySpec": {
       "properties": {

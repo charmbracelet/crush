@@ -1549,6 +1549,9 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 	if err := cfg.ValidateHooks(); err != nil {
 		return fmt.Errorf("invalid hook configuration on reload: %w", err)
 	}
+	if err := cfg.ValidateCustomTools(); err != nil {
+		return fmt.Errorf("invalid tool configuration on reload: %w", err)
+	}
 
 	// Save current state for potential rollback BEFORE configureProviders,
 	// which may write to disk via RemoveConfigField (e.g. removing stale

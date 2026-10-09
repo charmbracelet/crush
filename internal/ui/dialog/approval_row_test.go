@@ -18,15 +18,18 @@ import (
 // quietly reading a zero value.
 type approvalWorkspace struct {
 	workspace.Workspace
-	level permission.Level
+	level   permission.Level
+	purpose string
 }
 
 func (w *approvalWorkspace) PermissionLevel() permission.Level { return w.level }
 func (w *approvalWorkspace) PermissionSetLevel(level permission.Level) {
 	w.level = level
 }
-func (w *approvalWorkspace) AgentMainID() string           { return config.AgentCoder }
-func (w *approvalWorkspace) AgentMainCandidates() []string { return []string{config.AgentCoder} }
+func (w *approvalWorkspace) AgentMainID() string { return w.purpose }
+func (w *approvalWorkspace) AgentMainCandidates() []string {
+	return []string{config.AgentCoder, config.AgentPlan}
+}
 
 // Config answers the palette's own read of the configuration; a bare config is
 // all the rows this test cares about need.
@@ -36,7 +39,7 @@ func newApprovalPalette(t *testing.T, level permission.Level) (*Commands, *appro
 	t.Helper()
 
 	sty := styles.CharmtonePantera()
-	ws := &approvalWorkspace{level: level}
+	ws := &approvalWorkspace{level: level, purpose: config.AgentCoder}
 	com := &common.Common{Styles: &sty, Workspace: ws}
 	dia, err := NewCommands(com, "session-1", true, false, false, nil, nil)
 	require.NoError(t, err)
@@ -182,4 +185,121 @@ func countBracketed(s string) int {
 		}
 	}
 	return count
+}
+
+// modeRow returns the palette's single mode item.
+func modeRow(t *testing.T, dia *Commands) *CommandItem {
+	t.Helper()
+
+	var found *CommandItem
+	for _, item := range dia.list.FilteredItems() {
+		cmd, ok := item.(*CommandItem)
+		if !ok || cmd.id != purposeCommandID {
+			continue
+		}
+		require.Nil(t, found, "the palette must offer exactly one mode row")
+		found = cmd
+	}
+	require.NotNil(t, found, "the palette must offer a mode row")
+	return found
+}
+
+// TestModeRowShowsEveryModeWithTheActiveOneMarked: the mode axis gets the same
+// treatment as the approval axis, so both read as a setting with alternatives
+// rather than as a list of unrelated commands.
+func TestModeRowShowsEveryModeWithTheActiveOneMarked(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		purpose string
+		marked  string
+	}{
+		{config.AgentCoder, "[standard]"},
+		{config.AgentPlan, "[planning]"},
+	} {
+		sty := styles.CharmtonePantera()
+		item := NewCommandItem(&sty, purposeCommandID, "Mode:", "shift+tab", nil).
+			WithSegments(PurposeSegments(tt.purpose, []string{config.AgentCoder, config.AgentPlan})...)
+
+		out := ansi.Strip(item.Render(60))
+
+		require.Contains(t, out, "Mode:", "the row still names the axis it controls")
+		require.Contains(t, out, "standard")
+		require.Contains(t, out, "planning")
+		require.Contains(t, out, tt.marked)
+		require.Equal(t, 1, countBracketed(out), "exactly one mode is marked")
+	}
+}
+
+// TestModeRowRedrawsWhenTheSwitchLands: the switch is asynchronous, so the row
+// is redrawn from the message that reports it rather than from the key press.
+func TestModeRowRedrawsWhenTheSwitchLands(t *testing.T) {
+	t.Parallel()
+
+	dia, ws := newApprovalPalette(t, permission.LevelPrompt)
+	row := modeRow(t, dia)
+	require.Contains(t, ansi.Strip(row.Render(60)), "[standard]")
+
+	ws.purpose = config.AgentPlan
+	dia.RefreshPurposeMode(config.AgentPlan)
+
+	require.Contains(t, ansi.Strip(row.Render(60)), "[planning]")
+	require.NotContains(t, ansi.Strip(row.Render(60)), "[standard]")
+}
+
+// TestPaletteNoLongerOffersOneRowPerMode guards the regression: one row per
+// mode, each suffixed "(current)", which never showed what the alternatives
+// were.
+func TestPaletteNoLongerOffersOneRowPerMode(t *testing.T) {
+	t.Parallel()
+
+	dia, _ := newApprovalPalette(t, permission.LevelAuto)
+
+	ids := make([]string, 0, len(dia.list.FilteredItems()))
+	for _, item := range dia.list.FilteredItems() {
+		if cmd, ok := item.(*CommandItem); ok {
+			ids = append(ids, cmd.id)
+		}
+	}
+	require.Contains(t, ids, purposeCommandID)
+	require.NotContains(t, ids, "set_mode_"+config.AgentCoder)
+	require.NotContains(t, ids, "set_mode_"+config.AgentPlan)
+}
+
+// TestAutoModeModelIsNotInThePalette: the classifier model is chosen from the
+// model chooser, which already offers it, so the palette does not need a second
+// door to the same room.
+func TestAutoModeModelIsNotInThePalette(t *testing.T) {
+	t.Parallel()
+
+	dia, _ := newApprovalPalette(t, permission.LevelAuto)
+
+	for _, item := range dia.list.FilteredItems() {
+		if cmd, ok := item.(*CommandItem); ok {
+			require.NotEqual(t, "auto_mode_model", cmd.id,
+				"the auto-mode model is selected from the model chooser")
+		}
+	}
+}
+
+// TestModeRowIsFilterable pins that both modes and the axis name find the row.
+func TestModeRowIsFilterable(t *testing.T) {
+	t.Parallel()
+
+	for _, query := range []string{"standard", "planning", "mode", "purpose"} {
+		t.Run(query, func(t *testing.T) {
+			t.Parallel()
+
+			dia, _ := newApprovalPalette(t, permission.LevelAuto)
+			dia.list.SetFilter(query)
+
+			ids := make([]string, 0)
+			for _, item := range dia.list.FilteredItems() {
+				if cmd, ok := item.(*CommandItem); ok {
+					ids = append(ids, cmd.id)
+				}
+			}
+			require.Contains(t, ids, purposeCommandID, "typing %q must find the mode row", query)
+		})
+	}
 }

@@ -152,13 +152,13 @@ func filterToolsForChannel(agentTools []fantasy.AgentTool, channel string, state
 	}
 	filtered := make([]fantasy.AgentTool, 0, len(agentTools))
 	for _, agentTool := range agentTools {
-		mcpTool, ok := agentTool.(interface{ MCP() string })
+		server, ok := mcpServerOf(agentTool)
 		if !ok {
 			filtered = append(filtered, agentTool)
 			continue
 		}
-		state, found := states[mcpTool.MCP()]
-		if !found || !state.Channel || channel == mcpTool.MCP() {
+		state, found := states[server]
+		if !found || !state.Channel || channel == server {
 			filtered = append(filtered, agentTool)
 		}
 	}
@@ -1729,8 +1729,8 @@ func (a *sessionAgent) filterDisabledMCPTools(ctx context.Context, toolList []fa
 	}
 	filtered := make([]fantasy.AgentTool, 0, len(toolList))
 	for _, t := range toolList {
-		if mcpTool, ok := t.(*tools.Tool); ok {
-			if _, off := disabled[mcpTool.MCP()]; off {
+		if server, ok := mcpServerOf(t); ok {
+			if _, off := disabled[server]; off {
 				continue
 			}
 		}

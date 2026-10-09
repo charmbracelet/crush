@@ -33,6 +33,8 @@ func (m *mockPermissionService) GrantPersistent(req permission.PermissionRequest
 
 func (m *mockPermissionService) AutoApproveSession(sessionID string) {}
 
+func (m *mockPermissionService) IsSessionAutoApproved(sessionID string) bool { return false }
+
 func (m *mockPermissionService) SetSkipRequests(skip bool) {}
 
 func (m *mockPermissionService) SkipRequests() bool {
@@ -64,6 +66,10 @@ func (m *mockHistoryService) Get(ctx context.Context, id string) (history.File, 
 }
 
 func (m *mockHistoryService) ListBySession(ctx context.Context, sessionID string) ([]history.File, error) {
+	return nil, nil
+}
+
+func (m *mockHistoryService) ListBySessionWithChildren(ctx context.Context, sessionID string) ([]history.File, error) {
 	return nil, nil
 }
 

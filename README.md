@@ -684,6 +684,82 @@ disable-model-invocation: true
 
 Skills with `disable-model-invocation` won't appear in the model's available skills list but can still be invoked manually by users.
 
+### Subagents
+
+Subagents are specialized agents Crush can hand work to. Each one is a
+Markdown file whose YAML frontmatter configures the agent and whose body is
+its system prompt. Crush offers matching subagents to the model, which
+dispatches them through its `agent` tool; you can also ask for one directly
+by typing `@name` in your message.
+
+```markdown
+---
+name: code-reviewer
+description: Reviews staged changes for bugs and style issues.
+tools: view, grep, glob
+model: large
+---
+
+You are a careful code reviewer. Report problems with file:line references.
+```
+
+| Key               | Description                                                                                           |
+| ----------------- | ----------------------------------------------------------------------------------------------------- |
+| `name`            | Required. Lowercase letters, digits and single hyphens.                                               |
+| `description`     | Required. Tells the model when to use the subagent.                                                   |
+| `tools`           | Built-in tools to allow (list or comma-separated). Defaults to the dispatching agent's tools.        |
+| `disallowedTools` | Built-in tools to remove.                                                                             |
+| `model`           | `large`, `small`, or a model ID. Defaults to `large`.                                                 |
+| `provider`        | Provider for `model`. Required when more than one configured provider offers that model ID.          |
+| `effort`          | Reasoning effort: `none`, `minimal`, `low`, `medium`, `high`, `xhigh` or `max`.                      |
+| `skills`          | Skills to load into the subagent's prompt (list or comma-separated). Only these are offered to it.    |
+| `mcpServers`      | Configured MCP servers the subagent may use (list or comma-separated). None by default.               |
+| `permissionMode`  | `default`, or `bypassPermissions` to skip permission prompts (non-global subagents ask first).        |
+| `color`           | `red`, `orange`, `yellow`, `green`, `cyan`, `blue`, `purple` or `pink`.                               |
+
+Any other key is an error, so a misspelled `tools:` can't silently grant
+every tool. A file copied from Claude Code may need its tool names changed
+and Claude-only keys removed.
+
+To run one dispatch on a different model, ask for it ("use the
+code-reviewer with gpt-5"). That model, which also works with the built-in
+`task` agent, overrides `model:`. If the name is unknown or offered by more
+than one provider, Crush asks you which one to use.
+
+A subagent can never use more than the agent that dispatches it: tools and
+MCP servers are capped by the dispatching agent, so a subagent dispatched in
+plan mode stays read-only.
+
+Global subagents are loaded from:
+
+- `$XDG_CONFIG_HOME/crush/subagents` or `~/.config/crush/subagents/`
+- `$XDG_CONFIG_HOME/agents/subagents` or `~/.config/agents/subagents/`
+- `~/.agents/subagents/`
+- On Windows, also `%LOCALAPPDATA%\crush\subagents` and
+  `%LOCALAPPDATA%\agents\subagents`
+
+Setting `$CRUSH_SUBAGENTS_DIR` replaces all of these with that one
+directory. A `bypassPermissions` subagent from anywhere else asks before
+it runs.
+
+Project subagents are loaded from `.agents/subagents` and `.crush/subagents`
+in the working directory and, inside a git repository, at the repository
+root. When two files share a name, the later source wins: global, then
+repository root, then working directory, then directories you add. Add
+directories, or turn subagents off and on, in your config:
+
+```bash
+option subagent-path "$HOME/my-subagents"
+option disable-subagent code-reviewer
+option enable-subagent code-reviewer # Overrides a disable from any config.
+```
+
+Press <kbd>ctrl+q</kbd> to see running subagents and to browse, enable,
+disable or delete definitions in the Library. The Library toggle writes
+`disabled_subagents` and `enabled_subagents` for the current workspace;
+an `enabled_subagents` entry wins over a disable from any config, so the
+Library can't disable a subagent that another config enables.
+
 ### Desktop notifications
 
 Crush sends desktop notifications when a tool call requires permission and when

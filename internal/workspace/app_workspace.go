@@ -5,6 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"sync"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -13,6 +18,7 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/gitutil"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/lsp"
@@ -24,6 +30,7 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/charmbracelet/crush/internal/subagents"
 )
 
 // AppWorkspace implements the Workspace interface by delegating
@@ -32,6 +39,10 @@ import (
 type AppWorkspace struct {
 	app   *app.App
 	store *config.ConfigStore
+	// subagentToggleMu serializes the Library's read-modify-writes of the
+	// workspace config (SetSubagentDisabled, DeleteUserSubagent); Library
+	// actions run as concurrent commands.
+	subagentToggleMu sync.Mutex
 }
 
 // NewAppWorkspace creates a new AppWorkspace wrapping the given app
@@ -311,7 +322,7 @@ func (w *AppWorkspace) FileTrackerListReadFiles(ctx context.Context, sessionID s
 // -- History --
 
 func (w *AppWorkspace) ListSessionHistory(ctx context.Context, sessionID string) ([]history.File, error) {
-	return w.app.History.ListBySession(ctx, sessionID)
+	return w.app.ListSessionHistory(ctx, sessionID)
 }
 
 // -- LSP --
@@ -425,6 +436,337 @@ func (w *AppWorkspace) ListSkills(_ context.Context) ([]skills.CatalogEntry, err
 func (w *AppWorkspace) ReadSkill(_ context.Context, skillID string) ([]byte, skills.SkillReadResult, error) {
 	mgr := w.app.Skills
 	return skills.ReadContent(mgr.ActiveSkills(), mgr.ResolvedPaths(), mgr.WorkingDir(), skillID)
+}
+
+// ActiveSubagents returns the workspace's post-filter list of active subagents
+// projected to the frontend-facing SubagentInfo shape. Returns nil when the
+// workspace has no Subagents manager configured.
+func (w *AppWorkspace) ActiveSubagents() []SubagentInfo {
+	mgr := w.app.Subagents
+	if mgr == nil {
+		return nil
+	}
+	active := mgr.ActiveSubagents()
+	result := make([]SubagentInfo, len(active))
+	for i, sa := range active {
+		result[i] = SubagentInfo{Name: sa.Name, Description: sa.Description}
+	}
+	return result
+}
+
+// runningSubagentsEnrichTimeout bounds the token-count lookup in
+// RunningSubagents. It is generous for a local query and only exists so a
+// wedged database cannot park a refresh goroutine forever.
+const runningSubagentsEnrichTimeout = 5 * time.Second
+
+// RunningSubagents returns info about all subagent sessions currently running
+// under the given parentSessionID, enriched with token counts from the session
+// service where available. Returns nil when SubagentRuntime is nil.
+func (w *AppWorkspace) RunningSubagents(parentSessionID string) []RunningSubagentInfo {
+	if w.app.SubagentRuntime == nil {
+		return nil
+	}
+	entries := w.app.SubagentRuntime.List(parentSessionID)
+	if len(entries) == 0 {
+		return nil
+	}
+
+	// Enrich token counts with one query for every child of the parent
+	// rather than a Get per running entry: this runs on every
+	// RuntimeEvent-driven refresh (register, status change, finish), so the
+	// N round trips per event added up. A lookup failure leaves the counts
+	// at zero.
+	//
+	// The deadline is the only bound available here: RunningSubagents takes no
+	// context (it is called from tea.Cmd closures that have none to give), and
+	// token counts are decoration — a slow or wedged query must degrade to
+	// zero counts rather than pin the refresh goroutine indefinitely.
+	tokensByID := make(map[string]session.Session)
+	if w.app.Sessions != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), runningSubagentsEnrichTimeout)
+		children, err := w.app.Sessions.ListChildSessions(ctx, parentSessionID)
+		cancel()
+		if err == nil {
+			for _, child := range children {
+				tokensByID[child.ID] = child
+			}
+		}
+		// Re-read the runtime after the query: a subagent can finish while
+		// it runs, and its Finish event's refresh may skip the query and
+		// land first. Building from the older snapshot would then resurrect
+		// the finished entry with nothing left to clear it.
+		entries = w.app.SubagentRuntime.List(parentSessionID)
+		if len(entries) == 0 {
+			return nil
+		}
+	}
+
+	result := make([]RunningSubagentInfo, len(entries))
+	for i, e := range entries {
+		info := RunningSubagentInfo{
+			ChildSessionID:  e.ChildSessionID,
+			ParentSessionID: e.ParentSessionID,
+			Name:            e.Name,
+			Color:           e.Color,
+			Model:           e.Model,
+			Status:          e.Status,
+			StartedAt:       e.StartedAt,
+		}
+		if sess, ok := tokensByID[e.ChildSessionID]; ok {
+			info.PromptTokens = sess.PromptTokens
+			info.CompletionTokens = sess.CompletionTokens
+		}
+		result[i] = info
+	}
+	return result
+}
+
+// CancelSubagent cancels the subagent session with the given childSessionID.
+// It is a no-op when AgentCoordinator is nil.
+func (w *AppWorkspace) CancelSubagent(childSessionID string) {
+	if w.app.AgentCoordinator == nil {
+		return
+	}
+	w.app.AgentCoordinator.Cancel(childSessionID)
+}
+
+// AllSubagents returns all discovered subagent definitions projected to the
+// frontend-facing SubagentDefInfo shape, with scope detection relative to the
+// workspace working directory. Definitions that failed to parse or validate
+// are included with Error set, so the Library can surface the diagnostic
+// instead of silently dropping the file. Returns nil when the Subagents
+// manager is nil.
+//
+// The result is sorted by name then file path. Broken definitions are merged
+// in from the discovery states rather than appended, so a file that fails to
+// validate lands next to the valid definition whose name it claims instead of
+// in a separate block at the end of the Library.
+func (w *AppWorkspace) AllSubagents() []SubagentDefInfo {
+	mgr := w.app.Subagents
+	if mgr == nil {
+		return nil
+	}
+	all := mgr.AllSubagents()
+	cfg := w.store.Config()
+	workingDir := w.store.WorkingDir()
+
+	disabledSubagents := config.EffectiveDisabledSubagents(cfg.Options)
+	disabledSet := make(map[string]bool, len(disabledSubagents))
+	for _, name := range disabledSubagents {
+		disabledSet[name] = true
+	}
+
+	projectDirs := config.ProjectSubagentsDir(workingDir)
+	result := make([]SubagentDefInfo, 0, len(all))
+	for _, s := range all {
+		result = append(result, SubagentDefInfo{
+			Name:        s.Name,
+			Description: s.Description,
+			Color:       s.ResolvedColor(),
+			FilePath:    s.FilePath,
+			Scope:       subagentScope(s.FilePath, workingDir, projectDirs),
+			Disabled:    disabledSet[s.Name],
+			// Deletion is gated by the same trust rule DeleteUserSubagent
+			// enforces, so the dialog only offers to delete what the
+			// workspace will actually remove.
+			Deletable: subagents.InGlobalDir(s.FilePath),
+		})
+	}
+	for _, st := range mgr.States() {
+		if st.State != subagents.StateError {
+			continue
+		}
+		name := st.Name
+		if name == "" {
+			name = strings.TrimSuffix(filepath.Base(st.Path), filepath.Ext(st.Path))
+		}
+		errMsg := ""
+		if st.Err != nil {
+			errMsg = st.Err.Error()
+		}
+		result = append(result, SubagentDefInfo{
+			Name:     name,
+			Color:    subagents.AutoColor(name),
+			FilePath: st.Path,
+			Scope:    subagentScope(st.Path, workingDir, projectDirs),
+			Error:    errMsg,
+		})
+	}
+	// Name first so a broken file sorts beside the valid definition it
+	// shadows or duplicates; path breaks the tie, since several files may
+	// legitimately claim one name (only one of them wins discovery).
+	slices.SortStableFunc(result, func(a, b SubagentDefInfo) int {
+		if c := strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name)); c != 0 {
+			return c
+		}
+		return strings.Compare(strings.ToLower(a.FilePath), strings.ToLower(b.FilePath))
+	})
+	return result
+}
+
+// subagentScope classifies a subagent definition path: "builtin" (no file),
+// "project" for files under the working directory or any project discovery
+// dir (which includes the git worktree root for monorepo-level subagents),
+// and "user" otherwise. Comparison uses fsext.HasPrefix (filepath.Rel-based)
+// so it works with either path separator.
+func subagentScope(filePath, workingDir string, projectDirs []string) string {
+	if filePath == "" {
+		return "builtin"
+	}
+	if subagents.InGlobalDir(filePath) {
+		return "user"
+	}
+	if workingDir != "" && fsext.HasPrefix(filePath, workingDir) {
+		return "project"
+	}
+	for _, dir := range projectDirs {
+		if fsext.HasPrefix(filePath, dir) {
+			return "project"
+		}
+	}
+	return "user"
+}
+
+// DeleteUserSubagent removes a user-scoped subagent by name. It returns an
+// error if the subagent is not found or its file is not inside one of the
+// global (user-scope) subagents directories. On success it deletes the file
+// from disk, drops the name from the workspace enable/disable lists so a
+// later definition with the same name doesn't inherit them, and reloads the
+// Subagents manager. A file already removed outside Crush counts as deleted.
+func (w *AppWorkspace) DeleteUserSubagent(name string) error {
+	w.subagentToggleMu.Lock()
+	defer w.subagentToggleMu.Unlock()
+
+	var target *SubagentDefInfo
+	for _, info := range w.AllSubagents() {
+		// Broken (unparseable/invalid) entries are informational only.
+		if info.Error != "" {
+			continue
+		}
+		if info.Name == name {
+			cp := info
+			target = &cp
+			break
+		}
+	}
+	if target == nil {
+		return fmt.Errorf("subagent %q not found", name)
+	}
+	// Deletion is restricted to global (user-scope) dirs — scope labeling is
+	// display-oriented, and a monorepo-root or custom-path file must never be
+	// deletable as if it were the user's own.
+	if !subagents.InGlobalDir(target.FilePath) {
+		return fmt.Errorf("subagent %q is not in a user subagents directory and cannot be deleted", name)
+	}
+	if err := os.Remove(target.FilePath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	disabled := w.store.StringSliceConfigField(config.ScopeWorkspace, "options.disabled_subagents")
+	enabled := w.store.StringSliceConfigField(config.ScopeWorkspace, "options.enabled_subagents")
+	if slices.Contains(disabled, name) || slices.Contains(enabled, name) {
+		if err := w.store.SetConfigFields(config.ScopeWorkspace, map[string]any{
+			"options.disabled_subagents": addOrRemove(disabled, name, false),
+			"options.enabled_subagents":  addOrRemove(enabled, name, false),
+		}); err != nil {
+			return err
+		}
+	}
+	w.reloadSubagents()
+	return nil
+}
+
+// SetSubagentDisabled enables or disables a subagent by name, persisting the
+// change to options.disabled_subagents (and its counterpart,
+// options.enabled_subagents) at workspace scope and reloading discovery. A
+// disabled subagent is filtered out of the active set, which is what the
+// dispatcher enum, dispatch lookup and @-mention completions all derive from,
+// so it can be neither auto-selected by the main agent nor invoked manually.
+// Enabling always writes workspace scope only; it never rewrites whichever
+// scope actually disabled the name. When a broader scope still disables it,
+// the name is recorded in options.enabled_subagents, which
+// config.EffectiveDisabledSubagents subtracts from disabled_subagents at
+// read time — the only way a narrower scope can cancel out a disable set at
+// a broader one, since jsons.Merge concatenates arrays across scopes rather
+// than overriding them. An enabled_subagents entry wins over a disable at
+// any scope, so it is only written when needed.
+func (w *AppWorkspace) SetSubagentDisabled(name string, disabled bool) error {
+	w.subagentToggleMu.Lock()
+	defer w.subagentToggleMu.Unlock()
+
+	// Read from the same scope this writes to. w.store.Config() is the merged
+	// view, so using it here would copy entries the user disabled globally into
+	// the workspace file, pinning them at workspace scope forever.
+	currentDisabled := w.store.StringSliceConfigField(config.ScopeWorkspace, "options.disabled_subagents")
+	currentEnabled := w.store.StringSliceConfigField(config.ScopeWorkspace, "options.enabled_subagents")
+	// enabled_subagents cancels out a disable set at a broader scope (see
+	// config.EffectiveDisabledSubagents); jsons.Merge concatenates arrays
+	// across scopes rather than overriding them, so subtracting from
+	// disabled_subagents alone can never re-enable a name disabled globally.
+	nextDisabled := addOrRemove(currentDisabled, name, disabled)
+	// The merged list holds every scope's entries, so more occurrences there
+	// than in the workspace file means another scope disables the name too.
+	var mergedDisabled, mergedEnabled []string
+	if opts := w.store.Config().Options; opts != nil {
+		mergedDisabled = opts.DisabledSubagents
+		mergedEnabled = opts.EnabledSubagents
+	}
+	// An enabled_subagents entry from another scope wins over any disable
+	// written here, so the toggle would silently flip back.
+	if disabled && countOf(mergedEnabled, name) > countOf(currentEnabled, name) {
+		return fmt.Errorf("subagent %q is enabled by options.enabled_subagents in another config; remove it there to disable it", name)
+	}
+	disabledElsewhere := countOf(mergedDisabled, name) > countOf(currentDisabled, name)
+	nextEnabled := addOrRemove(currentEnabled, name, !disabled && disabledElsewhere)
+	if err := w.store.SetConfigFields(config.ScopeWorkspace, map[string]any{
+		"options.disabled_subagents": nextDisabled,
+		"options.enabled_subagents":  nextEnabled,
+	}); err != nil {
+		return err
+	}
+	w.reloadSubagents()
+	return nil
+}
+
+// reloadSubagents re-runs discovery from the current config and swaps the
+// Manager's snapshot, publishing a discovery event. The shared
+// DiscoveryConfigFromStore adapter keeps reload inputs (paths, resolver,
+// model and skill validation) identical to startup discovery in cmd/root.go
+// and backend.go.
+func (w *AppWorkspace) reloadSubagents() {
+	// The autoReload after a config write is skipped while another write or
+	// reload holds the store, so reload explicitly before discovering.
+	if err := w.store.ReloadFromDisk(context.Background()); err != nil {
+		slog.Warn("Failed to reload config before subagent discovery", "error", err)
+	}
+	w.app.Subagents.Rediscover(func() subagents.DiscoveryConfig {
+		return subagents.DiscoveryConfigFromStore(w.store, w.app.Skills)
+	})
+}
+
+// countOf returns how many times name occurs in list.
+func countOf(list []string, name string) int {
+	n := 0
+	for _, s := range list {
+		if s == name {
+			n++
+		}
+	}
+	return n
+}
+
+// addOrRemove returns list with name added (when add) or all occurrences
+// removed (when !add). The result is a fresh slice; order is otherwise stable.
+func addOrRemove(list []string, name string, add bool) []string {
+	next := make([]string, 0, len(list)+1)
+	for _, n := range list {
+		if n != name {
+			next = append(next, n)
+		}
+	}
+	if add {
+		next = append(next, name)
+	}
+	return next
 }
 
 // -- MCP operations --

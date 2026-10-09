@@ -191,11 +191,12 @@ stuff, and so on.
 > Event names are case insensitive and snake-caseable, so `PreToolUse`,
 > `pretooluse`, `PRETOOLUSE`, `pre_tool_use`, and `PRE_TOOL_USE` all work.
 
-**Scope**: `PreToolUse` only fires on the **top-level agent's** tool calls.
-Sub-agents (the `agent` task tool, `agentic_fetch`, etc.) run without hook
-interception so a single delegated turn doesn't trigger your hook N times. The
-outer sub-agent tool call itself _is_ hooked, so policy like "never let the
-agent spawn sub-agents" still works.
+**Scope**: `PreToolUse` fires on the **top-level agent's** tool calls and on
+**custom subagents'** tool calls, since custom subagents can hold write tools.
+The built-in read-only sub-agents (the `agent` task tool, `agentic_fetch`) run
+without hook interception so a single delegated turn doesn't trigger your hook
+N times. The outer sub-agent tool call itself _is_ hooked, so policy like
+"never let the agent spawn sub-agents" still works.
 
 Hooks are keyed by event name. Only `command` is required, and you can omit
 `matcher` to match all tools.

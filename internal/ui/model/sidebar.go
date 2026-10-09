@@ -100,15 +100,25 @@ func (m *UI) updateSidebarScrollState() {
 	filesSection := m.filesInfo(m.com.Workspace.WorkingDir(), contentWidth, fileChangeCount(m.sessionFiles), true)
 
 	// Build the scrollable content.
-	content := lipgloss.JoinVertical(
-		lipgloss.Left,
-		title,
+	blocks := []string{title}
+	if bc := parentBreadcrumbLine(t, m.subagentColor, m.parentTitle, contentWidth); bc != "" {
+		blocks = append(blocks, bc)
+	}
+	blocks = append(
+		blocks,
 		"",
 		cwd,
 		"",
 		m.modelInfo(contentWidth),
 		"",
 		filesSection,
+	)
+	if len(m.runningSubagents) > 0 {
+		subagentsSection := m.subagentsInfo(contentWidth, len(m.runningSubagents), true)
+		blocks = append(blocks, "", subagentsSection)
+	}
+	blocks = append(
+		blocks,
 		"",
 		lspSection,
 		"",
@@ -116,6 +126,7 @@ func (m *UI) updateSidebarScrollState() {
 		"",
 		skillsSection,
 	)
+	content := lipgloss.JoinVertical(lipgloss.Left, blocks...)
 
 	totalLines := strings.Count(content, "\n") + 1
 	m.sidebarContent = content

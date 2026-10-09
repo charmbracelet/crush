@@ -1,0 +1,231 @@
+package subagents
+
+import (
+	"context"
+	"path/filepath"
+	"slices"
+	"strings"
+	"sync"
+
+	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/home"
+	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/skills"
+)
+
+// Manager owns per-workspace subagent discovery state: the latest discovery
+// snapshot, the full subagent metadata, and a pubsub broker for change events.
+// There is exactly one Manager per workspace.
+type Manager struct {
+	mu              sync.RWMutex
+	allSubagents    []*Subagent
+	activeSubagents []*Subagent
+	states          []*SubagentState
+
+	// rediscoverMu serializes Rediscover's discover-then-apply.
+	rediscoverMu sync.Mutex
+
+	broker *pubsub.Broker[Event]
+}
+
+// NewManager constructs a workspace-scoped Manager with the given
+// pre-computed discovery results. The slices are stored as-is; callers
+// should not mutate them afterwards.
+func NewManager(all, active []*Subagent, states []*SubagentState) *Manager {
+	return &Manager{
+		allSubagents:    all,
+		activeSubagents: active,
+		states:          states,
+		broker:          pubsub.NewBroker[Event](),
+	}
+}
+
+// AllSubagents returns a copy of the deduplicated list of all discovered
+// subagents. The returned slice is safe for the caller to mutate.
+func (m *Manager) AllSubagents() []*Subagent {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return cloneSubagents(m.allSubagents)
+}
+
+// ActiveSubagents returns a copy of the post-filter list of active subagents
+// (after removing disabled entries). The returned slice is safe for the caller
+// to mutate.
+func (m *Manager) ActiveSubagents() []*Subagent {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return cloneSubagents(m.activeSubagents)
+}
+
+// States returns a clone of the latest discovery state snapshot.
+func (m *Manager) States() []*SubagentState {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return cloneStates(m.states)
+}
+
+// SubscribeEvents returns a channel of discovery events for the
+// manager's workspace.
+func (m *Manager) SubscribeEvents(ctx context.Context) <-chan pubsub.Event[Event] {
+	if m == nil || m.broker == nil {
+		ch := make(chan pubsub.Event[Event])
+		close(ch)
+		return ch
+	}
+	return m.broker.Subscribe(ctx)
+}
+
+// Reload atomically replaces the manager's allSubagents, activeSubagents, and
+// states with the provided slices, then publishes an UpdatedEvent to
+// subscribers. It is a no-op when m is nil.
+func (m *Manager) Reload(all, active []*Subagent, states []*SubagentState) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.allSubagents = cloneSubagents(all)
+	m.activeSubagents = cloneSubagents(active)
+	m.states = cloneStates(states)
+	m.mu.Unlock()
+	m.broker.Publish(pubsub.UpdatedEvent, Event{States: cloneStates(states)})
+}
+
+// Rediscover runs DiscoverFromConfig on cfg() and applies the result. Calls
+// are serialized end to end, so a discovery that read newer config is never
+// overwritten by an older one that finished later. It is a no-op when m is
+// nil.
+func (m *Manager) Rediscover(cfg func() DiscoveryConfig) {
+	if m == nil {
+		return
+	}
+	m.rediscoverMu.Lock()
+	defer m.rediscoverMu.Unlock()
+	m.Reload(DiscoverFromConfig(cfg()))
+}
+
+// Shutdown releases broker resources. It is a no-op when m is nil, matching
+// SubscribeEvents and Reload — app.New documents that the manager may be nil.
+func (m *Manager) Shutdown() {
+	if m == nil {
+		return
+	}
+	if m.broker != nil {
+		m.broker.Shutdown()
+	}
+}
+
+// DiscoveryConfig contains the inputs DiscoverFromConfig needs.
+type DiscoveryConfig struct {
+	SubagentsPaths    []string
+	DisabledSubagents []string
+	// Resolver expands $VAR-style references in paths. May be nil.
+	Resolver func(string) (string, error)
+	// ValidateModel checks that a model id (anything other than the
+	// "large"/"small" aliases) resolves to exactly one provider model. May be
+	// nil during discovery in contexts where the config is not yet loaded; in
+	// that case model-id validation is skipped.
+	ValidateModel func(provider, model string) error
+	// IsKnownSkill validates that a `skills:` frontmatter reference resolves
+	// to an active skill, so a broken reference surfaces in the Library UI
+	// instead of being silently dropped at dispatch time. May be nil when no
+	// skills context is available; in that case the check is skipped.
+	IsKnownSkill func(name string) bool
+	// IsKnownMCP validates that an `mcpServers:` reference names a
+	// configured MCP server. May be nil, skipping the check.
+	IsKnownMCP func(name string) bool
+}
+
+// DiscoveryConfigFromStore adapts a config store (plus the workspace's skills
+// manager, which may be nil) into the DiscoveryConfig DiscoverFromConfig
+// consumes. Shared by startup discovery (cmd, backend) and Library reloads so
+// the discovery inputs cannot drift between call sites.
+func DiscoveryConfigFromStore(store *config.ConfigStore, skillsMgr *skills.Manager) DiscoveryConfig {
+	opts := store.Config().Options
+	var paths, disabled []string
+	if opts != nil {
+		paths = opts.SubagentsPaths
+		disabled = config.EffectiveDisabledSubagents(opts)
+	}
+	var resolver func(string) (string, error)
+	if r := store.Resolver(); r != nil {
+		resolver = r.ResolveValue
+	}
+	return DiscoveryConfig{
+		SubagentsPaths:    paths,
+		DisabledSubagents: disabled,
+		Resolver:          resolver,
+		ValidateModel:     store.Config().ValidateModel,
+		IsKnownSkill:      knownSkillFunc(skillsMgr),
+		IsKnownMCP: func(name string) bool {
+			_, ok := store.Config().MCP[name]
+			return ok
+		},
+	}
+}
+
+// knownSkillFunc returns a name-membership check over the manager's active,
+// model-invocable skills at call time, or nil when no manager is available
+// (skipping skill validation). Skills that disable model invocation are
+// excluded: a subagent pinning one would pass validation only to have the
+// skill silently skipped at dispatch, so the pin fails discovery instead.
+func knownSkillFunc(mgr *skills.Manager) func(name string) bool {
+	if mgr == nil {
+		return nil
+	}
+	names := make(map[string]bool)
+	for _, s := range mgr.ActiveSkills() {
+		if !s.DisableModelInvocation {
+			names[s.Name] = true
+		}
+	}
+	return func(name string) bool { return names[name] }
+}
+
+// ResolvePaths expands home-directory and $VAR references in SubagentsPaths.
+// Spellings of the same directory (a user's "~/.config/crush/subagents" and
+// the expanded default) collapse to their last occurrence, so the directory
+// is walked once and later-path precedence still holds.
+func (c DiscoveryConfig) ResolvePaths() []string {
+	if len(c.SubagentsPaths) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(c.SubagentsPaths))
+	for _, pth := range c.SubagentsPaths {
+		expanded := home.Long(pth)
+		if strings.HasPrefix(expanded, "$") && c.Resolver != nil {
+			if resolved, err := c.Resolver(expanded); err == nil {
+				expanded = resolved
+			}
+		}
+		out = append(out, filepath.Clean(expanded))
+	}
+	seen := make(map[string]bool, len(out))
+	deduped := make([]string, 0, len(out))
+	for _, pth := range slices.Backward(out) {
+		if !seen[pth] {
+			seen[pth] = true
+			deduped = append(deduped, pth)
+		}
+	}
+	slices.Reverse(deduped)
+	return deduped
+}
+
+// DiscoverFromConfig walks every path in cfg.SubagentsPaths (after home / env
+// expansion), then dedups and filters by cfg.DisabledSubagents. It returns the
+// three slices the rest of the system needs:
+//
+//   - all:    deduplicated, pre-filter (includes disabled).
+//   - active: post-filter (DisabledSubagents removed).
+//   - states: per-file discovery outcome for diagnostics/UI.
+func DiscoverFromConfig(cfg DiscoveryConfig) (all, active []*Subagent, states []*SubagentState) {
+	userPaths := cfg.ResolvePaths()
+	discovered, allStates := DiscoverWithStates(userPaths, cfg.ValidateModel, cfg.IsKnownSkill, cfg.IsKnownMCP)
+	all = Deduplicate(discovered)
+	active = Filter(all, cfg.DisabledSubagents)
+	allStates = DeduplicateStates(allStates)
+	slices.SortStableFunc(allStates, func(a, b *SubagentState) int {
+		return comparePaths(a.Path, b.Path)
+	})
+	return all, active, allStates
+}

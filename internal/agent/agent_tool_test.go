@@ -1,0 +1,826 @@
+package agent
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"sync"
+	"testing"
+	"time"
+
+	"charm.land/catwalk/pkg/catwalk"
+	"charm.land/fantasy"
+	"charm.land/fantasy/providers/openaicompat"
+	"github.com/charmbracelet/crush/internal/agent/tools"
+	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/subagents"
+	"github.com/stretchr/testify/require"
+)
+
+func TestBuildAgentDispatchInfo_NoSubagents(t *testing.T) {
+	t.Parallel()
+
+	info := buildAgentDispatchInfo(nil, nil)
+
+	require.Equal(t, "agent", info.Name)
+	require.True(t, info.Parallel)
+	require.Contains(t, info.Required, "prompt")
+
+	subagentTypeParam, ok := info.Parameters["subagent_type"]
+	require.True(t, ok, "Parameters should have a subagent_type key")
+
+	paramMap, ok := subagentTypeParam.(map[string]any)
+	require.True(t, ok, "subagent_type parameter should be a map[string]any")
+
+	enum, ok := paramMap["enum"]
+	require.True(t, ok, "subagent_type parameter should have an enum key")
+
+	enumSlice, ok := enum.([]string)
+	require.True(t, ok, "enum should be a []string")
+	require.Contains(t, enumSlice, "task")
+}
+
+func TestBuildAgentDispatchInfo_WithSubagents(t *testing.T) {
+	t.Parallel()
+
+	activeSubagents := []*subagents.Subagent{
+		{Name: "code-reviewer", Description: "Reviews code"},
+		{Name: "tester", Description: "Writes tests"},
+	}
+
+	info := buildAgentDispatchInfo(activeSubagents, nil)
+
+	subagentTypeParam, ok := info.Parameters["subagent_type"]
+	require.True(t, ok, "Parameters should have a subagent_type key")
+
+	paramMap, ok := subagentTypeParam.(map[string]any)
+	require.True(t, ok, "subagent_type parameter should be a map[string]any")
+
+	enum, ok := paramMap["enum"]
+	require.True(t, ok, "subagent_type parameter should have an enum key")
+
+	enumSlice, ok := enum.([]string)
+	require.True(t, ok, "enum should be a []string")
+	require.Contains(t, enumSlice, "task")
+	require.Contains(t, enumSlice, "code-reviewer")
+	require.Contains(t, enumSlice, "tester")
+
+	// subagent descriptions should appear in the subagent_type parameter description
+	desc, ok := paramMap["description"]
+	require.True(t, ok, "subagent_type parameter should have a description key")
+	descStr, ok := desc.(string)
+	require.True(t, ok, "description should be a string")
+	require.Contains(t, descStr, "Reviews code")
+	require.Contains(t, descStr, "Writes tests")
+}
+
+func TestBuildAgentDispatchInfo_PromptRequired(t *testing.T) {
+	t.Parallel()
+
+	info := buildAgentDispatchInfo(nil, nil)
+
+	require.Contains(t, info.Required, "prompt")
+
+	// subagent_type is optional — should NOT appear in Required
+	for _, r := range info.Required {
+		require.NotEqual(t, "subagent_type", r, "subagent_type should not be required")
+	}
+}
+
+// dispatcherTool tests — exercise the struct's Run and Info methods without a
+// full coordinator. The dispatch closure is injected so no provider setup needed.
+
+func TestDispatcherTool_Info_ReturnsBuildInfo(t *testing.T) {
+	t.Parallel()
+
+	info := buildAgentDispatchInfo([]*subagents.Subagent{{Name: "my-agent", Description: "Does stuff"}}, nil)
+	dt := &dispatcherTool{info: info}
+
+	got := dt.Info()
+	require.Equal(t, "agent", got.Name)
+	require.True(t, got.Parallel)
+}
+
+func TestDispatcherTool_Run_ParsesJSONAndCallsDispatch(t *testing.T) {
+	t.Parallel()
+
+	var capturedParams AgentParams
+	dt := &dispatcherTool{
+		info: buildAgentDispatchInfo(nil, nil),
+		dispatch: func(_ context.Context, params AgentParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			capturedParams = params
+			return fantasy.NewTextResponse("ok"), nil
+		},
+	}
+
+	input, _ := json.Marshal(AgentParams{SubagentType: "my-agent", Prompt: "do the thing"})
+	resp, err := dt.Run(context.Background(), fantasy.ToolCall{Input: string(input)})
+
+	require.NoError(t, err)
+	require.False(t, resp.IsError)
+	require.Equal(t, "my-agent", capturedParams.SubagentType)
+	require.Equal(t, "do the thing", capturedParams.Prompt)
+}
+
+func TestDispatcherTool_Run_InvalidJSON_ReturnsErrorResponse(t *testing.T) {
+	t.Parallel()
+
+	dt := &dispatcherTool{
+		info: buildAgentDispatchInfo(nil, nil),
+		dispatch: func(_ context.Context, _ AgentParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			t.Fatal("dispatch should not be called for invalid JSON")
+			return fantasy.ToolResponse{}, nil
+		},
+	}
+
+	resp, err := dt.Run(context.Background(), fantasy.ToolCall{Input: "not-valid-json{"})
+
+	require.NoError(t, err) // errors are surfaced as error responses, not Go errors
+	require.True(t, resp.IsError)
+}
+
+func TestDispatcherTool_Run_EmptySubagentType_RoutesToTask(t *testing.T) {
+	t.Parallel()
+
+	var capturedParams AgentParams
+	dt := &dispatcherTool{
+		info: buildAgentDispatchInfo(nil, nil),
+		dispatch: func(_ context.Context, params AgentParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			capturedParams = params
+			return fantasy.NewTextResponse("ok"), nil
+		},
+	}
+
+	input, _ := json.Marshal(AgentParams{Prompt: "search for something"})
+	_, err := dt.Run(context.Background(), fantasy.ToolCall{Input: string(input)})
+
+	require.NoError(t, err)
+	require.Empty(t, capturedParams.SubagentType) // dispatch receives params as-is; routing is in the closure
+}
+
+func TestDispatcherTool_ProviderOptions_RoundTrip(t *testing.T) {
+	t.Parallel()
+
+	dt := &dispatcherTool{info: buildAgentDispatchInfo(nil, nil)}
+	require.Nil(t, dt.ProviderOptions())
+
+	opts := fantasy.ProviderOptions{}
+	dt.SetProviderOptions(opts)
+	require.NotNil(t, dt.ProviderOptions())
+}
+
+func TestFindSubagentByName(t *testing.T) {
+	t.Parallel()
+
+	active := []*subagents.Subagent{
+		{Name: "alpha"},
+		{Name: "beta"},
+	}
+
+	require.NotNil(t, findSubagentByName(active, "alpha"))
+	require.Equal(t, "alpha", findSubagentByName(active, "alpha").Name)
+	require.Equal(t, "beta", findSubagentByName(active, "beta").Name)
+	require.Nil(t, findSubagentByName(active, "missing"))
+	require.Nil(t, findSubagentByName(active, ""))
+	require.Nil(t, findSubagentByName(nil, "alpha"))
+}
+
+// TestDispatcherTool_Run_UnknownSubagent_ReturnsErrorResponse exercises the
+// dispatcher routing for a subagent_type not in the active list. The closure
+// here mirrors the lookup performed by (*coordinator).agentTool.
+func TestDispatcherTool_Run_UnknownSubagent_ReturnsErrorResponse(t *testing.T) {
+	t.Parallel()
+
+	active := []*subagents.Subagent{
+		{Name: "code-reviewer", Description: "ok"},
+	}
+
+	dt := &dispatcherTool{
+		info: buildAgentDispatchInfo(active, nil),
+		dispatch: func(_ context.Context, params AgentParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			sa := findSubagentByName(active, params.SubagentType)
+			if sa == nil {
+				return fantasy.NewTextErrorResponse("unknown subagent type: \"" + params.SubagentType + "\""), nil
+			}
+			return fantasy.NewTextResponse("would have run " + sa.Name), nil
+		},
+	}
+
+	input, _ := json.Marshal(AgentParams{SubagentType: "imaginary", Prompt: "do thing"})
+	resp, err := dt.Run(context.Background(), fantasy.ToolCall{Input: string(input)})
+
+	require.NoError(t, err)
+	require.True(t, resp.IsError)
+}
+
+// TestAgentTool_SubagentToolsCappedByOwner verifies that a custom subagent's
+// tool pool is capped by the AllowedTools of the agent that dispatched it
+// (the "owner" passed to agentTool), not always the coder's full tool set.
+// In plan mode the plan agent's read-only tool pool owns the dispatcher, so
+// its subagents must not inherit coder-only tools such as edit/write/bash.
+//
+// The dispatcher is built with the plan agent's config as owner. The custom
+// subagent has no tools:/disallowed_tools: restrictions of its own, so its
+// effective tool pool is exactly what ToConfigAgent copies from the owner.
+// The subagent is actually dispatched end-to-end against a local fake
+// OpenAI-compatible server so the real request payload's tool list — the
+// ground truth for what the built agent could actually call — can be
+// inspected directly, rather than trusting an intermediate config value.
+func TestAgentTool_SubagentToolsCappedByOwner(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+
+	var (
+		mu        sync.Mutex
+		sawTools  bool
+		toolNames []string
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var payload struct {
+			Tools []struct {
+				Function struct {
+					Name string `json:"name"`
+				} `json:"function"`
+			} `json:"tools"`
+		}
+		_ = json.Unmarshal(body, &payload)
+		if len(payload.Tools) > 0 {
+			mu.Lock()
+			if !sawTools {
+				sawTools = true
+				for _, tl := range payload.Tools {
+					toolNames = append(toolNames, tl.Function.Name)
+				}
+			}
+			mu.Unlock()
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"id\":\"z\",\"created\":1,\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"ok\"},\"finish_reason\":null}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"id\":\"z\",\"created\":1,\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"id\":\"z\",\"created\":1,\"model\":\"m\",\"choices\":[],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+
+	cfg, err := config.Init(env.workingDir, "", false)
+	require.NoError(t, err)
+
+	const (
+		providerID = "test-openai-compat"
+		modelID    = "test-model"
+	)
+	cfg.Config().Providers.Set(providerID, config.ProviderConfig{
+		ID:      providerID,
+		Name:    "Test",
+		Type:    openaicompat.Name,
+		BaseURL: srv.URL,
+		APIKey:  "test",
+		Models:  []catwalk.Model{{ID: modelID, DefaultMaxTokens: 4096}},
+	})
+	selected := config.SelectedModel{Provider: providerID, Model: modelID}
+	cfg.Config().Models[config.SelectedModelTypeLarge] = selected
+	cfg.Config().Models[config.SelectedModelTypeSmall] = selected
+	cfg.SetupAgents()
+
+	// Coder/task are irrelevant to this test; clear their AllowedTools like
+	// newOfflineCoordinator does, keeping the run cheap.
+	for _, agentID := range []string{config.AgentCoder, config.AgentTask} {
+		a := cfg.Config().Agents[agentID]
+		a.AllowedTools = nil
+		cfg.Config().Agents[agentID] = a
+	}
+
+	c, err := NewCoordinator(t.Context(), CoordinatorOptions{
+		Config:      cfg,
+		Sessions:    env.sessions,
+		Messages:    env.messages,
+		Permissions: permission.NewPermissionService(env.workingDir, true, nil),
+	})
+	require.NoError(t, err)
+	coord := c.(*coordinator)
+	require.NoError(t, coord.readyWg.Wait())
+
+	owner := cfg.Config().Agents[config.AgentPlan]
+	require.Contains(t, owner.AllowedTools, AgentToolName,
+		"precondition: the plan agent must retain the dispatcher tool")
+	require.NotContains(t, owner.AllowedTools, "edit")
+	require.NotContains(t, owner.AllowedTools, "write")
+	require.NotContains(t, owner.AllowedTools, "bash")
+
+	coord.activeSubagents = []*subagents.Subagent{
+		{Name: "custom", Description: "a custom subagent with no tool restrictions of its own"},
+	}
+
+	tool, err := coord.agentTool(t.Context(), owner)
+	require.NoError(t, err)
+	dt := tool.(*dispatcherTool)
+
+	parentSession, err := env.sessions.Create(t.Context(), "Parent")
+	require.NoError(t, err)
+
+	runCtx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	ctx := context.WithValue(runCtx, tools.SessionIDContextKey, parentSession.ID)
+	ctx = context.WithValue(ctx, tools.MessageIDContextKey, "msg-1")
+
+	input, err := json.Marshal(AgentParams{SubagentType: "custom", Prompt: "do something"})
+	require.NoError(t, err)
+
+	_, err = dt.Run(ctx, fantasy.ToolCall{ID: "call-1", Input: string(input)})
+	require.NoError(t, err)
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.True(t, sawTools, "expected at least one request carrying a tool list")
+	require.NotContains(t, toolNames, "edit",
+		"a subagent's tools must be capped by the dispatching (owner) agent's AllowedTools, not the coder's")
+	require.NotContains(t, toolNames, "write")
+	require.NotContains(t, toolNames, "bash")
+}
+
+// recordingPermissions stubs permission.Service to capture
+// AutoApproveSession calls for subagent dispatch tests. All other methods
+// are no-ops or return zero values.
+type recordingPermissions struct {
+	permission.Service
+	autoApproved []string
+}
+
+func (r *recordingPermissions) AutoApproveSession(sessionID string) {
+	r.autoApproved = append(r.autoApproved, sessionID)
+}
+
+func TestSubagentSessionSetup(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil_when_no_bypass", func(t *testing.T) {
+		t.Parallel()
+		c := &coordinator{}
+		require.Nil(t, c.subagentSessionSetup(&subagents.Subagent{Name: "a"}))
+		require.Nil(t, c.subagentSessionSetup(&subagents.Subagent{Name: "a", PermissionMode: subagents.PermissionModeDefault}))
+	})
+
+	t.Run("bypass_calls_auto_approve", func(t *testing.T) {
+		t.Parallel()
+		rec := &recordingPermissions{}
+		c := &coordinator{permissions: rec}
+		sa := &subagents.Subagent{Name: "a", PermissionMode: subagents.PermissionModeBypassPermissions}
+
+		setup := c.subagentSessionSetup(sa)
+		require.NotNil(t, setup)
+
+		setup("session-123")
+		require.Equal(t, []string{"session-123"}, rec.autoApproved)
+	})
+}
+
+// TestAgentTool_SubagentBuildFailure_SurfacedAsToolError verifies that when a
+// named subagent fails to build (because its model: names a model no provider
+// offers), the dispatcher returns a ToolResponse with IsError==true and a nil
+// Go error. A nil Go error is critical: fantasy treats a non-nil error as a
+// hard abort of the whole agent turn, whereas an error response lets the
+// parent model see the failure and continue.
+func TestAgentTool_SubagentBuildFailure_SurfacedAsToolError(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+
+	// Build a minimal offline config with one provider and one model, mirroring
+	// agenttest.NewCoordinator so no network call is needed.
+	cfg, err := config.Init(env.workingDir, "", false)
+	require.NoError(t, err)
+
+	const (
+		providerID = "test-openai-compat"
+		modelID    = "test-model"
+	)
+	cfg.Config().Providers.Set(providerID, config.ProviderConfig{
+		ID:      providerID,
+		Name:    "Test",
+		Type:    openaicompat.Name,
+		BaseURL: "http://127.0.0.1:0/v1",
+		APIKey:  "test",
+		Models:  []catwalk.Model{{ID: modelID, DefaultMaxTokens: 4096}},
+	})
+	selected := config.SelectedModel{Provider: providerID, Model: modelID}
+	cfg.Config().Models[config.SelectedModelTypeLarge] = selected
+	cfg.Config().Models[config.SelectedModelTypeSmall] = selected
+	cfg.SetupAgents()
+
+	// Clear AllowedTools on both agents so buildTools stays cheap and offline.
+	for _, agentID := range []string{config.AgentCoder, config.AgentTask} {
+		a := cfg.Config().Agents[agentID]
+		a.AllowedTools = nil
+		cfg.Config().Agents[agentID] = a
+	}
+
+	c, err := NewCoordinator(t.Context(), CoordinatorOptions{
+		Config:      cfg,
+		Sessions:    env.sessions,
+		Messages:    env.messages,
+		Permissions: permission.NewPermissionService(env.workingDir, true, nil),
+	})
+	require.NoError(t, err)
+
+	// Type-assert to *coordinator so we can access unexported fields and methods.
+	coord := c.(*coordinator)
+	// Let NewCoordinator's background builds finish before mutating fields
+	// they read.
+	require.NoError(t, coord.readyWg.Wait())
+
+	// Inject a broken subagent whose model is not offered by any provider.
+	// activeSubagentsList falls back to activeSubagents when subagentsMgr is nil.
+	coord.activeSubagents = []*subagents.Subagent{
+		{Name: "broken", Description: "intentionally broken", Model: "no-such-model"},
+	}
+
+	// Retrieve the real dispatcher tool built by agentTool. The coder agent
+	// dispatches here, so it is the owner whose AllowedTools cap the
+	// subagent's tool pool.
+	coderCfg := cfg.Config().Agents[config.AgentCoder]
+	tool, err := coord.agentTool(t.Context(), coderCfg)
+	require.NoError(t, err)
+
+	dt := tool.(*dispatcherTool)
+
+	// Inject session and message IDs into context; the dispatch closure returns
+	// a hard error when either is absent, which is a different code path.
+	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "sess-1")
+	ctx = context.WithValue(ctx, tools.MessageIDContextKey, "msg-1")
+
+	input, err := json.Marshal(AgentParams{SubagentType: "broken", Prompt: "do it"})
+	require.NoError(t, err)
+
+	resp, err := dt.Run(ctx, fantasy.ToolCall{ID: "call-1", Input: string(input)})
+
+	// The turn must not abort: fantasy treats a non-nil error as critical.
+	require.NoError(t, err)
+	// The build failure must be surfaced as a tool-error response so the
+	// parent model can report it and continue.
+	require.True(t, resp.IsError)
+	// The subagent name must appear in the error message.
+	require.Contains(t, resp.Content, "broken")
+}
+
+// stubRequestPermissions stubs permission.Service to record Request calls and
+// return a configured answer. All other methods are inherited (nil) and must
+// not be called by the code under test.
+type stubRequestPermissions struct {
+	permission.Service
+	requests []permission.CreatePermissionRequest
+	grant    bool
+}
+
+func (s *stubRequestPermissions) Request(_ context.Context, opts permission.CreatePermissionRequest) (bool, error) {
+	s.requests = append(s.requests, opts)
+	return s.grant, nil
+}
+
+// TestConfirmBypassPermissions verifies the per-dispatch confirmation gate for
+// permissionMode: bypassPermissions. User-scope (global-dir) definitions pass
+// without a prompt; anything else — which can arrive with a cloned repository
+// — requires an explicit user confirmation on every dispatch, and a denial
+// blocks the dispatch with a tool-error response.
+//
+// Not parallel: subtests pin the global subagents dir via CRUSH_SUBAGENTS_DIR
+// so scope detection is hermetic.
+func TestConfirmBypassPermissions(t *testing.T) {
+	globalDir := t.TempDir()
+	projectDir := t.TempDir()
+	t.Setenv("CRUSH_SUBAGENTS_DIR", globalDir)
+
+	t.Run("no bypass mode never prompts", func(t *testing.T) {
+		perms := &stubRequestPermissions{grant: false}
+		c := &coordinator{permissions: perms}
+		sa := &subagents.Subagent{Name: "plain", FilePath: filepath.Join(projectDir, "plain.md")}
+
+		_, ok := c.confirmBypassPermissions(t.Context(), sa, "sess", "call")
+		require.True(t, ok)
+		require.Empty(t, perms.requests)
+	})
+
+	t.Run("user-scoped bypass never prompts", func(t *testing.T) {
+		perms := &stubRequestPermissions{grant: false}
+		c := &coordinator{permissions: perms}
+		sa := &subagents.Subagent{
+			Name:           "trusted",
+			PermissionMode: subagents.PermissionModeBypassPermissions,
+			FilePath:       filepath.Join(globalDir, "trusted.md"),
+		}
+
+		_, ok := c.confirmBypassPermissions(t.Context(), sa, "sess", "call")
+		require.True(t, ok)
+		require.Empty(t, perms.requests)
+	})
+
+	t.Run("project-scoped bypass denied blocks dispatch", func(t *testing.T) {
+		perms := &stubRequestPermissions{grant: false}
+		c := &coordinator{permissions: perms}
+		sa := &subagents.Subagent{
+			Name:           "repo-agent",
+			PermissionMode: subagents.PermissionModeBypassPermissions,
+			FilePath:       filepath.Join(projectDir, ".crush", "subagents", "repo-agent.md"),
+		}
+
+		resp, ok := c.confirmBypassPermissions(t.Context(), sa, "sess", "call")
+		require.False(t, ok)
+		require.True(t, resp.IsError)
+		require.Contains(t, resp.Content, "repo-agent")
+		require.Len(t, perms.requests, 1)
+		require.Equal(t, bypassPermissionsToolName, perms.requests[0].ToolName)
+		require.Equal(t, "repo-agent", perms.requests[0].Action)
+	})
+
+	// An allowlist entry or hook approval for the agent tool must not
+	// answer the bypass prompt: the real service has to ask the user, which
+	// here times out and blocks the dispatch.
+	t.Run("agent allowlist and hook approval do not confirm bypass", func(t *testing.T) {
+		perms := permission.NewPermissionService(projectDir, false, []string{AgentToolName})
+		c := &coordinator{permissions: perms}
+		sa := &subagents.Subagent{
+			Name:           "repo-agent",
+			PermissionMode: subagents.PermissionModeBypassPermissions,
+			FilePath:       filepath.Join(projectDir, ".crush", "subagents", "repo-agent.md"),
+		}
+
+		ctx, cancel := context.WithTimeout(permission.WithHookApproval(t.Context(), "call"), 50*time.Millisecond)
+		defer cancel()
+		_, ok := c.confirmBypassPermissions(ctx, sa, "sess", "call")
+		require.False(t, ok)
+	})
+
+	t.Run("project-scoped bypass granted proceeds", func(t *testing.T) {
+		perms := &stubRequestPermissions{grant: true}
+		c := &coordinator{permissions: perms}
+		sa := &subagents.Subagent{
+			Name:           "repo-agent",
+			PermissionMode: subagents.PermissionModeBypassPermissions,
+			FilePath:       filepath.Join(projectDir, ".crush", "subagents", "repo-agent.md"),
+		}
+
+		_, ok := c.confirmBypassPermissions(t.Context(), sa, "sess", "call")
+		require.True(t, ok)
+		require.Len(t, perms.requests, 1)
+	})
+}
+
+// TestAgentTool_TaskDispatch_BuildsOnLocalGroup verifies the task path of the
+// dispatcher end-to-end with a real (offline) coordinator: the dispatch waits
+// for the task agent's local build group before running, the run failure
+// (unreachable provider) surfaces as a tool-error response rather than a turn
+// abort, and the coordinator-wide readyWg stays clean throughout — a task
+// build living on readyWg would risk both a promptless start and a sticky
+// error failing every later turn.
+func TestAgentTool_TaskDispatch_BuildsOnLocalGroup(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	coord := newOfflineCoordinator(t, env)
+	require.NoError(t, coord.readyWg.Wait())
+
+	parentSession, err := env.sessions.Create(t.Context(), "Parent")
+	require.NoError(t, err)
+
+	coderCfg := coord.cfg.Config().Agents[config.AgentCoder]
+	tool, err := coord.agentTool(t.Context(), coderCfg)
+	require.NoError(t, err)
+	dt := tool.(*dispatcherTool)
+
+	// Deadline-bound: the unreachable provider is retried with backoff, and
+	// without a deadline the failure takes over a minute to surface.
+	runCtx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	ctx := context.WithValue(runCtx, tools.SessionIDContextKey, parentSession.ID)
+	ctx = context.WithValue(ctx, tools.MessageIDContextKey, "msg-1")
+
+	input, err := json.Marshal(AgentParams{Prompt: "find something"})
+	require.NoError(t, err)
+
+	resp, err := dt.Run(ctx, fantasy.ToolCall{ID: "call-1", Input: string(input)})
+
+	require.NoError(t, err, "a task run failure must not abort the turn")
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "Failed to generate response")
+	require.NoError(t, coord.readyWg.Wait(), "the coordinator-wide readyWg must stay clean after a task dispatch")
+}
+
+// TestAgentTool_TaskBuildFailureIsRetryable verifies that a failed task-agent
+// build does not stick for the tool's lifetime: once the config problem is
+// fixed, the next dispatch builds and runs instead of replaying the cached
+// error (sync.Once semantics would fail every later dispatch the same way).
+func TestBuildAgentDispatchInfo_ModelParams(t *testing.T) {
+	t.Parallel()
+
+	info := buildAgentDispatchInfo(nil, map[config.SelectedModelType]config.SelectedModel{
+		config.SelectedModelTypeLarge: {Provider: "p", Model: "big-model"},
+		config.SelectedModelTypeSmall: {Provider: "p", Model: "tiny-model"},
+	})
+
+	modelParam, ok := info.Parameters["model"].(map[string]any)
+	require.True(t, ok)
+	desc, _ := modelParam["description"].(string)
+	require.Contains(t, desc, `"big-model"`)
+	require.Contains(t, desc, `"tiny-model"`)
+	require.Contains(t, desc, "ONLY when the user explicitly asks")
+	require.Contains(t, info.Parameters, "provider")
+	require.Equal(t, []string{"prompt"}, info.Required)
+}
+
+// TestAgentTool_DispatchModelOverride checks that a dispatch-time model wins
+// over the task default and a subagent's frontmatter, and that a bad choice is
+// a tool error telling the model to ask the user.
+func TestAgentTool_DispatchModelOverride(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	coord := newOfflineCoordinator(t, env)
+	require.NoError(t, coord.readyWg.Wait())
+
+	// Offer a second model so an override has something valid to resolve.
+	p, ok := coord.cfg.Config().Providers.Get("test-openai-compat")
+	require.True(t, ok)
+	p.Models = append(p.Models, catwalk.Model{ID: "other-model", DefaultMaxTokens: 4096})
+	coord.cfg.Config().Providers.Set(p.ID, p)
+	coord.activeSubagents = []*subagents.Subagent{
+		{Name: "broken", Description: "bad frontmatter model", Model: "no-such-model"},
+		{Name: "rev", Description: "valid frontmatter model"},
+	}
+
+	parentSession, err := env.sessions.Create(t.Context(), "Parent")
+	require.NoError(t, err)
+	tool, err := coord.agentTool(t.Context(), coord.cfg.Config().Agents[config.AgentCoder])
+	require.NoError(t, err)
+	dt := tool.(*dispatcherTool)
+
+	tests := []struct {
+		name   string
+		params AgentParams
+		want   []string
+	}{
+		{
+			name:   "task_unknown_model_asks_user",
+			params: AgentParams{Prompt: "x", Model: "other"},
+			want:   []string{"build task agent", "similar: other-model", askUserForModel},
+		},
+		{
+			name:   "provider_without_model_asks_user",
+			params: AgentParams{Prompt: "x", Provider: "test-openai-compat"},
+			want:   []string{"provider requires model", askUserForModel},
+		},
+		{
+			// Builds on the requested model and runs; the run then fails on
+			// the unreachable provider.
+			name:   "task_valid_model_runs",
+			params: AgentParams{Prompt: "x", Model: "other-model"},
+			want:   []string{"Failed to generate response"},
+		},
+		{
+			name:   "param_overrides_bad_frontmatter",
+			params: AgentParams{SubagentType: "broken", Prompt: "x", Model: "other-model"},
+			want:   []string{"Failed to generate response"},
+		},
+		{
+			name:   "alias_with_provider_asks_user",
+			params: AgentParams{Prompt: "x", Model: "large", Provider: "test-openai-compat"},
+			want:   []string{"provider requires a specific model id", askUserForModel},
+		},
+		{
+			name:   "subagent_unknown_model_asks_user",
+			params: AgentParams{SubagentType: "rev", Prompt: "x", Model: "no-such-model"},
+			want:   []string{`build subagent "rev"`, askUserForModel},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			// Deadline-bound: the unreachable provider is retried with backoff.
+			runCtx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+			defer cancel()
+			ctx := context.WithValue(runCtx, tools.SessionIDContextKey, parentSession.ID)
+			ctx = context.WithValue(ctx, tools.MessageIDContextKey, "msg-1")
+
+			input, err := json.Marshal(tt.params)
+			require.NoError(t, err)
+			resp, err := dt.Run(ctx, fantasy.ToolCall{ID: "call-" + tt.name, Input: string(input)})
+			require.NoError(t, err)
+			require.True(t, resp.IsError)
+			for _, w := range tt.want {
+				require.Contains(t, resp.Content, w)
+			}
+		})
+	}
+}
+
+// TestAgentTool_BuildFailureUnrelatedToModel verifies that a build failure
+// not caused by the requested model does not tell the LLM to ask the user
+// for a model.
+func TestAgentTool_BuildFailureUnrelatedToModel(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	coord := newOfflineCoordinator(t, env)
+	require.NoError(t, coord.readyWg.Wait())
+	tool, err := coord.agentTool(t.Context(), coord.cfg.Config().Agents[config.AgentCoder])
+	require.NoError(t, err)
+	parentSession, err := env.sessions.Create(t.Context(), "Parent")
+	require.NoError(t, err)
+
+	// Break the small model, which every build needs.
+	delete(coord.cfg.Config().Models, config.SelectedModelTypeSmall)
+
+	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, parentSession.ID)
+	ctx = context.WithValue(ctx, tools.MessageIDContextKey, "msg-1")
+	input, err := json.Marshal(AgentParams{Prompt: "x", Model: "test-model"})
+	require.NoError(t, err)
+	resp, err := tool.Run(ctx, fantasy.ToolCall{ID: "call-1", Input: string(input)})
+	require.NoError(t, err)
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "build task agent")
+	require.NotContains(t, resp.Content, askUserForModel)
+}
+
+// TestAgentTool_BypassConfirmAfterBuild verifies a bypassPermissions
+// subagent whose build fails never asks for the bypass approval, so a retry
+// after the user picks a model doesn't ask twice.
+func TestAgentTool_BypassConfirmAfterBuild(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	coord := newOfflineCoordinator(t, env)
+	require.NoError(t, coord.readyWg.Wait())
+	perms := &stubRequestPermissions{grant: true}
+	coord.permissions = perms
+	coord.activeSubagents = []*subagents.Subagent{{
+		Name:           "byp",
+		Description:    "bypass subagent",
+		PermissionMode: subagents.PermissionModeBypassPermissions,
+		FilePath:       filepath.Join(env.workingDir, ".crush", "subagents", "byp.md"),
+	}}
+	tool, err := coord.agentTool(t.Context(), coord.cfg.Config().Agents[config.AgentCoder])
+	require.NoError(t, err)
+	parentSession, err := env.sessions.Create(t.Context(), "Parent")
+	require.NoError(t, err)
+
+	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, parentSession.ID)
+	ctx = context.WithValue(ctx, tools.MessageIDContextKey, "msg-1")
+	input, err := json.Marshal(AgentParams{SubagentType: "byp", Prompt: "x", Model: "no-such-model"})
+	require.NoError(t, err)
+	resp, err := tool.Run(ctx, fantasy.ToolCall{ID: "call-1", Input: string(input)})
+	require.NoError(t, err)
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, `build subagent "byp"`)
+	require.Empty(t, perms.requests)
+}
+
+func TestAgentTool_TaskBuildFailureIsRetryable(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	coord := newOfflineCoordinator(t, env)
+	require.NoError(t, coord.readyWg.Wait())
+
+	parentSession, err := env.sessions.Create(t.Context(), "Parent")
+	require.NoError(t, err)
+
+	coderCfg := coord.cfg.Config().Agents[config.AgentCoder]
+	tool, err := coord.agentTool(t.Context(), coderCfg)
+	require.NoError(t, err)
+	dt := tool.(*dispatcherTool)
+
+	input, err := json.Marshal(AgentParams{Prompt: "find something"})
+	require.NoError(t, err)
+
+	// Break the task build: no small model selected.
+	smallModel := coord.cfg.Config().Models[config.SelectedModelTypeSmall]
+	delete(coord.cfg.Config().Models, config.SelectedModelTypeSmall)
+
+	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, parentSession.ID)
+	ctx = context.WithValue(ctx, tools.MessageIDContextKey, "msg-1")
+
+	resp, err := dt.Run(ctx, fantasy.ToolCall{ID: "call-1", Input: string(input)})
+	require.NoError(t, err, "a task build failure must not abort the turn")
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "build task agent")
+
+	// Fix the config; the next dispatch must retry the build instead of
+	// replaying the cached failure.
+	coord.cfg.Config().Models[config.SelectedModelTypeSmall] = smallModel
+
+	runCtx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	ctx = context.WithValue(runCtx, tools.SessionIDContextKey, parentSession.ID)
+	ctx = context.WithValue(ctx, tools.MessageIDContextKey, "msg-2")
+
+	resp, err = dt.Run(ctx, fantasy.ToolCall{ID: "call-2", Input: string(input)})
+	require.NoError(t, err)
+	require.True(t, resp.IsError)
+	require.NotContains(t, resp.Content, "build task agent",
+		"the task build must be retried after a failure, not replay the cached error")
+	require.Contains(t, resp.Content, "Failed to generate response")
+}

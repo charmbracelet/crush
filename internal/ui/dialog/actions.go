@@ -64,14 +64,10 @@ type (
 	ActionSetPermissionLevel struct {
 		Level permission.Level
 	}
-	// ActionSetPurpose switches which agent serves the main turn and leaves
-	// the permission level alone; purpose and level are independent axes.
-	ActionSetPurpose struct {
-		AgentID string
-	}
-	// ActionOpenAutoModeModels opens the models dialog preset to the
-	// auto-mode classifier selection.
-	ActionOpenAutoModeModels      struct{}
+	// ActionCyclePurpose advances the purpose axis one step, the same step
+	// Shift+Tab takes. Like the approval row, the palette keeps showing the
+	// row afterwards so the user can watch the mark move.
+	ActionCyclePurpose            struct{}
 	ActionToggleNotifications     struct{}
 	ActionSelectNotificationStyle struct {
 		Style string

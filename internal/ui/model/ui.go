@@ -2193,11 +2193,6 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		if cmd := m.openDialog(msg.DialogID); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-	case dialog.ActionOpenAutoModeModels:
-		m.dialog.CloseDialog(dialog.CommandsID)
-		if cmd := m.openModelsDialogPreset(dialog.ModelTypeAutoMode); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
 
 	// Command dialog messages.
 	case dialog.ActionCyclePermissionLevel:
@@ -2206,20 +2201,22 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		// The palette stays open and only its approval row redraws, so the user
 		// watches the highlight move to the next option. Closing here would
 		// leave them to take the change on faith.
-		if dia := m.dialog.Dialog(dialog.CommandsID); dia != nil {
-			if commands, ok := dia.(*dialog.Commands); ok {
-				commands.RefreshApprovalMode(level)
+		if m.dialog != nil {
+			if dia := m.dialog.Dialog(dialog.CommandsID); dia != nil {
+				if commands, ok := dia.(*dialog.Commands); ok {
+					commands.RefreshApprovalMode(level)
+				}
 			}
 		}
 	case dialog.ActionSetPermissionLevel:
 		m.setPermissionLevel(msg.Level)
 		cmds = append(cmds, levelBanner(msg.Level))
 		m.dialog.CloseDialog(dialog.CommandsID)
-	case dialog.ActionSetPurpose:
-		if cmd := m.setPurpose(msg.AgentID); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionCyclePurpose:
+		// The switch is an asynchronous round-trip, so the row cannot be
+		// redrawn here: it is redrawn by applyPurposeSwitch, which is the
+		// message that reports the switch actually took effect.
+		cmds = append(cmds, m.cyclePurpose())
 	case dialog.ActionSelectNotificationStyle:
 		cfg := m.com.Config()
 		if cfg != nil && cfg.Options != nil {
@@ -4851,6 +4848,16 @@ func (m *UI) applyPurposeSwitch(msg modeSwitchedMsg) []tea.Cmd {
 	}
 	m.purpose = msg.agentID
 	m.setEditorPrompt()
+	// The palette may still be open behind the switch, so its mode row is
+	// brought in line with the purpose that actually took effect. A UI with no
+	// overlay has no palette to redraw and must not care.
+	if m.dialog != nil {
+		if dia := m.dialog.Dialog(dialog.CommandsID); dia != nil {
+			if commands, ok := dia.(*dialog.Commands); ok {
+				commands.RefreshPurposeMode(msg.agentID)
+			}
+		}
+	}
 	var cmds []tea.Cmd
 	if msg.continueSessionID != "" && m.session != nil && m.session.ID == msg.continueSessionID {
 		cmds = append(cmds, m.sendMessageInternal("Implement the plan.", true))

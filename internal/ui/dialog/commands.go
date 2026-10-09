@@ -25,6 +25,10 @@ const CommandsID = "commands"
 // approval level.
 const approvalCommandID = "approval_mode"
 
+// purposeCommandID identifies the single row that shows and changes which
+// agent serves the main turn.
+const purposeCommandID = "purpose_mode"
+
 // CommandType represents the type of commands being displayed.
 type CommandType uint
 
@@ -56,6 +60,17 @@ func ApprovalSegments(level permission.Level) []Segment {
 	segments := make([]Segment, 0, len(permissionLevelEntries))
 	for _, entry := range permissionLevelEntries {
 		segments = append(segments, Segment{Text: entry.label, Active: entry.level == level})
+	}
+	return segments
+}
+
+// PurposeSegments renders the purpose axis as one row of modes with the one
+// serving the turn marked. The candidates come from the workspace, so a mode
+// added upstream appears here without a TUI change.
+func PurposeSegments(current string, candidates []string) []Segment {
+	segments := make([]Segment, 0, len(candidates))
+	for _, agentID := range candidates {
+		segments = append(segments, Segment{Text: PurposeLabel(agentID), Active: agentID == current})
 	}
 	return segments
 }
@@ -118,10 +133,11 @@ type Commands struct {
 	dockerMCPAvailable     *bool
 	dockerMCPCheckInFlight bool
 
-	// approvalItem is the row that shows and changes the approval level. It is
-	// held so cycling can redraw that one row in place, leaving the user's
-	// filter, scroll position, and cursor where they left them.
+	// approvalItem and purposeItem are the rows that show and change the two
+	// axes. They are held so cycling can redraw one row in place, leaving the
+	// user's filter, scroll position, and cursor where they left them.
 	approvalItem *CommandItem
+	purposeItem  *CommandItem
 }
 
 var _ Dialog = (*Commands)(nil)
@@ -590,11 +606,6 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	notificationLabel := "Notification Style"
 	commands = append(commands, NewCommandItem(c.com.Styles, "select_notifications", notificationLabel, "", ActionOpenDialog{DialogID: NotificationsID}))
 
-	commands = append(
-		commands,
-		NewCommandItem(c.com.Styles, "auto_mode_model", "Auto Mode Model", "", ActionOpenAutoModeModels{}),
-	)
-
 	// Approval axis: one row showing every level with the current one marked.
 	// A row per level read as three unrelated commands and said nothing about
 	// what the alternatives were; one row that cycles says both, and Enter
@@ -608,17 +619,19 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	c.approvalItem = approval
 	commands = append(commands, approval)
 
-	// Purpose axis: one entry per agent that can serve the main turn, read
-	// from the workspace so a purpose added upstream appears here without a
-	// TUI change.
-	currentPurpose := c.com.Workspace.AgentMainID()
-	for _, agentID := range c.com.Workspace.AgentMainCandidates() {
-		label := "Mode: " + PurposeLabel(agentID)
-		if agentID == currentPurpose {
-			label += " (current)"
-		}
-		commands = append(commands, NewCommandItem(c.com.Styles, "set_mode_"+agentID, label, "", ActionSetPurpose{AgentID: agentID}))
-	}
+	// Purpose axis: one row showing every mode with the one serving the turn
+	// marked, cycled with Enter exactly as the approval row is. The modes come
+	// from the workspace, so one added upstream appears here without a TUI
+	// change.
+	purposeSegments := PurposeSegments(c.com.Workspace.AgentMainID(), c.com.Workspace.AgentMainCandidates())
+	purpose := NewCommandItem(
+		c.com.Styles, purposeCommandID, "Mode:", "shift+tab",
+		ActionCyclePurpose{},
+	).WithSegments(purposeSegments...).
+		WithAliases("mode", "purpose", "agent").
+		WithDescription("Enter cycles: " + strings.Join(segmentTexts(purposeSegments), ", "))
+	c.purposeItem = purpose
+	commands = append(commands, purpose)
 
 	commands = append(
 		commands,
@@ -657,6 +670,16 @@ func (c *Commands) RefreshApprovalMode(level permission.Level) {
 		return
 	}
 	c.approvalItem.SetSegments(ApprovalSegments(level))
+}
+
+// RefreshPurposeMode redraws the mode row after a switch lands. The switch is
+// an asynchronous round-trip, so the row is redrawn from the message that
+// reports it rather than when the key was pressed.
+func (c *Commands) RefreshPurposeMode(agentID string) {
+	if c.purposeItem == nil {
+		return
+	}
+	c.purposeItem.SetSegments(PurposeSegments(agentID, c.com.Workspace.AgentMainCandidates()))
 }
 
 // SetCustomCommands sets the custom commands and refreshes the view if user commands are currently displayed.

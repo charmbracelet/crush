@@ -48,11 +48,6 @@
           "type": "boolean",
           "description": "Record session memory at the end of each turn; memory is kept verbatim beside every checkpoint",
           "default": false
-        },
-        "render_from_ledger": {
-          "type": "boolean",
-          "description": "Build compaction checkpoints entirely from recorded session memory",
-          "default": false
         }
       },
       "additionalProperties": false,

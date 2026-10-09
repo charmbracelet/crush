@@ -848,7 +848,6 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		Hooks:                c.hookRunner,
 		Ledger:               c.ledger,
 		ObserveMemory:        c.observesMemory(isSubAgent),
-		RenderFromLedger:     c.rendersFromLedger(isSubAgent),
 	})
 
 	// The readiness goroutines below perform one-time setup — building the
@@ -1009,19 +1008,6 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	filteredTools = wrapToolsWithHooks(filteredTools, c.hookRunner, isSubAgent)
 
 	return filteredTools, nil
-}
-
-// rendersFromLedger reports whether a compaction should build its checkpoint
-// from recorded memory. It shares the ledger-availability condition with
-// observation but not the enable flag, because the two are useful apart: an
-// observer that is running while the renderer is off is how memory gets
-// evaluated before anything depends on it.
-func (c *coordinator) rendersFromLedger(isSubAgent bool) bool {
-	if isSubAgent || c.ledger == nil {
-		return false
-	}
-	co := c.cfg.Config().Options.Compaction
-	return co != nil && co.RenderFromLedger != nil && *co.RenderFromLedger
 }
 
 // observesMemory reports whether this agent should distill its turns into the

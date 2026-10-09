@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"iter"
 	"log/slog"
@@ -112,6 +113,28 @@ func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string
 		Type:    "text",
 		Content: textContent,
 	}, nil
+}
+
+// ErrToolNotFound is returned by CallTool for a server that is not
+// connected or a tool it does not offer.
+var ErrToolNotFound = errors.New("mcp tool not found")
+
+// CallTool calls a tool on a connected MCP server with the given arguments
+// and returns the server's result as it gave it, including its error flag.
+// A tool the configuration filters out is refused, as it is for the agent.
+func CallTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string, args map[string]any) (*mcp.CallToolResult, error) {
+	tools, ok := allTools.Get(name)
+	if !ok {
+		return nil, fmt.Errorf("%w: mcp server %q is not connected", ErrToolNotFound, name)
+	}
+	if !slices.ContainsFunc(tools, func(t *Tool) bool { return t.Name == toolName }) {
+		return nil, fmt.Errorf("%w: mcp server %q offers no tool %q", ErrToolNotFound, name, toolName)
+	}
+	c, err := getOrRenewClient(ctx, cfg, name)
+	if err != nil {
+		return nil, err
+	}
+	return c.CallTool(ctx, &mcp.CallToolParams{Name: toolName, Arguments: args})
 }
 
 // RefreshTools gets the updated list of tools from the MCP and updates the

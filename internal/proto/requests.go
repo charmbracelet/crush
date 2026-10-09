@@ -163,6 +163,21 @@ type MCPReadResourceRequest struct {
 	URI  string `json:"uri"`
 }
 
+// MCPCallToolRequest represents a request to call a tool on an MCP server.
+type MCPCallToolRequest struct {
+	Name      string         `json:"name"`
+	Tool      string         `json:"tool"`
+	Arguments map[string]any `json:"arguments,omitempty"`
+}
+
+// MCPCallToolResponse is the result of an MCP tool call, as the server gave
+// it.
+type MCPCallToolResponse struct {
+	Content           []any `json:"content"`
+	IsError           bool  `json:"is_error,omitempty"`
+	StructuredContent any   `json:"structured_content,omitempty"`
+}
+
 // MCPGetPromptRequest represents a request to get an MCP prompt.
 type MCPGetPromptRequest struct {
 	ClientID string            `json:"client_id"`

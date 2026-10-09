@@ -30,11 +30,6 @@ type Info struct {
 	// TranscriptPath, when non-empty, holds the full text of the replaced
 	// region outside the context window.
 	TranscriptPath string
-	// Rendered counts the memory entries this checkpoint was built from, and is
-	// zero for a checkpoint a model wrote. It is recorded because a rendered
-	// checkpoint is only as good as the memory behind it, and a reader who can
-	// see the number can tell a thin checkpoint from a summarized one.
-	Rendered int
 	// Observed counts the memory entries appended to this checkpoint verbatim,
 	// alongside a summary a model wrote. Those entries persist across every
 	// later compaction, which is how a session's rationale outlives generations
@@ -55,9 +50,6 @@ func (i Info) Render() string {
 	if i.TranscriptPath != "" {
 		tag += fmt.Sprintf(` transcript_path=%q`, i.TranscriptPath)
 	}
-	if i.Rendered > 0 {
-		tag += fmt.Sprintf(` rendered="%d"`, i.Rendered)
-	}
 	if i.Observed > 0 {
 		tag += fmt.Sprintf(` observed="%d"`, i.Observed)
 	}
@@ -69,13 +61,6 @@ func (i Info) Render() string {
 		lines = append(lines, fmt.Sprintf(
 			"The %d most recent messages (~%d tokens) were not summarized and follow verbatim.",
 			i.KeptMessages, i.KeptTokens,
-		))
-	}
-	if i.Rendered > 0 {
-		lines = append(lines, fmt.Sprintf(
-			"This checkpoint was rendered from %d recorded session memories rather than "+
-				"summarized, so it states decisions and constraints without paraphrase.",
-			i.Rendered,
 		))
 	}
 	if i.Observed > 0 {
@@ -191,8 +176,6 @@ func parseAttrs(tag string) (Info, bool) {
 			info.KeptMessages, found = int(number), true
 		case key == "kept_tokens":
 			info.KeptTokens, found = number, true
-		case key == "rendered":
-			info.Rendered, found = int(number), true
 		case key == "observed":
 			info.Observed, found = int(number), true
 		}

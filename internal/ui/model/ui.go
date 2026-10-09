@@ -2887,6 +2887,12 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 	var needsSignIn bool
 	if providerCfg, ok := cfg.Providers.Get(providerID); ok {
 		needsSignIn = providerCfg.NeedsSignIn()
+		// The placeholder picked from the list, not handed back by a
+		// finished sign-in: the catalog is still locked, so sign in again.
+		if msg.Model.Model == "" && !m.dialog.ContainsDialog(dialog.OAuthID) &&
+			!slices.ContainsFunc(providerCfg.Models, func(model catwalk.Model) bool { return model.Name != "" }) {
+			needsSignIn = true
+		}
 	}
 
 	if !isConfigured() || needsSignIn || msg.ReAuthenticate {
@@ -2895,6 +2901,14 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 		return tea.Batch(cmds...)
+	}
+
+	// The sign-in placeholder's hand-off: the login just completed, so
+	// reopen the list to pick from the catalog it unlocked.
+	if msg.Model.Model == "" {
+		m.dialog.CloseDialog(dialog.ModelsID)
+		m.dialog.CloseDialog(dialog.OAuthID)
+		return m.openModelsDialog()
 	}
 
 	// A ChatGPT or Grok sign-in swaps the provider's catalog for the one

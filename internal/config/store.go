@@ -1,6 +1,7 @@
 package config
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	hyperp "github.com/charmbracelet/crush/internal/agent/hyper"
+	"github.com/charmbracelet/crush/internal/discover"
 	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/lock"
 	"github.com/charmbracelet/crush/internal/oauth"
@@ -720,7 +722,34 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 	if providerID == string(catwalk.InferenceProviderXAI) && isToken {
 		s.refetchGrokModels(context.Background(), scope)
 	}
+	// A provider whose catalog sits behind its login lists no models until
+	// signed in, so read the catalog now rather than at the next start.
+	if isToken && providerConfig.Catalog != nil {
+		s.refetchCatalog(providerID, providerConfig)
+	}
 	return nil
+}
+
+// refetchCatalog reads a provider's declared model catalog with its fresh
+// credential and keeps the result in memory. A failure leaves the existing
+// models in place and the login still succeeds.
+func (s *ConfigStore) refetchCatalog(providerID string, pc ProviderConfig) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	models, err := discover.Catalog(ctx, discover.CatalogConfig{
+		ID:       cmp.Or(pc.ID, providerID),
+		Spec:     pc.Catalog,
+		BaseURL:  pc.BaseURL,
+		Bearer:   pc.OAuthToken.AccessToken,
+		Headers:  pc.ExtraHeaders,
+		Existing: pc.Models,
+	}, s.resolver)
+	if err != nil {
+		slog.Warn("Failed to fetch provider model catalog after sign-in", "provider", providerID, "error", err)
+		return
+	}
+	pc.Models = models
+	s.Config().Providers.Set(providerID, pc)
 }
 
 // fetchOpenAIModels fetches the ChatGPT model catalog from the Codex

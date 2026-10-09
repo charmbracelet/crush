@@ -19,7 +19,18 @@ func TestPartialJSONFields(t *testing.T) {
 		{name: "empty", input: "", want: map[string]any{}},
 		{name: "object open only", input: "{", want: map[string]any{}},
 		{name: "key without value", input: `{"pattern"`, want: map[string]any{}},
-		{name: "value still streaming", input: `{"pattern":"fo`, want: map[string]any{}},
+		{name: "colon but no value start", input: `{"pattern":`, want: map[string]any{}},
+		{
+			name:  "string value streams live",
+			input: `{"pattern":"fo`,
+			want:  map[string]any{"pattern": "fo"},
+		},
+		{
+			name:  "string value streams live with whitespace",
+			input: `{"pattern" :  "fo`,
+			want:  map[string]any{"pattern": "fo"},
+		},
+		{name: "partial key is ignored", input: `{"pattern":"foo","pa`, want: map[string]any{"pattern": "foo"}},
 		{
 			name:  "value closed, object not",
 			input: `{"pattern":"fo"`,
@@ -38,6 +49,36 @@ func TestPartialJSONFields(t *testing.T) {
 		{
 			name:  "trailing garbage after complete object",
 			input: `{"pattern":"foo"} extra`,
+			want:  map[string]any{"pattern": "foo"},
+		},
+		{
+			name:  "cut unicode escape is trimmed",
+			input: `{"pattern":"a\u00`,
+			want:  map[string]any{"pattern": "a"},
+		},
+		{
+			name:  "lone trailing backslash is trimmed",
+			input: `{"pattern":"a\`,
+			want:  map[string]any{"pattern": "a"},
+		},
+		{
+			name:  "escaped quote survives unescaping",
+			input: `{"pattern":"a\"b`,
+			want:  map[string]any{"pattern": `a"b`},
+		},
+		{
+			name:  "JSON slash escape survives",
+			input: `{"pattern":"a\/`,
+			want:  map[string]any{"pattern": "a/"},
+		},
+		{
+			name:  "partial bool is ignored",
+			input: `{"pattern":"foo","literal_text":tr`,
+			want:  map[string]any{"pattern": "foo"},
+		},
+		{
+			name:  "in-flight nested value is ignored",
+			input: `{"pattern":"foo","meta":{"a":"x`,
 			want:  map[string]any{"pattern": "foo"},
 		},
 		{

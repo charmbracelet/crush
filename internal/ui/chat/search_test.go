@@ -38,14 +38,15 @@ func TestGrepToolMessageItem_PendingShowsSearchParameters(t *testing.T) {
 
 // TestGrepToolMessageItem_PendingPartialInputFallsBackToSpinner guards that
 // while the tool call input is still streaming and no field usable for the
-// header has completed yet, the pending state falls back to the plain
-// spinner instead of flashing an "Invalid parameters" error.
+// header exists yet (nothing streamed, a key not closed, or a value not
+// started), the pending state falls back to the plain spinner instead of
+// flashing an "Invalid parameters" error.
 func TestGrepToolMessageItem_PendingPartialInputFallsBackToSpinner(t *testing.T) {
 	t.Parallel()
 
 	sty := styles.CharmtonePantera()
 	ctx := &GrepToolRenderContext{}
-	streamingPrefixes := []string{"", "{", `{"pattern"`, `{"pattern":`, `{"pattern":"fo`}
+	streamingPrefixes := []string{"", "{", `{"pattern"`, `{"pattern":`}
 
 	for _, compact := range []bool{false, true} {
 		for _, input := range streamingPrefixes {
@@ -105,6 +106,30 @@ func TestGrepToolMessageItem_PendingPartialInputShowsCompleteFields(t *testing.T
 			input:    `{"pattern":123,"path":"."`,
 			contains: []string{"Grep"},
 			missing:  []string{"123", "path="},
+		},
+		{
+			name:     "pattern grows while its value streams",
+			input:    `{"pattern":"fo`,
+			contains: []string{"fo"},
+			missing:  []string{"path=", "Invalid parameters"},
+		},
+		{
+			name:     "cut escape at end of streaming value",
+			input:    `{"pattern":"a\u00`,
+			contains: []string{"Grep a"},
+			missing:  []string{"u00"},
+		},
+		{
+			name:     "escaped quote inside streaming value",
+			input:    `{"pattern":"a\"b`,
+			contains: []string{`a"b`},
+			missing:  []string{},
+		},
+		{
+			name:     "partial next key keeps complete pattern",
+			input:    `{"pattern":"foo","pa`,
+			contains: []string{"foo"},
+			missing:  []string{"pa"},
 		},
 	}
 

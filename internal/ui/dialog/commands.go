@@ -21,6 +21,10 @@ import (
 // CommandsID is the identifier for the commands dialog.
 const CommandsID = "commands"
 
+// approvalCommandID identifies the single row that shows and changes the
+// approval level.
+const approvalCommandID = "approval_mode"
+
 // CommandType represents the type of commands being displayed.
 type CommandType uint
 
@@ -37,11 +41,23 @@ const (
 var permissionLevelEntries = []struct {
 	id    string
 	level permission.Level
+	// label is the option as it appears inside the approval row.
 	label string
 }{
-	{"permissions_ask", permission.LevelPrompt, "Permissions: ask before acting"},
-	{"permissions_auto", permission.LevelAuto, "Permissions: auto (classifier decides)"},
-	{"permissions_bypass", permission.LevelBypass, "Permissions: never ask (yolo)"},
+	{"permissions_ask", permission.LevelPrompt, "ask"},
+	{"permissions_auto", permission.LevelAuto, "auto"},
+	{"permissions_bypass", permission.LevelBypass, "yolo"},
+}
+
+// ApprovalSegments renders the approval axis as one row of options with the
+// level in force marked, so the palette shows where the setting stands and what
+// the alternatives are.
+func ApprovalSegments(level permission.Level) []Segment {
+	segments := make([]Segment, 0, len(permissionLevelEntries))
+	for _, entry := range permissionLevelEntries {
+		segments = append(segments, Segment{Text: entry.label, Active: entry.level == level})
+	}
+	return segments
 }
 
 // PurposeLabel names an agent for display. An unknown id is reported
@@ -101,6 +117,11 @@ type Commands struct {
 
 	dockerMCPAvailable     *bool
 	dockerMCPCheckInFlight bool
+
+	// approvalItem is the row that shows and changes the approval level. It is
+	// held so cycling can redraw that one row in place, leaving the user's
+	// filter, scroll position, and cursor where they left them.
+	approvalItem *CommandItem
 }
 
 var _ Dialog = (*Commands)(nil)
@@ -574,17 +595,18 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		NewCommandItem(c.com.Styles, "auto_mode_model", "Auto Mode Model", "", ActionOpenAutoModeModels{}),
 	)
 
-	// Permission axis: one entry per level with the current one marked, so
-	// the palette says where the axis stands instead of offering a blind
-	// toggle. Ctrl+Y walks this same order.
-	currentLevel := c.com.Workspace.PermissionLevel()
-	for _, entry := range permissionLevelEntries {
-		label := entry.label
-		if entry.level == currentLevel {
-			label += " (current)"
-		}
-		commands = append(commands, NewCommandItem(c.com.Styles, entry.id, label, "", ActionSetPermissionLevel{Level: entry.level}))
-	}
+	// Approval axis: one row showing every level with the current one marked.
+	// A row per level read as three unrelated commands and said nothing about
+	// what the alternatives were; one row that cycles says both, and Enter
+	// walks the same order Ctrl+Y does.
+	approval := NewCommandItem(
+		c.com.Styles, approvalCommandID, "Approval Mode:", "ctrl+y",
+		ActionCyclePermissionLevel{},
+	).WithSegments(ApprovalSegments(c.com.Workspace.PermissionLevel())...).
+		WithAliases("permissions", "permission", "approval", "ask", "auto", "yolo", "bypass").
+		WithDescription("Enter cycles: ask, auto, yolo")
+	c.approvalItem = approval
+	commands = append(commands, approval)
 
 	// Purpose axis: one entry per agent that can serve the main turn, read
 	// from the workspace so a purpose added upstream appears here without a
@@ -626,6 +648,15 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	)
 
 	return commands
+}
+
+// RefreshApprovalMode redraws the approval row for a level that changed, so
+// the highlight follows the setting without rebuilding the list around it.
+func (c *Commands) RefreshApprovalMode(level permission.Level) {
+	if c.approvalItem == nil {
+		return
+	}
+	c.approvalItem.SetSegments(ApprovalSegments(level))
 }
 
 // SetCustomCommands sets the custom commands and refreshes the view if user commands are currently displayed.

@@ -90,12 +90,23 @@ type Resolver interface {
 	ResolveValue(val string) (string, error)
 }
 
+// modelCapabilities holds optional nested metadata some OpenAI-compatible
+// providers embed in /models entries (e.g. 9Router exposes contextWindow
+// here rather than at the top level).
+type modelCapabilities struct {
+	ContextWindow int64 `json:"contextWindow"`
+}
+
 type modelsResponse struct {
 	Data []struct {
-		ID      string `json:"id"`
-		Object  string `json:"object"`
-		Created int64  `json:"created"`
-		OwnedBy string `json:"owned_by"`
+		ID                  string            `json:"id"`
+		Object              string            `json:"object"`
+		Created             int64             `json:"created"`
+		OwnedBy             string            `json:"owned_by"`
+		ContextLength       *int64            `json:"context_length"`
+		ContextWindow       *int64            `json:"context_window"`
+		MaxCompletionTokens *int64            `json:"max_completion_tokens"`
+		Capabilities        modelCapabilities `json:"capabilities"`
 	} `json:"data"`
 }
 
@@ -135,10 +146,28 @@ func DiscoverModels(ctx context.Context, cfg Config, resolver Resolver) ([]catwa
 		if _, ok := existing[e.ID]; ok {
 			continue
 		}
-		result = append(result, catwalk.Model{
+		m := catwalk.Model{
 			ID:   e.ID,
 			Name: e.ID,
-		})
+		}
+		// Populate context window from whichever field the provider
+		// exposes: prefer top-level context_window, then context_length,
+		// then a nested capabilities.contextWindow (e.g. 9Router).
+		// Standard OpenAI-style responses omit all of these, leaving the
+		// value at zero — which is fine, specialized enrichers can fill
+		// it in later.
+		switch {
+		case e.ContextWindow != nil && *e.ContextWindow > 0:
+			m.ContextWindow = *e.ContextWindow
+		case e.ContextLength != nil && *e.ContextLength > 0:
+			m.ContextWindow = *e.ContextLength
+		case e.Capabilities.ContextWindow > 0:
+			m.ContextWindow = e.Capabilities.ContextWindow
+		}
+		if e.MaxCompletionTokens != nil && *e.MaxCompletionTokens > 0 {
+			m.DefaultMaxTokens = *e.MaxCompletionTokens
+		}
+		result = append(result, m)
 	}
 
 	return result, nil

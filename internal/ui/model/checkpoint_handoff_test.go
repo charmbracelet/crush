@@ -158,12 +158,14 @@ func TestPreviewMessageOpensTheHandoff(t *testing.T) {
 }
 
 // TestDiscardMessageClosesTheDecision, so accepting or discarding removes the
-// staged preview from the palette's keep and discard rows as well.
+// staged preview from the palette's keep and discard rows as well, and
+// triggers a session reload to update the chat feed and scroll to bottom.
 func TestDiscardMessageClosesTheDecision(t *testing.T) {
 	t.Parallel()
 
 	u, _, _ := newPreviewUI(t)
-	u.Update(discardPreviewMsg{})
+	_, cmd := u.Update(discardPreviewMsg{})
 
 	require.Nil(t, u.pendingPreview)
+	require.NotNil(t, cmd, "must reload session to restore feed and bottom scroll")
 }

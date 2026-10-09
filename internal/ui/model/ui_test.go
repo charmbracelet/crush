@@ -897,3 +897,39 @@ func TestHelpBarAdvertisesBothAxes(t *testing.T) {
 	require.Contains(t, keys, "shift+tab")
 	require.Contains(t, keys, "ctrl+y")
 }
+
+// TestAutoModePlaceholder says how the editor reads when the classifier is
+// deciding, in the same voice as the one for never asking.
+func TestAutoModePlaceholder(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	ws := &testWorkspace{cfg: &config.Config{
+		Providers: csync.NewMap[string, config.ProviderConfig](),
+	}}
+	com := &common.Common{Workspace: ws, Styles: &sty}
+	u := &UI{
+		com:         com,
+		keyMap:      DefaultKeyMap(),
+		state:       uiChat,
+		focus:       uiFocusEditor,
+		session:     &session.Session{ID: "sess-1"},
+		chat:        NewChat(com, config.ScrollbarDefault),
+		textarea:    textarea.New(),
+		dialog:      dialog.NewOverlay(),
+		attachments: attachments.New(nil, attachments.Keymap{}),
+		width:       140,
+		height:      45,
+	}
+	u.status = NewStatus(com, u)
+
+	u.setPermissionLevel(permission.LevelAuto)
+	u.updatePlaceholder()
+
+	require.Equal(t, "Go carefully", u.textarea.Placeholder,
+		"the auto-mode placeholder names the posture, not the mechanism")
+
+	u.setPermissionLevel(permission.LevelBypass)
+	u.updatePlaceholder()
+	require.Equal(t, "Go crazy", u.textarea.Placeholder)
+}

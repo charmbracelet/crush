@@ -467,7 +467,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 				SessionID: c.sessionID,
 				Arguments: compactArguments(),
 			},
-		).WithAliases("summarize", "compress").WithDescription("Replace older turns with a checkpoint, keeping the most recent ones verbatim"))
+		).WithAliases("summarize", "compress"))
 	}
 	// Preview is offered next to the fast path rather than replacing it:
 	// sometimes a checkpoint should just happen.
@@ -478,7 +478,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 				SessionID: c.sessionID,
 				Arguments: compactArguments(),
 			},
-		).WithDescription("Write a checkpoint and read it before deciding whether to keep it"))
+		))
 	}
 	if c.pendingPreview != nil {
 		commands = append(commands, NewCommandItem(
@@ -487,14 +487,14 @@ func (c *Commands) defaultCommands() []*CommandItem {
 				SessionID: c.sessionID,
 				Preview:   *c.pendingPreview,
 			},
-		).WithDescription("Apply the previewed checkpoint and drop the older turns it replaced"))
+		))
 		commands = append(commands, NewCommandItem(
 			c.com.Styles, "discard-checkpoint", "Discard Checkpoint", "",
 			ActionDiscardPreview{
 				SessionID:    c.sessionID,
 				CheckpointID: c.pendingPreview.CheckpointID,
 			},
-		).WithDescription("Throw the previewed checkpoint away and change nothing"))
+		))
 	}
 	// Compaction never deletes what it replaced, so the way back is offered
 	// whenever a checkpoint exists rather than only just after one.
@@ -504,7 +504,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 			ActionRestoreSummarize{
 				SessionID: c.sessionID,
 			},
-		).WithAliases("uncompact", "undo").WithDescription("Undo the last compaction and bring back the messages it replaced"))
+		).WithAliases("uncompact", "undo"))
 	}
 
 	// Add reasoning toggle for models that support it

@@ -3,6 +3,7 @@ package plugins
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -86,7 +87,9 @@ func TestManifestRoundTripAndValidation(t *testing.T) {
 
 	info, err := os.Stat(ManifestPath(dir))
 	require.NoError(t, err)
-	require.Equal(t, os.FileMode(0o644), info.Mode().Perm())
+	if runtime.GOOS != "windows" {
+		require.Equal(t, os.FileMode(0o644), info.Mode().Perm())
+	}
 
 	// A missing lock is not an error a command should die on.
 	_, err = LoadManifest(filepath.Join(filepath.Dir(dir), "nothing"))

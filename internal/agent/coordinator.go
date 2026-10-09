@@ -84,8 +84,12 @@ var copilotResponsesModels = map[string]bool{
 	"gpt-5.6-terra": true,
 	"gpt-5.6-sol":   true,
 	"gpt-6-astra":   true,
+	"gpt-6-luna":    true,
+	"gpt-6-sol":     true,
+	"gpt-6.1-sol":   true,
 	"grok-4.5":      true,
 	"grok-4.6":      true,
+	"grok-4.7":      true,
 }
 
 // OpenCode models that use the Anthropic Messages API instead of Chat

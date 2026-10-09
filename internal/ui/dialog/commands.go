@@ -614,8 +614,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		c.com.Styles, approvalCommandID, "Approval Mode:", "ctrl+y",
 		ActionCyclePermissionLevel{},
 	).WithSegments(ApprovalSegments(c.com.Workspace.PermissionLevel())...).
-		WithAliases("permissions", "permission", "approval", "ask", "auto", "yolo", "bypass").
-		WithDescription("Enter cycles: ask, auto, yolo")
+		WithAliases("permissions", "permission", "approval", "ask", "auto", "yolo", "bypass")
 	c.approvalItem = approval
 	commands = append(commands, approval)
 
@@ -623,13 +622,11 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	// marked, cycled with Enter exactly as the approval row is. The modes come
 	// from the workspace, so one added upstream appears here without a TUI
 	// change.
-	purposeSegments := PurposeSegments(c.com.Workspace.AgentMainID(), c.com.Workspace.AgentMainCandidates())
 	purpose := NewCommandItem(
 		c.com.Styles, purposeCommandID, "Mode:", "shift+tab",
 		ActionCyclePurpose{},
-	).WithSegments(purposeSegments...).
-		WithAliases("mode", "purpose", "agent").
-		WithDescription("Enter cycles: " + strings.Join(segmentTexts(purposeSegments), ", "))
+	).WithSegments(PurposeSegments(c.com.Workspace.AgentMainID(), c.com.Workspace.AgentMainCandidates())...).
+		WithAliases("mode", "purpose", "agent")
 	c.purposeItem = purpose
 	commands = append(commands, purpose)
 

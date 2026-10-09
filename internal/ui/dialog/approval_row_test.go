@@ -1,6 +1,7 @@
 package dialog
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/config"
@@ -301,5 +302,34 @@ func TestModeRowIsFilterable(t *testing.T) {
 			}
 			require.Contains(t, ids, purposeCommandID, "typing %q must find the mode row", query)
 		})
+	}
+}
+
+// TestAxisRowsCarryNoSubtext: the two axis rows are single-line settings like
+// every other system command. They were the only entries in the list with a
+// line of prose under them, which made them read as a different kind of thing.
+//
+// This is deliberately narrow. A rule that no system command may carry a
+// description would be the stronger statement, but it is not true of the
+// merged build, where the compaction row brings one of its own.
+func TestAxisRowsCarryNoSubtext(t *testing.T) {
+	t.Parallel()
+
+	dia, _ := newApprovalPalette(t, permission.LevelAuto)
+
+	for _, id := range []string{approvalCommandID, purposeCommandID} {
+		var found bool
+		for _, item := range dia.list.FilteredItems() {
+			cmd, ok := item.(*CommandItem)
+			if !ok || cmd.id != id {
+				continue
+			}
+			found = true
+			require.Empty(t, cmd.description,
+				"%s must stay a single-line row", id)
+			require.Zero(t, strings.Count(cmd.Render(62), "\n"),
+				"%s must render on one line", id)
+		}
+		require.True(t, found, "%s must be in the palette", id)
 	}
 }

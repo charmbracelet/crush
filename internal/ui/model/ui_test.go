@@ -132,6 +132,12 @@ type testWorkspace struct {
 	yolo              bool
 	runHidden         []bool
 	compactCalls      []bool
+
+	// Calls the checkpoint handoff drives, recorded so the tests can assert
+	// which workspace method each answer reaches.
+	previewCalls []string
+	confirmCalls []string
+	discardCalls []string
 }
 
 func (w *testWorkspace) Config() *config.Config {

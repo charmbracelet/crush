@@ -306,9 +306,9 @@ type UI struct {
 	sendProgressBar    bool
 	progressBarEnabled bool
 
-	// turnOutcome is the result of the last agent turn reported to the
-	// terminal as program status (done or error) until the user has seen
-	// it, or empty.
+	// turnOutcome is the result of the last agent turn (done or error),
+	// reported to the terminal until the user has seen it. See
+	// trackTurnOutcome.
 	turnOutcome tea.ProgramState
 
 	// caps hold different terminal capabilities that we query for.
@@ -851,6 +851,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.beginFrameUpdate()
 	// Update terminal capabilities
 	m.caps.Update(msg)
+	m.trackTurnOutcome(msg)
 	switch msg := msg.(type) {
 	case tea.EnvMsg:
 		// Is this Windows Terminal?
@@ -864,7 +865,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateNotificationBackend()
 	case tea.FocusMsg:
 		m.notifyWindowFocused = true
-		m.turnOutcome = ""
 	case tea.BlurMsg:
 		m.notifyWindowFocused = false
 	case dialog.CollapseInlineMsg:
@@ -894,7 +894,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 	case agentRunSubmittedMsg:
-		m.turnOutcome = ""
 		if msg.err != nil {
 			// The run never started, so no terminal event is coming to
 			// retire its spinner.
@@ -924,6 +923,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if cmd := m.resetPlanModeState(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
+			m.turnOutcome = ""
 		}
 		m.setState(uiChat, m.focus)
 		m.session = msg.session
@@ -3819,8 +3819,7 @@ func (m *UI) View() tea.View {
 		if content, cursor, ok := m.frames.get(key); ok {
 			v.Content = content
 			v.Cursor = cursor
-			m.applyProgressBar(&v)
-			v.ProgramStatus = m.programStatus()
+			m.applyTerminalStatus(&v)
 			return v
 		}
 	}
@@ -3841,15 +3840,16 @@ func (m *UI) View() tea.View {
 	if cacheable {
 		m.storeFrame(key, content, v.Cursor)
 	}
-	m.applyProgressBar(&v)
-	v.ProgramStatus = m.programStatus()
+	m.applyTerminalStatus(&v)
 
 	return v
 }
 
-// applyProgressBar attaches the terminal progress bar while the agent is
-// busy. Kept outside the frame cache so the randomized value stays fresh.
-func (m *UI) applyProgressBar(v *tea.View) {
+// applyTerminalStatus attaches the program status, and the terminal progress
+// bar while the agent is busy. Kept outside the frame cache so the
+// randomized progress value stays fresh.
+func (m *UI) applyTerminalStatus(v *tea.View) {
+	v.ProgramStatus = m.programStatus()
 	if m.progressBarEnabled && m.sendProgressBar && m.isAgentBusy() {
 		// HACK: use a random percentage to prevent ghostty from hiding it
 		// after a timeout.
@@ -5298,6 +5298,7 @@ func (m *UI) sendMessageInternal(content string, hidden bool, attachments ...mes
 
 	// Any new prompt supersedes a pending, unconfirmed plan.
 	m.setPlanReadyPending("")
+	m.turnOutcome = ""
 
 	var cmds []tea.Cmd
 	loadCmd, err := m.ensureSession()
@@ -5476,6 +5477,7 @@ func (m *UI) runShellCommandInternal(command string, isFirstMessage bool) tea.Cm
 
 	ctx, cancel := context.WithCancel(context.Background())
 	m.bangCancel = cancel
+	m.turnOutcome = ""
 
 	cmds = append(cmds, func() tea.Msg {
 		resp, err := m.com.Workspace.AgentRunShellCommand(ctx, sessionID, command, contentWidth, onProgress, isFirstMessage)
@@ -5934,7 +5936,6 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 	var cmds []tea.Cmd
 	switch n.Type {
 	case notify.TypeAgentFinished:
-		m.turnOutcome = tea.ProgramStateDone
 		cmds = append(cmds, m.sendNotification(notification.Notification{
 			Title:   "Crush is waiting...",
 			Message: fmt.Sprintf("Agent's turn completed in \"%s\"", n.SessionTitle),
@@ -5947,7 +5948,6 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 			cmds = append(cmds, m.fetchHyperCredits())
 		}
 	case notify.TypeAgentError:
-		m.turnOutcome = tea.ProgramStateError
 		// Terminal edge like TypeAgentFinished; fall through to the
 		// busy/queue refresh below.
 		m.endPendingTurn(n.SessionID)
@@ -6043,6 +6043,7 @@ func (m *UI) newSession() tea.Cmd {
 	}
 
 	planCmd := m.resetPlanModeState()
+	m.turnOutcome = ""
 	m.session = nil
 	m.sidebarOffset = 0
 	m.sessionFiles = nil

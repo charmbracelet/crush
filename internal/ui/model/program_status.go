@@ -2,6 +2,8 @@ package model
 
 import (
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/crush/internal/agent/notify"
+	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/ui/dialog"
 )
 
@@ -38,4 +40,25 @@ func (m *UI) programStatus() *tea.ProgramStatus {
 func (m *UI) hasPendingQuestion() bool {
 	_, ok := m.activeInline.(*dialog.QuestionForm)
 	return ok
+}
+
+// trackTurnOutcome records how the open session's last run ended until the
+// user returns to the window or submits something new.
+func (m *UI) trackTurnOutcome(msg tea.Msg) {
+	switch msg := msg.(type) {
+	case tea.FocusMsg:
+		m.turnOutcome = ""
+	case pubsub.Event[notify.RunComplete]:
+		if msg.Payload.SessionID != m.currentSessionID() {
+			return
+		}
+		switch {
+		case msg.Payload.Cancelled:
+			m.turnOutcome = ""
+		case msg.Payload.Error != "":
+			m.turnOutcome = tea.ProgramStateError
+		default:
+			m.turnOutcome = tea.ProgramStateDone
+		}
+	}
 }

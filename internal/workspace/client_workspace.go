@@ -236,9 +236,8 @@ func (w *ClientWorkspace) ListAllUserMessages(ctx context.Context) ([]message.Me
 // -- Agent --
 
 func (w *ClientWorkspace) AgentRun(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) error {
-	// The interactive TUI does not consume notify.RunComplete for
-	// completion detection (it observes message events directly),
-	// so passing an empty RunID is correct here: it skips the
+	// The interactive TUI matches notify.RunComplete by session, not
+	// RunID, so passing an empty RunID is correct here: it skips the
 	// correlator stamping path without functional consequences.
 	return w.client.SendMessage(ctx, w.workspaceID(), sessionID, "", "", prompt, attachments...)
 }

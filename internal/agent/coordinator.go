@@ -1522,8 +1522,7 @@ func (c *coordinator) retryAfterUnauthorized(ctx context.Context, providerCfg co
 		if err := c.refreshOAuth2Token(ctx, providerCfg); err != nil {
 			// If the refresh token was revoked, trigger interactive
 			// re-auth and wait for the user to complete it.
-			var exchangeErr *oauth.TokenExchangeError
-			if c.notify != nil && errors.As(err, &exchangeErr) && exchangeErr.IsRefreshTokenRevoked() {
+			if exchangeErr, ok := errors.AsType[*oauth.TokenExchangeError](err); ok && c.notify != nil && exchangeErr.IsRefreshTokenRevoked() {
 				slog.Info("Refresh token revoked, waiting for re-authentication", "provider", providerCfg.ID)
 				c.notify.Publish(pubsub.CreatedEvent, notify.Notification{
 					Type:       notify.TypeReAuthenticate,
@@ -1583,8 +1582,8 @@ func (c *coordinator) waitForInteractiveReauth(ctx context.Context, providerID s
 
 // isUnauthorized reports whether err is an HTTP 401 from a provider.
 func isUnauthorized(err error) bool {
-	var providerErr *fantasy.ProviderError
-	return errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusUnauthorized
+	providerErr, ok := errors.AsType[*fantasy.ProviderError](err)
+	return ok && providerErr.StatusCode == http.StatusUnauthorized
 }
 
 // makeAuthRefreshCallback returns an OnAuthRefresh callback for fantasy that

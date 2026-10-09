@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -45,7 +46,7 @@ func collectDirs(cmd *cobra.Command) []string {
 		return dirs
 	}
 
-	for _, p := range config.ProjectConfigs(cwd) {
+	for _, p := range config.ProjectConfigs(context.Background(), cwd) {
 		d := filepath.Dir(p)
 		// Skip global paths, already shown.
 		if d == filepath.Dir(config.GlobalConfig()) || d == filepath.Dir(config.GlobalConfigData()) {

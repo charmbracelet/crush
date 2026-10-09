@@ -2175,7 +2175,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		cfg := m.com.Config()
 		if cfg != nil && cfg.Options != nil {
 			cfg.Options.Notifications = msg.Style
-			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.notifications", msg.Style); err != nil {
+			if err := m.com.Workspace.SetConfigField(context.Background(), config.ScopeGlobal, "options.notifications", msg.Style); err != nil {
 				cmds = append(cmds, util.ReportError(err))
 			} else {
 				cmds = append(cmds, util.CmdHandler(util.NewInfoMsg("Notifications set to: "+msg.Style)))
@@ -2242,7 +2242,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 
 			currentModel := cfg.Models[agentCfg.Model]
 			currentModel.Think = !currentModel.Think
-			if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, agentCfg.Model, currentModel); err != nil {
+			if err := m.com.Workspace.UpdatePreferredModel(context.Background(), config.ScopeGlobal, agentCfg.Model, currentModel); err != nil {
 				return util.ReportError(err)()
 			}
 			m.com.Workspace.UpdateAgentModel(context.TODO())
@@ -2262,7 +2262,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 
 			isTransparent := cfg.Options != nil && cfg.Options.TUI.IsTransparent()
 			newValue := !isTransparent
-			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.tui.transparent", newValue); err != nil {
+			if err := m.com.Workspace.SetConfigField(context.Background(), config.ScopeGlobal, "options.tui.transparent", newValue); err != nil {
 				return util.ReportError(err)()
 			}
 			m.isTransparent = newValue
@@ -2281,7 +2281,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, util.ReportError(err))
 			break
 		}
-		if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.tui.active_theme", themeName); err != nil {
+		if err := m.com.Workspace.SetConfigField(context.Background(), config.ScopeGlobal, "options.tui.active_theme", themeName); err != nil {
 			if m.preThemeStyles != nil {
 				m.applyTheme(*m.preThemeStyles)
 				m.preThemeStyles = nil
@@ -2421,7 +2421,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, util.ReportError(err))
 			break
 		}
-		if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.tui.active_theme", name); err != nil {
+		if err := m.com.Workspace.SetConfigField(context.Background(), config.ScopeGlobal, "options.tui.active_theme", name); err != nil {
 			cmds = append(cmds, util.ReportError(err))
 			break
 		}
@@ -2439,7 +2439,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		cfg := m.com.Config()
 		if cfg != nil && cfg.Options != nil && cfg.Options.TUI != nil && strings.EqualFold(cfg.Options.TUI.ActiveTheme, oldName) {
-			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.tui.active_theme", newName); err != nil {
+			if err := m.com.Workspace.SetConfigField(context.Background(), config.ScopeGlobal, "options.tui.active_theme", newName); err != nil {
 				if rollbackErr := os.Rename(newPath, oldPath); rollbackErr != nil {
 					slog.Error("Failed to roll back theme rename", "error", rollbackErr)
 				}
@@ -2457,7 +2457,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		// If the deleted theme was active, reset to the default theme.
 		if strings.EqualFold(common.ThemeNameFromConfig(m.com.Config()), msg.Name) {
-			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.tui.active_theme", "charmtone-panther"); err != nil {
+			if err := m.com.Workspace.SetConfigField(context.Background(), config.ScopeGlobal, "options.tui.active_theme", "charmtone-panther"); err != nil {
 				cmds = append(cmds, util.ReportError(err))
 				break
 			}
@@ -2485,7 +2485,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		newValue := !mouseEnabled
 		m.mouseEnabled = newValue
 		cmds = append(cmds, func() tea.Msg {
-			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.tui.mouse", newValue); err != nil {
+			if err := m.com.Workspace.SetConfigField(context.Background(), config.ScopeGlobal, "options.tui.mouse", newValue); err != nil {
 				return util.ReportError(err)()
 			}
 
@@ -2538,7 +2538,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 
 		currentModel := cfg.Models[agentCfg.Model]
 		currentModel.ReasoningEffort = msg.Effort
-		if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, agentCfg.Model, currentModel); err != nil {
+		if err := m.com.Workspace.UpdatePreferredModel(context.Background(), config.ScopeGlobal, agentCfg.Model, currentModel); err != nil {
 			cmds = append(cmds, util.ReportError(err))
 			break
 		}
@@ -2771,7 +2771,7 @@ func (m *UI) restoreModelFromSession(msgs []message.Message) tea.Cmd {
 		Provider: lastAssistant.Provider,
 		Model:    lastAssistant.Model,
 	}
-	if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeLarge, selectedModel); err != nil {
+	if err := m.com.Workspace.UpdatePreferredModel(context.Background(), config.ScopeGlobal, config.SelectedModelTypeLarge, selectedModel); err != nil {
 		slog.Error("Failed to restore model from session", "error", err)
 		return nil
 	}
@@ -2779,8 +2779,8 @@ func (m *UI) restoreModelFromSession(msgs []message.Message) tea.Cmd {
 	m.applyThemeForProvider(lastAssistant.Provider)
 
 	if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
-		smallModel := m.com.Workspace.GetDefaultSmallModel(lastAssistant.Provider)
-		if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeSmall, smallModel); err != nil {
+		smallModel := m.com.Workspace.GetDefaultSmallModel(context.Background(), lastAssistant.Provider)
+		if err := m.com.Workspace.UpdatePreferredModel(context.Background(), config.ScopeGlobal, config.SelectedModelTypeSmall, smallModel); err != nil {
 			slog.Error("Failed to set small model during session restore", "error", err)
 		}
 	}
@@ -2830,7 +2830,7 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 
 	// Attempt to import GitHub Copilot tokens from VSCode if available.
 	if isCopilot && !isConfigured() && !msg.ReAuthenticate {
-		m.com.Workspace.ImportCopilot()
+		m.com.Workspace.ImportCopilot(context.Background())
 	}
 
 	// The OpenAI and xAI providers hold exactly one credential: an
@@ -2888,7 +2888,7 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		}
 	}
 
-	if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, msg.ModelType, msg.Model); err != nil {
+	if err := m.com.Workspace.UpdatePreferredModel(context.Background(), config.ScopeGlobal, msg.ModelType, msg.Model); err != nil {
 		cmds = append(cmds, util.ReportError(err))
 	} else {
 		if msg.ModelType == config.SelectedModelTypeLarge {
@@ -2900,8 +2900,8 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		}
 		if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
 			// Ensure small model is set is unset.
-			smallModel := m.com.Workspace.GetDefaultSmallModel(providerID)
-			if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeSmall, smallModel); err != nil {
+			smallModel := m.com.Workspace.GetDefaultSmallModel(context.Background(), providerID)
+			if err := m.com.Workspace.UpdatePreferredModel(context.Background(), config.ScopeGlobal, config.SelectedModelTypeSmall, smallModel); err != nil {
 				cmds = append(cmds, util.ReportError(err))
 			}
 		}
@@ -4155,7 +4155,7 @@ func (m *UI) currentModelSupportsImages() bool {
 func (m *UI) toggleCompactMode() tea.Cmd {
 	m.forceCompactMode = !m.forceCompactMode
 
-	err := m.com.Workspace.SetCompactMode(config.ScopeGlobal, m.forceCompactMode)
+	err := m.com.Workspace.SetCompactMode(context.Background(), config.ScopeGlobal, m.forceCompactMode)
 	if err != nil {
 		return util.ReportError(err)
 	}
@@ -6227,7 +6227,7 @@ func (m *UI) drawSessionDetails(scr uv.Screen, area uv.Rectangle) {
 
 func (m *UI) runMCPPrompt(clientID, promptID string, arguments map[string]string) tea.Cmd {
 	load := func() tea.Msg {
-		prompt, err := m.com.Workspace.GetMCPPrompt(clientID, promptID, arguments)
+		prompt, err := m.com.Workspace.GetMCPPrompt(context.Background(), clientID, promptID, arguments)
 		if err != nil {
 			// TODO: make this better
 			return util.ReportError(err)()
@@ -6310,7 +6310,7 @@ func (m *UI) enableDockerMCP() tea.Msg {
 }
 
 func (m *UI) disableDockerMCP() tea.Msg {
-	if err := m.com.Workspace.DisableDockerMCP(); err != nil {
+	if err := m.com.Workspace.DisableDockerMCP(context.Background()); err != nil {
 		return util.ReportError(err)()
 	}
 

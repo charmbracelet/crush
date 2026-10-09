@@ -37,7 +37,7 @@ func (m *OAuthOpenAI) name() string {
 }
 
 func (m *OAuthOpenAI) initiateAuth() tea.Msg {
-	flow, err := openai.StartBrowserFlow()
+	flow, err := openai.StartBrowserFlow(context.Background())
 	if err != nil {
 		return ActionOAuthErrored{Error: fmt.Errorf("failed to start browser auth: %w", err)}
 	}

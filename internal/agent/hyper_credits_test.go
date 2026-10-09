@@ -123,10 +123,10 @@ func TestHyperCreditsModel_CoalescesRefreshes(t *testing.T) {
 	m := newTestHyperCreditsModel(rec, func() string { return "test-key" })
 
 	// Hold the first fetch in flight, then queue two more refreshes.
-	m.refreshBalance()
+	m.refreshBalance(t.Context())
 	require.Eventually(t, func() bool { return rec.callCount() == 1 }, 5*time.Second, 5*time.Millisecond)
-	m.refreshBalance()
-	m.refreshBalance()
+	m.refreshBalance(t.Context())
+	m.refreshBalance(t.Context())
 
 	close(release)
 

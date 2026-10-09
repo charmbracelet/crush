@@ -316,7 +316,7 @@ func TestDrainQueueForStep_DroppedRunIDPublishesCancelledRunComplete(t *testing.
 
 	_, canceledWithRunID := a.drainQueueForStep(sessionID)
 	require.Len(t, canceledWithRunID, 1)
-	a.publishCanceledQueueDrops(canceledWithRunID)
+	a.publishCanceledQueueDrops(t.Context(), canceledWithRunID)
 
 	requireSingleCancelledRunComplete(t, ch, sessionID, "run-dropped")
 }

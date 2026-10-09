@@ -31,7 +31,7 @@ func newTestBackend(t *testing.T) (*Backend, *atomic.Int32) {
 		pathIndex:   make(map[string]string),
 		ctx:         context.Background(),
 		createGrace: 50 * time.Millisecond,
-		shutdownFn:  func() { shutdownCount.Add(1) },
+		shutdownFn:  func(context.Context) { shutdownCount.Add(1) },
 	}
 	return b, &shutdownCount
 }
@@ -47,7 +47,7 @@ func insertTestWorkspace(t *testing.T, b *Backend, key string) (*Workspace, *ato
 		Path:         key,
 		resolvedPath: key,
 		clients:      make(map[string]*clientState),
-		shutdownFn:   func() { shutdowns.Add(1) },
+		shutdownFn:   func(context.Context) { shutdowns.Add(1) },
 	}
 	b.mu.Lock()
 	b.workspaces.Set(ws.ID, ws)
@@ -105,8 +105,8 @@ func TestRegisterClient_Idempotent(t *testing.T) {
 	ws, _ := insertTestWorkspace(t, b, "/tmp/a")
 
 	cid := newClientID(t)
-	b.registerClient(ws, cid)
-	b.registerClient(ws, cid)
+	b.registerClient(context.Background(), ws, cid)
+	b.registerClient(context.Background(), ws, cid)
 
 	ws.clientsMu.Lock()
 	defer ws.clientsMu.Unlock()
@@ -122,7 +122,7 @@ func TestAttachClient_ConsumesHold(t *testing.T) {
 	ws, shutdowns := insertTestWorkspace(t, b, "/tmp/a")
 
 	cid := newClientID(t)
-	b.registerClient(ws, cid)
+	b.registerClient(context.Background(), ws, cid)
 	require.NoError(t, b.AttachClient(ws.ID, cid))
 
 	ws.clientsMu.Lock()
@@ -166,13 +166,13 @@ func TestAttachClient_DuplicateStreams(t *testing.T) {
 	require.Equal(t, 2, ws.clients[cid].streams)
 	ws.clientsMu.Unlock()
 
-	b.DetachClient(ws.ID, cid)
+	b.DetachClient(context.Background(), ws.ID, cid)
 	ws.clientsMu.Lock()
 	require.Equal(t, 1, ws.clients[cid].streams)
 	ws.clientsMu.Unlock()
 	require.Equal(t, int32(0), shutdowns.Load())
 
-	b.DetachClient(ws.ID, cid)
+	b.DetachClient(context.Background(), ws.ID, cid)
 	require.Equal(t, int32(1), shutdowns.Load(), "second detach tears down the workspace")
 }
 
@@ -183,9 +183,9 @@ func TestDetachClient_LastStreamTearsDown(t *testing.T) {
 	ws, wsShutdowns := insertTestWorkspace(t, b, "/tmp/a")
 
 	cid := newClientID(t)
-	b.registerClient(ws, cid)
+	b.registerClient(context.Background(), ws, cid)
 	require.NoError(t, b.AttachClient(ws.ID, cid))
-	b.DetachClient(ws.ID, cid)
+	b.DetachClient(context.Background(), ws.ID, cid)
 
 	require.Equal(t, int32(1), wsShutdowns.Load())
 	require.Equal(t, int32(1), srvShutdowns.Load(), "last workspace shut down must trigger server shutdown")
@@ -200,7 +200,7 @@ func TestHoldExpiry_TearsDown(t *testing.T) {
 	ws, wsShutdowns := insertTestWorkspace(t, b, "/tmp/a")
 
 	cid := newClientID(t)
-	b.registerClient(ws, cid)
+	b.registerClient(context.Background(), ws, cid)
 
 	require.Eventually(t, func() bool {
 		return wsShutdowns.Load() == 1 && srvShutdowns.Load() == 1
@@ -214,12 +214,12 @@ func TestReleaseHold_NoStreams(t *testing.T) {
 	ws, shutdowns := insertTestWorkspace(t, b, "/tmp/a")
 
 	cid := newClientID(t)
-	b.registerClient(ws, cid)
-	require.NoError(t, b.releaseHold(ws.ID, cid))
+	b.registerClient(context.Background(), ws, cid)
+	require.NoError(t, b.releaseHold(context.Background(), ws.ID, cid))
 
 	require.Equal(t, int32(1), shutdowns.Load())
 	// Idempotent.
-	require.NoError(t, b.releaseHold(ws.ID, cid))
+	require.NoError(t, b.releaseHold(context.Background(), ws.ID, cid))
 	require.Equal(t, int32(1), shutdowns.Load())
 }
 
@@ -230,9 +230,9 @@ func TestReleaseHold_WithActiveStream(t *testing.T) {
 	ws, shutdowns := insertTestWorkspace(t, b, "/tmp/a")
 
 	cid := newClientID(t)
-	b.registerClient(ws, cid)
+	b.registerClient(context.Background(), ws, cid)
 	require.NoError(t, b.AttachClient(ws.ID, cid))
-	require.NoError(t, b.releaseHold(ws.ID, cid))
+	require.NoError(t, b.releaseHold(context.Background(), ws.ID, cid))
 
 	ws.clientsMu.Lock()
 	require.Equal(t, 1, ws.clients[cid].streams)
@@ -240,7 +240,7 @@ func TestReleaseHold_WithActiveStream(t *testing.T) {
 	ws.clientsMu.Unlock()
 	require.Equal(t, int32(0), shutdowns.Load())
 
-	b.DetachClient(ws.ID, cid)
+	b.DetachClient(context.Background(), ws.ID, cid)
 	require.Equal(t, int32(1), shutdowns.Load())
 }
 
@@ -251,14 +251,14 @@ func TestReleaseHoldThenAttach(t *testing.T) {
 	ws, shutdowns := insertTestWorkspace(t, b, "/tmp/a")
 
 	cid := newClientID(t)
-	require.NoError(t, b.releaseHold(ws.ID, cid)) // no entry yet — no-op.
+	require.NoError(t, b.releaseHold(context.Background(), ws.ID, cid)) // no entry yet — no-op.
 	require.NoError(t, b.AttachClient(ws.ID, cid))
 	ws.clientsMu.Lock()
 	require.Equal(t, 1, ws.clients[cid].streams)
 	ws.clientsMu.Unlock()
-	require.NoError(t, b.releaseHold(ws.ID, cid)) // hold-only no-op (no hold timer).
+	require.NoError(t, b.releaseHold(context.Background(), ws.ID, cid)) // hold-only no-op (no hold timer).
 	require.Equal(t, int32(0), shutdowns.Load())
-	b.DetachClient(ws.ID, cid)
+	b.DetachClient(context.Background(), ws.ID, cid)
 	require.Equal(t, int32(1), shutdowns.Load())
 }
 
@@ -270,19 +270,19 @@ func TestRefcountWithSecondClient(t *testing.T) {
 
 	cidA := newClientID(t)
 	cidB := newClientID(t)
-	b.registerClient(ws, cidA)
+	b.registerClient(context.Background(), ws, cidA)
 	require.NoError(t, b.AttachClient(ws.ID, cidA))
-	b.registerClient(ws, cidB)
+	b.registerClient(context.Background(), ws, cidB)
 	require.NoError(t, b.AttachClient(ws.ID, cidB))
 
-	b.DetachClient(ws.ID, cidA)
+	b.DetachClient(context.Background(), ws.ID, cidA)
 	ws.clientsMu.Lock()
 	require.Contains(t, ws.clients, cidB)
 	require.NotContains(t, ws.clients, cidA)
 	ws.clientsMu.Unlock()
 	require.Equal(t, int32(0), shutdowns.Load(), "workspace survives while second client attached")
 
-	b.DetachClient(ws.ID, cidB)
+	b.DetachClient(context.Background(), ws.ID, cidB)
 	require.Equal(t, int32(1), shutdowns.Load())
 }
 
@@ -302,8 +302,8 @@ func TestDeleteWorkspace_RejectsBadClientID(t *testing.T) {
 	b, _ := newTestBackend(t)
 	ws, _ := insertTestWorkspace(t, b, "/tmp/a")
 
-	require.ErrorIs(t, b.DeleteWorkspace(ws.ID, ""), ErrInvalidClientID)
-	require.ErrorIs(t, b.DeleteWorkspace(ws.ID, "not-a-uuid"), ErrInvalidClientID)
+	require.ErrorIs(t, b.DeleteWorkspace(context.Background(), ws.ID, ""), ErrInvalidClientID)
+	require.ErrorIs(t, b.DeleteWorkspace(context.Background(), ws.ID, "not-a-uuid"), ErrInvalidClientID)
 }
 
 // TestHoldExpiry_RaceWithAttach checks that, when the grace timer fires
@@ -319,7 +319,7 @@ func TestHoldExpiry_RaceWithAttach(t *testing.T) {
 		ws, shutdowns := insertTestWorkspace(t, b, "/tmp/race")
 
 		cid := newClientID(t)
-		b.registerClient(ws, cid)
+		b.registerClient(context.Background(), ws, cid)
 		// Attach concurrently with the very short grace timer.
 		errCh := make(chan error, 1)
 		go func() { errCh <- b.AttachClient(ws.ID, cid) }()
@@ -363,7 +363,7 @@ func TestConcurrentAttachDetach(t *testing.T) {
 	ws, _ := insertTestWorkspace(t, b, "/tmp/a")
 
 	cid := newClientID(t)
-	b.registerClient(ws, cid)
+	b.registerClient(context.Background(), ws, cid)
 	require.NoError(t, b.AttachClient(ws.ID, cid)) // ensure refcount stays > 0.
 
 	const n = 50
@@ -374,7 +374,7 @@ func TestConcurrentAttachDetach(t *testing.T) {
 			defer wg.Done()
 			cid2 := newClientID(t)
 			_ = b.AttachClient(ws.ID, cid2)
-			b.DetachClient(ws.ID, cid2)
+			b.DetachClient(context.Background(), ws.ID, cid2)
 		}()
 	}
 	wg.Wait()
@@ -397,19 +397,19 @@ func TestPathDedupe_FullCreate(t *testing.T) {
 	cwd := t.TempDir()
 	dataDir := t.TempDir()
 
-	b := New(context.Background(), nil, func() {})
+	b := New(context.Background(), nil, func(context.Context) {})
 	b.SetCreateGrace(2 * time.Second)
 	t.Cleanup(func() { drainBackend(t, b) })
 
 	cidA := uuid.New().String()
 	cidB := uuid.New().String()
 
-	wsA, protoA, err := b.CreateWorkspace(protoWS(cwd, dataDir, cidA))
+	wsA, protoA, err := b.CreateWorkspace(context.Background(), protoWS(cwd, dataDir, cidA))
 	require.NoError(t, err)
 	require.NotEmpty(t, protoA.ID)
 	require.Equal(t, protoA.DataDir, wsA.Cfg.Config().Options.DataDirectory)
 
-	wsB, protoB, err := b.CreateWorkspace(protoWS(cwd, dataDir, cidB))
+	wsB, protoB, err := b.CreateWorkspace(context.Background(), protoWS(cwd, dataDir, cidB))
 	require.NoError(t, err)
 	require.Equal(t, wsA.ID, wsB.ID, "second create at same path must return existing workspace")
 	require.Equal(t, protoA.ID, protoB.ID)
@@ -433,13 +433,13 @@ func TestPathDedupe_DifferentPaths_DifferentWorkspaces(t *testing.T) {
 	dataA := t.TempDir()
 	dataB := t.TempDir()
 
-	b := New(context.Background(), nil, func() {})
+	b := New(context.Background(), nil, func(context.Context) {})
 	b.SetCreateGrace(2 * time.Second)
 	t.Cleanup(func() { drainBackend(t, b) })
 
-	wsA, _, err := b.CreateWorkspace(protoWS(cwdA, dataA, uuid.New().String()))
+	wsA, _, err := b.CreateWorkspace(context.Background(), protoWS(cwdA, dataA, uuid.New().String()))
 	require.NoError(t, err)
-	wsB, _, err := b.CreateWorkspace(protoWS(cwdB, dataB, uuid.New().String()))
+	wsB, _, err := b.CreateWorkspace(context.Background(), protoWS(cwdB, dataB, uuid.New().String()))
 	require.NoError(t, err)
 	require.NotEqual(t, wsA.ID, wsB.ID)
 }
@@ -457,7 +457,7 @@ func TestPathDedupe_FirstWinsKeepsOriginalEnv(t *testing.T) {
 	cwd := t.TempDir()
 	dataDir := t.TempDir()
 
-	b := New(context.Background(), nil, func() {})
+	b := New(context.Background(), nil, func(context.Context) {})
 	b.SetCreateGrace(2 * time.Second)
 	t.Cleanup(func() { drainBackend(t, b) })
 
@@ -465,7 +465,7 @@ func TestPathDedupe_FirstWinsKeepsOriginalEnv(t *testing.T) {
 	argsA := protoWS(cwd, dataDir, uuid.New().String())
 	argsA.YOLO = true
 	argsA.Env = originalEnv
-	wsA, protoA, err := b.CreateWorkspace(argsA)
+	wsA, protoA, err := b.CreateWorkspace(context.Background(), argsA)
 	require.NoError(t, err)
 	require.True(t, protoA.YOLO)
 	require.Equal(t, originalEnv, protoA.Env)
@@ -474,7 +474,7 @@ func TestPathDedupe_FirstWinsKeepsOriginalEnv(t *testing.T) {
 	argsB.YOLO = false
 	argsB.Debug = true
 	argsB.Env = []string{"BAZ=qux"}
-	_, protoB, err := b.CreateWorkspace(argsB)
+	_, protoB, err := b.CreateWorkspace(context.Background(), argsB)
 	require.NoError(t, err)
 	require.Equal(t, protoA.ID, protoB.ID)
 	require.True(t, protoB.YOLO, "first wins: YOLO must remain true")
@@ -498,13 +498,13 @@ func TestPathDedupe_Symlink(t *testing.T) {
 	require.NoError(t, os.Symlink(real, link))
 	dataDir := t.TempDir()
 
-	b := New(context.Background(), nil, func() {})
+	b := New(context.Background(), nil, func(context.Context) {})
 	b.SetCreateGrace(2 * time.Second)
 	t.Cleanup(func() { drainBackend(t, b) })
 
-	wsA, _, err := b.CreateWorkspace(protoWS(real, dataDir, uuid.New().String()))
+	wsA, _, err := b.CreateWorkspace(context.Background(), protoWS(real, dataDir, uuid.New().String()))
 	require.NoError(t, err)
-	wsB, _, err := b.CreateWorkspace(protoWS(link, dataDir, uuid.New().String()))
+	wsB, _, err := b.CreateWorkspace(context.Background(), protoWS(link, dataDir, uuid.New().String()))
 	require.NoError(t, err)
 	require.Equal(t, wsA.ID, wsB.ID)
 }
@@ -521,11 +521,11 @@ func TestPathDedupe_NonExistentPath(t *testing.T) {
 	missing := filepath.Join(parent, "does-not-exist")
 	dataDir := t.TempDir()
 
-	b := New(context.Background(), nil, func() {})
+	b := New(context.Background(), nil, func(context.Context) {})
 	b.SetCreateGrace(2 * time.Second)
 	t.Cleanup(func() { drainBackend(t, b) })
 
-	_, p, err := b.CreateWorkspace(protoWS(missing, dataDir, uuid.New().String()))
+	_, p, err := b.CreateWorkspace(context.Background(), protoWS(missing, dataDir, uuid.New().String()))
 	require.NoError(t, err)
 	require.NotEmpty(t, p.ID)
 }
@@ -541,14 +541,14 @@ func TestCreateWorkspace_IdempotentSameClient(t *testing.T) {
 
 	cwd := t.TempDir()
 	dataDir := t.TempDir()
-	b := New(context.Background(), nil, func() {})
+	b := New(context.Background(), nil, func(context.Context) {})
 	b.SetCreateGrace(2 * time.Second)
 	t.Cleanup(func() { drainBackend(t, b) })
 
 	cid := uuid.New().String()
-	ws1, _, err := b.CreateWorkspace(protoWS(cwd, dataDir, cid))
+	ws1, _, err := b.CreateWorkspace(context.Background(), protoWS(cwd, dataDir, cid))
 	require.NoError(t, err)
-	ws2, _, err := b.CreateWorkspace(protoWS(cwd, dataDir, cid))
+	ws2, _, err := b.CreateWorkspace(context.Background(), protoWS(cwd, dataDir, cid))
 	require.NoError(t, err)
 	require.Equal(t, ws1.ID, ws2.ID)
 
@@ -569,7 +569,7 @@ func TestPathDedupe_ParallelCreates(t *testing.T) {
 	cwd := t.TempDir()
 	dataDir := t.TempDir()
 
-	b := New(context.Background(), nil, func() {})
+	b := New(context.Background(), nil, func(context.Context) {})
 	b.SetCreateGrace(2 * time.Second)
 	t.Cleanup(func() { drainBackend(t, b) })
 
@@ -585,12 +585,12 @@ func TestPathDedupe_ParallelCreates(t *testing.T) {
 	start := make(chan struct{})
 	go func() {
 		<-start
-		ws, p, err := b.CreateWorkspace(protoWS(cwd, dataDir, cidA))
+		ws, p, err := b.CreateWorkspace(context.Background(), protoWS(cwd, dataDir, cidA))
 		ch <- result{ws, p, err}
 	}()
 	go func() {
 		<-start
-		ws, p, err := b.CreateWorkspace(protoWS(cwd, dataDir, cidB))
+		ws, p, err := b.CreateWorkspace(context.Background(), protoWS(cwd, dataDir, cidB))
 		ch <- result{ws, p, err}
 	}()
 	close(start)
@@ -612,11 +612,11 @@ func TestPathDedupe_ParallelCreates(t *testing.T) {
 func TestCreateWorkspace_RejectsBadClientID(t *testing.T) {
 	t.Parallel()
 
-	b := New(context.Background(), nil, func() {})
+	b := New(context.Background(), nil, func(context.Context) {})
 
-	_, _, err := b.CreateWorkspace(protoWS("/tmp/x", t.TempDir(), ""))
+	_, _, err := b.CreateWorkspace(context.Background(), protoWS("/tmp/x", t.TempDir(), ""))
 	require.ErrorIs(t, err, ErrInvalidClientID)
-	_, _, err = b.CreateWorkspace(protoWS("/tmp/x", t.TempDir(), "not-a-uuid"))
+	_, _, err = b.CreateWorkspace(context.Background(), protoWS("/tmp/x", t.TempDir(), "not-a-uuid"))
 	require.ErrorIs(t, err, ErrInvalidClientID)
 }
 
@@ -633,7 +633,7 @@ func drainBackend(t *testing.T, b *Backend) {
 		}
 		ws.clientsMu.Unlock()
 		for _, cid := range ids {
-			_ = b.releaseHold(ws.ID, cid)
+			_ = b.releaseHold(context.Background(), ws.ID, cid)
 		}
 	}
 }
@@ -720,13 +720,13 @@ func TestFirstWinsMismatch_LogsOnFlagDifferences(t *testing.T) {
 			dataDir := t.TempDir()
 
 			buf := captureDebugLogs(t)
-			b := New(context.Background(), nil, func() {})
+			b := New(context.Background(), nil, func(context.Context) {})
 			b.SetCreateGrace(2 * time.Second)
 			t.Cleanup(func() { drainBackend(t, b) })
 
 			argsA := protoWS(cwd, dataDir, uuid.New().String())
 			argsA.Env = []string{"FOO=bar"}
-			wsA, _, err := b.CreateWorkspace(argsA)
+			wsA, _, err := b.CreateWorkspace(context.Background(), argsA)
 			require.NoError(t, err)
 			originalDebug := wsA.Cfg.Config().Options.Debug
 			originalYOLO := wsA.Cfg.Overrides().SkipPermissionRequests
@@ -734,7 +734,7 @@ func TestFirstWinsMismatch_LogsOnFlagDifferences(t *testing.T) {
 			argsB := protoWS(cwd, dataDir, uuid.New().String())
 			argsB.Env = []string{"FOO=bar"} // identical by default
 			tc.mutate(&argsB)
-			_, _, err = b.CreateWorkspace(argsB)
+			_, _, err = b.CreateWorkspace(context.Background(), argsB)
 			require.NoError(t, err)
 
 			require.Contains(
@@ -757,18 +757,18 @@ func TestFirstWinsMismatch_NoLogWhenIdentical(t *testing.T) {
 	dataDir := t.TempDir()
 
 	buf := captureDebugLogs(t)
-	b := New(context.Background(), nil, func() {})
+	b := New(context.Background(), nil, func(context.Context) {})
 	b.SetCreateGrace(2 * time.Second)
 	t.Cleanup(func() { drainBackend(t, b) })
 
 	argsA := protoWS(cwd, dataDir, uuid.New().String())
 	argsA.Env = []string{"FOO=bar"}
-	_, _, err := b.CreateWorkspace(argsA)
+	_, _, err := b.CreateWorkspace(context.Background(), argsA)
 	require.NoError(t, err)
 
 	argsB := protoWS(cwd, dataDir, uuid.New().String())
 	argsB.Env = []string{"FOO=bar"}
-	_, _, err = b.CreateWorkspace(argsB)
+	_, _, err = b.CreateWorkspace(context.Background(), argsB)
 	require.NoError(t, err)
 
 	require.False(t,
@@ -821,18 +821,18 @@ func TestChannelOptInBoundary_DuplicateCreate(t *testing.T) {
 			cwd := t.TempDir()
 			dataDir := t.TempDir()
 
-			b := New(context.Background(), nil, func() {})
+			b := New(context.Background(), nil, func(context.Context) {})
 			b.SetCreateGrace(2 * time.Second)
 			t.Cleanup(func() { drainBackend(t, b) })
 
 			argsA := protoWS(cwd, dataDir, uuid.New().String())
 			argsA.Channels = tc.firstChannels
-			wsA, _, err := b.CreateWorkspace(argsA)
+			wsA, _, err := b.CreateWorkspace(context.Background(), argsA)
 			require.NoError(t, err)
 
 			argsB := protoWS(cwd, dataDir, uuid.New().String())
 			argsB.Channels = tc.secondChannels
-			wsB, protoB, err := b.CreateWorkspace(argsB)
+			wsB, protoB, err := b.CreateWorkspace(context.Background(), argsB)
 
 			if tc.wantMismatchErr {
 				require.ErrorIs(t, err, ErrChannelOptInMismatch)
@@ -883,7 +883,7 @@ func TestRaceTwoClientsAttachOneDetaches(t *testing.T) {
 	require.Len(t, ws.clients, 2, "both clients must be attached")
 	ws.clientsMu.Unlock()
 
-	b.DetachClient(ws.ID, cidA)
+	b.DetachClient(context.Background(), ws.ID, cidA)
 
 	ws.clientsMu.Lock()
 	require.Len(t, ws.clients, 1, "refcount must be 1 after one detach")
@@ -893,7 +893,7 @@ func TestRaceTwoClientsAttachOneDetaches(t *testing.T) {
 	require.Equal(t, int32(0), shutdowns.Load(), "workspace must remain alive")
 
 	// Drain.
-	b.DetachClient(ws.ID, cidB)
+	b.DetachClient(context.Background(), ws.ID, cidB)
 	require.Equal(t, int32(1), shutdowns.Load())
 }
 
@@ -919,7 +919,7 @@ func TestExplicitDeleteThenAttach(t *testing.T) {
 
 	cid := newClientID(t)
 	// Real hold via registerClient (mirrors CreateWorkspace).
-	b.registerClient(ws, cid)
+	b.registerClient(context.Background(), ws, cid)
 	ws.clientsMu.Lock()
 	require.Contains(t, ws.clients, cid)
 	require.NotNil(t, ws.clients[cid].holdTimer, "hold must be live")
@@ -929,7 +929,7 @@ func TestExplicitDeleteThenAttach(t *testing.T) {
 	// releaseHold: consumes the hold and removes the entry
 	// (streams == 0). The anchor client keeps the workspace
 	// alive.
-	require.NoError(t, b.releaseHold(ws.ID, cid))
+	require.NoError(t, b.releaseHold(context.Background(), ws.ID, cid))
 	require.Equal(t, int32(0), shutdowns.Load(), "anchor must keep workspace alive")
 	ws.clientsMu.Lock()
 	require.NotContains(t, ws.clients, cid, "entry must be removed by releaseHold")
@@ -946,7 +946,7 @@ func TestExplicitDeleteThenAttach(t *testing.T) {
 
 	// Calling releaseHold again is a no-op (no hold timer to
 	// stop, streams > 0 so the entry stays).
-	require.NoError(t, b.releaseHold(ws.ID, cid))
+	require.NoError(t, b.releaseHold(context.Background(), ws.ID, cid))
 	ws.clientsMu.Lock()
 	require.Contains(t, ws.clients, cid, "releaseHold must not touch a stream-only entry")
 	require.Equal(t, 1, ws.clients[cid].streams)
@@ -954,8 +954,8 @@ func TestExplicitDeleteThenAttach(t *testing.T) {
 	ws.clientsMu.Unlock()
 
 	// Drain.
-	b.DetachClient(ws.ID, cid)
-	b.DetachClient(ws.ID, anchor)
+	b.DetachClient(context.Background(), ws.ID, cid)
+	b.DetachClient(context.Background(), ws.ID, anchor)
 	require.Equal(t, int32(1), shutdowns.Load())
 }
 
@@ -997,7 +997,7 @@ func TestAttachClient_RacesWithTeardown(t *testing.T) {
 		}()
 		go func() {
 			<-start
-			b.DetachClient(ws.ID, cidA)
+			b.DetachClient(context.Background(), ws.ID, cidA)
 			close(detachDone)
 		}()
 		close(start)
@@ -1090,8 +1090,8 @@ func TestSetCurrentSession_BasicAttachAndSwitch(t *testing.T) {
 	ws.clientsMu.Unlock()
 
 	// Drain to release the workspace.
-	b.DetachClient(ws.ID, cidA)
-	b.DetachClient(ws.ID, cidB)
+	b.DetachClient(context.Background(), ws.ID, cidA)
+	b.DetachClient(context.Background(), ws.ID, cidB)
 }
 
 // TestSetCurrentSession_DetachClearsEntry verifies the implicit
@@ -1112,7 +1112,7 @@ func TestSetCurrentSession_DetachClearsEntry(t *testing.T) {
 	require.NoError(t, b.AttachClient(ws.ID, cid))
 	require.NoError(t, b.SetCurrentSession(ws.ID, cid, "S2"))
 
-	b.DetachClient(ws.ID, cid)
+	b.DetachClient(context.Background(), ws.ID, cid)
 
 	ws.clientsMu.Lock()
 	_, present := ws.clients[cid]
@@ -1123,7 +1123,7 @@ func TestSetCurrentSession_DetachClearsEntry(t *testing.T) {
 	// rejected with ErrClientNotAttached.
 	require.ErrorIs(t, b.SetCurrentSession(ws.ID, cid, "S3"), ErrClientNotAttached)
 
-	b.DetachClient(ws.ID, anchor)
+	b.DetachClient(context.Background(), ws.ID, anchor)
 }
 
 // TestSetCurrentSession_RejectsHoldOnly verifies that a registered
@@ -1139,7 +1139,7 @@ func TestSetCurrentSession_RejectsHoldOnly(t *testing.T) {
 	ws, _ := insertTestWorkspace(t, b, "/tmp/current-session-hold")
 
 	cid := newClientID(t)
-	b.registerClient(ws, cid)
+	b.registerClient(context.Background(), ws, cid)
 
 	require.ErrorIs(t, b.SetCurrentSession(ws.ID, cid, "S1"), ErrClientNotAttached)
 
@@ -1148,7 +1148,7 @@ func TestSetCurrentSession_RejectsHoldOnly(t *testing.T) {
 	ws.clientsMu.Unlock()
 
 	// Drain.
-	require.NoError(t, b.releaseHold(ws.ID, cid))
+	require.NoError(t, b.releaseHold(context.Background(), ws.ID, cid))
 }
 
 // TestSetCurrentSession_UnknownClient verifies that a client with no
@@ -1219,7 +1219,7 @@ func TestSetCurrentSession_RaceWithDetach(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		// Single concurrent detach of cidA partway through.
-		b.DetachClient(ws.ID, cidA)
+		b.DetachClient(context.Background(), ws.ID, cidA)
 	}()
 	wg.Wait()
 
@@ -1278,8 +1278,8 @@ func TestAttachedClients_BasicLifecycle(t *testing.T) {
 	// currentSessionID empty by construction, and SetCurrentSession
 	// rejects hold-only writers — so the contract holds two ways.
 	cidHold := newClientID(t)
-	b.registerClient(ws, cidHold)
-	t.Cleanup(func() { _ = b.releaseHold(ws.ID, cidHold) })
+	b.registerClient(context.Background(), ws, cidHold)
+	t.Cleanup(func() { _ = b.releaseHold(context.Background(), ws.ID, cidHold) })
 	n, _ = b.AttachedClients(ws.ID, "S1")
 	require.Equal(t, 1, n, "hold-only client must not contribute")
 	n, _ = b.AttachedClients(ws.ID, "")
@@ -1298,15 +1298,15 @@ func TestAttachedClients_BasicLifecycle(t *testing.T) {
 	require.Equal(t, 1, n, "stream-only client with empty currentSessionID matches the empty session id")
 
 	// B detaches: count for S2 drops to 0.
-	b.DetachClient(ws.ID, cidB)
+	b.DetachClient(context.Background(), ws.ID, cidB)
 	n, _ = b.AttachedClients(ws.ID, "S2")
 	require.Zero(t, n)
 	n, _ = b.AttachedClients(ws.ID, "S1")
 	require.Equal(t, 1, n, "A still on S1")
 
 	// Final cleanup.
-	b.DetachClient(ws.ID, cidA)
-	b.DetachClient(ws.ID, cidC)
+	b.DetachClient(context.Background(), ws.ID, cidA)
+	b.DetachClient(context.Background(), ws.ID, cidC)
 }
 
 // TestAttachedClients_UnknownWorkspace verifies the error surface.
@@ -1337,7 +1337,7 @@ func TestTeardown_DefersShutdownWhileCreatePending(t *testing.T) {
 	b.pending = 1
 	b.mu.Unlock()
 
-	b.teardown(ws)
+	b.teardown(context.Background(), ws)
 
 	require.Equal(t, int32(1), wsShutdowns.Load(),
 		"the torn-down workspace's own resources must still be released")
@@ -1355,7 +1355,7 @@ func TestTeardown_ShutsDownWhenIdleAndNoPending(t *testing.T) {
 	b, serverShutdowns := newTestBackend(t)
 	ws, _ := insertTestWorkspace(t, b, "/tmp/idle-shutdown")
 
-	b.teardown(ws)
+	b.teardown(context.Background(), ws)
 
 	require.Equal(t, int32(1), serverShutdowns.Load(),
 		"server must shut down once the last workspace is gone and nothing is pending")
@@ -1379,7 +1379,7 @@ func TestCreateWorkspace_PendingBalancedOnSuccess(t *testing.T) {
 	b.SetCreateGrace(time.Hour)
 	t.Cleanup(func() { drainBackend(t, b) })
 
-	_, _, err := b.CreateWorkspace(protoWS(t.TempDir(), t.TempDir(), uuid.New().String()))
+	_, _, err := b.CreateWorkspace(context.Background(), protoWS(t.TempDir(), t.TempDir(), uuid.New().String()))
 	require.NoError(t, err)
 
 	b.mu.Lock()
@@ -1410,7 +1410,7 @@ func TestCreateWorkspace_PendingBalancedAndReapsOnFailure(t *testing.T) {
 	require.NoError(t, os.WriteFile(fileAsParent, []byte("x"), 0o600))
 	badDataDir := filepath.Join(fileAsParent, "data")
 
-	_, _, err := b.CreateWorkspace(protoWS(tmp, badDataDir, uuid.New().String()))
+	_, _, err := b.CreateWorkspace(context.Background(), protoWS(tmp, badDataDir, uuid.New().String()))
 	require.Error(t, err, "create must fail when the data dir cannot be created")
 
 	b.mu.Lock()
@@ -1446,7 +1446,7 @@ func TestServer_CreateCancelsPendingIdleShutdown(t *testing.T) {
 	wsA, _ := insertTestWorkspace(t, b, "/tmp/linger-A")
 	cidA := newClientID(t)
 	require.NoError(t, b.AttachClient(wsA.ID, cidA))
-	b.DetachClient(wsA.ID, cidA)
+	b.DetachClient(context.Background(), wsA.ID, cidA)
 
 	b.mu.Lock()
 	armed := b.shutdownTimer != nil
@@ -1456,7 +1456,7 @@ func TestServer_CreateCancelsPendingIdleShutdown(t *testing.T) {
 
 	// Session 2 arrives within the linger window: creating a workspace
 	// must cancel the pending shutdown.
-	_, _, err := b.CreateWorkspace(protoWS(t.TempDir(), t.TempDir(), uuid.New().String()))
+	_, _, err := b.CreateWorkspace(context.Background(), protoWS(t.TempDir(), t.TempDir(), uuid.New().String()))
 	require.NoError(t, err)
 
 	b.mu.Lock()
@@ -1477,7 +1477,7 @@ func TestServer_ShutsDownAfterLingerWhenIdle(t *testing.T) {
 	wsA, _ := insertTestWorkspace(t, b, "/tmp/linger-idle")
 	cidA := newClientID(t)
 	require.NoError(t, b.AttachClient(wsA.ID, cidA))
-	b.DetachClient(wsA.ID, cidA)
+	b.DetachClient(context.Background(), wsA.ID, cidA)
 
 	// Nobody returns: after the linger elapses the server shuts down.
 	require.Eventually(t, func() bool { return shutdownCount.Load() == 1 },
@@ -1505,10 +1505,10 @@ func TestDetachStream_GraceSurvivesReattach(t *testing.T) {
 	ws, wsShutdowns := insertTestWorkspace(t, b, "/tmp/blip")
 
 	cid := newClientID(t)
-	b.registerClient(ws, cid)
+	b.registerClient(context.Background(), ws, cid)
 	require.NoError(t, b.AttachClient(ws.ID, cid))
 
-	b.DetachClient(ws.ID, cid)
+	b.DetachClient(context.Background(), ws.ID, cid)
 	require.Equal(t, int32(0), wsShutdowns.Load(),
 		"a dropped stream must not tear the workspace down within the grace")
 	live, err := b.GetWorkspace(ws.ID)
@@ -1536,9 +1536,9 @@ func TestDetachStream_GraceExpiryTearsDown(t *testing.T) {
 	ws, wsShutdowns := insertTestWorkspace(t, b, "/tmp/gone-for-good")
 
 	cid := newClientID(t)
-	b.registerClient(ws, cid)
+	b.registerClient(context.Background(), ws, cid)
 	require.NoError(t, b.AttachClient(ws.ID, cid))
-	b.DetachClient(ws.ID, cid)
+	b.DetachClient(context.Background(), ws.ID, cid)
 
 	require.Eventually(t, func() bool { return srvShutdowns.Load() == 1 },
 		2*time.Second, 10*time.Millisecond,
@@ -1559,13 +1559,13 @@ func TestDetachStream_ExplicitReleaseSkipsGrace(t *testing.T) {
 	ws, wsShutdowns := insertTestWorkspace(t, b, "/tmp/clean-exit")
 
 	cid := newClientID(t)
-	b.registerClient(ws, cid)
+	b.registerClient(context.Background(), ws, cid)
 	require.NoError(t, b.AttachClient(ws.ID, cid))
 
 	// The order a quitting client produces: release, then the stream ends.
-	require.NoError(t, b.releaseHold(ws.ID, cid))
+	require.NoError(t, b.releaseHold(context.Background(), ws.ID, cid))
 	require.Equal(t, int32(0), wsShutdowns.Load(), "the live stream still holds it")
-	b.DetachClient(ws.ID, cid)
+	b.DetachClient(context.Background(), ws.ID, cid)
 
 	require.Equal(t, int32(1), wsShutdowns.Load(),
 		"an explicitly released client must tear down without waiting out the grace")
@@ -1584,19 +1584,19 @@ func TestRegisterClient_RearmsGraceAndCancelsRelease(t *testing.T) {
 	ws, wsShutdowns := insertTestWorkspace(t, b, "/tmp/rearm")
 
 	cid := newClientID(t)
-	b.registerClient(ws, cid)
+	b.registerClient(context.Background(), ws, cid)
 	require.NoError(t, b.AttachClient(ws.ID, cid))
-	require.NoError(t, b.releaseHold(ws.ID, cid))
-	b.DetachClient(ws.ID, cid)
+	require.NoError(t, b.releaseHold(context.Background(), ws.ID, cid))
+	b.DetachClient(context.Background(), ws.ID, cid)
 	require.Equal(t, int32(1), wsShutdowns.Load())
 
 	// A second workspace, this time reclaimed by a duplicate create while
 	// its short detach grace is running.
 	ws2, ws2Shutdowns := insertTestWorkspace(t, b, "/tmp/rearm-2")
-	b.registerClient(ws2, cid)
+	b.registerClient(context.Background(), ws2, cid)
 	require.NoError(t, b.AttachClient(ws2.ID, cid))
-	b.DetachClient(ws2.ID, cid)
-	b.registerClient(ws2, cid)
+	b.DetachClient(context.Background(), ws2.ID, cid)
+	b.registerClient(context.Background(), ws2, cid)
 
 	ws2.clientsMu.Lock()
 	require.False(t, ws2.clients[cid].released)
@@ -1625,13 +1625,13 @@ func TestRetireClient_ReleasesEveryClaim(t *testing.T) {
 	shared, sharedShutdowns := insertTestWorkspace(t, b, "/tmp/retire-shared")
 
 	cid, other := newClientID(t), newClientID(t)
-	b.registerClient(streamed, cid)
+	b.registerClient(context.Background(), streamed, cid)
 	require.NoError(t, b.AttachClient(streamed.ID, cid))
-	b.registerClient(held, cid)
-	b.registerClient(shared, cid)
-	b.registerClient(shared, other)
+	b.registerClient(context.Background(), held, cid)
+	b.registerClient(context.Background(), shared, cid)
+	b.registerClient(context.Background(), shared, other)
 
-	require.NoError(t, b.RetireClient(cid))
+	require.NoError(t, b.RetireClient(context.Background(), cid))
 
 	require.Equal(t, int32(1), streamedShutdowns.Load())
 	require.Equal(t, int32(1), heldShutdowns.Load())
@@ -1643,7 +1643,7 @@ func TestRetireClient_ReleasesEveryClaim(t *testing.T) {
 	shared.clientsMu.Unlock()
 
 	// Idempotent: retiring twice is not an error and changes nothing.
-	require.NoError(t, b.RetireClient(cid))
+	require.NoError(t, b.RetireClient(context.Background(), cid))
 	require.Equal(t, int32(1), streamedShutdowns.Load())
 }
 
@@ -1657,13 +1657,13 @@ func TestRetireClient_RefusesLaterCreates(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 
-	b := New(context.Background(), nil, func() {})
+	b := New(context.Background(), nil, func(context.Context) {})
 	t.Cleanup(func() { drainBackend(t, b) })
 
 	cid := newClientID(t)
-	require.NoError(t, b.RetireClient(cid))
+	require.NoError(t, b.RetireClient(context.Background(), cid))
 
-	_, _, err := b.CreateWorkspace(protoWS(t.TempDir(), t.TempDir(), cid))
+	_, _, err := b.CreateWorkspace(context.Background(), protoWS(t.TempDir(), t.TempDir(), cid))
 	require.ErrorIs(t, err, ErrClientRetired)
 	require.Zero(t, b.workspaces.Len(), "a refused create must register nothing")
 }
@@ -1679,7 +1679,7 @@ func TestRetireClient_DuringPendingCreate(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 
-	b := New(context.Background(), nil, func() {})
+	b := New(context.Background(), nil, func(context.Context) {})
 	t.Cleanup(func() { drainBackend(t, b) })
 
 	cid := newClientID(t)
@@ -1687,7 +1687,7 @@ func TestRetireClient_DuringPendingCreate(t *testing.T) {
 
 	createErr := make(chan error, 1)
 	go func() {
-		_, _, err := b.CreateWorkspace(protoWS(cwd, dataDir, cid))
+		_, _, err := b.CreateWorkspace(context.Background(), protoWS(cwd, dataDir, cid))
 		createErr <- err
 	}()
 
@@ -1702,7 +1702,7 @@ func TestRetireClient_DuringPendingCreate(t *testing.T) {
 		return b.pending == 1
 	}, 30*time.Second, time.Millisecond, "create must reach its slow path")
 
-	require.NoError(t, b.RetireClient(cid))
+	require.NoError(t, b.RetireClient(context.Background(), cid))
 
 	require.ErrorIs(t, <-createErr, ErrClientRetired,
 		"a create that commits after retirement must be refused")
@@ -1721,9 +1721,9 @@ func TestShutdownIfIdle_RefusesWhileWorkspaceLive(t *testing.T) {
 	b, shutdowns := newTestBackend(t)
 	ws, _ := insertTestWorkspace(t, b, "/tmp/in-use")
 	cid := newClientID(t)
-	b.registerClient(ws, cid)
+	b.registerClient(context.Background(), ws, cid)
 
-	require.False(t, b.ShutdownIfIdle(), "a server hosting a workspace must refuse")
+	require.False(t, b.ShutdownIfIdle(context.Background()), "a server hosting a workspace must refuse")
 	require.Equal(t, int32(0), shutdowns.Load())
 
 	// Refusing must not latch anything: the server keeps serving.
@@ -1744,7 +1744,7 @@ func TestShutdownIfIdle_RefusesWhileCreatePending(t *testing.T) {
 	b.pending = 1
 	b.mu.Unlock()
 
-	require.False(t, b.ShutdownIfIdle())
+	require.False(t, b.ShutdownIfIdle(context.Background()))
 	require.Equal(t, int32(0), shutdowns.Load())
 }
 
@@ -1755,10 +1755,10 @@ func TestShutdownIfIdle_GrantedAndFinal(t *testing.T) {
 	t.Parallel()
 
 	b, shutdowns := newTestBackend(t)
-	require.True(t, b.ShutdownIfIdle())
+	require.True(t, b.ShutdownIfIdle(context.Background()))
 	require.Equal(t, int32(1), shutdowns.Load())
 
-	_, _, err := b.CreateWorkspace(protoWS(t.TempDir(), t.TempDir(), newClientID(t)))
+	_, _, err := b.CreateWorkspace(context.Background(), protoWS(t.TempDir(), t.TempDir(), newClientID(t)))
 	require.ErrorIs(t, err, ErrServerShuttingDown)
 }
 
@@ -1773,12 +1773,12 @@ func TestIdleShutdown_RefusesLaterCreates(t *testing.T) {
 	ws, _ := insertTestWorkspace(t, b, "/tmp/going-idle")
 	cid := newClientID(t)
 	require.NoError(t, b.AttachClient(ws.ID, cid))
-	b.DetachClient(ws.ID, cid)
+	b.DetachClient(context.Background(), ws.ID, cid)
 
 	require.Eventually(t, func() bool { return shutdowns.Load() == 1 },
 		2*time.Second, 10*time.Millisecond)
 
-	_, _, err := b.CreateWorkspace(protoWS(t.TempDir(), t.TempDir(), cid))
+	_, _, err := b.CreateWorkspace(context.Background(), protoWS(t.TempDir(), t.TempDir(), cid))
 	require.ErrorIs(t, err, ErrServerShuttingDown,
 		"the client must be told to retry against a replacement server")
 }

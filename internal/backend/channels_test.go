@@ -216,7 +216,7 @@ func insertChannelWorkspaceCfg(t *testing.T, b *Backend, srvName string, enabled
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(wd, "crush.json"), cfgJSON, 0o644))
 
-	cfg, err := config.Init(wd, "", false)
+	cfg, err := config.Init(t.Context(), wd, "", false)
 	require.NoError(t, err)
 	if enabled {
 		cfg.Overrides().EnabledChannels = []string{srvName}
@@ -228,7 +228,7 @@ func insertChannelWorkspaceCfg(t *testing.T, b *Backend, srvName string, enabled
 		Cfg:          cfg,
 		resolvedPath: wd,
 		clients:      make(map[string]*clientState),
-		shutdownFn:   func() {},
+		shutdownFn:   func(context.Context) {},
 	}
 	ws.App = &app.App{AgentCoordinator: coord, Sessions: sessions}
 	ws.ctx, ws.cancel = context.WithCancel(b.ctx)

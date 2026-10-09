@@ -50,7 +50,7 @@ type BrowserFlow struct {
 
 // StartBrowserFlow opens the loopback callback listener and returns the
 // flow holding the authorization URL to open in a browser.
-func StartBrowserFlow() (*BrowserFlow, error) {
+func StartBrowserFlow(ctx context.Context) (*BrowserFlow, error) {
 	pkce, err := NewPKCE()
 	if err != nil {
 		return nil, err
@@ -64,7 +64,7 @@ func StartBrowserFlow() (*BrowserFlow, error) {
 		return nil, err
 	}
 
-	listener, port, err := listenCallback()
+	listener, port, err := listenCallback(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -220,8 +220,8 @@ func (f *BrowserFlow) handleCallback(w http.ResponseWriter, r *http.Request) {
 }
 
 // listenCallback binds a loopback listener on an OS-assigned port.
-func listenCallback() (net.Listener, int, error) {
-	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
+func listenCallback(ctx context.Context) (net.Listener, int, error) {
+	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, 0, fmt.Errorf("listen OAuth callback: %w", err)
 	}

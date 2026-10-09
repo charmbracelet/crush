@@ -38,7 +38,7 @@ func (m *OAuthGrok) name() string {
 }
 
 func (m *OAuthGrok) initiateAuth() tea.Msg {
-	flow, err := grok.StartBrowserFlow()
+	flow, err := grok.StartBrowserFlow(context.Background())
 	if err == nil {
 		m.flow = flow
 

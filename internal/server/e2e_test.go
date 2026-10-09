@@ -57,7 +57,7 @@ type e2eHarness struct {
 func (h *e2eHarness) installServer(t *testing.T) {
 	t.Helper()
 	srv := &Server{}
-	srv.backend = backend.New(context.Background(), nil, func() {
+	srv.backend = backend.New(context.Background(), nil, func(context.Context) {
 		h.shutdownHit.Store(true)
 	})
 	srv.installHandler()
@@ -112,7 +112,7 @@ func newE2EHarness(t *testing.T) *e2eHarness {
 	// Synthetic workspaces have an incomplete App; bypass the
 	// default teardown so the "last workspace removed" path can run
 	// without panicking inside [app.App.Shutdown].
-	backend.SetWorkspaceShutdownFnForTest(ws, func() {})
+	backend.SetWorkspaceShutdownFnForTest(ws, func(context.Context) {})
 	backend.InsertWorkspaceForTest(h.backend, ws)
 
 	h.workspace = ws
@@ -386,7 +386,7 @@ func TestE2E_TwoClientsReceiveSameMessage(t *testing.T) {
 	// release the pooled DB connection so Windows can clean up
 	// the temp data directory.
 	wsDataDir := ws.Cfg.Config().Options.DataDirectory
-	backend.SetWorkspaceShutdownFnForTest(ws, func() {
+	backend.SetWorkspaceShutdownFnForTest(ws, func(context.Context) {
 		_ = db.Release(wsDataDir)
 	})
 

@@ -615,6 +615,7 @@ func (m MCPConfig) ResolvedURL(r VariableResolver) (string, error) {
 var knownSessionlessMCPs = map[string]struct{}{
 	"https://api.github.com/mcp":        {},
 	"https://api.githubcopilot.com/mcp": {},
+	"https://mcp.sentry.dev/mcp":        {},
 }
 
 // IsSessionless reports whether the server should be treated as sessionless.

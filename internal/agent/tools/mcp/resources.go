@@ -102,8 +102,8 @@ func getResources(ctx context.Context, c *ClientSession) ([]*Resource, error) {
 
 // isMethodNotFoundError checks if the error is a JSON-RPC "Method not found" error.
 func isMethodNotFoundError(err error) bool {
-	var rpcErr *jsonrpc.Error
-	return errors.As(err, &rpcErr) && rpcErr != nil && rpcErr.Code == jsonrpc.CodeMethodNotFound
+	rpcErr, ok := errors.AsType[*jsonrpc.Error](err)
+	return ok && rpcErr != nil && rpcErr.Code == jsonrpc.CodeMethodNotFound
 }
 
 func updateResources(name string, resources []*Resource) int {

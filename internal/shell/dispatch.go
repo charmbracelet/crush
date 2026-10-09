@@ -200,8 +200,7 @@ func dispatchShebang(ctx context.Context, scriptPath string, probe []byte, args 
 	isolateProcess(cmd)
 
 	if err := cmd.Run(); err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
+		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 			code := exitErr.ExitCode()
 			if code < 0 {
 				code = 1

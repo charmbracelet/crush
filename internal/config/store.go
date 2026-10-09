@@ -1624,6 +1624,9 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 	if err := cfg.ValidateHooks(); err != nil {
 		return fmt.Errorf("invalid hook configuration on reload: %w", err)
 	}
+	if err := cfg.ValidateCustomTools(); err != nil {
+		return fmt.Errorf("invalid tool configuration on reload: %w", err)
+	}
 
 	// Preserve runtime overrides
 	overrides := s.overrides

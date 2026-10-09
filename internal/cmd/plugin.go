@@ -26,11 +26,11 @@ var newGitHubClient = plugins.DefaultGitHub
 var pluginCmd = &cobra.Command{
 	Use:     "plugin",
 	Aliases: []string{"plugins"},
-	Short:   "Manage provider plugins",
-	Long: `Install provider plugins from GitHub.
+	Short:   "Manage plugins (providers and tools)",
+	Long: `Install plugins from GitHub.
 
-A provider plugin is a Bash script that declares a provider with the same
-builtins a crushrc uses, so a provider can ship without a Crush release.
+A plugin is a Bash script that declares providers and agent tools with the
+same builtins a crushrc uses, so either can ship without a Crush release.
 Installing a repository writes every *.sh at its root into a plugins directory
 and records the exact commit each file came from, which is what an update
 compares against.`,

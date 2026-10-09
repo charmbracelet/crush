@@ -12,44 +12,132 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestProgramStatus(t *testing.T) {
+func newProgramStatusUI(t *testing.T) *UI {
+	t.Helper()
 	pinTTLs(t)
+	u := newBusyUI(&countingWorkspace{ready: true})
+	warmCaches(u, false)
+	return u
+}
 
-	ws := &countingWorkspace{ready: true}
-	u := newBusyUI(ws)
-	require.Equal(t, &tea.ProgramStatus{State: tea.ProgramStateIdle, App: "crush"}, u.programStatus())
-
-	warmCaches(u, true)
-	require.Equal(t, tea.ProgramStateWorking, u.programStatus().State)
-
-	u.activeInline = dialog.NewQuestionForm(u.com.Styles, question.Request{})
-	ps := u.programStatus()
-	require.Equal(t, tea.ProgramStateBlocked, ps.State)
-	require.Equal(t, tea.ProgramStatusKindQuestion, ps.Kind)
-
-	u.dialog.OpenDialogWithGrace(dialog.NewPermissions(u.com, permission.PermissionRequest{ID: "p", ToolName: "bash"}))
-	ps = u.programStatus()
-	require.Equal(t, tea.ProgramStateBlocked, ps.State)
-	require.Equal(t, tea.ProgramStatusKindPermission, ps.Kind)
-
-	u.dialog.CloseDialog(dialog.PermissionsID)
-	u.activeInline = nil
-
-	finish := func(typ notify.Type) {
-		t.Helper()
-		_, cmd := u.Update(pubsub.Event[notify.Notification]{
-			Type:    pubsub.CreatedEvent,
-			Payload: notify.Notification{Type: typ, SessionID: "s1"},
-		})
-		runCmds(u, cmd)
+func agentFinished() tea.Msg {
+	return pubsub.Event[notify.Notification]{
+		Type:    pubsub.CreatedEvent,
+		Payload: notify.Notification{Type: notify.TypeAgentFinished, SessionID: "s1"},
 	}
+}
 
-	finish(notify.TypeAgentError)
-	require.Equal(t, tea.ProgramStateError, u.programStatus().State)
+func runComplete(rc notify.RunComplete) tea.Msg {
+	rc.SessionID = "s1"
+	return pubsub.Event[notify.RunComplete]{Type: pubsub.UpdatedEvent, Payload: rc}
+}
 
-	finish(notify.TypeAgentFinished)
-	require.Equal(t, tea.ProgramStateDone, u.programStatus().State)
+func TestProgramStatus(t *testing.T) {
+	cases := []struct {
+		name  string
+		setup func(u *UI)
+		want  tea.ProgramStatus
+	}{
+		{
+			name: "idle",
+			want: tea.ProgramStatus{State: tea.ProgramStateIdle, App: "crush"},
+		},
+		{
+			name:  "working",
+			setup: func(u *UI) { u.agentBusyCache.set(true) },
+			want:  tea.ProgramStatus{State: tea.ProgramStateWorking, App: "crush"},
+		},
+		{
+			name: "question",
+			setup: func(u *UI) {
+				u.agentBusyCache.set(true)
+				u.activeInline = dialog.NewQuestionForm(u.com.Styles, question.Request{})
+			},
+			want: tea.ProgramStatus{
+				State: tea.ProgramStateBlocked, App: "crush",
+				Kind: tea.ProgramStatusKindQuestion, Message: "Questions need your input",
+			},
+		},
+		{
+			name: "permission wins over a question",
+			setup: func(u *UI) {
+				u.activeInline = dialog.NewQuestionForm(u.com.Styles, question.Request{})
+				u.dialog.OpenDialogWithGrace(dialog.NewPermissions(u.com, permission.PermissionRequest{ID: "p", ToolName: "bash"}))
+			},
+			want: tea.ProgramStatus{
+				State: tea.ProgramStateBlocked, App: "crush",
+				Kind: tea.ProgramStatusKindPermission, Message: "Permission required",
+			},
+		},
+		{
+			name: "aws sign-in",
+			setup: func(u *UI) {
+				dlg, _ := dialog.NewAWSSSO(u.com, "aws sso login")
+				u.dialog.OpenDialog(dlg)
+			},
+			want: tea.ProgramStatus{
+				State: tea.ProgramStateBlocked, App: "crush",
+				Kind: tea.ProgramStatusKindAuth, Message: "AWS sign-in required",
+			},
+		},
+		{
+			name: "working wins over the last outcome",
+			setup: func(u *UI) {
+				u.turnOutcome = tea.ProgramStateDone
+				u.agentBusyCache.set(true)
+			},
+			want: tea.ProgramStatus{State: tea.ProgramStateWorking, App: "crush"},
+		},
+		{
+			name:  "outcome once idle",
+			setup: func(u *UI) { u.turnOutcome = tea.ProgramStateError },
+			want:  tea.ProgramStatus{State: tea.ProgramStateError, App: "crush"},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			u := newProgramStatusUI(t)
+			if c.setup != nil {
+				c.setup(u)
+			}
+			require.Equal(t, &c.want, u.programStatus())
+		})
+	}
+}
 
-	u.Update(tea.FocusMsg{})
-	require.Equal(t, tea.ProgramStateIdle, u.programStatus().State)
+func TestTurnOutcome(t *testing.T) {
+	cases := []struct {
+		name string
+		msgs []tea.Msg
+		want tea.ProgramState
+	}{
+		{"finished", []tea.Msg{agentFinished()}, tea.ProgramStateDone},
+		{"failed", []tea.Msg{runComplete(notify.RunComplete{Error: "boom"})}, tea.ProgramStateError},
+		{"succeeded run complete leaves done", []tea.Msg{agentFinished(), runComplete(notify.RunComplete{})}, tea.ProgramStateDone},
+		{"cancelled is idle", []tea.Msg{agentFinished(), runComplete(notify.RunComplete{Error: "context canceled", Cancelled: true})}, ""},
+		{"queued prompt failing after a finished one", []tea.Msg{agentFinished(), runComplete(notify.RunComplete{Error: "boom"}), runComplete(notify.RunComplete{})}, tea.ProgramStateError},
+		// In local mode AgentRun returns only after the turn, so this arrives
+		// after the finish notification and must not clear it.
+		{"run submitted after finishing", []tea.Msg{agentFinished(), agentRunSubmittedMsg{}}, tea.ProgramStateDone},
+		{"focus clears", []tea.Msg{agentFinished(), tea.FocusMsg{}}, ""},
+		{"other notifications ignored", []tea.Msg{pubsub.Event[notify.Notification]{Payload: notify.Notification{Type: notify.TypeAgentError}}}, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			u := newProgramStatusUI(t)
+			for _, msg := range c.msgs {
+				_, cmd := u.Update(msg)
+				runCmds(u, cmd)
+			}
+			require.Equal(t, c.want, u.turnOutcome)
+		})
+	}
+}
+
+func TestSendMessageClearsTurnOutcome(t *testing.T) {
+	u := newProgramStatusUI(t)
+	u.turnOutcome = tea.ProgramStateDone
+
+	require.NotNil(t, u.sendMessage("next"))
+	require.Empty(t, u.turnOutcome)
 }

@@ -941,6 +941,8 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		)
 	}
 
+	allTools = append(allTools, tools.GetCustomTools(c.permissions, c.cfg, c.cfg.WorkingDir(), c.cfg.Config().Options.DataDirectory)...)
+
 	var filteredTools []fantasy.AgentTool
 	for _, tool := range allTools {
 		if slices.Contains(agent.AllowedTools, tool.Info().Name) {

@@ -121,6 +121,7 @@ Available Commands:
   mcp           Manage MCP servers
   lsp           Manage language servers
   hook          Manage hooks
+  tool          Manage custom agent tools
   permissions   Configure tool permissions
   option        Configure general Crush behavior
 ```
@@ -482,7 +483,8 @@ model add example/gemini-3.8-flash --name "Gemini 3.8 Flash" --price-input "$pri
 
 The builtins above are the plugin format. A plugin is a Bash script that
 runs at config load through the same embedded interpreter, so a provider
-can be added without a Crush release. Two directories are scanned:
+or an agent tool (see [tool](#tool)) can be added without a Crush release.
+Two directories are scanned:
 
 - `$XDG_CONFIG_HOME/crush/plugins/` — user-wide
 - `.crush/plugins/` — the working directory's project folder
@@ -787,6 +789,91 @@ Usage:
 ```bash
 permissions allow view ls grep edit
 permissions deny bash
+```
+
+### tool
+
+Manage custom agent tools: tools the model can call whose implementation is a
+shell command. This is how a plugin ships a tool, the same way it ships a
+provider.
+
+```text
+Usage:
+  tool [command]
+
+Available Commands:
+  add       Add or update a tool
+  remove    Remove a tool
+  rm        Alias for remove
+```
+
+#### `tool add`
+
+```text
+Usage:
+  tool add <name> --description <text> --command <command> [flags]
+
+Flags:
+      --description string       what the tool does, shown to the model (required)
+      --command string           shell command run on every call (required)
+      --param NAME DESC          a string parameter (repeatable)
+      --schema JSON              a full JSON Schema object instead of --param
+      --required string          a parameter the model must supply (repeatable)
+      --timeout int              timeout in seconds (default 60)
+      --env KEY VALUE            extra environment for the command (repeatable)
+      --disabled bool            hide the tool from agents
+```
+
+```bash
+tool add jira_search \
+  --description "Search Jira issues with a JQL query" \
+  --param jql "The JQL query" --required jql \
+  --command 'curl -fsS -G -H "Authorization: Bearer $JIRA_TOKEN" \
+    --data-urlencode "jql=$(jq -r .jql)" https://jira.example.com/rest/api/2/search'
+```
+
+When the agent calls the tool:
+
+- The command runs in the embedded shell, in the project directory, with the
+  call's JSON input on stdin; the `jq` builtin is the easy way to read it.
+- The environment carries `CRUSH_TOOL_NAME`, `CRUSH_TOOL_INPUT` (the same
+  JSON), `CRUSH_SESSION_ID`, `CRUSH_PROJECT_DIR`, `CRUSH_VERSION`, and, when a
+  plugin declared it, `CRUSH_PLUGIN_FILE` and `CRUSH_PLUGIN_DIR`.
+- Stdout is the result. A non-zero exit is reported to the model as an error
+  with the exit code, stderr, and stdout. A call past its timeout is stopped.
+- Every call asks for permission, like an MCP tool; `permissions allow <name>`
+  pre-approves it and `permissions deny <name>` hides it. PreToolUse hooks run
+  for it like any other tool.
+- Only the coder agent gets custom tools; the read-only task and plan agents
+  do not.
+
+For anything longer than a line, define a function in the plugin and source
+the plugin from the command. The config builtins do nothing outside a config
+load, so this is safe, but any other top-level side effect in the file runs
+again on every call:
+
+```bash
+jira_search() {
+  jq -r .jql | ...
+}
+tool add jira_search --description "..." --param jql "JQL" \
+  --command 'source "$CRUSH_PLUGIN_FILE"; jira_search'
+```
+
+A name must match `^[a-zA-Z0-9_-]{1,64}$`, must not be a built-in tool's, and
+must not start with `mcp_`. A broken declaration fails the load, naming the
+tool. A later config can tweak a plugin's tool (`tool add jira_search
+--timeout 120`) or turn it off (`--disabled true`) without repeating it.
+
+#### `tool remove`
+
+Remove a tool declared earlier in the same file. To turn off a tool another
+file declares, use `tool add <name> --disabled true` or `permissions deny`.
+
+```text
+Usage:
+  tool remove <name>
+  tool rm <name>
 ```
 
 ### option

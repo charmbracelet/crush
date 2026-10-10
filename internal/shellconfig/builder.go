@@ -17,11 +17,14 @@ import (
 // the config loader merges with any other config files.
 type ConfigBuilder struct {
 	root map[string]any
+	// source is the path of the script being loaded, recorded on entries
+	// that need to find their way back to it (e.g. a plugin tool).
+	source string
 }
 
-// newConfigBuilder returns an empty builder.
-func newConfigBuilder() *ConfigBuilder {
-	return &ConfigBuilder{root: make(map[string]any)}
+// newConfigBuilder returns an empty builder for the script at source.
+func newConfigBuilder(source string) *ConfigBuilder {
+	return &ConfigBuilder{root: make(map[string]any), source: source}
 }
 
 // section returns the top-level object stored at key, creating it if absent.

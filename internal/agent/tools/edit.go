@@ -269,32 +269,36 @@ func commitFileChange(edit editContext, sessionID, filePath, oldContent, newCont
 	return nil
 }
 
-func loadExistingFile(edit editContext, filePath, sessionError string) (sessionID, oldContent string, isCrlf bool, resp fantasy.ToolResponse, err error) {
+// loadExistingFile reads the file and returns both the raw bytes on disk and the
+// LF-normalized form of them, which is the form edits are matched and applied in.
+// The two differ only in line endings, so the raw bytes are what has to be
+// written back.
+func loadExistingFile(edit editContext, filePath, sessionError string) (sessionID, oldContent, rawContent string, resp fantasy.ToolResponse, err error) {
 	fileInfo, err := os.Stat(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", "", false, fantasy.NewTextErrorResponse(fmt.Sprintf("file not found: %s", filePath)), nil
+			return "", "", "", fantasy.NewTextErrorResponse(fmt.Sprintf("file not found: %s", filePath)), nil
 		}
-		return "", "", false, fantasy.ToolResponse{}, fmt.Errorf("failed to access file: %w", err)
+		return "", "", "", fantasy.ToolResponse{}, fmt.Errorf("failed to access file: %w", err)
 	}
 
 	if fileInfo.IsDir() {
-		return "", "", false, fantasy.NewTextErrorResponse(fmt.Sprintf("path is a directory, not a file: %s", filePath)), nil
+		return "", "", "", fantasy.NewTextErrorResponse(fmt.Sprintf("path is a directory, not a file: %s", filePath)), nil
 	}
 
 	sessionID = GetSessionFromContext(edit.ctx)
 	if sessionID == "" {
-		return "", "", false, fantasy.ToolResponse{}, fmt.Errorf("%s", sessionError)
+		return "", "", "", fantasy.ToolResponse{}, fmt.Errorf("%s", sessionError)
 	}
 
 	lastRead := edit.filetracker.LastReadTime(edit.ctx, sessionID, filePath)
 	if lastRead.IsZero() {
-		return "", "", false, fantasy.NewTextErrorResponse("you must read the file before editing it. Use the View tool first"), nil
+		return "", "", "", fantasy.NewTextErrorResponse("you must read the file before editing it. Use the View tool first"), nil
 	}
 
 	modTime := fileInfo.ModTime().Truncate(time.Second)
 	if modTime.After(lastRead) {
-		return "", "", false, fantasy.NewTextErrorResponse(
+		return "", "", "", fantasy.NewTextErrorResponse(
 			fmt.Sprintf(
 				"file %s has been modified since it was last read (mod time: %s, last read: %s)",
 				filePath, modTime.Format(time.RFC3339), lastRead.Format(time.RFC3339),
@@ -304,15 +308,16 @@ func loadExistingFile(edit editContext, filePath, sessionError string) (sessionI
 
 	content, err := os.ReadFile(filePath)
 	if err != nil {
-		return "", "", false, fantasy.ToolResponse{}, fmt.Errorf("failed to read file: %w", err)
+		return "", "", "", fantasy.ToolResponse{}, fmt.Errorf("failed to read file: %w", err)
 	}
 
-	oldContent, isCrlf = fsext.ToUnixLineEndings(string(content))
-	return sessionID, oldContent, isCrlf, fantasy.ToolResponse{}, nil
+	rawContent = string(content)
+	oldContent, _ = fsext.ToUnixLineEndings(rawContent)
+	return sessionID, oldContent, rawContent, fantasy.ToolResponse{}, nil
 }
 
 func deleteContent(edit editContext, filePath, oldString string, replaceAll bool, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-	sessionID, oldContent, isCrlf, resp, err := loadExistingFile(edit, filePath, "session ID is required for deleting content")
+	sessionID, oldContent, rawContent, resp, err := loadExistingFile(edit, filePath, "session ID is required for deleting content")
 	if err != nil {
 		return fantasy.ToolResponse{}, err
 	}
@@ -361,10 +366,7 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 		return resp, nil
 	}
 
-	writeContent := newContent
-	if isCrlf {
-		writeContent, _ = fsext.ToWindowsLineEndings(writeContent)
-	}
+	writeContent := diff.RestoreLineEndings(rawContent, oldContent, newContent)
 
 	if err := commitFileChange(edit, sessionID, filePath, oldContent, writeContent); err != nil {
 		return fantasy.ToolResponse{}, err
@@ -382,7 +384,7 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 }
 
 func replaceContent(edit editContext, filePath, oldString, newString string, replaceAll bool, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-	sessionID, oldContent, isCrlf, resp, err := loadExistingFile(edit, filePath, "session ID is required for editing a file")
+	sessionID, oldContent, rawContent, resp, err := loadExistingFile(edit, filePath, "session ID is required for editing a file")
 	if err != nil {
 		return fantasy.ToolResponse{}, err
 	}
@@ -434,10 +436,7 @@ func replaceContent(edit editContext, filePath, oldString, newString string, rep
 		return resp, nil
 	}
 
-	writeContent := result
-	if isCrlf {
-		writeContent, _ = fsext.ToWindowsLineEndings(writeContent)
-	}
+	writeContent := diff.RestoreLineEndings(rawContent, oldContent, result)
 
 	if err := commitFileChange(edit, sessionID, filePath, oldContent, writeContent); err != nil {
 		return fantasy.ToolResponse{}, err

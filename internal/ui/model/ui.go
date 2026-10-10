@@ -27,6 +27,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
+	"charm.land/x/nerdfont"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	agenttools "github.com/charmbracelet/crush/internal/agent/tools"
@@ -609,8 +610,21 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	ui.isTransparent = opts.TUI.IsTransparent()
 	// enable mouse support (default on)
 	ui.mouseEnabled = opts.TUI.Mouse == nil || *opts.TUI.Mouse
+	// apply the Nerd Font override before anything probes the terminal
+	applyNerdFontsOption(opts)
 
 	return ui
+}
+
+// applyNerdFontsOption wires the tui.nerd_fonts option into Nerd Font
+// detection: nil keeps automatic detection, and true or false force glyphs
+// on and off.
+func applyNerdFontsOption(opts *config.Options) {
+	if opts == nil || opts.TUI == nil || opts.TUI.NerdFonts == nil {
+		nerdfont.ClearOverride()
+		return
+	}
+	nerdfont.SetOverride(*opts.TUI.NerdFonts)
 }
 
 // Init initializes the UI model.
@@ -2715,6 +2729,16 @@ func (m *UI) hyperCreditsTicker() tea.Cmd {
 // path. A failed read keeps whatever the last poll reported.
 func (m *UI) fetchGitBranch() tea.Cmd {
 	return func() tea.Msg {
+		// Warm the Nerd Font probe here rather than on the render path:
+		// the first probe may shell out to fc-list or read font
+		// directories, and [UI.gitBranchLabel] needs the answer for every
+		// frame that shows a branch.
+		slog.Debug(
+			"Nerd font support",
+			"supported", nerdfont.Supported(),
+			"reason", nerdfont.Reason(),
+		)
+
 		ctx, cancel := context.WithTimeout(context.Background(), gitBranchFetchTimeout)
 		defer cancel()
 		branch, err := m.com.Workspace.GitBranch(ctx)
@@ -2724,6 +2748,19 @@ func (m *UI) fetchGitBranch() tea.Cmd {
 		}
 		return gitBranchUpdatedMsg{branch: branch}
 	}
+}
+
+// gitBranchLabel renders the polled branch with the git branch glyph when
+// the terminal is expected to render Nerd Font glyphs. Without Nerd Font
+// support it is the bare branch name, as it has always been.
+func (m *UI) gitBranchLabel() string {
+	if m.gitBranch == "" {
+		return ""
+	}
+	if glyph := nerdfont.Glyph(styles.GitBranchIcon, ""); glyph != "" {
+		return glyph + " " + m.gitBranch
+	}
+	return m.gitBranch
 }
 
 // gitBranchTicker schedules the next git branch poll.
@@ -3585,7 +3622,7 @@ func (m *UI) drawHeader(scr uv.Screen, area uv.Rectangle) {
 		area.Dx(),
 		m.lspErrorCount(),
 		m.hyperCredits,
-		m.gitBranch,
+		m.gitBranchLabel(),
 	)
 }
 

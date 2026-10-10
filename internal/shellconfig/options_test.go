@@ -180,6 +180,24 @@ func TestOption_UIExitBanner(t *testing.T) {
 	require.Contains(t, err.Error(), "expects default, compact, or none")
 }
 
+func TestOption_UINerdFonts(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "crushrc")
+	jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(`option ui nerd-fonts true`))
+	require.NoError(t, err)
+
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &result))
+
+	ui := result["options"].(map[string]any)["tui"].(map[string]any)
+	require.Equal(t, true, ui["nerd_fonts"])
+
+	_, err = LoadShellConfig(t.Context(), path, []byte(`option ui nerd-fonts auto`))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "nerd-fonts expects true/false")
+}
+
 func TestOption_BoolShorthand(t *testing.T) {
 	t.Parallel()
 

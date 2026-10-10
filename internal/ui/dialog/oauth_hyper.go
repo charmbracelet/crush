@@ -23,6 +23,7 @@ func NewOAuthHyper(
 }
 
 type OAuthHyper struct {
+	oauthAPIKey
 	cancelFunc func()
 }
 

@@ -187,6 +187,9 @@ type (
 		Error error
 	}
 
+	// ActionDisconnectMemory removes the stored Honcho sign-in.
+	ActionDisconnectMemory struct{}
+
 	// ActionCloseOAuth closes the OAuth dialog and runs the given cleanup
 	// command, cancelling any in-flight authorization. It exists so a
 	// dismissed dialog does not leave a poller or loopback listener

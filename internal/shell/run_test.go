@@ -224,8 +224,8 @@ func TestRun_BlockFuncs(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when running blocked command")
 	}
-	if !strings.Contains(err.Error(), "not allowed") {
-		t.Fatalf("expected 'not allowed' error, got: %v", err)
+	if !strings.Contains(err.Error(), "is a dangerous command") {
+		t.Fatalf("expected a blocked-command error, got: %v", err)
 	}
 }
 

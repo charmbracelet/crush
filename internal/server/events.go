@@ -70,6 +70,7 @@ func wrapEvent(ev any) *pubsub.Payload {
 				Action:      e.Payload.Action,
 				Path:        e.Payload.Path,
 				Params:      e.Payload.Params,
+				Danger:      e.Payload.Danger,
 			},
 		})
 	case pubsub.Event[permission.PermissionNotification]:
@@ -79,6 +80,13 @@ func wrapEvent(ev any) *pubsub.Payload {
 				ToolCallID: e.Payload.ToolCallID,
 				Granted:    e.Payload.Granted,
 				Denied:     e.Payload.Denied,
+			},
+		})
+	case pubsub.Event[permission.ModeChangedEvent]:
+		return envelope(pubsub.PayloadTypePermissionModeChanged, pubsub.Event[proto.PermissionModeEvent]{
+			Type: e.Type,
+			Payload: proto.PermissionModeEvent{
+				Mode: proto.PermissionModeToProto(e.Payload.Mode),
 			},
 		})
 	case pubsub.Event[question.Request]:

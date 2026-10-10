@@ -669,6 +669,39 @@
           },
           "type": "array",
           "description": "List of tools that don't require permission prompts"
+        },
+        "blocked_commands": {
+          "items": {
+            "type": "string",
+            "examples": [
+              "kubectl",
+              "terraform"
+            ]
+          },
+          "type": "array",
+          "description": "Extra shell commands to treat as dangerous (prompted for in normal mode)"
+        },
+        "allowed_commands": {
+          "items": {
+            "type": "string",
+            "examples": [
+              "curl",
+              "ssh"
+            ]
+          },
+          "type": "array",
+          "description": "Shell commands to drop from the dangerous list so they stop prompting"
+        },
+        "safe_commands": {
+          "items": {
+            "type": "string",
+            "examples": [
+              "go build",
+              "cargo check"
+            ]
+          },
+          "type": "array",
+          "description": "Exact command lines that skip the permission prompt. Matched literally with no extra arguments"
         }
       },
       "additionalProperties": false,

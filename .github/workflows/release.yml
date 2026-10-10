@@ -70,6 +70,11 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Blacksmith runners identify as "self-hosted", and npm supports
+          # neither trusted publishing (OIDC) nor provenance there, so
+          # publish with a token and without the attestation.
+          NPM_CONFIG_PROVENANCE: "false"
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           GORELEASER_KEY: ${{ secrets.GORELEASER_KEY }}
           AUR_KEY: ${{ secrets.AUR_KEY }}

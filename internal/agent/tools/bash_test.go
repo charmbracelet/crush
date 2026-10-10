@@ -202,10 +202,23 @@ func TestTruncateOutputShortContent(t *testing.T) {
 	require.Equal(t, content, TruncateOutput(content, t.TempDir()))
 }
 
+func TestTruncateOutputBinary(t *testing.T) {
+	t.Parallel()
+	// NUL bytes take no display columns, so a budget in columns let binary
+	// output of any size through untouched.
+	content := strings.Repeat("\x00", 1<<20) + "hello"
+
+	out := TruncateOutput(content, t.TempDir())
+	require.Less(t, len(out), 2*MaxOutputLength)
+	require.Contains(t, out, "lines truncated")
+	require.True(t, strings.HasSuffix(out, "hello"))
+}
+
 func TestTruncateOutputEmoji(t *testing.T) {
 	t.Parallel()
-	// Emoji with ZWJ sequences should not be split.
-	content := strings.Repeat("👨‍👩‍👧‍👦", MaxOutputLength)
+	// Emoji with ZWJ sequences should not be split. Each family emoji is one
+	// grapheme cluster, so twice the budget is needed to force truncation.
+	content := strings.Repeat("👨‍👩‍👧‍👦", 2*MaxOutputLength)
 
 	out := TruncateOutput(content, t.TempDir())
 	require.True(t, utf8.ValidString(out), "truncated output must stay valid UTF-8")

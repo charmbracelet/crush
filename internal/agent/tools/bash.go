@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/x/ansi"
+	"github.com/rivo/uniseg"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/config"
@@ -428,18 +429,28 @@ func formatOutput(stdout, stderr string, execErr error, spillDir string) string 
 // TruncateOutput keeps the head and tail of oversized tool output. The
 // dropped middle is written in full to a file under spillDir so the agent
 // can read it back rather than losing it for good.
+//
+// The budget counts grapheme clusters rather than display columns, because
+// control bytes such as NUL are zero columns wide.
 func TruncateOutput(content, spillDir string) string {
-	if ansi.StringWidth(content) <= MaxOutputLength {
+	// Every cluster is at least one byte, so short output can skip the count.
+	if len(content) <= MaxOutputLength {
+		return content
+	}
+
+	plain := ansi.Strip(content)
+	clusterCount := uniseg.GraphemeClusterCount(plain)
+	if clusterCount <= MaxOutputLength {
 		return content
 	}
 
 	halfLength := MaxOutputLength / 2
-	start := ansi.Truncate(content, halfLength, "")
-	end := ansi.TruncateLeft(content, ansi.StringWidth(content)-halfLength, "")
+	start := plain[:graphemeOffset(plain, halfLength)]
+	end := plain[graphemeOffset(plain, clusterCount-halfLength):]
 
-	truncatedLinesCount := max(strings.Count(content, "\n")-strings.Count(start, "\n")-strings.Count(end, "\n"), 0)
+	truncatedLinesCount := max(strings.Count(plain, "\n")-strings.Count(start, "\n")-strings.Count(end, "\n"), 0)
 	marker := fmt.Sprintf("... [%d lines truncated] ...", truncatedLinesCount)
-	if path, err := shell.SpillOutput(ansi.Strip(content), spillDir); err == nil {
+	if path, err := shell.SpillOutput(plain, spillDir); err == nil {
 		marker = fmt.Sprintf("... [%d lines truncated, full output: %s] ...", truncatedLinesCount, path)
 	} else {
 		slog.Debug("Could not spill tool output", "dir", spillDir, "error", err)
@@ -449,6 +460,16 @@ func TruncateOutput(content, spillDir string) string {
 
 func truncateOutput(content, spillDir string) string {
 	return TruncateOutput(content, spillDir)
+}
+
+// graphemeOffset returns the byte offset in s right after its first n
+// grapheme clusters, so slicing there never splits a character.
+func graphemeOffset(s string, n int) int {
+	rest, state := s, -1
+	for range n {
+		_, rest, _, state = uniseg.FirstGraphemeClusterInString(rest, state)
+	}
+	return len(s) - len(rest)
 }
 
 func normalizeWorkingDir(path string) string {

@@ -1009,8 +1009,24 @@ func (b *Backend) Shutdown() {
 	b.closing = true
 	fn := b.shutdownFn
 	b.mu.Unlock()
+	b.shutdownWorkspaces()
 	if fn != nil {
 		fn()
+	}
+}
+
+// shutdownWorkspaces tears down every workspace still hosted, so a server
+// told to stop persists the work in flight instead of dropping it.
+//
+// Without this, stopping a server that is hosting live workspaces skips the
+// per-workspace teardown: agent runs are never cancelled, the writes that
+// record an interruption never happen, and the sessions are left looking
+// like a tool call is still waiting for an answer. Teardown is what turns an
+// interruption into a recorded one.
+func (b *Backend) shutdownWorkspaces() {
+	for _, ws := range b.workspaces.Seq2() {
+		slog.Info("Shutting down workspace", "workspace", ws.ID)
+		ws.invokeShutdown()
 	}
 }
 

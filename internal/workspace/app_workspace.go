@@ -89,13 +89,11 @@ func (w *AppWorkspace) RoutesChannelEvents() bool { return false }
 // -- Messages --
 
 func (w *AppWorkspace) ListMessages(ctx context.Context, sessionID string) ([]message.Message, error) {
-	// Drain any debounced updates so the caller observes the latest
-	// in-memory state. message.Service buffers streaming deltas and a
-	// cold List would otherwise miss them at session-switch time.
-	if err := w.app.Messages.FlushAll(ctx); err != nil {
-		return nil, err
+	var busy agent.SessionBusyFunc
+	if w.app.AgentCoordinator != nil {
+		busy = w.app.AgentCoordinator.IsSessionBusy
 	}
-	return w.app.Messages.List(ctx, sessionID)
+	return agent.ReadSettledMessages(ctx, w.app.Messages, busy, sessionID)
 }
 
 func (w *AppWorkspace) ListUserMessages(ctx context.Context, sessionID string) ([]message.Message, error) {

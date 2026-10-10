@@ -44,8 +44,9 @@ func TestLoadContextFilesMissingCandidateDoesNotSuppressLaterFile(t *testing.T) 
 	lower := filepath.Join(dir, "agents.md")
 	require.NoError(t, os.WriteFile(lower, []byte("CANARY-TWO"), 0o644))
 	missing := filepath.Join(dir, "AGENTS.md")
-	_, err := os.Lstat(missing)
-	require.Error(t, err)
+	if _, err := os.Lstat(missing); err == nil {
+		t.Skip("filesystem treats the missing candidate as the existing lowercase path")
+	}
 
 	require.Equal(t, []string{"CANARY-TWO"}, loadContents(t, missing, lower))
 }

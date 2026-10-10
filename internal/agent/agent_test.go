@@ -1351,3 +1351,84 @@ func TestProviderRetryLogFields(t *testing.T) {
 		}, fields)
 	})
 }
+
+func TestSanitizeToolInput(t *testing.T) {
+	t.Run("object input is unchanged", func(t *testing.T) {
+		input, sanitized := sanitizeToolInput("bash", "call-1", `{"command":"ls -la"}`)
+		require.Equal(t, `{"command":"ls -la"}`, input)
+		require.False(t, sanitized)
+	})
+
+	t.Run("empty object input is unchanged", func(t *testing.T) {
+		input, sanitized := sanitizeToolInput("bash", "call-1", "{}")
+		require.Equal(t, "{}", input)
+		require.False(t, sanitized)
+	})
+
+	t.Run("malformed input is replaced with an empty object", func(t *testing.T) {
+		for _, input := range []string{
+			"",                       // empty
+			"not json",               // not JSON
+			`{"command": "ls -la`,    // truncated
+			`{"command":"ls"} extra`, // trailing garbage
+			"[]",                     // valid JSON, not an object
+			"null",                   // valid JSON, not an object
+		} {
+			got, sanitized := sanitizeToolInput("bash", "call-1", input)
+			require.Equal(t, "{}", got)
+			require.True(t, sanitized)
+		}
+	})
+}
+
+func TestSanitizePromptToolCallInputs(t *testing.T) {
+	t.Run("leaves valid tool call inputs unchanged", func(t *testing.T) {
+		messages := []fantasy.Message{{
+			Role: fantasy.MessageRoleAssistant,
+			Content: []fantasy.MessagePart{
+				fantasy.TextPart{Text: "Running the command."},
+				fantasy.ToolCallPart{
+					ToolCallID: "call-1",
+					ToolName:   "bash",
+					Input:      `{"command":"ls -la"}`,
+				},
+			},
+		}}
+		got := sanitizePromptToolCallInputs(messages)
+		require.Equal(t, messages, got)
+	})
+
+	t.Run("replaces malformed tool call inputs", func(t *testing.T) {
+		messages := []fantasy.Message{{
+			Role: fantasy.MessageRoleAssistant,
+			Content: []fantasy.MessagePart{
+				fantasy.ToolCallPart{
+					ToolCallID: "call-1",
+					ToolName:   "bash",
+					Input:      `{"command": "ls -la`,
+				},
+			},
+		}}
+		got := sanitizePromptToolCallInputs(messages)
+		call, ok := fantasy.AsMessagePart[fantasy.ToolCallPart](got[0].Content[0])
+		require.True(t, ok)
+		require.Equal(t, "{}", call.Input)
+	})
+
+	t.Run("replaces non-object tool call inputs, including pointers", func(t *testing.T) {
+		messages := []fantasy.Message{{
+			Role: fantasy.MessageRoleAssistant,
+			Content: []fantasy.MessagePart{
+				fantasy.ToolCallPart{ToolCallID: "call-1", ToolName: "bash", Input: "[]"},
+				&fantasy.ToolCallPart{ToolCallID: "call-2", ToolName: "bash", Input: "null"},
+			},
+		}}
+		got := sanitizePromptToolCallInputs(messages)
+		call, ok := fantasy.AsMessagePart[fantasy.ToolCallPart](got[0].Content[0])
+		require.True(t, ok)
+		require.Equal(t, "{}", call.Input)
+		ptr, ok := got[0].Content[1].(*fantasy.ToolCallPart)
+		require.True(t, ok)
+		require.Equal(t, "{}", ptr.Input)
+	})
+}

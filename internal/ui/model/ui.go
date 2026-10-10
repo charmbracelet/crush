@@ -2504,8 +2504,8 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	case dialog.ActionDisableDockerMCP:
 		m.dialog.CloseDialog(dialog.CommandsID)
 		cmds = append(cmds, m.disableDockerMCP)
-	case dialog.ActionToggleMCP:
-		cmds = append(cmds, m.applyMCPToggle(msg))
+	case dialog.ActionSetMCPServerSetting:
+		cmds = append(cmds, m.applyMCPServerSetting(msg))
 	case dialog.ActionInitializeProject:
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before summarizing session..."))

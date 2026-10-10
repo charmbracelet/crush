@@ -532,6 +532,17 @@ func (w *AppWorkspace) MCPSetServerConfigDisabled(ctx context.Context, name stri
 	return mcptools.SetConfigDisabled(ctx, w.store, config.ScopeGlobal, name, disabled, override)
 }
 
+// MCPSetLazy writes the lazy-MCP policy to the global config: an empty name
+// flips the options.lazy_mcp default, otherwise the named server gets its
+// own override. Nothing reconnects; the next turn simply shows the model a
+// different set of tool schemas.
+func (w *AppWorkspace) MCPSetLazy(_ context.Context, name string, lazy bool) error {
+	if name == "" {
+		return w.store.SetLazyMCPConfig(config.ScopeGlobal, lazy)
+	}
+	return w.store.SetMCPServerLazyConfig(config.ScopeGlobal, name, &lazy)
+}
+
 // MCPStartServer starts the named MCP server even when its config entry is
 // disabled. The repository-scoped enabled override recorded by
 // MCPSetServerDisabled makes the start survive restarts. Config files are

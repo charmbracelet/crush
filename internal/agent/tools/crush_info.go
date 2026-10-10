@@ -217,8 +217,12 @@ func writeMCP(b *strings.Builder, states map[string]mcp.ClientInfo, cfg *config.
 			tools       int
 			resources   int
 			connectedAt string
+			// lazy marks a server whose tools stay out of the model
+			// context until mcp_search loads them.
+			lazy bool
 		}
 		var entries []entry
+		configured := cfg.Config()
 		for name, info := range states {
 			e := entry{
 				name:  name,
@@ -228,6 +232,9 @@ func writeMCP(b *strings.Builder, states map[string]mcp.ClientInfo, cfg *config.
 			if info.State == mcp.StateConnected {
 				e.tools = info.Counts.Tools
 				e.resources = info.Counts.Resources
+				if mcpCfg, ok := configured.MCP[name]; ok && mcpCfg.IsLazy(configured.Options) {
+					e.lazy = true
+				}
 				if !info.ConnectedAt.IsZero() {
 					e.connectedAt = info.ConnectedAt.Format("15:04:05")
 				}
@@ -239,10 +246,17 @@ func writeMCP(b *strings.Builder, states map[string]mcp.ClientInfo, cfg *config.
 		for _, e := range entries {
 			switch e.state {
 			case mcp.StateConnected:
+				// The marker matters: without it a server that is healthy
+				// but unused looks identical to one whose tools the model
+				// has already loaded.
+				lazy := ""
+				if e.lazy {
+					lazy = " [lazy: tools hidden until mcp_search]"
+				}
 				if e.connectedAt != "" {
-					fmt.Fprintf(b, "%s = connected (%d tools, %d resources) since %s\n", e.name, e.tools, e.resources, e.connectedAt)
+					fmt.Fprintf(b, "%s = connected (%d tools, %d resources) since %s%s\n", e.name, e.tools, e.resources, e.connectedAt, lazy)
 				} else {
-					fmt.Fprintf(b, "%s = connected (%d tools, %d resources)\n", e.name, e.tools, e.resources)
+					fmt.Fprintf(b, "%s = connected (%d tools, %d resources)%s\n", e.name, e.tools, e.resources, lazy)
 				}
 			case mcp.StateError:
 				if e.err != nil {

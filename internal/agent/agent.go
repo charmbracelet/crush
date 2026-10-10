@@ -858,6 +858,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			for i := range prepared.Messages {
 				prepared.Messages[i].ProviderOptions = nil
 			}
+			prepared.Messages = sanitizePromptToolCallInputs(prepared.Messages)
 
 			// Use latest tools (updated by SetTools when MCP tools
 			// change), filtered for the session's channel and minus MCP
@@ -1865,7 +1866,7 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 		Prompt:  fmt.Sprintf("Generate a concise title for the following content:\n\n%s\n <think>\n\n</think>", userPrompt),
 		Headers: sessionHeaders(sessionID),
 		PrepareStep: func(callCtx context.Context, opts fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
-			prepared.Messages = opts.Messages
+			prepared.Messages = sanitizePromptToolCallInputs(opts.Messages)
 			if systemPromptPrefix != "" {
 				prepared.Messages = append([]fantasy.Message{
 					fantasy.NewSystemMessage(systemPromptPrefix),
@@ -2415,14 +2416,48 @@ func providerRetryLogFields(err *fantasy.ProviderError, delay time.Duration) []a
 // stuck conversations from truncated or malformed model output.
 // The second return value indicates whether sanitization occurred.
 func sanitizeToolInput(toolName, toolCallID, input string) (string, bool) {
-	if !json.Valid([]byte(input)) {
-		slog.Warn(
-			"Malformed tool call JSON from provider, replacing with empty object",
-			"tool", toolName,
-			"id", toolCallID,
-			"input_len", len(input),
-		)
-		return "{}", true
+	if isJSONObject(input) {
+		return input, false
 	}
-	return input, false
+	slog.Warn(
+		"Malformed tool call JSON from provider, replacing with empty object",
+		"tool", toolName,
+		"id", toolCallID,
+		"input_len", len(input),
+	)
+	return "{}", true
+}
+
+// isJSONObject reports whether input is a JSON object. Tool call arguments
+// must be JSON objects: providers with strict server-side validation (e.g.
+// Ollama) reject requests that replay tool call arguments that are not
+// objects, even when they are valid JSON.
+func isJSONObject(input string) bool {
+	trimmed := strings.TrimSpace(input)
+	return strings.HasPrefix(trimmed, "{") && json.Valid([]byte(trimmed))
+}
+
+// sanitizePromptToolCallInputs replaces tool call arguments in the prompt
+// that are not JSON objects with an empty object. Messages are already
+// sanitized when stored (see sanitizeToolInput), but the prompt replayed
+// within a run still carries the raw streamed arguments, and providers with
+// strict server-side validation reject the entire request when any replayed
+// arguments are malformed, killing the run after the first bad tool call.
+func sanitizePromptToolCallInputs(messages []fantasy.Message) []fantasy.Message {
+	for i := range messages {
+		for j, part := range messages[i].Content {
+			switch p := part.(type) {
+			case fantasy.ToolCallPart:
+				if !isJSONObject(p.Input) {
+					p.Input = "{}"
+					messages[i].Content[j] = p
+				}
+			case *fantasy.ToolCallPart:
+				if !isJSONObject(p.Input) {
+					p.Input = "{}"
+				}
+			}
+		}
+	}
+	return messages
 }

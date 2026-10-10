@@ -310,6 +310,8 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 		}
 	}
 
+	fmt.Fprintln(os.Stderr, app.config.Config().ResolvedLargeLine())
+
 	var (
 		spinner   *format.Spinner
 		stderrTTY bool

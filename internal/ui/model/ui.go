@@ -448,6 +448,12 @@ type UI struct {
 	// discarded and re-fetched instead of clobbering newer state.
 	busyFetchGen uint64
 	pillsView    string
+	// Keep optimistic busy state until local submissions reach the agent.
+	pendingSubmissions int
+	sessionActivities  map[string]*sessionActivity
+	// Cache refreshes do not supersede a completion or prove a turn ended.
+	submissionGen   uint64
+	turnStopPending bool
 
 	// Todo spinner
 	todoSpinner    spinner.Model
@@ -885,17 +891,36 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 	case agentRunSubmittedMsg:
-		m.turnOutcome = ""
-		// A prompt was just accepted (run started or enqueued): fetch the
-		// authoritative busy/queue state to confirm the optimistic values
-		// sendMessage wrote.
-		m.invalidateBusyCaches()
-		m.invalidatePromptQueue()
-		if cmd := m.dispatchBusyRefresh(); cmd != nil {
-			cmds = append(cmds, cmd)
+		cmds = append(cmds, m.submissionFinished(msg.sessionID, msg.gen, msg.err, false))
+		if msg.err != nil && !errors.Is(msg.err, context.Canceled) {
+			cmds = append(cmds, util.ReportError(msg.err))
 		}
-		if cmd := m.dispatchPromptQueueRefresh(); cmd != nil {
-			cmds = append(cmds, cmd)
+	case summaryFinishedMsg:
+		cmds = append(cmds, m.submissionFinished(msg.sessionID, msg.gen, msg.err, true))
+		if errors.Is(msg.err, context.Canceled) {
+			cmds = append(cmds, util.ReportInfo("Summary cancelled"))
+		} else if msg.err != nil {
+			cmds = append(cmds, util.ReportError(msg.err))
+		}
+	case completionCheckedMsg:
+		activity := m.sessionActivities[msg.notification.SessionID]
+		if activity == nil || activity.completion != msg.notification {
+			break
+		}
+		if msg.busyGen != m.busyFetchGen {
+			cmds = append(cmds, m.dispatchCompletionCheck(msg.notification))
+		} else if activity.pending == 0 {
+			if !msg.busy {
+				if msg.notification.SessionID == m.currentSessionID() {
+					m.turnOutcome = tea.ProgramStateDone
+				}
+				cmds = append(cmds, m.sendNotification(notification.Notification{
+					Title:   "Crush is waiting...",
+					Message: fmt.Sprintf("Agent's turn completed in \"%s\"", msg.notification.SessionTitle),
+				}))
+			}
+			activity.completion = nil
+			m.pruneActivity(msg.notification.SessionID)
 		}
 	case loadSessionMsg:
 		if m.forceCompactMode {
@@ -906,6 +931,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// plan handoff. (Loading the session that was just created for the
 		// first plan-mode prompt is not a switch; the IDs match then.)
 		if m.session == nil || m.session.ID != msg.session.ID {
+			m.turnOutcome = ""
 			if cmd := m.resetPlanModeState(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
@@ -2198,13 +2224,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before summarizing session..."))
 			break
 		}
-		cmds = append(cmds, func() tea.Msg {
-			err := m.com.Workspace.AgentSummarize(context.Background(), msg.SessionID)
-			if err != nil {
-				return util.ReportError(err)()
-			}
-			return nil
-		})
+		cmds = append(cmds, m.summarizeSession(msg.SessionID))
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleHelp:
 		m.status.ToggleHelp()
@@ -5177,9 +5197,6 @@ func (m *UI) sendMessageInternal(content string, hidden bool, attachments ...mes
 		return util.ReportError(err)
 	}
 
-	// Start the turn timer.
-	common.StartTurn()
-
 	// Any new prompt supersedes a pending, unconfirmed plan.
 	m.setPlanReadyPending("")
 
@@ -5191,6 +5208,16 @@ func (m *UI) sendMessageInternal(content string, hidden bool, attachments ...mes
 	if loadCmd != nil {
 		cmds = append(cmds, loadCmd)
 	}
+
+	common.StartTurn()
+	m.turnOutcome = ""
+	m.turnStopPending = false
+	m.submissionGen++
+	gen := m.submissionGen
+	activity := m.activityFor(m.session.ID)
+	activity.gen = gen
+	activity.pending++
+	activity.completion = nil
 
 	ctx := context.Background()
 	cmds = append(cmds, func() tea.Msg {
@@ -5211,24 +5238,17 @@ func (m *UI) sendMessageInternal(content string, hidden bool, attachments ...mes
 	// optimistic write is discarded rather than reverting us to idle.
 	m.agentBusyCache.set(true)
 	m.busyFetchGen++
+	m.pendingSubmissions++
 	m.invalidatePromptQueue()
 	cmds = append(cmds, func() tea.Msg {
-		// AgentRun is fire-and-forget: it returns once the prompt has
-		// been accepted (HTTP 202) or synchronously with a validation
-		// or transport error. Run failures and cancellation surface
-		// through SSE-derived events, not this return value.
-		runCtx := context.Background()
+		// Remote runs return on admission; local runs can execute here.
+		// Both must release optimistic busy state, including on failure.
+		runCtx := message.WithOperatorSteering(context.Background(), true)
 		if hidden {
 			runCtx = message.WithHiddenUserMessage(runCtx)
 		}
 		err := m.com.Workspace.AgentRun(runCtx, sessionID, content, attachments...)
-		if err != nil && !errors.Is(err, context.Canceled) {
-			return util.InfoMsg{
-				Type: util.InfoTypeError,
-				Msg:  fmt.Sprintf("%v", err),
-			}
-		}
-		return agentRunSubmittedMsg{}
+		return agentRunSubmittedMsg{sessionID: sessionID, gen: gen, err: err}
 	})
 	return tea.Batch(cmds...)
 }
@@ -5395,6 +5415,10 @@ func (m *UI) cancelAgent() tea.Cmd {
 	if m.isCanceling {
 		// Second escape press — actually cancel.
 		m.isCanceling = false
+		if activity := m.sessionActivities[m.currentSessionID()]; activity != nil {
+			activity.completion = nil
+			m.pruneActivity(m.currentSessionID())
+		}
 
 		// Cancel a running bang command if one is in progress.
 		if m.bangCancel != nil {
@@ -5797,18 +5821,35 @@ func (m *UI) openPlanHandoff() {
 	}
 }
 
+func (m *UI) summarizeSession(sessionID string) tea.Cmd {
+	ws := m.com.Workspace
+	if sessionID == m.currentSessionID() {
+		m.turnOutcome = ""
+	}
+	m.submissionGen++
+	gen := m.submissionGen
+	activity := m.activityFor(sessionID)
+	activity.gen = gen
+	activity.pending++
+	activity.completion = nil
+	m.turnStopPending = false
+	m.pendingSubmissions++
+	m.invalidateBusyCaches()
+	m.agentBusyCache.set(true)
+	return func() tea.Msg {
+		return summaryFinishedMsg{sessionID: sessionID, gen: gen, err: ws.AgentSummarize(context.Background(), sessionID)}
+	}
+}
+
 // handleAgentNotification translates domain agent events into desktop
 // notifications using the UI notification backend.
 func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 	var cmds []tea.Cmd
 	switch n.Type {
 	case notify.TypeAgentFinished:
-		common.StopTurn()
-		m.turnOutcome = tea.ProgramStateDone
-		cmds = append(cmds, m.sendNotification(notification.Notification{
-			Title:   "Crush is waiting...",
-			Message: fmt.Sprintf("Agent's turn completed in \"%s\"", n.SessionTitle),
-		}))
+		if n.SessionID == m.currentSessionID() && m.turnOutcome == tea.ProgramStateDone {
+			m.turnOutcome = ""
+		}
 		// Show what the stored balance says right away, and fetch again:
 		// the refresh for the turn's last response is only kicked off once
 		// its request finishes, so it may still be in flight here.
@@ -5817,9 +5858,13 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 			cmds = append(cmds, m.fetchHyperCredits())
 		}
 	case notify.TypeAgentError:
-		m.turnOutcome = tea.ProgramStateError
-		// Terminal edge like TypeAgentFinished; fall through to the
-		// busy/queue refresh below.
+		if n.SessionID == m.currentSessionID() {
+			m.turnOutcome = tea.ProgramStateError
+		}
+		// Queued runs have no waiting caller to display their errors.
+		if n.Message != "" {
+			cmds = append(cmds, util.ReportError(errors.New(n.Message)))
+		}
 	case notify.TypeReAuthenticate:
 		return m.handleReAuthenticate(n.ProviderID)
 	case notify.TypeAWSSSOAuth:
@@ -5829,12 +5874,21 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 	default:
 		return nil
 	}
-	// TypeAgentFinished / TypeAgentError are the busy→idle edge: the agent
-	// clears its active request before publishing precisely so observers
-	// can re-probe. Drop the memoized busy state and re-fetch it and the
-	// prompt queue off-thread.
+	activity := m.activityFor(n.SessionID)
+	defer m.pruneActivity(n.SessionID)
+	activity.completion = nil
+	m.turnStopPending = n.Type == notify.TypeAgentError || n.FinishState != notify.FinishContinuing
+	// A turn ending does not mean the session is idle. Re-probe before
+	// stopping the timer or presenting a successful idle notification.
 	m.invalidateBusyCaches()
 	m.invalidatePromptQueue()
+	if n.Type == notify.TypeAgentFinished && n.FinishState == notify.FinishIdleSuccess {
+		activity.completion = &n
+		// Local AgentRun can publish idle before its own submission returns.
+		if activity.pending == 0 {
+			cmds = append(cmds, m.dispatchCompletionCheck(activity.completion))
+		}
+	}
 	if cmd := m.dispatchBusyRefresh(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}

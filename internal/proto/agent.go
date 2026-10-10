@@ -3,7 +3,14 @@ package proto
 import (
 	"encoding/json"
 	"errors"
+
+	"github.com/charmbracelet/crush/internal/agent/notify"
 )
+
+// SummaryResponse distinguishes cancellation from other HTTP conflicts.
+type SummaryResponse struct {
+	Cancelled bool `json:"cancelled"`
+}
 
 // AgentEventType represents the type of agent event.
 type AgentEventType string
@@ -37,6 +44,9 @@ type AgentEvent struct {
 	// instead of to any in-flight run on the session. Empty when no
 	// caller set one.
 	RunID string `json:"run_id,omitempty"`
+
+	// FinishState is absent on servers predating idle outcome notifications.
+	FinishState notify.FinishState `json:"finish_state,omitempty"`
 
 	// When summarizing.
 	SessionID    string `json:"session_id,omitempty"`

@@ -144,12 +144,17 @@ func renderItem(
 		text = ansi.Truncate(text, innerWidth, "…")
 	}
 
-	// Select base style.
+	// Select base style. The match highlight inherits the row background;
+	// on the focused row it must also inherit the focused foreground.
+	// Otherwise a theme whose foreground matches the focused background
+	// (e.g. a monochrome green palette) renders matched text invisibly.
 	style := normalStyle
 	matchStyle = matchStyle.Background(style.GetBackground())
 	if focused {
 		style = focusedStyle
-		matchStyle = matchStyle.Background(style.GetBackground())
+		matchStyle = matchStyle.
+			Background(style.GetBackground()).
+			Foreground(style.GetForeground())
 	}
 
 	// Render full-width text with background.

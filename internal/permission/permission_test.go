@@ -1,6 +1,7 @@
 package permission
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -612,4 +613,108 @@ func TestPermissionService_ResolveIdempotency(t *testing.T) {
 			// good: no notification.
 		}
 	})
+}
+
+func TestActiveRequest(t *testing.T) {
+	t.Parallel()
+
+	t.Run("reports the pending request only while resolvable", func(t *testing.T) {
+		t.Parallel()
+		service := NewPermissionService("/tmp", false, nil)
+
+		_, ok := service.ActiveRequest()
+		assert.False(t, ok, "no request pending yet")
+
+		events := service.Subscribe(t.Context())
+		done := make(chan bool, 1)
+		go func() {
+			granted, _ := service.Request(t.Context(), CreatePermissionRequest{
+				SessionID:   "s1",
+				ToolCallID:  "call-1",
+				ToolName:    "bash",
+				Action:      "execute",
+				Description: "run a command",
+				Path:        "/tmp",
+			})
+			done <- granted
+		}()
+
+		event := <-events
+		active, ok := service.ActiveRequest()
+		require.True(t, ok, "request must be active while awaiting a decision")
+		assert.Equal(t, event.Payload.ID, active.ID)
+		assert.Equal(t, "s1", active.SessionID)
+
+		assert.True(t, service.Grant(active))
+		assert.True(t, <-done)
+
+		_, ok = service.ActiveRequest()
+		assert.False(t, ok, "resolved request must no longer be active")
+	})
+
+	t.Run("does not report a request whose waiter was cancelled", func(t *testing.T) {
+		t.Parallel()
+		service := NewPermissionService("/tmp", false, nil)
+
+		events := service.Subscribe(t.Context())
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			_, _ = service.Request(ctx, CreatePermissionRequest{
+				SessionID:   "s1",
+				ToolCallID:  "call-2",
+				ToolName:    "bash",
+				Action:      "execute",
+				Description: "run a command",
+				Path:        "/tmp",
+			})
+		}()
+
+		<-events
+		_, ok := service.ActiveRequest()
+		require.True(t, ok, "request must be active before cancellation")
+
+		cancel()
+		<-done
+
+		_, ok = service.ActiveRequest()
+		assert.False(t, ok, "cancelled request cannot be resolved and must not be reported")
+	})
+}
+
+func TestNotificationsCarrySessionID(t *testing.T) {
+	t.Parallel()
+	service := NewPermissionService("/tmp", false, nil)
+
+	notifications := service.SubscribeNotifications(t.Context())
+	events := service.Subscribe(t.Context())
+
+	done := make(chan bool, 1)
+	go func() {
+		granted, _ := service.Request(t.Context(), CreatePermissionRequest{
+			SessionID:   "s-notify",
+			ToolCallID:  "call-3",
+			ToolName:    "view",
+			Action:      "read",
+			Description: "read a file",
+			Path:        "/tmp",
+		})
+		done <- granted
+	}()
+
+	// The request-start notification lands before the request event's
+	// resolution; both it and the resolution must name the session.
+	first := <-notifications
+	assert.Equal(t, "s-notify", first.Payload.SessionID)
+	assert.False(t, first.Payload.Granted)
+	assert.False(t, first.Payload.Denied)
+
+	event := <-events
+	assert.True(t, service.Grant(event.Payload))
+	assert.True(t, <-done)
+
+	second := <-notifications
+	assert.Equal(t, "s-notify", second.Payload.SessionID)
+	assert.True(t, second.Payload.Granted)
 }

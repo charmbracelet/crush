@@ -140,3 +140,60 @@ func TestGruvboxDark_InlineCodeContrast(t *testing.T) {
 		t.Errorf("gruvbox-dark inline code contrast %.2f is below WCAG AA (%.1f)", ratio, minAA)
 	}
 }
+
+func TestLoadTheme_CharmtoneLight(t *testing.T) {
+	_, err := LoadTheme("charmtone-light")
+	if err != nil {
+		t.Fatalf("LoadTheme(charmtone-light): %v", err)
+	}
+}
+
+func TestCharmtoneLight_IsLight(t *testing.T) {
+	s, err := LoadTheme("charmtone-light")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	// The base background must be a light surface and the base ink dark,
+	// which is what makes the theme usable in a black-on-white terminal.
+	bgHex := *hex(s.Background)
+	if lum := relativeLuminance(bgHex); lum < 0.5 {
+		t.Errorf("light theme background %s has luminance %.2f; want >= 0.5", bgHex, lum)
+	}
+	fgHex := *hex(s.Messages.NoContent.GetForeground())
+	if lum := relativeLuminance(fgHex); lum > 0.5 {
+		t.Errorf("light theme base ink %s has luminance %.2f; want <= 0.5", fgHex, lum)
+	}
+}
+
+func TestCharmtoneLight_BaseContrast(t *testing.T) {
+	// The base ink on the base background must clear WCAG AA, so ordinary
+	// text stays legible in a black-on-white terminal.
+	const minAA = 4.5
+	s, err := LoadTheme("charmtone-light")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	bgHex := *hex(s.Background)
+	fgHex := *hex(s.Messages.NoContent.GetForeground())
+	if ratio := contrastRatio(fgHex, bgHex); ratio < minAA {
+		t.Errorf("light theme base ink contrast %.2f is below WCAG AA (%.1f)", ratio, minAA)
+	}
+}
+
+func TestCharmtoneLight_ANSIWhiteIsDarkInk(t *testing.T) {
+	// In a light theme the ANSI "white" (index 7) must remap to a dark ink
+	// rather than a near-white, or raw terminal output that uses white
+	// would be invisible on the white background.
+	s, err := LoadTheme("charmtone-light")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	whiteHex := *hex(s.ANSI[7])
+	if lum := relativeLuminance(whiteHex); lum > 0.5 {
+		t.Errorf("light theme ANSI white %s has luminance %.2f; want dark ink (<= 0.5)", whiteHex, lum)
+	}
+	brightWhiteHex := *hex(s.ANSI[15])
+	if lum := relativeLuminance(brightWhiteHex); lum > 0.5 {
+		t.Errorf("light theme ANSI bright white %s has luminance %.2f; want dark ink (<= 0.5)", brightWhiteHex, lum)
+	}
+}

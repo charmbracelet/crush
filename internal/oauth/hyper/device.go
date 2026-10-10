@@ -191,6 +191,12 @@ func ExchangeToken(ctx context.Context, refreshToken string) (*oauth.Token, erro
 	}
 
 	token.SetExpiresAt()
+	// A response that omits refresh_token leaves the old one in force.
+	// Persisting the empty value would strand the account with nothing to
+	// present at the next refresh, which reads as a logout with no cause.
+	if token.RefreshToken == "" {
+		token.RefreshToken = refreshToken
+	}
 	return &token, nil
 }
 

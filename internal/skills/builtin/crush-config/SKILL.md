@@ -78,12 +78,67 @@ type like `ollama`, `lmstudio`, `llamacpp`), `--api-key`, `--base-url`,
 `--system-prompt-prefix TEXT`, `--extra-header KEY VALUE` (repeatable),
 `--extra-body JSON`, `--provider-options JSON`.
 
+OAuth sign-in flags — any of them marks the provider as one `crush login
+<id>` can authenticate. `--oauth-issuer` plus `--oauth-client-id` are enough
+for a server that publishes RFC 8414 metadata; the rest tune the flow:
+`--oauth-flow auto|browser|device`, `--oauth-scope S` (repeatable),
+`--oauth-client-secret`, `--oauth-auth-url`, `--oauth-token-url`,
+`--oauth-device-url`, `--oauth-redirect-uri`, `--oauth-callback-port N`,
+`--oauth-param KEY VALUE` (repeatable), `--oauth-secret-basic BOOL`,
+`--oauth-kind oauth|api_key`, `--oauth-token-header KEY VALUE` (repeatable,
+headers the token endpoint demands — some servers reject an unrecognized
+User-Agent with "invalid request format"), `--oauth-token-encoding
+form|json` (json also sends the flow's state in the code exchange).
+
+Gateway flags — `--gateway-request JQ` and `--gateway-response JQ` rewrite a
+provider's traffic in process, for a plan served by a gateway whose envelope,
+model naming, or stream framing differs from its SDK's. The request program
+gets `{method, url, headers, body, request_id, token}` and returns any of
+`{url, headers, drop_headers, body}`; the response program gets the reply (or
+`{event: true, data, final, …}` per stream event) and returns the replacement
+body, or an array of events for a stream. Both compile at load time.
+
+Quota flags — `--usage-url URL` declares the endpoint reporting the
+allowance left, which `crush usage` reads. Optional: `--usage-method`,
+`--usage-body`, `--usage-groups PATH`, `--usage-group-label`, `--usage-meters
+PATH` (default `buckets`; use `.` for one flat value), `--usage-label`,
+`--usage-remaining` (default `remainingFraction`), `--usage-reset`,
+`--usage-title`, `--usage-window`, and `--usage-model-group PREFIX GROUP`
+(repeatable, so a display shows the limits the current model draws from).
+Values up to 1 read as a share of the limit, larger as an amount. The header
+and sidebar show the current model's meters; `crush usage` lists them all.
+`--flat-rate true` stops per-token cost accumulation, which is the honest
+setting for a subscription.
+
 ```bash
 provider add deepseek \
   --type openai-compat \
   --base-url "https://api.deepseek.com/v1" \
   --api-key "${DEEPSEEK_API_KEY:?set DEEPSEEK_API_KEY}"
 ```
+
+```bash
+provider add example \
+  --type openai-compat \
+  --base-url "https://api.example.com/v1" \
+  --oauth-issuer "https://auth.example.com" \
+  --oauth-client-id crush \
+  --oauth-scope openid
+```
+
+### plugins
+
+A plugin is a Bash script in `$XDG_CONFIG_HOME/crush/plugins/` or
+`.crush/plugins/` that uses the same builtins and runs at config load; it is
+how a provider is added without a Crush release. Non-hidden `*.sh` files run
+in name order, along with those one directory down, and project plugins
+override global ones, with the crushrc overriding both.
+
+`crush plugin install <author>/<repo>[@ref]` fetches the `*.sh` files at a
+GitHub repository's root and records the commit they came from, so
+`crush plugin update` can report the commit it moved to; `crush plugin list`
+shows what is installed and which files no longer match. Read a plugin before
+treating it as configured: it is Bash with the user's shell privileges.
 
 ### models
 
@@ -99,7 +154,8 @@ model small [<provider>/<id>] [flags]  # set the small slot; no arg prints it
 - `model add` flags: `--name`, `--context-window N`, `--default-max-tokens N`,
   `--can-reason BOOL`, `--supports-images BOOL`, `--price-input F`,
   `--price-output F`, `--price-cache-create F`, `--price-cache-hit F`,
-  `--reasoning-effort low|medium|high`.
+  `--reasoning-effort low|medium|high`, `--reasoning-level L` (repeatable, the
+  tiers a family sells behind one entry).
 - `model large`/`model small` flags: `--think`, `--reasoning-effort`,
   `--max-tokens N`, `--temperature F`, `--top-p F`, `--top-k N`,
   `--frequency-penalty F`, `--presence-penalty F`, `--provider-options JSON`.

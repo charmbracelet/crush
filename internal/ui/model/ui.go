@@ -57,6 +57,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/notification"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/ui/util"
+	"github.com/charmbracelet/crush/internal/usage"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/crush/internal/workspace"
 	uv "github.com/charmbracelet/ultraviolet"
@@ -467,6 +468,17 @@ type UI struct {
 	// no balance is rendered in either case.
 	hyperCredits *int
 
+	// usageMeters is the quota the provider behind the current model last
+	// reported, unfiltered: which meters apply to the model in use is decided
+	// when drawing, so switching models narrows the display without a
+	// refetch. Empty until a fetch lands, and empty for providers that
+	// declare no report.
+	usageMeters []usage.Meter
+	// usageProvider is the provider usageMeters was fetched for. The pair is
+	// replaced together, so switching to a model on another provider never
+	// shows limits that do not apply to it.
+	usageProvider string
+
 	// gitBranch is the workspace's checked-out branch as of the last poll,
 	// empty when there is none to show. Reading it costs a file read
 	// locally and a request in client/server mode, so renders take it from
@@ -592,7 +604,10 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 
 	desiredState := uiLanding
 	desiredFocus := uiFocusEditor
-	if !com.Config().IsConfigured() {
+	// Onboard while nothing can serve a request: that includes the case
+	// where every configured provider is waiting on a sign-in, so the
+	// picker still lists their models and selecting one opens the sign-in.
+	if !com.Config().IsConfigured() || !com.Config().HasUsableSelection() {
 		desiredState = uiOnboarding
 	} else if n, _ := com.Workspace.ProjectNeedsInitialization(); n {
 		desiredState = uiInitialize
@@ -657,6 +672,10 @@ func (m *UI) Init() tea.Cmd {
 	if m.com.IsHyper() {
 		cmds = append(cmds, m.fetchHyperCredits())
 	}
+	// Same for a plan that reports its remaining quota: show it from the
+	// first frame and keep it fresh. The fetch is a no-op unless the current
+	// model's provider declares where to read it.
+	cmds = append(cmds, m.fetchUsage(), m.usageTicker())
 	// The branch is shown from the first frame on, so read it now and keep
 	// polling for checkouts made outside Crush.
 	cmds = append(cmds, m.fetchGitBranch(), m.gitBranchTicker())
@@ -1520,6 +1539,15 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.fetchHyperCredits())
 		}
 		cmds = append(cmds, m.hyperCreditsTicker())
+	case usageUpdatedMsg:
+		m.usageMeters = msg.meters
+		m.usageProvider = msg.provider
+	case usagePollMsg:
+		// Quota moves as the plan is spent, which is during a session, so
+		// this is not skipped while the agent is busy: one small read per
+		// minute keeps the figures honest instead of stale until idle.
+		cmds = append(cmds, m.fetchUsage())
+		cmds = append(cmds, m.usageTicker())
 	case gitBranchUpdatedMsg:
 		m.gitBranch = msg.branch
 	case gitBranchPollMsg:
@@ -2860,12 +2888,34 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		}
 	}
 
-	if !isConfigured() || msg.ReAuthenticate {
+	// A provider that declares an OAuth flow but has not signed in yet can
+	// serve nothing: picking one of its models opens the sign-in rather than
+	// trying to build a client with no credential.
+	var needsSignIn bool
+	if providerCfg, ok := cfg.Providers.Get(providerID); ok {
+		needsSignIn = providerCfg.NeedsSignIn()
+		// The placeholder picked from the list, not handed back by a
+		// finished sign-in: the catalog is still locked, so sign in again.
+		if msg.Model.Model == "" && !m.dialog.ContainsDialog(dialog.OAuthID) &&
+			!slices.ContainsFunc(providerCfg.Models, func(model catwalk.Model) bool { return model.Name != "" }) {
+			needsSignIn = true
+		}
+	}
+
+	if !isConfigured() || needsSignIn || msg.ReAuthenticate {
 		m.dialog.CloseDialog(dialog.ModelsID)
 		if cmd := m.openAuthenticationDialog(msg.Provider, msg.Model, msg.ModelType); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 		return tea.Batch(cmds...)
+	}
+
+	// The sign-in placeholder's hand-off: the login just completed, so
+	// reopen the list to pick from the catalog it unlocked.
+	if msg.Model.Model == "" {
+		m.dialog.CloseDialog(dialog.ModelsID)
+		m.dialog.CloseDialog(dialog.OAuthID)
+		return m.openModelsDialog()
 	}
 
 	// A ChatGPT or Grok sign-in swaps the provider's catalog for the one
@@ -2892,6 +2942,13 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		cmds = append(cmds, util.ReportError(err))
 	} else {
 		if msg.ModelType == config.SelectedModelTypeLarge {
+			// The plan's limits belong to the model in use, so drop the
+			// previous provider's figures at once and read the new
+			// provider's rather than letting them sit until the next poll.
+			// A sign-in ends here too, which is when the limits first
+			// become readable at all.
+			m.usageMeters, m.usageProvider = nil, ""
+			cmds = append(cmds, m.fetchUsage())
 			// Swap the theme live based on the newly selected large
 			// model's provider. Skipped when the provider resolves to
 			// the already-active theme, which avoids a full markdown
@@ -2992,7 +3049,20 @@ func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.Se
 			dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, model, modelType)
 		}
 	default:
-		dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, model, modelType)
+		// A provider that declares its own OAuth flow, which is how plugin
+		// providers sign in, gets the generic dialog. One that is already
+		// usable with an API key keeps the key editor.
+		providerCfg, known := m.com.Config().Providers.Get(string(provider.ID))
+		declaredOAuth := known && providerCfg.UsesOAuth()
+		switch {
+		case declaredOAuth && providerCfg.OAuthToken == nil &&
+			providerCfg.HasAPIKey(m.com.Workspace.Resolver()):
+			dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, model, modelType)
+		case declaredOAuth:
+			dlg, cmd = dialog.NewOAuthGeneric(m.com, isOnboarding, provider, model, modelType, providerCfg.Auth)
+		default:
+			dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, model, modelType)
+		}
 	}
 
 	if m.dialog.ContainsDialog(dlg.ID()) {
@@ -3022,8 +3092,17 @@ func (m *UI) openAuthenticationDialogWithMethod(provider catwalk.Provider, model
 			dlg, cmd = dialog.NewOAuthOpenAI(m.com, isOnboarding, provider, model, modelType)
 		case catwalk.InferenceProviderXAI:
 			dlg, cmd = dialog.NewOAuthGrok(m.com, isOnboarding, provider, model, modelType)
+		default:
+			if providerCfg, ok := m.com.Config().Providers.Get(string(provider.ID)); ok && providerCfg.UsesOAuth() {
+				dlg, cmd = dialog.NewOAuthGeneric(m.com, isOnboarding, provider, model, modelType, providerCfg.Auth)
+			}
 		}
 	} else {
+		dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, model, modelType)
+	}
+	if dlg == nil {
+		// No flow is configured for this provider, so there is nothing to
+		// open: fall back to the key prompt rather than a missing dialog.
 		dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, model, modelType)
 	}
 
@@ -3585,6 +3664,7 @@ func (m *UI) drawHeader(scr uv.Screen, area uv.Rectangle) {
 		area.Dx(),
 		m.lspErrorCount(),
 		m.hyperCredits,
+		m.usageForCurrentModel(),
 		m.gitBranch,
 	)
 }

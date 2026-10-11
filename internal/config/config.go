@@ -936,15 +936,23 @@ type Config struct {
 // mutator must never write through the live pointer. Instead it clones,
 // mutates the clone, and atomically swaps it in. The clone gives fresh
 // copies of every field a typed mutator touches in place — Models,
-// RecentModels, MCP, and Options (with its nested TUI pointer). Providers
-// is a *csync.Map (internally synchronized) and is shared by reference;
-// the remaining fields are immutable after load from the mutators'
-// standpoint and are likewise shared.
+// RecentModels, AutoMode, MCP, and Options (with its nested TUI pointer).
+// Providers is a *csync.Map (internally synchronized) and is shared by
+// reference; the remaining fields are immutable after load from the
+// mutators' standpoint and are likewise shared.
 func (c *Config) cloneForWrite() *Config {
 	nc := *c
 	nc.Models = maps.Clone(c.Models)
 	nc.RecentModels = maps.Clone(c.RecentModels)
 	nc.MCP = maps.Clone(c.MCP)
+	if c.AutoMode != nil {
+		autoMode := *c.AutoMode
+		if c.AutoMode.Classifier != nil {
+			classifier := *c.AutoMode.Classifier
+			autoMode.Classifier = &classifier
+		}
+		nc.AutoMode = &autoMode
+	}
 	if c.Options != nil {
 		opts := *c.Options
 		if c.Options.TUI != nil {

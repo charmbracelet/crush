@@ -2848,20 +2848,6 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		}
 	}
 
-	// The auto-mode classifier is stored under auto_mode.classifier, not
-	// the models map, and does not re-authenticate or swap agent models.
-	if msg.ModelType == config.SelectedModelTypeAutoMode {
-		m.dialog.CloseDialog(dialog.ModelsID)
-		providerID := string(msg.Provider.ID)
-		if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "auto_mode.classifier.provider", providerID); err != nil {
-			return util.ReportError(err)
-		}
-		if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "auto_mode.classifier.model", msg.Model.Model); err != nil {
-			return util.ReportError(err)
-		}
-		return util.ReportInfo(fmt.Sprintf("Auto mode classifier set to %s/%s", providerID, msg.Model.Model))
-	}
-
 	// Attempt to import GitHub Copilot tokens from VSCode if available.
 	if isCopilot && !isConfigured() && !msg.ReAuthenticate {
 		m.com.Workspace.ImportCopilot()
@@ -2920,6 +2906,25 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 			}
 			return tea.Batch(cmds...)
 		}
+	}
+
+	// The auto-mode classifier is stored under auto_mode.classifier, not
+	// the models map, and does not swap agent models. It shares the
+	// auth-gated flow above with large and small so an unconfigured
+	// provider prompts for credentials before the selection is persisted,
+	// and the selection plus the recent-models list land in a single write.
+	if msg.ModelType == config.SelectedModelTypeAutoMode {
+		m.dialog.CloseDialog(dialog.ModelsID)
+		selected := config.SelectedModel{
+			Provider: string(msg.Provider.ID),
+			Model:    msg.Model.Model,
+		}
+		if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeAutoMode, selected); err != nil {
+			return util.ReportError(err)
+		}
+		m.dialog.CloseDialog(dialog.APIKeyInputID)
+		m.dialog.CloseDialog(dialog.OAuthID)
+		return util.ReportInfo(fmt.Sprintf("Auto mode classifier set to %s/%s", selected.Provider, selected.Model))
 	}
 
 	if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, msg.ModelType, msg.Model); err != nil {

@@ -156,3 +156,73 @@ func TestUpdatePreferredModel_TypeIsolation(t *testing.T) {
 	require.Len(t, store.Config().RecentModels[SelectedModelTypeSmall], 1)
 	require.Equal(t, smallModel, store.Config().RecentModels[SelectedModelTypeSmall][0])
 }
+
+func TestUpdatePreferredModel_AutoModePersistsClassifierAndRecents(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cfg := &Config{}
+	cfg.setDefaults(dir, "")
+	store := testStoreWithPath(cfg, dir)
+
+	sel := SelectedModel{Provider: "local-llama", Model: "gemma4-e4b"}
+	require.NoError(t, store.UpdatePreferredModel(ScopeGlobal, SelectedModelTypeAutoMode, sel))
+
+	// in-memory state: the classifier is set, the models map untouched.
+	require.NotNil(t, store.Config().AutoMode)
+	require.NotNil(t, store.Config().AutoMode.Classifier)
+	require.Equal(t, "local-llama", store.Config().AutoMode.Classifier.Provider)
+	require.Equal(t, "gemma4-e4b", store.Config().AutoMode.Classifier.Model)
+	require.Empty(t, store.Config().Models)
+	require.Len(t, store.Config().RecentModels[SelectedModelTypeAutoMode], 1)
+	require.Equal(t, sel, store.Config().RecentModels[SelectedModelTypeAutoMode][0])
+
+	// persisted state
+	out := readConfigJSON(t, store.globalDataPath)
+	autoMode, ok := out["auto_mode"].(map[string]any)
+	require.True(t, ok)
+	classifier, ok := autoMode["classifier"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "local-llama", classifier["provider"])
+	require.Equal(t, "gemma4-e4b", classifier["model"])
+
+	rm := readRecentModels(t, store.globalDataPath)
+	autoRecents, ok := rm[string(SelectedModelTypeAutoMode)].([]any)
+	require.True(t, ok)
+	require.Len(t, autoRecents, 1)
+	item := autoRecents[0].(map[string]any)
+	require.Equal(t, "local-llama", item["provider"])
+	require.Equal(t, "gemma4-e4b", item["model"])
+
+	// Selecting another classifier moves it to the front of the recents.
+	another := SelectedModel{Provider: "openai", Model: "gpt-4o"}
+	require.NoError(t, store.UpdatePreferredModel(ScopeGlobal, SelectedModelTypeAutoMode, another))
+	require.Len(t, store.Config().RecentModels[SelectedModelTypeAutoMode], 2)
+	require.Equal(t, another, store.Config().RecentModels[SelectedModelTypeAutoMode][0])
+	require.Equal(t, sel, store.Config().RecentModels[SelectedModelTypeAutoMode][1])
+	require.Equal(t, "openai", store.Config().AutoMode.Classifier.Provider)
+}
+
+func TestUpdatePreferredModel_AutoModePreservesOtherFields(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cfg := &Config{
+		AutoMode: &AutoModeConfig{
+			Enabled:    true,
+			MaxTokens:  2048,
+			Classifier: &AutoModeClassifier{Provider: "old", Model: "old-model"},
+		},
+	}
+	cfg.setDefaults(dir, "")
+	store := testStoreWithPath(cfg, dir)
+
+	sel := SelectedModel{Provider: "local-llama", Model: "gemma4-e4b"}
+	require.NoError(t, store.UpdatePreferredModel(ScopeGlobal, SelectedModelTypeAutoMode, sel))
+
+	am := store.Config().AutoMode
+	require.True(t, am.Enabled)
+	require.Equal(t, 2048, am.MaxTokens)
+	require.Equal(t, "local-llama", am.Classifier.Provider)
+	require.Equal(t, "gemma4-e4b", am.Classifier.Model)
+}

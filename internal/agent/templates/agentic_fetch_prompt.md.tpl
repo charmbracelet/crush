@@ -51,6 +51,7 @@ Only include URLs that actually contributed information to your answer. Include 
 Working directory: {{.WorkingDir}}
 Platform: {{.Platform}}
 Today's date: {{.Date}}
+Current time: {{.Time}}
 </env>
 
 <web_search_tool>

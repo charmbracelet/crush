@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/scheduler"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -169,6 +170,7 @@ func (c *recordingCoordinator) Summarize(context.Context, string) error       { 
 func (c *recordingCoordinator) Model() agent.Model                            { return agent.Model{} }
 func (c *recordingCoordinator) UpdateModels(context.Context) error            { return nil }
 func (c *recordingCoordinator) SetMainAgent(string) error                     { return nil }
+func (c *recordingCoordinator) ListCronTasks(string) []scheduler.Task         { return nil }
 func (c *recordingCoordinator) GenerateTitle(context.Context, string, string) {}
 
 // fullFakeSessions adapts fakeChannelSessions to the full session.Service

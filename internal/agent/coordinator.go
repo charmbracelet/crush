@@ -41,6 +41,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
+	"github.com/charmbracelet/crush/internal/scheduler"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
 	"golang.org/x/sync/errgroup"
@@ -139,6 +140,7 @@ type Coordinator interface {
 	QueuedPrompts(sessionID string) int
 	QueuedPromptsList(sessionID string) []string
 	ClearQueue(sessionID string)
+	ListCronTasks(sessionID string) []scheduler.Task
 	Summarize(context.Context, string) error
 	Model() Model
 	UpdateModels(ctx context.Context) error
@@ -166,6 +168,26 @@ type coordinator struct {
 	mainAgentName string
 	agents        map[string]SessionAgent
 
+	cronStore *scheduler.Store // nil when the scheduler is disabled (headless runs)
+
+	// schedCancel and schedDone stop and join the cron scheduler
+	// goroutine, so Close can shut it down deterministically instead of
+	// relying on process exit. Both are nil when the scheduler never
+	// started.
+	schedCancel context.CancelFunc
+	schedDone   chan struct{}
+
+	// fireWg tracks in-flight runs started by fireScheduledTask, so
+	// Close can cancel them (they carry the scheduler's context) and
+	// wait for them before releasing the cron store.
+	fireWg sync.WaitGroup
+
+	// servedMu guards servedSessions: the set of sessions this process
+	// is actively serving, used to decide where a durable task may fire
+	// (see fireScheduledTask).
+	servedMu       sync.Mutex
+	servedSessions map[string]bool
+
 	// Skills discovery results (session-start snapshot).
 	allSkills    []*skills.Skill // Pre-filter: all discovered after dedup.
 	activeSkills []*skills.Skill // Post-filter: active skills only.
@@ -190,6 +212,14 @@ type CoordinatorOptions struct {
 	RunComplete pubsub.Publisher[notify.RunComplete]
 	Skills      *skills.Manager
 	Interactive bool
+	// EnableScheduler starts the scheduled-tasks scheduler loop and
+	// takes the ownership lock for durable tasks. Only long-lived
+	// interactive surfaces (the TUI and the server) set it: a short-lived
+	// headless `crush run` must not take the ownership lock and start
+	// firing other sessions' durable tasks — with --yolo that would
+	// auto-approve every prompt they run. When false the cron tools are
+	// still registered but report that scheduled tasks are unavailable.
+	EnableScheduler bool
 }
 
 func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, error) {
@@ -206,6 +236,14 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	}
 	skillTracker := skills.NewTracker(activeSkills)
 
+	var cronStore *scheduler.Store
+	if opts.EnableScheduler {
+		cronStore = scheduler.NewStore(filepath.Join(opts.Config.Config().Options.DataDirectory, "scheduled_tasks.json"))
+		if err := cronStore.Load(); err != nil {
+			slog.Error("Failed to load scheduled tasks", "error", err)
+		}
+	}
+
 	c := &coordinator{
 		cfg:          opts.Config,
 		sessions:     opts.Sessions,
@@ -218,6 +256,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		notify:       opts.Notify,
 		runComplete:  opts.RunComplete,
 		agents:       make(map[string]SessionAgent),
+		cronStore:    cronStore,
 		allSkills:    allSkills,
 		activeSkills: activeSkills,
 		skillTracker: skillTracker,
@@ -229,7 +268,13 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		return nil, errCoderAgentNotConfigured
 	}
 
-	coderPrompt, err := coderPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
+	// TODO: make this dynamic when we support multiple agents
+	// The cron tools below are registered unconditionally in buildAgent, so
+	// the matching prompt guidance is always on for the coder agent.
+	coderPrompt, err := coderPrompt(
+		prompt.WithWorkingDir(c.cfg.WorkingDir()),
+		prompt.WithScheduling(),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -258,7 +303,32 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 
 	c.mainAgent = agent
 	c.mainAgentName = config.AgentCoder
+
+	if cronStore != nil {
+		cronScheduler := scheduler.NewScheduler(c.cronStore, c.fireScheduledTask, c.sessionServed)
+		schedCtx, schedCancel := context.WithCancel(ctx)
+		c.schedCancel = schedCancel
+		c.schedDone = make(chan struct{})
+		go func() {
+			defer close(c.schedDone)
+			cronScheduler.Run(schedCtx)
+		}()
+	}
+
 	return c, nil
+}
+
+// Close stops the cron scheduler, waits for in-flight fired runs (they
+// carry the scheduler's context, so they are asked to abort first), so
+// an explicit shutdown does not leave the goroutine running. It is an
+// optional capability outside the Coordinator interface: callers that
+// need it type-assert to interface{ Close() }.
+func (c *coordinator) Close() {
+	if c.schedCancel != nil {
+		c.schedCancel()
+		<-c.schedDone
+	}
+	c.fireWg.Wait()
 }
 
 // activeAgent returns the coordinator's current main agent and its config
@@ -289,13 +359,103 @@ func (c *coordinator) SetMainAgent(agentName string) error {
 	return nil
 }
 
+// transientFireRetryDelay is how long a task waits after a transient
+// fire failure (database hiccup, canceled context) before retrying.
+const transientFireRetryDelay = 30 * time.Second
+
+// unservedSessionRetryDelay is how long a durable task whose session is
+// not served by any process waits before its fire is retried.
+const unservedSessionRetryDelay = time.Minute
+
+// fireScheduledTask runs a due scheduled task's prompt against its
+// session. The prompt is injected as a normal user turn so it respects
+// the session's busy queue: it fires between turns, never mid-response,
+// matching Claude Code's scheduler semantics.
+func (c *coordinator) fireScheduledTask(ctx context.Context, task scheduler.Task) error {
+	// A canceled context (shutdown) must never be mistaken for a dead
+	// session: the lookup below would fail with anything, and dropping
+	// durable tasks on exit would lose them.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return &scheduler.TransientError{Err: ctxErr, RetryIn: transientFireRetryDelay}
+	}
+	if _, err := c.sessions.Get(ctx, task.SessionID); err != nil {
+		// Only a session that is genuinely gone retires its tasks:
+		// leaving them behind means the scheduler retries a dead session
+		// on every fire, forever. Any other lookup failure (a brief
+		// database hiccup, a canceled context) is transient, so the task
+		// is retried instead of dropped.
+		if errors.Is(err, sql.ErrNoRows) {
+			c.cronStore.DropSession(task.SessionID)
+			return fmt.Errorf("session %s for scheduled task %s no longer exists", task.SessionID, task.ID)
+		}
+		return &scheduler.TransientError{Err: err, RetryIn: transientFireRetryDelay}
+	}
+
+	// The scheduler only hands this coordinator a durable task when this
+	// process is serving the task's session (see DueTasks): a session is
+	// "served" from the moment the TUI loads it (ListCronTasks) or a user
+	// turn runs in it (Run/RunAccepted), so the fire lands where somebody
+	// can see it, and the on-disk claim keeps it exactly-once. Firing into
+	// an unserved session would run a prompt with nobody watching, and any
+	// permission request it raises would hang until someone answers it.
+	// The check below is the second line of defense — it also covers
+	// session-only tasks and direct calls — and defers instead of failing:
+	// a TransientError keeps the task, skips this fire, and records no
+	// failure. When no process ever serves the session, the task waits.
+	if !c.sessionServed(task.SessionID) {
+		return &scheduler.TransientError{
+			Err:     fmt.Errorf("session %s is not open in a process that can run it", task.SessionID),
+			RetryIn: unservedSessionRetryDelay,
+		}
+	}
+
+	prompt := task.Prompt
+	// The run is dispatched in the background and tracked on fireWg so a
+	// slow or permission-blocked run can never stall the scheduler loop
+	// or other tasks: the fire returns immediately, MarkFired advances
+	// the schedule, and the run's own outcome is recorded afterwards via
+	// SetLastError. A permission request nobody answers blocks only this
+	// goroutine, and only until its context (the scheduler's) is canceled
+	// on Close.
+	c.fireWg.Add(1)
+	go func() {
+		defer c.fireWg.Done()
+		if _, err := c.run(ctx, nil, task.SessionID, prompt); err != nil {
+			slog.Error("Scheduled task run failed", "id", task.ID, "session_id", task.SessionID, "error", err)
+			c.cronStore.SetLastError(task.ID, err)
+		}
+	}()
+	return nil
+}
+
+// markSessionServed records that this process is actively serving
+// sessionID, making it eligible to fire that session's scheduled tasks.
+func (c *coordinator) markSessionServed(sessionID string) {
+	c.servedMu.Lock()
+	defer c.servedMu.Unlock()
+	if c.servedSessions == nil {
+		c.servedSessions = make(map[string]bool)
+	}
+	c.servedSessions[sessionID] = true
+}
+
+// sessionServed reports whether this process is actively serving
+// sessionID.
+func (c *coordinator) sessionServed(sessionID string) bool {
+	c.servedMu.Lock()
+	defer c.servedMu.Unlock()
+	return c.servedSessions[sessionID]
+}
+
 // Run implements Coordinator.
 func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
+	c.markSessionServed(sessionID)
 	return c.run(ctx, nil, sessionID, prompt, attachments...)
 }
 
 // RunAccepted implements Coordinator.
 func (c *coordinator) RunAccepted(ctx context.Context, accept *AcceptedRun, sessionID string, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
+	c.markSessionServed(sessionID)
 	return c.run(ctx, accept, sessionID, prompt, attachments...)
 }
 
@@ -881,6 +1041,9 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.DataDirectory, c.cfg.Config().Options.Attribution, modelID),
 		tools.NewCrushInfoTool(c.cfg, c.lspManager, c.allSkills, c.activeSkills, c.skillTracker),
 		tools.NewCrushLogsTool(logFile),
+		tools.NewCronCreateTool(c.cronStore, c.permissions),
+		tools.NewCronListTool(c.cronStore),
+		tools.NewCronDeleteTool(c.cronStore),
 		tools.NewJobOutputTool(c.cfg.Config().Options.DataDirectory),
 		tools.NewJobKillTool(),
 		tools.NewDownloadTool(c.permissions, c.cfg.WorkingDir(), nil),
@@ -1421,6 +1584,17 @@ func (c *coordinator) ClearQueue(sessionID string) {
 	c.currentAgent().ClearQueue(sessionID)
 }
 
+// ListCronTasks returns the scheduled tasks belonging to sessionID.
+// The TUI calls it when a session loads, which also marks the session as
+// served in this process, making it eligible to fire its durable tasks.
+func (c *coordinator) ListCronTasks(sessionID string) []scheduler.Task {
+	c.markSessionServed(sessionID)
+	if c.cronStore == nil {
+		return nil
+	}
+	return c.cronStore.List(sessionID)
+}
+
 func (c *coordinator) IsBusy() bool {
 	return c.currentAgent().IsBusy()
 }
@@ -1448,6 +1622,9 @@ func (c *coordinator) UpdateModels(ctx context.Context) error {
 // updateAgentModels rebuilds the model and tool configuration for the
 // given agent from the current config.
 func (c *coordinator) updateAgentModels(ctx context.Context, agent SessionAgent, name string) error {
+	if agent == nil {
+		return fmt.Errorf("%w: %s", errMainAgentNotFound, name)
+	}
 	// build the models again so we make sure we get the latest config
 	large, small, err := c.buildAgentModels(ctx, false)
 	if err != nil {

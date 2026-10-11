@@ -1026,6 +1026,9 @@ func allToolNames() []string {
 	return []string{
 		"agent",
 		"bash",
+		"cron_create",
+		"cron_delete",
+		"cron_list",
 		"crush_info",
 		"crush_logs",
 		"job_output",

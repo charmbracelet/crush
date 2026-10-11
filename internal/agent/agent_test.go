@@ -26,7 +26,30 @@ import (
 
 func TestMain(m *testing.M) {
 	slog.SetLogLoggerLevel(slog.LevelError)
+	defer isolateGlobalConfig()()
 	m.Run()
+}
+
+// isolateGlobalConfig points the global config and data JSON paths at a
+// throwaway directory for the whole package.
+//
+// Tests here call config.Init, which always merges the user-level
+// crush.json on top of the project config. On a developer machine that
+// file carries real MCP servers, so without this the tests spawn the
+// developer's actual MCP processes and count their tools — tool-list
+// assertions then fail with counts nobody can reproduce, and VCR
+// cassettes stop matching. CI only passes because its runners have no
+// user config. Env vars, not t.Setenv: the tests run in parallel.
+//
+// It returns a cleanup func for the caller to defer.
+func isolateGlobalConfig() func() {
+	dir, err := os.MkdirTemp("", "crush-agent-test-config")
+	if err != nil {
+		panic(fmt.Sprintf("isolate global config: %v", err))
+	}
+	os.Setenv("CRUSH_GLOBAL_CONFIG", dir)
+	os.Setenv("CRUSH_GLOBAL_DATA", dir)
+	return func() { os.RemoveAll(dir) }
 }
 
 var modelPairs = []modelPair{

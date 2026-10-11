@@ -9,12 +9,12 @@
     {
       "id": "deepseek-v4.1-flash",
       "name": "DeepSeek V4.1 Flash",
-      "cost_per_1m_in": 0.3,
-      "cost_per_1m_out": 1.2,
+      "cost_per_1m_in": 0.33,
+      "cost_per_1m_out": 1.31,
       "cost_per_1m_in_cached": 0,
       "cost_per_1m_out_cached": 0.03,
       "context_window": 1048576,
-      "default_max_tokens": 32768,
+      "default_max_tokens": 262144,
       "can_reason": true,
       "reasoning_levels": [
         "low",
@@ -227,15 +227,12 @@
       "cost_per_1m_in_cached": 0,
       "cost_per_1m_out_cached": 0.185096,
       "context_window": 1048576,
-      "default_max_tokens": 32768,
+      "default_max_tokens": 65536,
       "can_reason": true,
       "reasoning_levels": [
-        "none",
-        "minimal",
         "low",
         "medium",
-        "high",
-        "xhigh"
+        "high"
       ],
       "default_reasoning_effort": "medium",
       "supports_attachments": true

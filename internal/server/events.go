@@ -53,6 +53,8 @@ func wrapEvent(ev any) *pubsub.Payload {
 				State:          proto.MCPState(e.Payload.State),
 				Error:          e.Payload.Error,
 				ToolCount:      e.Payload.Counts.Tools,
+				PromptCount:    e.Payload.Counts.Prompts,
+				ResourceCount:  e.Payload.Counts.Resources,
 				ChannelMessage: e.Payload.ChannelMessage,
 			},
 		})

@@ -527,6 +527,9 @@ func (s *ConfigStore) UpdatePreferredModel(scope Scope, modelType SelectedModelT
 // model change. Shared between UpdatePreferredModel and direct updateLocked
 // callers (e.g. Load). Caller must hold writeMu.
 func (s *ConfigStore) updatePreferredModelFields(c *Config, modelType SelectedModelType, model SelectedModel) map[string]any {
+	if modelType == SelectedModelTypeAutoMode {
+		return updateAutoModeClassifierFields(c, model)
+	}
 	if c.Models == nil {
 		c.Models = make(map[SelectedModelType]SelectedModel)
 	}
@@ -542,6 +545,38 @@ func (s *ConfigStore) updatePreferredModelFields(c *Config, modelType SelectedMo
 		}
 		c.RecentModels[modelType] = updated
 		fields[fmt.Sprintf("recent_models.%s", modelType)] = updated
+	}
+	return fields
+}
+
+// updateAutoModeClassifierFields builds the fields map for persisting the
+// auto-mode classifier selection. The classifier lives under
+// auto_mode.classifier rather than the models map, but its recents are
+// tracked under recent_models.auto_mode so the models dialog shows a
+// "Recently used" section for the auto-mode tab like the large and small
+// slots. The classifier is not pinned: runtime model pins exist to keep a
+// reload from swapping the agent model mid-session, and the classifier is
+// resolved on each evaluation anyway.
+func updateAutoModeClassifierFields(c *Config, model SelectedModel) map[string]any {
+	if c.AutoMode == nil {
+		c.AutoMode = &AutoModeConfig{}
+	}
+	if c.AutoMode.Classifier == nil {
+		c.AutoMode.Classifier = &AutoModeClassifier{}
+	}
+	c.AutoMode.Classifier.Provider = model.Provider
+	c.AutoMode.Classifier.Model = model.Model
+
+	fields := map[string]any{
+		"auto_mode.classifier.provider": model.Provider,
+		"auto_mode.classifier.model":    model.Model,
+	}
+	if updated, changed := nextRecentModels(c, SelectedModelTypeAutoMode, model); changed {
+		if c.RecentModels == nil {
+			c.RecentModels = make(map[SelectedModelType][]SelectedModel)
+		}
+		c.RecentModels[SelectedModelTypeAutoMode] = updated
+		fields["recent_models.auto_mode"] = updated
 	}
 	return fields
 }

@@ -35,6 +35,17 @@ func TestContainsCommandChaining(t *testing.T) {
 		{"git log with pipe", "git log | head", true},
 		{"empty string", "", false},
 		{"dollar sign in argument", "echo $HOME", false},
+		{"ls then newline rm", "ls\nrm -rf tmpdir", true},
+		{"ls with args then newline rm", "ls -la\nrm -rf tmpdir", true},
+		{"git status then newline rm", "git status\nrm -rf tmpdir", true},
+		{"crlf separator", "ls\r\nrm -rf tmpdir", true},
+		{"carriage return separator", "ls\rrm -rf tmpdir", true},
+		{"leading newline", "\nrm -rf tmpdir", true},
+		{"trailing newline", "ls\n", true},
+		{"trailing crlf", "ls\r\n", true},
+		{"newline inside single quotes", "echo 'a\nb'", true},
+		{"newline inside double quotes", "echo \"a\nb\"", true},
+		{"escaped newline continuation", "ls \\\n-la", true},
 	}
 
 	for _, tt := range tests {

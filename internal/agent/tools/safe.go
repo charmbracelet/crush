@@ -61,10 +61,13 @@ var chainingMetacharacters = []string{
 	"&&",
 	"$(",
 	"`",
+	"\n",
+	"\r",
 }
 
 // containsCommandChaining reports whether s contains shell metacharacters
-// that enable command chaining or substitution.
+// that enable command chaining or substitution. Line breaks count as
+// metacharacters because the shell treats a newline as a command separator.
 func containsCommandChaining(s string) bool {
 	return slices.ContainsFunc(chainingMetacharacters, func(c string) bool {
 		return strings.Contains(s, c)

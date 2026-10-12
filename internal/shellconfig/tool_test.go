@@ -75,3 +75,18 @@ func TestToolAddRejectsBadFlags(t *testing.T) {
 	_, err = LoadShellConfig(t.Context(), path, []byte(`tool add x --schema '[1]'`))
 	require.ErrorContains(t, err, "expects a JSON object")
 }
+
+func TestToolAction(t *testing.T) {
+	t.Parallel()
+
+	result := loadScript(t, `tool add GitHub --description "GitHub" --param repo "Repo"
+tool action GitHub pr_view --description "Show a PR" --param number "PR" --required number --command 'gh pr view "$number"' --skip-permission true
+tool action GitHub pr_view --skip-permission false`)
+	tool := result["custom_tools"].(map[string]any)["GitHub"].(map[string]any)
+	view := tool["actions"].(map[string]any)["pr_view"].(map[string]any)
+	require.Equal(t, "Show a PR", view["description"])
+	require.Equal(t, `gh pr view "$number"`, view["command"])
+	require.Equal(t, false, view["skip_permission"])
+	require.Equal(t, []any{"number"}, view["required"])
+	require.Contains(t, tool, "source")
+}

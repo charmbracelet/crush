@@ -1708,6 +1708,14 @@ func (c *Config) ValidateHooks() error {
 // provider (Anthropic) rejects a whole request over one bad name.
 var customToolName = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
 
+// customToolParam is what a parameter name may look like: it becomes a shell
+// variable in the command, so it has to be a lowercase identifier.
+//
+// ponytail: lowercase keeps clear of the uppercase environment on Unix, but
+// Windows env names are case-insensitive, so "path" there would shadow PATH.
+// Add a reserved-name list if Windows plugins hit it.
+var customToolParam = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
+
 // ValidateCustomTools checks every declared custom tool so a broken plugin
 // fails the load naming the tool, rather than failing the first request.
 func (c *Config) ValidateCustomTools() error {
@@ -1722,25 +1730,79 @@ func (c *Config) ValidateCustomTools() error {
 			return fmt.Errorf("tool %q: the mcp_ prefix is reserved for MCP tools", name)
 		case t.Description == "":
 			return fmt.Errorf("tool %q: description is required", name)
-		case t.Command == "":
-			return fmt.Errorf("tool %q: command is required", name)
 		case t.Schema != nil && len(t.Params) > 0:
 			return fmt.Errorf("tool %q: use either a schema or params, not both", name)
-		}
-		props := map[string]any{}
-		for p := range t.Params {
-			props[p] = true
+		case t.Schema != nil && len(t.Actions) > 0:
+			return fmt.Errorf("tool %q: use either a schema or actions, not both", name)
+		case t.Command == "" && len(t.Actions) == 0:
+			return fmt.Errorf("tool %q: command is required", name)
 		}
 		if t.Schema != nil {
-			var ok bool
-			if props, ok = t.Schema["properties"].(map[string]any); !ok {
+			props, ok := t.Schema["properties"].(map[string]any)
+			if !ok {
 				return fmt.Errorf("tool %q: schema must have a properties object", name)
 			}
-		}
-		for _, r := range t.Required {
-			if _, ok := props[r]; !ok {
-				return fmt.Errorf("tool %q: required parameter %q is not declared", name, r)
+			for _, r := range t.Required {
+				if _, ok := props[r]; !ok {
+					return fmt.Errorf("tool %q: required parameter %q is not declared", name, r)
+				}
 			}
+		} else if err := validateToolParams(t.Params, t.Required, nil); err != nil {
+			return fmt.Errorf("tool %q: %w", name, err)
+		}
+		if _, ok := t.Params["action"]; ok && len(t.Actions) > 0 {
+			return fmt.Errorf("tool %q: \"action\" is reserved for picking an action", name)
+		}
+		if err := validateToolTemplates(t.Title, t.Summary); err != nil {
+			return fmt.Errorf("tool %q: %w", name, err)
+		}
+		for action, a := range t.Actions {
+			switch {
+			case !customToolParam.MatchString(action):
+				return fmt.Errorf("tool %q action %q: name must match %s", name, action, customToolParam)
+			case a.Description == "":
+				return fmt.Errorf("tool %q action %q: description is required", name, action)
+			case a.Command == "" && t.Command == "":
+				return fmt.Errorf("tool %q action %q: command is required", name, action)
+			}
+			if _, ok := a.Params["action"]; ok {
+				return fmt.Errorf("tool %q action %q: \"action\" is reserved for picking an action", name, action)
+			}
+			if err := validateToolParams(a.Params, a.Required, t.Params); err != nil {
+				return fmt.Errorf("tool %q action %q: %w", name, action, err)
+			}
+			if err := validateToolTemplates(a.Title, a.Summary); err != nil {
+				return fmt.Errorf("tool %q action %q: %w", name, action, err)
+			}
+		}
+	}
+	return nil
+}
+
+// validateToolTemplates parses the display templates so a typo fails the
+// load instead of quietly falling back to the plain rendering.
+func validateToolTemplates(title, summary string) error {
+	for field, text := range map[string]string{"title": title, "summary": summary} {
+		if _, err := CustomToolTemplate(text); err != nil {
+			return fmt.Errorf("invalid %s template: %w", field, err)
+		}
+	}
+	return nil
+}
+
+// validateToolParams checks parameter names and that every required one is
+// declared, either here or in shared.
+func validateToolParams(params map[string]string, required []string, shared map[string]string) error {
+	for p := range params {
+		if !customToolParam.MatchString(p) {
+			return fmt.Errorf("parameter %q must match %s", p, customToolParam)
+		}
+	}
+	for _, r := range required {
+		_, own := params[r]
+		_, common := shared[r]
+		if !own && !common {
+			return fmt.Errorf("required parameter %q is not declared", r)
 		}
 	}
 	return nil

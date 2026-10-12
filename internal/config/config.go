@@ -10,7 +10,9 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
+	"text/template"
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
@@ -860,8 +862,9 @@ func (h *HookConfig) TimeoutDuration() time.Duration {
 type CustomToolConfig struct {
 	// Description tells the model what the tool does and when to use it.
 	Description string `json:"description" jsonschema:"required,description=What the tool does, shown to the model"`
-	// Command is the shell source run on every call.
-	Command string `json:"command" jsonschema:"required,description=Shell command run when the agent calls the tool; the call's JSON input arrives on stdin"`
+	// Command is the shell source run on every call, unless the chosen
+	// action has its own.
+	Command string `json:"command,omitempty" jsonschema:"description=Shell command run when the agent calls the tool; declared parameters arrive as shell variables and the JSON input on stdin"`
 	// Schema is a full JSON Schema object for the input. Mutually exclusive
 	// with Params.
 	Schema map[string]any `json:"schema,omitempty" jsonschema:"description=JSON Schema object describing the tool input"`
@@ -875,8 +878,69 @@ type CustomToolConfig struct {
 	Env map[string]string `json:"env,omitempty" jsonschema:"description=Extra environment variables for the command"`
 	// Disabled hides the tool from every agent.
 	Disabled bool `json:"disabled,omitempty" jsonschema:"description=Hide the tool from agents"`
+	// SkipPermission runs calls without asking. Plugins are trusted code
+	// already, so this grants nothing a plugin could not do at load.
+	SkipPermission bool `json:"skip_permission,omitempty" jsonschema:"description=Run calls without a permission prompt"`
+	// Title and Summary are templates for how a call is shown in the chat,
+	// filled from its parameters. See CustomToolTemplate.
+	Title   string `json:"title,omitempty" jsonschema:"description=Template for the name a call is shown with"`
+	Summary string `json:"summary,omitempty" jsonschema:"description=Template for the one-line description a call is shown with"`
+	// Actions splits one tool into named operations the model picks with
+	// an "action" parameter. Params and Required on the tool are shared by
+	// every action.
+	Actions map[string]CustomToolAction `json:"actions,omitempty" jsonschema:"description=Named operations of the tool, chosen with the action parameter"`
 	// Source is the script that declared the command, recorded at load.
 	Source string `json:"source,omitempty" jsonschema:"-"`
+}
+
+// CustomToolAction is one operation of a custom tool with actions.
+type CustomToolAction struct {
+	// Description tells the model what the action does.
+	Description string `json:"description" jsonschema:"required,description=What the action does, shown to the model"`
+	// Command overrides the tool's command for this action.
+	Command string `json:"command,omitempty" jsonschema:"description=Shell command for this action; defaults to the tool's command"`
+	// Params are string parameters only this action uses.
+	Params map[string]string `json:"params,omitempty" jsonschema:"description=String parameters of this action, mapped to their descriptions"`
+	// Required lists the parameters this action needs.
+	Required []string `json:"required,omitempty" jsonschema:"description=Parameters this action requires"`
+	// SkipPermission runs this action without asking.
+	SkipPermission bool `json:"skip_permission,omitempty" jsonschema:"description=Run this action without a permission prompt"`
+	// Title and Summary override the tool's display templates.
+	Title   string `json:"title,omitempty" jsonschema:"description=Template for the name a call is shown with"`
+	Summary string `json:"summary,omitempty" jsonschema:"description=Template for the one-line description a call is shown with"`
+}
+
+// customToolTemplateFuncs are the helpers display templates may use on top
+// of text/template's builtins (or, eq, if, ...).
+var customToolTemplateFuncs = template.FuncMap{
+	// plural renders "1 pull request" or "5 pull requests"; a count that is
+	// not a number falls back to the given default.
+	"plural": func(count any, fallback int, word string) string {
+		n, err := strconv.Atoi(fmt.Sprint(count))
+		if err != nil {
+			n = fallback
+		}
+		if n == 1 {
+			return "1 " + word
+		}
+		return fmt.Sprintf("%d %ss", n, word)
+	},
+	// truncate shortens text to n characters on one line, ending in an
+	// ellipsis when it cut something, for previews like a comment body.
+	"truncate": func(n int, text string) string {
+		runes := []rune(strings.Join(strings.Fields(text), " "))
+		if len(runes) <= n {
+			return string(runes)
+		}
+		return strings.TrimSpace(string(runes[:max(n-1, 0)])) + "…"
+	},
+}
+
+// CustomToolTemplate parses a Title or Summary. The template sees every
+// declared parameter as a string, empty when the call left it out, e.g.
+// `Last {{plural .limit 20 "pull request"}} ({{or .state "open"}})`.
+func CustomToolTemplate(text string) (*template.Template, error) {
+	return template.New("display").Funcs(customToolTemplateFuncs).Parse(text)
 }
 
 // TimeoutDuration returns the tool timeout, defaulting to 60s.

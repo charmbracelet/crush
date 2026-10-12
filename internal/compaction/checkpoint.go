@@ -95,12 +95,11 @@ type Preview struct {
 	// Replaced and Kept count messages on each side of the cut.
 	Replaced int
 	Kept     int
-	// PromptTokens and the fields beside it are exactly what the session
-	// counters become on acceptance, recomputed here rather than at commit so
-	// the two paths can never drift.
-	PromptTokens     int64
-	CompletionTokens int64
-	EstimatedUsage   bool
+	// PromptTokens is exactly what the session's prompt counter becomes on
+	// acceptance, recomputed here rather than at commit so the two paths can
+	// never drift. The completion counter is deliberately absent: a
+	// checkpoint's own text already sits inside the prompt it produces.
+	PromptTokens int64
 }
 
 // Body returns summary with any footer removed, so a later compaction can

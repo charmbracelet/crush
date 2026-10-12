@@ -1742,12 +1742,10 @@ func (a *sessionAgent) runSummarize(ctx context.Context, sessionID, instructions
 		return compaction.Preview{}, err
 	}
 
-	var (
-		openrouterCost *float64
-		usage          fantasy.Usage
-	)
 	// A rendered checkpoint never reached a model, so it has no steps to price
-	// and no usage to bill; the zero usage below is what marks it estimated.
+	// and no usage to bill. Either way the session's counters are set below
+	// from the request the checkpoint produces, and marked estimated.
+	var openrouterCost *float64
 	if resp != nil {
 		for _, step := range resp.Steps {
 			stepCost := a.openrouterCost(step.ProviderMetadata)
@@ -1761,17 +1759,12 @@ func (a *sessionAgent) runSummarize(ctx context.Context, sessionID, instructions
 		}
 
 		a.updateSessionUsage(largeModel, &currentSession, resp.TotalUsage, openrouterCost, false)
-
-		// Just in case, get just the last usage info.
-		usage = resp.Response.Usage
 	}
 	preview := compaction.Preview{
-		CheckpointID:     summaryMessage.ID,
-		Text:             summaryMessage.Content().Text,
-		Replaced:         len(region),
-		Kept:             cut.Kept,
-		CompletionTokens: summaryCompletionTokens(usage, summaryMessage),
-		EstimatedUsage:   usageIsZero(usage),
+		CheckpointID: summaryMessage.ID,
+		Text:         summaryMessage.Content().Text,
+		Replaced:     len(region),
+		Kept:         cut.Kept,
 	}
 	if cut.Found {
 		preview.CutID = cut.MessageID
@@ -1792,11 +1785,7 @@ func (a *sessionAgent) runSummarize(ctx context.Context, sessionID, instructions
 		return preview, nil
 	}
 
-	currentSession.SummaryMessageID = preview.CheckpointID
-	currentSession.SummaryCutMessageID = preview.CutID
-	currentSession.PromptTokens = preview.PromptTokens
-	currentSession.CompletionTokens = preview.CompletionTokens
-	currentSession.EstimatedUsage = preview.EstimatedUsage
+	applyCheckpointCounters(&currentSession, preview)
 	_, err = a.sessions.Save(genCtx, currentSession)
 	if err != nil {
 		return compaction.Preview{}, err
@@ -1835,6 +1824,31 @@ func (a *sessionAgent) runSummarize(ctx context.Context, sessionID, instructions
 	return compaction.Preview{}, qErr
 }
 
+// applyCheckpointCounters writes the session counters a checkpoint implies.
+// Both commit paths go through it so the adopted figure cannot disagree with
+// the one the preview showed.
+//
+// The prompt counter is the size of the request the session is about to make:
+// the checkpoint, the turns the cut kept, and the measured overhead. The
+// completion counter is then zero by necessity rather than neglect — the
+// checkpoint is the session's last message and already sits inside that prompt.
+// The summarizer's own output used to be recorded here as well, and because
+// every readout (the header percentage, the sidebar context line, `crush
+// session`) adds the two counters together, a compaction that freed most of the
+// window appeared to free almost none of it until the next provider report
+// overwrote the pair.
+//
+// Usage is flagged estimated because the figure describes a request that has not
+// been made, whatever the summarizer's provider reported about its own call.
+// The undo path already re-estimates the same way and marks it.
+func applyCheckpointCounters(current *session.Session, preview compaction.Preview) {
+	current.SummaryMessageID = preview.CheckpointID
+	current.SummaryCutMessageID = preview.CutID
+	current.PromptTokens = preview.PromptTokens
+	current.CompletionTokens = 0
+	current.EstimatedUsage = true
+}
+
 // ConfirmSummarize adopts a previewed checkpoint, which is the moment the
 // session's older turns stop being sent.
 func (a *sessionAgent) ConfirmSummarize(ctx context.Context, sessionID string, preview compaction.Preview) error {
@@ -1849,11 +1863,7 @@ func (a *sessionAgent) ConfirmSummarize(ctx context.Context, sessionID string, p
 		return fmt.Errorf("the previewed checkpoint is gone: %w", err)
 	}
 
-	currentSession.SummaryMessageID = preview.CheckpointID
-	currentSession.SummaryCutMessageID = preview.CutID
-	currentSession.PromptTokens = preview.PromptTokens
-	currentSession.CompletionTokens = preview.CompletionTokens
-	currentSession.EstimatedUsage = preview.EstimatedUsage
+	applyCheckpointCounters(&currentSession, preview)
 	if _, err := a.sessions.Save(ctx, currentSession); err != nil {
 		return fmt.Errorf("failed to save session: %w", err)
 	}
@@ -2636,13 +2646,6 @@ func updateSessionTokenCounters(session *session.Session, usage fantasy.Usage) {
 	if promptTokens := contextTokens(usage); promptTokens != 0 {
 		session.PromptTokens = promptTokens
 	}
-}
-
-func summaryCompletionTokens(usage fantasy.Usage, summaryMessage message.Message) int64 {
-	if usage.OutputTokens != 0 {
-		return usage.OutputTokens
-	}
-	return approxTokenCount(summaryMessage.Content().Text) + approxTokenCount(summaryMessage.ReasoningContent().String())
 }
 
 func (a *sessionAgent) Cancel(sessionID string) {

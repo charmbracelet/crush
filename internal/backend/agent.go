@@ -44,7 +44,7 @@ func (b *Backend) SendMessage(workspaceID string, msg proto.AgentMessage) error 
 // channel from the wire, so only this package can bind a channel to a
 // run.
 func (b *Backend) dispatchRun(ws *Workspace, msg proto.AgentMessage, channel string) error {
-	if ws.AgentCoordinator == nil {
+	if ws.Agent() == nil {
 		return ErrAgentNotInitialized
 	}
 
@@ -56,7 +56,7 @@ func (b *Backend) dispatchRun(ws *Workspace, msg proto.AgentMessage, channel str
 		return err
 	}
 
-	accept := ws.AgentCoordinator.BeginAccepted(msg.SessionID)
+	accept := ws.Agent().BeginAccepted(msg.SessionID)
 
 	ws.runMu.Lock()
 	if ws.closing {
@@ -111,7 +111,7 @@ func (b *Backend) runAgent(ws *Workspace, msg proto.AgentMessage, channel string
 	if channel != "" {
 		ctx = agent.WithChannel(ctx, channel)
 	}
-	_, err := ws.AgentCoordinator.RunAccepted(ctx, accept, msg.SessionID, msg.Prompt, proto.AttachmentsToMessage(msg.Attachments)...)
+	_, err := ws.Agent().RunAccepted(ctx, accept, msg.SessionID, msg.Prompt, proto.AttachmentsToMessage(msg.Attachments)...)
 	if err == nil || errors.Is(err, context.Canceled) {
 		return
 	}
@@ -146,12 +146,12 @@ func (b *Backend) GetAgentInfo(workspaceID string) (proto.AgentInfo, error) {
 	}
 
 	var agentInfo proto.AgentInfo
-	if ws.AgentCoordinator != nil {
-		m := ws.AgentCoordinator.Model()
+	if ws.Agent() != nil {
+		m := ws.Agent().Model()
 		agentInfo = proto.AgentInfo{
 			Model:    m.CatwalkCfg,
 			ModelCfg: m.ModelCfg,
-			IsBusy:   ws.AgentCoordinator.IsBusy(),
+			IsBusy:   ws.Agent().IsBusy(),
 			IsReady:  true,
 		}
 	}
@@ -191,15 +191,15 @@ func (b *Backend) SetMainAgent(workspaceID, agentID string) error {
 		return err
 	}
 
-	if ws.AgentCoordinator == nil {
+	if ws.Agent() == nil {
 		return ErrAgentNotInitialized
 	}
 
-	if ws.AgentCoordinator.IsBusy() {
+	if ws.Agent().IsBusy() {
 		return ErrAgentBusy
 	}
 
-	return ws.AgentCoordinator.SetMainAgent(agentID)
+	return ws.Agent().SetMainAgent(agentID)
 }
 
 // CancelSession cancels an ongoing agent operation for the given
@@ -210,8 +210,8 @@ func (b *Backend) CancelSession(workspaceID, sessionID string) error {
 		return err
 	}
 
-	if ws.AgentCoordinator != nil {
-		ws.AgentCoordinator.Cancel(sessionID)
+	if ws.Agent() != nil {
+		ws.Agent().Cancel(sessionID)
 	}
 	return nil
 }
@@ -223,11 +223,11 @@ func (b *Backend) SummarizeSession(ctx context.Context, workspaceID, sessionID s
 		return err
 	}
 
-	if ws.AgentCoordinator == nil {
+	if ws.Agent() == nil {
 		return ErrAgentNotInitialized
 	}
 
-	return ws.AgentCoordinator.Summarize(ctx, sessionID)
+	return ws.Agent().Summarize(ctx, sessionID)
 }
 
 // QueuedPrompts returns the number of queued prompts for the session.
@@ -237,11 +237,11 @@ func (b *Backend) QueuedPrompts(workspaceID, sessionID string) (int, error) {
 		return 0, err
 	}
 
-	if ws.AgentCoordinator == nil {
+	if ws.Agent() == nil {
 		return 0, nil
 	}
 
-	return ws.AgentCoordinator.QueuedPrompts(sessionID), nil
+	return ws.Agent().QueuedPrompts(sessionID), nil
 }
 
 // ClearQueue clears the prompt queue for the session.
@@ -251,8 +251,8 @@ func (b *Backend) ClearQueue(workspaceID, sessionID string) error {
 		return err
 	}
 
-	if ws.AgentCoordinator != nil {
-		ws.AgentCoordinator.ClearQueue(sessionID)
+	if ws.Agent() != nil {
+		ws.Agent().ClearQueue(sessionID)
 	}
 	return nil
 }
@@ -265,11 +265,11 @@ func (b *Backend) QueuedPromptsList(workspaceID, sessionID string) ([]string, er
 		return nil, err
 	}
 
-	if ws.AgentCoordinator == nil {
+	if ws.Agent() == nil {
 		return nil, nil
 	}
 
-	return ws.AgentCoordinator.QueuedPromptsList(sessionID), nil
+	return ws.Agent().QueuedPromptsList(sessionID), nil
 }
 
 // GetDefaultSmallModel returns the default small model for a provider.

@@ -226,10 +226,10 @@ func sessionToProto(s session.Session) proto.Session {
 // unconditionally — the workspace lookup error is already surfaced by
 // the prior ListSessions/GetSession call when relevant.
 func isSessionBusy(ws *backend.Workspace, sessionID string) bool {
-	if ws == nil || ws.App == nil || ws.AgentCoordinator == nil {
+	if ws == nil || ws.App == nil || ws.Agent() == nil {
 		return false
 	}
-	return ws.AgentCoordinator.IsSessionBusy(sessionID)
+	return ws.Agent().IsSessionBusy(sessionID)
 }
 
 // attachedClients returns the number of clients currently viewing

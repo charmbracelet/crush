@@ -365,7 +365,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	}
 
 	// force update of agent models before running so mcp tools are loaded
-	app.AgentCoordinator.UpdateModels(ctx)
+	app.Agent().UpdateModels(ctx)
 
 	defer stopSpinner()
 
@@ -407,8 +407,9 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	}
 	done := make(chan response, 1)
 
+	coord := app.Agent()
 	go func(ctx context.Context, sessionID, prompt string) {
-		result, err := app.AgentCoordinator.Run(ctx, sess.ID, prompt)
+		result, err := coord.Run(ctx, sess.ID, prompt)
 		if err != nil {
 			done <- response{
 				err: fmt.Errorf("failed to start agent processing stream: %w", err),
@@ -488,10 +489,11 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 }
 
 func (app *App) UpdateAgentModel(ctx context.Context) error {
-	if app.AgentCoordinator == nil {
+	coord := app.Agent()
+	if coord == nil {
 		return fmt.Errorf("agent configuration is missing")
 	}
-	return app.AgentCoordinator.UpdateModels(ctx)
+	return coord.UpdateModels(ctx)
 }
 
 // restoreModelFromSession reads the last assistant message in the
@@ -533,7 +535,7 @@ func (app *App) restoreModelFromSession(ctx context.Context, sessionID string) e
 		smallModel := app.GetDefaultSmallModel(lastMsg.Provider)
 		app.config.OverridePreferredModel(config.SelectedModelTypeSmall, smallModel)
 	}
-	if err := app.AgentCoordinator.UpdateModels(ctx); err != nil {
+	if err := app.Agent().UpdateModels(ctx); err != nil {
 		return fmt.Errorf("failed to update agent models: %w", err)
 	}
 	slog.Info("Restored model from session",
@@ -591,7 +593,7 @@ func (app *App) overrideModelsForNonInteractive(ctx context.Context, largeModel,
 		app.config.OverridePreferredModel(config.SelectedModelTypeSmall, smallCfg)
 	}
 
-	return app.AgentCoordinator.UpdateModels(ctx)
+	return app.Agent().UpdateModels(ctx)
 }
 
 // overrideReasoningEffort validates the requested reasoning effort against
@@ -613,7 +615,7 @@ func (app *App) overrideReasoningEffort(ctx context.Context, reasoningEffort str
 		"model", selected.Model,
 		"reasoning_effort", reasoningEffort)
 	app.config.OverridePreferredModel(config.SelectedModelTypeLarge, selected)
-	return app.AgentCoordinator.UpdateModels(ctx)
+	return app.Agent().UpdateModels(ctx)
 }
 
 // GetDefaultSmallModel returns the default small model for the given
@@ -861,6 +863,12 @@ func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 			slog.Warn("Keeping headless coder agent: interactive init raced a running turn")
 			return nil
 		}
+		// Interactive upgrade: the headless coordinator is swapped out
+		// below. Cancel anything it still has in flight (the IsBusy
+		// check above covers the common case, but a channel push can
+		// start a run between the check and the swap, and nothing
+		// reaches the old coordinator afterwards).
+		app.AgentCoordinator.CancelAll()
 	}
 	coderAgentCfg := app.config.Config().Agents[config.AgentCoder]
 	if coderAgentCfg.ID == "" {
@@ -887,6 +895,19 @@ func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 	app.AgentCoordinator = coord
 	app.agentInteractive = interactive
 	return nil
+}
+
+// agentCoordinator returns the current coder coordinator under the init
+// lock. Every reader of the AgentCoordinator field goes through here,
+// so an interactive upgrade replacing a headless coordinator cannot
+// race a dispatch into calling methods on a half-replaced value. The
+// returned coordinator may be swapped for a newer one right after the
+// call; a superseded coordinator has been cancelled and is safe to
+// finish calls on.
+func (app *App) Agent() agent.Coordinator {
+	app.agentInitMu.Lock()
+	defer app.agentInitMu.Unlock()
+	return app.AgentCoordinator
 }
 
 // Subscribe sends events to the TUI as tea.Msgs.
@@ -929,8 +950,8 @@ func (app *App) Shutdown() {
 
 	// First, cancel all agents and wait for them to finish. This must complete
 	// before closing the DB so agents can finish writing their state.
-	if app.AgentCoordinator != nil {
-		app.AgentCoordinator.CancelAll()
+	if coord := app.Agent(); coord != nil {
+		coord.CancelAll()
 	}
 
 	// Shared shutdown context for all timeout-bounded cleanup.

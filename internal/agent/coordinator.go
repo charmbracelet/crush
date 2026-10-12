@@ -1010,14 +1010,16 @@ func (c *coordinator) compactionHooks(isSubAgent bool) func(string) CompactionHo
 // memory ledger. Sub-agents never do: they are the compaction's own machinery
 // and a memory of a memory is the erosion the ledger exists to prevent. The
 // ledger service being absent also disables it, so a build without one keeps
-// working unchanged.
+// working unchanged. Recording is on unless explicitly disabled: the ledger
+// only pays for itself if it has been accumulating since the turns a later
+// compaction will replace.
 
 func (c *coordinator) observesMemory(isSubAgent bool) bool {
 	if isSubAgent || c.ledger == nil {
 		return false
 	}
 	co := c.cfg.Config().Options.Compaction
-	return co != nil && co.ObserveMemory != nil && *co.ObserveMemory
+	return co == nil || co.ObserveMemory == nil || *co.ObserveMemory
 }
 
 func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Model, Model, error) {

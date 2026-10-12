@@ -830,11 +830,13 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 	var stepMessages []fantasy.Message
 	var shouldSummarize bool
+	// The fantasy agent invokes the tool callbacks below from multiple
+	// goroutines concurrently, so the maps they share must be guarded.
+	var toolCallStateMutex sync.Mutex
 	sanitizedToolCalls := make(map[string]bool)
-	// Full names of tool calls that completed without error this turn.
-	// Written only from the streaming callbacks (which run sequentially)
-	// and read after Stream returns, where sendChannelReply uses it to
-	// tell whether the model already replied on the originating channel.
+	// Written from the concurrent streaming callbacks and read after
+	// Stream returns, where sendChannelReply uses it to tell whether the
+	// model already replied on the originating channel.
 	completedToolCalls := make(map[string]struct{})
 	// Don't send MaxOutputTokens if 0 — some providers (e.g. LM Studio) reject it
 	var maxOutputTokens *int64
@@ -1004,7 +1006,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		OnToolCall: func(tc fantasy.ToolCallContent) error {
 			input, wasSanitized := sanitizeToolInput(tc.ToolName, tc.ToolCallID, tc.Input)
 			if wasSanitized {
+				toolCallStateMutex.Lock()
 				sanitizedToolCalls[tc.ToolCallID] = true
+				toolCallStateMutex.Unlock()
 			}
 			toolCall := message.ToolCall{
 				ID:               tc.ToolCallID,
@@ -1020,12 +1024,15 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		},
 		OnToolResult: func(result fantasy.ToolResultContent) error {
 			toolResult := a.convertToToolResult(result)
-			if sanitizedToolCalls[result.ToolCallID] {
+			toolCallStateMutex.Lock()
+			sanitized := sanitizedToolCalls[result.ToolCallID]
+			if !toolResult.IsError && !sanitized && toolResult.Name != "" {
+				completedToolCalls[toolResult.Name] = struct{}{}
+			}
+			toolCallStateMutex.Unlock()
+			if sanitized {
 				toolResult.Content = "Tool call failed: arguments were not valid JSON. Please check your tool call format and try again."
 				toolResult.IsError = true
-			}
-			if !toolResult.IsError && toolResult.Name != "" {
-				completedToolCalls[toolResult.Name] = struct{}{}
 			}
 			// Use parent ctx instead of genCtx to ensure the message is created
 			// even if the request is canceled mid-stream

@@ -252,6 +252,49 @@
       "additionalProperties": false,
       "type": "object"
     },
+    "CustomToolAction": {
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "What the action does"
+        },
+        "command": {
+          "type": "string",
+          "description": "Shell command for this action; defaults to the tool's command"
+        },
+        "params": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object",
+          "description": "String parameters of this action"
+        },
+        "required": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Parameters this action requires"
+        },
+        "skip_permission": {
+          "type": "boolean",
+          "description": "Run this action without a permission prompt"
+        },
+        "title": {
+          "type": "string",
+          "description": "Template for the name a call is shown with"
+        },
+        "summary": {
+          "type": "string",
+          "description": "Template for the one-line description a call is shown with"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "description"
+      ]
+    },
     "CustomToolConfig": {
       "properties": {
         "description": {
@@ -260,7 +303,7 @@
         },
         "command": {
           "type": "string",
-          "description": "Shell command run when the agent calls the tool; the call's JSON input arrives on stdin"
+          "description": "Shell command run when the agent calls the tool; declared parameters arrive as shell variables and the JSON input on stdin"
         },
         "schema": {
           "type": "object",
@@ -295,13 +338,31 @@
         "disabled": {
           "type": "boolean",
           "description": "Hide the tool from agents"
+        },
+        "skip_permission": {
+          "type": "boolean",
+          "description": "Run calls without a permission prompt"
+        },
+        "title": {
+          "type": "string",
+          "description": "Template for the name a call is shown with"
+        },
+        "summary": {
+          "type": "string",
+          "description": "Template for the one-line description a call is shown with"
+        },
+        "actions": {
+          "additionalProperties": {
+            "$ref": "#/$defs/CustomToolAction"
+          },
+          "type": "object",
+          "description": "Named operations of the tool"
         }
       },
       "additionalProperties": false,
       "type": "object",
       "required": [
-        "description",
-        "command"
+        "description"
       ]
     },
     "GatewaySpec": {

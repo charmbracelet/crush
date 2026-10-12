@@ -69,7 +69,7 @@ func TestToolAddRejectsBadFlags(t *testing.T) {
 	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "crushrc")
-	_, err := LoadShellConfig(t.Context(), path, []byte(`tool add x --descripton d`))
+	_, err := LoadShellConfig(t.Context(), path, []byte(`tool add x --bogus d`))
 	require.ErrorContains(t, err, "unknown flag")
 
 	_, err = LoadShellConfig(t.Context(), path, []byte(`tool add x --schema '[1]'`))

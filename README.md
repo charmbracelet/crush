@@ -879,6 +879,28 @@ provider add llamacpp \
   --base-url "http://localhost:2222"
 ```
 
+#### Rapid-MLX (Apple Silicon)
+
+On an Apple Silicon Mac, install Rapid-MLX and start a local OpenAI-compatible
+server in one terminal:
+
+```bash
+pip install rapid-mlx
+rapid-mlx serve qwen3-0.6b-4bit --port 8000
+```
+
+Add it to `~/.config/crush/crushrc`:
+
+```bash
+provider add rapid-mlx \
+  --name "Rapid-MLX" \
+  --type openai-compat \
+  --base-url "http://localhost:8000/v1"
+```
+
+Crush discovers the served model from the local endpoint. If you serve a
+different port, use that server's `/v1` URL.
+
 #### Manual Model Configuration
 
 You can still list models explicitly. User-defined models always take

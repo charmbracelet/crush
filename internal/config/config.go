@@ -336,8 +336,9 @@ type CompactionOptions struct {
 	// checkpoint verbatim, so decisions and constraints persist across
 	// compactions instead of being re-summarized generation after
 	// generation. It costs one cheap model call per turn with enough new
-	// material to be worth reading.
-	ObserveMemory *bool `json:"observe_memory,omitempty" jsonschema:"description=Record session memory at the end of each turn; memory is kept verbatim beside every checkpoint, so decisions survive compaction,default=false"`
+	// material to be worth reading, which is why it can be turned off; it
+	// is on unless explicitly disabled.
+	ObserveMemory *bool `json:"observe_memory,omitempty" jsonschema:"description=Record session memory at the end of each turn; memory is kept verbatim beside every checkpoint, so decisions survive compaction,default=true"`
 }
 
 type TUIOptions struct {

@@ -405,7 +405,7 @@ func writeOptions(b *strings.Builder, cfg *config.ConfigStore) {
 	// wrong for most models.
 	tail := "15% of the context window"
 	pruneToolResults := true
-	observeMemory := false
+	observeMemory := true
 	if co := c.Options.Compaction; co != nil {
 		if co.TailTokens > 0 {
 			tail = fmt.Sprintf("%d tokens", co.TailTokens)

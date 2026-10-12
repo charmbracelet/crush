@@ -15,6 +15,8 @@ There are two kinds of terminal, chosen by the wait parameter on start:
 - kill: terminate the session and get its final transcript (screen, scrollback, exit code). The terminal closes in the UI.
 </actions>
 
+Each write and paste asks the user for permission, since a shell or REPL runs whatever you type. You can only write to, paste into, or kill sessions you started; a terminal the user opened themselves is read-only to you.
+
 <keys>
 Send named keys instead of raw escape sequences; they are encoded for whatever mode the program enabled, which raw byte sequences cannot know:
 

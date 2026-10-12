@@ -68,6 +68,9 @@ type InteractiveSessionOptions struct {
 	Cols, Rows int
 	// ScrollbackSize overrides [DefaultInteractiveScrollback].
 	ScrollbackSize int
+	// Owner is the chat session that started the session through the
+	// agent. Empty means the user started it.
+	Owner string
 }
 
 // InteractiveSession runs a command attached to a real PTY while mirroring
@@ -85,6 +88,7 @@ type InteractiveSession struct {
 	pty     xpty.Pty
 	cmd     *exec.Cmd
 	command string
+	owner   string
 
 	// id is assigned by the manager; empty for sessions that never
 	// registered.
@@ -148,16 +152,18 @@ type InteractiveSession struct {
 // before an interactive session is spawned.
 var ErrCommandBlocked = fmt.Errorf("command blocked")
 
-// CheckBlocked parses command and applies blockFuncs to the literal argv of
-// every simple command it contains, recursing into the bodies of shell
-// interpreters ("sh -c ...", "bash -lc ...") and literal "eval" arguments:
-// without that, a denied command could simply be wrapped. It exists because
-// interactive sessions spawn a real shell, so the deny-list that normally
-// runs inside the mvdan exec middleware never sees these commands.
+// CheckBlocked parses command and applies blockFuncs to the argv of every
+// simple command it contains, recursing into the bodies of shell
+// interpreters ("sh -c ...", "bash -lc ...", "eval ...") and the commands
+// run by wrappers ("env curl", "nohup curl"): without that, a denied
+// command could simply be wrapped. It exists because interactive sessions
+// spawn a real shell, so the deny-list that normally runs inside the mvdan
+// exec middleware never sees these commands.
 //
-// Commands that cannot be parsed are passed through: the spawned shell
-// reports the syntax error itself, and an unparsable command cannot be
-// matched against the deny-list anyway.
+// The check fails closed: a command that cannot be parsed, a command name
+// that only resolves at runtime ("$x", "c$(echo)url"), and a shell reading
+// its script from a pipe or redirect are all blocked, since none of them
+// can be matched against the deny-list before they run.
 func CheckBlocked(command string, blockFuncs []BlockFunc) error {
 	if len(blockFuncs) == 0 {
 		return nil
@@ -166,111 +172,189 @@ func CheckBlocked(command string, blockFuncs []BlockFunc) error {
 }
 
 // checkBlockDepth bounds how deep the checker recurses into nested shell
-// bodies; a pathological "sh -c 'sh -c ...'" chain stops being checked
-// rather than hanging the spawn.
+// bodies and wrappers; anything nested deeper is blocked.
 const checkBlockDepth = 8
+
+// dynamicArg stands in for a word that only resolves at runtime. It cannot
+// appear in a parsed shell literal, so it never matches a deny-list entry.
+const dynamicArg = "\x00"
+
+// argWrappers run their arguments as a command, so every suffix of their
+// argv is checked as a command of its own.
+//
+// ponytail: fixed list; programs with their own exec flags (find -exec,
+// git -c) are not unwrapped.
+var argWrappers = map[string]bool{
+	"builtin": true, "caffeinate": true, "command": true, "doas": true,
+	"env": true, "exec": true, "nice": true, "nohup": true, "setsid": true,
+	"stdbuf": true, "sudo": true, "time": true, "timeout": true,
+	"watch": true, "xargs": true,
+}
+
+// shellNames are interpreters whose script can be passed with -c or read
+// from stdin.
+var shellNames = map[string]bool{
+	"sh": true, "bash": true, "dash": true, "zsh": true, "ksh": true,
+	"ash": true, "fish": true,
+}
+
+func blockedErr(reason string) error {
+	return fmt.Errorf("%w: %s", ErrCommandBlocked, reason)
+}
 
 // checkScript parses a script and walks its commands.
 func checkScript(command string, blockFuncs []BlockFunc, depth int) error {
 	if depth > checkBlockDepth {
-		return nil
+		return blockedErr("command is nested too deeply to check")
 	}
 
 	file, err := syntax.NewParser().Parse(strings.NewReader(command), "")
 	if err != nil {
-		return nil
+		return blockedErr(fmt.Sprintf("could not parse the command to check it (%v)", err))
 	}
 
-	var blocked string
+	var blockErr error
 	syntax.Walk(file, func(node syntax.Node) bool {
-		call, ok := node.(*syntax.CallExpr)
-		if !ok {
-			return true
+		// Returning false only skips this node's children, so keep the
+		// first error from being overwritten by a later sibling.
+		if blockErr != nil {
+			return false
 		}
-		args, ok := literalArgs(call)
-		if !ok {
-			return true
-		}
-		for _, block := range blockFuncs {
-			if block(args) {
-				blocked = args[0]
-				return false
+		switch n := node.(type) {
+		case *syntax.BinaryCmd:
+			if (n.Op == syntax.Pipe || n.Op == syntax.PipeAll) && readsScriptFromStdin(n.Y) {
+				blockErr = blockedErr("piping a script into a shell")
 			}
-		}
-
-		// A shell interpreter running a literal body executes that body as
-		// a script; check it the same way.
-		if body, ok := shellBody(args); ok {
-			if err := checkScript(body, blockFuncs, depth+1); err != nil {
-				blocked = args[0]
-				return false
+		case *syntax.Stmt:
+			if hasInputRedirect(n) && readsScriptFromStdin(n) {
+				blockErr = blockedErr("redirecting a script into a shell")
 			}
+		case *syntax.CallExpr:
+			blockErr = checkCall(n, blockFuncs, depth)
 		}
-		return true
+		return blockErr == nil
 	})
+	return blockErr
+}
 
-	if blocked != "" {
-		return fmt.Errorf("%w: %s", ErrCommandBlocked, blocked)
+// checkCall checks one simple command. Its name must be literal; other
+// words that expand at runtime become [dynamicArg].
+func checkCall(call *syntax.CallExpr, blockFuncs []BlockFunc, depth int) error {
+	if len(call.Args) == 0 {
+		return nil
+	}
+	args := make([]string, len(call.Args))
+	for i, word := range call.Args {
+		value, ok := wordValue(word)
+		if !ok {
+			value = dynamicArg
+		}
+		args[i] = value
+	}
+	return checkArgs(args, blockFuncs, depth)
+}
+
+// checkArgs applies the deny-list to an argv, then to whatever it runs: a
+// shell body or a wrapped command.
+func checkArgs(args []string, blockFuncs []BlockFunc, depth int) error {
+	if depth > checkBlockDepth {
+		return blockedErr("command is nested too deeply to check")
+	}
+	if args[0] == dynamicArg {
+		return blockedErr("the command name must be literal, not expanded at runtime")
+	}
+
+	base := filepath.Base(args[0])
+	named := append([]string{base}, args[1:]...)
+	for _, block := range blockFuncs {
+		if block(args) || block(named) {
+			return blockedErr(args[0])
+		}
+	}
+
+	if body, ok := shellBody(args); ok {
+		if strings.Contains(body, dynamicArg) {
+			return blockedErr(base + " runs a script that is expanded at runtime")
+		}
+		if err := checkScript(body, blockFuncs, depth+1); err != nil {
+			return err
+		}
+	}
+
+	if argWrappers[base] {
+		for i := 1; i < len(args); i++ {
+			if err := checkArgs(args[i:], blockFuncs, depth+1); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
 
-// shellBody extracts a literal script body from a shell interpreter or
-// eval invocation, so the deny-list can recurse into it.
+// shellBody extracts a script body from a shell interpreter or eval
+// invocation, so the deny-list can recurse into it.
 func shellBody(args []string) (string, bool) {
-	if len(args) == 0 {
+	base := filepath.Base(args[0])
+	if base == "eval" {
+		return strings.Join(args[1:], " "), len(args) > 1
+	}
+	if !shellNames[base] {
 		return "", false
 	}
 
-	base := filepath.Base(args[0])
-	switch base {
-	case "sh", "bash", "dash", "zsh", "ksh", "ash":
-		// The script is the argument right after a flag that asks the shell
-		// to read it from the command line: -c, and combined forms like -lc
-		// or -ec.
-		for i, arg := range args[1:] {
-			if len(arg) < 2 || arg[0] != '-' || strings.HasPrefix(arg, "--") {
-				continue
-			}
-			if !strings.Contains(arg[1:], "c") {
-				continue
-			}
-			if i+2 < len(args) {
-				return args[i+2], true
-			}
-			return "", false
+	// The script is the argument right after a flag that asks the shell to
+	// read it from the command line: -c, and combined forms like -lc or
+	// -ec. A "--" between the flag and the script is skipped.
+	for i := 1; i < len(args); i++ {
+		arg := args[i]
+		if len(arg) < 2 || arg[0] != '-' || strings.HasPrefix(arg, "--") {
+			continue
 		}
-		return "", false
-	case "eval":
-		// eval joins its arguments with spaces; a single literal argument is
-		// safe to parse.
-		if len(args) == 2 {
-			return args[1], true
+		if !strings.Contains(arg[1:], "c") {
+			continue
 		}
-		return "", false
-	default:
+		next := i + 1
+		if next < len(args) && args[next] == "--" {
+			next++
+		}
+		if next < len(args) {
+			return args[next], true
+		}
 		return "", false
 	}
+	return "", false
 }
 
-// literalArgs returns the literal argv of a call expression. It reports
-// false when any word requires expansion (a variable, glob, or command
-// substitution), since those cannot be resolved before execution. Quoted
-// words resolve when their content is fixed: single quotes never expand,
-// and double quotes resolve when they contain only literals.
-func literalArgs(call *syntax.CallExpr) ([]string, bool) {
-	if len(call.Args) == 0 {
-		return nil, false
+// readsScriptFromStdin reports whether stmt runs a shell that takes its
+// script from stdin: no -c body and no script file argument.
+func readsScriptFromStdin(stmt *syntax.Stmt) bool {
+	call, ok := stmt.Cmd.(*syntax.CallExpr)
+	if !ok || len(call.Args) == 0 {
+		return false
 	}
-	args := make([]string, 0, len(call.Args))
-	for _, word := range call.Args {
-		lit, ok := wordValue(word)
-		if !ok {
-			return nil, false
+	name, ok := wordValue(call.Args[0])
+	if !ok || !shellNames[filepath.Base(name)] {
+		return false
+	}
+	for _, word := range call.Args[1:] {
+		arg, ok := wordValue(word)
+		if !ok || !strings.HasPrefix(arg, "-") || strings.Contains(strings.TrimPrefix(arg, "-"), "c") {
+			return false
 		}
-		args = append(args, lit)
 	}
-	return args, true
+	return true
+}
+
+// hasInputRedirect reports whether stmt feeds its stdin from a file or a
+// here-document.
+func hasInputRedirect(stmt *syntax.Stmt) bool {
+	for _, redir := range stmt.Redirs {
+		switch redir.Op {
+		case syntax.RdrIn, syntax.Hdoc, syntax.DashHdoc, syntax.WordHdoc:
+			return true
+		}
+	}
+	return false
 }
 
 // wordValue resolves a word to its literal value, or reports false when it
@@ -338,6 +422,7 @@ func NewInteractiveSession(opts InteractiveSessionOptions) (*InteractiveSession,
 		pty:          pty,
 		input:        input,
 		command:      opts.Command,
+		owner:        opts.Owner,
 		dirty:        make(chan struct{}, 1),
 		done:         make(chan struct{}),
 		readDone:     make(chan struct{}),
@@ -418,6 +503,12 @@ func (s *InteractiveSession) inputLoop() {
 // enqueue schedules an input operation. It fails instead of blocking when
 // the child stopped consuming input and the queue is full.
 func (s *InteractiveSession) enqueue(fn func()) error {
+	return s.submit(fn, inputWriteTimeout)
+}
+
+// submit queues fn, waiting up to wait for room in the queue. A zero wait
+// never blocks, which keeps the order of calls made from one goroutine.
+func (s *InteractiveSession) submit(fn func(), wait time.Duration) error {
 	s.mu.Lock()
 	closed := s.closed
 	s.mu.Unlock()
@@ -428,10 +519,20 @@ func (s *InteractiveSession) enqueue(fn func()) error {
 	select {
 	case s.inputCh <- fn:
 		return nil
-	case <-time.After(inputWriteTimeout):
-		return fmt.Errorf("interactive session: the child is not reading input")
+	default:
+	}
+	if wait <= 0 {
+		return errInputQueueFull
+	}
+	select {
+	case s.inputCh <- fn:
+		return nil
+	case <-time.After(wait):
+		return errInputQueueFull
 	}
 }
+
+var errInputQueueFull = errors.New("interactive session: the child is not reading input")
 
 // tryEnqueue schedules a best-effort input operation, dropping it when the
 // queue is full. Used for replies the child asked for, where silence is
@@ -494,6 +595,10 @@ func (s *InteractiveSession) waitLoop() {
 
 	close(s.done)
 	s.signalDirty()
+
+	// Nothing can be sent to an exited child: release the PTY and the
+	// input goroutines. The emulator stays readable for the transcript.
+	_ = s.Close()
 }
 
 // signalDirty wakes the UI without blocking the PTY reader: renderable
@@ -628,6 +733,23 @@ func (s *InteractiveSession) Paste(text string) error {
 	return s.enqueue(func() {
 		s.emu.Paste(text)
 	})
+}
+
+// TrySendKey is [InteractiveSession.SendKey] without blocking: it fails at
+// once when the input queue is full. Calls from one goroutine (the UI
+// loop) reach the child in order.
+func (s *InteractiveSession) TrySendKey(key uv.KeyPressEvent) error {
+	return s.submit(func() { s.emu.SendKey(key) }, 0)
+}
+
+// TrySendMouse is [InteractiveSession.SendMouse] without blocking.
+func (s *InteractiveSession) TrySendMouse(event uv.MouseEvent) error {
+	return s.submit(func() { s.emu.SendMouse(event) }, 0)
+}
+
+// TryPaste is [InteractiveSession.Paste] without blocking.
+func (s *InteractiveSession) TryPaste(text string) error {
+	return s.submit(func() { s.emu.Paste(text) }, 0)
 }
 
 // Focus tells the child it gained focus, if it asked for focus events.
@@ -869,6 +991,10 @@ func (s *InteractiveSession) ID() string { return s.id }
 // Command returns the command the session is running. An empty string
 // means the session is a bare interactive shell.
 func (s *InteractiveSession) Command() string { return s.command }
+
+// Owner returns the chat session that started this session through the
+// agent, or the empty string for sessions the user started.
+func (s *InteractiveSession) Owner() string { return s.owner }
 
 // completedAgeMinutes is how many minutes have passed since the process
 // exited; 0 while it is still running.

@@ -98,20 +98,6 @@ func (m *InteractiveSessionManager) Get(id string) (*InteractiveSession, bool) {
 	return m.sessions.Get(id)
 }
 
-// MostRecent returns the most recently registered session, running or not.
-func (m *InteractiveSessionManager) MostRecent() (*InteractiveSession, bool) {
-	var newest *InteractiveSession
-	for session := range m.sessions.Seq() {
-		if newest == nil || session.ID() > newest.ID() {
-			newest = session
-		}
-	}
-	if newest == nil {
-		return nil, false
-	}
-	return newest, true
-}
-
 // Active returns the session that is still running, if any.
 func (m *InteractiveSessionManager) Active() (*InteractiveSession, bool) {
 	m.mu.Lock()

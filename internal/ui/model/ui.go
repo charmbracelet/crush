@@ -1199,7 +1199,14 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		cmds = append(cmds, m.handleDialogMsg(msg))
 	case dialog.TerminalExitMsg:
-		cmds = append(cmds, m.handleDialogMsg(msg))
+		// Deliver straight to the terminal dialog: another dialog (a
+		// permission prompt, the command palette) may be in front of it,
+		// and the exit must still close the panel.
+		if t, ok := m.dialog.Dialog(dialog.TerminalID).(*dialog.TerminalDialog); ok {
+			if done, ok := t.HandleMsg(msg).(dialog.ActionTerminalComplete); ok {
+				cmds = append(cmds, m.closeTerminalDialog(done.Result))
+			}
+		}
 	case cancelTimerExpiredMsg:
 		m.isCanceling = false
 	case tea.TerminalVersionMsg:
@@ -2209,14 +2216,10 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 
 	// Terminal dialog actions.
 	case dialog.ActionTerminalInput:
-		// Run the input application off the update loop: a wedged child
-		// process must never block rendering.
+		// Apply on the update loop so keystrokes keep their order; the
+		// session queues them without blocking.
 		if m.activeTerminal != nil && msg.Apply != nil {
-			apply := msg.Apply
-			cmds = append(cmds, func() tea.Msg {
-				apply()
-				return nil
-			})
+			msg.Apply()
 		}
 	case dialog.ActionTerminalKill:
 		if m.activeTerminal != nil {

@@ -104,9 +104,9 @@ func NewTerminalTool(permissions permission.Service, terminals terminal.Service,
 			case terminalActionRead:
 				return terminalRead(ctx, params, spillDir)
 			case terminalActionWrite:
-				return terminalWrite(ctx, params)
+				return terminalWrite(ctx, permissions, params, call)
 			case terminalActionPaste:
-				return terminalPaste(ctx, params)
+				return terminalPaste(ctx, permissions, params, call)
 			case terminalActionKill:
 				return terminalKill(ctx, params, spillDir)
 			default:
@@ -189,11 +189,12 @@ func terminalStart(
 		WorkingDir: execWorkingDir,
 		Cols:       shell.DefaultInteractiveCols,
 		Rows:       shell.DefaultInteractiveRows,
+		Owner:      sessionID,
 	})
 	if err != nil {
 		if errors.Is(err, shell.ErrInteractiveActive) {
 			return fantasy.NewTextErrorResponse(fmt.Sprintf(
-				"%v. Drive the running session with action read/write, or end it with action kill first",
+				"%v. If you started it, drive it with action read/write or end it with action kill first; otherwise wait for it to finish (read with wait_seconds)",
 				err,
 			)), nil
 		}
@@ -305,7 +306,7 @@ func terminalWaitForUser(
 // terminalRead returns the session's current screen, optionally waiting for
 // it to exit.
 func terminalRead(ctx context.Context, params TerminalParams, spillDir string) (fantasy.ToolResponse, error) {
-	session, err := resolveInteractiveSession(params.SessionID)
+	session, err := resolveInteractiveSession(ctx, params.SessionID, false)
 	if err != nil {
 		return fantasy.NewTextErrorResponse(err.Error()), nil
 	}
@@ -391,8 +392,8 @@ const defaultTerminalWriteSettle = 250 * time.Millisecond
 
 // terminalWrite sends text and keystrokes to the session and, after letting
 // it redraw, returns the updated screen.
-func terminalWrite(ctx context.Context, params TerminalParams) (fantasy.ToolResponse, error) {
-	session, err := resolveInteractiveSession(params.SessionID)
+func terminalWrite(ctx context.Context, permissions permission.Service, params TerminalParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+	session, err := resolveInteractiveSession(ctx, params.SessionID, true)
 	if err != nil {
 		return fantasy.NewTextErrorResponse(err.Error()), nil
 	}
@@ -405,6 +406,17 @@ func terminalWrite(ctx context.Context, params TerminalParams) (fantasy.ToolResp
 
 	if params.Text == "" && len(params.Keys) == 0 && params.Mouse == nil {
 		return fantasy.NewTextErrorResponse("nothing to send: provide text, keys, or mouse"), nil
+	}
+
+	input := params.Text
+	if len(params.Keys) > 0 {
+		input += fmt.Sprintf(" [keys: %s]", strings.Join(params.Keys, ", "))
+	}
+	if params.Mouse != nil {
+		input += fmt.Sprintf(" [mouse %s %s at %d,%d]", params.Mouse.Action, params.Mouse.Button, params.Mouse.X, params.Mouse.Y)
+	}
+	if resp, ok, err := requestTerminalInput(ctx, permissions, session, call, "Type into", input); !ok {
+		return resp, err
 	}
 
 	if params.Text != "" {
@@ -440,8 +452,8 @@ func terminalWrite(ctx context.Context, params TerminalParams) (fantasy.ToolResp
 // paste mode the text is wrapped in paste markers, so multi-line pastes
 // are inserted into an editor or command line instead of executed line by
 // line.
-func terminalPaste(ctx context.Context, params TerminalParams) (fantasy.ToolResponse, error) {
-	session, err := resolveInteractiveSession(params.SessionID)
+func terminalPaste(ctx context.Context, permissions permission.Service, params TerminalParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+	session, err := resolveInteractiveSession(ctx, params.SessionID, true)
 	if err != nil {
 		return fantasy.NewTextErrorResponse(err.Error()), nil
 	}
@@ -453,6 +465,9 @@ func terminalPaste(ctx context.Context, params TerminalParams) (fantasy.ToolResp
 	}
 	if params.Text == "" {
 		return fantasy.NewTextErrorResponse("nothing to paste: provide text"), nil
+	}
+	if resp, ok, err := requestTerminalInput(ctx, permissions, session, call, "Paste into", params.Text); !ok {
+		return resp, err
 	}
 
 	if err := session.Paste(params.Text); err != nil {
@@ -506,7 +521,7 @@ func terminalWriteResult(ctx context.Context, session *shell.InteractiveSession,
 
 // terminalKill ends the session and returns its final transcript.
 func terminalKill(ctx context.Context, params TerminalParams, spillDir string) (fantasy.ToolResponse, error) {
-	session, err := resolveInteractiveSession(params.SessionID)
+	session, err := resolveInteractiveSession(ctx, params.SessionID, true)
 	if err != nil {
 		return fantasy.NewTextErrorResponse(err.Error()), nil
 	}
@@ -552,25 +567,79 @@ func terminalKill(ctx context.Context, params TerminalParams, spillDir string) (
 	return fantasy.WithResponseMetadata(fantasy.NewTextResponse(result), metadata), nil
 }
 
-// resolveInteractiveSession finds the session named by id, or the running
-// session (or most recent) when id is empty.
-func resolveInteractiveSession(id string) (*shell.InteractiveSession, error) {
-	manager := shell.GetInteractiveSessionManager()
+// requestTerminalInput asks the user before the agent types into a running
+// session: whatever runs there (a shell, a REPL) executes the input with no
+// further checks. It reports false with the response to return when the
+// input must not be sent.
+func requestTerminalInput(
+	ctx context.Context,
+	permissions permission.Service,
+	session *shell.InteractiveSession,
+	call fantasy.ToolCall,
+	verb, input string,
+) (fantasy.ToolResponse, bool, error) {
+	granted, err := permissions.Request(ctx, permission.CreatePermissionRequest{
+		SessionID:   GetSessionFromContext(ctx),
+		Path:        session.WorkingDir(),
+		ToolCallID:  call.ID,
+		ToolName:    TerminalToolName,
+		Action:      terminalActionWrite,
+		Description: fmt.Sprintf("%s the interactive terminal running %q: %q", verb, session.Command(), input),
+		Params: TerminalPermissionsParams{
+			Description: verb + " the running terminal",
+			Command:     input,
+			WorkingDir:  session.WorkingDir(),
+		},
+	})
+	if err != nil {
+		return fantasy.ToolResponse{}, false, err
+	}
+	if !granted {
+		return NewPermissionDeniedResponse(), false, nil
+	}
+	return fantasy.ToolResponse{}, true, nil
+}
 
-	if id == "" {
-		if session, ok := manager.Active(); ok {
-			return session, nil
-		}
-		session, ok := manager.MostRecent()
-		if !ok {
-			return nil, fmt.Errorf("no terminal session is running")
-		}
-		return session, nil
+// resolveInteractiveSession finds the session named by id, or the running
+// session (or most recent) when id is empty. Sessions another chat started
+// are invisible; sessions the user started are readable but, with
+// mustOwn, refused: the agent only drives terminals it started itself.
+func resolveInteractiveSession(ctx context.Context, id string, mustOwn bool) (*shell.InteractiveSession, error) {
+	manager := shell.GetInteractiveSessionManager()
+	chat := GetSessionFromContext(ctx)
+	visible := func(s *shell.InteractiveSession) bool {
+		return s.Owner() == "" || s.Owner() == chat
 	}
 
-	session, ok := manager.Get(id)
-	if !ok {
-		return nil, fmt.Errorf("terminal session not found: %s (known sessions: %s)", id, strings.Join(manager.List(), ", "))
+	var session *shell.InteractiveSession
+	if id == "" {
+		for _, sid := range manager.List() {
+			s, ok := manager.Get(sid)
+			if !ok || !visible(s) {
+				continue
+			}
+			// Prefer a running session, then the newest one.
+			if session == nil || (!s.Exited() && session.Exited()) ||
+				(s.Exited() == session.Exited() && s.ID() > session.ID()) {
+				session = s
+			}
+		}
+		if session == nil {
+			return nil, fmt.Errorf("no terminal session is running")
+		}
+	} else {
+		s, ok := manager.Get(id)
+		if !ok || !visible(s) {
+			return nil, fmt.Errorf("terminal session not found: %s", id)
+		}
+		session = s
+	}
+
+	if mustOwn && session.Owner() != chat {
+		return nil, fmt.Errorf(
+			"terminal session %s belongs to the user; you can read it but not type into or kill it. Start your own session instead",
+			session.ID(),
+		)
 	}
 	return session, nil
 }

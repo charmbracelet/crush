@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/csync"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/stretchr/testify/require"
 )
 
@@ -181,14 +182,48 @@ func TestCheckBlocked(t *testing.T) {
 		require.NoError(t, CheckBlocked("echo sudo", blockFuncs))
 	})
 
-	t.Run("ignores dynamic words", func(t *testing.T) {
+	t.Run("blocks dynamic command names", func(t *testing.T) {
 		t.Parallel()
-		require.NoError(t, CheckBlocked("$EDITOR file.txt", blockFuncs))
+		for _, cmd := range []string{
+			"$EDITOR file.txt",
+			"c$(echo)url x",
+			`"$(printf curl)" x`,
+			"x=curl; $x evil",
+			`sh -c "$CMD"`,
+		} {
+			require.ErrorIs(t, CheckBlocked(cmd, blockFuncs), ErrCommandBlocked, cmd)
+		}
 	})
 
-	t.Run("ignores unparsable commands", func(t *testing.T) {
+	t.Run("blocks wrapped and indirect commands", func(t *testing.T) {
 		t.Parallel()
-		require.NoError(t, CheckBlocked("if", blockFuncs))
+		for _, cmd := range []string{
+			"env FOO=1 curl x",
+			"command curl x",
+			"nohup curl x",
+			"timeout 5 curl x",
+			"xargs curl <<< x",
+			"/usr/bin/curl x",
+			"bash -c -- 'curl x'",
+			"eval curl x",
+			"echo 'curl x' | sh",
+			"bash -s < script.sh",
+			"echo ok; true && env bash -c 'sudo reboot'",
+		} {
+			require.ErrorIs(t, CheckBlocked(cmd, blockFuncs), ErrCommandBlocked, cmd)
+		}
+	})
+
+	t.Run("allows dynamic arguments", func(t *testing.T) {
+		t.Parallel()
+		require.NoError(t, CheckBlocked(`vim "$HOME/notes.txt"`, blockFuncs))
+		require.NoError(t, CheckBlocked("bash", blockFuncs))
+		require.NoError(t, CheckBlocked("bash script.sh < input.txt", blockFuncs))
+	})
+
+	t.Run("blocks unparsable commands", func(t *testing.T) {
+		t.Parallel()
+		require.ErrorIs(t, CheckBlocked("if", blockFuncs), ErrCommandBlocked)
 	})
 
 	t.Run("no block funcs", func(t *testing.T) {
@@ -223,4 +258,32 @@ func needsPOSIXShell(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("needs a POSIX shell; cmd.exe has no sh, stty, dd or od")
 	}
+}
+
+func TestInteractiveSessionClosesOnExit(t *testing.T) {
+	t.Parallel()
+
+	needsPOSIXShell(t)
+
+	session := newTestSession(t, "true")
+	waitForExit(t, session)
+
+	// The PTY is released once the child exits; the transcript stays.
+	require.ErrorContains(t, session.Write([]byte("x")), "closed")
+	require.NotPanics(t, func() { _ = session.CaptureText() })
+}
+
+func TestInteractiveSessionTrySendKeyKeepsOrder(t *testing.T) {
+	t.Parallel()
+
+	needsPOSIXShell(t)
+
+	session := newTestSession(t, `stty -echo; read line; echo "got:$line"`)
+	for r := 'a'; r <= 'z'; r++ {
+		require.NoError(t, session.TrySendKey(uv.KeyPressEvent{Code: r, Text: string(r)}))
+	}
+	require.NoError(t, session.TrySendKey(uv.KeyPressEvent{Code: uv.KeyEnter}))
+
+	waitForExit(t, session)
+	require.Contains(t, session.CaptureText(), "got:abcdefghijklmnopqrstuvwxyz")
 }

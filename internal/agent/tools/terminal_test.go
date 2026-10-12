@@ -692,3 +692,79 @@ func needsPOSIXShell(t *testing.T) {
 		t.Skip("needs a POSIX shell; cmd.exe has no sh, stty, dd or od")
 	}
 }
+
+// denyingPermissionService records requests and denies them.
+type denyingPermissionService struct {
+	mockBashPermissionService
+	requests []permission.CreatePermissionRequest
+}
+
+func (d *denyingPermissionService) Request(_ context.Context, req permission.CreatePermissionRequest) (bool, error) {
+	d.requests = append(d.requests, req)
+	return false, nil
+}
+
+func TestTerminalWriteAsksPermission(t *testing.T) {
+	needsPOSIXShell(t)
+
+	resetTerminalManager(t)
+	workingDir := t.TempDir()
+
+	session, err := shell.GetInteractiveSessionManager().Start(shell.InteractiveSessionOptions{
+		Command:    "cat",
+		WorkingDir: workingDir,
+		Owner:      "test-session",
+	})
+	require.NoError(t, err)
+
+	permissions := &denyingPermissionService{}
+	tool := NewTerminalTool(permissions, newFakeTerminalService(), workingDir, workingDir)
+
+	for _, action := range []string{"write", "paste"} {
+		resp := runTerminalTool(t, tool, TerminalParams{Action: action, SessionID: session.ID(), Text: "rm -rf ~\r"})
+		require.True(t, resp.IsError, action)
+	}
+	require.Len(t, permissions.requests, 2)
+	require.Equal(t, "write", permissions.requests[0].Action)
+	require.Contains(t, permissions.requests[0].Description, "rm -rf ~")
+}
+
+func TestTerminalRefusesSessionsItDoesNotOwn(t *testing.T) {
+	needsPOSIXShell(t)
+
+	resetTerminalManager(t)
+	tool, _ := newTerminalToolForTest(t)
+	manager := shell.GetInteractiveSessionManager()
+
+	// A shell the user opened: readable, but not writable or killable.
+	user, err := shell.NewInteractiveSession(shell.InteractiveSessionOptions{Command: "cat", WorkingDir: t.TempDir()})
+	require.NoError(t, err)
+	require.NoError(t, manager.Register(user))
+
+	read := runTerminalTool(t, tool, TerminalParams{Action: "read", SessionID: user.ID()})
+	require.False(t, read.IsError)
+	for _, action := range []string{"write", "paste", "kill"} {
+		resp := runTerminalTool(t, tool, TerminalParams{Action: action, SessionID: user.ID(), Text: "x"})
+		require.True(t, resp.IsError, action)
+		require.Contains(t, resp.Content, "belongs to the user", action)
+	}
+	require.False(t, user.Exited())
+	require.NoError(t, user.Kill())
+	select {
+	case <-user.Done():
+	case <-time.After(5 * time.Second):
+	}
+
+	// A session another chat started is invisible.
+	other, err := manager.Start(shell.InteractiveSessionOptions{Command: "cat", WorkingDir: t.TempDir(), Owner: "other-chat"})
+	require.NoError(t, err)
+	for _, action := range []string{"read", "write", "kill"} {
+		resp := runTerminalTool(t, tool, TerminalParams{Action: action, SessionID: other.ID(), Text: "x"})
+		require.True(t, resp.IsError, action)
+		require.Contains(t, resp.Content, "not found", action)
+	}
+	manager.Remove(user.ID())
+	resp := runTerminalTool(t, tool, TerminalParams{Action: "read"})
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "no terminal session is running")
+}

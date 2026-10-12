@@ -633,3 +633,29 @@ func needsPOSIXShell(t *testing.T) {
 		t.Skip("needs a POSIX shell; cmd.exe has no sh, stty, dd or od")
 	}
 }
+
+// TestTerminalExitClosesPanelBehindAnotherDialog checks that the exit still
+// closes the terminal when another dialog (a permission prompt, the command
+// palette) is in front of it; otherwise the panel would stay open forever
+// and block every later terminal.
+func TestTerminalExitClosesPanelBehindAnotherDialog(t *testing.T) {
+	needsPOSIXShell(t)
+
+	u, _ := newTerminalTestUI(t)
+	session := newAgentSession(t, "true")
+	_, _ = u.Update(pubsubEventTerminalRequest(terminal.Request{Command: "true", Session: session, AgentDriven: true}))
+	require.NotNil(t, u.activeTerminal)
+
+	u.dialog.OpenDialog(dialog.NewQuit(u.com))
+
+	select {
+	case <-session.Done():
+	case <-time.After(15 * time.Second):
+		t.Fatal("session did not exit")
+	}
+	_, _ = u.Update(dialog.TerminalExitMsg{})
+
+	require.Nil(t, u.activeTerminal)
+	require.False(t, u.dialog.ContainsDialog(dialog.TerminalID))
+	require.True(t, u.dialog.ContainsDialog(dialog.QuitID), "the dialog in front stays open")
+}

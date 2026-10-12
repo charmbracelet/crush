@@ -136,9 +136,9 @@ func (t *TerminalDialog) HandleMsg(msg tea.Msg) Action {
 			return nil
 		}
 		return ActionTerminalInput{Apply: func() {
-			// Routed through the session's input queue, so a wedged child
-			// fails the write instead of hanging the UI goroutine.
-			_ = t.session.SendKey(uv.KeyPressEvent(uv.Key(msg)))
+			// Queued without blocking, so a wedged child drops the key
+			// instead of hanging the UI goroutine.
+			_ = t.session.TrySendKey(uv.KeyPressEvent(uv.Key(msg)))
 		}}
 
 	case tea.PasteMsg:
@@ -149,7 +149,7 @@ func (t *TerminalDialog) HandleMsg(msg tea.Msg) Action {
 		return ActionTerminalInput{Apply: func() {
 			// Paste is mode-aware: bracketed paste markers are added when
 			// the child enabled them.
-			_ = t.session.Paste(content)
+			_ = t.session.TryPaste(content)
 		}}
 
 	case tea.MouseClickMsg:
@@ -161,7 +161,7 @@ func (t *TerminalDialog) HandleMsg(msg tea.Msg) Action {
 			return nil
 		}
 		return ActionTerminalInput{Apply: func() {
-			_ = t.session.SendMouse(uv.MouseClickEvent(m))
+			_ = t.session.TrySendMouse(uv.MouseClickEvent(m))
 		}}
 
 	case tea.MouseReleaseMsg:
@@ -173,7 +173,7 @@ func (t *TerminalDialog) HandleMsg(msg tea.Msg) Action {
 			return nil
 		}
 		return ActionTerminalInput{Apply: func() {
-			_ = t.session.SendMouse(uv.MouseReleaseEvent(m))
+			_ = t.session.TrySendMouse(uv.MouseReleaseEvent(m))
 		}}
 
 	case tea.MouseWheelMsg:
@@ -185,7 +185,7 @@ func (t *TerminalDialog) HandleMsg(msg tea.Msg) Action {
 			return nil
 		}
 		return ActionTerminalInput{Apply: func() {
-			_ = t.session.SendMouse(uv.MouseWheelEvent(m))
+			_ = t.session.TrySendMouse(uv.MouseWheelEvent(m))
 		}}
 
 	case tea.MouseMotionMsg:
@@ -197,7 +197,7 @@ func (t *TerminalDialog) HandleMsg(msg tea.Msg) Action {
 			return nil
 		}
 		return ActionTerminalInput{Apply: func() {
-			_ = t.session.SendMouse(uv.MouseMotionEvent(m))
+			_ = t.session.TrySendMouse(uv.MouseMotionEvent(m))
 		}}
 
 	case TerminalOutputMsg:

@@ -135,9 +135,8 @@ type (
 	ActionDisableDockerMCP struct{}
 
 	// ActionTerminalInput carries interactive terminal input. The apply
-	// function feeds the embedded emulator; the model runs it off the
-	// update loop because a wedged child process could otherwise block
-	// rendering.
+	// function queues it for the child without blocking; the model runs it
+	// on the update loop so keystrokes reach the child in order.
 	ActionTerminalInput struct {
 		Apply func()
 	}

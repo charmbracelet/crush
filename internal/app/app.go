@@ -155,7 +155,12 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 			}
 		}
 	}
-	go mcp.Initialize(ctx, app.Permissions, store, forceStart...)
+	// Servers disabled for this repository via Toggle MCPs are not started.
+	localDisabled, err := app.Sessions.MCPDisabledServers(ctx)
+	if err != nil {
+		slog.Warn("Failed to list disabled MCP overrides; starting them anyway", "error", err)
+	}
+	go mcp.Initialize(ctx, app.Permissions, store, forceStart, localDisabled)
 
 	// Start herdr integration when running inside a herdr pane.
 	app.herdrClient = herdr.Init()
@@ -455,7 +460,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 
 				part := content[readBytes:]
 				// Trim leading whitespace. Sometimes the LLM includes leading
-				// formatting and intentation, which we don't want here.
+				// formatting and indentation, which we don't want here.
 				if readBytes == 0 {
 					part = strings.TrimLeft(part, " \t")
 				}

@@ -126,14 +126,17 @@ func (b *Backend) MCPServersEnabled(ctx context.Context, workspaceID string) ([]
 }
 
 // SetMCPServerDisabled toggles a repository-scoped MCP override for the
-// given workspace.
+// given workspace and applies it to the running client.
 func (b *Backend) SetMCPServerDisabled(ctx context.Context, workspaceID, name string, disabled bool) error {
 	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {
 		return err
 	}
 
-	return ws.Sessions.SetMCPServerDisabled(ctx, name, disabled)
+	if err := ws.Sessions.SetMCPServerDisabled(ctx, name, disabled); err != nil {
+		return err
+	}
+	return mcptools.SetLocalDisabled(ctx, ws.Cfg, name, disabled)
 }
 
 // SetMCPServerConfigDisabled toggles an MCP server's disabled flag in the
@@ -144,7 +147,11 @@ func (b *Backend) SetMCPServerConfigDisabled(ctx context.Context, workspaceID, n
 		return err
 	}
 
-	return mcptools.SetConfigDisabled(ctx, ws.Cfg, config.ScopeGlobal, name, disabled)
+	override, err := session.HasMCPOverride(ctx, ws.Sessions, name)
+	if err != nil {
+		return err
+	}
+	return mcptools.SetConfigDisabled(ctx, ws.Cfg, config.ScopeGlobal, name, disabled, override)
 }
 
 // StartMCPServer starts the named MCP server for the given workspace even

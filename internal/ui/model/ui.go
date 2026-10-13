@@ -916,7 +916,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.busyGen != m.busyFetchGen {
 			cmds = append(cmds, m.dispatchCompletionCheck(msg.notification))
 		} else if activity.pending == 0 {
-			if !msg.busy {
+			if msg.err == nil && !msg.busy {
 				cmds = append(cmds, m.sendNotification(notification.Notification{
 					Title:   "Crush is waiting...",
 					Message: fmt.Sprintf("Agent's turn completed in \"%s\"", msg.notification.SessionTitle),

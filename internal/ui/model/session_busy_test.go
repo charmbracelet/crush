@@ -2,6 +2,9 @@ package model
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
@@ -12,10 +15,12 @@ import (
 
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
+	"github.com/charmbracelet/crush/internal/client"
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/attachments"
@@ -62,8 +67,7 @@ type countingWorkspace struct {
 func (w *countingWorkspace) AgentIsReady() bool { w.readyCalls++; return w.ready }
 func (w *countingWorkspace) AgentIsBusy() bool  { w.agentBusyCalls++; return w.agentBusy }
 
-// AgentIsSessionBusy answers for the single session these tests use.
-func (w *countingWorkspace) AgentIsSessionBusy(string) bool { return w.agentBusy }
+func (w *countingWorkspace) AgentIsSessionBusy(string) (bool, error) { return w.agentBusy, nil }
 
 func (w *countingWorkspace) AgentSummarize(context.Context, string) error {
 	return w.summarizeErr
@@ -1206,4 +1210,53 @@ func TestRemoteYoloToggleUpdatesEditorPrompt(t *testing.T) {
 	require.False(t, m.yoloModeCached())
 	require.Equal(t, normalPrompt, ansi.Strip(m.textarea.View()),
 		"toggling yolo off must restore the normal editor prompt")
+}
+
+// TestCompletionProbeHTTP requires positive idle evidence, not a failed probe.
+func TestCompletionProbeHTTP(t *testing.T) {
+	pinTTLs(t)
+	for _, tc := range []struct {
+		name, body       string
+		status           int
+		closed, wantDone bool
+	}{
+		{name: "idle", body: `{"is_busy":false}`, status: http.StatusOK, wantDone: true},
+		{name: "busy", body: `{"is_busy":true}`, status: http.StatusOK},
+		{name: "non-200", status: http.StatusServiceUnavailable},
+		{name: "transport failure", closed: true},
+		{name: "malformed response", body: `{`, status: http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				require.Equal(t, "/v1/workspaces/ws-1/agent/sessions/s1", r.URL.Path)
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+			u, err := url.Parse(srv.URL)
+			require.NoError(t, err)
+			c, err := client.NewClient(t.TempDir(), "tcp", u.Host)
+			require.NoError(t, err)
+			if tc.closed {
+				srv.Close()
+			}
+			m := newBusyUI(&countingWorkspace{ready: true})
+			warmCaches(m, false)
+			backend := &recordingNotificationBackend{}
+			m.notifyBackend = backend
+			m.caps.ReportFocusEvents = true
+			n := &notify.Notification{Type: notify.TypeAgentFinished, FinishState: notify.FinishIdleSuccess, SessionID: "s1"}
+			m.activityFor("s1").completion = n
+			// Only the completion probe uses HTTP; unrelated UI caches stay controlled.
+			stub := m.com.Workspace
+			m.com.Workspace = workspace.NewClientWorkspace(c, proto.Workspace{ID: "ws-1"})
+			result := m.dispatchCompletionCheck(n)()
+			m.com.Workspace = stub
+			_, cmd := m.Update(result)
+			runCmds(m, cmd)
+			require.Equal(t, tc.wantDone, m.turnOutcome == tea.ProgramStateDone)
+			require.Equal(t, tc.wantDone, len(backend.sent) == 1)
+			require.Empty(t, m.sessionActivities)
+		})
+	}
 }

@@ -150,7 +150,8 @@ type Workspace interface {
 	AgentRunShellCommand(ctx context.Context, sessionID, command string, termWidth int, onProgress func(string), isFirstMessage bool) (proto.ShellCommandResponse, error)
 	AgentCancel(sessionID string)
 	AgentIsBusy() bool
-	AgentIsSessionBusy(sessionID string) bool
+	// AgentIsSessionBusy returns an error when session activity is unknown.
+	AgentIsSessionBusy(sessionID string) (bool, error)
 	AgentModel() AgentModel
 	AgentIsReady() bool
 	// AgentReadyErr reports nil when the coder agent is ready to accept

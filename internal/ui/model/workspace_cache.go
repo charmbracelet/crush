@@ -84,6 +84,7 @@ type busyStateMsg struct {
 	// sessionBusy reports whether forSession itself has a run in flight,
 	// unlike agentBusy, which any session or shell command sets.
 	sessionBusy bool
+	sessionBusyErr error
 	// model is the coordinator's selected model, fetched by the same probe
 	// so the sidebar/landing model info renders from memoized state. Zero
 	// (and ignored) when ready is false.
@@ -123,6 +124,7 @@ type summaryFinishedMsg struct {
 type completionCheckedMsg struct {
 	busyGen      uint64
 	busy         bool
+	err          error
 	notification *notify.Notification
 }
 
@@ -181,7 +183,8 @@ func (m *UI) submissionFinished(sessionID string, gen uint64, err error, summary
 func (m *UI) dispatchCompletionCheck(n *notify.Notification) tea.Cmd {
 	busyGen, ws := m.busyFetchGen, m.com.Workspace
 	return func() tea.Msg {
-		return completionCheckedMsg{busyGen: busyGen, busy: ws.AgentIsSessionBusy(n.SessionID), notification: n}
+		busy, err := ws.AgentIsSessionBusy(n.SessionID)
+		return completionCheckedMsg{busyGen: busyGen, busy: busy, err: err, notification: n}
 	}
 }
 // agentModelChangedMsg reports that the coordinator's model was updated
@@ -240,7 +243,7 @@ func (m *UI) dispatchBusyRefresh() tea.Cmd {
 			st.agentBusy = ws.AgentIsBusy()
 			st.model = ws.AgentModel()
 			if sessionID != "" {
-				st.sessionBusy = ws.AgentIsSessionBusy(sessionID)
+				st.sessionBusy, st.sessionBusyErr = ws.AgentIsSessionBusy(sessionID)
 			}
 		}
 		st.yolo = ws.PermissionSkipRequests()

@@ -262,12 +262,12 @@ func (w *ClientWorkspace) AgentIsBusy() bool {
 	return info.IsBusy
 }
 
-func (w *ClientWorkspace) AgentIsSessionBusy(sessionID string) bool {
+func (w *ClientWorkspace) AgentIsSessionBusy(sessionID string) (bool, error) {
 	info, err := w.client.GetAgentSessionInfo(context.Background(), w.workspaceID(), sessionID)
 	if err != nil {
-		return false
+		return false, err
 	}
-	return info.IsBusy
+	return info.IsBusy, nil
 }
 
 func (w *ClientWorkspace) AgentModel() AgentModel {

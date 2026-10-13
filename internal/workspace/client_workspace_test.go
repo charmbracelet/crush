@@ -1118,3 +1118,11 @@ func TestClientWorkspace_GitBranchServerError(t *testing.T) {
 	_, err = ws.GitBranch(t.Context())
 	require.Error(t, err)
 }
+
+func TestAppWorkspace_AgentSessionIdleKnown(t *testing.T) {
+	t.Parallel()
+	w := NewAppWorkspace(&app.App{}, nil)
+	busy, err := w.AgentIsSessionBusy("session")
+	require.NoError(t, err, "an absent local coordinator is known idle, not a failed probe")
+	require.False(t, busy)
+}

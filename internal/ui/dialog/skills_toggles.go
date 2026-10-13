@@ -29,6 +29,10 @@ type SkillToggleItem struct {
 	// config-disabled skill the user enabled here. Only the Local scope
 	// considers it.
 	EnabledOverride bool
+	// Error is non-empty when the skill failed discovery (malformed
+	// frontmatter, unreadable file, ...). Errored skills show a red ×
+	// and the error on the right edge instead of the enabled check.
+	Error string
 }
 
 // localDisabled returns the effective local state: a config-disabled
@@ -186,6 +190,10 @@ func (m *SkillToggles) requiredWidth(t *styles.Styles) int {
 	widest := minToggleDialogWidth
 	for _, item := range m.items {
 		row := 2 /* check column */ + lipgloss.Width(item.Name)
+		if item.Error != "" {
+			// + 1 gap + the red "error" label on the right edge.
+			row += 1 + lipgloss.Width("error")
+		}
 		widest = max(widest, row)
 	}
 	return widest + 2 /* row padding */ + t.Dialog.View.GetHorizontalFrameSize()
@@ -246,11 +254,23 @@ func (m *SkillToggles) innerContent() string {
 		item := m.items[i]
 		// Enabled skills get a green check in a fixed-width column so
 		// names align; disabled skills show nothing in it — skills have
-		// no connection state worth a status column like MCPs.
+		// no connection state worth a status column like MCPs. Errored
+		// skills show a red × regardless of the toggle state: they are
+		// "on" but failed to load.
 		mark := " " // Reserved check column so names align.
-		if !m.itemDisabled(item) {
+		switch {
+		case item.Error != "":
+			mark = t.Tool.IconError.Render()
+		case !m.itemDisabled(item):
 			mark = t.Tool.IconSuccess.Render()
 		}
+
+		// Errored skills carry a red "error" label on the right edge.
+		statusCol := ""
+		if item.Error != "" {
+			statusCol = t.Tool.IconError.SetString("error").Render()
+		}
+		statusWidth := lipgloss.Width(statusCol)
 
 		if i == m.cursor {
 			// The full row goes through the selection style in plain
@@ -264,15 +284,20 @@ func (m *SkillToggles) innerContent() string {
 			if m.itemDisabled(item) {
 				glyph = " "
 			}
+			if item.Error != "" {
+				glyph = styles.ToolError
+			}
 			row := glyph + " " + item.Name +
-				strings.Repeat(" ", max(0, rowWidth-2-lipgloss.Width(item.Name)))
+				strings.Repeat(" ", max(1, rowWidth-2-lipgloss.Width(item.Name)-statusWidth)) +
+				statusCol
 			rows = append(rows, t.Dialog.SelectedItem.Render(row))
 			continue
 		}
 
 		row := mark + " " +
 			t.Dialog.NormalItem.UnsetPadding().Render(item.Name) +
-			strings.Repeat(" ", max(0, rowWidth-2-lipgloss.Width(item.Name)))
+			strings.Repeat(" ", max(1, rowWidth-2-lipgloss.Width(item.Name)-statusWidth)) +
+			statusCol
 		rows = append(rows, lipgloss.NewStyle().Padding(0, 1).Render(row))
 	}
 

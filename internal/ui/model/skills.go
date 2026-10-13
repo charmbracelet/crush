@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -168,6 +169,9 @@ func (m *UI) skillsTogglesList() []dialog.SkillToggleItem {
 	items := make([]dialog.SkillToggleItem, 0)
 
 	seen := make(map[string]struct{})
+	// errors carries the discovery error per skill name so errored rows
+	// can show a red x and the error label in the toggles dialog.
+	errors := make(map[string]string)
 	add := func(name string) {
 		if name == "" {
 			return
@@ -184,6 +188,7 @@ func (m *UI) skillsTogglesList() []dialog.SkillToggleItem {
 			ConfigDisabled:  configDisabled,
 			EnabledOverride: enabledOverride,
 			Disabled:        disabledOverride,
+			Error:           errors[name],
 		})
 	}
 
@@ -191,6 +196,9 @@ func (m *UI) skillsTogglesList() []dialog.SkillToggleItem {
 		name := state.Name
 		if name == "" {
 			name = filepath.Base(filepath.Dir(state.Path))
+		}
+		if state.State == skills.StateError && state.Err != nil {
+			errors[name] = state.Err.Error()
 		}
 		add(name)
 	}
@@ -229,16 +237,21 @@ func disabledSet(cfg *config.Config) map[string]struct{} {
 
 // refreshSkillOverrides fetches the repository-scoped skill toggle sets
 // and emits them as a message so the sidebar and dialog update without
-// blocking on workspace calls during render.
+// blocking on workspace calls during render. Fetch failures (an older
+// server without the endpoints, say) fail open: they are logged and the
+// existing mirrors are kept instead of toasting an error on every
+// session load.
 func (m *UI) refreshSkillOverrides() tea.Cmd {
 	return func() tea.Msg {
 		disabled, err := m.com.Workspace.SkillsDisabled(context.Background())
 		if err != nil {
-			return util.NewErrorMsg(err)
+			slog.Warn("Failed to list disabled skills; keeping current overrides", "error", err)
+			return nil
 		}
 		enabled, err := m.com.Workspace.SkillsEnabled(context.Background())
 		if err != nil {
-			return util.NewErrorMsg(err)
+			slog.Warn("Failed to list enabled skills; keeping current overrides", "error", err)
+			return nil
 		}
 		disabledSet := make(map[string]bool, len(disabled))
 		for _, name := range disabled {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -244,6 +245,15 @@ func NewAssistantMessageItem(sty *styles.Styles, message *message.Message) Messa
 		sty:                      sty,
 	}
 
+	// Summary messages are generated outside a regular turn, so the turn
+	// timer is not active while they stream; give them their own elapsed
+	// timer anchored at item creation instead.
+	suffix := func() string { return common.Elapsed() }
+	if message.IsSummaryMessage {
+		startedAt := time.Now()
+		suffix = func() string { return common.FormatDuration(time.Since(startedAt)) }
+	}
+
 	a.anim = anim.New(anim.Settings{
 		ID:          a.ID(),
 		Size:        15,
@@ -251,9 +261,7 @@ func NewAssistantMessageItem(sty *styles.Styles, message *message.Message) Messa
 		GradColorB:  sty.WorkingGradToColor,
 		LabelColor:  sty.WorkingLabelColor,
 		CycleColors: true,
-		Suffix: func() string {
-			return common.Elapsed()
-		},
+		Suffix:      suffix,
 		SuffixColor: sty.WorkingTimerColor,
 	})
 	return a

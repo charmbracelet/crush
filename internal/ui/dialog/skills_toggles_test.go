@@ -128,3 +128,31 @@ func TestSkillsToggles_ScrollsToCursor(t *testing.T) {
 	require.Equal(t, 0, m.cursor)
 	require.Equal(t, 0, m.visibleOffset(maxVisibleToggleRows))
 }
+
+func TestSkillsToggles_ErroredSkill(t *testing.T) {
+	t.Parallel()
+
+	m := newSkillsTogglesForTest([]SkillToggleItem{
+		{Name: "charmtone"},
+		{Name: "broken", Error: "yaml: cannot unmarshal"},
+	})
+
+	// An errored skill is not disabled and not enabled: it shows the red
+	// x mark regardless of the toggle state.
+	require.False(t, m.itemDisabled(m.Items()[1]))
+
+	// Toggle still works on it (disable it so it stops loading).
+	action := m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
+	toggled, ok := action.(ActionToggleSkill)
+	require.True(t, ok)
+	require.Equal(t, "charmtone", toggled.Name)
+
+	// Move to the errored skill and disable it.
+	require.Nil(t, m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyDown}))
+	action = m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
+	toggled, ok = action.(ActionToggleSkill)
+	require.True(t, ok)
+	require.Equal(t, "broken", toggled.Name)
+	require.True(t, toggled.Disabled)
+	require.True(t, m.Items()[1].Disabled)
+}

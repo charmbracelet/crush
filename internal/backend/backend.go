@@ -260,8 +260,8 @@ func (w *Workspace) Shutdown() {
 	if w.cancel != nil {
 		w.cancel()
 	}
-	if w.App != nil && w.AgentCoordinator != nil {
-		w.AgentCoordinator.CancelAll()
+	if w.App != nil && w.Agent() != nil {
+		w.Agent().CancelAll()
 	}
 	w.runWG.Wait()
 	if w.App != nil {

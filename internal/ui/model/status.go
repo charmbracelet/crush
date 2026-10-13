@@ -7,6 +7,8 @@ import (
 	"charm.land/bubbles/v2/help"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/util"
 	uv "github.com/charmbracelet/ultraviolet"
@@ -28,9 +30,11 @@ type Status struct {
 	helpKm   help.KeyMap
 	msg      util.InfoMsg
 
-	// inputMode and yolo drive the mode badge shown before the help hints.
-	inputMode uiInputMode
-	yolo      bool
+	// purpose and level drive the mode badges shown before the help hints.
+	// They are independent axes, so both render when both are noteworthy:
+	// "[PLANNING] [AUTO MODE]".
+	purpose string
+	level   permission.Level
 }
 
 // NewStatus creates a new status bar and help model.
@@ -53,25 +57,29 @@ func (s *Status) ClearInfoMsg() {
 	s.msg = util.InfoMsg{}
 }
 
-// SetMode sets the input mode and YOLO state used for the mode badge.
-func (s *Status) SetMode(mode uiInputMode, yolo bool) {
-	s.inputMode = mode
-	s.yolo = yolo
+// SetMode records the two axes the badges render: which agent serves the
+// turn, and how far it may go without asking.
+func (s *Status) SetMode(purpose string, level permission.Level) {
+	s.purpose = purpose
+	s.level = level
 }
 
-// modeBadge renders the badge for the current mode, or an empty string in
-// the default coding mode.
+// modeBadge renders one badge per non-default axis. The standard purpose and
+// the ask-every-time level are the defaults, so an ordinary session shows
+// nothing.
 func (s *Status) modeBadge() string {
 	t := s.com.Styles
-	// Mirror the editor prompt precedence: planning wins over YOLO, which
-	// can be carried into plan mode.
-	if s.inputMode == uiInputModePlan {
-		return t.Status.ModeBadgePlan.String()
+	var badges []string
+	if s.purpose == config.AgentPlan {
+		badges = append(badges, t.Status.ModeBadgePlan.String())
 	}
-	if s.yolo {
-		return t.Status.ModeBadgeYolo.String()
+	switch s.level {
+	case permission.LevelBypass:
+		badges = append(badges, t.Status.ModeBadgeYolo.String())
+	case permission.LevelAuto:
+		badges = append(badges, t.Status.ModeBadgeAuto.String())
 	}
-	return ""
+	return strings.Join(badges, " ")
 }
 
 // SetWidth sets the width of the status bar and help view.
@@ -138,6 +146,10 @@ func (s *Status) Draw(scr uv.Screen, area uv.Rectangle) {
 	case util.InfoTypeYolo:
 		indStyle = s.com.Styles.Status.ModeBannerYoloBadge
 		msgStyle = s.com.Styles.Status.ModeBannerYolo
+		indInset = badgeLeftInset
+	case util.InfoTypeAuto:
+		indStyle = s.com.Styles.Status.ModeBannerAutoBadge
+		msgStyle = s.com.Styles.Status.ModeBannerAuto
 		indInset = badgeLeftInset
 	case util.InfoTypeError:
 		indStyle = s.com.Styles.Status.ErrorIndicator

@@ -60,7 +60,7 @@ func NewListMCPResourcesTool(cfg *config.ConfigStore, permissions permission.Ser
 				return fantasy.ToolResponse{}, err
 			}
 			if !p {
-				return NewPermissionDeniedResponse(), nil
+				return NewPermissionDeniedResponse(permissions.DenialReason(call.ID)), nil
 			}
 
 			resources, err := mcp.ListResources(ctx, cfg, params.MCPName)

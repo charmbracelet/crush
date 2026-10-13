@@ -39,9 +39,27 @@ func (m *mockBashPermissionService) ActiveRequest() (permission.PermissionReques
 
 func (m *mockBashPermissionService) SetSkipRequests(skip bool) {}
 
+func (m *mockBashPermissionService) SetPermissionHooks(hooks permission.PermissionHooks) {}
+
+func (m *mockBashPermissionService) DenialReason(toolCallID string) string {
+	return ""
+}
+
+func (m *mockBashPermissionService) SetAutoMode(enabled bool) {}
+
+func (m *mockBashPermissionService) AutoMode() bool { return false }
+
+func (m *mockBashPermissionService) EscalationNote(toolCallID string) string {
+	return ""
+}
+
 func (m *mockBashPermissionService) SkipRequests() bool {
 	return false
 }
+
+func (m *mockBashPermissionService) SetLevel(permission.Level) {}
+
+func (m *mockBashPermissionService) Level() permission.Level { return permission.LevelPrompt }
 
 func (m *mockBashPermissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[permission.PermissionNotification] {
 	return make(<-chan pubsub.Event[permission.PermissionNotification])
@@ -114,9 +132,27 @@ func (m *recordingPermissionService) ActiveRequest() (permission.PermissionReque
 
 func (m *recordingPermissionService) SetSkipRequests(skip bool) {}
 
+func (m *recordingPermissionService) SetPermissionHooks(hooks permission.PermissionHooks) {}
+
+func (m *recordingPermissionService) DenialReason(toolCallID string) string {
+	return ""
+}
+
+func (m *recordingPermissionService) SetAutoMode(enabled bool) {}
+
+func (m *recordingPermissionService) AutoMode() bool { return false }
+
+func (m *recordingPermissionService) EscalationNote(toolCallID string) string {
+	return ""
+}
+
 func (m *recordingPermissionService) SkipRequests() bool {
 	return false
 }
+
+func (m *recordingPermissionService) SetLevel(permission.Level) {}
+
+func (m *recordingPermissionService) Level() permission.Level { return permission.LevelPrompt }
 
 func (m *recordingPermissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[permission.PermissionNotification] {
 	return make(<-chan pubsub.Event[permission.PermissionNotification])

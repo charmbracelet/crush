@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -19,6 +20,14 @@ import (
 
 // CommandsID is the identifier for the commands dialog.
 const CommandsID = "commands"
+
+// approvalCommandID identifies the single row that shows and changes the
+// approval level.
+const approvalCommandID = "approval_mode"
+
+// purposeCommandID identifies the single row that shows and changes which
+// agent serves the main turn.
+const purposeCommandID = "purpose_mode"
 
 // CommandType represents the type of commands being displayed.
 type CommandType uint
@@ -29,6 +38,56 @@ func (c CommandType) String() string { return []string{"System", "User", "MCP"}[
 const (
 	sidebarCompactModeBreakpoint = 120
 )
+
+// permissionLevelEntries lists the permission axis in the order Ctrl+Y
+// cycles it. The levels themselves belong to the permission service; this is
+// only the palette's wording.
+var permissionLevelEntries = []struct {
+	id    string
+	level permission.Level
+	// label is the option as it appears inside the approval row.
+	label string
+}{
+	{"permissions_ask", permission.LevelPrompt, "ask"},
+	{"permissions_auto", permission.LevelAuto, "auto"},
+	{"permissions_bypass", permission.LevelBypass, "yolo"},
+}
+
+// ApprovalSegments renders the approval axis as one row of options with the
+// level in force marked, so the palette shows where the setting stands and what
+// the alternatives are.
+func ApprovalSegments(level permission.Level) []Segment {
+	segments := make([]Segment, 0, len(permissionLevelEntries))
+	for _, entry := range permissionLevelEntries {
+		segments = append(segments, Segment{Text: entry.label, Active: entry.level == level})
+	}
+	return segments
+}
+
+// PurposeSegments renders the purpose axis as one row of modes with the one
+// serving the turn marked. The candidates come from the workspace, so a mode
+// added upstream appears here without a TUI change.
+func PurposeSegments(current string, candidates []string) []Segment {
+	segments := make([]Segment, 0, len(candidates))
+	for _, agentID := range candidates {
+		segments = append(segments, Segment{Text: PurposeLabel(agentID), Active: agentID == current})
+	}
+	return segments
+}
+
+// PurposeLabel names an agent for display. An unknown id is reported
+// verbatim, so a purpose added upstream still reads sensibly before the TUI
+// has a word for it.
+func PurposeLabel(agentID string) string {
+	switch agentID {
+	case config.AgentCoder:
+		return "standard"
+	case config.AgentPlan:
+		return "planning"
+	default:
+		return agentID
+	}
+}
 
 const (
 	SystemCommands CommandType = iota
@@ -73,6 +132,12 @@ type Commands struct {
 
 	dockerMCPAvailable     *bool
 	dockerMCPCheckInFlight bool
+
+	// approvalItem and purposeItem are the rows that show and change the two
+	// axes. They are held so cycling can redraw one row in place, leaving the
+	// user's filter, scroll position, and cursor where they left them.
+	approvalItem *CommandItem
+	purposeItem  *CommandItem
 }
 
 var _ Dialog = (*Commands)(nil)
@@ -541,9 +606,32 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	notificationLabel := "Notification Style"
 	commands = append(commands, NewCommandItem(c.com.Styles, "select_notifications", notificationLabel, "", ActionOpenDialog{DialogID: NotificationsID}))
 
+	// Approval axis: one row showing every level with the current one marked.
+	// A row per level read as three unrelated commands and said nothing about
+	// what the alternatives were; one row that cycles says both, and Enter
+	// walks the same order Ctrl+Y does.
+	approval := NewCommandItem(
+		c.com.Styles, approvalCommandID, "Approval Mode:", "ctrl+y",
+		ActionCyclePermissionLevel{},
+	).WithSegments(ApprovalSegments(c.com.Workspace.PermissionLevel())...).
+		WithAliases("permissions", "permission", "approval", "ask", "auto", "yolo", "bypass")
+	c.approvalItem = approval
+	commands = append(commands, approval)
+
+	// Purpose axis: one row showing every mode with the one serving the turn
+	// marked, cycled with Enter exactly as the approval row is. The modes come
+	// from the workspace, so one added upstream appears here without a TUI
+	// change.
+	purpose := NewCommandItem(
+		c.com.Styles, purposeCommandID, "Mode:", "shift+tab",
+		ActionCyclePurpose{},
+	).WithSegments(PurposeSegments(c.com.Workspace.AgentMainID(), c.com.Workspace.AgentMainCandidates())...).
+		WithAliases("mode", "purpose", "agent")
+	c.purposeItem = purpose
+	commands = append(commands, purpose)
+
 	commands = append(
 		commands,
-		NewCommandItem(c.com.Styles, "toggle_yolo", "Toggle Yolo Mode", "ctrl+y", ActionToggleYoloMode{}),
 		NewCommandItem(c.com.Styles, "toggle_help", "Toggle Help", "ctrl+g", ActionToggleHelp{}),
 		NewCommandItem(c.com.Styles, "init", "Initialize Project", "", ActionInitializeProject{}),
 	)
@@ -570,6 +658,25 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	)
 
 	return commands
+}
+
+// RefreshApprovalMode redraws the approval row for a level that changed, so
+// the highlight follows the setting without rebuilding the list around it.
+func (c *Commands) RefreshApprovalMode(level permission.Level) {
+	if c.approvalItem == nil {
+		return
+	}
+	c.approvalItem.SetSegments(ApprovalSegments(level))
+}
+
+// RefreshPurposeMode redraws the mode row after a switch lands. The switch is
+// an asynchronous round-trip, so the row is redrawn from the message that
+// reports it rather than when the key was pressed.
+func (c *Commands) RefreshPurposeMode(agentID string) {
+	if c.purposeItem == nil {
+		return
+	}
+	c.purposeItem.SetSegments(PurposeSegments(agentID, c.com.Workspace.AgentMainCandidates()))
 }
 
 // SetCustomCommands sets the custom commands and refreshes the view if user commands are currently displayed.

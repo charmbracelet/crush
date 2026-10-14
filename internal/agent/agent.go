@@ -176,9 +176,10 @@ func filterToolsForChannel(agentTools []fantasy.AgentTool, channel string, state
 }
 
 type turnOutcome struct {
-	completed bool
-	result    *fantasy.AgentResult
-	err       error
+	completionSequence uint64
+	completed          bool
+	result             *fantasy.AgentResult
+	err                error
 }
 
 type SessionAgent interface {
@@ -240,6 +241,7 @@ type sessionAgent struct {
 	isYolo               bool
 	notify               pubsub.Publisher[notify.Notification]
 	runComplete          pubsub.Publisher[notify.RunComplete]
+	completionSequence   *atomic.Uint64
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, *activeCancel]
@@ -296,11 +298,15 @@ type SessionAgentOptions struct {
 	Tools                []fantasy.AgentTool
 	Notify               pubsub.Publisher[notify.Notification]
 	RunComplete          pubsub.Publisher[notify.RunComplete]
+	CompletionSequence   *atomic.Uint64
 }
 
 func NewSessionAgent(
 	opts SessionAgentOptions,
 ) SessionAgent {
+	if opts.CompletionSequence == nil {
+		opts.CompletionSequence = new(atomic.Uint64)
+	}
 	return &sessionAgent{
 		largeModel:           csync.NewValue(opts.LargeModel),
 		smallModel:           csync.NewValue(opts.SmallModel),
@@ -315,6 +321,7 @@ func NewSessionAgent(
 		isYolo:               opts.IsYolo,
 		notify:               opts.Notify,
 		runComplete:          opts.RunComplete,
+		completionSequence:   opts.CompletionSequence,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:       csync.NewMap[string, *activeCancel](),
 		dispatchMu:           csync.NewMap[string, *sync.Mutex](),
@@ -448,7 +455,7 @@ func (a *sessionAgent) enqueueCall(call SessionAgentCall) {
 // observed inconsistently.
 //
 // Calls covered by a pending cancel are dropped; the dropped ones that
-// carry a RunID are returned in canceledWithRunID so the caller can
+// carry a RunID are returned as frozen completions so the caller can
 // publish their terminal cancelled RunComplete (a caller waiting on that
 // RunID, e.g. `crush run`, would otherwise hang). Ordinary calls without a
 // RunID and with the same permission policy are folded into the active turn.
@@ -456,7 +463,7 @@ func (a *sessionAgent) enqueueCall(call SessionAgentCall) {
 // the active policy. Correlated calls, continuations and other mismatched
 // policies stay queued without blocking later eligible steering calls.
 // fold is processed by the caller without the lock held.
-func (a *sessionAgent) drainQueueForStep(ctx context.Context, sessionID string) (fold, canceledWithRunID []SessionAgentCall) {
+func (a *sessionAgent) drainQueueForStep(ctx context.Context, sessionID string) (fold []SessionAgentCall, canceled []notify.RunComplete) {
 	dispatchLock := a.sessionMu(sessionID)
 	dispatchLock.Lock()
 	defer dispatchLock.Unlock()
@@ -467,7 +474,7 @@ func (a *sessionAgent) drainQueueForStep(ctx context.Context, sessionID string) 
 	}
 	activePolicy := permission.RequestPolicyFromContext(ctx)
 	queuedCalls, _ := a.messageQueue.Get(sessionID)
-	var keep []SessionAgentCall
+	var keep, canceledWithRunID []SessionAgentCall
 	for _, queued := range queuedCalls {
 		if a.canceledBySeq(sessionID, queued.acceptSeq) {
 			if queued.RunID != "" {
@@ -482,51 +489,48 @@ func (a *sessionAgent) drainQueueForStep(ctx context.Context, sessionID string) 
 		}
 		fold = append(fold, queued)
 	}
+	canceled = a.freezeCanceledQueueDrops(canceledWithRunID)
 	if len(keep) == 0 {
 		a.messageQueue.Del(sessionID)
 	} else {
 		a.messageQueue.Set(sessionID, keep)
 	}
-	return fold, canceledWithRunID
+	return fold, canceled
 }
 
-// publishCanceledQueueDrops emits a terminal cancelled RunComplete for
-// every dropped detached call that carries a RunID. Internal continuations
-// leave completion to their suspended caller. A queued prompt removed
-// from the queue without ever running — covered by a pending cancel, or
-// cleared by Cancel/ClearQueue — would otherwise leave a caller blocked on
-// that RunID: `crush run` ignores live message events and exits only on a
-// RunComplete whose RunID matches. Calls without a RunID had no such waiter
-// and are dropped silently as before. A detached, bounded context keeps the
-// must-deliver publish alive even when the run context that triggered the
-// drop is already canceled.
-func (a *sessionAgent) publishCanceledQueueDrops(drops []SessionAgentCall) {
-	var hasRunID bool
+// freezeCanceledQueueDrops linearizes the whole batch before queue removal.
+// The caller holds the session dispatch lock. A single reservation prevents
+// another completion from falling between calls dropped by the same decision.
+func (a *sessionAgent) freezeCanceledQueueDrops(drops []SessionAgentCall) []notify.RunComplete {
+	var completions []notify.RunComplete
 	for _, d := range drops {
+		// Suspended callers own their continuation's completion and callback.
 		if d.RunID != "" && d.turn == nil {
-			hasRunID = true
-			break
+			completions = append(completions, notify.RunComplete{
+				SessionID: d.SessionID, RunID: d.RunID, Cancelled: true,
+			})
 		}
 	}
-	if !hasRunID || a.runComplete == nil {
+	if len(completions) != 0 {
+		first := a.completionSequence.Add(uint64(len(completions))) - uint64(len(completions)) + 1
+		for i := range completions {
+			completions[i].Sequence = first + uint64(i)
+		}
+	}
+	return completions
+}
+
+// publishCanceledQueueDrops delivers already frozen outcomes for detached
+// correlated calls. One detached deadline bounds the entire batch, even when
+// its originating run was cancelled or subscribers apply backpressure.
+func (a *sessionAgent) publishCanceledQueueDrops(completions []notify.RunComplete) {
+	if len(completions) == 0 || a.runComplete == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	for _, d := range drops {
-		// A suspended caller owns its continuation's completion. It detects
-		// the missing outcome after draining; never invoke its live callback
-		// from the goroutine clearing the queue.
-		if d.RunID == "" || d.turn != nil {
-			continue
-		}
-		// Detached queue entries have no callbacks. Preserve this batch's
-		// deadline rather than creating a new publication budget per entry.
-		a.runComplete.PublishMustDeliver(ctx, pubsub.UpdatedEvent, notify.RunComplete{
-			SessionID: d.SessionID,
-			RunID:     d.RunID,
-			Cancelled: true,
-		})
+	for _, complete := range completions {
+		a.runComplete.PublishMustDeliver(ctx, pubsub.UpdatedEvent, complete)
 	}
 }
 
@@ -535,12 +539,10 @@ func (a *sessionAgent) publishCanceledQueueDrops(drops []SessionAgentCall) {
 // so callers waiting on those RunIDs (e.g. `crush run`) are not left
 // hanging when their queued prompt is discarded without running.
 func (a *sessionAgent) clearQueueAndNotify(sessionID string) {
-	queued, ok := a.messageQueue.Get(sessionID)
+	queued, _ := a.messageQueue.Get(sessionID)
+	completions := a.freezeCanceledQueueDrops(queued)
 	a.messageQueue.Del(sessionID)
-	if !ok {
-		return
-	}
-	a.publishCanceledQueueDrops(queued)
+	a.publishCanceledQueueDrops(completions)
 }
 
 // clearPendingCancel removes any pending-cancel mark for sessionID. It
@@ -610,6 +612,9 @@ func (a *sessionAgent) persistCanceledTurn(ctx context.Context, call SessionAgen
 // observes exactly one terminal event regardless of which Run branch ends
 // the turn.
 func (a *sessionAgent) publishRunComplete(ctx context.Context, call SessionAgentCall, complete notify.RunComplete) {
+	if complete.Sequence == 0 {
+		complete.Sequence = a.reserveCompletionSequence(call)
+	}
 	if call.OnComplete != nil {
 		call.OnComplete(complete)
 		return
@@ -680,6 +685,19 @@ func (a *sessionAgent) finishOwner(ctx context.Context, sessionID string, owner 
 	}
 }
 
+// Reserve once, including when preparation publishes before finishTurn runs.
+// A frozen final answer retains its sequence through summary queue draining.
+func (a *sessionAgent) reserveCompletionSequence(call SessionAgentCall) uint64 {
+	if call.turn != nil && call.turn.completionSequence != 0 {
+		return call.turn.completionSequence
+	}
+	sequence := a.completionSequence.Add(1)
+	if call.turn != nil {
+		call.turn.completionSequence = sequence
+	}
+	return sequence
+}
+
 // finishTurn records only this logical turn's outcome. Detached submissions
 // have no backend caller left to report their errors.
 func (a *sessionAgent) finishTurn(call SessionAgentCall, result *fantasy.AgentResult, err error) {
@@ -687,6 +705,7 @@ func (a *sessionAgent) finishTurn(call SessionAgentCall, result *fantasy.AgentRe
 		return
 	}
 	call.turn.completed = true
+	a.reserveCompletionSequence(call)
 	call.turn.result, call.turn.err = result, err
 	if err != nil && !errors.Is(err, context.Canceled) && call.OnComplete == nil && a.notify != nil {
 		a.notify.Publish(pubsub.CreatedEvent, notify.Notification{
@@ -1467,12 +1486,13 @@ func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall, owner *ac
 			}
 			kept = append(kept, q)
 		}
+		completions := a.freezeCanceledQueueDrops(canceledRunIDDrops)
 		queuedMessages = kept
 		a.messageQueue.Set(call.SessionID, kept)
 		// A dropped prompt carrying a RunID must still publish its
 		// terminal cancelled RunComplete so a caller waiting on that
 		// RunID does not hang.
-		a.publishCanceledQueueDrops(canceledRunIDDrops)
+		a.publishCanceledQueueDrops(completions)
 	}
 	if len(queuedMessages) == 0 {
 		// No queued work. Clear the cancel mark only when no accepted

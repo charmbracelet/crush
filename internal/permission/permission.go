@@ -223,19 +223,9 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		return true, nil
 	}
 
-	// A PreToolUse hook that returned decision=allow stamps the context
-	// with the tool call ID. Treat that as a pre-approval and skip the
-	// prompt entirely. We still publish a granted notification so the UI
-	// and audit subscribers see the outcome.
-	if hookApproved(ctx, opts.ToolCallID) {
-		s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
-			SessionID:  opts.SessionID,
-			ToolCallID: opts.ToolCallID,
-			Granted:    true,
-		})
-		return true, nil
-	}
-	if RequestPolicyFromContext(ctx) == RequestPolicyAutoApprove {
+	// Hooks approve one tool call; turn policy approves its context tree.
+	// Both bypass pending prompts and notify subscribers of the grant.
+	if hookApproved(ctx, opts.ToolCallID) || RequestPolicyFromContext(ctx) == RequestPolicyAutoApprove {
 		s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
 			SessionID:  opts.SessionID,
 			ToolCallID: opts.ToolCallID,

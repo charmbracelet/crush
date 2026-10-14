@@ -66,7 +66,10 @@ const (
 // recovered transitions of the client-server link. Local (in-process)
 // workspaces never emit it.
 type ConnectionEvent struct {
-	State ConnectionState
+	// WorkspaceRecreated marks a new workspace ID on recovery. The subscription
+	// sends this after draining the old stream and before forwarding the new one.
+	WorkspaceRecreated bool
+	State              ConnectionState
 	// Err is the most recent failure, set when State is
 	// ConnectionDegraded.
 	Err error

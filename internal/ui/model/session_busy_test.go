@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -48,6 +49,7 @@ type countingWorkspace struct {
 	mcpStates      map[string]mcp.ClientInfo
 	mcpPendingAuth []mcp.PendingAuthServer
 	summarizeErr   error
+	sessionProbe   func(string) (bool, error)
 
 	readyCalls      int
 	agentBusyCalls  int
@@ -67,7 +69,12 @@ type countingWorkspace struct {
 func (w *countingWorkspace) AgentIsReady() bool { w.readyCalls++; return w.ready }
 func (w *countingWorkspace) AgentIsBusy() bool  { w.agentBusyCalls++; return w.agentBusy }
 
-func (w *countingWorkspace) AgentIsSessionBusy(string) (bool, error) { return w.agentBusy, nil }
+func (w *countingWorkspace) AgentIsSessionBusy(id string) (bool, error) {
+	if w.sessionProbe != nil {
+		return w.sessionProbe(id)
+	}
+	return w.agentBusy, nil
+}
 
 func (w *countingWorkspace) AgentSummarize(context.Context, string) error {
 	return w.summarizeErr
@@ -348,11 +355,11 @@ func TestManualSummaryPresentation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			m := newBusyUI(&countingWorkspace{ready: true, summarizeErr: tc.err})
 			warmCaches(m, false)
-			common.StartTurn()
-			t.Cleanup(common.StopTurn)
+			common.StartTurn("s1")
+			t.Cleanup(func() { common.StopTurn("s1") })
 			runCmds(m, m.summarizeSession("s1"))
 			require.Zero(t, m.pendingSubmissions)
-			require.Empty(t, common.Elapsed())
+			require.Empty(t, common.Elapsed("s1"))
 			require.Equal(t, tc.kind, m.status.msg.Type)
 			require.Equal(t, tc.text, m.status.msg.Msg)
 		})
@@ -424,13 +431,13 @@ func TestCompletionPresentation(t *testing.T) {
 			backend := &recordingNotificationBackend{}
 			m.notifyBackend = backend
 			m.caps.ReportFocusEvents = true
-			common.StartTurn()
-			t.Cleanup(common.StopTurn)
+			common.StartTurn("s1")
+			t.Cleanup(func() { common.StopTurn("s1") })
 			runCmds(m, m.handleAgentNotification(notify.Notification{
 				Type: notify.TypeAgentFinished, FinishState: tc.state, SessionID: "s1", SessionTitle: "test",
 			}))
 			require.Equal(t, tc.wantNotification, len(backend.sent) == 1)
-			require.Equal(t, tc.busy || tc.pending > 0, common.Elapsed() != "")
+			require.Equal(t, tc.busy || tc.pending > 0, common.Elapsed("s1") != "")
 		})
 	}
 }
@@ -441,11 +448,14 @@ func TestCompletionBeforeSubmissionReturns(t *testing.T) {
 		name          string
 		err           error
 		newSubmission bool
+		completed     bool
+		want          tea.ProgramState
 	}{
-		{"success", nil, false},
-		{"cancelled", context.Canceled, false},
-		{"failure", context.DeadlineExceeded, false},
-		{"superseded", nil, true},
+		{"success notification only", nil, false, false, tea.ProgramStateIdle},
+		{"completed before return", nil, false, true, tea.ProgramStateDone},
+		{"cancelled", context.Canceled, false, false, tea.ProgramStateIdle},
+		{"failure", context.DeadlineExceeded, false, false, tea.ProgramStateError},
+		{"superseded", nil, true, false, tea.ProgramStateIdle},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m := newBusyUI(&countingWorkspace{ready: true})
@@ -455,10 +465,15 @@ func TestCompletionBeforeSubmissionReturns(t *testing.T) {
 			m.caps.ReportFocusEvents = true
 			m.pendingSubmissions = 1
 			m.activityFor("s1").pending = 1
+			if tc.completed {
+				_, cmd := m.Update(runCompleteMsg(notify.RunComplete{}))
+				runCmds(m, cmd)
+			}
 			runCmds(m, m.handleAgentNotification(notify.Notification{
 				Type: notify.TypeAgentFinished, FinishState: notify.FinishIdleSuccess, SessionID: "s1",
 			}))
 			require.Empty(t, backend.sent)
+			require.Equal(t, tea.ProgramStateWorking, m.programStatus().State)
 			if tc.newSubmission {
 				m.sendMessage("new work")
 				_, cmd := m.Update(agentRunSubmittedMsg{sessionID: "s1", gen: m.submissionGen})
@@ -468,6 +483,7 @@ func TestCompletionBeforeSubmissionReturns(t *testing.T) {
 			runCmds(m, cmd)
 			require.Equal(t, tc.err == nil && !tc.newSubmission, len(backend.sent) == 1)
 			require.Zero(t, m.pendingSubmissions)
+			require.Equal(t, tc.want, m.programStatus().State)
 		})
 	}
 }
@@ -496,7 +512,7 @@ func TestCompletionIsIndependentAcrossSessions(t *testing.T) {
 			m.caps.ReportFocusEvents = true
 			if tc.pending {
 				m.sendMessage("A")
-				t.Cleanup(common.StopTurn)
+				t.Cleanup(func() { common.StopTurn("s1") })
 			}
 			a := m.handleAgentNotification(notify.Notification{
 				Type: notify.TypeAgentFinished, FinishState: notify.FinishIdleSuccess, SessionID: "s1", SessionTitle: "A",
@@ -525,7 +541,7 @@ func TestCompletionDoesNotWaitForOtherSessionSubmission(t *testing.T) {
 	m.caps.ReportFocusEvents = true
 	m.sendMessage("A")
 	aGeneration := m.submissionGen
-	t.Cleanup(common.StopTurn)
+	t.Cleanup(func() { common.StopTurn("s1") })
 	runCmds(m, m.handleAgentNotification(notify.Notification{
 		Type: notify.TypeAgentFinished, FinishState: notify.FinishIdleSuccess, SessionID: "s1", SessionTitle: "A",
 	}))
@@ -553,19 +569,19 @@ func TestStaleCompletionDoesNotStopNewTurn(t *testing.T) {
 	oldCompletion := &notify.Notification{SessionID: "s1"}
 	m.activityFor("s1").completion = oldCompletion
 	m.sendMessage("new work")
-	t.Cleanup(common.StopTurn)
+	t.Cleanup(func() { common.StopTurn("s1") })
 	_, cmd := m.Update(completionCheckedMsg{notification: oldCompletion, busyGen: oldGeneration})
 	runCmds(m, cmd)
 	m.applyBusyState(busyStateMsg{gen: oldGeneration})
 	require.Empty(t, backend.sent)
-	require.NotEmpty(t, common.Elapsed())
+	require.NotEmpty(t, common.Elapsed("s1"))
 	// Even a fresh probe can race a local submission not yet sent to the server.
 	m.applyBusyState(busyStateMsg{gen: m.busyFetchGen, ready: true})
-	require.NotEmpty(t, common.Elapsed())
+	require.NotEmpty(t, common.Elapsed("s1"))
 	_, cmd = m.Update(agentRunSubmittedMsg{sessionID: "s1", gen: m.submissionGen, err: context.DeadlineExceeded})
 	runCmds(m, cmd)
 	require.Zero(t, m.pendingSubmissions)
-	require.Empty(t, common.Elapsed())
+	require.Empty(t, common.Elapsed("s1"))
 	require.Equal(t, util.InfoTypeError, m.status.msg.Type)
 }
 
@@ -581,7 +597,7 @@ func TestAcceptedRemoteTurnKeepsTimer(t *testing.T) {
 			}
 			oldGeneration := m.submissionGen
 			m.sendMessage("new work")
-			t.Cleanup(common.StopTurn)
+			t.Cleanup(func() { common.StopTurn("s1") })
 			_, cmd := m.Update(agentRunSubmittedMsg{sessionID: "s1", gen: m.submissionGen})
 			runCmds(m, cmd)
 			if olderFailure {
@@ -589,12 +605,12 @@ func TestAcceptedRemoteTurnKeepsTimer(t *testing.T) {
 				runCmds(m, cmd)
 			}
 			require.Zero(t, m.pendingSubmissions)
-			require.NotEmpty(t, common.Elapsed(), "idle before dispatch is not completion")
+			require.NotEmpty(t, common.Elapsed("s1"), "idle before dispatch is not completion")
 			ws.agentBusy = true
 			m.invalidateBusyCaches()
 			runCmds(m, m.dispatchBusyRefresh())
 			require.True(t, m.isAgentBusy())
-			require.NotEmpty(t, common.Elapsed())
+			require.NotEmpty(t, common.Elapsed("s1"))
 		})
 	}
 }
@@ -1227,8 +1243,13 @@ func TestCompletionProbeHTTP(t *testing.T) {
 		{name: "malformed response", body: `{`, status: http.StatusOK},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			var recovered atomic.Bool
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				require.Equal(t, "/v1/workspaces/ws-1/agent/sessions/s1", r.URL.Path)
+				if recovered.Load() {
+					_, _ = w.Write([]byte(`{"is_busy":false}`))
+					return
+				}
 				w.WriteHeader(tc.status)
 				_, _ = w.Write([]byte(tc.body))
 			}))
@@ -1246,17 +1267,40 @@ func TestCompletionProbeHTTP(t *testing.T) {
 			m.notifyBackend = backend
 			m.caps.ReportFocusEvents = true
 			n := &notify.Notification{Type: notify.TypeAgentFinished, FinishState: notify.FinishIdleSuccess, SessionID: "s1"}
-			m.activityFor("s1").completion = n
-			// Only the completion probe uses HTTP; unrelated UI caches stay controlled.
-			stub := m.com.Workspace
-			m.com.Workspace = workspace.NewClientWorkspace(c, proto.Workspace{ID: "ws-1"})
-			result := m.dispatchCompletionCheck(n)()
-			m.com.Workspace = stub
-			_, cmd := m.Update(result)
+			// S1 finishes offscreen while S2 is still running. Use production
+			// stop-candidate creation, with only S1's probes going over HTTP.
+			remote := workspace.NewClientWorkspace(c, proto.Workspace{ID: "ws-1"})
+			m.com.Workspace.(*countingWorkspace).sessionProbe = func(id string) (bool, error) {
+				if id == "s1" {
+					return remote.AgentIsSessionBusy(id)
+				}
+				return true, nil
+			}
+			m.session = &session.Session{ID: "s2"}
+			common.StartTurn("s1")
+			common.StartTurn("s2")
+			t.Cleanup(func() { common.StopTurn("s1"); common.StopTurn("s2") })
+			m.turnOutcome = tea.ProgramStateError
+			_, cmd := m.Update(pubsub.Event[notify.Notification]{Payload: *n})
 			runCmds(m, cmd)
-			require.Equal(t, tc.wantDone, m.turnOutcome == tea.ProgramStateDone)
+			require.Equal(t, tea.ProgramStateError, m.turnOutcome, "a probe must never assign terminal status")
 			require.Equal(t, tc.wantDone, len(backend.sent) == 1)
-			require.Empty(t, m.sessionActivities)
+			if tc.wantDone {
+				require.Empty(t, m.sessionActivities)
+			} else {
+				require.True(t, m.activityFor("s1").stopPending)
+				require.NotEmpty(t, common.Elapsed("s1"))
+			}
+			if tc.name == "non-200" {
+				recovered.Store(true)
+				m.agentBusyCache.invalidate()
+				_, cmd = m.Update(plainMsg{})
+				runCmds(m, cmd)
+				require.Empty(t, m.sessionActivities)
+				require.Empty(t, common.Elapsed("s1"))
+			}
+			require.NotEmpty(t, common.Elapsed("s2"))
+			require.Equal(t, tea.ProgramStateError, m.turnOutcome)
 		})
 	}
 }

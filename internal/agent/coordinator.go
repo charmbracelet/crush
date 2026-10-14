@@ -17,6 +17,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
@@ -149,17 +150,18 @@ type Coordinator interface {
 }
 
 type coordinator struct {
-	cfg         *config.ConfigStore
-	sessions    session.Service
-	messages    message.Service
-	permissions permission.Service
-	questions   question.Service
-	history     history.Service
-	filetracker filetracker.Service
-	lspManager  *lsp.Manager
-	notify      pubsub.Publisher[notify.Notification]
-	runComplete pubsub.Publisher[notify.RunComplete]
-	interactive bool
+	cfg                *config.ConfigStore
+	sessions           session.Service
+	messages           message.Service
+	permissions        permission.Service
+	questions          question.Service
+	history            history.Service
+	filetracker        filetracker.Service
+	lspManager         *lsp.Manager
+	notify             pubsub.Publisher[notify.Notification]
+	runComplete        pubsub.Publisher[notify.RunComplete]
+	completionSequence *atomic.Uint64
+	interactive        bool
 
 	// agentMu guards mainAgent and mainAgentName: SetMainAgent runs on
 	// HTTP handler goroutines while runs, cancels, and probes read the
@@ -181,21 +183,25 @@ type coordinator struct {
 // struct keeps the constructor self-documenting and avoids a long
 // positional parameter list.
 type CoordinatorOptions struct {
-	Config      *config.ConfigStore
-	Sessions    session.Service
-	Messages    message.Service
-	Permissions permission.Service
-	Questions   question.Service
-	History     history.Service
-	FileTracker filetracker.Service
-	LSPManager  *lsp.Manager
-	Notify      pubsub.Publisher[notify.Notification]
-	RunComplete pubsub.Publisher[notify.RunComplete]
-	Skills      *skills.Manager
-	Interactive bool
+	Config             *config.ConfigStore
+	Sessions           session.Service
+	Messages           message.Service
+	Permissions        permission.Service
+	Questions          question.Service
+	History            history.Service
+	FileTracker        filetracker.Service
+	LSPManager         *lsp.Manager
+	Notify             pubsub.Publisher[notify.Notification]
+	RunComplete        pubsub.Publisher[notify.RunComplete]
+	CompletionSequence *atomic.Uint64
+	Skills             *skills.Manager
+	Interactive        bool
 }
 
 func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, error) {
+	if opts.CompletionSequence == nil {
+		opts.CompletionSequence = new(atomic.Uint64)
+	}
 	// Skills are pre-discovered by the caller (see app.New /
 	// backend.CreateWorkspace) and passed in via the manager. If no
 	// manager was provided (legacy callers), fall back to an in-line
@@ -210,21 +216,22 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	skillTracker := skills.NewTracker(activeSkills)
 
 	c := &coordinator{
-		cfg:          opts.Config,
-		sessions:     opts.Sessions,
-		messages:     opts.Messages,
-		permissions:  opts.Permissions,
-		questions:    opts.Questions,
-		history:      opts.History,
-		filetracker:  opts.FileTracker,
-		lspManager:   opts.LSPManager,
-		notify:       opts.Notify,
-		runComplete:  opts.RunComplete,
-		agents:       make(map[string]SessionAgent),
-		allSkills:    allSkills,
-		activeSkills: activeSkills,
-		skillTracker: skillTracker,
-		interactive:  opts.Interactive,
+		cfg:                opts.Config,
+		sessions:           opts.Sessions,
+		messages:           opts.Messages,
+		permissions:        opts.Permissions,
+		questions:          opts.Questions,
+		history:            opts.History,
+		filetracker:        opts.FileTracker,
+		lspManager:         opts.LSPManager,
+		notify:             opts.Notify,
+		runComplete:        opts.RunComplete,
+		completionSequence: opts.CompletionSequence,
+		agents:             make(map[string]SessionAgent),
+		allSkills:          allSkills,
+		activeSkills:       activeSkills,
+		skillTracker:       skillTracker,
+		interactive:        opts.Interactive,
 	}
 
 	agentCfg, ok := opts.Config.Config().Agents[config.AgentCoder]
@@ -307,7 +314,28 @@ func (c *coordinator) RunAccepted(ctx context.Context, accept *AcceptedRun, sess
 // Accepted so sessionAgent.Run can consume the accept reservation under
 // dispatchMu; when nil (the in-process/local path) no accept tracking
 // applies.
-func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID string, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
+func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID string, prompt string, attachments ...message.Attachment) (result *fantasy.AgentResult, retErr error) {
+	var (
+		latest    notify.RunComplete
+		hasLatest bool
+	)
+	defer func() {
+		if !hasLatest && retErr != nil {
+			latest = notify.RunComplete{
+				SessionID: sessionID, RunID: RunIDFromContext(ctx),
+				Error: retErr.Error(), Cancelled: errors.Is(retErr, context.Canceled),
+				Sequence: c.completionSequence.Add(1),
+			}
+			hasLatest = true
+		}
+		if hasLatest && c.runComplete != nil {
+			completeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			c.runComplete.PublishMustDeliver(completeCtx, pubsub.UpdatedEvent, latest)
+			MarkRunCompletePublished(ctx)
+		}
+	}()
+
 	if err := c.readyWg.Wait(); err != nil {
 		return nil, err
 	}
@@ -370,10 +398,6 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	// exactly once after retries resolve, via PublishMustDeliver, so
 	// a momentarily-full subscriber buffer can't silently drop the
 	// terminal event.
-	var (
-		latest    notify.RunComplete
-		hasLatest bool
-	)
 	onComplete := func(rc notify.RunComplete) {
 		latest = rc
 		hasLatest = true
@@ -424,14 +448,6 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 		})
 	}
 
-	if hasLatest && c.runComplete != nil {
-		c.runComplete.PublishMustDeliver(ctx, pubsub.UpdatedEvent, latest)
-		// Signal to the dispatcher (backend.runAgent) that the
-		// authoritative terminal RunComplete for this run was already
-		// emitted, so it does not publish a duplicate fallback for the
-		// error it is about to receive.
-		MarkRunCompletePublished(ctx)
-	}
 	return result, originalErr
 }
 
@@ -812,6 +828,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		Tools:                nil,
 		Notify:               c.notify,
 		RunComplete:          c.runComplete,
+		CompletionSequence:   c.completionSequence,
 	})
 
 	// The readiness goroutines below perform one-time setup — building the

@@ -236,9 +236,15 @@ func TestPendingSpinnerIsNotDuplicated(t *testing.T) {
 
 // runComplete delivers the agent's terminal event for sessionID.
 func runComplete(m *UI, sessionID string, cancelled bool) {
-	m.Update(pubsub.Event[notify.RunComplete]{
+	_, cmd := m.Update(pubsub.Event[notify.RunComplete]{
 		Payload: notify.RunComplete{SessionID: sessionID, Cancelled: cancelled},
 	})
+	runCmds(m, cmd)
+	// Local admission may return after completion. Retire only once that
+	// reservation is released and the session probe positively says idle.
+	if activity := m.sessionActivities[sessionID]; activity != nil && activity.pending > 0 {
+		runCmds(m, m.submissionFinished(sessionID, activity.gen, nil, false))
+	}
 }
 
 // The clock stops with the run, even after an assistant message has taken

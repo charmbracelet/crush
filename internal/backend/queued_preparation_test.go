@@ -98,181 +98,193 @@ func TestSendMessage_PreparationFailureCompletion(t *testing.T) {
 	t.Setenv("CRUSH_GLOBAL_DATA", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("CRUSH_DISABLE_PROVIDER_AUTO_UPDATE", "1")
-	for _, promoted := range []bool{false, true} {
-		for _, stage := range []string{"session", "history", "user", "assistant"} {
-			t.Run(fmt.Sprintf("promoted=%t/%s", promoted, stage), func(t *testing.T) {
-				ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-				entered := make(chan struct{}, 1)
-				gate := make(chan struct{})
-				var requests atomic.Int64
-				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					requests.Add(1)
-					select {
-					case entered <- struct{}{}:
-					default:
-					}
-					select {
-					case <-gate:
-					case <-ctx.Done():
-						return
-					}
-					w.Header().Set("Content-Type", "text/event-stream")
-					_, err := fmt.Fprint(w, "data: {\"id\":\"reply\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"first answer\"},\"finish_reason\":null}]}\n\ndata: {\"id\":\"reply\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
-					if err != nil {
-						t.Error(err)
-					}
-				}))
-				defer server.Close()
-				defer cancel()
+	for _, failingRunID := range []string{"", "failing"} {
+		for _, cancelled := range []bool{false, true} {
+			for _, promoted := range []bool{false, true} {
+				for _, stage := range []string{"session", "history", "user", "assistant"} {
+					t.Run(fmt.Sprintf("runID=%s/cancelled=%t/promoted=%t/%s", failingRunID, cancelled, promoted, stage), func(t *testing.T) {
+						ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+						entered := make(chan struct{}, 1)
+						gate := make(chan struct{})
+						var requests atomic.Int64
+						server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+							requests.Add(1)
+							select {
+							case entered <- struct{}{}:
+							default:
+							}
+							select {
+							case <-gate:
+							case <-ctx.Done():
+								return
+							}
+							w.Header().Set("Content-Type", "text/event-stream")
+							_, err := fmt.Fprint(w, "data: {\"id\":\"reply\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"first answer\"},\"finish_reason\":null}]}\n\ndata: {\"id\":\"reply\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+							if err != nil {
+								t.Error(err)
+							}
+						}))
+						defer server.Close()
+						defer cancel()
 
-				conn, err := db.Connect(ctx, t.TempDir())
-				require.NoError(t, err)
-				t.Cleanup(func() { require.NoError(t, conn.Close()) })
-				queries := db.New(conn)
-				sessions := &preparationSessions{Service: session.NewService(queries, conn)}
-				messages := &preparationMessages{Service: message.NewService(queries), sessions: sessions}
-				sess, err := sessions.Create(ctx, "session")
-				require.NoError(t, err)
-				// Avoid a title-generation request racing the fault injection.
-				_, err = messages.Create(ctx, sess.ID, message.CreateMessageParams{
-					Role: message.User, Parts: []message.ContentPart{message.TextContent{Text: "existing conversation"}},
-				})
-				require.NoError(t, err)
-				failure := errors.New("preparation storage failure")
-				switch stage {
-				case "session":
-					sessions.err = failure
-				case "history":
-					messages.historyErr = failure
-				case "user":
-					messages.createRole = message.User
-					messages.createErr = failure
-				case "assistant":
-					// This failure is past the guard's handoff to the normal
-					// completion path; it must not emit twice.
-					messages.createRole = message.Assistant
-					messages.createErr = failure
-				}
-				sessions.ready.Store(!promoted)
-
-				workingDir := t.TempDir()
-				cfg, err := config.Init(workingDir, "", false)
-				require.NoError(t, err)
-				cfg.Config().Providers.Set("test", config.ProviderConfig{
-					ID: "test", Name: "Test", Type: openaicompat.Name,
-					BaseURL: server.URL + "/v1", APIKey: "test",
-					Models: []catwalk.Model{{ID: "test-model", DefaultMaxTokens: 4096}},
-				})
-				selected := config.SelectedModel{Provider: "test", Model: "test-model"}
-				cfg.OverridePreferredModel(config.SelectedModelTypeLarge, selected)
-				cfg.OverridePreferredModel(config.SelectedModelTypeSmall, selected)
-				cfg.SetupAgents()
-				coder := cfg.Config().Agents[config.AgentCoder]
-				coder.AllowedTools = nil
-				cfg.Config().Agents[config.AgentCoder] = coder
-
-				backend, _ := newTestBackend(t)
-				ws := insertRunCompleteWorkspace(t, backend, ctx, nil)
-				coord, err := agent.NewCoordinator(ctx, agent.CoordinatorOptions{
-					Config: cfg, Sessions: sessions, Messages: messages,
-					Permissions: permission.NewPermissionService(workingDir, true, nil),
-					Notify:      ws.AgentNotifications(),
-					RunComplete: ws.RunCompletions(),
-					Skills:      skills.NewManager(nil, nil, nil),
-				})
-				require.NoError(t, err)
-				observed := &observedCoordinator{Coordinator: coord, returned: make(chan completedDispatch, 2)}
-				ws.AgentCoordinator = observed
-				completions := ws.RunCompletions().Subscribe(ctx)
-				notifications := ws.AgentNotifications().Subscribe(ctx)
-				if promoted && stage == "session" {
-					sessions.beforeFailure = func() {
-						if len(completions) != 0 {
-							t.Error("initial completion was published before synchronous queue execution finished")
+						conn, err := db.Connect(ctx, t.TempDir())
+						require.NoError(t, err)
+						t.Cleanup(func() { require.NoError(t, conn.Close()) })
+						queries := db.New(conn)
+						sessions := &preparationSessions{Service: session.NewService(queries, conn)}
+						messages := &preparationMessages{Service: message.NewService(queries), sessions: sessions}
+						sess, err := sessions.Create(ctx, "session")
+						require.NoError(t, err)
+						// Avoid a title-generation request racing the fault injection.
+						_, err = messages.Create(ctx, sess.ID, message.CreateMessageParams{
+							Role: message.User, Parts: []message.ContentPart{message.TextContent{Text: "existing conversation"}},
+						})
+						require.NoError(t, err)
+						failure := errors.New("preparation storage failure")
+						if cancelled {
+							failure = context.Canceled
 						}
-					}
-				}
+						switch stage {
+						case "session":
+							sessions.err = failure
+						case "history":
+							messages.historyErr = failure
+						case "user":
+							messages.createRole = message.User
+							messages.createErr = failure
+						case "assistant":
+							// Streaming setup shares the early completion path; it
+							// must not emit twice.
+							messages.createRole = message.Assistant
+							messages.createErr = failure
+						}
+						sessions.ready.Store(!promoted)
 
-				if promoted {
-					require.NoError(t, backend.SendMessage(ws.ID, proto.AgentMessage{SessionID: sess.ID, RunID: "first", Prompt: "first"}))
-					select {
-					case <-entered:
-					case <-ctx.Done():
-						t.Fatal("first turn never streamed")
-					}
-				}
-				require.NoError(t, backend.SendMessage(ws.ID, proto.AgentMessage{SessionID: sess.ID, RunID: "failing", Prompt: "second"}))
-				select {
-				case returned := <-observed.returned:
-					require.Equal(t, "failing", returned.runID)
-					require.Equal(t, !promoted && stage == "assistant", returned.marked,
-						"only the normal completion path transfers ownership from the backend")
-					if promoted {
-						require.NoError(t, returned.err, "a queued submission returns before execution")
-					} else {
-						require.ErrorIs(t, returned.err, failure)
-					}
-				case <-ctx.Done():
-					t.Fatal("second dispatch did not return")
-				}
-				if promoted {
-					require.Equal(t, 1, coord.QueuedPrompts(sess.ID))
-					close(gate)
-					select {
-					case returned := <-observed.returned:
-						require.Equal(t, "first", returned.runID)
-						require.True(t, returned.marked)
-						require.NoError(t, returned.err, "the queued failure must not become the initial caller's error")
-					case <-ctx.Done():
-						t.Fatal("queue promotion did not return")
-					}
-				}
-				ws.runWG.Wait()
-				var reported []notify.Notification
-				for len(notifications) > 0 {
-					n := (<-notifications).Payload
-					if n.Type == notify.TypeAgentError {
-						reported = append(reported, n)
-					}
-				}
-				require.Len(t, reported, 1)
-				require.Equal(t, "failing", reported[0].RunID)
-				require.Contains(t, reported[0].Message, failure.Error())
+						workingDir := t.TempDir()
+						cfg, err := config.Init(workingDir, "", false)
+						require.NoError(t, err)
+						cfg.Config().Providers.Set("test", config.ProviderConfig{
+							ID: "test", Name: "Test", Type: openaicompat.Name,
+							BaseURL: server.URL + "/v1", APIKey: "test",
+							Models: []catwalk.Model{{ID: "test-model", DefaultMaxTokens: 4096}},
+						})
+						selected := config.SelectedModel{Provider: "test", Model: "test-model"}
+						cfg.OverridePreferredModel(config.SelectedModelTypeLarge, selected)
+						cfg.OverridePreferredModel(config.SelectedModelTypeSmall, selected)
+						cfg.SetupAgents()
+						coder := cfg.Config().Agents[config.AgentCoder]
+						coder.AllowedTools = nil
+						cfg.Config().Agents[config.AgentCoder] = coder
 
-				// All publishers have returned. Read buffered events without
-				// sleeps, counting duplicates rather than overwriting by RunID.
-				var got []notify.RunComplete
-				for len(completions) > 0 {
-					got = append(got, (<-completions).Payload)
+						backend, _ := newTestBackend(t)
+						ws := insertRunCompleteWorkspace(t, backend, ctx, nil)
+						coord, err := agent.NewCoordinator(ctx, agent.CoordinatorOptions{
+							Config: cfg, Sessions: sessions, Messages: messages,
+							Permissions: permission.NewPermissionService(workingDir, true, nil),
+							Notify:      ws.AgentNotifications(),
+							RunComplete: ws.RunCompletions(),
+							Skills:      skills.NewManager(nil, nil, nil),
+						})
+						require.NoError(t, err)
+						observed := &observedCoordinator{Coordinator: coord, returned: make(chan completedDispatch, 2)}
+						ws.AgentCoordinator = observed
+						completions := ws.RunCompletions().Subscribe(ctx)
+						notifications := ws.AgentNotifications().Subscribe(ctx)
+						if promoted && stage == "session" {
+							sessions.beforeFailure = func() {
+								if len(completions) != 0 {
+									t.Error("initial completion was published before synchronous queue execution finished")
+								}
+							}
+						}
+
+						if promoted {
+							require.NoError(t, backend.SendMessage(ws.ID, proto.AgentMessage{SessionID: sess.ID, RunID: "first", Prompt: "first"}))
+							select {
+							case <-entered:
+							case <-ctx.Done():
+								t.Fatal("first turn never streamed")
+							}
+						}
+						require.NoError(t, backend.SendMessage(ws.ID, proto.AgentMessage{SessionID: sess.ID, RunID: failingRunID, Prompt: "second"}))
+						select {
+						case returned := <-observed.returned:
+							require.Equal(t, failingRunID, returned.runID)
+							require.Equal(t, !promoted, returned.marked,
+								"all executed preparations transfer completion ownership to the coordinator")
+							if promoted {
+								require.NoError(t, returned.err, "a queued submission returns before execution")
+							} else {
+								require.ErrorIs(t, returned.err, failure)
+							}
+						case <-ctx.Done():
+							t.Fatal("second dispatch did not return")
+						}
+						if promoted {
+							require.Equal(t, 1, coord.QueuedPrompts(sess.ID))
+							close(gate)
+							select {
+							case returned := <-observed.returned:
+								require.Equal(t, "first", returned.runID)
+								require.True(t, returned.marked)
+								require.NoError(t, returned.err, "the queued failure must not become the initial caller's error")
+							case <-ctx.Done():
+								t.Fatal("queue promotion did not return")
+							}
+						}
+						ws.runWG.Wait()
+						var reported []notify.Notification
+						for len(notifications) > 0 {
+							n := (<-notifications).Payload
+							if n.Type == notify.TypeAgentError {
+								reported = append(reported, n)
+							}
+						}
+						if cancelled {
+							require.Empty(t, reported)
+						} else {
+							require.Len(t, reported, 1)
+							require.Equal(t, failingRunID, reported[0].RunID)
+							require.Contains(t, reported[0].Message, failure.Error())
+						}
+
+						// All publishers have returned. Read buffered events without
+						// sleeps, counting duplicates rather than overwriting by RunID.
+						var got []notify.RunComplete
+						for len(completions) > 0 {
+							got = append(got, (<-completions).Payload)
+						}
+						wantCount := 1
+						if promoted {
+							wantCount = 2
+						}
+						require.Len(t, got, wantCount)
+						for _, complete := range got {
+							require.Equal(t, sess.ID, complete.SessionID)
+							switch complete.RunID {
+							case "first":
+								require.False(t, complete.Cancelled)
+								require.Empty(t, complete.Error)
+								require.Equal(t, "first answer", complete.Text)
+							case failingRunID:
+								require.Equal(t, cancelled, complete.Cancelled)
+								require.Contains(t, complete.Error, failure.Error())
+								require.Empty(t, complete.MessageID)
+								require.Empty(t, complete.Text)
+							default:
+								t.Fatalf("unexpected completion: %+v", complete)
+							}
+						}
+						if promoted {
+							require.NotEqual(t, got[0].RunID, got[1].RunID)
+							require.EqualValues(t, 1, requests.Load(), "the failed turn must never reach the provider")
+						} else {
+							require.Equal(t, failingRunID, got[0].RunID)
+							require.Zero(t, requests.Load())
+						}
+					})
 				}
-				wantCount := 1
-				if promoted {
-					wantCount = 2
-				}
-				require.Len(t, got, wantCount)
-				for _, complete := range got {
-					require.Equal(t, sess.ID, complete.SessionID)
-					require.False(t, complete.Cancelled)
-					switch complete.RunID {
-					case "first":
-						require.Empty(t, complete.Error)
-						require.Equal(t, "first answer", complete.Text)
-					case "failing":
-						require.Contains(t, complete.Error, failure.Error())
-						require.Empty(t, complete.MessageID)
-						require.Empty(t, complete.Text)
-					default:
-						t.Fatalf("unexpected completion: %+v", complete)
-					}
-				}
-				if promoted {
-					require.NotEqual(t, got[0].RunID, got[1].RunID)
-					require.EqualValues(t, 1, requests.Load(), "the failed turn must never reach the provider")
-				} else {
-					require.Equal(t, "failing", got[0].RunID)
-					require.Zero(t, requests.Load())
-				}
-			})
+			}
 		}
 	}
 }

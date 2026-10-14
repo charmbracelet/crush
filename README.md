@@ -16,6 +16,8 @@ agent-cli run "Đọc repo và tóm tắt kiến trúc, chưa sửa code."
 agent-cli --continue                       # nối phiên gần nhất
 ```
 
+`agent-cli run` tự duyệt mọi lời xin quyền (bash, sửa tệp, giao việc cho Claude Code/Codex) của session nó chạy, kể cả session có sẵn qua `-s`/`-C`; muốn được hỏi thì dùng TUI hoặc `agent-cli send`.
+
 Hướng dẫn đầy đủ (cấu hình model, kiểm chứng, cập nhật): [docs/agent-cli-local-setup.md](docs/agent-cli-local-setup.md).
 
 ## Cấu hình
@@ -33,6 +35,8 @@ Tên tệp và biến môi trường bên trong (`crush.json`, `CRUSH_*`, `.crus
 
 - Tên và giao diện: wordmark AGENT-CLI, banner thoát, thông báo, trợ giúp lệnh.
 - Không kiểm tra bản mới của upstream (`CRUSH_DISABLE_UPDATE_CHECK`).
+- Nhiều session/dự án trong một TUI (Home, Alt+W/S/N/M), draft riêng từng session, run tiếp tục khi đóng TUI; `run --json`, `send --wait`, `ps`, `logs` cho script.
+- Tool `claude_code`, `codex`: giao việc cho Claude Code / Codex đã đăng nhập trên máy, mỗi lần giao đều hỏi quyền trừ khi bạn chủ động cho qua (`run`, `--yolo`, "Allow for Session"; xem [docs](docs/agent-cli-local-setup.md#giao-việc-cho-claude-code--codex-tool-claude_code-codex)).
 - Chưa đổi: tên module Go, system prompt (còn tự xưng "Crush"), skill và công cụ nội bộ `crush-config`, `crush_info`.
 
 ## Phát triển

@@ -41,6 +41,14 @@ option metrics false
 option provider-auto-update false
 option default-providers false
 
-# Tắt công cụ chạm mạng; chỉ công cụ đọc được chạy không cần hỏi.
-permissions deny sourcegraph web_search web_fetch fetch download
-permissions allow view ls glob grep rg
+# Tắt công cụ chạm mạng của agent-cli. Tên phải đúng tên tool (danh sách ở
+# allToolNames, internal/config/config.go); tên sai bị bỏ qua, không báo lỗi.
+permissions deny sourcegraph fetch agentic_fetch download
+
+# KHÔNG `permissions allow view ls`: trong thư mục dự án hai tool này vốn chạy
+# không hỏi; chúng chỉ hỏi khi đọc NGOÀI dự án (vd tệp env chứa key ở trên).
+# Cho phép ở đây là bỏ luôn lời hỏi đó. glob/grep không có lời hỏi nào.
+
+# claude_code / codex (giao việc cho Claude Code / Codex đã đăng nhập trên máy)
+# chỉ có khi máy có CLI đó, và mỗi lần giao đều hỏi quyền. Không muốn dùng thì:
+# permissions deny claude_code codex

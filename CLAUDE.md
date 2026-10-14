@@ -39,15 +39,14 @@
 | `docs/superpowers/plans/2026-10-14-core-mvp-lat1-lat2.md` | REPO | Plan hiện hành, kèm đối chiếu file feedback UI |
 | `docs/superpowers/plans/2026-10-14-multi-session-multi-project.md`, Phần K | REPO | Bảng KEEP/DISABLE/DEFER/REMOVE; các task cũ A6, A8, A9, A10 đã DEFER |
 | `docs/reviews/2026-10-14-phase1-ui-feedback.md` | REPO | Danh sách đề nghị; ACCEPT/DEFER/REJECT ghi trong plan core MVP |
-| `.superpowers/sdd/2026-10-14-multi-session-multi-project/` | REPO, bị `.git/info/exclude` loại | Ledger `progress.md`, brief, report, diff review, `go.sh`, `preview-install.sh`, luật implementer/reviewer |
 
 - **Base skill** (chỉ đọc): superpowers, ponytail, code-en-doc-vi, glossary-keeper, retro, superpower. Chưa có skill chuyên biệt trong repo (`.claude/skills/` không tồn tại).
 - **Model:**
   - Sonnet cho UI và task nhỏ.
   - Opus cho code an ninh, đồng thời và vòng đời run, cùng lượt soát chúng.
   - Không dùng mutant, không giao lượt soát lại, trừ code an ninh.
-- **Changelog:** repo chưa có `CHANGELOG`, ADR hay `GLOSSARY.md`. Tiến độ ghi ở `docs/progress/PHASE1_STATUS.md` (chỉ agent điều phối ghi).
-- **Mâu thuẫn còn mở:** cây chính có thay đổi của một phiên khác (tool provider `claude_code`/`codex`), worktree có phần multi-session; chỉ gộp ở bước cài, không sửa cây chính.
+- **Changelog:** repo chưa có `CHANGELOG`, ADR hay `GLOSSARY.md`; trạng thái kiểm chứng ghi ở P8. Ledger `.superpowers/sdd/...` (`go.sh`, `preview-install.sh`, luật implementer/reviewer) và `docs/progress/` của đợt Phase 1 chưa từng vào git và đã mất khỏi máy ngày 14/10; tài liệu trong `docs/` còn nhắc tới chúng là lịch sử, đừng làm theo.
+- **Đã gộp (14/10):** nhánh `feat/core-mvp-phase1` và `feat/personal-rename-providers` vào `main`, kèm đợt sửa sau audit độc lập.
 
 ### P3. Kiến trúc và bản đồ repo
 
@@ -57,7 +56,7 @@
   - Tên hiển thị là agent-cli. Module path, `crush.json`, biến `CRUSH_*` và system prompt giữ chữ Crush, để merge upstream rẻ.
   - Không làm IO trong `Update`/`View` của TUI (ghi đầu `internal/ui/model/workspace_cache.go`).
   - Sửa SKILL.md builtin, template prompt hoặc mô tả tool là đổi system prompt, và sẽ làm đỏ cassette VCR của `TestCoderAgent`.
-- **Worktree code hiện hành:** `/home/luannt/application/opensource/agent-cli-wt/multi-session` (HEAD `a73e1bfa`, chưa commit). Cây chính `/home/luannt/application/opensource/agent-cli` chỉ dùng để đọc docs và tích hợp.
+- **Mã:** cây chính `/home/luannt/application/opensource/agent-cli`, nhánh `main`. Worktree `agent-cli-wt/` cũ không còn.
 
 ### P4. Luồng chính
 
@@ -67,20 +66,24 @@
 | Prompt → run → tool | Gửi tin trong TUI, `run`, `send` | Coordinator → session agent → tool → permission. Hook PreToolUse/Stop là opt-in | Bash tự duyệt theo tiền tố, chỉ khi không có ký tự nối lệnh/chuyển hướng | `internal/agent/`, `internal/agent/tools/safe.go`, `bash.go`, `internal/permission/` |
 | Vòng đời server/workspace | Client rời hoặc gắn lại | Còn run thì hoãn teardown, kiểm lại mỗi 5s, trần mồ côi 30 phút; init không thay coordinator khi còn run | Ctrl+C trên `run` chỉ huỷ session do chính nó tạo | `internal/backend/backend.go`, `agent.go`, `internal/cmd/run.go` |
 | CLI cho script | `run --json`, `send --wait`, `ps --all`, `logs` | JSON một object trên stdout; rc 0 = xong, 1 = lỗi chạy, 2 = sai cú pháp | `send --wait` + Ctrl+C chỉ thôi chờ, không huỷ run | `internal/cmd/{run,send,ps,logs}.go` |
+| Giao việc Claude Code/Codex | Model chính gọi tool `claude_code`/`codex` | Chỉ đăng ký khi có CLI (`PATH` hoặc `AGENT_CLI_*_BIN`); hỏi quyền mỗi lần; CLI con chạy headless, trả session/thread ID để `resume` | `run` tự duyệt; mức quyền CLI con: `AGENT_CLI_CLAUDE_PERMISSION_MODE`, `AGENT_CLI_CODEX_SANDBOX` (export ở shell) | `internal/agent/tools/provider/`, `docs/agent-cli-local-setup.md` |
 | Cấu hình provider | Nạp crushrc/crush.json + env của launcher | Biến `AGENT_CLI_*` dùng chung; crush.json chỉ expand `api_key`/`base_url` | Không ghi secret vào docs hay log | `agent-cli.crushrc.example`, `agent-cli.env.example`, `internal/config/load.go`, `docs/agent-cli-local-setup.md` |
 
 ### P5. Lệnh và môi trường kiểm tra
 
-| Mục đích | Thư mục | Lệnh | Thực thi | Kết quả / giới hạn |
-|---|---|---|---|---|
-| Mọi lệnh Go (bắt buộc) | worktree | `$SDD/go.sh <go args>`, với `SDD=.superpowers/sdd/2026-10-14-multi-session-multi-project` | ĐÃ CHẠY | Toàn máy tối đa 2 lệnh Go cùng lúc; chờ RAM trống ≥3000MB; rc=75 thì dừng, không lách. Đã thử phá: chặn được |
-| Test một package | worktree | `$SDD/go.sh test ./internal/<pkg> -count=1` | ĐÃ CHẠY | Không chạy `./...`; `-race` chỉ 1 lần ở cuối |
-| Cassette agent | worktree (phải là cây git) | `$SDD/go.sh test ./internal/agent -run TestCoderAgent -count=1` | ĐÃ CHẠY | Ngoài cây git, `load.go` giới hạn độ sâu của ls nên test đỏ giả |
-| E2E run/send | worktree | `bash scripts/test-agent-cli-run-json.sh` | Worker báo ĐÃ CHẠY | Dựng binary và server thật với fake LLM; chạy 1 lần ở cuối task |
-| Build + cài preview | bất kỳ | `DRY=1 bash $SDD/preview-install.sh`, rồi chạy lại không có `DRY` | CHƯA CHẠY | Gộp 2 cây → build → sao lưu `~/.local/lib/agent-cli/backup-<ts>` → cài; in lệnh quay lại |
-| Lint | worktree | `task lint` | CHƯA CHẠY | |
+| Mục đích | Lệnh (chạy ở gốc repo) | Thực thi | Kết quả / giới hạn |
+|---|---|---|---|
+| Mọi lệnh Go | `taskset -c 0,2,3,5-8,10,11,13-15 go <args>` | ĐÃ CHẠY 14/10 | Bỏ nhân CPU lỗi 1, 4 (SMT 9, 12). Một lệnh Go nặng một lúc |
+| Test toàn kho | `taskset -c 0,2,3,5-8,10,11,13-15 go test ./... -count=1 -p 4` | ĐÃ CHẠY 14/10 | 65 package ok, khoảng 45 giây. `go vet` chỉ báo `internal/csync/maps.go:156` (mã upstream) |
+| Race | `taskset -c 0,2,3,5-8,10,11,13-15 go test -race -count=1 -p 2 ./internal/backend/... ./internal/agent/... ./internal/cmd/... ./internal/ui/... ./internal/workspace/... ./internal/projects/... ./internal/permission/... ./internal/server/...` | ĐÃ CHẠY 14/10 | 0 data race |
+| Cassette agent | `taskset -c 0,2,3,5-8,10,11,13-15 go test ./internal/agent -run TestCoderAgent -count=1` | ĐÃ CHẠY 14/10 | Phải chạy trong cây git; ngoài cây git `load.go` giới hạn độ sâu ls nên đỏ giả |
+| E2E run/send | `bash scripts/test-agent-cli-run-json.sh` | xem P8 | Binary + server thật với LLM giả |
+| Launcher + installer | `bash scripts/test-agent-cli-wrapper.sh` | ĐÃ CHẠY 14/10 | PASS; cài vào thư mục tạm, không đụng bản cài thật |
+| Giao việc thật | `bash scripts/test-agent-cli-delegation.sh` | ĐÃ CHẠY 14/10 | Claude Code + Codex THẬT, LLM chính giả; tốn hạn mức thuê bao; mặc định mức quyền an toàn |
+| Lint | `task lint` | CHƯA CHẠY | |
 
-- **Máy:** luannt-pc, 12 lõi, 15,9GB RAM, 8GB swap, có earlyoom. Tối đa 3 agent cùng lúc.
+- **Máy:** luannt-pc, Ryzen 7 9700X 8 nhân/16 luồng (nhân 1, 4 lỗi L1D), RAM 60 GiB, swap 2 GiB (đo 14/10). Tối đa 3 agent cùng lúc.
+- Phiên Claude Code chạy test giao việc phải bỏ biến `CLAUDECODE`, `CLAUDE_CODE_*` (script dùng `env -i`) để `claude` con chạy như ở terminal thường.
 
 ### P6. Cổng, phát hành và vận hành
 
@@ -89,7 +92,7 @@
 - **Phát hành = cài local:**
   - Binary ở `~/.local/lib/agent-cli/crush`, wrapper ở `~/.local/bin/agent-cli`.
   - Smoke sau khi cài: `agent-cli --version`, rồi một prompt thật (không in secret).
-  - Quay lại: lệnh mà `preview-install.sh` in ra.
+  - Quay lại: lệnh `cp -p` mà `scripts/install-agent-cli.sh` in ra (sao lưu ở `~/.local/lib/agent-cli/backup-<thời điểm>/`, giữ 3 bản).
 - **Log:**
   - Chế độ server: `~/.cache/agent-cli/server-<host>/crush.log`.
   - Chế độ local: `<data dir>/logs/crush.log`.
@@ -105,20 +108,22 @@
 | Quyền / bash | `internal/agent/tools/*.md` | `safe.go`, `bash_autoapprove_test.go` (permission luôn từ chối) | Mọi thay đổi tự duyệt phải có test chứng minh vẫn hỏi quyền |
 | Hook | `docs/hooks/README.md` | `internal/agent/stop_hook.go` | Không sửa dòng `description:` của SKILL.md builtin |
 | Cấu hình / launcher | `docs/agent-cli-local-setup.md` | `scripts/install-agent-cli.sh` + `scripts/test-agent-cli-wrapper.sh` | Không đụng `~/.config/agent-cli` thật của user |
-| Giao việc cho agent | `$SDD/implementer-rules.md`, `reviewer-rules.md` | brief dạng `task-*-brief.md` | Brief ngắn: mục tiêu, ràng buộc, tiêu chí xong |
+| Giao việc cho agent | — | — | Brief ngắn: mục tiêu, ràng buộc, tệp được sửa, lệnh chứng minh xong |
+| Tool giao việc Claude Code/Codex | `internal/agent/tools/provider/doc.go` | `delegate.go` (cổng quyền chung), `delegate_test.go` | Cờ CLI phải thử với CLI thật: unit test chỉ so với chính mã |
 
 ### P8. Điểm chưa xác minh
 
-| Điểm | Tác động | Cách kiểm | Bị chặn |
+| Điểm | Tác động | Cách kiểm | Trạng thái |
 |---|---|---|---|
-| Chưa gọi provider thật trên bản mới | Cổng WIN | Chạy 1 prompt sau khi cài preview | Lát 1 |
-| Hook Stop vòng 1b bị reboot cắt giữa chừng | Hành vi giữ RunComplete khi có prompt xếp hàng chưa được soát lại | `$SDD/go.sh test ./internal/agent -run StopHook` ĐÃ CHẠY 14/10 → ok. Hook là opt-in | Không |
-| Commit `d73a6e42` (revert luật bash) thuộc upstream hay fork | Khi merge upstream có thể mất bản vá S1 | `git fetch upstream` rồi `merge-base --is-ancestor` | Không |
-| Chi phí 2 tool `claude_code`/`codex` trên mọi request | Thêm token cho mỗi request | Đo độ dài request có và không có 2 tool | Không |
-| Phím Alt thật trong terminal/tmux; Esc/Enter trong picker | Acceptance P1.3a | Chạy tmux với socket riêng, `send-keys M-s` | Lát 1 |
+| LLM chính thật (GLM/API) trên bản mới | Cổng WIN | Điền `~/.config/agent-cli/env`, chạy 1 prompt có tool call | CHƯA: máy chưa có key |
+| Giao việc Claude Code/Codex với CLI thật | Lát 1 | `scripts/test-agent-cli-delegation.sh` | ĐÃ 14/10 (local + server): tạo tệp, resume, prompt bắt đầu bằng `-`, mức quyền có hiệu lực |
+| Mức quyền mặc định toàn quyền của CLI con | An ninh | Chạy `claude_code`/`codex` không đặt `AGENT_CLI_*_MODE/SANDBOX` | CHƯA chạy thật: bộ phân loại an toàn của Claude Code chặn phiên Claude tự chạy agent toàn quyền; chỉ unit test |
+| Hộp thoại xin quyền của `claude_code`/`codex` trong TUI thật | An ninh | Mở TUI, model gọi tool, xem hộp thoại | Unit test đã chứng minh có hỏi và từ chối thì không chạy; chưa xem bằng mắt |
+| Commit `d73a6e42` (revert luật bash) thuộc upstream hay fork | Khi merge upstream có thể mất bản vá S1 | `git fetch upstream` rồi `merge-base --is-ancestor` | CHƯA |
+| Phím Alt thật trong terminal/tmux; Esc/Enter trong picker | Acceptance P1.3a | Chạy tmux với socket riêng, `send-keys M-s` | CHƯA |
 
 ## Bảo trì
 
 - Cập nhật PROJECT khi hành vi/lệnh/ràng buộc đổi; đồng bộ caller và docs/comment liên quan trong phạm vi được giao.
 - Chỉ cập nhật mục bị lệch: kiến trúc/đường vào → P3; luồng → P4; lệnh/phụ thuộc chạy → P5; môi trường/vận hành → P6; nguồn luật/changelog → P2; docs/skill/mã mẫu → P7. Sửa nội bộ không đổi các thông tin này thì giữ CLAUDE.md.
-- Giữ CORE theo bản nguồn đã áp dụng (`agent-environment/project-local/template/CLAUDE.template.md`), chỉ đổi khi chủ dự án yêu cầu. Dẫn nguồn thay chép dài; không dùng CLAUDE.md làm backlog hoặc nhật ký.
+- Giữ CORE theo bản nguồn đã áp dụng (`agent-environment/project-local/template/CLAUDE.template.md`, chỉ có trên máy tác giả), chỉ đổi khi chủ dự án yêu cầu. Dẫn nguồn thay chép dài; không dùng CLAUDE.md làm backlog hoặc nhật ký.

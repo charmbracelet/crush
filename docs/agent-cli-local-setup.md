@@ -50,10 +50,12 @@ Dạng `AGENT_CLI_BASE_URL` theo loại provider:
   tự thêm; thêm đuôi này vào sẽ ra URL sai).
 - `anthropic`: URL gốc, KHÔNG có `/v1` (client tự thêm `/v1/messages`).
 
-Crushrc mẫu tắt metrics, tự cập nhật catalog và provider mặc định, ẩn các tool `web_fetch`,
-`web_search`, `fetch`, `download`, `sourcegraph`, và cho chạy tự động các tool đọc (`view`, `ls`,
-`glob`, `grep`, `rg`). Tool `agentic_fetch` vẫn bật (không nằm trong danh sách ẩn); thêm
-`permissions deny agentic_fetch` vào crushrc nếu muốn tắt.
+Crushrc mẫu tắt metrics, tự cập nhật catalog và provider mặc định, và ẩn các tool chạm mạng
+`sourcegraph`, `fetch`, `agentic_fetch`, `download` (tên phải đúng tên tool; tên sai bị bỏ qua
+không báo lỗi). Mẫu KHÔNG `permissions allow` tool đọc nào: trong thư mục dự án `view`, `ls`,
+`glob`, `grep` vốn chạy không hỏi; `view`/`ls` chỉ hỏi khi đọc ngoài dự án (ví dụ tệp env chứa
+key), và allow sẽ bỏ luôn lời hỏi đó. Bản crushrc cài từ mẫu cũ còn dòng
+`permissions allow view ls glob grep rg`: nên xoá dòng đó.
 
 ### Cách 1: model local (không cần key)
 
@@ -124,15 +126,20 @@ agent-cli --continue
 agent-cli login openai
 ```
 
-File mẫu chỉ cho phép công cụ đọc tự động. Sửa file/shell dùng quyền tương tác;
-không dùng `--yolo` mặc định. Cấu hình project có thể ghi đè cấu hình global.
+Trong TUI và `send`: sửa file, chạy shell (trừ lệnh chỉ đọc an toàn), đọc ngoài thư mục
+dự án và giao việc cho Claude Code/Codex đều hỏi quyền; không dùng `--yolo` mặc định.
+**`agent-cli run` thì tự duyệt MỌI lời xin quyền của session nó chạy** (session mới, hoặc
+session có sẵn qua `-s`/`-C`; gồm bash, edit, claude_code, codex...): ràng buộc duy nhất là lời
+trong prompt. Cần được hỏi thì dùng TUI
+hoặc `send`. Cấu hình project có thể ghi đè cấu hình global.
 Metrics, cập nhật catalog provider và kiểm tra phiên bản upstream (`CRUSH_DISABLE_UPDATE_CHECK`) bị tắt trong launcher; điều này không chặn
 mọi network request (model, web/MCP và kiểm tra cập nhật app là các đường riêng).
 
 Model chọn trong TUI (kể cả bật/tắt thinking, mức reasoning) giờ thuộc về dự án:
 được ghi vào `<project>/.crush/crush.json`, nên đổi model ở worktree này không
 đổi model ở worktree khác. Mở lại một session cũ cũng ghi model của session đó
-vào file dự án. Thứ tự gộp config, từ thấp đến cao: `~/.config/agent-cli/crush.json`
+vào file dự án, trừ khi đang có run ở bất kỳ session nào: model là chung cho cả
+workspace và run đọc lại nó ở mỗi bước, nên đổi lúc đó là đổi provider giữa chừng run. Thứ tự gộp config, từ thấp đến cao: `~/.config/agent-cli/crush.json`
 < `~/.local/share/agent-cli/crush.json` < `crush.json` / `.crush.json` trong repo
 < `<project>/.crush/crush.json` (cao nhất). Hệ quả:
 
@@ -187,7 +194,8 @@ của `-c/--cwd` (hoặc thư mục hiện tại); ngoài repo git thì lấy đ
 (`pwd -P`). Kết quả: mọi process cùng một dự án dùng chung một server nên trạng thái
 session (bận, chờ duyệt) đúng ở mọi nơi; dự án khác thì server khác, log và DB tách riêng.
 Server tự tắt sau một khoảng ngắn không còn client (theo plan khoảng 60 giây; chưa đo). Không có `/run/user/$UID` thì
-socket nằm ở `$XDG_RUNTIME_DIR` hoặc `/tmp`.
+socket nằm ở `$XDG_RUNTIME_DIR`, rồi tới `$HOME/.cache/agent-cli` (mode 700; cố ý không
+dùng `/tmp` vì ai cũng ghi được). Đặt `AGENT_CLI_RUNTIME_DIR` để chọn thư mục khác.
 
 - Log server: `~/.cache/agent-cli/server-<host>/crush.log` (`<host>` là địa chỉ socket
   đã thay ký tự lạ bằng `_`). Mỗi dự án một thư mục, không trộn log.
@@ -321,6 +329,39 @@ agent-cli send --session 3f2a --wait --timeout 10m --json "Chạy lại test"   
 - Chỉ nhận prompt từ đối số, không đọc stdin.
 - Chưa kiểm với server và model thật (test chỉ dùng client giả).
 
+## Giao việc cho Claude Code / Codex: tool `claude_code`, `codex`
+
+Model chính có thể giao một việc trọn vẹn cho Claude Code hoặc Codex đã đăng nhập sẵn
+trên máy (dùng gói thuê bao của bạn, không cần API key). Cách hoạt động:
+
+- Tool chỉ có mặt khi tìm thấy CLI (`claude`, `codex` trong `PATH`, hoặc đường dẫn ở
+  `AGENT_CLI_CLAUDE_BIN` / `AGENT_CLI_CODEX_BIN`) và không bị `permissions deny`. Không có CLI
+  thì model không thấy tool và request không tốn token mô tả nó. Biến `*_BIN` đặt mà trỏ sai
+  (tool không bị deny) thì mọi prompt báo lỗi nêu đúng tên biến cho tới khi sửa và khởi động
+  lại server.
+- Mỗi lần giao đều hỏi quyền, hộp thoại hiện nguyên văn việc giao, thư mục và mức quyền.
+  Ngoại lệ, đều do bạn chủ động bật: "Allow for Session" (mọi lần giao sau của CLI đó trong
+  session), `agent-cli run` (tự duyệt mọi quyền của session nó chạy), `--yolo`,
+  `permissions allow claude_code`, hook PreToolUse trả allow.
+- `resume` chỉ nhận ID dạng chữ/số/`._:-` (đúng ID tool đã trả về); giá trị giống cờ bị từ chối
+  trước khi hỏi quyền, để model không chèn được cờ vào lệnh gọi CLI con.
+- Sau khi được duyệt, CLI con chạy không hỏi lại ai: mặc định Claude Code
+  `--dangerously-skip-permissions`, Codex sandbox `danger-full-access`. Muốn chặt hơn:
+  `AGENT_CLI_CLAUDE_PERMISSION_MODE=acceptEdits` (hoặc `plan`),
+  `AGENT_CLI_CODEX_SANDBOX=workspace-write` (hoặc `read-only`).
+- Kết quả trả về kèm session/thread ID; model truyền lại vào `resume` để nói tiếp đúng
+  cuộc hội thoại đó.
+
+Các biến trên phải có trong môi trường của tiến trình agent-cli (export ở shell, ví dụ
+`~/.bashrc`), KHÔNG đặt trong `~/.config/agent-cli/env`: tệp đó chỉ được crushrc `source`
+trong trình thông dịch riêng. Khác tệp env, chúng là env của TIẾN TRÌNH server, lấy từ client
+đã dựng server đó: mở workspace mới không nạp lại. Đổi xong phải để server cũ tắt (khoảng 60
+giây sau khi client cuối thoát, lâu hơn nếu còn run chạy nền; xem `agent-cli ps`) hoặc dừng
+nó như mục "Sửa env khi agent-cli đang chạy", rồi mở lại từ shell đã có biến mới.
+Codex đi kèm app ChatGPT desktop thường không nằm trong `PATH` (ví dụ
+`/usr/lib/chatgpt/resources/codex`): đặt `AGENT_CLI_CODEX_BIN` hoặc tạo symlink vào `~/.local/bin`.
+Không muốn dùng: `permissions deny claude_code codex` trong crushrc.
+
 ## Mode Shift+Tab và "accept edits"
 
 Shift+Tab xoay vòng: code → plan → code + YOLO → code. Các bước này đổi plan/YOLO cho cả workspace nên bị chặn khi
@@ -408,6 +449,10 @@ bash scripts/install-agent-cli.sh
 agent-cli --version
 git diff --check
 ```
+
+Installer sao lưu binary và wrapper đang cài vào `~/.local/lib/agent-cli/backup-<thời điểm>/`
+(giữ 3 bản mới nhất), build ra tệp tạm rồi mới thay (build lỗi thì bản cũ còn nguyên), và in
+lệnh `cp -p` để quay lại.
 
 Đã kiểm chứng: nạp `crushrc` + env với biến giả (provider `main`, model lớn/nhỏ, key rỗng
 và key có giá trị, thiếu biến thì dừng kèm thông báo). Chưa kiểm chứng với endpoint mới (tool

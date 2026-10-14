@@ -86,6 +86,17 @@ func (c *eventCollector) snapshot() []pubsub.Event[Message] {
 	return out
 }
 
+// dropCreated waits for the CreatedEvent that Create publishes, then clears
+// it, so it cannot land after the reset and be mistaken for a later event.
+func (c *eventCollector) dropCreated(t *testing.T) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		return len(c.snapshot()) >= 1
+	}, time.Second, time.Millisecond)
+	require.Equal(t, pubsub.CreatedEvent, c.snapshot()[0].Type)
+	c.reset()
+}
+
 func (c *eventCollector) reset() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -107,9 +118,7 @@ func TestUpdate_DebouncesTextDeltas(t *testing.T) {
 		Role: Assistant,
 	})
 	require.NoError(t, err)
-	// Drop the CreatedEvent emitted by Create.
-	time.Sleep(5 * time.Millisecond)
-	collector.reset()
+	collector.dropCreated(t)
 
 	// Push 5 deltas inside a single debounce window.
 	for i := 0; i < 5; i++ {
@@ -148,8 +157,7 @@ func TestUpdate_TerminalUpdatesFlushSynchronously(t *testing.T) {
 
 	msg, err := svc.Create(t.Context(), sessionID, CreateMessageParams{Role: Assistant})
 	require.NoError(t, err)
-	time.Sleep(5 * time.Millisecond)
-	collector.reset()
+	collector.dropCreated(t)
 
 	// AddFinish makes the message terminal; Update must flush
 	// synchronously even with a 1-hour debounce.

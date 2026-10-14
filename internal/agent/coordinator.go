@@ -1041,6 +1041,10 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 	largeModel = newRequestTimeoutModel(largeModel, requestTimeout)
 	smallModel = newRequestTimeoutModel(smallModel, requestTimeout)
 
+	// Cancelling a turn must stop its stream even with the timeout disabled.
+	largeModel = newStopOnCancelModel(largeModel)
+	smallModel = newStopOnCancelModel(smallModel)
+
 	// Hyper completions no longer report the hypercredit balance, so wrap
 	// the Hyper models to fetch it from /v1/credits on every request.
 	if largeModelCfg.Provider == hyper.Name {

@@ -457,18 +457,14 @@ func (t *baseToolMessageItem) Status() ToolStatus {
 
 // computeStatus computes the effective status considering the result.
 func (t *baseToolMessageItem) computeStatus() ToolStatus {
-	// A cancelled turn leaves its tools holding an interruption dressed as
-	// an error. The cancellation is the more useful thing to say.
-	if t.status == ToolStatusCanceled {
-		return ToolStatusCanceled
+	// A cancelled tool's result is an interruption, not a real error.
+	if t.result == nil || t.status == ToolStatusCanceled {
+		return t.status
 	}
-	if t.result != nil {
-		if t.result.IsError {
-			return ToolStatusError
-		}
-		return ToolStatusSuccess
+	if t.result.IsError {
+		return ToolStatusError
 	}
-	return t.status
+	return ToolStatusSuccess
 }
 
 // isSpinning returns true if the tool should show animation.

@@ -1753,6 +1753,10 @@ func filterFileParts(parts []fantasy.MessagePart) []fantasy.MessagePart {
 	return filtered
 }
 
+// interruptedToolResult is what a tool call reports when its turn was
+// cancelled, in place of the runtime's "context canceled".
+const interruptedToolResult = "tool call was interrupted and did not produce a result, you may retry this call if the result is still needed"
+
 // toolResultsForCalls builds the tool message that must immediately follow
 // an assistant message with tool calls. LLM APIs require every tool call to
 // be followed by its results before any other message; strict-adjacency
@@ -2229,10 +2233,6 @@ func (a *sessionAgent) Model() Model {
 }
 
 // convertToToolResult converts a fantasy tool result to a message tool result.
-// interruptedToolResult is what a tool call reports when the turn was
-// cancelled out from under it, in place of the runtime's "context canceled".
-const interruptedToolResult = "tool call was interrupted and did not produce a result, you may retry this call if the result is still needed"
-
 func (a *sessionAgent) convertToToolResult(result fantasy.ToolResultContent) message.ToolResult {
 	baseResult := message.ToolResult{
 		ToolCallID: result.ToolCallID,

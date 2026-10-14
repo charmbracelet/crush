@@ -229,10 +229,15 @@ func TestRequestTimeoutErrorMessages(t *testing.T) {
 	err.cause = context.DeadlineExceeded
 	require.Equal(t, "LLM request timed out after 1s: context deadline exceeded", err.Error())
 
-	idle := &requestTimeoutError{timeout: 2 * time.Second, idle: true}
+	idle := &requestTimeoutError{timeout: 2 * time.Second, kind: timeoutIdle}
 	require.Equal(t, "LLM stream received no data for 2s", idle.Error())
 	require.Contains(t, idle.userMessage(), "stopped sending data for 2s")
 	require.Contains(t, idle.userMessage(), "request-timeout")
+
+	stalled := &requestTimeoutError{timeout: 20 * time.Second, kind: timeoutStalled}
+	require.Equal(t, "LLM stream sent only keepalives for 20s", stalled.Error())
+	require.Contains(t, stalled.userMessage(), "model sent nothing for 20s")
+	require.Contains(t, stalled.userMessage(), "request-timeout")
 }
 
 // timeoutOnlyModel streams a single error part shaped exactly like the one
@@ -242,7 +247,7 @@ type timeoutOnlyModel struct {
 }
 
 func (m *timeoutOnlyModel) Stream(context.Context, fantasy.Call) (fantasy.StreamResponse, error) {
-	timeoutErr := &requestTimeoutError{timeout: time.Second, idle: true, cause: context.DeadlineExceeded}
+	timeoutErr := &requestTimeoutError{timeout: time.Second, kind: timeoutIdle, cause: context.DeadlineExceeded}
 	return func(yield func(fantasy.StreamPart) bool) {
 		yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeError, Error: timeoutErr})
 	}, nil
@@ -297,7 +302,7 @@ func TestRequestTimeoutRunFinishMessage(t *testing.T) {
 func TestRequestTimeoutIsRetryable(t *testing.T) {
 	t.Parallel()
 
-	err := error(&requestTimeoutError{timeout: time.Minute, idle: true})
+	err := error(&requestTimeoutError{timeout: time.Minute, kind: timeoutIdle})
 
 	var netErr net.Error
 	require.ErrorAs(t, err, &netErr, "must present as a net.Error to be retried")

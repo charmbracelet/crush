@@ -75,11 +75,15 @@ type CurrentSession struct {
 // behind a busy session: another turn's RunComplete for the same
 // SessionID may arrive first, and filtering by SessionID alone
 // would terminate the caller before its own turn ran.
+//
+// PlanPath is the workspace-relative path of the plan file saved for
+// a plan-mode run that ended with a ready plan. Empty otherwise.
 type RunComplete struct {
 	SessionID string `json:"session_id"`
 	RunID     string `json:"run_id,omitempty"`
 	MessageID string `json:"message_id"`
 	Text      string `json:"text,omitempty"`
+	PlanPath  string `json:"plan_path,omitempty"`
 	Error     string `json:"error,omitempty"`
 	Cancelled bool   `json:"cancelled,omitempty"`
 }

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -40,20 +41,22 @@ func wrapEvent(ev any) *pubsub.Payload {
 	case pubsub.Event[mcp.Event]:
 		pt := mcpEventTypeToProto(e.Payload.Type)
 		if pt == "" {
-			// Unsupported MCP event type (e.g. EventChannelMessage, which
-			// has no proto representation until session delivery is wired
-			// up). Drop it instead of fabricating a state_changed event.
+			// Unsupported MCP event type. Drop it instead of fabricating
+			// a state_changed event.
 			slog.Debug("Dropping unsupported MCP event type for SSE", "type", e.Payload.Type)
 			return nil
 		}
 		return envelope(pubsub.PayloadTypeMCPEvent, pubsub.Event[proto.MCPEvent]{
 			Type: e.Type,
 			Payload: proto.MCPEvent{
-				Type:      pt,
-				Name:      e.Payload.Name,
-				State:     proto.MCPState(e.Payload.State),
-				Error:     e.Payload.Error,
-				ToolCount: e.Payload.Counts.Tools,
+				Type:           pt,
+				Name:           e.Payload.Name,
+				State:          proto.MCPState(e.Payload.State),
+				Error:          e.Payload.Error,
+				ToolCount:      e.Payload.Counts.Tools,
+				PromptCount:    e.Payload.Counts.Prompts,
+				ResourceCount:  e.Payload.Counts.Resources,
+				ChannelMessage: e.Payload.ChannelMessage,
 			},
 		})
 	case pubsub.Event[permission.PermissionRequest]:
@@ -74,6 +77,7 @@ func wrapEvent(ev any) *pubsub.Payload {
 		return envelope(pubsub.PayloadTypePermissionNotification, pubsub.Event[proto.PermissionNotification]{
 			Type: e.Type,
 			Payload: proto.PermissionNotification{
+				SessionID:  e.Payload.SessionID,
 				ToolCallID: e.Payload.ToolCallID,
 				Granted:    e.Payload.Granted,
 				Denied:     e.Payload.Denied,
@@ -96,7 +100,8 @@ func wrapEvent(ev any) *pubsub.Payload {
 		return envelope(pubsub.PayloadTypeQuestionNotification, pubsub.Event[proto.QuestionNotification]{
 			Type: e.Type,
 			Payload: proto.QuestionNotification{
-				BatchID: e.Payload.BatchID,
+				BatchID:   e.Payload.BatchID,
+				SessionID: e.Payload.SessionID,
 			},
 		})
 	case pubsub.Event[message.Message]:
@@ -169,6 +174,71 @@ func wrapEvent(ev any) *pubsub.Payload {
 	}
 }
 
+// sessionScopedEventID extracts the session ID from events that
+// belong to a single session's interactive prompts (permission and
+// question requests and their resolution notifications). The second
+// return value reports whether the event is session-scoped at all. An
+// event whose session ID is empty is treated as unscoped: it cannot
+// match any client's current session, so scoping it would drop it for
+// everyone.
+func sessionScopedEventID(ev any) (string, bool) {
+	var id string
+	switch e := ev.(type) {
+	case pubsub.Event[permission.PermissionRequest]:
+		id = e.Payload.SessionID
+	case pubsub.Event[permission.PermissionNotification]:
+		id = e.Payload.SessionID
+	case pubsub.Event[question.Request]:
+		id = e.Payload.SessionID
+	case pubsub.Event[question.Notification]:
+		id = e.Payload.SessionID
+	default:
+		return "", false
+	}
+	return id, id != ""
+}
+
+// deliverToClient reports whether a workspace event should be written
+// to the given client's SSE stream. Session-scoped prompt events are
+// only delivered to clients currently viewing the session that raised
+// them: a permission dialog or question form is only actionable there,
+// and broadcasting it to every client in the workspace lets sessions
+// steal each other's prompts. Prompts raised by sub-agent sessions
+// (agent tool, agentic fetch) resolve to the top-level session so the
+// viewer of the parent session can answer them. Clients on the landing
+// screen (an explicitly cleared session) receive no prompts, while
+// clients that never reported a session at all (e.g. API clients
+// predating session reporting) fail open so their prompts are not
+// stranded. All other events are delivered unfiltered.
+func (c *controllerV1) deliverToClient(ctx context.Context, workspaceID, clientID string, ev any) bool {
+	sessionID, scoped := sessionScopedEventID(ev)
+	if !scoped {
+		return true
+	}
+	current, reported := c.backend.ClientCurrentSession(workspaceID, clientID)
+	if !reported {
+		// The client never reported a current session, so there is
+		// nothing to scope against. Fail open rather than stranding a
+		// prompt nobody can answer.
+		return true
+	}
+	if current == "" {
+		return false
+	}
+	if sessionID == current {
+		return true
+	}
+	root, err := c.backend.RootSessionID(ctx, workspaceID, sessionID)
+	if err != nil {
+		// Fail open: an unresolvable session is delivered as before
+		// rather than stranding a prompt nobody can answer.
+		slog.Debug("Failed to resolve root session for event routing",
+			"session_id", sessionID, "error", err)
+		return true
+	}
+	return root == current
+}
+
 // envelope marshals the inner event and wraps it in a pubsub.Payload.
 func envelope(payloadType pubsub.PayloadType, inner any) *pubsub.Payload {
 	raw, err := json.Marshal(inner)
@@ -192,9 +262,11 @@ func mcpEventTypeToProto(t mcp.EventType) proto.MCPEventType {
 		return proto.MCPEventPromptsListChanged
 	case mcp.EventResourcesListChanged:
 		return proto.MCPEventResourcesListChanged
+	case mcp.EventChannelMessage:
+		return proto.MCPEventChannelMessage
 	default:
-		// Unsupported type (e.g. EventChannelMessage). Return empty so
-		// callers can drop it rather than coercing to state_changed.
+		// Unsupported type. Return empty so callers can drop it rather
+		// than coercing to state_changed.
 		return ""
 	}
 }
@@ -210,6 +282,7 @@ func sessionToProto(s session.Session) proto.Session {
 		CompletionTokens: s.CompletionTokens,
 		Cost:             s.Cost,
 		Todos:            todosToProto(s.Todos),
+		Channel:          s.Channel,
 		CreatedAt:        s.CreatedAt,
 		UpdatedAt:        s.UpdatedAt,
 	}

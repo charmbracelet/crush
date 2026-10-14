@@ -81,42 +81,21 @@ func Register(workingDir, dataDir string) error {
 		return err
 	}
 
-	now := time.Now().UTC()
-
-	// Check if project already exists
-	found := false
-	for i, p := range list.Projects {
-		if p.Path == workingDir {
-			list.Projects[i].DataDir = dataDir
-			list.Projects[i].LastAccessed = now
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		list.Projects = append(list.Projects, Project{
-			Path:         workingDir,
-			DataDir:      dataDir,
-			LastAccessed: now,
-		})
-	}
-
-	// Sort by last accessed (most recent first)
-	slices.SortFunc(list.Projects, func(a, b Project) int {
-		if a.LastAccessed.After(b.LastAccessed) {
-			return -1
-		}
-		if a.LastAccessed.Before(b.LastAccessed) {
-			return 1
-		}
-		return 0
+	// The list is kept most-recent-first by moving each registration to the
+	// front, not by sorting on timestamps, which tie on coarse clocks.
+	list.Projects = slices.DeleteFunc(list.Projects, func(p Project) bool {
+		return p.Path == workingDir
+	})
+	list.Projects = slices.Insert(list.Projects, 0, Project{
+		Path:         workingDir,
+		DataDir:      dataDir,
+		LastAccessed: time.Now().UTC(),
 	})
 
 	return Save(list)
 }
 
-// List returns all tracked projects sorted by last accessed.
+// List returns all tracked projects, most recently registered first.
 func List() ([]Project, error) {
 	list, err := Load()
 	if err != nil {

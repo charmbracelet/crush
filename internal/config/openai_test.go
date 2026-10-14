@@ -3,6 +3,8 @@ package config
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -145,13 +147,16 @@ func TestSetProviderAPIKeyOpenAIIsEitherOr(t *testing.T) {
 			Providers *csync.Map[string, ProviderConfig] `json:"providers"`
 		}{Providers: providers}))
 
+		originalFetch := fetchOpenAIModels
+		fetchOpenAIModels = func(context.Context, *oauth.Token) ([]catwalk.Model, error) {
+			return []catwalk.Model{{ID: "gpt-5.1-codex"}}, nil
+		}
+		t.Cleanup(func() { fetchOpenAIModels = originalFetch })
+
 		return &ConfigStore{
 			config:         &Config{Providers: providers},
 			globalDataPath: configPath,
 			workingDir:     dir,
-			fetchOpenAIModels: func(context.Context, *oauth.Token) ([]catwalk.Model, error) {
-				return []catwalk.Model{{ID: "gpt-5.1-codex"}}, nil
-			},
 		}
 	}
 
@@ -217,4 +222,222 @@ func TestSetProviderAPIKeyOpenAIIsEitherOr(t *testing.T) {
 		require.Equal(t, "chatgpt-at", pc.APIKey, "copilot still mirrors the access token into api_key")
 		require.Equal(t, token, pc.OAuthToken)
 	})
+}
+
+// TestRefetchOpenAIModelsRefreshesExpiredToken pins the behavior of the
+// catalog refresh when the stored ChatGPT token has expired: the refresh
+// renews the token before fetching, so the request is not rejected with a
+// 401, and the fetched catalog replaces the persisted one.
+func TestRefetchOpenAIModelsRefreshesExpiredToken(t *testing.T) {
+	// Not parallel: swaps the fetchOpenAIModels package variable.
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "crush.json")
+
+	expired := &oauth.Token{
+		AccessToken:  "expired-at",
+		RefreshToken: "expired-rt",
+		ExpiresIn:    3600,
+		ExpiresAt:    time.Now().Add(-time.Hour).Unix(),
+	}
+	fresh := &oauth.Token{
+		AccessToken:  "fresh-at",
+		RefreshToken: "fresh-rt",
+		ExpiresIn:    3600,
+		ExpiresAt:    time.Now().Add(time.Hour).Unix(),
+	}
+
+	providers := csync.NewMap[string, ProviderConfig]()
+	providers.Set("openai", ProviderConfig{
+		ID:            "openai",
+		OAuthToken:    expired,
+		ChatGPTModels: []catwalk.Model{{ID: "gpt-stale"}},
+	})
+	store := &ConfigStore{
+		config:         &Config{Providers: providers},
+		globalDataPath: configPath,
+		exchangeToken: func(ctx context.Context, providerID, refreshToken string) (*oauth.Token, error) {
+			require.Equal(t, "openai", providerID)
+			require.Equal(t, "expired-rt", refreshToken)
+			return fresh, nil
+		},
+	}
+
+	originalFetch := fetchOpenAIModels
+	var fetchToken *oauth.Token
+	fetchOpenAIModels = func(_ context.Context, token *oauth.Token) ([]catwalk.Model, error) {
+		fetchToken = token
+		return []catwalk.Model{{ID: "gpt-fresh"}}, nil
+	}
+	t.Cleanup(func() { fetchOpenAIModels = originalFetch })
+
+	store.refetchOpenAIModels(t.Context(), ScopeGlobal)
+
+	require.Equal(t, fresh, fetchToken, "the catalog is fetched with the renewed token")
+
+	pc, ok := store.Config().Providers.Get("openai")
+	require.True(t, ok)
+	require.Equal(t, fresh, pc.OAuthToken, "the renewed token is kept in the config")
+	require.Equal(t, "gpt-fresh", pc.ChatGPTModels[0].ID, "the existing catalog is replaced")
+
+	disk, err := os.ReadFile(configPath)
+	require.NoError(t, err)
+	require.Contains(t, string(disk), "gpt-fresh", "the fetched catalog is persisted")
+	require.Contains(t, string(disk), "fresh-rt", "the renewed token is persisted")
+}
+
+// chatGPTLoginConfig is a project config for a ChatGPT login whose
+// persisted model catalog has gone stale.
+func chatGPTLoginConfig(token *oauth.Token) string {
+	tokenJSON, err := json.Marshal(token)
+	if err != nil {
+		panic(err)
+	}
+	return `{
+		"providers": {
+			"openai": {
+				"id": "openai",
+				"oauth": ` + string(tokenJSON) + `,
+				"chatgpt_models": [{"id": "gpt-stale", "name": "GPT Stale"}]
+			}
+		}
+	}`
+}
+
+// chatGPTLoginToken returns a token that is valid long enough for a test
+// run, so the catalog refresh does not spend time renewing it.
+func chatGPTLoginToken() *oauth.Token {
+	return &oauth.Token{
+		AccessToken:  "chatgpt-at",
+		RefreshToken: "chatgpt-rt",
+		ExpiresIn:    3600,
+		ExpiresAt:    time.Now().Add(time.Hour).Unix(),
+	}
+}
+
+// newCatwalkStub serves the given response for /v2/providers so Load's
+// catalog fetch can be driven without the network. CATWALK_URL and
+// HYPER_URL are pointed at the stub: Hyper fails fast against it instead
+// of reaching the real service.
+func newCatwalkStub(t *testing.T, status int, catalog []catwalk.Provider) {
+	t.Helper()
+
+	catalogJSON, err := json.Marshal(catalog)
+	require.NoError(t, err)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v2/providers" && status == http.StatusOK {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write(catalogJSON)
+			return
+		}
+		w.WriteHeader(status)
+	}))
+	t.Cleanup(server.Close)
+
+	t.Setenv("CATWALK_URL", server.URL)
+	t.Setenv("HYPER_URL", server.URL)
+}
+
+// isolateLoadEnv points the config discovery at throwaway directories.
+func isolateLoadEnv(t *testing.T) (workDir, dataDir string) {
+	t.Helper()
+
+	isolated := t.TempDir()
+	t.Setenv("HOME", isolated)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(isolated, ".config"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(isolated, ".local", "share"))
+	t.Setenv("CRUSH_GLOBAL_CONFIG", filepath.Join(isolated, ".config", "crush"))
+	t.Setenv("CRUSH_GLOBAL_DATA", filepath.Join(isolated, ".local", "share", "crush"))
+	return t.TempDir(), t.TempDir()
+}
+
+// stubChatGPTModels replaces the ChatGPT catalog fetch with one that
+// reports whether it ran and what it returns.
+func stubChatGPTModels(t *testing.T, models []catwalk.Model) *bool {
+	t.Helper()
+
+	originalFetch := fetchOpenAIModels
+	called := false
+	fetchOpenAIModels = func(context.Context, *oauth.Token) ([]catwalk.Model, error) {
+		called = true
+		return models, nil
+	}
+	t.Cleanup(func() { fetchOpenAIModels = originalFetch })
+	return &called
+}
+
+// TestLoadRefreshesChatGPTModelsWhenCatwalkUpdates covers the startup
+// wiring: when Catwalk delivers a fresh catalog, the ChatGPT model catalog
+// is refreshed in the same run, and the config Load publishes afterwards
+// still carries the resolved default models (the refresh swaps the config
+// out from under Load, which must re-read it).
+func TestLoadRefreshesChatGPTModelsWhenCatwalkUpdates(t *testing.T) {
+	// Not parallel: swaps package-level provider state and the fetch
+	// stub, and sets environment variables.
+	workDir, dataDir := isolateLoadEnv(t)
+	newCatwalkStub(t, http.StatusOK, []catwalk.Provider{{
+		Name:                "OpenAI",
+		ID:                  catwalk.InferenceProviderOpenAI,
+		Type:                catwalk.TypeOpenAI,
+		DefaultLargeModelID: "gpt-5.1",
+		DefaultSmallModelID: "gpt-5.1-mini",
+		Models: []catwalk.Model{
+			{ID: "gpt-5.1", Name: "GPT-5.1"},
+			{ID: "gpt-5.1-mini", Name: "GPT-5.1 mini"},
+		},
+	}})
+	resetProviderState()
+	t.Cleanup(resetProviderState)
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(workDir, "crush.json"),
+		[]byte(chatGPTLoginConfig(chatGPTLoginToken())),
+		0o600,
+	))
+
+	fetched := stubChatGPTModels(t, []catwalk.Model{{ID: "gpt-fresh", Name: "GPT Fresh"}})
+
+	store, err := Load(workDir, dataDir, false)
+	require.NoError(t, err)
+
+	require.True(t, CatwalkUpdated(), "the stub served a fresh catalog")
+	require.True(t, *fetched, "the ChatGPT catalog refresh rides the Catwalk update")
+
+	pc, ok := store.Config().Providers.Get("openai")
+	require.True(t, ok)
+	require.Equal(t, "gpt-fresh", pc.ChatGPTModels[0].ID, "the stale catalog is replaced")
+
+	large, ok := store.Config().Models[SelectedModelTypeLarge]
+	require.True(t, ok)
+	require.Equal(t, "gpt-5.1", large.Model, "the resolved default model survives the catalog refresh")
+}
+
+// TestLoadKeepsChatGPTModelsWhenCatwalkNotModified verifies the refresh
+// only follows actual Catwalk updates: a 304 Not Modified leaves the
+// persisted catalog alone.
+func TestLoadKeepsChatGPTModelsWhenCatwalkNotModified(t *testing.T) {
+	// Not parallel: swaps package-level provider state and the fetch
+	// stub, and sets environment variables.
+	workDir, dataDir := isolateLoadEnv(t)
+	newCatwalkStub(t, http.StatusNotModified, nil)
+	resetProviderState()
+	t.Cleanup(resetProviderState)
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(workDir, "crush.json"),
+		[]byte(chatGPTLoginConfig(chatGPTLoginToken())),
+		0o600,
+	))
+
+	fetched := stubChatGPTModels(t, []catwalk.Model{{ID: "gpt-fresh", Name: "GPT Fresh"}})
+
+	store, err := Load(workDir, dataDir, false)
+	require.NoError(t, err)
+
+	require.False(t, CatwalkUpdated(), "the stub reported the catalog unchanged")
+	require.False(t, *fetched, "an unchanged Catwalk catalog does not trigger a refresh")
+
+	pc, ok := store.Config().Providers.Get("openai")
+	require.True(t, ok)
+	require.Equal(t, "gpt-stale", pc.ChatGPTModels[0].ID, "the persisted catalog is kept")
 }

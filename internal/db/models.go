@@ -18,6 +18,14 @@ type File struct {
 	UpdatedAt int64  `json:"updated_at"`
 }
 
+type McpDisabledServer struct {
+	Name string `json:"name"`
+}
+
+type McpEnabledServer struct {
+	Name string `json:"name"`
+}
+
 type Message struct {
 	ID                      string          `json:"id"`
 	SessionID               string          `json:"session_id"`
@@ -53,4 +61,5 @@ type Session struct {
 	CreatedAt        int64          `json:"created_at"`
 	SummaryMessageID sql.NullString `json:"summary_message_id"`
 	Todos            sql.NullString `json:"todos"`
+	Channel          sql.NullString `json:"channel"`
 }

@@ -145,6 +145,7 @@ type AgentMessage struct {
 	HiddenUserMessage bool         `json:"hidden_user_message,omitempty"`
 	SessionID         string       `json:"session_id"`
 	RunID             string       `json:"run_id,omitempty"`
+	Channel           string       `json:"channel,omitempty"`
 	Prompt            string       `json:"prompt"`
 	Attachments       []Attachment `json:"attachments,omitempty"`
 }
@@ -261,7 +262,8 @@ type QuestionAnswerResponse struct {
 // QuestionNotification is published when a question batch is
 // resolved so non-answering clients can dismiss their forms.
 type QuestionNotification struct {
-	BatchID string `json:"batch_id"`
+	BatchID   string `json:"batch_id"`
+	SessionID string `json:"session_id"`
 }
 
 // PermissionSkipRequest represents a request to skip permission prompts.

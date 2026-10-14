@@ -488,7 +488,7 @@ func (s *Service) lookup(ctx context.Context, prompt string) string {
 		SearchQuery:       prompt,
 		IncludeSummary:    &summary,
 		PeerPerspective:   s.identity.ObserverPeer(s.cfg.ObservationMode),
-		PeerTarget:        s.identity.ChatTarget(s.cfg.ObservationMode),
+		PeerTarget:        s.identity.UserPeer,
 		SearchTopK:        5,
 		SearchMaxDistance: 0.7,
 		MaxConclusions:    s.cfg.MaxConclusions,

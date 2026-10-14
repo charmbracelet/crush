@@ -82,6 +82,11 @@ func (f *svcFake) handle(w http.ResponseWriter, r *http.Request) {
 
 	case strings.Contains(p, "/sessions/") && strings.HasSuffix(p, "/context"):
 		n := f.bump("session_context")
+		q := r.URL.Query()
+		if q.Get("peer_perspective") != "" && q.Get("peer_target") == "" {
+			http.Error(w, "peer_target must be provided if peer_perspective is provided", http.StatusUnprocessableEntity)
+			return
+		}
 		if code := f.read(func() int { return f.sessionStatus }); code != http.StatusOK {
 			http.Error(w, "boom", code)
 			return

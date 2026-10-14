@@ -8,9 +8,9 @@ asks to hand work to Codex or their ChatGPT plan, or when an independent
 second implementation of a hard problem is useful. Codex must be signed in
 on this machine ("codex" once, interactively); no API key is involved.
 
-The permission prompt for this tool call is the trust boundary: approving
-the delegation lets Codex run commands with full access inside the project
-directory without asking again.
+Each call asks the user for permission first, showing the full prompt.
+Once approved, Codex works in the project directory and may run commands
+without asking again, at the access level the user configured.
 
 Parameters:
 

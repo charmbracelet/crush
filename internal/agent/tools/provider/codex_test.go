@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,18 +17,22 @@ func TestBuildCodexArgs(t *testing.T) {
 	require.Equal(t, []string{
 		"exec",
 		"--json",
-		"-s", "danger-full-access",
+		"-c", `sandbox_mode="danger-full-access"`,
 		"--skip-git-repo-check",
+		"--",
 		"fix the login bug",
 	}, args)
 
+	// "exec resume" không có -s: sandbox phải đi qua -c (đã thử với
+	// codex-cli 0.159.2), id và prompt là hai tham số vị trí sau "--".
 	args = (codexStrategy{}).args("now add tests", "thread-9")
 	require.Equal(t, []string{
 		"exec",
 		"resume",
 		"--json",
-		"-s", "danger-full-access",
+		"-c", `sandbox_mode="danger-full-access"`,
 		"--skip-git-repo-check",
+		"--",
 		"thread-9",
 		"now add tests",
 	}, args)
@@ -130,8 +133,8 @@ JSONL
 	t.Cleanup(func() { codexCommand = "codex" })
 	codexCommand = script
 
-	tool := NewCodexTool(dir)
-	resp, err := tool.Run(context.Background(), fantasy.ToolCall{
+	tool := NewCodexTool(dir, &fakePermissions{allow: true})
+	resp, err := tool.Run(sessionCtx(t), fantasy.ToolCall{
 		ID:    "call-1",
 		Name:  CodexToolName,
 		Input: `{"prompt":"write hello.txt"}`,
@@ -158,8 +161,8 @@ func TestCodexToolMissingBinary(t *testing.T) {
 	t.Cleanup(func() { codexCommand = "codex" })
 	codexCommand = "codex-does-not-exist-anywhere"
 
-	tool := NewCodexTool(t.TempDir())
-	_, err := tool.Run(context.Background(), fantasy.ToolCall{
+	tool := NewCodexTool(t.TempDir(), &fakePermissions{allow: true})
+	_, err := tool.Run(sessionCtx(t), fantasy.ToolCall{
 		ID:    "call-2",
 		Name:  CodexToolName,
 		Input: `{"prompt":"noop"}`,
@@ -187,8 +190,8 @@ exit 1
 	t.Cleanup(func() { codexCommand = "codex" })
 	codexCommand = script
 
-	tool := NewCodexTool(dir)
-	_, err := tool.Run(context.Background(), fantasy.ToolCall{
+	tool := NewCodexTool(dir, &fakePermissions{allow: true})
+	_, err := tool.Run(sessionCtx(t), fantasy.ToolCall{
 		ID:    "call-4",
 		Name:  CodexToolName,
 		Input: `{"prompt":"noop"}`,

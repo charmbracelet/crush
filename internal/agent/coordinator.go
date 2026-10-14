@@ -880,8 +880,6 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	allTools = append(
 		allTools,
 		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.DataDirectory, c.cfg.Config().Options.Attribution, modelID),
-		provider.NewClaudeCodeTool(c.cfg.WorkingDir()),
-		provider.NewCodexTool(c.cfg.WorkingDir()),
 		tools.NewCrushInfoTool(c.cfg, c.lspManager, c.allSkills, c.activeSkills, c.skillTracker),
 		tools.NewCrushLogsTool(logFile),
 		tools.NewJobOutputTool(c.cfg.Config().Options.DataDirectory),
@@ -898,6 +896,14 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		tools.NewViewTool(c.lspManager, c.permissions, c.filetracker, c.skillTracker, c.cfg.WorkingDir(), c.cfg.Config().Options.SkillsPaths...),
 		tools.NewWriteTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 	)
+
+	// Tool uỷ quyền cho Claude Code/Codex chỉ có mặt khi agent được phép dùng
+	// và máy có CLI đó; biến AGENT_CLI_*_BIN trỏ sai thì dựng agent lỗi.
+	delegationTools, err := provider.NewTools(c.cfg.WorkingDir(), c.permissions, agent.AllowedTools)
+	if err != nil {
+		return nil, err
+	}
+	allTools = append(allTools, delegationTools...)
 
 	// Question tool is interactive-only and not available to sub-agents.
 	if !isSubAgent && c.interactive {

@@ -7,9 +7,9 @@ its own: the goal, the relevant file paths, and any constraints. Use it when
 the user asks to hand work to Claude Code or their Claude subscription, or
 when an independent second implementation of a hard problem is useful.
 
-The permission prompt for this tool call is the trust boundary: approving the
-delegation lets Claude Code use all of its tools inside the project
-directory without asking again.
+Each call asks the user for permission first, showing the full prompt.
+Once approved, Claude Code works in the project directory and may use its tools
+without asking again, at the access level the user configured.
 
 Parameters:
 

@@ -1,16 +1,29 @@
 package provider
 
 import (
+	"cmp"
 	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"charm.land/fantasy"
 )
 
 const CodexToolName = "codex"
+
+// Biến env cấu hình tool codex; như tool claude_code, phải có trong môi
+// trường của tiến trình agent-cli (export ở shell).
+const (
+	codexBinEnv     = "AGENT_CLI_CODEX_BIN"
+	codexSandboxEnv = "AGENT_CLI_CODEX_SANDBOX"
+)
+
+// defaultCodexSandbox giữ mặc định đã chốt của tool, cùng mức tin cậy với
+// claude_code: Codex chạy lệnh không giới hạn sau khi lời uỷ quyền được duyệt.
+const defaultCodexSandbox = "danger-full-access"
 
 //go:embed codex.md
 var codexDescription string
@@ -20,23 +33,41 @@ var codexCommand = "codex"
 
 // codexStrategy adapts Codex's headless interface: a JSONL event stream
 // whose error, turn.failed, and agent_message events carry the outcome.
-type codexStrategy struct{}
+// Giá trị rỗng của bin/sandbox nghĩa là dùng mặc định.
+type codexStrategy struct {
+	bin     string
+	sandbox string
+}
 
-func (codexStrategy) name() string     { return CodexToolName }
-func (codexStrategy) describe() string { return codexDescription }
-func (codexStrategy) binary() string   { return codexCommand }
+// newCodexStrategy đọc cấu hình từ env lúc dựng tool.
+func newCodexStrategy() codexStrategy {
+	return codexStrategy{bin: os.Getenv(codexBinEnv), sandbox: os.Getenv(codexSandboxEnv)}
+}
 
-// args assembles the headless invocation. The tool call itself is the
-// permission gate; danger-full-access matches the claude_code trust model.
-func (codexStrategy) args(prompt, resume string) []string {
+func (codexStrategy) name() string          { return CodexToolName }
+func (codexStrategy) describe() string      { return codexDescription }
+func (codexStrategy) label() string         { return "Codex" }
+func (codexStrategy) binaryEnv() string     { return codexBinEnv }
+func (s codexStrategy) binary() string      { return cmp.Or(s.bin, codexCommand) }
+func (s codexStrategy) sandboxMode() string { return cmp.Or(s.sandbox, defaultCodexSandbox) }
+func (s codexStrategy) access() string      { return "sandbox " + s.sandboxMode() }
+
+// args assembles the headless invocation. The permission prompt of the
+// tool call is the gate, as for claude_code.
+func (s codexStrategy) args(prompt, resume string) []string {
 	args := []string{"exec"}
 	if resume != "" {
 		args = append(args, "resume")
 	}
+	// "exec resume" không nhận -s/--sandbox (codex-cli 0.159.2 báo
+	// "unexpected argument '-s'"), nên mức sandbox đi qua -c, dùng được cho
+	// cả lượt mới lẫn lượt tiếp tục. "--" để prompt bắt đầu bằng "-" không
+	// bị hiểu thành cờ.
 	args = append(args,
 		"--json",
-		"-s", "danger-full-access",
+		"-c", fmt.Sprintf("sandbox_mode=%q", s.sandboxMode()),
 		"--skip-git-repo-check",
+		"--",
 	)
 	if resume != "" {
 		args = append(args, resume)
@@ -98,7 +129,7 @@ func (codexStrategy) parse(stdout []byte) (delegationOutput, error) {
 }
 
 // NewCodexTool delegates a self-contained task to Codex running headlessly
-// in the working directory.
-func NewCodexTool(workingDir string) fantasy.AgentTool {
-	return newDelegationTool(workingDir, codexStrategy{})
+// in the working directory, after the user approves the call.
+func NewCodexTool(workingDir string, perms permissionRequester) fantasy.AgentTool {
+	return newDelegationTool(workingDir, perms, newCodexStrategy())
 }

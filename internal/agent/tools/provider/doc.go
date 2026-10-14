@@ -4,8 +4,11 @@
 //
 // Every provider implements the strategy interface in delegate.go: name,
 // description, binary, argument assembly, and output parsing. The shared
-// runner owns everything common — prompt validation, binary availability,
-// timeout, execution, and error precedence (a failure the CLI reported in
-// its own output beats the process exit code). Adding a provider means
-// implementing the strategy and registering one constructor call.
+// runner owns everything common — prompt and resume validation, the
+// permission prompt (the only gate: the nested CLI runs without asking
+// anyone), binary availability, timeout, execution, and error precedence (a
+// failure the CLI reported in its own output beats the process exit code).
+// NewTools registers a provider only when its CLI is installed and the agent
+// may use it. Adding a provider means implementing the strategy and listing
+// it in NewTools.
 package provider

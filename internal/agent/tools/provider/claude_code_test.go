@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,14 +15,29 @@ func TestBuildClaudeCodeArgs(t *testing.T) {
 
 	args := (claudeStrategy{}).args("fix the login bug", "")
 	require.Equal(t, []string{
-		"-p", "fix the login bug",
+		"-p",
 		"--output-format", "json",
 		"--dangerously-skip-permissions",
+		"--", "fix the login bug",
 	}, args)
 
 	args = (claudeStrategy{}).args("now add tests", "sess-7")
-	require.Contains(t, args, "--resume")
-	require.Equal(t, "sess-7", args[len(args)-1])
+	require.Equal(t, []string{
+		"-p",
+		"--output-format", "json",
+		"--dangerously-skip-permissions",
+		"--resume=sess-7",
+		"--", "now add tests",
+	}, args)
+
+	// Mức khác mặc định đi qua --permission-mode.
+	args = (claudeStrategy{mode: "plan"}).args("look around", "")
+	require.Equal(t, []string{
+		"-p",
+		"--output-format", "json",
+		"--permission-mode", "plan",
+		"--", "look around",
+	}, args)
 }
 
 func TestParseClaudeCodeResult(t *testing.T) {
@@ -62,8 +76,8 @@ JSON
 	t.Cleanup(func() { claudeCommand = "claude" })
 	claudeCommand = script
 
-	tool := NewClaudeCodeTool(dir)
-	resp, err := tool.Run(context.Background(), fantasy.ToolCall{
+	tool := NewClaudeCodeTool(dir, &fakePermissions{allow: true})
+	resp, err := tool.Run(sessionCtx(t), fantasy.ToolCall{
 		ID:    "call-1",
 		Name:  ClaudeCodeToolName,
 		Input: `{"prompt":"write hello.txt"}`,
@@ -89,8 +103,8 @@ func TestClaudeCodeToolMissingBinary(t *testing.T) {
 	t.Cleanup(func() { claudeCommand = "claude" })
 	claudeCommand = "claude-does-not-exist-anywhere"
 
-	tool := NewClaudeCodeTool(t.TempDir())
-	_, err := tool.Run(context.Background(), fantasy.ToolCall{
+	tool := NewClaudeCodeTool(t.TempDir(), &fakePermissions{allow: true})
+	_, err := tool.Run(sessionCtx(t), fantasy.ToolCall{
 		ID:    "call-2",
 		Name:  ClaudeCodeToolName,
 		Input: `{"prompt":"noop"}`,
@@ -114,8 +128,8 @@ JSON
 	t.Cleanup(func() { claudeCommand = "claude" })
 	claudeCommand = script
 
-	tool := NewClaudeCodeTool(dir)
-	_, err := tool.Run(context.Background(), fantasy.ToolCall{
+	tool := NewClaudeCodeTool(dir, &fakePermissions{allow: true})
+	_, err := tool.Run(sessionCtx(t), fantasy.ToolCall{
 		ID:    "call-3",
 		Name:  ClaudeCodeToolName,
 		Input: `{"prompt":"fix build"}`,
@@ -142,8 +156,8 @@ exit 1
 	t.Cleanup(func() { claudeCommand = "claude" })
 	claudeCommand = successScript
 
-	tool := NewClaudeCodeTool(dir)
-	resp, err := tool.Run(context.Background(), fantasy.ToolCall{
+	tool := NewClaudeCodeTool(dir, &fakePermissions{allow: true})
+	resp, err := tool.Run(sessionCtx(t), fantasy.ToolCall{
 		ID:    "call-5",
 		Name:  ClaudeCodeToolName,
 		Input: `{"prompt":"write hello.txt"}`,
@@ -160,7 +174,7 @@ exit 1
 `), 0o755))
 	claudeCommand = failureScript
 
-	_, err = tool.Run(context.Background(), fantasy.ToolCall{
+	_, err = tool.Run(sessionCtx(t), fantasy.ToolCall{
 		ID:    "call-6",
 		Name:  ClaudeCodeToolName,
 		Input: `{"prompt":"noop"}`,
@@ -175,10 +189,10 @@ func TestDelegationRequiresPrompt(t *testing.T) {
 	// The shared runner rejects an empty prompt identically for every
 	// provider strategy.
 	for _, tool := range []fantasy.AgentTool{
-		NewClaudeCodeTool(t.TempDir()),
-		NewCodexTool(t.TempDir()),
+		NewClaudeCodeTool(t.TempDir(), &fakePermissions{allow: true}),
+		NewCodexTool(t.TempDir(), &fakePermissions{allow: true}),
 	} {
-		_, err := tool.Run(context.Background(), fantasy.ToolCall{
+		_, err := tool.Run(sessionCtx(t), fantasy.ToolCall{
 			ID:    "call-empty",
 			Name:  "any",
 			Input: `{"prompt":"   "}`,

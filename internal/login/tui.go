@@ -84,7 +84,6 @@ type authModel struct {
 
 	verificationURL string
 	userCode        string
-	browserFailed   bool
 
 	// codeEntry is set when the flow can finish with a pasted code from
 	// the authorization page; codeInput is its paste field, shown while
@@ -182,9 +181,6 @@ func (m authModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.flow = msg.flow
 		m.verificationURL = msg.url
 		m.userCode = msg.userCode
-		if !m.browserFailed {
-			m.browserFailed = browser.OpenURL(msg.url) != nil
-		}
 		m.state = authStateWaiting
 		m.updateAuthKeymap()
 		if msg.userCode == "" {
@@ -198,7 +194,7 @@ func (m authModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.updateAuthKeymap()
 			}
 		}
-		cmds := []tea.Cmd{waitCmd(m.flow), m.spinner.Tick}
+		cmds := []tea.Cmd{openURLCmd(msg.url), waitCmd(m.flow), m.spinner.Tick}
 		if msg.userCode != "" {
 			cmds = append(cmds, tea.SetClipboard(msg.userCode))
 		}
@@ -428,6 +424,15 @@ func startFlowCmd(newFlow func() flow) tea.Cmd {
 			url:      url,
 			userCode: userCode,
 		}
+	}
+}
+
+// openURLCmd opens the browser off the update loop. Failure needs no
+// handling: the waiting view always shows the URL to visit by hand.
+func openURLCmd(url string) tea.Cmd {
+	return func() tea.Msg {
+		_ = browser.OpenURL(url)
+		return nil
 	}
 }
 

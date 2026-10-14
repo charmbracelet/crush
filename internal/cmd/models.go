@@ -19,10 +19,10 @@ var modelsCmd = &cobra.Command{
 	Short: "List all available models from known providers",
 	Long:  `List all available models from known providers. Shows provider name and model IDs. Unconfigured providers are marked with (not configured).`,
 	Example: `# List all available models
-crush models
+agent-cli models
 
 # Search models
-crush models gpt5`,
+agent-cli models gpt5`,
 	Args: cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cwd, err := ResolveCwd(cmd)

@@ -41,33 +41,33 @@ var runCmd = &cobra.Command{
 The prompt can be provided as arguments or piped from stdin.`,
 	Example: `
 # Run a simple prompt
-crush run "Guess my 5 favorite Pokémon"
+agent-cli run "Guess my 5 favorite Pokémon"
 
 # Pipe input from stdin
-curl https://charm.land | crush run "Summarize this website"
+curl https://charm.land | agent-cli run "Summarize this website"
 
 # Read from a file
-crush run "What is this code doing?" <<< prrr.go
+agent-cli run "What is this code doing?" <<< prrr.go
 
 # Redirect output to a file
-crush run "Generate a hot README for this project" > MY_HOT_README.md
+agent-cli run "Generate a hot README for this project" > MY_HOT_README.md
 
 # Run in quiet mode (hide the spinner)
-crush run --quiet "Generate a README for this project"
+agent-cli run --quiet "Generate a README for this project"
 
 # Run in verbose mode (show logs)
-crush run --verbose "Generate a README for this project"
+agent-cli run --verbose "Generate a README for this project"
 
 # Use a specific reasoning effort
 # Levels depend on the model, unsupported values are rejected
 # with the accepted values listed
-crush run --reasoning-effort high "What is the meaning of life?"
+agent-cli run --reasoning-effort high "What is the meaning of life?"
 
 # Continue a previous session
-crush run --session {session-id} "Follow up on your last response"
+agent-cli run --session {session-id} "Follow up on your last response"
 
 # Continue the most recent session
-crush run --continue "Follow up on your last response"
+agent-cli run --continue "Follow up on your last response"
 
 # Machine-readable result: one JSON object on stdout with session_id,
 # text, error, prompt_tokens, completion_tokens and cost

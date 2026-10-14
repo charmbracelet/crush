@@ -1026,6 +1026,8 @@ func allToolNames() []string {
 	return []string{
 		"agent",
 		"bash",
+		"claude_code",
+		"codex",
 		"crush_info",
 		"crush_logs",
 		"job_output",

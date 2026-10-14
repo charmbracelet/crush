@@ -58,7 +58,7 @@ const (
 	smallContextWindowRatio     = 0.2
 )
 
-var userAgent = fmt.Sprintf("Charm-Crush/%s (https://charm.land/crush)", version.Version)
+var userAgent = fmt.Sprintf("agent-cli/%s", version.Version)
 
 //go:embed templates/title.md
 var titlePrompt []byte

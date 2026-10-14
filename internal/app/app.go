@@ -958,6 +958,10 @@ func (app *App) Shutdown() {
 
 // checkForUpdates checks for available updates.
 func (app *App) checkForUpdates(ctx context.Context) {
+	// A personal fork has no upstream release feed to compare against.
+	if os.Getenv("CRUSH_DISABLE_UPDATE_CHECK") != "" {
+		return
+	}
 	checkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 

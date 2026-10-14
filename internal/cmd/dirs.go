@@ -20,7 +20,7 @@ including any project-level config files discovered
 from the current directory up to the project root.`,
 	Example: `
 # Show all directories
-crush dirs
+agent-cli dirs
   `,
 	Run: func(cmd *cobra.Command, args []string) {
 		entries := collectDirs(cmd)

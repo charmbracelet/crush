@@ -136,20 +136,15 @@ func (c *Client) SubscribeEvents(ctx context.Context, id string) (<-chan any, er
 		scr := bufio.NewReader(rsp.Body)
 		for {
 			line, err := scr.ReadBytes('\n')
-			if errors.Is(err, io.EOF) {
-				break
-			}
 			if err != nil {
-				if ctx.Err() != nil {
-					return
+				// io.EOF là server đóng luồng sạch. Lỗi khác (vd
+				// io.ErrUnexpectedEOF khi server chết giữa luồng) thì đọc lại
+				// body đã hỏng cũng không hồi phục, chỉ lặp mãi; đóng kênh để
+				// tầng trên (run, send --wait, TUI) biết luồng đã mất.
+				if !errors.Is(err, io.EOF) && ctx.Err() == nil {
+					slog.Error("Reading from events stream", "error", err)
 				}
-				slog.Error("Reading from events stream", "error", err)
-				select {
-				case <-time.After(time.Second * 2):
-				case <-ctx.Done():
-					return
-				}
-				continue
+				return
 			}
 			line = bytes.TrimSpace(line)
 			if len(line) == 0 {

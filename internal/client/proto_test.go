@@ -244,3 +244,39 @@ func TestSendHiddenContinuation(t *testing.T) {
 	require.True(t, msg.HiddenUserMessage)
 	require.Equal(t, "Implement the plan.", msg.Prompt)
 }
+
+// Server chết giữa luồng (earlyoom, kill -9) làm kết nối chunked đứt không có
+// chunk kết thúc: client đọc được io.ErrUnexpectedEOF chứ không phải io.EOF.
+// Kênh events vẫn phải đóng, nếu không `run` và `send --wait` chờ mãi.
+func TestSubscribeEventsServerDeathClosesEvents(t *testing.T) {
+	t.Parallel()
+
+	payload := marshalSSEPayload(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, err := fmt.Fprintf(w, "data: %s\n\n", payload)
+		require.NoError(t, err)
+		w.(http.Flusher).Flush()
+
+		conn, _, err := w.(http.Hijacker).Hijack()
+		require.NoError(t, err)
+		require.NoError(t, conn.Close())
+	}))
+	defer srv.Close()
+
+	c := captureClient(t, srv)
+	events, err := c.SubscribeEvents(t.Context(), "ws1")
+	require.NoError(t, err)
+
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case _, ok := <-events:
+			if !ok {
+				return
+			}
+		case <-deadline:
+			require.Fail(t, "event channel stayed open after the server died")
+		}
+	}
+}

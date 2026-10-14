@@ -168,7 +168,7 @@ agent-cli --continue
 		if err := runErr; err != nil {
 			event.Error(err)
 			slog.Error("TUI run error", "error", err)
-			return errors.New("Crush crashed. If metrics are enabled, we were notified about it. If you'd like to report it, please copy the stacktrace above and open an issue at https://github.com/charmbracelet/crush/issues/new?template=bug.yml") //nolint:staticcheck
+			return errors.New("agent-cli crashed. To report it, copy the stacktrace above; recent logs are shown by `agent-cli logs`.") //nolint:staticcheck
 		}
 		if model.BackToHome() {
 			backHome = true

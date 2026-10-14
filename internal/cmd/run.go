@@ -71,7 +71,7 @@ agent-cli run --continue "Follow up on your last response"
 
 # Machine-readable result: one JSON object on stdout with session_id,
 # text, error, prompt_tokens, completion_tokens and cost
-crush run --json "Summarize this repo"
+agent-cli run --json "Summarize this repo"
 
 # run auto-approves every tool permission request of its own session, both
 # locally and via the server; questions the agent asks cannot be answered
@@ -157,7 +157,7 @@ crush run --json "Summarize this repo"
 			event.AppInitialized()
 
 			if !ws.Config.IsConfigured() {
-				return fmt.Errorf("no providers configured - please run 'crush' to set up a provider interactively")
+				return fmt.Errorf("no providers configured - please run 'agent-cli' to set up a provider interactively")
 			}
 
 			// Re-initialising a ready agent replaces the server's
@@ -200,7 +200,7 @@ crush run --json "Summarize this repo"
 		event.AppInitialized()
 
 		if !ws.Config().IsConfigured() {
-			return fmt.Errorf("no providers configured - please run 'crush' to set up a provider interactively")
+			return fmt.Errorf("no providers configured - please run 'agent-cli' to set up a provider interactively")
 		}
 
 		if verbose {

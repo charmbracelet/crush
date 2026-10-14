@@ -78,7 +78,7 @@ agent-cli send -c ~/code/web --new --title review --wait --json "Review the last
 		}
 		defer cleanup()
 		if !ws.Config.IsConfigured() {
-			return fmt.Errorf("no providers configured - please run 'crush' to set up a provider interactively")
+			return fmt.Errorf("no providers configured - please run 'agent-cli' to set up a provider interactively")
 		}
 		if err := ensureAgent(ctx, c, ws.ID); err != nil {
 			return err

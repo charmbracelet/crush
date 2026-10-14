@@ -260,6 +260,33 @@ func TestRun_CancelOnEntryPublishesRunComplete(t *testing.T) {
 	}
 }
 
+// A run that fails while setting up, after it became active, still ends
+// with RunComplete; observers would otherwise think the session busy.
+func TestRun_SetupFailurePublishesRunComplete(t *testing.T) {
+	t.Parallel()
+	sa, _, broker := newCancelTestAgentWithRunComplete(t)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	ch := broker.Subscribe(ctx)
+
+	_, err := sa.Run(t.Context(), SessionAgentCall{
+		SessionID: "missing",
+		RunID:     "run-setup-failure",
+		Prompt:    "hello",
+	})
+	require.Error(t, err)
+
+	select {
+	case got := <-ch:
+		assert.Equal(t, "run-setup-failure", got.Payload.RunID)
+		assert.NotEmpty(t, got.Payload.Error)
+		assert.False(t, got.Payload.Cancelled)
+	case <-time.After(2 * time.Second):
+		t.Fatal("a run that failed during setup must publish RunComplete")
+	}
+}
+
 // TestCancel_TwoAcceptedBothObserveCancellation covers the second review
 // finding: a single cancel with two accepted-not-yet-active prompts must
 // cancel both. The cancel raises the session's high-water mark to the

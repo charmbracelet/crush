@@ -25,6 +25,7 @@ import (
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/modelcontextprotocol/go-sdk/auth"
+	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"golang.org/x/oauth2"
 )
@@ -53,6 +54,10 @@ type ClientSession struct {
 	*mcp.ClientSession
 	cancel       context.CancelFunc
 	oauthHandler *mcpoauth.Handler
+	// channel reports whether this server is an active channel (it declared
+	// the claude/channel capability and was opted in via --channels or
+	// channel_enabled in config).
+	channel bool
 }
 
 // Close cancels the session context and then closes the underlying session.
@@ -224,6 +229,11 @@ type ClientInfo struct {
 	// progress rather than the last successful one, which would leave the
 	// server skipped as "starting" and never restarted for the new config.
 	PendingConfig *config.MCPConfig
+
+	// Channel reports whether this server is an active channel (declared the
+	// claude/channel capability and opted in via --channels or
+	// channel_enabled in config).
+	Channel bool
 }
 
 // SubscribeEvents returns a channel for MCP events.
@@ -231,9 +241,10 @@ type ClientInfo struct {
 // Channel message events (EventChannelMessage) are excluded: they carry no
 // workspace or session identity, and the MCP broker is process-global. Without
 // this filter, every workspace that calls SubscribeEvents would receive every
-// other workspace's channel events — a cross-workspace injection path. Channel
-// delivery requires workspace-scoped routing, which is deferred to a later PR;
-// until then, channel events must not flow through the shared event fan-out.
+// other workspace's channel events — a cross-workspace injection path.
+// Consumers that deliver channel messages use SubscribeChannelEvents and are
+// responsible for scoping each event to the workspaces that declared and
+// opted in the originating server.
 func SubscribeEvents(ctx context.Context) <-chan pubsub.Event[Event] {
 	raw := broker.Subscribe(ctx)
 	filtered := make(chan pubsub.Event[Event], 64)
@@ -251,6 +262,32 @@ func SubscribeEvents(ctx context.Context) <-chan pubsub.Event[Event] {
 		}
 	}()
 	return filtered
+}
+
+// SubscribeChannelEvents returns a channel carrying only channel message
+// events (EventChannelMessage). The MCP broker is process-global, so these
+// events are not scoped to any workspace: every consumer must check that the
+// originating server is declared in the target workspace's MCP config and
+// opted in (ChannelOptIn) before delivering, otherwise one workspace's
+// channel messages leak into another — the injection path SubscribeEvents
+// filters out.
+func SubscribeChannelEvents(ctx context.Context) <-chan pubsub.Event[Event] {
+	raw := broker.Subscribe(ctx)
+	channelOnly := make(chan pubsub.Event[Event], 64)
+	go func() {
+		defer close(channelOnly)
+		for ev := range raw {
+			if ev.Payload.Type != EventChannelMessage {
+				continue
+			}
+			select {
+			case channelOnly <- ev:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return channelOnly
 }
 
 // GetStates returns the current state of all MCP clients
@@ -294,7 +331,11 @@ func Close(ctx context.Context) error {
 }
 
 // Initialize initializes MCP clients based on the provided configuration.
-func Initialize(ctx context.Context, permissions permission.Service, cfg *config.ConfigStore) {
+// forceStart lists config-disabled servers with a repository-scoped enabled
+// override; they are started even though their config entry is disabled.
+// localDisabled lists servers with a repository-scoped disabled override;
+// they are not started.
+func Initialize(ctx context.Context, permissions permission.Service, cfg *config.ConfigStore, forceStart, localDisabled []string) {
 	ArmInit()
 	slog.Info("Initializing MCP clients")
 	start := time.Now()
@@ -302,10 +343,18 @@ func Initialize(ctx context.Context, permissions permission.Service, cfg *config
 	var wg sync.WaitGroup
 	// Initialize states for all configured MCPs
 	for name, m := range cfg.Config().MCP {
-		if m.Disabled {
+		if slices.Contains(localDisabled, name) {
 			updateState(name, StateDisabled, nil, nil, Counts{})
-			slog.Debug("Skipping disabled MCP", "name", name)
+			slog.Debug("Skipping MCP disabled for this repository", "name", name)
 			continue
+		}
+		if m.Disabled {
+			if !slices.Contains(forceStart, name) {
+				updateState(name, StateDisabled, nil, nil, Counts{})
+				slog.Debug("Skipping disabled MCP", "name", name)
+				continue
+			}
+			slog.Info("Starting config-disabled MCP with repository enabled override", "name", name)
 		}
 
 		// Set initial starting state
@@ -396,6 +445,19 @@ func InitializeSingle(ctx context.Context, name string, cfg *config.ConfigStore)
 	return initClient(ctx, cfg, name, m, currentGen(name), cfg.Resolver())
 }
 
+// InitializeSingleForced starts the named MCP client even when its config
+// entry is disabled. Used by the repository-scoped "Toggle MCPs" override.
+// The startup counterpart is the forceStart argument of Initialize, which
+// replays the persisted enabled overrides. Config files are not touched.
+func InitializeSingleForced(ctx context.Context, name string, cfg *config.ConfigStore) error {
+	m, exists := cfg.Config().MCP[name]
+	if !exists {
+		return fmt.Errorf("mcp '%s' not found in configuration", name)
+	}
+
+	return initClient(ctx, cfg, name, m, currentGen(name), cfg.Resolver())
+}
+
 // AuthenticateMCP initiates the OAuth flow for an MCP server that is in
 // StateNeedsAuth. It creates the OAuth handler (which starts a local
 // callback server), connects to the server (which triggers the browser
@@ -418,7 +480,7 @@ func AuthenticateMCP(ctx context.Context, cfg *config.ConfigStore, name string) 
 
 	// The OAuth handler persists the token automatically as it is
 	// exchanged, so a successful connection has already saved it.
-	_, err := connectAndRegister(ctx, cfg, name, m, currentGen(name), cfg.Resolver(), channelEnabled(cfg.Overrides().EnabledChannels, name))
+	_, err := connectAndRegister(ctx, cfg, name, m, currentGen(name), cfg.Resolver(), ChannelOptIn(m, cfg.Overrides().EnabledChannels, name))
 	if err != nil {
 		return err
 	}
@@ -511,7 +573,7 @@ func BeginAuth(cfg *config.ConfigStore, name string) (finish func(ctx context.Co
 // suppression enabled on the freshly created handler.
 func runAuthFlow(ctx context.Context, cfg *config.ConfigStore, name string, m config.MCPConfig) error {
 	updateState(name, StateStarting, nil, nil, Counts{}, withPending(m))
-	_, err := connectAndRegister(ctx, cfg, name, m, currentGen(name), cfg.Resolver(), channelEnabled(cfg.Overrides().EnabledChannels, name))
+	_, err := connectAndRegister(ctx, cfg, name, m, currentGen(name), cfg.Resolver(), ChannelOptIn(m, cfg.Overrides().EnabledChannels, name))
 	return err
 }
 
@@ -547,7 +609,7 @@ func initClient(ctx context.Context, cfg *config.ConfigStore, name string, m con
 	}
 
 	updateState(name, StateStarting, nil, nil, Counts{}, withPending(m))
-	_, err := connectAndRegister(ctx, cfg, name, m, gen, resolver, channelEnabled(cfg.Overrides().EnabledChannels, name))
+	_, err := connectAndRegister(ctx, cfg, name, m, gen, resolver, ChannelOptIn(m, cfg.Overrides().EnabledChannels, name))
 	if err != nil {
 		// If an OAuth MCP fails because the saved token is no longer
 		// valid (e.g. refresh token expired or revoked) or no token
@@ -631,6 +693,31 @@ func connectAndRegister(ctx context.Context, cfg *config.ConfigStore, name strin
 // persistOAuthToken saves the OAuth token from a session to the global
 // config so it survives restarts.
 
+// SetConfigDisabled persists the disabled flag of a single MCP server in
+// the given config scope and applies the change to the running client:
+// disabling tears the connection down, enabling starts it even if it was
+// disabled before. A repository-scoped override takes precedence, so when
+// localOverride is set only the config is written.
+func SetConfigDisabled(ctx context.Context, cfg *config.ConfigStore, scope config.Scope, name string, disabled, localOverride bool) error {
+	if err := cfg.SetMCPServerDisabledConfig(scope, name, disabled); err != nil {
+		return err
+	}
+	if localOverride {
+		return nil
+	}
+	return SetLocalDisabled(ctx, cfg, name, disabled)
+}
+
+// SetLocalDisabled applies a repository-scoped toggle to the running
+// client: disabling tears the connection down, enabling starts it even if
+// its config entry is disabled. Persisting the override is the caller's job.
+func SetLocalDisabled(ctx context.Context, cfg *config.ConfigStore, name string, disabled bool) error {
+	if disabled {
+		return DisableSingle(cfg, name)
+	}
+	return InitializeSingleForced(ctx, name, cfg)
+}
+
 // DisableSingle disables and closes a single MCP client by name.
 func DisableSingle(cfg *config.ConfigStore, name string) error {
 	// teardown bumps the generation, invalidating any in-flight connect, and
@@ -638,7 +725,7 @@ func DisableSingle(cfg *config.ConfigStore, name string) error {
 	// re-enable (even with an unchanged config) is seen as new and restarts.
 	teardown(name)
 	updateState(name, StateDisabled, nil, nil, Counts{})
-	slog.Info("Disabled mcp client", "name", name)
+	slog.Info("Disabled MCP client", "name", name)
 	return nil
 }
 
@@ -748,7 +835,7 @@ func getOrRenewClient(ctx context.Context, cfg *config.ConfigStore, name string)
 	// Capture the generation so a reconcile teardown that lands mid-renewal
 	// invalidates this rebuild instead of letting it clobber the newer one.
 	gen := currentGen(name)
-	newSess, err := newSession(ctx, cfg, name, m, cfg.Resolver(), channelEnabled(cfg.Overrides().EnabledChannels, name))
+	newSess, err := newSession(ctx, cfg, name, m, cfg.Resolver(), ChannelOptIn(m, cfg.Overrides().EnabledChannels, name))
 	if err != nil {
 		clearMCPData(name)
 		// If an OAuth MCP fails to reconnect because the token is no
@@ -820,7 +907,13 @@ func getOrRenewClient(ctx context.Context, cfg *config.ConfigStore, name string)
 func pingSession(ctx context.Context, s *ClientSession, timeout time.Duration) error {
 	pingCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	return s.Ping(pingCtx, nil)
+	err := s.Ping(pingCtx, nil)
+	// MethodNotFound means the server answered; it just doesn't implement ping.
+	var wireErr *jsonrpc.Error
+	if errors.As(err, &wireErr) && wireErr.Code == jsonrpc.CodeMethodNotFound {
+		return nil
+	}
+	return err
 }
 
 // closeSession closes an MCP session, logging only unexpected errors. EOF,
@@ -875,6 +968,7 @@ func updateState(name string, state State, err error, client *ClientSession, cou
 	info.Error = err
 	info.Client = client
 	info.Counts = counts
+	info.Channel = client != nil && client.channel
 	for _, opt := range opts {
 		opt(&info)
 	}
@@ -956,8 +1050,9 @@ func createSession(ctx context.Context, cfg *config.ConfigStore, name string, m 
 	// gate starts undecided: notifications that arrive during capability
 	// negotiation are buffered. After Connect resolves, the gate is opened
 	// (and the buffer drained) only when the server declares the channel
-	// capability AND was opted in via --channels; otherwise it is closed
-	// (buffer discarded). This prevents early notifications from being lost.
+	// capability AND was opted in (--channels or channel_enabled);
+	// otherwise it is closed (buffer discarded). This prevents early
+	// notifications from being lost.
 	channelGate := newChannelGate()
 	transport = &channelTransport{inner: transport, name: name, gate: channelGate}
 
@@ -1017,11 +1112,13 @@ func createSession(ctx context.Context, cfg *config.ConfigStore, name string, m 
 	slog.Debug("MCP client initialized", "name", name)
 
 	// Resolve the channel gate: open only for a server that both declares
-	// the claude/channel capability and was opted in via --channels.
-	// Otherwise close it (fail closed). Resolving drains buffered messages
+	// the claude/channel capability and was opted in — via --channels or
+	// channel_enabled in config. Merely listing a server under mcp is not
+	// enough. Otherwise close the gate (fail closed). Resolving drains buffered messages
 	// that arrived during negotiation so a fast server does not lose early
 	// events.
-	if channelOptIn && hasChannelCapability(session.InitializeResult()) {
+	isChannel := channelOptIn && hasChannelCapability(session.InitializeResult())
+	if isChannel {
 		buffered := channelGate.resolve(true)
 		for _, raw := range buffered {
 			publishChannelMessage(mcpCtx, name, raw)
@@ -1035,6 +1132,7 @@ func createSession(ctx context.Context, cfg *config.ConfigStore, name string, m 
 		ClientSession: session,
 		cancel:        cancel,
 		oauthHandler:  oauthHandler,
+		channel:       isChannel,
 	}, nil
 }
 

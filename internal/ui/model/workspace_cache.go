@@ -75,6 +75,11 @@ type busyStateMsg struct {
 	ready     bool
 	agentBusy bool
 	yolo      bool
+	// forSession is the session sessionBusy was probed for.
+	forSession string
+	// sessionBusy reports whether forSession itself has a run in flight,
+	// unlike agentBusy, which any session or shell command sets.
+	sessionBusy bool
 	// model is the coordinator's selected model, fetched by the same probe
 	// so the sidebar/landing model info renders from memoized state. Zero
 	// (and ignored) when ready is false.
@@ -93,10 +98,12 @@ type promptQueueMsg struct {
 	prompts []string
 }
 
-// agentRunSubmittedMsg reports that AgentRun accepted a prompt (it either
-// started a run or was enqueued behind one), so busy and queue state should
-// be re-fetched.
-type agentRunSubmittedMsg struct{}
+// agentRunSubmittedMsg reports whether AgentRun accepted a prompt. A
+// rejected prompt gets no RunComplete, so err must end its turn.
+type agentRunSubmittedMsg struct {
+	sessionID string
+	err       error
+}
 
 // agentModelChangedMsg reports that the coordinator's model was updated
 // (model selection, thinking toggle, reasoning effort), so the memoized
@@ -146,12 +153,16 @@ func (m *UI) dispatchBusyRefresh() tea.Cmd {
 	m.busyFetchInFlight = true
 	ws := m.com.Workspace
 	gen := m.busyFetchGen
+	sessionID := m.currentSessionID()
 	return func() tea.Msg {
-		st := busyStateMsg{gen: gen}
+		st := busyStateMsg{gen: gen, forSession: sessionID}
 		if ws.AgentIsReady() {
 			st.ready = true
 			st.agentBusy = ws.AgentIsBusy()
 			st.model = ws.AgentModel()
+			if sessionID != "" {
+				st.sessionBusy = ws.AgentIsSessionBusy(sessionID)
+			}
 		}
 		st.yolo = ws.PermissionSkipRequests()
 		return st
@@ -213,6 +224,8 @@ func (m *UI) applyBusyState(msg busyStateMsg) []tea.Cmd {
 	if m.todoIsSpinning && !busy {
 		m.todoIsSpinning = false
 	}
+	m.probedSession = msg.forSession
+	m.probedSessionBusy = msg.sessionBusy
 	if prevBusy != busy {
 		m.renderPills()
 	}
@@ -301,6 +314,11 @@ func (m *UI) staleWorkspaceRefreshCmds() []tea.Cmd {
 	}
 	if time.Since(m.lspCheckedAt) >= lspStatesTTL {
 		if cmd := m.dispatchLSPRefresh(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
+	if time.Since(m.mcpCheckedAt) >= mcpStatesTTL {
+		if cmd := m.dispatchMCPRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	}

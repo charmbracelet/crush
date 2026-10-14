@@ -532,9 +532,9 @@ func TestE2E_CancelBetweenActiveSetAndAssistantCreate(t *testing.T) {
 
 // TestE2E_PromptRequestContextDoesNotOwnRun covers PLAN item 2: the
 // prompting client's HTTP request context does not own the run. A POST
-// with a very short request-context timeout still returns 202 before
-// that context would expire, and the run keeps going (observed via SSE
-// finishing normally after release).
+// whose context is retired as soon as it returns still gets its 202,
+// and the run keeps going (observed via SSE finishing normally after
+// release).
 func TestE2E_PromptRequestContextDoesNotOwnRun(t *testing.T) {
 	t.Parallel()
 	h := newAgentE2EHarness(t)
@@ -548,15 +548,19 @@ func TestE2E_PromptRequestContextDoesNotOwnRun(t *testing.T) {
 
 	const sid = "s-short-req"
 
-	// The POST request context times out almost immediately. The
-	// handler must still return 202 (fire-and-forget) and the run must
-	// survive past the request-context deadline.
-	reqCtx, reqCancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	// The prompting client's request context is retired the moment the
+	// POST returns. The handler must still have answered 202
+	// (fire-and-forget) and the run must outlive that context. Cancelling
+	// explicitly beats racing a wall-clock deadline: a deadline short
+	// enough to be interesting is also short enough for a loaded runner
+	// to miss, and a POST that never completes proves nothing either way.
+	reqCtx, reqCancel := context.WithCancel(t.Context())
 	defer reqCancel()
 	require.Equal(t, http.StatusAccepted, h.postAgentHTTP(t, reqCtx, sid))
 	h.waitForRunEntered(t)
 
-	// Let the request context expire, then release the run.
+	// Retire the request context, then release the run.
+	reqCancel()
 	<-reqCtx.Done()
 	close(h.coord.release)
 

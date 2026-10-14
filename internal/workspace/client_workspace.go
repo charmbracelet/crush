@@ -1059,8 +1059,8 @@ func (w *ClientWorkspace) sleepOrDone(d time.Duration) bool {
 
 // consumeEvents drives the workspace event loop. It is split out from
 // Subscribe so tests can drive it without a real *tea.Program.
-// ConfigChanged events trigger a workspace refresh; all other events
-// are translated into domain types and forwarded to send.
+// ConfigChanged events refresh the workspace before notifying the UI. Other
+// events are translated into domain types and forwarded to send.
 func (w *ClientWorkspace) consumeEvents(evc <-chan any, send func(tea.Msg)) {
 	for ev := range evc {
 		// Forward events to herdr if running inside a herdr pane.
@@ -1070,6 +1070,9 @@ func (w *ClientWorkspace) consumeEvents(evc <-chan any, send func(tea.Msg)) {
 
 		if _, ok := ev.(pubsub.Event[proto.ConfigChanged]); ok {
 			w.refreshWorkspace()
+			if send != nil {
+				send(ev)
+			}
 			continue
 		}
 		translated := w.translateEvent(ev)

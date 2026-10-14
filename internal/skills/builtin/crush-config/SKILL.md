@@ -190,6 +190,7 @@ option reset <list-key>    # clear a list option back to empty
   disable to let the terminal/tmux handle selection, copy/paste, and
   scrolling), `option ui scrollbar default|always|never`,
   `option ui exit-banner default|compact|none`,
+  `option ui timestamps 12h|24h|off` (default `12h`),
   `option ui completions-max-depth N`, `option ui completions-max-items N`.
 - **List keys** (singular, one value per call, repeatable): `context-path`,
   `global-context-path`, `skill-path`, `disable-skill`. Use `option reset <key>`
@@ -204,7 +205,12 @@ option attribution-generated-with true
 option ui compact true
 option ui diff unified
 option ui exit-banner compact
+option ui timestamps 24h
 ```
+
+Completion timestamps use the local timezone. `timestamps off` hides them.
+The JSON equivalent is `options.tui.timestamps`. Reloaded settings apply to
+existing response footers.
 
 > [!IMPORTANT] These skill paths are loaded by default and do NOT need
 > `skill-path`: `.agents/skills`, `.crush/skills`, `.claude/skills`,

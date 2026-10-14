@@ -96,8 +96,8 @@ func TestUserMessageItem_MutatorsBumpVersion(t *testing.T) {
 }
 
 // TestAssistantInfoItem_VersionedAndFinished sanity-checks the
-// AssistantInfoItem wiring. The item carries only immutable data
-// after construction; we still assert Version() is callable and
+// AssistantInfoItem wiring. Completed message data is fixed; configuration
+// changes invalidate its output separately. Version() is callable and
 // Finished() returns true.
 func TestAssistantInfoItem_VersionedAndFinished(t *testing.T) {
 	t.Parallel()

@@ -9,17 +9,17 @@
     {
       "id": "deepseek-v4.1-flash",
       "name": "DeepSeek V4.1 Flash",
-      "cost_per_1m_in": 0.3,
-      "cost_per_1m_out": 1.2,
+      "cost_per_1m_in": 0.33,
+      "cost_per_1m_out": 1.31,
       "cost_per_1m_in_cached": 0,
       "cost_per_1m_out_cached": 0.03,
-      "context_window": 1000000,
-      "default_max_tokens": 32768,
+      "context_window": 1048576,
+      "default_max_tokens": 262144,
       "can_reason": true,
       "reasoning_levels": [
         "low",
         "high",
-        "max"
+        "xhigh"
       ],
       "default_reasoning_effort": "high",
       "supports_attachments": true
@@ -43,23 +43,6 @@
       "supports_attachments": false
     },
     {
-      "id": "deepseek-v4-pro",
-      "name": "DeepSeek V4 Pro",
-      "cost_per_1m_in": 2.4,
-      "cost_per_1m_out": 4.8,
-      "cost_per_1m_in_cached": 0,
-      "cost_per_1m_out_cached": 0.2,
-      "context_window": 1000000,
-      "default_max_tokens": 384000,
-      "can_reason": true,
-      "reasoning_levels": [
-        "high",
-        "xhigh"
-      ],
-      "default_reasoning_effort": "high",
-      "supports_attachments": false
-    },
-    {
       "id": "deepseek-v4-flash-0731",
       "name": "DeepSeek V4 Flash 0731",
       "cost_per_1m_in": 0.44,
@@ -73,6 +56,23 @@
         "low",
         "high",
         "max"
+      ],
+      "default_reasoning_effort": "high",
+      "supports_attachments": false
+    },
+    {
+      "id": "deepseek-v4-pro",
+      "name": "DeepSeek V4 Pro",
+      "cost_per_1m_in": 2.4,
+      "cost_per_1m_out": 4.8,
+      "cost_per_1m_in_cached": 0,
+      "cost_per_1m_out_cached": 0.2,
+      "context_window": 1000000,
+      "default_max_tokens": 384000,
+      "can_reason": true,
+      "reasoning_levels": [
+        "high",
+        "xhigh"
       ],
       "default_reasoning_effort": "high",
       "supports_attachments": false
@@ -227,15 +227,12 @@
       "cost_per_1m_in_cached": 0,
       "cost_per_1m_out_cached": 0.185096,
       "context_window": 1048576,
-      "default_max_tokens": 32768,
+      "default_max_tokens": 65536,
       "can_reason": true,
       "reasoning_levels": [
-        "none",
-        "minimal",
         "low",
         "medium",
-        "high",
-        "xhigh"
+        "high"
       ],
       "default_reasoning_effort": "medium",
       "supports_attachments": true

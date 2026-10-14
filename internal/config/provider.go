@@ -134,6 +134,15 @@ var (
 	hyperSyncer   = &hyperSync{}
 )
 
+// CatwalkUpdated reports whether the Catwalk provider catalog was
+// refreshed with new data during this run's catalog fetch. The fetch
+// runs once per process, before the first call to Providers returns, so
+// the result is stable afterwards. Callers use it to renew catalogs that
+// shadow Catwalk's, such as the ChatGPT model catalog.
+func CatwalkUpdated() bool {
+	return catwalkSyncer.Updated()
+}
+
 // Providers returns the list of providers, taking into account cached results
 // and whether or not auto update is enabled.
 //
@@ -252,7 +261,7 @@ func newCache[T any](path string) cache[T] {
 
 func (c cache[T]) Get() (T, string, error) {
 	var v T
-	data, err := os.ReadFile(c.path)
+	data, err := readFile(c.path)
 	if err != nil {
 		return v, "", fmt.Errorf("failed to read provider cache file: %w", err)
 	}

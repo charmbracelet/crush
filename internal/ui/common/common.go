@@ -258,17 +258,21 @@ func CopyToClipboard(text, successMessage string) tea.Cmd {
 // have worked, so callers can safely use the callback to discard the copied
 // state (a selection, say) without losing it on a failed copy.
 func CopyToClipboardWithCallback(text, successMessage string, callback tea.Cmd) tea.Cmd {
-	return tea.Sequence(
-		tea.SetClipboard(text),
-		func() tea.Msg {
-			// OSC 52 above is fire and forget: the terminal never answers, so a
-			// platform without a native clipboard (an SSH session, say) gets the
-			// benefit of the doubt. Only a native clipboard that accepted the
-			// write and then does not hold the text is a real failure.
-			if err := clipboard.WriteText(text); errors.Is(err, clipboard.ErrWriteFailed) {
-				return util.NewWarnMsg("Failed to copy to clipboard")
-			}
-			return tea.Sequence(callback, util.ReportInfo(successMessage))()
-		},
-	)
+	return func() tea.Msg {
+		// The native write goes first and is verified before OSC 52 goes out,
+		// because the terminal handles OSC 52 by writing the very same
+		// clipboard on its own schedule. Verifying afterwards means reading
+		// back in the middle of somebody else's write, which reports a good
+		// copy as lost.
+		err := clipboard.WriteText(text)
+		// OSC 52 is fire and forget: the terminal never answers, so a platform
+		// without a native clipboard (an SSH session, say) gets the benefit of
+		// the doubt. Only a native clipboard that accepted the write and then
+		// does not hold the text is a real failure.
+		osc52 := tea.SetClipboard(text)
+		if errors.Is(err, clipboard.ErrWriteFailed) {
+			return tea.Sequence(osc52, util.ReportWarn("Failed to copy to clipboard"))()
+		}
+		return tea.Sequence(osc52, callback, util.ReportInfo(successMessage))()
+	}
 }

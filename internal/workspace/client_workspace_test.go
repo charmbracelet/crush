@@ -13,6 +13,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/client"
 	"github.com/charmbracelet/crush/internal/commands"
@@ -226,6 +227,30 @@ func TestTranslateEvent_Skills(t *testing.T) {
 	require.Equal(t, "from-server", cached[0].Name)
 }
 
+// TestTranslateEvent_MCPChannel verifies the client reconstructs a channel
+// push from the wire with its type and rendered <channel> body intact, so the
+// TUI's channel handler fires in client/server mode.
+func TestTranslateEvent_MCPChannel(t *testing.T) {
+	t.Parallel()
+
+	w := NewClientWorkspace(nil, proto.Workspace{})
+	ev := pubsub.Event[proto.MCPEvent]{
+		Type: pubsub.CreatedEvent,
+		Payload: proto.MCPEvent{
+			Type:           proto.MCPEventChannelMessage,
+			Name:           "webhook",
+			ChannelMessage: `<channel source="webhook">build failed</channel>`,
+		},
+	}
+
+	out := w.translateEvent(ev)
+	got, ok := out.(pubsub.Event[mcp.Event])
+	require.True(t, ok, "expected pubsub.Event[mcp.Event], got %T", out)
+	require.Equal(t, mcp.EventChannelMessage, got.Payload.Type)
+	require.Equal(t, "webhook", got.Payload.Name)
+	require.Equal(t, `<channel source="webhook">build failed</channel>`, got.Payload.ChannelMessage)
+}
+
 // TestNewClientWorkspace_SeedsSkillsCache verifies that the snapshot in
 // proto.Workspace.Skills populates the package-level cache the TUI
 // reads at construction time, eliminating the race between TUI startup
@@ -328,6 +353,36 @@ func TestClientWorkspaceListMCPPromptsServerError(t *testing.T) {
 	_, err = workspace.ListMCPPrompts(t.Context())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "status code 500")
+}
+
+// TestClientWorkspace_MCPGetStatesTimeout pins the probe deadline: a hung
+// server must not wedge MCPGetStates (and with it the UI's in-flight
+// refresh flag, freezing every later MCP refresh) forever. The fetch gives
+// up at mcpStatesTimeout and reports nil states.
+func TestClientWorkspace_MCPGetStatesTimeout(t *testing.T) {
+	t.Parallel()
+
+	// The handler never answers; it unblocks when the client's deadline
+	// cancels the request.
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+
+	orig := mcpStatesTimeout
+	mcpStatesTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { mcpStatesTimeout = orig })
+
+	u, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	c, err := client.NewClient(t.TempDir(), "tcp", u.Host)
+	require.NoError(t, err)
+	workspace := NewClientWorkspace(c, proto.Workspace{ID: "ws-1"})
+
+	start := time.Now()
+	require.Nil(t, workspace.MCPGetStates())
+	require.Less(t, time.Since(start), 5*time.Second,
+		"the probe must give up at its deadline instead of hanging")
 }
 
 // TestClientWorkspace_ReconnectsOnStreamDrop verifies that the event
@@ -973,4 +1028,78 @@ func TestClientWorkspace_RecoveryCreateIsBounded(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("recoverWorkspace blocked on an unresponsive server")
 	}
+}
+
+// TestTranslateEvent_PermissionNotification verifies that the
+// notification's session ID survives the proto-to-domain translation,
+// keeping it available for session-scoped consumers.
+func TestTranslateEvent_PermissionNotification(t *testing.T) {
+	t.Parallel()
+
+	w := NewClientWorkspace(nil, proto.Workspace{})
+	ev := pubsub.Event[proto.PermissionNotification]{
+		Type: pubsub.CreatedEvent,
+		Payload: proto.PermissionNotification{
+			SessionID:  "s1",
+			ToolCallID: "tc-1",
+			Granted:    true,
+		},
+	}
+
+	out := w.translateEvent(ev)
+	got, ok := out.(pubsub.Event[permission.PermissionNotification])
+	require.True(t, ok, "expected pubsub.Event[permission.PermissionNotification], got %T", out)
+	require.Equal(t, "s1", got.Payload.SessionID)
+	require.Equal(t, "tc-1", got.Payload.ToolCallID)
+	require.True(t, got.Payload.Granted)
+}
+
+// TestClientWorkspace_GitBranch verifies that GitBranch asks the server and
+// returns what it reports. Caching and scheduling are the TUI's business, so
+// nothing here pretends otherwise.
+func TestClientWorkspace_GitBranch(t *testing.T) {
+	t.Parallel()
+
+	var hits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/v1/workspaces/ws-1/git/branch", r.URL.Path)
+		hits.Add(1)
+		require.NoError(t, json.NewEncoder(w).Encode(proto.GitBranchResponse{Branch: "feature/x"}))
+	}))
+	defer srv.Close()
+
+	u, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	c, err := client.NewClient(t.TempDir(), "tcp", u.Host)
+	require.NoError(t, err)
+
+	ws := NewClientWorkspace(c, proto.Workspace{ID: "ws-1"})
+	t.Cleanup(ws.Shutdown)
+
+	branch, err := ws.GitBranch(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, "feature/x", branch)
+	require.Equal(t, int64(1), hits.Load(), "one call must make exactly one request")
+}
+
+// TestClientWorkspace_GitBranchServerError verifies that a failing server
+// surfaces as an error rather than a silently empty branch, so the caller can
+// decide whether to keep what it already had.
+func TestClientWorkspace_GitBranchServerError(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	u, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	c, err := client.NewClient(t.TempDir(), "tcp", u.Host)
+	require.NoError(t, err)
+
+	ws := NewClientWorkspace(c, proto.Workspace{ID: "ws-1"})
+	t.Cleanup(ws.Shutdown)
+	_, err = ws.GitBranch(t.Context())
+	require.Error(t, err)
 }

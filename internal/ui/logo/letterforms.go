@@ -417,3 +417,41 @@ func stretchLetterformPart(s string, p letterformProps) string {
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
 }
+
+// The letterforms below spell the agent-cli wordmark. They are fixed-width and
+// ignore the stretch argument, which only exists to satisfy [letterform].
+
+// LetterA renders the letter A.
+func LetterA(bool) string {
+	return joinLetterform("▄\n█\n▀", "▀\n▀\n ", "▀\n▀\n ", "▀\n▀\n ", "▄\n█\n▀")
+}
+
+// LetterG renders the letter G.
+func LetterG(bool) string {
+	return "▄▀▀▀▀\n█ ▀▀█\n ▀▀▀▀"
+}
+
+// LetterN renders the letter N.
+func LetterN(bool) string {
+	return "█▄  █\n█ ▀▄█\n▀   ▀"
+}
+
+// LetterT renders the letter T.
+func LetterT(bool) string {
+	return "▀▀█▀▀\n  █  \n  ▀  "
+}
+
+// LetterL renders the letter L.
+func LetterL(bool) string {
+	return "█    \n█    \n▀▀▀▀▀"
+}
+
+// LetterI renders the letter I.
+func LetterI(bool) string {
+	return "▀█▀\n █ \n▀▀▀"
+}
+
+// LetterDash renders a hyphen on the middle row.
+func LetterDash(bool) string {
+	return "   \n▀▀▀\n   "
+}

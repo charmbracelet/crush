@@ -65,10 +65,10 @@ func logoSection(contentWidth int) string {
 	// Wrap the greeting and the message together: wrapping only the message
 	// leaves the greeting's own width unaccounted for and overflows the frame.
 	return crushLogo + "\n" +
-		lipgloss.NewStyle().Width(contentWidth).Render("Thanks for using Crush! "+randomExitMessage())
+		lipgloss.NewStyle().Width(contentWidth).Render("Thanks for using agent-cli! "+randomExitMessage())
 }
 
-// sessionResumeLines returns the "Session  <title>\nContinue crush -s <hash>"
+// sessionResumeLines returns the "Session  <title>\nContinue agent-cli -s <hash>"
 // pair used by the exit banner.
 func sessionResumeLines(sess *session.Session, contentWidth int) string {
 	title := strings.ReplaceAll(sess.Title, "\n", " ")
@@ -82,7 +82,7 @@ func sessionResumeLines(sess *session.Session, contentWidth int) string {
 	hash := session.HashID(sess.ID)[:7]
 	label := lipgloss.NewStyle().Foreground(charmtone.Charple)
 	sessionLine := label.Render("Session  ") + title
-	continueLine := label.Render("Continue ") + "crush -s " + hash
+	continueLine := label.Render("Continue ") + "agent-cli -s " + hash
 	return sessionLine + "\n" + continueLine
 }
 

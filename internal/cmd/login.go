@@ -18,25 +18,25 @@ import (
 var loginCmd = &cobra.Command{
 	Aliases: []string{"auth"},
 	Use:     "login [platform]",
-	Short:   "Login Crush to a platform",
+	Short:   "Login agent-cli to a platform",
 	Long: `Login Crush to a specified platform.
 	The platform should be provided as an argument.
 	Available platforms are: hyper, copilot, openai (chatgpt), grok (xai).`,
 	Example: `
 	# Authenticate with Charm Hyper
-	crush login
+	agent-cli login
 
 	# Authenticate with GitHub Copilot
-	crush login copilot
+	agent-cli login copilot
 
 	# Authenticate with a ChatGPT (OpenAI) account
-	crush login openai
+	agent-cli login openai
 
 	# Authenticate with a Grok (xAI) account
-	crush login grok
+	agent-cli login grok
 
 	# Force re-authentication even if already logged in
-	crush login -f copilot
+	agent-cli login -f copilot
 	`,
 	ValidArgs: []cobra.Completion{
 		"hyper",

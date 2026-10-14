@@ -1,6 +1,11 @@
-# Crush Development Guide
+# agent-cli Development Guide
 
 ## Project Overview
+
+agent-cli is a personal fork of Crush. User-visible names say "agent-cli"; the
+module path, config file names (`crush.json`), `CRUSH_*` environment variables
+and the system prompts still say Crush on purpose, to keep merging upstream
+cheap. Upstream description follows.
 
 Crush is a terminal-based AI coding assistant built in Go by
 [Charm](https://charm.land). It connects to LLMs and gives them tools to read,

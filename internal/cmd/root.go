@@ -79,33 +79,33 @@ func init() {
 }
 
 var rootCmd = &cobra.Command{
-	Use:   "crush",
+	Use:   "agent-cli",
 	Short: "A terminal-first AI assistant for software development",
 	Long:  "A glamorous, terminal-first AI assistant for software development and adjacent tasks",
 	Example: `
 # Run in interactive mode
-crush
+agent-cli
 
 # Run non-interactively
-crush run "Guess my 5 favorite Pokémon"
+agent-cli run "Guess my 5 favorite Pokémon"
 
 # Run a non-interactively with pipes and redirection
-cat README.md | crush run "make this more glamorous" > GLAMOROUS_README.md
+cat README.md | agent-cli run "make this more glamorous" > GLAMOROUS_README.md
 
 # Run with debug logging in a specific directory
-crush --debug --cwd /path/to/project
+agent-cli --debug --cwd /path/to/project
 
 # Run in yolo mode (auto-accept all permissions; use with care)
-crush --yolo
+agent-cli --yolo
 
 # Run with custom data directory
-crush --data-dir /path/to/custom/.crush
+agent-cli --data-dir /path/to/custom/.crush
 
 # Continue a previous session
-crush --session {session-id}
+agent-cli --session {session-id}
 
 # Continue the most recent session
-crush --continue
+agent-cli --continue
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		sessionID, _ := cmd.Flags().GetString("session")

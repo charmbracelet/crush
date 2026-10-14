@@ -54,3 +54,7 @@ manpages/
 completions/crush.*sh
 .prettierignore
 .task
+
+# Cấu hình multi-provider thực tế và dữ liệu phiên local.
+/.crush.json
+/.crush/

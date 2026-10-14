@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"image/color"
 	"math/rand/v2"
+	"slices"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -17,6 +18,9 @@ import (
 type letterform func(bool) string
 
 const diag = `╱`
+
+// brandLabel is the small label shown above the wordmark.
+const brandLabel = "luannt"
 
 // Opts are the options for rendering the Crush title art.
 type Opts struct {
@@ -40,7 +44,7 @@ type Opts struct {
 // The compact argument determines whether it renders compact for the sidebar
 // or wider for the main pane.
 func Render(base lipgloss.Style, version string, compact bool, o Opts) string {
-	charm := "Charm™"
+	charm := brandLabel
 	if !o.Hyper {
 		charm = " " + charm
 	}
@@ -61,13 +65,9 @@ func Render(base lipgloss.Style, version string, compact bool, o Opts) string {
 			LetterR,
 		}
 	}
-	crushLetterforms := []letterform{
-		LetterC,
-		LetterR,
-		LetterU,
-		LetterSAlt,
-		LetterH,
-	}
+	agentLetterforms := []letterform{LetterA, LetterG, LetterE, LetterN, LetterT}
+	cliLetterforms := []letterform{LetterC, LetterL, LetterI}
+	crushLetterforms := append(append(slices.Clone(agentLetterforms), LetterDash), cliLetterforms...)
 	if o.Hyper && !compact {
 		crushLetterforms = append(hyperLetterforms, crushLetterforms...)
 	}
@@ -81,6 +81,10 @@ func Render(base lipgloss.Style, version string, compact bool, o Opts) string {
 		stretchIndex = rand.IntN(len(crushLetterforms))
 	}
 	crush := renderWord(spacing, stretchIndex, crushLetterforms...)
+	if compact && !o.Hyper {
+		// The sidebar is too narrow for the whole wordmark, so stack it.
+		crush = renderWord(spacing, -1, agentLetterforms...) + "\n" + renderWord(spacing, -1, cliLetterforms...)
+	}
 	if o.Hyper && compact {
 		crush = renderWord(spacing, stretchIndex, hyperLetterforms...) + "\n" + crush
 	}
@@ -149,11 +153,11 @@ func Render(base lipgloss.Style, version string, compact bool, o Opts) string {
 // SmallRender renders a smaller version of the Crush logo, suitable for
 // smaller windows or sidebar usage.
 func SmallRender(t *styles.Styles, width int, o Opts) string {
-	name := "Crush"
+	name := "agent-cli"
 	if o.Hyper {
 		name = "HYPERCRUSH"
 	}
-	charm := "Charm™"
+	charm := brandLabel
 	title := t.Logo.SmallCharm.Render(charm)
 	title = fmt.Sprintf("%s %s", title, styles.ApplyBoldForegroundGrad(t.Logo.GradCanvas, name, t.Logo.SmallGradFromColor, t.Logo.SmallGradToColor))
 	remainingWidth := width - lipgloss.Width(title) - 1 // 1 for the space after the name

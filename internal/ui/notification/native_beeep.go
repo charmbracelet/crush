@@ -15,5 +15,5 @@ const NativeSupported = true
 var defaultNotifyFunc = beeep.Notify
 
 func init() {
-	beeep.AppName = "Crush"
+	beeep.AppName = "agent-cli"
 }

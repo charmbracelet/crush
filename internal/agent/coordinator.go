@@ -84,8 +84,12 @@ var copilotResponsesModels = map[string]bool{
 	"gpt-5.6-terra": true,
 	"gpt-5.6-sol":   true,
 	"gpt-6-astra":   true,
+	"gpt-6-luna":    true,
+	"gpt-6-sol":     true,
+	"gpt-6.1-sol":   true,
 	"grok-4.5":      true,
 	"grok-4.6":      true,
+	"grok-4.7":      true,
 }
 
 // OpenCode models that use the Anthropic Messages API instead of Chat
@@ -995,19 +999,12 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 		return Model{}, Model{}, err
 	}
 
-	var largeCatwalkModel *catwalk.Model
-	var smallCatwalkModel *catwalk.Model
-
-	for _, m := range largeProviderCfg.Models {
-		if m.ID == largeModelCfg.Model {
-			largeCatwalkModel = &m
-		}
-	}
-	for _, m := range smallProviderCfg.Models {
-		if m.ID == smallModelCfg.Model {
-			smallCatwalkModel = &m
-		}
-	}
+	// Resolve the selected model from the provider's whole catalog: an
+	// API-key model, a ChatGPT subscription model, or a Grok one. The
+	// subscription catalogs live outside Models, so looking only there
+	// strands a Grok/ChatGPT model that catwalk doesn't also publish.
+	largeCatwalkModel := c.cfg.Config().GetModel(largeModelCfg.Provider, largeModelCfg.Model)
+	smallCatwalkModel := c.cfg.Config().GetModel(smallModelCfg.Provider, smallModelCfg.Model)
 
 	if largeCatwalkModel == nil {
 		return Model{}, Model{}, errLargeModelNotFound
@@ -1437,11 +1434,12 @@ func (c *coordinator) Model() Model {
 }
 
 func (c *coordinator) UpdateModels(ctx context.Context) error {
-	// A ChatGPT login without its model catalog — the fetch at login
-	// failed, or the credentials predate it — would leave the models
-	// dialog's ChatGPT section empty. Fill it in lazily; the guard makes
-	// this a no-op once the catalog exists.
+	// A ChatGPT or Grok login without its model catalog — the fetch at
+	// login failed, or the credentials predate it — would leave the
+	// models dialog's subscription section empty. Fill it in lazily; the
+	// guards make this a no-op once a catalog exists.
 	c.cfg.RefetchOpenAIChatGPTModels(ctx)
+	c.cfg.RefetchGrokModels(ctx)
 
 	agent, name := c.activeAgent()
 	return c.updateAgentModels(ctx, agent, name)

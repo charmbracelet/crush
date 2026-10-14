@@ -102,6 +102,13 @@ type ProjectInitPromptResponse struct {
 	Prompt string `json:"prompt"`
 }
 
+// GitBranchResponse carries the current Git branch of the workspace's
+// working directory. Branch is empty when the directory is not a Git
+// repository or HEAD is detached.
+type GitBranchResponse struct {
+	Branch string `json:"branch"`
+}
+
 // AgentInitRequest represents a request to initialize the agent.
 type AgentInitRequest struct {
 	Interactive bool `json:"interactive"`

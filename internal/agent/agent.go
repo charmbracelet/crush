@@ -699,6 +699,66 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// the new run's cancel and breaking cancellation.
 	defer a.activeRequests.CompareAndDelete(call.SessionID, ac)
 
+	// skipRunComplete is set just before the queued-recursion path so
+	// the outer Run doesn't publish a RunComplete that would race
+	// with — and be superseded by — the recursive call's own
+	// RunComplete (each queued user prompt is its own turn and
+	// publishes exactly one terminal event).
+	var skipRunComplete bool
+	// currentAssistant is declared here so the deferred RunComplete
+	// publish below can capture the pointer that PrepareStep will
+	// later (re)assign for each streaming step. The final assistant
+	// message of the turn is the value reachable through this
+	// pointer when the defer runs.
+	var currentAssistant *message.Message
+	// Drain any debounced message updates before returning. message.Service
+	// already flushes synchronously on terminal updates, but a defer here
+	// guarantees the contract at every Run exit (success, error, panic
+	// recovery upstream) without callers needing to know.
+	//
+	// After the flush completes — meaning all per-message
+	// Publish(UpdatedEvent) calls have fired and been buffered into
+	// every subscriber's channel — publish the authoritative
+	// RunComplete event for this turn. The flush-then-publish order
+	// gives well-behaved clients the best chance of seeing the final
+	// message event before RunComplete; the embedded Text field
+	// reconciles for clients that observe the events out of order
+	// (the pubsub broker fan-in does not serialize publishes from
+	// different upstream brokers).
+	defer func() {
+		// Use a context detached from the run context: workspace
+		// shutdown cancels ctx before this goroutine returns, but the
+		// buffered streaming deltas must still land before the DB is
+		// closed. A short timeout bounds the flush.
+		flushCtx, flushCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer flushCancel()
+		if flushErr := a.messages.FlushAll(flushCtx); flushErr != nil {
+			slog.Error("Failed to flush pending message updates after run", "error", flushErr)
+		}
+		if skipRunComplete {
+			return
+		}
+		complete := notify.RunComplete{SessionID: call.SessionID, RunID: call.RunID}
+		if currentAssistant != nil {
+			complete.MessageID = currentAssistant.ID
+			complete.Text = currentAssistant.Content().String()
+		}
+		if retErr != nil {
+			complete.Error = retErr.Error()
+			complete.Cancelled = errors.Is(retErr, context.Canceled)
+		} else if ctx.Err() != nil {
+			complete.Cancelled = true
+		}
+		// Prefer the per-call hook when supplied so the coordinator
+		// can coalesce retries (e.g. unauthorized → re-auth → retry)
+		// into a single user-visible terminal event. The fallback
+		// must-deliver publish applies bounded-blocking semantics to
+		// the authoritative terminal event so a momentarily-full
+		// subscriber channel can't silently drop it and hang
+		// non-interactive clients waiting on RunComplete.
+		a.publishRunComplete(ctx, call, complete)
+	}()
+
 	// Copy mutable fields under lock to avoid races with SetTools/SetModels.
 	agentTools := filterToolsForChannel(a.tools.Copy(), call.Channel, mcp.GetStates())
 	largeModel := a.largeModel.Get()
@@ -763,65 +823,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// cancel func were already created and registered under the dispatch
 	// mutex above for both the accepted and in-process paths.
 	ctx = context.WithValue(ctx, tools.SessionIDContextKey, call.SessionID)
-	// skipRunComplete is set just before the queued-recursion path so
-	// the outer Run doesn't publish a RunComplete that would race
-	// with — and be superseded by — the recursive call's own
-	// RunComplete (each queued user prompt is its own turn and
-	// publishes exactly one terminal event).
-	var skipRunComplete bool
-	// currentAssistant is declared here so the deferred RunComplete
-	// publish below can capture the pointer that PrepareStep will
-	// later (re)assign for each streaming step. The final assistant
-	// message of the turn is the value reachable through this
-	// pointer when the defer runs.
-	var currentAssistant *message.Message
-	// Drain any debounced message updates before returning. message.Service
-	// already flushes synchronously on terminal updates, but a defer here
-	// guarantees the contract at every Run exit (success, error, panic
-	// recovery upstream) without callers needing to know.
-	//
-	// After the flush completes — meaning all per-message
-	// Publish(UpdatedEvent) calls have fired and been buffered into
-	// every subscriber's channel — publish the authoritative
-	// RunComplete event for this turn. The flush-then-publish order
-	// gives well-behaved clients the best chance of seeing the final
-	// message event before RunComplete; the embedded Text field
-	// reconciles for clients that observe the events out of order
-	// (the pubsub broker fan-in does not serialize publishes from
-	// different upstream brokers).
-	defer func() {
-		// Use a context detached from the run context: workspace
-		// shutdown cancels ctx before this goroutine returns, but the
-		// buffered streaming deltas must still land before the DB is
-		// closed. A short timeout bounds the flush.
-		flushCtx, flushCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer flushCancel()
-		if flushErr := a.messages.FlushAll(flushCtx); flushErr != nil {
-			slog.Error("Failed to flush pending message updates after run", "error", flushErr)
-		}
-		if skipRunComplete {
-			return
-		}
-		complete := notify.RunComplete{SessionID: call.SessionID, RunID: call.RunID}
-		if currentAssistant != nil {
-			complete.MessageID = currentAssistant.ID
-			complete.Text = currentAssistant.Content().String()
-		}
-		if retErr != nil {
-			complete.Error = retErr.Error()
-			complete.Cancelled = errors.Is(retErr, context.Canceled)
-		} else if ctx.Err() != nil {
-			complete.Cancelled = true
-		}
-		// Prefer the per-call hook when supplied so the coordinator
-		// can coalesce retries (e.g. unauthorized → re-auth → retry)
-		// into a single user-visible terminal event. The fallback
-		// must-deliver publish applies bounded-blocking semantics to
-		// the authoritative terminal event so a momentarily-full
-		// subscriber channel can't silently drop it and hang
-		// non-interactive clients waiting on RunComplete.
-		a.publishRunComplete(ctx, call, complete)
-	}()
 
 	history, files := a.preparePrompt(msgs, largeModel.CatwalkCfg.SupportsImages, call.Attachments...)
 

@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/gitutil"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
@@ -356,6 +357,10 @@ func (w *AppWorkspace) WorkingDir() string {
 	return w.store.WorkingDir()
 }
 
+func (w *AppWorkspace) GitBranch(context.Context) (string, error) {
+	return gitutil.CurrentBranch(w.store.WorkingDir()), nil
+}
+
 func (w *AppWorkspace) Resolver() config.VariableResolver {
 	return w.store.Resolver()
 }
@@ -507,16 +512,24 @@ func (w *AppWorkspace) MCPServersEnabled(ctx context.Context) ([]string, error) 
 	return w.app.Sessions.MCPServersEnabled(ctx)
 }
 
-// MCPSetServerDisabled adds or removes a repository-scoped MCP override.
-// Config files are never touched.
+// MCPSetServerDisabled adds or removes a repository-scoped MCP override
+// and applies it to the running client. Config files are never touched.
 func (w *AppWorkspace) MCPSetServerDisabled(ctx context.Context, name string, disabled bool) error {
-	return w.app.Sessions.SetMCPServerDisabled(ctx, name, disabled)
+	if err := w.app.Sessions.SetMCPServerDisabled(ctx, name, disabled); err != nil {
+		return err
+	}
+	return mcptools.SetLocalDisabled(ctx, w.store, name, disabled)
 }
 
 // MCPSetServerConfigDisabled toggles an MCP server's disabled flag in the
-// global config and applies the change to the running client.
+// global config and applies the change to the running client unless a
+// repository-scoped override takes precedence.
 func (w *AppWorkspace) MCPSetServerConfigDisabled(ctx context.Context, name string, disabled bool) error {
-	return mcptools.SetConfigDisabled(ctx, w.store, config.ScopeGlobal, name, disabled)
+	override, err := session.HasMCPOverride(ctx, w.app.Sessions, name)
+	if err != nil {
+		return err
+	}
+	return mcptools.SetConfigDisabled(ctx, w.store, config.ScopeGlobal, name, disabled, override)
 }
 
 // MCPStartServer starts the named MCP server even when its config entry is

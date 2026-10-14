@@ -23,9 +23,40 @@ jobs:
           else
             echo "should_run=true" >> $GITHUB_OUTPUT
           fi
+
   nightly:
     needs: check
-    if: needs.check.outputs.should_run == 'true'
-    uses: charmbracelet/meta/.github/workflows/nightly.yml@main
-    secrets:
-      goreleaser_key: ${{ secrets.GORELEASER_KEY }}
+    if: needs.check.outputs.should_run == 'true' && github.actor != 'dependabot[bot]'
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    permissions:
+      contents: write
+      id-token: write
+      packages: write
+    env:
+      DOCKER_CLI_EXPERIMENTAL: enabled
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+          cache: true
+          check-latest: true
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - uses: anchore/sbom-action/download-syft@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7
+        with:
+          version: latest
+          distribution: goreleaser-pro
+          args: release --clean --nightly
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GORELEASER_KEY: ${{ secrets.GORELEASER_KEY }}
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ always() }}
+        with:
+          retention-days: 30
+          name: dist
+          path: |
+            dist

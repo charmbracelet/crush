@@ -915,6 +915,16 @@
           ],
           "description": "Exit banner style after quitting Crush",
           "default": "default"
+        },
+        "timestamps": {
+          "type": "string",
+          "enum": [
+            "12h",
+            "24h",
+            "off"
+          ],
+          "description": "Completion timestamp format. Off hides the timestamp.",
+          "default": "12h"
         }
       },
       "additionalProperties": false,

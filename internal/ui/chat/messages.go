@@ -317,10 +317,21 @@ func NewAssistantInfoItem(sty *styles.Styles, message *message.Message, cfg *con
 }
 
 // Finished implements list.Item. Assistant info blocks render a fixed
-// model/duration footer once the assistant turn finishes; the data
-// is immutable after construction so the entry is safe to freeze.
+// model/duration footer once the assistant turn finishes. Configuration
+// changes bump the version and invalidate the cached output.
 func (a *AssistantInfoItem) Finished() bool {
 	return true
+}
+
+// SetConfig refreshes the configuration and invalidates cached output when
+// the timestamp format changes.
+func (a *AssistantInfoItem) SetConfig(cfg *config.Config) {
+	changed := a.cfg.TimestampFormat().Layout() != cfg.TimestampFormat().Layout()
+	a.cfg = cfg
+	if changed {
+		a.clearCache()
+		a.Bump()
+	}
 }
 
 // ID implements MessageItem.
@@ -401,7 +412,9 @@ func (a *AssistantInfoItem) renderContent(width int) string {
 		if duration := completedAt.Sub(a.lastUserMessageTime); duration >= 0 {
 			assistant += " " + a.sty.Messages.AssistantInfoDuration.Render(fmt.Sprintf("in %s", duration))
 		}
-		assistant += " " + a.sty.Messages.AssistantInfoDuration.Render("• "+completedAt.Format("3:04 PM"))
+		if layout := a.cfg.TimestampFormat().Layout(); layout != "" {
+			assistant += " " + a.sty.Messages.AssistantInfoDuration.Render("• "+completedAt.Format(layout))
+		}
 	}
 	if savings != "" {
 		assistant = fmt.Sprintf("%s %s", assistant, savings)

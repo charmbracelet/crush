@@ -99,7 +99,15 @@ func TestClientWorkspace_ConfigChangedRefreshesSiblingCache(t *testing.T) {
 	require.NoError(t, err)
 
 	go wsA.ConsumeEventsForTest(evcA, func(tea.Msg) {})
-	go wsB.ConsumeEventsForTest(evcB, func(tea.Msg) {})
+	configUpdated := make(chan struct{}, 1)
+	go wsB.ConsumeEventsForTest(evcB, func(msg tea.Msg) {
+		if _, ok := msg.(pubsub.Event[proto.ConfigChanged]); ok && compactMode(wsB.Config()) {
+			select {
+			case configUpdated <- struct{}{}:
+			default:
+			}
+		}
+	})
 
 	// Pre-condition: neither cache has compact mode enabled yet.
 	require.NotNil(t, wsA.Config())
@@ -129,6 +137,11 @@ func TestClientWorkspace_ConfigChangedRefreshesSiblingCache(t *testing.T) {
 	require.Eventually(t, func() bool { return compactMode(wsB.Config()) },
 		3*time.Second, 25*time.Millisecond,
 		"client B cache must reflect A's compact-mode mutation via SSE")
+	select {
+	case <-configUpdated:
+	case <-time.After(3 * time.Second):
+		t.Fatal("The UI must receive the config change after its cached snapshot is refreshed")
+	}
 }
 
 // compactMode is a tiny accessor that survives nil intermediates so

@@ -570,6 +570,9 @@ func (c *Config) NormalizeOptions() {
 	if c.Options.TUI.ExitBanner == "" {
 		c.Options.TUI.ExitBanner = ExitBannerDefault
 	}
+	if c.Options.TUI.Timestamps == "" {
+		c.Options.TUI.Timestamps = TimestampFormat12Hour
+	}
 }
 
 func (c *Config) setDefaults(workingDir, dataDir string) {

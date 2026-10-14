@@ -180,6 +180,27 @@ func TestOption_UIExitBanner(t *testing.T) {
 	require.Contains(t, err.Error(), "expects default, compact, or none")
 }
 
+func TestOption_UITimestamps(t *testing.T) {
+	t.Parallel()
+
+	for _, value := range []string{"12h", "24h", "off"} {
+		t.Run(value, func(t *testing.T) {
+			t.Parallel()
+
+			path := filepath.Join(t.TempDir(), "crushrc")
+			data, err := LoadShellConfig(t.Context(), path, []byte("option ui timestamps "+value))
+			require.NoError(t, err)
+			var result map[string]any
+			require.NoError(t, json.Unmarshal(data, &result))
+			ui := result["options"].(map[string]any)["tui"].(map[string]any)
+			require.Equal(t, value, ui["timestamps"])
+		})
+	}
+	path := filepath.Join(t.TempDir(), "crushrc")
+	_, err := LoadShellConfig(t.Context(), path, []byte("option ui timestamps auto"))
+	require.ErrorContains(t, err, "expects 12h, 24h, or off")
+}
+
 func TestOption_BoolShorthand(t *testing.T) {
 	t.Parallel()
 

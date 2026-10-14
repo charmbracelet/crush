@@ -102,6 +102,8 @@ func TestSendMessage_AgentNotInitialized(t *testing.T) {
 	ws := insertAgentWorkspace(t, b, nil)
 	err := b.SendMessage(ws.ID, proto.AgentMessage{SessionID: "S1", Prompt: "hi"})
 	require.ErrorIs(t, err, ErrAgentNotInitialized)
+	// Từ chối thì không được giữ vé run nào, kẻo teardown/Shutdown chờ mãi.
+	require.Zero(t, ws.inflightRuns.Load())
 }
 
 func TestSendMessage_EmptyPrompt(t *testing.T) {

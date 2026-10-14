@@ -35,10 +35,6 @@ func (b *Backend) SendMessage(workspaceID string, msg proto.AgentMessage) error 
 		return err
 	}
 
-	if ws.AgentCoordinator == nil {
-		return ErrAgentNotInitialized
-	}
-
 	if err := agent.ValidateCall(agent.SessionAgentCall{
 		SessionID:   msg.SessionID,
 		Prompt:      msg.Prompt,
@@ -52,13 +48,21 @@ func (b *Backend) SendMessage(workspaceID string, msg proto.AgentMessage) error 
 		ws.runMu.Unlock()
 		return ErrWorkspaceClosing
 	}
+	// Đọc coordinator dưới runMu: InitAgent giữ khoá này khi dựng lại và để
+	// nil nếu dựng lỗi. Kiểm nil trước khi tăng bộ đếm, kẻo một lần dựng lỗi
+	// làm rò runWG/inflightRuns và Shutdown() chờ mãi.
+	coord := ws.AgentCoordinator
+	if coord == nil {
+		ws.runMu.Unlock()
+		return ErrAgentNotInitialized
+	}
 	// Counted before BeginAccepted: from the moment the run holds a
 	// reservation on the coordinator, InitAgent must see it and keep it.
 	ws.runWG.Add(1)
 	ws.inflightRuns.Add(1)
 	ws.runMu.Unlock()
 
-	accept := ws.AgentCoordinator.BeginAccepted(msg.SessionID)
+	accept := coord.BeginAccepted(msg.SessionID)
 	go b.runAgent(ws, msg, accept)
 	return nil
 }

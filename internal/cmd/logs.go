@@ -143,7 +143,11 @@ func followLogs(ctx context.Context, logsFile string, tailLines int) error {
 
 	for {
 		select {
-		case line := <-t.Lines:
+		case line, ok := <-t.Lines:
+			if !ok {
+				// tail đóng kênh khi tự dừng (mở lại tệp lỗi...): line là nil.
+				return t.Err()
+			}
 			if line.Err != nil {
 				continue
 			}

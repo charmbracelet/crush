@@ -39,6 +39,7 @@ type KeyMap struct {
 
 	Chat struct {
 		NewSession     key.Binding
+		JumpSession    key.Binding
 		AddAttachment  key.Binding
 		Cancel         key.Binding
 		Tab            key.Binding
@@ -83,6 +84,7 @@ type KeyMap struct {
 	Models     key.Binding
 	Suspend    key.Binding
 	Sessions   key.Binding
+	Workspaces key.Binding
 	Tab        key.Binding
 	ToggleYolo key.Binding
 	ShiftTab   key.Binding
@@ -103,16 +105,22 @@ func DefaultKeyMap() KeyMap {
 			key.WithHelp("ctrl+p", "commands"),
 		),
 		Models: key.NewBinding(
-			key.WithKeys("ctrl+m", "ctrl+l"),
-			key.WithHelp("ctrl+l", "models"),
+			key.WithKeys("alt+m", "ctrl+m", "ctrl+l"),
+			key.WithHelp("alt+m", "model"),
 		),
 		Suspend: key.NewBinding(
 			key.WithKeys("ctrl+z"),
 			key.WithHelp("ctrl+z", "suspend"),
 		),
 		Sessions: key.NewBinding(
-			key.WithKeys("ctrl+s"),
-			key.WithHelp("ctrl+s", "sessions"),
+			key.WithKeys("alt+s", "ctrl+s"),
+			key.WithHelp("alt+s", "sessions"),
+		),
+		// Back to Home, the workspace picker: the TUI quits; the run keeps
+		// going only in client/server mode, where the server holds it.
+		Workspaces: key.NewBinding(
+			key.WithKeys("alt+w"),
+			key.WithHelp("alt+w", "workspace"),
 		),
 		Tab: key.NewBinding(
 			key.WithKeys("tab"),
@@ -195,9 +203,14 @@ func DefaultKeyMap() KeyMap {
 	)
 
 	km.Chat.NewSession = key.NewBinding(
-		key.WithKeys("ctrl+n"),
-		key.WithHelp("ctrl+n", "new session"),
+		key.WithKeys("alt+n", "ctrl+n"),
+		key.WithHelp("alt+n", "new"),
 	)
+	// The jump keys have no default keys (roadmap P1.3a: pick sessions by
+	// name, not by index); keybindings.json can still bind them. Key i of
+	// the jump binding is the (i+1)th session in the Sessions panel, so
+	// rebinding it keeps the order.
+	km.Chat.JumpSession = key.NewBinding(key.WithHelp("", "jump"))
 	km.Chat.AddAttachment = key.NewBinding(
 		key.WithKeys("ctrl+f"),
 		key.WithHelp("ctrl+f", "add attachment"),

@@ -132,6 +132,17 @@ type testWorkspace struct {
 	yolo              bool
 	runHidden         []bool
 	compactCalls      []bool
+	acceptEdits       map[string]bool
+}
+
+func (w *testWorkspace) PermissionAcceptEdits(id string) bool { return w.acceptEdits[id] }
+
+func (w *testWorkspace) PermissionSetAcceptEdits(id string, on bool) error {
+	if w.acceptEdits == nil {
+		w.acceptEdits = map[string]bool{}
+	}
+	w.acceptEdits[id] = on
+	return nil
 }
 
 func (w *testWorkspace) Config() *config.Config {
@@ -152,9 +163,9 @@ func (w *testWorkspace) UpdateAgentModel(context.Context) error {
 	return nil
 }
 
-func (w *testWorkspace) PermissionSkipRequests() bool { return w.yolo }
+func (w *testWorkspace) PermissionSkipRequests() (bool, error) { return w.yolo, nil }
 
-func (w *testWorkspace) PermissionSetSkipRequests(skip bool) { w.yolo = skip }
+func (w *testWorkspace) PermissionSetSkipRequests(skip bool) error { w.yolo = skip; return nil }
 
 func (w *testWorkspace) AgentIsReady() bool {
 	return w.agentReady
@@ -189,6 +200,8 @@ func TestDefaultKeyMapHasShiftTab(t *testing.T) {
 	require.Equal(t, []string{"shift+tab"}, km.ShiftTab.Keys())
 }
 
+// TestToggleInputMode pins the default Shift+Tab cycle with a session:
+// code -> plan -> code+YOLO -> code (accept-edits is not in it in Phase 1).
 func TestToggleInputMode(t *testing.T) {
 	t.Parallel()
 	ui, ws := newPlanUI(t, "sess-1")
@@ -202,10 +215,62 @@ func TestToggleInputMode(t *testing.T) {
 		{uiInputModeCode, true, 2},
 		{uiInputModeCode, false, 2},
 	} {
-		applyModeSwitchMsg(ui, ui.toggleInputMode())
+		runToggleCmds(ui, ui.toggleInputMode())
 		require.Equal(t, want.mode, ui.mode)
 		require.Equal(t, want.yolo, ws.yolo)
 		require.Equal(t, want.updates, ws.updateCalls)
+		require.Empty(t, ws.acceptEdits)
+	}
+}
+
+// TestToggleInputModeWithoutSession: on the landing screen there is no
+// session to hold accept-edits, so the cycle skips that step:
+// code -> plan -> code+YOLO -> code.
+func TestToggleInputModeWithoutSession(t *testing.T) {
+	t.Parallel()
+	ui, ws := newPlanUI(t, "")
+	ui.mode = uiInputModeCode
+	for _, want := range []struct {
+		mode    uiInputMode
+		yolo    bool
+		updates int
+	}{
+		{uiInputModePlan, false, 1},
+		{uiInputModeCode, true, 2},
+		{uiInputModeCode, false, 2},
+	} {
+		runToggleCmds(ui, ui.toggleInputMode())
+		require.Equal(t, want.mode, ui.mode)
+		require.Equal(t, want.yolo, ws.yolo)
+		require.Equal(t, want.updates, ws.updateCalls)
+		require.Empty(t, ws.acceptEdits)
+	}
+}
+
+// runToggleCmds runs a toggleInputMode command tree to completion the way
+// the event loop does: batches fan out, and the mode switch and the
+// accept-edits write are finalized (applyModeSwitchMsg handles only a bare
+// mode switch).
+func runToggleCmds(u *UI, cmd tea.Cmd) {
+	if cmd == nil {
+		return
+	}
+	switch msg := cmd().(type) {
+	case tea.BatchMsg:
+		for _, c := range msg {
+			runToggleCmds(u, c)
+		}
+	case modeSwitchedMsg:
+		u.modeSwitching = false
+		for _, c := range u.applyModeSwitch(msg) {
+			runToggleCmds(u, c)
+		}
+	case acceptEditsSetMsg:
+		runToggleCmds(u, u.applyAcceptEditsSet(msg))
+	case busyStateMsg:
+		for _, c := range u.applyBusyState(msg) {
+			runToggleCmds(u, c)
+		}
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -13,6 +14,7 @@ import (
 	"charm.land/log/v2"
 	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/server"
 	"github.com/charmbracelet/x/term"
 	"github.com/nxadm/tail"
 	"github.com/spf13/cobra"
@@ -55,7 +57,7 @@ var logsCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("failed to load configuration: %v", err)
 		}
-		logsFile := filepath.Join(cfg.Config().Options.DataDirectory, "logs", "crush.log")
+		logsFile := logFilePath(cfg.Config().Options.DataDirectory, useClientServer(), clientHost)
 		_, err = os.Stat(logsFile)
 		if os.IsNotExist(err) {
 			log.Warn("Looks like you are not in a crush project. No logs found.")
@@ -68,6 +70,28 @@ var logsCmd = &cobra.Command{
 
 		return showLogs(logsFile, tailLines)
 	},
+}
+
+// serverLogPath returns the log file of the server listening on hostURL.
+// It is the single source of the per-host log location, shared by the
+// server command and logs.
+func serverLogPath(hostURL *url.URL) string {
+	return filepath.Join(config.GlobalCacheDir(), "server-"+safeHostName(hostURL), "crush.log")
+}
+
+// logFilePath returns the log file to read: the per-host server log in
+// client/server mode, otherwise the data directory log.
+func logFilePath(dataDir string, clientServer bool, host string) string {
+	if !clientServer {
+		return filepath.Join(dataDir, "logs", "crush.log")
+	}
+	hostURL, err := server.ParseHostURL(host)
+	if err != nil {
+		// An unparsable host has no server, so point at a path that
+		// does not exist and let the caller report "no logs found".
+		return filepath.Join(config.GlobalCacheDir(), "server-"+safeNameRegexp.ReplaceAllString(host, "_"), "crush.log")
+	}
+	return serverLogPath(hostURL)
 }
 
 func init() {

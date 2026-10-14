@@ -220,6 +220,7 @@ func TestBuildPayload(t *testing.T) {
 	require.Contains(t, s, `"tool_name":"bash"`)
 	// tool_input should be an object, not a string.
 	require.Contains(t, s, `"tool_input":{"command":"ls"}`)
+	require.NotContains(t, s, "stop_hook_active", "only Stop payloads carry it")
 }
 
 func TestRunnerExitCode0Allow(t *testing.T) {

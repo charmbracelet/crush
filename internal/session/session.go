@@ -32,6 +32,30 @@ func HashID(id string) string {
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
+// MaxAncestryDepth bounds how far RootID walks the parent chain.
+// Sub-agents cannot spawn sub-agents today, so one hop suffices in
+// practice; the extra slack guards against cycles and future nesting.
+const MaxAncestryDepth = 4
+
+// RootID returns the top-level session id descends from, following
+// parentOf (a session's parent ID, "" for none) at most MaxAncestryDepth
+// hops. A session without a parent is its own root. On a lookup error it
+// returns id and the error.
+func RootID(id string, parentOf func(id string) (string, error)) (string, error) {
+	root := id
+	for range MaxAncestryDepth {
+		parent, err := parentOf(root)
+		if err != nil {
+			return id, err
+		}
+		if parent == "" || parent == root {
+			break
+		}
+		root = parent
+	}
+	return root, nil
+}
+
 type Todo struct {
 	Content    string     `json:"content"`
 	Status     TodoStatus `json:"status"`
@@ -431,11 +455,12 @@ func (s *service) CreateAgentToolSessionID(messageID, toolCallID string) string 
 
 // ParseAgentToolSessionID parses an agent tool session ID into its components
 func (s *service) ParseAgentToolSessionID(sessionID string) (messageID string, toolCallID string, ok bool) {
-	parts := strings.Split(sessionID, "$$")
-	if len(parts) != 2 {
+	// Cut, not Split: the TUI parses every message's session, Split allocates.
+	messageID, toolCallID, ok = strings.Cut(sessionID, "$$")
+	if !ok || strings.Contains(toolCallID, "$$") {
 		return "", "", false
 	}
-	return parts[0], parts[1], true
+	return messageID, toolCallID, true
 }
 
 // IsAgentToolSession checks if a session ID follows the agent tool session format

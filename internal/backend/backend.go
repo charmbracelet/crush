@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/app"
@@ -70,6 +71,20 @@ var DefaultIdleShutdownDelay = 60 * time.Second
 // that released its claim first (a clean exit) skips the grace. Overridable
 // via CRUSH_SERVER_DETACH_GRACE (seconds; 0 restores immediate teardown).
 var DefaultDetachGrace = 10 * time.Second
+
+// DefaultBusyRecheckInterval is how often a workspace kept alive for an
+// active run with no client attached re-checks whether it can be torn
+// down. Exposed as a package variable so tests can shorten it.
+var DefaultBusyRecheckInterval = 5 * time.Second
+
+// DefaultOrphanRunTimeout caps how long a workspace outlives its last
+// client because a run is still active. Leaving the TUI must not kill the
+// work it started, but a run blocked on a permission or question prompt
+// can never finish without a client, so it would otherwise pin the
+// workspace (and the server) forever. Overridable via
+// CRUSH_SERVER_ORPHAN_RUN_TIMEOUT (seconds; 0 restores tearing down
+// immediately).
+var DefaultOrphanRunTimeout = 30 * time.Minute
 
 // ShutdownFunc is called when the backend needs to trigger a server
 // shutdown (e.g. when the last workspace is removed).
@@ -135,6 +150,11 @@ type Backend struct {
 	createGrace time.Duration
 	lingerDelay time.Duration
 	detachGrace time.Duration
+	// busyRecheck and orphanRunTimeout drive the teardown deferral for
+	// workspaces whose run outlives the last client; see
+	// [Backend.deferTeardownLocked].
+	busyRecheck      time.Duration
+	orphanRunTimeout time.Duration
 }
 
 // clientState tracks one client's claim on a workspace.
@@ -196,19 +216,30 @@ type Workspace struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	// runMu guards closing and gates dispatch of new agent runs.
+	// runMu guards closing and gates dispatch of new agent runs. It is
+	// also held while InitAgent replaces the coordinator and while
+	// teardown asks whether runs are in flight, which orders the two.
 	// closing is set by Shutdown so no new runs are accepted once
 	// teardown has begun. runWG tracks dispatched agent goroutines
 	// so Shutdown can wait for them to return before app cleanup.
 	runMu   sync.Mutex
 	closing bool
 	runWG   sync.WaitGroup
+	// inflightRuns counts the runs tracked by runWG, which has no way to
+	// read its count. Teardown consults it to keep a workspace alive while
+	// a run goes on without a client.
+	inflightRuns atomic.Int32
 
 	// clientsMu guards clients. It is held only briefly (no IO).
 	clientsMu sync.Mutex
 	// clients tracks each client's claim on this workspace. Refcount
 	// is a derived value: len(clients).
 	clients map[string]*clientState
+	// teardownRecheck and orphanedAt track a teardown deferred because a
+	// run was still active when the last client left. Both are guarded by
+	// clientsMu and cleared as soon as a client claims the workspace again.
+	teardownRecheck *time.Timer
+	orphanedAt      time.Time
 
 	// rootCache memoizes [Backend.RootSessionID] resolutions, keyed by
 	// session ID. Session parentage is fixed at creation, so entries
@@ -283,6 +314,9 @@ func New(ctx context.Context, cfg *config.ConfigStore, shutdownFn ShutdownFunc) 
 		createGrace: DefaultCreateGrace,
 		lingerDelay: idleShutdownDelayFromEnv(),
 		detachGrace: durationFromEnv("CRUSH_SERVER_DETACH_GRACE", DefaultDetachGrace),
+
+		busyRecheck:      DefaultBusyRecheckInterval,
+		orphanRunTimeout: durationFromEnv("CRUSH_SERVER_ORPHAN_RUN_TIMEOUT", DefaultOrphanRunTimeout),
 	}
 	b.startChannelRouter()
 	return b
@@ -299,11 +333,15 @@ func idleShutdownDelayFromEnv() time.Duration {
 // unparseable. Zero is a meaningful value for both lifecycle windows it
 // configures, so it is accepted.
 func durationFromEnv(name string, def time.Duration) time.Duration {
-	if v := os.Getenv(name); v != "" {
-		if secs, err := strconv.Atoi(v); err == nil && secs >= 0 {
-			return time.Duration(secs) * time.Second
-		}
+	v := os.Getenv(name)
+	if v == "" {
+		return def
 	}
+	if secs, err := strconv.Atoi(v); err == nil && secs >= 0 {
+		return time.Duration(secs) * time.Second
+	}
+	slog.Warn("Ignoring invalid duration in environment, using the default",
+		"env", name, "value", v, "default", def)
 	return def
 }
 
@@ -598,6 +636,7 @@ func (b *Backend) AttachClient(workspaceID, clientID string) error {
 
 	ws.clientsMu.Lock()
 	defer ws.clientsMu.Unlock()
+	ws.cancelDeferredTeardownLocked()
 	cs, ok := ws.clients[clientID]
 	if !ok {
 		// Defensive: SSE attach without a prior CreateWorkspace by
@@ -710,6 +749,7 @@ func (b *Backend) releaseHold(workspaceID, clientID string) error {
 func (b *Backend) registerClient(ws *Workspace, clientID string) {
 	ws.clientsMu.Lock()
 	defer ws.clientsMu.Unlock()
+	ws.cancelDeferredTeardownLocked()
 	if old, ok := ws.clients[clientID]; ok {
 		old.released = false
 		if old.holdTimer == nil {
@@ -824,14 +864,32 @@ func (b *Backend) detachStream(ws *Workspace, clientID string) {
 // re-registered a client (CreateWorkspace holds b.mu while doing so,
 // so it is mutually exclusive with this critical section). teardown
 // re-checks under both locks (in the canonical b.mu -> ws.clientsMu
-// order) and aborts if the workspace has been re-claimed.
+// order) and aborts if the workspace has been re-claimed. An unclaimed
+// workspace whose agent is still running is not torn down yet either;
+// see [Backend.deferTeardownLocked].
 func (b *Backend) teardown(ws *Workspace) {
 	b.mu.Lock()
+	if live, ok := b.workspaces.Get(ws.ID); !ok || live != ws {
+		// Already torn down: a deferred re-check fired after another path
+		// got here first. Shutting the app down twice is not safe.
+		b.mu.Unlock()
+		return
+	}
+	// Probed before taking clientsMu, which is never held across calls
+	// into other packages.
+	ws.runMu.Lock()
+	busy := ws.runsInFlightLocked()
+	ws.runMu.Unlock()
 	ws.clientsMu.Lock()
 	if len(ws.clients) > 0 {
 		// Race: a CreateWorkspace re-registered a client
 		// between the detach path dropping ws.clientsMu and us
 		// taking b.mu. Abort: the workspace is still alive.
+		ws.clientsMu.Unlock()
+		b.mu.Unlock()
+		return
+	}
+	if b.deferTeardownLocked(ws, busy) {
 		ws.clientsMu.Unlock()
 		b.mu.Unlock()
 		return
@@ -855,6 +913,54 @@ func (b *Backend) teardown(ws *Workspace) {
 		slog.Info("Last workspace removed, shutting down server...")
 		b.shutdownFn()
 	}
+}
+
+// deferTeardownLocked keeps an unclaimed workspace alive while its agent is
+// still running, so a client that leaves (or crashes) mid-run does not
+// cancel the work. The teardown is retried every busyRecheck and goes ahead
+// once the run has ended, or once it has run orphaned for orphanRunTimeout.
+// It reports whether the teardown was deferred. Callers must hold b.mu and
+// ws.clientsMu.
+func (b *Backend) deferTeardownLocked(ws *Workspace, busy bool) bool {
+	if ws.teardownRecheck != nil {
+		ws.teardownRecheck.Stop()
+		ws.teardownRecheck = nil
+	}
+	if !busy || b.orphanRunTimeout <= 0 {
+		return false
+	}
+	if ws.orphanedAt.IsZero() {
+		ws.orphanedAt = time.Now()
+		slog.Info("Last client left while a run is active, keeping workspace alive",
+			"workspace_id", ws.ID, "path", ws.Path, "orphan_timeout", b.orphanRunTimeout)
+	} else if time.Since(ws.orphanedAt) >= b.orphanRunTimeout {
+		slog.Warn("Run still active with no client after the orphan timeout, tearing workspace down",
+			"workspace_id", ws.ID, "path", ws.Path, "orphan_timeout", b.orphanRunTimeout)
+		return false
+	}
+	// A stale firing is harmless: teardown re-checks everything under the
+	// locks and ignores a workspace that is already gone.
+	ws.teardownRecheck = time.AfterFunc(b.busyRecheck, func() { b.teardown(ws) })
+	return true
+}
+
+// runsInFlightLocked reports whether an agent run is going on this
+// workspace. IsBusy alone misses a run accepted but not yet started, so
+// runs dispatched by SendMessage are counted directly too. Callers must
+// hold runMu, under which InitAgent replaces the coordinator.
+func (w *Workspace) runsInFlightLocked() bool {
+	return w.inflightRuns.Load() > 0 ||
+		(w.App != nil && w.AgentCoordinator != nil && w.AgentCoordinator.IsBusy())
+}
+
+// cancelDeferredTeardownLocked drops a deferred teardown because a client
+// has claimed the workspace again. Callers must hold ws.clientsMu.
+func (w *Workspace) cancelDeferredTeardownLocked() {
+	if w.teardownRecheck != nil {
+		w.teardownRecheck.Stop()
+		w.teardownRecheck = nil
+	}
+	w.orphanedAt = time.Time{}
 }
 
 // scheduleShutdownIfIdleLocked decides what to do about server shutdown

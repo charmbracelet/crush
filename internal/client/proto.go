@@ -777,6 +777,36 @@ func (c *Client) GetPermissionsSkipRequests(ctx context.Context, id string) (boo
 	return skip.Skip, nil
 }
 
+// SetPermissionsAcceptEdits sets the accept-edits flag of a session.
+func (c *Client) SetPermissionsAcceptEdits(ctx context.Context, id, sessionID string, on bool) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/permissions/accept-edits", id), url.Values{"session_id": []string{sessionID}}, jsonBody(proto.PermissionAcceptEditsRequest{AcceptEdits: on}), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return fmt.Errorf("failed to set accept edits: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to set accept edits: status code %d", rsp.StatusCode)
+	}
+	return nil
+}
+
+// GetPermissionsAcceptEdits retrieves the accept-edits flag of a session.
+func (c *Client) GetPermissionsAcceptEdits(ctx context.Context, id, sessionID string) (bool, error) {
+	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/permissions/accept-edits", id), url.Values{"session_id": []string{sessionID}}, nil)
+	if err != nil {
+		return false, fmt.Errorf("failed to get accept edits: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("failed to get accept edits: status code %d", rsp.StatusCode)
+	}
+	var out proto.PermissionAcceptEditsRequest
+	if err := json.NewDecoder(rsp.Body).Decode(&out); err != nil {
+		return false, fmt.Errorf("failed to decode accept edits: %w", err)
+	}
+	return out.AcceptEdits, nil
+}
+
 // GetConfig retrieves the workspace-specific configuration.
 func (c *Client) GetConfig(ctx context.Context, id string) (*config.Config, error) {
 	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/config", id), nil, nil)

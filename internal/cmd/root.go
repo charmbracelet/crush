@@ -107,7 +107,16 @@ crush --session {session-id}
 # Continue the most recent session
 crush --continue
   `,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, args []string) (err error) {
+		// Drop the marker so servers and tools started from here do not
+		// inherit it.
+		homeChild := os.Getenv(homeChildEnv) != ""
+		_ = os.Unsetenv(homeChildEnv)
+		if shouldRunHome(cmd.Flags(), args, stdioIsTerminal()) {
+			return runHome(cmd)
+		}
+		startDir, _ := os.Getwd() // The workspace setup changes into --cwd.
+
 		sessionID, _ := cmd.Flags().GetString("session")
 		continueLast, _ := cmd.Flags().GetBool("continue")
 
@@ -115,7 +124,17 @@ crush --continue
 		if err != nil {
 			return err
 		}
-		defer cleanup()
+		backHome := false
+		defer func() {
+			cleanup()
+			// Alt+W: Home runs again once this workspace is closed.
+			switch {
+			case backHome && homeChild:
+				os.Exit(homeExitCode)
+			case backHome:
+				err = execHome(startDir)
+			}
+		}()
 
 		if sessionID != "" {
 			sess, err := resolveWorkspaceSessionID(cmd.Context(), ws, sessionID)
@@ -140,10 +159,20 @@ crush --continue
 		)
 		go ws.Subscribe(program)
 
-		if _, err := program.Run(); err != nil {
+		_, runErr := program.Run()
+		// Keep what the user was typing for the next start (blocking IO is
+		// fine here: the program has exited).
+		if err := model.SaveDrafts(); err != nil {
+			slog.Warn("Failed to save drafts", "error", err)
+		}
+		if err := runErr; err != nil {
 			event.Error(err)
 			slog.Error("TUI run error", "error", err)
 			return errors.New("Crush crashed. If metrics are enabled, we were notified about it. If you'd like to report it, please copy the stacktrace above and open an issue at https://github.com/charmbracelet/crush/issues/new?template=bug.yml") //nolint:staticcheck
+		}
+		if model.BackToHome() {
+			backHome = true
+			return nil
 		}
 		var banner config.ExitBanner
 		if cfg := com.Config(); cfg != nil {
@@ -214,6 +243,11 @@ func Execute() {
 		fang.WithVersion(version.Version),
 		fang.WithNotifySignal(os.Interrupt),
 	); err != nil {
+		var ue *usageError
+		// Cobra flag-group violations (e.g. -s with -C) are usage errors too.
+		if errors.As(err, &ue) || strings.HasPrefix(err.Error(), "if any flags in the group") {
+			os.Exit(2)
+		}
 		os.Exit(1)
 	}
 }
@@ -370,6 +404,13 @@ func setupClientServerWorkspace(cmd *cobra.Command) (workspace.Workspace, func()
 	}
 
 	clientWs := workspace.NewClientWorkspace(c, *protoWs)
+
+	// Home lists the registry; setupLocalWorkspace registers in-process runs.
+	if cwd, err := os.Getwd(); err == nil {
+		if err := projects.Register(cwd, protoWs.DataDir); err != nil {
+			slog.Warn("Failed to register project", "error", err)
+		}
+	}
 
 	if protoWs.Config.IsConfigured() {
 		if err := clientWs.InitCoderAgent(cmd.Context()); err != nil {

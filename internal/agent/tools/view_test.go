@@ -226,6 +226,10 @@ func (m *mockViewPermissionService) GrantPersistent(req permission.PermissionReq
 
 func (m *mockViewPermissionService) AutoApproveSession(sessionID string) {}
 
+func (m *mockViewPermissionService) SetAcceptEdits(string, bool) {}
+
+func (m *mockViewPermissionService) AcceptEdits(string) bool { return false }
+
 func (m *mockViewPermissionService) ActiveRequest() (permission.PermissionRequest, bool) {
 	return permission.PermissionRequest{}, false
 }

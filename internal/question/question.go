@@ -3,8 +3,9 @@
 // the permission service pattern: publish a request over pubsub,
 // block on a channel, and resolve when the UI sends back answers.
 //
-// Only one question can be pending at a time (the tool blocks until
-// answered), so no correlation IDs are needed in the domain model.
+// Only one request can be pending at a time (concurrent Asks queue), so
+// Answer matches the answers to the pending request by question ID and
+// ignores stale ones that belong to an earlier request.
 package question
 
 import (
@@ -200,6 +201,7 @@ type questionService struct {
 	broker             *pubsub.Broker[Request]
 	notificationBroker *pubsub.Broker[Notification]
 	mu                 sync.Mutex
+	askSem             chan struct{} // Serializes Ask; ctx-cancellable unlike a mutex.
 	pending            chan []Answer
 	cancelled          chan struct{}
 	pendingID          string
@@ -211,6 +213,7 @@ func NewService() *questionService {
 	return &questionService{
 		broker:             pubsub.NewBroker[Request](),
 		notificationBroker: pubsub.NewBroker[Notification](),
+		askSem:             make(chan struct{}, 1),
 	}
 }
 
@@ -250,6 +253,14 @@ func (s *questionService) Ask(ctx context.Context, req Request) ([]Answer, error
 		return nil, err
 	}
 
+	// Only one question is shown at a time; other sessions queue here.
+	select {
+	case s.askSem <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	defer func() { <-s.askSem }()
+
 	s.mu.Lock()
 	s.pending = make(chan []Answer, 1)
 	s.cancelled = make(chan struct{})
@@ -285,10 +296,20 @@ func (s *questionService) Answer(answers []Answer) bool {
 	batchID := s.pendingID
 	sessionID := s.pendingReq.SessionID
 	ch := s.pending
+	known := make(map[string]bool, len(s.pendingReq.Questions))
+	for _, q := range s.pendingReq.Questions {
+		known[q.ID] = true
+	}
 	s.mu.Unlock()
 
 	if ch == nil {
 		return false
+	}
+	// A stale submit must not resolve the next queued request.
+	for _, a := range answers {
+		if !known[a.QuestionID] {
+			return false
+		}
 	}
 	ch <- answers
 

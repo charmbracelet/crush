@@ -1,0 +1,46 @@
+# Cấu hình chính của agent-cli (crushrc, cú pháp Bash). Installer chép tệp này
+# thành ~/.config/agent-cli/crushrc nếu chưa có. Provider/model đọc từ biến
+# AGENT_CLI_* trong tệp env (xem agent-cli.env.example), không viết cứng ở đây.
+
+# Nạp biến; bỏ qua nếu tệp không có (khi đó biến phải có sẵn trong môi trường).
+env_file="${AGENT_CLI_ENV_FILE:-$HOME/.config/agent-cli/env}"
+[[ -f "$env_file" ]] && source "$env_file"
+
+# Thiếu biến bắt buộc thì dừng. Báo lỗi ghi thẳng ra /dev/stderr vì stderr của
+# crushrc bị bỏ qua khi nạp cấu hình; thông báo chỉ thấy ở chế độ trực tiếp
+# (CRUSH_CLIENT_SERVER=0 agent-cli models). Ở chế độ client/server chỉ thấy lỗi
+# "Failed to initialize crush server" và stderr.log của server chỉ ghi "exit status 1".
+{
+  : "${AGENT_CLI_BASE_URL:?đặt AGENT_CLI_BASE_URL trong ${env_file} (vd http://127.0.0.1:<port>/v1)}"
+  : "${AGENT_CLI_MODEL:?đặt AGENT_CLI_MODEL trong ${env_file}}"
+} 2>/dev/stderr
+base_url="$AGENT_CLI_BASE_URL"
+model="$AGENT_CLI_MODEL"
+small_model="${AGENT_CLI_SMALL_MODEL:-$model}"
+context_window="${AGENT_CLI_CONTEXT_WINDOW:-128000}"
+max_tokens="${AGENT_CLI_MAX_TOKENS:-8192}"
+
+# API key rỗng được (model local).
+provider add main \
+  --name "main" \
+  --type "${AGENT_CLI_PROVIDER_TYPE:-openai-compat}" \
+  --base-url "$base_url" \
+  --api-key "${AGENT_CLI_API_KEY-}"
+
+model add "main/$model" --name "$model" \
+  --context-window "$context_window" --default-max-tokens "$max_tokens"
+if [[ "$small_model" != "$model" ]]; then
+  model add "main/$small_model" --name "$small_model" \
+    --context-window "$context_window" --default-max-tokens "$max_tokens"
+fi
+model large "main/$model" --max-tokens "$max_tokens"
+model small "main/$small_model" --max-tokens "$max_tokens"
+
+# Riêng tư: tắt metrics, tắt cập nhật catalog, chỉ dùng provider khai ở trên.
+option metrics false
+option provider-auto-update false
+option default-providers false
+
+# Tắt công cụ chạm mạng; chỉ công cụ đọc được chạy không cần hỏi.
+permissions deny sourcegraph web_search web_fetch fetch download
+permissions allow view ls glob grep rg

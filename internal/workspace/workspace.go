@@ -110,6 +110,27 @@ type AgentModel struct {
 	ModelCfg   config.SelectedModel
 }
 
+// SessionStatus is the live state of one session: whether its agent is
+// busy and whether it waits for the user (a pending permission request or
+// question raised by the session or one of its sub-sessions).
+type SessionStatus struct {
+	// Known reports that the probe succeeded. A failed probe returns the
+	// zero SessionStatus, which is unknown rather than idle.
+	Known         bool
+	Busy          bool
+	PendingPrompt bool
+}
+
+// RootSessionID returns the top-level session that sessionID descends
+// from, via [session.RootID] (the walk the server uses, so both modes
+// agree). On a lookup error it returns sessionID and the error.
+func RootSessionID(ctx context.Context, ws Workspace, sessionID string) (string, error) {
+	return session.RootID(sessionID, func(id string) (string, error) {
+		sess, err := ws.GetSession(ctx, id)
+		return sess.ParentSessionID, err
+	})
+}
+
 // Workspace is the main abstraction consumed by the TUI and CLI. It
 // groups every operation a frontend needs to perform against a running
 // workspace, regardless of whether the workspace is in-process or
@@ -151,6 +172,10 @@ type Workspace interface {
 	AgentCancel(sessionID string)
 	AgentIsBusy() bool
 	AgentIsSessionBusy(sessionID string) bool
+	// AgentSessionStatus reports, in one call, whether the session's
+	// agent is busy and whether a permission request or question raised
+	// by the session (or a sub-session) awaits the user.
+	AgentSessionStatus(sessionID string) SessionStatus
 	AgentModel() AgentModel
 	AgentIsReady() bool
 	// AgentReadyErr reports nil when the coder agent is ready to accept
@@ -182,8 +207,18 @@ type Workspace interface {
 	PermissionGrant(perm permission.PermissionRequest) bool
 	PermissionGrantPersistent(perm permission.PermissionRequest) bool
 	PermissionDeny(perm permission.PermissionRequest) bool
-	PermissionSkipRequests() bool
-	PermissionSetSkipRequests(skip bool)
+	// PermissionSkipRequests reads the YOLO flag. A read error means unknown: callers
+	// must keep their last known value and never toggle/write on it.
+	PermissionSkipRequests() (bool, error)
+	PermissionSetSkipRequests(skip bool) error
+	// PermissionSetAcceptEdits makes edit, multiedit and write requests of
+	// exactly this session for files inside the workspace dir granted
+	// without prompting (sub-agent sessions do not inherit it). It returns
+	// the error of a write that did not land (an old server, a transport
+	// error). PermissionAcceptEdits reports it; it reads false
+	// when the state cannot be fetched.
+	PermissionSetAcceptEdits(sessionID string, on bool) error
+	PermissionAcceptEdits(sessionID string) bool
 
 	// Questions
 	//

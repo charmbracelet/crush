@@ -281,8 +281,9 @@ func (app *App) resolveSession(ctx context.Context, continueSessionID string, us
 }
 
 // RunNonInteractive runs the application in non-interactive mode with the
-// given prompt, printing to stdout.
-func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt, largeModel, smallModel, reasoningEffort string, hideSpinner bool, continueSessionID string, useLast bool) error {
+// given prompt, printing to output. onSession, when non-nil, receives the ID
+// of the session used or created, as soon as it is resolved.
+func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, onSession func(sessionID string), prompt, largeModel, smallModel, reasoningEffort string, hideSpinner bool, continueSessionID string, useLast bool) error {
 	slog.Info("Running in non-interactive mode")
 
 	// Re-initialize the coder agent without interactive-only tools.
@@ -366,6 +367,9 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 		return fmt.Errorf("failed to create session for non-interactive mode: %w", err)
 	}
 
+	if onSession != nil {
+		onSession(sess.ID)
+	}
 	if continueSessionID != "" || useLast {
 		slog.Info("Continuing session for non-interactive run", "session_id", sess.ID)
 		// If no explicit model override was requested, restore the
@@ -839,7 +843,7 @@ func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 		return fmt.Errorf("coder agent configuration is missing")
 	}
 	var err error
-	app.AgentCoordinator, err = agent.NewCoordinator(ctx, agent.CoordinatorOptions{
+	app.AgentCoordinator, err = agent.NewCoordinatorWithStopHooks(ctx, agent.CoordinatorOptions{
 		Config:      app.config,
 		Sessions:    app.Sessions,
 		Messages:    app.Messages,

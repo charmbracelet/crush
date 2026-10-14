@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
+	"github.com/charmbracelet/crush/internal/session"
 )
 
 // SubscribeEvents returns a per-caller event channel for a workspace.
@@ -24,12 +25,6 @@ func (b *Backend) SubscribeEvents(ctx context.Context, workspaceID string) (<-ch
 
 	return ws.Events(ctx), nil
 }
-
-// maxSessionAncestryDepth bounds how far [Backend.RootSessionID] walks
-// the parent chain when resolving a session to its top-level session.
-// Sub-agents cannot spawn sub-agents today, so one hop suffices in
-// practice; the extra slack guards against cycles and future nesting.
-const maxSessionAncestryDepth = 4
 
 // RootSessionID resolves sessionID to its top-level session by walking
 // the parent chain. Sub-agent sessions (created by the agent tool or
@@ -60,16 +55,12 @@ func rootSessionID(ctx context.Context, ws *Workspace, sessionID string) (string
 	if root, ok := ws.rootCache.Load(sessionID); ok {
 		return root.(string), nil
 	}
-	id := sessionID
-	for range maxSessionAncestryDepth {
+	id, err := session.RootID(sessionID, func(id string) (string, error) {
 		sess, err := ws.Sessions.Get(ctx, id)
-		if err != nil {
-			return sessionID, err
-		}
-		if sess.ParentSessionID == "" || sess.ParentSessionID == id {
-			break
-		}
-		id = sess.ParentSessionID
+		return sess.ParentSessionID, err
+	})
+	if err != nil {
+		return sessionID, err
 	}
 	ws.rootCache.Store(sessionID, id)
 	return id, nil

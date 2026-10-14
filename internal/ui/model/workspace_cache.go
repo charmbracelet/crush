@@ -30,6 +30,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/crush/internal/workspace"
 )
 
@@ -75,11 +76,14 @@ type busyStateMsg struct {
 	ready     bool
 	agentBusy bool
 	yolo      bool
+	yoloErr   bool // The yolo read failed: keep the cached value.
 	// forSession is the session sessionBusy was probed for.
 	forSession string
 	// sessionBusy reports whether forSession itself has a run in flight,
 	// unlike agentBusy, which any session or shell command sets.
 	sessionBusy bool
+	// acceptEdits reports whether forSession auto-approves edit tools.
+	acceptEdits bool
 	// model is the coordinator's selected model, fetched by the same probe
 	// so the sidebar/landing model info renders from memoized state. Zero
 	// (and ignored) when ready is false.
@@ -164,7 +168,12 @@ func (m *UI) dispatchBusyRefresh() tea.Cmd {
 				st.sessionBusy = ws.AgentIsSessionBusy(sessionID)
 			}
 		}
-		st.yolo = ws.PermissionSkipRequests()
+		var yoloErr error
+		st.yolo, yoloErr = ws.PermissionSkipRequests()
+		st.yoloErr = yoloErr != nil
+		if sessionID != "" {
+			st.acceptEdits = ws.PermissionAcceptEdits(sessionID)
+		}
 		return st
 	}
 }
@@ -193,12 +202,23 @@ func (m *UI) applyBusyState(msg busyStateMsg) []tea.Cmd {
 		}
 		return nil
 	}
-	prevBusy := m.isAgentBusy()
+	prevBusy := m.isCurrentSessionBusy()
 	prevYolo := m.yoloModeCached()
 	m.agentBusyCache.set(msg.agentBusy)
-	m.yoloCache.set(msg.yolo)
+	if msg.yoloErr {
+		// Unknown, not "off": keep the last known mode.
+		msg.yolo = prevYolo
+	} else {
+		m.yoloCache.set(msg.yolo)
+	}
 	m.agentReady = msg.ready
 	m.agentModel = msg.model
+	m.probedSession = msg.forSession
+	m.probedSessionBusy = msg.sessionBusy
+	if !m.acceptEditsSetting {
+		// While a toggle's write is in flight the probe may predate it.
+		m.acceptEditsSession, m.acceptEdits = msg.forSession, msg.acceptEdits
+	}
 	if prevYolo != msg.yolo {
 		// A remote/async toggle changed yolo mode: update the editor
 		// prompt function so the prompt icon/style tracks the new mode.
@@ -208,7 +228,7 @@ func (m *UI) applyBusyState(msg busyStateMsg) []tea.Cmd {
 	}
 
 	var cmds []tea.Cmd
-	busy := m.isAgentBusy()
+	busy := m.isCurrentSessionBusy()
 	if busy {
 		// A session reload that raced an unpopulated busy cache (the
 		// zero-value read at boot) froze the animation clock even though
@@ -224,8 +244,6 @@ func (m *UI) applyBusyState(msg busyStateMsg) []tea.Cmd {
 	if m.todoIsSpinning && !busy {
 		m.todoIsSpinning = false
 	}
-	m.probedSession = msg.forSession
-	m.probedSessionBusy = msg.sessionBusy
 	if prevBusy != busy {
 		m.renderPills()
 	}
@@ -322,16 +340,40 @@ func (m *UI) staleWorkspaceRefreshCmds() []tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 	}
+	if time.Since(m.sessionListCheckedAt) >= sessionListTTL {
+		if cmd := m.dispatchSessionListRefresh(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
 	return cmds
 }
 
 // toggleYoloMode flips permission auto-approval and writes the new value
 // through the yolo cache (no re-probe needed) and the editor prompt. Shared
 // by the direct keybinding and the commands-dialog action so both stay
-// write-through. Returns the new mode.
+// write-through. Returns the new mode; if the workspace write fails the mode
+// stays as it was and the error shows in the status bar.
 func (m *UI) toggleYoloMode() bool {
-	yolo := !m.com.Workspace.PermissionSkipRequests()
-	m.com.Workspace.PermissionSetSkipRequests(yolo)
+	yolo, err := m.tryToggleYoloMode()
+	if err != nil {
+		m.status.SetInfoMsg(util.NewErrorMsg(err))
+	}
+	return yolo
+}
+
+// tryToggleYoloMode is toggleYoloMode that hands the error back. If the read
+// or the write fails it returns the unchanged (cached) mode, writes nothing
+// and touches no state.
+func (m *UI) tryToggleYoloMode() (bool, error) {
+	cur, err := m.com.Workspace.PermissionSkipRequests()
+	if err != nil {
+		// Unknown mode: fail closed, no toggle and no write.
+		return m.yoloModeCached(), err
+	}
+	if err := m.com.Workspace.PermissionSetSkipRequests(!cur); err != nil {
+		return cur, err
+	}
+	yolo := !cur
 	m.yoloCache.set(yolo)
 	// Supersede any in-flight busy/yolo probe: its result carries the old
 	// generation and would otherwise overwrite the value we just wrote.
@@ -343,7 +385,7 @@ func (m *UI) toggleYoloMode() bool {
 	// Any explicit toggle hands YOLO ownership back to the user; the
 	// Shift+Tab cycle re-claims it right after its own call.
 	m.cycleYolo = false
-	return yolo
+	return yolo, nil
 }
 
 // yoloModeCached reports the memoized permission-skip ("yolo") mode. Toggles
@@ -351,4 +393,43 @@ func (m *UI) toggleYoloMode() bool {
 // otherwise.
 func (m *UI) yoloModeCached() bool {
 	return m.yoloCache.val
+}
+
+// acceptEditsSetMsg reports that setAcceptEdits' workspace write returned.
+type acceptEditsSetMsg struct {
+	info string // Reported only if the write landed; may be empty.
+	err  error
+}
+
+// setAcceptEdits turns accept-edits on or off for the current session,
+// writing through the memoized value; the workspace call runs off-thread.
+func (m *UI) setAcceptEdits(on bool, info string) tea.Cmd {
+	ws, sessionID := m.com.Workspace, m.currentSessionID()
+	m.acceptEditsSession, m.acceptEdits = sessionID, on
+	m.acceptEditsSetting = true
+	return func() tea.Msg {
+		return acceptEditsSetMsg{info: info, err: ws.PermissionSetAcceptEdits(sessionID, on)}
+	}
+}
+
+// applyAcceptEditsSet reports the write's outcome and re-probes, discarding
+// any probe that started before it; the re-probe also replaces the
+// memoized value a failed write left behind.
+func (m *UI) applyAcceptEditsSet(msg acceptEditsSetMsg) tea.Cmd {
+	m.acceptEditsSetting = false
+	m.busyFetchGen++
+	var report tea.Cmd
+	switch {
+	case msg.err != nil:
+		report = util.ReportError(msg.err)
+	case msg.info != "":
+		report = util.ReportInfo(msg.info)
+	}
+	return tea.Batch(report, m.dispatchBusyRefresh())
+}
+
+// acceptEditsCached reports the memoized accept-edits state of the current
+// session.
+func (m *UI) acceptEditsCached() bool {
+	return m.acceptEdits && m.hasSession() && m.acceptEditsSession == m.session.ID
 }

@@ -353,7 +353,16 @@ func (m *Models) setProviderItems() error {
 	var selectedItemID string
 	selectedType := m.modelType.Config()
 	currentModel := cfg.Models[selectedType]
-	recentItems := cfg.RecentModels[selectedType]
+	// The config merge concatenates arrays, so a project-scoped list can
+	// repeat models; keep the first occurrence of each.
+	var recentItems []config.SelectedModel
+	seenRecent := make(map[string]bool)
+	for _, r := range cfg.RecentModels[selectedType] {
+		if k := modelKey(r.Provider, r.Model); !seenRecent[k] {
+			seenRecent[k] = true
+			recentItems = append(recentItems, r)
+		}
+	}
 
 	// Track providers already added to avoid duplicates
 	addedProviders := make(map[string]bool)

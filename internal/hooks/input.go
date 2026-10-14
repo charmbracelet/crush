@@ -26,6 +26,9 @@ type Payload struct {
 	CWD       string          `json:"cwd"`
 	ToolName  string          `json:"tool_name"`
 	ToolInput json.RawMessage `json:"tool_input"`
+	// StopHookActive is set on Stop events only (Claude Code compatible):
+	// true when this turn is already a re-run caused by a Stop hook block.
+	StopHookActive *bool `json:"stop_hook_active,omitempty"`
 }
 
 // BuildPayload constructs the JSON stdin payload for a hook command.
@@ -40,6 +43,10 @@ func BuildPayload(eventName, sessionID, cwd, toolName, toolInputJSON string) []b
 		CWD:       cwd,
 		ToolName:  toolName,
 		ToolInput: toolInput,
+	}
+	if eventName == EventStop {
+		active := gjson.GetBytes(toolInput, "stop_hook_active").Bool()
+		p.StopHookActive = &active
 	}
 	data, err := json.Marshal(p)
 	if err != nil {
@@ -203,7 +210,7 @@ func parseDecision(s string) Decision {
 	switch strings.ToLower(s) {
 	case "allow":
 		return DecisionAllow
-	case "deny":
+	case "deny", "block": // "block" is Claude Code's Stop/legacy spelling.
 		return DecisionDeny
 	default:
 		return DecisionNone

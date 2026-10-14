@@ -86,11 +86,6 @@ func NewWriteTool(
 				return fantasy.ToolResponse{}, fmt.Errorf("error checking file: %w", err)
 			}
 
-			dir := filepath.Dir(filePath)
-			if err = os.MkdirAll(dir, 0o755); err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("error creating directory: %w", err)
-			}
-
 			oldContent := ""
 			if fileInfo != nil && !fileInfo.IsDir() {
 				oldBytes, readErr := os.ReadFile(filePath)
@@ -110,6 +105,7 @@ func NewWriteTool(
 				permission.CreatePermissionRequest{
 					SessionID:   sessionID,
 					Path:        fsext.PathOrPrefix(filePath, workingDir),
+					FilePath:    filePath,
 					ToolCallID:  call.ID,
 					ToolName:    WriteToolName,
 					Action:      "write",
@@ -132,6 +128,11 @@ func NewWriteTool(
 					Removals:  removals,
 				})
 				return resp, nil
+			}
+
+			// Only after the grant: a denied write must not leave directories.
+			if err = os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
+				return fantasy.ToolResponse{}, fmt.Errorf("error creating directory: %w", err)
 			}
 
 			err = os.WriteFile(filePath, []byte(params.Content), 0o644)

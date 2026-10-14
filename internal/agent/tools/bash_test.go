@@ -33,6 +33,10 @@ func (m *mockBashPermissionService) GrantPersistent(req permission.PermissionReq
 
 func (m *mockBashPermissionService) AutoApproveSession(sessionID string) {}
 
+func (m *mockBashPermissionService) SetAcceptEdits(string, bool) {}
+
+func (m *mockBashPermissionService) AcceptEdits(string) bool { return false }
+
 func (m *mockBashPermissionService) ActiveRequest() (permission.PermissionRequest, bool) {
 	return permission.PermissionRequest{}, false
 }
@@ -107,6 +111,10 @@ func (m *recordingPermissionService) GrantPersistent(req permission.PermissionRe
 }
 
 func (m *recordingPermissionService) AutoApproveSession(sessionID string) {}
+
+func (m *recordingPermissionService) SetAcceptEdits(string, bool) {}
+
+func (m *recordingPermissionService) AcceptEdits(string) bool { return false }
 
 func (m *recordingPermissionService) ActiveRequest() (permission.PermissionRequest, bool) {
 	return permission.PermissionRequest{}, false

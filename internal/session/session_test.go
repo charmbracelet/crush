@@ -143,3 +143,22 @@ func TestEstimatedUsageStateCanBeClearedByExplicitSave(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, refetched.EstimatedUsage)
 }
+
+// TestParseAgentToolSessionID pins the "<message>$$<tool call>" format and
+// that parsing does not allocate: the TUI parses every message's session.
+func TestParseAgentToolSessionID(t *testing.T) { // Not parallel: AllocsPerRun.
+	s := &service{}
+	for id, want := range map[string][3]any{
+		"m$$tc":    {"m", "tc", true},
+		"plain":    {"", "", false},
+		"a$$b$$c":  {"", "", false},
+		"$$tc":     {"", "tc", true},
+		"m$$":      {"m", "", true},
+		"a$$$b":    {"a", "$b", true},
+		"a$$$$b$$": {"", "", false},
+	} {
+		msgID, toolCallID, ok := s.ParseAgentToolSessionID(id)
+		require.Equal(t, want, [3]any{msgID, toolCallID, ok}, id)
+	}
+	require.Zero(t, testing.AllocsPerRun(100, func() { s.ParseAgentToolSessionID("0f9c2d4e-plain-session") }))
+}

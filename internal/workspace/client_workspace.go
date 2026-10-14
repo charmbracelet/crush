@@ -178,11 +178,12 @@ func (w *ClientWorkspace) CreateAgentToolSessionID(messageID, toolCallID string)
 }
 
 func (w *ClientWorkspace) ParseAgentToolSessionID(sessionID string) (string, string, bool) {
-	parts := strings.Split(sessionID, "$$")
-	if len(parts) != 2 {
+	// Cut, not Split: the TUI parses every message's session, Split allocates.
+	messageID, toolCallID, ok := strings.Cut(sessionID, "$$")
+	if !ok || strings.Contains(toolCallID, "$$") {
 		return "", "", false
 	}
-	return parts[0], parts[1], true
+	return messageID, toolCallID, true
 }
 
 // SetCurrentSession reports the session this client is currently
@@ -269,6 +270,21 @@ func (w *ClientWorkspace) AgentIsSessionBusy(sessionID string) bool {
 		return false
 	}
 	return info.IsBusy
+}
+
+// agentSessionStatusTimeout bounds AgentSessionStatus, which the TUI calls
+// for every session its panel shows; a hung server must not freeze it.
+// Package var so tests can shorten it.
+var agentSessionStatusTimeout = 5 * time.Second
+
+func (w *ClientWorkspace) AgentSessionStatus(sessionID string) SessionStatus {
+	ctx, cancel := context.WithTimeout(context.Background(), agentSessionStatusTimeout)
+	defer cancel()
+	info, err := w.client.GetAgentSessionInfo(ctx, w.workspaceID(), sessionID)
+	if err != nil {
+		return SessionStatus{}
+	}
+	return SessionStatus{Known: true, Busy: info.IsBusy, PendingPrompt: info.PendingPrompt}
 }
 
 func (w *ClientWorkspace) AgentModel() AgentModel {
@@ -407,16 +423,39 @@ func (w *ClientWorkspace) PermissionDeny(perm permission.PermissionRequest) bool
 	return resolved
 }
 
-func (w *ClientWorkspace) PermissionSkipRequests() bool {
-	skip, err := w.client.GetPermissionsSkipRequests(context.Background(), w.workspaceID())
-	if err != nil {
-		return false
-	}
-	return skip
+// skipRequestsTimeout bounds the YOLO (skip-requests) calls: the TUI makes
+// them on the Update goroutine when the user toggles the mode, so a hung
+// server must not freeze it. Package var so tests can shorten it.
+var skipRequestsTimeout = 2 * time.Second
+
+func (w *ClientWorkspace) PermissionSkipRequests() (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), skipRequestsTimeout)
+	defer cancel()
+	return w.client.GetPermissionsSkipRequests(ctx, w.workspaceID())
 }
 
-func (w *ClientWorkspace) PermissionSetSkipRequests(skip bool) {
-	_ = w.client.SetPermissionsSkipRequests(context.Background(), w.workspaceID(), skip)
+func (w *ClientWorkspace) PermissionSetSkipRequests(skip bool) error {
+	ctx, cancel := context.WithTimeout(context.Background(), skipRequestsTimeout)
+	defer cancel()
+	return w.client.SetPermissionsSkipRequests(ctx, w.workspaceID(), skip)
+}
+
+// acceptEditsTimeout bounds the accept-edits calls: the TUI probes on every
+// busy refresh and blocks Shift+Tab until a toggle's write returns, so a
+// hung server must not stall either. Package var so tests can shorten it.
+var acceptEditsTimeout = 5 * time.Second
+
+func (w *ClientWorkspace) PermissionSetAcceptEdits(sessionID string, on bool) error {
+	ctx, cancel := context.WithTimeout(context.Background(), acceptEditsTimeout)
+	defer cancel()
+	return w.client.SetPermissionsAcceptEdits(ctx, w.workspaceID(), sessionID, on)
+}
+
+func (w *ClientWorkspace) PermissionAcceptEdits(sessionID string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), acceptEditsTimeout)
+	defer cancel()
+	on, err := w.client.GetPermissionsAcceptEdits(ctx, w.workspaceID(), sessionID)
+	return err == nil && on
 }
 
 // -- Questions --

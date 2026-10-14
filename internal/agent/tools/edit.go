@@ -115,11 +115,6 @@ func createNewFile(edit editContext, filePath, content string, call fantasy.Tool
 		return fantasy.ToolResponse{}, fmt.Errorf("failed to access file: %w", err)
 	}
 
-	dir := filepath.Dir(filePath)
-	if err = os.MkdirAll(dir, 0o755); err != nil {
-		return fantasy.ToolResponse{}, fmt.Errorf("failed to create parent directories: %w", err)
-	}
-
 	sessionID := GetSessionFromContext(edit.ctx)
 	if sessionID == "" {
 		return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for creating a new file")
@@ -135,6 +130,7 @@ func createNewFile(edit editContext, filePath, content string, call fantasy.Tool
 		permission.CreatePermissionRequest{
 			SessionID:   sessionID,
 			Path:        fsext.PathOrPrefix(filePath, edit.workingDir),
+			FilePath:    filePath,
 			ToolCallID:  call.ID,
 			ToolName:    EditToolName,
 			Action:      "write",
@@ -158,6 +154,11 @@ func createNewFile(edit editContext, filePath, content string, call fantasy.Tool
 			Removals:   removals,
 		})
 		return resp, nil
+	}
+
+	// Only after the grant: a denied create must not leave directories.
+	if err = os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
+		return fantasy.ToolResponse{}, fmt.Errorf("failed to create parent directories: %w", err)
 	}
 
 	err = os.WriteFile(filePath, []byte(content), 0o644)
@@ -336,6 +337,7 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 		permission.CreatePermissionRequest{
 			SessionID:   sessionID,
 			Path:        fsext.PathOrPrefix(filePath, edit.workingDir),
+			FilePath:    filePath,
 			ToolCallID:  call.ID,
 			ToolName:    EditToolName,
 			Action:      "write",
@@ -409,6 +411,7 @@ func replaceContent(edit editContext, filePath, oldString, newString string, rep
 		permission.CreatePermissionRequest{
 			SessionID:   sessionID,
 			Path:        fsext.PathOrPrefix(filePath, edit.workingDir),
+			FilePath:    filePath,
 			ToolCallID:  call.ID,
 			ToolName:    EditToolName,
 			Action:      "write",

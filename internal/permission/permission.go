@@ -2,9 +2,12 @@ package permission
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -43,6 +46,9 @@ type CreatePermissionRequest struct {
 	Action      string `json:"action"`
 	Params      any    `json:"params"`
 	Path        string `json:"path"`
+	// FilePath is the file an edit, multiedit or write call changes.
+	// Accept-edits only grants when it resolves inside the working dir.
+	FilePath string `json:"file_path,omitempty"`
 }
 
 type PermissionNotification struct {
@@ -85,6 +91,11 @@ type Service interface {
 	// was cancelled is not returned.
 	ActiveRequest() (PermissionRequest, bool)
 	AutoApproveSession(sessionID string)
+	// SetAcceptEdits makes edit, multiedit and write requests of exactly
+	// this session (not its sub-agent sessions) for files inside the
+	// working dir granted without a prompt. An empty session ID is ignored.
+	SetAcceptEdits(sessionID string, on bool)
+	AcceptEdits(sessionID string) bool
 	SetSkipRequests(skip bool)
 	SkipRequests() bool
 	SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification]
@@ -107,6 +118,7 @@ type permissionService struct {
 	pendingRequests       *csync.Map[string, chan bool]
 	autoApproveSessions   map[string]bool
 	autoApproveSessionsMu sync.RWMutex
+	acceptEditsSessions   *csync.Map[string, bool]
 	skip                  atomic.Bool
 	allowedTools          []string
 
@@ -200,7 +212,9 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	// with the tool call ID. Treat that as a pre-approval and skip the
 	// prompt entirely. We still publish a granted notification so the UI
 	// and audit subscribers see the outcome.
-	if hookApproved(ctx, opts.ToolCallID) {
+	// Accept-edits grants here too, before requestMu, so it never waits
+	// behind another session's prompt.
+	if hookApproved(ctx, opts.ToolCallID) || s.acceptsEdit(opts) {
 		s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
 			SessionID:  opts.SessionID,
 			ToolCallID: opts.ToolCallID,
@@ -312,6 +326,106 @@ func (s *permissionService) AutoApproveSession(sessionID string) {
 	s.autoApproveSessionsMu.Unlock()
 }
 
+// acceptEditsTools are the file-editing tools accept-edits grants (the
+// tools package's EditToolName, MultiEditToolName and WriteToolName).
+var acceptEditsTools = []string{"edit", "multiedit", "write"}
+
+// protectedNames always ask under accept-edits, even inside the working
+// dir: agent-cli's config files (config.lookupConfigs) define hooks and MCP
+// servers, and .git holds hooks and core.hooksPath/fsmonitor; all run
+// commands. HEAD is what makes a directory a git dir without .git: a
+// planted bare repo (x/HEAD + x/config) lets an auto-approved read-only git
+// command such as `git ls-remote` run a program its config names
+// (remote.<name>.uploadpack). Compared case-insensitively, as macOS file
+// names are.
+var protectedNames = []string{".crushrc", "crushrc", ".crush.json", "crush.json", ".git", "HEAD"}
+
+func isProtectedName(name string) bool {
+	return slices.ContainsFunc(protectedNames, func(p string) bool { return strings.EqualFold(name, p) })
+}
+
+func (s *permissionService) acceptsEdit(opts CreatePermissionRequest) bool {
+	if !slices.Contains(acceptEditsTools, opts.ToolName) || !s.AcceptEdits(opts.SessionID) {
+		return false
+	}
+	rel, ok := s.insideWorkingDir(opts.FilePath)
+	return ok && !slices.ContainsFunc(strings.Split(rel, string(filepath.Separator)), isProtectedName)
+}
+
+// insideWorkingDir returns path relative to the working dir, with symlinks
+// resolved, if it is inside it. A relative path is taken from the working
+// dir; anything that cannot be resolved, or that has a ".." component,
+// counts as outside.
+func (s *permissionService) insideWorkingDir(path string) (string, bool) {
+	if s.workingDir == "" || path == "" {
+		return "", false
+	}
+	// The tools write the raw path, where the kernel follows a symlink
+	// before "..", but resolvePath cleans ".." lexically first.
+	if slices.Contains(strings.Split(filepath.ToSlash(path), "/"), "..") {
+		return "", false
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(s.workingDir, path)
+	}
+	root, err := resolvePath(s.workingDir)
+	if err != nil {
+		return "", false
+	}
+	target, err := resolvePath(path)
+	if err != nil {
+		return "", false
+	}
+	rel, err := filepath.Rel(root, target)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return rel, true
+}
+
+// resolvePath is filepath.EvalSymlinks for a path whose tail may not exist
+// yet: the missing names are re-attached to the nearest existing parent,
+// resolved. An entry that exists but cannot be resolved (a dangling
+// symlink) is an error, since writing through it could land anywhere.
+func resolvePath(path string) (string, error) {
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	var missing []string
+	for {
+		resolved, err := filepath.EvalSymlinks(path)
+		if err == nil {
+			return filepath.Join(append([]string{resolved}, missing...)...), nil
+		}
+		if _, lerr := os.Lstat(path); !errors.Is(lerr, fs.ErrNotExist) {
+			return "", err
+		}
+		parent := filepath.Dir(path)
+		if parent == path {
+			return "", err
+		}
+		missing = append([]string{filepath.Base(path)}, missing...)
+		path = parent
+	}
+}
+
+func (s *permissionService) SetAcceptEdits(sessionID string, on bool) {
+	if sessionID == "" {
+		return
+	}
+	if on {
+		s.acceptEditsSessions.Set(sessionID, true)
+	} else {
+		s.acceptEditsSessions.Del(sessionID)
+	}
+}
+
+func (s *permissionService) AcceptEdits(sessionID string) bool {
+	_, ok := s.acceptEditsSessions.Get(sessionID)
+	return ok
+}
+
 func (s *permissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification] {
 	return s.notificationBroker.Subscribe(ctx)
 }
@@ -331,6 +445,7 @@ func NewPermissionService(workingDir string, skip bool, allowedTools []string) S
 		workingDir:          workingDir,
 		sessionPermissions:  csync.NewMap[PermissionKey, bool](),
 		autoApproveSessions: make(map[string]bool),
+		acceptEditsSessions: csync.NewMap[string, bool](),
 		allowedTools:        allowedTools,
 		pendingRequests:     csync.NewMap[string, chan bool](),
 	}

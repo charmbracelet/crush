@@ -159,7 +159,8 @@ check "thiếu công cụ hash -> không thêm --host, cảnh báo stderr" "$(gr
 
 # AGENT_CLI_SKIP_BUILD chỉ bỏ build khi đúng bằng 1. go giả ghi dấu mỗi lần được gọi.
 mkdir -p "$t/gobin" "$t/inst2/lib/agent-cli"
-printf '#!/bin/sh\ntouch "%s/go-called"\n' "$t" > "$t/gobin/go"; chmod 755 "$t/gobin/go"
+# go giả giữ đúng hợp đồng của go build: sinh tệp -o (installer build ra tệp tạm rồi mv).
+printf '#!/bin/sh\ntouch "%s/go-called"\nwhile [ $# -gt 0 ]; do [ "$1" = -o ] && cp "%s" "$2"; shift; done\n' "$t" "$t/inst/lib/agent-cli/crush" > "$t/gobin/go"; chmod 755 "$t/gobin/go"
 cp "$t/inst/lib/agent-cli/crush" "$t/inst2/lib/agent-cli/crush"
 inst2() { HOME="$t/home" PATH="$t/gobin:$PATH" AGENT_CLI_INSTALL_DIR="$t/inst2" AGENT_CLI_SKIP_BUILD="$1" bash "$t/fake/scripts/install-agent-cli.sh" 2>&1; }
 rm -f "$t/go-called"; msg="$(inst2 0)"
@@ -197,8 +198,9 @@ msg_p="$(install_in "$t/hp")"; c="$t/hp/.config/agent-cli"
 check "crush.json có provider -> không tạo crushrc/env" "$([[ ! -e "$c/crushrc" && ! -e "$c/env" ]]; echo $?)"
 check "crush.json có provider -> có crushrc.example, env.example" "$([[ -f "$c/crushrc.example" && -f "$c/env.example" ]]; echo $?)"
 check "crush.json có provider -> in hướng dẫn, crush.json không đổi" "$(grep -q 'KHÔNG tạo crushrc' <<<"$msg_p" && [[ "$(cat "$c/crush.json")" == "$cj" ]]; echo $?)"
-echo '# sửa' >> "$c/crushrc.example"; install_in "$t/hp" >/dev/null
+echo '# sửa' >> "$c/crushrc.example"; msg_re="$(install_in "$t/hp")"
 check "chạy lại không ghi đè crushrc.example" "$(tail -1 "$c/crushrc.example" | grep -qx '# sửa'; echo $?)"
+check "cài lại -> sao lưu bản cũ và in lệnh quay lại" "$(ls -d "$t/inst/lib/agent-cli"/backup-*/crush >/dev/null 2>&1 && grep -q 'Quay lại' <<<"$msg_re"; echo $?)"
 mkdir -p "$t/hs/.config/agent-cli" "$t/store"; printf '%s' "$cj" > "$t/store/real.json"
 ln -s "$t/store/real.json" "$t/hs/.config/agent-cli/crush.json"
 install_in "$t/hs" >/dev/null
@@ -211,7 +213,7 @@ install_in "$t/hb" >/dev/null
 check "crush.json hỏng -> coi như có provider, không tạo crushrc" "$([[ ! -e "$t/hb/.config/agent-cli/crushrc" ]]; echo $?)"
 # Thiếu jq -> không xác định được provider -> an toàn: không tạo crushrc.
 mkdir -p "$t/nojq" "$t/hj/.config/agent-cli"
-for c in bash env dirname mkdir install find chmod ln cat; do ln -sf "$(command -v $c)" "$t/nojq/$c"; done
+for c in bash env dirname mkdir install find chmod ln cat cp mv rm ls tail date; do ln -sf "$(command -v $c)" "$t/nojq/$c"; done
 printf '%s' "$cj" > "$t/hj/.config/agent-cli/crush.json"
 msg_j="$(PATH="$t/nojq" install_in "$t/hj")"
 check "thiếu jq (PATH không có jq) -> không tạo crushrc, in hướng dẫn" "$([[ ! -e "$t/hj/.config/agent-cli/crushrc" && -f "$t/hj/.config/agent-cli/crushrc.example" ]] && grep -q 'KHÔNG tạo crushrc' <<<"$msg_j"; echo $?)"

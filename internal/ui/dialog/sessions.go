@@ -454,8 +454,16 @@ func (s *Session) updateSession(session session.Session) {
 
 func (s *Session) updateSessionCmd(session session.Session) tea.Cmd {
 	return func() tea.Msg {
-		_, err := s.com.Workspace.SaveSession(context.TODO(), session)
+		// Bản trong dialog chụp lúc mở, còn session nền vẫn chạy (cost,
+		// token, todos, summary đổi liên tục) và SaveSession ghi đè cả hàng:
+		// đọc lại ngay trước khi lưu, chỉ mang theo tiêu đề mới.
+		ctx := context.TODO()
+		fresh, err := s.com.Workspace.GetSession(ctx, session.ID)
 		if err != nil {
+			return util.NewErrorMsg(err)
+		}
+		fresh.Title = session.Title
+		if _, err := s.com.Workspace.SaveSession(ctx, fresh); err != nil {
 			return util.NewErrorMsg(err)
 		}
 		return nil

@@ -1019,6 +1019,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if switched {
 			m.stashDraft()
 			m.parkPrompts()
+			// Dấu "đã đọc" của tệp @-mention thuộc về session cũ; edit
+			// dựa vào nó để chặn sửa đè tệp mà session chưa xem.
+			m.sessionFileReads = nil
 			if cmd := m.resetPlanModeState(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
@@ -2933,6 +2936,15 @@ func (m *UI) gitBranchTicker() tea.Cmd {
 // available. Returns a tea.Cmd that rebuilds the agent models if a
 // switch was made, or nil if no switch was needed.
 func (m *UI) restoreModelFromSession(msgs []message.Message) tea.Cmd {
+	// Model là trạng thái chung của workspace và run đọc lại nó ở mỗi bước:
+	// đổi khi có run ở bất kỳ session nào (session nền vẫn chạy khi mở
+	// session khác) là đổi provider giữa chừng run đó. Cùng cổng với
+	// handleSelectModel.
+	if m.isAgentBusy() {
+		slog.Debug("Skipping model restoration: a run is in flight")
+		return nil
+	}
+
 	var lastAssistant *message.Message
 	for i := len(msgs) - 1; i >= 0; i-- {
 		if msgs[i].Role == message.Assistant && !msgs[i].IsSummaryMessage {
@@ -3987,7 +3999,7 @@ func (m *UI) View() tea.View {
 	}
 	v.MouseMode = mouseMode(m.mouseEnabled, m.activeInline != nil || m.dialog.HandlesHover())
 	v.ReportFocus = m.caps.ReportFocusEvents
-	v.WindowTitle = "crush " + home.Short(m.com.Workspace.WorkingDir())
+	v.WindowTitle = "agent-cli " + home.Short(m.com.Workspace.WorkingDir())
 
 	key, cacheable := m.currentFrameKey()
 	if cacheable {
@@ -5585,9 +5597,12 @@ func (m *UI) sendMessageInternal(content string, hidden bool, attachments ...mes
 	}
 
 	ctx := context.Background()
+	// Chụp giá trị trước khi tạo closure: closure chạy ngoài luồng Update,
+	// lúc đó m.session có thể đã là session khác (Alt+S).
+	readPaths := slices.Clone(m.sessionFileReads)
 	cmds = append(cmds, func() tea.Msg {
-		for _, path := range m.sessionFileReads {
-			m.com.Workspace.FileTrackerRecordRead(ctx, m.session.ID, path)
+		for _, path := range readPaths {
+			m.com.Workspace.FileTrackerRecordRead(ctx, sessionID, path)
 			m.com.Workspace.LSPStart(ctx, path)
 		}
 		return nil

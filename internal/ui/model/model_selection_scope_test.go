@@ -106,3 +106,17 @@ func runFirstOfSequence(cmd tea.Cmd) {
 		}
 	}
 }
+
+// Model là trạng thái chung của workspace và run đọc lại nó ở mỗi bước: mở
+// session khác lúc một run (ở bất kỳ session nào) đang chạy không được đổi
+// model dưới chân run đó.
+func TestRestoreModelFromSessionKeepsModelWhileBusy(t *testing.T) {
+	m, ws := newModelScopeUI(t)
+	m.agentBusyCache.set(true)
+
+	cmd := m.restoreModelFromSession([]message.Message{{
+		Role: message.Assistant, Provider: "p", Model: "other",
+	}})
+	require.Nil(t, cmd)
+	require.Empty(t, ws.prefModelScopes, "a busy workspace must keep its model")
+}

@@ -544,3 +544,17 @@ func TestFilterKeepsWorkingAcrossRefresh(t *testing.T) {
 	typeText(m, "g")
 	require.Equal(t, "/w/g", selectedPath(m), "typing narrows the results from the first one")
 }
+
+// Terminal gửi nội dung dán (bracketed paste) dưới dạng tea.PasteMsg, không
+// phải phím: dán đường dẫn vào "Open other folder" phải giống gõ tay.
+func TestPastePathIntoOpenOtherFolder(t *testing.T) {
+	t.Parallel()
+
+	src := &fakeSource{workspaces: tenWorkspaces()[:1]}
+	m := newTestModel(src)
+	selectRow(t, m, isKind(rowOpenPath))
+	press(m, keyEnter)
+	m.Update(tea.PasteMsg{Content: "/srv/new"})
+	press(m, keyEnter)
+	require.Equal(t, []string{"/srv/new"}, src.added)
+}

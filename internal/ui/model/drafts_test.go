@@ -253,3 +253,12 @@ func TestSaveDraftsConcurrentKeepsEveryKey(t *testing.T) {
 		require.Equal(t, "v"+strconv.Itoa(i), got["k"+strconv.Itoa(i)])
 	}
 }
+
+// Tệp @-mention ở session này không được tính là "đã đọc" cho session
+// khác: edit dựa vào dấu đã đọc theo session để chặn sửa đè tệp chưa xem.
+func TestFileReadsDoNotLeakAcrossSessions(t *testing.T) {
+	m, _ := newDraftUI(t)
+	m.sessionFileReads = []string{"/repo/db.go"}
+	switchTo(m, "s2")
+	require.Empty(t, m.sessionFileReads, "s1's mentions must not be recorded as read in s2")
+}

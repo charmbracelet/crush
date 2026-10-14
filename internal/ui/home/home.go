@@ -267,6 +267,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd = m.loadWorkspaces
 	case tea.KeyPressMsg:
 		cmd = m.handleKey(msg)
+	case tea.PasteMsg:
+		// Nội dung dán (bracketed paste) tới dưới dạng PasteMsg chứ không
+		// phải phím: đưa vào ô nhập như gõ tay.
+		m.note = ""
+		m.updateInput(msg)
 	default:
 		return m, nil // No state change: keep the rendered frame.
 	}
@@ -309,12 +314,18 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		return nil
 	}
+	m.updateInput(msg)
+	return nil
+}
+
+// updateInput đưa phím hoặc nội dung dán vào ô nhập đang dùng (tìm kiếm
+// hoặc đường dẫn).
+func (m *Model) updateInput(msg tea.Msg) {
 	prev := m.input.Value()
 	m.input, _ = m.input.Update(msg)
 	if m.input.Value() != prev {
 		m.anchored = false // New results: start from the first one.
 	}
-	return nil
 }
 
 func (m *Model) back() tea.Cmd {

@@ -62,7 +62,11 @@ func (w *AppWorkspace) SaveSession(ctx context.Context, sess session.Session) (s
 }
 
 func (w *AppWorkspace) DeleteSession(ctx context.Context, sessionID string) error {
-	return w.app.Sessions.Delete(ctx, sessionID)
+	if err := w.app.Sessions.Delete(ctx, sessionID); err != nil {
+		return err
+	}
+	w.app.Permissions.SetAcceptEdits(sessionID, false)
+	return nil
 }
 
 func (w *AppWorkspace) CreateAgentToolSessionID(messageID, toolCallID string) string {
@@ -190,6 +194,35 @@ func (w *AppWorkspace) AgentIsSessionBusy(sessionID string) bool {
 	return w.app.AgentCoordinator.IsSessionBusy(sessionID)
 }
 
+func (w *AppWorkspace) AgentSessionStatus(sessionID string) SessionStatus {
+	st := SessionStatus{Known: true, Busy: w.AgentIsSessionBusy(sessionID)}
+	ctx := context.Background()
+	// Same semantics as Backend.sessionMatches (shared depth limit):
+	// fail closed when the ancestry cannot be resolved. Without a
+	// session service every session counts as top-level.
+	matches := func(eventSessionID string) bool {
+		if eventSessionID == sessionID {
+			return true
+		}
+		if w.app.Sessions == nil {
+			return false
+		}
+		root, err := RootSessionID(ctx, w, eventSessionID)
+		return err == nil && root == sessionID
+	}
+	if w.app.Permissions != nil {
+		if req, ok := w.app.Permissions.ActiveRequest(); ok && matches(req.SessionID) {
+			st.PendingPrompt = true
+		}
+	}
+	if !st.PendingPrompt && w.app.Questions != nil {
+		if req, ok := w.app.Questions.Pending(); ok && matches(req.SessionID) {
+			st.PendingPrompt = true
+		}
+	}
+	return st
+}
+
 func (w *AppWorkspace) AgentModel() AgentModel {
 	if w.app.AgentCoordinator == nil {
 		return AgentModel{}
@@ -276,12 +309,22 @@ func (w *AppWorkspace) PermissionDeny(perm permission.PermissionRequest) bool {
 	return w.app.Permissions.Deny(perm)
 }
 
-func (w *AppWorkspace) PermissionSkipRequests() bool {
-	return w.app.Permissions.SkipRequests()
+func (w *AppWorkspace) PermissionSkipRequests() (bool, error) {
+	return w.app.Permissions.SkipRequests(), nil
 }
 
-func (w *AppWorkspace) PermissionSetSkipRequests(skip bool) {
+func (w *AppWorkspace) PermissionSetSkipRequests(skip bool) error {
 	w.app.Permissions.SetSkipRequests(skip)
+	return nil
+}
+
+func (w *AppWorkspace) PermissionSetAcceptEdits(sessionID string, on bool) error {
+	w.app.Permissions.SetAcceptEdits(sessionID, on)
+	return nil
+}
+
+func (w *AppWorkspace) PermissionAcceptEdits(sessionID string) bool {
+	return w.app.Permissions.AcceptEdits(sessionID)
 }
 
 // -- Questions --

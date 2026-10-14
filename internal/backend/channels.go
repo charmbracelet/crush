@@ -74,7 +74,7 @@ func (b *Backend) routeChannelMessage(ev mcptools.Event) {
 // workspace; there is no caller to return an error to.
 func (b *Backend) injectChannelMessage(ws *Workspace, serverName, content string) {
 	if ws.AgentCoordinator == nil {
-		if err := ws.InitCoderAgent(ws.ctx); err != nil {
+		if err := b.InitAgent(ws.ctx, ws.ID, true); err != nil {
 			slog.Warn("Channel message dropped: coder agent init failed",
 				"workspace", ws.ID, "server", serverName, "error", err)
 			return

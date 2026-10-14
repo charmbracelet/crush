@@ -267,6 +267,28 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 			Fails(400, 404, 500).
 			Handle(c.handlePostWorkspacePermissionsSkip),
 
+		apigen.Get("/v1/workspaces/{id}/permissions/accept-edits").
+			Summary("Get accept-edits status of a session").
+			Tags("permissions").
+			PathParam("id", "Workspace ID").
+			RequiredQueryParam("session_id", "Session ID").
+			Responds(proto.PermissionAcceptEditsRequest{}).
+			Fails(400, 404, 500).
+			Handle(c.handleGetWorkspacePermissionsAcceptEdits),
+
+		apigen.Post("/v1/workspaces/{id}/permissions/accept-edits").
+			Summary("Set accept-edits for a session").
+			Description("Edit, multiedit and write permission requests of the "+
+				"session for files inside the workspace directory are granted "+
+				"without prompting; other tools still ask. Sub-agent sessions "+
+				"do not inherit it.").
+			Tags("permissions").
+			PathParam("id", "Workspace ID").
+			RequiredQueryParam("session_id", "Session ID").
+			Accepts(proto.PermissionAcceptEditsRequest{}).
+			Fails(400, 404, 500).
+			Handle(c.handlePostWorkspacePermissionsAcceptEdits),
+
 		apigen.Post("/v1/workspaces/{id}/permissions/grant").
 			Summary("Grant permission").
 			Tags("permissions").

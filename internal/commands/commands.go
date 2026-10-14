@@ -3,10 +3,12 @@ package commands
 import (
 	"context"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
@@ -53,12 +55,19 @@ type CustomCommand struct {
 type commandSource struct {
 	path   string
 	prefix string
+	// claude marks Claude Code command dirs: frontmatter is stripped, $ARGUMENTS
+	// is optional, and commands never shadow earlier sources.
+	claude bool
 }
 
+// warnedShadows remembers which shadowed Claude commands were already logged.
+var warnedShadows sync.Map
+
 // LoadCustomCommands loads custom commands from multiple sources including
-// XDG config directory, home directory, and project directory.
-func LoadCustomCommands(cfg *config.Config) ([]CustomCommand, error) {
-	return loadAll(buildCommandSources(cfg))
+// XDG config directory, home directory, and project directory. workingDir is
+// the project root used for <project>/.claude/commands.
+func LoadCustomCommands(cfg *config.Config, workingDir string) ([]CustomCommand, error) {
+	return loadAll(buildCommandSources(cfg, workingDir))
 }
 
 // FromSkillCatalog converts user-invocable catalog entries into custom
@@ -118,8 +127,17 @@ func LoadMCPPrompts() ([]MCPPrompt, error) {
 	return commands, nil
 }
 
-func buildCommandSources(cfg *config.Config) []commandSource {
+// claudeSources lists the Claude Code command dirs. Subdirs become prefixes,
+// same as crush's own dirs.
+func claudeSources(userHome, projectDir string) []commandSource {
 	return []commandSource{
+		{path: filepath.Join(userHome, ".claude", "commands"), prefix: userCommandPrefix, claude: true},
+		{path: filepath.Join(projectDir, ".claude", "commands"), prefix: projectCommandPrefix, claude: true},
+	}
+}
+
+func buildCommandSources(cfg *config.Config, workingDir string) []commandSource {
+	sources := []commandSource{
 		{
 			path:   filepath.Join(home.Config(), "crush", "commands"),
 			prefix: userCommandPrefix,
@@ -133,14 +151,27 @@ func buildCommandSources(cfg *config.Config) []commandSource {
 			prefix: projectCommandPrefix,
 		},
 	}
+	return append(sources, claudeSources(home.Dir(), workingDir)...)
 }
 
 func loadAll(sources []commandSource) ([]CustomCommand, error) {
 	var commands []CustomCommand
+	seen := make(map[string]bool)
 
 	for _, source := range sources {
-		if cmds, err := loadFromSource(source); err == nil {
-			commands = append(commands, cmds...)
+		cmds, err := loadFromSource(source)
+		if err != nil {
+			continue
+		}
+		for _, cmd := range cmds {
+			if source.claude && seen[cmd.ID] {
+				if _, warned := warnedShadows.LoadOrStore(source.path+"|"+cmd.ID, true); !warned {
+					slog.Warn("Claude command ignored, a command with the same name exists", "id", cmd.ID, "dir", source.path)
+				}
+				continue
+			}
+			seen[cmd.ID] = true
+			commands = append(commands, cmd)
 		}
 	}
 
@@ -159,7 +190,7 @@ func loadFromSource(source commandSource) ([]CustomCommand, error) {
 			return err
 		}
 
-		cmd, err := loadCommand(path, source.path, source.prefix)
+		cmd, err := loadCommand(path, source.path, source.prefix, source.claude)
 		if err != nil {
 			return nil // Skip invalid files
 		}
@@ -171,20 +202,48 @@ func loadFromSource(source commandSource) ([]CustomCommand, error) {
 	return commands, err
 }
 
-func loadCommand(path, baseDir, prefix string) (CustomCommand, error) {
-	content, err := os.ReadFile(path)
+func loadCommand(path, baseDir, prefix string, claude bool) (CustomCommand, error) {
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		return CustomCommand{}, err
 	}
+	content := string(raw)
+	if claude {
+		content = stripFrontmatter(content)
+	}
 
 	id := buildCommandID(path, baseDir, prefix)
+	args := extractArgNames(content)
+	if claude {
+		// Claude Code runs a command with an empty $ARGUMENTS.
+		for i := range args {
+			if args[i].ID == "ARGUMENTS" {
+				args[i].Required = false
+			}
+		}
+	}
 
-	return CustomCommand{
-		ID:        id,
-		Name:      id,
-		Content:   string(content),
-		Arguments: extractArgNames(string(content)),
-	}, nil
+	return CustomCommand{ID: id, Name: id, Content: content, Arguments: args}, nil
+}
+
+// stripFrontmatter drops a leading YAML block. The opening line must be exactly
+// "---"; the closing line is "---" plus optional spaces/tabs, followed by a
+// newline or EOF. A body that itself starts with a markdown rule "---" is
+// therefore read as frontmatter when a later "---" line exists; with no later
+// one the content is returned whole. Its keys (description, argument-hint,
+// allowed-tools, model) are ignored: the command model has no field for them.
+func stripFrontmatter(content string) string {
+	content = strings.TrimPrefix(content, "\uFEFF")
+	lines := strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n")
+	if lines[0] != "---" {
+		return content
+	}
+	for i := 1; i < len(lines); i++ {
+		if strings.TrimRight(lines[i], " \t") == "---" {
+			return strings.TrimPrefix(strings.Join(lines[i+1:], "\n"), "\n")
+		}
+	}
+	return content
 }
 
 func extractArgNames(content string) []Argument {

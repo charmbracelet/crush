@@ -63,8 +63,26 @@ func (b *Backend) GetAgentSession(ctx context.Context, workspaceID, sessionID st
 			ID:    se.ID,
 			Title: se.Title,
 		},
-		IsBusy: isSessionBusy,
+		IsBusy:        isSessionBusy,
+		PendingPrompt: b.hasPendingPrompt(ctx, ws, sessionID),
 	}, nil
+}
+
+// hasPendingPrompt reports whether the workspace's current permission
+// request or question belongs to sessionID or one of its sub-sessions.
+// The services are nil on workspaces with a stubbed app (tests).
+func (b *Backend) hasPendingPrompt(ctx context.Context, ws *Workspace, sessionID string) bool {
+	if ws.Permissions != nil {
+		if req, ok := ws.Permissions.ActiveRequest(); ok && b.sessionMatches(ctx, ws, req.SessionID, sessionID) {
+			return true
+		}
+	}
+	if ws.Questions != nil {
+		if req, ok := ws.Questions.Pending(); ok && b.sessionMatches(ctx, ws, req.SessionID, sessionID) {
+			return true
+		}
+	}
+	return false
 }
 
 // ListSessionMessages returns all messages for a session.
@@ -172,7 +190,11 @@ func (b *Backend) DeleteSession(ctx context.Context, workspaceID, sessionID stri
 		return err
 	}
 
-	return ws.Sessions.Delete(ctx, sessionID)
+	if err := ws.Sessions.Delete(ctx, sessionID); err != nil {
+		return err
+	}
+	ws.Permissions.SetAcceptEdits(sessionID, false)
+	return nil
 }
 
 // ListUserMessages returns user-role messages for a session.

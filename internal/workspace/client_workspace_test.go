@@ -1103,3 +1103,199 @@ func TestClientWorkspace_GitBranchServerError(t *testing.T) {
 	_, err = ws.GitBranch(t.Context())
 	require.Error(t, err)
 }
+
+// TestAgentSessionStatusTimesOut: the TUI's session panel probes every
+// shown session; a server that never answers must not hang the probe.
+// Not parallel: it shortens the package-level timeout.
+func TestAgentSessionStatusTimesOut(t *testing.T) {
+	require.Equal(t, 5*time.Second, agentSessionStatusTimeout)
+	old := agentSessionStatusTimeout
+	agentSessionStatusTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { agentSessionStatusTimeout = old })
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Hang until the client gives up; answer late so a missing
+		// timeout fails the test instead of hanging it.
+		select {
+		case <-r.Context().Done():
+		case <-time.After(3 * time.Second):
+			_ = json.NewEncoder(w).Encode(proto.AgentSession{IsBusy: true})
+		}
+	}))
+	defer srv.Close()
+
+	u, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	c, err := client.NewClient(t.TempDir(), "tcp", u.Host)
+	require.NoError(t, err)
+	ws := NewClientWorkspace(c, proto.Workspace{ID: "ws-1"})
+
+	start := time.Now()
+	got := ws.AgentSessionStatus("sess-1")
+	require.Less(t, time.Since(start), 2*time.Second, "the probe must give up at the timeout")
+	require.Equal(t, SessionStatus{}, got, "a failed probe is unknown, not idle")
+}
+
+// TestAgentSessionStatusKnownOnSuccess: an answered probe is Known, which
+// is how the TUI tells an idle session from a failed probe.
+func TestAgentSessionStatusKnownOnSuccess(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(proto.AgentSession{IsBusy: true})
+	}))
+	defer srv.Close()
+
+	u, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	c, err := client.NewClient(t.TempDir(), "tcp", u.Host)
+	require.NoError(t, err)
+	ws := NewClientWorkspace(c, proto.Workspace{ID: "ws-1"})
+
+	require.Equal(t, SessionStatus{Known: true, Busy: true}, ws.AgentSessionStatus("sess-1"))
+}
+
+// TestClientParseAgentToolSessionID matches the session service's parser
+// and does not allocate: the TUI parses every message's session.
+func TestClientParseAgentToolSessionID(t *testing.T) { // Not parallel: AllocsPerRun.
+	w := &ClientWorkspace{}
+	for id, want := range map[string][3]any{
+		"m$$tc":    {"m", "tc", true},
+		"plain":    {"", "", false},
+		"a$$b$$c":  {"", "", false},
+		"$$tc":     {"", "tc", true},
+		"m$$":      {"m", "", true},
+		"a$$$b":    {"a", "$b", true},
+		"a$$$$b$$": {"", "", false},
+	} {
+		msgID, toolCallID, ok := w.ParseAgentToolSessionID(id)
+		require.Equal(t, want, [3]any{msgID, toolCallID, ok}, id)
+	}
+	require.Zero(t, testing.AllocsPerRun(100, func() { w.ParseAgentToolSessionID("0f9c2d4e-plain-session") }))
+}
+
+// TestClientWorkspace_PermissionAcceptEdits pins the wire format the
+// server's accept-edits endpoint expects: the session in the "session_id"
+// query parameter, the flag in the JSON body.
+func TestClientWorkspace_PermissionAcceptEdits(t *testing.T) {
+	t.Parallel()
+
+	var mu sync.Mutex
+	state := map[string]bool{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/v1/workspaces/ws-1/permissions/accept-edits", r.URL.Path)
+		sid := r.URL.Query().Get("session_id")
+		mu.Lock()
+		defer mu.Unlock()
+		switch r.Method {
+		case http.MethodPost:
+			var req proto.PermissionAcceptEditsRequest
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+			state[sid] = req.AcceptEdits
+		case http.MethodGet:
+			require.NoError(t, json.NewEncoder(w).Encode(proto.PermissionAcceptEditsRequest{AcceptEdits: state[sid]}))
+		default:
+			t.Errorf("unexpected method %s", r.Method)
+		}
+	}))
+	defer srv.Close()
+
+	u, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	c, err := client.NewClient(t.TempDir(), "tcp", u.Host)
+	require.NoError(t, err)
+	ws := NewClientWorkspace(c, proto.Workspace{ID: "ws-1"})
+
+	require.NoError(t, ws.PermissionSetAcceptEdits("sess-1", true))
+	require.True(t, ws.PermissionAcceptEdits("sess-1"))
+	require.False(t, ws.PermissionAcceptEdits("sess-2"))
+	require.NoError(t, ws.PermissionSetAcceptEdits("sess-1", false))
+	require.False(t, ws.PermissionAcceptEdits("sess-1"))
+}
+
+// TestClientWorkspace_PermissionAcceptEditsFailsClosed: an unreachable
+// server, or one without the endpoint, reads as off and the write reports
+// its failure so the TUI does not claim it is on.
+func TestClientWorkspace_PermissionAcceptEditsFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	c, err := client.NewClient(t.TempDir(), "tcp", "127.0.0.1:1")
+	require.NoError(t, err)
+	ws := NewClientWorkspace(c, proto.Workspace{ID: "ws-1"})
+	require.Error(t, ws.PermissionSetAcceptEdits("sess-1", true))
+	require.False(t, ws.PermissionAcceptEdits("sess-1"))
+
+	old := httptest.NewServer(http.NotFoundHandler())
+	defer old.Close()
+	u, err := url.Parse(old.URL)
+	require.NoError(t, err)
+	c, err = client.NewClient(t.TempDir(), "tcp", u.Host)
+	require.NoError(t, err)
+	ws = NewClientWorkspace(c, proto.Workspace{ID: "ws-1"})
+	require.Error(t, ws.PermissionSetAcceptEdits("sess-1", true))
+	require.False(t, ws.PermissionAcceptEdits("sess-1"))
+}
+
+// TestPermissionAcceptEditsTimesOut: the TUI probes accept-edits on every
+// busy refresh and waits on the toggle's write; a hung server must not
+// stall either. Not parallel: it shortens the package-level timeout.
+func TestPermissionAcceptEditsTimesOut(t *testing.T) {
+	require.Equal(t, 5*time.Second, acceptEditsTimeout)
+	old := acceptEditsTimeout
+	acceptEditsTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { acceptEditsTimeout = old })
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The server only notices a client hang-up once the body is read.
+		_, _ = io.Copy(io.Discard, r.Body)
+		select {
+		case <-r.Context().Done():
+		case <-time.After(3 * time.Second):
+			_ = json.NewEncoder(w).Encode(proto.PermissionAcceptEditsRequest{AcceptEdits: true})
+		}
+	}))
+	defer srv.Close()
+
+	u, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	c, err := client.NewClient(t.TempDir(), "tcp", u.Host)
+	require.NoError(t, err)
+	ws := NewClientWorkspace(c, proto.Workspace{ID: "ws-1"})
+
+	start := time.Now()
+	require.False(t, ws.PermissionAcceptEdits("sess-1"), "a timed-out probe reads as off")
+	ws.PermissionSetAcceptEdits("sess-1", true)
+	require.Less(t, time.Since(start), 2*time.Second, "both calls must give up at the timeout")
+}
+
+// TestPermissionSkipRequestsTimesOut: Shift+Tab/Ctrl+Y toggle YOLO on the
+// Update goroutine; a hung server must not freeze the TUI. Not parallel: it
+// shortens the package-level timeout.
+func TestPermissionSkipRequestsTimesOut(t *testing.T) {
+	require.Equal(t, 2*time.Second, skipRequestsTimeout)
+	old := skipRequestsTimeout
+	skipRequestsTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { skipRequestsTimeout = old })
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		select {
+		case <-r.Context().Done():
+		case <-time.After(3 * time.Second):
+			_ = json.NewEncoder(w).Encode(proto.PermissionSkipRequest{Skip: true})
+		}
+	}))
+	defer srv.Close()
+
+	u, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	c, err := client.NewClient(t.TempDir(), "tcp", u.Host)
+	require.NoError(t, err)
+	ws := NewClientWorkspace(c, proto.Workspace{ID: "ws-1"})
+
+	start := time.Now()
+	_, err = ws.PermissionSkipRequests()
+	require.Error(t, err, "a timed-out probe is an error, not 'off'")
+	require.Error(t, ws.PermissionSetSkipRequests(true), "a timed-out write reports the failure")
+	require.Less(t, time.Since(start), 2*time.Second, "both calls must give up at the timeout")
+}

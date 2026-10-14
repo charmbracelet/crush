@@ -3,6 +3,7 @@ package backend
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"os"
 
 	"github.com/charmbracelet/crush/internal/agent"
@@ -46,17 +47,18 @@ func (b *Backend) SendMessage(workspaceID string, msg proto.AgentMessage) error 
 		return err
 	}
 
-	accept := ws.AgentCoordinator.BeginAccepted(msg.SessionID)
-
 	ws.runMu.Lock()
 	if ws.closing {
 		ws.runMu.Unlock()
-		accept.Close()
 		return ErrWorkspaceClosing
 	}
+	// Counted before BeginAccepted: from the moment the run holds a
+	// reservation on the coordinator, InitAgent must see it and keep it.
 	ws.runWG.Add(1)
+	ws.inflightRuns.Add(1)
 	ws.runMu.Unlock()
 
+	accept := ws.AgentCoordinator.BeginAccepted(msg.SessionID)
 	go b.runAgent(ws, msg, accept)
 	return nil
 }
@@ -87,6 +89,7 @@ func (b *Backend) SendMessage(workspaceID string, msg proto.AgentMessage) error 
 // the terminal event, letting runAgent avoid a duplicate fallback.
 func (b *Backend) runAgent(ws *Workspace, msg proto.AgentMessage, accept *agent.AcceptedRun) {
 	defer ws.runWG.Done()
+	defer ws.inflightRuns.Add(-1)
 	defer accept.Close()
 
 	ctx := ws.ctx
@@ -148,13 +151,24 @@ func (b *Backend) GetAgentInfo(workspaceID string) (proto.AgentInfo, error) {
 	return agentInfo, nil
 }
 
-// InitAgent initializes the coder agent for the workspace.
+// InitAgent initializes the coder agent for the workspace. Every TUI
+// connect asks for it, but replacing the coordinator under a run would
+// orphan that run: cancels and busy probes only reach the new one. So while
+// any run is in flight the existing coordinator is kept and the init is a
+// no-op.
 func (b *Backend) InitAgent(ctx context.Context, workspaceID string, interactive bool) error {
 	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {
 		return err
 	}
 
+	ws.runMu.Lock()
+	defer ws.runMu.Unlock()
+	if ws.runsInFlightLocked() {
+		slog.Info("Skipping agent init: runs are in flight on the current coordinator",
+			"workspace_id", ws.ID, "interactive", interactive)
+		return nil
+	}
 	if interactive {
 		return ws.InitCoderAgent(ctx)
 	}

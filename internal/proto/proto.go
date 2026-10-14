@@ -167,6 +167,9 @@ type ShellCommandResponse struct {
 type AgentSession struct {
 	Session
 	IsBusy bool `json:"is_busy"`
+	// PendingPrompt is true while a permission request or question
+	// raised by this session (or one of its sub-sessions) awaits the user.
+	PendingPrompt bool `json:"pending_prompt"`
 }
 
 // IsZero checks if the AgentSession is zero-valued.
@@ -269,6 +272,13 @@ type QuestionNotification struct {
 // PermissionSkipRequest represents a request to skip permission prompts.
 type PermissionSkipRequest struct {
 	Skip bool `json:"skip"`
+}
+
+// PermissionAcceptEditsRequest is the accept-edits flag of the session named
+// by the "session_id" query parameter: edit, multiedit and write requests of
+// that session are granted without prompting.
+type PermissionAcceptEditsRequest struct {
+	AcceptEdits bool `json:"accept_edits"`
 }
 
 // LSPEventType represents the type of LSP event.

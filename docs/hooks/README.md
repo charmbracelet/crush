@@ -17,8 +17,8 @@ forward.
 - Hooks are Claude Code-compatible
 - Crush ships with a builtin `crush-hook` skill write, edit, and configure
   hooks; just tell Crush how to configure Crush
-- Crush currently supports just one hook, `PreToolUse`, with plans to support
-  the full gamut; please let us know which hooks you'd like to see next
+- Crush currently supports two hooks, `PreToolUse` and `Stop`, with plans to
+  support the full gamut; please let us know which hooks you'd like to see next
 - Hooks run in parallel for speed, but their results compose in config order
   for determinism
 
@@ -176,7 +176,7 @@ wins when rewriting input, but first deny wins when blocking.
 
 ## Events
 
-Here are the events you can hook into (spoiler: there's currently just one):
+Here are the events you can hook into:
 
 ### PreToolUse
 
@@ -199,6 +199,69 @@ agent spawn sub-agents" still works.
 
 Hooks are keyed by event name. Only `command` is required, and you can omit
 `matcher` to match all tools.
+
+### Stop
+
+This hook fires when the top-level agent is about to finish its turn. Use it as
+a machine gate: run lint or tests, and if they fail, send the agent back to
+work instead of letting it report "done".
+
+**Matched against**: nothing. Omit `matcher` (a matcher is tested against an
+empty tool name, so `^bash$` would never fire).
+
+To block the finish, exit `2` (stderr is the reason) or print
+`{"decision": "block", "reason": "…"}` on stdout (Claude Code's format;
+`"deny"` works too). The reason becomes the next prompt in the same session
+and the agent keeps going. Exit `0` without a decision, any other exit code, a
+timeout, or a halt (exit `49`) lets the turn end.
+
+A turn can be sent back at most **3** times in a row; after that Crush lets it
+end and logs `Stop hook kept blocking`. The hook does not fire when the turn
+errored or was cancelled, nor for sub-agents. The stdin payload carries
+`stop_hook_active`: `true` when the turn is already a re-run caused by a Stop
+hook, so a hook can choose to let it go.
+
+The turn is reported finished only once Stop hooks let it end: `crush run`
+(including `--json`) waits for the last attempt instead of returning at the
+blocked one. A prompt that was queued behind the turn with its own run ID
+(`send --wait`) is reported at the same time, with the last attempt's result.
+Until then the session reads busy. Cancelling the turn while a Stop hook runs
+(or right after it blocked) kills the hook and ends the turn as cancelled,
+without a re-run.
+
+Like `PreToolUse`, Stop hooks are read from the current config on every turn,
+so edits to them apply to the next turn without a restart.
+
+Known limits:
+
+- The re-run inherits the blocked turn's context. If that turn's user message
+  was hidden, the hook's reason is hidden from the user too, and a turn that
+  came from a channel sends the channel one reply per attempt.
+- In-process `crush run` (no server) prints every attempt's reply, joined
+  without a separator.
+
+Example: don't let the agent finish while lint is red.
+
+```jsonc
+{
+  "hooks": {
+    "Stop": [{ "command": "./hooks/lint-gate.sh", "timeout": 120 }],
+  },
+}
+```
+
+`hooks/lint-gate.sh`:
+
+```bash
+#!/usr/bin/env bash
+if ! out=$(golangci-lint run ./... 2>&1); then
+  echo "Lint failed. Fix these before finishing:" >&2
+  echo "$out" | tail -n 50 >&2
+  exit 2
+fi
+```
+
+In `crushrc`: `hook add Stop --command ./hooks/lint-gate.sh --timeout 120`.
 
 ## Building Hooks
 
@@ -324,7 +387,7 @@ the input, or still deny/halt with a reason:
 ```jsonc
 {
   "version": 1, // Output envelope version. Optional; defaults to 1.
-  "decision": "allow", // "allow", "deny", or null. Omit for no opinion.
+  "decision": "allow", // "allow", "deny" (or "block"), or null. Omit for no opinion.
   "halt": false, // If true, halts the turn entirely.
   "reason": "LGTM", // Shown when denying or halting.
   "context": "Scrubbed secrets", // String or array of strings. Appended to what the model sees.
@@ -579,6 +642,11 @@ stdin payload, output envelope, and exit codes line up so most Claude Code
 hooks run under Crush unchanged. This document covers the Crush-specific API
 only — anything not documented here isn't guaranteed to work.
 
+Crush also accepts Claude Code's `"decision": "block"` as a synonym for
+`"deny"` on every event: on `Stop` it sends the agent back to work, and on
+`PreToolUse` it denies the tool call (Claude Code's legacy spelling). Crush
+also sends `stop_hook_active` on `Stop`.
+
 One intentional divergence: Crush treats `updated_input` as a shallow-merge
 patch against the original `tool_input` rather than a full replacement. Keys
 you omit are preserved. See [Output](#output) for details.
@@ -648,6 +716,20 @@ Extends the common payload:
   "tool_input": {
     "command": "npm test",
   },
+}
+```
+
+### Stdin payload — Stop
+
+Extends the common payload (`tool_name` is empty; ignore `tool_input`):
+
+```jsonc
+{
+  // ...common fields...
+
+  // boolean. True when this turn is already a re-run caused by a Stop hook
+  // block.
+  "stop_hook_active": false,
 }
 ```
 

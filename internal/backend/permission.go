@@ -58,3 +58,26 @@ func (b *Backend) GetPermissionsSkip(workspaceID string) (bool, error) {
 
 	return ws.Permissions.SkipRequests(), nil
 }
+
+// SetPermissionsAcceptEdits sets whether edit tool requests of a session
+// are granted without prompting.
+func (b *Backend) SetPermissionsAcceptEdits(workspaceID, sessionID string, on bool) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+
+	ws.Permissions.SetAcceptEdits(sessionID, on)
+	return nil
+}
+
+// GetPermissionsAcceptEdits returns whether edit tool requests of a
+// session are granted without prompting.
+func (b *Backend) GetPermissionsAcceptEdits(workspaceID, sessionID string) (bool, error) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return false, err
+	}
+
+	return ws.Permissions.AcceptEdits(sessionID), nil
+}

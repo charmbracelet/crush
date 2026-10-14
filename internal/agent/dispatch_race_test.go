@@ -153,3 +153,45 @@ func TestRun_ConcurrentInProcessDispatchStartsOneRun(t *testing.T) {
 	close(model.release)
 	wg.Wait()
 }
+
+// TestRun_TwoSessionsStreamConcurrently pins that runs on two different
+// sessions stream at the same time in one process. The per-session busy
+// check must not serialize across sessions; multi-session UI relies on it.
+func TestRun_TwoSessionsStreamConcurrently(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	model := &concurrencyProbeModel{
+		entered: make(chan struct{}, 2),
+		release: make(chan struct{}),
+	}
+	sa := testSessionAgent(env, model, fastModel{}, "system").(*sessionAgent)
+
+	var wg sync.WaitGroup
+	for _, title := range []string{"session-a", "session-b"} {
+		sess, err := env.sessions.Create(t.Context(), title)
+		require.NoError(t, err)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = sa.Run(t.Context(), SessionAgentCall{
+				SessionID: sess.ID,
+				Prompt:    "hello",
+			})
+		}()
+	}
+
+	// Both streams must be in flight before either is released.
+	for range 2 {
+		select {
+		case <-model.entered:
+		case <-time.After(5 * time.Second):
+			close(model.release)
+			wg.Wait()
+			t.Fatal("expected both sessions to stream concurrently")
+		}
+	}
+	require.Equal(t, int32(2), model.maxSeen.Load(), "two sessions must stream concurrently")
+
+	close(model.release)
+	wg.Wait()
+}

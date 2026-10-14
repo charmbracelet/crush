@@ -23,6 +23,9 @@ const SessionsID = "session"
 
 const sessionDoubleClickThreshold = 400 * time.Millisecond
 
+// listSessionsTimeout bounds the session list the dialog opens with.
+const listSessionsTimeout = 2 * time.Second
+
 type sessionsMode uint8
 
 // Possible modes a session item can be in
@@ -69,7 +72,10 @@ func NewSessions(com *common.Common, selectedSessionID string) (*Session, error)
 	s := new(Session)
 	s.sessionsMode = sessionsModeNormal
 	s.com = com
-	sessions, err := com.Workspace.ListSessions(context.TODO())
+	// It runs on the Update goroutine: a hung server must not freeze the TUI.
+	ctx, cancel := context.WithTimeout(context.Background(), listSessionsTimeout)
+	defer cancel()
+	sessions, err := com.Workspace.ListSessions(ctx)
 	if err != nil {
 		return nil, err
 	}

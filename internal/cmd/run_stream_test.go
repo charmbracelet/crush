@@ -415,3 +415,69 @@ func TestRunStream_NoRunIDFallsBackToSessionID(t *testing.T) {
 	require.True(t, done)
 	require.Equal(t, "DONE", buf.String())
 }
+
+// A tool permission request on this run's session is approved (like the
+// local path's AutoApproveSession) and the run goes on.
+func TestRunStream_OwnPermissionIsGranted(t *testing.T) {
+	t.Parallel()
+
+	var granted []proto.PermissionRequest
+	s := &runStream{
+		sessionID: "S", out: &bytes.Buffer{}, read: map[string]int{},
+		grant: func(r proto.PermissionRequest) error { granted = append(granted, r); return nil },
+	}
+	done, err := s.handle(pubsub.Event[proto.PermissionRequest]{Payload: proto.PermissionRequest{
+		ID: "p1", SessionID: "S", ToolName: "bash", Action: "execute",
+	}}, nil)
+	require.False(t, done, "run continues after approving")
+	require.NoError(t, err)
+	require.Len(t, granted, 1)
+	require.Equal(t, "p1", granted[0].ID)
+
+	// A failed grant fails the run instead of leaving it blocked.
+	s.grant = func(proto.PermissionRequest) error { return errors.New("server gone") }
+	done, err = s.handle(pubsub.Event[proto.PermissionRequest]{Payload: proto.PermissionRequest{SessionID: "S"}}, nil)
+	require.True(t, done)
+	require.ErrorContains(t, err, "server gone")
+}
+
+// Questions cannot be answered non-interactively, so they fail fast.
+func TestRunStream_OwnQuestionFailsFast(t *testing.T) {
+	t.Parallel()
+
+	s := &runStream{sessionID: "S", out: &bytes.Buffer{}, read: map[string]int{}}
+	done, err := s.handle(pubsub.Event[proto.QuestionRequest]{Payload: proto.QuestionRequest{SessionID: "S"}}, nil)
+	require.True(t, done)
+	var ne *needsInputError
+	require.ErrorAs(t, err, &ne)
+	require.Contains(t, err.Error(), "asked a question")
+}
+
+// The server delivers every session's prompts to a client that never
+// reported a session; only ours (or our sub-agents') may be touched.
+func TestRunStream_PromptOnOtherSessionIgnored(t *testing.T) {
+	t.Parallel()
+
+	roots := map[string]string{"child": "S", "other-child": "X"}
+	var granted []string
+	s := &runStream{
+		sessionID: "S", out: &bytes.Buffer{}, read: map[string]int{},
+		rootOf: func(id string) string { return roots[id] },
+		grant:  func(r proto.PermissionRequest) error { granted = append(granted, r.SessionID); return nil },
+	}
+	for _, sid := range []string{"X", "other-child", "", "unknown"} {
+		done, err := s.handle(pubsub.Event[proto.PermissionRequest]{Payload: proto.PermissionRequest{SessionID: sid}}, nil)
+		require.False(t, done, sid)
+		require.NoError(t, err, sid)
+		done, err = s.handle(pubsub.Event[proto.QuestionRequest]{Payload: proto.QuestionRequest{SessionID: sid}}, nil)
+		require.False(t, done, sid)
+		require.NoError(t, err, sid)
+	}
+	require.Empty(t, granted, "never grant other sessions' requests")
+
+	// A sub-agent session of ours is ours.
+	done, err := s.handle(pubsub.Event[proto.PermissionRequest]{Payload: proto.PermissionRequest{SessionID: "child"}}, nil)
+	require.False(t, done)
+	require.NoError(t, err)
+	require.Equal(t, []string{"child"}, granted)
+}

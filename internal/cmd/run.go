@@ -1,13 +1,18 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
+	"syscall"
 	"time"
 
 	"charm.land/log/v2"
@@ -64,8 +69,24 @@ crush run --session {session-id} "Follow up on your last response"
 # Continue the most recent session
 crush run --continue "Follow up on your last response"
 
+# Machine-readable result: one JSON object on stdout with session_id,
+# text, error, prompt_tokens, completion_tokens and cost
+crush run --json "Summarize this repo"
+
+# run auto-approves every tool permission request of its own session, both
+# locally and via the server; questions the agent asks cannot be answered
+# and fail the run.
+#
+# The fields are read from the session after the run: cost is the session's
+# running total (so with --session/--continue it includes earlier runs);
+# prompt_tokens and completion_tokens are the latest step's usage, and on a
+# fresh session may also include title generation.
+#
+# Exit codes: 0 success, 1 runtime error (--json still prints the object
+# with "error" set), 2 bad usage (no prompt, bad flags).
+
   `,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, args []string) (err error) {
 		var (
 			quiet, _           = cmd.Flags().GetBool("quiet")
 			verbose, _         = cmd.Flags().GetBool("verbose")
@@ -74,22 +95,47 @@ crush run --continue "Follow up on your last response"
 			reasoningEffort, _ = cmd.Flags().GetString("reasoning-effort")
 			sessionID, _       = cmd.Flags().GetString("session")
 			useLast, _         = cmd.Flags().GetBool("continue")
+			jsonOut, _         = cmd.Flags().GetBool("json")
 		)
 
+		// JSON mode owns stdout: no spinner, and no --verbose logs.
+		if jsonOut {
+			quiet, verbose = true, false
+		}
+
+		// Failures before the run starts (config, server, bad --session)
+		// must still honour "exit 1 prints one JSON object".
+		var jsonPrinted bool
+		defer func() {
+			var ue *usageError
+			if jsonOut && !jsonPrinted && err != nil && !errors.As(err, &ue) {
+				_ = json.NewEncoder(os.Stdout).Encode(runJSONResult{Error: err.Error()})
+			}
+		}()
+		runOrJSON := func(
+			ctx context.Context,
+			asJSON bool,
+			usage func(ctx context.Context, sessionID string) (sessionUsage, error),
+			run func(out io.Writer, onSession func(string)) error,
+		) error {
+			jsonPrinted = asJSON
+			return runMaybeJSON(ctx, asJSON, usage, run)
+		}
+
 		// Cancel on SIGINT or SIGTERM.
-		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, os.Kill)
+		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer cancel()
 
 		prompt := strings.Join(args, " ")
 
-		prompt, err := MaybePrependStdin(prompt)
+		prompt, err = MaybePrependStdin(prompt)
 		if err != nil {
 			slog.Error("Failed to read from stdin", "error", err)
 			return err
 		}
 
 		if prompt == "" {
-			return fmt.Errorf("no prompt provided")
+			return &usageError{errors.New("no prompt provided")}
 		}
 
 		event.SetNonInteractive(true)
@@ -114,9 +160,10 @@ crush run --continue "Follow up on your last response"
 				return fmt.Errorf("no providers configured - please run 'crush' to set up a provider interactively")
 			}
 
-			clientWs := workspace.NewClientWorkspace(c, *ws)
-			if err := clientWs.InitCoderAgentNonInteractive(ctx); err != nil {
-				return fmt.Errorf("failed to initialize agent: %w", err)
+			// Re-initialising a ready agent replaces the server's
+			// coordinator under any open TUI, so only start one if missing.
+			if err := ensureAgent(ctx, c, ws.ID); err != nil {
+				return err
 			}
 
 			if sessionID != "" {
@@ -131,7 +178,17 @@ crush run --continue "Follow up on your last response"
 				slog.SetDefault(slog.New(log.New(os.Stderr)))
 			}
 
-			return runNonInteractive(ctx, c, ws, prompt, largeModel, smallModel, reasoningEffort, quiet || verbose, sessionID, useLast)
+			return runOrJSON(ctx, jsonOut,
+				func(ctx context.Context, id string) (sessionUsage, error) {
+					sess, err := c.GetSession(ctx, ws.ID, id)
+					if err != nil {
+						return sessionUsage{}, err
+					}
+					return sessionUsage{sess.PromptTokens, sess.CompletionTokens, sess.Cost}, nil
+				},
+				func(out io.Writer, onSession func(string)) error {
+					return runNonInteractive(ctx, c, ws, out, onSession, prompt, largeModel, smallModel, reasoningEffort, quiet || verbose, sessionID, useLast)
+				})
 		}
 
 		ws, cleanup, err := setupLocalWorkspace(cmd)
@@ -160,7 +217,17 @@ crush run --continue "Follow up on your last response"
 			sessionID = sess.ID
 		}
 
-		return appWs.App().RunNonInteractive(ctx, os.Stdout, prompt, largeModel, smallModel, reasoningEffort, quiet || verbose, sessionID, useLast)
+		return runOrJSON(ctx, jsonOut,
+			func(ctx context.Context, id string) (sessionUsage, error) {
+				sess, err := appWs.App().Sessions.Get(ctx, id)
+				if err != nil {
+					return sessionUsage{}, err
+				}
+				return sessionUsage{sess.PromptTokens, sess.CompletionTokens, sess.Cost}, nil
+			},
+			func(out io.Writer, onSession func(string)) error {
+				return appWs.App().RunNonInteractive(ctx, out, onSession, prompt, largeModel, smallModel, reasoningEffort, quiet || verbose, sessionID, useLast)
+			})
 	},
 }
 
@@ -172,20 +239,111 @@ func init() {
 	runCmd.Flags().String("reasoning-effort", "", "Reasoning effort for the model (e.g. low, medium, high). Levels depend on the model; unsupported values are rejected with the accepted values listed")
 	runCmd.Flags().StringP("session", "s", "", "Continue a previous session by ID")
 	runCmd.Flags().BoolP("continue", "C", false, "Continue the most recent session")
+	runCmd.Flags().Bool("json", false, "Print one JSON object (session_id, text, error, token usage) to stdout instead of streaming text")
 	runCmd.MarkFlagsMutuallyExclusive("session", "continue")
+	runCmd.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
+		return &usageError{err}
+	})
 }
 
+// usageError marks a bad invocation (missing prompt, bad flags); Execute
+// turns it into exit code 2 instead of the generic 1.
+type usageError struct{ error }
+
+// runJSONResult is the single object `crush run --json` prints to stdout.
+type runJSONResult struct {
+	SessionID        string  `json:"session_id"`
+	Text             string  `json:"text"`
+	Error            string  `json:"error,omitempty"`
+	PromptTokens     int64   `json:"prompt_tokens"`
+	CompletionTokens int64   `json:"completion_tokens"`
+	Cost             float64 `json:"cost"`
+}
+
+type sessionUsage struct {
+	promptTokens, completionTokens int64
+	cost                           float64
+}
+
+// runMaybeJSON runs the prompt, streaming to stdout, or in JSON mode
+// capturing it into a single JSON object.
+func runMaybeJSON(
+	ctx context.Context,
+	asJSON bool,
+	usage func(ctx context.Context, sessionID string) (sessionUsage, error),
+	run func(out io.Writer, onSession func(string)) error,
+) error {
+	if !asJSON {
+		return run(os.Stdout, nil)
+	}
+	return runJSON(ctx, os.Stdout, usage, run)
+}
+
+// runJSON captures run's output and the session ID it reports through
+// onSession (never guessed from "latest session": concurrent processes
+// share a project), reads the usage of exactly that session afterwards and
+// writes one JSON object to w. The run error is returned after printing so
+// the process still exits 1.
+func runJSON(
+	ctx context.Context,
+	w io.Writer,
+	usage func(ctx context.Context, sessionID string) (sessionUsage, error),
+	run func(out io.Writer, onSession func(string)) error,
+) error {
+	var (
+		buf bytes.Buffer
+		res runJSONResult
+	)
+	runErr := run(&buf, func(id string) { res.SessionID = id })
+	// The local path swallows a cancelled run as success; a JSON consumer
+	// still needs to see that it was cut short.
+	if runErr == nil {
+		runErr = ctx.Err()
+	}
+	// Both run paths end their output with one extra newline.
+	res.Text = strings.TrimSuffix(buf.String(), "\n")
+	err := runErr
+	if res.SessionID != "" {
+		// A cancelled ctx must not stop us reporting what was spent.
+		u, uerr := usage(context.WithoutCancel(ctx), res.SessionID)
+		if uerr != nil && err == nil {
+			err = fmt.Errorf("failed to read session usage: %w", uerr)
+		}
+		res.PromptTokens, res.CompletionTokens, res.Cost = u.promptTokens, u.completionTokens, u.cost
+	}
+	if err != nil {
+		res.Error = err.Error()
+	}
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	if encErr := enc.Encode(res); encErr != nil && err == nil {
+		err = encErr
+	}
+	return err
+}
+
+// cancelRunTimeout bounds the cancel request sent for an interrupted or
+// blocked run, so a hung server cannot hang Ctrl+C. runStderr is where the
+// timeout warning goes. Both are variables so tests can swap them.
+var (
+	cancelRunTimeout           = 5 * time.Second
+	runStderr        io.Writer = os.Stderr
+)
+
 // runNonInteractive executes the agent via the server and streams output
-// to stdout.
+// to out. onSession, when non-nil, receives the ID of the session used or
+// created, as soon as it is resolved.
 func runNonInteractive(
 	ctx context.Context,
 	c *client.Client,
 	ws *proto.Workspace,
+	out io.Writer,
+	onSession func(sessionID string),
 	prompt, largeModel, smallModel, reasoningEffort string,
 	hideSpinner bool,
 	continueSessionID string,
 	useLast bool,
-) error {
+) (err error) {
 	slog.Info("Running in non-interactive mode")
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -254,6 +412,9 @@ func runNonInteractive(
 	if err != nil {
 		return fmt.Errorf("failed to resolve session: %w", err)
 	}
+	if onSession != nil {
+		onSession(sess.ID)
+	}
 	if continueSessionID != "" || useLast {
 		slog.Info("Continuing session for non-interactive run", "session_id", sess.ID)
 		// If no explicit model override was requested, restore the
@@ -285,6 +446,20 @@ func runNonInteractive(
 	// loop would exit on whichever RunComplete arrived first for
 	// the same session and drop the queued prompt's output.
 	runID := uuid.New().String()
+	// The server keeps a run going after its client leaves, so Ctrl+C on a
+	// session this run created cancels it there. On a continued session
+	// (-s/-C) the active turn may be someone else's and the cancel API
+	// cannot tell turns apart, so the run only stops waiting.
+	// shortcut: cancel by RunID instead once the coordinator supports it.
+	defer func() {
+		switch {
+		case ctx.Err() == nil:
+		case continueSessionID != "" || useLast:
+			err = fmt.Errorf("stopped waiting; the run keeps going on session %s", sess.ID)
+		default:
+			cancelOwnRun(ctx, c, ws.ID, sess.ID)
+		}
+	}()
 	if err := c.SendMessage(ctx, ws.ID, sess.ID, runID, "", prompt); err != nil {
 		return fmt.Errorf("failed to send message: %w", err)
 	}
@@ -292,8 +467,27 @@ func runNonInteractive(
 	stream := &runStream{
 		sessionID: sess.ID,
 		runID:     runID,
-		out:       os.Stdout,
+		out:       out,
 		read:      make(map[string]int),
+		rootOf: func(id string) string {
+			root, _ := session.RootID(id, func(id string) (string, error) {
+				sess, err := c.GetSession(ctx, ws.ID, id)
+				if err != nil {
+					return "", err
+				}
+				return sess.ParentSessionID, nil
+			})
+			return root
+		},
+		grant: func(req proto.PermissionRequest) error {
+			_, err := c.GrantPermission(ctx, ws.ID, proto.PermissionGrant{Permission: req, Action: proto.PermissionAllow})
+			return err
+		},
+	}
+	// On a continued session our prompt may be queued behind another turn
+	// (e.g. the TUI's), whose prompts are not ours to approve or fail on.
+	if continueSessionID != "" || useLast {
+		stream.queued = promptQueued(ctx, c, ws.ID, sess.ID, prompt)
 	}
 
 	// Start herdr integration when running inside a herdr pane.
@@ -305,7 +499,7 @@ func runNonInteractive(
 		if progress && stderrTTY {
 			_, _ = fmt.Fprintf(os.Stderr, ansi.ResetProgressBar)
 		}
-		_, _ = fmt.Fprintln(os.Stdout)
+		_, _ = fmt.Fprintln(out)
 	}()
 
 	for {
@@ -317,7 +511,11 @@ func runNonInteractive(
 		case ev, ok := <-events:
 			if !ok {
 				stopSpinner()
-				return nil
+				// The stream also closes when ctx is cancelled.
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				return errEventStreamClosed
 			}
 
 			// Forward events to herdr if running inside a herdr pane.
@@ -327,6 +525,12 @@ func runNonInteractive(
 
 			done, err := stream.handle(ev, stopSpinner)
 			if err != nil {
+				var ne *needsInputError
+				if errors.As(err, &ne) {
+					// Nobody can answer, so don't leave the run blocked on
+					// the server (it would also block the session's TUI).
+					cancelOwnRun(ctx, c, ws.ID, sess.ID)
+				}
 				return err
 			}
 			if done {
@@ -337,6 +541,20 @@ func runNonInteractive(
 			stopSpinner()
 			return ctx.Err()
 		}
+	}
+}
+
+// cancelOwnRun asks the server to cancel sessionID's run, on a context of
+// its own (ctx may already be cancelled) bounded by cancelRunTimeout.
+func cancelOwnRun(ctx context.Context, c *client.Client, wsID, sessionID string) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cancelRunTimeout)
+	defer cancel()
+	err := c.CancelAgentSession(ctx, wsID, sessionID)
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		fmt.Fprintf(runStderr, "cancel request timed out; the run may still be going on session %s\n", sessionID)
+	case err != nil:
+		slog.Warn("Failed to cancel run", "session_id", sessionID, "error", err)
 	}
 }
 
@@ -361,6 +579,60 @@ type runStream struct {
 	out       io.Writer
 	read      map[string]int
 	printed   bool
+	// rootOf resolves a (sub-agent) session to its top-level session.
+	// Nil means only exact session matches count.
+	rootOf func(sessionID string) string
+	// grant approves a tool permission request of this run, like the local
+	// path's AutoApproveSession. Nil means such requests fail the run.
+	grant func(proto.PermissionRequest) error
+	// queued reports whether this run's prompt still waits in the session
+	// queue, so the active turn is someone else's. Nil means the active
+	// turn is this run's (a session the run created).
+	queued func() bool
+}
+
+// needsInputError reports that the run is blocked on a prompt a
+// non-interactive run cannot answer.
+type needsInputError struct{ what string }
+
+func (e *needsInputError) Error() string {
+	return e.what + ", but `run` cannot answer it non-interactively"
+}
+
+// ownsSession reports whether a prompt raised for sessionID belongs to
+// this run. The run client never reports a current session, so the server
+// delivers prompts of every session in the workspace to it.
+func (s *runStream) ownsSession(sessionID string) bool {
+	if sessionID == "" {
+		return false
+	}
+	return sessionID == s.sessionID || (s.rootOf != nil && s.rootOf(sessionID) == s.sessionID)
+}
+
+// promptQueued returns a check of whether prompt still waits in sessionID's
+// queue, i.e. the session's active turn is someone else's (e.g. the TUI's).
+// Unknown counts as queued: acting on another turn's prompt would approve
+// its tool or cancel it.
+func promptQueued(ctx context.Context, c sendClient, wsID, sessionID, prompt string) func() bool {
+	return func() bool {
+		list, err := c.GetAgentSessionQueuedPromptsList(ctx, wsID, sessionID)
+		return err != nil || slices.Contains(list, prompt)
+	}
+}
+
+// othersTurn reports whether a prompt raised in sessionID belongs to another
+// turn because our prompt is still queued (nil queued: the turn is ours); the
+// caller then leaves it alone, keeps waiting and says so on stderr.
+// shortcut: requests carry no RunID, so ownership is read from the queue by
+// prompt text: an identical prompt queued by someone else, or a foreign
+// prompt in the instant before ours is enqueued, is misread. Upgrade: put the
+// RunID on permission/question requests.
+func othersTurn(queued func() bool, what, sessionID string) bool {
+	if queued == nil || !queued() {
+		return false
+	}
+	fmt.Fprintf(runStderr, "%s from another turn is pending on session %s; this run keeps waiting behind it\n", what, sessionID)
+	return true
 }
 
 // handle processes one SSE event. Returns done=true when the run
@@ -451,6 +723,30 @@ func (s *runStream) handle(ev any, stopSpinner func()) (done bool, err error) {
 			}
 		}
 		return true, nil
+
+	case pubsub.Event[proto.PermissionRequest]:
+		if !s.ownsSession(e.Payload.SessionID) || othersTurn(s.queued, "a permission request", s.sessionID) {
+			return false, nil
+		}
+		// Same as the local path: a non-interactive run approves every
+		// tool permission of its own session. Other sessions' and other
+		// turns' prompts are never touched (see ownsSession, othersTurn).
+		if s.grant == nil {
+			stop()
+			return true, &needsInputError{fmt.Sprintf("permission required for tool %q (%s)", e.Payload.ToolName, e.Payload.Action)}
+		}
+		if err := s.grant(e.Payload); err != nil {
+			stop()
+			return true, fmt.Errorf("failed to approve tool permission: %w", err)
+		}
+		return false, nil
+
+	case pubsub.Event[proto.QuestionRequest]:
+		if !s.ownsSession(e.Payload.SessionID) || othersTurn(s.queued, "a question", s.sessionID) {
+			return false, nil
+		}
+		stop()
+		return true, &needsInputError{"the agent asked a question"}
 
 	case pubsub.Event[proto.AgentEvent]:
 		if e.Payload.Error == nil {
@@ -751,9 +1047,15 @@ func resolveSession(ctx context.Context, c *client.Client, wsID, continueSession
 	}
 }
 
+// sessionLookup is what resolveSessionByID needs from the client.
+type sessionLookup interface {
+	GetSession(ctx context.Context, id, sessionID string) (*proto.Session, error)
+	ListSessions(ctx context.Context, id string) ([]proto.Session, error)
+}
+
 // resolveSessionByID resolves a session ID that may be a full UUID or a hash
 // prefix returned by crush session list.
-func resolveSessionByID(ctx context.Context, c *client.Client, wsID, id string) (*proto.Session, error) {
+func resolveSessionByID(ctx context.Context, c sessionLookup, wsID, id string) (*proto.Session, error) {
 	if sess, err := c.GetSession(ctx, wsID, id); err == nil {
 		return sess, nil
 	}

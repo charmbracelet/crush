@@ -745,6 +745,46 @@ func (c *controllerV1) handleGetWorkspacePermissionsSkip(w http.ResponseWriter, 
 	jsonEncode(w, proto.PermissionSkipRequest{Skip: skip})
 }
 
+// handlePostWorkspacePermissionsAcceptEdits sets whether edit tool
+// requests of one session are granted without prompting.
+func (c *controllerV1) handlePostWorkspacePermissionsAcceptEdits(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	sid := r.URL.Query().Get("session_id")
+	if sid == "" {
+		jsonError(w, http.StatusBadRequest, "session_id is required")
+		return
+	}
+
+	var req proto.PermissionAcceptEditsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		c.server.logError(r, "Failed to decode request", "error", err)
+		jsonError(w, http.StatusBadRequest, "failed to decode request")
+		return
+	}
+
+	if err := c.backend.SetPermissionsAcceptEdits(id, sid, req.AcceptEdits); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+}
+
+// handleGetWorkspacePermissionsAcceptEdits returns whether edit tool
+// requests of one session are granted without prompting.
+func (c *controllerV1) handleGetWorkspacePermissionsAcceptEdits(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	sid := r.URL.Query().Get("session_id")
+	if sid == "" {
+		jsonError(w, http.StatusBadRequest, "session_id is required")
+		return
+	}
+	on, err := c.backend.GetPermissionsAcceptEdits(id, sid)
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	jsonEncode(w, proto.PermissionAcceptEditsRequest{AcceptEdits: on})
+}
+
 // handleError maps backend errors to HTTP status codes and writes the
 // JSON error response.
 //

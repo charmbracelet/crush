@@ -2,11 +2,14 @@ package permission
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -717,4 +720,272 @@ func TestNotificationsCarrySessionID(t *testing.T) {
 	second := <-notifications
 	assert.Equal(t, "s-notify", second.Payload.SessionID)
 	assert.True(t, second.Payload.Granted)
+}
+
+// newAcceptEditsService returns a service rooted at a fresh working dir.
+func newAcceptEditsService(t *testing.T) (Service, string) {
+	t.Helper()
+	dir := t.TempDir()
+	return NewPermissionService(dir, false, nil), dir
+}
+
+// requestAsks reports whether a request for tool writing filePath in
+// session reached the prompt (published as a PermissionRequest) instead of
+// being auto-granted. A prompted request is denied so the call returns.
+func requestAsks(t *testing.T, service Service, sessionID, tool, filePath string) bool {
+	t.Helper()
+	events := service.Subscribe(t.Context())
+	done := make(chan bool, 1)
+	go func() {
+		granted, _ := service.Request(t.Context(), CreatePermissionRequest{
+			SessionID:  sessionID,
+			ToolCallID: "call-" + tool,
+			ToolName:   tool,
+			Action:     "write",
+			Path:       filepath.Dir(filePath),
+			FilePath:   filePath,
+		})
+		done <- granted
+	}()
+	select {
+	case granted := <-done:
+		require.True(t, granted, "a request that never prompted must be granted")
+		return false
+	case event := <-events:
+		require.True(t, service.Deny(event.Payload))
+		require.False(t, <-done)
+		return true
+	case <-time.After(5 * time.Second):
+		t.Fatal("request neither granted nor prompted")
+		return false
+	}
+}
+
+func TestAcceptEditsAutoApprovesEditTools(t *testing.T) {
+	t.Parallel()
+	service, dir := newAcceptEditsService(t)
+	file := filepath.Join(dir, "main.go")
+	service.SetAcceptEdits("s1", true)
+	require.True(t, service.AcceptEdits("s1"))
+
+	notifications := service.SubscribeNotifications(t.Context())
+	for _, tool := range []string{"edit", "multiedit", "write"} {
+		require.False(t, requestAsks(t, service, "s1", tool, file), tool)
+		// The grant is published so the tool item and the sessions
+		// panel leave the waiting state.
+		var n pubsub.Event[PermissionNotification]
+		select {
+		case n = <-notifications:
+		case <-time.After(5 * time.Second):
+			t.Fatal("no granted notification for " + tool)
+		}
+		require.Equal(t, "s1", n.Payload.SessionID)
+		require.Equal(t, "call-"+tool, n.Payload.ToolCallID)
+		require.True(t, n.Payload.Granted, tool)
+	}
+
+	service.SetAcceptEdits("s1", false)
+	require.False(t, service.AcceptEdits("s1"))
+	require.True(t, requestAsks(t, service, "s1", "edit", file), "turning it off asks again")
+}
+
+func TestAcceptEditsStillAsksForBash(t *testing.T) {
+	t.Parallel()
+	service, dir := newAcceptEditsService(t)
+	file := filepath.Join(dir, "main.go")
+	service.SetAcceptEdits("s1", true)
+	for _, tool := range []string{"bash", "download", "fetch", "lsp_rename", "mcp_fs_write", "Edit"} {
+		require.True(t, requestAsks(t, service, "s1", tool, file), tool)
+	}
+}
+
+func TestAcceptEditsIsPerSession(t *testing.T) {
+	t.Parallel()
+	service, dir := newAcceptEditsService(t)
+	file := filepath.Join(dir, "main.go")
+	service.SetAcceptEdits("s1", true)
+	require.False(t, service.AcceptEdits("s2"))
+	require.True(t, requestAsks(t, service, "s2", "edit", file), "another session still asks")
+	// Sub-agent sessions ("<message>$$<tool call>") do not inherit it.
+	require.True(t, requestAsks(t, service, "msg-1$$call-1", "edit", file), "a child session still asks")
+
+	// Fail closed: an empty session ID can never be switched on.
+	service.SetAcceptEdits("", true)
+	require.False(t, service.AcceptEdits(""))
+	require.True(t, requestAsks(t, service, "", "edit", file), "an empty session ID still asks")
+}
+
+// TestAcceptEditsOnlyInsideWorkingDir: the written file, with symlinks
+// resolved, must be inside the working dir; anything else asks.
+func TestAcceptEditsOnlyInsideWorkingDir(t *testing.T) {
+	t.Parallel()
+	service, dir := newAcceptEditsService(t)
+	service.SetAcceptEdits("s1", true)
+	outside := t.TempDir()
+
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "sub"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "sub", "old.go"), nil, 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(outside, "secret"), nil, 0o644))
+	require.NoError(t, os.Symlink(outside, filepath.Join(dir, "linkdir")))
+	require.NoError(t, os.Symlink(filepath.Join(outside, "secret"), filepath.Join(dir, "linkfile")))
+	require.NoError(t, os.Symlink(filepath.Join(outside, "missing"), filepath.Join(dir, "dangling")))
+	require.NoError(t, os.Symlink(filepath.Join(dir, "sub"), filepath.Join(dir, "insidelink")))
+
+	for _, tc := range []struct {
+		name string
+		path string
+		asks bool
+	}{
+		{"existing file inside", filepath.Join(dir, "sub", "old.go"), false},
+		{"new file in an inside dir", filepath.Join(dir, "sub", "new.go"), false},
+		{"new file in new inside dirs", filepath.Join(dir, "a", "b", "c.go"), false},
+		{"relative to the working dir", "sub/rel.go", false},
+		{"symlink staying inside", filepath.Join(dir, "insidelink", "x.go"), false},
+		{"relative escape", "../outside.go", true},
+		{"absolute escape", dir + "/sub/../../outside.go", true},
+		// Cleaned lexically this is <dir>/x.go, but the kernel follows
+		// linkdir first, so the write lands next to outside.
+		{"dot-dot after a symlink pointing outside", dir + "/linkdir/../x.go", true},
+		{"dot-dot staying inside", dir + "/sub/../x.go", true},
+		{"outside dir", filepath.Join(outside, "x.go"), true},
+		{"symlinked dir pointing outside", filepath.Join(dir, "linkdir", "x.go"), true},
+		{"symlinked file pointing outside", filepath.Join(dir, "linkfile"), true},
+		{"dangling symlink pointing outside", filepath.Join(dir, "dangling"), true},
+		{"no file path", "", true},
+	} {
+		require.Equal(t, tc.asks, requestAsks(t, service, "s1", "edit", tc.path), tc.name)
+	}
+}
+
+// TestAcceptEditsAsksForAgentConfigAndGit: agent-cli's own config (hooks,
+// MCP servers, permissions) and git internals (hooks) can run commands, so
+// writing them always asks, matched case-insensitively for macOS.
+func TestAcceptEditsAsksForAgentConfigAndGit(t *testing.T) {
+	t.Parallel()
+	service, dir := newAcceptEditsService(t)
+	service.SetAcceptEdits("s1", true)
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".git", "hooks"), 0o755))
+	require.NoError(t, os.Symlink(filepath.Join(dir, ".git", "hooks"), filepath.Join(dir, "hooks")))
+
+	for _, tc := range []struct {
+		path string
+		asks bool
+	}{
+		{"crush.json", true},
+		{".crush.json", true},
+		{"crushrc", true},
+		{".crushrc", true},
+		{".crush/crush.json", true},
+		{"sub/crushrc", true},
+		{"CRUSH.JSON", true},
+		{".git", true},
+		{".git/config", true},
+		{".git/hooks/pre-commit", true},
+		{".GIT/hooks/pre-commit", true},
+		{"hooks/pre-commit", true},
+		// A nested bare repo (x/HEAD + x/config) lets a read-only git
+		// verb run the config's programs.
+		{"x/HEAD", true},
+		{"main.go", false},
+		{"docs/crush.json.example", false},
+		{".github/workflows/ci.yml", false},
+		{"gitconfig.go", false},
+	} {
+		require.Equal(t, tc.asks, requestAsks(t, service, "s1", "write", filepath.Join(dir, tc.path)), tc.path)
+	}
+}
+
+// TestAcceptEditsResolvesSymlinkedWorkingDir: a working dir reached through
+// a symlink still counts as inside, and an empty working dir grants nothing.
+func TestAcceptEditsResolvesSymlinkedWorkingDir(t *testing.T) {
+	t.Parallel()
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "project")
+	require.NoError(t, os.Symlink(real, link))
+
+	viaLink := NewPermissionService(link, false, nil)
+	viaLink.SetAcceptEdits("s1", true)
+	require.False(t, requestAsks(t, viaLink, "s1", "write", filepath.Join(real, "x.go")))
+
+	viaReal := NewPermissionService(real, false, nil)
+	viaReal.SetAcceptEdits("s1", true)
+	require.False(t, requestAsks(t, viaReal, "s1", "write", filepath.Join(link, "x.go")))
+
+	// No working dir must not fall back to the process cwd. The file is
+	// never created: Request only resolves the path.
+	noRoot := NewPermissionService("", false, nil)
+	noRoot.SetAcceptEdits("s1", true)
+	require.True(t, requestAsks(t, noRoot, "s1", "write", "x.go"))
+	require.True(t, requestAsks(t, noRoot, "s1", "write", filepath.Join(real, "x.go")))
+}
+
+// TestRequestWaitsForOtherSessionsPrompt pins the global FIFO: while one
+// session's prompt is pending, another session's request is not published
+// (nor lost); it is published once the first is answered.
+func TestRequestWaitsForOtherSessionsPrompt(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	service := NewPermissionService(dir, false, nil)
+	events := service.Subscribe(t.Context())
+	results := make(chan string, 2)
+	ask := func(session string) {
+		granted, _ := service.Request(t.Context(), CreatePermissionRequest{
+			SessionID: session, ToolCallID: "call-" + session, ToolName: "bash", Action: "execute", Path: dir,
+		})
+		if granted {
+			results <- session
+		}
+	}
+	go ask("a")
+	first := <-events
+	require.Equal(t, "a", first.Payload.SessionID)
+
+	go ask("b")
+	select {
+	case ev := <-events:
+		t.Fatalf("b's request was published while a's is pending: %+v", ev.Payload)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	require.True(t, service.Grant(first.Payload))
+	require.Equal(t, "a", <-results)
+	second := <-events
+	require.Equal(t, "b", second.Payload.SessionID)
+	require.True(t, service.Grant(second.Payload))
+	require.Equal(t, "b", <-results)
+}
+
+// TestAcceptEditsDoesNotWaitForOtherPrompts: the grant must not queue
+// behind another session's prompt that is waiting on the user.
+func TestAcceptEditsDoesNotWaitForOtherPrompts(t *testing.T) {
+	t.Parallel()
+	service, dir := newAcceptEditsService(t)
+	service.SetAcceptEdits("s1", true)
+
+	events := service.Subscribe(t.Context())
+	blocked := make(chan bool, 1)
+	go func() {
+		granted, _ := service.Request(t.Context(), CreatePermissionRequest{
+			SessionID: "s2", ToolCallID: "call-bash", ToolName: "bash", Action: "execute", Path: dir,
+		})
+		blocked <- granted
+	}()
+	pending := <-events // s2's prompt now holds the request lock.
+
+	granted := make(chan bool, 1)
+	go func() {
+		ok, _ := service.Request(t.Context(), CreatePermissionRequest{
+			SessionID: "s1", ToolCallID: "call-edit", ToolName: "edit", Action: "write",
+			Path: dir, FilePath: filepath.Join(dir, "main.go"),
+		})
+		granted <- ok
+	}()
+	select {
+	case ok := <-granted:
+		require.True(t, ok)
+	case <-time.After(5 * time.Second):
+		t.Fatal("accept-edits grant waited behind another session's prompt")
+	}
+	require.True(t, service.Grant(pending.Payload))
+	require.True(t, <-blocked)
 }

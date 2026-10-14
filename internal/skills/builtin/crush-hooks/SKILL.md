@@ -16,8 +16,21 @@ need to author correct hooks.
 
 ## Supported Events
 
-Only `PreToolUse` is currently supported. Event names are case-insensitive and
+`PreToolUse` and `Stop` are supported. Event names are case-insensitive and
 accept snake_case (`PreToolUse`, `pretooluse`, `pre_tool_use` all work).
+
+### Stop
+
+Fires when the top-level agent is about to finish its turn (not after an
+error or cancel, not for sub-agents). Omit `matcher`. Block the finish with
+`exit 2` (stderr is the reason) or `{"decision": "block", "reason": "…"}`;
+the reason becomes the next prompt and the agent keeps working, at most 3
+times in a row. Stdin carries `stop_hook_active: true` on those re-runs.
+Cancelling the turn kills a running Stop hook and drops the re-run.
+
+```jsonc
+{ "hooks": { "Stop": [{ "command": "./hooks/lint-gate.sh", "timeout": 120 }] } }
+```
 
 ## Configuration
 
@@ -100,7 +113,7 @@ policy violation).
 }
 ```
 
-- **`decision`**: `"allow"`, `"deny"`, or omit. `"allow"` is **affirmative
+- **`decision`**: `"allow"`, `"deny"` (or Claude Code's `"block"`), or omit. `"allow"` is **affirmative
   pre-approval** — it bypasses the permission prompt entirely. Omit it
   (or `null`) when you only want to inject context or rewrite input without
   also auto-approving the call.
@@ -203,7 +216,8 @@ preserved.
 
 ## Claude Code Compatibility
 
-Crush also accepts Claude Code's `hookSpecificOutput` envelope. One intentional
+Crush also accepts Claude Code's `hookSpecificOutput` envelope and its
+`decision: "block"` spelling (same as `"deny"`, for every event). One intentional
 divergence: Crush treats `updated_input` as shallow-merge, Claude Code replaces.
 Existing Claude Code hooks work without modification for the matcher/decision
 parts; revisit any that relied on `updatedInput` fully replacing tool input.

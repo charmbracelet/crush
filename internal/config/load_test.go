@@ -2558,3 +2558,10 @@ func TestConfig_LoadFromBytes_EnvMerge(t *testing.T) {
 	require.Equal(t, "second", loadedConfig.Env["AWS_PROFILE"])
 	require.Equal(t, "us-east-1", loadedConfig.Env["AWS_REGION"])
 }
+
+func TestNormalizeHookEventStop(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"Stop", "stop", "STOP"} {
+		require.Equal(t, "Stop", normalizeHookEvent(name), name)
+	}
+}

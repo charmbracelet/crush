@@ -159,12 +159,6 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 		return fantasy.ToolResponse{}, fmt.Errorf("failed to access file: %w", err)
 	}
 
-	// Create parent directories
-	dir := filepath.Dir(params.FilePath)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fantasy.ToolResponse{}, fmt.Errorf("failed to create parent directories: %w", err)
-	}
-
 	currentContent, failedEdits, whitespaceCorrected := applyEditsToContent(firstEdit.NewString, params.Edits[1:], 1)
 
 	// Get session and message IDs
@@ -186,6 +180,7 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 	p, err := edit.permissions.Request(edit.ctx, permission.CreatePermissionRequest{
 		SessionID:   sessionID,
 		Path:        fsext.PathOrPrefix(params.FilePath, edit.workingDir),
+		FilePath:    params.FilePath,
 		ToolCallID:  call.ID,
 		ToolName:    MultiEditToolName,
 		Action:      "write",
@@ -210,6 +205,12 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 			EditsFailed:  failedEdits,
 		})
 		return resp, nil
+	}
+
+	// Create parent directories, only after the grant: a denied create must
+	// not leave directories.
+	if err := os.MkdirAll(filepath.Dir(params.FilePath), 0o755); err != nil {
+		return fantasy.ToolResponse{}, fmt.Errorf("failed to create parent directories: %w", err)
 	}
 
 	// Write the file
@@ -291,6 +292,7 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 	p, err := edit.permissions.Request(edit.ctx, permission.CreatePermissionRequest{
 		SessionID:   sessionID,
 		Path:        fsext.PathOrPrefix(params.FilePath, edit.workingDir),
+		FilePath:    params.FilePath,
 		ToolCallID:  call.ID,
 		ToolName:    MultiEditToolName,
 		Action:      "write",

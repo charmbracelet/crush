@@ -16,8 +16,8 @@ func (historyWorkspace) Config() *config.Config {
 	return &config.Config{}
 }
 
-func (historyWorkspace) PermissionSkipRequests() bool {
-	return false
+func (historyWorkspace) PermissionSkipRequests() (bool, error) {
+	return false, nil
 }
 
 func TestHistoryBangCommandStripsPrefixWhileAlreadyInBangMode(t *testing.T) {

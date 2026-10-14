@@ -396,37 +396,6 @@ func requestOutsideWorkspace(ctx context.Context, permissions permission.Service
 	})
 }
 
-func TestRunSubAgentInheritsNonInteractivePermissionPolicy(t *testing.T) {
-	coord, parentSession, permissions, outsidePath := newPermissionTestCoordinator(t)
-	agent := newMockAgent("test-provider", 4096, func(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
-		assert.NotEqual(t, parentSession.ID, call.SessionID)
-		assert.Equal(t, permission.RequestPolicyAutoApprove, call.PermissionPolicy)
-		granted, err := requestOutsideWorkspace(ctx, permissions, call.SessionID, "child-call", outsidePath)
-		if err != nil {
-			return nil, err
-		}
-		if !granted {
-			return nil, errors.New("child permission was denied")
-		}
-		return agentResultWithText("done"), nil
-	})
-
-	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
-	defer cancel()
-
-	resp, err := coord.runSubAgent(permission.WithAutoApproveRequests(ctx), subAgentParams{
-		Agent:          agent,
-		SessionID:      parentSession.ID,
-		AgentMessageID: "msg-1",
-		ToolCallID:     "call-1",
-		Prompt:         "inspect outside the workspace",
-		SessionTitle:   "Validator",
-	})
-	require.NoError(t, err)
-	assert.False(t, resp.IsError)
-	assert.Equal(t, "done", resp.Content)
-}
-
 func TestRunSubAgentInteractiveParentDoesNotApproveChild(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
@@ -511,6 +480,7 @@ func TestRunSubAgentNestedDescendantInheritsPermissionPolicy(t *testing.T) {
 	grandchildSessions := make(chan string, 1)
 	grandchild := newMockAgent("test-provider", 4096, func(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
 		grandchildSessions <- call.SessionID
+		assert.Equal(t, permission.RequestPolicyAutoApprove, call.PermissionPolicy)
 		granted, err := requestOutsideWorkspace(ctx, permissions, call.SessionID, "grandchild-permission", outsidePath)
 		if err != nil {
 			return nil, err
@@ -522,6 +492,15 @@ func TestRunSubAgentNestedDescendantInheritsPermissionPolicy(t *testing.T) {
 	})
 
 	child := newMockAgent("test-provider", 4096, func(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
+		assert.NotEqual(t, parentSession.ID, call.SessionID)
+		assert.Equal(t, permission.RequestPolicyAutoApprove, call.PermissionPolicy)
+		granted, err := requestOutsideWorkspace(ctx, permissions, call.SessionID, "child-call", outsidePath)
+		if err != nil {
+			return nil, err
+		}
+		if !granted {
+			return nil, errors.New("child permission was denied")
+		}
 		response, err := coord.runSubAgent(ctx, subAgentParams{
 			Agent:          grandchild,
 			SessionID:      call.SessionID,

@@ -139,6 +139,11 @@ func TestRun_IndependentTurnOutcomes(t *testing.T) {
 						require.Len(t, queuedEvents, 1)
 						queued := (<-queuedEvents).Payload
 						require.Equal(t, ids[1], queued.RunID)
+						if summarize {
+							require.True(t, initialEvents[0].Sequence > queued.Sequence, "A resumes after B completes")
+						} else {
+							require.True(t, queued.Sequence > initialEvents[0].Sequence, "B completes after A, despite coordinator buffering")
+						}
 						var queuedErrors []notify.Notification
 						for len(notificationEvents) > 0 {
 							n := (<-notificationEvents).Payload
@@ -359,57 +364,64 @@ func (s observingSessionGet) Get(ctx context.Context, id string) (session.Sessio
 
 func TestRun_NestedContinuationPreparationCompletion(t *testing.T) {
 	t.Parallel()
-	for _, cancel := range []bool{false, true} {
-		t.Run(fmt.Sprint(cancel), func(t *testing.T) {
-			t.Parallel()
-			env, sess, model, sa := newLifecycleTestAgent(t, "session")
-			seedUserMessage(t, env.messages, sess.ID, "earlier")
-			injected, armed := false, false
-			failure := errors.New("continuation preparation failed")
-			sa.sessions = observingSessionGet{Service: env.sessions, beforeGet: func(ctx context.Context) error {
-				if !armed {
-					return nil
+	for _, runID := range []string{"A", ""} {
+		for _, cancel := range []bool{false, true} {
+			t.Run(fmt.Sprintf("runID=%s/cancel=%t", runID, cancel), func(t *testing.T) {
+				t.Parallel()
+				env, sess, model, sa := newLifecycleTestAgent(t, "session")
+				seedUserMessage(t, env.messages, sess.ID, "earlier")
+				events := subscribeRunCompletions(t, sa)
+				injected, armed := false, false
+				failure := errors.New("continuation preparation failed")
+				sa.sessions = observingSessionGet{Service: env.sessions, beforeGet: func(ctx context.Context) error {
+					if !armed {
+						return nil
+					}
+					armed = false
+					if cancel {
+						sa.Cancel(sess.ID)
+						return ctx.Err()
+					}
+					return failure
+				}}
+				sa.messages = observingFlush{Service: env.messages, afterFlush: func() {
+					if !injected {
+						injected = true
+						_, err := sa.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, RunID: "C", Prompt: "C"})
+						require.NoError(t, err)
+					}
+				}}
+				calls := 0
+				model.stream = func(ctx context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
+					calls++
+					if calls == 1 || calls == 3 {
+						return compactionStream, nil
+					}
+					if calls == 4 {
+						armed = true // C's summary next promotes A's continuation.
+					}
+					return (&finishStreamModel{text: "done"}).Stream(ctx, call)
 				}
-				armed = false
+				var completions []notify.RunComplete
+				_, err := sa.Run(t.Context(), SessionAgentCall{
+					SessionID: sess.ID, RunID: runID, Prompt: "A",
+					OnComplete: func(event notify.RunComplete) { completions = append(completions, event) },
+				})
 				if cancel {
-					sa.Cancel(sess.ID)
-					return ctx.Err()
+					require.ErrorIs(t, err, context.Canceled)
+				} else {
+					require.ErrorIs(t, err, failure)
 				}
-				return failure
-			}}
-			sa.messages = observingFlush{Service: env.messages, afterFlush: func() {
-				if !injected {
-					injected = true
-					_, err := sa.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, RunID: "C", Prompt: "C"})
-					require.NoError(t, err)
-				}
-			}}
-			calls := 0
-			model.stream = func(ctx context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
-				calls++
-				if calls == 1 || calls == 3 {
-					return compactionStream, nil
-				}
-				if calls == 4 {
-					armed = true // C's summary next promotes A's continuation.
-				}
-				return (&finishStreamModel{text: "done"}).Stream(ctx, call)
-			}
-			var completions []notify.RunComplete
-			_, err := sa.Run(t.Context(), SessionAgentCall{
-				SessionID: sess.ID, RunID: "A", Prompt: "A",
-				OnComplete: func(event notify.RunComplete) { completions = append(completions, event) },
+				require.Len(t, completions, 1)
+				require.Equal(t, runID, completions[0].RunID)
+				require.NotEmpty(t, completions[0].Error)
+				require.Equal(t, cancel, completions[0].Cancelled)
+				require.Len(t, events, 1)
+				queued := (<-events).Payload
+				require.Equal(t, "C", queued.RunID)
+				require.True(t, queued.Sequence > completions[0].Sequence, "C resumes after A's preparation failure")
 			})
-			if cancel {
-				require.ErrorIs(t, err, context.Canceled)
-			} else {
-				require.ErrorIs(t, err, failure)
-			}
-			require.Len(t, completions, 1)
-			require.Equal(t, "A", completions[0].RunID)
-			require.NotEmpty(t, completions[0].Error)
-			require.Equal(t, cancel, completions[0].Cancelled)
-		})
+		}
 	}
 }
 
@@ -559,6 +571,11 @@ func TestRun_FinishedAutomaticSummaryDoesNotInheritQueuedCancellation(t *testing
 				completed[complete.RunID] = complete
 			}
 			require.True(t, completed["B"].Cancelled)
+			if needsContinuation {
+				require.True(t, completed["A"].Sequence > completed["B"].Sequence, "resumed A completes after B")
+			} else {
+				require.True(t, completed["A"].Sequence < completed["B"].Sequence, "final-answer A freezes before B")
+			}
 			if needsContinuation {
 				require.ErrorIs(t, runErr, context.Canceled)
 				require.True(t, completed["A"].Cancelled)

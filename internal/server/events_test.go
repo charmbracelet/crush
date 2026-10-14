@@ -128,6 +128,7 @@ func TestRunCompleteToProto_RoundTrip(t *testing.T) {
 		Payload: notify.RunComplete{
 			SessionID: "S",
 			RunID:     "run-42",
+			Sequence:  42,
 			MessageID: "M",
 			Text:      "VERDICT: APPROVED",
 			Error:     "",
@@ -146,6 +147,7 @@ func TestRunCompleteToProto_RoundTrip(t *testing.T) {
 	require.Equal(t, "run-42", decoded.Payload.RunID,
 		"RunID must survive the SSE envelope so clients can correlate "+
 			"this event with the SendMessage call that produced it")
+	require.Equal(t, src.Payload.Sequence, decoded.Payload.Sequence)
 	require.Equal(t, "M", decoded.Payload.MessageID)
 	require.Equal(t, "VERDICT: APPROVED", decoded.Payload.Text)
 	require.Empty(t, decoded.Payload.Error)

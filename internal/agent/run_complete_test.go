@@ -2,11 +2,13 @@ package agent
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/agent/notify"
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
@@ -16,6 +18,10 @@ import (
 type canceledPreparationSession struct {
 	session.Service
 }
+
+type preparationFlushMessages struct{ message.Service }
+
+func (preparationFlushMessages) FlushAll(context.Context) error { return nil }
 
 func newQueueTestAgent(t *testing.T) *sessionAgent {
 	t.Helper()
@@ -34,7 +40,7 @@ func TestPublishRunComplete_CanceledContextWithBackpressure(t *testing.T) {
 		broker := pubsub.NewBrokerWithOptions[notify.RunComplete](0)
 		defer broker.Shutdown()
 		events := broker.Subscribe(t.Context())
-		a := &sessionAgent{runComplete: broker}
+		a := &sessionAgent{runComplete: broker, completionSequence: new(atomic.Uint64)}
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 		done := make(chan struct{})
@@ -62,12 +68,12 @@ func TestPublishCanceledQueueDrops_SharedDeadline(t *testing.T) {
 		broker.SetMustDeliverTimeout(10 * time.Second)
 		defer broker.Shutdown()
 		broker.Subscribe(t.Context())
-		a := &sessionAgent{runComplete: broker}
+		a := &sessionAgent{runComplete: broker, completionSequence: new(atomic.Uint64)}
 		start := time.Now()
-		a.publishCanceledQueueDrops([]SessionAgentCall{
+		a.publishCanceledQueueDrops(a.freezeCanceledQueueDrops([]SessionAgentCall{
 			{SessionID: "session", RunID: "A"},
 			{SessionID: "session", RunID: "B"},
-		})
+		}))
 		require.Equal(t, 5*time.Second, time.Since(start), "queue clearing has one budget, not one per dropped prompt")
 	})
 }
@@ -83,7 +89,7 @@ func TestRun_OwnerlessPreparationCancellationPublishesWithBackpressure(t *testin
 		defer broker.Shutdown()
 		completions := broker.Subscribe(t.Context())
 		sa := NewSessionAgent(SessionAgentOptions{
-			Sessions: canceledPreparationSession{}, RunComplete: broker,
+			Sessions: canceledPreparationSession{}, Messages: preparationFlushMessages{}, RunComplete: broker,
 		})
 		// A promoted call inherits the outer dispatch's context marker.
 		// Publishing its completion must not mark that outer call complete.
@@ -477,11 +483,26 @@ func TestDrainQueueForStep_DroppedRunIDPublishesCancelledRunComplete(t *testing.
 
 	fold, canceledWithRunID := a.drainQueueForStep(t.Context(), sessionID)
 	require.Empty(t, fold)
-	require.Equal(t, []SessionAgentCall{dropped}, canceledWithRunID)
+	require.Len(t, canceledWithRunID, 1)
+	require.Equal(t, dropped.RunID, canceledWithRunID[0].RunID)
+	require.True(t, canceledWithRunID[0].Cancelled)
 	kept, ok := a.messageQueue.Get(sessionID)
 	require.True(t, ok)
 	require.Equal(t, []SessionAgentCall{survivor}, kept)
 	a.publishCanceledQueueDrops(canceledWithRunID)
 
 	requireSingleCancelledRunComplete(t, ch, sessionID, "run-dropped")
+}
+
+func TestRunCompleteReservationIsReusedByFinish(t *testing.T) {
+	t.Parallel()
+	a := &sessionAgent{completionSequence: new(atomic.Uint64)}
+	var published notify.RunComplete
+	call := SessionAgentCall{turn: &turnOutcome{}, OnComplete: func(rc notify.RunComplete) { published = rc }}
+	a.publishRunComplete(t.Context(), call, notify.RunComplete{})
+	a.finishTurn(call, nil, nil)
+	require.NotZero(t, published.Sequence)
+	require.Equal(t, published.Sequence, call.turn.completionSequence)
+	// A second reservation here would reveal an extra allocation by finish.
+	require.Equal(t, published.Sequence+1, a.completionSequence.Add(1))
 }

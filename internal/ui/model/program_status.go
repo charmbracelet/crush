@@ -52,6 +52,15 @@ func (m *UI) trackTurnOutcome(msg tea.Msg) {
 		if msg.Payload.SessionID != m.currentSessionID() {
 			return
 		}
+		// A coordinator buffers its initial turn while queued work completes.
+		// Keep the last logical outcome, not the last delivered event. Legacy
+		// servers have no sequence and retain delivery-order behavior.
+		if msg.Payload.Sequence != 0 {
+			if msg.Payload.Sequence <= m.lastCompletionSequence {
+				return
+			}
+			m.lastCompletionSequence = msg.Payload.Sequence
+		}
 		switch {
 		case msg.Payload.Cancelled:
 			m.turnOutcome = ""

@@ -90,6 +90,7 @@ func TestRunAgent_PreRunErrorPublishesTerminalRunComplete(t *testing.T) {
 	subCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	ch := ws.RunCompletions().Subscribe(subCtx)
+	previous := ws.NextCompletionSequence()
 
 	err := b.SendMessage(ws.ID, proto.AgentMessage{SessionID: "S1", RunID: "run-1", Prompt: "hi"})
 	require.NoError(t, err)
@@ -99,6 +100,7 @@ func TestRunAgent_PreRunErrorPublishesTerminalRunComplete(t *testing.T) {
 		require.Equal(t, "run-1", ev.Payload.RunID,
 			"the terminal RunComplete must carry the dispatched RunID")
 		require.Equal(t, "S1", ev.Payload.SessionID)
+		require.Equal(t, previous+1, ev.Payload.Sequence)
 		require.Equal(t, runErr.Error(), ev.Payload.Error,
 			"the fallback terminal event must be marked errored")
 		require.False(t, ev.Payload.Cancelled)
@@ -145,7 +147,7 @@ func TestRunAgent_CancellationPublishesNoErrorTerminal(t *testing.T) {
 	t.Parallel()
 	b, _ := newTestBackend(t)
 	ws := insertRunCompleteWorkspace(t, b, context.Background(),
-		&errorCoordinator{err: context.Canceled})
+		&errorCoordinator{err: context.Canceled, markPublished: true})
 
 	subCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -165,4 +167,26 @@ func TestRunAgent_CancellationPublishesNoErrorTerminal(t *testing.T) {
 
 func (*errorCoordinator) ListSettledMessages(context.Context, string) ([]message.Message, error) {
 	return nil, nil
+}
+
+func TestRunAgent_UnpublishedFailureCompletesEverySubmission(t *testing.T) {
+	t.Parallel()
+	for _, runID := range []string{"", "correlated"} {
+		for _, runErr := range []error{errors.New("pre-agent failure"), context.Canceled} {
+			t.Run(runID+"/"+runErr.Error(), func(t *testing.T) {
+				t.Parallel()
+				b, _ := newTestBackend(t)
+				ws := insertRunCompleteWorkspace(t, b, t.Context(), &errorCoordinator{err: runErr})
+				ch := ws.RunCompletions().Subscribe(t.Context())
+				require.NoError(t, b.SendMessage(ws.ID, proto.AgentMessage{SessionID: "S1", RunID: runID, Prompt: "hi"}))
+				ws.runWG.Wait()
+				require.Len(t, ch, 1)
+				rc := (<-ch).Payload
+				require.Equal(t, runID, rc.RunID)
+				require.Equal(t, "S1", rc.SessionID)
+				require.Equal(t, runErr.Error(), rc.Error)
+				require.Equal(t, errors.Is(runErr, context.Canceled), rc.Cancelled)
+			})
+		}
+	}
 }

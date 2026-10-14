@@ -76,6 +76,7 @@ type CurrentSession struct {
 // SessionID may arrive first, and filtering by SessionID alone
 // would terminate the caller before its own turn ran.
 type RunComplete struct {
+	Sequence  uint64 `json:"sequence,omitzero"`
 	SessionID string `json:"session_id"`
 	RunID     string `json:"run_id,omitempty"`
 	MessageID string `json:"message_id"`

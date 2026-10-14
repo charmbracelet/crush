@@ -80,6 +80,9 @@ type Notification struct {
 // terminal event even when the session is busy and other turns are
 // finishing on the same session.
 type RunComplete struct {
+	// Sequence orders logical completions within a workspace instance.
+	// Delivery order can differ when an initial caller drains queued turns.
+	Sequence  uint64
 	SessionID string
 	RunID     string
 	MessageID string

@@ -33,7 +33,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/charmbracelet/crush/internal/agent/notify"
-	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/workspace"
 )
 
@@ -83,8 +82,10 @@ type busyStateMsg struct {
 	forSession string
 	// sessionBusy reports whether forSession itself has a run in flight,
 	// unlike agentBusy, which any session or shell command sets.
-	sessionBusy bool
+	sessionBusy    bool
 	sessionBusyErr error
+	// IdleStops contains offscreen stop candidates positively probed idle.
+	idleStops []string
 	// model is the coordinator's selected model, fetched by the same probe
 	// so the sidebar/landing model info renders from memoized state. Zero
 	// (and ignored) when ready is false.
@@ -110,6 +111,8 @@ type agentRunSubmittedMsg struct {
 	sessionID string
 	gen       uint64
 	err       error
+	// Completed distinguishes a local execution error from admission failure.
+	completed bool
 }
 
 // summaryFinishedMsg releases the optimistic busy state even on failure.
@@ -130,9 +133,10 @@ type completionCheckedMsg struct {
 
 // sessionActivity retains only submissions and completion checks still pending.
 type sessionActivity struct {
-	pending    int
-	gen        uint64
-	completion *notify.Notification
+	pending     int
+	gen         uint64
+	completion  *notify.Notification
+	stopPending bool
 }
 
 func (m *UI) activityFor(sessionID string) *sessionActivity {
@@ -148,12 +152,12 @@ func (m *UI) activityFor(sessionID string) *sessionActivity {
 }
 
 func (m *UI) pruneActivity(sessionID string) {
-	if activity := m.sessionActivities[sessionID]; activity != nil && activity.pending == 0 && activity.completion == nil {
+	if activity := m.sessionActivities[sessionID]; activity != nil && activity.pending == 0 && activity.completion == nil && !activity.stopPending {
 		delete(m.sessionActivities, sessionID)
 	}
 }
 
-func (m *UI) submissionFinished(sessionID string, gen uint64, err error, summary bool) tea.Cmd {
+func (m *UI) submissionFinished(sessionID string, gen uint64, err error, terminal bool) tea.Cmd {
 	activity := m.activityFor(sessionID)
 	defer m.pruneActivity(sessionID)
 	if activity.pending > 0 {
@@ -168,8 +172,11 @@ func (m *UI) submissionFinished(sessionID string, gen uint64, err error, summary
 			m.turnOutcome = tea.ProgramStateError
 		}
 	}
-	if gen == m.submissionGen && (err != nil || summary) {
-		m.turnStopPending = true
+	if gen == activity.gen && (err != nil || terminal) {
+		activity.stopPending = true
+		if activity.completion == nil {
+			activity.completion = &notify.Notification{SessionID: sessionID}
+		}
 	}
 	m.invalidateBusyCaches()
 	m.invalidatePromptQueue()
@@ -187,6 +194,7 @@ func (m *UI) dispatchCompletionCheck(n *notify.Notification) tea.Cmd {
 		return completionCheckedMsg{busyGen: busyGen, busy: busy, err: err, notification: n}
 	}
 }
+
 // agentModelChangedMsg reports that the coordinator's model was updated
 // (model selection, thinking toggle, reasoning effort), so the memoized
 // ready/model state should be re-fetched without waiting for the TTL.
@@ -236,6 +244,15 @@ func (m *UI) dispatchBusyRefresh() tea.Cmd {
 	ws := m.com.Workspace
 	gen := m.busyFetchGen
 	sessionID := m.currentSessionID()
+	// Retry retained offscreen stop candidates on the existing refresh
+	// cadence, not immediately on errors. One refresh is in flight at a
+	// time; capture IDs here and apply results only on the Update goroutine.
+	var stopCandidates []string
+	for id, activity := range m.sessionActivities {
+		if id != sessionID && activity.stopPending && activity.pending == 0 && activity.completion == nil {
+			stopCandidates = append(stopCandidates, id)
+		}
+	}
 	return func() tea.Msg {
 		st := busyStateMsg{gen: gen, forSession: sessionID}
 		if ws.AgentIsReady() {
@@ -244,6 +261,11 @@ func (m *UI) dispatchBusyRefresh() tea.Cmd {
 			st.model = ws.AgentModel()
 			if sessionID != "" {
 				st.sessionBusy, st.sessionBusyErr = ws.AgentIsSessionBusy(sessionID)
+			}
+			for _, id := range stopCandidates {
+				if busy, err := ws.AgentIsSessionBusy(id); err == nil && !busy {
+					st.idleStops = append(st.idleStops, id)
+				}
 			}
 		}
 		st.yolo = ws.PermissionSkipRequests()
@@ -292,9 +314,15 @@ func (m *UI) applyBusyState(msg busyStateMsg) []tea.Cmd {
 
 	var cmds []tea.Cmd
 	busy := m.isAgentBusy()
-	if !busy && m.turnStopPending {
-		common.StopTurn(m.currentSessionID())
-		m.turnStopPending = false
+	if msg.ready && msg.sessionBusyErr == nil && !msg.sessionBusy {
+		msg.idleStops = append(msg.idleStops, msg.forSession)
+	}
+	for _, id := range msg.idleStops {
+		if activity := m.sessionActivities[id]; activity != nil && activity.stopPending && activity.pending == 0 {
+			m.endPendingTurn(id)
+			activity.stopPending = false
+			m.pruneActivity(id)
+		}
 	}
 	if busy {
 		// A session reload that raced an unpopulated busy cache (the
@@ -311,8 +339,10 @@ func (m *UI) applyBusyState(msg busyStateMsg) []tea.Cmd {
 	if m.todoIsSpinning && !busy {
 		m.todoIsSpinning = false
 	}
-	m.probedSession = msg.forSession
-	m.probedSessionBusy = msg.sessionBusy
+	if msg.ready && msg.sessionBusyErr == nil {
+		m.probedSession = msg.forSession
+		m.probedSessionBusy = msg.sessionBusy
+	}
 	if prevBusy != busy {
 		m.renderPills()
 	}

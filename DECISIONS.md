@@ -195,3 +195,10 @@ Nạp tự động vào mọi phiên Claude. Mục đích: không bàn lại cá
 - **Đã thử và bỏ:** đoán phần JSON thiếu rồi chạy tool: cấm (chạy nội dung suy đoán). Sau sửa: request gửi `{}` hợp lệ → provider không 400 → model nhận tool result lỗi "arguments were not valid JSON" → tạo tool call mới (hữu hạn qua trần max_tokens + loop detection sẵn có).
 - **Còn chưa xác minh:** nguồn JSON hỏng (A) và liệu có luôn do token limit; cần payload runtime đã che secret để chốt. Cổng này xử lý phần B (agent-cli không gửi rác đi) bất kể A.
 
+## 2026-10-15 — Không tự vá (jsonrepair) arguments của tool tác động
+**Trạng thái:** đã làm
+- **Chốt:** cấu hình `fantasy.WithRepairToolCall(repairToolCall)` cho agent chính. Tool tác động (write, edit, multiedit, bash, download, job_kill) có arguments JSON hỏng thì KHÔNG vá — trả nil để fantasy đánh Invalid, model nhận lỗi và gọi lại đúng. Tool chỉ-đọc vẫn được `jsonrepair` như mặc định (tiện khi thừa dấu phẩy), nhưng chỉ chạy nếu khớp schema (fantasy validate lại sau vá); JSON đã hợp lệ thì không đụng.
+- **Vì:** mặc định fantasy (không cấu hình RepairToolCall) tự `jsonrepair.RepairJSON`. Arguments bị cắt như `{"file_path":"a","content":"nửa chừng` vá được thành JSON hợp lệ nhưng nội dung CỤT → `write` ghi tệp thiếu nội dung mà không báo (mất dữ liệu âm thầm). Phát hiện khi đọc fantasy v0.45.1 `validateAndRepairToolCall` (agent.go:1176).
+- **Đã thử và bỏ:** tắt repair cho MỌI tool: làm tool đọc kém bền khi model lỡ sai JSON nhẹ; giữ repair cho tool đọc là đủ an toàn vì chúng không ghi/chạy.
+- **Lật lại khi:** cần một tool tác động cụ thể tự vá (khi đó thêm RepairToolCall riêng có kiểm nội dung, không chỉ vá cú pháp).
+

@@ -965,6 +965,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		fantasy.WithSystemPrompt(systemPrompt),
 		fantasy.WithTools(agentTools...),
 		fantasy.WithUserAgent(userAgent),
+		// Không để fantasy tự đoán (jsonrepair) arguments của tool tác động:
+		// repair một tool call bị cắt có thể ra JSON hợp lệ nhưng nội dung
+		// cụt, rồi ghi/sửa tệp với nội dung thiếu mà không báo.
+		fantasy.WithRepairToolCall(repairToolCall),
 	)
 
 	sessionLock := sync.Mutex{}

@@ -428,6 +428,14 @@ func (m *Message) FinishToolCall(toolCallID string) {
 // Google drops the call entirely and leaves the result dangling, which the
 // API then rejects. Normalizing here means no provider sees the difference.
 func toolCallInput(input string) string {
+	return NormalizeToolInput(input)
+}
+
+// NormalizeToolInput là quy tắc chung cho arguments của tool call trước khi
+// gửi provider: không phải JSON hợp lệ (bị cắt, ghép stream hỏng, rỗng) thì
+// thành "{}". Dùng ở cả đường đọc lại từ DB (ToAIMessage) lẫn đường messages
+// trong bộ nhớ của fantasy (PrepareStep), để không có bản thứ hai của quy tắc.
+func NormalizeToolInput(input string) string {
 	if !json.Valid([]byte(input)) {
 		return "{}"
 	}

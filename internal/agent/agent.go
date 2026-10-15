@@ -1769,7 +1769,7 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fan
 			return a.stepModel(largeModel).Model
 		},
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
-			prepared.Messages = options.Messages
+			prepared.Messages = sanitizeOutgoingToolCalls(options.Messages)
 			if systemPromptPrefix != "" {
 				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(systemPromptPrefix)}, prepared.Messages...)
 			}
@@ -2066,21 +2066,27 @@ func filterFileParts(parts []fantasy.MessagePart) []fantasy.MessagePart {
 }
 
 // sanitizeOutgoingToolCalls thay arguments của tool call không phải JSON hợp
-// lệ bằng "{}" trước khi gửi provider. Cùng chuẩn với toolCallInput (đường
-// đọc lại từ DB): providers strict từ chối request có arguments hỏng (HTTP
-// 400), làm lượt dừng giữa chừng. Chỉ dựng lại Content của message có chỗ
-// cần sửa, không đụng phần còn lại.
+// lệ bằng "{}" (qua message.NormalizeToolInput, cùng quy tắc với đường đọc
+// lại từ DB) trước khi gửi provider. Gọi ở MỌI PrepareStep (lượt chính,
+// tóm tắt, đặt tiêu đề) vì messages bước kế do fantasy dựng từ step result
+// trong bộ nhớ, giữ Input thô dù bản DB đã được chuẩn hoá. Providers strict
+// từ chối request có arguments hỏng (HTTP 400) làm lượt dừng giữa chừng.
+// Chỉ dựng lại Content của message có chỗ cần sửa, không đụng phần còn lại.
 func sanitizeOutgoingToolCalls(msgs []fantasy.Message) []fantasy.Message {
 	for i := range msgs {
 		for j, part := range msgs[i].Content {
 			tc, ok := fantasy.AsMessagePart[fantasy.ToolCallPart](part)
-			if !ok || json.Valid([]byte(tc.Input)) {
+			if !ok {
+				continue
+			}
+			normalized := message.NormalizeToolInput(tc.Input)
+			if normalized == tc.Input {
 				continue
 			}
 			slog.Warn("Replacing malformed tool call arguments before sending to the provider",
 				"tool", tc.ToolName, "id", tc.ToolCallID, "input_len", len(tc.Input))
 			fixed := slices.Clone(msgs[i].Content)
-			tc.Input = "{}"
+			tc.Input = normalized
 			fixed[j] = tc
 			msgs[i].Content = fixed
 		}
@@ -2169,7 +2175,7 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 		Prompt:  fmt.Sprintf("Generate a concise title for the following content:\n\n%s\n <think>\n\n</think>", userPrompt),
 		Headers: sessionHeaders(sessionID),
 		PrepareStep: func(callCtx context.Context, opts fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
-			prepared.Messages = opts.Messages
+			prepared.Messages = sanitizeOutgoingToolCalls(opts.Messages)
 			if systemPromptPrefix != "" {
 				prepared.Messages = append([]fantasy.Message{
 					fantasy.NewSystemMessage(systemPromptPrefix),

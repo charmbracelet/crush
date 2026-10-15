@@ -24,6 +24,22 @@ type Enricher interface {
 // load.go or any existing enricher.
 var enrichers = map[string]Enricher{}
 
+// genericEnricherInst is the fallback enricher applied to any provider
+// that doesn't have a provider-specific enricher registered. It reads
+// context_length and metadata from the /v1/models response.
+var genericEnricherInst Enricher
+
+// RegisterGenericEnricher sets the fallback enricher used for providers
+// without a registered provider-specific enricher.
+func RegisterGenericEnricher(e Enricher) {
+	genericEnricherInst = e
+}
+
+// GetGenericEnricher returns the fallback enricher, or nil if none is set.
+func GetGenericEnricher() Enricher {
+	return genericEnricherInst
+}
+
 // RegisterEnricher registers an Enricher for the given provider type.
 // Called from init() in each enricher implementation file.
 func RegisterEnricher(providerType string, e Enricher) {

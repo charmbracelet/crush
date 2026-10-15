@@ -135,6 +135,7 @@ func NewReplaceSymbolTool(
 				granted, err := permissions.Request(ctx, permission.CreatePermissionRequest{
 					SessionID:   sessionID,
 					Path:        params.FilePath,
+					ToolCallID:  call.ID,
 					ToolName:    ReplaceSymbolToolName,
 					Description: fmt.Sprintf("%s symbol '%s' in %s", action, params.Symbol, params.FilePath),
 					Params: ReplaceSymbolPermissionsParams{

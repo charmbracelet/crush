@@ -65,7 +65,10 @@ else
   provider_id=main
   base_url="$AGENT_CLI_BASE_URL"
   context_window="${AGENT_CLI_CONTEXT_WINDOW:-128000}"
-  max_tokens="${AGENT_CLI_MAX_TOKENS:-8192}"
+  # Ngân sách output mặc định: một phần tư context, tối đa 32000. 8192 cũ quá nhỏ cho
+  # model có suy luận (phần nghĩ cũng tính vào đây) khi viết tệp lớn: trả lời bị cắt.
+  quarter=$((context_window / 4))
+  max_tokens="${AGENT_CLI_MAX_TOKENS:-$((quarter < 32000 ? quarter : 32000))}"
 
   # API key rỗng được (model local).
   provider add main \

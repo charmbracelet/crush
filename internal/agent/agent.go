@@ -52,6 +52,13 @@ import (
 const (
 	DefaultSessionName = "Untitled Session"
 
+	// maxLengthContinues là số lần tối đa tự làm tiếp khi trả lời bị cắt vì
+	// hết ngân sách output, trong chuỗi của một prompt người dùng: model cứ
+	// viết quá dài thì dừng sau vài lần thay vì lặp mãi.
+	maxLengthContinues = 3
+	// lengthContinuePrompt là lời nhắc của lượt tự làm tiếp đó.
+	lengthContinuePrompt = "Your previous reply was cut off because it reached the output token limit. Continue exactly where you stopped. If you were writing a tool call or a large file, split the work into smaller steps (for example several smaller edits or writes) so each reply fits."
+
 	// Constants for auto-summarization thresholds
 	largeContextWindowThreshold = 200_000
 	largeContextWindowBuffer    = 20_000
@@ -149,9 +156,13 @@ type SessionAgentCall struct {
 	// chạy sau vẫn gửi việc của agent con tới đúng provider của lượt. Nil
 	// thì lấy bộ tool hiện tại lúc lượt bắt đầu.
 	pinnedTools []fantasy.AgentTool
-	// summaryContinuation: lượt tự xếp lại để làm tiếp sau bước tự tóm tắt
-	// (thành công hay hỏng), không phải prompt mới của người dùng.
-	summaryContinuation bool
+	// continuation: lượt tự xếp lại để làm tiếp (sau bước tự tóm tắt, hay
+	// sau khi trả lời bị cắt vì hết ngân sách output), không phải prompt mới
+	// của người dùng.
+	continuation bool
+	// lengthContinues đếm số lần đã tự làm tiếp vì hết ngân sách output trong
+	// chuỗi của một prompt người dùng (có trần maxLengthContinues).
+	lengthContinues int
 }
 
 // sameModel cho biết hai lựa chọn có cùng provider và model hay không.
@@ -839,7 +850,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	genCtx, cancel = context.WithCancel(runCtx)
 	ac := &activeCancel{cancel: cancel, runID: call.RunID}
 	a.activeRequests.Set(call.SessionID, ac)
-	if !call.summaryContinuation {
+	if !call.continuation {
 		// Prompt mới: tự tóm tắt được thử lại (provider có thể đã ổn).
 		a.summarizeFailed.Del(call.SessionID)
 	}
@@ -1496,9 +1507,28 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			} else {
 				call.Prompt = fmt.Sprintf("The previous session was interrupted because it got too long, the initial user request was: `%s`", call.Prompt)
 			}
-			call.summaryContinuation = true
+			call.continuation = true
 			existing = append(existing, call)
 			a.messageQueue.Set(call.SessionID, existing)
+		}
+	}
+
+	// Trả lời bị cắt vì hết ngân sách output (finish = max tokens): việc
+	// chưa xong, nên tự xếp lượt làm tiếp (có trần) thay vì dừng chờ người
+	// dùng gõ "tiếp tục". Tool call viết dở đã được closeUnfinishedToolCalls
+	// ghi kết quả bảo chia nhỏ; lời nhắc dưới đây nói điều tương tự.
+	lengthContinuing := false
+	if !shouldSummarize && currentAssistant != nil && call.lengthContinues < maxLengthContinues {
+		if f := currentAssistant.FinishPart(); f != nil && f.Reason == message.FinishReasonMaxTokens {
+			slog.Warn("Reply hit the output token limit; continuing the turn",
+				"session_id", call.SessionID, "attempt", call.lengthContinues+1)
+			next := call
+			next.lengthContinues++
+			next.continuation = true
+			next.Prompt = lengthContinuePrompt
+			existing, _ := a.messageQueue.Get(call.SessionID)
+			a.messageQueue.Set(call.SessionID, append(existing, next))
+			lengthContinuing = true
 		}
 	}
 
@@ -1508,7 +1538,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// replies when it actually finishes. Runs before the busy state is
 	// released so a follow-up push queued behind this turn cannot
 	// overtake its reply.
-	if currentAssistant != nil && (!shouldSummarize || len(currentAssistant.ToolCalls()) == 0) {
+	if currentAssistant != nil && !lengthContinuing && (!shouldSummarize || len(currentAssistant.ToolCalls()) == 0) {
 		a.sendChannelReply(ctx, call, currentAssistant.Content().String(), completedToolCalls)
 	}
 

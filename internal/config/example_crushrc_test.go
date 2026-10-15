@@ -122,6 +122,17 @@ func TestExampleCrushrc_MainProviderStillLoads(t *testing.T) {
 	large := store.Config().Models[SelectedModelTypeLarge]
 	require.Equal(t, "main", large.Provider)
 	require.Equal(t, "local-model", large.Model)
+	// Ngân sách output mặc định: min(32000, context/4) — 8192 cũ làm model có
+	// suy luận bị cắt giữa chừng khi viết tệp lớn.
+	require.EqualValues(t, 32000, large.MaxTokens)
+
+	small, err := loadExampleCrushrc(t, map[string]string{
+		"AGENT_CLI_BASE_URL":       "http://127.0.0.1:1/v1",
+		"AGENT_CLI_MODEL":          "local-model",
+		"AGENT_CLI_CONTEXT_WINDOW": "32768",
+	}, "")
+	require.NoError(t, err)
+	require.EqualValues(t, 8192, small.Config().Models[SelectedModelTypeLarge].MaxTokens, "a small context keeps room for the input")
 }
 
 // Đã `agent-cli login` thì để trống AGENT_CLI_API_KEY: provider vẫn lên, token

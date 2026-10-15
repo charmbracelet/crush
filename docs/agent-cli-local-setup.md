@@ -298,6 +298,9 @@ cũng ghi được và tên socket đoán được. `AGENT_CLI_RUNTIME_DIR` bạ
 
 - Log server: `~/.cache/agent-cli/server-<host>/crush.log` (`<host>` là địa chỉ socket
   đã thay ký tự lạ bằng `_`). Mỗi dự án một thư mục, không trộn log.
+- Trả lời bị cắt vì hết ngân sách output (`max_tokens`) thì lượt tự làm tiếp (tin "Your previous reply was
+  cut off..."), tối đa 3 lần cho mỗi prompt của bạn. Ngân sách mặc định của provider `main` là
+  min(32000, `AGENT_CLI_CONTEXT_WINDOW`/4); đặt `AGENT_CLI_MAX_TOKENS` để đổi.
 - Tự tóm tắt (khi context còn khoảng 20%) có hạn chờ gấp 3 `request-timeout` (mặc định 6 phút). Tóm
   tắt vẫn hỏng thì việc không dừng: lịch sử giữ nguyên, lượt làm tiếp chạy ngay (tin "Continue the task
   where you stopped..."), tự tóm tắt tạm tắt cho session tới prompt sau của bạn. Context đầy thật thì

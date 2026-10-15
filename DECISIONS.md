@@ -173,3 +173,10 @@ Nạp tự động vào mọi phiên Claude. Mục đích: không bàn lại cá
 - **Đã thử và bỏ:** thử lại ngay một lần: provider im vì đầu vào lớn thì thử lại cũng im, người dùng chờ gấp đôi; bản tóm tắt cục bộ (cắt lịch sử) khi hỏng: mất ngữ cảnh mà vẫn còn chỗ để làm tiếp.
 - **Lật lại khi:** có lỗi "context đầy" từ provider được bắt riêng (roadmap P1.5) để tóm tắt bằng model nhỏ/ngân sách nhỏ thay vì chờ provider báo lỗi.
 
+## 2026-10-15 — Trả lời bị cắt vì hết ngân sách output thì tự làm tiếp (có trần)
+**Trạng thái:** đã làm
+- **Chốt:** lượt kết thúc với finish `max_tokens` thì tự xếp lượt làm tiếp cùng RunID với lời nhắc "làm tiếp đúng chỗ dừng, chia nhỏ việc"; tối đa `maxLengthContinues` = 3 lần cho mỗi prompt người dùng. crushrc mẫu đặt ngân sách output mặc định của provider `main` = min(32000, context/4) thay cho 8192.
+- **Vì:** người dùng 15/10: phiên Qwen hết ngân sách output giữa việc rồi dừng; model có suy luận tiêu phần lớn ngân sách 8192 cho phần nghĩ.
+- **Đã thử và bỏ:** làm tiếp không giới hạn: model cứ viết quá dài sẽ lặp mãi.
+- **Lật lại khi:** provider cho biết trước trần output thật của model (khi đó đặt ngân sách theo model thay vì theo context).
+

@@ -26,6 +26,36 @@ func (q *Queries) GetAverageResponseTime(ctx context.Context) (int64, error) {
 	return avg_response_seconds, err
 }
 
+const getCompressedParts = `-- name: GetCompressedParts :many
+SELECT
+    parts
+FROM messages
+WHERE substr(parts, 1, 4) = X'28B52FFD'
+`
+
+func (q *Queries) GetCompressedParts(ctx context.Context) ([][]byte, error) {
+	rows, err := q.query(ctx, q.getCompressedPartsStmt, getCompressedParts)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := [][]byte{}
+	for rows.Next() {
+		var parts []byte
+		if err := rows.Scan(&parts); err != nil {
+			return nil, err
+		}
+		items = append(items, parts)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getHourDayHeatmap = `-- name: GetHourDayHeatmap :many
 SELECT
     CAST(strftime('%w', created_at, 'unixepoch') AS INTEGER) as day_of_week,
@@ -121,6 +151,7 @@ SELECT
 FROM messages, json_each(parts)
 WHERE json_extract(value, '$.type') = 'tool_call'
   AND json_extract(value, '$.data.name') IS NOT NULL
+  AND substr(parts, 1, 4) <> X'28B52FFD'
 GROUP BY tool_name
 ORDER BY call_count DESC
 `
@@ -130,6 +161,12 @@ type GetToolUsageRow struct {
 	CallCount int64       `json:"call_count"`
 }
 
+// Aggregates legacy plain-JSON rows. Compressed rows (zstd, see
+// internal/message/parts_codec.go) cannot be parsed by json_each and
+// are handled by GetCompressedParts in Go. The substr magic-number
+// filter discriminates the two: stored JSON starts with '[' (TEXT),
+// zstd frames start with 0x28B52FFD (BLOB); a TEXT value never
+// compares equal to the BLOB constant in SQLite.
 func (q *Queries) GetToolUsage(ctx context.Context) ([]GetToolUsageRow, error) {
 	rows, err := q.query(ctx, q.getToolUsageStmt, getToolUsage)
 	if err != nil {

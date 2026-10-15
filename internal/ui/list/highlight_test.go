@@ -87,9 +87,10 @@ func TestHighlightContentMarkdownList(t *testing.T) {
 	result := HighlightContent(content, uv.Rect(0, 0, width, lipgloss.Height(content)), 0, 0, -1, -1)
 
 	// The wrapped item must join with its continuation, and the next item
-	// must start on its own line.
+	// must start on its own line. The rendered "• " bullet is restored to
+	// its raw "- " marker.
 	require.Contains(t, result, "(space, wrap continuation)\n", "wrapped continuation must join with a space, got:\n%s", result)
-	require.Contains(t, result, "continuation)\n• Otherwise", "next list item must start on its own line, got:\n%s", result)
+	require.Contains(t, result, "continuation)\n- Otherwise", "next list item must start on its own line with the raw bullet, got:\n%s", result)
 }
 
 // TestHighlightContentRestoresCodespanBackticks guards the copy side of the

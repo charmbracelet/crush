@@ -3,6 +3,8 @@ package login
 import (
 	"context"
 	"errors"
+	"os"
+	"sync"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -10,6 +12,40 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 )
+
+// openedURLs ghi lại mọi URL mà code yêu cầu mở trình duyệt trong lúc test.
+// Có khoá vì openURL không bị ràng buộc phải được gọi từ goroutine của test.
+var (
+	openedMu   sync.Mutex
+	openedURLs []string
+)
+
+// recordOpenURL thay cho browser.OpenURL trong test: chỉ ghi lại URL rồi báo
+// thành công, không chạy xdg-open nên không mở trình duyệt thật.
+func recordOpenURL(url string) error {
+	openedMu.Lock()
+	defer openedMu.Unlock()
+	openedURLs = append(openedURLs, url)
+	return nil
+}
+
+// takeOpenedURLs trả về các URL đã ghi lại rồi xoá danh sách, để mỗi test chỉ
+// thấy những lần mở do chính nó gây ra.
+func takeOpenedURLs() []string {
+	openedMu.Lock()
+	defer openedMu.Unlock()
+	urls := openedURLs
+	openedURLs = nil
+	return urls
+}
+
+// TestMain thay openURL bằng hàm giả cho cả package. Nhiều test đẩy
+// authReadyMsg qua Update và Update gọi openURL; để nguyên bản thật thì mỗi
+// lần chạy test sẽ mở nhiều tab trình duyệt trên máy người dùng.
+func TestMain(m *testing.M) {
+	openURL = recordOpenURL
+	os.Exit(m.Run())
+}
 
 // fakeCodeEntryFlow is a browser flow stub whose CompleteWithCode accepts
 // exactly one good code; every other input fails.
@@ -78,6 +114,20 @@ func TestAuthTUIPasteFieldHiddenForDeviceFlows(t *testing.T) {
 	require.False(t, m.codeEntry, "a user code to copy out means no paste field")
 	require.False(t, m.keymap.Submit.Enabled())
 	require.NotContains(t, m.content(), "Enter the code")
+}
+
+// TestAuthTUIReadyOpensBrowser giữ hành vi cũ: nhận authReadyMsg thì mở đúng
+// URL xác thực, đúng một lần, và chưa coi trình duyệt là hỏng khi mở được. Hàm
+// mở là bản giả từ TestMain nên test này không mở trình duyệt thật.
+func TestAuthTUIReadyOpensBrowser(t *testing.T) {
+	const authURL = "https://auth.example/authorize"
+	takeOpenedURLs() // bỏ các lần mở do test khác để lại
+
+	m := newAuthModel(PlatformGrok, func() flow { return fakeCodeEntryFlow{} })
+	m = step(t, m, authReadyMsg{flow: fakeCodeEntryFlow{}, url: authURL})
+
+	require.Equal(t, []string{authURL}, takeOpenedURLs(), "authReadyMsg must open the auth URL exactly once")
+	require.False(t, m.browserFailed, "a successful open must not flag the browser as failed")
 }
 
 func TestAuthTUITypeAndPasteIntoField(t *testing.T) {

@@ -20,6 +20,12 @@ import (
 	"github.com/charmbracelet/crush/internal/oauth"
 )
 
+// openURL mở URL trong trình duyệt mặc định (trên Linux là chạy xdg-open).
+// Đây là biến cấp package thay vì gọi thẳng browser.OpenURL để test thay nó
+// bằng hàm giả (xem TestMain): nếu không, mỗi lần `go test` đẩy authReadyMsg
+// qua Update sẽ mở tab trình duyệt THẬT trên máy của người chạy test.
+var openURL = browser.OpenURL
+
 // authState represents the state of the OAuth TUI flow.
 type authState int
 
@@ -183,7 +189,7 @@ func (m authModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.verificationURL = msg.url
 		m.userCode = msg.userCode
 		if !m.browserFailed {
-			m.browserFailed = browser.OpenURL(msg.url) != nil
+			m.browserFailed = openURL(msg.url) != nil
 		}
 		m.state = authStateWaiting
 		m.updateAuthKeymap()

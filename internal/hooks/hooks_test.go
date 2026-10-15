@@ -2,6 +2,7 @@ package hooks
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"strings"
 	"sync"
@@ -220,6 +221,20 @@ func TestBuildPayload(t *testing.T) {
 	require.Contains(t, s, `"tool_name":"bash"`)
 	// tool_input should be an object, not a string.
 	require.Contains(t, s, `"tool_input":{"command":"ls"}`)
+}
+
+// A Claude Code hook is one command that receives every event and tells them
+// apart by hook_event_name, so a payload without that key sends a shared hook
+// down its default branch and it does nothing. Nothing errors and nothing is
+// logged, which is the worst shape for a hook whose job is refusing a call.
+func TestBuildPayloadCarriesClaudeCodeEventKey(t *testing.T) {
+	t.Parallel()
+	payload := BuildPayload(EventPreToolUse, "sess-1", "/work", "bash", `{"command":"ls"}`)
+
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal(payload, &decoded))
+	require.Equal(t, EventPreToolUse, decoded["hook_event_name"])
+	require.Equal(t, EventPreToolUse, decoded["event"])
 }
 
 func TestRunnerExitCode0Allow(t *testing.T) {

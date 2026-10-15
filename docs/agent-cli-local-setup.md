@@ -38,11 +38,10 @@ Provider và model được cấu hình bằng biến dùng chung `AGENT_CLI_*` 
 
 Giá trị có ký tự đặc biệt (`<`, khoảng trắng) phải đặt trong dấu nháy kép.
 
-Thiếu `AGENT_CLI_BASE_URL` hoặc `AGENT_CLI_MODEL` thì nạp cấu hình thất bại. Thông báo có tên
-biến thiếu chỉ hiện ở chế độ trực tiếp: chạy `CRUSH_CLIENT_SERVER=0 agent-cli models`. Ở chế độ
-mặc định (client/server), TUI/`run` chỉ báo `Failed to initialize crush server: ... dial unix
-... no such file or directory`, và log của server (`~/.cache/agent-cli/server-*/stderr.log`)
-chỉ ghi `crushrc: exit status 1`, không có tên biến. Gặp lỗi kiểu này thì chạy lệnh trực tiếp ở trên.
+Thiếu biến bắt buộc thì nạp cấu hình thất bại, và thông báo lỗi nêu đúng biến thiếu ở cả hai
+chế độ: chế độ client/server (mặc định) nối phần cuối `stderr.log` của server vào câu
+`Failed to initialize crush server: ...`, ví dụ `... exit status 1: AGENT_CLI_BASE_URL: đặt
+AGENT_CLI_BASE_URL trong ...`.
 
 Dạng `AGENT_CLI_BASE_URL` theo loại provider:
 
@@ -431,7 +430,10 @@ theo `CRUSH_GLOBAL_CONFIG` nếu có). Dạng `{"<action>": ["phím", ...]}`; m�
 - `chat.up_down` và `chat.up_down_one_item` chỉ để hiện gợi ý ở thanh help (`agent-cli keys` ghi "display only"); gán phím cho chúng không có tác dụng. Đổi `chat.down`/`chat.up` thay thế.
 - Bảng lệnh (command palette) vẫn hiện gợi ý phím mặc định sau khi đổi, vì chuỗi này viết cứng trong `dialog/commands.go`; phím thật vẫn là phím bạn đã đổi.
 - File chỉ đọc lúc khởi động; sửa xong phải mở lại TUI.
-- Phím chính (thanh footer ở chat): `Alt+W` workspace (`workspaces`, thoát về Home để chọn workspace/session khác, xem mục Home) · `Alt+S` sessions · `Alt+N` session mới (`chat.new_session`) · `Alt+M` model (`models`); `Ctrl+P` vẫn là Commands. Phím cũ `Ctrl+S` / `Ctrl+N` / `Ctrl+L` vẫn dùng được.
+- Phím chính (thanh footer ở chat): `Alt+W` workspace (`workspaces`, thoát về Home để chọn workspace/session khác, xem mục Home) · `Alt+S` sessions · `Alt+N` session mới (`chat.new_session`) · `Alt+.` / `Alt+,` sang session kế / trước, vòng theo thứ tự panel Sessions (`chat.next_session`, `chat.prev_session`) · `Alt+P` provider (`providers`) · `Alt+M` model **của provider đang dùng** (`models`) · `Alt+E` mức effort của model (`effort`, chỉ khi model có các mức); `Ctrl+P` vẫn là Commands (lệnh "Switch Model" ở đó vẫn là danh sách đầy đủ). Phím cũ `Ctrl+S` / `Ctrl+N` / `Ctrl+L` vẫn dùng được.
+- `Alt+Tab` không dùng được trong TUI: trình quản lý cửa sổ (Cinnamon, GNOME, KDE...) giữ nó để đổi cửa sổ, terminal không bao giờ nhận. Vì vậy chuyển session là `Alt+.` / `Alt+,`.
+- Danh sách provider ở `Alt+P` lấy theo `option visible-provider` trong crushrc (đúng thứ tự), không khai thì là các provider đã cấu hình. Mỗi dòng ghi trạng thái: `current`, `ready`, `agent-cli login openai` (ChatGPT chưa đăng nhập), `needs API key`. Trong bảng model, `Alt+P` quay lại bảng provider.
+- Hộp thoại xin quyền mặc định chọn **Deny**: Enter lỡ tay là từ chối; cho phép thì bấm `a` (hoặc chọn Allow bằng ←/→ rồi Enter); Allow for Session là `Shift+S`. Chữ thường `h`/`l`/`s` và Tab không đổi lựa chọn, nên chữ đang gõ dở rơi vào hộp thoại không thành cho phép (riêng `a` vẫn là Allow). Hộp thoại "khởi tạo dự án" mặc định **Nope**; muốn khởi tạo thì bấm `y` hoặc dùng `Ctrl+P` → Initialize Project.
 - `chat.jump_session` **không có phím mặc định** (chọn session theo tên, không theo số), nên panel Sessions không
   đánh số dòng. Muốn dùng thì gán trong `keybindings.json` như ví dụ trên; mô tả dưới đây áp khi đã gán.
 - `chat.jump_session` (ví dụ gán `alt+1`..`alt+9`) nhảy thẳng tới session đánh số 1..9 trong panel Sessions (đúng thứ tự panel đang hiện), không đụng chữ đang gõ ở editor; số vượt quá danh sách hoặc trúng session đang xem thì không làm gì, session ghim ngoài top 9 không có số. Phím thứ i trong mảng ứng với session thứ i: đổi phím thì liệt kê theo thứ tự (ví dụ trên chỉ nhảy được tới session 1-3, nên panel chỉ đánh số 1-3, các dòng khác hiện `·`).

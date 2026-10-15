@@ -35,7 +35,8 @@ Tên tệp và biến môi trường bên trong (`crush.json`, `CRUSH_*`, `.crus
 
 - Tên và giao diện: wordmark AGENT-CLI, banner thoát, thông báo, trợ giúp lệnh.
 - Không kiểm tra bản mới của upstream (`CRUSH_DISABLE_UPDATE_CHECK`).
-- Nhiều session/dự án trong một TUI (Home, Alt+W/S/N/M), draft riêng từng session, run tiếp tục khi đóng TUI; `run --json`, `send --wait`, `ps`, `logs` cho script.
+- Nhiều session/dự án trong một TUI (Home, Alt+W/S/N, Alt+. / Alt+, chuyển session), draft riêng từng session, run tiếp tục khi đóng TUI; `run --json`, `send --wait`, `ps`, `logs` cho script.
+- Đổi provider (Alt+P), model của provider đang dùng (Alt+M), mức effort (Alt+E). Hộp thoại quyền mặc định Deny.
 - Tool `claude_code`, `codex`: giao việc cho Claude Code / Codex đã đăng nhập trên máy, mỗi lần giao đều hỏi quyền trừ khi bạn chủ động cho qua (`run`, `--yolo`, "Allow for Session"; xem [docs](docs/agent-cli-local-setup.md#giao-việc-cho-claude-code--codex-tool-claude_code-codex)).
 - Chưa đổi: tên module Go, system prompt (còn tự xưng "Crush"), skill và công cụ nội bộ `crush-config`, `crush_info`.
 

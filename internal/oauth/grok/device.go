@@ -97,8 +97,8 @@ func PollForToken(ctx context.Context, deviceCode string, expiresIn int) (*oauth
 			return token, nil
 		}
 
-		var exchangeErr *oauth.TokenExchangeError
-		if !errors.As(err, &exchangeErr) {
+		exchangeErr, ok := errors.AsType[*oauth.TokenExchangeError](err)
+		if !ok {
 			return nil, err
 		}
 		switch oauthErrorCode(exchangeErr.Body) {

@@ -909,8 +909,7 @@ func pingSession(ctx context.Context, s *ClientSession, timeout time.Duration) e
 	defer cancel()
 	err := s.Ping(pingCtx, nil)
 	// MethodNotFound means the server answered; it just doesn't implement ping.
-	var wireErr *jsonrpc.Error
-	if errors.As(err, &wireErr) && wireErr.Code == jsonrpc.CodeMethodNotFound {
+	if wireErr, ok := errors.AsType[*jsonrpc.Error](err); ok && wireErr.Code == jsonrpc.CodeMethodNotFound {
 		return nil
 	}
 	return err
@@ -1436,8 +1435,7 @@ func isOAuthInitErr(err error) bool {
 	if errors.Is(err, mcpoauth.ErrInteractiveAuthRequired) {
 		return true
 	}
-	var rErr *oauth2.RetrieveError
-	if errors.As(err, &rErr) {
+	if rErr, ok := errors.AsType[*oauth2.RetrieveError](err); ok {
 		return rErr.ErrorCode == "invalid_grant" || rErr.ErrorCode == "invalid_client"
 	}
 	msg := err.Error()

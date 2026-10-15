@@ -1033,6 +1033,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		PresencePenalty:  call.PresencePenalty,
 		TopK:             call.TopK,
 		FrequencyPenalty: call.FrequencyPenalty,
+		// Stream của fantasy bỏ qua WithRepairToolCall cấp agent (truyền opts gốc
+		// vào processStepStream), nên phải gắn hook ở từng lượt.
+		RepairToolCall: repairToolCall,
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 			prepared.Messages = options.Messages
 			// Cổng cuối trước khi gửi provider: một tool call mà model trả

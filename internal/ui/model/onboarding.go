@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -55,7 +56,7 @@ func (m *UI) initializeProject() tea.Cmd {
 		cmds = append(cmds, cmd)
 	}
 	initialize := func() tea.Msg {
-		initPrompt, err := m.com.Workspace.InitializePrompt()
+		initPrompt, err := m.com.Workspace.InitializePrompt(context.Background())
 		if err != nil {
 			return util.InfoMsg{
 				Type: util.InfoTypeError,

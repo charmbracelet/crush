@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -28,7 +29,7 @@ func TestShellConfigDotCrushrcTakesPrecedence(t *testing.T) {
 		[]byte("option notifications osc\n"), 0o644,
 	))
 
-	store, err := config.Load(workDir, dataDir, false)
+	store, err := config.Load(context.Background(), workDir, dataDir, false)
 	require.NoError(t, err)
 	require.Equal(t, "osc", store.Config().Options.Notifications,
 		".crushrc should win over crushrc")

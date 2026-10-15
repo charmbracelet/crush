@@ -33,7 +33,7 @@ func TestReloadFromDisk_PicksUpEditedCrushrc(t *testing.T) {
 	rcPath := filepath.Join(workDir, "crushrc")
 	require.NoError(t, os.WriteFile(rcPath, []byte("option notifications bell\n"), 0o644))
 
-	store, err := config.Load(workDir, dataDir, false)
+	store, err := config.Load(context.Background(), workDir, dataDir, false)
 	require.NoError(t, err)
 	require.Equal(t, "bell", store.Config().Options.Notifications)
 
@@ -52,7 +52,7 @@ func TestReloadFromDisk_FailingCrushrcKeepsOldConfig(t *testing.T) {
 	rcPath := filepath.Join(workDir, "crushrc")
 	require.NoError(t, os.WriteFile(rcPath, []byte("option notifications bell\n"), 0o644))
 
-	store, err := config.Load(workDir, dataDir, false)
+	store, err := config.Load(context.Background(), workDir, dataDir, false)
 	require.NoError(t, err)
 	require.Equal(t, "bell", store.Config().Options.Notifications)
 
@@ -76,7 +76,7 @@ func TestReloadFromDisk_HangingCrushrcIsInterruptible(t *testing.T) {
 	rcPath := filepath.Join(workDir, "crushrc")
 	require.NoError(t, os.WriteFile(rcPath, []byte("option notifications bell\n"), 0o644))
 
-	store, err := config.Load(workDir, dataDir, false)
+	store, err := config.Load(context.Background(), workDir, dataDir, false)
 	require.NoError(t, err)
 	require.Equal(t, "bell", store.Config().Options.Notifications)
 
@@ -124,7 +124,7 @@ func TestLoad_TracksNotYetCreatedGlobalCrushrc(t *testing.T) {
 	))
 
 	// Load with no global crushrc present.
-	store, err := config.Load(workDir, dataDir, false)
+	store, err := config.Load(context.Background(), workDir, dataDir, false)
 	require.NoError(t, err)
 	require.False(t, store.ConfigStaleness().Dirty, "fresh load should be clean")
 

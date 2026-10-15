@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/app"
@@ -72,8 +73,8 @@ func deliverFixture(t *testing.T) (*controllerV1, *backend.Workspace, string, st
 	require.NoError(t, c.backend.AttachClient(ws.ID, cidA))
 	require.NoError(t, c.backend.AttachClient(ws.ID, cidB))
 	t.Cleanup(func() {
-		c.backend.DetachClient(ws.ID, cidA)
-		c.backend.DetachClient(ws.ID, cidB)
+		c.backend.DetachClient(context.Background(), ws.ID, cidA)
+		c.backend.DetachClient(context.Background(), ws.ID, cidB)
 	})
 	require.NoError(t, c.backend.SetCurrentSession(t.Context(), ws.ID, cidA, "S1"))
 	require.NoError(t, c.backend.SetCurrentSession(t.Context(), ws.ID, cidB, "S2"))
@@ -124,7 +125,7 @@ func TestDeliverToClient(t *testing.T) {
 		ws := installSyntheticWorkspace(t, c)
 		cid := uuid.New().String()
 		require.NoError(t, c.backend.AttachClient(ws.ID, cid))
-		t.Cleanup(func() { c.backend.DetachClient(ws.ID, cid) })
+		t.Cleanup(func() { c.backend.DetachClient(context.Background(), ws.ID, cid) })
 		// Intentionally no SetCurrentSession: clients that predate
 		// session reporting must still receive their prompts.
 		for _, ev := range []any{permReq, permNotif, qReq, qNotif} {

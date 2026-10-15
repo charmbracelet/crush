@@ -39,7 +39,7 @@ func TestReloadFromDisk_CompilesHookMatchers(t *testing.T) {
     }`
 	require.NoError(t, os.WriteFile(configPath, []byte(cfgJSON), 0o600))
 
-	store, err := config.Load(workDir, dataDir, false)
+	store, err := config.Load(context.Background(), workDir, dataDir, false)
 	require.NoError(t, err)
 
 	// Sanity: hook filtering works immediately after Load.
@@ -92,11 +92,11 @@ func TestSetConfigField_AutoReload_PreservesHookMatcherFiltering(t *testing.T) {
     }`
 	require.NoError(t, os.WriteFile(configPath, []byte(cfgJSON), 0o600))
 
-	store, err := config.Load(workDir, dataDir, false)
+	store, err := config.Load(context.Background(), workDir, dataDir, false)
 	require.NoError(t, err)
 	assertHookFilters(t, store)
 
-	require.NoError(t, store.SetConfigField(config.ScopeGlobal, "options.debug", true))
+	require.NoError(t, store.SetConfigField(context.Background(), config.ScopeGlobal, "options.debug", true))
 
 	assertHookFilters(t, store)
 }

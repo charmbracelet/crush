@@ -507,7 +507,7 @@ func TestMaybeStdioErr_UnwrapsChannelTransport(t *testing.T) {
 	inner := &mcp.CommandTransport{Command: cmd}
 	wrapped := &channelTransport{inner: inner, name: "t", gate: newChannelGate()}
 
-	got := maybeStdioErr(io.EOF, wrapped)
+	got := maybeStdioErr(t.Context(), io.EOF, wrapped)
 	require.Error(t, got)
 	require.NotEqual(t, io.EOF, got, "the unwrap must reach the command transport")
 	require.ErrorContains(t, got, "startup failed: bad config",
@@ -523,7 +523,7 @@ func TestMaybeStdioErr_UnwrapsEveryWrapper(t *testing.T) {
 	transport = &channelTransport{inner: transport, name: "t", gate: newChannelGate()}
 	transport = &testTransportWrapper{inner: transport}
 
-	got := maybeStdioErr(io.EOF, transport)
+	got := maybeStdioErr(t.Context(), io.EOF, transport)
 	require.ErrorContains(t, got, "boom-diagnostic",
 		"stdio diagnostics must survive every transport decorator")
 }
@@ -537,7 +537,7 @@ func TestStdioCheck_DoesNotDuplicateArgv0(t *testing.T) {
 	withLongStdioCheckTimeout(t)
 	cmd := exec.CommandContext(t.Context(), "sh", "-c", "echo 'real startup error'; exit 3")
 
-	err := stdioCheck(cmd)
+	err := stdioCheck(t.Context(), cmd)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "real startup error",
 		"the re-run must execute the original command, not a duplicated argv0")

@@ -77,7 +77,7 @@ func TestLookupConfigs_BoundedByProject(t *testing.T) {
 		project := filepath.Join(parent, "project")
 		require.NoError(t, os.Mkdir(project, 0o755))
 
-		got := lookupConfigs(project)
+		got := lookupConfigs(context.Background(), project)
 		for _, p := range got {
 			require.NotEqual(t, filepath.Join(parent, "crush.json"), p)
 		}
@@ -102,7 +102,7 @@ func TestLookupConfigs_BoundedByProject(t *testing.T) {
 		gitInit.Dir = worktree
 		require.NoError(t, gitInit.Run())
 
-		got := lookupConfigs(worktree)
+		got := lookupConfigs(context.Background(), worktree)
 		strayEval, err := filepath.EvalSymlinks(filepath.Join(parent, "crush.json"))
 		require.NoError(t, err)
 		for _, p := range got {
@@ -119,7 +119,7 @@ func TestLookupConfigs_BoundedByProject(t *testing.T) {
 		local := filepath.Join(project, "crush.json")
 		require.NoError(t, os.WriteFile(local, []byte(`{}`), 0o644))
 
-		got := lookupConfigs(project)
+		got := lookupConfigs(context.Background(), project)
 
 		localEval, err := filepath.EvalSymlinks(local)
 		require.NoError(t, err)
@@ -140,7 +140,7 @@ func TestLookupConfigs_BoundedByProject(t *testing.T) {
 	t.Run("global config is always included regardless of boundary", func(t *testing.T) {
 		project := t.TempDir()
 
-		got := lookupConfigs(project)
+		got := lookupConfigs(context.Background(), project)
 		// Global config and global data path are always prepended,
 		// even when no project file exists.
 		require.Contains(t, got, GlobalConfig())
@@ -150,7 +150,7 @@ func TestLookupConfigs_BoundedByProject(t *testing.T) {
 	t.Run("global shell config (crushrc) is included", func(t *testing.T) {
 		project := t.TempDir()
 
-		got := lookupConfigs(project)
+		got := lookupConfigs(context.Background(), project)
 		// A global crushrc is discovered only beside the user config. The data
 		// directory is machine-owned state and must never execute a crushrc.
 		require.Contains(t, got, shellConfigSibling(GlobalConfig()))
@@ -162,7 +162,7 @@ func TestLookupConfigs_BoundedByProject(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(project, "crushrc"), []byte(""), 0o644))
 		require.NoError(t, os.WriteFile(filepath.Join(project, ".crushrc"), []byte(""), 0o644))
 
-		got := lookupConfigs(project)
+		got := lookupConfigs(context.Background(), project)
 		require.Contains(t, got, filepath.Join(project, "crushrc"))
 		require.Contains(t, got, filepath.Join(project, ".crushrc"))
 	})
@@ -172,7 +172,7 @@ func TestLookupConfigs_BoundedByProject(t *testing.T) {
 			t.Skip("system config not supported on Windows")
 		}
 
-		got := lookupConfigs(t.TempDir())
+		got := lookupConfigs(context.Background(), t.TempDir())
 		require.NotEmpty(t, got)
 		// The system-wide config must be first so it has the lowest
 		// priority when configs are merged.
@@ -265,7 +265,7 @@ func TestConfig_setDefaults(t *testing.T) {
 		cfg := &Config{}
 		workingDir := t.TempDir()
 
-		cfg.setDefaults(workingDir, "")
+		cfg.setDefaults(context.Background(), workingDir, "")
 
 		require.NotNil(t, cfg.Options)
 		require.NotNil(t, cfg.Options.TUI)
@@ -290,7 +290,7 @@ func TestConfig_setDefaults(t *testing.T) {
 		cfg := &Config{}
 		workingDir := t.TempDir()
 
-		cfg.setDefaults(workingDir, "")
+		cfg.setDefaults(context.Background(), workingDir, "")
 
 		require.Empty(t, cfg.Options.TUI.DiffMode)
 		require.Equal(t, ScrollbarDefault, cfg.Options.TUI.Scrollbar)
@@ -299,7 +299,7 @@ func TestConfig_setDefaults(t *testing.T) {
 		cfg.Options.TUI.DiffMode = DiffModeSplit
 		cfg.Options.TUI.Scrollbar = ScrollbarNever
 		cfg.Options.TUI.ExitBanner = ExitBannerCompact
-		cfg.setDefaults(workingDir, "")
+		cfg.setDefaults(context.Background(), workingDir, "")
 
 		require.Equal(t, DiffModeSplit, cfg.Options.TUI.DiffMode)
 		require.Equal(t, ScrollbarNever, cfg.Options.TUI.Scrollbar)
@@ -316,7 +316,7 @@ func TestConfig_setDefaults(t *testing.T) {
 			},
 		}
 
-		cfg.setDefaults(t.TempDir(), "")
+		cfg.setDefaults(context.Background(), t.TempDir(), "")
 
 		require.NotContains(t, cfg.MCP, "orphan", "orphaned token entry should be pruned")
 		require.Contains(t, cfg.MCP, "real-http")
@@ -328,7 +328,7 @@ func TestConfig_setDefaults(t *testing.T) {
 		cfg := &Config{Options: &Options{DataDirectory: "."}}
 		workingDir := filepath.Join(t.TempDir(), "worktree")
 
-		cfg.setDefaults(workingDir, "")
+		cfg.setDefaults(context.Background(), workingDir, "")
 
 		require.Equal(t, workingDir, cfg.Options.DataDirectory)
 	})
@@ -337,7 +337,7 @@ func TestConfig_setDefaults(t *testing.T) {
 		cfg := &Config{}
 		workingDir := filepath.Join(t.TempDir(), "worktree")
 
-		cfg.setDefaults(workingDir, "./state")
+		cfg.setDefaults(context.Background(), workingDir, "./state")
 
 		require.Equal(t, filepath.Join(workingDir, "state"), cfg.Options.DataDirectory)
 	})
@@ -348,7 +348,7 @@ func TestConfig_setDefaults(t *testing.T) {
 		absDir := filepath.Join(t.TempDir(), "data")
 		cfg := &Config{Options: &Options{DataDirectory: absDir}}
 
-		cfg.setDefaults(filepath.Join(t.TempDir(), "worktree"), "")
+		cfg.setDefaults(context.Background(), filepath.Join(t.TempDir(), "worktree"), "")
 
 		require.Equal(t, absDir, cfg.Options.DataDirectory)
 	})
@@ -359,12 +359,12 @@ func TestConfig_setDefaults(t *testing.T) {
 		// from an earlier merge as a relative string.
 		workingDir := filepath.Join(t.TempDir(), "worktree")
 		cfg := &Config{}
-		cfg.setDefaults(workingDir, "")
+		cfg.setDefaults(context.Background(), workingDir, "")
 
 		// Workspace JSON sets data_directory to a relative value; the
 		// merge replaces the struct, then setDefaults runs again.
 		cfg.Options.DataDirectory = "./state"
-		cfg.setDefaults(workingDir, "")
+		cfg.setDefaults(context.Background(), workingDir, "")
 
 		require.True(t, filepath.IsAbs(cfg.Options.DataDirectory),
 			"data directory must remain absolute after re-merge, got %q",
@@ -383,7 +383,7 @@ func TestConfig_setDefaults(t *testing.T) {
 		require.NoError(t, os.Mkdir(child, 0o755))
 
 		cfg := &Config{}
-		cfg.setDefaults(child, "")
+		cfg.setDefaults(context.Background(), child, "")
 
 		require.Equal(
 			t,
@@ -416,7 +416,7 @@ func TestConfig_setDefaults(t *testing.T) {
 		require.NoError(t, gitInit.Run())
 
 		cfg := &Config{}
-		cfg.setDefaults(sub, "")
+		cfg.setDefaults(context.Background(), sub, "")
 
 		// Resolve symlinks because TempDir on macOS sits under /var
 		// which is a symlink to /private/var. The data directory has
@@ -449,7 +449,7 @@ func TestConfig_configureProviders(t *testing.T) {
 	}
 
 	cfg := &Config{}
-	cfg.setDefaults("/tmp", "")
+	cfg.setDefaults(context.Background(), "/tmp", "")
 	env := env.NewFromMap(map[string]string{
 		"OPENAI_API_KEY": "test-key",
 	})
@@ -491,7 +491,7 @@ func TestConfig_configureProvidersWithOverride(t *testing.T) {
 			},
 		},
 	})
-	cfg.setDefaults("/tmp", "")
+	cfg.setDefaults(context.Background(), "/tmp", "")
 
 	env := env.NewFromMap(map[string]string{
 		"OPENAI_API_KEY": "test-key",
@@ -534,7 +534,7 @@ func TestConfig_configureProvidersWithNewProvider(t *testing.T) {
 			},
 		}),
 	}
-	cfg.setDefaults("/tmp", "")
+	cfg.setDefaults(context.Background(), "/tmp", "")
 	env := env.NewFromMap(map[string]string{
 		"OPENAI_API_KEY": "test-key",
 	})
@@ -569,7 +569,7 @@ func TestConfig_configureProvidersBedrockWithCredentials(t *testing.T) {
 	}
 
 	cfg := &Config{}
-	cfg.setDefaults("/tmp", "")
+	cfg.setDefaults(context.Background(), "/tmp", "")
 	env := env.NewFromMap(map[string]string{
 		"AWS_ACCESS_KEY_ID":     "test-key-id",
 		"AWS_SECRET_ACCESS_KEY": "test-secret-key",
@@ -598,7 +598,7 @@ func TestConfig_configureProvidersBedrockWithoutCredentials(t *testing.T) {
 	}
 
 	cfg := &Config{}
-	cfg.setDefaults("/tmp", "")
+	cfg.setDefaults(context.Background(), "/tmp", "")
 	env := env.NewFromMap(map[string]string{})
 	resolver := NewShellVariableResolver(env)
 	err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, knownProviders)
@@ -620,7 +620,7 @@ func TestConfig_configureProvidersVertexAIWithCredentials(t *testing.T) {
 	}
 
 	cfg := &Config{}
-	cfg.setDefaults("/tmp", "")
+	cfg.setDefaults(context.Background(), "/tmp", "")
 	env := env.NewFromMap(map[string]string{
 		"VERTEXAI_PROJECT":  "test-project",
 		"VERTEXAI_LOCATION": "us-central1",
@@ -651,7 +651,7 @@ func TestConfig_configureProvidersVertexAIWithoutCredentials(t *testing.T) {
 	}
 
 	cfg := &Config{}
-	cfg.setDefaults("/tmp", "")
+	cfg.setDefaults(context.Background(), "/tmp", "")
 	env := env.NewFromMap(map[string]string{
 		"GOOGLE_GENAI_USE_VERTEXAI": "false",
 		"GOOGLE_CLOUD_PROJECT":      "test-project",
@@ -677,7 +677,7 @@ func TestConfig_configureProvidersVertexAIMissingProject(t *testing.T) {
 	}
 
 	cfg := &Config{}
-	cfg.setDefaults("/tmp", "")
+	cfg.setDefaults(context.Background(), "/tmp", "")
 	env := env.NewFromMap(map[string]string{
 		"GOOGLE_GENAI_USE_VERTEXAI": "true",
 		"GOOGLE_CLOUD_LOCATION":     "us-central1",
@@ -702,7 +702,7 @@ func TestConfig_configureProvidersSetProviderID(t *testing.T) {
 	}
 
 	cfg := &Config{}
-	cfg.setDefaults("/tmp", "")
+	cfg.setDefaults(context.Background(), "/tmp", "")
 	env := env.NewFromMap(map[string]string{
 		"OPENAI_API_KEY": "test-key",
 	})
@@ -908,7 +908,7 @@ func TestConfig_configureProvidersWithDisabledProvider(t *testing.T) {
 			},
 		}),
 	}
-	cfg.setDefaults("/tmp", "")
+	cfg.setDefaults(context.Background(), "/tmp", "")
 
 	env := env.NewFromMap(map[string]string{
 		"OPENAI_API_KEY": "test-key",
@@ -938,7 +938,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 				},
 			}),
 		}
-		cfg.setDefaults("/tmp", "")
+		cfg.setDefaults(context.Background(), "/tmp", "")
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
@@ -961,7 +961,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 				},
 			}),
 		}
-		cfg.setDefaults("/tmp", "")
+		cfg.setDefaults(context.Background(), "/tmp", "")
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
@@ -985,7 +985,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 				},
 			}),
 		}
-		cfg.setDefaults("/tmp", "")
+		cfg.setDefaults(context.Background(), "/tmp", "")
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
@@ -1009,7 +1009,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 				},
 			}),
 		}
-		cfg.setDefaults("/tmp", "")
+		cfg.setDefaults(context.Background(), "/tmp", "")
 
 		env := env.NewFromMap(map[string]string{
 			"CUSTOM_API_URL": "https://api.custom.com/v1",
@@ -1035,7 +1035,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 				},
 			}),
 		}
-		cfg.setDefaults("/tmp", "")
+		cfg.setDefaults(context.Background(), "/tmp", "")
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
@@ -1059,7 +1059,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 				},
 			}),
 		}
-		cfg.setDefaults("/tmp", "")
+		cfg.setDefaults(context.Background(), "/tmp", "")
 		cfg.Options.DisableDefaultProviders = true
 
 		env := env.NewFromMap(map[string]string{})
@@ -1078,7 +1078,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 				},
 			}),
 		}
-		cfg.setDefaults("/tmp", "")
+		cfg.setDefaults(context.Background(), "/tmp", "")
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
@@ -1103,7 +1103,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 				},
 			}),
 		}
-		cfg.setDefaults("/tmp", "")
+		cfg.setDefaults(context.Background(), "/tmp", "")
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
@@ -1138,7 +1138,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 				},
 			}),
 		}
-		cfg.setDefaults("/tmp", "")
+		cfg.setDefaults(context.Background(), "/tmp", "")
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
@@ -1171,7 +1171,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 				},
 			}),
 		}
-		cfg.setDefaults("/tmp", "")
+		cfg.setDefaults(context.Background(), "/tmp", "")
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
@@ -1203,7 +1203,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 				},
 			}),
 		}
-		cfg.setDefaults("/tmp", "")
+		cfg.setDefaults(context.Background(), "/tmp", "")
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
@@ -1231,7 +1231,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 				},
 			}),
 		}
-		cfg.setDefaults("/tmp", "")
+		cfg.setDefaults(context.Background(), "/tmp", "")
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
@@ -1256,7 +1256,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 				},
 			}),
 		}
-		cfg.setDefaults("/tmp", "")
+		cfg.setDefaults(context.Background(), "/tmp", "")
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
@@ -1284,7 +1284,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 				},
 			}),
 		}
-		cfg.setDefaults("/tmp", "")
+		cfg.setDefaults(context.Background(), "/tmp", "")
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
@@ -1314,7 +1314,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 				},
 			}),
 		}
-		cfg.setDefaults("/tmp", "")
+		cfg.setDefaults(context.Background(), "/tmp", "")
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
@@ -1347,7 +1347,7 @@ func TestConfig_configureProvidersEnhancedCredentialValidation(t *testing.T) {
 				},
 			}),
 		}
-		cfg.setDefaults("/tmp", "")
+		cfg.setDefaults(context.Background(), "/tmp", "")
 
 		env := env.NewFromMap(map[string]string{
 			"GOOGLE_GENAI_USE_VERTEXAI": "false",
@@ -1380,7 +1380,7 @@ func TestConfig_configureProvidersEnhancedCredentialValidation(t *testing.T) {
 				},
 			}),
 		}
-		cfg.setDefaults("/tmp", "")
+		cfg.setDefaults(context.Background(), "/tmp", "")
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
@@ -1411,7 +1411,7 @@ func TestConfig_configureProvidersEnhancedCredentialValidation(t *testing.T) {
 				},
 			}),
 		}
-		cfg.setDefaults("/tmp", "")
+		cfg.setDefaults(context.Background(), "/tmp", "")
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
@@ -1442,7 +1442,7 @@ func TestConfig_configureProvidersEnhancedCredentialValidation(t *testing.T) {
 				},
 			}),
 		}
-		cfg.setDefaults("/tmp", "")
+		cfg.setDefaults(context.Background(), "/tmp", "")
 
 		env := env.NewFromMap(map[string]string{
 			"OPENAI_API_KEY": "test-key",
@@ -1479,7 +1479,7 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 		}
 
 		cfg := &Config{}
-		cfg.setDefaults("/tmp", "")
+		cfg.setDefaults(context.Background(), "/tmp", "")
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
 		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, knownProviders)
@@ -1515,7 +1515,7 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 		}
 
 		cfg := &Config{}
-		cfg.setDefaults("/tmp", "")
+		cfg.setDefaults(context.Background(), "/tmp", "")
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
 		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, knownProviders)
@@ -1545,7 +1545,7 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 		}
 
 		cfg := &Config{}
-		cfg.setDefaults("/tmp", "")
+		cfg.setDefaults(context.Background(), "/tmp", "")
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
 		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, knownProviders)
@@ -1588,7 +1588,7 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 				},
 			}),
 		}
-		cfg.setDefaults("/tmp", "")
+		cfg.setDefaults(context.Background(), "/tmp", "")
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
 		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, knownProviders)
@@ -1632,7 +1632,7 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 				},
 			}),
 		}
-		cfg.setDefaults("/tmp", "")
+		cfg.setDefaults(context.Background(), "/tmp", "")
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
 		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, knownProviders)
@@ -1674,7 +1674,7 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 				},
 			}),
 		}
-		cfg.setDefaults("/tmp", "")
+		cfg.setDefaults(context.Background(), "/tmp", "")
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
 		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, knownProviders)
@@ -1716,7 +1716,7 @@ func TestConfig_configureProvidersDisableDefaultProviders(t *testing.T) {
 				},
 			}),
 		}
-		cfg.setDefaults("/tmp", "")
+		cfg.setDefaults(context.Background(), "/tmp", "")
 
 		env := env.NewFromMap(map[string]string{
 			"OPENAI_API_KEY": "test-key",
@@ -1758,7 +1758,7 @@ func TestConfig_configureProvidersDisableDefaultProviders(t *testing.T) {
 				},
 			}),
 		}
-		cfg.setDefaults("/tmp", "")
+		cfg.setDefaults(context.Background(), "/tmp", "")
 
 		env := env.NewFromMap(map[string]string{
 			"MY_API_KEY":     "test-key",
@@ -1812,7 +1812,7 @@ func TestConfig_configureProvidersDisableDefaultProviders(t *testing.T) {
 				},
 			}),
 		}
-		cfg.setDefaults("/tmp", "")
+		cfg.setDefaults(context.Background(), "/tmp", "")
 
 		env := env.NewFromMap(map[string]string{
 			"OPENAI_API_KEY":    "test-key",
@@ -1843,7 +1843,7 @@ func TestConfig_configureProvidersDisableDefaultProviders(t *testing.T) {
 				},
 			}),
 		}
-		cfg.setDefaults("/tmp", "")
+		cfg.setDefaults(context.Background(), "/tmp", "")
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
@@ -1867,7 +1867,7 @@ func TestConfig_configureProvidersDisableDefaultProviders(t *testing.T) {
 				},
 			}),
 		}
-		cfg.setDefaults("/tmp", "")
+		cfg.setDefaults(context.Background(), "/tmp", "")
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
@@ -1884,7 +1884,7 @@ func TestConfig_setDefaultsDisableDefaultProvidersEnvVar(t *testing.T) {
 		t.Setenv("CRUSH_DISABLE_DEFAULT_PROVIDERS", "true")
 
 		cfg := &Config{}
-		cfg.setDefaults("/tmp", "")
+		cfg.setDefaults(context.Background(), "/tmp", "")
 
 		require.True(t, cfg.Options.DisableDefaultProviders)
 	})
@@ -1895,7 +1895,7 @@ func TestConfig_setDefaultsDisableDefaultProvidersEnvVar(t *testing.T) {
 				DisableDefaultProviders: true,
 			},
 		}
-		cfg.setDefaults("/tmp", "")
+		cfg.setDefaults(context.Background(), "/tmp", "")
 
 		require.True(t, cfg.Options.DisableDefaultProviders)
 	})
@@ -1925,7 +1925,7 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 				SelectedModelTypeLarge: {Provider: "ghost", Model: "missing"},
 			},
 		}
-		cfg.setDefaults(dir, "")
+		cfg.setDefaults(context.Background(), dir, "")
 		store := &ConfigStore{config: cfg, globalDataPath: globalPath}
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
@@ -1979,7 +1979,7 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 				},
 			},
 		}
-		cfg.setDefaults("/tmp", "")
+		cfg.setDefaults(context.Background(), "/tmp", "")
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
 		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, knownProviders)
@@ -2043,7 +2043,7 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 				},
 			},
 		}
-		cfg.setDefaults("/tmp", "")
+		cfg.setDefaults(context.Background(), "/tmp", "")
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
 		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, knownProviders)
@@ -2090,7 +2090,7 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 				},
 			},
 		}
-		cfg.setDefaults("/tmp", "")
+		cfg.setDefaults(context.Background(), "/tmp", "")
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
 		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, knownProviders)
@@ -2129,7 +2129,7 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 				SelectedModelTypeSmall: {Provider: "openai", Model: "also-does-not-exist"},
 			},
 		}
-		cfg.setDefaults(dir, "")
+		cfg.setDefaults(context.Background(), dir, "")
 		store := &ConfigStore{config: cfg, globalDataPath: globalPath}
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
@@ -2153,7 +2153,7 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 			store.writeMu.Lock()
 			defer store.writeMu.Unlock()
 			if resolved.LargeFallback {
-				if err := store.updateLocked(ScopeGlobal, func(c *Config) map[string]any {
+				if err := store.updateLocked(context.Background(), ScopeGlobal, func(c *Config) map[string]any {
 					return store.updatePreferredModelFields(c, SelectedModelTypeLarge, resolved.Large)
 				}); err != nil {
 					done <- err
@@ -2161,7 +2161,7 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 				}
 			}
 			if resolved.SmallFallback {
-				if err := store.updateLocked(ScopeGlobal, func(c *Config) map[string]any {
+				if err := store.updateLocked(context.Background(), ScopeGlobal, func(c *Config) map[string]any {
 					return store.updatePreferredModelFields(c, SelectedModelTypeSmall, resolved.Small)
 				}); err != nil {
 					done <- err
@@ -2205,7 +2205,7 @@ func TestConfig_configureProviders_HyperAPIKeyFromEnv(t *testing.T) {
 	}
 
 	cfg := &Config{}
-	cfg.setDefaults("/tmp", "")
+	cfg.setDefaults(context.Background(), "/tmp", "")
 	env := env.NewFromMap(map[string]string{
 		"HYPER_API_KEY": "env-api-key",
 	})
@@ -2250,7 +2250,7 @@ func TestConfig_configureProviders_HyperAPIKeyFromConfigOverrides(t *testing.T) 
 			},
 		}),
 	}
-	cfg.setDefaults("/tmp", "")
+	cfg.setDefaults(context.Background(), "/tmp", "")
 
 	// But they also have HYPER_API_KEY set - env var should take precedence
 	env := env.NewFromMap(map[string]string{
@@ -2292,7 +2292,7 @@ func TestConfig_configureProviders_ProviderHeaderResolveError(t *testing.T) {
 			},
 		}),
 	}
-	cfg.setDefaults("/tmp", "")
+	cfg.setDefaults(context.Background(), "/tmp", "")
 
 	testEnv := env.NewFromMap(map[string]string{
 		"OPENAI_API_KEY": "test-key",
@@ -2324,7 +2324,7 @@ func TestConfig_configureProviders_CatwalkDefaultWithUnsetVarLoads(t *testing.T)
 	}
 
 	cfg := &Config{}
-	cfg.setDefaults("/tmp", "")
+	cfg.setDefaults(context.Background(), "/tmp", "")
 
 	testEnv := env.NewFromMap(map[string]string{
 		"OPENAI_API_KEY": "test-key",
@@ -2361,7 +2361,7 @@ func TestConfig_configureProviders_LiteralEmptyHeaderDropped(t *testing.T) {
 			},
 		}),
 	}
-	cfg.setDefaults("/tmp", "")
+	cfg.setDefaults(context.Background(), "/tmp", "")
 
 	testEnv := env.NewFromMap(map[string]string{
 		"PATH": os.Getenv("PATH"),
@@ -2397,7 +2397,7 @@ func TestConfig_configureProviders_EchoEmptyHeaderDropped(t *testing.T) {
 	}
 
 	cfg := &Config{}
-	cfg.setDefaults("/tmp", "")
+	cfg.setDefaults(context.Background(), "/tmp", "")
 
 	testEnv := env.NewFromMap(map[string]string{
 		"OPENAI_API_KEY": "test-key",
@@ -2446,7 +2446,7 @@ func TestConfig_configureProviders_UnsetAPIKeySkipsProvider(t *testing.T) {
 			"openai": {BaseURL: "custom-url"},
 		}),
 	}
-	cfg.setDefaults("/tmp", "")
+	cfg.setDefaults(context.Background(), "/tmp", "")
 
 	testEnv := env.NewFromMap(map[string]string{
 		"PATH": os.Getenv("PATH"),
@@ -2484,7 +2484,7 @@ func TestConfig_configureProviders_FailingAPIKeyCmdSkipsProvider(t *testing.T) {
 			"openai": {BaseURL: "custom-url"},
 		}),
 	}
-	cfg.setDefaults("/tmp", "")
+	cfg.setDefaults(context.Background(), "/tmp", "")
 
 	testEnv := env.NewFromMap(map[string]string{
 		"PATH": os.Getenv("PATH"),
@@ -2521,7 +2521,7 @@ func TestConfig_configureProviders_UnsetAzureEndpointSkipsProvider(t *testing.T)
 			"azure": {BaseURL: ""},
 		}),
 	}
-	cfg.setDefaults("/tmp", "")
+	cfg.setDefaults(context.Background(), "/tmp", "")
 
 	testEnv := env.NewFromMap(map[string]string{
 		"PATH": os.Getenv("PATH"),

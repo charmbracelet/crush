@@ -820,8 +820,10 @@ func (m *Chat) SetSelected(index int) {
 
 // SelectPrev selects the previous message in the chat list.
 func (m *Chat) SelectPrev() {
+	start := m.list.Selected()
 	for {
 		if !m.list.SelectPrev() {
+			m.list.SetSelected(start)
 			return
 		}
 		if m.isSelectable(m.list.Selected()) {
@@ -832,8 +834,10 @@ func (m *Chat) SelectPrev() {
 
 // SelectNext selects the next message in the chat list.
 func (m *Chat) SelectNext() {
+	start := m.list.Selected()
 	for {
 		if !m.list.SelectNext() {
+			m.list.SetSelected(start)
 			return
 		}
 		if m.isSelectable(m.list.Selected()) {

@@ -3,6 +3,7 @@ package shell
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"sync"
@@ -17,7 +18,17 @@ const (
 	MaxBackgroundJobs = 50
 	// CompletedJobRetentionMinutes is how long to keep completed jobs before auto-cleanup (8 hours)
 	CompletedJobRetentionMinutes = 8 * 60
+	// killGrace bounds how long Kill waits for a cancelled shell to finish.
+	// The exec handler escalates from SIGINT to SIGKILL after
+	// defaultKillTimeout, so the grace has to outlast that to give a
+	// well-behaved job time to exit on its own.
+	killGrace = defaultKillTimeout + 3*time.Second
 )
+
+// ErrKillEscaped reports that a killed job left a process behind. It means
+// the process detached itself into its own session, so the process-group
+// kill could not reach it.
+var ErrKillEscaped = errors.New("a process outlived the kill and is still running")
 
 // syncBuffer is a thread-safe wrapper around bytes.Buffer.
 type syncBuffer struct {
@@ -143,16 +154,30 @@ func (m *BackgroundShellManager) Remove(id string) error {
 	return nil
 }
 
-// Kill terminates a background shell by ID.
-func (m *BackgroundShellManager) Kill(id string) error {
+// Kill terminates a background shell by ID. It returns once the shell has
+// finished or once killGrace has elapsed, whichever comes first: a process
+// that put itself in a new session survives the process-group kill and
+// keeps the shell's output pipe open, which would otherwise leave this
+// blocked for as long as that process runs.
+func (m *BackgroundShellManager) Kill(ctx context.Context, id string) error {
 	shell, ok := m.shells.Take(id)
 	if !ok {
 		return fmt.Errorf("background shell not found: %s", id)
 	}
 
 	shell.cancel()
-	<-shell.done
-	return nil
+
+	timer := time.NewTimer(killGrace)
+	defer timer.Stop()
+
+	select {
+	case <-shell.done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return fmt.Errorf("background shell %s: %w", id, ErrKillEscaped)
+	}
 }
 
 // BackgroundShellInfo contains information about a background shell.

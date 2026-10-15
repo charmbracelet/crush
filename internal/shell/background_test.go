@@ -71,7 +71,7 @@ func TestBackgroundShellManager_Get(t *testing.T) {
 	}
 
 	// Clean up
-	manager.Kill(bgShell.ID)
+	manager.Kill(context.Background(), bgShell.ID)
 }
 
 func TestBackgroundShellManager_Kill(t *testing.T) {
@@ -88,7 +88,7 @@ func TestBackgroundShellManager_Kill(t *testing.T) {
 	}
 
 	// Kill it
-	err = manager.Kill(bgShell.ID)
+	err = manager.Kill(context.Background(), bgShell.ID)
 	if err != nil {
 		t.Errorf("failed to kill background shell: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestBackgroundShellManager_KillNonExistent(t *testing.T) {
 
 	manager := newBackgroundShellManager()
 
-	err := manager.Kill("non-existent-id")
+	err := manager.Kill(context.Background(), "non-existent-id")
 	if err == nil {
 		t.Error("expected error when killing non-existent shell")
 	}
@@ -132,7 +132,7 @@ func TestBackgroundShell_IsDone(t *testing.T) {
 	require.Eventually(t, bgShell.IsDone, 5*time.Second, 50*time.Millisecond, "expected shell to be done")
 
 	// Clean up
-	manager.Kill(bgShell.ID)
+	manager.Kill(context.Background(), bgShell.ID)
 }
 
 func TestBackgroundShell_WithBlockFuncs(t *testing.T) {
@@ -166,7 +166,7 @@ func TestBackgroundShell_WithBlockFuncs(t *testing.T) {
 	}
 
 	// Clean up
-	manager.Kill(bgShell.ID)
+	manager.Kill(context.Background(), bgShell.ID)
 }
 
 func TestBackgroundShellManager_List(t *testing.T) {
@@ -213,8 +213,8 @@ func TestBackgroundShellManager_List(t *testing.T) {
 	}
 
 	// Clean up
-	manager.Kill(bgShell1.ID)
-	manager.Kill(bgShell2.ID)
+	manager.Kill(context.Background(), bgShell1.ID)
+	manager.Kill(context.Background(), bgShell2.ID)
 }
 
 func TestBackgroundShellManager_KillAll(t *testing.T) {
@@ -327,4 +327,61 @@ func TestBackgroundShell_WaitContext_Canceled(t *testing.T) {
 	cancel()
 
 	require.False(t, bgShell.WaitContext(ctx))
+}
+
+func TestBackgroundShellManager_KillReturnsWhenShellNeverFinishes(t *testing.T) {
+	t.Parallel()
+
+	// A shell whose goroutine never finishes, which is what a process that
+	// escaped into its own session leaves behind: it holds the output pipe
+	// open, so ExecStream never returns.
+	_, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	stuck := &BackgroundShell{ID: "STUCK", done: make(chan struct{}), cancel: cancel}
+
+	manager := newBackgroundShellManager()
+	manager.shells.Set(stuck.ID, stuck)
+
+	errc := make(chan error, 1)
+	go func() { errc <- manager.Kill(t.Context(), stuck.ID) }()
+
+	select {
+	case err := <-errc:
+		require.ErrorIs(t, err, ErrKillEscaped)
+	case <-time.After(killGrace + 10*time.Second):
+		t.Fatal("Kill never returned for a shell that does not finish")
+	}
+
+	_, tracked := manager.Get(stuck.ID)
+	require.False(t, tracked, "a killed shell must not stay tracked")
+}
+
+func TestBackgroundShellManager_KillReportsNoErrorOnCleanExit(t *testing.T) {
+	t.Parallel()
+
+	manager := newBackgroundShellManager()
+	bgShell, err := manager.Start(t.Context(), t.TempDir(), nil, "sleep 30", "sleeper")
+	require.NoError(t, err)
+
+	start := time.Now()
+	require.NoError(t, manager.Kill(t.Context(), bgShell.ID))
+	require.Less(t, time.Since(start), killGrace, "a job that exits must not wait out the grace")
+}
+
+func TestBackgroundShellManager_KillStopsWaitingOnCanceledContext(t *testing.T) {
+	t.Parallel()
+
+	_, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	stuck := &BackgroundShell{ID: "STUCK", done: make(chan struct{}), cancel: cancel}
+
+	manager := newBackgroundShellManager()
+	manager.shells.Set(stuck.ID, stuck)
+
+	ctx, cancelCaller := context.WithCancel(t.Context())
+	cancelCaller()
+
+	start := time.Now()
+	require.ErrorIs(t, manager.Kill(ctx, stuck.ID), context.Canceled)
+	require.Less(t, time.Since(start), killGrace, "a canceled caller must not wait out the grace")
 }

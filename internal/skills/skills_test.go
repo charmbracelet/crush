@@ -400,6 +400,100 @@ func TestParseContent_NoFrontmatter(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestParseContent_NestedMetadata ensures a skill whose metadata field
+// contains nested maps, sequences, and non-string scalars is still parsed.
+// The reference Agent Skills parser (skills-ref) coerces such values to
+// strings instead of dropping the whole skill. See issue #3331.
+func TestParseContent_NestedMetadata(t *testing.T) {
+	t.Parallel()
+
+	// Modeled on samber/cc-skills-golang/golang-testing/SKILL.md.
+	content := []byte(`---
+name: golang-testing
+description: "Production-ready Golang tests."
+user-invocable: true
+license: MIT
+metadata:
+  author: samber
+  version: "1.2.3"
+  port: 8080
+  enabled: true
+  ratio: 0.5
+  openclaw:
+    emoji: "🧪"
+    homepage: https://github.com/samber/cc-skills-golang
+  aliases:
+    - go-test
+    - gotest
+---
+
+# Golang Testing
+`)
+
+	skill, err := ParseContent(content)
+	require.NoError(t, err)
+	require.Equal(t, "golang-testing", skill.Name)
+
+	require.Equal(t, "samber", skill.Metadata["author"])
+	require.Equal(t, "1.2.3", skill.Metadata["version"])
+
+	// Non-string scalars keep their literal text.
+	require.Equal(t, "8080", skill.Metadata["port"])
+	require.Equal(t, "true", skill.Metadata["enabled"])
+	require.Equal(t, "0.5", skill.Metadata["ratio"])
+
+	// Nested maps and sequences are stringified rather than dropping the skill.
+	require.NotEmpty(t, skill.Metadata["openclaw"])
+	require.Contains(t, skill.Metadata["openclaw"], "emoji")
+	require.Contains(t, skill.Metadata["openclaw"], "homepage")
+	require.Contains(t, skill.Metadata["openclaw"], "https://github.com/samber/cc-skills-golang")
+	require.NotEmpty(t, skill.Metadata["aliases"])
+	require.Contains(t, skill.Metadata["aliases"], "go-test")
+	require.Contains(t, skill.Metadata["aliases"], "gotest")
+}
+
+// TestDiscoverNestedMetadata ensures a skill with nested metadata is
+// discovered and reported as normal rather than silently dropped. See
+// issue #3331.
+func TestDiscoverNestedMetadata(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	skillDir := filepath.Join(dir, "nested-meta")
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(`---
+name: nested-meta
+description: Skill with nested metadata.
+metadata:
+  author: someone
+  openclaw:
+    emoji: "🧪"
+    homepage: https://example.com
+---
+
+# Nested Meta
+`), 0o644))
+
+	skills, states := DiscoverWithStates([]string{dir})
+
+	require.Len(t, skills, 1)
+	require.Equal(t, "nested-meta", skills[0].Name)
+	require.NotEmpty(t, skills[0].Metadata["openclaw"])
+	require.Contains(t, skills[0].Metadata["openclaw"], "emoji")
+
+	var normal, errored int
+	for _, state := range states {
+		if state.State == StateNormal {
+			normal++
+		}
+		if state.State == StateError {
+			errored++
+		}
+	}
+	require.Equal(t, 1, normal)
+	require.Zero(t, errored)
+}
+
 func TestDiscoverBuiltin(t *testing.T) {
 	t.Parallel()
 

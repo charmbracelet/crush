@@ -110,6 +110,10 @@ func drive(m *Model, cmd tea.Cmd) (quit bool) {
 func newTestModel(src *fakeSource) *Model {
 	sty := styles.CharmtonePantera()
 	m := New(src, &sty, "/home/u/here")
+	// drive chạy mọi Cmd tới khi hết; chuỗi dò định kỳ không bao giờ hết (và
+	// tea.Tick thì ngủ thật), nên các test dùng drive tắt nó. Việc dò định kỳ
+	// có test riêng (home_probe_test.go) đi từng bước.
+	m.probeEvery = 0
 	m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	drive(m, m.Init())
 	return m

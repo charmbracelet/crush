@@ -2,7 +2,7 @@ package logout
 
 import (
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/exp/charmtone"
+	"github.com/charmbracelet/crush/internal/ui/styles"
 )
 
 // buttonPadding is the horizontal padding inside a button.
@@ -13,15 +13,15 @@ var (
 			Bold(true)
 
 	buttonFocusedStyle = lipgloss.NewStyle().
-				Foreground(charmtone.Sash).
-				Background(charmtone.Blush)
+				Foreground(styles.ColorBgBase).
+				Background(styles.ColorAccent)
 	buttonBlurredStyle = lipgloss.NewStyle().
-				Foreground(charmtone.Soda).
-				Background(charmtone.BBQ)
+				Foreground(styles.ColorFgMuted).
+				Background(styles.ColorOverlay)
 
 	choiceSelectedStyle = lipgloss.NewStyle().
 				Bold(true).
-				Foreground(charmtone.Blush)
+				Foreground(styles.ColorAccent)
 )
 
 // renderButton renders a selectable button with an underlined accelerator

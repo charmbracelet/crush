@@ -192,7 +192,7 @@ func TestBackgroundPromptLeavesPickerOpen(t *testing.T) {
 	t.Parallel()
 
 	m, _ := newPromptUI(t)
-	m.handleKeyPressMsg(altS)
+	pressAndLoad(m, altS)
 	require.True(t, m.dialog.ContainsDialog(dialog.SessionsID))
 
 	m.Update(permEvent("s2", "p2"))
@@ -213,7 +213,11 @@ func TestHeldPermissionOpensOnSwitch(t *testing.T) {
 	switchTo(m, "s2")
 	require.Equal(t, "tc-p2", openPermToolCall(m))
 	pastDialogGrace()
+	// Cho phép một lần chỉ qua Ctrl+A: chữ a trần không còn cấp quyền.
 	m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	require.Empty(t, ws.grants, "a bare 'a' must not grant")
+	require.True(t, m.dialog.ContainsDialog(dialog.PermissionsID))
+	m.Update(tea.KeyPressMsg{Code: 'a', Mod: tea.ModCtrl})
 
 	require.Len(t, ws.grants, 1)
 	require.Equal(t, "p2", ws.grants[0].ID)

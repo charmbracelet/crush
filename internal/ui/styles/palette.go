@@ -426,12 +426,12 @@ func MergePalette(baseName string, palette Palette) (Palette, error) {
 }
 
 // baseThemeOpts returns the quickStyleOpts of the named built-in theme.
-// An empty name yields the default Charmtone palette.
+// An empty name yields the default theme's palette.
 // resolveThemePalette returns the fully resolved palette and root built-in for
 // a theme. User themes may inherit from other user themes; cycles are rejected.
 func resolveThemePalette(name string, visiting map[string]bool) (Palette, string, error) {
 	if name == "" {
-		name = "charmtone-panther"
+		name = DefaultThemeName
 	}
 	key := normalizeThemeName(name)
 	if visiting[key] {
@@ -447,7 +447,7 @@ func resolveThemePalette(name string, visiting map[string]bool) (Palette, string
 		}
 		baseName := tf.Base
 		if baseName == "" {
-			baseName = "charmtone-panther"
+			baseName = DefaultThemeName
 		}
 		var base Palette
 		var root string
@@ -484,7 +484,7 @@ func resolveThemePalette(name string, visiting map[string]bool) (Palette, string
 // builtinThemeOpts returns the quickStyleOpts of a built-in theme.
 func builtinThemeOpts(name string) (quickStyleOpts, error) {
 	if name == "" {
-		name = "charmtone-panther"
+		name = DefaultThemeName
 	}
 	optsFn, ok := builtinThemes[normalizeThemeName(name)]
 	if !ok {

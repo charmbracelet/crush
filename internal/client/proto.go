@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 )
 
@@ -500,14 +501,19 @@ func (c *Client) SetMainAgent(ctx context.Context, id, agentID string) error {
 // to distinguish its own turn's terminal event from any concurrent
 // turn on the same session (e.g. interactive TUI usage).
 func (c *Client) SendMessage(ctx context.Context, id string, sessionID, runID, channel, prompt string, attachments ...message.Attachment) error {
-	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent", id), nil, jsonBody(proto.AgentMessage{
+	msg := proto.AgentMessage{
 		HiddenUserMessage: message.HiddenUserMessage(ctx),
 		SessionID:         sessionID,
 		RunID:             runID,
 		Channel:           channel,
 		Prompt:            prompt,
 		Attachments:       proto.AttachmentsFromMessage(attachments),
-	}), http.Header{"Content-Type": []string{"application/json"}})
+	}
+	if bound, _ := ctx.Value(bindRunKey{}).(bool); bound {
+		msg.BindToClient = c.clientID
+	}
+	msg.NonInteractive, _ = ctx.Value(nonInteractiveKey{}).(bool)
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent", id), nil, jsonBody(msg), http.Header{"Content-Type": []string{"application/json"}})
 	if err != nil {
 		return fmt.Errorf("failed to send message to agent: %w", err)
 	}
@@ -843,6 +849,95 @@ func (c *Client) SaveSession(ctx context.Context, id string, sess proto.Session)
 	return &saved, nil
 }
 
+// ErrRenameUnsupported: server cũ chưa có endpoint đổi tên.
+var ErrRenameUnsupported = errors.New("server cannot rename a session in place")
+
+// RenameSession đổi tiêu đề session (chỉ tiêu đề). Server cũ không có
+// endpoint thì trả ErrRenameUnsupported để người gọi dùng đường cũ.
+func (c *Client) RenameSession(ctx context.Context, id, sessionID, title string) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/sessions/%s/rename", id, sessionID), nil, jsonBody(proto.SessionRename{Title: title}), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return fmt.Errorf("failed to rename session: %w", err)
+	}
+	defer rsp.Body.Close()
+	switch rsp.StatusCode {
+	case http.StatusOK:
+		return nil
+	case http.StatusNotFound, http.StatusMethodNotAllowed:
+		if msg := decodeErrorMessage(rsp.Body); msg != "" {
+			// 404 có thân lỗi là session/workspace không có, không phải server cũ.
+			return fmt.Errorf("failed to rename session: %s", msg)
+		}
+		return ErrRenameUnsupported
+	}
+	if msg := decodeErrorMessage(rsp.Body); msg != "" {
+		return fmt.Errorf("failed to rename session: status code %d: %s", rsp.StatusCode, msg)
+	}
+	return fmt.Errorf("failed to rename session: status code %d", rsp.StatusCode)
+}
+
+// ErrJobsUnsupported: server cũ chưa có API job.
+var ErrJobsUnsupported = errors.New("this agent-cli server is too old to list jobs; restart it with the new version")
+
+// ListJobs trả các job (lệnh bash do agent chạy) của workspace.
+func (c *Client) ListJobs(ctx context.Context, id string) ([]shell.JobInfo, error) {
+	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/jobs", id), nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list jobs: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode == http.StatusNotFound {
+		if msg := decodeErrorMessage(rsp.Body); msg != "" {
+			return nil, fmt.Errorf("failed to list jobs: %s", msg)
+		}
+		return nil, ErrJobsUnsupported
+	}
+	if rsp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to list jobs: status code %d", rsp.StatusCode)
+	}
+	var jobs []shell.JobInfo
+	if err := json.NewDecoder(rsp.Body).Decode(&jobs); err != nil {
+		return nil, fmt.Errorf("failed to decode jobs: %w", err)
+	}
+	return jobs, nil
+}
+
+// JobOutput trả output của một job.
+func (c *Client) JobOutput(ctx context.Context, id, jobID string) (string, error) {
+	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/jobs/%s/output", id, url.PathEscape(jobID)), nil, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to get job output: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		if msg := decodeErrorMessage(rsp.Body); msg != "" {
+			return "", fmt.Errorf("failed to get job output: %s", msg)
+		}
+		return "", fmt.Errorf("failed to get job output: status code %d", rsp.StatusCode)
+	}
+	var out proto.JobOutput
+	if err := json.NewDecoder(rsp.Body).Decode(&out); err != nil {
+		return "", fmt.Errorf("failed to decode job output: %w", err)
+	}
+	return out.Output, nil
+}
+
+// KillJob dừng một job đang chạy.
+func (c *Client) KillJob(ctx context.Context, id, jobID string) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/jobs/%s/kill", id, url.PathEscape(jobID)), nil, nil, nil)
+	if err != nil {
+		return fmt.Errorf("failed to kill job: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		if msg := decodeErrorMessage(rsp.Body); msg != "" {
+			return fmt.Errorf("failed to kill job: %s", msg)
+		}
+		return fmt.Errorf("failed to kill job: status code %d", rsp.StatusCode)
+	}
+	return nil
+}
+
 // DeleteSession deletes a session from a workspace.
 func (c *Client) DeleteSession(ctx context.Context, id string, sessionID string) error {
 	rsp, err := c.delete(ctx, fmt.Sprintf("/workspaces/%s/sessions/%s", id, sessionID), nil, nil)
@@ -901,6 +996,46 @@ func (c *Client) CancelAgentSession(ctx context.Context, id string, sessionID st
 		return fmt.Errorf("failed to cancel agent session: status code %d", rsp.StatusCode)
 	}
 	return nil
+}
+
+type bindRunKey struct{}
+
+// WithRunBoundToClient đánh dấu ctx để SendMessage gắn lượt vào đời của
+// client này: client mất claim trên server (thoát, bị kill -9, mất kết nối
+// quá grace) thì server huỷ lượt. Dành cho `agent-cli run`, lệnh đồng bộ:
+// lượt của nó không được chạy tiếp mà không ai giám sát. Server cũ bỏ qua.
+func WithRunBoundToClient(ctx context.Context) context.Context {
+	return context.WithValue(ctx, bindRunKey{}, true)
+}
+
+type nonInteractiveKey struct{}
+
+// WithNonInteractiveRun đánh dấu ctx để SendMessage gửi lượt dạng phi tương
+// tác (agent-cli run): không có tool question, chờ MCP sẵn sàng. Server cũ
+// bỏ qua.
+func WithNonInteractiveRun(ctx context.Context) context.Context {
+	return context.WithValue(ctx, nonInteractiveKey{}, true)
+}
+
+// ErrCancelRunUnsupported: server (bản cũ, chưa có endpoint huỷ theo RunID)
+// không huỷ được đúng một lượt.
+var ErrCancelRunUnsupported = errors.New("server cannot cancel a single run")
+
+// CancelAgentRun huỷ đúng lượt mang runID của session, không đụng lượt khác.
+// Server cũ không có endpoint thì trả ErrCancelRunUnsupported.
+func (c *Client) CancelAgentRun(ctx context.Context, id, sessionID, runID string) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent/sessions/%s/runs/%s/cancel", id, sessionID, url.PathEscape(runID)), nil, nil, nil)
+	if err != nil {
+		return fmt.Errorf("failed to cancel run: %w", err)
+	}
+	defer rsp.Body.Close()
+	switch rsp.StatusCode {
+	case http.StatusOK:
+		return nil
+	case http.StatusNotFound, http.StatusMethodNotAllowed:
+		return ErrCancelRunUnsupported
+	}
+	return fmt.Errorf("failed to cancel run: status code %d", rsp.StatusCode)
 }
 
 // GetAgentSessionQueuedPromptsList retrieves the list of queued prompt

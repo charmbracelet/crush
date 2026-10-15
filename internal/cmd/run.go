@@ -12,7 +12,6 @@ import (
 	"os/signal"
 	"slices"
 	"strings"
-	"syscall"
 	"time"
 
 	"charm.land/log/v2"
@@ -74,8 +73,14 @@ agent-cli run --continue "Follow up on your last response"
 agent-cli run --json "Summarize this repo"
 
 # run auto-approves every tool permission request of its own session, both
-# locally and via the server; questions the agent asks cannot be answered
-# and fail the run.
+# locally and via the server. It has no question tool: nobody could answer.
+# It uses the project's current agent mode: if a TUI switched the project to
+# plan mode, run can only read and plan.
+#
+# Ctrl+C, SIGTERM or closing the terminal cancels this run's own turn, also
+# with --session/--continue (other turns and queued prompts of the session
+# are left alone). If run is killed outright, the server cancels its turn
+# once the client is gone (after a short reconnect grace).
 #
 # The fields are read from the session after the run: cost is the session's
 # running total (so with --session/--continue it includes earlier runs);
@@ -83,7 +88,8 @@ agent-cli run --json "Summarize this repo"
 # fresh session may also include title generation.
 #
 # Exit codes: 0 success, 1 runtime error (--json still prints the object
-# with "error" set), 2 bad usage (no prompt, bad flags).
+# with "error" set, also when the turn was cancelled from elsewhere), 2 bad
+# usage (no prompt, bad flags).
 
   `,
 	RunE: func(cmd *cobra.Command, args []string) (err error) {
@@ -122,8 +128,10 @@ agent-cli run --json "Summarize this repo"
 			return runMaybeJSON(ctx, asJSON, usage, run)
 		}
 
-		// Cancel on SIGINT or SIGTERM.
-		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		// Cancel on SIGINT, SIGTERM or SIGHUP (terminal đóng, SSH rớt): không
+		// bắt SIGHUP thì tiến trình chết ngay và run phía server sống tiếp
+		// không ai giám sát. Dưới nohup thì không bắt SIGHUP (stopSignals).
+		ctx, cancel := signal.NotifyContext(context.Background(), stopSignals()...)
 		defer cancel()
 
 		prompt := strings.Join(args, " ")
@@ -304,8 +312,11 @@ func runJSON(
 	res.Text = strings.TrimSuffix(buf.String(), "\n")
 	err := runErr
 	if res.SessionID != "" {
-		// A cancelled ctx must not stop us reporting what was spent.
-		u, uerr := usage(context.WithoutCancel(ctx), res.SessionID)
+		// A cancelled ctx must not stop us reporting what was spent, but a
+		// hung server must not hang the exit either.
+		usageCtx, cancelUsage := context.WithTimeout(context.WithoutCancel(ctx), cancelRunTimeout)
+		u, uerr := usage(usageCtx, res.SessionID)
+		cancelUsage()
 		if uerr != nil && err == nil {
 			err = fmt.Errorf("failed to read session usage: %w", uerr)
 		}
@@ -446,21 +457,24 @@ func runNonInteractive(
 	// loop would exit on whichever RunComplete arrived first for
 	// the same session and drop the queued prompt's output.
 	runID := uuid.New().String()
-	// The server keeps a run going after its client leaves, so Ctrl+C on a
-	// session this run created cancels it there. On a continued session
-	// (-s/-C) the active turn may be someone else's and the cancel API
-	// cannot tell turns apart, so the run only stops waiting.
-	// shortcut: cancel by RunID instead once the coordinator supports it.
+	// The server keeps a run going after its client leaves, so Ctrl+C
+	// (SIGTERM, SIGHUP) cancels this run's own turn there, by RunID: on a
+	// continued session (-s/-C) the other turns and queued prompts are left
+	// alone, and a cancel that overtakes the SendMessage still in flight
+	// cancels the prompt when it arrives.
+	ownSession := continueSessionID == "" && !useLast
 	defer func() {
-		switch {
-		case ctx.Err() == nil:
-		case continueSessionID != "" || useLast:
-			err = fmt.Errorf("stopped waiting; the run keeps going on session %s", sess.ID)
-		default:
-			cancelOwnRun(ctx, c, ws.ID, sess.ID)
+		if ctx.Err() == nil {
+			return
+		}
+		if cerr := cancelOwnRun(ctx, c, ws.ID, sess.ID, runID, ownSession); cerr != nil {
+			err = cerr
 		}
 	}()
-	if err := c.SendMessage(ctx, ws.ID, sess.ID, runID, "", prompt); err != nil {
+	// run là lệnh đồng bộ: lượt của nó gắn vào đời của client này, nên run
+	// chết bất thường (kill -9, OOM) thì server huỷ lượt thay vì để nó chạy
+	// tiếp không ai giám sát. send thì cố ý không gắn.
+	if err := c.SendMessage(client.WithNonInteractiveRun(client.WithRunBoundToClient(ctx)), ws.ID, sess.ID, runID, "", prompt); err != nil {
 		return fmt.Errorf("failed to send message: %w", err)
 	}
 
@@ -469,16 +483,16 @@ func runNonInteractive(
 		runID:     runID,
 		out:       out,
 		read:      make(map[string]int),
-		rootOf: func(id string) string {
-			root, _ := session.RootID(id, func(id string) (string, error) {
+		rootOf: func(id string) (string, error) {
+			return session.RootID(id, func(id string) (string, error) {
 				sess, err := c.GetSession(ctx, ws.ID, id)
 				if err != nil {
 					return "", err
 				}
 				return sess.ParentSessionID, nil
 			})
-			return root
 		},
+		selfCancelled: func() bool { return ctx.Err() != nil },
 		grant: func(req proto.PermissionRequest) error {
 			_, err := c.GrantPermission(ctx, ws.ID, proto.PermissionGrant{Permission: req, Action: proto.PermissionAllow})
 			return err
@@ -525,11 +539,16 @@ func runNonInteractive(
 
 			done, err := stream.handle(ev, stopSpinner)
 			if err != nil {
-				var ne *needsInputError
-				if errors.As(err, &ne) {
-					// Nobody can answer, so don't leave the run blocked on
-					// the server (it would also block the session's TUI).
-					cancelOwnRun(ctx, c, ws.ID, sess.ID)
+				var (
+					ne *needsInputError
+					ae *abandonError
+				)
+				if errors.As(err, &ne) || errors.As(err, &ae) {
+					// Nobody can unblock it, so don't leave the run blocked
+					// on the server (it would also block the session's TUI).
+					if cerr := cancelOwnRun(ctx, c, ws.ID, sess.ID, runID, ownSession); cerr != nil {
+						return fmt.Errorf("%w; %w", err, cerr)
+					}
 				}
 				return err
 			}
@@ -544,18 +563,34 @@ func runNonInteractive(
 	}
 }
 
-// cancelOwnRun asks the server to cancel sessionID's run, on a context of
-// its own (ctx may already be cancelled) bounded by cancelRunTimeout.
-func cancelOwnRun(ctx context.Context, c *client.Client, wsID, sessionID string) {
+// runCanceller là phần client mà cancelOwnRun cần.
+type runCanceller interface {
+	CancelAgentRun(ctx context.Context, id, sessionID, runID string) error
+	CancelAgentSession(ctx context.Context, id, sessionID string) error
+}
+
+// cancelOwnRun huỷ lượt runID của run này trên server, trên ctx riêng (ctx có
+// thể đã bị huỷ) có hạn cancelRunTimeout. Server cũ không huỷ được theo
+// RunID: session do run tạo (ownSession) thì huỷ cả session, vì trên đó chỉ
+// có lượt của run; session có sẵn (-s/-C) thì không huỷ được mà không đụng
+// lượt của người khác, nên trả lỗi nói run vẫn chạy.
+func cancelOwnRun(ctx context.Context, c runCanceller, wsID, sessionID, runID string, ownSession bool) error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cancelRunTimeout)
 	defer cancel()
-	err := c.CancelAgentSession(ctx, wsID, sessionID)
+	err := c.CancelAgentRun(ctx, wsID, sessionID, runID)
+	if errors.Is(err, client.ErrCancelRunUnsupported) {
+		if !ownSession {
+			return fmt.Errorf("stopped waiting; the run keeps going on session %s (this server cannot cancel a single run)", sessionID)
+		}
+		err = c.CancelAgentSession(ctx, wsID, sessionID)
+	}
 	switch {
 	case errors.Is(err, context.DeadlineExceeded):
 		fmt.Fprintf(runStderr, "cancel request timed out; the run may still be going on session %s\n", sessionID)
 	case err != nil:
 		slog.Warn("Failed to cancel run", "session_id", sessionID, "error", err)
 	}
+	return nil
 }
 
 // runStream tracks the per-message stdout cursor and the
@@ -581,7 +616,12 @@ type runStream struct {
 	printed   bool
 	// rootOf resolves a (sub-agent) session to its top-level session.
 	// Nil means only exact session matches count.
-	rootOf func(sessionID string) string
+	rootOf func(sessionID string) (string, error)
+	// selfCancelled reports whether this process cancelled the run itself
+	// (Ctrl+C, SIGTERM, SIGHUP). A cancelled RunComplete is a clean exit only
+	// then; cancelled from elsewhere (Esc in the TUI, server shutdown) the
+	// run did not finish and must not look like it did.
+	selfCancelled func() bool
 	// grant approves a tool permission request of this run, like the local
 	// path's AutoApproveSession. Nil means such requests fail the run.
 	grant func(proto.PermissionRequest) error
@@ -599,14 +639,43 @@ func (e *needsInputError) Error() string {
 	return e.what + ", but `run` cannot answer it non-interactively"
 }
 
+// abandonError: run không đi tiếp được và không ai gỡ được (duyệt quyền
+// thất bại, không biết yêu cầu là của ai). Như needsInputError, run tự huỷ
+// lượt của nó trên server thay vì để lượt treo ở đó.
+type abandonError struct{ err error }
+
+func (e *abandonError) Error() string { return e.err.Error() }
+func (e *abandonError) Unwrap() error { return e.err }
+
+// errRunCancelledElsewhere: lượt bị huỷ không phải do run này (Esc ở TUI,
+// server tắt, prompt bị gỡ khỏi hàng đợi), nên chưa xong.
+var errRunCancelledElsewhere = errors.New("run cancelled before it finished (by another client or the server)")
+
 // ownsSession reports whether a prompt raised for sessionID belongs to
 // this run. The run client never reports a current session, so the server
-// delivers prompts of every session in the workspace to it.
-func (s *runStream) ownsSession(sessionID string) bool {
+// delivers prompts of every session in the workspace to it. An error means
+// ownership could not be resolved: guessing would either approve another
+// session's tool or leave this run blocked forever.
+func (s *runStream) ownsSession(sessionID string) (bool, error) {
 	if sessionID == "" {
-		return false
+		return false, nil
 	}
-	return sessionID == s.sessionID || (s.rootOf != nil && s.rootOf(sessionID) == s.sessionID)
+	if sessionID == s.sessionID {
+		return true, nil
+	}
+	if s.rootOf == nil {
+		return false, nil
+	}
+	root, err := s.rootOf(sessionID)
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		// Run đang dừng (Ctrl+C, hết giờ): không phải lỗi tra cứu, vòng lặp
+		// sẽ thoát theo ctx.
+		return false, nil
+	}
+	if err != nil {
+		return false, &abandonError{fmt.Errorf("cannot tell whether a request from session %s belongs to this run: %w", sessionID, err)}
+	}
+	return root == s.sessionID, nil
 }
 
 // promptQueued returns a check of whether prompt still waits in sessionID's
@@ -702,6 +771,9 @@ func (s *runStream) handle(ev any, stopSpinner func()) (done bool, err error) {
 		if e.Payload.Error != "" && !e.Payload.Cancelled {
 			return true, fmt.Errorf("agent run failed: %s", e.Payload.Error)
 		}
+		// Lượt bị huỷ mà không phải do chính run này: in phần đã có rồi
+		// báo lỗi (dưới), để script không tưởng là xong.
+		cancelledElsewhere := e.Payload.Cancelled && (s.selfCancelled == nil || !s.selfCancelled())
 		// Reconcile stdout against the authoritative final
 		// assistant text carried in the event. The pubsub fan-in
 		// does not serialize publishes across upstream brokers, so
@@ -722,10 +794,18 @@ func (s *runStream) handle(ev any, stopSpinner func()) (done bool, err error) {
 				}
 			}
 		}
+		if cancelledElsewhere {
+			return true, errRunCancelledElsewhere
+		}
 		return true, nil
 
 	case pubsub.Event[proto.PermissionRequest]:
-		if !s.ownsSession(e.Payload.SessionID) || othersTurn(s.queued, "a permission request", s.sessionID) {
+		owned, err := s.ownsSession(e.Payload.SessionID)
+		if err != nil {
+			stop()
+			return true, err
+		}
+		if !owned || othersTurn(s.queued, "a permission request", s.sessionID) {
 			return false, nil
 		}
 		// Same as the local path: a non-interactive run approves every
@@ -737,12 +817,17 @@ func (s *runStream) handle(ev any, stopSpinner func()) (done bool, err error) {
 		}
 		if err := s.grant(e.Payload); err != nil {
 			stop()
-			return true, fmt.Errorf("failed to approve tool permission: %w", err)
+			return true, &abandonError{fmt.Errorf("failed to approve tool permission: %w", err)}
 		}
 		return false, nil
 
 	case pubsub.Event[proto.QuestionRequest]:
-		if !s.ownsSession(e.Payload.SessionID) || othersTurn(s.queued, "a question", s.sessionID) {
+		owned, err := s.ownsSession(e.Payload.SessionID)
+		if err != nil {
+			stop()
+			return true, err
+		}
+		if !owned || othersTurn(s.queued, "a question", s.sessionID) {
 			return false, nil
 		}
 		stop()

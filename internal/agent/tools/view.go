@@ -112,19 +112,14 @@ func NewViewTool(
 			// Handle relative paths
 			filePath := filepathext.SmartJoin(workingDir, params.FilePath)
 
-			// Check if file is outside working directory and request permission if needed
-			absWorkingDir, err := filepath.Abs(workingDir)
-			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("error resolving working directory: %w", err)
-			}
-
+			// Check if file is outside working directory and request permission if needed.
+			// Giải symlink cả hai phía: tệp trong dự án mà là symlink trỏ ra
+			// ngoài (vd docs/key -> ~/.ssh/id_ed25519) vẫn phải hỏi.
 			absFilePath, err := filepath.Abs(filePath)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error resolving file path: %w", err)
 			}
-
-			relPath, err := filepath.Rel(absWorkingDir, absFilePath)
-			isOutsideWorkDir := err != nil || strings.HasPrefix(relPath, "..")
+			resolvedPath, isOutsideWorkDir := outsideWorkingDir(workingDir, absFilePath)
 			isSkillFile := isInSkillsPath(absFilePath, skillsPaths)
 
 			sessionID := GetSessionFromContext(ctx)
@@ -138,11 +133,11 @@ func NewViewTool(
 					ctx,
 					permission.CreatePermissionRequest{
 						SessionID:   sessionID,
-						Path:        absFilePath,
+						Path:        resolvedPath,
 						ToolCallID:  call.ID,
 						ToolName:    ViewToolName,
 						Action:      "read",
-						Description: fmt.Sprintf("Read file outside working directory: %s", absFilePath),
+						Description: fmt.Sprintf("Read file outside working directory: %s", resolvedPath),
 						Params:      ViewPermissionsParams(params),
 					},
 				)

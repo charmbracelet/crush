@@ -229,8 +229,12 @@ Until then the session reads busy. Cancelling the turn while a Stop hook runs
 (or right after it blocked) kills the hook and ends the turn as cancelled,
 without a re-run.
 
-Like `PreToolUse`, Stop hooks are read from the current config on every turn,
-so edits to them apply to the next turn without a restart.
+Like `PreToolUse`, Stop hooks are read from the in-memory config on every turn.
+That config is only re-read from disk when a reload happens (any config write
+made by the running workspace, such as choosing a model, triggers one), so
+editing `crush.json` or `crushrc` on disk does not by itself change what the
+next turn sees. In agent-cli, close every client of the project and reopen it
+(see "Sửa env khi agent-cli đang chạy" in `docs/agent-cli-local-setup.md`).
 
 Known limits:
 

@@ -1170,17 +1170,6 @@ func TestPlaceholderReadyWhenOnlyOtherSessionBusy(t *testing.T) {
 	}
 }
 
-// TestModelSwitchStillBlockedWhileAnySessionBusy: every session shares the
-// model, so a run anywhere still blocks switching it.
-func TestModelSwitchStillBlockedWhileAnySessionBusy(t *testing.T) {
-	t.Parallel()
-
-	m, _ := probedUI(t, "s2")
-	cmd := m.handleSelectModel(dialog.ActionSelectModel{})
-	require.NotNil(t, cmd)
-	require.Equal(t, util.NewWarnMsg("Agent is busy, please wait..."), cmd())
-}
-
 // TestSessionSwitchDoesNotInheritBusyState: switching away from a running
 // session must not treat the next one as running, neither from the previous
 // session's busy probe nor from its spinners still in the chat. Allowing

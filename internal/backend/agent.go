@@ -62,9 +62,26 @@ func (b *Backend) SendMessage(workspaceID string, msg proto.AgentMessage) error 
 	ws.inflightRuns.Add(1)
 	ws.runMu.Unlock()
 
+	if msg.BindToClient != "" && msg.RunID != "" {
+		ws.bindRun(msg.BindToClient, boundRun{sessionID: msg.SessionID, runID: msg.RunID})
+	}
 	accept := coord.BeginAccepted(msg.SessionID)
 	go b.runAgent(ws, msg, accept)
 	return nil
+}
+
+// bindRun gắn lượt vào claim của client: client mất claim thì lượt bị huỷ
+// (cancelBoundRuns). Client chưa có claim (đã rời đi) thì không gắn được.
+func (w *Workspace) bindRun(clientID string, r boundRun) {
+	w.clientsMu.Lock()
+	defer w.clientsMu.Unlock()
+	cs, ok := w.clients[clientID]
+	if !ok {
+		slog.Warn("Run bound to a client with no claim on the workspace; it will outlive the client",
+			"client_id", clientID, "session_id", r.sessionID, "run_id", r.runID)
+		return
+	}
+	cs.boundRuns = append(cs.boundRuns, r)
 }
 
 // runAgent executes an accepted agent run for the workspace. It owns the
@@ -102,6 +119,9 @@ func (b *Backend) runAgent(ws *Workspace, msg proto.AgentMessage, accept *agent.
 	}
 	if msg.RunID != "" {
 		ctx = agent.WithRunID(ctx, msg.RunID)
+	}
+	if msg.NonInteractive {
+		ctx = agent.WithNonInteractive(ctx)
 	}
 	ctx = agent.WithRunCompleteMarker(ctx)
 
@@ -220,6 +240,20 @@ func (b *Backend) CancelSession(workspaceID, sessionID string) error {
 
 	if ws.AgentCoordinator != nil {
 		ws.AgentCoordinator.Cancel(sessionID)
+	}
+	return nil
+}
+
+// CancelRun huỷ đúng lượt mang runID của session (xem
+// agent.Coordinator.CancelRun): lượt khác và hàng đợi của session giữ nguyên.
+func (b *Backend) CancelRun(workspaceID, sessionID, runID string) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+
+	if ws.AgentCoordinator != nil {
+		ws.AgentCoordinator.CancelRun(sessionID, runID)
 	}
 	return nil
 }

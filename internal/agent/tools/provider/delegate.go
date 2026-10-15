@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent/tools"
@@ -73,6 +74,8 @@ type strategy interface {
 	binaryEnv() string
 	// access mô tả mức quyền CLI con được cấp, hiện trong lời xin quyền.
 	access() string
+	// validate kiểm cấu hình mức quyền (env) lúc dựng tool.
+	validate() error
 	// args assembles the headless invocation for one run.
 	args(prompt, resume string) []string
 	// parse extracts the outcome from captured stdout. A failure the CLI
@@ -91,6 +94,11 @@ func NewTools(workingDir string, perms permissionRequester, allowed []string) ([
 	for _, s := range []strategy{newClaudeStrategy(), newCodexStrategy()} {
 		if !slices.Contains(allowed, s.name()) {
 			continue
+		}
+		// Mức quyền gõ sai là cấu hình hỏng như *_BIN sai: báo ngay, nêu tên
+		// biến, thay vì để CLI con lỗi ở mỗi lần giao (sau khi đã duyệt).
+		if err := s.validate(); err != nil {
+			return nil, err
 		}
 		path, err := exec.LookPath(s.binary())
 		if err != nil {
@@ -187,9 +195,65 @@ func permissionDescription(s strategy, workingDir string, params DelegationParam
 	if params.Resume != "" {
 		fmt.Fprintf(&b, " It continues session %s.", params.Resume)
 	}
+	b.WriteString(" Allowing for the whole session also approves every later delegation in it without asking.")
 	b.WriteString("\n\n")
-	b.WriteString(strings.TrimSpace(params.Prompt))
+	b.WriteString(displaySafe(strings.TrimSpace(params.Prompt)))
 	return b.String()
+}
+
+// displaySafe thay ký tự điều khiển (trừ xuống dòng, tab) và ký tự đảo chiều
+// bidi bằng U+FFFD: prompt do model viết không được dùng escape terminal hay
+// đảo thứ tự hiển thị để làm hộp thoại xin quyền đọc khác với việc sẽ chạy.
+func displaySafe(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	var prev rune // ký tự GỐC đứng trước (trước khi thay)
+	for _, orig := range s {
+		r := orig
+		switch {
+		case r == '\n' || r == '\t':
+		case unicode.IsControl(r), unicode.Is(unicode.Bidi_Control, r),
+			// Ký tự vô hình (zero-width, soft hyphen, BOM, tag U+E00xx…),
+			// ngăn dòng/đoạn Unicode, vùng riêng và mã chưa gán: CLI con nhận
+			// được nhưng người duyệt không thấy.
+			unicode.Is(unicode.Cf, r), unicode.Is(unicode.Zl, r), unicode.Is(unicode.Zp, r),
+			unicode.Is(unicode.Co, r), !unicode.IsGraphic(r) && !unicode.IsSpace(r),
+			isInvisibleFiller(r):
+			r = '\uFFFD'
+		case isHiddenMark(r):
+			// Một VS15/VS16 ngay sau ký tự biểu tượng là cách vẽ emoji, giữ;
+			// mọi dấu ẩn khác (hay VS lặp) có thể giấu dữ liệu.
+			emojiSelector := (r == '\uFE0E' || r == '\uFE0F') && prev != '\uFFFD' &&
+				unicode.In(prev, unicode.So, unicode.Sm, unicode.Sk)
+			if !emojiSelector {
+				r = '\uFFFD'
+			}
+		}
+		b.WriteRune(r)
+		prev = orig
+	}
+	return b.String()
+}
+
+// isInvisibleFiller nhận các ký tự "lấp chỗ" hiển thị như khoảng trắng nhưng
+// không phải khoảng trắng (Hangul filler, braille trống), hay dùng để giấu chữ.
+func isInvisibleFiller(r rune) bool {
+	switch r {
+	case '\u115F', '\u1160', '\u3164', '\uFFA0', '\u2800':
+		return true
+	}
+	return false
+}
+
+// isHiddenMark nhận dấu kết hợp vô hình (variation selector, CGJ, nguyên âm
+// Khmer ẩn, Mongolian FVS) hay dùng để giấu dữ liệu sau một ký tự thấy được.
+func isHiddenMark(r rune) bool {
+	switch {
+	case r >= 0xFE00 && r <= 0xFE0F, r >= 0xE0100 && r <= 0xE01EF,
+		r == 0x034F, r >= 0x180B && r <= 0x180D, r == 0x180F, r == 0x17B4, r == 0x17B5:
+		return true
+	}
+	return false
 }
 
 // isCLIReported reports whether err is a failure the CLI stated in its own

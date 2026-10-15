@@ -83,19 +83,10 @@ func NewLsTool(permissions permission.Service, workingDir string, lsConfig confi
 
 			searchPath = filepathext.SmartJoin(workingDir, searchPath)
 
-			// Check if directory is outside working directory and request permission if needed
-			absWorkingDir, err := filepath.Abs(workingDir)
-			if err != nil {
-				return fantasy.NewTextErrorResponse(fmt.Sprintf("error resolving working directory: %v", err)), nil
-			}
-
-			absSearchPath, err := filepath.Abs(searchPath)
-			if err != nil {
-				return fantasy.NewTextErrorResponse(fmt.Sprintf("error resolving search path: %v", err)), nil
-			}
-
-			relPath, err := filepath.Rel(absWorkingDir, absSearchPath)
-			if err != nil || strings.HasPrefix(relPath, "..") {
+			// Check if directory is outside working directory and request permission if needed.
+			// Giải symlink cả hai phía: thư mục symlink trỏ ra ngoài vẫn phải hỏi.
+			absSearchPath, outside := outsideWorkingDir(workingDir, searchPath)
+			if outside {
 				// Directory is outside working directory, request permission
 				sessionID := GetSessionFromContext(ctx)
 				if sessionID == "" {

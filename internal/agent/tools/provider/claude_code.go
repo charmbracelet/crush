@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	"charm.land/fantasy"
@@ -50,7 +51,35 @@ func (claudeStrategy) label() string      { return "Claude Code" }
 func (claudeStrategy) binaryEnv() string  { return claudeBinEnv }
 func (s claudeStrategy) binary() string   { return cmp.Or(s.bin, claudeCommand) }
 func (s claudeStrategy) permMode() string { return cmp.Or(s.mode, defaultClaudePermissionMode) }
-func (s claudeStrategy) access() string   { return strings.Join(s.permissionArgs(), " ") }
+
+// claudePermissionModes là các giá trị --permission-mode mà claude nhận
+// (`claude --help`, Claude Code 2.1.300); "default" là tên cũ vẫn hợp lệ.
+var claudePermissionModes = []string{"acceptEdits", "auto", "bypassPermissions", "default", "dontAsk", "manual", "plan"}
+
+// claudeAccessText mô tả từng mức bằng lời, để người duyệt hiểu mà không cần thuộc cờ.
+var claudeAccessText = map[string]string{
+	"bypassPermissions": "FULL ACCESS: runs any command and edits any file without asking",
+	"acceptEdits":       "file edits auto-accepted; other actions need approval it cannot get headless",
+	"auto":              "Claude Code decides per action (auto mode)",
+	"dontAsk":           "only pre-approved actions; everything else is denied",
+	"plan":              "read-only planning, no edits",
+	"default":           "default permissions; actions needing approval are denied headless",
+	"manual":            "manual approval; actions needing approval are denied headless",
+}
+
+// validate từ chối mức quyền gõ sai lúc dựng tool, thay vì để claude báo lỗi
+// mỗi lần giao việc, sau khi người dùng đã duyệt.
+func (s claudeStrategy) validate() error {
+	if s.mode != "" && !slices.Contains(claudePermissionModes, s.mode) {
+		return fmt.Errorf("%s=%q is not a Claude Code permission mode (valid: %s)", claudeModeEnv, s.mode, strings.Join(claudePermissionModes, ", "))
+	}
+	return nil
+}
+
+// access mô tả mức quyền bằng lời kèm cờ thật sẽ dùng.
+func (s claudeStrategy) access() string {
+	return fmt.Sprintf("%s (%s)", claudeAccessText[s.permMode()], strings.Join(s.permissionArgs(), " "))
+}
 
 // permissionArgs giữ nguyên cờ đã chạy thật cho mặc định, và dùng
 // --permission-mode cho mọi mức khác (acceptEdits, plan, ...).

@@ -466,7 +466,7 @@ func (th *Theme) previewAction() Action {
 func (th *Theme) currentThemeName() string {
 	cfg := th.com.Config()
 	if cfg == nil || cfg.Options == nil || cfg.Options.TUI == nil || cfg.Options.TUI.ActiveTheme == "" {
-		return "charmtone-panther"
+		return styles.DefaultThemeName
 	}
 	return cfg.Options.TUI.ActiveTheme
 }

@@ -25,7 +25,8 @@ import (
 type interruptRun struct {
 	continueID string // As `run -s <id>`; empty creates session "own".
 	complete   bool   // Finish the run normally once it is in its loop.
-	onCancel   func(r *http.Request, sessionID string)
+	oldServer  bool   // Server không có endpoint huỷ theo RunID (404).
+	onCancel   func(r *http.Request, target string)
 }
 
 // runInLoop starts runNonInteractive for session "own" against a fake
@@ -75,6 +76,14 @@ func runInLoop(t *testing.T, o interruptRun) (interrupt func(), done <-chan erro
 			}
 			w.(http.Flusher).Flush()
 			<-r.Context().Done()
+		case strings.HasPrefix(p, "/agent/sessions/") && strings.Contains(p, "/runs/") && strings.HasSuffix(p, "/cancel"):
+			if o.oldServer {
+				http.NotFound(w, r)
+				return
+			}
+			// Ghi "<session>/run=<đúng RunID đã gửi?>" để test so được.
+			sid, rest, _ := strings.Cut(strings.TrimPrefix(p, "/agent/sessions/"), "/runs/")
+			o.onCancel(r, fmt.Sprintf("%s/run=%t", sid, strings.TrimSuffix(rest, "/cancel") == runID))
 		case strings.HasPrefix(p, "/agent/sessions/") && strings.HasSuffix(p, "/cancel"):
 			o.onCancel(r, strings.TrimSuffix(strings.TrimPrefix(p, "/agent/sessions/"), "/cancel"))
 		}
@@ -101,11 +110,12 @@ func runInLoop(t *testing.T, o interruptRun) (interrupt func(), done <-chan erro
 
 // TestRunInterruptCancelsOwnRun pins what Ctrl+C on `run` means in
 // client/server mode, where the server keeps a run going after its client
-// leaves. A session this run created holds only its own work, so the run
-// cancels it. On a continued session (-s/-C) the session's active turn may
-// belong to someone else, and the cancel API cannot tell turns apart, so
-// the run only stops waiting and says so. A run that completes cancels
-// nothing.
+// leaves: the run cancels its own turn by RunID, on a created session and
+// on a continued one (-s/-C) alike, so other turns and queued prompts of
+// the session are untouched. An old server without the per-run cancel:
+// a created session holds only this run's work and is cancelled whole; a
+// continued session is left alone and the run says it keeps going. A run
+// that completes cancels nothing.
 func TestRunInterruptCancelsOwnRun(t *testing.T) {
 	t.Parallel()
 
@@ -115,10 +125,15 @@ func TestRunInterruptCancelsOwnRun(t *testing.T) {
 		wantCancels []string
 		wantErr     string
 	}{
-		"created session": {interrupt: true, wantCancels: []string{"own"}, wantErr: context.Canceled.Error()},
-		"continued session": {
-			run: interruptRun{continueID: "own"}, interrupt: true,
-			wantErr: "stopped waiting; the run keeps going on session own",
+		"created session":   {interrupt: true, wantCancels: []string{"own/run=true"}, wantErr: context.Canceled.Error()},
+		"continued session": {run: interruptRun{continueID: "own"}, interrupt: true, wantCancels: []string{"own/run=true"}, wantErr: context.Canceled.Error()},
+		"old server, created session": {
+			run: interruptRun{oldServer: true}, interrupt: true,
+			wantCancels: []string{"own"}, wantErr: context.Canceled.Error(),
+		},
+		"old server, continued session": {
+			run: interruptRun{continueID: "own", oldServer: true}, interrupt: true,
+			wantErr: "stopped waiting; the run keeps going on session own (this server cannot cancel a single run)",
 		},
 		"completed run": {run: interruptRun{complete: true}},
 	}
@@ -216,9 +231,9 @@ func TestRunQueuedBehindOtherTurnLeavesItsPromptsAlone(t *testing.T) {
 			t.Cleanup(func() { runStderr = prev })
 
 			var (
-				mu              sync.Mutex
-				grants, cancels int
-				runID           string // Written before sent is closed, read after.
+				mu                          sync.Mutex
+				grants, cancels, runCancels int
+				runID                       string // Written before sent is closed, read after.
 			)
 			sent := make(chan struct{})
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -245,6 +260,10 @@ func TestRunQueuedBehindOtherTurnLeavesItsPromptsAlone(t *testing.T) {
 				case p == "/agent/sessions/S/cancel":
 					mu.Lock()
 					cancels++
+					mu.Unlock()
+				case p == "/agent/sessions/S/runs/"+runID+"/cancel":
+					mu.Lock()
+					runCancels++
 					mu.Unlock()
 				case p == "/events":
 					w.Header().Set("Content-Type", "text/event-stream")
@@ -288,7 +307,8 @@ func TestRunQueuedBehindOtherTurnLeavesItsPromptsAlone(t *testing.T) {
 			mu.Lock()
 			defer mu.Unlock()
 			require.Equal(t, tc.wantGrants, grants, "grants")
-			require.Equal(t, tc.wantCancels, cancels, "cancels of session S")
+			require.Equal(t, tc.wantCancels, runCancels, "cancels of this run's own turn")
+			require.Zero(t, cancels, "never cancel the whole session S: other turns live there")
 			require.Equal(t, tc.wantNotices, strings.Count(stderr.String(), "another turn"), stderr.String())
 		})
 	}

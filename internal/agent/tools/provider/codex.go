@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	"charm.land/fantasy"
@@ -50,7 +51,30 @@ func (codexStrategy) label() string         { return "Codex" }
 func (codexStrategy) binaryEnv() string     { return codexBinEnv }
 func (s codexStrategy) binary() string      { return cmp.Or(s.bin, codexCommand) }
 func (s codexStrategy) sandboxMode() string { return cmp.Or(s.sandbox, defaultCodexSandbox) }
-func (s codexStrategy) access() string      { return "sandbox " + s.sandboxMode() }
+
+// codexSandboxModes là các mức sandbox codex nhận (`codex exec --help`,
+// codex-cli 0.159.2).
+var codexSandboxModes = []string{"read-only", "workspace-write", "danger-full-access"}
+
+// codexAccessText mô tả từng mức bằng lời.
+var codexAccessText = map[string]string{
+	"danger-full-access": "FULL ACCESS: no sandbox, runs any command",
+	"workspace-write":    "sandboxed: writes only inside the workspace",
+	"read-only":          "sandboxed: read-only",
+}
+
+// validate từ chối mức sandbox gõ sai lúc dựng tool.
+func (s codexStrategy) validate() error {
+	if s.sandbox != "" && !slices.Contains(codexSandboxModes, s.sandbox) {
+		return fmt.Errorf("%s=%q is not a Codex sandbox mode (valid: %s)", codexSandboxEnv, s.sandbox, strings.Join(codexSandboxModes, ", "))
+	}
+	return nil
+}
+
+// access mô tả mức sandbox bằng lời kèm giá trị thật sẽ dùng.
+func (s codexStrategy) access() string {
+	return fmt.Sprintf("%s (sandbox_mode=%s)", codexAccessText[s.sandboxMode()], s.sandboxMode())
+}
 
 // args assembles the headless invocation. The permission prompt of the
 // tool call is the gate, as for claude_code.

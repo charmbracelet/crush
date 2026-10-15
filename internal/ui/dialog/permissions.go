@@ -123,16 +123,19 @@ func defaultPermissionsKeyMap() permissionsKeyMap {
 			key.WithKeys("enter", "ctrl+y"),
 			key.WithHelp("enter", "confirm"),
 		),
+		// Cho phép chỉ qua phím có Ctrl: hộp thoại bật lên giữa lúc người dùng
+		// đang gõ (chỉ nuốt phím ≤1,5 s), nên chữ trần (a, A, s, S, y...) gõ
+		// dở không bao giờ được cấp quyền. Ctrl+A cho một lần; Ctrl+S cho cả
+		// session, là quyền rộng nhất.
 		Allow: key.NewBinding(
-			key.WithKeys("a", "A", "ctrl+a"),
-			key.WithHelp("a", "allow"),
+			key.WithKeys("ctrl+a"),
+			key.WithHelp("ctrl+a", "allow once"),
 		),
-		// Cấp quyền cho cả session là quyền rộng nhất: cần Shift+S (đúng chữ S
-		// gạch chân trên nút), chữ s thường gõ dở không được kích hoạt nó.
 		AllowSession: key.NewBinding(
-			key.WithKeys("S", "ctrl+s"),
-			key.WithHelp("S", "allow session"),
+			key.WithKeys("ctrl+s"),
+			key.WithHelp("ctrl+s", "allow session"),
 		),
+		// Từ chối là hướng an toàn nên d/D (và Esc, ở Close) vẫn dùng chữ trần.
 		Deny: key.NewBinding(
 			key.WithKeys("d", "D"),
 			key.WithHelp("d", "deny"),
@@ -210,7 +213,8 @@ func NewPermissions(com *common.Common, perm permission.PermissionRequest, opts 
 		com:        com,
 		permission: perm,
 		// Mặc định Deny: hộp thoại bật lên giữa lúc đang gõ, một cú Enter lỡ
-		// tay không được thành cho phép. Muốn cho phép thì bấm a (hoặc chọn rồi Enter).
+		// tay không được thành cho phép. Muốn cho phép thì bấm Ctrl+A / Ctrl+S
+		// (hoặc dùng ←/→ chọn nút rồi Enter).
 		selectedOption: optionDeny,
 		viewport:       vp,
 		help:           h,
@@ -778,9 +782,11 @@ func (p *Permissions) renderContentPanel(content string, width int) string {
 }
 
 func (p *Permissions) renderButtons(contentWidth int, fullscreen bool) string {
+	// Chữ gạch chân báo phím tắt chữ trần, mà chỉ Deny (d) còn phím như vậy;
+	// phím cho phép (Ctrl+A / Ctrl+S) nằm ở dòng gợi ý bên dưới.
 	buttons := []common.ButtonOpts{
-		{Text: "Allow", UnderlineIndex: 0, Selected: p.selectedOption == optionAllow},
-		{Text: "Allow for Session", UnderlineIndex: 10, Selected: p.selectedOption == optionAllowSession},
+		{Text: "Allow", UnderlineIndex: -1, Selected: p.selectedOption == optionAllow},
+		{Text: "Allow for Session", UnderlineIndex: -1, Selected: p.selectedOption == optionAllowSession},
 		{Text: "Deny", UnderlineIndex: 0, Selected: p.selectedOption == optionDeny},
 	}
 
@@ -815,7 +821,11 @@ func (p *Permissions) canScroll() bool {
 
 // ShortHelp implements [help.KeyMap].
 func (p *Permissions) ShortHelp() []key.Binding {
+	// Phím cho phép đứng đầu: khi hộp thoại hẹp, dòng gợi ý bị cắt từ cuối,
+	// và đây là thứ duy nhất báo người dùng cách cho phép.
 	bindings := []key.Binding{
+		p.keyMap.Allow,
+		p.keyMap.AllowSession,
 		p.keyMap.Choose,
 		p.keyMap.Select,
 		p.keyMap.Close,

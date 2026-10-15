@@ -429,24 +429,6 @@ func (m *Message) FinishToolCall(toolCallID string) {
 	}
 }
 
-// AppendToolCallInput appends input to a tool call.
-func (m *Message) AppendToolCallInput(toolCallID string, inputDelta string) {
-	for i, part := range m.Parts {
-		if c, ok := part.(ToolCall); ok {
-			if c.ID == toolCallID {
-				m.Parts[i] = ToolCall{
-					ID:       c.ID,
-					Name:     c.Name,
-					Input:    c.Input + inputDelta,
-					Type:     c.Type,
-					Finished: c.Finished,
-				}
-				return
-			}
-		}
-	}
-}
-
 // AddToolCall adds or updates a tool call.
 func (m *Message) AddToolCall(tc ToolCall) {
 	for i, part := range m.Parts {

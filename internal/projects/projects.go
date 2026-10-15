@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/lock"
 )
 
 const (
@@ -27,7 +28,11 @@ type Project struct {
 	DataDir      string    `json:"data_dir"`
 	LastAccessed time.Time `json:"last_accessed"`
 	Host         string    `json:"host,omitempty"`
-	Pinned       bool      `json:"pinned,omitempty"`
+	// MachineID là /etc/machine-id của máy đã đăng ký mục này: hostname đổi
+	// được (DHCP, "localhost" khi chưa có mạng), machine-id thì không, nên
+	// nó quyết định mục có thuộc máy này hay không khi cả hai phía có.
+	MachineID string `json:"machine_id,omitempty"`
+	Pinned    bool   `json:"pinned,omitempty"`
 	// Locations lists every {cwd, data_dir} pair this workspace was launched
 	// with (newest first, at most maxLocations), because a subdirectory shares
 	// its repository's entry but may keep its own data directory. DataDir is
@@ -82,6 +87,35 @@ func currentHost() string {
 	h, _ := os.Hostname()
 	return h
 }
+
+// machineIDPaths là nơi đọc machine-id (systemd, rồi dbus). Biến để test thay.
+var machineIDPaths = []string{"/etc/machine-id", "/var/lib/dbus/machine-id"}
+
+// currentMachineID trả machine-id của máy này, rỗng nếu không có (macOS,
+// Windows): khi đó chỉ so hostname như trước.
+func currentMachineID() string {
+	for _, p := range machineIDPaths {
+		if b, err := os.ReadFile(p); err == nil {
+			if id := strings.TrimSpace(string(b)); id != "" {
+				return id
+			}
+		}
+	}
+	return ""
+}
+
+// OnThisMachine cho biết mục registry thuộc máy này: so machine-id khi cả hai
+// phía có (không đổi khi đổi hostname), không thì so hostname như cũ.
+func (p Project) OnThisMachine() bool {
+	if mid := currentMachineID(); mid != "" && p.MachineID != "" {
+		return p.MachineID == mid
+	}
+	return p.Host == currentHost()
+}
+
+// lockTimeout giới hạn thời gian chờ khoá registry: một agent-cli bị dừng
+// (Ctrl+Z) đúng lúc giữ khoá không được làm đứng mọi lần mở sau.
+var lockTimeout = 5 * time.Second
 
 // NormalizeWorkspace returns the canonical workspace root of dir: its resolved
 // path, then the git toplevel when inside a repository. This must match the
@@ -138,10 +172,16 @@ func read() (*ProjectList, error) {
 	if err := json.Unmarshal(data, &list); err != nil {
 		return nil, err
 	}
-	host := currentHost()
+	host, mid := currentHost(), currentMachineID()
 	for i := range list.Projects {
-		if list.Projects[i].Host == "" {
-			list.Projects[i].Host = host
+		p := &list.Projects[i]
+		if p.Host == "" {
+			p.Host = host
+		}
+		// Mục cũ (chưa có machine-id) của máy này: gắn machine-id, để nó
+		// còn nhận ra máy này sau khi hostname đổi.
+		if p.MachineID == "" && p.Host == host {
+			p.MachineID = mid
 		}
 	}
 	return &list, nil
@@ -211,9 +251,11 @@ func update(fn func(*ProjectList) error) error {
 	if err := os.MkdirAll(filepath.Dir(projectsFilePath()), 0o700); err != nil {
 		return err
 	}
-	unlock, err := lockFile(filepath.Join(filepath.Dir(projectsFilePath()), lockFileName))
+	ctx, cancel := context.WithTimeout(context.Background(), lockTimeout)
+	defer cancel()
+	unlock, err := lock.File(ctx, filepath.Join(filepath.Dir(projectsFilePath()), lockFileName))
 	if err != nil {
-		return err
+		return fmt.Errorf("project registry is locked by another agent-cli process: %w", err)
 	}
 	defer unlock()
 	list, err := read()
@@ -250,14 +292,14 @@ func Register(workingDir, dataDir string) error {
 	if err != nil {
 		cwd = filepath.Clean(workingDir)
 	}
-	host := currentHost()
+	host, mid := currentHost(), currentMachineID()
 	return update(func(list *ProjectList) error {
 		// The list is kept most-recent-first by moving each registration to
 		// the front, not by sorting on timestamps, which tie on coarse clocks.
 		var pinned bool
 		var locs []Location
 		list.Projects = slices.DeleteFunc(list.Projects, func(p Project) bool {
-			if p.Path != path || p.Host != host {
+			if p.Path != path || !p.OnThisMachine() {
 				return false
 			}
 			pinned = p.Pinned
@@ -279,6 +321,7 @@ func Register(workingDir, dataDir string) error {
 			DataDir:      dataDir,
 			LastAccessed: now,
 			Host:         host,
+			MachineID:    mid,
 			Pinned:       pinned,
 			Locations:    locs,
 		})
@@ -291,10 +334,9 @@ func Register(workingDir, dataDir string) error {
 // removed), then the normalized path. normalized is computed by the caller
 // before taking the locks because it may run git.
 func find(list *ProjectList, path, normalized string) int {
-	host := currentHost()
 	match := func(want string) int {
 		return slices.IndexFunc(list.Projects, func(p Project) bool {
-			return p.Path == want && p.Host == host
+			return p.Path == want && p.OnThisMachine()
 		})
 	}
 	if i := match(path); i >= 0 {

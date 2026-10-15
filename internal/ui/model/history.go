@@ -18,13 +18,16 @@ type promptHistoryLoadedMsg struct {
 // loadPromptHistory loads user messages for history navigation. Both queries
 // stop at the 200 most recent entries; recall only steps back one at a time.
 func (m *UI) loadPromptHistory() tea.Cmd {
+	// Chụp session trước khi tạo closure: closure chạy ngoài luồng Update, lúc đó
+	// m.session có thể đã đổi hoặc là nil.
+	hasSession, sessionID := m.session != nil, m.currentSessionID()
 	return func() tea.Msg {
 		ctx := context.Background()
 		var messages []message.Message
 		var err error
 
-		if m.session != nil {
-			messages, err = m.com.Workspace.ListUserMessages(ctx, m.session.ID)
+		if hasSession {
+			messages, err = m.com.Workspace.ListUserMessages(ctx, sessionID)
 		} else {
 			messages, err = m.com.Workspace.ListAllUserMessages(ctx)
 		}

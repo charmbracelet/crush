@@ -21,12 +21,30 @@ t="$(mktemp -d "${TMPDIR:-/tmp}/aclideleg.XXXXXX")"
 sock_dir="$(mktemp -d /tmp/aclisock.XXXXXX)"
 bin="${AGENT_CLI_BIN:-$t/agent-cli}"
 fake_pid=
+# Dừng server agent-cli do lần chạy này dựng. Không dùng `pgrep -f "$bin server"`: -f khớp REGEX trên cả
+# dòng lệnh, nên ký tự đặc biệt trong đường dẫn (TMPDIR) khớp sai và tiến trình lạ có chứa chuỗi đó cũng
+# bị bắt. Thay vào đó lọc theo TÊN tiến trình chính xác (-x), rồi chỉ giết tiến trình có exe đúng là
+# $bin và environ mang CRUSH_GLOBAL_DATA nằm trong thư mục tạm của lần chạy này (so chuỗi, không regex).
+stop_servers() {
+  local name want p exe kv
+  name="$(basename -- "$bin")"
+  name="${name:0:15}" # tên tiến trình (comm) của kernel bị cắt ở 15 ký tự
+  want="$(readlink -f -- "$bin" 2>/dev/null)" || return 0
+  [[ -n "$want" ]] || return 0
+  for p in $(pgrep -x -- "$name" 2>/dev/null); do
+    exe="$(readlink -- "/proc/$p/exe" 2>/dev/null)" || continue
+    [[ "$exe" == "$want" ]] || continue
+    while IFS= read -r -d '' kv; do
+      if [[ "$kv" == "CRUSH_GLOBAL_DATA=$t/"* ]]; then
+        kill "$p" 2>/dev/null
+        break
+      fi
+    done 2>/dev/null <"/proc/$p/environ"
+  done
+}
 cleanup() {
   [[ -n "$fake_pid" ]] && kill "$fake_pid" 2>/dev/null
-  # Server agent-cli của lần chạy này: nhận ra qua CRUSH_GLOBAL_DATA trong environ.
-  for p in $(pgrep -f -- "$bin server"); do
-    grep -qz "^CRUSH_GLOBAL_DATA=$t/" "/proc/$p/environ" 2>/dev/null && kill "$p"
-  done
+  stop_servers
   rm -rf "$sock_dir"
   [[ -n "${KEEP_TMP:-}" ]] && echo "kept $t" || rm -rf "$t"
 }

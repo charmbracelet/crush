@@ -158,6 +158,7 @@ func (c *recordingCoordinator) RunAccepted(ctx context.Context, _ *agent.Accepte
 }
 
 func (c *recordingCoordinator) BeginAccepted(string) *agent.AcceptedRun       { return nil }
+func (c *recordingCoordinator) CancelRun(string, string)                      {}
 func (c *recordingCoordinator) Cancel(string)                                 {}
 func (c *recordingCoordinator) CancelAll()                                    {}
 func (c *recordingCoordinator) IsBusy() bool                                  { return false }

@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
@@ -29,10 +30,13 @@ import (
 
 // Common errors returned by backend operations.
 var (
-	ErrWorkspaceNotFound       = errors.New("workspace not found")
-	ErrLSPClientNotFound       = errors.New("LSP client not found")
-	ErrAgentNotInitialized     = errors.New("agent coordinator not initialized")
-	ErrAgentBusy               = errors.New("agent is busy with a run")
+	ErrWorkspaceNotFound   = errors.New("workspace not found")
+	ErrLSPClientNotFound   = errors.New("LSP client not found")
+	ErrAgentNotInitialized = errors.New("agent coordinator not initialized")
+	ErrAgentBusy           = errors.New("agent is busy with a run")
+	// ErrSessionBusy: xoá session khi nó còn lượt đang chạy hoặc xếp hàng
+	// làm run đó ghi vào một session đã mất.
+	ErrSessionBusy             = errors.New("session has a run in progress or queued; cancel it before deleting the session")
 	ErrPathRequired            = errors.New("path is required")
 	ErrInvalidPermissionAction = errors.New("invalid permission action")
 	ErrUnknownCommand          = errors.New("unknown command")
@@ -85,6 +89,13 @@ var DefaultBusyRecheckInterval = 5 * time.Second
 // CRUSH_SERVER_ORPHAN_RUN_TIMEOUT (seconds; 0 restores tearing down
 // immediately).
 var DefaultOrphanRunTimeout = 30 * time.Minute
+
+// DefaultOrphanMaxRun là trần tuyệt đối cho một run mồ côi vẫn đang tiến
+// triển (không chờ ai trả lời): DefaultOrphanRunTimeout chỉ tính khi run
+// kẹt ở lời xin quyền/câu hỏi, nên việc giao dài (send) không bị huỷ giữa
+// chừng, còn trần này chặn một run lặp vô tận giữ server mãi. Đổi bằng
+// CRUSH_SERVER_ORPHAN_MAX_RUN (giây; 0 = không trần).
+var DefaultOrphanMaxRun = 6 * time.Hour
 
 // ShutdownFunc is called when the backend needs to trigger a server
 // shutdown (e.g. when the last workspace is removed).
@@ -155,6 +166,8 @@ type Backend struct {
 	// [Backend.deferTeardownLocked].
 	busyRecheck      time.Duration
 	orphanRunTimeout time.Duration
+	// orphanMaxRun là trần tuyệt đối cho run mồ côi vẫn tiến triển.
+	orphanMaxRun time.Duration
 }
 
 // clientState tracks one client's claim on a workspace.
@@ -190,6 +203,33 @@ type clientState struct {
 	currentSessionID string
 	sessionReported  bool
 	released         bool
+	// boundRuns là các lượt client này gửi kèm BindToClient: mất claim
+	// (xoá khỏi ws.clients) thì các lượt này bị huỷ.
+	boundRuns []boundRun
+}
+
+// boundRun là một lượt gắn với đời của client đã gửi nó (agent-cli run).
+type boundRun struct{ sessionID, runID string }
+
+// cancelBoundRuns huỷ các lượt gắn với một client vừa mất claim. Gọi sau
+// khi đã nhả mọi khoá: CancelRun lấy khoá riêng của session trong agent.
+func cancelBoundRuns(ws *Workspace, runs []boundRun) {
+	if len(runs) == 0 {
+		return
+	}
+	ws.runMu.Lock()
+	var coord agent.Coordinator
+	if ws.App != nil {
+		coord = ws.AgentCoordinator
+	}
+	ws.runMu.Unlock()
+	if coord == nil {
+		return
+	}
+	for _, r := range runs {
+		slog.Info("Client that started the run is gone, cancelling it", "session_id", r.sessionID, "run_id", r.runID)
+		coord.CancelRun(r.sessionID, r.runID)
+	}
 }
 
 // Workspace represents a running [app.App] workspace with its
@@ -240,6 +280,9 @@ type Workspace struct {
 	// clientsMu and cleared as soon as a client claims the workspace again.
 	teardownRecheck *time.Timer
 	orphanedAt      time.Time
+	// stuckSince là lúc run mồ côi bắt đầu chờ một lời xin quyền/câu hỏi mà
+	// không còn client nào trả lời; zero khi nó đang tiến triển.
+	stuckSince time.Time
 
 	// rootCache memoizes [Backend.RootSessionID] resolutions, keyed by
 	// session ID. Session parentage is fixed at creation, so entries
@@ -317,6 +360,7 @@ func New(ctx context.Context, cfg *config.ConfigStore, shutdownFn ShutdownFunc) 
 
 		busyRecheck:      DefaultBusyRecheckInterval,
 		orphanRunTimeout: durationFromEnv("CRUSH_SERVER_ORPHAN_RUN_TIMEOUT", DefaultOrphanRunTimeout),
+		orphanMaxRun:     durationFromEnv("CRUSH_SERVER_ORPHAN_MAX_RUN", DefaultOrphanMaxRun),
 	}
 	b.startChannelRouter()
 	return b
@@ -700,13 +744,17 @@ func (b *Backend) RetireClient(clientID string) error {
 		b.retired = make(map[string]struct{})
 	}
 	b.retired[clientID] = struct{}{}
-	var orphaned []*Workspace
+	var (
+		orphaned []*Workspace
+		bound    = map[*Workspace][]boundRun{}
+	)
 	for _, ws := range b.workspaces.Seq2() {
 		ws.clientsMu.Lock()
 		if cs, ok := ws.clients[clientID]; ok {
 			if cs.holdTimer != nil {
 				cs.holdTimer.Stop()
 			}
+			bound[ws] = cs.boundRuns
 			delete(ws.clients, clientID)
 			if len(ws.clients) == 0 {
 				orphaned = append(orphaned, ws)
@@ -716,6 +764,9 @@ func (b *Backend) RetireClient(clientID string) error {
 	}
 	b.mu.Unlock()
 
+	for ws, runs := range bound {
+		cancelBoundRuns(ws, runs)
+	}
 	for _, ws := range orphaned {
 		b.teardown(ws)
 	}
@@ -784,9 +835,11 @@ func (b *Backend) expireHold(ws *Workspace, clientID string, timer *clientState)
 		return
 	}
 	cs.holdTimer = nil
+	runs := cs.boundRuns
 	delete(ws.clients, clientID)
 	teardown := len(ws.clients) == 0
 	ws.clientsMu.Unlock()
+	cancelBoundRuns(ws, runs)
 	if teardown {
 		b.teardown(ws)
 	}
@@ -804,7 +857,9 @@ func (b *Backend) releaseHoldLocked(ws *Workspace, clientID string) {
 		cs.holdTimer = nil
 	}
 	teardown := false
+	var runs []boundRun
 	if cs.streams == 0 {
+		runs = cs.boundRuns
 		delete(ws.clients, clientID)
 		teardown = len(ws.clients) == 0
 	} else {
@@ -814,6 +869,7 @@ func (b *Backend) releaseHoldLocked(ws *Workspace, clientID string) {
 		cs.released = true
 	}
 	ws.clientsMu.Unlock()
+	cancelBoundRuns(ws, runs)
 	if teardown {
 		b.teardown(ws)
 	}
@@ -834,6 +890,7 @@ func (b *Backend) detachStream(ws *Workspace, clientID string) {
 		cs.streams--
 	}
 	teardown := false
+	var runs []boundRun
 	if cs.streams == 0 && cs.holdTimer == nil {
 		if grace > 0 && !cs.released {
 			// The stream dropped without the client releasing its claim, so
@@ -844,11 +901,13 @@ func (b *Backend) detachStream(ws *Workspace, clientID string) {
 				b.expireHold(ws, clientID, cs)
 			})
 		} else {
+			runs = cs.boundRuns
 			delete(ws.clients, clientID)
 			teardown = len(ws.clients) == 0
 		}
 	}
 	ws.clientsMu.Unlock()
+	cancelBoundRuns(ws, runs)
 	if teardown {
 		b.teardown(ws)
 	}
@@ -918,7 +977,10 @@ func (b *Backend) teardown(ws *Workspace) {
 // deferTeardownLocked keeps an unclaimed workspace alive while its agent is
 // still running, so a client that leaves (or crashes) mid-run does not
 // cancel the work. The teardown is retried every busyRecheck and goes ahead
-// once the run has ended, or once it has run orphaned for orphanRunTimeout.
+// once the run has ended; once it has been stuck for orphanRunTimeout on a
+// permission or question prompt nobody is left to answer; or once it has
+// run orphaned for orphanMaxRun. A run that keeps making progress is not
+// cut off by orphanRunTimeout: work handed over with `send` may take longer.
 // It reports whether the teardown was deferred. Callers must hold b.mu and
 // ws.clientsMu.
 func (b *Backend) deferTeardownLocked(ws *Workspace, busy bool) bool {
@@ -929,14 +991,28 @@ func (b *Backend) deferTeardownLocked(ws *Workspace, busy bool) bool {
 	if !busy || b.orphanRunTimeout <= 0 {
 		return false
 	}
+	now := time.Now()
 	if ws.orphanedAt.IsZero() {
-		ws.orphanedAt = time.Now()
+		ws.orphanedAt = now
 		slog.Info("Last client left while a run is active, keeping workspace alive",
-			"workspace_id", ws.ID, "path", ws.Path, "orphan_timeout", b.orphanRunTimeout)
-	} else if time.Since(ws.orphanedAt) >= b.orphanRunTimeout {
-		slog.Warn("Run still active with no client after the orphan timeout, tearing workspace down",
-			"workspace_id", ws.ID, "path", ws.Path, "orphan_timeout", b.orphanRunTimeout)
-		return false
+			"workspace_id", ws.ID, "path", ws.Path, "orphan_timeout", b.orphanRunTimeout, "orphan_max_run", b.orphanMaxRun)
+	}
+	if ws.awaitingAnswer() {
+		if ws.stuckSince.IsZero() {
+			ws.stuckSince = now
+		}
+		if now.Sub(ws.stuckSince) >= b.orphanRunTimeout {
+			slog.Warn("Run blocked on a prompt nobody can answer past the orphan timeout, tearing workspace down",
+				"workspace_id", ws.ID, "path", ws.Path, "orphan_timeout", b.orphanRunTimeout)
+			return false
+		}
+	} else {
+		ws.stuckSince = time.Time{}
+		if b.orphanMaxRun > 0 && now.Sub(ws.orphanedAt) >= b.orphanMaxRun {
+			slog.Warn("Run still active with no client past the orphan max run time, tearing workspace down",
+				"workspace_id", ws.ID, "path", ws.Path, "orphan_max_run", b.orphanMaxRun)
+			return false
+		}
 	}
 	// A stale firing is harmless: teardown re-checks everything under the
 	// locks and ignores a workspace that is already gone.
@@ -961,6 +1037,26 @@ func (w *Workspace) cancelDeferredTeardownLocked() {
 		w.teardownRecheck = nil
 	}
 	w.orphanedAt = time.Time{}
+	w.stuckSince = time.Time{}
+}
+
+// awaitingAnswer cho biết run đang chờ một lời xin quyền hay câu hỏi: khi
+// không còn client nào thì không ai trả lời được, run không tự tiến tiếp.
+func (w *Workspace) awaitingAnswer() bool {
+	if w.App == nil {
+		return false
+	}
+	if w.Permissions != nil {
+		if _, ok := w.Permissions.ActiveRequest(); ok {
+			return true
+		}
+	}
+	if w.Questions != nil {
+		if _, ok := w.Questions.Pending(); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // scheduleShutdownIfIdleLocked decides what to do about server shutdown
@@ -1161,8 +1257,38 @@ func (b *Backend) Shutdown() {
 	b.closing = true
 	fn := b.shutdownFn
 	b.mu.Unlock()
+	b.ShutdownWorkspaces()
 	if fn != nil {
 		fn()
+	}
+}
+
+// ShutdownWorkspaces tears down every workspace still hosted, so a server
+// told to stop persists the work in flight instead of dropping it.
+//
+// Without this, stopping a server that is hosting live workspaces skips the
+// per-workspace teardown: agent runs are never cancelled, the writes that
+// record an interruption never happen, and the sessions are left looking
+// like a tool call is still waiting for an answer. Teardown is what turns an
+// interruption into a recorded one. (Port upstream b1b34091; fork exports it
+// so the server's signal path uses it too.)
+func (b *Backend) ShutdownWorkspaces() {
+	// Gỡ khỏi bảng và chốt closing dưới khoá trước: một client rời (hết
+	// detach grace) trong lúc này không dừng cùng workspace lần nữa.
+	b.mu.Lock()
+	b.closing = true
+	var wss []*Workspace
+	for _, ws := range b.workspaces.Seq2() {
+		wss = append(wss, ws)
+		if existing, ok := b.pathIndex[ws.resolvedPath]; ok && existing == ws.ID {
+			delete(b.pathIndex, ws.resolvedPath)
+		}
+		b.workspaces.Del(ws.ID)
+	}
+	b.mu.Unlock()
+	for _, ws := range wss {
+		slog.Info("Shutting down workspace", "workspace", ws.ID)
+		ws.invokeShutdown()
 	}
 }
 
@@ -1262,7 +1388,13 @@ func logFirstWinsMismatch(existing *Workspace, args proto.Workspace) {
 		stringSlicesEqual(existingChannels, args.Channels) {
 		return
 	}
-	slog.Debug(
+	// Lệch YOLO đổi chuyện hỏi quyền nên ghi Warn; client cũng tự cảnh báo
+	// (cmd: yoloMismatchWarning) vì phản hồi mang cờ YOLO thật.
+	logf := slog.Debug
+	if existingYOLO != args.YOLO {
+		logf = slog.Warn
+	}
+	logf(
 		"Workspace flag mismatch on duplicate create; first wins",
 		"workspace_id", existing.ID,
 		"path", existing.Path,

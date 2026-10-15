@@ -10,13 +10,15 @@ import (
 var altW = tea.KeyPressMsg{Code: 'w', Mod: tea.ModAlt}
 
 // Alt+W leaves the workspace for Home: the TUI quits and flags it, without
-// cancelling the run or typing into the editor.
+// cancelling the run or typing into the editor. Ở chế độ client/server (đây là
+// serverModeWS) server giữ run chạy, nên thoát ngay cả khi agent đang bận.
 func TestAltWQuitsToHomeWithoutCancel(t *testing.T) {
 	t.Parallel()
 
 	for _, focus := range []uiFocusState{uiFocusEditor, uiFocusMain} {
 		ws := &countingWorkspace{ready: true, agentBusy: true, sessions: makeSessions(2)}
 		m := newPanelUI(ws)
+		m.com.Workspace = serverModeWS{ws}
 		m.focus = focus
 		m.textarea.SetValue("draft")
 

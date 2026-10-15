@@ -152,6 +152,41 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 			Fails(400, 404, 500).
 			Handle(c.handlePutWorkspaceSession),
 
+		apigen.Get("/v1/workspaces/{id}/jobs").
+			Summary("List jobs").
+			Description("Bash commands the agent ran in this workspace: running first, then recently finished; newest first in each group.").
+			Tags("jobs").
+			PathParam("id", "Workspace ID").
+			Fails(404, 500).
+			Handle(c.handleGetWorkspaceJobs),
+
+		apigen.Get("/v1/workspaces/{id}/jobs/{jid}/output").
+			Summary("Get job output").
+			Tags("jobs").
+			PathParam("id", "Workspace ID").
+			PathParam("jid", "Job ID").
+			Responds(proto.JobOutput{}).
+			Fails(404, 500).
+			Handle(c.handleGetWorkspaceJobOutput),
+
+		apigen.Post("/v1/workspaces/{id}/jobs/{jid}/kill").
+			Summary("Kill job").
+			Tags("jobs").
+			PathParam("id", "Workspace ID").
+			PathParam("jid", "Job ID").
+			Fails(404, 500).
+			Handle(c.handlePostWorkspaceJobKill),
+
+		apigen.Post("/v1/workspaces/{id}/sessions/{sid}/rename").
+			Summary("Rename session").
+			Description("Changes only the session title, atomically; other fields (cost, tokens) are untouched.").
+			Tags("sessions").
+			PathParam("id", "Workspace ID").
+			PathParam("sid", "Session ID").
+			Accepts(proto.SessionRename{}).
+			Fails(400, 404, 500).
+			Handle(c.handlePostWorkspaceSessionRename),
+
 		apigen.Delete("/v1/workspaces/{id}/sessions/{sid}").
 			Summary("Delete session").
 			Tags("sessions").
@@ -376,6 +411,16 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 			PathParam("sid", "Session ID").
 			Fails(404, 500).
 			Handle(c.handlePostWorkspaceAgentSessionCancel),
+
+		apigen.Post("/v1/workspaces/{id}/agent/sessions/{sid}/runs/{rid}/cancel").
+			Summary("Cancel one run").
+			Description("Cancels only the run with this RunID: the active turn if it is that run, otherwise its queued prompt, otherwise it is cancelled on arrival. Other turns and queued prompts of the session are untouched.").
+			Tags("agent").
+			PathParam("id", "Workspace ID").
+			PathParam("sid", "Session ID").
+			PathParam("rid", "Run ID passed to SendMessage").
+			Fails(404, 500).
+			Handle(c.handlePostWorkspaceAgentRunCancel),
 
 		apigen.Get("/v1/workspaces/{id}/agent/sessions/{sid}/prompts/queued").
 			Summary("Get queued prompt status").

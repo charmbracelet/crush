@@ -161,13 +161,13 @@ func TestRunStream_ErrorRunComplete(t *testing.T) {
 	require.Contains(t, err.Error(), "model temporarily unavailable")
 }
 
-// TestRunStream_CancelledRunCompleteIsClean ensures a cancelled
-// run (e.g. Ctrl+C while `crush run` waits) exits cleanly rather
+// TestRunStream_CancelledRunCompleteIsClean ensures a run this process
+// cancelled itself (Ctrl+C while `crush run` waits) exits cleanly rather
 // than reporting the cancellation as a failure.
 func TestRunStream_CancelledRunCompleteIsClean(t *testing.T) {
 	t.Parallel()
 
-	s := &runStream{sessionID: "S", out: &bytes.Buffer{}, read: map[string]int{}}
+	s := &runStream{sessionID: "S", out: &bytes.Buffer{}, read: map[string]int{}, selfCancelled: func() bool { return true }}
 	done, err := s.handle(pubsub.Event[proto.RunComplete]{Payload: proto.RunComplete{
 		SessionID: "S",
 		Error:     "context canceled",
@@ -175,6 +175,45 @@ func TestRunStream_CancelledRunCompleteIsClean(t *testing.T) {
 	}}, nil)
 	require.True(t, done)
 	require.NoError(t, err)
+}
+
+// Lượt bị huỷ ở nơi khác (Esc ở TUI gỡ prompt xếp hàng, server tắt) chưa
+// xong: run in phần đã có rồi báo lỗi, không thoát rc 0 như đã xong.
+func TestRunStream_CancelledElsewhereIsAnError(t *testing.T) {
+	t.Parallel()
+
+	out := &bytes.Buffer{}
+	s := &runStream{sessionID: "S", out: out, read: map[string]int{}, selfCancelled: func() bool { return false }}
+	done, err := s.handle(pubsub.Event[proto.RunComplete]{Payload: proto.RunComplete{
+		SessionID: "S",
+		MessageID: "m1",
+		Text:      "partial",
+		Cancelled: true,
+	}}, nil)
+	require.True(t, done)
+	require.ErrorIs(t, err, errRunCancelledElsewhere)
+	require.Equal(t, "partial", out.String())
+}
+
+// Không duyệt được quyền, hoặc không biết yêu cầu là của session nào: run
+// không đi tiếp được, phải bỏ (và huỷ lượt của nó) thay vì treo.
+func TestRunStream_UnresolvableOrUngrantablePromptAbandons(t *testing.T) {
+	t.Parallel()
+
+	s := &runStream{
+		sessionID: "S", out: &bytes.Buffer{}, read: map[string]int{},
+		rootOf: func(string) (string, error) { return "", errors.New("session lookup failed") },
+		grant:  func(proto.PermissionRequest) error { return errors.New("server said no") },
+	}
+	var ae *abandonError
+	done, err := s.handle(pubsub.Event[proto.PermissionRequest]{Payload: proto.PermissionRequest{SessionID: "child"}}, nil)
+	require.True(t, done)
+	require.ErrorAs(t, err, &ae)
+
+	done, err = s.handle(pubsub.Event[proto.PermissionRequest]{Payload: proto.PermissionRequest{SessionID: "S"}}, nil)
+	require.True(t, done)
+	require.ErrorAs(t, err, &ae)
+	require.ErrorContains(t, err, "failed to approve tool permission")
 }
 
 // TestRunStream_LeadingWhitespaceTrimmedOnce mirrors the
@@ -462,7 +501,7 @@ func TestRunStream_PromptOnOtherSessionIgnored(t *testing.T) {
 	var granted []string
 	s := &runStream{
 		sessionID: "S", out: &bytes.Buffer{}, read: map[string]int{},
-		rootOf: func(id string) string { return roots[id] },
+		rootOf: func(id string) (string, error) { return roots[id], nil },
 		grant:  func(r proto.PermissionRequest) error { granted = append(granted, r.SessionID); return nil },
 	}
 	for _, sid := range []string{"X", "other-child", "", "unknown"} {

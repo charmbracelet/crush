@@ -8,6 +8,7 @@ package home
 import (
 	"cmp"
 	"context"
+	"fmt"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -26,8 +27,13 @@ const (
 	RecentLimit = 5
 	// SessionLimit caps the sessions listed for one workspace.
 	SessionLimit = 50
-	// probeBudget bounds one probe of all servers, and one session listing.
+	// probeBudget bounds one probe of all servers, one session listing and one
+	// load of the workspace registry.
 	probeBudget = 3 * time.Second
+	// probeInterval is the pause between probes of the servers while the
+	// workspace list is shown, so a server that starts or stops (or a run that
+	// ends) is reflected without leaving Home.
+	probeInterval = 5 * time.Second
 )
 
 // Workspace is a registered workspace of this host.
@@ -163,6 +169,8 @@ type (
 		err error
 	}
 	changedMsg struct{ err error }
+	// probeTickMsg means it is time to probe the servers again.
+	probeTickMsg struct{}
 )
 
 // Model is the Home program.
@@ -184,7 +192,10 @@ type Model struct {
 
 	workspaces []Workspace
 	loaded     bool
-	probing    bool
+	probing    bool            // A probe is in flight.
+	tickArmed  bool            // A probeTickMsg timer is outstanding.
+	probeEvery time.Duration   // Pause between probes; 0 probes once per registry load.
+	budget     time.Duration   // Bound of one registry load.
 	live       map[string]Live // nil until the probe returns.
 
 	ws             Workspace // The workspace whose sessions are listed.
@@ -206,7 +217,7 @@ func New(src Source, sty *styles.Styles, cwd string) *Model {
 	in.SetVirtualCursor(false)
 	in.SetStyles(sty.TextInput)
 	in.Focus()
-	m := &Model{src: src, sty: sty, cwd: cwd, input: in}
+	m := &Model{src: src, sty: sty, cwd: cwd, input: in, probeEvery: probeInterval, budget: probeBudget}
 	m.setSize(80, 24)
 	m.setScreen(screenWorkspaces)
 	m.rebuild()
@@ -233,19 +244,30 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.setSize(msg.Width, msg.Height)
 	case workspacesMsg:
-		m.loaded, m.workspaces = true, msg.list
 		if msg.err != nil {
 			m.note = "Cannot read the workspace list: " + msg.err.Error()
+			// A failed reload (a timeout, say) keeps the list on screen; only a
+			// first load that failed shows the empty state.
+			if !m.loaded {
+				m.loaded, m.workspaces = true, nil
+			}
+		} else {
+			m.loaded, m.workspaces = true, msg.list
 		}
 		if !m.probing {
 			m.probing = true
-			cmd = m.probe(msg.list)
+			cmd = m.probe(m.workspaces)
 		}
 	case liveMsg:
+		m.probing = false
 		m.live = msg.live
 		if m.live == nil {
 			m.live = map[string]Live{}
 		}
+		cmd = m.armProbeTick()
+	case probeTickMsg:
+		// Nothing to redraw by itself: a probe's answer redraws when it lands.
+		return m, m.onProbeTick()
 	case sessionsMsg:
 		if m.screen != screenSessions || msg.path != m.ws.Path {
 			return m, nil // Stale: the user moved on.
@@ -416,9 +438,29 @@ func (m *Model) openWorkspace(ws Workspace) tea.Cmd {
 	}
 }
 
+// loadWorkspaces reads the registry within the load budget. The Source gets a
+// context with that deadline, but it may stat paths on a dead mount and never
+// look at it, so the wait itself is bounded too: a late answer is dropped and
+// the goroutine ends whenever the Source returns.
 func (m *Model) loadWorkspaces() tea.Msg {
-	list, err := m.src.Workspaces(context.Background())
-	return workspacesMsg{list: list, err: err}
+	budget := cmp.Or(m.budget, probeBudget)
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
+	defer cancel()
+	type result struct {
+		list []Workspace
+		err  error
+	}
+	src, answer := m.src, make(chan result, 1)
+	go func() {
+		list, err := src.Workspaces(ctx)
+		answer <- result{list, err}
+	}()
+	select {
+	case r := <-answer:
+		return workspacesMsg{list: r.list, err: r.err}
+	case <-ctx.Done():
+		return workspacesMsg{err: fmt.Errorf("reading the registry took longer than %s", budget)}
+	}
 }
 
 func (m *Model) probe(list []Workspace) tea.Cmd {
@@ -432,6 +474,31 @@ func (m *Model) probe(list []Workspace) tea.Cmd {
 		defer cancel()
 		return liveMsg{src.Probe(ctx, paths)}
 	}
+}
+
+// armProbeTick schedules the next probe, unless probing is off or a timer is
+// already outstanding.
+func (m *Model) armProbeTick() tea.Cmd {
+	if m.probeEvery <= 0 || m.tickArmed {
+		return nil
+	}
+	m.tickArmed = true
+	return tea.Tick(m.probeEvery, func(time.Time) tea.Msg { return probeTickMsg{} })
+}
+
+// onProbeTick probes the servers again while the workspace list is shown and no
+// probe is running. Off the list (sessions, path entry) it only keeps the timer
+// going; a probe in flight re-arms it when its answer lands.
+func (m *Model) onProbeTick() tea.Cmd {
+	m.tickArmed = false
+	switch {
+	case m.probing:
+		return nil
+	case m.screen != screenWorkspaces || !m.loaded:
+		return m.armProbeTick()
+	}
+	m.probing = true
+	return m.probe(m.workspaces)
 }
 
 func (m *Model) add(dir string) tea.Cmd {

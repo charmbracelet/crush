@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/charmbracelet/crush/internal/backend"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/google/uuid"
 )
 
@@ -372,6 +374,59 @@ func (c *controllerV1) handlePutWorkspaceSession(w http.ResponseWriter, r *http.
 	jsonEncode(w, out)
 }
 
+// handlePostWorkspaceSessionRename đổi tên session (chỉ tiêu đề).
+func (c *controllerV1) handlePostWorkspaceSessionRename(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	sid := r.PathValue("sid")
+	var req proto.SessionRename
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		c.server.logError(r, "Failed to decode request", "error", err)
+		jsonError(w, http.StatusBadRequest, "failed to decode request")
+		return
+	}
+	if strings.TrimSpace(req.Title) == "" {
+		jsonError(w, http.StatusBadRequest, "title is required")
+		return
+	}
+	if err := c.backend.RenameSession(r.Context(), id, sid, req.Title); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+// handleGetWorkspaceJobs liệt kê job của workspace.
+func (c *controllerV1) handleGetWorkspaceJobs(w http.ResponseWriter, r *http.Request) {
+	jobs, err := c.backend.ListJobs(r.PathValue("id"))
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	if jobs == nil {
+		jobs = []shell.JobInfo{}
+	}
+	jsonEncode(w, jobs)
+}
+
+// handleGetWorkspaceJobOutput trả output của một job.
+func (c *controllerV1) handleGetWorkspaceJobOutput(w http.ResponseWriter, r *http.Request) {
+	out, err := c.backend.JobOutput(r.PathValue("id"), r.PathValue("jid"))
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	jsonEncode(w, proto.JobOutput{Output: out})
+}
+
+// handlePostWorkspaceJobKill dừng một job.
+func (c *controllerV1) handlePostWorkspaceJobKill(w http.ResponseWriter, r *http.Request) {
+	if err := c.backend.KillJob(r.Context(), r.PathValue("id"), r.PathValue("jid")); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
 // handleDeleteWorkspaceSession deletes a session.
 func (c *controllerV1) handleDeleteWorkspaceSession(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
@@ -581,6 +636,18 @@ func (c *controllerV1) handlePostWorkspaceAgentSessionCancel(w http.ResponseWrit
 	id := r.PathValue("id")
 	sid := r.PathValue("sid")
 	if err := c.backend.CancelSession(id, sid); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+// handlePostWorkspaceAgentRunCancel huỷ đúng một lượt theo RunID.
+func (c *controllerV1) handlePostWorkspaceAgentRunCancel(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	sid := r.PathValue("sid")
+	rid := r.PathValue("rid")
+	if err := c.backend.CancelRun(id, sid, rid); err != nil {
 		c.handleError(w, r, err)
 		return
 	}
@@ -798,16 +865,16 @@ func (c *controllerV1) handleGetWorkspacePermissionsAcceptEdits(w http.ResponseW
 func (c *controllerV1) handleError(w http.ResponseWriter, r *http.Request, err error) {
 	status := http.StatusInternalServerError
 	switch {
-	case errors.Is(err, backend.ErrWorkspaceNotFound):
+	case errors.Is(err, backend.ErrWorkspaceNotFound), errors.Is(err, backend.ErrJobNotFound):
 		status = http.StatusNotFound
 	case errors.Is(err, backend.ErrLSPClientNotFound):
 		status = http.StatusNotFound
 	case errors.Is(err, backend.ErrAgentNotInitialized):
 		status = http.StatusBadRequest
-	case errors.Is(err, backend.ErrAgentBusy):
+	case errors.Is(err, backend.ErrAgentBusy), errors.Is(err, backend.ErrSessionBusy):
 		// Switching the main agent mid-run could strand the run's
 		// queued prompts on the previous agent; mirror the TUI's
-		// own busy guard for API callers.
+		// own busy guard for API callers. Xoá session đang chạy cũng vậy.
 		status = http.StatusConflict
 	case errors.Is(err, backend.ErrPathRequired):
 		status = http.StatusBadRequest

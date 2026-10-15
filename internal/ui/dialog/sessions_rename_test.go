@@ -10,16 +10,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// renameWorkspace trả session "mới nhất" từ GetSession và ghi lại mọi lần lưu.
+// renameWorkspace ghi lại mọi lần đổi tên và mọi lần ghi cả hàng.
 type renameWorkspace struct {
 	workspace.Workspace
 
-	fresh session.Session
-	saved []session.Session
+	renamed []string
+	saved   []session.Session
 }
 
-func (w *renameWorkspace) GetSession(context.Context, string) (session.Session, error) {
-	return w.fresh, nil
+func (w *renameWorkspace) RenameSession(_ context.Context, id, title string) error {
+	w.renamed = append(w.renamed, id+"="+title)
+	return nil
 }
 
 func (w *renameWorkspace) SaveSession(_ context.Context, s session.Session) (session.Session, error) {
@@ -27,24 +28,17 @@ func (w *renameWorkspace) SaveSession(_ context.Context, s session.Session) (ses
 	return s, nil
 }
 
-// Session nền vẫn chạy trong lúc dialog mở: đổi tên chỉ được đổi tiêu đề,
-// không được ghi đè cost/token/todos/summary bằng bản chụp lúc mở dialog.
-func TestRenameSessionKeepsFreshState(t *testing.T) {
+// Session nền vẫn chạy trong lúc dialog mở: đổi tên chỉ đổi tiêu đề (một lời
+// gọi nguyên tử), không ghi lại cả hàng bằng bản chụp lúc mở dialog, kẻo đè
+// cost/token/todos/summary mà run nền vừa ghi.
+func TestRenameSessionChangesOnlyTheTitle(t *testing.T) {
 	t.Parallel()
 
-	ws := &renameWorkspace{fresh: session.Session{
-		ID: "s1", Title: "old", Cost: 2.5, PromptTokens: 900,
-		SummaryMessageID: "m9", Todos: []session.Todo{{Content: "ship"}},
-	}}
+	ws := &renameWorkspace{}
 	d := &Session{com: &common.Common{Workspace: ws}}
 	stale := session.Session{ID: "s1", Title: "new", Cost: 0.1, PromptTokens: 10}
 
 	require.Nil(t, d.updateSessionCmd(stale)())
-	require.Len(t, ws.saved, 1)
-	got := ws.saved[0]
-	require.Equal(t, "new", got.Title)
-	require.Equal(t, 2.5, got.Cost)
-	require.EqualValues(t, 900, got.PromptTokens)
-	require.Equal(t, "m9", got.SummaryMessageID)
-	require.Len(t, got.Todos, 1)
+	require.Equal(t, []string{"s1=new"}, ws.renamed)
+	require.Empty(t, ws.saved, "renaming must not rewrite the whole row")
 }

@@ -46,17 +46,23 @@ func getRgCmd(ctx context.Context, globPattern string) *exec.Cmd {
 	return exec.CommandContext(ctx, name, args...)
 }
 
-func getRgSearchCmd(ctx context.Context, pattern, path, include string) *exec.Cmd {
+func getRgSearchCmd(ctx context.Context, pattern, path, include string, ignoreFiles ...string) *exec.Cmd {
 	name := getRg()
 	if name == "" {
 		return nil
 	}
 	// Use -n to show line numbers, -0 for null separation to handle Windows paths
-	args := []string{"--json", "-H", "-n", "-0", pattern}
+	args := []string{"--json", "-H", "-n", "-0"}
 	if include != "" {
-		args = append(args, "--glob", include)
+		args = append(args, "--glob="+include)
 	}
-	args = append(args, path)
+	for _, f := range ignoreFiles {
+		args = append(args, "--ignore-file="+f)
+	}
+	// Pattern do model viết: đưa qua -e và chặn cờ bằng "--", nếu không một
+	// pattern như "--pre=<chương trình>" khiến rg chạy chương trình đó trên mọi
+	// tệp mà không qua hỏi quyền.
+	args = append(args, "-e", pattern, "--", path)
 
 	return exec.CommandContext(ctx, name, args...)
 }

@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"image/color"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -14,10 +15,13 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 	"unicode"
 
@@ -30,6 +34,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/event"
+	"github.com/charmbracelet/crush/internal/herdr"
 	"github.com/charmbracelet/crush/internal/lock"
 	crushlog "github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/projects"
@@ -40,11 +45,11 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/exitbanner"
 	ui "github.com/charmbracelet/crush/internal/ui/model"
+	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/crush/internal/workspace"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/charmbracelet/x/exp/charmtone"
 	xstrings "github.com/charmbracelet/x/exp/strings"
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
@@ -54,9 +59,9 @@ var clientHost string
 
 func init() {
 	rootCmd.PersistentFlags().StringP("cwd", "c", "", "Current working directory")
-	rootCmd.PersistentFlags().StringP("data-dir", "D", "", "Custom crush data directory")
+	rootCmd.PersistentFlags().StringP("data-dir", "D", "", "Custom agent-cli data directory")
 	rootCmd.PersistentFlags().BoolP("debug", "d", false, "Debug")
-	rootCmd.PersistentFlags().StringVarP(&clientHost, "host", "H", server.DefaultHost(), "Connect to a specific crush server host (for advanced users)")
+	rootCmd.PersistentFlags().StringVarP(&clientHost, "host", "H", server.DefaultHost(), "Connect to a specific agent-cli server host (for advanced users)")
 	rootCmd.Flags().BoolP("help", "h", false, "Help")
 	rootCmd.Flags().BoolP("yolo", "y", false, "Automatically accept all permissions (dangerous mode)")
 	rootCmd.PersistentFlags().StringSlice("channels", nil, "MCP servers to enable as channels (repeatable), e.g. --channels server:webhook")
@@ -160,12 +165,19 @@ agent-cli --continue
 		)
 		go ws.Subscribe(program)
 
+		// Đóng terminal, tmux kill-pane, SSH rớt (SIGHUP): Bubble Tea không
+		// bắt tín hiệu này nên tiến trình chết ngay và draft chưa gửi của mọi
+		// session mất. Bắt nó để thoát êm: Run trả về rồi SaveDrafts chạy như
+		// khi thoát bình thường.
+		stopHangup := quitOnHangup(program)
 		_, runErr := program.Run()
 		// Keep what the user was typing for the next start (blocking IO is
-		// fine here: the program has exited).
+		// fine here: the program has exited). Gỡ việc bắt SIGHUP SAU khi lưu:
+		// SIGHUP thứ hai trong lúc lưu không giết tiến trình giữa chừng.
 		if err := model.SaveDrafts(); err != nil {
 			slog.Warn("Failed to save drafts", "error", err)
 		}
+		stopHangup()
 		if err := runErr; err != nil {
 			event.Error(err)
 			slog.Error("TUI run error", "error", err)
@@ -184,7 +196,7 @@ agent-cli --continue
 	},
 }
 
-var heartbit = lipgloss.NewStyle().Foreground(charmtone.Dolly).SetString(`
+var heartbit = lipgloss.NewStyle().Foreground(styles.ColorAccent).SetString(`
     ▄▄▄▄▄▄▄▄    ▄▄▄▄▄▄▄▄
   ███████████  ███████████
 ████████████████████████████
@@ -238,19 +250,120 @@ func Execute() {
 		_, _ = w.WriteString(heartbit.String())
 		rootCmd.SetVersionTemplate(b.String() + "\n" + defaultVersionTemplate)
 	}
+	markUsageErrors(rootCmd)
 	if err := fang.Execute(
 		context.Background(),
 		rootCmd,
 		fang.WithVersion(version.Version),
 		fang.WithNotifySignal(os.Interrupt),
+		fang.WithColorSchemeFunc(helpColorScheme),
 	); err != nil {
-		var ue *usageError
-		// Cobra flag-group violations (e.g. -s with -C) are usage errors too.
-		if errors.As(err, &ue) || strings.HasPrefix(err.Error(), "if any flags in the group") {
+		if isUsageError(err) {
 			os.Exit(2)
 		}
 		os.Exit(1)
 	}
+}
+
+// yoloMismatchWarning trả lời cảnh báo khi chế độ YOLO của workspace trên
+// server khác chế độ người gọi xin (rỗng khi khớp).
+func yoloMismatchWarning(requested, actual bool) string {
+	switch {
+	case actual && !requested:
+		return "warning: this project's agent-cli server is already in YOLO mode (started by an earlier client): tool permission prompts are skipped. Close every agent-cli of this project to restart it without --yolo."
+	case requested && !actual:
+		return "warning: --yolo was ignored: this project's agent-cli server is already running without it. Close every agent-cli of this project to restart it with --yolo."
+	}
+	return ""
+}
+
+// helpColorScheme tô help và lỗi của CLI bằng bảng màu Everforest Dark v2 (theme
+// mặc định), thay bảng Charmtone của fang. Theme chỉ có bản tối.
+func helpColorScheme(lipgloss.LightDarkFunc) fang.ColorScheme {
+	return fang.ColorScheme{
+		Base:           styles.ColorFgBase,
+		Title:          styles.ColorAccent,
+		Description:    styles.ColorFgMuted,
+		Codeblock:      styles.ColorBgRaised,
+		Program:        styles.ColorAccent,
+		DimmedArgument: styles.ColorFgSubtle,
+		Comment:        styles.ColorFgSubtle,
+		Flag:           styles.ColorSuccess,
+		FlagDefault:    styles.ColorFgSubtle,
+		Command:        styles.ColorAccent,
+		QuotedString:   styles.ColorWarning,
+		Argument:       styles.ColorFgBase,
+		Help:           styles.ColorFgMuted,
+		Dash:           styles.ColorFgSubtle,
+		ErrorHeader:    [2]color.Color{styles.ColorBgBase, styles.ColorError},
+		ErrorDetails:   styles.ColorError,
+	}
+}
+
+// quitOnHangup cho program thoát êm khi nhận SIGHUP; hàm trả về gỡ việc bắt
+// tín hiệu (gọi sau khi Run trả về).
+func quitOnHangup(program *tea.Program) (stop func()) {
+	if signal.Ignored(syscall.SIGHUP) {
+		// Chạy dưới nohup: Notify sẽ bật lại SIGHUP đang bị bỏ qua.
+		return func() {}
+	}
+	hup := make(chan os.Signal, 1)
+	signal.Notify(hup, syscall.SIGHUP)
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-hup:
+			program.Quit()
+		case <-done:
+		}
+	}()
+	return func() {
+		signal.Stop(hup)
+		close(done)
+	}
+}
+
+// markUsageErrors gắn usageError cho lỗi cú pháp của MỌI lệnh (cờ sai, số
+// tham số sai), không chỉ run/send, để mọi lệnh trả mã 2 khi gọi sai và mã 1
+// khi chạy lỗi: script phân biệt được hai trường hợp.
+func markUsageErrors(c *cobra.Command) {
+	c.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return &usageError{err} })
+	// Nhóm lệnh (vd `session`) không tự chạy: cobra coi lệnh con gõ sai là
+	// tham số, in trợ giúp rồi thoát 0 (và bỏ qua Args). Cho nó tự chạy: không
+	// tham số thì vẫn in trợ giúp, lệnh con lạ thì là lỗi cú pháp.
+	if !c.Runnable() && c.HasSubCommands() {
+		c.RunE = func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return cmd.Help()
+			}
+			return &usageError{fmt.Errorf("unknown command %q for %q", args[0], cmd.CommandPath())}
+		}
+	}
+	if args := c.Args; args != nil {
+		c.Args = func(cmd *cobra.Command, a []string) error {
+			if err := args(cmd, a); err != nil {
+				return &usageError{err}
+			}
+			return nil
+		}
+	}
+	for _, sub := range c.Commands() {
+		markUsageErrors(sub)
+	}
+}
+
+// cobraUsagePrefixes là lỗi cú pháp cobra tạo ở chỗ không có hook để bọc
+// (lệnh con sai tên, vi phạm nhóm cờ như -s với -C, thiếu cờ bắt buộc).
+var cobraUsagePrefixes = []string{"unknown command ", "if any flags in the group", "required flag(s) "}
+
+// isUsageError cho biết err là lỗi gọi sai lệnh (mã thoát 2).
+func isUsageError(err error) bool {
+	var ue *usageError
+	if errors.As(err, &ue) {
+		return true
+	}
+	msg := err.Error()
+	return slices.ContainsFunc(cobraUsagePrefixes, func(p string) bool { return strings.HasPrefix(msg, p) })
 }
 
 // supportsProgressBar tries to determine whether the current terminal supports
@@ -468,6 +581,13 @@ func connectToServer(cmd *cobra.Command) (*client.Client, *proto.Workspace, func
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	// Workspace đã có trên server (client khác mở trước, hoặc còn run mồ côi)
+	// giữ cờ của lần tạo đầu: nói rõ khi YOLO khác ý người gọi, vì nó quyết
+	// định có hỏi quyền hay không.
+	if msg := yoloMismatchWarning(yolo, ws.YOLO); msg != "" {
+		fmt.Fprintln(os.Stderr, msg)
+		slog.Warn(msg)
+	}
 
 	if shouldEnableMetrics(ws.Config) {
 		event.Init()
@@ -532,7 +652,7 @@ func replaceExitingServer(cmd *cobra.Command, hostURL *url.URL) error {
 		}
 	}
 	if err := spawnAndWaitReady(cmd, hostURL); err != nil {
-		return fmt.Errorf("failed to initialize crush server: %v", err)
+		return fmt.Errorf("failed to initialize agent-cli server: %v", err)
 	}
 	return nil
 }
@@ -596,13 +716,13 @@ func ensureServer(cmd *cobra.Command, hostURL *url.URL) error {
 
 		if needsStart {
 			if err := spawnAndWaitReady(cmd, hostURL); err != nil {
-				return fmt.Errorf("failed to initialize crush server: %v", err)
+				return fmt.Errorf("failed to initialize agent-cli server: %v", err)
 			}
 			return nil
 		}
 
 		if err := waitForServerReady(cmd.Context(), hostURL); err != nil {
-			return fmt.Errorf("failed to initialize crush server: %v", err)
+			return fmt.Errorf("failed to initialize agent-cli server: %v", err)
 		}
 	}
 
@@ -922,6 +1042,9 @@ func startDetachedServer(cmd *cobra.Command, hostURL *url.URL) error {
 	// DETACHED_PROCESS on windows) is what truly detaches the child from
 	// this process's lifetime.
 	c := exec.CommandContext(context.Background(), exe, cmdArgs...)
+	// Server không báo trạng thái về pane herdr của client đã dựng nó: client
+	// TUI báo thay qua luồng sự kiện; hai nguồn cùng pane thì tranh nhau.
+	c.Env = herdr.StripEnv(os.Environ())
 	stdoutPath := filepath.Join(chDir, "stdout.log")
 	stderrPath := filepath.Join(chDir, serverStderrLogName)
 	detachProcess(c)
@@ -941,11 +1064,11 @@ func startDetachedServer(cmd *cobra.Command, hostURL *url.URL) error {
 	c.Stderr = stderr
 
 	if err := c.Start(); err != nil {
-		return fmt.Errorf("failed to start crush server: %v", err)
+		return fmt.Errorf("failed to start agent-cli server: %v", err)
 	}
 
 	if err := c.Process.Release(); err != nil {
-		return fmt.Errorf("failed to detach crush server process: %v", err)
+		return fmt.Errorf("failed to detach agent-cli server process: %v", err)
 	}
 
 	return nil

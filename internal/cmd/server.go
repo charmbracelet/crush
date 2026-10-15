@@ -23,6 +23,10 @@ func init() {
 	rootCmd.AddCommand(serverCmd)
 }
 
+// workspaceShutdownTimeout giới hạn việc dừng các workspace khi server nhận
+// tín hiệu dừng.
+const workspaceShutdownTimeout = 15 * time.Second
+
 var serverCmd = &cobra.Command{
 	Use:   "server",
 	Short: "Start the agent-cli server",
@@ -60,17 +64,30 @@ var serverCmd = &cobra.Command{
 
 		errch := make(chan error, 1)
 		sigch := make(chan os.Signal, 1)
-		sigs := []os.Signal{os.Interrupt}
-		sigs = append(sigs, addSignals(sigs)...)
-		signal.Notify(sigch, sigs...)
+		signal.Notify(sigch, withoutIgnoredHangup(terminationSignals())...)
 
 		go func() {
 			errch <- srv.ListenAndServe()
 		}()
 
 		select {
-		case <-sigch:
-			slog.Info("Received interrupt signal...")
+		case sig := <-sigch:
+			slog.Info("Received termination signal, shutting down workspaces...", "signal", sig.String())
+			// Tín hiệu thứ hai (Ctrl+C lần nữa) thoát ngay theo mặc định.
+			signal.Stop(sigch)
+			// Dừng từng workspace trước (huỷ run, ghi lại việc dở) để lần mở
+			// sau không thấy tool call "đang chạy" giả; quá hạn thì bỏ, không
+			// để một run lì treo việc dừng server.
+			done := make(chan struct{})
+			go func() {
+				srv.ShutdownWorkspaces()
+				close(done)
+			}()
+			select {
+			case <-done:
+			case <-time.After(workspaceShutdownTimeout):
+				slog.Warn("Workspaces did not shut down in time; exiting anyway", "timeout", workspaceShutdownTimeout)
+			}
 		case err = <-errch:
 			if err != nil && !errors.Is(err, server.ErrServerClosed) {
 				_ = srv.Close()

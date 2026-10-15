@@ -1,11 +1,9 @@
 package model
 
 import (
-	"context"
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
@@ -14,7 +12,6 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/ui/dialog"
-	"github.com/charmbracelet/crush/internal/ui/util"
 )
 
 var (
@@ -58,7 +55,8 @@ func TestAltKeysOpenSessionsNewModels(t *testing.T) {
 			m := newPanelUI(&countingWorkspace{ready: true, sessions: makeSessions(2), cfg: modelsConfig()})
 			m.focus = focus
 			for _, k := range tc.keys {
-				m.handleKeyPressMsg(k)
+				// Hộp thoại Sessions mở khi danh sách session (nạp bằng Cmd) về.
+				pressAndLoad(m, k)
 			}
 			if tc.wantFree {
 				require.Nil(t, m.session, "%s focus %d", tc.name, focus)
@@ -78,7 +76,7 @@ func TestEscInDialogDoesNotCancelRun(t *testing.T) {
 	for _, open := range []tea.KeyPressMsg{altS, altM} {
 		m, ws := probedUI(t, "s1")
 		ws.cfg = modelsConfig()
-		m.handleKeyPressMsg(open)
+		pressAndLoad(m, open)
 		require.True(t, m.dialog.HasDialogs(), open.String())
 
 		m.handleKeyPressMsg(esc)
@@ -101,35 +99,11 @@ func TestEnterInSessionsDialogKeepsDraft(t *testing.T) {
 	m := newPanelUI(ws)
 	m.textarea.SetValue("draft")
 
-	m.handleKeyPressMsg(altS)
+	pressAndLoad(m, altS)
 	require.True(t, m.dialog.ContainsDialog(dialog.SessionsID))
 	m.handleKeyPressMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	require.Equal(t, "draft", m.textarea.Value())
-}
-
-// Alt+S lists sessions on the Update goroutine: a hung server must not
-// freeze the TUI, so the call is bounded and a failure shows as an error
-// instead of a dialog.
-func TestSessionsDialogListIsBounded(t *testing.T) {
-	t.Parallel()
-
-	ws := &countingWorkspace{ready: true, sessions: makeSessions(2)}
-	m := newPanelUI(ws)
-	start := time.Now()
-	m.handleKeyPressMsg(altS)
-	require.True(t, m.dialog.ContainsDialog(dialog.SessionsID))
-	require.True(t, ws.listHadDeadline, "an unbounded list freezes the TUI on a hung server")
-	require.WithinDuration(t, start.Add(2*time.Second), ws.listDeadline, time.Second)
-
-	ws = &countingWorkspace{ready: true, listErr: context.DeadlineExceeded}
-	m = newPanelUI(ws)
-	cmd := m.handleKeyPressMsg(altS)
-	require.False(t, m.dialog.ContainsDialog(dialog.SessionsID))
-	require.NotNil(t, cmd)
-	info, ok := cmd().(util.InfoMsg)
-	require.True(t, ok)
-	require.Equal(t, util.InfoTypeError, info.Type)
 }
 
 // The chat footer advertises the alt keys in this order, next to ctrl+p.

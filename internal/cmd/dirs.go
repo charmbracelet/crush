@@ -7,7 +7,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/x/exp/charmtone"
+	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 )
@@ -15,7 +15,7 @@ import (
 var dirsCmd = &cobra.Command{
 	Use:   "dirs",
 	Short: "Show config and data directories",
-	Long: `Show where Crush stores its configuration and data,
+	Long: `Show where agent-cli stores its configuration and data,
 including any project-level config files discovered
 from the current directory up to the project root.`,
 	Example: `
@@ -58,7 +58,7 @@ func collectDirs(cmd *cobra.Command) []string {
 }
 
 func printDirs(cmd *cobra.Command, dirs []string) {
-	labelStyle := lipgloss.NewStyle().Bold(true).Foreground(charmtone.Charple)
+	labelStyle := lipgloss.NewStyle().Bold(true).Foreground(styles.ColorAccent)
 
 	labels := make([]string, len(dirs))
 	longest := 0
@@ -76,7 +76,7 @@ func printDirs(cmd *cobra.Command, dirs []string) {
 			" " + d)
 	}
 
-	lipgloss.Println(lipgloss.NewStyle().Foreground(charmtone.Squid).Render("Configs merge from top to bottom"))
+	lipgloss.Println(lipgloss.NewStyle().Foreground(styles.ColorFgSubtle).Render("Configs merge from top to bottom"))
 }
 
 func dirLabel(i int) string {

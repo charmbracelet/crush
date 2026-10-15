@@ -31,3 +31,20 @@ func RunIDFromContext(ctx context.Context) string {
 	}
 	return ""
 }
+
+// nonInteractiveContextKey đánh dấu một lượt không có người ngồi trả lời
+// (agent-cli run): đi từ backend.SendMessage xuống coordinator.Run như RunID.
+type nonInteractiveContextKey struct{}
+
+// WithNonInteractive đánh dấu ctx là lượt phi tương tác: lượt đó không có
+// tool question (không ai trả lời được) và chờ MCP khởi động xong (có trần
+// thời gian) trước khi dựng bộ tool, như đường chạy local của `run`.
+func WithNonInteractive(ctx context.Context) context.Context {
+	return context.WithValue(ctx, nonInteractiveContextKey{}, true)
+}
+
+// NonInteractiveFromContext cho biết ctx có được WithNonInteractive đánh dấu.
+func NonInteractiveFromContext(ctx context.Context) bool {
+	v, _ := ctx.Value(nonInteractiveContextKey{}).(bool)
+	return v
+}

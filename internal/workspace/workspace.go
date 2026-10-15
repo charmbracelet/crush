@@ -22,6 +22,7 @@ import (
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/skills"
 )
 
@@ -35,7 +36,7 @@ var (
 	// ErrServerUnreachable means the client could not reach the server
 	// to determine the agent's status (server down, or the workspace was
 	// torn down out from under the client).
-	ErrServerUnreachable = errors.New("lost connection to the crush server")
+	ErrServerUnreachable = errors.New("lost connection to the agent-cli server")
 	// ErrWorkspaceGone means the server is reachable but no longer knows
 	// this client's workspace: it was torn down, or the server was
 	// replaced underneath the client. The subscription loop re-registers
@@ -141,6 +142,19 @@ type Workspace interface {
 	GetSession(ctx context.Context, sessionID string) (session.Session, error)
 	ListSessions(ctx context.Context) ([]session.Session, error)
 	SaveSession(ctx context.Context, sess session.Session) (session.Session, error)
+	// RenameSession chỉ đổi tiêu đề, nguyên tử: không đè chi phí/token mà
+	// một run nền có thể vừa ghi (khác SaveSession ghi lại cả hàng).
+	RenameSession(ctx context.Context, sessionID, title string) error
+
+	// Jobs: lệnh bash do agent chạy (chạy-rồi-chờ, chạy nền, tự chuyển nền).
+	// ListJobs trả job của workspace: đang chạy trước, rồi job vừa xong gần
+	// đây; mỗi nhóm mới nhất trước.
+	ListJobs(ctx context.Context) ([]shell.JobInfo, error)
+	// JobOutput trả output của job (stdout rồi stderr; quá dài thì giữ đầu và
+	// đuôi, phần giữa thay bằng dòng ghi số byte đã bỏ).
+	JobOutput(ctx context.Context, jobID string) (string, error)
+	// KillJob dừng một job đang chạy.
+	KillJob(ctx context.Context, jobID string) error
 	DeleteSession(ctx context.Context, sessionID string) error
 	CreateAgentToolSessionID(messageID, toolCallID string) string
 	ParseAgentToolSessionID(sessionID string) (messageID string, toolCallID string, ok bool)

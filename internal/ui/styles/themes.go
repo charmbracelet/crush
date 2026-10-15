@@ -10,35 +10,36 @@ import (
 	"github.com/charmbracelet/x/exp/charmtone"
 )
 
+// DefaultThemeName là theme mặc định của fork: Everforest Dark v2 (người
+// dùng chốt 15/10). Theme cũ vẫn chọn được trong Themes ("charmtone-panther").
+const DefaultThemeName = everforestDarkV2Name
+
+// DefaultTheme trả theme mặc định (Everforest Dark v2 kèm phần chỉnh riêng).
+func DefaultTheme() Styles {
+	return everforestDarkV2Overrides(quickStyle(everforestDarkV2Opts()))
+}
+
 // ThemeKeyForProvider returns a stable identifier for the theme
 // associated with the given provider ID. Providers that share a theme
 // yield the same key, so callers can cheaply detect when switching
 // providers would not actually change the active theme and skip the
 // expensive style rebuild. This is the single source of truth for the
 // provider-to-theme mapping; [ThemeForProvider] builds on it.
-func ThemeKeyForProvider(providerID string) string {
-	switch providerID {
-	case "hyper":
-		return "hyper"
-	default:
-		return "default"
-	}
+//
+// Fork: mọi provider dùng chung theme mặc định (kể cả hyper), để giao diện
+// không đổi màu khi đổi provider.
+func ThemeKeyForProvider(string) string {
+	return "default"
 }
 
 // ThemeForProvider returns the Styles associated with the given provider
-// ID. Unknown or empty provider IDs yield the default Charmtone Pantera
-// theme.
-func ThemeForProvider(providerID string) Styles {
-	switch ThemeKeyForProvider(providerID) {
-	case "hyper":
-		return HypercrushObsidiana()
-	default:
-		return CharmtonePantera()
-	}
+// ID: the default theme for every provider.
+func ThemeForProvider(string) Styles {
+	return DefaultTheme()
 }
 
-// CharmtonePantera returns the Charmtone dark theme. It's the default style
-// for the UI.
+// CharmtonePantera returns the Charmtone dark theme, the upstream default.
+// The fork defaults to [DefaultTheme]; this stays selectable.
 func CharmtonePantera() Styles {
 	return charmtoneOverrides(quickStyle(charmtoneOpts()))
 }
@@ -250,16 +251,18 @@ func gruvboxDarkOverrides(s Styles) Styles {
 
 // builtinThemes maps theme names to their quickStyleOpts palette definitions.
 var builtinThemes = map[string]func() quickStyleOpts{
-	"charmtone-panther": charmtoneOpts,
-	"gruvbox-dark":      gruvboxDarkOpts,
+	"charmtone-panther":  charmtoneOpts,
+	"gruvbox-dark":       gruvboxDarkOpts,
+	everforestDarkV2Name: everforestDarkV2Opts,
 }
 
 // builtinThemeOverrides maps theme names to functions that apply
 // theme-specific style tweaks on top of the styles produced by
 // [quickStyle]. Themes without overrides are absent from the map.
 var builtinThemeOverrides = map[string]func(Styles) Styles{
-	"charmtone-panther": charmtoneOverrides,
-	"gruvbox-dark":      gruvboxDarkOverrides,
+	"charmtone-panther":  charmtoneOverrides,
+	"gruvbox-dark":       gruvboxDarkOverrides,
+	everforestDarkV2Name: everforestDarkV2Overrides,
 }
 
 // deprecatedThemeNames maps legacy built-in theme names to their current
@@ -290,13 +293,11 @@ func BuiltinThemeNames() []string {
 
 // LoadTheme loads a theme by name. User theme files (in ThemeDirs) take
 // precedence over built-in themes of the same name. Returns
-// CharmtonePantera styles for an empty name. Returns an error if the
-// name is not recognized as either a user file or a built-in.
-// LoadTheme loads a theme by name. Global user theme files take precedence
-// over built-in themes of the same name. Empty names use Charmtone.
+// [DefaultTheme] for an empty name. Returns an error if the name is not
+// recognized as either a user file or a built-in.
 func LoadTheme(name string) (Styles, error) {
 	if name == "" {
-		return CharmtonePantera(), nil
+		return DefaultTheme(), nil
 	}
 	key := normalizeThemeName(name)
 
@@ -320,14 +321,14 @@ func LoadTheme(name string) (Styles, error) {
 }
 
 // ThemeFromConfig resolves the configured theme name, falling back to the
-// default Charmtone theme when the config value is empty or invalid. The
+// default theme when the config value is empty or invalid. The
 // fallback is logged so a missing or broken theme file is not silently
 // replaced by different colors.
 func ThemeFromConfig(name string) Styles {
 	s, err := LoadTheme(name)
 	if err != nil {
 		slog.Warn("Falling back to the default theme", "configured_theme", name, "reason", err)
-		return CharmtonePantera()
+		return DefaultTheme()
 	}
 	return s
 }

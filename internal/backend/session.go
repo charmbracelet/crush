@@ -2,12 +2,15 @@ package backend
 
 import (
 	"context"
+	"fmt"
 
+	"github.com/charmbracelet/crush/internal/agent"
 	mcptools "github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/shell"
 )
 
 // CreateSession creates a new session in the given workspace.
@@ -93,12 +96,14 @@ func (b *Backend) ListSessionMessages(ctx context.Context, workspaceID, sessionI
 	}
 
 	// Drain debounced updates so HTTP clients (and the TUI on session
-	// switch) observe the latest in-memory state rather than racing the
-	// debounce timer in message.Service.
-	if err := ws.Messages.FlushAll(ctx); err != nil {
-		return nil, err
+	// switch) observe the latest in-memory state, and settle any calls a
+	// dead process left dangling. Every remote client reads through here,
+	// so skipping the settle showed interrupted calls as still running.
+	var busy agent.SessionBusyFunc
+	if coord := ws.AgentCoordinator; coord != nil {
+		busy = agent.BusyWithAncestors(ctx, ws.Sessions, coord.IsSessionBusy)
 	}
-	return ws.Messages.List(ctx, sessionID)
+	return agent.ReadSettledMessages(ctx, ws.Messages, busy, sessionID)
 }
 
 // ListSessionHistory returns the history items for a session.
@@ -183,6 +188,66 @@ func (b *Backend) StartMCPServer(ctx context.Context, workspaceID, name string) 
 	return mcptools.InitializeSingleForced(ctx, name, ws.Cfg)
 }
 
+// ErrJobNotFound: không có job id trong workspace, hoặc output của job đã xong
+// không còn được giữ (cùng sentinel với shell để lỗi chi tiết của shell vẫn
+// thành 404).
+var ErrJobNotFound = shell.ErrJobNotFound
+
+// ListJobs trả các job (lệnh bash do agent chạy) trong thư mục của workspace.
+func (b *Backend) ListJobs(workspaceID string) ([]shell.JobInfo, error) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	return shell.GetBackgroundShellManager().Jobs(ws.Path), nil
+}
+
+// jobInWorkspace cho biết job id thuộc workspace (server có thể giữ nhiều
+// workspace; trình quản lý job là chung cả tiến trình).
+func jobInWorkspace(ws *Workspace, jobID string) bool {
+	for _, j := range shell.GetBackgroundShellManager().Jobs(ws.Path) {
+		if j.ID == jobID {
+			return true
+		}
+	}
+	return false
+}
+
+// JobOutput trả output của một job trong workspace.
+func (b *Backend) JobOutput(workspaceID, jobID string) (string, error) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return "", err
+	}
+	if !jobInWorkspace(ws, jobID) {
+		return "", fmt.Errorf("%w in this workspace: %s", ErrJobNotFound, jobID)
+	}
+	return shell.GetBackgroundShellManager().JobOutput(jobID)
+}
+
+// KillJob dừng một job đang chạy trong workspace; job đã xong thì không làm
+// gì. Job vẫn nằm trong bảng job để agent đọc được output và trạng thái.
+func (b *Backend) KillJob(ctx context.Context, workspaceID, jobID string) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+	if !jobInWorkspace(ws, jobID) {
+		return fmt.Errorf("%w in this workspace: %s", ErrJobNotFound, jobID)
+	}
+	return shell.GetBackgroundShellManager().Stop(ctx, jobID)
+}
+
+// RenameSession đổi tiêu đề session, nguyên tử (một câu UPDATE chỉ cột
+// title), không đè các trường khác mà run nền có thể vừa ghi.
+func (b *Backend) RenameSession(ctx context.Context, workspaceID, sessionID, title string) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+	return ws.Sessions.Rename(ctx, sessionID, title)
+}
+
 // DeleteSession deletes a session from the given workspace.
 func (b *Backend) DeleteSession(ctx context.Context, workspaceID, sessionID string) error {
 	ws, err := b.GetWorkspace(workspaceID)
@@ -190,6 +255,12 @@ func (b *Backend) DeleteSession(ctx context.Context, workspaceID, sessionID stri
 		return err
 	}
 
+	ws.runMu.Lock()
+	coord := ws.AgentCoordinator
+	ws.runMu.Unlock()
+	if coord != nil && (coord.IsSessionBusy(sessionID) || coord.QueuedPrompts(sessionID) > 0) {
+		return ErrSessionBusy
+	}
 	if err := ws.Sessions.Delete(ctx, sessionID); err != nil {
 		return err
 	}

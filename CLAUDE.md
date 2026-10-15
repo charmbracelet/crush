@@ -1,6 +1,6 @@
 # CLAUDE.md — agent-cli: thông tin dự án và quy tắc làm việc
 
-> Phần CORE là quy tắc chung (giữ nguyên theo bản nguồn). Phần PROJECT điền theo mã nguồn và tài liệu của repo này, cập nhật 14/10/2026.
+> Phần CORE là quy tắc chung (giữ nguyên theo bản nguồn). Phần PROJECT điền theo mã nguồn và tài liệu của repo này, cập nhật 15/10/2026.
 > agent-cli cũng tự nạp tệp này làm ngữ cảnh khi chạy trong repo này (AGENTS.md, mục Context files).
 
 ## CORE — Quy tắc làm việc
@@ -64,8 +64,8 @@
 |---|---|---|---|---|
 | Khởi động | Lệnh `agent-cli` (wrapper) | Wrapper đặt env, mỗi dự án một server (`--host` socket theo hash), rồi vào TUI. Home khi không có tham số là MỤC TIÊU, đang làm (H2) | Không tự dựng server chỉ để hiển thị Home | `scripts/install-agent-cli.sh`, `internal/cmd/root.go`, `internal/ui/home/` |
 | Prompt → run → tool | Gửi tin trong TUI, `run`, `send` | Coordinator → session agent → tool → permission. Hook PreToolUse/Stop là opt-in | Bash tự duyệt theo tiền tố, chỉ khi không có ký tự nối lệnh/chuyển hướng | `internal/agent/`, `internal/agent/tools/safe.go`, `bash.go`, `internal/permission/` |
-| Vòng đời server/workspace | Client rời hoặc gắn lại | Còn run thì hoãn teardown, kiểm lại mỗi 5s, trần mồ côi 30 phút; init không thay coordinator khi còn run | Ctrl+C trên `run` chỉ huỷ session do chính nó tạo | `internal/backend/backend.go`, `agent.go`, `internal/cmd/run.go` |
-| CLI cho script | `run --json`, `send --wait`, `ps --all`, `logs` | JSON một object trên stdout; rc 0 = xong, 1 = lỗi chạy, 2 = sai cú pháp | `send --wait` + Ctrl+C chỉ thôi chờ, không huỷ run | `internal/cmd/{run,send,ps,logs}.go` |
+| Vòng đời server/workspace | Client rời hoặc gắn lại; server nhận SIGTERM/SIGHUP | Còn run thì hoãn teardown, kiểm lại mỗi 5s; trần mồ côi 30 phút khi kẹt chờ duyệt/trả lời, 6 giờ khi vẫn chạy; init không thay coordinator khi còn run. Server bị dừng thì dừng từng workspace (ghi lại việc dở); tool call mà tiến trình chết bỏ dở được ghi "Interrupted" khi mở session | Ctrl+C trên `run` huỷ đúng lượt của nó theo RunID (prompt xếp hàng phía sau vẫn chạy) | `internal/backend/backend.go`, `agent.go`, `internal/cmd/run.go` |
+| CLI cho script | `run --json`, `send --wait`, `ps --all`, `logs`, `jobs` | JSON một object trên stdout; rc 0 = xong, 1 = lỗi chạy, 2 = sai cú pháp | `send --wait` + Ctrl+C chỉ thôi chờ, không huỷ run | `internal/cmd/{run,send,ps,logs,jobs}.go` |
 | Giao việc Claude Code/Codex | Model chính gọi tool `claude_code`/`codex` | Chỉ đăng ký khi có CLI (`PATH` hoặc `AGENT_CLI_*_BIN`); hỏi quyền mỗi lần; CLI con chạy headless, trả session/thread ID để `resume` | `run` tự duyệt; mức quyền CLI con: `AGENT_CLI_CLAUDE_PERMISSION_MODE`, `AGENT_CLI_CODEX_SANDBOX` (export ở shell) | `internal/agent/tools/provider/`, `docs/agent-cli-local-setup.md` |
 | Cấu hình provider | Nạp crushrc/crush.json + env của launcher | Biến `AGENT_CLI_*` dùng chung; crush.json chỉ expand `api_key`/`base_url` | Không ghi secret vào docs hay log | `agent-cli.crushrc.example`, `agent-cli.env.example`, `internal/config/load.go`, `docs/agent-cli-local-setup.md` |
 
@@ -104,7 +104,7 @@
 | Loại task | Đọc trước | Mã mẫu / convention | Ghi chú |
 |---|---|---|---|
 | Sửa TUI | `internal/ui/AGENTS.md` | `internal/ui/model/workspace_cache.go` (probe qua `tea.Cmd`) | `ui.go` dài khoảng 5.700 dòng: sửa có mục tiêu, đọc lại ngay trước khi sửa |
-| Phím tắt | Roadmap P1.3a | `internal/ui/model/keys.go` | Core gồm Alt+W/S/N/M; Ctrl+P là đường phụ |
+| Phím tắt | Roadmap P1.3a | `internal/ui/model/keys.go` | Core gồm Alt+W/S/N/M. Thêm 15/10 (DECISIONS.md): Alt+P chọn provider, Alt+M chỉ hiện model của provider đó, Alt+E chọn effort, Alt+. / Alt+, đổi session. Alt+J mở Jobs (job bash: xem output, dừng có hỏi lại). Alt+Tab bị hệ điều hành chiếm. Ctrl+P là đường phụ |
 | Quyền / bash | `internal/agent/tools/*.md` | `safe.go`, `bash_autoapprove_test.go` (permission luôn từ chối) | Mọi thay đổi tự duyệt phải có test chứng minh vẫn hỏi quyền |
 | Hook | `docs/hooks/README.md` | `internal/agent/stop_hook.go` | Không sửa dòng `description:` của SKILL.md builtin |
 | Cấu hình / launcher | `docs/agent-cli-local-setup.md` | `scripts/install-agent-cli.sh` + `scripts/test-agent-cli-wrapper.sh` | Không đụng `~/.config/agent-cli` thật của user |
@@ -115,12 +115,12 @@
 
 | Điểm | Tác động | Cách kiểm | Trạng thái |
 |---|---|---|---|
-| LLM chính thật (GLM/API) trên bản mới | Cổng WIN | Điền `~/.config/agent-cli/env`, chạy 1 prompt có tool call | CHƯA: máy chưa có key |
+| LLM chính thật (GLM/API) trên bản mới | Cổng WIN | Điền `~/.config/agent-cli/env`, chạy 1 prompt có tool call | ĐÃ 15/10: GLM qua provider `zai` của catalog; `run` trả PONG, một việc code có tool call chạy đúng |
 | Giao việc Claude Code/Codex với CLI thật | Lát 1 | `scripts/test-agent-cli-delegation.sh` | ĐÃ 14/10 (local + server): tạo tệp, resume, prompt bắt đầu bằng `-`, mức quyền có hiệu lực |
 | Mức quyền mặc định toàn quyền của CLI con | An ninh | Chạy `claude_code`/`codex` không đặt `AGENT_CLI_*_MODE/SANDBOX` | CHƯA chạy thật: bộ phân loại an toàn của Claude Code chặn phiên Claude tự chạy agent toàn quyền; chỉ unit test |
 | Hộp thoại xin quyền của `claude_code`/`codex` trong TUI thật | An ninh | Mở TUI, model gọi tool, xem hộp thoại | Unit test đã chứng minh có hỏi và từ chối thì không chạy; chưa xem bằng mắt |
-| Commit `d73a6e42` (revert luật bash) thuộc upstream hay fork | Khi merge upstream có thể mất bản vá S1 | `git fetch upstream` rồi `merge-base --is-ancestor` | CHƯA |
-| Phím Alt thật trong terminal/tmux; Esc/Enter trong picker | Acceptance P1.3a | Chạy tmux với socket riêng, `send-keys M-s` | CHƯA |
+| Commit `d73a6e42` (revert luật bash) thuộc upstream hay fork | Khi merge upstream có thể mất bản vá S1 | `git fetch upstream` rồi `merge-base --is-ancestor` | ĐÃ 15/10: của upstream (revert `1fdb081d`, PR #3565), là tổ tiên của điểm fork `a73e1bfa`; upstream main vẫn dùng safe-list theo tiền tố, bản vá S1 của fork nằm trên nền đó. Nhánh upstream `super-yolo` sẽ thay S1 khi được merge (xem `docs/reviews/2026-10-15-audit-herdr-crush-agent-cli.md`) |
+| Phím Alt thật trong terminal/tmux; Esc/Enter trong picker | Acceptance P1.3a | Chạy tmux với socket riêng, `send-keys M-s` | MỘT PHẦN 15/10: Alt+P/M/E, Alt+. / Alt+, (quay vòng hai chiều) đã kiểm trong tmux với bản cài; Alt+W/S/N CHƯA |
 
 ## Bảo trì
 

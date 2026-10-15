@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/google/uuid"
@@ -197,6 +198,14 @@ type Service interface {
 	Pending() (Request, bool)
 }
 
+// ErrQuestionBusy: câu hỏi của session khác đang chờ trả lời quá
+// askQueueTimeout; câu hỏi này không được hiện.
+var ErrQuestionBusy = errors.New("another session's question is still waiting for an answer; continue without asking, or ask again later")
+
+// askQueueTimeout giới hạn thời gian một câu hỏi chờ câu hỏi của session
+// khác được trả lời. Biến để test rút ngắn.
+var askQueueTimeout = 30 * time.Second
+
 type questionService struct {
 	broker             *pubsub.Broker[Request]
 	notificationBroker *pubsub.Broker[Notification]
@@ -253,17 +262,29 @@ func (s *questionService) Ask(ctx context.Context, req Request) ([]Answer, error
 		return nil, err
 	}
 
-	// Only one question is shown at a time; other sessions queue here.
+	// Only one question is shown at a time; other sessions queue here, but
+	// only for askQueueTimeout: while waiting, the question is invisible
+	// (no event, no WAITING status), so waiting on an unattended session's
+	// question would block this run silently. Past the bound the model gets
+	// an error it can act on.
+	wait := time.NewTimer(askQueueTimeout)
+	defer wait.Stop()
 	select {
 	case s.askSem <- struct{}{}:
+	case <-wait.C:
+		return nil, ErrQuestionBusy
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
 	defer func() { <-s.askSem }()
 
+	// Kênh cục bộ: Cancel/Answer đổi trường của s dưới khoá, còn select dưới
+	// đây đọc bản chụp này (đọc trường không khoá là data race).
+	pending := make(chan []Answer, 1)
+	cancelled := make(chan struct{})
 	s.mu.Lock()
-	s.pending = make(chan []Answer, 1)
-	s.cancelled = make(chan struct{})
+	s.pending = pending
+	s.cancelled = cancelled
 	s.pendingID = req.ID
 	s.pendingReq = req
 	s.mu.Unlock()
@@ -282,9 +303,9 @@ func (s *questionService) Ask(ctx context.Context, req Request) ([]Answer, error
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case <-s.cancelled:
+	case <-cancelled:
 		return nil, ErrCancelled
-	case answers := <-s.pending:
+	case answers := <-pending:
 		return answers, nil
 	}
 }
@@ -331,6 +352,9 @@ func (s *questionService) Cancel() bool {
 	batchID := s.pendingID
 	sessionID := s.pendingReq.SessionID
 	cancelCh := s.cancelled
+	// Lấy kênh ra dưới khoá: hai client huỷ cùng lúc thì chỉ một người đóng
+	// (đóng hai lần là panic).
+	s.cancelled = nil
 	s.mu.Unlock()
 
 	if cancelCh == nil {

@@ -202,7 +202,7 @@ func TestSendWaitFailsOnPermissionOrQuestionPrompt(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			f := newFakeSendClient(proto.Session{ID: "s1"})
+			f := newFakeSendClient(proto.Session{ID: "s1"}, proto.Session{ID: "other"})
 			f.onSend = func(sid, _ string) {
 				f.events <- mk("other") // another session's prompt: ignored
 				f.events <- mk(sid)
@@ -210,6 +210,23 @@ func TestSendWaitFailsOnPermissionOrQuestionPrompt(t *testing.T) {
 			res, err := runSend(t.Context(), f, "ws", sendOptions{sessionID: "s1", prompt: "p", wait: true}, &bytes.Buffer{})
 			require.ErrorContains(t, err, "TUI on session s1")
 			require.Equal(t, "s1", res.SessionID)
+		})
+		// Agent con của run hỏi: yêu cầu mang ID session con, vẫn là của run
+		// (trước đây bị bỏ qua và send --wait chờ mãi).
+		t.Run(name+" from a sub-agent", func(t *testing.T) {
+			t.Parallel()
+			f := newFakeSendClient(
+				proto.Session{ID: "s1"},
+				proto.Session{ID: "other"},
+				proto.Session{ID: "child", ParentSessionID: "s1"},
+				proto.Session{ID: "other-child", ParentSessionID: "other"},
+			)
+			f.onSend = func(string, string) {
+				f.events <- mk("other-child") // sub-agent of another session: ignored
+				f.events <- mk("child")
+			}
+			_, err := runSend(t.Context(), f, "ws", sendOptions{sessionID: "s1", prompt: "p", wait: true, timeout: 5 * time.Second}, &bytes.Buffer{})
+			require.ErrorContains(t, err, "TUI on session s1")
 		})
 	}
 }

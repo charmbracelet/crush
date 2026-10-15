@@ -51,7 +51,7 @@ var statsCmd = &cobra.Command{
 }
 
 func init() {
-	statsCmd.Flags().String("crawl-dir", "", "Crawl a directory recursively for all crush projects and aggregate stats")
+	statsCmd.Flags().String("crawl-dir", "", "Crawl a directory recursively for all agent-cli projects and aggregate stats")
 	statsCmd.Flags().Bool("all", false, "Aggregate stats from all known projects (from projects.json)")
 }
 

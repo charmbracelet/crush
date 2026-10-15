@@ -28,6 +28,7 @@ import (
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
@@ -167,6 +168,33 @@ func (w *ClientWorkspace) SaveSession(ctx context.Context, sess session.Session)
 		return session.Session{}, err
 	}
 	return protoToSession(*saved), nil
+}
+
+func (w *ClientWorkspace) ListJobs(ctx context.Context) ([]shell.JobInfo, error) {
+	return w.client.ListJobs(ctx, w.workspaceID())
+}
+
+func (w *ClientWorkspace) JobOutput(ctx context.Context, jobID string) (string, error) {
+	return w.client.JobOutput(ctx, w.workspaceID(), jobID)
+}
+
+func (w *ClientWorkspace) KillJob(ctx context.Context, jobID string) error {
+	return w.client.KillJob(ctx, w.workspaceID(), jobID)
+}
+
+func (w *ClientWorkspace) RenameSession(ctx context.Context, sessionID, title string) error {
+	err := w.client.RenameSession(ctx, w.workspaceID(), sessionID, title)
+	if !errors.Is(err, client.ErrRenameUnsupported) {
+		return err
+	}
+	// Server cũ: đường đọc rồi ghi cả hàng như trước.
+	sess, err := w.GetSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	sess.Title = title
+	_, err = w.SaveSession(ctx, sess)
+	return err
 }
 
 func (w *ClientWorkspace) DeleteSession(ctx context.Context, sessionID string) error {

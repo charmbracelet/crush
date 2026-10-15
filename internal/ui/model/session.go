@@ -62,25 +62,34 @@ type SessionFile struct {
 	Deletions     int
 }
 
+// loadSessionFailedMsg báo một lần nạp session thất bại. Lỗi nạp phải đi qua
+// message này: trả thẳng util.ReportError(err) từ trong Cmd chỉ gửi cho Update
+// một hàm (tea.Cmd), không ai gọi, nên người dùng không thấy lỗi nào.
+type loadSessionFailedMsg struct {
+	sessionID string
+	err       error
+}
+
 // loadSession loads the session along with its associated files and computes
 // the diff statistics (additions and deletions) for each file in the session.
 // It returns a tea.Cmd that, when executed, fetches the session data and
-// returns a sessionFilesLoadedMsg containing the processed session files.
+// returns a loadSessionMsg (or a loadSessionFailedMsg).
 //
-// The returned batch also reports the new current-session selection to
-// the workspace so the server can update its per-client presence map.
-// That report is fire-and-forget: errors are logged at debug and the
-// UI never blocks on the call.
+// Cmd này không báo session hiện tại cho workspace: việc đó thuộc về handler
+// của loadSessionMsg (sau khi đã chuyển session, xem reportCurrentSession), để
+// một lần nạp thất bại không để lại máy chủ tưởng client đang xem session kia.
+// Cmd cũng không chạm trạng thái của UI, nên gọi từ goroutine khác (xem
+// loadInitialSession) vẫn an toàn.
 func (m *UI) loadSession(sessionID string) tea.Cmd {
-	load := func() tea.Msg {
+	return func() tea.Msg {
 		session, err := m.com.Workspace.GetSession(context.Background(), sessionID)
 		if err != nil {
-			return util.ReportError(err)
+			return loadSessionFailedMsg{sessionID: sessionID, err: err}
 		}
 
 		sessionFiles, err := m.loadSessionFiles(sessionID)
 		if err != nil {
-			return util.ReportError(err)
+			return loadSessionFailedMsg{sessionID: sessionID, err: err}
 		}
 
 		readFiles, err := m.com.Workspace.FileTrackerListReadFiles(context.Background(), sessionID)
@@ -92,7 +101,7 @@ func (m *UI) loadSession(sessionID string) tea.Cmd {
 		// of megabytes and would freeze the event loop while it loads.
 		messages, err := m.com.Workspace.ListMessages(context.Background(), sessionID)
 		if err != nil {
-			return util.ReportError(err)
+			return loadSessionFailedMsg{sessionID: sessionID, err: err}
 		}
 
 		return loadSessionMsg{
@@ -102,7 +111,6 @@ func (m *UI) loadSession(sessionID string) tea.Cmd {
 			messages:  messages,
 		}
 	}
-	return tea.Batch(load, m.reportCurrentSession(sessionID))
 }
 
 // reportCurrentSession returns a fire-and-forget tea.Cmd that
@@ -111,6 +119,10 @@ func (m *UI) loadSession(sessionID string) tea.Cmd {
 // permission and question prompts are only delivered to clients
 // viewing the session that raised them. Errors are logged at debug
 // only; the call is best-effort, not correctness-critical state.
+//
+// Gửi khi session đã thật sự được chuyển (handler loadSessionMsg), và gửi lại
+// session đang hiện khi một lần nạp thất bại (loadSessionFailedMsg), chứ không
+// gửi lúc mới ra lệnh nạp.
 func (m *UI) reportCurrentSession(sessionID string) tea.Cmd {
 	return func() tea.Msg {
 		if err := m.com.Workspace.SetCurrentSession(context.Background(), sessionID); err != nil {
@@ -176,8 +188,11 @@ func (m *UI) handleFileEvent(file history.File) tea.Cmd {
 		return nil
 	}
 
+	// Chụp ID trước khi tạo closure: closure chạy ngoài luồng Update, lúc đó
+	// m.session có thể đã là session khác hoặc nil (session mới).
+	sessionID := m.session.ID
 	return func() tea.Msg {
-		sessionFiles, err := m.loadSessionFiles(m.session.ID)
+		sessionFiles, err := m.loadSessionFiles(sessionID)
 		// could not load session files
 		if err != nil {
 			return util.NewErrorMsg(err)

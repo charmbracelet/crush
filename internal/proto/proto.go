@@ -148,6 +148,24 @@ type AgentMessage struct {
 	Channel           string       `json:"channel,omitempty"`
 	Prompt            string       `json:"prompt"`
 	Attachments       []Attachment `json:"attachments,omitempty"`
+	// BindToClient là client ID mà lượt này gắn vào đời của nó: client mất
+	// claim trên server (thoát, bị kill, mất kết nối quá grace) thì server
+	// huỷ lượt (theo RunID). Rỗng: lượt sống tiếp khi client rời đi.
+	BindToClient string `json:"bind_to_client,omitempty"`
+	// NonInteractive: không ai ngồi trả lời lượt này (agent-cli run): lượt
+	// không có tool question và chờ MCP khởi động xong trước khi chạy.
+	NonInteractive bool `json:"non_interactive,omitempty"`
+}
+
+// JobOutput là phản hồi output của một job.
+type JobOutput struct {
+	Output string `json:"output"`
+}
+
+// SessionRename là thân request đổi tên session: chỉ đổi tiêu đề, không ghi
+// lại cả hàng (ghi cả hàng đè chi phí/token mà run nền vừa cập nhật).
+type SessionRename struct {
+	Title string `json:"title"`
 }
 
 // ShellCommandRequest represents a request to run a shell command directly.

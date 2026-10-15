@@ -69,6 +69,17 @@ func (t *sessionActivityTracker) Viewed(id string) {
 	}
 }
 
+// Active returns the IDs of the sessions that are not idle: running, waiting
+// on a prompt, or holding a result the user has not seen. The Sessions panel
+// pins them so their status shows even outside its first rows.
+func (t *sessionActivityTracker) Active() []string {
+	ids := make([]string, 0, len(t.states))
+	for id := range t.states {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
 // Forget drops all state for a session.
 func (t *sessionActivityTracker) Forget(id string) {
 	if _, ok := t.states[id]; ok {

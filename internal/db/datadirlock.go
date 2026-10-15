@@ -16,7 +16,7 @@ import (
 
 // ErrDataDirLocked is returned by Connect when the data directory is
 // already in use by another crush process.
-var ErrDataDirLocked = errors.New("data directory already in use by another crush process")
+var ErrDataDirLocked = errors.New("data directory already in use by another agent-cli process")
 
 // dataDirLockFile is the name of the lock file inside the data
 // directory. It lives next to crush.db so users can `ls` and find it.

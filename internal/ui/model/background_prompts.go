@@ -174,10 +174,12 @@ func (m *UI) dropHeldPrompts(id string) {
 	delete(m.heldQuestions, id)
 }
 
-// dropHeldPermission forgets a held permission resolved elsewhere.
-func (m *UI) dropHeldPermission(toolCallID string) {
+// dropHeldPermission forgets a held permission resolved elsewhere. A tool call
+// ID is only unique within its session (every session has a "call_0"), so the
+// request must match on both the session that raised it and the tool call.
+func (m *UI) dropHeldPermission(sessionID, toolCallID string) {
 	for id, perm := range m.heldPerms {
-		if perm.ToolCallID == toolCallID {
+		if perm.SessionID == sessionID && perm.ToolCallID == toolCallID {
 			delete(m.heldPerms, id)
 		}
 	}

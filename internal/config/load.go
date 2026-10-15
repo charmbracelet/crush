@@ -482,6 +482,21 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 		baseURL, err := resolver.ResolveValue(providerConfig.BaseURL)
 		if baseURL == "" || err != nil {
 			slog.Warn("Skipping custom provider due to missing API endpoint", "provider", id, "error", err)
+			// Provider bị bỏ mà model large/small vẫn trỏ vào nó thì
+			// resolveSelectedModels lặng lẽ chọn model khác rồi ghi đè lựa chọn
+			// xuống đĩa. Hay gặp nhất là gõ sai ID của provider dựng sẵn (ID lạ,
+			// không có base_url). Provider không ai chọn thì giữ hành vi cũ: cảnh
+			// báo rồi bỏ qua, để cấu hình không liên quan không bị chặn khởi động.
+			if slot := c.selectedModelSlot(id); slot != "" {
+				reason := "has no base_url"
+				switch {
+				case err != nil:
+					reason = fmt.Sprintf("has a base_url that cannot be resolved (%v)", err)
+				case providerConfig.BaseURL != "":
+					reason = "has a base_url that resolves to an empty string"
+				}
+				return fmt.Errorf("provider %q is selected as the %s model but is not a built-in provider and %s; check the provider ID for a typo, or give the provider a base_url", id, slot, reason)
+			}
 			c.Providers.Del(id)
 			continue
 		}
@@ -529,6 +544,17 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 	}
 
 	return nil
+}
+
+// selectedModelSlot trả về slot đầu tiên (large, rồi small) đang chọn model của
+// provider id, hoặc "" khi không slot nào chọn nó.
+func (c *Config) selectedModelSlot(id string) SelectedModelType {
+	for _, slot := range []SelectedModelType{SelectedModelTypeLarge, SelectedModelTypeSmall} {
+		if c.Models[slot].Provider == id {
+			return slot
+		}
+	}
+	return ""
 }
 
 // applyEnv sets top-level env vars from the config. Keys are sorted for

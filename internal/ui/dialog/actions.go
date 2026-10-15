@@ -27,6 +27,13 @@ type ActionClose struct{}
 // ActionQuit is a message to quit the application.
 type ActionQuit = tea.QuitMsg
 
+// ActionGoHome asks to leave the workspace for Home (the workspace picker),
+// the same as Alt+W. The UI decides whether to ask for a confirmation first.
+type ActionGoHome struct{}
+
+// ActionGoHomeConfirmed is the "yes" of the go-to-Home confirmation.
+type ActionGoHomeConfirmed struct{}
+
 // ActionOpenDialog is a message to open a dialog.
 type ActionOpenDialog struct {
 	DialogID string

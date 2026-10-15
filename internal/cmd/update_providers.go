@@ -6,7 +6,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/x/exp/charmtone"
+	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/spf13/cobra"
 )
 
@@ -61,8 +61,8 @@ agent-cli update-providers --source=hyper https://hyper.example.com
 		// NOTE(@andreynering): This style is more-or-less copied from Fang's
 		// error message, adapted for success.
 		headerStyle := lipgloss.NewStyle().
-			Foreground(charmtone.Butter).
-			Background(charmtone.Guac).
+			Foreground(styles.ColorBgBase).
+			Background(styles.ColorSuccess).
 			Bold(true).
 			Padding(0, 1).
 			Margin(1).

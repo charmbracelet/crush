@@ -12,7 +12,6 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/charmbracelet/x/exp/charmtone"
 )
 
 // FallbackWidth is used when stdout is not a terminal, so the banner still
@@ -80,7 +79,7 @@ func sessionResumeLines(sess *session.Session, contentWidth int) string {
 	}
 
 	hash := session.HashID(sess.ID)[:7]
-	label := lipgloss.NewStyle().Foreground(charmtone.Charple)
+	label := lipgloss.NewStyle().Foreground(styles.ColorFgMuted)
 	sessionLine := label.Render("Session  ") + title
 	continueLine := label.Render("Continue ") + "agent-cli -s " + hash
 	return sessionLine + "\n" + continueLine

@@ -40,7 +40,7 @@ var _ Dialog = (*ThemeNew)(nil)
 // new theme inherits its palette from base.
 func NewThemeNew(com *common.Common, base string) *ThemeNew {
 	if base == "" {
-		base = "charmtone-panther"
+		base = styles.DefaultThemeName
 	}
 	d := &ThemeNew{com: com, base: base}
 

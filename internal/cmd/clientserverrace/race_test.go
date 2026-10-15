@@ -27,7 +27,7 @@ import (
 // ensureServer when it gives up waiting for the server socket /
 // readiness probe (internal/cmd/root.go). Seeing this in any client's
 // output means the race fired.
-const readinessErrSubstr = "failed to initialize crush server"
+const readinessErrSubstr = "failed to initialize agent-cli server"
 
 // numClients is intentionally larger than the typical CPU count to
 // ensure the spawn lock + readiness probe are exercised under

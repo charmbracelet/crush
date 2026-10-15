@@ -29,6 +29,10 @@ func (m *UI) markProjectInitializedCmd() tea.Cmd {
 }
 
 // updateInitializeView handles keyboard input for the project initialization prompt.
+//
+// Khởi tạo chạy cả một lượt quét dự án và ghi AGENTS.md, mà màn này có thể hiện
+// ra đúng lúc người dùng đang gõ dở, nên chữ y/Y KHÔNG phải phím đồng ý: chỉ
+// chuyển lựa chọn sang Yep (←/→/Tab) rồi Enter mới chạy. n/N/Esc là Nope.
 func (m *UI) updateInitializeView(msg tea.KeyPressMsg) (cmds []tea.Cmd) {
 	switch {
 	case key.Matches(msg, m.keyMap.Initialize.Enter):
@@ -39,8 +43,6 @@ func (m *UI) updateInitializeView(msg tea.KeyPressMsg) (cmds []tea.Cmd) {
 		}
 	case key.Matches(msg, m.keyMap.Initialize.Switch):
 		m.onboarding.yesInitializeSelected = !m.onboarding.yesInitializeSelected
-	case key.Matches(msg, m.keyMap.Initialize.Yes):
-		cmds = append(cmds, m.initializeProject())
 	case key.Matches(msg, m.keyMap.Initialize.No):
 		cmds = append(cmds, m.skipInitializeProject())
 	}

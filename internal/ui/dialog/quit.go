@@ -20,12 +20,19 @@ const (
 	quitQuestion    = "Are you sure you want to quit?"
 	quitHintLineOne = "To quit without confirmation"
 	quitHintLineTwo = "press ctrl+c twice."
+
+	// Bản hỏi trước khi về Home khi run sẽ chết theo TUI (chế độ local).
+	homeQuestion    = "Stop the running task and go to Home?"
+	homeHintLineOne = "Leaving closes this workspace,"
+	homeHintLineTwo = "so the task stops with it."
 )
 
 // Quit represents a confirmation dialog for quitting the application.
 type Quit struct {
 	com        *common.Common
 	selectedNo bool // true if "No" button is selected
+	// toHome makes the dialog confirm leaving for Home instead of quitting.
+	toHome     bool
 	compositor *lipgloss.Compositor
 	hoverX     int
 	hoverY     int
@@ -76,6 +83,31 @@ func NewQuit(com *common.Common) *Quit {
 	return q
 }
 
+// NewQuitToHome creates the confirmation shown before leaving a workspace
+// whose run would end with the TUI. Answering yes returns ActionGoHomeConfirmed
+// instead of quitting.
+func NewQuitToHome(com *common.Common) *Quit {
+	q := NewQuit(com)
+	q.toHome = true
+	return q
+}
+
+// confirm is the action of answering yes.
+func (q *Quit) confirm() Action {
+	if q.toHome {
+		return ActionGoHomeConfirmed{}
+	}
+	return ActionQuit{}
+}
+
+// texts returns the question and the two hint lines of the dialog.
+func (q *Quit) texts() (question, hintOne, hintTwo string) {
+	if q.toHome {
+		return homeQuestion, homeHintLineOne, homeHintLineTwo
+	}
+	return quitQuestion, quitHintLineOne, quitHintLineTwo
+}
+
 // ID implements [Model].
 func (*Quit) ID() string {
 	return QuitID
@@ -98,11 +130,11 @@ func (q *Quit) HandleMsg(msg tea.Msg) Action {
 			q.selectedNo = !q.selectedNo
 		case key.Matches(msg, q.keyMap.EnterSpace):
 			if !q.selectedNo {
-				return ActionQuit{}
+				return q.confirm()
 			}
 			return ActionClose{}
 		case key.Matches(msg, q.keyMap.Yes):
-			return ActionQuit{}
+			return q.confirm()
 		case key.Matches(msg, q.keyMap.No, q.keyMap.Close):
 			return ActionClose{}
 		}
@@ -123,7 +155,7 @@ func (q *Quit) handleMouseClick(msg tea.MouseClickMsg) Action {
 			q.selectedNo = false
 			return nil
 		}
-		return ActionQuit{}
+		return q.confirm()
 	case 1: // "Nope"
 		if !q.selectedNo {
 			q.selectedNo = true
@@ -162,16 +194,17 @@ func (q *Quit) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	// renderContent builds the dialog body around the given button row. A
 	// blank row of the same width reserves space for the buttons, which are
 	// painted as layers so their bounds double as mouse hit regions.
+	question, hintOne, hintTwo := q.texts()
 	renderContent := func(buttonRow string) string {
 		return baseStyle.Render(
 			lipgloss.JoinVertical(
 				lipgloss.Center,
-				quitQuestion,
+				question,
 				"",
 				buttonRow,
 				"",
-				hintStyle.Render(quitHintLineOne),
-				hintStyle.Render(quitHintLineTwo),
+				hintStyle.Render(hintOne),
+				hintStyle.Render(hintTwo),
 			),
 		)
 	}

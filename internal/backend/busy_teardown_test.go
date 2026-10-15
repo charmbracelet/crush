@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/app"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -150,11 +151,20 @@ func TestTeardown_ClientReturnCancelsDeferral(t *testing.T) {
 // TestTeardown_OrphanTimeoutTearsDownStuckRun covers a run that can never
 // finish without a client (blocked on a permission or question prompt): the
 // deferral is capped so it cannot pin the workspace and server forever.
+// stuckPermissions báo luôn có một lời xin quyền đang chờ: run kẹt, không
+// client nào trả lời. Chỉ ActiveRequest được gọi trên đường teardown.
+type stuckPermissions struct{ permission.Service }
+
+func (stuckPermissions) ActiveRequest() (permission.PermissionRequest, bool) {
+	return permission.PermissionRequest{ID: "p1", ToolName: "bash"}, true
+}
+
 func TestTeardown_OrphanTimeoutTearsDownStuckRun(t *testing.T) {
 	t.Parallel()
 
 	const timeout = 100 * time.Millisecond
 	b, ws, _, wsDown, srvDown := newBusyBackend(t, timeout)
+	ws.App.Permissions = stuckPermissions{}
 	cid := newClientID(t)
 	require.NoError(t, b.AttachClient(ws.ID, cid))
 	start := time.Now()
@@ -280,4 +290,54 @@ func TestOrphanRunTimeoutFromEnv(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Run mồ côi vẫn tiến triển (không chờ ai trả lời) không bị cắt ở trần mồ côi
+// (việc giao bằng send có thể dài hơn), nhưng vẫn dừng ở trần tuyệt đối.
+func TestTeardown_ProgressingOrphanOutlivesStuckTimeoutUntilMaxRun(t *testing.T) {
+	t.Parallel()
+
+	const stuckTimeout = 50 * time.Millisecond
+	b, ws, _, wsDown, _ := newBusyBackend(t, stuckTimeout)
+	b.orphanMaxRun = 400 * time.Millisecond
+	cid := newClientID(t)
+	require.NoError(t, b.AttachClient(ws.ID, cid))
+	start := time.Now()
+	b.DetachClient(ws.ID, cid)
+
+	require.Never(t, func() bool { return wsDown.Load() > 0 },
+		250*time.Millisecond, 10*time.Millisecond,
+		"a run still making progress must outlive the stuck-prompt timeout")
+	require.Eventually(t, func() bool { return wsDown.Load() == 1 },
+		2*time.Second, 10*time.Millisecond,
+		"the absolute cap still ends an orphan that never finishes")
+	require.GreaterOrEqual(t, time.Since(start), b.orphanMaxRun)
+}
+
+// Run đang kẹt rồi lại chạy tiếp (một client vào trả lời rồi đi): đồng hồ
+// kẹt tính lại từ đầu, không cộng dồn thời gian đã chạy bình thường.
+func TestTeardown_StuckClockResetsWhenRunProgresses(t *testing.T) {
+	t.Parallel()
+
+	b, ws, _, _, _ := newBusyBackend(t, time.Hour)
+	ws.App.Permissions = stuckPermissions{}
+	ws.clientsMu.Lock()
+	b.mu.Lock()
+	require.True(t, b.deferTeardownLocked(ws, true))
+	stuck := ws.stuckSince
+	b.mu.Unlock()
+	ws.clientsMu.Unlock()
+	require.False(t, stuck.IsZero(), "a pending prompt starts the stuck clock")
+
+	ws.App.Permissions = nil
+	ws.clientsMu.Lock()
+	b.mu.Lock()
+	require.True(t, b.deferTeardownLocked(ws, true))
+	require.True(t, ws.stuckSince.IsZero(), "progress clears the stuck clock")
+	if ws.teardownRecheck != nil {
+		ws.teardownRecheck.Stop()
+		ws.teardownRecheck = nil
+	}
+	b.mu.Unlock()
+	ws.clientsMu.Unlock()
 }

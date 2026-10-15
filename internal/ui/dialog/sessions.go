@@ -23,8 +23,8 @@ const SessionsID = "session"
 
 const sessionDoubleClickThreshold = 400 * time.Millisecond
 
-// listSessionsTimeout bounds the session list the dialog opens with.
-const listSessionsTimeout = 2 * time.Second
+// ListSessionsTimeout bounds the session list the dialog opens with.
+const ListSessionsTimeout = 2 * time.Second
 
 type sessionsMode uint8
 
@@ -67,18 +67,32 @@ type Session struct {
 
 var _ Dialog = (*Session)(nil)
 
-// NewSessions creates a new Session dialog.
+// sessionBusyMsg mang kết quả dò "session này có đang chạy không" (Ctrl+X) từ
+// Cmd về hộp thoại.
+type sessionBusyMsg struct {
+	id   string
+	busy bool
+}
+
+// NewSessions lists the sessions and creates a new Session dialog. It BLOCKS on
+// the workspace (bounded by ListSessionsTimeout), so it is not for the Update
+// goroutine: list in a tea.Cmd and build the dialog with NewSessionsFromList.
 func NewSessions(com *common.Common, selectedSessionID string) (*Session, error) {
-	s := new(Session)
-	s.sessionsMode = sessionsModeNormal
-	s.com = com
-	// It runs on the Update goroutine: a hung server must not freeze the TUI.
-	ctx, cancel := context.WithTimeout(context.Background(), listSessionsTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), ListSessionsTimeout)
 	defer cancel()
 	sessions, err := com.Workspace.ListSessions(ctx)
 	if err != nil {
 		return nil, err
 	}
+	return NewSessionsFromList(com, selectedSessionID, sessions), nil
+}
+
+// NewSessionsFromList creates a new Session dialog over an already fetched
+// session list. It does no IO.
+func NewSessionsFromList(com *common.Common, selectedSessionID string, sessions []session.Session) *Session {
+	s := new(Session)
+	s.sessionsMode = sessionsModeNormal
+	s.com = com
 
 	s.sessions = sessions
 	for i, sess := range sessions {
@@ -144,7 +158,7 @@ func NewSessions(com *common.Common, selectedSessionID string) (*Session, error)
 	)
 	s.keyMap.Close = CloseKey
 
-	return s, nil
+	return s
 }
 
 // ID implements Dialog.
@@ -155,6 +169,8 @@ func (s *Session) ID() string {
 // HandleMsg implements Dialog.
 func (s *Session) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
+	case sessionBusyMsg:
+		return s.applySessionBusy(msg)
 	case tea.KeyPressMsg:
 		switch s.sessionsMode {
 		case sessionsModeDeleting:
@@ -193,11 +209,15 @@ func (s *Session) HandleMsg(msg tea.Msg) Action {
 				s.sessionsMode = sessionsModeUpdating
 				s.list.SetItems(sessionItems(s.com.Styles, sessionsModeUpdating, s.sessions...)...)
 			case key.Matches(msg, s.keyMap.Delete):
-				if s.isCurrentSessionBusy() {
-					return ActionCmd{util.ReportWarn("Agent is busy, please wait...")}
+				item := s.selectedSessionItem()
+				if item == nil {
+					s.enterDeleteMode()
+					break
 				}
-				s.sessionsMode = sessionsModeDeleting
-				s.list.SetItems(sessionItems(s.com.Styles, sessionsModeDeleting, s.sessions...)...)
+				// Hỏi workspace xem session có đang chạy không ngoài luồng Update
+				// (hai lần gọi HTTP ở chế độ client/server); kết quả quay về là
+				// sessionBusyMsg và quyết định có vào chế độ xoá hay không.
+				return ActionCmd{s.checkBusyCmd(item.ID())}
 			case key.Matches(msg, s.keyMap.Previous):
 				s.list.Focus()
 				if s.list.IsSelectedFirst() {
@@ -453,34 +473,46 @@ func (s *Session) updateSession(session session.Session) {
 }
 
 func (s *Session) updateSessionCmd(session session.Session) tea.Cmd {
+	ws := s.com.Workspace
 	return func() tea.Msg {
 		// Bản trong dialog chụp lúc mở, còn session nền vẫn chạy (cost,
-		// token, todos, summary đổi liên tục) và SaveSession ghi đè cả hàng:
-		// đọc lại ngay trước khi lưu, chỉ mang theo tiêu đề mới.
-		ctx := context.TODO()
-		fresh, err := s.com.Workspace.GetSession(ctx, session.ID)
-		if err != nil {
-			return util.NewErrorMsg(err)
-		}
-		fresh.Title = session.Title
-		if _, err := s.com.Workspace.SaveSession(ctx, fresh); err != nil {
+		// token, todos, summary đổi liên tục): chỉ đổi tiêu đề, nguyên tử, để
+		// không đè các trường run nền vừa ghi (SaveSession ghi lại cả hàng).
+		if err := ws.RenameSession(context.TODO(), session.ID, session.Title); err != nil {
 			return util.NewErrorMsg(err)
 		}
 		return nil
 	}
 }
 
-func (s *Session) isCurrentSessionBusy() bool {
-	sessionItem := s.selectedSessionItem()
-	if sessionItem == nil {
-		return false
-	}
+func (s *Session) enterDeleteMode() {
+	s.sessionsMode = sessionsModeDeleting
+	s.list.SetItems(sessionItems(s.com.Styles, sessionsModeDeleting, s.sessions...)...)
+}
 
-	if !s.com.Workspace.AgentIsReady() {
-		return false
+// checkBusyCmd dò, ngoài luồng Update, xem session id có đang chạy không.
+func (s *Session) checkBusyCmd(id string) tea.Cmd {
+	ws := s.com.Workspace
+	return func() tea.Msg {
+		return sessionBusyMsg{id: id, busy: ws.AgentIsReady() && ws.AgentIsSessionBusy(id)}
 	}
+}
 
-	return s.com.Workspace.AgentIsSessionBusy(sessionItem.ID())
+// applySessionBusy nhận kết quả dò của Ctrl+X: đang chạy thì từ chối xoá, không
+// thì vào chế độ xoá. Người dùng đã chuyển mục chọn hoặc chế độ trong lúc chờ thì
+// bỏ qua, kẻo hỏi xoá nhầm session khác.
+func (s *Session) applySessionBusy(msg sessionBusyMsg) Action {
+	if s.sessionsMode != sessionsModeNormal {
+		return nil
+	}
+	if item := s.selectedSessionItem(); item == nil || item.ID() != msg.id {
+		return nil
+	}
+	if msg.busy {
+		return ActionCmd{util.ReportWarn("Agent is busy, please wait...")}
+	}
+	s.enterDeleteMode()
+	return nil
 }
 
 // ShortHelp implements [help.KeyMap].

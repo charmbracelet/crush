@@ -37,6 +37,7 @@ func (c *errorCoordinator) RunAccepted(ctx context.Context, accept *agent.Accept
 }
 
 func (c *errorCoordinator) BeginAccepted(sessionID string) *agent.AcceptedRun { return nil }
+func (c *errorCoordinator) CancelRun(string, string)                          {}
 func (c *errorCoordinator) Cancel(string)                                     {}
 func (c *errorCoordinator) CancelAll()                                        {}
 func (c *errorCoordinator) IsBusy() bool                                      { return false }

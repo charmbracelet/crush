@@ -4,8 +4,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"slices"
 	"strings"
+	"time"
+
+	"github.com/charmbracelet/crush/internal/herdr"
 )
 
 // maxStderrBytes bounds the stderr tail surfaced in run errors so a chatty
@@ -27,10 +32,49 @@ func runCommand(ctx context.Context, dir, name string, args ...string) ([]byte, 
 	cmd.Dir = dir
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	cmd.Env = childEnv(os.Environ())
+	// CLI con hay bật tiến trình cháu (dev server, test watcher) giữ pipe
+	// stdout: huỷ/hết giờ thì dừng cả nhóm, và sau waitDelay đóng pipe để
+	// Run trả về thay vì treo quá hạn.
+	setProcessGroup(cmd)
+	cmd.WaitDelay = waitDelay
 	if err := cmd.Run(); err != nil {
 		return stdout.Bytes(), fmt.Errorf("running %s: %w: %s", name, err, tailStderr(stderr.String()))
 	}
 	return stdout.Bytes(), nil
+}
+
+// waitDelay là thời gian chờ CLI con thoát sau khi bị huỷ, trước khi Go đóng
+// pipe và giết hẳn tiến trình.
+const waitDelay = 5 * time.Second
+
+// sessionLinkEnv là các biến Claude Code đặt cho tiến trình con của MỘT phiên
+// của nó (đánh dấu lồng phiên, socket/token nhắn tin, ID phiên). agent-cli mở
+// từ trong một phiên Claude Code sẽ thừa kế chúng; CLI con được giao việc phải
+// chạy như mở ở terminal thường, không gắn vào phiên kia. Biến cấu hình của
+// người dùng (khoá, provider, model...) được giữ nguyên.
+var sessionLinkEnv = []string{
+	"CLAUDECODE",
+	"CLAUDE_CODE_ENTRYPOINT",
+	"CLAUDE_CODE_SESSION_ID",
+	"CLAUDE_CODE_CHILD_SESSION",
+	"CLAUDE_CODE_MESSAGING_SOCKET",
+	"CLAUDE_CODE_MESSAGING_TOKEN",
+	"CLAUDE_CODE_SESSION_ATTENDED",
+	"CLAUDE_CODE_EXECPATH",
+	"CLAUDE_CODE_SSE_PORT",
+	"CLAUDE_PID",
+	"CLAUDE_AGENT_SDK_VERSION",
+}
+
+// childEnv trả env cho CLI con: env của agent-cli bỏ đi sessionLinkEnv và các
+// biến HERDR_* (CLI con tự báo trạng thái bằng hook của nó sẽ đè trạng thái
+// của agent-cli trong cùng pane herdr).
+func childEnv(env []string) []string {
+	return slices.DeleteFunc(herdr.StripEnv(env), func(kv string) bool {
+		name, _, _ := strings.Cut(kv, "=")
+		return slices.Contains(sessionLinkEnv, name)
+	})
 }
 
 // tailStderr returns the last chunk of stderr for error reporting, with NUL

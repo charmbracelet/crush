@@ -61,7 +61,27 @@ func (w *AppWorkspace) SaveSession(ctx context.Context, sess session.Session) (s
 	return w.app.Sessions.Save(ctx, sess)
 }
 
+func (w *AppWorkspace) ListJobs(context.Context) ([]shell.JobInfo, error) {
+	return shell.GetBackgroundShellManager().Jobs(w.WorkingDir()), nil
+}
+
+func (w *AppWorkspace) JobOutput(_ context.Context, jobID string) (string, error) {
+	return shell.GetBackgroundShellManager().JobOutput(jobID)
+}
+
+func (w *AppWorkspace) KillJob(ctx context.Context, jobID string) error {
+	return shell.GetBackgroundShellManager().Stop(ctx, jobID)
+}
+
+func (w *AppWorkspace) RenameSession(ctx context.Context, sessionID, title string) error {
+	return w.app.Sessions.Rename(ctx, sessionID, title)
+}
+
 func (w *AppWorkspace) DeleteSession(ctx context.Context, sessionID string) error {
+	// Như backend.DeleteSession: không xoá session còn lượt chạy/xếp hàng.
+	if c := w.app.AgentCoordinator; c != nil && (c.IsSessionBusy(sessionID) || c.QueuedPrompts(sessionID) > 0) {
+		return errors.New("session has a run in progress or queued; cancel it before deleting the session")
+	}
 	if err := w.app.Sessions.Delete(ctx, sessionID); err != nil {
 		return err
 	}
@@ -93,13 +113,11 @@ func (w *AppWorkspace) RoutesChannelEvents() bool { return false }
 // -- Messages --
 
 func (w *AppWorkspace) ListMessages(ctx context.Context, sessionID string) ([]message.Message, error) {
-	// Drain any debounced updates so the caller observes the latest
-	// in-memory state. message.Service buffers streaming deltas and a
-	// cold List would otherwise miss them at session-switch time.
-	if err := w.app.Messages.FlushAll(ctx); err != nil {
-		return nil, err
+	var busy agent.SessionBusyFunc
+	if w.app.AgentCoordinator != nil {
+		busy = agent.BusyWithAncestors(ctx, w.app.Sessions, w.app.AgentCoordinator.IsSessionBusy)
 	}
-	return w.app.Messages.List(ctx, sessionID)
+	return agent.ReadSettledMessages(ctx, w.app.Messages, busy, sessionID)
 }
 
 func (w *AppWorkspace) ListUserMessages(ctx context.Context, sessionID string) ([]message.Message, error) {

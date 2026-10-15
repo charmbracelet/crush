@@ -7,9 +7,26 @@ set -uo pipefail
 here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 t="$(mktemp -d /tmp/aclijson.XXXXXX)"
 fake_pid=""
+bin=""
+# server_pids: PID các server agent-cli của lượt test này. Không dùng pgrep -f /
+# pkill -f: mẫu là regex và khớp cả dòng lệnh của chính shell đang chạy script.
+# Lọc theo exe đúng binary, rồi so nguyên văn đường dẫn socket trong cmdline.
+server_pids() {
+  local want name p
+  [[ -n "$bin" ]] || return 0
+  want="$(readlink -f -- "$bin" 2>/dev/null)" || return 0
+  [[ -n "$want" ]] || return 0
+  name="$(basename -- "$want")"
+  name="${name:0:15}" # comm của kernel bị cắt ở 15 ký tự
+  for p in $(pgrep -x -- "$name" 2>/dev/null); do
+    [[ "$(readlink -- "/proc/$p/exe" 2>/dev/null)" == "$want" ]] || continue
+    tr '\0' '\n' <"/proc/$p/cmdline" 2>/dev/null | grep -qF -- "$t/s.sock" && echo "$p"
+  done
+}
 cleanup() {
   [ -n "$fake_pid" ] && kill "$fake_pid" 2>/dev/null
-  pkill -f -- "$t/s.sock" 2>/dev/null
+  local p
+  for p in $(server_pids); do kill "$p" 2>/dev/null; done
   [ -n "${KEEP_TMP:-}" ] && echo "kept $t" || rm -rf "$t"
 }
 trap cleanup EXIT
@@ -193,7 +210,11 @@ run_suite() { # run_suite <tên> [cờ toàn cục...]
     [ "$busy" = True ]; check "$mode: init giữa run, agent vẫn báo bận (is_busy=$busy)" $?
     "$bin" "$@" run --json "probe" >"$o/f.json" 2>/dev/null; rc=$?
     local tools; tools="$(grep '^probe|' "$t/requests.log" | tail -1)"
-    [ "$code" = 200 ] && [ "$rc" -eq 0 ] && [[ "$tools" == *question* ]]; check "$mode: run không init lại agent đang sẵn sàng (init=$code, tools: $tools)" $?
+    # Lượt của run là phi tương tác nên KHÔNG có tool question; coordinator
+    # tương tác thì phải còn nguyên: lượt send sau đó vẫn có question.
+    "$bin" "$@" send --new --wait --json "probe-send" >"$o/g.json" 2>/dev/null
+    local stools; stools="$(grep '^probe-send|' "$t/requests.log" | tail -1)"
+    [ "$code" = 200 ] && [ "$rc" -eq 0 ] && [[ "$tools" != *question* ]] && [[ "$stools" == *question* ]]; check "$mode: run không init lại agent đang sẵn sàng, lượt run không có question (init=$code, run: $tools, send: $stools)" $?
     kill -TERM "$ph" 2>/dev/null; wait "$ph" 2>/dev/null
     # Init giữa run không được thay coordinator (run cũ thành bóng ma: không
     # huỷ được, is_busy=false): SIGTERM holder vẫn phải huỷ được run của nó.
@@ -208,8 +229,9 @@ run_suite local
 export CRUSH_CLIENT_SERVER=1
 run_suite clientserver --host "unix://$t/s.sock"
 
-# Client bị SIGKILL giữa run: hết detach grace (1s) server vẫn phải giữ
-# workspace cho tới khi run xong, không huỷ nó. Dự án + server riêng để biết
+# Client `run` bị SIGKILL giữa run: lượt của run gắn với client, nên hết
+# detach grace (1s) server huỷ lượt đó thay vì để nó chạy tiếp không ai giám
+# sát (lượt của send thì không gắn, xem dưới). Dự án + server riêng để biết
 # chắc session nào; tên socket bắt đầu bằng s.sock để cleanup và kiểm "không
 # còn server" bên dưới phủ luôn.
 h0="$t/h0"; mkdir -p "$h0"; cp "$t/proj/crush.json" "$h0/"
@@ -228,25 +250,27 @@ send_sid="$(jget "$t/h0-send.json" session_id)" send_err="$(jget "$t/h0-send.jso
 # Không đặt $(...) trong tên check: nó ghi đè $? trước khi check đọc.
 [ "$rc" -eq 1 ] && [ "$send_err" = "stopped waiting; the run keeps going on session $send_sid" ]; check "clientserver: Ctrl+C send --wait chỉ thôi chờ (quan sát: rc=$rc $send_err)" $?
 # run -s vào session đang chạy lượt của người khác (lượt SLOW send): Ctrl+C
-# không được huỷ lượt đó hay hàng đợi, chỉ thôi chờ.
+# huỷ đúng lượt của run (gỡ prompt của nó khỏi hàng đợi), không đụng lượt send.
 (cd "$h0" && exec "$bin" --host "unix://$t/s.sock-h0" run --json -s "$send_sid" "queued from run") >"$t/h0-runs.json" 2>/dev/null &
 pr=$!
 sleep 3
 kill -INT "$pr" 2>/dev/null; wait "$pr"; rc=$?
 runs_err="$(jget "$t/h0-runs.json" error)"
-[ "$rc" -eq 1 ] && [ "$runs_err" = "stopped waiting; the run keeps going on session $send_sid" ]; check "clientserver: Ctrl+C run -s chỉ thôi chờ (quan sát: rc=$rc $runs_err)" $?
+[ "$rc" -eq 1 ] && [ "$runs_err" = "context canceled" ]; check "clientserver: Ctrl+C run -s huỷ lượt của nó (quan sát: rc=$rc $runs_err)" $?
 h0_state="" send_all=""
 for _ in $(seq 60); do
   h0_state="$(last_reply "$h0" "$h0_sid")"; send_all="$(replies "$h0" "$send_sid" | tr '\n' ';')"
-  [[ "$h0_state" == ?*\|* && "$send_all" == *"queued from run"* ]] && break; sleep 1
+  [[ "$h0_state" == ?*\|* && "$send_all" == *"SLOW send"* ]] && break; sleep 1
 done
-[[ "$h0_state" == "end_turn|ECHO("*"SLOW orphan"* ]]; check "clientserver: client bị SIGKILL giữa run -> run vẫn xong (quan sát: $h0_state)" $?
-[[ "$send_all" == "end_turn|ECHO("*"SLOW send;"* ]]; check "clientserver: lượt của send vẫn xong sau Ctrl+C của send và của run -s (quan sát: $send_all)" $?
-[[ "$send_all" == *"end_turn|ECHO("*"queued from run;" ]]; check "clientserver: prompt xếp hàng của run -s vẫn chạy (quan sát: $send_all)" $?
+sleep 3 # để prompt đã gỡ có cơ hội chạy nếu lỡ còn trong hàng đợi
+send_all="$(replies "$h0" "$send_sid" | tr '\n' ';')"
+[[ "$h0_state" == canceled\|* ]]; check "clientserver: client run bị SIGKILL giữa run -> server huỷ lượt của nó (quan sát: $h0_state)" $?
+[[ "$send_all" == "end_turn|ECHO("*"SLOW send;" ]]; check "clientserver: lượt của send vẫn xong sau Ctrl+C của send và của run -s (quan sát: $send_all)" $?
+[[ "$send_all" != *"queued from run"* ]]; check "clientserver: prompt xếp hàng của run -s đã bị gỡ, không chạy (quan sát: $send_all)" $?
 
 # Server idle-timeout 1s phải tự thoát; không để lại tiến trình hay socket.
-for _ in $(seq 30); do pgrep -f -- "$t/s.sock" >/dev/null || break; sleep 0.5; done
-pgrep -f -- "$t/s.sock" >/dev/null; [ $? -ne 0 ]; check "không còn server process" $?
+for _ in $(seq 30); do [ -z "$(server_pids)" ] && break; sleep 0.5; done
+[ -z "$(server_pids)" ]; check "không còn server process" $?
 
 if [ "$fail" -eq 0 ]; then echo PASS; else echo "FAILED"; fi
 exit "$fail"

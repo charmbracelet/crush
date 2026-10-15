@@ -177,15 +177,19 @@ type homeSource struct{}
 
 var _ home.Source = homeSource{}
 
-func (homeSource) Workspaces(context.Context) ([]home.Workspace, error) {
+func (homeSource) Workspaces(ctx context.Context) ([]home.Workspace, error) {
 	list, err := projects.List()
 	if err != nil {
 		return nil, err
 	}
-	host, _ := os.Hostname()
 	var out []home.Workspace
 	for _, p := range list {
-		if p.Host != host {
+		// Home bỏ chờ sau hạn của nó: dừng luôn ở đây thay vì Stat/đọc
+		// branch tiếp (một mount treo có thể chặn từng lời gọi).
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if !p.OnThisMachine() {
 			continue
 		}
 		_, statErr := os.Stat(p.Path)
@@ -239,8 +243,7 @@ func (homeSource) Add(_ context.Context, dir string) (home.Workspace, error) {
 	if err != nil {
 		return home.Workspace{}, err
 	}
-	host, _ := os.Hostname()
-	if i := slices.IndexFunc(list, func(p projects.Project) bool { return p.Path == root && p.Host == host }); i >= 0 {
+	if i := slices.IndexFunc(list, func(p projects.Project) bool { return p.Path == root && p.OnThisMachine() }); i >= 0 {
 		return toHomeWorkspace(list[i]), nil
 	}
 	// The TUI registers the data dir its config resolves once it starts.

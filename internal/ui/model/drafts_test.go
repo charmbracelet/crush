@@ -39,6 +39,7 @@ func newDraftUI(t *testing.T) (*UI, *draftWS) {
 	m.status = NewStatus(m.com, nil)
 	warmCaches(m, false)
 	m.textarea.Focus()
+	m.promptHistory.index = -1 // Như New(): chưa duyệt lịch.
 	return m, ws
 }
 
@@ -261,4 +262,91 @@ func TestFileReadsDoNotLeakAcrossSessions(t *testing.T) {
 	m.sessionFileReads = []string{"/repo/db.go"}
 	switchTo(m, "s2")
 	require.Empty(t, m.sessionFileReads, "s1's mentions must not be recorded as read in s2")
+}
+
+// Đang duyệt lịch prompt bằng ↑ thì ô nhập hiện một mục lịch sử, không phải bản
+// nháp của người dùng: đổi session lúc đó phải cất bản nháp thật (không phải mục
+// lịch sử) và trả lại nguyên vẹn khi quay về.
+func TestDraftSurvivesHistoryBrowsingAcrossSessionSwitch(t *testing.T) {
+	m, _ := newDraftUI(t)
+	m.promptHistory.messages = []string{"older prompt", "oldest prompt"}
+	m.promptHistory.index = -1
+	typeText(m, "my real draft")
+
+	// ↑ lần đầu đưa con trỏ về đầu, lần hai mới vào lịch sử.
+	m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	require.Equal(t, "older prompt", m.textarea.Value())
+	require.Equal(t, 0, m.promptHistory.index)
+
+	switchTo(m, "s2")
+	require.Equal(t, "", m.textarea.Value(), "s2 starts empty")
+	switchTo(m, "s1")
+	require.Equal(t, "my real draft", m.textarea.Value(), "the history entry must not replace the real draft")
+}
+
+// Thoát lúc đang duyệt lịch cũng ghi bản nháp thật xuống đĩa.
+func TestSaveDraftsWhileBrowsingHistoryWritesRealDraft(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "drafts.json")
+	m, _ := newDraftUI(t)
+	m.draftsPath = path
+	m.promptHistory.messages = []string{"older prompt"}
+	m.promptHistory.index = -1
+	typeText(m, "unsent work")
+	m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	require.Equal(t, "older prompt", m.textarea.Value())
+
+	require.NoError(t, m.SaveDrafts())
+	require.JSONEq(t, `{"s1":"unsent work"}`, readDrafts(t, path))
+}
+
+// Tạo session từ màn landing (gửi prompt, chạy lệnh !, tin từ MCP, init) là một
+// lần đổi session như mọi lần khác: bản nháp landing phải được cất trước và ô
+// nhập của session mới phải rỗng. Trước đây chữ đang gõ ở landing trôi sang
+// session mới.
+func TestEnsureSessionStashesLandingDraft(t *testing.T) {
+	m, _ := newDraftUI(t)
+	m.session = nil
+	typeText(m, "typed on landing")
+
+	cmd, err := m.ensureSession()
+	require.NoError(t, err)
+	require.NotNil(t, cmd)
+	require.Equal(t, "new", m.currentSessionID())
+	require.Equal(t, "", m.textarea.Value(), "the new session starts with an empty editor")
+	require.Equal(t, "typed on landing", m.drafts[""].text, "the landing draft is kept for the landing screen")
+
+	// Về màn landing thì bản nháp đó hiện lại.
+	m.Update(tea.KeyPressMsg{Code: 'n', Mod: tea.ModCtrl})
+	require.Nil(t, m.session)
+	require.Equal(t, "typed on landing", m.textarea.Value())
+}
+
+func TestRunShellCommandWithoutSessionStashesLandingDraft(t *testing.T) {
+	m, _ := newDraftUI(t)
+	m.session = nil
+	typeText(m, "half-typed")
+
+	m.runShellCommandInternal("ls", true)
+	require.Equal(t, "new", m.currentSessionID())
+	require.Equal(t, "ls", m.pendingBangCommand)
+	require.Equal(t, "", m.textarea.Value())
+	require.Equal(t, "half-typed", m.drafts[""].text)
+}
+
+// Prompt đã gửi từ màn landing không hiện lại ở landing lần sau.
+func TestSentLandingPromptDoesNotReappear(t *testing.T) {
+	m, ws := newDraftUI(t)
+	m.session = nil
+	typeText(m, "send me")
+	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	runCmds(m, cmd)
+	require.Equal(t, "new", m.currentSessionID())
+	require.Equal(t, [][2]string{{"new", "send me"}}, ws.runs)
+
+	m.Update(tea.KeyPressMsg{Code: 'n', Mod: tea.ModCtrl})
+	require.Nil(t, m.session)
+	require.Equal(t, "", m.textarea.Value(), "the sent prompt must not come back on the landing screen")
+	require.NotContains(t, m.drafts, "")
 }

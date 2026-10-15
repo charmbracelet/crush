@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Kiểm agent-cli-tmux bằng tmux server riêng (-L agentcli-test) và agent-cli giả.
+# Kiểm agent-cli-tmux bằng tmux server riêng (tmux -S <socket trong thư mục tạm>) và agent-cli giả.
 set -euo pipefail
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 real_tmux=$(command -v tmux)

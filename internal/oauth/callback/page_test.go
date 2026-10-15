@@ -80,7 +80,7 @@ func TestWrite_TerseFailure(t *testing.T) {
 	require.Contains(t, page, "did not")
 	// With no subject the sentence must not dangle on a preposition.
 	require.NotContains(t, page, "access to <span")
-	require.Contains(t, page, "Crush was not granted access.")
+	require.Contains(t, page, "agent-cli was not granted access.")
 }
 
 // TestWrite_EscapesUntrustedText proves provider-supplied strings cannot
@@ -159,4 +159,44 @@ func TestServe_ContinueStatusCode(t *testing.T) {
 	require.NoError(t, Serve(rec, Result{ContinueURL: "https://auth.openai.com/x"}))
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
+}
+
+// TestWrite_NamesAgentCLI guards the product name shown to the user on all
+// three states of the page: the tab title, the sentence naming what was
+// authorized, and the retry hint. The fork is called agent-cli; the upstream
+// name must not leak into text a user reads.
+func TestWrite_NamesAgentCLI(t *testing.T) {
+	t.Parallel()
+
+	render := func(r Result) string {
+		var b strings.Builder
+		require.NoError(t, Write(&b, r))
+		return b.String()
+	}
+
+	ok := render(Result{Subject: "linear"})
+	require.Contains(t, ok, "<title>Authorized — agent-cli</title>")
+	require.Contains(t, ok, "agent-cli is now connected to")
+
+	noSubject := render(Result{})
+	require.Contains(t, noSubject, "agent-cli is now connected.")
+
+	failed := render(Result{Subject: "sentry", ErrorCode: "access_denied"})
+	require.Contains(t, failed, "<title>Authorization failed — agent-cli</title>")
+	require.Contains(t, failed, "agent-cli was not granted access to")
+	require.Contains(t, failed, "Close this tab and try again from agent-cli.")
+
+	handoff := render(Result{Subject: "linear", ContinueURL: "https://example.com/authorize"})
+	require.Contains(t, handoff, "<title>Authorize — agent-cli</title>")
+
+	for name, page := range map[string]string{"ok": ok, "no subject": noSubject, "failed": failed, "handoff": handoff} {
+		for _, stale := range []string{
+			"— Crush</title>",
+			"Crush is now connected",
+			"Crush was not granted access",
+			"try again from Crush",
+		} {
+			require.NotContains(t, page, stale, name)
+		}
+	}
 }

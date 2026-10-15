@@ -10,7 +10,9 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/ui/attachments"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/completions"
 	"github.com/charmbracelet/crush/internal/workspace"
 )
 
@@ -59,18 +61,22 @@ func (w *channelWorkspace) AgentRunChannel(_ context.Context, channel, sessionID
 func (w *channelWorkspace) Config() *config.Config { return nil }
 
 // newChannelUI builds a UI initialized enough that ensureSession's setState /
-// layout path is safe to exercise.
+// layout path is safe to exercise. ensureSession đổi session như mọi lần khác
+// (cất bản nháp landing, mở ô nhập của session mới) nên cần cả phần đính kèm
+// và gợi ý hoàn tất của ô nhập.
 func newChannelUI(ws *channelWorkspace) *UI {
 	com := common.DefaultCommon(ws)
 	return &UI{
-		com:      com,
-		status:   NewStatus(com, nil),
-		chat:     NewChat(com, config.ScrollbarDefault),
-		textarea: textarea.New(),
-		state:    uiChat,
-		focus:    uiFocusEditor,
-		width:    140,
-		height:   45,
+		com:         com,
+		status:      NewStatus(com, nil),
+		chat:        NewChat(com, config.ScrollbarDefault),
+		textarea:    textarea.New(),
+		attachments: attachments.New(nil, attachments.Keymap{}),
+		completions: completions.New(com.Styles.Completions.Normal, com.Styles.Completions.Focused, com.Styles.Completions.Match),
+		state:       uiChat,
+		focus:       uiFocusEditor,
+		width:       140,
+		height:      45,
 	}
 }
 

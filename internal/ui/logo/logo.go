@@ -19,9 +19,6 @@ type letterform func(bool) string
 
 const diag = `╱`
 
-// brandLabel is the small label shown above the wordmark.
-const brandLabel = "luannt"
-
 // Opts are the options for rendering the Crush title art.
 type Opts struct {
 	FieldColor   color.Color // diagonal lines
@@ -43,11 +40,12 @@ type Opts struct {
 //
 // The compact argument determines whether it renders compact for the sidebar
 // or wider for the main pane.
+//
+// Fork: không vẽ hàng nhãn và phiên bản phía trên chữ lớn (người dùng bỏ
+// 15/10; xem phiên bản bằng `agent-cli --version`). version giữ trong chữ ký
+// để khỏi sửa nơi gọi.
 func Render(base lipgloss.Style, version string, compact bool, o Opts) string {
-	charm := brandLabel
-	if !o.Hyper {
-		charm = " " + charm
-	}
+	_ = version
 
 	fg := func(c color.Color, s string) string {
 		return lipgloss.NewStyle().Foreground(c).Render(s)
@@ -95,18 +93,7 @@ func Render(base lipgloss.Style, version string, compact bool, o Opts) string {
 	}
 	crush = b.String()
 
-	// Charm and version.
-	metaRowGap := 1
-	maxVersionWidth := crushWidth - lipgloss.Width(charm) - metaRowGap
-	version = ansi.Truncate(version, maxVersionWidth, "…") // truncate version if too long.
-	if o.Hyper && compact {
-		version += " "
-	}
-	gap := max(0, crushWidth-lipgloss.Width(charm)-lipgloss.Width(version))
-	metaRow := fg(o.CharmColor, charm) + strings.Repeat(" ", gap) + fg(o.VersionColor, version)
-
-	// Join the meta row and big Crush title.
-	crush = strings.TrimSpace(metaRow + "\n" + crush)
+	crush = strings.TrimSpace(crush)
 
 	// Narrow version. If this is Hypercrush, this is also a stacked version.
 	if compact {
@@ -157,9 +144,7 @@ func SmallRender(t *styles.Styles, width int, o Opts) string {
 	if o.Hyper {
 		name = "HYPERCRUSH"
 	}
-	charm := brandLabel
-	title := t.Logo.SmallCharm.Render(charm)
-	title = fmt.Sprintf("%s %s", title, styles.ApplyBoldForegroundGrad(t.Logo.GradCanvas, name, t.Logo.SmallGradFromColor, t.Logo.SmallGradToColor))
+	title := styles.ApplyBoldForegroundGrad(t.Logo.GradCanvas, name, t.Logo.SmallGradFromColor, t.Logo.SmallGradToColor)
 	remainingWidth := width - lipgloss.Width(title) - 1 // 1 for the space after the name
 	if remainingWidth > 0 {
 		lines := strings.Repeat("╱", remainingWidth)

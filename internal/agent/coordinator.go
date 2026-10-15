@@ -134,6 +134,9 @@ type Coordinator interface {
 	RunAccepted(ctx context.Context, accept *AcceptedRun, sessionID, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error)
 	BeginAccepted(sessionID string) *AcceptedRun
 	Cancel(sessionID string)
+	// CancelRun huỷ đúng lượt mang runID (RunID của SendMessage), không đụng
+	// lượt khác hay hàng đợi của session.
+	CancelRun(sessionID, runID string)
 	CancelAll()
 	IsSessionBusy(sessionID string) bool
 	IsBusy() bool
@@ -326,7 +329,10 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	// mid-handshake cannot stall a headless run for minutes. Past the
 	// budget the turn proceeds without the stragglers; their tools simply
 	// stay absent from this run.
-	if !c.interactive {
+	// Lượt phi tương tác qua server (agent-cli run, đánh dấu ở ctx) cũng chỉ
+	// có một lần dựng bộ tool, nên cũng chờ như coordinator phi tương tác.
+	nonInteractive := !c.interactive || NonInteractiveFromContext(ctx)
+	if nonInteractive {
 		if err := mcp.WaitForInitBudget(ctx, mcp.InitWaitBudget); err != nil {
 			return nil, fmt.Errorf("failed to wait for MCP initialization: %w", err)
 		}
@@ -336,6 +342,13 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	// its model settings, and the model refresh below must all target the
 	// same agent even if SetMainAgent swaps the main agent mid-flight.
 	agent, agentName := c.activeAgent()
+	if nonInteractive && agentName == config.AgentPlan {
+		// Chế độ plan là của cả workspace (TUI bật): lượt phi tương tác cũng
+		// chỉ đọc được. Tách agent theo lượt thì Cancel/IsBusy (chỉ hỏi agent
+		// chính) không thấy lượt đó, nên chỉ ghi lại cho dễ dò.
+		slog.Warn("Non-interactive run uses the plan agent set for this workspace; it can only read and plan",
+			"session_id", sessionID)
+	}
 	if err := c.updateAgentModels(ctx, agent, agentName); err != nil {
 		return nil, fmt.Errorf("failed to update models: %w", err)
 	}
@@ -402,7 +415,11 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 			PresencePenalty:   presPenalty,
 			OnComplete:        onComplete,
 			Accepted:          accept,
-			OnAuthRefresh:     c.makeAuthRefreshCallback(providerCfg),
+			NonInteractive:    nonInteractive,
+			// Ghim đúng model mà các tham số trên được tính cho: lượt này
+			// (và lượt xếp hàng của nó) không đọc lại model chung.
+			pinnedModel:   &model,
+			OnAuthRefresh: c.makeAuthRefreshCallback(providerCfg),
 		})
 	}
 	beforeLoaded := c.skillTracker.LoadedNames()
@@ -888,8 +905,8 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		tools.NewEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 		tools.NewMultiEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 		tools.NewFetchTool(c.permissions, c.cfg.WorkingDir(), nil),
-		tools.NewGlobTool(c.cfg.WorkingDir(), c.cfg.Config().Tools.Glob),
-		tools.NewGrepTool(c.cfg.WorkingDir(), c.cfg.Config().Tools.Grep),
+		tools.NewGlobTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Tools.Glob),
+		tools.NewGrepTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Tools.Grep),
 		tools.NewLsTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Tools.Ls),
 		tools.NewSourcegraphTool(nil),
 		tools.NewTodosTool(c.sessions),
@@ -1422,6 +1439,10 @@ func (c *coordinator) Cancel(sessionID string) {
 	c.currentAgent().Cancel(sessionID)
 }
 
+func (c *coordinator) CancelRun(sessionID, runID string) {
+	c.currentAgent().CancelRun(sessionID, runID)
+}
+
 func (c *coordinator) CancelAll() {
 	c.currentAgent().CancelAll()
 }
@@ -1703,6 +1724,7 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 			PresencePenalty:  model.ModelCfg.PresencePenalty,
 			NonInteractive:   true,
 			OnAuthRefresh:    c.makeAuthRefreshCallback(providerCfg),
+			pinnedModel:      &model,
 		})
 	}
 	result, err := run()

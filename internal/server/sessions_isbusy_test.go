@@ -38,9 +38,10 @@ func (s *stubCoordinator) RunAccepted(ctx context.Context, accept *agent.Accepte
 func (s *stubCoordinator) BeginAccepted(sessionID string) *agent.AcceptedRun {
 	return nil
 }
-func (s *stubCoordinator) Cancel(string) {}
-func (s *stubCoordinator) CancelAll()    {}
-func (s *stubCoordinator) IsBusy() bool  { return false }
+func (s *stubCoordinator) CancelRun(string, string) {}
+func (s *stubCoordinator) Cancel(string)            {}
+func (s *stubCoordinator) CancelAll()               {}
+func (s *stubCoordinator) IsBusy() bool             { return false }
 func (s *stubCoordinator) IsSessionBusy(id string) bool {
 	return s.busy[id]
 }

@@ -3,16 +3,36 @@
 set -euo pipefail
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 install_dir="${AGENT_CLI_INSTALL_DIR:-$HOME/.local}"
+# Đổi sang đường dẫn tuyệt đối ngay từ đầu: wrapper ghi cứng đường dẫn binary vào chính nó,
+# nên nếu để tương đối thì wrapper chỉ chạy được khi đứng đúng thư mục cài.
+mkdir -p -- "$install_dir"
+install_dir="$(cd -- "$install_dir" && pwd)"
 config_dir="$HOME/.config/agent-cli"
 lib_dir="$install_dir/lib/agent-cli"
 bin_path="$lib_dir/crush"
 wrapper_path="$install_dir/bin/agent-cli"
 mkdir -p "$install_dir/bin" "$lib_dir"
 # Thư mục cấu hình chứa env (có key): tạo mới thì 700; đã có thì chỉ siết nếu còn mở cho nhóm/người khác.
-if [[ ! -d "$config_dir" ]]; then
+# Nếu nó là symlink thì xét và siết thư mục ĐÍCH đã phân giải, có chủ đích: chỉ siết khi đích là của
+# chính user (đích có thể là thư mục dùng chung), và nói rõ đã đổi gì. `find` không theo symlink nên
+# xét symlink thì luôn thấy mode 777 và chmod sẽ đổi quyền đích một cách mù quáng.
+if [[ -L "$config_dir" && ! -d "$config_dir" ]]; then
+  echo "$config_dir là symlink hỏng (đích không tồn tại): tạo đích hoặc gỡ symlink rồi cài lại." >&2
+  exit 1
+elif [[ ! -d "$config_dir" ]]; then
   install -d -m 700 "$config_dir"
-elif [[ -n "$(find "$config_dir" -maxdepth 0 -perm /077)" ]]; then
-  chmod go-rwx "$config_dir"
+else
+  real_config_dir="$(cd -P -- "$config_dir" && pwd)"
+  if [[ -n "$(find "$real_config_dir" -maxdepth 0 -perm /077)" ]]; then
+    if [[ ! -O "$real_config_dir" ]]; then
+      echo "Cảnh báo: $real_config_dir (đích của $config_dir) không thuộc user hiện tại và còn mở cho nhóm/người khác; installer không đổi quyền. Tệp env trong đó chứa key: tự kiểm tra." >&2
+    else
+      chmod go-rwx "$real_config_dir"
+      if [[ -L "$config_dir" ]]; then
+        echo "$config_dir là symlink: đã siết quyền thư mục đích $real_config_dir về go-rwx (chứa env có key)."
+      fi
+    fi
+  fi
 fi
 # Cấu hình chung: crushrc đọc biến AGENT_CLI_* từ tệp env. Không ghi đè tệp có sẵn.
 # crushrc thắng crush.json cùng thư mục: nếu crush.json (theo cả symlink, không sửa) đang khai
@@ -45,7 +65,10 @@ if [[ "${AGENT_CLI_SKIP_BUILD:-}" == 1 ]]; then
   echo "Bỏ qua go build (AGENT_CLI_SKIP_BUILD=1); dùng binary có sẵn."
 else
   # Build ra tệp tạm: build lỗi thì dừng ở đây, bản đang chạy và các bản sao lưu còn nguyên.
-  (cd "$repo_dir" && GOMAXPROCS=2 go build -p 2 -o "$bin_path.new" .)
+  # Biến build như bản chính thức (.goreleaser.yml, Taskfile.yaml): CGO_ENABLED=0 và
+  # GOEXPERIMENT=greenteagc. Đã kiểm với go1.27.0: tên experiment này được nhận (tên lạ bị báo
+  # `unknown GOEXPERIMENT`). Phiên bản hiển thị lấy từ VCS stamping của go build, không cần -ldflags.
+  (cd "$repo_dir" && CGO_ENABLED=0 GOEXPERIMENT=greenteagc GOMAXPROCS=2 go build -p 2 -o "$bin_path.new" .)
   built=1
 fi
 # Wrapper: mọi tiến trình agent-cli trong cùng thư mục gốc dự án dùng chung một server.
@@ -60,7 +83,11 @@ export CRUSH_DISABLE_UPDATE_CHECK=1
 export CRUSH_CLIENT_SERVER="${CRUSH_CLIENT_SERVER:-1}"
 # Home mở workspace qua chính launcher này để mỗi workspace có --host riêng của nó.
 export AGENT_CLI_LAUNCHER="$0"
-case "$CRUSH_CLIENT_SERVER" in 0 | f | F | false | FALSE | False) ;; *)
+# Giá trị hiểu đúng như strconv.ParseBool của Go (useClientServer trong internal/cmd/root.go): bật là
+# 1 t T TRUE true True, tắt là 0 f F FALSE false False. Giá trị khác Go coi là tắt, nên launcher cũng
+# coi là tắt (cảnh báo) thay vì thêm --host cho một tiến trình sẽ chạy in-process.
+case "$CRUSH_CLIENT_SERVER" in 0 | f | F | FALSE | false | False) ;;
+1 | t | T | TRUE | true | True)
   # shortcut: chỉ nhận -c/--cwd đứng riêng (không gộp cờ kiểu -dc), nâng cấp khi cần.
   have_host= cwd=$PWD sub= skip= bare=1
   args=("$@")
@@ -95,14 +122,19 @@ case "$CRUSH_CLIENT_SERVER" in 0 | f | F | false | FALSE | False) ;; *)
     fi
     h=$(printf %s "$root" | { sha1sum || shasum -a 1; } 2>/dev/null)
     sock="$rt/agent-cli-${h:0:8}.sock"
+    # Không chọn được server riêng thì DỪNG, đừng chạy tiếp không --host: client sẽ rơi về server
+    # mặc định dùng chung và mất cách ly theo dự án (session, trạng thái bận, log lẫn giữa các dự án).
     if [[ ${#h} -lt 8 ]]; then
-      echo "agent-cli: thiếu sha1sum/shasum, không chọn được server theo dự án." >&2
+      echo "agent-cli: thiếu sha1sum/shasum nên không chọn được server riêng cho dự án; cài một trong hai, hoặc chạy CRUSH_CLIENT_SERVER=0 agent-cli (in-process)." >&2
+      exit 1
     elif [[ ${#sock} -gt 107 ]]; then # giới hạn sun_path 108 byte gồm NUL
-      echo "agent-cli: đường dẫn socket quá dài (${#sock} byte), không chọn được server theo dự án." >&2
-    else
-      set -- --host "unix://$sock" "$@"
+      echo "agent-cli: đường dẫn socket quá dài (${#sock} byte, tối đa 107): $sock" >&2
+      echo "agent-cli: đặt AGENT_CLI_RUNTIME_DIR trỏ tới thư mục riêng ngắn hơn (mode 700), hoặc chạy CRUSH_CLIENT_SERVER=0 agent-cli (in-process)." >&2
+      exit 1
     fi
+    set -- --host "unix://$sock" "$@"
   fi ;;
+*) echo "agent-cli: CRUSH_CLIENT_SERVER=\"$CRUSH_CLIENT_SERVER\" không hợp lệ (dùng 1/0 hoặc true/false); chạy in-process như CRUSH_CLIENT_SERVER=0." >&2 ;;
 esac
 exec "__CRUSH_BIN__" "$@"
 EOF
@@ -124,7 +156,11 @@ fi
 printf '%s\n' "${wrapper_tpl//__CRUSH_BIN__/"$bin_path"}" > "$wrapper_path.tmp"
 chmod 755 "$wrapper_path.tmp"
 mv -f -- "$wrapper_path.tmp" "$wrapper_path"
-ln -sfn "$repo_dir/scripts/agent-cli-tmux.sh" "$install_dir/bin/agent-cli-tmux"
+# agent-cli-tmux: chép (không symlink) để bản cài không phụ thuộc thư mục checkout (đổi nhánh, di
+# chuyển hay xoá repo không làm hỏng nó). Ghi tệp tạm rồi mv: thay được cả symlink của bản cài cũ
+# mà không ghi xuyên qua nó vào tệp trong repo.
+install -m 755 "$repo_dir/scripts/agent-cli-tmux.sh" "$install_dir/bin/agent-cli-tmux.tmp"
+mv -f -- "$install_dir/bin/agent-cli-tmux.tmp" "$install_dir/bin/agent-cli-tmux"
 # In lệnh quay lại TRƯỚC khi chạy thử: bản mới hỏng ngay ở --version mới là lúc cần nó.
 if [[ -n "$backup_dir" ]]; then
   echo "Bản cũ đã sao lưu ở $backup_dir. Quay lại bằng:"
@@ -133,3 +169,17 @@ if [[ -n "$backup_dir" ]]; then
 fi
 "$wrapper_path" --version
 echo "Thêm $install_dir/bin vào PATH nếu terminal chưa nhận agent-cli."
+# Mẫu trong repo có thể đã thêm biến hoặc chú thích mới so với tệp bạn đang dùng. Không bao giờ
+# ghi đè tệp của user: chỉ gợi ý lệnh để tự xem khác biệt rồi gộp tay.
+diff_hints=()
+for pair in "crushrc:agent-cli.crushrc.example" "env:agent-cli.env.example"; do
+  live="$config_dir/${pair%%:*}" example="$repo_dir/${pair#*:}"
+  if [[ -f "$live" ]] && ! cmp -s -- "$live" "$example"; then
+    diff_hints+=("diff -u $(printf %q "$live") $(printf %q "$example")")
+  fi
+done
+if ((${#diff_hints[@]} > 0)); then
+  echo "Cấu hình đang dùng khác mẫu trong repo (installer không ghi đè tệp của bạn). Xem khác biệt:"
+  printf '  %s\n' "${diff_hints[@]}"
+  echo "(env chứa giá trị của bạn nên luôn khác mẫu; diff sẽ in cả key, đừng chạy khi chia sẻ màn hình.)"
+fi

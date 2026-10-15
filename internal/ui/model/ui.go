@@ -469,7 +469,10 @@ type UI struct {
 	// agentBusyCache / yoloCache memoize the workspace busy and permission
 	// probes (synchronous HTTP round-trips in client/server mode). Reads
 	// never probe; refreshes happen off-thread (see workspace_cache.go).
-	agentBusyCache    ttlCache
+	agentBusyCache ttlCache
+	// restorer cho các lần khôi phục model của session vừa mở chạy nền,
+	// lần lượt, lần sau thắng (xem model_restore.go).
+	restorer          modelRestorer
 	yoloCache         ttlCache
 	busyFetchInFlight bool
 	// agentReady / agentModel memoize the coordinator readiness and
@@ -522,9 +525,20 @@ type UI struct {
 
 	// drafts holds what the user was typing per session ("" = landing
 	// screen) while another session is on screen; see drafts.go.
-	drafts       map[string]draft
-	draftsPath   string
-	draftsOnDisk map[string]string
+	drafts     map[string]draft
+	draftsPath string
+	// draftsDisk is what this UI has loaded from or written to drafts.json;
+	// draftSave drives the debounced save; draftsPruned: see pruneStaleDrafts.
+	draftsDisk   *draftsDisk
+	draftSave    draftSaver
+	draftsPruned bool
+
+	// cycle remembers the target of an Alt+. / Alt+, load still in flight, so
+	// pressing again before it lands goes one more step; see sessions_panel.go.
+	cycle sessionCycle
+	// sessionsDialogLoading is true while the Sessions dialog's session list is
+	// being fetched off-thread, so a second Alt+S does not start another fetch.
+	sessionsDialogLoading bool
 
 	// Prompts of sessions not on screen, by top-level session ID; see
 	// background_prompts.go.
@@ -639,6 +653,9 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		ui.agentModel = com.Workspace.AgentModel()
 	}
 	ui.mode = uiInputModeCode
+	// -1 là "không duyệt lịch"; giá trị 0 mặc định sẽ bị coi là đang xem mục đầu
+	// của lịch sử (cất nhầm bản nháp) cho tới khi lịch sử nạp xong.
+	ui.promptHistory.index = -1
 	ui.setEditorPrompt(yolo)
 	ui.randomizePlaceholders()
 	ui.textarea.Placeholder = ui.readyPlaceholder
@@ -1009,10 +1026,38 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd := m.dispatchPromptQueueRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case mentionedFileMsg:
+		if msg.sessionID == m.currentSessionID() {
+			m.sessionFileReads = append(m.sessionFileReads, msg.absPath)
+			m.attachments.Update(msg.attachment)
+			m.invalidateFrames()
+		}
+	case sessionsDialogMsg:
+		if cmd := m.applySessionsDialog(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case draftSaveTickMsg:
+		if cmd := m.handleDraftSaveTick(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case draftsSavedMsg:
+		if cmd := m.handleDraftsSaved(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case loadSessionFailedMsg:
+		m.cycle.done(msg.sessionID)
+		// Báo lỗi cho người dùng, và báo lại session đang thật sự hiện để
+		// workspace không giữ một ý niệm nào khác về nó.
+		cmds = append(cmds, util.ReportError(msg.err), m.reportCurrentSession(m.currentSessionID()))
+	case modelRestoredMsg:
+		if cmd := m.handleModelRestored(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case loadSessionMsg:
 		if m.forceCompactMode {
 			m.isCompact = true
 		}
+		m.cycle.done(msg.session.ID)
 		// Plan mode is scoped to the session it was enabled in: switching
 		// to another session falls back to code mode and drops any pending
 		// plan handoff. (Loading the session that was just created for the
@@ -1036,6 +1081,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.restoreDraft()
 			m.openHeldPrompts()
 		}
+		// Báo workspace session đang xem SAU khi đã chuyển (cả khi nạp lại đúng
+		// session đang xem, như sau lúc kết nối lại), không phải lúc ra lệnh nạp.
+		cmds = append(cmds, m.reportCurrentSession(msg.session.ID))
 		m.sidebarOffset = 0
 		m.sessionFiles = msg.files
 		// Session switch: the memoized busy state and queued prompts
@@ -1169,7 +1217,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					cmds = append(cmds, cmd)
 				}
 			}
+			// Session đã xoá không còn gì để chờ: bỏ bản nháp, prompt đang giữ
+			// (không ai trả lời được nữa) và trạng thái hoạt động của nó.
 			delete(m.drafts, msg.Payload.ID)
+			m.dropHeldPrompts(msg.Payload.ID)
+			m.activity.Forget(msg.Payload.ID)
 			break
 		}
 		if m.session != nil && msg.Payload.ID == m.session.ID {
@@ -1803,6 +1855,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 	}
+	// Bản nháp đổi thì hẹn giờ lưu xuống đĩa (xem drafts.go).
+	if cmd := m.trackDraftChange(msg); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
 	if cmd := m.endFrameUpdate(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
@@ -2212,10 +2268,6 @@ func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.
 	if !ok {
 		return nil
 	}
-	// Nested tool activity means the agent is running; the animation clock
-	// may have been frozen by a non-busy session reload.
-	m.chat.SetAnimationsAllowed(true)
-
 	// Find the parent agent tool item.
 	var agentItem chat.NestedToolContainer
 	for i := 0; i < m.chat.Len(); i++ {
@@ -2238,6 +2290,12 @@ func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.
 	if agentItem == nil {
 		return nil
 	}
+
+	// Nested tool activity of an agent shown in this chat means it is running;
+	// the animation clock may have been frozen by a non-busy session reload.
+	// Only once the parent item is found: a child session of another chat says
+	// nothing about the one on screen.
+	m.chat.SetAnimationsAllowed(true)
 
 	// Get existing nested tools.
 	nestedTools := agentItem.NestedTools()
@@ -2547,7 +2605,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		activeTheme := common.ThemeNameFromConfig(m.com.Config())
 		isActive := strings.EqualFold(activeTheme, themeName)
 		if activeTheme == "" {
-			isActive = strings.EqualFold(themeName, "charmtone-panther")
+			isActive = strings.EqualFold(themeName, styles.DefaultThemeName)
 		}
 		if isActive {
 			newStyles, err := styles.LoadTheme(themeName)
@@ -2593,14 +2651,14 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	case dialog.ActionCreateTheme:
 		base := msg.Base
 		if base == "" {
-			base = "charmtone-panther"
+			base = styles.DefaultThemeName
 		}
 		name := msg.Name
 		exported, err := styles.ExportResolvedPalette(base)
 		if err != nil {
 			// Fall back to the default theme when the base theme is no
 			// longer resolvable (e.g. a user theme that was since deleted).
-			base = "charmtone-panther"
+			base = styles.DefaultThemeName
 			exported, err = styles.ExportResolvedPalette(base)
 			if err != nil {
 				cmds = append(cmds, util.ReportError(err))
@@ -2656,11 +2714,11 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		// If the deleted theme was active, reset to the default theme.
 		if strings.EqualFold(common.ThemeNameFromConfig(m.com.Config()), msg.Name) {
-			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.tui.active_theme", "charmtone-panther"); err != nil {
+			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.tui.active_theme", styles.DefaultThemeName); err != nil {
 				cmds = append(cmds, util.ReportError(err))
 				break
 			}
-			newStyles, err := styles.LoadTheme("charmtone-panther")
+			newStyles, err := styles.LoadTheme(styles.DefaultThemeName)
 			if err != nil {
 				cmds = append(cmds, util.ReportError(err))
 				break
@@ -2697,6 +2755,14 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionQuit:
 		cmds = append(cmds, tea.Quit)
+	case dialog.ActionGoHome:
+		m.dialog.CloseDialog(dialog.CommandsID)
+		if cmd := m.goHome(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.ActionGoHomeConfirmed:
+		m.backToHome = true
+		cmds = append(cmds, tea.Quit)
 	case dialog.ActionEnableDockerMCP:
 		m.dialog.CloseDialog(dialog.CommandsID)
 		cmds = append(cmds, m.enableDockerMCP)
@@ -2728,11 +2794,9 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 	case dialog.ActionSelectReasoningEffort:
-		if m.isAgentBusy() {
-			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait..."))
-			break
-		}
-
+		// Đổi được cả khi có run: mỗi lượt giữ tham số (gồm effort) lúc nó
+		// bắt đầu, nên mức mới áp cho tin nhắn gửi sau.
+		effortBusy := m.isAgentBusy()
 		cfg := m.com.Config()
 		if cfg == nil {
 			cmds = append(cmds, util.ReportError(errors.New("configuration not found")))
@@ -2753,8 +2817,10 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 
 		cmds = append(cmds, m.updateAgentModelCmd(func() tea.Msg {
-			m.com.Workspace.UpdateAgentModel(context.TODO())
-			return util.NewInfoMsg("Reasoning effort set to " + msg.Effort)
+			if err := m.com.Workspace.UpdateAgentModel(context.TODO()); err != nil {
+				return util.NewErrorMsg(err)
+			}
+			return util.NewInfoMsg("Reasoning effort set to " + msg.Effort + appliesNextNote(effortBusy))
 		}))
 		m.dialog.CloseDialog(dialog.ReasoningID)
 	case dialog.ActionPermissionResponse:
@@ -2948,15 +3014,9 @@ func (m *UI) gitBranchTicker() tea.Cmd {
 // available. Returns a tea.Cmd that rebuilds the agent models if a
 // switch was made, or nil if no switch was needed.
 func (m *UI) restoreModelFromSession(msgs []message.Message) tea.Cmd {
-	// Model là trạng thái chung của workspace và run đọc lại nó ở mỗi bước:
-	// đổi khi có run ở bất kỳ session nào (session nền vẫn chạy khi mở
-	// session khác) là đổi provider giữa chừng run đó. Cùng cổng với
-	// handleSelectModel.
-	if m.isAgentBusy() {
-		slog.Debug("Skipping model restoration: a run is in flight")
-		return nil
-	}
-
+	// Đổi model chung khi session khác đang chạy là an toàn: mỗi lượt giữ
+	// model lúc nó bắt đầu (agent: pinnedModel), nên session vừa mở được dùng
+	// lại model của nó ngay cả khi session nền đang chạy.
 	var lastAssistant *message.Message
 	for i := len(msgs) - 1; i >= 0; i-- {
 		if msgs[i].Role == message.Assistant && !msgs[i].IsSummaryMessage {
@@ -2973,7 +3033,12 @@ func (m *UI) restoreModelFromSession(msgs []message.Message) tea.Cmd {
 		return nil
 	}
 
+	// So với đích mới nhất đã yêu cầu nếu còn lần khôi phục chưa ghi xong:
+	// cấu hình lúc đó chưa phản ánh nó (A→B→A nhanh không được dừng ở B).
 	currentLarge := cfg.Models[config.SelectedModelTypeLarge]
+	if t := m.restorer.target(); t != nil {
+		currentLarge = *t
+	}
 	if currentLarge.Provider == lastAssistant.Provider && currentLarge.Model == lastAssistant.Model {
 		return nil
 	}
@@ -2985,32 +3050,13 @@ func (m *UI) restoreModelFromSession(msgs []message.Message) tea.Cmd {
 		return nil
 	}
 
-	selectedModel := config.SelectedModel{
-		Provider: lastAssistant.Provider,
-		Model:    lastAssistant.Model,
-	}
-	if err := m.com.Workspace.UpdatePreferredModel(config.ScopeWorkspace, config.SelectedModelTypeLarge, selectedModel); err != nil {
-		slog.Error("Failed to restore model from session", "error", err)
-		return nil
-	}
-
-	m.applyThemeForProvider(lastAssistant.Provider)
-
-	if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
-		smallModel := m.com.Workspace.GetDefaultSmallModel(lastAssistant.Provider)
-		if err := m.com.Workspace.UpdatePreferredModel(config.ScopeWorkspace, config.SelectedModelTypeSmall, smallModel); err != nil {
-			slog.Error("Failed to set small model during session restore", "error", err)
-		}
-	}
-
-	return m.updateAgentModelCmd(func() tea.Msg {
-		if err := m.com.Workspace.UpdateAgentModel(context.TODO()); err != nil {
-			return util.ReportError(err)
-		}
-		slog.Info("Restored model from session",
-			"provider", lastAssistant.Provider,
-			"model", lastAssistant.Model)
-		return nil
+	_, hasSmall := cfg.Models[config.SelectedModelTypeSmall]
+	return m.requestModelRestore(modelRestore{
+		sel: config.SelectedModel{
+			Provider: lastAssistant.Provider,
+			Model:    lastAssistant.Model,
+		},
+		needSmall: !hasSmall,
 	})
 }
 
@@ -3019,10 +3065,10 @@ func (m *UI) restoreModelFromSession(msgs []message.Message) tea.Cmd {
 func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 	var cmds []tea.Cmd
 
-	// we ignore dialogs with the oauth id as they need to be able to be dismissed
-	if m.isAgentBusy() && !m.dialog.ContainsDialog(dialog.OAuthID) {
-		return util.ReportWarn("Agent is busy, please wait...")
-	}
+	// Đổi được cả khi có run (ở session này hay session khác): mỗi lượt giữ
+	// model lúc nó bắt đầu (agent: pinnedModel), nên model mới áp cho tin
+	// nhắn gửi sau, lượt đang chạy không bị đổi provider giữa chừng.
+	busy := m.isAgentBusy()
 
 	cfg := m.com.Config()
 	if cfg == nil {
@@ -3127,7 +3173,7 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 
 	cmds = append(cmds, m.updateAgentModelCmd(func() tea.Msg {
 		if err := m.com.Workspace.UpdateAgentModel(context.TODO()); err != nil {
-			return util.ReportError(err)
+			return util.NewErrorMsg(err)
 		}
 
 		var (
@@ -3137,7 +3183,7 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		if catwalkModel := cfg.GetModel(msg.Model.Provider, msg.Model.Model); catwalkModel != nil && catwalkModel.Name != "" {
 			modelName = catwalkModel.Name
 		}
-		modelMsg := fmt.Sprintf("%s model changed to %s", modelType, modelName)
+		modelMsg := fmt.Sprintf("%s model changed to %s", modelType, modelName) + appliesNextNote(busy)
 
 		return util.NewInfoMsg(modelMsg)
 	}))
@@ -3283,6 +3329,11 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				cmds = append(cmds, cmd)
 			}
 			return true
+		case key.Matches(msg, m.keyMap.Jobs):
+			if cmd := m.openJobsDialog(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			return true
 		case key.Matches(msg, m.keyMap.Chat.NextSession):
 			if cmd := m.cycleSession(1); cmd != nil {
 				cmds = append(cmds, cmd)
@@ -3299,10 +3350,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			}
 			return true
 		case key.Matches(msg, m.keyMap.Workspaces):
-			// Quit only, no cancel: in client/server mode the server keeps
-			// the run going; in local mode closing the workspace ends it.
-			m.backToHome = true
-			cmds = append(cmds, tea.Quit)
+			cmds = append(cmds, m.goHome())
 			return true
 		case key.Matches(msg, m.keyMap.Chat.Details) && m.isCompact:
 			m.detailsOpen = !m.detailsOpen
@@ -3365,7 +3413,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			if yolo {
 				cmds = append(cmds, util.CmdHandler(util.InfoMsg{Type: util.InfoTypeYolo, Msg: yoloModeBannerMsg}))
 			} else {
-				cmds = append(cmds, util.ReportInfo("Yolo mode disabled"))
+				cmds = append(cmds, util.ReportInfo(yoloModeOffMsg))
 			}
 			return true
 		}
@@ -4102,7 +4150,9 @@ func (m *UI) ShortHelp() []key.Binding {
 
 	switch m.state {
 	case uiInitialize:
-		binds = append(binds, k.Quit)
+		// Không còn phím y: gợi ý cách chọn Yep/Nope rồi xác nhận. Quit đã
+		// có ở phần chung cuối hàm, thêm ở đây là hiện hai lần.
+		binds = append(binds, k.Initialize.Switch, k.Initialize.Enter)
 	case uiChat:
 		// Show cancel binding if agent is busy.
 		if m.isCurrentSessionBusy() {
@@ -4225,6 +4275,8 @@ func (m *UI) FullHelp() [][]key.Binding {
 	case uiInitialize:
 		binds = append(binds,
 			[]key.Binding{
+				k.Initialize.Switch,
+				k.Initialize.Enter,
 				k.Quit,
 			})
 	case uiChat:
@@ -4257,6 +4309,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 			k.Models,
 			k.Providers,
 			k.Effort,
+			k.Jobs,
 			k.Sessions,
 			k.ToggleYolo,
 		)
@@ -5034,8 +5087,11 @@ func (m *UI) switchPlanToYolo() tea.Cmd {
 
 // Mode banner copy shown in the status bar after switching modes.
 const (
-	planModeBannerMsg = "Plan with agent-cli before generating any code."
-	yoloModeBannerMsg = "Skip permission prompts. System level commands will be blocked."
+	// Plan mode và YOLO là của cả workspace, không riêng session đang xem
+	// (chỉ accept-edits là của riêng một session): lời báo nói rõ điều đó.
+	planModeBannerMsg = "Plan mode (all sessions in this workspace): plan with agent-cli before generating any code."
+	yoloModeBannerMsg = "YOLO mode (all sessions in this workspace): skip permission prompts. System level commands will be blocked."
+	yoloModeOffMsg    = "Yolo mode disabled (all sessions in this workspace)"
 	// acceptEditsBannerMsg is shown when Shift+Tab turns accept-edits on.
 	acceptEditsBannerMsg = "Accepting edits in this session. Other tools still ask."
 )
@@ -5136,6 +5192,11 @@ func (m *UI) insertFileCompletion(path string) tea.Cmd {
 	}
 	heightCmd := m.handleTextareaHeightChange(prevHeight)
 
+	// Chụp trạng thái cần đọc trước khi tạo closure: closure chạy ngoài luồng
+	// Update, lúc đó m.session có thể đã đổi hoặc là nil, và không được đọc hay
+	// ghi m.sessionFileReads từ đó.
+	hasSession, sessionID := m.hasSession(), m.currentSessionID()
+	alreadyRead := slices.Clone(m.sessionFileReads)
 	fileCmd := func() tea.Msg {
 		if !m.currentModelSupportsImages() && common.IsImagePath(path) {
 			return util.NewWarnMsg("The current model does not support image attachments")
@@ -5143,19 +5204,17 @@ func (m *UI) insertFileCompletion(path string) tea.Cmd {
 
 		absPath, _ := filepath.Abs(path)
 
-		if m.hasSession() {
+		if hasSession {
 			// Skip attachment if file was already read and hasn't been modified.
-			lastRead := m.com.Workspace.FileTrackerLastReadTime(context.Background(), m.session.ID, absPath)
+			lastRead := m.com.Workspace.FileTrackerLastReadTime(context.Background(), sessionID, absPath)
 			if !lastRead.IsZero() {
 				if info, err := os.Stat(path); err == nil && !info.ModTime().After(lastRead) {
 					return nil
 				}
 			}
-		} else if slices.Contains(m.sessionFileReads, absPath) {
+		} else if slices.Contains(alreadyRead, absPath) {
 			return nil
 		}
-
-		m.sessionFileReads = append(m.sessionFileReads, absPath)
 
 		// Add file as attachment.
 		content, err := os.ReadFile(path)
@@ -5164,14 +5223,28 @@ func (m *UI) insertFileCompletion(path string) tea.Cmd {
 			return nil
 		}
 
-		return message.Attachment{
-			FilePath: path,
-			FileName: filepath.Base(path),
-			MimeType: mimeOf(content),
-			Content:  content,
+		return mentionedFileMsg{
+			sessionID: sessionID,
+			absPath:   absPath,
+			attachment: message.Attachment{
+				FilePath: path,
+				FileName: filepath.Base(path),
+				MimeType: mimeOf(content),
+				Content:  content,
+			},
 		}
 	}
 	return tea.Batch(heightCmd, fileCmd)
+}
+
+// mentionedFileMsg mang kết quả đọc tệp @-mention từ Cmd về luồng Update: việc
+// ghi nhận "đã đọc" và thêm tệp đính kèm sửa trạng thái UI nên không làm trong
+// Cmd. Session đã đổi trong lúc đọc thì kết quả bị bỏ, không gắn nhầm vào ô
+// nhập của session khác.
+type mentionedFileMsg struct {
+	sessionID  string
+	absPath    string
+	attachment message.Attachment
 }
 
 // insertMCPResourceCompletion inserts the selected resource into the textarea,
@@ -5582,11 +5655,22 @@ func (m *UI) ensureSession() (tea.Cmd, error) {
 	}
 	var cmd tea.Cmd
 	if newSession.ID != "" {
-		m.session = &newSession
+		m.adoptNewSession(&newSession)
 		cmd = m.loadSession(newSession.ID)
 	}
 	m.setState(uiChat, m.focus)
 	return cmd, nil
+}
+
+// adoptNewSession đưa UI sang session vừa tạo khi chưa có session nào (màn
+// landing). Đây là một lần đổi session như mọi lần khác: cất bản nháp của màn
+// landing trước, mở ô nhập của session mới (rỗng) sau. Prompt vừa gửi đã xoá
+// khỏi ô nhập nên bản nháp landing biến mất; chữ gõ dở (tin từ MCP, init) ở lại
+// màn landing thay vì trôi sang session mới.
+func (m *UI) adoptNewSession(s *session.Session) {
+	m.stashDraft()
+	m.session = s
+	m.restoreDraft()
 }
 
 // sendMessage sends a message with the given content and attachments.
@@ -5738,7 +5822,7 @@ func (m *UI) runShellCommandInternal(command string, isFirstMessage bool) tea.Cm
 			m.isCompact = true
 		}
 		if newSession.ID != "" {
-			m.session = &newSession
+			m.adoptNewSession(&newSession)
 			cmds = append(cmds, m.loadSession(newSession.ID))
 		}
 		m.setState(uiChat, m.focus)
@@ -5892,6 +5976,14 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openReasoningDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.ProvidersID:
+		if cmd := m.openProvidersDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.JobsID:
+		if cmd := m.openJobsDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.NotificationsID:
 		if cmd := m.openNotificationsDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -5919,6 +6011,22 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		break
 	}
 	return tea.Batch(cmds...)
+}
+
+// goHome leaves the workspace for Home, the workspace picker (Alt+W and the
+// "Home" command). It only quits the TUI and never cancels. In client/server
+// mode the server keeps the run going, so it quits at once. In local mode
+// closing the workspace ends the run: while the agent is busy ask first, the
+// way Ctrl+C does.
+func (m *UI) goHome() tea.Cmd {
+	// RoutesChannelEvents is true exactly for the client/server workspace.
+	if m.isAgentBusy() && !m.com.Workspace.RoutesChannelEvents() {
+		m.dialog.CloseDialog(dialog.QuitID)
+		m.dialog.OpenDialog(dialog.NewQuitToHome(m.com))
+		return nil
+	}
+	m.backToHome = true
+	return tea.Quit
 }
 
 // openQuitDialog opens the quit confirmation dialog.
@@ -6066,8 +6174,9 @@ func (m *UI) openNotificationsDialog() tea.Cmd {
 }
 
 // openSessionsDialog opens the sessions dialog. If the dialog is already open,
-// it brings it to the front. Otherwise, it will list all the sessions and open
-// the dialog.
+// it brings it to the front. Otherwise, it returns a command that lists all the
+// sessions off the Update goroutine; the dialog opens when the list arrives
+// (sessionsDialogMsg).
 func (m *UI) openSessionsDialog() tea.Cmd {
 	if m.dialog.ContainsDialog(dialog.SessionsID) {
 		// Bring to front
@@ -6075,17 +6184,45 @@ func (m *UI) openSessionsDialog() tea.Cmd {
 		return nil
 	}
 
-	selectedSessionID := ""
-	if m.session != nil {
-		selectedSessionID = m.session.ID
+	if m.sessionsDialogLoading {
+		return nil
 	}
+	m.sessionsDialogLoading = true
+	return m.listSessionsForDialog(m.currentSessionID())
+}
 
-	dialog, err := dialog.NewSessions(m.com, selectedSessionID)
-	if err != nil {
-		return util.ReportError(err)
+// listSessionsForDialog lists the sessions for the Sessions dialog off the
+// Update goroutine (a round-trip over HTTP in client/server mode, bounded so a
+// hung server cannot wedge the loading flag). The closure captures only locals.
+func (m *UI) listSessionsForDialog(selectedID string) tea.Cmd {
+	ws := m.com.Workspace
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), dialog.ListSessionsTimeout)
+		defer cancel()
+		sessions, err := ws.ListSessions(ctx)
+		return sessionsDialogMsg{selectedID: selectedID, sessions: sessions, err: err}
 	}
+}
 
-	m.dialog.OpenDialog(dialog)
+// sessionsDialogMsg mang danh sách session đã liệt kê ngoài luồng Update để mở
+// hộp thoại Sessions.
+type sessionsDialogMsg struct {
+	selectedID string
+	sessions   []session.Session
+	err        error
+}
+
+// applySessionsDialog mở hộp thoại Sessions từ danh sách vừa về, hoặc báo lỗi.
+func (m *UI) applySessionsDialog(msg sessionsDialogMsg) tea.Cmd {
+	m.sessionsDialogLoading = false
+	switch {
+	case msg.err != nil:
+		return util.ReportWarn(fmt.Sprintf("Could not list sessions: %v", msg.err))
+	case m.dialog.ContainsDialog(dialog.SessionsID):
+		m.dialog.BringToFront(dialog.SessionsID)
+	default:
+		m.dialog.OpenDialog(dialog.NewSessionsFromList(m.com, msg.selectedID, msg.sessions))
+	}
 	return nil
 }
 
@@ -6210,9 +6347,11 @@ func (m *UI) handlePermissionNotification(notification permission.PermissionNoti
 	if !notification.Granted && !notification.Denied {
 		return
 	}
-	m.dropHeldPermission(notification.ToolCallID)
+	m.dropHeldPermission(notification.SessionID, notification.ToolCallID)
 	if d := m.dialog.Dialog(dialog.PermissionsID); d != nil {
-		if perm, ok := d.(*dialog.Permissions); ok && perm.ToolCallID() == notification.ToolCallID {
+		// Khớp cả session: tool call ID ("call_0") lặp lại ở mọi session.
+		if perm, ok := d.(*dialog.Permissions); ok &&
+			perm.ToolCallID() == notification.ToolCallID && perm.Permission().SessionID == notification.SessionID {
 			m.dialog.CloseDialog(dialog.PermissionsID)
 		}
 	}
@@ -6711,9 +6850,7 @@ func (m *UI) drawSessionDetails(scr uv.Screen, area uv.Rectangle) {
 		blocks...,
 	)
 
-	version := s.CompactDetails.Version.Width(width).AlignHorizontal(lipgloss.Right).Render(version.Version)
-
-	remainingHeight := height - lipgloss.Height(detailsHeader) - lipgloss.Height(version)
+	remainingHeight := height - lipgloss.Height(detailsHeader)
 
 	const maxSectionWidth = 50
 	sectionWidth := max(1, min(maxSectionWidth, width/4-2)) // account for spacing between sections
@@ -6732,7 +6869,6 @@ func (m *UI) drawSessionDetails(scr uv.Screen, area uv.Rectangle) {
 					lipgloss.Left,
 					detailsHeader,
 					sections,
-					version,
 				),
 			),
 	).Draw(scr, area)

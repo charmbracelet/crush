@@ -14,10 +14,10 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/pkg/browser"
 
 	"github.com/charmbracelet/crush/internal/oauth"
+	"github.com/charmbracelet/crush/internal/ui/styles"
 )
 
 // openURL mở URL trong trình duyệt mặc định (trên Linux là chạy xdg-open).
@@ -139,7 +139,7 @@ type authErrMsg struct {
 
 func newAuthModel(platform string, newFlow func() flow) authModel {
 	s := spinner.New(spinner.WithSpinner(spinner.Dot))
-	s.Style = lipgloss.NewStyle().Foreground(charmtone.Julep)
+	s.Style = lipgloss.NewStyle().Foreground(styles.ColorAccent)
 	m := authModel{
 		platform: platform,
 		newFlow:  newFlow,
@@ -324,7 +324,7 @@ const maxHeaderSlashes = 50
 // slashes renders n diagonal slashes with a horizontal gradient that fades
 // from the header purple to pink, echoing the dialog title treatment.
 func (authModel) slashes(n int) string {
-	ramp := lipgloss.Blend1D(n, charmtone.Charple, charmtone.Dolly)
+	ramp := lipgloss.Blend1D(n, styles.ColorAccent, styles.ColorFgMuted)
 	var b strings.Builder
 	for _, c := range ramp {
 		b.WriteString(slashStyle.Foreground(c).Render("╱"))
@@ -369,13 +369,13 @@ func (m authModel) content() string {
 	case authStateWaiting:
 		if m.userCode != "" {
 			b.WriteString(wrap.Render("Your code is "))
-			b.WriteString(lipgloss.NewStyle().Foreground(charmtone.Julep).Render(m.userCode))
+			b.WriteString(lipgloss.NewStyle().Foreground(styles.ColorAccent).Render(m.userCode))
 			b.WriteString(" ")
-			b.WriteString(lipgloss.NewStyle().Foreground(charmtone.Oyster).Render("copied to clipboard"))
+			b.WriteString(lipgloss.NewStyle().Foreground(styles.ColorFgSubtle).Render("copied to clipboard"))
 			b.WriteString("\n\n  ")
 		}
 		urlStyle := lipgloss.NewStyle().
-			Foreground(charmtone.Guac).
+			Foreground(styles.ColorAccent).
 			Underline(true).
 			Hyperlink(m.verificationURL).
 			MaxWidth(m.authWidth())

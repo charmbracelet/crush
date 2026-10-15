@@ -9,13 +9,13 @@ import (
 	"os"
 	"os/signal"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/client"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/session"
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
@@ -56,7 +56,8 @@ agent-cli send -c ~/code/web --new --title review --wait --json "Review the last
 			return &usageError{errors.New("send needs the project server: run it through the agent-cli launcher or set CRUSH_CLIENT_SERVER=1")}
 		}
 
-		ctx, cancel := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+		// SIGHUP (terminal đóng, SSH rớt) cũng chỉ thôi chờ, như Ctrl+C.
+		ctx, cancel := signal.NotifyContext(cmd.Context(), stopSignals()...)
 		defer cancel()
 
 		var res runJSONResult
@@ -223,7 +224,18 @@ func runSend(ctx context.Context, c sendClient, wsID string, o sendOptions, out 
 	if !o.newSession {
 		queued = promptQueued(ctx, c, wsID, sess.ID, o.prompt)
 	}
-	runErr := waitForRun(ctx, events, sess.ID, runID, queued, &res)
+	// Yêu cầu quyền/câu hỏi của agent con mang ID session con: quy về session
+	// gốc để nhận ra, không thì run chờ một hộp thoại không ai mở.
+	rootOf := func(id string) (string, error) {
+		return session.RootID(id, func(id string) (string, error) {
+			s, err := c.GetSession(ctx, wsID, id)
+			if err != nil {
+				return "", err
+			}
+			return s.ParentSessionID, nil
+		})
+	}
+	runErr := waitForRun(ctx, events, sess.ID, runID, queued, rootOf, &res)
 	// ctx, not runErr: the event stream closes with ctx and may be what
 	// waitForRun saw first.
 	switch {
@@ -252,8 +264,28 @@ func runSend(ctx context.Context, c sendClient, wsID string, o sendOptions, out 
 var errEventStreamClosed = errors.New("event stream closed before the run completed")
 
 // waitForRun reads events until the RunComplete carrying runID for sessionID,
-// storing its final text in res. queued is as in [othersTurn].
-func waitForRun(ctx context.Context, events <-chan any, sessionID, runID string, queued func() bool, res *runJSONResult) error {
+// storing its final text in res. queued is as in [othersTurn]. rootOf maps a
+// sub-agent session to its top-level session (nil: exact matches only).
+func waitForRun(ctx context.Context, events <-chan any, sessionID, runID string, queued func() bool, rootOf func(string) (string, error), res *runJSONResult) error {
+	ours := func(id string) (bool, error) {
+		if id == "" {
+			return false, nil
+		}
+		if id == sessionID {
+			return true, nil
+		}
+		if rootOf == nil {
+			return false, nil
+		}
+		root, err := rootOf(id)
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return false, nil
+		}
+		if err != nil {
+			return false, fmt.Errorf("cannot tell whether a request from session %s belongs to this run: %w", id, err)
+		}
+		return root == sessionID, nil
+	}
 	for {
 		select {
 		case ev, ok := <-events:
@@ -276,15 +308,22 @@ func waitForRun(ctx context.Context, events <-chan any, sessionID, runID string,
 				return nil
 			// Nobody reports a current session for this run, so the server
 			// hands its prompts to us; with no TUI on the session they would
-			// block the run forever. shortcut: sub-agent prompts carry the
-			// child session ID and are not matched; resolve via
-			// GetSession().ParentSessionID if needed.
+			// block the run forever. Sub-agent prompts carry the child
+			// session ID and are matched through rootOf.
 			case pubsub.Event[proto.PermissionRequest]:
-				if e.Payload.SessionID == sessionID && !othersTurn(queued, "a permission request", sessionID) {
+				owned, err := ours(e.Payload.SessionID)
+				if err != nil {
+					return err
+				}
+				if owned && !othersTurn(queued, "a permission request", sessionID) {
 					return fmt.Errorf("run is waiting for permission (%s); approve it in the TUI on session %s", e.Payload.ToolName, sessionID)
 				}
 			case pubsub.Event[proto.QuestionRequest]:
-				if e.Payload.SessionID == sessionID && !othersTurn(queued, "a question", sessionID) {
+				owned, err := ours(e.Payload.SessionID)
+				if err != nil {
+					return err
+				}
+				if owned && !othersTurn(queued, "a question", sessionID) {
 					return fmt.Errorf("run is waiting for an answer to a question; answer it in the TUI on session %s", sessionID)
 				}
 			case pubsub.Event[proto.AgentEvent]:

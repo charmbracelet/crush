@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -46,7 +47,6 @@ import (
 	"github.com/charmbracelet/crush/internal/stringext"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/charmbracelet/x/exp/charmtone"
 )
 
 const (
@@ -137,6 +137,77 @@ type SessionAgentCall struct {
 	// is rewritten and no longer carries the element, so the reply
 	// target is not lost when a long channel turn is summarized.
 	channelMeta map[string]string
+	// pinnedModel là model lượt này dùng từ đầu tới cuối: model lúc prompt
+	// được gửi, cũng là model mà ProviderOptions/MaxOutputTokens ở trên
+	// được tính cho. Model là trạng thái chung của workspace (session khác,
+	// `agent-cli run --model`, hay chính việc gửi prompt ở session khác đều
+	// dựng lại nó), nên lượt chạy, kể cả lượt xếp hàng chạy sau, không được
+	// đọc lại model hiện tại. Nil thì lấy model hiện tại lúc lượt bắt đầu.
+	pinnedModel *Model
+	// pinnedTools là bộ tool chụp cùng lúc với pinnedModel khi lượt phải
+	// xếp hàng: tool `agent` mang agent con dựng theo model lúc đó, nên lượt
+	// chạy sau vẫn gửi việc của agent con tới đúng provider của lượt. Nil
+	// thì lấy bộ tool hiện tại lúc lượt bắt đầu.
+	pinnedTools []fantasy.AgentTool
+}
+
+// sameModel cho biết hai lựa chọn có cùng provider và model hay không.
+func sameModel(a, b config.SelectedModel) bool {
+	return a.Provider == b.Provider && a.Model == b.Model
+}
+
+// runModel trả model của một lượt chạy: model đã ghim lúc gửi, hoặc model
+// hiện tại của agent.
+func (a *sessionAgent) runModel(call SessionAgentCall) Model {
+	if call.pinnedModel != nil {
+		return *call.pinnedModel
+	}
+	return a.largeModel.Get()
+}
+
+// runTools trả bộ tool của một lượt chạy: bộ đã ghim lúc xếp hàng, hoặc bộ
+// hiện tại của agent.
+func (a *sessionAgent) runTools(call SessionAgentCall) []fantasy.AgentTool {
+	if call.pinnedTools != nil {
+		return slices.Clone(call.pinnedTools)
+	}
+	return a.tools.Copy()
+}
+
+// stepTools trả bộ tool cho một bước của lượt chạy bằng run: bộ mới nhất
+// (SetTools khi tool MCP đổi), trừ khi model chung đã đổi khỏi model của
+// lượt. Khi đó bộ mới được dựng cho model khác (tool `agent` mang agent con
+// của model mới), nên lượt dùng bộ tool của chính nó (runTools).
+func (a *sessionAgent) stepTools(run Model, runTools []fantasy.AgentTool) []fantasy.AgentTool {
+	if sameModel(a.largeModel.Get().ModelCfg, run.ModelCfg) {
+		return a.tools.Copy()
+	}
+	return slices.Clone(runTools)
+}
+
+// stepToolsFor là stepTools, bỏ tool question khi lượt phi tương tác.
+func (a *sessionAgent) stepToolsFor(call SessionAgentCall, run Model, runTools []fantasy.AgentTool) []fantasy.AgentTool {
+	ts := a.stepTools(run, runTools)
+	if call.NonInteractive {
+		ts = withoutTool(ts, tools.QuestionToolName)
+	}
+	return ts
+}
+
+// withoutTool trả bản sao của ts không có tool tên name.
+func withoutTool(ts []fantasy.AgentTool, name string) []fantasy.AgentTool {
+	return slices.DeleteFunc(slices.Clone(ts), func(t fantasy.AgentTool) bool { return t.Info().Name == name })
+}
+
+// stepModel trả model cho từng bước (và từng lần thử lại) của một lượt chạy
+// bắt đầu bằng run. Lượt giữ nguyên model của nó; ngoại lệ duy nhất là bản
+// dựng lại của CHÍNH model đó (OnAuthRefresh làm mới credential rồi
+// SetModels), để lần thử lại mang token mới.
+func (a *sessionAgent) stepModel(run Model) Model {
+	if cur := a.largeModel.Get(); sameModel(cur.ModelCfg, run.ModelCfg) {
+		return cur
+	}
+	return run
 }
 
 // filterToolsForChannel scopes the tool list for a turn. A channel-originated
@@ -172,6 +243,8 @@ type SessionAgent interface {
 	SetTools(tools []fantasy.AgentTool)
 	SetSystemPrompt(systemPrompt string)
 	Cancel(sessionID string)
+	// CancelRun huỷ đúng lượt mang runID, không đụng lượt khác của session.
+	CancelRun(sessionID, runID string)
 	CancelAll()
 	IsSessionBusy(sessionID string) bool
 	IsBusy() bool
@@ -197,6 +270,9 @@ type Model struct {
 // the explicit Del and the function return.
 type activeCancel struct {
 	cancel context.CancelFunc
+	// runID là RunID của lượt đang chạy (rỗng khi người gọi không gắn), để
+	// CancelRun chỉ huỷ đúng lượt của người gọi.
+	runID string
 }
 
 type sessionAgent struct {
@@ -241,6 +317,9 @@ type sessionAgent struct {
 	// cancel. It is only raised by Cancel when acceptedRuns > 0, so an
 	// idle Escape never records a mark.
 	cancelMark *csync.Map[string, uint64]
+	// canceledRuns ghi các RunID bị CancelRun huỷ trước khi lượt của chúng
+	// tới Run (request gửi prompt còn đang bay), kèm thời điểm ghi để dọn.
+	canceledRuns *csync.Map[string, time.Time]
 	// dispatchMuCreate guards lazy creation of per-session entries in
 	// dispatchMu so two goroutines can't race to lock different mutex
 	// instances for the same session.
@@ -257,6 +336,10 @@ type sessionAgent struct {
 	// across the agent. Cancel uses its current value as the per-session
 	// high-water mark.
 	acceptSeqGen uint64
+	// transit đếm theo session các prompt nextQueued đã lấy khỏi hàng đợi mà
+	// Run của chúng chưa tới bước quyết định; còn >0 thì không handOff nào
+	// khác được lấy tiếp (sẽ chạy prompt sau trước). Giữ bằng acceptedMu.
+	transit map[string]int
 }
 
 type SessionAgentOptions struct {
@@ -297,6 +380,7 @@ func NewSessionAgent(
 		dispatchMu:           csync.NewMap[string, *sync.Mutex](),
 		acceptedRuns:         csync.NewMap[string, int](),
 		cancelMark:           csync.NewMap[string, uint64](),
+		canceledRuns:         csync.NewMap[string, time.Time](),
 	}
 }
 
@@ -309,6 +393,8 @@ func NewSessionAgent(
 type AcceptedRun struct {
 	agent     *sessionAgent
 	sessionID string
+	// transit: chỗ giữ do nextQueued lấy cho một prompt đang được chuyển.
+	transit bool
 	// seq is the monotonic accept sequence stamped by BeginAccepted. A
 	// cancel covers this handle iff seq is at or below the session's
 	// cancel mark, so a handle accepted after a cancel (higher seq) is
@@ -326,7 +412,39 @@ func (r *AcceptedRun) Close() {
 	if !r.done.CompareAndSwap(false, true) {
 		return
 	}
+	if r.transit {
+		r.agent.endTransit(r.sessionID)
+	}
 	r.agent.endAccepted(r.sessionID)
+}
+
+// beginTransit là BeginAccepted cho prompt nextQueued đang chuyển vào Run.
+func (a *sessionAgent) beginTransit(sessionID string) *AcceptedRun {
+	r := a.BeginAccepted(sessionID)
+	a.acceptedMu.Lock()
+	defer a.acceptedMu.Unlock()
+	if a.transit == nil {
+		a.transit = map[string]int{}
+	}
+	a.transit[sessionID]++
+	r.transit = true
+	return r
+}
+
+func (a *sessionAgent) endTransit(sessionID string) {
+	a.acceptedMu.Lock()
+	defer a.acceptedMu.Unlock()
+	if a.transit[sessionID] <= 1 {
+		delete(a.transit, sessionID)
+		return
+	}
+	a.transit[sessionID]--
+}
+
+func (a *sessionAgent) inTransit(sessionID string) bool {
+	a.acceptedMu.Lock()
+	defer a.acceptedMu.Unlock()
+	return a.transit[sessionID] > 0
 }
 
 // SessionID exposes the session this reservation is for so the run path
@@ -413,6 +531,16 @@ func (a *sessionAgent) enqueueCall(call SessionAgentCall) {
 	}
 	queued.OnComplete = nil
 	queued.Accepted = nil
+	// Lượt xếp hàng chạy sau, khi model chung có thể đã đổi: ghim model và
+	// bộ tool của lúc gửi (coordinator đã ghim model; người gọi khác thì
+	// lấy model hiện tại, cũng là model lúc gửi).
+	if queued.pinnedModel == nil {
+		m := a.largeModel.Get()
+		queued.pinnedModel = &m
+	}
+	if queued.pinnedTools == nil {
+		queued.pinnedTools = a.tools.Copy()
+	}
 	existing = append(existing, queued)
 	a.messageQueue.Set(call.SessionID, existing)
 }
@@ -433,9 +561,10 @@ func (a *sessionAgent) enqueueCall(call SessionAgentCall) {
 // a RunID are left in the queue so each runs as its own turn via the
 // recursive run path and publishes its own RunComplete, giving every
 // RunID-bearing prompt an explicit lifecycle instead of being silently
-// absorbed into another turn. fold is processed by the caller without the
-// lock held.
-func (a *sessionAgent) drainQueueForStep(sessionID string) (fold, canceledWithRunID []SessionAgentCall) {
+// absorbed into another turn. Calls pinned to a model other than runModel
+// (the active turn's model) are left queued too. fold is processed by the
+// caller without the lock held.
+func (a *sessionAgent) drainQueueForStep(sessionID string, runModel config.SelectedModel) (fold, canceledWithRunID []SessionAgentCall) {
 	dispatchLock := a.sessionMu(sessionID)
 	dispatchLock.Lock()
 	defer dispatchLock.Unlock()
@@ -449,6 +578,13 @@ func (a *sessionAgent) drainQueueForStep(sessionID string) (fold, canceledWithRu
 			continue
 		}
 		if queued.RunID != "" {
+			keep = append(keep, queued)
+			continue
+		}
+		// Prompt gửi với model khác model của lượt đang chạy (model đã đổi
+		// sau khi lượt bắt đầu) không gộp vào lượt này: để nó chạy thành
+		// lượt riêng với đúng model lúc gửi.
+		if queued.pinnedModel != nil && !sameModel(queued.pinnedModel.ModelCfg, runModel) {
 			keep = append(keep, queued)
 			continue
 		}
@@ -552,7 +688,7 @@ func (a *sessionAgent) persistCanceledTurn(ctx context.Context, call SessionAgen
 			return err
 		}
 	}
-	largeModel := a.largeModel.Get()
+	largeModel := a.runModel(call)
 	assistant, err := a.messages.Create(writeCtx, call.SessionID, message.CreateMessageParams{
 		Role:     message.Assistant,
 		Parts:    []message.ContentPart{},
@@ -631,7 +767,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	sessMu := a.sessionMu(call.SessionID)
 	sessMu.Lock()
 
-	if call.Accepted != nil && a.canceledBySeq(call.SessionID, call.Accepted.seq) {
+	if (call.Accepted != nil && a.canceledBySeq(call.SessionID, call.Accepted.seq)) || a.takeCanceledRun(call.RunID) {
 		// Cancel-on-entry: a cancel arrived while this accepted run was
 		// dispatched but not yet active, and this handle's accept sequence
 		// is at or below the session's cancel mark. The mark is left in
@@ -644,7 +780,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		// Without it, a caller waiting on RunComplete for this RunID (e.g.
 		// `crush run`, which ignores message events and blocks on
 		// RunComplete) would hang on an immediately-canceled accepted run.
-		call.Accepted.Close()
+		// CancelRun theo RunID cũng tới đây, kể cả với lượt không có Accepted.
+		if call.Accepted != nil {
+			call.Accepted.Close()
+		}
 		sessMu.Unlock()
 		complete := notify.RunComplete{
 			SessionID: call.SessionID,
@@ -657,6 +796,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			return nil, err
 		}
 		a.publishRunComplete(ctx, call, complete)
+		// Lượt này có thể vừa được lấy ra từ hàng đợi rồi mới bị huỷ: chuyển
+		// tiếp cho prompt kế, kẻo chúng kẹt lại khi session đã rảnh.
+		if handedOff, qResult, qErr := a.handOff(ctx, call, nil, nil, true); handedOff {
+			return qResult, qErr
+		}
 		return nil, nil
 	}
 
@@ -685,7 +829,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// is not lost.
 	runCtx := context.WithValue(ctx, tools.SessionIDContextKey, call.SessionID)
 	genCtx, cancel = context.WithCancel(runCtx)
-	ac := &activeCancel{cancel: cancel}
+	ac := &activeCancel{cancel: cancel, runID: call.RunID}
 	a.activeRequests.Set(call.SessionID, ac)
 	if call.Accepted != nil {
 		call.Accepted.Close()
@@ -760,8 +904,16 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	}()
 
 	// Copy mutable fields under lock to avoid races with SetTools/SetModels.
-	agentTools := filterToolsForChannel(a.tools.Copy(), call.Channel, mcp.GetStates())
-	largeModel := a.largeModel.Get()
+	// Model và bộ tool là của lượt này (ghim lúc gửi nếu có): mọi bước sau
+	// dùng chúng, không đọc lại trạng thái chung của workspace.
+	runToolSet := a.runTools(call)
+	if call.NonInteractive {
+		// Không ai trả lời được câu hỏi của lượt này: bỏ tool question để
+		// model làm tiếp thay vì dừng chờ.
+		runToolSet = withoutTool(runToolSet, tools.QuestionToolName)
+	}
+	agentTools := filterToolsForChannel(runToolSet, call.Channel, mcp.GetStates())
+	largeModel := a.runModel(call)
 	systemPrompt := a.systemPrompt.Get()
 	promptPrefix := a.systemPromptPrefix.Get()
 	var instructions strings.Builder
@@ -862,10 +1014,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 			// Use latest tools (updated by SetTools when MCP tools
 			// change), filtered for the session's channel and minus MCP
-			// servers disabled for this repository.
+			// servers disabled for this repository. stepTools giữ bộ tool
+			// của lượt khi model chung đã đổi khỏi model của lượt.
 			prepared.Tools = a.filterDisabledMCPTools(
 				callContext,
-				filterToolsForChannel(a.tools.Copy(), call.Channel, mcp.GetStates()),
+				filterToolsForChannel(a.stepToolsFor(call, largeModel, runToolSet), call.Channel, mcp.GetStates()),
 			)
 
 			// Drain queued follow-up prompts for this step. Calls covered
@@ -879,7 +1032,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			// into this turn; uncanceled prompts with a RunID are left
 			// queued so each runs as its own turn (with its own
 			// RunComplete) via the recursive run path below.
-			fold, canceledRunIDs := a.drainQueueForStep(call.SessionID)
+			fold, canceledRunIDs := a.drainQueueForStep(call.SessionID, largeModel.ModelCfg)
 			a.publishCanceledQueueDrops(canceledRunIDs)
 			for _, queued := range fold {
 				userMessage, createErr := a.createUserMessage(callContext, queued)
@@ -996,7 +1149,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		},
 		OnAuthRefresh: call.OnAuthRefresh,
 		ModelProvider: func() fantasy.LanguageModel {
-			m := a.largeModel.Get()
+			m := a.stepModel(largeModel)
 			slog.Info("ModelProvider called",
 				"provider", m.ModelCfg.Provider,
 				"model", m.ModelCfg.Model)
@@ -1131,6 +1284,23 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			"error_type", fmt.Sprintf("%T", err),
 			"is_hyper", isHyper,
 			"is_cancel", isCancelErr)
+		// Lượt kết thúc vì lỗi hoặc bị huỷ riêng (CancelRun theo RunID) mà
+		// ctx của người gọi còn sống: prompt xếp hàng sau nó vẫn phải chạy.
+		// Không chuyển thì chúng kẹt tới lượt sau, người chờ RunID của chúng
+		// không nhận RunComplete, và session không xoá được. (Bộ điều phối
+		// chỉ gọi Run một lần; thử lại khi lỗi xác thực nằm trong fantasy.)
+		afterError := func(res *fantasy.AgentResult, turnErr error) (*fantasy.AgentResult, error) {
+			if ctx.Err() != nil {
+				return res, turnErr
+			}
+			a.activeRequests.CompareAndDelete(call.SessionID, ac)
+			cancel()
+			if handedOff, qResult, qErr := a.handOff(ctx, call, currentAssistant, turnErr, false); handedOff {
+				skipRunComplete = true
+				return qResult, qErr
+			}
+			return res, turnErr
+		}
 		if currentAssistant == nil {
 			// Cancel-before-assistant-creation window: the run was
 			// canceled after activeRequests.Set but before PrepareStep
@@ -1144,7 +1314,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 					return nil, persistErr
 				}
 			}
-			return result, err
+			return afterError(result, err)
 		}
 		// Persist final state with a context detached from the run
 		// context. The run context (ctx) is derived from the
@@ -1165,8 +1335,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		}
 		for _, tc := range toolCalls {
 			if !tc.Finished {
+				// Partial arguments stay as the model wrote them; the send
+				// path makes them valid JSON.
 				tc.Finished = true
-				tc.Input = "{}"
 				currentAssistant.AddToolCall(tc)
 				updateErr := a.messages.Update(cleanupCtx, *currentAssistant)
 				if updateErr != nil {
@@ -1215,7 +1386,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		var providerErr *fantasy.ProviderError
 		var requestTimedOutErr *requestTimeoutError
 		const defaultTitle = "Provider Error"
-		linkStyle := lipgloss.NewStyle().Foreground(charmtone.Guac).Underline(true)
+		// Fork: link không tô màu (thông báo này được lưu lại, theme nào cũng đọc được).
+		linkStyle := lipgloss.NewStyle().Underline(true)
 		if isCancelErr {
 			currentAssistant.AddFinish(message.FinishReasonCanceled, "User canceled request", "")
 		} else if errors.As(err, &requestTimedOutErr) {
@@ -1259,12 +1431,32 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				"Something went wrong while handling your message. Please try again.",
 				completedToolCalls)
 		}
-		return nil, err
+		return afterError(nil, err)
+	}
+
+	// A turn stopped at its output token limit finishes with
+	// FinishReasonLength, so the error path above never runs for it.
+	if currentAssistant != nil {
+		if closeErr := a.closeUnfinishedToolCalls(ctx, currentAssistant); closeErr != nil {
+			// The turn produced a valid result, so a failure here is logged
+			// rather than returned.
+			slog.Error("Failed to close unfinished tool calls",
+				"session_id", call.SessionID, "error", closeErr)
+		}
 	}
 
 	if shouldSummarize {
 		a.activeRequests.Del(call.SessionID)
-		if summarizeErr := a.Summarize(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh); summarizeErr != nil {
+		if summarizeErr := a.summarize(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh, largeModel, call.RunID); summarizeErr != nil {
+			// Lượt dừng lúc đang tóm tắt (bị huỷ riêng hoặc tóm tắt lỗi):
+			// prompt xếp hàng sau vẫn chạy (như nhánh lỗi ở trên).
+			if ctx.Err() == nil {
+				cancel()
+				if handedOff, qResult, qErr := a.handOff(ctx, call, currentAssistant, summarizeErr, false); handedOff {
+					skipRunComplete = true
+					return qResult, qErr
+				}
+			}
 			return nil, summarizeErr
 		}
 		// If the agent wasn't done...
@@ -1306,27 +1498,100 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		})
 	}
 
-	// Hand off to the next queued prompt (if any) under dispatchMu so
-	// the transition from this finished run to the queued run is atomic
-	// against a concurrent Cancel. activeRequests for this session was
-	// just deleted above, so without the lock there is a window in
-	// which the session looks idle and a cancel becomes a no-op that
-	// fails to stop the queued prompt. Holding the lock lets us observe
-	// a pending cancel recorded against the session and drop the queue
-	// instead of running it, and (for the recursion) hand a fresh
-	// accept reservation to the dequeued call so acceptedRuns stays > 0
-	// across the recursive Run's own dispatch handoff — keeping the
-	// session observable to Cancel for the entire transition and
-	// closing the dequeue -> re-register window.
-	mu := a.sessionMu(call.SessionID)
+	// Hand off to the next queued prompt (if any); see handOff.
+	if handedOff, qResult, qErr := a.handOff(ctx, call, currentAssistant, nil, false); handedOff {
+		// Suppress the outer defer's emit: it would otherwise observe the
+		// recursive Run's retErr (named-return clobbering through the
+		// return below) against this turn's MessageID/Text and publish a
+		// mixed, racing event. handOff already published this turn's own
+		// RunComplete when it owed one.
+		skipRunComplete = true
+		return qResult, qErr
+	}
+	return result, err
+}
+
+// handOff chạy prompt xếp hàng kế tiếp của session sau khi lượt call kết
+// thúc, và báo true khi đã chạy. Trước khi chạy, nó phát RunComplete của
+// call nếu call còn nợ (ownPublished=false): mỗi prompt có RunID là một vòng
+// đời riêng, nên để lượt đệ quy (RunID khác) phát hộ sẽ làm treo người đang
+// chờ RunID của call. turnErr là lỗi kết thúc lượt call (nil nếu xong).
+func (a *sessionAgent) handOff(ctx context.Context, call SessionAgentCall, assistant *message.Message, turnErr error, ownPublished bool) (bool, *fantasy.AgentResult, error) {
+	next, remaining, ok := a.nextQueued(call.SessionID)
+	if !ok {
+		return false, nil, nil
+	}
+	if !ownPublished && owesOwnRunComplete(call, next, remaining) {
+		complete := notify.RunComplete{SessionID: call.SessionID, RunID: call.RunID}
+		if assistant != nil {
+			complete.MessageID = assistant.ID
+			complete.Text = assistant.Content().String()
+		}
+		switch {
+		case turnErr != nil:
+			complete.Error = turnErr.Error()
+			complete.Cancelled = errors.Is(turnErr, context.Canceled)
+		case ctx.Err() != nil:
+			complete.Cancelled = true
+		}
+		a.publishRunComplete(ctx, call, complete)
+	}
+	if turnErr != nil && !errors.Is(turnErr, context.Canceled) && a.notify != nil {
+		// Run trả kết quả của prompt kế, nên runAgent không còn thấy lỗi của
+		// lượt này: báo ở đây để TUI vẫn hiện lượt lỗi.
+		a.notify.Publish(pubsub.CreatedEvent, notify.Notification{
+			SessionID: call.SessionID,
+			RunID:     call.RunID,
+			Type:      notify.TypeAgentError,
+			Message:   turnErr.Error(),
+		})
+	}
+	result, err := a.Run(ctx, next)
+	return true, result, err
+}
+
+// owesOwnRunComplete cho biết call còn phải tự phát RunComplete trước khi
+// chuyển sang next. Ngoại lệ là nhánh tiếp-tục-sau-tóm-tắt: nó xếp lại chính
+// call (cùng RunID), nên lượt cuối của RunID đó sẽ phát.
+func owesOwnRunComplete(call, next SessionAgentCall, remaining []SessionAgentCall) bool {
+	if call.RunID == "" || next.RunID == call.RunID {
+		return false
+	}
+	for _, q := range remaining {
+		if q.RunID == call.RunID {
+			return false
+		}
+	}
+	return true
+}
+
+// nextQueued lấy prompt xếp hàng kế tiếp để chạy, dưới khoá session nên
+// nguyên tử với Cancel.
+//
+// activeRequests của lượt vừa xong đã bị xoá trước khi gọi, nên không có
+// khoá thì có một khe session trông như rảnh và Cancel thành no-op, để lọt
+// prompt xếp hàng. Giữ khoá thì:
+//   - Cancel đã ghi cancel mark: bỏ các prompt mark phủ (accept sequence
+//     không quá mark, hoặc không theo dõi), phát RunComplete huỷ cho prompt
+//     có RunID; giữ prompt xếp hàng sau lần huỷ.
+//   - Hàng đợi rỗng: dọn nó; dọn cả mark khi không còn lượt accepted nào mà
+//     mark có thể phủ (kẻo prompt anh em mất lệnh huỷ, và để mark cũ không
+//     bắt nhầm lượt sau).
+//   - Có prompt: giữ chỗ accept cho prompt lấy ra trước khi nhả khoá, để
+//     acceptedRuns > 0 suốt lúc chuyển vào Run đệ quy; Cancel tới trong khe
+//     đó ghi lệnh huỷ mà Run thấy ở bước cancel-on-entry.
+//
+// Session đã có run khác đang chạy, hoặc còn prompt đang chuyển vào Run,
+// thì không lấy: chúng tự chạy tiếp hàng đợi (lấy ở đây sẽ đảo thứ tự).
+func (a *sessionAgent) nextQueued(sessionID string) (next SessionAgentCall, remaining []SessionAgentCall, ok bool) {
+	mu := a.sessionMu(sessionID)
 	mu.Lock()
-	queuedMessages, _ := a.messageQueue.Get(call.SessionID)
-	if mark, ok := a.cancelMark.Get(call.SessionID); ok && mark > 0 && len(queuedMessages) > 0 {
-		// A cancel was recorded for this session (e.g. it arrived while
-		// this run was active and follow-ups had been queued). Drop the
-		// queued prompts it covers (accept sequence at or below the
-		// mark, or untracked); keep any queued after the cancel (higher
-		// sequence) so they still run.
+	defer mu.Unlock()
+	if a.IsSessionBusy(sessionID) || a.inTransit(sessionID) {
+		return SessionAgentCall{}, nil, false
+	}
+	queuedMessages, _ := a.messageQueue.Get(sessionID)
+	if mark, ok := a.cancelMark.Get(sessionID); ok && mark > 0 && len(queuedMessages) > 0 {
 		var kept []SessionAgentCall
 		var canceledRunIDDrops []SessionAgentCall
 		for _, q := range queuedMessages {
@@ -1339,83 +1604,47 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			kept = append(kept, q)
 		}
 		queuedMessages = kept
-		a.messageQueue.Set(call.SessionID, kept)
+		a.messageQueue.Set(sessionID, kept)
 		// A dropped prompt carrying a RunID must still publish its
 		// terminal cancelled RunComplete so a caller waiting on that
 		// RunID does not hang.
 		a.publishCanceledQueueDrops(canceledRunIDDrops)
 	}
 	if len(queuedMessages) == 0 {
-		// No queued work. Clear the cancel mark only when no accepted
-		// run remains in flight that it might still cover; otherwise a
-		// sibling prompt (sequence at or below the mark) waiting to
-		// enter Run would lose its cancellation. When accepted runs are
-		// gone, this also clears a stale mark so it can't catch a
-		// future run.
-		a.messageQueue.Del(call.SessionID)
+		a.messageQueue.Del(sessionID)
 		a.acceptedMu.Lock()
-		inFlight, _ := a.acceptedRuns.Get(call.SessionID)
+		inFlight, _ := a.acceptedRuns.Get(sessionID)
 		a.acceptedMu.Unlock()
 		if inFlight == 0 {
-			a.cancelMark.Del(call.SessionID)
+			a.cancelMark.Del(sessionID)
 		}
-		mu.Unlock()
-		return result, err
+		return SessionAgentCall{}, nil, false
 	}
-	// There are queued messages, restart the loop. Suppress the outer
-	// defer's emit: it would otherwise observe the recursive Run's retErr
-	// (named-return clobbering through the return below) against this
-	// turn's MessageID/Text and publish a mixed, racing event.
-	skipRunComplete = true
-	// Decide whether this turn still owes its own terminal RunComplete.
-	// Each submitted prompt with a RunID has its own lifecycle, so a turn
-	// that is finished and handing off to a *different* queued prompt must
-	// publish its own RunComplete here — leaving it to the recursive turn
-	// (which carries a different RunID) would hang a caller waiting on
-	// this turn's RunID. The exception is the summarize-continuation path,
-	// which re-queues this same call (same RunID) to resume after a
-	// summary; in that case the eventual terminal turn for this RunID
-	// publishes, so publishing now would double-emit.
-	outerOwesRunComplete := call.RunID != ""
-	if outerOwesRunComplete {
-		for _, q := range queuedMessages {
-			if q.RunID == call.RunID {
-				outerOwesRunComplete = false
-				break
-			}
-		}
-	}
-	firstQueuedMessage := queuedMessages[0]
-	a.messageQueue.Set(call.SessionID, queuedMessages[1:])
-	// Reserve a fresh accept for the dequeued prompt before dropping the
-	// lock so acceptedRuns > 0 across the handoff into the recursive
-	// Run. This closes the window between this dequeue and the recursive
-	// Run registering its activeRequests entry: a cancel arriving in
-	// that window now records a pending cancel (acceptedRuns > 0) that
-	// the recursive Run's accepted path observes as cancel-on-entry.
-	firstQueuedMessage.Accepted = a.BeginAccepted(call.SessionID)
-	mu.Unlock()
-	if outerOwesRunComplete {
-		complete := notify.RunComplete{SessionID: call.SessionID, RunID: call.RunID}
-		if currentAssistant != nil {
-			complete.MessageID = currentAssistant.ID
-			complete.Text = currentAssistant.Content().String()
-		}
-		if ctx.Err() != nil {
-			complete.Cancelled = true
-		}
-		a.publishRunComplete(ctx, call, complete)
-	}
-	return a.Run(ctx, firstQueuedMessage)
+	next = queuedMessages[0]
+	remaining = queuedMessages[1:]
+	a.messageQueue.Set(sessionID, remaining)
+	next.Accepted = a.beginTransit(sessionID)
+	return next, remaining, true
 }
 
 func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error) error {
+	// Copy mutable fields under lock to avoid races with SetModels.
+	err := a.summarize(ctx, sessionID, opts, onAuthRefresh, a.largeModel.Get(), "")
+	if errors.Is(err, context.Canceled) {
+		// Người dùng huỷ lệnh tóm tắt: không phải lỗi (như trước).
+		return nil
+	}
+	return err
+}
+
+// summarize tóm tắt session bằng largeModel. Run truyền model và RunID của
+// lượt đang chạy: bản tóm tắt giữa lượt không chuyển sang model khác, và
+// CancelRun theo RunID của lượt huỷ được cả bước tóm tắt.
+func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error, largeModel Model, runID string) error {
 	if a.IsSessionBusy(sessionID) {
 		return ErrSessionBusy
 	}
 
-	// Copy mutable fields under lock to avoid races with SetModels.
-	largeModel := a.largeModel.Get()
 	systemPromptPrefix := a.systemPromptPrefix.Get()
 
 	currentSession, err := a.sessions.Get(ctx, sessionID)
@@ -1434,7 +1663,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	aiMsgs, _ := a.preparePrompt(msgs, largeModel.CatwalkCfg.SupportsImages)
 
 	genCtx, cancel := context.WithCancel(ctx)
-	ac := &activeCancel{cancel: cancel}
+	ac := &activeCancel{cancel: cancel, runID: runID}
 	a.activeRequests.Set(sessionID, ac)
 	defer a.activeRequests.CompareAndDelete(sessionID, ac)
 	defer cancel()
@@ -1468,7 +1697,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		ProviderOptions: opts,
 		OnAuthRefresh:   onAuthRefresh,
 		ModelProvider: func() fantasy.LanguageModel {
-			return a.largeModel.Get().Model
+			return a.stepModel(largeModel).Model
 		},
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 			prepared.Messages = options.Messages
@@ -1500,8 +1729,12 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		isCancelErr := errors.Is(err, context.Canceled)
 		if isCancelErr {
 			// User cancelled summarize we need to remove the summary message.
-			deleteErr := a.messages.Delete(ctx, summaryMessage.ID)
-			return deleteErr
+			if deleteErr := a.messages.Delete(ctx, summaryMessage.ID); deleteErr != nil {
+				return deleteErr
+			}
+			// Trả lỗi huỷ để lượt đang tóm tắt dừng thật. Trước đây trả nil
+			// nên Run xếp lại lượt và chạy tiếp: CancelRun lúc tóm tắt bị nuốt.
+			return err
 		}
 		// Mark the summary message as finished with an error so the UI
 		// stops spinning.
@@ -1754,42 +1987,6 @@ func filterFileParts(parts []fantasy.MessagePart) []fantasy.MessagePart {
 	return filtered
 }
 
-// toolResultsForCalls builds the tool message that must immediately follow
-// an assistant message with tool calls. LLM APIs require every tool call to
-// be followed by its results before any other message; strict-adjacency
-// providers reject the request otherwise. Results are taken from
-// toolResultsByCall and consumed, so a result stored in a message that also
-// holds results for calls of other assistant messages is emitted exactly
-// once, next to the assistant that requested it. Tool calls without any
-// stored result (e.g. an interrupted session) receive a synthetic error
-// response so the conversation keeps working.
-func toolResultsForCalls(m message.Message, toolResultsByCall map[string][]fantasy.MessagePart) fantasy.Message {
-	content := make([]fantasy.MessagePart, 0, len(m.ToolCalls()))
-	for _, tc := range m.ToolCalls() {
-		parts := toolResultsByCall[tc.ID]
-		delete(toolResultsByCall, tc.ID)
-		if len(parts) > 0 {
-			content = append(content, parts...)
-			continue
-		}
-		slog.Warn(
-			"Injecting synthetic tool result for orphaned tool call",
-			"tool_call_id", tc.ID,
-			"tool_name", tc.Name,
-		)
-		content = append(content, fantasy.ToolResultPart{
-			ToolCallID: tc.ID,
-			Output: fantasy.ToolResultOutputContentError{
-				Error: errors.New("tool call was interrupted and did not produce a result, you may retry this call if the result is still needed"),
-			},
-		})
-	}
-	return fantasy.Message{
-		Role:    fantasy.MessageRoleTool,
-		Content: content,
-	}
-}
-
 func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.Session) ([]message.Message, error) {
 	// Read only the tail a compacted session actually sends. The full
 	// transcript can be tens of megabytes on the single shared connection.
@@ -1811,6 +2008,11 @@ func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.S
 			msgs[0].Role = message.User
 		}
 	}
+
+	// Orphans are not repaired here. toolResultsForCalls answers every
+	// unanswered call on the way out, and ReadSettledMessages owns the
+	// durable repair, so this path never writes back the slice it has
+	// just rewritten in memory.
 	return msgs, nil
 }
 
@@ -2150,7 +2352,64 @@ func (a *sessionAgent) Cancel(sessionID string) {
 	}
 }
 
+// canceledRunTTL là thời gian giữ dấu huỷ của một RunID chưa tới: đủ cho
+// request gửi prompt đang bay tới server, không giữ mãi khi nó không tới.
+const canceledRunTTL = 2 * time.Minute
+
+// CancelRun huỷ đúng một lượt theo RunID mà không đụng lượt khác của session
+// (Cancel huỷ lượt đang chạy VÀ xoá cả hàng đợi, kể cả prompt của người khác):
+// lượt đang chạy có RunID đó thì huỷ; còn trong hàng đợi thì gỡ đúng nó (kèm
+// RunComplete Cancelled cho người chờ); chưa tới (request gửi prompt còn đang
+// bay) thì ghi dấu để Run huỷ ngay lúc vào.
+func (a *sessionAgent) CancelRun(sessionID, runID string) {
+	if runID == "" {
+		return
+	}
+	mu := a.sessionMu(sessionID)
+	mu.Lock()
+	defer mu.Unlock()
+
+	if ac, ok := a.activeRequests.Get(sessionID); ok && ac != nil && ac.runID == runID {
+		slog.Debug("Run cancellation initiated", "session_id", sessionID, "run_id", runID)
+		ac.cancel()
+		return
+	}
+	if queued, ok := a.messageQueue.Get(sessionID); ok {
+		if i := slices.IndexFunc(queued, func(c SessionAgentCall) bool { return c.RunID == runID }); i >= 0 {
+			dropped := queued[i]
+			rest := slices.Delete(slices.Clone(queued), i, i+1)
+			if len(rest) == 0 {
+				a.messageQueue.Del(sessionID)
+			} else {
+				a.messageQueue.Set(sessionID, rest)
+			}
+			a.publishCanceledQueueDrops([]SessionAgentCall{dropped})
+			return
+		}
+	}
+	now := time.Now()
+	for id, at := range a.canceledRuns.Seq2() {
+		if now.Sub(at) > canceledRunTTL {
+			a.canceledRuns.Del(id)
+		}
+	}
+	a.canceledRuns.Set(runID, now)
+}
+
+// takeCanceledRun cho biết lượt runID đã bị CancelRun huỷ trước khi tới Run,
+// và xoá dấu.
+func (a *sessionAgent) takeCanceledRun(runID string) bool {
+	if runID == "" {
+		return false
+	}
+	_, ok := a.canceledRuns.Take(runID)
+	return ok
+}
+
 func (a *sessionAgent) ClearQueue(sessionID string) {
+	mu := a.sessionMu(sessionID)
+	mu.Lock()
+	defer mu.Unlock()
 	if a.QueuedPrompts(sessionID) > 0 {
 		slog.Debug("Clearing queued prompts", "session_id", sessionID)
 		a.clearQueueAndNotify(sessionID)

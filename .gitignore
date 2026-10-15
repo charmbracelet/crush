@@ -58,3 +58,10 @@ completions/crush.*sh
 # Cấu hình multi-provider thực tế và dữ liệu phiên local.
 /.crush.json
 /.crush/
+
+# Bản sao cấu hình THẬT đặt nhầm trong repo (env có thể chứa key). Chỉ các tệp mẫu
+# *.example được commit. Neo ở gốc repo: `env` không được chặn thư mục internal/env/.
+/crushrc
+/.crushrc
+/env
+/agent-cli.env

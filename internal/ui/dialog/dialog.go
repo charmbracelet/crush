@@ -43,6 +43,19 @@ type Dialog interface {
 	Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor
 }
 
+// TargetedMsg is a message addressed to one dialog by ID, typically the
+// result of a tea.Cmd that dialog started. The [Overlay] delivers it to that
+// dialog even when another dialog was opened on top of it in the meantime,
+// and drops it once the dialog is gone. A dialog that polls therefore keeps
+// its loop alive under a permission prompt and ends it by itself on close.
+//
+// Because the target is not necessarily the front dialog, a dialog should
+// answer a TargetedMsg only with [ActionCmd] or nil: actions such as
+// [ActionClose] act on the front dialog.
+type TargetedMsg interface {
+	TargetDialogID() string
+}
+
 // LoadingDialog is a dialog that can show a loading state.
 type LoadingDialog interface {
 	StartLoading() tea.Cmd
@@ -233,6 +246,16 @@ func (d *Overlay) BringToFront(dialogID string) {
 func (d *Overlay) Update(msg tea.Msg) tea.Msg {
 	if len(d.dialogs) == 0 {
 		return nil
+	}
+
+	// A message addressed to a dialog goes to that dialog wherever it sits in
+	// the stack; with no such dialog it is stale and dropped.
+	if tm, ok := msg.(TargetedMsg); ok {
+		target := d.Dialog(tm.TargetDialogID())
+		if target == nil {
+			return nil
+		}
+		return target.HandleMsg(msg)
 	}
 
 	// Absorb keystrokes during the grace period for async dialogs.

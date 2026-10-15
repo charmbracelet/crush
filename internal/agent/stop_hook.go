@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent/notify"
@@ -64,13 +65,24 @@ func WithStopHooks(inner Coordinator, stopHooks func() *hooks.Runner) Coordinato
 // Cancel implements Coordinator. It also stops the session's Stop gates,
 // killing a running hook and dropping any pending re-run.
 func (s *stopHookCoordinator) Cancel(sessionID string) {
-	s.eachGate(sessionID, false, func(g *stopGate) { g.cancel() })
+	s.eachGate(sessionID, false, func(g *stopGate) { g.wide.Store(true); g.cancel() })
 	s.Coordinator.Cancel(sessionID)
+}
+
+// CancelRun implements Coordinator. It also stops that run's Stop gate (a
+// running hook, a pending re-run), like Cancel does for the whole session.
+func (s *stopHookCoordinator) CancelRun(sessionID, runID string) {
+	s.eachGate(sessionID, false, func(g *stopGate) {
+		if g.runID == runID {
+			g.cancel()
+		}
+	})
+	s.Coordinator.CancelRun(sessionID, runID)
 }
 
 // CancelAll implements Coordinator.
 func (s *stopHookCoordinator) CancelAll() {
-	s.eachGate("", true, func(g *stopGate) { g.cancel() })
+	s.eachGate("", true, func(g *stopGate) { g.wide.Store(true); g.cancel() })
 	s.Coordinator.CancelAll()
 }
 
@@ -116,6 +128,14 @@ func (s *stopHookCoordinator) RunAccepted(ctx context.Context, accept *AcceptedR
 }
 
 func (s *stopHookCoordinator) gate(ctx context.Context, sessionID string, first func(context.Context) (*fantasy.AgentResult, error)) (result *fantasy.AgentResult, err error) {
+	// Không có Stop hook nào lúc lượt bắt đầu: không có gì để chặn, nên
+	// không dựng gate. Gate giữ RunComplete của cả chuỗi lượt xả từ hàng đợi
+	// tới khi lượt cuối xong, nên dựng nó vô ích sẽ bắt người chờ lượt đầu
+	// (vd `send --wait`) chờ theo cả hàng đợi. Hook thêm sau (nạp lại cấu
+	// hình) áp từ lượt sau.
+	if s.stopHooks() == nil {
+		return first(ctx)
+	}
 	gateCtx, cancel := context.WithCancel(ctx)
 	g := &stopGate{sessionID: sessionID, runID: RunIDFromContext(ctx), cancel: cancel}
 	s.mu.Lock()
@@ -182,6 +202,10 @@ type stopGateKey struct{}
 type stopGate struct {
 	sessionID, runID string
 	cancel           context.CancelFunc
+	// wide: gate bị huỷ cho cả session (Cancel/CancelAll), không chỉ lượt
+	// của nó. CancelRun chỉ huỷ lượt của gate; prompt xếp hàng chạy tiếp
+	// trong chuỗi của gate không bị đánh dấu Cancelled.
+	wide atomic.Bool
 
 	mu      sync.Mutex
 	pub     pubsub.Publisher[notify.RunComplete]
@@ -247,7 +271,7 @@ func (g *stopGate) release(ctx context.Context, canceled bool, err error) (own b
 		case err != nil:
 			rc = notify.RunComplete{SessionID: rc.SessionID, RunID: rc.RunID, Error: err.Error()}
 		}
-		rc.Cancelled = rc.Cancelled || canceled
+		rc.Cancelled = rc.Cancelled || (canceled && (g.wide.Load() || rc.RunID == g.runID))
 		g.pub.PublishMustDeliver(ctx, pubsub.UpdatedEvent, rc)
 		own = own || rc.RunID == g.runID
 	}

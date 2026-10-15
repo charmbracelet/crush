@@ -9,7 +9,11 @@ env_file="${AGENT_CLI_ENV_FILE:-$HOME/.config/agent-cli/env}"
 # Hai cách khai provider chính, chọn bằng AGENT_CLI_PROVIDER_ID:
 # - ID của provider dựng sẵn trong catalog (vd zai cho GLM, openai, anthropic):
 #   chỉ cần AGENT_CLI_API_KEY; catalog lo endpoint, danh sách model, mức effort
-#   (alt+e) và khả năng suy luận của model.
+#   (alt+e) và khả năng suy luận của model. Riêng openai, xai, copilot, hyper còn
+#   dùng được bằng tài khoản đăng nhập (agent-cli login openai | grok | copilot |
+#   không đối số cho hyper): khi đó để trống AGENT_CLI_API_KEY, crushrc không ghi
+#   key rỗng đè lên token đăng nhập. ID gõ sai (không có trong catalog, không có
+#   AGENT_CLI_BASE_URL) làm agent-cli dừng lúc khởi động và nêu tên provider.
 # - Bỏ trống: provider "main" tự khai bằng AGENT_CLI_BASE_URL (model local, hoặc
 #   endpoint tương thích OpenAI không có trong catalog).
 provider_id="${AGENT_CLI_PROVIDER_ID:-}"
@@ -19,20 +23,40 @@ provider_id="${AGENT_CLI_PROVIDER_ID:-}"
 if [[ -n "$provider_id" ]]; then
   {
     : "${AGENT_CLI_MODEL:?đặt AGENT_CLI_MODEL trong ${env_file} (vd glm-5.3)}"
-    : "${AGENT_CLI_API_KEY:?đặt AGENT_CLI_API_KEY trong ${env_file}}"
+    case "$provider_id" in
+      openai | xai | copilot | hyper) ;; # đăng nhập bằng `agent-cli login`, key không bắt buộc
+      *) : "${AGENT_CLI_API_KEY:?đặt AGENT_CLI_API_KEY trong ${env_file}}" ;;
+    esac
   } 2>/dev/stderr
 else
   {
     : "${AGENT_CLI_BASE_URL:?đặt AGENT_CLI_BASE_URL trong ${env_file} (vd http://127.0.0.1:<port>/v1)}"
     : "${AGENT_CLI_MODEL:?đặt AGENT_CLI_MODEL trong ${env_file}}"
   } 2>/dev/stderr
+
+  # Giá trị `model add --can-reason` nhận: true/false, 1/0, yes/no (không phân biệt
+  # hoa thường). Kiểm ở đây để lỗi nêu đúng tên biến thay vì thông báo của lệnh model.
+  can_reason="${AGENT_CLI_CAN_REASON:-false}"
+  case "${can_reason,,}" in
+    true | false | 1 | 0 | yes | no) ;;
+    *)
+      echo "AGENT_CLI_CAN_REASON phải là true hoặc false, nhận \"${can_reason}\" (sửa trong ${env_file})" >&2
+      exit 1
+      ;;
+  esac
 fi
 model="$AGENT_CLI_MODEL"
 small_model="${AGENT_CLI_SMALL_MODEL:-$model}"
 
 if [[ -n "$provider_id" ]]; then
   # Provider dựng sẵn: chỉ ghi khoá; endpoint, model, tên và mức effort lấy từ catalog.
-  provider add "$provider_id" --api-key "$AGENT_CLI_API_KEY"
+  # Khoá trống (chỉ xảy ra với openai/xai/copilot/hyper đăng nhập bằng tài khoản) thì KHÔNG
+  # truyền --api-key: token đăng nhập nằm ở ~/.local/share/agent-cli/crush.json, nạp sau
+  # crushrc nên không bị key rỗng đè, nhưng không phát ra trường api_key thì khỏi phải
+  # trông vào thứ tự nạp.
+  key_args=()
+  [[ -n "${AGENT_CLI_API_KEY:-}" ]] && key_args=(--api-key "$AGENT_CLI_API_KEY")
+  provider add "$provider_id" "${key_args[@]}"
   tok_args=()
   [[ -n "${AGENT_CLI_MAX_TOKENS:-}" ]] && tok_args=(--max-tokens "$AGENT_CLI_MAX_TOKENS")
   model large "$provider_id/$model" "${tok_args[@]}"
@@ -53,7 +77,6 @@ else
   # --can-reason: model có suy luận cần hạn mức token đủ để vừa nghĩ vừa trả
   # lời, kể cả khi đặt tiêu đề session (không thì mọi session tên "Untitled
   # Session"). Provider dựng sẵn thì catalog đã khai sẵn.
-  can_reason="${AGENT_CLI_CAN_REASON:-false}"
   model add "main/$model" --name "$model" \
     --context-window "$context_window" --default-max-tokens "$max_tokens" \
     --can-reason "$can_reason"
@@ -70,6 +93,14 @@ fi
 option metrics false
 option provider-auto-update false
 
+# Không để agent tự thêm dấu vết "Crush" vào commit và PR do nó tạo. Mặc định
+# upstream bảo model thêm `Assisted-by: Crush:<model>` vào commit và dòng
+# `Generated with Crush` vào commit/PR. Muốn bật lại: đổi dòng dưới thành
+# `option attribution-trailer-style assisted-by` (hoặc `co-authored-by`) và
+# `option attribution-generated-with true`.
+option attribution-trailer-style none
+option attribution-generated-with false
+
 # Provider dựng sẵn để BẬT: tài khoản đăng nhập (agent-cli login openai) và
 # provider có API key (vd ANTHROPIC_API_KEY) mới dùng được. Request chỉ đi tới
 # provider của model đang chọn. Muốn chỉ dùng provider tự khai ở trên thì bật
@@ -79,9 +110,13 @@ option provider-auto-update false
 
 # Provider hiện trong alt+p, đúng thứ tự này; alt+m chỉ hiện model của provider
 # đang dùng. Bỏ hết các dòng này thì alt+p liệt kê provider đã cấu hình.
+# openai và anthropic chỉ thêm khi chưa phải provider chính, để khỏi lặp.
 option visible-provider "$provider_id"
-option visible-provider openai
-option visible-provider anthropic
+for extra_provider in openai anthropic; do
+  if [[ "$extra_provider" != "$provider_id" ]]; then
+    option visible-provider "$extra_provider"
+  fi
+done
 
 # Tắt công cụ chạm mạng của agent-cli. Tên phải đúng tên tool (danh sách ở
 # allToolNames, internal/config/config.go); tên sai bị bỏ qua, không báo lỗi.

@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/filepathext"
 	"github.com/charmbracelet/crush/internal/fsext"
+	"github.com/charmbracelet/crush/internal/permission"
 )
 
 const GlobToolName = "glob"
@@ -50,7 +51,7 @@ type GlobResponseMetadata struct {
 	Truncated     bool `json:"truncated"`
 }
 
-func NewGlobTool(workingDir string, cfg config.ToolGlob) fantasy.AgentTool {
+func NewGlobTool(permissions permission.Service, workingDir string, cfg config.ToolGlob) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		GlobToolName,
 		globDescription(),
@@ -59,7 +60,18 @@ func NewGlobTool(workingDir string, cfg config.ToolGlob) fantasy.AgentTool {
 				return fantasy.NewTextErrorResponse("pattern is required"), nil
 			}
 
-			searchPath := cmp.Or(params.Path, workingDir)
+			searchPath := filepathext.SmartJoin(workingDir, cmp.Or(params.Path, workingDir))
+			// Liệt kê tên tệp ngoài dự án (vd ~/.config, ~/.ssh) phải hỏi quyền
+			// như ls; symlink trỏ ra ngoài cũng tính là ngoài. Kiểm gốc thật sự
+			// được duyệt: phần chữ đầu của pattern ("../x/*", "docs/*" với docs
+			// là symlink) dời gốc ra khỏi path.
+			walkRoot, _ := globWalkRoot(params.Pattern, searchPath)
+			if resp, err := requestOutsideAccess(ctx, permissions, call, workingDir, walkRoot, GlobToolName, "list", "Find files", params); resp != nil || err != nil {
+				if err != nil {
+					return fantasy.ToolResponse{}, err
+				}
+				return *resp, nil
+			}
 
 			// Bound the search so a huge or symlink-heavy root (e.g. $HOME
 			// or a module cache) fails cleanly instead of pinning the CPU
@@ -94,19 +106,24 @@ func NewGlobTool(workingDir string, cfg config.ToolGlob) fantasy.AgentTool {
 	)
 }
 
-func globFiles(ctx context.Context, pattern, searchPath string, limit int) ([]string, bool, error) {
-	// Scope the walk to the pattern's literal directory prefix. A pattern
-	// like "internal/agent/*.go" only needs to walk "internal/agent", so we
-	// start there instead of enumerating the entire tree and filtering.
-	// Patterns that begin with a wildcard (e.g. "**/foo.go") have no prefix
-	// and still walk from searchPath.
+// globWalkRoot trả thư mục mà glob thật sự duyệt và phần pattern khớp bên
+// trong nó.
+//
+// Scope the walk to the pattern's literal directory prefix. A pattern
+// like "internal/agent/*.go" only needs to walk "internal/agent", so we
+// start there instead of enumerating the entire tree and filtering.
+// Patterns that begin with a wildcard (e.g. "**/foo.go") have no prefix
+// and still walk from searchPath.
+func globWalkRoot(pattern, searchPath string) (walkRoot, walkPattern string) {
 	prefix, rest := filepathext.SplitGlobPrefix(pattern)
-	walkRoot := searchPath
-	walkPattern := pattern
-	if prefix != "" {
-		walkRoot = filepath.Join(searchPath, prefix)
-		walkPattern = rest
+	if prefix == "" {
+		return searchPath, pattern
 	}
+	return filepath.Join(searchPath, prefix), rest
+}
+
+func globFiles(ctx context.Context, pattern, searchPath string, limit int) ([]string, bool, error) {
+	walkRoot, walkPattern := globWalkRoot(pattern, searchPath)
 
 	cmdRg := getRgCmd(ctx, walkPattern)
 	if cmdRg != nil {

@@ -204,6 +204,13 @@ func (s *Server) Close() error {
 	return s.h.Close()
 }
 
+// ShutdownWorkspaces dừng mọi workspace server đang giữ: huỷ run (có giới hạn
+// thời gian) và ghi lại việc đang dở. Gọi trước Shutdown khi tiến trình bị
+// yêu cầu dừng.
+func (s *Server) ShutdownWorkspaces() {
+	s.backend.ShutdownWorkspaces()
+}
+
 // Shutdown gracefully shuts down the server without interrupting active
 // connections.
 func (s *Server) Shutdown(ctx context.Context) error {

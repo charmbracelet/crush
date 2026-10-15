@@ -73,7 +73,6 @@ type KeyMap struct {
 	}
 
 	Initialize struct {
-		Yes,
 		No,
 		Enter,
 		Switch key.Binding
@@ -86,6 +85,7 @@ type KeyMap struct {
 	Models     key.Binding
 	Providers  key.Binding
 	Effort     key.Binding
+	Jobs       key.Binding
 	Suspend    key.Binding
 	Sessions   key.Binding
 	Workspaces key.Binding
@@ -121,6 +121,11 @@ func DefaultKeyMap() KeyMap {
 		Effort: key.NewBinding(
 			key.WithKeys("alt+e"),
 			key.WithHelp("alt+e", "effort"),
+		),
+		// Lệnh bash agent đang chạy hoặc vừa xong (hộp thoại Jobs).
+		Jobs: key.NewBinding(
+			key.WithKeys("alt+j"),
+			key.WithHelp("alt+j", "jobs"),
 		),
 		Suspend: key.NewBinding(
 			key.WithKeys("ctrl+z"),
@@ -348,17 +353,14 @@ func DefaultKeyMap() KeyMap {
 		key.WithKeys("h", "left"),
 		key.WithHelp("h/←", "focus chat"),
 	)
-	km.Initialize.Yes = key.NewBinding(
-		key.WithKeys("y", "Y"),
-		key.WithHelp("y", "yes"),
-	)
+	// Không có phím "yes" chữ trần: xem updateInitializeView.
 	km.Initialize.No = key.NewBinding(
 		key.WithKeys("n", "N", "esc", "alt+esc"),
 		key.WithHelp("n", "no"),
 	)
 	km.Initialize.Switch = key.NewBinding(
 		key.WithKeys("left", "right", "tab"),
-		key.WithHelp("tab", "switch"),
+		key.WithHelp("←/→", "switch"),
 	)
 	km.Initialize.Enter = key.NewBinding(
 		key.WithKeys("enter"),

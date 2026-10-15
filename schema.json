@@ -886,8 +886,9 @@
         "active_theme": {
           "type": "string",
           "description": "Name of the currently active theme",
-          "default": "charmtone-panther",
+          "default": "everforest-dark-v2",
           "examples": [
+            "everforest-dark-v2",
             "charmtone-panther",
             "gruvbox-dark"
           ]

@@ -27,6 +27,7 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/crush/internal/workspace"
 )
 
@@ -93,6 +94,9 @@ func (m *UI) dispatchSessionListRefresh() tea.Cmd {
 	ws := m.com.Workspace
 	gen := m.activity.version
 	currentID := m.currentSessionID()
+	// Session đang chạy/chờ/có kết quả chưa xem cũng được dò dù nằm ngoài 9
+	// dòng đầu. Chụp lúc ra lệnh vì closure chạy ngoài luồng Update.
+	pinned := m.activity.Active()
 	wait := sessionListMinInterval - time.Since(m.sessionListFetchedAt)
 	m.sessionListFetchedAt = time.Now().Add(max(wait, 0))
 	return func() tea.Msg {
@@ -107,7 +111,7 @@ func (m *UI) dispatchSessionListRefresh() tea.Cmd {
 		// Sorted here, not on landing, so the probed sessions are the
 		// shown ones.
 		sortSessionsForPanel(sessions)
-		shown := panelSessionsOf(sessions, currentID)
+		shown := panelSessionsOf(sessions, currentID, pinned...)
 		status := make(map[string]workspace.SessionStatus, len(shown))
 		for _, s := range shown {
 			status[s.ID] = ws.AgentSessionStatus(s.ID)
@@ -137,7 +141,9 @@ func (m *UI) applySessionList(msg sessionListMsg) []tea.Cmd {
 		m.activity.Retain(ids)
 		m.sessionList = msg.sessions
 		m.sessionListVersion++
+		m.pruneStaleDrafts()
 		m.pruneChildRuns(ids)
+		m.refreshJobsTitles()
 		if fresh {
 			if cmd := m.probedWaitingInfo(msg.status); cmd != nil {
 				cmds = append(cmds, cmd)
@@ -185,7 +191,7 @@ func (m *UI) inSessionList(id string) bool {
 
 // panelSessions returns the sessions the panel shows.
 func (m *UI) panelSessions() []session.Session {
-	return panelSessionsOf(m.sessionList, m.currentSessionID())
+	return panelSessionsOf(m.sessionList, m.currentSessionID(), m.activity.Active()...)
 }
 
 // jumpSessionN returns n (1..9) when msg is the nth key of the jump binding,
@@ -214,14 +220,48 @@ func (m *UI) jumpToSession(n int) tea.Cmd {
 	return m.loadSession(shown[n-1].ID)
 }
 
-// cycleSession mở session kế (step=1) hoặc trước (step=-1) theo thứ tự của
-// bảng Sessions, vòng lại ở hai đầu (Alt+. / Alt+,). Dùng danh sách đã nạp
-// sẵn nên không làm IO trong Update.
-func (m *UI) cycleSession(step int) tea.Cmd {
-	id := nextSessionID(m.sessionList, m.currentSessionID(), step)
-	if id == "" {
-		return nil
+// cyclePendingTTL là thời hạn của đích Alt+. / Alt+, đang nạp dở: quá hạn mà
+// session vẫn chưa hiện (nạp treo) thì lần bấm kế lại tính từ session đang xem.
+const cyclePendingTTL = 5 * time.Second
+
+// sessionCycle nhớ đích của lần Alt+. / Alt+, đang nạp dở. Bấm tiếp trước khi
+// lần nạp xong phải đi tiếp từ đích đó, không đi lại từ session còn đang hiện.
+type sessionCycle struct {
+	pending string
+	at      time.Time
+}
+
+// base là session để tính bước kế: đích đang nạp dở nếu còn mới, không thì
+// session đang hiện.
+func (c *sessionCycle) base(current string) string {
+	if c.pending != "" && time.Since(c.at) < cyclePendingTTL {
+		return c.pending
 	}
+	return current
+}
+
+func (c *sessionCycle) start(id string) {
+	c.pending, c.at = id, time.Now()
+}
+
+// done quên đích chờ khi chính nó đã hiện hoặc nạp hỏng. Một lần nạp khác
+// không đụng tới đích mới hơn đang chờ.
+func (c *sessionCycle) done(id string) {
+	if c.pending == id {
+		*c = sessionCycle{}
+	}
+}
+
+// cycleSession mở session kế (step=1) hoặc trước (step=-1) theo đúng danh sách
+// bảng Sessions đang hiện (9 session mới nhất, session đang xem và session
+// đang bận), vòng lại ở hai đầu (Alt+. / Alt+,). Dùng danh sách đã nạp sẵn nên
+// không làm IO trong Update. Không còn session nào khác thì báo, không im lặng.
+func (m *UI) cycleSession(step int) tea.Cmd {
+	id := nextSessionID(m.panelSessions(), m.cycle.base(m.currentSessionID()), step)
+	if id == "" {
+		return util.ReportInfo("No other session")
+	}
+	m.cycle.start(id)
 	return m.loadSession(id)
 }
 
@@ -242,21 +282,23 @@ func nextSessionID(list []session.Session, currentID string, step int) string {
 	return list[((i+step)%n+n)%n].ID
 }
 
-// panelSessionsOf returns the first sessionsPanelMax sessions, plus the
-// viewed one as an extra pinned entry when it falls outside them.
-func panelSessionsOf(list []session.Session, currentID string) []session.Session {
+// panelSessionsOf returns the first sessionsPanelMax sessions, plus the viewed
+// one and every session in pinned (the busy or unseen ones) as extra entries
+// when they fall outside them. The extras keep the order of list, so a pin
+// never renumbers the rows.
+func panelSessionsOf(list []session.Session, currentID string, pinned ...string) []session.Session {
 	if len(list) <= sessionsPanelMax {
 		return list
 	}
 	// Cap the capacity so the append below copies instead of overwriting
 	// list[sessionsPanelMax].
-	top := list[:sessionsPanelMax:sessionsPanelMax]
+	shown := list[:sessionsPanelMax:sessionsPanelMax]
 	for _, s := range list[sessionsPanelMax:] {
-		if s.ID == currentID {
-			return append(top, s)
+		if s.ID == currentID || slices.Contains(pinned, s.ID) {
+			shown = append(shown, s)
 		}
 	}
-	return top
+	return shown
 }
 
 // sessionsInfo renders the Sessions section, one "<n> <glyph> <title>" row

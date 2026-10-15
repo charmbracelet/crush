@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -906,6 +907,15 @@ func (app *App) Shutdown() {
 	// before closing the DB so agents can finish writing their state.
 	if app.AgentCoordinator != nil {
 		app.AgentCoordinator.CancelAll()
+		// CancelAll gives up after a bounded wait. If a run outlasts it,
+		// the database is about to close underneath a turn that is still
+		// writing, which is how a session ends up recording a tool call
+		// that never got an answer. Nothing here can safely wait longer,
+		// so say so plainly rather than leaving it to be worked out from
+		// the damage later.
+		if app.AgentCoordinator.IsBusy() {
+			slog.Warn("Shutting down while agent work is still running; its final state may not be recorded")
+		}
 	}
 
 	// Shared shutdown context for all timeout-bounded cleanup.
@@ -956,10 +966,24 @@ func (app *App) Shutdown() {
 	wg.Wait()
 }
 
+// updateCheckEnabled cho biết có hỏi GitHub về bản mới của upstream hay không.
+// Fork cá nhân không có feed release riêng để so sánh (so với tag của upstream
+// sẽ luôn báo "có bản mới"), nên mặc định TẮT và không gọi mạng. Chỉ bật khi
+// CRUSH_DISABLE_UPDATE_CHECK được đặt tường minh thành giá trị false theo
+// strconv.ParseBool (0, f, F, false, FALSE, False). Không đặt, rỗng, true hay
+// giá trị không hiểu được đều giữ nguyên trạng thái tắt.
+func updateCheckEnabled() bool {
+	v, ok := os.LookupEnv("CRUSH_DISABLE_UPDATE_CHECK")
+	if !ok {
+		return false
+	}
+	disabled, err := strconv.ParseBool(v)
+	return err == nil && !disabled
+}
+
 // checkForUpdates checks for available updates.
 func (app *App) checkForUpdates(ctx context.Context) {
-	// A personal fork has no upstream release feed to compare against.
-	if os.Getenv("CRUSH_DISABLE_UPDATE_CHECK") != "" {
+	if !updateCheckEnabled() {
 		return
 	}
 	checkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)

@@ -24,8 +24,8 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 )
@@ -174,8 +174,8 @@ func runSessionList(cmd *cobra.Command, _ []string) error {
 	w, cleanup, usingPager := sessionWriter(ctx, len(list))
 	defer cleanup()
 
-	hashStyle := lipgloss.NewStyle().Foreground(charmtone.Malibu)
-	dateStyle := lipgloss.NewStyle().Foreground(charmtone.Damson)
+	hashStyle := lipgloss.NewStyle().Foreground(styles.ColorAccent)
+	dateStyle := lipgloss.NewStyle().Foreground(styles.ColorFgSubtle)
 
 	width := sessionOutputWidth
 	if tw, _, err := term.GetSize(os.Stdout.Fd()); err == nil && tw > 0 {
@@ -454,8 +454,8 @@ func outputSessionHuman(ctx context.Context, cfg *config.ConfigStore, sess sessi
 	}
 	contentWidth := min(width, sessionMaxContentWidth)
 
-	keyStyle := lipgloss.NewStyle().Foreground(charmtone.Damson)
-	valStyle := lipgloss.NewStyle().Foreground(charmtone.Malibu)
+	keyStyle := lipgloss.NewStyle().Foreground(sessionKeyColor)
+	valStyle := lipgloss.NewStyle().Foreground(sessionValueColor)
 
 	hash := session.HashID(sess.ID)[:12]
 	created := time.Unix(sess.CreatedAt, 0).Format("Mon Jan 2 15:04:05 2006 -0700")
@@ -561,13 +561,20 @@ func sessionWriter(ctx context.Context, contentHeight int) (io.Writer, func(), b
 	}
 
 	return &colorprofile.Writer{
-			Forward: pipe,
-			Profile: profile,
-		}, func() {
-			pipe.Close()
-			_ = cmd.Wait()
-		}, true
+		Forward: pipe,
+		Profile: profile,
+	}, func() {
+		pipe.Close()
+		_ = cmd.Wait()
+	}, true
 }
+
+// Màu khoá/giá trị của `session show` theo bảng màu mặc định (trong hàm in,
+// tên styles là theme của người dùng nên khai ở đây).
+var (
+	sessionKeyColor   = styles.ColorFgSubtle
+	sessionValueColor = styles.ColorAccent
+)
 
 type sessionShowMeta struct {
 	ID               string             `json:"id"`

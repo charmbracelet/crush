@@ -447,10 +447,17 @@ func (c *Commands) setCommandItems(commandType CommandType) {
 
 // defaultCommands returns the list of default system commands.
 func (c *Commands) defaultCommands() []*CommandItem {
+	// Phím tắt ghi ở đây là các phím Alt của keys.go (các phím Ctrl cũ vẫn chạy
+	// nhưng không còn là phím chính).
 	commands := []*CommandItem{
-		NewCommandItem(c.com.Styles, "new_session", "New Session", "ctrl+n", ActionNewSession{}).WithAliases("clear"),
-		NewCommandItem(c.com.Styles, "switch_session", "Sessions", "ctrl+s", ActionOpenDialog{SessionsID}),
-		NewCommandItem(c.com.Styles, "switch_model", "Switch Model", "ctrl+l", ActionOpenDialog{ModelsID}),
+		NewCommandItem(c.com.Styles, "new_session", "New Session", "alt+n", ActionNewSession{}).WithAliases("clear"),
+		NewCommandItem(c.com.Styles, "switch_session", "Sessions", "alt+s", ActionOpenDialog{SessionsID}),
+		// Về Home (chọn workspace), cùng việc với Alt+W.
+		NewCommandItem(c.com.Styles, "home", "Home", "alt+w", ActionGoHome{}).WithAliases("workspace", "workspaces"),
+		NewCommandItem(c.com.Styles, "switch_model", "Switch Model", "alt+m", ActionOpenDialog{ModelsID}),
+		NewCommandItem(c.com.Styles, "switch_provider", "Switch Provider", "alt+p", ActionOpenDialog{ProvidersID}),
+		// Lệnh bash agent đang chạy hoặc vừa xong: xem output, dừng job.
+		NewCommandItem(c.com.Styles, "jobs", "Jobs", "alt+j", ActionOpenDialog{JobsID}).WithAliases("activity", "background", "processes"),
 	}
 
 	// Only show compact command if there's an active session
@@ -477,7 +484,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 
 			// OpenAI models: reasoning effort dialog
 			if len(model.ReasoningLevels) > 0 {
-				commands = append(commands, NewCommandItem(c.com.Styles, "select_reasoning_effort", "Select Reasoning Effort", "", ActionOpenDialog{
+				commands = append(commands, NewCommandItem(c.com.Styles, "select_reasoning_effort", "Select Reasoning Effort", "alt+e", ActionOpenDialog{
 					DialogID: ReasoningID,
 				}))
 			}

@@ -22,7 +22,9 @@ import (
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/filepathext"
 	"github.com/charmbracelet/crush/internal/fsext"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -121,7 +123,7 @@ func escapeRegexPattern(pattern string) string {
 	return escaped
 }
 
-func NewGrepTool(workingDir string, config config.ToolGrep) fantasy.AgentTool {
+func NewGrepTool(permissions permission.Service, workingDir string, config config.ToolGrep) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		GrepToolName,
 		grepDescription(),
@@ -135,7 +137,15 @@ func NewGrepTool(workingDir string, config config.ToolGrep) fantasy.AgentTool {
 				searchPattern = escapeRegexPattern(params.Pattern)
 			}
 
-			searchPath := cmp.Or(params.Path, workingDir)
+			searchPath := filepathext.SmartJoin(workingDir, cmp.Or(params.Path, workingDir))
+			// grep đọc NỘI DUNG tệp: ngoài dự án (vd tệp env chứa API key)
+			// phải hỏi quyền như view; symlink trỏ ra ngoài cũng tính là ngoài.
+			if resp, err := requestOutsideAccess(ctx, permissions, call, workingDir, searchPath, GrepToolName, "read", "Search file contents", params); resp != nil || err != nil {
+				if err != nil {
+					return fantasy.ToolResponse{}, err
+				}
+				return *resp, nil
+			}
 
 			searchCtx, cancel := context.WithTimeout(ctx, config.GetTimeout())
 			defer cancel()
@@ -216,17 +226,17 @@ func searchFiles(ctx context.Context, pattern, rootPath, include string, limit i
 }
 
 func searchWithRipgrep(ctx context.Context, pattern, path, include string) ([]grepMatch, error) {
-	cmd := getRgSearchCmd(ctx, pattern, path, include)
-	if cmd == nil {
-		return nil, fmt.Errorf("ripgrep not found in $PATH")
-	}
-
 	// Only add ignore files if they exist
+	var ignoreFiles []string
 	for _, ignoreFile := range []string{".gitignore", ".crushignore"} {
 		ignorePath := filepath.Join(path, ignoreFile)
 		if _, err := os.Stat(ignorePath); err == nil {
-			cmd.Args = append(cmd.Args, "--ignore-file", ignorePath)
+			ignoreFiles = append(ignoreFiles, ignorePath)
 		}
+	}
+	cmd := getRgSearchCmd(ctx, pattern, path, include, ignoreFiles...)
+	if cmd == nil {
+		return nil, fmt.Errorf("ripgrep not found in $PATH")
 	}
 
 	output, err := cmd.Output()
@@ -320,6 +330,12 @@ func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error
 
 		// Use walker's shouldSkip method for files
 		if walker.ShouldSkip(path) {
+			return nil
+		}
+
+		// Không theo symlink, như rg: tệp trong dự án trỏ ra ngoài (vd tới
+		// tệp env chứa key) không được đọc mà không qua cổng hỏi quyền.
+		if info.Mode()&os.ModeSymlink != 0 {
 			return nil
 		}
 

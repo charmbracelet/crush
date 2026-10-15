@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -681,4 +682,91 @@ while [ ! -f go ]; do sleep 0.05; done
 	}
 	require.False(t, gated.IsSessionBusy("s1"))
 	require.False(t, gated.IsBusy())
+}
+
+// twoGateModel chặn lần Stream thứ nhất ở gate và lần thứ hai ở gate2, rồi
+// trả chữ "done".
+type twoGateModel struct {
+	gatedStreamModel
+	gate2    chan struct{}
+	entered2 chan struct{}
+	n        atomic.Int64
+}
+
+func (m *twoGateModel) Stream(ctx context.Context, _ fantasy.Call) (fantasy.StreamResponse, error) {
+	switch m.n.Add(1) {
+	case 1:
+		close(m.entered)
+		select {
+		case <-m.gate:
+		case <-ctx.Done():
+		}
+	case 2:
+		close(m.entered2)
+		select {
+		case <-m.gate2:
+		case <-ctx.Done():
+		}
+	}
+	return func(yield func(fantasy.StreamPart) bool) {
+		if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextStart, ID: "1"}) {
+			return
+		}
+		if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextDelta, ID: "1", Delta: "done"}) {
+			return
+		}
+		if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextEnd, ID: "1"}) {
+			return
+		}
+		yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop})
+	}, nil
+}
+
+// Không có Stop hook: không dựng gate, nên RunComplete của lượt đầu tới ngay
+// khi lượt đó xong, không chờ lượt xếp hàng sau nó (trước đây bị giữ tới
+// khi cả chuỗi xả hàng đợi xong).
+func TestNoStopHookDoesNotHoldRunComplete(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	broker := pubsub.NewBroker[notify.RunComplete]()
+	t.Cleanup(broker.Shutdown)
+	events := broker.Subscribe(t.Context())
+	model := &twoGateModel{
+		gatedStreamModel: gatedStreamModel{text: "done", gate: make(chan struct{}), entered: make(chan struct{})},
+		gate2:            make(chan struct{}),
+		entered2:         make(chan struct{}),
+	}
+	cw := catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}
+	sa := NewSessionAgent(SessionAgentOptions{
+		LargeModel:  Model{Model: model, CatwalkCfg: cw},
+		SmallModel:  Model{Model: &finishStreamModel{text: "title"}, CatwalkCfg: cw},
+		IsYolo:      true,
+		Sessions:    env.sessions,
+		Messages:    env.messages,
+		RunComplete: holdRunComplete(broker),
+	})
+	sess, err := env.sessions.Create(t.Context(), "session")
+	require.NoError(t, err)
+	gated := WithStopHooks(sessionAgentCoordinator{sa: sa}, func() *hooks.Runner { return nil })
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := gated.Run(WithRunID(t.Context(), "run-1"), sess.ID, "first")
+		done <- err
+	}()
+	waitEntered(t, model.entered)
+	res, err := gated.Run(WithRunID(t.Context(), "run-2"), sess.ID, "second")
+	require.NoError(t, err)
+	require.Nil(t, res, "run-2 must be queued behind run-1")
+	close(model.gate)
+	waitEntered(t, model.entered2) // run-2 đang chạy, bị chặn ở gate2.
+
+	select {
+	case ev := <-events:
+		require.Equal(t, "run-1", ev.Payload.RunID, "run-1's RunComplete must arrive while run-2 still runs")
+	case <-time.After(5 * time.Second):
+		t.Fatal("run-1's RunComplete was held behind the queued run-2")
+	}
+	close(model.gate2)
+	require.NoError(t, <-done)
 }

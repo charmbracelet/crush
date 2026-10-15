@@ -138,6 +138,7 @@ crush --continue
 			tea.WithContext(cmd.Context()),
 			tea.WithFilter(inputFilter.Filter),
 		)
+		model.SetProgram(program)
 		go ws.Subscribe(program)
 
 		if _, err := program.Run(); err != nil {

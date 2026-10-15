@@ -20,6 +20,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/charmbracelet/crush/internal/pinentry"
 	"github.com/charmbracelet/x/exp/slice"
 	"mvdan.cc/sh/v3/interp"
 	"mvdan.cc/sh/v3/syntax"
@@ -257,6 +258,10 @@ func (s *Shell) updateShellFromRunner(runner *interp.Runner) {
 
 // execCommon is the shared implementation for executing commands
 func (s *Shell) execCommon(ctx context.Context, command string, stdout, stderr io.Writer) (err error) {
+	// Let the pinentry watcher poll at full rate for the lifetime of the
+	// command so a gpg-agent passphrase prompt gets the terminal quickly.
+	defer pinentry.TrackCommand()()
+
 	var runner *interp.Runner
 	defer func() {
 		if r := recover(); r != nil {

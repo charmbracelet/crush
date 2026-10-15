@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent/tools"
+	"github.com/charmbracelet/crush/internal/execpolicy"
 	"github.com/charmbracelet/crush/internal/permission"
 )
 
@@ -28,6 +30,7 @@ const delegationTimeout = 15 * time.Minute
 type DelegationParams struct {
 	Prompt string `json:"prompt" description:"The complete, self-contained task to delegate, including goal, file paths, and constraints"`
 	Resume string `json:"resume,omitempty" description:"Session ID returned by a previous call to this tool to continue that conversation instead of starting a new one"`
+	Model  string `json:"model,omitempty" description:"Model the delegated agent runs; must be one of the models this tool's description allows (default: the first one)"`
 }
 
 // resumeIDPattern là dạng hợp lệ của resume: session/thread ID mà chính tool
@@ -76,8 +79,9 @@ type strategy interface {
 	access() string
 	// validate kiểm cấu hình mức quyền (env) lúc dựng tool.
 	validate() error
-	// args assembles the headless invocation for one run.
-	args(prompt, resume string) []string
+	// args assembles the headless invocation for one run. model là ID cụ
+	// thể đã qua execpolicy; rỗng thì không truyền (chỉ test dùng).
+	args(prompt, resume, model string) []string
 	// parse extracts the outcome from captured stdout. A failure the CLI
 	// reported in its own output comes back as a *delegationError; output
 	// that cannot be interpreted comes back as any other error.
@@ -89,10 +93,20 @@ type strategy interface {
 // một tool chắc chắn hỏng, và request không tốn token mô tả nó. Biến *_BIN đã
 // đặt mà không chạy được là cấu hình hỏng: trả lỗi khi dựng agent (lỗi hiện ở
 // prompt đầu tiên), trừ khi tool đã bị tắt (permissions deny).
-func NewTools(workingDir string, perms permissionRequester, allowed []string) ([]fantasy.AgentTool, error) {
+//
+// Ranh giới provider (execpolicy): CLI có trên máy, đã đăng nhập hay có key
+// chưa đủ. Giao việc phải được bật (AGENT_CLI_DELEGATION=on) và backend phải
+// có model cụ thể trong AGENT_CLI_ALLOWED_MODELS; không thì tool không tồn
+// tại, model chính không thể gọi tới.
+func NewTools(workingDir string, perms permissionRequester, allowed []string, pol execpolicy.Policy) ([]fantasy.AgentTool, error) {
 	var out []fantasy.AgentTool
 	for _, s := range []strategy{newClaudeStrategy(), newCodexStrategy()} {
 		if !slices.Contains(allowed, s.name()) {
+			continue
+		}
+		models := pol.DelegationModels(s.name())
+		if len(models) == 0 {
+			slog.Debug("Delegation tool not registered", "backend", s.name(), "reason", pol.CheckDelegation(s.name(), ""))
 			continue
 		}
 		// Mức quyền gõ sai là cấu hình hỏng như *_BIN sai: báo ngay, nêu tên
@@ -112,7 +126,7 @@ func NewTools(workingDir string, perms permissionRequester, allowed []string) ([
 		if abs, err := filepath.Abs(path); err == nil {
 			path = abs
 		}
-		out = append(out, newDelegationTool(workingDir, perms, resolvedStrategy{strategy: s, path: path}))
+		out = append(out, newDelegationTool(workingDir, perms, resolvedStrategy{strategy: s, path: path}, models))
 	}
 	return out, nil
 }
@@ -129,10 +143,14 @@ func (r resolvedStrategy) binary() string { return r.path }
 // validate the prompt, ask for permission, check the binary, run it
 // headlessly in workingDir, then let the structured output — not the exit
 // code — decide the outcome.
-func newDelegationTool(workingDir string, perms permissionRequester, s strategy) fantasy.AgentTool {
+//
+// models là các model execpolicy cho phép, model đầu là mặc định. Model lạ
+// (alias, Fable, Astra, bản cũ hay bản mới chưa liệt kê) bị từ chối trước khi
+// hỏi quyền và trước khi chạy gì; danh sách rỗng thì mọi lần gọi đều bị từ chối.
+func newDelegationTool(workingDir string, perms permissionRequester, s strategy, models []string) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		s.name(),
-		s.describe(),
+		s.describe()+modelsDescription(models),
 		func(ctx context.Context, params DelegationParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if strings.TrimSpace(params.Prompt) == "" {
 				return fantasy.ToolResponse{}, errors.New("prompt is required")
@@ -140,6 +158,16 @@ func newDelegationTool(workingDir string, perms permissionRequester, s strategy)
 			if params.Resume != "" && !resumeIDPattern.MatchString(params.Resume) {
 				return fantasy.ToolResponse{}, fmt.Errorf("resume must be a session ID returned by an earlier %s call", s.name())
 			}
+			model := strings.TrimSpace(params.Model)
+			if model == "" && len(models) > 0 {
+				model = models[0]
+			}
+			if !slices.Contains(models, model) {
+				denied := &execpolicy.Denied{Code: execpolicy.CodeModelNotAllowed, Provider: s.name(), Model: model, Allowed: slices.Clone(models)}
+				slog.Info("Delegation denied", "backend", s.name(), "model", model, "code", denied.Code)
+				return fantasy.NewTextErrorResponse(denied.Error()), nil
+			}
+			params.Model = model
 			if perms == nil {
 				// Không có cổng quyền thì không chạy: CLI con không hỏi lại ai.
 				return fantasy.ToolResponse{}, errors.New("permission service unavailable")
@@ -170,7 +198,8 @@ func newDelegationTool(workingDir string, perms permissionRequester, s strategy)
 			ctx, cancel := context.WithTimeout(ctx, delegationTimeout)
 			defer cancel()
 
-			stdout, runErr := runCommand(ctx, workingDir, s.binary(), s.args(params.Prompt, params.Resume)...)
+			slog.Info("Delegation approved", "backend", s.name(), "model", model)
+			stdout, runErr := runCommand(ctx, workingDir, s.binary(), s.args(params.Prompt, params.Resume, model)...)
 			out, parseErr := s.parse(stdout)
 			switch {
 			case parseErr == nil:
@@ -191,7 +220,7 @@ func newDelegationTool(workingDir string, perms permissionRequester, s strategy)
 // hộp thoại in params của tool lạ thành map khó đọc ở chế độ client/server.
 func permissionDescription(s strategy, workingDir string, params DelegationParams) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s will run this task headlessly in %s with %s.", s.label(), workingDir, s.access())
+	fmt.Fprintf(&b, "%s will run this task headlessly in %s with %s, model %s.", s.label(), workingDir, s.access(), displaySafe(params.Model))
 	if params.Resume != "" {
 		fmt.Fprintf(&b, " It continues session %s.", params.Resume)
 	}
@@ -233,6 +262,15 @@ func displaySafe(s string) string {
 		prev = orig
 	}
 	return b.String()
+}
+
+// modelsDescription báo cho model chính các model được giao (phần thêm vào mô
+// tả tool).
+func modelsDescription(models []string) string {
+	if len(models) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("\n\nModel: set `model` to one of %s (default %s). Any other model is refused.", strings.Join(models, ", "), models[0])
 }
 
 // isInvisibleFiller nhận các ký tự "lấp chỗ" hiển thị như khoảng trắng nhưng

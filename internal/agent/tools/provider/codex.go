@@ -78,7 +78,7 @@ func (s codexStrategy) access() string {
 
 // args assembles the headless invocation. The permission prompt of the
 // tool call is the gate, as for claude_code.
-func (s codexStrategy) args(prompt, resume string) []string {
+func (s codexStrategy) args(prompt, resume, model string) []string {
 	args := []string{"exec"}
 	if resume != "" {
 		args = append(args, "resume")
@@ -90,6 +90,12 @@ func (s codexStrategy) args(prompt, resume string) []string {
 	args = append(args,
 		"--json",
 		"-c", fmt.Sprintf("sandbox_mode=%q", s.sandboxMode()),
+	)
+	if model != "" {
+		// Qua -c như sandbox_mode: dùng được cho cả lượt mới lẫn "exec resume".
+		args = append(args, "-c", fmt.Sprintf("model=%q", model))
+	}
+	args = append(args,
 		"--skip-git-repo-check",
 		"--",
 	)
@@ -154,6 +160,7 @@ func (codexStrategy) parse(stdout []byte) (delegationOutput, error) {
 
 // NewCodexTool delegates a self-contained task to Codex running headlessly
 // in the working directory, after the user approves the call.
-func NewCodexTool(workingDir string, perms permissionRequester) fantasy.AgentTool {
-	return newDelegationTool(workingDir, perms, newCodexStrategy())
+// models là các model được phép (đầu tiên là mặc định).
+func NewCodexTool(workingDir string, perms permissionRequester, models ...string) fantasy.AgentTool {
+	return newDelegationTool(workingDir, perms, newCodexStrategy(), models)
 }

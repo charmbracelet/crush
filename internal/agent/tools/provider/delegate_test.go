@@ -9,6 +9,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent/tools"
+	"github.com/charmbracelet/crush/internal/execpolicy"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/stretchr/testify/require"
 )
@@ -55,10 +56,11 @@ func TestDelegationDeniedDoesNotRunCLI(t *testing.T) {
 		binEnv   string
 		stdout   string
 		access   string
-		build    func(dir string, perms permissionRequester) fantasy.AgentTool
+		build    func(dir string, perms permissionRequester, models ...string) fantasy.AgentTool
+		model    string
 	}{
-		{ClaudeCodeToolName, claudeBinEnv, `{"result":"done","session_id":"s1","is_error":false}`, "--dangerously-skip-permissions", NewClaudeCodeTool},
-		{CodexToolName, codexBinEnv, `{"type":"item.completed","item":{"type":"agent_message","text":"done"}}`, "danger-full-access", NewCodexTool},
+		{ClaudeCodeToolName, claudeBinEnv, `{"result":"done","session_id":"s1","is_error":false}`, "--dangerously-skip-permissions", NewClaudeCodeTool, testClaudeModel},
+		{CodexToolName, codexBinEnv, `{"type":"item.completed","item":{"type":"agent_message","text":"done"}}`, "danger-full-access", NewCodexTool, testCodexModel},
 	}
 	for _, tc := range cases {
 		t.Run(tc.toolName, func(t *testing.T) {
@@ -67,7 +69,7 @@ func TestDelegationDeniedDoesNotRunCLI(t *testing.T) {
 			t.Setenv(tc.binEnv, script)
 			perms := &fakePermissions{allow: false}
 
-			resp, err := tc.build(dir, perms).Run(sessionCtx(t), fantasy.ToolCall{
+			resp, err := tc.build(dir, perms, tc.model).Run(sessionCtx(t), fantasy.ToolCall{
 				ID:    "call-deny",
 				Name:  tc.toolName,
 				Input: `{"prompt":"delete everything"}`,
@@ -97,7 +99,7 @@ func TestDelegationGrantedRunsCLI(t *testing.T) {
 	t.Setenv(claudeBinEnv, script)
 	perms := &fakePermissions{allow: true}
 
-	resp, err := NewClaudeCodeTool(dir, perms).Run(sessionCtx(t), fantasy.ToolCall{
+	resp, err := NewClaudeCodeTool(dir, perms, testClaudeModel).Run(sessionCtx(t), fantasy.ToolCall{
 		ID:    "call-ok",
 		Name:  ClaudeCodeToolName,
 		Input: `{"prompt":"write hello.txt","resume":"s0"}`,
@@ -117,7 +119,7 @@ func TestDelegationRequiresSession(t *testing.T) {
 	t.Setenv(claudeBinEnv, script)
 	perms := &fakePermissions{allow: true}
 
-	_, err := NewClaudeCodeTool(dir, perms).Run(context.Background(), fantasy.ToolCall{
+	_, err := NewClaudeCodeTool(dir, perms, testClaudeModel).Run(context.Background(), fantasy.ToolCall{
 		ID:    "call-nosess",
 		Name:  ClaudeCodeToolName,
 		Input: `{"prompt":"write hello.txt"}`,
@@ -136,7 +138,7 @@ func TestDelegationPromptStartingWithDashStaysPositional(t *testing.T) {
 	prompt := "- fix the login bug\n- add tests"
 	for _, s := range []strategy{claudeStrategy{}, codexStrategy{}} {
 		for _, resume := range []string{"", "id-1"} {
-			args := s.args(prompt, resume)
+			args := s.args(prompt, resume, "")
 			require.Equal(t, prompt, args[len(args)-1], "%s: prompt must be the last argument", s.name())
 			sep := len(args) - 2
 			if resume != "" && s.name() == CodexToolName {
@@ -154,11 +156,11 @@ func TestDelegationUsesConfiguredAccessMode(t *testing.T) {
 	t.Setenv(claudeModeEnv, "acceptEdits")
 	t.Setenv(codexSandboxEnv, "workspace-write")
 
-	claudeArgs := newClaudeStrategy().args("task", "")
+	claudeArgs := newClaudeStrategy().args("task", "", "")
 	require.Contains(t, claudeArgs, "acceptEdits")
 	require.NotContains(t, claudeArgs, "--dangerously-skip-permissions")
 
-	codexArgs := newCodexStrategy().args("task", "thread-1")
+	codexArgs := newCodexStrategy().args("task", "thread-1", "")
 	require.Contains(t, codexArgs, `sandbox_mode="workspace-write"`)
 	require.NotContains(t, codexArgs, "-s", "exec resume rejects -s")
 }
@@ -171,18 +173,18 @@ func TestNewToolsRegistersOnlyInstalledCLIs(t *testing.T) {
 	t.Setenv(codexBinEnv, "")
 
 	all := []string{ClaudeCodeToolName, CodexToolName}
-	got, err := NewTools(t.TempDir(), &fakePermissions{}, all)
+	got, err := NewTools(t.TempDir(), &fakePermissions{}, all, testPolicy)
 	require.NoError(t, err)
 	require.Empty(t, got, "no CLI installed: no delegation tool, no token cost")
 
 	require.NoError(t, os.WriteFile(filepath.Join(bin, "claude"), []byte("#!/bin/sh\n"), 0o755))
-	got, err = NewTools(t.TempDir(), &fakePermissions{}, all)
+	got, err = NewTools(t.TempDir(), &fakePermissions{}, all, testPolicy)
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 	require.Equal(t, ClaudeCodeToolName, got[0].Info().Name)
 
 	// Tool bị tắt (permissions deny) thì không đăng ký dù có CLI.
-	got, err = NewTools(t.TempDir(), &fakePermissions{}, []string{CodexToolName})
+	got, err = NewTools(t.TempDir(), &fakePermissions{}, []string{CodexToolName}, testPolicy)
 	require.NoError(t, err)
 	require.Empty(t, got)
 }
@@ -191,12 +193,12 @@ func TestNewToolsRejectsBrokenExplicitBinary(t *testing.T) {
 	// Không parallel: t.Setenv.
 	t.Setenv(codexBinEnv, filepath.Join(t.TempDir(), "no-such-codex"))
 
-	_, err := NewTools(t.TempDir(), &fakePermissions{}, []string{ClaudeCodeToolName, CodexToolName})
+	_, err := NewTools(t.TempDir(), &fakePermissions{}, []string{ClaudeCodeToolName, CodexToolName}, testPolicy)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), codexBinEnv)
 
 	// Tool đã tắt thì biến BIN sai không được làm hỏng cả agent.
-	_, err = NewTools(t.TempDir(), &fakePermissions{}, []string{ClaudeCodeToolName})
+	_, err = NewTools(t.TempDir(), &fakePermissions{}, []string{ClaudeCodeToolName}, testPolicy)
 	require.NoError(t, err)
 }
 
@@ -209,7 +211,7 @@ func TestNewToolsResolvesRelativeBinary(t *testing.T) {
 	t.Chdir(binDir)
 	t.Setenv(codexBinEnv, "./my-codex")
 
-	got, err := NewTools(project, &fakePermissions{allow: true}, []string{CodexToolName})
+	got, err := NewTools(project, &fakePermissions{allow: true}, []string{CodexToolName}, testPolicy)
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 
@@ -232,7 +234,7 @@ func TestDelegationRejectsFlagLikeResume(t *testing.T) {
 	for _, resume := range []string{"--dangerously-skip-permissions", "-x", "id with space", "id\x1b[2J"} {
 		input, err := json.Marshal(DelegationParams{Prompt: "hi", Resume: resume})
 		require.NoError(t, err)
-		_, err = NewClaudeCodeTool(dir, perms).Run(sessionCtx(t), fantasy.ToolCall{
+		_, err = NewClaudeCodeTool(dir, perms, testClaudeModel).Run(sessionCtx(t), fantasy.ToolCall{
 			ID:    "call-resume",
 			Name:  ClaudeCodeToolName,
 			Input: string(input),
@@ -244,7 +246,30 @@ func TestDelegationRejectsFlagLikeResume(t *testing.T) {
 	require.NoFileExists(t, marker)
 
 	// Dạng một token: id hợp lệ cũng không thể tách thành cờ riêng.
-	args := (claudeStrategy{mode: "plan"}).args("p", "sess-1")
+	args := (claudeStrategy{mode: "plan"}).args("p", "sess-1", "")
 	require.Contains(t, args, "--resume=sess-1")
 	require.NotContains(t, args, "--resume")
 }
+
+// Model và chính sách dùng chung cho các test giao việc: giao việc bật, mỗi
+// backend một model cụ thể (đường thật dựng tool qua execpolicy).
+const (
+	testClaudeModel = "claude-opus-5-5"
+	testCodexModel  = "gpt-6.1-sol"
+)
+
+var testPolicy = func() execpolicy.Policy {
+	p, err := execpolicy.FromEnv(func(k string) string {
+		switch k {
+		case execpolicy.AllowedModelsEnv:
+			return "claude_code:" + testClaudeModel + " codex:" + testCodexModel
+		case execpolicy.DelegationEnv:
+			return "on"
+		}
+		return ""
+	})
+	if err != nil {
+		panic(err)
+	}
+	return p
+}()

@@ -17,6 +17,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/execpolicy"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/shell"
@@ -167,6 +168,10 @@ func blockFuncs() []shell.BlockFunc {
 	return []shell.BlockFunc{
 		shell.CommandsBlocker(bannedCommands),
 
+		// Ranh giới provider (execpolicy): gọi thẳng CLI agent khác (claude,
+		// codex, gemini...) vượt qua tool giao việc (ghim model, hỏi quyền).
+		blockExternalAgents,
+
 		// System package managers
 		shell.ArgumentsBlocker("apk", []string{"add"}, nil),
 		shell.ArgumentsBlocker("apt", []string{"install"}, nil),
@@ -193,6 +198,16 @@ func blockFuncs() []shell.BlockFunc {
 		// `go test -exec` can run arbitrary commands
 		shell.ArgumentsBlocker("go", []string{"test"}, []string{"-exec"}),
 	}
+}
+
+// blockExternalAgents chặn lệnh bash gọi CLI agent bên ngoài; tool giao việc
+// (claude_code, codex) là đường duy nhất, và chỉ có khi execpolicy cho phép.
+func blockExternalAgents(args []string) bool {
+	name, ok := execpolicy.ExternalAgentCommand(args)
+	if ok {
+		slog.Info("Delegation denied", "backend", name, "code", execpolicy.CodeExternalAgentNotAllowed, "path", "bash")
+	}
+	return ok
 }
 
 func NewBashTool(permissions permission.Service, workingDir, spillDir string, attribution *config.Attribution, modelID string) fantasy.AgentTool {

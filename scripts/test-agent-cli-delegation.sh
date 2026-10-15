@@ -122,7 +122,10 @@ JSON
     CRUSH_DISABLE_METRICS=1 CRUSH_DISABLE_PROVIDER_AUTO_UPDATE=1 CRUSH_DISABLE_UPDATE_CHECK=1 CRUSH_CLIENT_SERVER=$cs
     AGENT_CLI_CODEX_BIN="$codex_bin"
     AGENT_CLI_CLAUDE_PERMISSION_MODE="${AGENT_CLI_CLAUDE_PERMISSION_MODE:-acceptEdits}"
-    AGENT_CLI_CODEX_SANDBOX="${AGENT_CLI_CODEX_SANDBOX:-workspace-write}")
+    AGENT_CLI_CODEX_SANDBOX="${AGENT_CLI_CODEX_SANDBOX:-workspace-write}"
+    # Giao việc mặc định tắt (execpolicy): bật cho lượt kiểm, model cụ thể.
+    AGENT_CLI_DELEGATION=on
+    AGENT_CLI_ALLOWED_MODELS="${AGENT_CLI_ALLOWED_MODELS:-claude_code:claude-haiku-5-5 codex:gpt-6.1-sol}")
   # run <tên> <prompt> [VAR=giá trị...]. Chế độ server: server giữ môi trường của
   # client đã dựng nó, nên ca đổi biến phải dùng server riêng (SOCK=<tên>).
   run() {

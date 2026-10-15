@@ -93,8 +93,13 @@ func (s claudeStrategy) permissionArgs() []string {
 // args assembles the headless invocation. The permission prompt of the
 // tool call is the gate: the user approves each delegation, so the nested
 // agent runs without prompts it could not ask anyone to answer.
-func (s claudeStrategy) args(prompt, resume string) []string {
+func (s claudeStrategy) args(prompt, resume, model string) []string {
 	args := append([]string{"-p", "--output-format", "json"}, s.permissionArgs()...)
+	if model != "" {
+		// ID cụ thể, một token: CLI không tự chọn model mặc định (vd Fable)
+		// và không có --fallback-model nào đổi sang model khác.
+		args = append(args, "--model="+model)
+	}
 	if resume != "" {
 		// Một token "--resume=<id>": id không thể bị tách thành cờ riêng.
 		args = append(args, "--resume="+resume)
@@ -126,6 +131,7 @@ func (claudeStrategy) parse(stdout []byte) (delegationOutput, error) {
 
 // NewClaudeCodeTool delegates a self-contained task to Claude Code running
 // headlessly in the working directory, after the user approves the call.
-func NewClaudeCodeTool(workingDir string, perms permissionRequester) fantasy.AgentTool {
-	return newDelegationTool(workingDir, perms, newClaudeStrategy())
+// models là các model được phép (đầu tiên là mặc định).
+func NewClaudeCodeTool(workingDir string, perms permissionRequester, models ...string) fantasy.AgentTool {
+	return newDelegationTool(workingDir, perms, newClaudeStrategy(), models)
 }

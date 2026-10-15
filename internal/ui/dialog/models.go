@@ -13,7 +13,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/execpolicy"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/ui/util"
 	uv "github.com/charmbracelet/ultraviolet"
 )
@@ -563,6 +565,15 @@ func (m *Models) setProviderItems() error {
 		}
 	}
 
+	// Ranh giới model (AGENT_CLI_ALLOWED_MODELS, execpolicy): chỉ hiện model
+	// được phép; chọn model khác thì coordinator cũng từ chối.
+	if pol, err := execpolicy.Current(); err == nil && pol.Restricted() {
+		groups = allowedModelGroups(t, groups, pol)
+		if selectedItemID != "" && !modelGroupsContain(groups, selectedItemID) {
+			selectedItemID = ""
+		}
+	}
+
 	// Set model groups in the list.
 	m.list.SetGroups(groups...)
 	if selectedItemID != "" {
@@ -582,6 +593,35 @@ func (m *Models) setProviderItems() error {
 	}
 
 	return nil
+}
+
+// allowedModelGroups bỏ model không được chính sách cho phép, và nhóm rỗng.
+func allowedModelGroups(t *styles.Styles, groups []ModelGroup, pol execpolicy.Policy) []ModelGroup {
+	out := make([]ModelGroup, 0, len(groups))
+	for _, g := range groups {
+		kept := NewModelGroup(t, g.Title, g.configured)
+		for _, item := range g.Items {
+			if pol.AllowsModel(string(item.prov.ID), item.model.ID) {
+				kept.AppendItems(item)
+			}
+		}
+		if len(kept.Items) > 0 {
+			out = append(out, kept)
+		}
+	}
+	return out
+}
+
+// modelGroupsContain cho biết có dòng mang id trong các nhóm.
+func modelGroupsContain(groups []ModelGroup, id string) bool {
+	for _, g := range groups {
+		for _, item := range g.Items {
+			if item.ID() == id {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func modelKey(providerID, modelID string) string {

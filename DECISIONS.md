@@ -159,3 +159,10 @@ Nạp tự động vào mọi phiên Claude. Mục đích: không bàn lại cá
 - **Đã thử và bỏ:** bấm Ctrl+K lần hai để xác nhận: giữ phím sẽ tự lặp thành xác nhận; chỉ báo "N jobs running" trên sidebar: cần poll liên tục và đổi bố cục.
 - **Lật lại khi:** cần chỉ báo job ngoài hộp thoại (thêm vào Activity của sidebar ở Phase 2).
 
+## 2026-10-15 — Ranh giới provider/model: allowlist, giao việc mặc định tắt
+**Trạng thái:** đã làm
+- **Chốt:** `internal/execpolicy` là ranh giới duy nhất, đọc từ env đã export rồi tệp env của agent-cli (chỉ hai khoá, không qua cấu hình dự án). `AGENT_CLI_ALLOWED_MODELS` (provider:model) giới hạn model chính/nhỏ khi có provider chính trong danh sách; `AGENT_CLI_DELEGATION=on` mới đăng ký `claude_code`/`codex`, chỉ với model cụ thể của chúng trong danh sách, luôn truyền `--model`/`-c model=`. Điểm chặn: `buildAgentModels` (mọi lượt, sub-agent, tiêu đề), `provider.NewTools` + lúc gọi tool (trước khi hỏi quyền), hộp thoại Alt+M, tool bash (chặn gọi thẳng CLI agent).
+- **Vì:** người dùng 15/10: session GLM/Qwen tự giao việc sang Claude Code vì CLI có trên máy ("discovered = executable"), và CLI con chạy model mặc định của nó (có thể là Fable). Cài/đăng nhập/có key không phải là cho phép.
+- **Đã thử và bỏ:** chỉ đọc env của tiến trình: tệp env chỉ được crushrc `source` trong trình thông dịch riêng nên biến không tới Go; đưa qua crushrc thành `options.allowed_models`/`options.delegation`: cấu hình của dự án gộp vào nên repo lạ tự bật được giao việc; denylist (fable, astra): model mới lọt qua; nhận alias (opus, latest): CLI tự đổi sang model mới nhất.
+- **Lật lại khi:** Claude/Codex thành agent chính trực tiếp (Phase 2): khi đó provider của session là claude_code/codex và ranh giới theo provider của session.
+

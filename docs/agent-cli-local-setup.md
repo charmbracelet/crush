@@ -492,7 +492,41 @@ agent-cli jobs kill 01A       # dừng job đang chạy; job đã xong thì khô
 ## Giao việc cho Claude Code / Codex: tool `claude_code`, `codex`
 
 Model chính có thể giao một việc trọn vẹn cho Claude Code hoặc Codex đã đăng nhập sẵn
-trên máy (dùng gói thuê bao của bạn, không cần API key). Cách hoạt động:
+trên máy (dùng gói thuê bao của bạn, không cần API key). Đây là giao việc **sang provider khác**,
+nên mặc định TẮT: cài CLI, đăng nhập hay có key đều không mở được.
+
+### Ranh giới provider/model
+
+Hai biến trong `~/.config/agent-cli/env` (hoặc tệp ở `AGENT_CLI_ENV_FILE`); agent-cli đọc thẳng đúng
+hai dòng này, bỏ qua các dòng khác. Export ở shell cũng được và thắng giá trị trong tệp. Cố ý không
+đọc từ cấu hình của dự án (`crush.json`, crushrc trong repo): một repo lạ không nới được ranh giới.
+
+```bash
+AGENT_CLI_ALLOWED_MODELS="zai:glm-5.3 zai:glm-5.3-flash main:qwen3.8 claude_code:claude-opus-5-5 claude_code:claude-sonnet-5-5 claude_code:claude-haiku-5-5 codex:gpt-6.1-sol"
+AGENT_CLI_DELEGATION=on   # bỏ dòng này (hoặc off) = không giao việc
+```
+
+- Danh sách có provider chính (`zai`, `main`...) thì model chính và model nhỏ chỉ được là các cặp
+  đó: Alt+M chỉ hiện chúng, cấu hình trỏ tới model khác thì dừng lúc khởi động với
+  `MODEL_NOT_ALLOWED` kèm danh sách được phép. Model mới provider vừa thêm bị chặn cho tới khi bạn
+  thêm vào (allowlist, không có denylist). Sub-agent, đặt tiêu đề và tóm tắt dùng cùng model nên
+  cùng ranh giới. Không đặt danh sách thì model chính không giới hạn như trước.
+- Tool `claude_code` / `codex` chỉ có khi `AGENT_CLI_DELEGATION=on` VÀ backend có ít nhất một
+  model `claude_code:<id>` / `codex:<id>` trong danh sách. Model phải là ID cụ thể: alias như
+  `opus`, `latest`, `fable` bị từ chối vì CLI tự đổi chúng sang model mới nhất. Tool luôn truyền
+  model (`claude --model=<id>`, `codex -c model="<id>"`), không để CLI tự chọn mặc định (vd Fable)
+  và không có model dự phòng; model chính chỉ chọn được trong danh sách (mặc định là model đầu),
+  model khác bị từ chối trước khi hỏi quyền, CLI không chạy.
+- Tool bash chặn gọi thẳng CLI agent khác (`claude`, `codex`, `gemini`, `qwen`, `opencode`,
+  `aider`, `cursor-agent`, `amp`, `goose`, `kiro`; cả qua đường dẫn, `env`/`nohup`/`timeout`/`sudo`,
+  hay `npx`/`bunx` với gói của chúng): báo `command is not allowed`. Đây là lớp thứ hai; lệnh lồng
+  như `bash -c "..."` không bị nhận ra nhưng vẫn phải qua hộp thoại xin quyền của bash.
+- Tên model thật lấy từ CLI trên máy: Claude Code nhận ID như `claude-opus-5-5`; danh sách model
+  của Codex ở `~/.codex/models_cache.json` (15/10 có `gpt-6.1-sol`, `gpt-6-luna`, `gpt-5.6-luna`,
+  `gpt-6-astra`..., không có `gpt-6.1-luna`).
+- Đổi biến xong phải để server của dự án khởi động lại (như mọi giá trị trong env).
+
+### Cách hoạt động khi đã bật
 
 - Tool chỉ có mặt khi tìm thấy CLI (`claude`, `codex` trong `PATH`, hoặc đường dẫn ở
   `AGENT_CLI_CLAUDE_BIN` / `AGENT_CLI_CODEX_BIN`) và không bị `permissions deny`. Không có CLI
@@ -500,7 +534,7 @@ trên máy (dùng gói thuê bao của bạn, không cần API key). Cách hoạ
   hay `AGENT_CLI_CLAUDE_PERMISSION_MODE` / `AGENT_CLI_CODEX_SANDBOX` gõ sai giá trị (tool không bị
   deny), thì mọi prompt báo lỗi nêu đúng tên biến và các giá trị hợp lệ cho tới khi sửa và khởi
   động lại server.
-- Mỗi lần giao đều hỏi quyền, hộp thoại hiện nguyên văn việc giao, thư mục và mức quyền (bằng lời,
+- Mỗi lần giao đều hỏi quyền, hộp thoại hiện nguyên văn việc giao, model, thư mục và mức quyền (bằng lời,
   ví dụ "FULL ACCESS: runs any command…", kèm cờ thật). Ký tự điều khiển và ký tự đảo chiều trong
   prompt được thay bằng `�` để hộp thoại không hiện khác việc sẽ chạy.
   Ngoại lệ, đều do bạn chủ động bật: "Allow for Session" (mọi lần giao sau của CLI đó trong

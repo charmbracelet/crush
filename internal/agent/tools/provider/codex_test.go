@@ -13,7 +13,7 @@ import (
 func TestBuildCodexArgs(t *testing.T) {
 	t.Parallel()
 
-	args := (codexStrategy{}).args("fix the login bug", "")
+	args := (codexStrategy{}).args("fix the login bug", "", "")
 	require.Equal(t, []string{
 		"exec",
 		"--json",
@@ -25,7 +25,7 @@ func TestBuildCodexArgs(t *testing.T) {
 
 	// "exec resume" không có -s: sandbox phải đi qua -c (đã thử với
 	// codex-cli 0.159.2), id và prompt là hai tham số vị trí sau "--".
-	args = (codexStrategy{}).args("now add tests", "thread-9")
+	args = (codexStrategy{}).args("now add tests", "thread-9", "")
 	require.Equal(t, []string{
 		"exec",
 		"resume",
@@ -133,7 +133,7 @@ JSONL
 	t.Cleanup(func() { codexCommand = "codex" })
 	codexCommand = script
 
-	tool := NewCodexTool(dir, &fakePermissions{allow: true})
+	tool := NewCodexTool(dir, &fakePermissions{allow: true}, testCodexModel)
 	resp, err := tool.Run(sessionCtx(t), fantasy.ToolCall{
 		ID:    "call-1",
 		Name:  CodexToolName,
@@ -161,7 +161,7 @@ func TestCodexToolMissingBinary(t *testing.T) {
 	t.Cleanup(func() { codexCommand = "codex" })
 	codexCommand = "codex-does-not-exist-anywhere"
 
-	tool := NewCodexTool(t.TempDir(), &fakePermissions{allow: true})
+	tool := NewCodexTool(t.TempDir(), &fakePermissions{allow: true}, testCodexModel)
 	_, err := tool.Run(sessionCtx(t), fantasy.ToolCall{
 		ID:    "call-2",
 		Name:  CodexToolName,
@@ -190,7 +190,7 @@ exit 1
 	t.Cleanup(func() { codexCommand = "codex" })
 	codexCommand = script
 
-	tool := NewCodexTool(dir, &fakePermissions{allow: true})
+	tool := NewCodexTool(dir, &fakePermissions{allow: true}, testCodexModel)
 	_, err := tool.Run(sessionCtx(t), fantasy.ToolCall{
 		ID:    "call-4",
 		Name:  CodexToolName,

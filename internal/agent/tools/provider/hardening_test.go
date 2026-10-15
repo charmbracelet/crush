@@ -24,18 +24,18 @@ func TestNewToolsRejectsInvalidAccessModes(t *testing.T) {
 	t.Setenv(codexBinEnv, codex)
 
 	t.Setenv(claudeModeEnv, "acceptEdit")
-	_, err := NewTools(dir, &fakePermissions{}, []string{ClaudeCodeToolName})
+	_, err := NewTools(dir, &fakePermissions{}, []string{ClaudeCodeToolName}, testPolicy)
 	require.ErrorContains(t, err, claudeModeEnv)
-	_, err = NewTools(dir, &fakePermissions{}, []string{CodexToolName})
+	_, err = NewTools(dir, &fakePermissions{}, []string{CodexToolName}, testPolicy)
 	require.NoError(t, err, "a disabled tool's settings are not checked")
 
 	t.Setenv(claudeModeEnv, "acceptEdits")
 	t.Setenv(codexSandboxEnv, "workspace")
-	_, err = NewTools(dir, &fakePermissions{}, []string{ClaudeCodeToolName, CodexToolName})
+	_, err = NewTools(dir, &fakePermissions{}, []string{ClaudeCodeToolName, CodexToolName}, testPolicy)
 	require.ErrorContains(t, err, codexSandboxEnv)
 
 	t.Setenv(codexSandboxEnv, "read-only")
-	tools, err := NewTools(dir, &fakePermissions{}, []string{ClaudeCodeToolName, CodexToolName})
+	tools, err := NewTools(dir, &fakePermissions{}, []string{ClaudeCodeToolName, CodexToolName}, testPolicy)
 	require.NoError(t, err)
 	require.Len(t, tools, 2)
 }

@@ -30,6 +30,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/discover"
 	"github.com/charmbracelet/crush/internal/event"
+	"github.com/charmbracelet/crush/internal/execpolicy"
 	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/hooks"
@@ -916,7 +917,11 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 
 	// Tool uỷ quyền cho Claude Code/Codex chỉ có mặt khi agent được phép dùng
 	// và máy có CLI đó; biến AGENT_CLI_*_BIN trỏ sai thì dựng agent lỗi.
-	delegationTools, err := provider.NewTools(c.cfg.WorkingDir(), c.permissions, agent.AllowedTools)
+	pol, err := c.execPolicy()
+	if err != nil {
+		return nil, err
+	}
+	delegationTools, err := provider.NewTools(c.cfg.WorkingDir(), c.permissions, agent.AllowedTools, pol)
 	if err != nil {
 		return nil, err
 	}
@@ -995,6 +1000,25 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 }
 
 // TODO: when we support multiple agents we need to change this so that we pass in the agent specific model config
+// execPolicy là ranh giới provider/model (env của người dùng, không theo
+// cấu hình dự án).
+func (c *coordinator) execPolicy() (execpolicy.Policy, error) {
+	return execpolicy.Current()
+}
+
+// checkModelPolicy chặn model chính (large/small) không có trong
+// AGENT_CLI_ALLOWED_MODELS trước khi dựng provider: lượt chính, sub-agent,
+// đặt tiêu đề và tóm tắt đều dựng model qua buildAgentModels.
+func checkModelPolicy(pol execpolicy.Policy, models ...config.SelectedModel) error {
+	for _, m := range models {
+		if err := pol.CheckModel(m.Provider, m.Model); err != nil {
+			slog.Warn("Model denied by policy", "provider", m.Provider, "model", m.Model)
+			return err
+		}
+	}
+	return nil
+}
+
 func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Model, Model, error) {
 	largeModelCfg, ok := c.cfg.Config().Models[config.SelectedModelTypeLarge]
 	if !ok {
@@ -1003,6 +1027,13 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 	smallModelCfg, ok := c.cfg.Config().Models[config.SelectedModelTypeSmall]
 	if !ok {
 		return Model{}, Model{}, errSmallModelNotSelected
+	}
+	pol, err := c.execPolicy()
+	if err != nil {
+		return Model{}, Model{}, err
+	}
+	if err := checkModelPolicy(pol, largeModelCfg, smallModelCfg); err != nil {
+		return Model{}, Model{}, err
 	}
 
 	largeProviderCfg, ok := c.cfg.Config().Providers.Get(largeModelCfg.Provider)

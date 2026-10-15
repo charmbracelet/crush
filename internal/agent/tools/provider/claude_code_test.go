@@ -13,7 +13,7 @@ import (
 func TestBuildClaudeCodeArgs(t *testing.T) {
 	t.Parallel()
 
-	args := (claudeStrategy{}).args("fix the login bug", "")
+	args := (claudeStrategy{}).args("fix the login bug", "", "")
 	require.Equal(t, []string{
 		"-p",
 		"--output-format", "json",
@@ -21,7 +21,7 @@ func TestBuildClaudeCodeArgs(t *testing.T) {
 		"--", "fix the login bug",
 	}, args)
 
-	args = (claudeStrategy{}).args("now add tests", "sess-7")
+	args = (claudeStrategy{}).args("now add tests", "sess-7", "")
 	require.Equal(t, []string{
 		"-p",
 		"--output-format", "json",
@@ -31,7 +31,7 @@ func TestBuildClaudeCodeArgs(t *testing.T) {
 	}, args)
 
 	// Mức khác mặc định đi qua --permission-mode.
-	args = (claudeStrategy{mode: "plan"}).args("look around", "")
+	args = (claudeStrategy{mode: "plan"}).args("look around", "", "")
 	require.Equal(t, []string{
 		"-p",
 		"--output-format", "json",
@@ -76,7 +76,7 @@ JSON
 	t.Cleanup(func() { claudeCommand = "claude" })
 	claudeCommand = script
 
-	tool := NewClaudeCodeTool(dir, &fakePermissions{allow: true})
+	tool := NewClaudeCodeTool(dir, &fakePermissions{allow: true}, testClaudeModel)
 	resp, err := tool.Run(sessionCtx(t), fantasy.ToolCall{
 		ID:    "call-1",
 		Name:  ClaudeCodeToolName,
@@ -103,7 +103,7 @@ func TestClaudeCodeToolMissingBinary(t *testing.T) {
 	t.Cleanup(func() { claudeCommand = "claude" })
 	claudeCommand = "claude-does-not-exist-anywhere"
 
-	tool := NewClaudeCodeTool(t.TempDir(), &fakePermissions{allow: true})
+	tool := NewClaudeCodeTool(t.TempDir(), &fakePermissions{allow: true}, testClaudeModel)
 	_, err := tool.Run(sessionCtx(t), fantasy.ToolCall{
 		ID:    "call-2",
 		Name:  ClaudeCodeToolName,
@@ -128,7 +128,7 @@ JSON
 	t.Cleanup(func() { claudeCommand = "claude" })
 	claudeCommand = script
 
-	tool := NewClaudeCodeTool(dir, &fakePermissions{allow: true})
+	tool := NewClaudeCodeTool(dir, &fakePermissions{allow: true}, testClaudeModel)
 	_, err := tool.Run(sessionCtx(t), fantasy.ToolCall{
 		ID:    "call-3",
 		Name:  ClaudeCodeToolName,
@@ -156,7 +156,7 @@ exit 1
 	t.Cleanup(func() { claudeCommand = "claude" })
 	claudeCommand = successScript
 
-	tool := NewClaudeCodeTool(dir, &fakePermissions{allow: true})
+	tool := NewClaudeCodeTool(dir, &fakePermissions{allow: true}, testClaudeModel)
 	resp, err := tool.Run(sessionCtx(t), fantasy.ToolCall{
 		ID:    "call-5",
 		Name:  ClaudeCodeToolName,
@@ -189,8 +189,8 @@ func TestDelegationRequiresPrompt(t *testing.T) {
 	// The shared runner rejects an empty prompt identically for every
 	// provider strategy.
 	for _, tool := range []fantasy.AgentTool{
-		NewClaudeCodeTool(t.TempDir(), &fakePermissions{allow: true}),
-		NewCodexTool(t.TempDir(), &fakePermissions{allow: true}),
+		NewClaudeCodeTool(t.TempDir(), &fakePermissions{allow: true}, testClaudeModel),
+		NewCodexTool(t.TempDir(), &fakePermissions{allow: true}, testCodexModel),
 	} {
 		_, err := tool.Run(sessionCtx(t), fantasy.ToolCall{
 			ID:    "call-empty",

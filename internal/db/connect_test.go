@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -207,4 +208,70 @@ func TestConnect_ServerPathFailsWhenDataDirLocked(t *testing.T) {
 	_, err = Connect(context.Background(), dataDir, WithDataDirLock(true))
 	require.Error(t, err, "server-path Connect must refuse to open a locked data dir")
 	require.ErrorIs(t, err, ErrDataDirLocked)
+}
+
+// secureDeleteMode reports the connection's secure_delete pragma value.
+func secureDeleteMode(t *testing.T, conn interface {
+	QueryRow(string, ...any) *sql.Row
+},
+) int {
+	t.Helper()
+
+	var mode int
+	require.NoError(t, conn.QueryRow("PRAGMA secure_delete;").Scan(&mode))
+	return mode
+}
+
+// TestConnect_SecureDeleteOffByDefault confirms the SQLite default
+// (off) is used unless the user opts in, so deleted content is not
+// zeroed on every UPDATE/DELETE.
+func TestConnect_SecureDeleteOffByDefault(t *testing.T) {
+	t.Cleanup(ResetPool)
+
+	dataDir := t.TempDir()
+	conn, err := Connect(context.Background(), dataDir)
+	require.NoError(t, err)
+
+	require.Zero(t, secureDeleteMode(t, conn), "secure_delete should default to off")
+
+	require.NoError(t, Release(dataDir))
+}
+
+// TestConnect_SecureDeleteOptIn confirms CRUSH_SECURE_DELETE enables
+// the pragma for users who want deleted content scrubbed.
+func TestConnect_SecureDeleteOptIn(t *testing.T) {
+	t.Cleanup(ResetPool)
+	t.Setenv("CRUSH_SECURE_DELETE", "1")
+
+	dataDir := t.TempDir()
+	conn, err := Connect(context.Background(), dataDir)
+	require.NoError(t, err)
+
+	require.Equal(t, 1, secureDeleteMode(t, conn), "secure_delete should be on when opted in")
+
+	require.NoError(t, Release(dataDir))
+}
+
+// TestSecureDeleteEnabled covers how the CRUSH_SECURE_DELETE env var is
+// parsed: only truthy values opt in, anything else falls back to the
+// SQLite default.
+func TestSecureDeleteEnabled(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  bool
+	}{
+		{name: "unset", value: "", want: false},
+		{name: "zero", value: "0", want: false},
+		{name: "garbage", value: "banana", want: false},
+		{name: "one", value: "1", want: true},
+		{name: "true", value: "true", want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("CRUSH_SECURE_DELETE", tt.value)
+			require.Equal(t, tt.want, secureDeleteEnabled())
+		})
+	}
 }

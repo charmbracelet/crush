@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"charm.land/fantasy"
+	"charm.land/fantasy/providers/google"
 	"github.com/stretchr/testify/require"
 )
 
@@ -114,6 +115,86 @@ func TestToAIMessage_ASCIIButInvalidBase64(t *testing.T) {
 	textContent, ok := part.Output.(fantasy.ToolResultOutputContentText)
 	require.True(t, ok, "ASCII but invalid base64 should be downgraded to text")
 	require.Equal(t, mediaLoadFailedPlaceholder, textContent.Text)
+}
+
+// TestToAIMessage_GoogleThoughtSignaturesPerToolCall verifies that each tool
+// call's Google thought signature is replayed in its own ReasoningPart placed
+// immediately before that tool call, never concatenated. Concatenation or
+// misplacement is what triggers Gemini's "Corrupted thought signature" error.
+func TestToAIMessage_GoogleThoughtSignaturesPerToolCall(t *testing.T) {
+	t.Parallel()
+
+	msg := &Message{
+		Role: Assistant,
+		Parts: []ContentPart{
+			ReasoningContent{Thinking: "let me think", FinishedAt: 1},
+			ToolCall{ID: "call_1", Name: "view", Input: "{}", Finished: true, ThoughtSignature: "SIG1"},
+			ToolCall{ID: "call_2", Name: "ls", Input: "{}", Finished: true, ThoughtSignature: "SIG2"},
+		},
+	}
+
+	messages := msg.ToAIMessage()
+	require.Len(t, messages, 1)
+	content := messages[0].Content
+	// reasoning(thinking), reasoning(SIG1), toolcall_1, reasoning(SIG2), toolcall_2
+	require.Len(t, content, 5)
+
+	// [0] thinking reasoning, no google signature attached.
+	r0, ok := content[0].(fantasy.ReasoningPart)
+	require.True(t, ok)
+	require.Equal(t, "let me think", r0.Text)
+	require.Nil(t, r0.ProviderOptions[google.Name])
+
+	assertGoogleSig := func(i int, sig, toolID string) {
+		t.Helper()
+		rp, ok := content[i].(fantasy.ReasoningPart)
+		require.True(t, ok, "part %d must be a ReasoningPart", i)
+		meta, ok := rp.ProviderOptions[google.Name].(*google.ReasoningMetadata)
+		require.True(t, ok, "part %d must carry google ReasoningMetadata", i)
+		require.Equal(t, sig, meta.Signature)
+		require.Equal(t, toolID, meta.ToolID)
+	}
+
+	assertGoogleSig(1, "SIG1", "call_1")
+	tc1, ok := content[2].(fantasy.ToolCallPart)
+	require.True(t, ok)
+	require.Equal(t, "call_1", tc1.ToolCallID)
+
+	assertGoogleSig(3, "SIG2", "call_2")
+	tc2, ok := content[4].(fantasy.ToolCallPart)
+	require.True(t, ok)
+	require.Equal(t, "call_2", tc2.ToolCallID)
+}
+
+// TestToAIMessage_GoogleTextAnswerSignature verifies the final-answer thought
+// signature (no tool ID) is replayed on a ReasoningPart immediately before the
+// text part.
+func TestToAIMessage_GoogleTextAnswerSignature(t *testing.T) {
+	t.Parallel()
+
+	msg := &Message{
+		Role: Assistant,
+		Parts: []ContentPart{
+			ReasoningContent{ThoughtSignature: "TEXTSIG", FinishedAt: 1},
+			TextContent{Text: "final answer"},
+		},
+	}
+
+	messages := msg.ToAIMessage()
+	require.Len(t, messages, 1)
+	content := messages[0].Content
+	require.Len(t, content, 2)
+
+	rp, ok := content[0].(fantasy.ReasoningPart)
+	require.True(t, ok)
+	meta, ok := rp.ProviderOptions[google.Name].(*google.ReasoningMetadata)
+	require.True(t, ok)
+	require.Equal(t, "TEXTSIG", meta.Signature)
+	require.Empty(t, meta.ToolID)
+
+	tp, ok := content[1].(fantasy.TextPart)
+	require.True(t, ok)
+	require.Equal(t, "final answer", tp.Text)
 }
 
 func BenchmarkPromptWithTextAttachments(b *testing.B) {

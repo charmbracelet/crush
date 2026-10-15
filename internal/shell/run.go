@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/charmbracelet/crush/internal/sshaskpass"
 	"mvdan.cc/sh/v3/expand"
 	"mvdan.cc/sh/v3/interp"
 	"mvdan.cc/sh/v3/syntax"
@@ -231,19 +232,26 @@ var nonInteractiveEnvVars = []string{
 }
 
 // withNonInteractiveEnv returns env with nonInteractiveEnvVars forced in,
-// replacing any existing values for those keys. The returned slice is a
-// new allocation safe to use concurrently with the input.
+// replacing any existing values for those keys. The integrated ssh
+// askpass vars are also replaced so stale values from a parent process
+// never leak through. The returned slice is a new allocation safe to
+// use concurrently with the input.
 func withNonInteractiveEnv(env []string) []string {
 	// Build a set of override keys for fast lookup.
-	overrideKeys := make(map[string]bool, len(nonInteractiveEnvVars))
+	overrideKeys := make(map[string]bool, len(nonInteractiveEnvVars)+4)
 	for _, kv := range nonInteractiveEnvVars {
+		if key, _, ok := strings.Cut(kv, "="); ok {
+			overrideKeys[key] = true
+		}
+	}
+	for _, kv := range sshaskpass.AskpassEnv() {
 		if key, _, ok := strings.Cut(kv, "="); ok {
 			overrideKeys[key] = true
 		}
 	}
 
 	// Copy env, filtering out any keys we will override.
-	result := make([]string, 0, len(env)+len(nonInteractiveEnvVars))
+	result := make([]string, 0, len(env)+len(nonInteractiveEnvVars)+4)
 	for _, e := range env {
 		if key, _, ok := strings.Cut(e, "="); ok && overrideKeys[key] {
 			continue
@@ -251,7 +259,9 @@ func withNonInteractiveEnv(env []string) []string {
 		result = append(result, e)
 	}
 
-	return append(result, nonInteractiveEnvVars...)
+	result = append(result, nonInteractiveEnvVars...)
+	result = append(result, sshaskpass.AskpassEnv()...)
+	return result
 }
 
 // herdrEnvVars are the environment variables herdr injects into panes

@@ -30,6 +30,8 @@ const (
 	PayloadTypeUpdateAvailable        PayloadType = "update_available"
 	PayloadTypeQuestionRequest        PayloadType = "question_batch_request"
 	PayloadTypeQuestionNotification   PayloadType = "question_batch_notification"
+	PayloadTypeSSHPromptRequest       PayloadType = "ssh_prompt_request"
+	PayloadTypeSSHNotification        PayloadType = "ssh_prompt_notification"
 )
 
 // Payload wraps a discriminated JSON payload with a type tag.

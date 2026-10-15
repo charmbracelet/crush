@@ -11,6 +11,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/lsp"
+	"github.com/charmbracelet/crush/internal/lsp/util"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 )
 
@@ -77,7 +78,7 @@ func formatDefinitions(locations []protocol.Location) (string, *DefinitionRespon
 	var firstMeta *DefinitionResponseMetadata
 
 	for _, loc := range locations {
-		path, err := loc.URI.Path()
+		path, err := util.PathFromURI(loc.URI)
 		if err != nil {
 			slog.Error("Failed to convert URI to path", "uri", loc.URI, "error", err)
 			continue

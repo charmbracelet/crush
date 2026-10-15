@@ -214,6 +214,34 @@ func (m *UI) jumpToSession(n int) tea.Cmd {
 	return m.loadSession(shown[n-1].ID)
 }
 
+// cycleSession mở session kế (step=1) hoặc trước (step=-1) theo thứ tự của
+// bảng Sessions, vòng lại ở hai đầu (Alt+. / Alt+,). Dùng danh sách đã nạp
+// sẵn nên không làm IO trong Update.
+func (m *UI) cycleSession(step int) tea.Cmd {
+	id := nextSessionID(m.sessionList, m.currentSessionID(), step)
+	if id == "" {
+		return nil
+	}
+	return m.loadSession(id)
+}
+
+// nextSessionID trả về ID của session cách currentID một bước step trong
+// list, vòng lại ở hai đầu. Session hiện tại chưa nằm trong list (chưa lưu)
+// thì bắt đầu từ đầu hoặc cuối list; không có nơi để đi thì trả "".
+func nextSessionID(list []session.Session, currentID string, step int) string {
+	n := len(list)
+	i := slices.IndexFunc(list, func(s session.Session) bool { return s.ID == currentID })
+	switch {
+	case n == 0, i >= 0 && n == 1:
+		return ""
+	case i < 0 && step > 0:
+		return list[0].ID
+	case i < 0:
+		return list[n-1].ID
+	}
+	return list[((i+step)%n+n)%n].ID
+}
+
 // panelSessionsOf returns the first sessionsPanelMax sessions, plus the
 // viewed one as an extra pinned entry when it falls outside them.
 func panelSessionsOf(list []session.Session, currentID string) []session.Session {

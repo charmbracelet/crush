@@ -35,7 +35,6 @@ func TestPermissions_ActionKeysResolve(t *testing.T) {
 		{keyMsg('A'), PermissionAllow},
 		{keyMsg('d'), PermissionDeny},
 		{keyMsg('D'), PermissionDeny},
-		{keyMsg('s'), PermissionAllowForSession},
 		{keyMsg('S'), PermissionAllowForSession},
 	}
 
@@ -54,22 +53,51 @@ func TestPermissions_NavigationCyclesOptions(t *testing.T) {
 	t.Parallel()
 
 	p := newTestPermissions(t)
-	require.Equal(t, 0, p.selectedOption)
+	require.Equal(t, optionDeny, p.selectedOption, "a fresh dialog starts on Deny")
 
-	// Tab cycles forward.
-	p.HandleMsg(tea.KeyPressMsg{Code: tea.KeyTab})
-	require.Equal(t, 1, p.selectedOption)
+	// Right cycles forward, wrapping from Deny to Allow.
+	p.HandleMsg(tea.KeyPressMsg{Code: tea.KeyRight})
+	require.Equal(t, optionAllow, p.selectedOption)
 
-	p.HandleMsg(tea.KeyPressMsg{Code: tea.KeyTab})
-	require.Equal(t, 2, p.selectedOption)
+	p.HandleMsg(tea.KeyPressMsg{Code: tea.KeyRight})
+	require.Equal(t, optionAllowSession, p.selectedOption)
 
-	// Wrap around.
-	p.HandleMsg(tea.KeyPressMsg{Code: tea.KeyTab})
-	require.Equal(t, 0, p.selectedOption)
+	p.HandleMsg(tea.KeyPressMsg{Code: tea.KeyRight})
+	require.Equal(t, optionDeny, p.selectedOption)
 
 	// Left cycles backward.
-	p.HandleMsg(keyMsg('h'))
-	require.Equal(t, 2, p.selectedOption)
+	p.HandleMsg(tea.KeyPressMsg{Code: tea.KeyLeft})
+	require.Equal(t, optionAllowSession, p.selectedOption)
+}
+
+// Hộp thoại có thể bật lên giữa lúc người dùng đang gõ: chữ thường (h, l, s)
+// và Tab không được đẩy lựa chọn sang Allow, nên Enter sau đó vẫn là Deny.
+func TestPermissions_TypingThenEnterDenies(t *testing.T) {
+	t.Parallel()
+
+	typed := func(s string) []tea.KeyPressMsg {
+		var keys []tea.KeyPressMsg
+		for _, r := range s {
+			keys = append(keys, keyMsg(r))
+		}
+		return keys
+	}
+	for name, keys := range map[string][]tea.KeyPressMsg{
+		"git log":     typed("git log"),
+		"fix the bug": typed("fix the bug"),
+		"sss":         typed("sss"),
+		"tab":         {{Code: tea.KeyTab}, {Code: tea.KeyTab}},
+	} {
+		p := newTestPermissions(t)
+		for _, k := range keys {
+			if resp, ok := p.HandleMsg(k).(ActionPermissionResponse); ok {
+				require.Equalf(t, PermissionDeny, resp.Action, "%s: a typed key granted permission", name)
+			}
+		}
+		resp, ok := p.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter}).(ActionPermissionResponse)
+		require.Truef(t, ok, name)
+		require.Equalf(t, PermissionDeny, resp.Action, "%s then enter must deny", name)
+	}
 }
 
 // TestPermissions_EnterConfirmsSelection verifies that enter confirms the

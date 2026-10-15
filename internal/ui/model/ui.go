@@ -657,7 +657,9 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	ui.forceCompactMode = com.Config().Options.TUI.CompactMode
 
 	// set onboarding state defaults
-	ui.onboarding.yesInitializeSelected = true
+	// Mặc định Nope: Yep chạy cả một lượt quét dự án và ghi AGENTS.md, nên
+	// một cú Enter lỡ tay (gõ trước khi màn hình hiện) không được kích hoạt nó.
+	ui.onboarding.yesInitializeSelected = false
 
 	desiredState := uiLanding
 	desiredFocus := uiFocusEditor
@@ -2715,6 +2717,16 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		if cmd := m.handleSelectModel(msg); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.ActionSelectProvider:
+		m.dialog.CloseDialog(dialog.ProvidersID)
+		if cmd := m.openModelsDialogFor(msg.ProviderID); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.ActionOpenProviders:
+		m.dialog.CloseDialog(dialog.ModelsID)
+		if cmd := m.openProvidersDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.ActionSelectReasoningEffort:
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait..."))
@@ -3257,7 +3269,27 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			}
 			return true
 		case key.Matches(msg, m.keyMap.Models):
-			if cmd := m.openModelsDialog(); cmd != nil {
+			if cmd := m.openModelsDialogForCurrentProvider(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			return true
+		case key.Matches(msg, m.keyMap.Providers):
+			if cmd := m.openProvidersDialog(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			return true
+		case key.Matches(msg, m.keyMap.Effort):
+			if cmd := m.openEffortDialog(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			return true
+		case key.Matches(msg, m.keyMap.Chat.NextSession):
+			if cmd := m.cycleSession(1); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			return true
+		case key.Matches(msg, m.keyMap.Chat.PrevSession):
+			if cmd := m.cycleSession(-1); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
 			return true
@@ -4223,11 +4255,13 @@ func (m *UI) FullHelp() [][]key.Binding {
 			commands,
 			k.Workspaces,
 			k.Models,
+			k.Providers,
+			k.Effort,
 			k.Sessions,
 			k.ToggleYolo,
 		)
 		if hasSession {
-			mainBinds = append(mainBinds, k.Chat.NewSession, k.Chat.JumpSession, k.Chat.EndFollow)
+			mainBinds = append(mainBinds, k.Chat.NewSession, k.Chat.NextSession, k.Chat.PrevSession, k.Chat.JumpSession, k.Chat.EndFollow)
 		}
 		if m.canToggleSidebar() {
 			mainBinds = append(mainBinds, k.Chat.ToggleSidebar)
@@ -5897,6 +5931,64 @@ func (m *UI) openQuitDialog() tea.Cmd {
 
 	quitDialog := dialog.NewQuit(m.com)
 	m.dialog.OpenDialog(quitDialog)
+	return nil
+}
+
+// openModelsDialogForCurrentProvider mở bảng model chỉ gồm model của provider
+// đang dùng (alt+m); chưa chọn provider nào thì mở bảng đầy đủ như cũ.
+func (m *UI) openModelsDialogForCurrentProvider() tea.Cmd {
+	cfg := m.com.Config()
+	if cfg == nil || m.state == uiOnboarding {
+		return m.openModelsDialog()
+	}
+	provider := cfg.Models[config.SelectedModelTypeLarge].Provider
+	if provider == "" {
+		return m.openModelsDialog()
+	}
+	return m.openModelsDialogFor(provider)
+}
+
+// openModelsDialogFor mở bảng model của providerID, thay bảng đang mở nếu có.
+func (m *UI) openModelsDialogFor(providerID string) tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.ModelsID) {
+		m.dialog.CloseDialog(dialog.ModelsID)
+	}
+	modelsDialog, err := dialog.NewModelsForProvider(m.com, providerID)
+	if errors.Is(err, dialog.ErrNoProviderModels) {
+		// Không để người dùng đứng trước một bảng rỗng: báo và mở bảng đầy đủ.
+		return tea.Batch(util.ReportWarn(err.Error()+"; showing every provider"), m.openModelsDialog())
+	}
+	if err != nil {
+		return util.ReportError(err)
+	}
+	m.dialog.OpenDialog(modelsDialog)
+	return nil
+}
+
+// openEffortDialog mở hộp thoại chọn mức effort (alt+e) của model đang dùng;
+// model không có các mức thì báo thay vì mở hộp thoại rỗng.
+func (m *UI) openEffortDialog() tea.Cmd {
+	cfg := m.com.Config()
+	if cfg == nil {
+		return nil
+	}
+	if mdl := cfg.GetModelByType(config.SelectedModelTypeLarge); mdl == nil || len(mdl.ReasoningLevels) == 0 {
+		return util.ReportWarn("The current model has no reasoning effort levels")
+	}
+	return m.openDialog(dialog.ReasoningID)
+}
+
+// openProvidersDialog mở hộp thoại chọn provider (alt+p).
+func (m *UI) openProvidersDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.ProvidersID) {
+		m.dialog.BringToFront(dialog.ProvidersID)
+		return nil
+	}
+	providersDialog, err := dialog.NewProviders(m.com)
+	if err != nil {
+		return util.ReportError(err)
+	}
+	m.dialog.OpenDialog(providersDialog)
 	return nil
 }
 

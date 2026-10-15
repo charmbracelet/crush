@@ -917,3 +917,18 @@ func TestAltNumberFollowsOverride(t *testing.T) {
 	runLeaves(m.handleKeyPressMsg(ctrl(3)))
 	require.Equal(t, []string{"s3"}, ws.loaded, "alt is rebound away, ctrl+3 is the third session")
 }
+
+// Alt+. / Alt+, đi vòng qua danh sách session theo đúng thứ tự bảng Sessions,
+// vòng lại ở hai đầu; một session hoặc rỗng thì không đi đâu.
+func TestNextSessionID(t *testing.T) {
+	t.Parallel()
+
+	list := []session.Session{{ID: "a"}, {ID: "b"}, {ID: "c"}}
+	require.Equal(t, "b", nextSessionID(list, "a", 1))
+	require.Equal(t, "a", nextSessionID(list, "c", 1), "wraps forward")
+	require.Equal(t, "c", nextSessionID(list, "a", -1), "wraps backward")
+	require.Equal(t, "a", nextSessionID(list, "missing", 1), "an unsaved session starts from the top")
+	require.Equal(t, "c", nextSessionID(list, "missing", -1))
+	require.Empty(t, nextSessionID(list[:1], "a", 1), "a lone session has nowhere to go")
+	require.Empty(t, nextSessionID(nil, "a", 1))
+}

@@ -591,6 +591,16 @@
           "description": "Ignore all default/embedded providers. When enabled, providers must be fully specified in the config file with base_url, models, and api_key - no merging with defaults occurs",
           "default": false
         },
+        "visible_providers": {
+          "items": {
+            "type": "string",
+            "examples": [
+              "openai"
+            ]
+          },
+          "type": "array",
+          "description": "Providers the provider picker (alt+p) lists, in this order; empty lists the configured ones"
+        },
         "attribution": {
           "$ref": "#/$defs/Attribution",
           "description": "Attribution settings for generated content"

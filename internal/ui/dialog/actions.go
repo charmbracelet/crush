@@ -37,6 +37,15 @@ type ActionSelectSession struct {
 	Session session.Session
 }
 
+// ActionSelectProvider: người dùng chọn provider ở hộp thoại alt+p; UI mở
+// bảng model chỉ gồm model của provider đó.
+type ActionSelectProvider struct {
+	ProviderID string
+}
+
+// ActionOpenProviders đổi sang hộp thoại chọn provider (alt+p trong bảng model).
+type ActionOpenProviders struct{}
+
 // ActionSelectModel is a message indicating a model has been selected.
 type ActionSelectModel struct {
 	Provider       catwalk.Provider

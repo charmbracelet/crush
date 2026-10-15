@@ -97,20 +97,28 @@ type permissionsKeyMap struct {
 	Scroll           key.Binding
 }
 
+// Các nút của hộp thoại theo thứ tự hiển thị.
+const (
+	optionAllow = iota
+	optionAllowSession
+	optionDeny
+	optionCount
+)
+
 func defaultPermissionsKeyMap() permissionsKeyMap {
 	return permissionsKeyMap{
+		// Chỉ phím mũi tên đổi nút đang chọn: hộp thoại có thể bật lên giữa lúc
+		// người dùng đang gõ, và chữ thường (h, l) hay Tab không được lặng lẽ
+		// đẩy lựa chọn từ Deny sang Allow trước một cú Enter.
 		Left: key.NewBinding(
-			key.WithKeys("left", "h"),
+			key.WithKeys("left"),
 			key.WithHelp("←", "previous"),
 		),
 		Right: key.NewBinding(
-			key.WithKeys("right", "l"),
+			key.WithKeys("right"),
 			key.WithHelp("→", "next"),
 		),
-		Tab: key.NewBinding(
-			key.WithKeys("tab"),
-			key.WithHelp("tab", "next option"),
-		),
+		Tab: key.NewBinding(key.WithDisabled()),
 		Select: key.NewBinding(
 			key.WithKeys("enter", "ctrl+y"),
 			key.WithHelp("enter", "confirm"),
@@ -119,9 +127,11 @@ func defaultPermissionsKeyMap() permissionsKeyMap {
 			key.WithKeys("a", "A", "ctrl+a"),
 			key.WithHelp("a", "allow"),
 		),
+		// Cấp quyền cho cả session là quyền rộng nhất: cần Shift+S (đúng chữ S
+		// gạch chân trên nút), chữ s thường gõ dở không được kích hoạt nó.
 		AllowSession: key.NewBinding(
-			key.WithKeys("s", "S", "ctrl+s"),
-			key.WithHelp("s", "allow session"),
+			key.WithKeys("S", "ctrl+s"),
+			key.WithHelp("S", "allow session"),
 		),
 		Deny: key.NewBinding(
 			key.WithKeys("d", "D"),
@@ -197,9 +207,11 @@ func NewPermissions(com *common.Common, perm permission.PermissionRequest, opts 
 	}
 
 	p := &Permissions{
-		com:            com,
-		permission:     perm,
-		selectedOption: 0,
+		com:        com,
+		permission: perm,
+		// Mặc định Deny: hộp thoại bật lên giữa lúc đang gõ, một cú Enter lỡ
+		// tay không được thành cho phép. Muốn cho phép thì bấm a (hoặc chọn rồi Enter).
+		selectedOption: optionDeny,
 		viewport:       vp,
 		help:           h,
 		keyMap:         km,
@@ -244,10 +256,10 @@ func (p *Permissions) HandleMsg(msg tea.Msg) Action {
 			// Escape denies the permission request.
 			return p.respond(PermissionDeny)
 		case key.Matches(msg, p.keyMap.Right), key.Matches(msg, p.keyMap.Tab):
-			p.selectedOption = (p.selectedOption + 1) % 3
+			p.selectedOption = (p.selectedOption + 1) % optionCount
 		case key.Matches(msg, p.keyMap.Left):
 			// Add 2 instead of subtracting 1 to avoid negative modulo.
-			p.selectedOption = (p.selectedOption + 2) % 3
+			p.selectedOption = (p.selectedOption + optionCount - 1) % optionCount
 		case key.Matches(msg, p.keyMap.Select):
 			return p.selectCurrentOption()
 		case key.Matches(msg, p.keyMap.Allow):
@@ -308,9 +320,9 @@ func (p *Permissions) HandleMsg(msg tea.Msg) Action {
 
 func (p *Permissions) selectCurrentOption() tea.Msg {
 	switch p.selectedOption {
-	case 0:
+	case optionAllow:
 		return p.respond(PermissionAllow)
-	case 1:
+	case optionAllowSession:
 		return p.respond(PermissionAllowForSession)
 	default:
 		return p.respond(PermissionDeny)
@@ -767,9 +779,9 @@ func (p *Permissions) renderContentPanel(content string, width int) string {
 
 func (p *Permissions) renderButtons(contentWidth int, fullscreen bool) string {
 	buttons := []common.ButtonOpts{
-		{Text: "Allow", UnderlineIndex: 0, Selected: p.selectedOption == 0},
-		{Text: "Allow for Session", UnderlineIndex: 10, Selected: p.selectedOption == 1},
-		{Text: "Deny", UnderlineIndex: 0, Selected: p.selectedOption == 2},
+		{Text: "Allow", UnderlineIndex: 0, Selected: p.selectedOption == optionAllow},
+		{Text: "Allow for Session", UnderlineIndex: 10, Selected: p.selectedOption == optionAllowSession},
+		{Text: "Deny", UnderlineIndex: 0, Selected: p.selectedOption == optionDeny},
 	}
 
 	content := common.ButtonGroup(p.com.Styles, buttons, "  ")

@@ -2,6 +2,7 @@ package dialog
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -79,15 +80,18 @@ type Models struct {
 
 	modelType ModelType
 	providers []catwalk.Provider
+	// providerID khác rỗng: bảng chỉ hiện model của provider này (alt+m).
+	providerID string
 
 	keyMap struct {
-		Tab      key.Binding
-		UpDown   key.Binding
-		Select   key.Binding
-		Edit     key.Binding
-		Next     key.Binding
-		Previous key.Binding
-		Close    key.Binding
+		Tab       key.Binding
+		UpDown    key.Binding
+		Select    key.Binding
+		Edit      key.Binding
+		Providers key.Binding
+		Next      key.Binding
+		Previous  key.Binding
+		Close     key.Binding
 	}
 	list  *ModelsList
 	input textinput.Model
@@ -96,12 +100,27 @@ type Models struct {
 
 var _ Dialog = (*Models)(nil)
 
+// ErrNoProviderModels: provider được lọc không có model nào (bị xoá khỏi cấu
+// hình, bị tắt, hoặc ID không có trong catalog).
+var ErrNoProviderModels = errors.New("provider has no models")
+
 // NewModels creates a new Models dialog.
 func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
+	return newModels(com, isOnboarding, "")
+}
+
+// NewModelsForProvider tạo bảng model chỉ gồm model của providerID: đổi model
+// trong provider đang dùng không phải lội qua cả catalog.
+func NewModelsForProvider(com *common.Common, providerID string) (*Models, error) {
+	return newModels(com, false, providerID)
+}
+
+func newModels(com *common.Common, isOnboarding bool, providerID string) (*Models, error) {
 	t := com.Styles
 	m := &Models{}
 	m.com = com
 	m.isOnboarding = isOnboarding
+	m.providerID = providerID
 
 	help := help.New()
 	help.Styles = t.DialogHelpStyles()
@@ -133,6 +152,10 @@ func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
 		key.WithKeys("up", "down"),
 		key.WithHelp("↑/↓", "choose"),
 	)
+	m.keyMap.Providers = key.NewBinding(
+		key.WithKeys("alt+p"),
+		key.WithHelp("alt+p", "provider"),
+	)
 	m.keyMap.Next = key.NewBinding(
 		key.WithKeys("down", "ctrl+n"),
 		key.WithHelp("↓", "next item"),
@@ -157,6 +180,9 @@ func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
 	if err := m.setProviderItems(); err != nil {
 		return nil, fmt.Errorf("failed to set provider items: %w", err)
 	}
+	if providerID != "" && m.list.Len() == 0 {
+		return nil, fmt.Errorf("%w: %s", ErrNoProviderModels, providerID)
+	}
 
 	return m, nil
 }
@@ -173,6 +199,8 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 		switch {
 		case key.Matches(msg, m.keyMap.Close):
 			return ActionClose{}
+		case !m.isOnboarding && key.Matches(msg, m.keyMap.Providers):
+			return ActionOpenProviders{}
 		case key.Matches(msg, m.keyMap.Previous):
 			m.list.Focus()
 			if m.list.IsSelectedFirst() {
@@ -274,6 +302,9 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	rc := NewRenderContext(t, width)
 	rc.Title = "Switch Model"
+	if name := m.providerName(); name != "" {
+		rc.Title = "Switch Model · " + name
+	}
 	rc.TitleInfo = m.modelTypeRadioView()
 
 	if m.isOnboarding {
@@ -322,7 +353,7 @@ func (m *Models) ShortHelp() []key.Binding {
 	if m.isSelectedConfigured() {
 		h = append(h, m.keyMap.Edit)
 	}
-	h = append(h, m.keyMap.Close)
+	h = append(h, m.keyMap.Providers, m.keyMap.Close)
 	return h
 }
 
@@ -358,6 +389,9 @@ func (m *Models) setProviderItems() error {
 	var recentItems []config.SelectedModel
 	seenRecent := make(map[string]bool)
 	for _, r := range cfg.RecentModels[selectedType] {
+		if m.providerID != "" && r.Provider != m.providerID {
+			continue
+		}
 		if k := modelKey(r.Provider, r.Model); !seenRecent[k] {
 			seenRecent[k] = true
 			recentItems = append(recentItems, r)
@@ -383,7 +417,7 @@ func (m *Models) setProviderItems() error {
 	itemsMap := make(map[string]*ModelItem)
 	groups := []ModelGroup{}
 	for id, p := range cfg.Providers.Seq2() {
-		if p.Disable {
+		if p.Disable || (m.providerID != "" && id != m.providerID) {
 			continue
 		}
 
@@ -416,7 +450,7 @@ func (m *Models) setProviderItems() error {
 	// Providers already has Hyper at the front of the list.
 	for _, provider := range m.providers {
 		providerID := string(provider.ID)
-		if addedProviders[providerID] {
+		if addedProviders[providerID] || (m.providerID != "" && providerID != m.providerID) {
 			continue
 		}
 
@@ -515,7 +549,9 @@ func (m *Models) setProviderItems() error {
 			}
 		}
 
-		if len(validRecentItems) != len(recentItems) {
+		// Đang lọc theo provider thì danh sách chỉ có một phần: không được coi
+		// model gần đây của provider khác là hỏng mà xoá khỏi cấu hình.
+		if m.providerID == "" && len(validRecentItems) != len(recentItems) {
 			// FIXME: Does this need to be here? Is it mutating the config during a read?
 			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, fmt.Sprintf("recent_models.%s", selectedType), validRecentItems); err != nil {
 				return fmt.Errorf("failed to update recent models: %w", err)
@@ -529,10 +565,14 @@ func (m *Models) setProviderItems() error {
 
 	// Set model groups in the list.
 	m.list.SetGroups(groups...)
-	m.list.SetSelectedItem(selectedItemID)
 	if selectedItemID != "" {
+		m.list.SetSelectedItem(selectedItemID)
 		m.list.ScrollToSelected()
 	} else {
+		// Model hiện tại không có trong danh sách (vd Tab sang loại model mà
+		// provider khác provider đang lọc): chọn lại từ đầu, không giữ chỉ số
+		// cũ trỏ vào một dòng bất kỳ như thể đó là model đang dùng.
+		m.list.SelectFirst()
 		m.list.ScrollToTop()
 	}
 
@@ -549,4 +589,20 @@ func modelKey(providerID, modelID string) string {
 		return ""
 	}
 	return providerID + ":" + modelID
+}
+
+// providerName là tên hiển thị của provider đang lọc ("" khi không lọc).
+func (m *Models) providerName() string {
+	if m.providerID == "" {
+		return ""
+	}
+	if pc, ok := m.com.Config().Providers.Get(m.providerID); ok && pc.Name != "" {
+		return pc.Name
+	}
+	for _, p := range m.providers {
+		if string(p.ID) == m.providerID && p.Name != "" {
+			return p.Name
+		}
+	}
+	return m.providerID
 }

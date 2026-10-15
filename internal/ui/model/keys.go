@@ -39,6 +39,8 @@ type KeyMap struct {
 
 	Chat struct {
 		NewSession     key.Binding
+		NextSession    key.Binding
+		PrevSession    key.Binding
 		JumpSession    key.Binding
 		AddAttachment  key.Binding
 		Cancel         key.Binding
@@ -82,6 +84,8 @@ type KeyMap struct {
 	Help       key.Binding
 	Commands   key.Binding
 	Models     key.Binding
+	Providers  key.Binding
+	Effort     key.Binding
 	Suspend    key.Binding
 	Sessions   key.Binding
 	Workspaces key.Binding
@@ -104,9 +108,19 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("ctrl+p"),
 			key.WithHelp("ctrl+p", "commands"),
 		),
+		// Alt+M chỉ hiện model của provider đang dùng; Alt+P đổi provider.
 		Models: key.NewBinding(
 			key.WithKeys("alt+m", "ctrl+m", "ctrl+l"),
 			key.WithHelp("alt+m", "model"),
+		),
+		Providers: key.NewBinding(
+			key.WithKeys("alt+p"),
+			key.WithHelp("alt+p", "provider"),
+		),
+		// Mức suy luận (effort) của model đang dùng, nếu model có các mức.
+		Effort: key.NewBinding(
+			key.WithKeys("alt+e"),
+			key.WithHelp("alt+e", "effort"),
 		),
 		Suspend: key.NewBinding(
 			key.WithKeys("ctrl+z"),
@@ -205,6 +219,17 @@ func DefaultKeyMap() KeyMap {
 	km.Chat.NewSession = key.NewBinding(
 		key.WithKeys("alt+n", "ctrl+n"),
 		key.WithHelp("alt+n", "new"),
+	)
+	// Đi vòng qua các session (thay cho Alt+Tab mà trình quản lý cửa sổ giữ
+	// trên hầu hết desktop); Alt+. / Alt+, không bị Cinnamon hay
+	// gnome-terminal chiếm, và ô nhập không dùng.
+	km.Chat.NextSession = key.NewBinding(
+		key.WithKeys("alt+."),
+		key.WithHelp("alt+.", "next session"),
+	)
+	km.Chat.PrevSession = key.NewBinding(
+		key.WithKeys("alt+,"),
+		key.WithHelp("alt+,", "prev session"),
 	)
 	// The jump keys have no default keys (roadmap P1.3a: pick sessions by
 	// name, not by index); keybindings.json can still bind them. Key i of

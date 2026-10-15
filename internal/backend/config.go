@@ -288,6 +288,42 @@ func (b *Backend) RefreshMCPTools(ctx context.Context, workspaceID, name string)
 }
 
 // ReadMCPResource reads a resource from a named MCP server.
+// ListMCPTools returns the tools each connected MCP server offers, after
+// the configuration's filters.
+func (b *Backend) ListMCPTools(workspaceID string) (map[string][]proto.MCPTool, error) {
+	if _, err := b.GetWorkspace(workspaceID); err != nil {
+		return nil, err
+	}
+	out := map[string][]proto.MCPTool{}
+	for name, tools := range mcptools.Tools() {
+		for _, t := range tools {
+			out[name] = append(out[name], proto.MCPTool{Name: t.Name, Description: t.Description, InputSchema: t.InputSchema})
+		}
+	}
+	return out, nil
+}
+
+// CallMCPTool calls a tool on a connected MCP server through the
+// workspace's own connection.
+func (b *Backend) CallMCPTool(ctx context.Context, workspaceID, name, tool string, args map[string]any) (*proto.MCPCallToolResponse, error) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	result, err := mcptools.CallTool(ctx, ws.Cfg, name, tool, args)
+	if err != nil {
+		if errors.Is(err, mcptools.ErrToolNotFound) {
+			return nil, fmt.Errorf("%w: %v", ErrMCPToolNotFound, err)
+		}
+		return nil, err
+	}
+	resp := &proto.MCPCallToolResponse{Content: []any{}, IsError: result.IsError, StructuredContent: result.StructuredContent}
+	for _, c := range result.Content {
+		resp.Content = append(resp.Content, c)
+	}
+	return resp, nil
+}
+
 func (b *Backend) ReadMCPResource(ctx context.Context, workspaceID, name, uri string) ([]MCPResourceContents, error) {
 	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {

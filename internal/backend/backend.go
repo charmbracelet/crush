@@ -30,6 +30,7 @@ import (
 var (
 	ErrWorkspaceNotFound       = errors.New("workspace not found")
 	ErrLSPClientNotFound       = errors.New("LSP client not found")
+	ErrMCPToolNotFound         = errors.New("MCP tool not found")
 	ErrAgentNotInitialized     = errors.New("agent coordinator not initialized")
 	ErrAgentBusy               = errors.New("agent is busy with a run")
 	ErrPathRequired            = errors.New("path is required")

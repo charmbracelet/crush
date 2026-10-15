@@ -247,3 +247,61 @@ func TestDiscoverFromConfig_Resolver(t *testing.T) {
 	}
 	require.True(t, found, "DiscoverFromConfig must expand $VAR via Resolver")
 }
+
+func TestDiscoveryConfig_ResolvePathsRelativeToWorkingDir(t *testing.T) {
+	t.Parallel()
+
+	workingDir := t.TempDir()
+	absolutePath := filepath.Join(t.TempDir(), "absolute-skills")
+	cfg := DiscoveryConfig{
+		SkillsPaths: []string{
+			"./skills",
+			"nested/../other-skills",
+			"$RELATIVE_SKILLS_DIR",
+			absolutePath,
+			"",
+		},
+		WorkingDir: workingDir,
+		Resolver: func(s string) (string, error) {
+			if s == "$RELATIVE_SKILLS_DIR" {
+				return "resolved-skills", nil
+			}
+			return s, errors.New("unknown")
+		},
+	}
+
+	require.Equal(t, []string{
+		filepath.Join(workingDir, "skills"),
+		filepath.Join(workingDir, "other-skills"),
+		filepath.Join(workingDir, "resolved-skills"),
+		absolutePath,
+		"",
+	}, cfg.ResolvePaths())
+}
+
+func TestDiscoverFromConfig_RelativePathUsesWorkingDir(t *testing.T) {
+	t.Parallel()
+
+	workingDir := t.TempDir()
+	skillDir := filepath.Join(workingDir, "skills", "relative-skill")
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(skillDir, SkillFileName),
+		[]byte("---\nname: relative-skill\ndescription: Workspace-relative skill.\n---\nx\n"),
+		0o644,
+	))
+
+	allSkills, _, _ := DiscoverFromConfig(DiscoveryConfig{
+		SkillsPaths: []string{"./skills"},
+		WorkingDir:  workingDir,
+	})
+
+	found := false
+	for _, skill := range allSkills {
+		if skill.Name == "relative-skill" {
+			found = true
+			break
+		}
+	}
+	require.True(t, found, "DiscoverFromConfig must resolve relative paths from WorkingDir")
+}

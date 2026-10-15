@@ -188,3 +188,10 @@ Nạp tự động vào mọi phiên Claude. Mục đích: không bàn lại cá
 - **Đã thử và bỏ:** chỉ dặn trong prompt hoặc chặn tên lệnh: YOLO/quyền-cấp-session bỏ qua cổng quyền, và đường dẫn tuyệt đối/lớp bọc lách tên; đặt ở lớp thực thi (BlockFunc) mới chắc. Job do chính session tạo vẫn dừng được qua `jobs`/`job_kill`.
 - **Còn hở (ghi docs):** chặn theo PID giải qua `/proc` (Linux) và theo tên; `bash -c "kill ..."` lồng sâu, bản chép binary đổi tên, hay systemctl/docker/pm2 stop chưa bắt — tiến trình khác vẫn qua cổng quyền thường. PID bị tái dùng: giải `/proc/<pid>/exe` ngay lúc xét nên đúng tại thời điểm đó.
 
+## 2026-10-15 — Arguments tool call hỏng không được gửi tới provider (HTTP 400)
+**Trạng thái:** đã làm
+- **Chốt:** thêm cổng `sanitizeOutgoingToolCalls` trong PrepareStep của lượt chính: mọi `ToolCallPart` có `Input` không phải JSON hợp lệ bị thay `{}` ngay trước khi gửi provider (ghi log Warn). Trước đó chỉ có hai cổng không đủ: `sanitizeToolInput` (OnToolCall → chỉ sửa bản lưu DB) và `toolCallInput` (ToAIMessage → chỉ chạy khi đọc lại từ DB). Messages của bước kế trong cùng stream do fantasy dựng từ step result trong bộ nhớ (`prepared.Messages = options.Messages`), không qua hai cổng kia.
+- **Vì:** sự cố 15/10 ~14:38 (máy runtime, 8eff139e): model trả tool call `write` arguments JSON bị cắt (input_len=5976); request bước kế mang nguyên chuỗi hỏng → LiteLLM/vLLM trả HTTP 400 "Unterminated string" → lượt dừng, todo 2/8. Đã đọc code xác nhận đường in-memory không được làm sạch (đúng giả thuyết: B là lỗ; A = model/provider sinh JSON hỏng là nguồn, chưa rõ cắt do token limit hay ghép stream).
+- **Đã thử và bỏ:** đoán phần JSON thiếu rồi chạy tool: cấm (chạy nội dung suy đoán). Sau sửa: request gửi `{}` hợp lệ → provider không 400 → model nhận tool result lỗi "arguments were not valid JSON" → tạo tool call mới (hữu hạn qua trần max_tokens + loop detection sẵn có).
+- **Còn chưa xác minh:** nguồn JSON hỏng (A) và liệu có luôn do token limit; cần payload runtime đã che secret để chốt. Cổng này xử lý phần B (agent-cli không gửi rác đi) bất kể A.
+

@@ -1031,6 +1031,14 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		FrequencyPenalty: call.FrequencyPenalty,
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 			prepared.Messages = options.Messages
+			// Cổng cuối trước khi gửi provider: một tool call mà model trả
+			// arguments không phải JSON hợp lệ (bị cắt, ghép stream hỏng) đã
+			// được thay "{}" khi lưu DB, nhưng messages bước kế do fantasy
+			// dựng từ step result trong bộ nhớ nên vẫn mang chuỗi hỏng. Gửi
+			// nguyên thì provider trả HTTP 400 và lượt dừng. Thay ở đây để
+			// mọi request đi ra đều hợp lệ (như toolCallInput làm cho đường
+			// đọc lại từ DB).
+			prepared.Messages = sanitizeOutgoingToolCalls(prepared.Messages)
 			for i := range prepared.Messages {
 				prepared.Messages[i].ProviderOptions = nil
 			}
@@ -2055,6 +2063,29 @@ func filterFileParts(parts []fantasy.MessagePart) []fantasy.MessagePart {
 		filtered = append(filtered, part)
 	}
 	return filtered
+}
+
+// sanitizeOutgoingToolCalls thay arguments của tool call không phải JSON hợp
+// lệ bằng "{}" trước khi gửi provider. Cùng chuẩn với toolCallInput (đường
+// đọc lại từ DB): providers strict từ chối request có arguments hỏng (HTTP
+// 400), làm lượt dừng giữa chừng. Chỉ dựng lại Content của message có chỗ
+// cần sửa, không đụng phần còn lại.
+func sanitizeOutgoingToolCalls(msgs []fantasy.Message) []fantasy.Message {
+	for i := range msgs {
+		for j, part := range msgs[i].Content {
+			tc, ok := fantasy.AsMessagePart[fantasy.ToolCallPart](part)
+			if !ok || json.Valid([]byte(tc.Input)) {
+				continue
+			}
+			slog.Warn("Replacing malformed tool call arguments before sending to the provider",
+				"tool", tc.ToolName, "id", tc.ToolCallID, "input_len", len(tc.Input))
+			fixed := slices.Clone(msgs[i].Content)
+			tc.Input = "{}"
+			fixed[j] = tc
+			msgs[i].Content = fixed
+		}
+	}
+	return msgs
 }
 
 func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.Session) ([]message.Message, error) {

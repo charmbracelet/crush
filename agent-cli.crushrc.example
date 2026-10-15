@@ -6,40 +6,82 @@
 env_file="${AGENT_CLI_ENV_FILE:-$HOME/.config/agent-cli/env}"
 [[ -f "$env_file" ]] && source "$env_file"
 
-# Thiếu biến bắt buộc thì dừng. Báo lỗi ghi thẳng ra /dev/stderr vì stderr của
-# crushrc bị bỏ qua khi nạp cấu hình; thông báo chỉ thấy ở chế độ trực tiếp
-# (CRUSH_CLIENT_SERVER=0 agent-cli models). Ở chế độ client/server chỉ thấy lỗi
-# "Failed to initialize crush server" và stderr.log của server chỉ ghi "exit status 1".
-{
-  : "${AGENT_CLI_BASE_URL:?đặt AGENT_CLI_BASE_URL trong ${env_file} (vd http://127.0.0.1:<port>/v1)}"
-  : "${AGENT_CLI_MODEL:?đặt AGENT_CLI_MODEL trong ${env_file}}"
-} 2>/dev/stderr
-base_url="$AGENT_CLI_BASE_URL"
+# Hai cách khai provider chính, chọn bằng AGENT_CLI_PROVIDER_ID:
+# - ID của provider dựng sẵn trong catalog (vd zai cho GLM, openai, anthropic):
+#   chỉ cần AGENT_CLI_API_KEY; catalog lo endpoint, danh sách model, mức effort
+#   (alt+e) và khả năng suy luận của model.
+# - Bỏ trống: provider "main" tự khai bằng AGENT_CLI_BASE_URL (model local, hoặc
+#   endpoint tương thích OpenAI không có trong catalog).
+provider_id="${AGENT_CLI_PROVIDER_ID:-}"
+
+# Thiếu biến bắt buộc thì dừng; lý do in ra stderr đi kèm thông báo lỗi khi mở
+# agent-cli (cả chế độ client/server).
+if [[ -n "$provider_id" ]]; then
+  {
+    : "${AGENT_CLI_MODEL:?đặt AGENT_CLI_MODEL trong ${env_file} (vd glm-5.3)}"
+    : "${AGENT_CLI_API_KEY:?đặt AGENT_CLI_API_KEY trong ${env_file}}"
+  } 2>/dev/stderr
+else
+  {
+    : "${AGENT_CLI_BASE_URL:?đặt AGENT_CLI_BASE_URL trong ${env_file} (vd http://127.0.0.1:<port>/v1)}"
+    : "${AGENT_CLI_MODEL:?đặt AGENT_CLI_MODEL trong ${env_file}}"
+  } 2>/dev/stderr
+fi
 model="$AGENT_CLI_MODEL"
 small_model="${AGENT_CLI_SMALL_MODEL:-$model}"
-context_window="${AGENT_CLI_CONTEXT_WINDOW:-128000}"
-max_tokens="${AGENT_CLI_MAX_TOKENS:-8192}"
 
-# API key rỗng được (model local).
-provider add main \
-  --name "main" \
-  --type "${AGENT_CLI_PROVIDER_TYPE:-openai-compat}" \
-  --base-url "$base_url" \
-  --api-key "${AGENT_CLI_API_KEY-}"
+if [[ -n "$provider_id" ]]; then
+  # Provider dựng sẵn: chỉ ghi khoá; endpoint, model, tên và mức effort lấy từ catalog.
+  provider add "$provider_id" --api-key "$AGENT_CLI_API_KEY"
+  tok_args=()
+  [[ -n "${AGENT_CLI_MAX_TOKENS:-}" ]] && tok_args=(--max-tokens "$AGENT_CLI_MAX_TOKENS")
+  model large "$provider_id/$model" "${tok_args[@]}"
+  model small "$provider_id/$small_model" "${tok_args[@]}"
+else
+  provider_id=main
+  base_url="$AGENT_CLI_BASE_URL"
+  context_window="${AGENT_CLI_CONTEXT_WINDOW:-128000}"
+  max_tokens="${AGENT_CLI_MAX_TOKENS:-8192}"
 
-model add "main/$model" --name "$model" \
-  --context-window "$context_window" --default-max-tokens "$max_tokens"
-if [[ "$small_model" != "$model" ]]; then
-  model add "main/$small_model" --name "$small_model" \
-    --context-window "$context_window" --default-max-tokens "$max_tokens"
+  # API key rỗng được (model local).
+  provider add main \
+    --name "${AGENT_CLI_PROVIDER_NAME:-main}" \
+    --type "${AGENT_CLI_PROVIDER_TYPE:-openai-compat}" \
+    --base-url "$base_url" \
+    --api-key "${AGENT_CLI_API_KEY-}"
+
+  # --can-reason: model có suy luận cần hạn mức token đủ để vừa nghĩ vừa trả
+  # lời, kể cả khi đặt tiêu đề session (không thì mọi session tên "Untitled
+  # Session"). Provider dựng sẵn thì catalog đã khai sẵn.
+  can_reason="${AGENT_CLI_CAN_REASON:-false}"
+  model add "main/$model" --name "$model" \
+    --context-window "$context_window" --default-max-tokens "$max_tokens" \
+    --can-reason "$can_reason"
+  if [[ "$small_model" != "$model" ]]; then
+    model add "main/$small_model" --name "$small_model" \
+      --context-window "$context_window" --default-max-tokens "$max_tokens" \
+      --can-reason "$can_reason"
+  fi
+  model large "main/$model" --max-tokens "$max_tokens"
+  model small "main/$small_model" --max-tokens "$max_tokens"
 fi
-model large "main/$model" --max-tokens "$max_tokens"
-model small "main/$small_model" --max-tokens "$max_tokens"
 
-# Riêng tư: tắt metrics, tắt cập nhật catalog, chỉ dùng provider khai ở trên.
+# Riêng tư: tắt metrics, tắt cập nhật catalog (dùng catalog nhúng sẵn).
 option metrics false
 option provider-auto-update false
-option default-providers false
+
+# Provider dựng sẵn để BẬT: tài khoản đăng nhập (agent-cli login openai) và
+# provider có API key (vd ANTHROPIC_API_KEY) mới dùng được. Request chỉ đi tới
+# provider của model đang chọn. Muốn chỉ dùng provider tự khai ở trên thì bật
+# dòng dưới VÀ bỏ các dòng visible-provider openai/anthropic (chúng sẽ không còn
+# model nào để chọn):
+# option default-providers false
+
+# Provider hiện trong alt+p, đúng thứ tự này; alt+m chỉ hiện model của provider
+# đang dùng. Bỏ hết các dòng này thì alt+p liệt kê provider đã cấu hình.
+option visible-provider "$provider_id"
+option visible-provider openai
+option visible-provider anthropic
 
 # Tắt công cụ chạm mạng của agent-cli. Tên phải đúng tên tool (danh sách ở
 # allToolNames, internal/config/config.go); tên sai bị bỏ qua, không báo lỗi.

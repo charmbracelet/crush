@@ -879,6 +879,7 @@
           "default": "charmtone-panther",
           "examples": [
             "charmtone-panther",
+            "charmtone-light",
             "gruvbox-dark"
           ]
         },

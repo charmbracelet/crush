@@ -30,6 +30,17 @@ const loadTimeout = 30 * time.Second
 //
 // Execution is bounded by loadTimeout on top of any deadline already present
 // on ctx, so a misbehaving script cannot block config loading indefinitely.
+//
+// Stderr của script được thu lại thay vì bỏ đi: khi script thất bại,
+// maxStderrTailBytes byte cuối của nó được nối vào lỗi trả về, ví dụ
+//
+//	executing shell config .../crushrc: exit status 1: AGENT_CLI_BASE_URL: đặt ...
+//
+// Không có bước này thì chốt chặn kiểu `: "${VAR:?thông báo}"` chỉ để lại
+// "exit status 1", và ở chế độ client/server lý do mất hẳn (stderr của server
+// là tệp log không ai xem). Chuyển hướng tới stderr thật của tiến trình
+// (`2>/dev/stderr`) cũng được thu, xem redirectDevStderr. Ở đây không in gì ra
+// terminal: lỗi mang theo lý do.
 func LoadShellConfig(ctx context.Context, path string, src []byte) ([]byte, error) {
 	slog.Info("Loading shell config", "path", path)
 
@@ -45,18 +56,31 @@ func LoadShellConfig(ctx context.Context, path string, src []byte) ([]byte, erro
 	// [[ "$CRUSH_VERSION" == "devel" ]] or branch on the release.
 	env := append(os.Environ(), "CRUSH_VERSION="+version.Version)
 
+	stderr := newStderrTail(maxStderrTailBytes)
 	err := shell.Run(runCtx, shell.RunOptions{
-		Command: string(src),
+		Command: redirectDevStderr(string(src)),
 		Cwd:     cwd,
 		Env:     env,
+		Stderr:  stderr,
 	})
+	stderrSummary := stderr.summary()
 	if err != nil {
-		if shell.IsInterrupt(err) {
-			slog.Error("Shell config execution timed out or was cancelled", "path", path, "error", err)
-			return nil, fmt.Errorf("shell config %s: execution timed out or was cancelled: %w", path, err)
+		logAttrs := []any{"path", path, "error", err}
+		if stderrSummary != "" {
+			logAttrs = append(logAttrs, "stderr", stderrSummary)
 		}
-		slog.Error("Shell config execution failed", "path", path, "error", err)
-		return nil, fmt.Errorf("executing shell config %s: %w", path, err)
+		suffix := errorSuffix(err, stderrSummary)
+		if shell.IsInterrupt(err) {
+			slog.Error("Shell config execution timed out or was cancelled", logAttrs...)
+			return nil, fmt.Errorf("shell config %s: execution timed out or was cancelled: %w%s", path, err, suffix)
+		}
+		slog.Error("Shell config execution failed", logAttrs...)
+		return nil, fmt.Errorf("executing shell config %s: %w%s", path, err, suffix)
+	}
+	// Script thành công nhưng có in ra stderr (cảnh báo của chính script): ghi
+	// vào log thay vì terminal, để không làm rối TUI khi nạp lại cấu hình.
+	if stderrSummary != "" {
+		slog.Warn("Shell config wrote to stderr", "path", path, "stderr", stderrSummary)
 	}
 
 	if builder.empty() {

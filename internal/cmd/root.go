@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	tea "charm.land/bubbletea/v2"
 	fang "charm.land/fang/v2"
@@ -702,6 +703,10 @@ func serverReadyTimeout() time.Duration {
 //
 // The HTTP transport is built to mirror how *client.Client dials so the
 // same unix socket / npipe / tcp setups all work uniformly here.
+//
+// Hết thời gian chờ mà server vẫn chưa sẵn sàng thì lỗi trả về kèm phần cuối
+// stderr.log của server (withServerStderr). Hủy qua ctx thì không kèm: đó là
+// người dùng dừng chờ, không phải server hỏng.
 func waitForServerReady(ctx context.Context, hostURL *url.URL) error {
 	httpClient, reqURL, err := readinessHTTPClient(hostURL)
 	if err != nil {
@@ -717,10 +722,13 @@ func waitForServerReady(ctx context.Context, hostURL *url.URL) error {
 			return err
 		}
 		if time.Now().After(deadline) {
-			if lastErr != nil {
-				return lastErr
+			if lastErr == nil {
+				lastErr = errors.New("timed out waiting for server readiness")
 			}
-			return fmt.Errorf("timed out waiting for server readiness")
+			// Server chết lúc khởi động (vd crushrc lỗi) chỉ để lại dấu vết ở
+			// stderr.log của nó; lỗi thăm dò "no such file or directory" đơn độc
+			// không cho người dùng biết phải sửa gì.
+			return withServerStderr(hostURL, lastErr)
 		}
 
 		attemptCtx, cancel := context.WithTimeout(ctx, perAttempt)
@@ -915,7 +923,7 @@ func startDetachedServer(cmd *cobra.Command, hostURL *url.URL) error {
 	// this process's lifetime.
 	c := exec.CommandContext(context.Background(), exe, cmdArgs...)
 	stdoutPath := filepath.Join(chDir, "stdout.log")
-	stderrPath := filepath.Join(chDir, "stderr.log")
+	stderrPath := filepath.Join(chDir, serverStderrLogName)
 	detachProcess(c)
 
 	stdout, err := os.Create(stdoutPath)
@@ -941,6 +949,103 @@ func startDetachedServer(cmd *cobra.Command, hostURL *url.URL) error {
 	}
 
 	return nil
+}
+
+// serverStderrLogName là tên tệp, nằm trong thư mục riêng của từng host, mà
+// startDetachedServer trỏ stderr của server tách rời vào.
+const serverStderrLogName = "stderr.log"
+
+const (
+	// maxServerStderrRead là số byte cuối của stderr.log được đọc. Lớn hơn
+	// maxServerStderrTail vì khối lỗi server in khi chết phần lớn là khoảng trắng
+	// đệm mà cleanLogTail sẽ gộp lại.
+	maxServerStderrRead = 8 << 10
+	// maxServerStderrTail là độ dài tối đa của đoạn đã làm sạch đính vào lỗi client.
+	maxServerStderrTail = 2 << 10
+)
+
+// serverStderrPath trả về stderr.log của server đang nghe ở hostURL, chính là tệp
+// mà startDetachedServer tạo.
+func serverStderrPath(hostURL *url.URL) string {
+	return filepath.Join(filepath.Dir(serverLogPath(hostURL)), serverStderrLogName)
+}
+
+// serverStderrError là err kèm phần cuối stderr.log của server. Unwrap trả về
+// err nên nơi gọi vẫn so khớp được lỗi gốc (errors.Is/As).
+type serverStderrError struct {
+	err  error
+	path string
+	tail string
+}
+
+func (e *serverStderrError) Error() string {
+	return fmt.Sprintf("%v; server stderr (%s): %s", e.err, e.path, e.tail)
+}
+
+func (e *serverStderrError) Unwrap() error { return e.err }
+
+// withServerStderr nối phần cuối stderr.log của server vào err. Server chết lúc
+// khởi động (crushrc thoát khác 0, cấu hình hỏng) chỉ nói lý do ở đó; client
+// ngoài ra chỉ thấy một lần thăm dò sức khoẻ thất bại. Trả err nguyên vẹn khi
+// tệp không có, không đọc được hoặc rỗng.
+func withServerStderr(hostURL *url.URL, err error) error {
+	path := serverStderrPath(hostURL)
+	raw, readErr := readFileTail(path, maxServerStderrRead)
+	if readErr != nil {
+		return err
+	}
+	tail := cleanLogTail(raw, maxServerStderrTail)
+	if tail == "" {
+		return err
+	}
+	// Khối lỗi của server đã kết thúc bằng dấu chấm; fang ở client thêm một dấu
+	// nữa, nên bỏ dấu của server để không ra ".." ở cuối.
+	tail = strings.TrimSuffix(tail, ".")
+	return &serverStderrError{err: err, path: path, tail: tail}
+}
+
+// readFileTail đọc tối đa maxBytes byte cuối của tệp ở path.
+func readFileTail(path string, maxBytes int64) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if offset := fi.Size() - maxBytes; offset > 0 {
+		if _, err := f.Seek(offset, io.SeekStart); err != nil {
+			return nil, err
+		}
+	}
+	return io.ReadAll(io.LimitReader(f, maxBytes))
+}
+
+// cleanLogTail biến phần cuối thô của một tệp log thành MỘT dòng in được, an toàn
+// để nhúng vào thông báo lỗi: bỏ chuỗi ANSI, ký tự điều khiển và byte không phải
+// UTF-8 hợp lệ (như rune bị cắt đôi ở đầu đuôi), mọi chuỗi khoảng trắng kể cả
+// xuống dòng gộp thành một dấu cách. Phần vượt quá maxBytes bị cắt từ phía trước
+// và đánh dấu "...", vì lý do của một lỗi nằm ở cuối.
+func cleanLogTail(raw []byte, maxBytes int) string {
+	text := ansi.Strip(strings.ToValidUTF8(string(raw), ""))
+	text = strings.Map(func(r rune) rune {
+		switch {
+		case unicode.IsSpace(r):
+			return ' '
+		case unicode.IsPrint(r):
+			return r
+		default:
+			return -1
+		}
+	}, text)
+	text = strings.Join(strings.Fields(text), " ")
+	if len(text) > maxBytes {
+		text = "..." + strings.ToValidUTF8(text[len(text)-maxBytes:], "")
+	}
+	return text
 }
 
 func shouldEnableMetrics(cfg *config.Config) bool {

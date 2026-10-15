@@ -228,4 +228,3 @@ func TestChildEnvUsesTheSnapshot(t *testing.T) {
 	require.Equal(t, "zai:glm-5.3", TrustedEnv(AllowedModelsEnv))
 	require.Empty(t, TrustedEnv(DelegationEnv), "set after the snapshot: ignored")
 }
-

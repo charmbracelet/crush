@@ -45,4 +45,3 @@ func TestBashBlocksPathPrefixedAgentScripts(t *testing.T) {
 	}
 	require.NoFileExists(t, marker)
 }
-

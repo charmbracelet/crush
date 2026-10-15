@@ -61,13 +61,19 @@ func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string
 		return ToolResult{Type: "text", Content: ""}, nil
 	}
 
+	return contentToResult(result.Content), nil
+}
+
+// contentToResult collapses the content blocks of a tool result into the
+// single text or media payload that a tool response can carry.
+func contentToResult(contents []mcp.Content) ToolResult {
 	var textParts []string
 	var imageData []byte
 	var imageMimeType string
 	var audioData []byte
 	var audioMimeType string
 
-	for _, v := range result.Content {
+	for _, v := range contents {
 		switch content := v.(type) {
 		case *mcp.TextContent:
 			textParts = append(textParts, content.Text)
@@ -81,8 +87,36 @@ func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string
 				audioData = content.Data
 				audioMimeType = content.MIMEType
 			}
+		case *mcp.ResourceLink:
+			if content.Name != "" && content.Name != content.URI {
+				textParts = append(textParts, fmt.Sprintf("[resource link: %s (%s)]", content.Name, content.URI))
+			} else {
+				textParts = append(textParts, fmt.Sprintf("[resource link: %s]", content.URI))
+			}
+		case *mcp.EmbeddedResource:
+			res := content.Resource
+			switch {
+			case res == nil:
+				textParts = append(textParts, "[empty resource]")
+			case res.Text != "":
+				textParts = append(textParts, res.Text)
+			case res.Blob != nil && strings.HasPrefix(res.MIMEType, "image/"):
+				if imageData == nil {
+					imageData = res.Blob
+					imageMimeType = res.MIMEType
+				}
+			case res.Blob != nil && strings.HasPrefix(res.MIMEType, "audio/"):
+				if audioData == nil {
+					audioData = res.Blob
+					audioMimeType = res.MIMEType
+				}
+			default:
+				textParts = append(textParts, describeResource(res.URI, res.MIMEType, len(res.Blob)))
+			}
 		default:
-			textParts = append(textParts, fmt.Sprintf("%v", v))
+			// The SDK gains content types over time, and %v on an unhandled
+			// one stringifies a pointer into an unusable address.
+			textParts = append(textParts, fmt.Sprintf("[unsupported content: %T]", v))
 		}
 	}
 
@@ -96,7 +130,7 @@ func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string
 			Content:   textContent,
 			Data:      ensureRawBytes(imageData),
 			MediaType: imageMimeType,
-		}, nil
+		}
 	}
 
 	if audioData != nil {
@@ -105,13 +139,25 @@ func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string
 			Content:   textContent,
 			Data:      ensureRawBytes(audioData),
 			MediaType: audioMimeType,
-		}, nil
+		}
 	}
 
 	return ToolResult{
 		Type:    "text",
 		Content: textContent,
-	}, nil
+	}
+}
+
+// describeResource reports the identity and size of a resource whose payload
+// cannot be turned into tool output, so the text at least says what is there.
+func describeResource(uri, mimeType string, size int) string {
+	if uri == "" {
+		uri = "untitled"
+	}
+	if mimeType == "" {
+		return fmt.Sprintf("[resource: %s, %d bytes]", uri, size)
+	}
+	return fmt.Sprintf("[resource: %s (%s, %d bytes)]", uri, mimeType, size)
 }
 
 // RefreshTools gets the updated list of tools from the MCP and updates the

@@ -645,7 +645,7 @@
         },
         "request_timeout": {
           "type": "integer",
-          "description": "Timeout in seconds for each LLM API request. Streaming responses are aborted only after this much inactivity, so slow but active streams are never killed. 0 disables it, negative values are invalid.",
+          "description": "Timeout in seconds for each LLM API request. Streaming responses are aborted only after this much inactivity between tokens, so slow but active streams are never killed; the wait for the first token gets at least five minutes for prompt prefill. 0 disables it, negative values are invalid.",
           "default": 60,
           "examples": [
             120,

@@ -119,6 +119,7 @@ type Chat struct {
 	mouseDragItem int // Current item index being dragged over
 	mouseDragX    int // Current X in item content
 	mouseDragY    int // Current Y in item
+	mouseDragged  bool
 
 	// Click tracking for double/triple clicks
 	lastClickTime time.Time
@@ -1036,6 +1037,7 @@ func (m *Chat) HandleMouseDown(x, y int) (bool, tea.Cmd) {
 
 	// Select the item that was clicked
 	m.list.SetSelected(itemIdx)
+	m.mouseDragged = false
 
 	var cmd tea.Cmd
 
@@ -1137,6 +1139,7 @@ func (m *Chat) HandleMouseDrag(x, y int) bool {
 	m.mouseDragItem = itemIdx
 	m.mouseDragX = x
 	m.mouseDragY = itemY
+	m.mouseDragged = true
 
 	return true
 }
@@ -1187,6 +1190,7 @@ func (m *Chat) ClearMouse() {
 	m.mouseDown = false
 	m.mouseDownItem = -1
 	m.mouseDragItem = -1
+	m.mouseDragged = false
 	m.lastClickTime = time.Time{}
 	m.lastClickX = 0
 	m.lastClickY = 0
@@ -1265,6 +1269,13 @@ func (m *Chat) getHighlightRange() (startItemIdx, startLine, startCol, endItemId
 		endItemIdx = downItemIdx
 		endLine = m.mouseDownY
 		endCol = m.mouseDownX
+	}
+
+	// A dragged selection includes the cell under the cursor, as in native
+	// terminals, while the highlight range end is exclusive.
+	moved := startItemIdx != endItemIdx || startLine != endLine || startCol != endCol
+	if m.mouseDragged && moved {
+		endCol++
 	}
 
 	return startItemIdx, startLine, startCol, endItemIdx, endLine, endCol

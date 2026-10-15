@@ -172,6 +172,14 @@ func blockFuncs() []shell.BlockFunc {
 		// codex, gemini...) vượt qua tool giao việc (ghim model, hỏi quyền).
 		blockExternalAgents,
 
+		// Bảo vệ tiến trình điều khiển: không cho agent giết chính client/
+		// server/launcher agent-cli đang giữ phiên, hay tắt/khởi động lại máy.
+		// Chặn ở lớp thực thi nên YOLO và quyền đã cấp cho session không bỏ qua.
+		shell.ProtectControlProcess(func(reason string, args []string) {
+			slog.Warn("Blocked a command that targets agent-cli's own process or the machine",
+				"reason", reason, "command", args[0])
+		}),
+
 		// System package managers
 		shell.ArgumentsBlocker("apk", []string{"add"}, nil),
 		shell.ArgumentsBlocker("apt", []string{"install"}, nil),

@@ -181,3 +181,10 @@ Nạp tự động vào mọi phiên Claude. Mục đích: không bàn lại cá
 - **Đã thử và bỏ:** làm tiếp không giới hạn: model cứ viết quá dài sẽ lặp mãi.
 - **Lật lại khi:** provider cho biết trước trần output thật của model (khi đó đặt ngân sách theo model thay vì theo context).
 
+## 2026-10-15 — Không cho agent tự giết tiến trình agent-cli hay tắt máy
+**Trạng thái:** đã làm
+- **Chốt:** `internal/shell/protect.go` là BlockFunc chạy trong trình thực thi shell (trước cả YOLO và quyền đã cấp cho session): chặn `kill`/`/bin/kill` nhắm PID thuộc cây tiến trình agent-cli (chính nó + tổ tiên, hoặc tiến trình khác chạy cùng binary qua `/proc/<pid>/exe`), `pkill`/`killall` khớp tên crush/agent-cli, và `shutdown`/`reboot`/`halt`/`poweroff`. Bóc lớp bọc env/nohup/timeout trước khi xét. Ghi log Warn khi chặn.
+- **Vì:** sự cố 15/10 ~14:26 (máy runtime, bản 8eff139e): agent coi client (954803) + server (946242) là "mồ côi" rồi `/bin/kill -9` cả hai → mất lượt đang chạy. Cùng UID/cùng tên/bị coi mồ côi không đủ để được giết.
+- **Đã thử và bỏ:** chỉ dặn trong prompt hoặc chặn tên lệnh: YOLO/quyền-cấp-session bỏ qua cổng quyền, và đường dẫn tuyệt đối/lớp bọc lách tên; đặt ở lớp thực thi (BlockFunc) mới chắc. Job do chính session tạo vẫn dừng được qua `jobs`/`job_kill`.
+- **Còn hở (ghi docs):** chặn theo PID giải qua `/proc` (Linux) và theo tên; `bash -c "kill ..."` lồng sâu, bản chép binary đổi tên, hay systemctl/docker/pm2 stop chưa bắt — tiến trình khác vẫn qua cổng quyền thường. PID bị tái dùng: giải `/proc/<pid>/exe` ngay lúc xét nên đúng tại thời điểm đó.
+

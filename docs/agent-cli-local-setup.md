@@ -298,6 +298,10 @@ cũng ghi được và tên socket đoán được. `AGENT_CLI_RUNTIME_DIR` bạ
 
 - Log server: `~/.cache/agent-cli/server-<host>/crush.log` (`<host>` là địa chỉ socket
   đã thay ký tự lạ bằng `_`). Mỗi dự án một thư mục, không trộn log.
+- Tự tóm tắt (khi context còn khoảng 20%) có hạn chờ gấp 3 `request-timeout` (mặc định 6 phút). Tóm
+  tắt vẫn hỏng thì việc không dừng: lịch sử giữ nguyên, lượt làm tiếp chạy ngay (tin "Continue the task
+  where you stopped..."), tự tóm tắt tạm tắt cho session tới prompt sau của bạn. Context đầy thật thì
+  provider báo lỗi và lượt dừng với lỗi đó; khi đó tóm tắt tay (`Ctrl+P` → Summarize) hoặc mở session mới.
 - Server bị dừng (`kill <pid>`, SIGTERM, SIGHUP) thì dừng từng workspace trước: run đang
   chạy bị huỷ và được ghi lại, không bỏ dở giữa chừng. Server chết đột ngột (SIGKILL, mất
   điện) thì tool call đang chạy dở được ghi "Interrupted" khi session được mở lại (TUI,

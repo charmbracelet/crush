@@ -166,3 +166,10 @@ Nạp tự động vào mọi phiên Claude. Mục đích: không bàn lại cá
 - **Đã thử và bỏ:** chỉ đọc env của tiến trình: tệp env chỉ được crushrc `source` trong trình thông dịch riêng nên biến không tới Go; đưa qua crushrc thành `options.allowed_models`/`options.delegation`: cấu hình của dự án gộp vào nên repo lạ tự bật được giao việc; denylist (fable, astra): model mới lọt qua; nhận alias (opus, latest): CLI tự đổi sang model mới nhất.
 - **Lật lại khi:** Claude/Codex thành agent chính trực tiếp (Phase 2): khi đó provider của session là claude_code/codex và ranh giới theo provider của session.
 
+## 2026-10-15 — Tự tóm tắt hỏng thì làm tiếp, không dừng run
+**Trạng thái:** đã làm
+- **Chốt:** request tóm tắt có hạn chờ gấp 3 hạn thường (`summaryRequestTimeoutScale`, mặc định 6 phút vì `request-timeout` mặc định 2 phút). Tóm tắt vẫn hỏng (không phải bị huỷ) thì lượt KHÔNG dừng: lịch sử giữ nguyên (bản tóm tắt hỏng không thành điểm cắt, không gửi lại cho model), còn khoảng 20% context nên lượt làm tiếp được xếp ngay; tự tóm tắt tạm tắt cho session tới prompt mới của người dùng. Huỷ lúc tóm tắt vẫn dừng lượt.
+- **Vì:** người dùng 15/10: stream tóm tắt im 2 phút → timeout → lỗi trả thẳng ra, run dừng giữa việc (tái hiện bằng test, đỏ trên mã cũ).
+- **Đã thử và bỏ:** thử lại ngay một lần: provider im vì đầu vào lớn thì thử lại cũng im, người dùng chờ gấp đôi; bản tóm tắt cục bộ (cắt lịch sử) khi hỏng: mất ngữ cảnh mà vẫn còn chỗ để làm tiếp.
+- **Lật lại khi:** có lỗi "context đầy" từ provider được bắt riêng (roadmap P1.5) để tóm tắt bằng model nhỏ/ngân sách nhỏ thay vì chờ provider báo lỗi.
+

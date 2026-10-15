@@ -44,6 +44,26 @@ func (e *requestTimeoutError) userMessage() string {
 	return fmt.Sprintf("The model did not respond within %s. %s", e.timeout, hint)
 }
 
+// summaryRequestTimeoutScale nhân hạn chờ cho request tóm tắt: request đó đọc
+// cả lịch sử (gần đầy context) nên model có thể im lâu trước token đầu; hạn
+// chờ thường (mặc định 2 phút) từng cắt ngang và làm dừng cả lượt.
+const summaryRequestTimeoutScale = 3
+
+type requestTimeoutScaleKey struct{}
+
+// withRequestTimeoutScale nhân hạn chờ của các request đi qua ctx.
+func withRequestTimeoutScale(ctx context.Context, scale int) context.Context {
+	return context.WithValue(ctx, requestTimeoutScaleKey{}, scale)
+}
+
+// budget là hạn chờ của request: hạn cấu hình, nhân hệ số trong ctx nếu có.
+func (m requestTimeoutModel) budget(ctx context.Context) time.Duration {
+	if scale, ok := ctx.Value(requestTimeoutScaleKey{}).(int); ok && scale > 1 {
+		return m.timeout * time.Duration(scale)
+	}
+	return m.timeout
+}
+
 // requestTimeoutModel wraps a [fantasy.LanguageModel] so requests are
 // bounded by the configured request_timeout. Non-streaming calls get a hard
 // per-request deadline, applied per call so fantasy's retry loop gives every
@@ -86,8 +106,9 @@ func wrapTimedOut(ctx context.Context, timeoutErr *requestTimeoutError, err erro
 // deadline: there is no incremental progress signal, so the whole call must
 // finish within the budget.
 func (m requestTimeoutModel) Generate(ctx context.Context, call fantasy.Call) (*fantasy.Response, error) {
-	timeoutErr := &requestTimeoutError{timeout: m.timeout}
-	ctx, cancel := context.WithTimeoutCause(ctx, m.timeout, timeoutErr)
+	timeout := m.budget(ctx)
+	timeoutErr := &requestTimeoutError{timeout: timeout}
+	ctx, cancel := context.WithTimeoutCause(ctx, timeout, timeoutErr)
 	defer cancel()
 	resp, err := m.LanguageModel.Generate(ctx, call)
 	return resp, wrapTimedOut(ctx, timeoutErr, err)
@@ -101,9 +122,10 @@ func (m requestTimeoutModel) Generate(ctx context.Context, call fantasy.Call) (*
 // or the idle timeout aborts it. Both the initial connection and gaps
 // between parts share the same budget.
 func (m requestTimeoutModel) Stream(ctx context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
-	timeoutErr := &requestTimeoutError{timeout: m.timeout, idle: true}
+	timeout := m.budget(ctx)
+	timeoutErr := &requestTimeoutError{timeout: timeout, idle: true}
 	ctx, cancel := context.WithCancelCause(ctx)
-	timer := time.AfterFunc(m.timeout, func() { cancel(timeoutErr) })
+	timer := time.AfterFunc(timeout, func() { cancel(timeoutErr) })
 
 	inner, err := m.LanguageModel.Stream(ctx, call)
 	if err != nil {
@@ -115,7 +137,7 @@ func (m requestTimeoutModel) Stream(ctx context.Context, call fantasy.Call) (fan
 		defer timer.Stop()
 		defer cancel(nil)
 		inner(func(part fantasy.StreamPart) bool {
-			timer.Reset(m.timeout)
+			timer.Reset(timeout)
 			part.Error = wrapTimedOut(ctx, timeoutErr, part.Error)
 			return yield(part)
 		})

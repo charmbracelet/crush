@@ -149,6 +149,9 @@ type SessionAgentCall struct {
 	// chạy sau vẫn gửi việc của agent con tới đúng provider của lượt. Nil
 	// thì lấy bộ tool hiện tại lúc lượt bắt đầu.
 	pinnedTools []fantasy.AgentTool
+	// summaryContinuation: lượt tự xếp lại để làm tiếp sau bước tự tóm tắt
+	// (thành công hay hỏng), không phải prompt mới của người dùng.
+	summaryContinuation bool
 }
 
 // sameModel cho biết hai lựa chọn có cùng provider và model hay không.
@@ -320,6 +323,10 @@ type sessionAgent struct {
 	// canceledRuns ghi các RunID bị CancelRun huỷ trước khi lượt của chúng
 	// tới Run (request gửi prompt còn đang bay), kèm thời điểm ghi để dọn.
 	canceledRuns *csync.Map[string, time.Time]
+	// summarizeFailed đánh dấu session vừa tự tóm tắt hỏng: tạm tắt tự tóm
+	// tắt cho tới prompt mới của người dùng, để lượt làm tiếp không lặp lại
+	// bước tóm tắt hỏng (mỗi lần mất cả hạn chờ) ở từng bước.
+	summarizeFailed *csync.Map[string, bool]
 	// dispatchMuCreate guards lazy creation of per-session entries in
 	// dispatchMu so two goroutines can't race to lock different mutex
 	// instances for the same session.
@@ -381,6 +388,7 @@ func NewSessionAgent(
 		acceptedRuns:         csync.NewMap[string, int](),
 		cancelMark:           csync.NewMap[string, uint64](),
 		canceledRuns:         csync.NewMap[string, time.Time](),
+		summarizeFailed:      csync.NewMap[string, bool](),
 	}
 }
 
@@ -831,6 +839,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	genCtx, cancel = context.WithCancel(runCtx)
 	ac := &activeCancel{cancel: cancel, runID: call.RunID}
 	a.activeRequests.Set(call.SessionID, ac)
+	if !call.summaryContinuation {
+		// Prompt mới: tự tóm tắt được thử lại (provider có thể đã ổn).
+		a.summarizeFailed.Del(call.SessionID)
+	}
 	if call.Accepted != nil {
 		call.Accepted.Close()
 	}
@@ -1262,7 +1274,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				} else {
 					threshold = int64(float64(cw) * smallContextWindowRatio)
 				}
-				if (remaining <= threshold) && !a.disableAutoSummarize {
+				_, suppressed := a.summarizeFailed.Get(call.SessionID)
+				if (remaining <= threshold) && !a.disableAutoSummarize && !suppressed {
 					shouldSummarize = true
 					return true
 				}
@@ -1447,17 +1460,30 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 	if shouldSummarize {
 		a.activeRequests.Del(call.SessionID)
+		var summaryFailure error
 		if summarizeErr := a.summarize(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh, largeModel, call.RunID); summarizeErr != nil {
-			// Lượt dừng lúc đang tóm tắt (bị huỷ riêng hoặc tóm tắt lỗi):
-			// prompt xếp hàng sau vẫn chạy (như nhánh lỗi ở trên).
-			if ctx.Err() == nil {
-				cancel()
-				if handedOff, qResult, qErr := a.handOff(ctx, call, currentAssistant, summarizeErr, false); handedOff {
-					skipRunComplete = true
-					return qResult, qErr
+			if errors.Is(summarizeErr, context.Canceled) || ctx.Err() != nil {
+				// Bị huỷ lúc đang tóm tắt (riêng lượt này hoặc cả session):
+				// dừng lượt; prompt xếp hàng sau vẫn chạy (như nhánh lỗi ở trên).
+				if ctx.Err() == nil {
+					cancel()
+					if handedOff, qResult, qErr := a.handOff(ctx, call, currentAssistant, summarizeErr, false); handedOff {
+						skipRunComplete = true
+						return qResult, qErr
+					}
 				}
+				return nil, summarizeErr
 			}
-			return nil, summarizeErr
+			// Tóm tắt hỏng (provider im lặng quá hạn, mạng, lỗi API): KHÔNG
+			// dừng việc. Lịch sử còn nguyên (bản tóm tắt hỏng không thành
+			// điểm cắt) và lúc này còn khoảng 20% context, nên làm tiếp như
+			// khi tóm tắt xong; tự tóm tắt tạm tắt cho tới prompt mới để lượt
+			// làm tiếp không lặp lại bước hỏng. Context có đầy thật thì
+			// provider báo lỗi và lượt dừng với lỗi đó.
+			slog.Warn("Auto-summarize failed; continuing the turn without it",
+				"session_id", call.SessionID, "error", summarizeErr)
+			a.summarizeFailed.Set(call.SessionID, true)
+			summaryFailure = summarizeErr
 		}
 		// If the agent wasn't done...
 		if len(currentAssistant.ToolCalls()) > 0 {
@@ -1465,7 +1491,12 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			if !ok {
 				existing = []SessionAgentCall{}
 			}
-			call.Prompt = fmt.Sprintf("The previous session was interrupted because it got too long, the initial user request was: `%s`", call.Prompt)
+			if summaryFailure != nil {
+				call.Prompt = fmt.Sprintf("Continue the task where you stopped. The automatic context summary failed (%s), so the full conversation is still available; keep working on the initial user request: `%s`", summaryFailure, call.Prompt)
+			} else {
+				call.Prompt = fmt.Sprintf("The previous session was interrupted because it got too long, the initial user request was: `%s`", call.Prompt)
+			}
+			call.summaryContinuation = true
 			existing = append(existing, call)
 			a.messageQueue.Set(call.SessionID, existing)
 		}
@@ -1662,7 +1693,7 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fan
 
 	aiMsgs, _ := a.preparePrompt(msgs, largeModel.CatwalkCfg.SupportsImages)
 
-	genCtx, cancel := context.WithCancel(ctx)
+	genCtx, cancel := context.WithCancel(withRequestTimeoutScale(ctx, summaryRequestTimeoutScale))
 	ac := &activeCancel{cancel: cancel, runID: runID}
 	a.activeRequests.Set(sessionID, ac)
 	defer a.activeRequests.CompareAndDelete(sessionID, ac)
@@ -1775,6 +1806,8 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fan
 	if err != nil {
 		return err
 	}
+
+	a.summarizeFailed.Del(sessionID)
 
 	// Release the active request before processing queued messages so that
 	// Run() does not see the session as busy.
@@ -1905,6 +1938,13 @@ If not, please feel free to ignore. Again do not mention this message to the use
 		// Assistant message without content or tool calls (cancelled before it returned anything).
 		if m.Role == message.Assistant && len(m.ToolCalls()) == 0 && m.Content().Text == "" && m.ReasoningContent().String() == "" {
 			continue
+		}
+		// Bản tóm tắt hỏng giữa chừng (không thành điểm cắt) không phải lời
+		// của model trong cuộc trò chuyện.
+		if m.IsSummaryMessage {
+			if f := m.FinishPart(); f != nil && f.Reason == message.FinishReasonError {
+				continue
+			}
 		}
 		// Tool results are emitted right after their assistant message.
 		if m.Role == message.Tool {

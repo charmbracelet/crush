@@ -19,6 +19,7 @@ type CommandItem struct {
 	description string
 	action      Action
 	aliases     []string
+	children    []*CommandItem
 	t           *styles.Styles
 	m           fuzzy.Match
 	cache       map[int]string
@@ -57,6 +58,17 @@ func (c *CommandItem) WithAliases(aliases ...string) *CommandItem {
 func (c *CommandItem) WithDescription(desc string) *CommandItem {
 	c.description = desc
 	return c
+}
+
+// WithChildren returns the CommandItem with child sub-menu items.
+func (c *CommandItem) WithChildren(children ...*CommandItem) *CommandItem {
+	c.children = children
+	return c
+}
+
+// HasChildren reports whether the item has a sub-menu.
+func (c *CommandItem) HasChildren() bool {
+	return len(c.children) > 0
 }
 
 // Filter implements ListItem.

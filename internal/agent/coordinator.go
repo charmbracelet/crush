@@ -999,12 +999,13 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	return filteredTools, nil
 }
 
-// TODO: when we support multiple agents we need to change this so that we pass in the agent specific model config
-// execPolicy là ranh giới provider/model (env của người dùng, không theo
-// cấu hình dự án).
+// execPolicy là ranh giới provider/model (env gốc của người dùng và tệp env
+// của agent-cli, không theo cấu hình hay `.env` của dự án).
 func (c *coordinator) execPolicy() (execpolicy.Policy, error) {
 	return execpolicy.Current()
 }
+
+// TODO: when we support multiple agents we need to change this so that we pass in the agent specific model config
 
 // checkModelPolicy chặn model chính (large/small) không có trong
 // AGENT_CLI_ALLOWED_MODELS trước khi dựng provider: lượt chính, sub-agent,

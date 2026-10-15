@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
+	"github.com/charmbracelet/crush/internal/execpolicy"
 	"slices"
 	"strings"
 
@@ -42,7 +42,7 @@ type codexStrategy struct {
 
 // newCodexStrategy đọc cấu hình từ env lúc dựng tool.
 func newCodexStrategy() codexStrategy {
-	return codexStrategy{bin: os.Getenv(codexBinEnv), sandbox: os.Getenv(codexSandboxEnv)}
+	return codexStrategy{bin: execpolicy.TrustedEnv(codexBinEnv), sandbox: execpolicy.TrustedEnv(codexSandboxEnv)}
 }
 
 func (codexStrategy) name() string          { return CodexToolName }

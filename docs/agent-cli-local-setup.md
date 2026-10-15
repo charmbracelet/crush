@@ -505,8 +505,11 @@ nên mặc định TẮT: cài CLI, đăng nhập hay có key đều không mở
 ### Ranh giới provider/model
 
 Hai biến trong `~/.config/agent-cli/env` (hoặc tệp ở `AGENT_CLI_ENV_FILE`); agent-cli đọc thẳng đúng
-hai dòng này, bỏ qua các dòng khác. Export ở shell cũng được và thắng giá trị trong tệp. Cố ý không
-đọc từ cấu hình của dự án (`crush.json`, crushrc trong repo): một repo lạ không nới được ranh giới.
+hai dòng này (dạng `KEY=value`, có thể `export`; dạng shell khác như `declare -x`, `KEY+=` thì báo
+lỗi lúc khởi động thay vì bỏ qua). Export ở shell cũng được và thắng giá trị trong tệp. Các biến này
+(cùng `AGENT_CLI_ENV_FILE`, `HOME`, `AGENT_CLI_*_BIN`, `*_PERMISSION_MODE`, `*_SANDBOX`) được chụp ngay
+đầu tiến trình, trước khi nạp `.env` của thư mục hiện tại hay `env` trong `crush.json` của dự án, và
+server của dự án nhận đúng ảnh chụp đó: repo đang mở không đổi được chúng.
 
 ```bash
 AGENT_CLI_ALLOWED_MODELS="zai:glm-5.3 zai:glm-5.3-flash main:qwen3.8 claude_code:claude-opus-5-5 claude_code:claude-sonnet-5-5 claude_code:claude-haiku-5-5 codex:gpt-6.1-sol"
@@ -524,10 +527,17 @@ AGENT_CLI_DELEGATION=on   # bỏ dòng này (hoặc off) = không giao việc
   model (`claude --model=<id>`, `codex -c model="<id>"`), không để CLI tự chọn mặc định (vd Fable)
   và không có model dự phòng; model chính chỉ chọn được trong danh sách (mặc định là model đầu),
   model khác bị từ chối trước khi hỏi quyền, CLI không chạy.
-- Tool bash chặn gọi thẳng CLI agent khác (`claude`, `codex`, `gemini`, `qwen`, `opencode`,
-  `aider`, `cursor-agent`, `amp`, `goose`, `kiro`; cả qua đường dẫn, `env`/`nohup`/`timeout`/`sudo`,
-  hay `npx`/`bunx` với gói của chúng): báo `command is not allowed`. Đây là lớp thứ hai; lệnh lồng
-  như `bash -c "..."` không bị nhận ra nhưng vẫn phải qua hộp thoại xin quyền của bash.
+- Tool bash chặn gọi thẳng CLI agent khác (`claude`, `claude-code`, `codex`, `gemini`, `qwen`,
+  `opencode`, `aider`, `cursor-agent`, `amp`, `kiro`, kể cả đuôi `.exe`/`.js`): qua đường dẫn (script
+  có shebang cũng vậy), `env`/`env -S`/`nohup`/`timeout`/`sudo`/`doas`/`xargs`, `find -exec`,
+  `npx`/`bunx`/`npm exec`/`pnpm dlx`, `bash -c "..."`; cùng agent-cli lồng (`agent-cli run|send|server`,
+  `jobs`/`ps`/`logs` thì được). Báo `command is not allowed`. `goose` (migration DB) không bị chặn.
+  Đây là lớp thứ hai, theo tên: bản chép mang tên khác, `python -c` hay script tự viết rồi chạy không bị
+  nhận ra, nhưng vẫn phải qua hộp thoại xin quyền của bash.
+- Giới hạn còn lại: ranh giới so theo ID provider. Cấu hình của dự án (`crush.json`) vẫn được đổi
+  `base_url` của một provider có sẵn (vd `zai`), như upstream vốn tin cấu hình dự án; mở repo lạ thì
+  xem `crush.json`/`.crush.json` của nó trước.
+- Hộp thoại giao việc ghi đường dẫn CLI sẽ chạy (vd `Claude Code (/home/u/.local/bin/claude)`).
 - Tên model thật lấy từ CLI trên máy: Claude Code nhận ID như `claude-opus-5-5`; danh sách model
   của Codex ở `~/.codex/models_cache.json` (15/10 có `gpt-6.1-sol`, `gpt-6-luna`, `gpt-5.6-luna`,
   `gpt-6-astra`..., không có `gpt-6.1-luna`).

@@ -34,6 +34,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/event"
+	"github.com/charmbracelet/crush/internal/execpolicy"
 	"github.com/charmbracelet/crush/internal/herdr"
 	"github.com/charmbracelet/crush/internal/lock"
 	crushlog "github.com/charmbracelet/crush/internal/log"
@@ -1044,7 +1045,9 @@ func startDetachedServer(cmd *cobra.Command, hostURL *url.URL) error {
 	c := exec.CommandContext(context.Background(), exe, cmdArgs...)
 	// Server không báo trạng thái về pane herdr của client đã dựng nó: client
 	// TUI báo thay qua luồng sự kiện; hai nguồn cùng pane thì tranh nhau.
-	c.Env = herdr.StripEnv(os.Environ())
+	// Biến tin cậy (ranh giới, CLI giao việc) theo ảnh chụp đầu main, không theo
+	// env đã bị `.env`/cấu hình dự án đổi.
+	c.Env = execpolicy.ChildEnv(herdr.StripEnv(os.Environ()))
 	stdoutPath := filepath.Join(chDir, "stdout.log")
 	stderrPath := filepath.Join(chDir, serverStderrLogName)
 	detachProcess(c)

@@ -83,21 +83,85 @@ func (d *Denied) Error() string {
 	return msg
 }
 
+// EnvFileEnv đặt đường dẫn tệp env của agent-cli (mặc định
+// ~/.config/agent-cli/env), như crushrc mẫu.
+const EnvFileEnv = "AGENT_CLI_ENV_FILE"
+
+// trustedKeys là các biến chỉ được lấy từ env GỐC của tiến trình: chụp đầu
+// main, trước khi nạp `.env` của thư mục hiện tại hay `env` trong cấu hình
+// của dự án (cả hai đều os.Setenv và do repo kiểm soát). Gồm ranh giới, nơi
+// đặt tệp env (và HOME suy ra nó), cùng CLI và mức quyền của tool giao việc.
+var trustedKeys = []string{
+	AllowedModelsEnv, DelegationEnv, EnvFileEnv, "HOME",
+	"AGENT_CLI_CLAUDE_BIN", "AGENT_CLI_CODEX_BIN",
+	"AGENT_CLI_CLAUDE_PERMISSION_MODE", "AGENT_CLI_CODEX_SANDBOX",
+}
+
+var (
+	snapshotOnce sync.Once
+	snapshot     map[string]string // nil: chưa chụp
+)
+
+// Snapshot chụp các biến tin cậy từ env hiện tại. Gọi ĐẦU main, trước mọi
+// việc nạp `.env` hay cấu hình; gọi lại không đổi gì.
+func Snapshot() {
+	snapshotOnce.Do(func() {
+		m := make(map[string]string, len(trustedKeys))
+		for _, k := range trustedKeys {
+			if v, ok := os.LookupEnv(k); ok {
+				m[k] = v
+			}
+		}
+		snapshot = m
+	})
+}
+
+// TrustedEnv trả giá trị tin cậy của biến key: theo ảnh chụp nếu key thuộc
+// danh sách và đã chụp, không thì env hiện tại (test, tiện ích không qua main).
+func TrustedEnv(key string) string {
+	if snapshot != nil && slices.Contains(trustedKeys, key) {
+		return snapshot[key]
+	}
+	return os.Getenv(key)
+}
+
+// ChildEnv sửa env cho tiến trình agent-cli con (server của dự án): các biến
+// tin cậy lấy theo ảnh chụp, không theo env đã bị `.env`/cấu hình dự án đổi.
+// Chưa chụp thì trả nguyên env.
+func ChildEnv(env []string) []string {
+	if snapshot == nil {
+		return env
+	}
+	out := make([]string, 0, len(env)+len(snapshot))
+	for _, kv := range env {
+		k, _, _ := strings.Cut(kv, "=")
+		if !slices.Contains(trustedKeys, k) {
+			out = append(out, kv)
+		}
+	}
+	for _, k := range trustedKeys {
+		if v, ok := snapshot[k]; ok {
+			out = append(out, k+"="+v)
+		}
+	}
+	return out
+}
+
 // Current trả chính sách của tiến trình, nạp một lần từ hai nguồn của người
-// dùng: env đã export ở shell, rồi tệp env của agent-cli (AGENT_CLI_ENV_FILE,
-// mặc định ~/.config/agent-cli/env, chính tệp crushrc `source`). Cố ý KHÔNG
-// đọc cấu hình của dự án (crush.json, crushrc trong repo): một repo lạ không
-// được nới ranh giới. Đổi giá trị thì mở lại server của dự án.
+// dùng: env gốc đã export ở shell (ảnh chụp đầu main), rồi tệp env của
+// agent-cli (EnvFileEnv, mặc định ~/.config/agent-cli/env). Không đọc cấu
+// hình, `.env` hay `env` của dự án: một repo lạ không nới được ranh giới.
+// Đổi giá trị thì mở lại server của dự án.
 func Current() (Policy, error) { return current() }
 
 var current = sync.OnceValues(func() (Policy, error) {
 	if testing.Testing() {
-		// Test phải kín: không đọc tệp env thật của người chạy test (chính
-		// sách của máy đó sẽ chặn model giả). Test cần chính sách thì dựng
-		// bằng Parse/FromEnv.
-		return FromEnv(os.Getenv)
+		// Test phải kín: không theo tệp env hay biến export của người chạy
+		// test (chính sách của máy đó sẽ chặn model giả). Test cần chính sách
+		// thì dựng bằng Parse/FromEnv.
+		return Policy{}, nil
 	}
-	return load(os.Getenv)
+	return load(TrustedEnv)
 })
 
 // load là Current với getenv cho trước (test).
@@ -116,7 +180,7 @@ func load(getenv func(string) string) (Policy, error) {
 
 // envFilePath là đường dẫn tệp env của agent-cli, như crushrc mẫu tính.
 func envFilePath(getenv func(string) string) string {
-	if p := getenv("AGENT_CLI_ENV_FILE"); p != "" {
+	if p := getenv(EnvFileEnv); p != "" {
 		return p
 	}
 	if home := getenv("HOME"); home != "" {
@@ -143,14 +207,25 @@ func readEnvFile(path string) (map[string]string, error) {
 	}
 	defer f.Close()
 	sc := bufio.NewScanner(f)
-	for sc.Scan() {
+	for n := 1; sc.Scan(); n++ {
 		line := strings.TrimSpace(sc.Text())
-		line = strings.TrimSpace(strings.TrimPrefix(line, "export "))
-		key, val, ok := strings.Cut(line, "=")
-		if !ok || (key != AllowedModelsEnv && key != DelegationEnv) {
+		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		out[key] = shellValue(val)
+		mentions := strings.Contains(line, AllowedModelsEnv) || strings.Contains(line, DelegationEnv)
+		if rest, ok := strings.CutPrefix(line, "export"); ok && rest != "" && (rest[0] == ' ' || rest[0] == '\t') {
+			line = strings.TrimSpace(rest)
+		}
+		key, val, ok := strings.Cut(line, "=")
+		if ok && (key == AllowedModelsEnv || key == DelegationEnv) {
+			out[key] = shellValue(val)
+			continue
+		}
+		if mentions {
+			// Dạng shell khác (declare -x, readonly, KEY+=, nhiều lệnh một
+			// dòng...): không đọc được thì báo lỗi, đừng lặng lẽ bỏ ranh giới.
+			return nil, fmt.Errorf("%s:%d: write %s and %s as plain KEY=value lines", path, n, AllowedModelsEnv, DelegationEnv)
+		}
 	}
 	if err := sc.Err(); err != nil {
 		return nil, fmt.Errorf("reading %s: %w", path, err)
@@ -198,11 +273,11 @@ func Parse(spec string) (Policy, error) {
 	split := func(r rune) bool { return r == ',' || unicode.IsSpace(r) }
 	for _, entry := range strings.FieldsFunc(spec, split) {
 		provider, model, ok := strings.Cut(entry, ":")
-		provider, model = strings.ToLower(strings.TrimSpace(provider)), strings.TrimSpace(model)
+		provider, model = strings.TrimSpace(provider), strings.TrimSpace(model)
 		if !ok || provider == "" || model == "" {
 			return Policy{}, fmt.Errorf("%s: %q is not provider:model", AllowedModelsEnv, entry)
 		}
-		if IsBackend(provider) && !strings.ContainsAny(model, "0123456789") {
+		if IsBackend(provider) && (!strings.ContainsAny(model, "0123456789") || strings.ContainsAny(model, "[]") || strings.Contains(strings.ToLower(model), "latest")) {
 			return Policy{}, fmt.Errorf("%s: %q is an alias, which the CLI resolves to whatever model is newest; list the exact model ID (for example claude_code:claude-opus-5-5)", AllowedModelsEnv, entry)
 		}
 		if !slices.Contains(p.models[provider], model) {
@@ -223,12 +298,18 @@ func IsBackend(provider string) bool {
 // Restricted cho biết model chính bị giới hạn theo danh sách.
 func (p Policy) Restricted() bool { return p.restricted }
 
-// AllowsModel cho biết model chính provider/model được phép.
+// AllowsModel cho biết model chính provider/model được phép. Tên provider so
+// chính xác; tên của backend giao việc (claude_code, codex) không bao giờ là
+// provider chính hợp lệ khi đã có danh sách (cấu hình đặt tên provider trùng
+// tên backend không mượn được quyền của backend).
 func (p Policy) AllowsModel(provider, model string) bool {
 	if !p.restricted {
 		return true
 	}
-	return slices.Contains(p.models[strings.ToLower(provider)], model)
+	if IsBackend(provider) {
+		return false
+	}
+	return slices.Contains(p.models[provider], model)
 }
 
 // CheckModel trả *Denied khi model chính không được phép.
@@ -279,49 +360,115 @@ func (p Policy) mainPairs() []string {
 }
 
 // externalAgents là CLI agent của provider khác: gọi thẳng qua bash thì vượt
-// ranh giới (không ghim model, không qua hộp thoại giao việc). agent-cli và
-// crush là chính công cụ này nên không nằm ở đây.
+// ranh giới (không ghim model, không qua hộp thoại giao việc). Tên đã chuẩn
+// hoá (chữ thường, bỏ đuôi .exe/.js...). "goose" không ở đây: đó cũng là
+// công cụ migration DB (pressly/goose).
 var externalAgents = map[string]bool{
-	"claude": true, "codex": true, "gemini": true, "qwen": true, "opencode": true,
-	"aider": true, "cursor-agent": true, "amp": true, "goose": true, "kiro": true,
+	"claude": true, "claude-code": true, "codex": true, "gemini": true, "qwen": true,
+	"opencode": true, "aider": true, "cursor-agent": true, "amp": true, "kiro": true,
 }
 
-// externalAgentPackages là gói npm của các CLI đó (chạy qua npx, bunx...).
+// externalAgentPackages là gói npm của các CLI đó.
 var externalAgentPackages = []string{"claude-code", "@openai/codex", "@google/gemini-cli", "@qwen-code/"}
+
+// selfNames là chính agent-cli: chạy lồng (run/send/server) thì tiến trình
+// con tự chọn chính sách qua env của lệnh, nên cũng bị chặn; jobs/ps/logs thì
+// không.
+var selfNames = map[string]bool{"agent-cli": true, "crush": true}
+
+// selfAgentSubcommands là lệnh con của agent-cli chạy agent.
+var selfAgentSubcommands = map[string]bool{"run": true, "send": true, "server": true}
 
 // launchers chạy lệnh khác làm tiến trình con; lệnh thật nằm sau các cờ,
 // gán biến và tham số của chúng. Giá trị là các cờ nhận giá trị ở arg kế
 // (dạng "-u NAME"; dạng "--unset=NAME" tự nằm gọn trong một arg).
 var launchers = map[string][]string{
-	"env":     {"-u", "--unset", "-C", "--chdir", "-S", "--split-string"},
+	"env":     {"-u", "--unset", "-C", "--chdir"},
 	"nohup":   nil,
 	"timeout": {"-k", "--kill-after", "-s", "--signal"},
 	"nice":    {"-n", "--adjustment"},
 	"stdbuf":  {"-i", "-o", "-e"},
 	"sudo":    {"-u", "-g", "-C", "-D", "-h", "-p", "-r", "-t", "-U", "-T"},
+	"doas":    {"-u", "-C"},
 	"command": nil,
 	"exec":    {"-a"},
 	"time":    {"-f", "-o"},
 	"setsid":  nil,
+	"xargs":   {"-a", "-d", "-E", "-I", "-L", "-n", "-P", "-s"},
+}
+
+// packageRunners chạy gói npm (npx, bunx...) hoặc qua lệnh con exec/x/dlx.
+var packageRunners = map[string]bool{"npx": true, "bunx": true, "pnpx": true}
+
+// packageRunnerSubcommands: npm exec, pnpm dlx, yarn dlx, bun x...
+var packageRunnerSubcommands = map[string]bool{"exec": true, "x": true, "dlx": true}
+
+// shells nhận chuỗi lệnh qua -c.
+var shells = map[string]bool{"sh": true, "bash": true, "zsh": true, "dash": true, "ksh": true}
+
+// normalizeName chuẩn hoá tên lệnh: basename, chữ thường, bỏ đuôi chạy được.
+func normalizeName(arg string) string {
+	name := strings.ToLower(filepath.Base(arg))
+	for _, ext := range []string{".exe", ".cmd", ".bat", ".ps1", ".js", ".mjs", ".cjs"} {
+		name = strings.TrimSuffix(name, ext)
+	}
+	return name
 }
 
 // ExternalAgentCommand nhận lệnh bash gọi CLI agent bên ngoài (kể cả qua đường
-// dẫn, env/nohup/timeout/sudo, hay npx/bunx với gói của CLI đó) và trả tên của
-// nó. Là lớp chặn thứ hai: ranh giới chính là tool giao việc chỉ có khi được
-// phép. Không bắt được mọi đường (vd `bash -c "..."`); các lệnh đó vẫn phải
-// qua hộp thoại xin quyền của bash.
+// dẫn, env/nohup/timeout/sudo/doas/xargs, npx/npm exec/bunx, find -exec,
+// `bash -c "..."`, `env -S "..."`) hoặc agent-cli lồng (run/send/server), và
+// trả tên của nó. Là lớp chặn thứ hai: ranh giới chính là tool giao việc chỉ
+// có khi được phép. Theo tên nên không bắt được bản chép mang tên khác; các
+// lệnh đó vẫn phải qua hộp thoại xin quyền của bash.
 func ExternalAgentCommand(args []string) (string, bool) {
+	return externalAgentCommand(args, 0)
+}
+
+func externalAgentCommand(args []string, depth int) (string, bool) {
+	if depth > 4 {
+		return "", false
+	}
 	for i := 0; i < len(args); i++ {
-		name := filepath.Base(args[i])
+		name := normalizeName(args[i])
 		if externalAgents[name] {
 			return name, true
 		}
-		switch name {
-		case "npx", "bunx", "pnpx", "dlx", "pnpm", "yarn", "bun":
+		if selfNames[name] {
 			for _, a := range args[i+1:] {
+				if selfAgentSubcommands[a] {
+					return name + " " + a, true
+				}
+			}
+			return "", false
+		}
+		if packageRunners[name] || ((name == "npm" || name == "pnpm" || name == "yarn" || name == "bun") && i+1 < len(args) && packageRunnerSubcommands[args[i+1]]) {
+			for _, a := range args[i+1:] {
+				if externalAgents[normalizeName(a)] {
+					return normalizeName(a), true
+				}
 				for _, pkg := range externalAgentPackages {
 					if strings.Contains(a, pkg) {
 						return a, true
+					}
+				}
+			}
+			return "", false
+		}
+		if shells[name] {
+			for j := i + 1; j+1 < len(args); j++ {
+				if args[j] == "-c" {
+					return commandString(args[j+1], depth)
+				}
+			}
+			return "", false
+		}
+		if name == "find" {
+			for j := i + 1; j+1 < len(args); j++ {
+				switch args[j] {
+				case "-exec", "-execdir", "-ok", "-okdir":
+					if got, ok := externalAgentCommand(args[j+1:], depth+1); ok {
+						return got, true
 					}
 				}
 			}
@@ -332,11 +479,16 @@ func ExternalAgentCommand(args []string) (string, bool) {
 			return "", false
 		}
 		// Bỏ qua cờ (và giá trị của cờ nhận giá trị), gán biến (A=b) và tham
-		// số số (timeout 30) của launcher để tới lệnh thật.
+		// số số (timeout 30) của launcher để tới lệnh thật; env -S mang cả
+		// một dòng lệnh.
 	skip:
 		for i+1 < len(args) {
 			next := args[i+1]
 			switch {
+			case name == "env" && (next == "-S" || next == "--split-string") && i+2 < len(args):
+				return commandString(args[i+2], depth)
+			case strings.HasPrefix(next, "--split-string="):
+				return commandString(strings.TrimPrefix(next, "--split-string="), depth)
 			case slices.Contains(valueFlags, next):
 				i += 2
 			case strings.HasPrefix(next, "-") || strings.Contains(next, "=") || isNumberish(next):
@@ -344,6 +496,24 @@ func ExternalAgentCommand(args []string) (string, bool) {
 			default:
 				break skip
 			}
+		}
+	}
+	return "", false
+}
+
+// commandString xét một dòng lệnh dạng chuỗi (bash -c, env -S): tách theo
+// toán tử nối lệnh rồi xét từng lệnh.
+func commandString(cmd string, depth int) (string, bool) {
+	segments := strings.FieldsFunc(cmd, func(r rune) bool {
+		return r == ';' || r == '|' || r == '&' || r == '\n' || r == '(' || r == ')' || r == '`'
+	})
+	for _, seg := range segments {
+		fields := strings.Fields(seg)
+		for len(fields) > 0 && strings.Contains(fields[0], "=") && !strings.HasPrefix(fields[0], "-") {
+			fields = fields[1:] // A=b claude ...
+		}
+		if got, ok := externalAgentCommand(fields, depth+1); ok {
+			return got, true
 		}
 	}
 	return "", false

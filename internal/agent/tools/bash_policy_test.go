@@ -1,6 +1,8 @@
 package tools
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/shell"
@@ -26,3 +28,21 @@ func TestBashBlocksExternalAgentCLIs(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "claude\n", out)
 }
+
+// Script có shebang gọi qua đường dẫn (vd ~/.local/bin/claude là script bash)
+// được chạy thẳng bằng os/exec: vẫn phải qua bộ chặn trước khi chạy.
+func TestBashBlocksPathPrefixedAgentScripts(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "ran")
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "bin"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "bin", "claude"), []byte("#!/bin/sh\ntouch '"+marker+"'\n"), 0o755))
+	sh := shell.NewShell(&shell.Options{WorkingDir: dir, BlockFuncs: blockFuncs()})
+	for _, cmd := range []string{"./bin/claude -p hi", filepath.Join(dir, "bin", "claude") + " -p hi"} {
+		_, _, err := sh.Exec(t.Context(), cmd)
+		require.Errorf(t, err, "%q", cmd)
+		require.Containsf(t, err.Error(), "not allowed", "%q", cmd)
+	}
+	require.NoFileExists(t, marker)
+}
+

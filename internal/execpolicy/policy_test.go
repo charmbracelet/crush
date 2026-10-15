@@ -2,8 +2,10 @@ package execpolicy
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -37,7 +39,8 @@ func TestAllowlistIsAuthoritativeForMainModels(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, p.Restricted())
 	require.True(t, p.AllowsModel("zai", "glm-5.3-flash"))
-	require.True(t, p.AllowsModel("ZAI", "glm-5.3"), "provider IDs are case-insensitive")
+	require.False(t, p.AllowsModel("ZAI", "glm-5.3"), "provider IDs are exact, like the config")
+	require.False(t, p.AllowsModel("claude_code", "claude-opus-5-5"), "a main provider named like a backend borrows nothing")
 	require.True(t, p.AllowsModel("main", "qwen3.8"))
 	for _, c := range [][2]string{{"zai", "glm-5.4"}, {"zai", "glm-4.6"}, {"main", "qwen3.9"}, {"openai", "gpt-6.1-sol"}, {"anthropic", "claude-opus-5-5"}} {
 		require.Falsef(t, p.AllowsModel(c[0], c[1]), "%s:%s", c[0], c[1])
@@ -78,7 +81,8 @@ func TestDelegationModelAllowlist(t *testing.T) {
 // trị sai cú pháp chặn lúc khởi động.
 func TestParseRejectsAliasesAndGarbage(t *testing.T) {
 	t.Parallel()
-	for _, spec := range []string{"claude_code:opus", "claude_code:fable", "codex:latest", "glm-5.3", "zai:", ":glm"} {
+	for _, spec := range []string{"claude_code:opus", "claude_code:fable", "codex:latest", "glm-5.3", "zai:", ":glm",
+		"claude_code:sonnet[1m]", "claude_code:claude-3-5-haiku-latest", "codex:gpt-6-latest"} {
 		_, err := Parse(spec)
 		require.Errorf(t, err, "%q", spec)
 	}
@@ -105,6 +109,20 @@ func TestExternalAgentCommand(t *testing.T) {
 		{"timeout", "-k", "5", "60", "claude"},
 		{"npx", "-y", "@anthropic-ai/claude-code", "-p", "x"},
 		{"bunx", "@openai/codex", "exec"},
+		{"npx", "claude", "-p", "x"},
+		{"npm", "exec", "--", "claude", "-p", "x"},
+		{"pnpm", "dlx", "codex"},
+		{"/home/u/.nvm/versions/node/bin/claude.exe", "-p"},
+		{"./node_modules/.bin/claude-code"},
+		{"env", "-S", "claude -p hi"},
+		{"doas", "-u", "bob", "claude"},
+		{"env", "doas", "claude"},
+		{"xargs", "-n", "1", "codex"},
+		{"find", ".", "-exec", "claude", "-p", "{}", ";"},
+		{"bash", "-c", "cd x && claude -p hi"},
+		{"sh", "-c", "A=1 codex exec x"},
+		{"agent-cli", "run", "--yolo", "x"},
+		{"crush", "server", "--host", "unix:///tmp/s"},
 	}
 	for _, a := range hits {
 		_, ok := ExternalAgentCommand(a)
@@ -112,6 +130,8 @@ func TestExternalAgentCommand(t *testing.T) {
 	}
 	misses := [][]string{
 		{"git", "status"}, {"go", "test", "./..."}, {"agent-cli", "jobs"}, {"crush", "--version"},
+		{"goose", "-dir", "migrations", "postgres", "up"}, {"agent-cli", "ps", "--all"}, {"bash", "-c", "echo claude"},
+		{"find", ".", "-name", "*.go"}, {"npm", "exec", "prettier"},
 		{"npx", "prettier", "--write", "."}, {"echo", "claude"}, {"timeout", "5", "make", "test"},
 		{"env", "-u", "claude", "ls"}, {"sudo", "-u", "codex", "id"},
 	}
@@ -164,3 +184,48 @@ func TestShellValue(t *testing.T) {
 		require.Equal(t, want, shellValue(in), in)
 	}
 }
+
+// Tệp env viết bằng dạng shell khác (declare -x, readonly, KEY+=, nhiều lệnh
+// một dòng) thì báo lỗi, không lặng lẽ bỏ ranh giới.
+func TestEnvFileUnusualSpellingsFailClosed(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	for i, line := range []string{
+		"declare -x AGENT_CLI_ALLOWED_MODELS=zai:glm-5.3",
+		"typeset -x AGENT_CLI_ALLOWED_MODELS=zai:glm-5.3",
+		"readonly AGENT_CLI_DELEGATION=on",
+		"X=1; AGENT_CLI_ALLOWED_MODELS=zai:glm-5.3",
+		"AGENT_CLI_ALLOWED_MODELS+=zai:glm-5.3",
+	} {
+		f := filepath.Join(dir, fmt.Sprintf("env%d", i))
+		require.NoError(t, os.WriteFile(f, []byte(line+"\n"), 0o600))
+		_, err := readEnvFile(f)
+		require.Errorf(t, err, "%q", line)
+	}
+	ok := filepath.Join(dir, "ok")
+	require.NoError(t, os.WriteFile(ok, []byte("export\tAGENT_CLI_DELEGATION=on\r\n# AGENT_CLI_ALLOWED_MODELS=commented\n"), 0o600))
+	got, err := readEnvFile(ok)
+	require.NoError(t, err)
+	require.Equal(t, "on", strings.TrimSpace(got[DelegationEnv]))
+}
+
+// Ảnh chụp env tin cậy: giá trị .env/cấu hình dự án đặt sau khi chụp không
+// tới chính sách, không tới server con; biến khác giữ nguyên.
+func TestChildEnvUsesTheSnapshot(t *testing.T) {
+	// Không parallel: đổi ảnh chụp cấp gói.
+	prev := snapshot
+	t.Cleanup(func() { snapshot = prev })
+	snapshot = map[string]string{AllowedModelsEnv: "zai:glm-5.3", "HOME": "/home/u"}
+
+	env := ChildEnv([]string{
+		"PATH=/usr/bin",
+		AllowedModelsEnv + "=claude_code:claude-fable-5-1",
+		DelegationEnv + "=on",
+		EnvFileEnv + "=/repo/policy.env",
+		"HOME=/repo",
+	})
+	require.ElementsMatch(t, []string{"PATH=/usr/bin", AllowedModelsEnv + "=zai:glm-5.3", "HOME=/home/u"}, env)
+	require.Equal(t, "zai:glm-5.3", TrustedEnv(AllowedModelsEnv))
+	require.Empty(t, TrustedEnv(DelegationEnv), "set after the snapshot: ignored")
+}
+

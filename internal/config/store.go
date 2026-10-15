@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/charmbracelet/crush/internal/execpolicy"
 	"log/slog"
 	"maps"
 	"os"
@@ -509,6 +510,16 @@ func (s *ConfigStore) RemoveConfigField(scope Scope, key string) error {
 	return nil
 }
 
+// checkPreferredModel kiểm model theo ranh giới provider/model; biến để test
+// thay.
+var checkPreferredModel = func(m SelectedModel) error {
+	pol, err := execpolicy.Current()
+	if err != nil {
+		return err
+	}
+	return pol.CheckModel(m.Provider, m.Model)
+}
+
 // UpdatePreferredModel updates the preferred model for the given type and
 // persists it to the config file at the given scope. The selected model and
 // the recent-models list are written together in a single config write.
@@ -518,6 +529,12 @@ func (s *ConfigStore) RemoveConfigField(scope Scope, key string) error {
 // latency); agents are refreshed separately by the caller (see
 // UpdateAgentModel).
 func (s *ConfigStore) UpdatePreferredModel(scope Scope, modelType SelectedModelType, model SelectedModel) error {
+	// Model ngoài ranh giới (AGENT_CLI_ALLOWED_MODELS) không được ghi xuống
+	// đĩa: ghi rồi thì lần mở sau dừng ngay lúc dựng agent, không sửa được
+	// từ TUI.
+	if err := checkPreferredModel(model); err != nil {
+		return err
+	}
 	return s.update(scope, func(c *Config) map[string]any {
 		return s.updatePreferredModelFields(c, modelType, model)
 	})

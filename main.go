@@ -9,10 +9,18 @@ import (
 
 	"github.com/charmbracelet/crush/internal/cmd"
 	_ "github.com/charmbracelet/crush/internal/dns"
-	_ "github.com/joho/godotenv/autoload"
+	"github.com/charmbracelet/crush/internal/execpolicy"
+	"github.com/joho/godotenv"
 )
 
 func main() {
+	// Chụp env tin cậy (ranh giới provider/model, tệp env, CLI giao việc)
+	// TRƯỚC khi nạp `.env` của thư mục hiện tại: tệp đó thuộc repo đang mở
+	// và không được nới ranh giới. Rồi nạp `.env` như autoload cũ (không đè
+	// biến đã có).
+	execpolicy.Snapshot()
+	_ = godotenv.Load()
+
 	if os.Getenv("CRUSH_PROFILE") != "" {
 		go func() {
 			slog.Info("Serving pprof at localhost:6060")

@@ -5,7 +5,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"os"
+	"github.com/charmbracelet/crush/internal/execpolicy"
 	"slices"
 	"strings"
 
@@ -42,7 +42,7 @@ type claudeStrategy struct {
 
 // newClaudeStrategy đọc cấu hình từ env lúc dựng tool.
 func newClaudeStrategy() claudeStrategy {
-	return claudeStrategy{bin: os.Getenv(claudeBinEnv), mode: os.Getenv(claudeModeEnv)}
+	return claudeStrategy{bin: execpolicy.TrustedEnv(claudeBinEnv), mode: execpolicy.TrustedEnv(claudeModeEnv)}
 }
 
 func (claudeStrategy) name() string       { return ClaudeCodeToolName }

@@ -56,6 +56,14 @@ func scriptDispatchHandler(blockFuncs []BlockFunc) execMiddleware {
 			// the process cwd — hook commands are authored with the hook
 			// Runner's cwd in mind and sub-shells can cd before an exec.
 			scriptPath := filepathext.SmartJoin(interp.HandlerCtx(ctx).Dir, args[0])
+			// Chặn trước khi chạy: script có shebang được chạy thẳng bằng
+			// os/exec ở dưới, không qua blockHandler (vd ~/.local/bin/claude
+			// là script bash).
+			for _, blocked := range blockFuncs {
+				if blocked(args) {
+					return fmt.Errorf("command is not allowed for security reasons: %q", args[0])
+				}
+			}
 			probe, err := probeFile(scriptPath)
 			if err != nil {
 				return err

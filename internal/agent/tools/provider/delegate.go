@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -116,7 +115,7 @@ func NewTools(workingDir string, perms permissionRequester, allowed []string, po
 		}
 		path, err := exec.LookPath(s.binary())
 		if err != nil {
-			if os.Getenv(s.binaryEnv()) != "" {
+			if execpolicy.TrustedEnv(s.binaryEnv()) != "" {
 				return nil, fmt.Errorf("%s=%q is not an executable: %w", s.binaryEnv(), s.binary(), err)
 			}
 			continue
@@ -162,7 +161,7 @@ func newDelegationTool(workingDir string, perms permissionRequester, s strategy,
 			if model == "" && len(models) > 0 {
 				model = models[0]
 			}
-			if !slices.Contains(models, model) {
+			if model == "" || !slices.Contains(models, model) {
 				denied := &execpolicy.Denied{Code: execpolicy.CodeModelNotAllowed, Provider: s.name(), Model: model, Allowed: slices.Clone(models)}
 				slog.Info("Delegation denied", "backend", s.name(), "model", model, "code", denied.Code)
 				return fantasy.NewTextErrorResponse(denied.Error()), nil
@@ -220,7 +219,7 @@ func newDelegationTool(workingDir string, perms permissionRequester, s strategy,
 // hộp thoại in params của tool lạ thành map khó đọc ở chế độ client/server.
 func permissionDescription(s strategy, workingDir string, params DelegationParams) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s will run this task headlessly in %s with %s, model %s.", s.label(), workingDir, s.access(), displaySafe(params.Model))
+	fmt.Fprintf(&b, "%s (%s) will run this task headlessly in %s with %s, model %s.", s.label(), displaySafe(s.binary()), workingDir, s.access(), displaySafe(params.Model))
 	if params.Resume != "" {
 		fmt.Fprintf(&b, " It continues session %s.", params.Resume)
 	}

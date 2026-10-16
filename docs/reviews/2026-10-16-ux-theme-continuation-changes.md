@@ -93,3 +93,21 @@ Các tệp dưới đây do một phiên khác (Codex) làm, nằm sẵn trong c
 - **Tiêu đề LLM đè tên người dùng vừa tự đổi:** chưa sửa.
 - **Review agent / checkpoint / `/doctor`:** đề nghị KHÔNG làm — `git` và review bằng mắt rẻ hơn.
 - Theme và F2 CHƯA thử bằng mắt trong terminal thật; binary CHƯA cài lại.
+
+## A7. Tiêu đề LLM không đè tên người dùng tự đổi (`internal/agent/agent.go`)
+Tiêu đề do model sinh (chạy vài chục giây trên model local) ghi đè vô điều kiện
+lên tên session, nên tên đổi bằng F2/Ctrl+R giữa chừng bị mất. Thêm `machineTitle`:
+chỉ ghi đè khi tên hiện tại vẫn do máy đặt (rỗng / "Untitled Session" / "New Session"
+/ tiêu đề suy ra); tên người dùng được giữ, usage vẫn ghi. Bổ trợ cho F2 (A3).
+Test `title_preserve_test.go`; đột biến bỏ guard → đỏ. Test cũ (Codex) vẫn xanh.
+
+## A8. Vá lỗ chặn tự-kill (`internal/shell/protect.go`)
+Bộ chặn agent tự giết tiến trình agent-cli lọt hai nhóm (đo bằng test):
+- Lớp bọc `sudo`/`doas`/`xargs` chưa được bóc; nay `peelLaunchers` bóc cả ba kèm
+  cờ ăn giá trị (`sudo -u user`, `xargs -I{}`).
+- `pkill`/`killall` khớp theo chuỗi con / regex, nhưng guard chỉ so tên chính xác;
+  nay `patternHitsProtected` chặn khi mẫu chứa / bị chứa / (coi như regex) khớp một
+  tên được bảo vệ, nghiêng về chặn (fail-closed).
+Test `protect_test.go` thêm hai nhóm; đột biến gỡ từng phần → đỏ.
+Giới hạn còn lại (bản sao đổi tên binary, `systemctl`/`docker stop`, `bash -c` lồng
+sâu) giữ nguyên như ghi chú trong file — vẫn qua hộp thoại xin quyền thường.

@@ -158,7 +158,6 @@ type baseToolMessageItem struct {
 	status       ToolStatus
 	// we use this so we can efficiently cache
 	// tools that have a capped width (e.x bash.. and others)
-	hasCappedWidth bool
 	// isCompact indicates this tool should render in compact mode.
 	isCompact bool
 	// spinningFunc allows tools to override the default spinning logic.
@@ -181,7 +180,6 @@ func newBaseToolMessageItem(
 	canceled bool,
 ) *baseToolMessageItem {
 	// we only do full width for diffs (as far as I know)
-	hasCappedWidth := toolCall.Name != tools.EditToolName && toolCall.Name != tools.MultiEditToolName
 
 	status := ToolStatusRunning
 	if canceled {
@@ -199,7 +197,6 @@ func newBaseToolMessageItem(
 		toolCall:                 toolCall,
 		result:                   result,
 		status:                   status,
-		hasCappedWidth:           hasCappedWidth,
 	}
 	t.anim = anim.New(anim.Settings{
 		ID:          toolCall.ID,
@@ -337,10 +334,7 @@ func (t *baseToolMessageItem) Advance() bool {
 
 // RawRender implements [MessageItem].
 func (t *baseToolMessageItem) RawRender(width int) string {
-	toolItemWidth := width - MessageLeftPaddingTotal
-	if t.hasCappedWidth {
-		toolItemWidth = cappedMessageWidth(width)
-	}
+	toolItemWidth := toolMessageWidth(width)
 
 	content, height, ok := t.getCachedRender(toolItemWidth)
 	// if we are spinning or there is no cache rerender

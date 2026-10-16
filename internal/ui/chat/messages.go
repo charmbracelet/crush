@@ -406,6 +406,13 @@ func cappedMessageWidth(availableWidth int) int {
 	return min(availableWidth-MessageLeftPaddingTotal, maxTextWidth)
 }
 
+// toolMessageWidth là chiều rộng cho output tool (bash, code, diff, kết quả
+// tìm): dùng hết khung chat. Trần maxTextWidth chỉ hợp với đoạn văn; output máy
+// bị bẻ dòng ở 120 cột thì khó đọc hơn, và để trống nửa màn hình rộng.
+func toolMessageWidth(availableWidth int) int {
+	return availableWidth - MessageLeftPaddingTotal
+}
+
 // prismSavingsSuffix returns the styled Prism savings suffix for the
 // message, or an empty string when none was reported. The hypercredit
 // symbol carries the sidebar's hypercredit color; the rest is subdued

@@ -204,7 +204,7 @@ func (s *ShellItem) ToggleExpanded() bool {
 }
 
 func (s *ShellItem) RawRender(width int) string {
-	cappedWidth := cappedMessageWidth(width)
+	cappedWidth := toolMessageWidth(width)
 
 	cmd := strings.ReplaceAll(s.command, "\n", " ")
 	cmd = strings.ReplaceAll(cmd, "\t", "    ")

@@ -479,6 +479,9 @@ type Options struct {
 	Notifications             string       `json:"notifications,omitempty" jsonschema:"description=Notification style to use. Options: auto (default)\\, native\\, osc\\, bell\\, disabled. Auto selects based on environment: native for local sessions\\, osc for SSH (with automatic OSC 99/777 detection).,enum=auto,enum=native,enum=osc,enum=bell,enum=disabled,default=auto"`
 	DisabledSkills            []string     `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=crush-config"`
 	RequestTimeout            *int         `json:"request_timeout,omitempty" jsonschema:"description=Timeout in seconds for each LLM API request. Streaming responses are aborted only after this much inactivity\\, so slow but active streams are never killed. 0 disables it\\, negative values are invalid.,default=60,example=120,example=300,example=0"`
+	SubagentsPaths            []string     `json:"subagents_paths,omitempty" jsonschema:"description=Paths to directories containing subagent definition files (*.md files with YAML frontmatter)"`
+	DisabledSubagents         []string     `json:"disabled_subagents,omitempty" jsonschema:"description=List of subagent names to disable and hide from the agent"`
+	EnabledSubagents          []string     `json:"enabled_subagents,omitempty" jsonschema:"description=List of subagent names to force-enable\\, overriding a disable set at a broader config scope"`
 }
 
 // DefaultRequestTimeout bounds each LLM API request when the user has not
@@ -501,6 +504,28 @@ func (o *Options) GetRequestTimeout() time.Duration {
 		return 0
 	}
 	return time.Duration(*o.RequestTimeout) * time.Second
+}
+
+// EffectiveDisabledSubagents returns the subagent names that are disabled
+// after enabled_subagents has subtracted out any names re-enabled at a
+// narrower scope. jsons.Merge concatenates arrays across config layers
+// rather than overriding them, so options.enabled_subagents is the only way
+// a narrower scope can cancel out a name disabled at a broader one.
+func EffectiveDisabledSubagents(opts *Options) []string {
+	if opts == nil {
+		return nil
+	}
+	enabled := make(map[string]bool, len(opts.EnabledSubagents))
+	for _, name := range opts.EnabledSubagents {
+		enabled[name] = true
+	}
+	var effective []string
+	for _, name := range opts.DisabledSubagents {
+		if !enabled[name] {
+			effective = append(effective, name)
+		}
+	}
+	return effective
 }
 
 type MCPs map[string]MCPConfig
@@ -985,6 +1010,94 @@ func (c *Config) IsModelAvailable(provider, model string) bool {
 	return false
 }
 
+// FindModelProvider resolves a model id to the enabled provider that offers
+// it, searching every catalog GetModel does (including the ChatGPT and Grok
+// subscription lists). A non-empty providerID restricts the search to that
+// provider. With no providerID an id several providers share resolves to the
+// selected large model's provider, then the small one's, if either offers
+// it; otherwise it is an error rather than a guess, so the caller has to name
+// the provider.
+func (c *Config) FindModelProvider(providerID, modelID string) (ProviderConfig, catwalk.Model, error) {
+	if modelID == "" {
+		return ProviderConfig{}, catwalk.Model{}, errors.New("model id is empty")
+	}
+	if providerID != "" {
+		p, ok := c.Providers.Get(providerID)
+		if !ok || p.Disable {
+			return ProviderConfig{}, catwalk.Model{}, fmt.Errorf("provider %q is not configured or is disabled", providerID)
+		}
+		m := c.GetModel(providerID, modelID)
+		if m == nil {
+			return ProviderConfig{}, catwalk.Model{}, fmt.Errorf("model %q is not offered by provider %q%s", modelID, providerID, similarModelsHint([]ProviderConfig{p}, modelID))
+		}
+		return p, *m, nil
+	}
+	var (
+		found ProviderConfig
+		model catwalk.Model
+		ids   []string
+	)
+	for _, p := range c.EnabledProviders() {
+		if m := c.GetModel(p.ID, modelID); m != nil {
+			found, model = p, *m
+			ids = append(ids, p.ID)
+		}
+	}
+	switch len(ids) {
+	case 0:
+		return ProviderConfig{}, catwalk.Model{}, fmt.Errorf("model %q is not offered by any configured provider%s", modelID, similarModelsHint(c.EnabledProviders(), modelID))
+	case 1:
+		return found, model, nil
+	default:
+		for _, t := range []SelectedModelType{SelectedModelTypeLarge, SelectedModelTypeSmall} {
+			if p := c.Models[t].Provider; slices.Contains(ids, p) {
+				return c.FindModelProvider(p, modelID)
+			}
+		}
+		slices.Sort(ids)
+		return ProviderConfig{}, catwalk.Model{}, fmt.Errorf(
+			"model %q is offered by multiple providers (%s); set provider to choose one",
+			modelID, strings.Join(ids, ", "),
+		)
+	}
+}
+
+// maxSimilarModels caps the suggestions in similarModelsHint.
+const maxSimilarModels = 10
+
+// similarModelsHint lists model ids from providers whose id or name contains
+// query (case-insensitive), so a loose name like "sonnet" in an error points at
+// the real ids. It returns "" when nothing matches.
+func similarModelsHint(providers []ProviderConfig, query string) string {
+	q := strings.ToLower(query)
+	var ids []string
+	for _, p := range providers {
+		for _, models := range [][]catwalk.Model{p.Models, p.ChatGPTModels, p.GrokModels} {
+			for _, m := range models {
+				if strings.Contains(strings.ToLower(m.ID), q) || strings.Contains(strings.ToLower(m.Name), q) {
+					ids = append(ids, m.ID)
+				}
+			}
+		}
+	}
+	if len(ids) == 0 {
+		return ""
+	}
+	slices.Sort(ids)
+	ids = slices.Compact(ids)
+	if len(ids) > maxSimilarModels {
+		ids = ids[:maxSimilarModels]
+	}
+	return "; similar: " + strings.Join(ids, ", ")
+}
+
+// ValidateModel reports why a model id (optionally pinned to a provider)
+// cannot be resolved, or nil when FindModelProvider would succeed.
+func (c *Config) ValidateModel(providerID, modelID string) error {
+	_, _, err := c.FindModelProvider(providerID, modelID)
+	return err
+}
+
 func (c *Config) GetProviderForModel(modelType SelectedModelType) *ProviderConfig {
 	model, ok := c.Models[modelType]
 	if !ok {
@@ -1021,6 +1134,16 @@ func (c *Config) SmallModel() *catwalk.Model {
 }
 
 const maxRecentModelsPerType = 5
+
+// AllToolNames returns every built-in tool name an agent's AllowedTools may
+// contain. MCP tools are not included: they bypass AllowedTools entirely and
+// are gated by AllowedMCP instead (see the agent coordinator's buildTools).
+// Exported so callers that accept user-authored tool allowlists — subagent
+// `tools:` / `disallowedTools:` frontmatter — can reject unknown names instead
+// of silently intersecting them away to nothing.
+func AllToolNames() []string {
+	return allToolNames()
+}
 
 func allToolNames() []string {
 	return []string{

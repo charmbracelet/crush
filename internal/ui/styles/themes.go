@@ -2,6 +2,7 @@ package styles
 
 import (
 	"fmt"
+	"image/color"
 	"log/slog"
 	"sort"
 	"strings"
@@ -110,6 +111,19 @@ func charmtoneOpts() quickStyleOpts {
 		ansiBrightMagenta: charmtone.Blush,
 		ansiBrightCyan:    charmtone.Sardine,
 		ansiBrightWhite:   charmtone.Salt,
+
+		// Subagent identity palette, in SubagentColorNames order:
+		// red, orange, yellow, green, cyan, blue, purple, pink.
+		subagentPalette: [8]color.Color{
+			charmtone.Cherry,
+			charmtone.Tang,
+			charmtone.Citron,
+			charmtone.Julep,
+			charmtone.Guppy,
+			charmtone.Sapphire,
+			charmtone.Mauve,
+			charmtone.Flamingo,
+		},
 	}
 }
 
@@ -232,6 +246,19 @@ func gruvboxDarkOpts() quickStyleOpts {
 		ansiBrightMagenta: lipgloss.Color("#d3869b"),
 		ansiBrightCyan:    lipgloss.Color("#8ec07c"),
 		ansiBrightWhite:   lipgloss.Color("#ebdbb2"),
+
+		// Subagent identity palette, in SubagentColorNames order:
+		// red, orange, yellow, green, cyan, blue, purple, pink.
+		subagentPalette: [8]color.Color{
+			lipgloss.Color("#fb4934"),
+			lipgloss.Color("#fe8019"),
+			lipgloss.Color("#fabd2f"),
+			lipgloss.Color("#b8bb26"),
+			lipgloss.Color("#8ec07c"),
+			lipgloss.Color("#83a598"),
+			lipgloss.Color("#b16286"),
+			lipgloss.Color("#d3869b"),
+		},
 	}
 }
 

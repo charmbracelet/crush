@@ -192,8 +192,10 @@ option reset <list-key>    # clear a list option back to empty
   `option ui exit-banner default|compact|none`,
   `option ui completions-max-depth N`, `option ui completions-max-items N`.
 - **List keys** (singular, one value per call, repeatable): `context-path`,
-  `global-context-path`, `skill-path`, `disable-skill`. Use `option reset <key>`
-  to wipe inherited values (e.g. after `source`).
+  `global-context-path`, `skill-path`, `disable-skill`, `subagent-path`,
+  `disable-subagent`, `enable-subagent`. Use `option reset <key>`
+  to wipe inherited values (e.g. after `source`). An `enable-subagent`
+  entry overrides `disable-subagent` from any config scope.
 
 ```bash
 option progress false
@@ -349,6 +351,9 @@ The `$schema` property enables IDE autocomplete but is optional.
 | `permissions allow view ls`          | `permissions.allowed_tools = ["view","ls"]`            |
 | `permissions deny bash`              | `options.disabled_tools = ["bash"]`                    |
 | `option skill-path ./skills`         | `options.skills_paths = ["./skills"]`                  |
+| `option subagent-path ./agents`      | `options.subagents_paths = ["./agents"]`               |
+| `option disable-subagent NAME`       | `options.disabled_subagents = ["NAME"]`                |
+| `option enable-subagent NAME`        | `options.enabled_subagents = ["NAME"]`                 |
 | `option metrics false`               | `options.disable_metrics = true`                       |
 | `option request-timeout 300`          | `options.request_timeout = 300`                        |
 | `option attribution-trailer-style none` | `options.attribution.trailer_style = "none"`        |

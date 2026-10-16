@@ -16,6 +16,7 @@ import (
 
 	"github.com/charlievieth/fastwalk"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/stringext"
 	"gopkg.in/yaml.v3"
 )
 
@@ -27,8 +28,7 @@ const (
 )
 
 var (
-	namePattern    = regexp.MustCompile(`^[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*$`)
-	promptReplacer = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "\"", "&quot;", "'", "&apos;")
+	namePattern = regexp.MustCompile(`^[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*$`)
 
 	latestStates   []*SkillState
 	latestStatesMu sync.RWMutex
@@ -165,7 +165,7 @@ func Parse(path string) (*Skill, error) {
 
 // ParseContent parses a SKILL.md from raw bytes.
 func ParseContent(content []byte) (*Skill, error) {
-	frontmatter, body, err := splitFrontmatter(string(content))
+	frontmatter, body, err := SplitFrontmatter(string(content))
 	if err != nil {
 		return nil, err
 	}
@@ -180,8 +180,9 @@ func ParseContent(content []byte) (*Skill, error) {
 	return &skill, nil
 }
 
-// splitFrontmatter extracts YAML frontmatter and body from markdown content.
-func splitFrontmatter(content string) (frontmatter, body string, err error) {
+// SplitFrontmatter extracts YAML frontmatter and body from markdown content.
+// Subagent definitions share the format and parse with it too.
+func SplitFrontmatter(content string) (frontmatter, body string, err error) {
 	// Strip UTF-8 BOM for compatibility with editors that include it.
 	content = strings.TrimPrefix(content, "\uFEFF")
 	// Normalize line endings to \n for consistent parsing.
@@ -309,9 +310,9 @@ func ToPromptXML(skills []*Skill) string {
 			continue
 		}
 		sb.WriteString("  <skill>\n")
-		fmt.Fprintf(&sb, "    <name>%s</name>\n", escape(s.Name))
-		fmt.Fprintf(&sb, "    <description>%s</description>\n", escape(s.Description))
-		fmt.Fprintf(&sb, "    <location>%s</location>\n", escape(s.SkillFilePath))
+		fmt.Fprintf(&sb, "    <name>%s</name>\n", stringext.EscapeXML(s.Name))
+		fmt.Fprintf(&sb, "    <description>%s</description>\n", stringext.EscapeXML(s.Description))
+		fmt.Fprintf(&sb, "    <location>%s</location>\n", stringext.EscapeXML(s.SkillFilePath))
 		if s.Builtin {
 			sb.WriteString("    <type>builtin</type>\n")
 		}
@@ -325,18 +326,14 @@ func ToPromptXML(skills []*Skill) string {
 func (s *Skill) FormatInvocation() string {
 	var sb strings.Builder
 	sb.WriteString("<loaded_skill>\n")
-	fmt.Fprintf(&sb, "  <name>%s</name>\n", escape(s.Name))
-	fmt.Fprintf(&sb, "  <description>%s</description>\n", escape(s.Description))
-	fmt.Fprintf(&sb, "  <location>%s</location>\n", escape(s.SkillFilePath))
+	fmt.Fprintf(&sb, "  <name>%s</name>\n", stringext.EscapeXML(s.Name))
+	fmt.Fprintf(&sb, "  <description>%s</description>\n", stringext.EscapeXML(s.Description))
+	fmt.Fprintf(&sb, "  <location>%s</location>\n", stringext.EscapeXML(s.SkillFilePath))
 	sb.WriteString("  <instructions>\n")
-	sb.WriteString(escape(s.Instructions))
+	sb.WriteString(stringext.EscapeXML(s.Instructions))
 	sb.WriteString("\n  </instructions>\n")
 	sb.WriteString("</loaded_skill>")
 	return sb.String()
-}
-
-func escape(s string) string {
-	return promptReplacer.Replace(s)
 }
 
 // DeduplicateStates removes duplicate skill states by name. When duplicates exist,

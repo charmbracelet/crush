@@ -94,3 +94,84 @@ jobs:
           name: dist
           path: |
             dist
+
+  # Optional metadata for the archives GoReleaser has already published.
+  # Keep signing away from release-write access and the publishing secrets.
+  packslip:
+    needs: release
+    if: needs.release.result == 'success'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      bundle-ready: ${{ steps.stage.outcome == 'success' }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist
+      - name: Sign release metadata
+        id: sign
+        continue-on-error: true
+        uses: jdx/packslip@0e9bde4ea49070555a79cac1f040f1dafe60acd6 # v1.8.0
+        with:
+          packslip-sha256: 82a1064adb98517bd2f1a88957b7ca9bcfe071b2725ccec725f2db47a98a24eb
+          artifacts: dist/crush_*.tar.gz dist/crush_*.zip
+          bin: crush
+          resources: |
+            completion/bash,zsh,fish=exec:crush completion {shell}
+          # The build does not currently produce GitHub build attestations.
+          attest: "false"
+          upload: "false"
+      - name: Stage successful bundle
+        id: stage
+        if: steps.sign.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: packslip-bundle
+          path: ${{ steps.sign.outputs.bundle }}
+          if-no-files-found: error
+          retention-days: 1
+
+  publish-packslip:
+    needs: packslip
+    if: needs.packslip.outputs.bundle-ready == 'true'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: packslip-bundle
+          path: packslip
+      - name: Check mutable release assets and upload the bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # Release assets are mutable. Do not publish metadata for bytes
+          # replaced since this run built them. Later replacements will fail
+          # consumers' signed digest checks; this does not make assets immutable.
+          gh api "repos/${GH_REPO}/releases/tags/${RELEASE_TAG}" > release.json
+          jq --exit-status --slurpfile bundle packslip/packslip.sigstore.json '
+            ($bundle[0].dsseEnvelope.payload | @base64d | fromjson) as $statement
+            | .assets as $assets
+            | ($statement.predicate.artifacts | length > 0)
+              and all($statement.predicate.artifacts[];
+                . as $artifact
+                | ($statement.subject[] | select(.name == $artifact.name).digest.sha256) as $digest
+                | any($assets[];
+                    .name == $artifact.name
+                    and .size == $artifact.size
+                    and .digest == ("sha256:" + $digest)))
+          ' release.json
+          # Match Packslip's normal rerun behavior, only after checking that
+          # the statement still describes the currently published archives.
+          gh release upload "$RELEASE_TAG" packslip/packslip.sigstore.json --repo "$GH_REPO" --clobber

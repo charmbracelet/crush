@@ -1,6 +1,7 @@
 package shell
 
 import (
+	"regexp"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -21,6 +22,19 @@ import (
 var processLaunchers = map[string]bool{
 	"env": true, "nohup": true, "timeout": true, "nice": true,
 	"stdbuf": true, "setsid": true, "ionice": true, "command": true,
+	"sudo": true, "doas": true, "xargs": true,
+}
+
+// launcherValueFlags là các cờ của lớp bọc ăn thêm một GIÁ TRỊ ở arg kế (vd
+// `sudo -u root`, `xargs -I{} ...`): phải bỏ cả giá trị để không nhầm nó là
+// lệnh thật. Không gồm cờ nhận giá trị số (đã bị bỏ như digit) hay cờ không
+// giá trị (vd `sudo -n`).
+var launcherValueFlags = map[string]bool{
+	"-u": true, "--user": true, "-g": true, "--group": true,
+	"-C": true, "-p": true, "-U": true, "-R": true, "-h": true,
+	"-I": true, "--replace": true, "-a": true, "--arg-file": true,
+	"-E": true, "--eof": true, "-d": true, "--delimiter": true,
+	"-L": true, "--max-lines": true, "-P": true, "--max-procs": true,
 }
 
 // shutdownCommands tắt/khởi động lại cả máy: box chạy dịch vụ thật nên chặn
@@ -49,7 +63,14 @@ func peelLaunchers(args []string) []string {
 		for len(args) > 0 {
 			a := args[0]
 			// Bỏ cờ, gán biến (A=b) và tham số số (timeout 5) của lớp bọc.
-			if strings.HasPrefix(a, "-") || strings.Contains(a, "=") || isAllDigits(a) {
+			if strings.HasPrefix(a, "-") {
+				args = args[1:]
+				if launcherValueFlags[a] && len(args) > 0 {
+					args = args[1:] // bỏ luôn giá trị đi kèm
+				}
+				continue
+			}
+			if strings.Contains(a, "=") || isAllDigits(a) {
 				args = args[1:]
 				continue
 			}
@@ -222,18 +243,43 @@ func pidRunsSelfExe(pid int) bool {
 	return err == nil && target == selfExe
 }
 
+// patternHitsProtected báo mẫu của pkill/killall có đe doạ một tiến trình được
+// bảo vệ không. pkill/killall khớp theo CHUỖI CON / REGEX trên tên tiến trình
+// (hoặc cả dòng lệnh với -f), nên so tên chính xác là chưa đủ: chặn khi mẫu
+// chứa, bị chứa, hoặc (coi như regex) khớp một tên được bảo vệ. Nghiêng về
+// chặn (fail-closed) vì đây là lệnh giết tiến trình.
+func patternHitsProtected(pattern string, names []string) bool {
+	p := strings.ToLower(strings.TrimSpace(pattern))
+	if p == "" {
+		return false
+	}
+	re, reErr := regexp.Compile(p)
+	for _, n := range names {
+		n = strings.ToLower(n)
+		if n == "" {
+			continue
+		}
+		if strings.Contains(n, p) || strings.Contains(p, n) {
+			return true
+		}
+		if reErr == nil && re.MatchString(n) {
+			return true
+		}
+	}
+	return false
+}
+
 // defaultProcessGuard là bộ bảo vệ dùng lúc chạy thật.
 var defaultProcessGuard = ProcessGuard{
 	ProtectedPID: func(pid int) bool {
 		return selfTree[pid] || pidRunsSelfExe(pid)
 	},
-	ProtectedName: func(name string) bool {
-		n := baseName(name)
-		if n == "crush" || n == "agent-cli" {
-			return true
+	ProtectedName: func(pattern string) bool {
+		names := []string{"crush", "agent-cli"}
+		if selfExe != "" {
+			names = append(names, baseName(selfExe))
 		}
-		// pkill/killall theo tên khớp chính tên binary của mình.
-		return selfExe != "" && n == baseName(selfExe)
+		return patternHitsProtected(pattern, names)
 	},
 }
 

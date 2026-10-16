@@ -16,9 +16,8 @@ func testGuard(protectedPIDs ...int) ProcessGuard {
 	}
 	return ProcessGuard{
 		ProtectedPID: func(pid int) bool { return set[pid] },
-		ProtectedName: func(name string) bool {
-			n := baseName(name)
-			return n == "crush" || n == "agent-cli" || n == "mycli"
+		ProtectedName: func(pattern string) bool {
+			return patternHitsProtected(pattern, []string{"crush", "agent-cli", "mycli"})
 		},
 	}
 }
@@ -79,6 +78,47 @@ func TestProtect_BlocksKillByName(t *testing.T) {
 	for _, args := range [][]string{
 		{"pkill", "node"},
 		{"killall", "chrome"},
+	} {
+		_, ok := g.Blocked(args)
+		require.Falsef(t, ok, "%v", args)
+	}
+}
+
+// Lớp bọc sudo/doas/xargs không được che lệnh giết tiến trình được bảo vệ.
+func TestProtect_PeelsSudoAndXargs(t *testing.T) {
+	t.Parallel()
+	g := testGuard(954803)
+	for _, args := range [][]string{
+		{"sudo", "kill", "954803"},
+		{"sudo", "-n", "kill", "954803"},
+		{"sudo", "-u", "root", "kill", "954803"},
+		{"doas", "kill", "954803"},
+		{"xargs", "kill", "954803"},
+		{"xargs", "-r", "kill", "954803"},
+		{"xargs", "-I{}", "kill", "954803"},
+		{"sudo", "xargs", "kill", "954803"},
+	} {
+		_, ok := g.Blocked(args)
+		require.Truef(t, ok, "%v", args)
+	}
+}
+
+// pkill/killall khớp theo chuỗi con hoặc regex, không chỉ tên chính xác.
+func TestProtect_BlocksKillByPatternMatch(t *testing.T) {
+	t.Parallel()
+	g := testGuard()
+	for _, args := range [][]string{
+		{"pkill", "-f", "crush server"},
+		{"pkill", "crus"},
+		{"killall", "-r", "cru.*"},
+		{"pkill", "-f", "agent-cli"},
+	} {
+		_, ok := g.Blocked(args)
+		require.Truef(t, ok, "%v", args)
+	}
+	for _, args := range [][]string{
+		{"pkill", "node"},
+		{"killall", "-r", "fire.*"},
 	} {
 		_, ok := g.Blocked(args)
 		require.Falsef(t, ok, "%v", args)

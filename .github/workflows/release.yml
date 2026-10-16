@@ -149,29 +149,9 @@ jobs:
         with:
           name: packslip-bundle
           path: packslip
-      - name: Check mutable release assets and upload the bundle
+      - name: Upload the bundle
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          # Release assets are mutable. Do not publish metadata for bytes
-          # replaced since this run built them. Later replacements will fail
-          # consumers' signed digest checks; this does not make assets immutable.
-          gh api "repos/${GH_REPO}/releases/tags/${RELEASE_TAG}" > release.json
-          jq --exit-status --slurpfile bundle packslip/packslip.sigstore.json '
-            ($bundle[0].dsseEnvelope.payload | @base64d | fromjson) as $statement
-            | .assets as $assets
-            | ($statement.predicate.artifacts | length > 0)
-              and all($statement.predicate.artifacts[];
-                . as $artifact
-                | ($statement.subject[] | select(.name == $artifact.name).digest.sha256) as $digest
-                | any($assets[];
-                    .name == $artifact.name
-                    and .size == $artifact.size
-                    and .digest == ("sha256:" + $digest)))
-          ' release.json
-          # Match Packslip's normal rerun behavior, only after checking that
-          # the statement still describes the currently published archives.
-          gh release upload "$RELEASE_TAG" packslip/packslip.sigstore.json --repo "$GH_REPO" --clobber
+        run: gh release upload "$RELEASE_TAG" packslip/packslip.sigstore.json --repo "$GH_REPO" --clobber

@@ -39,6 +39,7 @@ type KeyMap struct {
 
 	Chat struct {
 		NewSession     key.Binding
+		RenameSession  key.Binding
 		NextSession    key.Binding
 		PrevSession    key.Binding
 		JumpSession    key.Binding
@@ -224,6 +225,10 @@ func DefaultKeyMap() KeyMap {
 	km.Chat.NewSession = key.NewBinding(
 		key.WithKeys("alt+n", "ctrl+n"),
 		key.WithHelp("alt+n", "new"),
+	)
+	km.Chat.RenameSession = key.NewBinding(
+		key.WithKeys("f2"),
+		key.WithHelp("f2", "rename"),
 	)
 	// Đi vòng qua các session (thay cho Alt+Tab mà trình quản lý cửa sổ giữ
 	// trên hầu hết desktop); Alt+. / Alt+, không bị Cinnamon hay

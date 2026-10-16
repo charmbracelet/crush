@@ -485,6 +485,18 @@ func (s *Session) updateSessionCmd(session session.Session) tea.Cmd {
 	}
 }
 
+// StartRename vào thẳng chế độ đổi tên cho session id (F2 ở màn chat). Trả false
+// và giữ chế độ thường nếu id không phải mục đang chọn, để không đổi nhầm tên
+// session khác.
+func (s *Session) StartRename(id string) bool {
+	if item := s.selectedSessionItem(); item == nil || item.ID() != id {
+		return false
+	}
+	s.sessionsMode = sessionsModeUpdating
+	s.list.SetItems(sessionItems(s.com.Styles, sessionsModeUpdating, s.sessions...)...)
+	return true
+}
+
 func (s *Session) enterDeleteMode() {
 	s.sessionsMode = sessionsModeDeleting
 	s.list.SetItems(sessionItems(s.com.Styles, sessionsModeDeleting, s.sessions...)...)

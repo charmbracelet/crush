@@ -3334,6 +3334,15 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				cmds = append(cmds, cmd)
 			}
 			return true
+		case key.Matches(msg, m.keyMap.Chat.RenameSession):
+			// Cùng đường với hộp thoại Sessions (Ctrl+R): liệt kê ngoài luồng
+			// Update, mở khi danh sách về, vào chế độ đổi tên cho session này.
+			if m.state == uiChat && m.hasSession() {
+				if cmd := m.openSessionsDialogFor(true); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+				return true
+			}
 		case key.Matches(msg, m.keyMap.Chat.NextSession):
 			if cmd := m.cycleSession(1); cmd != nil {
 				cmds = append(cmds, cmd)
@@ -4314,7 +4323,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 			k.ToggleYolo,
 		)
 		if hasSession {
-			mainBinds = append(mainBinds, k.Chat.NewSession, k.Chat.NextSession, k.Chat.PrevSession, k.Chat.JumpSession, k.Chat.EndFollow)
+			mainBinds = append(mainBinds, k.Chat.NewSession, k.Chat.RenameSession, k.Chat.NextSession, k.Chat.PrevSession, k.Chat.JumpSession, k.Chat.EndFollow)
 		}
 		if m.canToggleSidebar() {
 			mainBinds = append(mainBinds, k.Chat.ToggleSidebar)
@@ -6178,6 +6187,12 @@ func (m *UI) openNotificationsDialog() tea.Cmd {
 // sessions off the Update goroutine; the dialog opens when the list arrives
 // (sessionsDialogMsg).
 func (m *UI) openSessionsDialog() tea.Cmd {
+	return m.openSessionsDialogFor(false)
+}
+
+// openSessionsDialogFor là openSessionsDialog; rename=true mở hộp thoại thẳng ở
+// chế độ đổi tên cho session hiện tại.
+func (m *UI) openSessionsDialogFor(rename bool) tea.Cmd {
 	if m.dialog.ContainsDialog(dialog.SessionsID) {
 		// Bring to front
 		m.dialog.BringToFront(dialog.SessionsID)
@@ -6188,19 +6203,19 @@ func (m *UI) openSessionsDialog() tea.Cmd {
 		return nil
 	}
 	m.sessionsDialogLoading = true
-	return m.listSessionsForDialog(m.currentSessionID())
+	return m.listSessionsForDialog(m.currentSessionID(), rename)
 }
 
 // listSessionsForDialog lists the sessions for the Sessions dialog off the
 // Update goroutine (a round-trip over HTTP in client/server mode, bounded so a
 // hung server cannot wedge the loading flag). The closure captures only locals.
-func (m *UI) listSessionsForDialog(selectedID string) tea.Cmd {
+func (m *UI) listSessionsForDialog(selectedID string, rename bool) tea.Cmd {
 	ws := m.com.Workspace
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), dialog.ListSessionsTimeout)
 		defer cancel()
 		sessions, err := ws.ListSessions(ctx)
-		return sessionsDialogMsg{selectedID: selectedID, sessions: sessions, err: err}
+		return sessionsDialogMsg{selectedID: selectedID, sessions: sessions, rename: rename, err: err}
 	}
 }
 
@@ -6209,6 +6224,7 @@ func (m *UI) listSessionsForDialog(selectedID string) tea.Cmd {
 type sessionsDialogMsg struct {
 	selectedID string
 	sessions   []session.Session
+	rename     bool // Mở thẳng ở chế độ đổi tên cho selectedID (F2).
 	err        error
 }
 
@@ -6221,7 +6237,11 @@ func (m *UI) applySessionsDialog(msg sessionsDialogMsg) tea.Cmd {
 	case m.dialog.ContainsDialog(dialog.SessionsID):
 		m.dialog.BringToFront(dialog.SessionsID)
 	default:
-		m.dialog.OpenDialog(dialog.NewSessionsFromList(m.com, msg.selectedID, msg.sessions))
+		d := dialog.NewSessionsFromList(m.com, msg.selectedID, msg.sessions)
+		if msg.rename {
+			d.StartRename(msg.selectedID)
+		}
+		m.dialog.OpenDialog(d)
 	}
 	return nil
 }

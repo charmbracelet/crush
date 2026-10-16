@@ -13,7 +13,7 @@ import (
 )
 
 // loadEverforestV2 nạp theme mới qua đường LoadTheme (như app), cô lập thư mục
-// theme người dùng để một tệp everforest-dark-v2.json thật trên máy không che
+// theme người dùng để một tệp luannt-theme-everforest-dark.json thật trên máy không che
 // bản dựng sẵn. Test dùng nó không được chạy song song (xem setTestThemeDirs).
 func loadEverforestV2(t *testing.T) Styles {
 	t.Helper()
@@ -128,15 +128,15 @@ func allowedPalette() map[string]bool {
 func TestEverforestDarkV2_RegisteredAsBuiltin(t *testing.T) {
 	setTestThemeDirs(t, []string{t.TempDir()})
 
-	require.Contains(t, BuiltinThemeNames(), "everforest-dark-v2")
-	require.True(t, IsBuiltinTheme("everforest-dark-v2"))
-	require.True(t, IsBuiltinTheme("Everforest-Dark-V2"), "tên theme không phân biệt hoa thường")
+	require.Contains(t, BuiltinThemeNames(), "luannt-theme-everforest-dark")
+	require.True(t, IsBuiltinTheme("luannt-theme-everforest-dark"))
+	require.True(t, IsBuiltinTheme("LUANNT-THEME-EVERFOREST-DARK"), "tên theme không phân biệt hoa thường")
 	require.NoError(t, ValidateThemeName("my-everforest"), "tên người dùng khác vẫn tạo được")
-	require.Error(t, ValidateThemeName("everforest-dark-v2"), "không cho tạo theme người dùng trùng tên bản dựng sẵn")
+	require.Error(t, ValidateThemeName("luannt-theme-everforest-dark"), "không cho tạo theme người dùng trùng tên bản dựng sẵn")
 
 	var found bool
 	for _, info := range ListAllThemes() {
-		if info.Name == "everforest-dark-v2" {
+		if info.Name == "luannt-theme-everforest-dark" {
 			found = true
 			require.Equal(t, ThemeSourceBuiltin, info.Source)
 			require.False(t, info.Overridden)
@@ -144,9 +144,9 @@ func TestEverforestDarkV2_RegisteredAsBuiltin(t *testing.T) {
 	}
 	require.True(t, found, "theme phải hiện trong hộp thoại Themes (ListAllThemes)")
 
-	s, err := LoadTheme("Everforest-Dark-V2")
+	s, err := LoadTheme("LUANNT-THEME-EVERFOREST-DARK")
 	require.NoError(t, err)
-	require.Equal(t, "#121316", hexOf(s.Background))
+	require.Equal(t, "#141619", hexOf(s.Background))
 }
 
 // Everforest Dark v2 là mặc định (người dùng chốt 15/10); theme cũ không đổi
@@ -194,40 +194,40 @@ func TestEverforestDarkV2_PaletteMatchesSpec(t *testing.T) {
 	require.NoError(t, p.Validate())
 
 	want := map[string]string{
-		"bg_base":          "#121316",
-		"bg_least_visible": "#0c0d10", // bg.sunken
-		"bg_less_visible":  "#1c1e23", // bg.raised
-		"bg_most_visible":  "#272a31", // bg.overlay
-		"fg_base":          "#d4d7dd",
-		"fg_more_subtle":   "#a1a6b0", // fg.muted
-		"fg_most_subtle":   "#7b818c", // fg.subtle
-		"separator":        "#272a31", // border
-		"primary":          "#7fa6e8", // accent
-		"accent":           "#7fa6e8",
-		"info":             "#7fa6e8",
-		"success":          "#8fbf7f",
-		"warning":          "#d9b36c",
-		"error":            "#e07a7a",
-		"diff_insert_fg":   "#8fbf7f",
-		"diff_delete_fg":   "#e07a7a",
-		"keyword":          "#b79ce8", // syntax.keyword
-		"ansi_black":       "#272a31",
-		"ansi_red":         "#e07a7a",
-		"ansi_green":       "#8fbf7f",
-		"ansi_yellow":      "#d9b36c",
-		"ansi_blue":        "#7fa6e8",
-		"ansi_magenta":     "#b79ce8",
-		"ansi_cyan":        "#79b8b0",
-		"ansi_white":       "#d4d7dd",
+		"bg_base":          "#141619",
+		"bg_least_visible": "#0f1113", // bg.sunken
+		"bg_less_visible":  "#1b1e22", // bg.raised
+		"bg_most_visible":  "#23272d", // bg.overlay
+		"fg_base":          "#d0d2d1",
+		"fg_more_subtle":   "#929997", // fg.muted
+		"fg_most_subtle":   "#7d8585", // fg.subtle
+		"separator":        "#30343b", // border
+		"primary":          "#82aeb1", // accent
+		"accent":           "#82aeb1",
+		"info":             "#82aeb1",
+		"success":          "#8faf87",
+		"warning":          "#c2a66f",
+		"error":            "#c77d7d",
+		"diff_insert_fg":   "#8faf87",
+		"diff_delete_fg":   "#c77d7d",
+		"keyword":          "#a392b2", // syntax.keyword
+		"ansi_black":       "#23272d",
+		"ansi_red":         "#c77d7d",
+		"ansi_green":       "#8faf87",
+		"ansi_yellow":      "#c2a66f",
+		"ansi_blue":        "#829cb5",
+		"ansi_magenta":     "#a392b2",
+		"ansi_cyan":        "#82aeb1",
+		"ansi_white":       "#b7bbb9",
 
-		"ansi_bright_black":   "#555c66",
-		"ansi_bright_red":     "#e07a7a",
-		"ansi_bright_green":   "#9cc58a",
-		"ansi_bright_yellow":  "#e3bd78",
-		"ansi_bright_blue":    "#91b5ed",
-		"ansi_bright_magenta": "#c3aaec",
-		"ansi_bright_cyan":    "#8ac5bd",
-		"ansi_bright_white":   "#e1e3e7",
+		"ansi_bright_black":   "#525959",
+		"ansi_bright_red":     "#d28e8e",
+		"ansi_bright_green":   "#9fbc98",
+		"ansi_bright_yellow":  "#cfb583",
+		"ansi_bright_blue":    "#95aec4",
+		"ansi_bright_magenta": "#b3a3c0",
+		"ansi_bright_cyan":    "#94bdc0",
+		"ansi_bright_white":   "#d0d2d1",
 	}
 	for _, f := range PaletteFields() {
 		if w, ok := want[f.Name]; ok {
@@ -252,7 +252,7 @@ func TestEverforestDarkV2_UserForkLoads(t *testing.T) {
 
 	pure, err := LoadPaletteTheme(everforestDarkV2Name, Palette{})
 	require.NoError(t, err)
-	require.Equal(t, "#d4d7dd", *pure.Markdown.Code.Color, "bản nguyên trạng có override (inline code = fg.base)")
+	require.Equal(t, "#d0d2d1", *pure.Markdown.Code.Color, "bản nguyên trạng có override (inline code = fg.base)")
 
 	forked, err := LoadPaletteTheme(everforestDarkV2Name, Palette{Accent: "#ff8800"})
 	require.NoError(t, err)
@@ -262,7 +262,7 @@ func TestEverforestDarkV2_UserForkLoads(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, everforestDarkV2Name, exported.Base)
 	require.NoError(t, exported.Validate())
-	require.Equal(t, "#121316", strings.ToLower(exported.BgBase))
+	require.Equal(t, "#141619", strings.ToLower(exported.BgBase))
 }
 
 func TestEverforestDarkV2_CloneKeepsColors(t *testing.T) {
@@ -272,7 +272,7 @@ func TestEverforestDarkV2_CloneKeepsColors(t *testing.T) {
 	require.Equal(t, s.ChromaTheme()[chroma.Keyword], clone.ChromaTheme()[chroma.Keyword])
 	newColor := "#ff0000"
 	clone.Markdown.Document.Color = &newColor
-	require.Equal(t, "#d4d7dd", *s.Markdown.Document.Color, "sửa bản clone không được chạm bản gốc")
+	require.Equal(t, "#d0d2d1", *s.Markdown.Document.Color, "sửa bản clone không được chạm bản gốc")
 }
 
 // Vai trò -> màu, đúng theo bảng quy tắc của thiết kế (Phase 4/5).
@@ -454,7 +454,7 @@ func TestEverforestDarkV2_SemanticRoles(t *testing.T) {
 		require.Equal(t, hexOf(s.Logo.TitleColorA), hexOf(s.Logo.TitleColorB), "tên một màu")
 		require.Equal(t, hexOf(s.Logo.SmallGradFromColor), hexOf(s.Logo.SmallGradToColor))
 		require.Equal(t, hexOf(s.Header.LogoGradFromColor), hexOf(s.Header.LogoGradToColor))
-		require.Equal(t, muted, hexOf(s.Logo.TitleColorA))
+		require.Equal(t, hexOf(p.fgBase), hexOf(s.Logo.TitleColorA), "tên thương hiệu là fg.primary")
 		require.Equal(t, subtle, hexOf(s.Logo.VersionColor), "phiên bản")
 		require.NotEqual(t, accent, hexOf(s.Logo.TitleColorA), "logo không dùng màu nhấn")
 		require.Equal(t, hexOf(p.border), hexOf(s.Logo.FieldColor), "dải chéo chỉ là hoạ tiết")
@@ -500,7 +500,7 @@ func TestEverforestDarkV2_StatusColorsOnlyWhereTheyBelong(t *testing.T) {
 			name: "error chỉ cho lỗi thật/dòng xoá/hành động huỷ",
 			c:    p.error,
 			allowed: []string{
-				"ANSI[1][color]", "ANSI[9][color]",
+				"ANSI[1][color]",
 				"Attachments.Deleting[bg]",
 				"Button.Negative[bg]",
 				"Diff.DeleteLine.LineNumber[fg]", "Diff.DeleteLine.Symbol[fg]",
@@ -545,7 +545,7 @@ func TestEverforestDarkV2_AccentIsRestrained(t *testing.T) {
 	accent := hexOf(everforestV2.accent)
 
 	allowedPrefixes := []string{
-		"ANSI[4]",             // blue của bảng ANSI
+		"ANSI[6]",             // cyan của bảng ANSI chính là màu nhấn
 		"Button.Focused",      // nút đang chọn
 		"Completions.Focused", // dòng gợi ý đang chọn
 		"Dialog.Arguments.InputRequiredMarkFocused", // ô đang nhập
@@ -813,4 +813,37 @@ func TestEverforestDarkV2_SunkenIsDarkerThanBase(t *testing.T) {
 	require.Less(t, relativeLuminance(hexOf(p.bgSunken)), relativeLuminance(hexOf(p.bgBase)))
 	require.Less(t, relativeLuminance(hexOf(p.bgBase)), relativeLuminance(hexOf(p.bgRaised)))
 	require.Less(t, relativeLuminance(hexOf(p.bgRaised)), relativeLuminance(hexOf(p.bgOverlay)))
+}
+
+// Tên cũ vẫn nạp được để cấu hình và theme kế thừa không bị hỏng sau đổi tên.
+func TestLuanntThemeLegacyName(t *testing.T) {
+	setTestThemeDirs(t, []string{t.TempDir()})
+	require.Equal(t, "luannt-theme-everforest-dark", DefaultThemeName)
+	canonical, err := LoadTheme("luannt-theme-everforest-dark")
+	require.NoError(t, err)
+	legacy, err := LoadTheme("everforest-dark-v2")
+	require.NoError(t, err)
+	require.Equal(t, canonical, legacy)
+	exported, err := ExportResolvedPalette("everforest-dark-v2")
+	require.NoError(t, err)
+	require.Equal(t, "luannt-theme-everforest-dark", exported.Base)
+	require.NotContains(t, BuiltinThemeNames(), "everforest-dark-v2")
+}
+
+// Tiêu đề báo cáo dùng panel tối thay vì nền nhấn sáng như ảnh người dùng gửi.
+func TestLuanntThemeReportHeadingIsMuted(t *testing.T) {
+	s := loadEverforestV2(t)
+	for _, md := range []struct {
+		name   string
+		fg, bg *string
+	}{
+		{"markdown", s.Markdown.H1.Color, s.Markdown.H1.BackgroundColor},
+		{"plan", s.PlanMarkdown.H1.Color, s.PlanMarkdown.H1.BackgroundColor},
+	} {
+		require.Equal(t, "#d0d2d1", *md.fg, md.name)
+		require.Equal(t, "#1b1e22", *md.bg, md.name)
+		require.GreaterOrEqual(t, contrastRatio(*md.fg, *md.bg), 4.5, md.name)
+	}
+	require.Equal(t, "#d0d2d1", hexOf(s.Logo.TitleColorA))
+	require.Equal(t, hexOf(s.Logo.TitleColorA), hexOf(s.Logo.TitleColorB))
 }

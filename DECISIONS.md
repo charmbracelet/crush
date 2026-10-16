@@ -202,3 +202,9 @@ Nạp tự động vào mọi phiên Claude. Mục đích: không bàn lại cá
 - **Đã thử và bỏ:** tắt repair cho MỌI tool: làm tool đọc kém bền khi model lỡ sai JSON nhẹ; giữ repair cho tool đọc là đủ an toàn vì chúng không ghi/chạy.
 - **Lật lại khi:** cần một tool tác động cụ thể tự vá (khi đó thêm RepairToolCall riêng có kiểm nội dung, không chỉ vá cú pháp).
 
+
+## 2026-10-16 — Tên cá nhân cho theme Everforest
+**Trạng thái:** đã triển khai trong mã nguồn, chờ bản cài được cập nhật.
+- **Chốt:** tên chính `luannt-theme-everforest-dark`; `everforest-dark-v2` là alias tương thích cấu hình cũ. Giữ nguyên bảng màu và các theme khác.
+- **Vì:** người dùng muốn nhận biết ngay theme do mình đặt.
+- **Lật lại khi:** người dùng yêu cầu đổi tên hoặc màu.

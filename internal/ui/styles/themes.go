@@ -268,7 +268,8 @@ var builtinThemeOverrides = map[string]func(Styles) Styles{
 // deprecatedThemeNames maps legacy built-in theme names to their current
 // names so existing configs and user theme files keep resolving.
 var deprecatedThemeNames = map[string]string{
-	"charmtone": "charmtone-panther",
+	"charmtone":          "charmtone-panther",
+	"everforest-dark-v2": everforestDarkV2Name,
 }
 
 // normalizeThemeName lowercases a theme name and maps deprecated built-in

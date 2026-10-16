@@ -12,7 +12,7 @@ import (
 // trong hộp thoại Themes). Đây là theme mặc định của fork (DefaultThemeName);
 // theme cũ "charmtone-panther" không bị sửa, nên quay lại bản cũ chỉ cần chọn
 // nó trong Themes (xem docs/agent-cli-local-setup.md, mục "Theme").
-const everforestDarkV2Name = "everforest-dark-v2"
+const everforestDarkV2Name = "luannt-theme-everforest-dark"
 
 // everforestTokens là bộ semantic token của "Everforest Dark v2": mọi màu của
 // theme đều đi ra từ đây (không có màu hex rải rác ở nơi khác trong file này).
@@ -27,8 +27,7 @@ type everforestTokens struct {
 	// gợi ý, placeholder, số dòng, phím tắt.
 	fgBase, fgMuted, fgSubtle color.Color
 
-	// Viền và nhấn. accent chỉ dành cho thứ tương tác hoặc đang được chọn;
-	// info dùng cùng sắc với accent nên theme chỉ có MỘT màu nhấn.
+	// Viền và nhấn. accent chỉ dành cho thứ tương tác hoặc đang được chọn.
 	border, borderFocus, accent color.Color
 
 	// Trạng thái.
@@ -49,53 +48,55 @@ type everforestTokens struct {
 
 // everforestV2 là bảng màu của theme. Đây là nguồn duy nhất; đổi màu ở đây.
 var everforestV2 = everforestTokens{
-	bgBase:    lipgloss.Color("#121316"),
-	bgSunken:  lipgloss.Color("#0C0D10"),
-	bgRaised:  lipgloss.Color("#1C1E23"),
-	bgOverlay: lipgloss.Color("#272A31"),
+	bgBase:    lipgloss.Color("#141619"),
+	bgSunken:  lipgloss.Color("#0F1113"),
+	bgRaised:  lipgloss.Color("#1B1E22"),
+	bgOverlay: lipgloss.Color("#23272D"),
 
-	fgBase:   lipgloss.Color("#D4D7DD"),
-	fgMuted:  lipgloss.Color("#A1A6B0"),
-	fgSubtle: lipgloss.Color("#7B818C"),
+	// fgBase là fg.primary (chữ chính, tên thương hiệu); chữ thường trong khối
+	// code (synDefault) là fg.normal, tối hơn một bậc.
+	fgBase:   lipgloss.Color("#D0D2D1"),
+	fgMuted:  lipgloss.Color("#929997"),
+	fgSubtle: lipgloss.Color("#7D8585"),
 
-	border:      lipgloss.Color("#272A31"),
-	borderFocus: lipgloss.Color("#7FA6E8"),
-	accent:      lipgloss.Color("#7FA6E8"),
+	border:      lipgloss.Color("#30343B"),
+	borderFocus: lipgloss.Color("#82AEB1"),
+	accent:      lipgloss.Color("#82AEB1"),
 
-	success: lipgloss.Color("#8FBF7F"),
-	warning: lipgloss.Color("#D9B36C"),
-	error:   lipgloss.Color("#E07A7A"),
-	info:    lipgloss.Color("#7FA6E8"),
+	success: lipgloss.Color("#8FAF87"),
+	warning: lipgloss.Color("#C2A66F"),
+	error:   lipgloss.Color("#C77D7D"),
+	info:    lipgloss.Color("#829CB5"),
 
-	diffAdd:    lipgloss.Color("#8FBF7F"),
-	diffDelete: lipgloss.Color("#E07A7A"),
-	diffChange: lipgloss.Color("#D9B36C"),
+	diffAdd:    lipgloss.Color("#8FAF87"),
+	diffDelete: lipgloss.Color("#C77D7D"),
+	diffChange: lipgloss.Color("#C2A66F"),
 
-	synKeyword:  lipgloss.Color("#B79CE8"),
-	synFunction: lipgloss.Color("#7FA6E8"),
-	synString:   lipgloss.Color("#9CC58A"),
-	synNumber:   lipgloss.Color("#D9A06C"),
-	synComment:  lipgloss.Color("#7B818C"),
-	synDefault:  lipgloss.Color("#D4D7DD"),
-	synType:     lipgloss.Color("#79B8B0"),
+	synKeyword:  lipgloss.Color("#A392B2"),
+	synFunction: lipgloss.Color("#82AEB1"),
+	synString:   lipgloss.Color("#8FAF87"),
+	synNumber:   lipgloss.Color("#C2A66F"),
+	synComment:  lipgloss.Color("#7D8585"),
+	synDefault:  lipgloss.Color("#B7BBB9"),
+	synType:     lipgloss.Color("#82AEB1"),
 
 	ansi: [16]color.Color{
-		lipgloss.Color("#272A31"), // black
-		lipgloss.Color("#E07A7A"), // red
-		lipgloss.Color("#8FBF7F"), // green
-		lipgloss.Color("#D9B36C"), // yellow
-		lipgloss.Color("#7FA6E8"), // blue
-		lipgloss.Color("#B79CE8"), // magenta
-		lipgloss.Color("#79B8B0"), // cyan
-		lipgloss.Color("#D4D7DD"), // white
-		lipgloss.Color("#555C66"), // bright black
-		lipgloss.Color("#E07A7A"), // bright red
-		lipgloss.Color("#9CC58A"), // bright green
-		lipgloss.Color("#E3BD78"), // bright yellow
-		lipgloss.Color("#91B5ED"), // bright blue
-		lipgloss.Color("#C3AAEC"), // bright magenta
-		lipgloss.Color("#8AC5BD"), // bright cyan
-		lipgloss.Color("#E1E3E7"), // bright white
+		lipgloss.Color("#23272D"), // black
+		lipgloss.Color("#C77D7D"), // red
+		lipgloss.Color("#8FAF87"), // green
+		lipgloss.Color("#C2A66F"), // yellow
+		lipgloss.Color("#829CB5"), // blue
+		lipgloss.Color("#A392B2"), // magenta
+		lipgloss.Color("#82AEB1"), // cyan
+		lipgloss.Color("#B7BBB9"), // white
+		lipgloss.Color("#525959"), // bright black
+		lipgloss.Color("#D28E8E"), // bright red
+		lipgloss.Color("#9FBC98"), // bright green
+		lipgloss.Color("#CFB583"), // bright yellow
+		lipgloss.Color("#95AEC4"), // bright blue
+		lipgloss.Color("#B3A3C0"), // bright magenta
+		lipgloss.Color("#94BDC0"), // bright cyan
+		lipgloss.Color("#D0D2D1"), // bright white
 	},
 }
 
@@ -130,15 +131,18 @@ func everforestDarkV2Opts() quickStyleOpts {
 
 		separator: t.border,
 
-		destructive:       t.error,
-		error:             t.error,
-		warningSubtle:     t.warning,
-		warning:           t.warning,
-		attention:         t.warning,
-		busy:              t.accent, // "đang chạy" là trạng thái hiện hành, không phải cảnh báo.
-		info:              t.info,
-		infoMoreSubtle:    t.info,
-		infoMostSubtle:    t.info,
+		destructive:   t.error,
+		error:         t.error,
+		warningSubtle: t.warning,
+		warning:       t.warning,
+		attention:     t.warning,
+		busy:          t.accent, // "đang chạy" là trạng thái hiện hành, không phải cảnh báo.
+		// quickStyle dùng "info" cho tên tool, tên MCP, tiêu đề: đó là chữ hành động
+		// nên giữ màu nhấn (một sắc nhấn duy nhất); token info chỉ dùng cho chẩn
+		// đoán LSP dạng thông tin (xem everforestDarkV2Overrides).
+		info:              t.accent,
+		infoMoreSubtle:    t.accent,
+		infoMostSubtle:    t.accent,
 		success:           t.success,
 		successMoreSubtle: t.success,
 		successMostSubtle: t.success,
@@ -200,26 +204,26 @@ func everforestDarkV2Overrides(s Styles) Styles {
 	s.WorkingTimerColor = t.fgMuted
 
 	// --- Header và logo: bớt nổi, không gradient tím/xanh --------------------------
-	// Tên "AGENT-CLI" một màu fg.muted, dải chéo chỉ còn là hoạ tiết nền (màu
+	// Tên "AGENT-CLI" một màu fg.primary, dải chéo chỉ còn là hoạ tiết nền (màu
 	// border). Nhãn và phiên bản không còn được vẽ (bỏ 15/10); style của chúng
 	// giữ cho theme người dùng kế thừa.
 	s.Header.Charm = s.Header.Charm.Foreground(t.fgSubtle)
 	s.Header.Diagonals = s.Header.Diagonals.Foreground(t.border)
 	s.Header.HypercreditIcon = s.Header.HypercreditIcon.Foreground(t.fgMuted)
 	s.Header.GitBranch = s.Header.GitBranch.Foreground(t.fgMuted)
-	s.Header.LogoGradFromColor = t.fgMuted
-	s.Header.LogoGradToColor = t.fgMuted
+	s.Header.LogoGradFromColor = t.fgBase
+	s.Header.LogoGradToColor = t.fgBase
 	s.CompactDetails.View = s.CompactDetails.View.BorderForeground(t.border)
 	s.CompactDetails.Version = s.CompactDetails.Version.Foreground(t.fgSubtle)
 	s.Logo.FieldColor = t.border
-	s.Logo.TitleColorA = t.fgMuted
-	s.Logo.TitleColorB = t.fgMuted
+	s.Logo.TitleColorA = t.fgBase
+	s.Logo.TitleColorB = t.fgBase
 	s.Logo.CharmColor = t.fgSubtle
 	s.Logo.VersionColor = t.fgSubtle
 	s.Logo.SmallCharm = s.Logo.SmallCharm.Foreground(t.fgSubtle)
 	s.Logo.SmallDiagonals = s.Logo.SmallDiagonals.Foreground(t.border)
-	s.Logo.SmallGradFromColor = t.fgMuted
-	s.Logo.SmallGradToColor = t.fgMuted
+	s.Logo.SmallGradFromColor = t.fgBase
+	s.Logo.SmallGradToColor = t.fgBase
 
 	// --- Markdown và cú pháp ----------------------------------------------------
 	t.restyleMarkdown(&s.Markdown)
@@ -289,6 +293,8 @@ func everforestDarkV2Overrides(s Styles) Styles {
 	s.Pills.TodoCurrentTask = s.Pills.TodoCurrentTask.Foreground(t.accent)
 	s.Pills.TodoSpinner = s.Pills.TodoSpinner.Foreground(t.accent)
 	// Hàng đợi: dải tam giác trung tính (quickStyle tô từ đỏ sang hồng).
+	// Viền panel To-Do/hàng đợi là token border (overlay chỉ dành cho nền nổi).
+	s.Pills.Focused = s.Pills.Focused.BorderForeground(t.border)
 	s.Pills.QueueGradFromColor = t.fgSubtle
 	s.Pills.QueueGradToColor = t.fgMuted
 
@@ -328,6 +334,7 @@ func everforestDarkV2Overrides(s Styles) Styles {
 	// Phiên đang xem (và duy nhất nó) lấy foreground của RowTitleBase làm màu tiêu đề.
 	s.Resource.RowTitleBase = s.Resource.RowTitleBase.Foreground(t.accent)
 	s.LSP.HintDiagnostic = s.LSP.HintDiagnostic.Foreground(t.fgSubtle)
+	s.LSP.InfoDiagnostic = s.LSP.InfoDiagnostic.Foreground(t.info)
 	s.ModelInfo.HypercreditIcon = s.ModelInfo.HypercreditIcon.Foreground(t.fgMuted)
 
 	// --- Khung chat ---------------------------------------------------------------------------------
@@ -414,7 +421,7 @@ func everforestDarkV2Overrides(s Styles) Styles {
 func (t everforestTokens) restyleMarkdown(m *ansi.StyleConfig) {
 	m.Heading.Color = hex(t.fgBase)
 	m.H1.Color = hex(t.fgBase)
-	m.H1.BackgroundColor = hex(t.bgOverlay)
+	m.H1.BackgroundColor = hex(t.bgRaised)
 	m.H6.Color = hex(t.fgMuted)
 	m.LinkText.Color = hex(t.accent)
 	m.Code.Color = hex(t.fgBase)

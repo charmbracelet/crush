@@ -419,7 +419,7 @@ func runNonInteractive(
 
 	defer stopSpinner()
 
-	sess, err := resolveSession(ctx, c, ws.ID, continueSessionID, useLast)
+	sess, err := resolveSession(ctx, c, ws.ID, continueSessionID, useLast, prompt)
 	if err != nil {
 		return fmt.Errorf("failed to resolve session: %w", err)
 	}
@@ -1100,9 +1100,10 @@ func validateModelMatches(matches []modelMatch, modelID, label string) (modelMat
 
 // resolveSession returns the session to use for a non-interactive run.
 // If continueSessionID is set it fetches that session; if useLast is set it
-// returns the most recently updated top-level session; otherwise it creates a
-// new one.
-func resolveSession(ctx context.Context, c *client.Client, wsID, continueSessionID string, useLast bool) (*proto.Session, error) {
+// returns the most recently updated top-level session; otherwise it creates
+// a new one titled after the prompt. An empty prompt keeps the old
+// "non-interactive" name.
+func resolveSession(ctx context.Context, c *client.Client, wsID, continueSessionID string, useLast bool, prompt string) (*proto.Session, error) {
 	switch {
 	case continueSessionID != "":
 		sess, err := c.GetSession(ctx, wsID, continueSessionID)
@@ -1128,7 +1129,11 @@ func resolveSession(ctx context.Context, c *client.Client, wsID, continueSession
 		return &last, nil
 
 	default:
-		return c.CreateSession(ctx, wsID, "non-interactive")
+		title := session.DerivedTitle(prompt)
+		if title == "" {
+			title = "non-interactive"
+		}
+		return c.CreateSession(ctx, wsID, title)
 	}
 }
 

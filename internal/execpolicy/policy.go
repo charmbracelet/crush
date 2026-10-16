@@ -455,9 +455,12 @@ func externalAgentCommand(args []string, depth int) (string, bool) {
 			}
 			return "", false
 		}
+		if interpreterName.MatchString(name) {
+			return interpreterCommand(args[i:], depth)
+		}
 		if shells[name] {
 			for j := i + 1; j+1 < len(args); j++ {
-				if args[j] == "-c" {
+				if strings.HasPrefix(args[j], "-") && !strings.HasPrefix(args[j], "--") && strings.Contains(args[j], "c") {
 					return commandString(args[j+1], depth)
 				}
 			}

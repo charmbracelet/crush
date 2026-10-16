@@ -3,6 +3,7 @@
 package app
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"errors"
@@ -254,7 +255,7 @@ func (app *App) ReportCurrentSession(sessionID string) {
 // If continueSessionID is set, it looks up that session by ID
 // If useLast is set, it returns the most recently updated top-level session
 // Otherwise, it creates a new session
-func (app *App) resolveSession(ctx context.Context, continueSessionID string, useLast bool) (session.Session, error) {
+func (app *App) resolveSession(ctx context.Context, continueSessionID string, useLast bool, prompt string) (session.Session, error) {
 	switch {
 	case continueSessionID != "":
 		if app.Sessions.IsAgentToolSession(continueSessionID) {
@@ -277,7 +278,7 @@ func (app *App) resolveSession(ctx context.Context, continueSessionID string, us
 		return sess, nil
 
 	default:
-		return app.Sessions.Create(ctx, agent.DefaultSessionName)
+		return app.Sessions.Create(ctx, cmp.Or(session.DerivedTitle(prompt), agent.DefaultSessionName))
 	}
 }
 
@@ -363,7 +364,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, onSessi
 
 	defer stopSpinner()
 
-	sess, err := app.resolveSession(ctx, continueSessionID, useLast)
+	sess, err := app.resolveSession(ctx, continueSessionID, useLast, prompt)
 	if err != nil {
 		return fmt.Errorf("failed to create session for non-interactive mode: %w", err)
 	}

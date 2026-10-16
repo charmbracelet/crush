@@ -61,8 +61,11 @@ func TestDelegationModelAllowlist(t *testing.T) {
 	require.Equal(t, []string{"gpt-6.1-sol"}, p.DelegationModels(BackendCodex))
 	require.NoError(t, p.CheckDelegation(BackendClaudeCode, "claude-haiku-5-5"))
 	for _, c := range [][2]string{
-		{BackendClaudeCode, "claude-fable-5-1"}, {BackendClaudeCode, "claude-opus-4-1"},
-		{BackendClaudeCode, "claude-opus-6-0"}, {BackendCodex, "gpt-6-astra"}, {BackendCodex, "gpt-6-luna"},
+		{BackendClaudeCode, "claude-fable-5-1"},
+		{BackendClaudeCode, "claude-opus-4-1"},
+		{BackendClaudeCode, "claude-opus-6-0"},
+		{BackendCodex, "gpt-6-astra"},
+		{BackendCodex, "gpt-6-luna"},
 	} {
 		var d *Denied
 		require.ErrorAsf(t, p.CheckDelegation(c[0], c[1]), &d, "%s:%s", c[0], c[1])
@@ -81,8 +84,10 @@ func TestDelegationModelAllowlist(t *testing.T) {
 // trị sai cú pháp chặn lúc khởi động.
 func TestParseRejectsAliasesAndGarbage(t *testing.T) {
 	t.Parallel()
-	for _, spec := range []string{"claude_code:opus", "claude_code:fable", "codex:latest", "glm-5.3", "zai:", ":glm",
-		"claude_code:sonnet[1m]", "claude_code:claude-3-5-haiku-latest", "codex:gpt-6-latest"} {
+	for _, spec := range []string{
+		"claude_code:opus", "claude_code:fable", "codex:latest", "glm-5.3", "zai:", ":glm",
+		"claude_code:sonnet[1m]", "claude_code:claude-3-5-haiku-latest", "codex:gpt-6-latest",
+	} {
 		_, err := Parse(spec)
 		require.Errorf(t, err, "%q", spec)
 	}
@@ -129,11 +134,20 @@ func TestExternalAgentCommand(t *testing.T) {
 		require.Truef(t, ok, "%q", a)
 	}
 	misses := [][]string{
-		{"git", "status"}, {"go", "test", "./..."}, {"agent-cli", "jobs"}, {"crush", "--version"},
-		{"goose", "-dir", "migrations", "postgres", "up"}, {"agent-cli", "ps", "--all"}, {"bash", "-c", "echo claude"},
-		{"find", ".", "-name", "*.go"}, {"npm", "exec", "prettier"},
-		{"npx", "prettier", "--write", "."}, {"echo", "claude"}, {"timeout", "5", "make", "test"},
-		{"env", "-u", "claude", "ls"}, {"sudo", "-u", "codex", "id"},
+		{"git", "status"},
+		{"go", "test", "./..."},
+		{"agent-cli", "jobs"},
+		{"crush", "--version"},
+		{"goose", "-dir", "migrations", "postgres", "up"},
+		{"agent-cli", "ps", "--all"},
+		{"bash", "-c", "echo claude"},
+		{"find", ".", "-name", "*.go"},
+		{"npm", "exec", "prettier"},
+		{"npx", "prettier", "--write", "."},
+		{"echo", "claude"},
+		{"timeout", "5", "make", "test"},
+		{"env", "-u", "claude", "ls"},
+		{"sudo", "-u", "codex", "id"},
 	}
 	for _, a := range misses {
 		_, ok := ExternalAgentCommand(a)
@@ -227,4 +241,33 @@ func TestChildEnvUsesTheSnapshot(t *testing.T) {
 	require.ElementsMatch(t, []string{"PATH=/usr/bin", AllowedModelsEnv + "=zai:glm-5.3", "HOME=/home/u"}, env)
 	require.Equal(t, "zai:glm-5.3", TrustedEnv(AllowedModelsEnv))
 	require.Empty(t, TrustedEnv(DelegationEnv), "set after the snapshot: ignored")
+}
+
+func TestExternalAgentCommandInterpreterLiterals(t *testing.T) {
+	t.Parallel()
+	for _, args := range [][]string{
+		{"node", "/tmp/codex.js", "exec", "hi"},
+		{"node", "-e", `require('child_process').execFileSync('codex', ['exec', 'hi'])`},
+		{"node", "--eval=require('child_process').spawnSync('/opt/bin/codex', ['exec'])"},
+		{"python3.12", "-c", `import subprocess; subprocess.run(['codex', 'exec', 'hi'])`},
+		{"python", "-c", `import os; os.system('claude -p hi')`},
+		{"env", "X=1", "node", "-e", `require('child_process').execSync('codex exec hi')`},
+		{"ruby", "-e", `system('claude', '-p', 'hi')`},
+		{"perl", "-e", `exec 'codex', 'exec', 'hi'`},
+		{"php", "-r", `shell_exec('codex exec hi');`},
+		{"bash", "-lc", "codex exec hi"},
+	} {
+		name, blocked := ExternalAgentCommand(args)
+		require.Truef(t, blocked, "must block %q, got %q", args, name)
+	}
+	for _, args := range [][]string{
+		{"node", "-e", `console.log('codex')`},
+		{"python3", "-c", `print('claude')`},
+		{"node", "-e", `require('child_process').execSync('git status')`},
+		{"python3", "-c", `import subprocess; subprocess.run(['go', 'test', './...'])`},
+		{"node", "build.js"},
+	} {
+		_, blocked := ExternalAgentCommand(args)
+		require.Falsef(t, blocked, "must allow %q", args)
+	}
 }

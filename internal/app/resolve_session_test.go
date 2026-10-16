@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/stretchr/testify/require"
@@ -113,10 +114,11 @@ func TestResolveSession_NewSession(t *testing.T) {
 	mock := &mockSessionService{}
 	app := newTestApp(mock)
 
-	sess, err := app.resolveSession(t.Context(), "", false)
+	sess, err := app.resolveSession(t.Context(), "", false, "Fix login bug")
 	require.NoError(t, err)
 	require.Equal(t, "new-session-id", sess.ID)
 	require.Len(t, mock.created, 1)
+	require.Equal(t, "Fix login bug", sess.Title)
 }
 
 func TestResolveSession_ContinueByID(t *testing.T) {
@@ -127,7 +129,7 @@ func TestResolveSession_ContinueByID(t *testing.T) {
 	}
 	app := newTestApp(mock)
 
-	sess, err := app.resolveSession(t.Context(), "existing-id", false)
+	sess, err := app.resolveSession(t.Context(), "existing-id", false, "New prompt")
 	require.NoError(t, err)
 	require.Equal(t, "existing-id", sess.ID)
 	require.Equal(t, "Old session", sess.Title)
@@ -138,7 +140,7 @@ func TestResolveSession_ContinueByID_NotFound(t *testing.T) {
 	mock := &mockSessionService{}
 	app := newTestApp(mock)
 
-	_, err := app.resolveSession(t.Context(), "nonexistent", false)
+	_, err := app.resolveSession(t.Context(), "nonexistent", false, "New prompt")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "session not found")
 }
@@ -151,7 +153,7 @@ func TestResolveSession_ContinueByID_ChildSession(t *testing.T) {
 	}
 	app := newTestApp(mock)
 
-	_, err := app.resolveSession(t.Context(), "child-id", false)
+	_, err := app.resolveSession(t.Context(), "child-id", false, "New prompt")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "cannot continue a child session")
 }
@@ -160,7 +162,7 @@ func TestResolveSession_ContinueByID_AgentToolSession(t *testing.T) {
 	mock := &mockSessionService{}
 	app := newTestApp(mock)
 
-	_, err := app.resolveSession(t.Context(), "msg123$$tool456", false)
+	_, err := app.resolveSession(t.Context(), "msg123$$tool456", false, "New prompt")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "cannot continue an agent tool session")
 }
@@ -174,7 +176,7 @@ func TestResolveSession_Last(t *testing.T) {
 	}
 	app := newTestApp(mock)
 
-	sess, err := app.resolveSession(t.Context(), "", true)
+	sess, err := app.resolveSession(t.Context(), "", true, "New prompt")
 	require.NoError(t, err)
 	require.Equal(t, "most-recent", sess.ID)
 	require.Empty(t, mock.created)
@@ -184,7 +186,15 @@ func TestResolveSession_Last_NoSessions(t *testing.T) {
 	mock := &mockSessionService{}
 	app := newTestApp(mock)
 
-	_, err := app.resolveSession(t.Context(), "", true)
+	_, err := app.resolveSession(t.Context(), "", true, "New prompt")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no sessions found")
+}
+
+func TestResolveSession_EmptyPromptKeepsDefault(t *testing.T) {
+	t.Parallel()
+	app := newTestApp(&mockSessionService{})
+	sess, err := app.resolveSession(t.Context(), "", false, " \n\t")
+	require.NoError(t, err)
+	require.Equal(t, agent.DefaultSessionName, sess.Title)
 }

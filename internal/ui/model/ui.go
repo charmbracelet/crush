@@ -1638,6 +1638,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd := m.chat.EnsureAnimating(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+		// Same for the chat scrollbar's auto-hide: a scroll may be applied
+		// from anywhere, so the deadline is armed here instead of being
+		// handed back to each call site to forward.
+		if cmd := m.chat.EnsureScrollbarHide(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	}
 	if cmd := m.endFrameUpdate(); cmd != nil {
 		cmds = append(cmds, cmd)
@@ -3102,9 +3108,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			}
 		case key.Matches(msg, m.keyMap.Chat.EndFollow):
 			if m.state == uiChat && m.hasSession() {
-				if cmd := m.chat.ScrollToBottomAndSelectLast(); cmd != nil {
-					cmds = append(cmds, cmd)
-				}
+				m.chat.ScrollToBottomAndSelectLast()
 				return true
 			}
 		case key.Matches(msg, m.keyMap.Chat.TogglePills):

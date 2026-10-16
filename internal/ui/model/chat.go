@@ -144,6 +144,11 @@ type Chat struct {
 	scrollbarVisible bool
 	scrollbarHideSeq int    // current sequence number for hide timer
 	scrollbarMode    string // "default", "always", or "never"
+	// scrollbarHideArmed is the hide timeout already scheduled, or zero when
+	// none is outstanding. The tick is armed from the UI's Update tail rather
+	// than returned by the scroll calls, so a caller ignoring a command can
+	// no longer lose the auto-hide.
+	scrollbarHideArmed int
 
 	// resizing suppresses the O(N) total-height scan while a resize is in
 	// flight (and during the incremental warm afterward), so a drag only
@@ -432,7 +437,7 @@ func (m *Chat) InvalidateVisibleRenderCaches() {
 // SetMessages sets the chat messages to the provided list of message items.
 func (m *Chat) SetMessages(msgs ...chat.MessageItem) tea.Cmd {
 	m.idInxMap = make(map[string]int)
-	m.scrollbarVisible = false // Reset scrollbar visibility on new session load
+	m.resetScrollbar() // Reset scrollbar visibility on new session load
 
 	items := make([]list.Item, len(msgs))
 	for i, msg := range msgs {
@@ -707,21 +712,20 @@ func (m *Chat) Follow() bool {
 
 // ScrollToBottom scrolls the chat view to the bottom.
 // Does not trigger scrollbar visibility (auto-scroll to show new content).
-func (m *Chat) ScrollToBottom() tea.Cmd {
+func (m *Chat) ScrollToBottom() {
 	m.list.ScrollToBottom()
 	m.follow = true
-	return nil
 }
 
 // ScrollToTop scrolls the chat view to the top.
-func (m *Chat) ScrollToTop() tea.Cmd {
+func (m *Chat) ScrollToTop() {
 	m.list.ScrollToTop()
 	m.follow = false // Disable follow mode when user scrolls up
-	return m.showScrollbar()
+	m.showScrollbar()
 }
 
 // ScrollBy scrolls the chat view by the given number of line deltas.
-func (m *Chat) ScrollBy(lines int) tea.Cmd {
+func (m *Chat) ScrollBy(lines int) {
 	m.list.ScrollBy(lines)
 	if lines < 0 {
 		// Scrolling up always disables follow mode.
@@ -730,31 +734,47 @@ func (m *Chat) ScrollBy(lines int) tea.Cmd {
 		// Scrolling down re-enables follow when we reach the bottom.
 		m.follow = true
 	}
-	return m.showScrollbar()
+	m.showScrollbar()
 }
 
 // ScrollToSelected scrolls the chat view to the selected item.
-func (m *Chat) ScrollToSelected() tea.Cmd {
+func (m *Chat) ScrollToSelected() {
 	m.list.ScrollToSelected()
 	m.follow = m.AtBottom() // Disable follow mode if user scrolls up
-	return m.showScrollbar()
+	m.showScrollbar()
 }
 
 // ScrollToIndex scrolls the chat view to the item at the given index.
-func (m *Chat) ScrollToIndex(index int) tea.Cmd {
+func (m *Chat) ScrollToIndex(index int) {
 	m.list.ScrollToIndex(index)
 	m.follow = m.AtBottom() // Disable follow mode if user scrolls up
-	return m.showScrollbar()
+	m.showScrollbar()
 }
 
-// showScrollbar makes the scrollbar visible and returns a command to hide it after timeout.
-func (m *Chat) showScrollbar() tea.Cmd {
+// showScrollbar reveals the scrollbar and restarts its auto-hide timeout.
+// The tick itself is scheduled by EnsureScrollbarHide.
+func (m *Chat) showScrollbar() {
 	// Only start timer for "default" mode
 	if m.scrollbarMode != config.ScrollbarDefault {
-		return nil
+		return
 	}
 	m.scrollbarVisible = true
 	m.scrollbarHideSeq++
+}
+
+// EnsureScrollbarHide schedules the hide tick for a visible scrollbar whose
+// current timeout has none outstanding. Each scroll bumps the sequence, so a
+// fresh deadline is armed for the newest activity while earlier ticks go stale
+// and get ignored. This is the sole place the timeout is armed, mirroring the
+// shared animation clock, so no call site can drop it.
+func (m *Chat) EnsureScrollbarHide() tea.Cmd {
+	if m.scrollbarMode != config.ScrollbarDefault || !m.scrollbarVisible {
+		return nil
+	}
+	if m.scrollbarHideArmed == m.scrollbarHideSeq {
+		return nil
+	}
+	m.scrollbarHideArmed = m.scrollbarHideSeq
 	return scrollbarHideCmd(m.scrollbarHideSeq)
 }
 
@@ -766,16 +786,22 @@ func (m *Chat) HideScrollbar(seq int) {
 	}
 	if seq == m.scrollbarHideSeq {
 		m.scrollbarVisible = false
+		m.scrollbarHideArmed = 0
 	}
 }
 
-// ScrollToBottomAndSelectLast scrolls the chat view to the bottom, selects
-// the last item, and returns a command to restart any paused animations that
-// are now visible.
-func (m *Chat) ScrollToBottomAndSelectLast() tea.Cmd {
+// resetScrollbar hides the scrollbar and forgets any outstanding timeout, for
+// when the list stops showing the content it was scrolled through.
+func (m *Chat) resetScrollbar() {
+	m.scrollbarVisible = false
+	m.scrollbarHideArmed = 0
+}
+
+// ScrollToBottomAndSelectLast scrolls the chat view to the bottom and selects
+// the last item.
+func (m *Chat) ScrollToBottomAndSelectLast() {
 	m.ScrollToBottom()
 	m.SelectLast()
-	return nil
 }
 
 // SelectedItemInView returns whether the selected item is currently in view.
@@ -925,7 +951,7 @@ func (m *Chat) SelectNearestInView(scrolledUp bool) {
 // ClearMessages removes all messages from the chat list.
 func (m *Chat) ClearMessages() {
 	m.idInxMap = make(map[string]int)
-	m.scrollbarVisible = false
+	m.resetScrollbar()
 	m.list.SetItems()
 	m.ClearMouse()
 }

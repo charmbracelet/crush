@@ -46,7 +46,6 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/stringext"
 	"github.com/charmbracelet/crush/internal/version"
-	"github.com/charmbracelet/x/ansi"
 )
 
 const (
@@ -163,6 +162,10 @@ type SessionAgentCall struct {
 	// lengthContinues đếm số lần đã tự làm tiếp vì hết ngân sách output trong
 	// chuỗi của một prompt người dùng (có trần maxLengthContinues).
 	lengthContinues int
+	// originalPrompt là prompt THẬT của người dùng mà chuỗi làm tiếp (tóm tắt,
+	// bị cắt output) đang phục vụ. Prompt của lượt làm tiếp chỉ là lời nhắc,
+	// nên bọc lại nó sẽ lồng "yêu cầu gốc" nhiều lớp và làm mất yêu cầu thật.
+	originalPrompt string
 }
 
 // sameModel cho biết hai lựa chọn có cùng provider và model hay không.
@@ -1517,13 +1520,16 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			if !ok {
 				existing = []SessionAgentCall{}
 			}
+			call.originalPrompt = cmp.Or(call.originalPrompt, call.Prompt)
 			if summaryFailure != nil {
-				call.Prompt = fmt.Sprintf("Continue the task where you stopped. The automatic context summary failed (%s), so the full conversation is still available; keep working on the initial user request: `%s`", summaryFailure, call.Prompt)
+				call.Prompt = fmt.Sprintf("Continue the task where you stopped. The automatic context summary failed (%s), so the full conversation is still available; keep working on the initial user request: `%s`", summaryFailure, call.originalPrompt)
 			} else {
-				call.Prompt = fmt.Sprintf("The previous session was interrupted because it got too long, the initial user request was: `%s`", call.Prompt)
+				call.Prompt = fmt.Sprintf("The previous session was interrupted because it got too long, the initial user request was: `%s`", call.originalPrompt)
 			}
 			call.continuation = true
-			existing = append(existing, call)
+			// Lượt làm tiếp là phần còn lại của việc đang chạy: chạy trước prompt
+			// mà người dùng vừa gõ thêm, không phải sau.
+			existing = append([]SessionAgentCall{call}, existing...)
 			a.messageQueue.Set(call.SessionID, existing)
 		}
 	}
@@ -1538,11 +1544,21 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			slog.Warn("Reply hit the output token limit; continuing the turn",
 				"session_id", call.SessionID, "attempt", call.lengthContinues+1)
 			next := call
-			next.lengthContinues++
+			// Có tool call hoàn tất trong lượt này là có tiến triển: đếm lại từ
+			// đầu. Trần chỉ để chặn model cứ viết quá dài mà không làm được gì.
+			if len(completedToolCalls) > 0 {
+				next.lengthContinues = 0
+			} else {
+				next.lengthContinues++
+			}
 			next.continuation = true
+			next.originalPrompt = cmp.Or(call.originalPrompt, call.Prompt)
+			// Lịch sử còn nguyên tệp đính kèm của prompt gốc; gửi và lưu lại mỗi
+			// lần làm tiếp chỉ làm phình context.
+			next.Attachments = nil
 			next.Prompt = lengthContinuePrompt
 			existing, _ := a.messageQueue.Get(call.SessionID)
-			a.messageQueue.Set(call.SessionID, append(existing, next))
+			a.messageQueue.Set(call.SessionID, append([]SessionAgentCall{next}, existing...))
 			lengthContinuing = true
 		}
 	}
@@ -1819,6 +1835,18 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fan
 			return updateErr
 		}
 		return err
+	}
+
+	// Model suy luận ăn hết ngân sách output thì không ra chữ nào: bản tóm tắt
+	// rỗng sẽ thay toàn bộ lịch sử bằng chuỗi rỗng mà không ai hay. Coi là tóm
+	// tắt hỏng để giữ lịch sử và làm tiếp.
+	if strings.TrimSpace(summaryMessage.Content().String()) == "" {
+		emptyErr := errors.New("the summary is empty (the model produced no text, possibly out of output budget)")
+		summaryMessage.AddFinish(message.FinishReasonError, "Summarization Error", emptyErr.Error())
+		if updateErr := a.messages.Update(ctx, summaryMessage); updateErr != nil {
+			return updateErr
+		}
+		return emptyErr
 	}
 
 	summaryMessage.AddFinish(message.FinishReasonEndTurn, "", "")
@@ -2152,14 +2180,28 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 		return
 	}
 
+	// Đặt tiêu đề suy ra từ prompt NGAY LẬP TỨC: tiêu đề LLM bên dưới là
+	// best-effort, hỏng hoặc chậm thì session vẫn có tên có nghĩa suốt
+	// phiên thay vì "Untitled Session". Tiêu đề LLM thành công sẽ ghi đè.
+	derived := session.DerivedTitle(userPrompt)
+	var titleSaved bool
+	if derived != "" {
+		renameCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		if err := a.sessions.Rename(renameCtx, sessionID, derived); err != nil {
+			slog.Error("Failed to save derived session title", "error", err)
+		} else {
+			titleSaved = true
+		}
+		cancel()
+	}
+
 	// Ensure the session always gets a title even if every path below
 	// fails or the context is cancelled before we finish.
-	var titleSaved bool
 	defer func() {
 		if !titleSaved {
 			fallbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 			defer cancel()
-			if err := a.sessions.Rename(fallbackCtx, sessionID, DefaultSessionName); err != nil {
+			if err := a.sessions.Rename(fallbackCtx, sessionID, cmp.Or(derived, DefaultSessionName)); err != nil {
 				slog.Error("Failed to save fallback session title", "error", err)
 			}
 		}
@@ -2239,15 +2281,9 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 
 	title = strings.TrimSpace(title)
 	if title == "" {
-		// LLM returned empty content. Use the prompt itself as a
-		// fallback title, truncated to 50 chars, before resorting to
-		// the generic default.
-		fallback := strings.ReplaceAll(userPrompt, "\n", " ")
-		fallback = strings.TrimSpace(fallback)
-		if len(fallback) > 50 {
-			fallback = ansi.Truncate(fallback, 50, "…")
-		}
-		title = cmp.Or(fallback, DefaultSessionName)
+		// LLM returned empty content: the prompt-derived title is the
+		// same fallback, so reuse it before resorting to the default.
+		title = cmp.Or(derived, DefaultSessionName)
 	}
 
 	// Calculate usage and cost.

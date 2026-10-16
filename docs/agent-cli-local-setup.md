@@ -67,7 +67,7 @@ dưới), hoặc một provider dựng sẵn trong catalog chọn bằng `AGENT_
 | `AGENT_CLI_SMALL_MODEL` | model nhỏ (đặt tiêu đề...) | `AGENT_CLI_MODEL` |
 | `AGENT_CLI_CAN_REASON` | model của provider `main` có suy luận không: `true`/`false` (nhận cả `1`/`0`, `yes`/`no`, không phân biệt hoa thường); giá trị khác làm khởi động dừng và nêu đúng tên biến này | `false` |
 | `AGENT_CLI_CONTEXT_WINDOW` | context window khai cho model (áp cho cả model chính và nhỏ) | 128000 |
-| `AGENT_CLI_MAX_TOKENS` | số token đầu ra tối đa (áp cho cả model chính và nhỏ) | 8192 |
+| `AGENT_CLI_MAX_TOKENS` | số token đầu ra tối đa (áp cho cả model chính và nhỏ); model có suy luận cần đủ lớn vì phần nghĩ cũng tính vào đây | min(32000, `AGENT_CLI_CONTEXT_WINDOW`/4) |
 
 Tệp env là Bash nên cách đặt nháy quan trọng. Giá trị có ký tự đặc biệt (`<`, khoảng trắng) phải nằm
 trong nháy. **Key dạng chữ thường nên đặt trong nháy ĐƠN** (`AGENT_CLI_API_KEY='sk-...'`): nháy kép để
@@ -299,7 +299,8 @@ cũng ghi được và tên socket đoán được. `AGENT_CLI_RUNTIME_DIR` bạ
 - Log server: `~/.cache/agent-cli/server-<host>/crush.log` (`<host>` là địa chỉ socket
   đã thay ký tự lạ bằng `_`). Mỗi dự án một thư mục, không trộn log.
 - Trả lời bị cắt vì hết ngân sách output (`max_tokens`) thì lượt tự làm tiếp (tin "Your previous reply was
-  cut off..."), tối đa 3 lần cho mỗi prompt của bạn. Ngân sách mặc định của provider `main` là
+  cut off..."), tối đa 3 lần liên tiếp không tiến triển cho mỗi prompt của bạn (lượt nào đã chạy xong
+  ít nhất một tool call thì đếm lại từ đầu). Lượt làm tiếp chạy trước prompt bạn gõ thêm sau đó. Ngân sách mặc định của provider `main` là
   min(32000, `AGENT_CLI_CONTEXT_WINDOW`/4); đặt `AGENT_CLI_MAX_TOKENS` để đổi.
 - Tự tóm tắt (khi context còn khoảng 20%) có hạn chờ gấp 3 `request-timeout` (mặc định 6 phút). Tóm
   tắt vẫn hỏng thì việc không dừng: lịch sử giữ nguyên, lượt làm tiếp chạy ngay (tin "Continue the task
@@ -666,7 +667,7 @@ theo `CRUSH_GLOBAL_CONFIG` nếu có). Dạng `{"<action>": ["phím", ...]}`; m�
 
 ## Theme (màu giao diện)
 
-Theme mặc định là **`everforest-dark-v2`** (chốt 15/10): nền tối dịu cho phiên làm việc dài, chữ thường `#D4D7DD`,
+Theme mặc định là **`luannt-theme-everforest-dark`** (đổi tên cá nhân ngày 16/10 từ `everforest-dark-v2`; tên cũ vẫn là alias): nền tối dịu cho phiên làm việc dài, chữ thường `#D4D7DD`,
 đường dẫn/metadata `#A1A6B0`, gợi ý và phím tắt `#7B818C`. Chỉ có MỘT màu nhấn (xanh `#7FA6E8`), dành cho thứ
 đang chọn/tương tác; xanh lá chỉ cho thành công và dòng thêm, đỏ chỉ cho lỗi và dòng xoá, vàng chỉ cho cảnh báo;
 sidebar và logo trầm. Không cần cấu hình gì: TUI, Home, hộp thoại, banner khi thoát, màn `login`/`logout` và
@@ -679,14 +680,14 @@ Enter chọn, Esc quay lại), hoặc đặt trong `~/.config/agent-cli/crush.js
 {"options": {"tui": {"active_theme": "charmtone-panther"}}}
 ```
 
-Bỏ trống hoặc xoá `active_theme` thì về `everforest-dark-v2`. Thứ tự ưu tiên khi nhiều nơi cùng đặt (đã thử):
+Bỏ trống hoặc xoá `active_theme` thì về `luannt-theme-everforest-dark`. Thứ tự ưu tiên khi nhiều nơi cùng đặt (đã thử):
 `crush.json`/`crushrc` trong thư mục dự án thắng `<data dir>/crush.json` (hộp thoại Themes ghi vào đây, mặc định
 `~/.local/share/agent-cli/crush.json`), và nó thắng `~/.config/agent-cli/crush.json`. Đã từng chọn theme trong TUI
-thì giá trị đó còn trong `<data dir>/crush.json`: chọn lại `everforest-dark-v2` trong Themes để dùng mặc định mới.
+thì giá trị đó còn trong `<data dir>/crush.json`: chọn lại `luannt-theme-everforest-dark` trong Themes để dùng mặc định mới.
 
 Giới hạn đã biết: đường kẻ bảng markdown do glamour vẽ theo màu mặc định của terminal; màu cú pháp trong khối code
 markdown theo theme đầu tiên của tiến trình cho tới khi mở lại (đổi theme giữa chừng thì khối code mới chưa đổi màu).
-Đừng sửa `everforest-dark-v2` bằng trình soạn theme (`Ctrl+E`): bản đã sửa là theme người dùng nên mất các điều chỉnh
+Đừng sửa `luannt-theme-everforest-dark` bằng trình soạn theme (`Ctrl+E`): bản đã sửa là theme người dùng nên mất các điều chỉnh
 theo vai trò; `Ctrl+D` (revert) trả về bản dựng sẵn. Bảng màu nằm ở `internal/ui/styles/everforest_dark_v2.go`
 (theme mặc định chọn ở `DefaultThemeName`, `internal/ui/styles/themes.go`); kiểm bằng `go test ./internal/ui/styles/`.
 

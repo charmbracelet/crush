@@ -339,6 +339,28 @@ type LSPConfig struct {
 	Timeout     int               `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds for LSP server initialization,default=30,example=60,example=120"`
 }
 
+// CompactionOptions controls how a long session is compressed to fit its
+// context window.
+type CompactionOptions struct {
+	// PruneToolResults replaces the output of tool calls that are no longer
+	// part of the recent working set with a one-line skeleton naming what ran
+	// and how much was dropped. The tool call itself stays, so the model
+	// knows what it already tried and can run it again. Stored transcripts
+	// are never modified.
+	PruneToolResults *bool `json:"prune_tool_results,omitempty" jsonschema:"description=Replace the output of stale tool calls with a one-line skeleton naming what ran; stored history is never modified,default=true"`
+	// TailTokens is how much of the most recent conversation a compaction
+	// keeps verbatim instead of folding into its checkpoint.
+	TailTokens int `json:"tail_tokens,omitempty" jsonschema:"description=Tokens of recent conversation a compaction keeps verbatim. When unset this is 15% of the model's context window,example=8000,example=40000"`
+	// ObserveMemory distills each completed turn into a session memory
+	// ledger using the small model. Recorded memory is attached to every
+	// checkpoint verbatim, so decisions and constraints persist across
+	// compactions instead of being re-summarized generation after
+	// generation. It costs one cheap model call per turn with enough new
+	// material to be worth reading, which is why it can be turned off; it
+	// is on unless explicitly disabled.
+	ObserveMemory *bool `json:"observe_memory,omitempty" jsonschema:"description=Record session memory at the end of each turn; memory is kept verbatim beside every checkpoint, so decisions survive compaction,default=true"`
+}
+
 type TUIOptions struct {
 	CompactMode bool        `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
 	DiffMode    string      `json:"diff_mode,omitempty" jsonschema:"description=Diff mode for the TUI interface,enum=unified,enum=split"`
@@ -456,13 +478,14 @@ func (Attribution) JSONSchemaExtend(schema *jsonschema.Schema) {
 }
 
 type Options struct {
-	ContextPaths         []string    `json:"context_paths,omitempty" jsonschema:"description=Paths to files containing context information for the AI,example=.cursorrules,example=CRUSH.md"`
-	GlobalContextPaths   []string    `json:"global_context_paths,omitempty" jsonschema:"description=Paths to files containing global context information for the AI,default=~/.config/crush/CRUSH.md,default=~/.config/AGENTS.md"`
-	SkillsPaths          []string    `json:"skills_paths,omitempty" jsonschema:"description=Paths to directories containing Agent Skills (folders with SKILL.md files),example=~/.config/crush/skills,example=./skills"`
-	TUI                  *TUIOptions `json:"tui,omitempty" jsonschema:"description=Terminal user interface options"`
-	Debug                bool        `json:"debug,omitempty" jsonschema:"description=Enable debug logging,default=false"`
-	DebugLSP             bool        `json:"debug_lsp,omitempty" jsonschema:"description=Enable debug logging for LSP servers,default=false"`
-	DisableAutoSummarize bool        `json:"disable_auto_summarize,omitempty" jsonschema:"description=Disable automatic conversation summarization,default=false"`
+	ContextPaths         []string           `json:"context_paths,omitempty" jsonschema:"description=Paths to files containing context information for the AI,example=.cursorrules,example=CRUSH.md"`
+	GlobalContextPaths   []string           `json:"global_context_paths,omitempty" jsonschema:"description=Paths to files containing global context information for the AI,default=~/.config/crush/CRUSH.md,default=~/.config/AGENTS.md"`
+	SkillsPaths          []string           `json:"skills_paths,omitempty" jsonschema:"description=Paths to directories containing Agent Skills (folders with SKILL.md files),example=~/.config/crush/skills,example=./skills"`
+	TUI                  *TUIOptions        `json:"tui,omitempty" jsonschema:"description=Terminal user interface options"`
+	Debug                bool               `json:"debug,omitempty" jsonschema:"description=Enable debug logging,default=false"`
+	DebugLSP             bool               `json:"debug_lsp,omitempty" jsonschema:"description=Enable debug logging for LSP servers,default=false"`
+	DisableAutoSummarize bool               `json:"disable_auto_summarize,omitempty" jsonschema:"description=Disable automatic conversation summarization,default=false"`
+	Compaction           *CompactionOptions `json:"compaction,omitempty" jsonschema:"description=Context compaction options"`
 	// DataDirectory is where Crush keeps per-project state such as
 	// the SQLite database and workspace overrides. Relative paths are
 	// resolved against the working directory; absolute paths are used

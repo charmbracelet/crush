@@ -12,6 +12,7 @@ import (
 	"charm.land/fantasy/providers/anthropic"
 	"charm.land/fantasy/providers/bedrock"
 	"charm.land/fantasy/providers/openaicompat"
+	"github.com/charmbracelet/crush/internal/compaction"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/discover"
 	"github.com/stretchr/testify/assert"
@@ -33,22 +34,46 @@ func (m *mockSessionAgent) BeginAccepted(sessionID string) *AcceptedRun {
 	return &AcceptedRun{sessionID: sessionID}
 }
 
-func (m *mockSessionAgent) Model() Model                        { return m.model }
-func (m *mockSessionAgent) SetModels(large, small Model)        {}
-func (m *mockSessionAgent) SetTools(tools []fantasy.AgentTool)  {}
+func (m *mockSessionAgent) Model() Model { return m.model }
+
+func (m *mockSessionAgent) SetModels(large, small Model) {}
+
+func (m *mockSessionAgent) SetTools(tools []fantasy.AgentTool) {}
+
 func (m *mockSessionAgent) SetSystemPrompt(systemPrompt string) {}
+
 func (m *mockSessionAgent) Cancel(sessionID string) {
 	m.cancelled = append(m.cancelled, sessionID)
 }
-func (m *mockSessionAgent) CancelAll()                                  {}
-func (m *mockSessionAgent) IsSessionBusy(sessionID string) bool         { return false }
-func (m *mockSessionAgent) IsBusy() bool                                { return false }
-func (m *mockSessionAgent) QueuedPrompts(sessionID string) int          { return 0 }
+
+func (m *mockSessionAgent) CancelAll() {}
+
+func (m *mockSessionAgent) IsSessionBusy(sessionID string) bool { return false }
+
+func (m *mockSessionAgent) IsBusy() bool { return false }
+
+func (m *mockSessionAgent) QueuedPrompts(sessionID string) int { return 0 }
+
 func (m *mockSessionAgent) QueuedPromptsList(sessionID string) []string { return nil }
-func (m *mockSessionAgent) ClearQueue(sessionID string)                 {}
-func (m *mockSessionAgent) Summarize(context.Context, string, fantasy.ProviderOptions, func(context.Context, *fantasy.ProviderError) error) error {
+
+func (m *mockSessionAgent) ClearQueue(sessionID string) {}
+
+func (m *mockSessionAgent) RestoreSummarize(context.Context, string) error { return nil }
+
+func (m *mockSessionAgent) SummarizePreview(context.Context, string, string, fantasy.ProviderOptions, func(context.Context, *fantasy.ProviderError) error) (compaction.Preview, error) {
+	return compaction.Preview{}, nil
+}
+
+func (m *mockSessionAgent) ConfirmSummarize(context.Context, string, compaction.Preview) error {
 	return nil
 }
+
+func (m *mockSessionAgent) DiscardSummarize(context.Context, string, string) error { return nil }
+
+func (m *mockSessionAgent) Summarize(context.Context, string, string, fantasy.ProviderOptions, func(context.Context, *fantasy.ProviderError) error) error {
+	return nil
+}
+
 func (m *mockSessionAgent) GenerateTitle(context.Context, string, string) {}
 
 // newTestCoordinator creates a minimal coordinator for unit testing runSubAgent.

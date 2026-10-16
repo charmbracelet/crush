@@ -16,7 +16,9 @@ need to author correct hooks.
 
 ## Supported Events
 
-Only `PreToolUse` is currently supported. Event names are case-insensitive and
+`PreToolUse`, `PreCompact` and `PostCompact` are currently supported. Compaction
+events take no matcher and can only deny (skip this compaction) or halt. Event
+names are case-insensitive and
 accept snake_case (`PreToolUse`, `pretooluse`, `pre_tool_use` all work).
 
 ## Configuration

@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/commands"
+	"github.com/charmbracelet/crush/internal/compaction"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/oauth"
@@ -95,8 +96,47 @@ type (
 		Name string
 	}
 	ActionInitializeProject struct{}
-	ActionSummarize         struct {
+	// ActionSummarize compacts a session. Arguments and Args follow the
+	// custom-command pattern: Arguments describes what to collect before
+	// compacting, a non-nil Args marks that the values arrived, and
+	// Instructions carries the user's emphasis for the checkpoint.
+	ActionSummarize struct {
+		SessionID    string
+		Arguments    []commands.Argument
+		Args         map[string]string
+		Instructions string
+	}
+
+	// ActionRestoreSummarize undoes the last compaction of a session, bringing
+	// back the messages its checkpoint replaced.
+	ActionRestoreSummarize struct {
 		SessionID string
+	}
+
+	// ActionPreviewSummarize writes a checkpoint without adopting it, so the
+	// user can read what would be kept before the session gives up the text it
+	// replaces. Accepting and discarding are separate actions because the
+	// answer may not arrive until later: the preview stays staged until then.
+	ActionPreviewSummarize struct {
+		SessionID    string
+		Arguments    []commands.Argument
+		Args         map[string]string
+		Instructions string
+	}
+
+	// ActionAcceptPreview adopts a staged checkpoint. Preview carries the
+	// counters computed when it was written, so acceptance cannot disagree
+	// with the plan that produced the text.
+	ActionAcceptPreview struct {
+		SessionID string
+		Preview   compaction.Preview
+	}
+
+	// ActionDiscardPreview throws away a staged checkpoint. The session was
+	// never pointed at it, which is the whole safety of previewing.
+	ActionDiscardPreview struct {
+		SessionID    string
+		CheckpointID string
 	}
 	// ActionSelectReasoningEffort is a message indicating a reasoning effort
 	// has been selected.
@@ -134,6 +174,10 @@ type (
 	// ActionDisableDockerMCP is a message to disable Docker MCP.
 	ActionDisableDockerMCP struct{}
 )
+
+// CompactInstructionsArg is the argument the compact dialog collects the
+// user's emphasis under, so the collected value can be read back there.
+const CompactInstructionsArg = "instructions"
 
 // Messages for MCP OAuth authentication dialog.
 type (

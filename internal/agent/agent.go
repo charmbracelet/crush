@@ -1754,6 +1754,10 @@ func filterFileParts(parts []fantasy.MessagePart) []fantasy.MessagePart {
 	return filtered
 }
 
+// interruptedToolResult is what a tool call reports when its turn was
+// cancelled, in place of the runtime's "context canceled".
+const interruptedToolResult = "tool call was interrupted and did not produce a result, you may retry this call if the result is still needed"
+
 // toolResultsForCalls builds the tool message that must immediately follow
 // an assistant message with tool calls. LLM APIs require every tool call to
 // be followed by its results before any other message; strict-adjacency
@@ -1780,7 +1784,7 @@ func toolResultsForCalls(m message.Message, toolResultsByCall map[string][]fanta
 		content = append(content, fantasy.ToolResultPart{
 			ToolCallID: tc.ID,
 			Output: fantasy.ToolResultOutputContentError{
-				Error: errors.New("tool call was interrupted and did not produce a result, you may retry this call if the result is still needed"),
+				Error: errors.New(interruptedToolResult),
 			},
 		})
 	}
@@ -2245,6 +2249,9 @@ func (a *sessionAgent) convertToToolResult(result fantasy.ToolResultContent) mes
 	case fantasy.ToolResultContentTypeError:
 		if r, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentError](result.Result); ok {
 			baseResult.Content = r.Error.Error()
+			if errors.Is(r.Error, context.Canceled) {
+				baseResult.Content = interruptedToolResult
+			}
 			baseResult.IsError = true
 		}
 	case fantasy.ToolResultContentTypeMedia:

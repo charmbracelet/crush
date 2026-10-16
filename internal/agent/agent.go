@@ -2174,6 +2174,17 @@ func hasUserTextMessage(msgs []message.Message) bool {
 	return false
 }
 
+// machineTitle cho biết title là tên do máy đặt (an toàn để tiêu đề LLM ghi
+// đè): rỗng, tên mặc định lúc tạo session, hoặc tiêu đề suy ra từ prompt. Tên
+// khác là do người dùng tự đổi nên phải giữ.
+func machineTitle(title, derived string) bool {
+	switch title {
+	case "", DefaultSessionName, "New Session", derived:
+		return true
+	}
+	return false
+}
+
 // GenerateTitle generates a session title based on the initial prompt.
 func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, userPrompt string) {
 	if userPrompt == "" {
@@ -2317,6 +2328,13 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 
 	promptTokens := contextTokens(resp.TotalUsage)
 	completionTokens := resp.TotalUsage.OutputTokens
+
+	// Giữ tên người dùng vừa tự đổi (F2/Ctrl+R) trong lúc tiêu đề LLM đang chạy
+	// (có thể vài chục giây trên model local): chỉ ghi đè khi tên hiện tại vẫn do
+	// MÁY đặt (tên mặc định lúc tạo, hoặc tiêu đề suy ra). Usage vẫn luôn ghi.
+	if cur, getErr := a.sessions.Get(ctx, sessionID); getErr == nil && !machineTitle(cur.Title, derived) {
+		title = cur.Title
+	}
 
 	// Atomically update only title and usage fields to avoid overriding other
 	// concurrent session updates.

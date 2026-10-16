@@ -1,9 +1,9 @@
 package shell
 
 import (
-	"regexp"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 )

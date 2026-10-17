@@ -557,6 +557,7 @@ func sessionWriter(ctx context.Context, contentHeight int) (io.Writer, func(), b
 	}
 
 	if err := cmd.Start(); err != nil {
+		_ = pipe.Close()
 		return colorprofile.NewWriter(os.Stdout, os.Environ()), func() {}, false
 	}
 

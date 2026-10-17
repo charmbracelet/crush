@@ -25,6 +25,7 @@ func init() {
 	shell.RegisterBuiltin("lsp", handleLSP)
 	shell.RegisterBuiltin("permissions", handlePermissions)
 	shell.RegisterBuiltin("hook", handleHook)
+	shell.RegisterBuiltin("honcho", handleHoncho)
 	shell.RegisterBuiltin("option", handleOption)
 }
 

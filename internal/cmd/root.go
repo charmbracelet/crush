@@ -371,7 +371,8 @@ func setupClientServerWorkspace(cmd *cobra.Command) (workspace.Workspace, func()
 
 	clientWs := workspace.NewClientWorkspace(c, *protoWs)
 
-	if protoWs.Config.IsConfigured() {
+	// Skip agent init until a model is selected; the TUI prompts for one.
+	if protoWs.Config.IsConfigured() && protoWs.Config.HasSelectedModel(config.SelectedModelTypeLarge) {
 		if err := clientWs.InitCoderAgent(cmd.Context()); err != nil {
 			slog.Error("Failed to initialize coder agent", "error", err)
 		}

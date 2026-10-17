@@ -167,7 +167,7 @@ func (t *Transport) envelope(model, verb string, body []byte) ([]byte, error) {
 		// crush sees mangled ids for Anthropic-family models; the
 		// backend only knows the real ones.
 		"model":     RealModelID(model),
-		"userAgent": "Antigravity/1.2.4",
+		"userAgent": "Antigravity/1.4.0",
 		"requestId": requestID,
 		"request":   in,
 	}

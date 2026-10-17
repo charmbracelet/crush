@@ -60,7 +60,7 @@ const (
 
 	// UserAgent identifies the client to the subscription backend, which
 	// rejects requests that do not look like a supported first-party CLI.
-	UserAgent = "antigravity/cli/1.2.4 (aidev_client; os_type=linux; arch=amd64; auth_method=consumer)"
+	UserAgent = "antigravity/cli/1.4.0 (aidev_client; os_type=linux; arch=amd64; auth_method=consumer)"
 )
 
 // ErrClientSecretRequired means the OAuth client secret Google's token

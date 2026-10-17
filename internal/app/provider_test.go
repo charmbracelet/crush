@@ -5,6 +5,7 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/stretchr/testify/require"
 )
 
@@ -177,6 +178,38 @@ func TestFindModels(t *testing.T) {
 			errorContains:  "not found",
 			setupProviders: setupMockProviders,
 		},
+		{
+			name:             "credential-scoped Copilot auto model",
+			modelStr:         "copilot/auto",
+			expectedProvider: "copilot",
+			expectedModelID:  "auto",
+			setupProviders: func() map[string]config.ProviderConfig {
+				return map[string]config.ProviderConfig{
+					"copilot": {
+						ID:            "copilot",
+						OAuthToken:    &oauth.Token{AccessToken: "token"},
+						Models:        []catwalk.Model{{ID: "static-model"}},
+						CopilotModels: []catwalk.Model{{ID: "auto"}},
+					},
+				}
+			},
+		},
+		{
+			name:          "static Copilot model unavailable during OAuth",
+			modelStr:      "copilot/static-model",
+			expectError:   true,
+			errorContains: "not found",
+			setupProviders: func() map[string]config.ProviderConfig {
+				return map[string]config.ProviderConfig{
+					"copilot": {
+						ID:            "copilot",
+						OAuthToken:    &oauth.Token{AccessToken: "token"},
+						Models:        []catwalk.Model{{ID: "static-model"}},
+						CopilotModels: []catwalk.Model{{ID: "auto"}},
+					},
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -207,4 +240,16 @@ func TestFindModels(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCopilotSmallModelFallsBackToAuto(t *testing.T) {
+	t.Parallel()
+
+	model := copilotSmallModel(config.ProviderConfig{
+		ID:         "copilot",
+		OAuthToken: &oauth.Token{AccessToken: "token"},
+	})
+
+	require.NotNil(t, model)
+	require.Equal(t, "auto", model.ID)
 }

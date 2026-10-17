@@ -123,7 +123,7 @@ func writeProviders(b *strings.Builder, cfg *config.ConfigStore) {
 		if pc.Disable {
 			continue
 		}
-		providers = append(providers, pv{name: name, count: len(pc.Models)})
+		providers = append(providers, pv{name: name, count: len(pc.AvailableModels())})
 	}
 	if len(providers) == 0 {
 		return

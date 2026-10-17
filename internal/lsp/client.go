@@ -474,9 +474,11 @@ func (c *Client) CloseAllFiles(ctx context.Context) {
 		if c.debug {
 			slog.Debug("Closing file", "file", uri)
 		}
+		// Drop the entry even when the notification failed: we are done tracking
+		// the document either way, and a leftover entry makes the next OpenFile
+		// treat it as already open, so a restart would never re-open it.
 		if err := c.client.NotifyDidCloseTextDocument(ctx, uri); err != nil {
 			slog.Warn("Error closing file", "uri", uri, "error", err)
-			continue
 		}
 		c.openFiles.Del(uri)
 	}

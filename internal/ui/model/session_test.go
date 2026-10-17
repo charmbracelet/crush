@@ -1,12 +1,14 @@
 package model
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/crush/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
 
@@ -109,6 +111,37 @@ func TestFileList(t *testing.T) {
 		got := fileList(st, "/", files, 20, 0)
 		require.Empty(t, got)
 	})
+}
+
+// sessionHistoryWorkspace serves a fixed file history so loadSessionFiles can
+// be exercised without a real workspace.
+type sessionHistoryWorkspace struct {
+	workspace.Workspace
+	files []history.File
+}
+
+func (w sessionHistoryWorkspace) ListSessionHistory(context.Context, string) ([]history.File, error) {
+	return w.files, nil
+}
+
+// A file that is entirely CRLF enters the history with LF endings, the form
+// the edit tool reads it in, and leaves it in CRLF, the form it wrote back.
+// Diffing those two versions side by side counted every line as changed, so
+// editing one line of a four line file read as a rewrite of all four.
+func TestLoadSessionFilesCountsOneEditedLineAcrossLineEndings(t *testing.T) {
+	t.Parallel()
+
+	u := newTestUI()
+	u.com.Workspace = sessionHistoryWorkspace{files: []history.File{
+		{Path: "/repo/test.txt", Version: 0, Content: "alpha\nbeta\ngamma\ndelta\n"},
+		{Path: "/repo/test.txt", Version: 1, Content: "alpha\r\nBETA\r\ngamma\r\ndelta\r\n"},
+	}}
+
+	files, err := u.loadSessionFiles("session")
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+	require.Equal(t, 1, files[0].Additions)
+	require.Equal(t, 1, files[0].Deletions)
 }
 
 func minimalFileStyles() *styles.Styles {

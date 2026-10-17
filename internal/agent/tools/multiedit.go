@@ -253,7 +253,7 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 }
 
 func processMultiEditExistingFile(edit editContext, params MultiEditParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-	sessionID, oldContent, isCrlf, resp, err := loadExistingFile(edit, params.FilePath, "session ID is required for editing a file")
+	sessionID, oldContent, rawContent, resp, err := loadExistingFile(edit, params.FilePath, "session ID is required for editing a file")
 	if err != nil {
 		return fantasy.ToolResponse{}, err
 	}
@@ -317,10 +317,7 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 		return resp, nil
 	}
 
-	writeContent := currentContent
-	if isCrlf {
-		writeContent, _ = fsext.ToWindowsLineEndings(writeContent)
-	}
+	writeContent := diff.RestoreLineEndings(rawContent, oldContent, currentContent)
 
 	if err := commitFileChange(edit, sessionID, params.FilePath, oldContent, writeContent); err != nil {
 		return fantasy.ToolResponse{}, err
@@ -338,7 +335,7 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 		fantasy.NewTextResponse(message),
 		MultiEditResponseMetadata{
 			OldContent:   oldContent,
-			NewContent:   currentContent,
+			NewContent:   writeContent,
 			Additions:    additions,
 			Removals:     removals,
 			EditsApplied: editsApplied,

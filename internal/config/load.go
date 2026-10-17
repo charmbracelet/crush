@@ -252,18 +252,26 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 				p.APIKey = config.APIKey
 			}
 			if len(config.Models) > 0 {
+				catalogMap := make(map[string]catwalk.Model, len(p.Models))
+				for _, m := range p.Models {
+					catalogMap[m.ID] = m
+				}
+
 				models := []catwalk.Model{}
 				seen := make(map[string]bool)
 
-				for _, model := range config.Models {
-					if seen[model.ID] {
+				for _, userModel := range config.Models {
+					if seen[userModel.ID] {
 						continue
 					}
-					seen[model.ID] = true
-					if model.Name == "" {
-						model.Name = model.ID
+					seen[userModel.ID] = true
+					if catalogModel, exists := catalogMap[userModel.ID]; exists {
+						userModel = mergeCatalogModel(catalogModel, userModel)
 					}
-					models = append(models, model)
+					if userModel.Name == "" {
+						userModel.Name = userModel.ID
+					}
+					models = append(models, userModel)
 				}
 				for _, model := range p.Models {
 					if seen[model.ID] {
@@ -529,6 +537,102 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 	}
 
 	return nil
+}
+
+// mergeCatalogModel merges a user model override on top of a base catalog model.
+// Fields explicitly set on the override replace the base values; unset fields
+// inherit from the catalog entry.
+func mergeCatalogModel(base, override catwalk.Model) catwalk.Model {
+	merged := base
+
+	if override.Name != "" {
+		merged.Name = override.Name
+	}
+	if override.CostPer1MIn > 0 {
+		merged.CostPer1MIn = override.CostPer1MIn
+	}
+	if override.CostPer1MOut > 0 {
+		merged.CostPer1MOut = override.CostPer1MOut
+	}
+	if override.CostPer1MInCached > 0 {
+		merged.CostPer1MInCached = override.CostPer1MInCached
+	}
+	if override.CostPer1MOutCached > 0 {
+		merged.CostPer1MOutCached = override.CostPer1MOutCached
+	}
+	if override.ContextWindow > 0 {
+		merged.ContextWindow = override.ContextWindow
+	}
+	if override.DefaultMaxTokens > 0 {
+		merged.DefaultMaxTokens = override.DefaultMaxTokens
+	}
+	if override.CanReason {
+		merged.CanReason = true
+	}
+	if override.SupportsImages {
+		merged.SupportsImages = true
+	}
+
+	// Merge reasoning levels: keep base catalog levels, union with override levels.
+	if len(override.ReasoningLevels) > 0 {
+		seen := make(map[string]bool, len(base.ReasoningLevels)+len(override.ReasoningLevels))
+		var mergedLevels []string
+		for _, l := range base.ReasoningLevels {
+			if !seen[l] {
+				seen[l] = true
+				mergedLevels = append(mergedLevels, l)
+			}
+		}
+		for _, l := range override.ReasoningLevels {
+			if !seen[l] {
+				seen[l] = true
+				mergedLevels = append(mergedLevels, l)
+			}
+		}
+		merged.ReasoningLevels = mergedLevels
+	} else if len(base.ReasoningLevels) > 0 {
+		merged.ReasoningLevels = slices.Clone(base.ReasoningLevels)
+	}
+
+	if override.DefaultReasoningEffort != "" {
+		merged.DefaultReasoningEffort = override.DefaultReasoningEffort
+		// Ensure configured default effort is present in ReasoningLevels if levels are used
+		if len(merged.ReasoningLevels) > 0 && !slices.Contains(merged.ReasoningLevels, override.DefaultReasoningEffort) {
+			merged.ReasoningLevels = append(merged.ReasoningLevels, override.DefaultReasoningEffort)
+		}
+		merged.CanReason = true
+	}
+
+	// Merge ModelOptions (temperature, top_p, provider_options, etc.)
+	merged.Options = mergeModelOptions(base.Options, override.Options)
+
+	return merged
+}
+
+func mergeModelOptions(base, override catwalk.ModelOptions) catwalk.ModelOptions {
+	merged := base
+	if override.Temperature != nil {
+		merged.Temperature = override.Temperature
+	}
+	if override.TopP != nil {
+		merged.TopP = override.TopP
+	}
+	if override.TopK != nil {
+		merged.TopK = override.TopK
+	}
+	if override.FrequencyPenalty != nil {
+		merged.FrequencyPenalty = override.FrequencyPenalty
+	}
+	if override.PresencePenalty != nil {
+		merged.PresencePenalty = override.PresencePenalty
+	}
+	if len(override.ProviderOptions) > 0 {
+		opts := make(map[string]any, len(base.ProviderOptions)+len(override.ProviderOptions))
+		maps.Copy(opts, base.ProviderOptions)
+		maps.Copy(opts, override.ProviderOptions)
+		merged.ProviderOptions = opts
+	}
+	return merged
 }
 
 // applyEnv sets top-level env vars from the config. Keys are sorted for

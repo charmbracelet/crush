@@ -33,7 +33,11 @@ var runCmd = &cobra.Command{
 	Use:     "run [prompt...]",
 	Short:   "Run a single non-interactive prompt",
 	Long: `Run a single prompt in non-interactive mode and exit.
-The prompt can be provided as arguments or piped from stdin.`,
+The prompt can be provided as arguments or piped from stdin.
+
+Nobody is around to answer permission prompts in non-interactive mode, so
+crush run accepts its session's tool permissions automatically. Passing
+--yolo is allowed, but it has no extra effect.`,
 	Example: `
 # Run a simple prompt
 crush run "Guess my 5 favorite Pokémon"
@@ -173,6 +177,12 @@ func init() {
 	runCmd.Flags().StringP("session", "s", "", "Continue a previous session by ID")
 	runCmd.Flags().BoolP("continue", "C", false, "Continue the most recent session")
 	runCmd.MarkFlagsMutuallyExclusive("session", "continue")
+
+	// crush run always auto-accepts permissions. --yolo is accepted anyway so
+	// that scripts and agents passing it, as they would to crush, don't fail
+	// with "unknown flag". It's ignored; see yoloFlag.
+	runCmd.Flags().BoolP("yolo", "y", false, "No effect: crush run always accepts permissions")
+	_ = runCmd.Flags().MarkHidden("yolo")
 }
 
 // runNonInteractive executes the agent via the server and streams output

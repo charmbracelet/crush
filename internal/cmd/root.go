@@ -237,6 +237,19 @@ func useClientServer() bool {
 	return v
 }
 
+// yoloFlag reports whether --yolo was passed to the interactive root
+// command. `crush run` accepts --yolo too, but ignores it: non-interactive
+// runs already auto-approve their own session, and forwarding the flag would
+// make a shared client/server workspace skip permissions for every client
+// attached to it.
+func yoloFlag(cmd *cobra.Command) bool {
+	if cmd.HasParent() {
+		return false
+	}
+	yolo, _ := cmd.Flags().GetBool("yolo")
+	return yolo
+}
+
 // setupWorkspaceWithProgressBar wraps setupWorkspace with an optional
 // terminal progress bar shown during initialization.
 func setupWorkspaceWithProgressBar(cmd *cobra.Command) (workspace.Workspace, func(), error) {
@@ -269,7 +282,7 @@ func setupWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error) {
 // AppWorkspace.
 func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error) {
 	debug, _ := cmd.Flags().GetBool("debug")
-	yolo, _ := cmd.Flags().GetBool("yolo")
+	yolo := yoloFlag(cmd)
 	channels, _ := cmd.Flags().GetStringSlice("channels")
 	dataDir, _ := cmd.Flags().GetString("data-dir")
 	ctx := cmd.Context()
@@ -396,7 +409,7 @@ func connectToServer(cmd *cobra.Command) (*client.Client, *proto.Workspace, func
 	}
 
 	debug, _ := cmd.Flags().GetBool("debug")
-	yolo, _ := cmd.Flags().GetBool("yolo")
+	yolo := yoloFlag(cmd)
 	channels, _ := cmd.Flags().GetStringSlice("channels")
 	dataDir, _ := cmd.Flags().GetString("data-dir")
 

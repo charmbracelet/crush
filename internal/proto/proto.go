@@ -76,6 +76,7 @@ type CurrentSession struct {
 // SessionID may arrive first, and filtering by SessionID alone
 // would terminate the caller before its own turn ran.
 type RunComplete struct {
+	Sequence  uint64 `json:"sequence,omitzero"`
 	SessionID string `json:"session_id"`
 	RunID     string `json:"run_id,omitempty"`
 	MessageID string `json:"message_id"`
@@ -127,6 +128,17 @@ func (a AgentInfo) IsZero() bool {
 	return !a.IsBusy && !a.IsReady && a.Model.ID == ""
 }
 
+// PermissionRequestPolicy controls permission handling for one turn.
+type PermissionRequestPolicy string
+
+const (
+	// PermissionRequestPolicyPrompt retains normal permission handling,
+	// including existing grants, hooks, allowlists, and workspace overrides.
+	PermissionRequestPolicyPrompt PermissionRequestPolicy = ""
+	// PermissionRequestPolicyAutoApprove approves this turn and its descendants.
+	PermissionRequestPolicyAutoApprove PermissionRequestPolicy = "auto_approve"
+)
+
 // AgentMessage represents a message sent to the agent.
 //
 // RunID, when non-empty, is echoed back on the [RunComplete] event
@@ -142,12 +154,17 @@ func (a AgentInfo) IsZero() bool {
 // remains correct only when no other turns are in flight for the
 // same session.
 type AgentMessage struct {
-	HiddenUserMessage bool         `json:"hidden_user_message,omitempty"`
-	SessionID         string       `json:"session_id"`
-	RunID             string       `json:"run_id,omitempty"`
-	Channel           string       `json:"channel,omitempty"`
-	Prompt            string       `json:"prompt"`
-	Attachments       []Attachment `json:"attachments,omitempty"`
+	// OperatorSteering allows an uncorrelated, non-channel submission to
+	// steer the active turn under its existing permission policy. If idle,
+	// the submission starts a turn with PermissionPolicy as usual.
+	OperatorSteering  bool                    `json:"operator_steering,omitempty"`
+	HiddenUserMessage bool                    `json:"hidden_user_message,omitempty"`
+	SessionID         string                  `json:"session_id"`
+	RunID             string                  `json:"run_id,omitempty"`
+	Channel           string                  `json:"channel,omitempty"`
+	Prompt            string                  `json:"prompt"`
+	PermissionPolicy  PermissionRequestPolicy `json:"permission_policy,omitempty"`
+	Attachments       []Attachment            `json:"attachments,omitempty"`
 }
 
 // ShellCommandRequest represents a request to run a shell command directly.

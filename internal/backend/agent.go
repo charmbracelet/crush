@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"os"
+	"time"
 
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/shell"
@@ -46,6 +48,16 @@ func (b *Backend) SendMessage(workspaceID string, msg proto.AgentMessage) error 
 		return err
 	}
 
+	var policy permission.RequestPolicy
+	switch msg.PermissionPolicy {
+	case proto.PermissionRequestPolicyPrompt:
+		policy = permission.RequestPolicyPrompt
+	case proto.PermissionRequestPolicyAutoApprove:
+		policy = permission.RequestPolicyAutoApprove
+	default:
+		return ErrInvalidPermissionPolicy
+	}
+
 	accept := ws.AgentCoordinator.BeginAccepted(msg.SessionID)
 
 	ws.runMu.Lock()
@@ -57,7 +69,7 @@ func (b *Backend) SendMessage(workspaceID string, msg proto.AgentMessage) error 
 	ws.runWG.Add(1)
 	ws.runMu.Unlock()
 
-	go b.runAgent(ws, msg, accept)
+	go b.runAgent(ws, msg, policy, accept)
 	return nil
 }
 
@@ -85,11 +97,12 @@ func (b *Backend) SendMessage(workspaceID string, msg proto.AgentMessage) error 
 // notify.RunComplete event with that correlator. A run-complete marker
 // is also attached so the coordinator can report whether it published
 // the terminal event, letting runAgent avoid a duplicate fallback.
-func (b *Backend) runAgent(ws *Workspace, msg proto.AgentMessage, accept *agent.AcceptedRun) {
+func (b *Backend) runAgent(ws *Workspace, msg proto.AgentMessage, policy permission.RequestPolicy, accept *agent.AcceptedRun) {
 	defer ws.runWG.Done()
 	defer accept.Close()
 
-	ctx := ws.ctx
+	ctx := permission.WithRequestPolicy(ws.ctx, policy)
+	ctx = message.WithOperatorSteering(ctx, msg.OperatorSteering)
 	if msg.HiddenUserMessage {
 		ctx = message.WithHiddenUserMessage(ctx)
 	}
@@ -102,28 +115,33 @@ func (b *Backend) runAgent(ws *Workspace, msg proto.AgentMessage, accept *agent.
 		ctx = agent.WithChannel(ctx, msg.Channel)
 	}
 	_, err := ws.AgentCoordinator.RunAccepted(ctx, accept, msg.SessionID, msg.Prompt, proto.AttachmentsToMessage(msg.Attachments)...)
-	if err == nil || errors.Is(err, context.Canceled) {
+	if err == nil {
 		return
 	}
 
-	ws.AgentNotifications().Publish(pubsub.CreatedEvent, notify.Notification{
-		SessionID: msg.SessionID,
-		RunID:     msg.RunID,
-		Type:      notify.TypeAgentError,
-		Message:   err.Error(),
-	})
+	if !errors.Is(err, context.Canceled) {
+		ws.AgentNotifications().Publish(pubsub.CreatedEvent, notify.Notification{
+			SessionID: msg.SessionID,
+			RunID:     msg.RunID,
+			Type:      notify.TypeAgentError,
+			Message:   err.Error(),
+		})
+	}
 
-	// Reliable terminal fallback. Only needed when a RunID waiter
-	// exists and the coordinator has not already emitted the run's
-	// terminal RunComplete; otherwise this would be a duplicate.
-	if msg.RunID == "" || agent.RunCompletePublished(ctx) {
+	// Cover dispatchers without coordinator completion ownership, including
+	// anonymous submissions and cancellation before entering the agent.
+	if agent.RunCompletePublished(ctx) {
 		return
 	}
 	if rc := ws.RunCompletions(); rc != nil {
-		rc.PublishMustDeliver(ctx, pubsub.UpdatedEvent, notify.RunComplete{
+		completeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		rc.PublishMustDeliver(completeCtx, pubsub.UpdatedEvent, notify.RunComplete{
 			SessionID: msg.SessionID,
 			RunID:     msg.RunID,
 			Error:     err.Error(),
+			Cancelled: errors.Is(err, context.Canceled),
+			Sequence:  ws.NextCompletionSequence(),
 		})
 	}
 }

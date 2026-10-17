@@ -13,6 +13,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/client"
@@ -24,6 +25,20 @@ import (
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/stretchr/testify/require"
 )
+
+func TestFinishedEventTranslation(t *testing.T) {
+	t.Parallel()
+	w := &ClientWorkspace{}
+	for _, state := range []notify.FinishState{"", notify.FinishContinuing, notify.FinishIdleSuccess, notify.FinishIdleUnsuccessful} {
+		translated := w.translateEvent(pubsub.Event[proto.AgentEvent]{Payload: proto.AgentEvent{
+			Type: proto.AgentEventType(notify.TypeAgentFinished), SessionID: "session", FinishState: state,
+		}})
+		event, ok := translated.(pubsub.Event[notify.Notification])
+		require.True(t, ok)
+		require.Equal(t, state, event.Payload.FinishState)
+		require.Equal(t, "session", event.Payload.SessionID)
+	}
+}
 
 // TestProtoToMessageToolResult ensures that ToolResult metadata,
 // data, and MIME type survive the conversion from proto on the
@@ -717,6 +732,16 @@ func TestClientWorkspace_RecoversFromWorkspaceGone(t *testing.T) {
 	}, 3*time.Second, 5*time.Millisecond,
 		"the UI must be told to resync after the workspace was re-created")
 
+	rec.mu.Lock()
+	var resets int
+	for _, ev := range rec.events {
+		if ev.WorkspaceRecreated {
+			require.Equal(t, ConnectionRecovered, ev.State)
+			resets++
+		}
+	}
+	rec.mu.Unlock()
+	require.Equal(t, 1, resets, "only the first recovery changes workspace instance")
 	ws.Shutdown()
 	select {
 	case <-done:
@@ -766,6 +791,16 @@ func TestClientWorkspace_ResyncsAfterPlainStreamDrop(t *testing.T) {
 	require.Zero(t, creates, "a live workspace must not be re-created")
 	require.Equal(t, "ws-1", ws.workspaceID())
 
+	rec.mu.Lock()
+	var resets int
+	for _, ev := range rec.events {
+		if ev.WorkspaceRecreated {
+			require.Equal(t, ConnectionRecovered, ev.State)
+			resets++
+		}
+	}
+	rec.mu.Unlock()
+	require.Equal(t, 0, resets, "stream reconnects retain the completion sequence scope")
 	ws.Shutdown()
 	select {
 	case <-done:
@@ -1102,4 +1137,26 @@ func TestClientWorkspace_GitBranchServerError(t *testing.T) {
 	t.Cleanup(ws.Shutdown)
 	_, err = ws.GitBranch(t.Context())
 	require.Error(t, err)
+}
+
+func TestAppWorkspace_AgentSessionIdleKnown(t *testing.T) {
+	t.Parallel()
+	w := NewAppWorkspace(&app.App{}, nil)
+	busy, err := w.AgentIsSessionBusy("session")
+	require.NoError(t, err, "an absent local coordinator is known idle, not a failed probe")
+	require.False(t, busy)
+}
+
+func TestRunCompletePreservesCompletionSequence(t *testing.T) {
+	t.Parallel()
+	w := &ClientWorkspace{}
+	for _, sequence := range []uint64{0, 42} {
+		translated := w.translateEvent(pubsub.Event[proto.RunComplete]{Payload: proto.RunComplete{
+			SessionID: "session", Sequence: sequence, Error: "failed",
+		}})
+		event, ok := translated.(pubsub.Event[notify.RunComplete])
+		require.True(t, ok)
+		require.Equal(t, sequence, event.Payload.Sequence)
+		require.Equal(t, "failed", event.Payload.Error)
+	}
 }

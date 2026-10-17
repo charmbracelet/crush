@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -37,14 +38,15 @@ func newGateTestCoordinator(t *testing.T, interactive bool) *coordinator {
 	cfg.SetupAgents()
 
 	coord := &coordinator{
-		cfg:         cfg,
-		sessions:    env.sessions,
-		messages:    env.messages,
-		permissions: env.permissions,
-		history:     env.history,
-		filetracker: *env.filetracker,
-		agents:      make(map[string]SessionAgent),
-		interactive: interactive,
+		completionSequence: new(atomic.Uint64),
+		cfg:                cfg,
+		sessions:           env.sessions,
+		messages:           env.messages,
+		permissions:        env.permissions,
+		history:            env.history,
+		filetracker:        *env.filetracker,
+		agents:             make(map[string]SessionAgent),
+		interactive:        interactive,
 	}
 
 	p, err := coderPrompt(prompt.WithWorkingDir(env.workingDir))

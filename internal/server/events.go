@@ -125,6 +125,7 @@ func wrapEvent(ev any) *pubsub.Payload {
 			SessionTitle: e.Payload.SessionTitle,
 			RunID:        e.Payload.RunID,
 			Type:         proto.AgentEventType(e.Payload.Type),
+			FinishState:  e.Payload.FinishState,
 			AWSSOCommand: e.Payload.AWSSOCommand,
 			AWSSOURL:     e.Payload.AWSSOURL,
 		}
@@ -150,6 +151,7 @@ func wrapEvent(ev any) *pubsub.Payload {
 				Text:      e.Payload.Text,
 				Error:     e.Payload.Error,
 				Cancelled: e.Payload.Cancelled,
+				Sequence:  e.Payload.Sequence,
 			},
 		})
 	case pubsub.Event[proto.ConfigChanged]:

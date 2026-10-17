@@ -547,6 +547,8 @@ Available Keys:
                                 control the post-session banner: default shows
                                 the Crush logo, compact shows only the resume
                                 hint, none hides it entirely
+  timestamps 12h|24h|off        choose the completion timestamp format (default
+                                12h); off hides the timestamp
   completions-max-depth int     maximum directory depth shown by completions
   completions-max-items int     maximum items returned to completions
 ```
@@ -558,9 +560,13 @@ option ui transparent true
 option ui mouse false
 option ui scrollbar always
 option ui exit-banner compact
+option ui timestamps 24h
 option ui completions-max-depth 4
 option ui completions-max-items 200
 ```
+
+Completion timestamps use the local timezone. The JSON equivalent is
+`options.tui.timestamps`.
 
 > [!IMPORTANT]
 > These skill paths load by default — you do NOT need `skill-path`

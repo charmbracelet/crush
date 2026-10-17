@@ -43,6 +43,28 @@ func TestReloadFromDisk_PicksUpEditedCrushrc(t *testing.T) {
 		"reload must re-execute the crushrc and pick up the new value")
 }
 
+// TestReloadFromDisk_Timestamps verifies that format changes replace the
+// config snapshot and that invalid values leave the previous setting intact.
+func TestReloadFromDisk_Timestamps(t *testing.T) {
+	workDir, dataDir := isolateReloadEnv(t)
+	require.NoError(t, os.WriteFile(filepath.Join(workDir, "crush.json"), []byte(`{"options":{"disable_provider_auto_update":true}}`), 0o644))
+	rcPath := filepath.Join(workDir, "crushrc")
+	require.NoError(t, os.WriteFile(rcPath, []byte("option ui timestamps 12h\n"), 0o644))
+	store, err := config.Load(workDir, dataDir, false)
+	require.NoError(t, err)
+	original := store.Config()
+
+	for _, format := range []config.TimestampFormat{config.TimestampFormat24Hour, config.TimestampFormatOff} {
+		require.NoError(t, os.WriteFile(rcPath, []byte("option ui timestamps "+string(format)+"\n"), 0o644))
+		require.NoError(t, store.ReloadFromDisk(t.Context()))
+		require.Equal(t, format, store.Config().TimestampFormat())
+	}
+	require.Equal(t, config.TimestampFormat12Hour, original.TimestampFormat())
+	require.NoError(t, os.WriteFile(rcPath, []byte("option ui timestamps auto\n"), 0o644))
+	require.Error(t, store.ReloadFromDisk(t.Context()))
+	require.Equal(t, config.TimestampFormatOff, store.Config().TimestampFormat(), "failed reloads must preserve the previous setting")
+}
+
 // TestReloadFromDisk_FailingCrushrcKeepsOldConfig verifies that a crushrc
 // which fails to load during a reload does not clobber the in-memory config.
 // The reload must return an error and leave the previously-loaded config

@@ -61,9 +61,7 @@ var serverCmd = &cobra.Command{
 
 		errch := make(chan error, 1)
 		sigch := make(chan os.Signal, 1)
-		sigs := []os.Signal{os.Interrupt}
-		sigs = append(sigs, addSignals(sigs)...)
-		signal.Notify(sigch, sigs...)
+		signal.Notify(sigch, terminationSignals()...)
 
 		go func() {
 			errch <- srv.ListenAndServe()
@@ -84,7 +82,9 @@ var serverCmd = &cobra.Command{
 			return nil
 		}
 
-		ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Second)
+		// Workspace teardown is bounded at roughly 10s; leave the HTTP
+		// drain its own 5s after that.
+		ctx, cancel := context.WithTimeout(cmd.Context(), 15*time.Second)
 		defer cancel()
 
 		slog.Info("Shutting down...")

@@ -204,10 +204,11 @@ func (s *Server) Close() error {
 	return s.h.Close()
 }
 
-// Shutdown gracefully shuts down the server without interrupting active
-// connections.
+// Shutdown tears down hosted workspaces, then gracefully shuts down the
+// server without interrupting active connections.
 func (s *Server) Shutdown(ctx context.Context) error {
 	defer func() { s.closeListener() }()
+	s.backend.ShutdownWorkspaces()
 	return s.h.Shutdown(ctx)
 }
 

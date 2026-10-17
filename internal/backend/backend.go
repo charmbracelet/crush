@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -480,9 +481,7 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	// Re-check admission: the client may have retired while the slow
 	// init above ran with b.mu released, and registering a claim for a
 	// client that has already announced its exit would strand the
-	// workspace. (b.closing cannot have flipped: every shutdown decision
-	// requires pending == 0, and this create has held pending since
-	// before it released b.mu.)
+	// workspace, or the server may have been told to stop meanwhile.
 	if err := b.admitLocked(clientID); err != nil {
 		b.mu.Unlock()
 		ws.invokeShutdown()
@@ -837,6 +836,11 @@ func (b *Backend) teardown(ws *Workspace) {
 		return
 	}
 	ws.clientsMu.Unlock()
+	if _, ok := b.workspaces.Get(ws.ID); !ok {
+		// Already torn down by another path, which owns its shutdown.
+		b.mu.Unlock()
+		return
+	}
 	if existing, ok := b.pathIndex[ws.resolvedPath]; ok && existing == ws.ID {
 		delete(b.pathIndex, ws.resolvedPath)
 	}
@@ -872,7 +876,7 @@ func (b *Backend) teardown(ws *Workspace) {
 // Returning true also latches [Backend.closing], since the caller has to
 // release b.mu before it can run shutdownFn.
 func (b *Backend) scheduleShutdownIfIdleLocked() (shutdownNow bool) {
-	if b.shutdownFn == nil {
+	if b.shutdownFn == nil || b.closing {
 		return false
 	}
 	if b.workspaces.Len() != 0 || b.pending != 0 {
@@ -1049,15 +1053,25 @@ func (b *Backend) Config() *config.ConfigStore {
 	return b.cfg
 }
 
-// Shutdown initiates a graceful server shutdown.
-func (b *Backend) Shutdown() {
+// ShutdownWorkspaces refuses new creates and tears down every hosted
+// workspace in parallel, so interrupted work is recorded before exit.
+func (b *Backend) ShutdownWorkspaces() {
 	b.mu.Lock()
 	b.closing = true
-	fn := b.shutdownFn
-	b.mu.Unlock()
-	if fn != nil {
-		fn()
+	b.cancelShutdownLocked()
+	workspaces := slices.Collect(b.workspaces.Seq())
+	for _, ws := range workspaces {
+		b.workspaces.Del(ws.ID)
 	}
+	clear(b.pathIndex)
+	b.mu.Unlock()
+
+	var wg sync.WaitGroup
+	for _, ws := range workspaces {
+		slog.Info("Shutting down workspace", "workspace", ws.ID)
+		wg.Go(ws.invokeShutdown)
+	}
+	wg.Wait()
 }
 
 // ShutdownIfIdle shuts the server down only when it is hosting no

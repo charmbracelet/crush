@@ -32,14 +32,17 @@ type compiledHook struct {
 	matcher *regexp.Regexp
 }
 
-// Runner executes hook commands and aggregates their results.
+// Runner executes hook commands and aggregates their results. It holds
+// all hook configs keyed by event name and dispatches internally, so
+// callers create a single Runner for the entire application.
 type Runner struct {
-	hooks      []compiledHook
+	// hooks maps canonical event names to their compiled hooks.
+	hooks      map[string][]compiledHook
 	cwd        string
 	projectDir string
 }
 
-// NewRunner creates a Runner from the given hook configs. Each hook's
+// NewRunner creates a Runner from the given hooks map. Each hook's
 // Matcher is compiled here so the Runner is self-sufficient; callers do
 // not have to pre-compile matchers on the config, and reloads or merges
 // that rebuild HookConfig values can't silently strip compiled state.
@@ -47,24 +50,26 @@ type Runner struct {
 // Hooks whose matcher fails to compile are skipped with a warning rather
 // than treated as match-everything. ValidateHooks is expected to have
 // caught syntax errors earlier, so this is defense in depth.
-func NewRunner(hooks []config.HookConfig, cwd, projectDir string) *Runner {
-	compiled := make([]compiledHook, 0, len(hooks))
-	for _, h := range hooks {
-		ch := compiledHook{cfg: h}
-		if h.Matcher != "" {
-			re, err := regexp.Compile(h.Matcher)
-			if err != nil {
-				slog.Warn(
-					"Hook matcher failed to compile; skipping hook",
-					"matcher", h.Matcher,
-					"command", h.Command,
-					"error", err,
-				)
-				continue
+func NewRunner(hooksMap map[string][]config.HookConfig, cwd, projectDir string) *Runner {
+	compiled := make(map[string][]compiledHook, len(hooksMap))
+	for event, cfgs := range hooksMap {
+		for _, h := range cfgs {
+			ch := compiledHook{cfg: h}
+			if h.Matcher != "" {
+				re, err := regexp.Compile(h.Matcher)
+				if err != nil {
+					slog.Warn(
+						"Hook matcher failed to compile; skipping hook",
+						"matcher", h.Matcher,
+						"command", h.Command,
+						"error", err,
+					)
+					continue
+				}
+				ch.matcher = re
 			}
-			ch.matcher = re
+			compiled[event] = append(compiled[event], ch)
 		}
-		compiled = append(compiled, ch)
 	}
 	return &Runner{
 		hooks:      compiled,
@@ -73,39 +78,100 @@ func NewRunner(hooks []config.HookConfig, cwd, projectDir string) *Runner {
 	}
 }
 
-// Hooks returns the hook configs the runner was created with, in config
-// order. Hooks whose matcher failed to compile at construction are
-// omitted. Intended for diagnostics; callers should not rely on ordering
-// or identity beyond that.
-func (r *Runner) Hooks() []config.HookConfig {
-	out := make([]config.HookConfig, len(r.hooks))
-	for i, h := range r.hooks {
-		out[i] = h.cfg
-	}
-	return out
+// HasEvent reports whether any hooks are configured for the given event.
+func (r *Runner) HasEvent(event string) bool {
+	return len(r.hooks[event]) > 0
 }
 
-// Run executes all matching hooks for the given event and tool, returning
-// an aggregated result.
+// Run executes all matching hooks for the given event, returning an
+// aggregated result. For tool events (PreToolUse, PostToolUse), hooks
+// are filtered by matcher against toolName. For lifecycle events, all
+// configured hooks run unconditionally.
+//
+// For PostToolUse, updated_input uses replacement semantics
+// (last-writer-wins). For PreToolUse, updated_input uses shallow-merge
+// patch semantics against toolInputJSON. For lifecycle events,
+// toolName and toolInputJSON are ignored.
 func (r *Runner) Run(ctx context.Context, eventName, sessionID, toolName, toolInputJSON string) (AggregateResult, error) {
-	matching := r.matchingHooks(toolName)
-	if len(matching) == 0 {
+	hooks := r.matchingHooks(eventName, toolName)
+	if len(hooks) == 0 {
 		return AggregateResult{Decision: DecisionNone}, nil
 	}
 
+	isTool := IsToolEvent(eventName)
+	var envVars []string
+	var payload []byte
+	if isTool {
+		envVars = BuildEnv(eventName, toolName, sessionID, r.cwd, r.projectDir, toolInputJSON)
+		payload = BuildPayload(eventName, sessionID, r.cwd, toolName, toolInputJSON)
+	} else {
+		envVars = BuildLifecycleEnv(eventName, sessionID, r.cwd, r.projectDir)
+		payload = BuildLifecyclePayload(eventName, sessionID, r.cwd)
+	}
+
+	// PostToolUse uses replacement semantics for updated_input.
+	replace := eventName == EventPostToolUse
+	agg := r.executeHooks(ctx, hooks, envVars, payload, toolInputJSON, replace)
+
+	logArgs := []any{
+		"event", eventName,
+		"hooks", agg.HookCount,
+		"decision", agg.Decision.String(),
+	}
+	if isTool {
+		logArgs = append(logArgs, "tool", toolName)
+	}
+	slog.Info("Hook completed", logArgs...)
+	return agg, nil
+}
+
+// RunPostToolUse executes PostToolUse hooks with the tool's response
+// content included in the payload. Unlike Run, this passes tool_output
+// so hooks can inspect or redact what the model sees.
+func (r *Runner) RunPostToolUse(ctx context.Context, sessionID, toolName, toolInputJSON, toolOutput string, isError bool) (AggregateResult, error) {
+	hooks := r.matchingHooks(EventPostToolUse, toolName)
+	if len(hooks) == 0 {
+		return AggregateResult{Decision: DecisionNone}, nil
+	}
+
+	envVars := BuildEnv(EventPostToolUse, toolName, sessionID, r.cwd, r.projectDir, toolInputJSON)
+	payload := BuildPostToolUsePayload(sessionID, r.cwd, toolName, toolInputJSON, toolOutput, isError)
+
+	agg := r.executeHooks(ctx, hooks, envVars, payload, toolInputJSON, true)
+	slog.Info("Hook completed", "event", EventPostToolUse, "tool", toolName, "hooks", agg.HookCount, "decision", agg.Decision.String())
+	return agg, nil
+}
+
+// RunTurnEnd executes TurnEnd hooks with the assistant's rendered
+// text content included in the payload. Observe-only; results are
+// logged but not acted upon.
+func (r *Runner) RunTurnEnd(ctx context.Context, sessionID, text string) {
+	hooks := r.matchingHooks(EventTurnEnd, "")
+	if len(hooks) == 0 {
+		return
+	}
+
+	envVars := BuildLifecycleEnv(EventTurnEnd, sessionID, r.cwd, r.projectDir)
+	payload := BuildTurnEndPayload(sessionID, r.cwd, text)
+
+	agg := r.executeHooks(ctx, hooks, envVars, payload, "", false)
+	slog.Info("Hook completed", "event", EventTurnEnd, "hooks", agg.HookCount)
+}
+
+// executeHooks is the shared orchestration. It deduplicates hooks by
+// command, runs them in parallel, waits for completion, and aggregates
+// results in config order.
+func (r *Runner) executeHooks(ctx context.Context, hooks []config.HookConfig, envVars []string, payload []byte, origToolInput string, replace bool) AggregateResult {
 	// Deduplicate by command string.
-	seen := make(map[string]bool, len(matching))
+	seen := make(map[string]bool, len(hooks))
 	var deduped []config.HookConfig
-	for _, h := range matching {
+	for _, h := range hooks {
 		if seen[h.Command] {
 			continue
 		}
 		seen[h.Command] = true
 		deduped = append(deduped, h)
 	}
-
-	envVars := BuildEnv(eventName, toolName, sessionID, r.cwd, r.projectDir, toolInputJSON)
-	payload := BuildPayload(eventName, sessionID, r.cwd, toolName, toolInputJSON)
 
 	results := make([]HookResult, len(deduped))
 	var wg sync.WaitGroup
@@ -119,7 +185,7 @@ func (r *Runner) Run(ctx context.Context, eventName, sessionID, toolName, toolIn
 	}
 	wg.Wait()
 
-	agg := aggregate(results, toolInputJSON)
+	agg := aggregate(results, origToolInput, replace)
 	agg.Hooks = make([]HookInfo, len(deduped))
 	for i, h := range deduped {
 		agg.Hooks[i] = HookInfo{
@@ -131,21 +197,28 @@ func (r *Runner) Run(ctx context.Context, eventName, sessionID, toolName, toolIn
 			InputRewrite: results[i].UpdatedInput != "",
 		}
 	}
-	slog.Info(
-		"Hook completed",
-		"event", eventName,
-		"tool", toolName,
-		"hooks", len(deduped),
-		"decision", agg.Decision.String(),
-	)
-	return agg, nil
+	return agg
 }
 
-// matchingHooks returns hooks whose matcher matches the tool name (or has
-// no matcher, which matches everything).
-func (r *Runner) matchingHooks(toolName string) []config.HookConfig {
+// matchingHooks returns hooks for the given event. For tool events,
+// filters by matcher against toolName. For lifecycle events, returns
+// all configured hooks for the event.
+func (r *Runner) matchingHooks(eventName, toolName string) []config.HookConfig {
+	compiled := r.hooks[eventName]
+	if len(compiled) == 0 {
+		return nil
+	}
+	if !IsToolEvent(eventName) {
+		// Lifecycle events: return all hooks, no matcher filtering.
+		out := make([]config.HookConfig, len(compiled))
+		for i, h := range compiled {
+			out[i] = h.cfg
+		}
+		return out
+	}
+	// Tool events: filter by matcher.
 	var matched []config.HookConfig
-	for _, h := range r.hooks {
+	for _, h := range compiled {
 		if h.matcher == nil || h.matcher.MatchString(toolName) {
 			matched = append(matched, h.cfg)
 		}

@@ -48,6 +48,105 @@ func BuildPayload(eventName, sessionID, cwd, toolName, toolInputJSON string) []b
 	return data
 }
 
+// PostToolUsePayload extends Payload with the tool's output so hooks
+// can inspect or redact what the model sees.
+type PostToolUsePayload struct {
+	Payload
+	ToolOutput string `json:"tool_output"`
+	IsError    bool   `json:"is_error,omitempty"`
+}
+
+// BuildPostToolUsePayload constructs the JSON stdin payload for a
+// PostToolUse hook, including the tool's response content.
+func BuildPostToolUsePayload(sessionID, cwd, toolName, toolInputJSON, toolOutput string, isError bool) []byte {
+	toolInput := json.RawMessage(toolInputJSON)
+	if !json.Valid(toolInput) {
+		toolInput = json.RawMessage("{}")
+	}
+	p := PostToolUsePayload{
+		Payload: Payload{
+			Event:     EventPostToolUse,
+			SessionID: sessionID,
+			CWD:       cwd,
+			ToolName:  toolName,
+			ToolInput: toolInput,
+		},
+		ToolOutput: toolOutput,
+		IsError:    isError,
+	}
+	data, err := json.Marshal(p)
+	if err != nil {
+		return []byte("{}")
+	}
+	return data
+}
+
+// LifecyclePayload is the JSON structure piped to hook commands via
+// stdin for non-tool lifecycle events (SessionStart, TurnStart, etc.).
+// ToolName and ToolInput are omitted since they don't apply.
+type LifecyclePayload struct {
+	Event     string `json:"event"`
+	SessionID string `json:"session_id"`
+	CWD       string `json:"cwd"`
+}
+
+// TurnEndPayload extends LifecyclePayload with the assistant's
+// rendered text content for the completed turn. Observe-only;
+// hooks cannot modify or block based on this data.
+type TurnEndPayload struct {
+	LifecyclePayload
+	Text string `json:"text"`
+}
+
+// BuildLifecyclePayload constructs the JSON stdin payload for a
+// lifecycle hook command (non-tool events).
+func BuildLifecyclePayload(eventName, sessionID, cwd string) []byte {
+	p := LifecyclePayload{
+		Event:     eventName,
+		SessionID: sessionID,
+		CWD:       cwd,
+	}
+	data, err := json.Marshal(p)
+	if err != nil {
+		return []byte("{}")
+	}
+	return data
+}
+
+// BuildTurnEndPayload constructs the JSON stdin payload for a
+// TurnEnd hook, including the assistant's rendered text content.
+func BuildTurnEndPayload(sessionID, cwd, text string) []byte {
+	p := TurnEndPayload{
+		LifecyclePayload: LifecyclePayload{
+			Event:     EventTurnEnd,
+			SessionID: sessionID,
+			CWD:       cwd,
+		},
+		Text: text,
+	}
+	data, err := json.Marshal(p)
+	if err != nil {
+		return []byte("{}")
+	}
+	return data
+}
+
+// BuildLifecycleEnv constructs the environment variable slice for a
+// lifecycle hook command. Includes core env vars but omits
+// tool-specific ones (CRUSH_TOOL_NAME, CRUSH_TOOL_INPUT_*).
+func BuildLifecycleEnv(eventName, sessionID, cwd, projectDir string) []string {
+	env := os.Environ()
+	env = append(env, shell.CrushEnvMarkers()...)
+	env = append(
+		env,
+		fmt.Sprintf("CRUSH_EVENT=%s", eventName),
+		fmt.Sprintf("CRUSH_SESSION_ID=%s", sessionID),
+		fmt.Sprintf("CRUSH_CWD=%s", cwd),
+		fmt.Sprintf("CRUSH_PROJECT_DIR=%s", projectDir),
+	)
+	return env
+}
+
 // BuildEnv constructs the environment variable slice for a hook command.
 // It includes all current process env vars plus hook-specific ones.
 func BuildEnv(eventName, toolName, sessionID, cwd, projectDir, toolInputJSON string) []string {

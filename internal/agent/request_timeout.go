@@ -74,7 +74,10 @@ func wrapTimedOut(ctx context.Context, timeoutErr *requestTimeoutError, err erro
 	if err == nil || context.Cause(ctx) != timeoutErr {
 		return err
 	}
-	if errors.Is(err, context.Canceled) {
+	// The cancel cause is timeoutErr itself. Providers often wrap that cause
+	// into the returned error. Assigning it back as timeoutErr.cause would
+	// form a cycle and make errors.Is spin forever (charmbracelet/crush#3840).
+	if err == timeoutErr || errors.Is(err, timeoutErr) || errors.Is(err, context.Canceled) {
 		timeoutErr.cause = context.DeadlineExceeded
 	} else {
 		timeoutErr.cause = err

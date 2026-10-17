@@ -92,3 +92,54 @@ permissions deny bash`)
 	require.NotContains(t, cfg.Agents[config.AgentCoder].AllowedTools, "bash")
 	require.Contains(t, cfg.Agents[config.AgentCoder].AllowedTools, "view")
 }
+
+func TestShellConfigPermissionsSafeCommands(t *testing.T) {
+	// A command line is one entry, so it is given as a single quoted word.
+	store := loadCrushSh(t, `permissions safe "go build" "cargo check"
+permissions safe "go vet"`)
+
+	require.NotNil(t, store.Config().Permissions)
+	require.Equal(t, []string{"go build", "cargo check", "go vet"},
+		store.Config().Permissions.SafeCommands)
+}
+
+func TestShellConfigPermissionsBlockAndUnblock(t *testing.T) {
+	store := loadCrushSh(t, `permissions block kubectl terraform
+permissions unblock curl`)
+
+	perms := store.Config().Permissions
+	require.NotNil(t, perms)
+	require.Equal(t, []string{"kubectl", "terraform"}, perms.BlockedCommands)
+	require.Equal(t, []string{"curl"}, perms.AllowedCommands)
+}
+
+func TestShellConfigPermissionsCommandListsDedupe(t *testing.T) {
+	store := loadCrushSh(t, `permissions block kubectl
+permissions block kubectl
+permissions safe "go build"
+permissions safe "go build"`)
+
+	perms := store.Config().Permissions
+	require.Equal(t, []string{"kubectl"}, perms.BlockedCommands)
+	require.Equal(t, []string{"go build"}, perms.SafeCommands)
+}
+
+func TestShellConfigPermissionsCommandListsCoexistWithTools(t *testing.T) {
+	// The tool verbs and the command verbs write to different places and
+	// must not tread on each other.
+	store := loadCrushSh(t, `permissions allow view
+permissions deny write
+permissions safe "go build"
+permissions block kubectl`)
+
+	cfg := store.Config()
+	require.Equal(t, []string{"view"}, cfg.Permissions.AllowedTools)
+	require.Contains(t, cfg.Options.DisabledTools, "write")
+	require.Equal(t, []string{"go build"}, cfg.Permissions.SafeCommands)
+	require.Equal(t, []string{"kubectl"}, cfg.Permissions.BlockedCommands)
+}
+
+func TestShellConfigPermissionsUnknownSubcommand(t *testing.T) {
+	_, err := loadCrushShErr(t, `permissions frobnicate bash`)
+	require.Error(t, err)
+}

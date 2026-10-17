@@ -453,6 +453,8 @@ func (m *Models) setProviderItems() error {
 				subscriptionModels = providerConfig.ChatGPTModels
 			case catwalk.InferenceProviderXAI:
 				subscriptionModels = providerConfig.GrokModels
+			case catwalk.InferenceProviderCopilot:
+				subscriptionModels = providerConfig.CopilotModels
 			}
 			if subscriptionModels != nil {
 				group := NewModelGroup(t, name, true)

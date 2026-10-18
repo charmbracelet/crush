@@ -776,8 +776,8 @@ provider add custom-anthropic \
   --api-key "$ANTHROPIC_API_KEY" \
   --extra-header anthropic-version 2023-06-01
 
-model add custom-anthropic/claude-sonnet-4-20250514 \
-  --name "Claude Sonnet 4" \
+model add custom-anthropic/claude-sonnet-4-6 \
+  --name "Claude Sonnet 4.6" \
   --context-window 200000 \
   --default-max-tokens 50000 \
   --can-reason true \

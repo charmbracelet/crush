@@ -604,7 +604,7 @@ to Bash-based config.
     "anthropic": { "api_key": "$ANTHROPIC_API_KEY" },
   },
   "models": {
-    "large": { "provider": "anthropic", "model": "claude-sonnet-4-20250514" },
+    "large": { "provider": "anthropic", "model": "claude-sonnet-4-6" },
   },
   "permissions": { "allowed_tools": ["view", "ls", "grep"] },
 }

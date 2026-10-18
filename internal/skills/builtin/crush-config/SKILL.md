@@ -43,8 +43,8 @@ source ~/.config/crush/shared.sh
 
 provider add anthropic --api-key "$ANTHROPIC_API_KEY"
 
-model large anthropic/claude-sonnet-4-20250514 --max-tokens 16384
-model small anthropic/claude-haiku-4-20250514
+model large anthropic/claude-sonnet-4-6 --max-tokens 16384
+model small anthropic/claude-haiku-4-5-20251001
 
 option skill-path ./skills
 permissions allow view ls grep edit

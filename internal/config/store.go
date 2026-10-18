@@ -1,6 +1,7 @@
 package config
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -14,10 +15,12 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	hyperp "github.com/charmbracelet/crush/internal/agent/hyper"
+	"github.com/charmbracelet/crush/internal/discover"
 	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/lock"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
+	"github.com/charmbracelet/crush/internal/oauth/generic"
 	"github.com/charmbracelet/crush/internal/oauth/grok"
 	"github.com/charmbracelet/crush/internal/oauth/hyper"
 	"github.com/charmbracelet/crush/internal/oauth/openai"
@@ -39,6 +42,25 @@ const configLockDeadline = 5 * time.Second
 // already-rotated refresh token and trip the provider's reuse detection,
 // revoking the whole token family.
 const refreshLockDeadline = 45 * time.Second
+
+// tokenExchangeTimeout bounds a single OAuth token exchange. It matches
+// the HTTP timeout the provider clients use, and it is applied to a
+// context detached from the caller's, so an exchange that has started is
+// always allowed to finish. See refreshOAuthTokenLocked.
+const tokenExchangeTimeout = 30 * time.Second
+
+// refreshCooldown is how recently a credential must have been issued for
+// a refresh request to be answered with the credential itself rather than
+// another exchange.
+//
+// Several triggers watch the same token — a turn starting, a 401 coming
+// back, an error body that could not be decoded, a usage panel polling —
+// and they routinely fire within seconds of each other off snapshots
+// taken at different moments. On a provider that rotates refresh tokens
+// each of those exchanges retires the one before it, so a burst of them
+// leaves every other session holding something dead. A credential minted
+// this recently cannot be the reason any of them failed.
+const refreshCooldown = 60 * time.Second
 
 // credentialWriteLockDeadline bounds how long a credential write (e.g.
 // storing the token from a fresh interactive login) waits for the
@@ -700,7 +722,34 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 	if providerID == string(catwalk.InferenceProviderXAI) && isToken {
 		s.refetchGrokModels(context.Background(), scope)
 	}
+	// A provider whose catalog sits behind its login lists no models until
+	// signed in, so read the catalog now rather than at the next start.
+	if isToken && providerConfig.Catalog != nil {
+		s.refetchCatalog(providerID, providerConfig)
+	}
 	return nil
+}
+
+// refetchCatalog reads a provider's declared model catalog with its fresh
+// credential and keeps the result in memory. A failure leaves the existing
+// models in place and the login still succeeds.
+func (s *ConfigStore) refetchCatalog(providerID string, pc ProviderConfig) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	models, err := discover.Catalog(ctx, discover.CatalogConfig{
+		ID:       cmp.Or(pc.ID, providerID),
+		Spec:     pc.Catalog,
+		BaseURL:  pc.BaseURL,
+		Bearer:   pc.OAuthToken.AccessToken,
+		Headers:  pc.ExtraHeaders,
+		Existing: pc.Models,
+	}, s.resolver)
+	if err != nil {
+		slog.Warn("Failed to fetch provider model catalog after sign-in", "provider", providerID, "error", err)
+		return
+	}
+	pc.Models = models
+	s.Config().Providers.Set(providerID, pc)
 }
 
 // fetchOpenAIModels fetches the ChatGPT model catalog from the Codex
@@ -864,6 +913,10 @@ func (s *ConfigStore) refreshOAuthTokenLocked(ctx context.Context, scope Scope, 
 		return fmt.Errorf("provider %s does not have an OAuth token", providerID)
 	}
 	entryToken := providerConfig.OAuthToken
+	slog.Info("Refreshing OAuth token",
+		"provider", providerID,
+		"refresh_token", entryToken.Fingerprint(),
+		"expires_in_s", entryToken.ExpiresInSeconds())
 
 	// Acquire the per-provider cross-process refresh lock. This is a
 	// dedicated lock file, not the config-write lock, and it does not take
@@ -902,9 +955,22 @@ func (s *ConfigStore) refreshOAuthTokenLocked(ctx context.Context, scope Scope, 
 		entryToken = diskToken
 	}
 
+	// An exchange that already happened moments ago answers this one. The
+	// triggers that ask for a refresh do not coordinate with each other and
+	// each carries its own snapshot, so several of them routinely arrive
+	// just after a renewal has landed. Rotating again to satisfy them would
+	// retire a credential the other sessions have not read yet.
+	if entryToken.JustIssued(refreshCooldown) && !entryToken.IsExpired() {
+		slog.Info("Skipping OAuth refresh; the credential was just issued",
+			"provider", providerID,
+			"refresh_token", entryToken.Fingerprint(),
+			"expires_in_s", entryToken.ExpiresInSeconds())
+		return s.applyToken(providerConfig, entryToken, providerID)
+	}
+
 	// Disk still holds our token (or no newer peer token exists) and we hold
 	// the lock, so we are the sole exchanger. Perform the exchange.
-	refreshedToken, refreshErr := s.exchange(ctx, providerID, entryToken.RefreshToken)
+	refreshedToken, refreshErr := s.exchangeDetached(ctx, providerID, entryToken.RefreshToken)
 	if refreshErr != nil {
 		// The exchange may have failed because a peer rotated the refresh
 		// token in a window we did not cover. Re-check disk: adopt a usable
@@ -915,19 +981,35 @@ func (s *ConfigStore) refreshOAuthTokenLocked(ctx context.Context, scope Scope, 
 				return s.applyToken(providerConfig, diskToken, providerID)
 			}
 			slog.Info("Retrying exchange with refresh token rotated by another session", "provider", providerID)
-			refreshedToken, refreshErr = s.exchange(ctx, providerID, diskToken.RefreshToken)
+			refreshedToken, refreshErr = s.exchangeDetached(ctx, providerID, diskToken.RefreshToken)
 		}
 	}
 	if refreshErr != nil {
 		return fmt.Errorf("failed to refresh OAuth token for provider %s: %w", providerID, refreshErr)
 	}
 
-	slog.Info("Successfully refreshed OAuth token", "provider", providerID)
+	slog.Info("Successfully refreshed OAuth token",
+		"provider", providerID,
+		"refresh_token", entryToken.Fingerprint(),
+		"new_refresh_token", refreshedToken.Fingerprint(),
+		"rotated", refreshedToken.RefreshToken != entryToken.RefreshToken,
+		"expires_in", refreshedToken.ExpiresIn)
 	if err := s.applyToken(providerConfig, refreshedToken, providerID); err != nil {
 		return err
 	}
 
 	if err := s.SetConfigFields(scope, tokenFields(providerID, refreshedToken)); err != nil {
+		// The exchange already happened, so the provider has retired the
+		// refresh token we came in with. Failing to write its replacement
+		// strands the account: this process keeps working from memory, and
+		// the next start presents a credential the provider has forgotten,
+		// so it has to ask for a login. Say so plainly, because from the
+		// outside it looks like a refresh that simply never happened.
+		slog.Error("Refreshed OAuth token could not be saved; the next start will have to sign in again",
+			"provider", providerID,
+			"new_refresh_token", refreshedToken.Fingerprint(),
+			"rotated", refreshedToken.RefreshToken != entryToken.RefreshToken,
+			"error", err)
 		return fmt.Errorf("failed to persist refreshed token: %w", err)
 	}
 	return nil
@@ -944,6 +1026,34 @@ func tokenFields(providerID string, token *oauth.Token) map[string]any {
 		fields[fmt.Sprintf("providers.%s.api_key", providerID)] = token.AccessToken
 	}
 	return fields
+}
+
+// AdoptNewerDiskToken reconciles the in-memory OAuth token for a provider
+// with the copy on disk, adopting the peer's credential when it is both
+// newer and still usable. It reports whether anything was adopted.
+//
+// A session that has sat idle still holds whatever token it loaded when it
+// started, which a peer may have rotated away hours ago. Deciding anything
+// from that stale snapshot is what makes a retired refresh token get
+// presented to a provider that rotates them, and presenting a retired one
+// costs the whole token family rather than just the attempt. Consulting
+// disk first means the decision is made against the credential that is
+// actually current, and costs one file read.
+func (s *ConfigStore) AdoptNewerDiskToken(scope Scope, providerID string) (bool, error) {
+	providerConfig, exists := s.Config().Providers.Get(providerID)
+	if !exists || providerConfig.OAuthToken == nil {
+		return false, nil
+	}
+	diskToken := s.usableDiskToken(scope, providerID, providerConfig.OAuthToken)
+	if diskToken == nil {
+		return false, nil
+	}
+	slog.Info("Adopting token refreshed by another session",
+		"provider", providerID,
+		"refresh_token", providerConfig.OAuthToken.Fingerprint(),
+		"new_refresh_token", diskToken.Fingerprint(),
+		"expires_in_s", diskToken.ExpiresInSeconds())
+	return true, s.applyToken(providerConfig, diskToken, providerID)
 }
 
 // WaitForTokenChange blocks until SignalAuthComplete is called for the
@@ -1055,6 +1165,24 @@ func (s *ConfigStore) usableDiskToken(scope Scope, providerID string, entryToken
 	return diskToken
 }
 
+// exchangeDetached performs a token exchange on a context detached from
+// the caller's, with a budget of its own.
+//
+// A successful exchange rotates the credential at the provider, so
+// abandoning one halfway retires the refresh token we presented and leaves
+// its replacement nowhere. That costs an interactive sign-in, and it costs
+// it for every session sharing the account rather than only the one that
+// gave up. Callers ask for a refresh from whatever happens to be running
+// at the time — a turn that can end, a panel poll with seconds to spend —
+// and their deadlines are the right bound on how long to wait for the
+// refresh lock, never on whether an exchange already in flight may finish.
+func (s *ConfigStore) exchangeDetached(ctx context.Context, providerID, refreshToken string) (*oauth.Token, error) {
+	exchangeCtx, cancel := context.WithTimeout(
+		context.WithoutCancel(ctx), tokenExchangeTimeout)
+	defer cancel()
+	return s.exchange(exchangeCtx, providerID, refreshToken)
+}
+
 // exchange performs the provider-specific OAuth token exchange. Tests may
 // override it via the exchangeToken field; production uses the real
 // provider clients.
@@ -1072,6 +1200,11 @@ func (s *ConfigStore) exchange(ctx context.Context, providerID, refreshToken str
 	case hyperp.Name:
 		return hyper.ExchangeToken(ctx, refreshToken)
 	default:
+		// A provider declared in config drives its own refresh from the
+		// OAuth block that declared it, so plugins need no code here.
+		if pc, ok := s.Config().Providers.Get(providerID); ok && pc.UsesOAuth() {
+			return generic.RefreshToken(ctx, pc.Auth, refreshToken)
+		}
 		return nil, fmt.Errorf("OAuth refresh not supported for provider %s", providerID)
 	}
 }
@@ -1477,7 +1610,14 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 		} else {
 			cfg.Models[SelectedModelTypeLarge] = resolved.Large
 			cfg.Models[SelectedModelTypeSmall] = resolved.Small
-			s.SetupAgents()
+			// Logging out of the selected provider leaves nothing usable
+			// to build an agent with; the picker still lists its models,
+			// and signing in again completes the setup.
+			if !cfg.HasUsableSelection() {
+				slog.Warn("No signed-in provider after reload, waiting for a sign-in")
+			} else {
+				s.SetupAgents()
+			}
 		}
 	}
 

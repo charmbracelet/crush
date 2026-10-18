@@ -180,8 +180,10 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		func(ctx context.Context) error { return mcp.Close(ctx) },
 	)
 
-	// TODO: remove the concept of agent config, most likely.
-	if !cfg.IsConfigured() {
+	// TODO: remove the concept of agent config, most likely. A provider
+	// that is configured but waiting on a sign-in has no credential to
+	// build a client with, so the agent starts once the sign-in lands.
+	if !cfg.IsConfigured() || !cfg.HasUsableSelection() {
 		slog.Warn("No agent configuration found")
 		return app, nil
 	}

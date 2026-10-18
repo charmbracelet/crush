@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+	"uuid"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/backend"
@@ -14,7 +15,6 @@ import (
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/skills"
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
 

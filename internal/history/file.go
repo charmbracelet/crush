@@ -5,10 +5,10 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"uuid"
 
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/pubsub"
-	"github.com/google/uuid"
 )
 
 const (

@@ -2,6 +2,7 @@ package server
 
 import (
 	"testing"
+	"uuid"
 
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/backend"
@@ -10,7 +11,6 @@ import (
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
 

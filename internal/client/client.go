@@ -12,11 +12,11 @@ import (
 	stdpath "path"
 	"path/filepath"
 	"time"
+	"uuid"
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/server"
-	"github.com/google/uuid"
 )
 
 // DummyHost is used to satisfy the http.Client's requirement for a URL.

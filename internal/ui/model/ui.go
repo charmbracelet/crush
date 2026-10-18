@@ -503,6 +503,17 @@ type UI struct {
 
 // New creates a new instance of the [UI] model.
 func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
+	// Read the live config on every lookup so a reload that changes a
+	// plugin's tool is picked up by the next render.
+	chat.CustomToolLookup = func(name string) (config.CustomToolConfig, bool) {
+		cfg := com.Config()
+		if cfg == nil {
+			return config.CustomToolConfig{}, false
+		}
+		t, ok := cfg.CustomTools[name]
+		return t, ok
+	}
+
 	// Editor components
 	ta := textarea.New()
 	ta.SetStyles(com.Styles.Editor.Textarea)

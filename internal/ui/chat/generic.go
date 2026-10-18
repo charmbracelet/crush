@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/charmbracelet/crush/internal/agent/tools"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 )
@@ -28,10 +30,31 @@ func NewGenericToolMessageItem(
 // GenericToolRenderContext renders unknown/generic tool messages.
 type GenericToolRenderContext struct{}
 
+// CustomToolLookup finds a plugin tool's declaration by name. The UI model
+// sets it so calls render with the tool's own title and summary; nil means
+// every call renders plainly.
+var CustomToolLookup func(name string) (config.CustomToolConfig, bool)
+
+// customToolHeader returns a plugin tool's title and summary for a call.
+func customToolHeader(call message.ToolCall) (title, summary string, ok bool) {
+	if CustomToolLookup == nil {
+		return "", "", false
+	}
+	cfg, found := CustomToolLookup(call.Name)
+	if !found {
+		return "", "", false
+	}
+	return tools.CustomToolDisplay(cfg, call.Name, call.Input)
+}
+
 // RenderTool implements the [ToolRenderer] interface.
 func (g *GenericToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
 	name := humanizedToolName(opts.ToolCall.Name)
+	title, summary, custom := customToolHeader(opts.ToolCall)
+	if custom && title != "" {
+		name = title
+	}
 
 	if opts.IsPending() {
 		return pendingTool(sty, name, opts.Anim, opts.Compact)
@@ -43,7 +66,12 @@ func (g *GenericToolRenderContext) RenderTool(sty *styles.Styles, width int, opt
 	}
 
 	var toolParams []string
-	if len(params) > 0 {
+	switch {
+	case custom:
+		if summary != "" {
+			toolParams = append(toolParams, summary)
+		}
+	case len(params) > 0:
 		parsed, _ := json.Marshal(params)
 		toolParams = append(toolParams, string(parsed))
 	}

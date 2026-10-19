@@ -30,7 +30,7 @@ func loadStoreWithHooks(t *testing.T, hooksJSON string) (*config.ConfigStore, st
 	cfgJSON := `{"hooks":` + hooksJSON + `}`
 	require.NoError(t, os.WriteFile(filepath.Join(workDir, "crush.json"), []byte(cfgJSON), 0o600))
 
-	store, err := config.Load(context.Background(), workDir, dataDir, false)
+	store, err := config.Load(t.Context(), workDir, dataDir, false)
 	require.NoError(t, err)
 	return store, workDir
 }

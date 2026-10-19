@@ -91,11 +91,13 @@ func TestRender(t *testing.T) {
 	}
 }
 
-func TestRenderCompactIsExactlyTwoLines(t *testing.T) {
+func TestRenderCompactIsBlankLinePlusTwoLines(t *testing.T) {
 	t.Parallel()
 
 	got := Render(config.ExitBannerCompact, testSession(), 100)
-	require.Len(t, strings.Split(got, "\n"), 2)
+	lines := strings.Split(got, "\n")
+	require.Len(t, lines, 3)
+	require.Empty(t, lines[0])
 }
 
 func TestRenderTruncatesLongTitles(t *testing.T) {
@@ -118,7 +120,7 @@ func TestRenderFlattensNewlinesInTitles(t *testing.T) {
 	sess.Title = "first\nsecond"
 
 	got := Render(config.ExitBannerCompact, sess, 100)
-	require.Len(t, strings.Split(got, "\n"), 2)
+	require.Len(t, strings.Split(got, "\n"), 3)
 	require.Contains(t, got, "first second")
 }
 

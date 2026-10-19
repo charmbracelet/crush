@@ -168,6 +168,23 @@ provider add deepseek \
   --api-key "${DEEPSEEK_API_KEY:?set DEEPSEEK_API_KEY}"
 ```
 
+Fikra API is another OpenAI-compatible endpoint, at `https://fikraapi.co.ke/v1`. Its headline model is DeepSeek V4.1 Flash, at $0.045 per 1M input tokens and $0.09 per 1M output tokens, with a 1M token context. Get an API key from [fikraapi.co.ke](https://fikraapi.co.ke), then:
+
+```bash
+provider add fikra \
+  --type openai-compat \
+  --base-url "https://fikraapi.co.ke/v1" \
+  --api-key "${FIKRA_API_KEY:?set FIKRA_API_KEY}"
+
+model add fikra/deepseek-v4.1-flash \
+  --name "DeepSeek V4.1 Flash" \
+  --context-window 1000000 \
+  --price-input 0.045 \
+  --price-output 0.09
+```
+
+Fikra also serves GLM 5.3, GLM 5.3 Flash, GLM 5.2, Kimi K3, StepFun Step 5, Qwen 3.8 27B (cached input $0.10/M), Xiaomi MiMo V2.6 Pro, NVIDIA Nemotron 3.5 Super VL, plus Fikra house lanes. The full catalog is at https://fikraapi.co.ke/v1/models and https://fikraapi.co.ke. Per-token USD, $1 minimum top-up, M-Pesa and card payment.
+
 Headers whose value resolves to the empty string (an unset `$VAR`, a
 `$(...)` that prints nothing, or a literal `""`) are dropped from the
 outgoing request. This makes env-gated headers safe:

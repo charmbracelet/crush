@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"sync"
 
 	"github.com/charmbracelet/crush/internal/agent"
 	mcptools "github.com/charmbracelet/crush/internal/agent/tools/mcp"
@@ -36,6 +38,42 @@ func publishConfigChanged(ws *Workspace) {
 		Type:    pubsub.UpdatedEvent,
 		Payload: proto.ConfigChanged{WorkspaceID: ws.ID},
 	})
+}
+
+// ReloadConfig re-reads the server's and every hosted workspace's config
+// from disk, so edits take effect without a restart. A config that fails
+// to load keeps its previous state and does not hold back the others.
+func (b *Backend) ReloadConfig(ctx context.Context) error {
+	workspaces := slices.Collect(b.workspaces.Seq())
+
+	errs := make([]error, len(workspaces)+1)
+	if b.cfg != nil {
+		errs[0] = b.cfg.ReloadFromDisk(ctx)
+	}
+	var wg sync.WaitGroup
+	for i, ws := range workspaces {
+		wg.Go(func() {
+			if err := ws.reloadConfig(ctx); err != nil {
+				errs[i+1] = fmt.Errorf("workspace %s: %w", ws.ID, err)
+			}
+		})
+	}
+	wg.Wait()
+	return errors.Join(errs...)
+}
+
+// reloadConfig re-reads the workspace config and rebuilds the agent from it.
+func (w *Workspace) reloadConfig(ctx context.Context) error {
+	if err := w.Cfg.ReloadFromDisk(ctx); err != nil {
+		return err
+	}
+	if w.App != nil && w.AgentCoordinator != nil {
+		if err := w.UpdateAgentModel(ctx); err != nil {
+			return err
+		}
+	}
+	publishConfigChanged(w)
+	return nil
 }
 
 // MCPResourceContents holds the contents of an MCP resource returned

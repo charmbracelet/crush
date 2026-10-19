@@ -215,6 +215,11 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return errors.Join(err, s.h.Shutdown(ctx))
 }
 
+// ReloadConfig re-reads the server and hosted workspace configs from disk.
+func (s *Server) ReloadConfig(ctx context.Context) error {
+	return s.backend.ReloadConfig(ctx)
+}
+
 func (s *Server) logDebug(r *http.Request, msg string, args ...any) {
 	if s.logger != nil {
 		s.logger.With(

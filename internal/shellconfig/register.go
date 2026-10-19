@@ -1,7 +1,7 @@
 // Package shellconfig implements the Bash-powered config format for Crush.
 //
 // It provides shell builtins (provider, model, mcp, lsp, permissions, hook,
-// option, tool) that populate config by mutating a ConfigBuilder
+// option, tool, router) that populate config by mutating a ConfigBuilder
 // stored on the shell context. The builtins are registered at init time via
 // shell.RegisterBuiltin and are gated by the ConfigBuilder on the context —
 // they are no-ops during normal bash tool execution.
@@ -27,6 +27,7 @@ func init() {
 	shell.RegisterBuiltin("hook", handleHook)
 	shell.RegisterBuiltin("option", handleOption)
 	shell.RegisterBuiltin("tool", handleTool)
+	shell.RegisterBuiltin("router", handleRouter)
 }
 
 // usage prints a usage message to stderr and returns an error.

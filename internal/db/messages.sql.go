@@ -24,7 +24,7 @@ INSERT INTO messages (
 ) VALUES (
     ?, ?, ?, ?, ?, ?, ?, strftime('%s', 'now'), strftime('%s', 'now')
 )
-RETURNING id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message, prism_model_id, prism_model_name, prism_hypercredit_savings, prism_dollar_savings
+RETURNING id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message, prism_model_id, prism_model_name, prism_hypercredit_savings, prism_dollar_savings, router_name, route_name
 `
 
 type CreateMessageParams struct {
@@ -63,6 +63,8 @@ func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (M
 		&i.PrismModelName,
 		&i.PrismHypercreditSavings,
 		&i.PrismDollarSavings,
+		&i.RouterName,
+		&i.RouteName,
 	)
 	return i, err
 }
@@ -88,7 +90,7 @@ func (q *Queries) DeleteSessionMessages(ctx context.Context, sessionID string) e
 }
 
 const getLastAssistantMessageBySession = `-- name: GetLastAssistantMessageBySession :one
-SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message, prism_model_id, prism_model_name, prism_hypercredit_savings, prism_dollar_savings
+SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message, prism_model_id, prism_model_name, prism_hypercredit_savings, prism_dollar_savings, router_name, route_name
 FROM messages
 WHERE session_id = ? AND role = 'assistant' AND is_summary_message = 0
 ORDER BY created_at DESC
@@ -113,12 +115,14 @@ func (q *Queries) GetLastAssistantMessageBySession(ctx context.Context, sessionI
 		&i.PrismModelName,
 		&i.PrismHypercreditSavings,
 		&i.PrismDollarSavings,
+		&i.RouterName,
+		&i.RouteName,
 	)
 	return i, err
 }
 
 const getMessage = `-- name: GetMessage :one
-SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message, prism_model_id, prism_model_name, prism_hypercredit_savings, prism_dollar_savings
+SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message, prism_model_id, prism_model_name, prism_hypercredit_savings, prism_dollar_savings, router_name, route_name
 FROM messages
 WHERE id = ? LIMIT 1
 `
@@ -141,12 +145,14 @@ func (q *Queries) GetMessage(ctx context.Context, id string) (Message, error) {
 		&i.PrismModelName,
 		&i.PrismHypercreditSavings,
 		&i.PrismDollarSavings,
+		&i.RouterName,
+		&i.RouteName,
 	)
 	return i, err
 }
 
 const listAllUserMessages = `-- name: ListAllUserMessages :many
-SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message, prism_model_id, prism_model_name, prism_hypercredit_savings, prism_dollar_savings
+SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message, prism_model_id, prism_model_name, prism_hypercredit_savings, prism_dollar_savings, router_name, route_name
 FROM messages
 WHERE role = 'user'
 ORDER BY created_at DESC
@@ -179,6 +185,8 @@ func (q *Queries) ListAllUserMessages(ctx context.Context) ([]Message, error) {
 			&i.PrismModelName,
 			&i.PrismHypercreditSavings,
 			&i.PrismDollarSavings,
+			&i.RouterName,
+			&i.RouteName,
 		); err != nil {
 			return nil, err
 		}
@@ -194,7 +202,7 @@ func (q *Queries) ListAllUserMessages(ctx context.Context) ([]Message, error) {
 }
 
 const listMessagesBySession = `-- name: ListMessagesBySession :many
-SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message, prism_model_id, prism_model_name, prism_hypercredit_savings, prism_dollar_savings
+SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message, prism_model_id, prism_model_name, prism_hypercredit_savings, prism_dollar_savings, router_name, route_name
 FROM messages
 WHERE session_id = ?
 ORDER BY created_at ASC
@@ -224,6 +232,8 @@ func (q *Queries) ListMessagesBySession(ctx context.Context, sessionID string) (
 			&i.PrismModelName,
 			&i.PrismHypercreditSavings,
 			&i.PrismDollarSavings,
+			&i.RouterName,
+			&i.RouteName,
 		); err != nil {
 			return nil, err
 		}
@@ -239,7 +249,7 @@ func (q *Queries) ListMessagesBySession(ctx context.Context, sessionID string) (
 }
 
 const listMessagesBySessionFromSummary = `-- name: ListMessagesBySessionFromSummary :many
-SELECT m.id, m.session_id, m.role, m.parts, m.model, m.created_at, m.updated_at, m.finished_at, m.provider, m.is_summary_message, m.prism_model_id, m.prism_model_name, m.prism_hypercredit_savings, m.prism_dollar_savings
+SELECT m.id, m.session_id, m.role, m.parts, m.model, m.created_at, m.updated_at, m.finished_at, m.provider, m.is_summary_message, m.prism_model_id, m.prism_model_name, m.prism_hypercredit_savings, m.prism_dollar_savings, m.router_name, m.route_name
 FROM messages m
 WHERE m.session_id = ?
   AND m.created_at >= (SELECT s.created_at FROM messages s WHERE s.id = ?)
@@ -278,6 +288,8 @@ func (q *Queries) ListMessagesBySessionFromSummary(ctx context.Context, arg List
 			&i.PrismModelName,
 			&i.PrismHypercreditSavings,
 			&i.PrismDollarSavings,
+			&i.RouterName,
+			&i.RouteName,
 		); err != nil {
 			return nil, err
 		}
@@ -293,7 +305,7 @@ func (q *Queries) ListMessagesBySessionFromSummary(ctx context.Context, arg List
 }
 
 const listUserMessagesBySession = `-- name: ListUserMessagesBySession :many
-SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message, prism_model_id, prism_model_name, prism_hypercredit_savings, prism_dollar_savings
+SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message, prism_model_id, prism_model_name, prism_hypercredit_savings, prism_dollar_savings, router_name, route_name
 FROM messages
 WHERE session_id = ? AND role = 'user'
 ORDER BY created_at DESC
@@ -325,6 +337,8 @@ func (q *Queries) ListUserMessagesBySession(ctx context.Context, sessionID strin
 			&i.PrismModelName,
 			&i.PrismHypercreditSavings,
 			&i.PrismDollarSavings,
+			&i.RouterName,
+			&i.RouteName,
 		); err != nil {
 			return nil, err
 		}
@@ -347,6 +361,8 @@ SET
     prism_model_name = ?,
     prism_hypercredit_savings = ?,
     prism_dollar_savings = ?,
+    router_name = ?,
+    route_name = ?,
     finished_at = ?,
     updated_at = strftime('%s', 'now')
 WHERE id = ?
@@ -358,6 +374,8 @@ type UpdateMessageParams struct {
 	PrismModelName          sql.NullString  `json:"prism_model_name"`
 	PrismHypercreditSavings sql.NullFloat64 `json:"prism_hypercredit_savings"`
 	PrismDollarSavings      sql.NullFloat64 `json:"prism_dollar_savings"`
+	RouterName              sql.NullString  `json:"router_name"`
+	RouteName               sql.NullString  `json:"route_name"`
 	FinishedAt              sql.NullInt64   `json:"finished_at"`
 	ID                      string          `json:"id"`
 }
@@ -369,6 +387,8 @@ func (q *Queries) UpdateMessage(ctx context.Context, arg UpdateMessageParams) er
 		arg.PrismModelName,
 		arg.PrismHypercreditSavings,
 		arg.PrismDollarSavings,
+		arg.RouterName,
+		arg.RouteName,
 		arg.FinishedAt,
 		arg.ID,
 	)

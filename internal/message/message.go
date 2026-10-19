@@ -444,6 +444,8 @@ func (s *service) write(ctx context.Context, msg Message) error {
 		PrismModelName:          sql.NullString{String: msg.PrismModelName, Valid: msg.PrismModelName != ""},
 		PrismHypercreditSavings: nullableFloat(msg.PrismHypercreditSavings),
 		PrismDollarSavings:      nullableFloat(msg.PrismDollarSavings),
+		RouterName:              sql.NullString{String: msg.RouterName, Valid: msg.RouterName != ""},
+		RouteName:               sql.NullString{String: msg.RouteName, Valid: msg.RouteName != ""},
 		FinishedAt:              finishedAt,
 	}); err != nil {
 		return err
@@ -607,6 +609,8 @@ func (s *service) fromDBItem(item db.Message) (Message, error) {
 		PrismModelName:          item.PrismModelName.String,
 		PrismHypercreditSavings: floatPtr(item.PrismHypercreditSavings),
 		PrismDollarSavings:      floatPtr(item.PrismDollarSavings),
+		RouterName:              item.RouterName.String,
+		RouteName:               item.RouteName.String,
 	}, nil
 }
 

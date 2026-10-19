@@ -421,6 +421,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 			OnComplete:        onComplete,
 			Accepted:          accept,
 			OnAuthRefresh:     c.makeAuthRefreshCallback(providerCfg),
+			Router:            c.newRouter(),
 		})
 	}
 	beforeLoaded := c.skillTracker.LoadedNames()
@@ -1016,9 +1017,18 @@ func (c *coordinator) buildModel(ctx context.Context, slot config.SelectedModelT
 	if !ok {
 		return Model{}, fmt.Errorf("%s %w", slot, errModelNotSelected)
 	}
+	return c.buildSelectedModel(ctx, modelCfg, isSubAgent,
+		fmt.Errorf("%s %w", slot, errModelProviderNotConfigured),
+		fmt.Errorf("%s %w", slot, errModelNotFound))
+}
+
+// buildSelectedModel builds a ready-to-use [Model] for a selected model.
+// errProvider and errNotFound are returned when the provider is not
+// configured or the model is missing from its catalog.
+func (c *coordinator) buildSelectedModel(ctx context.Context, modelCfg config.SelectedModel, isSubAgent bool, errProvider, errNotFound error) (Model, error) {
 	providerCfg, ok := c.cfg.Config().Providers.Get(modelCfg.Provider)
 	if !ok {
-		return Model{}, fmt.Errorf("%s %w", slot, errModelProviderNotConfigured)
+		return Model{}, errProvider
 	}
 	provider, err := c.buildProvider(providerCfg, modelCfg, isSubAgent)
 	if err != nil {
@@ -1031,7 +1041,7 @@ func (c *coordinator) buildModel(ctx context.Context, slot config.SelectedModelT
 	// strands a Grok/ChatGPT model that catwalk doesn't also publish.
 	catwalkModel := c.cfg.Config().GetModel(modelCfg.Provider, modelCfg.Model)
 	if catwalkModel == nil {
-		return Model{}, fmt.Errorf("%s %w", slot, errModelNotFound)
+		return Model{}, errNotFound
 	}
 
 	modelID := modelCfg.Model

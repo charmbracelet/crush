@@ -45,6 +45,40 @@ type ActionSelectModel struct {
 	ReAuthenticate bool
 }
 
+// Router actions.
+type (
+	// ActionSelectRouter activates a router in place of the large model.
+	ActionSelectRouter struct {
+		Name string
+	}
+	// ActionEditRouter opens the router editor. An empty Name creates a
+	// new router.
+	ActionEditRouter struct {
+		Name string
+	}
+	// ActionSaveRouter persists a router. OrigName is the router's name
+	// before editing (empty for a new router).
+	ActionSaveRouter struct {
+		OrigName string
+		Name     string
+		Router   config.RouterConfig
+	}
+	// ActionDeleteRouter removes a router.
+	ActionDeleteRouter struct {
+		Name string
+	}
+	// ActionPickRouterModel asks for a model picker for an editor field.
+	ActionPickRouterModel struct {
+		Target string
+	}
+	// ActionRouterModelPicked carries the picker's choice back to the
+	// router editor.
+	ActionRouterModelPicked struct {
+		Target string
+		Model  config.SelectedModel
+	}
+)
+
 // Messages for commands
 type (
 	ActionNewSession              struct{}

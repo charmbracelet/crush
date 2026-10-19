@@ -41,6 +41,8 @@ type Message struct {
 	PrismModelName          sql.NullString  `json:"prism_model_name"`
 	PrismHypercreditSavings sql.NullFloat64 `json:"prism_hypercredit_savings"`
 	PrismDollarSavings      sql.NullFloat64 `json:"prism_dollar_savings"`
+	RouterName              sql.NullString  `json:"router_name"`
+	RouteName               sql.NullString  `json:"route_name"`
 }
 
 type ReadFile struct {

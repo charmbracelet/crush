@@ -93,7 +93,7 @@ func TestCrushrcCanReinstatePromptForPluginAction(t *testing.T) {
 tool action GitHub pr_list --description "List" --command 'gh pr list' --skip-permission true`)
 	require.NoError(t, os.WriteFile(filepath.Join(workDir, "crushrc"), []byte(`tool action GitHub pr_list --skip-permission false`), 0o644))
 
-	store, err := config.Load(workDir, t.TempDir(), false)
+	store, err := config.Load(t.Context(), workDir, t.TempDir(), false)
 	require.NoError(t, err)
 	a := store.Config().CustomTools["GitHub"].Actions["pr_list"]
 	require.False(t, a.SkipPermission)
@@ -116,7 +116,7 @@ tool action x a --description a --required n`,
 			isolateConfig(t)
 			workDir := t.TempDir()
 			writePlugin(t, workDir, "bad.sh", script)
-			_, err := config.Load(workDir, t.TempDir(), false)
+			_, err := config.Load(t.Context(), workDir, t.TempDir(), false)
 			require.ErrorContains(t, err, "invalid tool configuration")
 		})
 	}
@@ -127,7 +127,7 @@ func TestBadDisplayTemplateFailsLoad(t *testing.T) {
 	workDir := t.TempDir()
 	writePlugin(t, workDir, "bad.sh", `tool add x --description d --command c
 tool action x a --description a --summary '{{.n'`)
-	_, err := config.Load(workDir, t.TempDir(), false)
+	_, err := config.Load(t.Context(), workDir, t.TempDir(), false)
 	require.ErrorContains(t, err, "invalid summary template")
 }
 

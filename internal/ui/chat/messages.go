@@ -288,7 +288,7 @@ func ShouldShowAssistantInfo(msg *message.Message) bool {
 	if finishData == nil {
 		return false
 	}
-	return finishData.Reason == message.FinishReasonEndTurn || msg.PrismModelName != ""
+	return finishData.Reason == message.FinishReasonEndTurn || msg.PrismModelName != "" || msg.RouterName != ""
 }
 
 // AssistantInfoItem renders model info and response time after assistant completes.
@@ -379,6 +379,16 @@ func (a *AssistantInfoItem) renderContent(width int) string {
 		routedModel := a.sty.Messages.AssistantInfoModel.Render(a.message.PrismModelName)
 		arrow := a.sty.Messages.AssistantInfoProvider.Render("→")
 		modelFormatted = fmt.Sprintf("%s %s %s", modelFormatted, arrow, routedModel)
+	}
+	// A classifier-routed turn leads with the router (and the route it
+	// chose) and points at the model that served it, Prism-style.
+	if a.message.RouterName != "" {
+		router := a.sty.Messages.AssistantInfoModel.Render("⇄ " + a.message.RouterName)
+		if a.message.RouteName != "" {
+			router += a.sty.Messages.AssistantInfoProvider.Render("/" + a.message.RouteName)
+		}
+		arrow := a.sty.Messages.AssistantInfoProvider.Render("→")
+		modelFormatted = fmt.Sprintf("%s %s %s", router, arrow, modelFormatted)
 	}
 	savings := prismSavingsSuffix(a.sty, a.message)
 	if !isFinalTurn {

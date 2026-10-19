@@ -78,6 +78,40 @@ type ModelItem struct {
 	m            fuzzy.Match
 	focused      bool
 	showProvider bool
+
+	// router is set for items that stand for a model router rather than
+	// a model. routerNew marks the "New router" entry.
+	router     string
+	routerNew  bool
+	routerInfo string
+}
+
+// routerItemPrefix namespaces router item IDs away from model keys.
+const routerItemPrefix = "router:"
+
+// NewRouterItem creates a list item that stands for a model router.
+func NewRouterItem(t *styles.Styles, name, info string) *ModelItem {
+	item := NewModelItem(t, catwalk.Provider{}, catwalk.Model{ID: name, Name: name}, ModelTypeLarge, false)
+	item.router = name
+	item.routerInfo = info
+	return item
+}
+
+// NewRouterCreateItem creates the "New router" list item.
+func NewRouterCreateItem(t *styles.Styles) *ModelItem {
+	item := NewModelItem(t, catwalk.Provider{}, catwalk.Model{Name: "New router…"}, ModelTypeLarge, false)
+	item.routerNew = true
+	return item
+}
+
+// IsRouter reports whether the item stands for a router (or creating one).
+func (m *ModelItem) IsRouter() bool {
+	return m.router != "" || m.routerNew
+}
+
+// RouterName returns the router name, empty for the "New router" item.
+func (m *ModelItem) RouterName() string {
+	return m.router
 }
 
 // Finished implements list.Item. Model items are render-stable
@@ -123,6 +157,12 @@ func (m *ModelItem) Filter() string {
 
 // ID implements ListItem.
 func (m *ModelItem) ID() string {
+	if m.routerNew {
+		return routerItemPrefix + "+new"
+	}
+	if m.router != "" {
+		return routerItemPrefix + m.router
+	}
 	return modelKey(string(m.prov.ID), m.model.ID)
 }
 
@@ -131,6 +171,9 @@ func (m *ModelItem) Render(width int) string {
 	var providerInfo string
 	if m.showProvider {
 		providerInfo = string(m.prov.Name)
+	}
+	if m.router != "" {
+		providerInfo = m.routerInfo
 	}
 	styles := ListItemStyles{
 		ItemBlurred:     m.t.Dialog.NormalItem,

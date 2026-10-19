@@ -106,6 +106,17 @@
           },
           "type": "object",
           "description": "Environment variables to set on startup"
+        },
+        "routers": {
+          "additionalProperties": {
+            "$ref": "#/$defs/RouterConfig"
+          },
+          "type": "object",
+          "description": "Named model routers that use a classifier model to pick a model per prompt"
+        },
+        "active_router": {
+          "type": "string",
+          "description": "Name of the router to use instead of the large model"
         }
       },
       "additionalProperties": false,
@@ -787,6 +798,64 @@
       },
       "additionalProperties": false,
       "type": "object"
+    },
+    "RouterConfig": {
+      "properties": {
+        "classifier": {
+          "$ref": "#/$defs/SelectedModel",
+          "description": "Model that classifies each prompt"
+        },
+        "routes": {
+          "items": {
+            "$ref": "#/$defs/RouterRoute"
+          },
+          "type": "array",
+          "minItems": 1,
+          "description": "Routes the classifier can choose from"
+        },
+        "default": {
+          "type": "string",
+          "description": "Route used when classification fails; defaults to the first route"
+        },
+        "instructions": {
+          "type": "string",
+          "description": "Extra instructions appended to the classifier prompt"
+        },
+        "timeout": {
+          "type": "integer",
+          "description": "Classifier timeout in seconds",
+          "default": 10
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "classifier",
+        "routes"
+      ]
+    },
+    "RouterRoute": {
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Route name the classifier answers with"
+        },
+        "description": {
+          "type": "string",
+          "description": "When the classifier should pick this route"
+        },
+        "model": {
+          "$ref": "#/$defs/SelectedModel",
+          "description": "Model used for prompts routed here"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "name",
+        "description",
+        "model"
+      ]
     },
     "SelectedModel": {
       "properties": {

@@ -443,6 +443,10 @@ type UI struct {
 	// agentBusyCache.
 	agentReady bool
 	agentModel workspace.AgentModel
+	// lastAssistantModel is the model that answered the latest assistant
+	// message in the current session; shown as the routed model when a
+	// router is active.
+	lastAssistantModel config.SelectedModel
 	// busyFetchGen is bumped by every busy/permission state transition;
 	// like promptQueueGen it lets a stale in-flight probe result be
 	// discarded and re-fetched instead of clobbering newer state.
@@ -893,6 +897,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd := m.dispatchBusyRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case routersChangedMsg:
+		cmds = append(cmds, m.applyRoutersChanged(msg))
 	case agentRunSubmittedMsg:
 		if msg.err != nil {
 			// The run never started, so no terminal event is coming to
@@ -1845,6 +1851,9 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 	if msg.Role == message.Assistant && m.pending.sessionID == msg.SessionID {
 		m.handOffPendingTurn()
 	}
+	if msg.Role == message.Assistant && msg.Provider != "" && msg.Model != "" {
+		m.lastAssistantModel = config.SelectedModel{Provider: msg.Provider, Model: msg.Model}
+	}
 
 	existing := m.chat.MessageItem(msg.ID)
 	if existing != nil {
@@ -2125,6 +2134,10 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	}
 
 	isOnboarding := m.state == uiOnboarding
+
+	if cmd, ok := m.handleRouterAction(action); ok {
+		return cmd
+	}
 
 	switch msg := action.(type) {
 	// Generic dialog messages
@@ -2778,9 +2791,16 @@ func (m *UI) restoreModelFromSession(msgs []message.Message) tea.Cmd {
 	if lastAssistant == nil || lastAssistant.Provider == "" || lastAssistant.Model == "" {
 		return nil
 	}
+	m.lastAssistantModel = config.SelectedModel{Provider: lastAssistant.Provider, Model: lastAssistant.Model}
 
 	cfg := m.com.Config()
 	if cfg == nil {
+		return nil
+	}
+
+	// A router picks the model per prompt; restoring the routed model as
+	// the large model would switch routing off.
+	if cfg.ActiveRouter != "" {
 		return nil
 	}
 
@@ -2917,9 +2937,19 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		}
 	}
 
+	routersDisabled := false
 	if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, msg.ModelType, msg.Model); err != nil {
 		cmds = append(cmds, util.ReportError(err))
 	} else {
+		if msg.ModelType == config.SelectedModelTypeLarge && cfg.ActiveRouter != "" {
+			// Picking a concrete large model turns routing off, even
+			// when it is the router's fallback model.
+			if err := m.com.Workspace.SetActiveRouter(config.ScopeGlobal, ""); err != nil {
+				cmds = append(cmds, util.ReportError(err))
+			} else {
+				routersDisabled = true
+			}
+		}
 		if msg.ModelType == config.SelectedModelTypeLarge {
 			// Swap the theme live based on the newly selected large
 			// model's provider. Skipped when the provider resolves to
@@ -2949,6 +2979,9 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 			modelName = catwalkModel.Name
 		}
 		modelMsg := fmt.Sprintf("%s model changed to %s", modelType, modelName)
+		if routersDisabled {
+			modelMsg += " (router disabled)"
+		}
 
 		return util.NewInfoMsg(modelMsg)
 	}))
@@ -5589,6 +5622,14 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openMCPTogglesDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.RoutersID:
+		if cmd := m.openRoutersDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.RouterEditorID:
+		if cmd := m.openRouterEditor(""); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.FilePickerID:
 		if cmd := m.openFilesDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -6041,6 +6082,7 @@ func (m *UI) newSession() tea.Cmd {
 	planCmd := m.resetPlanModeState()
 	m.turnOutcome = ""
 	m.session = nil
+	m.lastAssistantModel = config.SelectedModel{}
 	m.sidebarOffset = 0
 	m.sessionFiles = nil
 	m.sessionFileReads = nil

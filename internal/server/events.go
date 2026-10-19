@@ -349,6 +349,8 @@ func messageToProto(m message.Message) proto.Message {
 		PrismModelName:          m.PrismModelName,
 		PrismHypercreditSavings: m.PrismHypercreditSavings,
 		PrismDollarSavings:      m.PrismDollarSavings,
+		RouterName:              m.RouterName,
+		RouteName:               m.RouteName,
 		CreatedAt:               m.CreatedAt,
 		UpdatedAt:               m.UpdatedAt,
 		IsSummaryMessage:        m.IsSummaryMessage,

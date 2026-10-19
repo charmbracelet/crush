@@ -121,6 +121,7 @@ Available Commands:
   mcp           Manage MCP servers
   lsp           Manage language servers
   hook          Manage hooks
+  router        Route prompts to models with a classifier
   permissions   Configure tool permissions
   option        Configure general Crush behavior
 ```
@@ -415,6 +416,94 @@ Usage:
 
 Flags:
       --name string              remove hooks with this name
+```
+
+### router
+
+A router picks the model for every step of the agent loop. A cheap
+**classifier** model reads the prompt (and, after the first step, a summary of
+the latest step: what was said, which tools ran, what they returned) and
+answers with one of the router's **routes**; the next step then runs on that
+route's model. A single prompt can therefore explore on a cheap model and
+implement on a strong one. An active router takes the place of the large model;
+selecting a regular large model (or `crush run --model`) turns it off.
+Routers can also be created, edited, and activated in the TUI: open the
+command palette and choose **Routers**, or pick one from the **Routers**
+group in **Switch Model**.
+
+```text
+Usage:
+  router [command]
+
+Available Commands:
+  add       Add or update a router
+  route     Add or replace a route on a router
+  remove    Remove a router or one of its routes
+  rm        Alias for remove
+  use       Activate a router
+```
+
+```bash
+router add auto --classifier anthropic/claude-haiku-4-5 --default simple
+router route auto simple anthropic/claude-haiku-4-5 \
+  --description "Questions, small edits, explanations"
+router route auto complex anthropic/claude-opus-4-1 \
+  --description "Multi-file changes, refactors, debugging"
+router use auto
+```
+
+#### `router add`
+
+```text
+Usage:
+  router add <name> --classifier <provider>/<id> [flags]
+
+Flags:
+      --classifier provider/id   model that classifies each step (required)
+      --default string           route used when classification fails (default: first route)
+      --instructions string      extra guidance appended to the classifier prompt
+      --timeout int              classifier timeout in seconds (default 10)
+```
+
+#### `router route`
+
+```text
+Usage:
+  router route <name> <route> <provider>/<id> --description <text>
+```
+
+#### `router remove`, `router use`
+
+```text
+Usage:
+  router remove <name> [<route>]
+  router use <name>
+  router use --none
+```
+
+Routing never fails a turn. If the classifier errors, times out, or answers
+with something that isn't a route, the first step uses the default route and
+later steps keep the model they were on; if a route's model is unavailable,
+the default route is used, then the large model. When a
+session nears a route model's context window, the route with the largest
+window is used instead. Sub-agents, titles, and summaries keep using the
+large and small models.
+
+Keep in mind that every step costs one extra (small) classifier call, which
+is added to the session cost, and that switching models between steps
+defeats provider prompt caching. Write route descriptions about the kind of
+step ("reading and searching", "writing new code"), not the whole task.
+
+The classifier can also be [TypeSafe's Jev](https://docs.typesafe.ai), a
+model built for structured decisions. Add it as a `typesafe` provider; it
+answers a single Choice question over your routes, so there's no text to
+parse. Jev can't chat, so it only appears in the router editor's picker.
+
+```bash
+provider add typesafe --type typesafe \
+  --base-url "https://api.typesafe.ai/v1" --api-key '$TYPESAFE_API_KEY'
+model add typesafe/jev-latest --name "Jev"
+router add auto --classifier typesafe/jev-latest
 ```
 
 ### permissions

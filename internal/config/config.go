@@ -63,6 +63,10 @@ const (
 	AgentTask  string = "task"
 )
 
+// ProviderTypeTypeSafe marks a TypeSafe (System One) provider such as Jev.
+// It cannot chat, so it is only usable as a router classifier.
+const ProviderTypeTypeSafe catwalk.Type = "typesafe"
+
 type SelectedModel struct {
 	// The model id as used by the provider API.
 	// Required.
@@ -871,7 +875,59 @@ type Config struct {
 	// Env is a map of environment variables set on startup.
 	Env map[string]string `json:"env,omitempty" jsonschema:"description=Environment variables to set on startup"`
 
+	// Routers are named classifier-driven model routers.
+	Routers map[string]RouterConfig `json:"routers,omitempty" jsonschema:"description=Named model routers that use a classifier model to pick a model per prompt"`
+
+	// ActiveRouter names the router used in place of the large model.
+	ActiveRouter string `json:"active_router,omitempty" jsonschema:"description=Name of the router to use instead of the large model"`
+
 	Agents map[string]Agent `json:"-"`
+}
+
+// RouterRoute is one destination of a router.
+type RouterRoute struct {
+	Name        string        `json:"name" jsonschema:"required,description=Route name the classifier answers with"`
+	Description string        `json:"description" jsonschema:"required,description=When the classifier should pick this route"`
+	Model       SelectedModel `json:"model" jsonschema:"required,description=Model used for prompts routed here"`
+}
+
+// RouterConfig configures a classifier-driven model router.
+type RouterConfig struct {
+	Classifier   SelectedModel `json:"classifier" jsonschema:"required,description=Model that classifies each prompt"`
+	Routes       []RouterRoute `json:"routes" jsonschema:"required,minItems=1,description=Routes the classifier can choose from"`
+	Default      string        `json:"default,omitempty" jsonschema:"description=Route used when classification fails; defaults to the first route"`
+	Instructions string        `json:"instructions,omitempty" jsonschema:"description=Extra instructions appended to the classifier prompt"`
+	Timeout      int           `json:"timeout,omitempty" jsonschema:"description=Classifier timeout in seconds,default=10"`
+}
+
+// DefaultRoute returns the default route, falling back to the first route.
+func (r RouterConfig) DefaultRoute() RouterRoute {
+	for _, route := range r.Routes {
+		if route.Name == r.Default {
+			return route
+		}
+	}
+	if len(r.Routes) > 0 {
+		return r.Routes[0]
+	}
+	return RouterRoute{}
+}
+
+// TimeoutDuration returns the classifier timeout, defaulting to 10s.
+func (r RouterConfig) TimeoutDuration() time.Duration {
+	if r.Timeout <= 0 {
+		return 10 * time.Second
+	}
+	return time.Duration(r.Timeout) * time.Second
+}
+
+// ActiveRouterConfig returns the active router, if one is set and exists.
+func (c *Config) ActiveRouterConfig() (string, RouterConfig, bool) {
+	if c == nil || c.ActiveRouter == "" {
+		return "", RouterConfig{}, false
+	}
+	r, ok := c.Routers[c.ActiveRouter]
+	return c.ActiveRouter, r, ok
 }
 
 // cloneForWrite returns a copy of c that the store's typed field mutators
@@ -890,6 +946,7 @@ func (c *Config) cloneForWrite() *Config {
 	nc.Models = maps.Clone(c.Models)
 	nc.RecentModels = maps.Clone(c.RecentModels)
 	nc.MCP = maps.Clone(c.MCP)
+	nc.Routers = maps.Clone(c.Routers)
 	if c.Options != nil {
 		opts := *c.Options
 		if c.Options.TUI != nil {

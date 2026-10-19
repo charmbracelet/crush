@@ -570,6 +570,14 @@ func (w *ClientWorkspace) SetCompactMode(scope config.Scope, enabled bool) error
 	return err
 }
 
+func (w *ClientWorkspace) SetActiveRouter(scope config.Scope, name string) error {
+	err := w.client.SetActiveRouter(context.Background(), w.workspaceID(), scope, name)
+	if err == nil {
+		w.refreshWorkspace()
+	}
+	return err
+}
+
 func (w *ClientWorkspace) SetProviderAPIKey(scope config.Scope, providerID string, apiKey any) error {
 	err := w.client.SetProviderAPIKey(context.Background(), w.workspaceID(), scope, providerID, apiKey)
 	if err == nil {
@@ -1356,6 +1364,8 @@ func protoToMessage(m proto.Message) message.Message {
 		PrismModelName:          m.PrismModelName,
 		PrismHypercreditSavings: m.PrismHypercreditSavings,
 		PrismDollarSavings:      m.PrismDollarSavings,
+		RouterName:              m.RouterName,
+		RouteName:               m.RouteName,
 		CreatedAt:               m.CreatedAt,
 		UpdatedAt:               m.UpdatedAt,
 		IsSummaryMessage:        m.IsSummaryMessage,

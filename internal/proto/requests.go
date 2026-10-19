@@ -34,6 +34,13 @@ type ConfigCompactRequest struct {
 	Enabled bool         `json:"enabled"`
 }
 
+// ConfigActiveRouterRequest represents a request to set the active router.
+// An empty Name clears it.
+type ConfigActiveRouterRequest struct {
+	Scope config.Scope `json:"scope"`
+	Name  string       `json:"name"`
+}
+
 // APIKeyKind discriminates the kind of credential carried in a
 // ConfigProviderKeyRequest. JSON's `any` loses Go type information, so
 // the wire format names the kind explicitly and the server decodes

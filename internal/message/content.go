@@ -190,6 +190,10 @@ type Message struct {
 	// figure is the one shown.
 	PrismHypercreditSavings *float64
 	PrismDollarSavings      *float64
+	// RouterName and RouteName identify the classifier router that picked
+	// this turn's model and the route it chose. Empty when not routed.
+	RouterName string
+	RouteName  string
 }
 
 func (m *Message) Content() TextContent {

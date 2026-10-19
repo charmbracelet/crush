@@ -57,6 +57,24 @@ func (m *UI) modelInfo(width int) string {
 	if model != nil {
 		modelName = model.CatwalkCfg.Name
 	}
+
+	// With a router active the model changes per step: show the router
+	// and the model that answered last, and size the context gauge
+	// against that model.
+	if cfg := m.com.Config(); cfg != nil {
+		if name, _, ok := cfg.ActiveRouterConfig(); ok {
+			modelName = "⇄ " + name
+			providerName = "Router · picks per step"
+			reasoningInfo = ""
+			last := m.lastAssistantModel
+			if lm := cfg.GetModel(last.Provider, last.Model); lm != nil {
+				providerName = "Router · last: " + lm.Name
+				if modelContext != nil {
+					modelContext.ModelContext = lm.ContextWindow
+				}
+			}
+		}
+	}
 	return common.ModelInfo(m.com.Styles, modelName, providerName, reasoningInfo, modelContext, width, m.hyperCredits)
 }
 

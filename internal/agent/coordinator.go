@@ -405,6 +405,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 			OnComplete:        onComplete,
 			Accepted:          accept,
 			OnAuthRefresh:     c.makeAuthRefreshCallback(providerCfg),
+			Router:            c.newRouter(),
 		})
 	}
 	beforeLoaded := c.skillTracker.LoadedNames()
@@ -982,91 +983,67 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 		return Model{}, Model{}, errSmallModelNotSelected
 	}
 
-	largeProviderCfg, ok := c.cfg.Config().Providers.Get(largeModelCfg.Provider)
-	if !ok {
-		return Model{}, Model{}, errLargeModelProviderNotConfigured
-	}
-
-	largeProvider, err := c.buildProvider(largeProviderCfg, largeModelCfg, isSubAgent)
+	large, err := c.buildModel(ctx, largeModelCfg, isSubAgent, errLargeModelProviderNotConfigured, errLargeModelNotFound)
 	if err != nil {
 		return Model{}, Model{}, err
 	}
-
-	smallProviderCfg, ok := c.cfg.Config().Providers.Get(smallModelCfg.Provider)
-	if !ok {
-		return Model{}, Model{}, errSmallModelProviderNotConfigured
-	}
-
-	smallProvider, err := c.buildProvider(smallProviderCfg, smallModelCfg, true)
+	small, err := c.buildModel(ctx, smallModelCfg, true, errSmallModelProviderNotConfigured, errSmallModelNotFound)
 	if err != nil {
 		return Model{}, Model{}, err
+	}
+	return large, small, nil
+}
+
+// buildModel builds a ready-to-use [Model] for a selected model. errProvider
+// and errNotFound are returned when the provider is not configured or the
+// model is missing from its catalog.
+func (c *coordinator) buildModel(ctx context.Context, sel config.SelectedModel, isSubAgent bool, errProvider, errNotFound error) (Model, error) {
+	providerCfg, ok := c.cfg.Config().Providers.Get(sel.Provider)
+	if !ok {
+		return Model{}, errProvider
+	}
+
+	provider, err := c.buildProvider(providerCfg, sel, isSubAgent)
+	if err != nil {
+		return Model{}, err
 	}
 
 	// Resolve the selected model from the provider's whole catalog: an
 	// API-key model, a ChatGPT subscription model, or a Grok one. The
 	// subscription catalogs live outside Models, so looking only there
 	// strands a Grok/ChatGPT model that catwalk doesn't also publish.
-	largeCatwalkModel := c.cfg.Config().GetModel(largeModelCfg.Provider, largeModelCfg.Model)
-	smallCatwalkModel := c.cfg.Config().GetModel(smallModelCfg.Provider, smallModelCfg.Model)
-
-	if largeCatwalkModel == nil {
-		return Model{}, Model{}, errLargeModelNotFound
+	catwalkModel := c.cfg.Config().GetModel(sel.Provider, sel.Model)
+	if catwalkModel == nil {
+		return Model{}, errNotFound
 	}
 
-	if smallCatwalkModel == nil {
-		return Model{}, Model{}, errSmallModelNotFound
+	modelID := sel.Model
+	if sel.Provider == openrouter.Name && isExactoSupported(modelID) {
+		modelID += ":exacto"
 	}
 
-	largeModelID := largeModelCfg.Model
-	smallModelID := smallModelCfg.Model
-
-	if largeModelCfg.Provider == openrouter.Name && isExactoSupported(largeModelID) {
-		largeModelID += ":exacto"
-	}
-
-	if smallModelCfg.Provider == openrouter.Name && isExactoSupported(smallModelID) {
-		smallModelID += ":exacto"
-	}
-
-	largeModel, err := largeProvider.LanguageModel(ctx, largeModelID)
+	lm, err := provider.LanguageModel(ctx, modelID)
 	if err != nil {
-		return Model{}, Model{}, err
-	}
-	smallModel, err := smallProvider.LanguageModel(ctx, smallModelID)
-	if err != nil {
-		return Model{}, Model{}, err
+		return Model{}, err
 	}
 
 	// Bound each request with the configured timeout so unreachable or hung
 	// providers fail instead of blocking a session forever. The wrapper is
 	// applied per request, so retries get a fresh budget each attempt.
-	requestTimeout := c.cfg.Config().Options.GetRequestTimeout()
-	largeModel = newRequestTimeoutModel(largeModel, requestTimeout)
-	smallModel = newRequestTimeoutModel(smallModel, requestTimeout)
+	lm = newRequestTimeoutModel(lm, c.cfg.Config().Options.GetRequestTimeout())
 
 	// Hyper completions no longer report the hypercredit balance, so wrap
 	// the Hyper models to fetch it from /v1/credits on every request.
-	if largeModelCfg.Provider == hyper.Name {
-		largeModel = newHyperCreditsModel(largeModel, c.hyperAPIKey)
-	}
-	if smallModelCfg.Provider == hyper.Name {
-		smallModel = newHyperCreditsModel(smallModel, c.hyperAPIKey)
+	if sel.Provider == hyper.Name {
+		lm = newHyperCreditsModel(lm, c.hyperAPIKey)
 	}
 
-	large := Model{
-		Model:      largeModel,
-		CatwalkCfg: *largeCatwalkModel,
-		ModelCfg:   largeModelCfg,
-		FlatRate:   largeProviderCfg.FlatRate,
-	}
-	small := Model{
-		Model:      smallModel,
-		CatwalkCfg: *smallCatwalkModel,
-		ModelCfg:   smallModelCfg,
-		FlatRate:   smallProviderCfg.FlatRate,
-	}
-
-	return large, small, nil
+	return Model{
+		Model:      lm,
+		CatwalkCfg: *catwalkModel,
+		ModelCfg:   sel,
+		FlatRate:   providerCfg.FlatRate,
+	}, nil
 }
 
 // hyperAPIKey resolves the Hyper API key from the live config, so an

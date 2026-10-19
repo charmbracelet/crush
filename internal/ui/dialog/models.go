@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"log/slog"
+	"maps"
 	"slices"
 
 	"charm.land/bubbles/v2/help"
@@ -70,12 +71,21 @@ const (
 // ModelsID is the identifier for the model selection dialog.
 const ModelsID = "models"
 
+// ModelPickerID is the identifier for the model picker used by the router
+// editor.
+const ModelPickerID = "model_picker"
+
 const defaultModelsDialogMaxWidth = 73
 
 // Models represents a model selection dialog.
 type Models struct {
 	com          *common.Common
 	isOnboarding bool
+
+	// pickerTarget, when set, turns the dialog into a model picker for
+	// the router editor: only configured providers are listed and the
+	// choice is returned as [ActionRouterModelPicked].
+	pickerTarget string
 
 	modelType ModelType
 	providers []catwalk.Provider
@@ -161,8 +171,26 @@ func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
 	return m, nil
 }
 
+// NewModelPicker creates a model picker that returns its choice for the
+// given router editor target.
+func NewModelPicker(com *common.Common, target string) (*Models, error) {
+	m, err := NewModels(com, false)
+	if err != nil {
+		return nil, err
+	}
+	m.pickerTarget = target
+	if err := m.setProviderItems(); err != nil {
+		return nil, err
+	}
+	m.input.Placeholder = "Choose a model"
+	return m, nil
+}
+
 // ID implements Dialog.
 func (m *Models) ID() string {
+	if m.pickerTarget != "" {
+		return ModelPickerID
+	}
 	return ModelsID
 }
 
@@ -202,6 +230,20 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 
 			isEdit := key.Matches(msg, m.keyMap.Edit)
 
+			if modelItem.IsRouter() {
+				if isEdit || modelItem.routerNew {
+					return ActionEditRouter{Name: modelItem.RouterName()}
+				}
+				return ActionSelectRouter{Name: modelItem.RouterName()}
+			}
+
+			if m.pickerTarget != "" {
+				return ActionRouterModelPicked{
+					Target: m.pickerTarget,
+					Model:  modelItem.SelectedModel(),
+				}
+			}
+
 			return ActionSelectModel{
 				Provider:       modelItem.prov,
 				Model:          modelItem.SelectedModel(),
@@ -209,7 +251,7 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 				ReAuthenticate: isEdit,
 			}
 		case key.Matches(msg, m.keyMap.Tab):
-			if m.isOnboarding {
+			if m.isOnboarding || m.pickerTarget != "" {
 				break
 			}
 			if m.modelType == ModelTypeLarge {
@@ -275,6 +317,10 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	rc := NewRenderContext(t, width)
 	rc.Title = "Switch Model"
 	rc.TitleInfo = m.modelTypeRadioView()
+	if m.pickerTarget != "" {
+		rc.Title = "Choose Model"
+		rc.TitleInfo = ""
+	}
 
 	if m.isOnboarding {
 		titleText := t.Dialog.PrimaryText.Render("To start, let's choose a provider and model.")
@@ -316,10 +362,14 @@ func (m *Models) ShortHelp() []key.Binding {
 	}
 	h := []key.Binding{
 		m.keyMap.UpDown,
-		m.keyMap.Tab,
-		m.keyMap.Select,
 	}
-	if m.isSelectedConfigured() {
+	if m.pickerTarget == "" {
+		h = append(h, m.keyMap.Tab)
+	}
+	h = append(h, m.keyMap.Select)
+	if m.isSelectedRouter() {
+		h = append(h, key.NewBinding(key.WithKeys("ctrl+e"), key.WithHelp("ctrl+e", "edit router")))
+	} else if m.pickerTarget == "" && m.isSelectedConfigured() {
 		h = append(h, m.keyMap.Edit)
 	}
 	h = append(h, m.keyMap.Close)
@@ -329,6 +379,11 @@ func (m *Models) ShortHelp() []key.Binding {
 // FullHelp returns the full help view.
 func (m *Models) FullHelp() [][]key.Binding {
 	return [][]key.Binding{m.ShortHelp()}
+}
+
+func (m *Models) isSelectedRouter() bool {
+	modelItem, ok := m.list.SelectedItem().(*ModelItem)
+	return ok && modelItem.router != ""
 }
 
 func (m *Models) isSelectedConfigured() bool {
@@ -377,6 +432,11 @@ func (m *Models) setProviderItems() error {
 		if p.Disable {
 			continue
 		}
+		// TypeSafe models can't chat; they are only offered as router
+		// classifiers in the picker.
+		if p.Type == config.ProviderTypeTypeSafe && m.pickerTarget == "" {
+			continue
+		}
 
 		// Check if this provider is not in the known providers list
 		if !slices.ContainsFunc(knownProviders, containsProviderFunc(id)) ||
@@ -413,6 +473,9 @@ func (m *Models) setProviderItems() error {
 
 		providerConfig, providerConfigured := cfg.Providers.Get(providerID)
 		if providerConfigured && providerConfig.Disable {
+			continue
+		}
+		if m.pickerTarget != "" && !providerConfigured {
 			continue
 		}
 
@@ -484,7 +547,9 @@ func (m *Models) setProviderItems() error {
 		groups = append(groups, group)
 	}
 
-	if len(recentItems) > 0 {
+	// The picker lists configured providers only, so the recent list would
+	// look stale against it; skip it rather than prune the user's recents.
+	if len(recentItems) > 0 && m.pickerTarget == "" {
 		recentGroup := NewModelGroup(t, "Recently used", false)
 
 		var validRecentItems []config.SelectedModel
@@ -516,6 +581,21 @@ func (m *Models) setProviderItems() error {
 		if len(recentGroup.Items) > 0 {
 			groups = append([]ModelGroup{recentGroup}, groups...)
 		}
+	}
+
+	// Routers stand in for the large model, so they only appear on the
+	// Large tab of the regular dialog.
+	if m.pickerTarget == "" && !m.isOnboarding && m.modelType == ModelTypeLarge {
+		routerGroup := NewModelGroup(t, "Routers", false)
+		for _, name := range slices.Sorted(maps.Keys(cfg.Routers)) {
+			item := NewRouterItem(t, name, fmt.Sprintf("%d routes", len(cfg.Routers[name].Routes)))
+			routerGroup.AppendItems(item)
+			if name == cfg.ActiveRouter {
+				selectedItemID = item.ID()
+			}
+		}
+		routerGroup.AppendItems(NewRouterCreateItem(t))
+		groups = append([]ModelGroup{routerGroup}, groups...)
 	}
 
 	// Set model groups in the list.

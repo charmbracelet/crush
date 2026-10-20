@@ -33,7 +33,7 @@ brew install charmbracelet/tap/crush
 npm install -g @charmland/crush
 
 # Arch Linux (btw)
-yay -S crush-bin
+yay -S crush
 
 # Nix
 nix run github:numtide/nix-ai-tools#crush

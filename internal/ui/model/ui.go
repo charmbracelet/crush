@@ -5741,6 +5741,11 @@ func (m *UI) openFilesDialog() tea.Cmd {
 
 // openPermissionsDialog opens the permissions dialog for a permission request.
 func (m *UI) openPermissionsDialog(perm permission.PermissionRequest) tea.Cmd {
+	// CRUSH_PERMISSIONS_PIPED=1: another client (an editor Crush runs in)
+	// shows the prompts and answers them, so this UI doesn't ask twice.
+	if piped, _ := strconv.ParseBool(os.Getenv("CRUSH_PERMISSIONS_PIPED")); piped {
+		return nil
+	}
 	// Close any existing permissions dialog first.
 	m.dialog.CloseDialog(dialog.PermissionsID)
 

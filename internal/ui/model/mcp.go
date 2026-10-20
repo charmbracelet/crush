@@ -204,9 +204,6 @@ func mcpCounts(t *styles.Styles, counts mcp.Counts) string {
 // mcpList renders a list of MCP clients with their status and counts,
 // truncating to maxItems if needed.
 func mcpList(t *styles.Styles, mcps []mcp.ClientInfo, width, maxItems int) string {
-	if maxItems <= 0 {
-		return ""
-	}
 	var renderedMcps []string
 
 	for _, m := range mcps {
@@ -259,13 +256,7 @@ func mcpList(t *styles.Styles, mcps []mcp.ClientInfo, width, maxItems int) strin
 		}, width))
 	}
 
-	if len(renderedMcps) > maxItems {
-		visibleItems := renderedMcps[:maxItems-1]
-		remaining := len(renderedMcps) - maxItems
-		visibleItems = append(visibleItems, t.Resource.AdditionalText.Render(fmt.Sprintf("…and %d more", remaining)))
-		return lipgloss.JoinVertical(lipgloss.Left, visibleItems...)
-	}
-	return lipgloss.JoinVertical(lipgloss.Left, renderedMcps...)
+	return lipgloss.JoinVertical(lipgloss.Left, truncateRows(renderedMcps, maxItems, t.Resource.AdditionalText)...)
 }
 
 // openMCPTogglesDialog opens the repository-scoped MCP toggles dialog.

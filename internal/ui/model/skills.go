@@ -120,19 +120,6 @@ func (m *UI) skillStatusItems() []skillStatusItem {
 }
 
 func skillsList(t *styles.Styles, items []skillStatusItem, width, maxItems int) string {
-	if maxItems <= 0 {
-		return ""
-	}
-
-	if len(items) > maxItems {
-		visibleItems := items[:maxItems-1]
-		remaining := len(items) - (maxItems - 1)
-		items = append(visibleItems, skillStatusItem{
-			name:  "more",
-			title: t.Resource.AdditionalText.Render(fmt.Sprintf("…and %d more", remaining)),
-		})
-	}
-
 	renderedItems := make([]string, 0, len(items))
 	for _, item := range items {
 		renderedItems = append(renderedItems, common.Status(t, common.StatusOpts{
@@ -141,5 +128,5 @@ func skillsList(t *styles.Styles, items []skillStatusItem, width, maxItems int) 
 			Description: item.description,
 		}, width))
 	}
-	return lipgloss.JoinVertical(lipgloss.Left, renderedItems...)
+	return lipgloss.JoinVertical(lipgloss.Left, truncateRows(renderedItems, maxItems, t.Resource.AdditionalText)...)
 }

@@ -496,6 +496,34 @@ tool/prompt/resource list-changed notifications.
 Crush has preliminary support for hooks. For details, see
 [the hook guide](./docs/hooks/).
 
+### Choosing a server address
+
+`crush server --host` (or `-H`) accepts TCP addresses and Unix socket paths.
+A Unix socket is a local endpoint represented by a file. For a local server,
+you can put that file in a private directory rather than open a TCP port:
+
+```bash
+socket_dir="$(mktemp -d /tmp/crush.XXXXXX)"
+printf 'Socket path: %s/crush.sock\n' "$socket_dir"
+crush server --host "unix://$socket_dir/crush.sock"
+```
+
+In another terminal, connect a TUI using the printed path. Replace `XXXXXX`
+below with the directory name printed above:
+
+```bash
+CRUSH_CLIENT_SERVER=1 crush --host unix:///tmp/crush.XXXXXX/crush.sock
+```
+
+`CRUSH_CLIENT_SERVER=1` makes the TUI connect to the server instead of running
+locally. The server and client must use the same address. Keep Unix socket paths
+short, since operating systems limit their length.
+
+Access to a Unix socket depends on filesystem permissions. `mktemp -d` creates
+a directory accessible only to its owner; processes running as that same user
+can still connect. Stop the server with Ctrl+C when finished, then remove the
+temporary directory.
+
 ### Sharing a workspace across clients
 
 When Crush is run against a shared backend (for example two TUIs talking to

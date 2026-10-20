@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
+	"strings"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent/tools"
@@ -52,34 +52,29 @@ func (h *hookedTool) SetProviderOptions(opts fantasy.ProviderOptions) {
 }
 
 func (h *hookedTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-	sessionID := tools.GetSessionFromContext(ctx)
-	result, err := h.runner.Run(ctx, hooks.EventPreToolUse, sessionID, call.Name, call.Input)
-	if err != nil {
-		slog.Warn("Hook execution error, proceeding with tool call",
-			"tool", call.Name, "error", err)
-	}
-
-	if result.Decision == hooks.DecisionDeny || result.Halt {
-		reason := fmt.Sprintf("Tool call blocked by hook. Reason: %s", result.Reason)
-		if result.Halt {
-			reason = fmt.Sprintf("Turn halted by hook. Reason: %s", result.Reason)
+	pre := h.runner.Run(ctx, hooks.Event{
+		Name:      hooks.EventPreToolUse,
+		SessionID: tools.GetSessionFromContext(ctx),
+		Tool:      &hooks.ToolCall{ID: call.ID, Name: call.Name, Input: call.Input},
+	})
+	if pre.Blocked() {
+		reason := fmt.Sprintf("Tool call blocked by hook. Reason: %s", pre.Reason)
+		if pre.Halt {
+			reason = fmt.Sprintf("Turn halted by hook. Reason: %s", pre.Reason)
 		}
 		resp := fantasy.NewTextErrorResponse(reason)
 		// Halt ends the whole turn; a plain deny only blocks this tool
 		// call so the model can see the error and try something else.
-		resp.StopTurn = result.Halt
-		resp.Metadata = hookMetadataJSON(result)
+		resp.StopTurn = pre.Halt
+		resp.Metadata = mergeHookMetadata("", pre)
 		return resp, nil
 	}
-
-	if result.UpdatedInput != "" {
-		call.Input = result.UpdatedInput
+	if pre.UpdatedInput != "" {
+		call.Input = pre.UpdatedInput
 	}
-
 	// An explicit allow from a hook pre-approves the permission prompt for
-	// this tool call. Deny is already handled above; silence falls through
-	// to the normal permission flow.
-	if result.Decision == hooks.DecisionAllow {
+	// this tool call. Silence falls through to the normal permission flow.
+	if pre.Decision == hooks.DecisionAllow {
 		ctx = permission.WithHookApproval(ctx, call.ID)
 	}
 
@@ -88,45 +83,65 @@ func (h *hookedTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.To
 		return resp, err
 	}
 
-	if result.Context != "" {
-		if resp.Content != "" {
-			resp.Content += "\n"
-		}
-		resp.Content += result.Context
-	}
-
-	resp.Metadata = mergeHookMetadata(resp.Metadata, result)
+	resp.Content = joinNonEmpty(resp.Content, pre.Context)
+	resp.Metadata = mergeHookMetadata(resp.Metadata, pre)
 	return resp, nil
 }
 
-// buildHookMetadata creates a HookMetadata from an AggregateResult.
-func buildHookMetadata(result hooks.AggregateResult) hooks.HookMetadata {
-	return hooks.HookMetadata{
-		HookCount:    result.HookCount,
-		Decision:     result.Decision.String(),
-		Halt:         result.Halt,
-		Reason:       result.Reason,
-		InputRewrite: result.UpdatedInput != "",
-		Hooks:        result.Hooks,
+// postToolEvent turns the PreToolUse event into the one describing how
+// the call ended. A Go error and an error response both count as a
+// failure, as in Claude Code, so PostToolUse only ever sees output the
+// model will treat as a success.
+func postToolEvent(ev hooks.Event, resp fantasy.ToolResponse, err error) hooks.Event {
+	switch {
+	case err != nil:
+		ev.Name, ev.Error = hooks.EventPostToolUseFailure, err.Error()
+	case resp.IsError:
+		ev.Name, ev.Error = hooks.EventPostToolUseFailure, resp.Content
+	default:
+		ev.Name, ev.ToolResponse = hooks.EventPostToolUse, new(resp.Content)
 	}
+	return ev
 }
 
-// hookMetadataJSON builds a JSON string containing only the hook metadata.
-func hookMetadataJSON(result hooks.AggregateResult) string {
-	meta := buildHookMetadata(result)
-	data, err := json.Marshal(meta)
-	if err != nil {
-		return ""
+// joinNonEmpty appends the non-empty parts to content, one per line.
+func joinNonEmpty(content string, parts ...string) string {
+	for _, p := range parts {
+		if p == "" {
+			continue
+		}
+		if content != "" {
+			content += "\n"
+		}
+		content += p
 	}
-	return `{"hook":` + string(data) + `}`
+	return content
 }
 
-// mergeHookMetadata injects hook metadata into existing tool metadata.
-func mergeHookMetadata(existing string, result hooks.AggregateResult) string {
-	if result.HookCount == 0 {
+// mergeHookMetadata injects the combined hook metadata for the given
+// results into existing tool metadata under the "hook" key. Results
+// with no hooks are skipped; when nothing ran, existing is returned
+// unchanged.
+func mergeHookMetadata(existing string, results ...hooks.AggregateResult) string {
+	var meta hooks.HookMetadata
+	var decision hooks.Decision
+	for _, r := range results {
+		if r.HookCount == 0 {
+			continue
+		}
+		meta.HookCount += r.HookCount
+		meta.Hooks = append(meta.Hooks, r.Hooks...)
+		meta.Halt = meta.Halt || r.Halt
+		meta.InputRewrite = meta.InputRewrite || r.UpdatedInput != ""
+		meta.OutputRewrite = meta.OutputRewrite || r.UpdatedOutput != ""
+		// Decisions are ordered none < allow < deny, so the strongest wins.
+		decision = max(decision, r.Decision)
+		meta.Reason = strings.TrimSpace(meta.Reason + "\n" + r.Reason)
+	}
+	if meta.HookCount == 0 {
 		return existing
 	}
-	meta := buildHookMetadata(result)
+	meta.Decision = decision.String()
 	data, err := json.Marshal(meta)
 	if err != nil {
 		return existing

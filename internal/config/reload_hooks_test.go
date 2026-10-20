@@ -60,14 +60,16 @@ func assertHookFilters(t *testing.T, store *config.ConfigStore) {
 	preHooks := store.Config().Hooks[hooks.EventPreToolUse]
 	require.Len(t, preHooks, 1)
 
-	runner := hooks.NewRunner(preHooks, t.TempDir(), t.TempDir())
+	// The runner reads the store on every event, exactly as the app
+	// wires it, so a reload that rebuilds HookConfig values is covered.
+	runner := hooks.NewRunner(func() map[string][]config.HookConfig {
+		return store.Config().Hooks
+	}, t.TempDir(), t.TempDir())
 
-	nonMatch, err := runner.Run(context.Background(), hooks.EventPreToolUse, "sess", "view", `{}`)
-	require.NoError(t, err)
+	nonMatch := runner.Run(context.Background(), hooks.Event{Name: hooks.EventPreToolUse, SessionID: "sess", Tool: &hooks.ToolCall{Name: "view", Input: `{}`}})
 	require.Equal(t, 0, nonMatch.HookCount, "view must not match ^bash$ matcher")
 
-	match, err := runner.Run(context.Background(), hooks.EventPreToolUse, "sess", "bash", `{}`)
-	require.NoError(t, err)
+	match := runner.Run(context.Background(), hooks.Event{Name: hooks.EventPreToolUse, SessionID: "sess", Tool: &hooks.ToolCall{Name: "bash", Input: `{}`}})
 	require.Equal(t, 1, match.HookCount, "bash must match ^bash$ matcher")
 }
 

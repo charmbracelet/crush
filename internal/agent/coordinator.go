@@ -886,11 +886,11 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 
 	logFile := filepath.Join(c.cfg.Config().Options.DataDirectory, "logs", "crush.log")
 
-	// Build hook runner if PreToolUse hooks are configured.
-	var hookRunner *hooks.Runner
-	if preToolHooks := c.cfg.Config().Hooks[hooks.EventPreToolUse]; len(preToolHooks) > 0 {
-		hookRunner = hooks.NewRunner(preToolHooks, c.cfg.WorkingDir(), c.cfg.WorkingDir())
-	}
+	// The runner reads the config store on every event, so a reload is
+	// picked up without rebuilding anything here.
+	hookRunner := hooks.NewRunner(func() map[string][]config.HookConfig {
+		return c.cfg.Config().Hooks
+	}, c.cfg.WorkingDir(), c.cfg.WorkingDir())
 
 	allTools = append(
 		allTools,

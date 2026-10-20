@@ -33,17 +33,20 @@ func (f *fakeTool) Run(ctx context.Context, _ fantasy.ToolCall) (fantasy.ToolRes
 func (f *fakeTool) ProviderOptions() fantasy.ProviderOptions     { return nil }
 func (f *fakeTool) SetProviderOptions(_ fantasy.ProviderOptions) {}
 
-// newRunner builds a hooks.Runner from a single HookConfig, running the
-// config-loader path that compiles the matcher regex.
+// newRunner builds a hooks.Runner with a single PreToolUse hook, running
+// the config-loader path that validates the config.
 func newRunner(t *testing.T, cmd string) *hooks.Runner {
 	t.Helper()
-	cfg := &config.Config{
-		Hooks: map[string][]config.HookConfig{
-			hooks.EventPreToolUse: {{Command: cmd}},
-		},
-	}
+	return newRunnerFor(t, map[string][]config.HookConfig{
+		hooks.EventPreToolUse: {{Command: cmd}},
+	})
+}
+
+func newRunnerFor(t *testing.T, cfgHooks map[string][]config.HookConfig) *hooks.Runner {
+	t.Helper()
+	cfg := &config.Config{Hooks: cfgHooks}
 	require.NoError(t, cfg.ValidateHooks())
-	return hooks.NewRunner(cfg.Hooks[hooks.EventPreToolUse], t.TempDir(), t.TempDir())
+	return hooks.NewRunner(hooks.Static(cfg.Hooks), t.TempDir(), t.TempDir())
 }
 
 func TestHookedTool_AllowStampsHookApproval(t *testing.T) {

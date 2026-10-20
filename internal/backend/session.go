@@ -17,7 +17,7 @@ func (b *Backend) CreateSession(ctx context.Context, workspaceID, title string) 
 		return session.Session{}, err
 	}
 
-	return ws.Sessions.Create(ctx, title)
+	return ws.CreateSession(ctx, title)
 }
 
 // GetSession retrieves a session by workspace and session ID.

@@ -165,6 +165,7 @@ type coordinator struct {
 	mainAgent     SessionAgent
 	mainAgentName string
 	agents        map[string]SessionAgent
+	hookRunner    *hooks.Runner
 
 	// models is shared by every agent; rebuildMu serializes rebuilds of it.
 	models    csync.Value[coordinatorModels]
@@ -193,6 +194,7 @@ type CoordinatorOptions struct {
 	Notify      pubsub.Publisher[notify.Notification]
 	RunComplete pubsub.Publisher[notify.RunComplete]
 	Skills      *skills.Manager
+	HookRunner  *hooks.Runner
 	Interactive bool
 }
 
@@ -226,6 +228,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		activeSkills: activeSkills,
 		skillTracker: skillTracker,
 		interactive:  opts.Interactive,
+		hookRunner:   opts.HookRunner,
 	}
 
 	agentCfg, ok := opts.Config.Config().Agents[config.AgentCoder]
@@ -823,6 +826,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		Tools:                nil,
 		Notify:               c.notify,
 		RunComplete:          c.runComplete,
+		Hooks:                c.hookRunner,
 	})
 
 	// The readiness goroutines below perform one-time setup — building the
@@ -885,12 +889,6 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	}
 
 	logFile := filepath.Join(c.cfg.Config().Options.DataDirectory, "logs", "crush.log")
-
-	// The runner reads the config store on every event, so a reload is
-	// picked up without rebuilding anything here.
-	hookRunner := hooks.NewRunner(func() map[string][]config.HookConfig {
-		return c.cfg.Config().Hooks
-	}, c.cfg.WorkingDir(), c.cfg.WorkingDir())
 
 	allTools = append(
 		allTools,
@@ -979,7 +977,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	// without hook interception to avoid firing the user's hook N times
 	// per delegated turn. The top-level invocation of the sub-agent tool
 	// itself is still wrapped from the coder's side.
-	filteredTools = wrapToolsWithHooks(filteredTools, hookRunner, isSubAgent)
+	filteredTools = wrapToolsWithHooks(filteredTools, c.hookRunner, isSubAgent)
 
 	return filteredTools, nil
 }

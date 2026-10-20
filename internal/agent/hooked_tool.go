@@ -13,8 +13,8 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-// hookedTool wraps a fantasy.AgentTool to run PreToolUse hooks before
-// delegating to the inner tool.
+// hookedTool wraps a fantasy.AgentTool to run PreToolUse hooks before the
+// inner tool and PostToolUse or PostToolUseFailure hooks after it.
 type hookedTool struct {
 	inner  fantasy.AgentTool
 	runner *hooks.Runner
@@ -52,11 +52,13 @@ func (h *hookedTool) SetProviderOptions(opts fantasy.ProviderOptions) {
 }
 
 func (h *hookedTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-	pre := h.runner.Run(ctx, hooks.Event{
+	ev := hooks.Event{
 		Name:      hooks.EventPreToolUse,
 		SessionID: tools.GetSessionFromContext(ctx),
 		Tool:      &hooks.ToolCall{ID: call.ID, Name: call.Name, Input: call.Input},
-	})
+	}
+
+	pre := h.runner.Run(ctx, ev)
 	if pre.Blocked() {
 		reason := fmt.Sprintf("Tool call blocked by hook. Reason: %s", pre.Reason)
 		if pre.Halt {
@@ -71,6 +73,7 @@ func (h *hookedTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.To
 	}
 	if pre.UpdatedInput != "" {
 		call.Input = pre.UpdatedInput
+		ev.Tool.Input = pre.UpdatedInput
 	}
 	// An explicit allow from a hook pre-approves the permission prompt for
 	// this tool call. Silence falls through to the normal permission flow.
@@ -79,12 +82,27 @@ func (h *hookedTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.To
 	}
 
 	resp, err := h.inner.Run(ctx, call)
+
+	ev = postToolEvent(ev, resp, err)
+	post := h.runner.Run(ctx, ev)
+	if post.UpdatedOutput != "" && ev.Name == hooks.EventPostToolUse {
+		resp.Content = post.UpdatedOutput
+	}
+	resp.StopTurn = resp.StopTurn || post.Halt
+	resp.Metadata = mergeHookMetadata(resp.Metadata, pre, post)
 	if err != nil {
+		// A Go error aborts the run, so there is no result to carry
+		// feedback to the model.
 		return resp, err
 	}
 
-	resp.Content = joinNonEmpty(resp.Content, pre.Context)
-	resp.Metadata = mergeHookMetadata(resp.Metadata, pre)
+	// A post hook that blocks cannot undo the call, so its reason is
+	// handed to the model as feedback instead, as in Claude Code.
+	feedback := []string{pre.Context, post.Context}
+	if post.Blocked() && post.Reason != "" {
+		feedback = append(feedback, "Hook feedback: "+post.Reason)
+	}
+	resp.Content = joinNonEmpty(resp.Content, feedback...)
 	return resp, nil
 }
 

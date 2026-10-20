@@ -148,3 +148,53 @@ func TestWrapToolsWithHooks(t *testing.T) {
 		require.Equal(t, inputs, wrapToolsWithHooks(inputs, nil, true))
 	})
 }
+
+func TestHookedTool_PostToolUse(t *testing.T) {
+	t.Parallel()
+
+	t.Run("replaces output and keeps pre context", func(t *testing.T) {
+		t.Parallel()
+		inner := &fakeTool{name: "bash", resp: fantasy.NewTextResponse("token=sk-secret")}
+		runner := newRunnerFor(t, map[string][]config.HookConfig{
+			hooks.EventPreToolUse:  {{Command: `echo '{"context":"pre note"}'`}},
+			hooks.EventPostToolUse: {{Command: `jq -r .tool_response | grep -q sk-secret || exit 1; echo '{"updated_output":"token=[REDACTED]","context":"post note"}'`}},
+		})
+		tool := newHookedTool(inner, runner)
+
+		resp, err := tool.Run(t.Context(), fantasy.ToolCall{ID: "c", Name: "bash", Input: `{"command":"env"}`})
+		require.NoError(t, err)
+		require.Equal(t, "token=[REDACTED]\npre note\npost note", resp.Content)
+		require.Contains(t, resp.Metadata, `"hook_count":2`)
+		require.Contains(t, resp.Metadata, `"event":"PostToolUse"`)
+	})
+
+	t.Run("block feeds reason back and halt stops the turn", func(t *testing.T) {
+		t.Parallel()
+		inner := &fakeTool{name: "bash", resp: fantasy.NewTextResponse("committed")}
+		runner := newRunnerFor(t, map[string][]config.HookConfig{
+			hooks.EventPostToolUse: {{Command: `echo '{"decision":"block","reason":"run the tests first","halt":true}'`}},
+		})
+		tool := newHookedTool(inner, runner)
+
+		resp, err := tool.Run(t.Context(), fantasy.ToolCall{ID: "c", Name: "bash", Input: `{}`})
+		require.NoError(t, err)
+		require.True(t, inner.called, "post hooks cannot undo the call")
+		require.Contains(t, resp.Content, "Hook feedback: run the tests first")
+		require.True(t, resp.StopTurn)
+	})
+
+	t.Run("failure fires PostToolUseFailure instead", func(t *testing.T) {
+		t.Parallel()
+		inner := &fakeTool{name: "bash", resp: fantasy.NewTextErrorResponse("boom")}
+		runner := newRunnerFor(t, map[string][]config.HookConfig{
+			hooks.EventPostToolUse:        {{Command: `echo '{"updated_output":"should not apply"}'`}},
+			hooks.EventPostToolUseFailure: {{Command: `jq -r .error | grep -q boom || exit 1; echo '{"context":"seen failure"}'`}},
+		})
+		tool := newHookedTool(inner, runner)
+
+		resp, err := tool.Run(t.Context(), fantasy.ToolCall{ID: "c", Name: "bash", Input: `{}`})
+		require.NoError(t, err)
+		require.True(t, resp.IsError)
+		require.Equal(t, "boom\nseen failure", resp.Content)
+	})
+}

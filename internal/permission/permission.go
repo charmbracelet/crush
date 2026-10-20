@@ -50,6 +50,9 @@ type PermissionNotification struct {
 	ToolCallID string `json:"tool_call_id"`
 	Granted    bool   `json:"granted"`
 	Denied     bool   `json:"denied"`
+	// Cancelled is set when the request was abandoned before a decision
+	// (the turn was cancelled while the prompt was open).
+	Cancelled bool `json:"cancelled"`
 }
 
 type PermissionRequest struct {
@@ -282,6 +285,15 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 
 	select {
 	case <-ctx.Done():
+		// The prompt is abandoned without a decision; tell subscribers
+		// so the request they saw is not left open.
+		if _, ok := s.pendingRequests.Take(permission.ID); ok {
+			s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+				SessionID:  opts.SessionID,
+				ToolCallID: opts.ToolCallID,
+				Cancelled:  true,
+			})
+		}
 		return false, ctx.Err()
 	case granted := <-respCh:
 		return granted, nil

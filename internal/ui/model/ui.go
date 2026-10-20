@@ -5822,7 +5822,7 @@ func (m *UI) handlePermissionNotification(notification permission.PermissionNoti
 		if permItem, ok := toolItem.(chat.ToolMessageItem); ok {
 			if notification.Granted {
 				permItem.SetStatus(chat.ToolStatusRunning)
-			} else {
+			} else if !notification.Cancelled {
 				permItem.SetStatus(chat.ToolStatusAwaitingPermission)
 			}
 		}
@@ -5831,7 +5831,7 @@ func (m *UI) handlePermissionNotification(notification permission.PermissionNoti
 	// If this notification reflects a final resolution (granted or denied),
 	// dismiss any open permissions dialog whose tool call ID matches. This
 	// covers the case where another client resolved the request remotely.
-	if !notification.Granted && !notification.Denied {
+	if !notification.Granted && !notification.Denied && !notification.Cancelled {
 		return
 	}
 	if d := m.dialog.Dialog(dialog.PermissionsID); d != nil {

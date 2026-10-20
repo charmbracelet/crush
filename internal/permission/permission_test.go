@@ -718,3 +718,57 @@ func TestNotificationsCarrySessionID(t *testing.T) {
 	assert.Equal(t, "s-notify", second.Payload.SessionID)
 	assert.True(t, second.Payload.Granted)
 }
+
+// A request abandoned by its caller (turn cancelled while the prompt is
+// open) publishes a cancelled notification so subscribers can close the
+// request they saw, and a late Grant for it is a no-op.
+func TestPermissionService_CancelledRequestNotifies(t *testing.T) {
+	t.Parallel()
+	service := NewPermissionService("/tmp", false, nil)
+
+	events := service.Subscribe(t.Context())
+	notifications := service.SubscribeNotifications(t.Context())
+
+	ctx, cancel := context.WithCancel(t.Context())
+	req := CreatePermissionRequest{
+		SessionID:  "cancel-session",
+		ToolCallID: "cancel-call",
+		ToolName:   "tool",
+		Action:     "act",
+		Path:       "/tmp/cancel",
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := service.Request(ctx, req)
+		done <- err
+	}()
+
+	var pending PermissionRequest
+	select {
+	case ev := <-events:
+		pending = ev.Payload
+	case <-time.After(2 * time.Second):
+		t.Fatal("permission request was never published")
+	}
+	select {
+	case ev := <-notifications:
+		require.False(t, ev.Payload.Cancelled)
+	case <-time.After(2 * time.Second):
+		t.Fatal("initial notification was never published")
+	}
+
+	cancel()
+	require.ErrorIs(t, <-done, context.Canceled)
+
+	select {
+	case ev := <-notifications:
+		require.True(t, ev.Payload.Cancelled)
+		require.False(t, ev.Payload.Granted)
+		require.False(t, ev.Payload.Denied)
+		require.Equal(t, "cancel-call", ev.Payload.ToolCallID)
+	case <-time.After(2 * time.Second):
+		t.Fatal("cancelled notification was never published")
+	}
+
+	require.False(t, service.Grant(pending), "a cancelled request cannot be granted later")
+}

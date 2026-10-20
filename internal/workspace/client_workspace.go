@@ -1186,6 +1186,7 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 				ToolCallID: e.Payload.ToolCallID,
 				Granted:    e.Payload.Granted,
 				Denied:     e.Payload.Denied,
+				Cancelled:  e.Payload.Cancelled,
 			},
 		}
 	case pubsub.Event[proto.QuestionRequest]:

@@ -216,18 +216,9 @@ func (m *UI) filesInfo(cwd string, width, maxItems int, isSection bool) string {
 // fileList renders a list of files with their diff statistics, truncating to
 // maxItems and showing a "...and N more" message if needed.
 func fileList(t *styles.Styles, cwd string, filesWithChanges []SessionFile, width, maxItems int) string {
-	if maxItems <= 0 {
-		return ""
-	}
 	var renderedFiles []string
-	filesShown := 0
 
 	for _, f := range filesWithChanges {
-		// Skip files with no changes
-		if filesShown >= maxItems {
-			break
-		}
-
 		// Build stats string with colors
 		var statusParts []string
 		if f.Additions > 0 {
@@ -257,15 +248,9 @@ func fileList(t *styles.Styles, cwd string, filesWithChanges []SessionFile, widt
 		}
 
 		renderedFiles = append(renderedFiles, line)
-		filesShown++
 	}
 
-	if len(filesWithChanges) > maxItems {
-		remaining := len(filesWithChanges) - maxItems
-		renderedFiles = append(renderedFiles, t.Files.TruncationHint.Render(fmt.Sprintf("…and %d more", remaining)))
-	}
-
-	return lipgloss.JoinVertical(lipgloss.Left, renderedFiles...)
+	return lipgloss.JoinVertical(lipgloss.Left, truncateRows(renderedFiles, maxItems, t.Files.TruncationHint)...)
 }
 
 // startLSPs starts LSP servers for the given file paths.

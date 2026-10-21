@@ -198,6 +198,7 @@ func (s *service) Create(ctx context.Context, sessionID string, params CreateMes
 	if err != nil {
 		return Message{}, err
 	}
+	storedParts := compressParts(partsJSON)
 	isSummary := int64(0)
 	if params.IsSummaryMessage {
 		isSummary = 1
@@ -206,7 +207,7 @@ func (s *service) Create(ctx context.Context, sessionID string, params CreateMes
 		ID:               uuid.New().String(),
 		SessionID:        sessionID,
 		Role:             string(params.Role),
-		Parts:            string(partsJSON),
+		Parts:            storedParts,
 		Model:            sql.NullString{String: string(params.Model), Valid: true},
 		Provider:         sql.NullString{String: params.Provider, Valid: params.Provider != ""},
 		IsSummaryMessage: isSummary,
@@ -428,10 +429,11 @@ func (s *service) flushOne(ctx context.Context, id string, syncCaller bool) erro
 // write performs the unguarded SQL write + UpdatedAt stamp. Caller
 // owns publishing.
 func (s *service) write(ctx context.Context, msg Message) error {
-	parts, err := marshalParts(msg.Parts)
+	partsJSON, err := marshalParts(msg.Parts)
 	if err != nil {
 		return err
 	}
+	storedParts := compressParts(partsJSON)
 	finishedAt := sql.NullInt64{}
 	if f := msg.FinishPart(); f != nil {
 		finishedAt.Int64 = f.Time
@@ -439,7 +441,7 @@ func (s *service) write(ctx context.Context, msg Message) error {
 	}
 	if err := s.q.UpdateMessage(ctx, db.UpdateMessageParams{
 		ID:                      msg.ID,
-		Parts:                   string(parts),
+		Parts:                   storedParts,
 		PrismModelID:            sql.NullString{String: msg.PrismModelID, Valid: msg.PrismModelID != ""},
 		PrismModelName:          sql.NullString{String: msg.PrismModelName, Valid: msg.PrismModelName != ""},
 		PrismHypercreditSavings: nullableFloat(msg.PrismHypercreditSavings),
@@ -589,7 +591,11 @@ func (s *service) GetLastAssistantMessage(ctx context.Context, sessionID string)
 }
 
 func (s *service) fromDBItem(item db.Message) (Message, error) {
-	parts, err := unmarshalParts([]byte(item.Parts))
+	partsJSON, err := decompressPartsIfStored(item.Parts)
+	if err != nil {
+		return Message{}, err
+	}
+	parts, err := unmarshalParts(partsJSON)
 	if err != nil {
 		return Message{}, err
 	}

@@ -167,8 +167,16 @@ func anyMCPStarting(states map[string]mcp.ClientInfo) bool {
 func (m *UI) mcpInfo(width, maxItems int, isSection bool) string {
 	var mcps []mcp.ClientInfo
 	t := m.com.Styles
+	cfg := m.com.Config()
+	opts := cfg.Options
 
-	for _, mcp := range m.com.Config().MCP.Sorted() {
+	// Which servers hide their tools until the agent searches for them.
+	lazyServers := make(map[string]bool, len(m.mcpStates))
+	for name, mcpCfg := range cfg.MCP {
+		lazyServers[name] = mcpCfg.IsLazy(opts)
+	}
+
+	for _, mcp := range cfg.MCP.Sorted() {
 		if state, ok := m.mcpStates[mcp.Name]; ok {
 			mcps = append(mcps, state)
 		}
@@ -180,7 +188,7 @@ func (m *UI) mcpInfo(width, maxItems int, isSection bool) string {
 	}
 	list := t.Resource.AdditionalText.Render("None")
 	if len(mcps) > 0 {
-		list = mcpList(t, mcps, width, maxItems)
+		list = mcpList(t, mcps, lazyServers, width, maxItems)
 	}
 
 	return lipgloss.NewStyle().Width(width).Render(fmt.Sprintf("%s\n\n%s", title, list))
@@ -202,8 +210,9 @@ func mcpCounts(t *styles.Styles, counts mcp.Counts) string {
 }
 
 // mcpList renders a list of MCP clients with their status and counts,
-// truncating to maxItems if needed.
-func mcpList(t *styles.Styles, mcps []mcp.ClientInfo, width, maxItems int) string {
+// truncating to maxItems if needed. Servers marked lazy show their tools as
+// available on demand instead of counting them as loaded context.
+func mcpList(t *styles.Styles, mcps []mcp.ClientInfo, lazyServers map[string]bool, width, maxItems int) string {
 	if maxItems <= 0 {
 		return ""
 	}
@@ -234,6 +243,10 @@ func mcpList(t *styles.Styles, mcps []mcp.ClientInfo, width, maxItems int) strin
 				} else {
 					extraContent = badge
 				}
+			}
+			if lazyServers[m.Name] {
+				extraContent = strings.TrimSpace(extraContent + " " +
+					t.Resource.AdditionalText.Render("· lazy"))
 			}
 		case mcp.StateError:
 			icon = t.Resource.ErrorIcon.String()
@@ -311,6 +324,7 @@ func (m *UI) mcpToggleItems() ([]dialog.MCPToggleItem, error) {
 			ConfigDisabled:  configured.MCP.Disabled,
 			EnabledOverride: enabledOverride,
 			Status:          mcpStatusText(m.mcpStates[configured.Name]),
+			Lazy:            configured.MCP.IsLazy(m.com.Config().Options),
 		}
 		if _, off := disabled[configured.Name]; off {
 			item.Disabled = true
@@ -320,29 +334,65 @@ func (m *UI) mcpToggleItems() ([]dialog.MCPToggleItem, error) {
 	return items, nil
 }
 
-// applyMCPToggle persists an MCP toggle and applies it to the running
-// client. Local toggles write a repository-scoped override; global toggles
-// write the disabled flag to the config. The dialog keeps its own
-// optimistic state; failures surface as an error toast.
-func (m *UI) applyMCPToggle(msg dialog.ActionToggleMCP) tea.Cmd {
+// applyMCPServerSetting persists a tri-state choice for one MCP server.
+// The connection half follows the dialog's scope: a local change writes a
+// repository-scoped override (and force-starts a config-disabled server so
+// it stays connected across restarts), while a global change writes the
+// config's disabled flag and applies it to the running client.
+//
+// The two connected settings then also carry the lazy half, which always
+// lives in the global config because it only decides whether the server's
+// schemas go into the model's next request, never which servers connect.
+// Disabled leaves the lazy flag untouched so cycling back restores the
+// server's previous placement. Failures surface as an error toast; the
+// dialog keeps its own optimistic state meanwhile.
+func (m *UI) applyMCPServerSetting(msg dialog.ActionSetMCPServerSetting) tea.Cmd {
 	name := msg.Name
-	disable := msg.Disabled
-	status := "enabled"
-	if disable {
-		status = "disabled"
-	}
 	return func() tea.Msg {
-		if msg.Global {
-			if err := m.com.Workspace.MCPSetServerConfigDisabled(context.TODO(), name, disable); err != nil {
+		switch msg.Setting {
+		case dialog.MCPServerSettingDisabled:
+			// Take the server offline for this scope; the lazy placement is
+			// preserved for when it is cycled back to a connected setting.
+			if err := m.setMCPServerConnected(name, false, msg.Global); err != nil {
 				return util.NewErrorMsg(err)
 			}
-			return util.NewInfoMsg(fmt.Sprintf("MCP %q %s globally", name, status))
+			if msg.Global {
+				return util.NewInfoMsg(fmt.Sprintf("MCP %q disabled globally", name))
+			}
+			return util.NewInfoMsg(fmt.Sprintf("MCP %q disabled for this repository", name))
+		default:
+			if err := m.setMCPServerConnected(name, true, msg.Global); err != nil {
+				return util.NewErrorMsg(err)
+			}
+			lazy := msg.Setting == dialog.MCPServerSettingLazy
+			if err := m.com.Workspace.MCPSetLazy(context.TODO(), name, lazy); err != nil {
+				return util.NewErrorMsg(err)
+			}
+			if msg.Setting == dialog.MCPServerSettingLazy {
+				return util.NewInfoMsg(fmt.Sprintf("MCP %q lazy loading: tools served on demand", name))
+			}
+			return util.NewInfoMsg(fmt.Sprintf("MCP %q enabled: tools always shown", name))
 		}
-		if err := m.com.Workspace.MCPSetServerDisabled(context.TODO(), name, disable); err != nil {
-			return util.NewErrorMsg(err)
-		}
-		return util.NewInfoMsg(fmt.Sprintf("MCP %q %s for this repository", name, status))
 	}
+}
+
+// setMCPServerConnected turns a server's connection on or off for the given
+// scope. Enabling a config-disabled server locally also force-starts it so
+// the running client reflects the change immediately, mirroring the startup
+// path that reads the repository overrides.
+func (m *UI) setMCPServerConnected(name string, enabled, global bool) error {
+	disabled := !enabled
+	if global {
+		return m.com.Workspace.MCPSetServerConfigDisabled(context.TODO(), name, disabled)
+	}
+	if enabled {
+		if configured, ok := m.com.Config().MCP[name]; ok && configured.Disabled {
+			if err := m.com.Workspace.MCPStartServer(context.TODO(), name); err != nil {
+				return err
+			}
+		}
+	}
+	return m.com.Workspace.MCPSetServerDisabled(context.TODO(), name, disabled)
 }
 
 // mcpStatusText renders a connection state as plain dialog text.

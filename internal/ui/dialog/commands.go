@@ -519,6 +519,10 @@ func (c *Commands) defaultCommands() []*CommandItem {
 
 	// Toggle MCP servers for this repository when any are configured.
 	if len(cfg.MCP) > 0 {
+		// Laziness is not a separate switch here: each server's setting
+		// (enabled, disabled, or lazy) lives in the dialog this opens, so a
+		// global toggle in the palette would be a second, conflicting door to
+		// the same decision.
 		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_mcps", "Toggle MCPs", "", ActionOpenDialog{
 			DialogID: MCPTogglesID,
 		}))

@@ -248,10 +248,229 @@ func gruvboxDarkOverrides(s Styles) Styles {
 	return s
 }
 
+// rosePineOpts returns the quickStyleOpts for the Rose pine base theme variant,
+// using canonical colors from the rose-pine/rose-pine-theme palette.
+func rosePineOpts() quickStyleOpts {
+	return quickStyleOpts{
+		primary:   lipgloss.Color("#c4a7e7"), // iris
+		secondary: lipgloss.Color("#ebbcba"), // rose
+		accent:    lipgloss.Color("#9ccfd8"), // foam
+		keyword:   lipgloss.Color("#eb6f92"), // love
+
+		fgBase:       lipgloss.Color("#e0def4"), // text
+		fgMoreSubtle: lipgloss.Color("#6e6a86"), // muted
+		fgSubtle:     lipgloss.Color("#908caa"), // subtle
+		fgMostSubtle: lipgloss.Color("#524f67"), // highlight_high
+
+		onPrimary: lipgloss.Color("#1d1923"),
+
+		bgBase:         lipgloss.Color("#191724"), // base
+		bgLeastVisible: lipgloss.Color("#23212e"),
+		bgLessVisible:  lipgloss.Color("#2f2d3b"),
+		bgMostVisible:  lipgloss.Color("#3f3d4c"),
+
+		separator: lipgloss.Color("#2f2d3b"),
+
+		destructive:       lipgloss.Color("#eb6f92"), // love
+		error:             lipgloss.Color("#eb6f92"), // love
+		warningSubtle:     lipgloss.Color("#bf9662"),
+		warning:           lipgloss.Color("#f6c177"), // gold
+		attention:         lipgloss.Color("#f6c177"), // gold
+		busy:              lipgloss.Color("#f6c177"), // gold
+		info:              lipgloss.Color("#31748f"), // pine
+		infoMoreSubtle:    lipgloss.Color("#4b6a7f"),
+		infoMostSubtle:    lipgloss.Color("#46596d"),
+		success:           lipgloss.Color("#31748f"), // pine
+		successMoreSubtle: lipgloss.Color("#4c6e84"),
+		successMostSubtle: lipgloss.Color("#485f72"),
+
+		yolo:           lipgloss.Color("#f6c177"), // gold
+		plan:           lipgloss.Color("#c4a7e7"), // iris
+		planMoreSubtle: lipgloss.Color("#3f3d4c"),
+
+		// Muted diff foreground hues; the backgrounds derive from these
+		// over bgBase.
+		diffInsertFg: lipgloss.Color("#31748f"), // pine
+		diffDeleteFg: lipgloss.Color("#eb6f92"), // love
+
+		button:         lipgloss.Color("#ebbcba"), // rose
+		buttonSubtle:   lipgloss.Color("#2f2d3b"),
+		buttonInactive: lipgloss.Color("#3f3d4c"),
+		buttonHovered:  lipgloss.Color("#e8c6ca"),
+
+		// ANSI 16-color palette for remapping raw terminal output
+		// (e.g. bang-mode shell commands) onto legible Rosé Pine colors.
+		ansiBlack:   lipgloss.Color("#191724"),
+		ansiRed:     lipgloss.Color("#eb6f92"),
+		ansiGreen:   lipgloss.Color("#31748f"),
+		ansiYellow:  lipgloss.Color("#f6c177"),
+		ansiBlue:    lipgloss.Color("#31748f"),
+		ansiMagenta: lipgloss.Color("#ebbcba"),
+		ansiCyan:    lipgloss.Color("#9ccfd8"),
+		ansiWhite:   lipgloss.Color("#908caa"),
+
+		ansiBrightBlack:   lipgloss.Color("#524f67"),
+		ansiBrightRed:     lipgloss.Color("#f092ac"),
+		ansiBrightGreen:   lipgloss.Color("#6295aa"),
+		ansiBrightYellow:  lipgloss.Color("#f8d098"),
+		ansiBrightBlue:    lipgloss.Color("#6295aa"),
+		ansiBrightMagenta: lipgloss.Color("#f0cccb"),
+		ansiBrightCyan:    lipgloss.Color("#b4dbe1"),
+		ansiBrightWhite:   lipgloss.Color("#e0def4"),
+	}
+}
+
+// rosePineMoonOpts returns the quickStyleOpts for the Rose pine moon theme variant,
+// using canonical colors from the rose-pine/rose-pine-theme palette.
+func rosePineMoonOpts() quickStyleOpts {
+	return quickStyleOpts{
+		primary:   lipgloss.Color("#c4a7e7"), // iris
+		secondary: lipgloss.Color("#ea9a97"), // rose
+		accent:    lipgloss.Color("#9ccfd8"), // foam
+		keyword:   lipgloss.Color("#eb6f92"), // love
+
+		fgBase:       lipgloss.Color("#e0def4"), // text
+		fgMoreSubtle: lipgloss.Color("#6e6a86"), // muted
+		fgSubtle:     lipgloss.Color("#908caa"), // subtle
+		fgMostSubtle: lipgloss.Color("#56526e"), // highlight_high
+
+		onPrimary: lipgloss.Color("#1d1923"),
+
+		bgBase:         lipgloss.Color("#232136"), // base
+		bgLeastVisible: lipgloss.Color("#2c2a40"),
+		bgLessVisible:  lipgloss.Color("#38364b"),
+		bgMostVisible:  lipgloss.Color("#47455a"),
+
+		separator: lipgloss.Color("#38364b"),
+
+		destructive:       lipgloss.Color("#eb6f92"), // love
+		error:             lipgloss.Color("#eb6f92"), // love
+		warningSubtle:     lipgloss.Color("#c19967"),
+		warning:           lipgloss.Color("#f6c177"), // gold
+		attention:         lipgloss.Color("#f6c177"), // gold
+		busy:              lipgloss.Color("#f6c177"), // gold
+		info:              lipgloss.Color("#3e8fb0"), // pine
+		infoMoreSubtle:    lipgloss.Color("#547a96"),
+		infoMostSubtle:    lipgloss.Color("#4f677f"),
+		success:           lipgloss.Color("#3e8fb0"), // pine
+		successMoreSubtle: lipgloss.Color("#467490"),
+		successMostSubtle: lipgloss.Color("#516d86"),
+
+		yolo:           lipgloss.Color("#f6c177"), // gold
+		plan:           lipgloss.Color("#c4a7e7"), // iris
+		planMoreSubtle: lipgloss.Color("#47455a"),
+
+		// Muted diff foreground hues; the backgrounds derive from these
+		// over bgBase.
+		diffInsertFg: lipgloss.Color("#3e8fb0"), // pine
+		diffDeleteFg: lipgloss.Color("#eb6f92"), // love
+
+		button:         lipgloss.Color("#ea9a97"), // rose
+		buttonSubtle:   lipgloss.Color("#38364b"),
+		buttonInactive: lipgloss.Color("#47455a"),
+		buttonHovered:  lipgloss.Color("#e7adb1"),
+
+		// ANSI 16-color palette for remapping raw terminal output
+		// (e.g. bang-mode shell commands) onto legible Rosé Pine colors.
+		ansiBlack:   lipgloss.Color("#232136"),
+		ansiRed:     lipgloss.Color("#eb6f92"),
+		ansiGreen:   lipgloss.Color("#3e8fb0"),
+		ansiYellow:  lipgloss.Color("#f6c177"),
+		ansiBlue:    lipgloss.Color("#3e8fb0"),
+		ansiMagenta: lipgloss.Color("#ea9a97"),
+		ansiCyan:    lipgloss.Color("#9ccfd8"),
+		ansiWhite:   lipgloss.Color("#908caa"),
+
+		ansiBrightBlack:   lipgloss.Color("#56526e"),
+		ansiBrightRed:     lipgloss.Color("#f092ac"),
+		ansiBrightGreen:   lipgloss.Color("#6caac3"),
+		ansiBrightYellow:  lipgloss.Color("#f8d098"),
+		ansiBrightBlue:    lipgloss.Color("#6caac3"),
+		ansiBrightMagenta: lipgloss.Color("#efb2b0"),
+		ansiBrightCyan:    lipgloss.Color("#b4dbe1"),
+		ansiBrightWhite:   lipgloss.Color("#e0def4"),
+	}
+}
+
+// rosePineDawnOpts returns the quickStyleOpts for the Rose pine dawn theme variant,
+// using canonical colors from the rose-pine/rose-pine-theme palette.
+func rosePineDawnOpts() quickStyleOpts {
+	return quickStyleOpts{
+		primary:   lipgloss.Color("#907aa9"), // iris
+		secondary: lipgloss.Color("#d7827e"), // rose
+		accent:    lipgloss.Color("#56949f"), // foam
+		keyword:   lipgloss.Color("#b4637a"), // love
+
+		fgBase:       lipgloss.Color("#575279"), // text
+		fgMoreSubtle: lipgloss.Color("#9893a5"), // muted
+		fgSubtle:     lipgloss.Color("#797593"), // subtle
+		fgMostSubtle: lipgloss.Color("#cecacd"), // highlight_high
+
+		onPrimary: lipgloss.Color("#161219"),
+
+		bgBase:         lipgloss.Color("#faf4ed"), // base
+		bgLeastVisible: lipgloss.Color("#f2ece7"),
+		bgLessVisible:  lipgloss.Color("#e8e2e0"),
+		bgMostVisible:  lipgloss.Color("#dbd5d7"),
+
+		separator: lipgloss.Color("#e8e2e0"),
+
+		destructive:       lipgloss.Color("#b4637a"), // love
+		error:             lipgloss.Color("#b4637a"), // love
+		warningSubtle:     lipgloss.Color("#a7856d"),
+		warning:           lipgloss.Color("#ea9d34"), // gold
+		attention:         lipgloss.Color("#ea9d34"), // gold
+		busy:              lipgloss.Color("#ea9d34"), // gold
+		info:              lipgloss.Color("#286983"), // pine
+		infoMoreSubtle:    lipgloss.Color("#7592a3"),
+		infoMostSubtle:    lipgloss.Color("#93a1b0"),
+		success:           lipgloss.Color("#286983"), // pine
+		successMoreSubtle: lipgloss.Color("#6f93a3"),
+		successMostSubtle: lipgloss.Color("#8fa2b0"),
+
+		yolo:           lipgloss.Color("#ea9d34"), // gold
+		plan:           lipgloss.Color("#907aa9"), // iris
+		planMoreSubtle: lipgloss.Color("#dbd5d7"),
+
+		// Muted diff foreground hues; the backgrounds derive from these
+		// over bgBase.
+		diffInsertFg: lipgloss.Color("#286983"), // pine
+		diffDeleteFg: lipgloss.Color("#b4637a"), // love
+
+		button:         lipgloss.Color("#d7827e"), // rose
+		buttonSubtle:   lipgloss.Color("#e8e2e0"),
+		buttonInactive: lipgloss.Color("#dbd5d7"),
+		buttonHovered:  lipgloss.Color("#b3757d"),
+
+		// ANSI 16-color palette for remapping raw terminal output
+		// (e.g. bang-mode shell commands) onto legible Rosé Pine colors.
+		ansiBlack:   lipgloss.Color("#faf4ed"),
+		ansiRed:     lipgloss.Color("#b4637a"),
+		ansiGreen:   lipgloss.Color("#286983"),
+		ansiYellow:  lipgloss.Color("#ea9d34"),
+		ansiBlue:    lipgloss.Color("#286983"),
+		ansiMagenta: lipgloss.Color("#d7827e"),
+		ansiCyan:    lipgloss.Color("#56949f"),
+		ansiWhite:   lipgloss.Color("#797593"),
+
+		ansiBrightBlack:   lipgloss.Color("#cecacd"),
+		ansiBrightRed:     lipgloss.Color("#894b5d"),
+		ansiBrightGreen:   lipgloss.Color("#1e5064"),
+		ansiBrightYellow:  lipgloss.Color("#b27728"),
+		ansiBrightBlue:    lipgloss.Color("#1e5064"),
+		ansiBrightMagenta: lipgloss.Color("#a36360"),
+		ansiBrightCyan:    lipgloss.Color("#417079"),
+		ansiBrightWhite:   lipgloss.Color("#575279"),
+	}
+}
+
 // builtinThemes maps theme names to their quickStyleOpts palette definitions.
 var builtinThemes = map[string]func() quickStyleOpts{
 	"charmtone-panther": charmtoneOpts,
 	"gruvbox-dark":      gruvboxDarkOpts,
+	"rose-pine":         rosePineOpts,
+	"rose-pine-moon":    rosePineMoonOpts,
+	"rose-pine-dawn":    rosePineDawnOpts,
 }
 
 // builtinThemeOverrides maps theme names to functions that apply

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/env"
+	"github.com/charmbracelet/crush/internal/keyring"
 	"github.com/charmbracelet/crush/internal/shell"
 )
 
@@ -75,6 +76,8 @@ func NewShellVariableResolver(e env.Env, opts ...ShellResolverOption) VariableRe
 
 // ResolveValue resolves shell-style substitution anywhere in the string:
 //
+//   - keychain://provider for OS keyring entries, stored by Crush when
+//     API keys are saved with keychain support.
 //   - $(command) for command substitution, with full quoting and nesting.
 //   - $VAR and ${VAR} for environment variables.
 //   - ${VAR:-default} / ${VAR:+alt} / ${VAR:?msg} for defaulting.
@@ -92,6 +95,18 @@ func (r *shellVariableResolver) ResolveValue(value string) (string, error) {
 	// configs that relied on this validation still fail early.
 	if value == "$" {
 		return "", fmt.Errorf("invalid value format: %s", value)
+	}
+
+	// Keyring references are resolved before shell expansion so a stored
+	// secret never needs to round-trip through the shell parser. A missing
+	// entry surfaces as an error, which makes providers with dangling
+	// references fail the same way providers with missing API keys do.
+	if providerID, ok := keyring.ParseRef(value); ok {
+		secret, err := keyring.Get(providerID)
+		if err != nil {
+			return "", sanitizeResolveError(value, err)
+		}
+		return secret, nil
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), resolveTimeout)

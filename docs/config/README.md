@@ -156,6 +156,7 @@ Flags:
       --flat-rate bool              use flat-rate billing
       --discover-models bool        auto-discover and merge provider models
       --system-prompt-prefix string text prepended to the system prompt
+      --aws-region string           AWS region for Bedrock inference (Bedrock only)
       --extra-header key value      add an HTTP header (repeatable)
       --extra-body JSON             merge a JSON object into request bodies
       --provider-options JSON       merge a provider-specific JSON object
@@ -178,6 +179,20 @@ provider add openai \
 ```
 
 If `OPENAI_ORG_ID` is unset, the header is simply not sent.
+
+For Amazon Bedrock, `--aws-region` selects the region used for inference.
+When unset, Crush defaults to `us-east-1` (or `eu-west-1` for the
+`bedrock-europe` provider). This is opt-in on purpose: `AWS_REGION` and
+`AWS_DEFAULT_REGION` are used only to locate credentials and are **not**
+read as the inference region, since not every region hosts every model.
+Make sure the model IDs you configure use an inference-profile prefix that
+matches the region (e.g. `apac.` for `ap-southeast-2`).
+
+```bash
+provider add bedrock --aws-region ap-southeast-2
+model add bedrock/apac.anthropic.claude-sonnet-4-20250514-v1:0 \
+  --name "Claude Sonnet 4 (APAC)" --context-window 200000
+```
 
 #### `provider remove`
 

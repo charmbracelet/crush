@@ -36,6 +36,17 @@ func TestLoadShellConfig_Provider(t *testing.T) {
 	require.Equal(t, "https://api.openai.com/v1", openai["base_url"])
 }
 
+// TestLoadShellConfig_ProviderAWSRegion verifies that --aws-region maps to
+// the aws_region JSON key for Bedrock region selection.
+func TestLoadShellConfig_ProviderAWSRegion(t *testing.T) {
+	t.Parallel()
+
+	result := loadScript(t, `provider add bedrock --aws-region ap-southeast-2`)
+
+	bedrock := result["providers"].(map[string]any)["bedrock"].(map[string]any)
+	require.Equal(t, "ap-southeast-2", bedrock["aws_region"])
+}
+
 // TestLoadShellConfig_FlagBoolCaseInsensitive verifies that flag booleans
 // accept mixed-case values like TRUE/False.
 func TestLoadShellConfig_FlagBoolCaseInsensitive(t *testing.T) {

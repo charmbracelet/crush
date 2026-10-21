@@ -192,3 +192,76 @@ provider rm anthropic`)
 	require.Len(t, models, 1)
 	require.Equal(t, "b", models[0].(map[string]any)["id"])
 }
+
+func TestModelAdd_ReasoningLevelsCommaSeparated(t *testing.T) {
+	t.Parallel()
+
+	result := loadScript(t, `provider add openai --api-key k
+model add openai/custom-reasoning --reasoning-levels low,high,max --reasoning-effort max`)
+
+	providers := result["providers"].(map[string]any)
+	models := providers["openai"].(map[string]any)["models"].([]any)
+	require.Len(t, models, 1)
+	m := models[0].(map[string]any)
+	require.Equal(t, "custom-reasoning", m["id"])
+	require.Equal(t, true, m["can_reason"])
+	require.Equal(t, "max", m["default_reasoning_effort"])
+	require.Equal(t, []any{"low", "high", "max"}, m["reasoning_levels"])
+}
+
+func TestModelAdd_ReasoningLevelsRepeated(t *testing.T) {
+	t.Parallel()
+
+	result := loadScript(t, `provider add openai --api-key k
+model add openai/custom-reasoning --reasoning-level low --reasoning-levels high,max`)
+
+	providers := result["providers"].(map[string]any)
+	models := providers["openai"].(map[string]any)["models"].([]any)
+	require.Len(t, models, 1)
+	m := models[0].(map[string]any)
+	require.Equal(t, true, m["can_reason"])
+	require.Equal(t, []any{"low", "high", "max"}, m["reasoning_levels"])
+}
+
+func TestModelAdd_ReasoningLevelsJSON(t *testing.T) {
+	t.Parallel()
+
+	result := loadScript(t, `provider add anthropic --api-key k
+model add anthropic/custom-reasoning --reasoning-levels '["low", "high", "xhigh"]'`)
+
+	providers := result["providers"].(map[string]any)
+	models := providers["anthropic"].(map[string]any)["models"].([]any)
+	require.Len(t, models, 1)
+	m := models[0].(map[string]any)
+	require.Equal(t, true, m["can_reason"])
+	require.Equal(t, []any{"low", "high", "xhigh"}, m["reasoning_levels"])
+}
+
+func TestModelAdd_ReasoningEffortAutoPopulatesLevel(t *testing.T) {
+	t.Parallel()
+
+	result := loadScript(t, `provider add openai --api-key k
+model add openai/custom-reasoning --reasoning-effort max`)
+
+	providers := result["providers"].(map[string]any)
+	models := providers["openai"].(map[string]any)["models"].([]any)
+	require.Len(t, models, 1)
+	m := models[0].(map[string]any)
+	require.Equal(t, true, m["can_reason"])
+	require.Equal(t, "max", m["default_reasoning_effort"])
+	require.Equal(t, []any{"max"}, m["reasoning_levels"])
+}
+
+func TestModelAdd_ExplicitCanReasonFalsePreserved(t *testing.T) {
+	t.Parallel()
+
+	result := loadScript(t, `provider add anthropic --api-key k
+model add anthropic/custom-reasoning --can-reason false --reasoning-levels low,high`)
+
+	providers := result["providers"].(map[string]any)
+	models := providers["anthropic"].(map[string]any)["models"].([]any)
+	require.Len(t, models, 1)
+	m := models[0].(map[string]any)
+	require.Equal(t, false, m["can_reason"])
+	require.Equal(t, []any{"low", "high"}, m["reasoning_levels"])
+}

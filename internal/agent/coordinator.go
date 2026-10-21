@@ -232,7 +232,10 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		return nil, errCoderAgentNotConfigured
 	}
 
-	coderPrompt, err := coderPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
+	coderPrompt, err := coderPrompt(
+		prompt.WithWorkingDir(c.cfg.WorkingDir()),
+		prompt.WithSkills(c.activeSkills),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -248,7 +251,10 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		return nil, errPlanAgentNotConfigured
 	}
 
-	planSystemPrompt, err := planPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
+	planSystemPrompt, err := planPrompt(
+		prompt.WithWorkingDir(c.cfg.WorkingDir()),
+		prompt.WithSkills(c.activeSkills),
+	)
 	if err != nil {
 		return nil, err
 	}

@@ -65,12 +65,13 @@ var bashDescriptionTpl = template.Must(
 )
 
 type bashDescriptionData struct {
-	BannedCommands  string
-	MaxOutputLength int
-	Attribution     config.Attribution
-	ModelID         string
-	RgAvailable     bool
-	GhAvailable     bool
+	BannedCommands           string
+	MaxOutputLength          int
+	MaxAutoBackgroundSeconds int
+	Attribution              config.Attribution
+	ModelID                  string
+	RgAvailable              bool
+	GhAvailable              bool
 }
 
 var bannedCommands = []string{
@@ -150,12 +151,13 @@ func bashDescription(attribution *config.Attribution, modelID string) string {
 	bannedCommandsStr := strings.Join(bannedCommands, ", ")
 	var out bytes.Buffer
 	if err := bashDescriptionTpl.Execute(&out, bashDescriptionData{
-		BannedCommands:  bannedCommandsStr,
-		MaxOutputLength: MaxOutputLength,
-		Attribution:     *attribution,
-		ModelID:         modelID,
-		RgAvailable:     getRg() != "",
-		GhAvailable:     ghAvailable,
+		BannedCommands:           bannedCommandsStr,
+		MaxOutputLength:          MaxOutputLength,
+		MaxAutoBackgroundSeconds: DefaultAutoBackgroundAfter,
+		Attribution:              *attribution,
+		ModelID:                  modelID,
+		RgAvailable:              getRg() != "",
+		GhAvailable:              ghAvailable,
 	}); err != nil {
 		// this should never happen.
 		panic("failed to execute bash description template: " + err.Error())

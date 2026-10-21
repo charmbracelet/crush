@@ -264,6 +264,7 @@ func sessionItems(t *styles.Styles, mode sessionsMode, sessions ...session.Sessi
 			inputStyle := t.TextInput
 			inputStyle.Focused.Placeholder = t.Dialog.Sessions.RenamingPlaceholder
 			item.updateTitleInput.SetStyles(inputStyle)
+			item.updateTitleInput.SetValue(s.Title)
 			item.updateTitleInput.Focus()
 		}
 		items[i] = item

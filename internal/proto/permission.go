@@ -17,6 +17,7 @@ type CreatePermissionRequest struct {
 
 // PermissionNotification represents a notification about a permission change.
 type PermissionNotification struct {
+	SessionID  string `json:"session_id"`
 	ToolCallID string `json:"tool_call_id"`
 	Granted    bool   `json:"granted"`
 	Denied     bool   `json:"denied"`

@@ -72,7 +72,7 @@ nix-shell -p '(import <nur> { pkgs = import <nixpkgs> {}; }).repos.charmbracelet
 ### NixOS & Home Manager Module Usage via NUR
 
 Crush provides NixOS and Home Manager modules via NUR.
-You can use these modules directly in your flake by importing them from NUR. Since it auto detects whether its a home manager or nixos context you can use the import the exact same way :)
+You can use these modules directly in your flake by importing them from NUR. Since it auto detects whether it's a home manager or nixos context you can use the import the exact same way :)
 
 ```nix
 {
@@ -100,8 +100,8 @@ You can use these modules directly in your flake by importing them from NUR. Sin
                   api_key = "sk-fake123456789abcdef...";
                   models = [
                     {
-                      id = "gpt-4";
-                      name = "GPT-4";
+                      id = "gpt-5.6-sol";
+                      name = "GPT-5.6 Sol";
                     }
                   ];
                 };
@@ -345,6 +345,57 @@ authentication (e.g. the AWS SDK credential chain) without wrapping the
 Values support the same `$VAR` and `$(command)` expansion as other config
 fields, so you can reference existing environment variables or shell out for
 a value.
+
+### Themes
+
+Crush ships with built-in color themes.
+
+#### Switching Themes
+
+Open the command palette with `ctrl+p`, select **Themes**, and browse the
+list. The UI previews each theme as you navigate, and pressing `enter`
+confirms the selection. Press `esc` to cancel and revert.
+
+#### Editing Themes
+
+Open **Themes**, highlight the theme to customize, and press `ctrl+e`.
+Changes preview live as you type. Press `enter` or `ctrl+s` to save, or `esc`
+to cancel and revert. User themes are stored globally in the Crush config
+directory under `themes/`.
+
+You can also select a theme directly in your config with `active_theme`:
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "options": {
+    "tui": {
+      "active_theme": "gruvbox-dark"
+    }
+  }
+}
+```
+
+Custom theme palettes are stored as JSON files in the global theme directory.
+For example, `~/.config/crush/themes/my-theme.json`:
+
+```json
+{
+  "base": "gruvbox-dark",
+  "primary": "#ff6b6b",
+  "bg_base": "#1a1a2e"
+}
+```
+
+Select it by setting `active_theme` to `my-theme` or from the **Themes**
+dialog.
+
+#### Built-In Themes
+
+| Theme | Name |
+| --- | --- |
+| Charmtone Pantera | `charmtone-panther` (default) |
+| Gruvbox Dark | `gruvbox-dark` |
 
 ### LSPs
 

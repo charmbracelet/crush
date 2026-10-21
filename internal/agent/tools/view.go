@@ -207,8 +207,7 @@ func NewViewTool(
 						fileInfo.Size(), MaxViewSize)), nil
 				}
 				if !GetSupportsImagesFromContext(ctx) {
-					modelName := GetModelNameFromContext(ctx)
-					return fantasy.NewTextErrorResponse(fmt.Sprintf("This model (%s) does not support image data.", modelName)), nil
+					return UnsupportedMediaResponse(GetModelNameFromContext(ctx)), nil
 				}
 
 				imageData, readErr := os.ReadFile(filePath)

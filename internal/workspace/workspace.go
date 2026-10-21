@@ -135,8 +135,18 @@ type Workspace interface {
 	ListUserMessages(ctx context.Context, sessionID string) ([]message.Message, error)
 	ListAllUserMessages(ctx context.Context) ([]message.Message, error)
 
+	// RoutesChannelEvents reports whether the workspace's backing
+	// process routes MCP channel events into sessions itself. When
+	// true (client/server mode), frontends must not inject channel
+	// messages on EventChannelMessage — the server injects each event
+	// exactly once and the resulting turn arrives through the normal
+	// session/message event stream. When false (in-process mode), the
+	// frontend owns injection.
+	RoutesChannelEvents() bool
+
 	// Agent
 	AgentRun(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) error
+	AgentRunChannel(ctx context.Context, channel, sessionID, prompt string, attachments ...message.Attachment) error
 	AgentRunShellCommand(ctx context.Context, sessionID, command string, termWidth int, onProgress func(string), isFirstMessage bool) (proto.ShellCommandResponse, error)
 	AgentCancel(sessionID string)
 	AgentIsBusy() bool
@@ -200,6 +210,7 @@ type Workspace interface {
 	// Config (read-only data)
 	Config() *config.Config
 	WorkingDir() string
+	GitBranch(ctx context.Context) (string, error)
 	Resolver() config.VariableResolver
 
 	// Config mutations (proxied to server in client mode)
@@ -207,6 +218,7 @@ type Workspace interface {
 	SetCompactMode(scope config.Scope, enabled bool) error
 	SetProviderAPIKey(scope config.Scope, providerID string, apiKey any) error
 	SetConfigField(scope config.Scope, key string, value any) error
+	SetConfigFields(scope config.Scope, fields map[string]any) error
 	RemoveConfigField(scope config.Scope, key string) error
 	ImportCopilot() (*oauth.Token, bool)
 	RefreshOAuthToken(ctx context.Context, scope config.Scope, providerID string) error
@@ -228,6 +240,11 @@ type Workspace interface {
 	GetMCPPrompt(clientID, promptID string, args map[string]string) (string, error)
 	EnableDockerMCP(ctx context.Context) error
 	DisableDockerMCP() error
+	MCPServersDisabled(ctx context.Context) ([]string, error)
+	MCPSetServerDisabled(ctx context.Context, name string, disabled bool) error
+	MCPSetServerConfigDisabled(ctx context.Context, name string, disabled bool) error
+	MCPServersEnabled(ctx context.Context) ([]string, error)
+	MCPStartServer(ctx context.Context, name string) error
 	MCPAuthenticate(ctx context.Context, name string) error
 	MCPPendingAuth() []mcptools.PendingAuthServer
 	MCPAuthURL(name string) string

@@ -32,6 +32,12 @@ func Tools() iter.Seq2[string, []*Tool] {
 	return allTools.Seq2()
 }
 
+// GetTools returns the tool list for a single MCP server by name, or
+// ok=false if the server is not registered.
+func GetTools(name string) ([]*Tool, bool) {
+	return allTools.Get(name)
+}
+
 // RunTool runs an MCP tool with the given input parameters.
 func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string, input string) (ToolResult, error) {
 	var args map[string]any
@@ -51,36 +57,32 @@ func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string
 		return ToolResult{}, err
 	}
 
+	return toolResultFromCall(result), nil
+}
+
+// toolResultFromCall folds the content blocks of an MCP reply into the one
+// result Crush carries, keeping at most one image and one audio payload.
+func toolResultFromCall(result *mcp.CallToolResult) ToolResult {
 	if len(result.Content) == 0 {
-		return ToolResult{Type: "text", Content: ""}, nil
+		return ToolResult{Type: "text", Content: ""}
 	}
 
-	return contentToResult(result.Content), nil
+	return contentToResult(result.Content)
 }
 
 // contentToResult collapses the content blocks of a tool result into the
 // single text or media payload that a tool response can carry.
 func contentToResult(contents []mcp.Content) ToolResult {
 	var textParts []string
-	var imageData []byte
-	var imageMimeType string
-	var audioData []byte
-	var audioMimeType string
-
+	var image, audio mediaPayload
 	for _, v := range contents {
 		switch content := v.(type) {
 		case *mcp.TextContent:
 			textParts = append(textParts, content.Text)
 		case *mcp.ImageContent:
-			if imageData == nil {
-				imageData = content.Data
-				imageMimeType = content.MIMEType
-			}
+			image.offer(content.Data, content.MIMEType)
 		case *mcp.AudioContent:
-			if audioData == nil {
-				audioData = content.Data
-				audioMimeType = content.MIMEType
-			}
+			audio.offer(content.Data, content.MIMEType)
 		case *mcp.ResourceLink:
 			if content.Name != "" && content.Name != content.URI {
 				textParts = append(textParts, fmt.Sprintf("[resource link: %s (%s)]", content.Name, content.URI))
@@ -95,15 +97,9 @@ func contentToResult(contents []mcp.Content) ToolResult {
 			case res.Text != "":
 				textParts = append(textParts, res.Text)
 			case res.Blob != nil && strings.HasPrefix(res.MIMEType, "image/"):
-				if imageData == nil {
-					imageData = res.Blob
-					imageMimeType = res.MIMEType
-				}
+				image.offer(res.Blob, res.MIMEType)
 			case res.Blob != nil && strings.HasPrefix(res.MIMEType, "audio/"):
-				if audioData == nil {
-					audioData = res.Blob
-					audioMimeType = res.MIMEType
-				}
+				audio.offer(res.Blob, res.MIMEType)
 			default:
 				textParts = append(textParts, describeResource(res.URI, res.MIMEType, len(res.Blob)))
 			}
@@ -113,33 +109,31 @@ func contentToResult(contents []mcp.Content) ToolResult {
 			textParts = append(textParts, fmt.Sprintf("[unsupported content: %T]", v))
 		}
 	}
-
 	textContent := strings.Join(textParts, "\n")
 
-	// We need to make sure the data is base64
-	// when using something like docker + playwright the data was not returned correctly.
-	if imageData != nil {
-		return ToolResult{
-			Type:      "image",
-			Content:   textContent,
-			Data:      ensureRawBytes(imageData),
-			MediaType: imageMimeType,
-		}
+	switch {
+	case image.seen && (len(image.data) > 0 || !audio.seen):
+		return ToolResult{Type: "image", Content: textContent, Data: image.data, MediaType: image.mimeType}
+	case audio.seen:
+		return ToolResult{Type: "media", Content: textContent, Data: audio.data, MediaType: audio.mimeType}
+	default:
+		return ToolResult{Type: "text", Content: textContent}
 	}
+}
 
-	if audioData != nil {
-		return ToolResult{
-			Type:      "media",
-			Content:   textContent,
-			Data:      ensureRawBytes(audioData),
-			MediaType: audioMimeType,
-		}
-	}
+// mediaPayload keeps the first non-empty payload offered, or the first one
+// if they are all empty, decoded to raw bytes.
+type mediaPayload struct {
+	data     []byte
+	mimeType string
+	seen     bool
+}
 
-	return ToolResult{
-		Type:    "text",
-		Content: textContent,
+func (m *mediaPayload) offer(data []byte, mimeType string) {
+	if m.seen && len(m.data) > 0 {
+		return
 	}
+	*m = mediaPayload{data: ensureRawBytes(data), mimeType: mimeType, seen: true}
 }
 
 // describeResource reports the identity and size of a resource whose payload

@@ -140,11 +140,15 @@ func (c *Common) Config() *config.Config {
 	return c.Workspace.Config()
 }
 
-// DefaultCommon returns the default common UI configurations. When the
-// workspace has a large model selected, the theme is chosen based on its
-// provider; otherwise the default theme is used.
+// DefaultCommon returns the default common UI configurations using the
+// theme from config (or the default Charmtone theme if unset).
 func DefaultCommon(ws workspace.Workspace) *Common {
-	s := styles.ThemeForProvider(largeModelProviderID(ws))
+	var s styles.Styles
+	if ws != nil {
+		s = ThemeStylesFromConfig(ws.Config())
+	} else {
+		s = LoadThemeStyles("")
+	}
 	return &Common{
 		Workspace: ws,
 		Styles:    &s,
@@ -162,6 +166,37 @@ func largeModelProviderID(ws workspace.Workspace) string {
 		return ""
 	}
 	return cfg.Models[config.SelectedModelTypeLarge].Provider
+}
+
+// NewCommon returns common UI configurations using the given theme.
+func NewCommon(ws workspace.Workspace, themeName string) *Common {
+	s := LoadThemeStyles(themeName)
+	return &Common{
+		Workspace: ws,
+		Styles:    &s,
+	}
+}
+
+// ThemeNameFromConfig extracts the theme name from config, returning ""
+// (which LoadTheme treats as the default) when config is nil or unset.
+func ThemeNameFromConfig(cfg *config.Config) string {
+	if cfg == nil || cfg.Options == nil || cfg.Options.TUI == nil {
+		return ""
+	}
+	return cfg.Options.TUI.ActiveTheme
+}
+
+// LoadThemeStyles resolves a theme name to Styles, falling back to
+// CharmtonePantera on error or empty name.
+func LoadThemeStyles(name string) styles.Styles {
+	return styles.ThemeFromConfig(name)
+}
+
+// ThemeStylesFromConfig resolves the configured theme to Styles. The
+// active_theme field selects either a built-in theme or a global user theme
+// file.
+func ThemeStylesFromConfig(cfg *config.Config) styles.Styles {
+	return LoadThemeStyles(ThemeNameFromConfig(cfg))
 }
 
 // IsHyper reports whether the currently selected large model is provided
@@ -223,17 +258,21 @@ func CopyToClipboard(text, successMessage string) tea.Cmd {
 // have worked, so callers can safely use the callback to discard the copied
 // state (a selection, say) without losing it on a failed copy.
 func CopyToClipboardWithCallback(text, successMessage string, callback tea.Cmd) tea.Cmd {
-	return tea.Sequence(
-		tea.SetClipboard(text),
-		func() tea.Msg {
-			// OSC 52 above is fire and forget: the terminal never answers, so a
-			// platform without a native clipboard (an SSH session, say) gets the
-			// benefit of the doubt. Only a native clipboard that accepted the
-			// write and then does not hold the text is a real failure.
-			if err := clipboard.WriteText(text); errors.Is(err, clipboard.ErrWriteFailed) {
-				return util.NewWarnMsg("Failed to copy to clipboard")
-			}
-			return tea.Sequence(callback, util.ReportInfo(successMessage))()
-		},
-	)
+	return func() tea.Msg {
+		// The native write goes first and is verified before OSC 52 goes out,
+		// because the terminal handles OSC 52 by writing the very same
+		// clipboard on its own schedule. Verifying afterwards means reading
+		// back in the middle of somebody else's write, which reports a good
+		// copy as lost.
+		err := clipboard.WriteText(text)
+		// OSC 52 is fire and forget: the terminal never answers, so a platform
+		// without a native clipboard (an SSH session, say) gets the benefit of
+		// the doubt. Only a native clipboard that accepted the write and then
+		// does not hold the text is a real failure.
+		osc52 := tea.SetClipboard(text)
+		if errors.Is(err, clipboard.ErrWriteFailed) {
+			return tea.Sequence(osc52, util.ReportWarn("Failed to copy to clipboard"))()
+		}
+		return tea.Sequence(osc52, callback, util.ReportInfo(successMessage))()
+	}
 }

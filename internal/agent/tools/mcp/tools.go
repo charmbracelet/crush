@@ -12,6 +12,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -57,7 +58,13 @@ func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string
 		return ToolResult{}, err
 	}
 
-	return toolResultFromCall(result), nil
+	tr := toolResultFromCall(result)
+	// The cap bounds what a server may place in the conversation, so it is
+	// applied here rather than inside the fold: translating a reply's content
+	// blocks stays a pure function, and only this path knows the data
+	// directory that oversized text spills to.
+	tr.Content = capResult(tr.Content, cfg.Config().Options.DataDirectory)
+	return tr, nil
 }
 
 // toolResultFromCall folds the content blocks of an MCP reply into the one
@@ -252,4 +259,19 @@ func decodeBase64(data []byte) ([]byte, bool) {
 		return decoded, true
 	}
 	return nil, false
+}
+
+// capResult bounds the text a server is allowed to place in the conversation.
+//
+// MCP servers are third-party, and nothing about their output size is ours to
+// assume: one result can be hundreds of kilobytes, and because tool results are
+// never rewritten it then rides along in every later request. The full text is
+// spilled into the data directory with a pointer left in its place, which is
+// the same bargain command output already strikes, so the data is deferred
+// rather than destroyed.
+func capResult(text, spillDir string) string {
+	if text == "" {
+		return text
+	}
+	return shell.TruncateForPersist(text, spillDir)
 }

@@ -28,6 +28,27 @@ type Payload struct {
 	ToolInput json.RawMessage `json:"tool_input"`
 }
 
+// CompactionDetail is the `tool_input` handed to a PreCompact or PostCompact
+// hook. Compaction has no tool call, so it describes what is about to be
+// rewritten instead: which turn asked for it, any emphasis the user supplied,
+// and how much text the checkpoint stands in for.
+type CompactionDetail struct {
+	Trigger      string `json:"trigger"`
+	Instructions string `json:"instructions,omitempty"`
+	Messages     int    `json:"messages"`
+	Tokens       int64  `json:"tokens"`
+}
+
+// BuildCompactionPayload renders detail as the JSON a compaction hook reads on
+// stdin.
+func BuildCompactionPayload(detail CompactionDetail) string {
+	data, err := json.Marshal(detail)
+	if err != nil {
+		return "{}"
+	}
+	return string(data)
+}
+
 // BuildPayload constructs the JSON stdin payload for a hook command.
 func BuildPayload(eventName, sessionID, cwd, toolName, toolInputJSON string) []byte {
 	toolInput := json.RawMessage(toolInputJSON)

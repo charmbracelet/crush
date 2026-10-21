@@ -344,6 +344,11 @@ type Styles struct {
 		// Plan section styles
 		PlanBox lipgloss.Style // Border+padding for the final plan message
 
+		// Compaction section styles
+		CompactionBox    lipgloss.Style // Border+padding for a session checkpoint
+		CompactionHeader lipgloss.Style // "Session Summary" label
+		CompactionNote   lipgloss.Style // What the checkpoint replaced and what stayed
+
 		// Thinking section styles
 		ThinkingBox            lipgloss.Style // Background for thinking content
 		ThinkingTruncationHint lipgloss.Style // "… (N lines hidden)" hint

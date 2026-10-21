@@ -400,6 +400,45 @@ func TestParseContent_NoFrontmatter(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestDiscoverSymlinkDedup(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	// Create a valid skill.
+	skillDir := filepath.Join(tmpDir, "real-skills", "my-skill")
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(`---
+name: my-skill
+description: Skill reachable via symlink.
+---
+# My Skill
+`), 0o644))
+
+	// Create a symlink directory pointing at the real skills dir.
+	linkDir := filepath.Join(tmpDir, "linked-skills")
+	require.NoError(t, os.Symlink(filepath.Join(tmpDir, "real-skills"), linkDir))
+
+	// Discover from both the real and symlinked paths.
+	discovered, states := DiscoverWithStates([]string{
+		filepath.Join(tmpDir, "real-skills"),
+		linkDir,
+	})
+
+	// Should find exactly one skill (not two).
+	require.Len(t, discovered, 1, "symlinked duplicate should be deduped")
+	require.Equal(t, "my-skill", discovered[0].Name)
+
+	// Should have exactly one normal state.
+	var normalCount int
+	for _, s := range states {
+		if s.State == StateNormal {
+			normalCount++
+		}
+	}
+	require.Equal(t, 1, normalCount, "symlinked duplicate should produce one state")
+}
+
 func TestDiscoverBuiltin(t *testing.T) {
 	t.Parallel()
 

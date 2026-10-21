@@ -95,6 +95,7 @@ type (
 		Name string
 	}
 	ActionInitializeProject struct{}
+	ActionReloadSkills      struct{}
 	ActionSummarize         struct {
 		SessionID string
 	}

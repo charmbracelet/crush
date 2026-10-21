@@ -170,7 +170,11 @@ func (b *Backend) InitializePrompt(workspaceID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return agent.InitializePrompt(ws.Cfg)
+	var active []*skills.Skill
+	if ws.Skills != nil {
+		active = ws.Skills.ActiveSkills()
+	}
+	return agent.InitializePrompt(ws.Cfg, active)
 }
 
 // GitBranch returns the current Git branch of the workspace's working

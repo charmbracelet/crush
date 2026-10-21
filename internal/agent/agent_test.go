@@ -1321,6 +1321,62 @@ func TestWorkaroundProviderMediaLimitations_AnthropicProvider(t *testing.T) {
 	require.Equal(t, "image/png", media.MediaType)
 }
 
+func TestWorkaroundProviderMediaLimitations_ParallelBatchKeepsToolRunContiguous(t *testing.T) {
+	env := testEnv(t)
+	sa := testSessionAgent(env, nil, nil, "test prompt")
+	agent := sa.(*sessionAgent)
+
+	pngBase64 := base64.StdEncoding.EncodeToString([]byte("fake-png-data"))
+	mediaResult := func(id string) fantasy.Message {
+		return fantasy.Message{
+			Role: fantasy.MessageRoleTool,
+			Content: []fantasy.MessagePart{
+				fantasy.ToolResultPart{
+					ToolCallID: id,
+					Output:     fantasy.ToolResultOutputContentMedia{Data: pngBase64, MediaType: "image/png"},
+				},
+			},
+		}
+	}
+	textResult := func(id string) fantasy.Message {
+		return fantasy.Message{
+			Role: fantasy.MessageRoleTool,
+			Content: []fantasy.MessagePart{
+				fantasy.ToolResultPart{
+					ToolCallID: id,
+					Output:     fantasy.ToolResultOutputContentText{Text: "ok"},
+				},
+			},
+		}
+	}
+	messages := []fantasy.Message{
+		mediaResult("call_1"),
+		textResult("call_2"),
+		mediaResult("call_3"),
+		{Role: fantasy.MessageRoleUser, Content: []fantasy.MessagePart{fantasy.TextPart{Text: "next"}}},
+	}
+
+	largeModel := Model{
+		ModelCfg:   config.SelectedModel{Provider: "openai"},
+		CatwalkCfg: catwalk.Model{SupportsImages: true},
+	}
+
+	result := agent.workaroundProviderMediaLimitations(messages, largeModel)
+
+	// Synthetic user messages holding media must come after the whole tool
+	// run, never between tool messages: strict chat-completions validators
+	// (OpenAI, Moonshot/Kimi) reject a user message that splits the tool
+	// messages answering a parallel tool-call batch.
+	require.Len(t, result, 6)
+	require.Equal(t, fantasy.MessageRoleTool, result[0].Role)
+	require.Equal(t, fantasy.MessageRoleTool, result[1].Role)
+	require.Equal(t, fantasy.MessageRoleTool, result[2].Role)
+	require.Equal(t, fantasy.MessageRoleUser, result[3].Role)
+	require.Equal(t, fantasy.MessageRoleUser, result[4].Role)
+	require.Equal(t, fantasy.MessageRoleUser, result[5].Role)
+	require.Equal(t, "next", result[5].Content[0].(fantasy.TextPart).Text)
+}
+
 func TestProviderRetryLogFields(t *testing.T) {
 	t.Run("nil provider error", func(t *testing.T) {
 		fields := providerRetryLogFields(nil, 2*time.Second)

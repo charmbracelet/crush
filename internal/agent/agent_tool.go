@@ -17,26 +17,14 @@ var agentToolDescription string
 
 type AgentParams struct {
 	Prompt string `json:"prompt" description:"The task for the agent to perform"`
+	SubagentType string `json:"subagent_type,omitempty" description:"Type of sub-agent to spawn, e.g. general-purpose"`
 }
 
 const (
 	AgentToolName = "agent"
 )
 
-func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) {
-	agentCfg, ok := c.cfg.Config().Agents[config.AgentTask]
-	if !ok {
-		return nil, errors.New("task agent not configured")
-	}
-	prompt, err := taskPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
-	if err != nil {
-		return nil, err
-	}
-
-	agent, err := c.buildAgent(ctx, prompt, agentCfg, true)
-	if err != nil {
-		return nil, err
-	}
+func (c *coordinator) agentTool(_ctx context.Context) (fantasy.AgentTool, error) {
 	return fantasy.NewParallelAgentTool(
 		AgentToolName,
 		agentToolDescription,
@@ -53,6 +41,28 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 			agentMessageID := tools.GetMessageFromContext(ctx)
 			if agentMessageID == "" {
 				return fantasy.ToolResponse{}, errors.New("agent message id missing from context")
+			}
+
+			agentID := config.AgentTask
+			if params.SubagentType == "general-purpose" {
+				agentID = config.AgentCoder
+			}
+			agentCfg, ok := c.cfg.Config().Agents[agentID]
+			if !ok {
+				agentCfg, ok = c.cfg.Config().Agents[config.AgentTask]
+				if !ok {
+					return fantasy.ToolResponse{}, errors.New("task agent not configured")
+				}
+			}
+
+			promptObj, err := taskPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
+			if err != nil {
+				return fantasy.ToolResponse{}, err
+			}
+
+			agent, err := c.buildAgent(ctx, promptObj, agentCfg, true)
+			if err != nil {
+				return fantasy.ToolResponse{}, err
 			}
 
 			return c.runSubAgent(ctx, subAgentParams{

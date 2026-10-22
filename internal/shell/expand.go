@@ -59,6 +59,20 @@ var NoUnset atomic.Bool
 //     prefix of its stderr. Callers that surface the error to users
 //     should additionally scrub it for the original template text.
 func ExpandValue(ctx context.Context, value string, env []string) (string, error) {
+	return expandValue(ctx, value, env, false)
+}
+
+// ExpandArgument is ExpandValue for a single argv item, such as an MCP
+// or LSP server argument. The one difference: a backslash pair ("\\")
+// outside of a substitution stays as two backslashes, so Windows named
+// pipes (\\.\pipe\name) and UNC paths (\\server\share) reach the child
+// unchanged. "\$" and "\`" still give a literal "$" and "`", and the
+// same substitutions run as with ExpandValue.
+func ExpandArgument(ctx context.Context, value string, env []string) (string, error) {
+	return expandValue(ctx, value, env, true)
+}
+
+func expandValue(ctx context.Context, value string, env []string, keepBackslashPairs bool) (string, error) {
 	// Fast path: a value with no shell metacharacters expands to itself.
 	// Parsing and running it through the interpreter would produce the
 	// same string at significant cost. Most config values (literal API
@@ -74,6 +88,18 @@ func ExpandValue(ctx context.Context, value string, env []string) (string, error
 	word, err := syntax.NewParser().Document(strings.NewReader(value))
 	if err != nil {
 		return "", fmt.Errorf("parse: %w", err)
+	}
+
+	if keepBackslashPairs && word != nil {
+		// Here-doc expansion turns each "\\" in a literal into "\".
+		// Double the pairs so the expansion gives them back. The parse
+		// is already done, so this does not change which "$" starts a
+		// substitution. Substitutions themselves are left alone.
+		for _, part := range word.Parts {
+			if lit, ok := part.(*syntax.Lit); ok {
+				lit.Value = strings.ReplaceAll(lit.Value, `\\`, `\\\\`)
+			}
+		}
 	}
 
 	// Build a minimal Shell value purely to reuse its handler chain

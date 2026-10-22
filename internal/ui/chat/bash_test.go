@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/x/ansi"
@@ -164,54 +165,136 @@ func TestBashToolMessageItem_WorkingDirChip(t *testing.T) {
 	// No chip when the command ran in the workspace itself.
 	out = render(`{"command":"ls","working_dir":"/workspace"}`, "")
 	require.NotContains(t, out, "cd ")
+
+	// The background start header carries the chip too.
+	out = render(`{"command":"make build","run_in_background":true}`,
+		`{"background":true,"shell_id":"sh-1","working_directory":"/workspace/sub","description":"build it"}`)
+	require.Contains(t, out, "PID sh-1")
+	require.Contains(t, out, "cd sub/")
+}
+
+// TestRenderDirChip verifies the chip logic on its own: when it applies,
+// how relative and outside paths resolve, and how it truncates.
+func TestRenderDirChip(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+
+	// No chip without a dir, without a workspace, in the workspace itself,
+	// or at a width that leaves the command no room.
+	require.Empty(t, renderDirChip(&sty, "/workspace", "", 80))
+	require.Empty(t, renderDirChip(&sty, "", "/workspace/sub", 80))
+	require.Empty(t, renderDirChip(&sty, "/workspace", "/workspace", 80))
+	require.Empty(t, renderDirChip(&sty, "/workspace", "/workspace/sub", 15))
+
+	// Relative dirs resolve against the workspace.
+	require.Equal(t, "cd sub/", ansi.Strip(renderDirChip(&sty, "/workspace", "sub", 80)))
+
+	// Dirs outside the workspace keep the leading ../.
+	require.Equal(t, "cd ../elsewhere/", ansi.Strip(renderDirChip(&sty, "/workspace", "/elsewhere", 80)))
+
+	// Deep paths truncate to half the width.
+	deep := strings.Repeat("aaaaaaaaaa/", 12)
+	chip := ansi.Strip(renderDirChip(&sty, "/workspace", "/workspace/"+deep, 40))
+	require.Contains(t, chip, "…")
+	require.NotContains(t, chip, deep)
+}
+
+// TestJobOutputToolMessageItem_WorkingDirChip verifies that the job
+// output header carries the working directory chip of the background
+// shell it read from.
+func TestJobOutputToolMessageItem_WorkingDirChip(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	ctx := &JobOutputToolRenderContext{workingDir: "/workspace"}
+	tc := message.ToolCall{
+		ID:       "job-out",
+		Name:     "job_output",
+		Input:    `{"shell_id":"sh-1"}`,
+		Finished: true,
+	}
+	result := &message.ToolResult{
+		ToolCallID: "job-out",
+		Content:    "out",
+		Metadata:   `{"shell_id":"sh-1","working_directory":"/workspace/sub"}`,
+	}
+	out := ansi.Strip(ctx.RenderTool(&sty, 120, &ToolRenderOpts{
+		ToolCall: tc,
+		Result:   result,
+		Status:   ToolStatusSuccess,
+	}))
+	require.Contains(t, out, "cd sub/")
 }
 
 // TestBashToolMessageItem_DescriptionHeader verifies that the
 // model-provided description leads the header: truncated to one line
-// when collapsed, wrapped when expanded, with the command indented
-// below.
+// when collapsed, wrapped when expanded, with the command indented below.
 func TestBashToolMessageItem_DescriptionHeader(t *testing.T) {
 	t.Parallel()
 
 	sty := styles.CharmtonePantera()
-	longDesc := strings.Repeat("d", 200)
-	tc := message.ToolCall{
-		ID:       "bash-desc-h",
-		Name:     "bash",
-		Input:    `{"command":"echo hi","description":"` + longDesc + `"}`,
-		Finished: true,
-	}
-	result := &message.ToolResult{ToolCallID: "bash-desc-h", Content: "hi"}
-	ctx := &BashToolRenderContext{}
+	ctx := &BashToolRenderContext{workingDir: "/workspace"}
+	// The icon and tool name the description and command indent under.
+	indent := strings.Repeat(" ", lipgloss.Width(toolBasePrefix(&sty, ToolStatusSuccess, "Bash", nil)))
+	capped := cappedMessageWidth(120)
 
-	opts := func(expanded bool) *ToolRenderOpts {
-		return &ToolRenderOpts{
+	render := func(input string, expanded, compact bool) string {
+		tc := message.ToolCall{
+			ID:       "bash-desc-h",
+			Name:     "bash",
+			Input:    input,
+			Finished: true,
+		}
+		return ansi.Strip(ctx.RenderTool(&sty, 120, &ToolRenderOpts{
 			ToolCall:        tc,
-			Result:          result,
+			Result:          &message.ToolResult{ToolCallID: "bash-desc-h", Content: "hi"},
 			Status:          ToolStatusSuccess,
 			ExpandedContent: expanded,
-		}
+			Compact:         compact,
+		}))
 	}
 
-	collapsed := strings.Split(ansi.Strip(ctx.RenderTool(&sty, 120, opts(false))), "\n")
-	require.GreaterOrEqual(t, len(collapsed), 4)
+	longDesc := strings.Repeat("d", 200)
+	longDescIn := `{"command":"echo hi","description":"` + longDesc + `"}`
+
+	// Collapsed: the description truncates to one line and the command
+	// follows, indented under the tool name.
+	collapsed := strings.Split(render(longDescIn, false, false), "\n")
 	require.Contains(t, collapsed[0], "…")
-	require.Less(t, lipglossWidth(collapsed[0]), 121)
-	require.Contains(t, collapsed[1], "echo hi")
-	require.True(t, strings.HasPrefix(collapsed[1], "  "), "command must be indented under the tool name")
-	require.Contains(t, strings.Join(collapsed, "\n"), "hi")
+	require.LessOrEqual(t, lipgloss.Width(collapsed[0]), capped)
+	require.True(t, strings.HasPrefix(collapsed[1], indent+"echo hi"),
+		"command must be indented under the tool name: %q", collapsed[1])
 
-	expanded := strings.Split(ansi.Strip(ctx.RenderTool(&sty, 120, opts(true))), "\n")
-	require.GreaterOrEqual(t, len(expanded), 5)
-	require.NotContains(t, expanded[0], "…", "expanded description must wrap, not truncate")
-	require.NotContains(t, expanded[1], "…", "expanded description must wrap, not truncate")
-	require.True(t, strings.HasPrefix(expanded[1], strings.Repeat(" ", 7)+"d"), "wrapped description must be indented under the tool name")
-	require.Contains(t, expanded[2], "echo hi")
-	require.Contains(t, strings.Join(expanded, "\n"), "hi")
-}
+	// Expanded: the description wraps, never truncates.
+	expandedOut := strings.Split(render(longDescIn, true, false), "\n")
+	require.NotContains(t, strings.Join(expandedOut, "\n"), "…",
+		"expanded description must wrap, not truncate")
+	require.True(t, strings.HasPrefix(expandedOut[1], indent+"d"),
+		"wrapped description must be indented under the tool name: %q", expandedOut[1])
+	require.Contains(t, strings.Join(expandedOut, "\n"), "\n"+indent+"echo hi")
 
-// lipglossWidth is a small helper so the test does not import lipgloss
-// directly for a single width check.
-func lipglossWidth(s string) int {
-	return ansi.StringWidth(s)
+	// Only the first line of a multi-line description shows when
+	// collapsed; the whole description shows when expanded.
+	multiDescIn := `{"command":"echo hi","description":"run the echo\nthen the suite in detail"}`
+	out := render(multiDescIn, false, false)
+	require.Contains(t, out, "run the echo")
+	require.NotContains(t, out, "then the suite")
+
+	out = render(multiDescIn, true, false)
+	require.Contains(t, out, "run the echo")
+	require.Contains(t, out, "then the suite in detail")
+
+	// The "background=true" pair rides on the description line.
+	out = render(`{"command":"sleep 5","description":"wait","run_in_background":true}`, false, false)
+	require.Contains(t, out, "wait (background=true)")
+
+	// The chip sits between the tool name and the description.
+	out = render(`{"command":"echo hi","working_dir":"/workspace/sub","description":"do things"}`, false, false)
+	require.Contains(t, out, "Bash cd sub/ do things")
+
+	// Nested tool calls (compact) keep the plain command header.
+	out = render(`{"command":"echo hi","description":"do things"}`, false, true)
+	require.Contains(t, out, "echo hi")
+	require.NotContains(t, out, "do things")
 }

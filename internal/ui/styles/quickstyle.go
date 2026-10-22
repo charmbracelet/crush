@@ -752,6 +752,7 @@ func quickStyle(o quickStyleOpts) Styles {
 
 	s.Tool.ParamMain = subtle
 	s.Tool.ParamKey = subtle
+
 	s.Tool.WorkingDirChip = base.Foreground(o.info).Background(o.bgLessVisible)
 	s.Tool.Description = base.Foreground(o.secondary)
 

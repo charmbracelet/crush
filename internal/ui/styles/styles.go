@@ -370,10 +370,12 @@ type Styles struct {
 		NameNested lipgloss.Style // Nested child tool name (inside Agent/Agentic Fetch)
 
 		// Parameter list styles
-		ParamMain      lipgloss.Style
-		ParamKey       lipgloss.Style
-		WorkingDirChip lipgloss.Style // Working directory chip in bash tool headers
-		Description    lipgloss.Style // Plain-foreground description text in tool headers
+		ParamMain lipgloss.Style
+		ParamKey  lipgloss.Style
+
+		// Header adornments
+		WorkingDirChip lipgloss.Style // Working directory chip in tool headers
+		Description    lipgloss.Style // Description text leading tool headers
 
 		// Content rendering styles
 		ContentLine           lipgloss.Style // Individual content line with background and width

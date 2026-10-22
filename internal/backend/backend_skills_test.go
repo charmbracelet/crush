@@ -122,9 +122,49 @@ func TestBackend_WorkspaceSkillsIsolation(t *testing.T) {
 		"workspace B's Manager.States() leaked workspace A's republish")
 }
 
+func TestBackend_RelativeSkillsPathUsesWorkspace(t *testing.T) {
+	hostHome := t.TempDir()
+	t.Setenv("HOME", hostHome)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(hostHome, ".config"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(hostHome, ".local", "share"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(hostHome, ".cache"))
+	t.Setenv("CRUSH_SKILLS_DIR", t.TempDir())
+
+	workingDir := t.TempDir()
+	dataDir := filepath.Join(workingDir, ".crush")
+	require.NoError(t, os.WriteFile(
+		filepath.Join(workingDir, "crush.json"),
+		[]byte(`{"options":{"skills_paths":["./team-skills"]}}`),
+		0o644,
+	))
+	writeSkillAt(t, filepath.Join(workingDir, "team-skills"), "relative-config-skill", "Workspace-relative configured skill.")
+
+	srvCfg, err := config.Init(workingDir, "", false)
+	require.NoError(t, err)
+	b := backend.New(t.Context(), srvCfg, nil)
+	clientID := uuid.New().String()
+
+	ws, _, err := b.CreateWorkspace(proto.Workspace{
+		ClientID: clientID,
+		Path:     workingDir,
+		DataDir:  dataDir,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = b.DeleteWorkspace(ws.ID, clientID) })
+
+	require.True(t, containsSkillName(ws.Skills.States(), "relative-config-skill"),
+		"relative skills_paths entry must be resolved from the workspace")
+	require.Contains(t, ws.Skills.ResolvedPaths(), filepath.Join(workingDir, "team-skills"))
+}
+
 func writeSkill(t *testing.T, workingDir, name, desc string) {
 	t.Helper()
-	skillDir := filepath.Join(workingDir, ".agents", "skills", name)
+	writeSkillAt(t, filepath.Join(workingDir, ".agents", "skills"), name, desc)
+}
+
+func writeSkillAt(t *testing.T, root, name, desc string) {
+	t.Helper()
+	skillDir := filepath.Join(root, name)
 	require.NoError(t, os.MkdirAll(skillDir, 0o755))
 	content := fmt.Sprintf("---\nname: %s\ndescription: %s\n---\n%s\n", name, desc, desc)
 	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(content), 0o644))

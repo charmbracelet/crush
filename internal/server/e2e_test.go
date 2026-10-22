@@ -262,6 +262,22 @@ func decodeSSEEnvelope(p pubsub.Payload) (any, bool) {
 	return nil, false
 }
 
+// setCurrentSession reports the session the given client is viewing
+// via the HTTP surface, mirroring the TUI's session-switch report.
+func (h *e2eHarness) setCurrentSession(t *testing.T, ctx context.Context, workspaceID, clientID, sessionID string) {
+	t.Helper()
+	body, err := json.Marshal(proto.CurrentSession{SessionID: sessionID})
+	require.NoError(t, err)
+	reqURL := h.httpSrv.URL + "/v1/workspaces/" + workspaceID + "/current-session?client_id=" + clientID
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(body))
+	require.NoError(t, err)
+	httpReq.Header.Set("Content-Type", "application/json")
+	resp, err := h.httpSrv.Client().Do(httpReq)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
 // grantPermission posts a permission grant via the HTTP surface and
 // returns the server's "resolved" verdict. Mirrors the client-side
 // GrantPermission flow without importing internal/client (which
@@ -448,6 +464,13 @@ func TestE2E_PermissionFlowCrossClient(t *testing.T) {
 	// Drive the permission request from a goroutine simulating the
 	// tool path. Request blocks until resolved; capture the outcome.
 	const sessionID = "s-perm"
+
+	// Permission prompts are session-scoped: only clients viewing the
+	// session observe the request. Both clients view it here, which
+	// is what makes the cross-client flow below possible at all.
+	h.setCurrentSession(t, ctx, h.workspace.ID, cidA, sessionID)
+	h.setCurrentSession(t, ctx, h.workspace.ID, cidB, sessionID)
+
 	const toolCallID = "tc-1"
 	type result struct {
 		granted bool
@@ -511,6 +534,90 @@ func TestE2E_PermissionFlowCrossClient(t *testing.T) {
 		Action:     proto.PermissionAllow,
 	})
 	require.False(t, resolvedB, "client B's follow-up grant must report already resolved")
+}
+
+// TestE2E_PermissionScopedToViewingClients verifies that permission
+// prompts are routed only to clients viewing the owning session: a
+// request raised while a client views another session never reaches
+// that client's stream, and switching into the owning session
+// re-delivers the still-pending request. Viewers of the same session
+// both observe the resolution notification.
+func TestE2E_PermissionScopedToViewingClients(t *testing.T) {
+	t.Parallel()
+	h := newE2EHarness(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	cidA := uuid.New().String()
+	cidB := uuid.New().String()
+
+	evcA, cancelA := h.subscribeSSE(t, ctx, h.workspace.ID, cidA)
+	t.Cleanup(cancelA)
+	evcB, cancelB := h.subscribeSSE(t, ctx, h.workspace.ID, cidB)
+	t.Cleanup(cancelB)
+
+	h.waitForAttached(t, 2)
+
+	const sessionA = "s-a"
+	const sessionB = "s-b"
+	h.setCurrentSession(t, ctx, h.workspace.ID, cidA, sessionA)
+	h.setCurrentSession(t, ctx, h.workspace.ID, cidB, sessionB)
+
+	const toolCallID = "tc-scoped"
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = h.app.Permissions.Request(ctx, permission.CreatePermissionRequest{
+			SessionID:   sessionA,
+			ToolCallID:  toolCallID,
+			ToolName:    "view",
+			Description: "read a file",
+			Action:      "read",
+			Path:        h.workspace.Path,
+		})
+	}()
+	// Unblock the request on failure paths before waiting on done.
+	t.Cleanup(func() { cancel(); <-done })
+
+	// The client viewing the owning session receives the request.
+	reqCtx, reqCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer reqCancel()
+	reqEv, ok := drainUntil(reqCtx, evcA, func(e pubsub.Event[proto.PermissionRequest]) bool {
+		return e.Payload.ToolCallID == toolCallID
+	})
+	require.True(t, ok, "client viewing the owning session must receive the request")
+
+	// The client viewing another session must not. A 500ms absence
+	// window is generous given the in-process transport.
+	absCtx, absCancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer absCancel()
+	_, leaked := drainUntil(absCtx, evcB, func(e pubsub.Event[proto.PermissionRequest]) bool {
+		return e.Payload.ToolCallID == toolCallID
+	})
+	require.False(t, leaked, "client viewing another session must not receive the request")
+
+	// Switching client B into the owning session re-publishes the
+	// still-pending request.
+	h.setCurrentSession(t, ctx, h.workspace.ID, cidB, sessionA)
+	repub, ok := drainUntil(reqCtx, evcB, func(e pubsub.Event[proto.PermissionRequest]) bool {
+		return e.Payload.ToolCallID == toolCallID
+	})
+	require.True(t, ok, "switching into the owning session must re-deliver the pending request")
+	require.Equal(t, reqEv.Payload.ID, repub.Payload.ID, "re-delivery must carry the same pending request")
+
+	// Both viewers observe the resolution notification.
+	resolved := h.grantPermission(t, ctx, h.workspace.ID, proto.PermissionGrant{
+		Permission: reqEv.Payload,
+		Action:     proto.PermissionAllow,
+	})
+	require.True(t, resolved)
+	<-done
+	for i, evc := range []<-chan any{evcA, evcB} {
+		_, ok := drainUntil(reqCtx, evc, func(e pubsub.Event[proto.PermissionNotification]) bool {
+			return e.Payload.ToolCallID == toolCallID && e.Payload.Granted
+		})
+		require.True(t, ok, "viewer %d must receive the granting notification", i)
+	}
 }
 
 // TestE2E_KillingClientASSEDoesNotBreakClientB covers PLAN item 6

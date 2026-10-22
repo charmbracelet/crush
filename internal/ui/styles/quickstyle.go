@@ -730,6 +730,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Header.Keystroke = muted
 	s.Header.KeystrokeTip = subtle
 	s.Header.WorkingDir = muted
+	s.Header.GitBranch = base.Foreground(o.secondary)
 	s.Header.Separator = subtle
 	s.Header.Wrapper = lipgloss.NewStyle().Foreground(o.fgBase)
 	s.Header.LogoGradCanvas = lipgloss.NewStyle()
@@ -1194,6 +1195,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	// keeps a transparent gap between adjacent chips.
 	s.Attachments.Remove = base.Padding(0, 1).MarginRight(1).Background(o.bgLessVisible).Foreground(o.fgSubtle).SetString(RemoveIcon)
 	s.Attachments.Deleting = base.Padding(0, 1).MarginRight(1).Bold(true).Background(o.destructive).Foreground(o.fgBase)
+	s.Attachments.More = base.Foreground(o.fgSubtle)
 
 	// Pills styles
 	s.Pills.Base = base.Padding(0, 1)

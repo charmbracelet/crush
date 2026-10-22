@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -315,6 +317,11 @@ func (t *baseToolMessageItem) Spinning() bool {
 	return t.isSpinning()
 }
 
+// restyleAnim implements [animRestyler].
+func (t *baseToolMessageItem) restyleAnim() {
+	t.anim.SetColors(t.sty.WorkingLabelColor, t.sty.WorkingGradFromColor, t.sty.WorkingGradToColor, nil)
+}
+
 // Advance implements [Animatable].
 //
 // Bumps the F6 list-cache version so the next draw re-renders this
@@ -461,7 +468,8 @@ func (t *baseToolMessageItem) computeStatus() ToolStatus {
 	return t.status
 }
 
-// isSpinning returns true if the tool should show animation.
+// isSpinning returns true if the tool should show animation. A recorded
+// result stops it too, for calls stored before settling marked them finished.
 func (t *baseToolMessageItem) isSpinning() bool {
 	if t.spinningFunc != nil {
 		return t.spinningFunc(SpinningState{
@@ -470,7 +478,7 @@ func (t *baseToolMessageItem) isSpinning() bool {
 			Status:   t.status,
 		})
 	}
-	return !t.toolCall.Finished && t.status != ToolStatusCanceled
+	return !t.toolCall.Finished && t.result == nil && t.status != ToolStatusCanceled
 }
 
 // SetSpinningFunc sets a custom function to determine if the tool should spin.
@@ -530,6 +538,88 @@ func pendingTool(sty *styles.Styles, name string, anim *anim.Anim, nested bool) 
 	}
 
 	return fmt.Sprintf("%s %s %s", icon, toolName, animView)
+}
+
+// partialJSONStringValue matches the raw remainder of a partial JSON
+// object after the decoder stopped, when the value of the pending key
+// is an in-flight string, e.g. `: "hel`.
+var partialJSONStringValue = regexp.MustCompile(`^\s*:\s*"((?:[^"\\]|\\.)*\\?)$`)
+
+// partialJSONFields extracts every complete top-level scalar field of a
+// JSON object that may be cut off mid-stream, e.g. while a tool call
+// input is still being streamed. The value currently streaming is also
+// recovered as far as it is unambiguous: a string value is included
+// while it grows (a cut escape at its end is dropped), while partial
+// keys, numbers, booleans, and nested values are omitted. Nested
+// objects and arrays are skipped: tool parameter schemas are flat.
+func partialJSONFields(input string) map[string]any {
+	fields := make(map[string]any)
+	dec := json.NewDecoder(strings.NewReader(input))
+	var key string
+	depth := 0
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			break
+		}
+		switch v := tok.(type) {
+		case json.Delim:
+			if v == '{' || v == '[' {
+				depth++
+			} else {
+				depth--
+				if depth == 1 {
+					// A nested value of the top-level object just closed;
+					// drop its dangling key so the next key/value pair stays
+					// in sync.
+					key = ""
+				}
+			}
+		case string:
+			if depth != 1 {
+				continue
+			}
+			if key == "" {
+				key = v
+			} else {
+				fields[key] = v
+				key = ""
+			}
+		default:
+			if depth == 1 && key != "" {
+				fields[key] = v
+				key = ""
+			}
+		}
+	}
+	if key != "" && depth == 1 {
+		offset := min(int(dec.InputOffset()), len(input))
+		if m := partialJSONStringValue.FindStringSubmatch(input[offset:]); m != nil {
+			fields[key] = unescapePartialString(m[1])
+		}
+	}
+	return fields
+}
+
+// unescapePartialString unescapes a string value cut off mid-stream,
+// dropping a trailing incomplete escape such as a lone backslash or a
+// short \u sequence. Unescaping is best-effort: the value is a prefix
+// of the final one and self-corrects as more input arrives.
+func unescapePartialString(s string) string {
+	// JSON allows \/ where Go string syntax does not.
+	s = strings.ReplaceAll(s, `\/`, `/`)
+	for {
+		if v, err := strconv.Unquote(`"` + s + `"`); err == nil {
+			return v
+		}
+		idx := strings.LastIndexByte(s, '\\')
+		if idx < 0 || len(s)-idx > len(`\uXXXX`) {
+			// No escape to trim: the failure is not a cut tail, so the
+			// raw prefix is the best display we have.
+			return s
+		}
+		s = s[:idx]
+	}
 }
 
 // toolEarlyStateContent handles error/cancelled/pending states before content rendering.
@@ -610,7 +700,9 @@ func toolParamList(sty *styles.Styles, params []string, width int, opts *ToolRen
 	if len(kvPairs) > 0 {
 		partsStr := strings.Join(kvPairs, ", ")
 		if remaining := width - lipgloss.Width(partsStr) - 3; remaining >= minSpaceForMainParam {
-			output = fmt.Sprintf("%s (%s)", mainParam, partsStr)
+			// main param is syntax highlighted so style the param as well
+			pairs := sty.Tool.ParamMain.Render(fmt.Sprintf("(%s)", partsStr))
+			output = fmt.Sprintf("%s %s", mainParam, pairs)
 		}
 	}
 
@@ -1079,14 +1171,19 @@ func toolOutputMultiEditDiffContent(sty *styles.Styles, file string, meta tools.
 	return sty.Tool.Body.Render(formatted)
 }
 
+// roundedTree styles a tool tree so multiline children stay aligned: the
+// enumerator draws each branch and the indenter continues it down the child's
+// wrapped lines. They share one width because the continuation bar only lines
+// up with the branch when their geometry matches.
+func roundedTree(t *tree.Tree, width int) *tree.Tree {
+	return t.
+		Enumerator(roundedEnumerator(2, width)).
+		Indenter(roundedIndenter(2, width))
+}
+
 // roundedEnumerator creates a tree enumerator with rounded corners.
 func roundedEnumerator(lPadding, width int) tree.Enumerator {
-	if width == 0 {
-		width = 2
-	}
-	if lPadding == 0 {
-		lPadding = 1
-	}
+	lPadding, width = enumeratorDims(lPadding, width)
 	return func(children tree.Children, index int) string {
 		line := strings.Repeat("─", width)
 		padding := strings.Repeat(" ", lPadding)
@@ -1095,6 +1192,31 @@ func roundedEnumerator(lPadding, width int) tree.Enumerator {
 		}
 		return padding + "├" + line
 	}
+}
+
+// roundedIndenter continues a branch down a child's wrapped lines, matching
+// roundedEnumerator's geometry so the bar stays under the branch.
+func roundedIndenter(lPadding, width int) tree.Indenter {
+	lPadding, width = enumeratorDims(lPadding, width)
+	return func(children tree.Children, index int) string {
+		padding := strings.Repeat(" ", lPadding)
+		if children.Length()-1 == index {
+			return padding + " " + strings.Repeat(" ", width)
+		}
+		return padding + "│" + strings.Repeat(" ", width)
+	}
+}
+
+// enumeratorDims applies the shared defaults so the enumerator and indenter
+// agree on geometry.
+func enumeratorDims(lPadding, width int) (int, int) {
+	if width == 0 {
+		width = 2
+	}
+	if lPadding == 0 {
+		lPadding = 1
+	}
+	return lPadding, width
 }
 
 // toolOutputMarkdownContent renders markdown content with optional truncation.

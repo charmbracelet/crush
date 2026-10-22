@@ -154,6 +154,11 @@ type ProviderConfig struct {
 	// the provider's whole catalog in that case: the API-key models in
 	// Models are not served by the subscription.
 	ChatGPTModels []catwalk.Model `json:"chatgpt_models,omitempty" jsonschema:"-"`
+
+	// GrokModels lists the models the Grok plan grants when the provider
+	// is authenticated with a Grok account. Like ChatGPTModels, it is
+	// the provider's whole catalog in that case.
+	GrokModels []catwalk.Model `json:"grok_models,omitempty" jsonschema:"-"`
 }
 
 // ToProvider converts the [ProviderConfig] to a [catwalk.Provider].
@@ -316,7 +321,7 @@ type LSPConfig struct {
 type TUIOptions struct {
 	CompactMode bool        `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
 	DiffMode    string      `json:"diff_mode,omitempty" jsonschema:"description=Diff mode for the TUI interface,enum=unified,enum=split"`
-	ActiveTheme string      `json:"active_theme,omitempty" jsonschema:"description=Name of the currently active theme,default=charmtone-panther,example=charmtone-panther,example=gruvbox-dark"`
+	ActiveTheme string      `json:"active_theme,omitempty" jsonschema:"description=Name of the currently active theme,default=charmtone-panther,example=charmtone-panther,example=gruvbox-dark,example=keanu"`
 	Completions Completions `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
 	Transparent *bool       `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
 	Scrollbar   string      `json:"scrollbar,omitempty" jsonschema:"description=Chat scrollbar visibility,enum=default,enum=always,enum=never,default=default"`
@@ -453,6 +458,19 @@ type Options struct {
 	Notifications             string       `json:"notifications,omitempty" jsonschema:"description=Notification style to use. Options: auto (default)\\, native\\, osc\\, bell\\, disabled. Auto selects based on environment: native for local sessions\\, osc for SSH (with automatic OSC 99/777 detection).,enum=auto,enum=native,enum=osc,enum=bell,enum=disabled,default=auto"`
 	DisabledSkills            []string     `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=crush-config"`
 	RequestTimeout            *int         `json:"request_timeout,omitempty" jsonschema:"description=Timeout in seconds for each LLM API request. Streaming responses are aborted only after this much inactivity\\, so slow but active streams are never killed. 0 disables it\\, negative values are invalid.,default=60,example=120,example=300,example=0"`
+	MaxBackgroundJobs         *int         `json:"max_background_jobs,omitempty" jsonschema:"description=How many background shell jobs may run at once. Jobs that have finished never count against it. 0 or negative restores the default.,default=50,example=10,example=200"`
+}
+
+// DefaultMaxBackgroundJobs is how many background shell jobs may run at once
+// when the user has not set max_background_jobs.
+const DefaultMaxBackgroundJobs = 50
+
+// GetMaxBackgroundJobs returns the running-job ceiling, always positive.
+func (o *Options) GetMaxBackgroundJobs() int {
+	if o == nil || o.MaxBackgroundJobs == nil || *o.MaxBackgroundJobs <= 0 {
+		return DefaultMaxBackgroundJobs
+	}
+	return *o.MaxBackgroundJobs
 }
 
 // DefaultRequestTimeout bounds each LLM API request when the user has not
@@ -901,6 +919,11 @@ func (c *Config) GetModel(provider, model string) *catwalk.Model {
 				return &m
 			}
 		}
+		for _, m := range providerConfig.GrokModels {
+			if m.ID == model {
+				return &m
+			}
+		}
 	}
 	return nil
 }
@@ -933,7 +956,21 @@ func (c *Config) IsModelAvailable(provider, model string) bool {
 	if !ok || providerConfig.Disable {
 		return false
 	}
+	// A model is available in any of the provider's catalogs: the
+	// API-key list, or the ChatGPT/Grok subscription list fetched on
+	// login. Subscription models live outside Models, so checking only
+	// there would reject a model that is selectable and usable.
 	for _, m := range providerConfig.Models {
+		if m.ID == model {
+			return true
+		}
+	}
+	for _, m := range providerConfig.ChatGPTModels {
+		if m.ID == model {
+			return true
+		}
+	}
+	for _, m := range providerConfig.GrokModels {
 		if m.ID == model {
 			return true
 		}

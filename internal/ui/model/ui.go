@@ -85,6 +85,15 @@ const sessionDetailsMaxHeight = 20
 // refreshed while no session is running.
 const hyperCreditsPollInterval = 60 * time.Second
 
+// gitBranchPollInterval is how often the workspace's checked-out branch is
+// re-read. A checkout emits no event Crush can subscribe to, so the branch
+// has to be polled to stay current.
+const gitBranchPollInterval = 5 * time.Second
+
+// gitBranchFetchTimeout bounds one branch read. Locally this is a file
+// read; in client/server mode it is a request to the server.
+const gitBranchFetchTimeout = 10 * time.Second
+
 // TextareaMaxHeight is the maximum height of the prompt textarea.
 const TextareaMaxHeight = 15
 
@@ -190,6 +199,16 @@ type (
 
 	// hyperCreditsPollMsg is sent by the Hyper credits poll timer.
 	hyperCreditsPollMsg struct{}
+
+	// gitBranchUpdatedMsg carries the workspace's checked-out branch. branch
+	// is empty when the workspace is not a Git repository or HEAD is
+	// detached.
+	gitBranchUpdatedMsg struct {
+		branch string
+	}
+
+	// gitBranchPollMsg is sent by the git branch poll timer.
+	gitBranchPollMsg struct{}
 )
 
 // UI represents the main user interface model.
@@ -287,6 +306,11 @@ type UI struct {
 	sendProgressBar    bool
 	progressBarEnabled bool
 
+	// turnOutcome is the result of the last agent turn (done or error),
+	// reported to the terminal until the user has seen it. See
+	// trackTurnOutcome.
+	turnOutcome tea.ProgramState
+
 	// caps hold different terminal capabilities that we query for.
 	caps common.Capabilities
 
@@ -339,8 +363,21 @@ type UI struct {
 	lspRefreshQueued bool
 	lspCheckedAt     time.Time
 
-	// mcp
-	mcpStates map[string]mcp.ClientInfo
+	// mcpStates memoizes the workspace MCP state (a synchronous probe in
+	// client/server mode) and its off-thread refresh bookkeeping. MCP
+	// state_changed events refresh it off-thread with a TTL backstop and a
+	// retry loop while servers are starting; see mcp.go.
+	mcpStates        map[string]mcp.ClientInfo
+	mcpFetchInFlight bool
+	// mcpRefreshQueued records that a refresh was requested while a fetch
+	// was already in flight; applyMCPStates re-dispatches so the freshest
+	// state still lands.
+	mcpRefreshQueued bool
+	mcpCheckedAt     time.Time
+	// mcpStartingRetries counts the consecutive starting-state re-probes
+	// driving the retry loop's exponential backoff. Event-driven refreshes
+	// renew the budget; settled states reset it.
+	mcpStartingRetries int
 
 	// skills
 	skillStates []*skills.SkillState
@@ -410,11 +447,19 @@ type UI struct {
 	// like promptQueueGen it lets a stale in-flight probe result be
 	// discarded and re-fetched instead of clobbering newer state.
 	busyFetchGen uint64
-	pillsView    string
+	// probedSessionBusy is the last busy probe of probedSession, covering
+	// runs this client did not start.
+	probedSession     string
+	probedSessionBusy bool
+	pillsView         string
 
 	// Todo spinner
 	todoSpinner    spinner.Model
 	todoIsSpinning bool
+
+	// pending is the turn this client sent; the placeholder items in the
+	// chat are derived from it by syncPendingItem.
+	pending pendingTurn
 
 	// preThemeStyles stores the styles before a theme preview so we can revert.
 	preThemeStyles *styles.Styles
@@ -429,6 +474,12 @@ type UI struct {
 	// balance yet, or when the team has hypercredit display disabled, and
 	// no balance is rendered in either case.
 	hyperCredits *int
+
+	// gitBranch is the workspace's checked-out branch as of the last poll,
+	// empty when there is none to show. Reading it costs a file read
+	// locally and a request in client/server mode, so renders take it from
+	// here rather than asking the workspace per frame.
+	gitBranch string
 
 	// Prompt history for up/down navigation through previous messages.
 	promptHistory struct {
@@ -483,14 +534,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 
 	// Attachments component
 	attachments := attachments.New(
-		attachments.NewRenderer(
-			com.Styles.Attachments.Normal,
-			com.Styles.Attachments.Deleting,
-			com.Styles.Attachments.Image,
-			com.Styles.Attachments.Text,
-			com.Styles.Attachments.Skill,
-			com.Styles.Attachments.Remove,
-		),
+		attachments.NewRenderer(com.Styles.Attachments),
 		attachments.Keymap{
 			DeleteMode: keyMap.Editor.AttachmentDeleteMode,
 			DeleteAll:  keyMap.Editor.DeleteAllAttachments,
@@ -621,8 +665,18 @@ func (m *UI) Init() tea.Cmd {
 	if m.com.IsHyper() {
 		cmds = append(cmds, m.fetchHyperCredits())
 	}
+	// The branch is shown from the first frame on, so read it now and keep
+	// polling for checkouts made outside Crush.
+	cmds = append(cmds, m.fetchGitBranch(), m.gitBranchTicker())
 	cmds = append(cmds, m.hyperCreditsTicker())
-	cmds = append(cmds, m.checkPendingMCPAuth())
+	// Prime the memoized MCP state off-thread. There is deliberately no
+	// wait for server-side MCP initialization: the init gate is
+	// process-local and only armed where mcp.Initialize runs (the server),
+	// so waiting here is a no-op in client/server mode. The retry loop and
+	// TTL backstop in mcp.go converge on the settled states instead.
+	if cmd := m.requestMCPRefresh(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
 	return tea.Batch(cmds...)
 }
 
@@ -797,6 +851,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.beginFrameUpdate()
 	// Update terminal capabilities
 	m.caps.Update(msg)
+	m.trackTurnOutcome(msg)
 	switch msg := msg.(type) {
 	case tea.EnvMsg:
 		// Is this Windows Terminal?
@@ -819,6 +874,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 	case pubsub.Event[notify.RunComplete]:
+		m.endPendingTurn(msg.Payload.SessionID)
 		if cmd := m.handlePlanHandoff(msg.Payload); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -838,6 +894,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 	case agentRunSubmittedMsg:
+		if msg.err != nil {
+			// The run never started, so no terminal event is coming to
+			// retire its spinner.
+			m.endPendingTurn(msg.sessionID)
+			cmds = append(cmds, util.ReportError(msg.err))
+		}
 		// A prompt was just accepted (run started or enqueued): fetch the
 		// authoritative busy/queue state to confirm the optimistic values
 		// sendMessage wrote.
@@ -861,6 +923,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if cmd := m.resetPlanModeState(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
+			m.turnOutcome = ""
 		}
 		m.setState(uiChat, m.focus)
 		m.session = msg.session
@@ -939,7 +1002,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case mcpStateChangedMsg:
-		m.mcpStates = msg.states
 		if dia := m.dialog.Dialog(dialog.MCPTogglesID); dia != nil {
 			if toggles, ok := dia.(*dialog.MCPToggles); ok {
 				for name, info := range msg.states {
@@ -947,8 +1009,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		// Auto-open the MCP auth dialog if any servers need authentication.
-		if cmd := m.openMCPAuthDialog(); cmd != nil {
+		cmds = append(cmds, m.applyMCPStates(msg)...)
+	case mcpStartingRetryMsg:
+		// A server was still connecting when the last fetch landed; re-probe
+		// so "starting..." converges without depending on state_changed
+		// events (which can be missed in client/server mode).
+		if cmd := m.requestMCPRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	case mcpPromptsLoadedMsg:
@@ -1066,10 +1132,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pubsub.Event[mcp.Event]:
 		switch msg.Payload.Type {
 		case mcp.EventStateChanged:
-			return m, tea.Batch(
-				m.handleStateChanged(),
-				m.loadMCPrompts,
-			)
+			return m, tea.Batch(m.handleStateChanged()...)
 		case mcp.EventPromptsListChanged:
 			return m, handleMCPPromptsEvent(m.com.Workspace, msg.Payload.Name)
 		case mcp.EventToolsListChanged:
@@ -1472,32 +1535,29 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.fetchHyperCredits())
 		}
 		cmds = append(cmds, m.hyperCreditsTicker())
+	case gitBranchUpdatedMsg:
+		m.gitBranch = msg.branch
+	case gitBranchPollMsg:
+		cmds = append(cmds, m.fetchGitBranch(), m.gitBranchTicker())
 	case util.InfoMsg:
 		if msg.Type == util.InfoTypeError {
 			slog.Error("Error reported", "error", msg.Msg)
 		}
-		m.status.SetInfoMsg(msg)
-		ttl := msg.TTL
-		if ttl <= 0 {
-			ttl = DefaultStatusTTL
-		}
-		cmds = append(cmds, clearInfoMsgCmd(ttl))
+		cmds = append(cmds, m.status.Show(msg))
 	case app.UpdateAvailableMsg:
 		text := fmt.Sprintf("Crush update available: v%s → v%s.", msg.CurrentVersion, msg.LatestVersion)
 		if msg.IsDevelopment {
 			text = fmt.Sprintf("This is a development version of Crush. The latest version is v%s.", msg.LatestVersion)
 		}
-		ttl := 10 * time.Second
-		m.status.SetInfoMsg(util.InfoMsg{
+		cmds = append(cmds, m.status.Show(util.InfoMsg{
 			Type: util.InfoTypeUpdate,
 			Msg:  text,
-			TTL:  ttl,
-		})
-		cmds = append(cmds, clearInfoMsgCmd(ttl))
+			TTL:  10 * time.Second,
+		}))
 	case workspace.ConnectionEvent:
 		cmds = append(cmds, m.handleConnectionEvent(msg)...)
 	case util.ClearStatusMsg:
-		m.status.ClearInfoMsg()
+		m.status.ClearInfoMsg(msg.Seq)
 	case completions.CompletionItemsLoadedMsg:
 		if m.completionsOpen {
 			m.completions.SetItems(msg.Files, msg.Resources)
@@ -1511,6 +1571,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case dialog.ActionMCPAuthStarted:
 		cmds = append(cmds, m.authenticateMCP(msg.Ctx, msg.Name))
 	case dialog.ActionMCPAuthComplete, dialog.ActionMCPAuthErrored:
+		// The OAuth flow finished server-side: refresh the memoized states
+		// so the sidebar reflects the outcome even when the state_changed
+		// event was missed.
+		if cmd := m.requestMCPRefresh(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 		if m.dialog.HasDialogs() {
 			if cmd := m.handleDialogMsg(msg); cmd != nil {
 				cmds = append(cmds, cmd)
@@ -1566,6 +1632,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// tea.Sequence.
 	if m.state == uiChat {
 		if cmd := m.chat.EnsureAnimating(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		// Same for the chat scrollbar's auto-hide: a scroll may be applied
+		// from anywhere, so the deadline is armed here instead of being
+		// handed back to each call site to forward.
+		if cmd := m.chat.EnsureScrollbarHide(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	}
@@ -1644,6 +1716,13 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 	if cmd := m.chat.SetMessages(items...); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
+	// SetMessages rebuilds the items from stored messages, which cannot
+	// include the placeholder. Put it back when this session is still
+	// waiting on one, so switching away and back does not lose the
+	// spinner for the rest of the turn.
+	if m.syncPendingItem() {
+		m.chat.SetAnimationsAllowed(true)
+	}
 	m.chat.SelectLast()
 	return tea.Sequence(cmds...)
 }
@@ -1673,10 +1752,16 @@ func (m *UI) handleConnectionEvent(msg workspace.ConnectionEvent) []tea.Cmd {
 			TTL:  DefaultStatusTTL,
 		}
 	}
-	m.status.SetInfoMsg(info)
-	cmds := []tea.Cmd{clearInfoMsgCmd(info.TTL)}
-	if msg.State == workspace.ConnectionRecovered && m.session != nil {
-		cmds = append(cmds, m.loadSession(m.session.ID))
+	cmds := []tea.Cmd{m.status.Show(info)}
+	if msg.State == workspace.ConnectionRecovered {
+		// Events published while the stream was down are gone: re-sync the
+		// memoized MCP states alongside the session reload.
+		if cmd := m.requestMCPRefresh(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		if m.session != nil {
+			cmds = append(cmds, m.loadSession(m.session.ID))
+		}
 	}
 	return cmds
 }
@@ -1759,6 +1844,11 @@ func (m *UI) setMessagePlanFlags(items []chat.MessageItem) {
 func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 	var cmds []tea.Cmd
 
+	// The real message carries its own spinner from here on.
+	if msg.Role == message.Assistant && m.pending.sessionID == msg.SessionID {
+		m.handOffPendingTurn()
+	}
+
 	existing := m.chat.MessageItem(msg.ID)
 	if existing != nil {
 		// message already exists, skip
@@ -1780,6 +1870,10 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 			return nil
 		}
 		m.lastUserMessageTime = msg.CreatedAt
+		// This is the prompt the echo stood in for.
+		if m.pending.echo != nil && m.pending.sessionID == msg.SessionID {
+			m.dropPendingEcho()
+		}
 		items := chat.ExtractMessageItems(m.com.Styles, &msg, nil, m.com.Workspace.WorkingDir())
 		m.chat.AppendMessages(items...)
 		m.chat.ScrollToBottom()
@@ -2649,6 +2743,28 @@ func (m *UI) hyperCreditsTicker() tea.Cmd {
 	})
 }
 
+// fetchGitBranch reads the workspace's checked-out branch off the render
+// path. A failed read keeps whatever the last poll reported.
+func (m *UI) fetchGitBranch() tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), gitBranchFetchTimeout)
+		defer cancel()
+		branch, err := m.com.Workspace.GitBranch(ctx)
+		if err != nil {
+			slog.Warn("Failed to read the git branch", "error", err)
+			return nil
+		}
+		return gitBranchUpdatedMsg{branch: branch}
+	}
+}
+
+// gitBranchTicker schedules the next git branch poll.
+func (m *UI) gitBranchTicker() tea.Cmd {
+	return tea.Tick(gitBranchPollInterval, func(time.Time) tea.Msg {
+		return gitBranchPollMsg{}
+	})
+}
+
 // restoreModelFromSession checks the last assistant message in the
 // loaded session and, if it used a different provider/model than the
 // current config, restores that model/provider provided it is still
@@ -2749,18 +2865,19 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		m.com.Workspace.ImportCopilot()
 	}
 
-	// The OpenAI provider holds exactly one credential: a ChatGPT login
-	// or an API key. The empty model ID marks the OAuth flow's hand-off
-	// message (sign-in completed, or the method choice going to OAuth),
-	// and a catalog model needs one of the credentials before it can
-	// serve.
-	if providerID == string(catwalk.InferenceProviderOpenAI) {
+	// The OpenAI and xAI providers hold exactly one credential: an
+	// account login or an API key. The empty model ID marks the OAuth
+	// flow's hand-off message (sign-in completed, or the method choice
+	// going to OAuth), and a catalog model needs one of the credentials
+	// before it can serve.
+	if providerID == string(catwalk.InferenceProviderOpenAI) ||
+		providerID == string(catwalk.InferenceProviderXAI) {
 		providerCfg, _ := cfg.Providers.Get(providerID)
 		if msg.Model.Model == "" {
 			m.dialog.CloseDialog(dialog.ModelsID)
 			if providerCfg.OAuthToken != nil && !msg.ReAuthenticate {
 				// A sign-in just completed: reopen the list so the user
-				// can pick one of the freshly fetched subscription models.
+				// can pick from the now-available catalog.
 				m.dialog.CloseDialog(dialog.OAuthID)
 				if cmd := m.openModelsDialog(); cmd != nil {
 					return cmd
@@ -2781,6 +2898,26 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 		return tea.Batch(cmds...)
+	}
+
+	// A ChatGPT or Grok sign-in swaps the provider's catalog for the one
+	// the account serves, so a model chosen before the flow may no longer
+	// exist afterward. Apply the remembered choice only when the refreshed
+	// catalog still offers it; otherwise reopen the list and say so rather
+	// than silently falling back to a default.
+	if providerID == string(catwalk.InferenceProviderOpenAI) ||
+		providerID == string(catwalk.InferenceProviderXAI) {
+		if !cfg.IsModelAvailable(providerID, msg.Model.Model) {
+			m.dialog.CloseDialog(dialog.ModelsID)
+			cmds = append(cmds, util.ReportError(fmt.Errorf(
+				"%s isn't offered by your %s account; choose another model",
+				msg.Model.Model, cmp.Or(msg.Provider.Name, providerID),
+			)))
+			if cmd := m.openModelsDialog(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			return tea.Batch(cmds...)
+		}
 	}
 
 	if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, msg.ModelType, msg.Model); err != nil {
@@ -2871,6 +3008,21 @@ func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.Se
 			// An API key is the credential in force: edit it.
 			dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, model, modelType)
 		}
+	case catwalk.InferenceProviderXAI:
+		providerCfg, _ := m.com.Config().Providers.Get(string(provider.ID))
+		hasAPIKey := providerCfg.HasAPIKey(m.com.Workspace.Resolver())
+		switch {
+		case model.Model == "" || providerCfg.OAuthToken != nil:
+			// The sign-in flow's hand-off, or a re-authentication while
+			// the Grok login is the credential in force.
+			dlg, cmd = dialog.NewOAuthGrok(m.com, isOnboarding, provider, model, modelType)
+		case !hasAPIKey:
+			// No credential at all: let the user pick the method.
+			dlg = dialog.NewAuthMethod(m.com, isOnboarding, provider, model, modelType)
+		default:
+			// An API key is the credential in force: edit it.
+			dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, model, modelType)
+		}
 	default:
 		dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, model, modelType)
 	}
@@ -2885,10 +3037,10 @@ func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.Se
 }
 
 // openAuthenticationDialogWithMethod opens the authentication dialog for
-// the method the user chose in the auth method picker. Choosing OAuth
-// clears the model: the ChatGPT catalog is only known after sign-in, so
-// the flow ends by reopening the models list rather than selecting the
-// API-key model the user happened to start from.
+// the method the user chose in the auth method picker. The model the
+// user selected is carried through the OAuth flow so the choice persists;
+// handleSelectModel applies it only when the signed-in catalog still
+// offers it and errors otherwise.
 func (m *UI) openAuthenticationDialogWithMethod(provider catwalk.Provider, model config.SelectedModel, modelType config.SelectedModelType, useOAuth bool) tea.Cmd {
 	isOnboarding := m.state == uiOnboarding
 
@@ -2897,8 +3049,12 @@ func (m *UI) openAuthenticationDialogWithMethod(provider catwalk.Provider, model
 		cmd tea.Cmd
 	)
 	if useOAuth {
-		model.Model = ""
-		dlg, cmd = dialog.NewOAuthOpenAI(m.com, isOnboarding, provider, model, modelType)
+		switch provider.ID {
+		case catwalk.InferenceProviderOpenAI:
+			dlg, cmd = dialog.NewOAuthOpenAI(m.com, isOnboarding, provider, model, modelType)
+		case catwalk.InferenceProviderXAI:
+			dlg, cmd = dialog.NewOAuthGrok(m.com, isOnboarding, provider, model, modelType)
+		}
 	} else {
 		dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, model, modelType)
 	}
@@ -2947,9 +3103,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			}
 		case key.Matches(msg, m.keyMap.Chat.EndFollow):
 			if m.state == uiChat && m.hasSession() {
-				if cmd := m.chat.ScrollToBottomAndSelectLast(); cmd != nil {
-					cmds = append(cmds, cmd)
-				}
+				m.chat.ScrollToBottomAndSelectLast()
 				return true
 			}
 		case key.Matches(msg, m.keyMap.Chat.TogglePills):
@@ -3461,6 +3615,7 @@ func (m *UI) drawHeader(scr uv.Screen, area uv.Rectangle) {
 		area.Dx(),
 		m.lspErrorCount(),
 		m.hyperCredits,
+		m.gitBranch,
 	)
 }
 
@@ -3663,7 +3818,7 @@ func (m *UI) View() tea.View {
 		if content, cursor, ok := m.frames.get(key); ok {
 			v.Content = content
 			v.Cursor = cursor
-			m.applyProgressBar(&v)
+			m.applyTerminalStatus(&v)
 			return v
 		}
 	}
@@ -3684,14 +3839,16 @@ func (m *UI) View() tea.View {
 	if cacheable {
 		m.storeFrame(key, content, v.Cursor)
 	}
-	m.applyProgressBar(&v)
+	m.applyTerminalStatus(&v)
 
 	return v
 }
 
-// applyProgressBar attaches the terminal progress bar while the agent is
-// busy. Kept outside the frame cache so the randomized value stays fresh.
-func (m *UI) applyProgressBar(v *tea.View) {
+// applyTerminalStatus attaches the program status, and the terminal progress
+// bar while the agent is busy. Kept outside the frame cache so the
+// randomized progress value stays fresh.
+func (m *UI) applyTerminalStatus(v *tea.View) {
+	v.ProgramStatus = m.programStatus()
 	if m.progressBarEnabled && m.sendProgressBar && m.isAgentBusy() {
 		// HACK: use a random percentage to prevent ghostty from hiding it
 		// after a timeout.
@@ -4498,17 +4655,22 @@ func (m *UI) openEditor(value string) tea.Cmd {
 		if err != nil {
 			return util.ReportError(err)
 		}
-		content, err := os.ReadFile(tmpPath)
-		if err != nil {
-			return util.ReportError(err)
-		}
-		if len(content) == 0 {
-			return util.ReportWarn("Message is empty")
-		}
-		return openEditorMsg{
-			Text: strings.TrimSpace(string(content)),
-		}
+		return editorFileMsg(tmpPath)
 	})
+}
+
+// editorFileMsg reads the file the external editor was supposed to write and
+// turns it into the message that replaces the composer text. An emptied buffer
+// yields an empty Text, which clears the composer just like deleting every
+// character in-app does.
+func editorFileMsg(path string) tea.Msg {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return util.ReportError(err)
+	}
+	return openEditorMsg{
+		Text: strings.TrimSpace(string(content)),
+	}
 }
 
 // setEditorPrompt configures the textarea prompt function based on whether
@@ -4874,6 +5036,94 @@ func (m *UI) isAgentBusy() bool {
 	return m.agentBusyCache.val
 }
 
+// pendingTurn is a turn this client sent that has not yet ended. It lives
+// until the run's RunComplete (or a failure to start it) arrives.
+type pendingTurn struct {
+	// sessionID is the session running the turn; empty when none.
+	sessionID string
+	// echo shows the prompt until the stored user message replaces it.
+	echo chat.MessageItem
+	// spinner is the placeholder, kept so moving it keeps its animation.
+	spinner chat.MessageItem
+	// handedOff records that an assistant message now carries the spinner.
+	handedOff bool
+}
+
+// showPendingTurn shows the prompt and the turn spinner for sessionID,
+// ahead of the agent storing the message and publishing it back. Reports
+// whether a placeholder was added.
+func (m *UI) showPendingTurn(sessionID, prompt string, attachments []message.Attachment) bool {
+	m.pending = pendingTurn{sessionID: sessionID}
+	if prompt != "" || len(attachments) > 0 {
+		m.pending.echo = chat.NewPendingUserItem(m.com.Styles, prompt, attachments)
+	}
+	return m.syncPendingItem()
+}
+
+// dropPendingEcho removes the prompt echo, having been given the stored
+// message that supersedes it.
+func (m *UI) dropPendingEcho() {
+	m.pending.echo = nil
+	m.chat.RemoveMessage(chat.PendingUserID)
+}
+
+// handOffPendingTurn drops the placeholder for the assistant message that
+// now carries the spinner, without ending the turn.
+func (m *UI) handOffPendingTurn() {
+	m.pending.handedOff = true
+	m.pending.spinner = nil
+	m.syncPendingItem()
+}
+
+// endPendingTurn retires the pending items and the clock for sessionID, if
+// that is the session currently running a turn.
+func (m *UI) endPendingTurn(sessionID string) {
+	common.StopTurn(sessionID)
+	if m.pending.sessionID == sessionID {
+		m.pending = pendingTurn{}
+		m.syncPendingItem()
+	}
+}
+
+// turnInFlight reports whether a prompt sent to sessionID now would queue
+// behind a running turn rather than start one.
+func (m *UI) turnInFlight(sessionID string) bool {
+	if m.pending.sessionID == sessionID {
+		return true
+	}
+	if m.probedSession == sessionID && m.probedSessionBusy {
+		return true
+	}
+	return m.chat.HasLiveSpinner()
+}
+
+// syncPendingItem makes the chat match the pending turn, adding or removing
+// the prompt echo and the placeholder spinner as needed, and reports whether
+// it added the spinner. It is idempotent, so callers may run it on any path
+// that could have changed either the pending turn or the items in view.
+func (m *UI) syncPendingItem() bool {
+	if m.pending.sessionID == "" || m.pending.sessionID != m.currentSessionID() {
+		m.chat.RemoveMessage(chat.PendingUserID)
+		m.chat.RemoveMessage(chat.PendingAssistantID)
+		return false
+	}
+	if m.pending.echo != nil && m.chat.MessageItem(chat.PendingUserID) == nil {
+		m.chat.AppendMessages(m.pending.echo)
+	}
+	if m.pending.handedOff {
+		m.chat.RemoveMessage(chat.PendingAssistantID)
+		return false
+	}
+	if m.chat.MessageItem(chat.PendingAssistantID) != nil {
+		return false
+	}
+	if m.pending.spinner == nil {
+		m.pending.spinner = chat.NewPendingAssistantItem(m.com.Styles, m.pending.sessionID)
+	}
+	m.chat.AppendMessages(m.pending.spinner)
+	return true
+}
+
 // hasSession returns true if there is an active session with a valid ID.
 func (m *UI) hasSession() bool {
 	return m.session != nil && m.session.ID != ""
@@ -4989,14 +5239,7 @@ func (m *UI) refreshStyles() {
 	}
 	m.textarea.SetStyles(t.Editor.Textarea)
 	m.completions.SetStyles(t.Completions.Normal, t.Completions.Focused, t.Completions.Match)
-	m.attachments.Renderer().SetStyles(
-		t.Attachments.Normal,
-		t.Attachments.Deleting,
-		t.Attachments.Image,
-		t.Attachments.Text,
-		t.Attachments.Skill,
-		t.Attachments.Remove,
-	)
+	m.attachments.SetStyles(t.Attachments)
 	m.todoSpinner.Style = t.Pills.TodoSpinner
 	m.status.help.Styles = t.Help
 	if d := m.dialog.Dialog(dialog.ThemeID); d != nil {
@@ -5097,11 +5340,9 @@ func (m *UI) sendMessageInternal(content string, hidden bool, attachments ...mes
 		return util.ReportError(err)
 	}
 
-	// Start the turn timer.
-	common.StartTurn()
-
 	// Any new prompt supersedes a pending, unconfirmed plan.
 	m.setPlanReadyPending("")
+	m.turnOutcome = ""
 
 	var cmds []tea.Cmd
 	loadCmd, err := m.ensureSession()
@@ -5110,6 +5351,24 @@ func (m *UI) sendMessageInternal(content string, hidden bool, attachments ...mes
 	}
 	if loadCmd != nil {
 		cmds = append(cmds, loadCmd)
+	}
+
+	// A queued prompt belongs in the queue pill and keeps the running
+	// turn's spinner and clock. A fresh turn gets its own, from now.
+	sessionID := m.currentSessionID()
+	queued := m.turnInFlight(sessionID)
+	// Loading an idle session freezes ghost spinners; sending unfreezes.
+	m.chat.SetAnimationsAllowed(true)
+	if !queued {
+		common.StartTurn(sessionID)
+		echo := content
+		echoAttachments := attachments
+		if hidden {
+			echo, echoAttachments = "", nil
+		}
+		if m.showPendingTurn(sessionID, echo, echoAttachments) {
+			m.chat.ScrollToBottom()
+		}
 	}
 
 	ctx := context.Background()
@@ -5121,8 +5380,8 @@ func (m *UI) sendMessageInternal(content string, hidden bool, attachments ...mes
 		return nil
 	})
 
-	// Capture session ID to avoid race with main goroutine updating m.session.
-	sessionID := m.session.ID
+	// sessionID is captured above, before the commands below run, so it
+	// cannot race the main goroutine updating m.session.
 	// Optimistically mark the agent busy: the prompt we are about to submit
 	// either starts a run or is enqueued behind one. This keeps esc pressed
 	// right after enter routing to cancelAgent instead of reading a stale
@@ -5142,13 +5401,10 @@ func (m *UI) sendMessageInternal(content string, hidden bool, attachments ...mes
 			runCtx = message.WithHiddenUserMessage(runCtx)
 		}
 		err := m.com.Workspace.AgentRun(runCtx, sessionID, content, attachments...)
-		if err != nil && !errors.Is(err, context.Canceled) {
-			return util.InfoMsg{
-				Type: util.InfoTypeError,
-				Msg:  fmt.Sprintf("%v", err),
-			}
+		if errors.Is(err, context.Canceled) {
+			err = nil
 		}
-		return agentRunSubmittedMsg{}
+		return agentRunSubmittedMsg{sessionID: sessionID, err: err}
 	})
 	return tea.Batch(cmds...)
 }
@@ -5265,6 +5521,7 @@ func (m *UI) runShellCommandInternal(command string, isFirstMessage bool) tea.Cm
 
 	ctx, cancel := context.WithCancel(context.Background())
 	m.bangCancel = cancel
+	m.turnOutcome = ""
 
 	cmds = append(cmds, func() tea.Msg {
 		resp, err := m.com.Workspace.AgentRunShellCommand(ctx, sessionID, command, contentWidth, onProgress, isFirstMessage)
@@ -5723,7 +5980,6 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 	var cmds []tea.Cmd
 	switch n.Type {
 	case notify.TypeAgentFinished:
-		common.StopTurn()
 		cmds = append(cmds, m.sendNotification(notification.Notification{
 			Title:   "Crush is waiting...",
 			Message: fmt.Sprintf("Agent's turn completed in \"%s\"", n.SessionTitle),
@@ -5738,6 +5994,7 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 	case notify.TypeAgentError:
 		// Terminal edge like TypeAgentFinished; fall through to the
 		// busy/queue refresh below.
+		m.endPendingTurn(n.SessionID)
 	case notify.TypeReAuthenticate:
 		return m.handleReAuthenticate(n.ProviderID)
 	case notify.TypeAWSSSOAuth:
@@ -5830,6 +6087,7 @@ func (m *UI) newSession() tea.Cmd {
 	}
 
 	planCmd := m.resetPlanModeState()
+	m.turnOutcome = ""
 	m.session = nil
 	m.sidebarOffset = 0
 	m.sessionFiles = nil
@@ -6173,13 +6431,19 @@ func (m *UI) runMCPPrompt(clientID, promptID string, arguments map[string]string
 	return tea.Sequence(cmds...)
 }
 
-func (m *UI) handleStateChanged() tea.Cmd {
-	return m.updateAgentModelCmd(func() tea.Msg {
-		m.com.Workspace.UpdateAgentModel(context.Background())
-		return mcpStateChangedMsg{
-			states: m.com.Workspace.MCPGetStates(),
-		}
-	})
+// handleStateChanged reacts to an MCP state change: the memoized sidebar
+// states refresh off-thread (an authoritative re-fetch rather than the event
+// payload, so a missed field cannot drift), the coordinator rebuilds to pick
+// up newly registered tools, and the MCP prompts reload.
+func (m *UI) handleStateChanged() []tea.Cmd {
+	return []tea.Cmd{
+		m.requestMCPRefresh(),
+		m.updateAgentModelCmd(func() tea.Msg {
+			m.com.Workspace.UpdateAgentModel(context.Background())
+			return nil
+		}),
+		m.loadMCPrompts,
+	}
 }
 
 func handleMCPPromptsEvent(ws workspace.Workspace, name string) tea.Cmd {

@@ -42,7 +42,7 @@ func TestBackend_WorkspaceSkillsIsolation(t *testing.T) {
 	writeSkill(t, wdA, "wsa-only-skill", "Workspace A only skill.")
 	writeSkill(t, wdB, "wsb-only-skill", "Workspace B only skill.")
 
-	srvCfg, err := config.Init(wdA, "", false)
+	srvCfg, err := config.Init(t.Context(), wdA, "", false)
 	require.NoError(t, err)
 	b := backend.New(t.Context(), srvCfg, nil)
 

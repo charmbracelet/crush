@@ -155,7 +155,12 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 			}
 		}
 	}
-	go mcp.Initialize(ctx, app.Permissions, store, forceStart...)
+	// Servers disabled for this repository via Toggle MCPs are not started.
+	localDisabled, err := app.Sessions.MCPDisabledServers(ctx)
+	if err != nil {
+		slog.Warn("Failed to list disabled MCP overrides; starting them anyway", "error", err)
+	}
+	go mcp.Initialize(ctx, app.Permissions, store, forceStart, localDisabled)
 
 	// Start herdr integration when running inside a herdr pane.
 	app.herdrClient = herdr.Init()
@@ -183,6 +188,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	if err := app.InitCoderAgent(ctx); err != nil {
 		return nil, fmt.Errorf("failed to initialize coder agent: %w", err)
 	}
+	go app.refreshDiscoveredModels(ctx, app.AgentCoordinator)
 
 	// Set up callback for LSP state updates.
 	app.LSPManager.SetCallback(func(name string, client *lsp.Client) {
@@ -199,6 +205,23 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	go app.LSPManager.TrackConfigured(ctx)
 
 	return app, nil
+}
+
+// refreshDiscoveredModels updates custom provider models that startup took
+// from the discovery cache. The coordinator is passed in rather than read
+// from app so this goroutine never races a later InitCoderAgent.
+func (app *App) refreshDiscoveredModels(ctx context.Context, coordinator agent.Coordinator) {
+	defer log.RecoverPanic("app.refreshDiscoveredModels", nil)
+	reloaded, err := app.config.RefreshDiscoveredModels(ctx)
+	if err != nil {
+		slog.Warn("Failed to apply refreshed provider models", "error", err)
+	}
+	if !reloaded {
+		return
+	}
+	if err := coordinator.UpdateModels(ctx); err != nil {
+		slog.Warn("Failed to update agent models after discovery", "error", err)
+	}
 }
 
 // Config returns the pure-data configuration.
@@ -455,7 +478,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 
 				part := content[readBytes:]
 				// Trim leading whitespace. Sometimes the LLM includes leading
-				// formatting and intentation, which we don't want here.
+				// formatting and indentation, which we don't want here.
 				if readBytes == 0 {
 					part = strings.TrimLeft(part, " \t")
 				}
@@ -632,20 +655,30 @@ func (app *App) GetDefaultSmallModel(providerID string) config.SelectedModel {
 		return largeModelCfg
 	}
 
-	// A ChatGPT-authenticated OpenAI provider only serves the models the
+	// A subscription-authenticated provider only serves the models its
 	// subscription grants, so the default small model must come from that
-	// catalog as well.
-	if providerID == string(catwalk.InferenceProviderOpenAI) && largeModelCfg.Provider == providerID {
-		if pc, ok := cfg.Providers.Get(providerID); ok && pc.OAuthToken != nil {
-			if small := chatGPTSmallModel(pc); small != nil {
-				return config.SelectedModel{
-					Provider:        providerID,
-					Model:           small.ID,
-					MaxTokens:       small.DefaultMaxTokens,
-					ReasoningEffort: small.Reasoning.DefaultEffortLevel,
+	// catalog as well. This applies to ChatGPT-authenticated OpenAI and
+	// Grok-authenticated xAI alike.
+	if largeModelCfg.Provider == providerID {
+		var pick func(config.ProviderConfig) *catwalk.Model
+		switch providerID {
+		case string(catwalk.InferenceProviderOpenAI):
+			pick = chatGPTSmallModel
+		case string(catwalk.InferenceProviderXAI):
+			pick = grokSmallModel
+		}
+		if pick != nil {
+			if pc, ok := cfg.Providers.Get(providerID); ok && pc.OAuthToken != nil {
+				if small := pick(pc); small != nil {
+					return config.SelectedModel{
+						Provider:        providerID,
+						Model:           small.ID,
+						MaxTokens:       small.DefaultMaxTokens,
+						ReasoningEffort: small.Reasoning.DefaultEffortLevel,
+					}
 				}
+				return largeModelCfg
 			}
-			return largeModelCfg
 		}
 	}
 
@@ -670,6 +703,24 @@ func chatGPTSmallModel(pc config.ProviderConfig) *catwalk.Model {
 	}
 	if len(pc.ChatGPTModels) > 0 {
 		return &pc.ChatGPTModels[len(pc.ChatGPTModels)-1]
+	}
+	return nil
+}
+
+// grokSmallModel picks a lightweight model from the Grok catalog,
+// preferring a "fast" or "mini" variant and falling back to the last
+// entry (the catalog lists heavier models first). Returns nil when the
+// catalog is empty.
+func grokSmallModel(pc config.ProviderConfig) *catwalk.Model {
+	for _, marker := range []string{"fast", "mini"} {
+		for i := range pc.GrokModels {
+			if strings.Contains(pc.GrokModels[i].ID, marker) {
+				return &pc.GrokModels[i]
+			}
+		}
+	}
+	if len(pc.GrokModels) > 0 {
+		return &pc.GrokModels[len(pc.GrokModels)-1]
 	}
 	return nil
 }

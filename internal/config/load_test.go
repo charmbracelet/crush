@@ -2652,6 +2652,7 @@ func TestConfig_LoadFromBytes_KeepsCatwalkV3Models(t *testing.T) {
 }
 
 func TestLoadFromConfigPaths_PersistsCatwalkV2Migration(t *testing.T) {
+	t.Parallel()
 	t.Run("rewrites v2 config files on disk", func(t *testing.T) {
 		t.Parallel()
 		tmpDir := t.TempDir()

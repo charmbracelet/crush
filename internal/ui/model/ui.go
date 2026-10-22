@@ -406,7 +406,6 @@ type UI struct {
 
 	// forceCompactMode tracks whether compact mode is forced by user toggle
 	forceCompactMode bool
-	timestampFormat  config.TimestampFormat
 
 	// isCompact tracks whether we're currently in compact layout mode (either
 	// by user toggle or auto-switch based on window size)
@@ -595,7 +594,6 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 
 	// Initialize compact mode from config
 	ui.forceCompactMode = com.Config().Options.TUI.CompactMode
-	ui.timestampFormat = com.Config().TimestampFormat()
 
 	// set onboarding state defaults
 	ui.onboarding.yesInitializeSelected = true
@@ -851,7 +849,6 @@ func (m *UI) loadMCPrompts() tea.Msg {
 func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	m.beginFrameUpdate()
-	m.refreshAssistantInfoConfig()
 	// Update terminal capabilities
 	m.caps.Update(msg)
 	m.trackTurnOutcome(msg)

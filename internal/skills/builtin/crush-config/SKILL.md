@@ -209,8 +209,7 @@ option ui timestamps 24h
 ```
 
 Completion timestamps use the local timezone. `timestamps off` hides them.
-The JSON equivalent is `options.tui.timestamps`. Reloaded settings apply to
-existing response footers.
+The JSON equivalent is `options.tui.timestamps`.
 
 > [!IMPORTANT] These skill paths are loaded by default and do NOT need
 > `skill-path`: `.agents/skills`, `.crush/skills`, `.claude/skills`,

@@ -81,7 +81,7 @@ func TestAssistantInfoItem_MissingCompletionTimestamp(t *testing.T) {
 	}
 }
 
-func TestAssistantInfoItem_TimestampConfigChanges(t *testing.T) {
+func TestAssistantInfoItem_TimestampFormats(t *testing.T) {
 	t.Parallel()
 
 	completedAt := time.Date(2026, time.January, 2, 23, 23, 0, 0, time.Local)
@@ -93,9 +93,6 @@ func TestAssistantInfoItem_TimestampConfigChanges(t *testing.T) {
 			message.Finish{Reason: message.FinishReasonEndTurn, Time: completedAt.Unix()},
 		},
 	}
-	item := newTestAssistantInfoItem(msg, completedAt.Add(-4*time.Second))
-	require.Contains(t, ansi.Strip(item.Render(120)), "in 4s • 11:23 PM")
-
 	for _, tt := range []struct {
 		format config.TimestampFormat
 		want   string
@@ -104,21 +101,21 @@ func TestAssistantInfoItem_TimestampConfigChanges(t *testing.T) {
 		{format: config.TimestampFormatOff, want: "Unknown Model via test in 4s"},
 		{format: config.TimestampFormat12Hour, want: "in 4s • 11:23 PM"},
 	} {
-		cfg := &config.Config{
-			Providers: item.cfg.Providers,
-			Options:   &config.Options{TUI: &config.TUIOptions{Timestamps: tt.format}},
-		}
-		version := item.Version()
-		item.SetConfig(cfg)
-		require.Greater(t, item.Version(), version, "a changed format must invalidate the list cache")
-		out := ansi.Strip(item.Render(120))
-		require.Contains(t, out, tt.want)
-		if tt.format == config.TimestampFormatOff {
-			require.NotContains(t, out, "•")
-		}
-		version = item.Version()
-		item.SetConfig(cfg)
-		require.Equal(t, version, item.Version(), "unchanged formats must retain cached output")
+		t.Run(string(tt.format), func(t *testing.T) {
+			t.Parallel()
+
+			sty := styles.CharmtonePantera()
+			cfg := &config.Config{
+				Providers: csync.NewMap[string, config.ProviderConfig](),
+				Options:   &config.Options{TUI: &config.TUIOptions{Timestamps: tt.format}},
+			}
+			item := NewAssistantInfoItem(&sty, msg, cfg, completedAt.Add(-4*time.Second))
+			out := ansi.Strip(item.Render(120))
+			require.Contains(t, out, tt.want)
+			if tt.format == config.TimestampFormatOff {
+				require.NotContains(t, out, "•")
+			}
+		})
 	}
 }
 

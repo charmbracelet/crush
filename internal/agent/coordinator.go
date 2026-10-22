@@ -73,10 +73,11 @@ var (
 
 // servingProvider returns the fantasy provider package that serves the
 // given provider and model. Providers with bespoke SDKs (Bedrock, Azure,
-// Google, Vertex AI, OpenRouter, Vercel, Hyper) are selected by ID, and
-// gateway providers (Copilot, OpenCode) are always OpenAI-compatible;
-// everything else is determined by the catwalk type, which describes the
-// API endpoint format the model speaks.
+// Google, Vertex AI, OpenRouter, Vercel, Hyper) are selected by ID;
+// everything else, gateways like Copilot and OpenCode included, is
+// determined by the catwalk type, which describes the API endpoint
+// format the model speaks and so the key its provider options are read
+// from.
 func servingProvider(providerCfg config.ProviderConfig, model catwalk.Model) string {
 	switch providerCfg.ID {
 	case string(catwalk.InferenceProviderBedrock), string(catwalk.InferenceProviderBedrockEurope):
@@ -91,10 +92,6 @@ func servingProvider(providerCfg config.ProviderConfig, model catwalk.Model) str
 		return vercel.Name
 	case hyper.Name:
 		return hyper.Name
-	case string(catwalk.InferenceProviderCopilot),
-		string(catwalk.InferenceProviderOpenCodeGo),
-		string(catwalk.InferenceProviderOpenCodeZen):
-		return openaicompat.Name
 	}
 
 	switch model.EffectiveType(providerCfg.Type) {

@@ -29,9 +29,6 @@ func TestServingProvider(t *testing.T) {
 			string(catwalk.InferenceProviderOpenRouter):    "openrouter",
 			string(catwalk.InferenceProviderVercel):        "vercel",
 			"hyper":                                        "hyper",
-			string(catwalk.InferenceProviderCopilot):       "openai-compat",
-			string(catwalk.InferenceProviderOpenCodeGo):    "openai-compat",
-			string(catwalk.InferenceProviderOpenCodeZen):   "openai-compat",
 		} {
 			require.Equal(t, expected, servingProvider(providerCfg(providerID, catwalk.TypeCompletions), model("")), providerID)
 		}
@@ -46,6 +43,13 @@ func TestServingProvider(t *testing.T) {
 		} {
 			require.Equal(t, expected, servingProvider(providerCfg("custom", ""), model(wireType)), wireType)
 			require.Equal(t, expected, servingProvider(providerCfg("custom", wireType), model("")), wireType)
+			for _, gateway := range []catwalk.InferenceProvider{
+				catwalk.InferenceProviderCopilot,
+				catwalk.InferenceProviderOpenCodeGo,
+				catwalk.InferenceProviderOpenCodeZen,
+			} {
+				require.Equal(t, expected, servingProvider(providerCfg(string(gateway), catwalk.TypeCompletions), model(wireType)), gateway)
+			}
 		}
 	})
 

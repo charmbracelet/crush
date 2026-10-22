@@ -13,6 +13,16 @@ import (
 // Hook event name constants.
 const (
 	EventPreToolUse = "PreToolUse"
+	// EventPrePermission fires right before the permission service is
+	// about to prompt the user for a tool call. Returning allow or deny
+	// from these hooks short-circuits the prompt entirely; silence falls
+	// through to the normal prompt.
+	EventPrePermission = "PrePermission"
+	// EventPermissionDenied fires after a permission request has been
+	// denied, so hosts can react programmatically (notify, log, disable).
+	// It carries the permission request payload. Fire-and-forget: the
+	// hook does not block the denial.
+	EventPermissionDenied = "PermissionDenied"
 )
 
 // HaltExitCode is the exit code that halts the whole turn. 2 blocks the

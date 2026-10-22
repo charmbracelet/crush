@@ -22,6 +22,10 @@ func TestCloneForWrite_Isolation(t *testing.T) {
 		},
 		MCP:       MCPs{"a": {}},
 		Providers: csync.NewMap[string, ProviderConfig](),
+		AutoMode: &AutoModeConfig{
+			Enabled:    true,
+			Classifier: &AutoModeClassifier{Provider: "old", Model: "old-model"},
+		},
 		Options: &Options{
 			TUI: &TUIOptions{CompactMode: false},
 		},
@@ -33,6 +37,9 @@ func TestCloneForWrite_Isolation(t *testing.T) {
 	clone.Models[SelectedModelTypeLarge] = SelectedModel{Provider: "anthropic", Model: "claude"}
 	clone.RecentModels[SelectedModelTypeLarge] = []SelectedModel{{Provider: "anthropic", Model: "claude"}}
 	clone.MCP["b"] = MCPConfig{}
+	clone.AutoMode.Enabled = false
+	clone.AutoMode.Classifier.Provider = "new"
+	clone.AutoMode.Classifier.Model = "new-model"
 	clone.Options.TUI.CompactMode = true
 	enabled := true
 	clone.Options.TUI.Transparent = &enabled
@@ -43,6 +50,9 @@ func TestCloneForWrite_Isolation(t *testing.T) {
 	require.Equal(t, "openai", orig.Models[SelectedModelTypeLarge].Provider, "Models leaked")
 	require.Equal(t, "openai", orig.RecentModels[SelectedModelTypeLarge][0].Provider, "RecentModels leaked")
 	require.NotContains(t, orig.MCP, "b", "MCP leaked")
+	require.True(t, orig.AutoMode.Enabled, "AutoMode.Enabled leaked")
+	require.Equal(t, "old", orig.AutoMode.Classifier.Provider, "AutoMode.Classifier.Provider leaked")
+	require.Equal(t, "old-model", orig.AutoMode.Classifier.Model, "AutoMode.Classifier.Model leaked")
 	require.False(t, orig.Options.TUI.CompactMode, "Options.TUI.CompactMode leaked")
 	require.Nil(t, orig.Options.TUI.Transparent, "Options.TUI.Transparent leaked")
 	require.Nil(t, orig.Options.TUI.Mouse, "Options.TUI.Mouse leaked")

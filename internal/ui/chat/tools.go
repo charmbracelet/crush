@@ -233,7 +233,7 @@ func NewToolMessageItem(
 	case tools.BashToolName:
 		item = NewBashToolMessageItem(sty, toolCall, result, canceled, workingDir)
 	case tools.JobOutputToolName:
-		item = NewJobOutputToolMessageItem(sty, toolCall, result, canceled)
+		item = NewJobOutputToolMessageItem(sty, toolCall, result, canceled, workingDir)
 	case tools.JobKillToolName:
 		item = NewJobKillToolMessageItem(sty, toolCall, result, canceled)
 	case tools.ViewToolName:
@@ -746,6 +746,16 @@ func capLineWidths(s string, width int) string {
 	return strings.Join(lines, "\n")
 }
 
+// indentLines indents every line of s by n spaces.
+func indentLines(s string, n int) string {
+	lines := strings.Split(s, "\n")
+	indent := strings.Repeat(" ", n)
+	for i := range lines {
+		lines[i] = indent + lines[i]
+	}
+	return strings.Join(lines, "\n")
+}
+
 // toolHeader builds the tool header line: "● ToolName params..."
 // When opts.ExpandedContent is true, long parameters wrap instead of truncating.
 func toolHeader(sty *styles.Styles, status ToolStatus, name string, width int, opts *ToolRenderOpts, params ...string) string {
@@ -770,20 +780,13 @@ func toolHeaderWithChip(sty *styles.Styles, status ToolStatus, name, chip string
 	if chip != "" {
 		prefix += chip + " "
 	}
-	prefixWidth := lipgloss.Width(prefix)
-	remainingWidth := width - prefixWidth
-	paramsStr := toolParamListMainStyle(sty, params, remainingWidth, opts, mainStyle)
+	paramsStr := toolParamListMainStyle(sty, params, width-lipgloss.Width(prefix), opts, mainStyle)
 
 	// When expanded, toolParamList may return multiple lines. Indent
 	// continuation lines with the base prefix (icon + name) so the chip does
 	// not push them too far to the right.
-	if strings.Contains(paramsStr, "\n") {
-		lines := strings.Split(paramsStr, "\n")
-		indent := strings.Repeat(" ", lipgloss.Width(basePrefix))
-		for i := 1; i < len(lines); i++ {
-			lines[i] = indent + lines[i]
-		}
-		return prefix + strings.Join(lines, "\n")
+	if first, rest, found := strings.Cut(paramsStr, "\n"); found {
+		return prefix + first + "\n" + indentLines(rest, lipgloss.Width(basePrefix))
 	}
 	return prefix + paramsStr
 }

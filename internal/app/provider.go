@@ -56,7 +56,7 @@ func findModels(providers map[string]config.ProviderConfig, largeModel, smallMod
 		if provider.Disable {
 			continue
 		}
-		for _, m := range provider.Models {
+		for _, m := range provider.AvailableModels() {
 			if filter(largeModelID, largeProviderFilter, m.ID, name) {
 				largeMatches = append(largeMatches, modelMatch{provider: name, modelID: m.ID})
 			}

@@ -2807,7 +2807,7 @@ func (m *UI) restoreModelFromSession(msgs []message.Message) tea.Cmd {
 
 	m.applyThemeForProvider(lastAssistant.Provider)
 
-	if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
+	if small, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok || !cfg.IsModelAvailable(small.Provider, small.Model) {
 		smallModel := m.com.Workspace.GetDefaultSmallModel(lastAssistant.Provider)
 		if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeSmall, smallModel); err != nil {
 			slog.Error("Failed to set small model during session restore", "error", err)
@@ -2859,7 +2859,25 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 
 	// Attempt to import GitHub Copilot tokens from VSCode if available.
 	if isCopilot && !isConfigured() && !msg.ReAuthenticate {
-		m.com.Workspace.ImportCopilot()
+		if _, imported := m.com.Workspace.ImportCopilot(); imported {
+			m.dialog.CloseDialog(dialog.ModelsID)
+			return m.openModelsDialog()
+		}
+	}
+
+	// An empty model marks the handoff from OAuth authentication to the
+	// credential-scoped model catalog, which is only known after sign-in.
+	if msg.Model.Model == "" && (providerID == string(catwalk.InferenceProviderOpenAI) || isCopilot) {
+		providerCfg, _ := cfg.Providers.Get(providerID)
+		m.dialog.CloseDialog(dialog.ModelsID)
+		if providerCfg.OAuthToken != nil && !msg.ReAuthenticate {
+			m.dialog.CloseDialog(dialog.OAuthID)
+			if cmd := m.openModelsDialog(); cmd != nil {
+				return cmd
+			}
+			return nil
+		}
+		return m.openAuthenticationDialog(msg.Provider, msg.Model, msg.ModelType)
 	}
 
 	// The OpenAI and xAI providers hold exactly one credential: an
@@ -2873,8 +2891,6 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		if msg.Model.Model == "" {
 			m.dialog.CloseDialog(dialog.ModelsID)
 			if providerCfg.OAuthToken != nil && !msg.ReAuthenticate {
-				// A sign-in just completed: reopen the list so the user
-				// can pick from the now-available catalog.
 				m.dialog.CloseDialog(dialog.OAuthID)
 				if cmd := m.openModelsDialog(); cmd != nil {
 					return cmd
@@ -2927,8 +2943,8 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 			// re-render of the transcript on every selection.
 			m.applyThemeForProvider(providerID)
 		}
-		if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
-			// Ensure small model is set is unset.
+		if small, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok || !cfg.IsModelAvailable(small.Provider, small.Model) {
+			// Ensure the small model is set and remains available.
 			smallModel := m.com.Workspace.GetDefaultSmallModel(providerID)
 			if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeSmall, smallModel); err != nil {
 				cmds = append(cmds, util.ReportError(err))
@@ -2989,6 +3005,7 @@ func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.Se
 	case "hyper":
 		dlg, cmd = dialog.NewOAuthHyper(m.com, isOnboarding, provider, model, modelType)
 	case catwalk.InferenceProviderCopilot:
+		model.Model = ""
 		dlg, cmd = dialog.NewOAuthCopilot(m.com, isOnboarding, provider, model, modelType)
 	case catwalk.InferenceProviderOpenAI:
 		providerCfg, _ := m.com.Config().Providers.Get(string(provider.ID))

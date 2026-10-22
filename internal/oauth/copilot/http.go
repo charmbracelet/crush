@@ -5,6 +5,7 @@ const (
 	editorVersion       = "vscode/1.105.1"
 	editorPluginVersion = "copilot-chat/0.32.4"
 	integrationID       = "vscode-chat"
+	apiVersion          = "2026-08-01"
 )
 
 func Headers() map[string]string {
@@ -13,5 +14,6 @@ func Headers() map[string]string {
 		"Editor-Version":         editorVersion,
 		"Editor-Plugin-Version":  editorPluginVersion,
 		"Copilot-Integration-Id": integrationID,
+		"X-GitHub-Api-Version":   apiVersion,
 	}
 }

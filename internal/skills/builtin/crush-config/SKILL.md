@@ -160,6 +160,28 @@ execute (stdin payload, env vars, decisions).
 hook add PreToolUse --matcher "^bash$" --command ".crush/hooks/no-haskell.sh" --name no-haskell
 ```
 
+### routers
+
+A router lets a cheap classifier model pick the model for every agent step. The
+active router replaces the large model; choosing a large model turns it off.
+
+```bash
+router add <name> --classifier <provider>/<id> [--default ROUTE] [--instructions TEXT] [--timeout N]
+router route <name> <route> <provider>/<id> --description TEXT   # add or replace a route
+router remove <name> [<route>]                                   # alias: rm
+router use <name>                                                # or: router use --none
+```
+
+Router and route names must match `[a-z0-9_-]+`. Classification failures
+fall back to the default route (first route unless `--default` is set).
+
+```bash
+router add auto --classifier anthropic/claude-haiku-4-5
+router route auto simple anthropic/claude-haiku-4-5 --description "Questions and small edits"
+router route auto complex anthropic/claude-opus-4-1 --description "Refactors and debugging"
+router use auto
+```
+
 ### permissions
 
 ```bash
@@ -346,6 +368,9 @@ The `$schema` property enables IDE autocomplete but is optional.
 | `mcp add gh --type http --url U`     | `mcp.gh = {"type":"http","url":"U"}`                   |
 | `lsp add go --command gopls`         | `lsp.go = {"command":"gopls"}`                         |
 | `hook add PreToolUse --command C`    | append to `hooks.PreToolUse[]`                         |
+| `router add r --classifier p/m`      | `routers.r = {"classifier":{"provider":"p","model":"m"}}` |
+| `router route r x p/m --description D` | append to `routers.r.routes[]`                       |
+| `router use r`                       | `active_router = "r"`                                  |
 | `permissions allow view ls`          | `permissions.allowed_tools = ["view","ls"]`            |
 | `permissions deny bash`              | `options.disabled_tools = ["bash"]`                    |
 | `option skill-path ./skills`         | `options.skills_paths = ["./skills"]`                  |

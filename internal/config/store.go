@@ -70,6 +70,9 @@ type RuntimeOverrides struct {
 	// selection made here always outranks whatever the shared config file
 	// happens to hold — see pinPreferredModelLocked.
 	Models map[SelectedModelType]SelectedModel
+	// ActiveRouter records a router choice made in this instance, pinned
+	// across reloads like Models. Nil means no choice was made here.
+	ActiveRouter *string
 }
 
 // ConfigStore is the single entry point for all config access. It owns the
@@ -468,6 +471,31 @@ func (s *ConfigStore) OverridePreferredModel(modelType SelectedModelType, model 
 		}
 		c.Models[modelType] = model
 		s.pinPreferredModelLocked(modelType, model)
+		if modelType == SelectedModelTypeLarge && c.ActiveRouter != "" {
+			c.ActiveRouter = ""
+			s.pinActiveRouterLocked("")
+		}
+	})
+}
+
+// pinActiveRouterLocked records the router choice made in this instance.
+// Caller must hold writeMu.
+func (s *ConfigStore) pinActiveRouterLocked(name string) {
+	s.overrides.ActiveRouter = &name
+}
+
+// SetActiveRouter activates the named router (or clears it when name is
+// empty) and persists the choice.
+func (s *ConfigStore) SetActiveRouter(scope Scope, name string) error {
+	if name != "" {
+		if _, ok := s.Config().Routers[name]; !ok {
+			return fmt.Errorf("router %q not found", name)
+		}
+	}
+	return s.update(scope, func(c *Config) map[string]any {
+		c.ActiveRouter = name
+		s.pinActiveRouterLocked(name)
+		return map[string]any{"active_router": name}
 	})
 }
 
@@ -520,7 +548,16 @@ func (s *ConfigStore) RemoveConfigField(scope Scope, key string) error {
 // UpdateAgentModel).
 func (s *ConfigStore) UpdatePreferredModel(scope Scope, modelType SelectedModelType, model SelectedModel) error {
 	return s.update(scope, func(c *Config) map[string]any {
-		return s.updatePreferredModelFields(c, modelType, model)
+		prev := c.Models[modelType]
+		fields := s.updatePreferredModelFields(c, modelType, model)
+		// Choosing a different large model turns off any active router.
+		changed := prev.Provider != model.Provider || prev.Model != model.Model
+		if modelType == SelectedModelTypeLarge && changed && c.ActiveRouter != "" {
+			c.ActiveRouter = ""
+			s.pinActiveRouterLocked("")
+			fields["active_router"] = ""
+		}
+		return fields
 	})
 }
 
@@ -1417,6 +1454,9 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 	if err := cfg.ValidateHooks(); err != nil {
 		return fmt.Errorf("invalid hook configuration on reload: %w", err)
 	}
+	if err := cfg.ValidateRouters(); err != nil {
+		return fmt.Errorf("invalid router configuration on reload: %w", err)
+	}
 
 	// Save current state for potential rollback BEFORE configureProviders,
 	// which may write to disk via RemoveConfigField (e.g. removing stale
@@ -1438,6 +1478,9 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 	// mid-session. An external edit to the config still takes effect for any
 	// model type this instance never chose.
 	maps.Copy(cfg.Models, overrides.Models)
+	if overrides.ActiveRouter != nil {
+		cfg.ActiveRouter = *overrides.ActiveRouter
+	}
 
 	// Reconfigure providers
 	env := env.New()

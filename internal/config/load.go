@@ -84,6 +84,9 @@ func Load(ctx context.Context, workingDir, dataDir string, debug bool) (*ConfigS
 	if err := cfg.ValidateHooks(); err != nil {
 		return nil, fmt.Errorf("invalid hook configuration: %w", err)
 	}
+	if err := cfg.ValidateRouters(); err != nil {
+		return nil, fmt.Errorf("invalid router configuration: %w", err)
+	}
 
 	if !isInsideWorktree() {
 		const depth = 2
@@ -422,6 +425,7 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 		providerConfig.Type = cmp.Or(providerConfig.Type, catwalk.TypeOpenAICompat)
 		if !slices.Contains(catwalk.KnownProviderTypes(), providerConfig.Type) &&
 			providerConfig.Type != hyper.Name &&
+			providerConfig.Type != ProviderTypeTypeSafe &&
 			!discover.IsKnownCustomProvider(string(providerConfig.Type)) {
 			slog.Warn("Skipping custom provider due to unsupported provider type", "provider", id)
 			c.Providers.Del(id)
@@ -1415,4 +1419,70 @@ func (c *Config) ValidateHooks() error {
 		}
 	}
 	return nil
+}
+
+// RouterNamePattern is the allowed shape of router and route names. It
+// keeps names safe to use as JSON-path segments when persisting.
+var RouterNamePattern = regexp.MustCompile(`^[a-z0-9_-]+$`)
+
+// ValidateRouter checks a single router's structure. Model availability
+// is checked at runtime, where routing falls back gracefully.
+func ValidateRouter(name string, r RouterConfig) error {
+	if !RouterNamePattern.MatchString(name) {
+		return fmt.Errorf("router %q: name must match %s", name, RouterNamePattern)
+	}
+	if r.Classifier.Provider == "" || r.Classifier.Model == "" {
+		return fmt.Errorf("router %q: classifier provider and model are required", name)
+	}
+	if len(r.Routes) == 0 {
+		return fmt.Errorf("router %q: at least one route is required", name)
+	}
+	seen := make(map[string]bool, len(r.Routes))
+	for i, route := range r.Routes {
+		if !RouterNamePattern.MatchString(route.Name) {
+			return fmt.Errorf("router %q: route[%d] name %q must match %s", name, i, route.Name, RouterNamePattern)
+		}
+		if seen[route.Name] {
+			return fmt.Errorf("router %q: duplicate route %q", name, route.Name)
+		}
+		seen[route.Name] = true
+		if route.Model.Provider == "" || route.Model.Model == "" {
+			return fmt.Errorf("router %q: route %q needs a provider and model", name, route.Name)
+		}
+	}
+	if r.Default != "" && !seen[r.Default] {
+		return fmt.Errorf("router %q: default route %q does not exist", name, r.Default)
+	}
+	return nil
+}
+
+// ValidateRouters validates every configured router.
+func (c *Config) ValidateRouters() error {
+	names := slices.Sorted(maps.Keys(c.Routers))
+	for _, name := range names {
+		r := c.Routers[name]
+		r.Routes = dedupeRoutes(r.Routes)
+		c.Routers[name] = r
+		if err := ValidateRouter(name, r); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// dedupeRoutes drops repeated route names, the last definition winning.
+// Config merging concatenates arrays across files, so the same route can
+// appear once per file that defines the router.
+func dedupeRoutes(routes []RouterRoute) []RouterRoute {
+	index := make(map[string]int, len(routes))
+	out := make([]RouterRoute, 0, len(routes))
+	for _, rt := range routes {
+		if i, ok := index[rt.Name]; ok {
+			out[i] = rt
+			continue
+		}
+		index[rt.Name] = len(out)
+		out = append(out, rt)
+	}
+	return out
 }

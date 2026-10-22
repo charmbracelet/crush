@@ -31,6 +31,8 @@ type Message struct {
 	PrismModelName          string        `json:"prism_model_name,omitempty"`
 	PrismHypercreditSavings *float64      `json:"prism_hypercredit_savings,omitempty"`
 	PrismDollarSavings      *float64      `json:"prism_dollar_savings,omitempty"`
+	RouterName              string        `json:"router_name,omitempty"`
+	RouteName               string        `json:"route_name,omitempty"`
 	CreatedAt               int64         `json:"created_at"`
 	UpdatedAt               int64         `json:"updated_at"`
 	IsSummaryMessage        bool          `json:"is_summary_message,omitempty"`

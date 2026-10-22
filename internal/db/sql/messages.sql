@@ -43,6 +43,8 @@ SET
     prism_model_name = ?,
     prism_hypercredit_savings = ?,
     prism_dollar_savings = ?,
+    router_name = ?,
+    route_name = ?,
     finished_at = ?,
     updated_at = strftime('%s', 'now')
 WHERE id = ?;

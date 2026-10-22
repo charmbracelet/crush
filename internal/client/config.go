@@ -77,6 +77,22 @@ func (c *Client) SetCompactMode(ctx context.Context, id string, scope config.Sco
 	return nil
 }
 
+// SetActiveRouter sets or clears the active router on the server.
+func (c *Client) SetActiveRouter(ctx context.Context, id string, scope config.Scope, name string) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/config/active-router", id), nil, jsonBody(proto.ConfigActiveRouterRequest{
+		Scope: scope,
+		Name:  name,
+	}), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return fmt.Errorf("failed to set active router: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to set active router: status code %d", rsp.StatusCode)
+	}
+	return nil
+}
+
 // SetProviderAPIKey sets a provider API key on the server. The wire
 // format tags the credential with an explicit Kind so the server can
 // decode it back into the right Go type — JSON's `any` loses that

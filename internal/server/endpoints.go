@@ -442,6 +442,14 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 			Fails(400, 404, 500).
 			Handle(c.handlePostWorkspaceConfigCompact),
 
+		apigen.Post("/v1/workspaces/{id}/config/active-router").
+			Summary("Set the active model router").
+			Tags("config").
+			PathParam("id", "Workspace ID").
+			Accepts(proto.ConfigActiveRouterRequest{}).
+			Fails(400, 404, 500).
+			Handle(c.handlePostWorkspaceConfigActiveRouter),
+
 		apigen.Post("/v1/workspaces/{id}/config/provider-key").
 			Summary("Set provider API key").
 			Tags("config").

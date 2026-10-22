@@ -137,6 +137,27 @@ type SessionAgentCall struct {
 	// is rewritten and no longer carries the element, so the reply
 	// target is not lost when a long channel turn is summarized.
 	channelMeta map[string]string
+	// Router, when non-nil, classifies the prompt and picks the model for
+	// this turn. Nil runs the turn on the large model.
+	Router ModelRouter
+	// routed carries an earlier routing decision so a summarize
+	// continuation resumes on the same model without re-classifying.
+	routed *RouteResult
+}
+
+// turnOptions returns the call options supplied by the caller for the
+// large model.
+func (c SessionAgentCall) turnOptions() TurnOptions {
+	return TurnOptions{
+		MaxOutputTokens:  c.MaxOutputTokens,
+		ProviderOptions:  c.ProviderOptions,
+		Temperature:      c.Temperature,
+		TopP:             c.TopP,
+		TopK:             c.TopK,
+		FrequencyPenalty: c.FrequencyPenalty,
+		PresencePenalty:  c.PresencePenalty,
+		OnAuthRefresh:    c.OnAuthRefresh,
+	}
 }
 
 // filterToolsForChannel scopes the tool list for a turn. A channel-originated
@@ -762,7 +783,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 	// Copy mutable fields under lock to avoid races with SetTools/SetModels.
 	agentTools := filterToolsForChannel(a.tools.Copy(), call.Channel, mcp.GetStates())
-	largeModel := a.largeModel.Get()
 	systemPrompt := a.systemPrompt.Get()
 	promptPrefix := a.systemPromptPrefix.Get()
 	var instructions strings.Builder
@@ -785,13 +805,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		// Add Anthropic caching to the last tool.
 		agentTools[len(agentTools)-1].SetProviderOptions(a.getCacheControlOptions())
 	}
-
-	agent := fantasy.NewAgent(
-		largeModel.Model,
-		fantasy.WithSystemPrompt(systemPrompt),
-		fantasy.WithTools(agentTools...),
-		fantasy.WithUserAgent(userAgent),
-	)
 
 	sessionLock := sync.Mutex{}
 	currentSession, err := a.sessions.Get(ctx, call.SessionID)
@@ -825,7 +838,72 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// mutex above for both the accepted and in-process paths.
 	ctx = context.WithValue(ctx, tools.SessionIDContextKey, call.SessionID)
 
-	history, files := a.preparePrompt(msgs, largeModel.CatwalkCfg.SupportsImages, call.Attachments...)
+	// Pick the model for this turn's first step. Without a router (or for
+	// sub-agents) this is the large model with the caller's call options.
+	// A router classifies the prompt and supplies the routed model and its
+	// own options; it is consulted again before every later step (see
+	// PrepareStep), so a turn can move between models as the work changes.
+	// Any routing failure keeps the current model.
+	turnModel := a.largeModel.Get()
+	opts := call.turnOptions()
+	modelProvider := func() fantasy.LanguageModel { return a.largeModel.Get().Model }
+	authRefresh := opts.OnAuthRefresh
+	routed := call.routed
+	var pendingRouterCost float64
+	applyRoute := func(r *RouteResult, step int, fresh bool) {
+		routed = r
+		turnModel = r.Model
+		rebuild := r.ModelProvider
+		if rebuild == nil {
+			lm := r.Model.Model
+			rebuild = func() fantasy.LanguageModel { return lm }
+		}
+		// Fantasy applies call options once per stream, so each routed
+		// model carries its own options and overrides them per request.
+		routeOpts := r.Options
+		modelProvider = func() fantasy.LanguageModel { return withCallOptions(rebuild(), routeOpts) }
+		authRefresh = routeOpts.OnAuthRefresh
+		if fresh {
+			pendingRouterCost += r.ClassifierCost
+			slog.Info("Routed step",
+				"router", r.Router,
+				"route", r.Route,
+				"step", step,
+				"provider", r.Model.ModelCfg.Provider,
+				"model", r.Model.ModelCfg.Model)
+		}
+	}
+	if routed != nil {
+		applyRoute(routed, 0, false)
+	} else if call.Router != nil && !a.isSubAgent {
+		result, routeErr := call.Router.Route(genCtx, RouteInput{
+			SessionID:     call.SessionID,
+			Prompt:        call.Prompt,
+			PrevAssistant: lastAssistantText(msgs),
+			Attachments:   len(call.Attachments),
+			SessionTokens: currentSession.PromptTokens + currentSession.CompletionTokens,
+		})
+		switch {
+		case genCtx.Err() != nil:
+			if persistErr := a.persistCanceledTurn(ctx, call, userMsgCreated); persistErr != nil {
+				return nil, persistErr
+			}
+			return nil, context.Canceled
+		case routeErr != nil:
+			slog.Warn("Router failed, using the large model", "session_id", call.SessionID, "error", routeErr)
+		default:
+			applyRoute(&result, 0, true)
+		}
+	}
+
+	agent := fantasy.NewAgent(
+		turnModel.Model,
+		fantasy.WithSystemPrompt(systemPrompt),
+		fantasy.WithTools(agentTools...),
+		fantasy.WithUserAgent(userAgent),
+	)
+
+	history, files := a.preparePrompt(msgs, turnModel.CatwalkCfg.SupportsImages, call.Attachments...)
 
 	startTime := time.Now()
 	a.eventPromptSent(call.SessionID)
@@ -842,22 +920,49 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	answeredToolCalls := csync.NewMap[string, struct{}]()
 	// Don't send MaxOutputTokens if 0 — some providers (e.g. LM Studio) reject it
 	var maxOutputTokens *int64
-	if call.MaxOutputTokens > 0 {
-		maxOutputTokens = &call.MaxOutputTokens
+	if opts.MaxOutputTokens > 0 {
+		maxOutputTokens = &opts.MaxOutputTokens
 	}
 	result, err = agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:           message.PromptWithTextAttachments(call.Prompt, call.Attachments),
 		Files:            files,
 		Messages:         history,
 		Headers:          sessionHeaders(call.SessionID),
-		ProviderOptions:  call.ProviderOptions,
+		ProviderOptions:  opts.ProviderOptions,
 		MaxOutputTokens:  maxOutputTokens,
-		TopP:             call.TopP,
-		Temperature:      call.Temperature,
-		PresencePenalty:  call.PresencePenalty,
-		TopK:             call.TopK,
-		FrequencyPenalty: call.FrequencyPenalty,
+		TopP:             opts.TopP,
+		Temperature:      opts.Temperature,
+		PresencePenalty:  opts.PresencePenalty,
+		TopK:             opts.TopK,
+		FrequencyPenalty: opts.FrequencyPenalty,
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
+			// Re-route before every step after the first, so each step of
+			// the agent loop runs on the model suited to what comes next
+			// (e.g. a cheap model to read and explore, a strong one to
+			// implement). The first step was routed before the stream.
+			if options.StepNumber > 0 && call.Router != nil && !a.isSubAgent {
+				sessionLock.Lock()
+				tokens := currentSession.PromptTokens + currentSession.CompletionTokens
+				sessionLock.Unlock()
+				r, routeErr := call.Router.Route(callContext, RouteInput{
+					SessionID:     call.SessionID,
+					Prompt:        call.Prompt,
+					Activity:      stepActivity(options.Steps),
+					SessionTokens: tokens,
+				})
+				switch {
+				case callContext.Err() != nil:
+					return callContext, prepared, callContext.Err()
+				case routeErr != nil:
+					slog.Warn("Router failed, keeping the current model", "session_id", call.SessionID, "step", options.StepNumber, "error", routeErr)
+				default:
+					applyRoute(&r, options.StepNumber, true)
+				}
+			}
+			if routed != nil {
+				prepared.Model = modelProvider()
+			}
+
 			prepared.Messages = options.Messages
 			for i := range prepared.Messages {
 				prepared.Messages[i].ProviderOptions = nil
@@ -893,7 +998,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			}
 
 			prepared.Messages = dropEmptyToolMedia(prepared.Messages)
-			prepared.Messages = a.workaroundProviderMediaLimitations(prepared.Messages, largeModel)
+			prepared.Messages = a.workaroundProviderMediaLimitations(prepared.Messages, turnModel)
 
 			lastSystemRoleInx := 0
 			systemMessageUpdated := false
@@ -923,16 +1028,20 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			assistantMsg, err = a.messages.Create(callContext, call.SessionID, message.CreateMessageParams{
 				Role:     message.Assistant,
 				Parts:    []message.ContentPart{},
-				Model:    largeModel.ModelCfg.Model,
-				Provider: largeModel.ModelCfg.Provider,
+				Model:    turnModel.ModelCfg.Model,
+				Provider: turnModel.ModelCfg.Provider,
 			})
 			if err != nil {
 				return callContext, prepared, err
 			}
+			if routed != nil {
+				assistantMsg.RouterName = routed.Router
+				assistantMsg.RouteName = routed.Route
+			}
 			callContext = context.WithValue(callContext, tools.MessageIDContextKey, assistantMsg.ID)
 			callContext = context.WithValue(callContext, tools.ChannelContextKey, call.Channel)
-			callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, largeModel.CatwalkCfg.SupportsImages)
-			callContext = context.WithValue(callContext, tools.ModelNameContextKey, largeModel.CatwalkCfg.Name)
+			callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, turnModel.CatwalkCfg.SupportsImages)
+			callContext = context.WithValue(callContext, tools.ModelNameContextKey, turnModel.CatwalkCfg.Name)
 			currentAssistant = &assistantMsg
 			return callContext, prepared, err
 		},
@@ -998,13 +1107,18 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				slog.Error("Failed to reset message on retry", "error", updateErr)
 			}
 		},
-		OnAuthRefresh: call.OnAuthRefresh,
+		OnAuthRefresh: func(ctx context.Context, perr *fantasy.ProviderError) error {
+			// Refresh credentials for whichever model is serving this step.
+			if authRefresh == nil {
+				return perr
+			}
+			return authRefresh(ctx, perr)
+		},
 		ModelProvider: func() fantasy.LanguageModel {
-			m := a.largeModel.Get()
 			slog.Info("ModelProvider called",
-				"provider", m.ModelCfg.Provider,
-				"model", m.ModelCfg.Model)
-			return m.Model
+				"provider", turnModel.ModelCfg.Provider,
+				"model", turnModel.ModelCfg.Model)
+			return modelProvider()
 		},
 		OnToolCall: func(tc fantasy.ToolCallContent) error {
 			input, wasSanitized := sanitizeToolInput(tc.ToolName, tc.ToolCallID, tc.Input)
@@ -1092,7 +1206,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				return getSessionErr
 			}
 			usage, estimated := fallbackStepUsage(stepMessages, stepResult)
-			a.updateSessionUsage(largeModel, &updatedSession, usage, a.openrouterCost(stepResult.ProviderMetadata), estimated)
+			a.updateSessionUsage(turnModel, &updatedSession, usage, a.openrouterCost(stepResult.ProviderMetadata), estimated)
+			updatedSession.Cost += pendingRouterCost
+			pendingRouterCost = 0
 			_, sessionErr := a.sessions.Save(ctx, updatedSession)
 			if sessionErr != nil {
 				return sessionErr
@@ -1102,7 +1218,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		},
 		StopWhen: []fantasy.StopCondition{
 			func(_ []fantasy.StepResult) bool {
-				cw := int64(largeModel.CatwalkCfg.ContextWindow)
+				cw := int64(turnModel.CatwalkCfg.ContextWindow)
 				// If context window is unknown (0), skip auto-summarize
 				// to avoid immediately truncating custom/local models.
 				if cw == 0 {
@@ -1147,7 +1263,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	}
 
 	if err != nil {
-		isHyper := largeModel.ModelCfg.Provider == hyper.Name
+		isHyper := turnModel.ModelCfg.Provider == hyper.Name
 		isCancelErr := errors.Is(err, context.Canceled)
 		slog.Info("Agent stream returned error",
 			"error", err.Error(),
@@ -1191,7 +1307,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				currentAssistant.AddFinish(
 					message.FinishReasonError,
 					"Copilot model not enabled",
-					fmt.Sprintf("%q is not enabled in Copilot. Go to the following page to enable it. Then, wait 5 minutes before trying again. %s", largeModel.CatwalkCfg.Name, link),
+					fmt.Sprintf("%q is not enabled in Copilot. Go to the following page to enable it. Then, wait 5 minutes before trying again. %s", turnModel.CatwalkCfg.Name, link),
 				)
 			} else {
 				currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(providerErr.Title), defaultTitle), providerErr.Message)
@@ -1232,6 +1348,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				existing = []SessionAgentCall{}
 			}
 			call.Prompt = fmt.Sprintf("The previous session was interrupted because it got too long, the initial user request was: `%s`", call.Prompt)
+			// Resume on the same routed model instead of re-classifying
+			// the synthetic continuation prompt.
+			call.routed = routed
 			existing = append(existing, call)
 			a.messageQueue.Set(call.SessionID, existing)
 		}

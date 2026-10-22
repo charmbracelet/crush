@@ -102,6 +102,19 @@ func (b *Backend) SetCompactMode(workspaceID string, scope config.Scope, enabled
 	return nil
 }
 
+// SetActiveRouter sets (or clears, with an empty name) the active router.
+func (b *Backend) SetActiveRouter(workspaceID string, scope config.Scope, name string) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+	if err := ws.Cfg.SetActiveRouter(scope, name); err != nil {
+		return err
+	}
+	publishConfigChanged(ws)
+	return nil
+}
+
 // SetProviderAPIKey sets the API key for a provider and persists it.
 func (b *Backend) SetProviderAPIKey(workspaceID string, scope config.Scope, providerID string, apiKey any) error {
 	ws, err := b.GetWorkspace(workspaceID)

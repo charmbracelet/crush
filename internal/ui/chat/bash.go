@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -74,16 +75,27 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	if highlighted, err := common.SyntaxHighlightLexerName(sty, cmd, "bash", nil); err == nil {
 		cmd = highlighted
 	}
-	toolParams := []string{cmd}
-	if params.RunInBackground {
-		toolParams = append(toolParams, "background", "true")
-	}
 
-	// The command is always rendered expanded (wrapped, never
-	// truncated); expansion only controls the output body.
+	// The working directory is rendered as a chip between the tool name and
+	// the command when it ran outside the workspace directory.
+	dirChip := b.renderDirChip(sty, cmp.Or(meta.WorkingDirectory, params.WorkingDir), cappedWidth)
+
+	// The command is always rendered expanded (wrapped, never truncated);
+	// expansion only controls the output body. 
+	// When the model provides a description, it becomes the header 
+	// (truncated to one line, full when expanded)
 	headerOpts := *opts
 	headerOpts.ExpandedContent = true
-	header := toolHeader(sty, opts.Status, "Bash", cappedWidth, &headerOpts, toolParams...)
+	var header string
+	if params.Description != "" && !opts.Compact {
+		header = b.renderDescriptionHeader(sty, opts, cappedWidth, params, cmd, dirChip)
+	} else {
+		toolParams := []string{cmd}
+		if params.RunInBackground {
+			toolParams = append(toolParams, "background", "true")
+		}
+		header = toolHeaderWithChip(sty, opts.Status, "Bash", dirChip, cappedWidth, &headerOpts, sty.Tool.ParamMain, toolParams...)
+	}
 	if opts.Compact {
 		return header
 	}
@@ -107,6 +119,64 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	bodyWidth := cappedWidth - toolBodyLeftPaddingTotal
 	body := sty.Tool.Body.Render(toolOutputPlainContent(sty, output, bodyWidth, opts.ExpandedContent))
 	return joinToolParts(header, body)
+}
+
+// renderDescriptionHeader renders a two-line header: the description (in
+// plain foreground, truncated to a single line) followed by the full command,
+// indented to align under the tool name. The working directory chip sits
+// between the tool name and the description.
+func (b *BashToolRenderContext) renderDescriptionHeader(sty *styles.Styles, opts *ToolRenderOpts, width int, params tools.BashParams, cmd, dirChip string) string {
+	descParams := []string{params.Description}
+	if params.RunInBackground {
+		descParams = append(descParams, "background", "true")
+	}
+	header := toolHeaderWithChip(sty, opts.Status, "Bash", dirChip, width, opts, sty.Tool.Description, descParams...)
+
+	// The command wraps as if the chip was absent and is indented with the
+	// base prefix so the chip does not push it too far to the right.
+	basePrefixWidth := lipgloss.Width(toolBasePrefix(sty, opts.Status, "Bash", opts))
+	cmdLines := strings.Split(ansi.Hardwrap(cmd, width-basePrefixWidth, false), "\n")
+	indent := strings.Repeat(" ", basePrefixWidth)
+	for i := range cmdLines {
+		cmdLines[i] = indent + cmdLines[i]
+	}
+	return header + "\n" + strings.Join(cmdLines, "\n")
+}
+
+// relativeDir returns dir relative to the workspace directory, or an empty
+// string when it matches the workspace or cannot be determined.
+func (b *BashToolRenderContext) relativeDir(dir string) string {
+	if dir == "" || b.workingDir == "" {
+		return ""
+	}
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(b.workingDir, dir)
+	}
+	rel, err := filepath.Rel(b.workingDir, dir)
+	if err != nil || rel == "." {
+		return ""
+	}
+	return rel
+}
+
+// renderDirChip renders the working directory chip shown between the tool
+// name and the command in bash tool headers. It returns an empty string when
+// the chip does not apply. The relative path is capped at half the header
+// width so the command keeps enough room.
+func (b *BashToolRenderContext) renderDirChip(sty *styles.Styles, dir string, width int) string {
+	rel := b.relativeDir(dir)
+	if rel == "" {
+		return ""
+	}
+	maxRel := width/2 - len("cd ") - len("/")
+	if maxRel < 4 {
+		return ""
+	}
+	rel = ansi.Truncate(rel, maxRel, "…")
+	if !strings.HasSuffix(rel, "…") {
+		rel += "/"
+	}
+	return sty.Tool.WorkingDirChip.Render("cd " + rel)
 }
 
 // -----------------------------------------------------------------------------

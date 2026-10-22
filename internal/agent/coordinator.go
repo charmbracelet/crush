@@ -1473,6 +1473,10 @@ func (c *coordinator) UpdateModels(ctx context.Context) error {
 	c.cfg.RefetchOpenAIChatGPTModels(ctx)
 	c.cfg.RefetchGrokModels(ctx)
 
+	// Same for GitHub Copilot: refresh the subscription's model catalog
+	// once it grows stale. TTL-gated, so a no-op while it is fresh.
+	c.cfg.RefetchCopilotModels(ctx)
+
 	agent, name := c.activeAgent()
 	return c.updateAgentModels(ctx, agent, name)
 }

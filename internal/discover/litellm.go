@@ -75,11 +75,11 @@ func (e *litellmEnricher) EnrichModels(ctx context.Context, cfg Config, resolver
 		if models[i].DefaultMaxTokens == 0 && meta.MaxOutputTokens != nil {
 			models[i].DefaultMaxTokens = *meta.MaxOutputTokens
 		}
-		if models[i].CostPer1MIn == 0 && meta.InputCostPerToken != nil {
-			models[i].CostPer1MIn = *meta.InputCostPerToken * 1_000_000
+		if models[i].Pricing.Input == 0 && meta.InputCostPerToken != nil {
+			models[i].Pricing.Input = *meta.InputCostPerToken * 1_000_000
 		}
-		if models[i].CostPer1MOut == 0 && meta.OutputCostPerToken != nil {
-			models[i].CostPer1MOut = *meta.OutputCostPerToken * 1_000_000
+		if models[i].Pricing.Output == 0 && meta.OutputCostPerToken != nil {
+			models[i].Pricing.Output = *meta.OutputCostPerToken * 1_000_000
 		}
 	}
 

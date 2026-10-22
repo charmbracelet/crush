@@ -95,8 +95,8 @@ func (e *lmstudioEnricher) EnrichModels(ctx context.Context, cfg Config, resolve
 		}
 
 		// Vision support from capabilities, if not already set by user.
-		if !models[i].SupportsImages {
-			models[i].SupportsImages = meta.Capabilities.Vision
+		if !models[i].Capabilities.Vision {
+			models[i].Capabilities.Vision = meta.Capabilities.Vision
 		}
 	}
 

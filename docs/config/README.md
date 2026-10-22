@@ -48,7 +48,7 @@ source "$XDG_CONFIG_HOME/squid-config.sh"
 
 # Get API keys from your password manager.
 provider add my-secret-provider \
-  --type openai-compat \
+  --type completions \
   --base-url "https://api.example.com/v1" \
   --api-key "$(op read my-secret-key)"
 ```
@@ -149,7 +149,7 @@ Usage:
 
 Flags:
       --name string                 display name
-      --type string                 provider type (openai, openai-compat, anthropic, ollama, …)
+      --type string                 provider type (completions, responses, messages, ollama, …)
       --api-key string              API key
       --base-url string             API base URL
       --disable bool                disable without removing
@@ -163,10 +163,16 @@ Flags:
 
 ```bash
 provider add deepseek \
-  --type openai-compat \
+  --type completions \
   --base-url "https://api.deepseek.com/v1" \
   --api-key "${DEEPSEEK_API_KEY:?set DEEPSEEK_API_KEY}"
 ```
+
+The type describes the API format the provider speaks: `completions`
+(OpenAI chat completions), `responses` (OpenAI responses), or `messages`
+(Anthropic messages). Local providers with a registered enricher (ollama,
+litellm, lmstudio, …) keep their own type. Legacy values (`openai`,
+`openai-compat`, `anthropic`, …) are migrated automatically at load.
 
 Headers whose value resolves to the empty string (an unset `$VAR`, a
 `$(...)` that prints nothing, or a literal `""`) are dropped from the
@@ -218,13 +224,14 @@ Flags:
       --name string                 display name
       --context-window int          context window in tokens
       --default-max-tokens int      default maximum output tokens
-      --can-reason bool             model supports reasoning
+      --thinking string             always, never, or toggleable
       --supports-images bool        model accepts image input
       --price-input float           input price per 1M tokens
       --price-output float          output price per 1M tokens
       --price-cache-create float    cache-creation price per 1M tokens
       --price-cache-hit float       cache-hit price per 1M tokens
       --reasoning-effort string     low, medium, or high
+      --max-attachments int         maximum attachments per request
 ```
 
 #### `model remove`

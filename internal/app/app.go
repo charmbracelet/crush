@@ -674,7 +674,7 @@ func (app *App) GetDefaultSmallModel(providerID string) config.SelectedModel {
 						Provider:        providerID,
 						Model:           small.ID,
 						MaxTokens:       small.DefaultMaxTokens,
-						ReasoningEffort: small.DefaultReasoningEffort,
+						ReasoningEffort: small.Reasoning.DefaultEffortLevel,
 					}
 				}
 				return largeModelCfg
@@ -687,7 +687,7 @@ func (app *App) GetDefaultSmallModel(providerID string) config.SelectedModel {
 		Provider:        providerID,
 		Model:           defaultSmallModelID,
 		MaxTokens:       model.DefaultMaxTokens,
-		ReasoningEffort: model.DefaultReasoningEffort,
+		ReasoningEffort: model.Reasoning.DefaultEffortLevel,
 	}
 }
 

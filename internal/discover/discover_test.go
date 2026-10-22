@@ -56,7 +56,7 @@ func TestDiscoverModels_ExistingModelsWin(t *testing.T) {
 		BaseURL: server.URL + "/v1",
 		APIKey:  "test-key",
 		ExistingModels: []catwalk.Model{
-			{ID: "model-a", Name: "My Custom Name", ContextWindow: 200000, CanReason: true},
+			{ID: "model-a", Name: "My Custom Name", ContextWindow: 200000, Reasoning: catwalk.Reasoning{Thinking: catwalk.ThinkingAlways}},
 		},
 	}
 
@@ -67,7 +67,7 @@ func TestDiscoverModels_ExistingModelsWin(t *testing.T) {
 	require.Equal(t, "model-a", models[0].ID)
 	require.Equal(t, "My Custom Name", models[0].Name)
 	require.Equal(t, int64(200000), models[0].ContextWindow)
-	require.True(t, models[0].CanReason)
+	require.True(t, models[0].Reasoning.Thinking == catwalk.ThinkingAlways)
 
 	require.Equal(t, "model-b", models[1].ID)
 	require.Equal(t, "model-b", models[1].Name)

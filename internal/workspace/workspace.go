@@ -66,7 +66,10 @@ const (
 // recovered transitions of the client-server link. Local (in-process)
 // workspaces never emit it.
 type ConnectionEvent struct {
-	State ConnectionState
+	// WorkspaceRecreated marks a new workspace ID on recovery. The subscription
+	// sends this after draining the old stream and before forwarding the new one.
+	WorkspaceRecreated bool
+	State              ConnectionState
 	// Err is the most recent failure, set when State is
 	// ConnectionDegraded.
 	Err error
@@ -150,7 +153,8 @@ type Workspace interface {
 	AgentRunShellCommand(ctx context.Context, sessionID, command string, termWidth int, onProgress func(string), isFirstMessage bool) (proto.ShellCommandResponse, error)
 	AgentCancel(sessionID string)
 	AgentIsBusy() bool
-	AgentIsSessionBusy(sessionID string) bool
+	// AgentIsSessionBusy returns an error when session activity is unknown.
+	AgentIsSessionBusy(sessionID string) (bool, error)
 	AgentModel() AgentModel
 	AgentIsReady() bool
 	// AgentReadyErr reports nil when the coder agent is ready to accept

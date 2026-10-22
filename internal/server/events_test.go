@@ -128,6 +128,7 @@ func TestRunCompleteToProto_RoundTrip(t *testing.T) {
 		Payload: notify.RunComplete{
 			SessionID: "S",
 			RunID:     "run-42",
+			Sequence:  42,
 			MessageID: "M",
 			Text:      "VERDICT: APPROVED",
 			Error:     "",
@@ -146,10 +147,25 @@ func TestRunCompleteToProto_RoundTrip(t *testing.T) {
 	require.Equal(t, "run-42", decoded.Payload.RunID,
 		"RunID must survive the SSE envelope so clients can correlate "+
 			"this event with the SendMessage call that produced it")
+	require.Equal(t, src.Payload.Sequence, decoded.Payload.Sequence)
 	require.Equal(t, "M", decoded.Payload.MessageID)
 	require.Equal(t, "VERDICT: APPROVED", decoded.Payload.Text)
 	require.Empty(t, decoded.Payload.Error)
 	require.False(t, decoded.Payload.Cancelled)
+}
+
+func TestAgentFinishedStateToProto(t *testing.T) {
+	t.Parallel()
+	for _, state := range []notify.FinishState{"", notify.FinishContinuing, notify.FinishIdleSuccess, notify.FinishIdleUnsuccessful} {
+		envelope := wrapEvent(pubsub.Event[notify.Notification]{Payload: notify.Notification{
+			Type: notify.TypeAgentFinished, SessionID: "session", FinishState: state,
+		}})
+		require.NotNil(t, envelope)
+		var decoded pubsub.Event[proto.AgentEvent]
+		require.NoError(t, json.Unmarshal(envelope.Payload, &decoded))
+		require.Equal(t, state, decoded.Payload.FinishState)
+		require.Equal(t, "session", decoded.Payload.SessionID)
+	}
 }
 
 // TestAgentErrorToProto_PreservesRunID verifies that an async agent

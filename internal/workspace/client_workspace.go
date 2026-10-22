@@ -105,7 +105,8 @@ func NewClientWorkspace(c *client.Client, ws proto.Workspace) *ClientWorkspace {
 // refreshWorkspace re-fetches the workspace from the server, updating
 // the cached snapshot. Called after config-mutating operations.
 func (w *ClientWorkspace) refreshWorkspace() {
-	updated, err := w.client.GetWorkspace(context.Background(), w.workspaceID())
+	requestedID := w.workspaceID()
+	updated, err := w.client.GetWorkspace(context.Background(), requestedID)
 	if err != nil {
 		slog.Error("Failed to refresh workspace", "error", err)
 		return
@@ -115,7 +116,9 @@ func (w *ClientWorkspace) refreshWorkspace() {
 		updated.Config.NormalizeOptions()
 	}
 	w.mu.Lock()
-	w.ws = *updated
+	if w.ws.ID == requestedID {
+		w.ws = *updated
+	}
 	w.mu.Unlock()
 }
 
@@ -239,11 +242,11 @@ func (w *ClientWorkspace) AgentRun(ctx context.Context, sessionID, prompt string
 	// The interactive TUI matches notify.RunComplete by session, not
 	// RunID, so passing an empty RunID is correct here: it skips the
 	// correlator stamping path without functional consequences.
-	return w.client.SendMessage(ctx, w.workspaceID(), sessionID, "", "", prompt, attachments...)
+	return w.client.SendMessage(ctx, w.workspaceID(), sessionID, "", "", prompt, proto.PermissionRequestPolicyPrompt, attachments...)
 }
 
 func (w *ClientWorkspace) AgentRunChannel(ctx context.Context, channel, sessionID, prompt string, attachments ...message.Attachment) error {
-	return w.client.SendMessage(ctx, w.workspaceID(), sessionID, "", channel, prompt, attachments...)
+	return w.client.SendMessage(ctx, w.workspaceID(), sessionID, "", channel, prompt, proto.PermissionRequestPolicyPrompt, attachments...)
 }
 
 func (w *ClientWorkspace) AgentRunShellCommand(ctx context.Context, sessionID, command string, termWidth int, _ func(string), _ bool) (proto.ShellCommandResponse, error) {
@@ -262,12 +265,12 @@ func (w *ClientWorkspace) AgentIsBusy() bool {
 	return info.IsBusy
 }
 
-func (w *ClientWorkspace) AgentIsSessionBusy(sessionID string) bool {
+func (w *ClientWorkspace) AgentIsSessionBusy(sessionID string) (bool, error) {
 	info, err := w.client.GetAgentSessionInfo(context.Background(), w.workspaceID(), sessionID)
 	if err != nil {
-		return false
+		return false, err
 	}
-	return info.IsBusy
+	return info.IsBusy, nil
 }
 
 func (w *ClientWorkspace) AgentModel() AgentModel {
@@ -897,6 +900,7 @@ func (w *ClientWorkspace) runSubscription(send func(tea.Msg)) {
 	backoff := sseReconnectInitialBackoff
 	degraded := false
 	recoveryFailures := 0
+	streamWorkspaceID := w.workspaceID()
 	markDegraded := func(err error, stuck bool) {
 		if degraded && !stuck {
 			return
@@ -910,7 +914,8 @@ func (w *ClientWorkspace) runSubscription(send func(tea.Msg)) {
 			return
 		}
 
-		evc, err := w.client.SubscribeEvents(w.subCtx, w.workspaceID())
+		subscribedID := w.workspaceID()
+		evc, err := w.client.SubscribeEvents(w.subCtx, subscribedID)
 		if err != nil {
 			if w.subCtx.Err() != nil {
 				return
@@ -940,8 +945,9 @@ func (w *ClientWorkspace) runSubscription(send func(tea.Msg)) {
 		if degraded {
 			degraded = false
 			recoveryFailures = 0
-			w.afterReconnect(send)
+			w.afterReconnect(send, streamWorkspaceID != subscribedID)
 		}
+		streamWorkspaceID = subscribedID
 		backoff = sseReconnectInitialBackoff
 		w.consumeEvents(evc, send)
 
@@ -1031,7 +1037,7 @@ func (w *ClientWorkspace) recreateArgs() proto.Workspace {
 // were away, and tells the UI to resync state published while detached. The
 // SSE handler attaches the client before writing its 200, so the presence
 // call cannot be rejected as not-attached here.
-func (w *ClientWorkspace) afterReconnect(send func(tea.Msg)) {
+func (w *ClientWorkspace) afterReconnect(send func(tea.Msg), recreated bool) {
 	w.mu.RLock()
 	sid := w.lastSession
 	w.mu.RUnlock()
@@ -1040,7 +1046,7 @@ func (w *ClientWorkspace) afterReconnect(send func(tea.Msg)) {
 			slog.Warn("Failed to re-assert current session after reconnect", "error", err)
 		}
 	}
-	send(ConnectionEvent{State: ConnectionRecovered})
+	send(ConnectionEvent{State: ConnectionRecovered, WorkspaceRecreated: recreated})
 }
 
 // sleepOrDone waits for d or until the subscription context is
@@ -1228,6 +1234,7 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 			SessionTitle: e.Payload.SessionTitle,
 			RunID:        e.Payload.RunID,
 			Type:         notify.Type(e.Payload.Type),
+			FinishState:  e.Payload.FinishState,
 			AWSSOCommand: e.Payload.AWSSOCommand,
 			AWSSOURL:     e.Payload.AWSSOURL,
 		}
@@ -1254,6 +1261,7 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 				Text:      e.Payload.Text,
 				Error:     e.Payload.Error,
 				Cancelled: e.Payload.Cancelled,
+				Sequence:  e.Payload.Sequence,
 			},
 		}
 	case pubsub.Event[proto.SkillsEvent]:

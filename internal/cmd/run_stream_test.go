@@ -358,6 +358,23 @@ func TestRunStream_AgentErrorRunIDFiltersForeign(t *testing.T) {
 	require.True(t, done)
 }
 
+func TestRunStream_CorrelatedRunIgnoresAnonymousQueuedError(t *testing.T) {
+	t.Parallel()
+	var output bytes.Buffer
+	s := &runStream{sessionID: "S", runID: "A", out: &output, read: map[string]int{}}
+	done, err := s.handle(pubsub.Event[proto.AgentEvent]{Payload: proto.AgentEvent{
+		Type: proto.AgentEventTypeError, SessionID: "S", Error: errors.New("B failed"),
+	}}, nil)
+	require.NoError(t, err, "B's uncorrelated failure must not fail A")
+	require.False(t, done, "A must keep waiting for its correlated completion")
+	done, err = s.handle(pubsub.Event[proto.RunComplete]{Payload: proto.RunComplete{
+		SessionID: "S", RunID: "A", MessageID: "A-response", Text: "A succeeded",
+	}}, nil)
+	require.NoError(t, err)
+	require.True(t, done)
+	require.Equal(t, "A succeeded", output.String())
+}
+
 // TestRunStream_AgentErrorNoRunIDFiltersBySession verifies the
 // compatibility fallback: when the event carries no RunID, attribution
 // falls back to SessionID. An error for another session or with an

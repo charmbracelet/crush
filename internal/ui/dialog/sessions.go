@@ -466,7 +466,9 @@ func (s *Session) isCurrentSessionBusy() bool {
 		return false
 	}
 
-	return s.com.Workspace.AgentIsSessionBusy(sessionItem.ID())
+	// Preserve the dialog's best-effort busy indicator on probe failure.
+	busy, _ := s.com.Workspace.AgentIsSessionBusy(sessionItem.ID())
+	return busy
 }
 
 // ShortHelp implements [help.KeyMap].

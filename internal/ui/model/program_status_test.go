@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/dialog"
 	"github.com/stretchr/testify/require"
 )
@@ -147,5 +148,61 @@ func TestNewSessionClearsTurnOutcome(t *testing.T) {
 	u.turnOutcome = tea.ProgramStateError
 
 	u.newSession()
+	require.Empty(t, u.turnOutcome)
+}
+
+func TestProgramStatusCompletionLifecycle(t *testing.T) {
+	pinTTLs(t)
+	for _, tc := range []struct {
+		name    string
+		state   notify.FinishState
+		busy    bool
+		pending int
+		prior   tea.ProgramState
+		want    tea.ProgramState
+	}{
+		{"success notification alone", notify.FinishIdleSuccess, false, 0, "", tea.ProgramStateIdle},
+		{"queued work", notify.FinishContinuing, true, 0, "", tea.ProgramStateWorking},
+		{"handoff admission gap", notify.FinishContinuing, false, 0, "", tea.ProgramStateIdle},
+		{"new work", notify.FinishIdleSuccess, true, 0, "", tea.ProgramStateWorking},
+		{"pending submission", notify.FinishIdleSuccess, false, 1, "", tea.ProgramStateWorking},
+		{"cancelled", notify.FinishIdleUnsuccessful, false, 0, "", tea.ProgramStateIdle},
+		{"unsuccessful owner preserves logical success", notify.FinishIdleUnsuccessful, false, 0, tea.ProgramStateDone, tea.ProgramStateDone},
+		{"failed", notify.FinishIdleUnsuccessful, false, 0, tea.ProgramStateError, tea.ProgramStateError},
+		{"legacy", "", false, 0, "", tea.ProgramStateIdle},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			u := newBusyUI(&countingWorkspace{ready: true, agentBusy: tc.busy})
+			warmCaches(u, true)
+			u.turnOutcome = tc.prior
+			u.pendingSubmissions = tc.pending
+			u.activityFor("s1").pending = tc.pending
+			runCmds(u, u.handleAgentNotification(notify.Notification{
+				Type: notify.TypeAgentFinished, FinishState: tc.state, SessionID: "s1",
+			}))
+			require.Equal(t, tc.want, u.programStatus().State)
+		})
+	}
+}
+
+func TestProgramStatusIgnoresOtherSessionOutcomes(t *testing.T) {
+	pinTTLs(t)
+	u := newBusyUI(&countingWorkspace{ready: true})
+	warmCaches(u, false)
+	for _, typ := range []notify.Type{notify.TypeAgentFinished, notify.TypeAgentError} {
+		runCmds(u, u.handleAgentNotification(notify.Notification{
+			Type: typ, FinishState: notify.FinishIdleSuccess, SessionID: "s2",
+		}))
+		require.Equal(t, tea.ProgramStateIdle, u.programStatus().State)
+	}
+
+	u.turnOutcome = tea.ProgramStateDone
+	u.sendMessage("new work")
+	t.Cleanup(func() { common.StopTurn("s1") })
+	require.Empty(t, u.turnOutcome)
+	_, cmd := u.Update(agentRunSubmittedMsg{sessionID: "s1", gen: u.submissionGen})
+	runCmds(u, cmd)
+	u.turnOutcome = tea.ProgramStateError
+	u.Update(loadSessionMsg{session: &session.Session{ID: "s2"}})
 	require.Empty(t, u.turnOutcome)
 }

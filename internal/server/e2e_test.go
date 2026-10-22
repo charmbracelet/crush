@@ -21,6 +21,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/session"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
@@ -736,4 +737,48 @@ func TestE2E_ShutdownCallbackFiresWhenLastClientLeaves(t *testing.T) {
 	_, _ = io.Copy(io.Discard, r.Body)
 	r.Body.Close()
 	require.Equal(t, http.StatusNotFound, r.StatusCode)
+}
+
+func TestE2E_AutoApprovalScopedToViewingClients(t *testing.T) {
+	t.Parallel()
+	h := newE2EHarness(t)
+	conn, err := db.Connect(t.Context(), t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { conn.Close() })
+	h.app.Sessions = session.NewService(db.New(conn), conn)
+	parent, err := h.app.Sessions.Create(t.Context(), "parent")
+	require.NoError(t, err)
+	child, err := h.app.Sessions.CreateTaskSession(t.Context(), "child", parent.ID, "child")
+	require.NoError(t, err)
+	other, err := h.app.Sessions.Create(t.Context(), "other")
+	require.NoError(t, err)
+	cidA, cidB := uuid.New().String(), uuid.New().String()
+	evcA, cancelA := h.subscribeSSE(t, t.Context(), h.workspace.ID, cidA)
+	t.Cleanup(cancelA)
+	evcB, cancelB := h.subscribeSSE(t, t.Context(), h.workspace.ID, cidB)
+	t.Cleanup(cancelB)
+	h.waitForAttached(t, 2)
+	h.setCurrentSession(t, t.Context(), h.workspace.ID, cidA, parent.ID)
+	h.setCurrentSession(t, t.Context(), h.workspace.ID, cidB, other.ID)
+	for _, id := range []string{parent.ID, child.ID, ""} {
+		callID := uuid.New().String()
+		granted, err := h.app.Permissions.Request(permission.WithAutoApproveRequests(t.Context()), permission.CreatePermissionRequest{
+			SessionID: id, ToolCallID: callID, ToolName: "view", Action: "read", Path: h.workspace.Path,
+		})
+		require.NoError(t, err)
+		require.True(t, granted)
+		ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+		event, ok := drainUntil(ctx, evcA, func(e pubsub.Event[proto.PermissionNotification]) bool {
+			return e.Payload.ToolCallID == callID && e.Payload.Granted
+		})
+		cancel()
+		require.True(t, ok, "parent viewer must receive parent, child and unscoped approvals")
+		require.Equal(t, id, event.Payload.SessionID)
+		ctx, cancel = context.WithTimeout(t.Context(), 200*time.Millisecond)
+		_, leaked := drainUntil(ctx, evcB, func(e pubsub.Event[proto.PermissionNotification]) bool {
+			return e.Payload.ToolCallID == callID
+		})
+		cancel()
+		require.Equal(t, id == "", leaked, "only empty-ID approvals broadcast")
+	}
 }

@@ -12,6 +12,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -83,7 +84,8 @@ type App struct {
 	// subscribers (notably `crush run` in client/server mode) can
 	// drive their exit on a deterministic, payload-bearing event
 	// instead of guessing from message finish parts.
-	runCompletions *pubsub.Broker[notify.RunComplete]
+	runCompletions     *pubsub.Broker[notify.RunComplete]
+	completionSequence atomic.Uint64
 
 	// herdrClient reports agent state to herdr when running inside
 	// a herdr-managed pane. Nil when not in a herdr environment.
@@ -258,6 +260,12 @@ func (app *App) RunCompletions() *pubsub.Broker[notify.RunComplete] {
 	return app.runCompletions
 }
 
+// NextCompletionSequence shares ordering with the coordinator and its agents.
+// The counter survives coordinator reinitialization for this workspace.
+func (app *App) NextCompletionSequence() uint64 {
+	return app.completionSequence.Add(1)
+}
+
 // ReportCurrentSession tells herdr which session the user is now
 // viewing so it can persist a resumable reference for the pane. Safe
 // to call when not running inside a herdr pane; the underlying client
@@ -404,10 +412,6 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 		}
 	}
 
-	// Automatically approve all permission requests for this non-interactive
-	// session.
-	app.Permissions.AutoApproveSession(sess.ID)
-
 	// Report session identity to herdr.
 	app.ReportCurrentSession(sess.ID)
 
@@ -418,7 +422,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	done := make(chan response, 1)
 
 	go func(ctx context.Context, sessionID, prompt string) {
-		result, err := app.AgentCoordinator.Run(ctx, sess.ID, prompt)
+		result, err := app.AgentCoordinator.Run(permission.WithAutoApproveRequests(ctx), sessionID, prompt)
 		if err != nil {
 			done <- response{
 				err: fmt.Errorf("failed to start agent processing stream: %w", err),
@@ -858,18 +862,19 @@ func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 	}
 	var err error
 	app.AgentCoordinator, err = agent.NewCoordinator(ctx, agent.CoordinatorOptions{
-		Config:      app.config,
-		Sessions:    app.Sessions,
-		Messages:    app.Messages,
-		Permissions: app.Permissions,
-		Questions:   app.Questions,
-		History:     app.History,
-		FileTracker: app.FileTracker,
-		LSPManager:  app.LSPManager,
-		Notify:      app.agentNotifications,
-		RunComplete: app.runCompletions,
-		Skills:      app.Skills,
-		Interactive: interactive,
+		Config:             app.config,
+		Sessions:           app.Sessions,
+		Messages:           app.Messages,
+		Permissions:        app.Permissions,
+		Questions:          app.Questions,
+		History:            app.History,
+		FileTracker:        app.FileTracker,
+		LSPManager:         app.LSPManager,
+		Notify:             app.agentNotifications,
+		RunComplete:        app.runCompletions,
+		CompletionSequence: &app.completionSequence,
+		Skills:             app.Skills,
+		Interactive:        interactive,
 	})
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)

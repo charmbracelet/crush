@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/stretchr/testify/require"
 )
@@ -178,4 +180,98 @@ func TestRun_QueuedRunIDPromptRunsRecursivelyAndPublishesRunComplete(t *testing.
 	}
 	require.Equal(t, 2, assistants, "the active turn and the recursive turn each produce one assistant message")
 	require.Equal(t, 1, follows, "the follow-up prompt is its own user turn")
+}
+
+func TestRun_PermissionRequestsAcrossHandoffs(t *testing.T) {
+	t.Parallel()
+	for _, activePolicy := range []permission.RequestPolicy{permission.RequestPolicyPrompt, permission.RequestPolicyAutoApprove} {
+		for _, phase := range []string{"handoff", "handoff-unaccepted", "summary", "cancel"} {
+			t.Run(fmt.Sprintf("policy=%d/%s", activePolicy, phase), func(t *testing.T) {
+				t.Parallel()
+				ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+				defer cancel()
+				env := testEnv(t)
+				sess, err := env.sessions.Create(ctx, "session")
+				require.NoError(t, err)
+				permissions := permission.NewPermissionService(env.workingDir, false, nil)
+				requests := permissions.Subscribe(ctx)
+				var prompted atomic.Int64
+				denierDone := make(chan struct{})
+				go func() {
+					defer close(denierDone)
+					for event := range requests {
+						prompted.Add(1)
+						permissions.Deny(event.Payload)
+					}
+				}()
+				t.Cleanup(func() { cancel(); <-denierDone })
+				queuedPolicy := permission.RequestPolicyPrompt
+				if activePolicy == permission.RequestPolicyPrompt {
+					queuedPolicy = permission.RequestPolicyAutoApprove
+				}
+				model := &lifecycleModel{}
+				sa := testSessionAgent(env, model, &finishStreamModel{text: "title"}, "system")
+				calls := 0
+				var wantPrompts int64
+				model.stream = func(runCtx context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
+					calls++
+					if phase == "summary" && calls == 2 {
+						return (&finishStreamModel{text: "summary"}).Stream(runCtx, call)
+					}
+					wantPolicy := queuedPolicy
+					if calls == 1 || (phase == "summary" && calls == 4) {
+						wantPolicy = activePolicy
+					}
+					require.Equal(t, wantPolicy, permission.RequestPolicyFromContext(runCtx))
+					granted, err := permissions.Request(runCtx, permission.CreatePermissionRequest{
+						SessionID: sess.ID, ToolCallID: fmt.Sprintf("permission-%d", calls),
+						ToolName: "ls", Action: "list", Path: env.workingDir,
+					})
+					require.NoError(t, err)
+					require.Equal(t, wantPolicy == permission.RequestPolicyAutoApprove, granted,
+						"turn %d must use its own authority", calls)
+					if wantPolicy == permission.RequestPolicyPrompt {
+						wantPrompts++
+					}
+					if calls == 1 {
+						if phase == "cancel" {
+							sa.Cancel(sess.ID)
+						}
+						var accepted *AcceptedRun
+						if phase != "handoff-unaccepted" {
+							accepted = sa.BeginAccepted(sess.ID)
+						}
+						result, err := sa.Run(ctx, SessionAgentCall{
+							SessionID: sess.ID, Prompt: "queued", PermissionPolicy: queuedPolicy,
+							Accepted: accepted,
+						})
+						require.NoError(t, err)
+						require.Nil(t, result)
+						require.Equal(t, 1, sa.QueuedPrompts(sess.ID), "the second turn waits while the first Stream is active")
+						switch phase {
+						case "cancel":
+							return nil, runCtx.Err()
+						case "summary":
+							return compactionStream, nil
+						}
+					}
+					return (&finishStreamModel{text: "done"}).Stream(runCtx, call)
+				}
+				_, err = sa.Run(ctx, SessionAgentCall{SessionID: sess.ID, Prompt: "active", PermissionPolicy: activePolicy})
+				if phase == "cancel" {
+					require.ErrorIs(t, err, context.Canceled)
+				} else {
+					require.NoError(t, err)
+				}
+				wantCalls := 2
+				if phase == "summary" {
+					wantCalls = 4
+				}
+				require.Equal(t, wantCalls, calls)
+				require.Equal(t, wantPrompts, prompted.Load())
+				require.False(t, sa.IsSessionBusy(sess.ID))
+				require.Zero(t, sa.QueuedPrompts(sess.ID))
+			})
+		}
+	}
 }

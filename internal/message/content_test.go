@@ -173,3 +173,42 @@ func TestResetStreamedContentEmpty(t *testing.T) {
 	msg.ResetStreamedContent()
 	require.Empty(t, msg.Parts)
 }
+
+func TestToAIMessage_OnlyReasoningContent(t *testing.T) {
+	msg := &Message{
+		ID:    "test-id",
+		Role:  Assistant,
+		Parts: []ContentPart{},
+	}
+
+	msg.AppendReasoningContent("Some thinking but no text response")
+
+	aiMessages := msg.ToAIMessage()
+
+	if len(aiMessages) == 0 {
+		t.Fatal("Expected at least one AI message")
+	}
+
+	fantasyMsg := aiMessages[0]
+
+	// Validation: Content must not be empty
+	if len(fantasyMsg.Content) == 0 {
+		t.Error("fantasy.Message.Content is empty")
+	}
+
+	// Validation: Must have at least one TextPart (the placeholder)
+	hasTextPart := false
+	for _, part := range fantasyMsg.Content {
+		if textPart, ok := part.(fantasy.TextPart); ok {
+			hasTextPart = true
+			// Verify it has content
+			if strings.TrimSpace(textPart.Text) == "" {
+				t.Error("TextPart is empty")
+			}
+		}
+	}
+
+	if !hasTextPart {
+		t.Error("Expected at least one TextPart when message has only reasoning")
+	}
+}

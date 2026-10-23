@@ -7,6 +7,7 @@ import (
 	"charm.land/bubbles/v2/help"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/util"
 	uv "github.com/charmbracelet/ultraviolet"
@@ -31,9 +32,10 @@ type Status struct {
 	// msgSeq identifies the message on screen; expiry timers carry it.
 	msgSeq uint64
 
-	// inputMode and yolo drive the mode badge shown before the help hints.
+	// inputMode and permMode drive the mode badge shown before the help
+	// hints.
 	inputMode uiInputMode
-	yolo      bool
+	permMode  permission.PermissionMode
 }
 
 // NewStatus creates a new status bar and help model.
@@ -68,10 +70,10 @@ func (s *Status) ClearInfoMsg(seq uint64) {
 	}
 }
 
-// SetMode sets the input mode and YOLO state used for the mode badge.
-func (s *Status) SetMode(mode uiInputMode, yolo bool) {
+// SetMode sets the input mode and permission mode used for the mode badge.
+func (s *Status) SetMode(mode uiInputMode, permMode permission.PermissionMode) {
 	s.inputMode = mode
-	s.yolo = yolo
+	s.permMode = permMode
 }
 
 // modeBadge renders the badge for the current mode, or an empty string in
@@ -83,7 +85,10 @@ func (s *Status) modeBadge() string {
 	if s.inputMode == uiInputModePlan {
 		return t.Status.ModeBadgePlan.String()
 	}
-	if s.yolo {
+	switch s.permMode {
+	case permission.PermissionModeSysadmin:
+		return t.Status.ModeBadgeSysadmin.String()
+	case permission.PermissionModeYolo:
 		return t.Status.ModeBadgeYolo.String()
 	}
 	return ""
@@ -153,6 +158,10 @@ func (s *Status) Draw(scr uv.Screen, area uv.Rectangle) {
 	case util.InfoTypeYolo:
 		indStyle = s.com.Styles.Status.ModeBannerYoloBadge
 		msgStyle = s.com.Styles.Status.ModeBannerYolo
+		indInset = badgeLeftInset
+	case util.InfoTypeSysadmin:
+		indStyle = s.com.Styles.Status.ModeBannerSysadminBadge
+		msgStyle = s.com.Styles.Status.ModeBannerSysadmin
 		indInset = badgeLeftInset
 	case util.InfoTypeError:
 		indStyle = s.com.Styles.Status.ErrorIndicator

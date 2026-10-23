@@ -19,7 +19,7 @@ var questionDescription string
 
 // QuestionParams defines the parameters for the question tool.
 type QuestionParams struct {
-	Questions          []QuestionItem `json:"questions" description:"List of questions to present. Single item = no tabs, multiple = tabbed form."`
+	Questions          []QuestionItem `json:"questions" description:"List of questions to present. Single item = no tabs, multiple = tabbed form." items_description:"A single question"`
 	ConfirmTitle       string         `json:"confirm_title,omitempty" description:"Title for the confirmation tab. Required for multi-question batches."`
 	ConfirmDescription string         `json:"confirm_description,omitempty" description:"Description for the confirmation tab. Required for multi-question batches."`
 }
@@ -60,8 +60,8 @@ type QuestionItem struct {
 	Type        string           `json:"type" description:"The type of question: yes_no, single_choice, multi_choice, or free_text"`
 	Question    string           `json:"question" description:"The question text"`
 	Description string           `json:"description" description:"Required markdown description shown below the question"`
-	Choices     []QuestionChoice `json:"choices,omitempty" description:"List of choices"`
-	Options     []QuestionChoice `json:"options,omitempty"` // alias for Choices
+	Choices     []QuestionChoice `json:"choices,omitempty" description:"List of choices" items_description:"A single choice"`
+	Options     []QuestionChoice `json:"options,omitempty" description:"Alias for choices. Use choices instead." items_description:"A single choice"`
 }
 
 // GetChoices returns choices, preferring the Choices field over Options.

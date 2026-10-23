@@ -32,6 +32,11 @@ type fakeASOpts struct {
 	refreshToken   string // refresh_token returned by /token
 	tokenExpiresIn int    // expires_in returned by /token (0 => 3600)
 	failRegister   bool   // make /register return 500 (server has no DCR)
+	// noProtectedResourceMetadata makes the protected resource metadata
+	// endpoints 404, so the server advertises no canonical resource and the
+	// SDK falls back to the 2025-03-26 behavior of treating the MCP server
+	// root as the authorization server.
+	noProtectedResourceMetadata bool
 	// issSupported advertises RFC 9207: the server promises to name itself
 	// in the authorization response, and the SDK rejects the authorization
 	// if no issuer comes back.
@@ -57,6 +62,10 @@ func newFakeAS(t *testing.T, opts fakeASOpts) (base, mcpURL string) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/.well-known/oauth-protected-resource/mcp", func(w http.ResponseWriter, r *http.Request) {
+		if opts.noProtectedResourceMetadata {
+			http.NotFound(w, r)
+			return
+		}
 		writeJSON(w, map[string]any{
 			"resource":              baseURL + "/mcp",
 			"authorization_servers": []string{baseURL},
@@ -769,4 +778,317 @@ func TestConnect_OneLoginOpensOneTab(t *testing.T) {
 
 	require.Equal(t, int64(1), opens.Load(), "one login must open exactly one browser tab")
 	require.NotNil(t, h.Token(), "the login must yield a usable token")
+}
+
+// authorizeURL builds an authorization URL shaped like the one the SDK
+// hands to the authorization-code fetcher, with resource left off when it
+// is empty.
+func authorizeURL(resource string) string {
+	q := url.Values{
+		"client_id":      {"c"},
+		"code_challenge": {"chal"},
+		"response_type":  {"code"},
+		"state":          {"st"},
+	}
+	if resource != "" {
+		q.Set("resource", resource)
+	}
+	return "https://as.example.com/authorize?" + q.Encode()
+}
+
+// TestResolveAuthorizeResourceParam covers the rule that reconciles the two
+// server behaviors: the RFC 8707 resource parameter is kept on the browser
+// URL when the server advertised itself as that canonical resource, and
+// dropped otherwise so servers that reject it at authorize (PR #3396) keep
+// working.
+func TestResolveAuthorizeResourceParam(t *testing.T) {
+	t.Parallel()
+
+	const resource = "https://mcp.render.com/mcp"
+
+	tests := []struct {
+		name string
+		// advertised are the canonical resources discovery published; nil
+		// means no metadata round tripper was involved at all.
+		advertised   []string
+		url          string
+		wantResource string // resource expected on the returned URL
+	}{
+		{
+			name:         "kept when the server advertises it",
+			advertised:   []string{resource},
+			url:          authorizeURL(resource),
+			wantResource: resource,
+		},
+		{
+			name:         "kept when advertised alongside others",
+			advertised:   []string{"https://mcp.render.com", resource},
+			url:          authorizeURL(resource),
+			wantResource: resource,
+		},
+		{
+			// PR #3396: no protected resource metadata, so the value is the
+			// SDK's fallback guess and the server may reject it.
+			name:         "stripped when nothing is advertised",
+			advertised:   []string{},
+			url:          authorizeURL(resource),
+			wantResource: "",
+		},
+		{
+			name:         "stripped when no metadata client was used",
+			advertised:   nil,
+			url:          authorizeURL(resource),
+			wantResource: "",
+		},
+		{
+			name:         "stripped when the advertisement does not match",
+			advertised:   []string{"https://other.example.com/mcp"},
+			url:          authorizeURL(resource),
+			wantResource: "",
+		},
+		{
+			name:         "untouched when there is no resource parameter",
+			advertised:   []string{resource},
+			url:          authorizeURL(""),
+			wantResource: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var rt *metadataFixupRoundTripper
+			if tt.advertised != nil {
+				rt = newMetadataFixupRoundTripper(http.DefaultTransport)
+				for _, res := range tt.advertised {
+					rt.recordAdvertisedResource(res)
+				}
+			}
+
+			got := resolveAuthorizeResourceParam(tt.url, rt)
+
+			u, err := url.Parse(got)
+			require.NoError(t, err)
+			require.Equal(t, tt.wantResource, u.Query().Get("resource"))
+
+			// Whatever the decision, the rest of the authorization request
+			// must survive intact.
+			in, err := url.Parse(tt.url)
+			require.NoError(t, err)
+			require.Equal(t, in.Scheme+"://"+in.Host+in.Path, u.Scheme+"://"+u.Host+u.Path)
+			for _, key := range []string{"client_id", "code_challenge", "response_type", "state"} {
+				require.Equal(t, in.Query().Get(key), u.Query().Get(key), "%s must be preserved", key)
+			}
+		})
+	}
+}
+
+// TestResolveAuthorizeResourceParam_MalformedURL proves an unparseable URL
+// is handed on untouched rather than mangled or dropped, so the failure
+// surfaces from the browser or the server instead of here.
+func TestResolveAuthorizeResourceParam_MalformedURL(t *testing.T) {
+	t.Parallel()
+
+	const bad = "https://as.example.com/authorize?resource=%zz"
+	rt := newMetadataFixupRoundTripper(http.DefaultTransport)
+	rt.recordAdvertisedResource("https://mcp.example.com/mcp")
+
+	require.Equal(t, bad, resolveAuthorizeResourceParam(bad, rt))
+	require.Equal(t, bad, resolveAuthorizeResourceParam(bad, nil))
+}
+
+// stubTransport answers every request with a canned status and body, so
+// the metadata round tripper can be exercised without a server.
+type stubTransport struct {
+	status int
+	body   string
+}
+
+func (s stubTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	return &http.Response{
+		StatusCode: s.status,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(s.body)),
+		Request:    req,
+	}, nil
+}
+
+// TestMetadataFixup_RecordsAdvertisedResource proves the round tripper
+// notes the canonical resource a protected resource document advertises —
+// the signal the authorization URL decision rests on — while still passing
+// the body through untouched and still normalizing trailing-slash issuers.
+func TestMetadataFixup_RecordsAdvertisedResource(t *testing.T) {
+	t.Parallel()
+
+	const resource = "https://mcp.example.com/mcp"
+
+	tests := []struct {
+		name         string
+		path         string
+		status       int
+		body         string
+		wantRecorded bool
+		wantBody     string // empty means "same as body"
+	}{
+		{
+			name:         "protected resource metadata",
+			path:         "/.well-known/oauth-protected-resource/mcp",
+			status:       http.StatusOK,
+			body:         `{"resource":"` + resource + `","authorization_servers":["https://as.example.com"]}`,
+			wantRecorded: true,
+		},
+		{
+			name:         "protected resource metadata at the root",
+			path:         "/.well-known/oauth-protected-resource",
+			status:       http.StatusOK,
+			body:         `{"resource":"` + resource + `"}`,
+			wantRecorded: true,
+		},
+		{
+			name:         "not found",
+			path:         "/.well-known/oauth-protected-resource/mcp",
+			status:       http.StatusNotFound,
+			body:         `{"resource":"` + resource + `"}`,
+			wantRecorded: false,
+		},
+		{
+			name:         "malformed json",
+			path:         "/.well-known/oauth-protected-resource/mcp",
+			status:       http.StatusOK,
+			body:         `not json`,
+			wantRecorded: false,
+		},
+		{
+			name:         "empty resource",
+			path:         "/.well-known/oauth-protected-resource/mcp",
+			status:       http.StatusOK,
+			body:         `{"resource":""}`,
+			wantRecorded: false,
+		},
+		{
+			name:         "authorization server metadata does not advertise a resource",
+			path:         "/.well-known/oauth-authorization-server",
+			status:       http.StatusOK,
+			body:         `{"issuer":"https://as.example.com","resource":"` + resource + `"}`,
+			wantRecorded: false,
+		},
+		{
+			name:         "trailing slash issuer is still normalized",
+			path:         "/.well-known/oauth-authorization-server",
+			status:       http.StatusOK,
+			body:         `{"issuer":"https://as.example.com/"}`,
+			wantRecorded: false,
+			wantBody:     `{"issuer":"https://as.example.com"}`,
+		},
+		{
+			name:         "non-metadata endpoint",
+			path:         "/authorize",
+			status:       http.StatusOK,
+			body:         `{"resource":"` + resource + `"}`,
+			wantRecorded: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			rt := newMetadataFixupRoundTripper(stubTransport{status: tt.status, body: tt.body})
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
+				"https://mcp.example.com"+tt.path, nil)
+			require.NoError(t, err)
+
+			resp, err := rt.RoundTrip(req)
+			require.NoError(t, err)
+			body, err := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			require.NoError(t, err)
+
+			wantBody := tt.wantBody
+			if wantBody == "" {
+				wantBody = tt.body
+			}
+			require.Equal(t, wantBody, string(body), "metadata body must reach the SDK")
+			require.Equal(t, tt.wantRecorded, rt.advertisesResource(resource))
+		})
+	}
+}
+
+// TestHandler_KeepsResourceParamWhenAdvertised is the regression test for
+// #3941. A server that publishes protected resource metadata naming itself
+// as the canonical resource (Render does) must see the RFC 8707 resource
+// parameter on the authorize request too, because the SDK sends it at token
+// exchange; dropping it made Render answer the redirect with
+// "invalid_target: resource is not a canonical resource server for this
+// API" and no login was possible.
+func TestHandler_KeepsResourceParamWhenAdvertised(t *testing.T) {
+	base, mcpURL := newFakeAS(t, fakeASOpts{
+		clientID:    "c",
+		accessToken: "a",
+	})
+
+	h, err := NewHandler("test", mcpURL, nil, nil, func(*oauth.Token) {}, true, 0)
+	require.NoError(t, err)
+	t.Cleanup(h.Close)
+
+	var (
+		mu      sync.Mutex
+		opened  string
+		forward = browserRedirect("code123")
+	)
+	h.openURL = func(u string) error {
+		mu.Lock()
+		opened = u
+		mu.Unlock()
+		return forward(u)
+	}
+
+	require.NoError(t, authorizeWith401(t, h, base, mcpURL))
+
+	mu.Lock()
+	defer mu.Unlock()
+	u, err := url.Parse(opened)
+	require.NoError(t, err)
+	require.Equal(t, mcpURL, u.Query().Get("resource"),
+		"authorize must carry the same resource the token exchange sends")
+}
+
+// TestHandler_StripsResourceParamWithoutAdvertisement is the regression
+// test for PR #3396. A server that publishes no protected resource metadata
+// never claimed a canonical resource, so the value is the SDK's fallback
+// guess; such servers are the ones observed rejecting the parameter on the
+// authorize request, and it stays stripped for them.
+func TestHandler_StripsResourceParamWithoutAdvertisement(t *testing.T) {
+	base, mcpURL := newFakeAS(t, fakeASOpts{
+		clientID:                    "c",
+		accessToken:                 "a",
+		noProtectedResourceMetadata: true,
+	})
+
+	h, err := NewHandler("test", mcpURL, nil, nil, func(*oauth.Token) {}, true, 0)
+	require.NoError(t, err)
+	t.Cleanup(h.Close)
+
+	var (
+		mu      sync.Mutex
+		opened  string
+		forward = browserRedirect("code123")
+	)
+	h.openURL = func(u string) error {
+		mu.Lock()
+		opened = u
+		mu.Unlock()
+		return forward(u)
+	}
+
+	require.NoError(t, authorizeWith401(t, h, base, mcpURL))
+
+	mu.Lock()
+	defer mu.Unlock()
+	u, err := url.Parse(opened)
+	require.NoError(t, err)
+	require.Empty(t, u.Query().Get("resource"),
+		"a server that advertises no canonical resource must not get the parameter")
+	require.NotEmpty(t, u.Query().Get("state"), "the rest of the request must survive")
 }

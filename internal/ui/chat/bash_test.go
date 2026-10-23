@@ -297,4 +297,8 @@ func TestBashToolMessageItem_DescriptionHeader(t *testing.T) {
 	out = render(`{"command":"echo hi","description":"do things"}`, false, true)
 	require.Contains(t, out, "echo hi")
 	require.NotContains(t, out, "do things")
+
+	// A present-but-empty description keeps the plain command header too.
+	out = render(`{"command":"echo hi","description":""}`, false, false)
+	require.Contains(t, strings.Split(out, "\n")[0], "echo hi")
 }

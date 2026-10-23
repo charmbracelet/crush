@@ -93,15 +93,14 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		extraParams = append(extraParams, "background", "true")
 	}
 
-	// The command is always rendered expanded (wrapped, never truncated);
-	// expansion only controls the output body.
-	// When the model provides a description, it becomes the header
-	// (truncated to one line, full when expanded)
+	// The description leads the header (its first line truncated when
+	// collapsed, the whole description wrapped when expanded). An empty
+	// description and nested tool calls (compact) keep the plain command
+	// header.
 	headerOpts := *opts
 	headerOpts.ExpandedContent = true
 	var header string
 	if desc != "" && !opts.Compact {
-		// Nested tool calls (compact) keep the plain command header.
 		header = renderDescriptionHeader(sty, opts, cappedWidth, desc, cmd, dirChip, extraParams...)
 	} else {
 		header = toolHeaderWithChip(sty, opts.Status, "Bash", dirChip, cappedWidth, &headerOpts, sty.Tool.ParamMain, append([]string{cmd}, extraParams...)...)

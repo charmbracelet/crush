@@ -65,18 +65,31 @@ func RequestDeviceCode(ctx context.Context) (*DeviceCode, error) {
 	return &dc, nil
 }
 
+const (
+	// pollSafetyMargin is added to every wait between polls. GitHub measures
+	// the interval from when it finished handling the previous request, so a
+	// poll that lands even slightly early is answered with slow_down.
+	pollSafetyMargin = 2 * time.Second
+	// slowDownIncrement is how much GitHub extends the interval on slow_down.
+	slowDownIncrement = 5 * time.Second
+)
+
 // PollForToken polls GitHub for the access token after user authorization.
 func PollForToken(ctx context.Context, dc *DeviceCode) (*oauth.Token, error) {
-	interval := max(dc.Interval, 5)
+	interval := time.Duration(max(dc.Interval, 5)) * time.Second
 	deadline := time.Now().Add(time.Duration(dc.ExpiresIn) * time.Second)
-	ticker := time.NewTicker(time.Duration(interval) * time.Second)
-	defer ticker.Stop()
 
 	for time.Now().Before(deadline) {
+		// Start the wait only after the previous poll has completed. A fixed
+		// ticker would subtract the request's round-trip time from the wait,
+		// so each poll would arrive early and trigger unbounded slow_down
+		// escalation (RFC 8628 section 3.5).
+		timer := time.NewTimer(interval + pollSafetyMargin)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return nil, ctx.Err()
-		case <-ticker.C:
+		case <-timer.C:
 		}
 
 		token, err := tryGetToken(ctx, dc.DeviceCode)
@@ -84,8 +97,7 @@ func PollForToken(ctx context.Context, dc *DeviceCode) (*oauth.Token, error) {
 			continue
 		}
 		if err == errSlowDown {
-			interval += 5
-			ticker.Reset(time.Duration(interval) * time.Second)
+			interval += slowDownIncrement
 			continue
 		}
 		if err != nil {

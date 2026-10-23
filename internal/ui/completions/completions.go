@@ -117,6 +117,12 @@ func (c *Completions) SetStyles(normalStyle, focusedStyle, matchStyle lipgloss.S
 	c.normalStyle = normalStyle
 	c.focusedStyle = focusedStyle
 	c.matchStyle = matchStyle
+	// Items loaded already copied the old styles.
+	for _, item := range c.allItems {
+		if ci, ok := item.(*CompletionItem); ok {
+			ci.setStyles(normalStyle, focusedStyle, matchStyle)
+		}
+	}
 }
 
 // IsOpen returns whether the completions popup is open.

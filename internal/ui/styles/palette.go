@@ -509,16 +509,17 @@ func LoadPaletteTheme(baseName string, palette Palette) (Styles, error) {
 	if err != nil {
 		return Styles{}, err
 	}
-	s := quickStyle(palette.ToQuickStyleOpts(base.ToQuickStyleOpts(rootOpts)))
+	opts := palette.ToQuickStyleOpts(base.ToQuickStyleOpts(rootOpts))
+	s := quickStyle(opts)
 	// Root theme overrides hardcode built-in colors (e.g. the Charmtone
 	// syntax palette) that only make sense for the untouched built-in.
 	// Only apply them when the theme is unmodified, so user themes (e.g.
 	// light themes) get fully token-driven styles.
 	pure := palette.IsEmpty() && base == PaletteFromOpts(rootOpts)
-	if pure {
-		if override, ok := builtinThemeOverrides[root]; ok {
-			s = override(s)
-		}
+	if !pure {
+		s = legibleBadges(s, opts)
+	} else if override, ok := builtinThemeOverrides[root]; ok {
+		s = override(s)
 	}
 	return s, nil
 }

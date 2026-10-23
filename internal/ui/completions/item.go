@@ -107,6 +107,15 @@ func (c *CompletionItem) SetFocused(focused bool) {
 	c.Bump()
 }
 
+// setStyles replaces the item's styles and drops its cached renders.
+func (c *CompletionItem) setStyles(normalStyle, focusedStyle, matchStyle lipgloss.Style) {
+	c.normalStyle = normalStyle
+	c.focusedStyle = focusedStyle
+	c.matchStyle = matchStyle
+	c.cache = nil
+	c.Bump()
+}
+
 // Render implements [list.Item].
 func (c *CompletionItem) Render(width int) string {
 	return renderItem(

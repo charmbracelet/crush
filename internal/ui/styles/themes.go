@@ -29,7 +29,14 @@ func ThemeKeyForProvider(providerID string) string {
 // ID. Unknown or empty provider IDs yield the default Charmtone Pantera
 // theme.
 func ThemeForProvider(providerID string) Styles {
-	switch ThemeKeyForProvider(providerID) {
+	return ThemeForKey(ThemeKeyForProvider(providerID))
+}
+
+// ThemeForKey returns the Styles for a key returned by
+// [ThemeKeyForProvider]. Unknown keys yield the default Charmtone Pantera
+// theme.
+func ThemeForKey(key string) Styles {
+	switch key {
 	case "hyper":
 		return HypercrushObsidiana()
 	default:

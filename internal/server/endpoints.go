@@ -84,6 +84,35 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 			Fails(400, 404).
 			Handle(c.handlePostWorkspaceCurrentSession),
 
+		apigen.Get("/v1/workspaces/{id}/theme").
+			Summary("Get host theme").
+			Description("Returns the theme a host application set for the "+
+				"workspace; theme is null when none is set.").
+			Tags("workspaces").
+			PathParam("id", "Workspace ID").
+			Responds(proto.HostThemeState{}).
+			Fails(404).
+			Handle(c.handleGetWorkspaceTheme),
+
+		apigen.Post("/v1/workspaces/{id}/theme").
+			Summary("Set host theme").
+			Description("Sets the theme a host application (e.g. an editor "+
+				"running Crush in a pane) supplies for every client of the "+
+				"workspace, or clears it with a null theme. Palette keys are "+
+				"theme-file keys and syntax keys are code highlighting tokens; "+
+				"unknown keys are ignored, invalid colors and an unknown base "+
+				"theme are rejected. The theme is kept in memory only. A change "+
+				"is broadcast as a host_theme event, and clients attaching "+
+				"later receive the current theme first. Setting the current "+
+				"theme again is a no-op. Responds with the resulting state.").
+			Tags("workspaces").
+			PathParam("id", "Workspace ID").
+			QueryParam("client_id", "Client ID (UUID) of the caller; only logged").
+			Accepts(proto.HostThemeRequest{}).
+			Responds(proto.HostThemeState{}).
+			Fails(400, 404, 413).
+			Handle(c.handlePostWorkspaceTheme),
+
 		apigen.Get("/v1/workspaces/{id}/config").
 			Summary("Get workspace config").
 			Description("Returns the resolved workspace configuration (config.Config).").

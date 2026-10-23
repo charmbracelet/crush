@@ -87,6 +87,12 @@ func (f FilterableItemsSource) String(i int) string {
 	return f[i].Filter()
 }
 
+// Items returns every item of the list, including the ones the current
+// query filters out.
+func (f *FilterableList) Items() []FilterableItem {
+	return f.items
+}
+
 // FilteredItems returns the visible items after filtering.
 func (f *FilterableList) FilteredItems() []Item {
 	if f.query == "" {

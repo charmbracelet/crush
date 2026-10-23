@@ -258,6 +258,12 @@ func decodeSSEEnvelope(p pubsub.Payload) (any, bool) {
 			return nil, false
 		}
 		return e, true
+	case pubsub.PayloadTypeHostTheme:
+		var e pubsub.Event[proto.HostThemeState]
+		if err := json.Unmarshal(p.Payload, &e); err != nil {
+			return nil, false
+		}
+		return e, true
 	}
 	return nil, false
 }

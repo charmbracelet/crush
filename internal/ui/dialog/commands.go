@@ -57,7 +57,10 @@ type Commands struct {
 	hasSession bool
 	hasTodos   bool
 	hasQueue   bool
-	selected   CommandType
+	// transparent is whether the background color is off on screen,
+	// which a host theme can make differ from the config.
+	transparent bool
+	selected    CommandType
 
 	spinner spinner.Model
 	loading bool
@@ -77,8 +80,9 @@ type Commands struct {
 
 var _ Dialog = (*Commands)(nil)
 
-// NewCommands creates a new commands dialog.
-func NewCommands(com *common.Common, sessionID string, hasSession, hasTodos, hasQueue bool, customCommands []commands.CustomCommand, mcpPrompts []commands.MCPPrompt) (*Commands, error) {
+// NewCommands creates a new commands dialog. transparent is whether the
+// background color is currently off on screen.
+func NewCommands(com *common.Common, sessionID string, hasSession, hasTodos, hasQueue, transparent bool, customCommands []commands.CustomCommand, mcpPrompts []commands.MCPPrompt) (*Commands, error) {
 	c := &Commands{
 		com:            com,
 		selected:       SystemCommands,
@@ -86,6 +90,7 @@ func NewCommands(com *common.Common, sessionID string, hasSession, hasTodos, has
 		hasSession:     hasSession,
 		hasTodos:       hasTodos,
 		hasQueue:       hasQueue,
+		transparent:    transparent,
 		customCommands: customCommands,
 		mcpPrompts:     mcpPrompts,
 	}
@@ -548,9 +553,10 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		NewCommandItem(c.com.Styles, "init", "Initialize Project", "", ActionInitializeProject{}),
 	)
 
-	// Add transparent background toggle.
+	// Add transparent background toggle. The label follows what is on
+	// screen, which the toggle flips.
 	transparentLabel := "Disable Background Color"
-	if cfg != nil && cfg.Options != nil && cfg.Options.TUI.IsTransparent() {
+	if c.transparent {
 		transparentLabel = "Enable Background Color"
 	}
 	commands = append(commands, NewCommandItem(c.com.Styles, "toggle_transparent", transparentLabel, "", ActionToggleTransparentBackground{}))

@@ -236,6 +236,50 @@ func TestUpdateAvailableMsgToProto_RoundTrip(t *testing.T) {
 	require.False(t, decoded.Payload.IsDevelopment)
 }
 
+// TestHostThemeEvent_RoundTrip verifies that a host theme event survives
+// the SSE envelope with the double-nested wire shape hosts and TUIs decode:
+// {"type":"host_theme","payload":{"type":"updated","payload":{...}}}.
+func TestHostThemeEvent_RoundTrip(t *testing.T) {
+	t.Parallel()
+
+	src := pubsub.Event[proto.HostThemeState]{
+		Type: pubsub.UpdatedEvent,
+		Payload: proto.HostThemeState{
+			WorkspaceID: "w1",
+			Theme: &proto.HostTheme{
+				Name:        "charmtone-dark",
+				Source:      "superjoy",
+				Palette:     map[string]string{"primary": "#6B50FF"},
+				Syntax:      map[string]string{"keyword": "#00A4FF"},
+				Transparent: new(true),
+			},
+		},
+	}
+
+	env := wrapEvent(src)
+	require.NotNil(t, env)
+	require.Equal(t, pubsub.PayloadTypeHostTheme, env.Type)
+	require.Equal(t, "host_theme", env.Type)
+
+	var decoded pubsub.Event[proto.HostThemeState]
+	require.NoError(t, json.Unmarshal(env.Payload, &decoded))
+	require.Equal(t, pubsub.UpdatedEvent, decoded.Type)
+	require.Equal(t, "w1", decoded.Payload.WorkspaceID)
+	require.True(t, src.Payload.Theme.Equal(decoded.Payload.Theme))
+
+	// A clear is a deleted event whose theme is null.
+	env = wrapEvent(pubsub.Event[proto.HostThemeState]{
+		Type:    pubsub.DeletedEvent,
+		Payload: proto.HostThemeState{WorkspaceID: "w1"},
+	})
+	require.NotNil(t, env)
+	data, err := json.Marshal(env)
+	require.NoError(t, err)
+	require.JSONEq(t,
+		`{"type":"host_theme","payload":{"type":"deleted","payload":{"workspace_id":"w1","theme":null}}}`,
+		string(data))
+}
+
 // TestMCPStateChangedEventForwardsCounts verifies that the SSE envelope
 // carries prompt and resource counts, not only tool counts. The client TUI
 // renders all three, so dropping the other two made client/server mode

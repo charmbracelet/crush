@@ -41,6 +41,7 @@ var (
 	ErrServerShuttingDown      = errors.New("server is shutting down")
 	ErrServerNotIdle           = errors.New("server is hosting live workspaces")
 	ErrClientRetired           = errors.New("client has been retired")
+	ErrInvalidTheme            = errors.New("invalid host theme")
 	ErrChannelOptInMismatch    = errors.New("requested channels differ from the existing workspace; channels are an explicit opt-in and are not shared across duplicate creates")
 )
 
@@ -209,6 +210,15 @@ type Workspace struct {
 	// clients tracks each client's claim on this workspace. Refcount
 	// is a derived value: len(clients).
 	clients map[string]*clientState
+
+	// themeMu guards hostTheme. It is held only briefly (no IO) and never
+	// together with clientsMu.
+	themeMu sync.Mutex
+	// hostTheme is the theme a host application set for every client of
+	// the workspace, or nil. It is never persisted and is not tied to the
+	// setting client: it stays until a host clears it or the workspace
+	// goes away. Stored themes are never mutated, only replaced.
+	hostTheme *proto.HostTheme
 
 	// rootCache memoizes [Backend.RootSessionID] resolutions, keyed by
 	// session ID. Session parentage is fixed at creation, so entries

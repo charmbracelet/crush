@@ -649,40 +649,47 @@ type Styles struct {
 // ChromaTheme converts the current markdown chroma styles to a chroma
 // StyleEntries map.
 func (s *Styles) ChromaTheme() chroma.StyleEntries {
-	rules := s.Markdown.CodeBlock
+	return ChromaEntries(s.Markdown.CodeBlock.Chroma)
+}
 
+// ChromaEntries converts a markdown chroma config to chroma style entries,
+// the same way glamour does for code blocks. A nil config has no entries.
+func ChromaEntries(c *ansi.Chroma) chroma.StyleEntries {
+	if c == nil {
+		return chroma.StyleEntries{}
+	}
 	return chroma.StyleEntries{
-		chroma.Text:                chromaStyle(rules.Chroma.Text),
-		chroma.Error:               chromaStyle(rules.Chroma.Error),
-		chroma.Comment:             chromaStyle(rules.Chroma.Comment),
-		chroma.CommentPreproc:      chromaStyle(rules.Chroma.CommentPreproc),
-		chroma.Keyword:             chromaStyle(rules.Chroma.Keyword),
-		chroma.KeywordReserved:     chromaStyle(rules.Chroma.KeywordReserved),
-		chroma.KeywordNamespace:    chromaStyle(rules.Chroma.KeywordNamespace),
-		chroma.KeywordType:         chromaStyle(rules.Chroma.KeywordType),
-		chroma.Operator:            chromaStyle(rules.Chroma.Operator),
-		chroma.Punctuation:         chromaStyle(rules.Chroma.Punctuation),
-		chroma.Name:                chromaStyle(rules.Chroma.Name),
-		chroma.NameBuiltin:         chromaStyle(rules.Chroma.NameBuiltin),
-		chroma.NameTag:             chromaStyle(rules.Chroma.NameTag),
-		chroma.NameAttribute:       chromaStyle(rules.Chroma.NameAttribute),
-		chroma.NameClass:           chromaStyle(rules.Chroma.NameClass),
-		chroma.NameConstant:        chromaStyle(rules.Chroma.NameConstant),
-		chroma.NameDecorator:       chromaStyle(rules.Chroma.NameDecorator),
-		chroma.NameException:       chromaStyle(rules.Chroma.NameException),
-		chroma.NameFunction:        chromaStyle(rules.Chroma.NameFunction),
-		chroma.NameOther:           chromaStyle(rules.Chroma.NameOther),
-		chroma.Literal:             chromaStyle(rules.Chroma.Literal),
-		chroma.LiteralNumber:       chromaStyle(rules.Chroma.LiteralNumber),
-		chroma.LiteralDate:         chromaStyle(rules.Chroma.LiteralDate),
-		chroma.LiteralString:       chromaStyle(rules.Chroma.LiteralString),
-		chroma.LiteralStringEscape: chromaStyle(rules.Chroma.LiteralStringEscape),
-		chroma.GenericDeleted:      chromaStyle(rules.Chroma.GenericDeleted),
-		chroma.GenericEmph:         chromaStyle(rules.Chroma.GenericEmph),
-		chroma.GenericInserted:     chromaStyle(rules.Chroma.GenericInserted),
-		chroma.GenericStrong:       chromaStyle(rules.Chroma.GenericStrong),
-		chroma.GenericSubheading:   chromaStyle(rules.Chroma.GenericSubheading),
-		chroma.Background:          chromaStyle(rules.Chroma.Background),
+		chroma.Text:                chromaStyle(c.Text),
+		chroma.Error:               chromaStyle(c.Error),
+		chroma.Comment:             chromaStyle(c.Comment),
+		chroma.CommentPreproc:      chromaStyle(c.CommentPreproc),
+		chroma.Keyword:             chromaStyle(c.Keyword),
+		chroma.KeywordReserved:     chromaStyle(c.KeywordReserved),
+		chroma.KeywordNamespace:    chromaStyle(c.KeywordNamespace),
+		chroma.KeywordType:         chromaStyle(c.KeywordType),
+		chroma.Operator:            chromaStyle(c.Operator),
+		chroma.Punctuation:         chromaStyle(c.Punctuation),
+		chroma.Name:                chromaStyle(c.Name),
+		chroma.NameBuiltin:         chromaStyle(c.NameBuiltin),
+		chroma.NameTag:             chromaStyle(c.NameTag),
+		chroma.NameAttribute:       chromaStyle(c.NameAttribute),
+		chroma.NameClass:           chromaStyle(c.NameClass),
+		chroma.NameConstant:        chromaStyle(c.NameConstant),
+		chroma.NameDecorator:       chromaStyle(c.NameDecorator),
+		chroma.NameException:       chromaStyle(c.NameException),
+		chroma.NameFunction:        chromaStyle(c.NameFunction),
+		chroma.NameOther:           chromaStyle(c.NameOther),
+		chroma.Literal:             chromaStyle(c.Literal),
+		chroma.LiteralNumber:       chromaStyle(c.LiteralNumber),
+		chroma.LiteralDate:         chromaStyle(c.LiteralDate),
+		chroma.LiteralString:       chromaStyle(c.LiteralString),
+		chroma.LiteralStringEscape: chromaStyle(c.LiteralStringEscape),
+		chroma.GenericDeleted:      chromaStyle(c.GenericDeleted),
+		chroma.GenericEmph:         chromaStyle(c.GenericEmph),
+		chroma.GenericInserted:     chromaStyle(c.GenericInserted),
+		chroma.GenericStrong:       chromaStyle(c.GenericStrong),
+		chroma.GenericSubheading:   chromaStyle(c.GenericSubheading),
+		chroma.Background:          chromaStyle(c.Background),
 	}
 }
 

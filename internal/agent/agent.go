@@ -807,11 +807,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		return nil, fmt.Errorf("failed to get session messages: %w", err)
 	}
 
-	// Generate title from the first real (non-shell) user prompt.
-	// can take tens of seconds. Blocking Run on it delays the
+	// Generate a root-session title from the first real (non-shell) user prompt.
+	// Title generation can take tens of seconds. Blocking Run on it delays the
 	// response to the caller. Use a detached context so the title
 	// goroutine survives Run's cancel.
-	if !hasUserTextMessage(msgs) {
+	if currentSession.ParentSessionID == "" && !hasUserTextMessage(msgs) {
 		titleCtx := context.WithoutCancel(ctx)
 		go a.GenerateTitle(titleCtx, call.SessionID, call.Prompt)
 	}

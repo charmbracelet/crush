@@ -7,10 +7,10 @@ import (
 	"slices"
 	"sync"
 	"sync/atomic"
+	"uuid"
 
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/pubsub"
-	"github.com/google/uuid"
 )
 
 // hookApprovalKey is the unexported context key used to mark a tool call as

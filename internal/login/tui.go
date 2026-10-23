@@ -18,6 +18,7 @@ import (
 	"github.com/pkg/browser"
 
 	"github.com/charmbracelet/crush/internal/oauth"
+	"github.com/charmbracelet/crush/internal/ui/keyhint"
 )
 
 // authState represents the state of the OAuth TUI flow.
@@ -395,7 +396,7 @@ func (m authModel) content() string {
 	}
 
 	b.WriteString("\n\n  ")
-	b.WriteString(m.help.View(m.keymap))
+	b.WriteString(m.help.View(keyhint.Wrap(m.keymap)))
 	b.WriteString("\n")
 	b.WriteString(trailingSpace)
 	return b.String()

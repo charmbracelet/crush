@@ -8,6 +8,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/ui/keyhint"
 )
 
 type chooseKeyMap struct {
@@ -136,7 +137,7 @@ func (m chooseModel) content() string {
 		}
 	}
 	b.WriteString("\n\n  ")
-	b.WriteString(m.help.View(m.keymap))
+	b.WriteString(m.help.View(keyhint.Wrap(m.keymap)))
 	b.WriteString("\n")
 	return b.String()
 }

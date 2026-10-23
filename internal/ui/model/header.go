@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/keyhint"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
@@ -164,10 +165,11 @@ func renderHeaderDetails(
 	}
 
 	const keystroke = "ctrl+d"
+	keystrokeLabel := keyhint.Label(keystroke)
 	if detailsOpen {
-		parts = append(parts, t.Header.Keystroke.Render(keystroke)+t.Header.KeystrokeTip.Render(" close"))
+		parts = append(parts, t.Header.Keystroke.Render(keystrokeLabel)+t.Header.KeystrokeTip.Render(" close"))
 	} else {
-		parts = append(parts, t.Header.Keystroke.Render(keystroke)+t.Header.KeystrokeTip.Render(" open "))
+		parts = append(parts, t.Header.Keystroke.Render(keystrokeLabel)+t.Header.KeystrokeTip.Render(" open "))
 	}
 
 	dot := t.Header.Separator.Render(" • ")

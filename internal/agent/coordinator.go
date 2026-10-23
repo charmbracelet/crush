@@ -1023,6 +1023,9 @@ func (c *coordinator) buildModel(ctx context.Context, slot config.SelectedModelT
 	// applied per request, so retries get a fresh budget each attempt.
 	languageModel = newRequestTimeoutModel(languageModel, c.cfg.Config().Options.GetRequestTimeout())
 
+	// Cancelling a turn must stop its stream even with the timeout disabled.
+	languageModel = newStopOnCancelModel(languageModel)
+
 	// Hyper completions no longer report the hypercredit balance, so wrap
 	// the Hyper models to fetch it from /v1/credits on every request.
 	if modelCfg.Provider == hyper.Name {

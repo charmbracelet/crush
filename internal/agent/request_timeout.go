@@ -10,28 +10,40 @@ import (
 	"charm.land/fantasy"
 )
 
-// requestTimeoutError reports that an LLM request exhausted its configured
-// request_timeout budget. For streaming requests this is an idle timeout:
-// it only fires when the provider sends nothing for the whole window, so a
-// slow but actively streaming response is never killed. It wraps the
-// underlying error so callers can still match [context.DeadlineExceeded]
-// through the chain.
+// timeoutKind is which request budget ran out.
+type timeoutKind int
+
+const (
+	// timeoutDeadline is a non-streaming request that ran past its budget.
+	timeoutDeadline timeoutKind = iota
+	// timeoutFirstPart is a stream that sent nothing before its first part.
+	timeoutFirstPart
+	// timeoutIdle is a stream that went silent after it started answering.
+	timeoutIdle
+	// timeoutStalled is a stream that sent only keepalives for its budget.
+	timeoutStalled
+)
+
+// timeoutMessages holds the log and UI wording for each kind; both take the
+// elapsed budget.
+var timeoutMessages = [...]struct{ log, user string }{
+	timeoutDeadline:  {"LLM request timed out after %s", "The model did not respond within %s."},
+	timeoutFirstPart: {"LLM stream received no data for %s", "The model did not send any data within %s."},
+	timeoutIdle:      {"LLM stream received no data for %s", "The model stopped sending data for %s."},
+	timeoutStalled:   {"LLM stream sent only keepalives for %s", "The connection stayed open but the model sent nothing for %s."},
+}
+
+// requestTimeoutError reports that an LLM request exhausted a
+// request_timeout budget. It presents as a retryable [net.Error] timeout and
+// never wraps a context error, which retry logic would read as an abort.
 type requestTimeoutError struct {
-	// timeout is the window that actually ran out, which is wider than the
-	// configured value when the deadline fired before the first part.
 	timeout time.Duration
-	idle    bool
-	// first reports that nothing at all arrived before the deadline, so
-	// the model never started answering rather than stopping midway.
-	first bool
-	cause error
+	kind    timeoutKind
+	cause   error
 }
 
 func (e *requestTimeoutError) Error() string {
-	msg := fmt.Sprintf("LLM request timed out after %s", e.timeout)
-	if e.idle {
-		msg = fmt.Sprintf("LLM stream received no data for %s", e.timeout)
-	}
+	msg := fmt.Sprintf(timeoutMessages[e.kind].log, e.timeout)
 	if e.cause != nil {
 		return fmt.Sprintf("%s: %v", msg, e.cause)
 	}
@@ -40,35 +52,33 @@ func (e *requestTimeoutError) Error() string {
 
 func (e *requestTimeoutError) Unwrap() error { return e.cause }
 
-// userMessage explains the timeout in the UI, including how long the request
-// ran before giving up and how to change the limit.
+// Timeout implements [net.Error], which marks this as retryable.
+func (e *requestTimeoutError) Timeout() bool { return true }
+
+// Temporary implements [net.Error].
+func (e *requestTimeoutError) Temporary() bool { return true }
+
+// userMessage explains the timeout in the UI and how to change the limit.
 func (e *requestTimeoutError) userMessage() string {
-	hint := "Increase the limit with \"option request-timeout SECONDS\" or set it to 0 to disable the timeout."
-	if e.idle && e.first {
-		return fmt.Sprintf("The model did not send any data within %s. %s", e.timeout, hint)
-	}
-	if e.idle {
-		return fmt.Sprintf("The model stopped sending data for %s. %s", e.timeout, hint)
-	}
-	return fmt.Sprintf("The model did not respond within %s. %s", e.timeout, hint)
+	const hint = "Increase the limit with \"option request-timeout SECONDS\" or set it to 0 to disable the timeout."
+	return fmt.Sprintf(timeoutMessages[e.kind].user, e.timeout) + " " + hint
 }
 
 // defaultFirstPartTimeout is the floor for the wait on a stream's first
 // part. Prefill and the thinking that happens before the first token are
 // model work, not a stalled connection: after a tool result lands in the
-// transcript a provider can stay silent for minutes before answering, and
-// the inter-part window is far too small to absorb that. A stream that
-// stays silent longer than this is treated as dead.
+// transcript a provider can stay silent for minutes before answering.
 const defaultFirstPartTimeout = 5 * time.Minute
+
+// keepaliveGraceFactor multiplies the request timeout to get how long a
+// stream may send nothing but keepalives before it is treated as wedged.
+const keepaliveGraceFactor = 10
 
 // requestTimeoutModel wraps a [fantasy.LanguageModel] so requests are
 // bounded by the configured request_timeout. Non-streaming calls get a hard
 // per-request deadline, applied per call so fantasy's retry loop gives every
-// attempt a fresh budget, the same per-request semantics the provider SDKs
-// expose. Streams get an idle timeout instead: the clock only runs while we
-// wait on the provider, so neither a slow but active response nor work on
-// this side (a long-running tool, a heavy database write) is ever mistaken
-// for a dead provider.
+// attempt a fresh budget. Streams are watched by a [streamWatchdog] instead,
+// so a slow but actively streaming response is never aborted.
 type requestTimeoutModel struct {
 	fantasy.LanguageModel
 	// timeout is the inactivity window between stream parts.
@@ -90,79 +100,107 @@ func newRequestTimeoutModel(m fantasy.LanguageModel, timeout time.Duration) fant
 	}
 }
 
-// wrapTimedOut replaces err with the requestTimeoutError when this model's
-// own deadline fired. Other errors — user cancellation, outer deadlines,
-// provider failures — pass through unchanged. Cancellation errors caused by
-// our own timer report as [context.DeadlineExceeded] so callers never
-// mistake a timeout for a user cancellation.
-func wrapTimedOut(ctx context.Context, timeoutErr *requestTimeoutError, err error) error {
-	if err == nil || context.Cause(ctx) != timeoutErr {
+// wrapTimedOut replaces err with the requestTimeoutError that cancelled ctx,
+// if one did. Other errors (user cancellation, provider failures) pass
+// through unchanged. The result is a copy of the sentinel, so a provider that
+// hands the sentinel back cannot make the chain cyclic, and a context error
+// is dropped as the cause so the result never reads as a deliberate abort.
+func wrapTimedOut(ctx context.Context, err error) error {
+	var timeoutErr *requestTimeoutError
+	if err == nil || !errors.As(context.Cause(ctx), &timeoutErr) {
 		return err
 	}
-	if errors.Is(err, timeoutErr) || errors.Is(err, context.Canceled) {
-		timeoutErr.cause = context.DeadlineExceeded
-	} else {
-		timeoutErr.cause = err
+	wrapped := *timeoutErr
+	if !errors.Is(err, timeoutErr) && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+		wrapped.cause = err
 	}
-	return timeoutErr
+	return &wrapped
 }
 
-// Generate implements [fantasy.LanguageModel]. The request gets a hard
-// deadline: there is no incremental progress signal, so the whole call must
-// finish within the budget.
+// Generate implements [fantasy.LanguageModel]. There is no incremental
+// progress signal, so the whole call must finish within the budget.
 func (m requestTimeoutModel) Generate(ctx context.Context, call fantasy.Call) (*fantasy.Response, error) {
-	timeoutErr := &requestTimeoutError{timeout: m.timeout}
-	ctx, cancel := context.WithTimeoutCause(ctx, m.timeout, timeoutErr)
+	ctx, cancel := context.WithTimeoutCause(ctx, m.timeout, &requestTimeoutError{timeout: m.timeout})
 	defer cancel()
 	resp, err := m.LanguageModel.Generate(ctx, call)
-	return resp, wrapTimedOut(ctx, timeoutErr, err)
+	return resp, wrapTimedOut(ctx, err)
 }
 
-// Stream implements [fantasy.LanguageModel].
-//
-// The clock measures provider silence and nothing else. It runs from the
-// call until the first part arrives, under the wider first-part budget,
-// and then from the moment the consumer is done with a part until the next
-// one arrives. Time spent on this side, in a stream callback or in a tool
-// waiting on a long-running job, is never charged to the model, so the
-// timer only starts once that work has stopped. It is released when
-// iteration ends, whether the stream finishes, breaks, or the idle timeout
-// aborts it.
+// Stream implements [fantasy.LanguageModel]. The stream is consumed after
+// Stream returns, so the watchdog outlives this call and is stopped when
+// iteration ends.
 func (m requestTimeoutModel) Stream(ctx context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
-	timeoutErr := &requestTimeoutError{timeout: m.timeout, idle: true}
-	ctx, cancel := context.WithCancelCause(ctx)
-
-	var arrived atomic.Bool
-	timer := time.AfterFunc(m.firstPart, func() {
-		if !arrived.Load() {
-			// Nothing ever arrived, so the first-part budget is the
-			// window that ran out.
-			timeoutErr.timeout, timeoutErr.first = m.firstPart, true
-		}
-		cancel(timeoutErr)
-	})
-
+	ctx, watchdog := newStreamWatchdog(ctx, m.timeout, m.firstPart)
 	inner, err := m.LanguageModel.Stream(ctx, call)
 	if err != nil {
-		timer.Stop()
-		cancel(nil)
-		return nil, wrapTimedOut(ctx, timeoutErr, err)
+		watchdog.stop()
+		return nil, wrapTimedOut(ctx, err)
 	}
 	return func(yield func(fantasy.StreamPart) bool) {
-		defer timer.Stop()
-		defer cancel(nil)
+		defer watchdog.stop()
 		inner(func(part fantasy.StreamPart) bool {
-			arrived.Store(true)
-			// The provider is alive. Hold the clock while the consumer
-			// works on this part and re-arm only once we are waiting on
-			// the next one.
-			timer.Stop()
-			part.Error = wrapTimedOut(ctx, timeoutErr, part.Error)
+			watchdog.received(part)
+			part.Error = wrapTimedOut(ctx, part.Error)
 			keepGoing := yield(part)
 			if keepGoing {
-				timer.Reset(m.timeout)
+				watchdog.waiting(part)
 			}
 			return keepGoing
 		})
 	}, nil
+}
+
+// streamWatchdog cancels a stream whose provider goes silent: nothing for the
+// first-part budget, then nothing for the idle budget between parts, or only
+// keepalives for the much longer stall budget. Keepalives prove the
+// connection is up but not that anything is being generated, so on their own
+// they must not hold a turn open forever. The clocks only run while we wait
+// on the provider, so work on this side is never charged to the model.
+type streamWatchdog struct {
+	idle, stall           time.Duration
+	idleTimer, stallTimer *time.Timer
+	arrived               atomic.Bool
+	cancel                context.CancelCauseFunc
+}
+
+// newStreamWatchdog starts both budgets and returns the context they cancel.
+func newStreamWatchdog(ctx context.Context, idle, firstPart time.Duration) (context.Context, *streamWatchdog) {
+	ctx, cancel := context.WithCancelCause(ctx)
+	w := &streamWatchdog{idle: idle, stall: max(idle*keepaliveGraceFactor, firstPart), cancel: cancel}
+	w.idleTimer = time.AfterFunc(firstPart, func() {
+		if w.arrived.Load() {
+			cancel(&requestTimeoutError{timeout: w.idle, kind: timeoutIdle})
+			return
+		}
+		cancel(&requestTimeoutError{timeout: firstPart, kind: timeoutFirstPart})
+	})
+	w.stallTimer = time.AfterFunc(w.stall, func() {
+		cancel(&requestTimeoutError{timeout: w.stall, kind: timeoutStalled})
+	})
+	return ctx, w
+}
+
+// received holds the clocks while the consumer works on a part. Any part
+// pauses the idle budget; only content pauses the stall budget.
+func (w *streamWatchdog) received(part fantasy.StreamPart) {
+	w.arrived.Store(true)
+	w.idleTimer.Stop()
+	if part.Type != fantasy.StreamPartTypeKeepalive {
+		w.stallTimer.Stop()
+	}
+}
+
+// waiting re-arms the clocks once the consumer is done with a part.
+func (w *streamWatchdog) waiting(part fantasy.StreamPart) {
+	w.idleTimer.Reset(w.idle)
+	if part.Type != fantasy.StreamPartTypeKeepalive {
+		w.stallTimer.Reset(w.stall)
+	}
+}
+
+// stop releases both timers and the context.
+func (w *streamWatchdog) stop() {
+	w.idleTimer.Stop()
+	w.stallTimer.Stop()
+	w.cancel(nil)
 }

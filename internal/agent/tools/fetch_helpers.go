@@ -159,17 +159,11 @@ func ConvertHTMLToMarkdown(htmlContent string) (string, error) {
 
 // FormatJSON formats JSON content with proper indentation.
 func FormatJSON(content string) (string, error) {
-	var data any
-	if err := json.Unmarshal([]byte(content), &data); err != nil {
-		return "", err
-	}
-
 	var buf bytes.Buffer
-	encoder := json.NewEncoder(&buf)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(data); err != nil {
+	if err := json.Indent(&buf, bytes.TrimSpace([]byte(content)), "", "  "); err != nil {
 		return "", err
 	}
+	buf.WriteByte('\n')
 
 	return buf.String(), nil
 }

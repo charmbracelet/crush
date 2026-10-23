@@ -185,9 +185,9 @@ go install -tags sqlite3_dotlk github.com/charmbracelet/crush@latest
 The quickest way to get started is to choose a [Hyper][hyper] model from model
 picker. Follow the steps to authenticate and you'll be good to go.
 
-[Hyper], from Charm, is the official Crush provider. It’s subscription-based,
-with a free tier, and optimized for Crush. It’s privacy focused, with zero data
-retention (ZDR) and is designed to comply with GDPR. [More on Hyper][hyper].
+[Hyper], from Charm, is the official Crush provider. It’s subscription-based
+and optimized for Crush. It’s privacy focused, with zero data retention (ZDR)
+and is designed to comply with GDPR. [More on Hyper][hyper].
 
 <p><a href="https://hyper.charm.land"><img width="340" height="200" alt="Charm Hyper" src="https://github.com/user-attachments/assets/50875289-7992-454d-9f14-9f790413fb5e" /></a></p>
 
@@ -393,11 +393,11 @@ dialog.
 
 #### Built-In Themes
 
-| Theme | Name |
-| --- | --- |
+| Theme             | Name                          |
+| ----------------- | ----------------------------- |
 | Charmtone Pantera | `charmtone-panther` (default) |
-| Gruvbox Dark | `gruvbox-dark` |
-| Keanu | `keanu` |
+| Gruvbox Dark      | `gruvbox-dark`                |
+| Keanu             | `keanu`                       |
 
 ### LSPs
 

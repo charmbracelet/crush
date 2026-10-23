@@ -661,6 +661,11 @@
             10,
             200
           ]
+        },
+        "disable_system_warnings": {
+          "type": "boolean",
+          "description": "Disable Crush system advisories such as small-context-model and sysadmin warnings",
+          "default": false
         }
       },
       "additionalProperties": false,

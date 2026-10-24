@@ -85,6 +85,9 @@ type Service interface {
 	// was cancelled is not returned.
 	ActiveRequest() (PermissionRequest, bool)
 	AutoApproveSession(sessionID string)
+	// IsSessionAutoApproved reports whether AutoApproveSession was called
+	// for sessionID.
+	IsSessionAutoApproved(sessionID string) bool
 	SetSkipRequests(skip bool)
 	SkipRequests() bool
 	SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification]
@@ -209,6 +212,22 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		return true, nil
 	}
 
+	// An auto-approved session never prompts, so it is answered before
+	// taking requestMu: otherwise it would wait behind another session's
+	// prompt (e.g. a parallel subagent) that the user hasn't answered yet.
+	if s.IsSessionAutoApproved(opts.SessionID) {
+		s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+			SessionID:  opts.SessionID,
+			ToolCallID: opts.ToolCallID,
+		})
+		s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+			SessionID:  opts.SessionID,
+			ToolCallID: opts.ToolCallID,
+			Granted:    true,
+		})
+		return true, nil
+	}
+
 	s.requestMu.Lock()
 	defer s.requestMu.Unlock()
 
@@ -217,19 +236,6 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		SessionID:  opts.SessionID,
 		ToolCallID: opts.ToolCallID,
 	})
-
-	s.autoApproveSessionsMu.RLock()
-	autoApprove := s.autoApproveSessions[opts.SessionID]
-	s.autoApproveSessionsMu.RUnlock()
-
-	if autoApprove {
-		s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
-			SessionID:  opts.SessionID,
-			ToolCallID: opts.ToolCallID,
-			Granted:    true,
-		})
-		return true, nil
-	}
 
 	fileInfo, err := os.Stat(opts.Path)
 	dir := opts.Path
@@ -310,6 +316,12 @@ func (s *permissionService) AutoApproveSession(sessionID string) {
 	s.autoApproveSessionsMu.Lock()
 	s.autoApproveSessions[sessionID] = true
 	s.autoApproveSessionsMu.Unlock()
+}
+
+func (s *permissionService) IsSessionAutoApproved(sessionID string) bool {
+	s.autoApproveSessionsMu.RLock()
+	defer s.autoApproveSessionsMu.RUnlock()
+	return s.autoApproveSessions[sessionID]
 }
 
 func (s *permissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification] {

@@ -32,6 +32,11 @@ type ActionOpenDialog struct {
 	DialogID string
 }
 
+// ActionGoToParentSession is a message to load a subagent session's parent.
+type ActionGoToParentSession struct {
+	SessionID string
+}
+
 // ActionSelectSession is a message indicating a session has been selected.
 type ActionSelectSession struct {
 	Session session.Session
@@ -204,6 +209,11 @@ type (
 		UseOAuth  bool
 	}
 )
+
+// ActionLoadSubagentSession is a message to load a subagent's child session.
+type ActionLoadSubagentSession struct {
+	SessionID string
+}
 
 // ActionCmd represents an action that carries a [tea.Cmd] to be passed to the
 // Bubble Tea program loop.

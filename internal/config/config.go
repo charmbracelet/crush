@@ -582,6 +582,9 @@ func (m MCPConfig) ResolvedEnv(r VariableResolver) ([]string, error) {
 // is already sanitized by ResolveValue and is wrapped with %w so
 // errors.Is/As continues to work.
 //
+// Each element is already one argv item, so the shell resolver keeps
+// backslash pairs: \\.\pipe\name reaches the child unchanged.
+//
 // See ResolvedEnv for guidance on picking a resolver.
 func (m MCPConfig) ResolvedArgs(r VariableResolver) ([]string, error) {
 	if len(m.Args) == 0 {
@@ -589,7 +592,7 @@ func (m MCPConfig) ResolvedArgs(r VariableResolver) ([]string, error) {
 	}
 	out := make([]string, len(m.Args))
 	for i, a := range m.Args {
-		v, err := r.ResolveValue(a)
+		v, err := resolveArgument(r, a)
 		if err != nil {
 			return nil, fmt.Errorf("arg %d: %w", i, err)
 		}
@@ -694,7 +697,8 @@ func (m MCPConfig) ResolvedHeaders(r VariableResolver) (map[string]string, error
 // errors.Is/As continues to work.
 //
 // Empty resolved values are kept (a deliberate "empty positional arg"
-// like --flag "" is sometimes valid), matching MCPConfig.ResolvedArgs.
+// like --flag "" is sometimes valid), and backslash pairs are kept,
+// matching MCPConfig.ResolvedArgs.
 //
 // The resolver choice matters: in server mode pass the shell resolver
 // so $VAR / $(cmd) expand; in client mode pass IdentityResolver so the
@@ -705,7 +709,7 @@ func (l LSPConfig) ResolvedArgs(r VariableResolver) ([]string, error) {
 	}
 	out := make([]string, len(l.Args))
 	for i, a := range l.Args {
-		v, err := r.ResolveValue(a)
+		v, err := resolveArgument(r, a)
 		if err != nil {
 			return nil, fmt.Errorf("arg %d: %w", i, err)
 		}

@@ -233,7 +233,7 @@ func NewToolMessageItem(
 	case tools.BashToolName:
 		item = NewBashToolMessageItem(sty, toolCall, result, canceled, workingDir)
 	case tools.JobOutputToolName:
-		item = NewJobOutputToolMessageItem(sty, toolCall, result, canceled)
+		item = NewJobOutputToolMessageItem(sty, toolCall, result, canceled, workingDir)
 	case tools.JobKillToolName:
 		item = NewJobKillToolMessageItem(sty, toolCall, result, canceled)
 	case tools.ViewToolName:
@@ -678,6 +678,12 @@ func toolIcon(sty *styles.Styles, status ToolStatus) string {
 // toolParamList formats tool parameters as "main (key=value, ...)" with truncation.
 // When opts.ExpandedContent is true, the output wraps instead of truncating.
 func toolParamList(sty *styles.Styles, params []string, width int, opts *ToolRenderOpts) string {
+	return toolParamListMainStyle(sty, params, width, opts, sty.Tool.ParamMain)
+}
+
+// toolParamListMainStyle is toolParamList with a custom style applied to the
+// rendered parameter list.
+func toolParamListMainStyle(sty *styles.Styles, params []string, width int, opts *ToolRenderOpts, mainStyle lipgloss.Style) string {
 	// minSpaceForMainParam is the min space required for the main param
 	// if this is less that the value set we will only show the main param nothing else
 	const minSpaceForMainParam = 30
@@ -701,13 +707,13 @@ func toolParamList(sty *styles.Styles, params []string, width int, opts *ToolRen
 		partsStr := strings.Join(kvPairs, ", ")
 		if remaining := width - lipgloss.Width(partsStr) - 3; remaining >= minSpaceForMainParam {
 			// main param is syntax highlighted so style the param as well
-			pairs := sty.Tool.ParamMain.Render(fmt.Sprintf("(%s)", partsStr))
+			pairs := mainStyle.Render(fmt.Sprintf("(%s)", partsStr))
 			output = fmt.Sprintf("%s %s", mainParam, pairs)
 		}
 	}
 
 	if width >= 0 && (opts == nil || !opts.ExpandedContent) {
-		return sty.Tool.ParamMain.Render(ansi.Truncate(output, width, "…"))
+		return mainStyle.Render(ansi.Truncate(output, width, "…"))
 	}
 	if opts != nil && opts.ExpandedContent && width > 0 && lipgloss.Width(output) > width {
 		// Let Lip Gloss do the wrapping rather than wrapping and styling in
@@ -718,9 +724,9 @@ func toolParamList(sty *styles.Styles, params []string, width int, opts *ToolRen
 		// style. Hard-wrapping first and styling after would emit only the
 		// parameter colour there and drop the highlight; styling first and
 		// hard-wrapping after would emit nothing there and drop both.
-		return capLineWidths(sty.Tool.ParamMain.Width(width).Render(output), width)
+		return capLineWidths(mainStyle.Width(width).Render(output), width)
 	}
-	return sty.Tool.ParamMain.Render(output)
+	return mainStyle.Render(output)
 }
 
 // capLineWidths holds every line of s to width.
@@ -740,30 +746,47 @@ func capLineWidths(s string, width int) string {
 	return strings.Join(lines, "\n")
 }
 
+// indentLines indents every line of s by n spaces.
+func indentLines(s string, n int) string {
+	lines := strings.Split(s, "\n")
+	indent := strings.Repeat(" ", n)
+	for i := range lines {
+		lines[i] = indent + lines[i]
+	}
+	return strings.Join(lines, "\n")
+}
+
 // toolHeader builds the tool header line: "● ToolName params..."
 // When opts.ExpandedContent is true, long parameters wrap instead of truncating.
 func toolHeader(sty *styles.Styles, status ToolStatus, name string, width int, opts *ToolRenderOpts, params ...string) string {
-	nested := opts != nil && opts.Compact
-	icon := toolIcon(sty, status)
+	return toolHeaderWithChip(sty, status, name, "", width, opts, sty.Tool.ParamMain, params...)
+}
+
+// toolBasePrefix returns the styled "icon name " prefix of a tool header.
+func toolBasePrefix(sty *styles.Styles, status ToolStatus, name string, opts *ToolRenderOpts) string {
 	nameStyle := sty.Tool.NameNormal
-	if nested {
+	if opts != nil && opts.Compact {
 		nameStyle = sty.Tool.NameNested
 	}
-	toolName := nameStyle.Render(name)
-	prefix := fmt.Sprintf("%s %s ", icon, toolName)
-	prefixWidth := lipgloss.Width(prefix)
-	remainingWidth := width - prefixWidth
-	paramsStr := toolParamList(sty, params, remainingWidth, opts)
+	return fmt.Sprintf("%s %s ", toolIcon(sty, status), nameStyle.Render(name))
+}
+
+// toolHeaderWithChip builds the tool header line with an optional chip
+// rendered between the tool name and the parameters. The parameter list is
+// rendered with mainStyle.
+func toolHeaderWithChip(sty *styles.Styles, status ToolStatus, name, chip string, width int, opts *ToolRenderOpts, mainStyle lipgloss.Style, params ...string) string {
+	basePrefix := toolBasePrefix(sty, status, name, opts)
+	prefix := basePrefix
+	if chip != "" {
+		prefix += chip + " "
+	}
+	paramsStr := toolParamListMainStyle(sty, params, width-lipgloss.Width(prefix), opts, mainStyle)
 
 	// When expanded, toolParamList may return multiple lines. Indent
-	// continuation lines to align with the first line's param text.
-	if strings.Contains(paramsStr, "\n") {
-		lines := strings.Split(paramsStr, "\n")
-		indent := strings.Repeat(" ", prefixWidth)
-		for i := 1; i < len(lines); i++ {
-			lines[i] = indent + lines[i]
-		}
-		return prefix + strings.Join(lines, "\n")
+	// continuation lines with the base prefix (icon + name) so the chip does
+	// not push them too far to the right.
+	if first, rest, found := strings.Cut(paramsStr, "\n"); found {
+		return prefix + first + "\n" + indentLines(rest, lipgloss.Width(basePrefix))
 	}
 	return prefix + paramsStr
 }

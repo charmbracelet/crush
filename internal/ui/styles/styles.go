@@ -375,6 +375,10 @@ type Styles struct {
 		ParamMain lipgloss.Style
 		ParamKey  lipgloss.Style
 
+		// Header adornments
+		WorkingDirChip lipgloss.Style // Working directory chip in tool headers
+		Description    lipgloss.Style // Description text leading tool headers
+
 		// Content rendering styles
 		ContentLine           lipgloss.Style // Individual content line with background and width
 		ContentTruncation     lipgloss.Style // Truncation message "… (N lines)"

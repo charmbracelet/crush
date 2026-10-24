@@ -136,20 +136,14 @@ func (c *Client) SubscribeEvents(ctx context.Context, id string) (<-chan any, er
 		scr := bufio.NewReader(rsp.Body)
 		for {
 			line, err := scr.ReadBytes('\n')
-			if errors.Is(err, io.EOF) {
-				break
-			}
 			if err != nil {
-				if ctx.Err() != nil {
-					return
+				// Any read error ends the stream: a response body that
+				// failed once keeps failing, so closing events is what
+				// lets the caller reconnect.
+				if ctx.Err() == nil && !errors.Is(err, io.EOF) {
+					slog.Warn("Events stream ended", "error", err)
 				}
-				slog.Error("Reading from events stream", "error", err)
-				select {
-				case <-time.After(time.Second * 2):
-				case <-ctx.Done():
-					return
-				}
-				continue
+				return
 			}
 			line = bytes.TrimSpace(line)
 			if len(line) == 0 {
@@ -251,6 +245,12 @@ func (c *Client) SubscribeEvents(ctx context.Context, id string) (<-chan any, er
 				}
 			case pubsub.PayloadTypeUpdateAvailable:
 				var e pubsub.Event[proto.UpdateAvailable]
+				_ = json.Unmarshal(p.Payload, &e)
+				if !sendEvent(ctx, events, e) {
+					return
+				}
+			case pubsub.PayloadTypeHostTheme:
+				var e pubsub.Event[proto.HostThemeState]
 				_ = json.Unmarshal(p.Payload, &e)
 				if !sendEvent(ctx, events, e) {
 					return
@@ -775,6 +775,45 @@ func (c *Client) GetPermissionsSkipRequests(ctx context.Context, id string) (boo
 		return false, fmt.Errorf("failed to decode permissions skip requests: %w", err)
 	}
 	return skip.Skip, nil
+}
+
+// SetHostTheme sets the theme a host application supplies for every
+// client of the workspace, or clears it when theme is nil, and returns the
+// resulting state. It fails with an error carrying the server's message
+// when a color or the base theme is invalid.
+func (c *Client) SetHostTheme(ctx context.Context, id string, theme *proto.HostTheme) (*proto.HostThemeState, error) {
+	q := url.Values{"client_id": []string{c.clientID}}
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/theme", id), q, jsonBody(proto.HostThemeRequest{Theme: theme}), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return nil, fmt.Errorf("failed to set host theme: %w", err)
+	}
+	defer rsp.Body.Close()
+	if err := checkStatus(rsp); err != nil {
+		return nil, fmt.Errorf("failed to set host theme: %w", err)
+	}
+	var st proto.HostThemeState
+	if err := json.NewDecoder(rsp.Body).Decode(&st); err != nil {
+		return nil, fmt.Errorf("failed to decode host theme: %w", err)
+	}
+	return &st, nil
+}
+
+// GetHostTheme retrieves the host theme of a workspace. The returned
+// state's Theme is nil when none is set.
+func (c *Client) GetHostTheme(ctx context.Context, id string) (*proto.HostThemeState, error) {
+	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/theme", id), nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get host theme: %w", err)
+	}
+	defer rsp.Body.Close()
+	if err := checkStatus(rsp); err != nil {
+		return nil, fmt.Errorf("failed to get host theme: %w", err)
+	}
+	var st proto.HostThemeState
+	if err := json.NewDecoder(rsp.Body).Decode(&st); err != nil {
+		return nil, fmt.Errorf("failed to decode host theme: %w", err)
+	}
+	return &st, nil
 }
 
 // GetConfig retrieves the workspace-specific configuration.

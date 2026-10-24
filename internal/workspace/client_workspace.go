@@ -1028,9 +1028,10 @@ func (w *ClientWorkspace) recreateArgs() proto.Workspace {
 // afterReconnect runs once a degraded subscription is re-established. It
 // re-asserts the client's current-session selection, since the server's
 // presence entry (or the whole workspace) may have been re-created while we
-// were away, and tells the UI to resync state published while detached. The
-// SSE handler attaches the client before writing its 200, so the presence
-// call cannot be rejected as not-attached here.
+// were away, re-reads the host theme, and tells the UI to resync state
+// published while detached. The SSE handler attaches the client before
+// writing its 200, so the presence call cannot be rejected as not-attached
+// here.
 func (w *ClientWorkspace) afterReconnect(send func(tea.Msg)) {
 	w.mu.RLock()
 	sid := w.lastSession
@@ -1040,7 +1041,30 @@ func (w *ClientWorkspace) afterReconnect(send func(tea.Msg)) {
 			slog.Warn("Failed to re-assert current session after reconnect", "error", err)
 		}
 	}
+	w.resyncHostTheme(send)
 	send(ConnectionEvent{State: ConnectionRecovered})
+}
+
+// hostThemeResyncTimeout bounds the host theme read after a reconnect, so a
+// wedged server cannot pin the subscription goroutine.
+const hostThemeResyncTimeout = 5 * time.Second
+
+// resyncHostTheme hands the UI the host theme the server holds after a
+// reconnect. The attach replay only covers a theme that is set, so a clear
+// published while the client was away, or a workspace re-created without
+// one, would otherwise leave the TUI on the host's colors. The read runs
+// after the new stream attached, so any later change still arrives as an
+// event, and the UI ignores a theme equal to the last one it received.
+func (w *ClientWorkspace) resyncHostTheme(send func(tea.Msg)) {
+	ctx, cancel := context.WithTimeout(w.subCtx, hostThemeResyncTimeout)
+	defer cancel()
+	st, err := w.client.GetHostTheme(ctx, w.workspaceID())
+	if err != nil {
+		// Servers that predate host themes have no such endpoint.
+		slog.Debug("Failed to read host theme after reconnect", "error", err)
+		return
+	}
+	send(HostThemeEvent{Theme: st.Theme})
 }
 
 // sleepOrDone waits for d or until the subscription context is
@@ -1271,6 +1295,12 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 			LatestVersion:  e.Payload.LatestVersion,
 			IsDevelopment:  e.Payload.IsDevelopment,
 		}
+	case pubsub.Event[proto.HostThemeState]:
+		theme := e.Payload.Theme
+		if e.Type == pubsub.DeletedEvent {
+			theme = nil
+		}
+		return HostThemeEvent{Theme: theme}
 	default:
 		slog.Warn("Unknown event type in translateEvent", "type", fmt.Sprintf("%T", ev))
 		return nil

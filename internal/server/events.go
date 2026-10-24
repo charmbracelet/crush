@@ -154,6 +154,8 @@ func wrapEvent(ev any) *pubsub.Payload {
 		})
 	case pubsub.Event[proto.ConfigChanged]:
 		return envelope(pubsub.PayloadTypeConfigChanged, e)
+	case pubsub.Event[proto.HostThemeState]:
+		return envelope(pubsub.PayloadTypeHostTheme, e)
 	case app.UpdateAvailableMsg:
 		return envelope(pubsub.PayloadTypeUpdateAvailable, pubsub.Event[proto.UpdateAvailable]{
 			Type: pubsub.UpdatedEvent,

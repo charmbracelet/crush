@@ -207,6 +207,8 @@ func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.R
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
+	c.replayHostTheme(w, r, flusher, id)
+
 	for {
 		select {
 		case <-r.Context().Done():
@@ -219,20 +221,25 @@ func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.R
 			if !c.deliverToClient(r.Context(), id, clientID, ev.Payload) {
 				continue
 			}
-			wrapped := wrapEvent(ev.Payload)
-			if wrapped == nil {
-				continue
-			}
-			data, err := json.Marshal(wrapped)
-			if err != nil {
-				c.server.logError(r, "Failed to marshal event", "error", err)
-				continue
-			}
-
-			fmt.Fprintf(w, "data: %s\n\n", data)
-			flusher.Flush()
+			c.writeEvent(w, r, flusher, ev.Payload)
 		}
 	}
+}
+
+// writeEvent wraps a workspace event in its SSE envelope and writes it to
+// the stream. Events with no wire form are skipped.
+func (c *controllerV1) writeEvent(w http.ResponseWriter, r *http.Request, flusher *http.ResponseController, ev any) {
+	wrapped := wrapEvent(ev)
+	if wrapped == nil {
+		return
+	}
+	data, err := json.Marshal(wrapped)
+	if err != nil {
+		c.server.logError(r, "Failed to marshal event", "error", err)
+		return
+	}
+	fmt.Fprintf(w, "data: %s\n\n", data)
+	flusher.Flush()
 }
 
 // handleGetWorkspaceLSPs lists LSP clients for a workspace.
@@ -776,6 +783,10 @@ func (c *controllerV1) handleError(w http.ResponseWriter, r *http.Request, err e
 	case errors.Is(err, backend.ErrUnknownCommand):
 		status = http.StatusBadRequest
 	case errors.Is(err, backend.ErrInvalidClientID):
+		status = http.StatusBadRequest
+	case errors.Is(err, backend.ErrInvalidTheme):
+		// The message names every offending color (or the unknown base
+		// theme), so a host can fix its theme mapping from the response.
 		status = http.StatusBadRequest
 	case errors.Is(err, backend.ErrClientNotAttached):
 		// 409, not 404: the workspace exists, the caller just has no live

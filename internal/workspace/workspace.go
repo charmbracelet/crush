@@ -76,6 +76,17 @@ type ConnectionEvent struct {
 	Stuck bool
 }
 
+// HostThemeEvent is delivered to the TUI as a tea.Msg when the host
+// application running Crush in a pane (an editor, for example) sets or
+// clears its theme on the server. Clients also receive the current theme
+// when their event stream attaches, and the current theme or its absence
+// after a reconnect, so the same theme can arrive more than once. Local
+// (in-process) workspaces never emit it.
+type HostThemeEvent struct {
+	// Theme is the host's theme, or nil when the host cleared it.
+	Theme *proto.HostTheme
+}
+
 // LSPClientInfo holds information about an LSP client's state. This is
 // the frontend-facing type; implementations translate from the
 // underlying app or proto representation.

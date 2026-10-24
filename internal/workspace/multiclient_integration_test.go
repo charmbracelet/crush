@@ -360,3 +360,62 @@ func TestClientWorkspace_RecoversAfterServerSideTeardown(t *testing.T) {
 		t.Fatal("the subscription loop did not stop after Shutdown")
 	}
 }
+
+// TestClientWorkspace_HostThemeReachesTUI drives a host theme through the
+// real server: a TUI that attaches after the host set its theme receives it
+// as a HostThemeEvent at once (the attach replay), and a clear arrives as a
+// nil theme.
+func TestClientWorkspace_HostThemeReachesTUI(t *testing.T) {
+	xdgIsolate(t)
+	rt := newRuntimeServer(t)
+
+	cwd := t.TempDir()
+	tui := rt.newClient(t, cwd)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	wsProto, err := tui.CreateWorkspace(ctx, proto.Workspace{Path: cwd, DataDir: t.TempDir()})
+	require.NoError(t, err)
+
+	// The host is a separate client that never creates the workspace.
+	host := rt.newClient(t, cwd)
+	theme := &proto.HostTheme{
+		Name:    "charmtone-dark",
+		Source:  "superjoy",
+		Palette: map[string]string{"primary": "#6B50FF", "bg_base": "#201F26"},
+		Syntax:  map[string]string{"keyword": "#00A4FF"},
+	}
+	st, err := host.SetHostTheme(ctx, wsProto.ID, theme)
+	require.NoError(t, err)
+	require.True(t, theme.Equal(st.Theme))
+
+	evc, err := tui.SubscribeEvents(ctx, wsProto.ID)
+	require.NoError(t, err)
+	ws := workspace.NewClientWorkspace(tui, *wsProto)
+	msgs := make(chan tea.Msg, 16)
+	go ws.ConsumeEventsForTest(evc, func(msg tea.Msg) { msgs <- msg })
+
+	next := func() workspace.HostThemeEvent {
+		t.Helper()
+		deadline := time.After(3 * time.Second)
+		for {
+			select {
+			case msg := <-msgs:
+				if ev, ok := msg.(workspace.HostThemeEvent); ok {
+					return ev
+				}
+			case <-deadline:
+				require.FailNow(t, "timed out waiting for a HostThemeEvent")
+			}
+		}
+	}
+	require.True(t, theme.Equal(next().Theme), "the attach must replay the current host theme")
+
+	_, err = host.SetHostTheme(ctx, wsProto.ID, nil)
+	require.NoError(t, err)
+	require.Nil(t, next().Theme)
+
+	got, err := host.GetHostTheme(ctx, wsProto.ID)
+	require.NoError(t, err)
+	require.Nil(t, got.Theme)
+}

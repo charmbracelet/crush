@@ -250,6 +250,10 @@ type UI struct {
 	// config round-trip may not reflect the selection immediately.
 	userThemeSelected bool
 
+	// hostTheme tracks the theme a host application pushes through the
+	// server (see hosttheme.go).
+	hostTheme hostThemeState
+
 	focus uiFocusState
 	state uiState
 	mode  uiInputMode
@@ -1556,6 +1560,23 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}))
 	case workspace.ConnectionEvent:
 		cmds = append(cmds, m.handleConnectionEvent(msg)...)
+	case workspace.HostThemeEvent:
+		if cmd := m.handleHostThemeEvent(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case hostThemeStylesMsg:
+		if cmd := m.handleHostThemeStyles(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case transparencyToggledMsg:
+		// The user's choice wins over a host theme's override.
+		m.isTransparent = msg.transparent
+		m.hostTheme.transparent = false
+		status := "disabled"
+		if msg.transparent {
+			status = "enabled"
+		}
+		cmds = append(cmds, util.ReportInfo("Transparent background "+status))
 	case util.ClearStatusMsg:
 		m.status.ClearInfoMsg(msg.Seq)
 	case completions.CompletionItemsLoadedMsg:
@@ -2283,24 +2304,18 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}))
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleTransparentBackground:
+		// Flip what is on screen, which a host theme may have overridden,
+		// rather than the config value.
+		newValue := !m.isTransparent
+		ws := m.com.Workspace
 		cmds = append(cmds, func() tea.Msg {
-			cfg := m.com.Config()
-			if cfg == nil {
+			if ws.Config() == nil {
 				return util.ReportError(errors.New("configuration not found"))()
 			}
-
-			isTransparent := cfg.Options != nil && cfg.Options.TUI.IsTransparent()
-			newValue := !isTransparent
-			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.tui.transparent", newValue); err != nil {
+			if err := ws.SetConfigField(config.ScopeGlobal, "options.tui.transparent", newValue); err != nil {
 				return util.ReportError(err)()
 			}
-			m.isTransparent = newValue
-
-			status := "disabled"
-			if newValue {
-				status = "enabled"
-			}
-			return util.NewInfoMsg("Transparent background " + status)
+			return transparencyToggledMsg{transparent: newValue}
 		})
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionSwitchTheme:
@@ -2320,6 +2335,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		m.applyTheme(newStyles)
 		m.preThemeStyles = nil
+		m.userAppliedTheme()
 		cmds = append(cmds, util.ReportInfo("Theme switched to "+themeName))
 		m.userThemeSelected = true
 		m.dialog.CloseDialog(dialog.ThemeID)
@@ -2387,6 +2403,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			}
 			m.applyTheme(newStyles)
 			m.preThemeStyles = nil
+			m.userAppliedTheme()
 		}
 		cmds = append(cmds, util.ReportInfo("Theme saved"))
 		m.dialog.CloseDialog(dialog.ThemeEditorID)
@@ -2415,6 +2432,10 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		if strings.EqualFold(common.ThemeNameFromConfig(m.com.Config()), msg.Name) {
 			if newStyles, err := styles.LoadTheme(msg.Name); err == nil {
 				m.applyTheme(newStyles)
+				// A preview snapshot holds the styles from before the
+				// revert; esc must not bring them back.
+				m.preThemeStyles = nil
+				m.userAppliedTheme()
 			}
 		}
 		cmds = append(cmds, util.ReportInfo("Reverted "+msg.Name+" to its built-in colors"))
@@ -2497,6 +2518,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			}
 			m.applyTheme(newStyles)
 			m.preThemeStyles = nil
+			m.userAppliedTheme()
 		}
 		cmds = append(cmds, util.ReportInfo("Deleted theme "+msg.Name))
 		m.dialog.CloseDialog(dialog.ThemeID)
@@ -5141,7 +5163,9 @@ func (m *UI) cacheSidebarLogo(width int) {
 // invalidating the markdown renderer cache and re-rendering the entire
 // transcript for no visible change.
 // A theme explicitly selected in the config always wins, so provider
-// changes never discard the user's choice.
+// changes never discard the user's choice. An active host theme wins too:
+// the provider's theme is only recorded, to revert to once the host clears
+// its theme.
 func (m *UI) applyThemeForProvider(providerID string) {
 	// A theme the user explicitly selected always wins over the
 	// per-provider default, so provider or session changes never discard
@@ -5155,7 +5179,10 @@ func (m *UI) applyThemeForProvider(providerID string) {
 		return
 	}
 	m.themeKey = key
-	m.applyTheme(styles.ThemeForProvider(providerID))
+	if m.hostTheme.active {
+		return
+	}
+	m.applyTheme(styles.ThemeForKey(key))
 }
 
 // applyTheme replaces the active styles with the given theme, drops the
@@ -5194,10 +5221,9 @@ func (m *UI) refreshStyles() {
 	m.attachments.SetStyles(t.Attachments)
 	m.todoSpinner.Style = t.Pills.TodoSpinner
 	m.status.help.Styles = t.Help
-	if d := m.dialog.Dialog(dialog.ThemeID); d != nil {
-		if td, ok := d.(*dialog.Theme); ok {
-			td.RefreshStyles()
-		}
+	m.dialog.RefreshStyles()
+	if r, ok := m.activeInline.(dialog.StyleRefresher); ok {
+		r.RefreshStyles()
 	}
 }
 
@@ -5658,7 +5684,7 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 	hasTodos := hasSession && hasIncompleteTodos(m.session.Todos)
 	hasQueue := m.promptQueue > 0
 
-	commands, err := dialog.NewCommands(m.com, sessionID, hasSession, hasTodos, hasQueue, m.customCommands, m.mcpPrompts)
+	commands, err := dialog.NewCommands(m.com, sessionID, hasSession, hasTodos, hasQueue, m.isTransparent, m.customCommands, m.mcpPrompts)
 	if err != nil {
 		return util.ReportError(err)
 	}

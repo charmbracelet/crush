@@ -591,6 +591,10 @@ To disable tools from MCP servers, see the [MCP config section](#mcps).
 You can also skip all permission prompts completely by running Crush with the
 `--yolo` flag. Be very, very careful with this feature.
 
+Non-interactive runs (`crush run`) accept tool permissions automatically,
+since nobody is around to answer a prompt. `crush run` accepts `--yolo` too,
+but it has no extra effect there.
+
 ### Disabling Skills
 
 You can prevent Crush from using certain skills entirely. Disabled skills are

@@ -57,16 +57,20 @@ func (d *SingleChoice) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	}
 
 	if done, cmd, handled := d.handleFillInFocused(msg, d.keyEnter, func() (bool, tea.Cmd) {
+		// Esc leaves editing but keeps the typed text, returning
+		// to selection on the same question.
 		d.fillIn.Blur()
-		d.answer(d.respond())
-		return true, nil
+		return false, nil
 	}, func() (bool, tea.Cmd) {
 		val := strings.TrimSpace(d.fillIn.Value())
-		if val != "" {
-			d.answer(d.respondFillIn(val))
-			return true, nil
+		if val == "" {
+			// Nothing typed: accept and return to selection.
+			d.fillIn.Blur()
+			return false, nil
 		}
-		return false, nil
+		d.fillIn.Blur()
+		d.answer(d.respondFillIn(val))
+		return true, nil
 	}); handled {
 		return done, cmd
 	}
@@ -76,14 +80,15 @@ func (d *SingleChoice) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		d.answer(question.Answer{QuestionID: d.Request.ID})
 		return true, nil
 	case key.Matches(msg, d.keyEnter):
-		// In hover mode, act on the item under the mouse. Landing on
-		// the fill-in focuses it (mirroring a click) instead of
-		// submitting an empty answer.
+		// In hover mode, act on the item under the mouse.
 		if d.mouseActive {
 			d.adoptHover()
-			if d.isFillIn() {
-				return false, d.fillIn.Focus()
-			}
+		}
+		// Enter on the highlighted fill-in activates text entry.
+		// While editing, enter accepts the input (handled by
+		// handleFillInFocused above).
+		if d.isFillIn() {
+			return false, d.fillIn.Focus()
 		}
 		d.answer(d.respond())
 		return true, nil
@@ -148,7 +153,7 @@ func (d *SingleChoice) ShortHelp() []key.Binding {
 		return []key.Binding{d.keyClose, key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "save note"))}
 	}
 	if d.isFillIn() && d.fillIn.Focused() {
-		return []key.Binding{d.navUp, d.keyEnter, d.keyClose}
+		return []key.Binding{d.navUp, d.keyEnter, d.keyBack}
 	}
 	return []key.Binding{d.keyUp, d.keyDown, d.keyEnter, numKeyBinding(len(d.Request.Choices)), d.keyNote, d.keyClose}
 }

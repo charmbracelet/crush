@@ -19,30 +19,94 @@ const (
 	// CompletedJobRetention is how long a finished job's output stays
 	// readable.
 	CompletedJobRetention = 8 * time.Hour
+
+	// maxBackgroundOutputBytes bounds how much of one background
+	// stream (stdout, stderr) is kept in memory. Without a bound a
+	// job that keeps running, a dev server or a log tail, writes into
+	// the buffer for as long as it lives, and up to MaxFinishedJobs
+	// finished jobs keep theirs for CompletedJobRetention after that.
+	//
+	// What is kept is the head and the tail, which is what an
+	// oversized tool result shows anyway, so the only bytes lost are
+	// ones that were going to be cut out of the middle.
+	maxBackgroundOutputBytes = 1 << 20
+	backgroundOutputHead     = maxBackgroundOutputBytes / 2
+	backgroundOutputTail     = maxBackgroundOutputBytes - backgroundOutputHead
 )
 
-// syncBuffer is a thread-safe wrapper around bytes.Buffer.
+// syncBuffer is a thread-safe, bounded output buffer. It keeps the
+// first headLimit bytes written and the last tailLimit bytes, and
+// counts what it dropped in between. A zero value keeps everything,
+// so only the constructor bounds a buffer.
 type syncBuffer struct {
-	buf bytes.Buffer
-	mu  sync.RWMutex
+	head      bytes.Buffer
+	tail      bytes.Buffer
+	mu        sync.RWMutex
+	dropped   int64
+	headLimit int
+	tailLimit int
+}
+
+// newSyncBuffer returns a syncBuffer bounded to the package limits.
+func newSyncBuffer() *syncBuffer {
+	return &syncBuffer{headLimit: backgroundOutputHead, tailLimit: backgroundOutputTail}
 }
 
 func (sb *syncBuffer) Write(p []byte) (n int, err error) {
 	sb.mu.Lock()
 	defer sb.mu.Unlock()
-	return sb.buf.Write(p)
+	return sb.write(p)
 }
 
 func (sb *syncBuffer) WriteString(s string) (n int, err error) {
 	sb.mu.Lock()
 	defer sb.mu.Unlock()
-	return sb.buf.WriteString(s)
+	return sb.write([]byte(s))
 }
 
+// write appends p, dropping from the middle once the buffer is full.
+// It reports len(p) written whatever it dropped: the caller handed the
+// bytes over, and an io.Writer that returns less than len(p) must
+// return an error, which a full buffer is not. sb.mu must be held.
+func (sb *syncBuffer) write(p []byte) (int, error) {
+	if sb.headLimit <= 0 && sb.tailLimit <= 0 {
+		return sb.head.Write(p)
+	}
+
+	n := len(p)
+	if room := sb.headLimit - sb.head.Len(); room > 0 {
+		if len(p) <= room {
+			return sb.head.Write(p)
+		}
+		sb.head.Write(p[:room])
+		p = p[room:]
+	}
+
+	sb.tail.Write(p)
+	if over := sb.tail.Len() - sb.tailLimit; over > 0 {
+		sb.tail.Next(over)
+		sb.dropped += int64(over)
+	}
+	return n, nil
+}
+
+// String returns the output kept, with a marker in place of whatever
+// was dropped from the middle.
 func (sb *syncBuffer) String() string {
 	sb.mu.RLock()
 	defer sb.mu.RUnlock()
-	return sb.buf.String()
+	if sb.dropped == 0 {
+		return sb.head.String() + sb.tail.String()
+	}
+	return fmt.Sprintf("%s\n... [%d bytes of output dropped] ...\n%s",
+		sb.head.String(), sb.dropped, sb.tail.String())
+}
+
+// Dropped reports how many bytes were dropped from the middle.
+func (sb *syncBuffer) Dropped() int64 {
+	sb.mu.RLock()
+	defer sb.mu.RUnlock()
+	return sb.dropped
 }
 
 // BackgroundShell represents a shell running in the background.
@@ -113,8 +177,8 @@ func (m *BackgroundShellManager) Start(ctx context.Context, workingDir string, b
 		Shell:       shell,
 		ctx:         shellCtx,
 		cancel:      cancel,
-		stdout:      &syncBuffer{},
-		stderr:      &syncBuffer{},
+		stdout:      newSyncBuffer(),
+		stderr:      newSyncBuffer(),
 		done:        make(chan struct{}),
 	}
 

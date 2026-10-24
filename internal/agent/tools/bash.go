@@ -88,8 +88,6 @@ var bannedCommands = []string{
 	"lynx",
 	"nc",
 	"safari",
-	"scp",
-	"ssh",
 	"telnet",
 	"w3m",
 	"wget",

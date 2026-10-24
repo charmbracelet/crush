@@ -40,6 +40,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
@@ -221,6 +222,7 @@ type sessionAgent struct {
 	isYolo               bool
 	notify               pubsub.Publisher[notify.Notification]
 	runComplete          pubsub.Publisher[notify.RunComplete]
+	hooks                *hooks.Runner
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, *activeCancel]
@@ -278,6 +280,8 @@ type SessionAgentOptions struct {
 	Tools                []fantasy.AgentTool
 	Notify               pubsub.Publisher[notify.Notification]
 	RunComplete          pubsub.Publisher[notify.RunComplete]
+	// Hooks runs lifecycle hooks for turns and compaction. Nil runs none.
+	Hooks *hooks.Runner
 }
 
 func NewSessionAgent(
@@ -296,6 +300,7 @@ func NewSessionAgent(
 		isYolo:               opts.IsYolo,
 		notify:               opts.Notify,
 		runComplete:          opts.RunComplete,
+		hooks:                opts.Hooks,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:       csync.NewMap[string, *activeCancel](),
 		dispatchMu:           csync.NewMap[string, *sync.Mutex](),
@@ -832,6 +837,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 	startTime := time.Now()
 	a.eventPromptSent(call.SessionID)
+	a.fireTurnHook(genCtx, call, hooks.Event{Name: hooks.EventTurnStart})
 
 	var stepMessages []fantasy.Message
 	var shouldSummarize bool
@@ -1158,6 +1164,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			"error_type", fmt.Sprintf("%T", err),
 			"oauth", largeModel.OAuth,
 			"is_cancel", isCancelErr)
+		// Fire once the turn's final state is written, whichever return
+		// below is taken, and outlive the cancelled run context.
+		defer a.fireTurnHook(context.WithoutCancel(ctx), call, turnEndEvent(err, currentAssistant))
 		if currentAssistant == nil {
 			// Cancel-before-assistant-creation window: the run was
 			// canceled after activeRequests.Set but before PrepareStep
@@ -1224,30 +1233,33 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		return nil, err
 	}
 
+	// A turn cut short for compaction with tool calls still pending is
+	// continued by a queued follow-up, which replies and fires TurnEnd
+	// when it actually finishes.
+	continued := false
 	if shouldSummarize {
 		a.activeRequests.Del(call.SessionID)
-		if summarizeErr := a.Summarize(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh); summarizeErr != nil {
+		summarizeErr := a.summarize(genCtx, call.SessionID, compactTriggerAuto, call.ProviderOptions, call.OnAuthRefresh)
+		switch {
+		case errors.Is(summarizeErr, ErrCompactionBlocked):
+			// Uncompacted, the next step would only hit the limit
+			// again, so the turn ends here.
+			slog.Info("PreCompact hook blocked compaction", "session_id", call.SessionID)
+		case summarizeErr != nil:
 			return nil, summarizeErr
-		}
-		// If the agent wasn't done...
-		if len(currentAssistant.ToolCalls()) > 0 {
-			existing, ok := a.messageQueue.Get(call.SessionID)
-			if !ok {
-				existing = []SessionAgentCall{}
-			}
+		case len(currentAssistant.ToolCalls()) > 0:
+			existing, _ := a.messageQueue.Get(call.SessionID)
 			call.Prompt = fmt.Sprintf("The previous session was interrupted because it got too long, the initial user request was: `%s`", call.Prompt)
-			existing = append(existing, call)
-			a.messageQueue.Set(call.SessionID, existing)
+			a.messageQueue.Set(call.SessionID, append(existing, call))
+			continued = true
 		}
 	}
+	finished := currentAssistant != nil && !continued
 
 	// Route the finished turn's response back to the channel it came
-	// from, unless the turn was cut short for summarization with work
-	// still pending — the queued continuation carries the channel and
-	// replies when it actually finishes. Runs before the busy state is
-	// released so a follow-up push queued behind this turn cannot
-	// overtake its reply.
-	if currentAssistant != nil && (!shouldSummarize || len(currentAssistant.ToolCalls()) == 0) {
+	// from. Runs before the busy state is released so a follow-up push
+	// queued behind this turn cannot overtake its reply.
+	if finished {
 		a.sendChannelReply(ctx, call, currentAssistant.Content().String(), completedToolCalls.Copy())
 	}
 
@@ -1257,6 +1269,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// subscribers see stale busy state at the moment of receipt.
 	a.activeRequests.Del(call.SessionID)
 	cancel()
+
+	if finished {
+		a.fireTurnHook(ctx, call, turnEndEvent(nil, currentAssistant))
+	}
 
 	// Send notification that agent has finished its turn (skip for
 	// nested/non-interactive sessions).
@@ -1371,7 +1387,13 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	return a.Run(ctx, firstQueuedMessage)
 }
 
+// Summarize compacts the session on the user's request. It returns
+// ErrCompactionBlocked when a PreCompact hook blocks it.
 func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error) error {
+	return a.summarize(ctx, sessionID, compactTriggerManual, opts, onAuthRefresh)
+}
+
+func (a *sessionAgent) summarize(ctx context.Context, sessionID, trigger string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error) error {
 	if a.IsSessionBusy(sessionID) {
 		return ErrSessionBusy
 	}
@@ -1390,6 +1412,10 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	if len(msgs) == 0 {
 		// Nothing to summarize.
 		return nil
+	}
+
+	if pre := a.hooks.Run(ctx, hooks.Event{Name: hooks.EventPreCompact, SessionID: sessionID, Trigger: trigger}); pre.Blocked() {
+		return fmt.Errorf("%w: %s", ErrCompactionBlocked, pre.Reason)
 	}
 
 	aiMsgs, _ := a.preparePrompt(msgs, largeModel.CatwalkCfg.SupportsImages)
@@ -1505,6 +1531,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	if err != nil {
 		return err
 	}
+	a.hooks.Run(ctx, hooks.Event{Name: hooks.EventPostCompact, SessionID: sessionID, Trigger: trigger})
 
 	// Release the active request before processing queued messages so that
 	// Run() does not see the session as busy.

@@ -5,6 +5,8 @@ import (
 
 	"charm.land/glamour/v2"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // streamingMarkdown caches a "stable prefix" glamour render so each
@@ -431,8 +433,44 @@ func glueRenders(prefix, trail string) string {
 // Glamour adds a leading blank line for documents that open with
 // a heading or paragraph, plus a trailing newline; both must be
 // removed before concatenation.
+//
+// Trailing margin rows that carry only copy sentinels count as blank
+// too: the code block's closing fence sentinel (styles.SentinelFence)
+// renders as a blank cell on the block's trailing margin row, and a
+// glued render must treat that row exactly like the blank margin row
+// it replaced, or the glued output grows an extra blank line a fresh
+// full render does not have (see internal/ui/list/rawcopy.go).
 func trimGlamourMargins(s string) string {
-	return strings.Trim(s, " \t\n")
+	s = strings.Trim(s, " \t\n")
+	for {
+		i := strings.LastIndexByte(s, '\n')
+		line := s[i+1:]
+		if !isSentinelOnlyLine(line) {
+			return s
+		}
+		if i < 0 {
+			return ""
+		}
+		s = s[:i]
+	}
+}
+
+// isSentinelOnlyLine reports whether the rendered line carries no
+// visible content and at least one copy sentinel.
+func isSentinelOnlyLine(line string) bool {
+	if !strings.ContainsAny(line, "\u2004\u2005\u2007") {
+		return false
+	}
+	stripped := ansi.Strip(line)
+	for _, sentinel := range []string{
+		styles.SentinelFence,
+		styles.SentinelTask,
+		styles.SentinelStrike,
+		"\u2004", "\u2005", "\u2007",
+	} {
+		stripped = strings.ReplaceAll(stripped, sentinel, "")
+	}
+	return strings.TrimSpace(stripped) == ""
 }
 
 // findSafeMarkdownBoundary returns the byte offset of the END of

@@ -31,6 +31,9 @@ internal/
     templates/                     System prompt templates (coder.md.tpl, task.md.tpl, etc.)
     tools/                         All built-in tools (bash, edit, view, grep, glob, etc.)
       mcp/                         MCP client integration
+  honcho/                          Honcho memory integration: REST client, OAuth,
+                                   config resolution, identity derivation, and the
+                                   service that writes turns and reads context back
   hooks/                           Hook engine: runs user shell commands on hook events
     hooks.go                       Decision types, aggregation logic, event constants
     runner.go                      Parallel hook execution, timeout, dedup
@@ -85,6 +88,24 @@ internal/
   generated code in `internal/db/`. Migrations in `internal/db/migrations/`.
 - **Pub/sub**: `internal/pubsub` for decoupled communication between agent,
   UI, and services.
+- **Memory**: Optional cross-session recall via Honcho
+  (`internal/honcho/`). Off unless configured. The agent depends on the
+  small `agent.Memory` interface rather than the concrete service, and
+  every method tolerates a nil implementation, so "no memory" costs one
+  nil check rather than a feature flag. Reads flow through two channels
+  with different caching properties: a session-stable snapshot sealed
+  into the system prompt, and volatile per-turn recall appended at the
+  tail and **excluded from cache breakpoints** (see
+  `markCacheBreakpoints` in `internal/agent/memory.go` — providers allow
+  only four breakpoints and Crush already uses all four). Writes go
+  through a buffered queue that drops rather than blocks. See
+  `docs/memory/`.
+- **Skill gating**: A builtin skill may declare `requires: <feature>` in
+  its frontmatter and is hidden unless that feature is available
+  (`skills.FilterUnavailable`). This keeps integration-specific skills
+  out of the system prompt when the integration is off. Note there are
+  two discovery paths — `skills.DiscoverFromConfig` and the one inside
+  `internal/agent/prompt/prompt.go` — and both must apply the filter.
 - **Hooks**: User-defined shell commands in `crushrc` (or `crush.json`)
   that fire before tool execution. The engine (`internal/hooks/`) is
   independent of fantasy and agent — it takes inputs, runs commands,

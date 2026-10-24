@@ -19,6 +19,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/db"
+	"github.com/charmbracelet/crush/internal/honcho"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/ui/util"
@@ -545,10 +546,11 @@ func skillsDiscoveryConfig(cfg *config.ConfigStore) skills.DiscoveryConfig {
 		resolver = r.ResolveValue
 	}
 	return skills.DiscoveryConfig{
-		SkillsPaths:    paths,
-		DisabledSkills: disabled,
-		WorkingDir:     cfg.WorkingDir(),
-		Resolver:       resolver,
+		SkillsPaths:       paths,
+		DisabledSkills:    disabled,
+		WorkingDir:        cfg.WorkingDir(),
+		Resolver:          resolver,
+		AvailableFeatures: honcho.Features(cfg.Config()),
 	}
 }
 

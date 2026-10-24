@@ -2,15 +2,19 @@ package model
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"charm.land/bubbles/v2/textarea"
+	tea "charm.land/bubbletea/v2"
+	"github.com/stretchr/testify/require"
 
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/crush/internal/workspace"
 )
 
@@ -166,4 +170,79 @@ func TestHandleChannelMessageDropsWhenNotReadyOrEmpty(t *testing.T) {
 			t.Error("not-ready event should not create a session")
 		}
 	})
+}
+
+// channelCmdMsgs runs cmd, fanning out any tea.BatchMsg, and returns the
+// produced messages.
+func channelCmdMsgs(cmd tea.Cmd) []tea.Msg {
+	if cmd == nil {
+		return nil
+	}
+	msg := cmd()
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		var msgs []tea.Msg
+		for _, c := range batch {
+			msgs = append(msgs, channelCmdMsgs(c)...)
+		}
+		return msgs
+	}
+	return []tea.Msg{msg}
+}
+
+// channelErrorMsgs returns the error InfoMsgs among msgs.
+func channelErrorMsgs(msgs []tea.Msg) []util.InfoMsg {
+	var out []util.InfoMsg
+	for _, msg := range msgs {
+		if info, ok := msg.(util.InfoMsg); ok && info.Type == util.InfoTypeError {
+			out = append(out, info)
+		}
+	}
+	return out
+}
+
+// TestHandleChannelMessageReportsRunError verifies that a failed
+// channel-driven turn surfaces in the TUI the way a failed typed prompt
+// does, instead of only being logged.
+func TestHandleChannelMessageReportsRunError(t *testing.T) {
+	t.Parallel()
+	ws := &channelWorkspace{ready: true, runErr: errors.New("context window exceeded")}
+	m := newChannelUI(ws)
+	m.session = &session.Session{ID: "sess-1"}
+
+	cmd := m.handleChannelMessage(mcp.Event{Name: "s", ChannelMessage: "<channel source=\"s\">hi</channel>"})
+	require.NotNil(t, cmd)
+	msgs := channelCmdMsgs(cmd)
+
+	errs := channelErrorMsgs(msgs)
+	require.Len(t, errs, 1, "run error must be reported to the UI; got %#v", msgs)
+	require.Equal(t, "s: context window exceeded", errs[0].Msg)
+}
+
+// TestHandleChannelMessageCanceledRunIsQuiet verifies a canceled
+// channel-driven turn is not reported as an error, matching the typed
+// prompt path.
+func TestHandleChannelMessageCanceledRunIsQuiet(t *testing.T) {
+	t.Parallel()
+	ws := &channelWorkspace{ready: true, runErr: context.Canceled}
+	m := newChannelUI(ws)
+	m.session = &session.Session{ID: "sess-1"}
+
+	msgs := channelCmdMsgs(m.handleChannelMessage(mcp.Event{Name: "s", ChannelMessage: "<channel source=\"s\">hi</channel>"}))
+	require.Len(t, ws.runCalls, 1)
+	require.Empty(t, channelErrorMsgs(msgs))
+}
+
+// TestHandleChannelMessageReportsSessionCreateError verifies that a
+// failure to create a session, which drops the event, is reported rather
+// than only logged.
+func TestHandleChannelMessageReportsSessionCreateError(t *testing.T) {
+	t.Parallel()
+	ws := &channelWorkspace{ready: true, createErr: errors.New("disk full")}
+	m := newChannelUI(ws)
+
+	msgs := channelCmdMsgs(m.handleChannelMessage(mcp.Event{Name: "s", ChannelMessage: "<channel source=\"s\">hi</channel>"}))
+	errs := channelErrorMsgs(msgs)
+	require.Len(t, errs, 1, "got %#v", msgs)
+	require.Equal(t, "s: create session: disk full", errs[0].Msg)
+	require.Empty(t, ws.runCalls)
 }

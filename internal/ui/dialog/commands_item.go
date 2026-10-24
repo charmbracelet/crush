@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/ui/keyhint"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/x/ansi"
@@ -112,7 +113,7 @@ func (c *CommandItem) Shortcut() string {
 
 // InfoText implements infoColumnItem; the command shortcut is its info.
 func (c *CommandItem) InfoText() string {
-	return c.shortcut
+	return keyhint.Label(c.shortcut)
 }
 
 // SetHideInfo controls whether the shortcut hint column is shown. The
@@ -136,7 +137,7 @@ func (c *CommandItem) Render(width int) string {
 		InfoTextBlurred: c.t.Dialog.ListItem.InfoBlurred,
 		InfoTextFocused: c.t.Dialog.ListItem.InfoFocused,
 	}
-	shortcut := c.shortcut
+	shortcut := keyhint.Label(c.shortcut)
 	if c.hideInfo {
 		shortcut = ""
 	}

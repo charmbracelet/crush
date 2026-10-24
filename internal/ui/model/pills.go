@@ -8,6 +8,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/chat"
+	"github.com/charmbracelet/crush/internal/ui/keyhint"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -347,7 +348,7 @@ func (m *UI) renderPills() {
 	if m.pillsExpanded {
 		helpDesc = "close"
 	}
-	helpKey := t.Pills.HelpKey.Render("ctrl+t")
+	helpKey := t.Pills.HelpKey.Render(keyhint.Label("ctrl+t"))
 	helpText := t.Pills.HelpText.Render(helpDesc)
 	helpHint := lipgloss.JoinHorizontal(lipgloss.Center, helpKey, " ", helpText)
 	pillsRow = lipgloss.JoinHorizontal(lipgloss.Center, pillsRow, " ", helpHint)

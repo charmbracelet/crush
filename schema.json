@@ -760,6 +760,14 @@
           "type": "object",
           "description": "Additional fields to include in request bodies, only works with openai-compatible providers"
         },
+        "thinking_on_body": {
+          "type": "object",
+          "description": "Fields merged into request bodies when thinking is on, only works with openai-compatible providers"
+        },
+        "thinking_off_body": {
+          "type": "object",
+          "description": "Fields merged into request bodies when thinking is off, only works with openai-compatible providers"
+        },
         "provider_options": {
           "type": "object",
           "description": "Additional provider-specific options for this provider"

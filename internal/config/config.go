@@ -127,6 +127,17 @@ type ProviderConfig struct {
 	// expand.
 	ExtraBody map[string]any `json:"extra_body,omitempty" jsonschema:"description=Additional fields to include in request bodies\\, only works with openai-compatible providers"`
 
+	// ThinkingOnBody and ThinkingOffBody tell Crush how to switch
+	// reasoning on and off for an OpenAI-compatible provider it has no
+	// built-in knowledge of. The matching object is deep-merged into the
+	// request body on every call, following the selected model's
+	// thinking setting, so the "Thinking Mode" toggle works for custom
+	// servers. For llama.cpp with a Qwen or Gemma chat template:
+	// {"chat_template_kwargs": {"enable_thinking": true}} and the same
+	// with false.
+	ThinkingOnBody  map[string]any `json:"thinking_on_body,omitempty" jsonschema:"description=Fields merged into request bodies when thinking is on\\, only works with openai-compatible providers"`
+	ThinkingOffBody map[string]any `json:"thinking_off_body,omitempty" jsonschema:"description=Fields merged into request bodies when thinking is off\\, only works with openai-compatible providers"`
+
 	ProviderOptions map[string]any `json:"provider_options,omitempty" jsonschema:"description=Additional provider-specific options for this provider"`
 
 	// Used to pass extra parameters to the provider.

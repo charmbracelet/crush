@@ -634,6 +634,102 @@ func TestGetProviderOptionsReasoningEffortFallback(t *testing.T) {
 	assert.Equal(t, "enabled", thinking["type"])
 }
 
+func TestGetProviderOptionsThinkingBody(t *testing.T) {
+	t.Parallel()
+
+	// A custom llama.cpp server that switches thinking through its chat
+	// template, alongside an unrelated chat_template_kwargs field.
+	newProviderCfg := func() config.ProviderConfig {
+		return config.ProviderConfig{
+			ID:   "llamacpp-local",
+			Type: openaicompat.Name,
+			ThinkingOnBody: map[string]any{
+				"chat_template_kwargs": map[string]any{"enable_thinking": true},
+			},
+			ThinkingOffBody: map[string]any{
+				"chat_template_kwargs": map[string]any{"enable_thinking": false},
+			},
+		}
+	}
+	newModel := func(think bool) Model {
+		return Model{
+			CatwalkCfg: catwalk.Model{ID: "qwen38", CanReason: true},
+			ModelCfg:   config.SelectedModel{Provider: "llamacpp-local", Think: think},
+		}
+	}
+	enableThinking := func(t *testing.T, opts fantasy.ProviderOptions) any {
+		t.Helper()
+		raw, ok := opts[openaicompat.Name]
+		require.True(t, ok)
+		parsed, ok := raw.(*openaicompat.ProviderOptions)
+		require.True(t, ok)
+		kwargs, ok := parsed.ExtraBody["chat_template_kwargs"].(map[string]any)
+		require.True(t, ok)
+		return kwargs["enable_thinking"]
+	}
+
+	t.Run("thinking on sends the on body", func(t *testing.T) {
+		t.Parallel()
+		opts := getProviderOptions(newModel(true), newProviderCfg())
+		assert.Equal(t, true, enableThinking(t, opts))
+	})
+
+	t.Run("thinking off sends the off body", func(t *testing.T) {
+		t.Parallel()
+		opts := getProviderOptions(newModel(false), newProviderCfg())
+		assert.Equal(t, false, enableThinking(t, opts))
+	})
+
+	t.Run("toggling does not leak state between calls", func(t *testing.T) {
+		t.Parallel()
+		providerCfg := newProviderCfg()
+		assert.Equal(t, true, enableThinking(t, getProviderOptions(newModel(true), providerCfg)))
+		assert.Equal(t, false, enableThinking(t, getProviderOptions(newModel(false), providerCfg)))
+		on := providerCfg.ThinkingOnBody["chat_template_kwargs"].(map[string]any)
+		assert.Equal(t, true, on["enable_thinking"])
+	})
+
+	t.Run("known custom provider types get the body too", func(t *testing.T) {
+		t.Parallel()
+		providerCfg := newProviderCfg()
+		providerCfg.ID = "ollama"
+		providerCfg.Type = "ollama"
+		opts := getProviderOptions(newModel(false), providerCfg)
+		assert.Equal(t, false, enableThinking(t, opts))
+	})
+
+	t.Run("nothing is added when the provider sets no body", func(t *testing.T) {
+		t.Parallel()
+		providerCfg := config.ProviderConfig{ID: "llamacpp-local", Type: openaicompat.Name}
+		opts := getProviderOptions(newModel(true), providerCfg)
+		raw, ok := opts[openaicompat.Name]
+		require.True(t, ok)
+		parsed, ok := raw.(*openaicompat.ProviderOptions)
+		require.True(t, ok)
+		_, has := parsed.ExtraBody["chat_template_kwargs"]
+		assert.False(t, has)
+	})
+}
+
+func TestMergeMaps(t *testing.T) {
+	t.Parallel()
+
+	dst := map[string]any{
+		"chat_template_kwargs": map[string]any{"reasoning_effort": "low"},
+		"top_k":                int64(40),
+	}
+	src := map[string]any{
+		"chat_template_kwargs": map[string]any{"enable_thinking": false},
+		"top_k":                int64(20),
+	}
+	mergeMaps(dst, src)
+
+	require.Equal(t, map[string]any{
+		"chat_template_kwargs": map[string]any{"reasoning_effort": "low", "enable_thinking": false},
+		"top_k":                int64(20),
+	}, dst)
+}
+
 func TestGetProviderOptionsTopKExtraBody(t *testing.T) {
 	// "ollama" has a registered discover.Enricher, so it is treated as a
 	// known custom provider speaking openai-compat.

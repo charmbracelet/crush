@@ -58,7 +58,7 @@ func NewTodosTool(sessions session.Service) fantasy.AgentTool {
 				switch item.Status {
 				case "pending", "in_progress", "completed":
 				default:
-					return fantasy.ToolResponse{}, fmt.Errorf("invalid status %q for todo %q", item.Status, item.Content)
+					return fantasy.NewTextErrorResponse(fmt.Sprintf("Invalid status %q for todo %q (must be pending, in_progress, or completed)", item.Status, item.Content)), nil
 				}
 			}
 

@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // -----------------------------------------------------------------------------
@@ -131,6 +132,36 @@ func (a *AgentToolMessageItem) AddNestedTool(tool ToolMessageItem) {
 	a.Bump()
 }
 
+// agentModelInfo returns the provider/model pair an agent tool call
+// overrode, for display inside the tool box. It is empty when the
+// sub-agent runs on the default (selected) model.
+func agentModelInfo(params agent.AgentParams) string {
+	if params.Model == "" {
+		return ""
+	}
+	if params.Provider != "" {
+		return params.Provider + "/" + params.Model
+	}
+	return params.Model
+}
+
+// agentMetaLine summarizes the non-default agent tool params as a
+// parenthesized, comma-separated list, or returns an empty string when
+// the call uses only defaults.
+func agentMetaLine(params agent.AgentParams) string {
+	var parts []string
+	if modelInfo := agentModelInfo(params); modelInfo != "" {
+		parts = append(parts, "model="+modelInfo)
+	}
+	if params.WriteTools {
+		parts = append(parts, "write_tools=true")
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "(" + strings.Join(parts, ", ") + ")"
+}
+
 // AgentToolRenderContext renders agent tool messages.
 type AgentToolRenderContext struct {
 	agent *AgentToolMessageItem
@@ -156,38 +187,42 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 		return header
 	}
 
-	// Build the task tag and prompt.
+	// Build the task tag and prompt. Non-default params share the
+	// first line with the tag, and the prompt starts on the next line,
+	// aligned under them.
 	taskTag := sty.Tool.AgentTaskTag.Render("Task")
-	taskTagWidth := lipgloss.Width(taskTag)
+	tagWidth := lipgloss.Width(taskTag)
+	promptIndent := tagWidth + 1
 
-	// Calculate remaining width for prompt.
-	remainingWidth := min(cappedWidth-taskTagWidth-3, maxTextWidth-taskTagWidth-3) // -3 for spacing
+	promptWidth := min(cappedWidth-tagWidth-3, maxTextWidth-tagWidth-3) // -3 for spacing
+	promptText := sty.Tool.AgentPrompt.Width(promptWidth).Render(prompt)
 
-	promptText := sty.Tool.AgentPrompt.Width(remainingWidth).Render(prompt)
+	sections := []string{header, ""}
+	if meta := agentMetaLine(params); meta != "" {
+		metaWidth := max(cappedWidth-tagWidth-4, 1) // tag, space, and closure
+		sections = append(sections,
+			lipgloss.JoinHorizontal(lipgloss.Left, taskTag, " ", sty.Tool.ParamKey.Render(ansi.Truncate(meta, metaWidth, "…"))),
+			lipgloss.NewStyle().PaddingLeft(promptIndent).Render(promptText),
+		)
+	} else {
+		sections = append(sections,
+			lipgloss.JoinHorizontal(lipgloss.Left, taskTag, " ", promptText),
+		)
+	}
 
-	header = lipgloss.JoinVertical(
-		lipgloss.Left,
-		header,
-		"",
-		lipgloss.JoinHorizontal(
-			lipgloss.Left,
-			taskTag,
-			" ",
-			promptText,
-		),
-	)
+	header = lipgloss.JoinVertical(lipgloss.Left, sections...)
 
 	// Build tree with nested tool calls.
 	childTools := tree.Root(header)
 
 	for _, nestedTool := range r.agent.nestedTools {
-		childView := nestedTool.Render(remainingWidth)
+		childView := nestedTool.Render(promptWidth)
 		childTools.Child(childView)
 	}
 
 	// Build parts.
 	var parts []string
-	parts = append(parts, roundedTree(childTools, taskTagWidth-5).String())
+	parts = append(parts, roundedTree(childTools, tagWidth-5).String())
 
 	// Show animation if still running.
 	if !opts.HasResult() && !opts.IsCanceled() {

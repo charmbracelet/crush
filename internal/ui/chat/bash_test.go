@@ -122,3 +122,53 @@ func TestToolOutputPlainContent_SingleHiddenLineShown(t *testing.T) {
 	require.NotContains(t, out, "line12")
 	require.Contains(t, out, "2 lines hidden")
 }
+
+// TestBashToolMessageItem_CompactCollapsesCommand guards the nested
+// sub-agent contract: a multi-line command is collapsed onto a single
+// line, while the main session keeps its full multi-line form.
+func TestBashToolMessageItem_CompactCollapsesCommand(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	tc := message.ToolCall{
+		ID:       "bash-nested",
+		Name:     "bash",
+		Input:    `{"command":"echo one\necho two\necho three"}`,
+		Finished: true,
+	}
+	ctx := &BashToolRenderContext{}
+	out := ansi.Strip(ctx.RenderTool(&sty, 120, &ToolRenderOpts{
+		ToolCall: tc,
+		Result:   &message.ToolResult{ToolCallID: "bash-nested", Content: "out"},
+		Status:   ToolStatusSuccess,
+		Compact:  true,
+	}))
+
+	require.NotContains(t, out, "\n", "nested bash command must render on one line")
+	require.Contains(t, out, "echo one echo two echo three")
+}
+
+// TestBashToolMessageItem_CompactTruncatesLongCommand verifies that a
+// long nested command is truncated with an ellipsis instead of wrapping.
+func TestBashToolMessageItem_CompactTruncatesLongCommand(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	longCmd := "echo " + strings.Repeat("a", 300)
+	tc := message.ToolCall{
+		ID:       "bash-nested-long",
+		Name:     "bash",
+		Input:    `{"command":"` + longCmd + `"}`,
+		Finished: true,
+	}
+	ctx := &BashToolRenderContext{}
+	out := ansi.Strip(ctx.RenderTool(&sty, 120, &ToolRenderOpts{
+		ToolCall: tc,
+		Result:   &message.ToolResult{ToolCallID: "bash-nested-long", Content: "out"},
+		Status:   ToolStatusSuccess,
+		Compact:  true,
+	}))
+
+	require.NotContains(t, out, "\n", "nested bash command must render on one line")
+	require.Contains(t, out, "…", "nested long command must be truncated")
+}

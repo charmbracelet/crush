@@ -718,3 +718,14 @@ func TestNotificationsCarrySessionID(t *testing.T) {
 	assert.Equal(t, "s-notify", second.Payload.SessionID)
 	assert.True(t, second.Payload.Granted)
 }
+
+func TestPermissionService_SessionAutoApproved(t *testing.T) {
+	t.Parallel()
+
+	service := NewPermissionService("/tmp", false, nil)
+	assert.False(t, service.SessionAutoApproved("session-1"))
+
+	service.AutoApproveSession("session-1")
+	assert.True(t, service.SessionAutoApproved("session-1"))
+	assert.False(t, service.SessionAutoApproved("session-2"))
+}

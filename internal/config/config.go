@@ -58,9 +58,10 @@ const (
 )
 
 const (
-	AgentCoder string = "coder"
-	AgentPlan  string = "plan"
-	AgentTask  string = "task"
+	AgentCoder     string = "coder"
+	AgentPlan      string = "plan"
+	AgentTask      string = "task"
+	AgentTaskWrite string = "task_write"
 )
 
 type SelectedModel struct {
@@ -1083,6 +1084,29 @@ func resolveReadOnlyTools(tools []string) []string {
 	return filterSlice(tools, readOnlyTools, true)
 }
 
+func resolveTaskWriteTools(tools []string) []string {
+	// The task agent's read-only set plus the tools that can modify
+	// files and run commands, so a write-capable sub-agent can do real
+	// work while staying barred from spawning nested sub-agents or
+	// asking the user questions.
+	writeTools := []string{
+		"bash",
+		"download",
+		"edit",
+		"multiedit",
+		"write",
+		"glob",
+		"grep",
+		"ls",
+		"lsp_call_hierarchy",
+		"lsp_definition",
+		"lsp_symbols",
+		"sourcegraph",
+		"view",
+	}
+	return filterSlice(tools, writeTools, true)
+}
+
 func resolvePlanTools(tools []string) []string {
 	// The read-only LSP lookups mirror the task agent's tool set: planning
 	// needs symbol navigation just as much as research does.
@@ -1133,6 +1157,17 @@ func (c *Config) SetupAgents() {
 			Model:        SelectedModelTypeLarge,
 			ContextPaths: c.Options.ContextPaths,
 			AllowedTools: resolveReadOnlyTools(allowedTools),
+			// NO MCPs or LSPs by default
+			AllowedMCP: map[string][]string{},
+		},
+
+		AgentTaskWrite: {
+			ID:           AgentTaskWrite,
+			Name:         "Task",
+			Description:  "An agent that helps with coding tasks and can modify files and run commands.",
+			Model:        SelectedModelTypeLarge,
+			ContextPaths: c.Options.ContextPaths,
+			AllowedTools: resolveTaskWriteTools(allowedTools),
 			// NO MCPs or LSPs by default
 			AllowedMCP: map[string][]string{},
 		},

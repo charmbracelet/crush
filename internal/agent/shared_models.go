@@ -21,11 +21,19 @@ type coordinatorModels struct {
 }
 
 // rebuildModels rebuilds every shared model from the live config and
-// publishes them together. Rebuilds are serialized, so one that read an older
-// config can never publish over one that read a newer credential.
+// publishes them together. Rebuilds are serialized, so one that read an
+// older config can never publish over one that read a newer credential.
+// It also drops every cached model-override sub-agent: a rebuild carries
+// refreshed credentials or a different provider build, and the cached
+// agents hold the old models.
 func (c *coordinator) rebuildModels(ctx context.Context) error {
 	c.rebuildMu.Lock()
 	defer c.rebuildMu.Unlock()
+
+	c.subAgentMu.Lock()
+	c.subAgentCache = nil
+	c.subAgentGen++
+	c.subAgentMu.Unlock()
 
 	large, err := c.buildModel(ctx, config.SelectedModelTypeLarge, false)
 	if err != nil {

@@ -27,6 +27,27 @@ func TestConfig_AgentIDs(t *testing.T) {
 		assert.Equal(t, AgentTask, taskAgent.ID, "Task agent ID should be '%s'", AgentTask)
 	})
 
+	t.Run("Task write agent should have correct ID", func(t *testing.T) {
+		writeAgent, ok := cfg.Agents[AgentTaskWrite]
+		require.True(t, ok)
+		assert.Equal(t, AgentTaskWrite, writeAgent.ID, "Task write agent ID should be '%s'", AgentTaskWrite)
+	})
+
+	t.Run("Task write agent should have write tools without nesting", func(t *testing.T) {
+		writeAgent := cfg.Agents[AgentTaskWrite]
+		for _, toolName := range []string{"bash", "edit", "multiedit", "write", "download"} {
+			assert.Contains(t, writeAgent.AllowedTools, toolName)
+		}
+		for _, toolName := range []string{"agent", "agentic_fetch", "question"} {
+			assert.NotContains(t, writeAgent.AllowedTools, toolName)
+		}
+
+		taskAgent := cfg.Agents[AgentTask]
+		for _, toolName := range []string{"bash", "edit", "multiedit", "write", "download"} {
+			assert.NotContains(t, taskAgent.AllowedTools, toolName)
+		}
+	})
+
 	t.Run("Plan agent should have correct ID", func(t *testing.T) {
 		planAgent, ok := cfg.Agents[AgentPlan]
 		require.True(t, ok)

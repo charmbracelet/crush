@@ -170,6 +170,15 @@ type coordinator struct {
 	models    csync.Value[coordinatorModels]
 	rebuildMu sync.Mutex
 
+	// subAgentMu guards the sub-agents built for model overrides requested
+	// through the agent tool. They are keyed by provider and model so the
+	// expensive tool-list build happens once per pair; rebuildModels clears
+	// the cache and bumps subAgentGen when the shared models are rebuilt,
+	// so a build that raced a rebuild never publishes a stale agent.
+	subAgentMu    sync.Mutex
+	subAgentCache map[subAgentKey]SessionAgent
+	subAgentGen   uint64
+
 	// Skills discovery results (session-start snapshot).
 	allSkills    []*skills.Skill // Pre-filter: all discovered after dedup.
 	activeSkills []*skills.Skill // Post-filter: active skills only.
@@ -797,6 +806,27 @@ func mergeCallOptions(model Model, cfg config.ProviderConfig) (fantasy.ProviderO
 	return modelOptions, temp, topP, topK, freqPenalty, presPenalty
 }
 
+// newSessionAgentOptions returns the SessionAgentOptions every agent the
+// coordinator builds shares. The system prompt is left empty: buildAgent
+// fills it asynchronously via SetSystemPrompt, while callers that build an
+// agent for immediate use pass it directly.
+func (c *coordinator) newSessionAgentOptions(models func() ModelSet, isSubAgent bool) SessionAgentOptions {
+	large := models().Large
+	largeProviderCfg, _ := c.cfg.Config().Providers.Get(large.ModelCfg.Provider)
+	return SessionAgentOptions{
+		Models:               models,
+		SystemPromptPrefix:   largeProviderCfg.SystemPromptPrefix,
+		IsSubAgent:           isSubAgent,
+		DisableAutoSummarize: c.cfg.Config().Options.DisableAutoSummarize,
+		IsYolo:               c.permissions.SkipRequests(),
+		Sessions:             c.sessions,
+		Messages:             c.messages,
+		Cfg:                  c.cfg,
+		Notify:               c.notify,
+		RunComplete:          c.runComplete,
+	}
+}
+
 func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, agent config.Agent, isSubAgent bool) (SessionAgent, error) {
 	if c.models.Get().large.Model == nil {
 		if err := c.rebuildModels(ctx); err != nil {
@@ -809,21 +839,8 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	}
 	large := models().Large
 
-	largeProviderCfg, _ := c.cfg.Config().Providers.Get(large.ModelCfg.Provider)
-	result := NewSessionAgent(SessionAgentOptions{
-		Models:               models,
-		SystemPromptPrefix:   largeProviderCfg.SystemPromptPrefix,
-		SystemPrompt:         "",
-		IsSubAgent:           isSubAgent,
-		DisableAutoSummarize: c.cfg.Config().Options.DisableAutoSummarize,
-		IsYolo:               c.permissions.SkipRequests(),
-		Sessions:             c.sessions,
-		Messages:             c.messages,
-		Cfg:                  c.cfg,
-		Tools:                nil,
-		Notify:               c.notify,
-		RunComplete:          c.runComplete,
-	})
+	opts := c.newSessionAgentOptions(models, isSubAgent)
+	result := NewSessionAgent(opts)
 
 	// The readiness goroutines below perform one-time setup — building the
 	// system prompt and the initial tool list — whose results the
@@ -995,10 +1012,6 @@ func (c *coordinator) buildModel(ctx context.Context, slot config.SelectedModelT
 	if !ok {
 		return Model{}, fmt.Errorf("%s %w", slot, errModelProviderNotConfigured)
 	}
-	provider, err := c.buildProvider(providerCfg, modelCfg, isSubAgent)
-	if err != nil {
-		return Model{}, err
-	}
 
 	// Resolve the selected model from the provider's whole catalog: an
 	// API-key model, a ChatGPT subscription model, or a Grok one. The
@@ -1007,6 +1020,45 @@ func (c *coordinator) buildModel(ctx context.Context, slot config.SelectedModelT
 	catwalkModel := c.cfg.Config().GetModel(modelCfg.Provider, modelCfg.Model)
 	if catwalkModel == nil {
 		return Model{}, fmt.Errorf("%s %w", slot, errModelNotFound)
+	}
+
+	return c.resolveModel(ctx, providerCfg, modelCfg, catwalkModel, isSubAgent)
+}
+
+// buildModelOverride builds the model requested through the agent tool's
+// provider and model params. Unlike buildModel, the pair is explicit
+// rather than resolved from a configured slot, so a sub-agent can run on
+// any configured provider's model. Model settings that a configured
+// selection would inherit from the catalog (max tokens, reasoning effort)
+// fall back to the catalog defaults.
+func (c *coordinator) buildModelOverride(ctx context.Context, providerID, modelID string, isSubAgent bool) (Model, error) {
+	providerCfg, ok := c.cfg.Config().Providers.Get(providerID)
+	if !ok || providerCfg.Disable {
+		return Model{}, fmt.Errorf("provider %q %w", providerID, errModelProviderNotConfigured)
+	}
+	catwalkModel := c.cfg.Config().GetModel(providerID, modelID)
+	if catwalkModel == nil {
+		return Model{}, fmt.Errorf("model %q from provider %q %w", modelID, providerID, errModelNotFound)
+	}
+	modelCfg := config.SelectedModel{
+		Provider:        providerID,
+		Model:           modelID,
+		MaxTokens:       catwalkModel.DefaultMaxTokens,
+		ReasoningEffort: catwalkModel.DefaultReasoningEffort,
+		// Overriding the model must not silently drop the user's explicit
+		// thinking preference from their selected large model.
+		Think: c.cfg.Config().Models[config.SelectedModelTypeLarge].Think,
+	}
+	return c.resolveModel(ctx, providerCfg, modelCfg, catwalkModel, isSubAgent)
+}
+
+// resolveModel builds a Model from an already-resolved provider
+// configuration, model selection, and catalog entry. buildModel and
+// buildModelOverride differ only in how they resolve those three inputs.
+func (c *coordinator) resolveModel(ctx context.Context, providerCfg config.ProviderConfig, modelCfg config.SelectedModel, catwalkModel *catwalk.Model, isSubAgent bool) (Model, error) {
+	provider, err := c.buildProvider(providerCfg, modelCfg, isSubAgent)
+	if err != nil {
+		return Model{}, err
 	}
 
 	modelID := modelCfg.Model
@@ -1656,6 +1708,14 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 	// Call session setup function if provided
 	if params.SessionSetup != nil {
 		params.SessionSetup(session.ID)
+	} else if c.permissions.SessionAutoApproved(params.SessionID) {
+		// An auto-approved parent session must extend the same treatment
+		// to the sub-agent's session, or write-capable sub-agents would
+		// block forever on permission requests nobody can answer in
+		// non-interactive runs. Yolo mode never reaches this branch: the
+		// service's skip flag short-circuits every request, sessions
+		// included.
+		c.permissions.AutoApproveSession(session.ID)
 	}
 
 	// Get model configuration
@@ -1707,9 +1767,62 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 
 	output := subAgentOutput(result)
 	if output == "" {
-		return fantasy.NewTextErrorResponse("Sub-agent completed but produced no text output."), nil
+		return fantasy.NewTextErrorResponse(subAgentNoOutputReason(ctx, c.messages, session.ID)), nil
 	}
 	return fantasy.NewTextResponse(output), nil
+}
+
+// subAgentNoOutputReason explains why a sub-agent finished without text.
+// A denied or cancelled tool call stops the turn before the model can
+// write a final answer, so a generic "produced no text output" message
+// is misleading: walk the child session's messages for the tool result
+// that ended the run. Only the last message carrying tool results can
+// explain the stop; an error from an earlier, recovered step is not the
+// cause. The sub-agent's messages are flushed by the time its Run
+// returns, so the walk observes them.
+func subAgentNoOutputReason(ctx context.Context, messages message.Service, sessionID string) string {
+	const generic = "Sub-agent completed but produced no text output."
+
+	msgs, err := messages.List(ctx, sessionID)
+	if err != nil {
+		return generic
+	}
+
+	for i := len(msgs) - 1; i >= 0; i-- {
+		var results []message.ToolResult
+		for _, part := range msgs[i].Parts {
+			if tr, ok := part.(message.ToolResult); ok {
+				results = append(results, tr)
+			}
+		}
+		if len(results) == 0 {
+			continue
+		}
+
+		for _, result := range results {
+			if !result.IsError {
+				continue
+			}
+			switch {
+			case strings.Contains(result.Content, "User denied permission"):
+				return fmt.Sprintf("Sub-agent stopped: the user denied permission for the %s tool call.", result.Name)
+			case strings.Contains(result.Content, "User cancelled"):
+				return fmt.Sprintf("Sub-agent stopped: the user cancelled the %s tool call.", result.Name)
+			}
+		}
+
+		last := results[len(results)-1]
+		if last.IsError {
+			content := []rune(last.Content)
+			if len(content) > 300 {
+				content = append(content[:300], []rune("…")...)
+			}
+			return fmt.Sprintf("Sub-agent stopped: the %s tool call failed: %s", last.Name, string(content))
+		}
+		return generic
+	}
+
+	return generic
 }
 
 func subAgentOutput(result *fantasy.AgentResult) string {

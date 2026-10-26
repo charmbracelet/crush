@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/discover"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -60,9 +61,10 @@ func newTestCoordinator(t *testing.T, env fakeEnv, providerID string, providerCf
 	require.NoError(t, err)
 	cfg.Config().Providers.Set(providerID, providerCfg)
 	return &coordinator{
-		cfg:      cfg,
-		sessions: env.sessions,
-		messages: env.messages,
+		cfg:         cfg,
+		sessions:    env.sessions,
+		messages:    env.messages,
+		permissions: env.permissions,
 	}
 }
 
@@ -107,6 +109,293 @@ func TestCopilotResponsesModels(t *testing.T) {
 		assert.True(t, copilotResponsesModels[modelID], modelID)
 	}
 	assert.False(t, copilotResponsesModels["gpt-4.1"])
+}
+
+func TestRunSubAgentPropagatesParentAutoApproval(t *testing.T) {
+	t.Parallel()
+	const providerID = "test-provider"
+	providerCfg := config.ProviderConfig{ID: providerID}
+
+	// A non-yolo permission service, so only explicit session
+	// auto-approval matters (yolo is handled by the skip flag inside
+	// Request and needs no propagation).
+	env := testEnv(t)
+	coord := newTestCoordinator(t, env, providerID, providerCfg)
+	perms := permission.NewPermissionService(env.workingDir, false, nil)
+	coord.permissions = perms
+
+	runAgent := newMockAgent(providerID, 4096, func(_ context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
+		return agentResultWithText("done"), nil
+	})
+
+	t.Run("auto-approved parent approves the child session", func(t *testing.T) {
+		t.Parallel()
+		parentSession, err := env.sessions.Create(t.Context(), "Parent")
+		require.NoError(t, err)
+		perms.AutoApproveSession(parentSession.ID)
+
+		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
+			Agent:          runAgent,
+			SessionID:      parentSession.ID,
+			AgentMessageID: "msg-approve",
+			ToolCallID:     "call-approve",
+			Prompt:         "do something",
+			SessionTitle:   "Test Session",
+		})
+		require.NoError(t, err)
+		assert.False(t, resp.IsError)
+
+		childID := env.sessions.CreateAgentToolSessionID("msg-approve", "call-approve")
+		assert.True(t, perms.SessionAutoApproved(childID))
+	})
+
+	t.Run("regular parent leaves the child session unapproved", func(t *testing.T) {
+		t.Parallel()
+		parentSession, err := env.sessions.Create(t.Context(), "Parent")
+		require.NoError(t, err)
+
+		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
+			Agent:          runAgent,
+			SessionID:      parentSession.ID,
+			AgentMessageID: "msg-plain",
+			ToolCallID:     "call-plain",
+			Prompt:         "do something",
+			SessionTitle:   "Test Session",
+		})
+		require.NoError(t, err)
+		assert.False(t, resp.IsError)
+
+		childID := env.sessions.CreateAgentToolSessionID("msg-plain", "call-plain")
+		assert.False(t, perms.SessionAutoApproved(childID))
+	})
+
+	t.Run("session setup overrides the propagation", func(t *testing.T) {
+		t.Parallel()
+		parentSession, err := env.sessions.Create(t.Context(), "Parent")
+		require.NoError(t, err)
+		perms.AutoApproveSession(parentSession.ID)
+
+		var setupSessions []string
+		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
+			Agent:          runAgent,
+			SessionID:      parentSession.ID,
+			AgentMessageID: "msg-setup",
+			ToolCallID:     "call-setup",
+			Prompt:         "do something",
+			SessionTitle:   "Test Session",
+			SessionSetup: func(sessionID string) {
+				setupSessions = append(setupSessions, sessionID)
+			},
+		})
+		require.NoError(t, err)
+		assert.False(t, resp.IsError)
+		require.Len(t, setupSessions, 1)
+	})
+}
+
+func TestRunSubAgentNoOutputReason(t *testing.T) {
+	t.Parallel()
+	const providerID = "test-provider"
+	providerCfg := config.ProviderConfig{ID: providerID}
+
+	newMessage := func(t *testing.T, env fakeEnv, sessionID string, parts ...message.ContentPart) {
+		t.Helper()
+		_, err := env.messages.Create(t.Context(), sessionID, message.CreateMessageParams{
+			Role:  message.Assistant,
+			Parts: parts,
+		})
+		require.NoError(t, err)
+	}
+
+	deniedResult := message.ToolResult{
+		ToolCallID: "call-inner",
+		Name:       "edit",
+		Content:    "User denied permission",
+		IsError:    true,
+	}
+
+	t.Run("denied tool call is reported", func(t *testing.T) {
+		t.Parallel()
+		env := testEnv(t)
+		coord := newTestCoordinator(t, env, providerID, providerCfg)
+
+		parentSession, err := env.sessions.Create(t.Context(), "Parent")
+		require.NoError(t, err)
+
+		agent := newMockAgent(providerID, 4096, func(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
+			newMessage(t, env, call.SessionID, deniedResult)
+			return agentResultWithText(""), nil
+		})
+
+		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
+			Agent:          agent,
+			SessionID:      parentSession.ID,
+			AgentMessageID: "msg-1",
+			ToolCallID:     "call-1",
+			Prompt:         "do something",
+			SessionTitle:   "Test Session",
+		})
+		require.NoError(t, err)
+		assert.True(t, resp.IsError)
+		assert.Contains(t, resp.Content, "user denied permission")
+		assert.Contains(t, resp.Content, "edit tool call")
+	})
+
+	t.Run("cancelled tool call is reported", func(t *testing.T) {
+		t.Parallel()
+		env := testEnv(t)
+		coord := newTestCoordinator(t, env, providerID, providerCfg)
+
+		parentSession, err := env.sessions.Create(t.Context(), "Parent")
+		require.NoError(t, err)
+
+		agent := newMockAgent(providerID, 4096, func(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
+			newMessage(t, env, call.SessionID, message.ToolResult{
+				ToolCallID: "call-inner",
+				Name:       "bash",
+				Content:    "User cancelled",
+				IsError:    true,
+			})
+			return agentResultWithText(""), nil
+		})
+
+		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
+			Agent:          agent,
+			SessionID:      parentSession.ID,
+			AgentMessageID: "msg-1",
+			ToolCallID:     "call-1",
+			Prompt:         "do something",
+			SessionTitle:   "Test Session",
+		})
+		require.NoError(t, err)
+		assert.True(t, resp.IsError)
+		assert.Contains(t, resp.Content, "user cancelled")
+		assert.Contains(t, resp.Content, "bash tool call")
+	})
+
+	t.Run("failing tool call is reported", func(t *testing.T) {
+		t.Parallel()
+		env := testEnv(t)
+		coord := newTestCoordinator(t, env, providerID, providerCfg)
+
+		parentSession, err := env.sessions.Create(t.Context(), "Parent")
+		require.NoError(t, err)
+
+		agent := newMockAgent(providerID, 4096, func(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
+			newMessage(t, env, call.SessionID, message.ToolResult{
+				ToolCallID: "call-inner",
+				Name:       "bash",
+				Content:    "exit status 1",
+				IsError:    true,
+			})
+			return agentResultWithText(""), nil
+		})
+
+		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
+			Agent:          agent,
+			SessionID:      parentSession.ID,
+			AgentMessageID: "msg-1",
+			ToolCallID:     "call-1",
+			Prompt:         "do something",
+			SessionTitle:   "Test Session",
+		})
+		require.NoError(t, err)
+		assert.True(t, resp.IsError)
+		assert.Contains(t, resp.Content, "bash tool call failed")
+		assert.Contains(t, resp.Content, "exit status 1")
+	})
+
+	t.Run("no messages falls back to the generic message", func(t *testing.T) {
+		t.Parallel()
+		env := testEnv(t)
+		coord := newTestCoordinator(t, env, providerID, providerCfg)
+
+		parentSession, err := env.sessions.Create(t.Context(), "Parent")
+		require.NoError(t, err)
+
+		agent := newMockAgent(providerID, 4096, func(context.Context, SessionAgentCall) (*fantasy.AgentResult, error) {
+			return agentResultWithText(""), nil
+		})
+
+		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
+			Agent:          agent,
+			SessionID:      parentSession.ID,
+			AgentMessageID: "msg-1",
+			ToolCallID:     "call-1",
+			Prompt:         "do something",
+			SessionTitle:   "Test Session",
+		})
+		require.NoError(t, err)
+		assert.True(t, resp.IsError)
+		assert.Equal(t, "Sub-agent completed but produced no text output.", resp.Content)
+	})
+
+	t.Run("recovered error in an earlier message is not reported", func(t *testing.T) {
+		t.Parallel()
+		env := testEnv(t)
+		coord := newTestCoordinator(t, env, providerID, providerCfg)
+
+		parentSession, err := env.sessions.Create(t.Context(), "Parent")
+		require.NoError(t, err)
+
+		agent := newMockAgent(providerID, 4096, func(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
+			newMessage(t, env, call.SessionID, message.ToolResult{
+				ToolCallID: "call-inner-1",
+				Name:       "grep",
+				Content:    "no matches",
+				IsError:    true,
+			})
+			// The model recovered and used another tool successfully, then
+			// ended without text for an unrelated reason.
+			newMessage(t, env, call.SessionID, message.ToolResult{
+				ToolCallID: "call-inner-2",
+				Name:       "view",
+				Content:    "file contents",
+			})
+			return agentResultWithText(""), nil
+		})
+
+		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
+			Agent:          agent,
+			SessionID:      parentSession.ID,
+			AgentMessageID: "msg-1",
+			ToolCallID:     "call-1",
+			Prompt:         "do something",
+			SessionTitle:   "Test Session",
+		})
+		require.NoError(t, err)
+		assert.True(t, resp.IsError)
+		assert.Equal(t, "Sub-agent completed but produced no text output.", resp.Content)
+	})
+
+	t.Run("denial wins over an earlier recovered error", func(t *testing.T) {
+		t.Parallel()
+		env := testEnv(t)
+		coord := newTestCoordinator(t, env, providerID, providerCfg)
+
+		parentSession, err := env.sessions.Create(t.Context(), "Parent")
+		require.NoError(t, err)
+
+		agent := newMockAgent(providerID, 4096, func(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
+			newMessage(t, env, call.SessionID,
+				message.ToolResult{ToolCallID: "call-1", Name: "grep", Content: "no matches", IsError: true},
+				deniedResult,
+			)
+			return agentResultWithText(""), nil
+		})
+
+		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
+			Agent:          agent,
+			SessionID:      parentSession.ID,
+			AgentMessageID: "msg-1",
+			ToolCallID:     "call-2",
+			Prompt:         "do something",
+			SessionTitle:   "Test Session",
+		})
+		require.NoError(t, err)
+		assert.True(t, resp.IsError)
+		assert.Contains(t, resp.Content, "user denied permission")
+	})
 }
 
 func TestRunSubAgent(t *testing.T) {

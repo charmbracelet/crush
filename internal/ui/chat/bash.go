@@ -66,11 +66,16 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		return renderJobTool(sty, opts, cappedWidth, "Start", meta.ShellID, description, content)
 	}
 
-	// Regular bash command. The command is always rendered expanded
-	// (newlines preserved); expansion only controls the output body.
+	// Regular bash command. The main session always renders the command
+	// expanded (newlines preserved, wrapped rather than truncated);
+	// nested sub-agent renders collapse it to a single line so the agent
+	// tool tree stays compact.
 	cmd := params.Command
 	cmd = strings.ReplaceAll(cmd, "\t", "    ")
 	cmd = common.StripBashDisplayPrefix(cmd, b.workingDir)
+	if opts.Compact {
+		cmd = strings.Join(strings.Fields(cmd), " ")
+	}
 	if highlighted, err := common.SyntaxHighlightLexerName(sty, cmd, "bash", nil); err == nil {
 		cmd = highlighted
 	}
@@ -80,9 +85,10 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	}
 
 	// The command is always rendered expanded (wrapped, never
-	// truncated); expansion only controls the output body.
+	// truncated) in the main session; a nested render lets
+	// toolParamList truncate it with an ellipsis instead.
 	headerOpts := *opts
-	headerOpts.ExpandedContent = true
+	headerOpts.ExpandedContent = !opts.Compact
 	header := toolHeader(sty, opts.Status, "Bash", cappedWidth, &headerOpts, toolParams...)
 	if opts.Compact {
 		return header

@@ -16,6 +16,13 @@ FROM files
 WHERE session_id = ?
 ORDER BY version ASC, created_at ASC;
 
+-- name: ListFilesBySessionWithChildren :many
+SELECT *
+FROM files
+WHERE session_id = ?
+   OR session_id IN (SELECT id FROM sessions WHERE parent_session_id = ?)
+ORDER BY version ASC, created_at ASC;
+
 -- name: ListFilesByPath :many
 SELECT *
 FROM files

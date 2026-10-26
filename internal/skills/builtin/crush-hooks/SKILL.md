@@ -16,8 +16,10 @@ need to author correct hooks.
 
 ## Supported Events
 
-Only `PreToolUse` is currently supported. Event names are case-insensitive and
-accept snake_case (`PreToolUse`, `pretooluse`, `pre_tool_use` all work).
+`PreToolUse` fires before each tool call; `PostToolUse` fires after each
+successful tool call with the tool output attached. Event names are
+case-insensitive and accept snake_case (`PreToolUse`, `pretooluse`,
+`pre_tool_use` all work; same for `PostToolUse`).
 
 ## Configuration
 
@@ -29,6 +31,12 @@ accept snake_case (`PreToolUse`, `pretooluse`, `pre_tool_use` all work).
         "matcher": "^bash$",              // regex against tool name (optional; omit to match all)
         "command": "./hooks/my-hook.sh",   // required: shell command to run
         "timeout": 10                     // optional: seconds, default 30
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "^(edit|write)$",
+        "command": "./hooks/after-edit.sh"
       }
     ]
   }
@@ -68,6 +76,20 @@ the input/output contract is identical regardless of language.
   "cwd": "/home/user/project",
   "tool_name": "bash",
   "tool_input": {"command": "rm -rf /"}
+}
+```
+
+`PostToolUse` payloads add the raw tool response (what the tool itself
+produced, before any PreToolUse-injected context):
+
+```json
+{
+  "event": "PostToolUse",
+  "session_id": "313909e",
+  "cwd": "/home/user/project",
+  "tool_name": "write",
+  "tool_input": {"file_path": "main.go", "content": "..."},
+  "tool_output": {"content": "ok", "is_error": false}
 }
 ```
 
@@ -111,6 +133,15 @@ policy violation).
 - **`updated_input`**: **shallow-merge patch** against `tool_input`, not a
   replacement. Keys you include overwrite; keys you don't are preserved.
   Nested objects are replaced wholesale, not deep-merged. Ignored on deny/halt.
+
+### PostToolUse semantics
+
+A `PostToolUse` hook observes a tool call that already happened, so
+`decision`, `halt`, and `updated_input` are meaningless and ignored — it
+fires only after successful calls (not on blocked or errored ones).
+`context` still works and is appended to the tool response the model sees,
+which makes it ideal for feedback that depends on the completed call: lint
+results after `edit`, test reminders after `write`, audit logs for `bash`.
 
 ## Aggregation (Multiple Hooks)
 

@@ -26,20 +26,36 @@ type Payload struct {
 	CWD       string          `json:"cwd"`
 	ToolName  string          `json:"tool_name"`
 	ToolInput json.RawMessage `json:"tool_input"`
+	// ToolOutput is only set for PostToolUse events.
+	ToolOutput *ToolOutput `json:"tool_output,omitempty"`
+}
+
+// ToolOutput describes the response of a completed tool call for
+// PostToolUse events.
+type ToolOutput struct {
+	Content string `json:"content"`
+	IsError bool   `json:"is_error,omitempty"`
 }
 
 // BuildPayload constructs the JSON stdin payload for a hook command.
 func BuildPayload(eventName, sessionID, cwd, toolName, toolInputJSON string) []byte {
+	return BuildPayloadWithOutput(eventName, sessionID, cwd, toolName, toolInputJSON, nil)
+}
+
+// BuildPayloadWithOutput constructs the JSON stdin payload for a hook
+// command, attaching the tool output for PostToolUse events.
+func BuildPayloadWithOutput(eventName, sessionID, cwd, toolName, toolInputJSON string, toolOutput *ToolOutput) []byte {
 	toolInput := json.RawMessage(toolInputJSON)
 	if !json.Valid(toolInput) {
 		toolInput = json.RawMessage("{}")
 	}
 	p := Payload{
-		Event:     eventName,
-		SessionID: sessionID,
-		CWD:       cwd,
-		ToolName:  toolName,
-		ToolInput: toolInput,
+		Event:      eventName,
+		SessionID:  sessionID,
+		CWD:        cwd,
+		ToolName:   toolName,
+		ToolInput:  toolInput,
+		ToolOutput: toolOutput,
 	}
 	data, err := json.Marshal(p)
 	if err != nil {

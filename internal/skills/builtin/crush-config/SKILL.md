@@ -212,20 +212,23 @@ option ui exit-banner compact
 
 ## Hooks runtime
 
-Hooks are user-defined shell commands that fire on agent events. Currently only
-`PreToolUse` is supported, which runs before a tool executes. This behavior is
-the same however the hook is defined (`hook add` or JSON).
+Hooks are user-defined shell commands that fire on agent events. Two events
+are supported: `PreToolUse` runs before a tool executes, `PostToolUse` runs
+after a tool call completes successfully. This behavior is the same however
+the hook is defined (`hook add` or JSON).
 
 ### How hooks work
 
 1. When a tool is about to be called, all `PreToolUse` hooks with a matching
-   `matcher` (or no matcher) run in parallel.
+   `matcher` (or no matcher) run in parallel; after the call completes, all
+   matching `PostToolUse` hooks run the same way.
 2. Duplicate commands are deduplicated — each unique command runs at most once.
 3. The hook receives JSON on **stdin** and hook-specific **environment
    variables**.
 
 Event names are case-insensitive and accept snake_case: `PreToolUse`,
-`pretooluse`, `pre_tool_use`, `PRE_TOOL_USE` all work.
+`pretooluse`, `pre_tool_use`, `PRE_TOOL_USE` (likewise `PostToolUse`,
+`post_tool_use`, ...) all work.
 
 ### Hook input (stdin)
 
@@ -236,6 +239,19 @@ Event names are case-insensitive and accept snake_case: `PreToolUse`,
   "cwd": "/path/to/project",
   "tool_name": "bash",
   "tool_input": { "command": "ls -la" }
+}
+```
+
+`PostToolUse` payloads add `tool_output` (the raw tool response):
+
+```json
+{
+  "event": "PostToolUse",
+  "session_id": "abc-123",
+  "cwd": "/path/to/project",
+  "tool_name": "bash",
+  "tool_input": { "command": "ls -la" },
+  "tool_output": { "content": "...", "is_error": false }
 }
 ```
 
@@ -346,6 +362,7 @@ The `$schema` property enables IDE autocomplete but is optional.
 | `mcp add gh --type http --url U`     | `mcp.gh = {"type":"http","url":"U"}`                   |
 | `lsp add go --command gopls`         | `lsp.go = {"command":"gopls"}`                         |
 | `hook add PreToolUse --command C`    | append to `hooks.PreToolUse[]`                         |
+| `hook add PostToolUse --command C`   | append to `hooks.PostToolUse[]`                        |
 | `permissions allow view ls`          | `permissions.allowed_tools = ["view","ls"]`            |
 | `permissions deny bash`              | `options.disabled_tools = ["bash"]`                    |
 | `option skill-path ./skills`         | `options.skills_paths = ["./skills"]`                  |

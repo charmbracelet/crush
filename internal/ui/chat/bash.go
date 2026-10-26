@@ -61,15 +61,14 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		_ = json.Unmarshal([]byte(opts.Result.Metadata), &meta)
 	}
 
+	cwd := cwdHint(b.workingDir, cmp.Or(meta.WorkingDirectory, params.WorkingDir), params.Command)
+
 	if meta.Background {
-		description := cmp.Or(meta.Description, params.Command)
+		description := withCwd(cmp.Or(meta.Description, params.Command), cwd)
 		content := "Command: " + params.Command + "\n" + opts.Result.Content
-		dirChip := renderDirChip(sty, b.workingDir, cmp.Or(meta.WorkingDirectory, params.WorkingDir), cappedWidth)
-		return renderJobTool(sty, opts, cappedWidth, "Start", meta.ShellID, description, content, dirChip)
+		return renderJobTool(sty, opts, cappedWidth, "Start", meta.ShellID, description, content)
 	}
 
-	// Regular bash command. The command is always rendered expanded
-	// (newlines preserved); expansion only controls the output body.
 	cmd := params.Command
 	cmd = strings.ReplaceAll(cmd, "\t", "    ")
 	cmd = common.StripBashDisplayPrefix(cmd, b.workingDir)
@@ -77,34 +76,15 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		cmd = highlighted
 	}
 
-	// The working directory is rendered as a chip between the tool name and
-	// the command when it ran outside the workspace directory.
-	dirChip := renderDirChip(sty, b.workingDir, cmp.Or(meta.WorkingDirectory, params.WorkingDir), cappedWidth)
-
-	// The description is prepared like the command: outer blank lines
-	// trimmed and tabs indented with spaces. Only its first line leads the
-	// header when collapsed.
-	desc := strings.TrimSpace(params.Description)
-	desc = strings.ReplaceAll(desc, "\t", "    ")
-
-	// The "background=true" pair rides on either header.
-	var extraParams []string
+	var options []string
+	if cwd != "" {
+		options = append(options, "cwd", cwd)
+	}
 	if params.RunInBackground {
-		extraParams = append(extraParams, "background", "true")
+		options = append(options, "background", "true")
 	}
 
-	// The description leads the header (its first line truncated when
-	// collapsed, the whole description wrapped when expanded). An empty
-	// description and nested tool calls (compact) keep the plain command
-	// header.
-	headerOpts := *opts
-	headerOpts.ExpandedContent = true
-	var header string
-	if desc != "" && !opts.Compact {
-		header = renderDescriptionHeader(sty, opts, cappedWidth, desc, cmd, dirChip, extraParams...)
-	} else {
-		header = toolHeaderWithChip(sty, opts.Status, "Bash", dirChip, cappedWidth, &headerOpts, sty.Tool.ParamMain, append([]string{cmd}, extraParams...)...)
-	}
+	header := bashHeader(sty, opts, cappedWidth, params.Description, cmd, options)
 	if opts.Compact {
 		return header
 	}
@@ -130,61 +110,55 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	return joinToolParts(header, body)
 }
 
-// renderDescriptionHeader renders a two-line header: the description (its
-// first line truncated when collapsed, the whole description wrapped when
-// expanded) followed by the full command, indented to align under the tool
-// name. The working directory chip sits between the tool name and the
-// description.
-func renderDescriptionHeader(sty *styles.Styles, opts *ToolRenderOpts, width int, desc, cmd, dirChip string, extraParams ...string) string {
-	if !opts.ExpandedContent {
-		if first, _, found := strings.Cut(desc, "\n"); found {
-			desc = first
-		}
-	}
-	header := toolHeaderWithChip(sty, opts.Status, "Bash", dirChip, width, opts, sty.Tool.Description, append([]string{desc}, extraParams...)...)
+// bashHeader leads with the model's description, when there is one, and puts
+// the command below it. The command always wraps and is never truncated.
+func bashHeader(sty *styles.Styles, opts *ToolRenderOpts, width int, description, cmd string, options []string) string {
+	description = strings.ReplaceAll(strings.TrimSpace(description), "\t", "    ")
+	showDescription := description != "" && !opts.Compact
 
-	// The command wraps below the description as if the chip was absent,
-	// indented under the tool name, and is never truncated.
-	indent := lipgloss.Width(toolBasePrefix(sty, opts.Status, "Bash", opts))
-	expandedOpts := ToolRenderOpts{ExpandedContent: true}
-	cmdStr := toolParamListMainStyle(sty, []string{cmd}, width-indent, &expandedOpts, sty.Tool.ParamMain)
-	return header + "\n" + indentLines(cmdStr, indent)
+	cmdOpts := *opts
+	cmdOpts.ExpandedContent = true
+	lead, leadOpts := cmd, &cmdOpts
+	if showDescription {
+		if !opts.ExpandedContent {
+			description, _, _ = strings.Cut(description, "\n")
+		}
+		lead, leadOpts = sty.Tool.Description.Render(description), opts
+	}
+
+	header := toolHeader(sty, opts.Status, "Bash", width, leadOpts, append([]string{lead}, options...)...)
+	if !showDescription {
+		return header
+	}
+	indent := lipgloss.Width(toolHeaderPrefix(sty, opts.Status, "Bash", opts))
+	return header + "\n" + indentLines(toolParamList(sty, []string{cmd}, width-indent, &cmdOpts), indent)
 }
 
-// relativeDir returns dir relative to the workspace directory workingDir, or
-// an empty string when it matches the workspace or cannot be determined.
-func relativeDir(workingDir, dir string) string {
-	if dir == "" || workingDir == "" {
+// cwdHint returns where a command ran, relative to the workspace, or "" when
+// it ran in the workspace or the command itself starts with a cd.
+func cwdHint(workspace, dir, command string) string {
+	if dir == "" || workspace == "" {
+		return ""
+	}
+	if strings.HasPrefix(strings.TrimSpace(common.StripBashDisplayPrefix(command, workspace)), "cd ") {
 		return ""
 	}
 	if !filepath.IsAbs(dir) {
-		dir = filepath.Join(workingDir, dir)
+		dir = filepath.Join(workspace, dir)
 	}
-	rel, err := filepath.Rel(workingDir, dir)
+	rel, err := filepath.Rel(workspace, dir)
 	if err != nil || rel == "." {
 		return ""
 	}
-	return rel
+	return filepath.ToSlash(rel)
 }
 
-// renderDirChip renders the working directory chip shown between the tool
-// name and the command in tool headers. It returns an empty string when the
-// chip does not apply. The relative path is capped at half the header width
-// so the command keeps enough room.
-func renderDirChip(sty *styles.Styles, workingDir, dir string, width int) string {
-	rel := relativeDir(workingDir, dir)
-	if rel == "" {
-		return ""
+// withCwd appends a "(cwd=dir)" hint to a job description.
+func withCwd(description, cwd string) string {
+	if cwd == "" {
+		return description
 	}
-	maxRel := width/2 - len("cd ") - len("/")
-	if maxRel < 4 {
-		return ""
-	}
-	rel = ansi.Truncate(rel, maxRel, "…")
-	if !strings.HasSuffix(rel, "…") {
-		rel += "/"
-	}
-	return sty.Tool.WorkingDirChip.Render("cd " + rel)
+	return strings.TrimSpace(description + " (cwd=" + cwd + ")")
 }
 
 // -----------------------------------------------------------------------------
@@ -226,12 +200,12 @@ func (j *JobOutputToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, cappedWidth)
 	}
 
-	var description, dirChip string
+	var description string
 	if opts.HasResult() && opts.Result.Metadata != "" {
 		var meta tools.JobOutputResponseMetadata
 		if err := json.Unmarshal([]byte(opts.Result.Metadata), &meta); err == nil {
-			description = cmp.Or(meta.Description, meta.Command)
-			dirChip = renderDirChip(sty, j.workingDir, meta.WorkingDirectory, cappedWidth)
+			cwd := cwdHint(j.workingDir, meta.WorkingDirectory, meta.Command)
+			description = withCwd(cmp.Or(meta.Description, meta.Command), cwd)
 		}
 	}
 
@@ -239,7 +213,7 @@ func (j *JobOutputToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 	if opts.HasResult() {
 		content = opts.Result.Content
 	}
-	return renderJobTool(sty, opts, cappedWidth, "Output", params.ShellID, description, content, dirChip)
+	return renderJobTool(sty, opts, cappedWidth, "Output", params.ShellID, description, content)
 }
 
 // -----------------------------------------------------------------------------
@@ -290,14 +264,13 @@ func (j *JobKillToolRenderContext) RenderTool(sty *styles.Styles, width int, opt
 	if opts.HasResult() {
 		content = opts.Result.Content
 	}
-	return renderJobTool(sty, opts, cappedWidth, "Kill", params.ShellID, description, content, "")
+	return renderJobTool(sty, opts, cappedWidth, "Kill", params.ShellID, description, content)
 }
 
 // renderJobTool renders a job-related tool with the common pattern:
-// header → nested check → early state → body. The chip, when non-empty, is
-// shown in the header.
-func renderJobTool(sty *styles.Styles, opts *ToolRenderOpts, width int, action, shellID, description, content, chip string) string {
-	header := jobHeader(sty, opts.Status, action, shellID, description, width, chip)
+// header → nested check → early state → body.
+func renderJobTool(sty *styles.Styles, opts *ToolRenderOpts, width int, action, shellID, description, content string) string {
+	header := jobHeader(sty, opts.Status, action, shellID, description, width)
 	if opts.Compact {
 		return header
 	}
@@ -316,17 +289,14 @@ func renderJobTool(sty *styles.Styles, opts *ToolRenderOpts, width int, action, 
 }
 
 // jobHeader builds a header for job-related tools.
-// Format: "● Job (Action) PID shellID [chip] description..."
-func jobHeader(sty *styles.Styles, status ToolStatus, action, shellID, description string, width int, chip string) string {
+// Format: "● Job (Action) PID shellID description..."
+func jobHeader(sty *styles.Styles, status ToolStatus, action, shellID, description string, width int) string {
 	icon := toolIcon(sty, status)
 	jobPart := sty.Tool.JobToolName.Render("Job")
 	actionPart := sty.Tool.JobAction.Render("(" + action + ")")
 	pidPart := sty.Tool.JobPID.Render("PID " + shellID)
 
 	prefix := fmt.Sprintf("%s %s %s %s", icon, jobPart, actionPart, pidPart)
-	if chip != "" {
-		prefix += " " + chip
-	}
 
 	if description == "" {
 		return prefix

@@ -3,6 +3,8 @@ package hooks
 import (
 	"context"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -220,6 +222,34 @@ func TestBuildPayload(t *testing.T) {
 	require.Contains(t, s, `"tool_name":"bash"`)
 	// tool_input should be an object, not a string.
 	require.Contains(t, s, `"tool_input":{"command":"ls"}`)
+	require.NotContains(t, s, "tool_output")
+}
+
+func TestBuildPayloadPostToolUse(t *testing.T) {
+	t.Parallel()
+	payload := BuildPayloadWithOutput(EventPostToolUse, "sess-1", "/work", "write", `{"file_path":"a.txt"}`, &ToolOutput{Content: "wrote file", IsError: true})
+	s := string(payload)
+	require.Contains(t, s, `"event":"`+EventPostToolUse+`"`)
+	require.Contains(t, s, `"tool_input":{"file_path":"a.txt"}`)
+	require.Contains(t, s, `"tool_output":{"content":"wrote file","is_error":true}`)
+}
+
+func TestRunnerRunPostToolUseFeedsOutput(t *testing.T) {
+	t.Parallel()
+	payloadPath := filepath.Join(t.TempDir(), "payload.json")
+	hookCfg := config.HookConfig{
+		Command: `cat > '` + payloadPath + `'; echo '{"context":"seen"}'`,
+	}
+	r := NewRunner([]config.HookConfig{hookCfg}, t.TempDir(), t.TempDir())
+	result, err := r.RunPostToolUse(context.Background(), "sess", "write", `{"file_path":"a.txt"}`, ToolOutput{Content: "wrote file"})
+	require.NoError(t, err)
+	require.Equal(t, "seen", result.Context)
+
+	data, err := os.ReadFile(payloadPath)
+	require.NoError(t, err)
+	s := string(data)
+	require.Contains(t, s, `"event":"`+EventPostToolUse+`"`)
+	require.Contains(t, s, `"tool_output":{"content":"wrote file"}`)
 }
 
 func TestRunnerExitCode0Allow(t *testing.T) {
@@ -453,12 +483,16 @@ func TestValidateHooksNormalizesEventNames(t *testing.T) {
 	tests := []struct {
 		name  string
 		input string
+		want  string
 	}{
-		{"canonical", "PreToolUse"},
-		{"lowercase", "pretooluse"},
-		{"snake_case", "pre_tool_use"},
-		{"upper_snake", "PRE_TOOL_USE"},
-		{"mixed_case", "preToolUse"},
+		{"canonical", "PreToolUse", EventPreToolUse},
+		{"lowercase", "pretooluse", EventPreToolUse},
+		{"snake_case", "pre_tool_use", EventPreToolUse},
+		{"upper_snake", "PRE_TOOL_USE", EventPreToolUse},
+		{"mixed_case", "preToolUse", EventPreToolUse},
+		{"post_canonical", "PostToolUse", EventPostToolUse},
+		{"post_lowercase", "posttooluse", EventPostToolUse},
+		{"post_snake_case", "post_tool_use", EventPostToolUse},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -471,7 +505,7 @@ func TestValidateHooksNormalizesEventNames(t *testing.T) {
 				},
 			}
 			require.NoError(t, cfg.ValidateHooks())
-			require.Len(t, cfg.Hooks[EventPreToolUse], 1)
+			require.Len(t, cfg.Hooks[tt.want], 1)
 		})
 	}
 }

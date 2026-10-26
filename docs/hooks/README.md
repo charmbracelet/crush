@@ -19,8 +19,9 @@ forward.
 - Hooks are Claude Code-compatible
 - Crush ships with a builtin `crush-hook` skill to write, edit, and configure
   hooks; just tell Crush how to configure Crush
-- Crush currently supports just one hook, `PreToolUse`, with plans to support
-  the full gamut; please let us know which hooks you'd like to see next
+- Crush currently supports `PreToolUse` and `PostToolUse` hooks, with plans
+  to support the full gamut; please let us know which hooks you'd like to see
+  next
 - Hooks run in parallel for speed, but their results compose in config order
   for determinism
 
@@ -160,7 +161,7 @@ wins when rewriting input, but first deny wins when blocking.
 
 ## Events
 
-Here are the events you can hook into (spoiler: there's currently just one):
+Here are the events you can hook into:
 
 ### PreToolUse
 
@@ -180,6 +181,45 @@ Sub-agents (the `agent` task tool, `agentic_fetch`, etc.) run without hook
 interception so a single delegated turn doesn't trigger your hook N times. The
 outer sub-agent tool call itself _is_ hooked, so policy like "never let the
 agent spawn sub-agents" still works.
+
+### PostToolUse
+
+This hook fires after every tool call completes successfully, with the tool's
+output attached. Use it to audit what tools actually did, run follow-up
+checks (linters, formatters, tests) whose findings should feed back to the
+model, snapshot file state after edits, and so on.
+
+**Matched against**: the tool name, same as `PreToolUse`. The same
+snake-case/case-insensitive naming rules apply (`post_tool_use`,
+`POSTTOOLUSE`, ...).
+
+**Scope**: like `PreToolUse`, this hook only fires on the top-level agent's
+tool calls. It does not fire when the tool call was blocked by a `PreToolUse`
+hook, nor when the tool itself returned an error.
+
+**Payload**: identical to `PreToolUse`, plus a `tool_output` object carrying
+the raw tool response:
+
+```jsonc
+{
+  "event": "PostToolUse",
+  "session_id": "313909e",
+  "cwd": "/home/user/project",
+  "tool_name": "write",
+  "tool_input": { "file_path": "main.go" },
+  "tool_output": { "content": "ok", "is_error": false },
+}
+```
+
+`tool_output.content` is what the tool itself produced, before any
+`PreToolUse`-injected context, so post hooks always observe the tool's own
+output.
+
+**Advisory only**: the tool already ran, so `decision`, `halt`, and
+`updated_input` from a `PostToolUse` hook are ignored. `context`, however,
+works the same as for `PreToolUse` and is appended to the tool response the
+model sees — perfect for "you edited Go, remember to run gofumpt" style
+feedback that needs the tool to have happened first.
 
 Hooks are keyed by event name. Only `command` is required, and you can omit
 `matcher` to match all tools.
@@ -244,6 +284,8 @@ Standard input provides the full context as JSON:
   "cwd": "/home/user/project", // Working directory
   "tool_name": "bash", // The tool being called
   "tool_input": { "command": "rm -rf /" }, // The tool's input
+  // For PostToolUse only:
+  // "tool_output": { "content": "...", "is_error": false },
 }
 ```
 

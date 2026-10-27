@@ -37,6 +37,18 @@ type dispatchRecord struct {
 	// agent or agentic_fetch tool when a blocking call was moved to the
 	// background. It picks which agent a follow-up reopens into.
 	Tool string
+	// Model override the dispatch resolved. When a dispatch succeeded, the
+	// tool result's metadata overwrites these with the selection that
+	// actually ran, provider included; until it is seen they hold the raw
+	// call params. All four are empty when the sub-agent runs on the shared
+	// sub-agent model. ReasoningOnly marks reasoning settings given without
+	// a model, which ride the sub-agent's default selection instead of an
+	// explicit one.
+	Model          string
+	Provider       string
+	Think          bool
+	ReasoningLevel string
+	ReasoningOnly  bool
 	// Open is true while the latest dispatch or follow-up has no report.
 	Open       bool
 	LastReport *message.SubAgentReport
@@ -84,14 +96,19 @@ func dispatchHistory(msgs []message.Message) dispatchRecords {
 				access = accessRead
 			}
 			record := &dispatchRecord{
-				Label:     label,
-				Access:    access,
-				Task:      params.Prompt,
-				MessageID: msg.ID,
-				CallID:    call.ID,
-				Tool:      AgentDispatchToolName,
-				Open:      true,
-				prev:      records.byLabel[label],
+				Label:          label,
+				Access:         access,
+				Task:           params.Prompt,
+				MessageID:      msg.ID,
+				CallID:         call.ID,
+				Tool:           AgentDispatchToolName,
+				Model:          strings.TrimSpace(params.Model),
+				Provider:       strings.TrimSpace(params.Provider),
+				Think:          params.Think,
+				ReasoningLevel: strings.TrimSpace(params.ReasoningLevel),
+				ReasoningOnly:  strings.TrimSpace(params.Model) == "" && (params.Think || strings.TrimSpace(params.ReasoningLevel) != ""),
+				Open:           true,
+				prev:           records.byLabel[label],
 			}
 			if record.prev == nil {
 				records.order = append(records.order, label)
@@ -102,19 +119,35 @@ func dispatchHistory(msgs []message.Message) dispatchRecords {
 		for _, result := range msg.ToolResults() {
 			switch result.Name {
 			case AgentDispatchToolName:
-				// A refused dispatch never started anything, so the label
-				// still means whatever it meant before.
 				record, ok := byCallID[result.ToolCallID]
-				if !ok || !result.IsError {
+				if !ok {
 					continue
 				}
-				if records.byLabel[record.Label] == record {
-					if record.prev != nil {
-						records.byLabel[record.Label] = record.prev
-					} else {
-						delete(records.byLabel, record.Label)
+				if result.IsError {
+					// A refused dispatch never started anything, so the label
+					// still means whatever it meant before.
+					if records.byLabel[record.Label] == record {
+						if record.prev != nil {
+							records.byLabel[record.Label] = record.prev
+						} else {
+							delete(records.byLabel, record.Label)
+						}
 					}
+					continue
 				}
+				// A started dispatch records the model override it resolved,
+				// so a restart rehydrates on the provider the dispatch
+				// actually used rather than re-deriving it from whatever
+				// model the session has by then.
+				var meta AgentDispatchResponseMetadata
+				if result.Metadata == "" || json.Unmarshal([]byte(result.Metadata), &meta) != nil {
+					continue
+				}
+				record.Model = meta.Model
+				record.Provider = meta.Provider
+				record.Think = meta.Think
+				record.ReasoningLevel = meta.ReasoningLevel
+				record.ReasoningOnly = meta.ReasoningOnly
 			case AgentSendToolName:
 				var meta AgentSendResponseMetadata
 				if result.Metadata == "" || json.Unmarshal([]byte(result.Metadata), &meta) != nil || !meta.Reopened {

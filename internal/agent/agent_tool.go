@@ -93,21 +93,14 @@ func (c *coordinator) taskAgents(ctx context.Context, readOnly bool) (map[string
 		variants = variants[:1]
 	}
 
-	// The variants get a readiness group of their own and are fully set up
-	// before this returns. This runs on every turn, concurrently with other
-	// runs waiting on the coordinator's group, so joining that group would
-	// race its Wait.
+	// The variants share a readiness group of their own and are fully set
+	// up before this returns. This runs on every turn, concurrently with
+	// other runs waiting on the coordinator's group, so joining that group
+	// would race its Wait.
 	var ready errgroup.Group
 	agents := map[string]SessionAgent{}
 	for _, variant := range variants {
-		prompt, err := taskPrompt(
-			prompt.WithWorkingDir(c.cfg.WorkingDir()),
-			prompt.WithCanWrite(variant.canWrite),
-		)
-		if err != nil {
-			return nil, err
-		}
-		agent, err := c.buildAgent(ctx, &ready, prompt, variant.cfg, true)
+		agent, err := c.buildTaskAgent(ctx, &ready, variant.cfg, variant.canWrite, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -117,6 +110,21 @@ func (c *coordinator) taskAgents(ctx context.Context, readOnly bool) (map[string
 		return nil, err
 	}
 	return agents, nil
+}
+
+// buildTaskAgent schedules one variant of the task sub-agent into ready; the
+// caller waits on the group, so several variants can build concurrently.
+// modelsFn, when set, replaces the shared sub-agent model set; a dispatch
+// with a model override uses it to run the variant on the overridden model.
+func (c *coordinator) buildTaskAgent(ctx context.Context, ready *errgroup.Group, agentCfg config.Agent, canWrite bool, modelsFn func() ModelSet) (SessionAgent, error) {
+	pr, err := taskPrompt(
+		prompt.WithWorkingDir(c.cfg.WorkingDir()),
+		prompt.WithCanWrite(canWrite),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return c.buildAgentWithModels(ctx, ready, pr, agentCfg, true, modelsFn)
 }
 
 func (c *coordinator) agentTool(ctx context.Context, parentAgentID string) (fantasy.AgentTool, error) {

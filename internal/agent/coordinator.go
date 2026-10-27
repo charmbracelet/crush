@@ -168,6 +168,14 @@ type coordinator struct {
 
 	// awsRefresh shares one AWS SSO login among requests that need it.
 	awsRefresh singleflight.Group
+	// overrideModels holds the shared builds of per-dispatch model overrides,
+	// so dispatching twice on the same selection does not rebuild its
+	// provider. Every entry is refreshed whenever the shared models are
+	// rebuilt, so an override picks up credential and config changes the same
+	// way the shared models do.
+	overrideModelsMu sync.Mutex
+	overrideModels   map[overrideModelKey]*overrideModel
+
 	// dispatched tracks detached sub-agents by parent session and label.
 	dispatched *csync.Map[string, *dispatchedAgent]
 	// dispatchMu makes checking a label and registering it one step.
@@ -860,6 +868,15 @@ func mergeCallOptions(model Model, cfg config.ProviderConfig) (fantasy.ProviderO
 }
 
 func (c *coordinator) buildAgent(ctx context.Context, ready *errgroup.Group, prompt *prompt.Prompt, agent config.Agent, isSubAgent bool) (SessionAgent, error) {
+	return c.buildAgentWithModels(ctx, ready, prompt, agent, isSubAgent, nil)
+}
+
+// buildAgentWithModels builds an agent whose model set can be replaced.
+// modelsFn nil keeps the coordinator's shared set: main models for the
+// coder and plan agents, sub-agent models for sub-agents. A dispatch with
+// a model override passes a function serving that override, so every
+// per-turn model read picks it up.
+func (c *coordinator) buildAgentWithModels(ctx context.Context, ready *errgroup.Group, prompt *prompt.Prompt, agent config.Agent, isSubAgent bool, modelsFn func() ModelSet) (SessionAgent, error) {
 	if c.models.Get().large.Model == nil {
 		if err := c.rebuildModels(ctx); err != nil {
 			return nil, err
@@ -868,6 +885,9 @@ func (c *coordinator) buildAgent(ctx context.Context, ready *errgroup.Group, pro
 	models := c.mainModels
 	if isSubAgent {
 		models = c.subAgentModels
+	}
+	if modelsFn != nil {
+		models = modelsFn
 	}
 	large := models().Large
 
@@ -1092,9 +1112,18 @@ func (c *coordinator) buildModel(ctx context.Context, slot config.SelectedModelT
 	if !ok {
 		return Model{}, fmt.Errorf("%s %w", slot, errModelNotSelected)
 	}
+	return c.buildModelFromSelection(ctx, modelCfg, isSubAgent)
+}
+
+// buildModelFromSelection builds the model for an explicit selection,
+// rather than one of the configured slots. A per-dispatch model override
+// goes through here, so an override gets everything a configured model
+// gets: provider construction, catalog resolution, request timeouts, and
+// the provider-specific wrappers.
+func (c *coordinator) buildModelFromSelection(ctx context.Context, modelCfg config.SelectedModel, isSubAgent bool) (Model, error) {
 	providerCfg, ok := c.cfg.Config().Providers.Get(modelCfg.Provider)
 	if !ok {
-		return Model{}, fmt.Errorf("%s %w", slot, errModelProviderNotConfigured)
+		return Model{}, fmt.Errorf("%s %w", modelCfg.Provider, errModelProviderNotConfigured)
 	}
 	// Resolve the selected model from the provider's whole catalog: an
 	// API-key model, a ChatGPT subscription model, or a Grok one. The
@@ -1102,7 +1131,7 @@ func (c *coordinator) buildModel(ctx context.Context, slot config.SelectedModelT
 	// strands a Grok/ChatGPT model that catwalk doesn't also publish.
 	catwalkModel := c.cfg.Config().GetModel(modelCfg.Provider, modelCfg.Model)
 	if catwalkModel == nil {
-		return Model{}, fmt.Errorf("%s %w", slot, errModelNotFound)
+		return Model{}, fmt.Errorf("%s %w", modelCfg.Model, errModelNotFound)
 	}
 
 	provider, err := c.buildProvider(providerCfg, modelCfg, isSubAgent, catwalkModel.EffectiveType(providerCfg.Type))

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"cmp"
 	"context"
 	_ "embed"
 	"errors"
@@ -14,8 +15,10 @@ import (
 	"time"
 
 	"charm.land/fantasy"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/charmbracelet/crush/internal/agent/tools"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
 )
 
@@ -44,6 +47,13 @@ type AgentDispatchParams struct {
 	Prompt string `json:"prompt" description:"The task for the sub-agent to perform"`
 	Label  string `json:"label" description:"A short name for this sub-agent, used to address it and to label its report"`
 	Access string `json:"access,omitempty" description:"\"read\" (default) for a sub-agent that can only inspect the codebase, or \"write\" for one that can also edit files"`
+
+	// Model override. When none of these is given the sub-agent runs on the
+	// session's sub-agent model with its configured settings.
+	Model          string `json:"model,omitempty" description:"The model ID for this sub-agent, as used by the provider API. Omit provider to use the parent agent's provider. Other settings default to the model's own"`
+	Provider       string `json:"provider,omitempty" description:"The provider ID for the overridden model; requires model. Defaults to the parent agent's provider when only model is given"`
+	Think          bool   `json:"think,omitempty" description:"Enable thinking for a model that supports reasoning, instead of the model's default"`
+	ReasoningLevel string `json:"reasoning_level,omitempty" description:"The reasoning effort for a model that supports it (e.g. low, medium, high), instead of the model's default"`
 }
 
 // AgentSendResponseMetadata tells the UI which sub-agent a message went to,
@@ -52,6 +62,22 @@ type AgentDispatchParams struct {
 type AgentSendResponseMetadata struct {
 	Label    string `json:"label"`
 	Reopened bool   `json:"reopened,omitempty"`
+}
+
+// AgentDispatchResponseMetadata records the model override a started
+// dispatch actually resolved, in the tool result. The transcript replays it
+// on restart, so rehydration runs on the provider the dispatch used rather
+// than re-deriving it from whatever model the session has by then.
+// ReasoningOnly marks a dispatch that gave reasoning settings but no model:
+// it rides the sub-agent's default selection, so rehydration must not treat
+// the recorded model as an explicit one and rebuild a bare selection.
+type AgentDispatchResponseMetadata struct {
+	Label          string `json:"label"`
+	Model          string `json:"model,omitempty"`
+	Provider       string `json:"provider,omitempty"`
+	Think          bool   `json:"think,omitempty"`
+	ReasoningLevel string `json:"reasoning_level,omitempty"`
+	ReasoningOnly  bool   `json:"reasoning_only,omitempty"`
 }
 
 type AgentSendParams struct {
@@ -269,6 +295,137 @@ func dispatchKey(parentSessionID, label string) string {
 	return parentSessionID + "\x00" + label
 }
 
+// parentModel returns the model of the agent that owns a dispatch call. A
+// model override that names only a model inherits this provider.
+func (c *coordinator) parentModel(parentAgentID string) Model {
+	c.agentMu.RLock()
+	defer c.agentMu.RUnlock()
+	if agent, ok := c.agents[parentAgentID]; ok {
+		return agent.Model()
+	}
+	if c.mainAgent != nil {
+		return c.mainAgent.Model()
+	}
+	return Model{}
+}
+
+// resolveModelOverride turns the dispatch tool's model-override params into
+// the model selection a sub-agent should run on. ok is false when no
+// override was requested. A non-empty refusal means one was requested but
+// cannot be served; it goes back to the model so the call can be retried.
+func (c *coordinator) resolveModelOverride(params AgentDispatchParams, parentModel Model) (sel config.SelectedModel, ok bool, refusal string) {
+	provider := strings.TrimSpace(params.Provider)
+	model := strings.TrimSpace(params.Model)
+	level := strings.TrimSpace(params.ReasoningLevel)
+	think := params.Think
+	if provider == "" && model == "" && !think && level == "" {
+		return config.SelectedModel{}, false, ""
+	}
+	if provider != "" && model == "" {
+		return config.SelectedModel{}, false, "provider is given without model; pass model as well"
+	}
+	if model == "" {
+		// Only reasoning settings were given: they apply to the sub-agent's
+		// default model, keeping its other configured settings.
+		sub := c.subAgentModels().Large
+		if sub.Model == nil {
+			return config.SelectedModel{}, false, "no sub-agent model is configured"
+		}
+		sel = sub.ModelCfg
+	} else {
+		if provider == "" {
+			if parentModel.Model == nil {
+				return config.SelectedModel{}, false, "the parent agent has no model to take a provider from"
+			}
+			provider = parentModel.ModelCfg.Provider
+		}
+		// A fresh selection: everything but the override itself is the
+		// model's own defaults.
+		sel = config.SelectedModel{
+			Provider: provider,
+			Model:    model,
+		}
+	}
+	if think {
+		sel.Think = true
+	}
+	if level != "" {
+		sel.ReasoningEffort = level
+	}
+	return sel, true, c.validateModelOverride(sel, level, think)
+}
+
+// validateModelOverride checks a resolved override against the live config.
+func (c *coordinator) validateModelOverride(sel config.SelectedModel, level string, think bool) string {
+	cfg := c.cfg.Config()
+	if _, ok := cfg.Providers.Get(sel.Provider); !ok {
+		return fmt.Sprintf("provider %q is not configured", sel.Provider)
+	}
+	model := cfg.GetModel(sel.Provider, sel.Model)
+	if model == nil {
+		return fmt.Sprintf("model %q is not available from provider %q", sel.Model, sel.Provider)
+	}
+	if level != "" {
+		if err := cfg.ValidateReasoningEffort(sel.Provider, sel.Model, level); err != nil {
+			return err.Error()
+		}
+	}
+	if think && !model.CanReason() {
+		return fmt.Sprintf("model %q does not support thinking", sel.Model)
+	}
+	return ""
+}
+
+// taskAgentConfig returns the task agent configuration for an access level,
+// mirroring the variants taskAgents builds.
+func (c *coordinator) taskAgentConfig(access string) (config.Agent, bool) {
+	if access == accessWrite {
+		return writeAgentConfig(c.cfg.Config()), true
+	}
+	return c.cfg.Config().Agents[config.AgentTask], false
+}
+
+// overrideDispatchAgent resolves a dispatch's model override and, when one
+// was requested, builds the SessionAgent it should run on. Without an
+// override the caller keeps the shared agent taskAgents built; with one,
+// the entry keeps the dedicated agent so reopens run on the same model.
+func (c *coordinator) overrideDispatchAgent(ctx context.Context, access string, params AgentDispatchParams, parentModel Model) (SessionAgent, config.SelectedModel, bool, string) {
+	sel, ok, refusal := c.resolveModelOverride(params, parentModel)
+	if refusal != "" || !ok {
+		return nil, config.SelectedModel{}, false, refusal
+	}
+	agent, refusal := c.overrideTaskAgent(ctx, access, sel)
+	if refusal != "" {
+		return nil, sel, true, refusal
+	}
+	return agent, sel, true, ""
+}
+
+// overrideTaskAgent builds a dedicated task sub-agent variant running on an
+// overridden model selection. The model function serves the selection's
+// current build, so a model refresh reaches a running sub-agent on its next
+// turn.
+func (c *coordinator) overrideTaskAgent(ctx context.Context, access string, sel config.SelectedModel) (SessionAgent, string) {
+	entry := c.overrideModelEntry(sel)
+	if err := entry.build(ctx, c); err != nil {
+		return nil, "failed to set up the requested model: " + err.Error()
+	}
+	agentCfg, canWrite := c.taskAgentConfig(access)
+	// A group of its own: this build joins no one, and is fully set up
+	// before the dispatch registers the sub-agent.
+	var ready errgroup.Group
+	agent, err := c.buildTaskAgent(ctx, &ready, agentCfg, canWrite, func() ModelSet {
+		return ModelSet{Large: entry.current(), Small: c.subAgentModels().Small}
+	})
+	if err != nil {
+		return nil, "failed to start a sub-agent on the requested model: " + err.Error()
+	}
+	if err := ready.Wait(); err != nil {
+		return nil, "failed to start a sub-agent on the requested model: " + err.Error()
+	}
+	return agent, ""
+}
+
 // agentDispatchTool launches a sub-agent that runs detached from this tool
 // call. The tool returns as soon as the sub-agent starts; the result is
 // delivered later as a message into the parent session.
@@ -295,18 +452,30 @@ func (c *coordinator) agentDispatchTool(ctx context.Context, parentAgentID strin
 			if refusal != "" {
 				return fantasy.NewTextErrorResponse(refusal), nil
 			}
+			agentMessageID := tools.GetMessageFromContext(ctx)
+			if agentMessageID == "" {
+				return fantasy.ToolResponse{}, errors.New("agent message id missing from context")
+			}
+
+			// A model override swaps the shared sub-agent for a dedicated
+			// one running on the requested model. It is resolved before the
+			// label is taken, so a refused override leaves the label free
+			// and the call can be retried immediately.
 			access := params.Access
 			if access == "" {
 				access = accessRead
+			}
+			overrideAgent, sel, hasOverride, refusal := c.overrideDispatchAgent(ctx, access, params, c.parentModel(parentAgentID))
+			if refusal != "" {
+				return fantasy.NewTextErrorResponse(refusal), nil
+			}
+			if overrideAgent != nil {
+				agent = overrideAgent
 			}
 
 			parentSessionID := tools.GetSessionFromContext(ctx)
 			if parentSessionID == "" {
 				return fantasy.ToolResponse{}, errors.New("session id missing from context")
-			}
-			agentMessageID := tools.GetMessageFromContext(ctx)
-			if agentMessageID == "" {
-				return fantasy.ToolResponse{}, errors.New("agent message id missing from context")
 			}
 
 			// The sub-session ID derives from the bare tool call ID so the
@@ -345,7 +514,18 @@ func (c *coordinator) agentDispatchTool(ctx context.Context, parentAgentID strin
 				})
 			})
 
-			return fantasy.NewTextResponse(fmt.Sprintf("Started sub-agent %q.", label)), nil
+			resp := fantasy.NewTextResponse(fmt.Sprintf("Started sub-agent %q.", label))
+			if hasOverride {
+				resp = fantasy.WithResponseMetadata(resp, AgentDispatchResponseMetadata{
+					Label:          label,
+					Model:          sel.Model,
+					Provider:       sel.Provider,
+					Think:          sel.Think,
+					ReasoningLevel: sel.ReasoningEffort,
+					ReasoningOnly:  strings.TrimSpace(params.Model) == "",
+				})
+			}
+			return resp, nil
 		},
 	), nil
 }
@@ -621,6 +801,26 @@ func (c *coordinator) runningDispatchLabels(parentSessionID string) string {
 	return strings.Join(labels, ", ")
 }
 
+// dispatchRunModel recovers the model and provider a sub-agent actually ran
+// on from its session's transcript. Assistant messages record both per turn,
+// so this works even when the dispatch result that recorded the resolved
+// override was never written — a crash between the dispatch starting and its
+// result landing. A read failure is returned rather than read as "no run
+// model": mistaking it for a child that never ran would let rehydration
+// fall back to the wrong provider.
+func (c *coordinator) dispatchRunModel(ctx context.Context, sessionID string) (model, provider string, err error) {
+	msgs, err := c.messages.List(ctx, sessionID)
+	if err != nil {
+		return "", "", err
+	}
+	for _, msg := range msgs {
+		if msg.Role == message.Assistant && msg.Model != "" && msg.Provider != "" {
+			return msg.Model, msg.Provider, nil
+		}
+	}
+	return "", "", nil
+}
+
 // rehydrateDispatch rebuilds a sub-agent's registry entry from what is on
 // disk. The registry is in-memory, so a restart empties it, but nothing that
 // matters was in memory to begin with: the parent's transcript records the
@@ -653,6 +853,50 @@ func (c *coordinator) rehydrateDispatch(ctx context.Context, parentSessionID, la
 	agent, ok := agents[record.Access]
 	if !ok {
 		return nil, fmt.Errorf("unknown access %q", record.Access)
+	}
+
+	// A dispatch that overrode the model is rehydrated on the same override,
+	// so a follow-up keeps running on the model the dispatch asked for. The
+	// dispatch's result records the resolved override, so the provider does
+	// not depend on whatever model the session has now. When that result
+	// never landed — a crash between the dispatch starting and its result
+	// being written — the missing pieces are recovered from the child
+	// session's transcript before falling back to the parent the session
+	// has now. Either way the override is re-resolved against the live
+	// config: if it no longer serves, the sub-agent cannot be resumed
+	// rather than silently dropping back to the session default.
+	if record.Model != "" || record.Provider != "" || record.Think || record.ReasoningLevel != "" {
+		params := AgentDispatchParams{
+			Think:          record.Think,
+			ReasoningLevel: record.ReasoningLevel,
+		}
+		parent := Model{}
+		if record.ReasoningOnly {
+			// Reasoning settings without a model ride the sub-agent's default
+			// selection, keeping its configured settings. Feeding the recorded
+			// model back in as an explicit one would rebuild a bare selection
+			// and drop them, so they ride the default again.
+		} else {
+			params.Model = record.Model
+			params.Provider = record.Provider
+			if params.Model == "" || params.Provider == "" {
+				sessionID := c.sessions.CreateAgentToolSessionID(record.MessageID, record.CallID)
+				runModel, runProvider, err := c.dispatchRunModel(ctx, sessionID)
+				if err != nil {
+					return nil, fmt.Errorf("sub-agent %q cannot be resumed: reading its transcript failed: %w", label, err)
+				}
+				params.Model = cmp.Or(params.Model, runModel)
+				params.Provider = cmp.Or(params.Provider, runProvider)
+				if params.Model == "" || params.Provider == "" {
+					parent = c.parentModel("")
+				}
+			}
+		}
+		overrideAgent, _, _, refusal := c.overrideDispatchAgent(ctx, record.Access, params, parent)
+		if refusal != "" {
+			return nil, fmt.Errorf("sub-agent %q cannot be resumed on its model override: %s", label, refusal)
+		}
+		agent = overrideAgent
 	}
 
 	sessionID := c.sessions.CreateAgentToolSessionID(record.MessageID, record.CallID)

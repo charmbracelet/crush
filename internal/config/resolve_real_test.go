@@ -336,6 +336,14 @@ func TestResolvedArgs_RealShell(t *testing.T) {
 		require.Equal(t, []string{"--token", "shh", "--host", "example.com"}, got)
 	})
 
+	t.Run("literal backslash pairs are kept", func(t *testing.T) {
+		t.Parallel()
+		m := MCPConfig{Args: []string{`\\.\pipe\example`, `\\server\share\$NAME`, `\\.\pipe\x-$NAME`}}
+		got, err := m.ResolvedArgs(realShellResolver(map[string]string{"NAME": "example"}))
+		require.NoError(t, err)
+		require.Equal(t, []string{`\\.\pipe\example`, `\\server\share$NAME`, `\\.\pipe\x-example`}, got)
+	})
+
 	t.Run("failure identifies offending index", func(t *testing.T) {
 		t.Parallel()
 		m := MCPConfig{Args: []string{"--token", "$(false)"}}
@@ -370,6 +378,14 @@ func TestLSPConfig_ResolvedArgs_RealShell(t *testing.T) {
 		got, err := l.ResolvedArgs(r)
 		require.NoError(t, err)
 		require.Equal(t, []string{"--root", "/home/tester", "--flag", "literal"}, got)
+	})
+
+	t.Run("literal backslash pairs are kept", func(t *testing.T) {
+		t.Parallel()
+		l := LSPConfig{Args: []string{"--pipe", `\\.\pipe\lsp`}}
+		got, err := l.ResolvedArgs(realShellResolver(nil))
+		require.NoError(t, err)
+		require.Equal(t, []string{"--pipe", `\\.\pipe\lsp`}, got)
 	})
 
 	t.Run("failure identifies offending index", func(t *testing.T) {

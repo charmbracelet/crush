@@ -217,6 +217,25 @@ func TestCreateTransport_StdioResolution(t *testing.T) {
 		require.Contains(t, ct.Command.Env, "REFERENCE=hunter2")
 	})
 
+	t.Run("args keep literal backslash pairs", func(t *testing.T) {
+		t.Parallel()
+		// Windows named pipes and UNC paths start with "\\". The child
+		// must get both backslashes, also when the arg expands a var.
+		r := shellResolverWithPath(t, map[string]string{"PIPE": "example"})
+		m := config.MCPConfig{
+			Type:    config.MCPStdio,
+			Command: "codeg-mcp",
+			Args:    []string{"--pipe", `\\.\pipe\example`, `\\server\share`, `\\.\pipe\x-$PIPE`},
+		}
+		tr, _, err := createTransport(t.Context(), nil, "test", m, r)
+		require.NoError(t, err)
+		ct, ok := tr.(*mcp.CommandTransport)
+		require.True(t, ok)
+		require.Equal(t, []string{
+			"codeg-mcp", "--pipe", `\\.\pipe\example`, `\\server\share`, `\\.\pipe\x-example`,
+		}, ct.Command.Args)
+	})
+
 	t.Run("env resolution failure surfaces error, no transport created", func(t *testing.T) {
 		t.Parallel()
 		r := shellResolverWithPath(t, nil)

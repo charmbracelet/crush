@@ -17,6 +17,22 @@ type VariableResolver interface {
 	ResolveValue(value string) (string, error)
 }
 
+// argumentResolver is implemented by resolvers that expand argv items
+// differently from other values. The shell resolver keeps backslash
+// pairs in arguments; see shell.ExpandArgument.
+type argumentResolver interface {
+	ResolveArgument(value string) (string, error)
+}
+
+// resolveArgument expands one MCP or LSP argv item. It uses
+// ResolveArgument when r has it and falls back to ResolveValue.
+func resolveArgument(r VariableResolver, value string) (string, error) {
+	if ar, ok := r.(argumentResolver); ok {
+		return ar.ResolveArgument(value)
+	}
+	return r.ResolveValue(value)
+}
+
 // identityResolver is a no-op resolver that returns values unchanged.
 // Used in client mode where variable resolution is handled server-side.
 type identityResolver struct{}
@@ -39,19 +55,22 @@ type Expander func(ctx context.Context, value string, env []string) (string, err
 // ShellResolverOption customizes shell variable resolver construction.
 type ShellResolverOption func(*shellVariableResolver)
 
-// WithExpander overrides the expansion function used by the resolver.
-// Primarily intended for tests; production callers should not need this.
+// WithExpander overrides the expansion function used by the resolver,
+// for argv items too. Primarily intended for tests; production callers
+// should not need this.
 func WithExpander(e Expander) ShellResolverOption {
 	return func(r *shellVariableResolver) {
 		if e != nil {
 			r.expand = e
+			r.expandArg = e
 		}
 	}
 }
 
 type shellVariableResolver struct {
-	env    env.Env
-	expand Expander
+	env       env.Env
+	expand    Expander
+	expandArg Expander
 }
 
 // NewShellVariableResolver returns a VariableResolver that delegates to
@@ -64,8 +83,9 @@ type shellVariableResolver struct {
 // shell.NoUnset.
 func NewShellVariableResolver(e env.Env, opts ...ShellResolverOption) VariableResolver {
 	r := &shellVariableResolver{
-		env:    e,
-		expand: shell.ExpandValue,
+		env:       e,
+		expand:    shell.ExpandValue,
+		expandArg: shell.ExpandArgument,
 	}
 	for _, opt := range opts {
 		opt(r)
@@ -86,6 +106,17 @@ func NewShellVariableResolver(e env.Env, opts ...ShellResolverOption) VariableRe
 // strict mode is available via shell.NoUnset for callers that want the
 // old nounset-on behaviour back.
 func (r *shellVariableResolver) ResolveValue(value string) (string, error) {
+	return r.resolve(value, r.expand)
+}
+
+// ResolveArgument is ResolveValue for one argv item. It keeps backslash
+// pairs, so Windows named pipes and UNC paths in MCP and LSP args reach
+// the child process unchanged. See shell.ExpandArgument.
+func (r *shellVariableResolver) ResolveArgument(value string) (string, error) {
+	return r.resolve(value, r.expandArg)
+}
+
+func (r *shellVariableResolver) resolve(value string, expand Expander) (string, error) {
 	// Preserve the historical backward-compat contract: a lone "$" is a
 	// malformed config value, not a legal literal. The underlying shell
 	// parser would accept it as a literal; we reject it here so existing
@@ -97,7 +128,7 @@ func (r *shellVariableResolver) ResolveValue(value string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), resolveTimeout)
 	defer cancel()
 
-	out, err := r.expand(ctx, value, r.env.Env())
+	out, err := expand(ctx, value, r.env.Env())
 	if err != nil {
 		return "", sanitizeResolveError(value, err)
 	}

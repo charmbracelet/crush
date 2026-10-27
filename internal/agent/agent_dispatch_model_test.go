@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"charm.land/catwalk/v3/pkg/catwalk"
 	"charm.land/fantasy"
 
 	"github.com/charmbracelet/crush/internal/agent/tools"
@@ -49,6 +51,17 @@ func newOverrideTestCoordinator(t *testing.T) (*coordinator, fakeEnv) {
 
 	cfg, err := config.Init(t.Context(), env.workingDir, "", false)
 	require.NoError(t, err)
+	// Local model servers found on the machine running the tests would
+	// otherwise join the config; keep only the providers declared above.
+	var discovered []string
+	for id := range cfg.Config().Providers.Seq2() {
+		if id != "mock" && id != "other" {
+			discovered = append(discovered, id)
+		}
+	}
+	for _, id := range discovered {
+		cfg.Config().Providers.Del(id)
+	}
 	cfg.SetupAgents()
 
 	c := &coordinator{
@@ -111,7 +124,7 @@ func TestResolveModelOverride(t *testing.T) {
 		{
 			name:    "unknown provider is refused",
 			params:  AgentDispatchParams{Model: "m", Provider: "nope"},
-			refusal: `provider "nope" is not configured`,
+			refusal: `provider "nope" is not available; use one of: mock, other`,
 		},
 		{
 			name:    "unknown model is refused",
@@ -548,4 +561,66 @@ func TestRehydrateDispatchPropagatesTranscriptReadError(t *testing.T) {
 	_, err = c.rehydrateDispatch(ctx, parent.ID, "ov")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "transient read failure")
+}
+
+// A disabled provider is refused even when the model it names exists, and
+// it drops out of the catalog the tool description lists.
+func TestModelOverrideSkipsDisabledProvider(t *testing.T) {
+	t.Parallel()
+	c, _ := newOverrideTestCoordinator(t)
+	cfg := c.cfg.Config()
+
+	other, ok := cfg.Providers.Get("other")
+	require.True(t, ok)
+	other.Disable = true
+	cfg.Providers.Set("other", other)
+
+	_, _, refusal := c.resolveModelOverride(AgentDispatchParams{Model: "other-model", Provider: "other"}, Model{})
+	require.Equal(t, `provider "other" is not available; use one of: mock`, refusal)
+
+	catalog := dispatchModelCatalog(cfg, Model{})
+	require.NotContains(t, catalog, "other")
+	require.Contains(t, catalog, "- `mock`: mock-model, mock-reasoner")
+}
+
+// The catalog names the parent's model, lists every usable provider in a
+// stable order, and is what an unknown model's refusal points back to.
+func TestDispatchModelCatalog(t *testing.T) {
+	t.Parallel()
+	c, _ := newOverrideTestCoordinator(t)
+	cfg := c.cfg.Config()
+
+	catalog := dispatchModelCatalog(cfg, c.mainModels().Large)
+	require.Equal(t, "\n\nModels available to `model`, by `provider` (you are running on `mock-reasoner` from `mock`):\n"+
+		"\n- `mock`: mock-model, mock-reasoner"+
+		"\n- `other`: other-model", catalog)
+
+	_, _, refusal := c.resolveModelOverride(AgentDispatchParams{Model: "gone-model", Provider: "mock"}, Model{})
+	require.Equal(t, `model "gone-model" is not available from provider "mock"; use one of: mock-model, mock-reasoner`, refusal)
+}
+
+// Nothing usable means no catalog at all, rather than an empty heading.
+func TestDispatchModelCatalogEmpty(t *testing.T) {
+	t.Parallel()
+	c, _ := newOverrideTestCoordinator(t)
+	cfg := c.cfg.Config()
+	for _, id := range []string{"mock", "other"} {
+		p, ok := cfg.Providers.Get(id)
+		require.True(t, ok)
+		p.Disable = true
+		cfg.Providers.Set(id, p)
+	}
+	require.Empty(t, dispatchModelCatalog(cfg, Model{}))
+}
+
+func TestModelIDListCapsLongCatalogs(t *testing.T) {
+	t.Parallel()
+	models := make([]catwalk.Model, catalogModelsPerProvider+3)
+	for i := range models {
+		models[i].ID = fmt.Sprintf("m%d", i)
+	}
+	list := modelIDList(models)
+	require.Contains(t, list, "m0, m1")
+	require.NotContains(t, list, fmt.Sprintf("m%d", catalogModelsPerProvider))
+	require.True(t, strings.HasSuffix(list, ", and 3 more"), list)
 }

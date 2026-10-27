@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -165,6 +166,32 @@ func TestLookupConfigs_BoundedByProject(t *testing.T) {
 		got := lookupConfigs(project)
 		require.Contains(t, got, filepath.Join(project, "crushrc"))
 		require.Contains(t, got, filepath.Join(project, ".crushrc"))
+	})
+
+	t.Run("project .config/crush/crushrc is discovered below root crushrc", func(t *testing.T) {
+		project := t.TempDir()
+		nested := filepath.Join(project, ".config", "crush", "crushrc")
+		require.NoError(t, os.MkdirAll(filepath.Dir(nested), 0o755))
+		require.NoError(t, os.WriteFile(nested, []byte(""), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(project, "crushrc"), []byte(""), 0o644))
+
+		got := lookupConfigs(project)
+		nestedIdx := slices.Index(got, nested)
+		rootIdx := slices.Index(got, filepath.Join(project, "crushrc"))
+		require.NotEqual(t, -1, nestedIdx, "expected %s in lookup result: %v", nested, got)
+		require.NotEqual(t, -1, rootIdx)
+		// Later entries win when merged, so the root crushrc must come after.
+		require.Less(t, nestedIdx, rootIdx)
+	})
+
+	t.Run("project .config/crush/crush.json is discovered", func(t *testing.T) {
+		project := t.TempDir()
+		nested := filepath.Join(project, ".config", "crush", "crush.json")
+		require.NoError(t, os.MkdirAll(filepath.Dir(nested), 0o755))
+		require.NoError(t, os.WriteFile(nested, []byte(`{}`), 0o644))
+
+		got := lookupConfigs(project)
+		require.Contains(t, got, nested)
 	})
 
 	t.Run("system config is loaded first", func(t *testing.T) {

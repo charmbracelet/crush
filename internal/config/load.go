@@ -903,13 +903,17 @@ func lookupConfigs(cwd string) []string {
 
 	// Ordered high-to-low priority within a directory. LookupBounded returns
 	// matches in this order, and the later reverse + merge make the earliest
-	// listed name win on conflict. So: .crushrc beats crushrc, both beat the
-	// JSON configs, and .crush.json beats crush.json.
+	// listed name win on conflict. So: .crushrc beats crushrc, which beats
+	// .config/crush/crushrc (mirroring the global layout, for projects that
+	// keep tool config under .config/), all beat the JSON configs, and
+	// .crush.json beats crush.json, which beats .config/crush/crush.json.
 	configNames := []string{
 		"." + appName + "rc",
 		appName + "rc",
+		filepath.Join(".config", appName, appName+"rc"),
 		"." + appName + ".json",
 		appName + ".json",
+		filepath.Join(".config", appName, appName+".json"),
 	}
 
 	foundConfigs, err := fsext.LookupBounded(cwd, projectBoundary(cwd), configNames...)

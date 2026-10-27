@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -170,6 +171,8 @@ func (c *recordingCoordinator) Model() agent.Model                            { 
 func (c *recordingCoordinator) UpdateModels(context.Context) error            { return nil }
 func (c *recordingCoordinator) SetMainAgent(string) error                     { return nil }
 func (c *recordingCoordinator) GenerateTitle(context.Context, string, string) {}
+func (c *recordingCoordinator) SetHostContext(proto.HostContext)              {}
+func (c *recordingCoordinator) HostContext() proto.HostContext                { return proto.HostContext{} }
 
 // fullFakeSessions adapts fakeChannelSessions to the full session.Service
 // interface by embedding it; only the channelSessionStore subset is

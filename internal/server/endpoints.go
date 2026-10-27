@@ -113,6 +113,28 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 			Fails(400, 404, 413).
 			Handle(c.handlePostWorkspaceTheme),
 
+		apigen.Get("/v1/workspaces/{id}/host-context").
+			Summary("Get host context").
+			Description("Returns what the host application (e.g. an editor "+
+				"running Crush) has in view; empty when none is set.").
+			Tags("workspaces").
+			PathParam("id", "Workspace ID").
+			Responds(proto.HostContext{}).
+			Fails(404).
+			Handle(c.handleGetWorkspaceHostContext),
+
+		apigen.Post("/v1/workspaces/{id}/host-context").
+			Summary("Set host context").
+			Description("Records what the host application has in view: its "+
+				"open files and the file and line the user is on. The agent "+
+				"gets it with each prompt, and file completions list the open "+
+				"files first. An empty body clears it.").
+			Tags("workspaces").
+			PathParam("id", "Workspace ID").
+			Accepts(proto.HostContext{}).
+			Fails(400, 404).
+			Handle(c.handlePostWorkspaceHostContext),
+
 		apigen.Get("/v1/workspaces/{id}/config").
 			Summary("Get workspace config").
 			Description("Returns the resolved workspace configuration (config.Config).").

@@ -59,6 +59,16 @@ type CurrentSession struct {
 	SessionID string `json:"session_id"`
 }
 
+// HostContext is what the application hosting Crush, such as an editor, has
+// in view: the files it has open, and the file and line the user is on. The
+// agent gets it with each prompt, so that "here" or "this file" means what
+// the user sees. The zero HostContext is none.
+type HostContext struct {
+	OpenFiles  []string `json:"open_files,omitempty"`
+	ActiveFile string   `json:"active_file,omitempty"`
+	Line       int      `json:"line,omitempty"` // 1-based line of the cursor in ActiveFile
+}
+
 // RunComplete is the authoritative end-of-run signal for a session,
 // emitted exactly once per top-level agent turn after all message
 // updates for the turn have flushed. Clients that need a reliable

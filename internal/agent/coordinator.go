@@ -40,6 +40,7 @@ import (
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	openaioauth "github.com/charmbracelet/crush/internal/oauth/openai"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
@@ -143,6 +144,10 @@ type Coordinator interface {
 	Model() Model
 	UpdateModels(ctx context.Context) error
 	GenerateTitle(ctx context.Context, sessionID, prompt string)
+	// SetHostContext records what the host application has in view;
+	// each run from then on tells the model about it.
+	SetHostContext(hc proto.HostContext)
+	HostContext() proto.HostContext
 }
 
 type coordinator struct {
@@ -177,6 +182,8 @@ type coordinator struct {
 	skillTracker *skills.Tracker
 
 	readyWg errgroup.Group
+
+	hostContext csync.Value[proto.HostContext]
 }
 
 // CoordinatorOptions holds the dependencies for NewCoordinator. Using a
@@ -400,6 +407,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 			RunID:             runID,
 			Channel:           channel,
 			Prompt:            prompt,
+			HostContext:       c.hostContext.Get(),
 			HiddenUserMessage: message.HiddenUserMessage(ctx),
 			Attachments:       attachments,
 			MaxOutputTokens:   maxTokens,
@@ -1412,6 +1420,10 @@ func (c *coordinator) IsSessionBusy(sessionID string) bool {
 func (c *coordinator) ListSettledMessages(ctx context.Context, sessionID string) ([]message.Message, error) {
 	return c.currentAgent().ListSettledMessages(ctx, sessionID)
 }
+
+func (c *coordinator) SetHostContext(hc proto.HostContext) { c.hostContext.Set(hc) }
+
+func (c *coordinator) HostContext() proto.HostContext { return c.hostContext.Get() }
 
 func (c *coordinator) Model() Model {
 	return c.currentAgent().Model()

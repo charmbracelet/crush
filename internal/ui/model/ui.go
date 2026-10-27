@@ -3436,7 +3436,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 						m.completionsStartIndex = curIdx
 						m.completionsPositionStart = m.completionsPosition()
 						depth, limit := m.com.Config().Options.TUI.Completions.Limits()
-						cmds = append(cmds, m.completions.Open(depth, limit))
+						cmds = append(cmds, m.completions.Open(depth, limit, hostOpenFiles(m.com.Workspace)))
 					}
 				}
 

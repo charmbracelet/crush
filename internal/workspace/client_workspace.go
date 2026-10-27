@@ -418,6 +418,12 @@ func (w *ClientWorkspace) PermissionSetSkipRequests(skip bool) {
 	_ = w.client.SetPermissionsSkipRequests(context.Background(), w.workspaceID(), skip)
 }
 
+// -- Host context --
+
+func (w *ClientWorkspace) HostContext(ctx context.Context) (proto.HostContext, error) {
+	return w.client.GetHostContext(ctx, w.workspaceID())
+}
+
 // -- Questions --
 
 // QuestionAnswer submits answers for a question via the client SDK.

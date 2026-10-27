@@ -816,6 +816,24 @@ func (c *Client) GetHostTheme(ctx context.Context, id string) (*proto.HostThemeS
 	return &st, nil
 }
 
+// GetHostContext retrieves what the host application has in view for a
+// workspace.
+func (c *Client) GetHostContext(ctx context.Context, id string) (proto.HostContext, error) {
+	var hc proto.HostContext
+	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/host-context", id), nil, nil)
+	if err != nil {
+		return hc, fmt.Errorf("failed to get host context: %w", err)
+	}
+	defer rsp.Body.Close()
+	if err := checkStatus(rsp); err != nil {
+		return hc, fmt.Errorf("failed to get host context: %w", err)
+	}
+	if err := json.NewDecoder(rsp.Body).Decode(&hc); err != nil {
+		return hc, fmt.Errorf("failed to decode host context: %w", err)
+	}
+	return hc, nil
+}
+
 // GetConfig retrieves the workspace-specific configuration.
 func (c *Client) GetConfig(ctx context.Context, id string) (*config.Config, error) {
 	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/config", id), nil, nil)

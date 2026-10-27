@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/charmbracelet/crush/internal/backend"
@@ -127,6 +128,31 @@ func (c *controllerV1) handlePostWorkspaceCurrentSession(w http.ResponseWriter, 
 	if err := c.backend.SetCurrentSession(r.Context(), id, clientID, req.SessionID); err != nil {
 		c.handleError(w, r, err)
 		return
+	}
+}
+
+// handleGetWorkspaceHostContext returns what the host application has in
+// view.
+func (c *controllerV1) handleGetWorkspaceHostContext(w http.ResponseWriter, r *http.Request) {
+	hc, err := c.backend.GetHostContext(r.PathValue("id"))
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	jsonEncode(w, hc)
+}
+
+// handlePostWorkspaceHostContext records what the host application has in
+// view.
+func (c *controllerV1) handlePostWorkspaceHostContext(w http.ResponseWriter, r *http.Request) {
+	var hc proto.HostContext
+	if err := json.NewDecoder(r.Body).Decode(&hc); err != nil && !errors.Is(err, io.EOF) {
+		c.server.logError(r, "Failed to decode request", "error", err)
+		jsonError(w, http.StatusBadRequest, "failed to decode request")
+		return
+	}
+	if err := c.backend.SetHostContext(r.PathValue("id"), hc); err != nil {
+		c.handleError(w, r, err)
 	}
 }
 

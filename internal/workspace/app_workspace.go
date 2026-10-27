@@ -284,6 +284,15 @@ func (w *AppWorkspace) PermissionSetSkipRequests(skip bool) {
 	w.app.Permissions.SetSkipRequests(skip)
 }
 
+// -- Host context --
+
+func (w *AppWorkspace) HostContext(_ context.Context) (proto.HostContext, error) {
+	if w.app.AgentCoordinator == nil {
+		return proto.HostContext{}, nil
+	}
+	return w.app.AgentCoordinator.HostContext(), nil
+}
+
 // -- Questions --
 
 func (w *AppWorkspace) QuestionAnswer(responses []question.Answer) bool {

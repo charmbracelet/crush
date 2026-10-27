@@ -8,12 +8,14 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"charm.land/catwalk/v3/pkg/catwalk"
 	"charm.land/fantasy"
 	"golang.org/x/sync/errgroup"
 
@@ -356,14 +358,26 @@ func (c *coordinator) resolveModelOverride(params AgentDispatchParams, parentMod
 }
 
 // validateModelOverride checks a resolved override against the live config.
+// Only a provider with a working credential that is not disabled, and only a
+// model that credential can serve, may run a sub-agent: the same set the
+// dispatch tool's description lists.
 func (c *coordinator) validateModelOverride(sel config.SelectedModel, level string, think bool) string {
 	cfg := c.cfg.Config()
-	if _, ok := cfg.Providers.Get(sel.Provider); !ok {
-		return fmt.Sprintf("provider %q is not configured", sel.Provider)
+	providers := usableProviders(cfg)
+	idx := slices.IndexFunc(providers, func(p config.ProviderConfig) bool {
+		return p.ID == sel.Provider
+	})
+	if idx < 0 {
+		ids := make([]string, 0, len(providers))
+		for _, p := range providers {
+			ids = append(ids, p.ID)
+		}
+		return fmt.Sprintf("provider %q is not available; use one of: %s", sel.Provider, strings.Join(ids, ", "))
 	}
-	model := cfg.GetModel(sel.Provider, sel.Model)
+	models := providers[idx].UsableModels()
+	model := findModel(models, sel.Model)
 	if model == nil {
-		return fmt.Sprintf("model %q is not available from provider %q", sel.Model, sel.Provider)
+		return fmt.Sprintf("model %q is not available from provider %q; use one of: %s", sel.Model, sel.Provider, modelIDList(models))
 	}
 	if level != "" {
 		if err := cfg.ValidateReasoningEffort(sel.Provider, sel.Model, level); err != nil {
@@ -374,6 +388,72 @@ func (c *coordinator) validateModelOverride(sel config.SelectedModel, level stri
 		return fmt.Sprintf("model %q does not support thinking", sel.Model)
 	}
 	return ""
+}
+
+// catalogModelsPerProvider caps how many model IDs one provider contributes
+// to the dispatch tool's description, so a provider with a huge catalog
+// cannot crowd out the rest of the prompt. Models past the cap still work;
+// they are only not listed.
+const catalogModelsPerProvider = 25
+
+// usableProviders returns the providers a model override may run on: the
+// ones with a working credential that are not disabled, sorted by ID so the
+// tool description is identical from turn to turn and keeps the prompt
+// cache warm. Providers without a credential never make it into the config,
+// so being present and enabled is the whole check.
+func usableProviders(cfg *config.Config) []config.ProviderConfig {
+	providers := cfg.EnabledProviders()
+	slices.SortFunc(providers, func(a, b config.ProviderConfig) int {
+		return strings.Compare(a.ID, b.ID)
+	})
+	return providers
+}
+
+func findModel(models []catwalk.Model, id string) *catwalk.Model {
+	for i := range models {
+		if models[i].ID == id {
+			return &models[i]
+		}
+	}
+	return nil
+}
+
+// modelIDList joins up to catalogModelsPerProvider model IDs, noting how many
+// were left out.
+func modelIDList(models []catwalk.Model) string {
+	listed := models[:min(len(models), catalogModelsPerProvider)]
+	ids := make([]string, 0, len(listed))
+	for _, m := range listed {
+		ids = append(ids, m.ID)
+	}
+	list := strings.Join(ids, ", ")
+	if extra := len(models) - len(listed); extra > 0 {
+		list += fmt.Sprintf(", and %d more", extra)
+	}
+	return list
+}
+
+// dispatchModelCatalog lists the providers and models a dispatch can name in
+// its model override, for the end of the tool's description. It is empty
+// when nothing is usable, so the description never offers a choice that
+// would only be refused.
+func dispatchModelCatalog(cfg *config.Config, parent Model) string {
+	var b strings.Builder
+	for _, p := range usableProviders(cfg) {
+		models := p.UsableModels()
+		if len(models) == 0 {
+			continue
+		}
+		fmt.Fprintf(&b, "\n- `%s`: %s", p.ID, modelIDList(models))
+	}
+	if b.Len() == 0 {
+		return ""
+	}
+	header := "\n\nModels available to `model`, by `provider`"
+	if parent.Model != nil {
+		header += fmt.Sprintf(" (you are running on `%s` from `%s`)", parent.ModelCfg.Model, parent.ModelCfg.Provider)
+	}
+	return header + ":\n" + b.String()
 }
 
 // taskAgentConfig returns the task agent configuration for an access level,
@@ -438,7 +518,7 @@ func (c *coordinator) agentDispatchTool(ctx context.Context, parentAgentID strin
 
 	return fantasy.NewParallelAgentTool(
 		AgentDispatchToolName,
-		agentDispatchToolDescription,
+		strings.TrimSpace(agentDispatchToolDescription)+dispatchModelCatalog(c.cfg.Config(), c.parentModel(parentAgentID)),
 		func(ctx context.Context, params AgentDispatchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Prompt == "" {
 				return fantasy.NewTextErrorResponse("prompt is required"), nil

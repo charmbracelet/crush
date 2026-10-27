@@ -996,6 +996,22 @@ func (c *Config) IsModelAvailable(provider, model string) bool {
 	return false
 }
 
+// UsableModels returns the models this provider can serve with its current
+// credential. The OpenAI and xAI providers each hold exactly one credential:
+// signed in with ChatGPT or Grok, only the models the subscription grants
+// work, and the API catalog would only 404. Otherwise it is the catalog.
+func (p ProviderConfig) UsableModels() []catwalk.Model {
+	if p.OAuthToken != nil {
+		switch catwalk.InferenceProvider(p.ID) {
+		case catwalk.InferenceProviderOpenAI:
+			return p.ChatGPTModels
+		case catwalk.InferenceProviderXAI:
+			return p.GrokModels
+		}
+	}
+	return p.Models
+}
+
 func (c *Config) GetProviderForModel(modelType SelectedModelType) *ProviderConfig {
 	model, ok := c.Models[modelType]
 	if !ok {

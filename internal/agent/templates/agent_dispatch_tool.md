@@ -8,7 +8,7 @@ Use it to fan work out (a review, a search, an investigation across several scop
 
 `access` is `read` (default) for a sub-agent that inspects and runs things but cannot edit, or `write` for one that makes a change. Give parallel `write` sub-agents scopes that do not overlap.
 
-`model` runs this sub-agent on a different model than the session default, given as the model ID the provider API uses. Omit `provider` to use the parent agent's provider; `provider` requires `model`. `think` and `reasoning_level` pick that model's reasoning, and when omitted the model's defaults apply. Without any of these the sub-agent runs on the session's model. The override is remembered: `agent_send` follow-ups and later resumes of the sub-agent keep running on it.
+`model` runs this sub-agent on a different model than the session default. Name one from the list at the end of this description; it holds every provider you can use and the models each can serve. Omit `provider` to use the parent agent's provider; `provider` requires `model`. `think` and `reasoning_level` pick that model's reasoning, and when omitted the model's defaults apply. Without any of these the sub-agent runs on the session's model. The override is remembered: `agent_send` follow-ups and later resumes of the sub-agent keep running on it.
 
 The prompt is all the sub-agent sees. It cannot see this conversation or other sub-agents. Say what to examine, what to do, and what shape the answer should take.
 

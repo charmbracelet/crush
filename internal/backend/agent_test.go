@@ -65,6 +65,7 @@ func (c *blockingCoordinator) UpdateModels(context.Context) error               
 func (c *blockingCoordinator) GenerateTitle(context.Context, string, string)     {}
 func (c *blockingCoordinator) SetHostContext(proto.HostContext)                  {}
 func (c *blockingCoordinator) HostContext() proto.HostContext                    { return proto.HostContext{} }
+
 func (c *blockingCoordinator) SetMainAgent(agentName string) error {
 	c.lastMainAgentSet.Store(agentName)
 	return c.setMainAgentErr

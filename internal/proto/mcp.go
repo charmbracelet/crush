@@ -147,6 +147,13 @@ type MCPClientInfo struct {
 	Channel bool `json:"channel,omitempty"`
 }
 
+// MCPTool is a tool an MCP server offers.
+type MCPTool struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	InputSchema any    `json:"input_schema,omitempty"`
+}
+
 type MCPPromptArgument struct {
 	ID          string `json:"id"`
 	Title       string `json:"title"`

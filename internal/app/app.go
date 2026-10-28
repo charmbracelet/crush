@@ -175,6 +175,10 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	if err != nil {
 		slog.Warn("Failed to list disabled MCP overrides; starting them anyway", "error", err)
 	}
+	// MCP clients are process-global and a server hosts one app per
+	// workspace, so hold a reference that keeps another app's shutdown from
+	// closing them. The mcp.Close cleanup below releases it.
+	mcp.Acquire()
 	go mcp.Initialize(ctx, app.Permissions, store, forceStart, localDisabled)
 
 	// Start herdr integration when running inside a herdr pane.
@@ -201,6 +205,10 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		return app, nil
 	}
 	if err := app.InitCoderAgent(ctx); err != nil {
+		// A failed app is never shut down, so release its MCP reference.
+		closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = mcp.Close(closeCtx)
+		cancel()
 		return nil, fmt.Errorf("failed to initialize coder agent: %w", err)
 	}
 	go app.refreshDiscoveredModels(ctx, app.AgentCoordinator)

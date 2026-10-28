@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/lock"
@@ -52,6 +53,9 @@ var dialSocket = func(network, address string) (net.Conn, error) {
 // was removed prior to binding so callers can log it. The operation
 // is idempotent: removing an absent file is a no-op, and a live
 // socket is never removed.
+//
+// Closing a returned unix listener removes the socket file only while
+// the path still refers to the socket it bound; see [unixListener].
 func listen(network, address string) (net.Listener, bool, error) {
 	var removedStale bool
 	if network == "unix" && address != "" {
@@ -99,5 +103,40 @@ func listen(network, address string) (net.Listener, bool, error) {
 			return nil, removedStale, err
 		}
 	}
+	if ul, ok := ln.(*net.UnixListener); ok {
+		ul.SetUnlinkOnClose(false)
+		l := &unixListener{Listener: ul, path: address}
+		if fi, err := os.Stat(address); err == nil {
+			l.bound = fi
+		}
+		return l, removedStale, nil
+	}
 	return ln, removedStale, nil
+}
+
+// unixListener removes its socket file on Close only while the path
+// still refers to the socket it bound. Go's own unlink on close removes
+// whatever is at the path by then, which can be a replacement server's
+// socket: a client that gives up waiting for this server to exit removes
+// the path and starts a new server on it.
+type unixListener struct {
+	net.Listener
+	path       string
+	bound      os.FileInfo
+	unlinkOnce sync.Once
+}
+
+// Close removes the socket file if it is still the one this listener
+// bound, then closes the listener. The check runs once, while the socket
+// is still open, so its inode cannot have been reused by another file.
+func (l *unixListener) Close() error {
+	l.unlinkOnce.Do(func() {
+		if l.bound == nil {
+			return
+		}
+		if fi, err := os.Stat(l.path); err == nil && os.SameFile(fi, l.bound) {
+			_ = os.Remove(l.path)
+		}
+	})
+	return l.Listener.Close()
 }

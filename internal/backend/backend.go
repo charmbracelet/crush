@@ -208,6 +208,12 @@ type Workspace struct {
 	closing bool
 	runWG   sync.WaitGroup
 
+	// agentMu guards the embedded App.AgentCoordinator once the workspace
+	// is published. Every client of the workspace shares that coordinator,
+	// so it is only created while missing ([Workspace.initAgent]) and never
+	// replaced; readers take it through [Workspace.Coordinator].
+	agentMu sync.RWMutex
+
 	// clientsMu guards clients. It is held only briefly (no IO).
 	clientsMu sync.Mutex
 	// clients tracks each client's claim on this workspace. Refcount
@@ -273,8 +279,8 @@ func (w *Workspace) Shutdown() {
 	if w.cancel != nil {
 		w.cancel()
 	}
-	if w.App != nil && w.AgentCoordinator != nil {
-		w.AgentCoordinator.CancelAll()
+	if coord := w.Coordinator(); coord != nil {
+		coord.CancelAll()
 	}
 	w.runWG.Wait()
 	if w.App != nil {

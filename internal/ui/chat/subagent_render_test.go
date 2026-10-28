@@ -21,7 +21,7 @@ func renderPlain(t *testing.T, item MessageItem) []string {
 func TestSubagentReportAlignsWithHeader(t *testing.T) {
 	t.Parallel()
 	sty := styles.CharmtonePantera()
-	item := NewSubAgentReportItem(&sty, "date-impl", "hyper/glm-5", "All done.", false)
+	item := NewSubAgentReportItem(&sty, agent.SubagentName("date-impl"), "hyper/glm-5", "All done.", false)
 	lines := renderPlain(t, item)
 
 	name := agent.SubagentName("date-impl")

@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"cmp"
 	"context"
 	_ "embed"
 	"errors"
@@ -61,19 +60,14 @@ type AgentSendResponseMetadata struct {
 	Reopened bool   `json:"reopened,omitempty"`
 }
 
-// AgentDispatchResponseMetadata records the model override a started
-// dispatch actually resolved, in the tool result. The transcript replays it
-// on restart, so rehydration runs on the provider the dispatch used rather
-// than re-deriving it from whatever model the session has by then.
-// ReasoningOnly marks a dispatch that gave reasoning settings but no model:
-// it rides the subagent's default selection, so rehydration must not treat
-// the recorded model as an explicit one and rebuild a bare selection.
+// AgentDispatchResponseMetadata records a started dispatch's override as the
+// call asked for it, with the provider resolved, so a resume after restart
+// runs on the same provider whatever the session's model is by then.
 type AgentDispatchResponseMetadata struct {
-	Label         string `json:"label"`
-	Model         string `json:"model,omitempty"`
-	Provider      string `json:"provider,omitempty"`
-	Reasoning     string `json:"reasoning,omitempty"`
-	ReasoningOnly bool   `json:"reasoning_only,omitempty"`
+	Label     string `json:"label"`
+	Model     string `json:"model,omitempty"`
+	Provider  string `json:"provider,omitempty"`
+	Reasoning string `json:"reasoning,omitempty"`
 	// RunModel is provider/model for display; rehydration ignores it.
 	RunModel string `json:"run_model,omitempty"`
 }
@@ -98,18 +92,28 @@ const (
 	dispatchStopped
 )
 
-func (s dispatchState) String() string {
+// SubagentState is a subagent's state as agent_status reports it.
+type SubagentState string
+
+const (
+	SubagentRunning     SubagentState = "running"
+	SubagentStopping    SubagentState = "stopping"
+	SubagentFinished    SubagentState = "finished"
+	SubagentFailed      SubagentState = "failed"
+	SubagentStopped     SubagentState = "stopped"
+	SubagentInterrupted SubagentState = "interrupted"
+)
+
+func (s dispatchState) reported() SubagentState {
 	switch s {
 	case dispatchRunning:
-		return "running"
-	case dispatchFinished:
-		return "finished"
+		return SubagentRunning
 	case dispatchFailed:
-		return "failed"
+		return SubagentFailed
 	case dispatchStopped:
-		return "stopped"
+		return SubagentStopped
 	}
-	return "unknown"
+	return SubagentFinished
 }
 
 // dispatchedAgent tracks one detached subagent across all of its runs: the
@@ -386,11 +390,10 @@ func (c *coordinator) agentDispatchTool(ctx context.Context, parentAgentID strin
 				RunModel: modelDisplayName(agent.Model()),
 			}
 			if hasOverride {
-				meta.Model = sel.Model
-				meta.Provider = sel.Provider
-				// What the call asked for, not the model's settings at the time.
 				meta.Reasoning = strings.TrimSpace(params.Reasoning)
-				meta.ReasoningOnly = strings.TrimSpace(params.Model) == ""
+				if strings.TrimSpace(params.Model) != "" {
+					meta.Model, meta.Provider = sel.Model, sel.Provider
+				}
 			}
 			return fantasy.WithResponseMetadata(
 				fantasy.NewTextResponse(fmt.Sprintf("Started subagent %q.", label)),
@@ -672,24 +675,20 @@ func (c *coordinator) runningDispatchLabels(parentSessionID string) string {
 	return strings.Join(labels, ", ")
 }
 
-// dispatchRunModel recovers the model and provider a subagent actually ran
-// on from its session's transcript. Assistant messages record both per turn,
-// so this works even when the dispatch result that recorded the resolved
-// override was never written — a crash between the dispatch starting and its
-// result landing. A read failure is returned rather than read as "no run
-// model": mistaking it for a child that never ran would let rehydration
-// fall back to the wrong provider.
-func (c *coordinator) dispatchRunModel(ctx context.Context, sessionID string) (model, provider string, err error) {
+// dispatchRunProvider reads the provider a subagent ran on from its own
+// transcript, for a dispatch whose result never landed. A read failure is an
+// error, not "never ran", so a resume cannot pick the wrong provider.
+func (c *coordinator) dispatchRunProvider(ctx context.Context, sessionID string) (string, error) {
 	msgs, err := c.messages.List(ctx, sessionID)
 	if err != nil {
-		return "", "", err
+		return "", err
 	}
 	for _, msg := range msgs {
-		if msg.Role == message.Assistant && msg.Model != "" && msg.Provider != "" {
-			return msg.Model, msg.Provider, nil
+		if msg.Role == message.Assistant && msg.Provider != "" {
+			return msg.Provider, nil
 		}
 	}
-	return "", "", nil
+	return "", nil
 }
 
 // rehydrateDispatch rebuilds a subagent's registry entry from what is on
@@ -726,38 +725,21 @@ func (c *coordinator) rehydrateDispatch(ctx context.Context, parentSessionID, la
 		return nil, fmt.Errorf("unknown access %q", record.Access)
 	}
 
-	// A dispatch that overrode the model is rehydrated on the same override,
-	// so a follow-up keeps running on the model the dispatch asked for. The
-	// dispatch's result records the resolved override, so the provider does
-	// not depend on whatever model the session has now. When that result
-	// never landed — a crash between the dispatch starting and its result
-	// being written — the missing pieces are recovered from the child
-	// session's transcript before falling back to the parent the session
-	// has now. Either way the override is re-resolved against the live
-	// config: if it no longer serves, the subagent cannot be resumed
-	// rather than silently dropping back to the session default.
-	if record.Model != "" || record.Provider != "" || record.Reasoning != "" {
-		params := AgentDispatchParams{Reasoning: record.Reasoning}
+	// An override resumes as it was asked for, re-resolved against the live
+	// config; if it no longer serves, the subagent is not quietly moved to
+	// the session default.
+	if record.Model != "" || record.Reasoning != "" {
+		params := AgentDispatchParams{Model: record.Model, Provider: record.Provider, Reasoning: record.Reasoning}
 		parent := Model{}
-		if record.ReasoningOnly {
-			// Reasoning settings without a model ride the subagent's default
-			// selection, keeping its configured settings. Feeding the recorded
-			// model back in as an explicit one would rebuild a bare selection
-			// and drop them, so they ride the default again.
-		} else {
-			params.Model = record.Model
-			params.Provider = record.Provider
-			if params.Model == "" || params.Provider == "" {
-				sessionID := c.sessions.CreateAgentToolSessionID(record.MessageID, record.CallID)
-				runModel, runProvider, err := c.dispatchRunModel(ctx, sessionID)
-				if err != nil {
-					return nil, fmt.Errorf("subagent %q cannot be resumed: reading its transcript failed: %w", label, err)
-				}
-				params.Model = cmp.Or(params.Model, runModel)
-				params.Provider = cmp.Or(params.Provider, runProvider)
-				if params.Model == "" || params.Provider == "" {
-					parent = c.parentModel("")
-				}
+		if params.Model != "" && params.Provider == "" {
+			// The result never landed: use the provider it ran on, else the session's.
+			provider, err := c.dispatchRunProvider(ctx, c.sessions.CreateAgentToolSessionID(record.MessageID, record.CallID))
+			if err != nil {
+				return nil, fmt.Errorf("subagent %q cannot be resumed: reading its transcript failed: %w", label, err)
+			}
+			params.Provider = provider
+			if provider == "" {
+				parent = c.parentModel("")
 			}
 		}
 		overrideAgent, _, _, refusal := c.overrideDispatchAgent(ctx, record.Access, params, parent)

@@ -15,3 +15,9 @@ import (
 func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 	return fsext.AtomicWriteFile(path, data, perm)
 }
+
+// AtomicWriteFile is atomicWriteFile for state files other packages keep
+// next to the global config, such as the projects list.
+func AtomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	return atomicWriteFile(path, data, perm)
+}

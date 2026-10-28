@@ -13,10 +13,12 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/oauth"
+	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
@@ -967,4 +969,44 @@ func TestCreateSession_Sessionless(t *testing.T) {
 		require.Contains(t, err.Error(), "session not found")
 		require.GreaterOrEqual(t, listenTotal.Load(), int64(1), "expected the listen stream attempt")
 	})
+}
+
+// TestClose_LastReferenceClosesSessions pins the reference counting that
+// lets a server host one app per workspace: Close leaves the shared sessions
+// open while another app still holds a reference, closes them when the last
+// reference is released, and never shuts the event broker down, since an
+// app created later in the process still needs it.
+//
+// It assumes no other test in this package holds a reference (refs starts
+// at 0), so its last Close closes every session left in the global map.
+func TestClose_LastReferenceClosesSessions(t *testing.T) {
+	const name = "close-refcount"
+	t.Cleanup(func() { sessions.Del(name) })
+
+	sess, sessCtx := liveSession(t, "do_thing")
+	sessions.Set(name, sess)
+	events := SubscribeEvents(t.Context())
+
+	Acquire()
+	Acquire()
+
+	require.NoError(t, Close(t.Context()))
+	require.NoError(t, sessCtx.Err(), "Close must leave the sessions open while another reference is held")
+
+	require.NoError(t, Close(t.Context()))
+	require.ErrorIs(t, sessCtx.Err(), context.Canceled, "the last Close must close the sessions")
+
+	broker.Publish(pubsub.UpdatedEvent, Event{Type: EventStateChanged, Name: name})
+	timeout := time.After(5 * time.Second)
+	for {
+		select {
+		case ev, ok := <-events:
+			require.True(t, ok, "Close must not shut the event broker down")
+			if ev.Payload.Name == name {
+				return
+			}
+		case <-timeout:
+			t.Fatal("timed out waiting for an event published after Close")
+		}
+	}
 }

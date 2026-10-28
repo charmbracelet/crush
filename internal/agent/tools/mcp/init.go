@@ -87,6 +87,12 @@ var (
 	initStarted bool
 	initArmedAt time.Time
 
+	// refs counts the apps sharing the process-global MCP clients (see
+	// Acquire). A server hosts one app per workspace, so only the Close
+	// that releases the last reference may close the sessions.
+	refsMu sync.Mutex
+	refs   int
+
 	// renewMus serializes lazy session renewals per server so concurrent tool
 	// calls cannot race to rebuild the same session.
 	renewMusMu sync.Mutex
@@ -300,10 +306,38 @@ func GetState(name string) (ClientInfo, bool) {
 	return states.Get(name)
 }
 
-// Close closes all MCP clients. This should be called during application shutdown.
+// Acquire takes a reference on the process-global MCP clients for an app
+// that is about to start them. Pair every Acquire with one Close.
+func Acquire() {
+	refsMu.Lock()
+	defer refsMu.Unlock()
+	refs++
+}
+
+// Close releases a reference taken by Acquire. Every app in the process
+// shares the MCP clients, so only the call that releases the last reference
+// closes them. The event broker is never shut down: subscriptions end with
+// their contexts, and an app created later in the process still needs it.
+//
+// A Close that is not the last leaves the releasing app's sessions, OAuth
+// handlers and tools in place until another app's Initialize replaces them
+// (connectAndRegister closes the session it replaces) or the last app exits.
 func Close(ctx context.Context) error {
+	refsMu.Lock()
+	if refs > 0 {
+		refs--
+	}
+	if refs > 0 {
+		refsMu.Unlock()
+		return nil
+	}
+	// Snapshot under the lock so nothing started by an app that acquires
+	// after this point is closed here.
+	open, handlers := sessions.Copy(), authURLs.Copy()
+	refsMu.Unlock()
+
 	var wg sync.WaitGroup
-	for name, session := range sessions.Seq2() {
+	for name, session := range open {
 		wg.Go(func() {
 			done := make(chan error, 1)
 			go func() {
@@ -323,10 +357,9 @@ func Close(ctx context.Context) error {
 	}
 	wg.Wait()
 	// Clean up any remaining OAuth handlers.
-	for _, h := range authURLs.Seq2() {
+	for _, h := range handlers {
 		h.Close()
 	}
-	broker.Shutdown()
 	return nil
 }
 
@@ -680,7 +713,13 @@ func connectAndRegister(ctx context.Context, cfg *config.ConfigStore, name strin
 	}
 
 	updatePrompts(name, prompts)
-	sessions.Set(name, session)
+	// Close the session this one replaces. Apps share the sessions and only
+	// the last app's Close walks the map, so a session dropped from it here
+	// would never be closed. Close it off this path so a slow child cannot
+	// hold up Initialize.
+	if old, ok := sessions.Swap(name, session); ok && old != session {
+		go closeSession(name, old)
+	}
 
 	updateState(name, StateConnected, nil, session, Counts{
 		Tools:   toolCount,

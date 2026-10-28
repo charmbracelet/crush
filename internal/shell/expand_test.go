@@ -215,6 +215,17 @@ func TestExpandValue_RequiredOptIn(t *testing.T) {
 	require.Equal(t, "ok", got)
 }
 
+// TestExpandValueInDir pins that $(...) runs in the given directory rather
+// than the process working directory.
+func TestExpandValueInDir(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	got, err := ExpandValueInDir(t.Context(), "$(pwd)", dir, nil)
+	require.NoError(t, err)
+	require.Equal(t, dir, got)
+}
+
 func TestSanitizeStderr(t *testing.T) {
 	t.Parallel()
 

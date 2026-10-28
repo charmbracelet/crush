@@ -59,6 +59,13 @@ var NoUnset atomic.Bool
 //     prefix of its stderr. Callers that surface the error to users
 //     should additionally scrub it for the original template text.
 func ExpandValue(ctx context.Context, value string, env []string) (string, error) {
+	return ExpandValueInDir(ctx, value, "", env)
+}
+
+// ExpandValueInDir is ExpandValue with $(...) command substitution run in
+// dir instead of the process working directory. An empty dir means the
+// process working directory.
+func ExpandValueInDir(ctx context.Context, value, dir string, env []string) (string, error) {
 	// Fast path: a value with no shell metacharacters expands to itself.
 	// Parsing and running it through the interpreter would produce the
 	// same string at significant cost. Most config values (literal API
@@ -84,14 +91,15 @@ func ExpandValue(ctx context.Context, value string, env []string) (string, error
 	// not in env as unset.
 	//
 	// The working directory is only needed for $(...) command
-	// substitution, so we resolve it lazily on first use. Values that
-	// only reference variables or use quoting (the common case) avoid
-	// the os.Getwd() syscall entirely.
+	// substitution, so without a dir we resolve the process's lazily on
+	// first use. Values that only reference variables or use quoting (the
+	// common case) avoid the os.Getwd() syscall entirely.
 	s := &Shell{
 		env:    env,
+		cwd:    dir,
 		logger: noopLogger{},
 	}
-	cwdResolved := false
+	cwdResolved := dir != ""
 
 	strict := NoUnset.Load()
 

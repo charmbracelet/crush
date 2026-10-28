@@ -510,3 +510,71 @@ func TestMCPConfig_IdentityResolver(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, m.URL, u)
 }
+
+// TestLoad_CommandSubstitutionRunsInWorkingDir pins that $(...) in config
+// values runs in the store's working directory rather than the process's.
+// The server hosts every workspace in one process whose working directory
+// belongs to none of them, so a project's "$(cat key.txt)" must still read
+// that project's key.txt.
+func TestLoad_CommandSubstitutionRunsInWorkingDir(t *testing.T) {
+	// Not parallel: sets environment variables, resets package-level
+	// provider state and changes the process working directory.
+	workDir, dataDir := isolateLoadEnv(t)
+	resetProviderState()
+	t.Cleanup(resetProviderState)
+
+	elsewhere := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(workDir, "key.txt"), []byte("workspace-key\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(elsewhere, "key.txt"), []byte("process-cwd-key\n"), 0o600))
+	t.Chdir(elsewhere)
+
+	require.NoError(t, os.WriteFile(filepath.Join(workDir, "crush.json"), []byte(`{
+		"options": {"disable_default_providers": true},
+		"providers": {
+			"local": {
+				"base_url": "http://127.0.0.1:1/v1",
+				"api_key": "$(cat key.txt)",
+				"models": [{"id": "m", "name": "M"}]
+			}
+		},
+		"models": {
+			"large": {"provider": "local", "model": "m"},
+			"small": {"provider": "local", "model": "m"}
+		}
+	}`), 0o600))
+
+	store, err := Load(t.Context(), workDir, dataDir, false)
+	require.NoError(t, err)
+
+	requireWorkspaceKey := func() {
+		t.Helper()
+		pc, ok := store.Config().Providers.Get("local")
+		require.True(t, ok)
+		key, err := store.Resolve(pc.APIKey)
+		require.NoError(t, err)
+		require.Equal(t, "workspace-key", key)
+	}
+	requireWorkspaceKey()
+
+	// A reload builds a new resolver, which must keep the working
+	// directory too.
+	require.NoError(t, store.ReloadFromDisk(t.Context()))
+	requireWorkspaceKey()
+}
+
+// TestShellVariableResolver_MissingWorkingDir pins that a working directory
+// that does not exist leaves $(...) in the process working directory rather
+// than failing it, since a server resolves its own config in
+// GlobalWorkspaceDir, which may not have been created yet.
+func TestShellVariableResolver_MissingWorkingDir(t *testing.T) {
+	t.Parallel()
+
+	wd, err := os.Getwd()
+	require.NoError(t, err)
+	missing := filepath.Join(t.TempDir(), "missing")
+
+	r := NewShellVariableResolver(env.NewFromMap(nil), WithWorkingDir(missing))
+	got, err := r.ResolveValue("$(pwd)")
+	require.NoError(t, err)
+	require.Equal(t, wd, got)
+}

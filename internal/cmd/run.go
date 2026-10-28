@@ -7,7 +7,6 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"os/signal"
 	"strings"
 	"time"
 
@@ -77,9 +76,9 @@ crush run --continue "Follow up on your last response"
 			useLast, _         = cmd.Flags().GetBool("continue")
 		)
 
-		// Cancel on SIGINT or SIGTERM.
-		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, os.Kill)
-		defer cancel()
+		// Stop on Ctrl+C, SIGTERM and SIGHUP: Execute cancels the command's
+		// context on each of them (see terminationSignals).
+		ctx := cmd.Context()
 
 		prompt := strings.Join(args, " ")
 

@@ -1025,6 +1025,77 @@ func TestClientWorkspace_ShutdownFallsBackForLegacyServer(t *testing.T) {
 	require.Equal(t, []string{"ws-1"}, deleted)
 }
 
+// TestClientWorkspace_ShutdownIsBounded checks quitting cannot hang on a
+// server that accepts the goodbye and never answers it, such as one stopped
+// in a debugger or suspended with Ctrl+Z. The client SDK sets no request
+// timeout of its own, and by the time Shutdown runs the TUI is gone and the
+// root signal handler swallows Ctrl+C, so nothing else can end the wait.
+func TestClientWorkspace_ShutdownIsBounded(t *testing.T) {
+	// Shrink the bound so the test does not wait out the production window,
+	// keeping enough of it for the goodbye to reach the server on a loaded
+	// machine. Not parallel: other tests read the bound through Shutdown.
+	orig := shutdownRetireTimeout
+	shutdownRetireTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { shutdownRetireTimeout = orig })
+
+	for _, tc := range []struct {
+		name string
+		// wedged is the path of the goodbye request that never answers.
+		// Every other request gets a 404, which is how a server that
+		// predates client retirement answers the retire.
+		wedged string
+	}{
+		{name: "retire", wedged: "/v1/clients/"},
+		{name: "legacy server", wedged: "/v1/workspaces/ws-1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reached := make(chan struct{})
+			var once sync.Once
+			release := make(chan struct{})
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodDelete || !strings.HasPrefix(r.URL.Path, tc.wedged) {
+					http.NotFound(w, r)
+					return
+				}
+				once.Do(func() { close(reached) })
+				// Accept the request and never answer it.
+				select {
+				case <-r.Context().Done():
+				case <-release:
+				}
+			}))
+			// Unwedge the handler first: closing the server waits on it.
+			t.Cleanup(func() {
+				close(release)
+				srv.Close()
+			})
+
+			u, err := url.Parse(srv.URL)
+			require.NoError(t, err)
+			c, err := client.NewClient(t.TempDir(), "tcp", u.Host)
+			require.NoError(t, err)
+			ws := NewClientWorkspace(c, proto.Workspace{ID: "ws-1"})
+
+			done := make(chan struct{})
+			go func() {
+				ws.Shutdown()
+				close(done)
+			}()
+
+			select {
+			case <-reached:
+			case <-time.After(5 * time.Second):
+				t.Fatal("Shutdown never said goodbye to the server")
+			}
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("Shutdown blocked on an unresponsive server")
+			}
+		})
+	}
+}
+
 // TestClientWorkspace_AgentReadyErr_WorkspaceGone checks the status the
 // UI is given while recovery runs. A 404 from a live server used to print
 // "lost connection to the crush server: ... status code 404", which is

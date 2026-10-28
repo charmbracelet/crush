@@ -124,7 +124,7 @@ func (c *controllerV1) handlePostWorkspaceCurrentSession(w http.ResponseWriter, 
 		jsonError(w, http.StatusBadRequest, "failed to decode request")
 		return
 	}
-	if err := c.backend.SetCurrentSession(id, clientID, req.SessionID); err != nil {
+	if err := c.backend.SetCurrentSession(r.Context(), id, clientID, req.SessionID); err != nil {
 		c.handleError(w, r, err)
 		return
 	}
@@ -215,6 +215,9 @@ func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.R
 		case ev, ok := <-events:
 			if !ok {
 				return
+			}
+			if !c.deliverToClient(r.Context(), id, clientID, ev.Payload) {
+				continue
 			}
 			wrapped := wrapEvent(ev.Payload)
 			if wrapped == nil {

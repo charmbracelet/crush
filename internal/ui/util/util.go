@@ -72,7 +72,8 @@ type (
 		Msg  string
 		TTL  time.Duration
 	}
-	ClearStatusMsg struct{}
+	// ClearStatusMsg retires the status message with sequence Seq.
+	ClearStatusMsg struct{ Seq uint64 }
 )
 
 // IsEmpty checks if the [InfoMsg] is empty.

@@ -46,9 +46,31 @@ type CreatePermissionRequest struct {
 }
 
 type PermissionNotification struct {
+	SessionID  string `json:"session_id"`
 	ToolCallID string `json:"tool_call_id"`
 	Granted    bool   `json:"granted"`
 	Denied     bool   `json:"denied"`
+	// Cancelled is set when the request was abandoned before a decision
+	// (the turn was cancelled while the prompt was open).
+	Cancelled bool `json:"cancelled"`
+}
+
+// Outcome is how a permission prompt the user saw was resolved.
+type Outcome string
+
+const (
+	OutcomeGranted   Outcome = "granted"
+	OutcomeDenied    Outcome = "denied"
+	OutcomeCancelled Outcome = "cancelled"
+)
+
+// PromptObserver hears about every prompt the user is shown and how it
+// was resolved, in that order. Auto-approved calls show no prompt and
+// are not reported. Calls run off the requesting goroutine, so a slow
+// observer never delays the prompt or the tool.
+type PromptObserver interface {
+	PromptShown(ctx context.Context, req PermissionRequest)
+	PromptResolved(ctx context.Context, req PermissionRequest, outcome Outcome)
 }
 
 type PermissionRequest struct {
@@ -78,6 +100,11 @@ type Service interface {
 	// already been resolved or is unknown.
 	Deny(permission PermissionRequest) bool
 	Request(ctx context.Context, opts CreatePermissionRequest) (bool, error)
+	// ActiveRequest returns the request that is currently awaiting a
+	// decision, or false when no request is pending. A request is only
+	// reported while it can still be resolved; a request whose waiter
+	// was cancelled is not returned.
+	ActiveRequest() (PermissionRequest, bool)
 	AutoApproveSession(sessionID string)
 	SetSkipRequests(skip bool)
 	SkipRequests() bool
@@ -103,6 +130,7 @@ type permissionService struct {
 	autoApproveSessionsMu sync.RWMutex
 	skip                  atomic.Bool
 	allowedTools          []string
+	observer              PromptObserver
 
 	// used to make sure we only process one request at a time
 	requestMu       sync.Mutex
@@ -137,6 +165,7 @@ func (s *permissionService) resolve(permission PermissionRequest, granted, denie
 	}
 
 	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+		SessionID:  permission.SessionID,
 		ToolCallID: permission.ToolCallID,
 		Granted:    granted,
 		Denied:     denied,
@@ -195,6 +224,7 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	// and audit subscribers see the outcome.
 	if hookApproved(ctx, opts.ToolCallID) {
 		s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+			SessionID:  opts.SessionID,
 			ToolCallID: opts.ToolCallID,
 			Granted:    true,
 		})
@@ -206,6 +236,7 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 
 	// tell the UI that a permission was requested
 	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+		SessionID:  opts.SessionID,
 		ToolCallID: opts.ToolCallID,
 	})
 
@@ -215,6 +246,7 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 
 	if autoApprove {
 		s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+			SessionID:  opts.SessionID,
 			ToolCallID: opts.ToolCallID,
 			Granted:    true,
 		})
@@ -252,6 +284,7 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		Path:      permission.Path,
 	}); ok {
 		s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+			SessionID:  opts.SessionID,
 			ToolCallID: opts.ToolCallID,
 			Granted:    true,
 		})
@@ -268,13 +301,70 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 
 	// Publish the request
 	s.Publish(pubsub.CreatedEvent, permission)
+	resolved := s.observe(ctx, permission)
 
 	select {
 	case <-ctx.Done():
+		// The prompt is abandoned without a decision; tell subscribers
+		// so the request they saw is not left open.
+		if _, ok := s.pendingRequests.Take(permission.ID); ok {
+			s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+				SessionID:  opts.SessionID,
+				ToolCallID: opts.ToolCallID,
+				Cancelled:  true,
+			})
+			resolved(OutcomeCancelled)
+			return false, ctx.Err()
+		}
+		// A decision won the race; resolve always delivers it.
+		resolved(outcomeOf(<-respCh))
 		return false, ctx.Err()
 	case granted := <-respCh:
+		resolved(outcomeOf(granted))
 		return granted, nil
 	}
+}
+
+// observe reports the prompt to the observer and returns the function
+// that reports its outcome. Both run on one goroutine so the observer
+// always hears them in order, and outlive ctx so a cancelled turn still
+// reports the cancellation.
+func (s *permissionService) observe(ctx context.Context, req PermissionRequest) func(Outcome) {
+	if s.observer == nil {
+		return func(Outcome) {}
+	}
+	ctx = context.WithoutCancel(ctx)
+	outcome := make(chan Outcome, 1)
+	go func() {
+		s.observer.PromptShown(ctx, req)
+		s.observer.PromptResolved(ctx, req, <-outcome)
+	}()
+	return func(o Outcome) { outcome <- o }
+}
+
+func outcomeOf(granted bool) Outcome {
+	if granted {
+		return OutcomeGranted
+	}
+	return OutcomeDenied
+}
+
+// ActiveRequest returns the request that is currently awaiting a
+// decision. The active pointer can outlive the waiter that published
+// it (Request leaves it behind when its context is cancelled), so a
+// request is only reported while its ID is still registered in
+// pendingRequests, i.e. while Grant/Deny can actually resolve it.
+func (s *permissionService) ActiveRequest() (PermissionRequest, bool) {
+	s.activeRequestMu.Lock()
+	active := s.activeRequest
+	s.activeRequestMu.Unlock()
+	if active == nil {
+		return PermissionRequest{}, false
+	}
+	if _, ok := s.pendingRequests.Get(active.ID); !ok {
+		return PermissionRequest{}, false
+	}
+	return *active, true
 }
 
 func (s *permissionService) AutoApproveSession(sessionID string) {
@@ -295,7 +385,9 @@ func (s *permissionService) SkipRequests() bool {
 	return s.skip.Load()
 }
 
-func NewPermissionService(workingDir string, skip bool, allowedTools []string) Service {
+// NewPermissionService creates the permission service. observer may be
+// nil.
+func NewPermissionService(workingDir string, skip bool, allowedTools []string, observer PromptObserver) Service {
 	svc := &permissionService{
 		Broker:              pubsub.NewBroker[PermissionRequest](),
 		notificationBroker:  pubsub.NewBroker[PermissionNotification](),
@@ -304,6 +396,7 @@ func NewPermissionService(workingDir string, skip bool, allowedTools []string) S
 		autoApproveSessions: make(map[string]bool),
 		allowedTools:        allowedTools,
 		pendingRequests:     csync.NewMap[string, chan bool](),
+		observer:            observer,
 	}
 	svc.skip.Store(skip)
 	return svc

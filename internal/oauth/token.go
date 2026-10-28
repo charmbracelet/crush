@@ -1,9 +1,10 @@
 package oauth
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
-	"strings"
+	"net/http"
 	"time"
 )
 
@@ -89,10 +90,15 @@ func (e *TokenExchangeError) Error() string {
 	return fmt.Sprintf("token exchange failed: status %d body %q", e.StatusCode, e.Body)
 }
 
-// IsRefreshTokenRevoked reports whether the exchange failed because the
-// refresh token was revoked or invalidated by the provider. This indicates
-// that interactive re-authentication is required.
+// IsRefreshTokenRevoked reports whether the provider rejected the credential
+// itself, so only a new sign-in can help: a 401, or the OAuth invalid_grant
+// error (RFC 6749 section 5.2).
 func (e *TokenExchangeError) IsRefreshTokenRevoked() bool {
-	return strings.Contains(e.Body, "revoked") ||
-		strings.Contains(e.Body, "invalid_grant")
+	if e.StatusCode == http.StatusUnauthorized {
+		return true
+	}
+	var body struct {
+		Error string `json:"error"`
+	}
+	return json.Unmarshal([]byte(e.Body), &body) == nil && body.Error == "invalid_grant"
 }

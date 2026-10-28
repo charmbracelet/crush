@@ -25,6 +25,7 @@ import (
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/modelcontextprotocol/go-sdk/auth"
+	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"golang.org/x/oauth2"
 )
@@ -330,7 +331,11 @@ func Close(ctx context.Context) error {
 }
 
 // Initialize initializes MCP clients based on the provided configuration.
-func Initialize(ctx context.Context, permissions permission.Service, cfg *config.ConfigStore) {
+// forceStart lists config-disabled servers with a repository-scoped enabled
+// override; they are started even though their config entry is disabled.
+// localDisabled lists servers with a repository-scoped disabled override;
+// they are not started.
+func Initialize(ctx context.Context, permissions permission.Service, cfg *config.ConfigStore, forceStart, localDisabled []string) {
 	ArmInit()
 	slog.Info("Initializing MCP clients")
 	start := time.Now()
@@ -338,10 +343,18 @@ func Initialize(ctx context.Context, permissions permission.Service, cfg *config
 	var wg sync.WaitGroup
 	// Initialize states for all configured MCPs
 	for name, m := range cfg.Config().MCP {
-		if m.Disabled {
+		if slices.Contains(localDisabled, name) {
 			updateState(name, StateDisabled, nil, nil, Counts{})
-			slog.Debug("Skipping disabled MCP", "name", name)
+			slog.Debug("Skipping MCP disabled for this repository", "name", name)
 			continue
+		}
+		if m.Disabled {
+			if !slices.Contains(forceStart, name) {
+				updateState(name, StateDisabled, nil, nil, Counts{})
+				slog.Debug("Skipping disabled MCP", "name", name)
+				continue
+			}
+			slog.Info("Starting config-disabled MCP with repository enabled override", "name", name)
 		}
 
 		// Set initial starting state
@@ -427,6 +440,19 @@ func InitializeSingle(ctx context.Context, name string, cfg *config.ConfigStore)
 		updateState(name, StateDisabled, nil, nil, Counts{})
 		slog.Debug("Skipping disabled MCP", "name", name)
 		return nil
+	}
+
+	return initClient(ctx, cfg, name, m, currentGen(name), cfg.Resolver())
+}
+
+// InitializeSingleForced starts the named MCP client even when its config
+// entry is disabled. Used by the repository-scoped "Toggle MCPs" override.
+// The startup counterpart is the forceStart argument of Initialize, which
+// replays the persisted enabled overrides. Config files are not touched.
+func InitializeSingleForced(ctx context.Context, name string, cfg *config.ConfigStore) error {
+	m, exists := cfg.Config().MCP[name]
+	if !exists {
+		return fmt.Errorf("mcp '%s' not found in configuration", name)
 	}
 
 	return initClient(ctx, cfg, name, m, currentGen(name), cfg.Resolver())
@@ -667,6 +693,31 @@ func connectAndRegister(ctx context.Context, cfg *config.ConfigStore, name strin
 // persistOAuthToken saves the OAuth token from a session to the global
 // config so it survives restarts.
 
+// SetConfigDisabled persists the disabled flag of a single MCP server in
+// the given config scope and applies the change to the running client:
+// disabling tears the connection down, enabling starts it even if it was
+// disabled before. A repository-scoped override takes precedence, so when
+// localOverride is set only the config is written.
+func SetConfigDisabled(ctx context.Context, cfg *config.ConfigStore, scope config.Scope, name string, disabled, localOverride bool) error {
+	if err := cfg.SetMCPServerDisabledConfig(scope, name, disabled); err != nil {
+		return err
+	}
+	if localOverride {
+		return nil
+	}
+	return SetLocalDisabled(ctx, cfg, name, disabled)
+}
+
+// SetLocalDisabled applies a repository-scoped toggle to the running
+// client: disabling tears the connection down, enabling starts it even if
+// its config entry is disabled. Persisting the override is the caller's job.
+func SetLocalDisabled(ctx context.Context, cfg *config.ConfigStore, name string, disabled bool) error {
+	if disabled {
+		return DisableSingle(cfg, name)
+	}
+	return InitializeSingleForced(ctx, name, cfg)
+}
+
 // DisableSingle disables and closes a single MCP client by name.
 func DisableSingle(cfg *config.ConfigStore, name string) error {
 	// teardown bumps the generation, invalidating any in-flight connect, and
@@ -674,7 +725,7 @@ func DisableSingle(cfg *config.ConfigStore, name string) error {
 	// re-enable (even with an unchanged config) is seen as new and restarts.
 	teardown(name)
 	updateState(name, StateDisabled, nil, nil, Counts{})
-	slog.Info("Disabled mcp client", "name", name)
+	slog.Info("Disabled MCP client", "name", name)
 	return nil
 }
 
@@ -856,7 +907,13 @@ func getOrRenewClient(ctx context.Context, cfg *config.ConfigStore, name string)
 func pingSession(ctx context.Context, s *ClientSession, timeout time.Duration) error {
 	pingCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	return s.Ping(pingCtx, nil)
+	err := s.Ping(pingCtx, nil)
+	// MethodNotFound means the server answered; it just doesn't implement ping.
+	var wireErr *jsonrpc.Error
+	if errors.As(err, &wireErr) && wireErr.Code == jsonrpc.CodeMethodNotFound {
+		return nil
+	}
+	return err
 }
 
 // closeSession closes an MCP session, logging only unexpected errors. EOF,

@@ -186,9 +186,12 @@ func (w *ClientWorkspace) ParseAgentToolSessionID(sessionID string) (string, str
 }
 
 // SetCurrentSession reports the session this client is currently
-// viewing to the server. Empty sessionID clears the entry. Errors
-// are propagated to the caller; the TUI logs and ignores them since
-// the presence record is a hint, not correctness-critical state.
+// viewing to the server. Empty sessionID clears the entry. The report
+// scopes the client's event stream: permission and question prompts
+// are only delivered to clients viewing the session that raised them.
+// Errors are propagated to the caller; the TUI logs and ignores them
+// since the presence record is best-effort, not correctness-critical
+// state.
 func (w *ClientWorkspace) SetCurrentSession(ctx context.Context, sessionID string) error {
 	w.herdrClient.SetSessionID(sessionID)
 	w.mu.Lock()
@@ -233,9 +236,8 @@ func (w *ClientWorkspace) ListAllUserMessages(ctx context.Context) ([]message.Me
 // -- Agent --
 
 func (w *ClientWorkspace) AgentRun(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) error {
-	// The interactive TUI does not consume notify.RunComplete for
-	// completion detection (it observes message events directly),
-	// so passing an empty RunID is correct here: it skips the
+	// The interactive TUI matches notify.RunComplete by session, not
+	// RunID, so passing an empty RunID is correct here: it skips the
 	// correlator stamping path without functional consequences.
 	return w.client.SendMessage(ctx, w.workspaceID(), sessionID, "", "", prompt, attachments...)
 }
@@ -539,6 +541,13 @@ func (w *ClientWorkspace) WorkingDir() string {
 	return w.cached().Path
 }
 
+// GitBranch asks the server for the branch checked out in the workspace's
+// working directory. Callers keep this off the render path; the TUI polls it
+// on a ticker and renders from its own state.
+func (w *ClientWorkspace) GitBranch(ctx context.Context) (string, error) {
+	return w.client.GitBranch(ctx, w.workspaceID())
+}
+
 func (w *ClientWorkspace) Resolver() config.VariableResolver {
 	return config.IdentityResolver()
 }
@@ -661,9 +670,19 @@ func (w *ClientWorkspace) ReadSkill(ctx context.Context, skillID string) ([]byte
 
 // -- MCP operations --
 
+// mcpStatesTimeout bounds a single MCP state probe. The client SDK sets no
+// request timeout of its own, and the UI serializes refreshes behind an
+// in-flight flag: without a deadline a hung request would wedge that flag
+// forever, queueing every later refresh behind it and silently freezing the
+// MCP sidebar. A var, not a const, so tests can shrink it.
+var mcpStatesTimeout = 10 * time.Second
+
 func (w *ClientWorkspace) MCPGetStates() map[string]mcp.ClientInfo {
-	states, err := w.client.MCPGetStates(context.Background(), w.workspaceID())
+	ctx, cancel := context.WithTimeout(context.Background(), mcpStatesTimeout)
+	defer cancel()
+	states, err := w.client.MCPGetStates(ctx, w.workspaceID())
 	if err != nil {
+		slog.Warn("Failed to fetch MCP states", "error", err)
 		return nil
 	}
 	result := make(map[string]mcp.ClientInfo, len(states))
@@ -751,6 +770,26 @@ func (w *ClientWorkspace) EnableDockerMCP(ctx context.Context) error {
 
 func (w *ClientWorkspace) DisableDockerMCP() error {
 	return w.client.DisableDockerMCP(context.Background(), w.workspaceID())
+}
+
+func (w *ClientWorkspace) MCPServersDisabled(ctx context.Context) ([]string, error) {
+	return w.client.MCPServersDisabled(ctx, w.workspaceID())
+}
+
+func (w *ClientWorkspace) MCPServersEnabled(ctx context.Context) ([]string, error) {
+	return w.client.MCPServersEnabled(ctx, w.workspaceID())
+}
+
+func (w *ClientWorkspace) MCPSetServerDisabled(ctx context.Context, name string, disabled bool) error {
+	return w.client.SetMCPServerDisabled(ctx, w.workspaceID(), name, disabled)
+}
+
+func (w *ClientWorkspace) MCPSetServerConfigDisabled(ctx context.Context, name string, disabled bool) error {
+	return w.client.SetMCPServerConfigDisabled(ctx, w.workspaceID(), name, disabled)
+}
+
+func (w *ClientWorkspace) MCPStartServer(ctx context.Context, name string) error {
+	return w.client.StartMCPServer(ctx, w.workspaceID(), name)
 }
 
 func (w *ClientWorkspace) MCPAuthenticate(ctx context.Context, name string) error {
@@ -1143,9 +1182,11 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 		return pubsub.Event[permission.PermissionNotification]{
 			Type: e.Type,
 			Payload: permission.PermissionNotification{
+				SessionID:  e.Payload.SessionID,
 				ToolCallID: e.Payload.ToolCallID,
 				Granted:    e.Payload.Granted,
 				Denied:     e.Payload.Denied,
+				Cancelled:  e.Payload.Cancelled,
 			},
 		}
 	case pubsub.Event[proto.QuestionRequest]:

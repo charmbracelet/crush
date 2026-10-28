@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/shell"
 )
 
@@ -25,132 +24,137 @@ const abandonGrace = time.Second
 // depending on the scheduling behavior of the real interpreter.
 var runShell = shell.Run
 
-// compiledHook pairs a HookConfig with its compiled matcher regex. A nil
-// matcher means "match every tool".
-type compiledHook struct {
-	cfg     config.HookConfig
-	matcher *regexp.Regexp
+// Source returns the current hook configuration keyed by event name.
+// The runner calls it on every event, so a source backed by the config
+// store picks up reloads with no extra wiring.
+type Source func() map[string][]HookConfig
+
+// Static returns a Source that always yields the same hooks.
+func Static(hooks map[string][]HookConfig) Source {
+	return func() map[string][]HookConfig { return hooks }
 }
 
-// Runner executes hook commands and aggregates their results.
+// Runner executes hook commands and aggregates their results. One
+// Runner serves every event for the application. A nil Runner is valid
+// and runs nothing, so callers never have to guard against it.
 type Runner struct {
-	hooks      []compiledHook
+	source     Source
 	cwd        string
 	projectDir string
+
+	matchersMu sync.Mutex
+	matchers   map[string]*regexp.Regexp // nil value: pattern did not compile
 }
 
-// NewRunner creates a Runner from the given hook configs. Each hook's
-// Matcher is compiled here so the Runner is self-sufficient; callers do
-// not have to pre-compile matchers on the config, and reloads or merges
-// that rebuild HookConfig values can't silently strip compiled state.
-//
-// Hooks whose matcher fails to compile are skipped with a warning rather
-// than treated as match-everything. ValidateHooks is expected to have
-// caught syntax errors earlier, so this is defense in depth.
-func NewRunner(hooks []config.HookConfig, cwd, projectDir string) *Runner {
-	compiled := make([]compiledHook, 0, len(hooks))
-	for _, h := range hooks {
-		ch := compiledHook{cfg: h}
-		if h.Matcher != "" {
-			re, err := regexp.Compile(h.Matcher)
-			if err != nil {
-				slog.Warn(
-					"Hook matcher failed to compile; skipping hook",
-					"matcher", h.Matcher,
-					"command", h.Command,
-					"error", err,
-				)
-				continue
-			}
-			ch.matcher = re
-		}
-		compiled = append(compiled, ch)
-	}
+// NewRunner creates a Runner that reads hook configs from source.
+// Matchers are compiled lazily and cached by pattern; one that fails to
+// compile is skipped with a warning rather than treated as
+// match-everything. ValidateHooks is expected to have caught syntax
+// errors earlier, so this is defense in depth.
+func NewRunner(source Source, cwd, projectDir string) *Runner {
 	return &Runner{
-		hooks:      compiled,
+		source:     source,
 		cwd:        cwd,
 		projectDir: projectDir,
+		matchers:   make(map[string]*regexp.Regexp),
 	}
 }
 
-// Hooks returns the hook configs the runner was created with, in config
-// order. Hooks whose matcher failed to compile at construction are
-// omitted. Intended for diagnostics; callers should not rely on ordering
-// or identity beyond that.
-func (r *Runner) Hooks() []config.HookConfig {
-	out := make([]config.HookConfig, len(r.hooks))
-	for i, h := range r.hooks {
-		out[i] = h.cfg
+// Run executes every configured hook for the event in parallel and
+// returns their aggregated result. Hooks with a matcher only run when
+// it matches the event's tool name. Execution failures are logged and
+// treated as "no opinion", so the result is always usable.
+func (r *Runner) Run(ctx context.Context, ev Event) AggregateResult {
+	if r == nil {
+		return AggregateResult{}
 	}
-	return out
-}
-
-// Run executes all matching hooks for the given event and tool, returning
-// an aggregated result.
-func (r *Runner) Run(ctx context.Context, eventName, sessionID, toolName, toolInputJSON string) (AggregateResult, error) {
-	matching := r.matchingHooks(toolName)
-	if len(matching) == 0 {
-		return AggregateResult{Decision: DecisionNone}, nil
+	hooks := r.matchingHooks(ev)
+	if len(hooks) == 0 {
+		return AggregateResult{}
 	}
 
-	// Deduplicate by command string.
-	seen := make(map[string]bool, len(matching))
-	var deduped []config.HookConfig
-	for _, h := range matching {
-		if seen[h.Command] {
-			continue
-		}
-		seen[h.Command] = true
-		deduped = append(deduped, h)
-	}
+	envVars := BuildEnv(ev, r.cwd, r.projectDir)
+	payload := BuildPayload(ev, r.cwd)
 
-	envVars := BuildEnv(eventName, toolName, sessionID, r.cwd, r.projectDir, toolInputJSON)
-	payload := BuildPayload(eventName, sessionID, r.cwd, toolName, toolInputJSON)
-
-	results := make([]HookResult, len(deduped))
+	results := make([]HookResult, len(hooks))
 	var wg sync.WaitGroup
-	wg.Add(len(deduped))
-
-	for i, h := range deduped {
-		go func(idx int, hook config.HookConfig) {
-			defer wg.Done()
-			results[idx] = r.runOne(ctx, hook, envVars, payload)
-		}(i, h)
+	for i, h := range hooks {
+		wg.Go(func() {
+			results[i] = r.runOne(ctx, h, envVars, payload)
+		})
 	}
 	wg.Wait()
 
-	agg := aggregate(results, toolInputJSON)
-	agg.Hooks = make([]HookInfo, len(deduped))
-	for i, h := range deduped {
+	var toolInput string
+	if ev.Tool != nil {
+		toolInput = ev.Tool.Input
+	}
+	agg := aggregate(results, toolInput)
+	agg.Hooks = make([]HookInfo, len(hooks))
+	for i, h := range hooks {
 		agg.Hooks[i] = HookInfo{
-			Name:         h.DisplayName(),
-			Matcher:      h.Matcher,
-			Decision:     results[i].Decision.String(),
-			Halt:         results[i].Halt,
-			Reason:       results[i].Reason,
-			InputRewrite: results[i].UpdatedInput != "",
+			Name:          h.DisplayName(),
+			Event:         ev.Name,
+			Matcher:       h.Matcher,
+			Decision:      results[i].Decision.String(),
+			Halt:          results[i].Halt,
+			Reason:        results[i].Reason,
+			InputRewrite:  results[i].UpdatedInput != "",
+			OutputRewrite: results[i].UpdatedOutput != "",
 		}
 	}
 	slog.Info(
 		"Hook completed",
-		"event", eventName,
-		"tool", toolName,
-		"hooks", len(deduped),
+		"event", ev.Name,
+		"tool", ev.toolName(),
+		"hooks", agg.HookCount,
 		"decision", agg.Decision.String(),
 	)
-	return agg, nil
+	return agg
 }
 
-// matchingHooks returns hooks whose matcher matches the tool name (or has
-// no matcher, which matches everything).
-func (r *Runner) matchingHooks(toolName string) []config.HookConfig {
-	var matched []config.HookConfig
-	for _, h := range r.hooks {
-		if h.matcher == nil || h.matcher.MatchString(toolName) {
-			matched = append(matched, h.cfg)
+// matchingHooks returns the hooks configured for the event, deduplicated
+// by command, keeping only those whose matcher accepts the tool name. A
+// matcher on an event without a tool name is ignored.
+func (r *Runner) matchingHooks(ev Event) []HookConfig {
+	seen := make(map[string]bool)
+	var matched []HookConfig
+	for _, h := range r.source()[ev.Name] {
+		if seen[h.Command] {
+			continue
 		}
+		if h.Matcher != "" && ev.Tool != nil {
+			re := r.matcher(h)
+			if re == nil || !re.MatchString(ev.Tool.Name) {
+				continue
+			}
+		}
+		seen[h.Command] = true
+		matched = append(matched, h)
 	}
 	return matched
+}
+
+// matcher returns the compiled regex for the hook's matcher, or nil when
+// it does not compile.
+func (r *Runner) matcher(h HookConfig) *regexp.Regexp {
+	r.matchersMu.Lock()
+	defer r.matchersMu.Unlock()
+	if re, ok := r.matchers[h.Matcher]; ok {
+		return re
+	}
+	re, err := regexp.Compile(h.Matcher)
+	if err != nil {
+		slog.Warn(
+			"Hook matcher failed to compile; skipping hook",
+			"matcher", h.Matcher,
+			"command", h.Command,
+			"error", err,
+		)
+		re = nil
+	}
+	r.matchers[h.Matcher] = re
+	return re
 }
 
 // runOne executes a single hook command and returns its result.
@@ -169,7 +173,7 @@ func (r *Runner) matchingHooks(toolName string) []config.HookConfig {
 //     outer frame reads them;
 //   - on the abandon path, the goroutine may still be writing and the
 //     outer frame must not touch them again.
-func (r *Runner) runOne(parentCtx context.Context, hook config.HookConfig, envVars []string, payload []byte) HookResult {
+func (r *Runner) runOne(parentCtx context.Context, hook HookConfig, envVars []string, payload []byte) HookResult {
 	timeout := hook.TimeoutDuration()
 	ctx, cancel := context.WithTimeout(parentCtx, timeout)
 	defer cancel()
@@ -217,49 +221,43 @@ func (r *Runner) runOne(parentCtx context.Context, hook config.HookConfig, envVa
 		return HookResult{Decision: DecisionNone}
 	}
 
-	if err != nil {
-		exitCode := shell.ExitCode(err)
-		switch exitCode {
-		case 2:
-			// Exit code 2 = block this tool call. Stderr is the reason.
-			reason := strings.TrimSpace(stderr.String())
-			if reason == "" {
-				reason = "blocked by hook"
-			}
-			return HookResult{
-				Decision: DecisionDeny,
-				Reason:   reason,
-			}
-		case HaltExitCode:
-			// Exit code 49 = halt the whole turn. Stderr is the reason.
-			reason := strings.TrimSpace(stderr.String())
-			if reason == "" {
-				reason = "turn halted by hook"
-			}
-			return HookResult{
-				Decision: DecisionDeny,
-				Halt:     true,
-				Reason:   reason,
-			}
-		default:
-			// Other non-zero exits are non-blocking errors.
-			slog.Warn(
-				"Hook failed with non-blocking error",
-				"command", hook.Command,
-				"exit_code", exitCode,
-				"stderr", strings.TrimSpace(stderr.String()),
-				"error", err,
-			)
-			return HookResult{Decision: DecisionNone}
-		}
+	result, hasJSON := parseStdout(stdout.String())
+	if err == nil {
+		slog.Debug("Hook executed", "command", hook.Command, "decision", result.Decision.String())
+		return result
 	}
 
-	// Exit code 0 — parse stdout JSON.
-	result := parseStdout(stdout.String())
-	slog.Debug(
-		"Hook executed",
+	// Exit 2 blocks the action and 49 halts the turn; stderr is the
+	// reason, falling back to any reason the JSON carried. Any other
+	// non-zero exit is a non-blocking error, except that, as in Claude
+	// Code, a valid JSON object on stdout still counts and the exit code
+	// is ignored.
+	exitCode := shell.ExitCode(err)
+	reason := strings.TrimSpace(stderr.String())
+	if reason == "" {
+		reason = result.Reason
+	}
+	switch exitCode {
+	case 2:
+		if reason == "" {
+			reason = "blocked by hook"
+		}
+		return HookResult{Decision: DecisionDeny, Reason: reason}
+	case HaltExitCode:
+		if reason == "" {
+			reason = "turn halted by hook"
+		}
+		return HookResult{Decision: DecisionDeny, Halt: true, Reason: reason}
+	}
+	if hasJSON {
+		return result
+	}
+	slog.Warn(
+		"Hook failed with non-blocking error",
 		"command", hook.Command,
-		"decision", result.Decision.String(),
+		"exit_code", exitCode,
+		"stderr", strings.TrimSpace(stderr.String()),
+		"error", err,
 	)
-	return result
+	return HookResult{Decision: DecisionNone}
 }

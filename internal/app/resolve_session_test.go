@@ -76,6 +76,18 @@ func (m *mockSessionService) Delete(context.Context, string) error {
 	return nil
 }
 
+func (m *mockSessionService) MCPDisabledServers(context.Context) ([]string, error) {
+	return nil, nil
+}
+
+func (m *mockSessionService) SetMCPServerDisabled(context.Context, string, bool) error {
+	return nil
+}
+
+func (m *mockSessionService) MCPServersEnabled(context.Context) ([]string, error) {
+	return nil, nil
+}
+
 func (m *mockSessionService) CreateAgentToolSessionID(messageID, toolCallID string) string {
 	return fmt.Sprintf("%s$$%s", messageID, toolCallID)
 }

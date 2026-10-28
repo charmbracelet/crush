@@ -1064,26 +1064,26 @@ func TestSetCurrentSession_BasicAttachAndSwitch(t *testing.T) {
 	require.NoError(t, b.AttachClient(ws.ID, cidA))
 	require.NoError(t, b.AttachClient(ws.ID, cidB))
 
-	require.NoError(t, b.SetCurrentSession(ws.ID, cidA, "S1"))
+	require.NoError(t, b.SetCurrentSession(context.Background(), ws.ID, cidA, "S1"))
 	ws.clientsMu.Lock()
 	require.Equal(t, "S1", ws.clients[cidA].currentSessionID)
 	ws.clientsMu.Unlock()
 
-	require.NoError(t, b.SetCurrentSession(ws.ID, cidB, "S1"))
+	require.NoError(t, b.SetCurrentSession(context.Background(), ws.ID, cidB, "S1"))
 	ws.clientsMu.Lock()
 	require.Equal(t, "S1", ws.clients[cidA].currentSessionID)
 	require.Equal(t, "S1", ws.clients[cidB].currentSessionID)
 	ws.clientsMu.Unlock()
 
 	// B switches to S2; counts redistribute.
-	require.NoError(t, b.SetCurrentSession(ws.ID, cidB, "S2"))
+	require.NoError(t, b.SetCurrentSession(context.Background(), ws.ID, cidB, "S2"))
 	ws.clientsMu.Lock()
 	require.Equal(t, "S1", ws.clients[cidA].currentSessionID)
 	require.Equal(t, "S2", ws.clients[cidB].currentSessionID)
 	ws.clientsMu.Unlock()
 
 	// A clears its selection.
-	require.NoError(t, b.SetCurrentSession(ws.ID, cidA, ""))
+	require.NoError(t, b.SetCurrentSession(context.Background(), ws.ID, cidA, ""))
 	ws.clientsMu.Lock()
 	require.Empty(t, ws.clients[cidA].currentSessionID)
 	require.Equal(t, "S2", ws.clients[cidB].currentSessionID)
@@ -1110,7 +1110,7 @@ func TestSetCurrentSession_DetachClearsEntry(t *testing.T) {
 
 	cid := newClientID(t)
 	require.NoError(t, b.AttachClient(ws.ID, cid))
-	require.NoError(t, b.SetCurrentSession(ws.ID, cid, "S2"))
+	require.NoError(t, b.SetCurrentSession(context.Background(), ws.ID, cid, "S2"))
 
 	b.DetachClient(ws.ID, cid)
 
@@ -1121,7 +1121,7 @@ func TestSetCurrentSession_DetachClearsEntry(t *testing.T) {
 
 	// A follow-up SetCurrentSession on the gone client must be
 	// rejected with ErrClientNotAttached.
-	require.ErrorIs(t, b.SetCurrentSession(ws.ID, cid, "S3"), ErrClientNotAttached)
+	require.ErrorIs(t, b.SetCurrentSession(context.Background(), ws.ID, cid, "S3"), ErrClientNotAttached)
 
 	b.DetachClient(ws.ID, anchor)
 }
@@ -1141,7 +1141,7 @@ func TestSetCurrentSession_RejectsHoldOnly(t *testing.T) {
 	cid := newClientID(t)
 	b.registerClient(ws, cid)
 
-	require.ErrorIs(t, b.SetCurrentSession(ws.ID, cid, "S1"), ErrClientNotAttached)
+	require.ErrorIs(t, b.SetCurrentSession(context.Background(), ws.ID, cid, "S1"), ErrClientNotAttached)
 
 	ws.clientsMu.Lock()
 	require.Empty(t, ws.clients[cid].currentSessionID, "hold-only client must not write a session id")
@@ -1159,7 +1159,7 @@ func TestSetCurrentSession_UnknownClient(t *testing.T) {
 	b, _ := newTestBackend(t)
 	ws, _ := insertTestWorkspace(t, b, "/tmp/current-session-unknown")
 
-	require.ErrorIs(t, b.SetCurrentSession(ws.ID, newClientID(t), "S1"), ErrClientNotAttached)
+	require.ErrorIs(t, b.SetCurrentSession(context.Background(), ws.ID, newClientID(t), "S1"), ErrClientNotAttached)
 }
 
 // TestSetCurrentSession_RejectsBadInputs covers the validation
@@ -1170,12 +1170,12 @@ func TestSetCurrentSession_RejectsBadInputs(t *testing.T) {
 	b, _ := newTestBackend(t)
 	ws, _ := insertTestWorkspace(t, b, "/tmp/current-session-bad")
 
-	require.ErrorIs(t, b.SetCurrentSession(ws.ID, "", "S1"), ErrInvalidClientID)
-	require.ErrorIs(t, b.SetCurrentSession(ws.ID, "not-a-uuid", "S1"), ErrInvalidClientID)
+	require.ErrorIs(t, b.SetCurrentSession(context.Background(), ws.ID, "", "S1"), ErrInvalidClientID)
+	require.ErrorIs(t, b.SetCurrentSession(context.Background(), ws.ID, "not-a-uuid", "S1"), ErrInvalidClientID)
 
 	require.ErrorIs(
 		t,
-		b.SetCurrentSession("00000000-0000-0000-0000-000000000000", newClientID(t), "S1"),
+		b.SetCurrentSession(context.Background(), "00000000-0000-0000-0000-000000000000", newClientID(t), "S1"),
 		ErrWorkspaceNotFound,
 	)
 }
@@ -1205,14 +1205,14 @@ func TestSetCurrentSession_RaceWithDetach(t *testing.T) {
 			// Errors are tolerated: once cidA detaches,
 			// further updates against cidA must return
 			// ErrClientNotAttached but never panic.
-			_ = b.SetCurrentSession(ws.ID, cidA, "SA")
+			_ = b.SetCurrentSession(context.Background(), ws.ID, cidA, "SA")
 			_ = i
 		}
 	}()
 	go func() {
 		defer wg.Done()
 		for i := range updates {
-			_ = b.SetCurrentSession(ws.ID, cidB, "SB")
+			_ = b.SetCurrentSession(context.Background(), ws.ID, cidB, "SB")
 			_ = i
 		}
 	}()
@@ -1249,7 +1249,7 @@ func TestAttachedClients_BasicLifecycle(t *testing.T) {
 	// Attach A, set to S1. Count for S1 is 1; count for S2 is 0.
 	cidA := newClientID(t)
 	require.NoError(t, b.AttachClient(ws.ID, cidA))
-	require.NoError(t, b.SetCurrentSession(ws.ID, cidA, "S1"))
+	require.NoError(t, b.SetCurrentSession(context.Background(), ws.ID, cidA, "S1"))
 
 	n, err = b.AttachedClients(ws.ID, "S1")
 	require.NoError(t, err)
@@ -1261,13 +1261,13 @@ func TestAttachedClients_BasicLifecycle(t *testing.T) {
 	// Attach B, set to S1. Count for S1 is 2.
 	cidB := newClientID(t)
 	require.NoError(t, b.AttachClient(ws.ID, cidB))
-	require.NoError(t, b.SetCurrentSession(ws.ID, cidB, "S1"))
+	require.NoError(t, b.SetCurrentSession(context.Background(), ws.ID, cidB, "S1"))
 
 	n, _ = b.AttachedClients(ws.ID, "S1")
 	require.Equal(t, 2, n)
 
 	// B switches to S2; counts redistribute.
-	require.NoError(t, b.SetCurrentSession(ws.ID, cidB, "S2"))
+	require.NoError(t, b.SetCurrentSession(context.Background(), ws.ID, cidB, "S2"))
 	n, _ = b.AttachedClients(ws.ID, "S1")
 	require.Equal(t, 1, n)
 	n, _ = b.AttachedClients(ws.ID, "S2")

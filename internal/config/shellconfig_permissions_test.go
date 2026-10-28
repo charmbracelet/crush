@@ -38,7 +38,7 @@ func loadCrushShErr(t *testing.T, script string) (*config.ConfigStore, error) {
 	dataDir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(workDir, "crushrc"), []byte(script), 0o644))
 
-	return config.Load(workDir, dataDir, false)
+	return config.Load(t.Context(), workDir, dataDir, false)
 }
 
 func TestShellConfigPermissionsAllow(t *testing.T) {

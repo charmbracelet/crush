@@ -345,7 +345,7 @@ func TestReloadFromDisk_UsesNewConfigValues(t *testing.T) {
 	require.NoError(t, os.WriteFile(configPath, []byte(initialConfig), 0o600))
 
 	// Load initial config properly
-	store, err := Load(dir, dir, false)
+	store, err := Load(t.Context(), dir, dir, false)
 	require.NoError(t, err)
 
 	// Set globalDataPath for the test (Load doesn't set this directly)
@@ -398,7 +398,7 @@ func TestSetConfigField_AutoReloads(t *testing.T) {
 	require.NoError(t, os.WriteFile(configPath, []byte(initialConfig), 0o600))
 
 	// Load initial config
-	store, err := Load(dir, dir, false)
+	store, err := Load(t.Context(), dir, dir, false)
 	require.NoError(t, err)
 
 	// Verify initial state
@@ -433,7 +433,7 @@ func TestRemoveConfigField_AutoReloads(t *testing.T) {
 	require.NoError(t, os.WriteFile(configPath, []byte(initialConfig), 0o600))
 
 	// Load initial config
-	store, err := Load(dir, dir, false)
+	store, err := Load(t.Context(), dir, dir, false)
 	require.NoError(t, err)
 
 	// Set globalDataPath and capture snapshot
@@ -480,7 +480,9 @@ func TestSetConfigField_AutoReloadSkipsWhenNoWorkingDir(t *testing.T) {
 // TestAutoReloadDisabledDuringReload verifies that auto-reload is suppressed
 // during ReloadFromDisk to prevent re-entrant/nested reload calls.
 func TestAutoReloadDisabledDuringReload(t *testing.T) {
-	t.Parallel()
+	// Load rewrites the global config; keep it off the one other tests share.
+	t.Setenv("CRUSH_GLOBAL_CONFIG", t.TempDir())
+	t.Setenv("CRUSH_GLOBAL_DATA", t.TempDir())
 
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "crush.json")
@@ -499,7 +501,7 @@ func TestAutoReloadDisabledDuringReload(t *testing.T) {
 
 	// Load will trigger configureProviders which removes anthropic OAuth config.
 	// This should NOT cause infinite recursion — writeMu prevents re-entrant reloads.
-	store, err := Load(dir, dir, false)
+	store, err := Load(t.Context(), dir, dir, false)
 	require.NoError(t, err)
 
 	// Capture snapshot and verify reload also works without recursion
@@ -528,7 +530,7 @@ func TestSetConfigFields_AutoReloadsAtomically(t *testing.T) {
 	require.NoError(t, os.WriteFile(configPath, []byte(initialConfig), 0o600))
 
 	// Load initial config.
-	store, err := Load(dir, dir, false)
+	store, err := Load(t.Context(), dir, dir, false)
 	require.NoError(t, err)
 
 	// Set globalDataPath and capture snapshot.

@@ -29,7 +29,7 @@ Use a package manager:
 # Homebrew
 brew install charmbracelet/tap/crush
 
-# NPM
+# NPM (macOS, Linux, and Windows)
 npm install -g @charmland/crush
 
 # Arch Linux (btw)
@@ -72,7 +72,7 @@ nix-shell -p '(import <nur> { pkgs = import <nixpkgs> {}; }).repos.charmbracelet
 ### NixOS & Home Manager Module Usage via NUR
 
 Crush provides NixOS and Home Manager modules via NUR.
-You can use these modules directly in your flake by importing them from NUR. Since it auto detects whether its a home manager or nixos context you can use the import the exact same way :)
+You can use these modules directly in your flake by importing them from NUR. Since it auto detects whether it's a home manager or nixos context you can use the import the exact same way :)
 
 ```nix
 {
@@ -100,8 +100,8 @@ You can use these modules directly in your flake by importing them from NUR. Sin
                   api_key = "sk-fake123456789abcdef...";
                   models = [
                     {
-                      id = "gpt-4";
-                      name = "GPT-4";
+                      id = "gpt-5.6-sol";
+                      name = "GPT-5.6 Sol";
                     }
                   ];
                 };
@@ -185,9 +185,9 @@ go install -tags sqlite3_dotlk github.com/charmbracelet/crush@latest
 The quickest way to get started is to choose a [Hyper][hyper] model from model
 picker. Follow the steps to authenticate and you'll be good to go.
 
-[Hyper], from Charm, is the official Crush provider. It’s subscription-based,
-with a free tier, and optimized for Crush. It’s privacy focused, with zero data
-retention (ZDR) is and designed to comply with GDPR. [More on Hyper][hyper].
+[Hyper], from Charm, is the official Crush provider. It’s subscription-based
+and optimized for Crush. It’s privacy focused, with zero data retention (ZDR)
+and is designed to comply with GDPR. [More on Hyper][hyper].
 
 <p><a href="https://hyper.charm.land"><img width="340" height="200" alt="Charm Hyper" src="https://github.com/user-attachments/assets/50875289-7992-454d-9f14-9f790413fb5e" /></a></p>
 
@@ -229,6 +229,7 @@ That said, you can also set environment variables for preferred providers:
 | `AZURE_OPENAI_API_KEY`      | Azure OpenAI models (optional when using Entra ID) |
 | `AZURE_OPENAI_API_VERSION`  | Azure OpenAI models                                |
 | `MOONSHOT_API_KEY`          | Moonshot                                           |
+| `XAI_API_KEY`               | xAI                                                |
 
 [hyper]: https://hyper.charm.land
 
@@ -392,10 +393,11 @@ dialog.
 
 #### Built-In Themes
 
-| Theme | Name |
-| --- | --- |
+| Theme             | Name                          |
+| ----------------- | ----------------------------- |
 | Charmtone Pantera | `charmtone-panther` (default) |
-| Gruvbox Dark | `gruvbox-dark` |
+| Gruvbox Dark      | `gruvbox-dark`                |
+| Keanu             | `keanu`                       |
 
 ### LSPs
 
@@ -943,12 +945,12 @@ updates your local configuration.
 
 You can also override [Catwalk](https://github.com/charmbracelet/catwalk) default URL (for testing, using a fork).
 
-You can do so by setting `CATWALK_URL` enviromental variable. (e.g. `export CATWALK_URL=http://localhost:8000`)
+You can do so by setting the `CATWALK_URL` environment variable. (e.g. `export CATWALK_URL=http://localhost:8000`)
 
 ### Disabling automatic provider updates
 
 For those with restricted internet access, or those who prefer to work in
-air-gapped environments, this might not be want you want, and this feature can
+air-gapped environments, this might not be what you want, and this feature can
 be disabled.
 
 To disable automatic provider updates in your `crushrc`:

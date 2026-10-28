@@ -33,7 +33,7 @@ crush models gpt5`,
 		dataDir, _ := cmd.Flags().GetString("data-dir")
 		debug, _ := cmd.Flags().GetBool("debug")
 
-		cfg, err := config.Init(cwd, dataDir, debug)
+		cfg, err := config.Init(cmd.Context(), cwd, dataDir, debug)
 		if err != nil {
 			return err
 		}
@@ -58,13 +58,17 @@ crush models gpt5`,
 				configured: true,
 			}
 
-			// The OpenAI provider holds exactly one credential. Signed
-			// in with ChatGPT, only the models the subscription grants are
-			// usable; an API key lists the regular catalog.
+			// The OpenAI and xAI providers each hold exactly one
+			// credential. Signed in with ChatGPT or Grok, only the
+			// models the subscription grants are usable; an API key
+			// lists the regular catalog.
 			var models []catwalk.Model
-			if providerID == string(catwalk.InferenceProviderOpenAI) && provider.OAuthToken != nil {
+			switch {
+			case providerID == string(catwalk.InferenceProviderOpenAI) && provider.OAuthToken != nil:
 				models = provider.ChatGPTModels
-			} else {
+			case providerID == string(catwalk.InferenceProviderXAI) && provider.OAuthToken != nil:
+				models = provider.GrokModels
+			default:
 				models = provider.Models
 			}
 

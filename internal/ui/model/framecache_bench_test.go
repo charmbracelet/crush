@@ -11,7 +11,7 @@ func BenchmarkView_ClampedOverscroll_Cached(b *testing.B) {
 	for b.Loop() {
 		u.beginFrameUpdate()
 		u.markScrollOnly()
-		_ = u.chat.ScrollBy(5)
+		u.chat.ScrollBy(5)
 		u.View()
 	}
 	b.ReportMetric(float64(u.frames.hits), "hits")
@@ -26,7 +26,7 @@ func BenchmarkView_ClampedOverscroll_Uncached(b *testing.B) {
 	b.ResetTimer()
 	for b.Loop() {
 		u.beginFrameUpdate()
-		_ = u.chat.ScrollBy(5)
+		u.chat.ScrollBy(5)
 		u.View()
 	}
 }
@@ -44,7 +44,7 @@ func BenchmarkView_MovingScroll_Cached(b *testing.B) {
 		if i%150 == 149 {
 			u.chat.ScrollToTop()
 		} else {
-			_ = u.chat.ScrollBy(1)
+			u.chat.ScrollBy(1)
 		}
 		i++
 		u.View()
@@ -65,7 +65,7 @@ func BenchmarkView_MovingScroll_Uncached(b *testing.B) {
 		if i%150 == 149 {
 			u.chat.ScrollToTop()
 		} else {
-			_ = u.chat.ScrollBy(1)
+			u.chat.ScrollBy(1)
 		}
 		i++
 		u.View()
@@ -84,7 +84,7 @@ func benchOscillate(b *testing.B, maxEntries int) {
 	for i := 0; b.Loop(); i++ {
 		u.beginFrameUpdate()
 		u.markScrollOnly()
-		_ = u.chat.ScrollBy(deltas[i%len(deltas)])
+		u.chat.ScrollBy(deltas[i%len(deltas)])
 		u.View()
 	}
 	b.ReportMetric(float64(u.frames.hits), "hits")

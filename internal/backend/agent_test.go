@@ -221,3 +221,7 @@ func TestSetMainAgent_PropagatesCoordinatorError(t *testing.T) {
 	err := b.SetMainAgent(ws.ID, "123")
 	require.ErrorIs(t, err, wantErr)
 }
+
+func (*blockingCoordinator) ListSettledMessages(context.Context, string) ([]message.Message, error) {
+	return nil, nil
+}

@@ -102,6 +102,13 @@ type ProjectInitPromptResponse struct {
 	Prompt string `json:"prompt"`
 }
 
+// GitBranchResponse carries the current Git branch of the workspace's
+// working directory. Branch is empty when the directory is not a Git
+// repository or HEAD is detached.
+type GitBranchResponse struct {
+	Branch string `json:"branch"`
+}
+
 // AgentInitRequest represents a request to initialize the agent.
 type AgentInitRequest struct {
 	Interactive bool `json:"interactive"`
@@ -127,6 +134,13 @@ type FileTrackerReadRequest struct {
 // MCPNameRequest represents a request targeting a named MCP server.
 type MCPNameRequest struct {
 	Name string `json:"name"`
+}
+
+// MCPSetServerDisabledRequest toggles a repository-scoped MCP server
+// override for the workspace's Toggle MCPs dialog.
+type MCPSetServerDisabledRequest struct {
+	Name     string `json:"name"`
+	Disabled bool   `json:"disabled"`
 }
 
 // MCPPendingAuthServer describes an MCP server awaiting OAuth

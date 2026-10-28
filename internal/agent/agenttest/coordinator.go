@@ -37,7 +37,7 @@ func NewCoordinator(
 	sessions session.Service,
 	messages message.Service,
 ) (agent.Coordinator, error) {
-	cfg, err := config.Init(workingDir, "", false)
+	cfg, err := config.Init(ctx, workingDir, "", false)
 	if err != nil {
 		return nil, err
 	}
@@ -68,6 +68,6 @@ func NewCoordinator(
 		Config:      cfg,
 		Sessions:    sessions,
 		Messages:    messages,
-		Permissions: permission.NewPermissionService(workingDir, true, nil),
+		Permissions: permission.NewPermissionService(workingDir, true, nil, nil),
 	})
 }

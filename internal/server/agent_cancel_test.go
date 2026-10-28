@@ -233,3 +233,7 @@ func TestPostAgent_DetachesRequestContext(t *testing.T) {
 		return coord.ranCount.Load() == 1
 	}, 2*time.Second, 10*time.Millisecond)
 }
+
+func (*runCoordinator) ListSettledMessages(context.Context, string) ([]message.Message, error) {
+	return nil, nil
+}

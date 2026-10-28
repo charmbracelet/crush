@@ -346,7 +346,14 @@ func runNonInteractive(
 		case ev, ok := <-events:
 			if !ok {
 				stopSpinner()
-				return nil
+				// The stream also ends when ctx is canceled, which is
+				// the caller giving up rather than the server going away.
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				// Otherwise the server died or ended the stream before
+				// our RunComplete, so the run cannot pass as finished.
+				return fmt.Errorf("lost connection to the crush server before the run completed")
 			}
 
 			// Forward events to herdr if running inside a herdr pane.
@@ -361,6 +368,13 @@ func runNonInteractive(
 				return err
 			}
 			if done {
+				// With ctx still live the cancel did not come from us
+				// but from the server shutting down, the workspace
+				// being torn down or another client, and the output is
+				// cut short.
+				if stream.cancelled && ctx.Err() == nil {
+					return fmt.Errorf("agent run was cancelled on the server before it completed")
+				}
 				return nil
 			}
 
@@ -408,6 +422,7 @@ type runStream struct {
 	out       io.Writer
 	read      map[string]int
 	printed   bool
+	cancelled bool // the terminal RunComplete reported a cancelled run
 }
 
 // handle processes one SSE event. Returns done=true when the run
@@ -416,6 +431,10 @@ type runStream struct {
 // handled by the caller's select). stopSpinner is called on the
 // first observable assistant output and on completion; passing nil
 // is safe for tests.
+//
+// A cancelled run is not an error here either: it sets s.cancelled
+// and the caller, which knows whether it asked for the cancel,
+// decides.
 func (s *runStream) handle(ev any, stopSpinner func()) (done bool, err error) {
 	stop := func() {
 		if stopSpinner != nil {
@@ -477,6 +496,7 @@ func (s *runStream) handle(ev any, stopSpinner func()) (done bool, err error) {
 		if e.Payload.Error != "" && !e.Payload.Cancelled {
 			return true, fmt.Errorf("agent run failed: %s", e.Payload.Error)
 		}
+		s.cancelled = e.Payload.Cancelled
 		// Reconcile stdout against the authoritative final
 		// assistant text carried in the event. The pubsub fan-in
 		// does not serialize publishes across upstream brokers, so

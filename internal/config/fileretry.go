@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"os"
 	"time"
 )
@@ -17,7 +18,8 @@ func readFile(path string) ([]byte, error) {
 		data, err = os.ReadFile(path)
 		return err
 	})
-	return data, err
+	// Strip UTF-8 BOM for compatibility with editors that include it.
+	return bytes.TrimPrefix(data, []byte("\xef\xbb\xbf")), err
 }
 
 // retryTransient runs op with backoff until it succeeds, fails with a

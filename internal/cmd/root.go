@@ -1096,14 +1096,8 @@ var startDetachedServer = func(cmd *cobra.Command, hostURL *url.URL) (*spawnedSe
 		cmdArgs = append(cmdArgs, "--host", hostURL.Scheme+"://"+hostURL.Host+hostURL.Path)
 	}
 
-	// Use context.Background() so the parent's context cancellation does not
-	// kill the spawned server. detachProcess (Setsid on !windows,
-	// DETACHED_PROCESS on windows) is what truly detaches the child from
-	// this process's lifetime.
-	c := exec.CommandContext(context.Background(), exe, cmdArgs...)
 	stdoutPath := filepath.Join(chDir, "stdout.log")
 	stderrPath := filepath.Join(chDir, "stderr.log")
-	detachProcess(c)
 
 	// Append rather than truncate: stderr.log is the only record of a
 	// previous server's panic or other runtime crash, and spawning its
@@ -1113,16 +1107,24 @@ var startDetachedServer = func(cmd *cobra.Command, hostURL *url.URL) (*spawnedSe
 		return nil, fmt.Errorf("failed to create stdout log file: %v", err)
 	}
 	defer stdout.Close()
-	c.Stdout = stdout
 
 	stderr, err := os.OpenFile(stderrPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create stderr log file: %v", err)
 	}
 	defer stderr.Close()
-	c.Stderr = stderr
 
-	if err := c.Start(); err != nil {
+	// Use context.Background() so the parent's context cancellation does not
+	// kill the spawned server. startDetached (Setsid on !windows,
+	// DETACHED_PROCESS and job breakaway on windows) is what truly detaches
+	// the child from this process's lifetime.
+	c, err := startDetached(func() *exec.Cmd {
+		c := exec.CommandContext(context.Background(), exe, cmdArgs...)
+		c.Stdout = stdout
+		c.Stderr = stderr
+		return c
+	})
+	if err != nil {
 		return nil, fmt.Errorf("failed to start crush server: %v", err)
 	}
 

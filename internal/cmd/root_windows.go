@@ -16,3 +16,9 @@ func detachProcess(c *exec.Cmd) {
 	}
 	c.SysProcAttr.CreationFlags = syscall.CREATE_NEW_PROCESS_GROUP | windows.DETACHED_PROCESS
 }
+
+// releaseProcess lets go of a started detached process. Windows has no
+// zombie processes, so releasing the process handle is enough.
+func releaseProcess(c *exec.Cmd) error {
+	return c.Process.Release()
+}

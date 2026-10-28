@@ -197,6 +197,41 @@ func TestConnect_SharedPoolDoesNotReacquireLock(t *testing.T) {
 	require.NoError(t, Release(dataDir))
 }
 
+// TestConnect_SharesEntryAcrossDataDirSpellings opens one data directory
+// under two spellings, here through a symlink, as the server does for two
+// workspaces that reach the same project differently. The second Connect
+// must reuse the open entry instead of taking the lock again and failing
+// against this very process, and either spelling releases the entry.
+func TestConnect_SharesEntryAcrossDataDirSpellings(t *testing.T) {
+	t.Cleanup(ResetPool)
+
+	dataDir := t.TempDir()
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(dataDir, alias); err != nil {
+		t.Skipf("cannot create symlink: %v", err)
+	}
+	lockPath := filepath.Join(dataDir, dataDirLockFile)
+
+	conn1, err := Connect(context.Background(), dataDir, WithDataDirLock(true))
+	require.NoError(t, err)
+	conn2, err := Connect(context.Background(), alias, WithDataDirLock(true))
+	require.NoError(t, err, "a second spelling of an open data dir must reuse its entry")
+	require.Same(t, conn1, conn2)
+
+	// Drop one reference; the connection and the lock must survive.
+	require.NoError(t, Release(dataDir))
+	require.NoError(t, conn1.PingContext(context.Background()))
+	_, lockErr := lock.TryFile(lockPath)
+	require.ErrorIs(t, lockErr, lock.ErrContended)
+
+	// Dropping the last reference under the other spelling closes both.
+	require.NoError(t, Release(alias))
+	require.Error(t, conn1.PingContext(context.Background()), "connection should be closed after final release")
+	release, err := lock.TryFile(lockPath)
+	require.NoError(t, err, "expected lock to be released after final Release")
+	release()
+}
+
 // TestConnect_SkipLockEnvBypassesAcquisition exercises the escape
 // hatch used by users on filesystems where flock is unreliable.
 func TestConnect_SkipLockEnvBypassesAcquisition(t *testing.T) {

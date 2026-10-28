@@ -673,6 +673,7 @@ func (b *Backend) RetireClient(clientID string) error {
 	}
 	b.retired[clientID] = struct{}{}
 	var orphaned []*Workspace
+	viewing := make(map[*Workspace]string)
 	for _, ws := range b.workspaces.Seq2() {
 		ws.clientsMu.Lock()
 		if cs, ok := ws.clients[clientID]; ok {
@@ -680,6 +681,7 @@ func (b *Backend) RetireClient(clientID string) error {
 				cs.holdTimer.Stop()
 			}
 			delete(ws.clients, clientID)
+			viewing[ws] = cs.currentSessionID
 			if len(ws.clients) == 0 {
 				orphaned = append(orphaned, ws)
 			}
@@ -688,6 +690,9 @@ func (b *Backend) RetireClient(clientID string) error {
 	}
 	b.mu.Unlock()
 
+	for ws, sessionID := range viewing {
+		ws.cancelUnwatchedRun(sessionID)
+	}
 	for _, ws := range orphaned {
 		b.teardown(ws)
 	}
@@ -756,8 +761,10 @@ func (b *Backend) expireHold(ws *Workspace, clientID string, timer *clientState)
 	}
 	cs.holdTimer = nil
 	delete(ws.clients, clientID)
+	viewing := cs.currentSessionID
 	teardown := len(ws.clients) == 0
 	ws.clientsMu.Unlock()
+	ws.cancelUnwatchedRun(viewing)
 	if teardown {
 		b.teardown(ws)
 	}
@@ -775,8 +782,10 @@ func (b *Backend) releaseHoldLocked(ws *Workspace, clientID string) {
 		cs.holdTimer = nil
 	}
 	teardown := false
+	viewing := ""
 	if cs.streams == 0 {
 		delete(ws.clients, clientID)
+		viewing = cs.currentSessionID
 		teardown = len(ws.clients) == 0
 	} else {
 		// The client gave up its claim while streams are still open, which
@@ -785,6 +794,7 @@ func (b *Backend) releaseHoldLocked(ws *Workspace, clientID string) {
 		cs.released = true
 	}
 	ws.clientsMu.Unlock()
+	ws.cancelUnwatchedRun(viewing)
 	if teardown {
 		b.teardown(ws)
 	}
@@ -805,6 +815,7 @@ func (b *Backend) detachStream(ws *Workspace, clientID string) {
 		cs.streams--
 	}
 	teardown := false
+	viewing := ""
 	if cs.streams == 0 && cs.holdTimer == nil {
 		if grace > 0 && !cs.released {
 			// The stream dropped without the client releasing its claim, so
@@ -816,13 +827,42 @@ func (b *Backend) detachStream(ws *Workspace, clientID string) {
 			})
 		} else {
 			delete(ws.clients, clientID)
+			viewing = cs.currentSessionID
 			teardown = len(ws.clients) == 0
 		}
 	}
 	ws.clientsMu.Unlock()
+	ws.cancelUnwatchedRun(viewing)
 	if teardown {
 		b.teardown(ws)
 	}
+}
+
+// cancelUnwatchedRun cancels the run in sessionID unless a client left on
+// the workspace is still viewing that session. Callers pass the session a
+// client was viewing when its claim on the workspace ended, and must not
+// hold w.clientsMu. Permission prompts and questions are only delivered to
+// a session's viewers, so a run nobody views would otherwise go on
+// headless and wait forever on the first prompt it raises; quitting crush
+// in local mode cancels its runs the same way. A client inside its detach
+// grace still counts as a viewer, since it is expected back.
+func (w *Workspace) cancelUnwatchedRun(sessionID string) {
+	if sessionID == "" || w.App == nil || w.AgentCoordinator == nil {
+		return
+	}
+	w.clientsMu.Lock()
+	for _, cs := range w.clients {
+		if cs.currentSessionID == sessionID {
+			w.clientsMu.Unlock()
+			return
+		}
+	}
+	w.clientsMu.Unlock()
+	if w.AgentCoordinator.IsSessionBusy(sessionID) {
+		slog.Info("Cancelling run in a session no client is viewing",
+			"workspace", w.ID, "session_id", sessionID)
+	}
+	w.AgentCoordinator.Cancel(sessionID)
 }
 
 // teardown removes the workspace from the index, shuts down its

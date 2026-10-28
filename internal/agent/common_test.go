@@ -81,7 +81,7 @@ func testEnv(t *testing.T) fakeEnv {
 	// on a permission prompt.
 	permissions.SetPermissionMode(permission.PermissionModeSysadmin)
 	history := history.NewService(q, conn)
-	filetrackerService := filetracker.NewService(q)
+	filetrackerService := filetracker.NewService(q, workingDir)
 	lspClients := csync.NewMap[string, *lsp.Client]()
 
 	t.Cleanup(func() {

@@ -133,7 +133,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		History:     files,
 		Permissions: permSvc,
 		Questions:   question.NewService(),
-		FileTracker: filetracker.NewService(q),
+		FileTracker: filetracker.NewService(q, store.WorkingDir()),
 		Pinentry:    pinentry.DefaultService(),
 		LSPManager:  lsp.NewManager(store),
 		Skills:      skillsMgr,

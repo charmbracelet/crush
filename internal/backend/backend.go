@@ -121,6 +121,13 @@ type Backend struct {
 	// be handed a workspace on a process that is already leaving.
 	// [Backend.ShutdownWorkspaces] sets it too, for an external stop.
 	closing bool
+	// teardowns counts the workspace shutdowns [Backend.teardown] has taken
+	// over but not finished. Their workspaces have left the map, so
+	// [Backend.ShutdownWorkspaces] waits on this too rather than let the
+	// process exit halfway through one. Add happens under mu right after a
+	// workspace is unregistered, which cannot happen once ShutdownWorkspaces
+	// has latched closing and emptied the map, so no Add races its Wait.
+	teardowns sync.WaitGroup
 	// retired holds the IDs of clients that announced their exit via
 	// RetireClient. Creates from a retired client are refused, which is what
 	// lets a client release a workspace whose ID it never learned.
@@ -869,6 +876,9 @@ func (b *Backend) teardown(ws *Workspace) {
 		b.mu.Unlock()
 		return
 	}
+	// This call now owns the shutdown; count it while mu is still held so
+	// a concurrent ShutdownWorkspaces waits for it (see b.teardowns).
+	b.teardowns.Add(1)
 	// Arm (or, with lingering disabled, request) the idle shutdown. It
 	// only proceeds once there is genuinely nothing left: no live
 	// workspaces AND no create in flight. Deferring via the linger lets a
@@ -877,7 +887,12 @@ func (b *Backend) teardown(ws *Workspace) {
 	shutdownNow := b.scheduleShutdownIfIdleLocked()
 	b.mu.Unlock()
 
-	ws.invokeShutdown()
+	// Done is deferred so a shutdown that panics, which the HTTP layer
+	// recovers from, cannot leave a server stop waiting on it.
+	func() {
+		defer b.teardowns.Done()
+		ws.invokeShutdown()
+	}()
 
 	if shutdownNow {
 		slog.Info("Last workspace removed, shutting down server...")
@@ -1118,7 +1133,9 @@ func (b *Backend) Config() *config.ConfigStore {
 
 // ShutdownWorkspaces refuses new creates and tears down every hosted
 // workspace in parallel, so interrupted work is recorded before exit. It
-// returns ctx's error, naming the stragglers in the log, if ctx ends first.
+// also waits for teardowns already under way, such as one started by an
+// expired detach grace. It returns ctx's error, naming the stragglers in
+// the log, if ctx ends first.
 func (b *Backend) ShutdownWorkspaces(ctx context.Context) error {
 	b.mu.Lock()
 	b.closing = true
@@ -1144,6 +1161,7 @@ func (b *Backend) ShutdownWorkspaces(ctx context.Context) error {
 	done := make(chan struct{})
 	go func() {
 		wg.Wait()
+		b.teardowns.Wait()
 		close(done)
 	}()
 

@@ -1209,6 +1209,13 @@ func createTransport(ctx context.Context, cfg *config.ConfigStore, name string, 
 			return nil, nil, err
 		}
 		cmd := exec.CommandContext(ctx, home.Long(command), args...)
+		// Start the server in the workspace directory, not the process cwd.
+		// In client/server mode one process hosts every workspace and keeps
+		// the cwd of whichever client spawned it, so a relative command or
+		// argument would otherwise resolve against another project.
+		if cfg != nil {
+			cmd.Dir = cfg.WorkingDir()
+		}
 		cmd.Env = append(os.Environ(), envs...)
 		// Run the child in its own process group and kill the whole group when
 		// the session context is cancelled. A stdio server often spawns its own
@@ -1482,6 +1489,7 @@ func stdioCheck(old *exec.Cmd) error {
 		args = args[1:]
 	}
 	cmd := exec.CommandContext(ctx, old.Path, args...)
+	cmd.Dir = old.Dir
 	cmd.Env = old.Env
 	cmd.WaitDelay = stdioCheckTimeout
 	out, err := cmd.CombinedOutput()

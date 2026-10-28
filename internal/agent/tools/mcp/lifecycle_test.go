@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -543,4 +545,21 @@ func TestStdioCheck_DoesNotDuplicateArgv0(t *testing.T) {
 		"the re-run must execute the original command, not a duplicated argv0")
 	require.NotContains(t, err.Error(), "cannot execute binary file",
 		"a duplicated argv0 makes the shell try to exec itself as a script")
+}
+
+// TestStdioCheck_KeepsWorkingDir pins that the diagnostic re-run starts in the
+// failed server's directory. Otherwise a server referenced by a relative path
+// re-runs in the process cwd and reports "no such file" instead of the
+// server's real startup output.
+func TestStdioCheck_KeepsWorkingDir(t *testing.T) {
+	withLongStdioCheckTimeout(t)
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "server.sh"),
+		[]byte("echo 'real startup error'; exit 3\n"), 0o644))
+	cmd := exec.CommandContext(t.Context(), "sh", "server.sh")
+	cmd.Dir = dir
+
+	err := stdioCheck(cmd)
+	require.ErrorContains(t, err, "real startup error",
+		"the re-run must start in the same directory as the failed server")
 }

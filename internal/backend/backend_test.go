@@ -1883,3 +1883,45 @@ func TestShutdownWorkspaces_GivesUpAtDeadline(t *testing.T) {
 	require.ErrorIs(t, b.ShutdownWorkspaces(ctx), context.DeadlineExceeded)
 	require.Zero(t, b.workspaces.Len())
 }
+
+// TestShutdownWorkspaces_WaitsForTeardownInFlight covers a server told to
+// stop while a workspace whose client vanished is still being torn down by
+// its expired detach grace. That workspace has already left the index, but
+// the stop must wait for it all the same, or the process exits halfway
+// through its shutdown.
+func TestShutdownWorkspaces_WaitsForTeardownInFlight(t *testing.T) {
+	t.Parallel()
+
+	b, _ := newTestBackend(t)
+	b.SetDetachGrace(10 * time.Millisecond)
+	b.SetIdleShutdownDelay(time.Hour)
+	ws, _ := insertTestWorkspace(t, b, "/tmp/tearing-down")
+	started, release := make(chan struct{}), make(chan struct{})
+	open := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(open)
+	var finished atomic.Bool
+	ws.shutdownFn = func() {
+		close(started)
+		<-release
+		finished.Store(true)
+	}
+
+	// The stream drops and the client never comes back, so the grace timer
+	// runs the teardown on its own goroutine.
+	cid := newClientID(t)
+	b.registerClient(ws, cid)
+	require.NoError(t, b.AttachClient(ws.ID, cid))
+	b.DetachClient(ws.ID, cid)
+	<-started
+
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	require.ErrorIs(t, b.ShutdownWorkspaces(ctx), context.DeadlineExceeded,
+		"the stop must wait for the teardown in flight, for as long as ctx allows")
+
+	done := make(chan error, 1)
+	go func() { done <- b.ShutdownWorkspaces(t.Context()) }()
+	open()
+	require.NoError(t, <-done)
+	require.True(t, finished.Load(), "the stop returned before the teardown finished")
+}

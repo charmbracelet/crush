@@ -472,7 +472,7 @@ func (a *sessionAgent) drainQueueForStep(sessionID string) (fold, canceledWithRu
 	queuedCalls, _ := a.messageQueue.Get(sessionID)
 	var keep []SessionAgentCall
 	for _, queued := range queuedCalls {
-		if a.canceledBySeq(sessionID, queued.acceptSeq) {
+		if a.canceledBySeq(sessionID, queued.acceptSeq) && !carriesReport(queued) {
 			if queued.RunID != "" {
 				canceledWithRunID = append(canceledWithRunID, queued)
 			}
@@ -536,7 +536,36 @@ func (a *sessionAgent) clearQueueAndNotify(sessionID string) {
 	if !ok {
 		return
 	}
+	a.recordQueuedReports(queued)
 	a.publishCanceledQueueDrops(queued)
+}
+
+// carriesReport reports whether a queued call delivers a subagent report.
+// A report records work already done, so a cancel never withdraws it.
+func carriesReport(call SessionAgentCall) bool {
+	return slices.ContainsFunc(call.PromptParts, func(part message.ContentPart) bool {
+		_, ok := part.(message.SubAgentReport)
+		return ok
+	})
+}
+
+// recordQueuedReports writes the reports among cleared calls to the
+// transcript without starting a turn, so cancelling a turn cannot lose them.
+func (a *sessionAgent) recordQueuedReports(calls []SessionAgentCall) {
+	for _, call := range calls {
+		if !carriesReport(call) {
+			continue
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_, err := a.messages.Create(ctx, call.SessionID, message.CreateMessageParams{
+			Role:  message.User,
+			Parts: call.PromptParts,
+		})
+		cancel()
+		if err != nil {
+			slog.Error("Failed to record queued subagent report", "session_id", call.SessionID, "error", err)
+		}
+	}
 }
 
 // clearPendingCancel removes any pending-cancel mark for sessionID. It
@@ -1329,7 +1358,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		var kept []SessionAgentCall
 		var canceledRunIDDrops []SessionAgentCall
 		for _, q := range queuedMessages {
-			if q.acceptSeq == 0 || q.acceptSeq <= mark {
+			if (q.acceptSeq == 0 || q.acceptSeq <= mark) && !carriesReport(q) {
 				if q.RunID != "" {
 					canceledRunIDDrops = append(canceledRunIDDrops, q)
 				}

@@ -50,7 +50,7 @@ type AgentDispatchParams struct {
 	// session's sub-agent model with its configured settings.
 	Model          string `json:"model,omitempty" description:"The model ID for this sub-agent, as used by the provider API. Omit provider to use the parent agent's provider. Other settings default to the model's own"`
 	Provider       string `json:"provider,omitempty" description:"The provider ID for the overridden model; requires model. Defaults to the parent agent's provider when only model is given"`
-	Think          bool   `json:"think,omitempty" description:"Enable thinking for a model that supports reasoning, instead of the model's default"`
+	Think          *bool  `json:"think,omitempty" description:"Turn thinking on or off for a model that supports reasoning, instead of the model's default"`
 	ReasoningLevel string `json:"reasoning_level,omitempty" description:"The reasoning effort for a model that supports it (e.g. low, medium, high), instead of the model's default"`
 }
 
@@ -73,7 +73,7 @@ type AgentDispatchResponseMetadata struct {
 	Label          string `json:"label"`
 	Model          string `json:"model,omitempty"`
 	Provider       string `json:"provider,omitempty"`
-	Think          bool   `json:"think,omitempty"`
+	Think          *bool  `json:"think,omitempty"`
 	ReasoningLevel string `json:"reasoning_level,omitempty"`
 	ReasoningOnly  bool   `json:"reasoning_only,omitempty"`
 	// RunModel is provider/model for display; rehydration ignores it.
@@ -390,8 +390,10 @@ func (c *coordinator) agentDispatchTool(ctx context.Context, parentAgentID strin
 			if hasOverride {
 				meta.Model = sel.Model
 				meta.Provider = sel.Provider
-				meta.Think = sel.Think
-				meta.ReasoningLevel = sel.ReasoningEffort
+				// Only what the call asked for, so a resume reapplies that
+				// rather than the default model's own settings at the time.
+				meta.Think = params.Think
+				meta.ReasoningLevel = strings.TrimSpace(params.ReasoningLevel)
 				meta.ReasoningOnly = strings.TrimSpace(params.Model) == ""
 			}
 			return fantasy.WithResponseMetadata(
@@ -738,7 +740,7 @@ func (c *coordinator) rehydrateDispatch(ctx context.Context, parentSessionID, la
 	// has now. Either way the override is re-resolved against the live
 	// config: if it no longer serves, the sub-agent cannot be resumed
 	// rather than silently dropping back to the session default.
-	if record.Model != "" || record.Provider != "" || record.Think || record.ReasoningLevel != "" {
+	if record.Model != "" || record.Provider != "" || record.Think != nil || record.ReasoningLevel != "" {
 		params := AgentDispatchParams{
 			Think:          record.Think,
 			ReasoningLevel: record.ReasoningLevel,

@@ -46,16 +46,8 @@ func (c *coordinator) rebuildModels(ctx context.Context) error {
 	}
 	c.models.Set(coordinatorModels{large: large, subLarge: subLarge, small: small})
 
-	// Refresh the override models from the same live config, so a sub-agent
-	// running on an overridden model picks up credential and config changes
-	// the same way the shared agents do. A failed refresh keeps the previous
-	// build: the alternative, dropping the override, would silently move a
-	// running sub-agent to the session default.
-	c.overrideModelsMu.Lock()
-	for _, entry := range c.overrideModels {
-		entry.refresh(ctx, c)
-	}
-	c.overrideModelsMu.Unlock()
+	// Override models rebuild lazily on their next use.
+	c.modelsGen.Add(1)
 	return nil
 }
 
@@ -67,84 +59,67 @@ type overrideModelKey struct {
 	effort   string
 }
 
-// overrideModel is one per-dispatch model selection together with its current
-// build. It is always built as a sub-agent model, so Copilot in particular
-// bills it as agent-initiated like any other sub-agent. The build is guarded
-// so rebuildModels can swap it under a running dispatch, and the model
-// function an overridden agent serves hands out current() on every turn
-// rather than closing over one build.
+// overrideModel is the shared build of one override selection. It is built
+// as a sub-agent model, so Copilot bills it as agent-initiated.
 type overrideModel struct {
 	sel config.SelectedModel
 
 	mu    sync.Mutex
 	model Model
+	gen   uint64 // c.modelsGen the build was made under.
 }
 
-// current returns the latest build of the selection. Before the first build
-// it is the zero Model; the dispatch that requested the override always
-// builds before the agent exists, so agents only ever see a real one.
-func (o *overrideModel) current() Model {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	return o.model
+// current returns the build, rebuilding it first if the shared models were
+// rebuilt since. A failed rebuild keeps the old build rather than moving a
+// running sub-agent onto the session default.
+func (o *overrideModel) current(c *coordinator) Model {
+	model, _ := o.refresh(c)
+	return model
 }
 
-// build produces the first build of the selection. The dispatch that
-// requested the override is refused when this fails.
-func (o *overrideModel) build(ctx context.Context, c *coordinator) error {
+func (o *overrideModel) refresh(c *coordinator) (Model, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	if o.model.Model != nil {
-		return nil
+	gen := c.modelsGen.Load()
+	if o.gen == gen {
+		return o.model, nil
 	}
-	model, err := c.buildModelFromSelection(ctx, o.sel, true)
+	model, err := c.buildModelFromSelection(context.Background(), o.sel, true)
 	if err != nil {
-		return err
+		if o.model.Model != nil {
+			slog.Warn("Failed to refresh an overridden sub-agent model",
+				"model", o.sel.Model, "provider", o.sel.Provider, "error", err)
+		}
+		return o.model, err
 	}
-	o.model = model
-	return nil
+	o.model, o.gen = model, gen
+	return o.model, nil
 }
 
-// refresh rebuilds the selection from the live config, keeping the previous
-// build when the rebuild fails. Building and refreshing both hold o.mu and
-// rebuildModels holds c.rebuildMu across every refresh, so a build can never
-// publish a pre-rebuild model over a post-rebuild one.
-func (o *overrideModel) refresh(ctx context.Context, c *coordinator) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	model, err := c.buildModelFromSelection(ctx, o.sel, true)
-	if err != nil {
-		slog.Warn(
-			"Failed to refresh an overridden sub-agent model",
-			"model", o.sel.Model,
-			"provider", o.sel.Provider,
-			"error", err,
-		)
-		return
-	}
-	o.model = model
-}
-
-// overrideModelEntry returns the shared build of a selection, creating it on
-// first use, so dispatches on the same selection share one model.
-func (c *coordinator) overrideModelEntry(sel config.SelectedModel) *overrideModel {
-	key := overrideModelKey{
-		provider: sel.Provider,
-		model:    sel.Model,
-		think:    sel.Think,
-		effort:   sel.ReasoningEffort,
-	}
+// overrideModel returns the shared, built model for a selection. A selection
+// that fails its first build is not cached, so a later dispatch tries afresh.
+func (c *coordinator) overrideModel(sel config.SelectedModel) (*overrideModel, error) {
+	key := overrideModelKey{provider: sel.Provider, model: sel.Model, think: sel.Think, effort: sel.ReasoningEffort}
 	c.overrideModelsMu.Lock()
-	defer c.overrideModelsMu.Unlock()
 	if c.overrideModels == nil {
 		c.overrideModels = make(map[overrideModelKey]*overrideModel)
 	}
 	entry, ok := c.overrideModels[key]
 	if !ok {
-		entry = &overrideModel{sel: sel}
+		entry = &overrideModel{sel: sel, gen: ^uint64(0)}
 		c.overrideModels[key] = entry
 	}
-	return entry
+	c.overrideModelsMu.Unlock()
+
+	if model, err := entry.refresh(c); model.Model == nil {
+		c.overrideModelsMu.Lock()
+		if c.overrideModels[key] == entry {
+			delete(c.overrideModels, key)
+		}
+		c.overrideModelsMu.Unlock()
+		return nil, err
+	}
+	return entry, nil
 }
 
 func (c *coordinator) mainModels() ModelSet {

@@ -60,6 +60,8 @@ var DefaultCreateGrace = 30 * time.Second
 // new client can attach to — or create a workspace on — a server that is
 // already tearing down, and then observe its coder agent as "offline".
 // Any workspace create within the window cancels the pending shutdown.
+// A server that never hosts a workspace waits it out from the moment it
+// starts listening (see [Backend.ArmIdleShutdown]).
 // Overridable via CRUSH_SERVER_IDLE_TIMEOUT (seconds; 0 restores the
 // old shut-down-immediately behavior).
 var DefaultIdleShutdownDelay = 60 * time.Second
@@ -915,6 +917,33 @@ func (b *Backend) scheduleShutdownIfIdleLocked() (shutdownNow bool) {
 		b.shutdownTimer = time.AfterFunc(b.lingerDelay, b.maybeShutdown)
 	}
 	return false
+}
+
+// ArmIdleShutdown starts the idle-shutdown timer on a server that is not
+// hosting anything yet. It is meant to be called once the server is
+// reachable. The timer is otherwise armed only when a workspace or a
+// create goes away, so a server whose spawning client never got as far as
+// creating a workspace (it was interrupted, or failed first) would run
+// forever. The first create cancels the timer, and [Backend.maybeShutdown]
+// re-checks idleness when it fires.
+//
+// With lingering disabled (lingerDelay <= 0) a fresh server would exit
+// before its client could create anything, so it waits out the create
+// grace instead.
+func (b *Backend) ArmIdleShutdown() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.shutdownFn == nil || b.closing || b.shutdownTimer != nil {
+		return
+	}
+	if b.workspaces.Len() != 0 || b.pending != 0 {
+		return
+	}
+	delay := b.lingerDelay
+	if delay <= 0 {
+		delay = b.createGrace
+	}
+	b.shutdownTimer = time.AfterFunc(delay, b.maybeShutdown)
 }
 
 // cancelShutdownLocked stops any armed idle-shutdown timer. It must be

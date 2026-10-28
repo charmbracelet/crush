@@ -1314,22 +1314,8 @@ func (c *coordinator) isAnthropicThinking(model config.SelectedModel) bool {
 	return err == nil && opts.Thinking != nil
 }
 
-// legacyWireTypes maps the catwalk v2 provider types that catwalk's v3
-// data still carries for some providers (OpenAI, MiniMax, ...) onto the
-// wire types they mean.
-var legacyWireTypes = map[catwalk.Type]catwalk.Type{
-	"openai":        catwalk.TypeResponses,
-	"openai-compat": catwalk.TypeCompletions,
-	"openrouter":    catwalk.TypeCompletions,
-	"vercel":        catwalk.TypeCompletions,
-	"anthropic":     catwalk.TypeMessages,
-	"google":        catwalk.TypeCompletions,
-}
-
 func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model config.SelectedModel, isSubAgent bool, wireType catwalk.Type) (fantasy.Provider, error) {
-	if mapped, ok := legacyWireTypes[wireType]; ok {
-		wireType = mapped
-	}
+	wireType = config.NormalizeProviderType(wireType)
 	headers := maps.Clone(providerCfg.ExtraHeaders)
 	if headers == nil {
 		headers = make(map[string]string)

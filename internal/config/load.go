@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"encoding/json"
@@ -52,6 +53,17 @@ var legacyProviderTypes = map[catwalk.Type]catwalk.Type{
 	"google-vertex": catwalk.TypeCompletions,
 }
 
+// NormalizeProviderType maps a catwalk v2 provider type onto the v3
+// endpoint type describing the same API format. Types that are already
+// v3 or are not legacy names pass through unchanged. catwalk's v3 data
+// still carries v2 names for some providers (OpenAI, MiniMax, ...).
+func NormalizeProviderType(t catwalk.Type) catwalk.Type {
+	if mapped, ok := legacyProviderTypes[t]; ok {
+		return mapped
+	}
+	return t
+}
+
 // legacyModelPricingFields maps catwalk v2 model cost fields onto their
 // v3 pricing counterparts.
 var legacyModelPricingFields = map[string]string{
@@ -71,7 +83,9 @@ var legacyModelPricingFields = map[string]string{
 // fields; use migrateCatwalkV2File to persist the result.
 func migrateCatwalkV2(data []byte) ([]byte, bool) {
 	var root map[string]any
-	if err := json.Unmarshal(data, &root); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	if err := dec.Decode(&root); err != nil {
 		return data, false
 	}
 	providers, ok := root["providers"].(map[string]any)
@@ -604,9 +618,7 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 		providerConfig.ID = id
 		providerConfig.Name = cmp.Or(providerConfig.Name, id) // Use ID as name if not set
 		// Migrate legacy provider types onto the catwalk v3 endpoint types.
-		if mapped, ok := legacyProviderTypes[providerConfig.Type]; ok {
-			providerConfig.Type = mapped
-		}
+		providerConfig.Type = NormalizeProviderType(providerConfig.Type)
 		// Default to OpenAI chat completions if not set.
 		providerConfig.Type = cmp.Or(providerConfig.Type, catwalk.TypeCompletions)
 		if !slices.Contains(catwalk.KnownProviderTypes(), providerConfig.Type) &&

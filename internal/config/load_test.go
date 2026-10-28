@@ -2718,3 +2718,24 @@ func TestLoadFromConfigPaths_PersistsCatwalkV2Migration(t *testing.T) {
 		require.JSONEq(t, string(original), string(rewritten))
 	})
 }
+
+func TestMigrateCatwalkV2KeepsLargeIntegersExact(t *testing.T) {
+	in := `{"providers":{"x":{"models":[{"id":"m","context_window":9007199254740993,"cost_per_1m_in":0.1}]}}}`
+	out, changed := migrateCatwalkV2([]byte(in))
+	require.True(t, changed)
+	require.Contains(t, string(out), `"context_window":9007199254740993`)
+	require.Contains(t, string(out), `"pricing":{"input":0.1}`)
+}
+
+func TestNormalizeProviderType(t *testing.T) {
+	t.Parallel()
+	for in, want := range map[catwalk.Type]catwalk.Type{
+		"openai":                catwalk.TypeResponses,
+		"openai-compat":         catwalk.TypeCompletions,
+		"anthropic":             catwalk.TypeMessages,
+		catwalk.TypeCompletions: catwalk.TypeCompletions,
+		"hyper":                 "hyper",
+	} {
+		require.Equal(t, want, NormalizeProviderType(in), string(in))
+	}
+}

@@ -24,7 +24,7 @@ func dispatchCall(t *testing.T, id, label, access string) message.ToolCall {
 func TestDispatchHistory(t *testing.T) {
 	t.Parallel()
 
-	reopenMeta, err := json.Marshal(AgentSendResponseMetadata{Label: "a", Reopened: true})
+	reopenMeta, err := json.Marshal(AgentSendResponseMetadata{Label: SubagentName("a"), Reopened: true})
 	require.NoError(t, err)
 
 	msgs := []message.Message{
@@ -37,7 +37,7 @@ func TestDispatchHistory(t *testing.T) {
 			message.ToolResult{ToolCallID: "c2", Name: AgentDispatchToolName, Content: "started"},
 		}},
 		{ID: "u1", Role: message.User, Parts: []message.ContentPart{
-			message.SubAgentReport{Label: "a", Output: "done"},
+			message.SubAgentReport{Label: SubagentName("a"), Output: "done"},
 		}},
 		// A refused dispatch under a running label changes nothing.
 		{ID: "m2", Role: message.Assistant, Parts: []message.ContentPart{
@@ -205,7 +205,7 @@ func TestReconcileDispatchesReportsInterruptedOnce(t *testing.T) {
 	require.NoError(t, err)
 	_, err = env.messages.Create(ctx, parent.ID, message.CreateMessageParams{
 		Role:  message.User,
-		Parts: []message.ContentPart{message.SubAgentReport{Label: "reported", Output: "all good"}},
+		Parts: []message.ContentPart{message.SubAgentReport{Label: SubagentName("reported"), Output: "all good"}},
 	})
 	require.NoError(t, err)
 

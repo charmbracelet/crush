@@ -152,7 +152,7 @@ func TestDispatchHistoryBackgroundedBlockingCall(t *testing.T) {
 	t.Parallel()
 
 	bgMeta, err := json.Marshal(AgentBackgroundMetadata{
-		Label:        "search-1",
+		Label:        SubagentName("search-1"),
 		Backgrounded: true,
 		Access:       accessRead,
 		Task:         "search x",
@@ -188,7 +188,7 @@ func TestDispatchHistoryBackgroundedBlockingCall(t *testing.T) {
 
 	// A report under that label closes it.
 	msgs = append(msgs, message.Message{ID: "u1", Role: message.User, Parts: []message.ContentPart{
-		message.SubAgentReport{Label: "search-1", Output: "found"},
+		message.SubAgentReport{Label: SubagentName("search-1"), Output: "found"},
 	}})
 	rec = dispatchHistory(msgs).byLabel[SubagentName("search-1")]
 	require.NotNil(t, rec)

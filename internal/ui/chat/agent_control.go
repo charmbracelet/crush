@@ -101,7 +101,7 @@ func agentStatusRows(sty *styles.Styles, result *message.ToolResult, width int) 
 	}
 	rows := make([]string, len(meta.Agents))
 	for i, a := range meta.Agents {
-		state := a.State
+		state := string(a.State)
 		if a.Detail != "" {
 			state += " (" + a.Detail + ")"
 		}
@@ -126,13 +126,13 @@ func agentStatusRows(sty *styles.Styles, result *message.ToolResult, width int) 
 	return strings.Join(rows, "\n")
 }
 
-func agentStateIcon(sty *styles.Styles, state string) string {
+func agentStateIcon(sty *styles.Styles, state agent.SubagentState) string {
 	switch state {
-	case "finished":
+	case agent.SubagentFinished:
 		return toolIcon(sty, ToolStatusSuccess)
-	case "running", "stopping":
+	case agent.SubagentRunning, agent.SubagentStopping:
 		return toolIcon(sty, ToolStatusRunning)
-	case "stopped":
+	case agent.SubagentStopped:
 		return toolIcon(sty, ToolStatusCanceled)
 	default:
 		return toolIcon(sty, ToolStatusError)

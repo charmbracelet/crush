@@ -2000,7 +2000,7 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 		// is the only signal that the subagent finished.
 		if reports := msg.SubAgentReports(); len(reports) > 0 {
 			for _, report := range reports {
-				m.markDispatchReported(agent.SubagentName(report.Label))
+				m.markDispatchReported(report.Label)
 			}
 		} else {
 			m.lastUserMessageTime = msg.CreatedAt

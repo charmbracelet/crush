@@ -37,13 +37,10 @@ type dispatchRecord struct {
 	// agent or agentic_fetch tool when a blocking call was moved to the
 	// background. It picks which agent a follow-up reopens into.
 	Tool string
-	// The model override, from the call until its result records the
-	// resolved provider. Empty without one. ReasoningOnly means reasoning
-	// without a model, which rides the subagent's default selection.
-	Model         string
-	Provider      string
-	Reasoning     string
-	ReasoningOnly bool
+	// The model override as asked for; the result fills in the provider.
+	Model     string
+	Provider  string
+	Reasoning string
 	// Open is true while the latest dispatch or follow-up has no report.
 	Open       bool
 	LastReport *message.SubAgentReport
@@ -91,18 +88,17 @@ func dispatchHistory(msgs []message.Message) dispatchRecords {
 				access = accessRead
 			}
 			record := &dispatchRecord{
-				Label:         label,
-				Access:        access,
-				Task:          params.Prompt,
-				MessageID:     msg.ID,
-				CallID:        call.ID,
-				Tool:          AgentDispatchToolName,
-				Model:         strings.TrimSpace(params.Model),
-				Provider:      strings.TrimSpace(params.Provider),
-				Reasoning:     strings.TrimSpace(params.Reasoning),
-				ReasoningOnly: strings.TrimSpace(params.Model) == "" && strings.TrimSpace(params.Reasoning) != "",
-				Open:          true,
-				prev:          records.byLabel[label],
+				Label:     label,
+				Access:    access,
+				Task:      params.Prompt,
+				MessageID: msg.ID,
+				CallID:    call.ID,
+				Tool:      AgentDispatchToolName,
+				Model:     strings.TrimSpace(params.Model),
+				Provider:  strings.TrimSpace(params.Provider),
+				Reasoning: strings.TrimSpace(params.Reasoning),
+				Open:      true,
+				prev:      records.byLabel[label],
 			}
 			if record.prev == nil {
 				records.order = append(records.order, label)
@@ -140,13 +136,12 @@ func dispatchHistory(msgs []message.Message) dispatchRecords {
 				record.Model = meta.Model
 				record.Provider = meta.Provider
 				record.Reasoning = meta.Reasoning
-				record.ReasoningOnly = meta.ReasoningOnly
 			case AgentSendToolName:
 				var meta AgentSendResponseMetadata
 				if result.Metadata == "" || json.Unmarshal([]byte(result.Metadata), &meta) != nil || !meta.Reopened {
 					continue
 				}
-				if record, ok := records.byLabel[SubagentName(meta.Label)]; ok {
+				if record, ok := records.byLabel[meta.Label]; ok {
 					record.Open = true
 				}
 			case AgentToolName, tools.AgenticFetchToolName:
@@ -158,7 +153,7 @@ func dispatchHistory(msgs []message.Message) dispatchRecords {
 				if result.Metadata == "" || json.Unmarshal([]byte(result.Metadata), &meta) != nil || !meta.Backgrounded {
 					continue
 				}
-				label := SubagentName(meta.Label)
+				label := strings.TrimSpace(meta.Label)
 				if label == "" {
 					continue
 				}
@@ -183,7 +178,7 @@ func dispatchHistory(msgs []message.Message) dispatchRecords {
 			}
 		}
 		for _, report := range msg.SubAgentReports() {
-			if record, ok := records.byLabel[SubagentName(report.Label)]; ok {
+			if record, ok := records.byLabel[report.Label]; ok {
 				record.Open = false
 				record.LastReport = &report
 			}
@@ -297,13 +292,13 @@ type AgentStatusResponseMetadata struct {
 
 // AgentStatusSummary is one subagent's state, as agent_status reports it.
 type AgentStatusSummary struct {
-	Label     string  `json:"label"`
-	State     string  `json:"state"`
-	Detail    string  `json:"detail,omitempty"` // Stop reason.
-	Timing    string  `json:"timing,omitempty"` // "for 2m" or "5m ago".
-	Access    string  `json:"access"`
-	ToolCalls int     `json:"tool_calls"`
-	Cost      float64 `json:"cost,omitempty"`
+	Label     string        `json:"label"`
+	State     SubagentState `json:"state"`
+	Detail    string        `json:"detail,omitempty"` // Stop reason.
+	Timing    string        `json:"timing,omitempty"` // "for 2m" or "5m ago".
+	Access    string        `json:"access"`
+	ToolCalls int           `json:"tool_calls"`
+	Cost      float64       `json:"cost,omitempty"`
 }
 
 // summarizeDispatch reads one subagent's state. The registry is the
@@ -312,28 +307,28 @@ type AgentStatusSummary struct {
 func (c *coordinator) summarizeDispatch(parentSessionID string, record *dispatchRecord, activity subAgentProgress) AgentStatusSummary {
 	sum := AgentStatusSummary{
 		Label:     record.Label,
-		State:     "finished",
+		State:     SubagentFinished,
 		Access:    record.Access,
 		ToolCalls: activity.toolCalls,
 		Cost:      activity.cost,
 	}
 	if record.LastReport != nil && record.LastReport.Failed {
-		sum.State = "failed"
+		sum.State = SubagentFailed
 	}
 	childID := c.sessions.CreateAgentToolSessionID(record.MessageID, record.CallID)
 	entry, ok := c.dispatched.Get(dispatchKey(parentSessionID, record.Label))
 	if !ok || entry.SessionID != childID {
 		if record.Open {
-			sum.State, sum.Detail = "interrupted", "Crush exited"
+			sum.State, sum.Detail = SubagentInterrupted, "Crush exited"
 		}
 		return sum
 	}
 	snap := entry.snapshot()
-	sum.State = snap.State.String()
+	sum.State = snap.State.reported()
 	switch {
 	case snap.State == dispatchRunning:
 		if snap.StopReason != "" {
-			sum.State = "stopping"
+			sum.State = SubagentStopping
 		}
 		sum.Timing = "for " + formatElapsed(time.Since(snap.Started))
 	case !snap.Ended.IsZero():

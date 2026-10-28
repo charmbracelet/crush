@@ -379,15 +379,16 @@ func TestDispatchToolRunsOverrideModel(t *testing.T) {
 	require.Equal(t, SubagentName("ov"), meta.Label)
 	require.Equal(t, "mock-model", meta.Model)
 	require.Equal(t, "mock", meta.Provider, "a model-only dispatch records the inherited provider")
-	require.False(t, meta.ReasoningOnly, "a dispatch that named a model is not reasoning-only")
+	require.Empty(t, meta.Reasoning)
 
 	callCtx, call = newCall("c4", `{"prompt":"do","label":"thunk","reasoning":"high"}`)
 	resp, err = tool.Run(callCtx, call)
 	require.NoError(t, err)
 	require.False(t, resp.IsError, resp.Content)
+	meta = AgentDispatchResponseMetadata{}
 	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
 	require.Equal(t, SubagentName("thunk"), meta.Label)
-	require.True(t, meta.ReasoningOnly, "a dispatch that named no model is reasoning-only")
+	require.Empty(t, meta.Model, "reasoning alone records no model, so a resume rides the default")
 	require.Equal(t, "high", meta.Reasoning, "only the settings the call asked for are recorded")
 	entry, ok := c.dispatched.Get(dispatchKey(parent.ID, SubagentName("thunk")))
 	require.True(t, ok)
@@ -446,13 +447,7 @@ func TestRehydrateDispatchRestoresModelOverride(t *testing.T) {
 	// rides the default selection rather than an explicit model.
 	thunkInput, err := json.Marshal(AgentDispatchParams{Prompt: "do thunk", Label: "thunk", Reasoning: "high"})
 	require.NoError(t, err)
-	thunkMeta, err := json.Marshal(AgentDispatchResponseMetadata{
-		Label:         "thunk",
-		Model:         "mock-reasoner",
-		Provider:      "mock",
-		Reasoning:     "high",
-		ReasoningOnly: true,
-	})
+	thunkMeta, err := json.Marshal(AgentDispatchResponseMetadata{Label: SubagentName("thunk"), Reasoning: "high"})
 	require.NoError(t, err)
 
 	firstAssistant := assistant
@@ -526,14 +521,14 @@ func TestRehydrateDispatchRestoresModelOverride(t *testing.T) {
 	require.Equal(t, "other-model", entry.agent.Model().ModelCfg.Model)
 	require.Equal(t, "other", entry.agent.Model().ModelCfg.Provider)
 
-	// A reasoning-only override rides the default selection, keeping its
+	// A reasoning override rides the default selection, keeping its
 	// configured settings, instead of rebuilding a bare selection from the
 	// recorded model.
 	entry, err = c.rehydrateDispatch(ctx, parent.ID, SubagentName("thunk"))
 	require.NoError(t, err)
 	want := c.subAgentModels().Large.ModelCfg
 	want.ReasoningEffort = "high"
-	require.Equal(t, want, entry.agent.Model().ModelCfg, "a reasoning-only override keeps the default selection's settings")
+	require.Equal(t, want, entry.agent.Model().ModelCfg, "a reasoning override keeps the default selection's settings")
 
 	// A dispatch whose model no longer resolves is not silently resumed on
 	// the session default.

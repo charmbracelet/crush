@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -63,19 +62,23 @@ func ParseHostURL(host string) (*url.URL, error) {
 
 // DefaultHost returns the default server host.
 //
-// On Windows the address is a named pipe under \\.\pipe\. On Unix
-// platforms the socket lives in the per-user runtime directory
-// returned by [socketDir] and is named crush-<uid>.sock, falling
-// back to crush.sock when the current uid cannot be determined. If
-// the composed path would exceed [maxUnixSocketPathLen] bytes (the
-// macOS sun_path limit), we fall back to /tmp/crush-<uid>.sock so
-// the socket remains bindable.
+// On Windows the address is the named pipe \\.\pipe\crush-<sid>.sock,
+// where <sid> is the current user's SID. On Unix platforms the socket
+// lives in the per-user runtime directory returned by [socketDir] and
+// is named crush-<uid>.sock. If the composed path would exceed
+// [maxUnixSocketPathLen] bytes (the macOS sun_path limit), we fall back
+// to /tmp/crush-<uid>.sock so the socket remains bindable.
+//
+// The user's id keeps users from sharing a server, since the pipe
+// namespace and /tmp are machine-wide. If it cannot be determined,
+// DefaultHost returns "", which callers reject as an invalid host,
+// rather than a name every user would share.
 func DefaultHost() string {
-	sock := "crush.sock"
-	usr, err := user.Current()
-	if err == nil && usr.Uid != "" {
-		sock = fmt.Sprintf("crush-%s.sock", usr.Uid)
+	id := currentUserID()
+	if id == "" {
+		return ""
 	}
+	sock := fmt.Sprintf("crush-%s.sock", id)
 	if runtime.GOOS == "windows" {
 		return fmt.Sprintf("npipe:////./pipe/%s", sock)
 	}

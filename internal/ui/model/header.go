@@ -146,7 +146,7 @@ func renderHeaderDetails(
 
 	var parts []string
 
-	// Sub-agents work out of sight in compact mode, so the header carries
+	// Subagents work out of sight in compact mode, so the header carries
 	// a live count of how many are still going.
 	if runningSubAgents > 0 {
 		parts = append(parts, t.Header.Percentage.Render(fmt.Sprintf(

@@ -19,7 +19,7 @@ func dispatchItem(t *testing.T) *AgentToolMessageItem {
 		Finished: true,
 	}, &message.ToolResult{
 		ToolCallID: "call-1",
-		Content:    "Started sub-agent \"audit\".",
+		Content:    "Started subagent \"audit\".",
 	}, false, "/tmp")
 
 	dispatch, ok := item.(*AgentToolMessageItem)
@@ -35,15 +35,15 @@ func running(t *testing.T, dispatch *AgentToolMessageItem) bool {
 	return status.Running
 }
 
-// A dispatch call is answered the moment its sub-agent starts, so the
+// A dispatch call is answered the moment its subagent starts, so the
 // presence of a result says nothing about whether the work is done. Judging
-// it by the result alone leaves a finished sub-agent looking like it is
+// it by the result alone leaves a finished subagent looking like it is
 // still running after the session is reopened.
 func TestDispatchRunsUntilItReports(t *testing.T) {
 	t.Parallel()
 
 	dispatch := dispatchItem(t)
-	require.True(t, running(t, dispatch), "a launched sub-agent has not answered yet")
+	require.True(t, running(t, dispatch), "a launched subagent has not answered yet")
 	require.True(t, dispatch.Spinning())
 
 	dispatch.MarkDispatchReported()

@@ -9,7 +9,7 @@ import (
 )
 
 // TestEffectiveToolNamesByRunMode pins how run mode picks a delegation
-// style. A TUI can receive a sub-agent's report as a later turn, so
+// style. A TUI can receive a subagent's report as a later turn, so
 // delegation detaches; a headless run exits before one could arrive, so
 // delegation blocks instead.
 func TestEffectiveToolNamesByRunMode(t *testing.T) {
@@ -42,7 +42,7 @@ func TestEffectiveToolNamesByRunMode(t *testing.T) {
 			want:        []string{AgentToolName, "view"},
 		},
 		{
-			name:        "sub-agents neither fan out nor ask",
+			name:        "subagents neither fan out nor ask",
 			interactive: true,
 			isSubAgent:  true,
 			want:        []string{"view"},
@@ -71,7 +71,7 @@ func TestEffectiveToolNamesKeepsConfigAuthoritative(t *testing.T) {
 }
 
 // TestResolveSubAgentAccess covers how a requested access level maps onto a
-// sub-agent variant, including plan mode, which may only delegate work it
+// subagent variant, including plan mode, which may only delegate work it
 // could have done itself.
 func TestResolveSubAgentAccess(t *testing.T) {
 	t.Parallel()
@@ -118,7 +118,7 @@ func TestResolveSubAgentAccess(t *testing.T) {
 }
 
 // TestReadOnlyParent documents which parents may only launch read-only
-// sub-agents.
+// subagents.
 func TestReadOnlyParent(t *testing.T) {
 	t.Parallel()
 

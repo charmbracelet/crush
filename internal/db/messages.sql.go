@@ -156,7 +156,7 @@ LIMIT 200
 
 // Backs prompt history when no session is open. Needs
 // idx_messages_role_created_at to seek rather than scan the table.
-// Child sessions are excluded: a sub-agent's task prompt is a user
+// Child sessions are excluded: a subagent's task prompt is a user
 // message too, but the user never typed it, so it has no place in the
 // prompt history.
 func (q *Queries) ListAllUserMessages(ctx context.Context) ([]Message, error) {

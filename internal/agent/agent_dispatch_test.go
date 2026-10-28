@@ -46,7 +46,7 @@ func TestDispatchHistory(t *testing.T) {
 		{ID: "t2", Role: message.Tool, Parts: []message.ContentPart{
 			message.ToolResult{ToolCallID: "c3", Name: AgentDispatchToolName, Content: "already running", IsError: true},
 		}},
-		// A follow-up reopens a finished sub-agent.
+		// A follow-up reopens a finished subagent.
 		{ID: "t3", Role: message.Tool, Parts: []message.ContentPart{
 			message.ToolResult{ToolCallID: "c4", Name: AgentSendToolName, Metadata: string(reopenMeta)},
 		}},
@@ -58,7 +58,7 @@ func TestDispatchHistory(t *testing.T) {
 	a := records.byLabel["a"]
 	require.Equal(t, "c1", a.CallID)
 	require.Equal(t, accessRead, a.Access)
-	require.True(t, a.Open, "a reopened sub-agent is open again")
+	require.True(t, a.Open, "a reopened subagent is open again")
 	require.NotNil(t, a.LastReport)
 
 	b := records.byLabel["b"]
@@ -78,7 +78,7 @@ func TestDispatchedAgentStaleRunCannotSettleNewerRun(t *testing.T) {
 	_, first, ok := entry.claim()
 	require.True(t, ok)
 	_, _, ok = entry.claim()
-	require.False(t, ok, "a running sub-agent cannot be claimed twice")
+	require.False(t, ok, "a running subagent cannot be claimed twice")
 
 	entry.settle(first, false)
 	_, second, ok := entry.claim()
@@ -93,7 +93,7 @@ func TestDispatchedAgentStaleRunCannotSettleNewerRun(t *testing.T) {
 }
 
 // newDispatchTestCoordinator returns a coordinator with just enough wiring to
-// run detached sub-agents whose work is a stand-in function.
+// run detached subagents whose work is a stand-in function.
 func newDispatchTestCoordinator(t *testing.T) (*coordinator, fakeEnv) {
 	t.Helper()
 	sa, env := newStreamTestAgent(t)
@@ -105,7 +105,7 @@ func newDispatchTestCoordinator(t *testing.T) (*coordinator, fakeEnv) {
 	}, env
 }
 
-// startBlockingDispatch registers a running sub-agent whose run blocks until
+// startBlockingDispatch registers a running subagent whose run blocks until
 // it is stopped.
 func startBlockingDispatch(t *testing.T, c *coordinator, parentID, label string) *dispatchedAgent {
 	t.Helper()
@@ -127,11 +127,11 @@ func TestCancelLeavesDispatchedSubAgentsRunning(t *testing.T) {
 	require.NoError(t, err)
 
 	entry := startBlockingDispatch(t, c, parent.ID, "a")
-	require.True(t, c.IsSessionBusy(entry.SessionID), "a running sub-agent's session is busy")
+	require.True(t, c.IsSessionBusy(entry.SessionID), "a running subagent's session is busy")
 
 	c.Cancel(parent.ID)
 	time.Sleep(100 * time.Millisecond)
-	require.True(t, entry.running(), "interrupting the parent's turn must not stop its sub-agents")
+	require.True(t, entry.running(), "interrupting the parent's turn must not stop its subagents")
 
 	// Stopping it explicitly ends the run and records why, without a turn.
 	require.True(t, entry.stop("not needed"))
@@ -243,7 +243,7 @@ func TestAgentStatusToolReportsLiveAndInterruptedSubAgents(t *testing.T) {
 
 	// The live one is running in this process and has made a tool call.
 	childID := env.sessions.CreateAgentToolSessionID(assistant.ID, "c1")
-	_, err = env.sessions.CreateTaskSession(ctx, childID, parent.ID, "Sub-agent: live")
+	_, err = env.sessions.CreateTaskSession(ctx, childID, parent.ID, "Subagent: live")
 	require.NoError(t, err)
 	_, err = env.messages.Create(ctx, childID, message.CreateMessageParams{
 		Role: message.Assistant,

@@ -1133,7 +1133,7 @@ func resolvePlanTools(tools []string) []string {
 	return filterSlice(tools, planTools, true)
 }
 
-// resolveTaskTools returns the tools available to the task sub-agent: the
+// resolveTaskTools returns the tools available to the task subagent: the
 // read-only set plus bash, so it can run git diff, tests, and rg while
 // reviewing. It still cannot edit or write files.
 func resolveTaskTools(tools []string) []string {

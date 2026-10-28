@@ -27,7 +27,7 @@ func (c *coordinator) parentModel(parentAgentID string) Model {
 }
 
 // resolveModelOverride turns the dispatch tool's model-override params into
-// the model selection a sub-agent should run on. ok is false when no
+// the model selection a subagent should run on. ok is false when no
 // override was requested. A non-empty refusal means one was requested but
 // cannot be served; it goes back to the model so the call can be retried.
 func (c *coordinator) resolveModelOverride(params AgentDispatchParams, parentModel Model) (sel config.SelectedModel, ok bool, refusal string) {
@@ -40,10 +40,10 @@ func (c *coordinator) resolveModelOverride(params AgentDispatchParams, parentMod
 	case provider != "" && model == "":
 		return config.SelectedModel{}, false, "provider is given without model; pass model as well"
 	case model == "":
-		// Reasoning alone rides the sub-agent's default selection.
+		// Reasoning alone rides the subagent's default selection.
 		sub := c.subAgentModels().Large
 		if sub.Model == nil {
-			return config.SelectedModel{}, false, "no sub-agent model is configured"
+			return config.SelectedModel{}, false, "no subagent model is configured"
 		}
 		sel = sub.ModelCfg
 	default:
@@ -181,9 +181,9 @@ func (c *coordinator) overrideDispatchAgent(ctx context.Context, access string, 
 	return agent, sel, true, ""
 }
 
-// overrideTaskAgent builds a dedicated task sub-agent variant running on an
+// overrideTaskAgent builds a dedicated task subagent variant running on an
 // overridden model selection. The model function serves the selection's
-// current build, so a model refresh reaches a running sub-agent on its next
+// current build, so a model refresh reaches a running subagent on its next
 // turn.
 func (c *coordinator) overrideTaskAgent(ctx context.Context, access string, sel config.SelectedModel) (SessionAgent, string) {
 	entry, err := c.overrideModel(sel)
@@ -192,16 +192,16 @@ func (c *coordinator) overrideTaskAgent(ctx context.Context, access string, sel 
 	}
 	agentCfg, canWrite := c.taskAgentConfig(access)
 	// A group of its own: this build joins no one, and is fully set up
-	// before the dispatch registers the sub-agent.
+	// before the dispatch registers the subagent.
 	var ready errgroup.Group
 	agent, err := c.buildTaskAgent(ctx, &ready, agentCfg, canWrite, func() ModelSet {
 		return ModelSet{Large: entry.current(c), Small: c.subAgentModels().Small}
 	})
 	if err != nil {
-		return nil, "failed to start a sub-agent on the requested model: " + err.Error()
+		return nil, "failed to start a subagent on the requested model: " + err.Error()
 	}
 	if err := ready.Wait(); err != nil {
-		return nil, "failed to start a sub-agent on the requested model: " + err.Error()
+		return nil, "failed to start a subagent on the requested model: " + err.Error()
 	}
 	return agent, ""
 }

@@ -15,11 +15,11 @@ import (
 )
 
 // subAgentSeq provides unique IDs for SubAgentReportItems even when two
-// sub-agents share a label across sessions.
+// subagents share a label across sessions.
 var subAgentSeq atomic.Int64
 
-// SubAgentReportItem renders the result a detached sub-agent reported back.
-// It reads as a tool call rather than as a message: a sub-agent finishing is
+// SubAgentReportItem renders the result a detached subagent reported back.
+// It reads as a tool call rather than as a message: a subagent finishing is
 // the same kind of event as a tool returning, and the transcript stays legible
 // when every non-prose block shares one shape.
 type SubAgentReportItem struct {
@@ -59,7 +59,7 @@ func NewSubAgentReportItem(sty *styles.Styles, label, model, output string, fail
 func (s *SubAgentReportItem) ID() string          { return s.id }
 func (s *SubAgentReportItem) FilterValue() string { return s.label + " " + s.output }
 
-// Finished implements [MessageItem]. A report only exists once the sub-agent
+// Finished implements [MessageItem]. A report only exists once the subagent
 // has finished, so it is never in flight.
 func (s *SubAgentReportItem) Finished() bool { return true }
 

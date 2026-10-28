@@ -83,5 +83,5 @@ func TestSubAgentReportToAIMessage(t *testing.T) {
 
 	text, ok := aiMsgs[0].Content[0].(fantasy.TextPart)
 	require.True(t, ok)
-	require.Equal(t, "<sub-agent-report label=\"auth-review\">\ntwo findings\n</sub-agent-report>", text.Text)
+	require.Equal(t, "<subagent-report label=\"auth-review\">\ntwo findings\n</subagent-report>", text.Text)
 }

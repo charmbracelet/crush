@@ -19,7 +19,7 @@ var agentToolDescription string
 
 type AgentParams struct {
 	Prompt string `json:"prompt" description:"The task for the agent to perform"`
-	Access string `json:"access,omitempty" description:"\"read\" (default) for a sub-agent that can only inspect the codebase, or \"write\" for one that can also edit files"`
+	Access string `json:"access,omitempty" description:"\"read\" (default) for a subagent that can only inspect the codebase, or \"write\" for one that can also edit files"`
 }
 
 const (
@@ -31,7 +31,7 @@ const (
 
 // writeAgentConfig derives the read-write variant of the task agent: the same
 // agent, given the coder's tools. The agent tool itself is withheld so
-// sub-agents cannot fan out again.
+// subagents cannot fan out again.
 func writeAgentConfig(cfg *config.Config) config.Agent {
 	task := cfg.Agents[config.AgentTask]
 	coder, ok := cfg.Agents[config.AgentCoder]
@@ -49,14 +49,14 @@ func writeAgentConfig(cfg *config.Config) config.Agent {
 }
 
 // readOnlyParent reports whether a parent agent may only delegate to
-// read-only sub-agents. Plan mode promises it cannot change files, and that
+// read-only subagents. Plan mode promises it cannot change files, and that
 // promise has to cover the work it hands off as well as the work it does
 // itself.
 func readOnlyParent(parentAgentID string) bool {
 	return parentAgentID == config.AgentPlan
 }
 
-// resolveSubAgent picks the sub-agent variant for a requested access level,
+// resolveSubAgent picks the subagent variant for a requested access level,
 // returning a message for the model when there is no such variant.
 func resolveSubAgent(agents map[string]SessionAgent, access string, readOnly bool) (SessionAgent, string) {
 	if access == "" {
@@ -66,12 +66,12 @@ func resolveSubAgent(agents map[string]SessionAgent, access string, readOnly boo
 		return agent, ""
 	}
 	if readOnly && access == accessWrite {
-		return nil, `plan mode sub-agents are read-only; omit access or pass "read"`
+		return nil, `plan mode subagents are read-only; omit access or pass "read"`
 	}
 	return nil, `access must be "read" or "write"`
 }
 
-// taskAgents builds the variants of the task sub-agent. Both the synchronous
+// taskAgents builds the variants of the task subagent. Both the synchronous
 // agent tool and the detached dispatch tool draw from these. A read-only
 // parent gets only the read variant, so the write one is never built rather
 // than built and withheld.
@@ -113,9 +113,9 @@ func (c *coordinator) taskAgentConfig(access string) (config.Agent, bool) {
 	return c.cfg.Config().Agents[config.AgentTask], false
 }
 
-// buildTaskAgent schedules one variant of the task sub-agent into ready; the
+// buildTaskAgent schedules one variant of the task subagent into ready; the
 // caller waits on the group, so several variants can build concurrently.
-// modelsFn, when set, replaces the shared sub-agent model set; a dispatch
+// modelsFn, when set, replaces the shared subagent model set; a dispatch
 // with a model override uses it to run the variant on the overridden model.
 func (c *coordinator) buildTaskAgent(ctx context.Context, ready *errgroup.Group, agentCfg config.Agent, canWrite bool, modelsFn func() ModelSet) (SessionAgent, error) {
 	pr, err := taskPrompt(

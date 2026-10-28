@@ -21,10 +21,10 @@ var agentStatusToolDescription string
 const AgentStatusToolName = "agent_status"
 
 type AgentStatusParams struct {
-	Label string `json:"label,omitempty" description:"Show detail for this sub-agent only: its task, recent tool calls, and latest output. Omit to list every sub-agent in this session"`
+	Label string `json:"label,omitempty" description:"Show detail for this subagent only: its task, recent tool calls, and latest output. Omit to list every subagent in this session"`
 }
 
-// dispatchRecord is what a parent transcript says about one sub-agent label:
+// dispatchRecord is what a parent transcript says about one subagent label:
 // the latest dispatch under it, and whether that dispatch is still waiting
 // on a report.
 type dispatchRecord struct {
@@ -39,7 +39,7 @@ type dispatchRecord struct {
 	Tool string
 	// The model override, from the call until its result records the
 	// resolved provider. Empty without one. ReasoningOnly means reasoning
-	// without a model, which rides the sub-agent's default selection.
+	// without a model, which rides the subagent's default selection.
 	Model         string
 	Provider      string
 	Reasoning     string
@@ -59,12 +59,12 @@ type dispatchRecords struct {
 
 // dispatchHistory replays a parent transcript in order to find, for each
 // label, its latest dispatch and whether it has reported since. A label can
-// be reused across a long session, and a finished sub-agent can be reopened
+// be reused across a long session, and a finished subagent can be reopened
 // by a follow-up, so only replaying the events in order gets this right.
 func dispatchHistory(msgs []message.Message) dispatchRecords {
 	records := dispatchRecords{byLabel: map[string]*dispatchRecord{}}
 	byCallID := map[string]*dispatchRecord{}
-	// bgCallMsg records the message a blocking sub-agent call lives in, so a
+	// bgCallMsg records the message a blocking subagent call lives in, so a
 	// later "moved to background" result can derive its child session from
 	// the same IDs the run used.
 	bgCallMsg := map[string]string{}
@@ -150,7 +150,7 @@ func dispatchHistory(msgs []message.Message) dispatchRecords {
 					record.Open = true
 				}
 			case AgentToolName, tools.AgenticFetchToolName:
-				// A blocking sub-agent that outran the threshold and was
+				// A blocking subagent that outran the threshold and was
 				// moved to the background behaves from here on exactly
 				// like a dispatch: its result carries the label it took,
 				// and its report lands later under that label.
@@ -192,7 +192,7 @@ func dispatchHistory(msgs []message.Message) dispatchRecords {
 	return records
 }
 
-// reconcileDispatches tells a parent session about sub-agents that were cut
+// reconcileDispatches tells a parent session about subagents that were cut
 // off when Crush last exited. The transcript shows them dispatched and never
 // reporting, and nothing in this process is running them, so without this the
 // parent would wait forever on a report that is never coming.
@@ -220,13 +220,13 @@ func (c *coordinator) reconcileDispatches(ctx context.Context, agent SessionAgen
 		}
 		c.recordDispatchReport(sessionID, message.SubAgentReport{
 			Label:  label,
-			Output: "Interrupted: Crush exited while this sub-agent was running. Its session is kept; agent_send resumes it with its work in context.",
+			Output: "Interrupted: Crush exited while this subagent was running. Its session is kept; agent_send resumes it with its work in context.",
 			Failed: true,
 		})
 	}
 }
 
-// agentStatusTool lets the main agent see what its sub-agents are doing.
+// agentStatusTool lets the main agent see what its subagents are doing.
 func (c *coordinator) agentStatusTool() fantasy.AgentTool {
 	return fantasy.NewParallelAgentTool(
 		AgentStatusToolName,
@@ -247,7 +247,7 @@ func (c *coordinator) agentStatusTool() fantasy.AgentTool {
 				record, ok := records.byLabel[label]
 				if !ok {
 					return fantasy.NewTextErrorResponse(fmt.Sprintf(
-						"no sub-agent %q; known: %s",
+						"no subagent %q; known: %s",
 						label, knownLabels(records),
 					)), nil
 				}
@@ -257,7 +257,7 @@ func (c *coordinator) agentStatusTool() fantasy.AgentTool {
 			}
 
 			if len(records.order) == 0 {
-				return fantasy.NewTextResponse("No sub-agents dispatched."), nil
+				return fantasy.NewTextResponse("No subagents dispatched."), nil
 			}
 			var (
 				lines []string
@@ -295,7 +295,7 @@ type AgentStatusResponseMetadata struct {
 	Agents []AgentStatusSummary `json:"agents"`
 }
 
-// AgentStatusSummary is one sub-agent's state, as agent_status reports it.
+// AgentStatusSummary is one subagent's state, as agent_status reports it.
 type AgentStatusSummary struct {
 	Label     string  `json:"label"`
 	State     string  `json:"state"`
@@ -306,8 +306,8 @@ type AgentStatusSummary struct {
 	Cost      float64 `json:"cost,omitempty"`
 }
 
-// summarizeDispatch reads one sub-agent's state. The registry is the
-// authority on a sub-agent this process is running; the transcript covers
+// summarizeDispatch reads one subagent's state. The registry is the
+// authority on a subagent this process is running; the transcript covers
 // the rest, including those cut off by a restart.
 func (c *coordinator) summarizeDispatch(parentSessionID string, record *dispatchRecord, activity subAgentProgress) AgentStatusSummary {
 	sum := AgentStatusSummary{
@@ -345,7 +345,7 @@ func (c *coordinator) summarizeDispatch(parentSessionID string, record *dispatch
 	return sum
 }
 
-// describeDispatch renders one sub-agent's status for the model.
+// describeDispatch renders one subagent's status for the model.
 func (c *coordinator) describeDispatch(ctx context.Context, parentSessionID string, record *dispatchRecord, detail bool) (string, AgentStatusSummary) {
 	activity := c.subAgentActivity(ctx, c.sessions.CreateAgentToolSessionID(record.MessageID, record.CallID))
 	sum := c.summarizeDispatch(parentSessionID, record, activity)
@@ -385,7 +385,7 @@ func (c *coordinator) describeDispatch(ctx context.Context, parentSessionID stri
 	return sb.String(), sum
 }
 
-// subAgentProgress summarizes what a sub-agent session has done so far.
+// subAgentProgress summarizes what a subagent session has done so far.
 type subAgentProgress struct {
 	toolCalls   int
 	lastCall    string
@@ -473,7 +473,7 @@ type DispatchState struct {
 	Open bool
 }
 
-// LatestDispatches returns, for each sub-agent label in a parent transcript,
+// LatestDispatches returns, for each subagent label in a parent transcript,
 // the state of its latest dispatch.
 func LatestDispatches(msgs []*message.Message) map[string]DispatchState {
 	plain := make([]message.Message, 0, len(msgs))

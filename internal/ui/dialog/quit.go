@@ -30,7 +30,7 @@ type Quit struct {
 	compositor *lipgloss.Compositor
 	hoverX     int
 	hoverY     int
-	// runningSubAgents is how many detached sub-agents are still working.
+	// runningSubAgents is how many detached subagents are still working.
 	// They die with the process, so quitting throws their work away.
 	runningSubAgents int
 	keyMap           struct {
@@ -160,7 +160,7 @@ func (q *Quit) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	buttons := strings.Join(buttonViews, " ")
 	buttonsWidth := lipgloss.Width(buttons)
 
-	// Quitting cuts off any sub-agent mid-turn.
+	// Quitting cuts off any subagent mid-turn.
 	var warning string
 	if q.runningSubAgents > 0 {
 		noun := "subagents are"

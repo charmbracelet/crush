@@ -23,7 +23,7 @@ func replayDispatchItem(t *testing.T, sty *styles.Styles, messageID, callID, lab
 }
 
 // TestReplayDispatchReportsSettlesDeadSubAgents covers reloading a session
-// whose sub-agents are not all running. Only the latest, unreported, live
+// whose subagents are not all running. Only the latest, unreported, live
 // dispatch under a label may keep spinning; one cut off when Crush exited, an
 // older dispatch under a reused label, and a refused dispatch all settle.
 func TestReplayDispatchReportsSettlesDeadSubAgents(t *testing.T) {

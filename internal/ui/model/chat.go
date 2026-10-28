@@ -93,7 +93,7 @@ type Chat struct {
 	idInxMap map[string]int // Map of message IDs to their indices in the list
 
 	// externalAnimation is set when something outside the list is animating
-	// and needs the shared clock, such as the header's sub-agent spinner.
+	// and needs the shared clock, such as the header's subagent spinner.
 	externalAnimation bool
 
 	// animRunning is true while the shared animation clock has a tick
@@ -581,7 +581,7 @@ func (m *Chat) SetAnimationsAllowed(allowed bool) {
 // tool update, scroll, session load) starts the clock without per-call-site
 // wiring. It is the only place a tick is armed apart from Tick itself.
 // SetExternalAnimation records whether something outside the transcript is
-// animating, such as the header's sub-agent spinner. The clock is shared, and
+// animating, such as the header's subagent spinner. The clock is shared, and
 // its gate otherwise only looks at items currently on screen, so an animation
 // living in the chrome would never keep it running.
 func (m *Chat) SetExternalAnimation(animating bool) {

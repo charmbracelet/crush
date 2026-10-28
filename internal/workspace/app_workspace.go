@@ -531,7 +531,7 @@ func (w *AppWorkspace) DisableDockerMCP() error {
 
 // MCPServersDisabled returns the MCP servers disabled for this
 // repository. The override set is shared by every session, including
-// sub-agent sessions.
+// subagent sessions.
 func (w *AppWorkspace) MCPServersDisabled(ctx context.Context) ([]string, error) {
 	return w.app.Sessions.MCPDisabledServers(ctx)
 }

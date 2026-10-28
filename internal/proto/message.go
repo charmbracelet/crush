@@ -188,7 +188,7 @@ type ShellCommand struct {
 
 func (ShellCommand) isPart() {}
 
-// SubAgentReport stores the result a detached sub-agent reported back.
+// SubAgentReport stores the result a detached subagent reported back.
 type SubAgentReport struct {
 	Label  string `json:"label"`
 	Output string `json:"output"`

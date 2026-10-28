@@ -21,19 +21,19 @@ func subAgentSpinner(now time.Time) string {
 	return subAgentSpinnerFrames[i]
 }
 
-// subAgentIdleRetention is how long a finished sub-agent stays in the
+// subAgentIdleRetention is how long a finished subagent stays in the
 // sidebar. Without it the section only ever grows, since every dispatch
-// leaves a row behind for the rest of the session. A retired sub-agent is
+// leaves a row behind for the rest of the session. A retired subagent is
 // hidden, not gone: agent_send can still reach it.
 const subAgentIdleRetention = 5 * time.Minute
 
-// subAgentStatuses reads the dispatched sub-agents out of the chat itself.
-// Every dispatch is a tool call item in the transcript, and the sub-agent's
+// subAgentStatuses reads the dispatched subagents out of the chat itself.
+// Every dispatch is a tool call item in the transcript, and the subagent's
 // tool calls already stream in as that item's nested tools, so the chat
 // already knows both who is running and what they are doing.
 //
-// Sub-agents that finished more than [subAgentIdleRetention] ago are left
-// out. Nothing repaints on a timer once every sub-agent is done, so a row
+// Subagents that finished more than [subAgentIdleRetention] ago are left
+// out. Nothing repaints on a timer once every subagent is done, so a row
 // retires on the next render rather than exactly on the deadline.
 func (m *UI) subAgentStatuses() []chat.DispatchStatus {
 	var statuses []chat.DispatchStatus
@@ -55,7 +55,7 @@ func (m *UI) subAgentStatuses() []chat.DispatchStatus {
 	return statuses
 }
 
-// runningSubAgents counts the sub-agents still working.
+// runningSubAgents counts the subagents still working.
 func (m *UI) runningSubAgents() int {
 	var n int
 	for _, s := range m.subAgentStatuses() {
@@ -66,7 +66,7 @@ func (m *UI) runningSubAgents() int {
 	return n
 }
 
-// subAgentRow renders one sub-agent's line: a spinner and elapsed time while
+// subAgentRow renders one subagent's line: a spinner and elapsed time while
 // it works, so a glance distinguishes it from a static "online" dot.
 func (m *UI) subAgentRow(status chat.DispatchStatus, width int) string {
 	t := m.com.Styles
@@ -90,7 +90,7 @@ func (m *UI) subAgentRow(status chat.DispatchStatus, width int) string {
 	}, width)
 }
 
-// subAgentsInfo renders the dispatched sub-agent section. It renders empty
+// subAgentsInfo renders the dispatched subagent section. It renders empty
 // when nothing has been dispatched, so it costs no sidebar space until it has
 // something to say.
 func (m *UI) subAgentsInfo(statuses []chat.DispatchStatus, width, maxItems int, isSection bool) string {

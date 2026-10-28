@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"net"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/lock"
@@ -87,6 +88,16 @@ func listen(network, address string) (net.Listener, bool, error) {
 	ln, err := net.Listen(network, address)
 	if err != nil {
 		return nil, removedStale, err
+	}
+	// The socket is created with the process umask, which may let other
+	// users connect when it lives in a shared directory such as /tmp.
+	// Restrict it to its owner. Linux abstract sockets (a leading '@')
+	// have no file to chmod.
+	if network == "unix" && !strings.HasPrefix(address, "@") {
+		if err := os.Chmod(address, 0o600); err != nil {
+			ln.Close()
+			return nil, removedStale, err
+		}
 	}
 	return ln, removedStale, nil
 }

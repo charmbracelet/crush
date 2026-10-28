@@ -30,6 +30,7 @@ type SubAgentReportItem struct {
 
 	id              string
 	label           string
+	model           string
 	output          string
 	failed          bool
 	expandedContent bool
@@ -39,7 +40,7 @@ type SubAgentReportItem struct {
 var _ MessageItem = (*SubAgentReportItem)(nil)
 
 // NewSubAgentReportItem creates a [SubAgentReportItem].
-func NewSubAgentReportItem(sty *styles.Styles, label, output string, failed bool) MessageItem {
+func NewSubAgentReportItem(sty *styles.Styles, label, model, output string, failed bool) MessageItem {
 	v := list.NewVersioned()
 	return &SubAgentReportItem{
 		Versioned:                v,
@@ -48,6 +49,7 @@ func NewSubAgentReportItem(sty *styles.Styles, label, output string, failed bool
 		focusableMessageItem:     newFocusableMessageItem(v),
 		id:                       fmt.Sprintf("subagent-%d-%s", subAgentSeq.Add(1), label),
 		label:                    label,
+		model:                    model,
 		output:                   output,
 		failed:                   failed,
 		sty:                      sty,
@@ -78,7 +80,7 @@ func (s *SubAgentReportItem) HandleMouseClick(btn ansi.MouseButton, x, y int) bo
 func (s *SubAgentReportItem) HandleKeyEvent(key tea.KeyMsg) (bool, tea.Cmd) {
 	switch key.String() {
 	case "c", "y":
-		return true, common.CopyToClipboard(ansi.Strip(s.output), "Sub-agent report copied to clipboard")
+		return true, common.CopyToClipboard(ansi.Strip(s.output), "Subagent report copied to clipboard")
 	}
 	return false, nil
 }
@@ -105,18 +107,12 @@ func (s *SubAgentReportItem) RawRender(width int) string {
 	if s.failed {
 		status = ToolStatusError
 	}
-	header := fmt.Sprintf(
-		"%s %s %s",
-		toolIcon(s.sty, status),
-		s.sty.Tool.NameNormal.Render("Sub-agent"),
-		s.sty.Tool.ParamMain.Render(s.label),
-	)
+	header := subagentHeader(s.sty, status, s.label, s.model, cappedWidth, nil)
 
 	bodyWidth := cappedWidth - toolBodyLeftPaddingTotal
 	// Sub-agents write prose, and the sync agent tool already renders its
-	// result as markdown, so a report reads the same way.
-	body := s.sty.Tool.Body.Render(
-		toolOutputMarkdownContent(s.sty, s.output, bodyWidth, s.expandedContent),
-	)
+	// result as markdown, so a report reads the same way. The markdown
+	// renderer pads the body itself, which lines it up under the name.
+	body := toolOutputMarkdownContent(s.sty, s.output, bodyWidth, s.expandedContent)
 	return joinToolParts(header, body)
 }

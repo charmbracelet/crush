@@ -260,6 +260,8 @@ func NewToolMessageItem(
 		item = NewDiagnosticsToolMessageItem(sty, toolCall, result, canceled)
 	case agent.AgentToolName, agent.AgentDispatchToolName:
 		item = NewAgentToolMessageItem(sty, toolCall, result, canceled)
+	case agent.AgentSendToolName, agent.AgentStatusToolName, agent.AgentStopToolName:
+		item = NewAgentControlToolMessageItem(sty, toolCall, result, canceled)
 	case tools.AgenticFetchToolName:
 		item = NewAgenticFetchToolMessageItem(sty, toolCall, result, canceled)
 	case tools.WebFetchToolName:
@@ -1454,9 +1456,9 @@ func (t *baseToolMessageItem) formatParametersForCopy() string {
 		var params agent.AgentStatusParams
 		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
 			if params.Label == "" {
-				return "**Sub-agents:** all"
+				return "**Subagents:** all"
 			}
-			return fmt.Sprintf("**Sub-agent:** %s", params.Label)
+			return fmt.Sprintf("**Subagent:** %s", params.Label)
 		}
 	case agent.AgentStopToolName:
 		var params agent.AgentStopParams

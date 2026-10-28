@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // -----------------------------------------------------------------------------
@@ -263,13 +264,12 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 
 	// A dispatch is named for the sub-agent it launched, so its header
 	// pairs with the report item that arrives later under the same label.
-	name := "Agent"
-	var headerParams []string
+	var header string
 	if r.agent.dispatchLabel != "" {
-		name = "Sub-agent"
-		headerParams = []string{r.agent.dispatchLabel}
+		header = subagentHeader(sty, opts.Status, r.agent.dispatchLabel, dispatchRunModel(opts), cappedWidth, opts)
+	} else {
+		header = toolHeader(sty, opts.Status, "Agent", cappedWidth, opts)
 	}
-	header := toolHeader(sty, opts.Status, name, cappedWidth, opts, headerParams...)
 	if opts.Compact {
 		return header
 	}
@@ -500,4 +500,42 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 	}
 
 	return result
+}
+
+// subagentHeader builds the header shared by everything that names a
+// sub-agent: "✓ Subagent betty-date-impl (model=hyper/glm-5)". The model
+// matters here more than a tool's extra parameters do, so a narrow pane
+// truncates it rather than dropping it the way the shared header would.
+func subagentHeader(sty *styles.Styles, status ToolStatus, label, model string, width int, opts *ToolRenderOpts) string {
+	header := toolHeader(sty, status, "Subagent", width, opts, sty.Tool.AgentName.Render(SubagentDisplayName(label)))
+	if model == "" {
+		return header
+	}
+	// Below this many columns a model name is truncated past recognition.
+	const minModelWidth = 12
+	room := width - lipgloss.Width(header) - 1
+	if room < minModelWidth {
+		return header
+	}
+	return header + " " + sty.Tool.ParamMain.Render(ansi.Truncate("(model="+model+")", room, "…)"))
+}
+
+// dispatchRunModel names the model a dispatched sub-agent runs on. The
+// dispatch result records it once the sub-agent starts; until then, an
+// override in the call's parameters is the best guess.
+func dispatchRunModel(opts *ToolRenderOpts) string {
+	if opts.HasResult() && opts.Result.Metadata != "" {
+		var meta agent.AgentDispatchResponseMetadata
+		if json.Unmarshal([]byte(opts.Result.Metadata), &meta) == nil && meta.RunModel != "" {
+			return meta.RunModel
+		}
+	}
+	var params agent.AgentDispatchParams
+	if json.Unmarshal([]byte(opts.ToolCall.Input), &params) != nil || params.Model == "" {
+		return ""
+	}
+	if params.Provider == "" {
+		return params.Model
+	}
+	return params.Provider + "/" + params.Model
 }

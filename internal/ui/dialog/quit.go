@@ -163,9 +163,9 @@ func (q *Quit) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	// Quitting cuts off any sub-agent mid-turn.
 	var warning string
 	if q.runningSubAgents > 0 {
-		noun := "sub-agents are"
+		noun := "subagents are"
 		if q.runningSubAgents == 1 {
-			noun = "sub-agent is"
+			noun = "subagent is"
 		}
 		warning = warningStyle.Render(fmt.Sprintf(
 			"%d %s still running and will be cut off.",

@@ -471,7 +471,7 @@ func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults m
 			case message.ShellCommand:
 				items = append(items, NewShellItem(sty, p.Command, p.Output, p.ExitCode))
 			case message.SubAgentReport:
-				items = append(items, NewSubAgentReportItem(sty, p.Label, p.Output, p.Failed))
+				items = append(items, NewSubAgentReportItem(sty, p.Label, p.Model, p.Output, p.Failed))
 			}
 		}
 		if len(items) > 0 {

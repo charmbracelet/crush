@@ -80,6 +80,20 @@ type AgentDispatchResponseMetadata struct {
 	Think          bool   `json:"think,omitempty"`
 	ReasoningLevel string `json:"reasoning_level,omitempty"`
 	ReasoningOnly  bool   `json:"reasoning_only,omitempty"`
+	// RunModel is the provider/model the sub-agent runs on, override or
+	// not. It is for display only; rehydration reads the fields above.
+	RunModel string `json:"run_model,omitempty"`
+}
+
+// modelDisplayName names a model as provider/model for the UI.
+func modelDisplayName(m Model) string {
+	if m.ModelCfg.Model == "" {
+		return ""
+	}
+	if m.ModelCfg.Provider == "" {
+		return m.ModelCfg.Model
+	}
+	return m.ModelCfg.Provider + "/" + m.ModelCfg.Model
 }
 
 type AgentSendParams struct {
@@ -594,18 +608,21 @@ func (c *coordinator) agentDispatchTool(ctx context.Context, parentAgentID strin
 				})
 			})
 
-			resp := fantasy.NewTextResponse(fmt.Sprintf("Started sub-agent %q.", label))
-			if hasOverride {
-				resp = fantasy.WithResponseMetadata(resp, AgentDispatchResponseMetadata{
-					Label:          label,
-					Model:          sel.Model,
-					Provider:       sel.Provider,
-					Think:          sel.Think,
-					ReasoningLevel: sel.ReasoningEffort,
-					ReasoningOnly:  strings.TrimSpace(params.Model) == "",
-				})
+			meta := AgentDispatchResponseMetadata{
+				Label:    label,
+				RunModel: modelDisplayName(agent.Model()),
 			}
-			return resp, nil
+			if hasOverride {
+				meta.Model = sel.Model
+				meta.Provider = sel.Provider
+				meta.Think = sel.Think
+				meta.ReasoningLevel = sel.ReasoningEffort
+				meta.ReasoningOnly = strings.TrimSpace(params.Model) == ""
+			}
+			return fantasy.WithResponseMetadata(
+				fantasy.NewTextResponse(fmt.Sprintf("Started sub-agent %q.", label)),
+				meta,
+			), nil
 		},
 	), nil
 }
@@ -715,6 +732,7 @@ func (c *coordinator) reportDispatchResult(entry *dispatchedAgent, resp fantasy.
 		Label:  entry.Label,
 		Output: body,
 		Failed: failed,
+		Model:  modelDisplayName(entry.agent.Model()),
 	}
 	if _, err := c.runWithParts(
 		context.Background(),

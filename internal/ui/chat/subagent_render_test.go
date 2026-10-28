@@ -91,3 +91,32 @@ func TestSubagentHeaderKeepsLongModelOnNarrowPane(t *testing.T) {
 	require.Contains(t, h, "(model=")
 	require.LessOrEqual(t, ansi.StringWidth(h), 72)
 }
+
+// agent_status draws one aligned row per sub-agent from its metadata.
+func TestAgentStatusRendersRows(t *testing.T) {
+	t.Parallel()
+	sty := styles.CharmtonePantera()
+	item := NewToolMessageItem(&sty, "msg-1", message.ToolCall{
+		ID: "call-1", Name: agent.AgentStatusToolName, Input: `{}`, Finished: true,
+	}, &message.ToolResult{
+		ToolCallID: "call-1",
+		Content:    "- a: finished",
+		Metadata:   `{"agents":[{"label":"a","state":"finished","timing":"5m ago","access":"read","tool_calls":2},{"label":"long-label","state":"running","timing":"for 1m","access":"write","tool_calls":1}]}`,
+	}, false, "/tmp")
+	lines := renderPlain(t, item)
+
+	require.NotContains(t, lines[0], "→", "a status of every sub-agent names no target")
+	a, long := lines[2], lines[3]
+	require.Contains(t, a, "✓ "+SubagentDisplayName("a"))
+	require.Contains(t, a, "finished 5m ago · 2 tool calls")
+	require.Contains(t, long, "running for 1m · 1 tool calls · can write")
+	require.Equal(t, strings.Index(a, "finished"), strings.Index(long, "running"), "states line up")
+}
+
+// A stopped sub-agent was stopped on purpose, so it reads as canceled, not failed.
+func TestAgentStateIconStoppedIsNotAnError(t *testing.T) {
+	t.Parallel()
+	sty := styles.CharmtonePantera()
+	require.Equal(t, toolIcon(&sty, ToolStatusCanceled), agentStateIcon(&sty, "stopped"))
+	require.Equal(t, toolIcon(&sty, ToolStatusError), agentStateIcon(&sty, "failed"))
+}

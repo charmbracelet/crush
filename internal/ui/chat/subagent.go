@@ -110,9 +110,7 @@ func (s *SubAgentReportItem) RawRender(width int) string {
 	header := subagentHeader(s.sty, status, s.label, s.model, cappedWidth, nil)
 
 	bodyWidth := cappedWidth - toolBodyLeftPaddingTotal
-	// Sub-agents write prose, and the sync agent tool already renders its
-	// result as markdown, so a report reads the same way. The markdown
-	// renderer pads the body itself, which lines it up under the name.
+	// Already padded to sit under the header text.
 	body := toolOutputMarkdownContent(s.sty, s.output, bodyWidth, s.expandedContent)
 	return joinToolParts(header, body)
 }

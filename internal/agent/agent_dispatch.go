@@ -8,19 +8,15 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"charm.land/catwalk/v3/pkg/catwalk"
 	"charm.land/fantasy"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/charmbracelet/crush/internal/agent/tools"
-	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
 )
 
@@ -80,20 +76,8 @@ type AgentDispatchResponseMetadata struct {
 	Think          bool   `json:"think,omitempty"`
 	ReasoningLevel string `json:"reasoning_level,omitempty"`
 	ReasoningOnly  bool   `json:"reasoning_only,omitempty"`
-	// RunModel is the provider/model the sub-agent runs on, override or
-	// not. It is for display only; rehydration reads the fields above.
+	// RunModel is provider/model for display; rehydration ignores it.
 	RunModel string `json:"run_model,omitempty"`
-}
-
-// modelDisplayName names a model as provider/model for the UI.
-func modelDisplayName(m Model) string {
-	if m.ModelCfg.Model == "" {
-		return ""
-	}
-	if m.ModelCfg.Provider == "" {
-		return m.ModelCfg.Model
-	}
-	return m.ModelCfg.Provider + "/" + m.ModelCfg.Model
 }
 
 type AgentSendParams struct {
@@ -309,215 +293,6 @@ func (d *dispatchedAgent) awaitDeliverable(ctx context.Context) bool {
 // use the same label without colliding.
 func dispatchKey(parentSessionID, label string) string {
 	return parentSessionID + "\x00" + label
-}
-
-// parentModel returns the model of the agent that owns a dispatch call. A
-// model override that names only a model inherits this provider.
-func (c *coordinator) parentModel(parentAgentID string) Model {
-	c.agentMu.RLock()
-	defer c.agentMu.RUnlock()
-	if agent, ok := c.agents[parentAgentID]; ok {
-		return agent.Model()
-	}
-	if c.mainAgent != nil {
-		return c.mainAgent.Model()
-	}
-	return Model{}
-}
-
-// resolveModelOverride turns the dispatch tool's model-override params into
-// the model selection a sub-agent should run on. ok is false when no
-// override was requested. A non-empty refusal means one was requested but
-// cannot be served; it goes back to the model so the call can be retried.
-func (c *coordinator) resolveModelOverride(params AgentDispatchParams, parentModel Model) (sel config.SelectedModel, ok bool, refusal string) {
-	provider := strings.TrimSpace(params.Provider)
-	model := strings.TrimSpace(params.Model)
-	level := strings.TrimSpace(params.ReasoningLevel)
-	think := params.Think
-	if provider == "" && model == "" && !think && level == "" {
-		return config.SelectedModel{}, false, ""
-	}
-	if provider != "" && model == "" {
-		return config.SelectedModel{}, false, "provider is given without model; pass model as well"
-	}
-	if model == "" {
-		// Only reasoning settings were given: they apply to the sub-agent's
-		// default model, keeping its other configured settings.
-		sub := c.subAgentModels().Large
-		if sub.Model == nil {
-			return config.SelectedModel{}, false, "no sub-agent model is configured"
-		}
-		sel = sub.ModelCfg
-	} else {
-		if provider == "" {
-			if parentModel.Model == nil {
-				return config.SelectedModel{}, false, "the parent agent has no model to take a provider from"
-			}
-			provider = parentModel.ModelCfg.Provider
-		}
-		// A fresh selection: everything but the override itself is the
-		// model's own defaults.
-		sel = config.SelectedModel{
-			Provider: provider,
-			Model:    model,
-		}
-	}
-	if think {
-		sel.Think = true
-	}
-	if level != "" {
-		sel.ReasoningEffort = level
-	}
-	return sel, true, c.validateModelOverride(sel, level, think)
-}
-
-// validateModelOverride checks a resolved override against the live config.
-// Only a provider with a working credential that is not disabled, and only a
-// model that credential can serve, may run a sub-agent: the same set the
-// dispatch tool's description lists.
-func (c *coordinator) validateModelOverride(sel config.SelectedModel, level string, think bool) string {
-	cfg := c.cfg.Config()
-	providers := usableProviders(cfg)
-	idx := slices.IndexFunc(providers, func(p config.ProviderConfig) bool {
-		return p.ID == sel.Provider
-	})
-	if idx < 0 {
-		ids := make([]string, 0, len(providers))
-		for _, p := range providers {
-			ids = append(ids, p.ID)
-		}
-		return fmt.Sprintf("provider %q is not available; use one of: %s", sel.Provider, strings.Join(ids, ", "))
-	}
-	models := providers[idx].UsableModels()
-	model := findModel(models, sel.Model)
-	if model == nil {
-		return fmt.Sprintf("model %q is not available from provider %q; use one of: %s", sel.Model, sel.Provider, modelIDList(models))
-	}
-	if level != "" {
-		if err := cfg.ValidateReasoningEffort(sel.Provider, sel.Model, level); err != nil {
-			return err.Error()
-		}
-	}
-	if think && !model.CanReason() {
-		return fmt.Sprintf("model %q does not support thinking", sel.Model)
-	}
-	return ""
-}
-
-// catalogModelsPerProvider caps how many model IDs one provider contributes
-// to the dispatch tool's description, so a provider with a huge catalog
-// cannot crowd out the rest of the prompt. Models past the cap still work;
-// they are only not listed.
-const catalogModelsPerProvider = 25
-
-// usableProviders returns the providers a model override may run on: the
-// ones with a working credential that are not disabled, sorted by ID so the
-// tool description is identical from turn to turn and keeps the prompt
-// cache warm. Providers without a credential never make it into the config,
-// so being present and enabled is the whole check.
-func usableProviders(cfg *config.Config) []config.ProviderConfig {
-	providers := cfg.EnabledProviders()
-	slices.SortFunc(providers, func(a, b config.ProviderConfig) int {
-		return strings.Compare(a.ID, b.ID)
-	})
-	return providers
-}
-
-func findModel(models []catwalk.Model, id string) *catwalk.Model {
-	for i := range models {
-		if models[i].ID == id {
-			return &models[i]
-		}
-	}
-	return nil
-}
-
-// modelIDList joins up to catalogModelsPerProvider model IDs, noting how many
-// were left out.
-func modelIDList(models []catwalk.Model) string {
-	listed := models[:min(len(models), catalogModelsPerProvider)]
-	ids := make([]string, 0, len(listed))
-	for _, m := range listed {
-		ids = append(ids, m.ID)
-	}
-	list := strings.Join(ids, ", ")
-	if extra := len(models) - len(listed); extra > 0 {
-		list += fmt.Sprintf(", and %d more", extra)
-	}
-	return list
-}
-
-// dispatchModelCatalog lists the providers and models a dispatch can name in
-// its model override, for the end of the tool's description. It is empty
-// when nothing is usable, so the description never offers a choice that
-// would only be refused.
-func dispatchModelCatalog(cfg *config.Config, parent Model) string {
-	var b strings.Builder
-	for _, p := range usableProviders(cfg) {
-		models := p.UsableModels()
-		if len(models) == 0 {
-			continue
-		}
-		fmt.Fprintf(&b, "\n- `%s`: %s", p.ID, modelIDList(models))
-	}
-	if b.Len() == 0 {
-		return ""
-	}
-	header := "\n\nModels available to `model`, by `provider`"
-	if parent.Model != nil {
-		header += fmt.Sprintf(" (you are running on `%s` from `%s`)", parent.ModelCfg.Model, parent.ModelCfg.Provider)
-	}
-	return header + ":\n" + b.String()
-}
-
-// taskAgentConfig returns the task agent configuration for an access level,
-// mirroring the variants taskAgents builds.
-func (c *coordinator) taskAgentConfig(access string) (config.Agent, bool) {
-	if access == accessWrite {
-		return writeAgentConfig(c.cfg.Config()), true
-	}
-	return c.cfg.Config().Agents[config.AgentTask], false
-}
-
-// overrideDispatchAgent resolves a dispatch's model override and, when one
-// was requested, builds the SessionAgent it should run on. Without an
-// override the caller keeps the shared agent taskAgents built; with one,
-// the entry keeps the dedicated agent so reopens run on the same model.
-func (c *coordinator) overrideDispatchAgent(ctx context.Context, access string, params AgentDispatchParams, parentModel Model) (SessionAgent, config.SelectedModel, bool, string) {
-	sel, ok, refusal := c.resolveModelOverride(params, parentModel)
-	if refusal != "" || !ok {
-		return nil, config.SelectedModel{}, false, refusal
-	}
-	agent, refusal := c.overrideTaskAgent(ctx, access, sel)
-	if refusal != "" {
-		return nil, sel, true, refusal
-	}
-	return agent, sel, true, ""
-}
-
-// overrideTaskAgent builds a dedicated task sub-agent variant running on an
-// overridden model selection. The model function serves the selection's
-// current build, so a model refresh reaches a running sub-agent on its next
-// turn.
-func (c *coordinator) overrideTaskAgent(ctx context.Context, access string, sel config.SelectedModel) (SessionAgent, string) {
-	entry := c.overrideModelEntry(sel)
-	if err := entry.build(ctx, c); err != nil {
-		return nil, "failed to set up the requested model: " + err.Error()
-	}
-	agentCfg, canWrite := c.taskAgentConfig(access)
-	// A group of its own: this build joins no one, and is fully set up
-	// before the dispatch registers the sub-agent.
-	var ready errgroup.Group
-	agent, err := c.buildTaskAgent(ctx, &ready, agentCfg, canWrite, func() ModelSet {
-		return ModelSet{Large: entry.current(), Small: c.subAgentModels().Small}
-	})
-	if err != nil {
-		return nil, "failed to start a sub-agent on the requested model: " + err.Error()
-	}
-	if err := ready.Wait(); err != nil {
-		return nil, "failed to start a sub-agent on the requested model: " + err.Error()
-	}
-	return agent, ""
 }
 
 // agentDispatchTool launches a sub-agent that runs detached from this tool

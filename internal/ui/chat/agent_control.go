@@ -5,14 +5,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 )
 
-// NewAgentControlToolMessageItem creates the item for the tools that talk to
-// a running sub-agent: agent_send, agent_status, and agent_stop. They name
-// the sub-agent the way its dispatch does, rather than dumping their JSON.
+// NewAgentControlToolMessageItem renders agent_send, agent_status, and agent_stop.
 func NewAgentControlToolMessageItem(
 	sty *styles.Styles,
 	toolCall message.ToolCall,
@@ -22,8 +19,7 @@ func NewAgentControlToolMessageItem(
 	return newBaseToolMessageItem(sty, toolCall, result, &AgentControlToolRenderContext{}, canceled)
 }
 
-// AgentControlToolRenderContext renders agent_send, agent_status, and
-// agent_stop calls.
+// AgentControlToolRenderContext renders calls addressed to a sub-agent.
 type AgentControlToolRenderContext struct{}
 
 // RenderTool implements the [ToolRenderer] interface.
@@ -34,7 +30,7 @@ func (r *AgentControlToolRenderContext) RenderTool(sty *styles.Styles, width int
 		return pendingTool(sty, name, opts.Anim, opts.Compact)
 	}
 
-	label, prose, showResult := agentControlParts(opts.ToolCall)
+	label, prose := agentControlParts(opts.ToolCall)
 	target := sty.Tool.ParamMain.Render("all")
 	if label != "" {
 		target = sty.Tool.AgentName.Render(SubagentDisplayName(label))
@@ -52,35 +48,25 @@ func (r *AgentControlToolRenderContext) RenderTool(sty *styles.Styles, width int
 	if prose != "" {
 		return joinToolParts(header, sty.Tool.Body.Render(agentMessageContent(sty, prose, bodyWidth, opts.ExpandedContent)))
 	}
-	if showResult && opts.HasResult() && opts.Result.Content != "" {
+	if opts.HasResult() && opts.Result.Content != "" {
 		body := renderToolResultTextContent(sty, opts.Result.Content, toolResultContentWidths{Body: bodyWidth, Diff: cappedWidth}, opts.ExpandedContent)
 		return joinToolParts(header, body)
 	}
 	return header
 }
 
-// agentControlParts reads which sub-agent a call addresses and the prose it
-// carries: the message sent, or the reason for a stop. A status call has no
-// prose of its own, so its result is what is worth showing.
-func agentControlParts(tc message.ToolCall) (label, prose string, showResult bool) {
-	switch tc.Name {
-	case agent.AgentSendToolName:
-		var params agent.AgentSendParams
-		_ = json.Unmarshal([]byte(tc.Input), &params)
-		return params.Label, params.Message, false
-	case agent.AgentStopToolName:
-		var params agent.AgentStopParams
-		_ = json.Unmarshal([]byte(tc.Input), &params)
-		return params.Label, params.Reason, false
-	default:
-		var params agent.AgentStatusParams
-		_ = json.Unmarshal([]byte(tc.Input), &params)
-		return params.Label, "", true
+// agentControlParts returns the addressed label and the prose to show: a message, a stop reason, or none.
+func agentControlParts(tc message.ToolCall) (label, prose string) {
+	var params struct {
+		Label   string `json:"label"`
+		Message string `json:"message"`
+		Reason  string `json:"reason"`
 	}
+	_ = json.Unmarshal([]byte(tc.Input), &params)
+	return params.Label, params.Message + params.Reason
 }
 
-// agentMessageContent wraps prose addressed to a sub-agent, collapsing it
-// the way tool output collapses.
+// agentMessageContent wraps prose and collapses it like tool output.
 func agentMessageContent(sty *styles.Styles, text string, width int, expanded bool) string {
 	width = min(width, maxTextWidth)
 	lines := strings.Split(sty.Tool.AgentMessage.Width(width).Render(strings.TrimSpace(text)), "\n")

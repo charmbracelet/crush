@@ -126,7 +126,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		History:     files,
 		Permissions: permission.NewPermissionService(store.WorkingDir(), skipPermissionsRequests, allowedTools, permissionHooks{hookRunner}),
 		Questions:   question.NewService(),
-		FileTracker: filetracker.NewService(q),
+		FileTracker: filetracker.NewService(q, store.WorkingDir()),
 		LSPManager:  lsp.NewManager(store),
 		Skills:      skillsMgr,
 

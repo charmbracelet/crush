@@ -48,10 +48,9 @@ type AgentDispatchParams struct {
 
 	// Model override. When none of these is given the sub-agent runs on the
 	// session's sub-agent model with its configured settings.
-	Model          string `json:"model,omitempty" description:"The model ID for this sub-agent, as used by the provider API. Omit provider to use the parent agent's provider. Other settings default to the model's own"`
-	Provider       string `json:"provider,omitempty" description:"The provider ID for the overridden model; requires model. Defaults to the parent agent's provider when only model is given"`
-	Think          *bool  `json:"think,omitempty" description:"Turn thinking on or off for a model that supports reasoning, instead of the model's default"`
-	ReasoningLevel string `json:"reasoning_level,omitempty" description:"The reasoning effort for a model that supports it (e.g. low, medium, high), instead of the model's default"`
+	Model     string `json:"model,omitempty" description:"The model ID for this sub-agent, as used by the provider API. Omit provider to use the parent agent's provider. Other settings default to the model's own"`
+	Provider  string `json:"provider,omitempty" description:"The provider ID for the overridden model; requires model. Defaults to the parent agent's provider when only model is given"`
+	Reasoning string `json:"reasoning,omitempty" description:"How hard the sub-agent reasons: one of the values listed in brackets after its model. Defaults to the model's own"`
 }
 
 // AgentSendResponseMetadata tells the UI which sub-agent a message went to,
@@ -70,12 +69,11 @@ type AgentSendResponseMetadata struct {
 // it rides the sub-agent's default selection, so rehydration must not treat
 // the recorded model as an explicit one and rebuild a bare selection.
 type AgentDispatchResponseMetadata struct {
-	Label          string `json:"label"`
-	Model          string `json:"model,omitempty"`
-	Provider       string `json:"provider,omitempty"`
-	Think          *bool  `json:"think,omitempty"`
-	ReasoningLevel string `json:"reasoning_level,omitempty"`
-	ReasoningOnly  bool   `json:"reasoning_only,omitempty"`
+	Label         string `json:"label"`
+	Model         string `json:"model,omitempty"`
+	Provider      string `json:"provider,omitempty"`
+	Reasoning     string `json:"reasoning,omitempty"`
+	ReasoningOnly bool   `json:"reasoning_only,omitempty"`
 	// RunModel is provider/model for display; rehydration ignores it.
 	RunModel string `json:"run_model,omitempty"`
 }
@@ -390,10 +388,8 @@ func (c *coordinator) agentDispatchTool(ctx context.Context, parentAgentID strin
 			if hasOverride {
 				meta.Model = sel.Model
 				meta.Provider = sel.Provider
-				// Only what the call asked for, so a resume reapplies that
-				// rather than the default model's own settings at the time.
-				meta.Think = params.Think
-				meta.ReasoningLevel = strings.TrimSpace(params.ReasoningLevel)
+				// What the call asked for, not the model's settings at the time.
+				meta.Reasoning = strings.TrimSpace(params.Reasoning)
 				meta.ReasoningOnly = strings.TrimSpace(params.Model) == ""
 			}
 			return fantasy.WithResponseMetadata(
@@ -740,11 +736,8 @@ func (c *coordinator) rehydrateDispatch(ctx context.Context, parentSessionID, la
 	// has now. Either way the override is re-resolved against the live
 	// config: if it no longer serves, the sub-agent cannot be resumed
 	// rather than silently dropping back to the session default.
-	if record.Model != "" || record.Provider != "" || record.Think != nil || record.ReasoningLevel != "" {
-		params := AgentDispatchParams{
-			Think:          record.Think,
-			ReasoningLevel: record.ReasoningLevel,
-		}
+	if record.Model != "" || record.Provider != "" || record.Reasoning != "" {
+		params := AgentDispatchParams{Reasoning: record.Reasoning}
 		parent := Model{}
 		if record.ReasoningOnly {
 			// Reasoning settings without a model ride the sub-agent's default

@@ -872,6 +872,12 @@ func probeHealth(ctx context.Context, h *http.Client, reqURL string, hostURL *ur
 	return nil
 }
 
+// versionCheckTimeout bounds the requests restartIfStale sends to a running
+// server. Connecting to a stopped or wedged server still succeeds, because
+// the kernel accepts on its behalf, so without a deadline the client would
+// wait for a reply forever. A var, not a const, so tests can shrink it.
+var versionCheckTimeout = 5 * time.Second
+
 // restartIfStale checks whether the running server matches the current
 // client version. When they differ it asks the server to stand down and,
 // if it agrees, removes the stale socket so the caller can start a fresh
@@ -893,7 +899,9 @@ func restartIfStale(cmd *cobra.Command, hostURL *url.URL) (restarted bool, err e
 	if err != nil {
 		return false, err
 	}
-	vi, err := c.VersionInfo(cmd.Context())
+	ctx, cancel := context.WithTimeout(cmd.Context(), versionCheckTimeout)
+	defer cancel()
+	vi, err := c.VersionInfo(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -909,7 +917,7 @@ func restartIfStale(cmd *cobra.Command, hostURL *url.URL) (restarted bool, err e
 	// Every refusal — in use, too old to be asked, or unreachable — leads to
 	// the same safe outcome: keep using the running server. The wrapped
 	// error says which it was.
-	if err := c.ShutdownServerIfIdle(cmd.Context()); err != nil {
+	if err := c.ShutdownServerIfIdle(ctx); err != nil {
 		if !errors.Is(err, client.ErrUnsupported) {
 			slog.Warn("Server version differs but it will not stand down; reusing it",
 				append(versionFields, "error", err)...)
@@ -917,7 +925,7 @@ func restartIfStale(cmd *cobra.Command, hostURL *url.URL) (restarted bool, err e
 		}
 		// The server predates shutdown_if_idle. Fall back to the
 		// unconditional command, but only after verifying it is idle.
-		if !shutdownLegacyStaleServer(cmd.Context(), c, versionFields) {
+		if !shutdownLegacyStaleServer(ctx, c, versionFields) {
 			return false, nil
 		}
 	}

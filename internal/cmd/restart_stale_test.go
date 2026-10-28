@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/crush/internal/client"
 	"github.com/charmbracelet/crush/internal/proto"
@@ -185,6 +186,65 @@ func TestRestartIfStale_MatchingServerUntouched(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, restarted)
 	require.Empty(t, log.all())
+}
+
+// TestRestartIfStale_GivesUpOnUnresponsiveServer covers a server that is
+// stopped (Ctrl+Z, SIGSTOP) or wedged. The kernel still completes the
+// connect on its behalf, so a request to it fails only at a deadline:
+// without one, the client blocked at startup until it was interrupted.
+func TestRestartIfStale_GivesUpOnUnresponsiveServer(t *testing.T) {
+	// Not parallel: the other restartIfStale tests read this package var.
+	orig := versionCheckTimeout
+	versionCheckTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { versionCheckTimeout = orig })
+
+	// check runs restartIfStale under a caller deadline far longer than
+	// versionCheckTimeout, so returning well before it shows that
+	// restartIfStale gave up by itself.
+	check := func(t *testing.T, hostURL *url.URL) (bool, error) {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+		defer cancel()
+		cmd := &cobra.Command{}
+		cmd.SetContext(ctx)
+		start := time.Now()
+		restarted, err := restartIfStale(cmd, hostURL)
+		require.Less(t, time.Since(start), 5*time.Second,
+			"restartIfStale must not wait on a server that never answers")
+		return restarted, err
+	}
+
+	t.Run("version check", func(t *testing.T) {
+		// Nothing ever accepts on this listener: requests connect, then
+		// wait for a reply that never comes.
+		ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = ln.Close() })
+
+		_, err = check(t, &url.URL{Scheme: "tcp", Host: ln.Addr().String()})
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+	})
+
+	t.Run("stand-down request", func(t *testing.T) {
+		release := make(chan struct{})
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/v1/version" {
+				_ = json.NewEncoder(w).Encode(staleVersion())
+				return
+			}
+			<-release
+		}))
+		t.Cleanup(srv.Close)
+		t.Cleanup(func() { close(release) })
+		u, err := url.Parse(srv.URL)
+		require.NoError(t, err)
+
+		// A stale server that never answers is reused, like one that
+		// refuses to stand down.
+		restarted, err := check(t, &url.URL{Scheme: "tcp", Host: u.Host})
+		require.NoError(t, err)
+		require.False(t, restarted)
+	})
 }
 
 // TestCreateWorkspaceOnLiveServer_RetriesPastExitingServer covers the

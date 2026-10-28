@@ -1314,7 +1314,22 @@ func (c *coordinator) isAnthropicThinking(model config.SelectedModel) bool {
 	return err == nil && opts.Thinking != nil
 }
 
+// legacyWireTypes maps the catwalk v2 provider types that catwalk's v3
+// data still carries for some providers (OpenAI, MiniMax, ...) onto the
+// wire types they mean.
+var legacyWireTypes = map[catwalk.Type]catwalk.Type{
+	"openai":        catwalk.TypeResponses,
+	"openai-compat": catwalk.TypeCompletions,
+	"openrouter":    catwalk.TypeCompletions,
+	"vercel":        catwalk.TypeCompletions,
+	"anthropic":     catwalk.TypeMessages,
+	"google":        catwalk.TypeCompletions,
+}
+
 func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model config.SelectedModel, isSubAgent bool, wireType catwalk.Type) (fantasy.Provider, error) {
+	if mapped, ok := legacyWireTypes[wireType]; ok {
+		wireType = mapped
+	}
 	headers := maps.Clone(providerCfg.ExtraHeaders)
 	if headers == nil {
 		headers = make(map[string]string)
@@ -1375,7 +1390,9 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID)
 	case catwalk.TypeResponses:
 		return c.buildOpenaiProvider(baseURL, apiKey, headers, providerCfg.OAuthToken, wireType)
-	case catwalk.TypeCompletions:
+	case catwalk.TypeCompletions, catwalk.Type(hyper.Name):
+		// Hyper's provider advertises its own type rather than a wire
+		// type; it speaks chat completions.
 		switch providerCfg.ID {
 		case hyper.Name:
 			baseURL = hyper.BaseURL() + "/v1"

@@ -1115,9 +1115,10 @@ var startDetachedServer = func(cmd *cobra.Command, hostURL *url.URL) (*spawnedSe
 	defer stderr.Close()
 
 	// Use context.Background() so the parent's context cancellation does not
-	// kill the spawned server. startDetached (Setsid on !windows,
-	// DETACHED_PROCESS and job breakaway on windows) is what truly detaches
-	// the child from this process's lifetime.
+	// kill the spawned server. startDetached (Setsid on !windows; on
+	// windows a new process group with a hidden console of its own, outside
+	// this process's job) is what truly detaches the child from this
+	// process's lifetime.
 	c, err := startDetached(func() *exec.Cmd {
 		c := exec.CommandContext(context.Background(), exe, cmdArgs...)
 		c.Stdout = stdout

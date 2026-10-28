@@ -1243,7 +1243,12 @@ func toolOutputMarkdownContent(sty *styles.Styles, content string, width int, ex
 		return toolOutputPlainContent(sty, content, width, expanded)
 	}
 
+	// Glamour ends with a blank, still-painted line, sometimes only a
+	// code block's margin wide; drop it so the box ends with its text.
 	lines := strings.Split(rendered, "\n")
+	for len(lines) > 0 && strings.TrimSpace(ansi.Strip(lines[len(lines)-1])) == "" {
+		lines = lines[:len(lines)-1]
+	}
 	maxLines := collapsedMaxLines(len(lines))
 	if expanded {
 		maxLines = len(lines)

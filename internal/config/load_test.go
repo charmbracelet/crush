@@ -184,6 +184,17 @@ func TestLoadFromConfigPaths_InvalidJSON(t *testing.T) {
 		require.Contains(t, err.Error(), "bad.json")
 	})
 
+	t.Run("accepts a UTF-8 BOM", func(t *testing.T) {
+		t.Parallel()
+		tmpDir := t.TempDir()
+		path := filepath.Join(tmpDir, "crush.json")
+		require.NoError(t, os.WriteFile(path, []byte("\xef\xbb\xbf"+`{"options":{"debug":true}}`), 0o644))
+
+		cfg, _, err := loadFromConfigPaths(context.Background(), []string{path})
+		require.NoError(t, err)
+		require.True(t, cfg.Options.Debug)
+	})
+
 	t.Run("skips missing and empty files", func(t *testing.T) {
 		t.Parallel()
 		tmpDir := t.TempDir()

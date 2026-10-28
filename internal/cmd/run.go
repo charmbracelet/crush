@@ -293,6 +293,21 @@ func runNonInteractive(
 		return fmt.Errorf("failed to subscribe to events: %w", err)
 	}
 
+	// The server runs the prompt for the workspace, not for this request,
+	// so returning on an interrupt would leave the run going for as long
+	// as another client holds the workspace. Cancel it on the way out,
+	// also when the interrupt lands while the prompt is still in flight.
+	defer func() {
+		if ctx.Err() == nil {
+			return
+		}
+		cancelCtx, cancelDone := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancelDone()
+		if err := c.CancelAgentSession(cancelCtx, ws.ID, sess.ID); err != nil {
+			slog.Warn("Failed to cancel the interrupted run", "session_id", sess.ID, "error", err)
+		}
+	}()
+
 	// Mint a per-call RunID so we can correlate the terminal
 	// RunComplete with *this* SendMessage even if the session was
 	// busy and another turn finished first. Without it the stream

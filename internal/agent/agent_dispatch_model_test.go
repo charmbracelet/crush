@@ -51,17 +51,6 @@ func newOverrideTestCoordinator(t *testing.T) (*coordinator, fakeEnv) {
 
 	cfg, err := config.Init(t.Context(), env.workingDir, "", false)
 	require.NoError(t, err)
-	// Local model servers found on the machine running the tests would
-	// otherwise join the config; keep only the providers declared above.
-	var discovered []string
-	for id := range cfg.Config().Providers.Seq2() {
-		if id != "mock" && id != "other" {
-			discovered = append(discovered, id)
-		}
-	}
-	for _, id := range discovered {
-		cfg.Config().Providers.Del(id)
-	}
 	cfg.SetupAgents()
 
 	c := &coordinator{
@@ -146,20 +135,27 @@ func TestResolveModelOverride(t *testing.T) {
 		},
 		{
 			name:    "think on a model that cannot reason is refused",
-			params:  AgentDispatchParams{Model: "mock-model", Think: true},
+			params:  AgentDispatchParams{Model: "mock-model", Think: new(true)},
 			parent:  parent,
 			refusal: `model "mock-model" does not support thinking`,
 		},
 		{
 			name:    "think on a reasoning model is applied",
-			params:  AgentDispatchParams{Model: "mock-reasoner", Think: true},
+			params:  AgentDispatchParams{Model: "mock-reasoner", Think: new(true)},
 			parent:  parent,
 			wantOK:  true,
 			wantSel: config.SelectedModel{Provider: "mock", Model: "mock-reasoner", Think: true},
 		},
 		{
+			name:    "think off on a reasoning model is applied",
+			params:  AgentDispatchParams{Model: "mock-reasoner", Think: new(false)},
+			parent:  parent,
+			wantOK:  true,
+			wantSel: config.SelectedModel{Provider: "mock", Model: "mock-reasoner"},
+		},
+		{
 			name:        "reasoning settings alone ride the sub-agent default model",
-			params:      AgentDispatchParams{Think: true},
+			params:      AgentDispatchParams{Think: new(true)},
 			wantOK:      true,
 			wantDynamic: true,
 		},
@@ -200,7 +196,7 @@ func TestResolveModelOverrideRidesNonReasoningSubDefault(t *testing.T) {
 	small := c.subAgentModels().Small
 	c.models.Set(coordinatorModels{large: small, subLarge: small, small: small})
 
-	_, ok, refusal := c.resolveModelOverride(AgentDispatchParams{Think: true}, Model{})
+	_, ok, refusal := c.resolveModelOverride(AgentDispatchParams{Think: new(true)}, Model{})
 	require.True(t, ok)
 	require.Contains(t, refusal, "does not support thinking")
 }
@@ -241,24 +237,33 @@ func TestOverrideDispatchAgent(t *testing.T) {
 	require.Contains(t, refusal, "provider is given without model")
 }
 
-// A model refresh swaps the build an overridden sub-agent serves, so a
-// credential or config change reaches it on its next turn like it reaches
-// the shared agents.
+// A rebuild of the shared models reaches an override on its next use.
 func TestOverrideModelRefreshedOnRebuild(t *testing.T) {
 	t.Parallel()
 	c, _ := newOverrideTestCoordinator(t)
 	ctx := t.Context()
 
-	entry := c.overrideModelEntry(config.SelectedModel{Provider: "other", Model: "other-model"})
-	require.NoError(t, entry.build(ctx, c))
-	first := entry.current()
+	entry, err := c.overrideModel(config.SelectedModel{Provider: "other", Model: "other-model"})
+	require.NoError(t, err)
+	first := entry.current(c)
 	require.Equal(t, "other-model", first.ModelCfg.Model)
+	require.Equal(t, fmt.Sprintf("%p", first.Model), fmt.Sprintf("%p", entry.current(c).Model), "no rebuild without a refresh")
 
 	require.NoError(t, c.rebuildModels(ctx))
-	second := entry.current()
+	second := entry.current(c)
 	require.Equal(t, "other-model", second.ModelCfg.Model)
 	require.NotEqual(t, fmt.Sprintf("%p", first.Model), fmt.Sprintf("%p", second.Model),
 		"a rebuild must produce a fresh build, not the pre-rebuild one")
+}
+
+// A selection that fails to build is not cached.
+func TestOverrideModelFailureIsNotCached(t *testing.T) {
+	t.Parallel()
+	c, _ := newOverrideTestCoordinator(t)
+
+	_, err := c.overrideModel(config.SelectedModel{Provider: "nope", Model: "x"})
+	require.Error(t, err)
+	require.Empty(t, c.overrideModels)
 }
 
 func dispatchOverrideCall(t *testing.T, id, label, access, model, provider string) message.ToolCall {
@@ -304,7 +309,7 @@ func TestDispatchHistoryRecordsModelOverride(t *testing.T) {
 	b := records.byLabel["b"]
 	require.Empty(t, b.Model)
 	require.Empty(t, b.Provider)
-	require.False(t, b.Think)
+	require.Nil(t, b.Think)
 }
 
 func TestDispatchToolRunsOverrideModel(t *testing.T) {
@@ -369,6 +374,8 @@ func TestDispatchToolRunsOverrideModel(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
 	require.Equal(t, "thunk", meta.Label)
 	require.True(t, meta.ReasoningOnly, "a dispatch that named no model is reasoning-only")
+	require.Empty(t, meta.ReasoningLevel, "only the settings the call asked for are recorded")
+	require.Equal(t, new(true), meta.Think)
 	entry, ok := c.dispatched.Get(dispatchKey(parent.ID, "thunk"))
 	require.True(t, ok)
 	require.True(t, entry.agent.Model().ModelCfg.Think)
@@ -424,13 +431,13 @@ func TestRehydrateDispatchRestoresModelOverride(t *testing.T) {
 	// result or a first turn, so only the parent the session has now can
 	// supply the provider. c6 "thunk" gave reasoning settings only, so it
 	// rides the default selection rather than an explicit model.
-	thunkInput, err := json.Marshal(AgentDispatchParams{Prompt: "do thunk", Label: "thunk", Think: true})
+	thunkInput, err := json.Marshal(AgentDispatchParams{Prompt: "do thunk", Label: "thunk", Think: new(true)})
 	require.NoError(t, err)
 	thunkMeta, err := json.Marshal(AgentDispatchResponseMetadata{
 		Label:         "thunk",
 		Model:         "mock-reasoner",
 		Provider:      "mock",
-		Think:         true,
+		Think:         new(true),
 		ReasoningOnly: true,
 	})
 	require.NoError(t, err)

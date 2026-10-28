@@ -31,3 +31,15 @@ func TestProviderConfigUsableModels(t *testing.T) {
 		})
 	}
 }
+
+func TestProviderConfigSubscriptionModels(t *testing.T) {
+	t.Parallel()
+	token := &oauth.Token{AccessToken: "t"}
+	_, ok := ProviderConfig{ID: "openai"}.SubscriptionModels()
+	require.False(t, ok, "an API key is not a subscription")
+	models, ok := ProviderConfig{ID: "openai", OAuthToken: token}.SubscriptionModels()
+	require.True(t, ok)
+	require.Nil(t, models, "signed in but the list is not fetched yet")
+	_, ok = ProviderConfig{ID: "copilot", OAuthToken: token}.SubscriptionModels()
+	require.False(t, ok)
+}

@@ -76,21 +76,12 @@ func resolveSubAgent(agents map[string]SessionAgent, access string, readOnly boo
 // parent gets only the read variant, so the write one is never built rather
 // than built and withheld.
 func (c *coordinator) taskAgents(ctx context.Context, readOnly bool) (map[string]SessionAgent, error) {
-	cfg := c.cfg.Config()
-	agentCfg, ok := cfg.Agents[config.AgentTask]
-	if !ok {
+	if _, ok := c.cfg.Config().Agents[config.AgentTask]; !ok {
 		return nil, errors.New("task agent not configured")
 	}
-	variants := []struct {
-		access   string
-		cfg      config.Agent
-		canWrite bool
-	}{
-		{accessRead, agentCfg, false},
-		{accessWrite, writeAgentConfig(cfg), true},
-	}
+	accesses := []string{accessRead, accessWrite}
 	if readOnly {
-		variants = variants[:1]
+		accesses = accesses[:1]
 	}
 
 	// The variants share a readiness group of their own and are fully set
@@ -99,17 +90,27 @@ func (c *coordinator) taskAgents(ctx context.Context, readOnly bool) (map[string
 	// would race its Wait.
 	var ready errgroup.Group
 	agents := map[string]SessionAgent{}
-	for _, variant := range variants {
-		agent, err := c.buildTaskAgent(ctx, &ready, variant.cfg, variant.canWrite, nil)
+	for _, access := range accesses {
+		agentCfg, canWrite := c.taskAgentConfig(access)
+		agent, err := c.buildTaskAgent(ctx, &ready, agentCfg, canWrite, nil)
 		if err != nil {
 			return nil, err
 		}
-		agents[variant.access] = agent
+		agents[access] = agent
 	}
 	if err := ready.Wait(); err != nil {
 		return nil, err
 	}
 	return agents, nil
+}
+
+// taskAgentConfig returns the task agent's config for an access level, and
+// whether it may write.
+func (c *coordinator) taskAgentConfig(access string) (config.Agent, bool) {
+	if access == accessWrite {
+		return writeAgentConfig(c.cfg.Config()), true
+	}
+	return c.cfg.Config().Agents[config.AgentTask], false
 }
 
 // buildTaskAgent schedules one variant of the task sub-agent into ready; the

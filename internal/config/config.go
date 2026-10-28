@@ -999,15 +999,25 @@ func (c *Config) IsModelAvailable(provider, model string) bool {
 // UsableModels returns the models the current credential can serve: a
 // ChatGPT or Grok login only reaches its subscription's models.
 func (p ProviderConfig) UsableModels() []catwalk.Model {
-	if p.OAuthToken != nil {
-		switch catwalk.InferenceProvider(p.ID) {
-		case catwalk.InferenceProviderOpenAI:
-			return p.ChatGPTModels
-		case catwalk.InferenceProviderXAI:
-			return p.GrokModels
-		}
+	if models, ok := p.SubscriptionModels(); ok {
+		return models
 	}
 	return p.Models
+}
+
+// SubscriptionModels returns the models a ChatGPT or Grok login grants, and
+// whether the provider is signed in with one at all.
+func (p ProviderConfig) SubscriptionModels() ([]catwalk.Model, bool) {
+	if p.OAuthToken == nil {
+		return nil, false
+	}
+	switch catwalk.InferenceProvider(p.ID) {
+	case catwalk.InferenceProviderOpenAI:
+		return p.ChatGPTModels, true
+	case catwalk.InferenceProviderXAI:
+		return p.GrokModels, true
+	}
+	return nil, false
 }
 
 func (c *Config) GetProviderForModel(modelType SelectedModelType) *ProviderConfig {

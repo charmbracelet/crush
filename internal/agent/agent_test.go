@@ -26,7 +26,7 @@ import (
 
 func TestMain(m *testing.M) {
 	slog.SetLogLoggerLevel(slog.LevelError)
-	m.Run()
+	os.Exit(runIsolated(m))
 }
 
 var modelPairs = []modelPair{

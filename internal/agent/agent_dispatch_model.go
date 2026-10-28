@@ -35,7 +35,7 @@ func (c *coordinator) resolveModelOverride(params AgentDispatchParams, parentMod
 	model := strings.TrimSpace(params.Model)
 	level := strings.TrimSpace(params.ReasoningLevel)
 	think := params.Think
-	if provider == "" && model == "" && !think && level == "" {
+	if provider == "" && model == "" && think == nil && level == "" {
 		return config.SelectedModel{}, false, ""
 	}
 	if provider != "" && model == "" {
@@ -63,13 +63,13 @@ func (c *coordinator) resolveModelOverride(params AgentDispatchParams, parentMod
 			Model:    model,
 		}
 	}
-	if think {
-		sel.Think = true
+	if think != nil {
+		sel.Think = *think
 	}
 	if level != "" {
 		sel.ReasoningEffort = level
 	}
-	return sel, true, c.validateModelOverride(sel, level, think)
+	return sel, true, c.validateModelOverride(sel, level, think != nil && *think)
 }
 
 // validateModelOverride refuses anything the dispatch tool's catalog would not list.
@@ -145,15 +145,6 @@ func modelDisplayName(m Model) string {
 	return m.ModelCfg.Provider + "/" + m.ModelCfg.Model
 }
 
-// taskAgentConfig returns the task agent configuration for an access level,
-// mirroring the variants taskAgents builds.
-func (c *coordinator) taskAgentConfig(access string) (config.Agent, bool) {
-	if access == accessWrite {
-		return writeAgentConfig(c.cfg.Config()), true
-	}
-	return c.cfg.Config().Agents[config.AgentTask], false
-}
-
 // overrideDispatchAgent resolves a dispatch's model override and, when one
 // was requested, builds the SessionAgent it should run on. Without an
 // override the caller keeps the shared agent taskAgents built; with one,
@@ -175,8 +166,8 @@ func (c *coordinator) overrideDispatchAgent(ctx context.Context, access string, 
 // current build, so a model refresh reaches a running sub-agent on its next
 // turn.
 func (c *coordinator) overrideTaskAgent(ctx context.Context, access string, sel config.SelectedModel) (SessionAgent, string) {
-	entry := c.overrideModelEntry(sel)
-	if err := entry.build(ctx, c); err != nil {
+	entry, err := c.overrideModel(sel)
+	if err != nil {
 		return nil, "failed to set up the requested model: " + err.Error()
 	}
 	agentCfg, canWrite := c.taskAgentConfig(access)
@@ -184,7 +175,7 @@ func (c *coordinator) overrideTaskAgent(ctx context.Context, access string, sel 
 	// before the dispatch registers the sub-agent.
 	var ready errgroup.Group
 	agent, err := c.buildTaskAgent(ctx, &ready, agentCfg, canWrite, func() ModelSet {
-		return ModelSet{Large: entry.current(), Small: c.subAgentModels().Small}
+		return ModelSet{Large: entry.current(c), Small: c.subAgentModels().Small}
 	})
 	if err != nil {
 		return nil, "failed to start a sub-agent on the requested model: " + err.Error()

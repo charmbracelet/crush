@@ -46,7 +46,7 @@ type dispatchRecord struct {
 	// explicit one.
 	Model          string
 	Provider       string
-	Think          bool
+	Think          *bool
 	ReasoningLevel string
 	ReasoningOnly  bool
 	// Open is true while the latest dispatch or follow-up has no report.
@@ -106,7 +106,7 @@ func dispatchHistory(msgs []message.Message) dispatchRecords {
 				Provider:       strings.TrimSpace(params.Provider),
 				Think:          params.Think,
 				ReasoningLevel: strings.TrimSpace(params.ReasoningLevel),
-				ReasoningOnly:  strings.TrimSpace(params.Model) == "" && (params.Think || strings.TrimSpace(params.ReasoningLevel) != ""),
+				ReasoningOnly:  strings.TrimSpace(params.Model) == "" && (params.Think != nil || strings.TrimSpace(params.ReasoningLevel) != ""),
 				Open:           true,
 				prev:           records.byLabel[label],
 			}

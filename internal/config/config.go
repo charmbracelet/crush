@@ -15,6 +15,7 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/invopop/jsonschema"
@@ -457,7 +458,7 @@ type Options struct {
 	Progress                  *bool        `json:"progress,omitempty" jsonschema:"description=Show indeterminate progress updates during long operations,default=true"`
 	Notifications             string       `json:"notifications,omitempty" jsonschema:"description=Notification style to use. Options: auto (default)\\, native\\, osc\\, bell\\, disabled. Auto selects based on environment: native for local sessions\\, osc for SSH (with automatic OSC 99/777 detection).,enum=auto,enum=native,enum=osc,enum=bell,enum=disabled,default=auto"`
 	DisabledSkills            []string     `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=crush-config"`
-	RequestTimeout            *int         `json:"request_timeout,omitempty" jsonschema:"description=Timeout in seconds for each LLM API request. Streaming responses are aborted only after this much inactivity\\, so slow but active streams are never killed. 0 disables it\\, negative values are invalid.,default=60,example=120,example=300,example=0"`
+	RequestTimeout            *int         `json:"request_timeout,omitempty" jsonschema:"description=Timeout in seconds for each LLM API request. Streaming responses are aborted only after this much inactivity between tokens\\, so slow but active streams are never killed; the wait for the first token gets at least five minutes for prompt prefill. 0 disables it\\, negative values are invalid.,default=60,example=120,example=300,example=0"`
 	MaxBackgroundJobs         *int         `json:"max_background_jobs,omitempty" jsonschema:"description=How many background shell jobs may run at once. Jobs that have finished never count against it. 0 or negative restores the default.,default=50,example=10,example=200"`
 }
 
@@ -476,15 +477,15 @@ func (o *Options) GetMaxBackgroundJobs() int {
 // DefaultRequestTimeout bounds each LLM API request when the user has not
 // configured a timeout. Slow or unreachable providers fail after it instead
 // of blocking a session forever; streamed responses are only aborted after
-// this much inactivity, and users running slow local models can raise or
-// disable it via options.request_timeout.
+// this much inactivity between tokens, and users running slow local models
+// can raise or disable it via options.request_timeout.
 const DefaultRequestTimeout = 2 * time.Minute
 
 // GetRequestTimeout returns the per-request timeout for LLM API calls (a
 // hard deadline for non-streaming requests and an idle timeout for
-// streams), or zero when disabled. The nil receiver and the unset field
-// both mean DefaultRequestTimeout, so callers can ask without unwrapping
-// either.
+// streams, with a more generous budget for the first streamed token), or
+// zero when disabled. The nil receiver and the unset field both mean
+// DefaultRequestTimeout, so callers can ask without unwrapping either.
 func (o *Options) GetRequestTimeout() time.Duration {
 	if o == nil || o.RequestTimeout == nil {
 		return DefaultRequestTimeout
@@ -789,38 +790,9 @@ func (t ToolGlob) GetTimeout() time.Duration {
 	return ptrValOr(t.Timeout, 30*time.Second)
 }
 
-// HookConfig defines a user-configured shell command that fires on a hook
-// event (e.g. PreToolUse). This is a pure-data struct: matcher compilation
-// is owned by hooks.Runner so a JSON round-trip, merge, or reload can't
-// silently drop compiled state.
-type HookConfig struct {
-	// Friendly display name shown in the TUI. Falls back to Command when empty.
-	Name string `json:"name,omitempty" jsonschema:"description=Friendly display name shown in the TUI for this hook"`
-	// Regex pattern tested against the tool name. Empty means match all.
-	Matcher string `json:"matcher,omitempty" jsonschema:"description=Regex pattern tested against the tool name. Empty means match all tools."`
-	// Shell command to execute.
-	Command string `json:"command" jsonschema:"required,description=Shell command to execute when the hook fires"`
-	// Timeout in seconds. Default 30.
-	Timeout int `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds for the hook command,default=30"`
-}
-
-// DisplayName returns the hook name for display purposes. It returns Name
-// when set, otherwise falls back to Command.
-func (h *HookConfig) DisplayName() string {
-	if h.Name != "" {
-		return h.Name
-	}
-	return h.Command
-}
-
-// TimeoutDuration returns the hook timeout as a time.Duration, defaulting
-// to 30s.
-func (h *HookConfig) TimeoutDuration() time.Duration {
-	if h.Timeout <= 0 {
-		return 30 * time.Second
-	}
-	return time.Duration(h.Timeout) * time.Second
-}
+// HookConfig is a user-configured hook command. The hooks package owns
+// the type because it owns the event list it is validated against.
+type HookConfig = hooks.HookConfig
 
 // Config holds the configuration for crush.
 type Config struct {

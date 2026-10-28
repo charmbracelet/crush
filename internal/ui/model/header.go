@@ -179,9 +179,9 @@ func renderHeaderDetails(
 	cwd := t.Header.WorkingDir.Render(fsext.DirTrim(fsext.PrettyPath(workingDir), dirTrimLimit))
 
 	if gitBranch != "" {
-		// Reserve space for the dot separator between branch and path and
+		// Reserve space for the separator between branch and path and
 		// at least some of the path.
-		branchSep := t.Header.Separator.Render(" • ")
+		branchSep := " "
 		metadataWidth := lipgloss.Width(metadata)
 		maxBranchWidth := max(0, availWidth-metadataWidth-lipgloss.Width(cwd)-lipgloss.Width(branchSep))
 		if maxBranchWidth > 0 {

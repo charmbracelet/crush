@@ -141,7 +141,13 @@ crush --continue
 		)
 		go ws.Subscribe(program)
 
-		if _, err := program.Run(); err != nil {
+		restoreStderr, err := detachStderr()
+		if err != nil {
+			slog.Warn("Failed to detach stderr from the terminal", "error", err)
+		}
+		_, err = program.Run()
+		restoreStderr()
+		if err != nil {
 			event.Error(err)
 			slog.Error("TUI run error", "error", err)
 			return errors.New("Crush crashed. If metrics are enabled, we were notified about it. If you'd like to report it, please copy the stacktrace above and open an issue at https://github.com/charmbracelet/crush/issues/new?template=bug.yml") //nolint:staticcheck
@@ -209,7 +215,7 @@ func Execute() {
 		_, _ = w.WriteString(heartbit.String())
 		rootCmd.SetVersionTemplate(b.String() + "\n" + defaultVersionTemplate)
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), terminationSignals()...)
 	err := fang.Execute(
 		ctx,
 		rootCmd,

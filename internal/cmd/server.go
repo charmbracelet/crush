@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
@@ -60,20 +61,12 @@ var serverCmd = &cobra.Command{
 		slog.Info("Starting Crush server...", "addr", serverHost)
 
 		errch := make(chan error, 1)
-		sigch := make(chan os.Signal, 1)
-		sigs := []os.Signal{os.Interrupt}
-		sigs = append(sigs, addSignals(sigs)...)
-		signal.Notify(sigch, sigs...)
-
 		go func() {
 			errch <- srv.ListenAndServe()
 		}()
 
-		select {
-		case <-sigch:
-			slog.Info("Received interrupt signal...")
-		case err = <-errch:
-			if err != nil && !errors.Is(err, server.ErrServerClosed) {
+		if err = awaitStop(cmd.Context(), srv, errch); err != nil {
+			if !errors.Is(err, server.ErrServerClosed) {
 				_ = srv.Close()
 				slog.Error("Server error", "error", err)
 				return fmt.Errorf("server error: %v", err)
@@ -84,7 +77,9 @@ var serverCmd = &cobra.Command{
 			return nil
 		}
 
-		ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Second)
+		// The signal already cancelled cmd.Context(); detach so the
+		// shutdown gets its full budget instead of none.
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(cmd.Context()), 15*time.Second)
 		defer cancel()
 
 		slog.Info("Shutting down...")
@@ -96,4 +91,32 @@ var serverCmd = &cobra.Command{
 
 		return nil
 	},
+}
+
+// awaitStop blocks until the root context is cancelled by a termination
+// signal, returning nil, or the server stops on its own, returning its
+// error. A server has no terminal to lose, so SIGHUP reloads config here
+// instead of stopping it.
+func awaitStop(ctx context.Context, srv *server.Server, errch <-chan error) error {
+	signal.Reset(syscall.SIGHUP)
+	hupch := make(chan os.Signal, 1)
+	signal.Notify(hupch, syscall.SIGHUP)
+	defer signal.Stop(hupch)
+
+	for {
+		select {
+		case <-hupch:
+			slog.Info("Received SIGHUP, reloading config...")
+			reloadCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			if err := srv.ReloadConfig(reloadCtx); err != nil {
+				slog.Error("Failed to reload config", "error", err)
+			}
+			cancel()
+		case <-ctx.Done():
+			slog.Info("Received termination signal...")
+			return nil
+		case err := <-errch:
+			return err
+		}
+	}
 }

@@ -177,8 +177,10 @@ func quickStyle(o quickStyleOpts) Styles {
 	// Populate color fields
 	s.WorkingGradFromColor = o.primary
 	s.WorkingGradToColor = o.secondary
-	s.WorkingLabelColor = o.fgMostSubtle
+	s.WorkingLabelColor = o.fgBase
 	s.WorkingTimerColor = o.fgMostSubtle
+	s.ThinkingLabelColor = o.fgMoreSubtle
+	s.CanceledLabelColor = o.fgMoreSubtle
 
 	s.TextInput = textinput.Styles{
 		Focused: textinput.StyleState{
@@ -1042,7 +1044,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Messages.AssistantInfoProvider = subtle
 	s.Messages.AssistantInfoDuration = subtle
 	s.Messages.SubduedHypercreditIcon = subtle
-	s.Messages.AssistantCanceled = lipgloss.NewStyle().Foreground(o.fgSubtle).Italic(true)
+	s.Messages.AssistantCanceled = lipgloss.NewStyle().Foreground(s.CanceledLabelColor).Italic(true)
 
 	// Plan section styles. The plan card is a bordered box with no background
 	// fill: the terminal background shows through, and only intentional chips
@@ -1056,7 +1058,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	// Thinking section styles
 	s.Messages.ThinkingBox = subtle.Background(o.bgLeastVisible)
 	s.Messages.ThinkingTruncationHint = muted
-	s.Messages.ThinkingFooterTitle = muted
+	s.Messages.ThinkingFooterTitle = subtle
 	s.Messages.ThinkingFooterDuration = subtle
 
 	// Text selection.

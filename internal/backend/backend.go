@@ -8,9 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -113,6 +115,7 @@ type Backend struct {
 	// to run unlocked; CreateWorkspace refuses once it is set. That
 	// makes the shutdown-vs-create decision atomic: a create can never
 	// be handed a workspace on a process that is already leaving.
+	// [Backend.ShutdownWorkspaces] sets it too, for an external stop.
 	closing bool
 	// retired holds the IDs of clients that announced their exit via
 	// RetireClient. Creates from a retired client are refused, which is what
@@ -480,9 +483,7 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	// Re-check admission: the client may have retired while the slow
 	// init above ran with b.mu released, and registering a claim for a
 	// client that has already announced its exit would strand the
-	// workspace. (b.closing cannot have flipped: every shutdown decision
-	// requires pending == 0, and this create has held pending since
-	// before it released b.mu.)
+	// workspace, or the server may have been told to stop meanwhile.
 	if err := b.admitLocked(clientID); err != nil {
 		b.mu.Unlock()
 		ws.invokeShutdown()
@@ -837,10 +838,10 @@ func (b *Backend) teardown(ws *Workspace) {
 		return
 	}
 	ws.clientsMu.Unlock()
-	if existing, ok := b.pathIndex[ws.resolvedPath]; ok && existing == ws.ID {
-		delete(b.pathIndex, ws.resolvedPath)
+	if !b.unregisterLocked(ws) {
+		b.mu.Unlock()
+		return
 	}
-	b.workspaces.Del(ws.ID)
 	// Arm (or, with lingering disabled, request) the idle shutdown. It
 	// only proceeds once there is genuinely nothing left: no live
 	// workspaces AND no create in flight. Deferring via the linger lets a
@@ -855,6 +856,18 @@ func (b *Backend) teardown(ws *Workspace) {
 		slog.Info("Last workspace removed, shutting down server...")
 		b.shutdownFn()
 	}
+}
+
+// unregisterLocked removes ws from the backend and reports whether this
+// caller now owns its shutdown. It must be called with b.mu held.
+func (b *Backend) unregisterLocked(ws *Workspace) bool {
+	if !b.workspaces.CompareAndDelete(ws.ID, ws) {
+		return false
+	}
+	if id, ok := b.pathIndex[ws.resolvedPath]; ok && id == ws.ID {
+		delete(b.pathIndex, ws.resolvedPath)
+	}
+	return true
 }
 
 // scheduleShutdownIfIdleLocked decides what to do about server shutdown
@@ -872,7 +885,7 @@ func (b *Backend) teardown(ws *Workspace) {
 // Returning true also latches [Backend.closing], since the caller has to
 // release b.mu before it can run shutdownFn.
 func (b *Backend) scheduleShutdownIfIdleLocked() (shutdownNow bool) {
-	if b.shutdownFn == nil {
+	if b.shutdownFn == nil || b.closing {
 		return false
 	}
 	if b.workspaces.Len() != 0 || b.pending != 0 {
@@ -1049,14 +1062,44 @@ func (b *Backend) Config() *config.ConfigStore {
 	return b.cfg
 }
 
-// Shutdown initiates a graceful server shutdown.
-func (b *Backend) Shutdown() {
+// ShutdownWorkspaces refuses new creates and tears down every hosted
+// workspace in parallel, so interrupted work is recorded before exit. It
+// returns ctx's error, naming the stragglers in the log, if ctx ends first.
+func (b *Backend) ShutdownWorkspaces(ctx context.Context) error {
 	b.mu.Lock()
 	b.closing = true
-	fn := b.shutdownFn
+	b.cancelShutdownLocked()
+	var owned []*Workspace
+	for _, ws := range slices.Collect(b.workspaces.Seq()) {
+		if b.unregisterLocked(ws) {
+			owned = append(owned, ws)
+		}
+	}
 	b.mu.Unlock()
-	if fn != nil {
-		fn()
+
+	remaining := csync.NewMap[string, struct{}]()
+	var wg sync.WaitGroup
+	for _, ws := range owned {
+		slog.Info("Shutting down workspace", "workspace", ws.ID)
+		remaining.Set(ws.ID, struct{}{})
+		wg.Go(func() {
+			ws.invokeShutdown()
+			remaining.Del(ws.ID)
+		})
+	}
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		slog.Warn("Gave up waiting for workspaces to shut down; their final state may not be recorded",
+			"workspaces", slices.Sorted(maps.Keys(remaining.Copy())))
+		return ctx.Err()
 	}
 }
 

@@ -111,7 +111,7 @@ func createNewFile(edit editContext, filePath, content string, call fantasy.Tool
 		}
 		return fantasy.NewTextErrorResponse(fmt.Sprintf("file already exists: %s", filePath)), nil
 	} else if !os.IsNotExist(err) {
-		return fantasy.ToolResponse{}, fmt.Errorf("failed to access file: %w", err)
+		return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to access file: %s", err)), nil
 	}
 
 	sessionID := GetSessionFromContext(edit.ctx)
@@ -155,14 +155,13 @@ func createNewFile(edit editContext, filePath, content string, call fantasy.Tool
 	}
 
 	if err = writeFileWithParents(filePath, []byte(content)); err != nil {
-		return fantasy.ToolResponse{}, err
+		return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to write file: %s", err)), nil
 	}
 
 	// File can't be in the history so we create a new file history
 	_, err = edit.files.Create(edit.ctx, sessionID, filePath, "")
 	if err != nil {
-		// Log error but don't fail the operation
-		return fantasy.ToolResponse{}, fmt.Errorf("error creating file history: %w", err)
+		slog.Error("Error creating file history", "error", err)
 	}
 
 	// Add the new content to the file history
@@ -245,7 +244,7 @@ func commitFileChange(edit editContext, sessionID, filePath, oldContent, newCont
 	if err != nil {
 		_, err = edit.files.Create(edit.ctx, sessionID, filePath, oldContent)
 		if err != nil {
-			return fmt.Errorf("error creating file history: %w", err)
+			slog.Error("Error creating file history", "error", err)
 		}
 	}
 	if file.Content != oldContent {
@@ -268,7 +267,7 @@ func loadExistingFile(edit editContext, filePath, sessionError string) (sessionI
 		if os.IsNotExist(err) {
 			return "", "", false, fantasy.NewTextErrorResponse(fmt.Sprintf("file not found: %s", filePath)), nil
 		}
-		return "", "", false, fantasy.ToolResponse{}, fmt.Errorf("failed to access file: %w", err)
+		return "", "", false, fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to access file: %s", err)), nil
 	}
 
 	if fileInfo.IsDir() {
@@ -297,7 +296,7 @@ func loadExistingFile(edit editContext, filePath, sessionError string) (sessionI
 
 	content, err := os.ReadFile(filePath)
 	if err != nil {
-		return "", "", false, fantasy.ToolResponse{}, fmt.Errorf("failed to read file: %w", err)
+		return "", "", false, fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to read file: %s", err)), nil
 	}
 
 	oldContent, isCrlf = fsext.ToUnixLineEndings(string(content))
@@ -360,7 +359,7 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 	}
 
 	if err := commitFileChange(edit, sessionID, filePath, oldContent, writeContent); err != nil {
-		return fantasy.ToolResponse{}, err
+		return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to write file: %s", err)), nil
 	}
 
 	return fantasy.WithResponseMetadata(
@@ -433,7 +432,7 @@ func replaceContent(edit editContext, filePath, oldString, newString string, rep
 	}
 
 	if err := commitFileChange(edit, sessionID, filePath, oldContent, writeContent); err != nil {
-		return fantasy.ToolResponse{}, err
+		return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to write file: %s", err)), nil
 	}
 
 	return fantasy.WithResponseMetadata(

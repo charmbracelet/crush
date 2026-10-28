@@ -4798,7 +4798,7 @@ func (m *UI) switchPlanToYolo() tea.Cmd {
 // Mode banner copy shown in the status bar after switching modes.
 const (
 	planModeBannerMsg = "Plan with Crush before generating any code."
-	yoloModeBannerMsg = "Skip permission prompts. System level commands will be blocked."
+	yoloModeBannerMsg = "System level commands stay blocked. The rest run unprompted."
 )
 
 func (m *UI) setInputMode(target uiInputMode) tea.Cmd {
@@ -5789,6 +5789,11 @@ func (m *UI) openFilesDialog() tea.Cmd {
 
 // openPermissionsDialog opens the permissions dialog for a permission request.
 func (m *UI) openPermissionsDialog(perm permission.PermissionRequest) tea.Cmd {
+	// CRUSH_PERMISSIONS_PIPED=1: another client (an editor Crush runs in)
+	// shows the prompts and answers them, so this UI doesn't ask twice.
+	if piped, _ := strconv.ParseBool(os.Getenv("CRUSH_PERMISSIONS_PIPED")); piped {
+		return nil
+	}
 	// Close any existing permissions dialog first.
 	m.dialog.CloseDialog(dialog.PermissionsID)
 
@@ -5870,7 +5875,7 @@ func (m *UI) handlePermissionNotification(notification permission.PermissionNoti
 		if permItem, ok := toolItem.(chat.ToolMessageItem); ok {
 			if notification.Granted {
 				permItem.SetStatus(chat.ToolStatusRunning)
-			} else {
+			} else if !notification.Cancelled {
 				permItem.SetStatus(chat.ToolStatusAwaitingPermission)
 			}
 		}
@@ -5879,7 +5884,7 @@ func (m *UI) handlePermissionNotification(notification permission.PermissionNoti
 	// If this notification reflects a final resolution (granted or denied),
 	// dismiss any open permissions dialog whose tool call ID matches. This
 	// covers the case where another client resolved the request remotely.
-	if !notification.Granted && !notification.Denied {
+	if !notification.Granted && !notification.Denied && !notification.Cancelled {
 		return
 	}
 	if d := m.dialog.Dialog(dialog.PermissionsID); d != nil {

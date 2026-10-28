@@ -183,7 +183,7 @@ func NewViewTool(
 
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("File not found: %s", filePath)), nil
 				}
-				return fantasy.ToolResponse{}, fmt.Errorf("error accessing file: %w", err)
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to access file: %s", err)), nil
 			}
 
 			// Check if it's a directory
@@ -212,7 +212,7 @@ func NewViewTool(
 
 				imageData, readErr := os.ReadFile(filePath)
 				if readErr != nil {
-					return fantasy.ToolResponse{}, fmt.Errorf("error reading image file: %w", readErr)
+					return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to read image file: %s", readErr)), nil
 				}
 
 				// Some tools save files with a mismatched extension
@@ -238,7 +238,7 @@ func NewViewTool(
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("Content section is too large (%d bytes). Maximum size is %d bytes",
 						tooLarge.Size, tooLarge.Max)), nil
 				}
-				return fantasy.ToolResponse{}, fmt.Errorf("error reading file: %w", err)
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to read file: %s", err)), nil
 			}
 			if !utf8.ValidString(content) {
 				return fantasy.NewTextErrorResponse("File content is not valid UTF-8"), nil

@@ -1700,12 +1700,6 @@ func (a *sessionAgent) runSummarize(ctx context.Context, sessionID, trigger, ins
 		Observed:         appendixCount,
 	}.Render())
 
-	summaryMessage.AddFinish(message.FinishReasonEndTurn, "", "")
-	err = a.messages.Update(genCtx, summaryMessage)
-	if err != nil {
-		return compaction.Preview{}, err
-	}
-
 	// A rendered checkpoint never reached a model, so it has no steps to price
 	// and no usage to bill. Either way the session's counters are set below
 	// from the request the checkpoint produces, and marked estimated.
@@ -1725,6 +1719,12 @@ func (a *sessionAgent) runSummarize(ctx context.Context, sessionID, trigger, ins
 		}
 
 		a.updateSessionUsage(largeModel, &currentSession, resp.TotalUsage, openrouterCost, false)
+	}
+
+	summaryMessage.AddFinish(message.FinishReasonEndTurn, "", "")
+	err = a.messages.Update(genCtx, summaryMessage)
+	if err != nil {
+		return compaction.Preview{}, err
 	}
 	preview := compaction.Preview{
 		CheckpointID: summaryMessage.ID,

@@ -153,6 +153,9 @@ func coderAgent(r *vcr.Recorder, env fakeEnv, large, small fantasy.LanguageModel
 	cfg.Config().Options.ContextPaths = nil
 	cfg.Config().Options.GlobalContextPaths = nil
 	cfg.Config().LSP = nil
+	// The working directory is not a git repository, so Load caps the ls
+	// walk. The cassettes were recorded without that cap.
+	cfg.Config().Tools.Ls = config.ToolLs{}
 
 	systemPrompt, err := prompt.Build(context.TODO(), large.Provider(), large.Model(), cfg)
 	if err != nil {

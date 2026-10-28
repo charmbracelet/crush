@@ -93,7 +93,7 @@ func Load(ctx context.Context, workingDir, dataDir string, debug bool) (*ConfigS
 		return nil, fmt.Errorf("invalid router configuration: %w", err)
 	}
 
-	if !isInsideWorktree() {
+	if !isInsideWorktree(workingDir) {
 		const depth = 2
 		const items = 100
 		slog.Warn("No git repository detected in working directory, will limit file walk operations", "depth", depth, "items", items)
@@ -1503,12 +1503,17 @@ func assignIfNil[T any](ptr **T, val T) {
 	}
 }
 
-func isInsideWorktree() bool {
-	bts, err := exec.CommandContext(
+// isInsideWorktree reports whether dir is inside a git working tree. It
+// checks dir rather than the process working directory, which a server
+// shares across every workspace it hosts.
+func isInsideWorktree(dir string) bool {
+	cmd := exec.CommandContext(
 		context.Background(),
 		"git", "rev-parse",
 		"--is-inside-work-tree",
-	).CombinedOutput()
+	)
+	cmd.Dir = dir
+	bts, err := cmd.CombinedOutput()
 	return err == nil && strings.TrimSpace(string(bts)) == "true"
 }
 

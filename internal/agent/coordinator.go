@@ -974,10 +974,12 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 
 	// Wrap tools with hook interception for the top-level agent only.
 	// Sub-agents (the `agent` task tool, `agentic_fetch`, etc.) run
-	// without hook interception to avoid firing the user's hook N times
-	// per delegated turn. The top-level invocation of the sub-agent tool
-	// itself is still wrapped from the coder's side.
-	filteredTools = wrapToolsWithHooks(filteredTools, c.hookRunner, isSubAgent)
+	// without hook interception by default to avoid firing the user's
+	// hook N times per delegated turn. The top-level invocation of the
+	// sub-agent tool itself is still wrapped from the coder's side.
+	// When a hook has IncludeSubAgents=true, it opt's into sub-agent
+	// interception for audit logging, secret redaction, or policy.
+	filteredTools = wrapToolsWithHooks(filteredTools, c.hookRunner, isSubAgent, c.cfg.Config().Hooks)
 
 	return filteredTools, nil
 }

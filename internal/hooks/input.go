@@ -37,6 +37,7 @@ type Payload struct {
 	Source               string          `json:"source,omitempty"`
 	Reason               string          `json:"reason,omitempty"`
 	Trigger              string          `json:"trigger,omitempty"`
+	IsSubAgent           bool            `json:"is_sub_agent,omitempty"`
 }
 
 // BuildPayload constructs the JSON stdin payload for an event.
@@ -53,6 +54,7 @@ func BuildPayload(ev Event, cwd string) []byte {
 		Source:               ev.Source,
 		Reason:               ev.Reason,
 		Trigger:              ev.Trigger,
+		IsSubAgent:           ev.IsSubAgent,
 	}
 	if ev.Tool != nil {
 		p.ToolName = ev.Tool.Name

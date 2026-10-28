@@ -4,8 +4,10 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/bubbles/v2/key"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/ui/attachments"
+	"github.com/charmbracelet/crush/internal/ui/keyhint"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
@@ -74,4 +76,29 @@ func TestStatusDrawExpandedHelpRowsAlignWithoutBadge(t *testing.T) {
 		require.Equal(t, wantCol, leadingSpaces(line),
 			"expanded help row %d must align with the first row", i)
 	}
+}
+
+type labelKeyMap struct {
+	bindings []key.Binding
+}
+
+func (m labelKeyMap) ShortHelp() []key.Binding { return m.bindings }
+
+func (m labelKeyMap) FullHelp() [][]key.Binding { return [][]key.Binding{m.bindings} }
+
+func TestStatusHelpUsesPlatformLabel(t *testing.T) {
+	t.Parallel()
+
+	u := newPrismTestUI()
+	st := u.status
+	st.helpKm = labelKeyMap{bindings: []key.Binding{
+		key.NewBinding(
+			key.WithKeys("ctrl+p"),
+			key.WithHelp("ctrl+p", "commands"),
+		),
+	}}
+	st.SetWidth(80)
+
+	lines := drawStatusLines(t, st, 80, 2)
+	require.Contains(t, strings.Join(lines, "\n"), keyhint.Label("ctrl+p"))
 }

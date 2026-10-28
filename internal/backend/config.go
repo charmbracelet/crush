@@ -67,8 +67,8 @@ func (w *Workspace) reloadConfig(ctx context.Context) error {
 	if err := w.Cfg.ReloadFromDisk(ctx); err != nil {
 		return err
 	}
-	if w.App != nil && w.AgentCoordinator != nil {
-		if err := w.UpdateAgentModel(ctx); err != nil {
+	if coord := w.Coordinator(); coord != nil {
+		if err := coord.UpdateModels(ctx); err != nil {
 			return err
 		}
 	}

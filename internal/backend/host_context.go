@@ -11,10 +11,11 @@ func (b *Backend) SetHostContext(workspaceID string, hc proto.HostContext) error
 	if err != nil {
 		return err
 	}
-	if ws.AgentCoordinator == nil {
+	coord := ws.Coordinator()
+	if coord == nil {
 		return ErrAgentNotInitialized
 	}
-	ws.AgentCoordinator.SetHostContext(hc)
+	coord.SetHostContext(hc)
 	return nil
 }
 
@@ -25,8 +26,9 @@ func (b *Backend) GetHostContext(workspaceID string) (proto.HostContext, error) 
 	if err != nil {
 		return proto.HostContext{}, err
 	}
-	if ws.AgentCoordinator == nil {
+	coord := ws.Coordinator()
+	if coord == nil {
 		return proto.HostContext{}, nil
 	}
-	return ws.AgentCoordinator.HostContext(), nil
+	return coord.HostContext(), nil
 }

@@ -325,6 +325,8 @@ func runNonInteractive(
 				hc.HandleEvent(hev)
 			}
 
+			cancelOwnQuestion(ctx, c, ws.ID, sess.ID, ev)
+
 			done, err := stream.handle(ev, stopSpinner)
 			if err != nil {
 				return err
@@ -337,6 +339,22 @@ func runNonInteractive(
 			stopSpinner()
 			return ctx.Err()
 		}
+	}
+}
+
+// cancelOwnQuestion cancels ev when it is a question batch the agent raised
+// in this run's session. The workspace's agent is shared with interactive
+// clients, so it can offer this run the question tool too, but nobody is
+// here to answer: a pending question would stall the run forever.
+// Cancelling it ends the agent's turn.
+func cancelOwnQuestion(ctx context.Context, c *client.Client, wsID, sessionID string, ev any) {
+	q, ok := ev.(pubsub.Event[proto.QuestionRequest])
+	if !ok || q.Payload.SessionID != sessionID {
+		return
+	}
+	slog.Warn("Cancelling a question from the agent: a non-interactive run cannot answer it", "session_id", sessionID)
+	if _, err := c.CancelQuestionBatch(ctx, wsID); err != nil {
+		slog.Error("Failed to cancel the agent's question", "error", err)
 	}
 }
 

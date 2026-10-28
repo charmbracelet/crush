@@ -12,11 +12,17 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// detachProcess starts the server in a new process group with a console of
+// its own that has no window. The console programs the server runs (git,
+// LSP and MCP servers, bash tool commands) inherit that hidden console.
+// DETACHED_PROCESS would leave the server without a console, and Windows
+// gives every console program started by such a process a new, visible
+// console window. It also makes Windows ignore CREATE_NO_WINDOW.
 func detachProcess(c *exec.Cmd) {
 	if c.SysProcAttr == nil {
 		c.SysProcAttr = &syscall.SysProcAttr{}
 	}
-	c.SysProcAttr.CreationFlags = syscall.CREATE_NEW_PROCESS_GROUP | windows.DETACHED_PROCESS
+	c.SysProcAttr.CreationFlags = syscall.CREATE_NEW_PROCESS_GROUP | windows.CREATE_NO_WINDOW
 }
 
 // startDetached starts the command newCmd builds, detached from this

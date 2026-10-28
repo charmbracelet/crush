@@ -21,6 +21,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/db"
+	"github.com/charmbracelet/crush/internal/dirid"
 	"github.com/charmbracelet/crush/internal/projects"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/skills"
@@ -199,6 +200,12 @@ type Workspace struct {
 	// Backend.pathIndex. It is filepath.EvalSymlinks(filepath.Abs(Path))
 	// with fallback to the cleaned absolute path.
 	resolvedPath string
+	// dirID identifies the directory found at resolvedPath when the
+	// workspace was created, or is the zero (unknown) ID. It dedupes
+	// spellings of the directory that resolvedPath does not unify. It
+	// is not re-validated: this assumes the directory outlives the
+	// workspace, so its inode or file ID is not reused by another one.
+	dirID dirid.ID
 
 	// ctx is the workspace-scoped run context. It is derived from
 	// the backend context in CreateWorkspace and lives for the
@@ -380,8 +387,8 @@ func (b *Backend) ListWorkspaces() []proto.Workspace {
 }
 
 // CreateWorkspace initializes a new workspace from the given
-// parameters, or returns an existing workspace if one already exists at
-// the same resolved path (first-wins semantics).
+// parameters, or returns an existing workspace if one already exists for
+// the same directory (first-wins semantics).
 //
 // args.ClientID must be a valid UUID identifying the calling client;
 // the resulting workspace registers a creation hold on behalf of that
@@ -400,6 +407,7 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	if err != nil {
 		return nil, proto.Workspace{}, fmt.Errorf("failed to resolve workspace path: %w", err)
 	}
+	dirID, _ := dirid.Of(key)
 
 	b.mu.Lock()
 	if err := b.admitLocked(clientID); err != nil {
@@ -409,7 +417,7 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	// A client is arriving: cancel any pending idle shutdown so we never
 	// hand back a workspace on a server that is about to tear itself down.
 	b.cancelShutdownLocked()
-	if existingID, ok := b.pathIndex[key]; ok {
+	if existingID, ok := b.lookupLocked(key, dirID); ok {
 		if ws, found := b.workspaces.Get(existingID); found {
 			// Hold b.mu while registering: teardown also
 			// acquires b.mu before tearing the workspace
@@ -506,6 +514,7 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 		Env:          args.Env,
 		Skills:       skillsMgr,
 		resolvedPath: key,
+		dirID:        dirID,
 		ctx:          wsCtx,
 		cancel:       wsCancel,
 		clients:      make(map[string]*clientState),
@@ -524,7 +533,7 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	}
 	// Re-check the index under the lock: a concurrent caller may have
 	// won the race between the initial unlock and here.
-	if existingID, ok := b.pathIndex[key]; ok {
+	if existingID, ok := b.lookupLocked(key, dirID); ok {
 		if existing, found := b.workspaces.Get(existingID); found {
 			// Register under b.mu so teardown cannot run
 			// between lookup and registerClient. Lock order
@@ -895,6 +904,25 @@ func (b *Backend) teardown(ws *Workspace) {
 		slog.Info("Last workspace removed, shutting down server...")
 		b.shutdownFn()
 	}
+}
+
+// lookupLocked returns the ID of the workspace registered for the
+// directory at key. It matches the resolved path first and then, when dir
+// is known, the directory itself: EvalSymlinks leaves some spellings of
+// one directory apart (another case on a case-insensitive filesystem; on
+// Windows a junction, subst drive or UNC path), and each of them must join
+// the same workspace rather than open its data directory a second time.
+// It does no IO and must be called with b.mu held.
+func (b *Backend) lookupLocked(key string, dir dirid.ID) (string, bool) {
+	if id, ok := b.pathIndex[key]; ok {
+		return id, true
+	}
+	for id, ws := range b.workspaces.Seq2() {
+		if dir.Same(ws.dirID) {
+			return id, true
+		}
+	}
+	return "", false
 }
 
 // unregisterLocked removes ws from the backend and reports whether this

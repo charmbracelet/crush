@@ -138,11 +138,20 @@ func unmarshalToolParams(toolName string, raw json.RawMessage) (any, error) {
 			return nil, err
 		}
 		return params, nil
-	default:
-		// For unknown tools, keep the raw JSON as-is.
-		var generic map[string]any
-		if err := json.Unmarshal(raw, &generic); err != nil {
+	case ReplaceSymbolToolName:
+		var params ReplaceSymbolPermissionsParams
+		if err := json.Unmarshal(raw, &params); err != nil {
 			return nil, err
+		}
+		return params, nil
+	default:
+		// For unknown tools, keep the params as the generic JSON value
+		// they hold. That is not always an object: MCP tools send their
+		// raw JSON input as a string. Never fail the whole request over
+		// params we have no type for; fall back to the raw JSON text.
+		var generic any
+		if err := json.Unmarshal(raw, &generic); err != nil {
+			return string(raw), nil
 		}
 		return generic, nil
 	}

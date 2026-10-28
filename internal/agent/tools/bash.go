@@ -326,10 +326,17 @@ func NewBashTool(permissions permission.Service, workingDir, spillDir string, at
 			for {
 				select {
 				case <-ticker.C:
-					stdout, stderr, done, execErr = bgShell.GetOutput()
-					if done {
-						break waitLoop
+					// Only ask whether the job has finished. GetOutput
+					// copies the whole accumulated output, so reading it
+					// on every tick costs one full copy of the command's
+					// output ten times a second for as long as the
+					// command runs, and the values are thrown away on
+					// every tick but the last.
+					if !bgShell.IsDone() {
+						continue
 					}
+					stdout, stderr, done, execErr = bgShell.GetOutput()
+					break waitLoop
 				case <-timeout:
 					stdout, stderr, done, execErr = bgShell.GetOutput()
 					break waitLoop

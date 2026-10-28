@@ -1,417 +1,159 @@
 package cmd
 
 import (
-	"bytes"
-	"errors"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"testing"
-	"time"
 
+	"github.com/charmbracelet/crush/internal/client"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/stretchr/testify/require"
 )
 
-// TestRunStream_ToolUseDoesNotTerminate is the regression test for
-// the original bug: a tool-call assistant message has a Finish part
-// with reason=tool_use and used to terminate `crush run` early via
-// the discarded `msg.IsFinished()` exit condition. With the new
-// RunComplete-driven loop, tool_use finishes must keep the stream
-// alive so the post-tool final text still reaches stdout.
-func TestRunStream_ToolUseDoesNotTerminate(t *testing.T) {
-	t.Parallel()
+// newRunServer serves just enough of the server API for runNonInteractive
+// to start a run in workspace "w". Once the prompt is accepted, the event
+// stream is handed to stream, which decides how the run ends as far as the
+// client can tell.
+func newStreamRunServer(t *testing.T, stream func(w http.ResponseWriter, r *http.Request, runID string)) *client.Client {
+	t.Helper()
 
-	s := &runStream{sessionID: "S", out: &bytes.Buffer{}, read: map[string]int{}}
+	accepted := make(chan string, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /v1/workspaces/w/agent":
+			_ = json.NewEncoder(w).Encode(proto.AgentInfo{IsReady: true})
+		case "POST /v1/workspaces/w/agent/update":
+			w.WriteHeader(http.StatusOK)
+		case "POST /v1/workspaces/w/sessions":
+			_ = json.NewEncoder(w).Encode(proto.Session{ID: "s"})
+		case "POST /v1/workspaces/w/agent":
+			var msg proto.AgentMessage
+			if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			accepted <- msg.RunID
+			w.WriteHeader(http.StatusAccepted)
+		case "GET /v1/workspaces/w/events":
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			_ = http.NewResponseController(w).Flush()
+			select {
+			case runID := <-accepted:
+				stream(w, r, runID)
+			case <-r.Context().Done():
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
 
-	toolUse := proto.Message{
-		ID:        "m1",
-		SessionID: "S",
-		Role:      proto.Assistant,
-		Parts: []proto.ContentPart{
-			proto.TextContent{Text: ""},
-			proto.Finish{Reason: proto.FinishReasonToolUse, Time: time.Now().Unix()},
-		},
+	u, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	c, err := client.NewClient(t.TempDir(), "tcp", u.Host)
+	require.NoError(t, err)
+	return c
+}
+
+// writeRunComplete sends rc on the event stream the way the server does.
+func writeRunComplete(t *testing.T, w http.ResponseWriter, rc proto.RunComplete) {
+	inner, err := json.Marshal(pubsub.Event[proto.RunComplete]{Type: pubsub.UpdatedEvent, Payload: rc})
+	if err != nil {
+		t.Error(err)
+		return
 	}
-	done, err := s.handle(pubsub.Event[proto.Message]{Payload: toolUse}, nil)
-	require.NoError(t, err)
-	require.False(t, done, "tool_use finish must NOT terminate the run loop")
-}
-
-// TestRunStream_RunCompleteExits verifies the happy path: streaming
-// assistant text then RunComplete terminates with the full final
-// text on stdout. Together with the tool_use test above this
-// nails down the "tool use + final text" sequence that the original
-// bug truncated.
-func TestRunStream_RunCompleteExits(t *testing.T) {
-	t.Parallel()
-
-	buf := &bytes.Buffer{}
-	s := &runStream{sessionID: "S", out: buf, read: map[string]int{}}
-
-	// Tool-use step.
-	done, err := s.handle(pubsub.Event[proto.Message]{Payload: proto.Message{
-		ID: "m1", SessionID: "S", Role: proto.Assistant,
-		Parts: []proto.ContentPart{
-			proto.TextContent{Text: ""},
-			proto.Finish{Reason: proto.FinishReasonToolUse},
-		},
-	}}, nil)
-	require.NoError(t, err)
-	require.False(t, done)
-
-	// Final assistant message stream.
-	done, err = s.handle(pubsub.Event[proto.Message]{Payload: proto.Message{
-		ID: "m2", SessionID: "S", Role: proto.Assistant,
-		Parts: []proto.ContentPart{
-			proto.TextContent{Text: "VERDICT: APPROVED"},
-			proto.Finish{Reason: proto.FinishReasonEndTurn},
-		},
-	}}, nil)
-	require.NoError(t, err)
-	require.False(t, done, "message finish (even end_turn) must not exit; RunComplete is the only terminal signal")
-
-	// RunComplete.
-	done, err = s.handle(pubsub.Event[proto.RunComplete]{Payload: proto.RunComplete{
-		SessionID: "S",
-		MessageID: "m2",
-		Text:      "VERDICT: APPROVED",
-	}}, nil)
-	require.NoError(t, err)
-	require.True(t, done)
-	require.Equal(t, "VERDICT: APPROVED", buf.String())
-}
-
-// TestRunStream_ReconcilesOnOutOfOrderRunComplete is the worst-case
-// ordering scenario: RunComplete reaches the client BEFORE any of
-// the streaming assistant message events for the turn (the pubsub
-// fan-in across upstream brokers does not preserve cross-broker
-// ordering). The embedded Text field must rescue stdout so the
-// caller still sees the complete final text.
-func TestRunStream_ReconcilesOnOutOfOrderRunComplete(t *testing.T) {
-	t.Parallel()
-
-	buf := &bytes.Buffer{}
-	s := &runStream{sessionID: "S", out: buf, read: map[string]int{}}
-
-	done, err := s.handle(pubsub.Event[proto.RunComplete]{Payload: proto.RunComplete{
-		SessionID: "S",
-		MessageID: "m2",
-		Text:      "VERDICT: APPROVED",
-	}}, nil)
-	require.NoError(t, err)
-	require.True(t, done)
-	require.Equal(t, "VERDICT: APPROVED", buf.String(),
-		"RunComplete must reconcile stdout when message events did not arrive in time")
-}
-
-// TestRunStream_ReconcilesPartialStream covers the realistic case
-// where some streaming output reached stdout before RunComplete
-// arrived: the reconciliation pass must append only the unread tail,
-// never duplicate the prefix.
-func TestRunStream_ReconcilesPartialStream(t *testing.T) {
-	t.Parallel()
-
-	buf := &bytes.Buffer{}
-	s := &runStream{sessionID: "S", out: buf, read: map[string]int{}}
-
-	_, err := s.handle(pubsub.Event[proto.Message]{Payload: proto.Message{
-		ID: "m2", SessionID: "S", Role: proto.Assistant,
-		Parts: []proto.ContentPart{proto.TextContent{Text: "VERDICT: "}},
-	}}, nil)
-	require.NoError(t, err)
-
-	_, err = s.handle(pubsub.Event[proto.RunComplete]{Payload: proto.RunComplete{
-		SessionID: "S",
-		MessageID: "m2",
-		Text:      "VERDICT: APPROVED",
-	}}, nil)
-	require.NoError(t, err)
-	require.Equal(t, "VERDICT: APPROVED", buf.String())
-}
-
-// TestRunStream_IgnoresOtherSessions ensures multi-session
-// subscribers (e.g. a TUI watching workspace events while `crush
-// run` is in flight against the same workspace) do not cause
-// premature exit on RunComplete for a different session.
-func TestRunStream_IgnoresOtherSessions(t *testing.T) {
-	t.Parallel()
-
-	s := &runStream{sessionID: "S", out: &bytes.Buffer{}, read: map[string]int{}}
-	done, err := s.handle(pubsub.Event[proto.RunComplete]{Payload: proto.RunComplete{
-		SessionID: "OTHER",
-		MessageID: "x",
-		Text:      "noise",
-	}}, nil)
-	require.NoError(t, err)
-	require.False(t, done)
-}
-
-// TestRunStream_ErrorRunComplete surfaces a failing run as a
-// non-nil error from `crush run` so shells and CI catch it via
-// exit status.
-func TestRunStream_ErrorRunComplete(t *testing.T) {
-	t.Parallel()
-
-	s := &runStream{sessionID: "S", out: &bytes.Buffer{}, read: map[string]int{}}
-	done, err := s.handle(pubsub.Event[proto.RunComplete]{Payload: proto.RunComplete{
-		SessionID: "S",
-		Error:     "model temporarily unavailable",
-	}}, nil)
-	require.True(t, done)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "model temporarily unavailable")
-}
-
-// TestRunStream_CancelledRunCompleteIsClean ensures a cancelled
-// run (e.g. Ctrl+C while `crush run` waits) exits cleanly rather
-// than reporting the cancellation as a failure.
-func TestRunStream_CancelledRunCompleteIsClean(t *testing.T) {
-	t.Parallel()
-
-	s := &runStream{sessionID: "S", out: &bytes.Buffer{}, read: map[string]int{}}
-	done, err := s.handle(pubsub.Event[proto.RunComplete]{Payload: proto.RunComplete{
-		SessionID: "S",
-		Error:     "context canceled",
-		Cancelled: true,
-	}}, nil)
-	require.True(t, done)
-	require.NoError(t, err)
-}
-
-// TestRunStream_LeadingWhitespaceTrimmedOnce mirrors the
-// pre-existing trim of leading whitespace on the first byte of
-// stdout: the trim must happen exactly once even when stdout is
-// first produced by the RunComplete reconciliation path rather
-// than the live stream.
-func TestRunStream_LeadingWhitespaceTrimmedOnce(t *testing.T) {
-	t.Parallel()
-
-	buf := &bytes.Buffer{}
-	s := &runStream{sessionID: "S", out: buf, read: map[string]int{}}
-
-	done, err := s.handle(pubsub.Event[proto.RunComplete]{Payload: proto.RunComplete{
-		SessionID: "S",
-		MessageID: "m2",
-		Text:      "  \tactual output",
-	}}, nil)
-	require.NoError(t, err)
-	require.True(t, done)
-	require.Equal(t, "actual output", buf.String())
-}
-
-// TestRunStream_StopSpinnerInvokedOnFirstOutput verifies the
-// spinner is stopped exactly when meaningful output starts (either
-// a streamed assistant message or the reconciliation tail). This
-// matches the prior behaviour and prevents the spinner from
-// painting over the final response on TTYs.
-func TestRunStream_StopSpinnerInvokedOnFirstOutput(t *testing.T) {
-	t.Parallel()
-
-	calls := 0
-	stop := func() { calls++ }
-	s := &runStream{sessionID: "S", out: &bytes.Buffer{}, read: map[string]int{}}
-	_, _ = s.handle(pubsub.Event[proto.Message]{Payload: proto.Message{
-		ID: "m1", SessionID: "S", Role: proto.Assistant,
-		Parts: []proto.ContentPart{proto.TextContent{Text: "hi"}},
-	}}, stop)
-	require.GreaterOrEqual(t, calls, 1, "spinner must stop once stdout has content")
-}
-
-// TestRunStream_RunIDFiltersForeignTurns covers the busy-session
-// queue scenario: `crush run --continue` attaches to a session
-// whose currently running turn finishes first, publishing its
-// RunComplete on the same session ID. Without per-run correlation
-// the stream would exit on that foreign event and drop our own
-// queued turn's output. With RunID filtering the foreign event is
-// ignored and only the matching RunComplete terminates the stream.
-func TestRunStream_RunIDFiltersForeignTurns(t *testing.T) {
-	t.Parallel()
-
-	const sessionID = "S"
-	const myRun = "run-mine"
-	const otherRun = "run-other"
-
-	buf := &bytes.Buffer{}
-	s := &runStream{
-		sessionID: sessionID,
-		runID:     myRun,
-		out:       buf,
-		read:      map[string]int{},
+	data, err := json.Marshal(pubsub.Payload{Type: pubsub.PayloadTypeRunComplete, Payload: inner})
+	if err != nil {
+		t.Error(err)
+		return
 	}
-
-	// The busy session's existing turn emits more text before it finishes.
-	done, err := s.handle(pubsub.Event[proto.Message]{Payload: proto.Message{
-		ID:        "other-msg",
-		SessionID: sessionID,
-		Role:      proto.Assistant,
-		Parts:     []proto.ContentPart{proto.TextContent{Text: "noise from another turn"}},
-	}}, nil)
-	require.NoError(t, err)
-	require.False(t, done,
-		"foreign message on same session must not terminate our run")
-	require.Empty(t, buf.String(),
-		"foreign message on same session must not write to our stdout")
-
-	// The busy session's existing turn finishes first.
-	done, err = s.handle(pubsub.Event[proto.RunComplete]{Payload: proto.RunComplete{
-		SessionID: sessionID,
-		RunID:     otherRun,
-		MessageID: "other-msg",
-		Text:      "noise from another turn",
-	}}, nil)
-	require.NoError(t, err)
-	require.False(t, done,
-		"foreign RunComplete on same session must not terminate our run")
-	require.Empty(t, buf.String(),
-		"foreign RunComplete must not write to our stdout")
-
-	// Our own queued turn eventually finishes.
-	done, err = s.handle(pubsub.Event[proto.RunComplete]{Payload: proto.RunComplete{
-		SessionID: sessionID,
-		RunID:     myRun,
-		MessageID: "my-msg",
-		Text:      "OK",
-	}}, nil)
-	require.NoError(t, err)
-	require.True(t, done, "matching RunID must terminate the stream")
-	require.Equal(t, "OK", buf.String())
+	fmt.Fprintf(w, "data: %s\n\n", data)
+	_ = http.NewResponseController(w).Flush()
 }
 
-func TestRunStream_RunIDSuppressesLiveMessagesAndPrintsRunComplete(t *testing.T) {
+// runAgainst runs `crush run hi` in workspace "w" on the server c talks to.
+func runAgainst(t *testing.T, c *client.Client) error {
+	t.Helper()
+	ws := &proto.Workspace{ID: "w", Config: &config.Config{Options: &config.Options{}}}
+	return runNonInteractive(t.Context(), c, ws, "hi", "", "", "", true, "", false)
+}
+
+// TestRunNonInteractive_LostStreamIsAnError is the regression test for
+// `crush run` exiting 0 with nothing on stdout when the server died or the
+// event stream ended mid-run. The run never completed, so a script chaining
+// on the exit status must see a failure.
+func TestRunNonInteractive_LostStreamIsAnError(t *testing.T) {
 	t.Parallel()
 
-	buf := &bytes.Buffer{}
-	s := &runStream{
-		sessionID: "S",
-		runID:     "run-mine",
-		out:       buf,
-		read:      map[string]int{},
+	for name, end := range map[string]func(t *testing.T, w http.ResponseWriter){
+		// The server stops streaming, e.g. because the workspace was torn
+		// down under the run.
+		"stream ends": func(*testing.T, http.ResponseWriter) {},
+		// The server process is killed: the connection drops without the
+		// response being terminated.
+		"connection drops": func(t *testing.T, w http.ResponseWriter) {
+			conn, _, err := http.NewResponseController(w).Hijack()
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			_ = conn.Close()
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			c := newStreamRunServer(t, func(w http.ResponseWriter, _ *http.Request, _ string) {
+				end(t, w)
+			})
+			require.ErrorContains(t, runAgainst(t, c), "lost connection",
+				"a run whose event stream was lost must not succeed")
+		})
 	}
-
-	done, err := s.handle(pubsub.Event[proto.Message]{Payload: proto.Message{
-		ID:        "my-msg",
-		SessionID: "S",
-		Role:      proto.Assistant,
-		Parts:     []proto.ContentPart{proto.TextContent{Text: "streamed prefix"}},
-	}}, nil)
-	require.NoError(t, err)
-	require.False(t, done)
-	require.Empty(t, buf.String())
-
-	done, err = s.handle(pubsub.Event[proto.RunComplete]{Payload: proto.RunComplete{
-		SessionID: "S",
-		RunID:     "run-mine",
-		MessageID: "my-msg",
-		Text:      "streamed prefix final",
-	}}, nil)
-	require.NoError(t, err)
-	require.True(t, done)
-	require.Equal(t, "streamed prefix final", buf.String())
 }
 
-// TestRunStream_AgentErrorRunIDFiltersForeign verifies that an async
-// agent error carrying a non-empty RunID is fatal only when it matches
-// our run. A foreign RunID is ignored regardless of the event's
-// SessionID, because RunID is the authoritative correlator and async
-// errors share the agent event channel: without strict RunID matching
-// an unrelated workspace failure would abort our run.
-func TestRunStream_AgentErrorRunIDFiltersForeign(t *testing.T) {
+// TestRunNonInteractive_ServerCancelledRunIsAnError covers the graceful
+// variant: a server that shuts down cancels the run (as does a workspace
+// teardown or another client) and still sends its RunComplete. Its text is
+// whatever the agent had written so far, so exiting 0 would pass truncated
+// output off as the answer.
+func TestRunNonInteractive_ServerCancelledRunIsAnError(t *testing.T) {
 	t.Parallel()
 
-	// Foreign RunID with a matching session is still foreign.
-	s := &runStream{sessionID: "S", runID: "run-mine", out: &bytes.Buffer{}, read: map[string]int{}}
-	done, err := s.handle(pubsub.Event[proto.AgentEvent]{Payload: proto.AgentEvent{
-		Type:      proto.AgentEventTypeError,
-		SessionID: "S",
-		RunID:     "run-other",
-		Error:     errors.New("foreign boom"),
-	}}, nil)
-	require.NoError(t, err, "foreign RunID error must not abort our run")
-	require.False(t, done)
-
-	// Foreign RunID with a different session is ignored.
-	done, err = s.handle(pubsub.Event[proto.AgentEvent]{Payload: proto.AgentEvent{
-		Type:      proto.AgentEventTypeError,
-		SessionID: "other",
-		RunID:     "run-other",
-		Error:     errors.New("foreign boom"),
-	}}, nil)
-	require.NoError(t, err, "foreign RunID error must not abort our run")
-	require.False(t, done)
-
-	// Foreign RunID with a missing session is ignored.
-	done, err = s.handle(pubsub.Event[proto.AgentEvent]{Payload: proto.AgentEvent{
-		Type:  proto.AgentEventTypeError,
-		RunID: "run-other",
-		Error: errors.New("foreign boom"),
-	}}, nil)
-	require.NoError(t, err, "foreign RunID error must not abort our run")
-	require.False(t, done)
-
-	// Matching RunID is fatal.
-	done, err = s.handle(pubsub.Event[proto.AgentEvent]{Payload: proto.AgentEvent{
-		Type:      proto.AgentEventTypeError,
-		SessionID: "S",
-		RunID:     "run-mine",
-		Error:     errors.New("my boom"),
-	}}, nil)
-	require.Error(t, err, "matching RunID error must be fatal")
-	require.True(t, done)
+	c := newStreamRunServer(t, func(w http.ResponseWriter, r *http.Request, runID string) {
+		writeRunComplete(t, w, proto.RunComplete{
+			SessionID: "s",
+			RunID:     runID,
+			MessageID: "m",
+			Text:      "partial answer",
+			Error:     "context canceled",
+			Cancelled: true,
+		})
+		<-r.Context().Done()
+	})
+	require.ErrorContains(t, runAgainst(t, c), "cancelled",
+		"a run cancelled by someone else must not succeed")
 }
 
-// TestRunStream_AgentErrorNoRunIDFiltersBySession verifies the
-// compatibility fallback: when the event carries no RunID, attribution
-// falls back to SessionID. An error for another session or with an
-// empty session is ignored, while an error for our own session is fatal
-// so a real failure is never dropped.
-func TestRunStream_AgentErrorNoRunIDFiltersBySession(t *testing.T) {
+// TestRunNonInteractive_CompletedRunSucceeds is the control: a run that
+// completes still exits cleanly.
+func TestRunNonInteractive_CompletedRunSucceeds(t *testing.T) {
 	t.Parallel()
 
-	s := &runStream{sessionID: "S", out: &bytes.Buffer{}, read: map[string]int{}}
-
-	// Empty RunID for another session is ignored.
-	done, err := s.handle(pubsub.Event[proto.AgentEvent]{Payload: proto.AgentEvent{
-		Type:      proto.AgentEventTypeError,
-		SessionID: "other",
-		Error:     errors.New("foreign boom"),
-	}}, nil)
-	require.NoError(t, err, "error for another session must not abort our run")
-	require.False(t, done)
-
-	// Empty RunID with an empty session is ignored.
-	done, err = s.handle(pubsub.Event[proto.AgentEvent]{Payload: proto.AgentEvent{
-		Type:  proto.AgentEventTypeError,
-		Error: errors.New("foreign boom"),
-	}}, nil)
-	require.NoError(t, err, "error with no session must not abort our run")
-	require.False(t, done)
-
-	// Empty RunID with a matching session is fatal.
-	done, err = s.handle(pubsub.Event[proto.AgentEvent]{Payload: proto.AgentEvent{
-		Type:      proto.AgentEventTypeError,
-		SessionID: "S",
-		Error:     errors.New("my boom"),
-	}}, nil)
-	require.Error(t, err, "error for our own session must be fatal")
-	require.True(t, done)
-}
-
-// TestRunStream_NoRunIDFallsBackToSessionID preserves the older
-// behaviour for callers (and tests) that don't supply a RunID:
-// SessionID-only matching still terminates the stream on the
-// session's RunComplete. This keeps the contract backwards
-// compatible with servers that don't echo RunID and with the
-// pre-existing TestRunStream_* assertions.
-func TestRunStream_NoRunIDFallsBackToSessionID(t *testing.T) {
-	t.Parallel()
-
-	buf := &bytes.Buffer{}
-	s := &runStream{sessionID: "S", out: buf, read: map[string]int{}}
-	done, err := s.handle(pubsub.Event[proto.RunComplete]{Payload: proto.RunComplete{
-		SessionID: "S",
-		MessageID: "m2",
-		Text:      "DONE",
-	}}, nil)
-	require.NoError(t, err)
-	require.True(t, done)
-	require.Equal(t, "DONE", buf.String())
+	c := newStreamRunServer(t, func(w http.ResponseWriter, r *http.Request, runID string) {
+		writeRunComplete(t, w, proto.RunComplete{
+			SessionID: "s",
+			RunID:     runID,
+			MessageID: "m",
+			Text:      "answer",
+		})
+		<-r.Context().Done()
+	})
+	require.NoError(t, runAgainst(t, c))
 }

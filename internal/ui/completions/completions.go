@@ -418,9 +418,12 @@ func (c *Completions) Render() string {
 func loadFiles(depth, limit int, open []string) []FileCompletionValue {
 	files, _, _ := fsext.ListDirectory(".", nil, depth, limit)
 	slices.Sort(files)
+	for i, file := range files {
+		files[i] = filepath.ToSlash(filepath.Clean(file))
+	}
 	listed := make(map[string]bool, len(files))
 	for _, file := range files {
-		listed[strings.TrimPrefix(file, "./")] = true
+		listed[file] = true
 	}
 	result := make([]FileCompletionValue, 0, len(files))
 	added := make(map[string]bool, len(open))
@@ -432,8 +435,8 @@ func loadFiles(depth, limit int, open []string) []FileCompletionValue {
 		}
 	}
 	for _, file := range files {
-		if rel := strings.TrimPrefix(file, "./"); !added[rel] {
-			result = append(result, FileCompletionValue{Path: rel})
+		if !added[file] {
+			result = append(result, FileCompletionValue{Path: file})
 		}
 	}
 	return result

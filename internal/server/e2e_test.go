@@ -626,6 +626,94 @@ func TestE2E_PermissionScopedToViewingClients(t *testing.T) {
 	}
 }
 
+// TestE2E_UnansweredPromptDoesNotBlockOtherSessions verifies that a
+// permission prompt left unanswered in one session does not hold back
+// the prompts of another session. Prompts only reach the viewers of
+// their own session, so a prompt queued behind another session's could
+// never be seen, let alone answered, by the client waiting for it.
+func TestE2E_UnansweredPromptDoesNotBlockOtherSessions(t *testing.T) {
+	t.Parallel()
+	h := newE2EHarness(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	cidA := uuid.New().String()
+	cidB := uuid.New().String()
+
+	evcA, cancelA := h.subscribeSSE(t, ctx, h.workspace.ID, cidA)
+	t.Cleanup(cancelA)
+	evcB, cancelB := h.subscribeSSE(t, ctx, h.workspace.ID, cidB)
+	t.Cleanup(cancelB)
+
+	h.waitForAttached(t, 2)
+
+	const sessionA = "s-unanswered"
+	const sessionB = "s-other"
+	h.setCurrentSession(t, ctx, h.workspace.ID, cidA, sessionA)
+	h.setCurrentSession(t, ctx, h.workspace.ID, cidB, sessionB)
+
+	var wg sync.WaitGroup
+	// Unblock the requests on failure paths before waiting on them.
+	t.Cleanup(func() { cancel(); wg.Wait() })
+	request := func(sessionID, toolCallID string) <-chan bool {
+		granted := make(chan bool, 1)
+		wg.Go(func() {
+			ok, _ := h.app.Permissions.Request(ctx, permission.CreatePermissionRequest{
+				SessionID:   sessionID,
+				ToolCallID:  toolCallID,
+				ToolName:    "bash",
+				Description: "run a command",
+				Action:      "execute",
+				Path:        h.workspace.Path,
+			})
+			granted <- ok
+		})
+		return granted
+	}
+	isRequest := func(toolCallID string) func(pubsub.Event[proto.PermissionRequest]) bool {
+		return func(e pubsub.Event[proto.PermissionRequest]) bool {
+			return e.Payload.ToolCallID == toolCallID
+		}
+	}
+
+	waitCtx, waitCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer waitCancel()
+
+	// Client A's prompt reaches client A, which never answers it.
+	doneA := request(sessionA, "tc-unanswered")
+	reqA, ok := drainUntil(waitCtx, evcA, isRequest("tc-unanswered"))
+	require.True(t, ok, "client A must receive its prompt")
+
+	// Client B's prompt in its own session must still reach client B.
+	doneB := request(sessionB, "tc-other")
+	reqB, ok := drainUntil(waitCtx, evcB, isRequest("tc-other"))
+	require.True(t, ok, "client B's prompt must not wait for an unanswered prompt in another session")
+
+	// Switching into a session re-delivers that session's own pending
+	// prompt, not the one pending in the session the client left.
+	h.setCurrentSession(t, ctx, h.workspace.ID, cidA, sessionB)
+	repub, ok := drainUntil(waitCtx, evcA, isRequest("tc-other"))
+	require.True(t, ok, "switching sessions must re-deliver the new session's pending prompt")
+	require.Equal(t, reqB.Payload.ID, repub.Payload.ID)
+
+	// Each prompt is resolved on its own.
+	require.True(t, h.grantPermission(t, ctx, h.workspace.ID, proto.PermissionGrant{
+		Permission: reqB.Payload,
+		Action:     proto.PermissionAllow,
+	}))
+	require.True(t, <-doneB, "client B's request must be granted")
+	select {
+	case <-doneA:
+		t.Fatal("client A's request must stay pending until it is answered")
+	default:
+	}
+	require.True(t, h.grantPermission(t, ctx, h.workspace.ID, proto.PermissionGrant{
+		Permission: reqA.Payload,
+		Action:     proto.PermissionAllow,
+	}))
+	require.True(t, <-doneA, "client A's request must be granted")
+}
+
 // TestE2E_KillingClientASSEDoesNotBreakClientB covers PLAN item 6
 // scenario 3: terminating client A's SSE stream does not affect
 // client B's stream; client B continues to receive events.

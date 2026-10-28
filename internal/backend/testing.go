@@ -10,8 +10,10 @@ import "context"
 // If the workspace has no run context yet it is derived from the
 // backend context (falling back to context.Background), mirroring the
 // initialization CreateWorkspace performs, so dispatched agent runs
-// have a non-nil ws.ctx.
+// have a non-nil ws.ctx. Its permission prompts are scoped per
+// top-level session the same way.
 func InsertWorkspaceForTest(b *Backend, ws *Workspace) {
+	scopePermissionPrompts(ws)
 	if ws.resolvedPath == "" {
 		ws.resolvedPath = ws.Path
 	}

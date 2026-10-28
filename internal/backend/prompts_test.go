@@ -2,6 +2,7 @@ package backend
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -196,8 +197,12 @@ func TestSetCurrentSession_RepublishesPendingPermission(t *testing.T) {
 
 	var active permission.PermissionRequest
 	require.Eventually(t, func() bool {
-		active, _ = a.Permissions.ActiveRequest()
-		return active.ID != ""
+		pending := a.Permissions.ActiveRequests()
+		if len(pending) == 0 {
+			return false
+		}
+		active = pending[0]
+		return true
 	}, 10*time.Second, 5*time.Millisecond, "request must be pending")
 	require.Equal(t, "tc-1", active.ToolCallID)
 
@@ -273,4 +278,90 @@ func TestSetCurrentSession_RepublishesPendingQuestion(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("expected re-published question request")
 	}
+}
+
+// TestCreateWorkspace_PermissionPromptsWaitPerTopLevelSession verifies
+// that a workspace's permission requests only wait for earlier requests
+// of the same top-level session: another session's prompt is shown
+// while one is left unanswered, and a sub-agent's prompt still waits
+// for its parent session's, since the same clients answer both.
+//
+// Cannot run in parallel: it isolates HOME/XDG_* via t.Setenv so
+// config.Init does not read the host machine's real config.
+func TestCreateWorkspace_PermissionPromptsWaitPerTopLevelSession(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+
+	b := New(context.Background(), nil, func() {})
+	b.SetCreateGrace(2 * time.Second)
+	t.Cleanup(func() { drainBackend(t, b) })
+
+	ws, _, err := b.CreateWorkspace(protoWS(t.TempDir(), t.TempDir(), uuid.New().String()))
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	var wg sync.WaitGroup
+	// Unblock the requests on failure paths before the workspace goes.
+	t.Cleanup(func() { cancel(); wg.Wait() })
+
+	top, err := ws.Sessions.Create(ctx, "top")
+	require.NoError(t, err)
+	child, err := ws.Sessions.CreateTaskSession(ctx, "child-1", top.ID, "child")
+	require.NoError(t, err)
+	other, err := ws.Sessions.Create(ctx, "other")
+	require.NoError(t, err)
+
+	requests := ws.Permissions.Subscribe(ctx)
+	request := func(sessionID string) <-chan bool {
+		granted := make(chan bool, 1)
+		wg.Go(func() {
+			ok, _ := ws.Permissions.Request(ctx, permission.CreatePermissionRequest{
+				SessionID:  sessionID,
+				ToolCallID: "tc-" + sessionID,
+				ToolName:   "bash",
+				Action:     "execute",
+				Path:       ws.Path,
+			})
+			granted <- ok
+		})
+		return granted
+	}
+	next := func() permission.PermissionRequest {
+		t.Helper()
+		select {
+		case ev := <-requests:
+			return ev.Payload
+		case <-time.After(10 * time.Second):
+			t.Fatal("permission request was never published")
+			return permission.PermissionRequest{}
+		}
+	}
+
+	doneTop := request(top.ID)
+	reqTop := next()
+	require.Equal(t, top.ID, reqTop.SessionID)
+
+	const childMustWait = "a sub-agent's prompt must wait for its top-level session's"
+	doneChild := request(child.ID)
+	doneOther := request(other.ID)
+	reqOther := next()
+	require.NotEqual(t, child.ID, reqOther.SessionID, childMustWait)
+	require.Equal(t, other.ID, reqOther.SessionID,
+		"another top-level session's prompt must not wait for an unanswered one")
+	select {
+	case ev := <-requests:
+		t.Fatalf("%s, got %q", childMustWait, ev.Payload.SessionID)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	require.True(t, ws.Permissions.Grant(reqOther))
+	require.True(t, <-doneOther)
+	require.True(t, ws.Permissions.Grant(reqTop))
+	require.True(t, <-doneTop)
+	reqChild := next()
+	require.Equal(t, child.ID, reqChild.SessionID)
+	require.True(t, ws.Permissions.Grant(reqChild))
+	require.True(t, <-doneChild)
 }

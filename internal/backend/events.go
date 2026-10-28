@@ -75,13 +75,31 @@ func rootSessionID(ctx context.Context, ws *Workspace, sessionID string) (string
 	return id, nil
 }
 
+// scopePermissionPrompts makes the workspace's permission requests wait
+// only for earlier requests of the same top-level session, instead of
+// every earlier request in the workspace. A prompt only reaches the
+// clients viewing its top-level session, so one that nobody answers
+// would otherwise hold back every other session's prompts, unseen by
+// the clients waiting on them. Sub-agent prompts still wait for their
+// top-level session's, since the same viewers answer them one at a
+// time.
+func scopePermissionPrompts(ws *Workspace) {
+	if ws.App == nil || ws.Permissions == nil {
+		return
+	}
+	ws.Permissions.SetSessionScope(func(ctx context.Context, sessionID string) string {
+		root, _ := rootSessionID(ctx, ws, sessionID)
+		return root
+	})
+}
+
 // republishPendingPrompts re-publishes the workspace's pending
-// permission request and question batch when their session matches the
-// one a client just switched to. Without this, a prompt raised while
-// nobody viewed the session would remain invisible — and therefore
-// unanswerable — until the run was cancelled. Delivery is still scoped
-// by the per-client SSE filter, so only the session's viewers (re)see
-// the prompt.
+// permission requests and question batch when their session matches
+// the one a client just switched to. Without this, a prompt raised
+// while nobody viewed the session would remain invisible — and
+// therefore unanswerable — until the run was cancelled. Delivery is
+// still scoped by the per-client SSE filter, so only the session's
+// viewers (re)see the prompt.
 func (b *Backend) republishPendingPrompts(ctx context.Context, ws *Workspace, sessionID string) {
 	if ws.App == nil {
 		return
@@ -89,11 +107,13 @@ func (b *Backend) republishPendingPrompts(ctx context.Context, ws *Workspace, se
 	// The individual services are nil on workspaces with a stubbed app
 	// (tests); treat those as having no pending prompts.
 	if ws.Permissions != nil {
-		if req, ok := ws.Permissions.ActiveRequest(); ok && b.sessionMatches(ctx, ws, req.SessionID, sessionID) {
-			ws.SendEvent(pubsub.Event[permission.PermissionRequest]{
-				Type:    pubsub.CreatedEvent,
-				Payload: req,
-			})
+		for _, req := range ws.Permissions.ActiveRequests() {
+			if b.sessionMatches(ctx, ws, req.SessionID, sessionID) {
+				ws.SendEvent(pubsub.Event[permission.PermissionRequest]{
+					Type:    pubsub.CreatedEvent,
+					Payload: req,
+				})
+			}
 		}
 	}
 	if ws.Questions != nil {

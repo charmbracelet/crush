@@ -656,15 +656,28 @@ func ensureServer(cmd *cobra.Command, hostURL *url.URL) error {
 // just use the now-running server. The lock is held only for the
 // duration of "spawn + readiness probe" and released before the caller
 // resumes its normal lifetime.
+//
+// A healthy holder therefore releases the lock within about one readiness
+// budget for a server it spawned, so the wait for it is bounded by twice
+// that: a holder that keeps it longer is stuck (e.g. suspended with
+// Ctrl+Z) and must not hang every other client too.
 func spawnAndWaitReady(cmd *cobra.Command, hostURL *url.URL) error {
 	chDir, err := perHostServerDir(hostURL)
 	if err != nil {
 		return err
 	}
-	release, err := lock.File(cmd.Context(), filepath.Join(chDir, "start.lock"))
+	waitCtx, cancelWait := context.WithTimeout(cmd.Context(), 2*serverReadyTimeout(true))
+	release, err := lock.File(waitCtx, filepath.Join(chDir, "start.lock"))
+	cancelWait()
 	if err != nil {
-		// If the lock itself is unavailable, fall back to the
-		// unsynchronized path rather than blocking the user.
+		// The user gave up (e.g. Ctrl+C) while we waited: spawning now
+		// would leave behind a server they aborted, racing the lock
+		// holder's own spawn.
+		if ctxErr := cmd.Context().Err(); ctxErr != nil {
+			return ctxErr
+		}
+		// If the lock itself is unavailable or its holder is stuck, fall
+		// back to the unsynchronized path rather than blocking the user.
 		slog.Warn("Failed to acquire spawn lock, proceeding without single-flight", "error", err)
 		child, err := startDetachedServer(cmd, hostURL)
 		if err != nil {
@@ -1054,7 +1067,9 @@ func (s *spawnedServer) exitError() error {
 	return fmt.Errorf("%w; last lines of %s:\n%s", err, s.stderrPath, strings.Join(lines, "\n"))
 }
 
-func startDetachedServer(cmd *cobra.Command, hostURL *url.URL) (*spawnedServer, error) {
+// startDetachedServer launches `crush server` detached from this process.
+// It is a variable so tests can observe spawns without starting a server.
+var startDetachedServer = func(cmd *cobra.Command, hostURL *url.URL) (*spawnedServer, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get executable path: %v", err)

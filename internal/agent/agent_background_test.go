@@ -18,8 +18,8 @@ import (
 
 func TestBackgroundLabel(t *testing.T) {
 	t.Parallel()
-	assert.Equal(t, "agent-123456", backgroundLabel(AgentToolName, "toolcall123456"))
-	assert.Equal(t, "search-abc123", backgroundLabel(tools.AgenticFetchToolName, "toolu_abc123"))
+	assert.Equal(t, SubagentName("agent-123456"), backgroundLabel(AgentToolName, "toolcall123456"))
+	assert.Equal(t, SubagentName("search-abc123"), backgroundLabel(tools.AgenticFetchToolName, "toolu_abc123"))
 }
 
 // A non-interactive coordinator keeps blocking, so the agent's output comes
@@ -176,9 +176,9 @@ func TestDispatchHistoryBackgroundedBlockingCall(t *testing.T) {
 	}
 
 	records := dispatchHistory(msgs)
-	require.Equal(t, []string{"search-1"}, records.order)
+	require.Equal(t, []string{SubagentName("search-1")}, records.order)
 
-	rec := records.byLabel["search-1"]
+	rec := records.byLabel[SubagentName("search-1")]
 	require.NotNil(t, rec)
 	assert.Equal(t, tools.AgenticFetchToolName, rec.Tool)
 	assert.Equal(t, "m1", rec.MessageID)
@@ -190,7 +190,7 @@ func TestDispatchHistoryBackgroundedBlockingCall(t *testing.T) {
 	msgs = append(msgs, message.Message{ID: "u1", Role: message.User, Parts: []message.ContentPart{
 		message.SubAgentReport{Label: "search-1", Output: "found"},
 	}})
-	rec = dispatchHistory(msgs).byLabel["search-1"]
+	rec = dispatchHistory(msgs).byLabel[SubagentName("search-1")]
 	require.NotNil(t, rec)
 	assert.False(t, rec.Open)
 	require.NotNil(t, rec.LastReport)

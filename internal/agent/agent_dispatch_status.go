@@ -21,7 +21,7 @@ var agentStatusToolDescription string
 const AgentStatusToolName = "agent_status"
 
 type AgentStatusParams struct {
-	Label string `json:"label,omitempty" description:"Show detail for this subagent only: its task, recent tool calls, and latest output. Omit to list every subagent in this session"`
+	Label string `json:"label,omitempty" description:"The name of one subagent, to show only its detail: its task, recent tool calls, and latest output. Omit to list every subagent in this session"`
 }
 
 // dispatchRecord is what a parent transcript says about one subagent label:
@@ -82,7 +82,7 @@ func dispatchHistory(msgs []message.Message) dispatchRecords {
 			if json.Unmarshal([]byte(call.Input), &params) != nil {
 				continue
 			}
-			label := strings.TrimSpace(params.Label)
+			label := SubagentName(params.Label)
 			if label == "" {
 				continue
 			}
@@ -146,7 +146,7 @@ func dispatchHistory(msgs []message.Message) dispatchRecords {
 				if result.Metadata == "" || json.Unmarshal([]byte(result.Metadata), &meta) != nil || !meta.Reopened {
 					continue
 				}
-				if record, ok := records.byLabel[meta.Label]; ok {
+				if record, ok := records.byLabel[SubagentName(meta.Label)]; ok {
 					record.Open = true
 				}
 			case AgentToolName, tools.AgenticFetchToolName:
@@ -158,7 +158,7 @@ func dispatchHistory(msgs []message.Message) dispatchRecords {
 				if result.Metadata == "" || json.Unmarshal([]byte(result.Metadata), &meta) != nil || !meta.Backgrounded {
 					continue
 				}
-				label := strings.TrimSpace(meta.Label)
+				label := SubagentName(meta.Label)
 				if label == "" {
 					continue
 				}
@@ -183,7 +183,7 @@ func dispatchHistory(msgs []message.Message) dispatchRecords {
 			}
 		}
 		for _, report := range msg.SubAgentReports() {
-			if record, ok := records.byLabel[report.Label]; ok {
+			if record, ok := records.byLabel[SubagentName(report.Label)]; ok {
 				record.Open = false
 				record.LastReport = &report
 			}
@@ -242,7 +242,7 @@ func (c *coordinator) agentStatusTool() fantasy.AgentTool {
 			}
 			records := dispatchHistory(msgs)
 
-			label := strings.TrimSpace(params.Label)
+			label := SubagentName(params.Label)
 			if label != "" {
 				record, ok := records.byLabel[label]
 				if !ok {

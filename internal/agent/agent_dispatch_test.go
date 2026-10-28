@@ -53,22 +53,22 @@ func TestDispatchHistory(t *testing.T) {
 	}
 
 	records := dispatchHistory(msgs)
-	require.Equal(t, []string{"a", "b"}, records.order)
+	require.Equal(t, []string{SubagentName("a"), SubagentName("b")}, records.order, "labels are recorded as names")
 
-	a := records.byLabel["a"]
+	a := records.byLabel[SubagentName("a")]
 	require.Equal(t, "c1", a.CallID)
 	require.Equal(t, accessRead, a.Access)
 	require.True(t, a.Open, "a reopened subagent is open again")
 	require.NotNil(t, a.LastReport)
 
-	b := records.byLabel["b"]
+	b := records.byLabel[SubagentName("b")]
 	require.Equal(t, "c2", b.CallID, "a refused dispatch must not replace the running one")
 	require.Equal(t, "write", b.Access)
 	require.True(t, b.Open)
 
 	latest := LatestDispatches([]*message.Message{&msgs[0], &msgs[1], &msgs[2]})
-	require.False(t, latest["a"].Open)
-	require.True(t, latest["b"].Open)
+	require.False(t, latest[SubagentName("a")].Open)
+	require.True(t, latest[SubagentName("b")].Open)
 }
 
 func TestDispatchedAgentStaleRunCannotSettleNewerRun(t *testing.T) {
@@ -217,12 +217,12 @@ func TestReconcileDispatchesReportsInterruptedOnce(t *testing.T) {
 	require.Len(t, msgs, 4, "exactly one interrupted report is written")
 	reports := msgs[3].SubAgentReports()
 	require.Len(t, reports, 1)
-	require.Equal(t, "cut-off", reports[0].Label)
+	require.Equal(t, SubagentName("cut-off"), reports[0].Label)
 	require.True(t, reports[0].Failed)
 	require.Contains(t, reports[0].Output, "Interrupted")
 
 	// The parent's history now closes the dispatch.
-	require.False(t, dispatchHistory(msgs).byLabel["cut-off"].Open)
+	require.False(t, dispatchHistory(msgs).byLabel[SubagentName("cut-off")].Open)
 }
 
 func TestAgentStatusToolReportsLiveAndInterruptedSubAgents(t *testing.T) {
@@ -253,10 +253,10 @@ func TestAgentStatusToolReportsLiveAndInterruptedSubAgents(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	entry := newDispatchedAgent("live", accessRead, childID, parent.ID, nil)
+	entry := newDispatchedAgent(SubagentName("live"), accessRead, childID, parent.ID, nil)
 	_, _, ok := entry.claim()
 	require.True(t, ok)
-	c.dispatched.Set(dispatchKey(parent.ID, "live"), entry)
+	c.dispatched.Set(dispatchKey(parent.ID, SubagentName("live")), entry)
 
 	tool := c.agentStatusTool()
 	toolCtx := context.WithValue(ctx, tools.SessionIDContextKey, parent.ID)
@@ -264,9 +264,9 @@ func TestAgentStatusToolReportsLiveAndInterruptedSubAgents(t *testing.T) {
 	resp, err := tool.Run(toolCtx, fantasy.ToolCall{ID: "s1", Name: AgentStatusToolName, Input: `{}`})
 	require.NoError(t, err)
 	require.False(t, resp.IsError, resp.Content)
-	require.Contains(t, resp.Content, "- live: running")
+	require.Contains(t, resp.Content, "- "+SubagentName("live")+": running")
 	require.Contains(t, resp.Content, `grep {"pattern":"foo"} [running]`)
-	require.Contains(t, resp.Content, "- dead: interrupted")
+	require.Contains(t, resp.Content, "- "+SubagentName("dead")+": interrupted")
 	require.Contains(t, resp.Content, "write access")
 
 	resp, err = tool.Run(toolCtx, fantasy.ToolCall{ID: "s2", Name: AgentStatusToolName, Input: `{"label":"live"}`})

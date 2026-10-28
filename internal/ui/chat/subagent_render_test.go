@@ -11,16 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The display name is a pure function of the label, so the dispatch, the
-// report, and any follow-up all show the same person without sharing state.
-func TestSubagentDisplayName(t *testing.T) {
-	t.Parallel()
-	name := SubagentDisplayName("date-impl")
-	require.True(t, strings.HasSuffix(name, "-date-impl"), name)
-	require.Equal(t, name, SubagentDisplayName("date-impl"))
-	require.Empty(t, SubagentDisplayName(""))
-}
-
 func renderPlain(t *testing.T, item MessageItem) []string {
 	t.Helper()
 	return strings.Split(ansi.Strip(item.RawRender(100)), "\n")
@@ -34,7 +24,7 @@ func TestSubagentReportAlignsWithHeader(t *testing.T) {
 	item := NewSubAgentReportItem(&sty, "date-impl", "hyper/glm-5", "All done.", false)
 	lines := renderPlain(t, item)
 
-	name := SubagentDisplayName("date-impl")
+	name := agent.SubagentName("date-impl")
 	require.Contains(t, lines[0], "Subagent Report "+name+" (model=hyper/glm-5)")
 	headerText := ansi.StringWidth(lines[0][:strings.Index(lines[0], "Subagent Report")])
 	body := lines[2]
@@ -57,7 +47,7 @@ func TestAgentSendShowsTheMessage(t *testing.T) {
 	}, false, "/tmp")
 	out := strings.Join(renderPlain(t, item), "\n")
 
-	require.Contains(t, out, "Message Subagent → "+SubagentDisplayName("date-impl"))
+	require.Contains(t, out, "Message Subagent → "+agent.SubagentName("date-impl"))
 	require.Contains(t, out, "Please fix the lint.")
 	require.NotContains(t, out, `"label"`)
 	require.NotContains(t, out, "Delivered")
@@ -79,7 +69,7 @@ func TestDispatchHeaderShowsRunModel(t *testing.T) {
 		Metadata:   `{"label":"audit","run_model":"hyper/glm-5"}`,
 	}, false, "/tmp")
 	lines := renderPlain(t, item)
-	require.Contains(t, lines[0], "Create Subagent "+SubagentDisplayName("audit")+" (model=hyper/glm-5)")
+	require.Contains(t, lines[0], "Create Subagent "+agent.SubagentName("audit")+" (model=hyper/glm-5)")
 }
 
 // A long model name on a narrow pane is what hid the override's model: the
@@ -101,13 +91,13 @@ func TestAgentStatusRendersRows(t *testing.T) {
 	}, &message.ToolResult{
 		ToolCallID: "call-1",
 		Content:    "- a: finished",
-		Metadata:   `{"agents":[{"label":"a","state":"finished","timing":"5m ago","access":"read","tool_calls":2},{"label":"long-label","state":"running","timing":"for 1m","access":"write","tool_calls":1}]}`,
+		Metadata:   `{"agents":[{"label":"betty-a","state":"finished","timing":"5m ago","access":"read","tool_calls":2},{"label":"sasha-long-label","state":"running","timing":"for 1m","access":"write","tool_calls":1}]}`,
 	}, false, "/tmp")
 	lines := renderPlain(t, item)
 
 	require.NotContains(t, lines[0], "→", "a status of every subagent names no target")
 	a, long := lines[2], lines[3]
-	require.Contains(t, a, "✓ "+SubagentDisplayName("a"))
+	require.Contains(t, a, "✓ betty-a")
 	require.Contains(t, a, "finished 5m ago · 2 tool calls")
 	require.Contains(t, long, "running for 1m · 1 tool calls · can write")
 	require.Equal(t, strings.Index(a, "finished"), strings.Index(long, "running"), "states line up")

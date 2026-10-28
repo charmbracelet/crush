@@ -108,9 +108,10 @@ func TestObserverRecordsMemoryAtTurnEnd(t *testing.T) {
 	observer := &recordingModel{text: fmt.Sprintf(
 		`[{"kind":"observation","text":"The user chose append-only storage","relevance":2,"sources":[%s]}]`,
 		strings.Join(ids, ","))}
-	sa.smallModel.Set(Model{Model: observer, CatwalkCfg: catwalk.Model{
+	observerModel := Model{Model: observer, CatwalkCfg: catwalk.Model{
 		ContextWindow: 200_000, DefaultMaxTokens: 10_000,
-	}})
+	}}
+	sa.models = fixedModels(sa.models().Large, observerModel)
 
 	// The observer is fired from the turn's terminal event and runs on a
 	// detached goroutine, so drive it directly and wait for the effect.

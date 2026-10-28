@@ -11,10 +11,10 @@ import (
 
 // TestPermissionRequestParamsTypeAssertable guards the permission
 // dialog's type assertions across the client/server boundary. The TUI
-// asserts PermissionRequest.Params to tools.*PermissionsParams; when
-// the request round-trips over the SSE wire (server → client), the
-// decoded value must be the same Go type, otherwise the dialog
-// renders empty content.
+// asserts PermissionRequest.Params to tools.*PermissionsParams (or to a
+// string for MCP tools); when the request round-trips over the SSE wire
+// (server → client), the decoded value must be the same Go type,
+// otherwise the dialog renders empty content.
 func TestPermissionRequestParamsTypeAssertable(t *testing.T) {
 	t.Parallel()
 
@@ -155,6 +155,34 @@ func TestPermissionRequestParamsTypeAssertable(t *testing.T) {
 				require.True(t, ok, "params must decode as tools.AgenticFetchPermissionsParams, got %T", got)
 				require.Equal(t, "https://example.com", v.URL)
 				require.Equal(t, "summarize this page", v.Prompt)
+			},
+		},
+		{
+			name:     "replace_symbol",
+			toolName: tools.ReplaceSymbolToolName,
+			params: tools.ReplaceSymbolPermissionsParams{
+				FilePath:   "/tmp/x.go",
+				OldContent: "old",
+				NewContent: "new",
+			},
+			assert: func(t *testing.T, got any) {
+				v, ok := got.(tools.ReplaceSymbolPermissionsParams)
+				require.True(t, ok, "params must decode as tools.ReplaceSymbolPermissionsParams, got %T", got)
+				require.Equal(t, "/tmp/x.go", v.FilePath)
+				require.Equal(t, "old", v.OldContent)
+				require.Equal(t, "new", v.NewContent)
+			},
+		},
+		{
+			// MCP tools pass the model's raw JSON input through as a
+			// string, which the dialog pretty-prints.
+			name:     "mcp",
+			toolName: "mcp_github_create_issue",
+			params:   `{"repo":"charmbracelet/crush","title":"bug"}`,
+			assert: func(t *testing.T, got any) {
+				v, ok := got.(string)
+				require.True(t, ok, "params must decode as string, got %T", got)
+				require.Equal(t, `{"repo":"charmbracelet/crush","title":"bug"}`, v)
 			},
 		},
 	}

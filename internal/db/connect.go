@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -28,6 +29,12 @@ var (
 	gooseInitOnce sync.Once
 	gooseInitErr  error
 )
+
+// dsnPathReplacer escapes the characters that SQLite's URI parser treats
+// specially in the path of a "file:" DSN: "%" starts an escape, "?" the
+// query string and "#" the fragment. Unescaped, a data directory such as
+// "C#app" would open a database file named "C" next to the project.
+var dsnPathReplacer = strings.NewReplacer("%", "%25", "?", "%3F", "#", "%23")
 
 //go:embed migrations/*.sql
 var FS embed.FS

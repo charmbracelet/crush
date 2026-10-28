@@ -16,7 +16,7 @@ func openDBReadOnly(dbPath string) (*sql.DB, error) {
 	params.Set("_txlock", "immediate")
 	params.Set("mode", "ro")
 
-	dsn := fmt.Sprintf("file:%s?%s", dbPath, params.Encode())
+	dsn := fmt.Sprintf("file:%s?%s", dsnPathReplacer.Replace(dbPath), params.Encode())
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
@@ -36,7 +36,7 @@ func openDB(dbPath string) (*sql.DB, error) {
 	// preventing deferred-to-writer upgrade deadlocks.
 	params.Set("_txlock", "immediate")
 
-	dsn := fmt.Sprintf("file:%s?%s", dbPath, params.Encode())
+	dsn := fmt.Sprintf("file:%s?%s", dsnPathReplacer.Replace(dbPath), params.Encode())
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)

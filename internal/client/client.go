@@ -199,6 +199,14 @@ func (c *Client) RetireClient(ctx context.Context) error {
 	return nil
 }
 
+// CloseIdleConnections closes the kept-alive connections the client is not
+// using, so its next request dials the server address afresh. A caller
+// that has replaced the server at that address needs this: a pooled
+// connection still leads to the old process.
+func (c *Client) CloseIdleConnections() {
+	c.h.CloseIdleConnections()
+}
+
 // Dial opens a connection to the server using the same scheme-aware
 // logic the client uses for its HTTP transport. Exposed so callers can
 // reuse the dialer when they need to construct sibling HTTP transports

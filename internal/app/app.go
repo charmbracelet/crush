@@ -871,6 +871,7 @@ func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 		Skills:      app.Skills,
 		HookRunner:  app.hookRunner,
 		Interactive: interactive,
+		ShellOwner:  app,
 	})
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)
@@ -946,9 +947,11 @@ func (app *App) Shutdown() {
 		event.AppExited()
 	})
 
-	// Kill all background shells.
+	// Kill the background shells this app started. The shell manager is
+	// shared by the whole process, and the server hosts one app per
+	// workspace, so other workspaces' shells must keep running.
 	wg.Go(func() {
-		shell.GetBackgroundShellManager().KillAll(shutdownCtx)
+		shell.GetBackgroundShellManager().KillOwned(shutdownCtx, app)
 	})
 
 	// Close herdr client to stop its background writer.

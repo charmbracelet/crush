@@ -3,6 +3,7 @@ package server
 import (
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/crush/internal/backend"
 	"github.com/google/uuid"
@@ -23,4 +24,27 @@ func TestShutdown_TearsDownHostedWorkspaces(t *testing.T) {
 
 	require.NoError(t, srv.Shutdown(t.Context()))
 	require.Equal(t, int32(1), tornDown.Load())
+}
+
+// TestListenAndServe_ShutsDownWhenNeverUsed covers a server spawned for a
+// client that went away before creating a workspace (interrupted, or
+// failed first): with nothing ever hosted, it must still exit once the
+// idle linger elapses instead of running forever.
+func TestListenAndServe_ShutsDownWhenNeverUsed(t *testing.T) {
+	t.Parallel()
+
+	srv := NewServer(nil, "tcp", "127.0.0.1:0")
+	srv.Backend().SetIdleShutdownDelay(100 * time.Millisecond)
+
+	errc := make(chan error, 1)
+	go func() { errc <- srv.ListenAndServe() }()
+	t.Cleanup(func() { _ = srv.Close() })
+
+	select {
+	case err := <-errc:
+		require.ErrorIs(t, err, ErrServerClosed)
+	case <-time.After(5 * time.Second):
+		t.Fatal("a server that never hosted a workspace is still running " +
+			"long after its idle linger elapsed")
+	}
 }

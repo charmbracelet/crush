@@ -192,6 +192,9 @@ func (s *Server) ListenAndServe() error {
 	if removedStale && s.logger != nil {
 		s.logger.Warn("Removed stale socket before binding", "address", s.Addr)
 	}
+	// Start the idle clock now that clients can reach us: a server that
+	// never gets a workspace must not outlive the client that spawned it.
+	s.backend.ArmIdleShutdown()
 	return s.Serve(ln)
 }
 

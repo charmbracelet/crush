@@ -1486,6 +1486,42 @@ func TestServer_ShutsDownAfterLingerWhenIdle(t *testing.T) {
 		"idle server must shut down after the linger window")
 }
 
+// TestArmIdleShutdown_ZeroLingerWaitsOutCreateGrace covers a fresh server
+// with lingering disabled: it must arm a timer rather than exit before
+// the client that spawned it can create a workspace.
+func TestArmIdleShutdown_ZeroLingerWaitsOutCreateGrace(t *testing.T) {
+	t.Parallel()
+
+	b, shutdownCount := newTestBackend(t)
+	b.SetIdleShutdownDelay(0)
+	b.SetCreateGrace(time.Hour)
+	b.ArmIdleShutdown()
+
+	b.mu.Lock()
+	armed, closing := b.shutdownTimer != nil, b.closing
+	b.cancelShutdownLocked()
+	b.mu.Unlock()
+	require.True(t, armed, "a fresh server must arm its idle-shutdown timer")
+	require.False(t, closing, "a fresh server must not commit to exiting at once")
+	require.Zero(t, shutdownCount.Load(), "a fresh server must not shut down at once")
+}
+
+// TestArmIdleShutdown_SkipsBusyServer covers the guard: a server already
+// hosting a workspace leaves arming to the teardown of its last one.
+func TestArmIdleShutdown_SkipsBusyServer(t *testing.T) {
+	t.Parallel()
+
+	b, _ := newTestBackend(t)
+	b.SetIdleShutdownDelay(time.Hour)
+	insertTestWorkspace(t, b, "/tmp/arm-busy")
+	b.ArmIdleShutdown()
+
+	b.mu.Lock()
+	armed := b.shutdownTimer != nil
+	b.mu.Unlock()
+	require.False(t, armed, "a server hosting a workspace must not arm the idle timer")
+}
+
 // -- Detach grace --
 //
 // The SSE stream is a client's refcount claim, so a stream that drops

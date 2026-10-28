@@ -256,11 +256,10 @@ func TestSetCurrentSession_RepublishesPendingQuestion(t *testing.T) {
 			}},
 		})
 	}()
-	defer func() { a.Questions.Cancel(); <-done }()
+	defer func() { a.Questions.Cancel(""); <-done }()
 
 	require.Eventually(t, func() bool {
-		_, ok := a.Questions.Pending()
-		return ok
+		return len(a.Questions.Pending()) > 0
 	}, 10*time.Second, 5*time.Millisecond, "question must be pending")
 
 	// Absorb the original publish, then attach a client.

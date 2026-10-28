@@ -728,11 +728,11 @@ func (c *Client) AnswerQuestionBatch(ctx context.Context, id string, req proto.Q
 	return resp.Resolved, nil
 }
 
-// CancelQuestionBatch cancels the pending question batch on a
-// workspace. Returns true if a question was cancelled, false if
-// none was pending.
-func (c *Client) CancelQuestionBatch(ctx context.Context, id string) (bool, error) {
-	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/questions/cancel", id), nil, nil, http.Header{})
+// CancelQuestionBatch cancels the pending question batch with the
+// given ID on a workspace. Returns true if a question was cancelled,
+// false if none was pending.
+func (c *Client) CancelQuestionBatch(ctx context.Context, id, batchID string) (bool, error) {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/questions/cancel", id), nil, jsonBody(proto.QuestionCancel{BatchRequestID: batchID}), http.Header{"Content-Type": []string{"application/json"}})
 	if err != nil {
 		return false, fmt.Errorf("failed to cancel question batch: %w", err)
 	}

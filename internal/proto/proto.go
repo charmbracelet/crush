@@ -263,6 +263,12 @@ type QuestionResponse struct {
 	Notes       map[string]string `json:"notes,omitempty"`
 }
 
+// QuestionCancel is the wire format for cancelling a batch question,
+// sent from client to server via REST.
+type QuestionCancel struct {
+	BatchRequestID string `json:"batch_request_id"`
+}
+
 // QuestionAnswerResponse is the server's response to a
 // question batch answer call.
 type QuestionAnswerResponse struct {

@@ -3,8 +3,9 @@
 // the permission service pattern: publish a request over pubsub,
 // block on a channel, and resolve when the UI sends back answers.
 //
-// Only one question can be pending at a time (the tool blocks until
-// answered), so no correlation IDs are needed in the domain model.
+// A session asks one question at a time (the tool blocks until
+// answered), but several sessions can ask at once, so answers and
+// cancellations name the batch they resolve by its request ID.
 package question
 
 import (
@@ -171,8 +172,9 @@ type Notification struct {
 	SessionID string `json:"session_id"`
 }
 
-// Service manages the lifecycle of question requests. Only one
-// question can be pending at a time.
+// Service manages the lifecycle of question requests. Several
+// sessions can each have a batch pending at once, so answers and
+// cancellations name the batch they resolve.
 type Service interface {
 	pubsub.Subscriber[Request]
 
@@ -184,26 +186,34 @@ type Service interface {
 	// or the context is cancelled.
 	Ask(ctx context.Context, req Request) ([]Answer, error)
 
-	// Answer resolves the pending question with the given answers.
-	Answer(answers []Answer) bool
+	// Answer delivers answers to the pending batch with the given ID.
+	// An empty ID names the only pending batch, for callers that
+	// predate batch IDs. Returns false if no such batch is pending.
+	Answer(batchID string, answers []Answer) bool
 
-	// Cancel cancels the pending question. Returns false if no
-	// question is pending.
-	Cancel() bool
+	// Cancel cancels the pending batch with the given ID, treating an
+	// empty ID as Answer does. Returns false if no such batch is
+	// pending.
+	Cancel(batchID string) bool
 
-	// Pending returns the request that is currently awaiting an
-	// answer, or false when no question is pending.
-	Pending() (Request, bool)
+	// Pending returns the requests that are currently awaiting an
+	// answer, in no particular order.
+	Pending() []Request
 }
 
 type questionService struct {
 	broker             *pubsub.Broker[Request]
 	notificationBroker *pubsub.Broker[Notification]
 	mu                 sync.Mutex
-	pending            chan []Answer
-	cancelled          chan struct{}
-	pendingID          string
-	pendingReq         Request
+	pending            map[string]*pendingBatch
+}
+
+// pendingBatch is a request awaiting an answer, with the channels its
+// Ask call waits on.
+type pendingBatch struct {
+	req       Request
+	answers   chan []Answer
+	cancelled chan struct{}
 }
 
 // NewService creates a new question service.
@@ -211,6 +221,7 @@ func NewService() *questionService {
 	return &questionService{
 		broker:             pubsub.NewBroker[Request](),
 		notificationBroker: pubsub.NewBroker[Notification](),
+		pending:            make(map[string]*pendingBatch),
 	}
 }
 
@@ -250,19 +261,26 @@ func (s *questionService) Ask(ctx context.Context, req Request) ([]Answer, error
 		return nil, err
 	}
 
+	p := &pendingBatch{
+		req:       req,
+		answers:   make(chan []Answer, 1),
+		cancelled: make(chan struct{}),
+	}
 	s.mu.Lock()
-	s.pending = make(chan []Answer, 1)
-	s.cancelled = make(chan struct{})
-	s.pendingID = req.ID
-	s.pendingReq = req
+	if _, ok := s.pending[req.ID]; ok {
+		s.mu.Unlock()
+		return nil, fmt.Errorf("question batch %q is already pending", req.ID)
+	}
+	s.pending[req.ID] = p
 	s.mu.Unlock()
 
 	defer func() {
+		// A resolver that took the batch already removed it, and its
+		// ID may since have been reused.
 		s.mu.Lock()
-		s.pending = nil
-		s.cancelled = nil
-		s.pendingID = ""
-		s.pendingReq = Request{}
+		if s.pending[req.ID] == p {
+			delete(s.pending, req.ID)
+		}
 		s.mu.Unlock()
 	}()
 
@@ -271,70 +289,78 @@ func (s *questionService) Ask(ctx context.Context, req Request) ([]Answer, error
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case <-s.cancelled:
+	case <-p.cancelled:
 		return nil, ErrCancelled
-	case answers := <-s.pending:
+	case answers := <-p.answers:
 		return answers, nil
 	}
 }
 
-// Answer resolves the pending question. Returns false if no
-// question is pending (already answered or cancelled).
-func (s *questionService) Answer(answers []Answer) bool {
-	s.mu.Lock()
-	batchID := s.pendingID
-	sessionID := s.pendingReq.SessionID
-	ch := s.pending
-	s.mu.Unlock()
-
-	if ch == nil {
-		return false
-	}
-	ch <- answers
-
-	// Publish a notification so non-answering clients can dismiss
-	// their open question forms.
-	if batchID != "" {
-		s.notificationBroker.Publish(pubsub.CreatedEvent, Notification{
-			BatchID:   batchID,
-			SessionID: sessionID,
-		})
-	}
-	return true
-}
-
-// Cancel cancels the pending question. Returns false if no
-// question is pending.
-func (s *questionService) Cancel() bool {
-	s.mu.Lock()
-	batchID := s.pendingID
-	sessionID := s.pendingReq.SessionID
-	cancelCh := s.cancelled
-	s.mu.Unlock()
-
-	if cancelCh == nil {
-		return false
-	}
-	close(cancelCh)
-
-	// Publish a notification so non-answering clients can dismiss
-	// their open question forms.
-	if batchID != "" {
-		s.notificationBroker.Publish(pubsub.CreatedEvent, Notification{
-			BatchID:   batchID,
-			SessionID: sessionID,
-		})
-	}
-	return true
-}
-
-// Pending returns the request that is currently awaiting an answer,
-// or false when no question is pending.
-func (s *questionService) Pending() (Request, bool) {
+// take removes the pending batch with the given ID and returns it.
+// Removing it under the lock makes the caller its only resolver. An
+// empty ID takes the only pending batch; with several pending it is
+// ambiguous and takes none.
+func (s *questionService) take(batchID string) (*pendingBatch, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.pendingID == "" {
-		return Request{}, false
+	if batchID == "" && len(s.pending) == 1 {
+		for id := range s.pending {
+			batchID = id
+		}
 	}
-	return s.pendingReq, true
+	p, ok := s.pending[batchID]
+	if ok {
+		delete(s.pending, batchID)
+	}
+	return p, ok
+}
+
+// Answer resolves the pending batch with the given ID. Returns false
+// if no such batch is pending (already answered or cancelled).
+func (s *questionService) Answer(batchID string, answers []Answer) bool {
+	p, ok := s.take(batchID)
+	if !ok {
+		return false
+	}
+	// The channel is buffered and take made this its only sender, so
+	// this never blocks.
+	p.answers <- answers
+
+	// Publish a notification so non-answering clients can dismiss
+	// their open question forms.
+	s.notificationBroker.Publish(pubsub.CreatedEvent, Notification{
+		BatchID:   p.req.ID,
+		SessionID: p.req.SessionID,
+	})
+	return true
+}
+
+// Cancel cancels the pending batch with the given ID. Returns false
+// if no such batch is pending.
+func (s *questionService) Cancel(batchID string) bool {
+	p, ok := s.take(batchID)
+	if !ok {
+		return false
+	}
+	close(p.cancelled)
+
+	// Publish a notification so non-answering clients can dismiss
+	// their open question forms.
+	s.notificationBroker.Publish(pubsub.CreatedEvent, Notification{
+		BatchID:   p.req.ID,
+		SessionID: p.req.SessionID,
+	})
+	return true
+}
+
+// Pending returns the requests that are currently awaiting an answer,
+// in no particular order.
+func (s *questionService) Pending() []Request {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	reqs := make([]Request, 0, len(s.pending))
+	for _, p := range s.pending {
+		reqs = append(reqs, p.req)
+	}
+	return reqs
 }

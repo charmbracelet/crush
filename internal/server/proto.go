@@ -737,12 +737,20 @@ func (c *controllerV1) handlePostWorkspaceQuestionsAnswer(w http.ResponseWriter,
 	jsonEncode(w, proto.QuestionAnswerResponse{Resolved: resolved})
 }
 
-// handlePostWorkspaceQuestionsCancel cancels the pending question
-// batch for a workspace.
+// handlePostWorkspaceQuestionsCancel cancels a pending question batch
+// for a workspace.
 func (c *controllerV1) handlePostWorkspaceQuestionsCancel(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	cancelled, err := c.backend.CancelQuestion(id)
+	// Clients that predate batch IDs send no body.
+	var req proto.QuestionCancel
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		c.server.logError(r, "Failed to decode request", "error", err)
+		jsonError(w, http.StatusBadRequest, "failed to decode request")
+		return
+	}
+
+	cancelled, err := c.backend.CancelQuestion(id, req.BatchRequestID)
 	if err != nil {
 		c.handleError(w, r, err)
 		return

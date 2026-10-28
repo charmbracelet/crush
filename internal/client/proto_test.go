@@ -242,6 +242,27 @@ func TestSetMainAgentPropagatesServerError(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestCancelQuestionBatchSendsBatchID(t *testing.T) {
+	t.Parallel()
+
+	var gotPath string
+	var got proto.QuestionCancel
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+		require.NoError(t, json.NewEncoder(w).Encode(proto.QuestionAnswerResponse{Resolved: true}))
+	}))
+	defer srv.Close()
+
+	c := captureClient(t, srv)
+	cancelled, err := c.CancelQuestionBatch(context.Background(), "ws1", "batch-1")
+	require.NoError(t, err)
+	require.True(t, cancelled)
+
+	require.Equal(t, "/v1/workspaces/ws1/questions/cancel", gotPath)
+	require.Equal(t, "batch-1", got.BatchRequestID)
+}
+
 func marshalSSEPayload(t *testing.T) []byte {
 	t.Helper()
 

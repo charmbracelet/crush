@@ -338,8 +338,12 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 
 		apigen.Post("/v1/workspaces/{id}/questions/cancel").
 			Summary("Cancel question batch").
+			Description("Cancels the batch the body names. Without a body "+
+				"it cancels the only pending batch, and nothing when "+
+				"several are pending.").
 			Tags("questions").
 			PathParam("id", "Workspace ID").
+			Accepts(proto.QuestionCancel{}).
 			Responds(proto.QuestionAnswerResponse{}).
 			Fails(400, 404, 500).
 			Handle(c.handlePostWorkspaceQuestionsCancel),

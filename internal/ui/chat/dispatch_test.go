@@ -24,7 +24,7 @@ func dispatchItem(t *testing.T) *AgentToolMessageItem {
 
 	dispatch, ok := item.(*AgentToolMessageItem)
 	require.True(t, ok)
-	require.Equal(t, agent.SubagentName("audit"), dispatch.DispatchLabel())
+	require.Equal(t, "audit", dispatch.DispatchLabel())
 	return dispatch
 }
 
@@ -70,4 +70,18 @@ func TestDispatchCancelledIsSettled(t *testing.T) {
 	dispatch := dispatchItem(t)
 	dispatch.SetStatus(ToolStatusCanceled)
 	require.False(t, running(t, dispatch), "a cancelled dispatch is settled")
+}
+
+// A refused dispatch never started a subagent, so it has no status to show.
+func TestRefusedDispatchHasNoStatus(t *testing.T) {
+	t.Parallel()
+	sty := styles.CharmtonePantera()
+	item := NewToolMessageItem(&sty, "msg-1", message.ToolCall{
+		ID:       "call-1",
+		Name:     agent.AgentDispatchToolName,
+		Input:    `{"prompt":"look","label":"audit"}`,
+		Finished: true,
+	}, &message.ToolResult{ToolCallID: "call-1", Content: "unknown model", IsError: true}, false, "/tmp")
+	_, ok := item.(*AgentToolMessageItem).DispatchStatus()
+	require.False(t, ok)
 }

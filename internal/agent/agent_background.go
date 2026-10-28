@@ -29,9 +29,7 @@ type AgentBackgroundMetadata struct {
 	Task         string `json:"task,omitempty"`
 }
 
-// backgroundLabel names an auto-backgrounded subagent after its tool call.
-// The call ID is unique within a session and stays in the transcript, so the
-// label is stable across a restart without a counter to keep.
+// backgroundLabel labels an auto-backgrounded subagent after its tool call.
 func backgroundLabel(toolName, callID string) string {
 	prefix := "agent"
 	if toolName == tools.AgenticFetchToolName {
@@ -47,7 +45,7 @@ func backgroundLabel(toolName, callID string) string {
 	if id == "" {
 		id = fmt.Sprintf("%d", time.Now().UnixNano()%1_000_000)
 	}
-	return SubagentName(prefix + "-" + id)
+	return prefix + "-" + id
 }
 
 // runSubAgentMaybeBackground runs a blocking subagent tool call, but moves it
@@ -68,7 +66,7 @@ func (c *coordinator) runSubAgentMaybeBackground(
 		access = accessRead
 	}
 
-	label := backgroundLabel(toolName, params.ToolCallID)
+	label := c.names.name(backgroundLabel(toolName, params.ToolCallID))
 	childSessionID := c.sessions.CreateAgentToolSessionID(params.AgentMessageID, params.ToolCallID)
 	entry := newDispatchedAgent(label, access, childSessionID, params.SessionID, params.Agent)
 

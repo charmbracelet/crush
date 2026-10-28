@@ -179,6 +179,8 @@ type coordinator struct {
 	dispatched *csync.Map[string, *dispatchedAgent]
 	// dispatchMu makes checking a label and registering it one step.
 	dispatchMu sync.Mutex
+	// names hands each new subagent its first name.
+	names subagentNamer
 	// backgroundAfter is how long a blocking subagent runs before it is
 	// moved to the background. It mirrors the bash tool's threshold and is
 	// a field only so tests can shorten it.

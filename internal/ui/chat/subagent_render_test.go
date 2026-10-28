@@ -21,11 +21,10 @@ func renderPlain(t *testing.T, item MessageItem) []string {
 func TestSubagentReportAlignsWithHeader(t *testing.T) {
 	t.Parallel()
 	sty := styles.CharmtonePantera()
-	item := NewSubAgentReportItem(&sty, agent.SubagentName("date-impl"), "hyper/glm-5", "All done.", false)
+	item := NewSubAgentReportItem(&sty, "bjorn-date-impl", "hyper/glm-5", "All done.", false)
 	lines := renderPlain(t, item)
 
-	name := agent.SubagentName("date-impl")
-	require.Contains(t, lines[0], "Subagent Report "+name+" (model=hyper/glm-5)")
+	require.Contains(t, lines[0], "Subagent Report → Björn date-impl (model=hyper/glm-5)")
 	headerText := ansi.StringWidth(lines[0][:strings.Index(lines[0], "Subagent Report")])
 	body := lines[2]
 	require.Equal(t, headerText, len(body)-len(strings.TrimLeft(body, " ")), "body: %q", body)
@@ -39,7 +38,7 @@ func TestAgentSendShowsTheMessage(t *testing.T) {
 	item := NewToolMessageItem(&sty, "msg-1", message.ToolCall{
 		ID:       "call-1",
 		Name:     agent.AgentSendToolName,
-		Input:    `{"label":"date-impl","message":"Please fix the lint."}`,
+		Input:    `{"label":"betty-date-impl","message":"Please fix the lint."}`,
 		Finished: true,
 	}, &message.ToolResult{
 		ToolCallID: "call-1",
@@ -47,7 +46,7 @@ func TestAgentSendShowsTheMessage(t *testing.T) {
 	}, false, "/tmp")
 	out := strings.Join(renderPlain(t, item), "\n")
 
-	require.Contains(t, out, "Message Subagent → "+agent.SubagentName("date-impl"))
+	require.Contains(t, out, "Message Subagent → Betty date-impl")
 	require.Contains(t, out, "Please fix the lint.")
 	require.NotContains(t, out, `"label"`)
 	require.NotContains(t, out, "Delivered")
@@ -66,10 +65,10 @@ func TestDispatchHeaderShowsRunModel(t *testing.T) {
 	}, &message.ToolResult{
 		ToolCallID: "call-1",
 		Content:    `Started subagent "audit".`,
-		Metadata:   `{"label":"audit","run_model":"hyper/glm-5"}`,
+		Metadata:   `{"label":"sasha-audit","run_model":"hyper/glm-5"}`,
 	}, false, "/tmp")
 	lines := renderPlain(t, item)
-	require.Contains(t, lines[0], "Create Subagent "+agent.SubagentName("audit")+" (model=hyper/glm-5)")
+	require.Contains(t, lines[0], "Create Subagent → Sasha audit (model=hyper/glm-5)")
 }
 
 // A long model name on a narrow pane is what hid the override's model: the
@@ -97,9 +96,9 @@ func TestAgentStatusRendersRows(t *testing.T) {
 
 	require.NotContains(t, lines[0], "→", "a status of every subagent names no target")
 	a, long := lines[2], lines[3]
-	require.Contains(t, a, "✓ betty-a")
+	require.Contains(t, a, "✓ Betty a")
 	require.Contains(t, a, "finished 5m ago · 2 tool calls")
-	require.Contains(t, long, "running for 1m · 1 tool calls · can write")
+	require.Contains(t, long, "running for 1m · 1 tool call · can write")
 	require.Equal(t, strings.Index(a, "finished"), strings.Index(long, "running"), "states line up")
 }
 
@@ -119,4 +118,27 @@ func TestSubagentReportHasNoBlankTail(t *testing.T) {
 		lines := renderPlain(t, NewSubAgentReportItem(&sty, "x", "", out, false))
 		require.NotEmpty(t, strings.TrimSpace(lines[len(lines)-1]), "%q", out)
 	}
+}
+
+// A dispatch goes by the label it asked for until its result names the
+// subagent, and from then on by that name, which its report shares.
+func TestDispatchAdoptsTheNameItWasGiven(t *testing.T) {
+	t.Parallel()
+	sty := styles.CharmtonePantera()
+	item := NewToolMessageItem(&sty, "msg-1", message.ToolCall{
+		ID:       "call-1",
+		Name:     agent.AgentDispatchToolName,
+		Input:    `{"prompt":"look","label":"audit"}`,
+		Finished: true,
+	}, nil, false, "/tmp")
+	dispatch := item.(*AgentToolMessageItem)
+	require.Equal(t, "audit", dispatch.DispatchLabel())
+
+	dispatch.SetResult(&message.ToolResult{
+		ToolCallID: "call-1",
+		Content:    `Started subagent "xochitl-audit".`,
+		Metadata:   `{"label":"xochitl-audit"}`,
+	})
+	require.Equal(t, "xochitl-audit", dispatch.DispatchLabel())
+	require.Contains(t, renderPlain(t, dispatch)[0], "Create Subagent → Xóchitl audit")
 }

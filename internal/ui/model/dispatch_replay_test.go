@@ -57,5 +57,6 @@ func TestReplayDispatchReportsSettlesDeadSubAgents(t *testing.T) {
 	require.False(t, running(dead), "a dispatch cut off by a restart must stop spinning")
 	require.False(t, running(old), "only the latest dispatch under a label can be running")
 	require.True(t, running(newer))
-	require.False(t, running(refused), "a refused dispatch never started")
+	_, ok := refused.DispatchStatus()
+	require.False(t, ok, "a refused dispatch never started, so it has no status")
 }

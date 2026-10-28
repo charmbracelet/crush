@@ -427,7 +427,8 @@ type Styles struct {
 		// Agent task styles
 		AgentTaskTag lipgloss.Style // Agent task tag (blue background, bold)
 		AgentPrompt  lipgloss.Style // Agent prompt text
-		AgentName    lipgloss.Style // Subagent name in a tool header
+		AgentName    lipgloss.Style // Subagent first name
+		AgentLabel   lipgloss.Style // Label a subagent was dispatched with, after its first name
 		AgentMessage lipgloss.Style // Message sent to a subagent
 
 		// Agentic fetch styles

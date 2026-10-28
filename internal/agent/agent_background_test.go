@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,8 +19,8 @@ import (
 
 func TestBackgroundLabel(t *testing.T) {
 	t.Parallel()
-	assert.Equal(t, SubagentName("agent-123456"), backgroundLabel(AgentToolName, "toolcall123456"))
-	assert.Equal(t, SubagentName("search-abc123"), backgroundLabel(tools.AgenticFetchToolName, "toolu_abc123"))
+	assert.Equal(t, "agent-123456", backgroundLabel(AgentToolName, "toolcall123456"))
+	assert.Equal(t, "search-abc123", backgroundLabel(tools.AgenticFetchToolName, "toolu_abc123"))
 }
 
 // A non-interactive coordinator keeps blocking, so the agent's output comes
@@ -118,8 +119,8 @@ func TestRunSubAgentMaybeBackground_Background(t *testing.T) {
 	var meta AgentBackgroundMetadata
 	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
 	assert.True(t, meta.Backgrounded)
-	label := backgroundLabel(AgentToolName, "toolcall999999")
-	assert.Equal(t, label, meta.Label)
+	label := meta.Label
+	assert.True(t, strings.HasSuffix(label, "-agent-999999"), label)
 	assert.Equal(t, "long task", meta.Task)
 
 	entry, ok := coord.dispatched.Get(dispatchKey(parent.ID, label))
@@ -152,7 +153,7 @@ func TestDispatchHistoryBackgroundedBlockingCall(t *testing.T) {
 	t.Parallel()
 
 	bgMeta, err := json.Marshal(AgentBackgroundMetadata{
-		Label:        SubagentName("search-1"),
+		Label:        "search-1",
 		Backgrounded: true,
 		Access:       accessRead,
 		Task:         "search x",
@@ -176,9 +177,9 @@ func TestDispatchHistoryBackgroundedBlockingCall(t *testing.T) {
 	}
 
 	records := dispatchHistory(msgs)
-	require.Equal(t, []string{SubagentName("search-1")}, records.order)
+	require.Equal(t, []string{"search-1"}, records.order)
 
-	rec := records.byLabel[SubagentName("search-1")]
+	rec := records.byLabel["search-1"]
 	require.NotNil(t, rec)
 	assert.Equal(t, tools.AgenticFetchToolName, rec.Tool)
 	assert.Equal(t, "m1", rec.MessageID)
@@ -188,9 +189,9 @@ func TestDispatchHistoryBackgroundedBlockingCall(t *testing.T) {
 
 	// A report under that label closes it.
 	msgs = append(msgs, message.Message{ID: "u1", Role: message.User, Parts: []message.ContentPart{
-		message.SubAgentReport{Label: SubagentName("search-1"), Output: "found"},
+		message.SubAgentReport{Label: "search-1", Output: "found"},
 	}})
-	rec = dispatchHistory(msgs).byLabel[SubagentName("search-1")]
+	rec = dispatchHistory(msgs).byLabel["search-1"]
 	require.NotNil(t, rec)
 	assert.False(t, rec.Open)
 	require.NotNil(t, rec.LastReport)

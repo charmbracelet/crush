@@ -37,7 +37,7 @@ func (r *AgentControlToolRenderContext) RenderTool(sty *styles.Styles, width int
 	label, prose := agentControlParts(opts.ToolCall)
 	var params []string
 	if label != "" {
-		params = append(params, sty.Tool.ParamMain.Render("→ ")+sty.Tool.AgentName.Render(agent.SubagentName(label)))
+		params = append(params, subagentTarget(sty, label))
 	}
 	header := toolHeader(sty, opts.Status, name, cappedWidth, opts, params...)
 	if opts.Compact {
@@ -96,7 +96,7 @@ func agentStatusRows(sty *styles.Styles, result *message.ToolResult, width int) 
 	names := make([]string, len(meta.Agents))
 	nameWidth := 0
 	for i, a := range meta.Agents {
-		names[i] = a.Label
+		names[i] = RenderSubagentName(sty, a.Label)
 		nameWidth = max(nameWidth, lipgloss.Width(names[i]))
 	}
 	rows := make([]string, len(meta.Agents))
@@ -108,22 +108,28 @@ func agentStatusRows(sty *styles.Styles, result *message.ToolResult, width int) 
 		if a.Timing != "" {
 			state += " " + a.Timing
 		}
-		facts := []string{fmt.Sprintf("%d tool calls", a.ToolCalls)}
+		facts := []string{state, toolCallCount(a.ToolCalls)}
 		if a.Access == "write" {
 			facts = append(facts, "can write")
 		}
 		if a.Cost > 0 {
 			facts = append(facts, fmt.Sprintf("$%.2f", a.Cost))
 		}
-		row := fmt.Sprintf("%s %s  %s %s",
+		row := fmt.Sprintf("%s %s  %s",
 			agentStateIcon(sty, a.State),
-			sty.Tool.AgentName.Render(names[i]+strings.Repeat(" ", nameWidth-lipgloss.Width(names[i]))),
-			sty.Tool.AgentMessage.Render(state),
-			sty.Tool.ParamMain.Render("· "+strings.Join(facts, " · ")),
+			names[i]+strings.Repeat(" ", nameWidth-lipgloss.Width(names[i])),
+			sty.Tool.ParamMain.Render(strings.Join(facts, " · ")),
 		)
 		rows[i] = ansi.Truncate(row, width, "…")
 	}
 	return strings.Join(rows, "\n")
+}
+
+func toolCallCount(n int) string {
+	if n == 1 {
+		return "1 tool call"
+	}
+	return fmt.Sprintf("%d tool calls", n)
 }
 
 func agentStateIcon(sty *styles.Styles, state agent.SubagentState) string {

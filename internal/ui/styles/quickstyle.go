@@ -856,6 +856,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Tool.AgentTaskTag = base.Bold(true).Padding(0, 1).MarginLeft(2).Background(o.infoMoreSubtle).Foreground(o.onPrimary)
 	s.Tool.AgentPrompt = muted
 	s.Tool.AgentName = base.Foreground(o.infoMostSubtle)
+	s.Tool.AgentLabel = base.Foreground(o.fgSubtle)
 	s.Tool.AgentMessage = muted
 
 	// Agentic fetch styles

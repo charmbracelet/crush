@@ -1,56 +1,84 @@
 package agent
 
 import (
-	"hash/fnv"
+	"math/rand/v2"
 	"strings"
+	"sync"
 )
 
-// subagentFirstNames are borrowed from charmbracelet/creeper.
-var subagentFirstNames = []string{
-	"akiko",
-	"alejandra",
-	"alexander",
-	"athena",
-	"benedict",
-	"benoit",
-	"betty",
-	"bjorn",
-	"candy",
-	"cindy",
-	"constance",
-	"domina",
-	"emily",
-	"francis",
-	"freddy",
-	"gunnar",
-	"jacopo",
-	"linda",
-	"luka",
-	"madeline",
-	"massimo",
-	"mindy",
-	"sarah",
-	"sasha",
-	"sofia",
-	"xochitl",
+// subagentFirstName pairs the ASCII key a model types with the accented
+// form a person reads.
+type subagentFirstName struct {
+	key     string
+	display string
 }
 
-// SubagentName gives a subagent its name: the label it was dispatched with,
-// prefixed with a first name chosen from the label, so "date-impl" becomes
-// "betty-date-impl". The dispatch result hands that name back and everything
-// after addresses it by name. A name passes through unchanged, so the model
-// can use either form.
-func SubagentName(label string) string {
+// subagentFirstNames are borrowed from charmbracelet/creeper.
+var subagentFirstNames = []subagentFirstName{
+	{"akiko", "Akiko"},
+	{"alejandra", "Alejandra"},
+	{"alexander", "Alexander"},
+	{"athena", "Athena"},
+	{"benedict", "Benedict"},
+	{"benoit", "Benoît"},
+	{"betty", "Betty"},
+	{"bjorn", "Björn"},
+	{"candy", "Candy"},
+	{"cindy", "Cindy"},
+	{"constance", "Constance"},
+	{"domina", "Domina"},
+	{"emily", "Emily"},
+	{"francis", "Francis"},
+	{"freddy", "Freddy"},
+	{"gunnar", "Gunnar"},
+	{"jacopo", "Jacopo"},
+	{"linda", "Linda"},
+	{"luka", "Luka"},
+	{"madeline", "Madeline"},
+	{"massimo", "Massimo"},
+	{"mindy", "Mindy"},
+	{"sarah", "Sarah"},
+	{"sasha", "Sasha"},
+	{"sofia", "Sofía"},
+	{"xochitl", "Xóchitl"},
+}
+
+// subagentNamer cycles through one shuffle of the first names, so a name
+// never repeats until every other one has been used.
+type subagentNamer struct {
+	once  sync.Once
+	mu    sync.Mutex
+	order []int
+	next  int
+}
+
+// name puts the next first name in front of label: "date-impl" becomes
+// something like "betty-date-impl". A label that already has one keeps it.
+func (n *subagentNamer) name(label string) string {
 	label = strings.TrimSpace(label)
-	if label == "" {
-		return ""
+	if _, _, ok := splitSubagentName(label); ok || label == "" {
+		return label
 	}
+	n.once.Do(func() { n.order = rand.Perm(len(subagentFirstNames)) })
+	n.mu.Lock()
+	first := subagentFirstNames[n.order[n.next%len(n.order)]]
+	n.next++
+	n.mu.Unlock()
+	return first.key + "-" + label
+}
+
+func splitSubagentName(name string) (subagentFirstName, string, bool) {
 	for _, first := range subagentFirstNames {
-		if strings.HasPrefix(label, first+"-") {
-			return label
+		if rest, ok := strings.CutPrefix(name, first.key+"-"); ok && rest != "" {
+			return first, rest, true
 		}
 	}
-	h := fnv.New32a()
-	_, _ = h.Write([]byte(label))
-	return subagentFirstNames[h.Sum32()%uint32(len(subagentFirstNames))] + "-" + label
+	return subagentFirstName{}, name, false
+}
+
+// SubagentDisplayName splits a subagent's name into its accented first name
+// and its label. A label without a first name comes back with first empty.
+func SubagentDisplayName(name string) (first, label string) {
+	f, label, _ := splitSubagentName(name)
+	return f.display, label
 }

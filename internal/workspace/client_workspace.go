@@ -355,6 +355,11 @@ func (w *ClientWorkspace) GetDefaultSmallModel(providerID string) config.Selecte
 
 // -- Permissions --
 
+// PermissionGrant grants a permission request once. Like the other
+// answers, it leaves the params out of the request it sends back: the
+// server resolves a request by its ID and never reads them, and older
+// servers reject an MCP tool's params, which are a JSON string, so
+// sending them would lose the answer.
 func (w *ClientWorkspace) PermissionGrant(perm permission.PermissionRequest) bool {
 	resolved, _ := w.client.GrantPermission(context.Background(), w.workspaceID(), proto.PermissionGrant{
 		Permission: proto.PermissionRequest{
@@ -365,7 +370,6 @@ func (w *ClientWorkspace) PermissionGrant(perm permission.PermissionRequest) boo
 			Description: perm.Description,
 			Action:      perm.Action,
 			Path:        perm.Path,
-			Params:      perm.Params,
 		},
 		Action: proto.PermissionAllow,
 	})
@@ -382,7 +386,6 @@ func (w *ClientWorkspace) PermissionGrantPersistent(perm permission.PermissionRe
 			Description: perm.Description,
 			Action:      perm.Action,
 			Path:        perm.Path,
-			Params:      perm.Params,
 		},
 		Action: proto.PermissionAllowForSession,
 	})
@@ -399,7 +402,6 @@ func (w *ClientWorkspace) PermissionDeny(perm permission.PermissionRequest) bool
 			Description: perm.Description,
 			Action:      perm.Action,
 			Path:        perm.Path,
-			Params:      perm.Params,
 		},
 		Action: proto.PermissionDeny,
 	})

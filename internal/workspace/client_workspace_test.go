@@ -158,6 +158,7 @@ func TestClientWorkspace_PermissionGrantMapping(t *testing.T) {
 				Description: "do thing",
 				Action:      "act",
 				Path:        "/tmp/p",
+				Params:      `{"repo":"charmbracelet/crush"}`,
 			}
 			tc.call(ws, perm)
 
@@ -168,6 +169,10 @@ func TestClientWorkspace_PermissionGrantMapping(t *testing.T) {
 			require.Equal(t, "tool", got.Permission.ToolName)
 			require.Equal(t, "act", got.Permission.Action)
 			require.Equal(t, "/tmp/p", got.Permission.Path)
+			// The answer must not carry the params back: older
+			// servers reject an MCP tool's params, which are a JSON
+			// string, so sending them would lose the answer.
+			require.Nil(t, got.Permission.Params)
 		})
 	}
 }

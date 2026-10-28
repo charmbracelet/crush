@@ -5,6 +5,10 @@ import (
 	"fmt"
 	"strings"
 
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/agent"
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 )
@@ -31,11 +35,11 @@ func (r *AgentControlToolRenderContext) RenderTool(sty *styles.Styles, width int
 	}
 
 	label, prose := agentControlParts(opts.ToolCall)
-	target := sty.Tool.ParamMain.Render("all")
+	var params []string
 	if label != "" {
-		target = sty.Tool.AgentName.Render(SubagentDisplayName(label))
+		params = append(params, sty.Tool.ParamMain.Render("→ ")+sty.Tool.AgentName.Render(SubagentDisplayName(label)))
 	}
-	header := toolHeader(sty, opts.Status, name, cappedWidth, opts, sty.Tool.ParamMain.Render("→ ")+target)
+	header := toolHeader(sty, opts.Status, name, cappedWidth, opts, params...)
 	if opts.Compact {
 		return header
 	}
@@ -47,6 +51,9 @@ func (r *AgentControlToolRenderContext) RenderTool(sty *styles.Styles, width int
 	bodyWidth := cappedWidth - toolBodyLeftPaddingTotal
 	if prose != "" {
 		return joinToolParts(header, sty.Tool.Body.Render(agentMessageContent(sty, prose, bodyWidth, opts.ExpandedContent)))
+	}
+	if rows := agentStatusRows(sty, opts.Result, bodyWidth); rows != "" {
+		return joinToolParts(header, sty.Tool.Body.Render(rows))
 	}
 	if opts.HasResult() && opts.Result.Content != "" {
 		body := renderToolResultTextContent(sty, opts.Result.Content, toolResultContentWidths{Body: bodyWidth, Diff: cappedWidth}, opts.ExpandedContent)
@@ -77,4 +84,57 @@ func agentMessageContent(sty *styles.Styles, text string, width int, expanded bo
 	hidden := sty.Tool.ContentTruncation.Width(width).
 		Render(fmt.Sprintf(assistantMessageTruncateFormat, len(lines)-maxLines))
 	return strings.Join(append(lines[:maxLines], hidden), "\n")
+}
+
+// agentStatusRows draws an agent_status result as one aligned row per
+// sub-agent, or returns "" when the result carries no status metadata.
+func agentStatusRows(sty *styles.Styles, result *message.ToolResult, width int) string {
+	var meta agent.AgentStatusResponseMetadata
+	if result == nil || json.Unmarshal([]byte(result.Metadata), &meta) != nil || len(meta.Agents) == 0 {
+		return ""
+	}
+	names := make([]string, len(meta.Agents))
+	nameWidth := 0
+	for i, a := range meta.Agents {
+		names[i] = SubagentDisplayName(a.Label)
+		nameWidth = max(nameWidth, lipgloss.Width(names[i]))
+	}
+	rows := make([]string, len(meta.Agents))
+	for i, a := range meta.Agents {
+		state := a.State
+		if a.Detail != "" {
+			state += " (" + a.Detail + ")"
+		}
+		if a.Timing != "" {
+			state += " " + a.Timing
+		}
+		facts := []string{fmt.Sprintf("%d tool calls", a.ToolCalls)}
+		if a.Access == "write" {
+			facts = append(facts, "can write")
+		}
+		if a.Cost > 0 {
+			facts = append(facts, fmt.Sprintf("$%.2f", a.Cost))
+		}
+		row := fmt.Sprintf("%s %s  %s %s",
+			agentStateIcon(sty, a.State),
+			sty.Tool.AgentName.Render(names[i]+strings.Repeat(" ", nameWidth-lipgloss.Width(names[i]))),
+			sty.Tool.AgentMessage.Render(state),
+			sty.Tool.ParamMain.Render("· "+strings.Join(facts, " · ")),
+		)
+		rows[i] = ansi.Truncate(row, width, "…")
+	}
+	return strings.Join(rows, "\n")
+}
+
+func agentStateIcon(sty *styles.Styles, state string) string {
+	switch state {
+	case "finished":
+		return toolIcon(sty, ToolStatusSuccess)
+	case "running", "stopping":
+		return toolIcon(sty, ToolStatusRunning)
+	case "stopped":
+		return toolIcon(sty, ToolStatusCanceled)
+	default:
+		return toolIcon(sty, ToolStatusError)
+	}
 }

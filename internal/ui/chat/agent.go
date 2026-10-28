@@ -227,9 +227,6 @@ func (a *AgentToolMessageItem) DispatchStatus() (DispatchStatus, bool) {
 		Started:  a.dispatchStarted,
 		Finished: a.dispatchReportedAt,
 	}
-	if len(a.nestedTools) > 0 {
-		status.Activity = prettifyToolName(a.nestedTools[len(a.nestedTools)-1].ToolCall().Name)
-	}
 	return status, true
 }
 
@@ -237,7 +234,6 @@ func (a *AgentToolMessageItem) DispatchStatus() (DispatchStatus, bool) {
 type DispatchStatus struct {
 	Label    string
 	Running  bool
-	Activity string // Name of the last tool it called.
 	Started  time.Time
 	Finished time.Time // When its report landed; zero while running.
 }

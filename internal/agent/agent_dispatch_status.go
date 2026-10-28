@@ -251,22 +251,28 @@ func (c *coordinator) agentStatusTool() fantasy.AgentTool {
 						label, knownLabels(records),
 					)), nil
 				}
-				return fantasy.NewTextResponse(c.describeDispatch(ctx, parentSessionID, record, true)), nil
+				text, sum := c.describeDispatch(ctx, parentSessionID, record, true)
+				return fantasy.WithResponseMetadata(fantasy.NewTextResponse(text),
+					AgentStatusResponseMetadata{Agents: []AgentStatusSummary{sum}}), nil
 			}
 
 			if len(records.order) == 0 {
 				return fantasy.NewTextResponse("No sub-agents dispatched."), nil
 			}
-			var sb strings.Builder
+			var (
+				lines []string
+				meta  AgentStatusResponseMetadata
+			)
 			for _, label := range records.order {
 				record, ok := records.byLabel[label]
 				if !ok {
 					continue
 				}
-				sb.WriteString(c.describeDispatch(ctx, parentSessionID, record, false))
-				sb.WriteString("\n")
+				text, sum := c.describeDispatch(ctx, parentSessionID, record, false)
+				lines = append(lines, text)
+				meta.Agents = append(meta.Agents, sum)
 			}
-			return fantasy.NewTextResponse(strings.TrimRight(sb.String(), "\n")), nil
+			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(strings.Join(lines, "\n")), meta), nil
 		},
 	)
 }
@@ -284,50 +290,83 @@ func knownLabels(records dispatchRecords) string {
 	return strings.Join(labels, ", ")
 }
 
-// describeDispatch renders one sub-agent's status. The registry is the
+// AgentStatusResponseMetadata lets the UI draw agent_status results as rows.
+type AgentStatusResponseMetadata struct {
+	Agents []AgentStatusSummary `json:"agents"`
+}
+
+// AgentStatusSummary is one sub-agent's state, as agent_status reports it.
+type AgentStatusSummary struct {
+	Label     string  `json:"label"`
+	State     string  `json:"state"`
+	Detail    string  `json:"detail,omitempty"` // Stop reason.
+	Timing    string  `json:"timing,omitempty"` // "for 2m" or "5m ago".
+	Access    string  `json:"access"`
+	ToolCalls int     `json:"tool_calls"`
+	Cost      float64 `json:"cost,omitempty"`
+}
+
+// summarizeDispatch reads one sub-agent's state. The registry is the
 // authority on a sub-agent this process is running; the transcript covers
 // the rest, including those cut off by a restart.
-func (c *coordinator) describeDispatch(ctx context.Context, parentSessionID string, record *dispatchRecord, detail bool) string {
-	state, timing := "finished", ""
+func (c *coordinator) summarizeDispatch(parentSessionID string, record *dispatchRecord, activity subAgentProgress) AgentStatusSummary {
+	sum := AgentStatusSummary{
+		Label:     record.Label,
+		State:     "finished",
+		Access:    record.Access,
+		ToolCalls: activity.toolCalls,
+		Cost:      activity.cost,
+	}
 	if record.LastReport != nil && record.LastReport.Failed {
-		state = "failed"
+		sum.State = "failed"
 	}
-	if entry, ok := c.dispatched.Get(dispatchKey(parentSessionID, record.Label)); ok && entry.SessionID == c.sessions.CreateAgentToolSessionID(record.MessageID, record.CallID) {
-		snap := entry.snapshot()
-		state = snap.State.String()
-		switch {
-		case snap.State == dispatchRunning && snap.StopReason != "":
-			state = "stopping"
-			timing = "for " + formatElapsed(time.Since(snap.Started))
-		case snap.State == dispatchRunning:
-			timing = "for " + formatElapsed(time.Since(snap.Started))
-		case !snap.Ended.IsZero():
-			timing = formatElapsed(time.Since(snap.Ended)) + " ago"
-		}
-		if snap.State == dispatchStopped && snap.StopReason != "" {
-			state += " (" + snap.StopReason + ")"
-		}
-	} else if record.Open {
-		state = "interrupted (Crush exited)"
-	}
-
 	childID := c.sessions.CreateAgentToolSessionID(record.MessageID, record.CallID)
-	activity := c.subAgentActivity(ctx, childID)
+	entry, ok := c.dispatched.Get(dispatchKey(parentSessionID, record.Label))
+	if !ok || entry.SessionID != childID {
+		if record.Open {
+			sum.State, sum.Detail = "interrupted", "Crush exited"
+		}
+		return sum
+	}
+	snap := entry.snapshot()
+	sum.State = snap.State.String()
+	switch {
+	case snap.State == dispatchRunning:
+		if snap.StopReason != "" {
+			sum.State = "stopping"
+		}
+		sum.Timing = "for " + formatElapsed(time.Since(snap.Started))
+	case !snap.Ended.IsZero():
+		sum.Timing = formatElapsed(time.Since(snap.Ended)) + " ago"
+	}
+	if snap.State == dispatchStopped {
+		sum.Detail = snap.StopReason
+	}
+	return sum
+}
+
+// describeDispatch renders one sub-agent's status for the model.
+func (c *coordinator) describeDispatch(ctx context.Context, parentSessionID string, record *dispatchRecord, detail bool) (string, AgentStatusSummary) {
+	activity := c.subAgentActivity(ctx, c.sessions.CreateAgentToolSessionID(record.MessageID, record.CallID))
+	sum := c.summarizeDispatch(parentSessionID, record, activity)
 
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "- %s: %s", record.Label, state)
-	if timing != "" {
-		fmt.Fprintf(&sb, " %s", timing)
+	fmt.Fprintf(&sb, "- %s: %s", sum.Label, sum.State)
+	if sum.Detail != "" {
+		fmt.Fprintf(&sb, " (%s)", sum.Detail)
 	}
-	fmt.Fprintf(&sb, ", %s access, %d tool calls", record.Access, activity.toolCalls)
-	if activity.cost > 0 {
-		fmt.Fprintf(&sb, ", $%.2f", activity.cost)
+	if sum.Timing != "" {
+		fmt.Fprintf(&sb, " %s", sum.Timing)
+	}
+	fmt.Fprintf(&sb, ", %s access, %d tool calls", sum.Access, sum.ToolCalls)
+	if sum.Cost > 0 {
+		fmt.Fprintf(&sb, ", $%.2f", sum.Cost)
 	}
 	if activity.lastCall != "" {
 		fmt.Fprintf(&sb, "\n  latest: %s", activity.lastCall)
 	}
 	if !detail {
-		return sb.String()
+		return sb.String(), sum
 	}
 
 	fmt.Fprintf(&sb, "\n\nTask:\n%s", truncateForStatus(record.Task, 1500))
@@ -343,7 +382,7 @@ func (c *coordinator) describeDispatch(ctx context.Context, parentSessionID stri
 	if record.LastReport != nil {
 		fmt.Fprintf(&sb, "\n\nLast report:\n%s", truncateForStatus(record.LastReport.Output, 2000))
 	}
-	return sb.String()
+	return sb.String(), sum
 }
 
 // subAgentProgress summarizes what a sub-agent session has done so far.

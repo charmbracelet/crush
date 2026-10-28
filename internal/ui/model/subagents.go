@@ -79,12 +79,9 @@ func (m *UI) subAgentRow(status chat.DispatchStatus, width int) string {
 		}, width)
 	}
 
-	description := status.Activity
-	if description == "" {
-		description = "starting"
-	}
+	description := "starting"
 	if !status.Started.IsZero() {
-		description = fmt.Sprintf("%s · %s", description, time.Since(status.Started).Round(time.Second))
+		description = time.Since(status.Started).Round(time.Second).String()
 	}
 	return common.Status(t, common.StatusOpts{
 		Icon:        t.Resource.WorkingIcon.Render(subAgentSpinner(time.Now())),

@@ -79,7 +79,7 @@ func TestResolveModelOverride(t *testing.T) {
 		parent  Model
 		wantOK  bool
 		wantSel config.SelectedModel
-		// wantDynamic expects the sub-agent default model's selection with
+		// wantDynamic expects the subagent default model's selection with
 		// the override applied, rather than a fixed selection.
 		wantDynamic bool
 		refusal     string
@@ -168,7 +168,7 @@ func TestResolveModelOverride(t *testing.T) {
 			wantSel: config.SelectedModel{Provider: "mock", Model: "mock-thinker"},
 		},
 		{
-			name:        "reasoning settings alone ride the sub-agent default model",
+			name:        "reasoning settings alone ride the subagent default model",
 			params:      AgentDispatchParams{Reasoning: "high"},
 			wantOK:      true,
 			wantDynamic: true,
@@ -201,7 +201,7 @@ func TestResolveModelOverride(t *testing.T) {
 	}
 }
 
-// Reasoning settings alone ride the sub-agent's default model, so they are
+// Reasoning settings alone ride the subagent's default model, so they are
 // refused when that model cannot reason.
 func TestResolveModelOverrideRidesNonReasoningSubDefault(t *testing.T) {
 	t.Parallel()
@@ -475,12 +475,12 @@ func TestRehydrateDispatchRestoresModelOverride(t *testing.T) {
 
 	for _, callID := range []string{"c1", "c2", "c3"} {
 		childID := env.sessions.CreateAgentToolSessionID(firstAssistant.ID, callID)
-		_, err := env.sessions.CreateTaskSession(ctx, childID, parent.ID, "Sub-agent")
+		_, err := env.sessions.CreateTaskSession(ctx, childID, parent.ID, "Subagent")
 		require.NoError(t, err)
 	}
 	for _, callID := range []string{"c4", "c5", "c6"} {
 		childID := env.sessions.CreateAgentToolSessionID(assistant.ID, callID)
-		_, err := env.sessions.CreateTaskSession(ctx, childID, parent.ID, "Sub-agent")
+		_, err := env.sessions.CreateTaskSession(ctx, childID, parent.ID, "Subagent")
 		require.NoError(t, err)
 	}
 	_, err = env.messages.Create(ctx, parent.ID, message.CreateMessageParams{
@@ -574,7 +574,7 @@ func TestRehydrateDispatchPropagatesTranscriptReadError(t *testing.T) {
 	})
 	require.NoError(t, err)
 	childID := env.sessions.CreateAgentToolSessionID(assistant.ID, "c1")
-	_, err = env.sessions.CreateTaskSession(ctx, childID, parent.ID, "Sub-agent")
+	_, err = env.sessions.CreateTaskSession(ctx, childID, parent.ID, "Subagent")
 	require.NoError(t, err)
 
 	c.messages = listFailingMessages{Service: env.messages, except: parent.ID}

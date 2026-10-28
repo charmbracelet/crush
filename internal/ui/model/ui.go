@@ -492,7 +492,7 @@ type UI struct {
 	hoverX        int
 	hoverY        int
 
-	// subAgentsRunning is how many sub-agents were still working as of the
+	// subAgentsRunning is how many subagents were still working as of the
 	// last update. Counting them walks the whole transcript, and the header
 	// needs the number on every frame, so it is counted once per update
 	// rather than once per frame.
@@ -1699,7 +1699,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// scroll, session load); make sure the clock is running. This is the
 	// sole place the clock is armed so a tick never sits inside a caller's
 	// tea.Sequence.
-	// The header spins while sub-agents work, and they work out of sight:
+	// The header spins while subagents work, and they work out of sight:
 	// that is the whole reason the header says anything about them. So the
 	// clock cannot be left to the transcript alone, which only arms it for
 	// an item currently on screen. Without this the spinner sat still and
@@ -1810,13 +1810,13 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 	return tea.Sequence(cmds...)
 }
 
-// replayDispatchReports settles dispatch items whose sub-agent is no longer
+// replayDispatchReports settles dispatch items whose subagent is no longer
 // working.
 //
-// A dispatched sub-agent outlives its own tool result, so the report landing
+// A dispatched subagent outlives its own tool result, so the report landing
 // later is the only sign it finished. On a live run that report arrives as
 // an event, but a session read back from storage has to recover it from the
-// transcript: without this every sub-agent that finished long ago would look
+// transcript: without this every subagent that finished long ago would look
 // like it is still working, in the transcript, the sidebar, the header count
 // and the warning shown when quitting.
 //
@@ -1994,10 +1994,10 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 		if msg.HasShellCommand() {
 			return nil
 		}
-		// A sub-agent report arrives on a user-role message but is not
+		// A subagent report arrives on a user-role message but is not
 		// the user speaking, so it does not move the last-user mark. It
 		// does end the dispatch item's spinner, since the report landing
-		// is the only signal that the sub-agent finished.
+		// is the only signal that the subagent finished.
 		if reports := msg.SubAgentReports(); len(reports) > 0 {
 			for _, report := range reports {
 				m.markDispatchReported(report.Label)
@@ -2031,7 +2031,7 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 			}
 			if toolMsgItem, ok := toolItem.(chat.ToolMessageItem); ok {
 				toolMsgItem.SetResult(&tr)
-				// Reopening a finished sub-agent puts it back to work, so
+				// Reopening a finished subagent puts it back to work, so
 				// its dispatch item has to start spinning again.
 				if tr.Name == agent.AgentSendToolName && tr.Metadata != "" {
 					var meta agent.AgentSendResponseMetadata
@@ -6569,8 +6569,8 @@ func (m *UI) drawSessionDetails(scr uv.Screen, area uv.Rectangle) {
 	remainingHeight := height - lipgloss.Height(detailsHeader) - lipgloss.Height(version)
 
 	const maxSectionWidth = 50
-	// Sub-agents take the leading column when any exist, since a running
-	// sub-agent is the one thing here that changes while you watch.
+	// Subagents take the leading column when any exist, since a running
+	// subagent is the one thing here that changes while you watch.
 	subAgents := m.subAgentStatuses()
 	columns := 4
 	if len(subAgents) > 0 {
@@ -6708,7 +6708,7 @@ func renderLogo(t *styles.Styles, compact, hyper bool, width int) string {
 }
 
 // markDispatchRunning puts the dispatch item for this label back into its
-// working state after its sub-agent was reopened with a follow-up. A label
+// working state after its subagent was reopened with a follow-up. A label
 // can be reused, and only its latest dispatch is the one reopened.
 func (m *UI) markDispatchRunning(label string) {
 	if label == "" {
@@ -6725,7 +6725,7 @@ func (m *UI) markDispatchRunning(label string) {
 }
 
 // markDispatchReported stops the spinner on the agent_dispatch item that
-// launched the sub-agent with this label.
+// launched the subagent with this label.
 func (m *UI) markDispatchReported(label string) {
 	if label == "" {
 		return

@@ -266,7 +266,7 @@ func sessionScopedEventID(ev any) (string, bool) {
 // only delivered to clients currently viewing the session that raised
 // them: a permission dialog or question form is only actionable there,
 // and broadcasting it to every client in the workspace lets sessions
-// steal each other's prompts. Prompts raised by sub-agent sessions
+// steal each other's prompts. Prompts raised by subagent sessions
 // (agent tool, agentic fetch) resolve to the top-level session so the
 // viewer of the parent session can answer them. Clients on the landing
 // screen (an explicitly cleared session) receive no prompts, while

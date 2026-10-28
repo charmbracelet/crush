@@ -23,7 +23,7 @@ func NewAgentControlToolMessageItem(
 	return newBaseToolMessageItem(sty, toolCall, result, &AgentControlToolRenderContext{}, canceled)
 }
 
-// AgentControlToolRenderContext renders calls addressed to a sub-agent.
+// AgentControlToolRenderContext renders calls addressed to a subagent.
 type AgentControlToolRenderContext struct{}
 
 // RenderTool implements the [ToolRenderer] interface.
@@ -87,7 +87,7 @@ func agentMessageContent(sty *styles.Styles, text string, width int, expanded bo
 }
 
 // agentStatusRows draws an agent_status result as one aligned row per
-// sub-agent, or returns "" when the result carries no status metadata.
+// subagent, or returns "" when the result carries no status metadata.
 func agentStatusRows(sty *styles.Styles, result *message.ToolResult, width int) string {
 	var meta agent.AgentStatusResponseMetadata
 	if result == nil || json.Unmarshal([]byte(result.Metadata), &meta) != nil || len(meta.Agents) == 0 {

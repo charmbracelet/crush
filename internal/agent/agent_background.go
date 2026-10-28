@@ -13,13 +13,13 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 )
 
-// subAgentBackgroundAfter is how long a blocking sub-agent tool call runs in
+// subAgentBackgroundAfter is how long a blocking subagent tool call runs in
 // the foreground before it is moved to the background, mirroring the bash
 // tool's auto-background threshold.
 const subAgentBackgroundAfter = 60 * time.Second
 
-// AgentBackgroundMetadata marks a blocking sub-agent tool result as handed
-// off to the background. The parent transcript carries it so the sub-agent
+// AgentBackgroundMetadata marks a blocking subagent tool result as handed
+// off to the background. The parent transcript carries it so the subagent
 // can be replayed as a running dispatch: shown by agent_status, reconciled
 // after a restart, and reached by agent_send and agent_stop.
 type AgentBackgroundMetadata struct {
@@ -29,7 +29,7 @@ type AgentBackgroundMetadata struct {
 	Task         string `json:"task,omitempty"`
 }
 
-// backgroundLabel names an auto-backgrounded sub-agent after its tool call.
+// backgroundLabel names an auto-backgrounded subagent after its tool call.
 // The call ID is unique within a session and stays in the transcript, so the
 // label is stable across a restart without a counter to keep.
 func backgroundLabel(toolName, callID string) string {
@@ -50,7 +50,7 @@ func backgroundLabel(toolName, callID string) string {
 	return prefix + "-" + id
 }
 
-// runSubAgentMaybeBackground runs a blocking sub-agent tool call, but moves it
+// runSubAgentMaybeBackground runs a blocking subagent tool call, but moves it
 // to the background if it outruns the threshold. A headless run has no later
 // turn to deliver a report into, so there the call always blocks, exactly as
 // before. In an interactive run a long call is handed to the dispatch
@@ -73,7 +73,7 @@ func (c *coordinator) runSubAgentMaybeBackground(
 	entry := newDispatchedAgent(label, access, childSessionID, params.SessionID, params.Agent)
 
 	// The background goroutine rolls the child's cost up itself, as a
-	// dispatched sub-agent does, so the synchronous rollup is turned off.
+	// dispatched subagent does, so the synchronous rollup is turned off.
 	params.SkipCostRollup = true
 
 	key := dispatchKey(params.SessionID, label)
@@ -159,7 +159,7 @@ func (c *coordinator) runSubAgentMaybeBackground(
 		return backgroundNotice(label, access, params.Prompt, c.backgroundAfter), nil
 	case <-ctx.Done():
 		// The parent turn was cancelled before the handoff. Stop the
-		// sub-agent and surface the cancellation, as a blocking call would;
+		// subagent and surface the cancellation, as a blocking call would;
 		// the goroutine sees backgrounded still false and writes no report.
 		entry.stop("the parent turn was cancelled")
 		<-done
@@ -168,11 +168,11 @@ func (c *coordinator) runSubAgentMaybeBackground(
 	}
 }
 
-// backgroundNotice is what the model gets when a sub-agent is moved to the
+// backgroundNotice is what the model gets when a subagent is moved to the
 // background. It names the label so the model can follow up on it.
 func backgroundNotice(label, access, prompt string, after time.Duration) fantasy.ToolResponse {
 	notice := fmt.Sprintf(
-		"Still working after %s, so this sub-agent moved to the background as %q. "+
+		"Still working after %s, so this subagent moved to the background as %q. "+
 			"Keep going; its report arrives under that label when it finishes. "+
 			"Check on it with %s, steer it with %s, or stop it with %s.",
 		after, label, AgentStatusToolName, AgentSendToolName, AgentStopToolName,

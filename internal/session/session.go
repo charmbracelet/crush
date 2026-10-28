@@ -367,7 +367,7 @@ func unmarshalTodos(data string) ([]Todo, error) {
 
 // MCPDisabledServers returns the MCP servers disabled for this
 // repository. The database is scoped to the project, so the override set
-// is shared by every session in the repository, including sub-agent
+// is shared by every session in the repository, including subagent
 // sessions. New repositories start empty and follow the config.
 func (s *service) MCPDisabledServers(ctx context.Context) ([]string, error) {
 	return s.q.ListMCPDisabledServers(ctx)

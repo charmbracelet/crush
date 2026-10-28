@@ -52,7 +52,7 @@ func TestPlanPromptListsConfiguredTools(t *testing.T) {
 		return systemPrompt
 	}
 
-	// Interactive: sub-agents report back on their own, so the detached
+	// Interactive: subagents report back on their own, so the detached
 	// pair is advertised and the blocking tool is not.
 	require.Contains(t, buildPrompt(t, true),
 		"Your available tools are: agent_dispatch, agent_send, agent_status, agent_stop, lsp_symbols, lsp_definition, lsp_call_hierarchy, glob, grep, ls, question, sourcegraph, view.")

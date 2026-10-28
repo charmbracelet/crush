@@ -462,7 +462,7 @@ func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults m
 		if msg.Content().Hidden {
 			return nil
 		}
-		// Reconstruct shell command and sub-agent report items from their
+		// Reconstruct shell command and subagent report items from their
 		// parts. Both are carried on user-role messages but neither is
 		// something the user typed, so they render as their own items.
 		var items []MessageItem

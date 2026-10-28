@@ -16,7 +16,7 @@ type ModelSet struct {
 }
 
 // coordinatorModels is every model the coordinator's agents share. On Copilot,
-// sub-agents get their own large model so it bills them as agent-initiated;
+// subagents get their own large model so it bills them as agent-initiated;
 // elsewhere subLarge is large. The small model is always built that way.
 type coordinatorModels struct {
 	large, subLarge, small Model
@@ -60,7 +60,7 @@ type overrideModelKey struct {
 }
 
 // overrideModel is the shared build of one override selection. It is built
-// as a sub-agent model, so Copilot bills it as agent-initiated.
+// as a subagent model, so Copilot bills it as agent-initiated.
 type overrideModel struct {
 	sel config.SelectedModel
 
@@ -71,7 +71,7 @@ type overrideModel struct {
 
 // current returns the build, rebuilding it first if the shared models were
 // rebuilt since. A failed rebuild keeps the old build rather than moving a
-// running sub-agent onto the session default.
+// running subagent onto the session default.
 func (o *overrideModel) current(c *coordinator) Model {
 	model, _ := o.refresh(c)
 	return model
@@ -87,7 +87,7 @@ func (o *overrideModel) refresh(c *coordinator) (Model, error) {
 	model, err := c.buildModelFromSelection(context.Background(), o.sel, true)
 	if err != nil {
 		if o.model.Model != nil {
-			slog.Warn("Failed to refresh an overridden sub-agent model",
+			slog.Warn("Failed to refresh an overridden subagent model",
 				"model", o.sel.Model, "provider", o.sel.Provider, "error", err)
 		}
 		return o.model, err

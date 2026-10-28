@@ -42,20 +42,20 @@ const (
 const stopForShutdown = "Crush is shutting down"
 
 type AgentDispatchParams struct {
-	Prompt string `json:"prompt" description:"The task for the sub-agent to perform"`
-	Label  string `json:"label" description:"A short name for this sub-agent, used to address it and to label its report"`
-	Access string `json:"access,omitempty" description:"\"read\" (default) for a sub-agent that can only inspect the codebase, or \"write\" for one that can also edit files"`
+	Prompt string `json:"prompt" description:"The task for the subagent to perform"`
+	Label  string `json:"label" description:"A short name for this subagent, used to address it and to label its report"`
+	Access string `json:"access,omitempty" description:"\"read\" (default) for a subagent that can only inspect the codebase, or \"write\" for one that can also edit files"`
 
-	// Model override. When none of these is given the sub-agent runs on the
-	// session's sub-agent model with its configured settings.
-	Model     string `json:"model,omitempty" description:"The model ID for this sub-agent, as used by the provider API. Omit provider to use the parent agent's provider. Other settings default to the model's own"`
+	// Model override. When none of these is given the subagent runs on the
+	// session's subagent model with its configured settings.
+	Model     string `json:"model,omitempty" description:"The model ID for this subagent, as used by the provider API. Omit provider to use the parent agent's provider. Other settings default to the model's own"`
 	Provider  string `json:"provider,omitempty" description:"The provider ID for the overridden model; requires model. Defaults to the parent agent's provider when only model is given"`
-	Reasoning string `json:"reasoning,omitempty" description:"How hard the sub-agent reasons: one of the values listed in brackets after its model. Defaults to the model's own"`
+	Reasoning string `json:"reasoning,omitempty" description:"How hard the subagent reasons: one of the values listed in brackets after its model. Defaults to the model's own"`
 }
 
-// AgentSendResponseMetadata tells the UI which sub-agent a message went to,
+// AgentSendResponseMetadata tells the UI which subagent a message went to,
 // and whether it restarted a finished one, so the transcript can show that
-// sub-agent as working again.
+// subagent as working again.
 type AgentSendResponseMetadata struct {
 	Label    string `json:"label"`
 	Reopened bool   `json:"reopened,omitempty"`
@@ -66,7 +66,7 @@ type AgentSendResponseMetadata struct {
 // on restart, so rehydration runs on the provider the dispatch used rather
 // than re-deriving it from whatever model the session has by then.
 // ReasoningOnly marks a dispatch that gave reasoning settings but no model:
-// it rides the sub-agent's default selection, so rehydration must not treat
+// it rides the subagent's default selection, so rehydration must not treat
 // the recorded model as an explicit one and rebuild a bare selection.
 type AgentDispatchResponseMetadata struct {
 	Label         string `json:"label"`
@@ -79,16 +79,16 @@ type AgentDispatchResponseMetadata struct {
 }
 
 type AgentSendParams struct {
-	Label   string `json:"label" description:"The label of the running sub-agent to send to"`
-	Message string `json:"message" description:"The message to deliver to that sub-agent"`
+	Label   string `json:"label" description:"The label of the running subagent to send to"`
+	Message string `json:"message" description:"The message to deliver to that subagent"`
 }
 
 type AgentStopParams struct {
-	Label  string `json:"label" description:"The label of the running sub-agent to stop"`
+	Label  string `json:"label" description:"The label of the running subagent to stop"`
 	Reason string `json:"reason,omitempty" description:"Why it is being stopped; recorded in its report"`
 }
 
-// dispatchState is where a dispatched sub-agent is in its life.
+// dispatchState is where a dispatched subagent is in its life.
 type dispatchState int
 
 const (
@@ -112,16 +112,16 @@ func (s dispatchState) String() string {
 	return "unknown"
 }
 
-// dispatchedAgent tracks one detached sub-agent across all of its runs: the
+// dispatchedAgent tracks one detached subagent across all of its runs: the
 // first one, and every follow-up that reopens it.
 type dispatchedAgent struct {
 	Label           string
 	SessionID       string
 	ParentSessionID string
 	Access          string
-	// agent is the SessionAgent instance actually running this sub-agent.
+	// agent is the SessionAgent instance actually running this subagent.
 	// Busy state and the message queue live on that instance, not on the
-	// coordinator's main agent, so a message meant for a sub-agent has to
+	// coordinator's main agent, so a message meant for a subagent has to
 	// be addressed to it directly.
 	agent SessionAgent
 
@@ -141,7 +141,7 @@ type dispatchedAgent struct {
 	rolledUpCost atomic.Uint64
 }
 
-// newDispatchedAgent returns an entry for a sub-agent that is not running.
+// newDispatchedAgent returns an entry for a subagent that is not running.
 // Callers start it with claim.
 func newDispatchedAgent(label, access, sessionID, parentSessionID string, agent SessionAgent) *dispatchedAgent {
 	return &dispatchedAgent{
@@ -154,8 +154,8 @@ func newDispatchedAgent(label, access, sessionID, parentSessionID string, agent 
 	}
 }
 
-// claim starts a new run if the sub-agent is idle. The returned context is
-// detached from whatever turn asked for the run: a sub-agent outlives the
+// claim starts a new run if the subagent is idle. The returned context is
+// detached from whatever turn asked for the run: a subagent outlives the
 // turn that started it and is stopped only through stop.
 func (d *dispatchedAgent) claim() (context.Context, uint64, bool) {
 	d.mu.Lock()
@@ -242,7 +242,7 @@ func (d *dispatchedAgent) snapshot() dispatchSnapshot {
 }
 
 // awaitSettled waits until the run in flight has unwound, or the timeout
-// passes. It reports whether the sub-agent is idle.
+// passes. It reports whether the subagent is idle.
 func (d *dispatchedAgent) awaitSettled(timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	for d.running() {
@@ -254,12 +254,12 @@ func (d *dispatchedAgent) awaitSettled(timeout time.Duration) bool {
 	return true
 }
 
-// awaitDeliverable waits until the sub-agent's session is actually running
+// awaitDeliverable waits until the subagent's session is actually running
 // and can accept a message, and reports whether it can. A run is claimed
 // before its goroutine has started the session, so a message sent right
 // after dispatching arrives while the session is not yet busy; treating that
 // window as "finished" would drop the message. Waiting closes the gap
-// without blocking indefinitely on a sub-agent that died on startup.
+// without blocking indefinitely on a subagent that died on startup.
 func (d *dispatchedAgent) awaitDeliverable(ctx context.Context) bool {
 	const (
 		pollEvery = 50 * time.Millisecond
@@ -293,8 +293,8 @@ func dispatchKey(parentSessionID, label string) string {
 	return parentSessionID + "\x00" + label
 }
 
-// agentDispatchTool launches a sub-agent that runs detached from this tool
-// call. The tool returns as soon as the sub-agent starts; the result is
+// agentDispatchTool launches a subagent that runs detached from this tool
+// call. The tool returns as soon as the subagent starts; the result is
 // delivered later as a message into the parent session.
 func (c *coordinator) agentDispatchTool(ctx context.Context, parentAgentID string) (fantasy.AgentTool, error) {
 	readOnly := readOnlyParent(parentAgentID)
@@ -324,7 +324,7 @@ func (c *coordinator) agentDispatchTool(ctx context.Context, parentAgentID strin
 				return fantasy.ToolResponse{}, errors.New("agent message id missing from context")
 			}
 
-			// A model override swaps the shared sub-agent for a dedicated
+			// A model override swaps the shared subagent for a dedicated
 			// one running on the requested model. It is resolved before the
 			// label is taken, so a refused override leaves the label free
 			// and the call can be retried immediately.
@@ -347,7 +347,7 @@ func (c *coordinator) agentDispatchTool(ctx context.Context, parentAgentID strin
 
 			// The sub-session ID derives from the bare tool call ID so the
 			// UI can walk back from a child-session event to this tool's
-			// chat item and nest the sub-agent's tool calls under it.
+			// chat item and nest the subagent's tool calls under it.
 			toolCallID := call.ID
 
 			// Checking the label and registering the entry happen under
@@ -356,7 +356,7 @@ func (c *coordinator) agentDispatchTool(ctx context.Context, parentAgentID strin
 			c.dispatchMu.Lock()
 			if existing, ok := c.dispatched.Get(key); ok && existing.running() {
 				c.dispatchMu.Unlock()
-				return fantasy.NewTextErrorResponse(fmt.Sprintf("sub-agent %q is already running; pick another label or stop it first", label)), nil
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("subagent %q is already running; pick another label or stop it first", label)), nil
 			}
 			entry := newDispatchedAgent(
 				label,
@@ -376,7 +376,7 @@ func (c *coordinator) agentDispatchTool(ctx context.Context, parentAgentID strin
 					AgentMessageID: agentMessageID,
 					ToolCallID:     toolCallID,
 					Prompt:         params.Prompt,
-					SessionTitle:   "Sub-agent: " + label,
+					SessionTitle:   "Subagent: " + label,
 					SkipCostRollup: true,
 				})
 			})
@@ -393,21 +393,21 @@ func (c *coordinator) agentDispatchTool(ctx context.Context, parentAgentID strin
 				meta.ReasoningOnly = strings.TrimSpace(params.Model) == ""
 			}
 			return fantasy.WithResponseMetadata(
-				fantasy.NewTextResponse(fmt.Sprintf("Started sub-agent %q.", label)),
+				fantasy.NewTextResponse(fmt.Sprintf("Started subagent %q.", label)),
 				meta,
 			), nil
 		},
 	), nil
 }
 
-// runDispatched runs one generation of a sub-agent in the background, then
+// runDispatched runs one generation of a subagent in the background, then
 // settles the entry and reports the outcome to the parent.
 func (c *coordinator) runDispatched(ctx context.Context, entry *dispatchedAgent, gen uint64, run func(context.Context) (fantasy.ToolResponse, error)) {
 	go func() {
 		resp, err := run(ctx)
 		c.rollUpDispatchCost(context.Background(), entry)
 		// Settle before reporting: the report starts a parent turn, and
-		// that turn may well send this sub-agent a follow-up, which needs
+		// that turn may well send this subagent a follow-up, which needs
 		// it idle.
 		stopReason := entry.settle(gen, err != nil || resp.IsError)
 
@@ -416,7 +416,7 @@ func (c *coordinator) runDispatched(ctx context.Context, entry *dispatchedAgent,
 			c.reportDispatchResult(entry, resp, err)
 		case stopForShutdown:
 		default:
-			// A stopped sub-agent has nothing to report and its parent
+			// A stopped subagent has nothing to report and its parent
 			// already knows it was stopped, so record the outcome
 			// without starting a turn over it.
 			c.recordDispatchReport(entry.ParentSessionID, message.SubAgentReport{
@@ -428,12 +428,12 @@ func (c *coordinator) runDispatched(ctx context.Context, entry *dispatchedAgent,
 	}()
 }
 
-// reopen runs another turn on a finished sub-agent's existing session, so it
+// reopen runs another turn on a finished subagent's existing session, so it
 // answers with its whole task still in context. This is what makes a
-// sub-agent answerable rather than a one-shot: the session is real and its
+// subagent answerable rather than a one-shot: the session is real and its
 // history is intact, so a follow-up is just the next turn on it.
 //
-// Returns false if the sub-agent is not idle, meaning somebody else claimed
+// Returns false if the subagent is not idle, meaning somebody else claimed
 // it first or it is still working.
 func (c *coordinator) reopen(entry *dispatchedAgent, prompt string) bool {
 	agentCall, _, err := c.subAgentCall(entry.agent, entry.SessionID, prompt)
@@ -452,14 +452,14 @@ func (c *coordinator) reopen(entry *dispatchedAgent, prompt string) bool {
 		defer done()
 		result, err := entry.agent.Run(ctx, agentCall)
 		if err != nil {
-			return fantasy.NewTextErrorResponse(fmt.Sprintf("Sub-agent failed: %s", err)), nil
+			return fantasy.NewTextErrorResponse(fmt.Sprintf("Subagent failed: %s", err)), nil
 		}
 		return fantasy.NewTextResponse(subAgentOutput(result)), nil
 	})
 	return true
 }
 
-// rollUpDispatchCost adds what a sub-agent spent since the last roll-up to
+// rollUpDispatchCost adds what a subagent spent since the last roll-up to
 // its parent session.
 func (c *coordinator) rollUpDispatchCost(ctx context.Context, entry *dispatchedAgent) {
 	child, err := c.sessions.Get(ctx, entry.SessionID)
@@ -479,11 +479,11 @@ func (c *coordinator) rollUpDispatchCost(ctx context.Context, entry *dispatchedA
 	}
 	parent.Cost += delta
 	if _, err := c.sessions.Save(ctx, parent); err != nil {
-		slog.Warn("Failed to roll up sub-agent cost", "label", entry.Label, "error", err)
+		slog.Warn("Failed to roll up subagent cost", "label", entry.Label, "error", err)
 	}
 }
 
-// reportDispatchResult delivers a finished sub-agent's output back to the
+// reportDispatchResult delivers a finished subagent's output back to the
 // parent session. If the parent is mid-turn the message folds into it at the
 // next step; if the parent is idle it starts a new turn. If no turn can start
 // at all, the report is still written to the session so it is read next turn.
@@ -494,9 +494,9 @@ func (c *coordinator) reportDispatchResult(entry *dispatchedAgent, resp fantasy.
 	)
 	switch {
 	case err != nil:
-		body, failed = fmt.Sprintf("Sub-agent failed: %s", err), true
+		body, failed = fmt.Sprintf("Subagent failed: %s", err), true
 	case resp.Content == "":
-		body, failed = "Sub-agent completed but produced no text output.", true
+		body, failed = "Subagent completed but produced no text output.", true
 	default:
 		body, failed = resp.Content, resp.IsError
 	}
@@ -514,7 +514,7 @@ func (c *coordinator) reportDispatchResult(entry *dispatchedAgent, resp fantasy.
 		[]message.ContentPart{report},
 	); err != nil {
 		slog.Error(
-			"Failed to deliver sub-agent report",
+			"Failed to deliver subagent report",
 			"label", entry.Label,
 			"parent_session", entry.ParentSessionID,
 			"error", err,
@@ -526,19 +526,19 @@ func (c *coordinator) reportDispatchResult(entry *dispatchedAgent, resp fantasy.
 // reportPrompt mirrors what a report part renders into for the model; the
 // part is what the UI draws.
 func reportPrompt(report message.SubAgentReport) string {
-	return fmt.Sprintf("<sub-agent-report label=%q>\n%s\n</sub-agent-report>", report.Label, report.Output)
+	return fmt.Sprintf("<subagent-report label=%q>\n%s\n</subagent-report>", report.Label, report.Output)
 }
 
 // recordDispatchReport stores a report in the parent session without starting
 // a turn. The model reads it with the rest of the history on its next turn,
-// and the UI settles the sub-agent's item when it lands.
+// and the UI settles the subagent's item when it lands.
 func (c *coordinator) recordDispatchReport(parentSessionID string, report message.SubAgentReport) {
 	if _, err := c.messages.Create(context.Background(), parentSessionID, message.CreateMessageParams{
 		Role:  message.User,
 		Parts: []message.ContentPart{report},
 	}); err != nil {
 		slog.Error(
-			"Failed to record sub-agent report",
+			"Failed to record subagent report",
 			"label", report.Label,
 			"parent_session", parentSessionID,
 			"error", err,
@@ -546,9 +546,9 @@ func (c *coordinator) recordDispatchReport(parentSessionID string, report messag
 	}
 }
 
-// agentSendTool delivers a message to a running detached sub-agent. The
-// message is queued on the sub-agent's session, where sessionAgent folds it
-// into the sub-agent's turn at its next step.
+// agentSendTool delivers a message to a running detached subagent. The
+// message is queued on the subagent's session, where sessionAgent folds it
+// into the subagent's turn at its next step.
 func (c *coordinator) agentSendTool() fantasy.AgentTool {
 	return fantasy.NewParallelAgentTool(
 		AgentSendToolName,
@@ -569,7 +569,7 @@ func (c *coordinator) agentSendTool() fantasy.AgentTool {
 
 			reopened := func(entry *dispatchedAgent) fantasy.ToolResponse {
 				if !c.reopen(entry, params.Message) {
-					return fantasy.NewTextErrorResponse(fmt.Sprintf("sub-agent %q cannot be reached", label))
+					return fantasy.NewTextErrorResponse(fmt.Sprintf("subagent %q cannot be reached", label))
 				}
 				return fantasy.WithResponseMetadata(fantasy.NewTextResponse(fmt.Sprintf(
 					"Delivered to %q, which had finished. It will answer in a new report.",
@@ -580,13 +580,13 @@ func (c *coordinator) agentSendTool() fantasy.AgentTool {
 			entry, ok := c.dispatched.Get(dispatchKey(parentSessionID, label))
 			if !ok {
 				// Not in the registry, which after a restart is every
-				// sub-agent. The transcript still records the dispatch and
+				// subagent. The transcript still records the dispatch and
 				// the child session still holds the work, so rebuild the
 				// entry from those rather than refusing.
 				entry, err := c.rehydrateDispatch(ctx, parentSessionID, label)
 				if err != nil {
 					return fantasy.NewTextErrorResponse(fmt.Sprintf(
-						"no sub-agent %q; running: %s",
+						"no subagent %q; running: %s",
 						label, c.runningDispatchLabels(parentSessionID),
 					)), nil
 				}
@@ -603,8 +603,8 @@ func (c *coordinator) agentSendTool() fantasy.AgentTool {
 				return reopened(entry), nil
 			}
 
-			// Addressed to the sub-agent's own SessionAgent and queued
-			// without a RunID, so it folds into that sub-agent's active
+			// Addressed to the subagent's own SessionAgent and queued
+			// without a RunID, so it folds into that subagent's active
 			// turn rather than starting a turn of its own.
 			agentCall, _, err := c.subAgentCall(entry.agent, entry.SessionID, params.Message)
 			if err != nil {
@@ -621,7 +621,7 @@ func (c *coordinator) agentSendTool() fantasy.AgentTool {
 	)
 }
 
-// agentStopTool stops a running detached sub-agent. Its session is kept, so a
+// agentStopTool stops a running detached subagent. Its session is kept, so a
 // later agent_send resumes it with its work still in context.
 func (c *coordinator) agentStopTool() fantasy.AgentTool {
 	return fantasy.NewParallelAgentTool(
@@ -640,7 +640,7 @@ func (c *coordinator) agentStopTool() fantasy.AgentTool {
 			entry, ok := c.dispatched.Get(dispatchKey(parentSessionID, label))
 			if !ok || !entry.running() {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf(
-					"sub-agent %q is not running; running: %s",
+					"subagent %q is not running; running: %s",
 					label, c.runningDispatchLabels(parentSessionID),
 				)), nil
 			}
@@ -650,14 +650,14 @@ func (c *coordinator) agentStopTool() fantasy.AgentTool {
 			}
 			entry.stop(reason)
 			if !entry.awaitSettled(10 * time.Second) {
-				return fantasy.NewTextResponse(fmt.Sprintf("Stopping sub-agent %q.", label)), nil
+				return fantasy.NewTextResponse(fmt.Sprintf("Stopping subagent %q.", label)), nil
 			}
-			return fantasy.NewTextResponse(fmt.Sprintf("Stopped sub-agent %q.", label)), nil
+			return fantasy.NewTextResponse(fmt.Sprintf("Stopped subagent %q.", label)), nil
 		},
 	)
 }
 
-// runningDispatchLabels lists the sub-agents still running for a session.
+// runningDispatchLabels lists the subagents still running for a session.
 func (c *coordinator) runningDispatchLabels(parentSessionID string) string {
 	var labels []string
 	for _, entry := range c.dispatched.Seq2() {
@@ -672,7 +672,7 @@ func (c *coordinator) runningDispatchLabels(parentSessionID string) string {
 	return strings.Join(labels, ", ")
 }
 
-// dispatchRunModel recovers the model and provider a sub-agent actually ran
+// dispatchRunModel recovers the model and provider a subagent actually ran
 // on from its session's transcript. Assistant messages record both per turn,
 // so this works even when the dispatch result that recorded the resolved
 // override was never written — a crash between the dispatch starting and its
@@ -692,12 +692,12 @@ func (c *coordinator) dispatchRunModel(ctx context.Context, sessionID string) (m
 	return "", "", nil
 }
 
-// rehydrateDispatch rebuilds a sub-agent's registry entry from what is on
+// rehydrateDispatch rebuilds a subagent's registry entry from what is on
 // disk. The registry is in-memory, so a restart empties it, but nothing that
 // matters was in memory to begin with: the parent's transcript records the
 // dispatch call, the child session ID derives from that call's IDs, and the
 // child session holds the whole conversation. The entry is reconstructed as a
-// finished sub-agent, which is what it is, so the caller reopens it.
+// finished subagent, which is what it is, so the caller reopens it.
 func (c *coordinator) rehydrateDispatch(ctx context.Context, parentSessionID, label string) (*dispatchedAgent, error) {
 	messages, err := c.messages.List(ctx, parentSessionID)
 	if err != nil {
@@ -707,11 +707,11 @@ func (c *coordinator) rehydrateDispatch(ctx context.Context, parentSessionID, la
 	if !ok {
 		return nil, fmt.Errorf("no dispatch recorded for label %q", label)
 	}
-	// A backgrounded search ran on a fetch sub-agent, not a task agent, so
+	// A backgrounded search ran on a fetch subagent, not a task agent, so
 	// it cannot be rebuilt from the task variants below. Its session is
 	// kept, but reopening it after a restart is not supported.
 	if record.Tool == tools.AgenticFetchToolName {
-		return nil, fmt.Errorf("sub-agent %q was a search and cannot be resumed", label)
+		return nil, fmt.Errorf("subagent %q was a search and cannot be resumed", label)
 	}
 
 	// Rehydration replays the access level recorded in the transcript, so
@@ -734,13 +734,13 @@ func (c *coordinator) rehydrateDispatch(ctx context.Context, parentSessionID, la
 	// being written — the missing pieces are recovered from the child
 	// session's transcript before falling back to the parent the session
 	// has now. Either way the override is re-resolved against the live
-	// config: if it no longer serves, the sub-agent cannot be resumed
+	// config: if it no longer serves, the subagent cannot be resumed
 	// rather than silently dropping back to the session default.
 	if record.Model != "" || record.Provider != "" || record.Reasoning != "" {
 		params := AgentDispatchParams{Reasoning: record.Reasoning}
 		parent := Model{}
 		if record.ReasoningOnly {
-			// Reasoning settings without a model ride the sub-agent's default
+			// Reasoning settings without a model ride the subagent's default
 			// selection, keeping its configured settings. Feeding the recorded
 			// model back in as an explicit one would rebuild a bare selection
 			// and drop them, so they ride the default again.
@@ -751,7 +751,7 @@ func (c *coordinator) rehydrateDispatch(ctx context.Context, parentSessionID, la
 				sessionID := c.sessions.CreateAgentToolSessionID(record.MessageID, record.CallID)
 				runModel, runProvider, err := c.dispatchRunModel(ctx, sessionID)
 				if err != nil {
-					return nil, fmt.Errorf("sub-agent %q cannot be resumed: reading its transcript failed: %w", label, err)
+					return nil, fmt.Errorf("subagent %q cannot be resumed: reading its transcript failed: %w", label, err)
 				}
 				params.Model = cmp.Or(params.Model, runModel)
 				params.Provider = cmp.Or(params.Provider, runProvider)
@@ -762,7 +762,7 @@ func (c *coordinator) rehydrateDispatch(ctx context.Context, parentSessionID, la
 		}
 		overrideAgent, _, _, refusal := c.overrideDispatchAgent(ctx, record.Access, params, parent)
 		if refusal != "" {
-			return nil, fmt.Errorf("sub-agent %q cannot be resumed on its model override: %s", label, refusal)
+			return nil, fmt.Errorf("subagent %q cannot be resumed on its model override: %s", label, refusal)
 		}
 		agent = overrideAgent
 	}
@@ -790,7 +790,7 @@ func (c *coordinator) rehydrateDispatch(ctx context.Context, parentSessionID, la
 	return entry, nil
 }
 
-// stopAllDispatched stops every running sub-agent and waits, up to timeout,
+// stopAllDispatched stops every running subagent and waits, up to timeout,
 // for them to unwind.
 func (c *coordinator) stopAllDispatched(reason string, timeout time.Duration) {
 	var stopped []*dispatchedAgent
@@ -802,13 +802,13 @@ func (c *coordinator) stopAllDispatched(reason string, timeout time.Duration) {
 	deadline := time.Now().Add(timeout)
 	for _, entry := range stopped {
 		if !entry.awaitSettled(time.Until(deadline)) {
-			slog.Warn("Sub-agent still running after being stopped", "label", entry.Label)
+			slog.Warn("Subagent still running after being stopped", "label", entry.Label)
 		}
 	}
 }
 
 // dispatchedSessionBusy reports whether sessionID belongs to a dispatched
-// sub-agent with a run in flight.
+// subagent with a run in flight.
 func (c *coordinator) dispatchedSessionBusy(sessionID string) bool {
 	for _, entry := range c.dispatched.Seq2() {
 		if entry.SessionID == sessionID && entry.running() {
@@ -818,9 +818,9 @@ func (c *coordinator) dispatchedSessionBusy(sessionID string) bool {
 	return false
 }
 
-// trackSubSession marks a sub-agent session as live until the returned func
+// trackSubSession marks a subagent session as live until the returned func
 // is called. The coordinator's busy check consults this, so a reader settling
-// half-finished sessions never mistakes a working sub-agent for a dead one.
+// half-finished sessions never mistakes a working subagent for a dead one.
 func (c *coordinator) trackSubSession(sessionID string) func() {
 	c.subSessionsMu.Lock()
 	if c.subSessions == nil {

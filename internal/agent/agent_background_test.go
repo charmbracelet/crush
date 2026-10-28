@@ -84,7 +84,7 @@ func TestRunSubAgentMaybeBackground_Foreground(t *testing.T) {
 }
 
 // A slow interactive call crosses the threshold, so it hands off: the tool
-// returns a background notice, the sub-agent is registered under a label, and
+// returns a background notice, the subagent is registered under a label, and
 // once it settles its outcome is reported into the parent session.
 func TestRunSubAgentMaybeBackground_Background(t *testing.T) {
 	const providerID = "test-provider"
@@ -97,7 +97,7 @@ func TestRunSubAgentMaybeBackground_Background(t *testing.T) {
 	parent, err := env.sessions.Create(t.Context(), "Parent")
 	require.NoError(t, err)
 
-	// The sub-agent runs until its detached context is cancelled, which is
+	// The subagent runs until its detached context is cancelled, which is
 	// how it outruns the threshold and, later, how stop unwinds it.
 	agent := newMockAgent(providerID, 4096, func(ctx context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
 		<-ctx.Done()
@@ -123,7 +123,7 @@ func TestRunSubAgentMaybeBackground_Background(t *testing.T) {
 	assert.Equal(t, "long task", meta.Task)
 
 	entry, ok := coord.dispatched.Get(dispatchKey(parent.ID, label))
-	require.True(t, ok, "backgrounded sub-agent must be in the registry")
+	require.True(t, ok, "backgrounded subagent must be in the registry")
 	assert.True(t, entry.running())
 
 	// Stopping it settles the run, which records a report in the parent.
@@ -143,11 +143,11 @@ func TestRunSubAgentMaybeBackground_Background(t *testing.T) {
 			}
 		}
 		return false
-	}, 2*time.Second, 10*time.Millisecond, "a stopped background sub-agent must report back")
+	}, 2*time.Second, 10*time.Millisecond, "a stopped background subagent must report back")
 }
 
 // dispatchHistory promotes a backgrounded blocking call to a first-class
-// sub-agent, and a later report closes it, just as for a dispatch.
+// subagent, and a later report closes it, just as for a dispatch.
 func TestDispatchHistoryBackgroundedBlockingCall(t *testing.T) {
 	t.Parallel()
 
@@ -166,7 +166,7 @@ func TestDispatchHistoryBackgroundedBlockingCall(t *testing.T) {
 		{ID: "m1", Role: message.Assistant, Parts: []message.ContentPart{
 			message.ToolCall{ID: "c1", Name: tools.AgenticFetchToolName, Input: string(fetchInput), Finished: true},
 			// A second blocking call that finished in the foreground has
-			// no background metadata, so it must not become a sub-agent.
+			// no background metadata, so it must not become a subagent.
 			message.ToolCall{ID: "c2", Name: AgentToolName, Input: `{"prompt":"quick"}`, Finished: true},
 		}},
 		{ID: "t1", Role: message.Tool, Parts: []message.ContentPart{

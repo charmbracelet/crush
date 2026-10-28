@@ -92,8 +92,8 @@ type SessionAgentCall struct {
 	Prompt            string
 	// PromptParts, when non-empty, replaces the plain text part of the
 	// user message this call creates. The agent tool uses it to deliver
-	// sub-agent reports as a distinct content part so the UI renders them
-	// as sub-agent results rather than as typed input. Prompt is still
+	// subagent reports as a distinct content part so the UI renders them
+	// as subagent results rather than as typed input. Prompt is still
 	// what the model reads, via the part's own ToAIMessage handling.
 	PromptParts      []message.ContentPart
 	ProviderOptions  fantasy.ProviderOptions
@@ -230,7 +230,7 @@ type sessionAgent struct {
 	sessions   session.Service
 	messages   message.Service
 	// cfg backs channel reply routing (config lookup + MCP tool
-	// invocation). Nil in tests and sub-agents that never see channel
+	// invocation). Nil in tests and subagents that never see channel
 	// turns; sendChannelReply treats nil as "routing disabled".
 	cfg                  *config.ConfigStore
 	disableAutoSummarize bool
@@ -1730,7 +1730,7 @@ If not, please feel free to ignore. Again do not mention this message to the use
 
 // filterDisabledMCPTools removes tools from MCP servers disabled via the
 // "Toggle MCPs" dialog. The override set is repository-scoped and shared
-// by every session in the repository, including sub-agent sessions.
+// by every session in the repository, including subagent sessions.
 // Connections are process-global and left untouched; only the tool list
 // changes.
 func (a *sessionAgent) filterDisabledMCPTools(ctx context.Context, toolList []fantasy.AgentTool) []fantasy.AgentTool {

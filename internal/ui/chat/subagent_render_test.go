@@ -26,7 +26,7 @@ func renderPlain(t *testing.T, item MessageItem) []string {
 	return strings.Split(ansi.Strip(item.RawRender(100)), "\n")
 }
 
-// A report's header names the sub-agent and its model, and its body starts
+// A report's header names the subagent and its model, and its body starts
 // in the same column as the header's text rather than indented past it.
 func TestSubagentReportAlignsWithHeader(t *testing.T) {
 	t.Parallel()
@@ -41,7 +41,7 @@ func TestSubagentReportAlignsWithHeader(t *testing.T) {
 	require.Equal(t, headerText, len(body)-len(strings.TrimLeft(body, " ")), "body: %q", body)
 }
 
-// A follow-up names its sub-agent and shows the message as prose, not the
+// A follow-up names its subagent and shows the message as prose, not the
 // call's JSON or the delivery receipt.
 func TestAgentSendShowsTheMessage(t *testing.T) {
 	t.Parallel()
@@ -57,13 +57,13 @@ func TestAgentSendShowsTheMessage(t *testing.T) {
 	}, false, "/tmp")
 	out := strings.Join(renderPlain(t, item), "\n")
 
-	require.Contains(t, out, "Send Subagent Message → "+SubagentDisplayName("date-impl"))
+	require.Contains(t, out, "Message Subagent → "+SubagentDisplayName("date-impl"))
 	require.Contains(t, out, "Please fix the lint.")
 	require.NotContains(t, out, `"label"`)
 	require.NotContains(t, out, "Delivered")
 }
 
-// The dispatch header shows the model the sub-agent actually runs on, which
+// The dispatch header shows the model the subagent actually runs on, which
 // the dispatch result records even without an override.
 func TestDispatchHeaderShowsRunModel(t *testing.T) {
 	t.Parallel()
@@ -75,7 +75,7 @@ func TestDispatchHeaderShowsRunModel(t *testing.T) {
 		Finished: true,
 	}, &message.ToolResult{
 		ToolCallID: "call-1",
-		Content:    `Started sub-agent "audit".`,
+		Content:    `Started subagent "audit".`,
 		Metadata:   `{"label":"audit","run_model":"hyper/glm-5"}`,
 	}, false, "/tmp")
 	lines := renderPlain(t, item)
@@ -92,7 +92,7 @@ func TestSubagentHeaderKeepsLongModelOnNarrowPane(t *testing.T) {
 	require.LessOrEqual(t, ansi.StringWidth(h), 72)
 }
 
-// agent_status draws one aligned row per sub-agent from its metadata.
+// agent_status draws one aligned row per subagent from its metadata.
 func TestAgentStatusRendersRows(t *testing.T) {
 	t.Parallel()
 	sty := styles.CharmtonePantera()
@@ -105,7 +105,7 @@ func TestAgentStatusRendersRows(t *testing.T) {
 	}, false, "/tmp")
 	lines := renderPlain(t, item)
 
-	require.NotContains(t, lines[0], "→", "a status of every sub-agent names no target")
+	require.NotContains(t, lines[0], "→", "a status of every subagent names no target")
 	a, long := lines[2], lines[3]
 	require.Contains(t, a, "✓ "+SubagentDisplayName("a"))
 	require.Contains(t, a, "finished 5m ago · 2 tool calls")
@@ -113,7 +113,7 @@ func TestAgentStatusRendersRows(t *testing.T) {
 	require.Equal(t, strings.Index(a, "finished"), strings.Index(long, "running"), "states line up")
 }
 
-// A stopped sub-agent was stopped on purpose, so it reads as canceled, not failed.
+// A stopped subagent was stopped on purpose, so it reads as canceled, not failed.
 func TestAgentStateIconStoppedIsNotAnError(t *testing.T) {
 	t.Parallel()
 	sty := styles.CharmtonePantera()

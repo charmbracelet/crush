@@ -19,7 +19,7 @@ import (
 // buildAgent starts readiness goroutines that build the system prompt and the
 // initial tool list. Several server entry points build an agent from a
 // short-lived HTTP request context — the InitAgent/UpdateAgent handlers, and
-// the sub-agent build reached through UpdateModels -> buildTools -> agentTool.
+// the subagent build reached through UpdateModels -> buildTools -> agentTool.
 // When that request context was canceled the moment the handler returned, the
 // readyWg errgroup recorded context.Canceled and every later coordinator.run
 // failed at readyWg.Wait() before emitting anything — the session hung with
@@ -99,11 +99,11 @@ func TestBuildAgentReadinessSurvivesCallerCancellation(t *testing.T) {
 // TestTaskAgentsDoNotJoinCoordinatorReadiness is a regression test for a
 // "sync: WaitGroup is reused before previous Wait has returned" panic.
 //
-// Every turn rebuilds the task sub-agents (run -> updateAgentModels ->
+// Every turn rebuilds the task subagents (run -> updateAgentModels ->
 // buildTools -> taskAgents). Those builds used to join the coordinator's
-// readyWg while another run, such as a sub-agent report being delivered,
+// readyWg while another run, such as a subagent report being delivered,
 // was blocked in readyWg.Wait. Adding work to a WaitGroup with a Wait in
-// flight panics. The sub-agents now use a group of their own, and are fully
+// flight panics. The subagents now use a group of their own, and are fully
 // set up by the time taskAgents returns.
 func TestTaskAgentsDoNotJoinCoordinatorReadiness(t *testing.T) {
 	env := testEnv(t)
@@ -156,8 +156,8 @@ func TestTaskAgentsDoNotJoinCoordinatorReadiness(t *testing.T) {
 		for access, agent := range agents {
 			sa, ok := agent.(*sessionAgent)
 			require.True(t, ok)
-			require.NotEmpty(t, sa.systemPrompt.Get(), "%s sub-agent returned before its system prompt was set", access)
-			require.NotZero(t, sa.tools.Len(), "%s sub-agent returned before its tools were set", access)
+			require.NotEmpty(t, sa.systemPrompt.Get(), "%s subagent returned before its system prompt was set", access)
+			require.NotZero(t, sa.tools.Len(), "%s subagent returned before its tools were set", access)
 		}
 	}
 

@@ -31,14 +31,14 @@ type AgentToolMessageItem struct {
 	nestedTools []ToolMessageItem
 
 	// dispatchLabel is set for agent_dispatch calls, which return as soon
-	// as the sub-agent starts. Such an item keeps spinning until the
-	// sub-agent's report arrives and clears it, since the tool result
-	// landing says only that the sub-agent launched, not that it is done.
+	// as the subagent starts. Such an item keeps spinning until the
+	// subagent's report arrives and clears it, since the tool result
+	// landing says only that the subagent launched, not that it is done.
 	dispatchLabel    string
 	dispatchReported bool
 	dispatchStarted  time.Time
 	// dispatchReportedAt is when the report landed. The sidebar retires a
-	// sub-agent that has been finished a while, so the section does not
+	// subagent that has been finished a while, so the section does not
 	// grow for the whole session.
 	dispatchReportedAt time.Time
 }
@@ -59,7 +59,7 @@ func NewAgentToolMessageItem(
 	t.baseToolMessageItem = newBaseToolMessageItem(sty, toolCall, result, &AgentToolRenderContext{agent: t}, canceled)
 	t.parseDispatchLabel(toolCall)
 	// For the agent tool we keep spinning until the tool call is finished.
-	// A dispatched sub-agent runs on past its tool result, so it spins
+	// A dispatched subagent runs on past its tool result, so it spins
 	// until its report arrives instead.
 	t.spinningFunc = func(state SpinningState) bool {
 		if t.dispatchLabel != "" {
@@ -70,7 +70,7 @@ func NewAgentToolMessageItem(
 	return t
 }
 
-// parseDispatchLabel reads the sub-agent's label out of an agent_dispatch
+// parseDispatchLabel reads the subagent's label out of an agent_dispatch
 // call. The tool call arrives with its input still streaming, so the label is
 // re-read on every update until it parses rather than once at construction.
 func (a *AgentToolMessageItem) parseDispatchLabel(toolCall message.ToolCall) {
@@ -91,12 +91,12 @@ func (a *AgentToolMessageItem) SetToolCall(tc message.ToolCall) {
 	a.parseDispatchLabel(tc)
 }
 
-// DispatchLabel returns the label of the sub-agent this item dispatched, or
+// DispatchLabel returns the label of the subagent this item dispatched, or
 // the empty string for a synchronous agent call.
 func (a *AgentToolMessageItem) DispatchLabel() string { return a.dispatchLabel }
 
 // MarkDispatchRunning puts the item back into its working state after its
-// sub-agent was reopened with a follow-up.
+// subagent was reopened with a follow-up.
 func (a *AgentToolMessageItem) MarkDispatchRunning() {
 	if !a.dispatchReported {
 		return
@@ -108,7 +108,7 @@ func (a *AgentToolMessageItem) MarkDispatchRunning() {
 	a.Bump()
 }
 
-// MarkDispatchReported records that the dispatched sub-agent reported back,
+// MarkDispatchReported records that the dispatched subagent reported back,
 // which stops the item's spinner.
 func (a *AgentToolMessageItem) MarkDispatchReported() {
 	if a.dispatchReported {
@@ -120,7 +120,7 @@ func (a *AgentToolMessageItem) MarkDispatchReported() {
 	a.Bump()
 }
 
-// dispatchSettled reports whether a dispatched sub-agent is done: it reported
+// dispatchSettled reports whether a dispatched subagent is done: it reported
 // back, or the dispatch was refused and nothing ever started.
 func (a *AgentToolMessageItem) dispatchSettled() bool {
 	return a.dispatchReported || (a.result != nil && a.result.IsError)
@@ -139,7 +139,7 @@ func (a *AgentToolMessageItem) Advance() bool {
 	if a.Status() == ToolStatusCanceled {
 		return false
 	}
-	// A dispatched sub-agent keeps working after its tool result lands, so
+	// A dispatched subagent keeps working after its tool result lands, so
 	// its animation runs until the report arrives.
 	if a.dispatchLabel == "" && a.result != nil {
 		return false
@@ -215,7 +215,7 @@ func (a *AgentToolMessageItem) AddNestedTool(tool ToolMessageItem) {
 	a.Bump()
 }
 
-// DispatchStatus reports what a dispatched sub-agent is up to. The second
+// DispatchStatus reports what a dispatched subagent is up to. The second
 // return is false for a synchronous agent call.
 func (a *AgentToolMessageItem) DispatchStatus() (DispatchStatus, bool) {
 	if a.dispatchLabel == "" {
@@ -230,7 +230,7 @@ func (a *AgentToolMessageItem) DispatchStatus() (DispatchStatus, bool) {
 	return status, true
 }
 
-// DispatchStatus describes what a dispatched sub-agent is up to.
+// DispatchStatus describes what a dispatched subagent is up to.
 type DispatchStatus struct {
 	Label    string
 	Running  bool
@@ -258,7 +258,7 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 		prompt = strings.ReplaceAll(prompt, "\n", " ")
 	}
 
-	// A dispatch is named for the sub-agent it launched, so its header
+	// A dispatch is named for the subagent it launched, so its header
 	// pairs with the report item that arrives later under the same label.
 	var header string
 	if r.agent.dispatchLabel != "" {
@@ -304,7 +304,7 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	parts = append(parts, roundedTree(childTools, taskTagWidth-5).String())
 
 	// Show animation if still running. A dispatch has its result the
-	// moment the sub-agent starts, so it animates until the report lands
+	// moment the subagent starts, so it animates until the report lands
 	// instead.
 	stillRunning := !opts.HasResult()
 	if r.agent.dispatchLabel != "" {
@@ -317,7 +317,7 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	result := lipgloss.JoinVertical(lipgloss.Left, parts...)
 
 	// Add body content when completed. A dispatch result only says the
-	// sub-agent started, which is bookkeeping rather than output; its real
+	// subagent started, which is bookkeeping rather than output; its real
 	// output arrives later as its own report item.
 	if r.agent.dispatchLabel != "" {
 		return result
@@ -509,7 +509,7 @@ func subagentHeader(sty *styles.Styles, status ToolStatus, name, label, model st
 	return header + " " + sty.Tool.ParamMain.Render(ansi.Truncate("(model="+model+")", room, "…)"))
 }
 
-// dispatchRunModel reads the model a dispatch recorded once its sub-agent started.
+// dispatchRunModel reads the model a dispatch recorded once its subagent started.
 func dispatchRunModel(opts *ToolRenderOpts) string {
 	var meta agent.AgentDispatchResponseMetadata
 	if opts.HasResult() {

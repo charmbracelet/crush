@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The header spins while sub-agents work, and they work out of sight: that
+// The header spins while subagents work, and they work out of sight: that
 // is the reason the header mentions them at all. The shared clock otherwise
 // only arms for an item currently on screen, so with an empty or scrolled
 // transcript nothing would drive the spinner and it would sit still until an

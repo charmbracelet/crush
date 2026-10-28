@@ -201,7 +201,10 @@ func traverseUp(dir string, walkFn func(dir string, owner int) error) error {
 // Boundary comparison is performed against symlink-resolved paths so
 // that callers passing logically equivalent paths (a symlinked /var vs
 // the underlying /private/var, for example) still terminate at the
-// expected directory.
+// expected directory. When those differ, the directories are also
+// compared by file identity: on a case-insensitive filesystem (the
+// macOS default) git reports the on-disk case of a worktree root while
+// symlink resolution keeps the case the caller typed.
 func traverseUpBounded(dir, stopDir string, walkFn func(dir string, owner int) error) error {
 	cwd, err := filepath.Abs(dir)
 	if err != nil {
@@ -216,6 +219,11 @@ func traverseUpBounded(dir, stopDir string, walkFn func(dir string, owner int) e
 		}
 	}
 	canonStop := canonicalize(stop)
+	// A stop dir that cannot be stat'ed is matched by path only.
+	var stopInfo os.FileInfo
+	if info, err := os.Stat(stop); err == nil {
+		stopInfo = info
+	}
 
 	owner, err := Owner(dir)
 	if err != nil {
@@ -225,7 +233,7 @@ func traverseUpBounded(dir, stopDir string, walkFn func(dir string, owner int) e
 	for {
 		err := walkFn(cwd, owner)
 		if err == nil || errors.Is(err, filepath.SkipDir) {
-			if canonicalize(cwd) == canonStop {
+			if canonicalize(cwd) == canonStop || sameFile(cwd, stopInfo) {
 				return nil
 			}
 
@@ -254,6 +262,16 @@ func canonicalize(path string) string {
 		return resolved
 	}
 	return filepath.Clean(path)
+}
+
+// sameFile reports whether path names the file described by info. It
+// returns false when info is nil or path cannot be stat'ed.
+func sameFile(path string, info os.FileInfo) bool {
+	if info == nil {
+		return false
+	}
+	pathInfo, err := os.Stat(path)
+	return err == nil && os.SameFile(pathInfo, info)
 }
 
 // probeEnt checks if entity at given path exists and belongs to given owner

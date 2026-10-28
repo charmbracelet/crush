@@ -108,6 +108,10 @@ crush run --continue "Follow up on your last response"
 			}
 			defer cleanup()
 
+			if warn := workspace.ServerVersionWarning(ws.Version); warn != "" {
+				fmt.Fprintf(os.Stderr, "warn: %s\n", warn)
+			}
+
 			event.AppInitialized()
 
 			if !ws.Config.IsConfigured() {

@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -32,6 +33,8 @@ import (
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/charmbracelet/crush/internal/ui/util"
+	"github.com/charmbracelet/crush/internal/version"
 	"github.com/stretchr/testify/require"
 )
 
@@ -587,6 +590,8 @@ type recoveryServer struct {
 	liveID string
 	// nextID names the workspace the next create hands back.
 	nextID string
+	// version is the server version creates report.
+	version string
 	// createErr, when set, fails creates instead of serving them.
 	createErr func() int
 	// hangUpOnCreate drops the connection mid-response so the client
@@ -656,7 +661,7 @@ func (s *recoveryServer) handler(t *testing.T) http.Handler {
 			}
 			s.liveID = s.nextID
 			require.NoError(t, json.NewEncoder(w).Encode(proto.Workspace{
-				ID: s.liveID, Path: "/tmp/recover", Config: s.config,
+				ID: s.liveID, Path: "/tmp/recover", Config: s.config, Version: s.version,
 			}))
 		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/v1/clients/"):
 			s.retired = append(s.retired, strings.TrimPrefix(r.URL.Path, "/v1/clients/"))
@@ -1539,6 +1544,121 @@ func TestClientWorkspace_StaleSkipReadKeepsToggle(t *testing.T) {
 
 	require.False(t, ws.recreateArgs().YOLO,
 		"a read answered before the toggle must not undo it")
+}
+
+// infoRecorder collects the status messages the subscription loop hands
+// the UI.
+type infoRecorder struct {
+	mu   sync.Mutex
+	msgs []util.InfoMsg
+}
+
+func (r *infoRecorder) send(msg tea.Msg) {
+	info, ok := msg.(util.InfoMsg)
+	if !ok {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.msgs = append(r.msgs, info)
+}
+
+func (r *infoRecorder) all() []util.InfoMsg {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]util.InfoMsg(nil), r.msgs...)
+}
+
+// runSubscriptionUntilStreams runs the subscription loop until the server
+// has served n event streams, then shuts the workspace down.
+func runSubscriptionUntilStreams(t *testing.T, ws *ClientWorkspace, srv *recoveryServer, n int, send func(tea.Msg)) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() {
+		ws.runSubscription(send)
+		close(done)
+	}()
+	require.Eventually(t, func() bool {
+		var streams int
+		srv.snapshot(func(s *recoveryServer) { streams = s.streams })
+		return streams >= n
+	}, 3*time.Second, 5*time.Millisecond)
+	ws.Shutdown()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("runSubscription did not return after Shutdown")
+	}
+}
+
+// TestClientWorkspace_WarnsAboutServerVersionMismatch checks that the user
+// is told when the server hosting the workspace runs another Crush
+// version, as it does when a busy server declines to stand down for an
+// upgraded client. The server used to publish this warning itself, but
+// before the creating client could subscribe and in a form the event
+// stream drops, so it never reached anyone.
+func TestClientWorkspace_WarnsAboutServerVersionMismatch(t *testing.T) {
+	t.Cleanup(SetSSEBackoffForTest(time.Millisecond, 5*time.Millisecond))
+
+	otherVersion := "not-" + version.Version
+	for _, tc := range []struct {
+		name          string
+		serverVersion string
+		wantWarning   bool
+	}{
+		{name: "different version", serverVersion: otherVersion, wantWarning: true},
+		{name: "same version", serverVersion: version.Version},
+		// Servers that predate reporting their version.
+		{name: "unknown version", serverVersion: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := &recoveryServer{liveID: "ws-1"}
+			c := srv.start(t)
+			ws := NewClientWorkspace(c, proto.Workspace{
+				ID: "ws-1", Path: "/tmp/version", Version: tc.serverVersion,
+			})
+
+			// The test server drops every stream, so the loop reconnects
+			// several times before it is stopped.
+			rec := &infoRecorder{}
+			runSubscriptionUntilStreams(t, ws, srv, 3, rec.send)
+
+			msgs := rec.all()
+			if !tc.wantWarning {
+				require.Empty(t, msgs, "only a server on another version is worth a warning")
+				return
+			}
+			require.Len(t, msgs, 1,
+				"the user must be told, once, that the server runs another version")
+			require.Equal(t, util.InfoTypeWarn, msgs[0].Type)
+			require.Contains(t, msgs[0].Msg, strconv.Quote(otherVersion))
+			require.Contains(t, msgs[0].Msg, strconv.Quote(version.Version))
+		})
+	}
+}
+
+// TestClientWorkspace_WarnsAboutServerVersionAfterRecovery covers a
+// workspace that recovery re-created on a server of another version, such
+// as one a client of that version spawned after the old server went away.
+func TestClientWorkspace_WarnsAboutServerVersionAfterRecovery(t *testing.T) {
+	t.Cleanup(SetSSEBackoffForTest(time.Millisecond, 5*time.Millisecond))
+
+	otherVersion := "not-" + version.Version
+	srv := &recoveryServer{nextID: "ws-2", version: otherVersion}
+	c := srv.start(t)
+	ws := NewClientWorkspace(c, proto.Workspace{
+		ID: "ws-1", Path: "/tmp/recover", Version: version.Version,
+	})
+
+	rec := &infoRecorder{}
+	runSubscriptionUntilStreams(t, ws, srv, 3, rec.send)
+
+	require.Equal(t, "ws-2", ws.workspaceID())
+	msgs := rec.all()
+	require.Len(t, msgs, 1,
+		"the user must be told that the replacement server runs another version")
+	require.Equal(t, util.InfoTypeWarn, msgs[0].Type)
+	require.Contains(t, msgs[0].Msg, strconv.Quote(otherVersion))
 }
 
 // TestTranslateEvent_PermissionNotification verifies that the

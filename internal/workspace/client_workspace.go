@@ -30,6 +30,7 @@ import (
 	"github.com/charmbracelet/crush/internal/server"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/pkg/browser"
@@ -969,6 +970,9 @@ func (w *ClientWorkspace) runSubscription(send func(tea.Msg)) {
 	backoff := sseReconnectInitialBackoff
 	degraded := false
 	recoveryFailures := 0
+	// versionWarning is the server version warning last shown, so a
+	// server is not reported again on every reconnect.
+	versionWarning := ""
 	markDegraded := func(err error, stuck bool) {
 		if degraded && !stuck {
 			return
@@ -1023,6 +1027,15 @@ func (w *ClientWorkspace) runSubscription(send func(tea.Msg)) {
 			degraded = false
 			recoveryFailures = 0
 			w.afterReconnect(send)
+		}
+		// Recovery may have re-created the workspace on another server,
+		// so check the version on every attach. It goes after the
+		// reconnect notice so that notice does not replace it.
+		if msg := ServerVersionWarning(w.cached().Version); msg != versionWarning {
+			versionWarning = msg
+			if msg != "" {
+				send(util.InfoMsg{Type: util.InfoTypeWarn, Msg: msg, TTL: 10 * time.Second})
+			}
 		}
 		backoff = sseReconnectInitialBackoff
 		w.consumeEvents(evc, send)
@@ -1128,6 +1141,20 @@ func (w *ClientWorkspace) recreateArgs() proto.Workspace {
 		Env:      ws.Env,
 		Version:  version.Version,
 	}
+}
+
+// ServerVersionWarning returns the warning to show the user when the
+// server, which reports its version in every workspace it returns, runs a
+// different Crush version than this client. It returns "" when the
+// versions match or the server is too old to report its version.
+func ServerVersionWarning(serverVersion string) string {
+	if serverVersion == "" || serverVersion == version.Version {
+		return ""
+	}
+	return fmt.Sprintf(
+		"Server version %q differs from client version %q. Consider restarting the server.",
+		serverVersion, version.Version,
+	)
 }
 
 // afterReconnect runs once a degraded subscription is re-established. It

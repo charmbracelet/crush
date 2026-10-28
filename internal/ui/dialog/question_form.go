@@ -23,6 +23,10 @@ type questionResponder interface {
 	Response() question.Answer
 	SetHover(x, y int)
 	HandleMouseClick(x, y int) (done bool, handled bool)
+	// Editing reports whether a text input is actively being
+	// edited. While it is, form-level keys like [ and ] reach
+	// the input instead of switching tabs.
+	Editing() bool
 }
 
 // QuestionForm presents multiple questions as a tabbed form.
@@ -170,6 +174,15 @@ func shortLabel(q string) string {
 	return strings.Join(words, " ")
 }
 
+// activeEditing reports whether the active tab is currently
+// editing a text input.
+func (f *QuestionForm) activeEditing() bool {
+	if f.isConfirmTab() || f.activeIdx < 0 || f.activeIdx >= f.numQuestions {
+		return false
+	}
+	return f.questions[f.activeIdx].Editing()
+}
+
 // isConfirmTab reports whether the active tab is the confirm tab.
 func (f *QuestionForm) isConfirmTab() bool {
 	return f.hasConfirm && f.activeIdx == f.numQuestions
@@ -201,14 +214,18 @@ func (f *QuestionForm) firstUnanswered() int {
 // HandleKey routes keys to the active tab. Returns true when the
 // entire batch is submitted.
 func (f *QuestionForm) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
-	// Tab navigation works on all tabs including confirm.
-	switch {
-	case key.Matches(msg, f.keyNextTab):
-		f.switchTab(f.activeIdx + 1)
-		return false, nil
-	case key.Matches(msg, f.keyPrevTab):
-		f.switchTab(f.activeIdx - 1)
-		return false, nil
+	// Tab navigation works on all tabs including confirm, but is
+	// suspended while a text input is being edited so its
+	// characters reach the input.
+	if !f.activeEditing() {
+		switch {
+		case key.Matches(msg, f.keyNextTab):
+			f.switchTab(f.activeIdx + 1)
+			return false, nil
+		case key.Matches(msg, f.keyPrevTab):
+			f.switchTab(f.activeIdx - 1)
+			return false, nil
+		}
 	}
 
 	// Confirm tab delegates to ConfirmComponent.
@@ -220,8 +237,10 @@ func (f *QuestionForm) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		return false, cmd
 	}
 
-	// Global keys for question tabs.
-	if key.Matches(msg, f.keyClose) {
+	// Global keys for question tabs. While a text input is being
+	// edited, esc belongs to the input: it returns to selection
+	// instead of cancelling the batch.
+	if key.Matches(msg, f.keyClose) && !f.activeEditing() {
 		f.cancel()
 		return true, nil
 	}
@@ -334,7 +353,12 @@ func (f *QuestionForm) ShortHelp() []key.Binding {
 	if f.isConfirmTab() {
 		return f.confirmComp.ShortHelp()
 	}
-	bindings := []key.Binding{f.keyPrevTab, f.keyNextTab}
+	var bindings []key.Binding
+	// Tab navigation is unbound while editing a text input, so
+	// don't advertise it then.
+	if !f.activeEditing() {
+		bindings = append(bindings, f.keyPrevTab, f.keyNextTab)
+	}
 	if f.activeIdx < f.numQuestions {
 		bindings = append(bindings, f.questions[f.activeIdx].ShortHelp()...)
 	}

@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -17,6 +18,8 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/client"
 	"github.com/charmbracelet/crush/internal/commands"
+	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/proto"
@@ -588,12 +591,21 @@ type recoveryServer struct {
 	// abortStreams kills each event stream mid-response, as a server
 	// that dies does, instead of ending it cleanly.
 	abortStreams bool
+	// config is the config a created workspace reports. A configured one
+	// makes recovery initialize the agent.
+	config *config.Config
+	// skip is the permission-skip state the server holds.
+	skip bool
 
 	creates      int
+	createReqs   []proto.Workspace
 	streams      int
 	sessionPosts []string
 	retired      []string
 	deleted      []string
+	// agentCalls logs agent and permission-skip calls as "<call> <id>
+	// [<arg>]", in the order the server saw them.
+	agentCalls []string
 }
 
 func (s *recoveryServer) start(t *testing.T) *client.Client {
@@ -604,6 +616,9 @@ func (s *recoveryServer) start(t *testing.T) *client.Client {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/workspaces":
 			s.creates++
+			var req proto.Workspace
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+			s.createReqs = append(s.createReqs, req)
 			if s.createErr != nil {
 				http.Error(w, "no", s.createErr())
 				return
@@ -622,7 +637,7 @@ func (s *recoveryServer) start(t *testing.T) *client.Client {
 			}
 			s.liveID = s.nextID
 			require.NoError(t, json.NewEncoder(w).Encode(proto.Workspace{
-				ID: s.liveID, Path: "/tmp/recover",
+				ID: s.liveID, Path: "/tmp/recover", Config: s.config,
 			}))
 		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/v1/clients/"):
 			s.retired = append(s.retired, strings.TrimPrefix(r.URL.Path, "/v1/clients/"))
@@ -647,6 +662,32 @@ func (s *recoveryServer) start(t *testing.T) *client.Client {
 			require.NoError(t, json.NewEncoder(w).Encode(proto.HostThemeState{
 				WorkspaceID: id, Theme: s.hostTheme,
 			}))
+		case strings.HasSuffix(r.URL.Path, "/agent/init"),
+			strings.HasSuffix(r.URL.Path, "/agent/main"),
+			strings.HasSuffix(r.URL.Path, "/permissions/skip"):
+			rest := strings.TrimPrefix(r.URL.Path, "/v1/workspaces/")
+			id, call, _ := strings.Cut(rest, "/")
+			if id != s.liveID {
+				http.Error(w, "workspace not found", http.StatusNotFound)
+				return
+			}
+			switch call {
+			case "agent/init":
+				s.agentCalls = append(s.agentCalls, "init "+id)
+			case "agent/main":
+				var req proto.AgentSetMainRequest
+				require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+				s.agentCalls = append(s.agentCalls, "main "+id+" "+req.AgentID)
+			case "permissions/skip":
+				if r.Method == http.MethodGet {
+					require.NoError(t, json.NewEncoder(w).Encode(proto.PermissionSkipRequest{Skip: s.skip}))
+					return
+				}
+				var req proto.PermissionSkipRequest
+				require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+				s.skip = req.Skip
+				s.agentCalls = append(s.agentCalls, fmt.Sprintf("skip %s %t", id, req.Skip))
+			}
 		case strings.HasSuffix(r.URL.Path, "/events"):
 			id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v1/workspaces/"), "/events")
 			if id != s.liveID {
@@ -1173,6 +1214,173 @@ func TestClientWorkspace_RecoveryCreateIsBounded(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("recoverWorkspace blocked on an unresponsive server")
 	}
+}
+
+// TestClientWorkspace_RecoveryRestoresModes covers the modes a re-created
+// workspace used to lose: it starts on the coder agent with the YOLO flag
+// of the snapshot it was created from. A client in plan mode got write
+// tools while its UI still said PLAN MODE, and YOLO the user had turned
+// off came back on, so tools ran without prompts.
+func TestClientWorkspace_RecoveryRestoresModes(t *testing.T) {
+	t.Cleanup(SetSSEBackoffForTest(time.Millisecond, 5*time.Millisecond))
+
+	cases := []struct {
+		name string
+		// yolo is the YOLO flag of the snapshot the client starts from.
+		yolo bool
+		// before runs while the original workspace is still live.
+		before func(t *testing.T, ws *ClientWorkspace, srv *recoveryServer)
+		// wantYOLO is the YOLO flag the recovery create must carry.
+		wantYOLO bool
+		// wantCalls is every agent and permission-skip call the server
+		// saw, recovery included.
+		wantCalls []string
+	}{
+		{
+			name: "plan mode",
+			before: func(t *testing.T, ws *ClientWorkspace, _ *recoveryServer) {
+				require.NoError(t, ws.AgentSetMain(config.AgentPlan))
+			},
+			wantCalls: []string{"main ws-1 plan", "init ws-2", "main ws-2 plan"},
+		},
+		{
+			// A fresh coordinator already runs the coder agent, so there
+			// is nothing to restore.
+			name: "back to code mode",
+			before: func(t *testing.T, ws *ClientWorkspace, _ *recoveryServer) {
+				require.NoError(t, ws.AgentSetMain(config.AgentPlan))
+				require.NoError(t, ws.AgentSetMain(config.AgentCoder))
+			},
+			wantCalls: []string{"main ws-1 plan", "main ws-1 coder", "init ws-2"},
+		},
+		{
+			name: "yolo turned off",
+			yolo: true,
+			before: func(_ *testing.T, ws *ClientWorkspace, _ *recoveryServer) {
+				ws.PermissionSetSkipRequests(false)
+			},
+			wantCalls: []string{"skip ws-1 false", "init ws-2"},
+		},
+		{
+			// The snapshot only knows the flag the workspace was created
+			// with; the client learns of the change from reading it.
+			name: "yolo turned off by another client",
+			yolo: true,
+			before: func(t *testing.T, ws *ClientWorkspace, srv *recoveryServer) {
+				srv.snapshot(func(s *recoveryServer) { s.skip = false })
+				require.False(t, ws.PermissionSkipRequests())
+			},
+			wantCalls: []string{"init ws-2"},
+		},
+		{
+			name: "yolo turned on",
+			before: func(_ *testing.T, ws *ClientWorkspace, _ *recoveryServer) {
+				ws.PermissionSetSkipRequests(true)
+			},
+			wantYOLO:  true,
+			wantCalls: []string{"skip ws-1 true", "init ws-2"},
+		},
+		{
+			name:      "startup yolo untouched",
+			yolo:      true,
+			wantYOLO:  true,
+			wantCalls: []string{"init ws-2"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := &recoveryServer{
+				liveID: "ws-1",
+				nextID: "ws-2",
+				skip:   tc.yolo,
+				config: &config.Config{
+					Options: &config.Options{},
+					Providers: csync.NewMapFrom(map[string]config.ProviderConfig{
+						"fake": {ID: "fake"},
+					}),
+				},
+			}
+			c := srv.start(t)
+			ws := NewClientWorkspace(c, proto.Workspace{
+				ID: "ws-1", Path: "/tmp/recover", YOLO: tc.yolo,
+			})
+			if tc.before != nil {
+				tc.before(t, ws, srv)
+			}
+
+			// The server loses the workspace, as it does when it restarts.
+			srv.snapshot(func(s *recoveryServer) { s.liveID = "" })
+			done := make(chan struct{})
+			go func() {
+				ws.runSubscription(func(tea.Msg) {})
+				close(done)
+			}()
+
+			// Recovery has finished once the re-created workspace streams.
+			require.Eventually(t, func() bool {
+				var streams int
+				srv.snapshot(func(s *recoveryServer) { streams = s.streams })
+				return streams > 0
+			}, 3*time.Second, 5*time.Millisecond)
+			ws.Shutdown()
+			select {
+			case <-done:
+			case <-time.After(3 * time.Second):
+				t.Fatal("runSubscription did not return after Shutdown")
+			}
+
+			srv.snapshot(func(s *recoveryServer) {
+				require.Len(t, s.createReqs, 1)
+				require.Equal(t, tc.wantYOLO, s.createReqs[0].YOLO,
+					"the workspace must be re-created with the YOLO state the client last knew")
+				require.Equal(t, tc.wantCalls, s.agentCalls,
+					"recovery must restore the main agent the client last chose")
+			})
+		})
+	}
+}
+
+// TestClientWorkspace_StaleSkipReadKeepsToggle covers the UI polling the
+// permission-skip state while the user toggles YOLO: a read the server
+// answered before the toggle must not overwrite it, or recovery would
+// re-create the workspace with YOLO back on.
+func TestClientWorkspace_StaleSkipReadKeepsToggle(t *testing.T) {
+	t.Parallel()
+
+	reading := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	unblock := func() { once.Do(func() { close(release) }) }
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/v1/workspaces/ws-1/permissions/skip", r.URL.Path)
+		if r.Method == http.MethodGet {
+			close(reading)
+			<-release
+			// The answer the server gave before the toggle landed.
+			require.NoError(t, json.NewEncoder(w).Encode(proto.PermissionSkipRequest{Skip: true}))
+		}
+	}))
+	t.Cleanup(func() {
+		unblock()
+		srv.Close()
+	})
+
+	u, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	c, err := client.NewClient(t.TempDir(), "tcp", u.Host)
+	require.NoError(t, err)
+	ws := NewClientWorkspace(c, proto.Workspace{ID: "ws-1", YOLO: true})
+
+	read := make(chan bool, 1)
+	go func() { read <- ws.PermissionSkipRequests() }()
+	<-reading
+	ws.PermissionSetSkipRequests(false)
+	unblock()
+	require.True(t, <-read)
+
+	require.False(t, ws.recreateArgs().YOLO,
+		"a read answered before the toggle must not undo it")
 }
 
 // TestTranslateEvent_PermissionNotification verifies that the

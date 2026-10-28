@@ -49,6 +49,17 @@ type ClientWorkspace struct {
 	// reconnect, because the server's per-client presence entry (or the
 	// whole workspace) may have been re-created in the meantime.
 	lastSession string
+	// mainAgent is the agent this client last made the main agent (empty
+	// until it switches), and skipRequests the permission-skip ("yolo")
+	// state it last set or read, seeded from the snapshot. Recovery
+	// restores both: a re-created workspace runs the coder agent and takes
+	// its YOLO flag from the create request, so plan mode would otherwise
+	// get write tools while the UI still says plan, and YOLO the user
+	// turned off would come back on. skipGen counts this client's skip
+	// changes, so a read that raced one cannot record the state before it.
+	mainAgent    string
+	skipRequests bool
+	skipGen      uint64
 
 	// subCtx bounds the lifetime of the event subscription (and its
 	// reconnect loop). Shutdown cancels it so Subscribe stops
@@ -92,13 +103,14 @@ func NewClientWorkspace(c *client.Client, ws proto.Workspace) *ClientWorkspace {
 	mgr := skills.NewManager(nil, nil, states, skills.WithGlobalMirror())
 	subCtx, subCancel := context.WithCancel(context.Background())
 	return &ClientWorkspace{
-		client:      c,
-		ws:          ws,
-		skills:      mgr,
-		subCtx:      subCtx,
-		subCancel:   subCancel,
-		subDone:     make(chan struct{}),
-		herdrClient: herdr.Init(),
+		client:       c,
+		ws:           ws,
+		skills:       mgr,
+		skipRequests: ws.YOLO,
+		subCtx:       subCtx,
+		subCancel:    subCancel,
+		subDone:      make(chan struct{}),
+		herdrClient:  herdr.Init(),
 	}
 }
 
@@ -326,7 +338,13 @@ func (w *ClientWorkspace) AgentClearQueue(sessionID string) {
 }
 
 func (w *ClientWorkspace) AgentSetMain(agentID string) error {
-	return w.client.SetMainAgent(context.Background(), w.workspaceID(), agentID)
+	if err := w.client.SetMainAgent(context.Background(), w.workspaceID(), agentID); err != nil {
+		return err
+	}
+	w.mu.Lock()
+	w.mainAgent = agentID
+	w.mu.Unlock()
+	return nil
 }
 
 func (w *ClientWorkspace) AgentSummarize(ctx context.Context, sessionID string) error {
@@ -408,16 +426,33 @@ func (w *ClientWorkspace) PermissionDeny(perm permission.PermissionRequest) bool
 	return resolved
 }
 
+// PermissionSkipRequests reads the permission-skip state from the server
+// and remembers it, so recovery also keeps a change another client of the
+// workspace made.
 func (w *ClientWorkspace) PermissionSkipRequests() bool {
+	w.mu.RLock()
+	gen := w.skipGen
+	w.mu.RUnlock()
 	skip, err := w.client.GetPermissionsSkipRequests(context.Background(), w.workspaceID())
 	if err != nil {
 		return false
 	}
+	w.mu.Lock()
+	if w.skipGen == gen {
+		w.skipRequests = skip
+	}
+	w.mu.Unlock()
 	return skip
 }
 
 func (w *ClientWorkspace) PermissionSetSkipRequests(skip bool) {
-	_ = w.client.SetPermissionsSkipRequests(context.Background(), w.workspaceID(), skip)
+	if err := w.client.SetPermissionsSkipRequests(context.Background(), w.workspaceID(), skip); err != nil {
+		return
+	}
+	w.mu.Lock()
+	w.skipRequests = skip
+	w.skipGen++
+	w.mu.Unlock()
 }
 
 // -- Host context --
@@ -974,7 +1009,8 @@ func (w *ClientWorkspace) runSubscription(send func(tea.Msg)) {
 // recoverWorkspace re-registers the workspace after the server reported it
 // gone: it re-creates it from the cached snapshot (the server's own view of
 // path, data dir, flags and env), adopts the new ID, and re-initializes the
-// coder agent when the config is ready, mirroring the startup handshake. The
+// coder agent when the config is ready, mirroring the startup handshake,
+// before switching it back to the main agent this client chose. The
 // server's path dedupe means this either rejoins a live sibling workspace or
 // mints a fresh one. It must only be called from the subscription goroutine,
 // the only writer of the cached ID.
@@ -1012,22 +1048,44 @@ func (w *ClientWorkspace) recoverWorkspace() error {
 			// Matches the startup handshake: agent init failure is
 			// logged, not fatal, since the user can still pick a model.
 			slog.Error("Failed to initialize coder agent after workspace recovery", "error", err)
+		} else {
+			w.restoreMainAgent()
 		}
 	}
 	return nil
 }
 
+// restoreMainAgent switches a freshly initialized agent back to the main
+// agent this client chose. The new coordinator runs the coder agent, so a
+// client in plan mode would otherwise get write tools while its UI still
+// says plan mode; a client on the coder agent needs nothing.
+func (w *ClientWorkspace) restoreMainAgent() {
+	w.mu.RLock()
+	agentID := w.mainAgent
+	w.mu.RUnlock()
+	if agentID == "" || agentID == config.AgentCoder {
+		return
+	}
+	if err := w.client.SetMainAgent(w.subCtx, w.workspaceID(), agentID); err != nil {
+		slog.Error("Failed to restore main agent after workspace recovery", "agent", agentID, "error", err)
+	}
+}
+
 // recreateArgs derives the CreateWorkspace request used for recovery from
 // the cached snapshot. The ID is dropped so the server can dedupe by
 // path or mint a fresh workspace, and Version carries this client's
-// version, matching the startup handshake.
+// version, matching the startup handshake. YOLO is the permission-skip
+// state the client last knew rather than the snapshot's creation flag, so
+// YOLO turned off since does not come back on.
 func (w *ClientWorkspace) recreateArgs() proto.Workspace {
-	ws := w.cached()
+	w.mu.RLock()
+	ws, skip := w.ws, w.skipRequests
+	w.mu.RUnlock()
 	return proto.Workspace{
 		Path:     ws.Path,
 		DataDir:  ws.DataDir,
 		Debug:    ws.Debug,
-		YOLO:     ws.YOLO,
+		YOLO:     skip,
 		Channels: ws.Channels,
 		Env:      ws.Env,
 		Version:  version.Version,

@@ -38,10 +38,23 @@ func socketDir() string {
 var ErrServerClosed = http.ErrServerClosed
 
 // ParseHostURL parses a host URL into a [url.URL].
+//
+// A relative unix socket path is made absolute against the current
+// directory, so the address keeps naming the same socket after the process
+// changes directory, as the client does for --cwd.
 func ParseHostURL(host string) (*url.URL, error) {
 	proto, addr, ok := strings.Cut(host, "://")
 	if !ok {
 		return nil, fmt.Errorf("invalid host format: %s", host)
+	}
+
+	// On Linux a leading '@' names an abstract socket, which has no path.
+	if proto == "unix" && addr != "" && !filepath.IsAbs(addr) && !strings.HasPrefix(addr, "@") {
+		abs, err := filepath.Abs(addr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid unix socket path: %w", err)
+		}
+		addr = abs
 	}
 
 	var basePath string

@@ -18,8 +18,14 @@ type controllerV1 struct {
 	server  *Server
 }
 
-// handleGetHealth checks server health.
+// handleGetHealth checks server health. A server that has committed to
+// shutting down answers 503: it takes no new workspaces, so a readiness
+// probe must not mistake it for a live server.
 func (c *controllerV1) handleGetHealth(w http.ResponseWriter, _ *http.Request) {
+	if c.backend.Closing() {
+		jsonError(w, http.StatusServiceUnavailable, backend.ErrServerShuttingDown.Error())
+		return
+	}
 	w.WriteHeader(http.StatusOK)
 }
 

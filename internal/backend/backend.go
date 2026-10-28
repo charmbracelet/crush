@@ -21,6 +21,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/db"
+	"github.com/charmbracelet/crush/internal/projects"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/ui/util"
@@ -459,6 +460,13 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 
 	if err := createDotCrushDir(cfg.Config().Options.DataDirectory); err != nil {
 		return nil, proto.Workspace{}, fmt.Errorf("failed to create data directory: %w", err)
+	}
+
+	// Record the project as local mode does, so `crush projects` and
+	// `crush stats --all` know about it. The list is only bookkeeping, so
+	// failing to update it must not keep the workspace from opening.
+	if err := projects.Register(args.Path, cfg.Config().Options.DataDirectory); err != nil {
+		slog.Warn("Failed to register project", "path", args.Path, "error", err)
 	}
 
 	conn, err := db.Connect(b.ctx, cfg.Config().Options.DataDirectory, db.WithDataDirLock(true))

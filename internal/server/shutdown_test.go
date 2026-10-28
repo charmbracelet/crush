@@ -1,8 +1,14 @@
 package server
 
 import (
+	"context"
+	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -77,4 +83,178 @@ func TestHealth_UnavailableWhileClosing(t *testing.T) {
 	// serving while it tears the hosted workspaces down.
 	require.NoError(t, srv.Backend().ShutdownWorkspaces(t.Context()))
 	require.Equal(t, http.StatusServiceUnavailable, health())
+}
+
+// TestServe_WaitsForSelfShutdown covers a server that stops itself while
+// a workspace is still being torn down inside its exiting client's
+// DELETE /v1/clients request. `crush server` exits as soon as Serve
+// returns, so Serve must wait for that shutdown to finish rather than
+// return the moment the listener closes, which would kill the teardown
+// and leave the client without a reply.
+func TestServe_WaitsForSelfShutdown(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		linger time.Duration
+		// stop retires other, the client of a second workspace, and makes
+		// the server stop itself while the first teardown is blocked.
+		stop func(t *testing.T, base, other string)
+	}{
+		{
+			name:   "client asks for shutdown_if_idle",
+			linger: time.Minute,
+			stop: func(t *testing.T, base, other string) {
+				code, err := sendRequest(t.Context(), base, http.MethodDelete, "/v1/clients/"+other, "")
+				require.NoError(t, err)
+				require.Equal(t, http.StatusOK, code)
+				code, err = sendRequest(t.Context(), base, http.MethodPost, "/v1/control", `{"command":"shutdown_if_idle"}`)
+				require.NoError(t, err)
+				require.Equal(t, http.StatusOK, code)
+			},
+		},
+		{
+			name:   "last client leaves with lingering disabled",
+			linger: 0,
+			stop: func(t *testing.T, base, other string) {
+				code, err := sendRequest(t.Context(), base, http.MethodDelete, "/v1/clients/"+other, "")
+				require.NoError(t, err)
+				require.Equal(t, http.StatusOK, code)
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := NewServer(nil, "tcp", "127.0.0.1:0")
+			srv.backend.SetIdleShutdownDelay(tc.linger)
+			gate := make(chan struct{})
+			var openGate sync.Once
+			t.Cleanup(func() { openGate.Do(func() { close(gate) }) })
+			ws, cid := addHeldWorkspace(t, srv, func() { <-gate })
+			_, other := addHeldWorkspace(t, srv, func() {})
+			base, served := serveOnLoopback(t, srv)
+
+			retired := make(chan error, 1)
+			go func() {
+				code, err := sendRequest(t.Context(), base, http.MethodDelete, "/v1/clients/"+cid, "")
+				if err == nil && code != http.StatusOK {
+					err = fmt.Errorf("unexpected status %d", code)
+				}
+				retired <- err
+			}()
+			require.Eventually(t, func() bool {
+				_, err := srv.backend.GetWorkspace(ws.ID)
+				return err != nil
+			}, 5*time.Second, 10*time.Millisecond, "the retire must start the teardown")
+
+			tc.stop(t, base, other)
+
+			select {
+			case err := <-served:
+				t.Fatalf("Serve returned (%v) while a workspace teardown was still running", err)
+			case <-time.After(500 * time.Millisecond):
+			}
+
+			openGate.Do(func() { close(gate) })
+			select {
+			case err := <-retired:
+				require.NoError(t, err, "the retiring client must get its reply")
+			case <-time.After(5 * time.Second):
+				t.Fatal("the retire request did not finish after its teardown did")
+			}
+			select {
+			case err := <-served:
+				require.ErrorIs(t, err, ErrServerClosed)
+			case <-time.After(5 * time.Second):
+				t.Fatal("Serve did not return after the shutdown finished")
+			}
+
+			// The backend can ask again, as an idle timer firing late
+			// would. That must not start a second shutdown.
+			require.True(t, srv.backend.ShutdownIfIdle())
+		})
+	}
+}
+
+// TestServe_SelfShutdownIsBounded covers a teardown that never finishes.
+// Serve waits for the shutdown the server starts on its own, so that
+// shutdown must give up after its budget and close what is left rather
+// than keep the server up for good.
+func TestServe_SelfShutdownIsBounded(t *testing.T) {
+	t.Parallel()
+
+	srv := NewServer(nil, "tcp", "127.0.0.1:0")
+	gate := make(chan struct{})
+	t.Cleanup(func() { close(gate) })
+	ws, cid := addHeldWorkspace(t, srv, func() { <-gate })
+	base, served := serveOnLoopback(t, srv)
+
+	retired := make(chan error, 1)
+	go func() {
+		_, err := sendRequest(t.Context(), base, http.MethodDelete, "/v1/clients/"+cid, "")
+		retired <- err
+	}()
+	require.Eventually(t, func() bool {
+		_, err := srv.backend.GetWorkspace(ws.ID)
+		return err != nil
+	}, 5*time.Second, 10*time.Millisecond, "the retire must start the teardown")
+
+	srv.shutdownSelf(100 * time.Millisecond)
+
+	select {
+	case err := <-served:
+		require.ErrorIs(t, err, ErrServerClosed)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Serve kept waiting for a shutdown that cannot finish")
+	}
+	select {
+	case err := <-retired:
+		require.Error(t, err, "the stuck request's connection must be closed")
+	case <-time.After(5 * time.Second):
+		t.Fatal("the stuck request's connection was left open")
+	}
+}
+
+// addHeldWorkspace hosts a synthetic workspace on srv, held by a fresh
+// client, whose teardown runs teardown. It returns the workspace and the
+// client's ID.
+func addHeldWorkspace(t *testing.T, srv *Server, teardown func()) (*backend.Workspace, string) {
+	t.Helper()
+	ws := &backend.Workspace{ID: uuid.New().String(), Path: t.TempDir()}
+	backend.SetWorkspaceShutdownFnForTest(ws, teardown)
+	backend.InsertWorkspaceForTest(srv.backend, ws)
+	cid := uuid.New().String()
+	require.NoError(t, backend.RegisterClientForTesting(srv.backend, ws, cid))
+	return ws, cid
+}
+
+// serveOnLoopback runs srv.Serve on a loopback TCP listener. It returns
+// the server's base URL and a channel that receives Serve's result.
+func serveOnLoopback(t *testing.T, srv *Server) (string, <-chan error) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0") //nolint:noctx
+	require.NoError(t, err)
+	served := make(chan error, 1)
+	go func() { served <- srv.Serve(ln) }()
+	return "http://" + ln.Addr().String(), served
+}
+
+// sendRequest sends a request on a connection of its own and returns the
+// response status.
+func sendRequest(ctx context.Context, base, method, path, body string) (int, error) {
+	req, err := http.NewRequestWithContext(ctx, method, base+path, strings.NewReader(body))
+	if err != nil {
+		return 0, err
+	}
+	tr := &http.Transport{DisableKeepAlives: true}
+	defer tr.CloseIdleConnections()
+	res, err := (&http.Client{Transport: tr}).Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer res.Body.Close()
+	_, _ = io.Copy(io.Discard, res.Body)
+	return res.StatusCode, nil
 }

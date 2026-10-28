@@ -291,13 +291,25 @@ func quickStyle(o quickStyleOpts) Styles {
 			},
 		},
 		Strikethrough: ansi.StylePrimitive{
+			// Copy sentinels: blank one-cell graphemes rendered in place
+			// of the raw * / ** / ~~ markers so selection copies can
+			// restore them (see [SentinelEmph], [SentinelStrong],
+			// [SentinelStrike], and list.HighlightContent). Style
+			// attributes cannot be used for these: headings, link text,
+			// and syntax highlighting also render bold and italic cells.
+			Prefix:     SentinelStrike,
+			Suffix:     SentinelStrike,
 			CrossedOut: new(true),
 		},
 		Emph: ansi.StylePrimitive{
+			Prefix: SentinelEmph,
+			Suffix: SentinelEmph,
 			Italic: new(true),
 		},
 		Strong: ansi.StylePrimitive{
-			Bold: new(true),
+			Prefix: SentinelStrong,
+			Suffix: SentinelStrong,
+			Bold:   new(true),
 		},
 		HorizontalRule: ansi.StylePrimitive{
 			Color:  hex(o.separator),
@@ -311,8 +323,14 @@ func quickStyle(o quickStyleOpts) Styles {
 		},
 		Task: ansi.StyleTask{
 			StylePrimitive: ansi.StylePrimitive{},
-			Ticked:         "[✓] ",
-			Unticked:       "[ ] ",
+			// The blank cell after the checkbox is a sentinel: it displays
+			// exactly like the plain space it replaces, but a selection
+			// copy turns "[✓] " and "[ ] " back into "- [x] " and
+			// "- [ ] " (see [SentinelTask] and list.HighlightContent).
+			// Without it a plain-text checklist line like "[ ] fix bug"
+			// could not be told apart from a rendered task.
+			Ticked:   "[✓]" + SentinelTask,
+			Unticked: "[ ]" + SentinelTask,
 		},
 		Link: ansi.StylePrimitive{
 			Color:     hex(o.info),
@@ -352,6 +370,12 @@ func quickStyle(o quickStyleOpts) Styles {
 			StyleBlock: ansi.StyleBlock{
 				StylePrimitive: ansi.StylePrimitive{
 					Color: hex(o.bgLessVisible),
+					// Copy sentinels bracketing the block: they display as
+					// blank cells but let a selection copy wrap the code in
+					// triple backticks (see [SentinelFence] and
+					// list.HighlightContent).
+					BlockPrefix: SentinelFence,
+					BlockSuffix: SentinelFence,
 				},
 				Margin: new(uint(defaultMargin)),
 			},
@@ -551,16 +575,24 @@ func quickStyle(o quickStyleOpts) Styles {
 			},
 		},
 		Strikethrough: ansi.StylePrimitive{
+			// Strike copy sentinels, see the Markdown Strikethrough
+			// comment.
+			Prefix:          SentinelStrike,
+			Suffix:          SentinelStrike,
 			CrossedOut:      new(true),
 			Color:           plainFg,
 			BackgroundColor: plainBg,
 		},
 		Emph: ansi.StylePrimitive{
+			Prefix:          SentinelEmph,
+			Suffix:          SentinelEmph,
 			Italic:          new(true),
 			Color:           plainFg,
 			BackgroundColor: plainBg,
 		},
 		Strong: ansi.StylePrimitive{
+			Prefix:          SentinelStrong,
+			Suffix:          SentinelStrong,
 			Bold:            new(true),
 			Color:           plainFg,
 			BackgroundColor: plainBg,
@@ -585,8 +617,9 @@ func quickStyle(o quickStyleOpts) Styles {
 				Color:           plainFg,
 				BackgroundColor: plainBg,
 			},
-			Ticked:   "[✓] ",
-			Unticked: "[ ] ",
+			// Task sentinels, see the Markdown Task comment.
+			Ticked:   "[✓]" + SentinelTask,
+			Unticked: "[ ]" + SentinelTask,
 		},
 		Link: ansi.StylePrimitive{
 			Underline:       new(true),
@@ -626,6 +659,10 @@ func quickStyle(o quickStyleOpts) Styles {
 				StylePrimitive: ansi.StylePrimitive{
 					Color:           plainFg,
 					BackgroundColor: plainBg,
+					// Fence copy sentinels, see the Markdown CodeBlock
+					// comment.
+					BlockPrefix: SentinelFence,
+					BlockSuffix: SentinelFence,
 				},
 				Margin: new(uint(defaultMargin)),
 			},

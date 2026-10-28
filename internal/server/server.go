@@ -217,7 +217,7 @@ func (s *Server) installHandler() {
 	s.cancelRequests = cancel
 	s.h = &http.Server{
 		Protocols:   &p,
-		Handler:     s.recoverHandler(s.loggingHandler(mux)),
+		Handler:     s.recoverHandler(s.loggingHandler(s.crossOriginHandler(mux))),
 		BaseContext: func(net.Listener) context.Context { return baseCtx },
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 
 	"github.com/charmbracelet/crush/internal/agent/notify"
+	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/backend"
@@ -231,6 +232,11 @@ func wrapEvent(ev any) *pubsub.Payload {
 		// of the host running the watcher; the pinentry dialog would not
 		// draw on a remote client's terminal.
 		return nil
+	case pubsub.Event[tools.ToolProgress]:
+		return envelope(pubsub.PayloadTypeToolProgress, pubsub.Event[proto.ToolProgress]{
+			Type:    e.Type,
+			Payload: proto.ToolProgress(e.Payload),
+		})
 	default:
 		slog.Warn("Unrecognized event type for SSE wrapping", "type", fmt.Sprintf("%T", ev))
 		return nil

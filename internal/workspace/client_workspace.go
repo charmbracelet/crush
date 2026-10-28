@@ -12,6 +12,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/agent/notify"
+	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/client"
@@ -1239,6 +1240,11 @@ func (w *ClientWorkspace) awaitSubscription() {
 // skills.GetLatestStates see fresh data.
 func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 	switch e := ev.(type) {
+	case pubsub.Event[proto.ToolProgress]:
+		return pubsub.Event[tools.ToolProgress]{
+			Type:    e.Type,
+			Payload: tools.ToolProgress(e.Payload),
+		}
 	case pubsub.Event[proto.LSPEvent]:
 		return pubsub.Event[LSPEvent]{
 			Type: e.Type,

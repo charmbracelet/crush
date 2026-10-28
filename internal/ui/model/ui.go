@@ -1187,6 +1187,14 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case pubsub.Event[skills.Event]:
 		m.skillStates = msg.Payload.States
+	case pubsub.Event[agenttools.ToolProgress]:
+		if item := m.chat.MessageItem(msg.Payload.ToolCallID); item != nil {
+			if live, ok := item.(chat.LiveOutputItem); ok && live.SetLiveOutput(msg.Payload.Output) {
+				if m.chat.Follow() {
+					m.chat.ScrollToBottom()
+				}
+			}
+		}
 	case pubsub.Event[mcp.Event]:
 		switch msg.Payload.Type {
 		case mcp.EventStateChanged:

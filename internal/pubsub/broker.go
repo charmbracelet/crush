@@ -82,16 +82,19 @@ func (b *Broker[T]) SetMustDeliverTimeout(d time.Duration) {
 	b.mustDeliverTimeout = d
 }
 
+// Shutdown closes every subscriber channel and stops delivery. It is safe
+// to call more than once, even concurrently, because done is checked and
+// closed under the write lock.
 func (b *Broker[T]) Shutdown() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
 	select {
 	case <-b.done: // Already closed
 		return
 	default:
 		close(b.done)
 	}
-
-	b.mu.Lock()
-	defer b.mu.Unlock()
 
 	for ch := range b.subs {
 		delete(b.subs, ch)

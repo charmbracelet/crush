@@ -89,6 +89,33 @@ func TestBashTool_CustomAutoBackgroundThreshold(t *testing.T) {
 	require.NoError(t, bgManager.Kill(meta.ShellID))
 }
 
+func TestBashTool_TagsShellsWithOwner(t *testing.T) {
+	workingDir := t.TempDir()
+	permissions := &mockBashPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}
+	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
+	owner := t.Name()
+	tool := NewBashTool(permissions, workingDir, workingDir, attribution, "test-model", config.DefaultMaxBackgroundJobs, owner)
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+	resp := runBashTool(t, tool, ctx, BashParams{
+		Description:     "owned job",
+		Command:         "sleep 10",
+		RunInBackground: true,
+	})
+
+	require.False(t, resp.IsError)
+	var meta BashResponseMetadata
+	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
+	require.NotEmpty(t, meta.ShellID)
+
+	bgManager := shell.GetBackgroundShellManager()
+	bgShell, ok := bgManager.Get(meta.ShellID)
+	require.True(t, ok)
+
+	bgManager.KillOwned(t.Context(), owner)
+	require.True(t, bgShell.IsDone(), "killing the tool's owner must stop the shells it started")
+}
+
 type recordingPermissionService struct {
 	*pubsub.Broker[permission.PermissionRequest]
 	requestCount int
@@ -129,7 +156,7 @@ func (m *recordingPermissionService) SubscribeNotifications(ctx context.Context)
 func newBashToolForTest(workingDir string) fantasy.AgentTool {
 	permissions := &mockBashPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}
 	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
-	return NewBashTool(permissions, workingDir, workingDir, attribution, "test-model", config.DefaultMaxBackgroundJobs)
+	return NewBashTool(permissions, workingDir, workingDir, attribution, "test-model", config.DefaultMaxBackgroundJobs, nil)
 }
 
 func newBashToolWithRecordingPerms(workingDir string, allow bool) (fantasy.AgentTool, *recordingPermissionService) {
@@ -138,7 +165,7 @@ func newBashToolWithRecordingPerms(workingDir string, allow bool) (fantasy.Agent
 		allow:  allow,
 	}
 	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
-	return NewBashTool(perms, workingDir, workingDir, attribution, "test-model", config.DefaultMaxBackgroundJobs), perms
+	return NewBashTool(perms, workingDir, workingDir, attribution, "test-model", config.DefaultMaxBackgroundJobs, nil), perms
 }
 
 func TestBashTool_ChainedCommandsRequirePermission(t *testing.T) {

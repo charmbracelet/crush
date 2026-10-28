@@ -120,3 +120,13 @@ func TestAgentStateIconStoppedIsNotAnError(t *testing.T) {
 	require.Equal(t, toolIcon(&sty, ToolStatusCanceled), agentStateIcon(&sty, "stopped"))
 	require.Equal(t, toolIcon(&sty, ToolStatusError), agentStateIcon(&sty, "failed"))
 }
+
+// Markdown output ends with its last line of text, not a painted blank line.
+func TestSubagentReportHasNoBlankTail(t *testing.T) {
+	t.Parallel()
+	sty := styles.CharmtonePantera()
+	for _, out := range []string{"Done.\n\nAll good.", "Contents:\n\n```\na\nb\n```"} {
+		lines := renderPlain(t, NewSubAgentReportItem(&sty, "x", "", out, false))
+		require.NotEmpty(t, strings.TrimSpace(lines[len(lines)-1]), "%q", out)
+	}
+}

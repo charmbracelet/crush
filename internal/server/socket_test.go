@@ -60,6 +60,23 @@ func TestIsStaleSocketErr(t *testing.T) {
 	}
 }
 
+func TestDefaultHost_UIDWithoutUserEnv(t *testing.T) {
+	// The pure-Go user.Current (cgo-less Linux builds, or -tags osusergo)
+	// only knows the users in /etc/passwd and otherwise needs $USER and
+	// $HOME, so it fails for directory-service (LDAP, SSSD) users when
+	// either is unset. The socket name must still carry the uid, or all
+	// of those users would share one socket.
+	t.Setenv("USER", "")
+	t.Setenv("HOME", "")
+
+	host := DefaultHost()
+
+	require.True(t, strings.HasPrefix(host, "unix://"),
+		"DefaultHost should return a unix:// URL, got %q", host)
+	path := strings.TrimPrefix(host, "unix://")
+	require.Equal(t, fmt.Sprintf("crush-%d.sock", os.Getuid()), filepath.Base(path))
+}
+
 func TestDefaultHost_XDGRuntimeDir(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_RUNTIME_DIR", dir)

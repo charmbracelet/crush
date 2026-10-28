@@ -268,6 +268,7 @@ func TestConfig_setDefaults(t *testing.T) {
 		require.Empty(t, cfg.Options.TUI.DiffMode)
 		require.Equal(t, ScrollbarDefault, cfg.Options.TUI.Scrollbar)
 		require.Equal(t, ExitBannerDefault, cfg.Options.TUI.ExitBanner)
+		require.Equal(t, TimestampFormat12Hour, cfg.Options.TUI.Timestamps)
 		for _, path := range defaultContextPaths {
 			require.Contains(t, cfg.Options.ContextPaths, path)
 		}
@@ -286,11 +287,13 @@ func TestConfig_setDefaults(t *testing.T) {
 		cfg.Options.TUI.DiffMode = DiffModeSplit
 		cfg.Options.TUI.Scrollbar = ScrollbarNever
 		cfg.Options.TUI.ExitBanner = ExitBannerCompact
+		cfg.Options.TUI.Timestamps = TimestampFormatOff
 		cfg.setDefaults(workingDir, "")
 
 		require.Equal(t, DiffModeSplit, cfg.Options.TUI.DiffMode)
 		require.Equal(t, ScrollbarNever, cfg.Options.TUI.Scrollbar)
 		require.Equal(t, ExitBannerCompact, cfg.Options.TUI.ExitBanner)
+		require.Equal(t, TimestampFormatOff, cfg.Options.TUI.Timestamps)
 	})
 
 	t.Run("prunes orphaned OAuth token MCP entries but keeps real ones", func(t *testing.T) {

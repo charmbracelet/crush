@@ -12,7 +12,9 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 	return []apigen.Endpoint{
 		apigen.Get("/v1/health").
 			Summary("Health check").
+			Description("Answers 503 once the server has committed to shutting down.").
 			Tags("system").
+			Fails(503).
 			Handle(c.handleGetHealth),
 
 		apigen.Get("/v1/version").

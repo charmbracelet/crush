@@ -1,6 +1,8 @@
 package server
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -47,4 +49,32 @@ func TestListenAndServe_ShutsDownWhenNeverUsed(t *testing.T) {
 		t.Fatal("a server that never hosted a workspace is still running " +
 			"long after its idle linger elapsed")
 	}
+}
+
+// TestHealth_UnavailableWhileClosing covers the readiness probe clients
+// use to tell whether a server is up. A server that has committed to
+// exiting refuses new workspaces, so it must not report itself healthy:
+// a client waiting for a replacement would take it for one.
+func TestHealth_UnavailableWhileClosing(t *testing.T) {
+	t.Parallel()
+
+	srv := NewServer(nil, "tcp", "127.0.0.1:0")
+	hs := httptest.NewServer(srv.Handler())
+	t.Cleanup(hs.Close)
+
+	health := func() int {
+		t.Helper()
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, hs.URL+"/v1/health", nil)
+		require.NoError(t, err)
+		rsp, err := hs.Client().Do(req)
+		require.NoError(t, err)
+		defer rsp.Body.Close()
+		return rsp.StatusCode
+	}
+	require.Equal(t, http.StatusOK, health())
+
+	// A termination signal latches the decision to exit, then keeps
+	// serving while it tears the hosted workspaces down.
+	require.NoError(t, srv.Backend().ShutdownWorkspaces(t.Context()))
+	require.Equal(t, http.StatusServiceUnavailable, health())
 }

@@ -329,6 +329,18 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 			Fails(400, 404, 500).
 			Handle(c.handlePostWorkspacePermissionsGrant),
 
+		apigen.Post("/v1/workspaces/{id}/sessions/{sid}/auto-approve").
+			Summary("Auto-approve a session's permissions").
+			Description("Grants every permission request the session raises from "+
+				"now on without prompting, as `crush run` does for its own session. "+
+				"Other sessions keep prompting. The approval lasts while the "+
+				"workspace is hosted.").
+			Tags("permissions").
+			PathParam("id", "Workspace ID").
+			PathParam("sid", "Session ID").
+			Fails(404, 500).
+			Handle(c.handlePostWorkspaceSessionAutoApprove),
+
 		apigen.Post("/v1/workspaces/{id}/questions/answer").
 			Summary("Answer question batch").
 			Tags("questions").

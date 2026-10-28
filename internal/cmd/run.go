@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -272,6 +273,19 @@ func runNonInteractive(
 		if err := overrideReasoningEffort(ctx, c, ws.ID, reasoningEffort); err != nil {
 			return err
 		}
+	}
+
+	// Automatically approve all permission requests for this
+	// non-interactive session, as local mode does: nothing here answers a
+	// prompt, so the run would wait on the first one forever. A server
+	// that predates the endpoint answers 404; carry on regardless, since
+	// runs that need no permission still work there.
+	if err := c.AutoApproveSession(ctx, ws.ID, sess.ID); err != nil {
+		if !errors.Is(err, client.ErrNotFound) {
+			return err
+		}
+		slog.Warn("Server cannot auto-approve permissions; tool calls that need permission will wait for approval",
+			"session_id", sess.ID, "error", err)
 	}
 
 	events, err := c.SubscribeEvents(ctx, ws.ID)

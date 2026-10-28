@@ -306,6 +306,19 @@ func (h *e2eHarness) grantPermission(t *testing.T, ctx context.Context, workspac
 	return out.Resolved
 }
 
+// autoApproveSession posts to the session auto-approve endpoint and
+// returns the response status code.
+func (h *e2eHarness) autoApproveSession(t *testing.T, ctx context.Context, workspaceID, sessionID string) int {
+	t.Helper()
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		h.httpSrv.URL+"/v1/workspaces/"+workspaceID+"/sessions/"+sessionID+"/auto-approve", nil)
+	require.NoError(t, err)
+	resp, err := h.httpSrv.Client().Do(httpReq)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	return resp.StatusCode
+}
+
 // waitForAttached spins until the workspace's clients map reports at
 // least n entries with streams > 0. Catches the race where a test
 // publishes events before the server-side AttachClient has completed.
@@ -712,6 +725,62 @@ func TestE2E_UnansweredPromptDoesNotBlockOtherSessions(t *testing.T) {
 		Action:     proto.PermissionAllow,
 	}))
 	require.True(t, <-doneA, "client A's request must be granted")
+}
+
+// TestE2E_AutoApproveSession verifies that auto-approving a session
+// through the API grants its permission requests without a prompt, which
+// is what `crush run` relies on for its own session, while every other
+// session in the workspace keeps prompting.
+func TestE2E_AutoApproveSession(t *testing.T) {
+	t.Parallel()
+	h := newE2EHarness(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	prompts := h.app.Permissions.Subscribe(ctx)
+
+	const runSession = "s-run"
+	require.Equal(t, http.StatusOK, h.autoApproveSession(t, ctx, h.workspace.ID, runSession))
+
+	reqCtx, reqCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer reqCancel()
+	granted, err := h.app.Permissions.Request(reqCtx, permission.CreatePermissionRequest{
+		SessionID:   runSession,
+		ToolCallID:  "tc-run",
+		ToolName:    "write",
+		Description: "write a file",
+		Action:      "write",
+		Path:        h.workspace.Path,
+	})
+	require.NoError(t, err, "an auto-approved session must not wait on a prompt")
+	require.True(t, granted)
+
+	// Another session is unaffected: its request still prompts.
+	otherCtx, otherCancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = h.app.Permissions.Request(otherCtx, permission.CreatePermissionRequest{
+			SessionID:   "s-other",
+			ToolCallID:  "tc-other",
+			ToolName:    "write",
+			Description: "write a file",
+			Action:      "write",
+			Path:        h.workspace.Path,
+		})
+	}()
+	// Unblock the request before waiting on done.
+	t.Cleanup(func() { otherCancel(); <-done })
+	select {
+	case ev := <-prompts:
+		require.Equal(t, "tc-other", ev.Payload.ToolCallID,
+			"only the session that was not auto-approved may prompt")
+	case <-time.After(5 * time.Second):
+		t.Fatal("a session that was not auto-approved must still prompt")
+	}
+
+	require.Equal(t, http.StatusNotFound, h.autoApproveSession(t, ctx, uuid.New().String(), runSession),
+		"an unknown workspace must answer 404")
 }
 
 // TestE2E_KillingClientASSEDoesNotBreakClientB covers PLAN item 6

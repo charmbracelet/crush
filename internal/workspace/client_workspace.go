@@ -27,6 +27,7 @@ import (
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
+	"github.com/charmbracelet/crush/internal/server"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/version"
@@ -77,6 +78,26 @@ type ClientWorkspace struct {
 	// herdrClient reports agent state to herdr when running inside
 	// a herdr-managed pane. Nil when not in a herdr environment.
 	herdrClient *herdr.Client
+
+	// respawnServer brings a server back on the client's address after the
+	// previous one died. Nil leaves the loop retrying the address.
+	respawnServer func(context.Context) error
+}
+
+// ClientWorkspaceOption configures a ClientWorkspace at construction time.
+type ClientWorkspaceOption func(*ClientWorkspace)
+
+// WithServerRespawn sets the hook the subscription loop calls when the
+// server is gone, that is, nothing listens on its address any more. The
+// hook should start a server there; the loop then finds that the new server
+// does not know this workspace and re-registers it. The hook runs on the
+// subscription goroutine with the subscription context, which Shutdown
+// cancels, and the loop stops calling it once that happens. Its failures
+// count toward the loop's escalation to a stuck connection.
+func WithServerRespawn(respawn func(ctx context.Context) error) ClientWorkspaceOption {
+	return func(w *ClientWorkspace) {
+		w.respawnServer = respawn
+	}
 }
 
 // SSE reconnect backoff bounds for the workspace event stream. Declared
@@ -94,7 +115,7 @@ var (
 // manager is constructed with WithGlobalMirror because the client
 // process represents exactly one workspace and the TUI reads
 // skills.GetLatestStates directly at construction time.
-func NewClientWorkspace(c *client.Client, ws proto.Workspace) *ClientWorkspace {
+func NewClientWorkspace(c *client.Client, ws proto.Workspace, opts ...ClientWorkspaceOption) *ClientWorkspace {
 	if ws.Config != nil {
 		ws.Config.SetupAgents()
 		ws.Config.NormalizeOptions()
@@ -102,7 +123,7 @@ func NewClientWorkspace(c *client.Client, ws proto.Workspace) *ClientWorkspace {
 	states := protoToSkillStates(ws.Skills)
 	mgr := skills.NewManager(nil, nil, states, skills.WithGlobalMirror())
 	subCtx, subCancel := context.WithCancel(context.Background())
-	return &ClientWorkspace{
+	w := &ClientWorkspace{
 		client:       c,
 		ws:           ws,
 		skills:       mgr,
@@ -112,6 +133,10 @@ func NewClientWorkspace(c *client.Client, ws proto.Workspace) *ClientWorkspace {
 		subDone:      make(chan struct{}),
 		herdrClient:  herdr.Init(),
 	}
+	for _, opt := range opts {
+		opt(w)
+	}
+	return w
 }
 
 // refreshWorkspace re-fetches the workspace from the server, updating
@@ -908,11 +933,11 @@ func (w *ClientWorkspace) Subscribe(program *tea.Program) {
 	w.runSubscription(program.Send)
 }
 
-// maxRecoveryEscalate is the number of consecutive failed workspace
-// recovery attempts after which the loop tells the UI the connection
-// looks unrecoverable. It keeps retrying regardless: a hard stop would
-// strand a user whose server comes back a minute later, and Shutdown can
-// always cancel it.
+// maxRecoveryEscalate is the number of consecutive failed recovery
+// attempts (re-registering the workspace or restarting the server) after
+// which the loop tells the UI the connection looks unrecoverable. It keeps
+// retrying regardless: a hard stop would strand a user whose server comes
+// back a minute later, and Shutdown can always cancel it.
 const maxRecoveryEscalate = 20
 
 // recoveryCreateTimeout bounds a single re-registration attempt. It is
@@ -928,12 +953,15 @@ var recoveryCreateTimeout = 30 * time.Second
 // subscription context is cancelled (via Shutdown). Split out from
 // Subscribe so it can be tested without a real *tea.Program.
 //
-// Two failures need more than a retry. A 404 means the server no longer
+// Some failures need more than a retry. A 404 means the server no longer
 // knows this workspace, so resubscribing with the same ID can never
-// succeed and the loop re-registers instead. And any stream that closes
-// loses whatever was published while the client was away, so every
-// re-established stream — even one that reconnects on the first try —
-// re-asserts the client's session and asks the UI to resync.
+// succeed and the loop re-registers instead. When nothing listens on the
+// server's address at all, the server died and no retry can reach it, so
+// the loop has the respawn hook start a new one, which then answers with
+// that 404. And any stream that closes loses whatever was published while
+// the client was away, so every re-established stream — even one that
+// reconnects on the first try — re-asserts the client's session and asks
+// the UI to resync.
 func (w *ClientWorkspace) runSubscription(send func(tea.Msg)) {
 	w.subStarted.Store(true)
 	defer close(w.subDone)
@@ -947,6 +975,12 @@ func (w *ClientWorkspace) runSubscription(send func(tea.Msg)) {
 		}
 		degraded = true
 		send(ConnectionEvent{State: ConnectionDegraded, Err: err, Stuck: stuck})
+	}
+	recoveryFailed := func(err error) {
+		recoveryFailures++
+		if recoveryFailures == maxRecoveryEscalate {
+			markDegraded(err, true)
+		}
 	}
 
 	for {
@@ -963,16 +997,20 @@ func (w *ClientWorkspace) runSubscription(send func(tea.Msg)) {
 			if !errors.Is(err, client.ErrNotFound) {
 				slog.Error("Failed to subscribe to workspace events; retrying",
 					"error", err, "retry_in", backoff)
+				if w.respawnServer != nil && server.IsStaleSocketErr(err) {
+					// The server died: bring up the one the retry will reach.
+					if err := w.respawnServer(w.subCtx); err != nil && w.subCtx.Err() == nil {
+						slog.Error("Failed to restart the crush server", "error", err)
+						recoveryFailed(fmt.Errorf("%w: %v", ErrServerUnreachable, err))
+					}
+				}
 			} else if w.recoverWorkspace() == nil {
 				// Re-registered: resubscribe immediately under the fresh
 				// workspace ID.
 				backoff = sseReconnectInitialBackoff
 				continue
 			} else if w.subCtx.Err() == nil {
-				recoveryFailures++
-				if recoveryFailures == maxRecoveryEscalate {
-					markDegraded(ErrWorkspaceGone, true)
-				}
+				recoveryFailed(ErrWorkspaceGone)
 			}
 			if !w.sleepOrDone(backoff) {
 				return

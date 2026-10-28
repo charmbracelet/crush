@@ -125,6 +125,39 @@ func TestSubscribeEventsAbortedStreamClosesEvents(t *testing.T) {
 	}
 }
 
+// TestSubscribeEventsKeepsMessageWithUnknownPart covers a server newer than
+// the client: a message carrying a part type the client does not know must
+// still arrive with the parts the client does know.
+func TestSubscribeEventsKeepsMessageWithUnknownPart(t *testing.T) {
+	t.Parallel()
+
+	const data = `{"type":"message","payload":{"type":"updated","payload":` +
+		`{"id":"m-1","session_id":"s-1","role":"assistant","parts":[` +
+		`{"type":"text","data":{"text":"hello"}},` +
+		`{"type":"future_widget","data":{"blob":"x"}}]}}}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
+		w.(http.Flusher).Flush()
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	events, err := captureClient(t, srv).SubscribeEvents(ctx, "ws1")
+	require.NoError(t, err)
+
+	select {
+	case ev := <-events:
+		e, ok := ev.(pubsub.Event[proto.Message])
+		require.True(t, ok, "got %T", ev)
+		require.Equal(t, "m-1", e.Payload.ID)
+		require.Equal(t, []proto.ContentPart{proto.TextContent{Text: "hello"}}, e.Payload.Parts)
+	case <-time.After(5 * time.Second):
+		require.Fail(t, "timed out waiting for the message event")
+	}
+}
+
 func TestSendMessageAcceptsStatusAccepted(t *testing.T) {
 	t.Parallel()
 

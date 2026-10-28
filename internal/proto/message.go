@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"slices"
 	"time"
 
@@ -546,7 +547,9 @@ func MarshalParts(parts []ContentPart) ([]byte, error) {
 	return json.Marshal(wrappedParts)
 }
 
-// UnmarshalParts unmarshals content parts from JSON.
+// UnmarshalParts unmarshals content parts from JSON. A part of a type this
+// build does not know, such as one added by a newer server, is skipped so
+// that the rest of the message still decodes.
 func UnmarshalParts(data []byte) ([]ContentPart, error) {
 	temp := []json.RawMessage{}
 
@@ -616,7 +619,7 @@ func UnmarshalParts(data []byte) ([]ContentPart, error) {
 			}
 			parts = append(parts, part)
 		default:
-			return nil, fmt.Errorf("unknown part type: %s", wrapper.Type)
+			slog.Debug("Skipping unknown message part type", "type", wrapper.Type)
 		}
 	}
 

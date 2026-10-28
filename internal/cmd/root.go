@@ -500,18 +500,59 @@ func createWorkspaceOnLiveServer(
 	return nil, fmt.Errorf("failed to create workspace: server kept shutting down")
 }
 
-// replaceExitingServer waits out the socket of a server that has committed
-// to exiting, then brings up a fresh one.
+// replaceExitingServer waits out the address of a server that has
+// committed to exiting, then brings up a fresh one.
 func replaceExitingServer(cmd *cobra.Command, hostURL *url.URL) error {
 	if hostURL.Scheme == "unix" {
 		if err := awaitSocketGone(cmd.Context(), hostURL); err != nil {
 			return err
 		}
+	} else if err := awaitExitingServerGone(cmd.Context(), hostURL); err != nil {
+		return err
 	}
 	if err := spawnAndWaitReady(cmd, hostURL); err != nil {
 		return fmt.Errorf("failed to initialize crush server: %v", err)
 	}
 	return nil
+}
+
+// exitingServerTimeout bounds how long a client waits for a server that
+// has committed to exiting to release a named pipe or tcp address. A
+// stopping server gives its workspaces 15s to shut down before it lets go.
+const exitingServerTimeout = 20 * time.Second
+
+// awaitExitingServerGone waits until a server that has committed to
+// exiting no longer holds its named pipe or tcp address. Unlike a unix
+// socket file, neither can be taken over from a live process, so a
+// replacement spawned any earlier would fail to bind.
+//
+// The wait ends once nothing listens at the address (the pipe is gone or
+// the connection is refused), or once a server that is not shutting down
+// answers there because another client already replaced it.
+func awaitExitingServerGone(ctx context.Context, hostURL *url.URL) error {
+	httpClient, reqURL, err := readinessHTTPClient(hostURL)
+	if err != nil {
+		return err
+	}
+
+	deadline := time.Now().Add(exitingServerTimeout)
+	for {
+		attemptCtx, cancel := context.WithDeadline(ctx, deadline)
+		err := probeHealth(attemptCtx, httpClient, reqURL, hostURL)
+		cancel()
+		if err == nil || errors.Is(err, fs.ErrNotExist) || isConnRefused(err) {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("server is shutting down but did not release %s: %v", hostURL.Host, err)
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
 }
 
 // ensureServer auto-starts a detached server if the socket file does not
@@ -579,6 +620,12 @@ func ensureServer(cmd *cobra.Command, hostURL *url.URL) error {
 		}
 
 		if err := waitForServerReady(cmd.Context(), hostURL); err != nil {
+			// The server found here has committed to exiting and will
+			// never serve this client, so replace it.
+			if errors.Is(err, client.ErrServerShuttingDown) {
+				slog.Warn("Server is shutting down; replacing it", "error", err)
+				return replaceExitingServer(cmd, hostURL)
+			}
 			return fmt.Errorf("failed to initialize crush server: %v", err)
 		}
 	}
@@ -677,6 +724,9 @@ func serverReadyTimeout() time.Duration {
 // waitForServerReady polls GET /v1/health until the server responds with
 // any 2xx status or the total timeout elapses. Each attempt uses a short
 // per-attempt timeout so a hung listener doesn't burn the whole budget.
+// A server that answers it is shutting down will never become ready, so
+// that ends the wait at once with an error wrapping
+// [client.ErrServerShuttingDown].
 //
 // The HTTP transport is built to mirror how *client.Client dials so the
 // same unix socket / npipe / tcp setups all work uniformly here.
@@ -706,6 +756,9 @@ func waitForServerReady(ctx context.Context, hostURL *url.URL) error {
 		cancel()
 		if err == nil {
 			return nil
+		}
+		if errors.Is(err, client.ErrServerShuttingDown) {
+			return err
 		}
 		lastErr = err
 
@@ -747,7 +800,8 @@ func readinessHTTPClient(hostURL *url.URL) (*http.Client, string, error) {
 }
 
 // probeHealth issues a single GET to the readiness endpoint and treats
-// any 2xx response as success.
+// any 2xx response as success. A server that is shutting down answers
+// 503, reported as an error wrapping [client.ErrServerShuttingDown].
 func probeHealth(ctx context.Context, h *http.Client, reqURL string, hostURL *url.URL) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
@@ -762,6 +816,9 @@ func probeHealth(ctx context.Context, h *http.Client, reqURL string, hostURL *ur
 	}
 	defer rsp.Body.Close()
 	_, _ = io.Copy(io.Discard, rsp.Body)
+	if rsp.StatusCode == http.StatusServiceUnavailable {
+		return fmt.Errorf("%w: %s", client.ErrServerShuttingDown, rsp.Status)
+	}
 	if rsp.StatusCode < 200 || rsp.StatusCode >= 300 {
 		return fmt.Errorf("server health check failed: %s", rsp.Status)
 	}

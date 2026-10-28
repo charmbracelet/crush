@@ -1187,6 +1187,14 @@ func (b *Backend) ShutdownIfIdle() bool {
 	return true
 }
 
+// Closing reports whether the server has committed to shutting down. The
+// decision is final: once it reports true, it always will.
+func (b *Backend) Closing() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.closing
+}
+
 // resolveWorkspaceKey returns a stable canonical form of path suitable
 // for use as a dedup key. It applies filepath.Abs, then attempts
 // filepath.EvalSymlinks; because EvalSymlinks errors on non-existent

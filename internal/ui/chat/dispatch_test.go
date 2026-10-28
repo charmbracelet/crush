@@ -24,7 +24,7 @@ func dispatchItem(t *testing.T) *AgentToolMessageItem {
 
 	dispatch, ok := item.(*AgentToolMessageItem)
 	require.True(t, ok)
-	require.Equal(t, "audit", dispatch.DispatchLabel())
+	require.Equal(t, agent.SubagentName("audit"), dispatch.DispatchLabel())
 	return dispatch
 }
 

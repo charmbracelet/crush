@@ -37,7 +37,7 @@ func (r *AgentControlToolRenderContext) RenderTool(sty *styles.Styles, width int
 	label, prose := agentControlParts(opts.ToolCall)
 	var params []string
 	if label != "" {
-		params = append(params, sty.Tool.ParamMain.Render("→ ")+sty.Tool.AgentName.Render(SubagentDisplayName(label)))
+		params = append(params, sty.Tool.ParamMain.Render("→ ")+sty.Tool.AgentName.Render(agent.SubagentName(label)))
 	}
 	header := toolHeader(sty, opts.Status, name, cappedWidth, opts, params...)
 	if opts.Compact {
@@ -96,7 +96,7 @@ func agentStatusRows(sty *styles.Styles, result *message.ToolResult, width int) 
 	names := make([]string, len(meta.Agents))
 	nameWidth := 0
 	for i, a := range meta.Agents {
-		names[i] = SubagentDisplayName(a.Label)
+		names[i] = a.Label
 		nameWidth = max(nameWidth, lipgloss.Width(names[i]))
 	}
 	rows := make([]string, len(meta.Agents))

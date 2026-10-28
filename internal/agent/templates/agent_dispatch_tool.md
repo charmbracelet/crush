@@ -1,10 +1,10 @@
 Start a subagent that runs on its own and reports back later.
 
-The call returns as soon as the subagent starts. Its result arrives as a `<subagent-report>` message under the `label` you gave it, once it finishes. Keep working in the meantime, or end your turn; the report wakes you.
+The call returns as soon as the subagent starts. It returns the subagent's name, which is your `label` with a first name in front (`date-impl` becomes something like `betty-date-impl`). Its result arrives as a `<subagent-report>` message under that name, once it finishes. Keep working in the meantime, or end your turn; the report wakes you.
 
 Use it to fan work out (a review, a search, an investigation across several scopes) or to hand off reading that would otherwise fill your context. For a quick lookup you need before doing anything else, use `agent` instead, which blocks and returns the answer.
 
-`label` names the subagent for `agent_send`, `agent_status`, and `agent_stop`, and titles its report. Make it describe the scope: `auth-review`, `db-layer`. Labels are unique per session.
+`label` describes the subagent's scope: `auth-review`, `db-layer`. Use the returned name for `agent_send`, `agent_status`, and `agent_stop`. Names are unique per session.
 
 `access` is `read` (default) for a subagent that inspects and runs things but cannot edit, or `write` for one that makes a change. Give parallel `write` subagents scopes that do not overlap.
 

@@ -79,7 +79,7 @@ func (a *AgentToolMessageItem) parseDispatchLabel(toolCall message.ToolCall) {
 	}
 	var params agent.AgentDispatchParams
 	if json.Unmarshal([]byte(toolCall.Input), &params) == nil && params.Label != "" {
-		a.dispatchLabel = params.Label
+		a.dispatchLabel = agent.SubagentName(params.Label)
 		a.dispatchStarted = time.Now()
 	}
 }
@@ -500,7 +500,7 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 
 // subagentHeader renders "✓ Create Subagent betty-date-impl (model=hyper/glm-5)", truncating the model rather than dropping it.
 func subagentHeader(sty *styles.Styles, status ToolStatus, name, label, model string, width int, opts *ToolRenderOpts) string {
-	header := toolHeader(sty, status, name, width, opts, sty.Tool.AgentName.Render(SubagentDisplayName(label)))
+	header := toolHeader(sty, status, name, width, opts, sty.Tool.AgentName.Render(agent.SubagentName(label)))
 	const minModelWidth = 12
 	room := width - lipgloss.Width(header) - 1
 	if model == "" || room < minModelWidth {

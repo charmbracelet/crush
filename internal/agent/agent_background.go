@@ -47,7 +47,7 @@ func backgroundLabel(toolName, callID string) string {
 	if id == "" {
 		id = fmt.Sprintf("%d", time.Now().UnixNano()%1_000_000)
 	}
-	return prefix + "-" + id
+	return SubagentName(prefix + "-" + id)
 }
 
 // runSubAgentMaybeBackground runs a blocking subagent tool call, but moves it

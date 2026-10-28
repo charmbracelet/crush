@@ -43,7 +43,7 @@ const stopForShutdown = "Crush is shutting down"
 
 type AgentDispatchParams struct {
 	Prompt string `json:"prompt" description:"The task for the subagent to perform"`
-	Label  string `json:"label" description:"A short name for this subagent, used to address it and to label its report"`
+	Label  string `json:"label" description:"A short label for this subagent's scope; the result returns the name to address it by"`
 	Access string `json:"access,omitempty" description:"\"read\" (default) for a subagent that can only inspect the codebase, or \"write\" for one that can also edit files"`
 
 	// Model override. When none of these is given the subagent runs on the
@@ -79,12 +79,12 @@ type AgentDispatchResponseMetadata struct {
 }
 
 type AgentSendParams struct {
-	Label   string `json:"label" description:"The label of the running subagent to send to"`
+	Label   string `json:"label" description:"The name of the subagent to send to, as returned when it was created"`
 	Message string `json:"message" description:"The message to deliver to that subagent"`
 }
 
 type AgentStopParams struct {
-	Label  string `json:"label" description:"The label of the running subagent to stop"`
+	Label  string `json:"label" description:"The name of the subagent to stop, as returned when it was created"`
 	Reason string `json:"reason,omitempty" description:"Why it is being stopped; recorded in its report"`
 }
 
@@ -310,7 +310,7 @@ func (c *coordinator) agentDispatchTool(ctx context.Context, parentAgentID strin
 			if params.Prompt == "" {
 				return fantasy.NewTextErrorResponse("prompt is required"), nil
 			}
-			label := strings.TrimSpace(params.Label)
+			label := SubagentName(params.Label)
 			if label == "" {
 				return fantasy.NewTextErrorResponse("label is required"), nil
 			}
@@ -554,7 +554,7 @@ func (c *coordinator) agentSendTool() fantasy.AgentTool {
 		AgentSendToolName,
 		agentSendToolDescription,
 		func(ctx context.Context, params AgentSendParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			label := strings.TrimSpace(params.Label)
+			label := SubagentName(params.Label)
 			if label == "" {
 				return fantasy.NewTextErrorResponse("label is required"), nil
 			}
@@ -628,7 +628,7 @@ func (c *coordinator) agentStopTool() fantasy.AgentTool {
 		AgentStopToolName,
 		agentStopToolDescription,
 		func(ctx context.Context, params AgentStopParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			label := strings.TrimSpace(params.Label)
+			label := SubagentName(params.Label)
 			if label == "" {
 				return fantasy.NewTextErrorResponse("label is required"), nil
 			}

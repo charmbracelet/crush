@@ -21,7 +21,7 @@ import (
 func buildLevelWorkspace(t *testing.T) (*controllerV1, string, permission.Service) {
 	t.Helper()
 
-	svc := permission.NewPermissionService(t.TempDir(), false, nil)
+	svc := permission.NewPermissionService(t.TempDir(), false, nil, nil)
 	b := backend.New(context.Background(), nil, nil)
 	ws := &backend.Workspace{
 		ID:   uuid.New().String(),

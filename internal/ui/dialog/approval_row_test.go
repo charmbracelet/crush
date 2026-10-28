@@ -42,7 +42,7 @@ func newApprovalPalette(t *testing.T, level permission.Level) (*Commands, *appro
 	sty := styles.CharmtonePantera()
 	ws := &approvalWorkspace{level: level, purpose: config.AgentCoder}
 	com := &common.Common{Styles: &sty, Workspace: ws}
-	dia, err := NewCommands(com, "session-1", true, false, false, nil, nil)
+	dia, err := NewCommands(com, "session-1", true, false, false, false, nil, nil)
 	require.NoError(t, err)
 	return dia, ws
 }

@@ -530,7 +530,7 @@ func ensureServer(cmd *cobra.Command, hostURL *url.URL) error {
 	switch hostURL.Scheme {
 	case "unix", "npipe":
 		needsStart := false
-		_, statErr := os.Stat(hostURL.Host)
+		statErr := statServerEndpoint(cmd.Context(), hostURL)
 		switch {
 		case statErr == nil:
 			// Probe the socket explicitly before the version-check
@@ -852,11 +852,12 @@ func shutdownLegacyStaleServer(ctx context.Context, c *client.Client, versionFie
 }
 
 // awaitSocketGone gives a server that has committed to exiting a moment to
-// release its socket, then force-removes whatever is left: the old process
-// has latched its decision and will not serve requests again.
+// release its socket, then force-removes a socket file that is left over:
+// the old process has latched its decision and will not serve requests
+// again. A named pipe is never removed; it goes away with the old server.
 func awaitSocketGone(ctx context.Context, hostURL *url.URL) error {
 	for range 20 {
-		if _, err := os.Stat(hostURL.Host); errors.Is(err, fs.ErrNotExist) {
+		if err := statServerEndpoint(ctx, hostURL); errors.Is(err, fs.ErrNotExist) {
 			return nil
 		}
 		select {
@@ -865,7 +866,54 @@ func awaitSocketGone(ctx context.Context, hostURL *url.URL) error {
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
-	_ = os.Remove(hostURL.Host)
+	if hostURL.Scheme != "npipe" {
+		_ = os.Remove(hostURL.Host)
+	}
+	return nil
+}
+
+// pipeProbeTimeout bounds the dial that decides whether a named pipe
+// exists. The dial retries while every instance is busy, and a serving
+// server offers a new instance right after each accept, so it only runs
+// out once the server has stopped accepting, e.g. while it drains its last
+// connections on the way out.
+const pipeProbeTimeout = 200 * time.Millisecond
+
+// probePipe connects to the named pipe at addr and hangs up again, giving
+// up after pipeProbeTimeout. It is a variable so tests can simulate the
+// states of a pipe on any platform.
+var probePipe = func(ctx context.Context, addr string) error {
+	ctx, cancel := context.WithTimeout(ctx, pipeProbeTimeout)
+	defer cancel()
+	c, err := client.NewClient("", "npipe", addr)
+	if err != nil {
+		return err
+	}
+	conn, err := c.Dial(ctx, "npipe", addr)
+	if err != nil {
+		return err
+	}
+	conn.Close()
+	return nil
+}
+
+// statServerEndpoint reports whether the server's endpoint exists the way
+// os.Stat does: nil if it does, an error matching fs.ErrNotExist if it does
+// not, and any other error if that cannot be told.
+//
+// A named pipe is not a file. Stat'ing or removing one opens it as a
+// client, which fails with ERROR_PIPE_BUSY whenever no instance is
+// listening, e.g. between two accepts or while an exiting server drains
+// its connections. So a pipe is dialed instead, and anything but "not
+// found" means a server still holds the name.
+func statServerEndpoint(ctx context.Context, hostURL *url.URL) error {
+	if hostURL.Scheme != "npipe" {
+		_, err := os.Stat(hostURL.Host)
+		return err
+	}
+	if err := probePipe(ctx, hostURL.Host); errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
 	return nil
 }
 

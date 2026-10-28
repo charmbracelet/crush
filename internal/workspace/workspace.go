@@ -202,11 +202,13 @@ type Workspace interface {
 
 	// Questions
 	//
-	// QuestionAnswer resolves the pending question with responses.
-	QuestionAnswer(responses []question.Answer) bool
+	// QuestionAnswer submits responses to the pending question batch
+	// with the given ID.
+	QuestionAnswer(batchID string, responses []question.Answer) bool
 
-	// QuestionCancel cancels the pending question.
-	QuestionCancel() bool
+	// QuestionCancel cancels the pending question batch with the
+	// given ID.
+	QuestionCancel(batchID string) bool
 
 	// FileTracker
 	FileTrackerRecordRead(ctx context.Context, sessionID, path string)

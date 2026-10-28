@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/server"
 	"github.com/charmbracelet/crush/internal/workspace"
 	"github.com/stretchr/testify/require"
@@ -418,4 +420,66 @@ func TestClientWorkspace_HostThemeReachesTUI(t *testing.T) {
 	got, err := host.GetHostTheme(ctx, wsProto.ID)
 	require.NoError(t, err)
 	require.Nil(t, got.Theme)
+}
+
+// TestClientWorkspace_QuestionsRouteByBatch drives questions pending in
+// two sessions at once through the real server: the TUI's answer and
+// cancellation each reach the batch they name, not whichever batch was
+// asked last.
+func TestClientWorkspace_QuestionsRouteByBatch(t *testing.T) {
+	xdgIsolate(t)
+	rt := newRuntimeServer(t)
+
+	cwd := t.TempDir()
+	c := rt.newClient(t, cwd)
+	wsProto, err := c.CreateWorkspace(t.Context(), proto.Workspace{Path: cwd, DataDir: t.TempDir()})
+	require.NoError(t, err)
+	srvWS, err := rt.srv.Backend().GetWorkspace(wsProto.ID)
+	require.NoError(t, err)
+
+	type askResult struct {
+		answers []question.Answer
+		err     error
+	}
+	ask := func(id string) <-chan askResult {
+		res := make(chan askResult, 1)
+		go func() {
+			answers, err := srvWS.Questions.Ask(t.Context(), question.Request{
+				ID:        id,
+				SessionID: "s-" + id,
+				Questions: []question.Question{{
+					ID:          "q-" + id,
+					Type:        question.TypeFreeText,
+					Text:        "Proceed?",
+					Description: "Batch " + id,
+				}},
+			})
+			res <- askResult{answers: answers, err: err}
+		}()
+		require.Eventually(t, func() bool {
+			return slices.ContainsFunc(srvWS.Questions.Pending(), func(r question.Request) bool { return r.ID == id })
+		}, 5*time.Second, 5*time.Millisecond, "batch %s must be pending", id)
+		return res
+	}
+	await := func(res <-chan askResult) askResult {
+		t.Helper()
+		select {
+		case got := <-res:
+			return got
+		case <-time.After(5 * time.Second):
+			require.FailNow(t, "timed out waiting for the question to resolve")
+			return askResult{}
+		}
+	}
+	resA, resB := ask("A"), ask("B")
+
+	ws := workspace.NewClientWorkspace(c, *wsProto)
+	require.True(t, ws.QuestionAnswer("A", []question.Answer{{QuestionID: "q-A", FillInText: "for A"}}))
+	got := await(resA)
+	require.NoError(t, got.err)
+	require.Len(t, got.answers, 1)
+	require.Equal(t, "for A", got.answers[0].FillInText)
+
+	require.True(t, ws.QuestionCancel("B"))
+	require.ErrorIs(t, await(resB).err, question.ErrCancelled)
 }

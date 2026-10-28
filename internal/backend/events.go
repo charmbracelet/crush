@@ -94,12 +94,12 @@ func scopePermissionPrompts(ws *Workspace) {
 }
 
 // republishPendingPrompts re-publishes the workspace's pending
-// permission requests and question batch when their session matches
-// the one a client just switched to. Without this, a prompt raised
-// while nobody viewed the session would remain invisible — and
-// therefore unanswerable — until the run was cancelled. Delivery is
-// still scoped by the per-client SSE filter, so only the session's
-// viewers (re)see the prompt.
+// permission requests and question batches when their session matches
+// the one a client just switched to. Without this, a prompt raised while
+// nobody viewed the session would remain invisible — and therefore
+// unanswerable — until the run was cancelled. Delivery is still scoped
+// by the per-client SSE filter, so only the session's viewers (re)see
+// the prompt.
 func (b *Backend) republishPendingPrompts(ctx context.Context, ws *Workspace, sessionID string) {
 	if ws.App == nil {
 		return
@@ -117,11 +117,13 @@ func (b *Backend) republishPendingPrompts(ctx context.Context, ws *Workspace, se
 		}
 	}
 	if ws.Questions != nil {
-		if req, ok := ws.Questions.Pending(); ok && b.sessionMatches(ctx, ws, req.SessionID, sessionID) {
-			ws.SendEvent(pubsub.Event[question.Request]{
-				Type:    pubsub.CreatedEvent,
-				Payload: req,
-			})
+		for _, req := range ws.Questions.Pending() {
+			if b.sessionMatches(ctx, ws, req.SessionID, sessionID) {
+				ws.SendEvent(pubsub.Event[question.Request]{
+					Type:    pubsub.CreatedEvent,
+					Payload: req,
+				})
+			}
 		}
 	}
 }

@@ -80,7 +80,7 @@ func TestWaitForServerReady_StopsAtExitingServer(t *testing.T) {
 	require.NoError(t, srv.Backend().ShutdownWorkspaces(t.Context()))
 
 	start := time.Now()
-	err := waitForServerReady(t.Context(), hostURL)
+	err := waitForServerReady(t.Context(), hostURL, nil)
 	require.ErrorIs(t, err, client.ErrServerShuttingDown)
 	require.Less(t, time.Since(start), 5*time.Second,
 		"waited on a server that will never become ready")

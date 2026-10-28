@@ -388,7 +388,18 @@ func setupClientServerWorkspace(cmd *cobra.Command) (workspace.Workspace, func()
 		return nil, nil, err
 	}
 
-	clientWs := workspace.NewClientWorkspace(c, *protoWs)
+	// A server that dies under the TUI is brought back the way startup
+	// brings one up. It runs to completion under the command's context, as
+	// at startup: abandoning it halfway would not stop a server it spawned.
+	clientWs := workspace.NewClientWorkspace(c, *protoWs, workspace.WithServerRespawn(
+		func(context.Context) error {
+			hostURL, err := server.ParseHostURL(clientHost)
+			if err != nil {
+				return fmt.Errorf("invalid host URL: %v", err)
+			}
+			return ensureServer(cmd, hostURL)
+		},
+	))
 
 	if protoWs.Config.IsConfigured() {
 		if err := clientWs.InitCoderAgent(cmd.Context()); err != nil {

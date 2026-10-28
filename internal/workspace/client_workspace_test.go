@@ -1,12 +1,19 @@
 package workspace
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -610,7 +617,19 @@ type recoveryServer struct {
 
 func (s *recoveryServer) start(t *testing.T) *client.Client {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(s.handler(t))
+	t.Cleanup(srv.Close)
+
+	u, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	c, err := client.NewClient(t.TempDir(), "tcp", u.Host)
+	require.NoError(t, err)
+	return c
+}
+
+// handler serves the scripted API, so a test can put it on any listener.
+func (s *recoveryServer) handler(t *testing.T) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		switch {
@@ -707,14 +726,7 @@ func (s *recoveryServer) start(t *testing.T) *client.Client {
 		default:
 			w.WriteHeader(http.StatusOK)
 		}
-	}))
-	t.Cleanup(srv.Close)
-
-	u, err := url.Parse(srv.URL)
-	require.NoError(t, err)
-	c, err := client.NewClient(t.TempDir(), "tcp", u.Host)
-	require.NoError(t, err)
-	return c
+	})
 }
 
 func (s *recoveryServer) snapshot(f func(*recoveryServer)) {
@@ -984,6 +996,152 @@ func TestClientWorkspace_EscalatesUnrecoverableConnection(t *testing.T) {
 	srv.snapshot(func(s *recoveryServer) { creates = s.creates })
 	require.GreaterOrEqual(t, creates, maxRecoveryEscalate,
 		"the loop must keep retrying rather than giving up")
+
+	ws.Shutdown()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("runSubscription did not return after Shutdown")
+	}
+}
+
+// shortSocketPath returns a unix socket path in a fresh directory, short
+// enough for the macOS sun_path limit that t.TempDir() can exceed.
+func shortSocketPath(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "crush-")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return filepath.Join(dir, "s.sock")
+}
+
+// TestClientWorkspace_RespawnsDeadServer is the dead-server regression: the
+// server process died (kill -9, OOM, a crash), so nothing listens on its
+// address any more. The loop used to retry that address forever, leaving
+// the TUI broken until some other crush process happened to spawn a server.
+// It must bring a server back through the respawn hook and re-register the
+// workspace on it.
+func TestClientWorkspace_RespawnsDeadServer(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows servers listen on named pipes; see the npipe twin")
+	}
+	sock := shortSocketPath(t)
+	testRespawnsDeadServer(t, "unix", sock, func() (net.Listener, error) {
+		// Clear the dead server's socket first, as ensureServer does.
+		if err := os.Remove(sock); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return nil, err
+		}
+		ln, err := (&net.ListenConfig{}).Listen(context.Background(), "unix", sock)
+		if err != nil {
+			return nil, err
+		}
+		// A killed server leaves its socket file behind, so dialing it is
+		// refused rather than finding nothing.
+		ln.(*net.UnixListener).SetUnlinkOnClose(false)
+		return ln, nil
+	})
+}
+
+// testRespawnsDeadServer kills a server the client is subscribed to, by
+// dropping every connection and listener, and expects the client to bring
+// up the next server through its respawn hook and re-register the
+// workspace there. listen binds the server's address.
+func testRespawnsDeadServer(t *testing.T, network, addr string, listen func() (net.Listener, error)) {
+	t.Helper()
+	t.Cleanup(SetSSEBackoffForTest(time.Millisecond, 5*time.Millisecond))
+
+	serve := func(s *recoveryServer) (*http.Server, error) {
+		ln, err := listen()
+		if err != nil {
+			return nil, err
+		}
+		hs := &http.Server{Handler: s.handler(t)}
+		go func() { _ = hs.Serve(ln) }()
+		t.Cleanup(func() { _ = hs.Close() })
+		return hs, nil
+	}
+
+	dead := &recoveryServer{liveID: "ws-1"}
+	dying, err := serve(dead)
+	require.NoError(t, err)
+
+	c, err := client.NewClient(t.TempDir(), network, addr)
+	require.NoError(t, err)
+
+	// The next server knows nothing of the dead one's workspaces.
+	next := &recoveryServer{nextID: "ws-2"}
+	var respawns atomic.Int32
+	ws := NewClientWorkspace(c, proto.Workspace{ID: "ws-1", Path: "/tmp/respawn"},
+		WithServerRespawn(func(context.Context) error {
+			if _, err := serve(next); err != nil {
+				return err
+			}
+			respawns.Add(1)
+			return nil
+		}))
+	done := make(chan struct{})
+	go func() {
+		ws.runSubscription(func(tea.Msg) {})
+		close(done)
+	}()
+
+	require.Eventually(t, func() bool {
+		var streams int
+		dead.snapshot(func(s *recoveryServer) { streams = s.streams })
+		return streams > 0
+	}, 3*time.Second, 5*time.Millisecond)
+	require.NoError(t, dying.Close())
+
+	require.Eventually(t, func() bool { return ws.workspaceID() == "ws-2" },
+		5*time.Second, 5*time.Millisecond,
+		"a dead server must be brought back and the workspace re-registered on it")
+	require.Eventually(t, func() bool {
+		var streams int
+		next.snapshot(func(s *recoveryServer) { streams = s.streams })
+		return streams > 0
+	}, 3*time.Second, 5*time.Millisecond,
+		"the event stream must be re-established on the new server")
+	require.EqualValues(t, 1, respawns.Load(), "one dead server needs one replacement")
+
+	ws.Shutdown()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("runSubscription did not return after Shutdown")
+	}
+}
+
+// TestClientWorkspace_EscalatesWhenRespawnFails checks a server that cannot
+// be brought back is escalated like a workspace that cannot be re-registered:
+// the loop keeps trying, but the UI is told the connection looks stuck
+// rather than showing a transient notice that quietly expires.
+func TestClientWorkspace_EscalatesWhenRespawnFails(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("dials a unix socket path")
+	}
+	t.Cleanup(SetSSEBackoffForTest(time.Millisecond, 2*time.Millisecond))
+
+	// Nothing ever listens here, so every dial finds no server.
+	c, err := client.NewClient(t.TempDir(), "unix", shortSocketPath(t))
+	require.NoError(t, err)
+
+	var respawns atomic.Int32
+	ws := NewClientWorkspace(c, proto.Workspace{ID: "ws-1", Path: "/tmp/respawn"},
+		WithServerRespawn(func(context.Context) error {
+			respawns.Add(1)
+			return errors.New("server failed to start")
+		}))
+	rec := &connectionRecorder{}
+	done := make(chan struct{})
+	go func() {
+		ws.runSubscription(rec.send)
+		close(done)
+	}()
+
+	require.Eventually(t, rec.sawStuck, 5*time.Second, 5*time.Millisecond,
+		"repeated respawn failures must escalate to a persistent notice")
+	require.GreaterOrEqual(t, int(respawns.Load()), maxRecoveryEscalate,
+		"the loop must keep trying to bring the server back")
 
 	ws.Shutdown()
 	select {

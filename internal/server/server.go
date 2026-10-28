@@ -117,6 +117,8 @@ type Server struct {
 
 	h  *http.Server
 	ln net.Listener
+	// cancelRequests cancels the context every request derives from.
+	cancelRequests context.CancelFunc
 
 	backend *backend.Backend
 	logger  *slog.Logger
@@ -208,9 +210,15 @@ func (s *Server) installHandler() {
 	}
 	mux.HandleFunc("GET /v1/docs/", c.handleDocsIndex)
 	mux.HandleFunc("GET /v1/docs/openapi.json", c.handleDocsSpec)
+	// http.Server.Shutdown waits for active requests without ever
+	// cancelling them, so requests derive from a context Shutdown can
+	// cancel itself.
+	baseCtx, cancel := context.WithCancel(context.Background())
+	s.cancelRequests = cancel
 	s.h = &http.Server{
-		Protocols: &p,
-		Handler:   s.recoverHandler(s.loggingHandler(mux)),
+		Protocols:   &p,
+		Handler:     s.recoverHandler(s.loggingHandler(mux)),
+		BaseContext: func(net.Listener) context.Context { return baseCtx },
 	}
 }
 
@@ -265,12 +273,19 @@ func (s *Server) Close() error {
 	return s.h.Close()
 }
 
-// Shutdown tears down hosted workspaces, then gracefully shuts down the
-// server without interrupting active connections. ctx bounds both. The
-// idle-shutdown path relies on the teardown being a no-op with none left.
+// Shutdown tears down hosted workspaces, then cancels in-flight requests
+// and gracefully shuts down the server, waiting for their handlers to
+// return. ctx bounds both. The idle-shutdown path relies on the teardown
+// being a no-op with none left.
 func (s *Server) Shutdown(ctx context.Context) error {
 	defer func() { s.closeListener() }()
 	err := s.backend.ShutdownWorkspaces(ctx)
+	// With the workspaces gone no request has work left to do, and one
+	// blocked on its context, such as a running shell command, would
+	// otherwise hold the shutdown until ctx expires and then be
+	// abandoned. Cancelling only now keeps event streams open to deliver
+	// the teardown's final events.
+	s.cancelRequests()
 	return errors.Join(err, s.h.Shutdown(ctx))
 }
 

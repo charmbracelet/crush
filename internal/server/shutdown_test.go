@@ -1,19 +1,28 @@
 package server
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/backend"
+	"github.com/charmbracelet/crush/internal/db"
+	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
@@ -257,4 +266,70 @@ func sendRequest(ctx context.Context, base, method, path, body string) (int, err
 	defer res.Body.Close()
 	_, _ = io.Copy(io.Discard, res.Body)
 	return res.StatusCode, nil
+}
+
+// TestShutdown_CancelsInFlightRequests covers a '!' shell command still
+// running when the server stops. The command runs on its request's
+// context, which the workspace teardown cannot reach, so Shutdown must
+// cancel in-flight requests itself instead of waiting them out.
+func TestShutdown_CancelsInFlightRequests(t *testing.T) {
+	t.Parallel()
+
+	// Serve on a real listener: an httptest server around Handler would
+	// bypass the server's own http.Server.
+	srv := NewServer(nil, "tcp", "127.0.0.1:0")
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	go func() { _ = srv.Serve(ln) }()
+
+	// The handler persists the command's output, so the workspace needs
+	// a message store.
+	conn, err := db.Connect(t.Context(), t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { conn.Close() })
+	ws := &backend.Workspace{
+		ID:   uuid.New().String(),
+		Path: t.TempDir(),
+		App:  &app.App{Messages: message.NewService(db.New(conn))},
+	}
+	backend.SetWorkspaceShutdownFnForTest(ws, func() {})
+	backend.InsertWorkspaceForTest(srv.backend, ws)
+
+	// Windows has no sleep command; ping waits about as long.
+	command := "touch started && sleep 30"
+	if runtime.GOOS == "windows" {
+		command = "touch started && ping -n 30 127.0.0.1"
+	}
+	body, err := json.Marshal(proto.ShellCommandRequest{Command: command})
+	require.NoError(t, err)
+	url := fmt.Sprintf("http://%s/v1/workspaces/%s/agent/sessions/%s/shell",
+		ln.Addr(), ws.ID, uuid.New())
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, url, bytes.NewReader(body))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+
+	replied := make(chan error, 1)
+	go func() {
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil {
+			resp.Body.Close()
+		}
+		replied <- err
+	}()
+
+	require.Eventually(t, func() bool {
+		_, err := os.Stat(filepath.Join(ws.Path, "started"))
+		return err == nil
+	}, 10*time.Second, 10*time.Millisecond, "the shell command never started")
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, srv.Shutdown(ctx),
+		"shutdown must interrupt the running command, not wait it out")
+	select {
+	case err := <-replied:
+		require.NoError(t, err, "the client must get a reply")
+	case <-time.After(5 * time.Second):
+		t.Fatal("the shell request did not return after shutdown")
+	}
 }

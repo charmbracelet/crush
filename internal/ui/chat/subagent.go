@@ -107,7 +107,7 @@ func (s *SubAgentReportItem) RawRender(width int) string {
 	if s.failed {
 		status = ToolStatusError
 	}
-	header := subagentHeader(s.sty, status, s.label, s.model, cappedWidth, nil)
+	header := subagentHeader(s.sty, status, "Subagent Report", s.label, s.model, cappedWidth, nil)
 
 	bodyWidth := cappedWidth - toolBodyLeftPaddingTotal
 	// Already padded to sit under the header text.

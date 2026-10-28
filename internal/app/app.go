@@ -255,6 +255,13 @@ func (app *App) Events(ctx context.Context) <-chan pubsub.Event[tea.Msg] {
 	return app.events.Subscribe(ctx)
 }
 
+// EventsWithOverflow is like [App.Events], but also returns a channel that
+// is closed the first time an event is dropped for this caller because it
+// fell behind. See [pubsub.Broker.SubscribeWithOverflow].
+func (app *App) EventsWithOverflow(ctx context.Context) (<-chan pubsub.Event[tea.Msg], <-chan struct{}) {
+	return app.events.SubscribeWithOverflow(ctx)
+}
+
 // SendEvent publishes a message to all event subscribers.
 func (app *App) SendEvent(msg tea.Msg) {
 	app.events.Publish(pubsub.UpdatedEvent, msg)

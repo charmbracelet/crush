@@ -161,7 +161,10 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 				"question prompts are scoped to the session the client currently "+
 				"views (see POST current-session): they are only delivered to clients "+
 				"viewing the session that raised them, and clients viewing no session "+
-				"receive none. All other events are workspace-wide.").
+				"receive none. All other events are workspace-wide. A client that "+
+				"falls so far behind that events are dropped for it has its stream "+
+				"closed; it should reconnect, re-report its current session, which "+
+				"re-delivers pending prompts, and re-read the state it shows.").
 			Tags("workspaces").
 			PathParam("id", "Workspace ID").
 			RequiredQueryParam("client_id", "Client ID (UUID)").

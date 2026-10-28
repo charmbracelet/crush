@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 
 	"github.com/charmbracelet/crush/internal/backend"
@@ -218,7 +219,7 @@ func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.R
 	// detect a live subscriber; subscribing first guarantees that
 	// once a client appears attached, any published event is
 	// delivered rather than dropped on a not-yet-registered stream.
-	events, err := c.backend.SubscribeEvents(r.Context(), id)
+	events, overflow, err := c.backend.SubscribeEventsWithOverflow(r.Context(), id)
 	if err != nil {
 		c.handleError(w, r, err)
 		return
@@ -245,6 +246,19 @@ func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.R
 		select {
 		case <-r.Context().Done():
 			c.server.logDebug(r, "Stopping event stream")
+			return
+		case <-overflow:
+			// The client stopped keeping up (a suspended or wedged
+			// terminal) and events were dropped for it, possibly a
+			// permission request or a run's completion. End the stream
+			// rather than leave a silent gap. A client with a reconnect
+			// loop (the TUI) re-reports its session, which re-delivers
+			// pending permission and question prompts, and reloads what
+			// it shows. Nothing re-delivers a dropped RunComplete:
+			// `crush run` has no reconnect loop and treats the closed
+			// stream as a failed run.
+			slog.Warn("Closing event stream of a client that fell behind",
+				"workspace", id, "client_id", clientID)
 			return
 		case ev, ok := <-events:
 			if !ok {

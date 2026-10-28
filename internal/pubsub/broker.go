@@ -20,7 +20,9 @@
 //     coalesced away.
 //
 // Drop counters ([Broker.DropCount], [Broker.MustDeliverDropCount]) are
-// exposed so callers can surface saturation in telemetry.
+// exposed so callers can surface saturation in telemetry. A subscriber
+// that cannot tolerate gaps subscribes with
+// [Broker.SubscribeWithOverflow] to learn when an event is dropped for it.
 package pubsub
 
 import (
@@ -46,7 +48,9 @@ const (
 )
 
 type Broker[T any] struct {
-	subs                 map[chan Event[T]]struct{}
+	// subs maps each subscriber's channel to the function to call when
+	// an event is dropped for it, or to nil.
+	subs                 map[chan Event[T]]func()
 	mu                   sync.RWMutex
 	done                 chan struct{}
 	subCount             int
@@ -62,7 +66,7 @@ func NewBroker[T any]() *Broker[T] {
 
 func NewBrokerWithOptions[T any](channelBufferSize int) *Broker[T] {
 	return &Broker[T]{
-		subs:               make(map[chan Event[T]]struct{}),
+		subs:               make(map[chan Event[T]]func()),
 		done:               make(chan struct{}),
 		channelBufferSize:  channelBufferSize,
 		mustDeliverTimeout: defaultMustDeliverTimeout,
@@ -102,6 +106,21 @@ func (b *Broker[T]) Shutdown() {
 }
 
 func (b *Broker[T]) Subscribe(ctx context.Context) <-chan Event[T] {
+	return b.subscribe(ctx, nil)
+}
+
+// SubscribeWithOverflow is like [Broker.Subscribe] for subscribers that
+// cannot tolerate gaps, such as a stream to a remote client. The second
+// channel is closed the first time an event is dropped for this
+// subscriber, by [Broker.Publish] finding its buffer full or by
+// [Broker.PublishMustDeliver] timing out. The subscriber should then stop
+// consuming and resynchronize from the source of truth.
+func (b *Broker[T]) SubscribeWithOverflow(ctx context.Context) (<-chan Event[T], <-chan struct{}) {
+	overflow := make(chan struct{})
+	return b.subscribe(ctx, sync.OnceFunc(func() { close(overflow) })), overflow
+}
+
+func (b *Broker[T]) subscribe(ctx context.Context, onDrop func()) <-chan Event[T] {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -114,7 +133,7 @@ func (b *Broker[T]) Subscribe(ctx context.Context) <-chan Event[T] {
 	}
 
 	sub := make(chan Event[T], b.channelBufferSize)
-	b.subs[sub] = struct{}{}
+	b.subs[sub] = onDrop
 	b.subCount++
 
 	go func() {
@@ -174,7 +193,7 @@ func (b *Broker[T]) Publish(t EventType, payload T) {
 
 	event := Event[T]{Type: t, Payload: payload}
 
-	for sub := range b.subs {
+	for sub, onDrop := range b.subs {
 		select {
 		case sub <- event:
 		default:
@@ -183,6 +202,9 @@ func (b *Broker[T]) Publish(t EventType, payload T) {
 			// observable.
 			b.dropCount.Add(1)
 			slog.Warn("Pubsub buffer full; dropping event", "type", t)
+			if onDrop != nil {
+				onDrop()
+			}
 		}
 	}
 }
@@ -211,7 +233,7 @@ func (b *Broker[T]) PublishMustDeliver(ctx context.Context, t EventType, payload
 	event := Event[T]{Type: t, Payload: payload}
 	timeout := b.mustDeliverTimeout
 
-	for sub := range b.subs {
+	for sub, onDrop := range b.subs {
 		// Fast path: non-blocking send.
 		select {
 		case sub <- event:
@@ -228,6 +250,9 @@ func (b *Broker[T]) PublishMustDeliver(ctx context.Context, t EventType, payload
 			b.mustDeliverDropCount.Add(1)
 			slog.Error("PublishMustDeliver timed out delivering event",
 				"type", t, "timeout", timeout)
+			if onDrop != nil {
+				onDrop()
+			}
 		case <-ctx.Done():
 			timer.Stop()
 			return

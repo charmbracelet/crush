@@ -3,6 +3,7 @@ package lock
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -165,4 +166,38 @@ func TestFile_ConcurrentAcquirers(t *testing.T) {
 
 	require.Equal(t, n, finished)
 	require.Equal(t, 1, maxSeen, "lock must be mutually exclusive")
+}
+
+// TestHeldLockLeavesContentsAccessible verifies that holding the lock does
+// not stop the file's contents being written and read through other
+// handles, so a holder can record details for contenders to read. Byte-range
+// locks on Windows are mandatory, so this only holds there if the locked
+// range stays clear of the contents.
+func TestHeldLockLeavesContentsAccessible(t *testing.T) {
+	t.Parallel()
+	acquirers := map[string]func(path string) (func(), error){
+		"TryFile": TryFile,
+		"File": func(path string) (func(), error) {
+			return File(context.Background(), path)
+		},
+	}
+	for name, acquire := range acquirers {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			path := filepath.Join(t.TempDir(), "test.lock")
+
+			release, err := acquire(path)
+			require.NoError(t, err)
+			t.Cleanup(release)
+
+			payload := []byte(`{"pid": 1}` + "\n")
+			require.NoError(t, os.WriteFile(path, payload, 0o600))
+			got, err := os.ReadFile(path)
+			require.NoError(t, err)
+			require.Equal(t, payload, got)
+
+			_, err = TryFile(path)
+			require.ErrorIs(t, err, ErrContended, "lock must still be held")
+		})
+	}
 }

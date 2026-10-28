@@ -1555,6 +1555,7 @@ func protoToMessage(m proto.Message) message.Message {
 				Label:  v.Label,
 				Output: v.Output,
 				Failed: v.Failed,
+				Model:  v.Model,
 			})
 		}
 	}

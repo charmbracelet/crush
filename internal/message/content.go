@@ -181,6 +181,8 @@ type SubAgentReport struct {
 	Label  string `json:"label"`
 	Output string `json:"output"`
 	Failed bool   `json:"failed,omitempty"`
+	// Model is the provider/model the sub-agent ran on, for display.
+	Model string `json:"model,omitempty"`
 }
 
 func (SubAgentReport) isPart() {}

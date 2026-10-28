@@ -74,7 +74,7 @@ func (m *UI) subAgentRow(status chat.DispatchStatus, width int) string {
 	if !status.Running {
 		return common.Status(t, common.StatusOpts{
 			Icon:        t.Resource.OfflineIcon.String(),
-			Title:       t.Resource.Name.Render(status.Label),
+			Title:       t.Resource.Name.Render(chat.SubagentDisplayName(status.Label)),
 			Description: "done",
 		}, width)
 	}
@@ -88,7 +88,7 @@ func (m *UI) subAgentRow(status chat.DispatchStatus, width int) string {
 	}
 	return common.Status(t, common.StatusOpts{
 		Icon:        t.Resource.WorkingIcon.Render(subAgentSpinner(time.Now())),
-		Title:       t.Resource.Name.Render(status.Label),
+		Title:       t.Resource.Name.Render(chat.SubagentDisplayName(status.Label)),
 		Description: description,
 	}, width)
 }
@@ -102,7 +102,7 @@ func (m *UI) subAgentsInfo(statuses []chat.DispatchStatus, width, maxItems int, 
 	}
 
 	t := m.com.Styles
-	title := t.Resource.Heading.Render("Sub-agents")
+	title := t.Resource.Heading.Render("Subagents")
 	if isSection {
 		title = common.Section(t, title, width)
 	}

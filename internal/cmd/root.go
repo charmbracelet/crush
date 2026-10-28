@@ -507,6 +507,10 @@ func createWorkspaceOnLiveServer(
 		if err := replace(); err != nil {
 			return nil, err
 		}
+		// The refused create left a kept-alive connection to the exiting
+		// server, which can outlive the handover and would refuse the
+		// retry as well. Drop it so the retry dials the replacement.
+		c.CloseIdleConnections()
 	}
 	return nil, fmt.Errorf("failed to create workspace: server kept shutting down")
 }

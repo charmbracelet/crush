@@ -496,6 +496,7 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 		cancel:       wsCancel,
 		clients:      make(map[string]*clientState),
 	}
+	scopePermissionPrompts(ws)
 
 	b.mu.Lock()
 	// Re-check admission: the client may have retired while the slow

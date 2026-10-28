@@ -2,11 +2,13 @@ package permission
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -615,15 +617,14 @@ func TestPermissionService_ResolveIdempotency(t *testing.T) {
 	})
 }
 
-func TestActiveRequest(t *testing.T) {
+func TestActiveRequests(t *testing.T) {
 	t.Parallel()
 
 	t.Run("reports the pending request only while resolvable", func(t *testing.T) {
 		t.Parallel()
 		service := NewPermissionService("/tmp", false, nil, nil)
 
-		_, ok := service.ActiveRequest()
-		assert.False(t, ok, "no request pending yet")
+		assert.Empty(t, service.ActiveRequests(), "no request pending yet")
 
 		events := service.Subscribe(t.Context())
 		done := make(chan bool, 1)
@@ -640,16 +641,15 @@ func TestActiveRequest(t *testing.T) {
 		}()
 
 		event := <-events
-		active, ok := service.ActiveRequest()
-		require.True(t, ok, "request must be active while awaiting a decision")
-		assert.Equal(t, event.Payload.ID, active.ID)
-		assert.Equal(t, "s1", active.SessionID)
+		active := service.ActiveRequests()
+		require.Len(t, active, 1, "request must be active while awaiting a decision")
+		assert.Equal(t, event.Payload.ID, active[0].ID)
+		assert.Equal(t, "s1", active[0].SessionID)
 
-		assert.True(t, service.Grant(active))
+		assert.True(t, service.Grant(active[0]))
 		assert.True(t, <-done)
 
-		_, ok = service.ActiveRequest()
-		assert.False(t, ok, "resolved request must no longer be active")
+		assert.Empty(t, service.ActiveRequests(), "resolved request must no longer be active")
 	})
 
 	t.Run("does not report a request whose waiter was cancelled", func(t *testing.T) {
@@ -672,14 +672,119 @@ func TestActiveRequest(t *testing.T) {
 		}()
 
 		<-events
-		_, ok := service.ActiveRequest()
-		require.True(t, ok, "request must be active before cancellation")
+		require.Len(t, service.ActiveRequests(), 1, "request must be active before cancellation")
 
 		cancel()
 		<-done
 
-		_, ok = service.ActiveRequest()
-		assert.False(t, ok, "cancelled request cannot be resolved and must not be reported")
+		assert.Empty(t, service.ActiveRequests(), "cancelled request cannot be resolved and must not be reported")
+	})
+}
+
+// TestRequestScopes covers which earlier requests a request waits for
+// before it is shown: every earlier one by default, so a single UI that
+// shows the prompts of all sessions gets them one at a time, and only
+// those of its own scope once a SessionScope is set.
+func TestRequestScopes(t *testing.T) {
+	t.Parallel()
+
+	request := func(t *testing.T, service Service, wg *sync.WaitGroup, sessionID string) <-chan bool {
+		granted := make(chan bool, 1)
+		wg.Go(func() {
+			ok, _ := service.Request(t.Context(), CreatePermissionRequest{
+				SessionID:  sessionID,
+				ToolCallID: "call-" + sessionID,
+				ToolName:   "bash",
+				Action:     "execute",
+				Path:       "/tmp",
+			})
+			granted <- ok
+		})
+		return granted
+	}
+	next := func(t *testing.T, events <-chan pubsub.Event[PermissionRequest]) PermissionRequest {
+		t.Helper()
+		select {
+		case ev := <-events:
+			return ev.Payload
+		case <-time.After(2 * time.Second):
+			t.Fatal("permission request was never published")
+			return PermissionRequest{}
+		}
+	}
+	none := func(t *testing.T, events <-chan pubsub.Event[PermissionRequest], why string) {
+		t.Helper()
+		select {
+		case ev := <-events:
+			t.Fatalf("%s: got request for session %q", why, ev.Payload.SessionID)
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+
+	t.Run("requests wait for every earlier request by default", func(t *testing.T) {
+		t.Parallel()
+		service := NewPermissionService("/tmp", false, nil, nil)
+		events := service.Subscribe(t.Context())
+		var wg sync.WaitGroup
+
+		done1 := request(t, service, &wg, "s1")
+		first := next(t, events)
+		require.Equal(t, "s1", first.SessionID)
+
+		done2 := request(t, service, &wg, "s2")
+		none(t, events, "another session's request must wait while one is pending")
+
+		require.True(t, service.Grant(first))
+		require.True(t, <-done1)
+		second := next(t, events)
+		require.Equal(t, "s2", second.SessionID)
+		require.True(t, service.Grant(second))
+		require.True(t, <-done2)
+		wg.Wait()
+	})
+
+	t.Run("requests only wait for earlier requests in their scope", func(t *testing.T) {
+		t.Parallel()
+		service := NewPermissionService("/tmp", false, nil, nil)
+		// Sessions "s1" and "s1/child" share scope "s1".
+		service.SetSessionScope(func(_ context.Context, sessionID string) string {
+			root, _, _ := strings.Cut(sessionID, "/")
+			return root
+		})
+		events := service.Subscribe(t.Context())
+		var wg sync.WaitGroup
+
+		done1 := request(t, service, &wg, "s1")
+		first := next(t, events)
+		require.Equal(t, "s1", first.SessionID)
+
+		doneChild := request(t, service, &wg, "s1/child")
+		done2 := request(t, service, &wg, "s2")
+		second := next(t, events)
+		require.Equal(t, "s2", second.SessionID, "another scope's request must not wait")
+		none(t, events, "a request must wait for the pending request in its scope")
+
+		var activeIDs []string
+		for _, req := range service.ActiveRequests() {
+			activeIDs = append(activeIDs, req.ID)
+		}
+		require.ElementsMatch(t, []string{first.ID, second.ID}, activeIDs,
+			"each scope's pending request must be active")
+
+		require.True(t, service.Grant(second))
+		require.True(t, <-done2)
+		require.True(t, service.Grant(first))
+		require.True(t, <-done1)
+		child := next(t, events)
+		require.Equal(t, "s1/child", child.SessionID)
+		require.True(t, service.Deny(child))
+		require.False(t, <-doneChild)
+		wg.Wait()
+
+		ps := service.(*permissionService)
+		ps.requestLocksMu.Lock()
+		defer ps.requestLocksMu.Unlock()
+		require.Empty(t, ps.requestLocks, "idle scopes must not keep their locks")
 	})
 }
 

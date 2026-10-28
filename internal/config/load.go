@@ -137,7 +137,7 @@ func Load(ctx context.Context, workingDir, dataDir string, debug bool) (*ConfigS
 
 	env := env.New()
 	// Configure providers
-	valueResolver := NewShellVariableResolver(env)
+	valueResolver := NewShellVariableResolver(env, WithWorkingDir(workingDir))
 	store.resolver = valueResolver
 
 	// Hold writeMu during initial load to prevent configureProviders

@@ -295,3 +295,61 @@ func TestListen_RestrictsSocketToOwner(t *testing.T) {
 	require.NoError(t, err, "owner should still be able to connect")
 	_ = conn.Close()
 }
+
+// TestListen_CloseKeepsReplacement covers a server that is still shutting
+// down when a client gives up on it, removes its socket and spawns a
+// replacement on the same path. Closing the old listener afterwards must
+// leave the replacement's socket in place.
+func TestListen_CloseKeepsReplacement(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "s.sock")
+
+	old, _, err := listen("unix", path)
+	require.NoError(t, err)
+
+	require.NoError(t, os.Remove(path))
+	repl, _, err := listen("unix", path)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = repl.Close()
+	})
+
+	require.NoError(t, old.Close())
+
+	_, statErr := os.Stat(path)
+	require.NoError(t, statErr,
+		"closing the old listener must not remove the replacement's socket")
+	conn, dialErr := net.DialTimeout("unix", path, 200*time.Millisecond) //nolint:noctx
+	require.NoError(t, dialErr, "the replacement's socket should accept dials")
+	_ = conn.Close()
+}
+
+// TestListen_CloseRemovesOwnSocket checks that closing a listener still
+// removes its own socket file, so a normal shutdown leaves nothing stale
+// behind, and that closing it again leaves a later socket alone.
+func TestListen_CloseRemovesOwnSocket(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "s.sock")
+
+	ln, _, err := listen("unix", path)
+	require.NoError(t, err)
+	require.NoError(t, ln.Close())
+	_, statErr := os.Stat(path)
+	require.ErrorIs(t, statErr, fs.ErrNotExist,
+		"closing the listener should remove its socket file")
+
+	repl, _, err := listen("unix", path)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = repl.Close()
+	})
+
+	_ = ln.Close()
+	_, statErr = os.Stat(path)
+	require.NoError(t, statErr,
+		"closing the listener again must not remove a later socket")
+}

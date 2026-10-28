@@ -33,47 +33,38 @@ func (c *coordinator) parentModel(parentAgentID string) Model {
 func (c *coordinator) resolveModelOverride(params AgentDispatchParams, parentModel Model) (sel config.SelectedModel, ok bool, refusal string) {
 	provider := strings.TrimSpace(params.Provider)
 	model := strings.TrimSpace(params.Model)
-	level := strings.TrimSpace(params.ReasoningLevel)
-	think := params.Think
-	if provider == "" && model == "" && think == nil && level == "" {
+	reasoning := strings.TrimSpace(params.Reasoning)
+	switch {
+	case provider == "" && model == "" && reasoning == "":
 		return config.SelectedModel{}, false, ""
-	}
-	if provider != "" && model == "" {
+	case provider != "" && model == "":
 		return config.SelectedModel{}, false, "provider is given without model; pass model as well"
-	}
-	if model == "" {
-		// Only reasoning settings were given: they apply to the sub-agent's
-		// default model, keeping its other configured settings.
+	case model == "":
+		// Reasoning alone rides the sub-agent's default selection.
 		sub := c.subAgentModels().Large
 		if sub.Model == nil {
 			return config.SelectedModel{}, false, "no sub-agent model is configured"
 		}
 		sel = sub.ModelCfg
-	} else {
+	default:
 		if provider == "" {
 			if parentModel.Model == nil {
 				return config.SelectedModel{}, false, "the parent agent has no model to take a provider from"
 			}
 			provider = parentModel.ModelCfg.Provider
 		}
-		// A fresh selection: everything but the override itself is the
-		// model's own defaults.
-		sel = config.SelectedModel{
-			Provider: provider,
-			Model:    model,
-		}
+		// A fresh selection: everything else is the model's own default.
+		sel = config.SelectedModel{Provider: provider, Model: model}
 	}
-	if think != nil {
-		sel.Think = *think
+	catwalkModel, refusal := c.availableModel(sel)
+	if refusal == "" {
+		refusal = applyReasoning(&sel, catwalkModel, reasoning)
 	}
-	if level != "" {
-		sel.ReasoningEffort = level
-	}
-	return sel, true, c.validateModelOverride(sel, level, think != nil && *think)
+	return sel, true, refusal
 }
 
-// validateModelOverride refuses anything the dispatch tool's catalog would not list.
-func (c *coordinator) validateModelOverride(sel config.SelectedModel, level string, think bool) string {
+// availableModel finds a selection's model among what the catalog would list.
+func (c *coordinator) availableModel(sel config.SelectedModel) (catwalk.Model, string) {
 	cfg := c.cfg.Config()
 	provider, ok := cfg.Providers.Get(sel.Provider)
 	if !ok || provider.Disable {
@@ -81,20 +72,45 @@ func (c *coordinator) validateModelOverride(sel config.SelectedModel, level stri
 		for _, p := range usableProviders(cfg) {
 			ids = append(ids, p.ID)
 		}
-		return fmt.Sprintf("provider %q is not available; use one of: %s", sel.Provider, strings.Join(ids, ", "))
+		return catwalk.Model{}, fmt.Sprintf("provider %q is not available; use one of: %s", sel.Provider, strings.Join(ids, ", "))
 	}
 	models := provider.UsableModels()
 	idx := slices.IndexFunc(models, func(m catwalk.Model) bool { return m.ID == sel.Model })
 	if idx < 0 {
-		return fmt.Sprintf("model %q is not available from provider %q; use one of: %s", sel.Model, sel.Provider, modelIDList(models))
+		return catwalk.Model{}, fmt.Sprintf("model %q is not available from provider %q; use one of: %s", sel.Model, sel.Provider, modelIDList(models))
 	}
-	if level != "" {
-		if err := cfg.ValidateReasoningEffort(sel.Provider, sel.Model, level); err != nil {
-			return err.Error()
+	return models[idx], ""
+}
+
+// reasoningOptions lists the values a model takes for reasoning: its effort
+// levels, or on and off for a model that can only toggle thinking.
+func reasoningOptions(m catwalk.Model) []string {
+	if levels := m.ReasoningEffortLevels(); len(levels) > 0 {
+		return levels
+	}
+	if m.Reasoning.Thinking == catwalk.ThinkingToggleable {
+		return []string{"on", "off"}
+	}
+	return nil
+}
+
+// applyReasoning sets the selection's effort level or thinking toggle,
+// whichever the model reasons with.
+func applyReasoning(sel *config.SelectedModel, m catwalk.Model, reasoning string) string {
+	if reasoning == "" {
+		return ""
+	}
+	options := reasoningOptions(m)
+	if !slices.Contains(options, reasoning) {
+		if len(options) == 0 {
+			return fmt.Sprintf("model %q does not support reasoning", m.ID)
 		}
+		return fmt.Sprintf("model %q takes reasoning %s", m.ID, strings.Join(options, ", "))
 	}
-	if think && !models[idx].CanReason() {
-		return fmt.Sprintf("model %q does not support thinking", sel.Model)
+	if len(m.ReasoningEffortLevels()) > 0 {
+		sel.ReasoningEffort = reasoning
+	} else {
+		sel.Think = reasoning == "on"
 	}
 	return ""
 }
@@ -113,7 +129,11 @@ func modelIDList(models []catwalk.Model) string {
 	listed := models[:min(len(models), catalogModelsPerProvider)]
 	ids := make([]string, 0, len(listed))
 	for _, m := range listed {
-		ids = append(ids, m.ID)
+		if options := reasoningOptions(m); len(options) > 0 {
+			ids = append(ids, m.ID+" ["+strings.Join(options, "|")+"]")
+		} else {
+			ids = append(ids, m.ID)
+		}
 	}
 	list := strings.Join(ids, ", ")
 	if extra := len(models) - len(listed); extra > 0 {

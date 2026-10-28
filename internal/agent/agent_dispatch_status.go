@@ -37,18 +37,13 @@ type dispatchRecord struct {
 	// agent or agentic_fetch tool when a blocking call was moved to the
 	// background. It picks which agent a follow-up reopens into.
 	Tool string
-	// Model override the dispatch resolved. When a dispatch succeeded, the
-	// tool result's metadata overwrites these with the selection that
-	// actually ran, provider included; until it is seen they hold the raw
-	// call params. All four are empty when the sub-agent runs on the shared
-	// sub-agent model. ReasoningOnly marks reasoning settings given without
-	// a model, which ride the sub-agent's default selection instead of an
-	// explicit one.
-	Model          string
-	Provider       string
-	Think          *bool
-	ReasoningLevel string
-	ReasoningOnly  bool
+	// The model override, from the call until its result records the
+	// resolved provider. Empty without one. ReasoningOnly means reasoning
+	// without a model, which rides the sub-agent's default selection.
+	Model         string
+	Provider      string
+	Reasoning     string
+	ReasoningOnly bool
 	// Open is true while the latest dispatch or follow-up has no report.
 	Open       bool
 	LastReport *message.SubAgentReport
@@ -96,19 +91,18 @@ func dispatchHistory(msgs []message.Message) dispatchRecords {
 				access = accessRead
 			}
 			record := &dispatchRecord{
-				Label:          label,
-				Access:         access,
-				Task:           params.Prompt,
-				MessageID:      msg.ID,
-				CallID:         call.ID,
-				Tool:           AgentDispatchToolName,
-				Model:          strings.TrimSpace(params.Model),
-				Provider:       strings.TrimSpace(params.Provider),
-				Think:          params.Think,
-				ReasoningLevel: strings.TrimSpace(params.ReasoningLevel),
-				ReasoningOnly:  strings.TrimSpace(params.Model) == "" && (params.Think != nil || strings.TrimSpace(params.ReasoningLevel) != ""),
-				Open:           true,
-				prev:           records.byLabel[label],
+				Label:         label,
+				Access:        access,
+				Task:          params.Prompt,
+				MessageID:     msg.ID,
+				CallID:        call.ID,
+				Tool:          AgentDispatchToolName,
+				Model:         strings.TrimSpace(params.Model),
+				Provider:      strings.TrimSpace(params.Provider),
+				Reasoning:     strings.TrimSpace(params.Reasoning),
+				ReasoningOnly: strings.TrimSpace(params.Model) == "" && strings.TrimSpace(params.Reasoning) != "",
+				Open:          true,
+				prev:          records.byLabel[label],
 			}
 			if record.prev == nil {
 				records.order = append(records.order, label)
@@ -145,8 +139,7 @@ func dispatchHistory(msgs []message.Message) dispatchRecords {
 				}
 				record.Model = meta.Model
 				record.Provider = meta.Provider
-				record.Think = meta.Think
-				record.ReasoningLevel = meta.ReasoningLevel
+				record.Reasoning = meta.Reasoning
 				record.ReasoningOnly = meta.ReasoningOnly
 			case AgentSendToolName:
 				var meta AgentSendResponseMetadata

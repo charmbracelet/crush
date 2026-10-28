@@ -22,7 +22,8 @@ import (
 )
 
 // overrideTestConfig is a hermetic config with two providers: mock carries a
-// plain model and a reasoning model, other carries one model of its own.
+// plain model, one with effort levels, and one that only toggles thinking;
+// other carries one model of its own.
 const overrideTestConfig = `{
   "options": {"disable_default_providers": true, "disable_provider_auto_update": true},
   "providers": {
@@ -31,7 +32,8 @@ const overrideTestConfig = `{
       "models": [
         {"id": "mock-model", "name": "Mock", "context_window": 8192, "default_max_tokens": 128},
         {"id": "mock-reasoner", "name": "Mock Reasoner", "context_window": 8192, "default_max_tokens": 128,
-         "can_reason": true, "reasoning_levels": ["low", "high"], "default_reasoning_effort": "low"}
+         "can_reason": true, "reasoning_levels": ["low", "high"], "default_reasoning_effort": "low"},
+        {"id": "mock-thinker", "name": "Mock Thinker", "context_window": 8192, "default_max_tokens": 128, "can_reason": true}
       ]},
     "other": {"id": "other", "name": "Other", "type": "openai",
       "base_url": "http://127.0.0.1:9/v1", "api_key": "test-key",
@@ -122,40 +124,52 @@ func TestResolveModelOverride(t *testing.T) {
 		},
 		{
 			name:    "unsupported reasoning level is refused",
-			params:  AgentDispatchParams{Model: "mock-reasoner", ReasoningLevel: "medium"},
+			params:  AgentDispatchParams{Model: "mock-reasoner", Reasoning: "medium"},
 			parent:  parent,
-			refusal: `does not support reasoning effort "medium"`,
+			refusal: `model "mock-reasoner" takes reasoning low, high`,
 		},
 		{
 			name:    "supported reasoning level is applied",
-			params:  AgentDispatchParams{Model: "mock-reasoner", ReasoningLevel: "high"},
+			params:  AgentDispatchParams{Model: "mock-reasoner", Reasoning: "high"},
 			parent:  parent,
 			wantOK:  true,
 			wantSel: config.SelectedModel{Provider: "mock", Model: "mock-reasoner", ReasoningEffort: "high"},
 		},
 		{
-			name:    "think on a model that cannot reason is refused",
-			params:  AgentDispatchParams{Model: "mock-model", Think: new(true)},
+			name:    "reasoning on a model that cannot reason is refused",
+			params:  AgentDispatchParams{Model: "mock-model", Reasoning: "on"},
 			parent:  parent,
-			refusal: `model "mock-model" does not support thinking`,
+			refusal: `model "mock-model" does not support reasoning`,
 		},
 		{
-			name:    "think on a reasoning model is applied",
-			params:  AgentDispatchParams{Model: "mock-reasoner", Think: new(true)},
+			name:    "on for a model that only toggles thinking turns it on",
+			params:  AgentDispatchParams{Model: "mock-thinker", Reasoning: "on"},
 			parent:  parent,
 			wantOK:  true,
-			wantSel: config.SelectedModel{Provider: "mock", Model: "mock-reasoner", Think: true},
+			wantSel: config.SelectedModel{Provider: "mock", Model: "mock-thinker", Think: true},
 		},
 		{
-			name:    "think off on a reasoning model is applied",
-			params:  AgentDispatchParams{Model: "mock-reasoner", Think: new(false)},
+			name:    "an effort level for a model that only toggles is refused",
+			params:  AgentDispatchParams{Model: "mock-thinker", Reasoning: "high"},
+			parent:  parent,
+			refusal: `model "mock-thinker" takes reasoning on, off`,
+		},
+		{
+			name:    "on for a model with effort levels is refused",
+			params:  AgentDispatchParams{Model: "mock-reasoner", Reasoning: "on"},
+			parent:  parent,
+			refusal: `model "mock-reasoner" takes reasoning low, high`,
+		},
+		{
+			name:    "off for a model that only toggles thinking turns it off",
+			params:  AgentDispatchParams{Model: "mock-thinker", Reasoning: "off"},
 			parent:  parent,
 			wantOK:  true,
-			wantSel: config.SelectedModel{Provider: "mock", Model: "mock-reasoner"},
+			wantSel: config.SelectedModel{Provider: "mock", Model: "mock-thinker"},
 		},
 		{
 			name:        "reasoning settings alone ride the sub-agent default model",
-			params:      AgentDispatchParams{Think: new(true)},
+			params:      AgentDispatchParams{Reasoning: "high"},
 			wantOK:      true,
 			wantDynamic: true,
 		},
@@ -178,7 +192,7 @@ func TestResolveModelOverride(t *testing.T) {
 			if tt.wantDynamic {
 				// The sub-default case keeps the default model's other settings.
 				want := c.subAgentModels().Large.ModelCfg
-				want.Think = true
+				want.ReasoningEffort = "high"
 				require.Equal(t, want, sel)
 				return
 			}
@@ -196,9 +210,9 @@ func TestResolveModelOverrideRidesNonReasoningSubDefault(t *testing.T) {
 	small := c.subAgentModels().Small
 	c.models.Set(coordinatorModels{large: small, subLarge: small, small: small})
 
-	_, ok, refusal := c.resolveModelOverride(AgentDispatchParams{Think: new(true)}, Model{})
+	_, ok, refusal := c.resolveModelOverride(AgentDispatchParams{Reasoning: "on"}, Model{})
 	require.True(t, ok)
-	require.Contains(t, refusal, "does not support thinking")
+	require.Contains(t, refusal, "does not support reasoning")
 }
 
 func TestOverrideDispatchAgent(t *testing.T) {
@@ -309,7 +323,7 @@ func TestDispatchHistoryRecordsModelOverride(t *testing.T) {
 	b := records.byLabel["b"]
 	require.Empty(t, b.Model)
 	require.Empty(t, b.Provider)
-	require.Nil(t, b.Think)
+	require.Empty(t, b.Reasoning)
 }
 
 func TestDispatchToolRunsOverrideModel(t *testing.T) {
@@ -367,18 +381,17 @@ func TestDispatchToolRunsOverrideModel(t *testing.T) {
 	require.Equal(t, "mock", meta.Provider, "a model-only dispatch records the inherited provider")
 	require.False(t, meta.ReasoningOnly, "a dispatch that named a model is not reasoning-only")
 
-	callCtx, call = newCall("c4", `{"prompt":"do","label":"thunk","think":true}`)
+	callCtx, call = newCall("c4", `{"prompt":"do","label":"thunk","reasoning":"high"}`)
 	resp, err = tool.Run(callCtx, call)
 	require.NoError(t, err)
 	require.False(t, resp.IsError, resp.Content)
 	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
 	require.Equal(t, "thunk", meta.Label)
 	require.True(t, meta.ReasoningOnly, "a dispatch that named no model is reasoning-only")
-	require.Empty(t, meta.ReasoningLevel, "only the settings the call asked for are recorded")
-	require.Equal(t, new(true), meta.Think)
+	require.Equal(t, "high", meta.Reasoning, "only the settings the call asked for are recorded")
 	entry, ok := c.dispatched.Get(dispatchKey(parent.ID, "thunk"))
 	require.True(t, ok)
-	require.True(t, entry.agent.Model().ModelCfg.Think)
+	require.Equal(t, "high", entry.agent.Model().ModelCfg.ReasoningEffort)
 	entry.stop("test done")
 	require.True(t, entry.awaitSettled(10*time.Second))
 
@@ -431,13 +444,13 @@ func TestRehydrateDispatchRestoresModelOverride(t *testing.T) {
 	// result or a first turn, so only the parent the session has now can
 	// supply the provider. c6 "thunk" gave reasoning settings only, so it
 	// rides the default selection rather than an explicit model.
-	thunkInput, err := json.Marshal(AgentDispatchParams{Prompt: "do thunk", Label: "thunk", Think: new(true)})
+	thunkInput, err := json.Marshal(AgentDispatchParams{Prompt: "do thunk", Label: "thunk", Reasoning: "high"})
 	require.NoError(t, err)
 	thunkMeta, err := json.Marshal(AgentDispatchResponseMetadata{
 		Label:         "thunk",
 		Model:         "mock-reasoner",
 		Provider:      "mock",
-		Think:         new(true),
+		Reasoning:     "high",
 		ReasoningOnly: true,
 	})
 	require.NoError(t, err)
@@ -519,7 +532,7 @@ func TestRehydrateDispatchRestoresModelOverride(t *testing.T) {
 	entry, err = c.rehydrateDispatch(ctx, parent.ID, "thunk")
 	require.NoError(t, err)
 	want := c.subAgentModels().Large.ModelCfg
-	want.Think = true
+	want.ReasoningEffort = "high"
 	require.Equal(t, want, entry.agent.Model().ModelCfg, "a reasoning-only override keeps the default selection's settings")
 
 	// A dispatch whose model no longer resolves is not silently resumed on
@@ -587,7 +600,7 @@ func TestModelOverrideSkipsDisabledProvider(t *testing.T) {
 
 	catalog := dispatchModelCatalog(cfg, Model{})
 	require.NotContains(t, catalog, "other")
-	require.Contains(t, catalog, "- `mock`: mock-model, mock-reasoner")
+	require.Contains(t, catalog, "- `mock`: mock-model, mock-reasoner [low|high], mock-thinker [on|off]")
 }
 
 // The catalog names the parent's model, lists every usable provider in a
@@ -599,11 +612,11 @@ func TestDispatchModelCatalog(t *testing.T) {
 
 	catalog := dispatchModelCatalog(cfg, c.mainModels().Large)
 	require.Equal(t, "\n\nModels available to `model`, by `provider` (you are running on `mock/mock-reasoner`):\n"+
-		"\n- `mock`: mock-model, mock-reasoner"+
+		"\n- `mock`: mock-model, mock-reasoner [low|high], mock-thinker [on|off]"+
 		"\n- `other`: other-model", catalog)
 
 	_, _, refusal := c.resolveModelOverride(AgentDispatchParams{Model: "gone-model", Provider: "mock"}, Model{})
-	require.Equal(t, `model "gone-model" is not available from provider "mock"; use one of: mock-model, mock-reasoner`, refusal)
+	require.Equal(t, `model "gone-model" is not available from provider "mock"; use one of: mock-model, mock-reasoner [low|high], mock-thinker [on|off]`, refusal)
 }
 
 // Nothing usable means no catalog at all, rather than an empty heading.

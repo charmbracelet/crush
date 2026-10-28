@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -315,6 +317,48 @@ func TestCreateTransport_StdioResolution(t *testing.T) {
 		require.Equal(t, []string{"forgejo-mcp", "--token", "$MCP_MISSING"}, ct.Command.Args)
 		require.Contains(t, ct.Command.Env, "TOKEN=$(vault read -f token)")
 	})
+}
+
+// TestCreateTransport_StdioStartsInWorkingDir pins that a stdio MCP server
+// starts in the workspace directory rather than the process cwd. In
+// client/server mode one server process hosts every workspace and keeps the
+// cwd of whichever client spawned it, so a project-local server referenced
+// by a relative path ran, and resolved its paths, in another project.
+func TestCreateTransport_StdioStartsInWorkingDir(t *testing.T) {
+	// Not parallel: isolates the global config with t.Setenv and moves the
+	// process cwd with t.Chdir.
+	isolated := t.TempDir()
+	t.Setenv("HOME", isolated)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(isolated, ".config"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(isolated, ".local", "share"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(isolated, ".cache"))
+	t.Setenv("CRUSH_GLOBAL_CONFIG", filepath.Join(isolated, ".config", "crush"))
+	t.Setenv("CRUSH_GLOBAL_DATA", filepath.Join(isolated, ".local", "share", "crush"))
+	t.Setenv("CRUSH_DISABLE_PROVIDER_AUTO_UPDATE", "1")
+
+	// Both the workspace and the project the process sits in (the server's
+	// cwd) ship a server.sh; only the workspace's may run.
+	workingDir := t.TempDir()
+	otherProject := t.TempDir()
+	for dir, name := range map[string]string{workingDir: "workspace", otherProject: "other-project"} {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "server.sh"), []byte("echo "+name+"\n"), 0o644))
+	}
+	t.Chdir(otherProject)
+
+	cfg, err := config.Init(t.Context(), workingDir, t.TempDir(), false)
+	require.NoError(t, err)
+
+	m := config.MCPConfig{Type: config.MCPStdio, Command: "sh", Args: []string{"server.sh"}}
+	tr, _, err := createTransport(t.Context(), cfg, "test", m, shellResolverWithPath(t, nil))
+	require.NoError(t, err)
+	ct, ok := tr.(*mcp.CommandTransport)
+	require.True(t, ok, "expected CommandTransport, got %T", tr)
+
+	out, err := ct.Command.Output()
+	require.NoError(t, err)
+	require.Equal(t, "workspace", strings.TrimSpace(string(out)),
+		"a relative server path must resolve in the workspace, not the process cwd")
+	require.Equal(t, workingDir, ct.Command.Dir)
 }
 
 // TestCreateTransport_HeadersResolution pins that a single failing

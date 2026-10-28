@@ -317,10 +317,10 @@ func TestDispatchHistoryRecordsModelOverride(t *testing.T) {
 	}
 
 	records := dispatchHistory(msgs)
-	a := records.byLabel[SubagentName("a")]
+	a := records.byLabel["a"]
 	require.Equal(t, "other-model", a.Model)
 	require.Equal(t, "mock", a.Provider, "the resolved provider is recorded, not re-derived")
-	b := records.byLabel[SubagentName("b")]
+	b := records.byLabel["b"]
 	require.Empty(t, b.Model)
 	require.Empty(t, b.Provider)
 	require.Empty(t, b.Reasoning)
@@ -376,7 +376,8 @@ func TestDispatchToolRunsOverrideModel(t *testing.T) {
 	// the provider the dispatch actually used.
 	var meta AgentDispatchResponseMetadata
 	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
-	require.Equal(t, SubagentName("ov"), meta.Label)
+	ovName := meta.Label
+	require.True(t, strings.HasSuffix(ovName, "-ov"), "a dispatch is given a first name: %s", ovName)
 	require.Equal(t, "mock-model", meta.Model)
 	require.Equal(t, "mock", meta.Provider, "a model-only dispatch records the inherited provider")
 	require.Empty(t, meta.Reasoning)
@@ -387,16 +388,17 @@ func TestDispatchToolRunsOverrideModel(t *testing.T) {
 	require.False(t, resp.IsError, resp.Content)
 	meta = AgentDispatchResponseMetadata{}
 	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
-	require.Equal(t, SubagentName("thunk"), meta.Label)
+	thunkName := meta.Label
+	require.NotEqual(t, strings.Split(ovName, "-")[0], strings.Split(thunkName, "-")[0], "two dispatches in a row get different names")
 	require.Empty(t, meta.Model, "reasoning alone records no model, so a resume rides the default")
 	require.Equal(t, "high", meta.Reasoning, "only the settings the call asked for are recorded")
-	entry, ok := c.dispatched.Get(dispatchKey(parent.ID, SubagentName("thunk")))
+	entry, ok := c.dispatched.Get(dispatchKey(parent.ID, thunkName))
 	require.True(t, ok)
 	require.Equal(t, "high", entry.agent.Model().ModelCfg.ReasoningEffort)
 	entry.stop("test done")
 	require.True(t, entry.awaitSettled(10*time.Second))
 
-	entry, ok = c.dispatched.Get(dispatchKey(parent.ID, SubagentName("ov")))
+	entry, ok = c.dispatched.Get(dispatchKey(parent.ID, ovName))
 	require.True(t, ok)
 	require.Equal(t, "mock-model", entry.agent.Model().ModelCfg.Model)
 	require.Equal(t, "mock", entry.agent.Model().ModelCfg.Provider)
@@ -447,7 +449,7 @@ func TestRehydrateDispatchRestoresModelOverride(t *testing.T) {
 	// rides the default selection rather than an explicit model.
 	thunkInput, err := json.Marshal(AgentDispatchParams{Prompt: "do thunk", Label: "thunk", Reasoning: "high"})
 	require.NoError(t, err)
-	thunkMeta, err := json.Marshal(AgentDispatchResponseMetadata{Label: SubagentName("thunk"), Reasoning: "high"})
+	thunkMeta, err := json.Marshal(AgentDispatchResponseMetadata{Label: "thunk", Reasoning: "high"})
 	require.NoError(t, err)
 
 	firstAssistant := assistant
@@ -495,14 +497,14 @@ func TestRehydrateDispatchRestoresModelOverride(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	entry, err := c.rehydrateDispatch(ctx, parent.ID, SubagentName("ov"))
+	entry, err := c.rehydrateDispatch(ctx, parent.ID, "ov")
 	require.NoError(t, err)
 	require.Equal(t, "other-model", entry.agent.Model().ModelCfg.Model)
 	require.Equal(t, "other", entry.agent.Model().ModelCfg.Provider)
 
 	// The metadata records the resolved provider, so the parent running on
 	// "other" by now does not matter.
-	entry, err = c.rehydrateDispatch(ctx, parent.ID, SubagentName("mono"))
+	entry, err = c.rehydrateDispatch(ctx, parent.ID, "mono")
 	require.NoError(t, err)
 	require.Equal(t, "mock-model", entry.agent.Model().ModelCfg.Model)
 	require.Equal(t, "mock", entry.agent.Model().ModelCfg.Provider)
@@ -510,13 +512,13 @@ func TestRehydrateDispatchRestoresModelOverride(t *testing.T) {
 	// A dispatch whose result never landed recovers the model and provider
 	// its child session actually ran on, not the provider the parent has
 	// now.
-	entry, err = c.rehydrateDispatch(ctx, parent.ID, SubagentName("crash"))
+	entry, err = c.rehydrateDispatch(ctx, parent.ID, "crash")
 	require.NoError(t, err)
 	require.Equal(t, "mock-model", entry.agent.Model().ModelCfg.Model)
 	require.Equal(t, "mock", entry.agent.Model().ModelCfg.Provider)
 
 	// A dispatch that never ran a turn falls back to the parent's provider.
-	entry, err = c.rehydrateDispatch(ctx, parent.ID, SubagentName("orphan"))
+	entry, err = c.rehydrateDispatch(ctx, parent.ID, "orphan")
 	require.NoError(t, err)
 	require.Equal(t, "other-model", entry.agent.Model().ModelCfg.Model)
 	require.Equal(t, "other", entry.agent.Model().ModelCfg.Provider)
@@ -524,7 +526,7 @@ func TestRehydrateDispatchRestoresModelOverride(t *testing.T) {
 	// A reasoning override rides the default selection, keeping its
 	// configured settings, instead of rebuilding a bare selection from the
 	// recorded model.
-	entry, err = c.rehydrateDispatch(ctx, parent.ID, SubagentName("thunk"))
+	entry, err = c.rehydrateDispatch(ctx, parent.ID, "thunk")
 	require.NoError(t, err)
 	want := c.subAgentModels().Large.ModelCfg
 	want.ReasoningEffort = "high"
@@ -532,7 +534,7 @@ func TestRehydrateDispatchRestoresModelOverride(t *testing.T) {
 
 	// A dispatch whose model no longer resolves is not silently resumed on
 	// the session default.
-	_, err = c.rehydrateDispatch(ctx, parent.ID, SubagentName("gone"))
+	_, err = c.rehydrateDispatch(ctx, parent.ID, "gone")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "cannot be resumed")
 }
@@ -573,7 +575,7 @@ func TestRehydrateDispatchPropagatesTranscriptReadError(t *testing.T) {
 	require.NoError(t, err)
 
 	c.messages = listFailingMessages{Service: env.messages, except: parent.ID}
-	_, err = c.rehydrateDispatch(ctx, parent.ID, SubagentName("ov"))
+	_, err = c.rehydrateDispatch(ctx, parent.ID, "ov")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "transient read failure")
 }

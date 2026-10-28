@@ -314,8 +314,7 @@ func (c *coordinator) agentDispatchTool(ctx context.Context, parentAgentID strin
 			if params.Prompt == "" {
 				return fantasy.NewTextErrorResponse("prompt is required"), nil
 			}
-			label := SubagentName(params.Label)
-			if label == "" {
+			if strings.TrimSpace(params.Label) == "" {
 				return fantasy.NewTextErrorResponse("label is required"), nil
 			}
 
@@ -353,6 +352,9 @@ func (c *coordinator) agentDispatchTool(ctx context.Context, parentAgentID strin
 			// UI can walk back from a child-session event to this tool's
 			// chat item and nest the subagent's tool calls under it.
 			toolCallID := call.ID
+
+			// Named last, so a refused dispatch does not use up a first name.
+			label := c.names.name(params.Label)
 
 			// Checking the label and registering the entry happen under
 			// one lock, so two parallel dispatches cannot both take it.
@@ -557,7 +559,7 @@ func (c *coordinator) agentSendTool() fantasy.AgentTool {
 		AgentSendToolName,
 		agentSendToolDescription,
 		func(ctx context.Context, params AgentSendParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			label := SubagentName(params.Label)
+			label := strings.TrimSpace(params.Label)
 			if label == "" {
 				return fantasy.NewTextErrorResponse("label is required"), nil
 			}
@@ -631,7 +633,7 @@ func (c *coordinator) agentStopTool() fantasy.AgentTool {
 		AgentStopToolName,
 		agentStopToolDescription,
 		func(ctx context.Context, params AgentStopParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			label := SubagentName(params.Label)
+			label := strings.TrimSpace(params.Label)
 			if label == "" {
 				return fantasy.NewTextErrorResponse("label is required"), nil
 			}

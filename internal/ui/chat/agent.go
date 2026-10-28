@@ -58,6 +58,7 @@ func NewAgentToolMessageItem(
 	t := &AgentToolMessageItem{}
 	t.baseToolMessageItem = newBaseToolMessageItem(sty, toolCall, result, &AgentToolRenderContext{agent: t}, canceled)
 	t.parseDispatchLabel(toolCall)
+	t.adoptDispatchName(result)
 	// For the agent tool we keep spinning until the tool call is finished.
 	// A dispatched subagent runs on past its tool result, so it spins
 	// until its report arrives instead.
@@ -78,10 +79,28 @@ func (a *AgentToolMessageItem) parseDispatchLabel(toolCall message.ToolCall) {
 		return
 	}
 	var params agent.AgentDispatchParams
-	if json.Unmarshal([]byte(toolCall.Input), &params) == nil && params.Label != "" {
-		a.dispatchLabel = agent.SubagentName(params.Label)
+	if json.Unmarshal([]byte(toolCall.Input), &params) == nil && strings.TrimSpace(params.Label) != "" {
+		a.dispatchLabel = strings.TrimSpace(params.Label)
 		a.dispatchStarted = time.Now()
 	}
+}
+
+// adoptDispatchName swaps the requested label for the name the result gave,
+// which is the name the report will arrive under.
+func (a *AgentToolMessageItem) adoptDispatchName(result *message.ToolResult) {
+	if a.dispatchLabel == "" || result == nil || result.Metadata == "" {
+		return
+	}
+	var meta agent.AgentDispatchResponseMetadata
+	if json.Unmarshal([]byte(result.Metadata), &meta) == nil && meta.Label != "" {
+		a.dispatchLabel = meta.Label
+	}
+}
+
+// SetResult records the result and, for a dispatch, the name it returned.
+func (a *AgentToolMessageItem) SetResult(res *message.ToolResult) {
+	a.baseToolMessageItem.SetResult(res)
+	a.adoptDispatchName(res)
 }
 
 // SetToolCall updates the tool call, picking up the dispatch label once the
@@ -216,9 +235,9 @@ func (a *AgentToolMessageItem) AddNestedTool(tool ToolMessageItem) {
 }
 
 // DispatchStatus reports what a dispatched subagent is up to. The second
-// return is false for a synchronous agent call.
+// return is false for a synchronous agent call or a refused dispatch.
 func (a *AgentToolMessageItem) DispatchStatus() (DispatchStatus, bool) {
-	if a.dispatchLabel == "" {
+	if a.dispatchLabel == "" || (a.result != nil && a.result.IsError) {
 		return DispatchStatus{}, false
 	}
 	status := DispatchStatus{
@@ -263,6 +282,8 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	var header string
 	if r.agent.dispatchLabel != "" {
 		header = subagentHeader(sty, opts.Status, prettifyToolName(agent.AgentDispatchToolName), r.agent.dispatchLabel, dispatchRunModel(opts), cappedWidth, opts)
+	} else if name := backgroundedName(opts); name != "" {
+		header = toolHeader(sty, opts.Status, "Agent", cappedWidth, opts, subagentTarget(sty, name))
 	} else {
 		header = toolHeader(sty, opts.Status, "Agent", cappedWidth, opts)
 	}
@@ -444,6 +465,9 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 		toolParams = append(toolParams, params.URL)
 	}
 
+	if name := backgroundedName(opts); name != "" {
+		toolParams = []string{subagentTarget(sty, name)}
+	}
 	header := toolHeader(sty, opts.Status, "Agentic Fetch", cappedWidth, opts, toolParams...)
 	if opts.Compact {
 		return header
@@ -498,15 +522,41 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 	return result
 }
 
-// subagentHeader renders "✓ Create Subagent betty-date-impl (model=hyper/glm-5)", truncating the model rather than dropping it.
+// subagentHeader renders "✓ Create Subagent → Betty date-impl (model=hyper/glm-5)", truncating the model rather than dropping it.
 func subagentHeader(sty *styles.Styles, status ToolStatus, name, label, model string, width int, opts *ToolRenderOpts) string {
-	header := toolHeader(sty, status, name, width, opts, sty.Tool.AgentName.Render(label))
+	header := toolHeader(sty, status, name, width, opts, subagentTarget(sty, label))
 	const minModelWidth = 12
 	room := width - lipgloss.Width(header) - 1
 	if model == "" || room < minModelWidth {
 		return header
 	}
 	return header + " " + sty.Tool.ParamMain.Render(ansi.Truncate("(model="+model+")", room, "…)"))
+}
+
+// subagentTarget renders "→ Name label", how every subagent header names one.
+func subagentTarget(sty *styles.Styles, label string) string {
+	return sty.Tool.ParamMain.Render("→ ") + RenderSubagentName(sty, label)
+}
+
+// RenderSubagentName renders the accented first name apart from the label.
+func RenderSubagentName(sty *styles.Styles, label string) string {
+	first, rest := agent.SubagentDisplayName(label)
+	if first == "" {
+		return sty.Tool.AgentLabel.Render(rest)
+	}
+	return sty.Tool.AgentName.Render(first) + " " + sty.Tool.AgentLabel.Render(rest)
+}
+
+// backgroundedName is the name a blocking call took when it was backgrounded.
+func backgroundedName(opts *ToolRenderOpts) string {
+	if !opts.HasResult() || opts.Result.Metadata == "" {
+		return ""
+	}
+	var meta agent.AgentBackgroundMetadata
+	if json.Unmarshal([]byte(opts.Result.Metadata), &meta) != nil || !meta.Backgrounded {
+		return ""
+	}
+	return meta.Label
 }
 
 // dispatchRunModel reads the model a dispatch recorded once its subagent started.

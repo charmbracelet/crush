@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -54,6 +55,29 @@ type dispatchRecords struct {
 	order   []string
 }
 
+// link files record as the latest under label.
+func (r *dispatchRecords) link(record *dispatchRecord, label string) {
+	record.Label = label
+	record.prev = r.byLabel[label]
+	if record.prev == nil {
+		r.order = append(r.order, label)
+	}
+	r.byLabel[label] = record
+}
+
+// unlink takes record back out, so its label means what it did before.
+func (r *dispatchRecords) unlink(record *dispatchRecord) {
+	if r.byLabel[record.Label] != record {
+		return
+	}
+	if record.prev != nil {
+		r.byLabel[record.Label] = record.prev
+		return
+	}
+	delete(r.byLabel, record.Label)
+	r.order = slices.DeleteFunc(r.order, func(label string) bool { return label == record.Label })
+}
+
 // dispatchHistory replays a parent transcript in order to find, for each
 // label, its latest dispatch and whether it has reported since. A label can
 // be reused across a long session, and a finished subagent can be reopened
@@ -79,7 +103,7 @@ func dispatchHistory(msgs []message.Message) dispatchRecords {
 			if json.Unmarshal([]byte(call.Input), &params) != nil {
 				continue
 			}
-			label := SubagentName(params.Label)
+			label := strings.TrimSpace(params.Label)
 			if label == "" {
 				continue
 			}
@@ -98,12 +122,9 @@ func dispatchHistory(msgs []message.Message) dispatchRecords {
 				Provider:  strings.TrimSpace(params.Provider),
 				Reasoning: strings.TrimSpace(params.Reasoning),
 				Open:      true,
-				prev:      records.byLabel[label],
 			}
-			if record.prev == nil {
-				records.order = append(records.order, label)
-			}
-			records.byLabel[label] = record
+			// Filed under the label asked for until the result names it.
+			records.link(record, label)
 			byCallID[call.ID] = record
 		}
 		for _, result := range msg.ToolResults() {
@@ -113,29 +134,25 @@ func dispatchHistory(msgs []message.Message) dispatchRecords {
 				if !ok {
 					continue
 				}
+				// A refused dispatch never started anything, so the label
+				// still means whatever it meant before.
 				if result.IsError {
-					// A refused dispatch never started anything, so the label
-					// still means whatever it meant before.
-					if records.byLabel[record.Label] == record {
-						if record.prev != nil {
-							records.byLabel[record.Label] = record.prev
-						} else {
-							delete(records.byLabel, record.Label)
-						}
-					}
+					records.unlink(record)
 					continue
 				}
-				// A started dispatch records the model override it resolved,
-				// so a restart rehydrates on the provider the dispatch
-				// actually used rather than re-deriving it from whatever
-				// model the session has by then.
+				// A started dispatch records the name it gave the subagent
+				// and the model override it resolved, so a restart resumes
+				// on the provider the dispatch actually used.
 				var meta AgentDispatchResponseMetadata
-				if result.Metadata == "" || json.Unmarshal([]byte(result.Metadata), &meta) != nil {
-					continue
+				if result.Metadata != "" && json.Unmarshal([]byte(result.Metadata), &meta) == nil {
+					record.Model = meta.Model
+					record.Provider = meta.Provider
+					record.Reasoning = meta.Reasoning
 				}
-				record.Model = meta.Model
-				record.Provider = meta.Provider
-				record.Reasoning = meta.Reasoning
+				if name := strings.TrimSpace(meta.Label); name != "" && name != record.Label {
+					records.unlink(record)
+					records.link(record, name)
+				}
 			case AgentSendToolName:
 				var meta AgentSendResponseMetadata
 				if result.Metadata == "" || json.Unmarshal([]byte(result.Metadata), &meta) != nil || !meta.Reopened {
@@ -161,20 +178,14 @@ func dispatchHistory(msgs []message.Message) dispatchRecords {
 				if access == "" {
 					access = accessRead
 				}
-				record := &dispatchRecord{
-					Label:     label,
+				records.link(&dispatchRecord{
 					Access:    access,
 					Task:      meta.Task,
 					MessageID: bgCallMsg[result.ToolCallID],
 					CallID:    result.ToolCallID,
 					Tool:      result.Name,
 					Open:      true,
-					prev:      records.byLabel[label],
-				}
-				if record.prev == nil {
-					records.order = append(records.order, label)
-				}
-				records.byLabel[label] = record
+				}, label)
 			}
 		}
 		for _, report := range msg.SubAgentReports() {
@@ -237,8 +248,7 @@ func (c *coordinator) agentStatusTool() fantasy.AgentTool {
 			}
 			records := dispatchHistory(msgs)
 
-			label := SubagentName(params.Label)
-			if label != "" {
+			if label := strings.TrimSpace(params.Label); label != "" {
 				record, ok := records.byLabel[label]
 				if !ok {
 					return fantasy.NewTextErrorResponse(fmt.Sprintf(

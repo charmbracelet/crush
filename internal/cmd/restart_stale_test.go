@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -231,6 +233,66 @@ func TestCreateWorkspaceOnLiveServer_RetriesPastExitingServer(t *testing.T) {
 	defer mu.Unlock()
 	require.Equal(t, 1, replaced, "exactly one replacement must be spawned")
 	require.Equal(t, 2, creates)
+}
+
+// TestCreateWorkspaceOnLiveServer_RetryReachesReplacement makes sure the
+// retry asks the replacement rather than the server that refused the first
+// create. That refusal leaves a kept-alive connection to the exiting server
+// in the client's pool, and the exiting server can outlive the handover: it
+// keeps its connections open while it tears down its workspaces, after the
+// client has given up waiting for its socket. Retrying over the pooled
+// connection asks the exiting server again, so every attempt is refused
+// although a healthy replacement owns the address.
+func TestCreateWorkspaceOnLiveServer_RetryReachesReplacement(t *testing.T) {
+	t.Parallel()
+
+	// generationKey tags each connection with the number of replacements
+	// made before it was accepted. A connection stays with the process it
+	// reached, so one from generation 0 keeps reaching the exiting server
+	// after a replacement has taken over the address.
+	type generationKey struct{}
+
+	var mu sync.Mutex
+	replaced := 0
+	exitingCreates := 0
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		if r.Context().Value(generationKey{}) == 0 {
+			exitingCreates++
+			http.Error(w, "server is shutting down", http.StatusServiceUnavailable)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(proto.Workspace{ID: "ws-new"})
+	}))
+	srv.Config.ConnContext = func(ctx context.Context, _ net.Conn) context.Context {
+		mu.Lock()
+		defer mu.Unlock()
+		return context.WithValue(ctx, generationKey{}, replaced)
+	}
+	srv.Start()
+	t.Cleanup(srv.Close)
+	u, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+
+	c, err := client.NewClient(t.TempDir(), "tcp", u.Host)
+	require.NoError(t, err)
+
+	ws, err := createWorkspaceOnLiveServer(t.Context(), c, proto.Workspace{Path: t.TempDir()},
+		func() error {
+			mu.Lock()
+			replaced++
+			mu.Unlock()
+			return nil
+		})
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.NoError(t, err, "the retry must reach the replacement (exiting server saw %d creates, %d replacements)",
+		exitingCreates, replaced)
+	require.Equal(t, "ws-new", ws.ID)
+	require.Equal(t, 1, replaced, "exactly one replacement must be spawned")
+	require.Equal(t, 1, exitingCreates, "only the first create may reach the exiting server")
 }
 
 // TestCreateWorkspaceOnLiveServer_GivesUpOnOtherFailures makes sure the

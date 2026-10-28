@@ -8,6 +8,7 @@ import (
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
+	"charm.land/x/nerdfont"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
@@ -781,5 +782,96 @@ func TestSwitchPlanToYolo(t *testing.T) {
 		require.True(t, ws.yolo, "YOLO ends up enabled regardless of the carried state")
 		require.False(t, u.cycleYolo, "explicit activation must not be undone by the Shift+Tab cycle")
 		require.Equal(t, config.AgentCoder, ws.setMainCalledWith)
+	}
+}
+
+// TestUIGitBranchLabel covers the git branch line shown in the header,
+// sidebar, and landing page: the Nerd Font glyph is prefixed only when the
+// terminal is expected to render it.
+func TestUIGitBranchLabel(t *testing.T) {
+	// Not parallel: t.Setenv is process-wide, as is the nerdfont probe memo.
+	tests := []struct {
+		name      string
+		nerdFonts string
+		branch    string
+		want      string
+	}{
+		{
+			name:      "empty outside a repository",
+			nerdFonts: "true",
+			want:      "",
+		},
+		{
+			name:      "glyph prefix with nerd font support",
+			nerdFonts: "true",
+			branch:    "main",
+			want:      styles.GitBranchIcon + " main",
+		},
+		{
+			name:      "bare branch without nerd font support",
+			nerdFonts: "false",
+			branch:    "main",
+			want:      "main",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(nerdfont.EnvVar, tt.nerdFonts)
+			nerdfont.Reset()
+			t.Cleanup(nerdfont.Reset)
+
+			ui := &UI{gitBranch: tt.branch}
+			require.Equal(t, tt.want, ui.gitBranchLabel())
+		})
+	}
+}
+
+// TestApplyNerdFontsOption covers the tui.nerd_fonts option: true and false
+// force Nerd Font glyphs on and off, and an unset option leaves detection to
+// the environment.
+func TestApplyNerdFontsOption(t *testing.T) {
+	// Not parallel: t.Setenv is process-wide, as is the nerdfont probe memo.
+	t.Cleanup(nerdfont.Reset)
+
+	on, off := true, false
+	tests := []struct {
+		name      string
+		nerdFonts string
+		opts      *config.Options
+		want      bool
+	}{
+		{
+			name: "forced off",
+			opts: &config.Options{TUI: &config.TUIOptions{NerdFonts: &off}},
+			want: false,
+		},
+		{
+			name: "forced on",
+			opts: &config.Options{TUI: &config.TUIOptions{NerdFonts: &on}},
+			want: true,
+		},
+		{
+			name:      "unset leaves detection to the environment",
+			nerdFonts: "false",
+			opts:      &config.Options{TUI: &config.TUIOptions{}},
+			want:      false,
+		},
+		{
+			name:      "environment beats the option",
+			nerdFonts: "true",
+			opts:      &config.Options{TUI: &config.TUIOptions{NerdFonts: &off}},
+			want:      true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(nerdfont.EnvVar, tt.nerdFonts)
+			nerdfont.Reset()
+
+			applyNerdFontsOption(tt.opts)
+			require.Equal(t, tt.want, nerdfont.Supported())
+		})
 	}
 }

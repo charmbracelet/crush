@@ -18,6 +18,8 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/client"
 	"github.com/charmbracelet/crush/internal/commands"
+	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/proto"
@@ -602,12 +604,19 @@ type recoveryServer struct {
 	// abortStreams kills each event stream mid-response, as a server
 	// that dies does, instead of ending it cleanly.
 	abortStreams bool
+	// config is the config a created workspace reports. A configured one
+	// makes recovery initialize the agent.
+	config *config.Config
 
 	creates      int
+	createReqs   []proto.Workspace
 	streams      int
 	sessionPosts []string
 	retired      []string
 	deleted      []string
+	// agentCalls logs agent calls as "<call> <id> [<arg>]", in the order
+	// the server saw them.
+	agentCalls []string
 }
 
 func (s *recoveryServer) start(t *testing.T) *client.Client {
@@ -618,6 +627,9 @@ func (s *recoveryServer) start(t *testing.T) *client.Client {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/workspaces":
 			s.creates++
+			var req proto.Workspace
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+			s.createReqs = append(s.createReqs, req)
 			if s.createErr != nil {
 				http.Error(w, "no", s.createErr())
 				return
@@ -636,7 +648,7 @@ func (s *recoveryServer) start(t *testing.T) *client.Client {
 			}
 			s.liveID = s.nextID
 			require.NoError(t, json.NewEncoder(w).Encode(proto.Workspace{
-				ID: s.liveID, Path: "/tmp/recover",
+				ID: s.liveID, Path: "/tmp/recover", Config: s.config,
 			}))
 		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/v1/clients/"):
 			s.retired = append(s.retired, strings.TrimPrefix(r.URL.Path, "/v1/clients/"))
@@ -661,6 +673,22 @@ func (s *recoveryServer) start(t *testing.T) *client.Client {
 			require.NoError(t, json.NewEncoder(w).Encode(proto.HostThemeState{
 				WorkspaceID: id, Theme: s.hostTheme,
 			}))
+		case strings.HasSuffix(r.URL.Path, "/agent/init"),
+			strings.HasSuffix(r.URL.Path, "/agent/main"):
+			rest := strings.TrimPrefix(r.URL.Path, "/v1/workspaces/")
+			id, call, _ := strings.Cut(rest, "/")
+			if id != s.liveID {
+				http.Error(w, "workspace not found", http.StatusNotFound)
+				return
+			}
+			switch call {
+			case "agent/init":
+				s.agentCalls = append(s.agentCalls, "init "+id)
+			case "agent/main":
+				var req proto.AgentSetMainRequest
+				require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+				s.agentCalls = append(s.agentCalls, "main "+id+" "+req.AgentID)
+			}
 		case strings.HasSuffix(r.URL.Path, "/events"):
 			id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v1/workspaces/"), "/events")
 			if id != s.liveID {
@@ -1257,6 +1285,91 @@ func TestClientWorkspace_RecoveryCreateIsBounded(t *testing.T) {
 		require.Error(t, err, "a create that never answers must not report success")
 	case <-time.After(5 * time.Second):
 		t.Fatal("recoverWorkspace blocked on an unresponsive server")
+	}
+}
+
+// TestClientWorkspace_RecoveryRestoresMainAgent covers the main agent a
+// re-created workspace used to lose: it starts on the coder agent, so a
+// client in plan mode got write tools while its UI still said PLAN MODE.
+func TestClientWorkspace_RecoveryRestoresMainAgent(t *testing.T) {
+	t.Cleanup(SetSSEBackoffForTest(time.Millisecond, 5*time.Millisecond))
+
+	cases := []struct {
+		name string
+		// before runs while the original workspace is still live.
+		before func(t *testing.T, ws *ClientWorkspace)
+		// wantCalls is every agent call the server saw, recovery
+		// included.
+		wantCalls []string
+	}{
+		{
+			name: "plan mode",
+			before: func(t *testing.T, ws *ClientWorkspace) {
+				require.NoError(t, ws.AgentSetMain(config.AgentPlan))
+			},
+			wantCalls: []string{"main ws-1 plan", "init ws-2", "main ws-2 plan"},
+		},
+		{
+			// A fresh coordinator already runs the coder agent, so there
+			// is nothing to restore.
+			name: "back to code mode",
+			before: func(t *testing.T, ws *ClientWorkspace) {
+				require.NoError(t, ws.AgentSetMain(config.AgentPlan))
+				require.NoError(t, ws.AgentSetMain(config.AgentCoder))
+			},
+			wantCalls: []string{"main ws-1 plan", "main ws-1 coder", "init ws-2"},
+		},
+		{
+			name:      "never switched",
+			wantCalls: []string{"init ws-2"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := &recoveryServer{
+				liveID: "ws-1",
+				nextID: "ws-2",
+				config: &config.Config{
+					Options: &config.Options{},
+					Providers: csync.NewMapFrom(map[string]config.ProviderConfig{
+						"fake": {ID: "fake"},
+					}),
+				},
+			}
+			c := srv.start(t)
+			ws := NewClientWorkspace(c, proto.Workspace{ID: "ws-1", Path: "/tmp/recover"})
+			if tc.before != nil {
+				tc.before(t, ws)
+			}
+
+			// The server loses the workspace, as it does when it restarts.
+			srv.snapshot(func(s *recoveryServer) { s.liveID = "" })
+			done := make(chan struct{})
+			go func() {
+				ws.runSubscription(func(tea.Msg) {})
+				close(done)
+			}()
+
+			// Recovery has finished once the re-created workspace streams.
+			require.Eventually(t, func() bool {
+				var streams int
+				srv.snapshot(func(s *recoveryServer) { streams = s.streams })
+				return streams > 0
+			}, 3*time.Second, 5*time.Millisecond)
+			ws.Shutdown()
+			select {
+			case <-done:
+			case <-time.After(3 * time.Second):
+				t.Fatal("runSubscription did not return after Shutdown")
+			}
+
+			srv.snapshot(func(s *recoveryServer) {
+				require.Len(t, s.createReqs, 1)
+				require.Equal(t, tc.wantCalls, s.agentCalls,
+					"recovery must restore the main agent the client last chose")
+			})
+		})
 	}
 }
 

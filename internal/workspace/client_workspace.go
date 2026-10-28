@@ -51,6 +51,11 @@ type ClientWorkspace struct {
 	// reconnect, because the server's per-client presence entry (or the
 	// whole workspace) may have been re-created in the meantime.
 	lastSession string
+	// mainAgent is the agent this client last made the main agent (empty
+	// until it switches). Recovery restores it: a re-created workspace
+	// runs the coder agent, so plan mode would otherwise get write tools
+	// while the UI still says plan.
+	mainAgent string
 
 	// subCtx bounds the lifetime of the event subscription (and its
 	// reconnect loop). Shutdown cancels it so Subscribe stops
@@ -328,7 +333,13 @@ func (w *ClientWorkspace) AgentClearQueue(sessionID string) {
 }
 
 func (w *ClientWorkspace) AgentSetMain(agentID string) error {
-	return w.client.SetMainAgent(context.Background(), w.workspaceID(), agentID)
+	if err := w.client.SetMainAgent(context.Background(), w.workspaceID(), agentID); err != nil {
+		return err
+	}
+	w.mu.Lock()
+	w.mainAgent = agentID
+	w.mu.Unlock()
+	return nil
 }
 
 func (w *ClientWorkspace) AgentSummarize(ctx context.Context, sessionID string) error {
@@ -1046,7 +1057,8 @@ func (w *ClientWorkspace) runSubscription(send func(tea.Msg)) {
 // recoverWorkspace re-registers the workspace after the server reported it
 // gone: it re-creates it from the cached snapshot (the server's own view of
 // path, data dir, flags and env), adopts the new ID, and re-initializes the
-// coder agent when the config is ready, mirroring the startup handshake. The
+// coder agent when the config is ready, mirroring the startup handshake,
+// before switching it back to the main agent this client chose. The
 // server's path dedupe means this either rejoins a live sibling workspace or
 // mints a fresh one. It must only be called from the subscription goroutine,
 // the only writer of the cached ID.
@@ -1084,9 +1096,27 @@ func (w *ClientWorkspace) recoverWorkspace() error {
 			// Matches the startup handshake: agent init failure is
 			// logged, not fatal, since the user can still pick a model.
 			slog.Error("Failed to initialize coder agent after workspace recovery", "error", err)
+		} else {
+			w.restoreMainAgent()
 		}
 	}
 	return nil
+}
+
+// restoreMainAgent switches a freshly initialized agent back to the main
+// agent this client chose. The new coordinator runs the coder agent, so a
+// client in plan mode would otherwise get write tools while its UI still
+// says plan mode; a client on the coder agent needs nothing.
+func (w *ClientWorkspace) restoreMainAgent() {
+	w.mu.RLock()
+	agentID := w.mainAgent
+	w.mu.RUnlock()
+	if agentID == "" || agentID == config.AgentCoder {
+		return
+	}
+	if err := w.client.SetMainAgent(w.subCtx, w.workspaceID(), agentID); err != nil {
+		slog.Error("Failed to restore main agent after workspace recovery", "agent", agentID, "error", err)
+	}
 }
 
 // recreateArgs derives the CreateWorkspace request used for recovery from

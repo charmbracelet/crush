@@ -423,6 +423,51 @@ func TestConfig_setDefaults(t *testing.T) {
 	})
 }
 
+// TestLoad_WalkLimitsFollowWorkingDir is a regression test for the git
+// check behind the non-git file walk limits running in the process working
+// directory. A server hosts every workspace from one process whose working
+// directory is wherever it was first launched, so the check must look at
+// the workspace being loaded.
+func TestLoad_WalkLimitsFollowWorkingDir(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	// Not parallel: changes the process working directory and sets
+	// environment variables.
+	plain, _ := isolateLoadEnv(t)
+	t.Setenv("CRUSH_DISABLE_PROVIDER_AUTO_UPDATE", "1")
+
+	repo := t.TempDir()
+	gitInit := exec.CommandContext(t.Context(), "git", "init", "-q")
+	gitInit.Dir = repo
+	require.NoError(t, gitInit.Run())
+
+	t.Run("git workspace, process outside a repo", func(t *testing.T) {
+		t.Chdir(plain)
+
+		cfg := loadIsolated(t, repo).Config()
+		require.Nil(t, cfg.Tools.Ls.MaxDepth, "a git workspace must not get the non-git walk limits")
+		require.Nil(t, cfg.Tools.Ls.MaxItems)
+		require.Nil(t, cfg.Options.TUI.Completions.MaxDepth)
+		require.Nil(t, cfg.Options.TUI.Completions.MaxItems)
+	})
+
+	t.Run("plain workspace, process inside a repo", func(t *testing.T) {
+		t.Chdir(repo)
+
+		cfg := loadIsolated(t, plain).Config()
+		require.NotNil(t, cfg.Tools.Ls.MaxDepth, "a non-git workspace must get the walk limits")
+		require.Equal(t, 2, *cfg.Tools.Ls.MaxDepth)
+		require.NotNil(t, cfg.Tools.Ls.MaxItems)
+		require.Equal(t, 100, *cfg.Tools.Ls.MaxItems)
+		require.NotNil(t, cfg.Options.TUI.Completions.MaxDepth)
+		require.Equal(t, 2, *cfg.Options.TUI.Completions.MaxDepth)
+		require.NotNil(t, cfg.Options.TUI.Completions.MaxItems)
+		require.Equal(t, 100, *cfg.Options.TUI.Completions.MaxItems)
+	})
+}
+
 func TestConfig_configureProviders(t *testing.T) {
 	knownProviders := []catwalk.Provider{
 		{

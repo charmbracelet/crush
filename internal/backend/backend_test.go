@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/lock"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -606,6 +608,132 @@ func TestPathDedupe_ParallelCreates(t *testing.T) {
 	defer ws.clientsMu.Unlock()
 	require.Contains(t, ws.clients, cidA)
 	require.Contains(t, ws.clients, cidB)
+}
+
+// TestPathDedupe_CaseVariant opens one directory under two spellings that
+// differ only in case. On a case-insensitive filesystem (the macOS and
+// Windows default) that is the same directory, so the second create must
+// join the first workspace instead of opening the directory's data
+// directory a second time, which the server's own data-directory lock
+// refuses. The data directory is left to the server, as a real client does.
+func TestPathDedupe_CaseVariant(t *testing.T) {
+	xdgIsolated(t)
+	t.Setenv("CRUSH_DISABLE_PROVIDER_AUTO_UPDATE", "1")
+
+	root := t.TempDir()
+	upper := filepath.Join(root, "Proj")
+	require.NoError(t, os.Mkdir(upper, 0o755))
+	lower := filepath.Join(root, "proj")
+	if _, err := os.Stat(lower); err != nil {
+		t.Skip("case-sensitive filesystem")
+	}
+
+	b := New(context.Background(), nil, func() {})
+	b.SetCreateGrace(2 * time.Second)
+	t.Cleanup(func() { drainBackend(t, b) })
+
+	wsA, _, err := b.CreateWorkspace(protoWS(upper, "", uuid.New().String()))
+	require.NoError(t, err)
+	wsB, _, err := b.CreateWorkspace(protoWS(lower, "", uuid.New().String()))
+	require.NoError(t, err)
+	require.Equal(t, wsA.ID, wsB.ID, "both spellings must share one workspace")
+}
+
+// TestPathDedupe_ParallelCaseVariants is the concurrent form of
+// TestPathDedupe_CaseVariant: both creates may pass the first lookup
+// before either registers, so the re-check after initialization and the
+// pooled database connection must recognize the directory as well, and the
+// data directory must still be released once the workspace is gone.
+func TestPathDedupe_ParallelCaseVariants(t *testing.T) {
+	xdgIsolated(t)
+	t.Setenv("CRUSH_DISABLE_PROVIDER_AUTO_UPDATE", "1")
+
+	root := t.TempDir()
+	upper := filepath.Join(root, "Proj")
+	require.NoError(t, os.Mkdir(upper, 0o755))
+	lower := filepath.Join(root, "proj")
+	if _, err := os.Stat(lower); err != nil {
+		t.Skip("case-sensitive filesystem")
+	}
+
+	b := New(context.Background(), nil, func() {})
+	b.SetCreateGrace(2 * time.Second)
+	t.Cleanup(func() { drainBackend(t, b) })
+
+	type result struct {
+		ws  *Workspace
+		err error
+	}
+	ch := make(chan result, 2)
+	start := make(chan struct{})
+	for _, path := range []string{upper, lower} {
+		go func() {
+			<-start
+			ws, _, err := b.CreateWorkspace(protoWS(path, "", uuid.New().String()))
+			ch <- result{ws, err}
+		}()
+	}
+	close(start)
+	r1 := <-ch
+	r2 := <-ch
+	require.NoError(t, r1.err)
+	require.NoError(t, r2.err)
+	require.Equal(t, r1.ws.ID, r2.ws.ID, "both creates must converge on one workspace ID")
+
+	drainBackend(t, b)
+	requireDataDirUnlocked(t, filepath.Join(upper, ".crush"))
+}
+
+// TestPathDedupe_SymlinkedParentSubdir opens a repository and, through a
+// symlink to it, one of its subdirectories. They are distinct workspaces,
+// but the subdirectory finds the repository's data directory under the
+// symlinked spelling and must share the open database rather than take the
+// data-directory lock a second time.
+func TestPathDedupe_SymlinkedParentSubdir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink semantics differ on windows")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	xdgIsolated(t)
+	t.Setenv("CRUSH_DISABLE_PROVIDER_AUTO_UPDATE", "1")
+
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	require.NoError(t, os.MkdirAll(filepath.Join(repo, "sub"), 0o755))
+	gitInit := exec.CommandContext(t.Context(), "git", "init", "-q")
+	gitInit.Dir = repo
+	require.NoError(t, gitInit.Run())
+	link := filepath.Join(root, "link")
+	require.NoError(t, os.Symlink(repo, link))
+
+	b := New(context.Background(), nil, func() {})
+	b.SetCreateGrace(2 * time.Second)
+	t.Cleanup(func() { drainBackend(t, b) })
+
+	wsA, protoA, err := b.CreateWorkspace(protoWS(repo, "", uuid.New().String()))
+	require.NoError(t, err)
+	wsB, protoB, err := b.CreateWorkspace(protoWS(filepath.Join(link, "sub"), "", uuid.New().String()))
+	require.NoError(t, err)
+	require.NotEqual(t, wsA.ID, wsB.ID)
+	infoA, err := os.Stat(protoA.DataDir)
+	require.NoError(t, err)
+	infoB, err := os.Stat(protoB.DataDir)
+	require.NoError(t, err)
+	require.True(t, os.SameFile(infoA, infoB), "the subdirectory must use the repository's data directory")
+
+	drainBackend(t, b)
+	requireDataDirUnlocked(t, filepath.Join(repo, ".crush"))
+}
+
+// requireDataDirUnlocked asserts that nothing in this process still holds
+// the data-directory lock in dataDir.
+func requireDataDirUnlocked(t *testing.T, dataDir string) {
+	t.Helper()
+	release, err := lock.TryFile(filepath.Join(dataDir, "crush.lock"))
+	require.NoError(t, err, "data directory must be unlocked once its workspaces are gone")
+	release()
 }
 
 // TestCreateWorkspace_RejectsBadClientID covers the 400 path from the

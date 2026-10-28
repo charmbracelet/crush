@@ -452,7 +452,9 @@ func connectToServer(cmd *cobra.Command) (*client.Client, *proto.Workspace, func
 
 	if ws.Config != nil {
 		logFile := filepath.Join(ws.Config.Options.DataDirectory, "logs", "crush.log")
-		crushlog.Setup(logFile, debug)
+		if err := crushlog.SetFile(logFile); err != nil {
+			slog.Warn("Failed to close the client startup log", "error", err)
+		}
 	}
 
 	// Retiring the client releases every claim it holds, so it covers
@@ -520,12 +522,12 @@ func replaceExitingServer(cmd *cobra.Command, hostURL *url.URL) error {
 // and starts a fresh one.
 func ensureServer(cmd *cobra.Command, hostURL *url.URL) error {
 	// Initialize the persistent log here so stale-socket diagnostics
-	// emitted before connectToServer runs are captured in the per-host
-	// server log file. crushlog.Setup uses sync.Once internally, so the
-	// later call from connectToServer becomes a no-op.
+	// emitted before connectToServer runs are captured on disk. They go to
+	// the clients' own file rather than the server's log, which only the
+	// server may write (see serverLogFile). connectToServer moves the log
+	// to the workspace once it is known.
 	debug, _ := cmd.Flags().GetBool("debug")
-	logFile := filepath.Join(config.GlobalCacheDir(), "server-"+safeHostName(hostURL), "crush.log")
-	crushlog.Setup(logFile, debug)
+	crushlog.Setup(clientLogFile(hostURL), debug)
 
 	switch hostURL.Scheme {
 	case "unix", "npipe":
@@ -648,6 +650,20 @@ func perHostServerDir(hostURL *url.URL) (string, error) {
 		return "", fmt.Errorf("failed to create server working directory: %v", err)
 	}
 	return chDir, nil
+}
+
+// serverLogFile returns the log file of the server at hostURL. Only the
+// server may write it: it rotates the file by renaming it, and Windows
+// refuses to rename a file another process holds open, which stops the
+// server's logging.
+func serverLogFile(hostURL *url.URL) string {
+	return filepath.Join(config.GlobalCacheDir(), "server-"+safeHostName(hostURL), "crush.log")
+}
+
+// clientLogFile returns the log file clients of the server at hostURL write
+// to until they know their workspace.
+func clientLogFile(hostURL *url.URL) string {
+	return filepath.Join(config.GlobalCacheDir(), "server-"+safeHostName(hostURL), "client.log")
 }
 
 // safeHostName returns a filesystem-safe identifier for hostURL,

@@ -247,7 +247,7 @@ type AgentToolRenderContext struct {
 func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
 	if !opts.ToolCall.Finished && !opts.IsCanceled() && len(r.agent.nestedTools) == 0 {
-		return pendingTool(sty, "Agent", opts.Anim, opts.Compact)
+		return pendingTool(sty, prettifyToolName(opts.ToolCall.Name), opts.Anim, opts.Compact)
 	}
 
 	var params agent.AgentParams
@@ -262,7 +262,7 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	// pairs with the report item that arrives later under the same label.
 	var header string
 	if r.agent.dispatchLabel != "" {
-		header = subagentHeader(sty, opts.Status, r.agent.dispatchLabel, dispatchRunModel(opts), cappedWidth, opts)
+		header = subagentHeader(sty, opts.Status, prettifyToolName(agent.AgentDispatchToolName), r.agent.dispatchLabel, dispatchRunModel(opts), cappedWidth, opts)
 	} else {
 		header = toolHeader(sty, opts.Status, "Agent", cappedWidth, opts)
 	}
@@ -498,9 +498,9 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 	return result
 }
 
-// subagentHeader renders "✓ Subagent betty-date-impl (model=hyper/glm-5)", truncating the model rather than dropping it.
-func subagentHeader(sty *styles.Styles, status ToolStatus, label, model string, width int, opts *ToolRenderOpts) string {
-	header := toolHeader(sty, status, "Subagent", width, opts, sty.Tool.AgentName.Render(SubagentDisplayName(label)))
+// subagentHeader renders "✓ Create Subagent betty-date-impl (model=hyper/glm-5)", truncating the model rather than dropping it.
+func subagentHeader(sty *styles.Styles, status ToolStatus, name, label, model string, width int, opts *ToolRenderOpts) string {
+	header := toolHeader(sty, status, name, width, opts, sty.Tool.AgentName.Render(SubagentDisplayName(label)))
 	const minModelWidth = 12
 	room := width - lipgloss.Width(header) - 1
 	if model == "" || room < minModelWidth {

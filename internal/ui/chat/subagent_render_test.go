@@ -35,8 +35,8 @@ func TestSubagentReportAlignsWithHeader(t *testing.T) {
 	lines := renderPlain(t, item)
 
 	name := SubagentDisplayName("date-impl")
-	require.Contains(t, lines[0], "Subagent "+name+" (model=hyper/glm-5)")
-	headerText := ansi.StringWidth(lines[0][:strings.Index(lines[0], "Subagent")])
+	require.Contains(t, lines[0], "Subagent Report "+name+" (model=hyper/glm-5)")
+	headerText := ansi.StringWidth(lines[0][:strings.Index(lines[0], "Subagent Report")])
 	body := lines[2]
 	require.Equal(t, headerText, len(body)-len(strings.TrimLeft(body, " ")), "body: %q", body)
 }
@@ -57,7 +57,7 @@ func TestAgentSendShowsTheMessage(t *testing.T) {
 	}, false, "/tmp")
 	out := strings.Join(renderPlain(t, item), "\n")
 
-	require.Contains(t, out, "Agent Send → "+SubagentDisplayName("date-impl"))
+	require.Contains(t, out, "Send Subagent Message → "+SubagentDisplayName("date-impl"))
 	require.Contains(t, out, "Please fix the lint.")
 	require.NotContains(t, out, `"label"`)
 	require.NotContains(t, out, "Delivered")
@@ -79,7 +79,7 @@ func TestDispatchHeaderShowsRunModel(t *testing.T) {
 		Metadata:   `{"label":"audit","run_model":"hyper/glm-5"}`,
 	}, false, "/tmp")
 	lines := renderPlain(t, item)
-	require.Contains(t, lines[0], "Subagent "+SubagentDisplayName("audit")+" (model=hyper/glm-5)")
+	require.Contains(t, lines[0], "Create Subagent "+SubagentDisplayName("audit")+" (model=hyper/glm-5)")
 }
 
 // A long model name on a narrow pane is what hid the override's model: the
@@ -87,7 +87,7 @@ func TestDispatchHeaderShowsRunModel(t *testing.T) {
 func TestSubagentHeaderKeepsLongModelOnNarrowPane(t *testing.T) {
 	t.Parallel()
 	sty := styles.CharmtonePantera()
-	h := ansi.Strip(subagentHeader(&sty, ToolStatusSuccess, "smoke-override", "anthropic/claude-haiku-4-5-20251001", 72, nil))
+	h := ansi.Strip(subagentHeader(&sty, ToolStatusSuccess, "Create Subagent", "smoke-override", "anthropic/claude-haiku-4-5-20251001", 72, nil))
 	require.Contains(t, h, "(model=")
 	require.LessOrEqual(t, ansi.StringWidth(h), 72)
 }

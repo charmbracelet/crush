@@ -1842,13 +1842,13 @@ func prettifyToolName(name string) string {
 	case agent.AgentToolName:
 		return "Agent"
 	case agent.AgentDispatchToolName:
-		return "Agent: Dispatch"
+		return "Create Subagent"
 	case agent.AgentSendToolName:
-		return "Agent: Send"
+		return "Send Subagent Message"
 	case agent.AgentStatusToolName:
-		return "Agent: Status"
+		return "Subagent Status"
 	case agent.AgentStopToolName:
-		return "Agent: Stop"
+		return "Stop Subagent"
 	case tools.BashToolName:
 		return "Bash"
 	case tools.JobOutputToolName:

@@ -965,7 +965,7 @@ func startDetachedServer(cmd *cobra.Command, hostURL *url.URL) error {
 		return fmt.Errorf("failed to start crush server: %v", err)
 	}
 
-	if err := c.Process.Release(); err != nil {
+	if err := releaseProcess(c); err != nil {
 		return fmt.Errorf("failed to detach crush server process: %v", err)
 	}
 

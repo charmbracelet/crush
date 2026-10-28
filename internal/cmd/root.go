@@ -1114,13 +1114,8 @@ var startDetachedServer = func(cmd *cobra.Command, hostURL *url.URL) (*spawnedSe
 	}
 	defer stderr.Close()
 
-	// Use context.Background() so the parent's context cancellation does not
-	// kill the spawned server. startDetached (Setsid on !windows; on
-	// windows a new process group with a hidden console of its own, outside
-	// this process's job) is what truly detaches the child from this
-	// process's lifetime.
 	c, err := startDetached(func() *exec.Cmd {
-		c := exec.CommandContext(context.Background(), exe, cmdArgs...)
+		c := detachedServerCmd(exe, chDir, cmdArgs...)
 		c.Stdout = stdout
 		c.Stderr = stderr
 		return c
@@ -1138,6 +1133,23 @@ var startDetachedServer = func(cmd *cobra.Command, hostURL *url.URL) (*spawnedSe
 		close(child.done)
 	}()
 	return child, nil
+}
+
+// detachedServerCmd returns the command that runs a detached server from
+// dir. The server outlives the client that spawns it, so inheriting that
+// client's working directory would keep it in use for as long as the
+// server runs: on Windows it could not be deleted or renamed, and
+// elsewhere its volume could not be unmounted. Panic logs, which are
+// written relative to the working directory, would also land there.
+func detachedServerCmd(exe, dir string, args ...string) *exec.Cmd {
+	// Use context.Background() so the parent's context cancellation does not
+	// kill the spawned server. startDetached (Setsid on !windows; on
+	// windows a new process group with a hidden console of its own, outside
+	// this process's job) is what truly detaches the child from this
+	// process's lifetime.
+	c := exec.CommandContext(context.Background(), exe, args...)
+	c.Dir = dir
+	return c
 }
 
 func shouldEnableMetrics(cfg *config.Config) bool {

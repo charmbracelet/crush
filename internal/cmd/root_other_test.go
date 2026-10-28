@@ -51,7 +51,8 @@ func TestStartDetachedServerReapsExitedServer(t *testing.T) {
 	require.NoError(t, err)
 	cmd := &cobra.Command{}
 	cmd.SetContext(t.Context())
-	require.NoError(t, startDetachedServer(cmd, hostURL))
+	_, err = startDetachedServer(cmd, hostURL)
+	require.NoError(t, err)
 
 	var pid int
 	require.Eventually(t, func() bool {

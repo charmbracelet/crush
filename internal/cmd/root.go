@@ -633,7 +633,7 @@ func ensureServer(cmd *cobra.Command, hostURL *url.URL) error {
 			return nil
 		}
 
-		if err := waitForServerReady(cmd.Context(), hostURL); err != nil {
+		if err := waitForServerReady(cmd.Context(), hostURL, nil); err != nil {
 			// The server found here has committed to exiting and will
 			// never serve this client, so replace it.
 			if errors.Is(err, client.ErrServerShuttingDown) {
@@ -666,10 +666,11 @@ func spawnAndWaitReady(cmd *cobra.Command, hostURL *url.URL) error {
 		// If the lock itself is unavailable, fall back to the
 		// unsynchronized path rather than blocking the user.
 		slog.Warn("Failed to acquire spawn lock, proceeding without single-flight", "error", err)
-		if err := startDetachedServer(cmd, hostURL); err != nil {
+		child, err := startDetachedServer(cmd, hostURL)
+		if err != nil {
 			return err
 		}
-		return waitForServerReady(cmd.Context(), hostURL)
+		return waitForServerReady(cmd.Context(), hostURL, child)
 	}
 	defer release()
 
@@ -683,10 +684,11 @@ func spawnAndWaitReady(cmd *cobra.Command, hostURL *url.URL) error {
 		return nil
 	}
 
-	if err := startDetachedServer(cmd, hostURL); err != nil {
+	child, err := startDetachedServer(cmd, hostURL)
+	if err != nil {
 		return err
 	}
-	return waitForServerReady(cmd.Context(), hostURL)
+	return waitForServerReady(cmd.Context(), hostURL, child)
 }
 
 // quickHealthProbe issues a single readiness request with the caller's
@@ -722,8 +724,16 @@ func safeHostName(hostURL *url.URL) string {
 
 // serverReadyTimeout returns the total budget for the readiness probe.
 // Overridable via CRUSH_SERVER_READY_TIMEOUT (parsed as a Go duration).
-func serverReadyTimeout() time.Duration {
-	const def = 10 * time.Second
+//
+// Without an override, a server this client has just spawned gets far
+// longer than one it found running: it binds only after loading its config,
+// which can spend tens of seconds fetching the provider catalog on a slow
+// network, and waitForServerReady stops early if it exits.
+func serverReadyTimeout(spawned bool) time.Duration {
+	def := 10 * time.Second
+	if spawned {
+		def = 2 * time.Minute
+	}
 	v := os.Getenv("CRUSH_SERVER_READY_TIMEOUT")
 	if v == "" {
 		return def
@@ -742,16 +752,20 @@ func serverReadyTimeout() time.Duration {
 // that ends the wait at once with an error wrapping
 // [client.ErrServerShuttingDown].
 //
+// child is the server this client just spawned, if any: the wait then gets
+// the longer budget for such a server, and fails as soon as that process
+// exits instead of running out the clock.
+//
 // The HTTP transport is built to mirror how *client.Client dials so the
 // same unix socket / npipe / tcp setups all work uniformly here.
-func waitForServerReady(ctx context.Context, hostURL *url.URL) error {
+func waitForServerReady(ctx context.Context, hostURL *url.URL, child *spawnedServer) error {
 	httpClient, reqURL, err := readinessHTTPClient(hostURL)
 	if err != nil {
 		return err
 	}
 
 	const perAttempt = 100 * time.Millisecond
-	deadline := time.Now().Add(serverReadyTimeout())
+	deadline := time.Now().Add(serverReadyTimeout(child != nil))
 
 	var lastErr error
 	for {
@@ -765,6 +779,9 @@ func waitForServerReady(ctx context.Context, hostURL *url.URL) error {
 			return fmt.Errorf("timed out waiting for server readiness")
 		}
 
+		// Check for an exit before probing, so that a server which beat
+		// the child to the address, and so made it exit, is still found.
+		exited := child != nil && child.exited()
 		attemptCtx, cancel := context.WithTimeout(ctx, perAttempt)
 		err := probeHealth(attemptCtx, httpClient, reqURL, hostURL)
 		cancel()
@@ -773,6 +790,9 @@ func waitForServerReady(ctx context.Context, hostURL *url.URL) error {
 		}
 		if errors.Is(err, client.ErrServerShuttingDown) {
 			return err
+		}
+		if exited {
+			return child.exitError()
 		}
 		lastErr = err
 
@@ -990,15 +1010,59 @@ func statServerEndpoint(ctx context.Context, hostURL *url.URL) error {
 
 var safeNameRegexp = regexp.MustCompile(`[^a-zA-Z0-9._-]`)
 
-func startDetachedServer(cmd *cobra.Command, hostURL *url.URL) error {
+// spawnedServer is a server process this client started and waits on, so
+// that waitForServerReady can tell a server that is slow to start from one
+// that has died.
+type spawnedServer struct {
+	// stderrPath is the log the server's stderr goes to.
+	stderrPath string
+	// done is closed once the process has exited.
+	done chan struct{}
+	// err is the process's exit status, set before done is closed.
+	err error
+}
+
+// exited reports whether the server process has exited.
+func (s *spawnedServer) exited() bool {
+	select {
+	case <-s.done:
+		return true
+	default:
+		return false
+	}
+}
+
+// exitError reports that the server exited before it was ready, along with
+// the last lines it wrote to stderr, which say why.
+func (s *spawnedServer) exitError() error {
+	err := errors.New("crush server exited before it was ready")
+	if s.err != nil {
+		err = fmt.Errorf("crush server exited before it was ready: %v", s.err)
+	}
+	data, _ := os.ReadFile(s.stderrPath)
+	var lines []string
+	for line := range strings.Lines(string(data)) {
+		if line = strings.TrimSpace(line); line != "" {
+			lines = append(lines, line)
+		}
+	}
+	if len(lines) == 0 {
+		return err
+	}
+	const maxLines = 10
+	lines = lines[max(0, len(lines)-maxLines):]
+	return fmt.Errorf("%w; last lines of %s:\n%s", err, s.stderrPath, strings.Join(lines, "\n"))
+}
+
+func startDetachedServer(cmd *cobra.Command, hostURL *url.URL) (*spawnedServer, error) {
 	exe, err := os.Executable()
 	if err != nil {
-		return fmt.Errorf("failed to get executable path: %v", err)
+		return nil, fmt.Errorf("failed to get executable path: %v", err)
 	}
 
 	chDir, err := perHostServerDir(hostURL)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Pass the parsed host rather than the flag as typed, so a relative
@@ -1023,27 +1087,31 @@ func startDetachedServer(cmd *cobra.Command, hostURL *url.URL) error {
 	// replacement must not erase that before anyone has read it.
 	stdout, err := os.OpenFile(stdoutPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
-		return fmt.Errorf("failed to create stdout log file: %v", err)
+		return nil, fmt.Errorf("failed to create stdout log file: %v", err)
 	}
 	defer stdout.Close()
 	c.Stdout = stdout
 
 	stderr, err := os.OpenFile(stderrPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
-		return fmt.Errorf("failed to create stderr log file: %v", err)
+		return nil, fmt.Errorf("failed to create stderr log file: %v", err)
 	}
 	defer stderr.Close()
 	c.Stderr = stderr
 
 	if err := c.Start(); err != nil {
-		return fmt.Errorf("failed to start crush server: %v", err)
+		return nil, fmt.Errorf("failed to start crush server: %v", err)
 	}
 
-	if err := releaseProcess(c); err != nil {
-		return fmt.Errorf("failed to detach crush server process: %v", err)
-	}
-
-	return nil
+	// Wait on the process rather than releasing it, so the readiness wait
+	// can see it exit. Waiting does not tie the server to this client: it
+	// stays detached and outlives the client as before.
+	child := &spawnedServer{stderrPath: stderrPath, done: make(chan struct{})}
+	go func() {
+		child.err = c.Wait()
+		close(child.done)
+	}()
+	return child, nil
 }
 
 func shouldEnableMetrics(cfg *config.Config) bool {

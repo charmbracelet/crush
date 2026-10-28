@@ -271,3 +271,27 @@ func TestListen_RacingStaleRecovery(t *testing.T) {
 	require.NoError(t, err, "the socket file on disk should reach the bound listener")
 	_ = conn.Close()
 }
+
+func TestListen_RestrictsSocketToOwner(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "s.sock")
+
+	// The umask is process-wide, so this test must not run in parallel.
+	// With a zero umask the kernel creates the socket world-connectable.
+	oldUmask := syscall.Umask(0)
+	ln, _, err := listen("unix", path)
+	syscall.Umask(oldUmask)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = ln.Close()
+	})
+
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0o600), info.Mode().Perm(),
+		"socket must only be accessible by its owner, got %v", info.Mode())
+
+	conn, err := net.DialTimeout("unix", path, 200*time.Millisecond) //nolint:noctx
+	require.NoError(t, err, "owner should still be able to connect")
+	_ = conn.Close()
+}

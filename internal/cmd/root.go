@@ -14,7 +14,6 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
-	"os/signal"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -215,7 +214,7 @@ func Execute() {
 		_, _ = w.WriteString(heartbit.String())
 		rootCmd.SetVersionTemplate(b.String() + "\n" + defaultVersionTemplate)
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), terminationSignals()...)
+	ctx, stop := notifyContext(context.Background(), terminationSignals()...)
 	err := fang.Execute(
 		ctx,
 		rootCmd,
@@ -226,12 +225,12 @@ func Execute() {
 			}
 		}),
 	)
-	interrupted := ctx.Err() != nil
+	code := signalExitCode(ctx)
 	stop()
 	switch {
-	case interrupted:
-		// An interrupt is not a failure worth printing; exit like a shell would.
-		os.Exit(130)
+	case code != 0:
+		// A signal is not a failure worth printing; exit like a shell would.
+		os.Exit(code)
 	case err != nil:
 		os.Exit(1)
 	}

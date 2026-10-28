@@ -502,40 +502,22 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 	return result
 }
 
-// subagentHeader builds the header shared by everything that names a
-// sub-agent: "✓ Subagent betty-date-impl (model=hyper/glm-5)". The model
-// matters here more than a tool's extra parameters do, so a narrow pane
-// truncates it rather than dropping it the way the shared header would.
+// subagentHeader renders "✓ Subagent betty-date-impl (model=hyper/glm-5)", truncating the model rather than dropping it.
 func subagentHeader(sty *styles.Styles, status ToolStatus, label, model string, width int, opts *ToolRenderOpts) string {
 	header := toolHeader(sty, status, "Subagent", width, opts, sty.Tool.AgentName.Render(SubagentDisplayName(label)))
-	if model == "" {
-		return header
-	}
-	// Below this many columns a model name is truncated past recognition.
 	const minModelWidth = 12
 	room := width - lipgloss.Width(header) - 1
-	if room < minModelWidth {
+	if model == "" || room < minModelWidth {
 		return header
 	}
 	return header + " " + sty.Tool.ParamMain.Render(ansi.Truncate("(model="+model+")", room, "…)"))
 }
 
-// dispatchRunModel names the model a dispatched sub-agent runs on. The
-// dispatch result records it once the sub-agent starts; until then, an
-// override in the call's parameters is the best guess.
+// dispatchRunModel reads the model a dispatch recorded once its sub-agent started.
 func dispatchRunModel(opts *ToolRenderOpts) string {
-	if opts.HasResult() && opts.Result.Metadata != "" {
-		var meta agent.AgentDispatchResponseMetadata
-		if json.Unmarshal([]byte(opts.Result.Metadata), &meta) == nil && meta.RunModel != "" {
-			return meta.RunModel
-		}
+	var meta agent.AgentDispatchResponseMetadata
+	if opts.HasResult() {
+		_ = json.Unmarshal([]byte(opts.Result.Metadata), &meta)
 	}
-	var params agent.AgentDispatchParams
-	if json.Unmarshal([]byte(opts.ToolCall.Input), &params) != nil || params.Model == "" {
-		return ""
-	}
-	if params.Provider == "" {
-		return params.Model
-	}
-	return params.Provider + "/" + params.Model
+	return meta.RunModel
 }

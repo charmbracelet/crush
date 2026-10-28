@@ -591,7 +591,7 @@ func TestDispatchModelCatalog(t *testing.T) {
 	cfg := c.cfg.Config()
 
 	catalog := dispatchModelCatalog(cfg, c.mainModels().Large)
-	require.Equal(t, "\n\nModels available to `model`, by `provider` (you are running on `mock-reasoner` from `mock`):\n"+
+	require.Equal(t, "\n\nModels available to `model`, by `provider` (you are running on `mock/mock-reasoner`):\n"+
 		"\n- `mock`: mock-model, mock-reasoner"+
 		"\n- `other`: other-model", catalog)
 

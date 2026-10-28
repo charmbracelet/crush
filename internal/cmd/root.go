@@ -930,9 +930,12 @@ func startDetachedServer(cmd *cobra.Command, hostURL *url.URL) error {
 		return err
 	}
 
+	// Pass the parsed host rather than the flag as typed, so a relative
+	// socket path reaches the server already resolved against the directory
+	// crush was started in, not against --cwd.
 	cmdArgs := []string{"server"}
 	if clientHost != server.DefaultHost() {
-		cmdArgs = append(cmdArgs, "--host", clientHost)
+		cmdArgs = append(cmdArgs, "--host", hostURL.Scheme+"://"+hostURL.Host+hostURL.Path)
 	}
 
 	// Use context.Background() so the parent's context cancellation does not

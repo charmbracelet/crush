@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -206,5 +207,67 @@ func TestListen_LiveSocketNotRemoved(t *testing.T) {
 	require.NoError(t, statErr, "live socket file should still exist")
 	conn, dialErr := net.DialTimeout("unix", path, 200*time.Millisecond) //nolint:noctx
 	require.NoError(t, dialErr, "live socket should still accept dials")
+	_ = conn.Close()
+}
+
+// TestListen_RacingStaleRecovery stalls one listen call between its stale
+// probe and its removal while a second call on the same path runs, as two
+// server processes starting at once would. Unless the two take turns, the
+// second binds, the first then removes that live socket file and binds
+// too, leaving the second listener on a deleted path no client can reach.
+func TestListen_RacingStaleRecovery(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "s.sock")
+
+	staleSocketPath(t, path)
+
+	probed := make(chan struct{})
+	secondDone := make(chan struct{})
+	var calls atomic.Int32
+	origDial := dialSocket
+	dialSocket = func(network, address string) (net.Conn, error) {
+		conn, err := origDial(network, address)
+		if calls.Add(1) == 1 {
+			// The first caller has just seen the stale socket. Give
+			// the second caller every chance to bind before this one
+			// goes on to remove the path.
+			close(probed)
+			select {
+			case <-secondDone:
+			case <-time.After(time.Second):
+			}
+		}
+		return conn, err
+	}
+	t.Cleanup(func() { dialSocket = origDial })
+
+	type result struct {
+		ln  net.Listener
+		err error
+	}
+	firstCh := make(chan result, 1)
+	go func() {
+		ln, _, err := listen("unix", path)
+		firstCh <- result{ln: ln, err: err}
+	}()
+	<-probed
+
+	ln2, _, err2 := listen("unix", path)
+	close(secondDone)
+	first := <-firstCh
+	for _, ln := range []net.Listener{first.ln, ln2} {
+		if ln != nil {
+			t.Cleanup(func() { _ = ln.Close() })
+		}
+	}
+
+	require.False(t, first.err == nil && err2 == nil,
+		"both listen calls bound %q: one listener is serving a deleted socket file", path)
+	require.NoError(t, first.err, "the caller that found the stale socket should bind")
+	require.ErrorIs(t, err2, syscall.EADDRINUSE,
+		"the second caller should find the first one's live socket")
+
+	conn, err := net.DialTimeout("unix", path, time.Second) //nolint:noctx
+	require.NoError(t, err, "the socket file on disk should reach the bound listener")
 	_ = conn.Close()
 }

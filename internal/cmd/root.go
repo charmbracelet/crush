@@ -1036,14 +1036,24 @@ func resolveWorkspaceSessionID(ctx context.Context, ws workspace.Workspace, id s
 	}
 }
 
+// ResolveCwd changes into the --cwd directory, if one is given, and returns
+// the absolute working directory. It must be absolute because client/server
+// mode sends it to the server, which would resolve a relative path against
+// its own working directory.
 func ResolveCwd(cmd *cobra.Command) (string, error) {
 	cwd, _ := cmd.Flags().GetString("cwd")
 	if cwd != "" {
-		err := os.Chdir(cwd)
+		// Resolve the flag before changing into it, while a relative
+		// value still means what it did in the user's shell.
+		abs, err := filepath.Abs(cwd)
+		if err != nil {
+			return "", fmt.Errorf("failed to resolve directory: %v", err)
+		}
+		err = os.Chdir(abs)
 		if err != nil {
 			return "", fmt.Errorf("failed to change directory: %v", err)
 		}
-		return cwd, nil
+		return abs, nil
 	}
 	cwd, err := os.Getwd()
 	if err != nil {

@@ -3,7 +3,9 @@ package db
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/lock"
@@ -48,6 +50,51 @@ func TestConnect_SeparateConnectionsForDifferentDataDirs(t *testing.T) {
 
 	require.NoError(t, Release(dir1))
 	require.NoError(t, Release(dir2))
+}
+
+// TestConnect_PathWithURIMetacharacters makes sure characters that are
+// special in a SQLite "file:" URI are taken literally in the data
+// directory. Unescaped, "#" ends the path, "?" starts the query string
+// and "%41" decodes to "A", so the database would be created outside the
+// project, shared between projects, or fail to open.
+func TestConnect_PathWithURIMetacharacters(t *testing.T) {
+	t.Cleanup(ResetPool)
+
+	// The subtest names stay plain because t.TempDir keeps "#" and "%"
+	// from the test name in the directory it creates.
+	tests := map[string]string{
+		"hash":    "C#app",
+		"percent": "100%41",
+	}
+	if runtime.GOOS != "windows" {
+		// Windows does not allow "?" in file names.
+		tests["question_mark"] = "q?x"
+	}
+	for name, dir := range tests {
+		t.Run(name, func(t *testing.T) {
+			parent := t.TempDir()
+			dataDir := filepath.Join(parent, dir, ".crush")
+			dbPath := filepath.Join(dataDir, "crush.db")
+
+			_, err := Connect(context.Background(), dataDir)
+			require.NoError(t, err)
+			require.NoError(t, Release(dataDir))
+			require.FileExists(t, dbPath)
+
+			ro, err := ConnectReadOnly(context.Background(), dbPath)
+			require.NoError(t, err)
+			require.NoError(t, ro.Close())
+
+			// Nothing may be created next to the project directory.
+			entries, err := os.ReadDir(parent)
+			require.NoError(t, err)
+			var names []string
+			for _, entry := range entries {
+				names = append(names, entry.Name())
+			}
+			require.Equal(t, []string{dir}, names)
+		})
+	}
 }
 
 func TestRelease_NoopForUnknownDataDir(t *testing.T) {

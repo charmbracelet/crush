@@ -25,6 +25,20 @@ func (b *Backend) SubscribeEvents(ctx context.Context, workspaceID string) (<-ch
 	return ws.Events(ctx), nil
 }
 
+// SubscribeEventsWithOverflow is like [Backend.SubscribeEvents], but also
+// returns a channel that is closed the first time an event is dropped for
+// this caller because it fell behind. Client event streams use it to end
+// the stream rather than leave a gap.
+func (b *Backend) SubscribeEventsWithOverflow(ctx context.Context, workspaceID string) (<-chan pubsub.Event[tea.Msg], <-chan struct{}, error) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	events, overflow := ws.EventsWithOverflow(ctx)
+	return events, overflow, nil
+}
+
 // maxSessionAncestryDepth bounds how far [Backend.RootSessionID] walks
 // the parent chain when resolving a session to its top-level session.
 // Sub-agents cannot spawn sub-agents today, so one hop suffices in

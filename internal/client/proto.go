@@ -255,6 +255,12 @@ func (c *Client) SubscribeEvents(ctx context.Context, id string) (<-chan any, er
 				if !sendEvent(ctx, events, e) {
 					return
 				}
+			case pubsub.PayloadTypeClientSession:
+				var e pubsub.Event[proto.ClientSession]
+				_ = json.Unmarshal(p.Payload, &e)
+				if !sendEvent(ctx, events, e) {
+					return
+				}
 			default:
 				slog.Warn("Unknown event type", "type", p.Type)
 				continue

@@ -224,6 +224,11 @@ func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.R
 		c.handleError(w, r, err)
 		return
 	}
+	sessions, err := c.backend.SubscribeClientSessions(r.Context(), id)
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
 	if err := c.backend.AttachClient(id, clientID); err != nil {
 		c.handleError(w, r, err)
 		return
@@ -241,6 +246,7 @@ func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.R
 	flusher.Flush()
 
 	c.replayHostTheme(w, r, flusher, id)
+	c.replayClientSessions(w, r, flusher, id)
 
 	for {
 		select {
@@ -268,6 +274,12 @@ func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.R
 				continue
 			}
 			c.writeEvent(w, r, flusher, ev.Payload)
+		case sev, ok := <-sessions:
+			if !ok {
+				sessions = nil
+				continue
+			}
+			c.writeEvent(w, r, flusher, sev)
 		}
 	}
 }

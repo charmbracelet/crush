@@ -53,6 +53,15 @@ type UpdateAvailable struct {
 	IsDevelopment  bool   `json:"is_development"`
 }
 
+// ClientSession is the payload of a client_session event: the session a
+// client of a workspace is viewing has changed. An empty SessionID means
+// the client no longer views one, such as the landing screen or after it
+// went away.
+type ClientSession struct {
+	ClientID  string `json:"client_id"`
+	SessionID string `json:"session_id"`
+}
+
 // CurrentSession is the request body for the per-client
 // current-session endpoint. An empty SessionID clears the entry.
 type CurrentSession struct {

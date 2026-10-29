@@ -78,3 +78,20 @@ func (c *controllerV1) replayHostTheme(w http.ResponseWriter, r *http.Request, f
 		Payload: st,
 	})
 }
+
+// replayClientSessions writes the session each client of the workspace
+// views to a client that just attached its event stream, so that it knows
+// the sessions of the clients that were already there. It runs after the
+// stream subscribed, like replayHostTheme.
+func (c *controllerV1) replayClientSessions(w http.ResponseWriter, r *http.Request, flusher *http.ResponseController, workspaceID string) {
+	sessions, err := c.backend.ClientSessions(workspaceID)
+	if err != nil {
+		return
+	}
+	for _, s := range sessions {
+		c.writeEvent(w, r, flusher, pubsub.Event[proto.ClientSession]{
+			Type:    pubsub.UpdatedEvent,
+			Payload: s,
+		})
+	}
+}

@@ -64,13 +64,20 @@ func (r *AgentControlToolRenderContext) RenderTool(sty *styles.Styles, width int
 
 // agentControlParts returns the addressed label and the prose to show: a message, a stop reason, or none.
 func agentControlParts(tc message.ToolCall) (label, prose string) {
-	var params struct {
-		Label   string `json:"label"`
-		Message string `json:"message"`
-		Reason  string `json:"reason"`
+	switch tc.Name {
+	case agent.AgentSendToolName:
+		var p agent.AgentSendParams
+		_ = json.Unmarshal([]byte(tc.Input), &p)
+		return p.Label, p.Message
+	case agent.AgentStopToolName:
+		var p agent.AgentStopParams
+		_ = json.Unmarshal([]byte(tc.Input), &p)
+		return p.Label, p.Reason
+	default:
+		var p agent.AgentStatusParams
+		_ = json.Unmarshal([]byte(tc.Input), &p)
+		return p.Label, ""
 	}
-	_ = json.Unmarshal([]byte(tc.Input), &params)
-	return params.Label, params.Message + params.Reason
 }
 
 // agentMessageContent wraps prose and collapses it like tool output.

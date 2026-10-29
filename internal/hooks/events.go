@@ -15,6 +15,16 @@ const (
 	EventPostToolUseFailure = "PostToolUseFailure"
 	// EventPermissionRequest fires when a permission prompt is shown.
 	EventPermissionRequest = "PermissionRequest"
+	// EventPrePermission fires right before the permission service is
+	// about to prompt the user for a tool call. Returning allow or deny
+	// from these hooks short-circuits the prompt entirely; silence falls
+	// through to the normal prompt.
+	EventPrePermission = "PrePermission"
+	// EventPermissionDenied fires after a permission request has been
+	// denied, so hosts can react programmatically (notify, log, disable).
+	// It carries the permission request payload. Fire-and-forget: the
+	// hook does not block the denial.
+	EventPermissionDenied = "PermissionDenied"
 	// EventPermissionResult fires when a permission prompt is resolved
 	// (granted, denied, or cancelled).
 	EventPermissionResult = "PermissionResult"
@@ -42,7 +52,9 @@ var events = map[string]bool{
 	EventPreToolUse:         true,
 	EventPostToolUse:        true,
 	EventPostToolUseFailure: true,
+	EventPermissionDenied:   true,
 	EventPermissionRequest:  true,
+	EventPrePermission:      true,
 	EventPermissionResult:   true,
 	EventSessionStart:       false,
 	EventSessionEnd:         false,
@@ -107,6 +119,10 @@ type Event struct {
 	Reason string
 	// Trigger is why compaction ran (PreCompact, PostCompact).
 	Trigger string
+	// Transcript is a reasoning-blind excerpt of the recent conversation,
+	// filled in by the runner for hooks that opt in via
+	// include_transcript. Callers do not set it.
+	Transcript string
 }
 
 // ToolCall identifies the tool call a tool event is about. Input is raw

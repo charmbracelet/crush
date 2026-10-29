@@ -922,6 +922,10 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Editor.PromptYoloIconBlurred = s.Editor.PromptYoloIconFocused.Foreground(o.bgBase).Background(o.fgMoreSubtle)
 	s.Editor.PromptYoloDotsFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.warningSubtle).SetString(":::")
 	s.Editor.PromptYoloDotsBlurred = s.Editor.PromptYoloDotsFocused.Foreground(o.fgMoreSubtle)
+	s.Editor.PromptAutoIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.fgMostSubtle).Background(o.successMoreSubtle).Bold(true).SetString(" A ")
+	s.Editor.PromptAutoIconBlurred = s.Editor.PromptAutoIconFocused.Foreground(o.bgBase).Background(o.fgMoreSubtle)
+	s.Editor.PromptAutoDotsFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.successMoreSubtle).SetString(":::")
+	s.Editor.PromptAutoDotsBlurred = s.Editor.PromptAutoDotsFocused.Foreground(o.fgMoreSubtle)
 	s.Editor.PromptBangIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.onPrimary).Background(o.primary).Bold(true).SetString(" ! ")
 	s.Editor.PromptBangIconBlurred = s.Editor.PromptBangIconFocused.Foreground(o.bgBase).Background(o.fgMoreSubtle)
 	s.Editor.PromptBangDotsFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.primary).SetString(":::")
@@ -1224,10 +1228,13 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Status.Help = lipgloss.NewStyle().Padding(0, 1)
 	s.Status.ModeBadgePlan = lipgloss.NewStyle().Foreground(o.fgBase).Background(o.primary).Padding(0, 1).Bold(true).SetString("PLAN MODE")
 	s.Status.ModeBadgeYolo = lipgloss.NewStyle().Foreground(badgeInk(o.busy, o.bgBase, o.fgBase)).Background(o.busy).Padding(0, 1).Bold(true).SetString("YOLO MODE")
+	s.Status.ModeBadgeAuto = lipgloss.NewStyle().Foreground(badgeInk(o.successMoreSubtle, o.bgBase, o.fgBase)).Background(o.successMoreSubtle).Padding(0, 1).Bold(true).SetString("AUTO MODE")
 	s.Status.ModeBannerPlanBadge = s.Status.ModeBadgePlan
 	s.Status.ModeBannerPlan = lipgloss.NewStyle().Foreground(o.fgBase).Background(o.planMoreSubtle).Padding(0, 1)
 	s.Status.ModeBannerYoloBadge = s.Status.ModeBadgeYolo
 	s.Status.ModeBannerYolo = lipgloss.NewStyle().Foreground(badgeInk(o.yolo, o.bgBase, o.fgBase)).Background(o.yolo).Padding(0, 1)
+	s.Status.ModeBannerAutoBadge = s.Status.ModeBadgeAuto
+	s.Status.ModeBannerAuto = lipgloss.NewStyle().Foreground(badgeInk(o.successMoreSubtle, o.bgBase, o.fgBase)).Background(o.successMoreSubtle).Padding(0, 1)
 	// The badges and toasts write a background role on a status fill;
 	// badgeInk swaps it for fgBase where that reads better (light themes).
 	s.Status.SuccessIndicator = base.Foreground(badgeInk(o.success, o.bgLessVisible, o.fgBase)).Background(o.success).Padding(0, 1).Bold(true).SetString("OKAY!")

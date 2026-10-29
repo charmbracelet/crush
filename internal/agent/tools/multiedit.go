@@ -193,7 +193,7 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 		return fantasy.ToolResponse{}, err
 	}
 	if !p {
-		resp := NewPermissionDeniedResponse()
+		resp := NewPermissionDeniedResponse(edit.permissions.DenialReason(call.ID))
 		resp = fantasy.WithResponseMetadata(resp, MultiEditResponseMetadata{
 			OldContent:   "",
 			NewContent:   currentContent,
@@ -296,7 +296,7 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 		return fantasy.ToolResponse{}, err
 	}
 	if !p {
-		resp := NewPermissionDeniedResponse()
+		resp := NewPermissionDeniedResponse(edit.permissions.DenialReason(call.ID))
 		resp = fantasy.WithResponseMetadata(resp, MultiEditResponseMetadata{
 			OldContent:   oldContent,
 			NewContent:   currentContent,

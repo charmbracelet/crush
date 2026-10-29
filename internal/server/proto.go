@@ -643,6 +643,20 @@ func (c *controllerV1) handlePostWorkspaceAgentSessionPromptClear(w http.Respons
 	w.WriteHeader(http.StatusOK)
 }
 
+// handlePostWorkspaceAgentSessionNote keeps a note for the session's next prompt.
+func (c *controllerV1) handlePostWorkspaceAgentSessionNote(w http.ResponseWriter, r *http.Request) {
+	var note proto.SessionNote
+	if err := json.NewDecoder(r.Body).Decode(&note); err != nil || note.Text == "" {
+		jsonError(w, http.StatusBadRequest, "failed to decode request")
+		return
+	}
+	if err := c.backend.AddNote(r.PathValue("id"), r.PathValue("sid"), note.Text); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
 // handlePostWorkspaceAgentSessionSummarize summarizes a session.
 func (c *controllerV1) handlePostWorkspaceAgentSessionSummarize(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")

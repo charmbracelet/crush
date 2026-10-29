@@ -7,6 +7,16 @@ import (
 	"github.com/charmbracelet/crush/internal/proto"
 )
 
+// notesPrompt tells the model what the user did since its last turn, ahead
+// of the prompt. It is "" without notes.
+func notesPrompt(notes []string) string {
+	if len(notes) == 0 {
+		return ""
+	}
+	return "<user_notes>\nThings the user did since your last message. Take them into account.\n" +
+		strings.Join(notes, "\n\n") + "\n</user_notes>\n\n"
+}
+
 // hostContextPrompt tells the model what the user has in view in the host
 // application, ahead of the prompt it is about. It is "" without a host.
 func hostContextPrompt(hc proto.HostContext) string {

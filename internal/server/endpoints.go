@@ -433,6 +433,17 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 			Fails(404, 500).
 			Handle(c.handlePostWorkspaceAgentSessionPromptClear),
 
+		apigen.Post("/v1/workspaces/{id}/agent/sessions/{sid}/notes").
+			Summary("Add a note for the next prompt").
+			Description("Keeps text for the session's next prompt, which the agent reads "+
+				"with it. Starts no run and is not shown in the chat.").
+			Tags("agent").
+			PathParam("id", "Workspace ID").
+			PathParam("sid", "Session ID").
+			Accepts(proto.SessionNote{}).
+			Fails(400, 404, 500).
+			Handle(c.handlePostWorkspaceAgentSessionNote),
+
 		apigen.Post("/v1/workspaces/{id}/agent/sessions/{sid}/summarize").
 			Summary("Summarize session").
 			Tags("agent").

@@ -135,7 +135,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 
 		config: store,
 
-		events:             pubsub.NewBroker[tea.Msg](),
+		events:             pubsub.NewCoalescingBroker(eventCoalesceKey),
 		serviceEventsWG:    &sync.WaitGroup{},
 		tuiWG:              &sync.WaitGroup{},
 		agentNotifications: pubsub.NewBroker[notify.Notification](),
@@ -768,11 +768,21 @@ func (app *App) subscribeScopedChannelEvents(ctx context.Context) <-chan pubsub.
 	return scoped
 }
 
+// eventCoalesceKey keeps at most one pending message update per message
+// for each slow app.events subscriber.
+func eventCoalesceKey(ev pubsub.Event[tea.Msg]) string {
+	if e, ok := ev.Payload.(pubsub.Event[message.Message]); ok {
+		return message.CoalesceKey(e)
+	}
+	return ""
+}
+
 // subscribe fans a service's event stream into the shared app.events
 // broker on app.serviceEventsWG, re-publishing each upstream event as a
-// tea.Msg. The goroutine exits when ctx is cancelled or the upstream
-// channel closes. It is a generic method (Go 1.27) so it can live in the
-// App namespace while still inferring the upstream event type T.
+// tea.Msg. Upstream must-deliver events stay must-deliver. The goroutine
+// exits when ctx is cancelled or the upstream channel closes. It is a
+// generic method (Go 1.27) so it can live in the App namespace while still
+// inferring the upstream event type T.
 func (app *App) subscribe[T any](
 	ctx context.Context,
 	name string,
@@ -787,7 +797,11 @@ func (app *App) subscribe[T any](
 					slog.Debug("Subscription channel closed", "name", name)
 					return
 				}
-				app.events.Publish(pubsub.UpdatedEvent, tea.Msg(event))
+				if event.MustDeliver {
+					app.events.PublishMustDeliver(ctx, pubsub.UpdatedEvent, tea.Msg(event))
+				} else {
+					app.events.Publish(pubsub.UpdatedEvent, tea.Msg(event))
+				}
 			case <-ctx.Done():
 				slog.Debug("Subscription cancelled", "name", name)
 				return

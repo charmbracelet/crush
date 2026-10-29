@@ -46,6 +46,7 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/singleflight"
 
 	"charm.land/fantasy/providers/anthropic"
 	"charm.land/fantasy/providers/azure"
@@ -165,6 +166,8 @@ type coordinator struct {
 	models    csync.Value[coordinatorModels]
 	rebuildMu sync.Mutex
 
+	// awsRefresh shares one AWS SSO login among requests that need it.
+	awsRefresh singleflight.Group
 	// Skills discovery results (session-start snapshot).
 	allSkills    []*skills.Skill // Pre-filter: all discovered after dedup.
 	activeSkills []*skills.Skill // Post-filter: active skills only.

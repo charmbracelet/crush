@@ -2189,26 +2189,11 @@ func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.
 	// may have been frozen by a non-busy session reload.
 	m.chat.SetAnimationsAllowed(true)
 
-	// Find the parent agent tool item.
-	var agentItem chat.NestedToolContainer
-	for i := 0; i < m.chat.Len(); i++ {
-		item := m.chat.MessageItem(toolCallID)
-		if item == nil {
-			continue
-		}
-		if agent, ok := item.(chat.NestedToolContainer); ok {
-			if toolMessageItem, ok := item.(chat.ToolMessageItem); ok {
-				if toolMessageItem.ToolCall().ID == toolCallID {
-					// Verify this agent belongs to the correct parent message.
-					// We can't directly check parentMessageID on the item, so we trust the session parsing.
-					agentItem = agent
-					break
-				}
-			}
-		}
-	}
-
-	if agentItem == nil {
+	// Find the parent agent tool item. A nested tool's ID also maps to its
+	// parent, so the ID check keeps this to the item that owns the session.
+	item := m.chat.MessageItem(toolCallID)
+	agentItem, ok := item.(chat.NestedToolContainer)
+	if tool, isTool := item.(chat.ToolMessageItem); !ok || !isTool || tool.ToolCall().ID != toolCallID {
 		return nil
 	}
 

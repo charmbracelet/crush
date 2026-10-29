@@ -10,9 +10,20 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
 )
+
+// SubscribeClientSessions returns a per-caller channel of the session
+// changes of the clients of a workspace.
+func (b *Backend) SubscribeClientSessions(ctx context.Context, workspaceID string) (<-chan pubsub.Event[proto.ClientSession], error) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	return ws.clientSessionBroker().Subscribe(ctx), nil
+}
 
 // SubscribeEvents returns a per-caller event channel for a workspace.
 // Each caller receives all events; multiple callers do not compete.

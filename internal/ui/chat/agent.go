@@ -86,14 +86,24 @@ func (a *AgentToolMessageItem) parseDispatchLabel(toolCall message.ToolCall) {
 	}
 }
 
-// adoptDispatchName swaps the requested label for the name the result gave,
-// which is the name the report will arrive under.
+// adoptDispatchName takes the subagent name the result gave, which is the
+// name the report arrives under. A blocking agent call that moved to the
+// background becomes a dispatched subagent here.
 func (a *AgentToolMessageItem) adoptDispatchName(result *message.ToolResult) {
-	if a.dispatchLabel == "" || result == nil || result.Metadata == "" {
+	if result == nil || result.Metadata == "" {
 		return
 	}
-	var meta agent.AgentDispatchResponseMetadata
-	if json.Unmarshal([]byte(result.Metadata), &meta) == nil && meta.Label != "" {
+	var meta struct {
+		Label        string `json:"label"`
+		Backgrounded bool   `json:"backgrounded"`
+	}
+	if json.Unmarshal([]byte(result.Metadata), &meta) != nil || meta.Label == "" {
+		return
+	}
+	if a.dispatchLabel == "" && meta.Backgrounded {
+		a.dispatchStarted = time.Now()
+	}
+	if a.dispatchLabel != "" || meta.Backgrounded {
 		a.dispatchLabel = meta.Label
 	}
 }
@@ -282,9 +292,7 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	// pairs with the report item that arrives later under the same label.
 	var header string
 	if r.agent.dispatchLabel != "" {
-		header = subagentHeader(sty, opts.Status, prettifyToolName(agent.AgentDispatchToolName), r.agent.dispatchLabel, dispatchRunModel(opts), cappedWidth, opts)
-	} else if name := backgroundedName(opts); name != "" {
-		header = toolHeader(sty, opts.Status, "Agent", cappedWidth, opts, subagentTarget(sty, name))
+		header = subagentHeader(sty, opts.Status, prettifyToolName(opts.ToolCall.Name), r.agent.dispatchLabel, dispatchRunModel(opts), cappedWidth, opts)
 	} else {
 		header = toolHeader(sty, opts.Status, "Agent", cappedWidth, opts)
 	}

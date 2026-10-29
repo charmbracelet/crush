@@ -634,60 +634,64 @@ func (c *coordinator) agentSendTool() fantasy.AgentTool {
 				return fantasy.ToolResponse{}, errors.New("session id missing from context")
 			}
 
-			reopened := func(entry *dispatchedAgent) fantasy.ToolResponse {
-				if !c.reopen(entry, params.Message) {
-					return fantasy.NewTextErrorResponse(fmt.Sprintf("subagent %q cannot be reached", label))
-				}
-				return fantasy.WithResponseMetadata(fantasy.NewTextResponse(fmt.Sprintf(
-					"Delivered to %q, which had finished. It will answer in a new report.",
-					label,
-				)), AgentSendResponseMetadata{Label: label, Reopened: true})
-			}
-
-			entry, ok := c.dispatched.Get(dispatchKey(parentSessionID, label))
+			key := dispatchKey(parentSessionID, label)
+			entry, ok := c.dispatched.Get(key)
 			if !ok {
 				// Not in the registry, which after a restart is every
-				// subagent. The transcript still records the dispatch and
-				// the child session still holds the work, so rebuild the
-				// entry from those rather than refusing.
-				entry, err := c.rehydrateDispatch(ctx, parentSessionID, label)
+				// subagent. The transcript and the child session still hold
+				// the work, so rebuild the entry rather than refusing.
+				rebuilt, err := c.rehydrateDispatch(ctx, parentSessionID, label)
 				if err != nil {
 					return fantasy.NewTextErrorResponse(fmt.Sprintf(
 						"no subagent %q; running: %s",
 						label, c.runningDispatchLabels(parentSessionID),
 					)), nil
 				}
-				return reopened(entry), nil
-			}
-			if entry.stopping() {
-				// Wait out the stop rather than queueing onto a run that
-				// is about to drop its queue.
-				entry.awaitSettled(10 * time.Second)
-			}
-			if !entry.awaitDeliverable(ctx) {
-				// Finished, not gone: its session still holds everything
-				// it did, so a follow-up reopens it rather than failing.
-				return reopened(entry), nil
+				entry = rebuilt
 			}
 
-			// Folded into the subagent's active turn. The busy check and the
-			// enqueue are one step, so a subagent finishing in between is
-			// reopened instead of answered inline here.
-			agentCall, _, err := c.subAgentCall(entry.agent, entry.SessionID, params.Message)
-			if err != nil {
-				return fantasy.NewTextErrorResponse("Failed to deliver message: " + err.Error()), nil
+			// Each pass either folds the message into a running turn or
+			// reopens a finished subagent. Losing a race to another follow-up
+			// that reopened it first means its new run takes the message.
+			for range 3 {
+				if current, ok := c.dispatched.Get(key); ok {
+					entry = current
+				}
+				if entry.stopping() {
+					entry.awaitSettled(10 * time.Second)
+				}
+				if entry.awaitDeliverable(ctx) {
+					agentCall, _, err := c.subAgentCall(entry.agent, entry.SessionID, params.Message)
+					if err != nil {
+						return fantasy.NewTextErrorResponse("Failed to deliver message: " + err.Error()), nil
+					}
+					agentCall.QueueOnly = true
+					_, err = entry.agent.Run(context.WithoutCancel(ctx), agentCall)
+					if err == nil {
+						return fantasy.WithResponseMetadata(fantasy.NewTextResponse(fmt.Sprintf(
+							"Delivered to %q. It will answer in its report.",
+							label,
+						)), AgentSendResponseMetadata{Label: label}), nil
+					}
+					if !errors.Is(err, ErrSessionIdle) {
+						return fantasy.NewTextErrorResponse("Failed to deliver message: " + err.Error()), nil
+					}
+					entry.awaitSettled(10 * time.Second)
+				}
+				if c.reopen(entry, params.Message) {
+					return fantasy.WithResponseMetadata(fantasy.NewTextResponse(fmt.Sprintf(
+						"Delivered to %q, which had finished. It will answer in a new report.",
+						label,
+					)), AgentSendResponseMetadata{Label: label, Reopened: true}), nil
+				}
 			}
-			agentCall.QueueOnly = true
-			if _, err := entry.agent.Run(context.WithoutCancel(ctx), agentCall); errors.Is(err, ErrSessionIdle) {
-				entry.awaitSettled(10 * time.Second)
-				return reopened(entry), nil
-			} else if err != nil {
-				return fantasy.NewTextErrorResponse("Failed to deliver message: " + err.Error()), nil
+			if ctx.Err() != nil {
+				return fantasy.ToolResponse{}, ctx.Err()
 			}
-			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(fmt.Sprintf(
-				"Delivered to %q. It will answer in its report.",
+			return fantasy.NewTextErrorResponse(fmt.Sprintf(
+				"subagent %q is still starting up and could not take the message yet; try again shortly",
 				label,
-			)), AgentSendResponseMetadata{Label: label}), nil
+			)), nil
 		},
 	)
 }

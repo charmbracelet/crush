@@ -15,7 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// newRunServer serves just enough of the server API for runNonInteractive
+// newStreamRunServer serves just enough of the server API for runNonInteractive
 // to start a run in workspace "w". Once the prompt is accepted, the event
 // stream is handed to stream, which decides how the run ends as far as the
 // client can tell.

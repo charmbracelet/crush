@@ -30,22 +30,22 @@ const (
 )
 
 // writeAgentConfig derives the read-write variant of the task agent: the same
-// agent, given the coder's tools. The agent tool itself is withheld so
-// subagents cannot fan out again.
+// agent, given the coder's tools. Subagents never get the delegation tools;
+// effectiveToolNames strips them.
 func writeAgentConfig(cfg *config.Config) config.Agent {
 	task := cfg.Agents[config.AgentTask]
-	coder, ok := cfg.Agents[config.AgentCoder]
-	if !ok {
-		return task
+	if coder, ok := cfg.Agents[config.AgentCoder]; ok {
+		task.AllowedTools = slices.Clone(coder.AllowedTools)
 	}
-	task.AllowedTools = slices.DeleteFunc(slices.Clone(coder.AllowedTools), func(name string) bool {
-		return name == AgentToolName ||
-			name == AgentDispatchToolName ||
-			name == AgentSendToolName ||
-			name == AgentStatusToolName ||
-			name == AgentStopToolName
-	})
 	return task
+}
+
+// accessOrRead defaults an unset access level to read-only.
+func accessOrRead(access string) string {
+	if access == "" {
+		return accessRead
+	}
+	return access
 }
 
 // readOnlyParent reports whether a parent agent may only delegate to
@@ -59,9 +59,7 @@ func readOnlyParent(parentAgentID string) bool {
 // resolveSubAgent picks the subagent variant for a requested access level,
 // returning a message for the model when there is no such variant.
 func resolveSubAgent(agents map[string]SessionAgent, access string, readOnly bool) (SessionAgent, string) {
-	if access == "" {
-		access = accessRead
-	}
+	access = accessOrRead(access)
 	if agent, ok := agents[access]; ok {
 		return agent, ""
 	}

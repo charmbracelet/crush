@@ -385,10 +385,7 @@ func (c *coordinator) agentDispatchTool(ctx context.Context, parentAgentID strin
 			// one running on the requested model. It is resolved before the
 			// label is taken, so a refused override leaves the label free
 			// and the call can be retried immediately.
-			access := params.Access
-			if access == "" {
-				access = accessRead
-			}
+			access := accessOrRead(params.Access)
 			overrideAgent, sel, hasOverride, refusal := c.overrideDispatchAgent(ctx, access, params, parentModel())
 			if refusal != "" {
 				return fantasy.NewTextErrorResponse(refusal), nil
@@ -462,8 +459,12 @@ func (c *coordinator) agentDispatchTool(ctx context.Context, parentAgentID strin
 // runDispatched runs one generation of a subagent in the background, then
 // settles the entry and reports the outcome to the parent.
 func (c *coordinator) runDispatched(ctx context.Context, entry *dispatchedAgent, gen uint64, run func(context.Context) (fantasy.ToolResponse, error)) {
+	// Tracked from here, not from when the session starts, so the busy
+	// check never sees a claimed run as idle.
+	untrack := c.trackSubSession(entry.SessionID)
 	go func() {
 		resp, err := run(ctx)
+		untrack()
 		c.rollUpDispatchCost(context.Background(), entry)
 		// Settle before reporting: the report starts a parent turn, and
 		// that turn may well send this subagent a follow-up, which needs
@@ -522,8 +523,6 @@ func (c *coordinator) reopen(entry *dispatchedAgent, prompt string) bool {
 	}
 
 	c.runDispatched(runCtx, entry, gen, func(ctx context.Context) (fantasy.ToolResponse, error) {
-		done := c.trackSubSession(entry.SessionID)
-		defer done()
 		result, err := entry.agent.Run(ctx, agentCall)
 		if err != nil {
 			return fantasy.NewTextErrorResponse(fmt.Sprintf("Subagent failed: %s", err)), nil
@@ -884,17 +883,6 @@ func (c *coordinator) stopAllDispatched(reason string, timeout time.Duration) {
 			slog.Warn("Subagent still running after being stopped", "label", entry.Label)
 		}
 	}
-}
-
-// dispatchedSessionBusy reports whether sessionID belongs to a dispatched
-// subagent with a run in flight.
-func (c *coordinator) dispatchedSessionBusy(sessionID string) bool {
-	for _, entry := range c.dispatched.Seq2() {
-		if entry.SessionID == sessionID && entry.running() {
-			return true
-		}
-	}
-	return false
 }
 
 // trackSubSession marks a subagent session as live until the returned func

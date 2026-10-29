@@ -46,17 +46,22 @@ func getRgCmd(ctx context.Context, globPattern string) *exec.Cmd {
 	return exec.CommandContext(ctx, name, args...)
 }
 
+func rgSearchArgs(pattern, path, include string) []string {
+	// -e keeps a pattern that starts with "-" from being parsed as a flag.
+	// A bare "--" does not work here: searchWithRipgrep appends --ignore-file
+	// after the path, and ripgrep would treat that option as another path.
+	args := []string{"--json", "-H", "-n", "-0", "-e", pattern}
+	if include != "" {
+		args = append(args, "--glob", include)
+	}
+	args = append(args, path)
+	return args
+}
+
 func getRgSearchCmd(ctx context.Context, pattern, path, include string) *exec.Cmd {
 	name := getRg()
 	if name == "" {
 		return nil
 	}
-	// Use -n to show line numbers, -0 for null separation to handle Windows paths
-	args := []string{"--json", "-H", "-n", "-0", pattern}
-	if include != "" {
-		args = append(args, "--glob", include)
-	}
-	args = append(args, path)
-
-	return exec.CommandContext(ctx, name, args...)
+	return exec.CommandContext(ctx, name, rgSearchArgs(pattern, path, include)...)
 }

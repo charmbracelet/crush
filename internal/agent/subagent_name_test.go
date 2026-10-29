@@ -28,10 +28,15 @@ func TestSubagentNamerCyclesThroughShuffle(t *testing.T) {
 	}
 }
 
-func TestSubagentNameKeepsAnExistingName(t *testing.T) {
+// A label that happens to start with a first name, like "jan-report", is
+// still a label and gets a first name of its own.
+func TestSubagentNameAlwaysAddsAFirstName(t *testing.T) {
 	t.Parallel()
 	var n subagentNamer
-	require.Equal(t, "bjorn-date-impl", n.name(" bjorn-date-impl "))
+	first, label, ok := splitSubagentName(n.name(" jan-report "))
+	require.True(t, ok)
+	require.Equal(t, "jan-report", label)
+	require.NotEmpty(t, first.key)
 	require.Empty(t, n.name("  "))
 }
 

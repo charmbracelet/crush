@@ -1831,7 +1831,7 @@ func (c *coordinator) refreshApiKeyTemplate(ctx context.Context, providerCfg con
 // is still refused after the refresh-and-retry.
 func (c *coordinator) askToSignInAgain(err error, model Model) {
 	if err == nil || !isUnauthorized(err) || c.notify == nil ||
-		!(model.OAuth || c.notifiesOnRevokedToken(model.ModelCfg.Provider)) {
+		(!model.OAuth && !c.notifiesOnRevokedToken(model.ModelCfg.Provider)) {
 		return
 	}
 	c.notify.Publish(pubsub.CreatedEvent, notify.Notification{

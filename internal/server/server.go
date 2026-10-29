@@ -38,11 +38,15 @@ func socketDir() string {
 // ErrServerClosed is returned when the server is closed.
 var ErrServerClosed = http.ErrServerClosed
 
-// ParseHostURL parses a host URL into a [url.URL].
+// ParseHostURL parses a host URL into a [url.URL]. The "http" scheme
+// is accepted as an alias for "tcp" and normalized to it.
 func ParseHostURL(host string) (*url.URL, error) {
 	proto, addr, ok := strings.Cut(host, "://")
 	if !ok {
 		return nil, fmt.Errorf("invalid host format: %s", host)
+	}
+	if proto == "http" {
+		proto = "tcp"
 	}
 
 	var basePath string

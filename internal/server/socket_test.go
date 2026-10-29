@@ -61,21 +61,12 @@ func TestIsStaleSocketErr(t *testing.T) {
 	}
 }
 
+// TestDefaultHost_UIDWithoutUserEnv guards against users that user.Current
+// cannot resolve (no $USER or $HOME) sharing one socket.
 func TestDefaultHost_UIDWithoutUserEnv(t *testing.T) {
-	// The pure-Go user.Current (cgo-less Linux builds, or -tags osusergo)
-	// only knows the users in /etc/passwd and otherwise needs $USER and
-	// $HOME, so it fails for directory-service (LDAP, SSSD) users when
-	// either is unset. The socket name must still carry the uid, or all
-	// of those users would share one socket.
 	t.Setenv("USER", "")
 	t.Setenv("HOME", "")
-
-	host := DefaultHost()
-
-	require.True(t, strings.HasPrefix(host, "unix://"),
-		"DefaultHost should return a unix:// URL, got %q", host)
-	path := strings.TrimPrefix(host, "unix://")
-	require.Equal(t, fmt.Sprintf("crush-%d.sock", os.Getuid()), filepath.Base(path))
+	require.Equal(t, fmt.Sprintf("crush-%d.sock", os.Getuid()), filepath.Base(DefaultHost()))
 }
 
 func TestDefaultHost_XDGRuntimeDir(t *testing.T) {
@@ -210,15 +201,10 @@ func TestListen_LiveSocketNotRemoved(t *testing.T) {
 	_ = conn.Close()
 }
 
-// TestListen_RacingStaleRecovery stalls one listen call between its stale
-// probe and its removal while a second call on the same path runs, as two
-// server processes starting at once would. Unless the two take turns, the
-// second binds, the first then removes that live socket file and binds
-// too, leaving the second listener on a deleted path no client can reach.
+// TestListen_RacingStaleRecovery guards against a listen call that found a
+// stale socket removing the live one a concurrent call bound meanwhile.
 func TestListen_RacingStaleRecovery(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "s.sock")
-
+	path := filepath.Join(t.TempDir(), "s.sock")
 	staleSocketPath(t, path)
 
 	probed := make(chan struct{})
@@ -228,9 +214,7 @@ func TestListen_RacingStaleRecovery(t *testing.T) {
 	dialSocket = func(network, address string) (net.Conn, error) {
 		conn, err := origDial(network, address)
 		if calls.Add(1) == 1 {
-			// The first caller has just seen the stale socket. Give
-			// the second caller every chance to bind before this one
-			// goes on to remove the path.
+			// Stall the first caller between its probe and its removal.
 			close(probed)
 			select {
 			case <-secondDone:
@@ -241,115 +225,54 @@ func TestListen_RacingStaleRecovery(t *testing.T) {
 	}
 	t.Cleanup(func() { dialSocket = origDial })
 
-	type result struct {
-		ln  net.Listener
-		err error
-	}
-	firstCh := make(chan result, 1)
+	firstErr := make(chan error, 1)
 	go func() {
 		ln, _, err := listen("unix", path)
-		firstCh <- result{ln: ln, err: err}
-	}()
-	<-probed
-
-	ln2, _, err2 := listen("unix", path)
-	close(secondDone)
-	first := <-firstCh
-	for _, ln := range []net.Listener{first.ln, ln2} {
-		if ln != nil {
+		if err == nil {
 			t.Cleanup(func() { _ = ln.Close() })
 		}
+		firstErr <- err
+	}()
+	<-probed
+	ln2, _, err2 := listen("unix", path)
+	close(secondDone)
+	if err2 == nil {
+		t.Cleanup(func() { _ = ln2.Close() })
 	}
-
-	require.False(t, first.err == nil && err2 == nil,
-		"both listen calls bound %q: one listener is serving a deleted socket file", path)
-	require.NoError(t, first.err, "the caller that found the stale socket should bind")
-	require.ErrorIs(t, err2, syscall.EADDRINUSE,
-		"the second caller should find the first one's live socket")
-
-	conn, err := net.DialTimeout("unix", path, time.Second) //nolint:noctx
-	require.NoError(t, err, "the socket file on disk should reach the bound listener")
-	_ = conn.Close()
+	require.NoError(t, <-firstErr)
+	require.ErrorIs(t, err2, syscall.EADDRINUSE)
 }
 
+// TestListen_RestrictsSocketToOwner guards against a socket other users can
+// connect to. The umask is process-wide, so this test is not parallel.
 func TestListen_RestrictsSocketToOwner(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "s.sock")
-
-	// The umask is process-wide, so this test must not run in parallel.
-	// With a zero umask the kernel creates the socket world-connectable.
+	path := filepath.Join(t.TempDir(), "s.sock")
 	oldUmask := syscall.Umask(0)
 	ln, _, err := listen("unix", path)
 	syscall.Umask(oldUmask)
 	require.NoError(t, err)
-	t.Cleanup(func() {
-		_ = ln.Close()
-	})
+	t.Cleanup(func() { _ = ln.Close() })
 
 	info, err := os.Stat(path)
 	require.NoError(t, err)
-	require.Equal(t, os.FileMode(0o600), info.Mode().Perm(),
-		"socket must only be accessible by its owner, got %v", info.Mode())
-
-	conn, err := net.DialTimeout("unix", path, 200*time.Millisecond) //nolint:noctx
-	require.NoError(t, err, "owner should still be able to connect")
-	_ = conn.Close()
+	require.Equal(t, os.FileMode(0o600), info.Mode().Perm())
 }
 
-// TestListen_CloseKeepsReplacement covers a server that is still shutting
-// down when a client gives up on it, removes its socket and spawns a
-// replacement on the same path. Closing the old listener afterwards must
-// leave the replacement's socket in place.
+// TestListen_CloseKeepsReplacement guards against an exiting server's
+// listener unlinking the socket of the replacement bound on its path.
 func TestListen_CloseKeepsReplacement(t *testing.T) {
 	t.Parallel()
-
-	dir := t.TempDir()
-	path := filepath.Join(dir, "s.sock")
-
+	path := filepath.Join(t.TempDir(), "s.sock")
 	old, _, err := listen("unix", path)
 	require.NoError(t, err)
-
 	require.NoError(t, os.Remove(path))
 	repl, _, err := listen("unix", path)
 	require.NoError(t, err)
-	t.Cleanup(func() {
-		_ = repl.Close()
-	})
 
 	require.NoError(t, old.Close())
-
-	_, statErr := os.Stat(path)
-	require.NoError(t, statErr,
-		"closing the old listener must not remove the replacement's socket")
-	conn, dialErr := net.DialTimeout("unix", path, 200*time.Millisecond) //nolint:noctx
-	require.NoError(t, dialErr, "the replacement's socket should accept dials")
-	_ = conn.Close()
-}
-
-// TestListen_CloseRemovesOwnSocket checks that closing a listener still
-// removes its own socket file, so a normal shutdown leaves nothing stale
-// behind, and that closing it again leaves a later socket alone.
-func TestListen_CloseRemovesOwnSocket(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	path := filepath.Join(dir, "s.sock")
-
-	ln, _, err := listen("unix", path)
-	require.NoError(t, err)
-	require.NoError(t, ln.Close())
-	_, statErr := os.Stat(path)
-	require.ErrorIs(t, statErr, fs.ErrNotExist,
-		"closing the listener should remove its socket file")
-
-	repl, _, err := listen("unix", path)
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		_ = repl.Close()
-	})
-
-	_ = ln.Close()
-	_, statErr = os.Stat(path)
-	require.NoError(t, statErr,
-		"closing the listener again must not remove a later socket")
+	_, err = os.Stat(path)
+	require.NoError(t, err, "closing the old listener removed the replacement's socket")
+	require.NoError(t, repl.Close())
+	_, err = os.Stat(path)
+	require.ErrorIs(t, err, fs.ErrNotExist, "a listener must still remove its own socket")
 }

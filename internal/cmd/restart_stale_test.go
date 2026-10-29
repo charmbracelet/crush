@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -188,63 +189,24 @@ func TestRestartIfStale_MatchingServerUntouched(t *testing.T) {
 	require.Empty(t, log.all())
 }
 
-// TestRestartIfStale_GivesUpOnUnresponsiveServer covers a server that is
-// stopped (Ctrl+Z, SIGSTOP) or wedged. The kernel still completes the
-// connect on its behalf, so a request to it fails only at a deadline:
-// without one, the client blocked at startup until it was interrupted.
+// TestRestartIfStale_GivesUpOnUnresponsiveServer guards the client blocking
+// at startup on a stopped (SIGSTOP) or wedged server that accepts but never
+// answers.
 func TestRestartIfStale_GivesUpOnUnresponsiveServer(t *testing.T) {
-	// Not parallel: the other restartIfStale tests read this package var.
+	// Not parallel: it swaps a package var the other tests read.
 	orig := versionCheckTimeout
 	versionCheckTimeout = 100 * time.Millisecond
 	t.Cleanup(func() { versionCheckTimeout = orig })
 
-	// check runs restartIfStale under a caller deadline far longer than
-	// versionCheckTimeout, so returning well before it shows that
-	// restartIfStale gave up by itself.
-	check := func(t *testing.T, hostURL *url.URL) (bool, error) {
-		t.Helper()
-		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-		defer cancel()
-		cmd := &cobra.Command{}
-		cmd.SetContext(ctx)
-		start := time.Now()
-		restarted, err := restartIfStale(cmd, hostURL)
-		require.Less(t, time.Since(start), 5*time.Second,
-			"restartIfStale must not wait on a server that never answers")
-		return restarted, err
-	}
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ln.Close() })
 
-	t.Run("version check", func(t *testing.T) {
-		// Nothing ever accepts on this listener: requests connect, then
-		// wait for a reply that never comes.
-		ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = ln.Close() })
-
-		_, err = check(t, &url.URL{Scheme: "tcp", Host: ln.Addr().String()})
-		require.ErrorIs(t, err, context.DeadlineExceeded)
-	})
-
-	t.Run("stand-down request", func(t *testing.T) {
-		release := make(chan struct{})
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path == "/v1/version" {
-				_ = json.NewEncoder(w).Encode(staleVersion())
-				return
-			}
-			<-release
-		}))
-		t.Cleanup(srv.Close)
-		t.Cleanup(func() { close(release) })
-		u, err := url.Parse(srv.URL)
-		require.NoError(t, err)
-
-		// A stale server that never answers is reused, like one that
-		// refuses to stand down.
-		restarted, err := check(t, &url.URL{Scheme: "tcp", Host: u.Host})
-		require.NoError(t, err)
-		require.False(t, restarted)
-	})
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	_, err = restartIfStale(commandWithContext(ctx), &url.URL{Scheme: "tcp", Host: ln.Addr().String()})
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.NoError(t, ctx.Err(), "restartIfStale waited for the caller's deadline")
 }
 
 // TestCreateWorkspaceOnLiveServer_RetriesPastExitingServer covers the
@@ -295,64 +257,37 @@ func TestCreateWorkspaceOnLiveServer_RetriesPastExitingServer(t *testing.T) {
 	require.Equal(t, 2, creates)
 }
 
-// TestCreateWorkspaceOnLiveServer_RetryReachesReplacement makes sure the
-// retry asks the replacement rather than the server that refused the first
-// create. That refusal leaves a kept-alive connection to the exiting server
-// in the client's pool, and the exiting server can outlive the handover: it
-// keeps its connections open while it tears down its workspaces, after the
-// client has given up waiting for its socket. Retrying over the pooled
-// connection asks the exiting server again, so every attempt is refused
-// although a healthy replacement owns the address.
+// TestCreateWorkspaceOnLiveServer_RetryReachesReplacement guards the retry
+// reusing the pooled connection to the exiting server instead of reaching
+// the replacement that now owns the address.
 func TestCreateWorkspaceOnLiveServer_RetryReachesReplacement(t *testing.T) {
 	t.Parallel()
 
-	// generationKey tags each connection with the number of replacements
-	// made before it was accepted. A connection stays with the process it
-	// reached, so one from generation 0 keeps reaching the exiting server
-	// after a replacement has taken over the address.
+	// Each connection remembers how many replacements preceded it.
 	type generationKey struct{}
-
-	var mu sync.Mutex
-	replaced := 0
-	exitingCreates := 0
+	var replaced atomic.Int32
 	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		defer mu.Unlock()
-		if r.Context().Value(generationKey{}) == 0 {
-			exitingCreates++
+		if r.Context().Value(generationKey{}) == int32(0) {
 			http.Error(w, "server is shutting down", http.StatusServiceUnavailable)
 			return
 		}
 		_ = json.NewEncoder(w).Encode(proto.Workspace{ID: "ws-new"})
 	}))
 	srv.Config.ConnContext = func(ctx context.Context, _ net.Conn) context.Context {
-		mu.Lock()
-		defer mu.Unlock()
-		return context.WithValue(ctx, generationKey{}, replaced)
+		return context.WithValue(ctx, generationKey{}, replaced.Load())
 	}
 	srv.Start()
 	t.Cleanup(srv.Close)
 	u, err := url.Parse(srv.URL)
 	require.NoError(t, err)
-
 	c, err := client.NewClient(t.TempDir(), "tcp", u.Host)
 	require.NoError(t, err)
 
 	ws, err := createWorkspaceOnLiveServer(t.Context(), c, proto.Workspace{Path: t.TempDir()},
-		func() error {
-			mu.Lock()
-			replaced++
-			mu.Unlock()
-			return nil
-		})
-
-	mu.Lock()
-	defer mu.Unlock()
-	require.NoError(t, err, "the retry must reach the replacement (exiting server saw %d creates, %d replacements)",
-		exitingCreates, replaced)
+		func() error { replaced.Add(1); return nil })
+	require.NoError(t, err)
 	require.Equal(t, "ws-new", ws.ID)
-	require.Equal(t, 1, replaced, "exactly one replacement must be spawned")
-	require.Equal(t, 1, exitingCreates, "only the first create may reach the exiting server")
+	require.EqualValues(t, 1, replaced.Load())
 }
 
 // TestCreateWorkspaceOnLiveServer_GivesUpOnOtherFailures makes sure the

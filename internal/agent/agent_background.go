@@ -97,6 +97,7 @@ func (c *coordinator) runSubAgentMaybeBackground(
 		resp, err := c.runSubAgent(runCtx, params)
 		c.rollUpDispatchCost(context.Background(), entry)
 		stopReason := entry.settle(gen, err != nil || resp.IsError)
+		c.pruneDispatched()
 
 		mu.Lock()
 		result = &outcome{resp: resp, err: err}

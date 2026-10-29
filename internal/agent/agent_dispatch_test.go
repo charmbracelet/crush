@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -277,4 +278,31 @@ func TestAgentStatusToolReportsLiveAndInterruptedSubAgents(t *testing.T) {
 	resp, err = tool.Run(toolCtx, fantasy.ToolCall{ID: "s3", Name: AgentStatusToolName, Input: `{"label":"nope"}`})
 	require.NoError(t, err)
 	require.True(t, resp.IsError)
+}
+
+// Finished subagents past the cap are forgotten, newest kept; running ones
+// are never touched.
+func TestPruneDispatchedKeepsRunningAndNewest(t *testing.T) {
+	t.Parallel()
+	c, _ := newDispatchTestCoordinator(t)
+	base := time.Now()
+	for i := range keptFinishedDispatches + 3 {
+		entry := newDispatchedAgent(fmt.Sprintf("done-%02d", i), accessRead, "s", "p", nil)
+		entry.ended = base.Add(time.Duration(i) * time.Second)
+		c.dispatched.Set(dispatchKey("p", entry.Label), entry)
+	}
+	live := newDispatchedAgent("live", accessRead, "s", "p", nil)
+	_, _, ok := live.claim()
+	require.True(t, ok)
+	c.dispatched.Set(dispatchKey("p", "live"), live)
+
+	c.pruneDispatched()
+
+	require.Equal(t, keptFinishedDispatches+1, c.dispatched.Len())
+	_, ok = c.dispatched.Get(dispatchKey("p", "live"))
+	require.True(t, ok, "a running subagent is never forgotten")
+	_, ok = c.dispatched.Get(dispatchKey("p", "done-00"))
+	require.False(t, ok, "the oldest finished subagent goes first")
+	_, ok = c.dispatched.Get(dispatchKey("p", fmt.Sprintf("done-%02d", keptFinishedDispatches+2)))
+	require.True(t, ok)
 }

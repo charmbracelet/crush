@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -415,6 +416,7 @@ func (c *coordinator) runDispatched(ctx context.Context, entry *dispatchedAgent,
 		// that turn may well send this subagent a follow-up, which needs
 		// it idle.
 		stopReason := entry.settle(gen, err != nil || resp.IsError)
+		c.pruneDispatched()
 
 		switch stopReason {
 		case "":
@@ -660,6 +662,34 @@ func (c *coordinator) agentStopTool() fantasy.AgentTool {
 			return fantasy.NewTextResponse(fmt.Sprintf("Stopped subagent %q.", label)), nil
 		},
 	)
+}
+
+// keptFinishedDispatches is how many finished subagents stay in the registry.
+// Each pins its agent; a forgotten one is rebuilt from the transcript if it
+// is messaged again.
+const keptFinishedDispatches = 8
+
+// pruneDispatched forgets all but the most recently finished subagents.
+func (c *coordinator) pruneDispatched() {
+	c.dispatchMu.Lock()
+	defer c.dispatchMu.Unlock()
+	type finished struct {
+		key   string
+		ended time.Time
+	}
+	var idle []finished
+	for key, entry := range c.dispatched.Seq2() {
+		if snap := entry.snapshot(); snap.State != dispatchRunning {
+			idle = append(idle, finished{key, snap.Ended})
+		}
+	}
+	if len(idle) <= keptFinishedDispatches {
+		return
+	}
+	slices.SortFunc(idle, func(a, b finished) int { return b.ended.Compare(a.ended) })
+	for _, f := range idle[keptFinishedDispatches:] {
+		c.dispatched.Del(f.key)
+	}
 }
 
 // runningDispatchLabels lists the subagents still running for a session.

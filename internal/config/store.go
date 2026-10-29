@@ -1247,6 +1247,14 @@ func NewTestStore(cfg *Config, loadedPaths ...string) *ConfigStore {
 	}
 }
 
+// NewTestStoreWithGlobalPath is NewTestStore with a global data file so
+// tests can persist and remove config fields.
+func NewTestStoreWithGlobalPath(cfg *Config, globalDataPath string) *ConfigStore {
+	s := NewTestStore(cfg)
+	s.globalDataPath = globalDataPath
+	return s
+}
+
 // ImportCopilot attempts to import a GitHub Copilot token from disk.
 func (s *ConfigStore) ImportCopilot() (*oauth.Token, bool) {
 	if s.HasConfigField(ScopeGlobal, "providers.copilot.api_key") || s.HasConfigField(ScopeGlobal, "providers.copilot.oauth") {

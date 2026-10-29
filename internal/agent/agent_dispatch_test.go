@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -81,15 +82,15 @@ func TestDispatchedAgentStaleRunCannotSettleNewerRun(t *testing.T) {
 	_, _, ok = entry.claim()
 	require.False(t, ok, "a running subagent cannot be claimed twice")
 
-	entry.settle(first, false)
+	entry.settle(first, runOutcome{})
 	_, second, ok := entry.claim()
 	require.True(t, ok)
 
 	// The first run's late cleanup must not end the second run.
-	entry.settle(first, false)
+	entry.settle(first, runOutcome{})
 	require.True(t, entry.running())
 
-	entry.settle(second, true)
+	entry.settle(second, runOutcome{err: errors.New("failed")})
 	require.Equal(t, dispatchFailed, entry.snapshot().State)
 }
 

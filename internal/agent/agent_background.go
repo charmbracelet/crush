@@ -4,13 +4,11 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"charm.land/fantasy"
 
 	"github.com/charmbracelet/crush/internal/agent/tools"
-	"github.com/charmbracelet/crush/internal/message"
 )
 
 // subAgentBackgroundAfter is how long a blocking subagent tool call runs in
@@ -78,61 +76,21 @@ func (c *coordinator) runSubAgentMaybeBackground(
 	c.dispatchMu.Lock()
 	c.dispatched.Set(key, entry)
 	runCtx, gen, _ := entry.claim()
+	done := entry.runInline(gen)
 	c.dispatchMu.Unlock()
 
-	type outcome struct {
-		resp fantasy.ToolResponse
-		err  error
-	}
-	var (
-		mu           sync.Mutex
-		backgrounded bool
-		result       *outcome
-	)
-	done := make(chan struct{})
+	c.runDispatched(runCtx, entry, gen, func(ctx context.Context) (fantasy.ToolResponse, error) {
+		return c.runSubAgent(ctx, params)
+	})
 
-	// The run uses the detached claim context, so moving it to the
-	// background outlives the turn that started it.
-	go func() {
-		resp, err := c.runSubAgent(runCtx, params)
-		c.rollUpDispatchCost(context.Background(), entry)
-		stopReason := entry.settle(gen, err != nil || resp.IsError)
-		c.pruneDispatched()
-
-		mu.Lock()
-		result = &outcome{resp: resp, err: err}
-		reportIt := backgrounded
-		mu.Unlock()
-		close(done)
-
-		if !reportIt {
-			// The foreground is still waiting, took the result, or
-			// cancelled: it owns the outcome and no report is written.
-			return
-		}
-		switch stopReason {
-		case "":
-			c.reportDispatchResult(entry, resp, err)
-		case stopForShutdown:
-		default:
-			c.recordDispatchReport(entry.ParentSessionID, message.SubAgentReport{
-				Label:  entry.Label,
-				Output: "Stopped: " + stopReason + ".",
-				Failed: true,
-			})
-		}
-	}()
-
-	drop := func() {
+	// A call that finishes in the foreground leaves nothing in the registry.
+	takeInline := func() (fantasy.ToolResponse, error) {
 		c.dispatchMu.Lock()
-		c.dispatched.Del(key)
+		if current, ok := c.dispatched.Get(key); ok && current == entry {
+			c.dispatched.Del(key)
+		}
 		c.dispatchMu.Unlock()
-	}
-	take := func() (fantasy.ToolResponse, error) {
-		mu.Lock()
-		out := *result
-		mu.Unlock()
-		return out.resp, out.err
+		return entry.result()
 	}
 
 	timer := time.NewTimer(c.backgroundAfter)
@@ -140,29 +98,18 @@ func (c *coordinator) runSubAgentMaybeBackground(
 
 	select {
 	case <-done:
-		// Finished within the threshold: behave like a blocking call and
-		// leave nothing in the registry.
-		drop()
-		return take()
+		return takeInline()
 	case <-timer.C:
-		mu.Lock()
-		if result != nil {
-			// Finished right at the threshold; prefer the real result over
-			// a background notice.
-			mu.Unlock()
-			drop()
-			return take()
+		if !entry.detach(gen) {
+			return takeInline()
 		}
-		backgrounded = true
-		mu.Unlock()
 		return backgroundNotice(label, access, params.Prompt, c.backgroundAfter), nil
 	case <-ctx.Done():
-		// The parent turn was cancelled before the handoff. Stop the
-		// subagent and surface the cancellation, as a blocking call would;
-		// the goroutine sees backgrounded still false and writes no report.
+		// Cancelled before the handoff: stop it and surface the
+		// cancellation, as a blocking call would; no report is written.
 		entry.stop("the parent turn was cancelled")
 		<-done
-		drop()
+		takeInline()
 		return fantasy.ToolResponse{}, ctx.Err()
 	}
 }

@@ -139,11 +139,23 @@ type dispatchedAgent struct {
 	stopReason string
 	started    time.Time
 	ended      time.Time
+	// done closes when the current run settles.
+	done chan struct{}
+	// inline is set while a caller waits on the run and takes its outcome
+	// instead of a report.
+	inline  bool
+	outcome runOutcome
 
 	// rolledUpCost is the child session's cumulative cost already added to
 	// the parent. Each run rolls up only what it spent since, since the
 	// child's own total is cumulative across every turn.
 	rolledUpCost atomic.Uint64
+}
+
+// runOutcome is what one run of a subagent returned.
+type runOutcome struct {
+	resp fantasy.ToolResponse
+	err  error
 }
 
 // newDispatchedAgent returns an entry for a subagent that is not running.
@@ -175,28 +187,63 @@ func (d *dispatchedAgent) claim() (context.Context, uint64, bool) {
 	d.stopReason = ""
 	d.started = time.Now()
 	d.ended = time.Time{}
+	d.done = make(chan struct{})
+	d.inline = false
+	d.outcome = runOutcome{}
 	return ctx, d.gen, true
 }
 
-// settle records how run gen ended, and returns the stop reason if it was
-// stopped. A stale generation is ignored.
-func (d *dispatchedAgent) settle(gen uint64, failed bool) (stopReason string) {
+// settle records how run gen ended. It returns the stop reason if the run
+// was stopped, and whether the outcome should be reported rather than taken
+// by an inline caller. A stale generation is ignored.
+func (d *dispatchedAgent) settle(gen uint64, out runOutcome) (stopReason string, report bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if gen != d.gen {
-		return ""
+		return "", false
 	}
 	switch {
 	case d.stopReason != "":
 		d.state = dispatchStopped
-	case failed:
+	case out.err != nil || out.resp.IsError:
 		d.state = dispatchFailed
 	default:
 		d.state = dispatchFinished
 	}
 	d.ended = time.Now()
+	d.outcome = out
 	d.cancel()
-	return d.stopReason
+	close(d.done)
+	return d.stopReason, !d.inline
+}
+
+// runInline marks run gen as having a caller that takes its outcome, and
+// returns the channel that closes when it settles.
+func (d *dispatchedAgent) runInline(gen uint64) <-chan struct{} {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if gen == d.gen {
+		d.inline = true
+	}
+	return d.done
+}
+
+// detach hands run gen over to the report path. It returns false if the run
+// already settled, in which case the inline caller takes its outcome.
+func (d *dispatchedAgent) detach(gen uint64) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if gen != d.gen || d.state != dispatchRunning {
+		return false
+	}
+	d.inline = false
+	return true
+}
+
+func (d *dispatchedAgent) result() (fantasy.ToolResponse, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.outcome.resp, d.outcome.err
 }
 
 // stop cancels the run in flight. It returns false if nothing is running.
@@ -249,14 +296,20 @@ func (d *dispatchedAgent) snapshot() dispatchSnapshot {
 // awaitSettled waits until the run in flight has unwound, or the timeout
 // passes. It reports whether the subagent is idle.
 func (d *dispatchedAgent) awaitSettled(timeout time.Duration) bool {
-	deadline := time.Now().Add(timeout)
-	for d.running() {
-		if time.Now().After(deadline) {
-			return false
-		}
-		time.Sleep(25 * time.Millisecond)
+	d.mu.Lock()
+	running, done := d.state == dispatchRunning, d.done
+	d.mu.Unlock()
+	if !running {
+		return true
 	}
-	return true
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return true
+	case <-timer.C:
+		return false
+	}
 }
 
 // awaitDeliverable waits until the subagent's session is actually running
@@ -415,8 +468,11 @@ func (c *coordinator) runDispatched(ctx context.Context, entry *dispatchedAgent,
 		// Settle before reporting: the report starts a parent turn, and
 		// that turn may well send this subagent a follow-up, which needs
 		// it idle.
-		stopReason := entry.settle(gen, err != nil || resp.IsError)
+		stopReason, report := entry.settle(gen, runOutcome{resp, err})
 		c.pruneDispatched()
+		if !report {
+			return
+		}
 
 		switch stopReason {
 		case "":

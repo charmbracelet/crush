@@ -71,11 +71,11 @@ type subagentNamer struct {
 }
 
 // name puts the next first name in front of label: "date-impl" becomes
-// something like "betty-date-impl". A label that already has one keeps it.
+// something like "betty-date-impl".
 func (n *subagentNamer) name(label string) string {
 	label = strings.TrimSpace(label)
-	if _, _, ok := splitSubagentName(label); ok || label == "" {
-		return label
+	if label == "" {
+		return ""
 	}
 	n.once.Do(func() { n.order = rand.Perm(len(subagentFirstNames)) })
 	n.mu.Lock()

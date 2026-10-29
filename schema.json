@@ -29,6 +29,22 @@
       "additionalProperties": false,
       "type": "object"
     },
+    "Capabilities": {
+      "properties": {
+        "vision": {
+          "type": "boolean"
+        },
+        "audio": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "vision",
+        "audio"
+      ]
+    },
     "Completions": {
       "properties": {
         "max_depth": {
@@ -110,6 +126,22 @@
       },
       "additionalProperties": false,
       "type": "object"
+    },
+    "EffortLevel": {
+      "properties": {
+        "value": {
+          "type": "string"
+        },
+        "display": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "value",
+        "display"
+      ]
     },
     "HookConfig": {
       "properties": {
@@ -408,20 +440,14 @@
         "id": {
           "type": "string"
         },
+        "type": {
+          "type": "string"
+        },
         "name": {
           "type": "string"
         },
-        "cost_per_1m_in": {
-          "type": "number"
-        },
-        "cost_per_1m_out": {
-          "type": "number"
-        },
-        "cost_per_1m_in_cached": {
-          "type": "number"
-        },
-        "cost_per_1m_out_cached": {
-          "type": "number"
+        "pricing": {
+          "$ref": "#/$defs/Pricing"
         },
         "context_window": {
           "type": "integer"
@@ -429,20 +455,14 @@
         "default_max_tokens": {
           "type": "integer"
         },
-        "can_reason": {
-          "type": "boolean"
+        "reasoning": {
+          "$ref": "#/$defs/Reasoning"
         },
-        "reasoning_levels": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
+        "capabilities": {
+          "$ref": "#/$defs/Capabilities"
         },
-        "default_reasoning_effort": {
-          "type": "string"
-        },
-        "supports_attachments": {
-          "type": "boolean"
+        "max_attachments": {
+          "type": "integer"
         },
         "options": {
           "$ref": "#/$defs/ModelOptions"
@@ -453,14 +473,11 @@
       "required": [
         "id",
         "name",
-        "cost_per_1m_in",
-        "cost_per_1m_out",
-        "cost_per_1m_in_cached",
-        "cost_per_1m_out_cached",
+        "pricing",
         "context_window",
         "default_max_tokens",
-        "can_reason",
-        "supports_attachments"
+        "reasoning",
+        "capabilities"
       ]
     },
     "ModelOptions": {
@@ -683,6 +700,28 @@
       "additionalProperties": false,
       "type": "object"
     },
+    "Pricing": {
+      "properties": {
+        "input": {
+          "type": "number"
+        },
+        "output": {
+          "type": "number"
+        },
+        "cache_create": {
+          "type": "number"
+        },
+        "cache_hit": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "input",
+        "output"
+      ]
+    },
     "ProviderConfig": {
       "properties": {
         "id": {
@@ -710,15 +749,9 @@
         "type": {
           "type": "string",
           "enum": [
-            "openai",
-            "openai-compat",
-            "openrouter",
-            "vercel",
-            "anthropic",
-            "google",
-            "azure",
-            "bedrock",
-            "google-vertex",
+            "completions",
+            "responses",
+            "messages",
             "hyper",
             "litellm",
             "llamacpp",
@@ -787,6 +820,27 @@
       },
       "additionalProperties": false,
       "type": "object"
+    },
+    "Reasoning": {
+      "properties": {
+        "thinking": {
+          "type": "string"
+        },
+        "effort_levels": {
+          "items": {
+            "$ref": "#/$defs/EffortLevel"
+          },
+          "type": "array"
+        },
+        "default_effort_level": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "thinking"
+      ]
     },
     "SelectedModel": {
       "properties": {

@@ -114,6 +114,10 @@ crush run --continue "Follow up on your last response"
 				return fmt.Errorf("no providers configured - please run 'crush' to set up a provider interactively")
 			}
 
+			if err := refuseUnresolvedLarge(largeModel, ws.Config); err != nil {
+				return err
+			}
+
 			clientWs := workspace.NewClientWorkspace(c, *ws)
 			if err := clientWs.InitCoderAgentNonInteractive(ctx); err != nil {
 				return fmt.Errorf("failed to initialize agent: %w", err)
@@ -144,6 +148,10 @@ crush run --continue "Follow up on your last response"
 
 		if !ws.Config().IsConfigured() {
 			return fmt.Errorf("no providers configured - please run 'crush' to set up a provider interactively")
+		}
+
+		if err := refuseUnresolvedLarge(largeModel, ws.Config()); err != nil {
+			return err
 		}
 
 		if verbose {
@@ -177,6 +185,15 @@ func init() {
 
 // runNonInteractive executes the agent via the server and streams output
 // to stdout.
+func refreshWorkspaceConfig(ctx context.Context, c *client.Client, ws *proto.Workspace) {
+	cfg, err := c.GetConfig(ctx, ws.ID)
+	if err != nil {
+		slog.Debug("Failed to refresh config after model override", "error", err)
+		return
+	}
+	ws.Config = cfg
+}
+
 func runNonInteractive(
 	ctx context.Context,
 	c *client.Client,
@@ -195,6 +212,7 @@ func runNonInteractive(
 		if err := overrideModels(ctx, c, ws, largeModel, smallModel); err != nil {
 			return fmt.Errorf("failed to override models: %w", err)
 		}
+		refreshWorkspaceConfig(ctx, c, ws)
 	}
 
 	// The reasoning effort applies to the model that will actually run.
@@ -207,6 +225,8 @@ func runNonInteractive(
 			return err
 		}
 	}
+
+	fmt.Fprintln(os.Stderr, resolvedLargeLine(ws.Config))
 
 	var (
 		spinner   *format.Spinner
@@ -498,6 +518,28 @@ func waitForAgent(ctx context.Context, c *client.Client, wsID string) error {
 		case <-time.After(200 * time.Millisecond):
 		}
 	}
+}
+
+// refuseUnresolvedLarge fails crush run when models.large was set and
+// did not resolve. -m / --model wins and skips this check. Interactive
+// TUI is not gated here.
+func refuseUnresolvedLarge(cliLarge string, cfg *config.Config) error {
+	if cliLarge != "" || cfg == nil || !cfg.LargeFallback {
+		return nil
+	}
+	requested := cfg.LargeConfigured
+	id := requested.Model
+	if requested.Provider != "" && requested.Model != "" {
+		id = requested.Provider + "/" + requested.Model
+	}
+	return fmt.Errorf("models.large %s does not resolve; crush run refusing to start (pass -m provider/model to override)", id)
+}
+
+// resolvedLargeLine is the default-verbosity model pin for headless runs.
+// Shared implementation lives on config.Config so app.RunNonInteractive can
+// use the same printer without importing cmd.
+func resolvedLargeLine(cfg *config.Config) string {
+	return cfg.ResolvedLargeLine()
 }
 
 // overrideModels resolves model strings and updates the workspace

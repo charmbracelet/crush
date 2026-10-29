@@ -447,6 +447,9 @@ func (a *sessionAgent) enqueueCall(call SessionAgentCall) {
 	}
 	queued.OnComplete = nil
 	queued.Accepted = nil
+	// Once queued the call is accepted: if no step folds it in, it runs as
+	// its own turn rather than being refused as idle.
+	queued.QueueOnly = false
 	existing = append(existing, queued)
 	a.messageQueue.Set(call.SessionID, existing)
 }
@@ -1287,6 +1290,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		case len(currentAssistant.ToolCalls()) > 0:
 			existing, _ := a.messageQueue.Get(call.SessionID)
 			call.Prompt = fmt.Sprintf("The previous session was interrupted because it got too long, the initial user request was: `%s`", call.Prompt)
+			// The rewritten prompt is a new message, not the saved one.
+			call.Saved = nil
 			a.messageQueue.Set(call.SessionID, append(existing, call))
 			continued = true
 		}

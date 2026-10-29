@@ -71,3 +71,21 @@ func TestQueueOnlyCallNeverStartsATurn(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, a.QueuedPrompts(sess.ID))
 }
+
+// A queue-only call that was accepted into the queue but missed every step
+// still runs as its own turn when the queue drains, instead of being refused
+// as idle.
+func TestQueuedCallDropsQueueOnly(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	a := NewSessionAgent(SessionAgentOptions{
+		Models:   noModels,
+		Sessions: env.sessions,
+		Messages: env.messages,
+	}).(*sessionAgent)
+	a.enqueueCall(SessionAgentCall{SessionID: "s", Prompt: "more", QueueOnly: true})
+	queued, ok := a.messageQueue.Get("s")
+	require.True(t, ok)
+	require.Len(t, queued, 1)
+	require.False(t, queued[0].QueueOnly)
+}

@@ -8,10 +8,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestAcquireDataDirLock_ContenderSeesOwnerInfo checks that a contender
-// can read the owner details the holder records in the lock file. Two
-// acquisitions in one process contend like two processes would, because
-// each opens its own handle on the lock file.
+// TestAcquireDataDirLock_ContenderSeesOwnerInfo guards that a contender can
+// still read the holder's owner info, which a whole-file lock on Windows
+// made unreadable.
 func TestAcquireDataDirLock_ContenderSeesOwnerInfo(t *testing.T) {
 	dataDir := t.TempDir()
 

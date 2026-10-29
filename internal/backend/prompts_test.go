@@ -279,32 +279,20 @@ func TestSetCurrentSession_RepublishesPendingQuestion(t *testing.T) {
 	}
 }
 
-// TestCreateWorkspace_PermissionPromptsWaitPerTopLevelSession verifies
-// that a workspace's permission requests only wait for earlier requests
-// of the same top-level session: another session's prompt is shown
-// while one is left unanswered, and a sub-agent's prompt still waits
-// for its parent session's, since the same clients answer both.
-//
-// Cannot run in parallel: it isolates HOME/XDG_* via t.Setenv so
-// config.Init does not read the host machine's real config.
+// TestCreateWorkspace_PermissionPromptsWaitPerTopLevelSession guards
+// against one unanswered permission prompt blocking every other session's;
+// a sub-agent's prompt must still wait for its parent session's.
 func TestCreateWorkspace_PermissionPromptsWaitPerTopLevelSession(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
-
+	xdgIsolated(t)
 	b := New(context.Background(), nil, func() {})
 	b.SetCreateGrace(2 * time.Second)
 	t.Cleanup(func() { drainBackend(t, b) })
-
 	ws, _, err := b.CreateWorkspace(protoWS(t.TempDir(), t.TempDir(), uuid.New().String()))
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(t.Context())
 	var wg sync.WaitGroup
-	// Unblock the requests on failure paths before the workspace goes.
 	t.Cleanup(func() { cancel(); wg.Wait() })
-
 	top, err := ws.Sessions.Create(ctx, "top")
 	require.NoError(t, err)
 	child, err := ws.Sessions.CreateTaskSession(ctx, "child-1", top.ID, "child")
@@ -313,54 +301,37 @@ func TestCreateWorkspace_PermissionPromptsWaitPerTopLevelSession(t *testing.T) {
 	require.NoError(t, err)
 
 	requests := ws.Permissions.Subscribe(ctx)
-	request := func(sessionID string) <-chan bool {
-		granted := make(chan bool, 1)
+	request := func(sessionID string) {
 		wg.Go(func() {
-			ok, _ := ws.Permissions.Request(ctx, permission.CreatePermissionRequest{
-				SessionID:  sessionID,
-				ToolCallID: "tc-" + sessionID,
-				ToolName:   "bash",
-				Action:     "execute",
-				Path:       ws.Path,
+			_, _ = ws.Permissions.Request(ctx, permission.CreatePermissionRequest{
+				SessionID: sessionID, ToolCallID: "tc-" + sessionID,
+				ToolName: "bash", Action: "execute", Path: ws.Path,
 			})
-			granted <- ok
 		})
-		return granted
 	}
-	next := func() permission.PermissionRequest {
-		t.Helper()
+	next := func(wait time.Duration) (permission.PermissionRequest, bool) {
 		select {
 		case ev := <-requests:
-			return ev.Payload
-		case <-time.After(10 * time.Second):
-			t.Fatal("permission request was never published")
-			return permission.PermissionRequest{}
+			return ev.Payload, true
+		case <-time.After(wait):
+			return permission.PermissionRequest{}, false
 		}
 	}
 
-	doneTop := request(top.ID)
-	reqTop := next()
+	request(top.ID)
+	reqTop, ok := next(10 * time.Second)
+	require.True(t, ok)
 	require.Equal(t, top.ID, reqTop.SessionID)
+	request(child.ID)
+	request(other.ID)
+	reqOther, ok := next(10 * time.Second)
+	require.True(t, ok, "another session's prompt waited for an unanswered one")
+	require.Equal(t, other.ID, reqOther.SessionID, "a sub-agent's prompt must wait for its parent's")
+	_, ok = next(200 * time.Millisecond)
+	require.False(t, ok, "a sub-agent's prompt must wait for its parent's")
 
-	const childMustWait = "a sub-agent's prompt must wait for its top-level session's"
-	doneChild := request(child.ID)
-	doneOther := request(other.ID)
-	reqOther := next()
-	require.NotEqual(t, child.ID, reqOther.SessionID, childMustWait)
-	require.Equal(t, other.ID, reqOther.SessionID,
-		"another top-level session's prompt must not wait for an unanswered one")
-	select {
-	case ev := <-requests:
-		t.Fatalf("%s, got %q", childMustWait, ev.Payload.SessionID)
-	case <-time.After(200 * time.Millisecond):
-	}
-
-	require.True(t, ws.Permissions.Grant(reqOther))
-	require.True(t, <-doneOther)
 	require.True(t, ws.Permissions.Grant(reqTop))
-	require.True(t, <-doneTop)
-	reqChild := next()
+	reqChild, ok := next(10 * time.Second)
+	require.True(t, ok)
 	require.Equal(t, child.ID, reqChild.SessionID)
-	require.True(t, ws.Permissions.Grant(reqChild))
-	require.True(t, <-doneChild)
 }

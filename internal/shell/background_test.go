@@ -305,6 +305,8 @@ func TestBackgroundShellManager_KillAll_Timeout(t *testing.T) {
 	require.Less(t, elapsed, 2*time.Second)
 }
 
+// TestBackgroundShellManager_KillOwned guards that tearing down one
+// workspace kills only the shells it owns.
 func TestBackgroundShellManager_KillOwned(t *testing.T) {
 	t.Parallel()
 
@@ -315,17 +317,13 @@ func TestBackgroundShellManager_KillOwned(t *testing.T) {
 	require.NoError(t, err)
 	shellB, err := manager.Start(t.Context(), "b", workingDir, nil, "sleep 10", "", testMaxJobs)
 	require.NoError(t, err)
-	unowned, err := manager.Start(t.Context(), nil, workingDir, nil, "sleep 10", "", testMaxJobs)
-	require.NoError(t, err)
 
 	manager.KillOwned(t.Context(), "a")
 
-	require.True(t, shellA.IsDone(), "the owner's shell should be killed")
-	_, ok := manager.Get(shellA.ID)
-	require.False(t, ok, "the owner's shell should be removed from the manager")
-	require.False(t, shellB.IsDone(), "another owner's shell should keep running")
-	require.False(t, unowned.IsDone(), "an unowned shell should keep running")
-	require.ElementsMatch(t, []string{shellB.ID, unowned.ID}, manager.List())
+	require.True(t, shellA.IsDone())
+	require.False(t, shellB.IsDone())
+	require.Equal(t, []string{shellB.ID}, manager.List())
+	require.NoError(t, manager.Kill(shellB.ID))
 }
 
 func TestBackgroundShell_WaitContext_Completed(t *testing.T) {

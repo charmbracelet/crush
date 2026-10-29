@@ -14,8 +14,7 @@ import (
 // serveLocal serves h on a unix socket owned by the current user.
 func serveLocal(t *testing.T, h http.Handler) (network, addr string) {
 	t.Helper()
-	// macOS caps socket paths at 104 bytes and t.TempDir embeds the test
-	// name, so both that name and the socket's must stay short.
+	// Keep it short: macOS caps socket paths at 104 bytes.
 	path := filepath.Join(t.TempDir(), "s.sock")
 	ln, err := net.Listen("unix", path) //nolint:noctx
 	require.NoError(t, err)

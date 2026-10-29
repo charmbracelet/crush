@@ -311,35 +311,21 @@ func NewBashTool(permissions permission.Service, workingDir, spillDir string, at
 			}
 
 			// Wait for either completion, auto-background threshold, or context cancellation
-			ticker := time.NewTicker(100 * time.Millisecond)
-			defer ticker.Stop()
-
 			autoBackgroundAfter := cmp.Or(params.AutoBackgroundAfter, DefaultAutoBackgroundAfter)
 			autoBackgroundThreshold := time.Duration(autoBackgroundAfter) * time.Second
-			timeout := time.After(autoBackgroundThreshold)
+			timer := time.NewTimer(autoBackgroundThreshold)
+			defer timer.Stop()
 
-			var stdout, stderr string
-			var done bool
-			var execErr error
-
-		waitLoop:
-			for {
-				select {
-				case <-ticker.C:
-					stdout, stderr, done, execErr = bgShell.GetOutput()
-					if done {
-						break waitLoop
-					}
-				case <-timeout:
-					stdout, stderr, done, execErr = bgShell.GetOutput()
-					break waitLoop
-				case <-ctx.Done():
-					// Incoming context was cancelled before we moved to background
-					// Kill the shell and return error
-					bgManager.Kill(bgShell.ID)
-					return fantasy.ToolResponse{}, ctx.Err()
-				}
+			select {
+			case <-bgShell.Done():
+			case <-timer.C:
+			case <-ctx.Done():
+				// Incoming context was cancelled before we moved to background
+				// Kill the shell and return error
+				bgManager.Kill(bgShell.ID)
+				return fantasy.ToolResponse{}, ctx.Err()
 			}
+			stdout, stderr, done, execErr := bgShell.GetOutput()
 
 			if done {
 				// Command completed within threshold - return synchronously

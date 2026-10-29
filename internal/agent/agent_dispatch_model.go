@@ -12,16 +12,11 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 )
 
-// parentModel returns the model of the agent that owns a dispatch call. A
-// model override that names only a model inherits this provider.
-func (c *coordinator) parentModel(parentAgentID string) Model {
-	c.agentMu.RLock()
-	defer c.agentMu.RUnlock()
-	if agent, ok := c.agents[parentAgentID]; ok {
+// mainModel returns the model the main agent runs on, or the zero Model
+// before one is set.
+func (c *coordinator) mainModel() Model {
+	if agent, _ := c.activeAgent(); agent != nil {
 		return agent.Model()
-	}
-	if c.mainAgent != nil {
-		return c.mainAgent.Model()
 	}
 	return Model{}
 }

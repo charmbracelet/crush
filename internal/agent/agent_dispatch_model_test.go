@@ -331,13 +331,11 @@ func TestDispatchToolRunsOverrideModel(t *testing.T) {
 	c, env := newOverrideTestCoordinator(t)
 	ctx := t.Context()
 
-	// Give the coordinator a parent agent so a model-only override has a
-	// provider to inherit.
+	// A parent model gives a model-only override a provider to inherit.
 	agents, err := c.taskAgents(ctx, false)
 	require.NoError(t, err)
-	c.mainAgent = agents[accessRead]
 
-	tool, err := c.agentDispatchTool(ctx, config.AgentCoder)
+	tool, err := c.agentDispatchTool(ctx, config.AgentCoder, agents[accessRead].Model)
 	require.NoError(t, err)
 
 	parent, err := env.sessions.Create(ctx, "parent")

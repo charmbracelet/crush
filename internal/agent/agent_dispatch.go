@@ -300,7 +300,7 @@ func dispatchKey(parentSessionID, label string) string {
 // agentDispatchTool launches a subagent that runs detached from this tool
 // call. The tool returns as soon as the subagent starts; the result is
 // delivered later as a message into the parent session.
-func (c *coordinator) agentDispatchTool(ctx context.Context, parentAgentID string) (fantasy.AgentTool, error) {
+func (c *coordinator) agentDispatchTool(ctx context.Context, parentAgentID string, parentModel func() Model) (fantasy.AgentTool, error) {
 	readOnly := readOnlyParent(parentAgentID)
 	agents, err := c.taskAgents(ctx, readOnly)
 	if err != nil {
@@ -309,7 +309,7 @@ func (c *coordinator) agentDispatchTool(ctx context.Context, parentAgentID strin
 
 	return fantasy.NewParallelAgentTool(
 		AgentDispatchToolName,
-		strings.TrimSpace(agentDispatchToolDescription)+dispatchModelCatalog(c.cfg.Config(), c.parentModel(parentAgentID)),
+		strings.TrimSpace(agentDispatchToolDescription)+dispatchModelCatalog(c.cfg.Config(), parentModel()),
 		func(ctx context.Context, params AgentDispatchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Prompt == "" {
 				return fantasy.NewTextErrorResponse("prompt is required"), nil
@@ -335,7 +335,7 @@ func (c *coordinator) agentDispatchTool(ctx context.Context, parentAgentID strin
 			if access == "" {
 				access = accessRead
 			}
-			overrideAgent, sel, hasOverride, refusal := c.overrideDispatchAgent(ctx, access, params, c.parentModel(parentAgentID))
+			overrideAgent, sel, hasOverride, refusal := c.overrideDispatchAgent(ctx, access, params, parentModel())
 			if refusal != "" {
 				return fantasy.NewTextErrorResponse(refusal), nil
 			}
@@ -741,7 +741,7 @@ func (c *coordinator) rehydrateDispatch(ctx context.Context, parentSessionID, la
 			}
 			params.Provider = provider
 			if provider == "" {
-				parent = c.parentModel("")
+				parent = c.mainModel()
 			}
 		}
 		overrideAgent, _, _, refusal := c.overrideDispatchAgent(ctx, record.Access, params, parent)

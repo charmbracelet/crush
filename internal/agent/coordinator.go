@@ -936,7 +936,7 @@ func (c *coordinator) buildAgentWithModels(ctx context.Context, ready *errgroup.
 	})
 
 	ready.Go(func() error {
-		tools, err := c.buildTools(initCtx, agent, isSubAgent)
+		tools, err := c.buildTools(initCtx, agent, isSubAgent, func() Model { return models().Large })
 		if err != nil {
 			return err
 		}
@@ -967,7 +967,9 @@ func (c *coordinator) effectiveToolNames(agentCfg config.Agent, isSubAgent bool)
 	})
 }
 
-func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubAgent bool) ([]fantasy.AgentTool, error) {
+// buildTools builds an agent's tools. parentModel reports the model the
+// agent runs on, which a dispatched subagent inherits.
+func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubAgent bool, parentModel func() Model) ([]fantasy.AgentTool, error) {
 	allowed := c.effectiveToolNames(agent, isSubAgent)
 
 	var allTools []fantasy.AgentTool
@@ -979,7 +981,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		allTools = append(allTools, agentTool)
 	}
 	if slices.Contains(allowed, AgentDispatchToolName) {
-		dispatchTool, err := c.agentDispatchTool(ctx, agent.ID)
+		dispatchTool, err := c.agentDispatchTool(ctx, agent.ID, parentModel)
 		if err != nil {
 			return nil, err
 		}
@@ -1619,7 +1621,7 @@ func (c *coordinator) updateAgentModels(ctx context.Context, agent SessionAgent,
 		return fmt.Errorf("%w: %s", errMainAgentNotFound, name)
 	}
 
-	tools, err := c.buildTools(ctx, agentCfg, false)
+	tools, err := c.buildTools(ctx, agentCfg, false, agent.Model)
 	if err != nil {
 		return err
 	}

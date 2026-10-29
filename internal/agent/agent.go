@@ -226,6 +226,7 @@ type sessionAgent struct {
 	// turns; sendChannelReply treats nil as "routing disabled".
 	cfg                  *config.ConfigStore
 	disableAutoSummarize bool
+	summarizeWithTools   bool
 	isYolo               bool
 	notify               pubsub.Publisher[notify.Notification]
 	runComplete          pubsub.Publisher[notify.RunComplete]
@@ -283,6 +284,7 @@ type SessionAgentOptions struct {
 	SystemPrompt         string
 	IsSubAgent           bool
 	DisableAutoSummarize bool
+	SummarizeWithTools   bool
 	IsYolo               bool
 	Sessions             session.Service
 	Messages             message.Service
@@ -306,6 +308,7 @@ func NewSessionAgent(
 		messages:             opts.Messages,
 		cfg:                  opts.Cfg,
 		disableAutoSummarize: opts.DisableAutoSummarize,
+		summarizeWithTools:   opts.SummarizeWithTools,
 		tools:                csync.NewSliceFrom(opts.Tools),
 		isYolo:               opts.IsYolo,
 		notify:               opts.Notify,
@@ -1441,11 +1444,14 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID, trigger string,
 			slog.Error("Failed to flush pending message updates after summarize", "error", flushErr)
 		}
 	}()
-
+	agentOps := []fantasy.AgentOption{fantasy.WithSystemPrompt(string(summaryPrompt)), fantasy.WithUserAgent(userAgent)}
+	if a.summarizeWithTools {
+		toolChoiceNone := fantasy.ToolChoiceNone
+		agentOps = append(agentOps, fantasy.WithTools(a.tools.Copy()...), fantasy.WithToolChoice(toolChoiceNone))
+	}
 	agent := fantasy.NewAgent(
 		largeModel.Model,
-		fantasy.WithSystemPrompt(string(summaryPrompt)),
-		fantasy.WithUserAgent(userAgent),
+		agentOps...,
 	)
 	summaryMessage, err := a.messages.Create(ctx, sessionID, message.CreateMessageParams{
 		Role:             message.Assistant,

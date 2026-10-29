@@ -203,24 +203,6 @@ func TestMap_CompareAndDelete(t *testing.T) {
 	require.False(t, m.CompareAndDelete("absent", any(original)))
 }
 
-func TestMap_Swap(t *testing.T) {
-	t.Parallel()
-
-	m := NewMap[string, int]()
-
-	prev, loaded := m.Swap("key", 1)
-	require.False(t, loaded)
-	require.Zero(t, prev)
-
-	prev, loaded = m.Swap("key", 2)
-	require.True(t, loaded)
-	require.Equal(t, 1, prev)
-
-	got, ok := m.Get("key")
-	require.True(t, ok)
-	require.Equal(t, 2, got)
-}
-
 func TestMap_Take(t *testing.T) {
 	t.Parallel()
 

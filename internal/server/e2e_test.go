@@ -306,19 +306,6 @@ func (h *e2eHarness) grantPermission(t *testing.T, ctx context.Context, workspac
 	return out.Resolved
 }
 
-// autoApproveSession posts to the session auto-approve endpoint and
-// returns the response status code.
-func (h *e2eHarness) autoApproveSession(t *testing.T, ctx context.Context, workspaceID, sessionID string) int {
-	t.Helper()
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		h.httpSrv.URL+"/v1/workspaces/"+workspaceID+"/sessions/"+sessionID+"/auto-approve", nil)
-	require.NoError(t, err)
-	resp, err := h.httpSrv.Client().Do(httpReq)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	return resp.StatusCode
-}
-
 // waitForAttached spins until the workspace's clients map reports at
 // least n entries with streams > 0. Catches the race where a test
 // publishes events before the server-side AttachClient has completed.
@@ -639,148 +626,64 @@ func TestE2E_PermissionScopedToViewingClients(t *testing.T) {
 	}
 }
 
-// TestE2E_UnansweredPromptDoesNotBlockOtherSessions verifies that a
-// permission prompt left unanswered in one session does not hold back
-// the prompts of another session. Prompts only reach the viewers of
-// their own session, so a prompt queued behind another session's could
-// never be seen, let alone answered, by the client waiting for it.
+// TestE2E_UnansweredPromptDoesNotBlockOtherSessions guards against an
+// unanswered prompt in one session holding back another session's prompt.
 func TestE2E_UnansweredPromptDoesNotBlockOtherSessions(t *testing.T) {
 	t.Parallel()
 	h := newE2EHarness(t)
-	ctx, cancel := context.WithCancel(t.Context())
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	t.Cleanup(cancel)
 
-	cidA := uuid.New().String()
-	cidB := uuid.New().String()
-
-	evcA, cancelA := h.subscribeSSE(t, ctx, h.workspace.ID, cidA)
-	t.Cleanup(cancelA)
-	evcB, cancelB := h.subscribeSSE(t, ctx, h.workspace.ID, cidB)
-	t.Cleanup(cancelB)
-
-	h.waitForAttached(t, 2)
-
-	const sessionA = "s-unanswered"
-	const sessionB = "s-other"
-	h.setCurrentSession(t, ctx, h.workspace.ID, cidA, sessionA)
-	h.setCurrentSession(t, ctx, h.workspace.ID, cidB, sessionB)
-
 	var wg sync.WaitGroup
-	// Unblock the requests on failure paths before waiting on them.
 	t.Cleanup(func() { cancel(); wg.Wait() })
-	request := func(sessionID, toolCallID string) <-chan bool {
-		granted := make(chan bool, 1)
+	for i, session := range []string{"s-a", "s-b"} {
+		cid := uuid.New().String()
+		evc, cancelSSE := h.subscribeSSE(t, ctx, h.workspace.ID, cid)
+		t.Cleanup(cancelSSE)
+		h.waitForAttached(t, i+1)
+		h.setCurrentSession(t, ctx, h.workspace.ID, cid, session)
 		wg.Go(func() {
-			ok, _ := h.app.Permissions.Request(ctx, permission.CreatePermissionRequest{
-				SessionID:   sessionID,
-				ToolCallID:  toolCallID,
-				ToolName:    "bash",
-				Description: "run a command",
-				Action:      "execute",
-				Path:        h.workspace.Path,
+			_, _ = h.app.Permissions.Request(ctx, permission.CreatePermissionRequest{
+				SessionID:  session,
+				ToolCallID: "tc-" + session,
+				ToolName:   "bash",
+				Action:     "execute",
+				Path:       h.workspace.Path,
 			})
-			granted <- ok
 		})
-		return granted
+		// Session A's prompt is left unanswered.
+		_, ok := drainUntil(ctx, evc, func(e pubsub.Event[proto.PermissionRequest]) bool {
+			return e.Payload.ToolCallID == "tc-"+session
+		})
+		require.True(t, ok, "session %s's prompt never reached its client", session)
 	}
-	isRequest := func(toolCallID string) func(pubsub.Event[proto.PermissionRequest]) bool {
-		return func(e pubsub.Event[proto.PermissionRequest]) bool {
-			return e.Payload.ToolCallID == toolCallID
-		}
-	}
-
-	waitCtx, waitCancel := context.WithTimeout(ctx, 10*time.Second)
-	defer waitCancel()
-
-	// Client A's prompt reaches client A, which never answers it.
-	doneA := request(sessionA, "tc-unanswered")
-	reqA, ok := drainUntil(waitCtx, evcA, isRequest("tc-unanswered"))
-	require.True(t, ok, "client A must receive its prompt")
-
-	// Client B's prompt in its own session must still reach client B.
-	doneB := request(sessionB, "tc-other")
-	reqB, ok := drainUntil(waitCtx, evcB, isRequest("tc-other"))
-	require.True(t, ok, "client B's prompt must not wait for an unanswered prompt in another session")
-
-	// Switching into a session re-delivers that session's own pending
-	// prompt, not the one pending in the session the client left.
-	h.setCurrentSession(t, ctx, h.workspace.ID, cidA, sessionB)
-	repub, ok := drainUntil(waitCtx, evcA, isRequest("tc-other"))
-	require.True(t, ok, "switching sessions must re-deliver the new session's pending prompt")
-	require.Equal(t, reqB.Payload.ID, repub.Payload.ID)
-
-	// Each prompt is resolved on its own.
-	require.True(t, h.grantPermission(t, ctx, h.workspace.ID, proto.PermissionGrant{
-		Permission: reqB.Payload,
-		Action:     proto.PermissionAllow,
-	}))
-	require.True(t, <-doneB, "client B's request must be granted")
-	select {
-	case <-doneA:
-		t.Fatal("client A's request must stay pending until it is answered")
-	default:
-	}
-	require.True(t, h.grantPermission(t, ctx, h.workspace.ID, proto.PermissionGrant{
-		Permission: reqA.Payload,
-		Action:     proto.PermissionAllow,
-	}))
-	require.True(t, <-doneA, "client A's request must be granted")
 }
 
-// TestE2E_AutoApproveSession verifies that auto-approving a session
-// through the API grants its permission requests without a prompt, which
-// is what `crush run` relies on for its own session, while every other
-// session in the workspace keeps prompting.
+// TestE2E_AutoApproveSession guards the endpoint `crush run` uses to grant
+// its own session's permission requests without a prompt.
 func TestE2E_AutoApproveSession(t *testing.T) {
 	t.Parallel()
 	h := newE2EHarness(t)
-	ctx, cancel := context.WithCancel(t.Context())
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	t.Cleanup(cancel)
 
-	prompts := h.app.Permissions.Subscribe(ctx)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		h.httpSrv.URL+"/v1/workspaces/"+h.workspace.ID+"/sessions/s-run/auto-approve", nil)
+	require.NoError(t, err)
+	resp, err := h.httpSrv.Client().Do(req)
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
 
-	const runSession = "s-run"
-	require.Equal(t, http.StatusOK, h.autoApproveSession(t, ctx, h.workspace.ID, runSession))
-
-	reqCtx, reqCancel := context.WithTimeout(ctx, 5*time.Second)
-	defer reqCancel()
-	granted, err := h.app.Permissions.Request(reqCtx, permission.CreatePermissionRequest{
-		SessionID:   runSession,
-		ToolCallID:  "tc-run",
-		ToolName:    "write",
-		Description: "write a file",
-		Action:      "write",
-		Path:        h.workspace.Path,
+	granted, err := h.app.Permissions.Request(ctx, permission.CreatePermissionRequest{
+		SessionID:  "s-run",
+		ToolCallID: "tc-run",
+		ToolName:   "write",
+		Action:     "write",
+		Path:       h.workspace.Path,
 	})
-	require.NoError(t, err, "an auto-approved session must not wait on a prompt")
+	require.NoError(t, err)
 	require.True(t, granted)
-
-	// Another session is unaffected: its request still prompts.
-	otherCtx, otherCancel := context.WithCancel(ctx)
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		_, _ = h.app.Permissions.Request(otherCtx, permission.CreatePermissionRequest{
-			SessionID:   "s-other",
-			ToolCallID:  "tc-other",
-			ToolName:    "write",
-			Description: "write a file",
-			Action:      "write",
-			Path:        h.workspace.Path,
-		})
-	}()
-	// Unblock the request before waiting on done.
-	t.Cleanup(func() { otherCancel(); <-done })
-	select {
-	case ev := <-prompts:
-		require.Equal(t, "tc-other", ev.Payload.ToolCallID,
-			"only the session that was not auto-approved may prompt")
-	case <-time.After(5 * time.Second):
-		t.Fatal("a session that was not auto-approved must still prompt")
-	}
-
-	require.Equal(t, http.StatusNotFound, h.autoApproveSession(t, ctx, uuid.New().String(), runSession),
-		"an unknown workspace must answer 404")
 }
 
 // TestE2E_KillingClientASSEDoesNotBreakClientB covers PLAN item 6

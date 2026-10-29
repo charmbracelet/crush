@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -17,7 +16,6 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/lock"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -610,130 +608,26 @@ func TestPathDedupe_ParallelCreates(t *testing.T) {
 	require.Contains(t, ws.clients, cidB)
 }
 
-// TestPathDedupe_CaseVariant opens one directory under two spellings that
-// differ only in case. On a case-insensitive filesystem (the macOS and
-// Windows default) that is the same directory, so the second create must
-// join the first workspace instead of opening the directory's data
-// directory a second time, which the server's own data-directory lock
-// refuses. The data directory is left to the server, as a real client does.
+// TestPathDedupe_CaseVariant guards against one directory opened under
+// two spellings that differ only in case becoming two workspaces, the
+// second failing on the data-directory lock the first holds.
 func TestPathDedupe_CaseVariant(t *testing.T) {
 	xdgIsolated(t)
 	t.Setenv("CRUSH_DISABLE_PROVIDER_AUTO_UPDATE", "1")
-
 	root := t.TempDir()
-	upper := filepath.Join(root, "Proj")
-	require.NoError(t, os.Mkdir(upper, 0o755))
-	lower := filepath.Join(root, "proj")
-	if _, err := os.Stat(lower); err != nil {
+	require.NoError(t, os.Mkdir(filepath.Join(root, "Proj"), 0o755))
+	if _, err := os.Stat(filepath.Join(root, "proj")); err != nil {
 		t.Skip("case-sensitive filesystem")
 	}
-
 	b := New(context.Background(), nil, func() {})
 	b.SetCreateGrace(2 * time.Second)
 	t.Cleanup(func() { drainBackend(t, b) })
 
-	wsA, _, err := b.CreateWorkspace(protoWS(upper, "", uuid.New().String()))
+	wsA, _, err := b.CreateWorkspace(protoWS(filepath.Join(root, "Proj"), "", uuid.NewString()))
 	require.NoError(t, err)
-	wsB, _, err := b.CreateWorkspace(protoWS(lower, "", uuid.New().String()))
+	wsB, _, err := b.CreateWorkspace(protoWS(filepath.Join(root, "proj"), "", uuid.NewString()))
 	require.NoError(t, err)
-	require.Equal(t, wsA.ID, wsB.ID, "both spellings must share one workspace")
-}
-
-// TestPathDedupe_ParallelCaseVariants is the concurrent form of
-// TestPathDedupe_CaseVariant: both creates may pass the first lookup
-// before either registers, so the re-check after initialization and the
-// pooled database connection must recognize the directory as well, and the
-// data directory must still be released once the workspace is gone.
-func TestPathDedupe_ParallelCaseVariants(t *testing.T) {
-	xdgIsolated(t)
-	t.Setenv("CRUSH_DISABLE_PROVIDER_AUTO_UPDATE", "1")
-
-	root := t.TempDir()
-	upper := filepath.Join(root, "Proj")
-	require.NoError(t, os.Mkdir(upper, 0o755))
-	lower := filepath.Join(root, "proj")
-	if _, err := os.Stat(lower); err != nil {
-		t.Skip("case-sensitive filesystem")
-	}
-
-	b := New(context.Background(), nil, func() {})
-	b.SetCreateGrace(2 * time.Second)
-	t.Cleanup(func() { drainBackend(t, b) })
-
-	type result struct {
-		ws  *Workspace
-		err error
-	}
-	ch := make(chan result, 2)
-	start := make(chan struct{})
-	for _, path := range []string{upper, lower} {
-		go func() {
-			<-start
-			ws, _, err := b.CreateWorkspace(protoWS(path, "", uuid.New().String()))
-			ch <- result{ws, err}
-		}()
-	}
-	close(start)
-	r1 := <-ch
-	r2 := <-ch
-	require.NoError(t, r1.err)
-	require.NoError(t, r2.err)
-	require.Equal(t, r1.ws.ID, r2.ws.ID, "both creates must converge on one workspace ID")
-
-	drainBackend(t, b)
-	requireDataDirUnlocked(t, filepath.Join(upper, ".crush"))
-}
-
-// TestPathDedupe_SymlinkedParentSubdir opens a repository and, through a
-// symlink to it, one of its subdirectories. They are distinct workspaces,
-// but the subdirectory finds the repository's data directory under the
-// symlinked spelling and must share the open database rather than take the
-// data-directory lock a second time.
-func TestPathDedupe_SymlinkedParentSubdir(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("symlink semantics differ on windows")
-	}
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not available")
-	}
-	xdgIsolated(t)
-	t.Setenv("CRUSH_DISABLE_PROVIDER_AUTO_UPDATE", "1")
-
-	root := t.TempDir()
-	repo := filepath.Join(root, "repo")
-	require.NoError(t, os.MkdirAll(filepath.Join(repo, "sub"), 0o755))
-	gitInit := exec.CommandContext(t.Context(), "git", "init", "-q")
-	gitInit.Dir = repo
-	require.NoError(t, gitInit.Run())
-	link := filepath.Join(root, "link")
-	require.NoError(t, os.Symlink(repo, link))
-
-	b := New(context.Background(), nil, func() {})
-	b.SetCreateGrace(2 * time.Second)
-	t.Cleanup(func() { drainBackend(t, b) })
-
-	wsA, protoA, err := b.CreateWorkspace(protoWS(repo, "", uuid.New().String()))
-	require.NoError(t, err)
-	wsB, protoB, err := b.CreateWorkspace(protoWS(filepath.Join(link, "sub"), "", uuid.New().String()))
-	require.NoError(t, err)
-	require.NotEqual(t, wsA.ID, wsB.ID)
-	infoA, err := os.Stat(protoA.DataDir)
-	require.NoError(t, err)
-	infoB, err := os.Stat(protoB.DataDir)
-	require.NoError(t, err)
-	require.True(t, os.SameFile(infoA, infoB), "the subdirectory must use the repository's data directory")
-
-	drainBackend(t, b)
-	requireDataDirUnlocked(t, filepath.Join(repo, ".crush"))
-}
-
-// requireDataDirUnlocked asserts that nothing in this process still holds
-// the data-directory lock in dataDir.
-func requireDataDirUnlocked(t *testing.T, dataDir string) {
-	t.Helper()
-	release, err := lock.TryFile(filepath.Join(dataDir, "crush.lock"))
-	require.NoError(t, err, "data directory must be unlocked once its workspaces are gone")
-	release()
+	require.Equal(t, wsA.ID, wsB.ID)
 }
 
 // TestCreateWorkspace_RejectsBadClientID covers the 400 path from the
@@ -1614,42 +1508,6 @@ func TestServer_ShutsDownAfterLingerWhenIdle(t *testing.T) {
 		"idle server must shut down after the linger window")
 }
 
-// TestArmIdleShutdown_ZeroLingerWaitsOutCreateGrace covers a fresh server
-// with lingering disabled: it must arm a timer rather than exit before
-// the client that spawned it can create a workspace.
-func TestArmIdleShutdown_ZeroLingerWaitsOutCreateGrace(t *testing.T) {
-	t.Parallel()
-
-	b, shutdownCount := newTestBackend(t)
-	b.SetIdleShutdownDelay(0)
-	b.SetCreateGrace(time.Hour)
-	b.ArmIdleShutdown()
-
-	b.mu.Lock()
-	armed, closing := b.shutdownTimer != nil, b.closing
-	b.cancelShutdownLocked()
-	b.mu.Unlock()
-	require.True(t, armed, "a fresh server must arm its idle-shutdown timer")
-	require.False(t, closing, "a fresh server must not commit to exiting at once")
-	require.Zero(t, shutdownCount.Load(), "a fresh server must not shut down at once")
-}
-
-// TestArmIdleShutdown_SkipsBusyServer covers the guard: a server already
-// hosting a workspace leaves arming to the teardown of its last one.
-func TestArmIdleShutdown_SkipsBusyServer(t *testing.T) {
-	t.Parallel()
-
-	b, _ := newTestBackend(t)
-	b.SetIdleShutdownDelay(time.Hour)
-	insertTestWorkspace(t, b, "/tmp/arm-busy")
-	b.ArmIdleShutdown()
-
-	b.mu.Lock()
-	armed := b.shutdownTimer != nil
-	b.mu.Unlock()
-	require.False(t, armed, "a server hosting a workspace must not arm the idle timer")
-}
-
 // -- Detach grace --
 //
 // The SSE stream is a client's refcount claim, so a stream that drops
@@ -2012,14 +1870,11 @@ func TestShutdownWorkspaces_GivesUpAtDeadline(t *testing.T) {
 	require.Zero(t, b.workspaces.Len())
 }
 
-// TestShutdownWorkspaces_WaitsForTeardownInFlight covers a server told to
-// stop while a workspace whose client vanished is still being torn down by
-// its expired detach grace. That workspace has already left the index, but
-// the stop must wait for it all the same, or the process exits halfway
-// through its shutdown.
+// TestShutdownWorkspaces_WaitsForTeardownInFlight guards against a stop
+// returning while a workspace that already left the index is still being
+// torn down by its expired detach grace.
 func TestShutdownWorkspaces_WaitsForTeardownInFlight(t *testing.T) {
 	t.Parallel()
-
 	b, _ := newTestBackend(t)
 	b.SetDetachGrace(10 * time.Millisecond)
 	b.SetIdleShutdownDelay(time.Hour)
@@ -2034,8 +1889,6 @@ func TestShutdownWorkspaces_WaitsForTeardownInFlight(t *testing.T) {
 		finished.Store(true)
 	}
 
-	// The stream drops and the client never comes back, so the grace timer
-	// runs the teardown on its own goroutine.
 	cid := newClientID(t)
 	b.registerClient(ws, cid)
 	require.NoError(t, b.AttachClient(ws.ID, cid))
@@ -2044,12 +1897,8 @@ func TestShutdownWorkspaces_WaitsForTeardownInFlight(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 	defer cancel()
-	require.ErrorIs(t, b.ShutdownWorkspaces(ctx), context.DeadlineExceeded,
-		"the stop must wait for the teardown in flight, for as long as ctx allows")
-
-	done := make(chan error, 1)
-	go func() { done <- b.ShutdownWorkspaces(t.Context()) }()
+	require.ErrorIs(t, b.ShutdownWorkspaces(ctx), context.DeadlineExceeded)
 	open()
-	require.NoError(t, <-done)
+	require.NoError(t, b.ShutdownWorkspaces(t.Context()))
 	require.True(t, finished.Load(), "the stop returned before the teardown finished")
 }

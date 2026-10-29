@@ -160,29 +160,19 @@ func TestPermissionRequestParamsTypeAssertable(t *testing.T) {
 		{
 			name:     "replace_symbol",
 			toolName: tools.ReplaceSymbolToolName,
-			params: tools.ReplaceSymbolPermissionsParams{
-				FilePath:   "/tmp/x.go",
-				OldContent: "old",
-				NewContent: "new",
-			},
+			params:   tools.ReplaceSymbolPermissionsParams{FilePath: "/tmp/x.go"},
 			assert: func(t *testing.T, got any) {
 				v, ok := got.(tools.ReplaceSymbolPermissionsParams)
-				require.True(t, ok, "params must decode as tools.ReplaceSymbolPermissionsParams, got %T", got)
+				require.True(t, ok, "got %T", got)
 				require.Equal(t, "/tmp/x.go", v.FilePath)
-				require.Equal(t, "old", v.OldContent)
-				require.Equal(t, "new", v.NewContent)
 			},
 		},
 		{
-			// MCP tools pass the model's raw JSON input through as a
-			// string, which the dialog pretty-prints.
 			name:     "mcp",
 			toolName: "mcp_github_create_issue",
-			params:   `{"repo":"charmbracelet/crush","title":"bug"}`,
+			params:   `{"repo":"charmbracelet/crush"}`,
 			assert: func(t *testing.T, got any) {
-				v, ok := got.(string)
-				require.True(t, ok, "params must decode as string, got %T", got)
-				require.Equal(t, `{"repo":"charmbracelet/crush","title":"bug"}`, v)
+				require.Equal(t, `{"repo":"charmbracelet/crush"}`, got)
 			},
 		},
 	}

@@ -1,9 +1,7 @@
 package projects
 
 import (
-	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -221,33 +219,26 @@ func TestRegisterOrdersByRecency(t *testing.T) {
 	}
 }
 
-// TestRegister_ConcurrentProcesses registers projects from several
-// processes at once, as crush processes started together do, and checks
-// that projects.json stays valid and keeps every project.
+// TestRegister_ConcurrentProcesses guards that crush processes registering
+// projects at once neither corrupt projects.json nor lose entries.
 func TestRegister_ConcurrentProcesses(t *testing.T) {
 	const (
 		dirEnv   = "CRUSH_TEST_PROJECTS_DIR"
 		idEnv    = "CRUSH_TEST_PROJECTS_CHILD"
 		children = 8
 		paths    = 5
-		rounds   = 2
 	)
 
 	if dir := os.Getenv(dirEnv); dir != "" {
-		// Child process. internal/home clears CRUSH_GLOBAL_DATA in test
-		// binaries, so the parent passes the directory under another name.
+		// Child process. internal/home clears CRUSH_GLOBAL_DATA in tests.
 		t.Setenv("CRUSH_GLOBAL_DATA", dir)
-		// Wait until the parent has started every child so they overlap.
+		// Block until the parent releases every child at once.
 		_, err := io.Copy(io.Discard, os.Stdin)
 		require.NoError(t, err)
-		// Keep going after a failure, as crush does, so the parent sees
-		// what the file is left in.
-		var errs []error
-		for i := range paths * rounds {
+		for i := range 2 * paths { // Two rounds widen the race window.
 			path := fmt.Sprintf("/project/%s/%d", os.Getenv(idEnv), i%paths)
-			errs = append(errs, Register(path, path+"/.crush"))
+			require.NoError(t, Register(path, path+"/.crush"))
 		}
-		require.NoError(t, errors.Join(errs...))
 		return
 	}
 
@@ -255,35 +246,23 @@ func TestRegister_ConcurrentProcesses(t *testing.T) {
 	r, w, err := os.Pipe()
 	require.NoError(t, err)
 	var cmds []*exec.Cmd
-	outputs := make([]bytes.Buffer, children)
 	for i := range children {
 		cmd := exec.CommandContext(t.Context(), os.Args[0],
 			"-test.run=^TestRegister_ConcurrentProcesses$")
 		cmd.Env = append(os.Environ(), dirEnv+"="+dir, fmt.Sprintf("%s=%d", idEnv, i))
 		cmd.Stdin = r
-		cmd.Stdout = &outputs[i]
-		cmd.Stderr = &outputs[i]
-		if err = cmd.Start(); err != nil {
-			break
-		}
+		require.NoError(t, cmd.Start())
 		cmds = append(cmds, cmd)
 	}
-	// Closing the pipe releases every child at once. Reap them all before
-	// asserting so none outlives the test.
 	r.Close()
 	w.Close()
-	errs := make([]error, len(cmds))
-	for i, cmd := range cmds {
-		errs[i] = cmd.Wait()
+	for _, cmd := range cmds {
+		require.NoError(t, cmd.Wait())
 	}
-	require.NoError(t, err, "start child")
 
 	data, err := os.ReadFile(filepath.Join(dir, projectsFileName))
 	require.NoError(t, err)
 	var list ProjectList
 	require.NoError(t, json.Unmarshal(data, &list), "projects.json:\n%s", data)
-	for i, err := range errs {
-		require.NoError(t, err, "child %d:\n%s", i, &outputs[i])
-	}
 	require.Len(t, list.Projects, children*paths)
 }

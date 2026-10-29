@@ -12,16 +12,11 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// serveLocal serves h on a named pipe created by the current user, set up
-// like the server's own.
+// serveLocal serves h on a named pipe created by the current user.
 func serveLocal(t *testing.T, h http.Handler) (network, addr string) {
 	t.Helper()
 	addr = `\\.\pipe\crush-test-` + uuid.NewString()
-	ln, err := winio.ListenPipe(addr, &winio.PipeConfig{
-		MessageMode:      true,
-		InputBufferSize:  65536,
-		OutputBufferSize: 65536,
-	})
+	ln, err := winio.ListenPipe(addr, nil)
 	require.NoError(t, err)
 	srv := &http.Server{Handler: h}
 	go func() { _ = srv.Serve(ln) }()

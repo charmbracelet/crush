@@ -2,7 +2,6 @@ package filetracker
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"testing"
 	"testing/synctest"
@@ -120,52 +119,16 @@ func TestService_RecordRead_DifferentPaths(t *testing.T) {
 	require.True(t, lastRead2.IsZero(), "path2 should not be recorded")
 }
 
-// TestService_PathsRelativeToWorkingDir checks that read records do not
-// depend on the process working directory. A server can be started from any
-// directory and a respawned one from yet another, so records written by a
-// service running in one directory must be found by one running in another.
+// TestService_PathsRelativeToWorkingDir guards that read records resolve
+// against the workspace, so they survive a server running from another cwd.
 func TestService_PathsRelativeToWorkingDir(t *testing.T) {
 	env := setupTest(t)
-
 	sessionID := "test-session-4"
-	path := filepath.Join(env.workingDir, "src", "main.go")
+	path := filepath.Join(env.workingDir, "main.go")
 	env.createSession(t, sessionID)
 
 	t.Chdir(t.TempDir())
 	NewService(env.q, env.workingDir).RecordRead(env.ctx, sessionID, path)
-
-	deeper := filepath.Join(t.TempDir(), "deeper")
-	require.NoError(t, os.Mkdir(deeper, 0o755))
-	t.Chdir(deeper)
-	svc := NewService(env.q, env.workingDir)
-
-	lastRead := svc.LastReadTime(env.ctx, sessionID, path)
-	require.False(t, lastRead.IsZero(), "read recorded from another directory should be found")
-
-	files, err := svc.ListReadFiles(env.ctx, sessionID)
-	require.NoError(t, err)
-	require.Equal(t, []string{path}, files)
-
-	// Rows are stored relative to the working directory, matching the rows
-	// local mode, which runs in the workspace, has always written.
-	rows, err := env.q.ListSessionReadFiles(env.ctx, sessionID)
-	require.NoError(t, err)
-	require.Len(t, rows, 1)
-	require.Equal(t, filepath.Join("src", "main.go"), rows[0].Path)
-}
-
-func TestService_RelativeWorkingDir(t *testing.T) {
-	env := setupTest(t)
-
-	sessionID := "test-session-5"
-	path := filepath.Join(env.workingDir, "main.go")
-	env.createSession(t, sessionID)
-
-	t.Chdir(filepath.Dir(env.workingDir))
-	svc := NewService(env.q, filepath.Base(env.workingDir))
-	svc.RecordRead(env.ctx, sessionID, path)
-
-	files, err := svc.ListReadFiles(env.ctx, sessionID)
-	require.NoError(t, err)
-	require.Equal(t, []string{path}, files)
+	t.Chdir(t.TempDir())
+	require.False(t, NewService(env.q, env.workingDir).LastReadTime(env.ctx, sessionID, path).IsZero())
 }

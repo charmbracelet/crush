@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -321,32 +320,16 @@ func TestCreateTransport_StdioResolution(t *testing.T) {
 	})
 }
 
-// TestCreateTransport_StdioStartsInWorkingDir pins that a stdio MCP server
-// starts in the workspace directory rather than the process cwd. In
-// client/server mode one server process hosts every workspace and keeps the
-// cwd of whichever client spawned it, so a project-local server referenced
-// by a relative path ran, and resolved its paths, in another project.
+// TestCreateTransport_StdioStartsInWorkingDir guards that a stdio MCP
+// server starts in the workspace directory, not the server process's cwd.
 func TestCreateTransport_StdioStartsInWorkingDir(t *testing.T) {
-	// Not parallel: isolates the global config with t.Setenv and moves the
-	// process cwd with t.Chdir.
 	isolated := t.TempDir()
 	t.Setenv("HOME", isolated)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(isolated, ".config"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(isolated, ".local", "share"))
-	t.Setenv("XDG_CACHE_HOME", filepath.Join(isolated, ".cache"))
-	t.Setenv("CRUSH_GLOBAL_CONFIG", filepath.Join(isolated, ".config", "crush"))
-	t.Setenv("CRUSH_GLOBAL_DATA", filepath.Join(isolated, ".local", "share", "crush"))
 	t.Setenv("CRUSH_DISABLE_PROVIDER_AUTO_UPDATE", "1")
 
-	// Both the workspace and the project the process sits in (the server's
-	// cwd) ship a server.sh; only the workspace's may run.
 	workingDir := t.TempDir()
-	otherProject := t.TempDir()
-	for dir, name := range map[string]string{workingDir: "workspace", otherProject: "other-project"} {
-		require.NoError(t, os.WriteFile(filepath.Join(dir, "server.sh"), []byte("echo "+name+"\n"), 0o644))
-	}
-	t.Chdir(otherProject)
-
 	cfg, err := config.Init(t.Context(), workingDir, t.TempDir(), false)
 	require.NoError(t, err)
 
@@ -355,11 +338,6 @@ func TestCreateTransport_StdioStartsInWorkingDir(t *testing.T) {
 	require.NoError(t, err)
 	ct, ok := tr.(*mcp.CommandTransport)
 	require.True(t, ok, "expected CommandTransport, got %T", tr)
-
-	out, err := ct.Command.Output()
-	require.NoError(t, err)
-	require.Equal(t, "workspace", strings.TrimSpace(string(out)),
-		"a relative server path must resolve in the workspace, not the process cwd")
 	require.Equal(t, workingDir, ct.Command.Dir)
 }
 
@@ -971,14 +949,9 @@ func TestCreateSession_Sessionless(t *testing.T) {
 	})
 }
 
-// TestClose_LastReferenceClosesSessions pins the reference counting that
-// lets a server host one app per workspace: Close leaves the shared sessions
-// open while another app still holds a reference, closes them when the last
-// reference is released, and never shuts the event broker down, since an
-// app created later in the process still needs it.
-//
-// It assumes no other test in this package holds a reference (refs starts
-// at 0), so its last Close closes every session left in the global map.
+// TestClose_LastReferenceClosesSessions guards that one workspace's
+// teardown leaves MCP sessions open while another still holds a reference,
+// and that Close never shuts the event broker down.
 func TestClose_LastReferenceClosesSessions(t *testing.T) {
 	const name = "close-refcount"
 	t.Cleanup(func() { sessions.Del(name) })

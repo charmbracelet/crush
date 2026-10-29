@@ -38,6 +38,19 @@ func (b *Backend) GrantPermission(workspaceID string, req proto.PermissionGrant)
 	}
 }
 
+// AutoApproveSession grants every permission request the session raises
+// from now on without prompting, as a non-interactive run does for its own
+// session. Other sessions keep prompting.
+func (b *Backend) AutoApproveSession(workspaceID, sessionID string) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+
+	ws.Permissions.AutoApproveSession(sessionID)
+	return nil
+}
+
 // SetPermissionsSkip sets whether permission prompts are skipped.
 func (b *Backend) SetPermissionsSkip(workspaceID string, skip bool) error {
 	ws, err := b.GetWorkspace(workspaceID)

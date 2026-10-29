@@ -608,6 +608,28 @@ func TestPathDedupe_ParallelCreates(t *testing.T) {
 	require.Contains(t, ws.clients, cidB)
 }
 
+// TestPathDedupe_CaseVariant guards against one directory opened under
+// two spellings that differ only in case becoming two workspaces, the
+// second failing on the data-directory lock the first holds.
+func TestPathDedupe_CaseVariant(t *testing.T) {
+	xdgIsolated(t)
+	t.Setenv("CRUSH_DISABLE_PROVIDER_AUTO_UPDATE", "1")
+	root := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(root, "Proj"), 0o755))
+	if _, err := os.Stat(filepath.Join(root, "proj")); err != nil {
+		t.Skip("case-sensitive filesystem")
+	}
+	b := New(context.Background(), nil, func() {})
+	b.SetCreateGrace(2 * time.Second)
+	t.Cleanup(func() { drainBackend(t, b) })
+
+	wsA, _, err := b.CreateWorkspace(protoWS(filepath.Join(root, "Proj"), "", uuid.NewString()))
+	require.NoError(t, err)
+	wsB, _, err := b.CreateWorkspace(protoWS(filepath.Join(root, "proj"), "", uuid.NewString()))
+	require.NoError(t, err)
+	require.Equal(t, wsA.ID, wsB.ID)
+}
+
 // TestCreateWorkspace_RejectsBadClientID covers the 400 path from the
 // backend side.
 func TestCreateWorkspace_RejectsBadClientID(t *testing.T) {
@@ -1846,4 +1868,37 @@ func TestShutdownWorkspaces_GivesUpAtDeadline(t *testing.T) {
 	defer cancel()
 	require.ErrorIs(t, b.ShutdownWorkspaces(ctx), context.DeadlineExceeded)
 	require.Zero(t, b.workspaces.Len())
+}
+
+// TestShutdownWorkspaces_WaitsForTeardownInFlight guards against a stop
+// returning while a workspace that already left the index is still being
+// torn down by its expired detach grace.
+func TestShutdownWorkspaces_WaitsForTeardownInFlight(t *testing.T) {
+	t.Parallel()
+	b, _ := newTestBackend(t)
+	b.SetDetachGrace(10 * time.Millisecond)
+	b.SetIdleShutdownDelay(time.Hour)
+	ws, _ := insertTestWorkspace(t, b, "/tmp/tearing-down")
+	started, release := make(chan struct{}), make(chan struct{})
+	open := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(open)
+	var finished atomic.Bool
+	ws.shutdownFn = func() {
+		close(started)
+		<-release
+		finished.Store(true)
+	}
+
+	cid := newClientID(t)
+	b.registerClient(ws, cid)
+	require.NoError(t, b.AttachClient(ws.ID, cid))
+	b.DetachClient(ws.ID, cid)
+	<-started
+
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	require.ErrorIs(t, b.ShutdownWorkspaces(ctx), context.DeadlineExceeded)
+	open()
+	require.NoError(t, b.ShutdownWorkspaces(t.Context()))
+	require.True(t, finished.Load(), "the stop returned before the teardown finished")
 }

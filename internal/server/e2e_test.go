@@ -626,6 +626,66 @@ func TestE2E_PermissionScopedToViewingClients(t *testing.T) {
 	}
 }
 
+// TestE2E_UnansweredPromptDoesNotBlockOtherSessions guards against an
+// unanswered prompt in one session holding back another session's prompt.
+func TestE2E_UnansweredPromptDoesNotBlockOtherSessions(t *testing.T) {
+	t.Parallel()
+	h := newE2EHarness(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	t.Cleanup(cancel)
+
+	var wg sync.WaitGroup
+	t.Cleanup(func() { cancel(); wg.Wait() })
+	for i, session := range []string{"s-a", "s-b"} {
+		cid := uuid.New().String()
+		evc, cancelSSE := h.subscribeSSE(t, ctx, h.workspace.ID, cid)
+		t.Cleanup(cancelSSE)
+		h.waitForAttached(t, i+1)
+		h.setCurrentSession(t, ctx, h.workspace.ID, cid, session)
+		wg.Go(func() {
+			_, _ = h.app.Permissions.Request(ctx, permission.CreatePermissionRequest{
+				SessionID:  session,
+				ToolCallID: "tc-" + session,
+				ToolName:   "bash",
+				Action:     "execute",
+				Path:       h.workspace.Path,
+			})
+		})
+		// Session A's prompt is left unanswered.
+		_, ok := drainUntil(ctx, evc, func(e pubsub.Event[proto.PermissionRequest]) bool {
+			return e.Payload.ToolCallID == "tc-"+session
+		})
+		require.True(t, ok, "session %s's prompt never reached its client", session)
+	}
+}
+
+// TestE2E_AutoApproveSession guards the endpoint `crush run` uses to grant
+// its own session's permission requests without a prompt.
+func TestE2E_AutoApproveSession(t *testing.T) {
+	t.Parallel()
+	h := newE2EHarness(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	t.Cleanup(cancel)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		h.httpSrv.URL+"/v1/workspaces/"+h.workspace.ID+"/sessions/s-run/auto-approve", nil)
+	require.NoError(t, err)
+	resp, err := h.httpSrv.Client().Do(req)
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	granted, err := h.app.Permissions.Request(ctx, permission.CreatePermissionRequest{
+		SessionID:  "s-run",
+		ToolCallID: "tc-run",
+		ToolName:   "write",
+		Action:     "write",
+		Path:       h.workspace.Path,
+	})
+	require.NoError(t, err)
+	require.True(t, granted)
+}
+
 // TestE2E_KillingClientASSEDoesNotBreakClientB covers PLAN item 6
 // scenario 3: terminating client A's SSE stream does not affect
 // client B's stream; client B continues to receive events.

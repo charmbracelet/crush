@@ -8,9 +8,11 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
+	"github.com/charmbracelet/crush/internal/dirid"
 	"github.com/pressly/goose/v3"
 )
 
@@ -28,6 +30,12 @@ var (
 	gooseInitOnce sync.Once
 	gooseInitErr  error
 )
+
+// dsnPathReplacer escapes the characters that SQLite's URI parser treats
+// specially in the path of a "file:" DSN: "%" starts an escape, "?" the
+// query string and "#" the fragment. Unescaped, a data directory such as
+// "C#app" would open a database file named "C" next to the project.
+var dsnPathReplacer = strings.NewReplacer("%", "%25", "?", "%3F", "#", "%23")
 
 //go:embed migrations/*.sql
 var FS embed.FS
@@ -102,7 +110,7 @@ func Connect(ctx context.Context, dataDir string, opts ...ConnectOption) (*sql.D
 	poolMu.Lock()
 	defer poolMu.Unlock()
 
-	if entry, ok := pool[absPath]; ok {
+	if _, entry, ok := lookupLocked(absPath); ok {
 		entry.refCount++
 		return entry.db, nil
 	}
@@ -184,7 +192,7 @@ func Release(dataDir string) error {
 	poolMu.Lock()
 	defer poolMu.Unlock()
 
-	entry, ok := pool[absPath]
+	key, entry, ok := lookupLocked(absPath)
 	if !ok {
 		return nil
 	}
@@ -194,12 +202,39 @@ func Release(dataDir string) error {
 		return nil
 	}
 
-	delete(pool, absPath)
+	delete(pool, key)
 	closeErr := entry.db.Close()
 	if entry.lock != nil {
 		entry.lock.release()
 	}
 	return closeErr
+}
+
+// lookupLocked returns the pool entry for the database at absPath and the
+// key it is stored under. On a miss it falls back to an entry in the same
+// directory: filepath.Abs leaves some spellings of one directory apart (a
+// symlinked parent, another case on a case-insensitive filesystem, a
+// Windows junction or UNC path), and a second entry would take the
+// data-dir lock again and fail against this very process. Both identities
+// are read afresh, so an entry matches only the directory that is at its
+// path now: one whose directory was removed cannot match an unrelated
+// directory that reuses its inode, though it does match a directory later
+// recreated at its path, as an exact key hit would. poolMu must be held.
+func lookupLocked(absPath string) (string, *connEntry, bool) {
+	if entry, ok := pool[absPath]; ok {
+		return absPath, entry, true
+	}
+	dir, ok := dirid.Of(filepath.Dir(absPath))
+	if !ok {
+		return "", nil, false
+	}
+	for key, entry := range pool {
+		other, ok := dirid.Of(filepath.Dir(key))
+		if ok && dir.Same(other) {
+			return key, entry, true
+		}
+	}
+	return "", nil, false
 }
 
 // ResetPool closes all pooled connections and clears the pool. This is

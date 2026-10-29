@@ -709,6 +709,21 @@ func (c *Client) GrantPermission(ctx context.Context, id string, req proto.Permi
 	return resp.Resolved, nil
 }
 
+// AutoApproveSession asks the server to grant every permission request
+// the session raises without prompting. An error matching [ErrNotFound]
+// means the server does not know the workspace or predates the endpoint.
+func (c *Client) AutoApproveSession(ctx context.Context, id string, sessionID string) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/sessions/%s/auto-approve", id, sessionID), nil, nil, nil)
+	if err != nil {
+		return fmt.Errorf("failed to auto-approve session: %w", err)
+	}
+	defer rsp.Body.Close()
+	if err := checkStatus(rsp); err != nil {
+		return fmt.Errorf("failed to auto-approve session: %w", err)
+	}
+	return nil
+}
+
 // AnswerQuestionBatch submits answers for a batch question on a
 // workspace. Returns true if this call resolved the pending
 // request, false if already resolved by another caller.
@@ -728,11 +743,11 @@ func (c *Client) AnswerQuestionBatch(ctx context.Context, id string, req proto.Q
 	return resp.Resolved, nil
 }
 
-// CancelQuestionBatch cancels the pending question batch on a
-// workspace. Returns true if a question was cancelled, false if
-// none was pending.
-func (c *Client) CancelQuestionBatch(ctx context.Context, id string) (bool, error) {
-	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/questions/cancel", id), nil, nil, http.Header{})
+// CancelQuestionBatch cancels the pending question batch with the
+// given ID on a workspace. Returns true if a question was cancelled,
+// false if none was pending.
+func (c *Client) CancelQuestionBatch(ctx context.Context, id, batchID string) (bool, error) {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/questions/cancel", id), nil, jsonBody(proto.QuestionCancel{BatchRequestID: batchID}), http.Header{"Content-Type": []string{"application/json"}})
 	if err != nil {
 		return false, fmt.Errorf("failed to cancel question batch: %w", err)
 	}

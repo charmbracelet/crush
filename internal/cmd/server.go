@@ -96,7 +96,7 @@ var serverCmd = &cobra.Command{
 // awaitStop blocks until the root context is cancelled by a termination
 // signal, returning nil, or the server stops on its own, returning its
 // error. A server has no terminal to lose, so SIGHUP reloads config here
-// instead of stopping it.
+// instead of stopping it, and is ignored once a stop has begun.
 func awaitStop(ctx context.Context, srv *server.Server, errch <-chan error) error {
 	signal.Reset(syscall.SIGHUP)
 	hupch := make(chan os.Signal, 1)
@@ -113,6 +113,10 @@ func awaitStop(ctx context.Context, srv *server.Server, errch <-chan error) erro
 			}
 			cancel()
 		case <-ctx.Done():
+			// On its own, the deferred Stop would give SIGHUP back its
+			// default action, and a late one (the terminal closing after
+			// Ctrl+C, say) would kill the process mid-shutdown.
+			signal.Ignore(syscall.SIGHUP)
 			slog.Info("Received termination signal...")
 			return nil
 		case err := <-errch:

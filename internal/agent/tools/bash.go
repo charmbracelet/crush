@@ -195,7 +195,10 @@ func blockFuncs() []shell.BlockFunc {
 	}
 }
 
-func NewBashTool(permissions permission.Service, workingDir, spillDir string, attribution *config.Attribution, modelID string, maxBackgroundJobs int) fantasy.AgentTool {
+// NewBashTool returns the bash tool. Every shell it starts is tagged with
+// shellOwner, so the owner can stop them with
+// [shell.BackgroundShellManager.KillOwned].
+func NewBashTool(permissions permission.Service, workingDir, spillDir string, attribution *config.Attribution, modelID string, maxBackgroundJobs int, shellOwner any) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		BashToolName,
 		string(bashDescription(attribution, modelID)),
@@ -251,7 +254,7 @@ func NewBashTool(permissions permission.Service, workingDir, spillDir string, at
 				startTime := time.Now()
 				bgManager := shell.GetBackgroundShellManager()
 				// Use background context so it continues after tool returns
-				bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(), params.Command, params.Description, maxBackgroundJobs)
+				bgShell, err := bgManager.Start(context.Background(), shellOwner, execWorkingDir, blockFuncs(), params.Command, params.Description, maxBackgroundJobs)
 				if err != nil {
 					return fantasy.NewTextErrorResponse("Failed to start background shell: " + err.Error()), nil
 				}
@@ -305,7 +308,7 @@ func NewBashTool(permissions permission.Service, workingDir, spillDir string, at
 
 			// Start with detached context so it can survive if moved to background
 			bgManager := shell.GetBackgroundShellManager()
-			bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(), params.Command, params.Description, maxBackgroundJobs)
+			bgShell, err := bgManager.Start(context.Background(), shellOwner, execWorkingDir, blockFuncs(), params.Command, params.Description, maxBackgroundJobs)
 			if err != nil {
 				return fantasy.NewTextErrorResponse("Failed to start shell: " + err.Error()), nil
 			}

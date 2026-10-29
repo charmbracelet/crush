@@ -1,6 +1,7 @@
 package question
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -25,8 +26,7 @@ func TestPending(t *testing.T) {
 	t.Parallel()
 	svc := NewService()
 
-	_, ok := svc.Pending()
-	assert.False(t, ok, "nothing pending yet")
+	assert.Empty(t, svc.Pending(), "nothing pending yet")
 
 	done := make(chan []Answer, 1)
 	go func() {
@@ -34,22 +34,21 @@ func TestPending(t *testing.T) {
 		done <- answers
 	}()
 
-	var pending Request
+	var pending []Request
 	require.Eventually(t, func() bool {
-		pending, ok = svc.Pending()
-		return ok
+		pending = svc.Pending()
+		return len(pending) == 1
 	}, 2*time.Second, 5*time.Millisecond, "question must be pending")
-	require.Equal(t, "s-ask", pending.SessionID)
-	require.NotEmpty(t, pending.ID)
-	require.Len(t, pending.Questions, 1)
+	require.Equal(t, "s-ask", pending[0].SessionID)
+	require.NotEmpty(t, pending[0].ID)
+	require.Len(t, pending[0].Questions, 1)
 
-	require.True(t, svc.Answer([]Answer{{QuestionID: pending.Questions[0].ID, FillInText: "ship it"}}))
+	require.True(t, svc.Answer(pending[0].ID, []Answer{{QuestionID: pending[0].Questions[0].ID, FillInText: "ship it"}}))
 	answers := <-done
 	require.Len(t, answers, 1)
 	assert.Equal(t, "ship it", answers[0].FillInText)
 
-	_, ok = svc.Pending()
-	assert.False(t, ok, "answered question must no longer be pending")
+	assert.Empty(t, svc.Pending(), "answered question must no longer be pending")
 }
 
 // TestAnswerNotificationCarriesSessionID verifies that the resolution
@@ -67,14 +66,11 @@ func TestAnswerNotificationCarriesSessionID(t *testing.T) {
 		_, _ = svc.Ask(t.Context(), freeTextRequest("s-answer"))
 	}()
 
-	var pending Request
-	require.Eventually(t, func() bool {
-		var ok bool
-		pending, ok = svc.Pending()
-		return ok
-	}, 2*time.Second, 5*time.Millisecond)
+	require.Eventually(t, func() bool { return len(svc.Pending()) == 1 },
+		2*time.Second, 5*time.Millisecond)
+	pending := svc.Pending()[0]
 
-	require.True(t, svc.Answer([]Answer{{QuestionID: pending.Questions[0].ID, FillInText: "yes"}}))
+	require.True(t, svc.Answer(pending.ID, []Answer{{QuestionID: pending.Questions[0].ID, FillInText: "yes"}}))
 	<-done
 
 	ev := <-notifications
@@ -96,17 +92,41 @@ func TestCancelNotificationCarriesSessionID(t *testing.T) {
 		done <- err
 	}()
 
-	var pending Request
-	require.Eventually(t, func() bool {
-		var ok bool
-		pending, ok = svc.Pending()
-		return ok
-	}, 2*time.Second, 5*time.Millisecond)
+	require.Eventually(t, func() bool { return len(svc.Pending()) == 1 },
+		2*time.Second, 5*time.Millisecond)
+	pending := svc.Pending()[0]
 
-	require.True(t, svc.Cancel())
+	require.True(t, svc.Cancel(pending.ID))
 	require.ErrorIs(t, <-done, ErrCancelled)
 
 	ev := <-notifications
 	assert.Equal(t, pending.ID, ev.Payload.BatchID)
 	assert.Equal(t, "s-cancel", ev.Payload.SessionID)
+}
+
+// TestAsk_ConcurrentBatchesAreRoutedByID guards that answers and cancels
+// resolve the batch they name, not whichever batch was asked last.
+func TestAsk_ConcurrentBatchesAreRoutedByID(t *testing.T) {
+	t.Parallel()
+	svc := NewService()
+	ask := func(id string) <-chan error {
+		errc := make(chan error, 1)
+		go func() {
+			req := freeTextRequest("s-" + id)
+			req.ID = id
+			_, err := svc.Ask(t.Context(), req)
+			errc <- err
+		}()
+		require.Eventually(t, func() bool {
+			return slices.ContainsFunc(svc.Pending(), func(r Request) bool { return r.ID == id })
+		}, 2*time.Second, 5*time.Millisecond)
+		return errc
+	}
+	errA, errB := ask("A"), ask("B")
+
+	require.True(t, svc.Cancel("A"))
+	require.Equal(t, "B", svc.Pending()[0].ID)
+	require.ErrorIs(t, <-errA, ErrCancelled)
+	require.True(t, svc.Answer("B", []Answer{{QuestionID: svc.Pending()[0].Questions[0].ID}}))
+	require.NoError(t, <-errB)
 }

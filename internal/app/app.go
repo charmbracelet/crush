@@ -126,7 +126,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		History:     files,
 		Permissions: permission.NewPermissionService(store.WorkingDir(), skipPermissionsRequests, allowedTools, permissionHooks{hookRunner}),
 		Questions:   question.NewService(),
-		FileTracker: filetracker.NewService(q),
+		FileTracker: filetracker.NewService(q, store.WorkingDir()),
 		LSPManager:  lsp.NewManager(store),
 		Skills:      skillsMgr,
 
@@ -175,6 +175,10 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	if err != nil {
 		slog.Warn("Failed to list disabled MCP overrides; starting them anyway", "error", err)
 	}
+	// MCP clients are process-global and a server hosts one app per
+	// workspace, so hold a reference that keeps another app's shutdown from
+	// closing them. The mcp.Close cleanup below releases it.
+	mcp.Acquire()
 	go mcp.Initialize(ctx, app.Permissions, store, forceStart, localDisabled)
 
 	// Start herdr integration when running inside a herdr pane.
@@ -201,6 +205,10 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		return app, nil
 	}
 	if err := app.InitCoderAgent(ctx); err != nil {
+		// A failed app is never shut down, so release its MCP reference.
+		closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = mcp.Close(closeCtx)
+		cancel()
 		return nil, fmt.Errorf("failed to initialize coder agent: %w", err)
 	}
 	go app.refreshDiscoveredModels(ctx, app.AgentCoordinator)
@@ -253,6 +261,13 @@ func (app *App) Store() *config.ConfigStore {
 // Each caller receives its own channel; all callers receive every event.
 func (app *App) Events(ctx context.Context) <-chan pubsub.Event[tea.Msg] {
 	return app.events.Subscribe(ctx)
+}
+
+// EventsWithOverflow is like [App.Events], but also returns a channel that
+// is closed the first time an event is dropped for this caller because it
+// fell behind. See [pubsub.Broker.SubscribeWithOverflow].
+func (app *App) EventsWithOverflow(ctx context.Context) (<-chan pubsub.Event[tea.Msg], <-chan struct{}) {
+	return app.events.SubscribeWithOverflow(ctx)
 }
 
 // SendEvent publishes a message to all event subscribers.
@@ -856,6 +871,7 @@ func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 		Skills:      app.Skills,
 		HookRunner:  app.hookRunner,
 		Interactive: interactive,
+		ShellOwner:  app,
 	})
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)
@@ -931,9 +947,11 @@ func (app *App) Shutdown() {
 		event.AppExited()
 	})
 
-	// Kill all background shells.
+	// Kill the background shells this app started. The shell manager is
+	// shared by the whole process, and the server hosts one app per
+	// workspace, so other workspaces' shells must keep running.
 	wg.Go(func() {
-		shell.GetBackgroundShellManager().KillAll(shutdownCtx)
+		shell.GetBackgroundShellManager().KillOwned(shutdownCtx, app)
 	})
 
 	// Close herdr client to stop its background writer.

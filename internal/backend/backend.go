@@ -21,9 +21,10 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/db"
+	"github.com/charmbracelet/crush/internal/dirid"
+	"github.com/charmbracelet/crush/internal/projects"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/skills"
-	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/google/uuid"
 )
@@ -60,6 +61,8 @@ var DefaultCreateGrace = 30 * time.Second
 // new client can attach to — or create a workspace on — a server that is
 // already tearing down, and then observe its coder agent as "offline".
 // Any workspace create within the window cancels the pending shutdown.
+// A server that never hosts a workspace waits it out from the moment it
+// starts listening (see [Backend.ArmIdleShutdown]).
 // Overridable via CRUSH_SERVER_IDLE_TIMEOUT (seconds; 0 restores the
 // old shut-down-immediately behavior).
 var DefaultIdleShutdownDelay = 60 * time.Second
@@ -118,6 +121,13 @@ type Backend struct {
 	// be handed a workspace on a process that is already leaving.
 	// [Backend.ShutdownWorkspaces] sets it too, for an external stop.
 	closing bool
+	// teardowns counts the workspace shutdowns [Backend.teardown] has taken
+	// over but not finished. Their workspaces have left the map, so
+	// [Backend.ShutdownWorkspaces] waits on this too rather than let the
+	// process exit halfway through one. Add happens under mu right after a
+	// workspace is unregistered, which cannot happen once ShutdownWorkspaces
+	// has latched closing and emptied the map, so no Add races its Wait.
+	teardowns sync.WaitGroup
 	// retired holds the IDs of clients that announced their exit via
 	// RetireClient. Creates from a retired client are refused, which is what
 	// lets a client release a workspace whose ID it never learned.
@@ -190,6 +200,12 @@ type Workspace struct {
 	// Backend.pathIndex. It is filepath.EvalSymlinks(filepath.Abs(Path))
 	// with fallback to the cleaned absolute path.
 	resolvedPath string
+	// dirID identifies the directory found at resolvedPath when the
+	// workspace was created, or is the zero (unknown) ID. It dedupes
+	// spellings of the directory that resolvedPath does not unify. It
+	// is not re-validated: this assumes the directory outlives the
+	// workspace, so its inode or file ID is not reused by another one.
+	dirID dirid.ID
 
 	// ctx is the workspace-scoped run context. It is derived from
 	// the backend context in CreateWorkspace and lives for the
@@ -207,6 +223,12 @@ type Workspace struct {
 	runMu   sync.Mutex
 	closing bool
 	runWG   sync.WaitGroup
+
+	// agentMu guards the embedded App.AgentCoordinator once the workspace
+	// is published. Every client of the workspace shares that coordinator,
+	// so it is only created while missing ([Workspace.initAgent]) and never
+	// replaced; readers take it through [Workspace.Coordinator].
+	agentMu sync.RWMutex
 
 	// clientsMu guards clients. It is held only briefly (no IO).
 	clientsMu sync.Mutex
@@ -273,8 +295,8 @@ func (w *Workspace) Shutdown() {
 	if w.cancel != nil {
 		w.cancel()
 	}
-	if w.App != nil && w.AgentCoordinator != nil {
-		w.AgentCoordinator.CancelAll()
+	if coord := w.Coordinator(); coord != nil {
+		coord.CancelAll()
 	}
 	w.runWG.Wait()
 	if w.App != nil {
@@ -365,8 +387,8 @@ func (b *Backend) ListWorkspaces() []proto.Workspace {
 }
 
 // CreateWorkspace initializes a new workspace from the given
-// parameters, or returns an existing workspace if one already exists at
-// the same resolved path (first-wins semantics).
+// parameters, or returns an existing workspace if one already exists for
+// the same directory (first-wins semantics).
 //
 // args.ClientID must be a valid UUID identifying the calling client;
 // the resulting workspace registers a creation hold on behalf of that
@@ -385,6 +407,7 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	if err != nil {
 		return nil, proto.Workspace{}, fmt.Errorf("failed to resolve workspace path: %w", err)
 	}
+	dirID, _ := dirid.Of(key)
 
 	b.mu.Lock()
 	if err := b.admitLocked(clientID); err != nil {
@@ -394,7 +417,7 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	// A client is arriving: cancel any pending idle shutdown so we never
 	// hand back a workspace on a server that is about to tear itself down.
 	b.cancelShutdownLocked()
-	if existingID, ok := b.pathIndex[key]; ok {
+	if existingID, ok := b.lookupLocked(key, dirID); ok {
 		if ws, found := b.workspaces.Get(existingID); found {
 			// Hold b.mu while registering: teardown also
 			// acquires b.mu before tearing the workspace
@@ -453,6 +476,13 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 		return nil, proto.Workspace{}, fmt.Errorf("failed to create data directory: %w", err)
 	}
 
+	// Record the project as local mode does, so `crush projects` and
+	// `crush stats --all` know about it. The list is only bookkeeping, so
+	// failing to update it must not keep the workspace from opening.
+	if err := projects.Register(args.Path, cfg.Config().Options.DataDirectory); err != nil {
+		slog.Warn("Failed to register project", "path", args.Path, "error", err)
+	}
+
 	conn, err := db.Connect(b.ctx, cfg.Config().Options.DataDirectory, db.WithDataDirLock(true))
 	if err != nil {
 		return nil, proto.Workspace{}, fmt.Errorf("failed to connect to database: %w", err)
@@ -484,10 +514,12 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 		Env:          args.Env,
 		Skills:       skillsMgr,
 		resolvedPath: key,
+		dirID:        dirID,
 		ctx:          wsCtx,
 		cancel:       wsCancel,
 		clients:      make(map[string]*clientState),
 	}
+	scopePermissionPrompts(ws)
 
 	b.mu.Lock()
 	// Re-check admission: the client may have retired while the slow
@@ -501,7 +533,7 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	}
 	// Re-check the index under the lock: a concurrent caller may have
 	// won the race between the initial unlock and here.
-	if existingID, ok := b.pathIndex[key]; ok {
+	if existingID, ok := b.lookupLocked(key, dirID); ok {
 		if existing, found := b.workspaces.Get(existingID); found {
 			// Register under b.mu so teardown cannot run
 			// between lookup and registerClient. Lock order
@@ -527,16 +559,14 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	b.registerClient(ws, clientID)
 	b.mu.Unlock()
 
+	// Clients warn their users themselves, from the version every
+	// returned workspace carries.
 	if args.Version != "" && args.Version != version.Version {
 		slog.Warn(
 			"Client/server version mismatch",
 			"client", args.Version,
 			"server", version.Version,
 		)
-		appWorkspace.SendEvent(util.NewWarnMsg(fmt.Sprintf(
-			"Server version %q differs from client version %q. Consider restarting the server.",
-			version.Version, args.Version,
-		)))
 	}
 
 	return ws, workspaceToProto(ws), nil
@@ -852,6 +882,9 @@ func (b *Backend) teardown(ws *Workspace) {
 		b.mu.Unlock()
 		return
 	}
+	// This call now owns the shutdown; count it while mu is still held so
+	// a concurrent ShutdownWorkspaces waits for it (see b.teardowns).
+	b.teardowns.Add(1)
 	// Arm (or, with lingering disabled, request) the idle shutdown. It
 	// only proceeds once there is genuinely nothing left: no live
 	// workspaces AND no create in flight. Deferring via the linger lets a
@@ -860,12 +893,36 @@ func (b *Backend) teardown(ws *Workspace) {
 	shutdownNow := b.scheduleShutdownIfIdleLocked()
 	b.mu.Unlock()
 
-	ws.invokeShutdown()
+	// Done is deferred so a shutdown that panics, which the HTTP layer
+	// recovers from, cannot leave a server stop waiting on it.
+	func() {
+		defer b.teardowns.Done()
+		ws.invokeShutdown()
+	}()
 
 	if shutdownNow {
 		slog.Info("Last workspace removed, shutting down server...")
 		b.shutdownFn()
 	}
+}
+
+// lookupLocked returns the ID of the workspace registered for the
+// directory at key. It matches the resolved path first and then, when dir
+// is known, the directory itself: EvalSymlinks leaves some spellings of
+// one directory apart (another case on a case-insensitive filesystem; on
+// Windows a junction, subst drive or UNC path), and each of them must join
+// the same workspace rather than open its data directory a second time.
+// It does no IO and must be called with b.mu held.
+func (b *Backend) lookupLocked(key string, dir dirid.ID) (string, bool) {
+	if id, ok := b.pathIndex[key]; ok {
+		return id, true
+	}
+	for id, ws := range b.workspaces.Seq2() {
+		if dir.Same(ws.dirID) {
+			return id, true
+		}
+	}
+	return "", false
 }
 
 // unregisterLocked removes ws from the backend and reports whether this
@@ -909,6 +966,33 @@ func (b *Backend) scheduleShutdownIfIdleLocked() (shutdownNow bool) {
 		b.shutdownTimer = time.AfterFunc(b.lingerDelay, b.maybeShutdown)
 	}
 	return false
+}
+
+// ArmIdleShutdown starts the idle-shutdown timer on a server that is not
+// hosting anything yet. It is meant to be called once the server is
+// reachable. The timer is otherwise armed only when a workspace or a
+// create goes away, so a server whose spawning client never got as far as
+// creating a workspace (it was interrupted, or failed first) would run
+// forever. The first create cancels the timer, and [Backend.maybeShutdown]
+// re-checks idleness when it fires.
+//
+// With lingering disabled (lingerDelay <= 0) a fresh server would exit
+// before its client could create anything, so it waits out the create
+// grace instead.
+func (b *Backend) ArmIdleShutdown() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.shutdownFn == nil || b.closing || b.shutdownTimer != nil {
+		return
+	}
+	if b.workspaces.Len() != 0 || b.pending != 0 {
+		return
+	}
+	delay := b.lingerDelay
+	if delay <= 0 {
+		delay = b.createGrace
+	}
+	b.shutdownTimer = time.AfterFunc(delay, b.maybeShutdown)
 }
 
 // cancelShutdownLocked stops any armed idle-shutdown timer. It must be
@@ -1074,7 +1158,9 @@ func (b *Backend) Config() *config.ConfigStore {
 
 // ShutdownWorkspaces refuses new creates and tears down every hosted
 // workspace in parallel, so interrupted work is recorded before exit. It
-// returns ctx's error, naming the stragglers in the log, if ctx ends first.
+// also waits for teardowns already under way, such as one started by an
+// expired detach grace. It returns ctx's error, naming the stragglers in
+// the log, if ctx ends first.
 func (b *Backend) ShutdownWorkspaces(ctx context.Context) error {
 	b.mu.Lock()
 	b.closing = true
@@ -1100,6 +1186,7 @@ func (b *Backend) ShutdownWorkspaces(ctx context.Context) error {
 	done := make(chan struct{})
 	go func() {
 		wg.Wait()
+		b.teardowns.Wait()
 		close(done)
 	}()
 
@@ -1141,6 +1228,14 @@ func (b *Backend) ShutdownIfIdle() bool {
 		fn()
 	}
 	return true
+}
+
+// Closing reports whether the server has committed to shutting down. The
+// decision is final: once it reports true, it always will.
+func (b *Backend) Closing() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.closing
 }
 
 // resolveWorkspaceKey returns a stable canonical form of path suitable

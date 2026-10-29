@@ -423,6 +423,25 @@ func TestConfig_setDefaults(t *testing.T) {
 	})
 }
 
+// TestLoad_WalkLimitsFollowWorkingDir guards that the git check behind the
+// non-git walk limits looks at the workspace, not the process cwd.
+func TestLoad_WalkLimitsFollowWorkingDir(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	plain, _ := isolateLoadEnv(t)
+	t.Setenv("CRUSH_DISABLE_PROVIDER_AUTO_UPDATE", "1")
+	repo := t.TempDir()
+	gitInit := exec.CommandContext(t.Context(), "git", "init", "-q")
+	gitInit.Dir = repo
+	require.NoError(t, gitInit.Run())
+
+	t.Chdir(plain)
+	require.Nil(t, loadIsolated(t, repo).Config().Tools.Ls.MaxDepth)
+	t.Chdir(repo)
+	require.NotNil(t, loadIsolated(t, plain).Config().Tools.Ls.MaxDepth)
+}
+
 func TestConfig_configureProviders(t *testing.T) {
 	knownProviders := []catwalk.Provider{
 		{

@@ -100,16 +100,26 @@ type Service interface {
 	// already been resolved or is unknown.
 	Deny(permission PermissionRequest) bool
 	Request(ctx context.Context, opts CreatePermissionRequest) (bool, error)
-	// ActiveRequest returns the request that is currently awaiting a
-	// decision, or false when no request is pending. A request is only
-	// reported while it can still be resolved; a request whose waiter
-	// was cancelled is not returned.
-	ActiveRequest() (PermissionRequest, bool)
+	// ActiveRequests returns the requests that are currently awaiting a
+	// decision, at most one per scope (see SessionScope). A request is
+	// only reported while it can still be resolved; a request whose
+	// waiter was cancelled is not returned.
+	ActiveRequests() []PermissionRequest
+	// SetSessionScope makes requests wait only for earlier requests in
+	// the same scope instead of every earlier request. A nil scope
+	// restores the default of one scope for the whole service.
+	SetSessionScope(scope SessionScope)
 	AutoApproveSession(sessionID string)
 	SetSkipRequests(skip bool)
 	SkipRequests() bool
 	SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification]
 }
+
+// SessionScope maps a session to the scope its permission requests are
+// processed in. A request is only shown once the earlier requests in its
+// scope are resolved, so each scope shows one prompt at a time, while
+// requests in different scopes never wait for each other.
+type SessionScope func(ctx context.Context, sessionID string) string
 
 // PermissionKey is a composite key for session permission lookups.
 type PermissionKey struct {
@@ -132,10 +142,20 @@ type permissionService struct {
 	allowedTools          []string
 	observer              PromptObserver
 
-	// used to make sure we only process one request at a time
-	requestMu       sync.Mutex
-	activeRequest   *PermissionRequest
-	activeRequestMu sync.Mutex
+	// Requests are processed one at a time per scope (see SessionScope).
+	// activeRequests holds the request each scope is showing, by ID.
+	scope          atomic.Pointer[SessionScope]
+	requestLocks   map[string]*requestLock
+	requestLocksMu sync.Mutex
+	activeRequests *csync.Map[string, PermissionRequest]
+}
+
+// requestLock serializes the requests of one scope. refs counts the
+// requests holding or waiting for it, so it is dropped once its scope
+// has no requests left.
+type requestLock struct {
+	sync.Mutex
+	refs int
 }
 
 // resolve atomically removes the pending request entry for the given
@@ -175,12 +195,6 @@ func (s *permissionService) resolve(permission PermissionRequest, granted, denie
 	// per request because Take removes the entry under the map lock,
 	// so this send never blocks.
 	respCh <- granted
-
-	s.activeRequestMu.Lock()
-	if s.activeRequest != nil && s.activeRequest.ID == permission.ID {
-		s.activeRequest = nil
-	}
-	s.activeRequestMu.Unlock()
 	return true
 }
 
@@ -231,8 +245,8 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		return true, nil
 	}
 
-	s.requestMu.Lock()
-	defer s.requestMu.Unlock()
+	unlock := s.lockScope(ctx, opts.SessionID)
+	defer unlock()
 
 	// tell the UI that a permission was requested
 	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
@@ -291,9 +305,8 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		return true, nil
 	}
 
-	s.activeRequestMu.Lock()
-	s.activeRequest = &permission
-	s.activeRequestMu.Unlock()
+	s.activeRequests.Set(permission.ID, permission)
+	defer s.activeRequests.Del(permission.ID)
 
 	respCh := make(chan bool, 1)
 	s.pendingRequests.Set(permission.ID, respCh)
@@ -325,6 +338,36 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	}
 }
 
+// lockScope waits until no earlier request in the scope of sessionID is
+// awaiting a decision, and returns the function that lets the next
+// request in that scope through.
+func (s *permissionService) lockScope(ctx context.Context, sessionID string) func() {
+	var key string
+	if scope := s.scope.Load(); scope != nil {
+		key = (*scope)(ctx, sessionID)
+	}
+
+	s.requestLocksMu.Lock()
+	l, ok := s.requestLocks[key]
+	if !ok {
+		l = &requestLock{}
+		s.requestLocks[key] = l
+	}
+	l.refs++
+	s.requestLocksMu.Unlock()
+
+	l.Lock()
+	return func() {
+		l.Unlock()
+		s.requestLocksMu.Lock()
+		l.refs--
+		if l.refs == 0 {
+			delete(s.requestLocks, key)
+		}
+		s.requestLocksMu.Unlock()
+	}
+}
+
 // observe reports the prompt to the observer and returns the function
 // that reports its outcome. Both run on one goroutine so the observer
 // always hears them in order, and outlive ctx so a cancelled turn still
@@ -349,22 +392,27 @@ func outcomeOf(granted bool) Outcome {
 	return OutcomeDenied
 }
 
-// ActiveRequest returns the request that is currently awaiting a
-// decision. The active pointer can outlive the waiter that published
-// it (Request leaves it behind when its context is cancelled), so a
-// request is only reported while its ID is still registered in
-// pendingRequests, i.e. while Grant/Deny can actually resolve it.
-func (s *permissionService) ActiveRequest() (PermissionRequest, bool) {
-	s.activeRequestMu.Lock()
-	active := s.activeRequest
-	s.activeRequestMu.Unlock()
-	if active == nil {
-		return PermissionRequest{}, false
+// ActiveRequests returns the requests that are currently awaiting a
+// decision. An entry outlives the decision on its request (or the
+// cancellation of its waiter) until Request returns, so a request is
+// only reported while its ID is still registered in pendingRequests,
+// i.e. while Grant/Deny can actually resolve it.
+func (s *permissionService) ActiveRequests() []PermissionRequest {
+	var active []PermissionRequest
+	for req := range s.activeRequests.Seq() {
+		if _, ok := s.pendingRequests.Get(req.ID); ok {
+			active = append(active, req)
+		}
 	}
-	if _, ok := s.pendingRequests.Get(active.ID); !ok {
-		return PermissionRequest{}, false
+	return active
+}
+
+func (s *permissionService) SetSessionScope(scope SessionScope) {
+	if scope == nil {
+		s.scope.Store(nil)
+		return
 	}
-	return *active, true
+	s.scope.Store(&scope)
 }
 
 func (s *permissionService) AutoApproveSession(sessionID string) {
@@ -397,6 +445,8 @@ func NewPermissionService(workingDir string, skip bool, allowedTools []string, o
 		allowedTools:        allowedTools,
 		pendingRequests:     csync.NewMap[string, chan bool](),
 		observer:            observer,
+		requestLocks:        make(map[string]*requestLock),
+		activeRequests:      csync.NewMap[string, PermissionRequest](),
 	}
 	svc.skip.Store(skip)
 	return svc

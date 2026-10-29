@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 
 	"github.com/charmbracelet/crush/internal/backend"
@@ -18,8 +19,14 @@ type controllerV1 struct {
 	server  *Server
 }
 
-// handleGetHealth checks server health.
+// handleGetHealth checks server health. A server that has committed to
+// shutting down answers 503: it takes no new workspaces, so a readiness
+// probe must not mistake it for a live server.
 func (c *controllerV1) handleGetHealth(w http.ResponseWriter, _ *http.Request) {
+	if c.backend.Closing() {
+		jsonError(w, http.StatusServiceUnavailable, backend.ErrServerShuttingDown.Error())
+		return
+	}
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -212,7 +219,7 @@ func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.R
 	// detect a live subscriber; subscribing first guarantees that
 	// once a client appears attached, any published event is
 	// delivered rather than dropped on a not-yet-registered stream.
-	events, err := c.backend.SubscribeEvents(r.Context(), id)
+	events, overflow, err := c.backend.SubscribeEventsWithOverflow(r.Context(), id)
 	if err != nil {
 		c.handleError(w, r, err)
 		return
@@ -239,6 +246,19 @@ func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.R
 		select {
 		case <-r.Context().Done():
 			c.server.logDebug(r, "Stopping event stream")
+			return
+		case <-overflow:
+			// The client stopped keeping up (a suspended or wedged
+			// terminal) and events were dropped for it, possibly a
+			// permission request or a run's completion. End the stream
+			// rather than leave a silent gap. A client with a reconnect
+			// loop (the TUI) re-reports its session, which re-delivers
+			// pending permission and question prompts, and reloads what
+			// it shows. Nothing re-delivers a dropped RunComplete:
+			// `crush run` has no reconnect loop and treats the closed
+			// stream as a failed run.
+			slog.Warn("Closing event stream of a client that fell behind",
+				"workspace", id, "client_id", clientID)
 			return
 		case ev, ok := <-events:
 			if !ok {
@@ -718,6 +738,18 @@ func (c *controllerV1) handlePostWorkspacePermissionsGrant(w http.ResponseWriter
 	jsonEncode(w, proto.PermissionGrantResponse{Resolved: resolved})
 }
 
+// handlePostWorkspaceSessionAutoApprove auto-approves every permission
+// request a session raises.
+func (c *controllerV1) handlePostWorkspaceSessionAutoApprove(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	sid := r.PathValue("sid")
+	if err := c.backend.AutoApproveSession(id, sid); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
 // handlePostWorkspaceQuestionsAnswer submits answers for a batch question.
 func (c *controllerV1) handlePostWorkspaceQuestionsAnswer(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
@@ -737,12 +769,20 @@ func (c *controllerV1) handlePostWorkspaceQuestionsAnswer(w http.ResponseWriter,
 	jsonEncode(w, proto.QuestionAnswerResponse{Resolved: resolved})
 }
 
-// handlePostWorkspaceQuestionsCancel cancels the pending question
-// batch for a workspace.
+// handlePostWorkspaceQuestionsCancel cancels a pending question batch
+// for a workspace.
 func (c *controllerV1) handlePostWorkspaceQuestionsCancel(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	cancelled, err := c.backend.CancelQuestion(id)
+	// Clients that predate batch IDs send no body.
+	var req proto.QuestionCancel
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		c.server.logError(r, "Failed to decode request", "error", err)
+		jsonError(w, http.StatusBadRequest, "failed to decode request")
+		return
+	}
+
+	cancelled, err := c.backend.CancelQuestion(id, req.BatchRequestID)
 	if err != nil {
 		c.handleError(w, r, err)
 		return

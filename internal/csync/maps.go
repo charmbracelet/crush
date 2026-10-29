@@ -53,6 +53,16 @@ func (m *Map[K, V]) Set(key K, value V) {
 	m.inner[key] = value
 }
 
+// Swap sets the value for the specified key and returns the value it
+// replaced, if any, in one atomic step.
+func (m *Map[K, V]) Swap(key K, value V) (previous V, loaded bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	previous, loaded = m.inner[key]
+	m.inner[key] = value
+	return previous, loaded
+}
+
 // Del deletes the specified key from the map.
 func (m *Map[K, V]) Del(key K) {
 	m.mu.Lock()

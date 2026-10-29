@@ -1,11 +1,15 @@
 package workspace
 
 import (
+	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -17,11 +21,15 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/client"
 	"github.com/charmbracelet/crush/internal/commands"
+	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/charmbracelet/crush/internal/ui/util"
+	"github.com/charmbracelet/crush/internal/version"
 	"github.com/stretchr/testify/require"
 )
 
@@ -158,6 +166,7 @@ func TestClientWorkspace_PermissionGrantMapping(t *testing.T) {
 				Description: "do thing",
 				Action:      "act",
 				Path:        "/tmp/p",
+				Params:      `{"repo":"charmbracelet/crush"}`,
 			}
 			tc.call(ws, perm)
 
@@ -168,6 +177,8 @@ func TestClientWorkspace_PermissionGrantMapping(t *testing.T) {
 			require.Equal(t, "tool", got.Permission.ToolName)
 			require.Equal(t, "act", got.Permission.Action)
 			require.Equal(t, "/tmp/p", got.Permission.Path)
+			// Older servers reject an MCP tool's string params.
+			require.Nil(t, got.Permission.Params)
 		})
 	}
 }
@@ -583,22 +594,43 @@ type recoveryServer struct {
 	// abortStreams kills each event stream mid-response, as a server
 	// that dies does, instead of ending it cleanly.
 	abortStreams bool
+	// config is the config creates report; a configured one makes
+	// recovery initialize the agent.
+	config *config.Config
 
 	creates      int
+	createReqs   []proto.Workspace
 	streams      int
 	sessionPosts []string
 	retired      []string
 	deleted      []string
+	// agentCalls logs agent calls as "<call> <id> [<agent>]".
+	agentCalls []string
 }
 
 func (s *recoveryServer) start(t *testing.T) *client.Client {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(s.handler(t))
+	t.Cleanup(srv.Close)
+
+	u, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	c, err := client.NewClient(t.TempDir(), "tcp", u.Host)
+	require.NoError(t, err)
+	return c
+}
+
+// handler serves the scripted API, so a test can put it on any listener.
+func (s *recoveryServer) handler(t *testing.T) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/workspaces":
 			s.creates++
+			var req proto.Workspace
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+			s.createReqs = append(s.createReqs, req)
 			if s.createErr != nil {
 				http.Error(w, "no", s.createErr())
 				return
@@ -617,7 +649,7 @@ func (s *recoveryServer) start(t *testing.T) *client.Client {
 			}
 			s.liveID = s.nextID
 			require.NoError(t, json.NewEncoder(w).Encode(proto.Workspace{
-				ID: s.liveID, Path: "/tmp/recover",
+				ID: s.liveID, Path: "/tmp/recover", Config: s.config,
 			}))
 		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/v1/clients/"):
 			s.retired = append(s.retired, strings.TrimPrefix(r.URL.Path, "/v1/clients/"))
@@ -642,6 +674,15 @@ func (s *recoveryServer) start(t *testing.T) *client.Client {
 			require.NoError(t, json.NewEncoder(w).Encode(proto.HostThemeState{
 				WorkspaceID: id, Theme: s.hostTheme,
 			}))
+		case strings.Contains(r.URL.Path, "/agent/"):
+			id, call, _ := strings.Cut(strings.TrimPrefix(r.URL.Path, "/v1/workspaces/"), "/")
+			if id != s.liveID {
+				http.Error(w, "workspace not found", http.StatusNotFound)
+				return
+			}
+			var req proto.AgentSetMainRequest
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			s.agentCalls = append(s.agentCalls, strings.TrimSpace(call+" "+id+" "+req.AgentID))
 		case strings.HasSuffix(r.URL.Path, "/events"):
 			id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v1/workspaces/"), "/events")
 			if id != s.liveID {
@@ -661,14 +702,7 @@ func (s *recoveryServer) start(t *testing.T) *client.Client {
 		default:
 			w.WriteHeader(http.StatusOK)
 		}
-	}))
-	t.Cleanup(srv.Close)
-
-	u, err := url.Parse(srv.URL)
-	require.NoError(t, err)
-	c, err := client.NewClient(t.TempDir(), "tcp", u.Host)
-	require.NoError(t, err)
-	return c
+	})
 }
 
 func (s *recoveryServer) snapshot(f func(*recoveryServer)) {
@@ -947,6 +981,71 @@ func TestClientWorkspace_EscalatesUnrecoverableConnection(t *testing.T) {
 	}
 }
 
+// runSubscriptionUntilStreams runs the subscription loop until srv has
+// served n event streams, then shuts the workspace down.
+func runSubscriptionUntilStreams(t *testing.T, ws *ClientWorkspace, srv *recoveryServer, n int, send func(tea.Msg)) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() {
+		ws.runSubscription(send)
+		close(done)
+	}()
+	require.Eventually(t, func() bool {
+		var streams int
+		srv.snapshot(func(s *recoveryServer) { streams = s.streams })
+		return streams >= n
+	}, 3*time.Second, 5*time.Millisecond)
+	ws.Shutdown()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("runSubscription did not return after Shutdown")
+	}
+}
+
+// TestClientWorkspace_RespawnsDeadServer guards against the reconnect loop
+// retrying a dead server's address forever instead of respawning it.
+func TestClientWorkspace_RespawnsDeadServer(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows servers listen on named pipes; see the npipe twin")
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0") //nolint:noctx
+	require.NoError(t, err)
+	addr := ln.Addr().String()
+	require.NoError(t, ln.Close())
+	testRespawnsDeadServer(t, "tcp", addr, func() (net.Listener, error) {
+		return net.Listen("tcp", addr) //nolint:noctx
+	})
+}
+
+// testRespawnsDeadServer points a client at an address nothing listens on
+// and expects the respawn hook to bring up a server there, on which the
+// workspace is re-registered.
+func testRespawnsDeadServer(t *testing.T, network, addr string, listen func() (net.Listener, error)) {
+	t.Helper()
+	t.Cleanup(SetSSEBackoffForTest(time.Millisecond, 5*time.Millisecond))
+	c, err := client.NewClient(t.TempDir(), network, addr)
+	require.NoError(t, err)
+
+	next := &recoveryServer{nextID: "ws-2"}
+	var respawns atomic.Int32
+	ws := NewClientWorkspace(c, proto.Workspace{ID: "ws-1", Path: "/tmp/respawn"},
+		WithServerRespawn(func(context.Context) error {
+			ln, err := listen()
+			if err != nil {
+				return err
+			}
+			hs := &http.Server{Handler: next.handler(t)}
+			go func() { _ = hs.Serve(ln) }()
+			t.Cleanup(func() { _ = hs.Close() })
+			respawns.Add(1)
+			return nil
+		}))
+	runSubscriptionUntilStreams(t, ws, next, 1, func(tea.Msg) {})
+	require.Equal(t, "ws-2", ws.workspaceID())
+	require.EqualValues(t, 1, respawns.Load())
+}
+
 // TestClientWorkspace_ShutdownRetiresAfterLostCreateResponse is the
 // quit-during-recovery case, in its nastiest form: the client asks for a
 // replacement workspace and the connection dies before it can read the
@@ -1168,6 +1267,90 @@ func TestClientWorkspace_RecoveryCreateIsBounded(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("recoverWorkspace blocked on an unresponsive server")
 	}
+}
+
+// TestClientWorkspace_RecoveryRestoresModes guards against a re-created
+// workspace dropping plan mode or reviving a YOLO flag the user turned off.
+func TestClientWorkspace_RecoveryRestoresModes(t *testing.T) {
+	t.Cleanup(SetSSEBackoffForTest(time.Millisecond, 5*time.Millisecond))
+
+	cases := []struct {
+		name      string
+		yolo      bool
+		before    func(t *testing.T, ws *ClientWorkspace)
+		wantCalls []string
+	}{
+		{
+			name: "plan mode",
+			before: func(t *testing.T, ws *ClientWorkspace) {
+				require.NoError(t, ws.AgentSetMain(config.AgentPlan))
+			},
+			wantCalls: []string{"agent/main ws-1 plan", "agent/init ws-2", "agent/main ws-2 plan"},
+		},
+		{
+			name: "yolo turned off",
+			yolo: true,
+			before: func(_ *testing.T, ws *ClientWorkspace) {
+				ws.PermissionSetSkipRequests(false)
+			},
+			wantCalls: []string{"agent/init ws-2"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := &recoveryServer{
+				liveID: "ws-1",
+				nextID: "ws-2",
+				config: &config.Config{
+					Options: &config.Options{},
+					Providers: csync.NewMapFrom(map[string]config.ProviderConfig{
+						"fake": {ID: "fake"},
+					}),
+				},
+			}
+			ws := NewClientWorkspace(srv.start(t), proto.Workspace{
+				ID: "ws-1", Path: "/tmp/recover", YOLO: tc.yolo,
+			})
+			tc.before(t, ws)
+
+			srv.snapshot(func(s *recoveryServer) { s.liveID = "" })
+			runSubscriptionUntilStreams(t, ws, srv, 1, func(tea.Msg) {})
+
+			srv.snapshot(func(s *recoveryServer) {
+				require.Len(t, s.createReqs, 1)
+				require.False(t, s.createReqs[0].YOLO)
+				require.Equal(t, tc.wantCalls, s.agentCalls)
+			})
+		})
+	}
+}
+
+// TestClientWorkspace_WarnsAboutServerVersionMismatch guards that the user
+// is warned, once, when the workspace's server runs another Crush version.
+func TestClientWorkspace_WarnsAboutServerVersionMismatch(t *testing.T) {
+	t.Cleanup(SetSSEBackoffForTest(time.Millisecond, 5*time.Millisecond))
+
+	otherVersion := "not-" + version.Version
+	srv := &recoveryServer{liveID: "ws-1"}
+	ws := NewClientWorkspace(srv.start(t), proto.Workspace{
+		ID: "ws-1", Path: "/tmp/version", Version: otherVersion,
+	})
+
+	var mu sync.Mutex
+	var msgs []util.InfoMsg
+	runSubscriptionUntilStreams(t, ws, srv, 3, func(msg tea.Msg) {
+		if info, ok := msg.(util.InfoMsg); ok {
+			mu.Lock()
+			msgs = append(msgs, info)
+			mu.Unlock()
+		}
+	})
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.Len(t, msgs, 1)
+	require.Equal(t, util.InfoTypeWarn, msgs[0].Type)
+	require.Contains(t, msgs[0].Msg, strconv.Quote(otherVersion))
 }
 
 // TestTranslateEvent_PermissionNotification verifies that the

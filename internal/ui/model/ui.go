@@ -5698,10 +5698,10 @@ func (m *UI) openBatchFormDialog(batch question.Request) {
 
 	form := dialog.NewQuestionForm(m.com.Styles, batch)
 	form.OnAnswer = func(responses []question.Answer) {
-		m.com.Workspace.QuestionAnswer(responses)
+		m.com.Workspace.QuestionAnswer(batch.ID, responses)
 	}
 	form.OnCancel = func() {
-		m.com.Workspace.QuestionCancel()
+		m.com.Workspace.QuestionCancel(batch.ID)
 	}
 	m.activeInline = form
 	m.textarea.Blur()

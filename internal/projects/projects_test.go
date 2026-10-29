@@ -1,10 +1,17 @@
 package projects
 
 import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestRegisterAndList(t *testing.T) {
@@ -210,4 +217,52 @@ func TestRegisterOrdersByRecency(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Fatalf("Expected order %v, got %v", want, got)
 	}
+}
+
+// TestRegister_ConcurrentProcesses guards that crush processes registering
+// projects at once neither corrupt projects.json nor lose entries.
+func TestRegister_ConcurrentProcesses(t *testing.T) {
+	const (
+		dirEnv   = "CRUSH_TEST_PROJECTS_DIR"
+		idEnv    = "CRUSH_TEST_PROJECTS_CHILD"
+		children = 8
+		paths    = 5
+	)
+
+	if dir := os.Getenv(dirEnv); dir != "" {
+		// Child process. internal/home clears CRUSH_GLOBAL_DATA in tests.
+		t.Setenv("CRUSH_GLOBAL_DATA", dir)
+		// Block until the parent releases every child at once.
+		_, err := io.Copy(io.Discard, os.Stdin)
+		require.NoError(t, err)
+		for i := range 2 * paths { // Two rounds widen the race window.
+			path := fmt.Sprintf("/project/%s/%d", os.Getenv(idEnv), i%paths)
+			require.NoError(t, Register(path, path+"/.crush"))
+		}
+		return
+	}
+
+	dir := filepath.Join(t.TempDir(), "crush")
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	var cmds []*exec.Cmd
+	for i := range children {
+		cmd := exec.CommandContext(t.Context(), os.Args[0],
+			"-test.run=^TestRegister_ConcurrentProcesses$")
+		cmd.Env = append(os.Environ(), dirEnv+"="+dir, fmt.Sprintf("%s=%d", idEnv, i))
+		cmd.Stdin = r
+		require.NoError(t, cmd.Start())
+		cmds = append(cmds, cmd)
+	}
+	r.Close()
+	w.Close()
+	for _, cmd := range cmds {
+		require.NoError(t, cmd.Wait())
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, projectsFileName))
+	require.NoError(t, err)
+	var list ProjectList
+	require.NoError(t, json.Unmarshal(data, &list), "projects.json:\n%s", data)
+	require.Len(t, list.Projects, children*paths)
 }

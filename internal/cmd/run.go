@@ -2,11 +2,11 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
-	"os/signal"
 	"strings"
 	"time"
 
@@ -76,9 +76,9 @@ crush run --continue "Follow up on your last response"
 			useLast, _         = cmd.Flags().GetBool("continue")
 		)
 
-		// Cancel on SIGINT or SIGTERM.
-		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, os.Kill)
-		defer cancel()
+		// Stop on Ctrl+C, SIGTERM and SIGHUP: Execute cancels the command's
+		// context on each of them (see terminationSignals).
+		ctx := cmd.Context()
 
 		prompt := strings.Join(args, " ")
 
@@ -107,6 +107,10 @@ crush run --continue "Follow up on your last response"
 				return err
 			}
 			defer cleanup()
+
+			if warn := workspace.ServerVersionWarning(ws.Version); warn != "" {
+				fmt.Fprintf(os.Stderr, "warn: %s\n", warn)
+			}
 
 			event.AppInitialized()
 
@@ -274,10 +278,38 @@ func runNonInteractive(
 		}
 	}
 
+	// Automatically approve all permission requests for this
+	// non-interactive session, as local mode does: nothing here answers a
+	// prompt, so the run would wait on the first one forever. A server
+	// that predates the endpoint answers 404; carry on regardless, since
+	// runs that need no permission still work there.
+	if err := c.AutoApproveSession(ctx, ws.ID, sess.ID); err != nil {
+		if !errors.Is(err, client.ErrNotFound) {
+			return err
+		}
+		slog.Warn("Server cannot auto-approve permissions; tool calls that need permission will wait for approval",
+			"session_id", sess.ID, "error", err)
+	}
+
 	events, err := c.SubscribeEvents(ctx, ws.ID)
 	if err != nil {
 		return fmt.Errorf("failed to subscribe to events: %w", err)
 	}
+
+	// The server runs the prompt for the workspace, not for this request,
+	// so returning on an interrupt would leave the run going for as long
+	// as another client holds the workspace. Cancel it on the way out,
+	// also when the interrupt lands while the prompt is still in flight.
+	defer func() {
+		if ctx.Err() == nil {
+			return
+		}
+		cancelCtx, cancelDone := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancelDone()
+		if err := c.CancelAgentSession(cancelCtx, ws.ID, sess.ID); err != nil {
+			slog.Warn("Failed to cancel the interrupted run", "session_id", sess.ID, "error", err)
+		}
+	}()
 
 	// Mint a per-call RunID so we can correlate the terminal
 	// RunComplete with *this* SendMessage even if the session was
@@ -317,7 +349,14 @@ func runNonInteractive(
 		case ev, ok := <-events:
 			if !ok {
 				stopSpinner()
-				return nil
+				// The stream also ends when ctx is canceled, which is
+				// the caller giving up rather than the server going away.
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				// Otherwise the server died or ended the stream before
+				// our RunComplete, so the run cannot pass as finished.
+				return fmt.Errorf("lost connection to the crush server before the run completed")
 			}
 
 			// Forward events to herdr if running inside a herdr pane.
@@ -325,11 +364,20 @@ func runNonInteractive(
 				hc.HandleEvent(hev)
 			}
 
+			cancelOwnQuestion(ctx, c, ws.ID, sess.ID, ev)
+
 			done, err := stream.handle(ev, stopSpinner)
 			if err != nil {
 				return err
 			}
 			if done {
+				// With ctx still live the cancel did not come from us
+				// but from the server shutting down, the workspace
+				// being torn down or another client, and the output is
+				// cut short.
+				if stream.cancelled && ctx.Err() == nil {
+					return fmt.Errorf("agent run was cancelled on the server before it completed")
+				}
 				return nil
 			}
 
@@ -337,6 +385,22 @@ func runNonInteractive(
 			stopSpinner()
 			return ctx.Err()
 		}
+	}
+}
+
+// cancelOwnQuestion cancels ev when it is a question batch the agent raised
+// in this run's session. The workspace's agent is shared with interactive
+// clients, so it can offer this run the question tool too, but nobody is
+// here to answer: a pending question would stall the run forever.
+// Cancelling it ends the agent's turn.
+func cancelOwnQuestion(ctx context.Context, c *client.Client, wsID, sessionID string, ev any) {
+	q, ok := ev.(pubsub.Event[proto.QuestionRequest])
+	if !ok || q.Payload.SessionID != sessionID {
+		return
+	}
+	slog.Warn("Cancelling a question from the agent: a non-interactive run cannot answer it", "session_id", sessionID)
+	if _, err := c.CancelQuestionBatch(ctx, wsID, q.Payload.ID); err != nil {
+		slog.Error("Failed to cancel the agent's question", "error", err)
 	}
 }
 
@@ -361,6 +425,7 @@ type runStream struct {
 	out       io.Writer
 	read      map[string]int
 	printed   bool
+	cancelled bool // the terminal RunComplete reported a cancelled run
 }
 
 // handle processes one SSE event. Returns done=true when the run
@@ -369,6 +434,10 @@ type runStream struct {
 // handled by the caller's select). stopSpinner is called on the
 // first observable assistant output and on completion; passing nil
 // is safe for tests.
+//
+// A cancelled run is not an error here either: it sets s.cancelled
+// and the caller, which knows whether it asked for the cancel,
+// decides.
 func (s *runStream) handle(ev any, stopSpinner func()) (done bool, err error) {
 	stop := func() {
 		if stopSpinner != nil {
@@ -430,6 +499,7 @@ func (s *runStream) handle(ev any, stopSpinner func()) (done bool, err error) {
 		if e.Payload.Error != "" && !e.Payload.Cancelled {
 			return true, fmt.Errorf("agent run failed: %s", e.Payload.Error)
 		}
+		s.cancelled = e.Payload.Cancelled
 		// Reconcile stdout against the authoritative final
 		// assistant text carried in the event. The pubsub fan-in
 		// does not serialize publishes across upstream brokers, so

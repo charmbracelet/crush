@@ -295,12 +295,12 @@ func (w *AppWorkspace) HostContext(_ context.Context) (proto.HostContext, error)
 
 // -- Questions --
 
-func (w *AppWorkspace) QuestionAnswer(responses []question.Answer) bool {
-	return w.app.Questions.Answer(responses)
+func (w *AppWorkspace) QuestionAnswer(batchID string, responses []question.Answer) bool {
+	return w.app.Questions.Answer(batchID, responses)
 }
 
-func (w *AppWorkspace) QuestionCancel() bool {
-	return w.app.Questions.Cancel()
+func (w *AppWorkspace) QuestionCancel(batchID string) bool {
+	return w.app.Questions.Cancel(batchID)
 }
 
 // -- FileTracker --

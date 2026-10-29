@@ -9,10 +9,12 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/charmbracelet/crush/internal/backend"
 	"github.com/charmbracelet/crush/internal/config"
@@ -22,6 +24,10 @@ import (
 // path. The macOS sun_path field is 104 bytes; Linux allows 108. We
 // use 104 so the resulting path is portable across both platforms.
 const maxUnixSocketPathLen = 104
+
+// selfShutdownTimeout bounds a shutdown the server starts on its own. It
+// is the budget `crush server` gives the shutdown a signal starts.
+const selfShutdownTimeout = 15 * time.Second
 
 // socketDir returns the directory used for the Crush Unix socket.
 // It prefers $XDG_RUNTIME_DIR when set (systemd's per-user runtime
@@ -39,10 +45,23 @@ func socketDir() string {
 var ErrServerClosed = http.ErrServerClosed
 
 // ParseHostURL parses a host URL into a [url.URL].
+//
+// A relative unix socket path is made absolute against the current
+// directory, so the address keeps naming the same socket after the process
+// changes directory, as the client does for --cwd.
 func ParseHostURL(host string) (*url.URL, error) {
 	proto, addr, ok := strings.Cut(host, "://")
 	if !ok {
 		return nil, fmt.Errorf("invalid host format: %s", host)
+	}
+
+	// On Linux a leading '@' names an abstract socket, which has no path.
+	if proto == "unix" && addr != "" && !filepath.IsAbs(addr) && !strings.HasPrefix(addr, "@") {
+		abs, err := filepath.Abs(addr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid unix socket path: %w", err)
+		}
+		addr = abs
 	}
 
 	var basePath string
@@ -63,19 +82,23 @@ func ParseHostURL(host string) (*url.URL, error) {
 
 // DefaultHost returns the default server host.
 //
-// On Windows the address is a named pipe under \\.\pipe\. On Unix
-// platforms the socket lives in the per-user runtime directory
-// returned by [socketDir] and is named crush-<uid>.sock, falling
-// back to crush.sock when the current uid cannot be determined. If
-// the composed path would exceed [maxUnixSocketPathLen] bytes (the
-// macOS sun_path limit), we fall back to /tmp/crush-<uid>.sock so
-// the socket remains bindable.
+// On Windows the address is the named pipe \\.\pipe\crush-<sid>.sock,
+// where <sid> is the current user's SID. On Unix platforms the socket
+// lives in the per-user runtime directory returned by [socketDir] and
+// is named crush-<uid>.sock. If the composed path would exceed
+// [maxUnixSocketPathLen] bytes (the macOS sun_path limit), we fall back
+// to /tmp/crush-<uid>.sock so the socket remains bindable.
+//
+// The user's id keeps users from sharing a server, since the pipe
+// namespace and /tmp are machine-wide. If it cannot be determined,
+// DefaultHost returns "", which callers reject as an invalid host,
+// rather than a name every user would share.
 func DefaultHost() string {
-	sock := "crush.sock"
-	usr, err := user.Current()
-	if err == nil && usr.Uid != "" {
-		sock = fmt.Sprintf("crush-%s.sock", usr.Uid)
+	id := currentUserID()
+	if id == "" {
+		return ""
 	}
+	sock := fmt.Sprintf("crush-%s.sock", id)
 	if runtime.GOOS == "windows" {
 		return fmt.Sprintf("npipe:////./pipe/%s", sock)
 	}
@@ -94,9 +117,19 @@ type Server struct {
 
 	h  *http.Server
 	ln net.Listener
+	// cancelRequests cancels the context every request derives from.
+	cancelRequests context.CancelFunc
 
 	backend *backend.Backend
 	logger  *slog.Logger
+
+	// selfShutdown runs the shutdown the backend asks for at most once.
+	// selfShutdownStarted is set before that shutdown begins and
+	// selfShutdownDone is closed once it has finished, so [Server.Serve]
+	// can wait for it.
+	selfShutdown        sync.Once
+	selfShutdownStarted atomic.Bool
+	selfShutdownDone    chan struct{}
 }
 
 // SetLogger sets the logger for the server.
@@ -125,23 +158,41 @@ func NewServer(cfg *config.ConfigStore, network, address string) *Server {
 	s := new(Server)
 	s.Addr = address
 	s.network = network
+	s.selfShutdownDone = make(chan struct{})
 
 	// The backend is created with a shutdown callback that triggers
 	// a graceful server shutdown (e.g. when the last workspace is
 	// removed).
 	s.backend = backend.New(context.Background(), cfg, func() {
-		go func() {
-			slog.Info("Shutting down server...")
-			if err := s.Shutdown(context.Background()); err != nil {
-				slog.Error("Failed to shutdown server", "error", err)
-			}
-		}()
+		s.shutdownSelf(selfShutdownTimeout)
 	})
 	s.installHandler()
 	if network == "tcp" {
 		s.h.Addr = address
 	}
 	return s
+}
+
+// shutdownSelf starts the graceful shutdown the backend asks for when the
+// server has gone idle. The backend can ask more than once (a client's
+// request and the idle timer, say), so only the first call does anything.
+// [Server.Serve] waits for this shutdown, so it gives up after timeout and
+// closes what is left: a request that never finishes must not keep the
+// server up for good.
+func (s *Server) shutdownSelf(timeout time.Duration) {
+	s.selfShutdown.Do(func() {
+		s.selfShutdownStarted.Store(true)
+		go func() {
+			defer close(s.selfShutdownDone)
+			slog.Info("Shutting down server...")
+			ctx, cancel := context.WithTimeout(context.Background(), timeout)
+			defer cancel()
+			if err := s.Shutdown(ctx); err != nil {
+				slog.Error("Failed to shutdown server", "error", err)
+				_ = s.Close()
+			}
+		}()
+	})
 }
 
 // installHandler builds the protocol/router around s.backend and
@@ -159,9 +210,15 @@ func (s *Server) installHandler() {
 	}
 	mux.HandleFunc("GET /v1/docs/", c.handleDocsIndex)
 	mux.HandleFunc("GET /v1/docs/openapi.json", c.handleDocsSpec)
+	// http.Server.Shutdown waits for active requests without ever
+	// cancelling them, so requests derive from a context Shutdown can
+	// cancel itself.
+	baseCtx, cancel := context.WithCancel(context.Background())
+	s.cancelRequests = cancel
 	s.h = &http.Server{
-		Protocols: &p,
-		Handler:   s.recoverHandler(s.loggingHandler(mux)),
+		Protocols:   &p,
+		Handler:     s.recoverHandler(s.loggingHandler(s.crossOriginHandler(mux))),
+		BaseContext: func(net.Listener) context.Context { return baseCtx },
 	}
 }
 
@@ -172,9 +229,16 @@ func (s *Server) Handler() http.Handler {
 	return s.h.Handler
 }
 
-// Serve accepts incoming connections on the listener.
+// Serve accepts incoming connections on the listener. When the server
+// stops itself, Serve returns once that shutdown has finished rather than
+// as soon as the listener closes, so a caller that exits on return does
+// not cut off the requests the shutdown is still draining.
 func (s *Server) Serve(ln net.Listener) error {
-	return s.h.Serve(ln)
+	err := s.h.Serve(ln)
+	if errors.Is(err, ErrServerClosed) && s.selfShutdownStarted.Load() {
+		<-s.selfShutdownDone
+	}
+	return err
 }
 
 // ListenAndServe starts the server and begins accepting connections.
@@ -189,6 +253,9 @@ func (s *Server) ListenAndServe() error {
 	if removedStale && s.logger != nil {
 		s.logger.Warn("Removed stale socket before binding", "address", s.Addr)
 	}
+	// Start the idle clock now that clients can reach us: a server that
+	// never gets a workspace must not outlive the client that spawned it.
+	s.backend.ArmIdleShutdown()
 	return s.Serve(ln)
 }
 
@@ -206,12 +273,19 @@ func (s *Server) Close() error {
 	return s.h.Close()
 }
 
-// Shutdown tears down hosted workspaces, then gracefully shuts down the
-// server without interrupting active connections. ctx bounds both. The
-// idle-shutdown path relies on the teardown being a no-op with none left.
+// Shutdown tears down hosted workspaces, then cancels in-flight requests
+// and gracefully shuts down the server, waiting for their handlers to
+// return. ctx bounds both. The idle-shutdown path relies on the teardown
+// being a no-op with none left.
 func (s *Server) Shutdown(ctx context.Context) error {
 	defer func() { s.closeListener() }()
 	err := s.backend.ShutdownWorkspaces(ctx)
+	// With the workspaces gone no request has work left to do, and one
+	// blocked on its context, such as a running shell command, would
+	// otherwise hold the shutdown until ctx expires and then be
+	// abandoned. Cancelling only now keeps event streams open to deliver
+	// the teardown's final events.
+	s.cancelRequests()
 	return errors.Join(err, s.h.Shutdown(ctx))
 }
 

@@ -12,7 +12,9 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 	return []apigen.Endpoint{
 		apigen.Get("/v1/health").
 			Summary("Health check").
+			Description("Answers 503 once the server has committed to shutting down.").
 			Tags("system").
+			Fails(503).
 			Handle(c.handleGetHealth),
 
 		apigen.Get("/v1/version").
@@ -159,7 +161,10 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 				"question prompts are scoped to the session the client currently "+
 				"views (see POST current-session): they are only delivered to clients "+
 				"viewing the session that raised them, and clients viewing no session "+
-				"receive none. All other events are workspace-wide.").
+				"receive none. All other events are workspace-wide. A client that "+
+				"falls so far behind that events are dropped for it has its stream "+
+				"closed; it should reconnect, re-report its current session, which "+
+				"re-delivers pending prompts, and re-read the state it shows.").
 			Tags("workspaces").
 			PathParam("id", "Workspace ID").
 			RequiredQueryParam("client_id", "Client ID (UUID)").
@@ -327,6 +332,18 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 			Fails(400, 404, 500).
 			Handle(c.handlePostWorkspacePermissionsGrant),
 
+		apigen.Post("/v1/workspaces/{id}/sessions/{sid}/auto-approve").
+			Summary("Auto-approve a session's permissions").
+			Description("Grants every permission request the session raises from "+
+				"now on without prompting, as `crush run` does for its own session. "+
+				"Other sessions keep prompting. The approval lasts while the "+
+				"workspace is hosted.").
+			Tags("permissions").
+			PathParam("id", "Workspace ID").
+			PathParam("sid", "Session ID").
+			Fails(404, 500).
+			Handle(c.handlePostWorkspaceSessionAutoApprove),
+
 		apigen.Post("/v1/workspaces/{id}/questions/answer").
 			Summary("Answer question batch").
 			Tags("questions").
@@ -338,8 +355,12 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 
 		apigen.Post("/v1/workspaces/{id}/questions/cancel").
 			Summary("Cancel question batch").
+			Description("Cancels the batch the body names. Without a body "+
+				"it cancels the only pending batch, and nothing when "+
+				"several are pending.").
 			Tags("questions").
 			PathParam("id", "Workspace ID").
+			Accepts(proto.QuestionCancel{}).
 			Responds(proto.QuestionAnswerResponse{}).
 			Fails(400, 404, 500).
 			Handle(c.handlePostWorkspaceQuestionsCancel),

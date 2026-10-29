@@ -93,12 +93,10 @@ type SessionAgentCall struct {
 	// session Run returns ErrSessionIdle instead of starting one.
 	QueueOnly bool
 	Prompt    string
-	// PromptParts, when non-empty, replaces the plain text part of the
-	// user message this call creates. The agent tool uses it to deliver
-	// subagent reports as a distinct content part so the UI renders them
-	// as subagent results rather than as typed input. Prompt is still
-	// what the model reads, via the part's own ToAIMessage handling.
-	PromptParts      []message.ContentPart
+	// Saved is a user message already in the transcript that this call
+	// delivers, so no new one is written. Prompt is still what the model
+	// reads for it.
+	Saved            *message.Message
 	ProviderOptions  fantasy.ProviderOptions
 	Attachments      []message.Attachment
 	MaxOutputTokens  int64
@@ -478,7 +476,7 @@ func (a *sessionAgent) drainQueueForStep(sessionID string) (fold, canceledWithRu
 	queuedCalls, _ := a.messageQueue.Get(sessionID)
 	var keep []SessionAgentCall
 	for _, queued := range queuedCalls {
-		if a.canceledBySeq(sessionID, queued.acceptSeq) && !carriesReport(queued) {
+		if a.canceledBySeq(sessionID, queued.acceptSeq) {
 			if queued.RunID != "" {
 				canceledWithRunID = append(canceledWithRunID, queued)
 			}
@@ -542,36 +540,7 @@ func (a *sessionAgent) clearQueueAndNotify(sessionID string) {
 	if !ok {
 		return
 	}
-	a.recordQueuedReports(queued)
 	a.publishCanceledQueueDrops(queued)
-}
-
-// carriesReport reports whether a queued call delivers a subagent report.
-// A report records work already done, so a cancel never withdraws it.
-func carriesReport(call SessionAgentCall) bool {
-	return slices.ContainsFunc(call.PromptParts, func(part message.ContentPart) bool {
-		_, ok := part.(message.SubAgentReport)
-		return ok
-	})
-}
-
-// recordQueuedReports writes the reports among cleared calls to the
-// transcript without starting a turn, so cancelling a turn cannot lose them.
-func (a *sessionAgent) recordQueuedReports(calls []SessionAgentCall) {
-	for _, call := range calls {
-		if !carriesReport(call) {
-			continue
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_, err := a.messages.Create(ctx, call.SessionID, message.CreateMessageParams{
-			Role:  message.User,
-			Parts: call.PromptParts,
-		})
-		cancel()
-		if err != nil {
-			slog.Error("Failed to record queued subagent report", "session_id", call.SessionID, "error", err)
-		}
-	}
 }
 
 // clearPendingCancel removes any pending-cancel mark for sessionID. It
@@ -874,6 +843,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	msgs, err := a.getSessionMessages(ctx, currentSession)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get session messages: %w", err)
+	}
+	if call.Saved != nil {
+		// The saved message goes in as this turn's prompt, not as history.
+		msgs = slices.DeleteFunc(msgs, func(m message.Message) bool { return m.ID == call.Saved.ID })
 	}
 
 	// Generate title from the first real (non-shell) user prompt.
@@ -1372,7 +1345,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		var kept []SessionAgentCall
 		var canceledRunIDDrops []SessionAgentCall
 		for _, q := range queuedMessages {
-			if (q.acceptSeq == 0 || q.acceptSeq <= mark) && !carriesReport(q) {
+			if q.acceptSeq == 0 || q.acceptSeq <= mark {
 				if q.RunID != "" {
 					canceledRunIDDrops = append(canceledRunIDDrops, q)
 				}
@@ -1644,10 +1617,10 @@ func sessionHeaders(sessionID string) map[string]string {
 }
 
 func (a *sessionAgent) createUserMessage(ctx context.Context, call SessionAgentCall) (message.Message, error) {
-	parts := []message.ContentPart{message.TextContent{Text: call.Prompt, Hidden: call.HiddenUserMessage}}
-	if len(call.PromptParts) > 0 {
-		parts = slices.Clone(call.PromptParts)
+	if call.Saved != nil {
+		return *call.Saved, nil
 	}
+	parts := []message.ContentPart{message.TextContent{Text: call.Prompt, Hidden: call.HiddenUserMessage}}
 	var attachmentParts []message.ContentPart
 	for _, attachment := range call.Attachments {
 		attachmentParts = append(attachmentParts, message.BinaryContent{Path: attachment.FilePath, MIMEType: attachment.MimeType, Data: attachment.Content})

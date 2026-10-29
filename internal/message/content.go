@@ -187,6 +187,11 @@ type SubAgentReport struct {
 
 func (SubAgentReport) isPart() {}
 
+// PromptText is the report as the model reads it.
+func (r SubAgentReport) PromptText() string {
+	return fmt.Sprintf("<subagent-report label=%q>\n%s\n</subagent-report>", r.Label, r.Output)
+}
+
 // HasSubAgentReport reports whether the message contains any SubAgentReport parts.
 func (m *Message) HasSubAgentReport() bool {
 	for _, part := range m.Parts {
@@ -603,7 +608,7 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 		// carries the label and body separately so the UI can render
 		// them; the model sees them as one tagged block.
 		for _, r := range m.SubAgentReports() {
-			reportText := fmt.Sprintf("<subagent-report label=%q>\n%s\n</subagent-report>", r.Label, r.Output)
+			reportText := r.PromptText()
 			if text != "" {
 				text += "\n\n" + reportText
 			} else {

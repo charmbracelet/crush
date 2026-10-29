@@ -557,10 +557,9 @@ func (c *coordinator) rollUpDispatchCost(ctx context.Context, entry *dispatchedA
 	}
 }
 
-// reportDispatchResult delivers a finished subagent's output back to the
-// parent session. If the parent is mid-turn the message folds into it at the
-// next step; if the parent is idle it starts a new turn. If no turn can start
-// at all, the report is still written to the session so it is read next turn.
+// reportDispatchResult saves a finished subagent's output to the parent
+// session, then wakes the parent: it folds into a turn in progress or starts
+// one. Saving first means a cancelled or failed turn cannot lose the report.
 func (c *coordinator) reportDispatchResult(entry *dispatchedAgent, resp fantasy.ToolResponse, err error) {
 	var (
 		body   string
@@ -581,43 +580,38 @@ func (c *coordinator) reportDispatchResult(entry *dispatchedAgent, resp fantasy.
 		Failed: failed,
 		Model:  modelDisplayName(entry.agent.Model()),
 	}
-	if _, err := c.runWithParts(
-		context.Background(),
-		entry.ParentSessionID,
-		reportPrompt(report),
-		[]message.ContentPart{report},
-	); err != nil {
+	saved, ok := c.recordDispatchReport(entry.ParentSessionID, report)
+	if !ok {
+		return
+	}
+	if _, err := c.runSaved(context.Background(), saved, report.PromptText()); err != nil {
 		slog.Error(
-			"Failed to deliver subagent report",
+			"Failed to wake the parent with a subagent report",
 			"label", entry.Label,
 			"parent_session", entry.ParentSessionID,
 			"error", err,
 		)
-		c.recordDispatchReport(entry.ParentSessionID, report)
 	}
-}
-
-// reportPrompt mirrors what a report part renders into for the model; the
-// part is what the UI draws.
-func reportPrompt(report message.SubAgentReport) string {
-	return fmt.Sprintf("<subagent-report label=%q>\n%s\n</subagent-report>", report.Label, report.Output)
 }
 
 // recordDispatchReport stores a report in the parent session without starting
 // a turn. The model reads it with the rest of the history on its next turn,
 // and the UI settles the subagent's item when it lands.
-func (c *coordinator) recordDispatchReport(parentSessionID string, report message.SubAgentReport) {
-	if _, err := c.messages.Create(context.Background(), parentSessionID, message.CreateMessageParams{
+func (c *coordinator) recordDispatchReport(parentSessionID string, report message.SubAgentReport) (message.Message, bool) {
+	msg, err := c.messages.Create(context.Background(), parentSessionID, message.CreateMessageParams{
 		Role:  message.User,
 		Parts: []message.ContentPart{report},
-	}); err != nil {
+	})
+	if err != nil {
 		slog.Error(
 			"Failed to record subagent report",
 			"label", report.Label,
 			"parent_session", parentSessionID,
 			"error", err,
 		)
+		return message.Message{}, false
 	}
+	return msg, true
 }
 
 // agentSendTool delivers a message to a running detached subagent. The

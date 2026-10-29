@@ -1,47 +1,36 @@
 package agent
 
 import (
+	"errors"
 	"testing"
 
+	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/stretchr/testify/require"
 )
 
-// A report that arrives while the parent is busy waits in the queue. If
-// that turn is then cancelled, the report must still reach the transcript;
-// otherwise the subagent reads as never having reported, and the next
-// launch tells the parent it was interrupted.
-func TestCancelKeepsQueuedSubagentReport(t *testing.T) {
+// A report is saved before the parent is woken, so a turn that fails to
+// start, or is cancelled, cannot lose it.
+func TestReportIsSavedEvenWhenWakingFails(t *testing.T) {
 	t.Parallel()
-	env := testEnv(t)
-	a := NewSessionAgent(SessionAgentOptions{
-		Models:   noModels,
-		Sessions: env.sessions,
-		Messages: env.messages,
-	}).(*sessionAgent)
-
+	c, env := newDispatchTestCoordinator(t)
+	c.readyWg.Go(func() error { return errors.New("not ready") })
 	parent, err := env.sessions.Create(t.Context(), "parent")
 	require.NoError(t, err)
-	report := message.SubAgentReport{Label: "betty-review", Output: "all good"}
-	a.messageQueue.Set(parent.ID, []SessionAgentCall{
-		{SessionID: parent.ID, Prompt: "follow-up the user typed", acceptSeq: 1},
-		{SessionID: parent.ID, Prompt: reportPrompt(report), PromptParts: []message.ContentPart{report}},
-	})
+	entry := newDispatchedAgent("betty-review", accessRead, "child", parent.ID, newMockAgent("p", 4096, nil))
 
-	a.Cancel(parent.ID)
+	c.reportDispatchResult(entry, fantasy.NewTextResponse("all good"), nil)
 
 	msgs, err := env.messages.List(t.Context(), parent.ID)
 	require.NoError(t, err)
-	var reports []message.SubAgentReport
-	for _, m := range msgs {
-		reports = append(reports, m.SubAgentReports()...)
-	}
-	require.Equal(t, []message.SubAgentReport{report}, reports)
+	require.Len(t, msgs, 1)
+	reports := msgs[0].SubAgentReports()
+	require.Len(t, reports, 1)
+	require.Equal(t, "all good", reports[0].Output)
 }
 
-// A report queued behind a cancel is folded into the step rather than
-// dropped with the prompts the cancel covers.
-func TestDrainKeepsReportCoveredByCancel(t *testing.T) {
+// A call delivering a saved message writes nothing new.
+func TestSavedCallWritesNoUserMessage(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	a := NewSessionAgent(SessionAgentOptions{
@@ -49,18 +38,13 @@ func TestDrainKeepsReportCoveredByCancel(t *testing.T) {
 		Sessions: env.sessions,
 		Messages: env.messages,
 	}).(*sessionAgent)
-
-	const sessionID = "drain-report"
-	report := message.SubAgentReport{Label: "betty-review", Output: "all good"}
-	a.messageQueue.Set(sessionID, []SessionAgentCall{
-		{SessionID: sessionID, Prompt: "withdrawn", acceptSeq: 1},
-		{SessionID: sessionID, Prompt: reportPrompt(report), PromptParts: []message.ContentPart{report}},
-	})
-	a.cancelMark.Set(sessionID, 1)
-
-	fold, _ := a.drainQueueForStep(sessionID)
-	require.Len(t, fold, 1)
-	require.True(t, carriesReport(fold[0]))
+	saved := message.Message{ID: "saved", SessionID: "s"}
+	got, err := a.createUserMessage(t.Context(), SessionAgentCall{SessionID: "s", Saved: &saved})
+	require.NoError(t, err)
+	require.Equal(t, "saved", got.ID)
+	msgs, err := env.messages.List(t.Context(), "s")
+	require.NoError(t, err)
+	require.Empty(t, msgs)
 }
 
 // A queue-only call never starts a turn: on an idle session it is refused,

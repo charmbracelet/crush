@@ -340,14 +340,12 @@ func (c *coordinator) RunAccepted(ctx context.Context, accept *AcceptedRun, sess
 // Accepted so sessionAgent.Run can consume the accept reservation under
 // dispatchMu; when nil (the in-process/local path) no accept tracking
 // applies.
-// runWithParts starts a turn whose user message is built from parts rather
-// than from plain text. prompt is still what the model reads; parts decide how
-// the message renders.
-func (c *coordinator) runWithParts(ctx context.Context, sessionID, prompt string, parts []message.ContentPart) (*fantasy.AgentResult, error) {
-	return c.run(ctx, nil, parts, sessionID, prompt)
+// runSaved starts a turn on a user message already in the transcript.
+func (c *coordinator) runSaved(ctx context.Context, saved message.Message, prompt string) (*fantasy.AgentResult, error) {
+	return c.run(ctx, nil, &saved, saved.SessionID, prompt)
 }
 
-func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, promptParts []message.ContentPart, sessionID string, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
+func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, saved *message.Message, sessionID string, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
 	if err := c.readyWg.Wait(); err != nil {
 		return nil, err
 	}
@@ -441,7 +439,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, promptParts 
 			Channel:           channel,
 			Prompt:            prompt,
 			HostContext:       c.hostContext.Get(),
-			PromptParts:       promptParts,
+			Saved:             saved,
 			HiddenUserMessage: message.HiddenUserMessage(ctx),
 			Attachments:       attachments,
 			MaxOutputTokens:   maxTokens,

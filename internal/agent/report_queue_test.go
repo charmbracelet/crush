@@ -62,3 +62,28 @@ func TestDrainKeepsReportCoveredByCancel(t *testing.T) {
 	require.Len(t, fold, 1)
 	require.True(t, carriesReport(fold[0]))
 }
+
+// A queue-only call never starts a turn: on an idle session it is refused,
+// and on a busy one it is queued.
+func TestQueueOnlyCallNeverStartsATurn(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	a := NewSessionAgent(SessionAgentOptions{
+		Models:   noModels,
+		Sessions: env.sessions,
+		Messages: env.messages,
+	}).(*sessionAgent)
+	sess, err := env.sessions.Create(t.Context(), "child")
+	require.NoError(t, err)
+
+	_, err = a.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, Prompt: "hi", QueueOnly: true})
+	require.ErrorIs(t, err, ErrSessionIdle)
+	msgs, err := env.messages.List(t.Context(), sess.ID)
+	require.NoError(t, err)
+	require.Empty(t, msgs, "an idle session gets no turn")
+
+	a.activeRequests.Set(sess.ID, &activeCancel{cancel: func() {}})
+	_, err = a.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, Prompt: "hi", QueueOnly: true})
+	require.NoError(t, err)
+	require.Equal(t, 1, a.QueuedPrompts(sess.ID))
+}

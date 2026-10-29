@@ -1255,7 +1255,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			return nil, summarizeErr
 		case len(currentAssistant.ToolCalls()) > 0:
 			existing, _ := a.messageQueue.Get(call.SessionID)
-			call.Prompt = fmt.Sprintf("The previous session was interrupted because it got too long, the initial user request was: `%s`", call.Prompt)
+			call.Prompt = "The previous session was interrupted because it got too long. Continue the task using the summarized context above."
 			a.messageQueue.Set(call.SessionID, append(existing, call))
 			continued = true
 		}

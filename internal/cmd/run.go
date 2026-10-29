@@ -353,7 +353,7 @@ func cancelOwnQuestion(ctx context.Context, c *client.Client, wsID, sessionID st
 		return
 	}
 	slog.Warn("Cancelling a question from the agent: a non-interactive run cannot answer it", "session_id", sessionID)
-	if _, err := c.CancelQuestionBatch(ctx, wsID); err != nil {
+	if _, err := c.CancelQuestionBatch(ctx, wsID, q.Payload.ID); err != nil {
 		slog.Error("Failed to cancel the agent's question", "error", err)
 	}
 }

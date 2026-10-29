@@ -73,12 +73,13 @@ func (l *pipeListener) dial(ctx context.Context, _, _ string) (net.Conn, error) 
 	}
 }
 
-// pipeAddr names the pipe network after the host real clients send over
-// local sockets.
+// pipeAddr names the pipe listener. The harness's server is a tcp one,
+// which only accepts loopback-style Host headers, so requests over the pipe
+// name localhost.
 type pipeAddr struct{}
 
 func (pipeAddr) Network() string { return "pipe" }
-func (pipeAddr) String() string  { return "api.crush.localhost" }
+func (pipeAddr) String() string  { return "localhost" }
 
 // newPipeE2EHarness is [newE2EHarness] served over a [pipeListener], so a
 // client that stops reading stalls its stream deterministically on every

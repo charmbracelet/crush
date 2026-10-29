@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/catwalk/pkg/catwalk"
+	"charm.land/catwalk/v3/pkg/catwalk"
 )
 
 // httpClient is shared across all discovery and enrichment calls. It

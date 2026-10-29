@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"charm.land/catwalk/pkg/catwalk"
+	"charm.land/catwalk/v3/pkg/catwalk"
 	"charm.land/fantasy"
 	"charm.land/x/vcr"
 	"github.com/charmbracelet/crush/internal/agent/tools"

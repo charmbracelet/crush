@@ -15,7 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"charm.land/catwalk/pkg/catwalk"
+	"charm.land/catwalk/v3/pkg/catwalk"
 	"charm.land/fantasy/providers/openai"
 )
 

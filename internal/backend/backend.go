@@ -22,6 +22,7 @@ import (
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/proto"
+	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/crush/internal/version"
@@ -213,6 +214,12 @@ type Workspace struct {
 	// clients tracks each client's claim on this workspace. Refcount
 	// is a derived value: len(clients).
 	clients map[string]*clientState
+
+	// sessions announces when a client of the workspace changes the session
+	// it views. It is apart from the app's events, which the agent's
+	// sessions publish on, so that it reaches the streams on its own.
+	sessions     *pubsub.Broker[proto.ClientSession]
+	sessionsOnce sync.Once
 
 	// themeMu guards hostTheme. It is held only briefly (no IO) and never
 	// together with clientsMu.
@@ -679,7 +686,7 @@ func (b *Backend) RetireClient(clientID string) error {
 			if cs.holdTimer != nil {
 				cs.holdTimer.Stop()
 			}
-			delete(ws.clients, clientID)
+			forgetClient(ws, clientID, cs)
 			if len(ws.clients) == 0 {
 				orphaned = append(orphaned, ws)
 			}
@@ -755,7 +762,7 @@ func (b *Backend) expireHold(ws *Workspace, clientID string, timer *clientState)
 		return
 	}
 	cs.holdTimer = nil
-	delete(ws.clients, clientID)
+	forgetClient(ws, clientID, cs)
 	teardown := len(ws.clients) == 0
 	ws.clientsMu.Unlock()
 	if teardown {
@@ -776,7 +783,7 @@ func (b *Backend) releaseHoldLocked(ws *Workspace, clientID string) {
 	}
 	teardown := false
 	if cs.streams == 0 {
-		delete(ws.clients, clientID)
+		forgetClient(ws, clientID, cs)
 		teardown = len(ws.clients) == 0
 	} else {
 		// The client gave up its claim while streams are still open, which
@@ -815,7 +822,7 @@ func (b *Backend) detachStream(ws *Workspace, clientID string) {
 				b.expireHold(ws, clientID, cs)
 			})
 		} else {
-			delete(ws.clients, clientID)
+			forgetClient(ws, clientID, cs)
 			teardown = len(ws.clients) == 0
 		}
 	}
@@ -823,6 +830,49 @@ func (b *Backend) detachStream(ws *Workspace, clientID string) {
 	if teardown {
 		b.teardown(ws)
 	}
+}
+
+// publishClientSession tells the workspace's event streams which session
+// a client now views. It is called with clientsMu held; publishing never
+// blocks.
+func publishClientSession(ws *Workspace, clientID, sessionID string) {
+	ws.clientSessionBroker().Publish(pubsub.UpdatedEvent, proto.ClientSession{ClientID: clientID, SessionID: sessionID})
+}
+
+// clientSessionBroker returns the broker of client session changes,
+// creating it on first use.
+func (ws *Workspace) clientSessionBroker() *pubsub.Broker[proto.ClientSession] {
+	ws.sessionsOnce.Do(func() { ws.sessions = pubsub.NewBroker[proto.ClientSession]() })
+	return ws.sessions
+}
+
+// forgetClient removes a client's claim on the workspace. Its session is
+// cleared for the event streams first, so that they do not keep showing a
+// client that is gone. It is called with clientsMu held.
+func forgetClient(ws *Workspace, clientID string, cs *clientState) {
+	if cs.currentSessionID != "" {
+		publishClientSession(ws, clientID, "")
+	}
+	delete(ws.clients, clientID)
+}
+
+// ClientSessions returns the session each client of the workspace views,
+// for the clients that have one. It is sent to an event stream as it
+// opens, so a client that starts after another one learns its session.
+func (b *Backend) ClientSessions(workspaceID string) ([]proto.ClientSession, error) {
+	ws, ok := b.workspaces.Get(workspaceID)
+	if !ok {
+		return nil, ErrWorkspaceNotFound
+	}
+	ws.clientsMu.Lock()
+	defer ws.clientsMu.Unlock()
+	var out []proto.ClientSession
+	for id, cs := range ws.clients {
+		if cs.currentSessionID != "" {
+			out = append(out, proto.ClientSession{ClientID: id, SessionID: cs.currentSessionID})
+		}
+	}
+	return out, nil
 }
 
 // teardown removes the workspace from the index, shuts down its
@@ -981,8 +1031,12 @@ func (b *Backend) SetCurrentSession(ctx context.Context, workspaceID, clientID, 
 		ws.clientsMu.Unlock()
 		return ErrClientNotAttached
 	}
+	changed := cs.currentSessionID != sessionID
 	cs.currentSessionID = sessionID
 	cs.sessionReported = true
+	if changed {
+		publishClientSession(ws, clientID, sessionID)
+	}
 	ws.clientsMu.Unlock()
 
 	// A prompt that was raised while no client viewed the session

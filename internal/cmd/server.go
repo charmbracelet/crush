@@ -21,13 +21,30 @@ import (
 var serverHost string
 
 func init() {
-	serverCmd.Flags().StringVarP(&serverHost, "host", "H", server.DefaultHost(), "Server host (TCP or Unix socket)")
+	serverCmd.Flags().StringVarP(&serverHost, "host", "H", server.DefaultHost(), "Server host")
 	rootCmd.AddCommand(serverCmd)
 }
 
 var serverCmd = &cobra.Command{
 	Use:   "server",
 	Short: "Start the Crush server",
+	Long: `Start the Crush server.
+
+Usage:
+
+  # Serve over HTTP
+  crush server --host http://127.0.0.1:8080
+
+  # Serve over TCP
+  crush server --host tcp://127.0.0.1:8080
+
+  # Serve over a Unix socket (default)
+  crush server --host unix:///tmp/crush.sock
+
+While the server is running, browse the HTTP API docs at /v1/docs/
+(e.g. http://127.0.0.1:8080/v1/docs/). The OpenAPI 3.1 spec is served
+at /v1/docs/openapi.json.
+`,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		dataDir, err := cmd.Flags().GetString("data-dir")
 		if err != nil {

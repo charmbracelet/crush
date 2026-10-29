@@ -247,6 +247,20 @@ func (b *Backend) ClearQueue(workspaceID, sessionID string) error {
 	return nil
 }
 
+// AddNote keeps text for the session's next prompt. It does not start a run.
+func (b *Backend) AddNote(workspaceID, sessionID, text string) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+
+	if ws.AgentCoordinator == nil {
+		return ErrAgentNotInitialized
+	}
+	ws.AgentCoordinator.AddNote(sessionID, text)
+	return nil
+}
+
 // QueuedPromptsList returns the list of queued prompt strings for a
 // session.
 func (b *Backend) QueuedPromptsList(workspaceID, sessionID string) ([]string, error) {

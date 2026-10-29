@@ -414,8 +414,21 @@ func TestE2E_TwoClientsReceiveSameMessage(t *testing.T) {
 	// release the pooled DB connection so Windows can clean up
 	// the temp data directory.
 	wsDataDir := ws.Cfg.Config().Options.DataDirectory
+	released := make(chan struct{})
 	backend.SetWorkspaceShutdownFnForTest(ws, func() {
 		_ = db.Release(wsDataDir)
+		close(released)
+	})
+	// Registered before the stream cancels so LIFO cleanup runs it
+	// after both streams have dropped. The workspace is only torn
+	// down once its detach grace expires, and the data directory
+	// cannot be removed on Windows until that release happens.
+	t.Cleanup(func() {
+		select {
+		case <-released:
+		case <-time.After(10 * time.Second):
+			t.Error("workspace was not released after both clients detached")
+		}
 	})
 
 	evcA, cancelA := h.subscribeSSE(t, ctx, ws.ID, cidA)

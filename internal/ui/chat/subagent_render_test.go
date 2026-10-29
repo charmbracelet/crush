@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -141,4 +142,31 @@ func TestDispatchAdoptsTheNameItWasGiven(t *testing.T) {
 	})
 	require.Equal(t, "xochitl-audit", dispatch.DispatchLabel())
 	require.Contains(t, renderPlain(t, dispatch)[0], "Create Subagent → Xóchitl audit")
+}
+
+// A busy subagent's item shows only its latest tool calls until expanded,
+// so it stays readable and cheap to redraw however much the subagent does.
+func TestDispatchCollapsesOlderToolCalls(t *testing.T) {
+	t.Parallel()
+	sty := styles.CharmtonePantera()
+	item := NewToolMessageItem(&sty, "m", message.ToolCall{
+		ID: "c", Name: agent.AgentDispatchToolName, Input: `{"prompt":"look","label":"r"}`, Finished: true,
+	}, &message.ToolResult{ToolCallID: "c", Metadata: `{"label":"betty-r"}`}, false, "/tmp").(*AgentToolMessageItem)
+	for i := range collapsedNestedTools + 5 {
+		id := fmt.Sprintf("n%02d", i)
+		item.AddNestedTool(NewToolMessageItem(&sty, "m", message.ToolCall{
+			ID: id, Name: "view", Input: fmt.Sprintf(`{"file_path":"/tmp/f%02d.go"}`, i), Finished: true,
+		}, &message.ToolResult{ToolCallID: id}, false, "/tmp"))
+	}
+
+	out := strings.Join(renderPlain(t, item), "\n")
+	require.Contains(t, out, "… 5 earlier tool calls")
+	require.NotContains(t, out, "f04.go")
+	require.Contains(t, out, "f05.go")
+	require.Contains(t, out, fmt.Sprintf("f%02d.go", collapsedNestedTools+4))
+
+	item.ToggleExpanded()
+	out = strings.Join(renderPlain(t, item), "\n")
+	require.NotContains(t, out, "earlier tool calls")
+	require.Contains(t, out, "f00.go")
 }

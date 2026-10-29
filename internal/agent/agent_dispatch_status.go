@@ -107,13 +107,9 @@ func dispatchHistory(msgs []message.Message) dispatchRecords {
 			if label == "" {
 				continue
 			}
-			access := params.Access
-			if access == "" {
-				access = accessRead
-			}
 			record := &dispatchRecord{
 				Label:     label,
-				Access:    access,
+				Access:    accessOrRead(params.Access),
 				Task:      params.Prompt,
 				MessageID: msg.ID,
 				CallID:    call.ID,
@@ -174,12 +170,8 @@ func dispatchHistory(msgs []message.Message) dispatchRecords {
 				if label == "" {
 					continue
 				}
-				access := meta.Access
-				if access == "" {
-					access = accessRead
-				}
 				records.link(&dispatchRecord{
-					Access:    access,
+					Access:    accessOrRead(meta.Access),
 					Task:      meta.Task,
 					MessageID: bgCallMsg[result.ToolCallID],
 					CallID:    result.ToolCallID,

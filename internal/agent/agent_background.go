@@ -60,9 +60,7 @@ func (c *coordinator) runSubAgentMaybeBackground(
 	if !c.interactive {
 		return c.runSubAgent(ctx, params)
 	}
-	if access == "" {
-		access = accessRead
-	}
+	access = accessOrRead(access)
 
 	label := c.names.name(backgroundLabel(toolName, params.ToolCallID))
 	childSessionID := c.sessions.CreateAgentToolSessionID(params.AgentMessageID, params.ToolCallID)

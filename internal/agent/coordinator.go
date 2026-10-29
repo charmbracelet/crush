@@ -1578,9 +1578,7 @@ func (c *coordinator) IsBusy() bool {
 // and safe to settle, so it must not miss a subagent running on an agent
 // instance other than the main one.
 func (c *coordinator) IsSessionBusy(sessionID string) bool {
-	return c.currentAgent().IsSessionBusy(sessionID) ||
-		c.subSessionBusy(sessionID) ||
-		c.dispatchedSessionBusy(sessionID)
+	return c.currentAgent().IsSessionBusy(sessionID) || c.subSessionBusy(sessionID)
 }
 
 func (c *coordinator) ListSettledMessages(ctx context.Context, sessionID string) ([]message.Message, error) {

@@ -89,7 +89,10 @@ type SessionAgentCall struct {
 	RunID             string
 	Channel           string
 	HiddenUserMessage bool
-	Prompt            string
+	// QueueOnly delivers the call only into an active turn; on an idle
+	// session Run returns ErrSessionIdle instead of starting one.
+	QueueOnly bool
+	Prompt    string
 	// PromptParts, when non-empty, replaces the plain text part of the
 	// user message this call creates. The agent tool uses it to deliver
 	// subagent reports as a distinct content part so the UI renders them
@@ -179,6 +182,9 @@ func filterToolsForChannel(agentTools []fantasy.AgentTool, channel string, state
 	}
 	return filtered
 }
+
+// ErrSessionIdle is returned for a QueueOnly call when no turn is active.
+var ErrSessionIdle = errors.New("session is idle")
 
 type SessionAgent interface {
 	Run(context.Context, SessionAgentCall) (*fantasy.AgentResult, error)
@@ -737,6 +743,14 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		}
 		sessMu.Unlock()
 		return nil, nil
+	}
+
+	if call.QueueOnly {
+		if call.Accepted != nil {
+			call.Accepted.Close()
+		}
+		sessMu.Unlock()
+		return nil, ErrSessionIdle
 	}
 
 	// Idle: become the active run. Register the cancel func before dropping

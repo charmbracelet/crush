@@ -306,3 +306,30 @@ func TestPruneDispatchedKeepsRunningAndNewest(t *testing.T) {
 	_, ok = c.dispatched.Get(dispatchKey("p", fmt.Sprintf("done-%02d", keptFinishedDispatches+2)))
 	require.True(t, ok)
 }
+
+// A follow-up to a subagent pruned from the registry puts it back, so stop
+// and status still reach it while it runs.
+func TestReopenRestoresPrunedEntry(t *testing.T) {
+	t.Parallel()
+	c, env := newOverrideTestCoordinator(t)
+	parent, err := env.sessions.Create(t.Context(), "parent")
+	require.NoError(t, err)
+	release := make(chan struct{})
+	agent := newMockAgent("mock", 4096, func(context.Context, SessionAgentCall) (*fantasy.AgentResult, error) {
+		<-release
+		return agentResultWithText("done"), nil
+	})
+	entry := newDispatchedAgent("betty-pruned", accessRead, "child", parent.ID, agent)
+
+	require.True(t, c.reopen(entry, "more please"))
+	got, ok := c.dispatched.Get(dispatchKey(parent.ID, "betty-pruned"))
+	require.True(t, ok, "a reopened subagent is registered again")
+	require.Same(t, entry, got)
+	require.True(t, got.running())
+
+	require.False(t, c.reopen(entry, "again"), "a second follow-up does not start a second run")
+	// Stopped rather than finished, so no report turn starts on the parent.
+	entry.stop("test done")
+	close(release)
+	require.True(t, entry.awaitSettled(5*time.Second))
+}

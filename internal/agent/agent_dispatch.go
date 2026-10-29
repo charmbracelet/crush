@@ -443,13 +443,24 @@ func (c *coordinator) runDispatched(ctx context.Context, entry *dispatchedAgent,
 // Returns false if the subagent is not idle, meaning somebody else claimed
 // it first or it is still working.
 func (c *coordinator) reopen(entry *dispatchedAgent, prompt string) bool {
+	// Claiming and registering are one step under dispatchMu: two concurrent
+	// follow-ups resolve to one reopen, and an entry pruned meanwhile is put
+	// back rather than left running outside the registry.
+	c.dispatchMu.Lock()
+	key := dispatchKey(entry.ParentSessionID, entry.Label)
+	if current, ok := c.dispatched.Get(key); ok {
+		entry = current
+	}
 	agentCall, _, err := c.subAgentCall(entry.agent, entry.SessionID, prompt)
 	if err != nil {
+		c.dispatchMu.Unlock()
 		return false
 	}
-	// Claiming makes two concurrent follow-ups resolve to one reopen rather
-	// than two turns racing on one session.
 	runCtx, gen, ok := entry.claim()
+	if ok {
+		c.dispatched.Set(key, entry)
+	}
+	c.dispatchMu.Unlock()
 	if !ok {
 		return false
 	}
@@ -610,14 +621,18 @@ func (c *coordinator) agentSendTool() fantasy.AgentTool {
 				return reopened(entry), nil
 			}
 
-			// Addressed to the subagent's own SessionAgent and queued
-			// without a RunID, so it folds into that subagent's active
-			// turn rather than starting a turn of its own.
+			// Folded into the subagent's active turn. The busy check and the
+			// enqueue are one step, so a subagent finishing in between is
+			// reopened instead of answered inline here.
 			agentCall, _, err := c.subAgentCall(entry.agent, entry.SessionID, params.Message)
 			if err != nil {
 				return fantasy.NewTextErrorResponse("Failed to deliver message: " + err.Error()), nil
 			}
-			if _, err := entry.agent.Run(context.WithoutCancel(ctx), agentCall); err != nil {
+			agentCall.QueueOnly = true
+			if _, err := entry.agent.Run(context.WithoutCancel(ctx), agentCall); errors.Is(err, ErrSessionIdle) {
+				entry.awaitSettled(10 * time.Second)
+				return reopened(entry), nil
+			} else if err != nil {
 				return fantasy.NewTextErrorResponse("Failed to deliver message: " + err.Error()), nil
 			}
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(fmt.Sprintf(

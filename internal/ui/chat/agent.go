@@ -535,7 +535,7 @@ func subagentHeader(sty *styles.Styles, status ToolStatus, name, label, model st
 
 // subagentTarget renders "→ Name label", how every subagent header names one.
 func subagentTarget(sty *styles.Styles, label string) string {
-	return sty.Tool.ParamMain.Render("→ ") + RenderSubagentName(sty, label)
+	return sty.Tool.MCPArrow.String() + " " + RenderSubagentName(sty, label)
 }
 
 // RenderSubagentName renders the accented first name apart from the label.

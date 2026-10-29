@@ -136,6 +136,9 @@ func (m *Tool) Run(ctx context.Context, params fantasy.ToolCall) (fantasy.ToolRe
 	if err != nil {
 		return fantasy.NewTextErrorResponse(err.Error()), nil
 	}
+	if result.IsError {
+		return mcpToolErrorResponse(result), nil
+	}
 
 	switch result.Type {
 	case "image", "media":
@@ -154,4 +157,14 @@ func (m *Tool) Run(ctx context.Context, params fantasy.ToolCall) (fantasy.ToolRe
 	default:
 		return fantasy.NewTextResponse(result.Content), nil
 	}
+}
+
+// mcpToolErrorResponse reports an MCP tool result flagged with isError as a
+// failed tool call, so the model and the UI don't treat it as a success.
+func mcpToolErrorResponse(result mcp.ToolResult) fantasy.ToolResponse {
+	content := result.Content
+	if content == "" {
+		content = "MCP tool returned an error without details"
+	}
+	return fantasy.NewTextErrorResponse(content)
 }

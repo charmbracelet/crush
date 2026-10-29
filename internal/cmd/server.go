@@ -21,7 +21,7 @@ import (
 var serverHost string
 
 func init() {
-	serverCmd.Flags().StringVarP(&serverHost, "host", "H", server.DefaultHost(), "Server host")
+	serverCmd.Flags().StringVarP(&serverHost, "host", "H", server.DefaultHost(), "Server host  (HTTP, TCP or Unix socket)")
 	rootCmd.AddCommand(serverCmd)
 }
 

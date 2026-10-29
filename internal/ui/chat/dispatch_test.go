@@ -85,3 +85,27 @@ func TestRefusedDispatchHasNoStatus(t *testing.T) {
 	_, ok := item.(*AgentToolMessageItem).DispatchStatus()
 	require.False(t, ok)
 }
+
+// A blocking agent call that moved to the background is a subagent from
+// then on: it keeps spinning until its report, and the sidebar lists it.
+func TestBackgroundedAgentCallIsADispatch(t *testing.T) {
+	t.Parallel()
+	sty := styles.CharmtonePantera()
+	item := NewToolMessageItem(&sty, "msg-1", message.ToolCall{
+		ID: "call-1", Name: agent.AgentToolName, Input: `{"prompt":"long"}`, Finished: true,
+	}, nil, false, "/tmp").(*AgentToolMessageItem)
+	_, ok := item.DispatchStatus()
+	require.False(t, ok, "a blocking call is not a dispatch")
+
+	item.SetResult(&message.ToolResult{
+		ToolCallID: "call-1",
+		Content:    "moved to the background",
+		Metadata:   `{"label":"sofia-agent-123456","backgrounded":true}`,
+	})
+	require.Equal(t, "sofia-agent-123456", item.DispatchLabel())
+	require.True(t, running(t, item))
+	require.True(t, item.Spinning())
+
+	item.MarkDispatchReported()
+	require.False(t, running(t, item))
+}

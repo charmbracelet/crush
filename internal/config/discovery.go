@@ -59,7 +59,7 @@ func discoveryJobs(c *Config, known map[string]bool) []discoveryJob {
 				APIKey:       pc.APIKey,
 				ExtraHeaders: pc.ExtraHeaders,
 			},
-			providerType: string(cmp.Or(pc.Type, catwalk.TypeOpenAICompat)),
+			providerType: string(cmp.Or(pc.Type, catwalk.TypeCompletions)),
 		})
 	}
 	return jobs

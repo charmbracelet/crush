@@ -144,7 +144,7 @@ func (r realHyperClient) doGet(ctx context.Context, etag string) (catwalk.Provid
 	req, err := http.NewRequestWithContext(
 		ctx,
 		http.MethodGet,
-		r.baseURL+"/api/v1/provider",
+		r.baseURL+"/api/v1/provider/v3",
 		nil,
 	)
 	if err != nil {

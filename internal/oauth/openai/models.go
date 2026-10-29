@@ -94,14 +94,20 @@ func Models(ctx context.Context, token *oauth.Token) ([]catwalk.Model, error) {
 				levels = append(levels, level.Effort)
 			}
 		}
+		reasoning := catwalk.Reasoning{Thinking: catwalk.ThinkingNever}
+		if len(levels) > 0 {
+			reasoning = catwalk.Reasoning{
+				Thinking:           catwalk.ThinkingToggleable,
+				EffortLevels:       catwalk.NewEffortLevels(levels...),
+				DefaultEffortLevel: m.DefaultReasoningLevel,
+			}
+		}
 		models = append(models, catwalk.Model{
-			ID:                     m.Slug,
-			Name:                   m.DisplayName,
-			ContextWindow:          m.ContextWindow,
-			CanReason:              len(levels) > 0,
-			ReasoningLevels:        levels,
-			DefaultReasoningEffort: m.DefaultReasoningLevel,
-			SupportsImages:         true,
+			ID:            m.Slug,
+			Name:          m.DisplayName,
+			ContextWindow: m.ContextWindow,
+			Reasoning:     reasoning,
+			Capabilities:  catwalk.Capabilities{Vision: true},
 		})
 	}
 	if len(models) == 0 {

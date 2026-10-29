@@ -226,7 +226,7 @@ func TestLoadRefreshesGrokModelsWhenCatwalkUpdates(t *testing.T) {
 	newCatwalkStub(t, http.StatusOK, []catwalk.Provider{{
 		Name:                "xAI",
 		ID:                  catwalk.InferenceProviderXAI,
-		Type:                catwalk.TypeOpenAICompat,
+		Type:                catwalk.TypeCompletions,
 		DefaultLargeModelID: "grok-4.5",
 		DefaultSmallModelID: "grok-4.5",
 		Models: []catwalk.Model{

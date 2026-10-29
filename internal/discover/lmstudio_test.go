@@ -152,7 +152,7 @@ func TestLmstudioEnricher(t *testing.T) {
 		require.Equal(t, "User Name", result[0].Name)
 	})
 
-	t.Run("does not override user-set SupportsImages", func(t *testing.T) {
+	t.Run("does not override user-set vision capability", func(t *testing.T) {
 		t.Parallel()
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
@@ -165,15 +165,15 @@ func TestLmstudioEnricher(t *testing.T) {
 		defer srv.Close()
 
 		cfg := Config{ID: "test-lmstudio", BaseURL: srv.URL}
-		models := []catwalk.Model{{ID: "m1", Name: "m1", SupportsImages: true}}
+		models := []catwalk.Model{{ID: "m1", Name: "m1", Capabilities: catwalk.Capabilities{Vision: true}}}
 
 		e := &lmstudioEnricher{}
 		result, err := e.EnrichModels(context.Background(), cfg, &mockResolver{}, models)
 		require.NoError(t, err)
-		require.True(t, result[0].SupportsImages)
+		require.True(t, result[0].Capabilities.Vision)
 	})
 
-	t.Run("populates SupportsImages from capabilities.vision", func(t *testing.T) {
+	t.Run("populates vision capability from capabilities.vision", func(t *testing.T) {
 		t.Parallel()
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
@@ -211,8 +211,8 @@ func TestLmstudioEnricher(t *testing.T) {
 		e := &lmstudioEnricher{}
 		result, err := e.EnrichModels(context.Background(), cfg, &mockResolver{}, models)
 		require.NoError(t, err)
-		require.True(t, result[0].SupportsImages, "vision model should have SupportsImages=true")
-		require.False(t, result[1].SupportsImages, "text-only model should have SupportsImages=false")
-		require.False(t, result[2].SupportsImages, "model without capabilities should default to false")
+		require.True(t, result[0].Capabilities.Vision, "vision model should have Capabilities.Vision=true")
+		require.False(t, result[1].Capabilities.Vision, "text-only model should have Capabilities.Vision=false")
+		require.False(t, result[2].Capabilities.Vision, "model without capabilities should default to false")
 	})
 }

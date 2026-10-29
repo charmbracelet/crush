@@ -5,7 +5,7 @@ go 1.27.0
 require (
 	charm.land/bubbles/v2 v2.2.1
 	charm.land/bubbletea/v2 v2.1.0
-	charm.land/catwalk v0.52.49
+	charm.land/catwalk v0.52.87-0.20261028124101-d20cc5a55a69 // pinned v3-preview
 	charm.land/fang/v2 v2.0.1
 	charm.land/fantasy v0.45.1
 	charm.land/glamour/v2 v2.0.1

@@ -19,7 +19,7 @@ import (
 	"charm.land/fantasy/providers/openai"
 )
 
-//go:generate wget -O provider.json https://hyper.charm.land/v1/provider
+//go:generate wget -O provider.json https://hyper.charm.land/v1/provider/v3
 
 //go:embed provider.json
 var embedded []byte

@@ -2,6 +2,7 @@ package backend
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -54,8 +55,9 @@ func (c *sessionRunCoordinator) startRun(t *testing.T, ws *Workspace, sessionID 
 		done <- err
 	}()
 	require.Eventually(t, func() bool {
-		req, ok := ws.Permissions.ActiveRequest()
-		return ok && req.SessionID == sessionID
+		return slices.ContainsFunc(ws.Permissions.ActiveRequests(), func(req permission.PermissionRequest) bool {
+			return req.SessionID == sessionID
+		})
 	}, 10*time.Second, 5*time.Millisecond, "the run of %s must be waiting on its prompt", sessionID)
 	return ctx, done
 }

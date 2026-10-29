@@ -417,7 +417,7 @@ func (c *coordinator) subAgentActivity(ctx context.Context, sessionID string) su
 	}
 
 	const recent = 8
-	var calls []string
+	var calls []message.ToolCall
 	for _, msg := range msgs {
 		if msg.Role != message.Assistant {
 			continue
@@ -425,21 +425,23 @@ func (c *coordinator) subAgentActivity(ctx context.Context, sessionID string) su
 		if text := strings.TrimSpace(msg.Content().Text); text != "" {
 			progress.lastText = text
 		}
-		for _, call := range msg.ToolCalls() {
-			progress.toolCalls++
-			outcome := "running"
-			if result, ok := results[call.ID]; ok {
-				outcome = "ok"
-				if result.IsError {
-					outcome = "error"
-				}
-			}
-			calls = append(calls, fmt.Sprintf("%s %s [%s]", call.Name, truncateForStatus(compactJSON(call.Input), 120), outcome))
-		}
+		calls = append(calls, msg.ToolCalls()...)
 	}
-	if len(calls) > 0 {
-		progress.lastCall = calls[len(calls)-1]
-		progress.recentCalls = calls[max(0, len(calls)-recent):]
+	progress.toolCalls = len(calls)
+	// Only the calls shown are formatted; formatting every call made each
+	// status check cost as much as the subagent's whole history.
+	for _, call := range calls[max(0, len(calls)-recent):] {
+		outcome := "running"
+		if result, ok := results[call.ID]; ok {
+			outcome = "ok"
+			if result.IsError {
+				outcome = "error"
+			}
+		}
+		progress.recentCalls = append(progress.recentCalls, fmt.Sprintf("%s %s [%s]", call.Name, truncateForStatus(compactJSON(call.Input), 120), outcome))
+	}
+	if n := len(progress.recentCalls); n > 0 {
+		progress.lastCall = progress.recentCalls[n-1]
 	}
 	return progress
 }

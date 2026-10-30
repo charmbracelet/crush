@@ -45,6 +45,30 @@
         "audio"
       ]
     },
+    "CompactionOptions": {
+      "properties": {
+        "prune_tool_results": {
+          "type": "boolean",
+          "description": "Replace the output of stale tool calls with a one-line skeleton naming what ran; stored history is never modified",
+          "default": true
+        },
+        "tail_tokens": {
+          "type": "integer",
+          "description": "Tokens of recent conversation a compaction keeps verbatim. When unset this is 15% of the model's context window",
+          "examples": [
+            8000,
+            40000
+          ]
+        },
+        "observe_memory": {
+          "type": "boolean",
+          "description": "Record session memory at the end of each turn; memory is kept verbatim beside every checkpoint",
+          "default": true
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
     "Completions": {
       "properties": {
         "max_depth": {
@@ -578,6 +602,10 @@
           "type": "boolean",
           "description": "Disable automatic conversation summarization",
           "default": false
+        },
+        "compaction": {
+          "$ref": "#/$defs/CompactionOptions",
+          "description": "Context compaction options"
         },
         "data_directory": {
           "type": "string",

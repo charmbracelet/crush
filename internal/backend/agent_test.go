@@ -10,6 +10,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/app"
+	"github.com/charmbracelet/crush/internal/compaction"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/google/uuid"
@@ -60,12 +61,20 @@ func (c *blockingCoordinator) QueuedPrompts(string) int                         
 func (c *blockingCoordinator) QueuedPromptsList(string) []string                 { return nil }
 func (c *blockingCoordinator) ClearQueue(string)                                 {}
 func (c *blockingCoordinator) AddNote(string, string)                            {}
-func (c *blockingCoordinator) Summarize(context.Context, string) error           { return nil }
+func (c *blockingCoordinator) Summarize(context.Context, string, string) error   { return nil }
+func (c *blockingCoordinator) RestoreSummarize(context.Context, string) error    { return nil }
 func (c *blockingCoordinator) Model() agent.Model                                { return agent.Model{} }
 func (c *blockingCoordinator) UpdateModels(context.Context) error                { return nil }
 func (c *blockingCoordinator) GenerateTitle(context.Context, string, string)     {}
 func (c *blockingCoordinator) SetHostContext(proto.HostContext)                  {}
 func (c *blockingCoordinator) HostContext() proto.HostContext                    { return proto.HostContext{} }
+func (c *blockingCoordinator) SummarizePreview(context.Context, string, string) (compaction.Preview, error) {
+	return compaction.Preview{}, nil
+}
+func (c *blockingCoordinator) ConfirmSummarize(context.Context, string, compaction.Preview) error {
+	return nil
+}
+func (c *blockingCoordinator) DiscardSummarize(context.Context, string, string) error { return nil }
 
 func (c *blockingCoordinator) SetMainAgent(agentName string) error {
 	c.lastMainAgentSet.Store(agentName)

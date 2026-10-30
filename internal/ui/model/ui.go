@@ -35,6 +35,7 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/clipboard"
 	"github.com/charmbracelet/crush/internal/commands"
+	"github.com/charmbracelet/crush/internal/compaction"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/fsext"
@@ -289,6 +290,16 @@ type UI struct {
 
 	// isCanceling tracks whether the user has pressed escape once to cancel.
 	isCanceling bool
+	// summarizingNote is the in-flight status of a compaction, surfaced
+	// through the editor placeholder, and summarizingNoteSession is the
+	// session it belongs to. The pair rather than a bare string because a
+	// compaction keeps running when the user switches away, and its status
+	// must not follow them to the next session.
+	summarizingNote string
+	// pendingPreview is a checkpoint the user has been shown but has not yet
+	// accepted. The session still has its full history while it is set.
+	pendingPreview         *compaction.Preview
+	summarizingNoteSession string
 
 	// bangMode tracks whether the editor is in bang (!) shell mode.
 	bangMode     bool
@@ -1134,6 +1145,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.updateSessionMessage(msg.Payload))
 		case pubsub.DeletedEvent:
 			m.chat.RemoveMessage(msg.Payload.ID)
+			m.chat.RemoveMessage(chat.AssistantInfoID(msg.Payload.ID))
 		}
 		// start the spinner if there is a new message
 		if hasInProgressTodo(m.session.Todos) && m.isAgentBusy() && !m.todoIsSpinning {
@@ -1216,6 +1228,27 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sendProgressBar = xstrings.ContainsAnyOf(termVersion, "ghostty", "iterm2", "rio")
 		}
 		return m, nil
+	case previewCheckpointMsg:
+		// Hold the staged checkpoint and ask about it in the foreground. A
+		// banner that expired left the decision to be remembered, and a staged
+		// checkpoint rendered in the transcript looked exactly like an applied
+		// one; the inline prompt waits for an answer instead.
+		m.pendingPreview = &msg.preview
+		cmds = append(cmds, util.ReportInfo(fmt.Sprintf(
+			"Checkpoint previewed: %d messages would be replaced, %d kept verbatim.",
+			msg.preview.Replaced, msg.preview.Kept,
+		)))
+		m.openCheckpointHandoff()
+	case discardPreviewMsg:
+		m.pendingPreview = nil
+		// Every decision - keep, discard, whatever the path - lands here, so
+		// the reload does too: the feed then reflects the session as it is,
+		// not as it was while a staged checkpoint was still a row. Skipping
+		// this left the viewport scrolled past content that had just been
+		// deleted, which read as an empty page.
+		if m.session != nil {
+			cmds = append(cmds, m.loadSession(m.session.ID))
+		}
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		// Suppress the chat's full-height scan during the resize so a drag
@@ -1657,6 +1690,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Textarea placeholder logic
 		if m.bangMode {
 			m.textarea.Placeholder = "Run a shell command"
+		} else if m.compactionVisible() {
+			m.textarea.Placeholder = m.summarizingNote
 		} else if m.isAgentBusy() {
 			m.textarea.Placeholder = m.workingPlaceholder
 		} else if m.mode == uiInputModePlan {
@@ -1664,7 +1699,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.textarea.Placeholder = m.readyPlaceholder
 		}
-		if !m.bangMode && m.mode != uiInputModePlan && m.yoloModeCached() {
+		if m.summarizingNote == "" && !m.bangMode && m.mode != uiInputModePlan && m.yoloModeCached() {
 			m.textarea.Placeholder = "Go crazy"
 		}
 	}
@@ -2275,17 +2310,82 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionSummarize:
+		// The palette entry collects emphasis first. The action handed back by
+		// the arguments dialog carries Args, so it runs straight through.
+		if len(msg.Arguments) > 0 && msg.Args == nil {
+			m.dialog.CloseFrontDialog()
+			m.dialog.OpenDialog(dialog.NewArguments(
+				m.com,
+				"Compact Session",
+				"Optional: tell the checkpoint what to emphasize. Empty is fine, and means a general summary of the whole session.",
+				msg.Arguments,
+				msg,
+			))
+			break
+		}
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before summarizing session..."))
 			break
 		}
 		cmds = append(cmds, func() tea.Msg {
-			err := m.com.Workspace.AgentSummarize(context.Background(), msg.SessionID)
+			err := m.com.Workspace.AgentSummarize(context.Background(), msg.SessionID, msg.Instructions)
 			if err != nil {
 				return util.ReportError(err)()
 			}
 			return nil
 		})
+		// Whatever is on top is what the user submitted: from the palette
+		// that is the command list, from the arguments dialog it is that
+		// dialog, and closing the wrong one leaves the box hanging over a
+		// compaction that is already running.
+		m.dialog.CloseFrontDialog()
+	case dialog.ActionPreviewSummarize:
+		// The palette collects emphasis first, exactly as compact does; the
+		// action handed back carries Args and runs straight through.
+		if len(msg.Arguments) > 0 && msg.Args == nil {
+			m.dialog.CloseFrontDialog()
+			m.dialog.OpenDialog(dialog.NewArguments(
+				m.com,
+				"Compact (Preview First)",
+				"Optional: tell the checkpoint what to emphasize. The result is written for reading, and only applied if you keep it.",
+				msg.Arguments,
+				msg,
+			))
+			break
+		}
+		if m.isAgentBusy() {
+			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before previewing a checkpoint..."))
+			break
+		}
+		cmds = append(cmds, func() tea.Msg {
+			preview, err := m.com.Workspace.AgentSummarizePreview(context.Background(), msg.SessionID, msg.Instructions)
+			if err != nil {
+				return util.ReportError(err)()
+			}
+			return previewCheckpointMsg{preview: preview}
+		})
+		m.dialog.CloseFrontDialog()
+	case dialog.ActionAcceptPreview:
+		if cmd := m.acceptCheckpoint(msg.Preview); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionDiscardPreview:
+		if cmd := m.discardCheckpoint(msg.CheckpointID); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionRestoreSummarize:
+		if m.isAgentBusy() {
+			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before restoring the checkpoint..."))
+			break
+		}
+		cmds = append(cmds, func() tea.Msg {
+			if err := m.com.Workspace.AgentRestoreSummarize(context.Background(), msg.SessionID); err != nil {
+				return util.ReportError(err)()
+			}
+			return nil
+		}, m.loadSession(msg.SessionID))
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleHelp:
 		m.status.ToggleHelp()
@@ -5690,6 +5790,9 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 		return util.ReportError(err)
 	}
 
+	commands.SetPendingPreview(m.pendingPreview)
+	commands.SetHasCheckpoint(m.session != nil && m.session.SummaryMessageID != "")
+
 	m.dialog.OpenDialog(commands)
 
 	return commands.InitialCmd()
@@ -5958,8 +6061,89 @@ func (m *UI) openPlanHandoff() {
 	}
 }
 
+// openCheckpointHandoff replaces the textarea with the inline prompt asking
+// what to do with a previewed checkpoint. Dismissing it keeps the staged
+// checkpoint, so the palette still offers keep and discard afterwards.
+func (m *UI) openCheckpointHandoff() {
+	if m.pendingPreview == nil || m.session == nil {
+		return
+	}
+	// Captured at open time: acceptance has to use the counters computed when
+	// this preview was written, so a later change to the staged preview cannot
+	// make the adopted checkpoint disagree with the plan that produced it.
+	preview := *m.pendingPreview
+	inline := dialog.NewCheckpointHandoffInline(m.com)
+	inline.OnKeep = func() tea.Cmd { return m.acceptCheckpoint(preview) }
+	inline.OnDiscard = func() tea.Cmd { return m.discardCheckpoint(preview.CheckpointID) }
+	inline.OnRedo = func(comments string) tea.Cmd { return m.redoCheckpoint(preview.CheckpointID, comments) }
+	m.activeInline = inline
+	m.textarea.Blur()
+	m.focus = uiFocusEditor
+	m.activeInline.SetFocused(true)
+	if m.status != nil {
+		m.updateLayoutAndSize()
+	}
+}
+
+// acceptCheckpoint adopts the staged checkpoint named by preview.
+func (m *UI) acceptCheckpoint(preview compaction.Preview) tea.Cmd {
+	if m.session == nil {
+		return nil
+	}
+	sessionID := m.session.ID
+	return func() tea.Msg {
+		if err := m.com.Workspace.AgentConfirmSummarize(context.Background(), sessionID, preview); err != nil {
+			return util.ReportError(err)()
+		}
+		return discardPreviewMsg{}
+	}
+}
+
+// discardCheckpoint throws the staged checkpoint away and changes nothing.
+func (m *UI) discardCheckpoint(checkpointID string) tea.Cmd {
+	if m.session == nil {
+		return nil
+	}
+	sessionID := m.session.ID
+	return func() tea.Msg {
+		if err := m.com.Workspace.AgentDiscardSummarize(context.Background(), sessionID, checkpointID); err != nil {
+			return util.ReportError(err)()
+		}
+		return discardPreviewMsg{}
+	}
+}
+
+// redoCheckpoint discards the staged checkpoint and writes another with the
+// user's notes as the emphasis. The old one has to go first: previews are rows
+// in the transcript, so answering twice without discarding would leave the
+// session holding checkpoints nobody asked for, each rendering as a summary.
+func (m *UI) redoCheckpoint(checkpointID, comments string) tea.Cmd {
+	if m.session == nil {
+		return nil
+	}
+	sessionID := m.session.ID
+	m.pendingPreview = nil
+	return func() tea.Msg {
+		if err := m.com.Workspace.AgentDiscardSummarize(context.Background(), sessionID, checkpointID); err != nil {
+			return util.ReportError(err)()
+		}
+		fresh, err := m.com.Workspace.AgentSummarizePreview(context.Background(), sessionID, comments)
+		if err != nil {
+			return util.ReportError(err)()
+		}
+		return previewCheckpointMsg{preview: fresh}
+	}
+}
+
 // handleAgentNotification translates domain agent events into desktop
 // notifications using the UI notification backend.
+// compactionVisible reports whether the in-flight compaction note describes
+// the session the user is looking at. A compaction keeps running when they
+// switch away, and its status must not follow them to the next session.
+func (m *UI) compactionVisible() bool {
+	return m.summarizingNote != "" && m.session != nil && m.summarizingNoteSession == m.session.ID
+}
+
 func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 	var cmds []tea.Cmd
 	switch n.Type {
@@ -5985,6 +6169,27 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 		return m.handleAWSSSOAuth(n.AWSSOCommand, n.AWSSOURL)
 	case notify.TypeAWSSSOAuthResult:
 		return m.handleAWSSSOAuthResult(n.Message)
+	case notify.TypeSummarizing:
+		// While a compaction runs the placeholder says what it is doing and
+		// how far along it is, so minutes of streaming are not mistaken for a
+		// hang; when it ends the toast reports the outcome. The chat already
+		// spins, and the session update refreshes the context meter.
+		if m.session == nil || n.SessionID != m.session.ID {
+			return nil
+		}
+		if !n.Done {
+			m.summarizingNote = n.Progress
+			m.summarizingNoteSession = n.SessionID
+			m.invalidateFrames()
+			return nil
+		}
+		m.summarizingNote = ""
+		m.summarizingNoteSession = ""
+		m.invalidateFrames()
+		if n.Progress == "" {
+			return nil
+		}
+		return util.ReportInfo(n.Progress)
 	default:
 		return nil
 	}
@@ -6492,3 +6697,11 @@ func renderLogo(t *styles.Styles, compact, hyper bool, width int) string {
 		Hyper:        hyper,
 	})
 }
+
+// previewCheckpointMsg carries a staged checkpoint back from the workspace so
+// the model can hold it for the accept/discard commands.
+type previewCheckpointMsg struct{ preview compaction.Preview }
+
+// discardPreviewMsg clears the staged checkpoint once it has been accepted or
+// thrown away, so the palette stops offering a decision that is already made.
+type discardPreviewMsg struct{}

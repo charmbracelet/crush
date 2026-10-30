@@ -26,6 +26,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
+	"github.com/charmbracelet/crush/internal/compaction"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/discover"
@@ -33,6 +34,7 @@ import (
 	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/hooks"
+	"github.com/charmbracelet/crush/internal/ledger"
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
@@ -130,7 +132,11 @@ type Coordinator interface {
 	QueuedPromptsList(sessionID string) []string
 	ClearQueue(sessionID string)
 	AddNote(sessionID, text string)
-	Summarize(context.Context, string) error
+	Summarize(context.Context, string, string) error
+	RestoreSummarize(context.Context, string) error
+	SummarizePreview(context.Context, string, string) (compaction.Preview, error)
+	ConfirmSummarize(context.Context, string, compaction.Preview) error
+	DiscardSummarize(context.Context, string, string) error
 	Model() Model
 	UpdateModels(ctx context.Context) error
 	GenerateTitle(ctx context.Context, sessionID, prompt string)
@@ -152,6 +158,7 @@ type coordinator struct {
 	notify      pubsub.Publisher[notify.Notification]
 	runComplete pubsub.Publisher[notify.RunComplete]
 	interactive bool
+	ledger      ledger.Service
 
 	// agentMu guards mainAgent and mainAgentName: SetMainAgent runs on
 	// HTTP handler goroutines while runs, cancels, and probes read the
@@ -195,6 +202,9 @@ type CoordinatorOptions struct {
 	Skills      *skills.Manager
 	HookRunner  *hooks.Runner
 	Interactive bool
+	// Ledger persists session memory. Nil disables observation and leaves
+	// compaction summarizing with a model, which is the default.
+	Ledger ledger.Service
 }
 
 func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, error) {
@@ -228,6 +238,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		skillTracker: skillTracker,
 		interactive:  opts.Interactive,
 		hookRunner:   opts.HookRunner,
+		ledger:       opts.Ledger,
 	}
 
 	agentCfg, ok := opts.Config.Config().Agents[config.AgentCoder]
@@ -853,6 +864,8 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		Notify:               c.notify,
 		RunComplete:          c.runComplete,
 		Hooks:                c.hookRunner,
+		Ledger:               c.ledger,
+		ObserveMemory:        c.observesMemory(isSubAgent),
 	})
 
 	// The readiness goroutines below perform one-time setup — building the
@@ -936,6 +949,13 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		tools.NewWriteTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 	)
 
+	// Memory recall is only offered where memory exists. A session that records
+	// nothing has nothing to recall, and the tool's description would be prompt
+	// weight paid on every request for no capability.
+	if c.ledger != nil && c.observesMemory(isSubAgent) {
+		allTools = append(allTools, tools.NewRecallTool(c.ledger, c.messages))
+	}
+
 	// Question tool is interactive-only and not available to sub-agents.
 	if !isSubAgent && c.interactive {
 		allTools = append(allTools, tools.NewQuestionTool(c.questions))
@@ -1006,6 +1026,21 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	filteredTools = wrapToolsWithHooks(filteredTools, c.hookRunner, isSubAgent)
 
 	return filteredTools, nil
+}
+
+// observesMemory reports whether this agent should distill its turns into the
+// memory ledger. Sub-agents never do: they are the compaction's own machinery
+// and a memory of a memory is the erosion the ledger exists to prevent. The
+// ledger service being absent also disables it, so a build without one keeps
+// working unchanged. Recording is on unless explicitly disabled: the ledger
+// only pays for itself if it has been accumulating since the turns a later
+// compaction will replace.
+func (c *coordinator) observesMemory(isSubAgent bool) bool {
+	if isSubAgent || c.ledger == nil {
+		return false
+	}
+	co := c.cfg.Config().Options.Compaction
+	return co == nil || co.ObserveMemory == nil || *co.ObserveMemory
 }
 
 // buildModel builds the model selected for one slot from the live config.
@@ -1508,7 +1543,7 @@ func (c *coordinator) QueuedPromptsList(sessionID string) []string {
 	return c.currentAgent().QueuedPromptsList(sessionID)
 }
 
-func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
+func (c *coordinator) Summarize(ctx context.Context, sessionID, instructions string) error {
 	agent := c.currentAgent()
 	providerCfg, ok := c.cfg.Config().Providers.Get(agent.Model().ModelCfg.Provider)
 	if !ok {
@@ -1523,7 +1558,33 @@ func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
 	// the same path used by regular turns.
 	opts := getProviderOptions(agent.Model(), providerCfg)
 	injectOpenrouterSessionID(opts, sessionID)
-	return agent.Summarize(ctx, sessionID, opts, c.makeAuthRefreshCallback(providerCfg))
+	return agent.Summarize(ctx, sessionID, instructions, opts, c.makeAuthRefreshCallback(providerCfg))
+}
+
+// SummarizePreview writes a checkpoint for a session without adopting it.
+func (c *coordinator) SummarizePreview(ctx context.Context, sessionID, instructions string) (compaction.Preview, error) {
+	agent := c.currentAgent()
+	providerCfg, ok := c.cfg.Config().Providers.Get(agent.Model().ModelCfg.Provider)
+	if !ok {
+		return compaction.Preview{}, errModelProviderNotConfigured
+	}
+	return agent.SummarizePreview(ctx, sessionID, instructions, getProviderOptions(agent.Model(), providerCfg), c.makeAuthRefreshCallback(providerCfg))
+}
+
+// ConfirmSummarize adopts a previewed checkpoint.
+func (c *coordinator) ConfirmSummarize(ctx context.Context, sessionID string, preview compaction.Preview) error {
+	return c.currentAgent().ConfirmSummarize(ctx, sessionID, preview)
+}
+
+// DiscardSummarize throws away a previewed checkpoint.
+func (c *coordinator) DiscardSummarize(ctx context.Context, sessionID, checkpointID string) error {
+	return c.currentAgent().DiscardSummarize(ctx, sessionID, checkpointID)
+}
+
+// RestoreSummarize undoes the last compaction of a session. No model is
+// involved, so no token refresh is either.
+func (c *coordinator) RestoreSummarize(ctx context.Context, sessionID string) error {
+	return c.currentAgent().RestoreSummarize(ctx, sessionID)
 }
 
 // GenerateTitle generates a session title using the current agent.

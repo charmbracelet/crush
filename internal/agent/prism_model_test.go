@@ -86,7 +86,7 @@ func TestSummarizeCapturesPrismModel(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	require.NoError(t, agent.Summarize(ctx, sess.ID, fantasy.ProviderOptions{}, nil))
+	require.NoError(t, agent.Summarize(ctx, sess.ID, "", fantasy.ProviderOptions{}, nil))
 
 	updated, err := env.sessions.Get(ctx, sess.ID)
 	require.NoError(t, err)

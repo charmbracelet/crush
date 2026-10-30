@@ -10,7 +10,6 @@
 package shell
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -284,8 +283,8 @@ func (s *Shell) execCommon(ctx context.Context, command string, stdout, stderr i
 
 // exec executes commands using a cross-platform shell interpreter.
 func (s *Shell) exec(ctx context.Context, command string) (string, string, error) {
-	var stdout, stderr bytes.Buffer
-	err := s.execCommon(ctx, command, &stdout, &stderr)
+	stdout, stderr := newCappedBuffer(maxKeptOutput), newCappedBuffer(maxKeptOutput)
+	err := s.execCommon(ctx, command, stdout, stderr)
 	return stdout.String(), stderr.String(), err
 }
 

@@ -1,7 +1,6 @@
 package shell
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -128,9 +127,9 @@ func RunAndCapture(ctx context.Context, opts RunOptions) (CaptureResult, error) 
 		opts.Env = os.Environ()
 	}
 
-	var stdout, stderr bytes.Buffer
-	opts.Stdout = &stdout
-	opts.Stderr = &stderr
+	stdout, stderr := newCappedBuffer(maxKeptOutput), newCappedBuffer(maxKeptOutput)
+	opts.Stdout = stdout
+	opts.Stderr = stderr
 
 	runErr := Run(ctx, opts)
 
@@ -140,11 +139,11 @@ func RunAndCapture(ctx context.Context, opts RunOptions) (CaptureResult, error) 
 	}
 
 	output := stdout.String()
-	if stderr.Len() > 0 {
+	if errOutput := stderr.String(); errOutput != "" {
 		if output != "" {
 			output += "\n"
 		}
-		output += stderr.String()
+		output += errOutput
 	}
 
 	return CaptureResult{

@@ -338,8 +338,8 @@ func track(m *BackgroundShellManager, id string, completedAt int64) {
 	bgShell := &BackgroundShell{
 		ID:     id,
 		done:   make(chan struct{}),
-		stdout: &syncBuffer{},
-		stderr: &syncBuffer{},
+		stdout: newCappedBuffer(maxKeptOutput),
+		stderr: newCappedBuffer(maxKeptOutput),
 		cancel: func() {},
 	}
 	if completedAt > 0 {

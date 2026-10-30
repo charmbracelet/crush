@@ -310,17 +310,18 @@ type execMiddleware = func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc
 //     argv[0], no-op for bare commands) — runs before the block list so
 //     that deny rules see the already-resolved argv of anything the
 //     script exec's rather than the outer path-prefixed wrapper;
-//  3. the integrated pinentry, which drives credential-relevant gpg
+//  3. block list;
+//  4. the integrated pinentry, which drives credential-relevant gpg
 //     invocations through loopback pinentry (the TUI prompts for the
-//     passphrase/PIN) instead of an external terminal pinentry;
-//  4. block list;
+//     passphrase/PIN) instead of an external terminal pinentry. It runs
+//     after the block list so deny rules still apply to gpg;
 //  5. optional Go coreutils (only when useGoCoreUtils is on).
 func standardHandlers(blockFuncs []BlockFunc) []execMiddleware {
 	handlers := []execMiddleware{
 		builtinHandler(),
 		scriptDispatchHandler(blockFuncs),
-		gpgHandler(),
 		blockHandler(blockFuncs),
+		gpgHandler(),
 	}
 	if useGoCoreUtils && coreUtilsExecHandler != nil {
 		handlers = append(handlers, coreUtilsExecHandler)

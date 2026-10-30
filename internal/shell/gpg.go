@@ -12,10 +12,10 @@ import (
 // gpgHandler intercepts top-level gpg commands run from Crush's shell
 // and drives them through the integrated pinentry runner, so a
 // passphrase/PIN prompt is rendered by the TUI instead of an external
-// terminal pinentry. Commands that are not credential-relevant, or that
-// fail loopback pinentry (older GPG, agent without loopback support,
-// headless run), fall back to the next handler unchanged, which reverts
-// to the existing terminal-handover behavior.
+// terminal pinentry. Commands that are not credential-relevant pass
+// through unchanged; when loopback pinentry is unavailable (older GPG,
+// agent without loopback support, headless run) the runner itself
+// reverts to plain gpg and the existing terminal-handover behavior.
 func gpgHandler() execMiddleware {
 	return func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {
 		return func(ctx context.Context, args []string) error {
@@ -36,9 +36,6 @@ func gpgHandler() execMiddleware {
 				Stdout: hc.Stdout,
 				Stderr: hc.Stderr,
 			})
-			if errors.Is(err, pinentry.ErrFallback) {
-				return next(ctx, args)
-			}
 			if err == nil {
 				return nil
 			}

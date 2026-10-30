@@ -44,12 +44,12 @@ func (m *UI) handlePinentryEvent(ev pinentry.Event) tea.Cmd {
 	if ev.TouchPending != m.pinentryTouchPending {
 		m.pinentryTouchPending = ev.TouchPending
 		if ev.TouchPending {
-			m.status.SetInfoMsg(util.InfoMsg{
+			cmds = append(cmds, m.status.Show(util.InfoMsg{
 				Type: util.InfoTypeWarn,
 				Msg:  pinentryTouchMessage,
-			})
+			}))
 		} else {
-			m.status.ClearInfoMsg()
+			m.status.ClearInfoMsg(m.status.msgSeq)
 		}
 	}
 
@@ -123,21 +123,29 @@ func (m *UI) openPinentryDialog(req pinentry.PromptRequest) tea.Cmd {
 	// Close any existing pinentry dialog first to prevent stacking.
 	m.dialog.CloseDialog(dialog.PinentryID)
 	m.dialog.OpenDialogWithGrace(dialog.NewPinentry(m.com, req))
-	return nil
+
+	what := "passphrase"
+	if req.Kind == pinentry.KindPIN {
+		what = "security key PIN"
+	}
+	cmds := []tea.Cmd{m.sendNotification(notification.Notification{
+		Title:   "Crush is waiting...",
+		Message: "GPG needs your " + what + " to continue",
+	})}
+	// A retry carries why GPG rejected the previous attempt; surface it
+	// as a caution-level status message rather than inside the dialog.
+	if req.Error != "" {
+		cmds = append(cmds, util.ReportWarn(req.Error))
+	}
+	return tea.Batch(cmds...)
 }
 
-// handlePinentryNotification dismisses the pinentry dialog once the
+// handlePinentryNotification dismisses the pinentry dialog once its
 // prompt is resolved, covering the case where another subscriber (or a
-// cancelled GPG command) resolved it first.
-func (m *UI) handlePinentryNotification(_ pinentry.Notification) {
-	if m.dialog.ContainsDialog(dialog.PinentryID) {
+// cancelled GPG command) resolved it first. A newer prompt's dialog is
+// left alone: notifications can arrive after the next prompt opened.
+func (m *UI) handlePinentryNotification(n pinentry.Notification) {
+	if d, ok := m.dialog.Dialog(dialog.PinentryID).(*dialog.Pinentry); ok && d.RequestID() == n.RequestID {
 		m.dialog.CloseDialog(dialog.PinentryID)
 	}
-}
-
-// handlePinentryPromptError surfaces a failed credential attempt as a
-// caution-level status notification the moment GPG rejects a passphrase
-// or PIN, instead of waiting for (or printing inside) the retry dialog.
-func (m *UI) handlePinentryPromptError(pe pinentry.PromptError) tea.Cmd {
-	return util.ReportWarn(pe.Error)
 }

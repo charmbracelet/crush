@@ -37,31 +37,24 @@ func runPinentryGpg(ctx context.Context, args []string) error {
 	gpgArgs := append([]string{"gpg"}, args...)
 
 	socketPath := os.Getenv("CRUSH_PINENTRY_SOCK")
-	var runner *pinentry.Runner
-	if socketPath != "" {
-		runner = &pinentry.Runner{
-			Prompter: pinentry.SocketPrompter(socketPath),
-		}
+	if socketPath == "" {
+		return runPlainGpg(ctx, gpgArgs)
 	}
 
-	if runner != nil {
-		err := runner.Run(ctx, pinentry.RunOptions{
-			Args:   gpgArgs,
-			Env:    os.Environ(),
-			Dir:    cwd(),
-			Stdin:  os.Stdin,
-			Stdout: os.Stdout,
-			Stderr: os.Stderr,
-		})
-		if !errors.Is(err, pinentry.ErrFallback) {
-			return exitWithStatus(err)
-		}
-		// Loopback pinentry is unavailable (old GPG, agent without
-		// loopback support, no host listening): fall back to plain
-		// gpg, which triggers the terminal-handover watcher.
+	// When loopback pinentry is unavailable (old GPG, agent without
+	// loopback support) the runner reverts to plain gpg itself, which
+	// triggers the terminal-handover watcher.
+	runner := &pinentry.Runner{
+		Prompter: pinentry.SocketPrompter(socketPath),
 	}
-
-	return runPlainGpg(ctx, gpgArgs)
+	return exitWithStatus(runner.Run(ctx, pinentry.RunOptions{
+		Args:   gpgArgs,
+		Env:    os.Environ(),
+		Dir:    cwd(),
+		Stdin:  os.Stdin,
+		Stdout: os.Stdout,
+		Stderr: os.Stderr,
+	}))
 }
 
 // runPlainGpg execs gpg as-is, preserving stdin/stdout/stderr and the

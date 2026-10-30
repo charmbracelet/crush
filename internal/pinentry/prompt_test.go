@@ -2,8 +2,8 @@ package pinentry
 
 import (
 	"context"
-	"errors"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/stretchr/testify/require"
@@ -106,25 +106,43 @@ func TestPromptNoSubscribers(t *testing.T) {
 	require.ErrorIs(t, err, ErrNoPrompter)
 }
 
-func TestPromptOnlyOnePending(t *testing.T) {
+func TestPromptQueuesConcurrentPrompts(t *testing.T) {
 	svc := NewPrompts()
 	ctx := context.Background()
 	ch := svc.Subscribe(ctx)
 	defer svc.broker.Shutdown()
 
 	go svc.Prompt(ctx, PromptRequest{Prompt: "first"})
-	<-ch
+	first := <-ch
 
-	_, err := svc.Prompt(ctx, PromptRequest{Prompt: "second"})
-	require.Error(t, err)
-	require.False(t, errors.Is(err, ErrNoPrompter))
+	second := make(chan string, 1)
+	go func() {
+		s, _ := svc.Prompt(ctx, PromptRequest{Prompt: "second"})
+		second <- s
+	}()
+
+	// The second prompt waits for the first instead of failing...
+	select {
+	case ev := <-ch:
+		t.Fatalf("second prompt published while the first is pending: %q", ev.Payload.Prompt)
+	case <-time.After(50 * time.Millisecond):
+	}
+	require.True(t, svc.Respond(first.Payload.ID, "one"))
+
+	// ...then gets its turn.
+	ev := <-ch
+	require.Equal(t, "second", ev.Payload.Prompt)
+	require.True(t, svc.Respond(ev.Payload.ID, "two"))
+	require.Equal(t, "two", <-second)
 }
 
 func TestPromptRespectsContext(t *testing.T) {
 	svc := NewPrompts()
 	ctx := context.Background()
 	ch := svc.Subscribe(ctx)
+	notifs := svc.SubscribeNotifications(ctx)
 	defer svc.broker.Shutdown()
+	defer svc.notificationBroker.Shutdown()
 
 	childCtx, cancel := context.WithCancel(ctx)
 	res := make(chan error, 1)
@@ -132,7 +150,9 @@ func TestPromptRespectsContext(t *testing.T) {
 		_, err := svc.Prompt(childCtx, PromptRequest{Prompt: "p"})
 		res <- err
 	}()
-	<-ch
+	ev := <-ch
 	cancel()
 	require.ErrorIs(t, <-res, context.Canceled)
+	// The abandoned prompt's dialog is dismissed.
+	require.Equal(t, ev.Payload.ID, (<-notifs).Payload.RequestID)
 }

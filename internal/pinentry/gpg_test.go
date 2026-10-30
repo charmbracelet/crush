@@ -3,7 +3,6 @@ package pinentry
 import (
 	"bytes"
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -73,7 +72,8 @@ func TestRunnerSucceedsWhenCached(t *testing.T) {
 func TestRunnerPromptsAndSucceeds(t *testing.T) {
 	rec := &recordingPrompter{}
 	r := testRunner(writeFakeGPG(t), rec.prompter())
-	err := r.Run(context.Background(), testOptions("locked", "data"))
+	opts := testOptions("locked", "data")
+	err := r.Run(context.Background(), opts)
 	require.NoError(t, err)
 	require.Equal(t, 1, rec.calls)
 	require.Equal(t, KindPassphrase, rec.reqs[0].Kind)
@@ -82,14 +82,17 @@ func TestRunnerPromptsAndSucceeds(t *testing.T) {
 	// The first prompt carries no error: the probe failure was an empty
 	// passphrase, not a user attempt.
 	require.Empty(t, rec.reqs[0].Error)
+	// Only the successful attempt's output reaches the caller, not the
+	// partial output the failed probe left behind.
+	require.Equal(t, "[GNUPG:] SIG_CREATED ok\n", opts.Stdout.(*bytes.Buffer).String())
 }
 
 func TestRunnerRetriesBadPassphraseThenGivesUp(t *testing.T) {
 	rec := &recordingPrompter{secrets: []string{"wrong", "wrong", "wrong"}}
 	r := testRunner(writeFakeGPG(t), rec.prompter())
 	err := r.Run(context.Background(), testOptions("locked", "data"))
-	require.Error(t, err)
-	require.False(t, errors.Is(err, ErrFallback))
+	var ee *ExitError
+	require.ErrorAs(t, err, &ee)
 	require.Equal(t, maxPassphraseAttempts, rec.calls)
 	// Retry counts increment per attempt.
 	require.Equal(t, 0, rec.reqs[0].RetryCount)
@@ -102,12 +105,34 @@ func TestRunnerRetriesBadPassphraseThenGivesUp(t *testing.T) {
 	require.NotEmpty(t, rec.reqs[2].Error)
 }
 
+func TestRunnerCachesAndForgetsRejectedSecret(t *testing.T) {
+	rec := &recordingPrompter{}
+	r := testRunner(writeFakeGPG(t), rec.prompter())
+	r.CacheTimeout = time.Minute
+
+	require.NoError(t, r.Run(context.Background(), testOptions("locked", "data")))
+	require.NoError(t, r.Run(context.Background(), testOptions("locked", "data")))
+	require.Equal(t, 1, rec.calls, "the second run reuses the cached secret")
+
+	// A cached secret GPG rejects is dropped even if the user then
+	// cancels: replaying a stale PIN would burn the card's retries.
+	r.cache.set("ABC123", "stale")
+	r.Prompter = func(context.Context, PromptRequest) (string, error) { return "", ErrCancelled }
+	require.ErrorIs(t, r.Run(context.Background(), testOptions("locked", "data")), ErrCancelled)
+	_, ok := r.cache.get("ABC123")
+	require.False(t, ok)
+}
+
 func TestRunnerFallsBackWhenLoopbackUnsupported(t *testing.T) {
 	rec := &recordingPrompter{}
 	r := testRunner(writeFakeGPG(t), rec.prompter())
-	err := r.Run(context.Background(), testOptions("unsupported", "data"))
-	require.ErrorIs(t, err, ErrFallback)
+	opts := testOptions("unsupported", "data")
+	err := r.Run(context.Background(), opts)
+	require.NoError(t, err)
 	require.Equal(t, 0, rec.calls, "no prompt on an unsupported loopback")
+	// The plain run gets the caller's stdin even though the probe
+	// already consumed it.
+	require.Equal(t, "plain\ndata", opts.Stdout.(*bytes.Buffer).String())
 }
 
 func TestRunnerGenuineFailureNoPrompt(t *testing.T) {
@@ -122,8 +147,10 @@ func TestRunnerGenuineFailureNoPrompt(t *testing.T) {
 
 func TestRunWithNilPrompterFallsBack(t *testing.T) {
 	r := testRunner(writeFakeGPG(t), nil)
-	err := r.Run(context.Background(), testOptions("locked", "data"))
-	require.ErrorIs(t, err, ErrFallback)
+	opts := testOptions("locked", "data")
+	err := r.Run(context.Background(), opts)
+	require.NoError(t, err)
+	require.Equal(t, "plain\ndata", opts.Stdout.(*bytes.Buffer).String())
 }
 
 func TestStatusKey(t *testing.T) {
@@ -143,7 +170,17 @@ func TestStatusKey(t *testing.T) {
 	require.Equal(t, "ABC1234567890DEF", key.KeyID)
 	require.Equal(t, "0123456789ABCDEF0123456789ABCDEF01234567", key.Fingerprint)
 	require.Equal(t, "Test Key <test@example.com>", key.Holder)
-	require.Equal(t, key.Holder, st.userID(), "the user id hint is the cache identity")
+	require.Equal(t, key.Fingerprint, st.cacheKey(), "the fingerprint is the cache identity")
+
+	// GPG 2.1+ omits USERID_HINT when the passphrase comes from a file
+	// descriptor; the key must still be identifiable for the cache.
+	modern := newStatus()
+	modern.record([]byte(strings.Join([]string{
+		"[GNUPG:] KEY_CONSIDERED 2C9A1667F88CD79D387E6BF7DAAE8DA632952425 2",
+		"[GNUPG:] BEGIN_SIGNING H10",
+		"gpg: signing failed: No passphrase given",
+	}, "\n")))
+	require.Equal(t, "2C9A1667F88CD79D387E6BF7DAAE8DA632952425", modern.cacheKey())
 }
 
 func TestStatusKeyEmpty(t *testing.T) {
@@ -163,6 +200,7 @@ func TestHasCredentialOperation(t *testing.T) {
 		{[]string{"gpg2", "-c"}, true},
 		{[]string{"gpg", "-d", "f.gpg"}, true},
 		{[]string{"gpg", "--clearsign", "f"}, true},
+		{[]string{"gpg", "--clear-sign", "f"}, true},
 		{[]string{"gpg", "--detach-sign", "f"}, true},
 		{[]string{"gpg", "--symmetric", "f"}, true},
 		{[]string{"gpg", "--list-keys"}, false},

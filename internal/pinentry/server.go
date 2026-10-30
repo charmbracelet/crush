@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -26,13 +27,48 @@ type socketResponse struct {
 	Error     string `json:"error,omitempty"`
 }
 
+var (
+	sharedMu   sync.Mutex
+	sharedRefs int
+	sharedStop func()
+)
+
 // StartIntegration enables the integrated pinentry for this process:
 // it writes the git gpg wrapper script, opens the prompt socket, configures
 // the process-wide integration, and starts serving wrapper requests.
 //
+// The integration is shared and reference counted: in server mode every
+// workspace starts it, and it stays up until the last returned cleanup
+// runs, so closing one workspace never disables it for the others.
+//
 // Returns a cleanup function that stops the socket, removes the wrapper,
 // and disables integration. It is safe to cancel ctx to stop serving.
 func StartIntegration(ctx context.Context, executable string, cacheTimeout time.Duration) (cleanup func(), err error) {
+	sharedMu.Lock()
+	defer sharedMu.Unlock()
+	if sharedRefs == 0 {
+		stop, err := startIntegration(ctx, executable, cacheTimeout)
+		if err != nil {
+			return nil, err
+		}
+		sharedStop = stop
+	}
+	sharedRefs++
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			sharedMu.Lock()
+			defer sharedMu.Unlock()
+			if sharedRefs--; sharedRefs == 0 {
+				sharedStop()
+				sharedStop = nil
+			}
+		})
+	}, nil
+}
+
+func startIntegration(ctx context.Context, executable string, cacheTimeout time.Duration) (cleanup func(), err error) {
 	// The socket dir must have no spaces (git's gpg program is exec'd
 	// as a path); os.TempDir on macOS can contain none, but create a
 	// dedicated random dir to be certain.
@@ -128,6 +164,20 @@ func handleConnection(ctx context.Context, conn net.Conn) {
 	// Bound the wait so a stuck gpg cannot hold the socket forever.
 	reqCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
+
+	// The wrapper sends nothing after its request, so a read only
+	// returns once it hangs up: its GPG command was cancelled. Drop the
+	// prompt then, rather than leaving a stale dialog that holds up the
+	// next one.
+	go func() {
+		buf := make([]byte, 1)
+		for {
+			if _, err := conn.Read(buf); err != nil {
+				cancel()
+				return
+			}
+		}
+	}()
 
 	secret, err := defaultPrompts.Prompt(reqCtx, req.Request)
 

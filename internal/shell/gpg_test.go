@@ -85,32 +85,57 @@ func TestGpgHandlerInterceptsCredentialOperations(t *testing.T) {
 
 func TestGpgHandlerPassthroughWhenDisabled(t *testing.T) {
 	gpgPath := fakeGPGShim(t)
-	// Integration disabled: the command must run the plain fake gpg,
-	// which in locked mode fails (exit 2) since no loopback flags or
-	// prompt are involved.
-	t.Setenv("PATH", filepath.Dir(gpgPath))
+	// Integration disabled: the command runs the plain fake gpg, with no
+	// loopback flags or prompt involved.
+	t.Setenv("PATH", filepath.Dir(gpgPath)+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	sh := NewShell(&Options{
 		WorkingDir: t.TempDir(),
 		Env:        append(os.Environ(), "FAKE_GPG_MODE=locked"),
 	})
-	_, _, err := sh.Exec(context.Background(), "echo data | gpg --detach-sign")
-	require.Error(t, err)
+	stdout, _, err := sh.Exec(context.Background(), "echo data | gpg --detach-sign")
+	require.NoError(t, err)
+	require.Equal(t, "plain\ndata\n", stdout)
 }
 
 func TestGpgHandlerFallsBackOnUnsupportedLoopback(t *testing.T) {
 	gpgPath := fakeGPGShim(t)
 	configureIntegration(t, gpgPath)
-	// Unsupported loopback: the middleware delegates to the next
-	// handler, which runs the plain fake gpg (exit 2, no prompting).
-	t.Setenv("PATH", filepath.Dir(gpgPath))
 
 	sh := NewShell(&Options{
 		WorkingDir: t.TempDir(),
 		Env:        append(os.Environ(), "FAKE_GPG_MODE=unsupported"),
 	})
-	_, _, err := sh.Exec(context.Background(), "echo data | gpg --detach-sign")
-	require.Error(t, err, "plain gpg still fails with the unsupported error")
+	// Unsupported loopback: the runner reverts to plain gpg, which still
+	// gets the piped input the probe consumed.
+	stdout, _, err := sh.Exec(context.Background(), "echo data | gpg --detach-sign")
+	require.NoError(t, err)
+	require.Equal(t, "plain\ndata\n", stdout)
+}
+
+func TestGpgHandlerKeepsOperandsAndBlockList(t *testing.T) {
+	gpgPath := fakeGPGShim(t)
+	configureIntegration(t, gpgPath)
+	answerPrompts(t, "secret")
+
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "f.txt"), []byte("data"), 0o644))
+	sh := NewShell(&Options{
+		WorkingDir: dir,
+		Env:        append(os.Environ(), "FAKE_GPG_MODE=locked"),
+	})
+	// A file operand must not swallow the loopback flags.
+	_, stderr, err := sh.Exec(context.Background(), "gpg --clearsign f.txt")
+	require.NoError(t, err, "stderr: %s", stderr)
+
+	// Deny rules still apply to the gpg commands the runner drives.
+	blocked := NewShell(&Options{
+		WorkingDir: dir,
+		Env:        append(os.Environ(), "FAKE_GPG_MODE=locked"),
+		BlockFuncs: []BlockFunc{CommandsBlocker([]string{"gpg"})},
+	})
+	_, _, err = blocked.Exec(context.Background(), "gpg --clearsign f.txt")
+	require.Error(t, err)
 }
 
 func TestGpgHandlerLeavesNonCredentialGpgAlone(t *testing.T) {

@@ -2,6 +2,7 @@ package pinentry
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -9,17 +10,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"time"
 )
-
-// ErrFallback reports that the integrated pinentry could not drive a GPG
-// invocation (for example the agent refuses loopback mode, or no one is
-// listening for a credential prompt). Callers should run GPG normally and
-// let the terminal-handover watcher handle the external pinentry.
-var ErrFallback = errors.New("integrated pinentry unavailable; falling back to external pinentry")
 
 // maxPassphraseAttempts is the number of times a bad credential is
 // re-prompted before giving up, matching GPG's own retry count.
@@ -71,9 +65,8 @@ type RunOptions struct {
 type Prompter func(ctx context.Context, req PromptRequest) (string, error)
 
 // Runner drives GPG invocations through loopback pinentry. A nil
-// Prompter means credentials cannot be collected in-process (for the
-// socket-backed subprocess wrapper), in which case any password prompt
-// falls back to [ErrFallback].
+// Prompter means credentials cannot be collected in-process, in which
+// case GPG runs as invoked and the agent's own pinentry asks.
 type Runner struct {
 	// Prompter collects a credential; may be nil.
 	Prompter Prompter
@@ -101,8 +94,9 @@ func (r *Runner) ClearCache() {
 }
 
 // Run executes the GPG command, prompting for a credential only when the
-// agent does not already have it cached, and retrying on a bad one.
-// Returns [ErrFallback] so the caller can run plain GPG instead.
+// agent does not already have it cached, and retrying on a bad one. When
+// loopback pinentry is unavailable, GPG runs as invoked so the agent's
+// own pinentry collects the credential.
 func (r *Runner) Run(ctx context.Context, opts RunOptions) error {
 	if len(opts.Args) == 0 {
 		return errors.New("pinentry: empty gpg argv")
@@ -119,23 +113,31 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) error {
 		}
 	}
 
-	spooled, cleanup, err := spoolStdin(opts.Stdin)
+	stdin, cleanup, err := spoolStdin(opts.Stdin)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
 
+	// Only the final attempt's output reaches the caller: a failed
+	// attempt can leave partial output behind (a clearsign header, say)
+	// that would corrupt the real result.
+	// ponytail: output is held in memory; spool it to a temp file if
+	// large decrypts through Crush ever matter.
+	aio := &attemptIO{stdin: stdin}
+	defer aio.replay(opts.Stdout, opts.Stderr)
+
 	// Probe: run with loopback and an empty passphrase. This succeeds
 	// immediately when the key is unprotected or the agent already has
 	// the credential cached.
 	st := newStatus()
-	probeErr := r.exec(ctx, bin, opts, spooled, "", st)
+	probeErr := r.exec(ctx, bin, opts, aio, "", st)
 	if probeErr == nil {
 		return nil
 	}
 	if !st.credentialRequired() {
 		if st.unsupported() {
-			return ErrFallback
+			return aio.plain(ctx, bin, opts)
 		}
 		return probeErr
 	}
@@ -152,24 +154,25 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) error {
 		secret, perr := r.collectCredential(ctx, st, attempt, lastErr)
 		if perr != nil {
 			if errors.Is(perr, ErrNoPrompter) {
-				return ErrFallback
+				return aio.plain(ctx, bin, opts)
 			}
 			return perr
 		}
 		st = newStatus()
-		err = r.exec(ctx, bin, opts, spooled, secret, st)
+		err = r.exec(ctx, bin, opts, aio, secret, st)
 		if err == nil {
-			if key := st.userID(); key != "" {
-				r.storeCredential(key, secret)
-			}
+			r.storeCredential(st.cacheKey(), secret)
 			return nil
 		}
 		if st.unsupported() && !st.credentialRequired() {
-			return ErrFallback
+			return aio.plain(ctx, bin, opts)
 		}
 		if !st.credentialRequired() {
 			return err
 		}
+		// Never replay a rejected secret from the cache: a stale security
+		// key PIN would burn the card's retry counter.
+		r.cache.forget(st.cacheKey())
 		lastErr = err
 	}
 	return lastErr
@@ -179,7 +182,7 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) error {
 // preferring the optional cache on the first attempt.
 func (r *Runner) collectCredential(ctx context.Context, st *status, attempt int, lastErr error) (string, error) {
 	if attempt == 1 {
-		if key := st.userID(); key != "" {
+		if key := st.cacheKey(); key != "" {
 			if secret, ok := r.cache.get(key); ok {
 				return secret, nil
 			}
@@ -207,28 +210,11 @@ func (r *Runner) storeCredential(key, secret string) {
 	}
 }
 
-// exec runs a single gpg attempt. An empty passphrase is the probe (the
-// operation succeeds if the credential is cached/unprotectd). The secret
-// is written over a dedicated pipe (fd 3) as `--passphrase-fd 3`.
-func (r *Runner) exec(ctx context.Context, bin string, opts RunOptions, stdin *os.File, passphrase string, st *status) error {
-	args := slices.Clone(opts.Args)
-	args[0] = bin
-	args = append(args, "--batch", "--pinentry-mode", "loopback", "--passphrase-fd", passphraseFD())
-
-	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
-	cmd.Env = opts.Env
-	cmd.Dir = opts.Dir
-	prepareProcess(cmd)
-
-	if _, err := stdin.Seek(0, io.SeekStart); err != nil {
-		return err
-	}
-
-	var out bytes.Buffer
-	cmd.Stdin = stdin
-	cmd.Stdout = firstWriter(opts.Stdout, &out)
-	cmd.Stderr = statusWriter{inner: opts.Stderr, st: st}
-
+// exec runs a single gpg attempt through loopback pinentry. An empty
+// passphrase is the probe (the operation succeeds if the credential is
+// cached or the key is unprotected). The secret is written over a
+// dedicated pipe (fd 3) as `--passphrase-fd 3`.
+func (r *Runner) exec(ctx context.Context, bin string, opts RunOptions, aio *attemptIO, passphrase string, st *status) error {
 	// The passphrase pipe is always wired up, even for the empty probe:
 	// gpg is told to read fd 3 and would fail with a bad-descriptor
 	// error if it were missing. The write is best-effort in a goroutine
@@ -238,33 +224,77 @@ func (r *Runner) exec(ctx context.Context, bin string, opts RunOptions, stdin *o
 		return err
 	}
 	defer pr.Close()
-	cmd.ExtraFiles = []*os.File{pr}
 	go func() {
 		_, _ = io.WriteString(pw, passphrase+"\n")
 		_ = pw.Close()
 	}()
 
+	// The loopback flags go first: gpg stops parsing options at the
+	// first non-option argument, so flags after a file operand would be
+	// taken as more file names.
+	args := append([]string{"--batch", "--pinentry-mode", "loopback", "--passphrase-fd", passphraseFD()}, opts.Args[1:]...)
+	return aio.run(ctx, bin, args, opts, st, pr)
+}
+
+// attemptIO is the stdio shared by the gpg attempts of one [Runner.Run]:
+// the spooled stdin every attempt re-reads (the caller's reader is
+// consumed once), and the output of the latest attempt.
+type attemptIO struct {
+	stdin          *os.File
+	stdout, stderr bytes.Buffer
+}
+
+// run executes one gpg attempt with the given arguments (argv[0]
+// excluded), replacing the previous attempt's output. A non-nil
+// passphrase file is passed to gpg as fd 3.
+func (a *attemptIO) run(ctx context.Context, bin string, args []string, opts RunOptions, st *status, passphrase *os.File) error {
+	if _, err := a.stdin.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	a.stdout.Reset()
+	a.stderr.Reset()
+
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Env = opts.Env
+	cmd.Dir = opts.Dir
+	cmd.Stdin = a.stdin
+	cmd.Stdout = &a.stdout
+	cmd.Stderr = statusWriter{inner: &a.stderr, st: st}
+	if passphrase != nil {
+		cmd.ExtraFiles = []*os.File{passphrase}
+	}
+	prepareProcess(cmd)
+
 	if err := cmd.Start(); err != nil {
 		return err
 	}
 	stopKill := watchCancel(ctx, cmd)
-	err = cmd.Wait()
+	err := cmd.Wait()
 	stopKill()
 	if err == nil {
 		return nil
 	}
-	var ee *exec.ExitError
-	if errors.As(err, &ee) {
+	if ee, ok := errors.AsType[*exec.ExitError](err); ok {
 		return &ExitError{Code: ee.ExitCode(), Stderr: st.excerpt()}
 	}
 	return err
 }
 
-func firstWriter(a, b io.Writer) io.Writer {
-	if a != nil {
-		return a
+// plain runs gpg exactly as the caller invoked it, for when loopback
+// pinentry is unavailable: the agent's own pinentry collects the
+// credential.
+func (a *attemptIO) plain(ctx context.Context, bin string, opts RunOptions) error {
+	return a.run(ctx, bin, opts.Args[1:], opts, newStatus(), nil)
+}
+
+// replay writes the final attempt's output to the caller.
+func (a *attemptIO) replay(stdout, stderr io.Writer) {
+	if stdout != nil {
+		_, _ = stdout.Write(a.stdout.Bytes())
 	}
-	return b
+	if stderr != nil {
+		_, _ = stderr.Write(a.stderr.Bytes())
+	}
 }
 
 // status accumulates the stderr of a single gpg invocation so the
@@ -317,10 +347,13 @@ func (s *status) body() string {
 
 func (s *status) excerpt() string { return s.body() }
 
-// userID returns a stable identity for the key being unlocked, from the
-// USERID_HINT status line when present.
-func (s *status) userID() string {
-	return s.key().Holder
+// cacheKey returns a stable identity for the key being unlocked, or ""
+// when GPG reported none. The fingerprint comes first: GPG 2.1+ reports
+// KEY_CONSIDERED but omits USERID_HINT when the passphrase comes from a
+// file descriptor.
+func (s *status) cacheKey() string {
+	k := s.key()
+	return cmp.Or(k.Fingerprint, k.KeyID, k.Holder)
 }
 
 // key parses the key details GPG reported for the credential. It reads
@@ -438,8 +471,8 @@ func ShouldIntercept(args []string) bool {
 // or symmetric-encrypt operation (the ones that can need a credential).
 func hasCredentialOperation(args []string) bool {
 	credentialLong := map[string]bool{
-		"--sign": true, "--clearsign": true, "--detach-sign": true,
-		"--decrypt": true, "--symmetric": true,
+		"--sign": true, "--clearsign": true, "--clear-sign": true,
+		"--detach-sign": true, "--decrypt": true, "--symmetric": true,
 	}
 	credentialShort := map[rune]bool{
 		's': true, 'b': true, 'c': true, 'd': true,

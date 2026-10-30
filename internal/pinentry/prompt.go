@@ -72,20 +72,10 @@ type PromptRequest struct {
 	Error string `json:"error,omitempty"`
 }
 
-// Notification is published when a prompt is resolved so that clients
-// which did not answer it can dismiss their open dialogs.
+// Notification is published when a prompt is resolved (or abandoned by
+// its GPG command) so that clients can dismiss the matching dialog.
 type Notification struct {
 	RequestID string `json:"request_id"`
-}
-
-// PromptError is published as soon as a credential attempt fails, so
-// clients can surface the reason immediately rather than waiting for the
-// next (retry) prompt.
-type PromptError struct {
-	// RequestID identifies the prompt the failed attempt belonged to.
-	RequestID string `json:"request_id,omitempty"`
-	// Error describes why the attempt failed.
-	Error string `json:"error"`
 }
 
 // ErrCancelled is returned when the user cancelled the prompt.
@@ -99,20 +89,20 @@ var ErrNoPrompter = errors.New("no pinentry prompt listener available")
 // the permission and question service patterns: publish a request over
 // pubsub, block on a channel, and resolve when the UI responds.
 //
-// Only one prompt can be pending at a time (GPG handles one credential
-// per operation), so responses are correlated by the pending request ID.
-// The secret is delivered to the single waiting caller and is never
-// published on any broker.
+// Only one prompt is pending at a time (the UI shows a single dialog);
+// concurrent callers queue for their turn. Responses are correlated by
+// the pending request ID. The secret is delivered to the single waiting
+// caller and is never published on any broker.
 type Prompts struct {
 	broker             *pubsub.Broker[PromptRequest]
 	notificationBroker *pubsub.Broker[Notification]
-	errorBroker        *pubsub.Broker[PromptError]
 
-	mu         sync.Mutex
-	pending    chan PromptResponse
-	cancelled  chan struct{}
-	pendingID  string
-	prompterWG sync.WaitGroup
+	// turn holds a token while a prompt is pending.
+	turn chan struct{}
+
+	mu        sync.Mutex
+	pending   chan PromptResponse
+	pendingID string
 }
 
 // PromptResponse resolves a pending prompt. Exactly one of Secret or
@@ -131,7 +121,7 @@ func NewPrompts() *Prompts {
 	return &Prompts{
 		broker:             pubsub.NewBroker[PromptRequest](),
 		notificationBroker: pubsub.NewBroker[Notification](),
-		errorBroker:        pubsub.NewBroker[PromptError](),
+		turn:               make(chan struct{}, 1),
 	}
 }
 
@@ -155,12 +145,6 @@ func (s *Prompts) SubscribeNotifications(ctx context.Context) <-chan pubsub.Even
 	return s.notificationBroker.Subscribe(ctx)
 }
 
-// SubscribeErrors returns a channel for failed-attempt errors, published
-// the moment a bad credential is rejected by GPG.
-func (s *Prompts) SubscribeErrors(ctx context.Context) <-chan pubsub.Event[PromptError] {
-	return s.errorBroker.Subscribe(ctx)
-}
-
 // Prompt publishes a credential request and blocks until the user
 // answers, cancels, or the context is cancelled.
 func (s *Prompts) Prompt(ctx context.Context, req PromptRequest) (string, error) {
@@ -177,43 +161,38 @@ func (s *Prompts) Prompt(ctx context.Context, req PromptRequest) (string, error)
 		req.Kind = KindPassphrase
 	}
 
-	s.mu.Lock()
-	if s.pending != nil {
-		s.mu.Unlock()
-		return "", errors.New("another pinentry prompt is already pending")
+	// Concurrent GPG operations wait their turn instead of failing.
+	select {
+	case s.turn <- struct{}{}:
+	case <-ctx.Done():
+		return "", ctx.Err()
 	}
+	defer func() { <-s.turn }()
+
 	respCh := make(chan PromptResponse, 1)
-	cancelCh := make(chan struct{})
+	s.mu.Lock()
 	s.pending = respCh
-	s.cancelled = cancelCh
 	s.pendingID = req.ID
 	s.mu.Unlock()
 
 	defer func() {
 		s.mu.Lock()
 		s.pending = nil
-		s.cancelled = nil
 		s.pendingID = ""
 		s.mu.Unlock()
 	}()
 
 	// Credential prompts are terminal events; losing one to a full
-	// buffer would hang the GPG operation.
+	// buffer would hang the GPG operation. A retry request carries the
+	// reason the previous attempt failed in its Error field.
 	s.broker.PublishMustDeliver(context.Background(), pubsub.CreatedEvent, req)
-	// A retry request carries the reason the previous attempt failed;
-	// surface it immediately so the user sees it as soon as it happens.
-	if req.Error != "" {
-		s.errorBroker.PublishMustDeliver(context.Background(), pubsub.CreatedEvent, PromptError{
-			RequestID: req.ID,
-			Error:     req.Error,
-		})
-	}
 
 	select {
 	case <-ctx.Done():
+		// The GPG command went away unanswered (cancelled or timed
+		// out): let clients dismiss the now-stale dialog.
+		s.notificationBroker.Publish(pubsub.CreatedEvent, Notification{RequestID: req.ID})
 		return "", ctx.Err()
-	case <-cancelCh:
-		return "", ErrCancelled
 	case resp := <-respCh:
 		if resp.Cancelled {
 			return "", ErrCancelled
@@ -310,6 +289,19 @@ func (c *passphraseCache) set(key, secret string) {
 	c.entries[key] = cacheEntry{
 		secret:  []byte(secret),
 		expires: time.Now().Add(c.ttl),
+	}
+}
+
+// forget zeroes and drops the entry for key, if any.
+func (c *passphraseCache) forget(key string) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if e, ok := c.entries[key]; ok {
+		zeroBytes(e.secret)
+		delete(c.entries, key)
 	}
 }
 

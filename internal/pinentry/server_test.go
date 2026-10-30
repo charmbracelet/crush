@@ -2,6 +2,8 @@ package pinentry
 
 import (
 	"context"
+	"encoding/json"
+	"net"
 	"os"
 	"runtime"
 	"strings"
@@ -64,6 +66,17 @@ func TestStartIntegrationAndSocketRoundTrip(t *testing.T) {
 		Prompt: "GPG is waiting",
 	})
 	require.ErrorIs(t, err, ErrCancelled)
+
+	// A wrapper that hangs up (its GPG command was cancelled) drops the
+	// prompt, so the stale dialog is dismissed and the next can open.
+	notifs := prompts.SubscribeNotifications(ctx)
+	var d net.Dialer
+	conn, err := d.DialContext(ctx, "unix", socketPath)
+	require.NoError(t, err)
+	require.NoError(t, json.NewEncoder(conn).Encode(socketRequest{Request: PromptRequest{ID: "gone"}}))
+	require.Equal(t, "gone", (<-sub).Payload.ID)
+	require.NoError(t, conn.Close())
+	require.Equal(t, "gone", (<-notifs).Payload.RequestID)
 
 	cleanup()
 	require.False(t, IntegrationEnabled(), "cleanup disables integration")

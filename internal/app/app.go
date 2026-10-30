@@ -314,6 +314,10 @@ func (app *App) ReportCurrentSession(sessionID string) {
 func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt, largeModel, smallModel, reasoningEffort string, hideSpinner bool, continueSessionID string, useLast bool) error {
 	slog.Info("Running in non-interactive mode")
 
+	// No dialog can answer an integrated pinentry prompt here, so GPG
+	// would wait forever: let the agent's own pinentry ask instead.
+	pinentry.DisableIntegration()
+
 	// Re-initialize the coder agent without interactive-only tools.
 	if err := app.InitCoderAgentNonInteractive(ctx); err != nil {
 		return fmt.Errorf("failed to reinitialize agent for non-interactive mode: %w", err)
@@ -754,7 +758,6 @@ func (app *App) setupEvents() {
 	app.subscribeMustDeliver(ctx, "pinentry", app.Pinentry.Subscribe)
 	app.subscribeMustDeliver(ctx, "pinentry-prompts", pinentry.DefaultPrompts().Subscribe)
 	app.subscribeMustDeliver(ctx, "pinentry-notifications", pinentry.DefaultPrompts().SubscribeNotifications)
-	app.subscribeMustDeliver(ctx, "pinentry-errors", pinentry.DefaultPrompts().SubscribeErrors)
 	app.subscribeMustDeliver(ctx, "run-completions", app.runCompletions.Subscribe)
 	app.subscribe(ctx, "mcp", mcp.SubscribeEvents)
 	app.subscribe(ctx, "mcp-channels", app.subscribeScopedChannelEvents)

@@ -40,6 +40,7 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/charmbracelet/crush/internal/sshaskpass"
 	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/update"
@@ -168,6 +169,22 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 				return nil
 			})
 		}
+	}
+
+	// Enable the integrated ssh askpass: OpenSSH credential and
+	// confirmation prompts (passwords, key passphrases, security key
+	// touches) for Crush-spawned commands are rendered as native
+	// dialogs. The redirect is environment-scoped; no ssh configuration
+	// or files are modified.
+	if executable, err := os.Executable(); err != nil {
+		slog.Warn("Integrated ssh prompts unavailable", "error", err)
+	} else if cleanup, err := sshaskpass.StartIntegration(ctx, executable); err != nil {
+		slog.Warn("Integrated ssh prompts unavailable", "error", err)
+	} else {
+		app.cleanupFuncs = append(app.cleanupFuncs, func(context.Context) error {
+			cleanup()
+			return nil
+		})
 	}
 
 	// Initialize clipboard support. This is best-effort; if it fails
@@ -317,6 +334,10 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	// No dialog can answer an integrated pinentry prompt here, so GPG
 	// would wait forever: let the agent's own pinentry ask instead.
 	pinentry.DisableIntegration()
+
+	// No dialog can answer an ssh prompt here, so ssh would wait forever:
+	// let it fail instead.
+	sshaskpass.DisableIntegration()
 
 	// Re-initialize the coder agent without interactive-only tools.
 	if err := app.InitCoderAgentNonInteractive(ctx); err != nil {
@@ -749,6 +770,10 @@ func (app *App) setupEvents() {
 	app.subscribeMustDeliver(ctx, "permissions-notifications", app.Permissions.SubscribeNotifications)
 	app.subscribeMustDeliver(ctx, "question-batches", app.Questions.Subscribe)
 	app.subscribeMustDeliver(ctx, "question-notifications", app.Questions.SubscribeNotifications)
+	// SSH credential prompts hang a running ssh command if lost, so
+	// the fan-in must not drop them.
+	app.subscribeMustDeliver(ctx, "ssh-prompts", sshaskpass.DefaultPrompts().Subscribe)
+	app.subscribeMustDeliver(ctx, "ssh-notifications", sshaskpass.DefaultPrompts().SubscribeNotifications)
 	app.subscribe(ctx, "history", app.History.Subscribe)
 	app.subscribe(ctx, "agent-notifications", app.agentNotifications.Subscribe)
 	// Pinentry transitions are rare and drive the terminal handover, so

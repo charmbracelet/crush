@@ -501,6 +501,11 @@ type Styles struct {
 		PromptMessage lipgloss.Style
 		// PromptKey styles the labeled key rows shown under it.
 		PromptKey lipgloss.Style
+		// SSHMessage is the friendly description of what an integrated
+		// SSH askpass prompt is asking for.
+		SSHMessage lipgloss.Style
+		// SSHKey styles the labeled account/key row shown under it.
+		SSHKey lipgloss.Style
 
 		List lipgloss.Style
 

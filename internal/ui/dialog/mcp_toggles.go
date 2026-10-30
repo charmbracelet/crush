@@ -31,6 +31,44 @@ type MCPToggleItem struct {
 	EnabledOverride bool
 	// Status is the human-readable connection status.
 	Status string
+	// Lazy is the effective lazy state: the server's tool schemas stay out
+	// of the model context until mcp_search loads them.
+	Lazy bool
+}
+
+// settingLabel names the setting for the row. A disabled server has no
+// tools to speak of, and its "disabled" status already reads off the
+// connection state, so only the two connected settings carry a label.
+func (i MCPToggleItem) settingLabel(scope MCPToggleScope) string {
+	if i.disabledIn(scope) {
+		return ""
+	}
+	if i.Lazy {
+		return "lazy"
+	}
+	return "enabled"
+}
+
+// disabledIn reports the effective disabled state for a scope: the local
+// scope honors the repository overrides, the global scope reads the raw
+// config flag.
+func (i MCPToggleItem) disabledIn(scope MCPToggleScope) bool {
+	if scope == MCPToggleScopeGlobal {
+		return i.ConfigDisabled
+	}
+	return i.localDisabled()
+}
+
+// setting derives the current tri-state setting for a scope from the
+// effective disabled flag and the lazy policy.
+func (i MCPToggleItem) setting(scope MCPToggleScope) MCPServerSetting {
+	if i.disabledIn(scope) {
+		return MCPServerSettingDisabled
+	}
+	if i.Lazy {
+		return MCPServerSettingLazy
+	}
+	return MCPServerSettingEnabled
 }
 
 // localDisabled returns the effective local state: a config-disabled
@@ -40,13 +78,54 @@ func (i MCPToggleItem) localDisabled() bool {
 	return i.Disabled || (i.ConfigDisabled && !i.EnabledOverride)
 }
 
-// ActionToggleMCP is sent when the user toggles an MCP server. Local
-// toggles persist a repository-scoped override; global toggles write the
-// disabled flag to the global config.
-type ActionToggleMCP struct {
-	Name     string
-	Disabled bool
-	Global   bool
+// MCPServerSetting is one of the three per-server settings offered by the
+// dialog. It unifies the connection flag and the lazy-context flag into a
+// single choice: Enabled keeps the server connected with its tool schemas
+// always in the model context, Lazy Load keeps it connected but serves the
+// schemas on demand through mcp_search (the default), and Disabled takes it
+// offline entirely.
+type MCPServerSetting int
+
+const (
+	MCPServerSettingEnabled MCPServerSetting = iota
+	MCPServerSettingDisabled
+	MCPServerSettingLazy
+)
+
+// String returns the setting label shown in dialog rows.
+func (s MCPServerSetting) String() string {
+	switch s {
+	case MCPServerSettingDisabled:
+		return "disabled"
+	case MCPServerSettingLazy:
+		return "lazy"
+	default:
+		return "enabled"
+	}
+}
+
+// next returns the setting the enter/space cycle advances to: disabled ->
+// lazy -> enabled -> disabled, an escalation of how much of the server the
+// model sees.
+func (s MCPServerSetting) next() MCPServerSetting {
+	switch s {
+	case MCPServerSettingDisabled:
+		return MCPServerSettingLazy
+	case MCPServerSettingLazy:
+		return MCPServerSettingEnabled
+	default:
+		return MCPServerSettingDisabled
+	}
+}
+
+// ActionSetMCPServerSetting persists a tri-state choice for one server. The
+// connection half honors Global (repository override vs config), while the
+// lazy half always writes the global config: it only decides what the model
+// is shown, never which servers connect.
+type ActionSetMCPServerSetting struct {
+	Name    string
+	Setting MCPServerSetting
+	Global  bool
 }
 
 // MCPToggleScope selects which store a toggle affects.
@@ -67,8 +146,10 @@ func (s MCPToggleScope) String() string {
 	return "Local"
 }
 
-// MCPToggles lets the user enable and disable MCP servers, either for
-// the current repository (Local, the default) or in the config (Global).
+// MCPToggles lets the user choose between the three per-server settings
+// (Enabled, Disabled, and Lazy Load) either for the current repository
+// (Local, the default) or in the config (Global). Enter cycles the active
+// row through the settings.
 type MCPToggles struct {
 	com    *common.Common
 	width  int
@@ -109,7 +190,7 @@ func NewMCPToggles(com *common.Common, items []MCPToggleItem) *MCPToggles {
 	)
 	m.keyMap.Toggle = key.NewBinding(
 		key.WithKeys("enter", " ", "space"),
-		key.WithHelp("enter", "toggle"),
+		key.WithHelp("enter", "cycle setting"),
 	)
 	m.keyMap.Scope = key.NewBinding(
 		key.WithKeys("tab"),
@@ -155,30 +236,36 @@ func (m *MCPToggles) HandleMsg(msg tea.Msg) Action {
 				return nil
 			}
 			item := m.items[m.cursor]
-			// Toggle based on the effective state for the active scope:
-			// local considers the repository overrides, global reads the
-			// config's raw disabled flag.
-			currentlyDisabled := item.localDisabled()
-			if m.scope == MCPToggleScopeGlobal {
-				currentlyDisabled = item.ConfigDisabled
-			}
-			newState := !currentlyDisabled
-			if m.scope == MCPToggleScopeGlobal {
-				m.items[m.cursor].ConfigDisabled = newState
-			} else {
-				m.items[m.cursor].Disabled = newState
-				// A server enabled locally is started at runtime; surface
-				// that immediately instead of waiting for the connection
-				// state event.
-				if !newState {
-					m.items[m.cursor].EnabledOverride = true
-					m.items[m.cursor].Status = "starting"
+			next := item.setting(m.scope).next()
+			// Apply optimistically so the row flips immediately; the UI
+			// model persists the choice and surfaces failures as toasts.
+			switch next {
+			case MCPServerSettingDisabled:
+				if m.scope == MCPToggleScopeGlobal {
+					m.items[m.cursor].ConfigDisabled = true
+				} else {
+					m.items[m.cursor].Disabled = true
+					m.items[m.cursor].EnabledOverride = false
 				}
+			default:
+				if m.scope == MCPToggleScopeGlobal {
+					m.items[m.cursor].ConfigDisabled = false
+				} else {
+					m.items[m.cursor].Disabled = false
+					// A config-disabled server enabled locally must be
+					// started at runtime; surface that immediately instead
+					// of waiting for the connection event.
+					if item.ConfigDisabled {
+						m.items[m.cursor].EnabledOverride = true
+						m.items[m.cursor].Status = "starting"
+					}
+				}
+				m.items[m.cursor].Lazy = next == MCPServerSettingLazy
 			}
-			return ActionToggleMCP{
-				Name:     item.Name,
-				Disabled: newState,
-				Global:   m.scope == MCPToggleScopeGlobal,
+			return ActionSetMCPServerSetting{
+				Name:    item.Name,
+				Setting: next,
+				Global:  m.scope == MCPToggleScopeGlobal,
 			}
 		case key.Matches(msg, m.keyMap.Close):
 			return ActionClose{}
@@ -202,7 +289,11 @@ func (m *MCPToggles) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 func (m *MCPToggles) requiredWidth(t *styles.Styles) int {
 	widest := 48 // Comfortable minimum so short names don't shrink the dialog.
 	for _, item := range m.items {
-		row := 2 /* dot + space */ + lipgloss.Width(item.Name) + 1 + lipgloss.Width(m.itemStatus(item))
+		status := m.itemStatus(item)
+		if label := item.settingLabel(m.scope); label != "" {
+			status += " · " + label
+		}
+		row := 2 /* dot + space */ + lipgloss.Width(item.Name) + 1 + lipgloss.Width(status)
 		widest = max(widest, row)
 	}
 	return widest + 2 /* row padding */ + t.Dialog.View.GetHorizontalFrameSize()
@@ -254,6 +345,9 @@ func (m *MCPToggles) innerContent() string {
 		// their own "●" via SetString, so Render() yields just the dot.
 		// It sits left of the name, like the sidebar rows.
 		dot := statusDot(t, status)
+		if label := item.settingLabel(m.scope); label != "" {
+			status += " · " + label
+		}
 		gap := max(1, rowWidth-2 /* dot + space */ -lipgloss.Width(item.Name)-lipgloss.Width(status))
 
 		if i == m.cursor {
@@ -335,6 +429,17 @@ func (m *MCPToggles) SetItemStatus(name, status string) {
 	for i, item := range m.items {
 		if item.Name == name {
 			m.items[i].Status = status
+			return
+		}
+	}
+}
+
+// SetItemLazy refreshes one item's lazy state without disturbing anything
+// else, so an open dialog reflects a config reload or a global flip.
+func (m *MCPToggles) SetItemLazy(name string, lazy bool) {
+	for i, item := range m.items {
+		if item.Name == name {
+			m.items[i].Lazy = lazy
 			return
 		}
 	}

@@ -23,7 +23,7 @@ import (
 // Prompt represents a template-based prompt generator.
 type Prompt struct {
 	name       string
-	template   string
+	template   *template.Template
 	now        func() time.Time
 	platform   string
 	workingDir string
@@ -68,10 +68,16 @@ func WithWorkingDir(workingDir string) Option {
 	}
 }
 
+// NewPrompt parses promptTemplate up front, so a malformed template fails
+// here instead of on every turn that builds it.
 func NewPrompt(name, promptTemplate string, opts ...Option) (*Prompt, error) {
+	t, err := template.New(name).Parse(promptTemplate)
+	if err != nil {
+		return nil, fmt.Errorf("parsing %s prompt template: %w", name, err)
+	}
 	p := &Prompt{
 		name:     name,
-		template: promptTemplate,
+		template: t,
 		now:      time.Now,
 	}
 	for _, opt := range opts {
@@ -81,16 +87,12 @@ func NewPrompt(name, promptTemplate string, opts ...Option) (*Prompt, error) {
 }
 
 func (p *Prompt) Build(ctx context.Context, provider, model string, store *config.ConfigStore) (string, error) {
-	t, err := template.New(p.name).Parse(p.template)
-	if err != nil {
-		return "", fmt.Errorf("parsing template: %w", err)
-	}
 	var sb strings.Builder
 	d, err := p.promptData(ctx, provider, model, store)
 	if err != nil {
 		return "", err
 	}
-	if err := t.Execute(&sb, d); err != nil {
+	if err := p.template.Execute(&sb, d); err != nil {
 		return "", fmt.Errorf("executing template: %w", err)
 	}
 
@@ -136,8 +138,8 @@ func processContextPath(p string, store *config.ConfigStore) []ContextFile {
 	return contexts
 }
 
-// expandPath expands ~ and environment variables in file paths
-func expandPath(path string, store *config.ConfigStore) string {
+// ExpandPath resolves ~ and environment variables in a config-supplied path.
+func ExpandPath(path string, store *config.ConfigStore) string {
 	path = home.Long(path)
 	// Handle environment variable expansion using the same pattern as config
 	if strings.HasPrefix(path, "$") {
@@ -153,7 +155,7 @@ func expandPath(path string, store *config.ConfigStore) string {
 func loadContextFiles(paths []string, store *config.ConfigStore) map[string][]ContextFile {
 	files := map[string][]ContextFile{}
 	for _, pth := range paths {
-		expanded := expandPath(pth, store)
+		expanded := ExpandPath(pth, store)
 		pathKey := strings.ToLower(expanded)
 		if _, ok := files[pathKey]; ok {
 			continue
@@ -185,7 +187,7 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 	if len(cfg.Options.SkillsPaths) > 0 {
 		expandedPaths := make([]string, 0, len(cfg.Options.SkillsPaths))
 		for _, pth := range cfg.Options.SkillsPaths {
-			expandedPaths = append(expandedPaths, expandPath(pth, store))
+			expandedPaths = append(expandedPaths, ExpandPath(pth, store))
 		}
 		for _, userSkill := range skills.Discover(expandedPaths) {
 			if builtinNames[userSkill.Name] {

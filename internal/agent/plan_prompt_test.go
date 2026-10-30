@@ -34,7 +34,7 @@ func TestPlanPromptListsConfiguredTools(t *testing.T) {
 	require.NoError(t, err)
 	cfg.SetupAgents()
 
-	p, err := planPrompt(prompt.WithWorkingDir(env.workingDir))
+	p, err := loadPrompt(cfg, "plan", prompt.WithWorkingDir(env.workingDir))
 	require.NoError(t, err)
 
 	systemPrompt, err := p.Build(context.Background(), "mock", "mock-model", cfg)

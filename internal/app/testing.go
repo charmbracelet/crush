@@ -4,7 +4,6 @@ import (
 	"context"
 	"sync"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -32,7 +31,7 @@ func NewForTest(ctx context.Context) *App {
 		Permissions:        permission.NewPermissionService("", false, nil, nil),
 		Questions:          question.NewService(),
 		globalCtx:          ctx,
-		events:             pubsub.NewBroker[tea.Msg](),
+		events:             pubsub.NewCoalescingBroker(eventCoalesceKey),
 		serviceEventsWG:    &sync.WaitGroup{},
 		tuiWG:              &sync.WaitGroup{},
 		agentNotifications: pubsub.NewBroker[notify.Notification](),

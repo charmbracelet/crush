@@ -150,9 +150,18 @@ func WithDebounce(d time.Duration) ServiceOption {
 	}
 }
 
+// CoalesceKey lets a newer UpdatedEvent snapshot replace an undelivered
+// older one for the same message, bounding what a slow subscriber holds.
+func CoalesceKey(ev pubsub.Event[Message]) string {
+	if ev.Type != pubsub.UpdatedEvent {
+		return ""
+	}
+	return ev.Payload.ID
+}
+
 func NewService(q db.Querier, opts ...ServiceOption) Service {
 	s := &service{
-		Broker:   pubsub.NewBroker[Message](),
+		Broker:   pubsub.NewCoalescingBroker(CoalesceKey),
 		q:        q,
 		debounce: defaultUpdateDebounce,
 		pending:  make(map[string]*pendingState),

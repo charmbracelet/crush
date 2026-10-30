@@ -842,6 +842,29 @@ credential error, Crush runs the command, then retries the request in place
 
 - `aws_auth_refresh` — shell command run when AWS credentials expire (e.g. `aws sso login`)
 
+#### OpenAI models on Bedrock
+
+Bedrock serves OpenAI's GPT models through an OpenAI-compatible endpoint
+rather than the built-in Bedrock provider. Add them as a custom provider with
+the `responses` type. GPT-6 models only accept tools through the Responses
+API, so the `completions` type fails on any request that uses tools.
+
+```bash
+provider add bedrock-openai --type responses \
+  --base-url "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1" \
+  --api-key "$AWS_BEARER_TOKEN_BEDROCK"
+
+model add bedrock-openai/us.openai.gpt-6-sol \
+  --name "GPT-6 Sol (Bedrock)" \
+  --context-window 1050000 \
+  --default-max-tokens 32000 \
+  --thinking always \
+  --supports-images true
+```
+
+Use a cross-Region inference profile (`us.` or `global.`) as the model ID;
+Bedrock rejects the bare foundation model ID on this endpoint.
+
 ### Vertex AI Platform
 
 Vertex AI will appear in the list of available providers when `VERTEXAI_PROJECT` and `VERTEXAI_LOCATION` are set. You will also need to be authenticated:

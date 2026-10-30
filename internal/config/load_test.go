@@ -1986,6 +1986,63 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 		require.Equal(t, "openai", small.Provider)
 		require.Equal(t, int64(500), small.MaxTokens)
 	})
+	t.Run("should keep reasoning options only for models that reason", func(t *testing.T) {
+		toggleable := catwalk.Reasoning{Thinking: catwalk.ThinkingToggleable}
+		withLevels := catwalk.Reasoning{
+			Thinking:           catwalk.ThinkingToggleable,
+			EffortLevels:       catwalk.NewEffortLevels("low", "high"),
+			DefaultEffortLevel: "low",
+		}
+		knownProviders := []catwalk.Provider{
+			{
+				ID:                  "openai",
+				APIKey:              "abc",
+				DefaultLargeModelID: "toggle",
+				DefaultSmallModelID: "toggle",
+				Models: []catwalk.Model{
+					{ID: "toggle", DefaultMaxTokens: 1000, Reasoning: toggleable},
+					{ID: "levels", DefaultMaxTokens: 1000, Reasoning: withLevels},
+					{ID: "never", DefaultMaxTokens: 1000, Reasoning: catwalk.Reasoning{Thinking: catwalk.ThinkingNever}},
+					{ID: "unknown", DefaultMaxTokens: 1000},
+				},
+			},
+		}
+
+		tests := []struct {
+			name       string
+			selected   SelectedModel
+			wantEffort string
+			wantThink  bool
+		}{
+			{"toggleable keeps think", SelectedModel{Model: "toggle", Think: true}, "", true},
+			{"levels keep a chosen effort", SelectedModel{Model: "levels", ReasoningEffort: "high"}, "high", false},
+			{"levels default an empty effort", SelectedModel{Model: "levels"}, "low", false},
+			{"never drops both", SelectedModel{Model: "never", ReasoningEffort: "high", Think: true}, "", false},
+			{"undeclared drops both", SelectedModel{Model: "unknown", ReasoningEffort: "high", Think: true}, "", false},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				cfg := &Config{
+					Models: map[SelectedModelType]SelectedModel{
+						SelectedModelTypeLarge: tt.selected,
+						SelectedModelTypeSmall: tt.selected,
+					},
+				}
+				cfg.setDefaults(t.TempDir(), "")
+				env := env.NewFromMap(map[string]string{})
+				resolver := NewShellVariableResolver(env)
+				require.NoError(t, cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, knownProviders))
+
+				resolved, err := resolveSelectedModels(cfg, knownProviders)
+				require.NoError(t, err)
+				for _, got := range []SelectedModel{resolved.Large, resolved.Small} {
+					require.Equal(t, tt.selected.Model, got.Model)
+					require.Equal(t, tt.wantEffort, got.ReasoningEffort)
+					require.Equal(t, tt.wantThink, got.Think)
+				}
+			})
+		}
+	})
 	t.Run("should be possible to use multiple providers", func(t *testing.T) {
 		knownProviders := []catwalk.Provider{
 			{

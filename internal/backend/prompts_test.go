@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 	"time"
+	"uuid"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/app"
@@ -12,7 +13,6 @@ import (
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
 

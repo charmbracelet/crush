@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"strings"
 	"time"
+	"uuid"
 
 	"charm.land/log/v2"
 	"github.com/charmbracelet/crush/internal/client"
@@ -24,7 +25,6 @@ import (
 	"github.com/charmbracelet/crush/internal/workspace"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/term"
-	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
 

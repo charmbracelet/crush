@@ -459,11 +459,12 @@ func (t *baseToolMessageItem) Status() ToolStatus {
 
 // computeStatus computes the effective status considering the result.
 func (t *baseToolMessageItem) computeStatus() ToolStatus {
-	// A cancelled tool's result is an interruption, not a real error.
-	if t.result == nil || t.status == ToolStatusCanceled {
+	switch {
+	case t.result == nil:
 		return t.status
-	}
-	if t.result.IsError {
+	case t.result.IsError && t.status == ToolStatusCanceled:
+		return ToolStatusCanceled // an interruption, not a real error
+	case t.result.IsError:
 		return ToolStatusError
 	}
 	return ToolStatusSuccess

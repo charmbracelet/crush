@@ -1,61 +1,50 @@
 package chat
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 )
 
-// A tool caught by a cancelled turn holds an interruption dressed as an
-// error, so it rendered a red ERROR banner for something the user did on
-// purpose.
-func TestCancelledTurnRendersToolAsCancelled(t *testing.T) {
+// renderTool renders a finished bash call with the given result as plain text.
+func renderTool(t *testing.T, result message.ToolResult, canceled bool) string {
+	t.Helper()
+	sty := styles.CharmtonePantera()
+	result.ToolCallID = "c1"
+	item := NewToolMessageItem(&sty, "m1",
+		message.ToolCall{ID: "c1", Name: "bash", Input: `{"command":"ls"}`, Finished: true},
+		&result, canceled, "/tmp",
+	)
+	return ansi.Strip(item.Render(120))
+}
+
+// An error result on a cancelled turn is the interruption, not a tool failure;
+// "context canceled" is what sessions saved before the agent relabelled it hold.
+func TestCancelledTurnRendersToolErrorAsCancelled(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.CharmtonePantera()
-	item := NewToolMessageItem(&sty, "m1",
-		message.ToolCall{ID: "c1", Name: "mcp__prickly__find", Input: `{}`, Finished: true},
-		&message.ToolResult{ToolCallID: "c1", Content: "context canceled", IsError: true},
-		true, // the turn was cancelled
-		"/tmp",
-	)
+	for _, content := range []string{"tool call was interrupted and did not produce a result", "context canceled"} {
+		out := renderTool(t, message.ToolResult{Content: content, IsError: true}, true)
+		require.Contains(t, out, "Canceled")
+		require.NotContains(t, out, content)
+	}
+}
 
-	out := plainText(item.Render(120))
-	require.Contains(t, out, "Canceled")
-	require.NotContains(t, out, "context canceled", "the runtime's wording must not reach the user")
+// A tool that finished before the turn was cancelled keeps its output.
+func TestCancelledTurnKeepsSuccessfulToolOutput(t *testing.T) {
+	t.Parallel()
+
+	out := renderTool(t, message.ToolResult{Content: "main.go"}, true)
+	require.Contains(t, out, "main.go")
+	require.NotContains(t, out, "Canceled")
 }
 
 // Without a cancellation, a genuine tool error still reads as an error.
 func TestToolErrorStillRendersAsError(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.CharmtonePantera()
-	item := NewToolMessageItem(&sty, "m1",
-		message.ToolCall{ID: "c1", Name: "mcp__prickly__find", Input: `{}`, Finished: true},
-		&message.ToolResult{ToolCallID: "c1", Content: "no such element", IsError: true},
-		false,
-		"/tmp",
-	)
-
-	require.Contains(t, plainText(item.Render(120)), "no such element")
-}
-
-// plainText drops ANSI styling so assertions read the visible text.
-func plainText(s string) string {
-	var b strings.Builder
-	var esc bool
-	for _, r := range s {
-		switch {
-		case r == 0x1b:
-			esc = true
-		case esc && r == 'm':
-			esc = false
-		case !esc:
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
+	require.Contains(t, renderTool(t, message.ToolResult{Content: "no such file", IsError: true}, false), "no such file")
 }

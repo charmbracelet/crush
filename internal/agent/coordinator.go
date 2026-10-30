@@ -1043,13 +1043,10 @@ func (c *coordinator) buildModel(ctx context.Context, slot config.SelectedModelT
 		return Model{}, err
 	}
 
-	// Bound each request with the configured timeout so unreachable or hung
-	// providers fail instead of blocking a session forever. The wrapper is
-	// applied per request, so retries get a fresh budget each attempt.
-	languageModel = newRequestTimeoutModel(languageModel, c.cfg.Config().Options.GetRequestTimeout())
-
-	// Cancelling a turn must stop its stream even with the timeout disabled.
-	languageModel = newStopOnCancelModel(languageModel)
+	// End each request when its turn is cancelled, and bound it with the
+	// configured timeout so unreachable or hung providers fail instead of
+	// blocking a session forever. Retries get a fresh budget each attempt.
+	languageModel = newRequestGuardModel(languageModel, c.cfg.Config().Options.GetRequestTimeout())
 
 	// Hyper completions no longer report the hypercredit balance, so wrap
 	// the Hyper models to fetch it from /v1/credits on every request.

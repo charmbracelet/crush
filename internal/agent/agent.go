@@ -1050,6 +1050,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			if _, ok := sanitizedToolCalls.Get(result.ToolCallID); ok {
 				toolResult.Content = "Tool call failed: arguments were not valid JSON. Please check your tool call format and try again."
 				toolResult.IsError = true
+			} else if toolResult.IsError && genCtx.Err() != nil {
+				// The turn was cancelled out from under the tool.
+				toolResult.Content = interruptedToolCallResult
 			}
 			if !toolResult.IsError && toolResult.Name != "" {
 				completedToolCalls.Set(toolResult.Name, struct{}{})
@@ -2212,8 +2215,6 @@ func (a *sessionAgent) Model() Model {
 }
 
 // convertToToolResult converts a fantasy tool result to a message tool result.
-// A tool cancelled out from under its turn reports interruptedToolCallResult
-// in place of the runtime's "context canceled".
 func (a *sessionAgent) convertToToolResult(result fantasy.ToolResultContent) message.ToolResult {
 	baseResult := message.ToolResult{
 		ToolCallID: result.ToolCallID,
@@ -2229,9 +2230,6 @@ func (a *sessionAgent) convertToToolResult(result fantasy.ToolResultContent) mes
 	case fantasy.ToolResultContentTypeError:
 		if r, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentError](result.Result); ok {
 			baseResult.Content = r.Error.Error()
-			if errors.Is(r.Error, context.Canceled) {
-				baseResult.Content = interruptedToolCallResult
-			}
 			baseResult.IsError = true
 		}
 	case fantasy.ToolResultContentTypeMedia:

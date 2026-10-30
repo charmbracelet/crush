@@ -103,3 +103,31 @@ func TestPromptsResolutionNotification(t *testing.T) {
 		t.Fatal("resolution notification never published")
 	}
 }
+
+func TestParsePromptTidiesKeyInfo(t *testing.T) {
+	t.Setenv("HOME", "/home/drew")
+	got := ParsePrompt("Enter PIN for ED25519-SK key /home/drew/.ssh/id_sk: ")
+	if got.KeyInfo != "ED25519-SK key ~/.ssh/id_sk" {
+		t.Fatalf("key info: %q", got.KeyInfo)
+	}
+	if got.Title != "Security Key PIN" {
+		t.Fatalf("title: %q", got.Title)
+	}
+	// "pin" inside a host name is not a PIN prompt.
+	if ParsePrompt("drew@pinecone's password: ").Title != "SSH Password" {
+		t.Fatal("host name containing pin misclassified")
+	}
+}
+
+func TestPromptsDoubleResolveDoesNotBlock(t *testing.T) {
+	svc := NewPrompts()
+	ch := svc.Subscribe(t.Context())
+	go svc.Prompt(t.Context(), PromptRequest{Prompt: "p"})
+	ev := <-ch
+	if !svc.Cancel(ev.Payload.ID) {
+		t.Fatal("cancel failed")
+	}
+	svc.Cancel(ev.Payload.ID)
+	svc.Respond(ev.Payload.ID, "x")
+	svc.Respond(ev.Payload.ID, "y")
+}

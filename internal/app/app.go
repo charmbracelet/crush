@@ -335,6 +335,10 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	// would wait forever: let the agent's own pinentry ask instead.
 	pinentry.DisableIntegration()
 
+	// No dialog can answer an ssh prompt here, so ssh would wait forever:
+	// let it fail instead.
+	sshaskpass.DisableIntegration()
+
 	// Re-initialize the coder agent without interactive-only tools.
 	if err := app.InitCoderAgentNonInteractive(ctx); err != nil {
 		return fmt.Errorf("failed to reinitialize agent for non-interactive mode: %w", err)

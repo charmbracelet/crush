@@ -136,7 +136,7 @@ func TestParsePrompt(t *testing.T) {
 			prompt:  "Verification code: ",
 			kind:    KindPassword,
 			title:   "SSH Password",
-			message: "Verification code:",
+			message: "Verification code.",
 		},
 	}
 	for _, c := range cases {

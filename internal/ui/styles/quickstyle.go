@@ -1167,7 +1167,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Dialog.InputPrompt = base.Margin(1, 1)
 	s.Dialog.PromptMessage = base.Foreground(o.fgSubtle).PaddingLeft(1)
 	s.Dialog.PromptKey = base.PaddingLeft(1)
-	s.Dialog.SSHMessage = base.Foreground(o.fgSubtle).PaddingLeft(1)
+	s.Dialog.SSHMessage = base.PaddingLeft(1)
 	s.Dialog.SSHKey = base.PaddingLeft(1)
 
 	s.Dialog.List = base.Margin(0, 0, 1, 0)

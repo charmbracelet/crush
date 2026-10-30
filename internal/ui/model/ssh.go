@@ -54,8 +54,8 @@ func (m *UI) openSSHDialog(req sshaskpass.PromptRequest) tea.Cmd {
 // handleSSHNotification dismisses the SSH dialog once the prompt is
 // resolved, covering the case where another subscriber (or a cancelled
 // ssh command) resolved it first.
-func (m *UI) handleSSHNotification(_ sshaskpass.Notification) {
-	if m.dialog.ContainsDialog(dialog.SSHID) {
+func (m *UI) handleSSHNotification(n sshaskpass.Notification) {
+	if d, ok := m.dialog.Dialog(dialog.SSHID).(*dialog.SSH); ok && d.RequestID() == n.RequestID {
 		m.dialog.CloseDialog(dialog.SSHID)
 	}
 }

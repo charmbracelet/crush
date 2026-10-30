@@ -8,6 +8,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/sshaskpass"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	uv "github.com/charmbracelet/ultraviolet"
@@ -49,7 +50,13 @@ func NewSSH(com *common.Common, req sshaskpass.PromptRequest) *SSH {
 
 	m.input = textinput.New()
 	m.input.SetVirtualCursor(false)
-	m.input.Placeholder = "Type your " + string(req.Kind) + "..."
+	m.input.Placeholder = "Type your password..."
+	switch req.Title {
+	case "SSH Passphrase":
+		m.input.Placeholder = "Type your passphrase..."
+	case "Security Key PIN":
+		m.input.Placeholder = "Type your PIN..."
+	}
 	m.input.EchoMode = textinput.EchoPassword
 	m.input.EchoCharacter = '•'
 	m.input.SetStyles(com.Styles.TextInput)
@@ -67,6 +74,11 @@ func NewSSH(com *common.Common, req sshaskpass.PromptRequest) *SSH {
 	m.keyMap.Close = CloseKey
 
 	return &m
+}
+
+// RequestID returns the ID of the prompt this dialog answers.
+func (m *SSH) RequestID() string {
+	return m.req.ID
 }
 
 // ID implements Dialog.
@@ -125,27 +137,26 @@ func (m *SSH) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := m.com.Styles
 
 	m.width = max(0, min(60, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
-	innerWidth := m.width - t.Dialog.View.GetHorizontalFrameSize() - 2
-	m.input.SetWidth(max(0, innerWidth-t.Dialog.InputPrompt.GetHorizontalFrameSize()-1)) // (1) cursor padding
-
-	dialogStyle := t.Dialog.View.Width(m.width)
-	inputStyle := t.Dialog.InputPrompt
-	helpView := renderDialogHelp(t, &m.help, m, m.width-dialogStyle.GetHorizontalFrameSize())
-
+	contentWidth := m.width - t.Dialog.View.GetHorizontalFrameSize()
 	m.input.Prompt = "> "
+	m.input.SetWidth(dialogInputTextWidth(t, m.input, contentWidth))
 
-	lines := []string{
-		m.headerView(),
-	}
+	// What OpenSSH is asking for comes before the input.
+	description := m.descriptionView(contentWidth)
+	lines := []string{m.headerView(), "", description}
 	if m.confirm {
-		lines = append(lines, m.descriptionView(), "", m.hintView())
+		lines = append(lines, "", m.hintView())
 	} else {
-		lines = append(lines, inputStyle.Render(m.input.View()), "", m.descriptionView())
+		lines = append(lines, t.Dialog.InputPrompt.Render(m.input.View()))
 	}
-	lines = append(lines, "", helpView)
+	lines = append(lines, renderDialogHelp(t, &m.help, m, contentWidth))
 
-	view := dialogStyle.Render(strings.Join(lines, "\n"))
+	view := t.Dialog.View.Width(m.width).Render(strings.Join(lines, "\n"))
 	cur := InputCursor(t, m.input.Cursor())
+	if cur != nil {
+		// InputCursor assumes the input sits right under the title.
+		cur.Y += 1 + lipgloss.Height(description)
+	}
 	DrawCenterCursor(scr, area, view, cur)
 	return cur
 }
@@ -167,12 +178,14 @@ func (m *SSH) headerView() string {
 	return common.DialogTitle(t, titleStyle.Render(title), m.width-headerOffset, t.Dialog.TitleGradFromColor, t.Dialog.TitleGradToColor)
 }
 
-func (m *SSH) descriptionView() string {
+// descriptionView renders the message and key row, wrapped to width so
+// continuation lines keep their padding.
+func (m *SSH) descriptionView(width int) string {
 	t := m.com.Styles
-	lines := []string{t.Dialog.SSHMessage.Render(m.messageView())}
+	lines := []string{t.Dialog.SSHMessage.Width(width).Render(m.messageView())}
 	if m.req.KeyInfo != "" {
 		label := sshaskpass.KeyInfoLabel(m.req.Prompt, m.req.Kind)
-		lines = append(lines, t.Dialog.SSHKey.Render(label+": "+m.req.KeyInfo))
+		lines = append(lines, t.Dialog.SSHKey.Width(width).Render(label+": "+m.req.KeyInfo))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -184,7 +197,7 @@ func (m *SSH) messageView() string {
 	if msg := strings.TrimSpace(m.req.Message); msg != "" {
 		return msg
 	}
-	return strings.TrimSpace(m.req.Prompt)
+	return strings.TrimRight(strings.TrimSpace(m.req.Prompt), ": ")
 }
 
 // hintView tells the user what a confirmation prompt is waiting for.

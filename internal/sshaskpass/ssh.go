@@ -2,6 +2,9 @@ package sshaskpass
 
 import (
 	"math/rand/v2"
+	"os"
+	"os/user"
+	"regexp"
 	"strings"
 )
 
@@ -106,11 +109,35 @@ func classifyStyle(lower string, kind Kind) promptStyle {
 		return styleHostKey
 	case strings.Contains(lower, "passphrase"):
 		return stylePassphrase
-	case strings.Contains(lower, "pin"):
+	case pinWord.MatchString(lower):
 		return stylePIN
 	default:
 		return stylePassword
 	}
+}
+
+var pinWord = regexp.MustCompile(`\bpin\b`)
+
+// tidy strips the trailing colon (and spaces) OpenSSH leaves on prompt
+// text and abbreviates the user's home directory to ~.
+func tidy(s string) string {
+	s = strings.TrimRight(strings.TrimSpace(s), ": ")
+	home, _ := os.UserHomeDir()
+	if u, err := user.Current(); err == nil {
+		for _, base := range []string{"/Users/", "/home/"} {
+			s = replacePrefixed(s, base+u.Username)
+		}
+	}
+	return replacePrefixed(s, home)
+}
+
+// replacePrefixed replaces dir with ~ wherever it starts a path.
+func replacePrefixed(s, dir string) string {
+	if dir == "" || dir == "/" {
+		return s
+	}
+	re := regexp.MustCompile(`(^|[\s'"])` + regexp.QuoteMeta(dir) + `(/|$|[\s'"])`)
+	return re.ReplaceAllString(s, "${1}~${2}")
 }
 
 // title is the short dialog heading for the prompt style.
@@ -156,7 +183,10 @@ func (s promptStyle) message(prompt, keyInfo string) string {
 		if keyInfo != "" {
 			return withAside("OpenSSH needs the password for "+keyInfo+".", s)
 		}
-		if trimmed := strings.TrimSpace(prompt); trimmed != "" {
+		if trimmed := tidy(prompt); trimmed != "" {
+			if !strings.HasSuffix(trimmed, "?") && !strings.HasSuffix(trimmed, ".") {
+				trimmed += "."
+			}
 			return withAside(trimmed, s)
 		}
 		return withAside("OpenSSH needs your input.", s)
@@ -261,14 +291,14 @@ func keyInfoFromPrompt(prompt string) string {
 	lower := strings.ToLower(prompt)
 	for _, prefix := range []string{"passphrase for key", "passphrase for", "pin for key", "pin for", "allow use of key"} {
 		if i := strings.Index(lower, prefix); i >= 0 {
-			return keyPath(prompt[i+len(prefix):])
+			return tidy(keyPath(prompt[i+len(prefix):]))
 		}
 	}
 	if i := strings.Index(lower, "'s password"); i >= 0 {
-		return strings.TrimSpace(prompt[:i])
+		return tidy(prompt[:i])
 	}
 	if i := strings.Index(lower, "password for "); i >= 0 {
-		return strings.TrimSpace(strings.TrimRight(prompt[i+len("password for "):], ": "))
+		return tidy(prompt[i+len("password for "):])
 	}
 	return ""
 }

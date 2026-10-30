@@ -76,17 +76,19 @@ var ErrNoPrompter = errors.New("no ssh prompt listener available")
 // the permission and question service patterns: publish a request over
 // pubsub, block on a channel, and resolve when the UI responds.
 //
-// Only one prompt can be pending at a time (OpenSSH asks for one
-// credential per operation), so responses are correlated by the pending
-// request ID. The secret is delivered to the single waiting caller and
-// is never published on any broker.
+// Only one prompt is pending at a time (the UI shows a single dialog);
+// concurrent callers queue for their turn. Responses are correlated by
+// the pending request ID. The secret is delivered to the single waiting
+// caller and is never published on any broker.
 type Prompts struct {
 	broker             *pubsub.Broker[PromptRequest]
 	notificationBroker *pubsub.Broker[Notification]
 
+	// turn holds a token while a prompt is pending.
+	turn chan struct{}
+
 	mu        sync.Mutex
 	pending   chan PromptResponse
-	cancelled chan struct{}
 	pendingID string
 }
 
@@ -106,6 +108,7 @@ func NewPrompts() *Prompts {
 	return &Prompts{
 		broker:             pubsub.NewBroker[PromptRequest](),
 		notificationBroker: pubsub.NewBroker[Notification](),
+		turn:               make(chan struct{}, 1),
 	}
 }
 
@@ -145,27 +148,24 @@ func (s *Prompts) Prompt(ctx context.Context, req PromptRequest) (string, error)
 		req.Kind = KindPassword
 	}
 
-	s.mu.Lock()
-	if s.pending != nil {
-		s.mu.Unlock()
-		return "", errors.New("another ssh prompt is already pending")
+	// Concurrent ssh operations wait their turn instead of failing.
+	select {
+	case s.turn <- struct{}{}:
+	case <-ctx.Done():
+		return "", ctx.Err()
 	}
+	defer func() { <-s.turn }()
+
 	respCh := make(chan PromptResponse, 1)
-	cancelCh := make(chan struct{})
+	s.mu.Lock()
 	s.pending = respCh
-	s.cancelled = cancelCh
 	s.pendingID = req.ID
 	s.mu.Unlock()
 
 	defer func() {
 		s.mu.Lock()
-		// Only clear our own slot; a follow-up prompt (e.g. a retry)
-		// may already occupy it by the time this caller unwinds.
-		if s.pendingID == req.ID {
-			s.pending = nil
-			s.cancelled = nil
-			s.pendingID = ""
-		}
+		s.pending = nil
+		s.pendingID = ""
 		s.mu.Unlock()
 	}()
 
@@ -179,17 +179,15 @@ func (s *Prompts) Prompt(ctx context.Context, req PromptRequest) (string, error)
 			return "", ErrCancelled
 		}
 		return resp.Secret, nil
-	case <-cancelCh:
-		return "", ErrCancelled
 	case <-ctx.Done():
+		// The ssh command went away unanswered: let clients dismiss
+		// the now-stale dialog.
 		s.notify(req.ID)
 		return "", ctx.Err()
 	}
 }
 
-// notify publishes a resolution so other subscribers close their
-// dialogs. Safe to call from Respond/Cancel under s.mu because the
-// notification broker is independent.
+// notify publishes a resolution so clients close the matching dialog.
 func (s *Prompts) notify(id string) {
 	s.notificationBroker.Publish(pubsub.UpdatedEvent, Notification{RequestID: id})
 }
@@ -197,25 +195,28 @@ func (s *Prompts) notify(id string) {
 // Respond resolves the pending prompt with the user's secret. Returns
 // false when no matching prompt is pending.
 func (s *Prompts) Respond(id, secret string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.pending == nil || s.pendingID != id {
-		return false
-	}
-	s.pending <- PromptResponse{ID: id, Secret: secret}
-	s.notify(id)
-	return true
+	return s.resolve(PromptResponse{ID: id, Secret: secret})
 }
 
 // Cancel dismisses the pending prompt. Returns false when no matching
 // prompt is pending.
 func (s *Prompts) Cancel(id string) bool {
+	return s.resolve(PromptResponse{ID: id, Cancelled: true})
+}
+
+// resolve delivers at most one response to the matching pending prompt.
+func (s *Prompts) resolve(resp PromptResponse) bool {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.cancelled == nil || s.pendingID != id {
+	ch, ok := s.pending, s.pending != nil && s.pendingID == resp.ID
+	s.mu.Unlock()
+	if !ok {
 		return false
 	}
-	close(s.cancelled)
-	s.notify(id)
+	select {
+	case ch <- resp:
+	default:
+		return false
+	}
+	s.notify(resp.ID)
 	return true
 }

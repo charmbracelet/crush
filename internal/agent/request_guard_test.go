@@ -4,9 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"runtime"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"charm.land/fantasy"
@@ -50,40 +51,47 @@ func (f *fakeLanguageModel) StreamObject(context.Context, fantasy.ObjectCall) (f
 func (f *fakeLanguageModel) Provider() string { return "fake" }
 func (f *fakeLanguageModel) Model() string    { return "fake-model" }
 
-func TestNewRequestTimeoutModel_Disabled(t *testing.T) {
+// A disabled timeout drops every budget but still guards the model, since
+// cancellation must stop a stream either way.
+func TestNewRequestGuardModel_Disabled(t *testing.T) {
 	t.Parallel()
 
-	inner := &fakeLanguageModel{}
-	require.Same(t, inner, newRequestTimeoutModel(inner, 0))
-	require.Same(t, inner, newRequestTimeoutModel(inner, -time.Second))
+	require.Nil(t, newRequestGuardModel(nil, time.Second))
+	for _, timeout := range []time.Duration{0, -time.Second} {
+		inner := &fakeLanguageModel{}
+		_, err := newRequestGuardModel(inner, timeout).Generate(t.Context(), fantasy.Call{})
+		require.NoError(t, err)
+		_, ok := inner.generateCtx.Deadline()
+		require.False(t, ok, "a disabled timeout must not impose a deadline")
+	}
 }
 
-// newTestRequestTimeoutModel builds a model whose first-part budget equals
+// newTestRequestGuardModel builds a model whose first-part budget equals
 // the idle window, so deadline tests fire in milliseconds instead of
 // waiting out [defaultFirstPartTimeout].
-func newTestRequestTimeoutModel(m fantasy.LanguageModel, timeout time.Duration) requestTimeoutModel {
-	return requestTimeoutModel{LanguageModel: m, timeout: timeout, firstPart: timeout}
+func newTestRequestGuardModel(m fantasy.LanguageModel, timeout time.Duration) requestGuardModel {
+	return requestGuardModel{LanguageModel: m, timeout: timeout, firstPart: timeout}
 }
 
-func TestNewRequestTimeoutModel_FirstPartBudget(t *testing.T) {
+func TestNewRequestGuardModel_FirstPartBudget(t *testing.T) {
 	t.Parallel()
 
 	// A tight idle window still grants the full first-part floor: prefill
 	// before the first token must not be mistaken for a stalled provider.
-	short := newRequestTimeoutModel(&fakeLanguageModel{}, time.Second).(requestTimeoutModel)
+	short := newRequestGuardModel(&fakeLanguageModel{}, time.Second).(requestGuardModel)
 	require.Equal(t, time.Second, short.timeout)
 	require.Equal(t, defaultFirstPartTimeout, short.firstPart)
 
 	// A budget larger than the floor is used as configured.
-	long := newRequestTimeoutModel(&fakeLanguageModel{}, 10*time.Minute).(requestTimeoutModel)
+	long := newRequestGuardModel(&fakeLanguageModel{}, 10*time.Minute).(requestGuardModel)
 	require.Equal(t, 10*time.Minute, long.firstPart)
 }
 
-func TestRequestTimeoutModel_GenerateDeadline(t *testing.T) {
+func TestRequestGuardModel_GenerateDeadline(t *testing.T) {
 	t.Parallel()
 
 	inner := &fakeLanguageModel{}
-	m := newRequestTimeoutModel(inner, 5*time.Minute)
+	m := newRequestGuardModel(inner, 5*time.Minute)
 
 	_, err := m.Generate(t.Context(), fantasy.Call{})
 	require.NoError(t, err)
@@ -92,11 +100,11 @@ func TestRequestTimeoutModel_GenerateDeadline(t *testing.T) {
 	require.True(t, ok, "Generate should run under a deadline")
 }
 
-func TestRequestTimeoutModel_StreamDeadlineOutlivesCall(t *testing.T) {
+func TestRequestGuardModel_StreamDeadlineOutlivesCall(t *testing.T) {
 	t.Parallel()
 
 	inner := &fakeLanguageModel{}
-	m := newRequestTimeoutModel(inner, 5*time.Minute)
+	m := newRequestGuardModel(inner, 5*time.Minute)
 
 	stream, err := m.Stream(t.Context(), fantasy.Call{})
 	require.NoError(t, err)
@@ -109,7 +117,7 @@ func TestRequestTimeoutModel_StreamDeadlineOutlivesCall(t *testing.T) {
 	require.ErrorIs(t, inner.streamCtx.Err(), context.Canceled, "the stream context should be released after the stream ends")
 }
 
-func TestRequestTimeoutModel_StreamAbortsWhenIdle(t *testing.T) {
+func TestRequestGuardModel_StreamAbortsWhenIdle(t *testing.T) {
 	t.Parallel()
 
 	inner := &fakeLanguageModel{}
@@ -120,7 +128,7 @@ func TestRequestTimeoutModel_StreamAbortsWhenIdle(t *testing.T) {
 		<-inner.streamCtx.Done()
 		streamObserved <- inner.streamCtx.Err()
 	}
-	m := newTestRequestTimeoutModel(inner, 10*time.Millisecond)
+	m := newTestRequestGuardModel(inner, 10*time.Millisecond)
 	stream, err := m.Stream(t.Context(), fantasy.Call{})
 	require.NoError(t, err)
 
@@ -140,7 +148,7 @@ func TestRequestTimeoutModel_StreamAbortsWhenIdle(t *testing.T) {
 	<-done
 }
 
-func TestRequestTimeoutModel_ActiveStreamSurvives(t *testing.T) {
+func TestRequestGuardModel_ActiveStreamSurvives(t *testing.T) {
 	t.Parallel()
 
 	inner := &fakeLanguageModel{}
@@ -154,7 +162,7 @@ func TestRequestTimeoutModel_ActiveStreamSurvives(t *testing.T) {
 			}
 		}
 	}
-	m := newRequestTimeoutModel(inner, 25*time.Millisecond)
+	m := newRequestGuardModel(inner, 25*time.Millisecond)
 	stream, err := m.Stream(t.Context(), fantasy.Call{})
 	require.NoError(t, err)
 
@@ -177,10 +185,10 @@ func (b *blockingModel) Generate(ctx context.Context, _ fantasy.Call) (*fantasy.
 	return nil, ctx.Err()
 }
 
-func TestRequestTimeoutModel_GenerateReportsTimeout(t *testing.T) {
+func TestRequestGuardModel_GenerateReportsTimeout(t *testing.T) {
 	t.Parallel()
 
-	m := newRequestTimeoutModel(&blockingModel{}, 10*time.Millisecond)
+	m := newRequestGuardModel(&blockingModel{}, 10*time.Millisecond)
 
 	_, err := m.Generate(t.Context(), fantasy.Call{})
 	require.Error(t, err)
@@ -195,7 +203,7 @@ func TestRequestTimeoutModel_GenerateReportsTimeout(t *testing.T) {
 	require.Contains(t, err.Error(), "timed out after 10ms")
 }
 
-func TestRequestTimeoutModel_StreamReportsTimeout(t *testing.T) {
+func TestRequestGuardModel_StreamReportsTimeout(t *testing.T) {
 	t.Parallel()
 
 	inner := &fakeLanguageModel{}
@@ -205,7 +213,7 @@ func TestRequestTimeoutModel_StreamReportsTimeout(t *testing.T) {
 		<-inner.streamCtx.Done()
 		yield(fantasy.StreamPart{Error: inner.streamCtx.Err()})
 	}
-	m := newTestRequestTimeoutModel(inner, 10*time.Millisecond)
+	m := newTestRequestGuardModel(inner, 10*time.Millisecond)
 	stream, err := m.Stream(t.Context(), fantasy.Call{})
 	require.NoError(t, err)
 
@@ -223,10 +231,10 @@ func TestRequestTimeoutModel_StreamReportsTimeout(t *testing.T) {
 	require.NotErrorIs(t, got, context.Canceled)
 }
 
-func TestRequestTimeoutModel_ParentCancelPassesThrough(t *testing.T) {
+func TestRequestGuardModel_ParentCancelPassesThrough(t *testing.T) {
 	t.Parallel()
 
-	m := newRequestTimeoutModel(&blockingModel{}, 5*time.Minute)
+	m := newRequestGuardModel(&blockingModel{}, 5*time.Minute)
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -250,8 +258,11 @@ func TestRequestTimeoutErrorMessages(t *testing.T) {
 	require.Contains(t, err.userMessage(), "1s")
 	require.Contains(t, err.userMessage(), "request-timeout")
 
-	err.cause = context.DeadlineExceeded
-	require.Equal(t, "LLM request timed out after 1s: context deadline exceeded", err.Error())
+	err.cause = errors.New("connection reset")
+	require.Equal(t, "LLM request timed out after 1s: connection reset", err.Error())
+
+	first := &requestTimeoutError{timeout: 5 * time.Minute, kind: timeoutFirstPart}
+	require.Equal(t, "LLM stream sent no first part within 5m0s", first.Error())
 
 	idle := &requestTimeoutError{timeout: 2 * time.Second, kind: timeoutIdle}
 	require.Equal(t, "LLM stream received no data for 2s", idle.Error())
@@ -265,29 +276,33 @@ func TestRequestTimeoutErrorMessages(t *testing.T) {
 }
 
 // timeoutOnlyModel streams a single error part shaped exactly like the one
-// requestTimeoutModel produces when its deadline fires.
+// requestGuardModel produces when its deadline fires.
 type timeoutOnlyModel struct {
 	fakeLanguageModel
+	attempts atomic.Int32
 }
 
 func (m *timeoutOnlyModel) Stream(context.Context, fantasy.Call) (fantasy.StreamResponse, error) {
-	timeoutErr := &requestTimeoutError{timeout: time.Second, kind: timeoutIdle, cause: context.DeadlineExceeded}
+	m.attempts.Add(1)
+	timeoutErr := &requestTimeoutError{timeout: time.Second, kind: timeoutIdle}
 	return func(yield func(fantasy.StreamPart) bool) {
 		yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeError, Error: timeoutErr})
 	}, nil
 }
 
-// TestRequestTimeoutRunFinishMessage pins what the user sees when a request
-// exhausts its timeout: a "Request timed out" finish that names the elapsed
-// budget and how to change it, instead of a bare provider error.
+// A timeout ends the run with "Request timed out" once its retries run out;
+// the bubble fakes the backoff clock.
 func TestRequestTimeoutRunFinishMessage(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("skipping on windows for now")
 	}
+	synctest.Test(t, testRequestTimeoutRunFinishMessage)
+}
 
+func testRequestTimeoutRunFinishMessage(t *testing.T) {
 	env := testEnv(t)
 	model := &timeoutOnlyModel{}
-	agent, err := coderAgent(vcr.NewRecorder(t), env, model, model)
+	agent, err := coderAgent(vcr.NewRecorder(t), env, model, fastModel{})
 	require.NoError(t, err)
 
 	session, err := env.sessions.Create(t.Context(), "timeout session")
@@ -317,9 +332,10 @@ func TestRequestTimeoutRunFinishMessage(t *testing.T) {
 	require.Equal(t, "Request timed out", finish.Message)
 	require.Contains(t, finish.Details, "stopped sending data for 1s")
 	require.Contains(t, finish.Details, "request-timeout")
+	require.EqualValues(t, fantasy.DefaultRetryOptions().MaxRetries+1, model.attempts.Load(), "a timeout must be retried")
 }
 
-func TestRequestTimeoutModel_FirstPartWindowOutlivesIdle(t *testing.T) {
+func TestRequestGuardModel_FirstPartWindowOutlivesIdle(t *testing.T) {
 	t.Parallel()
 
 	inner := &fakeLanguageModel{}
@@ -330,7 +346,7 @@ func TestRequestTimeoutModel_FirstPartWindowOutlivesIdle(t *testing.T) {
 		time.Sleep(80 * time.Millisecond)
 		yield(fantasy.StreamPart{Delta: "hello"})
 	}
-	m := requestTimeoutModel{
+	m := requestGuardModel{
 		LanguageModel: inner,
 		timeout:       20 * time.Millisecond,
 		firstPart:     200 * time.Millisecond,
@@ -346,7 +362,7 @@ func TestRequestTimeoutModel_FirstPartWindowOutlivesIdle(t *testing.T) {
 	require.Equal(t, 1, parts, "the first part must not be cut off by the idle window")
 }
 
-func TestRequestTimeoutModel_AbortsOnInterPartGap(t *testing.T) {
+func TestRequestGuardModel_AbortsOnInterPartGap(t *testing.T) {
 	t.Parallel()
 
 	inner := &fakeLanguageModel{}
@@ -359,7 +375,7 @@ func TestRequestTimeoutModel_AbortsOnInterPartGap(t *testing.T) {
 		<-inner.streamCtx.Done()
 		yield(fantasy.StreamPart{Error: inner.streamCtx.Err()})
 	}
-	m := requestTimeoutModel{
+	m := requestGuardModel{
 		LanguageModel: inner,
 		timeout:       10 * time.Millisecond,
 		firstPart:     time.Hour,
@@ -382,7 +398,7 @@ func TestRequestTimeoutModel_AbortsOnInterPartGap(t *testing.T) {
 	require.Contains(t, timeoutErr.userMessage(), "stopped sending data for 10ms")
 }
 
-func TestRequestTimeoutModel_SlowConsumerDoesNotAbort(t *testing.T) {
+func TestRequestGuardModel_SlowConsumerDoesNotAbort(t *testing.T) {
 	t.Parallel()
 
 	inner := &fakeLanguageModel{}
@@ -396,7 +412,7 @@ func TestRequestTimeoutModel_SlowConsumerDoesNotAbort(t *testing.T) {
 			}
 		}
 	}
-	m := newTestRequestTimeoutModel(inner, 10*time.Millisecond)
+	m := newTestRequestGuardModel(inner, 10*time.Millisecond)
 	stream, err := m.Stream(t.Context(), fantasy.Call{})
 	require.NoError(t, err)
 
@@ -474,11 +490,11 @@ func (m *oneToolCallModel) Stream(_ context.Context, call fantasy.Call) (fantasy
 	}, nil
 }
 
-// TestRequestTimeoutModel_DoesNotBoundToolCalls pins the invariant that
+// TestRequestGuardModel_DoesNotBoundToolCalls pins the invariant that
 // request_timeout covers LLM requests only: a tool that waits far past the
 // timeout for its job must finish normally, and its context must carry no
 // deadline.
-func TestRequestTimeoutModel_DoesNotBoundToolCalls(t *testing.T) {
+func TestRequestGuardModel_DoesNotBoundToolCalls(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("skipping on windows for now")
 	}
@@ -487,7 +503,7 @@ func TestRequestTimeoutModel_DoesNotBoundToolCalls(t *testing.T) {
 
 	inner := &oneToolCallModel{}
 	slow := &slowTool{delay: 500 * time.Millisecond}
-	agent := testSessionAgent(env, newRequestTimeoutModel(inner, 100*time.Millisecond), inner, "", slow)
+	agent := testSessionAgent(env, newRequestGuardModel(inner, 100*time.Millisecond), inner, "", slow)
 
 	session, err := env.sessions.Create(t.Context(), "tool timeout session")
 	require.NoError(t, err)
@@ -502,44 +518,218 @@ func TestRequestTimeoutModel_DoesNotBoundToolCalls(t *testing.T) {
 	require.False(t, slow.hadDeadline, "a tool call must not inherit the request timeout deadline")
 }
 
-// TestWrapTimedOutBreaksCycle guards against a cyclic error chain: a
-// provider that reports the context cause hands this very sentinel back,
-// and linking the sentinel to itself makes every errors.Is/As walk of it,
-// in fantasy's retry classification and in our own, spin forever.
-func TestWrapTimedOutBreaksCycle(t *testing.T) {
-	t.Parallel()
-
-	timeoutErr := &requestTimeoutError{timeout: time.Minute, kind: timeoutIdle}
-	ctx, cancel := context.WithTimeoutCause(context.Background(), 10*time.Millisecond, timeoutErr)
-	t.Cleanup(cancel)
-	<-ctx.Done()
-
-	err := wrapTimedOut(ctx, fmt.Errorf("stream aborted: %w", context.Cause(ctx)))
-
-	terminated := make(chan bool, 1)
-	go func() { terminated <- errors.Is(err, context.DeadlineExceeded) }()
-	select {
-	case matched := <-terminated:
-		require.False(t, matched, "a timeout must not read as the caller giving up")
-	case <-time.After(2 * time.Second):
-		t.Fatal("errors.Is never returned: the error chain is cyclic")
-	}
-}
-
 // An idle timeout usually means the connection died rather than the model
-// thinking, since provider keepalives reset the budget. Retry logic skips
-// anything that looks like a deliberate abort, so the error has to present
-// as a retryable network timeout instead.
+// thinking, since provider keepalives reset the budget, so it is worth
+// another attempt whatever failure it wraps.
 func TestRequestTimeoutIsRetryable(t *testing.T) {
 	t.Parallel()
 
-	err := error(&requestTimeoutError{timeout: time.Minute, kind: timeoutIdle})
+	err := error(&requestTimeoutError{
+		timeout: time.Minute,
+		kind:    timeoutIdle,
+		cause:   &fantasy.ProviderError{StatusCode: 400},
+	})
 
-	var netErr net.Error
-	require.ErrorAs(t, err, &netErr, "must present as a net.Error to be retried")
-	require.True(t, netErr.Timeout())
+	var retryable fantasy.RetryableError
+	require.ErrorAs(t, err, &retryable)
+	require.True(t, retryable.IsRetryable())
 
 	// These are what retry logic reads as "the caller gave up".
 	require.NotErrorIs(t, err, context.Canceled)
 	require.NotErrorIs(t, err, context.DeadlineExceeded)
+}
+
+// drainStream consumes a stream and returns the part types and last error.
+func drainStream(t *testing.T, ctx context.Context, model fantasy.LanguageModel) ([]fantasy.StreamPartType, error) {
+	t.Helper()
+	stream, err := model.Stream(ctx, fantasy.Call{})
+	require.NoError(t, err)
+	var types []fantasy.StreamPartType
+	var lastErr error
+	for part := range stream {
+		if part.Error != nil {
+			lastErr = part.Error
+		}
+		types = append(types, part.Type)
+	}
+	return types, lastErr
+}
+
+// A keepalive-only stretch longer than the idle budget is a model thinking,
+// not a dead connection.
+func TestRequestTimeoutSurvivesKeepaliveOnlyStretch(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		const idle = time.Minute
+		inner := &fakeLanguageModel{stream: func(yield func(fantasy.StreamPart) bool) {
+			for range 4 {
+				time.Sleep(idle * 3 / 4)
+				if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeKeepalive}) {
+					return
+				}
+			}
+			yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextDelta, Delta: "done"})
+			yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish})
+		}}
+
+		types, err := drainStream(t, t.Context(), newTestRequestGuardModel(inner, idle))
+		require.NoError(t, err, "keepalives should have kept the stream alive")
+		require.Contains(t, types, fantasy.StreamPartTypeTextDelta)
+	})
+}
+
+// The first-part budget still fires on a stream that is genuinely silent.
+func TestRequestTimeoutStillFiresOnRealSilence(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		const idle = time.Minute
+		inner := &fakeLanguageModel{stream: func(yield func(fantasy.StreamPart) bool) {
+			time.Sleep(idle * 4)
+			yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextDelta, Delta: "too late"})
+		}}
+
+		types, err := drainStream(t, t.Context(), newTestRequestGuardModel(inner, idle))
+		var timeoutErr *requestTimeoutError
+		require.ErrorAs(t, err, &timeoutErr)
+		require.Equal(t, timeoutFirstPart, timeoutErr.kind)
+		require.NotContains(t, types, fantasy.StreamPartTypeTextDelta, "a part after the timeout must not reach the consumer")
+	})
+}
+
+// Keepalives alone must not hold a turn open forever: the laptop-sleep case,
+// where the connection survives but nothing is being generated behind it.
+func TestRequestTimeoutFiresOnKeepaliveOnlyStream(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		const idle = time.Minute
+		inner := &fakeLanguageModel{stream: func(yield func(fantasy.StreamPart) bool) {
+			for {
+				time.Sleep(idle / 2)
+				if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeKeepalive}) {
+					return
+				}
+			}
+		}}
+
+		start := time.Now()
+		_, err := drainStream(t, t.Context(), newTestRequestGuardModel(inner, idle))
+		var timeoutErr *requestTimeoutError
+		require.ErrorAs(t, err, &timeoutErr)
+		require.Equal(t, timeoutStalled, timeoutErr.kind)
+		require.Less(t, time.Since(start), idle*keepaliveGraceFactor+idle, "the stall budget, not the idle one, must end it")
+	})
+}
+
+// Content resets the stall budget, so an active stream outlives it.
+func TestRequestTimeoutStallBudgetResetsOnContent(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		const idle = time.Minute
+		inner := &fakeLanguageModel{stream: func(yield func(fantasy.StreamPart) bool) {
+			for range keepaliveGraceFactor * 2 {
+				time.Sleep(idle / 2)
+				if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextDelta, Delta: "."}) {
+					return
+				}
+			}
+			yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish})
+		}}
+
+		_, err := drainStream(t, t.Context(), newTestRequestGuardModel(inner, idle))
+		require.NoError(t, err, "an actively streaming response must never be cut off")
+	})
+}
+
+// A cancelled run must stop consuming a stream whose parts are already
+// buffered locally, where cancelling the context reaches nothing, and must
+// say why it stopped: a quiet stop reads as a finished stream.
+func TestStreamStopsDrainingBufferedPartsOnCancel(t *testing.T) {
+	t.Parallel()
+
+	for _, timeout := range []time.Duration{0, time.Minute} {
+		t.Run(timeout.String(), func(t *testing.T) {
+			t.Parallel()
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			delivered := 0
+			inner := &fakeLanguageModel{stream: func(yield func(fantasy.StreamPart) bool) {
+				for range 5000 {
+					if delivered++; delivered == 10 {
+						cancel()
+					}
+					if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextDelta, Delta: "x"}) {
+						return
+					}
+				}
+			}}
+
+			types, err := drainStream(t, ctx, newRequestGuardModel(inner, timeout))
+			require.Len(t, types, 10, "iteration must stop once the run is cancelled")
+			require.Equal(t, fantasy.StreamPartTypeError, types[len(types)-1])
+			require.ErrorIs(t, err, context.Canceled)
+		})
+	}
+}
+
+// A provider that notices the cancel and returns without an error part
+// still leaves the consumer with a reason.
+func TestStreamReportsQuietStopOnCancel(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	inner := &fakeLanguageModel{stream: func(yield func(fantasy.StreamPart) bool) {
+		yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeToolInputStart, ID: "c1"})
+		cancel()
+	}}
+
+	types, err := drainStream(t, ctx, newRequestGuardModel(inner, 0))
+	require.Equal(t, []fantasy.StreamPartType{fantasy.StreamPartTypeToolInputStart, fantasy.StreamPartTypeError}, types)
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+// cancelAwareTool answers a cancelled context the way MCP tools do: a text
+// error naming the cancellation, with no Go error to match on.
+type cancelAwareTool struct {
+	slowTool
+	started chan struct{}
+}
+
+func (t *cancelAwareTool) Run(ctx context.Context, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
+	close(t.started)
+	<-ctx.Done()
+	return fantasy.NewTextErrorResponse("context canceled"), nil
+}
+
+// A tool cut off by a cancelled turn is recorded as interrupted, so the model
+// reads it as retryable rather than as the tool failing.
+func TestCancelledTurnRecordsToolAsInterrupted(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on windows for now")
+	}
+
+	env := testEnv(t)
+	inner := &oneToolCallModel{}
+	tool := &cancelAwareTool{started: make(chan struct{})}
+	agent := testSessionAgent(env, newRequestGuardModel(inner, 0), inner, "", tool)
+
+	session, err := env.sessions.Create(t.Context(), "cancelled tool session")
+	require.NoError(t, err)
+
+	go func() {
+		<-tool.started
+		agent.Cancel(session.ID)
+	}()
+	_, err = agent.Run(t.Context(), SessionAgentCall{Prompt: "Hello", SessionID: session.ID, MaxOutputTokens: 1000})
+	require.ErrorIs(t, err, context.Canceled)
+
+	msgs, err := env.messages.List(t.Context(), session.ID)
+	require.NoError(t, err)
+	var results []message.ToolResult
+	for _, msg := range msgs {
+		results = append(results, msg.ToolResults()...)
+	}
+	require.Len(t, results, 1)
+	require.True(t, results[0].IsError)
+	require.Equal(t, interruptedToolCallResult, results[0].Content)
 }

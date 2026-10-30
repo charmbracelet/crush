@@ -459,13 +459,15 @@ func (t *baseToolMessageItem) Status() ToolStatus {
 
 // computeStatus computes the effective status considering the result.
 func (t *baseToolMessageItem) computeStatus() ToolStatus {
-	if t.result != nil {
-		if t.result.IsError {
-			return ToolStatusError
-		}
-		return ToolStatusSuccess
+	switch {
+	case t.result == nil:
+		return t.status
+	case t.result.IsError && t.status == ToolStatusCanceled:
+		return ToolStatusCanceled // an interruption, not a real error
+	case t.result.IsError:
+		return ToolStatusError
 	}
-	return t.status
+	return ToolStatusSuccess
 }
 
 // isSpinning returns true if the tool should show animation. A recorded

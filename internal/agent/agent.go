@@ -1053,6 +1053,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			if _, ok := sanitizedToolCalls.Get(result.ToolCallID); ok {
 				toolResult.Content = "Tool call failed: arguments were not valid JSON. Please check your tool call format and try again."
 				toolResult.IsError = true
+			} else if toolResult.IsError && genCtx.Err() != nil {
+				// The turn was cancelled out from under the tool.
+				toolResult.Content = interruptedToolCallResult
 			}
 			if !toolResult.IsError && toolResult.Name != "" {
 				completedToolCalls.Set(toolResult.Name, struct{}{})

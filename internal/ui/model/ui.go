@@ -2912,14 +2912,12 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		return tea.Batch(cmds...)
 	}
 
-	// A ChatGPT or Grok sign-in swaps the provider's catalog for the one
-	// the account serves, so a model chosen before the flow may no longer
-	// exist afterward. Apply the remembered choice only when the refreshed
-	// catalog still offers it; otherwise reopen the list and say so rather
-	// than silently falling back to a default.
-	if providerID == string(catwalk.InferenceProviderOpenAI) ||
-		providerID == string(catwalk.InferenceProviderXAI) {
-		if !cfg.IsModelAvailable(providerID, msg.Model.Model) {
+	// A subscription sign-in swaps the provider's catalog, so a model chosen
+	// before the flow may no longer be served. Reopen the list rather than
+	// silently falling back to a default.
+	if config.HasSubscriptionCatalog(providerID) {
+		pc, _ := cfg.Providers.Get(providerID)
+		if !slices.ContainsFunc(pc.ActiveModels(), func(model catwalk.Model) bool { return model.ID == msg.Model.Model }) {
 			m.dialog.CloseDialog(dialog.ModelsID)
 			cmds = append(cmds, util.ReportError(fmt.Errorf(
 				"%s isn't offered by your %s account; choose another model",

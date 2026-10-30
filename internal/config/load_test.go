@@ -2776,9 +2776,9 @@ func TestLoadFromConfigPaths_PersistsCatwalkV2Migration(t *testing.T) {
 	})
 }
 
-func TestMigrateCatwalkV2KeepsLargeIntegersExact(t *testing.T) {
+func TestMigrateLegacyConfigKeepsLargeIntegersExact(t *testing.T) {
 	in := `{"providers":{"x":{"models":[{"id":"m","context_window":9007199254740993,"cost_per_1m_in":0.1}]}}}`
-	out, changed := migrateCatwalkV2([]byte(in))
+	out, changed := migrateLegacyConfig([]byte(in))
 	require.True(t, changed)
 	require.Contains(t, string(out), `"context_window":9007199254740993`)
 	require.Contains(t, string(out), `"pricing":{"input":0.1}`)

@@ -2,6 +2,7 @@ package grok
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -90,6 +91,7 @@ func TestExchangeCode(t *testing.T) {
 	require.Equal(t, "at-abc", token.AccessToken)
 	require.Equal(t, "rt-abc", token.RefreshToken)
 	require.Equal(t, "id-abc", token.IDToken)
+	require.Empty(t, token.AccountID, "an unreadable ID token names no account")
 	require.WithinDuration(t, time.Now().Add(time.Hour), time.Unix(token.ExpiresAt, 0), time.Minute)
 }
 
@@ -128,4 +130,13 @@ func TestRefreshToken_ServerError(t *testing.T) {
 	var exchangeErr *oauth.TokenExchangeError
 	require.ErrorAs(t, err, &exchangeErr)
 	require.True(t, exchangeErr.IsRefreshTokenRevoked())
+}
+
+func TestTokenAccountIDFromIDToken(t *testing.T) {
+	idToken := "e30." + base64.RawURLEncoding.EncodeToString([]byte(`{"sub":"user-123"}`)) + ".sig"
+	stubTokenServer(t, tokenResponse{AccessToken: "at", IDToken: idToken, ExpiresIn: 60})
+
+	token, err := ExchangeCode(context.Background(), "code", "http://127.0.0.1/callback", PKCE{Verifier: "v"})
+	require.NoError(t, err)
+	require.Equal(t, "user-123", token.AccountID, "the ID token subject names the account")
 }

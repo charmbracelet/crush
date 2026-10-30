@@ -43,10 +43,7 @@ type modelsResponse struct {
 	Models []ModelInfo `json:"data"`
 }
 
-// modelReasoning maps the catalog's thinking flags onto the catwalk
-// reasoning structure. Models that list effort levels get them all as a
-// toggleable setting; models that only claim thinking support toggle
-// reasoning without levels; the rest cannot reason.
+// modelReasoning maps the catalog's thinking flags onto catwalk's model.
 func modelReasoning(s ModelSupports) catwalk.Reasoning {
 	if len(s.ReasoningEffort) > 0 {
 		return catwalk.Reasoning{
@@ -60,9 +57,8 @@ func modelReasoning(s ModelSupports) catwalk.Reasoning {
 	return catwalk.Reasoning{Thinking: catwalk.ThinkingNever}
 }
 
-// Models fetches the model catalog the GitHub Copilot subscription
-// grants, using the OAuth token obtained from the device flow. Models
-// the plan does not enable for the model picker are filtered out.
+// Models fetches the models the Copilot subscription enables for the
+// model picker.
 func Models(ctx context.Context, token *oauth.Token) ([]catwalk.Model, error) {
 	if token == nil {
 		return nil, fmt.Errorf("an OAuth token is required to list GitHub Copilot models")
@@ -76,8 +72,7 @@ func Models(ctx context.Context, token *oauth.Token) ([]catwalk.Model, error) {
 	req.Header.Set("Authorization", "Bearer "+token.AccessToken)
 	req.Header.Set("OpenAI-Intent", "model-access")
 	req.Header.Set("originator", "crush")
-	// The API rejects catalog requests without the editor identity
-	// headers, asking for IDE auth.
+	// Without the editor identity headers the API demands IDE auth.
 	for k, v := range Headers() {
 		req.Header.Set(k, v)
 	}

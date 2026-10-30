@@ -9,13 +9,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestBuildAgentModelsResolvesCredentialScopedCatalog is a regression test
-// for the "fetched OAuth catalog models cannot be selected" bug: the model
-// picker lists credential-scoped catalogs (CopilotModels), but model
-// resolution only considered the static Models list, so picking a
-// subscription-granted model failed with errLargeModelNotFound. Resolution
-// now goes through Config.GetModel, which includes the credential-scoped
-// catalogs.
+// TestBuildAgentModelsResolvesCredentialScopedCatalog proves models from a
+// subscription catalog, not just the static one, can be selected.
 func TestBuildAgentModelsResolvesCredentialScopedCatalog(t *testing.T) {
 	env := testEnv(t)
 
@@ -24,7 +19,7 @@ func TestBuildAgentModelsResolvesCredentialScopedCatalog(t *testing.T) {
   "providers": {"mock": {"id": "mock", "name": "Mock", "type": "openai",
     "base_url": "http://127.0.0.1:9/v1", "api_key": "test-key",
     "models": [{"id": "static-model", "name": "Static", "context_window": 8192, "default_max_tokens": 128}],
-    "copilot_models": [{"id": "scoped-model", "name": "Scoped", "context_window": 8192, "default_max_tokens": 128}]}},
+    "subscription_models": [{"id": "scoped-model", "name": "Scoped", "context_window": 8192, "default_max_tokens": 128}]}},
   "models": {"large": {"provider": "mock", "model": "scoped-model"},
              "small": {"provider": "mock", "model": "scoped-model"}}
 }`

@@ -640,30 +640,19 @@ func (app *App) GetDefaultSmallModel(providerID string) config.SelectedModel {
 		return largeModelCfg
 	}
 
-	// A subscription-authenticated provider only serves the models its
-	// subscription grants, so the default small model must come from that
-	// catalog as well. This applies to ChatGPT-authenticated OpenAI and
-	// Grok-authenticated xAI alike.
-	if largeModelCfg.Provider == providerID {
-		var pick func(config.ProviderConfig) *catwalk.Model
-		switch providerID {
-		case string(catwalk.InferenceProviderOpenAI):
-			pick = chatGPTSmallModel
-		case string(catwalk.InferenceProviderXAI):
-			pick = grokSmallModel
-		}
-		if pick != nil {
-			if pc, ok := cfg.Providers.Get(providerID); ok && pc.OAuthToken != nil {
-				if small := pick(pc); small != nil {
-					return config.SelectedModel{
-						Provider:        providerID,
-						Model:           small.ID,
-						MaxTokens:       small.DefaultMaxTokens,
-						ReasoningEffort: small.Reasoning.DefaultEffortLevel,
-					}
+	// A signed-in subscription only serves the models it grants, so the
+	// small model must come from that catalog too.
+	if largeModelCfg.Provider == providerID && config.HasSubscriptionCatalog(providerID) {
+		if pc, ok := cfg.Providers.Get(providerID); ok && pc.OAuthToken != nil {
+			if small := subscriptionSmallModel(providerID, pc.SubscriptionModels); small != nil {
+				return config.SelectedModel{
+					Provider:        providerID,
+					Model:           small.ID,
+					MaxTokens:       small.DefaultMaxTokens,
+					ReasoningEffort: small.Reasoning.DefaultEffortLevel,
 				}
-				return largeModelCfg
 			}
+			return largeModelCfg
 		}
 	}
 
@@ -676,36 +665,27 @@ func (app *App) GetDefaultSmallModel(providerID string) config.SelectedModel {
 	}
 }
 
-// chatGPTSmallModel picks a lightweight model from the ChatGPT catalog,
-// preferring a "mini" variant and falling back to the last entry (the
-// catalog lists heavier models first). Returns nil when the catalog is
-// empty.
-func chatGPTSmallModel(pc config.ProviderConfig) *catwalk.Model {
-	for i := range pc.ChatGPTModels {
-		if strings.Contains(pc.ChatGPTModels[i].ID, "mini") {
-			return &pc.ChatGPTModels[i]
-		}
-	}
-	if len(pc.ChatGPTModels) > 0 {
-		return &pc.ChatGPTModels[len(pc.ChatGPTModels)-1]
-	}
-	return nil
+// smallModelMarkers lists, per subscription provider, the ID fragments
+// that mark a lightweight model, most preferred first.
+var smallModelMarkers = map[string][]string{
+	string(catwalk.InferenceProviderOpenAI):  {"mini"},
+	string(catwalk.InferenceProviderXAI):     {"fast", "mini"},
+	string(catwalk.InferenceProviderCopilot): {"mini", "haiku", "flash"},
 }
 
-// grokSmallModel picks a lightweight model from the Grok catalog,
-// preferring a "fast" or "mini" variant and falling back to the last
-// entry (the catalog lists heavier models first). Returns nil when the
-// catalog is empty.
-func grokSmallModel(pc config.ProviderConfig) *catwalk.Model {
-	for _, marker := range []string{"fast", "mini"} {
-		for i := range pc.GrokModels {
-			if strings.Contains(pc.GrokModels[i].ID, marker) {
-				return &pc.GrokModels[i]
+// subscriptionSmallModel picks a lightweight model from a subscription
+// catalog, falling back to its last entry (catalogs list heavier models
+// first). Returns nil when the catalog is empty.
+func subscriptionSmallModel(providerID string, models []catwalk.Model) *catwalk.Model {
+	for _, marker := range smallModelMarkers[providerID] {
+		for i := range models {
+			if strings.Contains(models[i].ID, marker) {
+				return &models[i]
 			}
 		}
 	}
-	if len(pc.GrokModels) > 0 {
-		return &pc.GrokModels[len(pc.GrokModels)-1]
+	if len(models) > 0 {
+		return &models[len(models)-1]
 	}
 	return nil
 }

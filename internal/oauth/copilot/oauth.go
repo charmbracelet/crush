@@ -23,8 +23,7 @@ const (
 	copilotBaseURL  = "https://api.githubcopilot.com"
 )
 
-// modelsEndpoint lists the models the Copilot subscription enables. A
-// var so tests can point it at a stub server.
+// modelsEndpoint is a variable so tests can point it at a stub server.
 var modelsEndpoint = copilotBaseURL + "/models"
 
 var ErrNotAvailable = errors.New("github copilot not available")

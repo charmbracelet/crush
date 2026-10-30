@@ -441,40 +441,15 @@ func (m *Models) setProviderItems() error {
 
 		name := cmp.Or(displayProvider.Name, providerID)
 
-		// The OpenAI and xAI providers each hold exactly one credential.
-		// Signed in with ChatGPT or Grok, only the models the
-		// subscription grants are usable, so they are all the section
-		// lists; the API catalog would only 404. Without a login the
-		// section is the API catalog.
-		if providerConfig.OAuthToken != nil {
-			var subscriptionModels []catwalk.Model
-			switch provider.ID {
-			case catwalk.InferenceProviderOpenAI:
-				subscriptionModels = providerConfig.ChatGPTModels
-			case catwalk.InferenceProviderXAI:
-				subscriptionModels = providerConfig.GrokModels
-			case catwalk.InferenceProviderCopilot:
-				subscriptionModels = providerConfig.CopilotModels
-			}
-			if subscriptionModels != nil {
-				group := NewModelGroup(t, name, true)
-				for _, model := range subscriptionModels {
-					item := NewModelItem(t, provider, model, m.modelType, false)
-					group.AppendItems(item)
-					itemsMap[item.ID()] = item
-					if model.ID == currentModel.Model && string(provider.ID) == currentModel.Provider {
-						selectedItemID = item.ID()
-					}
-				}
-				if len(group.Items) > 0 {
-					groups = append(groups, group)
-				}
-				continue
-			}
+		// Signed in to a subscription, only the models it grants are
+		// usable; the API catalog would only 404.
+		models := displayProvider.Models
+		if subscription := providerConfig.SignedInModels(); subscription != nil {
+			models = subscription
 		}
 
 		group := NewModelGroup(t, name, providerConfigured)
-		for _, model := range displayProvider.Models {
+		for _, model := range models {
 			item := NewModelItem(t, provider, model, m.modelType, false)
 			group.AppendItems(item)
 			itemsMap[item.ID()] = item

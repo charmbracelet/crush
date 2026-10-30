@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 
-	"charm.land/catwalk/v3/pkg/catwalk"
 	"charm.land/lipgloss/v2/tree"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/mattn/go-isatty"
@@ -58,21 +57,9 @@ crush models gpt5`,
 				configured: true,
 			}
 
-			// The OpenAI and xAI providers each hold exactly one
-			// credential. Signed in with ChatGPT or Grok, only the
-			// models the subscription grants are usable; an API key
-			// lists the regular catalog.
-			var models []catwalk.Model = provider.Models
-			if provider.OAuthToken != nil {
-				switch {
-				case providerID == string(catwalk.InferenceProviderOpenAI):
-					models = provider.ChatGPTModels
-				case providerID == string(catwalk.InferenceProviderXAI):
-					models = provider.GrokModels
-				case providerID == string(catwalk.InferenceProviderCopilot):
-					models = provider.CopilotModels
-				}
-			}
+			// Signed in to a subscription, only the models it grants
+			// are usable; an API key lists the regular catalog.
+			models := provider.ActiveModels()
 
 			for _, model := range models {
 				if term != "" {

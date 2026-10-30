@@ -150,26 +150,10 @@ type ProviderConfig struct {
 	// The provider models
 	Models []catwalk.Model `json:"models,omitempty" jsonschema:"description=List of models available from this provider"`
 
-	// ChatGPTModels lists the models the ChatGPT (Codex) backend grants
-	// when the provider is authenticated with a ChatGPT account. It is
-	// the provider's whole catalog in that case: the API-key models in
-	// Models are not served by the subscription.
-	ChatGPTModels []catwalk.Model `json:"chatgpt_models,omitempty" jsonschema:"-"`
-
-	// CopilotModels lists the models the GitHub Copilot subscription
-	// grants, fetched from the Copilot API with the OAuth token. It
-	// reflects the models enabled in the user's Copilot plan rather
-	// than the provider's static catalog.
-	CopilotModels []catwalk.Model `json:"copilot_models,omitempty" jsonschema:"-"`
-
-	// CopilotModelsFetchAt records when CopilotModels was last fetched
-	// so the catalog is only refreshed once it grows stale.
-	CopilotModelsFetchAt time.Time `json:"copilot_models_fetch_at,omitempty" jsonschema:"-"`
-
-	// GrokModels lists the models the Grok plan grants when the provider
-	// is authenticated with a Grok account. Like ChatGPTModels, it is
-	// the provider's whole catalog in that case.
-	GrokModels []catwalk.Model `json:"grok_models,omitempty" jsonschema:"-"`
+	// SubscriptionModels lists the models the provider's OAuth login grants
+	// (ChatGPT, Grok, GitHub Copilot). When set it replaces Models, which
+	// the subscription does not serve.
+	SubscriptionModels []catwalk.Model `json:"subscription_models,omitempty" jsonschema:"-"`
 }
 
 // ToProvider converts the [ProviderConfig] to a [catwalk.Provider].
@@ -182,7 +166,24 @@ func (c *ProviderConfig) ToProvider() catwalk.Provider {
 }
 
 func (c *ProviderConfig) SetupGitHubCopilot() {
-	maps.Copy(c.ExtraHeaders, copilot.Headers())
+	headers := maps.Clone(c.ExtraHeaders)
+	if headers == nil {
+		headers = make(map[string]string)
+	}
+	maps.Copy(headers, copilot.Headers())
+	c.ExtraHeaders = headers
+}
+
+// applyOAuthToken installs a login token. Every provider but OpenAI also
+// sends the access token as its API key.
+func (c *ProviderConfig) applyOAuthToken(token *oauth.Token) {
+	c.OAuthToken = token
+	if c.ID != string(catwalk.InferenceProviderOpenAI) {
+		c.APIKey = token.AccessToken
+	}
+	if c.ID == string(catwalk.InferenceProviderCopilot) {
+		c.SetupGitHubCopilot()
+	}
 }
 
 // HasAPIKey reports whether the provider's api_key resolves to a usable
@@ -889,34 +890,11 @@ func (c *Config) IsConfigured() bool {
 	return len(c.EnabledProviders()) > 0
 }
 
-// GetModel resolves the model with the given ID against every catalog
-// the provider's current credentials can use: the static catalog first,
-// then the OAuth-scoped catalogs fetched at login (ChatGPT, Grok,
-// Copilot).
+// GetModel resolves the model with the given ID against the provider's
+// static and subscription catalogs.
 func (c *Config) GetModel(provider, model string) *catwalk.Model {
 	if providerConfig, ok := c.Providers.Get(provider); ok {
 		return providerConfig.findModel(model)
-	}
-	return nil
-}
-
-// findModel looks the model ID up across the provider's static and
-// credential-scoped catalogs, in that order.
-func (p ProviderConfig) findModel(id string) *catwalk.Model {
-	for _, models := range [][]catwalk.Model{p.Models, p.ChatGPTModels, p.GrokModels, p.CopilotModels} {
-		if m := findModelByID(models, id); m != nil {
-			return m
-		}
-	}
-	return nil
-}
-
-// findModelByID returns the model with the given ID, or nil.
-func findModelByID(models []catwalk.Model, id string) *catwalk.Model {
-	for i := range models {
-		if models[i].ID == id {
-			return &models[i]
-		}
 	}
 	return nil
 }
@@ -946,29 +924,7 @@ func (c *Config) ValidateReasoningEffort(provider, modelID, effort string) error
 // exists in its catalog. Unlike GetModel, it rejects disabled providers.
 func (c *Config) IsModelAvailable(provider, model string) bool {
 	providerConfig, ok := c.Providers.Get(provider)
-	if !ok || providerConfig.Disable {
-		return false
-	}
-	// A model is available in any of the provider's catalogs: the
-	// API-key list, or the ChatGPT/Grok subscription list fetched on
-	// login. Subscription models live outside Models, so checking only
-	// there would reject a model that is selectable and usable.
-	for _, m := range providerConfig.Models {
-		if m.ID == model {
-			return true
-		}
-	}
-	for _, m := range providerConfig.ChatGPTModels {
-		if m.ID == model {
-			return true
-		}
-	}
-	for _, m := range providerConfig.GrokModels {
-		if m.ID == model {
-			return true
-		}
-	}
-	return false
+	return ok && !providerConfig.Disable && providerConfig.findModel(model) != nil
 }
 
 func (c *Config) GetProviderForModel(modelType SelectedModelType) *ProviderConfig {

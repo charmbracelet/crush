@@ -106,6 +106,7 @@ func TestPromptsResolutionNotification(t *testing.T) {
 
 func TestParsePromptTidiesKeyInfo(t *testing.T) {
 	t.Setenv("HOME", "/home/drew")
+	t.Setenv("USERPROFILE", "/home/drew")
 	got := ParsePrompt("Enter PIN for ED25519-SK key /home/drew/.ssh/id_sk: ")
 	if got.KeyInfo != "ED25519-SK key ~/.ssh/id_sk" {
 		t.Fatalf("key info: %q", got.KeyInfo)

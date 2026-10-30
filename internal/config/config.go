@@ -460,6 +460,12 @@ type Options struct {
 	DisabledSkills            []string     `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=crush-config"`
 	RequestTimeout            *int         `json:"request_timeout,omitempty" jsonschema:"description=Timeout in seconds for each LLM API request. Streaming responses are aborted only after this much inactivity between tokens\\, so slow but active streams are never killed; the wait for the first token gets at least five minutes for prompt prefill. 0 disables it\\, negative values are invalid.,default=60,example=120,example=300,example=0"`
 	MaxBackgroundJobs         *int         `json:"max_background_jobs,omitempty" jsonschema:"description=How many background shell jobs may run at once. Jobs that have finished never count against it. 0 or negative restores the default.,default=50,example=10,example=200"`
+	// PinentryIntegrated renders GPG passphrase/PIN prompts as a native
+	// Crush dialog (loopback pinentry) instead of handing the terminal
+	// over to an external pinentry program. No GPG or git configuration
+	// is modified: the redirect only applies to processes Crush spawns.
+	PinentryIntegrated   *bool `json:"pinentry_integrated,omitempty" jsonschema:"description=Render GPG passphrase prompts as a native Crush dialog instead of an external pinentry program. Works with file-based keys and security keys and never modifies GPG or git configuration.,default=true"`
+	PinentryCacheTimeout *int  `json:"pinentry_cache_timeout,omitempty" jsonschema:"description=Seconds Crush keeps an entered GPG passphrase in memory so repeated signing operations do not re-prompt. 0 (the default) disables it; gpg-agent's own cache applies regardless.,default=0,example=300"`
 }
 
 // DefaultMaxBackgroundJobs is how many background shell jobs may run at once
@@ -494,6 +500,28 @@ func (o *Options) GetRequestTimeout() time.Duration {
 		return 0
 	}
 	return time.Duration(*o.RequestTimeout) * time.Second
+}
+
+// GetPinentryIntegrated reports whether the integrated pinentry is
+// enabled. Enabled by default; callers use it to decide whether to
+// prompt in-app or let the external pinentry handle credentials.
+func (o *Options) GetPinentryIntegrated() bool {
+	if o == nil || o.PinentryIntegrated == nil {
+		return true
+	}
+	return *o.PinentryIntegrated
+}
+
+// GetPinentryCacheTimeout returns how long an entered GPG passphrase may
+// stay in Crush's memory, or 0 when caching is disabled.
+func (o *Options) GetPinentryCacheTimeout() time.Duration {
+	if o == nil || o.PinentryCacheTimeout == nil {
+		return 0
+	}
+	if *o.PinentryCacheTimeout <= 0 {
+		return 0
+	}
+	return time.Duration(*o.PinentryCacheTimeout) * time.Second
 }
 
 type MCPs map[string]MCPConfig

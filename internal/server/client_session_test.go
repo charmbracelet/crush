@@ -43,6 +43,20 @@ func nextClientSession(t *testing.T, ctx context.Context, evc <-chan any, client
 	return ev
 }
 
+// nextClientSessionChange returns the next event that moves clientID off
+// prev. A stream that attached just before prev was chosen can be sent prev
+// twice, live and again by the replay on attach, so repeats are skipped.
+func nextClientSessionChange(t *testing.T, ctx context.Context, evc <-chan any, clientID, prev string) pubsub.Event[proto.ClientSession] {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	ev, ok := drainUntil(ctx, evc, func(ev pubsub.Event[proto.ClientSession]) bool {
+		return ev.Payload.ClientID == clientID && ev.Payload.SessionID != prev
+	})
+	require.True(t, ok, "expected a client_session event moving off %q", prev)
+	return ev
+}
+
 // TestE2E_ClientSessionBroadcast verifies that a client's session change
 // reaches every other client's stream, and that a cleared session is sent
 // as an empty session.
@@ -64,10 +78,10 @@ func TestE2E_ClientSessionBroadcast(t *testing.T) {
 	require.Equal(t, "S1", ev.Payload.SessionID)
 
 	h.postCurrentSession(t, ctx, h.workspace.ID, tui, "S2")
-	require.Equal(t, "S2", nextClientSession(t, ctx, watchEvents, tui).Payload.SessionID)
+	require.Equal(t, "S2", nextClientSessionChange(t, ctx, watchEvents, tui, "S1").Payload.SessionID)
 
 	h.postCurrentSession(t, ctx, h.workspace.ID, tui, "")
-	require.Empty(t, nextClientSession(t, ctx, watchEvents, tui).Payload.SessionID)
+	require.Empty(t, nextClientSessionChange(t, ctx, watchEvents, tui, "S2").Payload.SessionID)
 }
 
 // TestE2E_ClientSessionReplayedOnAttach verifies that a client attaching
@@ -107,5 +121,5 @@ func TestE2E_ClientSessionClearedWhenTheClientLeaves(t *testing.T) {
 
 	require.NoError(t, h.backend.RetireClient(tui)) // a clean exit gives up the claim at once
 	cancelTUI()
-	require.Empty(t, nextClientSession(t, ctx, watch, tui).Payload.SessionID)
+	require.Empty(t, nextClientSessionChange(t, ctx, watch, tui, "S1").Payload.SessionID)
 }

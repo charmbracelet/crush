@@ -65,7 +65,7 @@
         "output": 1.31,
         "cache_hit": 0.03
       },
-      "context_window": 1048576,
+      "context_window": 1000000,
       "default_max_tokens": 262144,
       "reasoning": {
         "thinking": "toggleable",

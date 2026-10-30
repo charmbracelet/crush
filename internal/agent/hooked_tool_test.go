@@ -54,7 +54,7 @@ func TestHookedTool_AllowStampsHookApproval(t *testing.T) {
 
 	inner := &fakeTool{name: "view", resp: fantasy.NewTextResponse("ok")}
 	runner := newRunner(t, `echo '{"decision":"allow"}'`)
-	tool := newHookedTool(inner, runner)
+	tool := newHookedTool(inner, runner, false)
 
 	_, err := tool.Run(t.Context(), fantasy.ToolCall{ID: "call-1", Name: "view"})
 	require.NoError(t, err)
@@ -78,7 +78,7 @@ func TestHookedTool_SilentDoesNotStampApproval(t *testing.T) {
 
 	inner := &fakeTool{name: "view", resp: fantasy.NewTextResponse("ok")}
 	runner := newRunner(t, `exit 0`) // no stdout, no decision
-	tool := newHookedTool(inner, runner)
+	tool := newHookedTool(inner, runner, false)
 
 	_, err := tool.Run(t.Context(), fantasy.ToolCall{ID: "call-2", Name: "view"})
 	require.NoError(t, err)
@@ -107,7 +107,7 @@ func TestHookedTool_DenySkipsInnerTool(t *testing.T) {
 
 	inner := &fakeTool{name: "bash"}
 	runner := newRunner(t, `echo "blocked" >&2; exit 2`)
-	tool := newHookedTool(inner, runner)
+	tool := newHookedTool(inner, runner, false)
 
 	resp, err := tool.Run(t.Context(), fantasy.ToolCall{ID: "call-3", Name: "bash"})
 	require.NoError(t, err)
@@ -121,10 +121,13 @@ func TestWrapToolsWithHooks(t *testing.T) {
 
 	runner := newRunner(t, `exit 0`)
 	inputs := []fantasy.AgentTool{&fakeTool{name: "a"}, &fakeTool{name: "b"}}
+	hookCfgs := map[string][]hooks.HookConfig{
+		hooks.EventPreToolUse: {{Command: `exit 0`}},
+	}
 
 	t.Run("top-level agent wraps every tool", func(t *testing.T) {
 		t.Parallel()
-		out := wrapToolsWithHooks(inputs, runner, false)
+		out := wrapToolsWithHooks(inputs, runner, false, hookCfgs)
 		require.Len(t, out, len(inputs))
 		for i, tool := range out {
 			_, ok := tool.(*hookedTool)
@@ -132,9 +135,9 @@ func TestWrapToolsWithHooks(t *testing.T) {
 		}
 	})
 
-	t.Run("sub-agent skips the wrap", func(t *testing.T) {
+	t.Run("sub-agent skips the wrap when no hook opts in", func(t *testing.T) {
 		t.Parallel()
-		out := wrapToolsWithHooks(inputs, runner, true)
+		out := wrapToolsWithHooks(inputs, runner, true, hookCfgs)
 		require.Equal(t, inputs, out, "sub-agent tools should be returned unwrapped")
 		for _, tool := range out {
 			_, isHooked := tool.(*hookedTool)
@@ -142,10 +145,23 @@ func TestWrapToolsWithHooks(t *testing.T) {
 		}
 	})
 
+	t.Run("sub-agent wraps when a hook has IncludeSubAgents=true", func(t *testing.T) {
+		t.Parallel()
+		optInCfgs := map[string][]hooks.HookConfig{
+			hooks.EventPreToolUse: {{Command: `exit 0`, IncludeSubAgents: true}},
+		}
+		out := wrapToolsWithHooks(inputs, runner, true, optInCfgs)
+		require.Len(t, out, len(inputs))
+		for i, tool := range out {
+			_, ok := tool.(*hookedTool)
+			require.Truef(t, ok, "tool %d should be a *hookedTool when sub-agent opt-in is set", i)
+		}
+	})
+
 	t.Run("nil runner skips the wrap for both agent kinds", func(t *testing.T) {
 		t.Parallel()
-		require.Equal(t, inputs, wrapToolsWithHooks(inputs, nil, false))
-		require.Equal(t, inputs, wrapToolsWithHooks(inputs, nil, true))
+		require.Equal(t, inputs, wrapToolsWithHooks(inputs, nil, false, hookCfgs))
+		require.Equal(t, inputs, wrapToolsWithHooks(inputs, nil, true, hookCfgs))
 	})
 }
 
@@ -159,7 +175,7 @@ func TestHookedTool_PostToolUse(t *testing.T) {
 			hooks.EventPreToolUse:  {{Command: `echo '{"context":"pre note"}'`}},
 			hooks.EventPostToolUse: {{Command: `jq -r .tool_response | grep -q sk-secret || exit 1; echo '{"updated_output":"token=[REDACTED]","context":"post note"}'`}},
 		})
-		tool := newHookedTool(inner, runner)
+		tool := newHookedTool(inner, runner, false)
 
 		resp, err := tool.Run(t.Context(), fantasy.ToolCall{ID: "c", Name: "bash", Input: `{"command":"env"}`})
 		require.NoError(t, err)
@@ -174,7 +190,7 @@ func TestHookedTool_PostToolUse(t *testing.T) {
 		runner := newRunnerFor(t, map[string][]config.HookConfig{
 			hooks.EventPostToolUse: {{Command: `echo '{"decision":"block","reason":"run the tests first","halt":true}'`}},
 		})
-		tool := newHookedTool(inner, runner)
+		tool := newHookedTool(inner, runner, false)
 
 		resp, err := tool.Run(t.Context(), fantasy.ToolCall{ID: "c", Name: "bash", Input: `{}`})
 		require.NoError(t, err)
@@ -190,11 +206,56 @@ func TestHookedTool_PostToolUse(t *testing.T) {
 			hooks.EventPostToolUse:        {{Command: `echo '{"updated_output":"should not apply"}'`}},
 			hooks.EventPostToolUseFailure: {{Command: `jq -r .error | grep -q boom || exit 1; echo '{"context":"seen failure"}'`}},
 		})
-		tool := newHookedTool(inner, runner)
+		tool := newHookedTool(inner, runner, false)
 
 		resp, err := tool.Run(t.Context(), fantasy.ToolCall{ID: "c", Name: "bash", Input: `{}`})
 		require.NoError(t, err)
 		require.True(t, resp.IsError)
 		require.Equal(t, "boom\nseen failure", resp.Content)
+	})
+}
+
+func TestAnyHookIncludesSubAgents(t *testing.T) {
+	t.Parallel()
+
+	t.Run("empty config returns false", func(t *testing.T) {
+		t.Parallel()
+		require.False(t, anyHookIncludesSubAgents(nil))
+		require.False(t, anyHookIncludesSubAgents(map[string][]hooks.HookConfig{}))
+	})
+
+	t.Run("no hooks with IncludeSubAgents returns false", func(t *testing.T) {
+		t.Parallel()
+		cfgs := map[string][]hooks.HookConfig{
+			hooks.EventPreToolUse: {{Command: `exit 0`}},
+		}
+		require.False(t, anyHookIncludesSubAgents(cfgs))
+	})
+
+	t.Run("one hook with IncludeSubAgents returns true", func(t *testing.T) {
+		t.Parallel()
+		cfgs := map[string][]hooks.HookConfig{
+			hooks.EventPreToolUse: {{Command: `exit 0`, IncludeSubAgents: true}},
+		}
+		require.True(t, anyHookIncludesSubAgents(cfgs))
+	})
+
+	t.Run("multiple hooks, only some opt in", func(t *testing.T) {
+		t.Parallel()
+		cfgs := map[string][]hooks.HookConfig{
+			hooks.EventPreToolUse:  {{Command: `exit 0`}},
+			hooks.EventPostToolUse: {{Command: `exit 0`, IncludeSubAgents: true}},
+		}
+		require.True(t, anyHookIncludesSubAgents(cfgs))
+	})
+
+	t.Run("IncludeSubAgents on non-tool event is ignored by anyHookIncludesSubAgents", func(t *testing.T) {
+		t.Parallel()
+		cfgs := map[string][]hooks.HookConfig{
+			hooks.EventTurnStart: {{Command: `exit 0`, IncludeSubAgents: true}},
+		}
+		// The flag is stored regardless of event type; filtering happens
+		// at match time in the runner. This test just checks the helper.
+		require.True(t, anyHookIncludesSubAgents(cfgs))
 	})
 }

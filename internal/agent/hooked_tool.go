@@ -16,27 +16,44 @@ import (
 // hookedTool wraps a fantasy.AgentTool to run PreToolUse hooks before the
 // inner tool and PostToolUse or PostToolUseFailure hooks after it.
 type hookedTool struct {
-	inner  fantasy.AgentTool
-	runner *hooks.Runner
+	inner       fantasy.AgentTool
+	runner      *hooks.Runner
+	isSubAgent  bool
 }
 
-func newHookedTool(inner fantasy.AgentTool, runner *hooks.Runner) *hookedTool {
-	return &hookedTool{inner: inner, runner: runner}
+func newHookedTool(inner fantasy.AgentTool, runner *hooks.Runner, isSubAgent bool) *hookedTool {
+	return &hookedTool{inner: inner, runner: runner, isSubAgent: isSubAgent}
 }
 
 // wrapToolsWithHooks returns a tool slice with each entry wrapped in a
-// hookedTool. Returns the original slice unchanged when runner is nil or
-// when isSubAgent is true — sub-agents never fire hooks, the top-level
-// invocation of the sub-agent tool itself is wrapped on the caller's side.
-func wrapToolsWithHooks(tools []fantasy.AgentTool, runner *hooks.Runner, isSubAgent bool) []fantasy.AgentTool {
-	if runner == nil || isSubAgent {
+// hookedTool. Returns the original slice unchanged when runner is nil.
+//
+// For top-level agents (isSubAgent=false), all matching hooks run.
+// For sub-agents (isSubAgent=true), only hooks that have
+// IncludeSubAgents=true run. This lets users opt into sub-agent
+// interception for audit logging, secret redaction, or policy enforcement.
+func wrapToolsWithHooks(tools []fantasy.AgentTool, runner *hooks.Runner, isSubAgent bool, hookCfgs map[string][]hooks.HookConfig) []fantasy.AgentTool {
+	if runner == nil {
+		return tools
+	}
+	if isSubAgent && !anyHookIncludesSubAgents(hookCfgs) {
 		return tools
 	}
 	out := make([]fantasy.AgentTool, len(tools))
 	for i, tool := range tools {
-		out[i] = newHookedTool(tool, runner)
+		out[i] = newHookedTool(tool, runner, isSubAgent)
 	}
 	return out
+}
+func anyHookIncludesSubAgents(hookCfgs map[string][]hooks.HookConfig) bool {
+	for _, hooks := range hookCfgs {
+		for _, h := range hooks {
+			if h.IncludeSubAgents {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (h *hookedTool) Info() fantasy.ToolInfo {
@@ -53,9 +70,10 @@ func (h *hookedTool) SetProviderOptions(opts fantasy.ProviderOptions) {
 
 func (h *hookedTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 	ev := hooks.Event{
-		Name:      hooks.EventPreToolUse,
-		SessionID: tools.GetSessionFromContext(ctx),
-		Tool:      &hooks.ToolCall{ID: call.ID, Name: call.Name, Input: call.Input},
+		Name:       hooks.EventPreToolUse,
+		SessionID:  tools.GetSessionFromContext(ctx),
+		IsSubAgent: h.isSubAgent,
+		Tool:       &hooks.ToolCall{ID: call.ID, Name: call.Name, Input: call.Input},
 	}
 
 	pre := h.runner.Run(ctx, ev)

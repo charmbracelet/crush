@@ -15,6 +15,10 @@ type HookConfig struct {
 	Command string `json:"command" jsonschema:"required,description=Shell command to execute when the hook fires"`
 	// Timeout in seconds. Default 30.
 	Timeout int `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds for the hook command,default=30"`
+	// IncludeSubAgents controls whether this hook also fires on sub-agent
+	// tool calls (agent task tool, agentic_fetch, etc.). When false (the
+	// default), hooks only run on the top-level agent's calls.
+	IncludeSubAgents bool `json:"include_sub_agents,omitempty" jsonschema:"description=Also fire this hook on sub-agent tool calls,default=false"`
 }
 
 // DisplayName returns the hook name for display purposes. It returns Name

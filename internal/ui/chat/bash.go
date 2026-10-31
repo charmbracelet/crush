@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -60,30 +61,30 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		_ = json.Unmarshal([]byte(opts.Result.Metadata), &meta)
 	}
 
+	cwd := cwdHint(b.workingDir, cmp.Or(meta.WorkingDirectory, params.WorkingDir), params.Command)
+
 	if meta.Background {
-		description := cmp.Or(meta.Description, params.Command)
+		description := withCwd(cmp.Or(meta.Description, params.Command), cwd)
 		content := "Command: " + params.Command + "\n" + opts.Result.Content
 		return renderJobTool(sty, opts, cappedWidth, "Start", meta.ShellID, description, content)
 	}
 
-	// Regular bash command. The command is always rendered expanded
-	// (newlines preserved); expansion only controls the output body.
 	cmd := params.Command
 	cmd = strings.ReplaceAll(cmd, "\t", "    ")
 	cmd = common.StripBashDisplayPrefix(cmd, b.workingDir)
 	if highlighted, err := common.SyntaxHighlightLexerName(sty, cmd, "bash", nil); err == nil {
 		cmd = highlighted
 	}
-	toolParams := []string{cmd}
+
+	var options []string
+	if cwd != "" {
+		options = append(options, "cwd", cwd)
+	}
 	if params.RunInBackground {
-		toolParams = append(toolParams, "background", "true")
+		options = append(options, "background", "true")
 	}
 
-	// The command is always rendered expanded (wrapped, never
-	// truncated); expansion only controls the output body.
-	headerOpts := *opts
-	headerOpts.ExpandedContent = true
-	header := toolHeader(sty, opts.Status, "Bash", cappedWidth, &headerOpts, toolParams...)
+	header := bashHeader(sty, opts, cappedWidth, params.Description, cmd, options)
 	if opts.Compact {
 		return header
 	}
@@ -109,6 +110,57 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	return joinToolParts(header, body)
 }
 
+// bashHeader leads with the model's description, when there is one, and puts
+// the command below it. The command always wraps and is never truncated.
+func bashHeader(sty *styles.Styles, opts *ToolRenderOpts, width int, description, cmd string, options []string) string {
+	description = strings.ReplaceAll(strings.TrimSpace(description), "\t", "    ")
+	showDescription := description != "" && !opts.Compact
+
+	cmdOpts := *opts
+	cmdOpts.ExpandedContent = true
+	lead, leadOpts := cmd, &cmdOpts
+	if showDescription {
+		if !opts.ExpandedContent {
+			description, _, _ = strings.Cut(description, "\n")
+		}
+		lead, leadOpts = sty.Tool.Description.Render(description), opts
+	}
+
+	header := toolHeader(sty, opts.Status, "Bash", width, leadOpts, append([]string{lead}, options...)...)
+	if !showDescription {
+		return header
+	}
+	indent := lipgloss.Width(toolHeaderPrefix(sty, opts.Status, "Bash", opts))
+	return header + "\n" + indentLines(toolParamList(sty, []string{cmd}, width-indent, &cmdOpts), indent)
+}
+
+// cwdHint returns where a command ran, relative to the workspace, or "" when
+// it ran in the workspace or the command itself starts with a cd.
+func cwdHint(workspace, dir, command string) string {
+	if dir == "" || workspace == "" {
+		return ""
+	}
+	if strings.HasPrefix(strings.TrimSpace(common.StripBashDisplayPrefix(command, workspace)), "cd ") {
+		return ""
+	}
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(workspace, dir)
+	}
+	rel, err := filepath.Rel(workspace, dir)
+	if err != nil || rel == "." {
+		return ""
+	}
+	return filepath.ToSlash(rel)
+}
+
+// withCwd appends a "(cwd=dir)" hint to a job description.
+func withCwd(description, cwd string) string {
+	if cwd == "" {
+		return description
+	}
+	return strings.TrimSpace(description + " (cwd=" + cwd + ")")
+}
+
 // -----------------------------------------------------------------------------
 // Job Output Tool
 // -----------------------------------------------------------------------------
@@ -126,12 +178,15 @@ func NewJobOutputToolMessageItem(
 	toolCall message.ToolCall,
 	result *message.ToolResult,
 	canceled bool,
+	workingDir string,
 ) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &JobOutputToolRenderContext{}, canceled)
+	return newBaseToolMessageItem(sty, toolCall, result, &JobOutputToolRenderContext{workingDir: workingDir}, canceled)
 }
 
 // JobOutputToolRenderContext renders job_output tool messages.
-type JobOutputToolRenderContext struct{}
+type JobOutputToolRenderContext struct {
+	workingDir string
+}
 
 // RenderTool implements the [ToolRenderer] interface.
 func (j *JobOutputToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
@@ -149,7 +204,8 @@ func (j *JobOutputToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 	if opts.HasResult() && opts.Result.Metadata != "" {
 		var meta tools.JobOutputResponseMetadata
 		if err := json.Unmarshal([]byte(opts.Result.Metadata), &meta); err == nil {
-			description = cmp.Or(meta.Description, meta.Command)
+			cwd := cwdHint(j.workingDir, meta.WorkingDirectory, meta.Command)
+			description = withCwd(cmp.Or(meta.Description, meta.Command), cwd)
 		}
 	}
 

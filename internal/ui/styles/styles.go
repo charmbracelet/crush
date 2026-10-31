@@ -378,8 +378,9 @@ type Styles struct {
 		NameNested lipgloss.Style // Nested child tool name (inside Agent/Agentic Fetch)
 
 		// Parameter list styles
-		ParamMain lipgloss.Style
-		ParamKey  lipgloss.Style
+		ParamMain   lipgloss.Style
+		ParamKey    lipgloss.Style
+		Description lipgloss.Style // A tool's own summary of what it is doing
 
 		// Content rendering styles
 		ContentLine           lipgloss.Style // Individual content line with background and width

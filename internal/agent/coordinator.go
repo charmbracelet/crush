@@ -1249,6 +1249,7 @@ func (c *coordinator) buildModelFromSelection(ctx context.Context, modelCfg conf
 	// configured timeout so unreachable or hung providers fail instead of
 	// blocking a session forever. Retries get a fresh budget each attempt.
 	languageModel = newRequestGuardModel(languageModel, c.cfg.Config().Options.GetRequestTimeout())
+	languageModel = newRefusalRetryModel(languageModel)
 
 	// Hyper completions no longer report the hypercredit balance, so wrap
 	// the Hyper models to fetch it from /v1/credits on every request.

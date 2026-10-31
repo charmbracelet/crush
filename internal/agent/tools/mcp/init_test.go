@@ -3,21 +3,27 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"reflect"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/oauth"
+	mcpoauth "github.com/charmbracelet/crush/internal/oauth/mcp"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
+	"golang.org/x/oauth2"
 )
 
 // shellResolverWithPath builds a shell resolver whose env carries PATH
@@ -923,4 +929,121 @@ func TestCreateSession_Sessionless(t *testing.T) {
 		require.Contains(t, err.Error(), "session not found")
 		require.GreaterOrEqual(t, listenTotal.Load(), int64(1), "expected the listen stream attempt")
 	})
+}
+
+func TestIsOAuthInitErr(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"unrelated", errors.New("connection refused"), false},
+		{"interactive", mcpoauth.ErrInteractiveAuthRequired, true},
+		{"invalid_grant typed", &oauth2.RetrieveError{ErrorCode: "invalid_grant"}, true},
+		{"invalid_client typed", &oauth2.RetrieveError{ErrorCode: "invalid_client"}, true},
+		{
+			name: "unauthorized_client typed",
+			err:  &oauth2.RetrieveError{ErrorCode: "unauthorized_client", ErrorDescription: "refresh_token is invalid"},
+			want: true,
+		},
+		{
+			name: "unauthorized_client wrapped",
+			err: fmt.Errorf("calling %q: %w", "initialize",
+				&oauth2.RetrieveError{ErrorCode: "unauthorized_client", ErrorDescription: "refresh_token is invalid"}),
+			want: true,
+		},
+		{
+			name: "unauthorized_client string",
+			err:  errors.New(`oauth2: "unauthorized_client" "refresh_token is invalid"`),
+			want: true,
+		},
+		{"invalid_grant string", errors.New(`oauth2: "invalid_grant" "token expired"`), true},
+		{"no token available", errors.New("no token available"), true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tt.want, isOAuthInitErr(tt.err))
+		})
+	}
+}
+
+// TestInitClient_RevokedRefreshTokenClearsStoredToken is the startup path
+// for issue #4179: a persisted token whose refresh is rejected must not
+// leave the server stuck in StateError. Crush should treat the token as
+// dead and move the server to NeedsAuth so the next start re-authenticates.
+func TestInitClient_RevokedRefreshTokenClearsStoredToken(t *testing.T) {
+	cases := []struct {
+		name string
+		code string
+		desc string
+	}{
+		{"invalid_grant", "invalid_grant", "refresh token revoked"},
+		{"unauthorized_client", "unauthorized_client", "refresh_token is invalid"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var tokenHits atomic.Int64
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/token" {
+					tokenHits.Add(1)
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusBadRequest)
+					_ = json.NewEncoder(w).Encode(map[string]string{
+						"error":             tc.code,
+						"error_description": tc.desc,
+					})
+					return
+				}
+				w.WriteHeader(http.StatusUnauthorized)
+			}))
+			t.Cleanup(srv.Close)
+
+			name := "revoked-" + tc.name
+			states.Del(name)
+			t.Cleanup(func() {
+				states.Del(name)
+				if h, ok := authURLs.Get(name); ok {
+					h.Close()
+					authURLs.Del(name)
+				}
+			})
+
+			m := config.MCPConfig{
+				Type:    config.MCPHttp,
+				URL:     srv.URL + "/mcp",
+				OAuth:   true,
+				Timeout: 5,
+				OAuthToken: &oauth.Token{
+					AccessToken:  "stale-access",
+					RefreshToken: "revoked-refresh",
+					ExpiresAt:    time.Now().Add(-time.Hour).Unix(),
+					Client: &oauth.OAuthClient{
+						ClientID: "saved-client",
+						AuthURL:  srv.URL + "/authorize",
+						TokenURL: srv.URL + "/token",
+					},
+				},
+			}
+			path := filepath.Join(t.TempDir(), "crush.json")
+			require.NoError(t, os.WriteFile(path, []byte("{}"), 0o600))
+			store := config.NewTestStoreWithGlobalPath(&config.Config{
+				MCP: config.MCPs{name: m},
+			}, path)
+			require.NoError(t, store.SetConfigField(config.ScopeGlobal, "mcp."+name+".oauth_token", m.OAuthToken))
+			require.True(t, store.HasConfigField(config.ScopeGlobal, "mcp."+name+".oauth_token"))
+
+			err := initClient(t.Context(), store, name, m, currentGen(name), store.Resolver())
+			require.NoError(t, err, "a revoked refresh token should prompt re-auth, not fail init")
+			require.Greater(t, tokenHits.Load(), int64(0), "the stored refresh token must be tried")
+
+			info, ok := GetState(name)
+			require.True(t, ok)
+			require.Equal(t, StateNeedsAuth, info.State, "expected NeedsAuth so the next start can re-authenticate")
+			require.False(t, store.HasConfigField(config.ScopeGlobal, "mcp."+name+".oauth_token"), "stale token must be cleared so the next start re-authenticates")
+		})
+	}
 }

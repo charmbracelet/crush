@@ -1430,19 +1430,31 @@ func hasUsableToken(tok *oauth.Token) bool {
 // is missing, no longer valid, or cannot be refreshed. This covers:
 //   - invalid_grant: expired or revoked refresh tokens
 //   - invalid_client: deleted or deactivated client registrations
+//   - unauthorized_client: some servers (e.g. Atlassian) report a
+//     revoked refresh token this way instead of invalid_grant
+//   - "refresh_token is invalid": error description used by those servers
 //   - "no token available": the handler had no cached token to use
 //   - interactive authorization was required but withheld during startup
 func isOAuthInitErr(err error) bool {
+	if err == nil {
+		return false
+	}
 	if errors.Is(err, mcpoauth.ErrInteractiveAuthRequired) {
 		return true
 	}
 	var rErr *oauth2.RetrieveError
 	if errors.As(err, &rErr) {
-		return rErr.ErrorCode == "invalid_grant" || rErr.ErrorCode == "invalid_client"
+		switch rErr.ErrorCode {
+		case "invalid_grant", "invalid_client", "unauthorized_client":
+			return true
+		}
+		return strings.Contains(rErr.ErrorDescription, "refresh_token is invalid")
 	}
 	msg := err.Error()
 	return strings.Contains(msg, "invalid_grant") ||
 		strings.Contains(msg, "invalid_client") ||
+		strings.Contains(msg, "unauthorized_client") ||
+		strings.Contains(msg, "refresh_token is invalid") ||
 		strings.Contains(msg, "no token available")
 }
 

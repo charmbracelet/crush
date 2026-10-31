@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -15,7 +14,8 @@ import (
 // SSH_ASKPASS program (via the wrapper script pointed to by the
 // environment-scoped SSH_ASKPASS variable). It forwards the prompt to
 // the host Crush process's prompt socket so the question is rendered by
-// the TUI instead of a plain terminal, and prints the answer (a secret,
+// the TUI, unless a driver like sshpass owns a terminal for this ssh,
+// and prints the answer (a secret,
 // or "yes" for confirmations) on stdout. No ssh configuration or files
 // are modified.
 var sshAskpassCmd = &cobra.Command{
@@ -38,14 +38,7 @@ func init() {
 // answer such as "yes") on stdout.
 func runSSHAskpass(ctx context.Context, args []string) error {
 	prompt := strings.Join(args, " ")
-
-	socketPath := os.Getenv("CRUSH_SSH_SOCK")
-	if socketPath == "" {
-		return errors.New("crush: no ssh prompt socket configured (askpass unavailable)")
-	}
-
-	req := sshaskpass.ParsePrompt(prompt)
-	secret, err := sshaskpass.AskCredentialOverSocket(ctx, socketPath, req)
+	secret, err := sshaskpass.Answer(ctx, prompt, os.Getenv("CRUSH_SSH_SOCK"))
 	if err != nil {
 		// OpenSSH aborts the authentication attempt when askpass exits
 		// non-zero, which is the correct outcome for a cancelled or

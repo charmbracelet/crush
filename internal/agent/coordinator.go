@@ -1218,9 +1218,12 @@ func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers 
 	if httpClient == nil && c.cfg.Config().Options.Debug {
 		httpClient = log.NewHTTPClient()
 	}
-	if httpClient != nil {
-		opts = append(opts, openaicompat.WithHTTPClient(httpClient))
+	if httpClient == nil {
+		// Crush owns request timeouts. The SDK's default client imposes a
+		// fixed header timeout even when request-timeout is disabled.
+		httpClient = &http.Client{}
 	}
+	opts = append(opts, openaicompat.WithHTTPClient(httpClient))
 
 	if len(headers) > 0 {
 		opts = append(opts, openaicompat.WithHeaders(headers))

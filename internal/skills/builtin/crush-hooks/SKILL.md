@@ -8,8 +8,8 @@ description: Use when the user wants to add, write, debug, or configure a Crush 
 Hooks are user-defined commands in `crush.json` that fire at specific points
 during execution, giving deterministic control over tool behavior. They run
 **before** permission checks and **only on the top-level agent's** tool calls —
-sub-agent calls (task tool, agentic_fetch, etc.) are not intercepted, though
-the sub-agent tool call itself is.
+subagent calls (task tool, agentic_fetch, etc.) are not intercepted, though
+the subagent tool call itself is.
 
 For the full reference, see `docs/hooks/README.md`. This skill covers what you
 need to author correct hooks.
@@ -30,7 +30,7 @@ Only `PreToolUse` (allow/deny/halt/rewrite/context), `PostToolUse`
 (halt/replace output/context/feedback), `PostToolUseFailure`
 (halt/context), and `PreCompact` (block) honor output. The rest are
 observe-only. Turn and tool events fire only for the top-level agent, never
-for sub-agents (`agentic_fetch`, the task tool), so a `TurnEnd` hook runs
+for subagents (`agentic_fetch`, the task tool), so a `TurnEnd` hook runs
 once per user prompt.
 
 Per-event payload extras: `PostToolUse` has `tool_response` (the output

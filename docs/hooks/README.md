@@ -192,9 +192,9 @@ event name is a config error.
 the events that carry a tool name; configuring one elsewhere is a config error.
 
 **Scope**: tool and turn events only fire for the **top-level agent**.
-Sub-agents (the task tool, `agentic_fetch`, and friends) fire none of them,
+Subagents (the task tool, `agentic_fetch`, and friends) fire none of them,
 so a notification hook on `TurnEnd` speaks once per prompt rather than once
-per delegated turn. The outer sub-agent tool call itself _is_ hooked.
+per delegated turn. The outer subagent tool call itself _is_ hooked.
 
 **Permission events** fire only when a prompt is actually shown. Calls that a
 `PreToolUse` hook allowed, that are on the allow-list, or that run in YOLO

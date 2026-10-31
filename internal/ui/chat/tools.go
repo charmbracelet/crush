@@ -258,8 +258,10 @@ func NewToolMessageItem(
 		item = NewSourcegraphToolMessageItem(sty, toolCall, result, canceled)
 	case tools.DiagnosticsToolName:
 		item = NewDiagnosticsToolMessageItem(sty, toolCall, result, canceled)
-	case agent.AgentToolName:
+	case agent.AgentToolName, agent.AgentDispatchToolName:
 		item = NewAgentToolMessageItem(sty, toolCall, result, canceled)
+	case agent.AgentSendToolName, agent.AgentStatusToolName, agent.AgentStopToolName:
+		item = NewAgentControlToolMessageItem(sty, toolCall, result, canceled)
 	case tools.AgenticFetchToolName:
 		item = NewAgenticFetchToolMessageItem(sty, toolCall, result, canceled)
 	case tools.WebFetchToolName:
@@ -676,7 +678,8 @@ func toolIcon(sty *styles.Styles, status ToolStatus) string {
 }
 
 // toolParamList formats tool parameters as "main (key=value, ...)" with truncation.
-// When opts.ExpandedContent is true, the output wraps instead of truncating.
+// When opts.ExpandedContent is true, the output wraps instead of truncating,
+// unless the tool is compact (nested in an agent tree), which always truncates.
 func toolParamList(sty *styles.Styles, params []string, width int, opts *ToolRenderOpts) string {
 	// minSpaceForMainParam is the min space required for the main param
 	// if this is less that the value set we will only show the main param nothing else
@@ -706,7 +709,10 @@ func toolParamList(sty *styles.Styles, params []string, width int, opts *ToolRen
 		}
 	}
 
-	if width >= 0 && (opts == nil || !opts.ExpandedContent) {
+	// Compact tools are the children of an agent tree, where a wrapped
+	// header would push continuation lines past the tree's branch drawing
+	// and break the bars. They truncate even when expanded.
+	if width >= 0 && (opts == nil || !opts.ExpandedContent || opts.Compact) {
 		return sty.Tool.ParamMain.Render(ansi.Truncate(output, width, "…"))
 	}
 	if opts != nil && opts.ExpandedContent && width > 0 && lipgloss.Width(output) > width {
@@ -1237,7 +1243,12 @@ func toolOutputMarkdownContent(sty *styles.Styles, content string, width int, ex
 		return toolOutputPlainContent(sty, content, width, expanded)
 	}
 
+	// Glamour ends with a blank, still-painted line, sometimes only a
+	// code block's margin wide; drop it so the box ends with its text.
 	lines := strings.Split(rendered, "\n")
+	for len(lines) > 0 && strings.TrimSpace(ansi.Strip(lines[len(lines)-1])) == "" {
+		lines = lines[:len(lines)-1]
+	}
 	maxLines := collapsedMaxLines(len(lines))
 	if expanded {
 		maxLines = len(lines)
@@ -1436,6 +1447,32 @@ func (t *baseToolMessageItem) formatParametersForCopy() string {
 		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
 			return fmt.Sprintf("**Task:**\n%s", params.Prompt)
 		}
+	case agent.AgentDispatchToolName:
+		var params agent.AgentDispatchParams
+		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
+			return fmt.Sprintf("**Task (%s):**\n%s", params.Label, params.Prompt)
+		}
+	case agent.AgentSendToolName:
+		var params agent.AgentSendParams
+		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
+			return fmt.Sprintf("**To %s:**\n%s", params.Label, params.Message)
+		}
+	case agent.AgentStatusToolName:
+		var params agent.AgentStatusParams
+		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
+			if params.Label == "" {
+				return "**Subagents:** all"
+			}
+			return fmt.Sprintf("**Subagent:** %s", params.Label)
+		}
+	case agent.AgentStopToolName:
+		var params agent.AgentStopParams
+		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
+			if params.Reason == "" {
+				return fmt.Sprintf("**Stop:** %s", params.Label)
+			}
+			return fmt.Sprintf("**Stop:** %s\n**Reason:** %s", params.Label, params.Reason)
+		}
 	}
 
 	var params map[string]any
@@ -1484,7 +1521,7 @@ func (t *baseToolMessageItem) formatResultForCopy() string {
 		return t.formatAgenticFetchResultForCopy()
 	case tools.WebFetchToolName:
 		return t.formatWebFetchResultForCopy()
-	case agent.AgentToolName:
+	case agent.AgentToolName, agent.AgentDispatchToolName:
 		return t.formatAgentResultForCopy()
 	case tools.DownloadToolName, tools.GrepToolName, tools.GlobToolName, tools.LSToolName, tools.SourcegraphToolName, tools.DiagnosticsToolName, tools.TodosToolName:
 		return fmt.Sprintf("```\n%s\n```", t.result.Content)
@@ -1804,6 +1841,14 @@ func prettifyToolName(name string) string {
 	switch name {
 	case agent.AgentToolName:
 		return "Agent"
+	case agent.AgentDispatchToolName:
+		return "Create Subagent"
+	case agent.AgentSendToolName:
+		return "Message Subagent"
+	case agent.AgentStatusToolName:
+		return "Subagent Status"
+	case agent.AgentStopToolName:
+		return "Stop Subagent"
 	case tools.BashToolName:
 		return "Bash"
 	case tools.JobOutputToolName:

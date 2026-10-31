@@ -113,7 +113,7 @@ func (b *Backend) injectChannelMessage(ws *Workspace, serverName, content string
 //     session only when the workspace has none.
 //
 // The fallback relies on session.Service.List returning only top-level
-// sessions (no sub-agent sessions) ordered by updated_at DESC, so the
+// sessions (no subagent sessions) ordered by updated_at DESC, so the
 // first hit in the list is the most recently updated top-level session.
 // The underlying query (ListSessions) enforces both: WHERE
 // parent_session_id IS NULL ORDER BY updated_at DESC.

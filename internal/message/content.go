@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -160,7 +161,7 @@ func (m *Message) HasShellCommand() bool {
 
 // IsPrompt reports whether the message is something the user typed.
 func (m *Message) IsPrompt() bool {
-	return m.Role == User && !m.HasShellCommand()
+	return m.Role == User && !m.HasShellCommand() && len(m.SubAgentReports()) == 0
 }
 
 // ShellCommands returns all ShellCommand parts from the message.
@@ -172,6 +173,64 @@ func (m *Message) ShellCommands() []ShellCommand {
 		}
 	}
 	return cmds
+}
+
+// SubAgentReport stores the result a detached subagent reported back, as a
+// distinct content part so the UI can render it as a subagent result rather
+// than as something the user typed.
+type SubAgentReport struct {
+	Label  string `json:"label"`
+	Output string `json:"output"`
+	Failed bool   `json:"failed,omitempty"`
+	// Model is provider/model, for display.
+	Model string `json:"model,omitempty"`
+}
+
+func (SubAgentReport) isPart() {}
+
+// PromptText is the report as the model reads it.
+func (r SubAgentReport) PromptText() string {
+	return fmt.Sprintf("<subagent-report label=%q>\n%s\n</subagent-report>", r.Label, r.Output)
+}
+
+// ParseSubAgentReportPrompt recovers a report from its PromptText, for
+// places such as the prompt queue that only carry the text.
+func ParseSubAgentReportPrompt(prompt string) (SubAgentReport, bool) {
+	const prefix, suffix = "<subagent-report label=", "\n</subagent-report>"
+	rest, ok := strings.CutPrefix(prompt, prefix)
+	if !ok {
+		return SubAgentReport{}, false
+	}
+	quoted, output, ok := strings.Cut(rest, ">\n")
+	if !ok {
+		return SubAgentReport{}, false
+	}
+	label, err := strconv.Unquote(quoted)
+	if err != nil {
+		return SubAgentReport{}, false
+	}
+	return SubAgentReport{Label: label, Output: strings.TrimSuffix(output, suffix)}, true
+}
+
+// HasSubAgentReport reports whether the message contains any SubAgentReport parts.
+func (m *Message) HasSubAgentReport() bool {
+	for _, part := range m.Parts {
+		if _, ok := part.(SubAgentReport); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// SubAgentReports returns all SubAgentReport parts from the message.
+func (m *Message) SubAgentReports() []SubAgentReport {
+	var reports []SubAgentReport
+	for _, part := range m.Parts {
+		if r, ok := part.(SubAgentReport); ok {
+			reports = append(reports, r)
+		}
+	}
+	return reports
 }
 
 type Message struct {
@@ -565,6 +624,17 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 			})
 		}
 		text = PromptWithTextAttachments(text, textAttachments)
+		// Include subagent reports as context for the agent. The part
+		// carries the label and body separately so the UI can render
+		// them; the model sees them as one tagged block.
+		for _, r := range m.SubAgentReports() {
+			reportText := r.PromptText()
+			if text != "" {
+				text += "\n\n" + reportText
+			} else {
+				text = reportText
+			}
+		}
 		// Include bang-mode shell commands as context for the agent.
 		for _, sc := range m.ShellCommands() {
 			shellText := fmt.Sprintf("$ %s\n%s\n(exit code %d)", sc.Command, ansi.Strip(sc.Output), sc.ExitCode)

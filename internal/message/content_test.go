@@ -173,3 +173,15 @@ func TestResetStreamedContentEmpty(t *testing.T) {
 	msg.ResetStreamedContent()
 	require.Empty(t, msg.Parts)
 }
+
+func TestParseSubAgentReportPromptRoundTrips(t *testing.T) {
+	t.Parallel()
+
+	want := SubAgentReport{Label: `odd "label"`, Output: "line one\n</subagent-report>\nline three"}
+	got, ok := ParseSubAgentReportPrompt(want.PromptText())
+	require.True(t, ok)
+	require.Equal(t, want, got)
+
+	_, ok = ParseSubAgentReportPrompt("just a prompt")
+	require.False(t, ok)
+}

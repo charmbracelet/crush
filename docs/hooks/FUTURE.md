@@ -78,19 +78,19 @@ envelopes keep working unchanged. No version bump required.
   (`{"path": "...", "reason": "..."}`) would allow that but complicates the
   schema. Defer until there's a real user need.
 
-## Sub-agent opt-in
+## Subagent opt-in
 
 **Status:** not implemented.
 
 ### Background
 
-Today hooks fire **only** on the top-level agent's tool calls. Sub-agents
+Today hooks fire **only** on the top-level agent's tool calls. Subagents
 (`agent` task tool, `agentic_fetch`, future delegated loops) run without hook
 interception so a single delegated turn doesn't trigger the user's hook N times.
 
-The outer sub-agent tool call itself is hooked, so blanket policy like "never
-spawn sub-agents" or "rewrite prompts sent to the task agent" still works from
-the coder's side. The sub-agent's inner loop is the part that's exempt.
+The outer subagent tool call itself is hooked, so blanket policy like "never
+spawn subagents" or "rewrite prompts sent to the task agent" still works from
+the coder's side. The subagent's inner loop is the part that's exempt.
 
 ### Why users might want the escape hatch
 
@@ -104,7 +104,7 @@ Until someone actually asks, don't ship this. YAGNI.
 
 ### Proposed shape
 
-Additive, per-hook. Zero-value matches current default (skip sub-agents):
+Additive, per-hook. Zero-value matches current default (skip subagents):
 
 ```jsonc
 {
@@ -122,20 +122,20 @@ Additive, per-hook. Zero-value matches current default (skip sub-agents):
 
 Implementation changes where `wrapToolsWithHooks` decides to skip. Instead of a
 single `isSubAgent` bailout, the runner filters per-hook matches by the hook's
-`include_sub_agents` flag. Hooks that opt in get wrapped into sub-agent tool
+`include_sub_agents` flag. Hooks that opt in get wrapped into subagent tool
 slices too; everything else stays skipped.
 
 ### Backwards Compatibility
 
 Purely additive. Hooks that don't set `include_sub_agents` get the default
-(`false` = skip sub-agents). No wire format change, no version bump. The initial
-transition from "hooks fire everywhere" to "hooks skip sub-agents by default"
+(`false` = skip subagents). No wire format change, no version bump. The initial
+transition from "hooks fire everywhere" to "hooks skip subagents by default"
 was a one-time behavior change; adding the opt-in is pure addition.
 
 ### Side benefit: payload awareness
 
 Extend the stdin payload with `"is_sub_agent": true|false` so hook scripts that
-opt in can branch on caller type ("audit top-level and sub-agent calls
+opt in can branch on caller type ("audit top-level and subagent calls
 differently"). Also purely additive — hooks that don't read the field are
 unaffected.
 
@@ -145,8 +145,8 @@ unaffected.
   toggle is simpler but coarse-grained; per-hook is more flexible and
   composable. Start per-hook; a global default can be layered on later with
   explicit precedence ("per-hook overrides global").
-- Does an opt-in hook see hooks from _nested_ sub-agents too (a sub-agent that
-  itself calls a sub-agent)? Probably yes — once you've opted in you want the
+- Does an opt-in hook see hooks from _nested_ subagents too (a subagent that
+  itself calls a subagent)? Probably yes — once you've opted in you want the
   full tree. But call it out explicitly in docs so users aren't surprised by N²
   explosions on pathological configs.
 

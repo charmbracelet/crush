@@ -105,7 +105,7 @@ larger, later increment.
 - Do we want a way to *see* the effective live config from the bash tool
   (a read-only `option get` / `model large` print)? `model large` already
   prints its selection; a broader introspection surface could follow.
-- Should sub-agents be allowed to reconfigure the session, or only the
+- Should subagents be allowed to reconfigure the session, or only the
   top-level agent? Probably top-level only, mirroring how hooks scope.
 
 ## Separate machine state from user configuration

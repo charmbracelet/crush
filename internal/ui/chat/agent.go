@@ -2,13 +2,16 @@ package chat
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
+	"time"
 
 	"charm.land/lipgloss/v2"
 	"charm.land/lipgloss/v2/tree"
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // -----------------------------------------------------------------------------
@@ -27,6 +30,18 @@ type AgentToolMessageItem struct {
 	*baseToolMessageItem
 
 	nestedTools []ToolMessageItem
+
+	// dispatchLabel is set for agent_dispatch calls, which return as soon
+	// as the subagent starts. Such an item keeps spinning until the
+	// subagent's report arrives and clears it, since the tool result
+	// landing says only that the subagent launched, not that it is done.
+	dispatchLabel    string
+	dispatchReported bool
+	dispatchStarted  time.Time
+	// dispatchReportedAt is when the report landed. The sidebar retires a
+	// subagent that has been finished a while, so the section does not
+	// grow for the whole session.
+	dispatchReportedAt time.Time
 }
 
 var (
@@ -43,11 +58,102 @@ func NewAgentToolMessageItem(
 ) *AgentToolMessageItem {
 	t := &AgentToolMessageItem{}
 	t.baseToolMessageItem = newBaseToolMessageItem(sty, toolCall, result, &AgentToolRenderContext{agent: t}, canceled)
+	t.parseDispatchLabel(toolCall)
+	t.adoptDispatchName(result)
 	// For the agent tool we keep spinning until the tool call is finished.
+	// A dispatched subagent runs on past its tool result, so it spins
+	// until its report arrives instead.
 	t.spinningFunc = func(state SpinningState) bool {
+		if t.dispatchLabel != "" {
+			return !t.dispatchSettled() && !state.IsCanceled()
+		}
 		return !state.HasResult() && !state.IsCanceled()
 	}
 	return t
+}
+
+// parseDispatchLabel reads the subagent's label out of an agent_dispatch
+// call. The tool call arrives with its input still streaming, so the label is
+// re-read on every update until it parses rather than once at construction.
+func (a *AgentToolMessageItem) parseDispatchLabel(toolCall message.ToolCall) {
+	if toolCall.Name != agent.AgentDispatchToolName || a.dispatchLabel != "" {
+		return
+	}
+	var params agent.AgentDispatchParams
+	if json.Unmarshal([]byte(toolCall.Input), &params) == nil && strings.TrimSpace(params.Label) != "" {
+		a.dispatchLabel = strings.TrimSpace(params.Label)
+		a.dispatchStarted = time.Now()
+	}
+}
+
+// adoptDispatchName takes the subagent name the result gave, which is the
+// name the report arrives under. A blocking agent call that moved to the
+// background becomes a dispatched subagent here.
+func (a *AgentToolMessageItem) adoptDispatchName(result *message.ToolResult) {
+	if result == nil || result.Metadata == "" {
+		return
+	}
+	var meta struct {
+		Label        string `json:"label"`
+		Backgrounded bool   `json:"backgrounded"`
+	}
+	if json.Unmarshal([]byte(result.Metadata), &meta) != nil || meta.Label == "" {
+		return
+	}
+	if a.dispatchLabel == "" && meta.Backgrounded {
+		a.dispatchStarted = time.Now()
+	}
+	if a.dispatchLabel != "" || meta.Backgrounded {
+		a.dispatchLabel = meta.Label
+	}
+}
+
+// SetResult records the result and, for a dispatch, the name it returned.
+func (a *AgentToolMessageItem) SetResult(res *message.ToolResult) {
+	a.baseToolMessageItem.SetResult(res)
+	a.adoptDispatchName(res)
+}
+
+// SetToolCall updates the tool call, picking up the dispatch label once the
+// streamed input is complete enough to parse.
+func (a *AgentToolMessageItem) SetToolCall(tc message.ToolCall) {
+	a.baseToolMessageItem.SetToolCall(tc)
+	a.parseDispatchLabel(tc)
+}
+
+// DispatchLabel returns the label of the subagent this item dispatched, or
+// the empty string for a synchronous agent call.
+func (a *AgentToolMessageItem) DispatchLabel() string { return a.dispatchLabel }
+
+// MarkDispatchRunning puts the item back into its working state after its
+// subagent was reopened with a follow-up.
+func (a *AgentToolMessageItem) MarkDispatchRunning() {
+	if !a.dispatchReported {
+		return
+	}
+	a.dispatchReported = false
+	a.dispatchStarted = time.Now()
+	a.dispatchReportedAt = time.Time{}
+	a.clearCache()
+	a.Bump()
+}
+
+// MarkDispatchReported records that the dispatched subagent reported back,
+// which stops the item's spinner.
+func (a *AgentToolMessageItem) MarkDispatchReported() {
+	if a.dispatchReported {
+		return
+	}
+	a.dispatchReported = true
+	a.dispatchReportedAt = time.Now()
+	a.clearCache()
+	a.Bump()
+}
+
+// dispatchSettled reports whether a dispatched subagent is done: it reported
+// back, or the dispatch was refused and nothing ever started.
+func (a *AgentToolMessageItem) dispatchSettled() bool {
+	return a.dispatchReported || (a.result != nil && a.result.IsError)
 }
 
 // Advance implements [Animatable].
@@ -60,7 +166,15 @@ func NewAgentToolMessageItem(
 // Without the bump, the list cache would serve the previously rendered
 // frame indefinitely and the spinner would appear frozen.
 func (a *AgentToolMessageItem) Advance() bool {
-	if a.result != nil || a.Status() == ToolStatusCanceled {
+	if a.Status() == ToolStatusCanceled {
+		return false
+	}
+	// A dispatched subagent keeps working after its tool result lands, so
+	// its animation runs until the report arrives.
+	if a.dispatchLabel == "" && a.result != nil {
+		return false
+	}
+	if a.dispatchLabel != "" && a.dispatchSettled() {
 		return false
 	}
 	changed := a.anim.Advance()
@@ -131,6 +245,29 @@ func (a *AgentToolMessageItem) AddNestedTool(tool ToolMessageItem) {
 	a.Bump()
 }
 
+// DispatchStatus reports what a dispatched subagent is up to. The second
+// return is false for a synchronous agent call or a refused dispatch.
+func (a *AgentToolMessageItem) DispatchStatus() (DispatchStatus, bool) {
+	if a.dispatchLabel == "" || (a.result != nil && a.result.IsError) {
+		return DispatchStatus{}, false
+	}
+	status := DispatchStatus{
+		Label:    a.dispatchLabel,
+		Running:  !a.dispatchSettled() && a.Status() != ToolStatusCanceled,
+		Started:  a.dispatchStarted,
+		Finished: a.dispatchReportedAt,
+	}
+	return status, true
+}
+
+// DispatchStatus describes what a dispatched subagent is up to.
+type DispatchStatus struct {
+	Label    string
+	Running  bool
+	Started  time.Time
+	Finished time.Time // When its report landed; zero while running.
+}
+
 // AgentToolRenderContext renders agent tool messages.
 type AgentToolRenderContext struct {
 	agent *AgentToolMessageItem
@@ -140,7 +277,7 @@ type AgentToolRenderContext struct {
 func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
 	if !opts.ToolCall.Finished && !opts.IsCanceled() && len(r.agent.nestedTools) == 0 {
-		return pendingTool(sty, "Agent", opts.Anim, opts.Compact)
+		return pendingTool(sty, prettifyToolName(opts.ToolCall.Name), opts.Anim, opts.Compact)
 	}
 
 	var params agent.AgentParams
@@ -151,7 +288,14 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 		prompt = strings.ReplaceAll(prompt, "\n", " ")
 	}
 
-	header := toolHeader(sty, opts.Status, "Agent", cappedWidth, opts)
+	// A dispatch is named for the subagent it launched, so its header
+	// pairs with the report item that arrives later under the same label.
+	var header string
+	if r.agent.dispatchLabel != "" {
+		header = subagentHeader(sty, opts.Status, prettifyToolName(opts.ToolCall.Name), r.agent.dispatchLabel, dispatchRunModel(opts), cappedWidth, opts)
+	} else {
+		header = toolHeader(sty, opts.Status, "Agent", cappedWidth, opts)
+	}
 	if opts.Compact {
 		return header
 	}
@@ -180,23 +324,31 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	// Build tree with nested tool calls.
 	childTools := tree.Root(header)
 
-	for _, nestedTool := range r.agent.nestedTools {
-		childView := nestedTool.Render(remainingWidth)
-		childTools.Child(childView)
-	}
+	addNestedTools(sty, childTools, r.agent.nestedTools, remainingWidth, opts.ExpandedContent)
 
 	// Build parts.
 	var parts []string
 	parts = append(parts, roundedTree(childTools, taskTagWidth-5).String())
 
-	// Show animation if still running.
-	if !opts.HasResult() && !opts.IsCanceled() {
+	// Show animation if still running. A dispatch has its result the
+	// moment the subagent starts, so it animates until the report lands
+	// instead.
+	stillRunning := !opts.HasResult()
+	if r.agent.dispatchLabel != "" {
+		stillRunning = !r.agent.dispatchSettled()
+	}
+	if stillRunning && !opts.IsCanceled() {
 		parts = append(parts, "", opts.Anim.Render())
 	}
 
 	result := lipgloss.JoinVertical(lipgloss.Left, parts...)
 
-	// Add body content when completed.
+	// Add body content when completed. A dispatch result only says the
+	// subagent started, which is bookkeeping rather than output; its real
+	// output arrives later as its own report item.
+	if r.agent.dispatchLabel != "" {
+		return result
+	}
 	if opts.HasResult() && opts.Result.Content != "" {
 		body := toolOutputMarkdownContent(sty, opts.Result.Content, cappedWidth-toolBodyLeftPaddingTotal, opts.ExpandedContent)
 		return joinToolParts(result, body)
@@ -319,6 +471,9 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 		toolParams = append(toolParams, params.URL)
 	}
 
+	if name := backgroundedName(opts); name != "" {
+		toolParams = []string{subagentTarget(sty, name)}
+	}
 	header := toolHeader(sty, opts.Status, "Agentic Fetch", cappedWidth, opts, toolParams...)
 	if opts.Compact {
 		return header
@@ -348,10 +503,7 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 	// Build tree with nested tool calls.
 	childTools := tree.Root(header)
 
-	for _, nestedTool := range r.fetch.nestedTools {
-		childView := nestedTool.Render(remainingWidth)
-		childTools.Child(childView)
-	}
+	addNestedTools(sty, childTools, r.fetch.nestedTools, remainingWidth, opts.ExpandedContent)
 
 	// Build parts.
 	var parts []string
@@ -371,4 +523,67 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 	}
 
 	return result
+}
+
+// collapsedNestedTools is how many of a subagent's latest tool calls show
+// while its item is collapsed. Drawing every call made a busy subagent's
+// item slower on each frame and taller than the screen.
+const collapsedNestedTools = 10
+
+// addNestedTools adds a subagent's tool calls to its tree, only the latest
+// ones unless the item is expanded.
+func addNestedTools(sty *styles.Styles, root *tree.Tree, nested []ToolMessageItem, width int, expanded bool) {
+	if hidden := len(nested) - collapsedNestedTools; hidden > 0 && !expanded {
+		root.Child(sty.Tool.ParamMain.Render(fmt.Sprintf("… %d earlier tool calls", hidden)))
+		nested = nested[hidden:]
+	}
+	for _, tool := range nested {
+		root.Child(tool.Render(width))
+	}
+}
+
+// subagentHeader renders "✓ Create Subagent → Betty date-impl (model=hyper/glm-5)", truncating the model rather than dropping it.
+func subagentHeader(sty *styles.Styles, status ToolStatus, name, label, model string, width int, opts *ToolRenderOpts) string {
+	header := toolHeader(sty, status, name, width, opts, subagentTarget(sty, label))
+	const minModelWidth = 12
+	room := width - lipgloss.Width(header) - 1
+	if model == "" || room < minModelWidth {
+		return header
+	}
+	return header + " " + sty.Tool.ParamMain.Render(ansi.Truncate("(model="+model+")", room, "…)"))
+}
+
+// subagentTarget renders "→ Name label", how every subagent header names one.
+func subagentTarget(sty *styles.Styles, label string) string {
+	return sty.Tool.MCPArrow.String() + " " + RenderSubagentName(sty, label)
+}
+
+// RenderSubagentName renders the accented first name apart from the label.
+func RenderSubagentName(sty *styles.Styles, label string) string {
+	first, rest := agent.SubagentDisplayName(label)
+	if first == "" {
+		return sty.Tool.AgentLabel.Render(rest)
+	}
+	return sty.Tool.AgentName.Render(first) + " " + sty.Tool.AgentLabel.Render(rest)
+}
+
+// backgroundedName is the name a blocking call took when it was backgrounded.
+func backgroundedName(opts *ToolRenderOpts) string {
+	if !opts.HasResult() || opts.Result.Metadata == "" {
+		return ""
+	}
+	var meta agent.AgentBackgroundMetadata
+	if json.Unmarshal([]byte(opts.Result.Metadata), &meta) != nil || !meta.Backgrounded {
+		return ""
+	}
+	return meta.Label
+}
+
+// dispatchRunModel reads the model a dispatch recorded once its subagent started.
+func dispatchRunModel(opts *ToolRenderOpts) string {
+	var meta agent.AgentDispatchResponseMetadata
+	if opts.HasResult() {
+		_ = json.Unmarshal([]byte(opts.Result.Metadata), &meta)
+	}
+	return meta.RunModel
 }

@@ -38,12 +38,12 @@ func (b *Backend) SubscribeEvents(ctx context.Context, workspaceID string) (<-ch
 
 // maxSessionAncestryDepth bounds how far [Backend.RootSessionID] walks
 // the parent chain when resolving a session to its top-level session.
-// Sub-agents cannot spawn sub-agents today, so one hop suffices in
+// Subagents cannot spawn subagents today, so one hop suffices in
 // practice; the extra slack guards against cycles and future nesting.
 const maxSessionAncestryDepth = 4
 
 // RootSessionID resolves sessionID to its top-level session by walking
-// the parent chain. Sub-agent sessions (created by the agent tool or
+// the parent chain. Subagent sessions (created by the agent tool or
 // agentic fetch) carry derived IDs; their interactive prompts are
 // scoped to the top-level session a user can actually view. A session
 // with no parent resolves to itself. The sessionID is returned

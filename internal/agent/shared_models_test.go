@@ -16,9 +16,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// A sub-agent outlives the credential it was built with: a refresh renews the
-// credential and revokes the old one while the sub-agent keeps working. The
-// refresh rebuilds the models every agent shares, so the sub-agent's retry
+// A subagent outlives the credential it was built with: a refresh renews the
+// credential and revokes the old one while the subagent keeps working. The
+// refresh rebuilds the models every agent shares, so the subagent's retry
 // must go out with the renewed credential rather than the rejected one.
 func TestSubAgentRetriesWithRenewedCredential(t *testing.T) {
 	const chunk = `{"id":"c","object":"chat.completion.chunk","created":0,"model":"mock-model","choices":[{"index":0,"delta":%s,"finish_reason":%s}]}`
@@ -31,7 +31,7 @@ func TestSubAgentRetriesWithRenewedCredential(t *testing.T) {
 		auth := r.Header.Get("Authorization")
 		body, _ := io.ReadAll(r.Body)
 		// Title generation runs in its own goroutine and can land after the
-		// sub-agent's retry, so only the sub-agent's requests are recorded.
+		// subagent's retry, so only the subagent's requests are recorded.
 		if !strings.Contains(string(body), "Generate a concise title") {
 			mu.Lock()
 			seen = append(seen, auth)
@@ -74,7 +74,7 @@ func TestSubAgentRetriesWithRenewedCredential(t *testing.T) {
 	}
 	p, err := taskPrompt(prompt.WithWorkingDir(env.workingDir))
 	require.NoError(t, err)
-	sub, err := coord.buildAgent(t.Context(), p, cfg.Config().Agents[config.AgentTask], true)
+	sub, err := coord.buildAgent(t.Context(), &coord.readyWg, p, cfg.Config().Agents[config.AgentTask], true)
 	require.NoError(t, err)
 	require.NoError(t, coord.readyWg.Wait())
 

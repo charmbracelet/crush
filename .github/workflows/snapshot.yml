@@ -29,4 +29,5 @@ jobs:
           distribution: goreleaser-pro
           args: build --snapshot --clean
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           GORELEASER_KEY: ${{ secrets.GORELEASER_KEY }}

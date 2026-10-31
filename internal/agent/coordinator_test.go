@@ -192,6 +192,32 @@ func TestRunSubAgent(t *testing.T) {
 		assert.Equal(t, "Subagent completed but produced no text output.", resp.Content)
 	})
 
+	t.Run("refused or truncated run says why it stopped", func(t *testing.T) {
+		narration := fantasy.ResponseContent{fantasy.TextContent{Text: "Now processes, network, and systemd state."}}
+		for _, tc := range []struct {
+			reason fantasy.FinishReason
+			want   string
+		}{
+			{fantasy.FinishReasonContentFilter, subAgentRefused},
+			{fantasy.FinishReasonLength, subAgentTruncated},
+		} {
+			resp := subAgentResponse(&fantasy.AgentResult{
+				Steps: []fantasy.StepResult{
+					{Response: fantasy.Response{Content: narration, FinishReason: fantasy.FinishReasonToolCalls}},
+					{Response: fantasy.Response{FinishReason: tc.reason}},
+				},
+				Response: fantasy.Response{Content: narration},
+			})
+			assert.True(t, resp.IsError, tc.reason)
+			assert.Equal(t, tc.want, resp.Content, "earlier narration must not pass for a report")
+		}
+
+		resp := subAgentResponse(&fantasy.AgentResult{
+			Steps: []fantasy.StepResult{{Response: fantasy.Response{Content: narration, FinishReason: fantasy.FinishReasonContentFilter}}},
+		})
+		assert.Equal(t, subAgentRefused+"\n\nIts last output before stopping:\n\n"+narration.Text(), resp.Content)
+	})
+
 	t.Run("empty result returns error response", func(t *testing.T) {
 		env := testEnv(t)
 		coord := newTestCoordinator(t, env, providerID, providerCfg)

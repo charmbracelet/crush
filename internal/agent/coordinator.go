@@ -1901,18 +1901,46 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 		}
 	}
 
-	output := subAgentOutput(result)
-	if output == "" {
-		return fantasy.NewTextErrorResponse("Subagent completed but produced no text output."), nil
-	}
-	return fantasy.NewTextResponse(output), nil
+	return subAgentResponse(result), nil
 }
 
-func subAgentOutput(result *fantasy.AgentResult) string {
+const (
+	subAgentNoOutput  = "Subagent completed but produced no text output."
+	subAgentRefused   = "Subagent stopped early: the provider's safety classifier refused its response, so it never finished the task. The same task on the same model will likely be refused again; rephrase it or dispatch a new subagent on a different model."
+	subAgentTruncated = "Subagent stopped early: it ran out of output tokens mid-response, so it never finished the task. Ask it to continue in smaller steps."
+)
+
+// subAgentResponse turns a finished subagent run into the parent's tool
+// result. The run's last step decides: fantasy falls back to an earlier
+// step's text when the last one has none, which after a cut-short step is
+// narration, not a report.
+func subAgentResponse(result *fantasy.AgentResult) fantasy.ToolResponse {
 	if result == nil {
-		return ""
+		return fantasy.NewTextErrorResponse(subAgentNoOutput)
 	}
-	return result.Response.Content.Text()
+	var last fantasy.StepResult
+	if n := len(result.Steps); n > 0 {
+		last = result.Steps[n-1]
+	}
+	switch last.FinishReason {
+	case fantasy.FinishReasonContentFilter:
+		return fantasy.NewTextErrorResponse(withLastWords(subAgentRefused, last))
+	case fantasy.FinishReasonLength:
+		return fantasy.NewTextErrorResponse(withLastWords(subAgentTruncated, last))
+	}
+	if output := result.Response.Content.Text(); output != "" {
+		return fantasy.NewTextResponse(output)
+	}
+	return fantasy.NewTextErrorResponse(subAgentNoOutput)
+}
+
+// withLastWords appends whatever text the cut-short step did produce.
+func withLastWords(reason string, step fantasy.StepResult) string {
+	text := strings.TrimSpace(step.Content.Text())
+	if text == "" {
+		return reason
+	}
+	return reason + "\n\nIts last output before stopping:\n\n" + text
 }
 
 // updateParentSessionCost accumulates the cost from a child session to its parent session.

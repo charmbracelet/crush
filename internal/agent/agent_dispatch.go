@@ -527,7 +527,7 @@ func (c *coordinator) reopen(entry *dispatchedAgent, prompt string) bool {
 		if err != nil {
 			return fantasy.NewTextErrorResponse(fmt.Sprintf("Subagent failed: %s", err)), nil
 		}
-		return fantasy.NewTextResponse(subAgentOutput(result)), nil
+		return subAgentResponse(result), nil
 	})
 	return true
 }

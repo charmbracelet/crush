@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -190,6 +191,25 @@ func (SubAgentReport) isPart() {}
 // PromptText is the report as the model reads it.
 func (r SubAgentReport) PromptText() string {
 	return fmt.Sprintf("<subagent-report label=%q>\n%s\n</subagent-report>", r.Label, r.Output)
+}
+
+// ParseSubAgentReportPrompt recovers a report from its PromptText, for
+// places such as the prompt queue that only carry the text.
+func ParseSubAgentReportPrompt(prompt string) (SubAgentReport, bool) {
+	const prefix, suffix = "<subagent-report label=", "\n</subagent-report>"
+	rest, ok := strings.CutPrefix(prompt, prefix)
+	if !ok {
+		return SubAgentReport{}, false
+	}
+	quoted, output, ok := strings.Cut(rest, ">\n")
+	if !ok {
+		return SubAgentReport{}, false
+	}
+	label, err := strconv.Unquote(quoted)
+	if err != nil {
+		return SubAgentReport{}, false
+	}
+	return SubAgentReport{Label: label, Output: strings.TrimSuffix(output, suffix)}, true
 }
 
 // HasSubAgentReport reports whether the message contains any SubAgentReport parts.

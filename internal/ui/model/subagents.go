@@ -68,7 +68,7 @@ func (m *UI) runningSubAgents() int {
 }
 
 // subAgentRow renders one subagent's line: a spinner and elapsed time while
-// it works, so a glance distinguishes it from a static "online" dot.
+// it works; once finished, the icon's color alone says so.
 func (m *UI) subAgentRow(status chat.DispatchStatus, width int) string {
 	t := m.com.Styles
 
@@ -76,9 +76,13 @@ func (m *UI) subAgentRow(status chat.DispatchStatus, width int) string {
 	state := "starting"
 	switch {
 	case !status.Running:
-		icon, state = t.Resource.OfflineIcon.String(), "done"
+		icon, state = t.Resource.OfflineIcon.String(), ""
 	case !status.Started.IsZero():
 		state = time.Since(status.Started).Round(time.Second).String()
+	}
+	var extra string
+	if state != "" {
+		extra = t.Resource.RowDescBase.Foreground(t.Resource.DefaultDescFg).Render(state)
 	}
 
 	// The label is the description so Status truncates it, not the state.
@@ -91,7 +95,7 @@ func (m *UI) subAgentRow(status chat.DispatchStatus, width int) string {
 		Icon:         icon,
 		Title:        title,
 		Description:  label,
-		ExtraContent: t.Resource.RowDescBase.Foreground(t.Resource.DefaultDescFg).Render(state),
+		ExtraContent: extra,
 	}, width)
 }
 

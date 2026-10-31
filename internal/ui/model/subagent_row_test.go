@@ -1,6 +1,7 @@
 package model
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -33,6 +34,15 @@ func TestSubAgentRowLeavesShortLabelWhole(t *testing.T) {
 
 	u := newTestUI()
 	plain := ansi.Strip(u.subAgentRow(chat.DispatchStatus{Label: "xochitl-porky"}, 40))
-	require.Contains(t, plain, "porky done")
+	require.Equal(t, "porky", lastWord(plain))
+	require.NotContains(t, plain, "done")
 	require.NotContains(t, plain, "…")
+}
+
+func lastWord(s string) string {
+	fields := strings.Fields(s)
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[len(fields)-1]
 }

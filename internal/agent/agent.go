@@ -1289,6 +1289,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		linkStyle := lipgloss.NewStyle().Foreground(charmtone.Guac).Underline(true)
 		if isCancelErr {
 			currentAssistant.AddFinish(message.FinishReasonCanceled, "User canceled request", "")
+		} else if errors.Is(err, errRefused) {
+			// Every retry was refused; keep the refusal banner rather than
+			// reporting a generic provider error.
+			currentAssistant.AddFinish(message.FinishReasonContentFilter, "", "")
 		} else if errors.As(err, &requestTimedOutErr) {
 			// Checked before the provider branches so a deadline our own
 			// request timeout imposed is never reported as a provider error.

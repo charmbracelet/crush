@@ -62,6 +62,8 @@ func turnEndReason(assistant *message.Message, runErr error) string {
 	switch {
 	case errors.Is(runErr, context.Canceled):
 		return canceledToolCallResult
+	case errors.Is(runErr, errRefused):
+		return refusedToolCallResult
 	case runErr != nil:
 		return failedToolCallResult
 	}

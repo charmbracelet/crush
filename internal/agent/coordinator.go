@@ -1160,6 +1160,7 @@ func (c *coordinator) buildModelFromSelection(ctx context.Context, modelCfg conf
 	// providers fail instead of blocking a session forever. The wrapper is
 	// applied per request, so retries get a fresh budget each attempt.
 	languageModel = newRequestTimeoutModel(languageModel, c.cfg.Config().Options.GetRequestTimeout())
+	languageModel = newRefusalRetryModel(languageModel)
 
 	// Hyper completions no longer report the hypercredit balance, so wrap
 	// the Hyper models to fetch it from /v1/credits on every request.

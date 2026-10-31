@@ -483,6 +483,37 @@ func effectiveReasoningEffort(model Model) string {
 	return ""
 }
 
+// thinkingBody returns the request fields a provider configures for its
+// thinking switch: ThinkingOnBody when thinking is on for the model (the
+// toggle, or a reasoning effort other than "none"), ThinkingOffBody
+// otherwise. It returns nil when the provider configures neither.
+func thinkingBody(providerCfg config.ProviderConfig, model Model, reasoningEffort string) map[string]any {
+	if model.ModelCfg.Think || reasoningEffort != "" && reasoningEffort != "none" {
+		return providerCfg.ThinkingOnBody
+	}
+	return providerCfg.ThinkingOffBody
+}
+
+// mergeMaps deep-merges src into dst. Nested maps are merged key by key;
+// any other value in src replaces the one in dst.
+func mergeMaps(dst, src map[string]any) {
+	for k, v := range src {
+		srcMap, srcIsMap := v.(map[string]any)
+		dstMap, dstIsMap := dst[k].(map[string]any)
+		if srcIsMap && dstIsMap {
+			mergeMaps(dstMap, srcMap)
+			continue
+		}
+		if srcIsMap {
+			copied := make(map[string]any, len(srcMap))
+			mergeMaps(copied, srcMap)
+			dst[k] = copied
+			continue
+		}
+		dst[k] = v
+	}
+}
+
 func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.ProviderOptions {
 	options := fantasy.ProviderOptions{}
 
@@ -741,6 +772,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 			}
 		}
 
+		mergeMaps(extraBody, thinkingBody(providerCfg, model, reasoningEffort))
 		mergedOptions["extra_body"] = extraBody
 
 		parsed, err := openaicompat.ParseOptions(mergedOptions)
@@ -764,6 +796,15 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 				if _, hasTopK := extraBody["top_k"]; !hasTopK {
 					extraBody["top_k"] = *topK
 				}
+			}
+
+			if body := thinkingBody(providerCfg, model, reasoningEffort); len(body) > 0 {
+				extraBody, hasExtraBody := mergedOptions["extra_body"].(map[string]any)
+				if !hasExtraBody {
+					extraBody = make(map[string]any)
+					mergedOptions["extra_body"] = extraBody
+				}
+				mergeMaps(extraBody, body)
 			}
 
 			_, hasReasoningEffort := mergedOptions["reasoning_effort"]

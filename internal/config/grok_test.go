@@ -50,11 +50,9 @@ func TestSetProviderAPIKeyXAIIsEitherOr(t *testing.T) {
 			Providers *csync.Map[string, ProviderConfig] `json:"providers"`
 		}{Providers: providers}))
 
-		originalFetch := fetchGrokModels
-		fetchGrokModels = func(context.Context, *oauth.Token) ([]catwalk.Model, error) {
+		stubSubscriptionFetch(t, "xai", func(context.Context, *oauth.Token) ([]catwalk.Model, error) {
 			return []catwalk.Model{{ID: "grok-4-fast"}}, nil
-		}
-		t.Cleanup(func() { fetchGrokModels = originalFetch })
+		})
 
 		return &ConfigStore{
 			config:         &Config{Providers: providers},
@@ -82,7 +80,7 @@ func TestSetProviderAPIKeyXAIIsEitherOr(t *testing.T) {
 		// providers: it is the credential the API client sends.
 		require.Equal(t, token.AccessToken, pc.APIKey)
 		require.Equal(t, token, pc.OAuthToken)
-		require.Equal(t, "grok-4-fast", pc.GrokModels[0].ID, "the subscription catalog lands in its own field")
+		require.Equal(t, "grok-4-fast", pc.SubscriptionModels[0].ID, "the subscription catalog lands in its own field")
 		require.Equal(t, "grok-4.5", pc.Models[0].ID, "the API catalog is untouched")
 
 		disk, err := os.ReadFile(store.globalDataPath)
@@ -99,7 +97,7 @@ func TestSetProviderAPIKeyXAIIsEitherOr(t *testing.T) {
 					"id": "xai",
 					"api_key": "",
 					"oauth": {"access_token": "old-at", "refresh_token": "old-rt"},
-					"grok_models": [{"id": "grok-4.20"}]
+					"subscription_models": [{"id": "grok-4.20"}]
 				}
 			}
 		}`)
@@ -110,7 +108,7 @@ func TestSetProviderAPIKeyXAIIsEitherOr(t *testing.T) {
 		require.True(t, ok)
 		require.Equal(t, "sk-new", pc.APIKey)
 		require.Nil(t, pc.OAuthToken, "the API key retires the Grok login")
-		require.Empty(t, pc.GrokModels, "the subscription catalog goes with it")
+		require.Empty(t, pc.SubscriptionModels, "the subscription catalog goes with it")
 
 		disk, err := os.ReadFile(store.globalDataPath)
 		require.NoError(t, err)
@@ -125,7 +123,7 @@ func TestSetProviderAPIKeyXAIIsEitherOr(t *testing.T) {
 // renews the token before fetching, so the request is not rejected with
 // a 401, and the fetched catalog replaces the persisted one.
 func TestRefetchGrokModelsRefreshesExpiredToken(t *testing.T) {
-	// Not parallel: swaps the fetchGrokModels package variable.
+	// Not parallel: swaps the fetchSubscriptionModels package variable.
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "crush.json")
 
@@ -144,9 +142,9 @@ func TestRefetchGrokModelsRefreshesExpiredToken(t *testing.T) {
 
 	providers := csync.NewMap[string, ProviderConfig]()
 	providers.Set("xai", ProviderConfig{
-		ID:         "xai",
-		OAuthToken: expired,
-		GrokModels: []catwalk.Model{{ID: "grok-stale"}},
+		ID:                 "xai",
+		OAuthToken:         expired,
+		SubscriptionModels: []catwalk.Model{{ID: "grok-stale"}},
 	})
 	store := &ConfigStore{
 		config:         &Config{Providers: providers},
@@ -158,22 +156,20 @@ func TestRefetchGrokModelsRefreshesExpiredToken(t *testing.T) {
 		},
 	}
 
-	originalFetch := fetchGrokModels
 	var fetchToken *oauth.Token
-	fetchGrokModels = func(_ context.Context, token *oauth.Token) ([]catwalk.Model, error) {
+	stubSubscriptionFetch(t, "xai", func(_ context.Context, token *oauth.Token) ([]catwalk.Model, error) {
 		fetchToken = token
 		return []catwalk.Model{{ID: "grok-fresh"}}, nil
-	}
-	t.Cleanup(func() { fetchGrokModels = originalFetch })
+	})
 
-	store.refetchGrokModels(t.Context(), ScopeGlobal)
+	store.refetchSubscriptionModels(t.Context(), ScopeGlobal, "xai")
 
 	require.Equal(t, fresh, fetchToken, "the catalog is fetched with the renewed token")
 
 	pc, ok := store.Config().Providers.Get("xai")
 	require.True(t, ok)
 	require.Equal(t, fresh, pc.OAuthToken, "the renewed token is kept in the config")
-	require.Equal(t, "grok-fresh", pc.GrokModels[0].ID, "the existing catalog is replaced")
+	require.Equal(t, "grok-fresh", pc.SubscriptionModels[0].ID, "the existing catalog is replaced")
 
 	disk, err := os.ReadFile(configPath)
 	require.NoError(t, err)
@@ -193,7 +189,7 @@ func grokLoginConfig(token *oauth.Token) string {
 			"xai": {
 				"id": "xai",
 				"oauth": ` + string(tokenJSON) + `,
-				"grok_models": [{"id": "grok-stale", "name": "Grok Stale"}]
+				"subscription_models": [{"id": "grok-stale", "name": "Grok Stale"}]
 			}
 		}
 	}`
@@ -204,13 +200,11 @@ func grokLoginConfig(token *oauth.Token) string {
 func stubGrokModels(t *testing.T, models []catwalk.Model) *bool {
 	t.Helper()
 
-	originalFetch := fetchGrokModels
 	called := false
-	fetchGrokModels = func(context.Context, *oauth.Token) ([]catwalk.Model, error) {
+	stubSubscriptionFetch(t, "xai", func(context.Context, *oauth.Token) ([]catwalk.Model, error) {
 		called = true
 		return models, nil
-	}
-	t.Cleanup(func() { fetchGrokModels = originalFetch })
+	})
 	return &called
 }
 
@@ -252,7 +246,7 @@ func TestLoadRefreshesGrokModelsWhenCatwalkUpdates(t *testing.T) {
 
 	pc, ok := store.Config().Providers.Get("xai")
 	require.True(t, ok)
-	require.Equal(t, "grok-fresh", pc.GrokModels[0].ID, "the stale catalog is replaced")
+	require.Equal(t, "grok-fresh", pc.SubscriptionModels[0].ID, "the stale catalog is replaced")
 
 	large, ok := store.Config().Models[SelectedModelTypeLarge]
 	require.True(t, ok)
@@ -286,5 +280,5 @@ func TestLoadKeepsGrokModelsWhenCatwalkNotModified(t *testing.T) {
 
 	pc, ok := store.Config().Providers.Get("xai")
 	require.True(t, ok)
-	require.Equal(t, "grok-stale", pc.GrokModels[0].ID, "the persisted catalog is kept")
+	require.Equal(t, "grok-stale", pc.SubscriptionModels[0].ID, "the persisted catalog is kept")
 }

@@ -344,12 +344,13 @@ func (c *coordinator) RunAccepted(ctx context.Context, accept *AcceptedRun, sess
 // Accepted so sessionAgent.Run can consume the accept reservation under
 // dispatchMu; when nil (the in-process/local path) no accept tracking
 // applies.
-// runSaved starts a turn on a user message already in the transcript.
-func (c *coordinator) runSaved(ctx context.Context, saved message.Message, prompt string) (*fantasy.AgentResult, error) {
-	return c.run(ctx, nil, &saved, saved.SessionID, prompt)
+// runReport delivers a subagent report: it folds into a turn in progress, or
+// starts one.
+func (c *coordinator) runReport(ctx context.Context, sessionID string, report message.SubAgentReport) (*fantasy.AgentResult, error) {
+	return c.run(ctx, nil, &report, sessionID, report.PromptText())
 }
 
-func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, saved *message.Message, sessionID string, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
+func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, report *message.SubAgentReport, sessionID string, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
 	if err := c.readyWg.Wait(); err != nil {
 		return nil, err
 	}
@@ -443,7 +444,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, saved *messa
 			Channel:           channel,
 			Prompt:            prompt,
 			HostContext:       c.hostContext.Get(),
-			Saved:             saved,
+			Report:            report,
 			HiddenUserMessage: message.HiddenUserMessage(ctx),
 			Attachments:       attachments,
 			MaxOutputTokens:   maxTokens,

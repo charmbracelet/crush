@@ -556,9 +556,10 @@ func (c *coordinator) rollUpDispatchCost(ctx context.Context, entry *dispatchedA
 	}
 }
 
-// reportDispatchResult saves a finished subagent's output to the parent
-// session, then wakes the parent: it folds into a turn in progress or starts
-// one. Saving first means a cancelled or failed turn cannot lose the report.
+// reportDispatchResult delivers a finished subagent's output to the parent:
+// it folds into a turn in progress or starts one. A busy parent queues it,
+// and it reaches the transcript when the model reads it; if waking the parent
+// fails before then, it is recorded anyway so it is never lost.
 func (c *coordinator) reportDispatchResult(entry *dispatchedAgent, resp fantasy.ToolResponse, err error) {
 	var (
 		body   string
@@ -579,18 +580,33 @@ func (c *coordinator) reportDispatchResult(entry *dispatchedAgent, resp fantasy.
 		Failed: failed,
 		Model:  modelDisplayName(entry.agent.Model()),
 	}
-	saved, ok := c.recordDispatchReport(entry.ParentSessionID, report)
-	if !ok {
-		return
-	}
-	if _, err := c.runSaved(context.Background(), saved, report.PromptText()); err != nil {
+	ctx := context.Background()
+	if _, err := c.runReport(ctx, entry.ParentSessionID, report); err != nil {
 		slog.Error(
 			"Failed to wake the parent with a subagent report",
 			"label", entry.Label,
 			"parent_session", entry.ParentSessionID,
 			"error", err,
 		)
+		if !c.reportRecorded(ctx, entry.ParentSessionID, report) {
+			c.recordDispatchReport(entry.ParentSessionID, report)
+		}
 	}
+}
+
+// reportRecorded reports whether report is already in the parent's
+// transcript, as it is when the turn it started failed after writing it.
+func (c *coordinator) reportRecorded(ctx context.Context, parentSessionID string, report message.SubAgentReport) bool {
+	msgs, err := c.messages.List(ctx, parentSessionID)
+	if err != nil {
+		return false
+	}
+	for _, msg := range slices.Backward(msgs) {
+		if slices.Contains(msg.SubAgentReports(), report) {
+			return true
+		}
+	}
+	return false
 }
 
 // recordDispatchReport stores a report in the parent session without starting

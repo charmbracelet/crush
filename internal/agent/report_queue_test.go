@@ -29,8 +29,8 @@ func TestReportIsSavedEvenWhenWakingFails(t *testing.T) {
 	require.Equal(t, "all good", reports[0].Output)
 }
 
-// A call delivering a saved message writes nothing new.
-func TestSavedCallWritesNoUserMessage(t *testing.T) {
+// A report call writes the report when it is delivered.
+func TestReportCallWritesTheReport(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	a := NewSessionAgent(SessionAgentOptions{
@@ -38,13 +38,66 @@ func TestSavedCallWritesNoUserMessage(t *testing.T) {
 		Sessions: env.sessions,
 		Messages: env.messages,
 	}).(*sessionAgent)
-	saved := message.Message{ID: "saved", SessionID: "s"}
-	got, err := a.createUserMessage(t.Context(), SessionAgentCall{SessionID: "s", Saved: &saved})
+	sess, err := env.sessions.Create(t.Context(), "parent")
 	require.NoError(t, err)
-	require.Equal(t, "saved", got.ID)
-	msgs, err := env.messages.List(t.Context(), "s")
+	report := message.SubAgentReport{Label: "akiko-bugs", Output: "all good"}
+	got, err := a.createUserMessage(t.Context(), SessionAgentCall{SessionID: sess.ID, Report: &report})
 	require.NoError(t, err)
-	require.Empty(t, msgs)
+	require.Equal(t, []message.SubAgentReport{report}, got.SubAgentReports())
+}
+
+// A report for a busy session waits in the queue, out of the transcript,
+// until the turn reads it, and a cancel that drops it still records it.
+func TestQueuedReportReachesTheTranscriptOnlyWhenDeliveredOrDropped(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	a := NewSessionAgent(SessionAgentOptions{
+		Models:   noModels,
+		Sessions: env.sessions,
+		Messages: env.messages,
+	}).(*sessionAgent)
+	sess, err := env.sessions.Create(t.Context(), "parent")
+	require.NoError(t, err)
+	a.activeRequests.Set(sess.ID, &activeCancel{cancel: func() {}})
+
+	report := message.SubAgentReport{Label: "akiko-bugs", Output: "all good"}
+	_, err = a.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, Prompt: report.PromptText(), Report: &report})
+	require.NoError(t, err)
+	require.Equal(t, 1, a.QueuedPrompts(sess.ID))
+	msgs, err := env.messages.List(t.Context(), sess.ID)
+	require.NoError(t, err)
+	require.Empty(t, msgs, "a queued report is not in the transcript yet")
+
+	a.ClearQueue(sess.ID)
+	msgs, err = env.messages.List(t.Context(), sess.ID)
+	require.NoError(t, err)
+	require.Len(t, msgs, 1)
+	require.Equal(t, []message.SubAgentReport{report}, msgs[0].SubAgentReports())
+}
+
+// The user's own queued prompts go ahead of queued reports, in order, so
+// a short line is not buried at the end of a long report.
+func TestUserPromptsQueueAheadOfReports(t *testing.T) {
+	t.Parallel()
+	report := func(label string) SessionAgentCall {
+		return SessionAgentCall{Prompt: label, Report: &message.SubAgentReport{Label: label}}
+	}
+	var queue []SessionAgentCall
+	for _, call := range []SessionAgentCall{
+		{Prompt: "first"},
+		report("r1"),
+		report("r2"),
+		{Prompt: "pw hunter2"},
+		report("r3"),
+		{Prompt: "and another"},
+	} {
+		queue = insertQueued(queue, call)
+	}
+	var got []string
+	for _, call := range queue {
+		got = append(got, call.Prompt)
+	}
+	require.Equal(t, []string{"first", "pw hunter2", "and another", "r1", "r2", "r3"}, got)
 }
 
 // A queue-only call never starts a turn: on an idle session it is refused,

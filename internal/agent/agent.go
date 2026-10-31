@@ -98,10 +98,10 @@ type SessionAgentCall struct {
 	// session Run returns ErrSessionIdle instead of starting one.
 	QueueOnly bool
 	Prompt    string
-	// Saved is a user message already in the transcript that this call
-	// delivers, so no new one is written. Prompt is still what the model
-	// reads for it.
-	Saved            *message.Message
+	// Report is a subagent report this call delivers. It is written to
+	// the transcript only when delivered, so it lands where the model
+	// reads it. Prompt is still what the model reads for it.
+	Report           *message.SubAgentReport
 	ProviderOptions  fantasy.ProviderOptions
 	Attachments      []message.Attachment
 	MaxOutputTokens  int64
@@ -460,8 +460,20 @@ func (a *sessionAgent) enqueueCall(call SessionAgentCall) {
 	// Once queued the call is accepted: if no step folds it in, it runs as
 	// its own turn rather than being refused as idle.
 	queued.QueueOnly = false
-	existing = append(existing, queued)
-	a.messageQueue.Set(call.SessionID, existing)
+	a.messageQueue.Set(call.SessionID, insertQueued(existing, queued))
+}
+
+// insertQueued appends call, except that the user's own prompts go ahead of
+// queued subagent reports: delivered together they read as one message, and
+// a short line trailing a long report gets missed.
+func insertQueued(queue []SessionAgentCall, call SessionAgentCall) []SessionAgentCall {
+	at := len(queue)
+	if call.Report == nil {
+		for at > 0 && queue[at-1].Report != nil {
+			at--
+		}
+	}
+	return slices.Insert(queue, at, call)
 }
 
 // drainQueueForStep partitions the session's queued calls for the current
@@ -471,10 +483,8 @@ func (a *sessionAgent) enqueueCall(call SessionAgentCall) {
 // prevents a cancel recorded between the drain and the check from being
 // observed inconsistently.
 //
-// Calls covered by a pending cancel are dropped; the dropped ones that
-// carry a RunID are returned in canceledWithRunID so the caller can
-// publish their terminal cancelled RunComplete (a caller waiting on that
-// RunID, e.g. `crush run`, would otherwise hang). Uncanceled calls without
+// Calls covered by a pending cancel are dropped and returned in canceled
+// for the caller to settle (see settleDroppedCalls). Uncanceled calls without
 // a RunID are returned in fold to be folded into the active turn,
 // preserving the existing follow-up behavior. Uncanceled calls that carry
 // a RunID are left in the queue so each runs as its own turn via the
@@ -482,7 +492,7 @@ func (a *sessionAgent) enqueueCall(call SessionAgentCall) {
 // RunID-bearing prompt an explicit lifecycle instead of being silently
 // absorbed into another turn. fold is processed by the caller without the
 // lock held.
-func (a *sessionAgent) drainQueueForStep(sessionID string) (fold, canceledWithRunID []SessionAgentCall) {
+func (a *sessionAgent) drainQueueForStep(sessionID string) (fold, canceled []SessionAgentCall) {
 	dispatchLock := a.sessionMu(sessionID)
 	dispatchLock.Lock()
 	defer dispatchLock.Unlock()
@@ -490,9 +500,7 @@ func (a *sessionAgent) drainQueueForStep(sessionID string) (fold, canceledWithRu
 	var keep []SessionAgentCall
 	for _, queued := range queuedCalls {
 		if a.canceledBySeq(sessionID, queued.acceptSeq) {
-			if queued.RunID != "" {
-				canceledWithRunID = append(canceledWithRunID, queued)
-			}
+			canceled = append(canceled, queued)
 			continue
 		}
 		if queued.RunID != "" {
@@ -506,11 +514,13 @@ func (a *sessionAgent) drainQueueForStep(sessionID string) (fold, canceledWithRu
 	} else {
 		a.messageQueue.Set(sessionID, keep)
 	}
-	return fold, canceledWithRunID
+	return fold, canceled
 }
 
-// publishCanceledQueueDrops emits a terminal cancelled RunComplete for
-// every dropped queued call that carries a RunID. A queued prompt removed
+// settleDroppedCalls settles queued calls removed without running. A
+// subagent report is written to the transcript, where the model reads it
+// next turn, so cancelling a turn never loses one. Each call that carries a
+// RunID gets a terminal cancelled RunComplete. A queued prompt removed
 // from the queue without ever running — covered by a pending cancel, or
 // cleared by Cancel/ClearQueue — would otherwise leave a caller blocked on
 // that RunID: `crush run` ignores live message events and exits only on a
@@ -518,20 +528,18 @@ func (a *sessionAgent) drainQueueForStep(sessionID string) (fold, canceledWithRu
 // and are dropped silently as before. A detached, bounded context keeps the
 // must-deliver publish alive even when the run context that triggered the
 // drop is already canceled.
-func (a *sessionAgent) publishCanceledQueueDrops(drops []SessionAgentCall) {
-	var hasRunID bool
-	for _, d := range drops {
-		if d.RunID != "" {
-			hasRunID = true
-			break
-		}
-	}
-	if !hasRunID {
+func (a *sessionAgent) settleDroppedCalls(drops []SessionAgentCall) {
+	if len(drops) == 0 {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	for _, d := range drops {
+		if d.Report != nil {
+			if _, err := a.createUserMessage(ctx, d); err != nil {
+				slog.Error("Failed to record a dropped subagent report", "session_id", d.SessionID, "error", err)
+			}
+		}
 		if d.RunID == "" {
 			continue
 		}
@@ -553,7 +561,7 @@ func (a *sessionAgent) clearQueueAndNotify(sessionID string) {
 	if !ok {
 		return
 	}
-	a.publishCanceledQueueDrops(queued)
+	a.settleDroppedCalls(queued)
 }
 
 // clearPendingCancel removes any pending-cancel mark for sessionID. It
@@ -914,11 +922,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	if err != nil {
 		return nil, fmt.Errorf("failed to get session messages: %w", err)
 	}
-	if call.Saved != nil {
-		// The saved message goes in as this turn's prompt, not as history.
-		msgs = slices.DeleteFunc(msgs, func(m message.Message) bool { return m.ID == call.Saved.ID })
-	}
-
 	// Generate title from the first real (non-shell) user prompt in the
 	// background; Run must not wait on it. CancelAll drains it instead.
 	if !hasUserTextMessage(msgs) {
@@ -1003,8 +1006,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			// into this turn; uncanceled prompts with a RunID are left
 			// queued so each runs as its own turn (with its own
 			// RunComplete) via the recursive run path below.
-			fold, canceledRunIDs := a.drainQueueForStep(call.SessionID)
-			a.publishCanceledQueueDrops(canceledRunIDs)
+			fold, canceled := a.drainQueueForStep(call.SessionID)
+			a.settleDroppedCalls(canceled)
 			for _, queued := range fold {
 				userMessage, createErr := a.createUserMessage(callContext, queued)
 				if createErr != nil {
@@ -1340,8 +1343,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		case len(currentAssistant.ToolCalls()) > 0:
 			existing, _ := a.messageQueue.Get(call.SessionID)
 			call.Prompt = fmt.Sprintf("The previous session was interrupted because it got too long, the initial user request was: `%s`", call.Prompt)
-			// The rewritten prompt is a new message, not the saved one.
-			call.Saved = nil
+			// The rewritten prompt is a new message, not the report.
+			call.Report = nil
 			a.messageQueue.Set(call.SessionID, append(existing, call))
 			continued = true
 		}
@@ -1399,23 +1402,17 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		// queued prompts it covers (accept sequence at or below the
 		// mark, or untracked); keep any queued after the cancel (higher
 		// sequence) so they still run.
-		var kept []SessionAgentCall
-		var canceledRunIDDrops []SessionAgentCall
+		var kept, dropped []SessionAgentCall
 		for _, q := range queuedMessages {
 			if q.acceptSeq == 0 || q.acceptSeq <= mark {
-				if q.RunID != "" {
-					canceledRunIDDrops = append(canceledRunIDDrops, q)
-				}
+				dropped = append(dropped, q)
 				continue
 			}
 			kept = append(kept, q)
 		}
 		queuedMessages = kept
 		a.messageQueue.Set(call.SessionID, kept)
-		// A dropped prompt carrying a RunID must still publish its
-		// terminal cancelled RunComplete so a caller waiting on that
-		// RunID does not hang.
-		a.publishCanceledQueueDrops(canceledRunIDDrops)
+		a.settleDroppedCalls(dropped)
 	}
 	if len(queuedMessages) == 0 {
 		// No queued work. Clear the cancel mark only when no accepted
@@ -1682,8 +1679,11 @@ func sessionHeaders(sessionID string) map[string]string {
 }
 
 func (a *sessionAgent) createUserMessage(ctx context.Context, call SessionAgentCall) (message.Message, error) {
-	if call.Saved != nil {
-		return *call.Saved, nil
+	if call.Report != nil {
+		return a.messages.Create(ctx, call.SessionID, message.CreateMessageParams{
+			Role:  message.User,
+			Parts: []message.ContentPart{*call.Report},
+		})
 	}
 	parts := []message.ContentPart{message.TextContent{Text: call.Prompt, Hidden: call.HiddenUserMessage}}
 	var attachmentParts []message.ContentPart

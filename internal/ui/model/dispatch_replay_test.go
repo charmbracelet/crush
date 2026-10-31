@@ -60,3 +60,24 @@ func TestReplayDispatchReportsSettlesDeadSubAgents(t *testing.T) {
 	_, ok := refused.DispatchStatus()
 	require.False(t, ok, "a refused dispatch never started, so it has no status")
 }
+
+// A report waits in the prompt queue until the model reads it, but its
+// subagent has finished, so seeing it queued stops the dispatch spinner.
+func TestQueuedReportSettlesItsDispatch(t *testing.T) {
+	pinTTLs(t)
+	m := newBusyUI(&countingWorkspace{ready: true})
+	warmCaches(m, false)
+	item := replayDispatchItem(t, m.com.Styles, "m1", "c1", "akiko-bugs", false)
+	other := replayDispatchItem(t, m.com.Styles, "m1", "c2", "sarah-speedy", false)
+	m.chat.AppendMessages(item, other)
+
+	report := message.SubAgentReport{Label: "akiko-bugs", Output: "all good"}
+	m.applyPromptQueue(promptQueueMsg{forSession: "s1", gen: m.promptQueueGen, prompts: []string{"pw hunter2", report.PromptText()}})
+
+	status, ok := item.DispatchStatus()
+	require.True(t, ok)
+	require.False(t, status.Running)
+	status, ok = other.DispatchStatus()
+	require.True(t, ok)
+	require.True(t, status.Running, "only the reported subagent settles")
+}

@@ -87,13 +87,12 @@ func TestDrainQueueForStep_FiltersUnderDispatchLock(t *testing.T) {
 	// Cancel high-water mark at seq 2: seq <= 2 and seq == 0 are covered.
 	a.cancelMark.Set(sessionID, 2)
 
-	fold, canceledWithRunID := a.drainQueueForStep(sessionID)
+	fold, canceled := a.drainQueueForStep(sessionID)
 
 	require.Len(t, fold, 1,
 		"only the follow-up queued after the cancel (seq > mark) must be folded")
 	require.Equal(t, "after", fold[0].Prompt)
-	require.Empty(t, canceledWithRunID,
-		"no dropped call carried a RunID, so none need a terminal RunComplete")
+	require.Len(t, canceled, 3, "every call the cancel covers is dropped")
 
 	_, ok := a.messageQueue.Get(sessionID)
 	require.False(t, ok, "drain must clear the session message queue when nothing is kept")
@@ -182,12 +181,11 @@ func TestDrainQueueForStep_ReportsCanceledRunIDDrops(t *testing.T) {
 	})
 	a.cancelMark.Set(sessionID, 2)
 
-	fold, canceledWithRunID := a.drainQueueForStep(sessionID)
+	fold, canceled := a.drainQueueForStep(sessionID)
 
 	require.Empty(t, fold, "no uncanceled non-RunID prompts to fold")
-	require.Len(t, canceledWithRunID, 1,
-		"only the dropped RunID-bearing prompt needs a terminal RunComplete")
-	require.Equal(t, "run-canceled", canceledWithRunID[0].RunID)
+	require.Len(t, canceled, 2, "both prompts the cancel covers are dropped")
+	require.Equal(t, "run-canceled", canceled[0].RunID)
 
 	kept, ok := a.messageQueue.Get(sessionID)
 	require.True(t, ok)
@@ -252,7 +250,7 @@ func requireSingleCancelledRunComplete(t *testing.T, ch <-chan pubsub.Event[noti
 // TestCancel_QueuedRunIDPromptPublishesCancelledRunComplete proves the
 // terminal-event behavior end-to-end: a RunID-bearing prompt sitting in
 // the queue that is canceled while queued (via the public Cancel path,
-// which routes through clearQueueAndNotify -> publishCanceledQueueDrops)
+// which routes through clearQueueAndNotify -> settleDroppedCalls)
 // must emit exactly one cancelled RunComplete on the broker for its
 // RunID. A queued prompt without a RunID is dropped silently. This is the
 // coverage the earlier drain test lacked: it asserted the returned
@@ -291,7 +289,7 @@ func TestCancel_QueuedRunIDPromptPublishesCancelledRunComplete(t *testing.T) {
 
 // TestDrainQueueForStep_DroppedRunIDPublishesCancelledRunComplete drives
 // the production drain sequence (drainQueueForStep then
-// publishCanceledQueueDrops, mirroring the PrepareStep handoff) and
+// settleDroppedCalls, mirroring the PrepareStep handoff) and
 // asserts the dropped RunID-bearing prompt actually publishes exactly one
 // cancelled RunComplete on the broker. The companion bookkeeping test
 // covers the returned slice; this one covers the observable terminal
@@ -321,9 +319,9 @@ func TestDrainQueueForStep_DroppedRunIDPublishesCancelledRunComplete(t *testing.
 	})
 	a.cancelMark.Set(sessionID, 2)
 
-	_, canceledWithRunID := a.drainQueueForStep(sessionID)
-	require.Len(t, canceledWithRunID, 1)
-	a.publishCanceledQueueDrops(canceledWithRunID)
+	_, canceled := a.drainQueueForStep(sessionID)
+	require.Len(t, canceled, 2, "both canceled prompts are dropped")
+	a.settleDroppedCalls(canceled)
 
 	requireSingleCancelledRunComplete(t, ch, sessionID, "run-dropped")
 }

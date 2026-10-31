@@ -40,17 +40,20 @@ type savingTokenSource struct {
 }
 
 func (s *savingTokenSource) Token() (*oauth2.Token, error) {
+	// Keep refreshes and persistence in the same order so a delayed save
+	// cannot replace newer credentials with an older token.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	tok, err := s.src.Token()
 	if err != nil {
 		slog.Debug("Token refresh failed", "error", err)
 		return nil, err
 	}
-	s.mu.Lock()
 	changed := s.accessToken != tok.AccessToken
 	if changed {
 		s.accessToken = tok.AccessToken
 	}
-	s.mu.Unlock()
 	if changed {
 		s.saver(s.config, tok)
 	}

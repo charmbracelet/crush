@@ -26,7 +26,7 @@ type MultiEditOperation struct {
 
 type MultiEditParams struct {
 	FilePath string               `json:"file_path" description:"The absolute path to the file to modify"`
-	Edits    []MultiEditOperation `json:"edits" description:"Array of edit operations to perform sequentially on the file"`
+	Edits    []MultiEditOperation `json:"edits" description:"Array of edit operations to perform sequentially on the file" items_description:"A single edit operation"`
 }
 
 type MultiEditPermissionsParams struct {

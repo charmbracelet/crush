@@ -288,7 +288,7 @@ func loadExistingFile(edit editContext, filePath, sessionError string) (sessionI
 	if modTime.After(lastRead) {
 		return "", "", false, fantasy.NewTextErrorResponse(
 			fmt.Sprintf(
-				"file %s has been modified since it was last read (mod time: %s, last read: %s)",
+				"file %s has been modified since it was last read (mod time: %s, last read: %s). Use the View tool to read it again before editing",
 				filePath, modTime.Format(time.RFC3339), lastRead.Format(time.RFC3339),
 			),
 		), nil

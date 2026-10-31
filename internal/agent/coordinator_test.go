@@ -1,11 +1,17 @@
 package agent
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"charm.land/catwalk/v3/pkg/catwalk"
 	"charm.land/fantasy"
@@ -18,6 +24,83 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestOpenAICompatProviderAllowsSlowResponseHeaders(t *testing.T) {
+	// This test replaces the default transport, so it must not run in parallel.
+	for _, tc := range []struct {
+		name      string
+		timeout   int
+		debug     bool
+		wantError bool
+	}{
+		{name: "disabled"},
+		{name: "long timeout", timeout: 20 * 60},
+		{name: "debug client", debug: true},
+		{name: "configured deadline", timeout: 2 * 60, wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				release := make(chan struct{})
+				var requests atomic.Int32
+				original := http.DefaultTransport
+				transport := original.(*http.Transport).Clone()
+				transport.DialContext = func(context.Context, string, string) (net.Conn, error) {
+					client, server := net.Pipe()
+					go func() {
+						defer server.Close()
+						req, err := http.ReadRequest(bufio.NewReader(server))
+						if err != nil {
+							return
+						}
+						_, _ = io.Copy(io.Discard, req.Body)
+						_ = req.Body.Close()
+						requests.Add(1)
+						<-release
+						body := `{"id":"test","object":"chat.completion","created":1,"model":"local-model","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`
+						_, _ = fmt.Fprintf(server, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s", len(body), body)
+					}()
+					return client, nil
+				}
+				http.DefaultTransport = transport
+				defer func() {
+					http.DefaultTransport = original
+					transport.CloseIdleConnections()
+				}()
+
+				coord := &coordinator{cfg: config.NewTestStore(&config.Config{
+					Options: &config.Options{RequestTimeout: ptr(tc.timeout), Debug: tc.debug},
+				})}
+				provider, err := coord.buildOpenaiCompatProvider("http://local-model.test/v1", "test-key", nil, nil, "ollama", false, "")
+				require.NoError(t, err)
+				model, err := provider.LanguageModel(t.Context(), "local-model")
+				require.NoError(t, err)
+				model = newRequestTimeoutModel(model, coord.cfg.Config().Options.GetRequestTimeout())
+				type result struct {
+					response *fantasy.Response
+					err      error
+				}
+				done := make(chan result, 1)
+				go func() {
+					response, err := model.Generate(t.Context(), fantasy.Call{})
+					done <- result{response, err}
+				}()
+
+				// The SDK's fixed ten-minute header timeout must not override Crush's budget.
+				// net.Pipe keeps the request inside synctest's virtual clock.
+				time.Sleep(11 * time.Minute)
+				close(release)
+				got := <-done
+				if tc.wantError {
+					require.Error(t, got.err)
+				} else {
+					require.NoError(t, got.err)
+					require.Equal(t, "ok", got.response.Content.Text())
+				}
+				require.EqualValues(t, 1, requests.Load(), "a slow first response must not trigger an SDK retry")
+			})
+		})
+	}
+}
 
 // mockSessionAgent is a minimal mock for the SessionAgent interface.
 type mockSessionAgent struct {

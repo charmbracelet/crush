@@ -22,12 +22,7 @@ func algorithmicCompaction() bool {
 // conversation.
 func (a *sessionAgent) summaryInput(sess session.Session, msgs []message.Message, model Model, thinking bool) (string, []fantasy.Message) {
 	if algorithmicCompaction() {
-		var previous string
-		history := msgs
-		if sess.SummaryMessageID != "" && len(msgs) > 0 && msgs[0].ID == sess.SummaryMessageID {
-			previous, history = msgs[0].Content().Text, msgs[1:]
-		}
-		if extracted := compact.Compact(compact.Input{Messages: history, PreviousSummary: previous}); extracted != "" {
+		if extracted := compact.Compact(msgs); extracted != "" {
 			return buildSummaryPrompt(extracted, sess.Todos, thinking), nil
 		}
 	}

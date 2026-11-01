@@ -19,9 +19,10 @@ import (
 
 type slashWorkspace struct {
 	workspace.Workspace
-	cfg     *config.Config
-	reloads int
-	prompts []string
+	cfg       *config.Config
+	reloads   int
+	prompts   []string
+	askAnswer string
 }
 
 func (w *slashWorkspace) Config() *config.Config {
@@ -39,6 +40,10 @@ func (w *slashWorkspace) AgentReadyErr() error {
 func (w *slashWorkspace) AgentRun(_ context.Context, _ string, prompt string, _ ...message.Attachment) error {
 	w.prompts = append(w.prompts, prompt)
 	return nil
+}
+
+func (w *slashWorkspace) AgentAsk(context.Context, string, string) (string, error) {
+	return w.askAnswer, nil
 }
 
 func (w *slashWorkspace) ListUserMessages(context.Context, string) ([]message.Message, error) {

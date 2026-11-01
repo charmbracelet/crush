@@ -280,6 +280,9 @@ type UI struct {
 	// server (see hosttheme.go).
 	hostTheme hostThemeState
 
+	// automation holds the goal and loop state for the open session.
+	automation *automationState
+
 	focus uiFocusState
 	state uiState
 	mode  uiInputMode
@@ -623,6 +626,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		attachments:         attachments,
 		todoSpinner:         todoSpinner,
 		frames:              newFrameCache(frameCacheTTL, frameCacheMaxEntries),
+		automation:          newAutomationState(com),
 		lspStates:           make(map[string]workspace.LSPClientInfo),
 		mcpStates:           make(map[string]mcp.ClientInfo),
 		notifyBackend:       notification.NoopBackend{},
@@ -979,7 +983,21 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case pubsub.Event[notify.RunComplete]:
 		m.endPendingTurn(msg.Payload.SessionID)
+		if cmd := m.handleAutomationRunComplete(msg.Payload); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 		if cmd := m.handlePlanHandoff(msg.Payload); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case automationTickMsg:
+		if m.automation != nil {
+			m.automation.tickScheduled = false
+		}
+		if cmd := m.handleAutomationTick(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case goalVerifiedMsg:
+		if cmd := m.handleGoalVerified(msg); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	case busyStateMsg:
@@ -1099,6 +1117,17 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.setState(uiChat, m.focus)
 		m.session = msg.session
+		if m.automation != nil {
+			// A fresh session created by /goal or /loop is already
+			// loaded and has its pending turn set; reloading it here
+			// would reset that state.
+			if m.automation.sessionID != msg.session.ID {
+				m.automation.load(msg.session.ID)
+			}
+			if cmd := m.scheduleAutomationTick(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
 		m.sidebarOffset = 0
 		m.sessionFiles = msg.files
 		// Session switch: the memoized busy state and queued prompts
@@ -3527,6 +3556,12 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 	// Handle cancel key when agent is busy.
 	if key.Matches(msg, m.keyMap.Chat.Cancel) {
+		if cmd := m.cancelAutomationLoops(); cmd != nil {
+			cmds = append(cmds, cmd)
+			if !m.isAgentBusy() {
+				return tea.Batch(cmds...)
+			}
+		}
 		if m.isAgentBusy() {
 			if cmd := m.cancelAgent(); cmd != nil {
 				cmds = append(cmds, cmd)
@@ -5678,12 +5713,15 @@ func (m *UI) followRemoteClear(msg discord.SessionClearedMsg) []tea.Cmd {
 }
 
 // slashCommand dispatches the system commands the editor accepts as plain
-// text. Only an exact match is handled; anything else, including
-// "/reload now", is a normal prompt.
+// text. /reload is exact; /goal and /loop take arguments.
 func (m *UI) slashCommand(value string) (tea.Cmd, bool) {
-	switch value {
-	case "/reload":
+	switch {
+	case value == "/reload":
 		return m.reloadConfig(), true
+	case value == "/goal" || strings.HasPrefix(value, "/goal "):
+		return m.handleGoalCommand(strings.TrimSpace(strings.TrimPrefix(value, "/goal"))), true
+	case value == "/loop" || strings.HasPrefix(value, "/loop "):
+		return m.handleLoopCommand(strings.TrimSpace(strings.TrimPrefix(value, "/loop"))), true
 	}
 	return nil, false
 }

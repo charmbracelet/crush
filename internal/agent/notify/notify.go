@@ -75,4 +75,8 @@ type RunComplete struct {
 	Text      string
 	Error     string
 	Cancelled bool
+	// Steps is the number of model round-trips the turn consumed. The
+	// goal loop budgets by model turn, so it needs the count even when a
+	// single prompt drove several tool steps.
+	Steps int
 }

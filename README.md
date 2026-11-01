@@ -68,6 +68,13 @@ Local patches and improvements over [upstream Crush](https://github.com/charmbra
 - **Config reload without restart:** the config files are watched, and an edit made outside Crush (or a provider catalog refreshed in the background) raises a notice instead of silently leaving the session on the startup snapshot. The "Reload Configuration" command (`/reload`) re-reads every config file, rebuilds agent models and tools, re-discovers skills, starts newly added LSP servers, and refreshes subscribers, locally and over the server API; it refuses to run mid-turn and leaves an active Discord thread connected.
 - **Discord compaction parity:** `/compact` is a first-class remote command (with `/summarize` as an alias) and the thread reports the measured outcome (tokens before/after, tokens saved, messages kept), so a remote compaction no longer looks like a silent no-op.
 
+### Goals and loops
+
+Two slash commands turn a single request into ongoing work:
+
+- **`/goal <objective>`** sets a standing objective. Crush works toward it turn after turn, counting model turns against a budget (default 100, max 1000; `/goal --max-turns 20 <objective>` lowers it). When the model claims completion, an independent check reviews the evidence and either accepts the goal or sends the specific gap back for another turn. `/goal status` shows the state, `/goal clear` stops it, and `/goal` with no arguments resumes an idle or paused goal. Goals persist with the session and come back idle after a resume.
+- **`/loop [interval] [task]`** runs a task now and repeats it. `/loop 5m check the deploy` runs every five minutes; `/loop watch the build` runs now and lets the model choose the next delay (1m-1h); `/loop check the deploy every 2 hours` puts the cadence at the end. `/loop` alone runs the default maintenance task. Fixed intervals are snapped to clean cron-like cadences, get a small deterministic jitter, and expire after seven days. `/loop status` lists scheduled tasks, `/loop clear` cancels them, and Esc cancels every loop in the conversation. Loops persist with the session and resume with it. The default task can be replaced with `.crush/loop.md` in the project or `~/.config/crush/loop.md`; `CRUSH_DISABLE_CRON=1` disables loops.
+
 The fork also ships Linux builds to npm as [`@conanmontreal/crush`](https://www.npmjs.com/package/@conanmontreal/crush) with `v<upstream>-fork.N` versioning (see [Installation](#installation)), runs ubuntu-only CI with a coverage ratchet, and drops upstream's CLA machinery and paid pipelines.
 
 ## Installation

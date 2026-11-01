@@ -2175,6 +2175,8 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 		m.chat.RemoveMessage(chat.AssistantInfoID(msg.ID))
 	}
 
+	m.chat.RemoveStaleToolCalls(msg.ID, msg.ToolCalls())
+
 	var items []chat.MessageItem
 	for _, tc := range msg.ToolCalls() {
 		existingToolItem := m.chat.MessageItem(tc.ID)

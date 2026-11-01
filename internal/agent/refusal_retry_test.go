@@ -32,20 +32,27 @@ func (m *refusingModel) Stream(context.Context, fantasy.Call) (fantasy.StreamRes
 	}, nil
 }
 
-func TestRefusalRetryModel_TurnsRefusalIntoRetryableError(t *testing.T) {
+// A refusal is retryable only while the turn has retries left.
+func TestRefusalRetryModel_SpendsTheTurnsBudget(t *testing.T) {
 	t.Parallel()
-	stream, err := newRefusalRetryModel(&refusingModel{refusals: 1}).Stream(t.Context(), fantasy.Call{})
-	require.NoError(t, err)
-
-	var last fantasy.StreamPart
-	for part := range stream {
-		last = part
+	ctx := withRefusalRetries(t.Context(), 1)
+	model := newRefusalRetryModel(&refusingModel{refusals: 3})
+	retryable := func(ctx context.Context) bool {
+		stream, err := model.Stream(ctx, fantasy.Call{})
+		require.NoError(t, err)
+		var last fantasy.StreamPart
+		for part := range stream {
+			last = part
+		}
+		require.Equal(t, fantasy.StreamPartTypeError, last.Type)
+		require.ErrorIs(t, last.Error, errRefused)
+		var providerErr *fantasy.ProviderError
+		require.True(t, errors.As(last.Error, &providerErr))
+		return providerErr.IsRetryable()
 	}
-	require.Equal(t, fantasy.StreamPartTypeError, last.Type)
-	require.ErrorIs(t, last.Error, errRefused)
-	var providerErr *fantasy.ProviderError
-	require.True(t, errors.As(last.Error, &providerErr))
-	require.True(t, providerErr.IsRetryable())
+	require.True(t, retryable(ctx), "the first refusal is retried")
+	require.False(t, retryable(ctx), "the budget is spent")
+	require.False(t, retryable(t.Context()), "without a budget nothing is retried")
 }
 
 func TestRefusalRetryModel_PassesOtherFinishesThrough(t *testing.T) {
@@ -67,7 +74,8 @@ func TestRefusalRetryModel_AgentRetriesRefusal(t *testing.T) {
 	t.Parallel()
 	model := &refusingModel{refusals: 1}
 	retries := 0
-	result, err := fantasy.NewAgent(newRefusalRetryModel(model)).Stream(t.Context(), fantasy.AgentStreamCall{
+	ctx := withRefusalRetries(t.Context(), refusalRetriesPerTurn)
+	result, err := fantasy.NewAgent(newRefusalRetryModel(model)).Stream(ctx, fantasy.AgentStreamCall{
 		Prompt:  "hi",
 		OnRetry: func(*fantasy.ProviderError, time.Duration) { retries++ },
 	})
@@ -77,7 +85,17 @@ func TestRefusalRetryModel_AgentRetriesRefusal(t *testing.T) {
 	require.Equal(t, "answer", result.Response.Content.Text())
 }
 
+// A second refusal in the turn is shown rather than retried again.
+func TestRefusalRetryModel_AgentStopsAfterOneRetry(t *testing.T) {
+	t.Parallel()
+	model := &refusingModel{refusals: 5}
+	ctx := withRefusalRetries(t.Context(), refusalRetriesPerTurn)
+	_, err := fantasy.NewAgent(newRefusalRetryModel(model)).Stream(ctx, fantasy.AgentStreamCall{Prompt: "hi"})
+	require.ErrorIs(t, err, errRefused)
+	require.Equal(t, 2, model.calls)
+}
+
 func TestTurnEndReason_Refused(t *testing.T) {
 	t.Parallel()
-	require.Equal(t, refusedToolCallResult, turnEndReason(&message.Message{}, refusedError()))
+	require.Equal(t, refusedToolCallResult, turnEndReason(&message.Message{}, refusedError(false)))
 }

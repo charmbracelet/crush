@@ -4,21 +4,40 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sync/atomic"
 
 	"charm.land/fantasy"
 )
 
-// refusalMessage is what the model and the user see once every retry of a
-// refused response has been refused too.
-const refusalMessage = "The provider's safety classifier refused this response on every retry. Rephrase the request or try a different model."
+// refusalMessage is what the model and the user see once a refusal is final.
+const refusalMessage = "The provider's safety classifier refused this response. Rephrase the request or try a different model."
+
+// refusalRetriesPerTurn is how many refusals a turn retries before showing
+// one. A misfire usually clears on the first retry; more mostly waits.
+const refusalRetriesPerTurn = 1
+
+type refusalBudgetKey struct{}
+
+// withRefusalRetries gives the turn on ctx a budget of refusal retries.
+func withRefusalRetries(ctx context.Context, n int32) context.Context {
+	budget := new(atomic.Int32)
+	budget.Store(n)
+	return context.WithValue(ctx, refusalBudgetKey{}, budget)
+}
+
+// takeRefusalRetry spends one retry from ctx's budget; without a budget
+// there is none to spend.
+func takeRefusalRetry(ctx context.Context) bool {
+	budget, ok := ctx.Value(refusalBudgetKey{}).(*atomic.Int32)
+	return ok && budget.Add(-1) >= 0
+}
 
 // errRefused marks a response the provider's safety classifier stopped.
 var errRefused = errors.New("response refused by the provider's safety classifier")
 
-// refusalRetryModel turns a refused response into a retryable error, so
-// fantasy re-requests the step with its usual backoff and resets what the
-// refused attempt streamed. Safety classifiers misfire often enough on
-// legitimate work that a fresh sample usually gets through.
+// refusalRetryModel turns a refused response into an error, retryable while
+// the turn's refusal budget lasts, so fantasy re-requests the step and resets
+// what the refused attempt streamed.
 type refusalRetryModel struct {
 	fantasy.LanguageModel
 }
@@ -39,19 +58,20 @@ func (m refusalRetryModel) Stream(ctx context.Context, call fantasy.Call) (fanta
 	return func(yield func(fantasy.StreamPart) bool) {
 		inner(func(part fantasy.StreamPart) bool {
 			if part.Type == fantasy.StreamPartTypeFinish && part.FinishReason == fantasy.FinishReasonContentFilter {
-				slog.Warn("Provider safety classifier refused the response, retrying")
-				return yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeError, Error: refusedError()})
+				retry := takeRefusalRetry(ctx)
+				slog.Warn("Provider safety classifier refused the response", "retrying", retry)
+				return yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeError, Error: refusedError(retry)})
 			}
 			return yield(part)
 		})
 	}, nil
 }
 
-func refusedError() *fantasy.ProviderError {
+func refusedError(retryable bool) *fantasy.ProviderError {
 	return &fantasy.ProviderError{
 		Title:          "Refused",
 		Message:        refusalMessage,
 		Cause:          errRefused,
-		TransientError: true,
+		TransientError: retryable,
 	}
 }

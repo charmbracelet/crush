@@ -80,6 +80,23 @@ func TestFetchToolReportsStatusCodesAsToolErrors(t *testing.T) {
 	require.Contains(t, resp.Content, "Request failed with status code: 404 Not Found")
 }
 
+func TestFetchToolRefusesPrivateRedirectTargets(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("secret"))
+	}))
+	defer target.Close()
+
+	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusFound)
+	}))
+	defer redirect.Close()
+
+	resp, err := runFetchTool(t, redirect.Client(), redirect.URL)
+	require.NoError(t, err)
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "Failed to fetch URL")
+}
+
 func TestFetchToolReturnsContent(t *testing.T) {
 	t.Parallel()
 

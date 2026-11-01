@@ -841,3 +841,22 @@ func TestRunnerPicksUpSourceChanges(t *testing.T) {
 	hooks = map[string][]HookConfig{EventPreToolUse: {{Command: "exit 0"}}}
 	require.Equal(t, 1, r.Run(context.Background(), preToolEvent("bash", `{}`)).HookCount)
 }
+
+func TestBuildPayloadIsSubAgent(t *testing.T) {
+	t.Parallel()
+
+	t.Run("top-level event omits is_sub_agent", func(t *testing.T) {
+		t.Parallel()
+		payload := BuildPayload(Event{Name: EventPreToolUse, SessionID: "sess-1", Tool: &ToolCall{Name: "bash", Input: `{}`}}, "/work")
+		s := string(payload)
+		require.Contains(t, s, `"event":"`+EventPreToolUse+`"`)
+		require.NotContains(t, s, `"is_sub_agent":true`)
+	})
+
+	t.Run("sub-agent event includes is_sub_agent", func(t *testing.T) {
+		t.Parallel()
+		payload := BuildPayload(Event{Name: EventPreToolUse, SessionID: "sess-1", Tool: &ToolCall{Name: "bash", Input: `{}`}, IsSubAgent: true}, "/work")
+		s := string(payload)
+		require.Contains(t, s, `"is_sub_agent":true`)
+	})
+}

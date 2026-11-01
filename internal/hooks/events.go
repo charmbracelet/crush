@@ -89,6 +89,7 @@ func EventHasTool(name string) bool {
 type Event struct {
 	Name      string
 	SessionID string
+	IsSubAgent bool
 
 	// Tool is the call a tool event is about; nil for lifecycle events.
 	Tool *ToolCall

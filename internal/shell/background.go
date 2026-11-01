@@ -62,8 +62,9 @@ func GetBackgroundShellManager() *BackgroundShellManager {
 }
 
 // Start creates and starts a new background shell with the given command,
-// unless maxJobs jobs are already running.
-func (m *BackgroundShellManager) Start(ctx context.Context, workingDir string, blockFuncs []BlockFunc, command, description string, maxJobs int) (*BackgroundShell, error) {
+// unless maxJobs jobs are already running. When provided, env is the full
+// environment for the new shell.
+func (m *BackgroundShellManager) Start(ctx context.Context, workingDir string, blockFuncs []BlockFunc, command, description string, maxJobs int, env ...string) (*BackgroundShell, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -75,6 +76,7 @@ func (m *BackgroundShellManager) Start(ctx context.Context, workingDir string, b
 
 	shell := NewShell(&Options{
 		WorkingDir: workingDir,
+		Env:        env,
 		BlockFuncs: blockFuncs,
 	})
 

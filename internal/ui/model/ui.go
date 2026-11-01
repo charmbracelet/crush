@@ -1192,7 +1192,16 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pubsub.Event[pinentry.Notification]:
 		m.handlePinentryNotification(msg.Payload)
 	case pubsub.Event[question.Request]:
-		m.openBatchFormDialog(msg.Payload)
+		// CRUSH_QUESTIONS_PIPED=1: another client (an editor Crush runs in)
+		// shows the questions and answers them, so this UI doesn't ask twice.
+		// Skip the scroll and notification too: the server re-sends a pending
+		// batch whenever a client reports its session, so both would repeat.
+		if piped, _ := strconv.ParseBool(os.Getenv("CRUSH_QUESTIONS_PIPED")); piped {
+			break
+		}
+		if !m.openBatchFormDialog(msg.Payload) {
+			break // a replay of the batch the form already shows
+		}
 		m.chat.ScrollToBottom()
 		if cmd := m.sendNotification(notification.Notification{
 			Title:   "Crush is waiting...",
@@ -5778,9 +5787,17 @@ func (m *UI) openPermissionsDialog(perm permission.PermissionRequest) tea.Cmd {
 
 // openBatchFormDialog activates a tabbed multi-question form in
 // the editor area. Single questions render without tabs or confirm.
-func (m *UI) openBatchFormDialog(batch question.Request) {
+// It reports whether it opened a form, which it doesn't for a batch
+// the open form already shows.
+func (m *UI) openBatchFormDialog(batch question.Request) bool {
 	// Close any existing question form first to prevent stacking.
 	if qf, ok := m.activeInline.(*dialog.QuestionForm); ok && qf != nil {
+		// The server re-sends a pending batch whenever a client reports
+		// its session; keep the form already showing it so the answers
+		// typed so far survive.
+		if qf.BatchID == batch.ID {
+			return false
+		}
 		m.activeInline = nil
 	}
 
@@ -5796,6 +5813,7 @@ func (m *UI) openBatchFormDialog(batch question.Request) {
 	m.focus = uiFocusEditor
 	m.activeInline.SetFocused(true)
 	m.updateLayoutAndSize()
+	return true
 }
 
 // handleQuestionNotification dismisses an open question form when

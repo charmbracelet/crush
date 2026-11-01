@@ -91,12 +91,23 @@ type Resolver interface {
 }
 
 type modelsResponse struct {
-	Data []struct {
-		ID      string `json:"id"`
-		Object  string `json:"object"`
-		Created int64  `json:"created"`
-		OwnedBy string `json:"owned_by"`
-	} `json:"data"`
+	Data []modelsEntry `json:"data"`
+}
+
+// modelsEntry is a single model entry from an OpenAI-compatible /models
+// response. The first four fields (id, object, created, owned_by) are part
+// of the standard OpenAI format. The remaining fields (context_length,
+// max_completion_tokens) are non-standard extensions that many providers
+// (including OpenRouter and Poolside) already include. Parsing them
+// here lets auto-discovered models populate ContextWindow and
+// DefaultMaxTokens without requiring users to register every model by hand.
+type modelsEntry struct {
+	ID                  string `json:"id"`
+	Object              string `json:"object"`
+	Created             int64  `json:"created"`
+	OwnedBy             string `json:"owned_by"`
+	ContextLength       *int64 `json:"context_length,omitempty"`
+	MaxCompletionTokens *int64 `json:"max_completion_tokens,omitempty"`
 }
 
 // DiscoverModels fetches available models from the provider's /models endpoint.
@@ -135,10 +146,17 @@ func DiscoverModels(ctx context.Context, cfg Config, resolver Resolver) ([]catwa
 		if _, ok := existing[e.ID]; ok {
 			continue
 		}
-		result = append(result, catwalk.Model{
+		discovered := catwalk.Model{
 			ID:   e.ID,
 			Name: e.ID,
-		})
+		}
+		if e.ContextLength != nil && *e.ContextLength > 0 {
+			discovered.ContextWindow = *e.ContextLength
+		}
+		if e.MaxCompletionTokens != nil && *e.MaxCompletionTokens > 0 {
+			discovered.DefaultMaxTokens = *e.MaxCompletionTokens
+		}
+		result = append(result, discovered)
 	}
 
 	return result, nil

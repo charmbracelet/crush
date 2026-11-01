@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/common"
@@ -982,6 +983,33 @@ func (m *Chat) RemoveMessage(id string) {
 		if item, ok := m.list.ItemAt(i).(chat.MessageItem); ok {
 			m.idInxMap[item.ID()] = i
 		}
+	}
+}
+
+// RemoveStaleToolCalls removes the tool items of message messageID whose
+// calls are not in keep, as a retried response drops what its failed attempt
+// streamed. Only the live message is retried, so only the tail is scanned.
+func (m *Chat) RemoveStaleToolCalls(messageID string, keep []message.ToolCall) {
+	var stale []string
+	for i := m.list.Len() - 1; i >= 0; i-- {
+		item, ok := m.list.ItemAt(i).(chat.MessageItem)
+		if !ok {
+			break
+		}
+		tool, isTool := item.(chat.ToolMessageItem)
+		switch {
+		case isTool && tool.MessageID() == messageID:
+			id := tool.ToolCall().ID
+			if !slices.ContainsFunc(keep, func(tc message.ToolCall) bool { return tc.ID == id }) {
+				stale = append(stale, id)
+			}
+		case item.ID() == messageID || item.ID() == chat.AssistantInfoID(messageID):
+		default:
+			i = 0
+		}
+	}
+	for _, id := range stale {
+		m.RemoveMessage(id)
 	}
 }
 

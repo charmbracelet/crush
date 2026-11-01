@@ -11,10 +11,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// An algorithmic summary records the model Prism routed it to, as a
-// regular summary does, so its footer can name it.
+// An algorithmic summary goes through the one summarize path, so it records
+// the model Prism routed it to and reads only the extraction.
 func TestAlgorithmicSummarizeCapturesPrismModel(t *testing.T) {
-	t.Parallel()
+	t.Setenv("CRUSH_ALGORITHMIC_COMPACT", "1")
 
 	header := http.Header{}
 	header.Set(hyper.PrismModelIDHeader, "glm-5.3")
@@ -24,7 +24,7 @@ func TestAlgorithmicSummarizeCapturesPrismModel(t *testing.T) {
 	model := &fakePrismLanguageModel{metadata: fantasy.ProviderMetadata{openai.Name: metadata}}
 
 	env := testEnv(t)
-	agent := testSessionAgent(env, model, model, "test prompt").(*sessionAgent)
+	agent := testSessionAgent(env, model, model, "test prompt")
 	ctx := t.Context()
 	sess, err := env.sessions.Create(ctx, "test")
 	require.NoError(t, err)
@@ -36,7 +36,7 @@ func TestAlgorithmicSummarizeCapturesPrismModel(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	require.NoError(t, agent.AlgorithmicSummarize(ctx, sess.ID))
+	require.NoError(t, agent.Summarize(ctx, sess.ID, fantasy.ProviderOptions{}, nil))
 
 	updated, err := env.sessions.Get(ctx, sess.ID)
 	require.NoError(t, err)

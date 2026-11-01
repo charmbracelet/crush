@@ -130,8 +130,9 @@ func bashHeader(sty *styles.Styles, opts *ToolRenderOpts, width int, description
 	if !showDescription {
 		return header
 	}
-	indent := lipgloss.Width(toolHeaderPrefix(sty, opts.Status, "Bash", opts))
-	return header + "\n" + indentLines(toolParamList(sty, []string{cmd}, width-indent, &cmdOpts), indent)
+	// The command sits below the description, in the output's column.
+	indent := toolBodyLeftPaddingTotal
+	return header + "\n\n" + indentLines(toolParamList(sty, []string{cmd}, width-indent, &cmdOpts), indent)
 }
 
 // cwdHint returns where a command ran, relative to the workspace, or "" when

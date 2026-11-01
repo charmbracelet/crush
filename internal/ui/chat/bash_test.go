@@ -211,7 +211,8 @@ func TestJobOutputToolMessageItem_CwdHint(t *testing.T) {
 }
 
 // TestBashToolMessageItem_DescriptionHeader verifies that the model's
-// description leads the header with the command below it.
+// description leads the header, with the command a blank line below it,
+// in the column the tool name and output start in.
 func TestBashToolMessageItem_DescriptionHeader(t *testing.T) {
 	t.Parallel()
 
@@ -227,7 +228,8 @@ func TestBashToolMessageItem_DescriptionHeader(t *testing.T) {
 	collapsed := render(longDesc, false, false)
 	require.Contains(t, collapsed[0], "…")
 	require.LessOrEqual(t, lipgloss.Width(collapsed[0]), cappedMessageWidth(120))
-	require.Regexp(t, commandLine, collapsed[1], "command sits indented below the description")
+	require.Empty(t, strings.TrimSpace(collapsed[1]), "a blank line separates description and command")
+	require.Regexp(t, commandLine, collapsed[2], "command lines up with the tool name")
 
 	expanded := render(longDesc, true, false)
 	joined := strings.Join(expanded, "\n")

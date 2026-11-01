@@ -242,6 +242,8 @@ type sessionAgent struct {
 	// turns; sendChannelReply treats nil as "routing disabled".
 	cfg                  *config.ConfigStore
 	disableAutoSummarize bool
+	// compactSummaries writes summaries from an extraction of the session.
+	compactSummaries bool
 	// permissions answers whether the user is being asked about tool
 	// calls at all. Nil in tests and anywhere that never needs to know.
 	permissions permission.Service
@@ -303,6 +305,7 @@ type SessionAgentOptions struct {
 	SystemPrompt         string
 	IsSubAgent           bool
 	DisableAutoSummarize bool
+	CompactSummaries     bool // Summaries are written from an extraction of the session.
 	Sessions             session.Service
 	Messages             message.Service
 	Permissions          permission.Service
@@ -328,6 +331,7 @@ func NewSessionAgent(
 		messages:             opts.Messages,
 		cfg:                  opts.Cfg,
 		disableAutoSummarize: opts.DisableAutoSummarize,
+		compactSummaries:     opts.CompactSummaries,
 		permissions:          opts.Permissions,
 		tools:                csync.NewSliceFrom(opts.Tools),
 		notify:               opts.Notify,

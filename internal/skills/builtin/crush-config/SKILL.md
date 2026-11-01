@@ -180,7 +180,8 @@ option reset <list-key>    # clear a list option back to empty
 ```
 
 - **Boolean keys** (value optional, defaults `true`): `debug`, `debug-lsp`,
-  `auto-lsp`, `progress`.
+  `auto-lsp`, `progress`, `algorithmic-compaction` (write summaries from a
+  short extraction of the session instead of the full transcript).
 - **Boolean keys phrased positively** (stored as the negated field): `metrics`,
   `auto-summarize`, `provider-auto-update`,
   `default-providers`. Example: `option metrics false` disables metrics.

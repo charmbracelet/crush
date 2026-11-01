@@ -14,7 +14,7 @@ import (
 // An algorithmic summary goes through the one summarize path, so it records
 // the model Prism routed it to and reads only the extraction.
 func TestAlgorithmicSummarizeCapturesPrismModel(t *testing.T) {
-	t.Setenv("CRUSH_ALGORITHMIC_COMPACT", "1")
+	t.Parallel()
 
 	header := http.Header{}
 	header.Set(hyper.PrismModelIDHeader, "glm-5.3")
@@ -25,6 +25,7 @@ func TestAlgorithmicSummarizeCapturesPrismModel(t *testing.T) {
 
 	env := testEnv(t)
 	agent := testSessionAgent(env, model, model, "test prompt")
+	agent.(*sessionAgent).compactSummaries = true
 	ctx := t.Context()
 	sess, err := env.sessions.Create(ctx, "test")
 	require.NoError(t, err)

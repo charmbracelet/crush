@@ -461,6 +461,10 @@ type Options struct {
 	Debug                bool        `json:"debug,omitempty" jsonschema:"description=Enable debug logging,default=false"`
 	DebugLSP             bool        `json:"debug_lsp,omitempty" jsonschema:"description=Enable debug logging for LSP servers,default=false"`
 	DisableAutoSummarize bool        `json:"disable_auto_summarize,omitempty" jsonschema:"description=Disable automatic conversation summarization,default=false"`
+
+	// AlgorithmicCompaction summarizes from an extraction of the session.
+	AlgorithmicCompaction bool `json:"algorithmic_compaction,omitempty" jsonschema:"description=Write conversation summaries from a compact algorithmic extraction of the session instead of the full transcript\\, which is much cheaper on long sessions,default=false"`
+
 	// DataDirectory is where Crush keeps per-project state such as
 	// the SQLite database and workspace overrides. Relative paths are
 	// resolved against the working directory; absolute paths are used

@@ -991,6 +991,7 @@ func (c *coordinator) buildAgentWithModels(ctx context.Context, ready *errgroup.
 		SystemPrompt:         "",
 		IsSubAgent:           isSubAgent,
 		DisableAutoSummarize: c.cfg.Config().Options.DisableAutoSummarize,
+		CompactSummaries:     c.cfg.Config().Options.AlgorithmicCompaction,
 		Sessions:             c.sessions,
 		Messages:             c.messages,
 		Permissions:          c.permissions,

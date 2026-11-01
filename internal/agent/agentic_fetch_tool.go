@@ -180,6 +180,7 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				SystemPromptPrefix:   smallProviderCfg.SystemPromptPrefix,
 				SystemPrompt:         systemPrompt,
 				DisableAutoSummarize: c.cfg.Config().Options.DisableAutoSummarize,
+				CompactSummaries:     c.cfg.Config().Options.AlgorithmicCompaction,
 				Sessions:             c.sessions,
 				Messages:             c.messages,
 				Tools:                fetchTools,

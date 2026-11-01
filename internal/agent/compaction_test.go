@@ -207,6 +207,7 @@ func TestBuildSummaryPrompt(t *testing.T) {
 // The summary model reads the extraction instead of the conversation when
 // algorithmic compaction is on, and the conversation otherwise.
 func TestSummaryInput(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
 	a := testSessionAgent(env, fastModel{}, fastModel{}, "system").(*sessionAgent)
 	msgs := []message.Message{
@@ -214,12 +215,11 @@ func TestSummaryInput(t *testing.T) {
 		{ID: "a1", Role: message.Assistant, Parts: []message.ContentPart{message.TextContent{Text: "On it."}, message.Finish{Reason: message.FinishReasonEndTurn}}},
 	}
 
-	t.Setenv("CRUSH_ALGORITHMIC_COMPACT", "")
 	prompt, history := a.summaryInput(session.Session{}, msgs, a.models().Large, false)
 	require.Contains(t, prompt, "conversation above")
 	require.NotEmpty(t, history)
 
-	t.Setenv("CRUSH_ALGORITHMIC_COMPACT", "1")
+	a.compactSummaries = true
 	prompt, history = a.summaryInput(session.Session{}, msgs, a.models().Large, false)
 	require.Contains(t, prompt, "## Extracted Context")
 	require.Empty(t, history, "the conversation itself is not sent")

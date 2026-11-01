@@ -1,133 +1,137 @@
 package agent
 
 import (
+	"fmt"
+	"os"
 	"strings"
+
+	"charm.land/fantasy"
+	"github.com/charmbracelet/crush/internal/compact"
+	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/session"
 )
 
-// stripAnalysisBlock removes <analysis>...</analysis> blocks from summary text.
-// Used as a safety net when loading previously stored summaries that may contain
-// analysis blocks from before the streaming router was implemented.
-func stripAnalysisBlock(text string) string {
-	for {
-		start := strings.Index(text, "<analysis>")
-		if start == -1 {
-			break
-		}
-		end := strings.Index(text[start:], "</analysis>")
-		if end == -1 {
-			break
-		}
-		end += start + len("</analysis>")
-		// Trim trailing whitespace after the closing tag.
-		rest := strings.TrimLeft(text[end:], " \t\n\r")
-		text = text[:start] + rest
-	}
-	return strings.TrimSpace(text)
+// algorithmicCompaction reports whether summaries are written from an
+// algorithmic extraction of the conversation instead of the whole of it.
+func algorithmicCompaction() bool {
+	return os.Getenv("CRUSH_ALGORITHMIC_COMPACT") == "1"
 }
 
-// analysisRouter streams text deltas and routes <analysis>...</analysis> content
-// to reasoning (thinking display) while passing everything else to normal content.
-// Tags may span multiple deltas so it buffers partial matches.
-//
-// Used for all models during summarization. For non-thinking models, the summary
-// prompt instructs the model to wrap analysis in <analysis> tags. For thinking
-// models, this acts as a defensive safety net in case <analysis> tags leak into
-// text output alongside native reasoning tokens.
+// summaryInput is what the summary model reads: an algorithmic extraction of
+// the conversation when that is enabled and finds anything, else the whole
+// conversation.
+func (a *sessionAgent) summaryInput(sess session.Session, msgs []message.Message, model Model, thinking bool) (string, []fantasy.Message) {
+	if algorithmicCompaction() {
+		var previous string
+		history := msgs
+		if sess.SummaryMessageID != "" && len(msgs) > 0 && msgs[0].ID == sess.SummaryMessageID {
+			previous, history = msgs[0].Content().Text, msgs[1:]
+		}
+		if extracted := compact.Compact(compact.Input{Messages: history, PreviousSummary: previous}); extracted != "" {
+			return buildSummaryPrompt(extracted, sess.Todos, thinking), nil
+		}
+	}
+	aiMsgs, _ := a.preparePrompt(msgs, model.CatwalkCfg.Capabilities.Vision, model.CatwalkCfg.Capabilities.Audio)
+	return buildSummaryPrompt("", sess.Todos, thinking), aiMsgs
+}
+
+// analysisRouter routes streamed <analysis>...</analysis> text to the
+// reasoning display and the rest to content. Tags can span deltas, so a
+// possible partial tag at the end is held back until the next one.
 type analysisRouter struct {
-	inAnalysis  bool
-	buffer      strings.Builder
-	onReasoning func(string) error
-	onContent   func(string) error
-	lastErr     error
+	onReasoning, onContent func(string) error
+	inAnalysis             bool
+	pending                string
 }
 
 func newAnalysisRouter(onReasoning, onContent func(string) error) *analysisRouter {
 	return &analysisRouter{onReasoning: onReasoning, onContent: onContent}
 }
 
-func (r *analysisRouter) write(delta string) error {
-	r.buffer.WriteString(delta)
-	for r.buffer.Len() > 0 {
-		text := r.buffer.String()
-		if r.inAnalysis {
-			found, err := r.processSide(text, "</analysis>", r.onReasoning, false)
-			if err != nil {
-				return err
-			}
-			if !found && r.buffer.Len() == len(text) {
-				return nil
-			}
-		} else {
-			found, err := r.processSide(text, "<analysis>", r.onContent, true)
-			if err != nil {
-				return err
-			}
-			if !found && r.buffer.Len() == len(text) {
-				return nil
-			}
-		}
-	}
-	return nil
-}
-
-// processSide handles one side of the tag routing. It searches for tag in text,
-// emits content before the tag via handler, then transitions state. If the tag
-// is not found, it emits the safe prefix (everything except the last len(tag)
-// bytes which might be a partial tag) and returns false.
-func (r *analysisRouter) processSide(text, tag string, handler func(string) error, enteringAnalysis bool) (bool, error) {
-	if idx := strings.Index(text, tag); idx != -1 {
-		if idx > 0 {
-			if err := handler(text[:idx]); err != nil {
-				r.lastErr = err
-				return false, err
-			}
-		}
-		if enteringAnalysis {
-			// Transitioning into analysis mode; no extra newline needed.
-			r.buffer.Reset()
-			r.buffer.WriteString(text[idx+len(tag):])
-			r.inAnalysis = true
-		} else {
-			// Exiting analysis mode; append a newline to separate reasoning blocks.
-			if err := handler("\n"); err != nil {
-				r.lastErr = err
-				return false, err
-			}
-			r.buffer.Reset()
-			r.buffer.WriteString(text[idx+len(tag):])
-			r.inAnalysis = false
-		}
-		return true, nil
-	}
-	tagLen := len(tag)
-	if len(text) > tagLen {
-		safe := text[:len(text)-tagLen]
-		if err := handler(safe); err != nil {
-			r.lastErr = err
-			return false, err
-		}
-		r.buffer.Reset()
-		r.buffer.WriteString(text[len(text)-tagLen:])
-	}
-	return false, nil
-}
-
-// flush sends any remaining buffered content to the appropriate handler.
-func (r *analysisRouter) flush() error {
-	text := r.buffer.String()
-	if text == "" {
-		return r.lastErr
-	}
-	var err error
+func (r *analysisRouter) side() (tag string, emit func(string) error) {
 	if r.inAnalysis {
-		err = r.onReasoning(text)
+		return "</analysis>", r.onReasoning
+	}
+	return "<analysis>", r.onContent
+}
+
+func (r *analysisRouter) write(delta string) error {
+	r.pending += delta
+	for {
+		tag, emit := r.side()
+		idx := strings.Index(r.pending, tag)
+		if idx < 0 {
+			keep := partialTagLen(r.pending, tag)
+			if err := emitText(emit, r.pending[:len(r.pending)-keep]); err != nil {
+				return err
+			}
+			r.pending = r.pending[len(r.pending)-keep:]
+			return nil
+		}
+		if err := emitText(emit, r.pending[:idx]); err != nil {
+			return err
+		}
+		if r.inAnalysis {
+			// Separate one reasoning block from the next.
+			if err := r.onReasoning("\n"); err != nil {
+				return err
+			}
+		}
+		r.pending = r.pending[idx+len(tag):]
+		r.inAnalysis = !r.inAnalysis
+	}
+}
+
+// flush emits whatever is still held back.
+func (r *analysisRouter) flush() error {
+	_, emit := r.side()
+	text := r.pending
+	r.pending = ""
+	return emitText(emit, text)
+}
+
+func emitText(emit func(string) error, text string) error {
+	if text == "" {
+		return nil
+	}
+	return emit(text)
+}
+
+// partialTagLen is the length of the longest suffix of s that starts tag.
+func partialTagLen(s, tag string) int {
+	for n := min(len(s), len(tag)-1); n > 0; n-- {
+		if strings.HasSuffix(s, tag[:n]) {
+			return n
+		}
+	}
+	return 0
+}
+
+// buildSummaryPrompt asks for a summary of the conversation above, or of
+// extracted when it is set.
+func buildSummaryPrompt(extracted string, todos []session.Todo, thinking bool) string {
+	var sb strings.Builder
+	if extracted == "" {
+		sb.WriteString("Summarize our conversation above following the instructions in the system prompt.\n")
 	} else {
-		err = r.onContent(text)
+		sb.WriteString("Below is a structured extraction from our conversation. ")
+		sb.WriteString("Use it as your sole source of truth to write a handoff summary following the system prompt instructions.\n\n")
+		sb.WriteString("## Extracted Context\n\n")
+		sb.WriteString(extracted)
+		sb.WriteString("\n\n")
 	}
-	r.buffer.Reset()
-	if err != nil {
-		r.lastErr = err
-		return err
+	if thinking {
+		sb.WriteString("Use your reasoning/thinking block to analyze what to preserve before writing the summary.")
+	} else {
+		sb.WriteString("Wrap your analysis in <analysis> tags before writing the summary. These will be displayed as thinking.")
 	}
-	return r.lastErr
+	if len(todos) > 0 {
+		sb.WriteString("\n\n## Current Todo List\n\n")
+		for _, t := range todos {
+			fmt.Fprintf(&sb, "- [%s] %s\n", t.Status, t.Content)
+		}
+		sb.WriteString("\nInclude these tasks and their statuses in your summary. ")
+		sb.WriteString("Instruct the resuming assistant to use the `todos` tool to continue tracking progress on these tasks.")
+	}
+	return sb.String()
 }

@@ -233,7 +233,8 @@ func NewViewTool(
 			}
 			content, hasMore, err := readTextFile(filePath, params.Offset, params.Limit, maxContentSize)
 			if err != nil {
-				if tooLarge, ok := errors.AsType[contentTooLargeError](err); ok {
+				var tooLarge contentTooLargeError
+				if errors.As(err, &tooLarge) {
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("Content section is too large (%d bytes). Maximum size is %d bytes",
 						tooLarge.Size, tooLarge.Max)), nil
 				}

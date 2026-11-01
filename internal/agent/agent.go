@@ -204,7 +204,6 @@ type SessionAgent interface {
 	ClearQueue(sessionID string)
 	AddNote(sessionID, text string)
 	Summarize(context.Context, string, fantasy.ProviderOptions, func(context.Context, *fantasy.ProviderError) error) error
-	AlgorithmicSummarize(context.Context, string) error
 	Model() Model
 	GenerateTitle(ctx context.Context, sessionID, userPrompt string)
 }
@@ -1283,6 +1282,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		}
 		// Ensure we finish thinking on error to close the reasoning state.
 		currentAssistant.FinishThinking()
+		var fantasyErr *fantasy.Error
 		var providerErr *fantasy.ProviderError
 		var requestTimedOutErr *requestTimeoutError
 		const defaultTitle = "Provider Error"
@@ -1307,7 +1307,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			} else {
 				currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(providerErr.Title), defaultTitle), providerErr.Message)
 			}
-		} else if fantasyErr, ok := errors.AsType[*fantasy.Error](err); ok {
+		} else if errors.As(err, &fantasyErr) {
 			currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(fantasyErr.Title), defaultTitle), fantasyErr.Message)
 		} else if fantasy.IsTransportError(err) {
 			wrapped := fantasy.NewTransportError(err)
@@ -1337,12 +1337,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	continued := false
 	if shouldSummarize {
 		a.activeRequests.Del(call.SessionID)
-		var summarizeErr error
-		if os.Getenv("CRUSH_ALGORITHMIC_COMPACT") == "1" {
-			summarizeErr = a.AlgorithmicSummarize(genCtx, call.SessionID)
-		} else {
-			summarizeErr = a.summarize(genCtx, call.SessionID, compactTriggerAuto, call.ProviderOptions, call.OnAuthRefresh)
-		}
+		summarizeErr := a.summarize(genCtx, call.SessionID, compactTriggerAuto, call.ProviderOptions, call.OnAuthRefresh)
 		switch {
 		case errors.Is(summarizeErr, ErrCompactionBlocked):
 			// Uncompacted, the next step would only hit the limit
@@ -1519,7 +1514,8 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID, trigger string,
 		return fmt.Errorf("%w: %s", ErrCompactionBlocked, pre.Reason)
 	}
 
-	aiMsgs, _ := a.preparePrompt(msgs, largeModel.CatwalkCfg.Capabilities.Vision, largeModel.CatwalkCfg.Capabilities.Audio)
+	thinkingEnabled := largeModel.CatwalkCfg.CanReason() && largeModel.ModelCfg.Think
+	summaryPromptText, aiMsgs := a.summaryInput(currentSession, msgs, largeModel, thinkingEnabled)
 
 	genCtx, cancel := context.WithCancel(ctx)
 	ac := &activeCancel{cancel: cancel}
@@ -1548,12 +1544,7 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID, trigger string,
 		return err
 	}
 
-	thinkingEnabled := largeModel.CatwalkCfg.CanReason() && largeModel.ModelCfg.Think
-	summaryPromptText := buildSummaryPrompt(currentSession.Todos, thinkingEnabled)
-
-	// Route <analysis> blocks to reasoning display, everything else to content.
-	// For non-thinking models, the prompt instructs the model to use <analysis> tags.
-	// For thinking models, this is a defensive safety net for tags that leak into text.
+	// Route <analysis> blocks to the reasoning display, the rest to content.
 	router := newAnalysisRouter(
 		func(text string) error {
 			summaryMessage.AppendReasoningContent(text)
@@ -1905,12 +1896,6 @@ func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.S
 		if summaryMsgIndex != -1 {
 			msgs = msgs[summaryMsgIndex:]
 			msgs[0].Role = message.User
-			// Strip <analysis> scratch space blocks from the summary text.
-			for i, part := range msgs[0].Parts {
-				if tc, ok := part.(message.TextContent); ok {
-					msgs[0].Parts[i] = message.TextContent{Text: stripAnalysisBlock(tc.Text)}
-				}
-			}
 		}
 	}
 	return msgs, nil
@@ -2559,27 +2544,6 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 	}
 
 	return convertedMessages
-}
-
-// buildSummaryPrompt constructs the prompt text for session summarization.
-func buildSummaryPrompt(todos []session.Todo, thinkingEnabled bool) string {
-	var sb strings.Builder
-	if thinkingEnabled {
-		sb.WriteString("Summarize our conversation above following the instructions in the system prompt.\n")
-		sb.WriteString("Use your reasoning/thinking block to analyze what to preserve before writing the summary.")
-	} else {
-		sb.WriteString("Summarize our conversation above following the instructions in the system prompt.\n")
-		sb.WriteString("Wrap your analysis in <analysis> tags before writing the summary. These will be displayed as thinking.")
-	}
-	if len(todos) > 0 {
-		sb.WriteString("\n\n## Current Todo List\n\n")
-		for _, t := range todos {
-			fmt.Fprintf(&sb, "- [%s] %s\n", t.Status, t.Content)
-		}
-		sb.WriteString("\nInclude these tasks and their statuses in your summary. ")
-		sb.WriteString("Instruct the resuming assistant to use the `todos` tool to continue tracking progress on these tasks.")
-	}
-	return sb.String()
 }
 
 func providerRetryLogFields(err *fantasy.ProviderError, delay time.Duration) []any {

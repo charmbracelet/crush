@@ -176,6 +176,10 @@ type coordinator struct {
 	readyWg errgroup.Group
 
 	hostContext csync.Value[proto.HostContext]
+
+	// titles is shared by every agent built here, sub-agents included, so
+	// CancelAll on the current agent drains all title generation.
+	titles titleTracker
 }
 
 // CoordinatorOptions holds the dependencies for NewCoordinator. Using a
@@ -853,6 +857,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		Notify:               c.notify,
 		RunComplete:          c.runComplete,
 		Hooks:                c.hookRunner,
+		titles:               &c.titles,
 	})
 
 	// The readiness goroutines below perform one-time setup — building the

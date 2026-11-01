@@ -127,19 +127,13 @@ func queueList(queueItems []string, t *styles.Styles) string {
 }
 
 // queueItem renders one queued prompt on a single line. A subagent report
-// reads like its transcript header rather than the raw markup the model gets.
+// reads like its transcript header, not the raw markup the model gets.
 func queueItem(item string, t *styles.Styles) string {
 	report, ok := message.ParseSubAgentReportPrompt(item)
 	if !ok {
 		return t.Pills.QueueItemText.Render(singleLine(item))
 	}
-	line := t.Pills.QueueItemText.Render("Report") + " " +
-		t.Tool.MCPArrow.String() + " " +
-		chat.RenderSubagentName(t, report.Label)
-	if preview := singleLine(report.Output); preview != "" {
-		line += t.Pills.QueueItemText.Render(" · " + preview)
-	}
-	return line
+	return chat.SubagentReportTitle(t, report.Label)
 }
 
 // singleLine collapses runs of whitespace, newlines included, so a queued

@@ -21,11 +21,7 @@ func TestQueueItemRendersSubagentReport(t *testing.T) {
 	}
 	got := ansi.Strip(queueList([]string{report.PromptText()}, u.com.Styles))
 
-	require.NotContains(t, got, "<subagent-report")
-	require.Contains(t, got, "Report")
-	require.Contains(t, got, "roadrunner-recheck")
-	require.Contains(t, got, "· Verification complete.")
-	require.Equal(t, 1, strings.Count(got, "\n")+1, "a report takes one row")
+	require.Equal(t, "Subagent Report → Nancy roadrunner-recheck", strings.TrimSpace(strings.TrimLeft(got, "•▶ ")))
 }
 
 func TestQueueItemKeepsMultilinePromptOnOneRow(t *testing.T) {

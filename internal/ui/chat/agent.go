@@ -553,6 +553,12 @@ func subagentHeader(sty *styles.Styles, status ToolStatus, name, label, model st
 	return header + " " + sty.Tool.ParamMain.Render(ansi.Truncate("(model="+model+")", room, "…)"))
 }
 
+// SubagentReportTitle renders "Subagent Report → Name label" as a report's
+// header does, for places that show a report without its status icon.
+func SubagentReportTitle(sty *styles.Styles, label string) string {
+	return sty.Tool.NameNormal.Render("Subagent Report") + " " + subagentTarget(sty, label)
+}
+
 // subagentTarget renders "→ Name label", how every subagent header names one.
 func subagentTarget(sty *styles.Styles, label string) string {
 	return sty.Tool.MCPArrow.String() + " " + RenderSubagentName(sty, label)

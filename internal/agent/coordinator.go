@@ -992,7 +992,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		allTools = append(allTools, dispatchTool)
 	}
 	if slices.Contains(allowed, AgentSendToolName) {
-		allTools = append(allTools, c.agentSendTool())
+		allTools = append(allTools, c.agentSendTool(parentModel))
 	}
 	if slices.Contains(allowed, AgentStatusToolName) {
 		allTools = append(allTools, c.agentStatusTool())

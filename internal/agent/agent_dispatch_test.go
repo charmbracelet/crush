@@ -330,13 +330,13 @@ func TestReopenRestoresPrunedEntry(t *testing.T) {
 	})
 	entry := newDispatchedAgent("betty-pruned", accessRead, "child", parent.ID, agent)
 
-	require.True(t, c.reopen(entry, "more please"))
+	require.True(t, c.reopen(entry, "more please", nil))
 	got, ok := c.dispatched.Get(dispatchKey(parent.ID, "betty-pruned"))
 	require.True(t, ok, "a reopened subagent is registered again")
 	require.Same(t, entry, got)
 	require.True(t, got.running())
 
-	require.False(t, c.reopen(entry, "again"), "a second follow-up does not start a second run")
+	require.False(t, c.reopen(entry, "again", nil), "a second follow-up does not start a second run")
 	// Stopped rather than finished, so no report turn starts on the parent.
 	entry.stop("test done")
 	close(release)

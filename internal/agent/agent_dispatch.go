@@ -59,6 +59,12 @@ type AgentDispatchParams struct {
 type AgentSendResponseMetadata struct {
 	Label    string `json:"label"`
 	Reopened bool   `json:"reopened,omitempty"`
+	// Set when the message moved the subagent to another model, so a
+	// restart resumes it there.
+	Model     string `json:"model,omitempty"`
+	Provider  string `json:"provider,omitempty"`
+	Reasoning string `json:"reasoning,omitempty"`
+	RunModel  string `json:"run_model,omitempty"`
 }
 
 // AgentDispatchResponseMetadata records a started dispatch's override as the
@@ -76,6 +82,16 @@ type AgentDispatchResponseMetadata struct {
 type AgentSendParams struct {
 	Label   string `json:"label" description:"The name of the subagent to send to, as returned when it was created"`
 	Message string `json:"message" description:"The message to deliver to that subagent"`
+
+	// Model switch, for a subagent that is not running. Same meaning as on
+	// agent_dispatch; the subagent keeps its session.
+	Model     string `json:"model,omitempty" description:"Move the subagent to this model before delivering, keeping its session. Only for a subagent that is not running. Same IDs as agent_dispatch's model list"`
+	Provider  string `json:"provider,omitempty" description:"The provider ID for model; requires model. Defaults to the parent agent's provider"`
+	Reasoning string `json:"reasoning,omitempty" description:"How hard the subagent reasons on its new model: one of the values in agent_dispatch's model list"`
+}
+
+func (p AgentSendParams) switchesModel() bool {
+	return strings.TrimSpace(p.Model) != "" || strings.TrimSpace(p.Provider) != "" || strings.TrimSpace(p.Reasoning) != ""
 }
 
 type AgentStopParams struct {
@@ -332,7 +348,7 @@ func (d *dispatchedAgent) awaitDeliverable(ctx context.Context) bool {
 		if !d.running() || d.stopping() {
 			return false
 		}
-		if d.agent.IsSessionBusy(d.SessionID) {
+		if d.runner().IsSessionBusy(d.SessionID) {
 			return true
 		}
 		select {
@@ -443,10 +459,7 @@ func (c *coordinator) agentDispatchTool(ctx context.Context, parentAgentID strin
 				RunModel: modelDisplayName(agent.Model()),
 			}
 			if hasOverride {
-				meta.Reasoning = strings.TrimSpace(params.Reasoning)
-				if strings.TrimSpace(params.Model) != "" {
-					meta.Model, meta.Provider = sel.Model, sel.Provider
-				}
+				meta.Model, meta.Provider, meta.Reasoning = overrideRecord(params, sel)
 			}
 			return fantasy.WithResponseMetadata(
 				fantasy.NewTextResponse(fmt.Sprintf("Started subagent %q.", label)),
@@ -492,14 +505,30 @@ func (c *coordinator) runDispatched(ctx context.Context, entry *dispatchedAgent,
 	}()
 }
 
+// runner is the agent running this subagent; agent_send can swap it.
+func (d *dispatchedAgent) runner() SessionAgent {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.agent
+}
+
+func (d *dispatchedAgent) setRunner(agent SessionAgent) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.agent = agent
+}
+
 // reopen runs another turn on a finished subagent's existing session, so it
 // answers with its whole task still in context. This is what makes a
 // subagent answerable rather than a one-shot: the session is real and its
 // history is intact, so a follow-up is just the next turn on it.
 //
+// A non-nil agent replaces the subagent's runner, and only when the claim
+// succeeds, so a refused reopen leaves the subagent as it was.
+//
 // Returns false if the subagent is not idle, meaning somebody else claimed
 // it first or it is still working.
-func (c *coordinator) reopen(entry *dispatchedAgent, prompt string) bool {
+func (c *coordinator) reopen(entry *dispatchedAgent, prompt string, agent SessionAgent) bool {
 	// Claiming and registering are one step under dispatchMu: two concurrent
 	// follow-ups resolve to one reopen, and an entry pruned meanwhile is put
 	// back rather than left running outside the registry.
@@ -508,13 +537,20 @@ func (c *coordinator) reopen(entry *dispatchedAgent, prompt string) bool {
 	if current, ok := c.dispatched.Get(key); ok {
 		entry = current
 	}
-	agentCall, _, err := c.subAgentCall(entry.agent, entry.SessionID, prompt)
+	swap := agent != nil
+	if !swap {
+		agent = entry.runner()
+	}
+	agentCall, _, err := c.subAgentCall(agent, entry.SessionID, prompt)
 	if err != nil {
 		c.dispatchMu.Unlock()
 		return false
 	}
 	runCtx, gen, ok := entry.claim()
 	if ok {
+		if swap {
+			entry.setRunner(agent)
+		}
 		c.dispatched.Set(key, entry)
 	}
 	c.dispatchMu.Unlock()
@@ -523,7 +559,7 @@ func (c *coordinator) reopen(entry *dispatchedAgent, prompt string) bool {
 	}
 
 	c.runDispatched(runCtx, entry, gen, func(ctx context.Context) (fantasy.ToolResponse, error) {
-		result, err := entry.agent.Run(ctx, agentCall)
+		result, err := agent.Run(ctx, agentCall)
 		if err != nil {
 			return fantasy.NewTextErrorResponse(fmt.Sprintf("Subagent failed: %s", err)), nil
 		}
@@ -578,7 +614,7 @@ func (c *coordinator) reportDispatchResult(entry *dispatchedAgent, resp fantasy.
 		Label:  entry.Label,
 		Output: body,
 		Failed: failed,
-		Model:  modelDisplayName(entry.agent.Model()),
+		Model:  modelDisplayName(entry.runner().Model()),
 	}
 	ctx := context.Background()
 	if _, err := c.runReport(ctx, entry.ParentSessionID, report); err != nil {
@@ -632,7 +668,7 @@ func (c *coordinator) recordDispatchReport(parentSessionID string, report messag
 // agentSendTool delivers a message to a running detached subagent. The
 // message is queued on the subagent's session, where sessionAgent folds it
 // into the subagent's turn at its next step.
-func (c *coordinator) agentSendTool() fantasy.AgentTool {
+func (c *coordinator) agentSendTool(parentModel func() Model) fantasy.AgentTool {
 	return fantasy.NewParallelAgentTool(
 		AgentSendToolName,
 		agentSendToolDescription,
@@ -666,6 +702,10 @@ func (c *coordinator) agentSendTool() fantasy.AgentTool {
 				entry = rebuilt
 			}
 
+			if params.switchesModel() {
+				return c.sendOnNewModel(ctx, entry, params, parentModel()), nil
+			}
+
 			// Each pass either folds the message into a running turn or
 			// reopens a finished subagent. Losing a race to another follow-up
 			// that reopened it first means its new run takes the message.
@@ -677,12 +717,13 @@ func (c *coordinator) agentSendTool() fantasy.AgentTool {
 					entry.awaitSettled(10 * time.Second)
 				}
 				if entry.awaitDeliverable(ctx) {
-					agentCall, _, err := c.subAgentCall(entry.agent, entry.SessionID, params.Message)
+					agent := entry.runner()
+					agentCall, _, err := c.subAgentCall(agent, entry.SessionID, params.Message)
 					if err != nil {
 						return fantasy.NewTextErrorResponse("Failed to deliver message: " + err.Error()), nil
 					}
 					agentCall.QueueOnly = true
-					_, err = entry.agent.Run(context.WithoutCancel(ctx), agentCall)
+					_, err = agent.Run(context.WithoutCancel(ctx), agentCall)
 					if err == nil {
 						return fantasy.WithResponseMetadata(fantasy.NewTextResponse(fmt.Sprintf(
 							"Delivered to %q. It will answer in its report.",
@@ -694,7 +735,7 @@ func (c *coordinator) agentSendTool() fantasy.AgentTool {
 					}
 					entry.awaitSettled(10 * time.Second)
 				}
-				if c.reopen(entry, params.Message) {
+				if c.reopen(entry, params.Message, nil) {
 					return fantasy.WithResponseMetadata(fantasy.NewTextResponse(fmt.Sprintf(
 						"Delivered to %q, which had finished. It will answer in a new report.",
 						label,

@@ -35,11 +35,12 @@ func (r *AgentControlToolRenderContext) RenderTool(sty *styles.Styles, width int
 	}
 
 	label, prose := agentControlParts(opts.ToolCall)
-	var params []string
+	var header string
 	if label != "" {
-		params = append(params, subagentTarget(sty, label))
+		header = subagentHeader(sty, opts.Status, name, label, sendRunModel(opts), cappedWidth, opts)
+	} else {
+		header = toolHeader(sty, opts.Status, name, cappedWidth, opts)
 	}
-	header := toolHeader(sty, opts.Status, name, cappedWidth, opts, params...)
 	if opts.Compact {
 		return header
 	}
@@ -60,6 +61,18 @@ func (r *AgentControlToolRenderContext) RenderTool(sty *styles.Styles, width int
 		return joinToolParts(header, body)
 	}
 	return header
+}
+
+// sendRunModel is the model a follow-up moved its subagent to, if it did.
+func sendRunModel(opts *ToolRenderOpts) string {
+	if opts.ToolCall.Name != agent.AgentSendToolName || !opts.HasResult() || opts.Result.Metadata == "" {
+		return ""
+	}
+	var meta agent.AgentSendResponseMetadata
+	if json.Unmarshal([]byte(opts.Result.Metadata), &meta) != nil {
+		return ""
+	}
+	return meta.RunModel
 }
 
 // agentControlParts returns the addressed label and the prose to show: a message, a stop reason, or none.

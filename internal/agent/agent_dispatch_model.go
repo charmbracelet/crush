@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"charm.land/catwalk/v3/pkg/catwalk"
+	"charm.land/fantasy"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/charmbracelet/crush/internal/config"
@@ -199,4 +201,39 @@ func (c *coordinator) overrideTaskAgent(ctx context.Context, access string, sel 
 		return nil, "failed to start a subagent on the requested model: " + err.Error()
 	}
 	return agent, ""
+}
+
+// overrideRecord is what a transcript records of an override: only the
+// settings the call asked for, with the provider it resolved to.
+func overrideRecord(params AgentDispatchParams, sel config.SelectedModel) (model, provider, reasoning string) {
+	if strings.TrimSpace(params.Model) != "" {
+		model, provider = sel.Model, sel.Provider
+	}
+	return model, provider, strings.TrimSpace(params.Reasoning)
+}
+
+// sendOnNewModel moves an idle subagent to another model and reopens it with
+// the message, keeping its session.
+func (c *coordinator) sendOnNewModel(ctx context.Context, entry *dispatchedAgent, params AgentSendParams, parentModel Model) fantasy.ToolResponse {
+	if entry.stopping() {
+		entry.awaitSettled(10 * time.Second)
+	}
+	running := fmt.Sprintf("subagent %q is running; stop it with agent_stop before moving it to another model", entry.Label)
+	if entry.running() {
+		return fantasy.NewTextErrorResponse(running)
+	}
+	override := AgentDispatchParams{Model: params.Model, Provider: params.Provider, Reasoning: params.Reasoning}
+	agent, sel, _, refusal := c.overrideDispatchAgent(ctx, entry.Access, override, parentModel)
+	if refusal != "" {
+		return fantasy.NewTextErrorResponse(refusal)
+	}
+	if !c.reopen(entry, params.Message, agent) {
+		return fantasy.NewTextErrorResponse(running)
+	}
+	meta := AgentSendResponseMetadata{Label: entry.Label, Reopened: true, RunModel: modelDisplayName(agent.Model())}
+	meta.Model, meta.Provider, meta.Reasoning = overrideRecord(override, sel)
+	return fantasy.WithResponseMetadata(fantasy.NewTextResponse(fmt.Sprintf(
+		"Moved %q to %s and delivered the message. It will answer in a new report.",
+		entry.Label, meta.RunModel,
+	)), meta)
 }

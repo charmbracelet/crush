@@ -639,3 +639,96 @@ func TestModelIDListCapsLongCatalogs(t *testing.T) {
 	require.NotContains(t, list, fmt.Sprintf("m%d", catalogModelsPerProvider))
 	require.True(t, strings.HasSuffix(list, ", and 3 more"), list)
 }
+
+// A refused subagent can be moved to another model by agent_send, keeping
+// its session, and a restart resumes it there.
+func TestAgentSendMovesSubagentToAnotherModel(t *testing.T) {
+	t.Parallel()
+	c, env := newOverrideTestCoordinator(t)
+	ctx := t.Context()
+	agents, err := c.taskAgents(ctx, false)
+	require.NoError(t, err)
+	dispatch, err := c.agentDispatchTool(ctx, config.AgentCoder, agents[accessRead].Model)
+	require.NoError(t, err)
+	send := c.agentSendTool(agents[accessRead].Model)
+
+	parent, err := env.sessions.Create(ctx, "parent")
+	require.NoError(t, err)
+	assistant, err := env.messages.Create(ctx, parent.ID, message.CreateMessageParams{
+		Role:  message.Assistant,
+		Parts: []message.ContentPart{message.TextContent{Text: "dispatching"}},
+	})
+	require.NoError(t, err)
+	callCtx := context.WithValue(ctx, tools.SessionIDContextKey, parent.ID)
+	callCtx = context.WithValue(callCtx, tools.MessageIDContextKey, assistant.ID)
+
+	resp, err := dispatch.Run(callCtx, fantasy.ToolCall{ID: "d1", Name: AgentDispatchToolName, Input: `{"prompt":"do","label":"ir","model":"mock-model"}`})
+	require.NoError(t, err)
+	require.False(t, resp.IsError, resp.Content)
+	var dmeta AgentDispatchResponseMetadata
+	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &dmeta))
+	entry, ok := c.dispatched.Get(dispatchKey(parent.ID, dmeta.Label))
+	require.True(t, ok)
+	sessionID := entry.SessionID
+
+	input := func(extra string) string {
+		return `{"label":"` + dmeta.Label + `","message":"carry on"` + extra + `}`
+	}
+	sendCall := func(extra string) fantasy.ToolResponse {
+		resp, err := send.Run(callCtx, fantasy.ToolCall{ID: "s", Name: AgentSendToolName, Input: input(extra)})
+		require.NoError(t, err)
+		return resp
+	}
+
+	// Not switched while it is running.
+	require.True(t, entry.running())
+	resp = sendCall(`,"model":"other-model","provider":"other"`)
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "agent_stop")
+
+	entry.stop("refused")
+	require.True(t, entry.awaitSettled(10*time.Second))
+
+	// A model that cannot be served is refused and changes nothing.
+	resp = sendCall(`,"model":"gone-model"`)
+	require.True(t, resp.IsError)
+	require.Equal(t, "mock-model", entry.runner().Model().ModelCfg.Model)
+
+	resp = sendCall(`,"model":"other-model","provider":"other"`)
+	require.False(t, resp.IsError, resp.Content)
+	var smeta AgentSendResponseMetadata
+	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &smeta))
+	require.True(t, smeta.Reopened)
+	require.Equal(t, "other-model", smeta.Model)
+	require.Equal(t, "other", smeta.Provider)
+
+	entry, ok = c.dispatched.Get(dispatchKey(parent.ID, dmeta.Label))
+	require.True(t, ok)
+	require.Equal(t, sessionID, entry.SessionID, "the subagent keeps its session")
+	require.Equal(t, "other-model", entry.runner().Model().ModelCfg.Model)
+	require.Equal(t, "other", entry.runner().Model().ModelCfg.Provider)
+	entry.stop("test done")
+	require.True(t, entry.awaitSettled(10*time.Second))
+
+	// The transcript records the switch, so a restart resumes on it.
+	records := dispatchHistory([]message.Message{
+		{ID: assistant.ID, Role: message.Assistant, Parts: []message.ContentPart{
+			message.ToolCall{ID: "d1", Name: AgentDispatchToolName, Input: `{"prompt":"do","label":"ir","model":"mock-model"}`, Finished: true},
+		}},
+		{Role: message.Tool, Parts: []message.ContentPart{
+			message.ToolResult{ToolCallID: "d1", Name: AgentDispatchToolName, Metadata: mustJSON(t, dmeta)},
+			message.ToolResult{ToolCallID: "s", Name: AgentSendToolName, Metadata: mustJSON(t, smeta)},
+		}},
+	})
+	record := records.byLabel[dmeta.Label]
+	require.NotNil(t, record)
+	require.Equal(t, "other-model", record.Model)
+	require.Equal(t, "other", record.Provider)
+}
+
+func mustJSON(t *testing.T, v any) string {
+	t.Helper()
+	b, err := json.Marshal(v)
+	require.NoError(t, err)
+	return string(b)
+}

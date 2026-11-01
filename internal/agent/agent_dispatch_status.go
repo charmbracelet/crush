@@ -156,6 +156,9 @@ func dispatchHistory(msgs []message.Message) dispatchRecords {
 				}
 				if record, ok := records.byLabel[meta.Label]; ok {
 					record.Open = true
+					if meta.Model != "" || meta.Reasoning != "" {
+						record.Model, record.Provider, record.Reasoning = meta.Model, meta.Provider, meta.Reasoning
+					}
 				}
 			case AgentToolName, tools.AgenticFetchToolName:
 				// A blocking subagent that outran the threshold and was

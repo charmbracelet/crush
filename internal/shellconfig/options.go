@@ -203,6 +203,8 @@ var optionSpecs = map[string]optionSpec{
 	"progress":            {jsonKey: "progress", kind: optBool},
 	"pinentry-integrated": {jsonKey: "pinentry_integrated", kind: optBool},
 
+	"algorithmic-compaction": {jsonKey: "algorithmic_compaction", kind: optBool},
+
 	// Boolean fields exposed positively but stored as their negation.
 	"metrics":              {jsonKey: "disable_metrics", kind: optBool, inverted: true},
 	"auto-summarize":       {jsonKey: "disable_auto_summarize", kind: optBool, inverted: true},

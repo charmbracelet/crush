@@ -406,6 +406,7 @@ func writeOptions(b *strings.Builder, cfg *config.ConfigStore) {
 	opts = append(opts, kv{"auto_lsp", fmt.Sprintf("%v", autoLSP)})
 	autoSummarize := !c.Options.DisableAutoSummarize
 	opts = append(opts, kv{"auto_summarize", fmt.Sprintf("%v", autoSummarize)})
+	opts = append(opts, kv{"algorithmic_compaction", fmt.Sprintf("%v", c.Options.AlgorithmicCompaction)})
 
 	if c.Options.TUI != nil {
 		opts = append(opts, kv{"compact_mode", fmt.Sprintf("%v", c.Options.TUI.CompactMode)})

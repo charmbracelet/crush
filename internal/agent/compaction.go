@@ -2,7 +2,6 @@ package agent
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"charm.land/fantasy"
@@ -11,17 +10,11 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 )
 
-// algorithmicCompaction reports whether summaries are written from an
-// algorithmic extraction of the conversation instead of the whole of it.
-func algorithmicCompaction() bool {
-	return os.Getenv("CRUSH_ALGORITHMIC_COMPACT") == "1"
-}
-
 // summaryInput is what the summary model reads: an algorithmic extraction of
 // the conversation when that is enabled and finds anything, else the whole
 // conversation.
 func (a *sessionAgent) summaryInput(sess session.Session, msgs []message.Message, model Model, thinking bool) (string, []fantasy.Message) {
-	if algorithmicCompaction() {
+	if a.compactSummaries {
 		if extracted := compact.Compact(msgs); extracted != "" {
 			return buildSummaryPrompt(extracted, sess.Todos, thinking), nil
 		}

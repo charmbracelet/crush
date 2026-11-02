@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"charm.land/catwalk/v3/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/commands"
@@ -58,6 +59,8 @@ var builtinCommands = []commandDoc{
 	{"model", "<query>", "switch the main model (fuzzy match)"},
 	{"effort", "[level|auto]", "show or set reasoning effort"},
 	{"btw", "<question>", "ask a side question without adding it to the conversation"},
+	{"goal", "[objective|status|clear]", "pursue a standing objective across turns"},
+	{"loop", "[interval] <task>|status|clear|cancel <id>", "run a task on a schedule"},
 	{"plan", "", "plan mode"},
 	{"code", "", "code mode"},
 	{"yolo", "[on|off]", "toggle permission prompts"},
@@ -110,6 +113,10 @@ func (b *Bridge) handleCommand(ctx context.Context, name, args string) string {
 		return b.commandEffort(ctx, args)
 	case "btw":
 		return b.commandBTW(ctx, args)
+	case "goal":
+		return b.commandAutomation("goal", args)
+	case "loop":
+		return b.commandAutomation("loop", args)
 	case "plan":
 		return b.commandMode(ctx, true)
 	case "code":
@@ -493,6 +500,36 @@ func (b *Bridge) commandBTW(ctx context.Context, question string) string {
 		b.post(card)
 	}()
 	return ""
+}
+
+// commandAutomation forwards /goal and /loop to the TUI, which owns the
+// per-session automation state and the scheduler that fires loop turns.
+// The bridge cannot run them itself: the TUI's automation state is the
+// source of truth, and a second scheduler would fire the same loop twice.
+func (b *Bridge) commandAutomation(name, args string) string {
+	if b.sendEvent == nil {
+		return iconError + " Automation is unavailable in this bridge."
+	}
+	reply := make(chan string, 1)
+	b.sendEvent(AutomationCommandMsg{
+		SessionID: b.currentSessionID(),
+		Name:      name,
+		Args:      args,
+		Reply:     reply,
+	})
+	timer := time.NewTimer(b.commandTimeout)
+	defer timer.Stop()
+	select {
+	case text := <-reply:
+		if strings.TrimSpace(text) == "" {
+			return iconBot + " /" + name + " handled."
+		}
+		return text
+	case <-timer.C:
+		return iconError + " The TUI did not answer /" + name + "."
+	case <-b.ctx.Done():
+		return ""
+	}
 }
 
 // commandMode switches between plan and code mode.

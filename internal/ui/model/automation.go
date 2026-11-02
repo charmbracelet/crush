@@ -14,6 +14,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/automation"
+	"github.com/charmbracelet/crush/internal/discord"
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/util"
@@ -147,10 +148,24 @@ func (a *automationState) loopStatus() string {
 	return "Loops: " + strings.Join(parts, "; ")
 }
 
-// handleGoalCommand implements /goal and its subcommands.
+// handleGoalCommand implements /goal and its subcommands in the TUI.
 func (m *UI) handleGoalCommand(args string) tea.Cmd {
+	reply, cmd, err := m.goalCommand(args)
+	if err != nil {
+		return util.ReportError(err)
+	}
+	if cmd == nil {
+		return util.ReportInfo(reply)
+	}
+	return tea.Batch(util.ReportInfo(reply), cmd)
+}
+
+// goalCommand runs /goal and returns the reply text plus the command
+// that carries out any side effect. Frontends that do not own the
+// automation state (Discord) call it through handleAutomationCommand.
+func (m *UI) goalCommand(args string) (string, tea.Cmd, error) {
 	if m.automation == nil {
-		return util.ReportError(errors.New("automation is not available"))
+		return "", nil, errors.New("automation is not available")
 	}
 	args = strings.TrimSpace(args)
 	switch args {
@@ -159,15 +174,15 @@ func (m *UI) handleGoalCommand(args string) tea.Cmd {
 		if goal != nil && (goal.Status == automation.GoalIdle || goal.Status == automation.GoalPaused) {
 			return m.resumeGoal()
 		}
-		return util.ReportInfo(m.automation.goalStatus())
+		return m.automation.goalStatus(), nil, nil
 	case "status":
-		return util.ReportInfo(m.automation.goalStatus())
+		return m.automation.goalStatus(), nil, nil
 	case "clear":
 		return m.clearGoal()
 	}
 	objective, budget := parseGoalArgs(args)
 	if objective == "" {
-		return util.ReportInfo(m.automation.goalStatus())
+		return m.automation.goalStatus(), nil, nil
 	}
 	return m.startGoal(objective, budget)
 }
@@ -202,13 +217,13 @@ func parsePositiveInt(s string) (int, error) {
 	return n, nil
 }
 
-func (m *UI) startGoal(objective string, budget int) tea.Cmd {
+func (m *UI) startGoal(objective string, budget int) (string, tea.Cmd, error) {
 	loadCmd, err := m.ensureSession()
 	if err != nil {
-		return util.ReportError(err)
+		return "", nil, err
 	}
 	if m.session == nil {
-		return util.ReportError(errors.New("no session to attach the goal to"))
+		return "", nil, errors.New("no session to attach the goal to")
 	}
 	m.automation.ensureLoaded(m.session.ID)
 	goal := automation.NewGoal(objective, budget, time.Now())
@@ -217,58 +232,69 @@ func (m *UI) startGoal(objective string, budget int) tea.Cmd {
 	m.automation.verifying = false
 	m.automation.save()
 
-	cmds := []tea.Cmd{util.ReportInfo("Goal set: " + truncateText(objective, 60))}
+	cmds := []tea.Cmd{}
 	if loadCmd != nil {
 		cmds = append(cmds, loadCmd)
 	}
 	cmds = append(cmds, m.sendMessageInternal(automation.GoalPrompt(goal.Objective, 0, goal.Budget, ""), true))
-	return tea.Batch(cmds...)
+	return "Goal set: " + truncateText(objective, 60), tea.Batch(cmds...), nil
 }
 
-func (m *UI) resumeGoal() tea.Cmd {
+func (m *UI) resumeGoal() (string, tea.Cmd, error) {
 	goal := m.automation.state.Goal
 	if goal == nil {
-		return util.ReportInfo("No goal set")
+		return "No goal set", nil, nil
 	}
 	if goal.Status == automation.GoalActive {
-		return util.ReportInfo(goal.StatusLine(time.Now()))
+		return goal.StatusLine(time.Now()), nil, nil
 	}
 	goal.Resume()
 	m.automation.pendingGoal = true
 	m.automation.verifying = false
 	m.automation.save()
-	return tea.Batch(
-		util.ReportInfo("Goal resumed"),
-		m.sendMessageInternal(automation.GoalPrompt(goal.Objective, goal.Turn, goal.Budget, goal.LastVerification), true),
-	)
+	return "Goal resumed", m.sendMessageInternal(automation.GoalPrompt(goal.Objective, goal.Turn, goal.Budget, goal.LastVerification), true), nil
 }
 
-func (m *UI) clearGoal() tea.Cmd {
+func (m *UI) clearGoal() (string, tea.Cmd, error) {
 	if m.automation.state.Goal == nil {
-		return util.ReportInfo("No goal set")
+		return "No goal set", nil, nil
 	}
 	m.automation.state.Goal = nil
 	m.automation.pendingGoal = false
 	m.automation.verifying = false
 	m.automation.save()
-	return util.ReportInfo("Goal cleared")
+	return "Goal cleared", nil, nil
 }
 
-// handleLoopCommand implements /loop and its subcommands.
+// handleLoopCommand implements /loop and its subcommands in the TUI.
 func (m *UI) handleLoopCommand(args string) tea.Cmd {
+	reply, cmd, err := m.loopCommand(args)
+	if err != nil {
+		return util.ReportError(err)
+	}
+	if cmd == nil {
+		return util.ReportInfo(reply)
+	}
+	return tea.Batch(util.ReportInfo(reply), cmd)
+}
+
+// loopCommand runs /loop and returns the reply text plus the command
+// that carries out any side effect. Frontends that do not own the
+// automation state (Discord) call it through handleAutomationCommand.
+func (m *UI) loopCommand(args string) (string, tea.Cmd, error) {
 	if m.automation == nil {
-		return util.ReportError(errors.New("automation is not available"))
+		return "", nil, errors.New("automation is not available")
 	}
 	if m.automation.disabled {
-		return util.ReportInfo("Loops are disabled (CRUSH_DISABLE_CRON=1)")
+		return "Loops are disabled (CRUSH_DISABLE_CRON=1)", nil, nil
 	}
 	if m.mode == uiInputModePlan {
-		return util.ReportInfo("Loops cannot start in plan mode; leave plan mode and run /loop again")
+		return "Loops cannot start in plan mode; leave plan mode and run /loop again", nil, nil
 	}
 	args = strings.TrimSpace(args)
 	switch {
 	case args == "status":
-		return util.ReportInfo(m.automation.loopStatus())
+		return m.automation.loopStatus(), nil, nil
 	case args == "clear":
 		return m.clearLoops()
 	case strings.HasPrefix(args, "cancel "):
@@ -280,22 +306,22 @@ func (m *UI) handleLoopCommand(args string) tea.Cmd {
 	)
 	req, err := automation.ParseLoopRequest(args, defaultTask)
 	if err != nil {
-		return util.ReportError(err)
+		return "", nil, err
 	}
 	return m.startLoop(req)
 }
 
-func (m *UI) startLoop(req automation.LoopRequest) tea.Cmd {
+func (m *UI) startLoop(req automation.LoopRequest) (string, tea.Cmd, error) {
 	loadCmd, err := m.ensureSession()
 	if err != nil {
-		return util.ReportError(err)
+		return "", nil, err
 	}
 	if m.session == nil {
-		return util.ReportError(errors.New("no session to attach the loop to"))
+		return "", nil, errors.New("no session to attach the loop to")
 	}
 	m.automation.ensureLoaded(m.session.ID)
 	if len(m.automation.state.Loops) >= automation.MaxLoopsPerSession {
-		return util.ReportError(fmt.Errorf("at most %d loops are allowed per conversation", automation.MaxLoopsPerSession))
+		return "", nil, fmt.Errorf("at most %d loops are allowed per conversation", automation.MaxLoopsPerSession)
 	}
 	if !req.Fixed {
 		m.automation.state.Loops = slices.DeleteFunc(m.automation.state.Loops, func(task automation.Task) bool {
@@ -313,7 +339,7 @@ func (m *UI) startLoop(req automation.LoopRequest) tea.Cmd {
 	m.automation.state.Loops = append(m.automation.state.Loops, task)
 	m.automation.save()
 
-	cmds := []tea.Cmd{util.ReportInfo(loopStartedMessage(task))}
+	cmds := []tea.Cmd{}
 	if loadCmd != nil {
 		cmds = append(cmds, loadCmd)
 	}
@@ -322,7 +348,7 @@ func (m *UI) startLoop(req automation.LoopRequest) tea.Cmd {
 		task.NextRun = now.Add(5 * time.Second)
 		m.automation.state.Loops[len(m.automation.state.Loops)-1] = task
 		m.automation.save()
-		return tea.Batch(append(cmds, m.scheduleAutomationTick())...)
+		return loopStartedMessage(task), tea.Batch(append(cmds, m.scheduleAutomationTick())...), nil
 	}
 	idx := len(m.automation.state.Loops) - 1
 	task.LastRun = now
@@ -331,7 +357,7 @@ func (m *UI) startLoop(req automation.LoopRequest) tea.Cmd {
 	m.automation.save()
 	cmds = append(cmds, m.sendMessageInternal(automation.LoopPrompt(task, 0), true))
 	cmds = append(cmds, m.scheduleAutomationTick())
-	return tea.Batch(cmds...)
+	return loopStartedMessage(task), tea.Batch(cmds...), nil
 }
 
 func loopStartedMessage(task automation.Task) string {
@@ -341,27 +367,27 @@ func loopStartedMessage(task automation.Task) string {
 	return "Loop started · " + task.ID + " · every " + automation.FormatDuration(task.Interval)
 }
 
-func (m *UI) clearLoops() tea.Cmd {
+func (m *UI) clearLoops() (string, tea.Cmd, error) {
 	n := len(m.automation.state.Loops)
 	if n == 0 {
-		return util.ReportInfo("No loops scheduled")
+		return "No loops scheduled", nil, nil
 	}
 	m.automation.state.Loops = nil
 	m.automation.pendingLoopID = ""
 	m.automation.save()
-	return util.ReportInfo(fmt.Sprintf("Loop stopped · %d scheduled tasks cancelled", n))
+	return fmt.Sprintf("Loop stopped · %d scheduled tasks cancelled", n), nil, nil
 }
 
-func (m *UI) cancelLoop(id string) tea.Cmd {
+func (m *UI) cancelLoop(id string) (string, tea.Cmd, error) {
 	if id == "" {
-		return util.ReportError(errors.New("usage: /loop cancel <id>"))
+		return "", nil, errors.New("usage: /loop cancel <id>")
 	}
 	if !m.automation.state.RemoveLoop(id) {
-		return util.ReportInfo("No loop with id " + id)
+		return "No loop with id " + id, nil, nil
 	}
 	m.automation.pendingLoopID = ""
 	m.automation.save()
-	return util.ReportInfo("Loop stopped · " + id)
+	return "Loop stopped · " + id, nil, nil
 }
 
 // cancelAutomationLoops cancels every loop in the conversation. It is the
@@ -375,6 +401,37 @@ func (m *UI) cancelAutomationLoops() tea.Cmd {
 	m.automation.pendingLoopID = ""
 	m.automation.save()
 	return util.ReportInfo(fmt.Sprintf("Loop stopped · %d scheduled tasks cancelled", n))
+}
+
+// handleAutomationCommand runs a /goal or /loop command sent by the
+// Discord bridge and replies with the text to post in the thread. The
+// command starts a turn in the open session, so it only runs when the
+// TUI is showing the bridge's session.
+func (m *UI) handleAutomationCommand(msg discord.AutomationCommandMsg) tea.Cmd {
+	reply := ""
+	var cmd tea.Cmd
+	if !m.hasSession() || m.session.ID != msg.SessionID {
+		reply = "The TUI is showing a different session; switch back to this session to use /" + msg.Name + "."
+	} else {
+		var err error
+		switch msg.Name {
+		case "goal":
+			reply, cmd, err = m.goalCommand(msg.Args)
+		case "loop":
+			reply, cmd, err = m.loopCommand(msg.Args)
+		default:
+			err = fmt.Errorf("unknown automation command %q", msg.Name)
+		}
+		if err != nil {
+			reply = "Error: " + err.Error()
+			cmd = nil
+		}
+	}
+	select {
+	case msg.Reply <- reply:
+	default:
+	}
+	return cmd
 }
 
 func (m *UI) scheduleAutomationTick() tea.Cmd {

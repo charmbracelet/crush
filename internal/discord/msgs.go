@@ -55,3 +55,20 @@ type SessionClearedMsg struct {
 type StoppedMsg struct {
 	Bridge *Bridge
 }
+
+// AutomationCommandMsg asks the TUI to run a /goal or /loop command on
+// behalf of the Discord bridge, which does not own the per-session
+// automation state or its scheduler. The TUI replies on Reply with the
+// text to post in the thread. Published with app.SendEvent.
+type AutomationCommandMsg struct {
+	// SessionID is the bridge's session. The TUI only runs the command
+	// when it is showing that session, because the command starts a
+	// turn in the open session.
+	SessionID string
+	// Name is "goal" or "loop".
+	Name string
+	// Args is the raw argument text after the command name.
+	Args string
+	// Reply receives the text to post. It is buffered by the sender.
+	Reply chan string
+}

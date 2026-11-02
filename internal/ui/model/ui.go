@@ -1084,6 +1084,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 		cmds = append(cmds, agentModelChangedCmd)
+	case discord.AutomationCommandMsg:
+		// Remote control forwards /goal and /loop here because the TUI
+		// owns the per-session automation state and scheduler.
+		if cmd := m.handleAutomationCommand(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case discord.StatusNoteMsg:
 		if msg.IsErr {
 			cmds = append(cmds, util.ReportWarn(msg.Text))

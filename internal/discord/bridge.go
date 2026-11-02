@@ -39,6 +39,12 @@ const (
 	// the agent is busy.
 	typingInterval = 9 * time.Second
 
+	// defaultCommandTimeout bounds how long a command waits for the
+	// TUI to answer. The TUI runs on the same event loop as the
+	// session, so a short wait keeps a stalled frontend from blocking
+	// the Discord input loop.
+	defaultCommandTimeout = 5 * time.Second
+
 	// maxAttachmentBytes caps mirrored Discord attachments.
 	maxAttachmentBytes = 8 << 20
 
@@ -97,6 +103,12 @@ type Bridge struct {
 	editRate       time.Duration
 	tick           time.Duration
 	typing         time.Duration
+
+	// sendEvent publishes a message to the TUI. Nil when the bridge
+	// runs without a TUI (tests).
+	sendEvent func(tea.Msg)
+	// commandTimeout bounds commands that need a TUI reply.
+	commandTimeout time.Duration
 
 	ctx      context.Context
 	cancel   context.CancelFunc
@@ -184,6 +196,8 @@ type bridgeDeps struct {
 	editThrottle   time.Duration
 	http           *http.Client
 	typing         time.Duration
+	sendEvent      func(tea.Msg)
+	commandTimeout time.Duration
 }
 
 // Start creates the Discord control thread for a live session and
@@ -247,6 +261,8 @@ func newBridge(env commandEnv, application *app.App, sessionID string, cfg Confi
 		tick:               deps.tick,
 		editRate:           deps.editThrottle,
 		typing:             deps.typing,
+		sendEvent:          deps.sendEvent,
+		commandTimeout:     deps.commandTimeout,
 		mode:               mode,
 		permissions:        map[string]permission.PermissionRequest{},
 		permMessage:        map[string]string{},
@@ -286,6 +302,12 @@ func newBridge(env commandEnv, application *app.App, sessionID string, cfg Confi
 	}
 	if b.typing <= 0 {
 		b.typing = typingInterval
+	}
+	if b.sendEvent == nil && b.app != nil {
+		b.sendEvent = b.app.SendEvent
+	}
+	if b.commandTimeout <= 0 {
+		b.commandTimeout = defaultCommandTimeout
 	}
 	b.gateway = newGateway(cfg.Token, defaultGatewayIntents)
 	return b

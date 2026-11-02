@@ -68,7 +68,44 @@ func TestCommandHelp(t *testing.T) {
 	require.Contains(t, help, "/model")
 	require.Contains(t, help, "/yolo")
 	require.Contains(t, help, "/clear")
+	require.Contains(t, help, "/goal")
+	require.Contains(t, help, "/loop")
 	require.Contains(t, help, "sent to the agent as a prompt")
+}
+
+func TestCommandAutomationForwardsToTUI(t *testing.T) {
+	t.Parallel()
+	b, _, _ := newCommandBridge(t)
+	var got AutomationCommandMsg
+	b.sendEvent = func(msg tea.Msg) {
+		got, _ = msg.(AutomationCommandMsg)
+		got.Reply <- "Goal set: get the tests green"
+	}
+
+	reply := b.handleCommand(b.ctx, "goal", "get the tests green")
+	require.Equal(t, "Goal set: get the tests green", reply)
+	require.Equal(t, "sess-1", got.SessionID)
+	require.Equal(t, "goal", got.Name)
+	require.Equal(t, "get the tests green", got.Args)
+}
+
+func TestCommandAutomationTimesOut(t *testing.T) {
+	t.Parallel()
+	b, _, _ := newCommandBridge(t)
+	b.commandTimeout = 10 * time.Millisecond
+	b.sendEvent = func(tea.Msg) {}
+
+	reply := b.handleCommand(b.ctx, "loop", "status")
+	require.Contains(t, reply, "did not answer")
+}
+
+func TestCommandAutomationUnavailable(t *testing.T) {
+	t.Parallel()
+	b, _, _ := newCommandBridge(t)
+	b.sendEvent = nil
+
+	reply := b.handleCommand(b.ctx, "goal", "status")
+	require.Contains(t, reply, "unavailable")
 }
 
 func TestCommandStatus(t *testing.T) {

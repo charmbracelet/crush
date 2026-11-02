@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/automation"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/discord"
 	"github.com/stretchr/testify/require"
 )
 
@@ -177,4 +178,54 @@ func TestLoadSessionKeepsPendingAutomation(t *testing.T) {
 	m.Update(loadSessionMsg{session: m.session})
 	require.True(t, m.automation.pendingGoal)
 	require.Equal(t, automation.GoalActive, m.automation.state.Goal.Status)
+}
+
+func TestAutomationCommandFromDiscord(t *testing.T) {
+	t.Parallel()
+
+	m, ws := newAutomationUI(t)
+	reply := make(chan string, 1)
+	runCmd(m.handleAutomationCommand(discord.AutomationCommandMsg{
+		SessionID: "s1",
+		Name:      "goal",
+		Args:      "get the tests green",
+		Reply:     reply,
+	}))
+
+	require.Len(t, ws.prompts, 1)
+	require.Contains(t, ws.prompts[0], "get the tests green")
+	require.Equal(t, "Goal set: get the tests green", <-reply)
+	require.True(t, m.automation.pendingGoal)
+}
+
+func TestAutomationCommandStatusFromDiscord(t *testing.T) {
+	t.Parallel()
+
+	m, ws := newAutomationUI(t)
+	reply := make(chan string, 1)
+	cmd := m.handleAutomationCommand(discord.AutomationCommandMsg{
+		SessionID: "s1",
+		Name:      "loop",
+		Args:      "status",
+		Reply:     reply,
+	})
+	require.Nil(t, cmd)
+	require.Empty(t, ws.prompts)
+	require.Equal(t, "No loops scheduled", <-reply)
+}
+
+func TestAutomationCommandRejectsOtherSession(t *testing.T) {
+	t.Parallel()
+
+	m, ws := newAutomationUI(t)
+	reply := make(chan string, 1)
+	cmd := m.handleAutomationCommand(discord.AutomationCommandMsg{
+		SessionID: "other",
+		Name:      "goal",
+		Args:      "get the tests green",
+		Reply:     reply,
+	})
+	require.Nil(t, cmd)
+	require.Empty(t, ws.prompts)
+	require.Contains(t, <-reply, "different session")
 }

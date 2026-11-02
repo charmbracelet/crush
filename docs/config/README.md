@@ -561,7 +561,10 @@ Available Keys:
   nerd-fonts bool               override Nerd Font glyph detection: true
                                 forces glyphs on, false forces them off, and
                                 unset keeps automatic detection (the NERDFONT
-                                environment variable wins when both are set)
+                                environment variable wins when both are set);
+                                detection checks fonts on this machine, so
+                                set it when running over SSH or when a Nerd
+                                Font is installed but not used by the terminal
   scrollbar string              control chat scrollbar visibility: default,
                                 always, or never
   exit-banner default|compact|none

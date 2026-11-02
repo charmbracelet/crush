@@ -26,10 +26,7 @@ const (
 	ModelIcon       string = "◇"
 	HypercreditIcon string = "◆"
 
-	// GitBranchIcon is the Powerline git branch glyph (U+E0A0), shown
-	// beside the checked-out branch when the terminal is expected to
-	// render Nerd Font glyphs. Terminals without Nerd Font support show
-	// the bare branch name instead.
+	// GitBranchIcon is the Powerline branch glyph, shown only with Nerd Fonts.
 	GitBranchIcon string = "\ue0a0"
 
 	ArrowRightIcon string = "→"

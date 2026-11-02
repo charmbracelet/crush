@@ -5,6 +5,7 @@ import (
 	"log/slog"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 
 	mcptools "github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
@@ -155,6 +156,14 @@ func (b *Backend) GetLSPDiagnostics(workspaceID, lspName string) (any, error) {
 		if name == lspName {
 			return client.GetDiagnostics(), nil
 		}
+	}
+
+	// GetLSPStates also lists servers that are no longer running (failed
+	// init, stopped, or started by another workspace), so callers iterate
+	// over names this manager does not hold. Report those as having no
+	// diagnostics, like the local workspace does, instead of a 404.
+	if _, ok := app.GetLSPState(lspName); ok {
+		return map[protocol.DocumentURI][]protocol.Diagnostic{}, nil
 	}
 
 	return nil, ErrLSPClientNotFound

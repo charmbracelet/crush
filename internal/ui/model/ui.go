@@ -2522,6 +2522,34 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			answer, err := m.com.Workspace.AgentAsk(context.Background(), sessionID, question)
 			return sideAnswerMsg{question: question, answer: answer, err: err}
 		})
+	case dialog.ActionGoal:
+		m.dialog.CloseDialog(dialog.CommandsID)
+		if msg.Objective == "" {
+			m.dialog.OpenDialog(dialog.NewArguments(
+				m.com,
+				"Set Goal",
+				"Crush works toward the objective turn after turn until it verifies completion.",
+				[]commands.Argument{{ID: "objective", Title: "Objective", Required: true}},
+				msg,
+			))
+			break
+		}
+		m.dialog.CloseFrontDialog()
+		cmds = append(cmds, m.handleGoalCommand(msg.Objective))
+	case dialog.ActionLoop:
+		m.dialog.CloseDialog(dialog.CommandsID)
+		if msg.Task == "" {
+			m.dialog.OpenDialog(dialog.NewArguments(
+				m.com,
+				"Start Loop",
+				"Run the task now and repeat it. Prefix an interval (5m) or end with 'every 2 hours'.",
+				[]commands.Argument{{ID: "task", Title: "Task", Required: true}},
+				msg,
+			))
+			break
+		}
+		m.dialog.CloseFrontDialog()
+		cmds = append(cmds, m.handleLoopCommand(msg.Task))
 	case dialog.ActionToggleHelp:
 		m.status.ToggleHelp()
 		m.dialog.CloseDialog(dialog.CommandsID)

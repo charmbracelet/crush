@@ -4,10 +4,13 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/automation"
+	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/discord"
+	"github.com/charmbracelet/crush/internal/ui/dialog"
 	"github.com/stretchr/testify/require"
 )
 
@@ -228,4 +231,39 @@ func TestAutomationCommandRejectsOtherSession(t *testing.T) {
 	require.Nil(t, cmd)
 	require.Empty(t, ws.prompts)
 	require.Contains(t, <-reply, "different session")
+}
+
+func TestGoalCommandFromMenu(t *testing.T) {
+	t.Parallel()
+
+	m, _ := newAutomationUI(t)
+	m.dialog.OpenDialog(dialog.NewArguments(
+		m.com,
+		"Set Goal",
+		"",
+		[]commands.Argument{{ID: "objective", Title: "Objective", Required: true}},
+		dialog.ActionGoal{},
+	))
+	m.handleDialogMsg(tea.PasteMsg{Content: "get the tests green"})
+	cmd := m.handleDialogMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.NotNil(t, cmd)
+	require.NotNil(t, m.automation.state.Goal)
+	require.Equal(t, automation.GoalActive, m.automation.state.Goal.Status)
+}
+
+func TestLoopCommandFromMenu(t *testing.T) {
+	t.Parallel()
+
+	m, _ := newAutomationUI(t)
+	m.dialog.OpenDialog(dialog.NewArguments(
+		m.com,
+		"Start Loop",
+		"",
+		[]commands.Argument{{ID: "task", Title: "Task", Required: true}},
+		dialog.ActionLoop{},
+	))
+	m.handleDialogMsg(tea.PasteMsg{Content: "5m check the deploy"})
+	cmd := m.handleDialogMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.NotNil(t, cmd)
+	require.Len(t, m.automation.state.Loops, 1)
 }

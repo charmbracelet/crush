@@ -113,6 +113,16 @@ type (
 		SessionID string
 		Question  string
 	}
+	// ActionGoal sets a standing objective. Objective is empty until the
+	// user fills the prompt.
+	ActionGoal struct {
+		Objective string
+	}
+	// ActionLoop starts a scheduled loop. Task is empty until the user
+	// fills the prompt.
+	ActionLoop struct {
+		Task string
+	}
 	// ActionSelectReasoningEffort is a message indicating a reasoning effort
 	// has been selected.
 	ActionSelectReasoningEffort struct {

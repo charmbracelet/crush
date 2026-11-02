@@ -221,6 +221,12 @@ func (a *Arguments) HandleMsg(msg tea.Msg) Action {
 				case ActionAskSideQuestion:
 					action.Question = args["question"]
 					return action
+				case ActionGoal:
+					action.Objective = args["objective"]
+					return action
+				case ActionLoop:
+					action.Task = args["task"]
+					return action
 				}
 			}
 			a.focusInput(a.focused + 1)

@@ -5,6 +5,8 @@ updates:
     directory: "/"
     schedule:
       interval: "monthly"
+    cooldown:
+      default-days: 7
     labels:
       - "area: dependencies"
     commit-message:
@@ -26,6 +28,8 @@ updates:
     directory: "/"
     schedule:
       interval: "monthly"
+    cooldown:
+      default-days: 7
     labels:
       - "area: dependencies"
     commit-message:

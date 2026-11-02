@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"errors"
 	"image"
 	"testing"
 
@@ -268,14 +269,18 @@ type testWorkspace struct {
 	updateCalls       int
 	agentReady        bool
 	agentBusy         bool
-	runPrompts        []string
+	runPrompts []string
 	// level is the permission axis and mainAgent the purpose axis, so a test
 	// can assert which one an action moved.
-	level        permission.Level
-	mainAgent    string
-	mainAgents   []string
-	runHidden    []bool
+	level       permission.Level
+	mainAgent   string
+	mainAgents  []string
+	runHidden   []bool
 	compactCalls []bool
+
+	// failLevelSet injects write failures so tests can pin how a level
+	// change reports an undeliverable write.
+	failLevelSet error
 }
 
 func (w *testWorkspace) Config() *config.Config {
@@ -298,7 +303,13 @@ func (w *testWorkspace) UpdateAgentModel(context.Context) error {
 
 func (w *testWorkspace) PermissionLevel() permission.Level { return w.level }
 
-func (w *testWorkspace) PermissionSetLevel(level permission.Level) { w.level = level }
+func (w *testWorkspace) PermissionSetLevel(level permission.Level) error {
+	if w.failLevelSet != nil {
+		return w.failLevelSet
+	}
+	w.level = level
+	return nil
+}
 
 func (w *testWorkspace) AgentMainID() string {
 	if w.mainAgent == "" {
@@ -390,7 +401,9 @@ func TestCyclePermissionLevelWalksLevels(t *testing.T) {
 	u.purpose = config.AgentPlan
 
 	for _, want := range []permission.Level{permission.LevelAuto, permission.LevelBypass, permission.LevelPrompt} {
-		require.Equal(t, want, u.cyclePermissionLevel())
+		got, err := u.cyclePermissionLevel()
+		require.NoError(t, err)
+		require.Equal(t, want, got)
 		require.Equal(t, want, ws.level)
 	}
 	require.Equal(t, config.AgentPlan, u.purpose,
@@ -788,6 +801,44 @@ func TestCyclePurpose_BlockedWhileAgentBusy(t *testing.T) {
 	require.Equal(t, util.InfoTypeWarn, info.Type)
 }
 
+// TestCyclePurpose_BlockedWhileSessionBusy covers the window the
+// agent-wide flag cannot see: the flag follows the current main agent,
+// so right after a switch it reads idle while the run still serves the
+// old agent. The session-scoped probe must block the cycle anyway.
+func TestCyclePurpose_BlockedWhileSessionBusy(t *testing.T) {
+	t.Parallel()
+	u, ws := newPlanUI(t, "sess-1")
+	ws.agentReady = true
+	u.probedSession = "sess-1"
+	u.probedSessionBusy = true
+
+	msg := u.cyclePurpose()()
+	require.Equal(t, config.AgentPlan, u.purpose)
+	require.Empty(t, ws.setMainCalledWith)
+	info, ok := msg.(util.InfoMsg)
+	require.True(t, ok)
+	require.Equal(t, util.InfoTypeWarn, info.Type)
+}
+
+// TestPlanHandoffConfirm_NoSwitchWhenPurposeAlreadyCoder pins the nil-cmd
+// fix: Shift+Tab can leave the handoff open after switching to the coder,
+// and confirming then must not wrap a nil command (a panic) but simply
+// settle the pending plan.
+func TestPlanHandoffConfirm_NoSwitchWhenPurposeAlreadyCoder(t *testing.T) {
+	t.Parallel()
+	u, ws := newPlanUI(t, "sess-1")
+	u.openPlanHandoff()
+	inline, ok := u.activeInline.(*dialog.PlanHandoffInline)
+	require.True(t, ok)
+	u.purpose = config.AgentCoder
+	ws.setMainCalledWith = ""
+
+	cmd := inline.OnConfirm(false)
+	require.Nil(t, cmd)
+	require.Empty(t, ws.setMainCalledWith)
+	require.Empty(t, u.planReadySessionID, "confirming still settles the pending plan")
+}
+
 func TestSetPurpose_TracksModeSwitching(t *testing.T) {
 	t.Parallel()
 	u, _ := newPlanUI(t, "sess-1")
@@ -921,11 +972,8 @@ func TestPlanHandoffExplicitPermissionMode(t *testing.T) {
 		inline := u.activeInline.(*dialog.PlanHandoffInline)
 		cmd := inline.OnConfirm(bypass)
 
-		want := permission.LevelPrompt
-		if bypass {
-			want = permission.LevelBypass
-		}
-		require.Equal(t, want, ws.level)
+		require.Equal(t, bypass, ws.level == permission.LevelBypass,
+			"confirming the handoff must land the level the answer names")
 		require.Empty(t, ws.runPrompts, "wait for the coder model to finish switching")
 		switched := cmd().(modeSwitchedMsg)
 		require.NoError(t, switched.err)
@@ -987,10 +1035,46 @@ func TestCyclePermissionLevelWhilePlanning(t *testing.T) {
 	u.purpose = config.AgentPlan
 	u.levelCache.set(permission.LevelAuto)
 
-	require.Equal(t, permission.LevelBypass, u.cyclePermissionLevel())
+	got, err := u.cyclePermissionLevel()
+	require.NoError(t, err)
+	require.Equal(t, permission.LevelBypass, got)
 	require.Equal(t, permission.LevelBypass, ws.level)
 	require.Equal(t, config.AgentPlan, u.purpose, "the permission cycle must stay in planning")
 	require.Empty(t, ws.setMainCalledWith, "and must not switch agents")
+}
+
+// TestCyclePermissionLevelFailedWrite pins that a failed write stops the
+// cycle and is reported: the level cache keeps the pre-toggle value so
+// the next cycle starts from what the server actually has, instead of
+// optimistically displaying a level the server never adopted (which the
+// next probe would silently revert).
+func TestCyclePermissionLevelFailedWrite(t *testing.T) {
+	t.Parallel()
+	u, ws := newPlanUI(t, "sess-1")
+	u.levelCache.set(permission.LevelPrompt)
+	ws.failLevelSet = errors.New("server unreachable")
+
+	level, err := u.cyclePermissionLevel()
+	require.Error(t, err)
+	require.Equal(t, permission.LevelAuto, level, "the proposed level is reported alongside the error")
+	require.Equal(t, permission.LevelPrompt, u.levelCached())
+	require.Equal(t, permission.LevelPrompt, ws.level)
+}
+
+// TestSetPermissionLevelFailedWriteReportsError covers the palette's
+// explicit level selection: a failed write surfaces the error rather
+// than showing the banner of a level that never landed.
+func TestSetPermissionLevelFailedWriteReportsError(t *testing.T) {
+	t.Parallel()
+	u, ws := newPlanUI(t, "sess-1")
+	u.levelCache.set(permission.LevelPrompt)
+	ws.failLevelSet = errors.New("server unreachable")
+
+	err := u.setPermissionLevel(permission.LevelBypass)
+	require.Error(t, err)
+	require.Equal(t, permission.LevelPrompt, u.levelCached(),
+		"the cache must not adopt a level the workspace rejected")
+	require.Equal(t, permission.LevelPrompt, ws.level)
 }
 
 // TestHelpBarAdvertisesBothAxes: the two axes are independent, so the bar has

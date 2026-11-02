@@ -69,6 +69,13 @@ var (
 	errModelProviderNotConfigured = errors.New("model provider not configured")
 	errModelNotSelected           = errors.New("model not selected")
 	errModelNotFound              = errors.New("model not found in provider config")
+	// ErrAgentBusy reports that a run is in flight, so switching the
+	// main agent would strand it (and every prompt queued behind it) on
+	// the previous agent. The backend HTTP path rejects this case with
+	// its own ErrAgentBusy before reaching the coordinator; this
+	// sentinel is the backstop for the in-process workspace path, which
+	// has no other guard.
+	ErrAgentBusy = errors.New("agent is busy")
 )
 
 // servingProvider returns the fantasy provider package that serves the
@@ -254,8 +261,10 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		opts.Permissions.SetPermissionHooks(policyHooks)
 		// Seed the runtime auto-mode state (also forwards to the native
 		// toggler) so headless gating and the TUI toggle agree with the
-		// config's initial value.
-		opts.Permissions.SetAutoMode(c.AutoModeEnabled())
+		// config's initial value. A level already chosen at runtime wins:
+		// a coordinator rebuilt mid-session (reconnect, workspace
+		// recovery, a second client attaching) must not revert it.
+		opts.Permissions.SeedAutoMode(c.AutoModeEnabled())
 	}
 
 	agentCfg, ok := opts.Config.Config().Agents[config.AgentCoder]
@@ -318,6 +327,18 @@ func (c *coordinator) SetMainAgent(agentName string) error {
 	agent, ok := c.agents[agentName]
 	if !ok {
 		return fmt.Errorf("%w: %s", errMainAgentNotFound, agentName)
+	}
+	// A running turn (and the queue behind it) belongs to the agent it
+	// started on: Run snapshots the current agent once, so switching
+	// mid-run would leave the turn and its queued prompts executing on
+	// the old agent while the UI reports the new one. Reject instead;
+	// the caller re-tries once the run is done. Check every agent, not
+	// just the current one: the busy run lives on the old agent for the
+	// whole handoff window.
+	for _, a := range c.agents {
+		if a.IsBusy() {
+			return ErrAgentBusy
+		}
 	}
 	c.mainAgent = agent
 	c.mainAgentName = agentName

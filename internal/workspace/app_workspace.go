@@ -307,8 +307,9 @@ func (w *AppWorkspace) PermissionLevel() permission.Level {
 }
 
 // PermissionSetLevel sets the approval level.
-func (w *AppWorkspace) PermissionSetLevel(level permission.Level) {
+func (w *AppWorkspace) PermissionSetLevel(level permission.Level) error {
 	w.app.Permissions.SetLevel(level)
+	return nil
 }
 
 // -- Questions --

@@ -88,9 +88,10 @@ func (w *countingWorkspace) PermissionLevel() permission.Level {
 	return w.level
 }
 
-func (w *countingWorkspace) PermissionSetLevel(level permission.Level) {
+func (w *countingWorkspace) PermissionSetLevel(level permission.Level) error {
 	w.permSetCalls++
 	w.level = level
+	return nil
 }
 
 func (w *countingWorkspace) AgentMainID() string { return "" }
@@ -411,7 +412,9 @@ func TestCyclePermissionLevelWalksTheAxis(t *testing.T) {
 	warmCaches(m, false)
 
 	for _, want := range []permission.Level{permission.LevelAuto, permission.LevelBypass, permission.LevelPrompt} {
-		require.Equal(t, want, m.cyclePermissionLevel())
+		got, err := m.cyclePermissionLevel()
+		require.NoError(t, err)
+		require.Equal(t, want, got)
 		require.Equal(t, want, m.levelCached())
 		require.Equal(t, want, ws.level, "the cycle must write the level through to the workspace")
 	}

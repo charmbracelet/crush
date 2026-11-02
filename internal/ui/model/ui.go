@@ -2222,7 +2222,11 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 
 	// Command dialog messages.
 	case dialog.ActionCyclePermissionLevel:
-		level := m.cyclePermissionLevel()
+		level, err := m.cyclePermissionLevel()
+		if err != nil {
+			cmds = append(cmds, util.ReportError(err))
+			break
+		}
 		cmds = append(cmds, levelBanner(level))
 		// The palette stays open and only its approval row redraws, so the user
 		// watches the highlight move to the next option. Closing here would
@@ -2235,7 +2239,10 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			}
 		}
 	case dialog.ActionSetPermissionLevel:
-		m.setPermissionLevel(msg.Level)
+		if err := m.setPermissionLevel(msg.Level); err != nil {
+			cmds = append(cmds, util.ReportError(err))
+			break
+		}
 		cmds = append(cmds, levelBanner(msg.Level))
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionCyclePurpose:
@@ -3211,7 +3218,12 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			// Ctrl+Y walks the permission axis only. Which agent serves the
 			// turn is Shift+Tab's business, so this key no longer diverts out
 			// of planning.
-			cmds = append(cmds, levelBanner(m.cyclePermissionLevel()))
+			level, err := m.cyclePermissionLevel()
+			if err != nil {
+				cmds = append(cmds, util.ReportError(err))
+			} else {
+				cmds = append(cmds, levelBanner(level))
+			}
 			return true
 		}
 		return false
@@ -4908,7 +4920,16 @@ func (m *UI) purposeCandidates() []string {
 // what made the old cycle's "only the cycle may turn this back off"
 // bookkeeping necessary.
 func (m *UI) cyclePurpose() tea.Cmd {
-	if m.isAgentBusy() || m.modeSwitching {
+	// The agent-wide busy flag follows the current main agent, so it
+	// reads idle while the agent that actually serves the turn is still
+	// running. The session-scoped oracle covers that window (and the
+	// gap while a queued prompt hands off between turns); the
+	// coordinator's own ErrAgentBusy rejection is the backstop.
+	busy := m.modeSwitching || m.isAgentBusy()
+	if !busy && m.hasSession() {
+		busy = m.turnInFlight(m.session.ID)
+	}
+	if busy {
 		return util.ReportWarn("Agent is busy, please wait before switching mode...")
 	}
 	candidates := m.purposeCandidates()
@@ -6034,10 +6055,11 @@ func (m *UI) resetPlanModeState() tea.Cmd {
 	if !m.planning() {
 		return nil
 	}
-	// The backend rejects agent switches while a run is active (409). When
-	// one is, keep the mode as-is: the server's active agent still matches
-	// what the editor shows, and the next Shift+Tab lands back in the
-	// standard purpose once the run finishes.
+	// Switching agents is rejected while a run is active (the backend
+	// answers 409 and the coordinator itself refuses in local mode).
+	// When a run is active, keep the mode as-is: the server's active
+	// agent still matches what the editor shows, and the next Shift+Tab
+	// lands back in the standard purpose once the run finishes.
 	if m.isAgentBusy() {
 		return nil
 	}
@@ -6064,10 +6086,20 @@ func (m *UI) openPlanHandoff() {
 		if bypassPermissions {
 			level = permission.LevelBypass
 		}
-		m.setPermissionLevel(level)
+		if err := m.setPermissionLevel(level); err != nil {
+			return util.ReportError(err)
+		}
 		m.setPlanReadyPending("")
 		sessionID := m.session.ID
 		cmd := m.setPurpose(config.AgentCoder)
+		// The purpose can already be coder — Shift+Tab switched away
+		// from planning while this handoff stayed open — and a switch
+		// rejected mid-run also returns after reporting its own error.
+		// Either way there is no cmd to wrap, and calling through a nil
+		// one would panic.
+		if cmd == nil {
+			return nil
+		}
 		return func() tea.Msg {
 			result := cmd()
 			if switched, ok := result.(modeSwitchedMsg); ok {

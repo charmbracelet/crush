@@ -209,9 +209,11 @@ type Workspace interface {
 	// human; PermissionSetLevel sets it. This is the permission axis and is
 	// independent of which agent serves the turn, so planning and coding can
 	// each run at any level instead of the level being a side effect of
-	// wherever the key cycle happens to be.
+	// wherever the key cycle happens to be. SetLevel returns an error when
+	// the write could not be delivered (client/server mode); in-process
+	// writes always succeed.
 	PermissionLevel() permission.Level
-	PermissionSetLevel(level permission.Level)
+	PermissionSetLevel(level permission.Level) error
 
 	// HostContext returns what the host application has in view, such
 	// as its open files, or the zero context when there is no host.

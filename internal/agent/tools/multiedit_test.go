@@ -48,6 +48,8 @@ func (m *mockPermissionService) DenialReason(toolCallID string) string {
 
 func (m *mockPermissionService) SetAutoMode(enabled bool) {}
 
+func (m *mockPermissionService) SeedAutoMode(configEnabled bool) {}
+
 func (m *mockPermissionService) AutoMode() bool { return false }
 
 func (m *mockPermissionService) EscalationNote(toolCallID string) string {

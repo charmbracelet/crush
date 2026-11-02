@@ -47,6 +47,8 @@ func (m *mockBashPermissionService) DenialReason(toolCallID string) string {
 
 func (m *mockBashPermissionService) SetAutoMode(enabled bool) {}
 
+func (m *mockBashPermissionService) SeedAutoMode(configEnabled bool) {}
+
 func (m *mockBashPermissionService) AutoMode() bool { return false }
 
 func (m *mockBashPermissionService) EscalationNote(toolCallID string) string {
@@ -139,6 +141,8 @@ func (m *recordingPermissionService) DenialReason(toolCallID string) string {
 }
 
 func (m *recordingPermissionService) SetAutoMode(enabled bool) {}
+
+func (m *recordingPermissionService) SeedAutoMode(configEnabled bool) {}
 
 func (m *recordingPermissionService) AutoMode() bool { return false }
 

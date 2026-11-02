@@ -24,8 +24,9 @@ type approvalWorkspace struct {
 }
 
 func (w *approvalWorkspace) PermissionLevel() permission.Level { return w.level }
-func (w *approvalWorkspace) PermissionSetLevel(level permission.Level) {
+func (w *approvalWorkspace) PermissionSetLevel(level permission.Level) error {
 	w.level = level
+	return nil
 }
 func (w *approvalWorkspace) AgentMainID() string { return w.purpose }
 func (w *approvalWorkspace) AgentMainCandidates() []string {

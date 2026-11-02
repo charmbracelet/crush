@@ -24,6 +24,7 @@ type mockSessionAgent struct {
 	model     Model
 	runFunc   func(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error)
 	cancelled []string
+	busy      bool
 }
 
 func (m *mockSessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
@@ -42,7 +43,7 @@ func (m *mockSessionAgent) Cancel(sessionID string) {
 }
 func (m *mockSessionAgent) CancelAll()                                  {}
 func (m *mockSessionAgent) IsSessionBusy(sessionID string) bool         { return false }
-func (m *mockSessionAgent) IsBusy() bool                                { return false }
+func (m *mockSessionAgent) IsBusy() bool                                { return m.busy }
 func (m *mockSessionAgent) QueuedPrompts(sessionID string) int          { return 0 }
 func (m *mockSessionAgent) QueuedPromptsList(sessionID string) []string { return nil }
 func (m *mockSessionAgent) ClearQueue(sessionID string)                 {}
@@ -821,5 +822,31 @@ func TestCoordinatorSetMainAgent(t *testing.T) {
 		err := coord.SetMainAgent("unknown")
 		require.Error(t, err)
 		assert.ErrorIs(t, err, errMainAgentNotFound)
+	})
+
+	t.Run("rejects while any agent is busy", func(t *testing.T) {
+		coder := &mockSessionAgent{busy: true}
+		plan := &mockSessionAgent{}
+		coord := &coordinator{
+			mainAgent:     coder,
+			mainAgentName: config.AgentCoder,
+			agents: map[string]SessionAgent{
+				config.AgentCoder: coder,
+				config.AgentPlan:  plan,
+			},
+		}
+
+		err := coord.SetMainAgent(config.AgentPlan)
+		require.ErrorIs(t, err, ErrAgentBusy)
+		assert.Equal(t, config.AgentCoder, coord.mainAgentName,
+			"a busy turn must keep its agent")
+
+		// The busy run can live on the non-main agent for the whole
+		// handoff window after a switch, so the check is not limited to
+		// the current one.
+		coder.busy = false
+		plan.busy = true
+		err = coord.SetMainAgent(config.AgentPlan)
+		require.ErrorIs(t, err, ErrAgentBusy)
 	})
 }

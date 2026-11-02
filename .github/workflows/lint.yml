@@ -26,5 +26,8 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
+          # v2.15.0 bundles x/tools v0.52, which can read the export data
+          # produced by Go 1.27.2 (required by fantasy v0.45.5). v2.13.1
+          # fails with a typecheck error on that toolchain.
           args: --config=.golangci.yml --timeout=10m ./...
-          version: v2.13.1
+          version: v2.15.0

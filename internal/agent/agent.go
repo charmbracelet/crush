@@ -747,7 +747,6 @@ func ValidateCall(call SessionAgentCall) error {
 // history without persisting anything or exposing tools to the model.
 func (a *sessionAgent) runEphemeral(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
 	largeModel := a.largeModel.Get()
-	systemPrompt := a.systemPrompt.Get()
 	promptPrefix := a.systemPromptPrefix.Get()
 
 	currentSession, err := a.sessions.Get(ctx, call.SessionID)
@@ -763,7 +762,7 @@ func (a *sessionAgent) runEphemeral(ctx context.Context, call SessionAgentCall) 
 
 	agent := fantasy.NewAgent(
 		largeModel.Model,
-		fantasy.WithSystemPrompt(systemPrompt),
+		fantasy.WithSystemPrompt(sideQuestionPrompt()),
 		fantasy.WithUserAgent(userAgent),
 	)
 
@@ -786,7 +785,9 @@ func (a *sessionAgent) runEphemeral(ctx context.Context, call SessionAgentCall) 
 		FrequencyPenalty: call.FrequencyPenalty,
 		OnAuthRefresh:    call.OnAuthRefresh,
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (context.Context, fantasy.PrepareStepResult, error) {
-			prepared := fantasy.PrepareStepResult{Messages: options.Messages}
+			// No tools are registered on this agent; disable them
+			// explicitly so nothing a caller added can leak in.
+			prepared := fantasy.PrepareStepResult{Messages: options.Messages, DisableAllTools: true}
 			for i := range prepared.Messages {
 				prepared.Messages[i].ProviderOptions = nil
 			}

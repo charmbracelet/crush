@@ -216,10 +216,10 @@ func (c *choiceList) handleNavKey(msg tea.KeyPressMsg) bool {
 }
 
 // noteKey returns the map key for the currently focused item's
-// note. Choices use their ID; the question itself uses "_question".
+// note. Choices use their ID; the question itself uses [question.QuestionNoteKey].
 func (c *choiceList) noteKey() string {
 	if c.isFillIn() || c.cursorIdx >= len(c.Request.Choices) {
-		return "_question"
+		return question.QuestionNoteKey
 	}
 	return c.Request.Choices[c.cursorIdx].ID
 }

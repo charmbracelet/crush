@@ -10,9 +10,11 @@ import (
 	"testing"
 
 	"charm.land/fantasy"
+	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 )
 
 // authRecorder is a provider endpoint that records the Authorization header of
@@ -55,7 +57,8 @@ func newPinnedModelCoordinator(t *testing.T, srvURL string) *coordinator {
     "base_url": %q, "api_key": "first",
     "models": [
       {"id": "mock-model", "name": "Mock", "context_window": 8192, "default_max_tokens": 128},
-      {"id": "pinned-model", "name": "Pinned", "context_window": 8192, "default_max_tokens": 128}
+      {"id": "pinned-model", "name": "Pinned", "context_window": 8192, "default_max_tokens": 128,
+       "can_reason": true, "reasoning_levels": ["low", "medium", "high"], "default_reasoning_effort": "low"}
     ]}},
   "models": {"large": {"provider": "mock", "model": "mock-model"},
              "small": {"provider": "mock", "model": "mock-model"}}
@@ -68,6 +71,9 @@ func newPinnedModelCoordinator(t *testing.T, srvURL string) *coordinator {
 		cfg:                cfg,
 		sessions:           env.sessions,
 		messages:           env.messages,
+		permissions:        env.permissions,
+		history:            env.history,
+		filetracker:        *env.filetracker,
 		subagentModelCache: csync.NewMap[subagentModelKey, Model](),
 	}
 	require.NoError(t, coord.rebuildModels(t.Context()))
@@ -124,4 +130,39 @@ func TestPinnedSubagentModelKeepsLastBuildOnFailure(t *testing.T) {
 	set := models()
 	require.Equal(t, "pinned-model", set.Large.ModelCfg.Model, "the last good build is kept")
 	require.Equal(t, "mock-model", set.Small.ModelCfg.Model)
+}
+
+// A built subagent keeps its model selection and effort, and reads the renewed
+// credential, after a refresh rebuilds the shared models.
+func TestBuiltSubagentKeepsSelectionAcrossCredentialRefresh(t *testing.T) {
+	t.Parallel()
+
+	rec := &authRecorder{}
+	srv := httptest.NewServer(rec)
+	t.Cleanup(srv.Close)
+	coord := newPinnedModelCoordinator(t, srv.URL)
+
+	p, err := taskPrompt(prompt.WithWorkingDir(coord.cfg.WorkingDir()))
+	require.NoError(t, err)
+	var wg errgroup.Group
+	sub, err := coord.buildAgent(t.Context(), p, coord.cfg.Config().Agents[config.AgentTask], true,
+		subagentModel{Model: "pinned-model", Effort: "high"}, &wg)
+	require.NoError(t, err)
+	require.NoError(t, wg.Wait())
+
+	before := sub.Model()
+	require.Equal(t, "pinned-model", before.ModelCfg.Model)
+	require.Equal(t, "high", before.ModelCfg.ReasoningEffort)
+	require.Equal(t, "Bearer first", rec.send(t, before))
+
+	pc, ok := coord.cfg.Config().Providers.Get("mock")
+	require.True(t, ok)
+	pc.APIKey = "second"
+	coord.cfg.Config().Providers.Set("mock", pc)
+	require.NoError(t, coord.rebuildModels(t.Context()))
+
+	after := sub.Model()
+	require.Equal(t, "pinned-model", after.ModelCfg.Model, "the pinned model survives the rebuild")
+	require.Equal(t, "high", after.ModelCfg.ReasoningEffort, "the requested effort survives the rebuild")
+	require.Equal(t, "Bearer second", rec.send(t, after))
 }

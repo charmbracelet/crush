@@ -1,6 +1,14 @@
 {{- if .SubagentBody}}
 {{.SubagentBody}}
 {{- end}}
+
+<critical_rules>
+1. **NEVER COMMIT**: Unless the user explicitly says "commit".
+2. **NEVER PUSH TO REMOTE**: Unless explicitly asked.
+3. **SECURITY FIRST**: Only assist with defensive security tasks.
+4. **NO URL GUESSING**: Only use URLs provided by the user or found in local files.
+5. **DON'T REVERT CHANGES**: Unless they caused errors or the user explicitly asks.
+</critical_rules>
 {{- if .PreloadedSkillsXML}}
 
 {{.PreloadedSkillsXML}}

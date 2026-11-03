@@ -168,8 +168,8 @@ func (c *Completions) Open(depth, limit int, hostFiles func() []string, subagent
 	}
 }
 
-// SetItems sets the subagents, files and MCP resources and rebuilds the merged list.
-// Subagents appear first so they are immediately visible at the top of the popup.
+// SetItems sets the subagents, files and MCP resources and rebuilds the
+// merged list. Subagents appear first so they sit at the top of the popup.
 func (c *Completions) SetItems(files []FileCompletionValue, resources []ResourceCompletionValue, subagents []SubagentCompletionValue) {
 	items := make([]list.FilterableItem, 0, len(subagents)+len(files)+len(resources))
 

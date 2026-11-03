@@ -1,4 +1,5 @@
-// Package subagents implements parsing and validation of subagent definition files.
+// Package subagents implements parsing and validation of subagent definition
+// files.
 package subagents
 
 import (
@@ -19,14 +20,15 @@ import (
 )
 
 const (
-	// MaxNameLength is the maximum number of characters allowed in a subagent name.
+	// MaxNameLength is the max characters allowed in a subagent name.
 	MaxNameLength = 64
-	// MaxDescriptionLength is the maximum number of characters allowed in a subagent description.
+	// MaxDescriptionLength is the max characters allowed in a subagent
+	// description.
 	MaxDescriptionLength = 1024
 )
 
-// namePattern matches valid subagent names: lowercase alphanumeric with single hyphens,
-// no leading or trailing hyphens, no consecutive hyphens.
+// namePattern matches valid subagent names: lowercase alphanumeric with single
+// hyphens, no leading or trailing hyphens, no consecutive hyphens.
 var namePattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
 // reservedNames is the set of names that may not be used for subagents.
@@ -86,13 +88,32 @@ type Subagent struct {
 	Name            string   `yaml:"name"`
 	Description     string   `yaml:"description"`
 	Tools           ToolList `yaml:"tools"`
-	DisallowedTools ToolList `yaml:"disallowed_tools"`
+	DisallowedTools ToolList `yaml:"disallowedTools"`
 	Model           string   `yaml:"model"`
+	Effort          string   `yaml:"effort"`
 	Skills          []string `yaml:"skills"`
 	MCPServers      []string `yaml:"mcpServers"`
+	PermissionMode  string   `yaml:"permissionMode"`
+	Color           string   `yaml:"color"`
+	Provider        string   `yaml:"provider"`
 	Body            string   // set from markdown body after frontmatter
 	FilePath        string   // set from the file path passed to Parse
 }
+
+// ResolvedColor returns the subagent's explicit Color if set, or falls back to
+// AutoColor(Name) for a deterministic palette assignment.
+func (s Subagent) ResolvedColor() string {
+	if s.Color != "" {
+		return s.Color
+	}
+	return AutoColor(s.Name)
+}
+
+// PermissionMode values accepted in the PermissionMode field.
+const (
+	PermissionModeDefault           = "default"
+	PermissionModeBypassPermissions = "bypassPermissions"
+)
 
 // ToConfigAgent converts the Subagent into a config.Agent by applying the
 // subagent's tool restrictions and model preference on top of the provided
@@ -132,18 +153,21 @@ func (s *Subagent) ToConfigAgent(base config.Agent) config.Agent {
 	}
 
 	// AllowedMCP nil means "no restrictions configured" (full access to every
-	// MCP server) to config.Agent's consumer; a subagent with no mcp_servers:
+	// MCP server) to config.Agent's consumer; a subagent with no mcpServers:
 	// frontmatter must default to the locked-down empty map instead, matching
-	// the built-in task agent's secure-by-default AllowedMCP.
+	// the built-in task agent's secure-by-default AllowedMCP. Like the tool
+	// pool, the requested servers are capped by the dispatching agent: a
+	// restricted base (plan mode allows none) keeps only the servers it
+	// allows, along with its per-server tool limits.
 	allowedMCP := make(map[string][]string, len(s.MCPServers))
 	for _, srv := range s.MCPServers {
-		allowedMCP[srv] = nil
-	}
-
-	// Determine model: use subagent preference only for the two recognised values.
-	model := base.Model
-	if s.Model == "large" || s.Model == "small" {
-		model = config.SelectedModelType(s.Model)
+		if base.AllowedMCP == nil {
+			allowedMCP[srv] = nil
+			continue
+		}
+		if tools, ok := base.AllowedMCP[srv]; ok {
+			allowedMCP[srv] = tools
+		}
 	}
 
 	return config.Agent{
@@ -152,7 +176,10 @@ func (s *Subagent) ToConfigAgent(base config.Agent) config.Agent {
 		Description:  s.Description,
 		AllowedTools: pool,
 		AllowedMCP:   allowedMCP,
-		Model:        model,
+		// Unused for subagents: the coordinator resolves the model from the
+		// raw `model:` value (alias or specific id). Inherit the base type so
+		// the field stays a valid selection.
+		Model: base.Model,
 	}
 }
 
@@ -190,6 +217,28 @@ func Parse(path string) (*Subagent, error) {
 	return agent, nil
 }
 
+// ValidateAgainst runs Validate plus model-resolution checks. When isKnownModel
+// is non-nil and Model is a non-empty value other than "large"/"small", the
+// resolver must return true or validation fails. A nil resolver skips the
+// model check (used when the caller has no config context).
+func (s *Subagent) ValidateAgainst(isKnownModel func(provider, model string) bool) error {
+	err := s.Validate()
+	if isKnownModel == nil {
+		return err
+	}
+	if s.Model == "" || s.Model == "large" || s.Model == "small" {
+		return err
+	}
+	if !isKnownModel(s.Provider, s.Model) {
+		modelErr := fmt.Errorf("model %q is not a known model id; use \"large\", \"small\", or a valid provider model id", s.Model)
+		if err == nil {
+			return modelErr
+		}
+		return errors.Join(err, modelErr)
+	}
+	return err
+}
+
 // Validate checks that the subagent meets all specification requirements.
 // Multiple errors are joined with errors.Join.
 func (s *Subagent) Validate() error {
@@ -222,10 +271,29 @@ func (s *Subagent) Validate() error {
 		}
 		for _, tool := range s.Tools {
 			if disallowedSet[tool] {
-				errs = append(errs, fmt.Errorf("tool %q appears in both tools and disallowed_tools", tool))
-				break
+				errs = append(errs, fmt.Errorf("tool %q appears in both tools and disallowedTools", tool))
 			}
 		}
+	}
+
+	switch s.Effort {
+	case "", EffortNone, EffortMinimal, EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax:
+	default:
+		errs = append(errs, fmt.Errorf("effort %q is not valid; use one of: %q, %q, %q, %q, %q, %q, %q", s.Effort, EffortNone, EffortMinimal, EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax))
+	}
+
+	switch s.PermissionMode {
+	case "", PermissionModeDefault, PermissionModeBypassPermissions:
+	default:
+		errs = append(errs, fmt.Errorf("permissionMode %q is not valid; use %q or %q", s.PermissionMode, PermissionModeDefault, PermissionModeBypassPermissions))
+	}
+
+	if s.Color != "" && !IsValidColor(s.Color) {
+		errs = append(errs, fmt.Errorf("color %q is not valid; use one of: %s", s.Color, strings.Join(colorPalette[:], ", ")))
+	}
+
+	if s.Provider != "" && (s.Model == "" || s.Model == "large" || s.Model == "small") {
+		errs = append(errs, fmt.Errorf("provider requires a specific model id; use a valid provider model id (not empty, %q, or %q)", "large", "small"))
 	}
 
 	return errors.Join(errs...)
@@ -295,6 +363,18 @@ type Event struct {
 	States []*SubagentState
 }
 
+// cloneSubagents returns a shallow copy of the slice so callers cannot mutate
+// the manager's internal slice header. The underlying *Subagent pointers are
+// shared — subagents are immutable post-discovery.
+func cloneSubagents(in []*Subagent) []*Subagent {
+	if in == nil {
+		return nil
+	}
+	out := make([]*Subagent, len(in))
+	copy(out, in)
+	return out
+}
+
 // cloneStates returns a deep copy of the given state slice so callers cannot
 // accidentally mutate the source.
 func cloneStates(states []*SubagentState) []*SubagentState {
@@ -321,7 +401,8 @@ func DeduplicateStates(all []*SubagentState) []*SubagentState {
 
 	result := make([]*SubagentState, 0, len(seen))
 	for i, s := range all {
-		// If it's the last occurrence of this name, or it has no name (error state), keep it
+		// Keep the last occurrence of this name, or anything without a
+		// name (error state).
 		if s.Name == "" || seen[s.Name] == i {
 			result = append(result, s)
 		}
@@ -331,14 +412,16 @@ func DeduplicateStates(all []*SubagentState) []*SubagentState {
 
 // DiscoverWithStates finds all valid subagent definition files (*.md) in the
 // given paths recursively, and returns both the discovered subagents and a
-// per-file state slice describing parse/validation outcomes.
+// per-file state slice describing parse/validation outcomes. When
+// isKnownModel is non-nil it is used to validate non-alias model ids; nil
+// skips that check.
 //
 // The returned agents preserve the caller's path order: all subagents from
 // paths[0] (sorted by file path), then paths[1], and so on. Deduplicate keeps
 // the last occurrence of a name, so this ordering is what makes later paths —
 // the working directory, per ProjectSubagentsDir — override earlier ones
 // (monorepo root, global dirs) on a name collision.
-func DiscoverWithStates(paths []string) ([]*Subagent, []*SubagentState) {
+func DiscoverWithStates(paths []string, isKnownModel func(provider, model string) bool) ([]*Subagent, []*SubagentState) {
 	var agents []*Subagent
 	var states []*SubagentState
 	var mu sync.Mutex
@@ -384,7 +467,7 @@ func DiscoverWithStates(paths []string) ([]*Subagent, []*SubagentState) {
 				addState("", path, StateError, err)
 				return nil
 			}
-			if err := agent.Validate(); err != nil {
+			if err := agent.ValidateAgainst(isKnownModel); err != nil {
 				slog.Warn("Subagent validation failed", "path", path, "error", err)
 				addState(agent.Name, path, StateError, err)
 				return nil

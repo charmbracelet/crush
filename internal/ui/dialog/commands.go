@@ -53,10 +53,11 @@ type Commands struct {
 		Close key.Binding
 	}
 
-	sessionID  string
-	hasSession bool
-	hasTodos   bool
-	hasQueue   bool
+	sessionID       string
+	parentSessionID string
+	hasSession      bool
+	hasTodos        bool
+	hasQueue        bool
 	// transparent is whether the background color is off on screen,
 	// which a host theme can make differ from the config.
 	transparent bool
@@ -82,17 +83,18 @@ var _ Dialog = (*Commands)(nil)
 
 // NewCommands creates a new commands dialog. transparent is whether the
 // background color is currently off on screen.
-func NewCommands(com *common.Common, sessionID string, hasSession, hasTodos, hasQueue, transparent bool, customCommands []commands.CustomCommand, mcpPrompts []commands.MCPPrompt) (*Commands, error) {
+func NewCommands(com *common.Common, sessionID, parentSessionID string, hasSession, hasTodos, hasQueue, transparent bool, customCommands []commands.CustomCommand, mcpPrompts []commands.MCPPrompt) (*Commands, error) {
 	c := &Commands{
-		com:            com,
-		selected:       SystemCommands,
-		sessionID:      sessionID,
-		hasSession:     hasSession,
-		hasTodos:       hasTodos,
-		hasQueue:       hasQueue,
-		transparent:    transparent,
-		customCommands: customCommands,
-		mcpPrompts:     mcpPrompts,
+		com:             com,
+		selected:        SystemCommands,
+		sessionID:       sessionID,
+		parentSessionID: parentSessionID,
+		hasSession:      hasSession,
+		hasTodos:        hasTodos,
+		hasQueue:        hasQueue,
+		transparent:     transparent,
+		customCommands:  customCommands,
+		mcpPrompts:      mcpPrompts,
 	}
 
 	help := help.New()
@@ -455,8 +457,13 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	commands := []*CommandItem{
 		NewCommandItem(c.com.Styles, "new_session", "New Session", "ctrl+n", ActionNewSession{}).WithAliases("clear"),
 		NewCommandItem(c.com.Styles, "switch_session", "Sessions", "ctrl+s", ActionOpenDialog{SessionsID}),
-		NewCommandItem(c.com.Styles, "switch_model", "Switch Model", "ctrl+l", ActionOpenDialog{ModelsID}),
 	}
+	if c.parentSessionID != "" {
+		commands = append(commands, NewCommandItem(c.com.Styles, "parent_session", "Go to Parent Session", "ctrl/alt+up", ActionGoToParentSession{SessionID: c.parentSessionID}))
+	}
+	commands = append(commands,
+		NewCommandItem(c.com.Styles, "switch_model", "Switch Model", "ctrl+l", ActionOpenDialog{ModelsID}),
+	)
 
 	// Only show compact command if there's an active session
 	if c.hasSession {

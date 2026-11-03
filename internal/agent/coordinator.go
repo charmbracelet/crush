@@ -177,6 +177,9 @@ type coordinator struct {
 	// Subagents discovery results (session-start snapshot).
 	activeSubagents []*subagents.Subagent
 
+	// runtime tracks which sub-agents are currently running.
+	runtime *subagents.Runtime
+
 	readyWg errgroup.Group
 
 	hostContext csync.Value[proto.HostContext]
@@ -203,6 +206,7 @@ type CoordinatorOptions struct {
 	Skills       *skills.Manager
 	SubagentsMgr *subagents.Manager
 	HookRunner   *hooks.Runner
+	Runtime      *subagents.Runtime
 	Interactive  bool
 }
 
@@ -242,6 +246,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	if opts.SubagentsMgr != nil {
 		c.activeSubagents = opts.SubagentsMgr.ActiveSubagents()
 	}
+	c.runtime = opts.Runtime
 
 	agentCfg, ok := opts.Config.Config().Agents[config.AgentCoder]
 	if !ok {
@@ -253,7 +258,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		return nil, err
 	}
 
-	agent, err := c.buildAgent(ctx, coderPrompt, agentCfg, false)
+	agent, err := c.buildAgent(ctx, coderPrompt, agentCfg, false, "")
 	if err != nil {
 		return nil, err
 	}
@@ -269,7 +274,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		return nil, err
 	}
 
-	planAgent, err := c.buildAgent(ctx, planSystemPrompt, planCfg, false)
+	planAgent, err := c.buildAgent(ctx, planSystemPrompt, planCfg, false, "")
 	if err != nil {
 		return nil, err
 	}
@@ -839,7 +844,18 @@ func mergeCallOptions(model Model, cfg config.ProviderConfig) (fantasy.ProviderO
 	return modelOptions, temp, topP, topK, freqPenalty, presPenalty
 }
 
-func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, agent config.Agent, isSubAgent bool) (SessionAgent, error) {
+// applyEffortToBuiltModels returns copies of large and small with the given
+// effort level applied to the large model's config. The small model is returned
+// unchanged. It is a no-op when effort is empty.
+func applyEffortToBuiltModels(effort string, large, small Model) (Model, Model) {
+	if effort == "" {
+		return large, small
+	}
+	large.ModelCfg = subagents.ApplyEffortToModel(effort, large.ModelCfg, large.CatwalkCfg)
+	return large, small
+}
+
+func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, agent config.Agent, isSubAgent bool, effort string) (SessionAgent, error) {
 	if c.models.Get().large.Model == nil {
 		if err := c.rebuildModels(ctx); err != nil {
 			return nil, err
@@ -848,6 +864,14 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	models := c.mainModels
 	if isSubAgent {
 		models = c.subAgentModels
+	}
+	if effort != "" {
+		shared := models
+		models = func() ModelSet {
+			set := shared()
+			set.Large, set.Small = applyEffortToBuiltModels(effort, set.Large, set.Small)
+			return set
+		}
 	}
 	large := models().Large
 
@@ -902,10 +926,20 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	return result, nil
 }
 
+// shouldExposeDispatcher reports whether the dispatcher agent tool should be
+// included for an agent. Sub-agents never receive it — that prevents recursive
+// delegation regardless of what their AllowedTools list contains.
+func shouldExposeDispatcher(allowed []string, isSubAgent bool) bool {
+	if isSubAgent {
+		return false
+	}
+	return slices.Contains(allowed, AgentToolName)
+}
+
 func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubAgent bool) ([]fantasy.AgentTool, error) {
 	var allTools []fantasy.AgentTool
-	if slices.Contains(agent.AllowedTools, AgentToolName) {
-		agentTool, err := c.agentTool(ctx)
+	if shouldExposeDispatcher(agent.AllowedTools, isSubAgent) {
+		agentTool, err := c.agentTool(ctx, agent)
 		if err != nil {
 			return nil, err
 		}
@@ -970,7 +1004,10 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		)
 	}
 
-	if len(c.cfg.Config().MCP) > 0 {
+	// Scoped agents (non-nil AllowedMCP) lose MCP resource browsing
+	// entirely; per-server filtering inside the resource tools would
+	// restore it.
+	if len(c.cfg.Config().MCP) > 0 && agent.AllowedMCP == nil {
 		allTools = append(
 			allTools,
 			tools.NewListMCPResourcesTool(c.cfg, c.permissions),
@@ -1012,12 +1049,8 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		return strings.Compare(a.Info().Name, b.Info().Name)
 	})
 
-	// Wrap tools with hook interception for the top-level agent only.
-	// Sub-agents (the `agent` task tool, `agentic_fetch`, etc.) run
-	// without hook interception to avoid firing the user's hook N times
-	// per delegated turn. The top-level invocation of the sub-agent tool
-	// itself is still wrapped from the coder's side.
-	filteredTools = wrapToolsWithHooks(filteredTools, c.hookRunner, isSubAgent)
+	// Only the built-in task agent skips hooks; see wrapToolsWithHooks.
+	filteredTools = wrapToolsWithHooks(filteredTools, c.hookRunner, isSubAgent && agent.ID == config.AgentTask)
 
 	return filteredTools, nil
 }
@@ -1689,6 +1722,9 @@ type subAgentParams struct {
 	ToolCallID     string
 	Prompt         string
 	SessionTitle   string
+	AgentName      string
+	AgentColor     string
+	AgentModel     string
 	// SessionSetup is an optional callback invoked after session creation
 	// but before agent execution, for custom session configuration.
 	SessionSetup func(sessionID string)
@@ -1720,6 +1756,10 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 	if params.SessionSetup != nil {
 		params.SessionSetup(session.ID)
 	}
+
+	// Register with the runtime tracker and remove on return.
+	c.runtime.Register(params.SessionID, session.ID, params.AgentName, params.AgentColor, params.AgentModel)
+	defer c.runtime.Unregister(session.ID)
 
 	// Get model configuration
 	model := params.Agent.Model()

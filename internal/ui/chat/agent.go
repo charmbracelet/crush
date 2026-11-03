@@ -2,6 +2,7 @@ package chat
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -132,6 +133,23 @@ func (a *AgentToolMessageItem) AddNestedTool(tool ToolMessageItem) {
 	a.Bump()
 }
 
+// collapsedNestedTools is how many of an agent's latest tool calls show while
+// its item is collapsed. Drawing every call made a busy agent's item slower on
+// each frame and taller than the screen.
+const collapsedNestedTools = 10
+
+// addNestedTools adds an agent's tool calls to its tree, only the latest ones
+// unless the item is expanded.
+func addNestedTools(sty *styles.Styles, root *tree.Tree, nested []ToolMessageItem, width int, expanded bool) {
+	if hidden := len(nested) - collapsedNestedTools; hidden > 0 && !expanded {
+		root.Child(sty.Tool.ParamMain.Render(fmt.Sprintf("… %d earlier tool calls", hidden)))
+		nested = nested[hidden:]
+	}
+	for _, tool := range nested {
+		root.Child(tool.Render(width))
+	}
+}
+
 // AgentToolRenderContext renders agent tool messages.
 type AgentToolRenderContext struct {
 	agent *AgentToolMessageItem
@@ -194,10 +212,7 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	// Build tree with nested tool calls.
 	childTools := tree.Root(header)
 
-	for _, nestedTool := range r.agent.nestedTools {
-		childView := nestedTool.Render(remainingWidth)
-		childTools.Child(childView)
-	}
+	addNestedTools(sty, childTools, r.agent.nestedTools, remainingWidth, opts.ExpandedContent)
 
 	// Build parts.
 	var parts []string
@@ -362,10 +377,7 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 	// Build tree with nested tool calls.
 	childTools := tree.Root(header)
 
-	for _, nestedTool := range r.fetch.nestedTools {
-		childView := nestedTool.Render(remainingWidth)
-		childTools.Child(childView)
-	}
+	addNestedTools(sty, childTools, r.fetch.nestedTools, remainingWidth, opts.ExpandedContent)
 
 	// Build parts.
 	var parts []string

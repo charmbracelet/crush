@@ -1021,12 +1021,50 @@ func (c *Config) IsModelAvailable(provider, model string) bool {
 	return false
 }
 
+// SubscriptionModels returns the models a ChatGPT or Grok login grants, or nil
+// when the provider has no such login or its list has not been fetched yet.
+// The OpenAI and xAI providers each hold exactly one credential: signed in
+// with a subscription, only these models work, and the API catalog would only
+// 404.
+func (p ProviderConfig) SubscriptionModels() []catwalk.Model {
+	if p.OAuthToken == nil {
+		return nil
+	}
+	switch catwalk.InferenceProvider(p.ID) {
+	case catwalk.InferenceProviderOpenAI:
+		return p.ChatGPTModels
+	case catwalk.InferenceProviderXAI:
+		return p.GrokModels
+	}
+	return nil
+}
+
+// UsableModels returns the models this provider can serve with its current
+// credential: the subscription's models when it has them, the catalog
+// otherwise.
+func (p ProviderConfig) UsableModels() []catwalk.Model {
+	if subscription := p.SubscriptionModels(); len(subscription) > 0 {
+		return subscription
+	}
+	return p.Models
+}
+
+// usableModel returns the usable model with the given id, or nil.
+func (p ProviderConfig) usableModel(modelID string) *catwalk.Model {
+	for _, m := range p.UsableModels() {
+		if m.ID == modelID {
+			return &m
+		}
+	}
+	return nil
+}
+
 // FindModelProvider resolves a model id to the enabled provider that offers
-// it, searching every catalog GetModel does (including the ChatGPT and Grok
-// subscription lists). A non-empty providerID restricts the search to that
-// provider. With no providerID the id must be offered by exactly one enabled
-// provider: an id several providers share is an error rather than a guess,
-// so the caller has to name the provider.
+// it, searching the models each provider can use with its current credential
+// (see ProviderConfig.UsableModels). A non-empty providerID restricts the
+// search to that provider. With no providerID the id must be offered by
+// exactly one enabled provider: an id several providers share is an error
+// rather than a guess, so the caller has to name the provider.
 func (c *Config) FindModelProvider(providerID, modelID string) (ProviderConfig, catwalk.Model, error) {
 	if modelID == "" {
 		return ProviderConfig{}, catwalk.Model{}, errors.New("model id is empty")
@@ -1036,9 +1074,9 @@ func (c *Config) FindModelProvider(providerID, modelID string) (ProviderConfig, 
 		if !ok || p.Disable {
 			return ProviderConfig{}, catwalk.Model{}, fmt.Errorf("provider %q is not configured or is disabled", providerID)
 		}
-		m := c.GetModel(providerID, modelID)
+		m := p.usableModel(modelID)
 		if m == nil {
-			return ProviderConfig{}, catwalk.Model{}, fmt.Errorf("model %q is not offered by provider %q", modelID, providerID)
+			return ProviderConfig{}, catwalk.Model{}, fmt.Errorf("model %q is not offered by provider %q%s", modelID, providerID, similarModelsHint([]ProviderConfig{p}, modelID))
 		}
 		return p, *m, nil
 	}
@@ -1048,14 +1086,14 @@ func (c *Config) FindModelProvider(providerID, modelID string) (ProviderConfig, 
 		ids   []string
 	)
 	for _, p := range c.EnabledProviders() {
-		if m := c.GetModel(p.ID, modelID); m != nil {
+		if m := p.usableModel(modelID); m != nil {
 			found, model = p, *m
 			ids = append(ids, p.ID)
 		}
 	}
 	switch len(ids) {
 	case 0:
-		return ProviderConfig{}, catwalk.Model{}, fmt.Errorf("model %q is not offered by any configured provider", modelID)
+		return ProviderConfig{}, catwalk.Model{}, fmt.Errorf("model %q is not offered by any configured provider%s", modelID, similarModelsHint(c.EnabledProviders(), modelID))
 	case 1:
 		return found, model, nil
 	default:
@@ -1065,6 +1103,33 @@ func (c *Config) FindModelProvider(providerID, modelID string) (ProviderConfig, 
 			modelID, strings.Join(ids, ", "),
 		)
 	}
+}
+
+// maxSimilarModels caps the suggestions in similarModelsHint.
+const maxSimilarModels = 10
+
+// similarModelsHint lists model ids from providers whose id or name contains
+// query (case-insensitive), so a loose name like "sonnet" in an error points at
+// the real ids. It returns "" when nothing matches.
+func similarModelsHint(providers []ProviderConfig, query string) string {
+	q := strings.ToLower(query)
+	var ids []string
+	for _, p := range providers {
+		for _, m := range p.UsableModels() {
+			if strings.Contains(strings.ToLower(m.ID), q) || strings.Contains(strings.ToLower(m.Name), q) {
+				ids = append(ids, m.ID)
+			}
+		}
+	}
+	if len(ids) == 0 {
+		return ""
+	}
+	slices.Sort(ids)
+	ids = slices.Compact(ids)
+	if len(ids) > maxSimilarModels {
+		ids = ids[:maxSimilarModels]
+	}
+	return "; similar: " + strings.Join(ids, ", ")
 }
 
 // ValidateModel reports why a model id (optionally pinned to a provider)

@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -24,6 +25,9 @@ import (
 
 type stubSessionService struct {
 	sessions map[string]session.Session
+	// onListChildren, when set, runs inside ListChildSessions to simulate
+	// work that races the query.
+	onListChildren func()
 }
 
 func (s *stubSessionService) Subscribe(context.Context) <-chan pubsub.Event[session.Session] {
@@ -57,8 +61,17 @@ func (s *stubSessionService) List(context.Context) ([]session.Session, error) {
 	return nil, nil
 }
 
-func (s *stubSessionService) ListChildSessions(context.Context, string) ([]session.Session, error) {
-	return nil, nil
+func (s *stubSessionService) ListChildSessions(_ context.Context, parentID string) ([]session.Session, error) {
+	if s.onListChildren != nil {
+		s.onListChildren()
+	}
+	var out []session.Session
+	for _, sess := range s.sessions {
+		if sess.ParentSessionID == parentID {
+			out = append(out, sess)
+		}
+	}
+	return out, nil
 }
 
 func (s *stubSessionService) Save(_ context.Context, sess session.Session) (session.Session, error) {
@@ -168,9 +181,39 @@ func TestAppWorkspace_RunningSubagents_WithEntries(t *testing.T) {
 	require.Equal(t, "red", b.Color)
 }
 
+// TestAppWorkspace_RunningSubagents_FinishDuringQuery verifies that a
+// subagent finishing while the token query runs is not returned: an older
+// refresh landing after the Finish event's refresh would otherwise leave a
+// finished subagent shown as running.
+func TestAppWorkspace_RunningSubagents_FinishDuringQuery(t *testing.T) {
+	t.Parallel()
+
+	rt := subagents.NewRuntime()
+	t.Cleanup(rt.Shutdown)
+
+	rt.Register("parent-1", "child-A", "agent-alpha", "blue", "")
+	rt.Register("parent-1", "child-B", "agent-beta", "red", "")
+
+	sessions := &stubSessionService{
+		sessions:       map[string]session.Session{},
+		onListChildren: func() { rt.Finish("child-A", subagents.StatusCompleted) },
+	}
+	w := &AppWorkspace{
+		app:   &app.App{SubagentRuntime: rt, Sessions: sessions},
+		store: config.NewTestStore(&config.Config{}),
+	}
+
+	got := w.RunningSubagents("parent-1")
+	require.Len(t, got, 1)
+	require.Equal(t, "child-B", got[0].ChildSessionID)
+}
+
 // TestAppWorkspace_RunningSubagents_TokenEnrichment verifies that when a child
 // session exists, its PromptTokens and CompletionTokens are included in the
-// returned RunningSubagentInfo.
+// returned RunningSubagentInfo. Enrichment comes from one ListChildSessions
+// query for the parent (not a Get per entry), so children that are not
+// registered on the runtime must not appear, and a registered entry without a
+// child session keeps zero counts.
 func TestAppWorkspace_RunningSubagents_TokenEnrichment(t *testing.T) {
 	t.Parallel()
 
@@ -178,13 +221,22 @@ func TestAppWorkspace_RunningSubagents_TokenEnrichment(t *testing.T) {
 	t.Cleanup(rt.Shutdown)
 
 	rt.Register("parent-1", "child-tok", "agent-tok", "green", "")
+	rt.Register("parent-1", "child-nosession", "agent-lost", "blue", "")
 
 	sessions := &stubSessionService{
 		sessions: map[string]session.Session{
 			"child-tok": {
 				ID:               "child-tok",
+				ParentSessionID:  "parent-1",
 				PromptTokens:     100,
 				CompletionTokens: 200,
+			},
+			// A finished sibling child: returned by ListChildSessions but
+			// not registered on the runtime, so it must not be enriched.
+			"child-done": {
+				ID:              "child-done",
+				ParentSessionID: "parent-1",
+				PromptTokens:    500,
 			},
 		},
 	}
@@ -198,9 +250,17 @@ func TestAppWorkspace_RunningSubagents_TokenEnrichment(t *testing.T) {
 	}
 
 	got := w.RunningSubagents("parent-1")
-	require.Len(t, got, 1)
-	require.Equal(t, int64(100), got[0].PromptTokens)
-	require.Equal(t, int64(200), got[0].CompletionTokens)
+	require.Len(t, got, 2)
+
+	byID := map[string]RunningSubagentInfo{}
+	for _, info := range got {
+		byID[info.ChildSessionID] = info
+	}
+
+	require.Equal(t, int64(100), byID["child-tok"].PromptTokens)
+	require.Equal(t, int64(200), byID["child-tok"].CompletionTokens)
+	require.Zero(t, byID["child-nosession"].PromptTokens)
+	require.Zero(t, byID["child-nosession"].CompletionTokens)
 }
 
 // TestAppWorkspace_CancelSubagent_NilCoordinator verifies that calling
@@ -284,6 +344,164 @@ func TestAppWorkspace_AllSubagents_ScopeDetection(t *testing.T) {
 	require.Equal(t, "project", byName["proj-agent"].Scope)
 	require.Equal(t, "user", byName["user-agent"].Scope)
 	require.Equal(t, "builtin", byName["builtin-agent"].Scope)
+}
+
+// TestAppWorkspace_AllSubagents_IncludesErrorEntries verifies that definition
+// files which failed to parse or validate are still surfaced (with Error set),
+// so the Library can show the diagnostic instead of silently dropping them.
+func TestAppWorkspace_AllSubagents_IncludesErrorEntries(t *testing.T) {
+	t.Parallel()
+
+	workDir := t.TempDir()
+
+	goodFile := filepath.Join(workDir, "good.md")
+	brokenFile := filepath.Join(workDir, "broken.md")
+
+	goodAgent := &subagents.Subagent{Name: "good", Description: "Good.", FilePath: goodFile}
+	mgr := subagents.NewManager(
+		[]*subagents.Subagent{goodAgent},
+		[]*subagents.Subagent{goodAgent},
+		[]*subagents.SubagentState{
+			{Name: "good", Path: goodFile, State: subagents.StateNormal},
+			{Name: "broken", Path: brokenFile, State: subagents.StateError, Err: errors.New("unclosed frontmatter")},
+			// An unnamed error (parse failure) derives its label from the file name.
+			{Name: "", Path: filepath.Join(workDir, "garbage.md"), State: subagents.StateError, Err: errors.New("no YAML frontmatter found")},
+		},
+	)
+	t.Cleanup(mgr.Shutdown)
+
+	w := &AppWorkspace{
+		app:   &app.App{Subagents: mgr},
+		store: newStoreForWorkDir(workDir),
+	}
+
+	got := w.AllSubagents()
+	byPath := map[string]SubagentDefInfo{}
+	for _, info := range got {
+		byPath[info.FilePath] = info
+	}
+
+	require.Len(t, got, 3)
+
+	require.Empty(t, byPath[goodFile].Error)
+	require.Equal(t, "unclosed frontmatter", byPath[brokenFile].Error)
+	require.Equal(t, "broken", byPath[brokenFile].Name)
+
+	unnamed := byPath[filepath.Join(workDir, "garbage.md")]
+	require.Equal(t, "garbage", unnamed.Name)
+	require.Equal(t, "no YAML frontmatter found", unnamed.Error)
+
+	// Broken entries are merged into the sort, not appended after it, so the
+	// Library reads as one alphabetical list.
+	names := make([]string, len(got))
+	for i, info := range got {
+		names[i] = info.Name
+	}
+	require.Equal(t, []string{"broken", "garbage", "good"}, names)
+}
+
+// TestAppWorkspace_AllSubagents_NameCollisionKeepsBothRows verifies that a
+// broken definition claiming a name a valid definition already owns is still
+// listed, and sorts next to it. Both rows carry the same name, so the Library
+// distinguishes them by scope and by the diagnostic on the broken one.
+func TestAppWorkspace_AllSubagents_NameCollisionKeepsBothRows(t *testing.T) {
+	t.Parallel()
+
+	workDir := t.TempDir()
+	validFile := filepath.Join(workDir, "valid", "reviewer.md")
+	brokenFile := filepath.Join(workDir, "broken", "reviewer.md")
+
+	validAgent := &subagents.Subagent{Name: "reviewer", Description: "Valid.", FilePath: validFile}
+	mgr := subagents.NewManager(
+		[]*subagents.Subagent{validAgent},
+		[]*subagents.Subagent{validAgent},
+		[]*subagents.SubagentState{
+			{Name: "reviewer", Path: validFile, State: subagents.StateNormal},
+			{Name: "reviewer", Path: brokenFile, State: subagents.StateError, Err: errors.New("unknown model")},
+		},
+	)
+	t.Cleanup(mgr.Shutdown)
+
+	w := &AppWorkspace{
+		app:   &app.App{Subagents: mgr},
+		store: newStoreForWorkDir(workDir),
+	}
+
+	got := w.AllSubagents()
+	require.Len(t, got, 2, "the broken file must not be hidden by its valid namesake")
+	for _, info := range got {
+		require.Equal(t, "reviewer", info.Name)
+	}
+	// Sorted by path within the name, so "broken/" precedes "valid/".
+	require.Equal(t, brokenFile, got[0].FilePath)
+	require.Equal(t, "unknown model", got[0].Error)
+	require.Equal(t, validFile, got[1].FilePath)
+	require.Empty(t, got[1].Error)
+}
+
+// TestAppWorkspace_AllSubagents_Deletable verifies that Deletable reflects the
+// same trust rule DeleteUserSubagent enforces (InGlobalDir), not the display
+// scope: a file in the global user dir is deletable, a project file is not.
+// Not parallel: pins the global subagents dir via CRUSH_SUBAGENTS_DIR.
+func TestAppWorkspace_AllSubagents_Deletable(t *testing.T) {
+	workDir := t.TempDir()
+	userDir := t.TempDir()
+	t.Setenv("CRUSH_SUBAGENTS_DIR", userDir)
+
+	userFile := filepath.Join(userDir, "user-agent.md")
+	require.NoError(t, os.WriteFile(
+		userFile,
+		[]byte("---\nname: user-agent\ndescription: User agent.\n---\n\nBody.\n"),
+		0o644,
+	))
+	projectFile := filepath.Join(workDir, ".crush", "subagents", "proj-agent.md")
+	require.NoError(t, os.MkdirAll(filepath.Dir(projectFile), 0o755))
+	require.NoError(t, os.WriteFile(
+		projectFile,
+		[]byte("---\nname: proj-agent\ndescription: Project agent.\n---\n\nBody.\n"),
+		0o644,
+	))
+
+	userAgent := &subagents.Subagent{Name: "user-agent", Description: "User agent.", FilePath: userFile}
+	projAgent := &subagents.Subagent{Name: "proj-agent", Description: "Project agent.", FilePath: projectFile}
+	mgr := subagents.NewManager(
+		[]*subagents.Subagent{userAgent, projAgent},
+		[]*subagents.Subagent{userAgent, projAgent},
+		nil,
+	)
+	t.Cleanup(mgr.Shutdown)
+
+	w := &AppWorkspace{
+		app:   &app.App{Subagents: mgr},
+		store: config.NewTestStoreWithWorkingDir(&config.Config{}, workDir),
+	}
+
+	byName := map[string]SubagentDefInfo{}
+	for _, info := range w.AllSubagents() {
+		byName[info.Name] = info
+	}
+
+	require.True(t, byName["user-agent"].Deletable, "global-dir subagent must be deletable")
+	require.False(t, byName["proj-agent"].Deletable, "project subagent must not be deletable")
+}
+
+// TestAppWorkspace_DeleteUserSubagent_SkipsErrorEntries verifies that a broken
+// entry sharing a name with a valid one cannot shadow the valid target.
+func TestAppWorkspace_DeleteUserSubagent_SkipsErrorEntries(t *testing.T) {
+	t.Parallel()
+
+	mgr := subagents.NewManager(nil, nil, []*subagents.SubagentState{
+		{Name: "broken", Path: "/nowhere/broken.md", State: subagents.StateError, Err: errors.New("bad")},
+	})
+	t.Cleanup(mgr.Shutdown)
+
+	w := &AppWorkspace{
+		app:   &app.App{Subagents: mgr},
+		store: config.NewTestStore(&config.Config{}),
+	}
+
+	err := w.DeleteUserSubagent("broken")
+	require.ErrorContains(t, err, "not found")
 }
 
 // TestAppWorkspace_DeleteUserSubagent_NotFound verifies that deleting a
@@ -517,8 +735,13 @@ func TestAppWorkspace_DeleteUserSubagent_ReloadValidatesModel(t *testing.T) {
 
 	require.NoError(t, w.DeleteUserSubagent("keep-agent"))
 
+	// bad-agent must not be a valid entry after the reload. It may still be
+	// surfaced as an error diagnostic (Error set), which is how the Library
+	// reports a definition that failed validation.
 	for _, info := range w.AllSubagents() {
-		require.NotEqual(t, "bad-agent", info.Name,
-			"subagent with an unknown model must stay rejected after reload")
+		if info.Name == "bad-agent" {
+			require.NotEmpty(t, info.Error,
+				"subagent with an unknown model must only appear as an error entry after reload")
+		}
 	}
 }

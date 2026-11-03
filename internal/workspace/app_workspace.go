@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -481,6 +484,11 @@ func (w *AppWorkspace) ActiveSubagents() []SubagentInfo {
 	return result
 }
 
+// runningSubagentsEnrichTimeout bounds the token-count lookup in
+// RunningSubagents. It is generous for a local query and only exists so a
+// wedged database cannot park a refresh goroutine forever.
+const runningSubagentsEnrichTimeout = 5 * time.Second
+
 // RunningSubagents returns info about all subagent sessions currently running
 // under the given parentSessionID, enriched with token counts from the session
 // service where available. Returns nil when SubagentRuntime is nil.
@@ -492,6 +500,37 @@ func (w *AppWorkspace) RunningSubagents(parentSessionID string) []RunningSubagen
 	if len(entries) == 0 {
 		return nil
 	}
+
+	// Enrich token counts with one query for every child of the parent
+	// rather than a Get per running entry: this runs on every
+	// RuntimeEvent-driven refresh (register, status change, finish), so the
+	// N round trips per event added up. A lookup failure leaves the counts
+	// at zero.
+	//
+	// The deadline is the only bound available here: RunningSubagents takes no
+	// context (it is called from tea.Cmd closures that have none to give), and
+	// token counts are decoration — a slow or wedged query must degrade to
+	// zero counts rather than pin the refresh goroutine indefinitely.
+	tokensByID := make(map[string]session.Session)
+	if w.app.Sessions != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), runningSubagentsEnrichTimeout)
+		children, err := w.app.Sessions.ListChildSessions(ctx, parentSessionID)
+		cancel()
+		if err == nil {
+			for _, child := range children {
+				tokensByID[child.ID] = child
+			}
+		}
+		// Re-read the runtime after the query: a subagent can finish while
+		// it runs, and its Finish event's refresh may skip the query and
+		// land first. Building from the older snapshot would then resurrect
+		// the finished entry with nothing left to clear it.
+		entries = w.app.SubagentRuntime.List(parentSessionID)
+		if len(entries) == 0 {
+			return nil
+		}
+	}
+
 	result := make([]RunningSubagentInfo, len(entries))
 	for i, e := range entries {
 		info := RunningSubagentInfo{
@@ -503,11 +542,9 @@ func (w *AppWorkspace) RunningSubagents(parentSessionID string) []RunningSubagen
 			Status:          e.Status,
 			StartedAt:       e.StartedAt,
 		}
-		if w.app.Sessions != nil {
-			if sess, err := w.app.Sessions.Get(context.Background(), e.ChildSessionID); err == nil {
-				info.PromptTokens = sess.PromptTokens
-				info.CompletionTokens = sess.CompletionTokens
-			}
+		if sess, ok := tokensByID[e.ChildSessionID]; ok {
+			info.PromptTokens = sess.PromptTokens
+			info.CompletionTokens = sess.CompletionTokens
 		}
 		result[i] = info
 	}
@@ -525,7 +562,15 @@ func (w *AppWorkspace) CancelSubagent(childSessionID string) {
 
 // AllSubagents returns all discovered subagent definitions projected to the
 // frontend-facing SubagentDefInfo shape, with scope detection relative to the
-// workspace working directory. Returns nil when the Subagents manager is nil.
+// workspace working directory. Definitions that failed to parse or validate
+// are included with Error set, so the Library can surface the diagnostic
+// instead of silently dropping the file. Returns nil when the Subagents
+// manager is nil.
+//
+// The result is sorted by name then file path. Broken definitions are merged
+// in from the discovery states rather than appended, so a file that fails to
+// validate lands next to the valid definition whose name it claims instead of
+// in a separate block at the end of the Library.
 func (w *AppWorkspace) AllSubagents() []SubagentDefInfo {
 	mgr := w.app.Subagents
 	if mgr == nil {
@@ -542,17 +587,50 @@ func (w *AppWorkspace) AllSubagents() []SubagentDefInfo {
 	}
 
 	projectDirs := config.ProjectSubagentsDir(workingDir)
-	result := make([]SubagentDefInfo, len(all))
-	for i, s := range all {
-		result[i] = SubagentDefInfo{
+	result := make([]SubagentDefInfo, 0, len(all))
+	for _, s := range all {
+		result = append(result, SubagentDefInfo{
 			Name:        s.Name,
 			Description: s.Description,
 			Color:       s.ResolvedColor(),
 			FilePath:    s.FilePath,
 			Scope:       subagentScope(s.FilePath, workingDir, projectDirs),
 			Disabled:    disabledSet[s.Name],
-		}
+			// Deletion is gated by the same trust rule DeleteUserSubagent
+			// enforces, so the dialog only offers to delete what the
+			// workspace will actually remove.
+			Deletable: subagents.InGlobalDir(s.FilePath),
+		})
 	}
+	for _, st := range mgr.States() {
+		if st.State != subagents.StateError {
+			continue
+		}
+		name := st.Name
+		if name == "" {
+			name = strings.TrimSuffix(filepath.Base(st.Path), filepath.Ext(st.Path))
+		}
+		errMsg := ""
+		if st.Err != nil {
+			errMsg = st.Err.Error()
+		}
+		result = append(result, SubagentDefInfo{
+			Name:     name,
+			Color:    subagents.AutoColor(name),
+			FilePath: st.Path,
+			Scope:    subagentScope(st.Path, workingDir, projectDirs),
+			Error:    errMsg,
+		})
+	}
+	// Name first so a broken file sorts beside the valid definition it
+	// shadows or duplicates; path breaks the tie, since several files may
+	// legitimately claim one name (only one of them wins discovery).
+	slices.SortStableFunc(result, func(a, b SubagentDefInfo) int {
+		if c := strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name)); c != 0 {
+			return c
+		}
+		return strings.Compare(strings.ToLower(a.FilePath), strings.ToLower(b.FilePath))
+	})
 	return result
 }
 
@@ -586,6 +664,10 @@ func subagentScope(filePath, workingDir string, projectDirs []string) string {
 func (w *AppWorkspace) DeleteUserSubagent(name string) error {
 	var target *SubagentDefInfo
 	for _, info := range w.AllSubagents() {
+		// Broken (unparseable/invalid) entries are informational only.
+		if info.Error != "" {
+			continue
+		}
 		if info.Name == name {
 			cp := info
 			target = &cp

@@ -135,8 +135,8 @@ func DefaultKeyMap() KeyMap {
 			key.WithHelp("ctrl/alt+up", "go to parent session"),
 		),
 		Subagents: key.NewBinding(
-			key.WithKeys("ctrl+x"),
-			key.WithHelp("ctrl+x", "subagents"),
+			key.WithKeys("ctrl+q"),
+			key.WithHelp("ctrl+q", "subagents"),
 		),
 	}
 

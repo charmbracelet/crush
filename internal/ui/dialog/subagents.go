@@ -28,8 +28,9 @@ type RunningSubagentsFetchedMsg struct {
 // Update path by InitialFetchCmd. Exported for the same reason as
 // [RunningSubagentsFetchedMsg]: the UI model routes it back into the dialog.
 type SubagentsInitialDataMsg struct {
-	Running []workspace.RunningSubagentInfo
-	Library []workspace.SubagentDefInfo
+	ParentSessionID string
+	Running         []workspace.RunningSubagentInfo
+	Library         []workspace.SubagentDefInfo
 }
 
 // InitialFetchCmd resolves the running and library data off the Update path
@@ -40,8 +41,9 @@ func (s *Subagents) InitialFetchCmd() tea.Cmd {
 	parentSessionID := s.parentSessionID
 	return func() tea.Msg {
 		return SubagentsInitialDataMsg{
-			Running: ws.RunningSubagents(parentSessionID),
-			Library: ws.AllSubagents(),
+			ParentSessionID: parentSessionID,
+			Running:         ws.RunningSubagents(parentSessionID),
+			Library:         ws.AllSubagents(),
 		}
 	}
 }
@@ -194,8 +196,11 @@ func (s *Subagents) HandleMsg(msg tea.Msg) Action {
 		}
 		return nil
 	case SubagentsInitialDataMsg:
-		s.applyRunning(ev.Running)
-		s.setLibrary(ev.Library)
+		// Drop data fetched for an earlier dialog instance.
+		if ev.ParentSessionID == s.parentSessionID {
+			s.applyRunning(ev.Running)
+			s.setLibrary(ev.Library)
+		}
 		return nil
 	case pubsub.Event[subagents.Event]:
 		s.refreshLibrary()

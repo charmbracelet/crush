@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	uistyles "github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 )
 
@@ -66,9 +67,9 @@ func TestLibrarySubagentItem_DisabledItemRendered(t *testing.T) {
 }
 
 // TestLibrarySubagentItem_SelectedStyleReappliedAfterIcon verifies that the
-// selected-row highlight survives past the dot, a pre-styled segment ending
-// in an SGR reset, so text concatenated raw after it and wrapped in one
-// outer style loses the highlight.
+// selected-row highlight survives past the status icon and dot. Both are
+// pre-styled segments ending in an SGR reset, so text concatenated raw after
+// them and wrapped in one outer style loses the highlight.
 func TestLibrarySubagentItem_SelectedStyleReappliedAfterIcon(t *testing.T) {
 	t.Parallel()
 
@@ -81,8 +82,9 @@ func TestLibrarySubagentItem_SelectedStyleReappliedAfterIcon(t *testing.T) {
 	item.SetFocused(true)
 
 	bg := st.Dialog.SelectedItem.GetBackground()
+	icon := ansi.Strip(st.Tool.IconSuccess.String())
 	scr := drawItem(item.Render(60), 60, 2)
-	for _, text := range []string{"●", "my-agent", "user", "does stuff"} {
+	for _, text := range []string{icon, "●", "my-agent", "user", "does stuff"} {
 		requirePlanHandoffColorEqual(t, bg, screenCell(t, scr, text).Style.Bg)
 	}
 

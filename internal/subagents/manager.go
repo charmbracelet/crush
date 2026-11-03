@@ -7,8 +7,10 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/skills"
 )
 
 // Manager owns per-workspace subagent discovery state: the latest discovery
@@ -59,22 +61,6 @@ func (m *Manager) States() []*SubagentState {
 	return cloneStates(m.states)
 }
 
-// SetLatestStates updates the manager's cached discovery snapshot.
-func (m *Manager) SetLatestStates(states []*SubagentState) {
-	m.mu.Lock()
-	m.states = cloneStates(states)
-	m.mu.Unlock()
-}
-
-// PublishStates updates the manager's cached snapshot and publishes a
-// discovery event to subscribers.
-func (m *Manager) PublishStates(states []*SubagentState) {
-	m.mu.Lock()
-	m.states = cloneStates(states)
-	m.mu.Unlock()
-	m.broker.Publish(pubsub.UpdatedEvent, Event{States: cloneStates(states)})
-}
-
 // SubscribeEvents returns a channel of discovery events for the
 // manager's workspace.
 func (m *Manager) SubscribeEvents(ctx context.Context) <-chan pubsub.Event[Event] {
@@ -101,8 +87,12 @@ func (m *Manager) Reload(all, active []*Subagent, states []*SubagentState) {
 	m.broker.Publish(pubsub.UpdatedEvent, Event{States: cloneStates(states)})
 }
 
-// Shutdown releases broker resources.
+// Shutdown releases broker resources. It is a no-op when m is nil, matching
+// SubscribeEvents and Reload — app.New documents that the manager may be nil.
 func (m *Manager) Shutdown() {
+	if m == nil {
+		return
+	}
 	if m.broker != nil {
 		m.broker.Shutdown()
 	}
@@ -119,6 +109,50 @@ type DiscoveryConfig struct {
 	// nil during discovery in contexts where the config is not yet loaded; in
 	// that case model-id validation is skipped.
 	ValidateModel func(provider, model string) error
+	// IsKnownSkill validates that a `skills:` frontmatter reference resolves
+	// to an active skill, so a broken reference surfaces in the Library UI
+	// instead of being silently dropped at dispatch time. May be nil when no
+	// skills context is available; in that case the check is skipped.
+	IsKnownSkill func(name string) bool
+}
+
+// DiscoveryConfigFromStore adapts a config store (plus the workspace's skills
+// manager, which may be nil) into the DiscoveryConfig DiscoverFromConfig
+// consumes. Shared by startup discovery (cmd, backend) and Library reloads so
+// the discovery inputs cannot drift between call sites.
+func DiscoveryConfigFromStore(store *config.ConfigStore, skillsMgr *skills.Manager) DiscoveryConfig {
+	opts := store.Config().Options
+	var paths, disabled []string
+	if opts != nil {
+		paths = opts.SubagentsPaths
+		disabled = config.EffectiveDisabledSubagents(opts)
+	}
+	var resolver func(string) (string, error)
+	if r := store.Resolver(); r != nil {
+		resolver = r.ResolveValue
+	}
+	return DiscoveryConfig{
+		SubagentsPaths:    paths,
+		DisabledSubagents: disabled,
+		Resolver:          resolver,
+		ValidateModel:     store.Config().ValidateModel,
+		IsKnownSkill:      knownSkillFunc(skillsMgr),
+	}
+}
+
+// knownSkillFunc returns a name-membership check over the manager's active
+// skills at call time, or nil when no manager is available (skipping skill
+// validation).
+func knownSkillFunc(mgr *skills.Manager) func(name string) bool {
+	if mgr == nil {
+		return nil
+	}
+	active := mgr.ActiveSkills()
+	names := make(map[string]bool, len(active))
+	for _, s := range active {
+		names[s.Name] = true
+	}
+	return func(name string) bool { return names[name] }
 }
 
 // ResolvePaths expands home-directory and $VAR references in SubagentsPaths.
@@ -160,7 +194,7 @@ func (c DiscoveryConfig) ResolvePaths() []string {
 //   - states: per-file discovery outcome for diagnostics/UI.
 func DiscoverFromConfig(cfg DiscoveryConfig) (all, active []*Subagent, states []*SubagentState) {
 	userPaths := cfg.ResolvePaths()
-	discovered, allStates := DiscoverWithStates(userPaths, cfg.ValidateModel)
+	discovered, allStates := DiscoverWithStates(userPaths, cfg.ValidateModel, cfg.IsKnownSkill)
 	all = Deduplicate(discovered)
 	active = Filter(all, cfg.DisabledSubagents)
 	allStates = DeduplicateStates(allStates)

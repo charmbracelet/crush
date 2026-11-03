@@ -478,11 +478,7 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 		skills.WithWorkingDir(discoveryCfg.WorkingDir),
 	)
 
-	subagentsCfg := subagents.DiscoveryConfig{
-		SubagentsPaths:    cfg.Config().Options.SubagentsPaths,
-		DisabledSubagents: cfg.Config().Options.DisabledSubagents,
-		ValidateModel:     cfg.Config().ValidateModel,
-	}
+	subagentsCfg := subagents.DiscoveryConfigFromStore(cfg, skillsMgr)
 	allSubagents, activeSubagents, subagentStates := subagents.DiscoverFromConfig(subagentsCfg)
 	subagentsMgr := subagents.NewManager(allSubagents, activeSubagents, subagentStates)
 

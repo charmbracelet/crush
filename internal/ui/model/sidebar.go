@@ -112,6 +112,13 @@ func (m *UI) updateSidebarScrollState() {
 		m.modelInfo(contentWidth),
 		"",
 		filesSection,
+	)
+	if len(m.runningSubagents) > 0 {
+		subagentsSection := m.subagentsInfo(contentWidth, len(m.runningSubagents), true)
+		blocks = append(blocks, "", subagentsSection)
+	}
+	blocks = append(
+		blocks,
 		"",
 		lspSection,
 		"",

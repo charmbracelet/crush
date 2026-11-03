@@ -2,9 +2,12 @@ package agent
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/subagents"
@@ -224,6 +227,32 @@ func TestSubagentPrompt_Build_RendersBody(t *testing.T) {
 	got, err := p.Build(context.Background(), "p", "m", nil)
 	require.NoError(t, err)
 	require.Contains(t, got, body)
+}
+
+// TestSubagentPrompt_Build_RendersUserContextAndSkillsUsage confirms the
+// subagent prompt carries the user's global context files and the skill
+// activation instructions alongside the available-skills list.
+func TestSubagentPrompt_Build_RendersUserContextAndSkillsUsage(t *testing.T) {
+	t.Parallel()
+
+	global := filepath.Join(t.TempDir(), "AGENTS.md")
+	require.NoError(t, os.WriteFile(global, []byte("Prefer table-driven tests."), 0o644))
+
+	sa := newTestSubagent("with-context", nil, "Body.")
+	p, err := subagentPrompt(sa, nil,
+		prompt.WithAvailableSkillsXML(skills.ToPromptXML([]*skills.Skill{newTestSkill("avail", false)})),
+	)
+	require.NoError(t, err)
+
+	store := config.NewTestStoreWithWorkingDir(&config.Config{
+		Options: &config.Options{GlobalContextPaths: []string{global}},
+	}, t.TempDir())
+
+	got, err := p.Build(context.Background(), "p", "m", store)
+	require.NoError(t, err)
+	require.Contains(t, got, "<user_preferences>")
+	require.Contains(t, got, "Prefer table-driven tests.")
+	require.Contains(t, got, "<skills_usage>")
 }
 
 // TestSubagentPrompt_Build_RendersPreloadedSkillsXML confirms that resolved

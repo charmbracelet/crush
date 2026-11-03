@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"strings"
+	"sync"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/gitutil"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/lsp"
@@ -23,7 +24,6 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pinentry"
 	"github.com/charmbracelet/crush/internal/proto"
-	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/shell"
@@ -38,6 +38,9 @@ import (
 type AppWorkspace struct {
 	app   *app.App
 	store *config.ConfigStore
+	// subagentToggleMu serializes SetSubagentDisabled's read-modify-write
+	// of the workspace config; Library toggles run as concurrent commands.
+	subagentToggleMu sync.Mutex
 }
 
 // NewAppWorkspace creates a new AppWorkspace wrapping the given app
@@ -346,7 +349,7 @@ func (w *AppWorkspace) FileTrackerListReadFiles(ctx context.Context, sessionID s
 // -- History --
 
 func (w *AppWorkspace) ListSessionHistory(ctx context.Context, sessionID string) ([]history.File, error) {
-	return w.app.History.ListBySession(ctx, sessionID)
+	return w.app.ListSessionHistory(ctx, sessionID)
 }
 
 // -- LSP --
@@ -511,17 +514,6 @@ func (w *AppWorkspace) RunningSubagents(parentSessionID string) []RunningSubagen
 	return result
 }
 
-// SubscribeSubagentRuntime returns a channel of RuntimeEvents from the
-// SubagentRuntime. Returns a closed channel when SubagentRuntime is nil.
-func (w *AppWorkspace) SubscribeSubagentRuntime(ctx context.Context) <-chan pubsub.Event[subagents.RuntimeEvent] {
-	if w.app.SubagentRuntime == nil {
-		ch := make(chan pubsub.Event[subagents.RuntimeEvent])
-		close(ch)
-		return ch
-	}
-	return w.app.SubagentRuntime.Subscribe(ctx)
-}
-
 // CancelSubagent cancels the subagent session with the given childSessionID.
 // It is a no-op when AgentCoordinator is nil.
 func (w *AppWorkspace) CancelSubagent(childSessionID string) {
@@ -543,38 +535,54 @@ func (w *AppWorkspace) AllSubagents() []SubagentDefInfo {
 	cfg := w.store.Config()
 	workingDir := w.store.WorkingDir()
 
-	var disabledSubagents []string
-	if cfg.Options != nil {
-		disabledSubagents = cfg.Options.DisabledSubagents
-	}
+	disabledSubagents := config.EffectiveDisabledSubagents(cfg.Options)
 	disabledSet := make(map[string]bool, len(disabledSubagents))
 	for _, name := range disabledSubagents {
 		disabledSet[name] = true
 	}
 
+	projectDirs := config.ProjectSubagentsDir(workingDir)
 	result := make([]SubagentDefInfo, len(all))
 	for i, s := range all {
-		scope := "user"
-		if s.FilePath == "" {
-			scope = "builtin"
-		} else if workingDir != "" && (strings.HasPrefix(s.FilePath, workingDir+"/") || s.FilePath == workingDir) {
-			scope = "project"
-		}
 		result[i] = SubagentDefInfo{
 			Name:        s.Name,
 			Description: s.Description,
 			Color:       s.ResolvedColor(),
 			FilePath:    s.FilePath,
-			Scope:       scope,
+			Scope:       subagentScope(s.FilePath, workingDir, projectDirs),
 			Disabled:    disabledSet[s.Name],
 		}
 	}
 	return result
 }
 
+// subagentScope classifies a subagent definition path: "builtin" (no file),
+// "project" for files under the working directory or any project discovery
+// dir (which includes the git worktree root for monorepo-level subagents),
+// and "user" otherwise. Comparison uses fsext.HasPrefix (filepath.Rel-based)
+// so it works with either path separator.
+func subagentScope(filePath, workingDir string, projectDirs []string) string {
+	if filePath == "" {
+		return "builtin"
+	}
+	if subagents.InGlobalDir(filePath) {
+		return "user"
+	}
+	if workingDir != "" && fsext.HasPrefix(filePath, workingDir) {
+		return "project"
+	}
+	for _, dir := range projectDirs {
+		if fsext.HasPrefix(filePath, dir) {
+			return "project"
+		}
+	}
+	return "user"
+}
+
 // DeleteUserSubagent removes a user-scoped subagent by name. It returns an
-// error if the subagent is not found or is not user-scoped. On success it
-// deletes the file from disk and reloads the Subagents manager.
+// error if the subagent is not found or its file is not inside one of the
+// global (user-scope) subagents directories. On success it deletes the file
+// from disk and reloads the Subagents manager.
 func (w *AppWorkspace) DeleteUserSubagent(name string) error {
 	var target *SubagentDefInfo
 	for _, info := range w.AllSubagents() {
@@ -587,38 +595,107 @@ func (w *AppWorkspace) DeleteUserSubagent(name string) error {
 	if target == nil {
 		return fmt.Errorf("subagent %q not found", name)
 	}
-	if target.Scope != "user" {
-		return fmt.Errorf("subagent %q is not user-scoped and cannot be deleted", name)
+	// Deletion is restricted to global (user-scope) dirs — scope labeling is
+	// display-oriented, and a monorepo-root or custom-path file must never be
+	// deletable as if it were the user's own.
+	if !subagents.InGlobalDir(target.FilePath) {
+		return fmt.Errorf("subagent %q is not in a user subagents directory and cannot be deleted", name)
 	}
 	if err := os.Remove(target.FilePath); err != nil {
 		return err
 	}
-	cfg := w.store.Config()
-	var subagentsPaths, disabledSubagents []string
-	if cfg.Options != nil {
-		subagentsPaths = cfg.Options.SubagentsPaths
-		disabledSubagents = cfg.Options.DisabledSubagents
-	}
-	all, active, states := subagents.DiscoverFromConfig(subagents.DiscoveryConfig{
-		SubagentsPaths:    subagentsPaths,
-		DisabledSubagents: disabledSubagents,
-
-		// Match startup discovery (cmd/root.go, backend.go): validate model
-		// ids so a subagent with an invalid model stays rejected after reload.
-		ValidateModel: cfg.ValidateModel,
-	})
-	w.app.Subagents.Reload(all, active, states)
+	w.reloadSubagents()
 	return nil
 }
 
-// SessionTokens returns the prompt and completion token counts for the given
-// session. It delegates to the session service and propagates any error.
-func (w *AppWorkspace) SessionTokens(ctx context.Context, sessionID string) (prompt, completion int64, err error) {
-	sess, err := w.app.Sessions.Get(ctx, sessionID)
-	if err != nil {
-		return 0, 0, err
+// SetSubagentDisabled enables or disables a subagent by name, persisting the
+// change to options.disabled_subagents (and its counterpart,
+// options.enabled_subagents) at workspace scope and reloading discovery. A
+// disabled subagent is filtered out of the active set, which is what the
+// dispatcher enum, dispatch lookup and @-mention completions all derive from,
+// so it can be neither auto-selected by the main agent nor invoked manually.
+// Enabling always writes workspace scope only; it never rewrites whichever
+// scope actually disabled the name. When a broader scope still disables it,
+// the name is recorded in options.enabled_subagents, which
+// config.EffectiveDisabledSubagents subtracts from disabled_subagents at
+// read time — the only way a narrower scope can cancel out a disable set at
+// a broader one, since jsons.Merge concatenates arrays across scopes rather
+// than overriding them. An enabled_subagents entry wins over a disable at
+// any scope, so it is only written when needed.
+func (w *AppWorkspace) SetSubagentDisabled(name string, disabled bool) error {
+	w.subagentToggleMu.Lock()
+	defer w.subagentToggleMu.Unlock()
+
+	// Read from the same scope this writes to. w.store.Config() is the merged
+	// view, so using it here would copy entries the user disabled globally into
+	// the workspace file, pinning them at workspace scope forever.
+	currentDisabled := w.store.StringSliceConfigField(config.ScopeWorkspace, "options.disabled_subagents")
+	currentEnabled := w.store.StringSliceConfigField(config.ScopeWorkspace, "options.enabled_subagents")
+	// enabled_subagents cancels out a disable set at a broader scope (see
+	// config.EffectiveDisabledSubagents); jsons.Merge concatenates arrays
+	// across scopes rather than overriding them, so subtracting from
+	// disabled_subagents alone can never re-enable a name disabled globally.
+	nextDisabled := addOrRemove(currentDisabled, name, disabled)
+	// The merged list holds every scope's entries, so more occurrences there
+	// than in the workspace file means another scope disables the name too.
+	var mergedDisabled, mergedEnabled []string
+	if opts := w.store.Config().Options; opts != nil {
+		mergedDisabled = opts.DisabledSubagents
+		mergedEnabled = opts.EnabledSubagents
 	}
-	return sess.PromptTokens, sess.CompletionTokens, nil
+	// An enabled_subagents entry from another scope wins over any disable
+	// written here, so the toggle would silently flip back.
+	if disabled && countOf(mergedEnabled, name) > countOf(currentEnabled, name) {
+		return fmt.Errorf("subagent %q is enabled by options.enabled_subagents in another config; remove it there to disable it", name)
+	}
+	disabledElsewhere := countOf(mergedDisabled, name) > countOf(currentDisabled, name)
+	nextEnabled := addOrRemove(currentEnabled, name, !disabled && disabledElsewhere)
+	if err := w.store.SetConfigFields(config.ScopeWorkspace, map[string]any{
+		"options.disabled_subagents": nextDisabled,
+		"options.enabled_subagents":  nextEnabled,
+	}); err != nil {
+		return err
+	}
+	w.reloadSubagents()
+	return nil
+}
+
+// reloadSubagents re-runs discovery from the current config and swaps the
+// Manager's snapshot, publishing a discovery event. The shared
+// DiscoveryConfigFromStore adapter keeps reload inputs (paths, resolver,
+// model and skill validation) identical to startup discovery in cmd/root.go
+// and backend.go.
+func (w *AppWorkspace) reloadSubagents() {
+	all, active, states := subagents.DiscoverFromConfig(
+		subagents.DiscoveryConfigFromStore(w.store, w.app.Skills),
+	)
+	w.app.Subagents.Reload(all, active, states)
+}
+
+// countOf returns how many times name occurs in list.
+func countOf(list []string, name string) int {
+	n := 0
+	for _, s := range list {
+		if s == name {
+			n++
+		}
+	}
+	return n
+}
+
+// addOrRemove returns list with name added (when add) or all occurrences
+// removed (when !add). The result is a fresh slice; order is otherwise stable.
+func addOrRemove(list []string, name string, add bool) []string {
+	next := make([]string, 0, len(list)+1)
+	for _, n := range list {
+		if n != name {
+			next = append(next, n)
+		}
+	}
+	if add {
+		next = append(next, name)
+	}
+	return next
 }
 
 // -- MCP operations --

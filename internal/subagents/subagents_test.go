@@ -33,12 +33,12 @@ func TestParseContent(t *testing.T) {
 			content: `---
 name: my-agent
 description: A test agent.
-tools: Read, Grep, Bash
+tools: view, grep, bash
 ---
 `,
 			wantName:        "my-agent",
 			wantDescription: "A test agent.",
-			wantTools:       []string{"Read", "Grep", "Bash"},
+			wantTools:       []string{"view", "grep", "bash"},
 		},
 		{
 			name: "yaml_array_tools",
@@ -46,13 +46,28 @@ tools: Read, Grep, Bash
 name: my-agent
 description: A test agent.
 tools:
-  - Read
-  - Grep
+  - view
+  - grep
 ---
 `,
 			wantName:        "my-agent",
 			wantDescription: "A test agent.",
-			wantTools:       []string{"Read", "Grep"},
+			wantTools:       []string{"view", "grep"},
+		},
+		{
+			name: "yaml_array_tools_trimmed",
+			content: `---
+name: my-agent
+description: A test agent.
+tools:
+  - "view "
+  - " grep"
+  - "  "
+---
+`,
+			wantName:        "my-agent",
+			wantDescription: "A test agent.",
+			wantTools:       []string{"view", "grep"},
 		},
 		{
 			name: "no_tools_field",
@@ -70,12 +85,12 @@ description: A test agent.
 			content: `---
 name: my-agent
 description: A test agent.
-disallowedTools: Write, Edit
+disallowedTools: write, edit
 ---
 `,
 			wantName:        "my-agent",
 			wantDescription: "A test agent.",
-			wantDisallowed:  []string{"Write", "Edit"},
+			wantDisallowed:  []string{"write", "edit"},
 		},
 		{
 			name: "all_fields",
@@ -84,9 +99,9 @@ name: my-agent
 description: A fully specified agent.
 model: large
 tools:
-  - Read
-  - Bash
-disallowedTools: Write, Edit
+  - view
+  - bash
+disallowedTools: write, edit
 skills:
   - pdf-processing
   - data-analysis
@@ -99,8 +114,8 @@ This is the system prompt body.
 			wantName:        "my-agent",
 			wantDescription: "A fully specified agent.",
 			wantModel:       "large",
-			wantTools:       []string{"Read", "Bash"},
-			wantDisallowed:  []string{"Write", "Edit"},
+			wantTools:       []string{"view", "bash"},
+			wantDisallowed:  []string{"write", "edit"},
 			wantSkills:      []string{"pdf-processing", "data-analysis"},
 			wantMCPServers:  []string{"filesystem"},
 			wantBody:        "This is the system prompt body.",
@@ -435,7 +450,7 @@ func TestValidateAgainst(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			err := tt.agent.ValidateAgainst(isKnown)
+			err := tt.agent.ValidateAgainst(isKnown, nil)
 			if tt.wantErr {
 				require.Error(t, err)
 				require.Contains(t, err.Error(), tt.errMsg)
@@ -458,10 +473,10 @@ func TestValidateAgainst_SurfacesResolverError(t *testing.T) {
 		return errors.New(`model "gpt-5" is offered by multiple providers (azure, openai); set provider to choose one`)
 	}
 	s := Subagent{Name: "a", Description: "d", Model: "gpt-5"}
-	require.ErrorContains(t, s.ValidateAgainst(ambiguous), "offered by multiple providers (azure, openai)")
+	require.ErrorContains(t, s.ValidateAgainst(ambiguous, nil), "offered by multiple providers (azure, openai)")
 
 	s.Provider = "openai"
-	require.NoError(t, s.ValidateAgainst(ambiguous))
+	require.NoError(t, s.ValidateAgainst(ambiguous, nil))
 }
 
 func TestValidateAgainst_NilResolver_AcceptsAnyNonEmptyModel(t *testing.T) {
@@ -470,7 +485,7 @@ func TestValidateAgainst_NilResolver_AcceptsAnyNonEmptyModel(t *testing.T) {
 	// Without a resolver, model id strings cannot be validated; ValidateAgainst
 	// should accept any non-empty model string and defer enforcement.
 	s := Subagent{Name: "a", Description: "d", Model: "gpt-99-future"}
-	require.NoError(t, s.ValidateAgainst(nil))
+	require.NoError(t, s.ValidateAgainst(nil, nil))
 }
 
 // TestValidateAgainst_ProviderPropagated verifies that ValidateAgainst forwards
@@ -486,7 +501,7 @@ func TestValidateAgainst_ProviderPropagated(t *testing.T) {
 	}
 
 	s := Subagent{Name: "a", Description: "d", Provider: "openai", Model: "gpt-4o"}
-	require.NoError(t, s.ValidateAgainst(isKnown))
+	require.NoError(t, s.ValidateAgainst(isKnown, nil))
 	require.Equal(t, "openai", capturedProvider)
 	require.Equal(t, "gpt-4o", capturedModel)
 }
@@ -504,7 +519,7 @@ func TestValidateAgainst_EmptyProviderPropagated(t *testing.T) {
 	}
 
 	s := Subagent{Name: "a", Description: "d", Provider: "", Model: "gpt-4o"}
-	require.NoError(t, s.ValidateAgainst(isKnown))
+	require.NoError(t, s.ValidateAgainst(isKnown, nil))
 	require.Equal(t, "", capturedProvider)
 }
 
@@ -910,7 +925,7 @@ func TestDiscoverWithStates(t *testing.T) {
 			0o644,
 		))
 
-		agents, states := DiscoverWithStates([]string{tmp}, nil)
+		agents, states := DiscoverWithStates([]string{tmp}, nil, nil)
 
 		require.Len(t, agents, 2)
 		names := make([]string, 0, len(agents))
@@ -920,6 +935,42 @@ func TestDiscoverWithStates(t *testing.T) {
 		require.Contains(t, names, "top-agent")
 		require.Contains(t, names, "sub-agent")
 		require.Len(t, states, 2)
+	})
+
+	t.Run("states_and_agents_agree_on_which_file_wins_a_name_collision", func(t *testing.T) {
+		t.Parallel()
+
+		// Two files in one base declaring the same name. Deduplicate and
+		// DeduplicateStates both keep the last occurrence, so both lists must
+		// be ordered by path — otherwise the surviving agent comes from one
+		// file while the surviving state describes the other, and which one
+		// varies with fastwalk's goroutine completion order.
+		tmp := t.TempDir()
+		require.NoError(t, os.WriteFile(
+			filepath.Join(tmp, "a.md"),
+			[]byte("---\nname: reviewer\ndescription: First file.\n---\n\nFirst body.\n"),
+			0o644,
+		))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(tmp, "z.md"),
+			[]byte("---\nname: reviewer\ndescription: Last file.\n---\n\nLast body.\n"),
+			0o644,
+		))
+
+		// Repeat: a single pass can pass by luck when the order happens to
+		// come out sorted.
+		for range 20 {
+			agents, states := DiscoverWithStates([]string{tmp}, nil, nil)
+			require.Len(t, agents, 2)
+			require.Len(t, states, 2)
+
+			keptAgents := Deduplicate(agents)
+			keptStates := DeduplicateStates(states)
+			require.Len(t, keptAgents, 1)
+			require.Len(t, keptStates, 1)
+			require.Equal(t, keptAgents[0].FilePath, keptStates[0].Path,
+				"the surviving state must describe the surviving agent's file")
+		}
 	})
 
 	t.Run("invalid_agent_no_frontmatter_appears_as_error_not_in_agents", func(t *testing.T) {
@@ -932,7 +983,7 @@ func TestDiscoverWithStates(t *testing.T) {
 			0o644,
 		))
 
-		agents, states := DiscoverWithStates([]string{tmp}, nil)
+		agents, states := DiscoverWithStates([]string{tmp}, nil, nil)
 
 		require.Empty(t, agents)
 		require.Len(t, states, 1)
@@ -943,7 +994,7 @@ func TestDiscoverWithStates(t *testing.T) {
 	t.Run("nonexistent_path_silently_skipped", func(t *testing.T) {
 		t.Parallel()
 
-		agents, states := DiscoverWithStates([]string{filepath.Join(t.TempDir(), "does-not-exist")}, nil)
+		agents, states := DiscoverWithStates([]string{filepath.Join(t.TempDir(), "does-not-exist")}, nil, nil)
 
 		require.Empty(t, agents)
 		require.Empty(t, states)
@@ -952,7 +1003,7 @@ func TestDiscoverWithStates(t *testing.T) {
 	t.Run("empty_dir_returns_no_results", func(t *testing.T) {
 		t.Parallel()
 
-		agents, states := DiscoverWithStates([]string{t.TempDir()}, nil)
+		agents, states := DiscoverWithStates([]string{t.TempDir()}, nil, nil)
 
 		require.Empty(t, agents)
 		require.Empty(t, states)
@@ -968,7 +1019,7 @@ func TestDiscoverWithStates(t *testing.T) {
 			0o644,
 		))
 
-		agents, states := DiscoverWithStates([]string{tmp}, nil)
+		agents, states := DiscoverWithStates([]string{tmp}, nil, nil)
 
 		require.Empty(t, agents)
 		require.Empty(t, states)
@@ -991,7 +1042,7 @@ func TestDiscoverWithStates(t *testing.T) {
 			return nil
 		}
 
-		agents, states := DiscoverWithStates([]string{tmp}, isKnown)
+		agents, states := DiscoverWithStates([]string{tmp}, isKnown, nil)
 
 		require.Len(t, agents, 1)
 		require.Len(t, states, 1)
@@ -1012,7 +1063,7 @@ func TestDiscoverWithStates(t *testing.T) {
 
 		isKnown := func(provider, model string) error { return errors.New("unknown model") }
 
-		agents, states := DiscoverWithStates([]string{tmp}, isKnown)
+		agents, states := DiscoverWithStates([]string{tmp}, isKnown, nil)
 
 		require.Empty(t, agents)
 		require.Len(t, states, 1)
@@ -1058,7 +1109,7 @@ func TestDiscoverWithStates(t *testing.T) {
 			0o644,
 		))
 
-		agents, _ := DiscoverWithStates([]string{parent, nested}, nil)
+		agents, _ := DiscoverWithStates([]string{parent, nested}, nil, nil)
 
 		kept := Deduplicate(agents)
 		require.Len(t, kept, 1)
@@ -1086,4 +1137,112 @@ func TestValidate_ReportsAllToolOverlaps(t *testing.T) {
 	require.ErrorContains(t, err, "view")
 	require.ErrorContains(t, err, "edit")
 	require.ErrorContains(t, err, "bash")
+}
+
+// TestParseContent_EmptyToolListIsNotAbsent verifies that ToolList keeps the
+// distinction ToConfigAgent depends on: nil means the field was absent, a
+// non-nil empty list means the author asked for no tools.
+func TestParseContent_EmptyToolListIsNotAbsent(t *testing.T) {
+	t.Parallel()
+
+	absent, err := ParseContent([]byte("---\nname: a\ndescription: d.\n---\n"))
+	require.NoError(t, err)
+	require.Nil(t, absent.Tools, "an absent tools: field must stay nil")
+
+	empty, err := ParseContent([]byte("---\nname: a\ndescription: d.\ntools: []\n---\n"))
+	require.NoError(t, err)
+	require.NotNil(t, empty.Tools, "tools: [] must be a non-nil empty list")
+	require.Empty(t, empty.Tools)
+
+	null, err := ParseContent([]byte("---\nname: a\ndescription: d.\ntools:\n---\n"))
+	require.NoError(t, err)
+	require.Nil(t, null.Tools, "a bare tools: (null) must read as absent")
+
+	emptyStr, err := ParseContent([]byte("---\nname: a\ndescription: d.\ntools: \"\"\n---\n"))
+	require.NoError(t, err)
+	require.NotNil(t, emptyStr.Tools, `tools: "" must be a non-nil empty list`)
+	require.Empty(t, emptyStr.Tools)
+}
+
+// TestValidate_RejectsUnknownToolNames verifies that a tool name that is not a
+// real built-in fails validation instead of silently intersecting to nothing.
+func TestValidate_RejectsUnknownToolNames(t *testing.T) {
+	t.Parallel()
+
+	t.Run("unknown_name_in_tools", func(t *testing.T) {
+		t.Parallel()
+
+		sa := Subagent{
+			Name:        "reviewer",
+			Description: "Reviews things.",
+			Tools:       ToolList{"view", "not-a-real-tool"},
+		}
+		err := sa.Validate()
+		require.Error(t, err)
+		require.ErrorContains(t, err, "not-a-real-tool")
+	})
+
+	t.Run("unknown_name_in_disallowed_tools", func(t *testing.T) {
+		t.Parallel()
+
+		sa := Subagent{
+			Name:            "reviewer",
+			Description:     "Reviews things.",
+			DisallowedTools: ToolList{"nope"},
+		}
+		err := sa.Validate()
+		require.Error(t, err)
+		require.ErrorContains(t, err, "nope")
+	})
+
+	t.Run("wrong_case_suggests_the_lowercase_name", func(t *testing.T) {
+		t.Parallel()
+
+		// The cross-tool convention this feature mirrors uses PascalCase names,
+		// which match nothing here. The error must say so rather than leaving
+		// the subagent silently toolless.
+		sa := Subagent{
+			Name:        "reviewer",
+			Description: "Reviews things.",
+			Tools:       ToolList{"Grep"},
+		}
+		err := sa.Validate()
+		require.Error(t, err)
+		require.ErrorContains(t, err, `did you mean "grep"`)
+	})
+
+	t.Run("all_known_names_pass", func(t *testing.T) {
+		t.Parallel()
+
+		sa := Subagent{
+			Name:        "reviewer",
+			Description: "Reviews things.",
+			Tools:       ToolList{"view", "grep", "bash"},
+		}
+		require.NoError(t, sa.Validate())
+	})
+}
+
+// TestValidateAgainst_SkillsValidated verifies that with a non-nil
+// isKnownSkill resolver, unknown skills references fail validation and known
+// ones pass; a nil resolver skips the check entirely.
+func TestValidateAgainst_SkillsValidated(t *testing.T) {
+	t.Parallel()
+
+	s := Subagent{
+		Name:        "skilled-agent",
+		Description: "Uses skills.",
+		Skills:      []string{"known-skill", "unknown-skill"},
+	}
+	isKnown := func(name string) bool { return name == "known-skill" }
+
+	err := s.ValidateAgainst(nil, isKnown)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), `skill "unknown-skill" is not a known active skill`)
+	require.NotContains(t, err.Error(), `skill "known-skill"`)
+
+	require.NoError(t, s.ValidateAgainst(nil, nil), "nil resolver must skip the skills check")
+
+	s.Skills = []string{"known-skill"}
+	require.NoError(t, s.ValidateAgainst(nil, isKnown))
 }

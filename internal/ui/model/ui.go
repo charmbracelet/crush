@@ -217,14 +217,24 @@ type (
 	// parentTitleMsg is sent when the parent session metadata has been
 	// fetched: the title for the breadcrumb and this child's subagent color.
 	parentTitleMsg struct {
-		title string
-		color string
+		// forSession is the child session the fetch was scoped to; a result
+		// that raced a session switch (the user navigated away before it
+		// resolved) is discarded rather than applied, mirroring
+		// promptQueueMsg.forSession.
+		forSession string
+		title      string
+		color      string
 	}
 
 	// runningSubagentsMsg carries the refreshed running-subagent list,
 	// resolved off the Update path to keep DB IO out of the message loop.
 	runningSubagentsMsg struct {
-		list []workspace.RunningSubagentInfo
+		// forSession is the session the fetch was scoped to; a result that
+		// raced a session switch (the user navigated away before this
+		// resolved) is discarded rather than applied, mirroring
+		// promptQueueMsg.forSession.
+		forSession string
+		list       []workspace.RunningSubagentInfo
 	}
 )
 
@@ -402,6 +412,15 @@ type UI struct {
 	// runningSubagents holds the live subagent list for the current session,
 	// refreshed on each RuntimeEvent.
 	runningSubagents []workspace.RunningSubagentInfo
+
+	// knownChildSessionIDs accumulates child (subagent) session IDs seen via
+	// subagents.RuntimeEvent for the currently-viewed session. Gates live
+	// history.File events in handleFileEvent (internal/ui/model/session.go)
+	// without a DB round trip per event. Entries are only added, never
+	// removed, so a child that already finished is still recognized for
+	// file events that arrive just after RuntimeEvent's Finished drops it
+	// from Entries.
+	knownChildSessionIDs map[string]bool
 
 	// Subagent @-mention completions, rebuilt on subagents.Event.
 	activeSubagentItems []completions.SubagentCompletionValue
@@ -1004,6 +1023,14 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.parentTitle = ""
 		m.subagentColor = ""
+		m.knownChildSessionIDs = nil
+		// runningSubagents is otherwise only refreshed by a live RuntimeEvent
+		// for the current session's parent — drop the previous session's
+		// list and re-fetch for the new one so the sidebar doesn't keep
+		// showing a stale "Active subagents" panel until one happens to
+		// arrive (or never, if nothing is dispatched under the new session).
+		m.runningSubagents = nil
+		cmds = append(cmds, m.refreshRunningSubagents(m.session.ID))
 		cmds = append(cmds, m.startLSPs(msg.lspFilePaths()))
 		msgs := msg.messages
 		if cmd := m.setSessionMessages(msgs); cmd != nil {
@@ -1043,8 +1070,13 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateLayoutAndSize()
 
 	case parentTitleMsg:
-		m.parentTitle = msg.title
-		m.subagentColor = msg.color
+		// Discard a fetch that raced a session switch: the user navigated
+		// away from forSession before it resolved, so applying it here would
+		// show a breadcrumb that belongs to a different (departed) session.
+		if msg.forSession == m.currentSessionID() {
+			m.parentTitle = msg.title
+			m.subagentColor = msg.color
+		}
 
 	case sessionFilesUpdatesMsg:
 		m.sessionFiles = msg.sessionFiles
@@ -1205,10 +1237,20 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch {
 		case m.session == nil:
 			m.runningSubagents = nil
+			m.knownChildSessionIDs = nil
 		case msg.Payload.ParentSessionID == m.session.ID:
 			// Only the current session's children populate the panel; ignore
 			// events for other parents to avoid spurious DB refreshes.
 			cmds = append(cmds, m.refreshRunningSubagents(m.session.ID))
+			if m.knownChildSessionIDs == nil {
+				m.knownChildSessionIDs = make(map[string]bool)
+			}
+			for _, e := range msg.Payload.Entries {
+				m.knownChildSessionIDs[e.ChildSessionID] = true
+			}
+			if f := msg.Payload.Finished; f != nil {
+				m.knownChildSessionIDs[f.ChildSessionID] = true
+			}
 		}
 		// A successful result already shows as the tool result; only report
 		// failed and cancelled runs, or every agentic_fetch and task call
@@ -1217,7 +1259,34 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, util.ReportInfo(fmt.Sprintf("Subagent %s %s", f.Name, f.Status)))
 		}
 	case runningSubagentsMsg:
-		m.runningSubagents = msg.list
+		// Discard a fetch that raced a session switch: the user navigated
+		// away from forSession before it resolved, so applying it here would
+		// clobber the newly-loaded session's (possibly already-refreshed)
+		// list with a stale one.
+		if msg.forSession == m.currentSessionID() {
+			m.runningSubagents = msg.list
+			// Seed the child-session set from the fetch as well. On a session
+			// switch loadSessionMsg clears knownChildSessionIDs, and the only
+			// other place it is filled is the RuntimeEvent case — so a subagent
+			// that was already running before the switch would have its
+			// history.File events rejected by handleFileEvent until it next
+			// published an event, losing its edits from the Modified Files
+			// panel in the meantime.
+			for _, info := range msg.list {
+				if m.knownChildSessionIDs == nil {
+					m.knownChildSessionIDs = make(map[string]bool)
+				}
+				m.knownChildSessionIDs[info.ChildSessionID] = true
+			}
+		}
+	case dialog.RunningSubagentsFetchedMsg:
+		// The subagents dialog resolves its running list off the Update path;
+		// dialogs only see message types routed here, so hand it back.
+		if m.dialog.HasDialogs() {
+			if cmd := m.handleDialogMsg(msg); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
 	case pubsub.Event[subagents.Event]:
 		// Library discovery changed (e.g. a delete) — rebuild the @-mention
 		// caches so removed subagents stop being offered without a restart.
@@ -6346,6 +6415,14 @@ func (m *UI) newSession() tea.Cmd {
 	m.sidebarOffset = 0
 	m.sessionFiles = nil
 	m.sessionFileReads = nil
+	m.knownChildSessionIDs = nil
+	// Same reset the loadSessionMsg handler performs on a session switch. A new
+	// session has no parent and no children, so leaving these set would keep
+	// rendering the previous session's parent breadcrumb and "Active subagents"
+	// panel on an empty screen until an unrelated event happened to clear them.
+	m.runningSubagents = nil
+	m.parentTitle = ""
+	m.subagentColor = ""
 	m.setState(uiLanding, uiFocusEditor)
 	m.textarea.Focus()
 	m.chat.Blur()

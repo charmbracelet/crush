@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -56,11 +57,19 @@ func (s *stubSessionService) List(context.Context) ([]session.Session, error) {
 	return nil, nil
 }
 
+func (s *stubSessionService) ListChildSessions(context.Context, string) ([]session.Session, error) {
+	return nil, nil
+}
+
 func (s *stubSessionService) Save(_ context.Context, sess session.Session) (session.Session, error) {
 	return sess, nil
 }
 
 func (s *stubSessionService) UpdateTitleAndUsage(context.Context, string, string, int64, int64, float64) error {
+	return nil
+}
+
+func (s *stubSessionService) AddCost(context.Context, string, float64) error {
 	return nil
 }
 
@@ -192,30 +201,6 @@ func TestAppWorkspace_RunningSubagents_TokenEnrichment(t *testing.T) {
 	require.Len(t, got, 1)
 	require.Equal(t, int64(100), got[0].PromptTokens)
 	require.Equal(t, int64(200), got[0].CompletionTokens)
-}
-
-// TestAppWorkspace_SubscribeSubagentRuntime_NilRuntime verifies that a nil
-// SubagentRuntime returns a closed channel without panicking.
-func TestAppWorkspace_SubscribeSubagentRuntime_NilRuntime(t *testing.T) {
-	t.Parallel()
-
-	w := &AppWorkspace{
-		app:   &app.App{SubagentRuntime: nil},
-		store: config.NewTestStore(&config.Config{}),
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-
-	ch := w.SubscribeSubagentRuntime(ctx)
-	require.NotNil(t, ch)
-
-	select {
-	case _, ok := <-ch:
-		require.False(t, ok, "channel must be closed when SubagentRuntime is nil")
-	default:
-		t.Fatal("channel was not immediately closed for nil SubagentRuntime")
-	}
 }
 
 // TestAppWorkspace_CancelSubagent_NilCoordinator verifies that calling
@@ -351,13 +336,14 @@ func TestAppWorkspace_DeleteUserSubagent_NonUserScope(t *testing.T) {
 }
 
 // TestAppWorkspace_DeleteUserSubagent_Success verifies that deleting a
-// user-scope subagent removes the file from disk and the agent no longer
-// appears in AllSubagents after the internal Manager is reloaded.
+// subagent whose file lives in a global (user-scope) subagents directory
+// removes the file from disk and the agent no longer appears in AllSubagents
+// after the internal Manager is reloaded. Not parallel: pins the global
+// subagents dir via CRUSH_SUBAGENTS_DIR.
 func TestAppWorkspace_DeleteUserSubagent_Success(t *testing.T) {
-	t.Parallel()
-
 	workDir := t.TempDir()
 	userDir := t.TempDir()
+	t.Setenv("CRUSH_SUBAGENTS_DIR", userDir)
 
 	userFile := filepath.Join(userDir, "user-agent.md")
 	require.NoError(t, os.WriteFile(
@@ -392,59 +378,108 @@ func TestAppWorkspace_DeleteUserSubagent_Success(t *testing.T) {
 	}
 }
 
-// TestAppWorkspace_SessionTokens_Found verifies that SessionTokens returns the
-// correct token counts for an existing session.
-func TestAppWorkspace_SessionTokens_Found(t *testing.T) {
+// TestAppWorkspace_DeleteUserSubagent_OutsideGlobalDirsRefused verifies that a
+// subagent that merely *displays* as user scope (its file lives in a custom
+// discovery path, not in a global subagents dir) is refused deletion — scope
+// labeling is display-oriented and must not authorize file removal.
+func TestAppWorkspace_DeleteUserSubagent_OutsideGlobalDirsRefused(t *testing.T) {
 	t.Parallel()
 
-	sessions := &stubSessionService{
-		sessions: map[string]session.Session{
-			"sess-1": {
-				ID:               "sess-1",
-				PromptTokens:     42,
-				CompletionTokens: 77,
-			},
-		},
-	}
+	workDir := t.TempDir()
+	customDir := t.TempDir()
+
+	customFile := filepath.Join(customDir, "custom-agent.md")
+	require.NoError(t, os.WriteFile(
+		customFile,
+		[]byte("---\nname: custom-agent\ndescription: Custom path agent.\n---\n\nBody.\n"),
+		0o644,
+	))
+
+	customAgent := &subagents.Subagent{Name: "custom-agent", Description: "Custom path agent.", FilePath: customFile}
+	mgr := subagents.NewManager(
+		[]*subagents.Subagent{customAgent},
+		[]*subagents.Subagent{customAgent},
+		nil,
+	)
+	t.Cleanup(mgr.Shutdown)
 
 	w := &AppWorkspace{
-		app:   &app.App{Sessions: sessions},
-		store: config.NewTestStore(&config.Config{}),
+		app:   &app.App{Subagents: mgr},
+		store: newStoreForWorkDir(workDir),
 	}
 
-	prompt, completion, err := w.SessionTokens(context.Background(), "sess-1")
-	require.NoError(t, err)
-	require.Equal(t, int64(42), prompt)
-	require.Equal(t, int64(77), completion)
+	require.Error(t, w.DeleteUserSubagent("custom-agent"))
+	_, statErr := os.Stat(customFile)
+	require.NoError(t, statErr, "the file must not have been deleted")
 }
 
-// TestAppWorkspace_SessionTokens_NotFound verifies that SessionTokens returns
-// an error when the session does not exist.
-func TestAppWorkspace_SessionTokens_NotFound(t *testing.T) {
+// TestAppWorkspace_AllSubagents_MonorepoRootIsProjectScope verifies that a
+// subagent discovered at the git worktree root — outside the working
+// directory — is labeled project scope, not user scope (a user-scope label
+// would make repo-tracked files deletable).
+func TestAppWorkspace_AllSubagents_MonorepoRootIsProjectScope(t *testing.T) {
 	t.Parallel()
 
-	sessions := &stubSessionService{
-		sessions: map[string]session.Session{},
-	}
+	// Resolve symlinks up front: macOS temp dirs live behind /private
+	// symlinks, and git rev-parse --show-toplevel (what worktreeRoot uses)
+	// reports the resolved path — file paths must match that view.
+	repoRoot, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	out, err := exec.CommandContext(t.Context(), "git", "init", repoRoot).CombinedOutput()
+	require.NoError(t, err, "git init: %s", out)
+
+	workDir := filepath.Join(repoRoot, "apps", "web")
+	require.NoError(t, os.MkdirAll(workDir, 0o755))
+
+	rootFile := filepath.Join(repoRoot, ".agents", "subagents", "root-agent.md")
+	require.NoError(t, os.MkdirAll(filepath.Dir(rootFile), 0o755))
+	require.NoError(t, os.WriteFile(
+		rootFile,
+		[]byte("---\nname: root-agent\ndescription: Monorepo root agent.\n---\n\nBody.\n"),
+		0o644,
+	))
+
+	rootAgent := &subagents.Subagent{Name: "root-agent", Description: "Monorepo root agent.", FilePath: rootFile}
+	mgr := subagents.NewManager(
+		[]*subagents.Subagent{rootAgent},
+		[]*subagents.Subagent{rootAgent},
+		nil,
+	)
+	t.Cleanup(mgr.Shutdown)
 
 	w := &AppWorkspace{
-		app:   &app.App{Sessions: sessions},
-		store: config.NewTestStore(&config.Config{}),
+		app:   &app.App{Subagents: mgr},
+		store: newStoreForWorkDir(workDir),
 	}
 
-	_, _, err := w.SessionTokens(context.Background(), "does-not-exist")
-	require.Error(t, err)
+	got := w.AllSubagents()
+	require.Len(t, got, 1)
+	require.Equal(t, "project", got[0].Scope, "a worktree-root subagent must be project scope")
+	require.Error(t, w.DeleteUserSubagent("root-agent"), "a worktree-root subagent must not be deletable")
+}
+
+// TestAddOrRemove covers the pure list helper backing SetSubagentDisabled.
+func TestAddOrRemove(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, []string{"a"}, addOrRemove(nil, "a", true), "add to empty")
+	require.Equal(t, []string{"a"}, addOrRemove([]string{"a"}, "a", true), "add dedups")
+	require.Equal(t, []string{}, addOrRemove([]string{"a"}, "a", false), "remove last")
+	require.Equal(t, []string{"b", "c"}, addOrRemove([]string{"b", "a", "c", "a"}, "a", false),
+		"remove drops all occurrences, keeps others")
+	require.Equal(t, []string{"b", "a"}, addOrRemove([]string{"b"}, "a", true), "add appends")
 }
 
 // TestAppWorkspace_DeleteUserSubagent_ReloadValidatesModel verifies that the
 // reload after a delete validates model ids (passes cfg.ValidateModel, not
 // nil). A subagent referencing an unknown model must NOT become active after
-// the reload — with a nil validator it would be wrongly accepted.
+// the reload — with a nil validator it would be wrongly accepted. Not
+// parallel: pins the global subagents dir via CRUSH_SUBAGENTS_DIR so the
+// delete passes the user-scope check.
 func TestAppWorkspace_DeleteUserSubagent_ReloadValidatesModel(t *testing.T) {
-	t.Parallel()
-
 	workDir := t.TempDir()
 	userDir := t.TempDir()
+	t.Setenv("CRUSH_SUBAGENTS_DIR", userDir)
 
 	// One valid user subagent to delete, and one with an unknown model id.
 	keepFile := filepath.Join(userDir, "keep-agent.md")

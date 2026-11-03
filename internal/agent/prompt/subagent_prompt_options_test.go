@@ -125,3 +125,94 @@ func TestWithPreloadedSkillsXML_EmptyString(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "", result)
 }
+
+// TestWithAvailableSubagentsXML verifies that WithAvailableSubagentsXML stores
+// the XML string in PromptDat.AvailSubagentXML and that the template can
+// render it.
+func TestWithAvailableSubagentsXML(t *testing.T) {
+	t.Parallel()
+
+	const xml = "<available_subagents>\n  <subagent>\n    <name>my-agent</name>\n  </subagent>\n</available_subagents>"
+
+	p, err := NewPrompt("test", `{{.AvailSubagentXML}}`, WithAvailableSubagentsXML(xml))
+	require.NoError(t, err)
+
+	result, err := p.Build(context.Background(), "test-provider", "test-model", nil)
+	require.NoError(t, err)
+	require.Equal(t, xml, result)
+}
+
+// TestWithAvailableSubagentsXML_EmptyString verifies that an empty XML string
+// is stored and rendered correctly (default when the option is not provided).
+func TestWithAvailableSubagentsXML_EmptyString(t *testing.T) {
+	t.Parallel()
+
+	p, err := NewPrompt("test", `{{.AvailSubagentXML}}`, WithAvailableSubagentsXML(""))
+	require.NoError(t, err)
+
+	result, err := p.Build(context.Background(), "test-provider", "test-model", nil)
+	require.NoError(t, err)
+	require.Equal(t, "", result)
+}
+
+// TestWithAvailableSkillsXML verifies the caller-supplied block replaces the
+// discovery walk's output. A real store is required because the nil-store path
+// never computes AvailSkillXML at all.
+func TestWithAvailableSkillsXML(t *testing.T) {
+	t.Parallel()
+
+	store, err := config.Init(t.Context(), t.TempDir(), "", false)
+	require.NoError(t, err)
+
+	const tmpl = `{{.AvailSkillXML}}`
+	const xml = "<available_skills>\n  <skill><name>supplied</name></skill>\n</available_skills>"
+
+	p, err := NewPrompt("t", tmpl, WithAvailableSkillsXML(xml))
+	require.NoError(t, err)
+	got, err := p.Build(context.Background(), "p", "m", store)
+	require.NoError(t, err)
+	require.Equal(t, xml, got, "supplied block must be used verbatim instead of discovery")
+}
+
+// TestWithAvailableSkillsXML_EmptyStringSkipsDiscovery verifies that an
+// explicitly empty block is honored rather than falling back to the discovery
+// walk — the distinction availSkillXMLSet exists to preserve.
+func TestWithAvailableSkillsXML_EmptyStringSkipsDiscovery(t *testing.T) {
+	t.Parallel()
+
+	store, err := config.Init(t.Context(), t.TempDir(), "", false)
+	require.NoError(t, err)
+
+	const tmpl = `{{.AvailSkillXML}}`
+
+	open, err := NewPrompt("t", tmpl)
+	require.NoError(t, err)
+	got, err := open.Build(context.Background(), "p", "m", store)
+	require.NoError(t, err)
+	require.Contains(t, got, "<available_skills>", "discovery renders builtins by default")
+
+	empty, err := NewPrompt("t", tmpl, WithAvailableSkillsXML(""))
+	require.NoError(t, err)
+	got, err = empty.Build(context.Background(), "p", "m", store)
+	require.NoError(t, err)
+	require.Empty(t, got, "an explicitly empty block must not fall back to discovery")
+}
+
+// TestWithSuppressAvailableSkills_BeatsSuppliedXML verifies suppression wins
+// over a supplied block, so a subagent pinning skills cannot be handed the
+// broad discovery list through the other option.
+func TestWithSuppressAvailableSkills_BeatsSuppliedXML(t *testing.T) {
+	t.Parallel()
+
+	store, err := config.Init(t.Context(), t.TempDir(), "", false)
+	require.NoError(t, err)
+
+	p, err := NewPrompt("t", `{{.AvailSkillXML}}`,
+		WithAvailableSkillsXML("<available_skills><skill><name>leak</name></skill></available_skills>"),
+		WithSuppressAvailableSkills(true),
+	)
+	require.NoError(t, err)
+	got, err := p.Build(context.Background(), "p", "m", store)
+	require.NoError(t, err)
+	require.Empty(t, got, "suppression must win over a supplied skills block")
+}

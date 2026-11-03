@@ -1726,18 +1726,18 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 
 	// Run the agent
 	run := func() (*fantasy.AgentResult, error) {
-		subOpts := getProviderOptions(model, providerCfg)
+		subOpts, temp, topP, topK, freqPenalty, presPenalty := mergeCallOptions(model, providerCfg)
 		injectOpenrouterSessionID(subOpts, session.ID)
 		return params.Agent.Run(ctx, SessionAgentCall{
 			SessionID:        session.ID,
 			Prompt:           params.Prompt,
 			MaxOutputTokens:  maxTokens,
 			ProviderOptions:  subOpts,
-			Temperature:      model.ModelCfg.Temperature,
-			TopP:             model.ModelCfg.TopP,
-			TopK:             callTopK(providerCfg, model.ModelCfg.TopK),
-			FrequencyPenalty: model.ModelCfg.FrequencyPenalty,
-			PresencePenalty:  model.ModelCfg.PresencePenalty,
+			Temperature:      temp,
+			TopP:             topP,
+			TopK:             callTopK(providerCfg, topK),
+			FrequencyPenalty: freqPenalty,
+			PresencePenalty:  presPenalty,
 			NonInteractive:   true,
 			OnAuthRefresh:    c.makeAuthRefreshCallback(providerCfg),
 		})

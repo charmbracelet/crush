@@ -5,6 +5,7 @@ import (
 
 	"charm.land/catwalk/v3/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/stretchr/testify/require"
 )
 
@@ -67,6 +68,24 @@ func TestConfig_FindModelProvider(t *testing.T) {
 	}
 }
 
+func TestConfig_FindModelProvider_SimilarHint(t *testing.T) {
+	t.Parallel()
+
+	cfg := newConfigWithProviders(t, map[string][]string{
+		"openai":    {"gpt-4o", "gpt-4o-mini"},
+		"anthropic": {"claude-opus-4-7", "claude-sonnet-4-6"},
+	})
+
+	_, _, err := cfg.FindModelProvider("", "Sonnet")
+	require.EqualError(t, err, `model "Sonnet" is not offered by any configured provider; similar: claude-sonnet-4-6`)
+
+	_, _, err = cfg.FindModelProvider("openai", "gpt-4")
+	require.EqualError(t, err, `model "gpt-4" is not offered by provider "openai"; similar: gpt-4o, gpt-4o-mini`)
+
+	_, _, err = cfg.FindModelProvider("", "imaginary-99")
+	require.EqualError(t, err, `model "imaginary-99" is not offered by any configured provider`)
+}
+
 func TestConfig_FindModelProvider_NoProviders(t *testing.T) {
 	t.Parallel()
 
@@ -83,8 +102,9 @@ func TestConfig_FindModelProvider_SubscriptionCatalogs(t *testing.T) {
 	t.Parallel()
 
 	pMap := csync.NewMap[string, ProviderConfig]()
-	pMap.Set("openai", ProviderConfig{ID: "openai", ChatGPTModels: []catwalk.Model{{ID: "gpt-sub"}}})
-	pMap.Set("xai", ProviderConfig{ID: "xai", GrokModels: []catwalk.Model{{ID: "grok-sub"}}})
+	token := &oauth.Token{AccessToken: "t"}
+	pMap.Set("openai", ProviderConfig{ID: "openai", OAuthToken: token, ChatGPTModels: []catwalk.Model{{ID: "gpt-sub"}}})
+	pMap.Set("xai", ProviderConfig{ID: "xai", OAuthToken: token, GrokModels: []catwalk.Model{{ID: "grok-sub"}}})
 	cfg := &Config{Providers: pMap}
 
 	for _, tc := range []struct{ provider, model string }{

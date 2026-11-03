@@ -1,6 +1,7 @@
 package dialog
 
 import (
+	"errors"
 	"fmt"
 	"image"
 	"slices"
@@ -12,6 +13,7 @@ import (
 	"github.com/charmbracelet/crush/internal/subagents"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/crush/internal/workspace"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
@@ -22,12 +24,13 @@ import (
 // Subagents dialog.
 type subagentsWorkspace struct {
 	workspace.Workspace
-	running       []workspace.RunningSubagentInfo
-	defs          []workspace.SubagentDefInfo
-	cancelledIDs  []string
-	deletedNames  []string
-	deleteUserErr error
-	disabledCalls []disabledCall
+	running        []workspace.RunningSubagentInfo
+	defs           []workspace.SubagentDefInfo
+	cancelledIDs   []string
+	deletedNames   []string
+	deleteUserErr  error
+	setDisabledErr error
+	disabledCalls  []disabledCall
 }
 
 type disabledCall struct {
@@ -37,7 +40,7 @@ type disabledCall struct {
 
 func (w *subagentsWorkspace) SetSubagentDisabled(name string, disabled bool) error {
 	w.disabledCalls = append(w.disabledCalls, disabledCall{name: name, disabled: disabled})
-	return nil
+	return w.setDisabledErr
 }
 
 func (w *subagentsWorkspace) RunningSubagents(_ string) []workspace.RunningSubagentInfo {
@@ -61,7 +64,13 @@ func newTestSubagentsDialog(t *testing.T, ws *subagentsWorkspace) *Subagents {
 	t.Helper()
 	st := styles.CharmtonePantera()
 	com := &common.Common{Styles: &st, Workspace: ws}
-	return NewSubagents(com, "parent-session-id")
+	d := NewSubagents(com, "parent-session-id")
+	// Populate the tabs the way openSubagentsDialog does: run the initial
+	// fetch (synchronously, it is a plain closure) and deliver its message.
+	if msg := d.InitialFetchCmd()(); msg != nil {
+		d.HandleMsg(msg)
+	}
+	return d
 }
 
 // TestSubagentsDialog_ImplementsDialogInterface is a compile-time assertion.
@@ -150,7 +159,7 @@ func TestSubagentsDialog_DeleteLibraryItem(t *testing.T) {
 
 	ws := &subagentsWorkspace{
 		defs: []workspace.SubagentDefInfo{
-			{Name: "user-agent", Description: "does stuff", Scope: "user"},
+			{Name: "user-agent", Description: "does stuff", Scope: "user", Deletable: true},
 		},
 	}
 	d := newTestSubagentsDialog(t, ws)
@@ -178,7 +187,7 @@ func TestSubagentsDialog_DeleteLibraryItem_Cancel(t *testing.T) {
 
 	ws := &subagentsWorkspace{
 		defs: []workspace.SubagentDefInfo{
-			{Name: "user-agent", Description: "does stuff", Scope: "user"},
+			{Name: "user-agent", Description: "does stuff", Scope: "user", Deletable: true},
 		},
 	}
 	d := newTestSubagentsDialog(t, ws)
@@ -226,6 +235,143 @@ func TestSubagentsDialog_ToggleLibraryItem(t *testing.T) {
 	runCmd(d.HandleMsg(keyMsg(' ')))
 	require.Len(t, ws.disabledCalls, 2)
 	require.False(t, ws.disabledCalls[1].disabled, "second toggle must re-enable")
+}
+
+// TestSubagentsDialog_BrokenItemCannotToggle verifies that space on a library
+// entry whose definition failed discovery is a no-op: there is no active
+// subagent to enable or disable.
+func TestSubagentsDialog_BrokenItemCannotToggle(t *testing.T) {
+	t.Parallel()
+
+	ws := &subagentsWorkspace{
+		defs: []workspace.SubagentDefInfo{
+			{Name: "broken-agent", Scope: "user", Error: "unclosed frontmatter"},
+		},
+	}
+	d := newTestSubagentsDialog(t, ws)
+
+	d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyTab})
+	require.Equal(t, SubagentsTabLibrary, d.ActiveTab())
+
+	action := d.HandleMsg(keyMsg(' '))
+	require.Nil(t, action, "toggling a broken entry must be a no-op")
+	require.Empty(t, ws.disabledCalls)
+}
+
+// TestSubagentsDialog_BrokenItemCannotDelete verifies that d on a broken
+// library entry never enters confirm-delete mode, even when user-scoped.
+func TestSubagentsDialog_BrokenItemCannotDelete(t *testing.T) {
+	t.Parallel()
+
+	ws := &subagentsWorkspace{
+		defs: []workspace.SubagentDefInfo{
+			{Name: "broken-agent", Scope: "user", Error: "unclosed frontmatter"},
+		},
+	}
+	d := newTestSubagentsDialog(t, ws)
+
+	d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyTab})
+	require.Equal(t, SubagentsTabLibrary, d.ActiveTab())
+
+	d.HandleMsg(keyMsg('d'))
+	require.False(t, d.IsConfirmingDelete(), "broken entries must not be deletable")
+}
+
+// TestSubagentsDialog_NonDeletableItemCannotDelete verifies that d on an entry
+// the workspace will not delete (e.g. project scope or a custom path outside
+// the global dirs) never enters confirm-delete mode — the dialog gates on the
+// same trust rule DeleteUserSubagent enforces instead of the display scope.
+func TestSubagentsDialog_NonDeletableItemCannotDelete(t *testing.T) {
+	t.Parallel()
+
+	ws := &subagentsWorkspace{
+		defs: []workspace.SubagentDefInfo{
+			{Name: "custom-path-agent", Scope: "user", Deletable: false},
+		},
+	}
+	d := newTestSubagentsDialog(t, ws)
+
+	d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyTab})
+	require.Equal(t, SubagentsTabLibrary, d.ActiveTab())
+
+	d.HandleMsg(keyMsg('d'))
+	require.False(t, d.IsConfirmingDelete(), "non-deletable entries must not offer delete")
+}
+
+// TestSubagentsDialog_ToggleFailureRollback verifies that when persisting a
+// toggle fails, the optimistic flip is rolled back by re-syncing from the
+// unchanged workspace and the error is reported.
+func TestSubagentsDialog_ToggleFailureRollback(t *testing.T) {
+	t.Parallel()
+
+	ws := &subagentsWorkspace{
+		defs:           []workspace.SubagentDefInfo{{Name: "lib-agent", Description: "does stuff", Scope: "user"}},
+		setDisabledErr: errors.New("write denied"),
+	}
+	d := newTestSubagentsDialog(t, ws)
+
+	d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyTab})
+	require.Equal(t, SubagentsTabLibrary, d.ActiveTab())
+
+	action := d.HandleMsg(keyMsg(' '))
+	ac, ok := action.(ActionCmd)
+	require.True(t, ok, "toggle must return an ActionCmd")
+	require.True(t, d.libraryItems[0].data.Disabled, "optimistic flip applied immediately")
+
+	// The failure fans out into an error report and a rollback signal. The
+	// report is its own top-level command so it lands even if this dialog has
+	// closed by the time the write fails.
+	rollback := requireMutationFailure(t, ac.Cmd())
+
+	d.HandleMsg(rollback)
+	require.False(t, d.libraryItems[0].data.Disabled, "failed toggle must be rolled back")
+}
+
+// requireMutationFailure asserts that msg is the two-command fan-out a failed
+// Library mutation produces — an error report plus a rollback signal — and
+// returns the rollback message for delivery to the dialog.
+func requireMutationFailure(t *testing.T, msg tea.Msg) tea.Msg {
+	t.Helper()
+
+	batch, ok := msg.(tea.BatchMsg)
+	require.True(t, ok, "a failed mutation must fan out into a batch")
+	require.Len(t, batch, 2, "the batch must carry the error report and the rollback")
+
+	report := batch[0]()
+	require.IsType(t, util.InfoMsg{}, report, "the first command must report the error")
+	require.Equal(t, util.InfoTypeError, report.(util.InfoMsg).Type)
+
+	rollback := batch[1]()
+	require.IsType(t, SubagentMutationFailedMsg{}, rollback)
+	return rollback
+}
+
+// TestSubagentsDialog_DeleteFailureRollback verifies that when a delete fails,
+// the optimistically removed item is restored by re-syncing from the unchanged
+// workspace and the error is reported.
+func TestSubagentsDialog_DeleteFailureRollback(t *testing.T) {
+	t.Parallel()
+
+	ws := &subagentsWorkspace{
+		defs:          []workspace.SubagentDefInfo{{Name: "user-agent", Description: "does stuff", Scope: "user", Deletable: true}},
+		deleteUserErr: errors.New("remove denied"),
+	}
+	d := newTestSubagentsDialog(t, ws)
+
+	d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyTab})
+	require.Equal(t, SubagentsTabLibrary, d.ActiveTab())
+
+	d.HandleMsg(keyMsg('d'))
+	require.True(t, d.IsConfirmingDelete())
+
+	action := d.HandleMsg(keyMsg('y'))
+	ac, ok := action.(ActionCmd)
+	require.True(t, ok, "confirm delete must return an ActionCmd")
+	require.Empty(t, d.libraryItems, "optimistic removal applied immediately")
+
+	d.HandleMsg(requireMutationFailure(t, ac.Cmd()))
+	require.Len(t, d.libraryItems, 1, "failed delete must restore the item")
+	require.Equal(t, "user-agent", d.libraryItems[0].data.Name)
 }
 
 // TestSubagentsDialog_RuntimeEventRefreshesRunningTab verifies that a
@@ -420,6 +566,48 @@ func TestSubagentsDialog_LibraryEventPreservesSelection(t *testing.T) {
 	selected, ok := d.libraryList.SelectedItem().(ListItem)
 	require.True(t, ok, "an item should remain selected after refresh")
 	require.Equal(t, "agent-b", selected.ID(), "selection should follow the same logical item across a reorder")
+}
+
+// TestSubagentsDialog_LibraryEventPreservesSelection_ErrorRow verifies that
+// selection tracking across a refresh also works for an error-state item,
+// whose ID is its file path rather than its name.
+func TestSubagentsDialog_LibraryEventPreservesSelection_ErrorRow(t *testing.T) {
+	t.Parallel()
+
+	ws := &subagentsWorkspace{
+		defs: []workspace.SubagentDefInfo{
+			{Name: "agent-a", Scope: "user"},
+			{Name: "broken", FilePath: "/some/path/broken.md", Error: "parse error", Scope: "user"},
+		},
+	}
+	d := newTestSubagentsDialog(t, ws)
+
+	var brokenIdx int
+	for i, item := range d.libraryItems {
+		if item.ID() == "/some/path/broken.md" {
+			brokenIdx = i
+			break
+		}
+	}
+	d.libraryList.SetSelected(brokenIdx)
+
+	// Insert a new item ahead of the broken one so its post-refresh index is
+	// not 0. This rules out the buggy code's index-0 fallback coincidentally
+	// matching the expected item.
+	ws.defs = []workspace.SubagentDefInfo{
+		{Name: "agent-a", Scope: "user"},
+		{Name: "agent-c", Scope: "user"},
+		{Name: "broken", FilePath: "/some/path/broken.md", Error: "parse error", Scope: "user"},
+	}
+
+	d.HandleMsg(pubsub.Event[subagents.Event]{
+		Type:    pubsub.UpdatedEvent,
+		Payload: subagents.Event{},
+	})
+
+	selected, ok := d.libraryList.SelectedItem().(ListItem)
+	require.True(t, ok, "an item should remain selected after refresh")
+	require.Equal(t, "/some/path/broken.md", selected.ID(), "selection should follow the same error-state item across a reorder")
 }
 
 // stripANSIDialog strips ANSI escape sequences from a string for plain-text

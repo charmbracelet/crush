@@ -3,6 +3,7 @@ package dialog
 import (
 	"fmt"
 
+	"github.com/charmbracelet/crush/internal/subagents"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/x/ansi"
@@ -15,6 +16,7 @@ type RunningSubagentItemData struct {
 	Name             string
 	Color            string
 	Model            string
+	Status           string
 	PromptTokens     int64
 	CompletionTokens int64
 }
@@ -48,7 +50,7 @@ func (r *RunningSubagentItem) Finished() bool {
 
 // Filter implements [list.FilterableItem].
 func (r *RunningSubagentItem) Filter() string {
-	return r.data.Name
+	return r.data.Name + " " + r.data.Model
 }
 
 // ID implements [ListItem].
@@ -81,7 +83,7 @@ func (r *RunningSubagentItem) SetMatch(m fuzzy.Match) {
 // Render implements list.Item. It renders the running subagent as a single
 // line showing the colored dot, name, model, and total token count.
 func (r *RunningSubagentItem) Render(width int) string {
-	dot := styles.SubagentDot(r.data.Color)
+	dot := r.t.SubagentDot(r.data.Color)
 	totalTokens := r.data.PromptTokens + r.data.CompletionTokens
 	tokStr := fmt.Sprintf("%d tok", totalTokens)
 
@@ -90,9 +92,16 @@ func (r *RunningSubagentItem) Render(width int) string {
 		itemStyle = r.t.Dialog.SelectedItem
 	}
 
+	text := " " + r.data.Name + "  " + r.data.Model + "  " + tokStr
+	// A live entry is "running"; anything else (retrying while credentials
+	// refresh) is worth spelling out. Parenthesized to match the sidebar
+	// panel, which renders the same status alongside the same fields.
+	if r.data.Status != "" && r.data.Status != subagents.StatusRunning {
+		text += "  (" + r.data.Status + ")"
+	}
 	// The dot ends in an SGR reset, so the text after it carries the row
 	// style itself or it loses the selected highlight.
-	content := dot + itemStyle.UnsetPadding().Render(" "+r.data.Name+"  "+r.data.Model+"  "+tokStr)
+	content := dot + itemStyle.UnsetPadding().Render(text)
 	content = ansi.Truncate(content, max(0, width-itemStyle.GetHorizontalFrameSize()), "…")
 	return itemStyle.Render(content)
 }

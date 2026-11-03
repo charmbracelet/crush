@@ -141,6 +141,9 @@ type Service interface {
 	// was cancelled is not returned.
 	ActiveRequest() (PermissionRequest, bool)
 	AutoApproveSession(sessionID string)
+	// IsSessionAutoApproved reports whether AutoApproveSession was called
+	// for sessionID.
+	IsSessionAutoApproved(sessionID string) bool
 	SetPermissionMode(mode PermissionMode)
 	PermissionMode() PermissionMode
 	SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification]
@@ -446,6 +449,12 @@ func (s *permissionService) AutoApproveSession(sessionID string) {
 	s.autoApproveSessionsMu.Lock()
 	s.autoApproveSessions[sessionID] = true
 	s.autoApproveSessionsMu.Unlock()
+}
+
+func (s *permissionService) IsSessionAutoApproved(sessionID string) bool {
+	s.autoApproveSessionsMu.RLock()
+	defer s.autoApproveSessionsMu.RUnlock()
+	return s.autoApproveSessions[sessionID]
 }
 
 func (s *permissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification] {

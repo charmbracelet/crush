@@ -38,7 +38,7 @@ var (
 type Skill struct {
 	Name                   string            `yaml:"name" json:"name"`
 	Description            string            `yaml:"description" json:"description"`
-	UserInvocable          bool              `yaml:"user-invocable" json:"user_invocable"`
+	UserInvocable          *bool             `yaml:"user-invocable,omitempty" json:"user_invocable,omitempty"`
 	DisableModelInvocation bool              `yaml:"disable-model-invocation" json:"disable_model_invocation"`
 	License                string            `yaml:"license,omitempty" json:"license,omitempty"`
 	Compatibility          string            `yaml:"compatibility,omitempty" json:"compatibility,omitempty"`
@@ -47,6 +47,13 @@ type Skill struct {
 	Path                   string            `yaml:"-" json:"path"`
 	SkillFilePath          string            `yaml:"-" json:"skill_file_path"`
 	Builtin                bool              `yaml:"-" json:"builtin"`
+}
+
+// IsUserInvocable reports whether the skill should appear in the command
+// palette. When the user-invocable frontmatter field is absent, skills
+// default to user-invocable to make the feature opt-out.
+func (s *Skill) IsUserInvocable() bool {
+	return s.UserInvocable == nil || *s.UserInvocable
 }
 
 // DiscoveryState represents the outcome of discovering a single skill file.

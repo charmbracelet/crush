@@ -17,3 +17,9 @@ func buildSubagentCaches(active []workspace.SubagentInfo) []completions.Subagent
 	}
 	return items
 }
+
+// rebuildSubagentCaches refreshes the @-mention completion caches from the
+// workspace's current active subagents. Called when Library discovery changes.
+func (m *UI) rebuildSubagentCaches() {
+	m.activeSubagentItems = buildSubagentCaches(m.com.Workspace.ActiveSubagents())
+}

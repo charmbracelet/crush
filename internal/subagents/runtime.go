@@ -19,10 +19,22 @@ type RunningEntry struct {
 	StartedAt       time.Time
 }
 
+// Live and terminal statuses for sub-agent runs.
+const (
+	StatusRunning   = "running"
+	StatusRetrying  = "retrying"
+	StatusCompleted = "completed"
+	StatusCancelled = "cancelled"
+	StatusFailed    = "failed"
+)
+
 // RuntimeEvent is published whenever the set of running sub-agents changes.
+// Finished is non-nil when the event reflects a sub-agent that just finished,
+// carrying its final entry (including terminal Status) so the UI can react.
 type RuntimeEvent struct {
 	ParentSessionID string
 	Entries         []RunningEntry
+	Finished        *RunningEntry
 }
 
 // Runtime tracks which sub-agents are currently running across all sessions.
@@ -53,7 +65,7 @@ func (r *Runtime) Register(parentSessionID, childSessionID, name, color, model s
 		Name:            name,
 		Color:           color,
 		Model:           model,
-		Status:          "running",
+		Status:          StatusRunning,
 		StartedAt:       time.Now(),
 	}
 	r.mu.Lock()
@@ -64,22 +76,30 @@ func (r *Runtime) Register(parentSessionID, childSessionID, name, color, model s
 	return entry
 }
 
-// Unregister removes a running sub-agent entry and publishes a RuntimeEvent.
-// It is a no-op when r is nil.
-func (r *Runtime) Unregister(childSessionID string) {
+// Finish removes a running sub-agent entry with a terminal status and publishes
+// a RuntimeEvent whose Finished field carries the removed entry. Use one of the
+// Status* constants for finalStatus. It is a no-op when r is nil.
+func (r *Runtime) Finish(childSessionID, finalStatus string) {
 	if r == nil {
 		return
 	}
 	r.mu.Lock()
 	entry, ok := r.entries[childSessionID]
 	if ok {
+		entry.Status = finalStatus
 		delete(r.entries, childSessionID)
 	}
 	r.mu.Unlock()
 
-	if ok {
-		r.publish(entry.ParentSessionID)
+	if !ok {
+		return
 	}
+
+	r.broker.Publish(pubsub.UpdatedEvent, RuntimeEvent{
+		ParentSessionID: entry.ParentSessionID,
+		Entries:         r.entriesFor(entry.ParentSessionID),
+		Finished:        &entry,
+	})
 }
 
 // SetStatus updates the Status field of a running sub-agent and publishes a
@@ -143,17 +163,22 @@ func (r *Runtime) Shutdown() {
 // publish gathers all entries for parentSessionID and sends a RuntimeEvent.
 // Called with no locks held.
 func (r *Runtime) publish(parentSessionID string) {
+	r.broker.Publish(pubsub.UpdatedEvent, RuntimeEvent{
+		ParentSessionID: parentSessionID,
+		Entries:         r.entriesFor(parentSessionID),
+	})
+}
+
+// entriesFor returns a snapshot of all entries belonging to parentSessionID.
+// Acquires the read lock; callers must hold no locks.
+func (r *Runtime) entriesFor(parentSessionID string) []RunningEntry {
 	r.mu.RLock()
+	defer r.mu.RUnlock()
 	var entries []RunningEntry
 	for _, e := range r.entries {
 		if e.ParentSessionID == parentSessionID {
 			entries = append(entries, e)
 		}
 	}
-	r.mu.RUnlock()
-
-	r.broker.Publish(pubsub.UpdatedEvent, RuntimeEvent{
-		ParentSessionID: parentSessionID,
-		Entries:         entries,
-	})
+	return entries
 }

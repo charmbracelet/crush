@@ -146,40 +146,50 @@ func stripANSI(s string) string {
 	return b.String()
 }
 
-func TestFetchParentTitle_ReturnsMsg(t *testing.T) {
+func TestFetchParentMeta_ReturnsTitleAndColor(t *testing.T) {
 	t.Parallel()
 
 	ws := &getSessionWorkspace{
 		sessions: map[string]session.Session{
 			"parent-id": {ID: "parent-id", Title: "My Parent Session"},
 		},
+		running: map[string][]workspace.RunningSubagentInfo{
+			"parent-id": {{ChildSessionID: "child-id", Color: "purple"}},
+		},
 	}
 	m := &UI{com: &common.Common{Workspace: ws}}
 
-	cmd := m.fetchParentTitle("parent-id")
+	cmd := m.fetchParentMeta("parent-id", "child-id")
 	msg := cmd()
 
 	ptm, ok := msg.(parentTitleMsg)
 	require.True(t, ok, "expected parentTitleMsg")
 	require.Equal(t, "My Parent Session", ptm.title)
+	require.Equal(t, "purple", ptm.color)
 }
 
-func TestFetchParentTitle_NotFoundReturnsNil(t *testing.T) {
+func TestFetchParentMeta_NotFoundReturnsNil(t *testing.T) {
 	t.Parallel()
 
 	ws := &getSessionWorkspace{sessions: map[string]session.Session{}}
 	m := &UI{com: &common.Common{Workspace: ws}}
 
-	cmd := m.fetchParentTitle("missing")
+	cmd := m.fetchParentMeta("missing", "")
 	msg := cmd()
 
 	require.Nil(t, msg)
 }
 
-// getSessionWorkspace stubs only GetSession for fetchParentTitle tests.
+// getSessionWorkspace stubs GetSession and RunningSubagents for the
+// fetchParentMeta tests.
 type getSessionWorkspace struct {
 	workspace.Workspace
 	sessions map[string]session.Session
+	running  map[string][]workspace.RunningSubagentInfo
+}
+
+func (w *getSessionWorkspace) RunningSubagents(parentSessionID string) []workspace.RunningSubagentInfo {
+	return w.running[parentSessionID]
 }
 
 func (w *getSessionWorkspace) GetSession(_ context.Context, sessionID string) (session.Session, error) {

@@ -47,7 +47,7 @@ func TestBuildTools_HookWrapping_TaskAgentBypassesHooks(t *testing.T) {
 	t.Run("custom subagent tools are wrapped", func(t *testing.T) {
 		t.Parallel()
 		agentCfg := config.Agent{ID: "reviewer", Name: "Reviewer", AllowedTools: []string{"view"}}
-		got, err := coord.buildTools(t.Context(), agentCfg, true)
+		got, err := coord.buildTools(t.Context(), agentCfg, true, "")
 		require.NoError(t, err)
 		require.NotEmpty(t, got)
 		for _, tool := range got {
@@ -59,7 +59,7 @@ func TestBuildTools_HookWrapping_TaskAgentBypassesHooks(t *testing.T) {
 	t.Run("built-in task agent tools are not wrapped", func(t *testing.T) {
 		t.Parallel()
 		agentCfg := config.Agent{ID: config.AgentTask, Name: "Task", AllowedTools: []string{"view"}}
-		got, err := coord.buildTools(t.Context(), agentCfg, true)
+		got, err := coord.buildTools(t.Context(), agentCfg, true, "")
 		require.NoError(t, err)
 		require.NotEmpty(t, got)
 		for _, tool := range got {
@@ -96,7 +96,7 @@ func TestBuildTools_MCPResourceToolsRespectAllowedMCP(t *testing.T) {
 			AllowedTools: allowedTools,
 			AllowedMCP:   map[string][]string{},
 		}
-		got, err := coord.buildTools(t.Context(), agentCfg, false)
+		got, err := coord.buildTools(t.Context(), agentCfg, false, "")
 		require.NoError(t, err)
 		for _, tool := range got {
 			require.NotEqual(t, tools.ListMCPResourcesToolName, tool.Info().Name)
@@ -111,7 +111,7 @@ func TestBuildTools_MCPResourceToolsRespectAllowedMCP(t *testing.T) {
 			AllowedTools: allowedTools,
 			AllowedMCP:   nil,
 		}
-		got, err := coord.buildTools(t.Context(), agentCfg, false)
+		got, err := coord.buildTools(t.Context(), agentCfg, false, "")
 		require.NoError(t, err)
 		names := make([]string, 0, len(got))
 		for _, tool := range got {

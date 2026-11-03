@@ -114,11 +114,11 @@ type DiscoveryConfig struct {
 	DisabledSubagents []string
 	// Resolver expands $VAR-style references in paths. May be nil.
 	Resolver func(string) (string, error)
-	// IsKnownModelID validates that a model id (anything other than the
-	// "large"/"small" aliases) resolves to a real provider model. May be nil
-	// during discovery in contexts where the config is not yet loaded; in that
-	// case model-id validation is skipped.
-	IsKnownModelID func(string) bool
+	// ValidateModel checks that a model id (anything other than the
+	// "large"/"small" aliases) resolves to exactly one provider model. May be
+	// nil during discovery in contexts where the config is not yet loaded; in
+	// that case model-id validation is skipped.
+	ValidateModel func(provider, model string) error
 }
 
 // ResolvePaths expands home-directory and $VAR references in SubagentsPaths.
@@ -160,13 +160,7 @@ func (c DiscoveryConfig) ResolvePaths() []string {
 //   - states: per-file discovery outcome for diagnostics/UI.
 func DiscoverFromConfig(cfg DiscoveryConfig) (all, active []*Subagent, states []*SubagentState) {
 	userPaths := cfg.ResolvePaths()
-	isKnown := cfg.IsKnownModelID
-	discovered, allStates := DiscoverWithStates(userPaths, func(_, model string) bool {
-		if isKnown == nil {
-			return false
-		}
-		return isKnown(model)
-	})
+	discovered, allStates := DiscoverWithStates(userPaths, cfg.ValidateModel)
 	all = Deduplicate(discovered)
 	active = Filter(all, cfg.DisabledSubagents)
 	allStates = DeduplicateStates(allStates)

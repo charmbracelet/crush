@@ -57,12 +57,23 @@ func padRight(s string, width int) string {
 // the input, and the help footer. A scrollbar column is reserved only when
 // the list actually overflows.
 func sizeOnboardingList(t *styles.Styles, l *list.FilterableList, innerWidth, maxHeight, chrome int) (listHeight, listTotalHeight int) {
-	listTotalHeight = l.TotalHeight()
-	listHeight = max(1, min(listTotalHeight, max(1, maxHeight-chrome)))
+	maxListHeight := max(1, maxHeight-chrome)
 
+	// Measure at the final width. An unsized list measures its rows at
+	// width zero, where every row collapses to a single line, so measuring
+	// before SetSize under-reports the height on the first frame.
+	l.SetSize(max(0, innerWidth), maxListHeight)
+	listTotalHeight = l.TotalHeight()
+
+	listHeight = min(listTotalHeight, maxListHeight)
 	width := innerWidth
 	if listTotalHeight > listHeight {
+		// Reserve a column for the scrollbar, then re-measure: a narrower
+		// list can wrap differently.
 		width--
+		l.SetSize(max(0, width), listHeight)
+		listTotalHeight = l.TotalHeight()
+		listHeight = min(listTotalHeight, maxListHeight)
 	}
 	l.SetSize(max(0, width), listHeight)
 	return listHeight, listTotalHeight

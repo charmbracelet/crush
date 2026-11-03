@@ -17,7 +17,7 @@ type OnboardingStep int
 const (
 	OnboardingStepProvider OnboardingStep = iota
 	OnboardingStepModel
-	OnboardingStepHelp
+	OnboardingStepDemo
 
 	onboardingStepCount = 3
 )
@@ -41,6 +41,30 @@ func onboardingProgress(t *styles.Styles, step OnboardingStep) string {
 
 	count := t.Dialog.Onboarding.Step.Render(fmt.Sprintf("%d/%d", int(step)+1, onboardingStepCount))
 	return " " + count + "  " + strings.Join(dots, "")
+}
+
+// KeyHint is one key/description pair. The UI builds these from its real key
+// bindings so the hints cannot drift from what the keys do.
+type KeyHint struct {
+	Key  string
+	Desc string
+}
+
+// RenderKeyHints lays out key hints as a two-column block, padding the key
+// column to a uniform width.
+func RenderKeyHints(t *styles.Styles, hints []KeyHint, maxKeyWidth int) string {
+	keyWidth := 0
+	for _, hint := range hints {
+		keyWidth = max(keyWidth, lipgloss.Width(hint.Key))
+	}
+	keyWidth = min(keyWidth, maxKeyWidth)
+
+	lines := make([]string, 0, len(hints))
+	for _, hint := range hints {
+		keyCell := t.Dialog.Onboarding.Key.Width(keyWidth).Render(hint.Key)
+		lines = append(lines, " "+keyCell+"  "+t.Dialog.Onboarding.Desc.Render(hint.Desc))
+	}
+	return strings.Join(lines, "\n")
 }
 
 // padRight pads s with spaces to width, so a row's selection background

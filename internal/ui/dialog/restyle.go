@@ -240,6 +240,6 @@ func (s *ShortlistItem) RefreshStyles() {
 }
 
 // RefreshStyles implements [StyleRefresher].
-func (m *OnboardingHelp) RefreshStyles() {
+func (m *OnboardingDemo) RefreshStyles() {
 	m.help.Styles = m.com.Styles.DialogHelpStyles()
 }

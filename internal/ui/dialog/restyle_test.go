@@ -45,7 +45,7 @@ var (
 	_ StyleRefresher = (*ProviderItem)(nil)
 	_ StyleRefresher = (*ModelShortlist)(nil)
 	_ StyleRefresher = (*ShortlistItem)(nil)
-	_ StyleRefresher = (*OnboardingHelp)(nil)
+	_ StyleRefresher = (*OnboardingDemo)(nil)
 )
 
 // restyleTheme returns a theme whose colors differ from the default

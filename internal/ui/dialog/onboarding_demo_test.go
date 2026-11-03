@@ -9,20 +9,32 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestOnboardingHelpStartsOnEnter(t *testing.T) {
+func TestOnboardingDemoRunsOnEnter(t *testing.T) {
 	t.Parallel()
 
-	m := NewOnboardingHelp(testCommon(nil), []KeyHint{{Key: "enter", Desc: "send"}})
-	require.Equal(t, OnboardingHelpID, m.ID())
+	m := NewOnboardingDemo(testCommon(nil))
+	require.Equal(t, OnboardingDemoID, m.ID())
 
-	require.IsType(t, ActionOnboardingDone{}, m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter}))
+	action := m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.Equal(t, ActionOnboardingDone{RunDemo: true}, action)
 }
 
-func TestOnboardingHelpIgnoresEscape(t *testing.T) {
+func TestOnboardingDemoNotNow(t *testing.T) {
 	t.Parallel()
 
-	m := NewOnboardingHelp(testCommon(nil), []KeyHint{{Key: "enter", Desc: "send"}})
-	require.Nil(t, m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEscape}))
+	m := NewOnboardingDemo(testCommon(nil))
+	m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyTab})
+
+	action := m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.Equal(t, ActionOnboardingDone{RunDemo: false}, action)
+}
+
+func TestOnboardingDemoEscapeSkips(t *testing.T) {
+	t.Parallel()
+
+	m := NewOnboardingDemo(testCommon(nil))
+	action := m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEscape})
+	require.Equal(t, ActionOnboardingDone{}, action)
 }
 
 func TestRenderKeyHintsAlignsKeys(t *testing.T) {
@@ -56,7 +68,7 @@ func TestOnboardingProgress(t *testing.T) {
 	progress := onboardingProgress(&sty, OnboardingStepProvider)
 	require.Contains(t, progress, "1/3")
 
-	progress = onboardingProgress(&sty, OnboardingStepHelp)
+	progress = onboardingProgress(&sty, OnboardingStepDemo)
 	require.Contains(t, progress, "3/3")
 
 	require.Empty(t, onboardingProgress(&sty, OnboardingStep(99)))

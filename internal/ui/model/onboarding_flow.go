@@ -46,15 +46,15 @@ func (m *UI) openModelShortlist(provider catwalk.Provider) tea.Cmd {
 	return nil
 }
 
-// openOnboardingHelp opens the final setup screen that teaches the keys worth
-// knowing.
-func (m *UI) openOnboardingHelp() tea.Cmd {
-	if m.dialog.ContainsDialog(dialog.OnboardingHelpID) {
-		m.dialog.BringToFront(dialog.OnboardingHelpID)
+// openOnboardingDemo opens the final setup screen, which offers a live first
+// turn instead of a shortcut list.
+func (m *UI) openOnboardingDemo() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.OnboardingDemoID) {
+		m.dialog.BringToFront(dialog.OnboardingDemoID)
 		return nil
 	}
 
-	m.dialog.OpenDialog(dialog.NewOnboardingHelp(m.com, m.onboardingKeyHints()))
+	m.dialog.OpenDialog(dialog.NewOnboardingDemo(m.com))
 	return nil
 }
 
@@ -64,8 +64,8 @@ func (m *UI) openOnboardingStepDialog() tea.Cmd {
 	switch m.onboarding.step {
 	case dialog.OnboardingStepModel:
 		return m.openModelShortlist(m.onboarding.provider)
-	case dialog.OnboardingStepHelp:
-		return m.openOnboardingHelp()
+	case dialog.OnboardingStepDemo:
+		return m.openOnboardingDemo()
 	default:
 		return m.openProviderSelect()
 	}
@@ -105,36 +105,25 @@ func (m *UI) startProviderAuth(provider catwalk.Provider) tea.Cmd {
 	return m.openAuthenticationDialog(provider, model, config.SelectedModelTypeLarge)
 }
 
-// finishOnboarding hands control back to the normal UI. When the project has
-// not been initialized yet, the initialize prompt runs as the last setup step
-// instead of waiting for a later launch.
-func (m *UI) finishOnboarding() tea.Cmd {
+// finishOnboarding hands control back to the normal UI. When the user asked
+// for the demo, the first turn is a live tour: the project-init prompt when
+// the project has not been initialized yet (so the first turn also writes the
+// context file), otherwise a plain exploration prompt.
+func (m *UI) finishOnboarding(runDemo bool) tea.Cmd {
+	m.setState(uiLanding, uiFocusEditor)
+	m.textarea.Focus()
+	if !runDemo {
+		return nil
+	}
+
 	needsInit, err := m.com.Workspace.ProjectNeedsInitialization()
 	if err != nil {
 		slog.Warn("Failed to check project initialization", "error", err)
 	}
 	if needsInit {
-		m.setState(uiInitialize, uiFocusEditor)
-		return nil
+		return m.initializeProject()
 	}
-
-	m.setState(uiLanding, uiFocusEditor)
-	m.textarea.Focus()
-	return nil
-}
-
-// onboardingKeyHints builds the usage screen content from the live key
-// bindings, so the hints cannot drift from what the keys do.
-func (m *UI) onboardingKeyHints() []dialog.KeyHint {
-	return []dialog.KeyHint{
-		keyHint(m.keyMap.Editor.SendMessage, "send"),
-		keyHint(m.keyMap.Editor.Newline, "new line"),
-		keyHint(m.keyMap.Editor.MentionFile, "pull a file into the conversation"),
-		keyHint(m.keyMap.Editor.Commands, "slash commands"),
-		keyHint(m.keyMap.Commands, "palette: models, sessions, init"),
-		keyHint(m.keyMap.Chat.Cancel, "interrupt the agent"),
-		keyHint(m.keyMap.ShiftTab, "switch mode"),
-	}
+	return m.sendMessage("What does this project do?")
 }
 
 // keyHint pairs a binding's key with a description suited to onboarding. An

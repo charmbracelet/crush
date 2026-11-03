@@ -8,25 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestOnboardingKeyHintsTrackBindings(t *testing.T) {
-	t.Parallel()
-
-	ui := newTestUIWithConfig(t, &config.Config{})
-	ui.keyMap = DefaultKeyMap()
-
-	hints := ui.onboardingKeyHints()
-	require.NotEmpty(t, hints)
-
-	enter := ui.keyMap.Editor.SendMessage.Help()
-	require.Equal(t, enter.Key, hints[0].Key)
-	require.Equal(t, "send", hints[0].Desc)
-
-	for _, hint := range hints {
-		require.NotEmpty(t, hint.Key, "every hint names a key")
-		require.NotEmpty(t, hint.Desc, "every hint explains the key")
-	}
-}
-
 func TestShowLandingTips(t *testing.T) {
 	t.Parallel()
 

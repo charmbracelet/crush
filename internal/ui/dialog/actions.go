@@ -58,8 +58,11 @@ type ActionBrowseModels struct {
 }
 
 // ActionOnboardingDone is sent when the final onboarding screen is
-// acknowledged.
-type ActionOnboardingDone struct{}
+// acknowledged. RunDemo indicates the user asked for the first turn to be a
+// live tour of the project.
+type ActionOnboardingDone struct {
+	RunDemo bool
+}
 
 // Messages for commands
 type (

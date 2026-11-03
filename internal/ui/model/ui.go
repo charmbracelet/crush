@@ -2618,8 +2618,8 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 	case dialog.ActionOnboardingDone:
-		m.dialog.CloseDialog(dialog.OnboardingHelpID)
-		if cmd := m.finishOnboarding(); cmd != nil {
+		m.dialog.CloseDialog(dialog.OnboardingDemoID)
+		if cmd := m.finishOnboarding(msg.RunDemo); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	case dialog.ActionSelectModel:
@@ -3080,9 +3080,9 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		if cmd := m.dispatchBusyRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-		m.onboarding.step = dialog.OnboardingStepHelp
+		m.onboarding.step = dialog.OnboardingStepDemo
 		m.dialog.CloseDialog(dialog.ModelShortlistID)
-		if cmd := m.openOnboardingHelp(); cmd != nil {
+		if cmd := m.openOnboardingDemo(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	} else if m.com.IsHyper() {

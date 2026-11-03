@@ -19,9 +19,13 @@ import (
 //go:embed templates/agent_tool.md
 var agentToolDescription string
 
-// AgentParams is kept for backward compatibility; new code uses AgentDispatchParams.
+// AgentParams is the shape consumed by UI tool-call renderers when displaying
+// historical agent tool invocations. New tool-call inputs decode with
+// AgentDispatchParams; AgentParams stays wire-compatible so older inputs still
+// decode cleanly.
 type AgentParams struct {
-	Prompt string `json:"prompt" description:"The task for the agent to perform"`
+	SubagentType string `json:"subagent_type,omitempty"`
+	Prompt       string `json:"prompt" description:"The task for the agent to perform"`
 }
 
 // AgentDispatchParams is the input to the dispatcher agent tool.
@@ -50,6 +54,29 @@ func (d *dispatcherTool) Run(ctx context.Context, call fantasy.ToolCall) (fantas
 		return fantasy.NewTextErrorResponse("invalid parameters: " + err.Error()), nil
 	}
 	return d.dispatch(ctx, params, call)
+}
+
+// findSubagentByName returns the active subagent with the given name, or nil
+// when none matches.
+func findSubagentByName(active []*subagents.Subagent, name string) *subagents.Subagent {
+	for _, sa := range active {
+		if sa.Name == name {
+			return sa
+		}
+	}
+	return nil
+}
+
+// subagentSessionSetup returns a SessionSetup callback that applies the
+// subagent's permission mode to the freshly-created sub-session. Returns
+// nil when no setup is needed.
+func (c *coordinator) subagentSessionSetup(sa *subagents.Subagent) func(sessionID string) {
+	if sa.PermissionMode != subagents.PermissionModeBypassPermissions {
+		return nil
+	}
+	return func(sessionID string) {
+		c.permissions.AutoApproveSession(sessionID)
+	}
 }
 
 // buildAgentDispatchInfo builds the ToolInfo for the agent dispatcher tool with
@@ -88,7 +115,9 @@ func buildAgentDispatchInfo(activeSubagents []*subagents.Subagent) fantasy.ToolI
 	}
 }
 
-func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) {
+// agentTool builds the dispatcher tool for owner, whose tools cap every
+// custom subagent it dispatches (plan-mode subagents stay read-only).
+func (c *coordinator) agentTool(ctx context.Context, owner config.Agent) (fantasy.AgentTool, error) {
 	taskCfg, ok := c.cfg.Config().Agents[config.AgentTask]
 	if !ok {
 		return nil, errors.New("task agent not configured")
@@ -97,7 +126,7 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 	if err != nil {
 		return nil, err
 	}
-	taskAgent, err := c.buildAgent(ctx, taskPr, taskCfg, true)
+	taskAgent, err := c.buildAgent(ctx, taskPr, taskCfg, true, "")
 	if err != nil {
 		return nil, err
 	}
@@ -132,23 +161,17 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 				})
 			}
 
-			var sa *subagents.Subagent
-			for _, active := range c.activeSubagents {
-				if active.Name == subagentType {
-					sa = active
-					break
-				}
-			}
+			sa := findSubagentByName(c.activeSubagents, subagentType)
 			if sa == nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("unknown subagent type: %q", subagentType)), nil
 			}
 
-			agentCfg := sa.ToConfigAgent(taskCfg)
+			agentCfg := sa.ToConfigAgent(owner)
 			subPr, err := subagentPrompt(sa, c.activeSkills, prompt.WithWorkingDir(c.cfg.WorkingDir()))
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("build subagent prompt %q: %w", sa.Name, err)
 			}
-			agent, err := c.buildAgent(ctx, subPr, agentCfg, true)
+			agent, err := c.buildAgent(ctx, subPr, agentCfg, true, sa.Effort)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("build subagent %q: %w", sa.Name, err)
 			}
@@ -160,6 +183,10 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 				ToolCallID:     call.ID,
 				Prompt:         params.Prompt,
 				SessionTitle:   sa.Name + " Agent Session",
+				SessionSetup:   c.subagentSessionSetup(sa),
+				AgentName:      sa.Name,
+				AgentColor:     sa.ResolvedColor(),
+				AgentModel:     agent.Model().ModelCfg.Model,
 			})
 		},
 	}, nil

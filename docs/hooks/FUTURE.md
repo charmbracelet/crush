@@ -84,9 +84,10 @@ envelopes keep working unchanged. No version bump required.
 
 ### Background
 
-Today hooks fire **only** on the top-level agent's tool calls. Sub-agents
-(`agent` task tool, `agentic_fetch`, future delegated loops) run without hook
-interception so a single delegated turn doesn't trigger the user's hook N times.
+Today hooks fire on the top-level agent's tool calls and on custom subagents'
+(which can hold write tools). The built-in read-only sub-agents (`agent` task
+tool, `agentic_fetch`, future delegated loops) run without hook interception so
+a single delegated turn doesn't trigger the user's hook N times.
 
 The outer sub-agent tool call itself is hooked, so blanket policy like "never
 spawn sub-agents" or "rewrite prompts sent to the task agent" still works from
@@ -121,7 +122,7 @@ Additive, per-hook. Zero-value matches current default (skip sub-agents):
 ```
 
 Implementation changes where `wrapToolsWithHooks` decides to skip. Instead of a
-single `isSubAgent` bailout, the runner filters per-hook matches by the hook's
+single `skipHooks` bailout, the runner filters per-hook matches by the hook's
 `include_sub_agents` flag. Hooks that opt in get wrapped into sub-agent tool
 slices too; everything else stays skipped.
 

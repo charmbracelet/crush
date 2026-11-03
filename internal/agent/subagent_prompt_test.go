@@ -1,9 +1,11 @@
 package agent
 
 import (
+	"context"
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/subagents"
 	"github.com/stretchr/testify/require"
@@ -205,4 +207,116 @@ func TestSubagentPrompt_NilSubagentSkills(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, p)
+}
+
+// TestSubagentPrompt_Build_RendersBody confirms that the subagent template
+// actually emits SubagentBody when the prompt is built. A typo in
+// subagent.md.tpl would otherwise pass the existing not-nil tests.
+func TestSubagentPrompt_Build_RendersBody(t *testing.T) {
+	t.Parallel()
+
+	body := "You are a specialist that handles XYZ tasks."
+	sa := newTestSubagent("build-render", nil, body)
+
+	p, err := subagentPrompt(sa, nil)
+	require.NoError(t, err)
+
+	got, err := p.Build(context.Background(), "p", "m", nil)
+	require.NoError(t, err)
+	require.Contains(t, got, body)
+}
+
+// TestSubagentPrompt_Build_RendersPreloadedSkillsXML confirms that resolved
+// preloaded skill invocations actually flow through to the rendered prompt.
+func TestSubagentPrompt_Build_RendersPreloadedSkillsXML(t *testing.T) {
+	t.Parallel()
+
+	sk := newTestSkill("preload-me", false)
+	sa := newTestSubagent("with-preload", []string{"preload-me"}, "Body.")
+
+	p, err := subagentPrompt(sa, []*skills.Skill{sk})
+	require.NoError(t, err)
+
+	got, err := p.Build(context.Background(), "p", "m", nil)
+	require.NoError(t, err)
+	require.Contains(t, got, "<loaded_skill>")
+	require.Contains(t, got, "preload-me")
+}
+
+// TestSubagentPrompt_Build_OmitsPreloadWhenEmpty verifies that the template's
+// guard around PreloadedSkillsXML keeps the output clean when no skills are
+// requested. Catches accidental literal `<loaded_skill>` leak.
+func TestSubagentPrompt_Build_OmitsPreloadWhenEmpty(t *testing.T) {
+	t.Parallel()
+
+	sa := newTestSubagent("no-preload", nil, "Body.")
+
+	p, err := subagentPrompt(sa, nil)
+	require.NoError(t, err)
+
+	got, err := p.Build(context.Background(), "p", "m", nil)
+	require.NoError(t, err)
+	require.NotContains(t, got, "<loaded_skill>")
+}
+
+// TestSubagentPrompt_Build_SuppressesAvailableWhenSkillsPinned verifies that a
+// subagent with a pinned skills set gets its skills preloaded and the broad
+// <available_skills> discovery list suppressed. Uses a real store so promptData
+// runs the full path (the nil-store path never computes AvailSkillXML).
+func TestSubagentPrompt_Build_SuppressesAvailableWhenSkillsPinned(t *testing.T) {
+	t.Parallel()
+
+	store, err := config.Init(t.Context(), t.TempDir(), "", false)
+	require.NoError(t, err)
+
+	sk := newTestSkill("preload-me", false)
+	sa := newTestSubagent("scoped", []string{"preload-me"}, "Body.")
+
+	p, err := subagentPrompt(sa, []*skills.Skill{sk})
+	require.NoError(t, err)
+
+	got, err := p.Build(context.Background(), "p", "m", store)
+	require.NoError(t, err)
+	require.Contains(t, got, "<loaded_skill>", "pinned skill must be preloaded")
+	require.NotContains(t, got, "<available_skills>", "available list must be suppressed when skills are pinned")
+}
+
+// TestSubagentPrompt_Build_RendersAvailableWhenNoSkillsPinned verifies the
+// default (no skills:): the discovery list renders (builtins present) and
+// nothing is preloaded.
+func TestSubagentPrompt_Build_RendersAvailableWhenNoSkillsPinned(t *testing.T) {
+	t.Parallel()
+
+	store, err := config.Init(t.Context(), t.TempDir(), "", false)
+	require.NoError(t, err)
+
+	sa := newTestSubagent("open", nil, "Body.")
+
+	p, err := subagentPrompt(sa, nil)
+	require.NoError(t, err)
+
+	got, err := p.Build(context.Background(), "p", "m", store)
+	require.NoError(t, err)
+	require.Contains(t, got, "<available_skills>", "available list must render when no skills are pinned")
+	require.NotContains(t, got, "<loaded_skill>")
+}
+
+// TestSubagentPrompt_Build_SuppressesEvenWhenSkillsUnresolved documents the
+// accepted lenient edge: a pinned-but-unknown skill name suppresses available
+// yet preloads nothing, so the subagent gets no skills section at all.
+func TestSubagentPrompt_Build_SuppressesEvenWhenSkillsUnresolved(t *testing.T) {
+	t.Parallel()
+
+	store, err := config.Init(t.Context(), t.TempDir(), "", false)
+	require.NoError(t, err)
+
+	sa := newTestSubagent("scoped-typo", []string{"does-not-exist"}, "Body.")
+
+	p, err := subagentPrompt(sa, nil)
+	require.NoError(t, err)
+
+	got, err := p.Build(context.Background(), "p", "m", store)
+	require.NoError(t, err)
+	require.NotContains(t, got, "<available_skills>")
+	require.NotContains(t, got, "<loaded_skill>")
 }

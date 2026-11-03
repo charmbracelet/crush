@@ -164,8 +164,9 @@ func TestValidate_EffortField(t *testing.T) {
 	}
 }
 
-// TestApplyEffortToModel_OpenAI verifies that effort values pass through
-// directly as ReasoningEffort for an OpenAI-family model. Think is never set.
+// TestApplyEffortToModel_OpenAI verifies that supported effort values replace
+// ReasoningEffort while unsupported ones keep the user's configured effort,
+// so the call-time fallback never overrides both. Think is never set.
 func TestApplyEffortToModel_OpenAI(t *testing.T) {
 	t.Parallel()
 
@@ -181,13 +182,13 @@ func TestApplyEffortToModel_OpenAI(t *testing.T) {
 		effort        string
 		wantReasoning string
 	}{
-		{"none", "none"},
-		{"minimal", "minimal"},
+		{"none", "medium"},
+		{"minimal", "medium"},
 		{"low", "low"},
 		{"medium", "medium"},
 		{"high", "high"},
-		{"xhigh", "xhigh"},
-		{"max", "max"},
+		{"xhigh", "medium"},
+		{"max", "medium"},
 	}
 
 	for _, tt := range tests {
@@ -195,8 +196,9 @@ func TestApplyEffortToModel_OpenAI(t *testing.T) {
 			t.Parallel()
 
 			base := config.SelectedModel{
-				Model:    "o4-mini",
-				Provider: "openai",
+				Model:           "o4-mini",
+				Provider:        "openai",
+				ReasoningEffort: "medium",
 			}
 			result := ApplyEffortToModel(tt.effort, base, m)
 			require.Equal(t, tt.wantReasoning, result.ReasoningEffort)
@@ -313,42 +315,9 @@ func TestApplyEffortToModel_PreservesOtherFields(t *testing.T) {
 	require.Equal(t, "high", result.ReasoningEffort)
 }
 
-// TestApplyEffortToModel_XHighAndMaxPassThrough verifies that xhigh and max
-// are set verbatim as ReasoningEffort without any clamping or mapping.
-func TestApplyEffortToModel_XHighAndMaxPassThrough(t *testing.T) {
-	t.Parallel()
-
-	m := catwalk.Model{
-		ID: "o4-mini",
-		Reasoning: catwalk.Reasoning{
-			Thinking:     catwalk.ThinkingToggleable,
-			EffortLevels: catwalk.NewEffortLevels("low", "medium", "high"),
-		},
-	}
-	base := config.SelectedModel{
-		Model:    "o4-mini",
-		Provider: "openai",
-	}
-
-	t.Run("xhigh", func(t *testing.T) {
-		t.Parallel()
-
-		result := ApplyEffortToModel("xhigh", base, m)
-		require.Equal(t, "xhigh", result.ReasoningEffort)
-	})
-
-	t.Run("max", func(t *testing.T) {
-		t.Parallel()
-
-		result := ApplyEffortToModel("max", base, m)
-		require.Equal(t, "max", result.ReasoningEffort)
-	})
-}
-
 // TestApplyEffortToModel_EmptyReasoningLevels verifies that when a model has
-// CanReason=true but no ReasoningLevels list, effort still passes through as
-// ReasoningEffort. The coordinator's shouldSetEffort check handles filtering at
-// dispatch time; ApplyEffortToModel itself does not clamp.
+// CanReason=true but no ReasoningLevels list, effort is ignored: no level can
+// be honored, so the user's configured effort is left alone.
 func TestApplyEffortToModel_EmptyReasoningLevels(t *testing.T) {
 	t.Parallel()
 
@@ -362,7 +331,8 @@ func TestApplyEffortToModel_EmptyReasoningLevels(t *testing.T) {
 	}
 
 	result := ApplyEffortToModel("high", base, m)
-	require.Equal(t, "high", result.ReasoningEffort)
+	require.Empty(t, result.ReasoningEffort)
+	require.True(t, EffortIgnored("high", m))
 	require.False(t, result.Think)
 }
 
@@ -432,15 +402,19 @@ func TestDispatchAppliesEffort_Anthropic_EndToEnd(t *testing.T) {
 }
 
 // TestEffortIgnored verifies the capability check used to warn on misconfig:
-// a non-empty effort on a non-reasoning model is "ignored".
+// a non-empty effort the model cannot honor is "ignored".
 func TestEffortIgnored(t *testing.T) {
 	t.Parallel()
 
-	reasoning := catwalk.Model{ID: "r", Reasoning: catwalk.Reasoning{Thinking: catwalk.ThinkingToggleable}}
+	reasoning := catwalk.Model{ID: "r", Reasoning: catwalk.Reasoning{
+		Thinking:     catwalk.ThinkingToggleable,
+		EffortLevels: catwalk.NewEffortLevels("low", "high"),
+	}}
 	plain := catwalk.Model{ID: "p", Reasoning: catwalk.Reasoning{Thinking: catwalk.ThinkingNever}}
 
 	require.True(t, EffortIgnored("high", plain), "effort on non-reasoning model is ignored")
 	require.False(t, EffortIgnored("high", reasoning), "effort on reasoning model is honored")
 	require.False(t, EffortIgnored("", plain), "empty effort is never a misconfig")
 	require.False(t, EffortIgnored("", reasoning))
+	require.True(t, EffortIgnored("max", reasoning), "unsupported level is ignored")
 }

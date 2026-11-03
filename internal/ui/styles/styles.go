@@ -551,14 +551,15 @@ type Styles struct {
 		// selector, the curated model shortlist, and the usage hints
 		// shown once setup completes.
 		Onboarding struct {
-			Step      lipgloss.Style // "1 of 3" progress label
-			StepDot   lipgloss.Style // Inactive progress dot
-			StepDotOn lipgloss.Style // Active progress dot
-			Blurb     lipgloss.Style // Description line under a row title
-			Badge     lipgloss.Style // Right-aligned row badge (e.g. INCLUDED)
-			Key       lipgloss.Style // Key name in the usage hints
-			Desc      lipgloss.Style // Key description in the usage hints
-			Tip       lipgloss.Style // Trailing example line
+			Step         lipgloss.Style // "1 of 3" progress label
+			StepDot      lipgloss.Style // Inactive progress dot
+			StepDotOn    lipgloss.Style // Active progress dot
+			Blurb        lipgloss.Style // Description line under a row title
+			Badge        lipgloss.Style // Right-aligned row badge on the focused row
+			BadgeBlurred lipgloss.Style // Badge on every other row, receding into the background
+			Key          lipgloss.Style // Key name in the usage hints
+			Desc         lipgloss.Style // Key description in the usage hints
+			Tip          lipgloss.Style // Trailing example line
 		}
 
 		Permissions struct {

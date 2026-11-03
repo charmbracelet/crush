@@ -106,6 +106,16 @@ func TestProviderSelectIgnoresEscape(t *testing.T) {
 	require.Nil(t, m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEscape}))
 }
 
+func TestProviderBadges(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, providerPromotedBadge, NewProviderItem(new(styles.Styles), catwalk.Provider{ID: "hyper"}).badge)
+	require.Equal(t, providerSignInBadge, NewProviderItem(new(styles.Styles), catwalk.Provider{ID: catwalk.InferenceProviderOpenAI}).badge)
+	require.Equal(t, providerSignInBadge, NewProviderItem(new(styles.Styles), catwalk.Provider{ID: catwalk.InferenceProviderXAI}).badge)
+	require.Equal(t, providerSignInBadge, NewProviderItem(new(styles.Styles), catwalk.Provider{ID: catwalk.InferenceProviderCopilot}).badge)
+	require.Equal(t, providerAPIKeyBadge, NewProviderItem(new(styles.Styles), catwalk.Provider{ID: catwalk.InferenceProviderAnthropic}).badge)
+}
+
 func TestProviderSelectBlurbs(t *testing.T) {
 	t.Parallel()
 

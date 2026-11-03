@@ -40,6 +40,9 @@ const (
 	// providerSignInBadge marks the providers that authenticate with an
 	// account instead of an API key.
 	providerSignInBadge = "Sign in"
+	// providerAPIKeyBadge marks the providers that need a key. It makes
+	// the sign-in rows stand out as the exception rather than the norm.
+	providerAPIKeyBadge = "API key"
 	// providerFallbackBlurb is shown for providers without a tailored
 	// description.
 	providerFallbackBlurb = "Bring your own API key."
@@ -312,17 +315,26 @@ func NewProviderItem(t *styles.Styles, provider catwalk.Provider) *ProviderItem 
 		t:         t,
 		cache:     make(map[int]string),
 	}
+	item.badge = providerBadge(provider)
+	return item
+}
+
+// providerBadge labels how a provider authenticates. Hyper says why it is
+// promoted instead, since the row is already first and its blurb explains the
+// sign-in.
+func providerBadge(provider catwalk.Provider) string {
 	switch provider.ID {
 	case "hyper":
-		item.badge = providerPromotedBadge
+		return providerPromotedBadge
 	case catwalk.InferenceProviderOpenAI,
 		catwalk.InferenceProviderXAI,
 		catwalk.InferenceProviderCopilot:
 		// These providers can authenticate with an account instead of an
 		// API key.
-		item.badge = providerSignInBadge
+		return providerSignInBadge
+	default:
+		return providerAPIKeyBadge
 	}
-	return item
 }
 
 // Filter implements ListItem.
@@ -353,9 +365,14 @@ func (p *ProviderItem) Render(width int) string {
 
 	lineWidth := max(0, width-titleStyle.GetHorizontalFrameSize())
 
+	badgeStyle := p.t.Dialog.Onboarding.BadgeBlurred
+	if p.focused {
+		badgeStyle = p.t.Dialog.Onboarding.Badge
+	}
+
 	var badge string
 	if p.badge != "" && lipgloss.Width(p.badge)+2 <= lineWidth/2 {
-		badge = p.t.Dialog.Onboarding.Badge.Render(" " + p.badge + " ")
+		badge = badgeStyle.Render(" " + p.badge + " ")
 	}
 
 	title := ansi.Truncate(p.name(), max(0, lineWidth-lipgloss.Width(badge)), "…")

@@ -1155,6 +1155,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Dialog.Onboarding.StepDotOn = s.Dialog.Onboarding.StepDot.Foreground(o.fgBase)
 	s.Dialog.Onboarding.Blurb = lipgloss.NewStyle().Foreground(o.fgMostSubtle).Padding(0, 1)
 	s.Dialog.Onboarding.Badge = lipgloss.NewStyle().Foreground(o.success).Bold(true)
+	s.Dialog.Onboarding.BadgeBlurred = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
 	s.Dialog.Onboarding.Key = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
 	s.Dialog.Onboarding.Desc = lipgloss.NewStyle().Foreground(o.fgBase)
 	s.Dialog.Onboarding.Tip = lipgloss.NewStyle().Foreground(o.fgMostSubtle)

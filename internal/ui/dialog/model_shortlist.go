@@ -300,9 +300,14 @@ func (s *ShortlistItem) Render(width int) string {
 
 	lineWidth := max(0, width-titleStyle.GetHorizontalFrameSize())
 
+	tagStyle := s.t.Dialog.Onboarding.BadgeBlurred
+	if s.focused {
+		tagStyle = s.t.Dialog.Onboarding.Badge
+	}
+
 	var tag string
 	if s.tag != "" && lipgloss.Width(s.tag)+2 <= lineWidth/2 {
-		tag = s.t.Dialog.Onboarding.Badge.Render(" " + s.tag + " ")
+		tag = tagStyle.Render(" " + s.tag + " ")
 	}
 
 	name := s.title()

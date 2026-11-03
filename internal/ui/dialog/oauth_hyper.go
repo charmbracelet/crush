@@ -14,12 +14,11 @@ import (
 
 func NewOAuthHyper(
 	com *common.Common,
-	isOnboarding bool,
 	provider catwalk.Provider,
 	model config.SelectedModel,
 	modelType config.SelectedModelType,
 ) (*OAuth, tea.Cmd) {
-	return newOAuth(com, isOnboarding, provider, model, modelType, &OAuthHyper{})
+	return newOAuth(com, provider, model, modelType, &OAuthHyper{})
 }
 
 type OAuthHyper struct {

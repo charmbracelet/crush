@@ -328,6 +328,16 @@ type TUIOptions struct {
 	Scrollbar   string      `json:"scrollbar,omitempty" jsonschema:"description=Chat scrollbar visibility,enum=default,enum=always,enum=never,default=default"`
 	Mouse       *bool       `json:"mouse,omitempty" jsonschema:"description=Enable terminal mouse capture for selection\\, clicks\\, and scrolling in the TUI. Disable to let the terminal emulator or tmux handle text selection and copy/paste,default=true"`
 	ExitBanner  ExitBanner  `json:"exit_banner,omitempty" jsonschema:"description=Exit banner style after quitting Crush,enum=default,enum=compact,enum=none,default=default"`
+	// Tips controls the first-run usage hints on the landing view. They
+	// disappear after the first prompt, and stay gone once dismissed.
+	Tips *bool `json:"tips,omitempty" jsonschema:"description=Show first-run usage tips on the landing view,default=true"`
+}
+
+// ShowTips reports whether first-run usage tips should be shown. The nil
+// receiver and the unset pointer both mean yes, so callers can ask without
+// unwrapping either.
+func (t *TUIOptions) ShowTips() bool {
+	return t == nil || t.Tips == nil || *t.Tips
 }
 
 // IsTransparent reports whether the TUI draws a transparent background. The

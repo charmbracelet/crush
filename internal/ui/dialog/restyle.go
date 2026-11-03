@@ -209,3 +209,37 @@ func (n *NotificationItem) RefreshStyles() {
 		n.Bump()
 	}
 }
+
+// RefreshStyles implements [StyleRefresher].
+func (m *ProviderSelect) RefreshStyles() {
+	m.help.Styles = m.com.Styles.DialogHelpStyles()
+	m.input.SetStyles(m.com.Styles.TextInput)
+	refreshItems(m.list.Items())
+}
+
+// RefreshStyles implements [StyleRefresher].
+func (p *ProviderItem) RefreshStyles() {
+	p.cache = nil
+	if p.Versioned != nil {
+		p.Bump()
+	}
+}
+
+// RefreshStyles implements [StyleRefresher].
+func (m *ModelShortlist) RefreshStyles() {
+	m.help.Styles = m.com.Styles.DialogHelpStyles()
+	refreshItems(m.list.Items())
+}
+
+// RefreshStyles implements [StyleRefresher].
+func (s *ShortlistItem) RefreshStyles() {
+	s.cache = nil
+	if s.Versioned != nil {
+		s.Bump()
+	}
+}
+
+// RefreshStyles implements [StyleRefresher].
+func (m *OnboardingHelp) RefreshStyles() {
+	m.help.Styles = m.com.Styles.DialogHelpStyles()
+}

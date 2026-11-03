@@ -482,8 +482,10 @@ type Options struct {
 	// Crush dialog (loopback pinentry) instead of handing the terminal
 	// over to an external pinentry program. No GPG or git configuration
 	// is modified: the redirect only applies to processes Crush spawns.
-	PinentryIntegrated   *bool `json:"pinentry_integrated,omitempty" jsonschema:"description=Render GPG passphrase prompts as a native Crush dialog instead of an external pinentry program. Works with file-based keys and security keys and never modifies GPG or git configuration.,default=true"`
-	PinentryCacheTimeout *int  `json:"pinentry_cache_timeout,omitempty" jsonschema:"description=Seconds Crush keeps an entered GPG passphrase in memory so repeated signing operations do not re-prompt. 0 (the default) disables it; gpg-agent's own cache applies regardless.,default=0,example=300"`
+	PinentryIntegrated   *bool    `json:"pinentry_integrated,omitempty" jsonschema:"description=Render GPG passphrase prompts as a native Crush dialog instead of an external pinentry program. Works with file-based keys and security keys and never modifies GPG or git configuration.,default=true"`
+	PinentryCacheTimeout *int     `json:"pinentry_cache_timeout,omitempty" jsonschema:"description=Seconds Crush keeps an entered GPG passphrase in memory so repeated signing operations do not re-prompt. 0 (the default) disables it; gpg-agent's own cache applies regardless.,default=0,example=300"`
+	SubagentsPaths       []string `json:"subagents_paths,omitempty" jsonschema:"description=Paths to directories containing subagent definition files (*.md files with YAML frontmatter)"`
+	DisabledSubagents    []string `json:"disabled_subagents,omitempty" jsonschema:"description=List of subagent names to disable and hide from the agent"`
 }
 
 // DefaultMaxBackgroundJobs is how many background shell jobs may run at once

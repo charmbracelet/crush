@@ -45,6 +45,7 @@ import (
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/charmbracelet/crush/internal/subagents"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
 
@@ -173,6 +174,9 @@ type coordinator struct {
 	activeSkills []*skills.Skill // Post-filter: active skills only.
 	skillTracker *skills.Tracker
 
+	// Subagents discovery results (session-start snapshot).
+	activeSubagents []*subagents.Subagent
+
 	readyWg errgroup.Group
 
 	hostContext csync.Value[proto.HostContext]
@@ -186,19 +190,20 @@ type coordinator struct {
 // struct keeps the constructor self-documenting and avoids a long
 // positional parameter list.
 type CoordinatorOptions struct {
-	Config      *config.ConfigStore
-	Sessions    session.Service
-	Messages    message.Service
-	Permissions permission.Service
-	Questions   question.Service
-	History     history.Service
-	FileTracker filetracker.Service
-	LSPManager  *lsp.Manager
-	Notify      pubsub.Publisher[notify.Notification]
-	RunComplete pubsub.Publisher[notify.RunComplete]
-	Skills      *skills.Manager
-	HookRunner  *hooks.Runner
-	Interactive bool
+	Config       *config.ConfigStore
+	Sessions     session.Service
+	Messages     message.Service
+	Permissions  permission.Service
+	Questions    question.Service
+	History      history.Service
+	FileTracker  filetracker.Service
+	LSPManager   *lsp.Manager
+	Notify       pubsub.Publisher[notify.Notification]
+	RunComplete  pubsub.Publisher[notify.RunComplete]
+	Skills       *skills.Manager
+	SubagentsMgr *subagents.Manager
+	HookRunner   *hooks.Runner
+	Interactive  bool
 }
 
 func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, error) {
@@ -232,6 +237,10 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		skillTracker: skillTracker,
 		interactive:  opts.Interactive,
 		hookRunner:   opts.HookRunner,
+	}
+
+	if opts.SubagentsMgr != nil {
+		c.activeSubagents = opts.SubagentsMgr.ActiveSubagents()
 	}
 
 	agentCfg, ok := opts.Config.Config().Agents[config.AgentCoder]

@@ -290,7 +290,8 @@ with the following priority:
 | -------- | ------------------------- | ------------------------------------- |
 | 1        | `./.crushrc`              | `.\.crushrc`                          |
 | 2        | `./crushrc`               | `.\crushrc`                           |
-| 3        | `~/.config/crush/crushrc` | `%USERPROFILE%\.config\crush\crushrc` |
+| 3        | `./.config/crush/crushrc` | `.\.config\crush\crushrc`             |
+| 4        | `~/.config/crush/crushrc` | `%USERPROFILE%\.config\crush\crushrc` |
 
 (Crush respects the [XDG Base Directory Specification][xdg], so your paths
 may differ depending on your `XDG_CONFIG_HOME` value. Data directories such as

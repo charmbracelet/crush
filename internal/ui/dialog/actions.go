@@ -70,6 +70,7 @@ type (
 	ActionTogglePills             struct{}
 	ActionExternalEditor          struct{}
 	ActionToggleYoloMode          struct{}
+	ActionToggleSysadminMode      struct{}
 	ActionToggleNotifications     struct{}
 	ActionSelectNotificationStyle struct {
 		Style string
@@ -119,9 +120,29 @@ type (
 	ActionSelectReasoningEffort struct {
 		Effort string
 	}
+	// ActionPermissionResponse carries the user's decision on a
+	// permission request.
 	ActionPermissionResponse struct {
 		Permission permission.PermissionRequest
 		Action     PermissionAction
+	}
+	// Messages for the integrated pinentry dialog.
+	ActionPinentrySubmit struct {
+		RequestID string
+		Secret    string
+	}
+	ActionPinentryCancel struct {
+		RequestID string
+	}
+	// Messages for the integrated SSH askpass dialog. The secret only
+	// ever travels through ActionSSHSubmit to the workspace, mirroring
+	// how the permission dialog resolves its requests.
+	ActionSSHSubmit struct {
+		RequestID string
+		Secret    string
+	}
+	ActionSSHCancel struct {
+		RequestID string
 	}
 	// ActionRunCustomCommand is a message to run a custom command.
 	ActionRunCustomCommand struct {

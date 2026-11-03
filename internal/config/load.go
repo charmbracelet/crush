@@ -974,92 +974,11 @@ func resolveSelectedModels(cfg *Config, knownProviders []catwalk.Provider) (reso
 
 	largeModelSelected, largeModelConfigured := cfg.Models[SelectedModelTypeLarge]
 	if largeModelConfigured {
-		if largeModelSelected.Model != "" {
-			large.Model = largeModelSelected.Model
-		}
-		if largeModelSelected.Provider != "" {
-			large.Provider = largeModelSelected.Provider
-		}
-		model := cfg.GetModel(large.Provider, large.Model)
-		if model == nil {
-			large = defaultLarge
-			result.LargeFallback = true
-		} else {
-			if largeModelSelected.MaxTokens > 0 {
-				large.MaxTokens = largeModelSelected.MaxTokens
-			} else {
-				large.MaxTokens = model.DefaultMaxTokens
-			}
-			if largeModelSelected.ReasoningEffort != "" {
-				large.ReasoningEffort = largeModelSelected.ReasoningEffort
-			} else {
-				large.ReasoningEffort = model.Reasoning.DefaultEffortLevel
-			}
-			large.Think = largeModelSelected.Think
-			if largeModelSelected.Temperature != nil {
-				large.Temperature = largeModelSelected.Temperature
-			}
-			if largeModelSelected.TopP != nil {
-				large.TopP = largeModelSelected.TopP
-			}
-			if largeModelSelected.TopK != nil {
-				large.TopK = largeModelSelected.TopK
-			}
-			if largeModelSelected.FrequencyPenalty != nil {
-				large.FrequencyPenalty = largeModelSelected.FrequencyPenalty
-			}
-			if largeModelSelected.PresencePenalty != nil {
-				large.PresencePenalty = largeModelSelected.PresencePenalty
-			}
-			if largeModelSelected.ProviderOptions != nil {
-				large.ProviderOptions = maps.Clone(largeModelSelected.ProviderOptions)
-			}
-		}
+		large, result.LargeFallback = applySelection(cfg, defaultLarge, largeModelSelected)
 	}
-	smallModelSelected, smallModelConfigured := cfg.Models[SelectedModelTypeSmall]
+	_, smallModelConfigured := cfg.Models[SelectedModelTypeSmall]
 	if smallModelConfigured {
-		if smallModelSelected.Model != "" {
-			small.Model = smallModelSelected.Model
-		}
-		if smallModelSelected.Provider != "" {
-			small.Provider = smallModelSelected.Provider
-		}
-
-		model := cfg.GetModel(small.Provider, small.Model)
-		if model == nil {
-			small = defaultSmall
-			result.SmallFallback = true
-		} else {
-			if smallModelSelected.MaxTokens > 0 {
-				small.MaxTokens = smallModelSelected.MaxTokens
-			} else {
-				small.MaxTokens = model.DefaultMaxTokens
-			}
-			if smallModelSelected.ReasoningEffort != "" {
-				small.ReasoningEffort = smallModelSelected.ReasoningEffort
-			} else {
-				small.ReasoningEffort = model.Reasoning.DefaultEffortLevel
-			}
-			if smallModelSelected.Temperature != nil {
-				small.Temperature = smallModelSelected.Temperature
-			}
-			if smallModelSelected.TopP != nil {
-				small.TopP = smallModelSelected.TopP
-			}
-			if smallModelSelected.TopK != nil {
-				small.TopK = smallModelSelected.TopK
-			}
-			if smallModelSelected.FrequencyPenalty != nil {
-				small.FrequencyPenalty = smallModelSelected.FrequencyPenalty
-			}
-			if smallModelSelected.PresencePenalty != nil {
-				small.PresencePenalty = smallModelSelected.PresencePenalty
-			}
-			if smallModelSelected.ProviderOptions != nil {
-				small.ProviderOptions = maps.Clone(smallModelSelected.ProviderOptions)
-			}
-			small.Think = smallModelSelected.Think
-		}
+		small, result.SmallFallback = applySelection(cfg, defaultSmall, cfg.Models[SelectedModelTypeSmall])
 	}
 
 	// When small isn't explicitly configured and the provider isn't a
@@ -1083,6 +1002,48 @@ func resolveSelectedModels(cfg *Config, knownProviders []catwalk.Provider) (reso
 	result.Large = large
 	result.Small = small
 	return result, nil
+}
+
+// applySelection overlays a configured selection onto def. It reports a
+// fallback, returning def unchanged, when the selection names no known model.
+func applySelection(cfg *Config, def, sel SelectedModel) (SelectedModel, bool) {
+	out := def
+	out.Model = cmp.Or(sel.Model, def.Model)
+	out.Provider = cmp.Or(sel.Provider, def.Provider)
+	model := cfg.GetModel(out.Provider, out.Model)
+	if model == nil {
+		return def, true
+	}
+
+	out.MaxTokens = model.DefaultMaxTokens
+	if sel.MaxTokens > 0 {
+		out.MaxTokens = sel.MaxTokens
+	}
+
+	// A selection layered over another model's can hold reasoning options
+	// this one rejects, so they only apply to a model that reasons.
+	out.ReasoningEffort, out.Think = "", false
+	if model.CanReason() {
+		out.ReasoningEffort = cmp.Or(sel.ReasoningEffort, model.Reasoning.DefaultEffortLevel)
+		out.Think = sel.Think
+	} else if sel.Think || sel.ReasoningEffort != "" {
+		slog.Warn(
+			"Ignoring reasoning options for a model that does not declare reasoning support",
+			"provider", out.Provider,
+			"model", out.Model,
+			"hint", `set "reasoning": {"thinking": "toggleable"} on the model if it reasons`,
+		)
+	}
+
+	out.Temperature = cmp.Or(sel.Temperature, out.Temperature)
+	out.TopP = cmp.Or(sel.TopP, out.TopP)
+	out.TopK = cmp.Or(sel.TopK, out.TopK)
+	out.FrequencyPenalty = cmp.Or(sel.FrequencyPenalty, out.FrequencyPenalty)
+	out.PresencePenalty = cmp.Or(sel.PresencePenalty, out.PresencePenalty)
+	if sel.ProviderOptions != nil {
+		out.ProviderOptions = maps.Clone(sel.ProviderOptions)
+	}
+	return out, false
 }
 
 // lookupConfigs searches config files starting at cwd and walking up

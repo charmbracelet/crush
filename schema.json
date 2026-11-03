@@ -678,6 +678,19 @@
             10,
             200
           ]
+        },
+        "pinentry_integrated": {
+          "type": "boolean",
+          "description": "Render GPG passphrase prompts as a native Crush dialog instead of an external pinentry program. Works with file-based keys and security keys and never modifies GPG or git configuration.",
+          "default": true
+        },
+        "pinentry_cache_timeout": {
+          "type": "integer",
+          "description": "Seconds Crush keeps an entered GPG passphrase in memory so repeated signing operations do not re-prompt. 0 (the default) disables it; gpg-agent's own cache applies regardless.",
+          "default": 0,
+          "examples": [
+            300
+          ]
         }
       },
       "additionalProperties": false,
@@ -695,6 +708,39 @@
           },
           "type": "array",
           "description": "List of tools that don't require permission prompts"
+        },
+        "blocked_commands": {
+          "items": {
+            "type": "string",
+            "examples": [
+              "kubectl",
+              "terraform"
+            ]
+          },
+          "type": "array",
+          "description": "Extra shell commands to treat as dangerous (prompted for in normal mode)"
+        },
+        "allowed_commands": {
+          "items": {
+            "type": "string",
+            "examples": [
+              "curl",
+              "ssh"
+            ]
+          },
+          "type": "array",
+          "description": "Shell commands to drop from the dangerous list so they stop prompting"
+        },
+        "safe_commands": {
+          "items": {
+            "type": "string",
+            "examples": [
+              "go build",
+              "cargo check"
+            ]
+          },
+          "type": "array",
+          "description": "Exact command lines that skip the permission prompt. Matched literally with no extra arguments"
         }
       },
       "additionalProperties": false,

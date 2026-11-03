@@ -14,11 +14,13 @@ import (
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/pinentry"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/charmbracelet/crush/internal/sshaskpass"
 )
 
 // wrapEvent converts a raw tea.Msg (a pubsub.Event[T] from the app
@@ -71,6 +73,7 @@ func wrapEvent(ev any) *pubsub.Payload {
 				Action:      e.Payload.Action,
 				Path:        e.Payload.Path,
 				Params:      e.Payload.Params,
+				Danger:      e.Payload.Danger,
 			},
 		})
 	case pubsub.Event[permission.PermissionNotification]:
@@ -82,6 +85,13 @@ func wrapEvent(ev any) *pubsub.Payload {
 				Granted:    e.Payload.Granted,
 				Denied:     e.Payload.Denied,
 				Cancelled:  e.Payload.Cancelled,
+			},
+		})
+	case pubsub.Event[permission.ModeChangedEvent]:
+		return envelope(pubsub.PayloadTypePermissionModeChanged, pubsub.Event[proto.PermissionModeEvent]{
+			Type: e.Type,
+			Payload: proto.PermissionModeEvent{
+				Mode: proto.PermissionModeToProto(e.Payload.Mode),
 			},
 		})
 	case pubsub.Event[question.Request]:
@@ -103,6 +113,49 @@ func wrapEvent(ev any) *pubsub.Payload {
 			Payload: proto.QuestionNotification{
 				BatchID:   e.Payload.BatchID,
 				SessionID: e.Payload.SessionID,
+			},
+		})
+	case pubsub.Event[pinentry.PromptRequest]:
+		return envelope(pubsub.PayloadTypePinentryPromptRequest, pubsub.Event[proto.PinentryPromptRequest]{
+			Type: e.Type,
+			Payload: proto.PinentryPromptRequest{
+				ID:     e.Payload.ID,
+				Prompt: e.Payload.Prompt,
+				Key: proto.PinentryKey{
+					CardNumber:  e.Payload.Key.CardNumber,
+					KeyID:       e.Payload.Key.KeyID,
+					Fingerprint: e.Payload.Key.Fingerprint,
+					Holder:      e.Payload.Key.Holder,
+				},
+				Kind:       string(e.Payload.Kind),
+				RetryCount: e.Payload.RetryCount,
+				Error:      e.Payload.Error,
+			},
+		})
+	case pubsub.Event[pinentry.Notification]:
+		return envelope(pubsub.PayloadTypePinentryNotification, pubsub.Event[proto.PinentryNotification]{
+			Type: e.Type,
+			Payload: proto.PinentryNotification{
+				RequestID: e.Payload.RequestID,
+			},
+		})
+	case pubsub.Event[sshaskpass.PromptRequest]:
+		return envelope(pubsub.PayloadTypeSSHPromptRequest, pubsub.Event[proto.SSHPromptRequest]{
+			Type: e.Type,
+			Payload: proto.SSHPromptRequest{
+				ID:      e.Payload.ID,
+				Prompt:  e.Payload.Prompt,
+				KeyInfo: e.Payload.KeyInfo,
+				Kind:    string(e.Payload.Kind),
+				Title:   e.Payload.Title,
+				Message: e.Payload.Message,
+			},
+		})
+	case pubsub.Event[sshaskpass.Notification]:
+		return envelope(pubsub.PayloadTypeSSHNotification, pubsub.Event[proto.SSHNotification]{
+			Type: e.Type,
+			Payload: proto.SSHNotification{
+				RequestID: e.Payload.RequestID,
 			},
 		})
 	case pubsub.Event[message.Message]:
@@ -173,6 +226,11 @@ func wrapEvent(ev any) *pubsub.Payload {
 			Type:    e.Type,
 			Payload: skillsEventToProto(e.Payload),
 		})
+	case pubsub.Event[pinentry.Event]:
+		// Terminal handover for GPG passphrase prompts is a local concern
+		// of the host running the watcher; the pinentry dialog would not
+		// draw on a remote client's terminal.
+		return nil
 	default:
 		slog.Warn("Unrecognized event type for SSE wrapping", "type", fmt.Sprintf("%T", ev))
 		return nil

@@ -24,11 +24,13 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/pinentry"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/charmbracelet/crush/internal/sshaskpass"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/pkg/browser"
@@ -406,16 +408,12 @@ func (w *ClientWorkspace) PermissionDeny(perm permission.PermissionRequest) bool
 	return resolved
 }
 
-func (w *ClientWorkspace) PermissionSkipRequests() bool {
-	skip, err := w.client.GetPermissionsSkipRequests(context.Background(), w.workspaceID())
-	if err != nil {
-		return false
-	}
-	return skip
+func (w *ClientWorkspace) PermissionMode() permission.PermissionMode {
+	return proto.ProtoModeToPermission(w.cached().PermissionMode)
 }
 
-func (w *ClientWorkspace) PermissionSetSkipRequests(skip bool) {
-	_ = w.client.SetPermissionsSkipRequests(context.Background(), w.workspaceID(), skip)
+func (w *ClientWorkspace) PermissionSetMode(mode permission.PermissionMode) {
+	_ = w.client.SetPermissionMode(context.Background(), w.workspaceID(), proto.PermissionModeToProto(mode))
 }
 
 // -- Host context --
@@ -453,6 +451,64 @@ func (w *ClientWorkspace) QuestionCancel() bool {
 	cancelled, err := w.client.CancelQuestionBatch(context.Background(), w.workspaceID())
 	if err != nil {
 		slog.Error("Failed to cancel question", "error", err)
+		return false
+	}
+	return cancelled
+}
+
+// -- Pinentry --
+
+// PinentryRespond submits the secret for a pending integrated pinentry
+// prompt via the client SDK.
+func (w *ClientWorkspace) PinentryRespond(id, secret string) bool {
+	resolved, err := w.client.AnswerPinentry(context.Background(), w.workspaceID(), proto.PinentryAnswer{
+		RequestID: id,
+		Secret:    secret,
+	})
+	if err != nil {
+		slog.Error("Failed to answer pinentry prompt", "error", err)
+		return false
+	}
+	return resolved
+}
+
+// PinentryCancel dismisses a pending integrated pinentry prompt via the
+// client SDK.
+func (w *ClientWorkspace) PinentryCancel(id string) bool {
+	cancelled, err := w.client.CancelPinentry(context.Background(), w.workspaceID(), proto.PinentryCancel{
+		RequestID: id,
+	})
+	if err != nil {
+		slog.Error("Failed to cancel pinentry prompt", "error", err)
+		return false
+	}
+	return cancelled
+}
+
+// -- SSH prompts --
+
+// SSHRespond submits the secret for a pending integrated SSH prompt via
+// the client SDK. Confirmations answer "yes".
+func (w *ClientWorkspace) SSHRespond(id, secret string) bool {
+	resolved, err := w.client.AnswerSSH(context.Background(), w.workspaceID(), proto.SSHAnswer{
+		RequestID: id,
+		Secret:    secret,
+	})
+	if err != nil {
+		slog.Error("Failed to answer ssh prompt", "error", err)
+		return false
+	}
+	return resolved
+}
+
+// SSHCancel dismisses a pending integrated SSH prompt via the client
+// SDK.
+func (w *ClientWorkspace) SSHCancel(id string) bool {
+	cancelled, err := w.client.CancelSSH(context.Background(), w.workspaceID(), proto.SSHCancel{
+		RequestID: id,
+	})
+	if err != nil {
+		slog.Error("Failed to cancel ssh prompt", "error", err)
 		return false
 	}
 	return cancelled
@@ -1021,13 +1077,13 @@ func (w *ClientWorkspace) recoverWorkspace() error {
 func (w *ClientWorkspace) recreateArgs() proto.Workspace {
 	ws := w.cached()
 	return proto.Workspace{
-		Path:     ws.Path,
-		DataDir:  ws.DataDir,
-		Debug:    ws.Debug,
-		YOLO:     ws.YOLO,
-		Channels: ws.Channels,
-		Env:      ws.Env,
-		Version:  version.Version,
+		Path:           ws.Path,
+		DataDir:        ws.DataDir,
+		Debug:          ws.Debug,
+		PermissionMode: ws.PermissionMode,
+		Channels:       ws.Channels,
+		Env:            ws.Env,
+		Version:        version.Version,
 	}
 }
 
@@ -1206,6 +1262,7 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 				Action:      e.Payload.Action,
 				Path:        e.Payload.Path,
 				Params:      e.Payload.Params,
+				Danger:      e.Payload.Danger,
 			},
 		}
 	case pubsub.Event[proto.PermissionNotification]:
@@ -1236,6 +1293,49 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 			Type: e.Type,
 			Payload: question.Notification{
 				BatchID: e.Payload.BatchID,
+			},
+		}
+	case pubsub.Event[proto.PinentryPromptRequest]:
+		return pubsub.Event[pinentry.PromptRequest]{
+			Type: e.Type,
+			Payload: pinentry.PromptRequest{
+				ID:     e.Payload.ID,
+				Prompt: e.Payload.Prompt,
+				Key: pinentry.Key{
+					CardNumber:  e.Payload.Key.CardNumber,
+					KeyID:       e.Payload.Key.KeyID,
+					Fingerprint: e.Payload.Key.Fingerprint,
+					Holder:      e.Payload.Key.Holder,
+				},
+				Kind:       pinentry.Kind(e.Payload.Kind),
+				RetryCount: e.Payload.RetryCount,
+				Error:      e.Payload.Error,
+			},
+		}
+	case pubsub.Event[proto.PinentryNotification]:
+		return pubsub.Event[pinentry.Notification]{
+			Type: e.Type,
+			Payload: pinentry.Notification{
+				RequestID: e.Payload.RequestID,
+			},
+		}
+	case pubsub.Event[proto.SSHPromptRequest]:
+		return pubsub.Event[sshaskpass.PromptRequest]{
+			Type: e.Type,
+			Payload: sshaskpass.PromptRequest{
+				ID:      e.Payload.ID,
+				Prompt:  e.Payload.Prompt,
+				KeyInfo: e.Payload.KeyInfo,
+				Kind:    sshaskpass.Kind(e.Payload.Kind),
+				Title:   e.Payload.Title,
+				Message: e.Payload.Message,
+			},
+		}
+	case pubsub.Event[proto.SSHNotification]:
+		return pubsub.Event[sshaskpass.Notification]{
+			Type: e.Type,
+			Payload: sshaskpass.Notification{
+				RequestID: e.Payload.RequestID,
 			},
 		}
 	case pubsub.Event[proto.Message]:
@@ -1308,6 +1408,13 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 			theme = nil
 		}
 		return HostThemeEvent{Theme: theme}
+	case pubsub.Event[proto.PermissionModeEvent]:
+		// Keep the cached workspace in sync so PermissionMode() never goes
+		// stale when another client or the server changes the mode.
+		w.mu.Lock()
+		w.ws.PermissionMode = e.Payload.Mode
+		w.mu.Unlock()
+		return nil
 	default:
 		slog.Warn("Unknown event type in translateEvent", "type", fmt.Sprintf("%T", ev))
 		return nil

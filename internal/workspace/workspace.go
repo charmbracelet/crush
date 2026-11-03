@@ -193,8 +193,8 @@ type Workspace interface {
 	PermissionGrant(perm permission.PermissionRequest) bool
 	PermissionGrantPersistent(perm permission.PermissionRequest) bool
 	PermissionDeny(perm permission.PermissionRequest) bool
-	PermissionSkipRequests() bool
-	PermissionSetSkipRequests(skip bool)
+	PermissionMode() permission.PermissionMode
+	PermissionSetMode(mode permission.PermissionMode)
 
 	// HostContext returns what the host application has in view, such
 	// as its open files, or the zero context when there is no host.
@@ -207,6 +207,22 @@ type Workspace interface {
 
 	// QuestionCancel cancels the pending question.
 	QuestionCancel() bool
+
+	// Pinentry
+	//
+	// PinentryRespond resolves the pending GPG credential prompt with
+	// the secret; PinentryCancel dismisses it. Both return false when
+	// no matching prompt is pending.
+	PinentryRespond(id, secret string) bool
+	PinentryCancel(id string) bool
+	// SSH prompts
+	//
+	// SSHRespond resolves the pending integrated SSH credential or
+	// confirmation prompt with the secret ("yes" for confirmations);
+	// SSHCancel dismisses it. Both return false when no matching prompt
+	// is pending.
+	SSHRespond(id, secret string) bool
+	SSHCancel(id string) bool
 
 	// FileTracker
 	FileTrackerRecordRead(ctx context.Context, sessionID, path string)

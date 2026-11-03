@@ -302,21 +302,13 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 			Fails(404, 500).
 			Handle(c.handlePostWorkspaceLSPStopAll),
 
-		apigen.Get("/v1/workspaces/{id}/permissions/skip").
-			Summary("Get skip permissions status").
+		apigen.Post("/v1/workspaces/{id}/permissions/mode").
+			Summary("Set permission mode").
 			Tags("permissions").
 			PathParam("id", "Workspace ID").
-			Responds(proto.PermissionSkipRequest{}).
-			Fails(404, 500).
-			Handle(c.handleGetWorkspacePermissionsSkip),
-
-		apigen.Post("/v1/workspaces/{id}/permissions/skip").
-			Summary("Set skip permissions").
-			Tags("permissions").
-			PathParam("id", "Workspace ID").
-			Accepts(proto.PermissionSkipRequest{}).
+			Accepts(proto.PermissionSetModeRequest{}).
 			Fails(400, 404, 500).
-			Handle(c.handlePostWorkspacePermissionsSkip),
+			Handle(c.handlePostWorkspacePermissionsMode),
 
 		apigen.Post("/v1/workspaces/{id}/permissions/grant").
 			Summary("Grant permission").
@@ -343,6 +335,41 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 			Responds(proto.QuestionAnswerResponse{}).
 			Fails(400, 404, 500).
 			Handle(c.handlePostWorkspaceQuestionsCancel),
+
+		apigen.Post("/v1/workspaces/{id}/pinentry/answer").
+			Summary("Answer pinentry prompt").
+			Tags("pinentry").
+			PathParam("id", "Workspace ID").
+			Accepts(proto.PinentryAnswer{}).
+			Responds(proto.PinentryResponse{}).
+			Fails(400, 404, 500).
+			Handle(c.handlePostWorkspacePinentryAnswer),
+
+		apigen.Post("/v1/workspaces/{id}/pinentry/cancel").
+			Summary("Cancel pinentry prompt").
+			Tags("pinentry").
+			PathParam("id", "Workspace ID").
+			Accepts(proto.PinentryCancel{}).
+			Responds(proto.PinentryResponse{}).
+			Fails(400, 404, 500).
+			Handle(c.handlePostWorkspacePinentryCancel),
+		apigen.Post("/v1/workspaces/{id}/ssh/answer").
+			Summary("Answer SSH prompt").
+			Tags("ssh").
+			PathParam("id", "Workspace ID").
+			Accepts(proto.SSHAnswer{}).
+			Responds(proto.SSHResponse{}).
+			Fails(400, 404, 500).
+			Handle(c.handlePostWorkspaceSSHAnswer),
+
+		apigen.Post("/v1/workspaces/{id}/ssh/cancel").
+			Summary("Cancel SSH prompt").
+			Tags("ssh").
+			PathParam("id", "Workspace ID").
+			Accepts(proto.SSHCancel{}).
+			Responds(proto.SSHResponse{}).
+			Fails(400, 404, 500).
+			Handle(c.handlePostWorkspaceSSHCancel),
 
 		apigen.Get("/v1/workspaces/{id}/agent").
 			Summary("Get agent info").

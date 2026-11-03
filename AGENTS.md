@@ -43,6 +43,10 @@ internal/
   lsp/                             LSP client manager, auto-discovery, on-demand startup
   ui/                              Bubble Tea v2 TUI (see internal/ui/AGENTS.md)
   permission/                      Tool permission checking and allow-lists
+  pinentry/                        GPG pinentry: terminal handover watcher, plus the integrated
+                                   pinentry (native passphrase dialogs via loopback pinentry)
+  sshaskpass/                      Integrated SSH askpass: OpenSSH credential prompts and security key
+                                   touches rendered as native dialogs and warnings
   skills/                          Skill file discovery and loading
   shell/                           Bash command execution with background job support
   event/                           Telemetry (PostHog)

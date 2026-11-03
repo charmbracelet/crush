@@ -3,6 +3,7 @@ package dialog
 import (
 	"cmp"
 	"fmt"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -44,6 +45,16 @@ const (
 	shortlistTagBalanced = "Balanced"
 	shortlistTagFastest  = "Fastest"
 )
+
+// localProviderIDs lists the provider types that run models on the user's own
+// machine. They never charge per token, so a price field would imply missing
+// data rather than a fact about the model.
+var localProviderIDs = map[catwalk.InferenceProvider]bool{
+	"ollama":   true,
+	"lmstudio": true,
+	"llamacpp": true,
+	"omlx":     true,
+}
 
 // ShortlistEntry is one curated model and the tag explaining why it was
 // picked.
@@ -313,9 +324,15 @@ func (s *ShortlistItem) Render(width int) string {
 	name := s.title()
 	name = ansi.Truncate(name, max(0, lineWidth-lipgloss.Width(tag)), "…")
 	gap := strings.Repeat(" ", max(0, lineWidth-lipgloss.Width(name)-lipgloss.Width(tag)))
-	blurb := padRight(ansi.Truncate(s.blurb(), lineWidth, "…"), lineWidth)
+	var blurb string
+	if raw := s.blurb(); raw != "" {
+		blurb = padRight(ansi.Truncate(raw, lineWidth, "…"), lineWidth)
+	}
 
-	content := titleStyle.Render(name+gap+tag) + "\n" + blurbStyle.Render(blurb)
+	content := titleStyle.Render(name + gap + tag)
+	if blurb != "" {
+		content += "\n" + blurbStyle.Render(blurb)
+	}
 	s.cache[width] = content
 	return content
 }
@@ -361,7 +378,7 @@ func (s *ShortlistItem) blurb() string {
 	if s.browse {
 		return "Every model " + providerName(s.provider) + " supports."
 	}
-	return shortlistBlurb(s.model)
+	return shortlistBlurb(s.provider, s.model)
 }
 
 // PickShortlist chooses up to three models that represent a provider's
@@ -565,20 +582,46 @@ func shortlistModels(cfg *config.Config, provider catwalk.Provider) []catwalk.Mo
 	return models
 }
 
-// shortlistBlurb summarizes a model's context window and price.
-func shortlistBlurb(model catwalk.Model) string {
+// shortlistBlurb summarizes a model's context window and, when there is one
+// to report, its price. Local providers omit the price entirely: they do not
+// bill per token, so "n/a" would read as missing data. A remote model with no
+// catalog price says so.
+func shortlistBlurb(provider catwalk.Provider, model catwalk.Model) string {
 	parts := make([]string, 0, 2)
 	if model.ContextWindow > 0 {
 		parts = append(parts, shortTokenCount(model.ContextWindow)+" context")
 	}
-	if price(model) > 0 {
+	switch {
+	case price(model) > 0:
 		parts = append(parts,
 			fmt.Sprintf("$%.2f in · $%.2f out per M tok", model.Pricing.Input, model.Pricing.Output),
 		)
-	} else {
-		parts = append(parts, "no per-token cost")
+	case isLocalProvider(provider):
+		// Nothing to report: pricing is not part of how these models are
+		// billed.
+	default:
+		parts = append(parts, "pricing n/a")
 	}
 	return strings.Join(parts, " · ")
+}
+
+// isLocalProvider reports whether a provider serves models from the user's
+// own machine, either because it is a known local provider or because its
+// endpoint is loopback.
+func isLocalProvider(provider catwalk.Provider) bool {
+	if localProviderIDs[provider.ID] {
+		return true
+	}
+
+	parsed, err := url.Parse(provider.APIEndpoint)
+	if err != nil {
+		return false
+	}
+	switch parsed.Hostname() {
+	case "localhost", "127.0.0.1", "0.0.0.0", "::1":
+		return true
+	}
+	return false
 }
 
 // shortTokenCount renders a token count compactly (131072 -> "131K").

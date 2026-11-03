@@ -7,6 +7,7 @@ import (
 	"charm.land/catwalk/v3/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/oauth"
+	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/stretchr/testify/require"
 )
 
@@ -132,6 +133,44 @@ func TestPickShortlistNeverRepeatsAModel(t *testing.T) {
 	require.Equal(t, shortlistTagCapable, entries[0].Tag)
 	require.Equal(t, shortlistTagBalanced, entries[1].Tag)
 	require.Equal(t, shortlistTagFastest, entries[2].Tag)
+}
+
+func TestShortlistBlurbPricing(t *testing.T) {
+	t.Parallel()
+
+	priced := pricedModel("priced", 128_000, 3, 15)
+	unpriced := pricedModel("unpriced", 128_000, 0, 0)
+
+	remote := catwalk.Provider{ID: "anthropic", Name: "Anthropic", APIEndpoint: "https://api.anthropic.com"}
+	require.Equal(t,
+		"128K context · $3.00 in · $15.00 out per M tok",
+		shortlistBlurb(remote, priced),
+	)
+	require.Equal(t, "128K context · pricing n/a", shortlistBlurb(remote, unpriced))
+
+	local := catwalk.Provider{ID: "ollama", Name: "Ollama", APIEndpoint: "http://localhost:11434/v1"}
+	require.Equal(t, "128K context", shortlistBlurb(local, unpriced))
+
+	// A custom provider served from loopback is local too, even though its
+	// ID is not one of the known local types.
+	custom := catwalk.Provider{ID: "my-llama", Name: "My Llama", APIEndpoint: "http://127.0.0.1:8080/v1"}
+	require.Equal(t, "128K context", shortlistBlurb(custom, unpriced))
+
+	// Someone can still put a price on a local model; then it is shown.
+	require.Contains(t, shortlistBlurb(local, priced), "$3.00 in")
+}
+
+func TestShortlistItemOmitsEmptyBlurb(t *testing.T) {
+	t.Parallel()
+
+	provider := catwalk.Provider{ID: "ollama", Name: "Ollama", APIEndpoint: "http://localhost:11434/v1"}
+	item := NewShortlistItem(berryStyles(), provider, ShortlistEntry{Model: catwalk.Model{ID: "m", Name: "M"}}, config.SelectedModelTypeLarge)
+	require.NotContains(t, item.Render(40), "\n")
+}
+
+func berryStyles() *styles.Styles {
+	sty := styles.CharmtonePantera()
+	return &sty
 }
 
 func TestShortlistModelsUsesSubscriptionCatalog(t *testing.T) {

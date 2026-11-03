@@ -583,7 +583,7 @@ func (r *callbackReceiver) handleCallback(w http.ResponseWriter, req *http.Reque
 				Code:  query.Get("code"),
 				State: query.Get("state"),
 				// Required by servers that implement RFC 9207.
-				Iss: query.Get("iss"),
+				Iss: strings.TrimSuffix(query.Get("iss"), "/"),
 			}, nil)
 		}
 	}

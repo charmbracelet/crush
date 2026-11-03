@@ -98,12 +98,12 @@ func TestCompletions_SetStylesRestylesLoadedItems(t *testing.T) {
 	newFocused := lipgloss.NewStyle().Foreground(lipgloss.Color("#00aa00"))
 
 	c := New(normal, focused, match)
-	c.SetItems(files, nil)
+	c.SetItems(files, nil, nil)
 	before := c.Render()
 
 	c.SetStyles(newNormal, newFocused, match)
 	fresh := New(newNormal, newFocused, match)
-	fresh.SetItems(files, nil)
+	fresh.SetItems(files, nil, nil)
 	require.NotEqual(t, before, fresh.Render())
 	require.Equal(t, fresh.Render(), c.Render())
 }

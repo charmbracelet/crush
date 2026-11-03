@@ -17,7 +17,7 @@ func TestFilterPrefersExactBasenameStem(t *testing.T) {
 	c.SetItems([]FileCompletionValue{
 		{Path: "internal/ui/chat/search.go"},
 		{Path: "internal/ui/chat/user.go"},
-	}, nil)
+	}, nil, nil)
 
 	c.Filter("user")
 
@@ -36,7 +36,7 @@ func TestFilterPrefersBasenamePrefix(t *testing.T) {
 	c.SetItems([]FileCompletionValue{
 		{Path: "internal/ui/chat/mcp.go"},
 		{Path: "internal/ui/model/chat.go"},
-	}, nil)
+	}, nil, nil)
 
 	c.Filter("chat.g")
 
@@ -99,7 +99,7 @@ func TestFilterPrefersPathSegmentExact(t *testing.T) {
 	c.SetItems([]FileCompletionValue{
 		{Path: "internal/ui/model/xychat.go"},
 		{Path: "internal/ui/chat/mcp.go"},
-	}, nil)
+	}, nil, nil)
 
 	c.Filter("chat")
 
@@ -145,4 +145,114 @@ func TestRenderItem_FocusedMatchUsesFocusedForeground(t *testing.T) {
 	item.SetFocused(false)
 	blurredOut := item.Render(30)
 	require.Contains(t, blurredOut, "38;2;85;85;85")
+}
+
+// TestSetItems_SubagentsAppearsInList verifies that a subagent passed via the
+// third argument to SetItems is represented in the filtered list as an item
+// whose Text() is the subagent name prefixed with @.
+func TestSetItems_SubagentsAppearsInList(t *testing.T) {
+	t.Parallel()
+
+	c := New(lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle())
+	c.SetItems(nil, nil, []SubagentCompletionValue{
+		{Name: "code-reviewer", Description: "reviews code"},
+	})
+
+	var found bool
+	for _, item := range c.filtered {
+		ci, ok := item.(*CompletionItem)
+		if !ok {
+			continue
+		}
+		if ci.Text() == "@code-reviewer" {
+			found = true
+			break
+		}
+	}
+	require.True(t, found, "expected to find a completion item with text %q", "@code-reviewer")
+}
+
+// TestSetItems_SubagentAndFilesCoexist verifies that when SetItems is called
+// with both file and subagent entries, items for both appear in the filtered
+// list.
+func TestSetItems_SubagentAndFilesCoexist(t *testing.T) {
+	t.Parallel()
+
+	c := New(lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle())
+	c.SetItems(
+		[]FileCompletionValue{{Path: "cmd/main.go"}},
+		nil,
+		[]SubagentCompletionValue{{Name: "tester", Description: "writes tests"}},
+	)
+
+	texts := make([]string, 0, len(c.filtered))
+	for _, item := range c.filtered {
+		ci, ok := item.(*CompletionItem)
+		if !ok {
+			continue
+		}
+		texts = append(texts, ci.Text())
+	}
+
+	require.Contains(t, texts, "cmd/main.go", "file item must appear in filtered list")
+	require.Contains(t, texts, "@tester", "subagent item must appear in filtered list")
+}
+
+// TestSetItems_NilSubagents_NoError verifies that calling SetItems with a nil
+// subagents slice does not panic and still populates file items normally.
+func TestSetItems_NilSubagents_NoError(t *testing.T) {
+	t.Parallel()
+
+	c := New(lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle())
+	require.NotPanics(t, func() {
+		c.SetItems([]FileCompletionValue{{Path: "internal/foo.go"}}, nil, nil)
+	})
+
+	require.NotEmpty(t, c.filtered, "file items must still be populated when subagents is nil")
+
+	var found bool
+	for _, item := range c.filtered {
+		ci, ok := item.(*CompletionItem)
+		if !ok {
+			continue
+		}
+		if ci.Text() == "internal/foo.go" {
+			found = true
+			break
+		}
+	}
+	require.True(t, found, "expected to find file item %q when subagents is nil", "internal/foo.go")
+}
+
+// TestSetItems_PreservesSubagentOrder verifies that multiple subagents appear in
+// the filtered list in the order they were passed to SetItems. This pins the
+// ordering contract so frontend display matches input order.
+func TestSetItems_PreservesSubagentOrder(t *testing.T) {
+	t.Parallel()
+
+	c := New(lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle())
+	c.SetItems(nil, nil, []SubagentCompletionValue{
+		{Name: "zeta"},
+		{Name: "alpha"},
+		{Name: "mu"},
+	})
+
+	require.Len(t, c.filtered, 3)
+
+	got := make([]string, 0, 3)
+	for _, item := range c.filtered {
+		ci, ok := item.(*CompletionItem)
+		require.True(t, ok)
+		got = append(got, ci.Text())
+	}
+	require.Equal(t, []string{"@zeta", "@alpha", "@mu"}, got)
+}
+
+// TestNamePriorityTier_SubagentRankedByBareName verifies the @ prefix shown on
+// subagent items does not demote them below files with the same name.
+func TestNamePriorityTier_SubagentRankedByBareName(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, tierExactName, namePriorityTier("@reviewer", "reviewer"))
+	require.Equal(t, tierPrefixName, namePriorityTier("@reviewer", "rev"))
 }

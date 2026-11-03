@@ -96,7 +96,7 @@ func (m *OnboardingHelp) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	rc := NewRenderContext(t, width)
 	rc.Title = "Welcome"
 	rc.TitleInfo = onboardingProgress(t, OnboardingStepHelp)
-	rc.AddPart(t.Dialog.PrimaryText.Render("You're set. Now just ask for things."))
+	rc.AddPart("\n" + t.Dialog.Onboarding.Lead.Render("You're set. Now just ask for things."))
 	rc.AddPart(t.Dialog.SecondaryText.Render("Crush reads, writes, and runs things in this project."))
 	rc.AddPart("\n" + m.hintsView())
 	rc.AddPart(t.Dialog.Onboarding.Tip.PaddingLeft(1).Render(`Try: "what does this project do?"`))

@@ -1151,6 +1151,7 @@ func quickStyle(o quickStyleOpts) Styles {
 
 	// Dialog.Onboarding (first-run setup screens).
 	s.Dialog.Onboarding.Step = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
+	s.Dialog.Onboarding.Lead = lipgloss.NewStyle().Foreground(o.fgBase).Padding(0, 1)
 	s.Dialog.Onboarding.StepDot = lipgloss.NewStyle().Foreground(o.separator).SetString("·")
 	s.Dialog.Onboarding.StepDotOn = s.Dialog.Onboarding.StepDot.Foreground(o.fgBase)
 	s.Dialog.Onboarding.Blurb = lipgloss.NewStyle().Foreground(o.fgMostSubtle).Padding(0, 1)

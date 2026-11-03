@@ -29,9 +29,9 @@ const (
 	providerSelectDialogMaxWidth = 64
 	providerSelectDialogHeight   = 22
 	// providerSelectChrome is the number of lines the dialog spends on
-	// everything but the list: the step label, the two copy lines, the
-	// input and its margins, and the help footer.
-	providerSelectChrome = 8
+	// everything but the list: the title, the blank line and two copy
+	// lines, the input and its margins, and the help footer.
+	providerSelectChrome = 9
 	// providerPromotedBadge marks the provider promoted on top of the
 	// list. It says why Hyper sits first (it is optimized for Crush)
 	// rather than implying an entitlement: Hyper needs a Charm
@@ -233,7 +233,9 @@ func (m *ProviderSelect) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		m.list.ScrollToSelected()
 	}
 
-	heading := t.Dialog.PrimaryText.Render("Choose how to run your models.")
+	// The blank line under the header is part of the lead so the cursor
+	// offset can be derived from the same strings.
+	heading := "\n" + t.Dialog.Onboarding.Lead.Render("Choose how to run your models.")
 	subheading := t.Dialog.SecondaryText.Render("You can change this anytime with ctrl+p.")
 
 	rc := NewRenderContext(t, width)

@@ -29,9 +29,9 @@ const (
 	modelShortlistDialogMaxWidth = 64
 	modelShortlistDialogHeight   = 20
 	// modelShortlistChrome is the number of lines the dialog spends on
-	// everything but the list: the step label, two copy lines, and the help
-	// footer.
-	modelShortlistChrome = 5
+	// everything but the list: the title, the blank line and two copy
+	// lines, and the help footer.
+	modelShortlistChrome = 6
 	// shortlistMaxEntries caps how many curated models are offered. The
 	// full catalog stays one row below.
 	shortlistMaxEntries = 3
@@ -217,7 +217,7 @@ func (m *ModelShortlist) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	rc := NewRenderContext(t, width)
 	rc.Title = "Welcome"
 	rc.TitleInfo = onboardingProgress(t, OnboardingStepModel)
-	rc.AddPart(t.Dialog.PrimaryText.Render("Pick a starting model."))
+	rc.AddPart("\n" + t.Dialog.Onboarding.Lead.Render("Pick a starting model."))
 	rc.AddPart(t.Dialog.SecondaryText.Render("Switch anytime with ctrl+p."))
 
 	listView := "\n" + t.Dialog.List.Height(m.list.Height()).Render(m.list.Render())

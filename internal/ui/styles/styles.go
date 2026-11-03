@@ -554,6 +554,7 @@ type Styles struct {
 			Step         lipgloss.Style // "1 of 3" progress label
 			StepDot      lipgloss.Style // Inactive progress dot
 			StepDotOn    lipgloss.Style // Active progress dot
+			Lead         lipgloss.Style // Opening sentence under the dialog header
 			Blurb        lipgloss.Style // Description line under a row title
 			Badge        lipgloss.Style // Right-aligned row badge on the focused row
 			BadgeBlurred lipgloss.Style // Badge on every other row, receding into the background

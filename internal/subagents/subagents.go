@@ -47,36 +47,44 @@ var reservedNames = map[string]bool{
 }
 
 // ToolList is a []string that YAML-unmarshals from either a comma-separated
-// scalar string ("Read, Grep, Bash") or a YAML sequence (["Read","Grep"]).
-// When the field is absent the value stays nil.
+// scalar string ("view, grep, bash") or a YAML sequence (["view","grep"]).
+//
+// A nil ToolList means the field was absent; a non-nil empty one means the
+// author explicitly wrote an empty list. The two are not interchangeable:
+// absent `tools:` inherits the base agent's whole tool pool, while `tools: []`
+// requests no tools at all.
 type ToolList []string
 
 // UnmarshalYAML implements yaml.Unmarshaler for ToolList.
 func (t *ToolList) UnmarshalYAML(value *yaml.Node) error {
 	switch value.Kind {
 	case yaml.ScalarNode:
-		if value.Value == "" || value.Tag == "!!null" {
+		// A bare `tools:` (null) is absent. An empty string is an explicit
+		// empty list, like `tools: []`.
+		if value.Tag == "!!null" {
 			return nil
 		}
 		parts := strings.Split(value.Value, ",")
-		result := make([]string, 0, len(parts))
+		result := make(ToolList, 0, len(parts))
 		for _, p := range parts {
 			if trimmed := strings.TrimSpace(p); trimmed != "" {
 				result = append(result, trimmed)
 			}
 		}
-		if len(result) > 0 {
-			*t = result
-		}
+		*t = result
 		return nil
 	case yaml.SequenceNode:
 		var items []string
 		if err := value.Decode(&items); err != nil {
 			return err
 		}
-		if len(items) > 0 {
-			*t = items
+		result := make(ToolList, 0, len(items))
+		for _, item := range items {
+			if trimmed := strings.TrimSpace(item); trimmed != "" {
+				result = append(result, trimmed)
+			}
 		}
+		*t = result
 		return nil
 	default:
 		return nil
@@ -138,7 +146,9 @@ func (s *Subagent) ToConfigAgent(base config.Agent) config.Agent {
 	}
 
 	// Intersect with the explicit tools allowlist (cannot widen beyond base).
-	if len(s.Tools) > 0 {
+	// Tested for nil, not length: an explicitly empty `tools: []` must yield no
+	// tools, whereas an absent field leaves the base pool untouched.
+	if s.Tools != nil {
 		allowed := make(map[string]bool, len(s.Tools))
 		for _, t := range s.Tools {
 			allowed[t] = true
@@ -217,23 +227,60 @@ func Parse(path string) (*Subagent, error) {
 	return agent, nil
 }
 
-// ValidateAgainst runs Validate plus model-resolution checks. When
+// ValidateAgainst runs Validate plus model- and skill-resolution checks. When
 // validateModel is non-nil and Model is a non-empty value other than
 // "large"/"small", its error (unknown id, or an id several providers offer
-// with no `provider:` set) fails validation. A nil resolver skips the model
-// check (used when the caller has no config context).
-func (s *Subagent) ValidateAgainst(validateModel func(provider, model string) error) error {
-	err := s.Validate()
-	if validateModel == nil {
-		return err
+// with no `provider:` set) fails validation. When isKnownSkill is non-nil,
+// every name in Skills must resolve to a known skill. A nil resolver skips
+// the corresponding check (used when the caller has no config or skills
+// context).
+func (s *Subagent) ValidateAgainst(validateModel func(provider, model string) error, isKnownSkill func(name string) bool) error {
+	errs := []error{s.Validate()}
+	if validateModel != nil && s.Model != "" && s.Model != "large" && s.Model != "small" {
+		if err := validateModel(s.Provider, s.Model); err != nil {
+			errs = append(errs, err)
+		}
 	}
-	if s.Model == "" || s.Model == "large" || s.Model == "small" {
-		return err
+	if isKnownSkill != nil {
+		for _, name := range s.Skills {
+			if !isKnownSkill(name) {
+				errs = append(errs, fmt.Errorf("skill %q is not a known active skill", name))
+			}
+		}
 	}
-	if modelErr := validateModel(s.Provider, s.Model); modelErr != nil {
-		return errors.Join(err, modelErr)
+	return errors.Join(errs...)
+}
+
+// knownToolNames is the set of built-in tool names a subagent may reference.
+// Built once: config.AllToolNames returns a fixed list.
+var knownToolNames = func() map[string]bool {
+	names := config.AllToolNames()
+	set := make(map[string]bool, len(names))
+	for _, n := range names {
+		set[n] = true
 	}
-	return err
+	return set
+}()
+
+// unknownToolErrors reports every name in list that is not a built-in tool.
+// Without this an unknown name is not an error anywhere: `tools:` intersects
+// against the base pool and simply matches nothing (leaving the subagent with
+// no tools at all), while `disallowedTools:` fails open and removes nothing.
+// Tool names are lowercase snake_case, so a list written in another tool's
+// PascalCase convention is caught here rather than at dispatch.
+func unknownToolErrors(field string, list ToolList) []error {
+	var errs []error
+	for _, tool := range list {
+		if knownToolNames[tool] {
+			continue
+		}
+		msg := fmt.Sprintf("%s references unknown tool %q", field, tool)
+		if lower := strings.ToLower(tool); lower != tool && knownToolNames[lower] {
+			msg += fmt.Sprintf("; tool names are lowercase, did you mean %q?", lower)
+		}
+		errs = append(errs, errors.New(msg))
+	}
+	return errs
 }
 
 // Validate checks that the subagent meets all specification requirements.
@@ -248,7 +295,15 @@ func (s *Subagent) Validate() error {
 			errs = append(errs, fmt.Errorf("name exceeds %d characters", MaxNameLength))
 		}
 		if !namePattern.MatchString(s.Name) {
-			errs = append(errs, errors.New("name must be lowercase alphanumeric with single hyphens (no leading, trailing, or consecutive hyphens)"))
+			msg := "name must be lowercase alphanumeric with single hyphens (no leading, trailing, or consecutive hyphens)"
+			// Definition files carried over from the cross-tool
+			// .agents/subagents convention routinely use names like "Explore".
+			// Those fail here and are dropped from discovery, so the fix has to
+			// be in the message — the Library only shows this error text.
+			if lower := strings.ToLower(s.Name); lower != s.Name && namePattern.MatchString(lower) {
+				msg += fmt.Sprintf("; rename %q to %q", s.Name, lower)
+			}
+			errs = append(errs, errors.New(msg))
 		}
 		if reservedNames[s.Name] {
 			errs = append(errs, fmt.Errorf("name %q is reserved", s.Name))
@@ -260,6 +315,9 @@ func (s *Subagent) Validate() error {
 	} else if len(s.Description) > MaxDescriptionLength {
 		errs = append(errs, fmt.Errorf("description exceeds %d characters", MaxDescriptionLength))
 	}
+
+	errs = append(errs, unknownToolErrors("tools", s.Tools)...)
+	errs = append(errs, unknownToolErrors("disallowedTools", s.DisallowedTools)...)
 
 	if len(s.Tools) > 0 && len(s.DisallowedTools) > 0 {
 		disallowedSet := make(map[string]bool, len(s.DisallowedTools))
@@ -410,33 +468,34 @@ func DeduplicateStates(all []*SubagentState) []*SubagentState {
 // DiscoverWithStates finds all valid subagent definition files (*.md) in the
 // given paths recursively, and returns both the discovered subagents and a
 // per-file state slice describing parse/validation outcomes. When
-// validateModel is non-nil it is used to validate non-alias model ids; nil
-// skips that check.
+// validateModel is non-nil it is used to validate non-alias model ids; when
+// isKnownSkill is non-nil it is used to validate skills references; a nil
+// func skips the corresponding check.
 //
 // The returned agents preserve the caller's path order: all subagents from
 // paths[0] (sorted by file path), then paths[1], and so on. Deduplicate keeps
 // the last occurrence of a name, so this ordering is what makes later paths —
 // the working directory, per ProjectSubagentsDir — override earlier ones
 // (monorepo root, global dirs) on a name collision.
-func DiscoverWithStates(paths []string, validateModel func(provider, model string) error) ([]*Subagent, []*SubagentState) {
+func DiscoverWithStates(paths []string, validateModel func(provider, model string) error, isKnownSkill func(name string) bool) ([]*Subagent, []*SubagentState) {
 	var agents []*Subagent
 	var states []*SubagentState
 	var mu sync.Mutex
 
-	addState := func(name, path string, state DiscoveryState, err error) {
-		mu.Lock()
-		states = append(states, &SubagentState{
-			Name:  name,
-			Path:  path,
-			State: state,
-			Err:   err,
-		})
-		mu.Unlock()
-	}
-
 	for _, base := range paths {
 		seen := make(map[string]bool)
 		var baseAgents []*Subagent
+		var baseStates []*SubagentState
+		addState := func(name, path string, state DiscoveryState, err error) {
+			mu.Lock()
+			baseStates = append(baseStates, &SubagentState{
+				Name:  name,
+				Path:  path,
+				State: state,
+				Err:   err,
+			})
+			mu.Unlock()
+		}
 		conf := fastwalk.Config{
 			Follow:  true,
 			ToSlash: fastwalk.DefaultToSlash(),
@@ -464,7 +523,7 @@ func DiscoverWithStates(paths []string, validateModel func(provider, model strin
 				addState("", path, StateError, err)
 				return nil
 			}
-			if err := agent.ValidateAgainst(validateModel); err != nil {
+			if err := agent.ValidateAgainst(validateModel, isKnownSkill); err != nil {
 				slog.Warn("Subagent validation failed", "path", path, "error", err)
 				addState(agent.Name, path, StateError, err)
 				return nil
@@ -489,7 +548,16 @@ func DiscoverWithStates(paths []string, validateModel func(provider, model strin
 			}
 			return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
 		})
+		// States are sorted and appended on the same per-base schedule as the
+		// agents above. Deduplicate and DeduplicateStates both keep the last
+		// occurrence of a name, so the two lists must agree on what "last"
+		// means — otherwise a name collision can resolve to one file's agent
+		// while the Library shows the other file's (possibly errored) state.
+		slices.SortStableFunc(baseStates, func(a, b *SubagentState) int {
+			return strings.Compare(strings.ToLower(a.Path), strings.ToLower(b.Path))
+		})
 		agents = append(agents, baseAgents...)
+		states = append(states, baseStates...)
 	}
 
 	return agents, states

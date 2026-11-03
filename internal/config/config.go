@@ -486,6 +486,7 @@ type Options struct {
 	PinentryCacheTimeout *int     `json:"pinentry_cache_timeout,omitempty" jsonschema:"description=Seconds Crush keeps an entered GPG passphrase in memory so repeated signing operations do not re-prompt. 0 (the default) disables it; gpg-agent's own cache applies regardless.,default=0,example=300"`
 	SubagentsPaths       []string `json:"subagents_paths,omitempty" jsonschema:"description=Paths to directories containing subagent definition files (*.md files with YAML frontmatter)"`
 	DisabledSubagents    []string `json:"disabled_subagents,omitempty" jsonschema:"description=List of subagent names to disable and hide from the agent"`
+	EnabledSubagents     []string `json:"enabled_subagents,omitempty" jsonschema:"description=List of subagent names to force-enable\\, overriding a disable set at a broader config scope"`
 }
 
 // DefaultMaxBackgroundJobs is how many background shell jobs may run at once
@@ -542,6 +543,28 @@ func (o *Options) GetPinentryCacheTimeout() time.Duration {
 		return 0
 	}
 	return time.Duration(*o.PinentryCacheTimeout) * time.Second
+}
+
+// EffectiveDisabledSubagents returns the subagent names that are disabled
+// after enabled_subagents has subtracted out any names re-enabled at a
+// narrower scope. jsons.Merge concatenates arrays across config layers
+// rather than overriding them, so options.enabled_subagents is the only way
+// a narrower scope can cancel out a name disabled at a broader one.
+func EffectiveDisabledSubagents(opts *Options) []string {
+	if opts == nil {
+		return nil
+	}
+	enabled := make(map[string]bool, len(opts.EnabledSubagents))
+	for _, name := range opts.EnabledSubagents {
+		enabled[name] = true
+	}
+	var effective []string
+	for _, name := range opts.DisabledSubagents {
+		if !enabled[name] {
+			effective = append(effective, name)
+		}
+	}
+	return effective
 }
 
 type MCPs map[string]MCPConfig
@@ -1087,6 +1110,16 @@ func (c *Config) SmallModel() *catwalk.Model {
 }
 
 const maxRecentModelsPerType = 5
+
+// AllToolNames returns every built-in tool name an agent's AllowedTools may
+// contain. MCP tools are not included: they bypass AllowedTools entirely and
+// are gated by AllowedMCP instead (see the agent coordinator's buildTools).
+// Exported so callers that accept user-authored tool allowlists — subagent
+// `tools:` / `disallowedTools:` frontmatter — can reject unknown names instead
+// of silently intersecting them away to nothing.
+func AllToolNames() []string {
+	return allToolNames()
+}
 
 func allToolNames() []string {
 	return []string{

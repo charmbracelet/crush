@@ -77,10 +77,15 @@ func (l *LibrarySubagentItem) SetMatch(m fuzzy.Match) {
 }
 
 // Render implements list.Item. It renders the library subagent as two lines:
-// the first line shows the colored dot, name, and scope badge; the second line
-// shows the description. Disabled items are rendered with a dimmed style.
+// the first line shows an enabled/disabled status icon, the colored dot,
+// name, and scope badge; the second line shows the description.
 func (l *LibrarySubagentItem) Render(width int) string {
 	dot := styles.SubagentDot(l.data.Color)
+
+	status := l.t.Tool.IconSuccess.String()
+	if l.data.Disabled {
+		status = l.t.Tool.IconError.String()
+	}
 
 	itemStyle := l.t.Dialog.NormalItem
 	if l.focused {
@@ -94,13 +99,10 @@ func (l *LibrarySubagentItem) Render(width int) string {
 		scope = "user"
 	}
 
-	// The dot ends in an SGR reset, so it starts its own row-style run or
-	// it, and the text after it, loses the selected highlight.
+	// The icon and dot end in an SGR reset, so each starts its own row-style
+	// run or it, and the text after it, loses the selected highlight.
 	text := itemStyle.UnsetPadding()
-	if l.data.Disabled {
-		text = l.t.Resource.AdditionalText
-	}
-	firstLine := text.Render(dot) + text.Render(" "+l.data.Name+"  "+scope)
+	firstLine := text.Render(status) + text.Render(" "+dot) + text.Render(" "+l.data.Name+"  "+scope)
 	firstLine = ansi.Truncate(firstLine, innerWidth, "…")
 
 	var content string
@@ -109,11 +111,6 @@ func (l *LibrarySubagentItem) Render(width int) string {
 		content = firstLine + "\n" + desc
 	} else {
 		content = firstLine
-	}
-
-	if l.data.Disabled {
-		dimStyle := l.t.Resource.AdditionalText
-		return dimStyle.Render(content)
 	}
 
 	return itemStyle.Render(content)

@@ -4,14 +4,25 @@ import (
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/subagents"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/util"
+	"github.com/charmbracelet/crush/internal/workspace"
 	uv "github.com/charmbracelet/ultraviolet"
 )
 
 // SubagentsID is the identifier for the subagents dialog.
 const SubagentsID = "subagents"
+
+// RunningSubagentsFetchedMsg delivers a running-subagent list resolved off the
+// Update path. Exported because the UI model has to route it back into the
+// dialog: dialogs only receive message types the model forwards explicitly.
+type RunningSubagentsFetchedMsg struct {
+	ParentSessionID string
+	List            []workspace.RunningSubagentInfo
+}
 
 // SubagentsTab identifies which tab of the subagents dialog is active.
 type SubagentsTab int
@@ -40,6 +51,7 @@ type Subagents struct {
 		Enter         key.Binding
 		Cancel        key.Binding
 		Delete        key.Binding
+		Toggle        key.Binding
 		ConfirmDelete key.Binding
 		CancelDelete  key.Binding
 		Close         key.Binding
@@ -126,6 +138,10 @@ func NewSubagents(com *common.Common, parentSessionID string) *Subagents {
 		key.WithKeys("d"),
 		key.WithHelp("d", "delete"),
 	)
+	s.keyMap.Toggle = key.NewBinding(
+		key.WithKeys("space"),
+		key.WithHelp("space", "enable/disable"),
+	)
 	s.keyMap.ConfirmDelete = key.NewBinding(
 		key.WithKeys("y"),
 		key.WithHelp("y", "confirm delete"),
@@ -167,6 +183,24 @@ func (s *Subagents) activeList() *list.FilterableList {
 
 // HandleMsg implements [Dialog].
 func (s *Subagents) HandleMsg(msg tea.Msg) Action {
+	switch ev := msg.(type) {
+	case pubsub.Event[subagents.RuntimeEvent]:
+		if ev.Payload.ParentSessionID == s.parentSessionID {
+			return ActionCmd{s.fetchRunningCmd()}
+		}
+		return nil
+	case RunningSubagentsFetchedMsg:
+		// Drop a fetch that raced a session switch, matching the guard the
+		// sidebar's runningSubagentsMsg handler applies.
+		if ev.ParentSessionID == s.parentSessionID {
+			s.applyRunning(ev.List)
+		}
+		return nil
+	case pubsub.Event[subagents.Event]:
+		s.refreshLibrary()
+		return nil
+	}
+
 	keyMsg, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		return nil
@@ -214,11 +248,42 @@ func (s *Subagents) HandleMsg(msg tea.Msg) Action {
 	case s.tab == SubagentsTabRunning && key.Matches(keyMsg, s.keyMap.Cancel):
 		s.cancelSelectedRunning()
 
+	case s.tab == SubagentsTabLibrary && key.Matches(keyMsg, s.keyMap.Toggle):
+		return s.toggleSelectedLibrary()
+
 	case s.tab == SubagentsTabLibrary && key.Matches(keyMsg, s.keyMap.Delete):
 		s.enterConfirmDelete()
 	}
 
 	return nil
+}
+
+// toggleSelectedLibrary flips the enabled/disabled state of the selected
+// library item, optimistically dimming/undimming it, and issues a cmd that
+// persists the change via the workspace.
+func (s *Subagents) toggleSelectedLibrary() Action {
+	item := s.libraryList.SelectedItem()
+	if item == nil {
+		return nil
+	}
+	li, ok := item.(*LibrarySubagentItem)
+	if !ok {
+		return nil
+	}
+	li.data.Disabled = !li.data.Disabled
+	li.Bump()
+	return ActionCmd{s.setDisabledCmd(li.ID(), li.data.Disabled)}
+}
+
+// setDisabledCmd returns a cmd that persists the disabled state for name and
+// reports any error back to the program.
+func (s *Subagents) setDisabledCmd(name string, disabled bool) tea.Cmd {
+	return func() tea.Msg {
+		if err := s.com.Workspace.SetSubagentDisabled(name, disabled); err != nil {
+			return util.ReportError(err)()
+		}
+		return nil
+	}
 }
 
 // toggleTab switches between the Running and Library tabs.
@@ -247,7 +312,10 @@ func (s *Subagents) loadSelectedRunning() Action {
 }
 
 // cancelSelectedRunning cancels the currently selected running subagent via
-// the workspace and removes it from the list.
+// the workspace. The row is not removed here: the runtime publishes a Finish
+// event once the run actually stops, and refreshRunning drops the row then —
+// removing it optimistically would make it reappear on the next RuntimeEvent
+// while the run winds down.
 func (s *Subagents) cancelSelectedRunning() {
 	item := s.runningList.SelectedItem()
 	if item == nil {
@@ -257,28 +325,90 @@ func (s *Subagents) cancelSelectedRunning() {
 	if !ok {
 		return
 	}
-	childID := ri.ID()
-	s.com.Workspace.CancelSubagent(childID)
-	s.removeRunningItem(childID)
+	s.com.Workspace.CancelSubagent(ri.ID())
 }
 
-// removeRunningItem removes the running item with the given child session ID
-// from the list.
-func (s *Subagents) removeRunningItem(childID string) {
-	var newItems []*RunningSubagentItem
-	for _, item := range s.runningItems {
-		if item.ID() == childID {
-			continue
+// fetchRunningCmd resolves the running-subagent list off the Update path.
+// RunningSubagents queries the DB to enrich token counts, and a RuntimeEvent
+// arrives for every register, status change and finish, so doing that work
+// inline would block input handling and rendering on every event. The
+// closure captures only locals, never s, so it is safe off-thread.
+func (s *Subagents) fetchRunningCmd() tea.Cmd {
+	ws := s.com.Workspace
+	parentSessionID := s.parentSessionID
+	return func() tea.Msg {
+		return RunningSubagentsFetchedMsg{
+			ParentSessionID: parentSessionID,
+			List:            ws.RunningSubagents(parentSessionID),
 		}
-		newItems = append(newItems, item)
 	}
-	s.runningItems = newItems
-	filterable := make([]list.FilterableItem, len(s.runningItems))
-	for i, item := range s.runningItems {
+}
+
+// applyRunning rebuilds the running tab from an already-fetched list,
+// preserving the selected item's identity (by child session ID) across the
+// rebuild when it still exists in the new set.
+func (s *Subagents) applyRunning(running []workspace.RunningSubagentInfo) {
+	var selectedID string
+	if item, ok := s.runningList.SelectedItem().(ListItem); ok {
+		selectedID = item.ID()
+	}
+
+	s.runningItems = make([]*RunningSubagentItem, len(running))
+	filterable := make([]list.FilterableItem, len(running))
+	selectedIdx := 0
+	for i, r := range running {
+		item := NewRunningSubagentItem(s.com.Styles, RunningSubagentItemData{
+			ChildSessionID:   r.ChildSessionID,
+			Name:             r.Name,
+			Color:            r.Color,
+			Model:            r.Model,
+			PromptTokens:     r.PromptTokens,
+			CompletionTokens: r.CompletionTokens,
+		})
+		s.runningItems[i] = item
 		filterable[i] = item
+		if selectedID != "" && r.ChildSessionID == selectedID {
+			selectedIdx = i
+		}
 	}
 	s.runningList.SetItems(filterable...)
-	s.runningList.SelectFirst()
+	s.runningList.SetSelected(selectedIdx)
+	// SetItems on the initially empty list pins the scroll offset at -1,
+	// which renders nothing until the offset is recomputed.
+	s.runningList.ScrollToSelected()
+}
+
+// refreshLibrary rebuilds the library tab from the workspace, preserving the
+// selected item's identity (by name) across the rebuild when it still
+// exists in the new set.
+func (s *Subagents) refreshLibrary() {
+	var selectedID string
+	if item, ok := s.libraryList.SelectedItem().(ListItem); ok {
+		selectedID = item.ID()
+	}
+
+	defs := s.com.Workspace.AllSubagents()
+	s.libraryItems = make([]*LibrarySubagentItem, len(defs))
+	filterable := make([]list.FilterableItem, len(defs))
+	selectedIdx := 0
+	for i, d := range defs {
+		item := NewLibrarySubagentItem(s.com.Styles, LibrarySubagentItemData{
+			Name:        d.Name,
+			Description: d.Description,
+			Color:       d.Color,
+			FilePath:    d.FilePath,
+			Scope:       d.Scope,
+			Disabled:    d.Disabled,
+		})
+		s.libraryItems[i] = item
+		filterable[i] = item
+		if selectedID != "" && item.ID() == selectedID {
+			selectedIdx = i
+		}
+	}
+	s.libraryList.SetItems(filterable...)
+	s.libraryList.SetSelected(selectedIdx)
+	s.libraryList.ScrollToSelected()
 }
 
 // enterConfirmDelete sets confirm-delete mode for the currently selected
@@ -410,6 +540,7 @@ func (s *Subagents) ShortHelp() []key.Binding {
 	}
 	return []key.Binding{
 		s.keyMap.Next,
+		s.keyMap.Toggle,
 		s.keyMap.Delete,
 		s.keyMap.Tab,
 		s.keyMap.Close,

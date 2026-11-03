@@ -11,6 +11,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/stretchr/testify/require"
 )
 
@@ -67,7 +68,7 @@ func newPinnedModelCoordinator(t *testing.T, srvURL string) *coordinator {
 		cfg:                cfg,
 		sessions:           env.sessions,
 		messages:           env.messages,
-		subagentModelCache: make(map[subagentModelKey]Model),
+		subagentModelCache: csync.NewMap[subagentModelKey, Model](),
 	}
 	require.NoError(t, coord.rebuildModels(t.Context()))
 	return coord

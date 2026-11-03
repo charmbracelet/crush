@@ -17,10 +17,10 @@ import (
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/discover"
 	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/subagents"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 )
 
 // mockSessionAgent is a minimal mock for the SessionAgent interface.
@@ -68,7 +68,7 @@ func newTestCoordinator(t *testing.T, env fakeEnv, providerID string, providerCf
 		cfg:                cfg,
 		sessions:           env.sessions,
 		messages:           env.messages,
-		subagentModelCache: make(map[subagentModelKey]Model),
+		subagentModelCache: csync.NewMap[subagentModelKey, Model](),
 	}
 }
 
@@ -528,7 +528,7 @@ func TestUpdateParentSessionCost(t *testing.T) {
 
 		err = coord.updateParentSessionCost(t.Context(), child.ID, "non-existent")
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "get parent session")
+		assert.Contains(t, err.Error(), "add cost to parent session")
 	})
 
 	t.Run("zero cost handled correctly", func(t *testing.T) {
@@ -548,6 +548,42 @@ func TestUpdateParentSessionCost(t *testing.T) {
 		updated, err := env.sessions.Get(t.Context(), parent.ID)
 		require.NoError(t, err)
 		assert.InDelta(t, 0.0, updated.Cost, 1e-9)
+	})
+
+	t.Run("concurrent updates never lose an increment", func(t *testing.T) {
+		env := testEnv(t)
+		cfg, err := config.Init(t.Context(), env.workingDir, "", false)
+		require.NoError(t, err)
+		coord := &coordinator{cfg: cfg, sessions: env.sessions}
+
+		parent, err := env.sessions.Create(t.Context(), "Parent")
+		require.NoError(t, err)
+
+		const n = 20
+		children := make([]string, n)
+		for i := range n {
+			child, err := env.sessions.CreateTaskSession(t.Context(), fmt.Sprintf("tool-%d", i), parent.ID, "Child")
+			require.NoError(t, err)
+			child.Cost = 0.01
+			_, err = env.sessions.Save(t.Context(), child)
+			require.NoError(t, err)
+			children[i] = child.ID
+		}
+
+		// Mirrors the dispatcher tool's Parallel: true dispatch: several
+		// subagents finishing at once must each call updateParentSessionCost
+		// concurrently without losing an increment to a lost-update race.
+		var wg errgroup.Group
+		for _, childID := range children {
+			wg.Go(func() error {
+				return coord.updateParentSessionCost(t.Context(), childID, parent.ID)
+			})
+		}
+		require.NoError(t, wg.Wait())
+
+		updated, err := env.sessions.Get(t.Context(), parent.ID)
+		require.NoError(t, err)
+		assert.InDelta(t, 0.01*n, updated.Cost, 1e-9)
 	})
 }
 
@@ -757,7 +793,8 @@ func TestBuildAgent_SubagentModel(t *testing.T) {
 		// Zero-value subagentModel must be accepted without panicking. With no
 		// models configured, buildNamedModel fails before any prompt is needed,
 		// verifying the struct parameter is wired into model-selection logic.
-		_, err := coord.buildAgent(t.Context(), nil, agentCfg, true, subagentModel{})
+		var wg errgroup.Group
+		_, err := coord.buildAgent(t.Context(), nil, agentCfg, true, subagentModel{}, &wg)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "model")
 	})
@@ -891,42 +928,10 @@ func TestRunSubAgent_AuthRefreshWrapper_ResetsStatusAfterSuccess(t *testing.T) {
 	t.Parallel()
 
 	env := testEnv(t)
-	cfg, err := config.Init(t.Context(), env.workingDir, "", false)
-	require.NoError(t, err)
-
-	const (
-		providerID = "test-openai-compat"
-		modelID    = "test-model"
-	)
-	cfg.Config().Providers.Set(providerID, config.ProviderConfig{
-		ID:      providerID,
-		Name:    "Test",
-		Type:    openaicompat.Name,
-		BaseURL: "http://127.0.0.1:0/v1",
-		APIKey:  "test",
-		Models:  []catwalk.Model{{ID: modelID, DefaultMaxTokens: 4096}},
-	})
-	selected := config.SelectedModel{Provider: providerID, Model: modelID}
-	cfg.Config().Models[config.SelectedModelTypeLarge] = selected
-	cfg.Config().Models[config.SelectedModelTypeSmall] = selected
-	cfg.SetupAgents()
-	for _, agentID := range []string{config.AgentCoder, config.AgentTask} {
-		a := cfg.Config().Agents[agentID]
-		a.AllowedTools = nil
-		cfg.Config().Agents[agentID] = a
-	}
-	permissions := permission.NewPermissionService(env.workingDir, nil, nil)
-	permissions.SetPermissionMode(permission.PermissionModeYolo)
-	c, err := NewCoordinator(t.Context(), CoordinatorOptions{
-		Config:      cfg,
-		Sessions:    env.sessions,
-		Messages:    env.messages,
-		Permissions: permissions,
-	})
-	require.NoError(t, err)
-	coord := c.(*coordinator)
+	coord := newOfflineCoordinator(t, env)
 	require.NoError(t, coord.readyWg.Wait())
 
+	const providerID = "test-openai-compat"
 	providerCfg, ok := coord.cfg.Config().Providers.Get(providerID)
 	require.True(t, ok)
 	// Any "$"-containing APIKeyTemplate is enough for makeAuthRefreshCallback
@@ -971,6 +976,237 @@ func TestRunSubAgent_AuthRefreshWrapper_ResetsStatusAfterSuccess(t *testing.T) {
 
 	require.Equal(t, subagents.StatusRunning, statusDuringRefresh,
 		"runtime status must return to running once OnAuthRefresh succeeds, not stay stuck at retrying")
+}
+
+// TestCancel_StopsRunningSubagent verifies the full targeted-cancel path: a
+// dispatched subagent runs on its own SessionAgent (invisible to
+// currentAgent's activeRequests), so Cancel(childSessionID) must reach it via
+// the subagentCancels registry — stopping only that run while the parent
+// turn's context stays alive — and must not fall through to currentAgent.
+func TestCancel_StopsRunningSubagent(t *testing.T) {
+	t.Parallel()
+
+	const providerID = "test-provider"
+	env := testEnv(t)
+	cfg, err := config.Init(t.Context(), env.workingDir, "", false)
+	require.NoError(t, err)
+	cfg.Config().Providers.Set(providerID, config.ProviderConfig{ID: providerID})
+
+	rt := subagents.NewRuntime()
+	t.Cleanup(rt.Shutdown)
+
+	parentSession, err := env.sessions.Create(t.Context(), "Parent")
+	require.NoError(t, err)
+
+	// Blocks until its context is cancelled, like a real in-flight run.
+	subAgent := newMockAgent(providerID, 4096, func(ctx context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+	coderMock := newMockAgent(providerID, 4096, nil)
+
+	coord := &coordinator{
+		cfg:             cfg,
+		sessions:        env.sessions,
+		runtime:         rt,
+		mainAgent:       coderMock,
+		subagentCancels: csync.NewMap[string, context.CancelFunc](),
+	}
+
+	done := make(chan fantasy.ToolResponse, 1)
+	go func() {
+		resp, _ := coord.runSubAgent(t.Context(), subAgentParams{
+			Agent:          subAgent,
+			SessionID:      parentSession.ID,
+			AgentMessageID: "msg-1",
+			ToolCallID:     "call-1",
+			Prompt:         "long running work",
+			SessionTitle:   "Cancel Target",
+			AgentName:      "worker",
+			AgentColor:     "blue",
+		})
+		done <- resp
+	}()
+
+	// The cancel registry is populated before the runtime announces the child
+	// session, so once List returns the entry it is safe to cancel.
+	var childID string
+	require.Eventually(t, func() bool {
+		entries := rt.List(parentSession.ID)
+		if len(entries) == 0 {
+			return false
+		}
+		childID = entries[0].ChildSessionID
+		return true
+	}, 5*time.Second, 10*time.Millisecond)
+
+	coord.Cancel(childID)
+
+	select {
+	case resp := <-done:
+		require.True(t, resp.IsError)
+		require.Equal(t, "Subagent cancelled by user", resp.Content)
+	case <-time.After(5 * time.Second):
+		t.Fatal("subagent run did not stop after Cancel(childSessionID)")
+	}
+
+	require.Empty(t, coderMock.cancelled, "targeted subagent cancel must not fall through to the coder agent")
+	_, stillRegistered := coord.subagentCancels.Get(childID)
+	require.False(t, stillRegistered, "cancel registry entry must be cleaned up after the run")
+	require.Empty(t, rt.List(parentSession.ID))
+}
+
+// TestCancelAll_StopsRunningSubagents verifies that CancelAll reaches
+// dispatched subagents through the subagentCancels registry, not just the
+// coder agent's own activeRequests — subagents run on ad-hoc SessionAgents
+// invisible to currentAgent, so App.Shutdown calling CancelAll must not leave
+// them running past shutdown.
+func TestCancelAll_StopsRunningSubagents(t *testing.T) {
+	t.Parallel()
+
+	const providerID = "test-provider"
+	env := testEnv(t)
+	cfg, err := config.Init(t.Context(), env.workingDir, "", false)
+	require.NoError(t, err)
+	cfg.Config().Providers.Set(providerID, config.ProviderConfig{ID: providerID})
+
+	rt := subagents.NewRuntime()
+	t.Cleanup(rt.Shutdown)
+
+	parentSession, err := env.sessions.Create(t.Context(), "Parent")
+	require.NoError(t, err)
+
+	// Blocks until its context is cancelled, like a real in-flight run.
+	subAgent := newMockAgent(providerID, 4096, func(ctx context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+	coderMock := newMockAgent(providerID, 4096, nil)
+
+	coord := &coordinator{
+		cfg:             cfg,
+		sessions:        env.sessions,
+		runtime:         rt,
+		mainAgent:       coderMock,
+		subagentCancels: csync.NewMap[string, context.CancelFunc](),
+	}
+
+	done := make(chan fantasy.ToolResponse, 1)
+	go func() {
+		resp, _ := coord.runSubAgent(t.Context(), subAgentParams{
+			Agent:          subAgent,
+			SessionID:      parentSession.ID,
+			AgentMessageID: "msg-1",
+			ToolCallID:     "call-1",
+			Prompt:         "long running work",
+			SessionTitle:   "CancelAll Target",
+			AgentName:      "worker",
+			AgentColor:     "blue",
+		})
+		done <- resp
+	}()
+
+	require.Eventually(t, func() bool {
+		return len(rt.List(parentSession.ID)) > 0
+	}, 5*time.Second, 10*time.Millisecond)
+
+	coord.CancelAll()
+
+	select {
+	case resp := <-done:
+		require.True(t, resp.IsError)
+		require.Equal(t, "Subagent cancelled by user", resp.Content)
+	case <-time.After(5 * time.Second):
+		t.Fatal("subagent run did not stop after CancelAll()")
+	}
+
+	require.Empty(t, rt.List(parentSession.ID))
+}
+
+// TestIsSessionBusy_TrueForRunningSubagent verifies that IsSessionBusy
+// reports a dispatched subagent's child session as busy while it runs, even
+// though the coder agent's own IsSessionBusy has no record of it (subagents
+// run on ad-hoc SessionAgents, invisible to currentAgent).
+func TestIsSessionBusy_TrueForRunningSubagent(t *testing.T) {
+	t.Parallel()
+
+	const providerID = "test-provider"
+	env := testEnv(t)
+	cfg, err := config.Init(t.Context(), env.workingDir, "", false)
+	require.NoError(t, err)
+	cfg.Config().Providers.Set(providerID, config.ProviderConfig{ID: providerID})
+
+	rt := subagents.NewRuntime()
+	t.Cleanup(rt.Shutdown)
+
+	parentSession, err := env.sessions.Create(t.Context(), "Parent")
+	require.NoError(t, err)
+
+	runStarted := make(chan struct{})
+	subAgent := newMockAgent(providerID, 4096, func(ctx context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
+		close(runStarted)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+	coderMock := newMockAgent(providerID, 4096, nil)
+
+	coord := &coordinator{
+		cfg:             cfg,
+		sessions:        env.sessions,
+		runtime:         rt,
+		mainAgent:       coderMock,
+		subagentCancels: csync.NewMap[string, context.CancelFunc](),
+	}
+
+	done := make(chan fantasy.ToolResponse, 1)
+	go func() {
+		resp, _ := coord.runSubAgent(t.Context(), subAgentParams{
+			Agent:          subAgent,
+			SessionID:      parentSession.ID,
+			AgentMessageID: "msg-1",
+			ToolCallID:     "call-1",
+			Prompt:         "long running work",
+			SessionTitle:   "Busy Target",
+			AgentName:      "worker",
+			AgentColor:     "blue",
+		})
+		done <- resp
+	}()
+	<-runStarted
+
+	var childID string
+	require.Eventually(t, func() bool {
+		entries := rt.List(parentSession.ID)
+		if len(entries) == 0 {
+			return false
+		}
+		childID = entries[0].ChildSessionID
+		return true
+	}, 5*time.Second, 10*time.Millisecond)
+
+	require.True(t, coord.IsSessionBusy(childID), "child session must be reported busy while its subagent runs")
+
+	coord.Cancel(childID)
+	<-done
+
+	require.False(t, coord.IsSessionBusy(childID), "child session must be reported idle once the subagent finishes")
+}
+
+// TestCancel_UnknownSessionFallsThroughToCoder verifies that Cancel for a
+// session with no registry entry still reaches the coder agent (the
+// pre-existing behavior for parent sessions).
+func TestCancel_UnknownSessionFallsThroughToCoder(t *testing.T) {
+	t.Parallel()
+
+	coderMock := newMockAgent("p", 4096, nil)
+	coord := &coordinator{
+		mainAgent:       coderMock,
+		subagentCancels: csync.NewMap[string, context.CancelFunc](),
+	}
+
+	coord.Cancel("some-parent-session")
+
+	require.Equal(t, []string{"some-parent-session"}, coderMock.cancelled)
 }
 
 // TestActiveSubagentsList verifies the coordinator reads the live manager
@@ -1346,19 +1582,19 @@ func TestUpdateModels_ClearsSubagentModelCache(t *testing.T) {
 	coord := &coordinator{
 		cfg:                config.NewTestStoreWithWorkingDir(&config.Config{Providers: csync.NewMap[string, config.ProviderConfig]()}, env.workingDir),
 		sessions:           env.sessions,
-		subagentModelCache: make(map[subagentModelKey]Model),
+		subagentModelCache: csync.NewMap[subagentModelKey, Model](),
 	}
 
 	// Manually populate the cache with a dummy entry.
-	coord.subagentModelCache[subagentModelKey{modelID: "some-model", provider: "", isSubAgent: true}] = Model{}
+	coord.subagentModelCache.Set(subagentModelKey{modelID: "some-model", provider: "", isSubAgent: true}, Model{})
 
-	require.Len(t, coord.subagentModelCache, 1)
+	require.Equal(t, 1, coord.subagentModelCache.Len())
 
 	// UpdateModels will error (no models configured in empty config), but the
 	// cache must be cleared regardless.
 	_ = coord.UpdateModels(t.Context())
 
-	require.Empty(t, coord.subagentModelCache)
+	require.Equal(t, 0, coord.subagentModelCache.Len())
 }
 
 // TestResolveModelByID_CacheHitSkipsBuild verifies that a second call to
@@ -1376,23 +1612,23 @@ func TestResolveModelByID_CacheHitSkipsBuild(t *testing.T) {
 	coord := newTestCoordinator(t, env, "test-provider", providerCfg)
 
 	// First call — cache is empty.
-	require.Empty(t, coord.subagentModelCache)
+	require.Equal(t, 0, coord.subagentModelCache.Len())
 
 	_, err := coord.resolveModelByID(t.Context(), "model-x", "test-provider", true)
 	if err != nil {
 		// Provider construction may fail in the test environment (fake API key).
 		// Errors must not be cached.
-		require.Empty(t, coord.subagentModelCache, "failed build must not populate cache")
+		require.Equal(t, 0, coord.subagentModelCache.Len(), "failed build must not populate cache")
 		return
 	}
 
 	// Success path: cache must contain exactly one entry.
-	require.Len(t, coord.subagentModelCache, 1)
+	require.Equal(t, 1, coord.subagentModelCache.Len())
 
 	// Second call must hit the cache (same result, no error).
 	_, err2 := coord.resolveModelByID(t.Context(), "model-x", "test-provider", true)
 	require.NoError(t, err2)
-	require.Len(t, coord.subagentModelCache, 1, "second call must not add a new entry")
+	require.Equal(t, 1, coord.subagentModelCache.Len(), "second call must not add a new entry")
 }
 
 // TestResolveModelByID_ModelNotFound verifies that resolveModelByID returns an
@@ -1409,5 +1645,5 @@ func TestResolveModelByID_ModelNotFound(t *testing.T) {
 
 	_, err := coord.resolveModelByID(t.Context(), "does-not-exist", "", true)
 	require.ErrorContains(t, err, "not offered by any configured provider")
-	require.Empty(t, coord.subagentModelCache)
+	require.Equal(t, 0, coord.subagentModelCache.Len())
 }

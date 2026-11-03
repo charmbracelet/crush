@@ -29,6 +29,25 @@ func TestToConfigAgent(t *testing.T) {
 			},
 		},
 		{
+			// An author writing `tools: []` wants a no-tool agent (a planner or
+			// reviewer). Treating that as "field absent" would hand it the base
+			// pool — bash, edit and write included — i.e. the exact opposite.
+			name: "explicitly_empty_tools_grants_nothing",
+			subagent: Subagent{
+				Name:        "my-agent",
+				Description: "Does something.",
+				Tools:       ToolList{},
+			},
+			base: config.Agent{
+				AllowedTools: []string{"bash", "grep", "view", "edit"},
+				Model:        config.SelectedModelTypeLarge,
+			},
+			check: func(t *testing.T, result config.Agent) {
+				t.Helper()
+				require.Empty(t, result.AllowedTools)
+			},
+		},
+		{
 			name: "tools_filter",
 			subagent: Subagent{
 				Name:        "my-agent",

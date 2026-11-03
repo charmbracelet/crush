@@ -359,11 +359,7 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 		skills.WithWorkingDir(discoveryCfg.WorkingDir),
 	)
 
-	subagentsCfg := subagents.DiscoveryConfig{
-		SubagentsPaths:    cfg.Options.SubagentsPaths,
-		DisabledSubagents: cfg.Options.DisabledSubagents,
-		ValidateModel:     cfg.ValidateModel,
-	}
+	subagentsCfg := subagents.DiscoveryConfigFromStore(store, skillsMgr)
 	allSubagents, activeSubagents, subagentStates := subagents.DiscoverFromConfig(subagentsCfg)
 	subagentsMgr := subagents.NewManager(allSubagents, activeSubagents, subagentStates)
 

@@ -4,4 +4,4 @@ With no `label`, it lists every subagent in this session: state (running, finish
 
 With a `label`, it shows that subagent in detail: its task, recent tool calls, latest output, and last report.
 
-Reports arrive on their own, so there is no need to poll.
+Use it to answer a question about a subagent: whether it is stuck, what it is doing, why it stopped. It is not a way to wait for one. Reports arrive on their own and wake you, so once you have nothing else to do, end your turn rather than checking again.

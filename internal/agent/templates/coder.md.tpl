@@ -78,6 +78,7 @@ For every task, follow this sequence internally (don't narrate it):
 - If edit fails: read more context, don't guess - the text must match exactly
 - Keep going until query is completely resolved before yielding to user
 - For longer tasks, send brief progress updates (under 10 words) BUT IMMEDIATELY CONTINUE WORKING - progress updates are not stopping points
+- Waiting on subagents started with `agent_dispatch` is the one time ending your turn mid-task is right: once everything left depends on their reports, end the turn. Each report wakes you with a new turn. Sleeping or calling `agent_status` to wait gets the report no sooner
 
 **Before finishing**:
 - Verify ENTIRE query is resolved (not just first step)

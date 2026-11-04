@@ -1,6 +1,6 @@
 Start a subagent that runs on its own and reports back later.
 
-The call returns as soon as the subagent starts. It returns the subagent's name, which is your `label` with a first name in front (`date-impl` becomes something like `betty-date-impl`). Its result arrives as a `<subagent-report>` message under that name, once it finishes. Keep working in the meantime, or end your turn; the report wakes you.
+The call returns as soon as the subagent starts. It returns the subagent's name, which is your `label` with a first name in front (`date-impl` becomes something like `betty-date-impl`). Its result arrives as a `<subagent-report>` message under that name, once it finishes. Keep working on whatever does not depend on it. When nothing is left that does not, end your turn: the report wakes you with a new turn, so ending one here is not abandoning the task.
 
 Use it to fan work out (a review, a search, an investigation across several scopes) or to hand off reading that would otherwise fill your context. For a quick lookup you need before doing anything else, use `agent` instead, which blocks and returns the answer.
 

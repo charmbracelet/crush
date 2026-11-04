@@ -117,8 +117,9 @@ func (c *coordinator) runSubAgentMaybeBackground(
 func backgroundNotice(label, access, prompt string, after time.Duration) fantasy.ToolResponse {
 	notice := fmt.Sprintf(
 		"Still working after %s, so this subagent moved to the background as %q. "+
-			"Keep going; its report arrives under that label when it finishes. "+
-			"Check on it with %s, steer it with %s, or stop it with %s.",
+			"Its report arrives under that label when it finishes and wakes you, so carry on "+
+			"with anything that does not need it, then end your turn. Do not sleep or check "+
+			"%s to wait for it. Steer it with %s, or stop it with %s.",
 		after, label, AgentStatusToolName, AgentSendToolName, AgentStopToolName,
 	)
 	return fantasy.WithResponseMetadata(

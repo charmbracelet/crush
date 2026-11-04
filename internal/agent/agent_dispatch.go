@@ -109,6 +109,14 @@ const (
 	dispatchStopped
 )
 
+// reportArrivesOnItsOwn closes every result that leaves a subagent working.
+// Models read a started-but-unfinished job as something to wait on, and
+// without this they sleep and poll agent_status until the report lands,
+// which it would have done anyway.
+const reportArrivesOnItsOwn = " The report arrives on its own and wakes you, so carry on with" +
+	" anything that does not need it, then end your turn. Do not sleep or" +
+	" check agent_status to wait for it."
+
 // SubagentState is a subagent's state as agent_status reports it.
 type SubagentState string
 
@@ -462,7 +470,7 @@ func (c *coordinator) agentDispatchTool(ctx context.Context, parentAgentID strin
 				meta.Model, meta.Provider, meta.Reasoning = overrideRecord(params, sel)
 			}
 			return fantasy.WithResponseMetadata(
-				fantasy.NewTextResponse(fmt.Sprintf("Started subagent %q.", label)),
+				fantasy.NewTextResponse(fmt.Sprintf("Started subagent %q.", label)+reportArrivesOnItsOwn),
 				meta,
 			), nil
 		},
@@ -728,7 +736,7 @@ func (c *coordinator) agentSendTool(parentModel func() Model) fantasy.AgentTool 
 						return fantasy.WithResponseMetadata(fantasy.NewTextResponse(fmt.Sprintf(
 							"Delivered to %q. It will answer in its report.",
 							label,
-						)), AgentSendResponseMetadata{Label: label}), nil
+						)+reportArrivesOnItsOwn), AgentSendResponseMetadata{Label: label}), nil
 					}
 					if !errors.Is(err, ErrSessionIdle) {
 						return fantasy.NewTextErrorResponse("Failed to deliver message: " + err.Error()), nil
@@ -739,7 +747,7 @@ func (c *coordinator) agentSendTool(parentModel func() Model) fantasy.AgentTool 
 					return fantasy.WithResponseMetadata(fantasy.NewTextResponse(fmt.Sprintf(
 						"Delivered to %q, which had finished. It will answer in a new report.",
 						label,
-					)), AgentSendResponseMetadata{Label: label, Reopened: true}), nil
+					)+reportArrivesOnItsOwn), AgentSendResponseMetadata{Label: label, Reopened: true}), nil
 				}
 			}
 			if ctx.Err() != nil {

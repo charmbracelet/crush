@@ -252,6 +252,9 @@ func (c *coordinator) agentStatusTool() fantasy.AgentTool {
 					)), nil
 				}
 				text, sum := c.describeDispatch(ctx, parentSessionID, record, true)
+				if sum.State == SubagentRunning {
+					text += "\n\n" + stillRunningNote
+				}
 				return fantasy.WithResponseMetadata(fantasy.NewTextResponse(text),
 					AgentStatusResponseMetadata{Agents: []AgentStatusSummary{sum}}), nil
 			}
@@ -260,8 +263,9 @@ func (c *coordinator) agentStatusTool() fantasy.AgentTool {
 				return fantasy.NewTextResponse("No subagents dispatched."), nil
 			}
 			var (
-				lines []string
-				meta  AgentStatusResponseMetadata
+				lines   []string
+				meta    AgentStatusResponseMetadata
+				running bool
 			)
 			for _, label := range records.order {
 				record, ok := records.byLabel[label]
@@ -271,11 +275,21 @@ func (c *coordinator) agentStatusTool() fantasy.AgentTool {
 				text, sum := c.describeDispatch(ctx, parentSessionID, record, false)
 				lines = append(lines, text)
 				meta.Agents = append(meta.Agents, sum)
+				running = running || sum.State == SubagentRunning
+			}
+			if running {
+				lines = append(lines, "", stillRunningNote)
 			}
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(strings.Join(lines, "\n")), meta), nil
 		},
 	)
 }
+
+// stillRunningNote ends a status result that shows a subagent still at work.
+// A model that has run out of other work reaches for agent_status as a way
+// to wait, and calls it again on every answer that says "running".
+const stillRunningNote = "Running subagents report on their own and wake you when they do. " +
+	"If nothing else needs doing, end your turn now rather than checking again."
 
 func knownLabels(records dispatchRecords) string {
 	var labels []string

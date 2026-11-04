@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/keyhint"
 	uv "github.com/charmbracelet/ultraviolet"
 )
 
@@ -171,7 +172,7 @@ func (q *Quit) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 				buttonRow,
 				"",
 				hintStyle.Render(quitHintLineOne),
-				hintStyle.Render(quitHintLineTwo),
+				hintStyle.Render(keyhint.Label(quitHintLineTwo)),
 			),
 		)
 	}

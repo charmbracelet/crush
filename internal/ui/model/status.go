@@ -9,6 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/keyhint"
 	"github.com/charmbracelet/crush/internal/ui/util"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
@@ -128,7 +129,7 @@ func (s *Status) Draw(scr uv.Screen, area uv.Rectangle) {
 			helpWidth -= lipgloss.Width(badge) + 1 + badgeLeftInset
 		}
 		s.help.SetWidth(max(0, helpWidth))
-		helpView := helpStyle.Render(s.help.View(s.helpKm))
+		helpView := helpStyle.Render(s.help.View(keyhint.Wrap(s.helpKm)))
 		if badge != "" {
 			// Indent the rows after the first so the expanded help lines up
 			// with the hints on the badge row.

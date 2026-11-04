@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/keyhint"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	uv "github.com/charmbracelet/ultraviolet"
 )
@@ -149,7 +150,7 @@ func (ed *ThemeEditor) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		listView = lipgloss.JoinHorizontal(lipgloss.Top, listView, scrollbar)
 	}
 	rc.AddPart(listView)
-	rc.Help = ed.help.View(ed)
+	rc.Help = ed.help.View(keyhint.Wrap(ed))
 
 	view := rc.Render()
 

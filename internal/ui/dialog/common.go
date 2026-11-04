@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/keyhint"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 )
@@ -92,7 +93,7 @@ const (
 // infoColumnItem is a list item with a secondary info column (a session
 // timestamp, a command shortcut) that can be hidden when space is tight.
 type infoColumnItem interface {
-	// InfoText returns the raw info string, or "" when there is none.
+	// InfoText returns the info string to display, or "" when there is none.
 	InfoText() string
 	// SetHideInfo toggles whether the info column is rendered.
 	SetHideInfo(bool)
@@ -149,7 +150,7 @@ func shortHelpLine(h *help.Model, bindings []key.Binding, width int) string {
 		if total > 0 {
 			seg = sep
 		}
-		seg += h.Styles.ShortKey.Inline(true).Render(kb.Help().Key) + " " +
+		seg += h.Styles.ShortKey.Inline(true).Render(keyhint.Label(kb.Help().Key)) + " " +
 			h.Styles.ShortDesc.Inline(true).Render(kb.Help().Desc)
 		w := lipgloss.Width(seg)
 		if total+w > width {

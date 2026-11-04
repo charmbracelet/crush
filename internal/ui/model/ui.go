@@ -1286,6 +1286,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// list with a stale one.
 		if msg.forSession == m.currentSessionID() {
 			m.runningSubagents = msg.list
+			m.syncBackgroundAgents(m.chat.MessageItems())
 			// Seed the child-session set from the fetch as well. On a session
 			// switch loadSessionMsg clears knownChildSessionIDs, and the only
 			// other place it is filled is the RuntimeEvent case — so a subagent
@@ -1918,6 +1919,7 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 	// Load nested tool calls for agent/agentic_fetch tools.
 	m.loadNestedToolCalls(items)
 	m.setMessagePlanFlags(items)
+	m.syncBackgroundAgents(items)
 
 	// If the user switches between sessions while the agent is working we
 	// want to make sure the animations are shown. Gate on the agent actually
@@ -1927,7 +1929,7 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 	// leave a ghost "working" spinner (and a second one alongside any tool
 	// spinner) after the session is reloaded. Messages arriving for the
 	// session re-enable the clock.
-	m.chat.SetAnimationsAllowed(m.isAgentBusy())
+	m.chat.SetAnimationsAllowed(m.isAgentBusy() || len(m.runningSubagents) > 0)
 
 	if cmd := m.chat.SetMessages(items...); cmd != nil {
 		cmds = append(cmds, cmd)
@@ -2040,6 +2042,27 @@ func (m *UI) loadNestedToolCalls(items []chat.MessageItem) {
 	}
 }
 
+// syncBackgroundAgents tells each agent tool item in items whether its
+// background subagent is still listed as running, and lets the animation
+// clock run while any is.
+func (m *UI) syncBackgroundAgents(items []chat.MessageItem) {
+	running := make(map[string]bool, len(m.runningSubagents))
+	for _, info := range m.runningSubagents {
+		running[info.ChildSessionID] = true
+	}
+	for _, item := range items {
+		agentItem, ok := item.(*chat.AgentToolMessageItem)
+		if !ok {
+			continue
+		}
+		childID := m.com.Workspace.CreateAgentToolSessionID(agentItem.MessageID(), agentItem.ToolCall().ID)
+		agentItem.SetBackgroundRunning(running[childID])
+	}
+	if len(running) > 0 {
+		m.chat.SetAnimationsAllowed(true)
+	}
+}
+
 // setMessagePlanFlags marks assistant message items as plan-agent output
 // while the UI is in plan mode, so their streaming content renders as the
 // open plan card. Finished non-plan messages ignore the flag, so reloading
@@ -2086,6 +2109,7 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 	case message.Assistant:
 		items := chat.ExtractMessageItems(m.com.Styles, &msg, nil, m.com.Workspace.WorkingDir())
 		m.setMessagePlanFlags(items)
+		m.syncBackgroundAgents(items)
 		m.chat.AppendMessages(items...)
 		if m.chat.Follow() {
 			m.chat.ScrollToBottom()
@@ -6029,6 +6053,7 @@ func (m *UI) openQuitDialog() tea.Cmd {
 	}
 
 	quitDialog := dialog.NewQuit(m.com)
+	quitDialog.SetRunningSubagents(len(m.runningSubagents))
 	m.dialog.OpenDialog(quitDialog)
 	return nil
 }

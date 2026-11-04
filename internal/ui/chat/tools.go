@@ -261,6 +261,10 @@ func NewToolMessageItem(
 		item = NewDiagnosticsToolMessageItem(sty, toolCall, result, canceled)
 	case agent.AgentToolName:
 		item = NewAgentToolMessageItem(sty, toolCall, result, canceled)
+	case agent.AgentSendToolName:
+		item = NewAgentSendToolMessageItem(sty, toolCall, result, canceled)
+	case agent.AgentStopToolName:
+		item = NewAgentStopToolMessageItem(sty, toolCall, result, canceled)
 	case tools.AgenticFetchToolName:
 		item = NewAgenticFetchToolMessageItem(sty, toolCall, result, canceled)
 	case tools.WebFetchToolName:

@@ -54,6 +54,7 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 			Transport: transport,
 		}
 	}
+	client = withSafeFetchRedirects(client)
 
 	return fantasy.NewParallelAgentTool(
 		FetchToolName,

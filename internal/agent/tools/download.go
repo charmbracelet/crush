@@ -62,6 +62,7 @@ func NewDownloadTool(permissions permission.Service, workingDir string, client *
 			Transport: transport,
 		}
 	}
+	client = withSafeFetchRedirects(client)
 	return fantasy.NewParallelAgentTool(
 		DownloadToolName,
 		downloadDescription(),

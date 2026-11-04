@@ -769,6 +769,45 @@ disable or delete definitions in the Library. The Library toggle writes
 an `enabled_subagents` entry wins over a disable from any config, so the
 Library can't disable a subagent that another config enables.
 
+#### Background subagents
+
+By default the model waits for a subagent to finish. In the interactive UI
+it can instead start one in the background (`background: true` on the
+`agent` tool) and keep working with you. Each background subagent gets a
+name made of its type and a counter, such as `code-reviewer-1`.
+
+When a background subagent finishes, its result arrives as a report in the
+chat. If the main agent is idle, the report starts a new turn so it can
+react. If the main agent is busy, the report is added to its next step.
+A subagent you stop reports as `cancelled` and does not start a turn.
+
+The model has two more tools for background subagents:
+
+- `agent_send` sends a message to one by name. A running subagent reads it
+  at its next step. A finished one picks up where it left off, with its
+  earlier context intact, and sends a new report when done.
+- `agent_stop` stops a running one.
+
+Things to know:
+
+- Background subagents follow the normal permission rules, and their
+  permission prompts show up while you work on something else.
+- Nothing stops the main agent and a background subagent from editing the
+  same file. The model is told not to touch files a background subagent may
+  be changing.
+- Quitting Crush stops running subagents. The quit dialog warns you first,
+  and the stopped subagents leave a `Stopped: Crush exited` report.
+- A background subagent can't be picked back up after Crush restarts.
+- When Crush runs against a shared backend (see [Sharing a workspace across
+  clients](#sharing-a-workspace-across-clients)), reports, `agent_send` and
+  `agent_stop` work as above. The running-subagents list, the spinner on a
+  background subagent, the quit warning and cancelling from the UI are not
+  available yet. Quitting one client leaves background subagents running
+  while another client is attached; they stop when the workspace is torn
+  down, which happens after the last client disconnects.
+- `crush run` and other non-interactive runs ignore `background` and wait
+  for the result.
+
 ### Desktop notifications
 
 Crush sends desktop notifications when a tool call requires permission and when

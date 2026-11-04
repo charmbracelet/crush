@@ -188,6 +188,16 @@ type ShellCommand struct {
 
 func (ShellCommand) isPart() {}
 
+// SubagentReport is the result a background subagent hands back to its
+// parent.
+type SubagentReport struct {
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	Output string `json:"output"`
+}
+
+func (SubagentReport) isPart() {}
+
 // MarshalJSON implements the [json.Marshaler] interface.
 func (m Message) MarshalJSON() ([]byte, error) {
 	parts, err := MarshalParts(m.Parts)
@@ -493,14 +503,15 @@ func (m *Message) AddBinary(mimeType string, data []byte) {
 type partType string
 
 const (
-	reasoningType    partType = "reasoning"
-	textType         partType = "text"
-	imageURLType     partType = "image_url"
-	binaryType       partType = "binary"
-	toolCallType     partType = "tool_call"
-	toolResultType   partType = "tool_result"
-	finishType       partType = "finish"
-	shellCommandType partType = "shell_command"
+	reasoningType      partType = "reasoning"
+	textType           partType = "text"
+	imageURLType       partType = "image_url"
+	binaryType         partType = "binary"
+	toolCallType       partType = "tool_call"
+	toolResultType     partType = "tool_result"
+	finishType         partType = "finish"
+	shellCommandType   partType = "shell_command"
+	subagentReportType partType = "subagent_report"
 )
 
 type partWrapper struct {
@@ -532,6 +543,8 @@ func MarshalParts(parts []ContentPart) ([]byte, error) {
 			typ = finishType
 		case ShellCommand:
 			typ = shellCommandType
+		case SubagentReport:
+			typ = subagentReportType
 		default:
 			return nil, fmt.Errorf("unknown part type: %T", part)
 		}
@@ -609,6 +622,12 @@ func UnmarshalParts(data []byte) ([]ContentPart, error) {
 			parts = append(parts, part)
 		case shellCommandType:
 			part := ShellCommand{}
+			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
+				return nil, err
+			}
+			parts = append(parts, part)
+		case subagentReportType:
+			part := SubagentReport{}
 			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
 				return nil, err
 			}

@@ -52,6 +52,22 @@ func TestMessageToProtoToolResult(t *testing.T) {
 	require.False(t, tr.IsError)
 }
 
+// TestMessageToProtoSubagentReport ensures a subagent report survives the
+// conversion to proto, so client/server sessions can render it.
+func TestMessageToProtoSubagentReport(t *testing.T) {
+	t.Parallel()
+
+	got := messageToProto(message.Message{
+		ID:   "m1",
+		Role: message.User,
+		Parts: []message.ContentPart{
+			message.SubagentReport{Name: "a-1", Status: "completed", Output: "done"},
+		},
+	})
+	require.Len(t, got.Parts, 1)
+	require.Equal(t, proto.SubagentReport{Name: "a-1", Status: "completed", Output: "done"}, got.Parts[0])
+}
+
 // TestMCPChannelEventToProto_RoundTrip verifies that a channel push survives
 // the SSE envelope conversion with its type and rendered <channel> body intact,
 // so client/server sessions receive channel events rather than dropping the

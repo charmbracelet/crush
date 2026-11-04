@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -201,6 +202,10 @@ func (c *coordinator) launch(ctx context.Context, entry *backgroundAgent, prompt
 	go func() {
 		defer c.backgroundWg.Done()
 		defer cancel()
+		window := &turnWindow{startedAt: time.Now()}
+		if snap, ok := takeWorktreeSnapshot(runCtx, c.cfg.WorkingDir()); ok {
+			window.before = snap
+		}
 		turn := c.runSubAgentTurn(runCtx, subAgentTurnArgs{
 			params:   entry.params,
 			childID:  entry.childSessionID,
@@ -214,18 +219,30 @@ func (c *coordinator) launch(ctx context.Context, entry *backgroundAgent, prompt
 		markActive()
 		close(done)
 		entry.mu.Unlock()
-		c.deliverReport(entry, turn.status, turn.resp.Content)
+		c.deliverReport(entry, turn.status, turn.resp.Content, window)
 	}()
 }
 
 // deliverReport hands a finished turn's result to the parent session. A
 // cancelled turn or a shutdown only records the report; anything else also
 // starts a parent turn when the parent is idle, or queues the report when it
-// is busy.
-func (c *coordinator) deliverReport(entry *backgroundAgent, status, output string) {
+// is busy. window, when its snapshot is set, adds the files changed outside
+// the child's edit tools.
+func (c *coordinator) deliverReport(entry *backgroundAgent, status, output string, window *turnWindow) {
 	report := message.SubagentReport{Name: entry.name, Status: status, Output: output}
 	if status == subagents.StatusCancelled && c.shuttingDown() {
 		report.Output = "Stopped: Crush exited"
+	} else {
+		// The turn context may already be cancelled, so detach from it.
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(c.backgroundContext()), reportWriteTimeout)
+		report.Output += c.changedFilesNote(ctx, entry.childSessionID)
+		if window != nil && window.before != nil {
+			if after, ok := takeWorktreeSnapshot(ctx, c.cfg.WorkingDir()); ok {
+				changed := changedBetween(ctx, window.before, after)
+				report.Output += c.otherChangesNote(ctx, changed, entry.childSessionID, entry.parentSessionID, window.startedAt)
+			}
+		}
+		cancel()
 	}
 	if status == subagents.StatusCancelled || c.shuttingDown() {
 		c.writeReport(entry.parentSessionID, report)
@@ -264,6 +281,118 @@ func (c *coordinator) reportStored(parentSessionID string, report message.Subage
 		stored, ok := m.SubagentReport()
 		return ok && stored == report
 	})
+}
+
+// changedFilesNote lists the files the child session touched, relative to
+// the working directory when possible, or returns "" when there are none.
+func (c *coordinator) changedFilesNote(ctx context.Context, childSessionID string) string {
+	if c.history == nil {
+		return ""
+	}
+	files, err := c.history.ListLatestSessionFiles(ctx, childSessionID)
+	if err != nil {
+		slog.Warn("Failed to list files changed by subagent", "session", childSessionID, "error", err)
+		return ""
+	}
+	workingDir := c.cfg.WorkingDir()
+	paths := make([]string, 0, len(files))
+	for _, f := range files {
+		paths = append(paths, displayPath(workingDir, f.Path))
+	}
+	slices.Sort(paths)
+	paths = slices.Compact(paths)
+	if len(paths) == 0 {
+		return ""
+	}
+	return "\n\nFiles changed by this subagent so far:\n- " + strings.Join(paths, "\n- ")
+}
+
+// displayPath shows path relative to dir when it is inside dir, and
+// unchanged otherwise.
+func displayPath(dir, path string) string {
+	rel, err := filepath.Rel(dir, path)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return path
+	}
+	return rel
+}
+
+// canonicalPath resolves symlinks in path. A path that does not exist, such
+// as a deleted file, keeps its missing tail and resolves the part that does.
+func canonicalPath(path string) string {
+	path = filepath.Clean(path)
+	missing := ""
+	for dir := path; ; {
+		if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+			return filepath.Join(resolved, missing)
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return path
+		}
+		missing = filepath.Join(filepath.Base(dir), missing)
+		dir = parent
+	}
+}
+
+// maxOtherChanges caps how many paths otherChangesNote lists.
+const maxOtherChanges = 100
+
+// otherChangesNote lists the changed files that neither the child session
+// nor the parent session (since the turn started) wrote through their edit
+// tools, or returns "" when none remain.
+func (c *coordinator) otherChangesNote(ctx context.Context, changed []string, childSessionID, parentSessionID string, since time.Time) string {
+	if c.history != nil {
+		known := map[string]bool{}
+		if files, err := c.history.ListLatestSessionFiles(ctx, childSessionID); err != nil {
+			slog.Warn("Failed to list files changed by subagent", "session", childSessionID, "error", err)
+		} else {
+			for _, f := range files {
+				known[canonicalPath(f.Path)] = true
+			}
+		}
+		if files, err := c.history.ListLatestSessionFiles(ctx, parentSessionID); err != nil {
+			slog.Warn("Failed to list files changed by parent session", "session", parentSessionID, "error", err)
+		} else {
+			for _, f := range files {
+				if f.UpdatedAt >= since.Unix() {
+					known[canonicalPath(f.Path)] = true
+				}
+			}
+		}
+		changed = slices.DeleteFunc(slices.Clone(changed), func(path string) bool {
+			return known[canonicalPath(path)]
+		})
+	}
+	if len(changed) == 0 {
+		return ""
+	}
+	workingDir := canonicalPath(c.cfg.WorkingDir())
+	paths := make([]string, 0, len(changed))
+	for _, path := range changed {
+		paths = append(paths, displayPath(workingDir, canonicalPath(path)))
+	}
+	// Files inside the working directory come first, then absolute paths.
+	slices.SortFunc(paths, func(a, b string) int {
+		if aAbs, bAbs := filepath.IsAbs(a), filepath.IsAbs(b); aAbs != bAbs {
+			if aAbs {
+				return 1
+			}
+			return -1
+		}
+		return strings.Compare(a, b)
+	})
+	paths = slices.Compact(paths)
+	more := 0
+	if len(paths) > maxOtherChanges {
+		more = len(paths) - maxOtherChanges
+		paths = paths[:maxOtherChanges]
+	}
+	note := "\n\nOther files changed while it ran (bash, you, or the main agent):\n- " + strings.Join(paths, "\n- ")
+	if more > 0 {
+		note += fmt.Sprintf("\n- ... and %d more", more)
+	}
+	return note
 }
 
 // writeReport stores report as a user message without starting a turn.

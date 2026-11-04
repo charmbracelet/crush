@@ -796,7 +796,11 @@ Things to know:
   permission prompts show up while you work on something else.
 - Nothing stops the main agent and a background subagent from editing the
   same file. The model is told not to touch files a background subagent may
-  be changing.
+  be changing, and each report lists the files the subagent changed with its
+  edit tools. In a git repository it also lists other files that changed
+  while the subagent ran (through bash commands, your own edits or the main
+  agent's, minus the main agent's own edit-tool writes), so the model knows
+  what to re-read. Ignored files are not listed.
 - Quitting Crush stops running subagents. The quit dialog warns you first,
   and the stopped subagents leave a `Stopped: Crush exited` report.
 - A background subagent can't be picked back up after Crush restarts.

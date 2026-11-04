@@ -454,6 +454,10 @@ func (a *sessionAgent) enqueueCall(call SessionAgentCall) {
 	}
 	queued.OnComplete = nil
 	queued.Accepted = nil
+	// QueueOnly guards the idle check at dispatch. Once queued, the call is
+	// replayed after the active turn releases the session, which would make
+	// Run reject it as idle.
+	queued.QueueOnly = false
 	existing = append(existing, queued)
 	a.messageQueue.Set(call.SessionID, existing)
 }

@@ -64,6 +64,10 @@ func NormalizeProviderType(t catwalk.Type) catwalk.Type {
 	return t
 }
 
+// legacySubscriptionModelKeys are the per-provider names subscription
+// catalogs were stored under before subscription_models.
+var legacySubscriptionModelKeys = []string{"chatgpt_models", "grok_models", "copilot_models"}
+
 // legacyModelPricingFields maps catwalk v2 model cost fields onto their
 // v3 pricing counterparts.
 var legacyModelPricingFields = map[string]string{
@@ -73,15 +77,14 @@ var legacyModelPricingFields = map[string]string{
 	"cost_per_1m_out_cached": "cache_hit",
 }
 
-// migrateCatwalkV2 rewrites a merged user config from the catwalk v2
-// schema onto the v3 schema so pre-migration configs decode correctly.
-// In v3, flat model fields moved into nested structures: the cost
-// fields became pricing, supports_attachments became
-// capabilities.vision, and the can_reason/reasoning_levels/
-// default_reasoning_effort trio became the reasoning object. The
-// rewrite is pure and is a no-op for configs already written with v3
-// fields; use migrateCatwalkV2File to persist the result.
-func migrateCatwalkV2(data []byte) ([]byte, bool) {
+// migrateLegacyConfig rewrites a user config's legacy provider fields
+// onto the current schema: the per-provider subscription catalogs
+// (chatgpt_models, grok_models, copilot_models) become
+// subscription_models, and catwalk v2 model fields move into their v3
+// structures (pricing, capabilities.vision, reasoning). The rewrite is
+// pure and a no-op for current configs; use migrateLegacyConfigFile to
+// persist the result.
+func migrateLegacyConfig(data []byte) ([]byte, bool) {
 	var root map[string]any
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
@@ -99,7 +102,16 @@ func migrateCatwalkV2(data []byte) ([]byte, bool) {
 		if !ok {
 			continue
 		}
-		for _, key := range []string{"models", "chatgpt_models"} {
+		for _, legacy := range legacySubscriptionModelKeys {
+			if models, ok := provider[legacy]; ok {
+				if _, exists := provider["subscription_models"]; !exists {
+					provider["subscription_models"] = models
+				}
+				delete(provider, legacy)
+				changed = true
+			}
+		}
+		for _, key := range []string{"models", "subscription_models"} {
 			models, ok := provider[key].([]any)
 			if !ok {
 				continue
@@ -127,12 +139,12 @@ func migrateCatwalkV2(data []byte) ([]byte, bool) {
 	return out, true
 }
 
-// migrateCatwalkV2File migrates a JSON config file from the catwalk v2
-// model schema onto v3 and persists the rewrite atomically, preserving
+// migrateLegacyConfigFile migrates a JSON config file's legacy fields
+// and persists the rewrite atomically, preserving
 // the file's permissions. The returned bytes are always the migrated
 // form, so loading continues even when the write fails.
-func migrateCatwalkV2File(path string, data []byte) []byte {
-	migrated, changed := migrateCatwalkV2(data)
+func migrateLegacyConfigFile(path string, data []byte) []byte {
+	migrated, changed := migrateLegacyConfig(data)
 	if !changed {
 		return data
 	}
@@ -143,7 +155,7 @@ func migrateCatwalkV2File(path string, data []byte) []byte {
 	if err := atomicWriteFile(path, migrated, perm); err != nil {
 		slog.Warn("Failed to write migrated config", "path", path, "error", err)
 	} else {
-		slog.Info("Migrated config file to the catwalk v3 model schema", "path", path)
+		slog.Info("Migrated legacy fields in config file", "path", path)
 	}
 	return migrated
 }
@@ -266,7 +278,7 @@ func Load(ctx context.Context, workingDir, dataDir string, debug bool) (*ConfigS
 		if !json.Valid(wsData) {
 			return nil, fmt.Errorf("invalid JSON in config file %s", store.workspacePath)
 		}
-		wsData = migrateCatwalkV2File(store.workspacePath, wsData)
+		wsData = migrateLegacyConfigFile(store.workspacePath, wsData)
 		merged, mergeErr := loadFromBytes(append([][]byte{mustMarshalConfig(cfg)}, wsData))
 		if mergeErr == nil {
 			// Preserve defaults that setDefaults already applied.
@@ -318,19 +330,13 @@ func Load(ctx context.Context, workingDir, dataDir string, debug bool) (*ConfigS
 	}
 	store.knownProviders = providers
 
-	// When Catwalk refreshed its catalog this run, give the model
-	// catalogs that shadow Catwalk's the same treatment: the ChatGPT and
-	// Grok catalogs are otherwise only fetched at login and would freeze
-	// there while Catwalk keeps moving. Best effort; a failed fetch keeps
-	// the catalog loaded from config.
-	//
-	// The refetches publish a copy-on-write config, so re-read it
-	// afterwards: the mutations below must land on the live config rather
-	// than a snapshot the store has already replaced.
+	// When Catwalk refreshed its catalog this run, refresh the
+	// subscription catalogs that shadow it too; they are otherwise only
+	// fetched at login. The refetches publish a copy-on-write config, so
+	// re-read it afterwards.
 	if CatwalkUpdated() {
 		fetchCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		store.refetchOpenAIModels(fetchCtx, ScopeGlobal)
-		store.refetchGrokModels(fetchCtx, ScopeGlobal)
+		store.refetchSignedInSubscriptions(fetchCtx, false)
 		cancel()
 		cfg = store.Config()
 	}
@@ -1130,7 +1136,7 @@ func loadFromConfigPaths(ctx context.Context, configPaths []string) (*Config, []
 			if !json.Valid(data) {
 				return nil, nil, fmt.Errorf("invalid JSON in config file %s", path)
 			}
-			data = migrateCatwalkV2File(path, data)
+			data = migrateLegacyConfigFile(path, data)
 			addTopLevelKeys(jsonDirKeys, dir, data)
 			configs = append(configs, data)
 			loaded = append(loaded, path)
@@ -1191,7 +1197,7 @@ func loadFromBytes(configs [][]byte) (*Config, error) {
 	// Safety net for sources that cannot be rewritten on disk (e.g.
 	// crushrc builtins producing JSON): migrate the merged result in
 	// memory so decoding always sees the v3 schema.
-	data, _ = migrateCatwalkV2(data)
+	data, _ = migrateLegacyConfig(data)
 	var config Config
 	if err := json.Unmarshal(data, &config); err != nil {
 		return nil, err

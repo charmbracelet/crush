@@ -22,8 +22,8 @@ func TestGetModelIncludesChatGPTModels(t *testing.T) {
 
 	providers := csync.NewMap[string, ProviderConfig]()
 	providers.Set("openai", ProviderConfig{
-		Models:        []catwalk.Model{{ID: "gpt-5.1"}},
-		ChatGPTModels: []catwalk.Model{{ID: "gpt-5.1-codex", Name: "GPT-5.1 Codex"}},
+		Models:             []catwalk.Model{{ID: "gpt-5.1"}},
+		SubscriptionModels: []catwalk.Model{{ID: "gpt-5.1-codex", Name: "GPT-5.1 Codex"}},
 	})
 	cfg := &Config{Providers: providers}
 
@@ -147,11 +147,9 @@ func TestSetProviderAPIKeyOpenAIIsEitherOr(t *testing.T) {
 			Providers *csync.Map[string, ProviderConfig] `json:"providers"`
 		}{Providers: providers}))
 
-		originalFetch := fetchOpenAIModels
-		fetchOpenAIModels = func(context.Context, *oauth.Token) ([]catwalk.Model, error) {
+		stubSubscriptionFetch(t, "openai", func(context.Context, *oauth.Token) ([]catwalk.Model, error) {
 			return []catwalk.Model{{ID: "gpt-5.1-codex"}}, nil
-		}
-		t.Cleanup(func() { fetchOpenAIModels = originalFetch })
+		})
 
 		return &ConfigStore{
 			config:         &Config{Providers: providers},
@@ -177,7 +175,7 @@ func TestSetProviderAPIKeyOpenAIIsEitherOr(t *testing.T) {
 		require.True(t, ok)
 		require.Empty(t, pc.APIKey, "the ChatGPT login replaces the API key")
 		require.Equal(t, token, pc.OAuthToken)
-		require.Equal(t, "gpt-5.1-codex", pc.ChatGPTModels[0].ID, "the subscription catalog lands in its own field")
+		require.Equal(t, "gpt-5.1-codex", pc.SubscriptionModels[0].ID, "the subscription catalog lands in its own field")
 		require.Equal(t, "gpt-5.1", pc.Models[0].ID, "the API catalog is untouched")
 
 		disk, err := os.ReadFile(store.globalDataPath)
@@ -193,7 +191,7 @@ func TestSetProviderAPIKeyOpenAIIsEitherOr(t *testing.T) {
 					"id": "openai",
 					"api_key": "",
 					"oauth": {"access_token": "old-at", "refresh_token": "old-rt"},
-					"chatgpt_models": [{"id": "gpt-5.6-luna"}]
+					"subscription_models": [{"id": "gpt-5.6-luna"}]
 				}
 			}
 		}`)
@@ -204,7 +202,7 @@ func TestSetProviderAPIKeyOpenAIIsEitherOr(t *testing.T) {
 		require.True(t, ok)
 		require.Equal(t, "sk-new", pc.APIKey)
 		require.Nil(t, pc.OAuthToken, "the API key replaces the ChatGPT login")
-		require.Empty(t, pc.ChatGPTModels, "the subscription catalog goes with it")
+		require.Empty(t, pc.SubscriptionModels, "the subscription catalog goes with it")
 
 		disk, err := os.ReadFile(store.globalDataPath)
 		require.NoError(t, err)
@@ -229,7 +227,7 @@ func TestSetProviderAPIKeyOpenAIIsEitherOr(t *testing.T) {
 // renews the token before fetching, so the request is not rejected with a
 // 401, and the fetched catalog replaces the persisted one.
 func TestRefetchOpenAIModelsRefreshesExpiredToken(t *testing.T) {
-	// Not parallel: swaps the fetchOpenAIModels package variable.
+	// Not parallel: stubs the catalog fetch.
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "crush.json")
 
@@ -248,9 +246,9 @@ func TestRefetchOpenAIModelsRefreshesExpiredToken(t *testing.T) {
 
 	providers := csync.NewMap[string, ProviderConfig]()
 	providers.Set("openai", ProviderConfig{
-		ID:            "openai",
-		OAuthToken:    expired,
-		ChatGPTModels: []catwalk.Model{{ID: "gpt-stale"}},
+		ID:                 "openai",
+		OAuthToken:         expired,
+		SubscriptionModels: []catwalk.Model{{ID: "gpt-stale"}},
 	})
 	store := &ConfigStore{
 		config:         &Config{Providers: providers},
@@ -262,22 +260,20 @@ func TestRefetchOpenAIModelsRefreshesExpiredToken(t *testing.T) {
 		},
 	}
 
-	originalFetch := fetchOpenAIModels
 	var fetchToken *oauth.Token
-	fetchOpenAIModels = func(_ context.Context, token *oauth.Token) ([]catwalk.Model, error) {
+	stubSubscriptionFetch(t, "openai", func(_ context.Context, token *oauth.Token) ([]catwalk.Model, error) {
 		fetchToken = token
 		return []catwalk.Model{{ID: "gpt-fresh"}}, nil
-	}
-	t.Cleanup(func() { fetchOpenAIModels = originalFetch })
+	})
 
-	store.refetchOpenAIModels(t.Context(), ScopeGlobal)
+	store.refetchSubscriptionModels(t.Context(), ScopeGlobal, "openai")
 
 	require.Equal(t, fresh, fetchToken, "the catalog is fetched with the renewed token")
 
 	pc, ok := store.Config().Providers.Get("openai")
 	require.True(t, ok)
 	require.Equal(t, fresh, pc.OAuthToken, "the renewed token is kept in the config")
-	require.Equal(t, "gpt-fresh", pc.ChatGPTModels[0].ID, "the existing catalog is replaced")
+	require.Equal(t, "gpt-fresh", pc.SubscriptionModels[0].ID, "the existing catalog is replaced")
 
 	disk, err := os.ReadFile(configPath)
 	require.NoError(t, err)
@@ -297,7 +293,7 @@ func chatGPTLoginConfig(token *oauth.Token) string {
 			"openai": {
 				"id": "openai",
 				"oauth": ` + string(tokenJSON) + `,
-				"chatgpt_models": [{"id": "gpt-stale", "name": "GPT Stale"}]
+				"subscription_models": [{"id": "gpt-stale", "name": "GPT Stale"}]
 			}
 		}
 	}`
@@ -356,13 +352,11 @@ func isolateLoadEnv(t *testing.T) (workDir, dataDir string) {
 func stubChatGPTModels(t *testing.T, models []catwalk.Model) *bool {
 	t.Helper()
 
-	originalFetch := fetchOpenAIModels
 	called := false
-	fetchOpenAIModels = func(context.Context, *oauth.Token) ([]catwalk.Model, error) {
+	stubSubscriptionFetch(t, "openai", func(context.Context, *oauth.Token) ([]catwalk.Model, error) {
 		called = true
 		return models, nil
-	}
-	t.Cleanup(func() { fetchOpenAIModels = originalFetch })
+	})
 	return &called
 }
 
@@ -405,7 +399,7 @@ func TestLoadRefreshesChatGPTModelsWhenCatwalkUpdates(t *testing.T) {
 
 	pc, ok := store.Config().Providers.Get("openai")
 	require.True(t, ok)
-	require.Equal(t, "gpt-fresh", pc.ChatGPTModels[0].ID, "the stale catalog is replaced")
+	require.Equal(t, "gpt-fresh", pc.SubscriptionModels[0].ID, "the stale catalog is replaced")
 
 	large, ok := store.Config().Models[SelectedModelTypeLarge]
 	require.True(t, ok)
@@ -439,5 +433,5 @@ func TestLoadKeepsChatGPTModelsWhenCatwalkNotModified(t *testing.T) {
 
 	pc, ok := store.Config().Providers.Get("openai")
 	require.True(t, ok)
-	require.Equal(t, "gpt-stale", pc.ChatGPTModels[0].ID, "the persisted catalog is kept")
+	require.Equal(t, "gpt-stale", pc.SubscriptionModels[0].ID, "the persisted catalog is kept")
 }

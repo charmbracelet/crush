@@ -194,9 +194,31 @@ func requestToken(ctx context.Context, vals url.Values) (*oauth.Token, error) {
 		AccessToken:  tr.AccessToken,
 		RefreshToken: tr.RefreshToken,
 		IDToken:      tr.IDToken,
+		AccountID:    idTokenSubject(tr.IDToken),
 		ExpiresIn:    tr.ExpiresIn,
 	}
 	token.SetExpiresAt()
 
 	return token, nil
+}
+
+// idTokenSubject returns the account an ID token names, or "" when it
+// cannot be read. The claim is identity metadata, not a credential, so the
+// signature is not checked.
+func idTokenSubject(idToken string) string {
+	parts := strings.Split(idToken, ".")
+	if len(parts) != 3 {
+		return ""
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(parts[1], "="))
+	if err != nil {
+		return ""
+	}
+	var claims struct {
+		Subject string `json:"sub"`
+	}
+	if json.Unmarshal(payload, &claims) != nil {
+		return ""
+	}
+	return claims.Subject
 }

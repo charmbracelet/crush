@@ -208,3 +208,28 @@ func TestFindModels(t *testing.T) {
 		})
 	}
 }
+
+func TestSubscriptionSmallModel(t *testing.T) {
+	t.Parallel()
+
+	ids := func(ids ...string) []catwalk.Model {
+		models := make([]catwalk.Model, len(ids))
+		for i, id := range ids {
+			models[i] = catwalk.Model{ID: id}
+		}
+		return models
+	}
+	for _, tc := range []struct {
+		provider string
+		models   []catwalk.Model
+		want     string
+	}{
+		{"openai", ids("gpt-5.1-codex", "gpt-5.1-codex-mini", "gpt-5"), "gpt-5.1-codex-mini"},
+		{"xai", ids("grok-4", "grok-4-mini", "grok-4-fast"), "grok-4-fast"},
+		{"copilot", ids("gpt-4.1", "claude-haiku-4.5", "claude-sonnet-4.5"), "claude-haiku-4.5"},
+		{"copilot", ids("gpt-4.1", "o3"), "o3"},
+	} {
+		require.Equal(t, tc.want, subscriptionSmallModel(tc.provider, tc.models).ID, tc.provider)
+	}
+	require.Nil(t, subscriptionSmallModel("openai", nil))
+}

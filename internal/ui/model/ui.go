@@ -217,6 +217,8 @@ type (
 
 // UI represents the main user interface model.
 type UI struct {
+	planPreview *savedPlanPreview
+
 	com          *common.Common
 	session      *session.Session
 	sessionFiles []SessionFile
@@ -882,7 +884,14 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Update terminal capabilities
 	m.caps.Update(msg)
 	m.trackTurnOutcome(msg)
+	if handled, cmd := m.handlePlanPreviewInput(msg); handled {
+		return m, cmd
+	}
 	switch msg := msg.(type) {
+	case dialog.PlanReadMsg:
+		if cmd := m.showSavedPlan(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case tea.EnvMsg:
 		// Is this Windows Terminal?
 		if !m.sendProgressBar {
@@ -3711,6 +3720,9 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	// Clear the screen first
 	screen.Clear(scr)
+	if m.planPreview != nil {
+		return m.drawSavedPlan(scr, area)
+	}
 
 	switch m.state {
 	case uiOnboarding:
@@ -5721,6 +5733,10 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openCommandsDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.PlansID:
+		plans := dialog.NewPlans(m.com)
+		m.dialog.OpenDialog(plans)
+		cmds = append(cmds, plans.InitialCmd())
 	case dialog.ReasoningID:
 		if cmd := m.openReasoningDialog(); cmd != nil {
 			cmds = append(cmds, cmd)

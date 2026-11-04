@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"strings"
 
-	"charm.land/catwalk/pkg/catwalk"
+	"charm.land/catwalk/v3/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/jq"
 	"github.com/charmbracelet/crush/internal/oauth"
 )
@@ -163,17 +163,17 @@ func keepDeclared(declared, reported catwalk.Model) catwalk.Model {
 	if declared.Name != "" {
 		merged.Name = declared.Name
 	}
-	if declared.CostPer1MIn != 0 {
-		merged.CostPer1MIn = declared.CostPer1MIn
+	if declared.Pricing.Input != 0 {
+		merged.Pricing.Input = declared.Pricing.Input
 	}
-	if declared.CostPer1MOut != 0 {
-		merged.CostPer1MOut = declared.CostPer1MOut
+	if declared.Pricing.Output != 0 {
+		merged.Pricing.Output = declared.Pricing.Output
 	}
-	if declared.CostPer1MInCached != 0 {
-		merged.CostPer1MInCached = declared.CostPer1MInCached
+	if declared.Pricing.CacheCreate != 0 {
+		merged.Pricing.CacheCreate = declared.Pricing.CacheCreate
 	}
-	if declared.CostPer1MOutCached != 0 {
-		merged.CostPer1MOutCached = declared.CostPer1MOutCached
+	if declared.Pricing.CacheHit != 0 {
+		merged.Pricing.CacheHit = declared.Pricing.CacheHit
 	}
 	if declared.ContextWindow != 0 {
 		merged.ContextWindow = declared.ContextWindow
@@ -181,17 +181,23 @@ func keepDeclared(declared, reported catwalk.Model) catwalk.Model {
 	if declared.DefaultMaxTokens != 0 {
 		merged.DefaultMaxTokens = declared.DefaultMaxTokens
 	}
-	if len(declared.ReasoningLevels) > 0 {
-		merged.ReasoningLevels = declared.ReasoningLevels
+	if declared.MaxAttachments != 0 {
+		merged.MaxAttachments = declared.MaxAttachments
 	}
-	if declared.DefaultReasoningEffort != "" {
-		merged.DefaultReasoningEffort = declared.DefaultReasoningEffort
+	if len(declared.Reasoning.EffortLevels) > 0 {
+		merged.Reasoning.EffortLevels = declared.Reasoning.EffortLevels
 	}
-	if declared.CanReason {
-		merged.CanReason = true
+	if declared.Reasoning.DefaultEffortLevel != "" {
+		merged.Reasoning.DefaultEffortLevel = declared.Reasoning.DefaultEffortLevel
 	}
-	if declared.SupportsImages {
-		merged.SupportsImages = true
+	if declared.Reasoning.Thinking != "" {
+		merged.Reasoning.Thinking = declared.Reasoning.Thinking
+	}
+	if declared.Capabilities.Vision {
+		merged.Capabilities.Vision = true
+	}
+	if declared.Capabilities.Audio {
+		merged.Capabilities.Audio = true
 	}
 	return merged
 }

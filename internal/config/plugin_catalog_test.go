@@ -39,11 +39,11 @@ func TestPluginCatalogDiscoversModels(t *testing.T) {
 	defer server.Close()
 
 	workDir := t.TempDir()
-	writePluginScript(t, workDir, "catalog.sh", fmt.Sprintf(`provider add catalog-sub   --name "Catalog Subscription"   --type anthropic   --base-url %[1]q   --catalog-url "%[1]s/v1/models"   --catalog-header anthropic-version "2023-06-01"   --catalog-program '.data | map({id, name: .display_name, context_window: (.max_input_tokens // 0), reasoning_levels: ([.capabilities.effort // {} | to_entries[] | select(.value.supported == true) | .key])})'
+	writePluginScript(t, workDir, "catalog.sh", fmt.Sprintf(`provider add catalog-sub   --name "Catalog Subscription"   --type anthropic   --base-url %[1]q   --catalog-url "%[1]s/v1/models"   --catalog-header anthropic-version "2023-06-01"   --catalog-program '.data | map({id, name: .display_name, context_window: (.max_input_tokens // 0), reasoning: {effort_levels: ([.capabilities.effort // {} | to_entries[] | select(.value.supported == true) | {value: .key, display: .key}])}})'
 
 model add catalog-sub/big --reasoning-effort high`, server.URL))
 
-	store, err := config.Load(workDir, t.TempDir(), false)
+	store, err := config.Load(t.Context(), workDir, t.TempDir(), false)
 	require.NoError(t, err)
 
 	pc, ok := store.Config().Providers.Get("catalog-sub")
@@ -60,11 +60,11 @@ model add catalog-sub/big --reasoning-effort high`, server.URL))
 			big = true
 			require.Equal(t, "Big Model", model.Name, "the listing supplies what the declaration left out")
 			require.Equal(t, int64(1000000), model.ContextWindow)
-			require.Equal(t, "high", model.DefaultReasoningEffort, "the declared default wins")
+			require.Equal(t, "high", model.Reasoning.DefaultEffortLevel, "the declared default wins")
 		case "small":
 			small = true
 			require.Equal(t, int64(200000), model.ContextWindow)
-			require.Empty(t, model.ReasoningLevels)
+			require.Empty(t, model.ReasoningEffortLevels())
 		}
 	}
 	require.True(t, big, "the pinned model keeps its id")
@@ -90,7 +90,7 @@ func TestPluginCatalogStaysReachableBeforeSignIn(t *testing.T) {
 	workDir := t.TempDir()
 	writePluginScript(t, workDir, "signedout.sh", fmt.Sprintf(`provider add signedout-sub   --name "Signed Out"   --type google   --base-url %q   --catalog-url "%s/v1internal:fetchAvailableModels"   --catalog-method POST   --catalog-program '.data | map({id})'   --oauth-flow browser   --oauth-client-id "public-id"   --oauth-auth-url "https://auth.example.com/oauth2/authorize"   --oauth-token-url "https://oauth.example.com/token"`, server.URL, server.URL))
 
-	store, err := config.Load(workDir, t.TempDir(), false)
+	store, err := config.Load(t.Context(), workDir, t.TempDir(), false)
 	require.NoError(t, err)
 
 	_, ok := store.Config().Providers.Get("signedout-sub")
@@ -110,6 +110,6 @@ func TestPluginCatalogWithBadProgramFailsLoad(t *testing.T) {
 	workDir := t.TempDir()
 	writePluginScript(t, workDir, "broken.sh", `provider add broken-sub   --name "Broken"   --type anthropic   --base-url "https://api.example.com"   --catalog-url "https://api.example.com/v1/models"   --catalog-program 'if'`)
 
-	_, err := config.Load(workDir, t.TempDir(), false)
+	_, err := config.Load(t.Context(), workDir, t.TempDir(), false)
 	require.ErrorContains(t, err, "invalid catalog for provider broken-sub")
 }

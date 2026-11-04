@@ -8,7 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"charm.land/catwalk/pkg/catwalk"
+	"charm.land/catwalk/v3/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/stretchr/testify/require"
 )
@@ -53,9 +53,11 @@ def preferred($levels):
   | supported($caps.effort // {}) as $levels
   | {id, name: (.display_name // .id), context_window: (.max_input_tokens // 0),
      default_max_tokens: (.max_tokens // 0),
-     can_reason: (($caps.thinking // {})["supported"] == true),
-     supports_attachments: (($caps.image_input // {})["supported"] == true),
-     reasoning_levels: $levels, default_reasoning_effort: preferred($levels)})`
+     reasoning: {
+       thinking: (if (($caps.thinking // {})["supported"] == true) then "toggleable" else "never" end),
+       effort_levels: ($levels | map({value: ., display: (. | ascii_upcase)})),
+       default_effort_level: preferred($levels)},
+     capabilities: {vision: (($caps.image_input // {})["supported"] == true), audio: false}})`
 
 func TestCatalogReadsAProvidersOwnListing(t *testing.T) {
 	t.Parallel()
@@ -88,22 +90,22 @@ func TestCatalogReadsAProvidersOwnListing(t *testing.T) {
 	require.Equal(t, "Claude Opus 5.5", opus.Name)
 	require.Equal(t, int64(1000000), opus.ContextWindow)
 	require.Equal(t, int64(128000), opus.DefaultMaxTokens)
-	require.True(t, opus.CanReason)
-	require.True(t, opus.SupportsImages)
-	require.Equal(t, []string{"low", "medium", "high", "xhigh", "max"}, opus.ReasoningLevels)
-	require.Equal(t, "medium", opus.DefaultReasoningEffort)
+	require.True(t, opus.CanReason())
+	require.True(t, opus.Capabilities.Vision)
+	require.Equal(t, []string{"low", "medium", "high", "xhigh", "max"}, opus.ReasoningEffortLevels())
+	require.Equal(t, "medium", opus.Reasoning.DefaultEffortLevel)
 
 	// A rung the listing marks unsupported is left out, and the levels stay
 	// in ladder order rather than the order the response listed them.
-	require.Equal(t, []string{"low", "medium", "high", "max"}, models[1].ReasoningLevels)
+	require.Equal(t, []string{"low", "medium", "high", "max"}, models[1].ReasoningEffortLevels())
 
 	// A model that takes no effort at all gets no default rather than a
 	// made-up one, and reports the smaller window it actually has.
 	haiku := models[2]
-	require.Empty(t, haiku.ReasoningLevels)
-	require.Empty(t, haiku.DefaultReasoningEffort)
+	require.Empty(t, haiku.ReasoningEffortLevels())
+	require.Empty(t, haiku.Reasoning.DefaultEffortLevel)
 	require.Equal(t, int64(200000), haiku.ContextWindow)
-	require.False(t, haiku.SupportsImages)
+	require.False(t, haiku.Capabilities.Vision)
 }
 
 // A catalog fills in what a declared model leaves out and leaves alone what it
@@ -121,9 +123,9 @@ func TestCatalogKeepsDeclaredFields(t *testing.T) {
 		BaseURL: server.URL,
 		Spec:    &oauth.CatalogSpec{URL: "/v1/models", Program: catalogProgram},
 		Existing: []catwalk.Model{{
-			ID:                     "claude-opus-5-5",
-			Name:                   "Pinned Name",
-			DefaultReasoningEffort: "high",
+			ID:        "claude-opus-5-5",
+			Name:      "Pinned Name",
+			Reasoning: catwalk.Reasoning{DefaultEffortLevel: "high"},
 		}},
 	}, &mockResolver{})
 	require.NoError(t, err)
@@ -131,10 +133,10 @@ func TestCatalogKeepsDeclaredFields(t *testing.T) {
 
 	first := models[0]
 	require.Equal(t, "Pinned Name", first.Name, "a declared name wins")
-	require.Equal(t, "high", first.DefaultReasoningEffort, "a declared effort wins")
+	require.Equal(t, "high", first.Reasoning.DefaultEffortLevel, "a declared effort wins")
 	require.Equal(t, int64(1000000), first.ContextWindow, "the catalog fills what was left unset")
-	require.Equal(t, []string{"low", "medium", "high", "xhigh", "max"}, first.ReasoningLevels)
-	require.True(t, first.SupportsImages)
+	require.Equal(t, []string{"low", "medium", "high", "xhigh", "max"}, first.ReasoningEffortLevels())
+	require.True(t, first.Capabilities.Vision)
 
 	// A declared model the catalog never lists survives as it was.
 	models, err = Catalog(context.Background(), CatalogConfig{

@@ -46,15 +46,12 @@ const (
 	// opMergeChild merges a JSON object into childMap(target, child), e.g.
 	// --provider-options '{...}'.
 	opMergeChild
-	// opSetInChild assigns childMap(target, child)[jsonKey] = value, e.g.
-	// --price-input F stored under pricing.input.
-	opSetInChild
-	// opSetChildValue assigns childMap(target, child)[jsonKey] = value, for a
-	// flag that sets one field of a nested object, e.g. --oauth-issuer URL
+	// opSetInChild assigns childMapPath(target, child)[jsonKey] = value, e.g.
+	// --price-input F stored under pricing.input, or --oauth-issuer URL
 	// writing auth.issuer.
-	opSetChildValue
+	opSetInChild
 	// opAppendChild appends value to the []any at
-	// childMap(target, child)[jsonKey], e.g. --oauth-scope S writing to
+	// childMapPath(target, child)[jsonKey], e.g. --oauth-scope S writing to
 	// auth.scopes.
 	opAppendChild
 )
@@ -229,8 +226,6 @@ func storeFlag(target map[string]any, spec flagSpec, val any) {
 			maps.Copy(childMapPath(target, spec.child), obj)
 		}
 	case opSetInChild:
-		childMapPath(target, spec.child)[spec.jsonKey] = val
-	case opSetChildValue:
 		childMapPath(target, spec.child)[spec.jsonKey] = val
 	case opAppendChild:
 		child := childMapPath(target, spec.child)

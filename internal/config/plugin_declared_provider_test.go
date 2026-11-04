@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"charm.land/catwalk/pkg/catwalk"
+	"charm.land/catwalk/v3/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/stretchr/testify/require"
 )
@@ -66,13 +66,14 @@ model add example-sub/cld-sonnet-9 \
   --reasoning-effort max
 `)
 
-	store, err := config.Load(workDir, t.TempDir(), false)
+	store, err := config.Load(t.Context(), workDir, t.TempDir(), false)
 	require.NoError(t, err)
 
 	pc, ok := store.Config().Providers.Get("example-sub")
 	require.True(t, ok, "the plugin should register the subscription provider")
 	require.Equal(t, "Example Subscription", pc.Name)
-	require.Equal(t, "anthropic", string(pc.Type))
+	require.Equal(t, string(catwalk.TypeMessages), string(pc.Type),
+		"the anthropic legacy type lands on the Messages wire type")
 	require.Equal(t, "https://api.example.com", pc.BaseURL)
 	require.True(t, pc.FlatRate, "a flat monthly plan must not accumulate per-token cost")
 	require.Equal(t, "oauth-2025-04-20", pc.ExtraHeaders["anthropic-beta"])
@@ -107,8 +108,8 @@ model add example-sub/cld-sonnet-9 \
 		}
 	}
 	require.NotNil(t, pro)
-	require.Equal(t, []string{"low", "medium", "high"}, pro.ReasoningLevels)
-	require.Equal(t, "medium", pro.DefaultReasoningEffort)
+	require.Equal(t, []string{"low", "medium", "high"}, pro.ReasoningEffortLevels())
+	require.Equal(t, "medium", pro.Reasoning.DefaultEffortLevel)
 	require.Equal(t, int64(1048576), pro.ContextWindow)
 
 	// Unsigned-in, the provider is configured but cannot serve: its models

@@ -26,7 +26,9 @@ import (
 	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/filepathext"
 	"github.com/charmbracelet/crush/internal/fsext"
+	"github.com/charmbracelet/crush/internal/gateway"
 	"github.com/charmbracelet/crush/internal/home"
+	"github.com/charmbracelet/crush/internal/jq"
 	"github.com/charmbracelet/crush/internal/shellconfig"
 	powernapConfig "github.com/charmbracelet/x/powernap/pkg/config"
 	"github.com/qjebbs/go-jsons"
@@ -49,9 +51,12 @@ var legacyProviderTypes = map[catwalk.Type]catwalk.Type{
 	"anthropic":     catwalk.TypeMessages,
 	"azure":         catwalk.TypeResponses,
 	"bedrock":       catwalk.TypeMessages,
-	"google":        catwalk.TypeCompletions,
 	"google-vertex": catwalk.TypeCompletions,
 }
+
+// TypeGoogle names a custom provider that speaks the Gemini API. Unlike
+// the endpoint types, it selects the Google SDK rather than an OpenAI one.
+const TypeGoogle = catwalk.Type("google")
 
 // NormalizeProviderType maps a catwalk v2 provider type onto the v3
 // endpoint type describing the same API format. Types that are already
@@ -368,6 +373,14 @@ func Load(ctx context.Context, workingDir, dataDir string, debug bool) (*ConfigS
 	cfg.Models[SelectedModelTypeLarge] = resolved.Large
 	cfg.Models[SelectedModelTypeSmall] = resolved.Small
 
+	// A provider that is configured but waiting on a sign-in has no
+	// credential to build a client with, so agent setup waits for the
+	// sign-in rather than failing the startup.
+	if !cfg.HasUsableSelection() {
+		slog.Warn("No signed-in provider yet, sign in to one of the configured providers")
+		return store, nil
+	}
+
 	// Persist any fallback corrections while we still hold writeMu.
 	if resolved.LargeFallback {
 		if err := store.updateLocked(ScopeGlobal, func(c *Config) map[string]any {
@@ -606,6 +619,22 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 		c.Providers.Set(string(p.ID), prepared)
 	}
 
+	// A declared catalog is discovery in its own right: the provider publishes
+	// a listing whose shape only the plugin understands. Its program is
+	// compiled before any fetching starts, so a jq typo is a load error naming
+	// the provider rather than a provider quietly left without models.
+	for id, pc := range c.Providers.Seq2() {
+		if pc.Catalog == nil {
+			continue
+		}
+		if !pc.Catalog.Usable() {
+			return fmt.Errorf("invalid catalog for provider %s: a catalog needs both a url and a program", id)
+		}
+		if _, err := jq.Compile(pc.Catalog.Program); err != nil {
+			return fmt.Errorf("invalid catalog for provider %s: %w", id, err)
+		}
+	}
+
 	discovered := store.resolveDiscoveredModels(ctx, discoveryJobs(c, knownProviderNames), resolver)
 
 	// Validate the custom providers.
@@ -622,6 +651,7 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 		// Default to OpenAI chat completions if not set.
 		providerConfig.Type = cmp.Or(providerConfig.Type, catwalk.TypeCompletions)
 		if !slices.Contains(catwalk.KnownProviderTypes(), providerConfig.Type) &&
+			providerConfig.Type != TypeGoogle &&
 			providerConfig.Type != hyper.Name &&
 			!discover.IsKnownCustomProvider(string(providerConfig.Type)) {
 			slog.Warn("Skipping custom provider due to unsupported provider type", "provider", id)
@@ -634,8 +664,17 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 			c.Providers.Del(id)
 			continue
 		}
+		if providerConfig.UsesOAuth() && !providerConfig.Auth.Usable() {
+			slog.Warn(
+				"Skipping custom provider whose OAuth configuration names no authorization server",
+				"provider", id,
+				"hint", "set auth.issuer, or auth.token_url together with auth.authorize_url or auth.device_auth_url",
+			)
+			c.Providers.Del(id)
+			continue
+		}
 		apiKey, err := resolver.ResolveValue(providerConfig.APIKey)
-		if apiKey == "" || err != nil {
+		if (apiKey == "" || err != nil) && !providerConfig.UsesOAuth() {
 			slog.Warn("Provider is missing API key, this might be OK for local providers", "provider", id)
 		}
 		baseURL, err := resolver.ResolveValue(providerConfig.BaseURL)
@@ -646,13 +685,29 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 		}
 
 		if models, ok := discovered[id]; ok {
-			providerConfig.Models = mergeModels(providerConfig.Models, models)
+			if providerConfig.Catalog != nil {
+				// The catalog program already folded the declared models and
+				// the listing together field by field; re-stacking the
+				// configured copies on top would erase what the catalog
+				// filled in.
+				providerConfig.Models = models
+			} else {
+				providerConfig.Models = mergeModels(providerConfig.Models, models)
+			}
 		}
 
 		if len(providerConfig.Models) == 0 {
-			slog.Warn("Skipping custom provider because the provider has no models", "provider", id)
-			c.Providers.Del(id)
-			continue
+			if providerConfig.UsesOAuth() {
+				// An unsigned-in provider cannot list its models: the
+				// catalog is behind the credential. Keeping it is what
+				// makes the sign-in reachable, and the reload after a
+				// successful login discovers the models.
+				slog.Info("Keeping OAuth provider with no models until it is signed in", "provider", id)
+			} else {
+				slog.Warn("Skipping custom provider because the provider has no models", "provider", id)
+				c.Providers.Del(id)
+				continue
+			}
 		}
 
 		// Custom-provider headers share the MCP error contract; see
@@ -667,6 +722,84 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 				continue
 			}
 			providerConfig.ExtraHeaders[k] = resolved
+		}
+
+		// OAuth endpoints and credentials are expanded the same way
+		// api_key and base_url are, so a plugin can carry $VAR references
+		// instead of baked-in secrets.
+		if auth := providerConfig.Auth; auth != nil {
+			for _, field := range []*string{
+				&auth.Issuer,
+				&auth.ClientID,
+				&auth.ClientSecret,
+				&auth.AuthorizeURL,
+				&auth.TokenURL,
+				&auth.DeviceAuthURL,
+				&auth.RedirectURI,
+			} {
+				if *field == "" {
+					continue
+				}
+				resolved, err := resolver.ResolveValue(*field)
+				if err != nil {
+					return fmt.Errorf("resolving provider %s OAuth value: %w", id, err)
+				}
+				*field = resolved
+			}
+			for _, values := range []map[string]string{auth.ExtraParams, auth.TokenHeaders} {
+				for k, v := range values {
+					resolved, err := resolver.ResolveValue(v)
+					if err != nil {
+						return fmt.Errorf("resolving provider %s OAuth value %q: %w", id, k, err)
+					}
+					values[k] = resolved
+				}
+			}
+		}
+
+		// The gateway programs must compile: a plugin author typo in jq is
+		// a load error naming the provider, not a failed request later.
+		if providerConfig.Gateway != nil {
+			if providerConfig.Gateway.Usable() {
+				// The adapter is attached where a provider family lets the
+				// SDK take a client: for custom providers that is the Messages
+				// and Google API builders, alongside the known google logins
+				// this loop never sees. Saying so beats ignoring the
+				// declaration.
+				if providerConfig.Type != catwalk.TypeMessages && providerConfig.Type != TypeGoogle {
+					slog.Warn("Gateway adapter is only applied to Messages- and Google-type providers",
+						"provider", id, "type", string(providerConfig.Type))
+				}
+				if _, err := gateway.New(providerConfig.Gateway, "", nil); err != nil {
+					return fmt.Errorf("invalid gateway adapter for provider %s: %w", id, err)
+				}
+			} else {
+				slog.Warn("Skipping provider gateway adapter with incomplete programs",
+					"provider", id,
+					"hint", "a gateway needs both a request and a response jq program")
+				providerConfig.Gateway = nil
+			}
+		}
+
+		// The quota endpoint is expanded the same way, then checked: a usage
+		// block without a URL is a mistake in the plugin, not a reason to
+		// drop the provider itself.
+		if usage := providerConfig.Usage; usage != nil {
+			for _, field := range []*string{&usage.URL, &usage.Body} {
+				if *field == "" {
+					continue
+				}
+				resolved, err := resolver.ResolveValue(*field)
+				if err != nil {
+					return fmt.Errorf("resolving provider %s usage value: %w", id, err)
+				}
+				*field = resolved
+			}
+			if usage.URL == "" {
+				slog.Warn("Skipping provider usage report with no endpoint", "provider", id,
+					"hint", "set usage.url to the endpoint that reports remaining quota")
+				providerConfig.Usage = nil
+			}
 		}
 
 		c.Providers.Set(id, providerConfig)
@@ -885,7 +1018,7 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (large
 	// if no provider found that is known use the first provider configured
 	for _, p := range knownProviders {
 		providerConfig, ok := c.Providers.Get(string(p.ID))
-		if !ok || providerConfig.Disable {
+		if !ok || providerConfig.Disable || providerConfig.NeedsSignIn() {
 			continue
 		}
 		defaultLargeModel := c.GetModel(string(p.ID), p.DefaultLargeModelID)
@@ -920,12 +1053,18 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (large
 		return largeModel, smallModel, err
 	}
 
-	enabledProviders := c.EnabledProviders()
+	enabledProviders := c.UsableProviders()
 	slices.SortFunc(enabledProviders, func(a, b ProviderConfig) int {
 		return strings.Compare(a.ID, b.ID)
 	})
 
 	if len(enabledProviders) == 0 {
+		if c.Providers.Len() > 0 {
+			// Every provider declared is one that still needs a sign-in.
+			// There is no default to pick yet, which is not an error: the
+			// picker lists the models and signing in resolves it.
+			return largeModel, smallModel, nil
+		}
 		err = fmt.Errorf("no providers configured, please configure at least one provider")
 		return largeModel, smallModel, err
 	}
@@ -1084,7 +1223,95 @@ func lookupConfigs(cwd string) []string {
 	// reverse order so last config has more priority
 	slices.Reverse(foundConfigs)
 
-	return append(configPaths, foundConfigs...)
+	// Plugins come before the project configs so a project's own crushrc can
+	// still override anything a plugin declares, while a plugin can still
+	// override the user's global config.
+	return append(append(configPaths, lookupPlugins(cwd)...), foundConfigs...)
+}
+
+// pluginDirName is the directory, under both the global config directory and
+// the working directory's .crush folder, whose scripts run as plugins.
+const pluginDirName = "plugins"
+
+// lookupPlugins returns plugin scripts in load order: global first, then the
+// working directory's, each directory in name order. A plugin is a Bash
+// script that uses the same config builtins as a crushrc, which is how a
+// provider gets added without a Crush release.
+//
+// ponytail: only the working directory's .crush/plugins is scanned, not
+// every level up to the project boundary. Scripts one directory deep are
+// included, because that is where `crush plugin install` puts a repository,
+// but nothing deeper is. Extend the walk if plugins start nesting.
+func lookupPlugins(cwd string) []string {
+	dirs := []string{
+		filepath.Join(filepath.Dir(GlobalConfig()), pluginDirName),
+		filepath.Join(cwd, "."+appName, pluginDirName),
+	}
+	var paths []string
+	for _, dir := range dirs {
+		paths = append(paths, pluginScripts(dir)...)
+	}
+	return paths
+}
+
+// pluginScripts lists the runnable scripts in a plugin directory, sorted by
+// name so load order is stable across platforms. Both the directory's own
+// scripts and those of its immediate subdirectories are returned, so an
+// installed plugin repository loads as a group. A missing directory simply
+// contributes nothing.
+func pluginScripts(dir string) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var found []string
+	for _, entry := range entries {
+		name := entry.Name()
+		if strings.HasPrefix(name, ".") {
+			// Hidden entries are lock files and editor droppings, not
+			// plugins.
+			continue
+		}
+		if entry.IsDir() {
+			// One level only: a subdirectory is an installed repository, and
+			// anything nested inside it is that repository's own business.
+			found = append(found, topLevelScripts(filepath.Join(dir, name))...)
+			continue
+		}
+		if !strings.HasSuffix(name, ".sh") {
+			continue
+		}
+		found = append(found, filepath.Join(dir, name))
+	}
+	slices.Sort(found)
+	return found
+}
+
+// topLevelScripts lists the runnable scripts directly inside one plugin
+// repository directory.
+func topLevelScripts(dir string) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var found []string
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || strings.HasPrefix(name, ".") || !strings.HasSuffix(name, ".sh") {
+			continue
+		}
+		found = append(found, filepath.Join(dir, name))
+	}
+	return found
+}
+
+// isShellConfig reports whether a config path is executed as Bash rather
+// than parsed as JSON: a crushrc, the hidden .crushrc, or a plugin script.
+func isShellConfig(path string) bool {
+	base := filepath.Base(path)
+	return base == appName+"rc" ||
+		base == "."+appName+"rc" ||
+		strings.HasSuffix(base, ".sh")
 }
 
 func loadFromConfigPaths(ctx context.Context, configPaths []string) (*Config, []string, error) {
@@ -1335,13 +1562,6 @@ func GlobalConfig() string {
 // shell config, not just JSON.
 func shellConfigSibling(jsonPath string) string {
 	return filepath.Join(filepath.Dir(jsonPath), appName+"rc")
-}
-
-// isShellConfig reports whether a config path is a shell config (crushrc or
-// the hidden .crushrc), as opposed to a JSON config.
-func isShellConfig(path string) bool {
-	base := filepath.Base(path)
-	return base == appName+"rc" || base == "."+appName+"rc"
 }
 
 // GlobalCacheDir returns the path to the global cache directory for the

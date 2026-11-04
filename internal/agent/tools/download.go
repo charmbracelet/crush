@@ -142,19 +142,39 @@ func NewDownloadTool(permissions permission.Service, workingDir string, client *
 				return fantasy.NewTextErrorResponse("Download failed: " + err.Error()), nil
 			}
 
-			// Create the output file
+			// Stage the response before opening the destination so failed downloads
+			// cannot truncate existing files or leave partial new files behind.
+			downloadFile, err := os.CreateTemp("", "crush-download-*")
+			if err != nil {
+				return fantasy.NewTextErrorResponse("Failed to create temporary file: " + err.Error()), nil
+			}
+			defer func() {
+				downloadFile.Close()
+				os.Remove(downloadFile.Name())
+			}()
+
+			// Stream to disk without an explicit size limit. The download is still
+			// constrained by the HTTP client's timeout and upstream server limits.
+			bytesWritten, err := io.Copy(downloadFile, resp.Body)
+			if err != nil {
+				return fantasy.NewTextErrorResponse("Failed to download file: " + err.Error()), nil
+			}
+			if _, err := downloadFile.Seek(0, io.SeekStart); err != nil {
+				return fantasy.NewTextErrorResponse("Failed to rewind downloaded file: " + err.Error()), nil
+			}
+
+			// Keep the destination's existing permissions and link behavior.
 			outFile, err := os.Create(filePath)
 			if err != nil {
 				return fantasy.NewTextErrorResponse("Failed to create output file: " + err.Error()), nil
 			}
 			defer outFile.Close()
 
-			// Copy data without an explicit size limit.
-			// The overall download is still constrained by the HTTP client's timeout
-			// and any upstream server limits.
-			bytesWritten, err := io.Copy(outFile, resp.Body)
-			if err != nil {
+			if _, err := io.Copy(outFile, downloadFile); err != nil {
 				return fantasy.NewTextErrorResponse("Failed to write file: " + err.Error()), nil
+			}
+			if err := outFile.Close(); err != nil {
+				return fantasy.NewTextErrorResponse("Failed to close output file: " + err.Error()), nil
 			}
 
 			contentType := resp.Header.Get("Content-Type")

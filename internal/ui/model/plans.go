@@ -51,31 +51,40 @@ func (m *UI) handlePlanPreviewInput(msg tea.Msg) (bool, tea.Cmd) {
 			m.planPreview = nil
 			m.dialog.OpenDialog(source)
 		case "up", "k":
-			return true, preview.ScrollBy(-1)
+			preview.ScrollBy(-1)
+			return true, nil
 		case "down", "j":
-			return true, preview.ScrollBy(1)
+			preview.ScrollBy(1)
+			return true, nil
 		case "pgup":
-			return true, preview.ScrollBy(-max(1, preview.Height()-1))
+			preview.ScrollBy(-max(1, preview.Height()-1))
+			return true, nil
 		case "pgdown", "space":
-			return true, preview.ScrollBy(max(1, preview.Height()-1))
+			preview.ScrollBy(max(1, preview.Height()-1))
+			return true, nil
 		case "home", "g":
-			return true, preview.ScrollToTop()
+			preview.ScrollToTop()
+			return true, nil
 		case "end", "G":
-			return true, preview.ScrollToBottom()
+			preview.ScrollToBottom()
+			return true, nil
 		}
 		return true, nil
 	case common.CoalescedWheelMsg:
 		if image.Pt(msg.Mouse.X, msg.Mouse.Y).In(m.layout.main) {
-			return true, preview.ScrollBy(int(msg.DeltaY))
+			preview.ScrollBy(int(msg.DeltaY))
+			return true, nil
 		}
 		return true, nil
 	case tea.MouseWheelMsg:
 		if image.Pt(msg.X, msg.Y).In(m.layout.main) {
 			if msg.Button == tea.MouseWheelUp {
-				return true, preview.ScrollBy(-3)
+				preview.ScrollBy(-3)
+				return true, nil
 			}
 			if msg.Button == tea.MouseWheelDown {
-				return true, preview.ScrollBy(3)
+				preview.ScrollBy(3)
+				return true, nil
 			}
 		}
 		return true, nil

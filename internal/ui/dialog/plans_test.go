@@ -57,7 +57,7 @@ func TestPlansMenuAvailabilityRefresh(t *testing.T) {
 	t.Parallel()
 	com := plansCommon(t)
 	newCommands := func() *Commands {
-		c, err := NewCommands(com, "", false, false, false, nil, nil)
+		c, err := NewCommands(com, "", false, false, false, false, nil, nil)
 		require.NoError(t, err)
 		available := false
 		c.dockerMCPAvailable = &available

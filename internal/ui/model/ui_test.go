@@ -486,6 +486,27 @@ func TestToggleSidebarKeyBinding(t *testing.T) {
 	require.Contains(t, fullHelp, "toggle sidebar")
 }
 
+func TestHandlePlanSaveNotification(t *testing.T) {
+	t.Parallel()
+	u, _ := newPlanUI(t, "sess-1")
+	for _, tc := range []struct {
+		eventType notify.Type
+		message   string
+		want      string
+		infoType  util.InfoType
+	}{
+		{notify.TypePlanSaved, ".crush/plans/2026-09-19-153045-fix-login-timeout.md", "Plan saved to .crush/plans/2026-09-19-153045-fix-login-timeout.md", util.InfoTypeInfo},
+		{notify.TypePlanSaveError, "permission denied", "failed to save plan: permission denied", util.InfoTypeError},
+	} {
+		cmd := u.handleAgentNotification(notify.Notification{Type: tc.eventType, Message: tc.message})
+		require.NotNil(t, cmd)
+		msg, ok := cmd().(util.InfoMsg)
+		require.True(t, ok)
+		require.Equal(t, tc.want, msg.Msg)
+		require.Equal(t, tc.infoType, msg.Type)
+	}
+}
+
 func TestHandlePlanHandoff_NoMarkerNoInline(t *testing.T) {
 	t.Parallel()
 	u, _ := newPlanUI(t, "sess-1")

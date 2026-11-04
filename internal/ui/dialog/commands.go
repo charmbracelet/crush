@@ -1,6 +1,7 @@
 package dialog
 
 import (
+	"context"
 	"os"
 	"strings"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/crush/internal/ui/util"
 	uv "github.com/charmbracelet/ultraviolet"
 )
 
@@ -56,6 +58,7 @@ type Commands struct {
 	sessionID  string
 	hasSession bool
 	hasTodos   bool
+	hasPlans   bool
 	hasQueue   bool
 	// transparent is whether the background color is off on screen,
 	// which a host theme can make differ from the config.
@@ -161,26 +164,20 @@ func (c *Commands) ID() string {
 // HandleMsg implements [Dialog].
 func (c *Commands) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
+	case plansAvailabilityMsg:
+		if msg.owner != c {
+			return nil
+		}
+		c.hasPlans = len(msg.files) > 0
+		c.refreshSystemCommands()
+		if msg.err != nil {
+			return ActionCmd{util.ReportError(msg.err)}
+		}
+		return nil
 	case dockerMCPAvailabilityCheckedMsg:
 		c.dockerMCPAvailable = &msg.available
 		c.dockerMCPCheckInFlight = false
-		if c.selected == SystemCommands {
-			// Preserve the current selection across the rebuild to avoid reset
-			var prevID string
-			if item, ok := c.list.SelectedItem().(*CommandItem); ok && item != nil {
-				prevID = item.id
-			}
-			c.setCommandItems(c.selected)
-			if prevID != "" {
-				for i, it := range c.list.FilteredItems() {
-					if ci, ok := it.(*CommandItem); ok && ci != nil && ci.id == prevID {
-						c.list.SetSelected(i)
-						c.list.ScrollToSelected()
-						break
-					}
-				}
-			}
-		}
+		c.refreshSystemCommands()
 		return nil
 	case spinner.TickMsg:
 		if c.loading {
@@ -247,6 +244,28 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 	return nil
 }
 
+// Refresh system commands without losing the active filter or selection.
+func (c *Commands) refreshSystemCommands() {
+	if c.selected != SystemCommands {
+		return
+	}
+	filter := c.input.Value()
+	selectedID := ""
+	if item, ok := c.list.SelectedItem().(*CommandItem); ok {
+		selectedID = item.ID()
+	}
+	c.setCommandItems(c.selected)
+	c.input.SetValue(filter)
+	c.list.SetFilter(filter)
+	for i, item := range c.list.FilteredItems() {
+		if item.(*CommandItem).ID() == selectedID {
+			c.list.SetSelected(i)
+			break
+		}
+	}
+	c.list.ScrollToSelected()
+}
+
 func checkDockerMCPAvailabilityCmd() tea.Cmd {
 	return func() tea.Msg {
 		return dockerMCPAvailabilityCheckedMsg{available: config.RefreshDockerMCPAvailability()}
@@ -254,11 +273,16 @@ func checkDockerMCPAvailabilityCmd() tea.Cmd {
 }
 
 func (c *Commands) InitialCmd() tea.Cmd {
+	ws := c.com.Workspace
+	plansCmd := func() tea.Msg {
+		files, err := ws.ListPlans(context.Background())
+		return plansAvailabilityMsg{owner: c, files: files, err: err}
+	}
 	if c.dockerMCPAvailable != nil || c.dockerMCPCheckInFlight {
-		return nil
+		return plansCmd
 	}
 	c.dockerMCPCheckInFlight = true
-	return checkDockerMCPAvailabilityCmd()
+	return tea.Batch(plansCmd, checkDockerMCPAvailabilityCmd())
 }
 
 // Cursor returns the cursor position relative to the dialog.
@@ -456,6 +480,10 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		NewCommandItem(c.com.Styles, "new_session", "New Session", "ctrl+n", ActionNewSession{}).WithAliases("clear"),
 		NewCommandItem(c.com.Styles, "switch_session", "Sessions", "ctrl+s", ActionOpenDialog{SessionsID}),
 		NewCommandItem(c.com.Styles, "switch_model", "Switch Model", "ctrl+l", ActionOpenDialog{ModelsID}),
+	}
+
+	if c.hasPlans {
+		commands = append(commands, NewCommandItem(c.com.Styles, "show_my_plans", "Show my plans", "", ActionOpenDialog{PlansID}))
 	}
 
 	// Only show compact command if there's an active session

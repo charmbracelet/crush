@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/plan"
 	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
@@ -521,7 +522,7 @@ func (a *AssistantMessageItem) contentKey() (uint64, uint64) {
 	if a.planStreaming() {
 		planStreaming = 1
 	}
-	return fnv64(a.message.Content().Text), uint64(planStreaming)
+	return fnvFields([]byte(a.message.Content().Text)), uint64(planStreaming)
 }
 
 // SetPlanAgent flags this item as plan-agent output (or clears the
@@ -589,17 +590,17 @@ func (a *AssistantMessageItem) cachedContent(width int) string {
 	// ThinkingBox treatment.
 	var out string
 	switch {
-	case common.PlanReadyMarkerPresent(text):
-		out = a.renderPlanCard(common.StripPlanMarkers(text), width)
-	case a.planStreaming() && common.PlanStartMarkerPresent(text):
+	case plan.ReadyMarkerPresent(text):
+		out = a.renderPlanCard(plan.StripMarkers(text), width)
+	case a.planStreaming() && plan.StartMarkerPresent(text):
 		// While the plan streams, draw the card as an open box: top
 		// and side borders only. The bottom border closes once the
 		// plan-ready marker arrives. The plan-start marker gates the
 		// card so intermediate exploratory replies in plan mode never
 		// grow a border.
-		out = a.renderPlanCardStreaming(common.StripPlanMarkers(text), width)
+		out = a.renderPlanCardStreaming(plan.StripMarkers(text), width)
 	default:
-		out = a.renderMarkdown(common.StripPlanMarkers(text), width)
+		out = a.renderMarkdown(plan.StripMarkers(text), width)
 	}
 	a.contentSec.store(width, srcHash, extra, out, 0)
 	return out

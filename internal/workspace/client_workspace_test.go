@@ -1243,3 +1243,35 @@ func TestClientWorkspace_GitBranchServerError(t *testing.T) {
 	_, err = ws.GitBranch(t.Context())
 	require.Error(t, err)
 }
+
+func TestClientWorkspacePlansUseRemoteBackend(t *testing.T) {
+	t.Parallel()
+	name := "2026-11-план with spaces.md"
+	content := "# Remote plan\n\nOnly on server.\n"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /v1/workspaces/ws-1/plans":
+			require.NoError(t, json.NewEncoder(w).Encode([]string{name}))
+		case "POST /v1/workspaces/ws-1/plans/read":
+			var req proto.ReadPlanRequest
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+			require.Equal(t, name, req.Name)
+			require.NoError(t, json.NewEncoder(w).Encode(proto.ReadPlanResponse{Content: content}))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	u, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	c, err := client.NewClient(t.TempDir(), "tcp", u.Host)
+	require.NoError(t, err)
+	ws := NewClientWorkspace(c, proto.Workspace{ID: "ws-1", Path: "/server-only/workspace"})
+	t.Cleanup(ws.Shutdown)
+	names, err := ws.ListPlans(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, []string{name}, names)
+	text, err := ws.ReadPlan(t.Context(), names[0])
+	require.NoError(t, err)
+	require.Equal(t, content, text)
+}

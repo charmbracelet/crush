@@ -1651,3 +1651,13 @@ func protoQuestionsToDomain(qs []proto.QuestionItem) []question.Question {
 	}
 	return out
 }
+
+// ListPlans retrieves saved plan filenames from the server workspace.
+func (w *ClientWorkspace) ListPlans(ctx context.Context) ([]string, error) {
+	return w.client.ListPlans(ctx, w.workspaceID())
+}
+
+// ReadPlan retrieves saved plan text from the server workspace.
+func (w *ClientWorkspace) ReadPlan(ctx context.Context, name string) (string, error) {
+	return w.client.ReadPlan(ctx, w.workspaceID(), name)
+}

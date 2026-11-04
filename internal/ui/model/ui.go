@@ -44,6 +44,7 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pinentry"
+	"github.com/charmbracelet/crush/internal/plan"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
@@ -216,6 +217,8 @@ type (
 
 // UI represents the main user interface model.
 type UI struct {
+	planPreview *savedPlanPreview
+
 	com          *common.Common
 	session      *session.Session
 	sessionFiles []SessionFile
@@ -881,7 +884,14 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Update terminal capabilities
 	m.caps.Update(msg)
 	m.trackTurnOutcome(msg)
+	if handled, cmd := m.handlePlanPreviewInput(msg); handled {
+		return m, cmd
+	}
 	switch msg := msg.(type) {
+	case dialog.PlanReadMsg:
+		if cmd := m.showSavedPlan(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case tea.EnvMsg:
 		// Is this Windows Terminal?
 		if !m.sendProgressBar {
@@ -1235,7 +1245,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.copyChatHighlight())
 	case DelayedClickMsg:
 		// Handle delayed single-click action (e.g., expansion).
-		m.chat.HandleDelayedClick(msg)
+		if _, cmd := m.chat.HandleDelayedClick(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case tea.MouseClickMsg:
 		// Pass mouse events to dialogs first if any are open.
 		if m.dialog.HasDialogs() {
@@ -1298,7 +1310,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Adjust for chat area position
 			x -= m.layout.main.Min.X
 			y -= m.layout.main.Min.Y
-			if !image.Pt(msg.X, msg.Y).In(m.layout.sidebar) {
+			if msg.Button == uv.MouseLeft && !image.Pt(msg.X, msg.Y).In(m.layout.sidebar) {
 				if handled, cmd := m.chat.HandleMouseDown(x, y); handled {
 					m.lastClickTime = time.Now()
 					if cmd != nil {
@@ -3708,6 +3720,9 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	// Clear the screen first
 	screen.Clear(scr)
+	if m.planPreview != nil {
+		return m.drawSavedPlan(scr, area)
+	}
 
 	switch m.state {
 	case uiOnboarding:
@@ -5718,6 +5733,10 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openCommandsDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.PlansID:
+		plans := dialog.NewPlans(m.com)
+		m.dialog.OpenDialog(plans)
+		cmds = append(cmds, plans.InitialCmd())
 	case dialog.ReasoningID:
 		if cmd := m.openReasoningDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -5999,7 +6018,7 @@ func (m *UI) handlePlanHandoff(rc notify.RunComplete) tea.Cmd {
 	if m.session == nil || rc.SessionID != m.session.ID {
 		return nil
 	}
-	if !common.PlanReadyMarkerPresent(rc.Text) {
+	if !plan.ReadyMarkerPresent(rc.Text) {
 		slog.Debug("Plan run completed without ready marker", "session_id", rc.SessionID)
 		return nil
 	}
@@ -6095,6 +6114,10 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 		// Terminal edge like TypeAgentFinished; fall through to the
 		// busy/queue refresh below.
 		m.endPendingTurn(n.SessionID)
+	case notify.TypePlanSaved:
+		return util.ReportInfo("Plan saved to " + n.Message)
+	case notify.TypePlanSaveError:
+		return util.ReportError(fmt.Errorf("failed to save plan: %s", n.Message))
 	case notify.TypeReAuthenticate:
 		return m.handleReAuthenticate(n.ProviderID)
 	case notify.TypeAWSSSOAuth:

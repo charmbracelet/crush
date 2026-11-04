@@ -293,3 +293,23 @@ func colorsEqual(left, right color.Color) bool {
 	rightR, rightG, rightB, rightA := right.RGBA()
 	return [4]uint32{leftR, leftG, leftB, leftA} == [4]uint32{rightR, rightG, rightB, rightA}
 }
+
+func TestAssistantMessageItem_PlanCardHasNoSavedFileFooter(t *testing.T) {
+	t.Parallel()
+	sty := styles.CharmtonePantera()
+	msg := &message.Message{
+		ID: "plan", Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.TextContent{Text: "<!-- CRUSH_PLAN_START -->\n\n# Plan\n\nDone\n\n<!-- CRUSH_PLAN_READY -->"},
+			message.Finish{Reason: message.FinishReasonEndTurn, Time: 1},
+		},
+	}
+	item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
+	item.SetPlanAgent(true)
+	for _, width := range []int{24, 72, 140} {
+		rendered := item.RawRender(width)
+		require.Contains(t, ansi.Strip(rendered), "Done")
+		require.NotContains(t, rendered, "Saved to")
+		require.NotContains(t, rendered, "file://")
+	}
+}

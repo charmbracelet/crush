@@ -50,6 +50,7 @@ type AgentEvent struct {
 	// the client. AWSSOCommand is the refresh command being run; AWSSOURL
 	// is the verification URL once it appears in the command output. The
 	// result's failure text travels through Error, like TypeAgentError.
+	// Plan save status and error messages use Error for the same wire shape.
 	AWSSOCommand string `json:"aws_sso_command,omitempty"`
 	AWSSOURL     string `json:"aws_sso_url,omitempty"`
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/gitutil"
 	"github.com/charmbracelet/crush/internal/oauth"
+	"github.com/charmbracelet/crush/internal/plan"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/skills"
@@ -394,4 +395,22 @@ func (b *Backend) GetWorkingDir(workspaceID string) (string, error) {
 		return "", err
 	}
 	return ws.Cfg.WorkingDir(), nil
+}
+
+// ListPlans returns saved plan filenames for a workspace.
+func (b *Backend) ListPlans(ctx context.Context, workspaceID string) ([]string, error) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	return plan.List(ctx, ws.Cfg.WorkingDir())
+}
+
+// ReadPlan reads a saved plan from a workspace.
+func (b *Backend) ReadPlan(ctx context.Context, workspaceID, name string) (string, error) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return "", err
+	}
+	return plan.Read(ctx, ws.Cfg.WorkingDir(), name)
 }

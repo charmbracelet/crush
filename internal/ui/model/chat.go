@@ -1112,19 +1112,22 @@ func (m *Chat) HandleMouseDown(x, y int) (bool, tea.Cmd) {
 // HandleDelayedClick handles a delayed single-click action (like expansion).
 // It only executes if the click ID matches (i.e., no double-click occurred)
 // and no text selection was made (drag to select).
-func (m *Chat) HandleDelayedClick(msg DelayedClickMsg) bool {
+func (m *Chat) HandleDelayedClick(msg DelayedClickMsg) (bool, tea.Cmd) {
 	// Ignore if this click was superseded by a newer click (double/triple).
 	if msg.ClickID != m.pendingClickID {
-		return false
+		return false, nil
 	}
 
 	// Don't expand if user dragged to select text.
 	if m.HasHighlight() {
-		return false
+		return false, nil
 	}
 
 	// Execute the click action (e.g., expansion).
 	selectedItem := m.list.SelectedItem()
+	if selectedItem != m.list.ItemAt(msg.ItemIdx) {
+		return false, nil
+	}
 	if clickable, ok := selectedItem.(list.MouseClickable); ok {
 		handled := clickable.HandleMouseClick(ansi.MouseButton1, msg.X, msg.Y)
 		// Toggle expansion only when the item signalled it handled the
@@ -1140,10 +1143,10 @@ func (m *Chat) HandleDelayedClick(msg DelayedClickMsg) bool {
 				}
 			}
 		}
-		return handled
+		return handled, nil
 	}
 
-	return false
+	return false, nil
 }
 
 // HandleMouseUp handles mouse up events for the chat component.

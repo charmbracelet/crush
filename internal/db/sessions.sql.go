@@ -301,7 +301,6 @@ SET
     prompt_tokens = ?,
     completion_tokens = ?,
     summary_message_id = ?,
-    cost = ?,
     todos = ?,
     channel = ?
 WHERE id = ?
@@ -313,7 +312,6 @@ type UpdateSessionParams struct {
 	PromptTokens     int64          `json:"prompt_tokens"`
 	CompletionTokens int64          `json:"completion_tokens"`
 	SummaryMessageID sql.NullString `json:"summary_message_id"`
-	Cost             float64        `json:"cost"`
 	Todos            sql.NullString `json:"todos"`
 	Channel          sql.NullString `json:"channel"`
 	ID               string         `json:"id"`
@@ -326,7 +324,6 @@ func (q *Queries) UpdateSession(ctx context.Context, arg UpdateSessionParams) (S
 		arg.PromptTokens,
 		arg.CompletionTokens,
 		arg.SummaryMessageID,
-		arg.Cost,
 		arg.Todos,
 		arg.Channel,
 		arg.ID,

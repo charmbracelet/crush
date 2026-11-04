@@ -358,9 +358,10 @@ func TestUpdateSessionUsageAddsProviderCost(t *testing.T) {
 	model := Model{CatwalkCfg: catwalk.Model{Pricing: catwalk.Pricing{Input: 10, Output: 20}}}
 	usage := fantasy.Usage{InputTokens: 1000, OutputTokens: 2000}
 
-	agent.updateSessionUsage(model, currentSession, usage, nil, false)
+	cost := agent.updateSessionUsage(model, currentSession, usage, nil, false)
 
-	require.Equal(t, 1.3, currentSession.Cost)
+	require.InDelta(t, 0.05, cost, 1e-9)
+	require.Equal(t, 1.25, currentSession.Cost, "the caller adds the returned cost with AddCost")
 	require.Equal(t, int64(1000), currentSession.PromptTokens)
 	require.Equal(t, int64(2000), currentSession.CompletionTokens)
 	require.False(t, currentSession.EstimatedUsage)

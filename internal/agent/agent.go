@@ -108,6 +108,10 @@ type SessionAgentCall struct {
 	// steer a running session without racing its completion.
 	QueueOnly bool
 
+	// onActive, when non-nil, is called once Run becomes the active run
+	// for the session, while the session lock is still held.
+	onActive func()
+
 	// HostContext is what the host application had in view when the
 	// prompt was sent. The model sees it with this prompt only; it is
 	// not stored with the message.
@@ -755,6 +759,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	genCtx, cancel = context.WithCancel(runCtx)
 	ac := &activeCancel{cancel: cancel}
 	a.activeRequests.Set(call.SessionID, ac)
+	if call.onActive != nil {
+		call.onActive()
+	}
 	if call.Accepted != nil {
 		call.Accepted.Close()
 	}
@@ -1164,12 +1171,17 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				return getSessionErr
 			}
 			usage, estimated := fallbackStepUsage(stepMessages, stepResult)
-			a.updateSessionUsage(largeModel, &updatedSession, usage, a.openrouterCost(stepResult.ProviderMetadata), estimated)
-			_, sessionErr := a.sessions.Save(ctx, updatedSession)
+			cost := a.updateSessionUsage(largeModel, &updatedSession, usage, a.openrouterCost(stepResult.ProviderMetadata), estimated)
+			// Cost is added atomically because Save does not write it: a
+			// background child can roll its cost up between Get and Save.
+			if costErr := a.sessions.AddCost(ctx, call.SessionID, cost); costErr != nil {
+				return costErr
+			}
+			savedSession, sessionErr := a.sessions.Save(ctx, updatedSession)
 			if sessionErr != nil {
 				return sessionErr
 			}
-			currentSession = updatedSession
+			currentSession = savedSession
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
 		StopWhen: []fantasy.StopCondition{
@@ -1585,7 +1597,12 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID, trigger string,
 		return err
 	}
 
-	a.updateSessionUsage(largeModel, &currentSession, resp.TotalUsage, openrouterCost, false)
+	summaryCost := a.updateSessionUsage(largeModel, &currentSession, resp.TotalUsage, openrouterCost, false)
+	// Cost is added atomically because Save does not write it: a background
+	// child can roll its cost up between the Get above and the Save below.
+	if err := a.sessions.AddCost(genCtx, sessionID, summaryCost); err != nil {
+		return err
+	}
 
 	// Just in case, get just the last usage info.
 	usage := resp.Response.Usage
@@ -2072,7 +2089,10 @@ func extraFieldFloat(pm *openai.ProviderMetadata, key string) *float64 {
 	return &parsed
 }
 
-func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session, usage fantasy.Usage, overrideCost *float64, estimated bool) {
+// updateSessionUsage updates the session's token counters and returns the cost
+// of usage. It leaves session.Cost alone: the caller must add the returned
+// cost with Service.AddCost, because Save does not persist cost.
+func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session, usage fantasy.Usage, overrideCost *float64, estimated bool) float64 {
 	if !usageIsZero(usage) {
 		session.EstimatedUsage = estimated
 	}
@@ -2101,8 +2121,8 @@ func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session,
 		}
 	}
 
-	session.Cost += cost
 	updateSessionTokenCounters(session, usage)
+	return cost
 }
 
 // contextTokens returns the size of the prompt the provider processed for

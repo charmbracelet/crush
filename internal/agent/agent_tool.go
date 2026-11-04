@@ -24,6 +24,9 @@ import (
 //go:embed templates/agent_tool.md
 var agentToolDescription string
 
+//go:embed templates/agent_background.md
+var agentBackgroundDescription string
+
 // AgentParams is the input to the dispatcher agent tool, also decoded by the
 // UI tool-call renderers. Inputs stored before subagent_type existed carry
 // only a prompt and still decode.
@@ -32,6 +35,7 @@ type AgentParams struct {
 	Prompt       string `json:"prompt"`
 	Model        string `json:"model,omitempty"`
 	Provider     string `json:"provider,omitempty"`
+	Background   bool   `json:"background,omitempty"`
 }
 
 const (
@@ -236,6 +240,15 @@ func (c *coordinator) agentTool(_ context.Context, owner config.Agent) (fantasy.
 	// name removed mid-turn fails cleanly and a newly added one still
 	// resolves — the enum is advisory only.
 	info := buildAgentDispatchInfo(c.activeSubagentsList(), c.cfg.Config().Models)
+	// Headless runs have no later turn to deliver a report into, so the
+	// background option is offered to interactive runs only.
+	if c.interactive {
+		info.Description += "\n\n" + agentBackgroundDescription
+		info.Parameters["background"] = map[string]any{
+			"type":        "boolean",
+			"description": "Run the agent in the background and return at once. Its report arrives in a later message.",
+		}
+	}
 
 	return &dispatcherTool{
 		info: info,
@@ -284,7 +297,7 @@ func (c *coordinator) agentTool(_ context.Context, owner config.Agent) (fantasy.
 				if err != nil {
 					return buildFailed("task agent", err)
 				}
-				return c.runSubAgent(ctx, subAgentParams{
+				return c.dispatchSubAgent(ctx, subAgentParams{
 					Agent:          taskAgent,
 					SessionID:      sessionID,
 					AgentMessageID: agentMessageID,
@@ -294,7 +307,7 @@ func (c *coordinator) agentTool(_ context.Context, owner config.Agent) (fantasy.
 					AgentName:      config.AgentTask,
 					AgentColor:     subagents.AutoColor(config.AgentTask),
 					AgentModel:     taskAgent.Model().ModelCfg.Model,
-				})
+				}, params.Background)
 			}
 
 			sa := findSubagentByName(c.activeSubagentsList(), subagentType)
@@ -348,7 +361,7 @@ func (c *coordinator) agentTool(_ context.Context, owner config.Agent) (fantasy.
 				return resp, nil
 			}
 
-			return c.runSubAgent(ctx, subAgentParams{
+			return c.dispatchSubAgent(ctx, subAgentParams{
 				Agent:          agent,
 				SessionID:      sessionID,
 				AgentMessageID: agentMessageID,
@@ -359,7 +372,16 @@ func (c *coordinator) agentTool(_ context.Context, owner config.Agent) (fantasy.
 				AgentName:      sa.Name,
 				AgentColor:     sa.ResolvedColor(),
 				AgentModel:     agent.Model().ModelCfg.Model,
-			})
+			}, params.Background)
 		},
 	}, nil
+}
+
+// dispatchSubAgent runs a sub-agent to completion, or starts it in the
+// background when asked to and the run is interactive.
+func (c *coordinator) dispatchSubAgent(ctx context.Context, params subAgentParams, background bool) (fantasy.ToolResponse, error) {
+	if background && c.interactive {
+		return c.startBackground(ctx, params)
+	}
+	return c.runSubAgent(ctx, params)
 }

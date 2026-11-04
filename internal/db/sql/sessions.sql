@@ -53,7 +53,6 @@ SET
     prompt_tokens = ?,
     completion_tokens = ?,
     summary_message_id = ?,
-    cost = ?,
     todos = ?,
     channel = ?
 WHERE id = ?

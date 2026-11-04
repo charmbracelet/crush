@@ -76,6 +76,7 @@ type Service interface {
 	// sessions created via CreateTaskSession) of parentSessionID. It does
 	// not recurse into grandchildren.
 	ListChildSessions(ctx context.Context, parentSessionID string) ([]Session, error)
+	// Save persists everything except cost; use AddCost to change cost.
 	Save(ctx context.Context, session Session) (Session, error)
 	SetChannel(ctx context.Context, sessionID, channel string) (Session, error)
 	UpdateTitleAndUsage(ctx context.Context, sessionID, title string, promptTokens, completionTokens int64, cost float64) error
@@ -203,6 +204,9 @@ func (s *service) GetLast(ctx context.Context) (Session, error) {
 	return session, nil
 }
 
+// Save persists a session's mutable fields except cost, which only AddCost
+// changes so a stale Save cannot erase a concurrent roll-up. The returned
+// session reflects the stored row, including its current cost.
 func (s *service) Save(ctx context.Context, session Session) (Session, error) {
 	todosJSON, err := marshalTodos(session.Todos)
 	if err != nil {
@@ -218,7 +222,6 @@ func (s *service) Save(ctx context.Context, session Session) (Session, error) {
 			String: session.SummaryMessageID,
 			Valid:  session.SummaryMessageID != "",
 		},
-		Cost: session.Cost,
 		Todos: sql.NullString{
 			String: todosJSON,
 			Valid:  todosJSON != "",

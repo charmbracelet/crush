@@ -595,9 +595,6 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 	case Assistant:
 		var parts []fantasy.MessagePart
 		text := strings.TrimSpace(m.Content().Text)
-		if text != "" {
-			parts = append(parts, fantasy.TextPart{Text: text})
-		}
 		reasoning := m.ReasoningContent()
 		if reasoning.Thinking != "" {
 			reasoningPart := fantasy.ReasoningPart{Text: reasoning.Thinking, ProviderOptions: fantasy.ProviderOptions{}}
@@ -616,6 +613,9 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 				}
 			}
 			parts = append(parts, reasoningPart)
+		}
+		if text != "" {
+			parts = append(parts, fantasy.TextPart{Text: text})
 		}
 		for _, call := range m.ToolCalls() {
 			parts = append(parts, fantasy.ToolCallPart{

@@ -23,6 +23,9 @@ type ToolResult struct {
 	Content   string
 	Data      []byte
 	MediaType string
+	// IsError mirrors CallToolResult.IsError: the server reported that the
+	// tool call failed, with the error details in Content.
+	IsError bool
 }
 
 var allTools = csync.NewMap[string, []*Tool]()
@@ -63,13 +66,19 @@ func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string
 // toolResultFromCall folds the content blocks of an MCP reply into the one
 // result Crush carries, keeping at most one image and one audio payload.
 func toolResultFromCall(result *mcp.CallToolResult) ToolResult {
-	if len(result.Content) == 0 {
+	tr := foldToolContent(result.Content)
+	tr.IsError = result.IsError
+	return tr
+}
+
+func foldToolContent(contents []mcp.Content) ToolResult {
+	if len(contents) == 0 {
 		return ToolResult{Type: "text", Content: ""}
 	}
 
 	var textParts []string
 	var image, audio mediaPayload
-	for _, v := range result.Content {
+	for _, v := range contents {
 		switch content := v.(type) {
 		case *mcp.TextContent:
 			textParts = append(textParts, content.Text)

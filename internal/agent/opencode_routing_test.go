@@ -57,6 +57,31 @@ func TestServingProvider(t *testing.T) {
 		t.Parallel()
 		require.Equal(t, "litellm", servingProvider(providerCfg("litellm", "litellm"), model("")))
 	})
+
+	t.Run("custom Google providers use the Google SDK", func(t *testing.T) {
+		t.Parallel()
+		require.Equal(t, "google", servingProvider(providerCfg("gemini-sub", config.TypeGoogle), model("")))
+	})
+}
+
+func TestBuildProviderCustomGoogleRouting(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	providerCfg := config.ProviderConfig{
+		ID:      "gemini-sub",
+		BaseURL: "https://generativelanguage.googleapis.com/",
+		Type:    config.TypeGoogle,
+		APIKey:  "test-key",
+	}
+	coord := newTestCoordinator(t, env, providerCfg.ID, providerCfg)
+
+	provider, err := coord.buildProvider(providerCfg, config.SelectedModel{
+		Model:    "gemini-3.8-flash",
+		Provider: providerCfg.ID,
+	}, false, config.TypeGoogle)
+	require.NoError(t, err)
+	require.Equal(t, "google", provider.Name())
 }
 
 func TestBuildProviderOpenCodeRouting(t *testing.T) {

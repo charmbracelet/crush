@@ -78,6 +78,10 @@ var (
 // format the model speaks and so the key its provider options are read
 // from.
 func servingProvider(providerCfg config.ProviderConfig, model catwalk.Model) string {
+	if providerCfg.Type == config.TypeGoogle {
+		return google.Name
+	}
+
 	switch providerCfg.ID {
 	case string(catwalk.InferenceProviderBedrock), string(catwalk.InferenceProviderBedrockEurope):
 		return bedrock.Name
@@ -1386,6 +1390,10 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 			}
 		}
 		return c.buildOpenaiProvider(baseURL, apiKey, headers, token, wireType)
+	}
+
+	if providerCfg.Type == config.TypeGoogle {
+		return c.buildGoogleProvider(baseURL, apiKey, headers)
 	}
 
 	switch wireType {

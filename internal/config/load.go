@@ -49,9 +49,12 @@ var legacyProviderTypes = map[catwalk.Type]catwalk.Type{
 	"anthropic":     catwalk.TypeMessages,
 	"azure":         catwalk.TypeResponses,
 	"bedrock":       catwalk.TypeMessages,
-	"google":        catwalk.TypeCompletions,
 	"google-vertex": catwalk.TypeCompletions,
 }
+
+// TypeGoogle names a custom provider that speaks the Gemini API. Unlike
+// the endpoint types, it selects the Google SDK rather than an OpenAI one.
+const TypeGoogle = catwalk.Type("google")
 
 // NormalizeProviderType maps a catwalk v2 provider type onto the v3
 // endpoint type describing the same API format. Types that are already
@@ -622,6 +625,7 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 		// Default to OpenAI chat completions if not set.
 		providerConfig.Type = cmp.Or(providerConfig.Type, catwalk.TypeCompletions)
 		if !slices.Contains(catwalk.KnownProviderTypes(), providerConfig.Type) &&
+			providerConfig.Type != TypeGoogle &&
 			providerConfig.Type != hyper.Name &&
 			!discover.IsKnownCustomProvider(string(providerConfig.Type)) {
 			slog.Warn("Skipping custom provider due to unsupported provider type", "provider", id)

@@ -2790,6 +2790,7 @@ func TestNormalizeProviderType(t *testing.T) {
 		"openai":                catwalk.TypeResponses,
 		"openai-compat":         catwalk.TypeCompletions,
 		"anthropic":             catwalk.TypeMessages,
+		TypeGoogle:              TypeGoogle,
 		catwalk.TypeCompletions: catwalk.TypeCompletions,
 		"hyper":                 "hyper",
 	} {

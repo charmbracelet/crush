@@ -63,6 +63,11 @@ const (
 
 var userAgent = fmt.Sprintf("Charm-Crush/%s (https://charm.land/crush)", version.Version)
 
+// providerStoppedTurnMessage is the banner title recorded when a provider
+// ends the response on its own terms (fantasy's error/other finish
+// reasons) instead of completing it. Details are filled in per turn.
+const providerStoppedTurnMessage = "Provider stopped the response"
+
 //go:embed templates/title.md
 var titlePrompt []byte
 
@@ -630,6 +635,63 @@ func ValidateCall(call SessionAgentCall) error {
 	return nil
 }
 
+// turnFinish maps the upstream finish reason of a step onto what the
+// assistant message records: the reason itself plus the banner copy the
+// agent owns for the stops it has to explain (empty copy means the TUI
+// supplies its own). Abnormal stops are logged because they otherwise
+// look exactly like a turn that completed normally — the response just
+// stops short.
+func turnFinish(largeModel Model, sessionID string, reason fantasy.FinishReason) (message.FinishReason, string, string) {
+	switch reason {
+	case fantasy.FinishReasonStop:
+		return message.FinishReasonEndTurn, "", ""
+	case fantasy.FinishReasonToolCalls:
+		return message.FinishReasonToolUse, "", ""
+	case fantasy.FinishReasonLength:
+		// The turn looks like a normal, completed answer that simply
+		// stops mid-sentence, so leave a trace in the log even though
+		// the TUI owns the display copy.
+		slog.Warn(
+			"Model response truncated at the output token limit",
+			"session_id", sessionID,
+			"provider", largeModel.ModelCfg.Provider,
+			"model", largeModel.ModelCfg.Model,
+			"finish_reason", string(reason),
+		)
+		return message.FinishReasonMaxTokens, "", ""
+	case fantasy.FinishReasonContentFilter:
+		// Provider safety classifier stopped the model
+		// (Anthropic stop_reason=refusal, OpenAI content_filter).
+		// The TUI owns the display copy; we only persist the
+		// reason so the UI can show a REFUSED banner.
+		slog.Warn(
+			"Provider content filter stopped the model",
+			"session_id", sessionID,
+			"finish_reason", string(reason),
+		)
+		return message.FinishReasonContentFilter, "", ""
+	case fantasy.FinishReasonError, fantasy.FinishReasonOther:
+		// The provider gave up on the response from its own side
+		// (e.g. insufficient_system_resource) but the stream still
+		// completed, so no error reaches the run's error path. Record
+		// it as an error finish, with copy generic enough for any
+		// provider reason, or the turn renders as a normal completed
+		// answer that stops short.
+		slog.Warn(
+			"Provider stopped the model",
+			"session_id", sessionID,
+			"provider", largeModel.ModelCfg.Provider,
+			"model", largeModel.ModelCfg.Model,
+			"finish_reason", string(reason),
+		)
+		return message.FinishReasonError, providerStoppedTurnMessage, fmt.Sprintf(
+			"The provider ended this response before it was complete (finish_reason=%s). Try again, or use a different model.",
+			string(reason),
+		)
+	}
+	return message.FinishReasonUnknown, "", ""
+}
+
 func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *fantasy.AgentResult, retErr error) {
 	if err := ValidateCall(call); err != nil {
 		return nil, err
@@ -1081,26 +1143,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			for _, w := range stepResult.Warnings {
 				slog.Warn("Provider warning", "type", w.Type, "message", w.Message)
 			}
-			finishReason := message.FinishReasonUnknown
-			switch stepResult.FinishReason {
-			case fantasy.FinishReasonLength:
-				finishReason = message.FinishReasonMaxTokens
-			case fantasy.FinishReasonStop:
-				finishReason = message.FinishReasonEndTurn
-			case fantasy.FinishReasonToolCalls:
-				finishReason = message.FinishReasonToolUse
-			case fantasy.FinishReasonContentFilter:
-				// Provider safety classifier stopped the model
-				// (Anthropic stop_reason=refusal, OpenAI content_filter).
-				// The TUI owns the display copy; we only persist the
-				// reason so the UI can show a REFUSED banner.
-				finishReason = message.FinishReasonContentFilter
-				slog.Warn(
-					"Provider content filter stopped the model",
-					"session_id", call.SessionID,
-					"finish_reason", string(stepResult.FinishReason),
-				)
-			}
+			finishReason, finishMessage, finishDetails := turnFinish(largeModel, call.SessionID, stepResult.FinishReason)
 			// If a tool result halted the turn (e.g. a hook halt or a
 			// permission denial), the step ends on FinishReasonToolCalls but
 			// the model will not be called again. Treat it as the end of the
@@ -1113,7 +1156,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 					}
 				}
 			}
-			currentAssistant.AddFinish(finishReason, "", "")
+			currentAssistant.AddFinish(finishReason, finishMessage, finishDetails)
 			currentAssistant.PrismModelID, currentAssistant.PrismModelName = extractPrismModel(stepResult.ProviderMetadata)
 			currentAssistant.PrismHypercreditSavings, currentAssistant.PrismDollarSavings = extractPrismSavings(stepResult.ProviderMetadata)
 			sessionLock.Lock()
@@ -1279,9 +1322,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 	// Route the finished turn's response back to the channel it came
 	// from. Runs before the busy state is released so a follow-up push
-	// queued behind this turn cannot overtake its reply.
+	// queued behind this turn cannot overtake its reply. The reply text
+	// carries a closing note when the response stopped short, because a
+	// channel recipient sees only the text, never the TUI banner.
 	if finished {
-		a.sendChannelReply(ctx, call, currentAssistant.Content().String(), completedToolCalls.Copy())
+		a.sendChannelReply(ctx, call, channelReplyText(currentAssistant), completedToolCalls.Copy())
 	}
 
 	// Release active request before publishing the notification.
@@ -1534,7 +1579,15 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID, trigger string,
 		}
 	}
 
-	summaryMessage.AddFinish(message.FinishReasonEndTurn, "", "")
+	// A compaction summary that stopped short is the record the session
+	// goes on reading from, so record and log why it is incomplete
+	// rather than filing it under a clean end_turn. Unknown finishes
+	// (providers that never report one) keep the historical end_turn.
+	finishReason, finishMessage, finishDetails := turnFinish(largeModel, sessionID, resp.Response.FinishReason)
+	if finishReason == message.FinishReasonUnknown {
+		finishReason = message.FinishReasonEndTurn
+	}
+	summaryMessage.AddFinish(finishReason, finishMessage, finishDetails)
 	err = a.messages.Update(genCtx, summaryMessage)
 	if err != nil {
 		return err

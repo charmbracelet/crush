@@ -300,13 +300,18 @@ func AssistantInfoID(messageID string) string {
 // render its info footer. The turn that ends the prompt always gets one;
 // intermediate turns only get one when a Prism-routed model name is
 // available, since that is the only case where the footer adds
-// per-turn information.
+// per-turn information. A truncated turn always gets one: it is the
+// final turn by definition (the model cannot continue past the token
+// limit), and without the footer it would render with the compact
+// intermediate-step header, reading as a step of a loop still running.
 func ShouldShowAssistantInfo(msg *message.Message) bool {
 	finishData := msg.FinishPart()
 	if finishData == nil {
 		return false
 	}
-	return finishData.Reason == message.FinishReasonEndTurn || msg.PrismModelName != ""
+	return finishData.Reason == message.FinishReasonEndTurn ||
+		finishData.Reason == message.FinishReasonMaxTokens ||
+		msg.PrismModelName != ""
 }
 
 // AssistantInfoItem renders model info and response time after assistant completes.
@@ -382,8 +387,14 @@ func (a *AssistantInfoItem) renderContent(width int) string {
 		return ""
 	}
 	// The final turn of a prompt keeps the full footer (duration and
-	// separator line); intermediate turns render a compact header.
-	isFinalTurn := finishData.Reason == message.FinishReasonEndTurn
+	// separator line); intermediate turns render a compact header. A
+	// truncated turn never gets a follow-up step (the model cannot
+	// continue past the token limit), so it renders the full footer
+	// too: otherwise the compact header reads as just another step of a
+	// loop that is still running, and the TRUNCATED banner is the only
+	// hint the turn is over.
+	isFinalTurn := finishData.Reason == message.FinishReasonEndTurn ||
+		finishData.Reason == message.FinishReasonMaxTokens
 
 	icon := a.sty.Messages.AssistantInfoIcon.Render(styles.ModelIcon)
 	mainModelName := "Unknown Model"
@@ -506,7 +517,10 @@ func ShouldRenderAssistantMessage(msg *message.Message) bool {
 	thinking := strings.TrimSpace(msg.ReasoningContent().Thinking)
 	isCancelled := msg.FinishReason() == message.FinishReasonCanceled
 	hasToolCalls := len(msg.ToolCalls()) > 0
-	return !hasToolCalls || content != "" || thinking != "" || msg.IsThinking() || msg.IsErrorLike() || isCancelled
+	// A tool-only turn renders no assistant body, but an error, refusal,
+	// or truncation banner still has to appear, so those finishes force
+	// the message to render.
+	return !hasToolCalls || content != "" || thinking != "" || msg.IsThinking() || msg.IsErrorLike() || msg.IsTruncated() || isCancelled
 }
 
 // BuildToolResultMap creates a map of tool call IDs to their results from a list of messages.

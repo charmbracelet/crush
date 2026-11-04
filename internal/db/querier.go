@@ -6,9 +6,11 @@ package db
 
 import (
 	"context"
+	"database/sql"
 )
 
 type Querier interface {
+	AddSessionCost(ctx context.Context, arg AddSessionCostParams) (int64, error)
 	CreateFile(ctx context.Context, arg CreateFileParams) (File, error)
 	CreateMessage(ctx context.Context, arg CreateMessageParams) (Message, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
@@ -39,9 +41,14 @@ type Querier interface {
 	InsertMCPEnabledServer(ctx context.Context, name string) error
 	// Backs prompt history when no session is open. Needs
 	// idx_messages_role_created_at to seek rather than scan the table.
+	// Child sessions are excluded: a subagent's task prompt is a user message
+	// too, but the user never typed it, so it has no place in the prompt
+	// history.
 	ListAllUserMessages(ctx context.Context) ([]Message, error)
+	ListChildSessions(ctx context.Context, parentSessionID sql.NullString) ([]Session, error)
 	ListFilesByPath(ctx context.Context, path string) ([]File, error)
 	ListFilesBySession(ctx context.Context, sessionID string) ([]File, error)
+	ListFilesBySessionWithChildren(ctx context.Context, arg ListFilesBySessionWithChildrenParams) ([]File, error)
 	ListLatestSessionFiles(ctx context.Context, sessionID string) ([]File, error)
 	ListMCPDisabledServers(ctx context.Context) ([]string, error)
 	ListMCPEnabledServers(ctx context.Context) ([]string, error)

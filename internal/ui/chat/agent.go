@@ -2,11 +2,13 @@ package chat
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"charm.land/lipgloss/v2"
 	"charm.land/lipgloss/v2/tree"
 	"github.com/charmbracelet/crush/internal/agent"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 )
@@ -27,6 +29,9 @@ type AgentToolMessageItem struct {
 	*baseToolMessageItem
 
 	nestedTools []ToolMessageItem
+	// backgroundRunning reports whether the item's background subagent is
+	// still running. It only matters for background items.
+	backgroundRunning bool
 }
 
 var (
@@ -45,9 +50,33 @@ func NewAgentToolMessageItem(
 	t.baseToolMessageItem = newBaseToolMessageItem(sty, toolCall, result, &AgentToolRenderContext{agent: t}, canceled)
 	// For the agent tool we keep spinning until the tool call is finished.
 	t.spinningFunc = func(state SpinningState) bool {
-		return !state.HasResult() && !state.IsCanceled()
+		if state.IsCanceled() {
+			return false
+		}
+		return !state.HasResult() || (t.backgroundRunning && backgroundMetadata(state.Result).Background)
 	}
 	return t
+}
+
+// backgroundMetadata decodes the metadata the agent tool attaches to its
+// result when the subagent was started in the background.
+func backgroundMetadata(result *message.ToolResult) agent.AgentBackgroundMetadata {
+	var meta agent.AgentBackgroundMetadata
+	if result != nil {
+		_ = json.Unmarshal([]byte(result.Metadata), &meta)
+	}
+	return meta
+}
+
+// SetBackgroundRunning sets whether the item's background subagent is still
+// running. Items that were not started in the background ignore it.
+func (a *AgentToolMessageItem) SetBackgroundRunning(running bool) {
+	if a.backgroundRunning == running {
+		return
+	}
+	a.backgroundRunning = running
+	a.clearCache()
+	a.Bump()
 }
 
 // Advance implements [Animatable].
@@ -60,7 +89,7 @@ func NewAgentToolMessageItem(
 // Without the bump, the list cache would serve the previously rendered
 // frame indefinitely and the spinner would appear frozen.
 func (a *AgentToolMessageItem) Advance() bool {
-	if a.result != nil || a.Status() == ToolStatusCanceled {
+	if !a.isSpinning() {
 		return false
 	}
 	changed := a.anim.Advance()
@@ -131,27 +160,64 @@ func (a *AgentToolMessageItem) AddNestedTool(tool ToolMessageItem) {
 	a.Bump()
 }
 
+// collapsedNestedTools is how many of an agent's latest tool calls show while
+// its item is collapsed. Drawing every call made a busy agent's item slower on
+// each frame and taller than the screen.
+const collapsedNestedTools = 10
+
+// addNestedTools adds an agent's tool calls to its tree, only the latest ones
+// unless the item is expanded.
+func addNestedTools(sty *styles.Styles, root *tree.Tree, nested []ToolMessageItem, width int, expanded bool) {
+	if hidden := len(nested) - collapsedNestedTools; hidden > 0 && !expanded {
+		root.Child(sty.Tool.ParamMain.Render(fmt.Sprintf("… %d earlier tool calls", hidden)))
+		nested = nested[hidden:]
+	}
+	for _, tool := range nested {
+		root.Child(tool.Render(width))
+	}
+}
+
 // AgentToolRenderContext renders agent tool messages.
 type AgentToolRenderContext struct {
 	agent *AgentToolMessageItem
 }
 
+// agentRenderLabel returns the header label for an agent tool row: the plain
+// "Agent" string for the default task agent, or "Agent: <name>" when a
+// specialized subagent has been dispatched.
+func agentRenderLabel(subagentType string) string {
+	if subagentType == "" || subagentType == config.AgentTask {
+		return "Agent"
+	}
+	return "Agent: " + subagentType
+}
+
 // RenderTool implements the [ToolRenderer] interface.
 func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
-	if !opts.ToolCall.Finished && !opts.IsCanceled() && len(r.agent.nestedTools) == 0 {
-		return pendingTool(sty, "Agent", opts.Anim, opts.Compact)
-	}
 
 	var params agent.AgentParams
 	_ = json.Unmarshal([]byte(opts.ToolCall.Input), &params)
+
+	label := agentRenderLabel(params.SubagentType)
+	background := backgroundMetadata(opts.Result)
+	if background.Background {
+		label = "Background: " + background.Name
+		if opts.IsSpinning {
+			opts.Status = ToolStatusRunning
+		}
+	}
+
+	if !opts.ToolCall.Finished && !opts.IsCanceled() && len(r.agent.nestedTools) == 0 {
+		return pendingTool(sty, label, opts.Anim, opts.Compact)
+	}
 
 	prompt := params.Prompt
 	if !opts.ExpandedContent {
 		prompt = strings.ReplaceAll(prompt, "\n", " ")
 	}
 
-	header := toolHeader(sty, opts.Status, "Agent", cappedWidth, opts)
+	header := toolHeader(sty, opts.Status, label, cappedWidth, opts)
 	if opts.Compact {
 		return header
 	}
@@ -180,21 +246,25 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	// Build tree with nested tool calls.
 	childTools := tree.Root(header)
 
-	for _, nestedTool := range r.agent.nestedTools {
-		childView := nestedTool.Render(remainingWidth)
-		childTools.Child(childView)
-	}
+	addNestedTools(sty, childTools, r.agent.nestedTools, remainingWidth, opts.ExpandedContent)
 
 	// Build parts.
 	var parts []string
 	parts = append(parts, roundedTree(childTools, taskTagWidth-5).String())
 
 	// Show animation if still running.
-	if !opts.HasResult() && !opts.IsCanceled() {
+	if opts.IsSpinning {
 		parts = append(parts, "", opts.Anim.Render())
 	}
 
 	result := lipgloss.JoinVertical(lipgloss.Left, parts...)
+
+	// The immediate result of a background start is not the subagent's
+	// answer. The report arrives later as its own message.
+	if background.Background {
+		hint := sty.Tool.ParamMain.Render("Reports back when finished.")
+		return joinToolParts(result, hint)
+	}
 
 	// Add body content when completed.
 	if opts.HasResult() && opts.Result.Content != "" {
@@ -348,10 +418,7 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 	// Build tree with nested tool calls.
 	childTools := tree.Root(header)
 
-	for _, nestedTool := range r.fetch.nestedTools {
-		childView := nestedTool.Render(remainingWidth)
-		childTools.Child(childView)
-	}
+	addNestedTools(sty, childTools, r.fetch.nestedTools, remainingWidth, opts.ExpandedContent)
 
 	// Build parts.
 	var parts []string
@@ -371,4 +438,65 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 	}
 
 	return result
+}
+
+// -----------------------------------------------------------------------------
+// Agent Send and Stop Tools
+// -----------------------------------------------------------------------------
+
+// NewAgentSendToolMessageItem creates a message item for an agent_send call.
+func NewAgentSendToolMessageItem(
+	sty *styles.Styles,
+	toolCall message.ToolCall,
+	result *message.ToolResult,
+	canceled bool,
+) ToolMessageItem {
+	return newBaseToolMessageItem(sty, toolCall, result, backgroundAgentRenderer("Agent: Send", true), canceled)
+}
+
+// NewAgentStopToolMessageItem creates a message item for an agent_stop call.
+func NewAgentStopToolMessageItem(
+	sty *styles.Styles,
+	toolCall message.ToolCall,
+	result *message.ToolResult,
+	canceled bool,
+) ToolMessageItem {
+	return newBaseToolMessageItem(sty, toolCall, result, backgroundAgentRenderer("Agent: Stop", false), canceled)
+}
+
+// backgroundAgentRenderer renders agent_send and agent_stop calls: the
+// subagent name (and the message, when withMessage is set) in the header and
+// the result text as the body.
+func backgroundAgentRenderer(label string, withMessage bool) ToolRenderer {
+	return ToolRendererFunc(func(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
+		cappedWidth := cappedMessageWidth(width)
+		if opts.IsPending() {
+			return pendingTool(sty, label, opts.Anim, opts.Compact)
+		}
+
+		var params agent.AgentSendParams
+		_ = json.Unmarshal([]byte(opts.ToolCall.Input), &params)
+
+		toolParams := []string{params.Name}
+		if withMessage && params.Message != "" {
+			toolParams = append(toolParams, strings.ReplaceAll(params.Message, "\n", " "))
+		}
+
+		header := toolHeader(sty, opts.Status, label, cappedWidth, opts, toolParams...)
+		if opts.Compact {
+			return header
+		}
+
+		if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
+			return joinToolParts(header, earlyState)
+		}
+
+		if opts.HasEmptyResult() {
+			return header
+		}
+
+		bodyWidth := cappedWidth - toolBodyLeftPaddingTotal
+		body := sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, bodyWidth, opts.ExpandedContent))
+		return joinToolParts(header, body)
+	})
 }

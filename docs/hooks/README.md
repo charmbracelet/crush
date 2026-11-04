@@ -207,6 +207,13 @@ running turn has been cancelled (so you will see `Interrupt` first). It has a
 two second budget shared by every `SessionEnd` hook, so keep it to enqueueing
 or notifying; do the heavy work elsewhere.
 
+**Scope**: `PreToolUse` fires on the **top-level agent's** tool calls and on
+**custom subagents'** tool calls, since custom subagents can hold write tools.
+The built-in read-only sub-agents (the `agent` task tool, `agentic_fetch`) run
+without hook interception so a single delegated turn doesn't trigger your hook
+N times. The outer sub-agent tool call itself _is_ hooked, so policy like
+"never let the agent spawn sub-agents" still works.
+
 ### What each control field does
 
 - **`decision: "allow"`** — pre-approves the tool call, skips the permission

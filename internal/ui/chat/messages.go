@@ -483,6 +483,9 @@ func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults m
 		if len(items) > 0 {
 			return items
 		}
+		if _, ok := msg.SubagentReport(); ok {
+			return []MessageItem{NewSubagentReportItem(sty, msg)}
+		}
 		return []MessageItem{NewUserMessageItem(sty, msg, newAttachmentRenderer(sty))}
 	case message.Assistant:
 		var items []MessageItem

@@ -730,6 +730,41 @@ func (w *ClientWorkspace) ReadSkill(ctx context.Context, skillID string) ([]byte
 	}, nil
 }
 
+// -- Subagents (local-mode only) --
+//
+// All subagent surfaces are unimplemented over RPC: discovery, the running
+// runtime, cancellation, and deletion are server-side concerns the client does
+// not expose today. These stubs return empty/no-op, so in client/server mode
+// the Subagents dialog opens with no entries.
+
+// ActiveSubagents returns nil in client mode.
+func (w *ClientWorkspace) ActiveSubagents() []SubagentInfo {
+	return nil
+}
+
+// RunningSubagents returns nil in client mode.
+func (w *ClientWorkspace) RunningSubagents(_ string) []RunningSubagentInfo {
+	return nil
+}
+
+// CancelSubagent is a no-op in client mode.
+func (w *ClientWorkspace) CancelSubagent(_ string) {}
+
+// AllSubagents returns nil in client mode.
+func (w *ClientWorkspace) AllSubagents() []SubagentDefInfo {
+	return nil
+}
+
+// DeleteUserSubagent returns an error in client mode.
+func (w *ClientWorkspace) DeleteUserSubagent(name string) error {
+	return fmt.Errorf("deleting subagent %q is not supported in client/server mode", name)
+}
+
+// SetSubagentDisabled returns an error in client mode.
+func (w *ClientWorkspace) SetSubagentDisabled(name string, _ bool) error {
+	return fmt.Errorf("toggling subagent %q is not supported in client/server mode", name)
+}
+
 // -- MCP operations --
 
 // mcpStatesTimeout bounds a single MCP state probe. The client SDK sets no
@@ -1550,6 +1585,8 @@ func protoToMessage(m proto.Message) message.Message {
 				Output:   v.Output,
 				ExitCode: v.ExitCode,
 			})
+		case proto.SubagentReport:
+			msg.Parts = append(msg.Parts, message.SubagentReport{Name: v.Name, Status: v.Status, Output: v.Output})
 		}
 	}
 

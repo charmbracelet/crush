@@ -29,7 +29,9 @@ type Quit struct {
 	compositor *lipgloss.Compositor
 	hoverX     int
 	hoverY     int
-	keyMap     struct {
+	// runningSubagents is how many background subagents quitting stops.
+	runningSubagents int
+	keyMap           struct {
 		LeftRight,
 		EnterSpace,
 		Yes,
@@ -74,6 +76,25 @@ func NewQuit(com *common.Common) *Quit {
 		key.WithHelp("ctrl+c", "quit"),
 	)
 	return q
+}
+
+// SetRunningSubagents sets how many background subagents are running, so
+// the dialog can warn that quitting stops them.
+func (q *Quit) SetRunningSubagents(n int) {
+	q.runningSubagents = n
+}
+
+// subagentsWarning returns the warning line for running subagents, or an
+// empty string when none are running.
+func (q *Quit) subagentsWarning() string {
+	switch q.runningSubagents {
+	case 0:
+		return ""
+	case 1:
+		return "1 subagent still running; quitting stops them."
+	default:
+		return fmt.Sprintf("%d subagents still running; quitting stops them.", q.runningSubagents)
+	}
 }
 
 // ID implements [Model].
@@ -136,11 +157,14 @@ func (q *Quit) handleMouseClick(msg tea.MouseClickMsg) Action {
 
 // Draw implements [Dialog].
 func (q *Quit) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
-	const (
-		// buttonLine is the index of the content line reserved for the
-		// buttons, which are drawn as layers on top of the frame.
-		buttonLine = 2
-	)
+	// buttonLine is the index of the content line reserved for the buttons,
+	// which are drawn as layers on top of the frame.
+	buttonLine := 2
+	warning := q.subagentsWarning()
+	if warning != "" {
+		// The warning and a blank row sit between the question and buttons.
+		buttonLine += 2
+	}
 	var (
 		baseStyle = q.com.Styles.Dialog.Quit.Content
 		hintStyle = q.com.Styles.Dialog.Quit.Hint
@@ -163,17 +187,17 @@ func (q *Quit) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	// blank row of the same width reserves space for the buttons, which are
 	// painted as layers so their bounds double as mouse hit regions.
 	renderContent := func(buttonRow string) string {
-		return baseStyle.Render(
-			lipgloss.JoinVertical(
-				lipgloss.Center,
-				quitQuestion,
-				"",
-				buttonRow,
-				"",
-				hintStyle.Render(quitHintLineOne),
-				hintStyle.Render(quitHintLineTwo),
-			),
+		lines := []string{quitQuestion, ""}
+		if warning != "" {
+			lines = append(lines, warning, "")
+		}
+		lines = append(lines,
+			buttonRow,
+			"",
+			hintStyle.Render(quitHintLineOne),
+			hintStyle.Render(quitHintLineTwo),
 		)
+		return baseStyle.Render(lipgloss.JoinVertical(lipgloss.Center, lines...))
 	}
 
 	content := renderContent(strings.Repeat(" ", buttonsWidth))

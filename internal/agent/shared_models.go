@@ -27,6 +27,11 @@ func (c *coordinator) rebuildModels(ctx context.Context) error {
 	c.rebuildMu.Lock()
 	defer c.rebuildMu.Unlock()
 
+	// Pinned subagent models were built from the credential this rebuild is
+	// replacing, so they must be built again on their next read. Dropping them
+	// even when the rebuild fails is safe: they only cost a rebuild.
+	c.resetSubagentModelCache()
+
 	large, err := c.buildModel(ctx, config.SelectedModelTypeLarge, false)
 	if err != nil {
 		return err

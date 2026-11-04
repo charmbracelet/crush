@@ -43,6 +43,7 @@ type ClosedMsg struct{}
 type CompletionItemsLoadedMsg struct {
 	Files     []FileCompletionValue
 	Resources []ResourceCompletionValue
+	Subagents []SubagentCompletionValue
 }
 
 // Completions represents the completions popup component.
@@ -149,10 +150,12 @@ func (c *Completions) KeyMap() KeyMap {
 
 // Open opens the completions with file items from the filesystem. Files that
 // hostFiles names, the host application's open files, are listed first. It
-// is called off the UI goroutine.
-func (c *Completions) Open(depth, limit int, hostFiles func() []string) tea.Cmd {
+// is called off the UI goroutine. subagentItems are already in memory so they
+// are passed directly rather than loaded asynchronously.
+func (c *Completions) Open(depth, limit int, hostFiles func() []string, subagentItems []SubagentCompletionValue) tea.Cmd {
 	return func() tea.Msg {
 		var msg CompletionItemsLoadedMsg
+		msg.Subagents = subagentItems
 		var wg sync.WaitGroup
 		wg.Go(func() {
 			msg.Files = loadFiles(depth, limit, hostFiles())
@@ -165,11 +168,25 @@ func (c *Completions) Open(depth, limit int, hostFiles func() []string) tea.Cmd 
 	}
 }
 
-// SetItems sets the files and MCP resources and rebuilds the merged list.
-func (c *Completions) SetItems(files []FileCompletionValue, resources []ResourceCompletionValue) {
-	items := make([]list.FilterableItem, 0, len(files)+len(resources))
+// SetItems sets the subagents, files and MCP resources and rebuilds the
+// merged list. Subagents appear first so they sit at the top of the popup.
+func (c *Completions) SetItems(files []FileCompletionValue, resources []ResourceCompletionValue, subagents []SubagentCompletionValue) {
+	items := make([]list.FilterableItem, 0, len(subagents)+len(files)+len(resources))
 
-	// Add files first.
+	// Subagents appear first, shown as @name so they read differently from
+	// file paths.
+	for _, sa := range subagents {
+		item := NewCompletionItem(
+			"@"+sa.Name,
+			sa,
+			c.normalStyle,
+			c.focusedStyle,
+			c.matchStyle,
+		)
+		items = append(items, item)
+	}
+
+	// Files.
 	for _, file := range files {
 		item := NewCompletionItem(
 			file.Path,
@@ -181,7 +198,7 @@ func (c *Completions) SetItems(files []FileCompletionValue, resources []Resource
 		items = append(items, item)
 	}
 
-	// Add MCP resources.
+	// MCP resources.
 	for _, resource := range resources {
 		item := NewCompletionItem(
 			resource.MCPName+"/"+cmp.Or(resource.Title, resource.URI),
@@ -263,6 +280,8 @@ func namePriorityTier(path, queryLower string) int {
 		return tierFallback
 	}
 
+	// Subagent items display as @name; rank them by the bare name.
+	path = strings.TrimPrefix(path, "@")
 	pathLower := strings.ToLower(path)
 	baseLower := strings.ToLower(filepath.Base(strings.ReplaceAll(path, `\`, `/`)))
 	stemLower := strings.TrimSuffix(baseLower, filepath.Ext(baseLower))
@@ -391,6 +410,11 @@ func (c *Completions) selectCurrent(keepOpen bool) tea.Msg {
 		}
 	case FileCompletionValue:
 		return SelectionMsg[FileCompletionValue]{
+			Value:    item,
+			KeepOpen: keepOpen,
+		}
+	case SubagentCompletionValue:
+		return SelectionMsg[SubagentCompletionValue]{
 			Value:    item,
 			KeepOpen: keepOpen,
 		}

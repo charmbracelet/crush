@@ -23,6 +23,12 @@ type ResourceCompletionValue struct {
 	MIMEType string
 }
 
+// SubagentCompletionValue represents a subagent @-mention completion value.
+type SubagentCompletionValue struct {
+	Name        string
+	Description string
+}
+
 // CompletionItem represents an item in the completions list.
 type CompletionItem struct {
 	*list.Versioned

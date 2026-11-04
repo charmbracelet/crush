@@ -315,6 +315,9 @@ func (p Palette) ToQuickStyleOpts(base quickStyleOpts) quickStyleOpts {
 		ansiBrightMagenta: resolveColor(p.AnsiBrightMagenta, base.ansiBrightMagenta),
 		ansiBrightCyan:    resolveColor(p.AnsiBrightCyan, base.ansiBrightCyan),
 		ansiBrightWhite:   resolveColor(p.AnsiBrightWhite, base.ansiBrightWhite),
+
+		// Palette files don't override subagent hues; keep the base theme's.
+		subagentPalette: base.subagentPalette,
 	}
 }
 

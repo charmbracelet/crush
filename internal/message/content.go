@@ -148,6 +148,32 @@ type ShellCommand struct {
 
 func (ShellCommand) isPart() {}
 
+// SubagentReport is the result a background subagent hands back to its
+// parent. It lives in a user message so the parent model reads it as new
+// input, but it is not something the user typed.
+type SubagentReport struct {
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	Output string `json:"output"`
+}
+
+func (SubagentReport) isPart() {}
+
+// PromptText renders the report the way the parent model reads it.
+func (r SubagentReport) PromptText() string {
+	return fmt.Sprintf("<subagent-report name=%q status=%q>\n%s\n</subagent-report>", r.Name, r.Status, r.Output)
+}
+
+// SubagentReport returns the message's subagent report, if it has one.
+func (m *Message) SubagentReport() (SubagentReport, bool) {
+	for _, part := range m.Parts {
+		if r, ok := part.(SubagentReport); ok {
+			return r, true
+		}
+	}
+	return SubagentReport{}, false
+}
+
 // HasShellCommand reports whether the message contains any ShellCommand parts.
 func (m *Message) HasShellCommand() bool {
 	for _, part := range m.Parts {
@@ -160,6 +186,9 @@ func (m *Message) HasShellCommand() bool {
 
 // IsPrompt reports whether the message is something the user typed.
 func (m *Message) IsPrompt() bool {
+	if _, isReport := m.SubagentReport(); isReport {
+		return false
+	}
 	return m.Role == User && !m.HasShellCommand()
 }
 
@@ -574,6 +603,9 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 			})
 		}
 		text = PromptWithTextAttachments(text, textAttachments)
+		if report, ok := m.SubagentReport(); ok {
+			text = report.PromptText()
+		}
 		// Include bang-mode shell commands as context for the agent.
 		for _, sc := range m.ShellCommands() {
 			shellText := fmt.Sprintf("$ %s\n%s\n(exit code %d)", sc.Command, ansi.Strip(sc.Output), sc.ExitCode)

@@ -16,7 +16,7 @@ func TestKeyLines(t *testing.T) {
 
 	require.Equal(t, []string{
 		"Number: D2760001240103040006123456780000",
-		"Key:    ABC1234567890DEF",
+		"Key: ABC1234567890DEF",
 		"Holder: Test Key <test@example.com>",
 	}, Key{
 		CardNumber: "D2760001240103040006123456780000",
@@ -25,7 +25,7 @@ func TestKeyLines(t *testing.T) {
 	}.Lines())
 
 	// The fingerprint stands in when GPG reported no long key ID.
-	require.Equal(t, []string{"Key:    0123ABCD"}, Key{Fingerprint: "0123ABCD"}.Lines())
+	require.Equal(t, []string{"Key: 0123ABCD"}, Key{Fingerprint: "0123ABCD"}.Lines())
 }
 
 func TestPromptResponds(t *testing.T) {

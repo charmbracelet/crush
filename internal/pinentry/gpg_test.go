@@ -69,6 +69,33 @@ func TestRunnerSucceedsWhenCached(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestRunnerReadsKeyFromPrivateStatusFD(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake gpg shim only runs on POSIX shells")
+	}
+	// A security key signing run by hand (no --status-fd from the
+	// caller): gpg only names the key on the status fd the runner adds.
+	script := `#!/bin/sh
+case " $* " in *" --status-fd 4 "*) ;; *) echo "no status fd" >&2; exit 1 ;; esac
+read -r pass <&3
+echo "[GNUPG:] KEY_CONSIDERED 0995DB5DE156832F8E063193C2E661E4E4BA9F53 2" >&4
+[ "$pass" = "123456" ] && exit 0
+echo "gpg: signing failed: Bad PIN" >&2
+exit 2
+`
+	path := filepath.Join(t.TempDir(), "fake-gpg")
+	require.NoError(t, os.WriteFile(path, []byte(script), 0o755))
+
+	rec := &recordingPrompter{secrets: []string{"123456"}}
+	opts := testOptions("", "data")
+	opts.Args = []string{"gpg", "--clearsign"}
+	require.NoError(t, testRunner(path, rec.prompter()).Run(context.Background(), opts))
+	require.Equal(t, 1, rec.calls)
+	require.Equal(t, KindPIN, rec.reqs[0].Kind)
+	require.Equal(t, []string{"Key: 0995DB5DE156832F8E063193C2E661E4E4BA9F53"}, rec.reqs[0].Key.Lines())
+	require.NotContains(t, opts.Stderr.(*bytes.Buffer).String(), "[GNUPG:]", "status lines stay off the caller's stderr")
+}
+
 func TestRunnerPromptsAndSucceeds(t *testing.T) {
 	rec := &recordingPrompter{}
 	r := testRunner(writeFakeGPG(t), rec.prompter())
@@ -181,6 +208,19 @@ func TestStatusKey(t *testing.T) {
 		"gpg: signing failed: No passphrase given",
 	}, "\n")))
 	require.Equal(t, "2C9A1667F88CD79D387E6BF7DAAE8DA632952425", modern.cacheKey())
+}
+
+func TestLocalUser(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, "ABC123", localUser([]string{"gpg", "--status-fd=2", "-bsau", "ABC123"}))
+	require.Equal(t, "ABC123", localUser([]string{"gpg", "--local-user", "ABC123", "-s"}))
+	require.Equal(t, "ABC123", localUser([]string{"gpg", "--local-user=ABC123"}))
+	require.Empty(t, localUser([]string{"gpg", "--sign", "file"}))
+
+	st := newStatus()
+	st.record([]byte("[GNUPG:] ENC_TO ABC1234567890DEF 1 0\n[GNUPG:] DECRYPTION_KEY FPR1 FPR2 u\n"))
+	require.Equal(t, Key{KeyID: "ABC1234567890DEF", Fingerprint: "FPR1"}, st.key())
 }
 
 func TestStatusKeyEmpty(t *testing.T) {

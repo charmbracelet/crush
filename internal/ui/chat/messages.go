@@ -300,13 +300,18 @@ func AssistantInfoID(messageID string) string {
 // render its info footer. The turn that ends the prompt always gets one;
 // intermediate turns only get one when a Prism-routed model name is
 // available, since that is the only case where the footer adds
-// per-turn information.
+// per-turn information. A truncated turn always gets one: it is the
+// final turn by definition (the model cannot continue past the token
+// limit), and without the footer it would render with the compact
+// intermediate-step header, reading as a step of a loop still running.
 func ShouldShowAssistantInfo(msg *message.Message) bool {
 	finishData := msg.FinishPart()
 	if finishData == nil {
 		return false
 	}
-	return finishData.Reason == message.FinishReasonEndTurn || msg.PrismModelName != ""
+	return finishData.Reason == message.FinishReasonEndTurn ||
+		finishData.Reason == message.FinishReasonMaxTokens ||
+		msg.PrismModelName != ""
 }
 
 // AssistantInfoItem renders model info and response time after assistant completes.

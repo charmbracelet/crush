@@ -25,21 +25,20 @@ type planRunCompletePublisher struct {
 }
 
 func (p *planRunCompletePublisher) Publish(eventType pubsub.EventType, complete notify.RunComplete) {
-	complete = p.persist(context.Background(), complete)
+	p.persist(context.Background(), complete)
 	p.downstream.Publish(eventType, complete)
 }
 
 func (p *planRunCompletePublisher) PublishMustDeliver(ctx context.Context, eventType pubsub.EventType, complete notify.RunComplete) {
-	complete = p.persist(ctx, complete)
+	p.persist(ctx, complete)
 	p.downstream.PublishMustDeliver(ctx, eventType, complete)
 }
 
-// persist saves a completed ready plan and returns the run event enriched
-// with the saved path. Runs that did not produce a ready plan (errors,
-// cancellations, intermediate replies) are returned unchanged.
-func (p *planRunCompletePublisher) persist(ctx context.Context, complete notify.RunComplete) notify.RunComplete {
+// Persist saves completed ready plans, skipping errors, cancellations,
+// and intermediate replies.
+func (p *planRunCompletePublisher) persist(ctx context.Context, complete notify.RunComplete) {
 	if complete.Error != "" || complete.Cancelled || !plan.ReadyMarkerPresent(complete.Text) {
-		return complete
+		return
 	}
 	path, err := saveReadyPlan(p.workingDir, complete, time.Now())
 	if err != nil {
@@ -51,9 +50,8 @@ func (p *planRunCompletePublisher) persist(ctx context.Context, complete notify.
 				Message:   err.Error(),
 			})
 		}
-		return complete
+		return
 	}
-	complete.PlanPath = path
 	if p.notify != nil {
 		p.notify.PublishMustDeliver(ctx, pubsub.CreatedEvent, notify.Notification{
 			SessionID: complete.SessionID,
@@ -61,7 +59,6 @@ func (p *planRunCompletePublisher) persist(ctx context.Context, complete notify.
 			Message:   path,
 		})
 	}
-	return complete
 }
 
 func saveReadyPlan(workingDir string, complete notify.RunComplete, at time.Time) (string, error) {

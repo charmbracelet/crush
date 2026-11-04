@@ -171,15 +171,10 @@ func TestPlanRunCompletePublisherReportsSaveResult(t *testing.T) {
 			if fail {
 				require.Equal(t, notify.TypePlanSaveError, notice.Type)
 				require.Contains(t, notice.Message, "create plan directory")
-				require.Empty(t, downstream.PlanPath, "a failed save must not report a plan path")
 			} else {
 				require.Equal(t, notify.TypePlanSaved, notice.Type)
 				require.FileExists(t, filepath.Join(workingDir, notice.Message))
-				// The terminal event carries the saved path so the TUI can
-				// render it under the plan card.
-				require.Equal(t, notice.Message, downstream.PlanPath)
 			}
-			complete.PlanPath = downstream.PlanPath
 			require.Equal(t, complete, downstream)
 		})
 	}

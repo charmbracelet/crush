@@ -1,7 +1,6 @@
 package model
 
 import (
-	"fmt"
 	"image"
 	"slices"
 	"strings"
@@ -14,12 +13,10 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
-	"github.com/charmbracelet/crush/internal/ui/util"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/clipperhouse/displaywidth"
 	"github.com/clipperhouse/uax29/v2/words"
-	"github.com/pkg/browser"
 )
 
 // Constants for multi-click detection.
@@ -1131,12 +1128,6 @@ func (m *Chat) HandleDelayedClick(msg DelayedClickMsg) (bool, tea.Cmd) {
 	if selectedItem != m.list.ItemAt(msg.ItemIdx) {
 		return false, nil
 	}
-	if item, ok := selectedItem.(*chat.AssistantMessageItem); ok && !m.mouseDown {
-		if path := item.PlanFileAt(msg.X, msg.Y, m.list.Width()); path != "" {
-			m.pendingClickID++
-			return true, openPlanFile(path, browser.OpenFile)
-		}
-	}
 	if clickable, ok := selectedItem.(list.MouseClickable); ok {
 		handled := clickable.HandleMouseClick(ansi.MouseButton1, msg.X, msg.Y)
 		// Toggle expansion only when the item signalled it handled the
@@ -1156,16 +1147,6 @@ func (m *Chat) HandleDelayedClick(msg DelayedClickMsg) (bool, tea.Cmd) {
 	}
 
 	return false, nil
-}
-
-// openPlanFile keeps filesystem and process work outside Update.
-func openPlanFile(path string, open func(string) error) tea.Cmd {
-	return func() tea.Msg {
-		if err := open(path); err != nil {
-			return util.ReportError(fmt.Errorf("open plan: %w", err))()
-		}
-		return nil
-	}
 }
 
 // HandleMouseUp handles mouse up events for the chat component.

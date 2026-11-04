@@ -905,9 +905,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case pubsub.Event[notify.RunComplete]:
 		m.endPendingTurn(msg.Payload.SessionID)
-		if cmd := m.setPlanFilePath(msg.Payload); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
 		if cmd := m.handlePlanHandoff(msg.Payload); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -5991,27 +5988,6 @@ func (m *UI) handlePermissionNotification(notification permission.PermissionNoti
 			m.dialog.CloseDialog(dialog.PermissionsID)
 		}
 	}
-}
-
-// setPlanFilePath records the saved plan's path on the plan card for the
-// run's message so the card can render it as a footer for the current view. It is a
-// no-op for runs without a saved plan (non-plan runs, failed saves, or
-// completions that belong to another session).
-func (m *UI) setPlanFilePath(rc notify.RunComplete) tea.Cmd {
-	if rc.PlanPath == "" || m.session == nil || rc.SessionID != m.session.ID {
-		return nil
-	}
-	item := m.chat.MessageItem(rc.MessageID)
-	a, ok := item.(*chat.AssistantMessageItem)
-	if !ok {
-		return nil
-	}
-	absPath := ""
-	if wd := m.com.Workspace.WorkingDir(); filepath.IsAbs(wd) {
-		absPath = filepath.Join(wd, filepath.FromSlash(rc.PlanPath))
-	}
-	a.SetPlanFileLink(rc.PlanPath, absPath)
-	return nil
 }
 
 // handlePlanHandoff checks whether a completed run in plan mode contained the

@@ -5,9 +5,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"hash/fnv"
-	"image"
-	"net/url"
-	"path/filepath"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -194,22 +191,6 @@ type AssistantMessageItem struct {
 	// side borders only, with the bottom border withheld until the
 	// plan-ready marker lands.
 	planAgent bool
-
-	// planFilePath is the workspace-relative path of the saved plan file,
-	// set once the plan has been written to disk. Non-empty renders a
-	// dimmed footer under the plan card so the user can find the file
-	// later. Empty for runs whose plan was not saved.
-	planFilePath string
-
-	// planFileAbsPath is the absolute path backing the footer's OSC 8
-	// hyperlink. Empty when the caller did not provide one, in which case
-	// the footer renders as plain text.
-	planFileAbsPath string
-
-	// Plan footer geometry comes from the last render, keeping mouse
-	// handling free of Markdown rendering work.
-	planFooterBounds image.Rectangle
-	planFooterWidth  int
 
 	// Incremental FNV-64a hash of the thinking text. Avoids
 	// re-hashing the entire accumulated text on every streaming
@@ -425,8 +406,6 @@ func (a *AssistantMessageItem) compositionKey() uint64 {
 // only the section whose source text or extras changed since the last
 // render is recomputed.
 func (a *AssistantMessageItem) renderMessageContent(width int) (string, int) {
-	a.planFooterBounds = image.Rectangle{}
-	a.planFooterWidth = width
 	var messageParts []string
 	thinking := strings.TrimSpace(a.message.ReasoningContent().Thinking)
 	content := strings.TrimSpace(a.message.Content().Text)
@@ -440,15 +419,6 @@ func (a *AssistantMessageItem) renderMessageContent(width int) (string, int) {
 			messageParts = append(messageParts, "")
 		}
 		messageParts = append(messageParts, a.cachedContent(width))
-		if a.planFileAbsPath != "" && plan.ReadyMarkerPresent(a.message.Content().Text) {
-			inset, label := a.planFileLabel(width)
-			y := lipgloss.Height(a.contentSec.out) - 1
-			if thinking != "" {
-				y += lipgloss.Height(a.thinkingSec.out) + 1
-			}
-			left := MessageLeftPaddingTotal + inset
-			a.planFooterBounds = image.Rect(left, y, left+ansi.StringWidth(label), y+1)
-		}
 	}
 
 	if a.message.IsFinished() {
@@ -552,10 +522,7 @@ func (a *AssistantMessageItem) contentKey() (uint64, uint64) {
 	if a.planStreaming() {
 		planStreaming = 1
 	}
-	// The saved-plan footer is part of the rendered content, so the path
-	// folds into the cache key. Without it a card rendered before the
-	// path arrived would serve the path-less version from cache.
-	return fnvFields([]byte(a.message.Content().Text), []byte(a.planFilePath), []byte(a.planFileAbsPath)), uint64(planStreaming)
+	return fnvFields([]byte(a.message.Content().Text)), uint64(planStreaming)
 }
 
 // SetPlanAgent flags this item as plan-agent output (or clears the
@@ -575,45 +542,6 @@ func (a *AssistantMessageItem) SetPlanAgent(plan bool) {
 // plan-ready marker lands.
 func (a *AssistantMessageItem) planStreaming() bool {
 	return a.planAgent && !a.message.IsFinished()
-}
-
-// SetPlanFilePath records the workspace-relative path of the saved plan
-// file so the plan card can render it as a dimmed footer. It bumps the
-// render version because the footer is part of the rendered output.
-func (a *AssistantMessageItem) SetPlanFilePath(path string) {
-	a.SetPlanFileLink(path, "")
-}
-
-// SetPlanFileLink records the workspace-relative path of the saved plan
-// file together with its absolute counterpart. The relative path is what
-// the footer displays; the absolute path is what the footer's OSC 8
-// hyperlink points at. Either may be empty: with only the relative path
-// the footer renders as plain text.
-func (a *AssistantMessageItem) SetPlanFileLink(displayPath, absPath string) {
-	if a.planFilePath == displayPath && a.planFileAbsPath == absPath {
-		return
-	}
-	a.planFilePath = displayPath
-	a.planFileAbsPath = absPath
-	a.planFooterBounds = image.Rectangle{}
-	a.Bump()
-}
-
-// PlanFileAt returns the file target when the item-relative click hits
-// the visible footer label. Rendering and hit testing share its layout.
-func (a *AssistantMessageItem) PlanFileAt(x, y, width int) string {
-	if cappedMessageWidth(width) == a.planFooterWidth && image.Pt(x, y).In(a.planFooterBounds) {
-		return a.planFileAbsPath
-	}
-	return ""
-}
-
-func (a *AssistantMessageItem) planFileLabel(width int) (int, string) {
-	inset := min(max(0, width), a.sty.Messages.PlanBox.GetBorderLeftSize()+a.sty.Messages.PlanBox.GetPaddingLeft())
-	if width <= inset || a.planFilePath == "" {
-		return inset, ""
-	}
-	return inset, ansi.Truncate("Saved to "+a.planFilePath, width-inset, "…")
 }
 
 // errorKey returns the (srcHash, extra) cache key components for the
@@ -694,42 +622,7 @@ func (a *AssistantMessageItem) renderPlanCard(text string, width int) string {
 	if err != nil {
 		rendered = text
 	}
-	out := renderPlanBox(box, rendered, width, true)
-	if footer := a.renderPlanFileFooter(width); footer != "" {
-		out += "\n" + footer
-	}
-	return out
-}
-
-// renderPlanFileFooter renders the saved-plan path below the card. A known
-// absolute target adds underlining and an OSC 8 link, in addition to the
-// click handling in Crush. Unsaved plans have no footer.
-func (a *AssistantMessageItem) renderPlanFileFooter(width int) string {
-	if a.planFilePath == "" {
-		return ""
-	}
-	style := a.sty.Messages.PlanBoxFooter
-	inset, text := a.planFileLabel(width)
-	if text == "" {
-		return ""
-	}
-	if uri := fileURI(a.planFileAbsPath); uri != "" {
-		text = style.Underline(true).Hyperlink(uri, "id=plan-file").Render(text)
-	} else {
-		text = style.Render(text)
-	}
-	return strings.Repeat(" ", inset) + text
-}
-
-// fileURI converts an absolute filesystem path into a file:// URI suitable
-// for an OSC 8 hyperlink. Returns an empty string when the path is empty or
-// cannot be represented as a URI.
-func fileURI(absPath string) string {
-	if !filepath.IsAbs(absPath) {
-		return ""
-	}
-	u := url.URL{Scheme: "file", Path: filepath.ToSlash(absPath)}
-	return u.String()
+	return renderPlanBox(box, rendered, width, true)
 }
 
 // renderPlanCardStreaming renders the plan while it is still streaming

@@ -202,7 +202,6 @@ func wrapEvent(ev any) *pubsub.Payload {
 				RunID:     e.Payload.RunID,
 				MessageID: e.Payload.MessageID,
 				Text:      e.Payload.Text,
-				PlanPath:  e.Payload.PlanPath,
 				Error:     e.Payload.Error,
 				Cancelled: e.Payload.Cancelled,
 			},

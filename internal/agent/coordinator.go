@@ -203,6 +203,19 @@ type coordinator struct {
 	// registry to reach them.
 	subagentCancels *csync.Map[string, context.CancelFunc]
 
+	// background tracks subagents started with background: true.
+	background backgroundRegistry
+	// backgroundMu guards backgroundCtx and cancelBackground, and orders
+	// backgroundWg.Add against the wait in CancelAll.
+	backgroundMu sync.Mutex
+	// backgroundCtx is cancelled when the coordinator shuts down, created
+	// lazily by backgroundContext.
+	backgroundCtx    context.Context
+	cancelBackground context.CancelFunc
+	// backgroundWg tracks background subagent goroutines, including the
+	// report delivery that ends each one.
+	backgroundWg sync.WaitGroup
+
 	// subagentPromptXML is the <available_subagents> XML currently baked into
 	// the coder system prompt. refreshCoderSystemPrompt compares against it
 	// each turn so Library reloads reach the prompt without a rebuild when
@@ -381,6 +394,12 @@ func (c *coordinator) RunAccepted(ctx context.Context, accept *AcceptedRun, sess
 // dispatchMu; when nil (the in-process/local path) no accept tracking
 // applies.
 func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID string, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
+	return c.runCall(ctx, accept, sessionID, prompt, nil, attachments)
+}
+
+// runCall is the body of run. A non-nil report makes the user message a
+// subagent report; prompt then carries the same report as text.
+func (c *coordinator) runCall(ctx context.Context, accept *AcceptedRun, sessionID string, prompt string, report *message.SubagentReport, attachments []message.Attachment) (*fantasy.AgentResult, error) {
 	if err := c.readyWg.Wait(); err != nil {
 		return nil, err
 	}
@@ -469,6 +488,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 			RunID:             runID,
 			Channel:           channel,
 			Prompt:            prompt,
+			Report:            report,
 			HostContext:       c.hostContext.Get(),
 			HiddenUserMessage: message.HiddenUserMessage(ctx),
 			Attachments:       attachments,
@@ -1226,6 +1246,12 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		}
 	}
 
+	// The background-subagent tools are not in the configurable tool names,
+	// so they join after the allow-list filter, next to the agent tool.
+	if c.interactive && shouldExposeDispatcher(agent.AllowedTools, isSubAgent) {
+		filteredTools = append(filteredTools, c.agentSendTool(), c.agentStopTool())
+	}
+
 	for _, tool := range tools.GetMCPTools(c.permissions, c.cfg, c.cfg.WorkingDir()) {
 		if agent.AllowedMCP == nil {
 			// No MCP restrictions
@@ -1705,16 +1731,11 @@ func (c *coordinator) Cancel(sessionID string) {
 
 func (c *coordinator) CancelAll() {
 	// Running subagents live on ad-hoc SessionAgents, invisible to
-	// currentAgent's activeRequests — cancel each one via the registry (a
-	// snapshot, so this is safe against concurrent Del calls from finishing
-	// runs) before falling through to the coder agent's own bookkeeping.
-	if c.subagentCancels != nil {
-		for cancel := range c.subagentCancels.Seq() {
-			if cancel != nil {
-				cancel()
-			}
-		}
-	}
+	// currentAgent's activeRequests. stopBackgroundWork cancels each one via
+	// the registry (a snapshot, so this is safe against concurrent Del calls
+	// from finishing runs) and waits for background reports to be written
+	// before falling through to the coder agent's own bookkeeping.
+	c.stopBackgroundWork(time.Now())
 	c.currentAgent().CancelAll()
 }
 
@@ -2065,23 +2086,95 @@ func callTopK(providerCfg config.ProviderConfig, topK *int64) *int64 {
 // It creates a sub-session, runs the agent with the given prompt, and propagates
 // the cost to the parent session.
 func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (fantasy.ToolResponse, error) {
-	// Create sub-session
-	agentToolSessionID := c.sessions.CreateAgentToolSessionID(params.AgentMessageID, params.ToolCallID)
-	session, err := c.sessions.CreateTaskSession(ctx, agentToolSessionID, params.SessionID, params.SessionTitle)
+	session, err := c.startSubAgentSession(ctx, params)
 	if err != nil {
-		return fantasy.ToolResponse{}, fmt.Errorf("create session: %w", err)
+		return fantasy.ToolResponse{}, err
+	}
+	return c.runSubAgentTurn(ctx, subAgentTurnArgs{
+		params:  params,
+		childID: session.ID,
+		prompt:  params.Prompt,
+	}).resp, nil
+}
+
+// startSubAgentSession creates the child session for a sub-agent and applies
+// the session-level setup.
+func (c *coordinator) startSubAgentSession(ctx context.Context, params subAgentParams) (session.Session, error) {
+	agentToolSessionID := c.sessions.CreateAgentToolSessionID(params.AgentMessageID, params.ToolCallID)
+	sess, err := c.sessions.CreateTaskSession(ctx, agentToolSessionID, params.SessionID, params.SessionTitle)
+	if err != nil {
+		return session.Session{}, fmt.Errorf("create session: %w", err)
 	}
 
 	// A child of an auto-approved session is auto-approved too: in
 	// non-interactive mode nothing could answer the child's prompts.
 	if c.permissions != nil && c.permissions.IsSessionAutoApproved(params.SessionID) {
-		c.permissions.AutoApproveSession(session.ID)
+		c.permissions.AutoApproveSession(sess.ID)
 	}
 
 	// Call session setup function if provided
 	if params.SessionSetup != nil {
-		params.SessionSetup(session.ID)
+		params.SessionSetup(sess.ID)
 	}
+	return sess, nil
+}
+
+// subAgentTurnArgs is the input to runSubAgentTurn.
+type subAgentTurnArgs struct {
+	params  subAgentParams
+	childID string
+	prompt  string
+	// billed is the child cost already added to the parent session.
+	billed float64
+	// onActive, when non-nil, is called once the run is active on the child
+	// session.
+	onActive func()
+}
+
+// subAgentTurnResult is the outcome of one sub-agent turn.
+type subAgentTurnResult struct {
+	resp fantasy.ToolResponse
+	// status is one of the subagents.Status* constants.
+	status string
+	// billed is the child cost now added to the parent session.
+	billed float64
+}
+
+// subAgentCall builds the call for a turn on a sub-agent's child session. It
+// reports false when the agent's provider is not configured. Queued calls
+// run later with only the fields they carry, so steering reuses it too.
+func (c *coordinator) subAgentCall(agent SessionAgent, sessionID, prompt string) (SessionAgentCall, Model, config.ProviderConfig, bool) {
+	model := agent.Model()
+	maxTokens := model.CatwalkCfg.DefaultMaxTokens
+	if model.ModelCfg.MaxTokens != 0 {
+		maxTokens = model.ModelCfg.MaxTokens
+	}
+
+	providerCfg, ok := c.cfg.Config().Providers.Get(model.ModelCfg.Provider)
+	if !ok {
+		return SessionAgentCall{}, model, providerCfg, false
+	}
+
+	subOpts := getProviderOptions(model, providerCfg)
+	injectOpenrouterSessionID(subOpts, sessionID)
+	return SessionAgentCall{
+		SessionID:        sessionID,
+		Prompt:           prompt,
+		MaxOutputTokens:  maxTokens,
+		ProviderOptions:  subOpts,
+		Temperature:      model.ModelCfg.Temperature,
+		TopP:             model.ModelCfg.TopP,
+		TopK:             callTopK(providerCfg, model.ModelCfg.TopK),
+		FrequencyPenalty: model.ModelCfg.FrequencyPenalty,
+		PresencePenalty:  model.ModelCfg.PresencePenalty,
+		NonInteractive:   true,
+	}, model, providerCfg, true
+}
+
+// runSubAgentTurn runs one turn of a sub-agent on an existing child session,
+// rolls its cost up into the parent session, and returns its output.
+func (c *coordinator) runSubAgentTurn(ctx context.Context, args subAgentTurnArgs) subAgentTurnResult {
+	params, childID := args.params, args.childID
 
 	// Make this run individually cancellable by child session ID (see
 	// coordinator.Cancel): cancelling runCtx stops only this subagent while
@@ -2090,31 +2183,29 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 	runCtx, cancelRun := context.WithCancel(ctx)
 	defer cancelRun()
 	if c.subagentCancels != nil {
-		c.subagentCancels.Set(session.ID, cancelRun)
-		defer c.subagentCancels.Del(session.ID)
+		c.subagentCancels.Set(childID, cancelRun)
+		defer c.subagentCancels.Del(childID)
 	}
 
 	// Register with the runtime tracker and finish on return. finalStatus is
 	// captured by the deferred call and updated below based on the outcome.
-	c.runtime.Register(params.SessionID, session.ID, params.AgentName, params.AgentColor, params.AgentModel)
+	c.runtime.Register(params.SessionID, childID, params.AgentName, params.AgentColor, params.AgentModel)
 	finalStatus := subagents.StatusCompleted
-	defer func() { c.runtime.Finish(session.ID, finalStatus) }()
+	defer func() { c.runtime.Finish(childID, finalStatus) }()
 
-	// Get model configuration
-	model := params.Agent.Model()
-	maxTokens := model.CatwalkCfg.DefaultMaxTokens
-	if model.ModelCfg.MaxTokens != 0 {
-		maxTokens = model.ModelCfg.MaxTokens
+	billed := args.billed
+	finish := func(resp fantasy.ToolResponse) subAgentTurnResult {
+		return subAgentTurnResult{resp: resp, status: finalStatus, billed: billed}
 	}
 
-	providerCfg, ok := c.cfg.Config().Providers.Get(model.ModelCfg.Provider)
+	call, model, providerCfg, ok := c.subAgentCall(params.Agent, childID, args.prompt)
 	if !ok {
 		// A tool-error response, not a bare error: the provider set can
 		// change under a running dispatch (config reload), and a bare error
 		// would abort the whole parent turn where the parent agent could
 		// otherwise report the failure and continue.
 		finalStatus = subagents.StatusFailed
-		return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to run subagent: %s", errModelProviderNotConfigured)), nil
+		return finish(fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to run subagent: %s", errModelProviderNotConfigured)))
 	}
 
 	// Surface a "retrying" status on the subagent while OnAuthRefresh
@@ -2123,64 +2214,50 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 	if authRefresh != nil {
 		inner := authRefresh
 		authRefresh = func(ctx context.Context, pe *fantasy.ProviderError) error {
-			c.runtime.SetStatus(session.ID, subagents.StatusRetrying)
+			c.runtime.SetStatus(childID, subagents.StatusRetrying)
 			if err := inner(ctx, pe); err != nil {
 				return err
 			}
 			// The refresh rebuilt the shared models; the subagent reads them
 			// through its Models func, so fantasy's retry sends the fresh
 			// credentials.
-			c.runtime.SetStatus(session.ID, subagents.StatusRunning)
+			c.runtime.SetStatus(childID, subagents.StatusRunning)
 			return nil
 		}
 	}
+	call.OnAuthRefresh = authRefresh
+	call.onActive = args.onActive
 
-	// Run the agent
-	run := func() (*fantasy.AgentResult, error) {
-		subOpts := getProviderOptions(model, providerCfg)
-		injectOpenrouterSessionID(subOpts, session.ID)
-		return params.Agent.Run(runCtx, SessionAgentCall{
-			SessionID:        session.ID,
-			Prompt:           params.Prompt,
-			MaxOutputTokens:  maxTokens,
-			ProviderOptions:  subOpts,
-			Temperature:      model.ModelCfg.Temperature,
-			TopP:             model.ModelCfg.TopP,
-			TopK:             callTopK(providerCfg, model.ModelCfg.TopK),
-			FrequencyPenalty: model.ModelCfg.FrequencyPenalty,
-			PresencePenalty:  model.ModelCfg.PresencePenalty,
-			NonInteractive:   true,
-			OnAuthRefresh:    authRefresh,
-		})
-	}
-	result, err := run()
+	result, err := params.Agent.Run(runCtx, call)
 	c.askToSignInAgain(err, model)
 	// Roll up whatever the sub-agent spent, however the run ended. Best
 	// effort: a failure here must not discard output already produced. On a
 	// cancel ctx is already done, so the DB write runs detached from it.
-	if err := c.updateParentSessionCost(context.WithoutCancel(ctx), session.ID, params.SessionID); err != nil {
+	if watermark, rollErr := c.rollUpSessionCost(context.WithoutCancel(ctx), childID, params.SessionID, billed); rollErr != nil {
 		slog.Warn(
 			"Failed to update parent session cost",
-			"child_session", session.ID,
+			"child_session", childID,
 			"parent_session", params.SessionID,
-			"error", err,
+			"error", rollErr,
 		)
+	} else {
+		billed = watermark
 	}
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			finalStatus = subagents.StatusCancelled
-			return fantasy.NewTextErrorResponse("Subagent cancelled by user"), nil
+			return finish(fantasy.NewTextErrorResponse("Subagent cancelled by user"))
 		}
 		finalStatus = subagents.StatusFailed
-		return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to generate response: %s", err)), nil
+		return finish(fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to generate response: %s", err)))
 	}
 
 	output := subAgentOutput(result)
 	if output == "" {
 		finalStatus = subagents.StatusFailed
-		return fantasy.NewTextErrorResponse("Sub-agent completed but produced no text output."), nil
+		return finish(fantasy.NewTextErrorResponse("Sub-agent completed but produced no text output."))
 	}
-	return fantasy.NewTextResponse(output), nil
+	return finish(fantasy.NewTextResponse(output))
 }
 
 func subAgentOutput(result *fantasy.AgentResult) string {
@@ -2198,16 +2275,24 @@ func subAgentOutput(result *fantasy.AgentResult) string {
 // concurrent calls and with the parent turn's own in-flight session save
 // (title/tokens/todos), silently losing whichever update saved last.
 func (c *coordinator) updateParentSessionCost(ctx context.Context, childSessionID, parentSessionID string) error {
+	_, err := c.rollUpSessionCost(ctx, childSessionID, parentSessionID, 0)
+	return err
+}
+
+// rollUpSessionCost adds to the parent only the child's cost beyond billed,
+// the part already rolled up by earlier turns of the same child session. It
+// returns the child's cost as the new billed watermark.
+func (c *coordinator) rollUpSessionCost(ctx context.Context, childSessionID, parentSessionID string, billed float64) (float64, error) {
 	childSession, err := c.sessions.Get(ctx, childSessionID)
 	if err != nil {
-		return fmt.Errorf("get child session: %w", err)
+		return billed, fmt.Errorf("get child session: %w", err)
 	}
 
-	if err := c.sessions.AddCost(ctx, parentSessionID, childSession.Cost); err != nil {
-		return fmt.Errorf("add cost to parent session: %w", err)
+	if err := c.sessions.AddCost(ctx, parentSessionID, max(0, childSession.Cost-billed)); err != nil {
+		return billed, fmt.Errorf("add cost to parent session: %w", err)
 	}
 
-	return nil
+	return childSession.Cost, nil
 }
 
 // discoverSkills is a thin fallback wrapper used only when no

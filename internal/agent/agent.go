@@ -108,6 +108,10 @@ type SessionAgentCall struct {
 	// steer a running session without racing its completion.
 	QueueOnly bool
 
+	// onActive, when non-nil, is called once Run becomes the active run
+	// for the session, while the session lock is still held.
+	onActive func()
+
 	// HostContext is what the host application had in view when the
 	// prompt was sent. The model sees it with this prompt only; it is
 	// not stored with the message.
@@ -755,6 +759,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	genCtx, cancel = context.WithCancel(runCtx)
 	ac := &activeCancel{cancel: cancel}
 	a.activeRequests.Set(call.SessionID, ac)
+	if call.onActive != nil {
+		call.onActive()
+	}
 	if call.Accepted != nil {
 		call.Accepted.Close()
 	}

@@ -20,6 +20,7 @@ func TestPartsRoundTrip(t *testing.T) {
 		ToolResult{ToolCallID: "c1", Name: "bash", Content: "out", MIMEType: "text/plain", IsError: true},
 		Finish{Reason: FinishReasonEndTurn, Time: 42, Message: "done"},
 		ShellCommand{Command: "ls -la", Output: "total 0", ExitCode: 0},
+		SubagentReport{Name: "code-reviewer-1", Status: "completed", Output: "looks good"},
 	}
 
 	encoded, err := marshalParts(parts)

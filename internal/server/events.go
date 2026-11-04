@@ -462,6 +462,8 @@ func messageToProto(m message.Message) proto.Message {
 				Output:   v.Output,
 				ExitCode: v.ExitCode,
 			})
+		case message.SubagentReport:
+			msg.Parts = append(msg.Parts, proto.SubagentReport{Name: v.Name, Status: v.Status, Output: v.Output})
 		}
 	}
 

@@ -62,6 +62,22 @@ func TestProtoToMessageToolResult(t *testing.T) {
 	require.False(t, tr.IsError)
 }
 
+// TestProtoToMessageSubagentReport ensures a subagent report survives the
+// conversion from proto on the client.
+func TestProtoToMessageSubagentReport(t *testing.T) {
+	t.Parallel()
+
+	got := protoToMessage(proto.Message{
+		ID:   "m1",
+		Role: proto.User,
+		Parts: []proto.ContentPart{
+			proto.SubagentReport{Name: "a-1", Status: "completed", Output: "done"},
+		},
+	})
+	require.Len(t, got.Parts, 1)
+	require.Equal(t, message.SubagentReport{Name: "a-1", Status: "completed", Output: "done"}, got.Parts[0])
+}
+
 // TestProtoToMessagePrismModel ensures the Prism-routed model fields survive
 // the conversion from proto. Without them the client TUI cannot show which
 // model actually served each turn on Hyper's model router.

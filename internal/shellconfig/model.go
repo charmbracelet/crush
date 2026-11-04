@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
+
+	"charm.land/catwalk/v3/pkg/catwalk"
 )
 
 // handleModel implements the `model` builtin.
@@ -81,11 +83,12 @@ var modelAddFlags = []flagSpec{
 	{name: "--price-cache-create", jsonKey: "cache_create", child: "pricing", kind: flagFloat, op: opSetInChild},
 	{name: "--price-cache-hit", jsonKey: "cache_hit", child: "pricing", kind: flagFloat, op: opSetInChild},
 	{name: "--reasoning-effort", jsonKey: "default_effort_level", child: "reasoning", kind: flagString, op: opSetInChild},
-	{name: "--max-attachments", jsonKey: "max_attachments", kind: flagInt, op: opSet},
 	// --reasoning-level lists the selectable effort tiers behind one model
 	// entry, which is how a family that sells one model per tier collapses
-	// into a single picker row.
-	{name: "--reasoning-level", jsonKey: "effort_levels", child: "reasoning", kind: flagString, op: opAppendChild},
+	// into a single picker row. The collected values become the reasoning
+	// schema's effort levels after the flags are parsed.
+	{name: "--reasoning-level", jsonKey: "reasoning_levels", kind: flagString, op: opAppend},
+	{name: "--max-attachments", jsonKey: "max_attachments", kind: flagInt, op: opSet},
 }
 
 func modelAdd(b *ConfigBuilder, args []string, stderr io.Writer) error {
@@ -115,6 +118,25 @@ func modelAdd(b *ConfigBuilder, args []string, stderr io.Writer) error {
 			thinking = "toggleable"
 		}
 		childMap(model, "reasoning")["thinking"] = thinking
+	}
+
+	// Translate the collected --reasoning-level tiers into the reasoning
+	// schema, deriving each tier's display name the way the catalog does.
+	if levels, ok := model["reasoning_levels"].([]any); ok {
+		delete(model, "reasoning_levels")
+		effortLevels := make([]any, 0, len(levels))
+		for _, level := range levels {
+			value, ok := level.(string)
+			if !ok {
+				continue
+			}
+			effortLevel := catwalk.NewEffortLevels(value)[0]
+			effortLevels = append(effortLevels, map[string]any{
+				"value":   effortLevel.Value,
+				"display": effortLevel.Display,
+			})
+		}
+		childMap(model, "reasoning")["effort_levels"] = effortLevels
 	}
 
 	p := childMap(providers, provider)

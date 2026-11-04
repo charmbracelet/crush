@@ -43,7 +43,7 @@ provider add example \
   --discover-models false
 model add example/code-1 --name "Code 1" --context-window 128000`)
 
-	store, err := config.Load(workDir, dataDir, false)
+	store, err := config.Load(t.Context(), workDir, dataDir, false)
 	require.NoError(t, err)
 
 	pc, ok := store.Config().Providers.Get("example")
@@ -83,7 +83,7 @@ model add shared/m1 --name M1`),
 	dataDir := t.TempDir()
 	writePlugin(t, workDir, "shared.sh", `provider add shared --base-url "https://plugin.example/v1"`)
 
-	store, err := config.Load(workDir, dataDir, false)
+	store, err := config.Load(t.Context(), workDir, dataDir, false)
 	require.NoError(t, err)
 	pc, ok := store.Config().Providers.Get("shared")
 	require.True(t, ok)
@@ -96,7 +96,7 @@ model add shared/m1 --name M1`),
 		0o644,
 	))
 
-	store, err = config.Load(workDir, dataDir, false)
+	store, err = config.Load(t.Context(), workDir, dataDir, false)
 	require.NoError(t, err)
 	pc, ok = store.Config().Providers.Get("shared")
 	require.True(t, ok)
@@ -117,7 +117,7 @@ func TestPluginFailureFailsLoad(t *testing.T) {
 	dataDir := t.TempDir()
 	writePlugin(t, workDir, "broken.sh", `provider add broken --oauth-flwo device`)
 
-	_, err := config.Load(workDir, dataDir, false)
+	_, err := config.Load(t.Context(), workDir, dataDir, false)
 	require.Error(t, err, "a plugin with a bad flag must fail the load")
 	require.Contains(t, err.Error(), "unknown flag")
 }
@@ -142,7 +142,7 @@ model add unusable/m1 --name M1`),
 		0o644,
 	))
 
-	store, err := config.Load(workDir, dataDir, false)
+	store, err := config.Load(t.Context(), workDir, dataDir, false)
 	require.NoError(t, err)
 	_, ok := store.Config().Providers.Get("unusable")
 	require.False(t, ok, "an OAuth provider with no issuer or endpoints cannot be used and must be dropped")
@@ -172,7 +172,7 @@ model add quotaless/m1 --name M1`),
 		0o644,
 	))
 
-	store, err := config.Load(workDir, dataDir, false)
+	store, err := config.Load(t.Context(), workDir, dataDir, false)
 	require.NoError(t, err)
 
 	// Declaring usage fields without a URL is a mistake in the plugin, not a
@@ -209,7 +209,7 @@ model add broken/m1 --name M1`),
 		0o644,
 	))
 
-	_, err := config.Load(workDir, t.TempDir(), false)
+	_, err := config.Load(t.Context(), workDir, t.TempDir(), false)
 	require.ErrorContains(t, err, "invalid gateway adapter for provider broken")
 }
 
@@ -262,7 +262,7 @@ model add repotwo/m1 --name M1`,
 model add globalone/m1 --name M1`,
 	})
 
-	store, err := config.Load(workDir, t.TempDir(), false)
+	store, err := config.Load(t.Context(), workDir, t.TempDir(), false)
 	require.NoError(t, err)
 
 	cfg := store.Config()
@@ -296,7 +296,7 @@ model add shared/m1 --name M1`
 		"shared.sh": declare("https://last.example/v1"),
 	})
 
-	store, err := config.Load(workDir, t.TempDir(), false)
+	store, err := config.Load(t.Context(), workDir, t.TempDir(), false)
 	require.NoError(t, err)
 	pc, ok := store.Config().Providers.Get("shared")
 	require.True(t, ok)

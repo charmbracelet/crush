@@ -20,11 +20,12 @@ import (
 const discoveryProbeTimeout = 3 * time.Second
 
 // discoveryJob is one custom provider whose models come from its /models
-// endpoint.
+// endpoint, or from a declared catalog when it has one.
 type discoveryJob struct {
 	id           string
 	cfg          discover.Config
 	providerType string
+	catalog      *discover.CatalogConfig
 }
 
 // discoveredModels is the on-disk cache entry for one provider. BaseURL is
@@ -37,11 +38,38 @@ type discoveredModels struct {
 
 // discoveryJobs returns the custom providers that need model discovery:
 // enabled, with a base URL, and either opted in through discover_models or
-// lacking an explicit models list.
+// lacking an explicit models list. A provider with a declared catalog always
+// reads its models from there: the standard listing is OpenAI-shaped and
+// would report ids alone.
 func discoveryJobs(c *Config, known map[string]bool) []discoveryJob {
 	var jobs []discoveryJob
 	for id, pc := range c.Providers.Seq2() {
 		if known[id] || pc.Disable || pc.BaseURL == "" {
+			continue
+		}
+		providerID := cmp.Or(pc.ID, id)
+		if pc.Catalog != nil {
+			bearer := pc.APIKey
+			if pc.OAuthToken != nil && pc.OAuthToken.AccessToken != "" {
+				bearer = pc.OAuthToken.AccessToken
+			}
+			jobs = append(jobs, discoveryJob{
+				id: id,
+				cfg: discover.Config{
+					ID:           providerID,
+					BaseURL:      pc.BaseURL,
+					APIKey:       pc.APIKey,
+					ExtraHeaders: pc.ExtraHeaders,
+				},
+				catalog: &discover.CatalogConfig{
+					ID:       providerID,
+					Spec:     pc.Catalog,
+					BaseURL:  pc.BaseURL,
+					Bearer:   bearer,
+					Headers:  pc.ExtraHeaders,
+					Existing: pc.Models,
+				},
+			})
 			continue
 		}
 		wanted := len(pc.Models) == 0
@@ -54,7 +82,7 @@ func discoveryJobs(c *Config, known map[string]bool) []discoveryJob {
 		jobs = append(jobs, discoveryJob{
 			id: id,
 			cfg: discover.Config{
-				ID:           cmp.Or(pc.ID, id),
+				ID:           providerID,
 				BaseURL:      pc.BaseURL,
 				APIKey:       pc.APIKey,
 				ExtraHeaders: pc.ExtraHeaders,
@@ -126,16 +154,24 @@ func (s *ConfigStore) probeAndCache(ctx context.Context, jobs []discoveryJob, re
 	var wg sync.WaitGroup
 	for _, job := range jobs {
 		wg.Go(func() {
-			models, err := discover.DiscoverModels(ctx, job.cfg, resolver)
+			var models []catwalk.Model
+			var err error
+			if job.catalog != nil {
+				models, err = discover.Catalog(ctx, *job.catalog, resolver)
+			} else {
+				models, err = discover.DiscoverModels(ctx, job.cfg, resolver)
+				if err == nil && len(models) > 0 {
+					if enricher := discover.GetEnricher(job.providerType); enricher != nil {
+						models, _ = enricher.EnrichModels(ctx, job.cfg, resolver, models)
+					}
+				}
+			}
 			if err != nil {
 				slog.Warn("Model discovery failed", "provider", job.id, "error", err)
 				return
 			}
 			if len(models) == 0 {
 				return
-			}
-			if enricher := discover.GetEnricher(job.providerType); enricher != nil {
-				models, _ = enricher.EnrichModels(ctx, job.cfg, resolver, models)
 			}
 			slog.Info("Discovered models for provider", "provider", job.id, "count", len(models))
 			s.cacheModels(job, models)

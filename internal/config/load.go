@@ -51,9 +51,12 @@ var legacyProviderTypes = map[catwalk.Type]catwalk.Type{
 	"anthropic":     catwalk.TypeMessages,
 	"azure":         catwalk.TypeResponses,
 	"bedrock":       catwalk.TypeMessages,
-	"google":        catwalk.TypeCompletions,
 	"google-vertex": catwalk.TypeCompletions,
 }
+
+// TypeGoogle names a custom provider that speaks the Gemini API. Unlike
+// the endpoint types, it selects the Google SDK rather than an OpenAI one.
+const TypeGoogle = catwalk.Type("google")
 
 // NormalizeProviderType maps a catwalk v2 provider type onto the v3
 // endpoint type describing the same API format. Types that are already
@@ -648,6 +651,7 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 		// Default to OpenAI chat completions if not set.
 		providerConfig.Type = cmp.Or(providerConfig.Type, catwalk.TypeCompletions)
 		if !slices.Contains(catwalk.KnownProviderTypes(), providerConfig.Type) &&
+			providerConfig.Type != TypeGoogle &&
 			providerConfig.Type != hyper.Name &&
 			!discover.IsKnownCustomProvider(string(providerConfig.Type)) {
 			slog.Warn("Skipping custom provider due to unsupported provider type", "provider", id)
@@ -758,10 +762,12 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 		if providerConfig.Gateway != nil {
 			if providerConfig.Gateway.Usable() {
 				// The adapter is attached where a provider family lets the
-				// SDK take a client, today google and anthropic. Saying so
-				// beats ignoring the declaration.
-				if providerConfig.Type != catwalk.TypeGoogle && providerConfig.Type != catwalk.TypeAnthropic {
-					slog.Warn("Gateway adapter is only applied to google- and anthropic-type providers",
+				// SDK take a client: for custom providers that is the Messages
+				// and Google API builders, alongside the known google logins
+				// this loop never sees. Saying so beats ignoring the
+				// declaration.
+				if providerConfig.Type != catwalk.TypeMessages && providerConfig.Type != TypeGoogle {
+					slog.Warn("Gateway adapter is only applied to Messages- and Google-type providers",
 						"provider", id, "type", string(providerConfig.Type))
 				}
 				if _, err := gateway.New(providerConfig.Gateway, "", nil); err != nil {

@@ -627,6 +627,10 @@ type sessionShowPart struct {
 	// Finish
 	Reason string `json:"reason,omitempty"`
 	Time   int64  `json:"time,omitempty"`
+
+	// Subagent report; the report text goes in Content and the subagent's
+	// name in Name.
+	Status string `json:"status,omitempty"`
 }
 
 func extractSkillsFromMessages(msgs []*message.Message) []sessionShowSkill {
@@ -712,6 +716,13 @@ func convertParts(parts []message.ContentPart) []sessionShowPart {
 				Type:   "finish",
 				Reason: string(p.Reason),
 				Time:   p.Time,
+			})
+		case message.SubagentReport:
+			result = append(result, sessionShowPart{
+				Type:    "subagent_report",
+				Name:    p.Name,
+				Status:  p.Status,
+				Content: p.Output,
 			})
 		default:
 			result = append(result, sessionShowPart{

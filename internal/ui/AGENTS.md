@@ -136,7 +136,7 @@ tool names to specific types:
 | `chat/file.go`        | View, Write, Edit, MultiEdit, Download         |
 | `chat/search.go`      | Glob, Grep, LS, Sourcegraph                    |
 | `chat/fetch.go`       | Fetch, WebFetch, WebSearch                     |
-| `chat/agent.go`       | Agent, AgenticFetch                            |
+| `chat/agent.go`       | Agent, AgentSend, AgentStop, AgenticFetch      |
 | `chat/diagnostics.go` | Diagnostics                                    |
 | `chat/references.go`  | References                                     |
 | `chat/lsp_restart.go` | LSPRestart                                     |

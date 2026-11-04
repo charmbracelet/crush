@@ -12,3 +12,10 @@ sql:
         emit_interface: true
         emit_exact_table_names: false
         emit_empty_slices: true
+        overrides:
+          # parts stores zstd-compressed JSON BLOBs (see internal/message/
+          # parts_codec.go); the column stays TEXT in the schema for
+          # compatibility with existing databases, the Go binding is bytes.
+          - column: "messages.parts"
+            go_type:
+              type: "[]byte"

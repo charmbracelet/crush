@@ -59,7 +59,7 @@ func TestE2E_StalledStreamClosedOnOverflow(t *testing.T) {
 	for range 4096 + 64 {
 		h.app.SendEvent(pubsub.Event[message.Message]{
 			Type:    pubsub.UpdatedEvent,
-			Payload: message.Message{ID: "m", SessionID: "s-overflow", Role: message.Assistant},
+			Payload: message.Message{ID: uuid.NewString(), SessionID: "s-overflow", Role: message.Assistant},
 		})
 	}
 	close(resume)

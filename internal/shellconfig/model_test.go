@@ -32,7 +32,7 @@ model add openai/gpt-5.6-sol --name "GPT 5.6 Sol" --context-window 200000 --can-
 	require.Equal(t, "gpt-5.6-sol", m["id"])
 	require.Equal(t, "GPT 5.6 Sol", m["name"])
 	require.Equal(t, float64(200000), m["context_window"])
-	require.Equal(t, true, m["can_reason"])
+	require.Equal(t, "toggleable", m["reasoning"].(map[string]any)["thinking"])
 }
 
 func TestModelAddReasoningLevels(t *testing.T) {
@@ -41,13 +41,17 @@ func TestModelAddReasoningLevels(t *testing.T) {
 	// A family that sells one model per tier collapses into a single entry
 	// with the tiers behind the reasoning selector.
 	result := loadScript(t, `provider add gemini-sub --api-key k
-model add gemini-sub/flash --name "Flash" --can-reason true \
+model add gemini-sub/flash --name "Flash" --thinking toggleable \
   --reasoning-level low --reasoning-level medium --reasoning-level high \
   --reasoning-effort medium`)
 
 	model := result["providers"].(map[string]any)["gemini-sub"].(map[string]any)["models"].([]any)[0].(map[string]any)
-	require.Equal(t, []any{"low", "medium", "high"}, model["reasoning_levels"].([]any))
-	require.Equal(t, "medium", model["default_reasoning_effort"])
+	reasoning := model["reasoning"].(map[string]any)
+	levels := reasoning["effort_levels"].([]any)
+	require.Len(t, levels, 3)
+	require.Equal(t, map[string]any{"value": "low", "display": "Low"}, levels[0])
+	require.Equal(t, map[string]any{"value": "high", "display": "High"}, levels[2])
+	require.Equal(t, "medium", reasoning["default_effort_level"])
 }
 
 // TestModelAddReplacesDuplicateID verifies that re-adding a model id updates
@@ -72,10 +76,11 @@ func TestModelAddPricingFlags(t *testing.T) {
 model add anthropic/claude-x --price-input 3 --price-output 15 --price-cache-create 3.75 --price-cache-hit 0.3`)
 
 	model := result["providers"].(map[string]any)["anthropic"].(map[string]any)["models"].([]any)[0].(map[string]any)
-	require.Equal(t, 3.0, model["cost_per_1m_in"])
-	require.Equal(t, 15.0, model["cost_per_1m_out"])
-	require.Equal(t, 3.75, model["cost_per_1m_in_cached"])
-	require.Equal(t, 0.3, model["cost_per_1m_out_cached"])
+	pricing := model["pricing"].(map[string]any)
+	require.Equal(t, 3.0, pricing["input"])
+	require.Equal(t, 15.0, pricing["output"])
+	require.Equal(t, 3.75, pricing["cache_create"])
+	require.Equal(t, 0.3, pricing["cache_hit"])
 }
 
 func TestModelAddRejectsLegacyPricingFlags(t *testing.T) {

@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"charm.land/catwalk/v3/pkg/catwalk"
 )
 
 // flagKind is the value type a flag parses from the command line.
@@ -54,6 +56,13 @@ const (
 	// childMap(target, child)[jsonKey], e.g. --oauth-scope S writing to
 	// auth.scopes.
 	opAppendChild
+	// opSetInChild assigns childMap(target, child)[jsonKey] = value, e.g.
+	// --price-input F stored under pricing.input.
+	opSetInChild
+	// opAppendEffortLevel appends the effort level named by value to the
+	// []any at childMap(target, child)[jsonKey], e.g. --reasoning-level
+	// high stored under reasoning.effort_levels.
+	opAppendEffortLevel
 )
 
 // flagSpec declares one command-line flag: how it parses, where it writes,
@@ -231,6 +240,15 @@ func storeFlag(target map[string]any, spec flagSpec, val any) {
 		child := childMapPath(target, spec.child)
 		arr, _ := child[spec.jsonKey].([]any)
 		child[spec.jsonKey] = append(arr, val)
+	case opSetInChild:
+		childMap(target, spec.child)[spec.jsonKey] = val
+	case opAppendEffortLevel:
+		if name, ok := val.(string); ok {
+			child := childMap(target, spec.child)
+			arr, _ := child[spec.jsonKey].([]any)
+			level := catwalk.NewEffortLevels(name)[0]
+			child[spec.jsonKey] = append(arr, map[string]any{"value": level.Value, "display": level.Display})
+		}
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"charm.land/bubbles/v2/textarea"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/ui/attachments"
 	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	uv "github.com/charmbracelet/ultraviolet"
@@ -78,6 +79,37 @@ func newTestUI() *UI {
 	}
 
 	return u
+}
+
+func TestGenerateLayout_HelpAndSidebarDoNotOverlap(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		fullHelp bool
+	}{
+		{name: "short help", fullHelp: false},
+		{name: "full help", fullHelp: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			u := newTestUI()
+			u.com.Workspace = &testWorkspace{}
+			u.attachments = attachments.New(nil, attachments.Keymap{})
+			if tt.fullHelp {
+				u.status.ToggleHelp()
+			}
+			l := u.generateLayout(120, 40)
+			if l.status.Max.X > l.sidebar.Min.X {
+				t.Fatalf("help ends at column %d, past the sidebar at %d", l.status.Max.X, l.sidebar.Min.X)
+			}
+			if l.sidebar.Max.Y != l.status.Max.Y-1 {
+				t.Fatalf("sidebar ends at row %d, want it to reach the last help row %d", l.sidebar.Max.Y, l.status.Max.Y-2)
+			}
+		})
+	}
 }
 
 func TestUpdateLayoutAndSize_EditorGrowthShrinksChat(t *testing.T) {

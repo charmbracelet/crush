@@ -24,12 +24,14 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/pinentry"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/server"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/charmbracelet/crush/internal/sshaskpass"
 	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
@@ -52,16 +54,8 @@ type ClientWorkspace struct {
 	// whole workspace) may have been re-created in the meantime.
 	lastSession string
 	// mainAgent is the agent this client last made the main agent (empty
-	// until it switches), and skipRequests the permission-skip ("yolo")
-	// state it last set or read, seeded from the snapshot. Recovery
-	// restores both: a re-created workspace runs the coder agent and takes
-	// its YOLO flag from the create request, so plan mode would otherwise
-	// get write tools while the UI still says plan, and YOLO the user
-	// turned off would come back on. skipGen counts this client's skip
-	// changes, so a read that raced one cannot record the state before it.
-	mainAgent    string
-	skipRequests bool
-	skipGen      uint64
+	// until it switches). Recovery restores it.
+	mainAgent string
 
 	// subCtx bounds the lifetime of the event subscription (and its
 	// reconnect loop). Shutdown cancels it so Subscribe stops
@@ -125,14 +119,13 @@ func NewClientWorkspace(c *client.Client, ws proto.Workspace, opts ...ClientWork
 	mgr := skills.NewManager(nil, nil, states, skills.WithGlobalMirror())
 	subCtx, subCancel := context.WithCancel(context.Background())
 	w := &ClientWorkspace{
-		client:       c,
-		ws:           ws,
-		skills:       mgr,
-		skipRequests: ws.YOLO,
-		subCtx:       subCtx,
-		subCancel:    subCancel,
-		subDone:      make(chan struct{}),
-		herdrClient:  herdr.Init(),
+		client:      c,
+		ws:          ws,
+		skills:      mgr,
+		subCtx:      subCtx,
+		subCancel:   subCancel,
+		subDone:     make(chan struct{}),
+		herdrClient: herdr.Init(),
 	}
 	for _, opt := range opts {
 		opt(w)
@@ -452,33 +445,12 @@ func (w *ClientWorkspace) PermissionDeny(perm permission.PermissionRequest) bool
 	return resolved
 }
 
-// PermissionSkipRequests reads the permission-skip state from the server
-// and remembers it, so recovery also keeps a change another client of the
-// workspace made.
-func (w *ClientWorkspace) PermissionSkipRequests() bool {
-	w.mu.RLock()
-	gen := w.skipGen
-	w.mu.RUnlock()
-	skip, err := w.client.GetPermissionsSkipRequests(context.Background(), w.workspaceID())
-	if err != nil {
-		return false
-	}
-	w.mu.Lock()
-	if w.skipGen == gen {
-		w.skipRequests = skip
-	}
-	w.mu.Unlock()
-	return skip
+func (w *ClientWorkspace) PermissionMode() permission.PermissionMode {
+	return proto.ProtoModeToPermission(w.cached().PermissionMode)
 }
 
-func (w *ClientWorkspace) PermissionSetSkipRequests(skip bool) {
-	if err := w.client.SetPermissionsSkipRequests(context.Background(), w.workspaceID(), skip); err != nil {
-		return
-	}
-	w.mu.Lock()
-	w.skipRequests = skip
-	w.skipGen++
-	w.mu.Unlock()
+func (w *ClientWorkspace) PermissionSetMode(mode permission.PermissionMode) {
+	_ = w.client.SetPermissionMode(context.Background(), w.workspaceID(), proto.PermissionModeToProto(mode))
 }
 
 // -- Host context --
@@ -517,6 +489,64 @@ func (w *ClientWorkspace) QuestionCancel(batchID string) bool {
 	cancelled, err := w.client.CancelQuestionBatch(context.Background(), w.workspaceID(), batchID)
 	if err != nil {
 		slog.Error("Failed to cancel question", "error", err)
+		return false
+	}
+	return cancelled
+}
+
+// -- Pinentry --
+
+// PinentryRespond submits the secret for a pending integrated pinentry
+// prompt via the client SDK.
+func (w *ClientWorkspace) PinentryRespond(id, secret string) bool {
+	resolved, err := w.client.AnswerPinentry(context.Background(), w.workspaceID(), proto.PinentryAnswer{
+		RequestID: id,
+		Secret:    secret,
+	})
+	if err != nil {
+		slog.Error("Failed to answer pinentry prompt", "error", err)
+		return false
+	}
+	return resolved
+}
+
+// PinentryCancel dismisses a pending integrated pinentry prompt via the
+// client SDK.
+func (w *ClientWorkspace) PinentryCancel(id string) bool {
+	cancelled, err := w.client.CancelPinentry(context.Background(), w.workspaceID(), proto.PinentryCancel{
+		RequestID: id,
+	})
+	if err != nil {
+		slog.Error("Failed to cancel pinentry prompt", "error", err)
+		return false
+	}
+	return cancelled
+}
+
+// -- SSH prompts --
+
+// SSHRespond submits the secret for a pending integrated SSH prompt via
+// the client SDK. Confirmations answer "yes".
+func (w *ClientWorkspace) SSHRespond(id, secret string) bool {
+	resolved, err := w.client.AnswerSSH(context.Background(), w.workspaceID(), proto.SSHAnswer{
+		RequestID: id,
+		Secret:    secret,
+	})
+	if err != nil {
+		slog.Error("Failed to answer ssh prompt", "error", err)
+		return false
+	}
+	return resolved
+}
+
+// SSHCancel dismisses a pending integrated SSH prompt via the client
+// SDK.
+func (w *ClientWorkspace) SSHCancel(id string) bool {
+	cancelled, err := w.client.CancelSSH(context.Background(), w.workspaceID(), proto.SSHCancel{
+		RequestID: id,
+	})
+	if err != nil {
+		slog.Error("Failed to cancel ssh prompt", "error", err)
 		return false
 	}
 	return cancelled
@@ -1133,21 +1163,20 @@ func (w *ClientWorkspace) restoreMainAgent() {
 // recreateArgs derives the CreateWorkspace request used for recovery from
 // the cached snapshot. The ID is dropped so the server can dedupe by
 // path or mint a fresh workspace, and Version carries this client's
-// version, matching the startup handshake. YOLO is the permission-skip
-// state the client last knew rather than the snapshot's creation flag, so
-// YOLO turned off since does not come back on.
+// version, matching the startup handshake. The permission mode is the one
+// the client last saw change, so a mode switched since startup survives.
 func (w *ClientWorkspace) recreateArgs() proto.Workspace {
 	w.mu.RLock()
-	ws, skip := w.ws, w.skipRequests
+	ws := w.ws
 	w.mu.RUnlock()
 	return proto.Workspace{
-		Path:     ws.Path,
-		DataDir:  ws.DataDir,
-		Debug:    ws.Debug,
-		YOLO:     skip,
-		Channels: ws.Channels,
-		Env:      ws.Env,
-		Version:  version.Version,
+		Path:           ws.Path,
+		DataDir:        ws.DataDir,
+		Debug:          ws.Debug,
+		PermissionMode: ws.PermissionMode,
+		Channels:       ws.Channels,
+		Env:            ws.Env,
+		Version:        version.Version,
 	}
 }
 
@@ -1352,6 +1381,7 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 				Action:      e.Payload.Action,
 				Path:        e.Payload.Path,
 				Params:      e.Payload.Params,
+				Danger:      e.Payload.Danger,
 			},
 		}
 	case pubsub.Event[proto.PermissionNotification]:
@@ -1382,6 +1412,49 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 			Type: e.Type,
 			Payload: question.Notification{
 				BatchID: e.Payload.BatchID,
+			},
+		}
+	case pubsub.Event[proto.PinentryPromptRequest]:
+		return pubsub.Event[pinentry.PromptRequest]{
+			Type: e.Type,
+			Payload: pinentry.PromptRequest{
+				ID:     e.Payload.ID,
+				Prompt: e.Payload.Prompt,
+				Key: pinentry.Key{
+					CardNumber:  e.Payload.Key.CardNumber,
+					KeyID:       e.Payload.Key.KeyID,
+					Fingerprint: e.Payload.Key.Fingerprint,
+					Holder:      e.Payload.Key.Holder,
+				},
+				Kind:       pinentry.Kind(e.Payload.Kind),
+				RetryCount: e.Payload.RetryCount,
+				Error:      e.Payload.Error,
+			},
+		}
+	case pubsub.Event[proto.PinentryNotification]:
+		return pubsub.Event[pinentry.Notification]{
+			Type: e.Type,
+			Payload: pinentry.Notification{
+				RequestID: e.Payload.RequestID,
+			},
+		}
+	case pubsub.Event[proto.SSHPromptRequest]:
+		return pubsub.Event[sshaskpass.PromptRequest]{
+			Type: e.Type,
+			Payload: sshaskpass.PromptRequest{
+				ID:      e.Payload.ID,
+				Prompt:  e.Payload.Prompt,
+				KeyInfo: e.Payload.KeyInfo,
+				Kind:    sshaskpass.Kind(e.Payload.Kind),
+				Title:   e.Payload.Title,
+				Message: e.Payload.Message,
+			},
+		}
+	case pubsub.Event[proto.SSHNotification]:
+		return pubsub.Event[sshaskpass.Notification]{
+			Type: e.Type,
+			Payload: sshaskpass.Notification{
+				RequestID: e.Payload.RequestID,
 			},
 		}
 	case pubsub.Event[proto.Message]:
@@ -1454,6 +1527,13 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 			theme = nil
 		}
 		return HostThemeEvent{Theme: theme}
+	case pubsub.Event[proto.PermissionModeEvent]:
+		// Keep the cached workspace in sync so PermissionMode() never goes
+		// stale when another client or the server changes the mode.
+		w.mu.Lock()
+		w.ws.PermissionMode = e.Payload.Mode
+		w.mu.Unlock()
+		return nil
 	default:
 		slog.Warn("Unknown event type in translateEvent", "type", fmt.Sprintf("%T", ev))
 		return nil

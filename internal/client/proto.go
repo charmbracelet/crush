@@ -201,6 +201,30 @@ func (c *Client) SubscribeEvents(ctx context.Context, id string) (<-chan any, er
 				if !sendEvent(ctx, events, e) {
 					return
 				}
+			case pubsub.PayloadTypePinentryPromptRequest:
+				var e pubsub.Event[proto.PinentryPromptRequest]
+				_ = json.Unmarshal(p.Payload, &e)
+				if !sendEvent(ctx, events, e) {
+					return
+				}
+			case pubsub.PayloadTypePinentryNotification:
+				var e pubsub.Event[proto.PinentryNotification]
+				_ = json.Unmarshal(p.Payload, &e)
+				if !sendEvent(ctx, events, e) {
+					return
+				}
+			case pubsub.PayloadTypeSSHPromptRequest:
+				var e pubsub.Event[proto.SSHPromptRequest]
+				_ = json.Unmarshal(p.Payload, &e)
+				if !sendEvent(ctx, events, e) {
+					return
+				}
+			case pubsub.PayloadTypeSSHNotification:
+				var e pubsub.Event[proto.SSHNotification]
+				_ = json.Unmarshal(p.Payload, &e)
+				if !sendEvent(ctx, events, e) {
+					return
+				}
 			case pubsub.PayloadTypeMessage:
 				var e pubsub.Event[proto.Message]
 				_ = json.Unmarshal(p.Payload, &e)
@@ -257,6 +281,12 @@ func (c *Client) SubscribeEvents(ctx context.Context, id string) (<-chan any, er
 				}
 			case pubsub.PayloadTypeClientSession:
 				var e pubsub.Event[proto.ClientSession]
+				_ = json.Unmarshal(p.Payload, &e)
+				if !sendEvent(ctx, events, e) {
+					return
+				}
+			case pubsub.PayloadTypePermissionModeChanged:
+				var e pubsub.Event[proto.PermissionModeEvent]
 				_ = json.Unmarshal(p.Payload, &e)
 				if !sendEvent(ctx, events, e) {
 					return
@@ -768,34 +798,92 @@ func (c *Client) CancelQuestionBatch(ctx context.Context, id, batchID string) (b
 	return resp.Resolved, nil
 }
 
-// SetPermissionsSkipRequests sets the skip-requests flag for a workspace.
-func (c *Client) SetPermissionsSkipRequests(ctx context.Context, id string, skip bool) error {
-	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/permissions/skip", id), nil, jsonBody(proto.PermissionSkipRequest{Skip: skip}), http.Header{"Content-Type": []string{"application/json"}})
+// AnswerPinentry submits a secret for the pending integrated pinentry
+// prompt on a workspace. Returns true if this call resolved the
+// pending prompt, false if already resolved by another caller.
+func (c *Client) AnswerPinentry(ctx context.Context, id string, req proto.PinentryAnswer) (bool, error) {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/pinentry/answer", id), nil, jsonBody(req), http.Header{"Content-Type": []string{"application/json"}})
 	if err != nil {
-		return fmt.Errorf("failed to set permissions skip requests: %w", err)
+		return false, fmt.Errorf("failed to answer pinentry prompt: %w", err)
 	}
 	defer rsp.Body.Close()
 	if rsp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to set permissions skip requests: status code %d", rsp.StatusCode)
+		return false, fmt.Errorf("failed to answer pinentry prompt: status code %d", rsp.StatusCode)
 	}
-	return nil
+	var resp proto.PinentryResponse
+	if err := json.NewDecoder(rsp.Body).Decode(&resp); err != nil {
+		return false, fmt.Errorf("failed to decode answer pinentry prompt response: %w", err)
+	}
+	return resp.Resolved, nil
 }
 
-// GetPermissionsSkipRequests retrieves the skip-requests flag for a workspace.
-func (c *Client) GetPermissionsSkipRequests(ctx context.Context, id string) (bool, error) {
-	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/permissions/skip", id), nil, nil)
+// CancelPinentry dismisses the pending integrated pinentry prompt on
+// a workspace. Returns true if a prompt was cancelled, false if none
+// was pending.
+func (c *Client) CancelPinentry(ctx context.Context, id string, req proto.PinentryCancel) (bool, error) {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/pinentry/cancel", id), nil, jsonBody(req), http.Header{"Content-Type": []string{"application/json"}})
 	if err != nil {
-		return false, fmt.Errorf("failed to get permissions skip requests: %w", err)
+		return false, fmt.Errorf("failed to cancel pinentry prompt: %w", err)
 	}
 	defer rsp.Body.Close()
 	if rsp.StatusCode != http.StatusOK {
-		return false, fmt.Errorf("failed to get permissions skip requests: status code %d", rsp.StatusCode)
+		return false, fmt.Errorf("failed to cancel pinentry prompt: status code %d", rsp.StatusCode)
 	}
-	var skip proto.PermissionSkipRequest
-	if err := json.NewDecoder(rsp.Body).Decode(&skip); err != nil {
-		return false, fmt.Errorf("failed to decode permissions skip requests: %w", err)
+	var resp proto.PinentryResponse
+	if err := json.NewDecoder(rsp.Body).Decode(&resp); err != nil {
+		return false, fmt.Errorf("failed to decode cancel pinentry prompt response: %w", err)
 	}
-	return skip.Skip, nil
+	return resp.Resolved, nil
+}
+
+// AnswerSSH submits a secret for the pending integrated SSH prompt on a
+// workspace. Returns true if this call resolved the pending prompt,
+// false if already resolved by another caller.
+func (c *Client) AnswerSSH(ctx context.Context, id string, req proto.SSHAnswer) (bool, error) {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/ssh/answer", id), nil, jsonBody(req), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return false, fmt.Errorf("failed to answer ssh prompt: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("failed to answer ssh prompt: status code %d", rsp.StatusCode)
+	}
+	var resp proto.SSHResponse
+	if err := json.NewDecoder(rsp.Body).Decode(&resp); err != nil {
+		return false, fmt.Errorf("failed to decode answer ssh prompt response: %w", err)
+	}
+	return resp.Resolved, nil
+}
+
+// CancelSSH dismisses the pending integrated SSH prompt on a workspace.
+// Returns true if a prompt was cancelled, false if none was pending.
+func (c *Client) CancelSSH(ctx context.Context, id string, req proto.SSHCancel) (bool, error) {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/ssh/cancel", id), nil, jsonBody(req), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return false, fmt.Errorf("failed to cancel ssh prompt: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("failed to cancel ssh prompt: status code %d", rsp.StatusCode)
+	}
+	var resp proto.SSHResponse
+	if err := json.NewDecoder(rsp.Body).Decode(&resp); err != nil {
+		return false, fmt.Errorf("failed to decode cancel ssh prompt response: %w", err)
+	}
+	return resp.Resolved, nil
+}
+
+// SetPermissionMode sets the permission mode for a workspace.
+func (c *Client) SetPermissionMode(ctx context.Context, id string, mode proto.WorkspacePermissionMode) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/permissions/mode", id), nil, jsonBody(proto.PermissionSetModeRequest{Mode: mode}), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return fmt.Errorf("failed to set permission mode: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to set permission mode: status code %d", rsp.StatusCode)
+	}
+	return nil
 }
 
 // SetHostTheme sets the theme a host application supplies for every

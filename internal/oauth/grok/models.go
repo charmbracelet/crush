@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/catwalk/pkg/catwalk"
+	"charm.land/catwalk/v3/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/oauth"
 )
 
@@ -98,14 +98,20 @@ func Models(ctx context.Context, token *oauth.Token) ([]catwalk.Model, error) {
 			levels = m.Capabilities.ReasoningEffort
 			defaultEffort = m.Capabilities.DefaultReasoningEffort
 		}
+		reasoning := catwalk.Reasoning{Thinking: catwalk.ThinkingNever}
+		if len(levels) > 0 {
+			reasoning = catwalk.Reasoning{
+				Thinking:           catwalk.ThinkingToggleable,
+				EffortLevels:       catwalk.NewEffortLevels(levels...),
+				DefaultEffortLevel: defaultEffort,
+			}
+		}
 		models = append(models, catwalk.Model{
-			ID:                     m.ID,
-			Name:                   modelName(m.ID),
-			ContextWindow:          m.ContextLength,
-			CanReason:              len(levels) > 0,
-			ReasoningLevels:        levels,
-			DefaultReasoningEffort: defaultEffort,
-			SupportsImages:         m.PromptImageTokenPrice > 0,
+			ID:            m.ID,
+			Name:          modelName(m.ID),
+			ContextWindow: m.ContextLength,
+			Reasoning:     reasoning,
+			Capabilities:  catwalk.Capabilities{Vision: m.PromptImageTokenPrice > 0},
 		})
 	}
 	if len(models) == 0 {

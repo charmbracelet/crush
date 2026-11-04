@@ -374,8 +374,13 @@ func TestBroker_PublishMustDeliverHonorsTimeout(t *testing.T) {
 	sub := b.Subscribe(subCtx)
 	require.NotNil(t, sub)
 
-	// Saturate: one event sits in the buffer, the second must wait.
-	b.Publish(pubsub.UpdatedEvent, 1)
+	// Saturate: the subscriber's pump holds one event and its queue
+	// (capacity 1) the next. Keep publishing across several ticks so
+	// the pump has parked before we stop.
+	require.Eventually(t, func() bool {
+		b.Publish(pubsub.UpdatedEvent, 1)
+		return b.DropCount() >= 3
+	}, time.Second, 5*time.Millisecond)
 
 	// PublishMustDeliver should block up to 20ms then drop.
 	start := time.Now()
@@ -676,11 +681,16 @@ func TestUpdate_StructuralFlushUsesMustDeliver(t *testing.T) {
 			msg, err := svc.Create(t.Context(), sess.ID, CreateMessageParams{Role: Assistant})
 			require.NoError(t, err)
 
-			// Saturate the subscriber's buffer (capacity 1). The
-			// CreatedEvent from Create above already left one event
-			// in the buffer; we never read sub, so the next publish
-			// has nowhere to go.
+			// Saturate the subscriber, which we never read: its pump
+			// holds one event and its queue (capacity 1) the next.
+			// Keep publishing fillers across several ticks so the pump
+			// has parked before we stop.
 			_ = sub // intentionally not drained.
+			require.Eventually(t, func() bool {
+				impl.Publish(pubsub.CreatedEvent, Message{})
+				return impl.DropCount() >= 3
+			}, time.Second, 5*time.Millisecond)
+			drops := impl.DropCount()
 
 			// Drive the structural change. With debounce=1h, Update
 			// flushes synchronously and routes through whichever
@@ -697,7 +707,7 @@ func TestUpdate_StructuralFlushUsesMustDeliver(t *testing.T) {
 				return impl.MustDeliverDropCount() >= 1
 			}, time.Second, 5*time.Millisecond,
 				"structural terminal event should publish via must-deliver, not lossy Publish")
-			require.Zero(t, impl.DropCount(),
+			require.Equal(t, drops, impl.DropCount(),
 				"structural terminal event must not be silently dropped via lossy Publish")
 		})
 	}
@@ -815,4 +825,50 @@ func TestShouldFlushNow_AgainstCompactBaseline(t *testing.T) {
 		require.NoError(t, err)
 		require.NotZero(t, got.ReasoningContent().FinishedAt)
 	})
+}
+
+// drainEvents reads until no event arrives for a short while.
+func drainEvents(sub <-chan pubsub.Event[Message]) []pubsub.Event[Message] {
+	var got []pubsub.Event[Message]
+	for {
+		select {
+		case ev := <-sub:
+			got = append(got, ev)
+		case <-time.After(100 * time.Millisecond):
+			return got
+		}
+	}
+}
+
+// TestStalledSubscriberHoldsOnlyNewestUpdate guards against a slow
+// subscriber retaining one full snapshot per streamed update.
+func TestStalledSubscriberHoldsOnlyNewestUpdate(t *testing.T) {
+	t.Parallel()
+
+	svc, sessionID := newTestService(t, WithDebounce(0))
+	sub := svc.Subscribe(t.Context())
+
+	msg, err := svc.Create(t.Context(), sessionID, CreateMessageParams{Role: Assistant})
+	require.NoError(t, err)
+	chunk := strings.Repeat("x", 1024)
+	const n = 100
+	for range n {
+		msg.AppendContent(chunk)
+		require.NoError(t, svc.Update(t.Context(), msg))
+	}
+
+	got := drainEvents(sub)
+	require.Len(t, got, 2)
+	require.Equal(t, pubsub.CreatedEvent, got[0].Type)
+	require.Equal(t, pubsub.UpdatedEvent, got[1].Type)
+	require.Len(t, got[1].Payload.Content().Text, n*len(chunk))
+
+	// Terminal updates are must-deliver and still arrive.
+	msg.AddFinish(FinishReasonEndTurn, "", "")
+	require.NoError(t, svc.Update(t.Context(), msg))
+	got = drainEvents(sub)
+	require.Len(t, got, 1)
+	require.True(t, got[0].MustDeliver)
+	require.True(t, got[0].Payload.IsFinished())
+	require.Zero(t, svc.(*service).DropCount())
 }

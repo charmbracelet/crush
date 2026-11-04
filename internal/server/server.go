@@ -44,7 +44,8 @@ func socketDir() string {
 // ErrServerClosed is returned when the server is closed.
 var ErrServerClosed = http.ErrServerClosed
 
-// ParseHostURL parses a host URL into a [url.URL].
+// ParseHostURL parses a host URL into a [url.URL]. The "http" scheme
+// is accepted as an alias for "tcp" and normalized to it.
 //
 // A relative unix socket path is made absolute against the current
 // directory, so the address keeps naming the same socket after the process
@@ -53,6 +54,9 @@ func ParseHostURL(host string) (*url.URL, error) {
 	proto, addr, ok := strings.Cut(host, "://")
 	if !ok {
 		return nil, fmt.Errorf("invalid host format: %s", host)
+	}
+	if proto == "http" {
+		proto = "tcp"
 	}
 
 	// On Linux a leading '@' names an abstract socket, which has no path.

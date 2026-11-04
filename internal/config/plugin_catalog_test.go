@@ -60,11 +60,11 @@ model add catalog-sub/big --reasoning-effort high`, server.URL))
 			big = true
 			require.Equal(t, "Big Model", model.Name, "the listing supplies what the declaration left out")
 			require.Equal(t, int64(1000000), model.ContextWindow)
-			require.Equal(t, "high", model.DefaultReasoningEffort, "the declared default wins")
+			require.Equal(t, "high", model.Reasoning.DefaultEffortLevel, "the declared default wins")
 		case "small":
 			small = true
 			require.Equal(t, int64(200000), model.ContextWindow)
-			require.Empty(t, model.ReasoningLevels)
+			require.Empty(t, model.ReasoningEffortLevels())
 		}
 	}
 	require.True(t, big, "the pinned model keeps its id")

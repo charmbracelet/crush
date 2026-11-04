@@ -17,6 +17,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -25,7 +26,7 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/catwalk/pkg/catwalk"
+	"charm.land/catwalk/v3/pkg/catwalk"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/agent/notify"
@@ -42,10 +43,12 @@ import (
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/pinentry"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/charmbracelet/crush/internal/sshaskpass"
 	"github.com/charmbracelet/crush/internal/stringext"
 	"github.com/charmbracelet/crush/internal/ui/attachments"
 	"github.com/charmbracelet/crush/internal/ui/chat"
@@ -275,10 +278,6 @@ type UI struct {
 	// by setInputMode is still in flight; sending is blocked meanwhile.
 	modeSwitching bool
 
-	// cycleYolo is true while YOLO was enabled by the Shift+Tab input-mode
-	// cycle, which is the only case where the cycle may disable it again.
-	cycleYolo bool
-
 	keyMap KeyMap
 	keyenh tea.KeyboardEnhancementsMsg
 
@@ -435,11 +434,12 @@ type UI struct {
 	// in-flight fetch captures it at dispatch and its result is discarded
 	// if the generation has moved on (see workspace_cache.go).
 	promptQueueGen uint64
-	// agentBusyCache / yoloCache memoize the workspace busy and permission
-	// probes (synchronous HTTP round-trips in client/server mode). Reads
-	// never probe; refreshes happen off-thread (see workspace_cache.go).
+	// agentBusyCache / permModeCache memoize the workspace busy and
+	// permission-mode probes (synchronous HTTP round-trips in client/server
+	// mode). Reads never probe; refreshes happen off-thread (see
+	// workspace_cache.go).
 	agentBusyCache    ttlCache
-	yoloCache         ttlCache
+	permModeCache     modeTTLCache
 	busyFetchInFlight bool
 	// agentReady / agentModel memoize the coordinator readiness and
 	// selected model (AgentIsReady/AgentModel are synchronous HTTP GETs in
@@ -472,6 +472,23 @@ type UI struct {
 
 	// preThemeStyles stores the styles before a theme preview so we can revert.
 	preThemeStyles *styles.Styles
+
+	// program is the running Bubble Tea program, set via SetProgram. It is
+	// needed to release and restore the terminal when a terminal-based GPG
+	// pinentry dialog takes over the screen.
+	program *tea.Program
+
+	// pinentryActive tracks whether the terminal is currently handed over
+	// to a pinentry dialog; pinentryTouchPending tracks whether the status
+	// bar shows the security key touch hint.
+	pinentryActive       bool
+	pinentryTouchPending bool
+	// pinentryCtrlL tracks whether the active pinentry dialog is an
+	// ncurses flavor that repaints its UI on Ctrl-L.
+	pinentryCtrlL bool
+	// pinentryTermMu serializes terminal release/restore commands, which
+	// Bubble Tea runs on separate goroutines.
+	pinentryTermMu sync.Mutex
 
 	// mouse highlighting related state
 	lastClickTime time.Time
@@ -604,11 +621,11 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		ui.userThemeSelected = common.ThemeNameFromConfig(cfg) != ""
 	}
 
-	// Seed the yolo cache once at construction; afterwards it is kept
-	// fresh by write-through toggles and off-thread refreshes so Update
+	// Seed the permission-mode cache once at construction; afterwards it is
+	// kept fresh by write-through toggles and off-thread refreshes so Update
 	// and View never probe the workspace synchronously.
-	yolo := com.Workspace.PermissionSkipRequests()
-	ui.yoloCache.set(yolo)
+	permMode := com.Workspace.PermissionMode()
+	ui.permModeCache.set(permMode)
 
 	// Seed the memoized agent ready/model state the same way so the first
 	// frame renders the model info; the busy probe keeps it fresh
@@ -618,7 +635,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		ui.agentModel = com.Workspace.AgentModel()
 	}
 	ui.mode = uiInputModeCode
-	ui.setEditorPrompt(yolo)
+	ui.setEditorPrompt(permMode)
 	ui.randomizePlaceholders()
 	ui.textarea.Placeholder = ui.readyPlaceholder
 	ui.status = status
@@ -653,6 +670,14 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	ui.mouseEnabled = opts.TUI.Mouse == nil || *opts.TUI.Mouse
 
 	return ui
+}
+
+// SetProgram gives the model a handle to the running Bubble Tea program.
+// It is used to release and restore the terminal when a terminal-based GPG
+// pinentry dialog takes over the screen. Must be called before the program
+// starts processing pinentry events.
+func (m *UI) SetProgram(program *tea.Program) {
+	m.program = program
 }
 
 // Init initializes the UI model.
@@ -1194,6 +1219,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case pubsub.Event[permission.PermissionNotification]:
 		m.handlePermissionNotification(msg.Payload)
+	case pubsub.Event[pinentry.Event]:
+		cmds = append(cmds, m.handlePinentryEvent(msg.Payload))
+	case pubsub.Event[pinentry.PromptRequest]:
+		cmds = append(cmds, m.openPinentryDialog(msg.Payload))
+	case pubsub.Event[pinentry.Notification]:
+		m.handlePinentryNotification(msg.Payload)
 	case pubsub.Event[question.Request]:
 		m.openBatchFormDialog(msg.Payload)
 		m.chat.ScrollToBottom()
@@ -1205,6 +1236,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case pubsub.Event[question.Notification]:
 		m.handleQuestionNotification(msg.Payload)
+	case pubsub.Event[sshaskpass.PromptRequest]:
+		cmds = append(cmds, m.handleSSHPrompt(msg.Payload)...)
+	case pubsub.Event[sshaskpass.Notification]:
+		m.handleSSHNotification(msg.Payload)
 	case cancelTimerExpiredMsg:
 		m.isCanceling = false
 	case tea.TerminalVersionMsg:
@@ -1671,8 +1706,13 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.textarea.Placeholder = m.readyPlaceholder
 		}
-		if !m.bangMode && m.mode != uiInputModePlan && m.yoloModeCached() {
-			m.textarea.Placeholder = "Go crazy"
+		if !m.bangMode && m.mode != uiInputModePlan {
+			switch m.permModeCached() {
+			case permission.PermissionModeYolo:
+				m.textarea.Placeholder = "Go crazy"
+			case permission.PermissionModeSysadmin:
+				m.textarea.Placeholder = "Sysadmin mode!"
+			}
 		}
 	}
 	if m.textarea.Placeholder != prevPlaceholder {
@@ -1686,7 +1726,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// at this point this can only handle [message.Attachment] message, and we
 	// should return all cmds anyway.
-	if m.attachments.Update(msg) {
+	if _, isAttachment := msg.(message.Attachment); isAttachment && m.attachmentsLimitReached() {
+		max := m.currentModelMaxAttachments()
+		cmds = append(cmds, util.ReportWarn(fmt.Sprintf("Maximum attachment reached for this session (%d)", max)))
+	} else if m.attachments.Update(msg) {
 		m.invalidateFrames()
 	}
 	// Any update may have put a spinner on screen (new message, tool update,
@@ -2260,8 +2303,11 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 				cmds = append(cmds, cmd)
 			}
 		} else {
-			m.toggleYoloMode()
+			cmds = append(cmds, m.toggleModeAndReport(permission.PermissionModeYolo))
 		}
+		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionToggleSysadminMode:
+		cmds = append(cmds, m.toggleModeAndReport(permission.PermissionModeSysadmin))
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionSelectNotificationStyle:
 		cfg := m.com.Config()
@@ -2651,6 +2697,19 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		case dialog.PermissionDeny:
 			m.com.Workspace.PermissionDeny(msg.Permission)
 		}
+
+	case dialog.ActionPinentrySubmit:
+		m.dialog.CloseDialog(dialog.PinentryID)
+		m.com.Workspace.PinentryRespond(msg.RequestID, msg.Secret)
+	case dialog.ActionPinentryCancel:
+		m.dialog.CloseDialog(dialog.PinentryID)
+		m.com.Workspace.PinentryCancel(msg.RequestID)
+	case dialog.ActionSSHSubmit:
+		m.dialog.CloseDialog(dialog.SSHID)
+		m.com.Workspace.SSHRespond(msg.RequestID, msg.Secret)
+	case dialog.ActionSSHCancel:
+		m.dialog.CloseDialog(dialog.SSHID)
+		m.com.Workspace.SSHCancel(msg.RequestID)
 
 	case dialog.ActionFilePickerSelected:
 		cmds = append(cmds, tea.Sequence(
@@ -3275,8 +3334,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				}
 				return true
 			}
-			yolo := m.toggleYoloMode()
-			if yolo {
+			if m.toggleMode(permission.PermissionModeYolo) {
 				cmds = append(cmds, util.CmdHandler(util.InfoMsg{Type: util.InfoTypeYolo, Msg: yoloModeBannerMsg}))
 			} else {
 				cmds = append(cmds, util.ReportInfo("Yolo mode disabled"))
@@ -3431,7 +3489,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 				if m.bangMode && value != "" {
 					m.bangMode = false
-					m.setEditorPrompt(m.yoloModeCached())
+					m.setEditorPrompt(m.permModeCached())
 					m.randomizePlaceholders()
 					m.historyReset()
 					return tea.Batch(m.runShellCommand(value))
@@ -3532,7 +3590,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				if m.bangMode && m.bangWasEmpty && msg.Code == tea.KeyBackspace {
 					m.bangMode = false
 					m.bangWasEmpty = false
-					m.setEditorPrompt(m.yoloModeCached())
+					m.setEditorPrompt(m.permModeCached())
 					break
 				}
 
@@ -3581,7 +3639,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					m.textarea.SetValue(stripped)
 					m.textarea.SetCursorColumn(max(0, col-(len(newVal)-len(stripped))))
 					_ = line // cursor line doesn't change; prefix removed
-					m.setEditorPrompt(m.yoloModeCached())
+					m.setEditorPrompt(m.permModeCached())
 				} else if m.bangMode && newVal == "" && curValue != "" {
 					// Just cleared last character; mark empty, stay in bang mode.
 					m.bangWasEmpty = true
@@ -3847,7 +3905,7 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	// Add status and help layer
 	m.status.SetHideHelp(isOnboarding)
-	m.status.SetMode(m.mode, m.yoloModeCached())
+	m.status.SetMode(m.mode, m.permModeCached())
 	m.status.Draw(scr, layout.status)
 
 	// Draw completions popup if open
@@ -4311,7 +4369,46 @@ func (m *UI) currentModelSupportsImages() bool {
 		return false
 	}
 	model := cfg.GetModelByType(agentCfg.Model)
-	return model != nil && model.SupportsImages
+	return model != nil && model.Capabilities.Vision
+}
+
+func (m *UI) currentModelSupportsAudio() bool {
+	cfg := m.com.Config()
+	if cfg == nil {
+		return false
+	}
+	agentCfg, ok := cfg.Agents[config.AgentCoder]
+	if !ok {
+		return false
+	}
+	model := cfg.GetModelByType(agentCfg.Model)
+	return model != nil && model.Capabilities.Audio
+}
+
+// currentModelMaxAttachments returns the maximum number of attachments the
+// current model accepts in a single request. Zero means the provider does
+// not enforce a hard limit.
+func (m *UI) currentModelMaxAttachments() int {
+	cfg := m.com.Config()
+	if cfg == nil {
+		return 0
+	}
+	agentCfg, ok := cfg.Agents[config.AgentCoder]
+	if !ok {
+		return 0
+	}
+	model := cfg.GetModelByType(agentCfg.Model)
+	if model == nil {
+		return 0
+	}
+	return model.MaxAttachments
+}
+
+// attachmentsLimitReached reports whether the current model's attachment
+// limit is already exhausted by the pending attachments.
+func (m *UI) attachmentsLimitReached() bool {
+	max := m.currentModelMaxAttachments()
+	return max > 0 && len(m.attachments.List()) >= max
 }
 
 // toggleCompactMode toggles compact mode between uiChat and uiChatCompact states.
@@ -4651,14 +4748,16 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 			// main  |
 			// ------| side
 			// editor|
-			// ----------
-			// help
+			// ------|
+			// help  |
 
 			var mainRect, sideRect image.Rectangle
 			layout.Horizontal(
 				layout.Len(appRect.Dx()-sidebarWidth),
 				layout.Fill(1),
 			).Split(appRect).Assign(&mainRect, &sideRect)
+			sideRect.Max.Y = helpRect.Max.Y - 1
+			uiLayout.status.Max.X = mainRect.Max.X
 			// Add padding left
 			sideRect.Min.X += 1
 			var editorRect image.Rectangle
@@ -4767,9 +4866,81 @@ func editorFileMsg(path string) tea.Msg {
 	}
 }
 
-// setEditorPrompt configures the textarea prompt function based on whether
-// plan, yolo, or bang mode is enabled.
-func (m *UI) setEditorPrompt(yolo bool) {
+// setPermissionMode writes mode to the workspace and through the
+// permission-mode cache (no re-probe needed), then refreshes the editor
+// prompt. Every permission-mode write goes through here, so the cache is
+// never left trailing the workspace.
+func (m *UI) setPermissionMode(mode permission.PermissionMode) {
+	m.com.Workspace.PermissionSetMode(mode)
+	m.permModeCache.set(mode)
+	// Supersede any in-flight busy/permission probe: its result carries the
+	// old generation and would otherwise overwrite the value we just wrote.
+	// Bump the generation (rather than invalidateBusyCaches, which would
+	// clear the fresh value) so applyBusyState's guard discards and
+	// re-dispatches the stale probe.
+	m.busyFetchGen++
+	m.setEditorPrompt(mode)
+}
+
+// setYolo turns YOLO on or off. Turning it off goes all the way back to
+// normal, so a sysadmin session that declines YOLO really does get its
+// prompts back rather than landing one rung down.
+func (m *UI) setYolo(on bool) {
+	mode := permission.PermissionModeNormal
+	if on {
+		mode = permission.PermissionModeYolo
+	}
+	m.setPermissionMode(mode)
+}
+
+// toggleMode flips the permission mode between target and Normal. It reports
+// whether target is now the active mode.
+func (m *UI) toggleMode(target permission.PermissionMode) (enabled bool) {
+	mode := permission.PermissionModeNormal
+	if m.com.Workspace.PermissionMode() != target {
+		mode = target
+		enabled = true
+	}
+	m.setPermissionMode(mode)
+	return enabled
+}
+
+// permissionModeName is the human-readable name for a permission mode.
+func permissionModeName(mode permission.PermissionMode) string {
+	switch mode {
+	case permission.PermissionModeYolo:
+		return "yolo"
+	case permission.PermissionModeSysadmin:
+		return "sysadmin"
+	default:
+		return "normal"
+	}
+}
+
+// toggleModeAndReport flips the permission mode and announces where it
+// landed. Reaching a mode from the command palette shows the same badge
+// banner as reaching it from the Shift+Tab cycle, so one mode does not
+// announce itself two different ways depending on the road in. Dropping
+// back to normal is ordinary news and reads as such: it names the mode
+// rather than saying "disabled", which is a lie when the toggle landed
+// somewhere rather than switching something off.
+func (m *UI) toggleModeAndReport(target permission.PermissionMode) tea.Cmd {
+	if !m.toggleMode(target) {
+		return util.ReportInfo("Permission mode: " + permissionModeName(permission.PermissionModeNormal))
+	}
+	switch target {
+	case permission.PermissionModeSysadmin:
+		return util.CmdHandler(util.InfoMsg{Type: util.InfoTypeSysadmin, Msg: sysadminModeBannerMsg})
+	case permission.PermissionModeYolo:
+		return util.CmdHandler(util.InfoMsg{Type: util.InfoTypeYolo, Msg: yoloModeBannerMsg})
+	default:
+		return util.ReportInfo("Permission mode: " + permissionModeName(target))
+	}
+}
+
+// setEditorPrompt configures the textarea prompt function based on the current
+// permission mode, or whether plan or bang mode is enabled.
+func (m *UI) setEditorPrompt(mode permission.PermissionMode) {
 	if m.bangMode {
 		m.textarea.SetPromptFunc(4, m.bangPromptFunc)
 		return
@@ -4778,11 +4949,14 @@ func (m *UI) setEditorPrompt(yolo bool) {
 		m.textarea.SetPromptFunc(4, m.planPromptFunc)
 		return
 	}
-	if yolo {
+	switch mode {
+	case permission.PermissionModeSysadmin:
+		m.textarea.SetPromptFunc(4, m.sysadminPromptFunc)
+	case permission.PermissionModeYolo:
 		m.textarea.SetPromptFunc(4, m.yoloPromptFunc)
-		return
+	default:
+		m.textarea.SetPromptFunc(4, m.normalPromptFunc)
 	}
-	m.textarea.SetPromptFunc(4, m.normalPromptFunc)
 }
 
 // normalPromptFunc returns the normal editor prompt style ("> " on the
@@ -4849,23 +5023,33 @@ func (m *UI) bangPromptFunc(info textarea.PromptInfo) string {
 	return t.Editor.PromptBangDotsBlurred.Render()
 }
 
+// toggleInputMode advances the Shift+Tab cycle by one position. The cycle is
+// a ring of four positions read straight off the current state — code ->
+// plan -> YOLO -> sysadmin -> code. Nothing is remembered between presses,
+// so the next position is always the one the badge implies, whether the
+// permission mode came from this cycle or from Ctrl+Y.
 func (m *UI) toggleInputMode() tea.Cmd {
 	if m.isAgentBusy() || m.modeSwitching {
 		return util.ReportWarn("Agent is busy, please wait before switching input mode...")
 	}
 	if m.mode == uiInputModePlan {
-		// Second step of the Shift+Tab cycle: plan -> YOLO. Enabling YOLO
-		// here is the only case where the cycle may disable it again.
-		if !m.com.Workspace.PermissionSkipRequests() {
-			m.toggleYoloMode()
-			m.cycleYolo = true
+		// Second step: plan -> YOLO coding. A permissive mode carried into
+		// plan keeps its rung rather than being knocked down to plain YOLO.
+		if !m.yoloActive() {
+			m.setYolo(true)
 		}
 		return m.setInputMode(uiInputModeCode)
 	}
-	// Only the cycle may turn YOLO back off: YOLO the user enabled himself
-	// (Ctrl+Y, the command palette) survives entering plan mode.
-	if m.com.Workspace.PermissionSkipRequests() && m.cycleYolo {
-		m.toggleYoloMode()
+	if m.yoloActive() {
+		if m.permModeCached() == permission.PermissionModeYolo {
+			// Third step: YOLO -> sysadmin. The banner spells out what was
+			// just given up, since this is the most permissive state the
+			// program has and it is now one keystroke away.
+			m.setPermissionMode(permission.PermissionModeSysadmin)
+			return util.CmdHandler(util.InfoMsg{Type: util.InfoTypeSysadmin, Msg: sysadminModeBannerMsg})
+		}
+		// Fourth step: sysadmin -> normal, closing the cycle.
+		m.setYolo(false)
 		return util.ReportInfo("input mode: code")
 	}
 	return m.setInputMode(uiInputModePlan)
@@ -4880,19 +5064,19 @@ func (m *UI) switchPlanToYolo() tea.Cmd {
 	if m.isAgentBusy() || m.modeSwitching {
 		return util.ReportWarn("Agent is busy, please wait before switching input mode...")
 	}
-	if !m.com.Workspace.PermissionSkipRequests() {
-		m.toggleYoloMode()
+	// Idempotent by design: a sysadmin session carried into plan mode keeps
+	// its mode rather than being knocked down to plain YOLO.
+	if !m.yoloActive() {
+		m.setYolo(true)
 	}
-	// Explicit activation pins YOLO: the Shift+Tab cycle must not disable
-	// it on the next pass.
-	m.cycleYolo = false
 	return m.setInputMode(uiInputModeCode)
 }
 
 // Mode banner copy shown in the status bar after switching modes.
 const (
-	planModeBannerMsg = "Plan with Crush before generating any code."
-	yoloModeBannerMsg = "System level commands stay blocked. The rest run unprompted."
+	planModeBannerMsg     = "Plan with Crush before generating any code."
+	yoloModeBannerMsg     = "System level commands stay blocked. The rest run unprompted."
+	sysadminModeBannerMsg = "All commands are unblocked. Use wisely."
 )
 
 func (m *UI) setInputMode(target uiInputMode) tea.Cmd {
@@ -4901,9 +5085,13 @@ func (m *UI) setInputMode(target uiInputMode) tea.Cmd {
 		agentID = config.AgentCoder
 	}
 
-	// YOLO is orthogonal to the input mode, so report it alongside the mode
-	// instead of treating a YOLO-enabled coder as plain "code".
-	yolo := target == uiInputModeCode && m.com.Workspace.PermissionSkipRequests()
+	// The permission mode is orthogonal to the input mode, so report it
+	// alongside the mode instead of treating a YOLO-enabled coder as plain
+	// "code".
+	perm := permission.PermissionModeNormal
+	if target == uiInputModeCode {
+		perm = m.permModeCached()
+	}
 
 	// The agent switch is an HTTP round-trip in client/server mode, so it
 	// runs off the update loop together with the model update. The mode and
@@ -4918,7 +5106,7 @@ func (m *UI) setInputMode(target uiInputMode) tea.Cmd {
 		}
 		return modeSwitchedMsg{
 			mode: target,
-			yolo: yolo,
+			perm: perm,
 			err:  err,
 		}
 	}
@@ -4932,7 +5120,7 @@ func (m *UI) applyModeSwitch(msg modeSwitchedMsg) []tea.Cmd {
 		return []tea.Cmd{util.ReportError(msg.err)}
 	}
 	m.mode = msg.mode
-	m.setEditorPrompt(m.yoloModeCached())
+	m.setEditorPrompt(m.permModeCached())
 	var cmds []tea.Cmd
 	if msg.continueSessionID != "" && m.session != nil && m.session.ID == msg.continueSessionID {
 		cmds = append(cmds, m.sendMessageInternal("Implement the plan.", true))
@@ -4940,7 +5128,9 @@ func (m *UI) applyModeSwitch(msg modeSwitchedMsg) []tea.Cmd {
 	switch {
 	case msg.mode == uiInputModePlan:
 		cmds = append(cmds, util.CmdHandler(util.InfoMsg{Type: util.InfoTypePlan, Msg: planModeBannerMsg}))
-	case msg.yolo:
+	case msg.perm == permission.PermissionModeSysadmin:
+		cmds = append(cmds, util.CmdHandler(util.InfoMsg{Type: util.InfoTypeSysadmin, Msg: sysadminModeBannerMsg}))
+	case msg.perm == permission.PermissionModeYolo:
 		cmds = append(cmds, util.CmdHandler(util.InfoMsg{Type: util.InfoTypeYolo, Msg: yoloModeBannerMsg}))
 	default:
 		cmds = append(cmds, util.ReportInfo("input mode: code"))
@@ -4953,8 +5143,25 @@ func (m *UI) applyModeSwitch(msg modeSwitchedMsg) []tea.Cmd {
 type modeSwitchedMsg struct {
 	continueSessionID string
 	mode              uiInputMode
-	yolo              bool
+	perm              permission.PermissionMode
 	err               error
+}
+
+// sysadminPromptFunc returns the sysadmin mode editor prompt style with red
+// warning icon and red dots.
+func (m *UI) sysadminPromptFunc(info textarea.PromptInfo) string {
+	t := m.com.Styles
+	if info.LineNumber == 0 {
+		if info.Focused {
+			return t.Editor.PromptSysadminIconFocused.Render()
+		} else {
+			return t.Editor.PromptSysadminIconBlurred.Render()
+		}
+	}
+	if info.Focused {
+		return t.Editor.PromptSysadminDotsFocused.Render()
+	}
+	return t.Editor.PromptSysadminDotsBlurred.Render()
 }
 
 // closeCompletions closes the completions popup and resets state.
@@ -4994,6 +5201,9 @@ func (m *UI) insertFileCompletion(path string) tea.Cmd {
 	fileCmd := func() tea.Msg {
 		if !m.currentModelSupportsImages() && common.IsImagePath(path) {
 			return util.NewWarnMsg("The current model does not support image attachments")
+		}
+		if !m.currentModelSupportsAudio() && common.IsAudioPath(path) {
+			return util.NewWarnMsg("The current model does not support audio attachments")
 		}
 
 		absPath, _ := filepath.Abs(path)
@@ -5075,6 +5285,9 @@ func (m *UI) insertMCPResourceCompletion(item completions.ResourceCompletionValu
 
 		if !m.currentModelSupportsImages() && strings.HasPrefix(mimeType, "image/") {
 			return util.NewWarnMsg("The current model does not support image attachments")
+		}
+		if !m.currentModelSupportsAudio() && strings.HasPrefix(mimeType, "audio/") {
+			return util.NewWarnMsg("The current model does not support audio attachments")
 		}
 
 		return message.Attachment{
@@ -5964,8 +6177,10 @@ func (m *UI) setPlanReadyPending(sessionID string) {
 func (m *UI) openPlanHandoff() {
 	inline := dialog.NewPlanHandoffInline(m.com)
 	inline.OnConfirm = func(yolo bool) tea.Cmd {
-		if m.com.Workspace.PermissionSkipRequests() != yolo {
-			m.toggleYoloMode()
+		// The handoff asks a yes/no question about YOLO, so answer it
+		// literally: declining drops the session back to normal.
+		if m.yoloActive() != yolo {
+			m.setYolo(yolo)
 		}
 		m.setPlanReadyPending("")
 		sessionID := m.session.ID
@@ -6153,7 +6368,7 @@ func (m *UI) checkBangModeAfterPaste() {
 	m.textarea.SetValue(stripped)
 	col := m.textarea.Column()
 	m.textarea.SetCursorColumn(max(0, col-(len(val)-len(stripped))))
-	m.setEditorPrompt(m.yoloModeCached())
+	m.setEditorPrompt(m.permModeCached())
 }
 
 // handlePasteMsg handles a paste message.
@@ -6199,7 +6414,7 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 			if _, err := os.Stat(path); os.IsNotExist(err) {
 				return false
 			}
-			if !common.IsImagePath(path) {
+			if !common.IsImagePath(path) && !common.IsAudioPath(path) {
 				return false
 			}
 		}
@@ -6211,8 +6426,11 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 		m.checkBangModeAfterPaste()
 		return cmd
 	}
-	if !m.currentModelSupportsImages() {
+	if !m.currentModelSupportsImages() && slices.ContainsFunc(paths, common.IsImagePath) {
 		return util.ReportWarn("The current model does not support image attachments")
+	}
+	if !m.currentModelSupportsAudio() && slices.ContainsFunc(paths, common.IsAudioPath) {
+		return util.ReportWarn("The current model does not support audio attachments")
 	}
 
 	var cmds []tea.Cmd

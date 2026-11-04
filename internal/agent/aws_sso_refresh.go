@@ -19,8 +19,8 @@ import (
 )
 
 // awsSSORefreshTimeout bounds how long the AWS SSO refresh command may run.
-// Browser-based SSO needs time, so it is generous, and it runs on a context
-// detached from the agent turn so a cancelled turn doesn't abort the login.
+// Browser-based SSO needs time, so it is generous, and the login runs on its
+// own context so a cancelled turn doesn't abort it.
 const awsSSORefreshTimeout = 5 * time.Minute
 
 // awsSSOURLRe matches the https verification URL that `aws sso login` and
@@ -46,6 +46,34 @@ func (c *coordinator) refreshAWSCredentials(ctx context.Context, providerCfg con
 	if c.notify == nil {
 		return errNoInteractiveAuth
 	}
+	// Every request that hits the expired session shares one login, so
+	// parallel subagents open one browser flow rather than one each.
+	// The login owns its context; a cancelled caller only stops waiting.
+	done := c.awsRefresh.DoChan(providerCfg.ID, func() (any, error) {
+		return nil, c.loginAWS(providerCfg)
+	})
+	select {
+	case res := <-done:
+		if res.Err != nil {
+			return res.Err
+		}
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	// The login may finish just as this request is cancelled. Don't retry
+	// it: any error here makes fantasy skip the retry and surface the
+	// original auth error, the same as a cancel during the wait above.
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	slog.Info("AWS SSO refresh complete, retrying request", "provider", providerCfg.ID)
+	return nil
+}
+
+// loginAWS runs the provider's refresh command once and rebuilds the models
+// so the AWS SDK re-reads the refreshed SSO cache. It is shared by every
+// waiting request, so it runs on its own context rather than any caller's.
+func (c *coordinator) loginAWS(providerCfg config.ProviderConfig) error {
 	slog.Info("AWS credentials expired, running refresh command",
 		"provider", providerCfg.ID, "command", providerCfg.AWSAuthRefresh)
 
@@ -57,9 +85,7 @@ func (c *coordinator) refreshAWSCredentials(ctx context.Context, providerCfg con
 		AWSSOCommand: providerCfg.AWSAuthRefresh,
 	})
 
-	// Detach from the turn's context (with a generous timeout) so cancelling
-	// the turn doesn't kill an in-progress browser login.
-	runCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), awsSSORefreshTimeout)
+	runCtx, cancel := context.WithTimeout(context.Background(), awsSSORefreshTimeout)
 	defer cancel()
 
 	runErr := c.runAWSAuthRefresh(runCtx, providerCfg)
@@ -74,18 +100,10 @@ func (c *coordinator) refreshAWSCredentials(ctx context.Context, providerCfg con
 		slog.Error("AWS SSO refresh command failed", "provider", providerCfg.ID, "error", runErr)
 		return runErr
 	}
-	// If the turn's context was cancelled while the command ran, fantasy's
-	// retry would fail immediately, so surface the cancellation instead.
-	if ctx.Err() != nil {
-		return ctx.Err()
-	}
-	// Rebuild models so the AWS SDK credential chain re-reads the refreshed
-	// SSO cache on the next attempt.
 	if err := c.rebuildModels(runCtx); err != nil {
 		slog.Error("Failed to update models after AWS SSO refresh", "provider", providerCfg.ID, "error", err)
 		return err
 	}
-	slog.Info("AWS SSO refresh complete, retrying request", "provider", providerCfg.ID)
 	return nil
 }
 
@@ -124,8 +142,8 @@ func (c *coordinator) runAWSAuthRefresh(ctx context.Context, providerCfg config.
 		}
 		if url := extractAWSSSOURL(line); url != "" {
 			urlSent = true
-			// Second phase of the two-part publish: the dialog is already
-			// open from refreshAWSCredentials; this fills in the URL on it.
+			// Second phase of the two-part publish: loginAWS already opened
+			// the dialog; this fills in the URL on it.
 			c.notify.Publish(pubsub.CreatedEvent, notify.Notification{
 				Type:         notify.TypeAWSSSOAuth,
 				ProviderID:   providerCfg.ID,

@@ -1341,13 +1341,13 @@ func TestClientWorkspace_RecoveryCreateIsBounded(t *testing.T) {
 }
 
 // TestClientWorkspace_RecoveryRestoresModes guards against a re-created
-// workspace dropping plan mode or reviving a YOLO flag the user turned off.
+// workspace dropping plan mode or the permission mode the user had set.
 func TestClientWorkspace_RecoveryRestoresModes(t *testing.T) {
 	t.Cleanup(SetSSEBackoffForTest(time.Millisecond, 5*time.Millisecond))
 
 	cases := []struct {
 		name      string
-		yolo      bool
+		mode      proto.WorkspacePermissionMode
 		before    func(t *testing.T, ws *ClientWorkspace)
 		wantCalls []string
 	}{
@@ -1359,11 +1359,9 @@ func TestClientWorkspace_RecoveryRestoresModes(t *testing.T) {
 			wantCalls: []string{"agent/main ws-1 plan", "agent/init ws-2", "agent/main ws-2 plan"},
 		},
 		{
-			name: "yolo turned off",
-			yolo: true,
-			before: func(_ *testing.T, ws *ClientWorkspace) {
-				ws.PermissionSetSkipRequests(false)
-			},
+			name:      "yolo mode",
+			mode:      proto.WorkspacePermissionModeYolo,
+			before:    func(_ *testing.T, _ *ClientWorkspace) {},
 			wantCalls: []string{"agent/init ws-2"},
 		},
 	}
@@ -1380,7 +1378,7 @@ func TestClientWorkspace_RecoveryRestoresModes(t *testing.T) {
 				},
 			}
 			ws := NewClientWorkspace(srv.start(t), proto.Workspace{
-				ID: "ws-1", Path: "/tmp/recover", YOLO: tc.yolo,
+				ID: "ws-1", Path: "/tmp/recover", PermissionMode: tc.mode,
 			})
 			tc.before(t, ws)
 
@@ -1389,7 +1387,7 @@ func TestClientWorkspace_RecoveryRestoresModes(t *testing.T) {
 
 			srv.snapshot(func(s *recoveryServer) {
 				require.Len(t, s.createReqs, 1)
-				require.False(t, s.createReqs[0].YOLO)
+				require.Equal(t, tc.mode, s.createReqs[0].PermissionMode)
 				require.Equal(t, tc.wantCalls, s.agentCalls)
 			})
 		})

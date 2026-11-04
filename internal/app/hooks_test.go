@@ -27,7 +27,7 @@ func recordingPermissions(t *testing.T) (permission.Service, func() []string) {
 		hooks.EventPermissionResult:  {record},
 	}
 	runner := hooks.NewRunner(hooks.Static(cfg), dir, dir)
-	return permission.NewPermissionService(dir, false, nil, permissionHooks{runner}), func() []string {
+	return permission.NewPermissionService(dir, nil, permissionHooks{runner}), func() []string {
 		data, _ := os.ReadFile(logPath)
 		text := strings.TrimSpace(string(data))
 		if text == "" {

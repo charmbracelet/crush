@@ -169,7 +169,7 @@ func (r *classifierRouter) classify(ctx context.Context, in RouteInput) (string,
 	defer cancel()
 
 	tok := int64(32)
-	if classifier.CatwalkCfg.CanReason {
+	if classifier.CatwalkCfg.CanReason() {
 		tok = classifier.CatwalkCfg.DefaultMaxTokens
 	}
 	agent := fantasy.NewAgent(
@@ -191,10 +191,10 @@ func (r *classifierRouter) classify(ctx context.Context, in RouteInput) (string,
 	if !classifier.FlatRate {
 		mc := classifier.CatwalkCfg
 		u := resp.TotalUsage
-		cost = mc.CostPer1MInCached/1e6*float64(u.CacheCreationTokens) +
-			mc.CostPer1MOutCached/1e6*float64(u.CacheReadTokens) +
-			mc.CostPer1MIn/1e6*float64(u.InputTokens) +
-			mc.CostPer1MOut/1e6*float64(u.OutputTokens)
+		cost = mc.Pricing.CacheCreate/1e6*float64(u.CacheCreationTokens) +
+			mc.Pricing.CacheHit/1e6*float64(u.CacheReadTokens) +
+			mc.Pricing.Input/1e6*float64(u.InputTokens) +
+			mc.Pricing.Output/1e6*float64(u.OutputTokens)
 	}
 	return resp.Response.Content.Text(), cost, nil
 }

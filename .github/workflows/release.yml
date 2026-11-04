@@ -17,7 +17,7 @@ concurrency:
 jobs:
   release:
     if: ${{ !contains(github.repository, '-internal') }}
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: blacksmith-16vcpu-ubuntu-2404
     permissions:
       contents: write
       id-token: write

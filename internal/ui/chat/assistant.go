@@ -42,6 +42,17 @@ const (
 	refusalDetails  = "The provider's safety classifier stopped this response before any usable content was produced. Rephrase the request, start a fresh session, or try a different model."
 )
 
+// Default copy for a truncated-response banner. As with refusals, the
+// agent persists only the FinishReasonMaxTokens reason and the TUI owns
+// the text, so a response that stops mid-sentence says why instead of
+// looking complete. The hint matters: raising max tokens is the one
+// thing the user can do about it.
+const (
+	truncatedTagLabel = "TRUNCATED"
+	truncatedTitle    = "Response cut off at the token limit"
+	truncatedDetails  = "The model reached its output token limit and stopped mid-response. Raise the model's max tokens to get the full answer, or retry with a narrower request."
+)
+
 // maxExpandedThinkingTailLines is the F5 tail-window cap. When the user
 // expands a thinking block whose post-glamour line count exceeds this
 // threshold, only the last N lines are shown with an affordance line
@@ -432,7 +443,10 @@ func (a *AssistantMessageItem) renderMessageContent(width int) (string, int) {
 				break
 			}
 			banner = a.sty.Messages.AssistantCanceled.Render("Canceled")
-		case a.message.IsErrorLike():
+		case a.message.IsErrorLike(), a.message.IsTruncated():
+			// ERROR, REFUSED and TRUNCATED all render through the same
+			// banner section: a tag, a one-line title, and the details
+			// the finish part carries (or the TUI's defaults).
 			banner = a.cachedError(width)
 		}
 		if banner != "" {
@@ -544,10 +558,10 @@ func (a *AssistantMessageItem) planStreaming() bool {
 }
 
 // errorKey returns the (srcHash, extra) cache key components for the
-// error / refusal section. Returns (0, 0) when no error-like finish
-// is present so the cache stays a no-op for normal messages.
+// error / refusal / truncation section. Returns (0, 0) when no banner
+// finish is present so the cache stays a no-op for normal messages.
 func (a *AssistantMessageItem) errorKey() (uint64, uint64) {
-	if !a.message.IsFinished() || !a.message.IsErrorLike() {
+	if !a.message.IsFinished() || (!a.message.IsErrorLike() && !a.message.IsTruncated()) {
 		return 0, 0
 	}
 	finishPart := a.message.FinishPart()
@@ -774,16 +788,21 @@ func (a *AssistantMessageItem) renderSpinning() string {
 	return a.anim.Render()
 }
 
-// renderError renders an error or provider-refusal banner.
+// renderError renders an error, provider-refusal, or truncation banner.
 func (a *AssistantMessageItem) renderError(width int) string {
 	finishPart := a.message.FinishPart()
 	tagLabel := "ERROR"
 	titleText := finishPart.Message
 	detailsText := finishPart.Details
-	if finishPart.Reason == message.FinishReasonContentFilter {
+	switch finishPart.Reason {
+	case message.FinishReasonContentFilter:
 		tagLabel = refusalTagLabel
 		titleText = cmp.Or(titleText, refusalTitle)
 		detailsText = cmp.Or(detailsText, refusalDetails)
+	case message.FinishReasonMaxTokens:
+		tagLabel = truncatedTagLabel
+		titleText = cmp.Or(titleText, truncatedTitle)
+		detailsText = cmp.Or(detailsText, truncatedDetails)
 	}
 	errTag := a.sty.Messages.ErrorTag.Render(tagLabel)
 	truncated := ansi.Truncate(titleText, width-2-lipgloss.Width(errTag), "...")

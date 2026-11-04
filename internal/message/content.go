@@ -293,6 +293,15 @@ func (m *Message) IsErrorLike() bool {
 	return false
 }
 
+// IsTruncated reports whether the model stopped because it ran out of
+// output tokens instead of completing the response on its own terms.
+// The TUI renders this as a TRUNCATED banner, alongside the
+// error-style banners, so a response that stops mid-sentence is never
+// mistaken for a complete one.
+func (m *Message) IsTruncated() bool {
+	return m.FinishReason() == FinishReasonMaxTokens
+}
+
 func (m *Message) IsThinking() bool {
 	if m.ReasoningContent().Thinking != "" && m.Content().Text == "" && !m.IsFinished() {
 		return true

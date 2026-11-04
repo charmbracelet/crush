@@ -398,10 +398,11 @@ func messageToProto(m message.Message) proto.Message {
 			})
 		case message.Finish:
 			msg.Parts = append(msg.Parts, proto.Finish{
-				Reason:  proto.FinishReason(v.Reason),
-				Time:    v.Time,
-				Message: v.Message,
-				Details: v.Details,
+				Reason:   proto.FinishReason(v.Reason),
+				Time:     v.Time,
+				Message:  v.Message,
+				Details:  v.Details,
+				DecodeMs: v.DecodeMs,
 			})
 		case message.ImageURLContent:
 			msg.Parts = append(msg.Parts, proto.ImageURLContent{URL: v.URL, Detail: v.Detail})

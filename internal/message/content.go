@@ -134,6 +134,12 @@ type Finish struct {
 	Time    int64        `json:"time"`
 	Message string       `json:"message,omitempty"`
 	Details string       `json:"details,omitempty"`
+	// DecodeMs is how long the model spent emitting this step's output,
+	// measured from the first streamed token to the finish. It excludes
+	// the request round trip and time to first token, so it is the
+	// denominator for generation speed (tokens per second). Zero when the
+	// step never streamed an output token or predates this measurement.
+	DecodeMs int64 `json:"decode_ms,omitempty"`
 }
 
 func (Finish) isPart() {}
@@ -221,6 +227,10 @@ type Message struct {
 	// figure is the one shown.
 	PrismHypercreditSavings *float64
 	PrismDollarSavings      *float64
+	// firstTokenAt is when this step's first output token arrived. It is
+	// transient: the finish part carries the measured decode duration
+	// (Finish.DecodeMs) once the step ends, so it does not need storage.
+	firstTokenAt time.Time
 }
 
 func (m *Message) Content() TextContent {
@@ -591,12 +601,17 @@ func (m *Message) ResetStreamedContent() {
 }
 
 func (m *Message) AddFinish(reason FinishReason, message, details string) {
-	m.AddFinishAt(reason, message, details, time.Now().Unix())
+	now := time.Now()
+	m.addFinish(reason, message, details, now.Unix(), m.decodeMillis(now))
 }
 
 // AddFinishAt is AddFinish with an explicit timestamp, for backdating a
 // repaired turn so response-time statistics stay honest.
 func (m *Message) AddFinishAt(reason FinishReason, message, details string, at int64) {
+	m.addFinish(reason, message, details, at, m.decodeMillis(time.Unix(at, 0)))
+}
+
+func (m *Message) addFinish(reason FinishReason, message, details string, at, decodeMs int64) {
 	// remove any existing finish part
 	for i, part := range m.Parts {
 		if _, ok := part.(Finish); ok {
@@ -604,7 +619,26 @@ func (m *Message) AddFinishAt(reason FinishReason, message, details string, at i
 			break
 		}
 	}
-	m.Parts = append(m.Parts, Finish{Reason: reason, Time: at, Message: message, Details: details})
+	m.Parts = append(m.Parts, Finish{Reason: reason, Time: at, Message: message, Details: details, DecodeMs: decodeMs})
+}
+
+// SetFirstTokenAt records when the step's first output token arrived. It is
+// called once per step, from the first text or reasoning delta, so the finish
+// part can report the decode duration without counting time to first token.
+func (m *Message) SetFirstTokenAt(at time.Time) {
+	if !m.firstTokenAt.IsZero() {
+		return
+	}
+	m.firstTokenAt = at
+}
+
+// decodeMillis is the generation time of this step: first token to end. It is
+// zero when the step never streamed a token or the end predates it.
+func (m *Message) decodeMillis(end time.Time) int64 {
+	if m.firstTokenAt.IsZero() || end.Before(m.firstTokenAt) {
+		return 0
+	}
+	return end.Sub(m.firstTokenAt).Milliseconds()
 }
 
 func (m *Message) AddImageURL(url, detail string) {

@@ -175,6 +175,9 @@ type Finish struct {
 	Time    int64        `json:"time"`
 	Message string       `json:"message,omitempty"`
 	Details string       `json:"details,omitempty"`
+	// DecodeMs is the step's generation time: first output token to
+	// finish, excluding time to first token. Zero when unmeasured.
+	DecodeMs int64 `json:"decode_ms,omitempty"`
 }
 
 func (Finish) isPart() {}

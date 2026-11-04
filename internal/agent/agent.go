@@ -1222,6 +1222,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				}
 			}
 			currentAssistant.AppendReasoningContent(text)
+			if text != "" {
+				currentAssistant.SetFirstTokenAt(time.Now())
+			}
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
 		OnReasoningEnd: func(id string, reasoning fantasy.ReasoningContent) error {
@@ -1262,6 +1265,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			// turn's replay would miss the prompt cache. Display code
 			// trims leading whitespace instead.
 			currentAssistant.AppendContent(text)
+			if text != "" {
+				currentAssistant.SetFirstTokenAt(time.Now())
+			}
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
 		OnToolInputStart: func(id string, toolName string) error {

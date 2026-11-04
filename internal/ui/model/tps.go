@@ -17,7 +17,10 @@ func (m *UI) beginLiveTPS(msg message.Message) {
 		return
 	}
 	m.liveTPSMsgID = msg.ID
-	m.liveTPSStart = time.Now()
+	// The decode clock starts with the first output token, not with the
+	// message. Time to first token is request latency, not generation
+	// speed, and counting it would understate the rate.
+	m.liveTPSStart = time.Time{}
 	m.liveTPSBytes = 0
 	m.liveTPSTokens = 0
 	// Keep the previous step's rate visible until this one has streamed
@@ -25,7 +28,9 @@ func (m *UI) beginLiveTPS(msg message.Message) {
 }
 
 // updateLiveTPS advances the live tokens-per-second estimate and folds the
-// finished step into the session average.
+// finished step into the session average. The rate is output tokens over the
+// decode window (first token to last), so it measures generation speed
+// rather than end-to-end request latency.
 func (m *UI) updateLiveTPS(msg message.Message) {
 	if msg.Role != message.Assistant || msg.IsSummaryMessage {
 		return
@@ -42,15 +47,24 @@ func (m *UI) updateLiveTPS(msg message.Message) {
 		delta := bytes - m.liveTPSBytes
 		m.liveTPSTokens += int64((delta + 3) / 4)
 		m.liveTPSBytes = bytes
+		if m.liveTPSStart.IsZero() {
+			m.liveTPSStart = time.Now()
+		}
 	}
-	if elapsed := time.Since(m.liveTPSStart).Seconds(); elapsed >= 0.25 {
-		m.liveTPS = float64(m.liveTPSTokens) / elapsed
+	if !m.liveTPSStart.IsZero() {
+		if elapsed := time.Since(m.liveTPSStart).Seconds(); elapsed >= 0.25 {
+			m.liveTPS = float64(m.liveTPSTokens) / elapsed
+		}
 	}
 
 	if msg.IsFinished() {
 		if m.liveTPSTokens > 0 {
 			m.sessionTPSOutput += m.liveTPSTokens
-			m.sessionTPSDuration += time.Since(m.liveTPSStart)
+			if decode := decodeDuration(msg); decode > 0 {
+				m.sessionTPSDuration += decode
+			} else if !m.liveTPSStart.IsZero() {
+				m.sessionTPSDuration += time.Since(m.liveTPSStart)
+			}
 		}
 		// Keep the last turn's rate in the sidebar while idle. The next
 		// step overwrites it once it has a live estimate.
@@ -85,12 +99,32 @@ func (m *UI) resetSessionTPS(msgs []message.Message) {
 			continue
 		}
 		bytes := assistantOutputBytes(msg)
-		if bytes == 0 || msg.UpdatedAt <= msg.CreatedAt {
+		if bytes == 0 {
 			continue
 		}
+		decode := decodeDuration(msg)
+		if decode <= 0 {
+			// Steps recorded before decode timing was measured fall back
+			// to the wall clock, which includes time to first token.
+			if msg.UpdatedAt <= msg.CreatedAt {
+				continue
+			}
+			decode = time.Duration(max(msg.UpdatedAt-msg.CreatedAt, 1)) * time.Second
+		}
 		m.sessionTPSOutput += int64((bytes + 3) / 4)
-		m.sessionTPSDuration += time.Duration(max(msg.UpdatedAt-msg.CreatedAt, 1)) * time.Second
+		m.sessionTPSDuration += decode
 	}
+}
+
+// decodeDuration is the generation window the agent measured for a finished
+// step: first output token to finish. It is zero for steps that streamed no
+// token or predate the measurement.
+func decodeDuration(msg message.Message) time.Duration {
+	finish := msg.FinishPart()
+	if finish == nil || finish.DecodeMs <= 0 {
+		return 0
+	}
+	return time.Duration(finish.DecodeMs) * time.Millisecond
 }
 
 // activeModel returns the provider and model of the last finished,

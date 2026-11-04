@@ -132,3 +132,44 @@ func TestAssistantOutputBytesCountsReasoning(t *testing.T) {
 	}}
 	require.Equal(t, 8, assistantOutputBytes(msg))
 }
+
+func TestLiveTPSWaitsForFirstToken(t *testing.T) {
+	t.Parallel()
+	m := &UI{}
+	msg := message.Message{ID: "a1", Role: message.Assistant}
+	m.beginLiveTPS(msg)
+	require.True(t, m.liveTPSStart.IsZero(), "the decode clock waits for the first token")
+
+	// A tool call start arrives before any output; it must not start the
+	// decode clock.
+	msg.Parts = []message.ContentPart{message.ToolCall{ID: "t1", Name: "view"}}
+	m.updateLiveTPS(msg)
+	require.True(t, m.liveTPSStart.IsZero())
+
+	msg.Parts = append(msg.Parts, message.TextContent{Text: string(make([]byte, 400))})
+	m.updateLiveTPS(msg)
+	require.False(t, m.liveTPSStart.IsZero(), "the first output token starts the clock")
+
+	m.liveTPSStart = time.Now().Add(-1 * time.Second)
+	m.updateLiveTPS(msg)
+	require.InDelta(t, 100.0, m.liveTPS, 0.001, "rate is tokens over the decode window")
+}
+
+func TestSessionAverageUsesDecodeTime(t *testing.T) {
+	t.Parallel()
+	m := &UI{}
+	msgs := []message.Message{
+		{
+			Role:      message.Assistant,
+			CreatedAt: 100,
+			UpdatedAt: 110,
+			Parts: []message.ContentPart{
+				message.TextContent{Text: string(make([]byte, 400))},
+				message.Finish{Reason: message.FinishReasonEndTurn, DecodeMs: 2000},
+			},
+		},
+	}
+	m.resetSessionTPS(msgs)
+	_, average := m.tpsStats()
+	require.InDelta(t, 50.0, average, 0.001, "decode time, not wall clock, is the denominator")
+}

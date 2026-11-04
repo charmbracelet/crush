@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"charm.land/fantasy"
 	"github.com/stretchr/testify/require"
@@ -185,4 +186,49 @@ func TestResetStreamedContentEmpty(t *testing.T) {
 	msg := &Message{}
 	msg.ResetStreamedContent()
 	require.Empty(t, msg.Parts)
+}
+
+func TestAddFinishRecordsDecodeTime(t *testing.T) {
+	t.Parallel()
+
+	msg := &Message{}
+	msg.SetFirstTokenAt(time.Now().Add(-2 * time.Second))
+	msg.AddFinish(FinishReasonEndTurn, "", "")
+
+	finish := msg.FinishPart()
+	require.NotNil(t, finish)
+	require.InDelta(t, 2000, finish.DecodeMs, 100)
+}
+
+func TestSetFirstTokenAtKeepsTheFirstToken(t *testing.T) {
+	t.Parallel()
+
+	msg := &Message{}
+	msg.SetFirstTokenAt(time.Now().Add(-3 * time.Second))
+	// Later deltas must not move the decode start.
+	msg.SetFirstTokenAt(time.Now())
+	msg.AddFinish(FinishReasonEndTurn, "", "")
+
+	require.InDelta(t, 3000, msg.FinishPart().DecodeMs, 100)
+}
+
+func TestAddFinishWithoutTokensHasNoDecodeTime(t *testing.T) {
+	t.Parallel()
+
+	msg := &Message{}
+	msg.AddFinish(FinishReasonError, "boom", "")
+
+	require.Zero(t, msg.FinishPart().DecodeMs)
+}
+
+func TestAddFinishAtClampsDecodeTime(t *testing.T) {
+	t.Parallel()
+
+	msg := &Message{}
+	msg.SetFirstTokenAt(time.Now())
+	// A backdated finish that precedes the first token reports no decode
+	// time rather than a negative one.
+	msg.AddFinishAt(FinishReasonError, "", "", time.Now().Add(-time.Minute).Unix())
+
+	require.Zero(t, msg.FinishPart().DecodeMs)
 }

@@ -8,8 +8,7 @@ package agenttest
 import (
 	"context"
 
-	"charm.land/catwalk/pkg/catwalk"
-	"charm.land/fantasy/providers/openaicompat"
+	"charm.land/catwalk/v3/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
@@ -49,7 +48,7 @@ func NewCoordinator(
 	cfg.Config().Providers.Set(providerID, config.ProviderConfig{
 		ID:      providerID,
 		Name:    "Test",
-		Type:    openaicompat.Name,
+		Type:    catwalk.TypeCompletions,
 		BaseURL: "http://127.0.0.1:0/v1",
 		APIKey:  "test",
 		Models:  []catwalk.Model{{ID: modelID, DefaultMaxTokens: 4096}},
@@ -68,6 +67,6 @@ func NewCoordinator(
 		Config:      cfg,
 		Sessions:    sessions,
 		Messages:    messages,
-		Permissions: permission.NewPermissionService(workingDir, true, nil),
+		Permissions: permission.NewPermissionService(workingDir, nil, nil),
 	})
 }

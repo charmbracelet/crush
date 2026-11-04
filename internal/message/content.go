@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/catwalk/pkg/catwalk"
+	"charm.land/catwalk/v3/pkg/catwalk"
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/anthropic"
 	"charm.land/fantasy/providers/google"
@@ -156,6 +156,11 @@ func (m *Message) HasShellCommand() bool {
 		}
 	}
 	return false
+}
+
+// IsPrompt reports whether the message is something the user typed.
+func (m *Message) IsPrompt() bool {
+	return m.Role == User && !m.HasShellCommand()
 }
 
 // ShellCommands returns all ShellCommand parts from the message.

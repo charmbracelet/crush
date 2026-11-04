@@ -136,7 +136,7 @@ func tryGetToken(ctx context.Context, deviceCode string) (*oauth.Token, error) {
 		if result.AccessToken == "" {
 			return nil, errPending
 		}
-		return getCopilotToken(ctx, result.AccessToken)
+		return getCopilotToken(ctx, copilotTokenURL, result.AccessToken)
 	case "authorization_pending":
 		return nil, errPending
 	case "slow_down":
@@ -146,8 +146,8 @@ func tryGetToken(ctx context.Context, deviceCode string) (*oauth.Token, error) {
 	}
 }
 
-func getCopilotToken(ctx context.Context, githubToken string) (*oauth.Token, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", copilotTokenURL, nil)
+func getCopilotToken(ctx context.Context, tokenURL, githubToken string) (*oauth.Token, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", tokenURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -173,7 +173,8 @@ func getCopilotToken(ctx context.Context, githubToken string) (*oauth.Token, err
 		return nil, ErrNotAvailable
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("copilot token request failed: %s - %s", resp.Status, string(body))
+		return nil, fmt.Errorf("copilot token request failed: %w",
+			&oauth.TokenExchangeError{StatusCode: resp.StatusCode, Body: string(body)})
 	}
 
 	var result struct {
@@ -196,5 +197,5 @@ func getCopilotToken(ctx context.Context, githubToken string) (*oauth.Token, err
 
 // RefreshToken refreshes the Copilot token using the GitHub token.
 func RefreshToken(ctx context.Context, githubToken string) (*oauth.Token, error) {
-	return getCopilotToken(ctx, githubToken)
+	return getCopilotToken(ctx, copilotTokenURL, githubToken)
 }

@@ -59,10 +59,14 @@ func (c *blockingCoordinator) IsSessionBusy(string) bool                        
 func (c *blockingCoordinator) QueuedPrompts(string) int                          { return 0 }
 func (c *blockingCoordinator) QueuedPromptsList(string) []string                 { return nil }
 func (c *blockingCoordinator) ClearQueue(string)                                 {}
+func (c *blockingCoordinator) AddNote(string, string)                            {}
 func (c *blockingCoordinator) Summarize(context.Context, string) error           { return nil }
 func (c *blockingCoordinator) Model() agent.Model                                { return agent.Model{} }
 func (c *blockingCoordinator) UpdateModels(context.Context) error                { return nil }
 func (c *blockingCoordinator) GenerateTitle(context.Context, string, string)     {}
+func (c *blockingCoordinator) SetHostContext(proto.HostContext)                  {}
+func (c *blockingCoordinator) HostContext() proto.HostContext                    { return proto.HostContext{} }
+
 func (c *blockingCoordinator) SetMainAgent(agentName string) error {
 	c.lastMainAgentSet.Store(agentName)
 	return c.setMainAgentErr

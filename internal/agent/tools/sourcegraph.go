@@ -141,7 +141,7 @@ func NewSourcegraphTool(client *http.Client) fantasy.AgentTool {
 
 			var result map[string]any
 			if err = json.Unmarshal(body, &result); err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("failed to unmarshal response: %w", err)
+				return fantasy.NewTextErrorResponse("Failed to parse Sourcegraph response: " + err.Error()), nil
 			}
 
 			formattedResults, err := formatSourcegraphResults(result, params.ContextWindow, params.Count)

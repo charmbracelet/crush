@@ -53,6 +53,11 @@ func NewUserMessageItem(sty *styles.Styles, message *message.Message, attachment
 	}
 }
 
+// Message returns the message the item renders.
+func (m *UserMessageItem) Message() *message.Message {
+	return m.message
+}
+
 // Finished implements list.Item. User messages are immutable once
 // submitted, so the entry is always safe to freeze.
 func (m *UserMessageItem) Finished() bool {

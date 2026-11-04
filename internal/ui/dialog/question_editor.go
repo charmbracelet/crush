@@ -17,9 +17,7 @@ import (
 // only placeholder and char limit vary.
 func newQuestionTextarea(sty *styles.Styles, placeholder string, charLimit int) textarea.Model {
 	ta := textarea.New()
-	taStyles := sty.Editor.Textarea
-	taStyles.Cursor.Color = sty.Editor.QuestionCursorBar.GetForeground()
-	ta.SetStyles(taStyles)
+	ta.SetStyles(questionTextareaStyles(sty))
 	ta.Placeholder = placeholder
 	ta.ShowLineNumbers = false
 	ta.CharLimit = charLimit
@@ -33,6 +31,13 @@ func newQuestionTextarea(sty *styles.Styles, placeholder string, charLimit int) 
 	ta.KeyMap.InsertNewline = key.NewBinding(key.WithDisabled())
 	ta.Blur()
 	return ta
+}
+
+// questionTextareaStyles returns the styles of a question textarea.
+func questionTextareaStyles(sty *styles.Styles) textarea.Styles {
+	taStyles := sty.Editor.Textarea
+	taStyles.Cursor.Color = sty.Editor.QuestionCursorBar.GetForeground()
+	return taStyles
 }
 
 // questionEditor owns the fill-in textarea, note editor, and notes

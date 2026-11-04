@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/crush/internal/backend"
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
@@ -45,6 +46,7 @@ func TestSessionScopedEventID(t *testing.T) {
 	}{
 		{"session event", pubsub.Event[session.Session]{Payload: session.Session{ID: "s1"}}},
 		{"config changed", pubsub.Event[struct{}]{}},
+		{"host theme", pubsub.Event[proto.HostThemeState]{Payload: proto.HostThemeState{WorkspaceID: "w1", Theme: &proto.HostTheme{Name: "t"}}}},
 		{"string", "not an event"},
 		{"empty permission request", pubsub.Event[permission.PermissionRequest]{}},
 		{"empty permission notification", pubsub.Event[permission.PermissionNotification]{}},

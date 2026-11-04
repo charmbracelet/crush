@@ -197,6 +197,12 @@ type Styles struct {
 		QuestionRadioOff   lipgloss.Style // Unselected single-choice radio.
 		QuestionCheckOn    lipgloss.Style // Checked multi-choice indicator.
 		QuestionCheckOff   lipgloss.Style // Unchecked multi-choice indicator.
+
+		// Sysadmin mode prompt (" # " icon + ":::" dots).
+		PromptSysadminIconFocused lipgloss.Style
+		PromptSysadminIconBlurred lipgloss.Style
+		PromptSysadminDotsFocused lipgloss.Style
+		PromptSysadminDotsBlurred lipgloss.Style
 	}
 
 	// Radio
@@ -240,6 +246,8 @@ type Styles struct {
 	WorkingGradToColor   color.Color
 	WorkingLabelColor    color.Color // Label text color next to the indicator
 	WorkingTimerColor    color.Color // Elapsed timer suffix color
+	ThinkingLabelColor   color.Color // Label text color for thinking/summarizing spinners
+	CanceledLabelColor   color.Color // Label text color for canceled prompts
 
 	// Section Title
 	Section struct {
@@ -370,8 +378,9 @@ type Styles struct {
 		NameNested lipgloss.Style // Nested child tool name (inside Agent/Agentic Fetch)
 
 		// Parameter list styles
-		ParamMain lipgloss.Style
-		ParamKey  lipgloss.Style
+		ParamMain   lipgloss.Style
+		ParamKey    lipgloss.Style
+		Description lipgloss.Style // A tool's own summary of what it is doing
 
 		// Content rendering styles
 		ContentLine           lipgloss.Style // Individual content line with background and width
@@ -494,6 +503,17 @@ type Styles struct {
 		SelectedItem lipgloss.Style
 		InputPrompt  lipgloss.Style
 
+		// PromptMessage is the friendly description of what an
+		// integrated credential prompt (GPG pinentry) is asking for.
+		PromptMessage lipgloss.Style
+		// PromptKey styles the labeled key rows shown under it.
+		PromptKey lipgloss.Style
+		// SSHMessage is the friendly description of what an integrated
+		// SSH askpass prompt is asking for.
+		SSHMessage lipgloss.Style
+		// SSHKey styles the labeled account/key row shown under it.
+		SSHKey lipgloss.Style
+
 		List lipgloss.Style
 
 		Spinner lipgloss.Style
@@ -594,14 +614,17 @@ type Styles struct {
 		Help lipgloss.Style
 
 		// Mode badges shown before the help hints.
-		ModeBadgePlan lipgloss.Style
-		ModeBadgeYolo lipgloss.Style
+		ModeBadgePlan     lipgloss.Style
+		ModeBadgeYolo     lipgloss.Style
+		ModeBadgeSysadmin lipgloss.Style
 
 		// Full-width banners shown when switching modes.
-		ModeBannerPlan      lipgloss.Style
-		ModeBannerPlanBadge lipgloss.Style
-		ModeBannerYolo      lipgloss.Style
-		ModeBannerYoloBadge lipgloss.Style
+		ModeBannerPlan          lipgloss.Style
+		ModeBannerPlanBadge     lipgloss.Style
+		ModeBannerYolo          lipgloss.Style
+		ModeBannerYoloBadge     lipgloss.Style
+		ModeBannerSysadmin      lipgloss.Style
+		ModeBannerSysadminBadge lipgloss.Style
 
 		ErrorIndicator   lipgloss.Style
 		WarnIndicator    lipgloss.Style
@@ -649,40 +672,47 @@ type Styles struct {
 // ChromaTheme converts the current markdown chroma styles to a chroma
 // StyleEntries map.
 func (s *Styles) ChromaTheme() chroma.StyleEntries {
-	rules := s.Markdown.CodeBlock
+	return ChromaEntries(s.Markdown.CodeBlock.Chroma)
+}
 
+// ChromaEntries converts a markdown chroma config to chroma style entries,
+// the same way glamour does for code blocks. A nil config has no entries.
+func ChromaEntries(c *ansi.Chroma) chroma.StyleEntries {
+	if c == nil {
+		return chroma.StyleEntries{}
+	}
 	return chroma.StyleEntries{
-		chroma.Text:                chromaStyle(rules.Chroma.Text),
-		chroma.Error:               chromaStyle(rules.Chroma.Error),
-		chroma.Comment:             chromaStyle(rules.Chroma.Comment),
-		chroma.CommentPreproc:      chromaStyle(rules.Chroma.CommentPreproc),
-		chroma.Keyword:             chromaStyle(rules.Chroma.Keyword),
-		chroma.KeywordReserved:     chromaStyle(rules.Chroma.KeywordReserved),
-		chroma.KeywordNamespace:    chromaStyle(rules.Chroma.KeywordNamespace),
-		chroma.KeywordType:         chromaStyle(rules.Chroma.KeywordType),
-		chroma.Operator:            chromaStyle(rules.Chroma.Operator),
-		chroma.Punctuation:         chromaStyle(rules.Chroma.Punctuation),
-		chroma.Name:                chromaStyle(rules.Chroma.Name),
-		chroma.NameBuiltin:         chromaStyle(rules.Chroma.NameBuiltin),
-		chroma.NameTag:             chromaStyle(rules.Chroma.NameTag),
-		chroma.NameAttribute:       chromaStyle(rules.Chroma.NameAttribute),
-		chroma.NameClass:           chromaStyle(rules.Chroma.NameClass),
-		chroma.NameConstant:        chromaStyle(rules.Chroma.NameConstant),
-		chroma.NameDecorator:       chromaStyle(rules.Chroma.NameDecorator),
-		chroma.NameException:       chromaStyle(rules.Chroma.NameException),
-		chroma.NameFunction:        chromaStyle(rules.Chroma.NameFunction),
-		chroma.NameOther:           chromaStyle(rules.Chroma.NameOther),
-		chroma.Literal:             chromaStyle(rules.Chroma.Literal),
-		chroma.LiteralNumber:       chromaStyle(rules.Chroma.LiteralNumber),
-		chroma.LiteralDate:         chromaStyle(rules.Chroma.LiteralDate),
-		chroma.LiteralString:       chromaStyle(rules.Chroma.LiteralString),
-		chroma.LiteralStringEscape: chromaStyle(rules.Chroma.LiteralStringEscape),
-		chroma.GenericDeleted:      chromaStyle(rules.Chroma.GenericDeleted),
-		chroma.GenericEmph:         chromaStyle(rules.Chroma.GenericEmph),
-		chroma.GenericInserted:     chromaStyle(rules.Chroma.GenericInserted),
-		chroma.GenericStrong:       chromaStyle(rules.Chroma.GenericStrong),
-		chroma.GenericSubheading:   chromaStyle(rules.Chroma.GenericSubheading),
-		chroma.Background:          chromaStyle(rules.Chroma.Background),
+		chroma.Text:                chromaStyle(c.Text),
+		chroma.Error:               chromaStyle(c.Error),
+		chroma.Comment:             chromaStyle(c.Comment),
+		chroma.CommentPreproc:      chromaStyle(c.CommentPreproc),
+		chroma.Keyword:             chromaStyle(c.Keyword),
+		chroma.KeywordReserved:     chromaStyle(c.KeywordReserved),
+		chroma.KeywordNamespace:    chromaStyle(c.KeywordNamespace),
+		chroma.KeywordType:         chromaStyle(c.KeywordType),
+		chroma.Operator:            chromaStyle(c.Operator),
+		chroma.Punctuation:         chromaStyle(c.Punctuation),
+		chroma.Name:                chromaStyle(c.Name),
+		chroma.NameBuiltin:         chromaStyle(c.NameBuiltin),
+		chroma.NameTag:             chromaStyle(c.NameTag),
+		chroma.NameAttribute:       chromaStyle(c.NameAttribute),
+		chroma.NameClass:           chromaStyle(c.NameClass),
+		chroma.NameConstant:        chromaStyle(c.NameConstant),
+		chroma.NameDecorator:       chromaStyle(c.NameDecorator),
+		chroma.NameException:       chromaStyle(c.NameException),
+		chroma.NameFunction:        chromaStyle(c.NameFunction),
+		chroma.NameOther:           chromaStyle(c.NameOther),
+		chroma.Literal:             chromaStyle(c.Literal),
+		chroma.LiteralNumber:       chromaStyle(c.LiteralNumber),
+		chroma.LiteralDate:         chromaStyle(c.LiteralDate),
+		chroma.LiteralString:       chromaStyle(c.LiteralString),
+		chroma.LiteralStringEscape: chromaStyle(c.LiteralStringEscape),
+		chroma.GenericDeleted:      chromaStyle(c.GenericDeleted),
+		chroma.GenericEmph:         chromaStyle(c.GenericEmph),
+		chroma.GenericInserted:     chromaStyle(c.GenericInserted),
+		chroma.GenericStrong:       chromaStyle(c.GenericStrong),
+		chroma.GenericSubheading:   chromaStyle(c.GenericSubheading),
+		chroma.Background:          chromaStyle(c.Background),
 	}
 }
 

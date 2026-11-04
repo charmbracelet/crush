@@ -70,6 +70,44 @@ func TestStoredPromptReplacesTheEcho(t *testing.T) {
 	require.Equal(t, []string{"u1", chat.PendingAssistantID}, transcriptIDs(m))
 }
 
+// The load and the event can arrive in either order; the prompt shows once.
+func TestLoadRacingTheStoredPromptShowsItOnce(t *testing.T) {
+	stored := userMessage("u1", "s1", "hello")
+
+	t.Run("load first", func(t *testing.T) {
+		m := newPendingUI(t)
+		m.sendMessage("hello")
+
+		m.setSessionMessages([]message.Message{stored})
+		require.Equal(t, []string{"u1", chat.PendingAssistantID}, transcriptIDs(m))
+
+		m.appendSessionMessage(stored)
+		require.Equal(t, []string{"u1", chat.PendingAssistantID}, transcriptIDs(m))
+	})
+
+	t.Run("event first", func(t *testing.T) {
+		m := newPendingUI(t)
+		m.sendMessage("hello")
+
+		m.appendSessionMessage(stored)
+		m.setSessionMessages([]message.Message{stored})
+		require.Equal(t, []string{"u1", chat.PendingAssistantID}, transcriptIDs(m))
+	})
+}
+
+// A load that lands before the new prompt is stored, showing only the
+// history that was already on screen, must leave the echo in place.
+func TestLoadOfOlderHistoryKeepsTheEcho(t *testing.T) {
+	m := newPendingUI(t)
+	older := []message.Message{userMessage("u0", "s1", "earlier")}
+	m.setSessionMessages(older)
+	m.sendMessage("hello")
+
+	m.setSessionMessages(older)
+
+	require.Equal(t, []string{"u0", chat.PendingUserID, chat.PendingAssistantID}, transcriptIDs(m))
+}
+
 // A prompt queued behind a running turn belongs in the queue pill, not in
 // the transcript, so it is not echoed.
 func TestQueuedPromptIsNotEchoed(t *testing.T) {

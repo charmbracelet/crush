@@ -136,20 +136,14 @@ func (c *Client) SubscribeEvents(ctx context.Context, id string) (<-chan any, er
 		scr := bufio.NewReader(rsp.Body)
 		for {
 			line, err := scr.ReadBytes('\n')
-			if errors.Is(err, io.EOF) {
-				break
-			}
 			if err != nil {
-				if ctx.Err() != nil {
-					return
+				// Any read error ends the stream: a response body that
+				// failed once keeps failing, so closing events is what
+				// lets the caller reconnect.
+				if ctx.Err() == nil && !errors.Is(err, io.EOF) {
+					slog.Warn("Events stream ended", "error", err)
 				}
-				slog.Error("Reading from events stream", "error", err)
-				select {
-				case <-time.After(time.Second * 2):
-				case <-ctx.Done():
-					return
-				}
-				continue
+				return
 			}
 			line = bytes.TrimSpace(line)
 			if len(line) == 0 {
@@ -207,6 +201,30 @@ func (c *Client) SubscribeEvents(ctx context.Context, id string) (<-chan any, er
 				if !sendEvent(ctx, events, e) {
 					return
 				}
+			case pubsub.PayloadTypePinentryPromptRequest:
+				var e pubsub.Event[proto.PinentryPromptRequest]
+				_ = json.Unmarshal(p.Payload, &e)
+				if !sendEvent(ctx, events, e) {
+					return
+				}
+			case pubsub.PayloadTypePinentryNotification:
+				var e pubsub.Event[proto.PinentryNotification]
+				_ = json.Unmarshal(p.Payload, &e)
+				if !sendEvent(ctx, events, e) {
+					return
+				}
+			case pubsub.PayloadTypeSSHPromptRequest:
+				var e pubsub.Event[proto.SSHPromptRequest]
+				_ = json.Unmarshal(p.Payload, &e)
+				if !sendEvent(ctx, events, e) {
+					return
+				}
+			case pubsub.PayloadTypeSSHNotification:
+				var e pubsub.Event[proto.SSHNotification]
+				_ = json.Unmarshal(p.Payload, &e)
+				if !sendEvent(ctx, events, e) {
+					return
+				}
 			case pubsub.PayloadTypeMessage:
 				var e pubsub.Event[proto.Message]
 				_ = json.Unmarshal(p.Payload, &e)
@@ -251,6 +269,24 @@ func (c *Client) SubscribeEvents(ctx context.Context, id string) (<-chan any, er
 				}
 			case pubsub.PayloadTypeUpdateAvailable:
 				var e pubsub.Event[proto.UpdateAvailable]
+				_ = json.Unmarshal(p.Payload, &e)
+				if !sendEvent(ctx, events, e) {
+					return
+				}
+			case pubsub.PayloadTypeHostTheme:
+				var e pubsub.Event[proto.HostThemeState]
+				_ = json.Unmarshal(p.Payload, &e)
+				if !sendEvent(ctx, events, e) {
+					return
+				}
+			case pubsub.PayloadTypeClientSession:
+				var e pubsub.Event[proto.ClientSession]
+				_ = json.Unmarshal(p.Payload, &e)
+				if !sendEvent(ctx, events, e) {
+					return
+				}
+			case pubsub.PayloadTypePermissionModeChanged:
+				var e pubsub.Event[proto.PermissionModeEvent]
 				_ = json.Unmarshal(p.Payload, &e)
 				if !sendEvent(ctx, events, e) {
 					return
@@ -747,34 +783,149 @@ func (c *Client) CancelQuestionBatch(ctx context.Context, id string) (bool, erro
 	return resp.Resolved, nil
 }
 
-// SetPermissionsSkipRequests sets the skip-requests flag for a workspace.
-func (c *Client) SetPermissionsSkipRequests(ctx context.Context, id string, skip bool) error {
-	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/permissions/skip", id), nil, jsonBody(proto.PermissionSkipRequest{Skip: skip}), http.Header{"Content-Type": []string{"application/json"}})
+// AnswerPinentry submits a secret for the pending integrated pinentry
+// prompt on a workspace. Returns true if this call resolved the
+// pending prompt, false if already resolved by another caller.
+func (c *Client) AnswerPinentry(ctx context.Context, id string, req proto.PinentryAnswer) (bool, error) {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/pinentry/answer", id), nil, jsonBody(req), http.Header{"Content-Type": []string{"application/json"}})
 	if err != nil {
-		return fmt.Errorf("failed to set permissions skip requests: %w", err)
+		return false, fmt.Errorf("failed to answer pinentry prompt: %w", err)
 	}
 	defer rsp.Body.Close()
 	if rsp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to set permissions skip requests: status code %d", rsp.StatusCode)
+		return false, fmt.Errorf("failed to answer pinentry prompt: status code %d", rsp.StatusCode)
+	}
+	var resp proto.PinentryResponse
+	if err := json.NewDecoder(rsp.Body).Decode(&resp); err != nil {
+		return false, fmt.Errorf("failed to decode answer pinentry prompt response: %w", err)
+	}
+	return resp.Resolved, nil
+}
+
+// CancelPinentry dismisses the pending integrated pinentry prompt on
+// a workspace. Returns true if a prompt was cancelled, false if none
+// was pending.
+func (c *Client) CancelPinentry(ctx context.Context, id string, req proto.PinentryCancel) (bool, error) {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/pinentry/cancel", id), nil, jsonBody(req), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return false, fmt.Errorf("failed to cancel pinentry prompt: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("failed to cancel pinentry prompt: status code %d", rsp.StatusCode)
+	}
+	var resp proto.PinentryResponse
+	if err := json.NewDecoder(rsp.Body).Decode(&resp); err != nil {
+		return false, fmt.Errorf("failed to decode cancel pinentry prompt response: %w", err)
+	}
+	return resp.Resolved, nil
+}
+
+// AnswerSSH submits a secret for the pending integrated SSH prompt on a
+// workspace. Returns true if this call resolved the pending prompt,
+// false if already resolved by another caller.
+func (c *Client) AnswerSSH(ctx context.Context, id string, req proto.SSHAnswer) (bool, error) {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/ssh/answer", id), nil, jsonBody(req), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return false, fmt.Errorf("failed to answer ssh prompt: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("failed to answer ssh prompt: status code %d", rsp.StatusCode)
+	}
+	var resp proto.SSHResponse
+	if err := json.NewDecoder(rsp.Body).Decode(&resp); err != nil {
+		return false, fmt.Errorf("failed to decode answer ssh prompt response: %w", err)
+	}
+	return resp.Resolved, nil
+}
+
+// CancelSSH dismisses the pending integrated SSH prompt on a workspace.
+// Returns true if a prompt was cancelled, false if none was pending.
+func (c *Client) CancelSSH(ctx context.Context, id string, req proto.SSHCancel) (bool, error) {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/ssh/cancel", id), nil, jsonBody(req), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return false, fmt.Errorf("failed to cancel ssh prompt: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("failed to cancel ssh prompt: status code %d", rsp.StatusCode)
+	}
+	var resp proto.SSHResponse
+	if err := json.NewDecoder(rsp.Body).Decode(&resp); err != nil {
+		return false, fmt.Errorf("failed to decode cancel ssh prompt response: %w", err)
+	}
+	return resp.Resolved, nil
+}
+
+// SetPermissionMode sets the permission mode for a workspace.
+func (c *Client) SetPermissionMode(ctx context.Context, id string, mode proto.WorkspacePermissionMode) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/permissions/mode", id), nil, jsonBody(proto.PermissionSetModeRequest{Mode: mode}), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return fmt.Errorf("failed to set permission mode: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to set permission mode: status code %d", rsp.StatusCode)
 	}
 	return nil
 }
 
-// GetPermissionsSkipRequests retrieves the skip-requests flag for a workspace.
-func (c *Client) GetPermissionsSkipRequests(ctx context.Context, id string) (bool, error) {
-	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/permissions/skip", id), nil, nil)
+// SetHostTheme sets the theme a host application supplies for every
+// client of the workspace, or clears it when theme is nil, and returns the
+// resulting state. It fails with an error carrying the server's message
+// when a color or the base theme is invalid.
+func (c *Client) SetHostTheme(ctx context.Context, id string, theme *proto.HostTheme) (*proto.HostThemeState, error) {
+	q := url.Values{"client_id": []string{c.clientID}}
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/theme", id), q, jsonBody(proto.HostThemeRequest{Theme: theme}), http.Header{"Content-Type": []string{"application/json"}})
 	if err != nil {
-		return false, fmt.Errorf("failed to get permissions skip requests: %w", err)
+		return nil, fmt.Errorf("failed to set host theme: %w", err)
 	}
 	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return false, fmt.Errorf("failed to get permissions skip requests: status code %d", rsp.StatusCode)
+	if err := checkStatus(rsp); err != nil {
+		return nil, fmt.Errorf("failed to set host theme: %w", err)
 	}
-	var skip proto.PermissionSkipRequest
-	if err := json.NewDecoder(rsp.Body).Decode(&skip); err != nil {
-		return false, fmt.Errorf("failed to decode permissions skip requests: %w", err)
+	var st proto.HostThemeState
+	if err := json.NewDecoder(rsp.Body).Decode(&st); err != nil {
+		return nil, fmt.Errorf("failed to decode host theme: %w", err)
 	}
-	return skip.Skip, nil
+	return &st, nil
+}
+
+// GetHostTheme retrieves the host theme of a workspace. The returned
+// state's Theme is nil when none is set.
+func (c *Client) GetHostTheme(ctx context.Context, id string) (*proto.HostThemeState, error) {
+	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/theme", id), nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get host theme: %w", err)
+	}
+	defer rsp.Body.Close()
+	if err := checkStatus(rsp); err != nil {
+		return nil, fmt.Errorf("failed to get host theme: %w", err)
+	}
+	var st proto.HostThemeState
+	if err := json.NewDecoder(rsp.Body).Decode(&st); err != nil {
+		return nil, fmt.Errorf("failed to decode host theme: %w", err)
+	}
+	return &st, nil
+}
+
+// GetHostContext retrieves what the host application has in view for a
+// workspace.
+func (c *Client) GetHostContext(ctx context.Context, id string) (proto.HostContext, error) {
+	var hc proto.HostContext
+	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/host-context", id), nil, nil)
+	if err != nil {
+		return hc, fmt.Errorf("failed to get host context: %w", err)
+	}
+	defer rsp.Body.Close()
+	if err := checkStatus(rsp); err != nil {
+		return hc, fmt.Errorf("failed to get host context: %w", err)
+	}
+	if err := json.NewDecoder(rsp.Body).Decode(&hc); err != nil {
+		return hc, fmt.Errorf("failed to decode host context: %w", err)
+	}
+	return hc, nil
 }
 
 // GetConfig retrieves the workspace-specific configuration.

@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"charm.land/catwalk/pkg/catwalk"
+	"charm.land/catwalk/v3/pkg/catwalk"
 )
 
 func init() {
@@ -41,7 +41,12 @@ type llamacppMeta struct {
 type llamacppEnricher struct{}
 
 func (e *llamacppEnricher) EnrichModels(ctx context.Context, cfg Config, resolver Resolver, models []catwalk.Model) ([]catwalk.Model, error) {
-	resp, err := doRequest(ctx, http.MethodGet, cfg.BaseURL, "/v1/models", cfg.APIKey, cfg.ExtraHeaders, resolver, nil)
+	// llama-server serves /v1/models at the server root, so the path is
+	// built from the root and not from the configured base URL, which
+	// commonly already ends in /v1. Without the strip that config asks
+	// for /v1/v1/models, llama-server answers 404, and the enricher
+	// silently returns the models with no context window at all.
+	resp, err := doRequest(ctx, http.MethodGet, stripV1Suffix(cfg.BaseURL), "/v1/models", cfg.APIKey, cfg.ExtraHeaders, resolver, nil)
 	if err != nil {
 		return models, nil
 	}

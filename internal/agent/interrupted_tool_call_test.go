@@ -321,7 +321,7 @@ func TestListSettledMessages_HealthySessionIsUntouched(t *testing.T) {
 // listSettled reads a session through the agent, which settles orphans first.
 func listSettled(t *testing.T, env fakeEnv, sessionID string) []message.Message {
 	t.Helper()
-	agent := NewSessionAgent(SessionAgentOptions{Sessions: env.sessions, Messages: env.messages})
+	agent := NewSessionAgent(SessionAgentOptions{Models: noModels, Sessions: env.sessions, Messages: env.messages})
 	msgs, err := agent.ListSettledMessages(t.Context(), sessionID)
 	require.NoError(t, err)
 	return msgs
@@ -350,7 +350,7 @@ func TestListSettledMessages_SkipsBusySessions(t *testing.T) {
 
 	sess, _ := killedTurn(t, env, true)
 
-	agent := NewSessionAgent(SessionAgentOptions{Sessions: env.sessions, Messages: env.messages}).(*sessionAgent)
+	agent := NewSessionAgent(SessionAgentOptions{Models: noModels, Sessions: env.sessions, Messages: env.messages}).(*sessionAgent)
 	agent.activeRequests.Set(sess.ID, &activeCancel{cancel: func() {}})
 
 	msgs, err := agent.ListSettledMessages(t.Context(), sess.ID)

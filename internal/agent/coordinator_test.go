@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"testing"
 
-	"charm.land/catwalk/pkg/catwalk"
+	"charm.land/catwalk/v3/pkg/catwalk"
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/anthropic"
 	"charm.land/fantasy/providers/bedrock"
@@ -35,7 +35,6 @@ func (m *mockSessionAgent) BeginAccepted(sessionID string) *AcceptedRun {
 }
 
 func (m *mockSessionAgent) Model() Model                        { return m.model }
-func (m *mockSessionAgent) SetModels(large, small Model)        {}
 func (m *mockSessionAgent) SetTools(tools []fantasy.AgentTool)  {}
 func (m *mockSessionAgent) SetSystemPrompt(systemPrompt string) {}
 func (m *mockSessionAgent) Cancel(sessionID string) {
@@ -47,6 +46,7 @@ func (m *mockSessionAgent) IsBusy() bool                                { return
 func (m *mockSessionAgent) QueuedPrompts(sessionID string) int          { return 0 }
 func (m *mockSessionAgent) QueuedPromptsList(sessionID string) []string { return nil }
 func (m *mockSessionAgent) ClearQueue(sessionID string)                 {}
+func (m *mockSessionAgent) AddNote(sessionID, text string)              {}
 func (m *mockSessionAgent) Summarize(context.Context, string, fantasy.ProviderOptions, func(context.Context, *fantasy.ProviderError) error) error {
 	return nil
 }
@@ -91,23 +91,6 @@ func agentResultWithText(text string) *fantasy.AgentResult {
 			},
 		},
 	}
-}
-
-func TestCopilotResponsesModels(t *testing.T) {
-	t.Parallel()
-
-	for _, modelID := range []string{
-		"gpt-6-astra",
-		"gpt-6-luna",
-		"gpt-6-sol",
-		"gpt-6.1-sol",
-		"grok-4.5",
-		"grok-4.6",
-		"grok-4.7",
-	} {
-		assert.True(t, copilotResponsesModels[modelID], modelID)
-	}
-	assert.False(t, copilotResponsesModels["gpt-4.1"])
 }
 
 func TestRunSubAgent(t *testing.T) {
@@ -524,9 +507,11 @@ func TestGetProviderOptionsReasoningEffort(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			model := Model{
 				CatwalkCfg: catwalk.Model{
-					ID:              "claude-opus-4-7",
-					CanReason:       true,
-					ReasoningLevels: []string{"max"},
+					ID: "claude-opus-4-7",
+					Reasoning: catwalk.Reasoning{
+						Thinking:     catwalk.ThinkingToggleable,
+						EffortLevels: catwalk.NewEffortLevels("max"),
+					},
 				},
 				ModelCfg: config.SelectedModel{
 					Provider:        "test",
@@ -581,9 +566,11 @@ func TestGetProviderOptionsReasoningEffortCustomProvider(t *testing.T) {
 		t.Run(providerType, func(t *testing.T) {
 			model := Model{
 				CatwalkCfg: catwalk.Model{
-					ID:              "qwen/qwen3-8b",
-					CanReason:       true,
-					ReasoningLevels: []string{"low", "medium", "high"},
+					ID: "qwen/qwen3-8b",
+					Reasoning: catwalk.Reasoning{
+						Thinking:     catwalk.ThinkingToggleable,
+						EffortLevels: catwalk.NewEffortLevels("low", "medium", "high"),
+					},
 				},
 				ModelCfg: config.SelectedModel{
 					Provider:        "local",
@@ -608,9 +595,11 @@ func TestGetProviderOptionsReasoningEffortCustomProvider(t *testing.T) {
 func TestGetProviderOptionsReasoningEffortFallback(t *testing.T) {
 	model := Model{
 		CatwalkCfg: catwalk.Model{
-			ID:              "glm-5.2",
-			CanReason:       true,
-			ReasoningLevels: []string{"high", "max"},
+			ID: "glm-5.2",
+			Reasoning: catwalk.Reasoning{
+				Thinking:     catwalk.ThinkingToggleable,
+				EffortLevels: catwalk.NewEffortLevels("high", "max"),
+			},
 		},
 		ModelCfg: config.SelectedModel{
 			Provider: "zai",

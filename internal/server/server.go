@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -37,11 +38,15 @@ func socketDir() string {
 // ErrServerClosed is returned when the server is closed.
 var ErrServerClosed = http.ErrServerClosed
 
-// ParseHostURL parses a host URL into a [url.URL].
+// ParseHostURL parses a host URL into a [url.URL]. The "http" scheme
+// is accepted as an alias for "tcp" and normalized to it.
 func ParseHostURL(host string) (*url.URL, error) {
 	proto, addr, ok := strings.Cut(host, "://")
 	if !ok {
 		return nil, fmt.Errorf("invalid host format: %s", host)
+	}
+	if proto == "http" {
+		proto = "tcp"
 	}
 
 	var basePath string
@@ -198,17 +203,25 @@ func (s *Server) closeListener() {
 	}
 }
 
-// Close force closes all listeners and connections.
+// Close force closes all listeners and connections. Unlike [Server.Shutdown]
+// it leaves hosted workspaces running.
 func (s *Server) Close() error {
 	defer func() { s.closeListener() }()
 	return s.h.Close()
 }
 
-// Shutdown gracefully shuts down the server without interrupting active
-// connections.
+// Shutdown tears down hosted workspaces, then gracefully shuts down the
+// server without interrupting active connections. ctx bounds both. The
+// idle-shutdown path relies on the teardown being a no-op with none left.
 func (s *Server) Shutdown(ctx context.Context) error {
 	defer func() { s.closeListener() }()
-	return s.h.Shutdown(ctx)
+	err := s.backend.ShutdownWorkspaces(ctx)
+	return errors.Join(err, s.h.Shutdown(ctx))
+}
+
+// ReloadConfig re-reads the server and hosted workspace configs from disk.
+func (s *Server) ReloadConfig(ctx context.Context) error {
+	return s.backend.ReloadConfig(ctx)
 }
 
 func (s *Server) logDebug(r *http.Request, msg string, args ...any) {

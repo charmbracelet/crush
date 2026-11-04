@@ -7,9 +7,31 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"testing"
 )
 
-var homedir, homedirErr = os.UserHomeDir()
+var homedir, homedirErr = userHomeDir()
+
+// userHomeDir returns the real home, or under go test a scratch one so no
+// test can read or rewrite the developer's files.
+func userHomeDir() (string, error) {
+	if !testing.Testing() {
+		return os.UserHomeDir()
+	}
+	for _, key := range testIgnoredEnv {
+		os.Unsetenv(key) //nolint:errcheck
+	}
+	return os.MkdirTemp("", "crush-test-home-*")
+}
+
+// testIgnoredEnv would point tests at real dirs; tests set them via t.Setenv.
+var testIgnoredEnv = []string{
+	"CRUSH_GLOBAL_CONFIG",
+	"CRUSH_GLOBAL_DATA",
+	"XDG_CONFIG_HOME",
+	"XDG_DATA_HOME",
+	"XDG_CACHE_HOME",
+}
 
 func init() {
 	if homedirErr != nil {

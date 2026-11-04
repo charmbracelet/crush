@@ -8,7 +8,7 @@ Common shell builtins and core utils available on Windows.
 
 <execution_steps>
 1. Directory Verification: If creating directories/files, use LS tool to verify parent exists
-2. Security Check: Banned commands ({{ .BannedCommands }}) return error - explain to user. Safe read-only commands execute without prompts
+2. Security Check: Dangerous commands ({{ .BannedCommands }}) require explicit user approval with a warning popup in normal mode; YOLO and Sysadmin modes approve them without asking. Safe read-only commands always execute without prompts
 3. Command Execution: Execute with proper quoting, capture output
 4. Auto-Background: Commands exceeding 1 minute (default, configurable via `auto_background_after`) automatically move to background and return shell ID
 5. Output Processing: Truncate if exceeds {{ .MaxOutputLength }} characters. The truncation marker names a file holding the complete output - read it with the view tool when the omitted middle matters
@@ -29,7 +29,11 @@ Common shell builtins and core utils available on Windows.
 <background_execution>
 - Set run_in_background=true to run commands in a separate background shell
 - Returns a shell ID for managing the background process
-- Use job_output tool to view current output from background shell
+- Backgrounding buys you the time the command takes, so spend it: start the job, then keep working
+- Do NOT call job_output right after starting a job. It returns the output so far, and a job that just started has printed nothing
+- Call job_output once the job's result is the next thing you need, or once you have run out of other work
+- job_output with wait=true blocks until the job finishes, giving back the time you just bought; only wait when waiting is the useful thing to do
+- A command that auto-backgrounds on the timeout behaves the same way: it is still running, so keep working unless you need its result now
 - Use job_kill tool to terminate a background shell
 - IMPORTANT: NEVER use `&` at the end of commands to run in background - use run_in_background parameter instead
 - Commands that should run in background:

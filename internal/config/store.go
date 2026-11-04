@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -12,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"charm.land/catwalk/pkg/catwalk"
+	"charm.land/catwalk/v3/pkg/catwalk"
 	hyperp "github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/lock"
@@ -21,6 +22,7 @@ import (
 	"github.com/charmbracelet/crush/internal/oauth/grok"
 	"github.com/charmbracelet/crush/internal/oauth/hyper"
 	"github.com/charmbracelet/crush/internal/oauth/openai"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 	"golang.org/x/sync/singleflight"
@@ -59,7 +61,7 @@ type fileSnapshot struct {
 // disk. They are applied on top of the loaded Config and survive only for
 // the lifetime of the process (or workspace).
 type RuntimeOverrides struct {
-	SkipPermissionRequests bool
+	PermissionMode permission.PermissionMode
 	// EnabledChannels lists the MCP servers opted in as channels for this
 	// session (via the --channels flag). A server present in MCP config only
 	// pushes channel events when it also appears here. Entries may be written
@@ -117,6 +119,14 @@ type ConfigStore struct {
 	// cross-process refresh lock, it ensures only one token exchange runs
 	// at a time. See RefreshOAuthToken.
 	refreshSF singleflight.Group
+
+	// rejectedRefreshTokens remembers refresh tokens a provider has refused
+	// for rejectedRefreshTokenTTL, so a dead credential costs one exchange
+	// per window rather than one per caller.
+	rejectedMu            sync.Mutex
+	rejectedRefreshTokens map[string]rejectedRefresh
+	// now is the clock for rejectedRefreshTokens; nil means time.Now.
+	now func() time.Time
 
 	// exchangeToken performs the provider-specific OAuth token exchange.
 	// It is a field so tests can substitute a fake exchange without making
@@ -1056,10 +1066,48 @@ func (s *ConfigStore) usableDiskToken(scope Scope, providerID string, entryToken
 	return diskToken
 }
 
-// exchange performs the provider-specific OAuth token exchange. Tests may
-// override it via the exchangeToken field; production uses the real
-// provider clients.
+// rejectedRefreshTokenTTL is how long a refused refresh token is answered
+// from memory. It is short so one mistaken refusal cannot outlast an outage.
+const rejectedRefreshTokenTTL = 5 * time.Minute
+
+type rejectedRefresh struct {
+	err   error
+	until time.Time
+}
+
+// exchange performs the provider-specific OAuth token exchange, answering
+// from memory for a refresh token the provider recently refused.
 func (s *ConfigStore) exchange(ctx context.Context, providerID, refreshToken string) (*oauth.Token, error) {
+	now := time.Now
+	if s.now != nil {
+		now = s.now
+	}
+	s.rejectedMu.Lock()
+	rejected, ok := s.rejectedRefreshTokens[refreshToken]
+	if ok && !now().Before(rejected.until) {
+		delete(s.rejectedRefreshTokens, refreshToken)
+		ok = false
+	}
+	s.rejectedMu.Unlock()
+	if ok {
+		return nil, rejected.err
+	}
+	token, err := s.exchangeWithProvider(ctx, providerID, refreshToken)
+	var exchangeErr *oauth.TokenExchangeError
+	if errors.As(err, &exchangeErr) && exchangeErr.IsRefreshTokenRevoked() {
+		s.rejectedMu.Lock()
+		if s.rejectedRefreshTokens == nil {
+			s.rejectedRefreshTokens = make(map[string]rejectedRefresh)
+		}
+		s.rejectedRefreshTokens[refreshToken] = rejectedRefresh{err: err, until: now().Add(rejectedRefreshTokenTTL)}
+		s.rejectedMu.Unlock()
+	}
+	return token, err
+}
+
+// exchangeWithProvider calls the provider's token endpoint. Tests may
+// override it via the exchangeToken field.
+func (s *ConfigStore) exchangeWithProvider(ctx context.Context, providerID, refreshToken string) (*oauth.Token, error) {
 	if s.exchangeToken != nil {
 		return s.exchangeToken(ctx, providerID, refreshToken)
 	}
@@ -1403,6 +1451,7 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 		if !json.Valid(wsData) {
 			return fmt.Errorf("invalid JSON in config file %s", workspacePath)
 		}
+		wsData = migrateCatwalkV2File(workspacePath, wsData)
 		merged, mergeErr := loadFromBytes(append([][]byte{mustMarshalConfig(cfg)}, wsData))
 		if mergeErr == nil {
 			dataDir := cfg.Options.DataDirectory

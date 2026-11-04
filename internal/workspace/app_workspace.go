@@ -19,11 +19,13 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/pinentry"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/charmbracelet/crush/internal/sshaskpass"
 )
 
 // AppWorkspace implements the Workspace interface by delegating
@@ -46,7 +48,7 @@ func NewAppWorkspace(a *app.App, store *config.ConfigStore) *AppWorkspace {
 // -- Sessions --
 
 func (w *AppWorkspace) CreateSession(ctx context.Context, title string) (session.Session, error) {
-	return w.app.Sessions.Create(ctx, title)
+	return w.app.CreateSession(ctx, title)
 }
 
 func (w *AppWorkspace) GetSession(ctx context.Context, sessionID string) (session.Session, error) {
@@ -276,12 +278,21 @@ func (w *AppWorkspace) PermissionDeny(perm permission.PermissionRequest) bool {
 	return w.app.Permissions.Deny(perm)
 }
 
-func (w *AppWorkspace) PermissionSkipRequests() bool {
-	return w.app.Permissions.SkipRequests()
+func (w *AppWorkspace) PermissionMode() permission.PermissionMode {
+	return w.app.Permissions.PermissionMode()
 }
 
-func (w *AppWorkspace) PermissionSetSkipRequests(skip bool) {
-	w.app.Permissions.SetSkipRequests(skip)
+func (w *AppWorkspace) PermissionSetMode(mode permission.PermissionMode) {
+	w.app.Permissions.SetPermissionMode(mode)
+}
+
+// -- Host context --
+
+func (w *AppWorkspace) HostContext(_ context.Context) (proto.HostContext, error) {
+	if w.app.AgentCoordinator == nil {
+		return proto.HostContext{}, nil
+	}
+	return w.app.AgentCoordinator.HostContext(), nil
 }
 
 // -- Questions --
@@ -292,6 +303,26 @@ func (w *AppWorkspace) QuestionAnswer(responses []question.Answer) bool {
 
 func (w *AppWorkspace) QuestionCancel() bool {
 	return w.app.Questions.Cancel()
+}
+
+// -- Pinentry --
+
+func (w *AppWorkspace) PinentryRespond(id, secret string) bool {
+	return pinentry.DefaultPrompts().Respond(id, secret)
+}
+
+func (w *AppWorkspace) PinentryCancel(id string) bool {
+	return pinentry.DefaultPrompts().Cancel(id)
+}
+
+// -- SSH prompts --
+
+func (w *AppWorkspace) SSHRespond(id, secret string) bool {
+	return sshaskpass.DefaultPrompts().Respond(id, secret)
+}
+
+func (w *AppWorkspace) SSHCancel(id string) bool {
+	return sshaskpass.DefaultPrompts().Cancel(id)
 }
 
 // -- FileTracker --

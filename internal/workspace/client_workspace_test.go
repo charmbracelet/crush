@@ -273,6 +273,31 @@ func TestNewClientWorkspace_SeedsSkillsCache(t *testing.T) {
 	require.Equal(t, "seeded", got[0].Name)
 }
 
+// TestTranslateEvent_HostTheme verifies that host theme events reach the
+// TUI as HostThemeEvent: the theme for an update, nil for a clear.
+func TestTranslateEvent_HostTheme(t *testing.T) {
+	t.Parallel()
+
+	w := NewClientWorkspace(nil, proto.Workspace{})
+	theme := &proto.HostTheme{Name: "charmtone-dark", Palette: map[string]string{"primary": "#6B50FF"}}
+
+	out := w.translateEvent(pubsub.Event[proto.HostThemeState]{
+		Type:    pubsub.UpdatedEvent,
+		Payload: proto.HostThemeState{WorkspaceID: "ws1", Theme: theme},
+	})
+	got, ok := out.(HostThemeEvent)
+	require.True(t, ok, "expected HostThemeEvent, got %T", out)
+	require.Same(t, theme, got.Theme)
+
+	out = w.translateEvent(pubsub.Event[proto.HostThemeState]{
+		Type:    pubsub.DeletedEvent,
+		Payload: proto.HostThemeState{WorkspaceID: "ws1"},
+	})
+	got, ok = out.(HostThemeEvent)
+	require.True(t, ok, "expected HostThemeEvent, got %T", out)
+	require.Nil(t, got.Theme)
+}
+
 // TestTranslateEvent_UpdateAvailable verifies that an incoming
 // proto.UpdateAvailable event is converted back into the
 // app.UpdateAvailableMsg that the TUI expects, so client/server mode
@@ -553,6 +578,12 @@ type recoveryServer struct {
 	// never learns the ID of a workspace the server did register.
 	hangUpOnCreate bool
 
+	// hostTheme is the host theme the theme endpoint reports.
+	hostTheme *proto.HostTheme
+	// abortStreams kills each event stream mid-response, as a server
+	// that dies does, instead of ending it cleanly.
+	abortStreams bool
+
 	creates      int
 	streams      int
 	sessionPosts []string
@@ -602,6 +633,15 @@ func (s *recoveryServer) start(t *testing.T) *client.Client {
 			var req proto.CurrentSession
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
 			s.sessionPosts = append(s.sessionPosts, req.SessionID)
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/theme"):
+			id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v1/workspaces/"), "/theme")
+			if id != s.liveID {
+				http.Error(w, "workspace not found", http.StatusNotFound)
+				return
+			}
+			require.NoError(t, json.NewEncoder(w).Encode(proto.HostThemeState{
+				WorkspaceID: id, Theme: s.hostTheme,
+			}))
 		case strings.HasSuffix(r.URL.Path, "/events"):
 			id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v1/workspaces/"), "/events")
 			if id != s.liveID {
@@ -613,6 +653,9 @@ func (s *recoveryServer) start(t *testing.T) *client.Client {
 			w.WriteHeader(http.StatusOK)
 			if f, ok := w.(http.Flusher); ok {
 				f.Flush()
+			}
+			if s.abortStreams {
+				panic(http.ErrAbortHandler)
 			}
 			// Drop the stream so the loop keeps cycling.
 		default:
@@ -765,6 +808,103 @@ func TestClientWorkspace_ResyncsAfterPlainStreamDrop(t *testing.T) {
 	require.Positive(t, posts, "the session selection must be re-asserted after the drop")
 	require.Zero(t, creates, "a live workspace must not be re-created")
 	require.Equal(t, "ws-1", ws.workspaceID())
+
+	ws.Shutdown()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("runSubscription did not return after Shutdown")
+	}
+}
+
+// TestClientWorkspace_ResyncsHostThemeAfterReconnect covers a host theme
+// cleared while the stream was down: the attach replay only carries a
+// theme that is set, so the client must re-read it after the reconnect and
+// hand the UI the clear. Once the host sets a theme again, the next
+// reconnect hands that over too.
+func TestClientWorkspace_ResyncsHostThemeAfterReconnect(t *testing.T) {
+	t.Cleanup(SetSSEBackoffForTest(time.Millisecond, 5*time.Millisecond))
+
+	srv := &recoveryServer{liveID: "ws-1"}
+	c := srv.start(t)
+	ws := NewClientWorkspace(c, proto.Workspace{ID: "ws-1", Path: "/tmp/theme"})
+
+	var (
+		mu     sync.Mutex
+		themes []*proto.HostTheme
+	)
+	send := func(msg tea.Msg) {
+		if ev, ok := msg.(HostThemeEvent); ok {
+			mu.Lock()
+			themes = append(themes, ev.Theme)
+			mu.Unlock()
+		}
+	}
+	last := func() (*proto.HostTheme, int) {
+		mu.Lock()
+		defer mu.Unlock()
+		if len(themes) == 0 {
+			return nil, 0
+		}
+		return themes[len(themes)-1], len(themes)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		ws.runSubscription(send)
+		close(done)
+	}()
+
+	require.Eventually(t, func() bool {
+		theme, n := last()
+		return n > 0 && theme == nil
+	}, 3*time.Second, 5*time.Millisecond,
+		"a reconnect must hand the UI the host theme the server holds, even none")
+
+	theme := &proto.HostTheme{Name: "host", Palette: map[string]string{"primary": "#112233"}}
+	srv.snapshot(func(s *recoveryServer) { s.hostTheme = theme })
+	require.Eventually(t, func() bool {
+		got, _ := last()
+		return theme.Equal(got)
+	}, 3*time.Second, 5*time.Millisecond)
+
+	ws.Shutdown()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("runSubscription did not return after Shutdown")
+	}
+}
+
+// TestClientWorkspace_ResyncsHostThemeAfterAbortedStream covers a stream
+// that dies mid-response (the server was killed) instead of ending
+// cleanly: the loop must still resubscribe and re-read the host theme, so a
+// clear published meanwhile reaches the UI.
+func TestClientWorkspace_ResyncsHostThemeAfterAbortedStream(t *testing.T) {
+	t.Cleanup(SetSSEBackoffForTest(time.Millisecond, 5*time.Millisecond))
+
+	srv := &recoveryServer{liveID: "ws-1", abortStreams: true}
+	c := srv.start(t)
+	ws := NewClientWorkspace(c, proto.Workspace{ID: "ws-1", Path: "/tmp/abort"})
+
+	var resynced atomic.Bool
+	send := func(msg tea.Msg) {
+		if ev, ok := msg.(HostThemeEvent); ok && ev.Theme == nil {
+			resynced.Store(true)
+		}
+	}
+	done := make(chan struct{})
+	go func() {
+		ws.runSubscription(send)
+		close(done)
+	}()
+
+	require.Eventually(t, func() bool {
+		var streams int
+		srv.snapshot(func(s *recoveryServer) { streams = s.streams })
+		return streams >= 2 && resynced.Load()
+	}, 3*time.Second, 5*time.Millisecond,
+		"an aborted stream must be resubscribed and the host theme re-read")
 
 	ws.Shutdown()
 	select {

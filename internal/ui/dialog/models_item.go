@@ -1,7 +1,7 @@
 package dialog
 
 import (
-	"charm.land/catwalk/pkg/catwalk"
+	"charm.land/catwalk/v3/pkg/catwalk"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/ui/common"
@@ -91,7 +91,7 @@ func (m *ModelItem) SelectedModel() config.SelectedModel {
 	return config.SelectedModel{
 		Model:           m.model.ID,
 		Provider:        string(m.prov.ID),
-		ReasoningEffort: m.model.DefaultReasoningEffort,
+		ReasoningEffort: m.model.Reasoning.DefaultEffortLevel,
 		MaxTokens:       m.model.DefaultMaxTokens,
 	}
 }

@@ -85,11 +85,14 @@ type highlightableMessageItem struct {
 	// or leaves the item.
 	version *list.Versioned
 
-	startLine   int
-	startCol    int
-	endLine     int
-	endCol      int
-	highlighter list.Highlighter
+	startLine int
+	startCol  int
+	endLine   int
+	endCol    int
+	// sty supplies the selection style. It is read when highlighting, not
+	// copied when the item is built, so a theme switch recolors selections
+	// in existing items too.
+	sty *styles.Styles
 }
 
 var _ list.Highlightable = (*highlightableMessageItem)(nil)
@@ -105,7 +108,7 @@ func (h *highlightableMessageItem) renderHighlighted(content string, width, heig
 		return content
 	}
 	area := image.Rect(0, 0, width, height)
-	return list.Highlight(content, area, h.startLine, h.startCol, h.endLine, h.endCol, h.highlighter)
+	return list.Highlight(content, area, h.startLine, h.startCol, h.endLine, h.endCol, list.ToHighlighter(h.sty.TextSelection))
 }
 
 // SetHighlight implements list.Highlightable.
@@ -137,12 +140,12 @@ func (h *highlightableMessageItem) Highlight() (startLine int, startCol int, end
 
 func defaultHighlighter(sty *styles.Styles, v *list.Versioned) *highlightableMessageItem {
 	return &highlightableMessageItem{
-		version:     v,
-		startLine:   -1,
-		startCol:    -1,
-		endLine:     -1,
-		endCol:      -1,
-		highlighter: list.ToHighlighter(sty.TextSelection),
+		version:   v,
+		startLine: -1,
+		startCol:  -1,
+		endLine:   -1,
+		endCol:    -1,
+		sty:       sty,
 	}
 }
 
@@ -163,6 +166,11 @@ type animRestyler interface {
 // next render uses the current styles. It also bumps each item's
 // version so the F6 list-level memo invalidates frozen entries on
 // the next render.
+//
+// Tools nested in an Agent or AgenticFetch item are not list entries of
+// their own, so their caches are cleared through the parent; otherwise the
+// parent's re-render would reuse their cached, old-colored output. (Their
+// spinners are restyled by the parent's restyleAnim.)
 func ClearItemCaches(items []MessageItem) {
 	for _, item := range items {
 		if cc, ok := item.(cacheClearable); ok {
@@ -170,6 +178,16 @@ func ClearItemCaches(items []MessageItem) {
 		}
 		if ar, ok := item.(animRestyler); ok {
 			ar.restyleAnim()
+		}
+		if c, ok := item.(NestedToolContainer); ok {
+			for _, nested := range c.NestedTools() {
+				if cc, ok := nested.(cacheClearable); ok {
+					cc.clearCache()
+				}
+				if v, ok := nested.(interface{ Bump() }); ok {
+					v.Bump()
+				}
+			}
 		}
 		if v, ok := item.(interface{ Bump() }); ok {
 			v.Bump()

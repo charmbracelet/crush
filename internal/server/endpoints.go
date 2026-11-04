@@ -586,6 +586,14 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 			Fails(404, 500).
 			Handle(c.handleGetWorkspaceGitBranch),
 
+		apigen.Get("/v1/workspaces/{id}/plans").
+			Summary("List saved plans").Tags("plans").PathParam("id", "Workspace ID").
+			Responds([]string{}).Fails(404, 500).Handle(c.handleGetWorkspacePlans),
+		apigen.Post("/v1/workspaces/{id}/plans/read").
+			Summary("Read a saved plan").Tags("plans").PathParam("id", "Workspace ID").
+			Accepts(proto.ReadPlanRequest{}).Responds(proto.ReadPlanResponse{}).
+			Fails(400, 404, 500).Handle(c.handlePostWorkspacePlanRead),
+
 		apigen.Get("/v1/workspaces/{id}/skills").
 			Summary("List visible skills").
 			Tags("skills").

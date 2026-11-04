@@ -20,6 +20,7 @@ import (
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pinentry"
+	"github.com/charmbracelet/crush/internal/plan"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
@@ -605,3 +606,13 @@ func (w *AppWorkspace) Store() *config.ConfigStore {
 
 // Compile-time check that AppWorkspace implements Workspace.
 var _ Workspace = (*AppWorkspace)(nil)
+
+// ListPlans returns saved plan filenames for this workspace.
+func (w *AppWorkspace) ListPlans(ctx context.Context) ([]string, error) {
+	return plan.List(ctx, w.WorkingDir())
+}
+
+// ReadPlan reads a saved plan from this workspace.
+func (w *AppWorkspace) ReadPlan(ctx context.Context, name string) (string, error) {
+	return plan.Read(ctx, w.WorkingDir(), name)
+}

@@ -507,3 +507,13 @@ func (i *LSPClientInfo) UnmarshalJSON(data []byte) error {
 	}
 	return nil
 }
+
+// ReadPlanRequest identifies a file in the workspace plans directory.
+type ReadPlanRequest struct {
+	Name string `json:"name"`
+}
+
+// ReadPlanResponse contains saved plan text.
+type ReadPlanResponse struct {
+	Content string `json:"content"`
+}

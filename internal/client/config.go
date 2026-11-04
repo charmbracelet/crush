@@ -445,3 +445,37 @@ func (c *Client) GetMCPPrompt(ctx context.Context, id, clientID, promptID string
 	}
 	return result.Prompt, nil
 }
+
+// ListPlans retrieves saved plan filenames from a workspace.
+func (c *Client) ListPlans(ctx context.Context, id string) ([]string, error) {
+	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/plans", id), nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("list plans: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("list plans: status code %d", rsp.StatusCode)
+	}
+	var names []string
+	if err := json.NewDecoder(rsp.Body).Decode(&names); err != nil {
+		return nil, fmt.Errorf("decode plans: %w", err)
+	}
+	return names, nil
+}
+
+// ReadPlan retrieves saved plan text from a workspace.
+func (c *Client) ReadPlan(ctx context.Context, id, name string) (string, error) {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/plans/read", id), nil, jsonBody(proto.ReadPlanRequest{Name: name}), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return "", fmt.Errorf("read plan: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("read plan: status code %d", rsp.StatusCode)
+	}
+	var result proto.ReadPlanResponse
+	if err := json.NewDecoder(rsp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("decode plan: %w", err)
+	}
+	return result.Content, nil
+}

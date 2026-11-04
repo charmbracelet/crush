@@ -258,6 +258,8 @@ type Workspace interface {
 	ProjectNeedsInitialization() (bool, error)
 	MarkProjectInitialized() error
 	InitializePrompt() (string, error)
+	ListPlans(ctx context.Context) ([]string, error)
+	ReadPlan(ctx context.Context, name string) (string, error)
 	ListSkills(ctx context.Context) ([]skills.CatalogEntry, error)
 	ReadSkill(ctx context.Context, skillID string) ([]byte, skills.SkillReadResult, error)
 

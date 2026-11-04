@@ -524,3 +524,28 @@ func (c *controllerV1) handlePostWorkspaceMCPRefreshResources(w http.ResponseWri
 	c.backend.MCPRefreshResources(r.Context(), id, req.Name)
 	w.WriteHeader(http.StatusOK)
 }
+
+// List saved plan filenames from the server workspace.
+func (c *controllerV1) handleGetWorkspacePlans(w http.ResponseWriter, r *http.Request) {
+	names, err := c.backend.ListPlans(r.Context(), r.PathValue("id"))
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	jsonEncode(w, names)
+}
+
+// Read a plan from the server workspace.
+func (c *controllerV1) handlePostWorkspacePlanRead(w http.ResponseWriter, r *http.Request) {
+	var req proto.ReadPlanRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, http.StatusBadRequest, "failed to decode request")
+		return
+	}
+	content, err := c.backend.ReadPlan(r.Context(), r.PathValue("id"), req.Name)
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	jsonEncode(w, proto.ReadPlanResponse{Content: content})
+}

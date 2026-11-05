@@ -10,9 +10,14 @@ import (
 	"github.com/charmbracelet/crush/internal/cmd"
 	_ "github.com/charmbracelet/crush/internal/dns"
 	_ "github.com/joho/godotenv/autoload"
+	"github.com/pkg/browser"
 )
 
 func main() {
+	// Send browser output directly to the null device to keep it off the TUI.
+	browser.Stdout = nil
+	browser.Stderr = nil
+
 	if os.Getenv("CRUSH_PROFILE") != "" {
 		go func() {
 			slog.Info("Serving pprof at localhost:6060")

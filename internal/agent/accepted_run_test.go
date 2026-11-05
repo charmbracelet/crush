@@ -178,7 +178,7 @@ func TestPersistCanceledTurn_WritesAssistantOnlyWhenUserCreated(t *testing.T) {
 	_, err = sa.createUserMessage(t.Context(), SessionAgentCall{
 		SessionID: sess.ID,
 		Prompt:    "hello",
-	})
+	}, "")
 	require.NoError(t, err)
 
 	err = sa.persistCanceledTurn(t.Context(), SessionAgentCall{

@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -58,7 +59,7 @@ func (q *QuestionToolRenderContext) RenderTool(sty *styles.Styles, width int, op
 		return header
 	}
 
-	body := formatQuestionAnswers(sty, opts.Result.Content, cappedWidth-toolBodyLeftPaddingTotal)
+	body := formatQuestionAnswers(sty, opts.Result, cappedWidth-toolBodyLeftPaddingTotal)
 	if body == "" {
 		return header
 	}
@@ -86,184 +87,93 @@ func questionSummary(params tools.QuestionParams) string {
 	return fmt.Sprintf("%s (+%d more)", first, n-1)
 }
 
-// questionBlock holds a parsed Q&A block from the tool result.
-type questionBlock struct {
-	question string
-	answer   string
-	notes    []string
-}
-
-// parseQuestionBlocks splits the tool result into per-question blocks,
-// correctly handling the Notes subsection within each block.
-func parseQuestionBlocks(content string) []questionBlock {
-	// Split on "QN: " boundaries rather than \n\n since notes
-	// introduce extra \n\n within a single question block.
-	var rawBlocks []string
-	lines := strings.Split(content, "\n")
-	var current []string
-	for _, line := range lines {
-		if strings.HasPrefix(line, "Q") && len(current) > 0 {
-			rest := strings.TrimPrefix(line, "Q")
-			if idx := strings.IndexByte(rest, ':'); idx > 0 {
-				allDigits := true
-				for _, c := range rest[:idx] {
-					if c < '0' || c > '9' {
-						allDigits = false
-						break
-					}
-				}
-				if allDigits {
-					rawBlocks = append(rawBlocks, strings.Join(current, "\n"))
-					current = nil
-				}
-			}
+// formatQuestionAnswers renders each question with its answer and notes
+// from the tool's structured metadata.
+func formatQuestionAnswers(sty *styles.Styles, result *message.ToolResult, width int) string {
+	var meta tools.QuestionResponseMetadata
+	if err := json.Unmarshal([]byte(result.Metadata), &meta); err != nil {
+		// Results saved before the tool emitted metadata.
+		var lines []string
+		for line := range strings.SplitSeq(strings.TrimSpace(result.Content), "\n") {
+			lines = append(lines, sty.Tool.TodoStatusNote.Render(ansi.Truncate(line, width, "…")))
 		}
-		current = append(current, line)
-	}
-	if len(current) > 0 {
-		rawBlocks = append(rawBlocks, strings.Join(current, "\n"))
-	}
-
-	blocks := make([]questionBlock, 0, len(rawBlocks))
-	for _, raw := range rawBlocks {
-		raw = strings.TrimSpace(raw)
-		if raw == "" {
-			continue
-		}
-
-		var b questionBlock
-
-		// Strip the "QN: <question>\n" prefix.
-		if nlIdx := strings.IndexByte(raw, '\n'); nlIdx >= 0 {
-			b.question = strings.TrimSpace(raw[:nlIdx])
-			// Remove the "QN: " prefix from the question text.
-			if colonIdx := strings.Index(b.question, ": "); colonIdx >= 0 {
-				b.question = b.question[colonIdx+2:]
-			}
-			raw = raw[nlIdx+1:]
-		}
-
-		// Split off notes section if present.
-		if notesIdx := strings.Index(raw, "\n\nNotes:"); notesIdx >= 0 {
-			b.answer = strings.TrimSpace(raw[:notesIdx])
-			notesRaw := raw[notesIdx+len("\n\nNotes:"):]
-			for _, noteLine := range strings.Split(notesRaw, "\n") {
-				noteLine = strings.TrimSpace(noteLine)
-				if strings.HasPrefix(noteLine, "- ") {
-					b.notes = append(b.notes, strings.TrimPrefix(noteLine, "- "))
-				}
-			}
-		} else {
-			b.answer = strings.TrimSpace(raw)
-		}
-
-		blocks = append(blocks, b)
-	}
-
-	return blocks
-}
-
-// formatQuestionAnswers parses the tool result and formats answers with
-// styling for display in the chat body.
-func formatQuestionAnswers(sty *styles.Styles, content string, width int) string {
-	if content == "" {
-		return ""
-	}
-
-	blocks := parseQuestionBlocks(content)
-	if len(blocks) == 0 {
-		return ""
+		return strings.Join(lines, "\n")
 	}
 
 	var lines []string
-	for _, b := range blocks {
-		icon := sty.Tool.IconSuccess.Render()
-		answer := styleAnswer(sty, b.answer)
+	for i, a := range meta.Answers {
+		var q question.Question
+		if i < len(meta.Questions) {
+			q = meta.Questions[i]
+		}
 
-		// Show question text in subtle style, answer on same line.
-		qText := sty.Tool.TodoStatusNote.Render(b.question)
-		line := fmt.Sprintf("%s %s %s", icon, qText, answer)
-		line = ansi.Truncate(line, width, "…")
-		lines = append(lines, line)
+		line := fmt.Sprintf("%s %s %s",
+			sty.Tool.IconSuccess.Render(),
+			sty.Tool.TodoStatusNote.Render(q.Text),
+			styleAnswer(sty, q, a),
+		)
+		lines = append(lines, ansi.Truncate(line, width, "…"))
 
-		for _, note := range b.notes {
-			noteLine := sty.Tool.TodoStatusNote.Render("  ╰ " + note)
-			noteLine = ansi.Truncate(noteLine, width, "…")
-			lines = append(lines, noteLine)
+		for _, note := range answerNotes(q, a) {
+			lines = append(lines, ansi.Truncate(sty.Tool.TodoStatusNote.Render("  ╰ "+note), width, "…"))
 		}
 	}
-
 	return strings.Join(lines, "\n")
 }
 
-// styleAnswer splits an answer into its distinct parts (e.g. a multi-choice
-// selection plus a custom fill-in) and styles each, rejoining with commas.
-func styleAnswer(sty *styles.Styles, answer string) string {
-	answer = strings.TrimSpace(answer)
-	segments := splitAnswerSegments(answer)
-	styled := make([]string, 0, len(segments))
-	for _, seg := range segments {
-		seg = strings.TrimSpace(seg)
-		if seg == "" {
-			continue
-		}
-		styled = append(styled, styleAnswerLine(sty, seg))
-	}
-	return strings.Join(styled, sty.Tool.TodoStatusNote.Render(", "))
-}
-
-// answerMarkers prefix each distinct answer part the question tool emits.
-var answerMarkers = []string{
-	"User answered:",
-	"User selected:",
-	"User provided:",
-	"User skipped",
-}
-
-// splitAnswerSegments groups answer lines into segments that each begin with
-// a known marker. Free-text ("User provided:") answers may span multiple
-// lines, so continuation lines stay attached to their marker instead of being
-// treated as separate selections.
-func splitAnswerSegments(answer string) []string {
-	var segments []string
-	var current []string
-	for _, line := range strings.Split(answer, "\n") {
-		isMarker := slices.ContainsFunc(answerMarkers, func(m string) bool {
-			return strings.HasPrefix(line, m)
-		})
-		if isMarker && len(current) > 0 {
-			segments = append(segments, strings.Join(current, "\n"))
-			current = nil
-		}
-		current = append(current, line)
-	}
-	if len(current) > 0 {
-		segments = append(segments, strings.Join(current, "\n"))
-	}
-	return segments
-}
-
-// styleAnswerLine styles a single answer line.
-func styleAnswerLine(sty *styles.Styles, answer string) string {
+// styleAnswer renders an answer on a single line.
+func styleAnswer(sty *styles.Styles, q question.Question, a question.Answer) string {
 	switch {
-	case answer == "User answered: yes":
+	case a.Yes != nil && *a.Yes:
 		return sty.Tool.TodoCompletedIcon.Render("Yes")
-	case answer == "User answered: no":
+	case a.Yes != nil:
 		return sty.Tool.StateCancelled.Render("No")
-	case strings.HasPrefix(answer, "User selected:"):
-		selected := strings.TrimPrefix(answer, "User selected: ")
-		selected = strings.Trim(selected, "[]\"")
-		selected = strings.ReplaceAll(selected, "\",\"", ", ")
-		return sty.Tool.ParamMain.Render(selected)
-	case strings.HasPrefix(answer, "User provided:"):
-		text := strings.TrimPrefix(answer, "User provided: ")
-		// Free-text may span multiple lines; collapse whitespace so the
-		// answer renders as a single truncatable line.
-		text = strings.Join(strings.Fields(text), " ")
-		return sty.Tool.ParamMain.Render(text)
-	case answer == "User skipped this question":
+	case len(a.SelectedIDs) == 0 && a.FillInText == "":
 		return sty.Tool.StateCancelled.Render("Skipped")
-	default:
-		return answer
 	}
+
+	parts := make([]string, 0, len(a.SelectedIDs)+1)
+	for _, id := range a.SelectedIDs {
+		parts = append(parts, sty.Tool.ParamMain.Render(choiceLabel(q, id)))
+	}
+	if a.FillInText != "" {
+		parts = append(parts, sty.Tool.ParamMain.Render(strings.Join(strings.Fields(a.FillInText), " ")))
+	}
+	return strings.Join(parts, sty.Tool.TodoStatusNote.Render(", "))
+}
+
+// answerNotes lists the question's own note first, then choice notes in
+// choice order.
+func answerNotes(q question.Question, a question.Answer) []string {
+	var notes []string
+	if note, ok := a.Notes[question.QuestionNoteKey]; ok {
+		notes = append(notes, note)
+	}
+	keys := make([]string, 0, len(a.Notes))
+	for key := range a.Notes {
+		if key != question.QuestionNoteKey {
+			keys = append(keys, key)
+		}
+	}
+	slices.SortFunc(keys, func(x, y string) int { return choiceIndex(q, x) - choiceIndex(q, y) })
+	for _, key := range keys {
+		notes = append(notes, choiceLabel(q, key)+": "+a.Notes[key])
+	}
+	return notes
+}
+
+func choiceLabel(q question.Question, id string) string {
+	if i := choiceIndex(q, id); i < len(q.Choices) && q.Choices[i].Label != "" {
+		return q.Choices[i].Label
+	}
+	return id
+}
+
+// choiceIndex returns the position of id in q.Choices, or len(q.Choices) if
+// it is not a choice.
+func choiceIndex(q question.Question, id string) int {
+	if i := slices.IndexFunc(q.Choices, func(c question.Choice) bool { return c.ID == id }); i >= 0 {
+		return i
+	}
+	return len(q.Choices)
 }

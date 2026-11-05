@@ -47,6 +47,10 @@ type Question struct {
 	Choices     []Choice `json:"choices,omitempty"`
 }
 
+// QuestionNoteKey is the Answer.Notes key for a note on the question
+// itself; notes on individual choices are keyed by choice ID.
+const QuestionNoteKey = "_question"
+
 // Answer carries the user's response to a single Question.
 type Answer struct {
 	QuestionID  string            `json:"question_id"`

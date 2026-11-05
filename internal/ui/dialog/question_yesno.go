@@ -55,7 +55,7 @@ func NewYesNo(sty *styles.Styles, req question.Question) *YesNo {
 func (d *YesNo) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	// Note editor takes priority when active.
 	if d.activeNoteKey != "" && d.noteEditor.Focused() {
-		cmd, handled := d.handleNoteKey(msg, d.keyClose, func() { d.closeNote("_question") })
+		cmd, handled := d.handleNoteKey(msg, d.keyClose, func() { d.closeNote(question.QuestionNoteKey) })
 		if handled {
 			return false, cmd
 		}
@@ -78,7 +78,7 @@ func (d *YesNo) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		d.answer(d.respond(false))
 		return true, nil
 	case key.Matches(msg, d.keyNote):
-		return false, d.openNote("_question")
+		return false, d.openNote(question.QuestionNoteKey)
 	}
 	return false, nil
 }
@@ -199,7 +199,7 @@ func (d *YesNo) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	y += drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, area.Max.Y), buttons)
 
 	// Draw note editor or saved note.
-	cur, _ := d.drawStandaloneNote(scr, area, y, "_question")
+	cur, _ := d.drawStandaloneNote(scr, area, y, question.QuestionNoteKey)
 	return cur
 }
 

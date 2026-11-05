@@ -107,7 +107,7 @@ func TestParsePrompt(t *testing.T) {
 			kind:    KindPassword,
 			keyInfo: "/home/user/.ssh/id_ed25519_sk",
 			title:   "Security Key PIN",
-			message: "Your security key wants its PIN.",
+			message: "Please enter the PIN for your security key:",
 		},
 		{
 			name:    "host key acceptance",
@@ -146,10 +146,7 @@ func TestParsePrompt(t *testing.T) {
 			require.Equal(t, c.kind, req.Kind)
 			require.Equal(t, c.keyInfo, req.KeyInfo)
 			require.Equal(t, c.title, req.Title)
-			require.True(t, strings.HasPrefix(req.Message, c.message),
-				"message %q should start with %q", req.Message, c.message)
-			// Every message gets a playful aside appended.
-			require.NotEqual(t, c.message, req.Message)
+			require.Equal(t, c.message, req.Message)
 			require.Equal(t, c.prompt, req.Prompt)
 		})
 	}
@@ -171,7 +168,7 @@ func TestDescribeFillsInParsedCopy(t *testing.T) {
 	require.Equal(t, KindPassword, req.Kind)
 	require.Equal(t, "git@example.com", req.KeyInfo)
 	require.Equal(t, "SSH Password", req.Title)
-	require.True(t, strings.HasPrefix(req.Message, "OpenSSH needs the password for git@example.com."))
+	require.Equal(t, "OpenSSH needs the password for git@example.com.", req.Message)
 
 	// Pre-parsed copy is preserved untouched.
 	filled := PromptRequest{

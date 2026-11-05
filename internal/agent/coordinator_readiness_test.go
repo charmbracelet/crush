@@ -19,7 +19,7 @@ import (
 // buildAgent starts readiness goroutines that build the system prompt and the
 // initial tool list. Several server entry points build an agent from a
 // short-lived HTTP request context — the InitAgent/UpdateAgent handlers, and
-// the sub-agent build reached through UpdateModels -> buildTools -> agentTool.
+// the subagent build reached through UpdateModels -> buildTools -> agentTool.
 // When that request context was canceled the moment the handler returned, the
 // readyWg errgroup recorded context.Canceled and every later coordinator.run
 // failed at readyWg.Wait() before emitting anything — the session hung with
@@ -74,7 +74,7 @@ func TestBuildAgentReadinessSurvivesCallerCancellation(t *testing.T) {
 	agentCfg := cfg.Config().Agents[config.AgentCoder]
 
 	ctx, cancel := context.WithCancel(context.Background())
-	_, err = coord.buildAgent(ctx, p, agentCfg, false)
+	_, err = coord.buildAgent(ctx, &coord.readyWg, p, agentCfg, false)
 	require.NoError(t, err)
 
 	// The caller goes away, mirroring an HTTP handler returning and canceling
@@ -93,5 +93,76 @@ func TestBuildAgentReadinessSurvivesCallerCancellation(t *testing.T) {
 		require.NoError(t, err, "unexpected buildAgent readiness error")
 	case <-time.After(2 * time.Second):
 		t.Fatal("readyWg did not complete; the readiness goroutines must not block on MCP init")
+	}
+}
+
+// TestTaskAgentsDoNotJoinCoordinatorReadiness is a regression test for a
+// "sync: WaitGroup is reused before previous Wait has returned" panic.
+//
+// Every turn rebuilds the task subagents (run -> updateAgentModels ->
+// buildTools -> taskAgents). Those builds used to join the coordinator's
+// readyWg while another run, such as a subagent report being delivered,
+// was blocked in readyWg.Wait. Adding work to a WaitGroup with a Wait in
+// flight panics. The subagents now use a group of their own, and are fully
+// set up by the time taskAgents returns.
+func TestTaskAgentsDoNotJoinCoordinatorReadiness(t *testing.T) {
+	env := testEnv(t)
+
+	crushJSON := `{
+  "options": {"disable_default_providers": true, "disable_provider_auto_update": true},
+  "providers": {"mock": {"id": "mock", "name": "Mock", "type": "openai",
+    "base_url": "http://127.0.0.1:9/v1", "api_key": "test-key",
+    "models": [{"id": "mock-model", "name": "Mock", "context_window": 8192, "default_max_tokens": 128}]}},
+  "models": {"large": {"provider": "mock", "model": "mock-model"},
+             "small": {"provider": "mock", "model": "mock-model"}}
+}`
+	require.NoError(t, os.WriteFile(filepath.Join(env.workingDir, "crush.json"), []byte(crushJSON), 0o644))
+
+	cfg, err := config.Init(t.Context(), env.workingDir, "", false)
+	require.NoError(t, err)
+	cfg.SetupAgents()
+
+	coord := &coordinator{
+		cfg:         cfg,
+		sessions:    env.sessions,
+		messages:    env.messages,
+		permissions: env.permissions,
+		history:     env.history,
+		filetracker: *env.filetracker,
+	}
+
+	stop := make(chan struct{})
+	waiters := make(chan error, 4)
+	for range 4 {
+		go func() {
+			for {
+				select {
+				case <-stop:
+					waiters <- nil
+					return
+				default:
+				}
+				if err := coord.readyWg.Wait(); err != nil {
+					waiters <- err
+					return
+				}
+			}
+		}()
+	}
+
+	for range 20 {
+		agents, err := coord.taskAgents(context.Background(), false)
+		require.NoError(t, err)
+		for access, agent := range agents {
+			sa, ok := agent.(*sessionAgent)
+			require.True(t, ok)
+			require.NotEmpty(t, sa.systemPrompt.Get(), "%s subagent returned before its system prompt was set", access)
+			require.NotZero(t, sa.tools.Len(), "%s subagent returned before its tools were set", access)
+		}
+	}
+
+	close(stop)
+	for range 4 {
+		require.NoError(t, <-waiters)
 	}
 }

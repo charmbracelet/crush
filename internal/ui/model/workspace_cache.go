@@ -28,6 +28,8 @@ import (
 	"slices"
 	"time"
 
+	"github.com/charmbracelet/crush/internal/message"
+
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/charmbracelet/crush/internal/permission"
@@ -309,6 +311,13 @@ func (m *UI) applyPromptQueue(msg promptQueueMsg) []tea.Cmd {
 	countChanged := len(msg.prompts) != m.promptQueue
 	m.promptQueueItems = msg.prompts
 	m.promptQueue = len(msg.prompts)
+	// A report waits in the queue until the model reads it, but its
+	// subagent is already done.
+	for _, prompt := range msg.prompts {
+		if report, ok := message.ParseSubAgentReportPrompt(prompt); ok {
+			m.markDispatchReported(report.Label)
+		}
+	}
 	if countChanged {
 		m.updateLayoutAndSize()
 	} else if itemsChanged {

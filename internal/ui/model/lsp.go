@@ -153,9 +153,6 @@ func lspDiagnostics(t *styles.Styles, diagnostics map[protocol.DiagnosticSeverit
 // lspList renders a list of LSP clients with their status and diagnostics,
 // truncating to maxItems if needed.
 func lspList(t *styles.Styles, lsps []LSPInfo, width, maxItems int) string {
-	if maxItems <= 0 {
-		return ""
-	}
 	var renderedLsps []string
 	for _, l := range lsps {
 		var icon string
@@ -195,11 +192,5 @@ func lspList(t *styles.Styles, lsps []LSPInfo, width, maxItems int) string {
 		}, width))
 	}
 
-	if len(renderedLsps) > maxItems {
-		visibleItems := renderedLsps[:maxItems-1]
-		remaining := len(renderedLsps) - maxItems
-		visibleItems = append(visibleItems, t.Resource.AdditionalText.Render(fmt.Sprintf("…and %d more", remaining)))
-		return lipgloss.JoinVertical(lipgloss.Left, visibleItems...)
-	}
-	return lipgloss.JoinVertical(lipgloss.Left, renderedLsps...)
+	return lipgloss.JoinVertical(lipgloss.Left, truncateRows(renderedLsps, maxItems, t.Resource.AdditionalText)...)
 }

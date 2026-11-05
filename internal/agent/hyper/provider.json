@@ -15,7 +15,25 @@
         "cache_hit": 0.32664
       },
       "context_window": 1000000,
-      "default_max_tokens": 16000,
+      "default_max_tokens": 131072,
+      "reasoning": {
+        "thinking": ""
+      },
+      "capabilities": {
+        "vision": true,
+        "audio": false
+      }
+    },
+    {
+      "id": "prism-core",
+      "name": "Prism Core",
+      "pricing": {
+        "input": 1.52432,
+        "output": 4.79072,
+        "cache_hit": 0.283088
+      },
+      "context_window": 1000000,
+      "default_max_tokens": 131072,
       "reasoning": {
         "thinking": ""
       },
@@ -65,7 +83,7 @@
         "output": 1.31,
         "cache_hit": 0.03
       },
-      "context_window": 1000000,
+      "context_window": 1048576,
       "default_max_tokens": 262144,
       "reasoning": {
         "thinking": "toggleable",
@@ -153,6 +171,39 @@
       },
       "capabilities": {
         "vision": false,
+        "audio": false
+      }
+    },
+    {
+      "id": "kimi-k3.1-pro",
+      "name": "Kimi K3.1 Pro",
+      "pricing": {
+        "input": 2.2,
+        "output": 11,
+        "cache_hit": 0.22
+      },
+      "context_window": 1000000,
+      "default_max_tokens": 262144,
+      "reasoning": {
+        "thinking": "toggleable",
+        "effort_levels": [
+          {
+            "value": "low",
+            "display": "Low"
+          },
+          {
+            "value": "high",
+            "display": "High"
+          },
+          {
+            "value": "max",
+            "display": "Max"
+          }
+        ],
+        "default_effort_level": "high"
+      },
+      "capabilities": {
+        "vision": true,
         "audio": false
       }
     },
@@ -712,6 +763,43 @@
       },
       "capabilities": {
         "vision": false,
+        "audio": false
+      }
+    },
+    {
+      "id": "muse-spark-open",
+      "name": "Muse Spark Open",
+      "pricing": {
+        "input": 1.4,
+        "output": 4.65,
+        "cache_hit": 0.17
+      },
+      "context_window": 1048576,
+      "default_max_tokens": 1048576,
+      "reasoning": {
+        "thinking": "toggleable",
+        "effort_levels": [
+          {
+            "value": "low",
+            "display": "Low"
+          },
+          {
+            "value": "medium",
+            "display": "Medium"
+          },
+          {
+            "value": "high",
+            "display": "High"
+          },
+          {
+            "value": "xhigh",
+            "display": "X-High"
+          }
+        ],
+        "default_effort_level": "xhigh"
+      },
+      "capabilities": {
+        "vision": true,
         "audio": false
       }
     }

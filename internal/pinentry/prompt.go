@@ -42,9 +42,9 @@ func (k Key) Lines() []string {
 		lines = append(lines, "Number: "+k.CardNumber)
 	}
 	if id := k.KeyID; id != "" {
-		lines = append(lines, "Key:    "+id)
+		lines = append(lines, "Key: "+id)
 	} else if k.Fingerprint != "" {
-		lines = append(lines, "Key:    "+k.Fingerprint)
+		lines = append(lines, "Key: "+k.Fingerprint)
 	}
 	if k.Holder != "" {
 		lines = append(lines, "Holder: "+k.Holder)

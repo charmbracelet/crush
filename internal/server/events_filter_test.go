@@ -152,7 +152,7 @@ func TestDeliverToClient(t *testing.T) {
 }
 
 // TestDeliverToClient_SubSessionResolvesToParent verifies that a
-// prompt raised by a sub-agent session (a task session with a parent)
+// prompt raised by a subagent session (a task session with a parent)
 // is delivered to clients viewing the top-level parent session, and
 // that an unresolvable session fails open rather than stranding the
 // prompt.

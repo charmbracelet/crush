@@ -149,7 +149,7 @@ func TestPromptSentDuringAToolRunIsNotEchoed(t *testing.T) {
 	require.False(t, hasPending(m), "no second spinner underneath the turn")
 }
 
-// A run this client never sent (a sub-agent report, a channel event, a
+// A run this client never sent (a subagent report, a channel event, a
 // session opened mid-run) has no pending turn to vouch for it. While its
 // tool runs the transcript is silent too, so the busy probe has to be what
 // keeps a prompt sent then in the queue pill instead of echoed with a

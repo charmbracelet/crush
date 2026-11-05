@@ -1,7 +1,6 @@
 package sshaskpass
 
 import (
-	"math/rand/v2"
 	"os"
 	"os/user"
 	"regexp"
@@ -29,8 +28,7 @@ func ClassifyPrompt(prompt string) (kind Kind, keyInfo string) {
 // ParsePrompt classifies an OpenSSH askpass prompt and fills in the
 // friendly copy Crush shows in place of OpenSSH's terse phrasing: a
 // short title for the dialog heading and a human-readable description
-// of what is being asked for, with a playful aside suited to the
-// moment. The raw prompt is preserved on the result.
+// of what is being asked for. The raw prompt is preserved on the result.
 func ParsePrompt(prompt string) PromptRequest {
 	kind, keyInfo := ClassifyPrompt(prompt)
 	lower := strings.ToLower(prompt)
@@ -158,96 +156,38 @@ func (s promptStyle) title() string {
 	}
 }
 
-// message describes what OpenSSH is asking for, in friendly terms,
-// followed by a playful aside. Phrasing Crush does not recognize falls
-// back to the raw prompt text.
+// message describes what OpenSSH is asking for, in friendly terms.
+// Phrasing Crush does not recognize falls back to the raw prompt text.
 func (s promptStyle) message(prompt, keyInfo string) string {
 	switch s {
 	case styleTouch:
-		return withAside("Tap your security key to continue.", s)
+		return "Tap your security key to continue."
 	case styleHostKey:
-		return withAside("OpenSSH has not seen this host before. Trust its key?", s)
+		return "OpenSSH has not seen this host before. Trust its key?"
 	case styleKeyUse:
 		if keyInfo != "" {
-			return withAside("Something wants to use the SSH key at "+keyInfo+".", s)
+			return "Something wants to use the SSH key at " + keyInfo + "."
 		}
-		return withAside("Something wants to use one of your SSH keys.", s)
+		return "Something wants to use one of your SSH keys."
 	case stylePassphrase:
 		if keyInfo != "" {
-			return withAside("Unlock the SSH key at "+keyInfo+".", s)
+			return "Unlock the SSH key at " + keyInfo + "."
 		}
-		return withAside("Unlock your SSH key.", s)
+		return "Unlock your SSH key."
 	case stylePIN:
-		return withAside("Your security key wants its PIN.", s)
+		return "Please enter the PIN for your security key:"
 	default:
 		if keyInfo != "" {
-			return withAside("OpenSSH needs the password for "+keyInfo+".", s)
+			return "OpenSSH needs the password for " + keyInfo + "."
 		}
 		if trimmed := tidy(prompt); trimmed != "" {
 			if !strings.HasSuffix(trimmed, "?") && !strings.HasSuffix(trimmed, ".") {
 				trimmed += "."
 			}
-			return withAside(trimmed, s)
+			return trimmed
 		}
-		return withAside("OpenSSH needs your input.", s)
+		return "OpenSSH needs your input."
 	}
-}
-
-// withAside appends a playful aside to the message, in the spirit of
-// Crush's exit messages.
-func withAside(message string, s promptStyle) string {
-	if aside := s.aside(); aside != "" {
-		return message + " " + aside
-	}
-	return message
-}
-
-// aside returns a random line of light banter that suits the prompt.
-func (s promptStyle) aside() string {
-	var asides []string
-	switch s {
-	case stylePIN:
-		asides = []string{
-			"It's not getting any younger.",
-			"It's been tapping its foot all day.",
-			"Your key promises not to tell.",
-			"A few digits of pure trust.",
-			"No judgments here.",
-		}
-	case stylePassphrase:
-		asides = []string{
-			"Only you can unlock this one.",
-			"Your keys, your castle.",
-			"The tumblers are ready when you are.",
-			"No peeking.",
-		}
-	case styleHostKey:
-		asides = []string{
-			"Trust is a two-way street.",
-			"Take your time.",
-			"We will wait.",
-		}
-	case styleKeyUse:
-		asides = []string{
-			"It says it comes in peace.",
-			"Just between us.",
-			"Nothing to see here.",
-		}
-	case styleTouch:
-		asides = []string{
-			"Your key is all ears.",
-			"A gentle tap will do.",
-			"Ready when you are.",
-		}
-	default:
-		asides = []string{
-			"No peeking.",
-			"I won't look, promise.",
-			"Your secret stays between us.",
-			"Just between us.",
-		}
-	}
-	return asides[rand.IntN(len(asides))]
 }
 
 // isTouchPrompt reports whether the prompt is a passive security key

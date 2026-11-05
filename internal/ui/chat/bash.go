@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -70,6 +71,9 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	}
 
 	cmd := params.Command
+	if opts.Compact {
+		cmd = singleLine(cmd)
+	}
 	cmd = strings.ReplaceAll(cmd, "\t", "    ")
 	cmd = common.StripBashDisplayPrefix(cmd, b.workingDir)
 	if highlighted, err := common.SyntaxHighlightLexerName(sty, cmd, "bash", nil); err == nil {
@@ -133,6 +137,18 @@ func bashHeader(sty *styles.Styles, opts *ToolRenderOpts, width int, description
 	// The command sits below the description, in the output's column.
 	indent := toolBodyLeftPaddingTotal
 	return header + "\n\n" + indentLines(toolParamList(sty, []string{cmd}, width-indent, &cmdOpts), indent)
+}
+
+// singleLine joins a multi-line command onto one line, dropping each
+// continuation line's indent. A subagent's tool calls are one line each,
+// and a heredoc or inline script would otherwise spill its first lines into
+// the tree before the truncation hides the rest.
+func singleLine(s string) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimSpace(line)
+	}
+	return strings.Join(slices.DeleteFunc(lines, func(l string) bool { return l == "" }), " ")
 }
 
 // cwdHint returns where a command ran, relative to the workspace, or "" when

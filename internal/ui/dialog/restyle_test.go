@@ -41,6 +41,11 @@ var (
 	_ StyleRefresher = (*YesNo)(nil)
 	_ StyleRefresher = (*FreeText)(nil)
 	_ StyleRefresher = (*PlanHandoffInline)(nil)
+	_ StyleRefresher = (*ProviderSelect)(nil)
+	_ StyleRefresher = (*ProviderItem)(nil)
+	_ StyleRefresher = (*ModelShortlist)(nil)
+	_ StyleRefresher = (*ShortlistItem)(nil)
+	_ StyleRefresher = (*OnboardingDemo)(nil)
 )
 
 // restyleTheme returns a theme whose colors differ from the default

@@ -351,8 +351,14 @@ type UI struct {
 
 	// onboarding state
 	onboarding struct {
+		step                  dialog.OnboardingStep
+		provider              catwalk.Provider
 		yesInitializeSelected bool
 	}
+
+	// tipsDismissed records that the landing cheat sheet was dismissed this
+	// run, so the preference is persisted only once.
+	tipsDismissed bool
 
 	// lspStates / lspDiagnostics memoize the workspace LSP state and
 	// per-server severity counts (each probe behind them is a synchronous
@@ -662,7 +668,7 @@ func (m *UI) SetProgram(program *tea.Program) {
 func (m *UI) Init() tea.Cmd {
 	var cmds []tea.Cmd
 	if m.state == uiOnboarding {
-		if cmd := m.openModelsDialog(); cmd != nil {
+		if cmd := m.openProviderSelect(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	}
@@ -2256,7 +2262,13 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	switch msg := action.(type) {
 	// Generic dialog messages
 	case dialog.ActionClose:
-		if isOnboarding && m.dialog.ContainsDialog(dialog.ModelsID) {
+		if isOnboarding {
+			// First-run setup cannot be skipped: dismissing a screen
+			// returns to the one belonging to the current step.
+			m.dialog.CloseFrontDialog()
+			if cmd := m.openOnboardingStepDialog(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 			break
 		}
 
@@ -2265,12 +2277,6 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 
 		m.dialog.CloseFrontDialog()
-
-		if isOnboarding {
-			if cmd := m.openModelsDialog(); cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-		}
 
 		if m.focus == uiFocusEditor {
 			cmds = append(cmds, m.textarea.Focus())
@@ -2285,7 +2291,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 
 		if isOnboarding {
-			if cmd := m.openModelsDialog(); cmd != nil {
+			if cmd := m.openOnboardingStepDialog(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
 		}
@@ -2674,6 +2680,21 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		cmds = append(cmds, m.initializeProject())
 		m.dialog.CloseDialog(dialog.CommandsID)
 
+	case dialog.ActionSelectProvider:
+		m.dialog.CloseDialog(dialog.ProviderSelectID)
+		if cmd := m.startProviderAuth(msg.Provider); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.ActionBrowseModels:
+		m.dialog.CloseDialog(dialog.ModelShortlistID)
+		if cmd := m.openModelsDialogForProvider(string(msg.Provider.ID)); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.ActionOnboardingDone:
+		m.dialog.CloseDialog(dialog.OnboardingDemoID)
+		if cmd := m.finishOnboarding(msg.RunDemo); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.ActionSelectModel:
 		if cmd := m.handleSelectModel(msg); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -2991,6 +3012,23 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		isOnboarding = m.state == uiOnboarding
 	)
 
+	if isOnboarding && msg.Model.Model == "" {
+		// A credential flow hands back an empty model: setup has no model
+		// yet, so advance to the curated shortlist rather than the full
+		// catalog.
+		m.onboarding.step = dialog.OnboardingStepModel
+		m.onboarding.provider = msg.Provider
+		m.dialog.CloseDialog(dialog.ProviderSelectID)
+		m.dialog.CloseDialog(dialog.AuthMethodID)
+		m.dialog.CloseDialog(dialog.APIKeyInputID)
+		m.dialog.CloseDialog(dialog.OAuthID)
+		m.dialog.CloseDialog(dialog.ModelsID)
+		if cmd := m.openModelShortlist(msg.Provider); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		return tea.Batch(cmds...)
+	}
+
 	// For Hyper, if the stored OAuth token is expired, try a silent
 	// refresh before deciding whether the provider is configured. Keeps
 	// users from hitting a 401 on their first message after the
@@ -3102,7 +3140,8 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 	m.dialog.CloseDialog(dialog.ModelsID)
 
 	if isOnboarding {
-		m.setState(uiLanding, uiFocusEditor)
+		// Bring the agent up now so the first prompt has a model, but stay
+		// in onboarding until the usage screen is acknowledged.
 		m.com.Config().SetupAgents()
 		if err := m.com.Workspace.InitCoderAgent(context.TODO()); err != nil {
 			cmds = append(cmds, util.ReportError(err))
@@ -3112,6 +3151,11 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		// the TTL backstop.
 		m.invalidateBusyCaches()
 		if cmd := m.dispatchBusyRefresh(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		m.onboarding.step = dialog.OnboardingStepDemo
+		m.dialog.CloseDialog(dialog.ModelShortlistID)
+		if cmd := m.openOnboardingDemo(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	} else if m.com.IsHyper() {
@@ -3125,15 +3169,13 @@ func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.Se
 	var (
 		dlg dialog.Dialog
 		cmd tea.Cmd
-
-		isOnboarding = m.state == uiOnboarding
 	)
 
 	switch provider.ID {
 	case "hyper":
-		dlg, cmd = dialog.NewOAuthHyper(m.com, isOnboarding, provider, model, modelType)
+		dlg, cmd = dialog.NewOAuthHyper(m.com, provider, model, modelType)
 	case catwalk.InferenceProviderCopilot:
-		dlg, cmd = dialog.NewOAuthCopilot(m.com, isOnboarding, provider, model, modelType)
+		dlg, cmd = dialog.NewOAuthCopilot(m.com, provider, model, modelType)
 	case catwalk.InferenceProviderOpenAI:
 		providerCfg, _ := m.com.Config().Providers.Get(string(provider.ID))
 		hasAPIKey := providerCfg.HasAPIKey(m.com.Workspace.Resolver())
@@ -3141,13 +3183,13 @@ func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.Se
 		case model.Model == "" || providerCfg.OAuthToken != nil:
 			// The sign-in placeholder, or a re-authentication while the
 			// ChatGPT login is the credential in force.
-			dlg, cmd = dialog.NewOAuthOpenAI(m.com, isOnboarding, provider, model, modelType)
+			dlg, cmd = dialog.NewOAuthOpenAI(m.com, provider, model, modelType)
 		case !hasAPIKey:
 			// No credential at all: let the user pick the method.
-			dlg = dialog.NewAuthMethod(m.com, isOnboarding, provider, model, modelType)
+			dlg = dialog.NewAuthMethod(m.com, provider, model, modelType)
 		default:
 			// An API key is the credential in force: edit it.
-			dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, model, modelType)
+			dlg, cmd = dialog.NewAPIKeyInput(m.com, provider, model, modelType)
 		}
 	case catwalk.InferenceProviderXAI:
 		providerCfg, _ := m.com.Config().Providers.Get(string(provider.ID))
@@ -3156,16 +3198,16 @@ func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.Se
 		case model.Model == "" || providerCfg.OAuthToken != nil:
 			// The sign-in flow's hand-off, or a re-authentication while
 			// the Grok login is the credential in force.
-			dlg, cmd = dialog.NewOAuthGrok(m.com, isOnboarding, provider, model, modelType)
+			dlg, cmd = dialog.NewOAuthGrok(m.com, provider, model, modelType)
 		case !hasAPIKey:
 			// No credential at all: let the user pick the method.
-			dlg = dialog.NewAuthMethod(m.com, isOnboarding, provider, model, modelType)
+			dlg = dialog.NewAuthMethod(m.com, provider, model, modelType)
 		default:
 			// An API key is the credential in force: edit it.
-			dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, model, modelType)
+			dlg, cmd = dialog.NewAPIKeyInput(m.com, provider, model, modelType)
 		}
 	default:
-		dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, model, modelType)
+		dlg, cmd = dialog.NewAPIKeyInput(m.com, provider, model, modelType)
 	}
 
 	if m.dialog.ContainsDialog(dlg.ID()) {
@@ -3183,8 +3225,6 @@ func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.Se
 // handleSelectModel applies it only when the signed-in catalog still
 // offers it and errors otherwise.
 func (m *UI) openAuthenticationDialogWithMethod(provider catwalk.Provider, model config.SelectedModel, modelType config.SelectedModelType, useOAuth bool) tea.Cmd {
-	isOnboarding := m.state == uiOnboarding
-
 	var (
 		dlg dialog.Dialog
 		cmd tea.Cmd
@@ -3192,12 +3232,12 @@ func (m *UI) openAuthenticationDialogWithMethod(provider catwalk.Provider, model
 	if useOAuth {
 		switch provider.ID {
 		case catwalk.InferenceProviderOpenAI:
-			dlg, cmd = dialog.NewOAuthOpenAI(m.com, isOnboarding, provider, model, modelType)
+			dlg, cmd = dialog.NewOAuthOpenAI(m.com, provider, model, modelType)
 		case catwalk.InferenceProviderXAI:
-			dlg, cmd = dialog.NewOAuthGrok(m.com, isOnboarding, provider, model, modelType)
+			dlg, cmd = dialog.NewOAuthGrok(m.com, provider, model, modelType)
 		}
 	} else {
-		dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, model, modelType)
+		dlg, cmd = dialog.NewAPIKeyInput(m.com, provider, model, modelType)
 	}
 
 	if m.dialog.ContainsDialog(dlg.ID()) {
@@ -5512,6 +5552,18 @@ func (m *UI) sendMessageInternal(content string, hidden bool, attachments ...mes
 	m.turnOutcome = ""
 
 	var cmds []tea.Cmd
+
+	// The landing cheat sheet has served its purpose once a prompt is sent.
+	if m.showLandingTips() {
+		m.tipsDismissed = true
+		cmds = append(cmds, func() tea.Msg {
+			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.tui.tips", false); err != nil {
+				slog.Warn("Failed to save the tips preference", "error", err)
+			}
+			return nil
+		})
+	}
+
 	loadCmd, err := m.ensureSession()
 	if err != nil {
 		return util.ReportError(err)
@@ -5846,14 +5898,30 @@ func (m *UI) openModelsDialog() tea.Cmd {
 		return nil
 	}
 
-	isOnboarding := m.state == uiOnboarding
-	modelsDialog, err := dialog.NewModels(m.com, isOnboarding)
+	modelsDialog, err := dialog.NewModels(m.com)
 	if err != nil {
 		return util.ReportError(err)
 	}
 
 	m.dialog.OpenDialog(modelsDialog)
 
+	return nil
+}
+
+// openModelsDialogForProvider opens the full model list limited to a single
+// provider. Onboarding uses it from the shortlist's "browse all" row.
+func (m *UI) openModelsDialogForProvider(providerID string) tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.ModelsID) {
+		m.dialog.BringToFront(dialog.ModelsID)
+		return nil
+	}
+
+	modelsDialog, err := dialog.NewModelsForProvider(m.com, providerID)
+	if err != nil {
+		return util.ReportError(err)
+	}
+
+	m.dialog.OpenDialogWithGrace(modelsDialog)
 	return nil
 }
 

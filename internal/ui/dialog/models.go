@@ -62,9 +62,8 @@ func (mt ModelType) Placeholder() string {
 }
 
 const (
-	onboardingModelInputPlaceholder = "Find your fave"
-	largeModelInputPlaceholder      = "Choose a model for large, complex tasks"
-	smallModelInputPlaceholder      = "Choose a model for small, simple tasks"
+	largeModelInputPlaceholder = "Choose a model for large, complex tasks"
+	smallModelInputPlaceholder = "Choose a model for small, simple tasks"
 )
 
 // ModelsID is the identifier for the model selection dialog.
@@ -74,8 +73,11 @@ const defaultModelsDialogMaxWidth = 73
 
 // Models represents a model selection dialog.
 type Models struct {
-	com          *common.Common
-	isOnboarding bool
+	com *common.Common
+	// filterProvider, when set, limits the catalog to one provider. The
+	// onboarding "browse all" row uses it to open the full list scoped to
+	// the provider the user already picked.
+	filterProvider string
 
 	modelType ModelType
 	providers []catwalk.Provider
@@ -97,11 +99,10 @@ type Models struct {
 var _ Dialog = (*Models)(nil)
 
 // NewModels creates a new Models dialog.
-func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
+func NewModels(com *common.Common) (*Models, error) {
 	t := com.Styles
 	m := &Models{}
 	m.com = com
-	m.isOnboarding = isOnboarding
 
 	help := help.New()
 	help.Styles = t.DialogHelpStyles()
@@ -113,7 +114,7 @@ func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
 
 	m.input = textinput.New()
 	m.input.SetVirtualCursor(false)
-	m.input.Placeholder = onboardingModelInputPlaceholder
+	m.input.Placeholder = largeModelInputPlaceholder
 	m.input.SetStyles(com.Styles.TextInput)
 	m.input.Focus()
 
@@ -158,6 +159,21 @@ func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
 		return nil, fmt.Errorf("failed to set provider items: %w", err)
 	}
 
+	return m, nil
+}
+
+// NewModelsForProvider creates a models dialog limited to a single provider.
+// The onboarding "browse all" row uses it so the full catalog opens scoped to
+// the provider the user already chose.
+func NewModelsForProvider(com *common.Common, providerID string) (*Models, error) {
+	m, err := NewModels(com)
+	if err != nil {
+		return nil, err
+	}
+	m.filterProvider = providerID
+	if err := m.setProviderItems(); err != nil {
+		return nil, fmt.Errorf("failed to set provider items: %w", err)
+	}
 	return m, nil
 }
 
@@ -209,9 +225,6 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 				ReAuthenticate: isEdit,
 			}
 		case key.Matches(msg, m.keyMap.Tab):
-			if m.isOnboarding {
-				break
-			}
 			if m.modelType == ModelTypeLarge {
 				m.modelType = ModelTypeSmall
 			} else {
@@ -276,11 +289,6 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	rc.Title = "Switch Model"
 	rc.TitleInfo = m.modelTypeRadioView()
 
-	if m.isOnboarding {
-		titleText := t.Dialog.PrimaryText.Render("To start, let's choose a provider and model.")
-		rc.AddPart(titleText)
-	}
-
 	inputView := t.Dialog.InputPrompt.Render(m.input.View())
 	rc.AddPart(inputView)
 
@@ -291,29 +299,12 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	rc.Help = renderDialogHelp(t, &m.help, m, innerWidth)
 
 	cur := m.Cursor()
-
-	if m.isOnboarding {
-		rc.Title = ""
-		rc.TitleInfo = ""
-		rc.IsOnboarding = true
-		view := rc.Render()
-		cur = adjustOnboardingInputCursor(t, cur)
-		DrawOnboardingCursor(scr, area, view, cur)
-	} else {
-		view := rc.Render()
-		DrawCenterCursor(scr, area, view, cur)
-	}
+	DrawCenterCursor(scr, area, rc.Render(), cur)
 	return cur
 }
 
 // ShortHelp returns the short help view.
 func (m *Models) ShortHelp() []key.Binding {
-	if m.isOnboarding {
-		return []key.Binding{
-			m.keyMap.UpDown,
-			m.keyMap.Select,
-		}
-	}
 	h := []key.Binding{
 		m.keyMap.UpDown,
 		m.keyMap.Tab,
@@ -377,6 +368,9 @@ func (m *Models) setProviderItems() error {
 		if p.Disable {
 			continue
 		}
+		if m.filterProvider != "" && id != m.filterProvider {
+			continue
+		}
 
 		// Check if this provider is not in the known providers list
 		if !slices.ContainsFunc(knownProviders, containsProviderFunc(id)) ||
@@ -407,6 +401,9 @@ func (m *Models) setProviderItems() error {
 	// Providers already has Hyper at the front of the list.
 	for _, provider := range m.providers {
 		providerID := string(provider.ID)
+		if m.filterProvider != "" && providerID != m.filterProvider {
+			continue
+		}
 		if addedProviders[providerID] {
 			continue
 		}
@@ -516,9 +513,7 @@ func (m *Models) setProviderItems() error {
 	}
 
 	// Update placeholder based on model type
-	if !m.isOnboarding {
-		m.input.Placeholder = m.modelType.Placeholder()
-	}
+	m.input.Placeholder = m.modelType.Placeholder()
 
 	return nil
 }

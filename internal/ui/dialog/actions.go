@@ -45,6 +45,25 @@ type ActionSelectModel struct {
 	ReAuthenticate bool
 }
 
+// ActionSelectProvider is sent when a provider is picked on the first-run
+// provider selector. The caller starts the credential flow for it.
+type ActionSelectProvider struct {
+	Provider catwalk.Provider
+}
+
+// ActionBrowseModels is sent when the user asks for the full model catalog
+// instead of the curated shortlist during onboarding.
+type ActionBrowseModels struct {
+	Provider catwalk.Provider
+}
+
+// ActionOnboardingDone is sent when the final onboarding screen is
+// acknowledged. RunDemo indicates the user asked for the first turn to be a
+// live tour of the project.
+type ActionOnboardingDone struct {
+	RunDemo bool
+}
+
 // Messages for commands
 type (
 	ActionNewSession              struct{}

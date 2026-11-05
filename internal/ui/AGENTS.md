@@ -41,6 +41,11 @@ The `UI` struct is the top-level Bubble Tea model. Key fields:
 - `layout uiLayout` — computed layout rectangles
 - `state uiState` — `uiOnboarding | uiInitialize | uiLanding | uiChat`
 - `focus uiFocusState` — `uiFocusNone | uiFocusEditor | uiFocusMain`
+- `onboarding` — setup step, chosen provider, and the initialize prompt
+  selection. Setup runs provider → model → a live first-turn demo in
+  `dialog/provider_select.go`, `dialog/model_shortlist.go`, and
+  `dialog/onboarding_demo.go`; the demo also initializes the project when it
+  needs it. `model/onboarding_flow.go` owns that wiring.
 - `chat *Chat` — wraps `list.List` for the message view
 - `textarea textarea.Model` — the input editor
 - `dialog *dialog.Overlay` — stacked dialog system

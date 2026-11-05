@@ -9,8 +9,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// renderTool renders a finished bash call with the given result as plain text.
-func renderTool(t *testing.T, result message.ToolResult, canceled bool) string {
+// renderCancelledBash renders a finished bash call with the given result as
+// plain text.
+func renderCancelledBash(t *testing.T, result message.ToolResult, canceled bool) string {
 	t.Helper()
 	sty := styles.CharmtonePantera()
 	result.ToolCallID = "c1"
@@ -27,7 +28,7 @@ func TestCancelledTurnRendersToolErrorAsCancelled(t *testing.T) {
 	t.Parallel()
 
 	for _, content := range []string{"tool call was interrupted and did not produce a result", "context canceled"} {
-		out := renderTool(t, message.ToolResult{Content: content, IsError: true}, true)
+		out := renderCancelledBash(t, message.ToolResult{Content: content, IsError: true}, true)
 		require.Contains(t, out, "Canceled")
 		require.NotContains(t, out, content)
 	}
@@ -37,7 +38,7 @@ func TestCancelledTurnRendersToolErrorAsCancelled(t *testing.T) {
 func TestCancelledTurnKeepsSuccessfulToolOutput(t *testing.T) {
 	t.Parallel()
 
-	out := renderTool(t, message.ToolResult{Content: "main.go"}, true)
+	out := renderCancelledBash(t, message.ToolResult{Content: "main.go"}, true)
 	require.Contains(t, out, "main.go")
 	require.NotContains(t, out, "Canceled")
 }
@@ -46,5 +47,5 @@ func TestCancelledTurnKeepsSuccessfulToolOutput(t *testing.T) {
 func TestToolErrorStillRendersAsError(t *testing.T) {
 	t.Parallel()
 
-	require.Contains(t, renderTool(t, message.ToolResult{Content: "no such file", IsError: true}, false), "no such file")
+	require.Contains(t, renderCancelledBash(t, message.ToolResult{Content: "no such file", IsError: true}, false), "no such file")
 }

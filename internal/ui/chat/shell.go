@@ -266,6 +266,9 @@ func (s *ShellItem) RawRender(width int) string {
 		}
 	}
 
+	// Normalize CRLF before stripping cursor controls so a bare CR still
+	// resets its line when followed by an erase sequence.
+	raw = strings.ReplaceAll(raw, "\r\n", "\n")
 	raw = common.StripCursorControl(raw)
 	output := common.RemapANSI16(raw, s.sty.ANSI)
 	lines := strings.Split(output, "\n")
@@ -331,7 +334,8 @@ func firstLines(s string, count int) string {
 		}
 		end += next
 		if i == count-1 {
-			return s[:end]
+			// Remove both bytes if the delimiter is CRLF.
+			return strings.TrimSuffix(s[:end], "\r")
 		}
 		end++
 	}

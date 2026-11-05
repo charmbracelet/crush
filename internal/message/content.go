@@ -67,12 +67,23 @@ type ReasoningContent struct {
 func (tc ReasoningContent) String() string {
 	return tc.Thinking
 }
+
+// HasReplayData reports whether the reasoning must be sent back to the
+// provider. Providers may return signed reasoning with no visible text,
+// and dropping it changes the prefix their signatures are bound to.
+func (tc ReasoningContent) HasReplayData() bool {
+	return tc.Thinking != "" || tc.Signature != "" || tc.ThoughtSignature != "" || tc.ResponsesData != nil
+}
 func (ReasoningContent) isPart() {}
 
 type TextContent struct {
 	Text string `json:"text"`
 	// Hidden marks generated user continuations that remain in model history.
 	Hidden bool `json:"hidden,omitempty"`
+	// Context is text sent to the model ahead of the prompt, such as host
+	// context and user notes. It is stored so the replayed history matches
+	// what the model saw, which signed thinking blocks depend on.
+	Context string `json:"context,omitempty"`
 }
 
 func (tc TextContent) String() string {
@@ -632,7 +643,7 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 				Content:  content.Data,
 			})
 		}
-		text = PromptWithTextAttachments(text, textAttachments)
+		text = m.Content().Context + PromptWithTextAttachments(text, textAttachments)
 		// Include subagent reports as context for the agent. The part
 		// carries the label and body separately so the UI can render
 		// them; the model sees them as one tagged block.
@@ -675,7 +686,7 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 		var parts []fantasy.MessagePart
 		text := strings.TrimSpace(m.Content().Text)
 		reasoning := m.ReasoningContent()
-		if reasoning.Thinking != "" {
+		if reasoning.HasReplayData() {
 			reasoningPart := fantasy.ReasoningPart{Text: reasoning.Thinking, ProviderOptions: fantasy.ProviderOptions{}}
 			if reasoning.Signature != "" {
 				reasoningPart.ProviderOptions[anthropic.Name] = &anthropic.ReasoningOptionMetadata{

@@ -173,3 +173,24 @@ func TestResetStreamedContentEmpty(t *testing.T) {
 	msg.ResetStreamedContent()
 	require.Empty(t, msg.Parts)
 }
+
+func TestToAIMessage_SignedReasoningWithoutText(t *testing.T) {
+	t.Parallel()
+
+	msg := &Message{
+		Role: Assistant,
+		Parts: []ContentPart{
+			ReasoningContent{Signature: "sig"},
+			TextContent{Text: "hello"},
+		},
+	}
+
+	messages := msg.ToAIMessage()
+	require.Len(t, messages, 1)
+	require.Len(t, messages[0].Content, 2)
+
+	reasoning, ok := messages[0].Content[0].(fantasy.ReasoningPart)
+	require.True(t, ok)
+	require.Empty(t, reasoning.Text)
+	require.NotNil(t, reasoning.ProviderOptions)
+}

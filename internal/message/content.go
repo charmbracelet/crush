@@ -66,6 +66,13 @@ type ReasoningContent struct {
 func (tc ReasoningContent) String() string {
 	return tc.Thinking
 }
+
+// HasReplayData reports whether the reasoning must be sent back to the
+// provider. Providers may return signed reasoning with no visible text,
+// and dropping it changes the prefix their signatures are bound to.
+func (tc ReasoningContent) HasReplayData() bool {
+	return tc.Thinking != "" || tc.Signature != "" || tc.ThoughtSignature != "" || tc.ResponsesData != nil
+}
 func (ReasoningContent) isPart() {}
 
 type TextContent struct {
@@ -600,7 +607,7 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 		var parts []fantasy.MessagePart
 		text := strings.TrimSpace(m.Content().Text)
 		reasoning := m.ReasoningContent()
-		if reasoning.Thinking != "" {
+		if reasoning.HasReplayData() {
 			reasoningPart := fantasy.ReasoningPart{Text: reasoning.Thinking, ProviderOptions: fantasy.ProviderOptions{}}
 			if reasoning.Signature != "" {
 				reasoningPart.ProviderOptions[anthropic.Name] = &anthropic.ReasoningOptionMetadata{

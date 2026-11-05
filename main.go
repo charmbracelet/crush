@@ -13,7 +13,6 @@ import (
 )
 
 func main() {
-	// Send browser output directly to the null device to keep it off the TUI.
 	if os.Getenv("CRUSH_PROFILE") != "" {
 		go func() {
 			slog.Info("Serving pprof at localhost:6060")

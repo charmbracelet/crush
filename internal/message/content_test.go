@@ -194,3 +194,20 @@ func TestToAIMessage_SignedReasoningWithoutText(t *testing.T) {
 	require.Empty(t, reasoning.Text)
 	require.NotNil(t, reasoning.ProviderOptions)
 }
+
+func TestToAIMessage_UserContextReplayed(t *testing.T) {
+	t.Parallel()
+
+	msg := &Message{
+		Role: User,
+		Parts: []ContentPart{
+			TextContent{Text: "  continue  ", Context: "<host_context>x</host_context>\n\n"},
+		},
+	}
+
+	messages := msg.ToAIMessage()
+	require.Len(t, messages, 1)
+	part, ok := messages[0].Content[0].(fantasy.TextPart)
+	require.True(t, ok)
+	require.Equal(t, "<host_context>x</host_context>\n\ncontinue", part.Text)
+}

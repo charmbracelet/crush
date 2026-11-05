@@ -79,6 +79,10 @@ type TextContent struct {
 	Text string `json:"text"`
 	// Hidden marks generated user continuations that remain in model history.
 	Hidden bool `json:"hidden,omitempty"`
+	// Context is text sent to the model ahead of the prompt, such as host
+	// context and user notes. It is stored so the replayed history matches
+	// what the model saw, which signed thinking blocks depend on.
+	Context string `json:"context,omitempty"`
 }
 
 func (tc TextContent) String() string {
@@ -575,7 +579,7 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 				Content:  content.Data,
 			})
 		}
-		text = PromptWithTextAttachments(text, textAttachments)
+		text = m.Content().Context + PromptWithTextAttachments(text, textAttachments)
 		// Include bang-mode shell commands as context for the agent.
 		for _, sc := range m.ShellCommands() {
 			shellText := fmt.Sprintf("$ %s\n%s\n(exit code %d)", sc.Command, ansi.Strip(sc.Output), sc.ExitCode)

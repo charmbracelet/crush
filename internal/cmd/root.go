@@ -114,6 +114,14 @@ crush --session {session-id}
 crush --continue
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Bail out before loading config or reporting anything when there is
+		// no terminal to draw on, e.g. package manager validators that run
+		// the binary with redirected streams and no console.
+		if !hasTerminal(term.IsTerminal, os.Stdin.Fd(), os.Stdout.Fd()) {
+			fmt.Fprintln(cmd.ErrOrStderr(), "Crush needs an interactive terminal. Use `crush run` for non-interactive use.")
+			return nil
+		}
+
 		sessionID, _ := cmd.Flags().GetString("session")
 		continueLast, _ := cmd.Flags().GetBool("continue")
 
@@ -199,6 +207,13 @@ func printSessionResume(model *ui.UI, banner config.ExitBanner) {
 // copied from cobra:
 const defaultVersionTemplate = `{{with .DisplayName}}{{printf "%s " .}}{{end}}{{printf "version %s" .Version}}
 `
+
+// hasTerminal reports whether the TUI has a terminal to attach to. Either
+// stdin or stdout being a terminal is enough: when only stdout is (as in
+// `echo foo | crush`), Bubble Tea reopens the controlling TTY for input.
+func hasTerminal(isTerminal func(uintptr) bool, stdin, stdout uintptr) bool {
+	return isTerminal(stdin) || isTerminal(stdout)
+}
 
 func Execute() {
 	// FIXME: config.Load uses slog internally during provider resolution,

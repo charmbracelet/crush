@@ -226,6 +226,12 @@ type Styles struct {
 	// Background
 	Background color.Color
 
+	// Exit banner
+	ExitBanner struct {
+		Text  lipgloss.Style // Parting message, session title, and resume command
+		Label lipgloss.Style // Session and Continue labels
+	}
+
 	// Logo
 	Logo struct {
 		FieldColor         color.Color

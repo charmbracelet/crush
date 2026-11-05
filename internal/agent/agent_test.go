@@ -768,7 +768,7 @@ func TestCreateUserMessage_RetainsAllAttachments(t *testing.T) {
 		},
 	}
 
-	msg, err := agent.createUserMessage(ctx, call)
+	msg, err := agent.createUserMessage(ctx, call, "")
 	require.NoError(t, err)
 
 	// All attachments should be present as BinaryContent parts.

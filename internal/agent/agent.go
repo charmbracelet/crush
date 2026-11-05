@@ -536,7 +536,7 @@ func (a *sessionAgent) settleDroppedCalls(drops []SessionAgentCall) {
 	defer cancel()
 	for _, d := range drops {
 		if d.Report != nil {
-			if _, err := a.createUserMessage(ctx, d); err != nil {
+			if _, err := a.createUserMessage(ctx, d, ""); err != nil {
 				slog.Error("Failed to record a dropped subagent report", "session_id", d.SessionID, "error", err)
 			}
 		}
@@ -603,7 +603,7 @@ func (a *sessionAgent) persistCanceledTurn(ctx context.Context, call SessionAgen
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	if !userMsgCreated {
-		if _, err := a.createUserMessage(writeCtx, call); err != nil {
+		if _, err := a.createUserMessage(writeCtx, call, ""); err != nil {
 			return err
 		}
 	}
@@ -933,8 +933,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		}()
 	}
 
-	// Add the user message to the session.
-	_, err = a.createUserMessage(ctx, call)
+	// Add the user message to the session. The context sent ahead of the
+	// prompt is stored with it so later requests replay the same text.
+	modelContext := hostContextPrompt(call.HostContext) + notesPrompt(a.takeNotes(call.SessionID))
+	_, err = a.createUserMessage(ctx, call, modelContext)
 	if err != nil {
 		return nil, err
 	}
@@ -970,7 +972,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		maxOutputTokens = &call.MaxOutputTokens
 	}
 	result, err = agent.Stream(genCtx, fantasy.AgentStreamCall{
-		Prompt:           hostContextPrompt(call.HostContext) + notesPrompt(a.takeNotes(call.SessionID)) + message.PromptWithTextAttachments(call.Prompt, call.Attachments),
+		Prompt:           modelContext + message.PromptWithTextAttachments(strings.TrimSpace(call.Prompt), call.Attachments),
 		Files:            files,
 		Messages:         history,
 		Headers:          sessionHeaders(call.SessionID),
@@ -1009,7 +1011,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			fold, canceled := a.drainQueueForStep(call.SessionID)
 			a.settleDroppedCalls(canceled)
 			for _, queued := range fold {
-				userMessage, createErr := a.createUserMessage(callContext, queued)
+				userMessage, createErr := a.createUserMessage(callContext, queued, "")
 				if createErr != nil {
 					return callContext, prepared, createErr
 				}
@@ -1682,14 +1684,14 @@ func sessionHeaders(sessionID string) map[string]string {
 	}
 }
 
-func (a *sessionAgent) createUserMessage(ctx context.Context, call SessionAgentCall) (message.Message, error) {
+func (a *sessionAgent) createUserMessage(ctx context.Context, call SessionAgentCall, modelContext string) (message.Message, error) {
 	if call.Report != nil {
 		return a.messages.Create(ctx, call.SessionID, message.CreateMessageParams{
 			Role:  message.User,
 			Parts: []message.ContentPart{*call.Report},
 		})
 	}
-	parts := []message.ContentPart{message.TextContent{Text: call.Prompt, Hidden: call.HiddenUserMessage}}
+	parts := []message.ContentPart{message.TextContent{Text: call.Prompt, Hidden: call.HiddenUserMessage, Context: modelContext}}
 	var attachmentParts []message.ContentPart
 	for _, attachment := range call.Attachments {
 		attachmentParts = append(attachmentParts, message.BinaryContent{Path: attachment.FilePath, MIMEType: attachment.MimeType, Data: attachment.Content})

@@ -41,7 +41,7 @@ func TestReportCallWritesTheReport(t *testing.T) {
 	sess, err := env.sessions.Create(t.Context(), "parent")
 	require.NoError(t, err)
 	report := message.SubAgentReport{Label: "akiko-bugs", Output: "all good"}
-	got, err := a.createUserMessage(t.Context(), SessionAgentCall{SessionID: sess.ID, Report: &report})
+	got, err := a.createUserMessage(t.Context(), SessionAgentCall{SessionID: sess.ID, Report: &report}, "")
 	require.NoError(t, err)
 	require.Equal(t, []message.SubAgentReport{report}, got.SubAgentReports())
 }

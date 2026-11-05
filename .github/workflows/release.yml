@@ -17,7 +17,7 @@ concurrency:
 jobs:
   release:
     if: ${{ !contains(github.repository, '-internal') }}
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: blacksmith-16vcpu-ubuntu-2404
     permissions:
       contents: write
       id-token: write
@@ -32,10 +32,19 @@ jobs:
           git config --global url."https://${{ secrets.PERSONAL_ACCESS_TOKEN }}@github.com/charmbracelet".insteadOf "https://github.com/charmbracelet"
           git config --global url."https://${{ secrets.PERSONAL_ACCESS_TOKEN }}@github.com/charmcli".insteadOf "https://github.com/charmcli"
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        id: go
         with:
           go-version: "1.27.1"
-          cache: true
+          cache: false
           check-latest: true
+      # Warm build cache from the snapshot workflow on main.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: goreleaser-${{ runner.os }}-go${{ steps.go.outputs.go-version }}-${{ github.sha }}
+          restore-keys: goreleaser-${{ runner.os }}-go${{ steps.go.outputs.go-version }}-
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
       - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
         with:

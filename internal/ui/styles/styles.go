@@ -48,6 +48,34 @@ const (
 	// as flicker).
 	CodespanPadding string = "\u00a0\ufe0e"
 
+	// The markers below are copy sentinels for the remaining markdown
+	// syntax markers, following the same principle as CodespanPadding:
+	// each is a single one-cell grapheme that renders as a blank cell
+	// where the raw syntax would sit, and list.HighlightContent maps it
+	// back to that raw syntax when a selection is copied. Like
+	// CodespanPadding they are tagged with U+FE0E so real message text
+	// can never collide with them (see the flicker note above for why
+	// the tag must never be U+FE0F).
+	//
+	// The base rune must not be a Unicode whitespace character: the
+	// word wrap in glamour (ansi.Wordwrap) rebuilds whitespace runs
+	// rune by rune and drops the variation selector from them, which
+	// would leave a bare, unguarded blank in the output. The emphasis
+	// and strong bases are blank glyphs that are not whitespace at
+	// all: a halfwidth Hangul filler and a blank braille pattern, both
+	// non-breaking, so word wrap also cannot tear a marker away from
+	// its word. The strikethrough, fence, and task sentinels use spaces
+	// (U+2005, U+2007, U+2004) because they sit in positions where wrap
+	// cannot split them from what they mark; list.HighlightContent
+	// therefore matches them with or without the selector, which is
+	// safe because those code points are essentially never found in
+	// real text.
+	SentinelEmph   string = "\uffa0\ufe0e"
+	SentinelStrong string = "\u2800\ufe0e"
+	SentinelStrike string = "\u2005\ufe0e"
+	SentinelFence  string = "\u2007\ufe0e"
+	SentinelTask   string = "\u2004\ufe0e"
+
 	ToolPending string = "●"
 	ToolSuccess string = "✓"
 	ToolError   string = "×"

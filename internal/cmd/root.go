@@ -48,6 +48,7 @@ import (
 	"github.com/charmbracelet/x/exp/charmtone"
 	xstrings "github.com/charmbracelet/x/exp/strings"
 	"github.com/charmbracelet/x/term"
+	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
 )
 
@@ -137,6 +138,9 @@ crush --continue
 
 		inputFilter := ui.NewFilter()
 		var env uv.Environ = os.Environ()
+		// Don't leak the errors to the TUI
+		browser.Stderr = nil
+		browser.Stdout = nil
 		program := tea.NewProgram(
 			model,
 			tea.WithEnvironment(env),

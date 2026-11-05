@@ -223,3 +223,11 @@ func TestToAIMessage_UserContextReplayed(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "<host_context>x</host_context>\n\ncontinue", part.Text)
 }
+
+func TestAppendContentKeepsContext(t *testing.T) {
+	t.Parallel()
+
+	msg := &Message{Parts: []ContentPart{TextContent{Text: "a", Hidden: true, Context: "ctx"}}}
+	msg.AppendContent("b")
+	require.Equal(t, TextContent{Text: "ab", Hidden: true, Context: "ctx"}, msg.Content())
+}

@@ -383,7 +383,8 @@ func (m *Message) AppendContent(delta string) {
 	found := false
 	for i, part := range m.Parts {
 		if c, ok := part.(TextContent); ok {
-			m.Parts[i] = TextContent{Text: c.Text + delta, Hidden: c.Hidden}
+			c.Text += delta
+			m.Parts[i] = c
 			found = true
 		}
 	}

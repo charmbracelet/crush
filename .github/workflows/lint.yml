@@ -28,3 +28,7 @@ jobs:
         with:
           args: --config=.golangci.yml --timeout=10m ./...
           version: v2.13.1
+          # Build from source so the linter matches the Go version in go.mod.
+          # Prebuilt binaries made with an older toolchain cannot read the
+          # standard library's export data.
+          install-mode: goinstall

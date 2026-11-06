@@ -849,3 +849,71 @@ func TestCoordinatorSetMainAgent(t *testing.T) {
 		assert.ErrorIs(t, err, errMainAgentNotFound)
 	})
 }
+
+func TestRunSubAgentCallOptions(t *testing.T) {
+	const providerID = "test-provider"
+	providerCfg := config.ProviderConfig{ID: providerID}
+
+	run := func(t *testing.T, model Model) SessionAgentCall {
+		t.Helper()
+		env := testEnv(t)
+		coord := newTestCoordinator(t, env, providerID, providerCfg)
+		parentSession, err := env.sessions.Create(t.Context(), "Parent")
+		require.NoError(t, err)
+
+		var got SessionAgentCall
+		agent := newMockAgent(providerID, 4096, func(_ context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
+			got = call
+			return agentResultWithText("done"), nil
+		})
+		agent.model = model
+
+		_, err = coord.runSubAgent(t.Context(), subAgentParams{
+			Agent:          agent,
+			SessionID:      parentSession.ID,
+			AgentMessageID: "msg-1",
+			ToolCallID:     "call-1",
+			Prompt:         "do something",
+			SessionTitle:   "Test Session",
+		})
+		require.NoError(t, err)
+		return got
+	}
+
+	t.Run("falls back to the catwalk model defaults like the main agent", func(t *testing.T) {
+		call := run(t, Model{
+			CatwalkCfg: catwalk.Model{
+				DefaultMaxTokens: 4096,
+				Options: catwalk.ModelOptions{
+					Temperature:      ptr(0.6),
+					TopP:             ptr(0.9),
+					FrequencyPenalty: ptr(0.1),
+					PresencePenalty:  ptr(0.2),
+				},
+			},
+			ModelCfg: config.SelectedModel{Provider: providerID},
+		})
+
+		require.NotNil(t, call.Temperature)
+		assert.InDelta(t, 0.6, *call.Temperature, 1e-9)
+		require.NotNil(t, call.TopP)
+		assert.InDelta(t, 0.9, *call.TopP, 1e-9)
+		require.NotNil(t, call.FrequencyPenalty)
+		assert.InDelta(t, 0.1, *call.FrequencyPenalty, 1e-9)
+		require.NotNil(t, call.PresencePenalty)
+		assert.InDelta(t, 0.2, *call.PresencePenalty, 1e-9)
+	})
+
+	t.Run("explicit model config wins over the catwalk defaults", func(t *testing.T) {
+		call := run(t, Model{
+			CatwalkCfg: catwalk.Model{
+				DefaultMaxTokens: 4096,
+				Options:          catwalk.ModelOptions{Temperature: ptr(0.6)},
+			},
+			ModelCfg: config.SelectedModel{Provider: providerID, Temperature: ptr(0.2)},
+		})
+
+		require.NotNil(t, call.Temperature)
+		assert.InDelta(t, 0.2, *call.Temperature, 1e-9)
+	})
+}

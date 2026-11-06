@@ -143,3 +143,27 @@ func TestEstimatedUsageStateCanBeClearedByExplicitSave(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, refetched.EstimatedUsage)
 }
+
+func TestGetLastSkipsSubAgentSessions(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Cleanup(func() {
+		require.NoError(t, db.Release(dataDir))
+		db.ResetPool()
+	})
+
+	conn, err := db.Connect(t.Context(), dataDir)
+	require.NoError(t, err)
+
+	sessions := NewService(db.New(conn), conn)
+
+	// A sub-agent session is newer than its parent when the process is
+	// killed during a sub-agent run.
+	_, err = conn.ExecContext(t.Context(), `INSERT INTO sessions (id, parent_session_id, title, updated_at, created_at) VALUES
+		('parent', NULL, 'Parent', 100, 100),
+		('msg$$call', 'parent', 'Sub-agent', 200, 150)`)
+	require.NoError(t, err)
+
+	last, err := sessions.GetLast(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, "parent", last.ID)
+}

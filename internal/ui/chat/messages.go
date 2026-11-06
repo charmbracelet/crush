@@ -381,6 +381,25 @@ func (a *AssistantInfoItem) Render(width int) string {
 	return out
 }
 
+// modelDisplayName resolves the model name shown in the assistant info
+// footer. It prefers the current config entry (so a renamed model shows
+// its fresh name), then the name persisted with the message (so a
+// renamed or removed model still shows a friendly name for old turns),
+// then the model ID, which is always identifiable. "Unknown Model" is
+// only used when the message carries no model at all.
+func (a *AssistantInfoItem) modelDisplayName() string {
+	if model := a.cfg.GetModel(a.message.Provider, a.message.Model); model != nil && model.Name != "" {
+		return model.Name
+	}
+	if a.message.ModelName != "" {
+		return a.message.ModelName
+	}
+	if a.message.Model != "" {
+		return a.message.Model
+	}
+	return "Unknown Model"
+}
+
 func (a *AssistantInfoItem) renderContent(width int) string {
 	finishData := a.message.FinishPart()
 	if finishData == nil {
@@ -397,10 +416,7 @@ func (a *AssistantInfoItem) renderContent(width int) string {
 		finishData.Reason == message.FinishReasonMaxTokens
 
 	icon := a.sty.Messages.AssistantInfoIcon.Render(styles.ModelIcon)
-	mainModelName := "Unknown Model"
-	if model := a.cfg.GetModel(a.message.Provider, a.message.Model); model != nil {
-		mainModelName = model.Name
-	}
+	mainModelName := a.modelDisplayName()
 	modelFormatted := a.sty.Messages.AssistantInfoModel.Render(mainModelName)
 	// A Prism-routed turn shows the model that actually served the
 	// request, with the arrow and any savings suffix subdued.

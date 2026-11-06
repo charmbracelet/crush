@@ -26,12 +26,13 @@ INSERT INTO messages (
     role,
     parts,
     model,
+    model_name,
     provider,
     is_summary_message,
     created_at,
     updated_at
 ) VALUES (
-    ?, ?, ?, ?, ?, ?, ?, strftime('%s', 'now'), strftime('%s', 'now')
+    ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s', 'now'), strftime('%s', 'now')
 )
 RETURNING *;
 
@@ -39,6 +40,7 @@ RETURNING *;
 UPDATE messages
 SET
     parts = ?,
+    model_name = ?,
     prism_model_id = ?,
     prism_model_name = ?,
     prism_hypercredit_savings = ?,

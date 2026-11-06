@@ -277,7 +277,7 @@ func TestRequestTimeoutRunFinishMessage(t *testing.T) {
 
 	env := testEnv(t)
 	model := &timeoutOnlyModel{}
-	agent, err := coderAgent(vcr.NewRecorder(t), env, model, model)
+	agent, err := coderAgent(t, vcr.NewRecorder(t), env, model, model)
 	require.NoError(t, err)
 
 	session, err := env.sessions.Create(t.Context(), "timeout session")

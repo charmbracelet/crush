@@ -311,6 +311,7 @@ considered deprecated. See: [the config docs](./docs/config/) for details.
 >
 > - `CRUSH_GLOBAL_CONFIG`
 > - `CRUSH_GLOBAL_DATA`
+> - `CRUSH_DATA_DIR` (overrides the per-project `.crush` directory)
 
 As an additional note, Crush also stores ephemeral data, such as application
 state, in one additional location. This is state and should not be edited by

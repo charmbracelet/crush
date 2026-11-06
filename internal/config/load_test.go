@@ -43,6 +43,41 @@ func TestConfig_LoadFromBytes(t *testing.T) {
 	require.Equal(t, "https://api.openai.com/v2", pc.BaseURL)
 }
 
+func TestLoadDataDirEnv(t *testing.T) {
+	t.Setenv("CRUSH_GLOBAL_CONFIG", t.TempDir())
+	t.Setenv("CRUSH_GLOBAL_DATA", t.TempDir())
+	t.Setenv("CRUSH_DISABLE_PROVIDER_AUTO_UPDATE", "1")
+
+	t.Run("CRUSH_DATA_DIR overrides the project data directory", func(t *testing.T) {
+		workDir := t.TempDir()
+		dataDir := t.TempDir()
+		t.Setenv("CRUSH_DATA_DIR", dataDir)
+
+		store, err := Load(t.Context(), workDir, "", false)
+		require.NoError(t, err)
+		require.Equal(t, dataDir, store.Config().Options.DataDirectory)
+	})
+
+	t.Run("an explicit data directory wins over CRUSH_DATA_DIR", func(t *testing.T) {
+		workDir := t.TempDir()
+		dataDir := t.TempDir()
+		t.Setenv("CRUSH_DATA_DIR", t.TempDir())
+
+		store, err := Load(t.Context(), workDir, dataDir, false)
+		require.NoError(t, err)
+		require.Equal(t, dataDir, store.Config().Options.DataDirectory)
+	})
+
+	t.Run("relative CRUSH_DATA_DIR resolves against the working directory", func(t *testing.T) {
+		workDir := t.TempDir()
+		t.Setenv("CRUSH_DATA_DIR", "state")
+
+		store, err := Load(t.Context(), workDir, "", false)
+		require.NoError(t, err)
+		require.Equal(t, filepath.Join(workDir, "state"), store.Config().Options.DataDirectory)
+	})
+}
+
 func TestLookupConfigs_BoundedByProject(t *testing.T) {
 	// Force GlobalConfig and GlobalConfigData to point at locations we
 	// control so they can be present in the result without polluting

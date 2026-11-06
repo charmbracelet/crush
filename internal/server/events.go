@@ -407,6 +407,7 @@ func messageToProto(m message.Message) proto.Message {
 		SessionID:               m.SessionID,
 		Role:                    proto.MessageRole(m.Role),
 		Model:                   m.Model,
+		ModelName:               m.ModelName,
 		Provider:                m.Provider,
 		PrismModelID:            m.PrismModelID,
 		PrismModelName:          m.PrismModelName,

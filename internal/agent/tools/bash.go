@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"html/template"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -329,12 +330,14 @@ func yoloBlockedMessage(command string) string {
 }
 
 func executeBashCommand(ctx context.Context, params BashParams, execWorkingDir, spillDir string, blockFuncsToUse []shell.BlockFunc, maxBackgroundJobs int) (fantasy.ToolResponse, error) {
+	env := append(os.Environ(), GetEnvironmentFromContext(ctx)...)
+
 	// If explicitly requested as background, start immediately with detached context
 	if params.RunInBackground {
 		startTime := time.Now()
 		bgManager := shell.GetBackgroundShellManager()
 		// Use background context so it continues after tool returns
-		bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncsToUse, params.Command, params.Description, maxBackgroundJobs)
+		bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncsToUse, params.Command, params.Description, maxBackgroundJobs, env...)
 		if err != nil {
 			return fantasy.NewTextErrorResponse("Failed to start background shell: " + err.Error()), nil
 		}
@@ -388,7 +391,7 @@ func executeBashCommand(ctx context.Context, params BashParams, execWorkingDir, 
 
 	// Start with detached context so it can survive if moved to background
 	bgManager := shell.GetBackgroundShellManager()
-	bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncsToUse, params.Command, params.Description, maxBackgroundJobs)
+	bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncsToUse, params.Command, params.Description, maxBackgroundJobs, env...)
 	if err != nil {
 		return fantasy.NewTextErrorResponse("Failed to start shell: " + err.Error()), nil
 	}

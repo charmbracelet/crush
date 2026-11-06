@@ -19,6 +19,8 @@ type (
 	channelContextKey   string
 )
 
+type environmentContextKey string
+
 const (
 	// SessionIDContextKey is the key for the session ID in the context.
 	SessionIDContextKey sessionIDContextKey = "session_id"
@@ -30,6 +32,8 @@ const (
 	ModelNameContextKey modelNameKey = "model_name"
 	// ChannelContextKey is the key for the channel that originated the turn.
 	ChannelContextKey channelContextKey = "channel"
+	// EnvironmentContextKey carries workspace environment overrides for tools.
+	EnvironmentContextKey environmentContextKey = "environment"
 )
 
 // getContextValue is a generic helper that retrieves a typed value from context.
@@ -68,6 +72,11 @@ func GetSupportsImagesFromContext(ctx context.Context) bool {
 // GetModelNameFromContext retrieves the model name from the context.
 func GetModelNameFromContext(ctx context.Context) string {
 	return getContextValue(ctx, ModelNameContextKey, "")
+}
+
+// GetEnvironmentFromContext retrieves workspace environment overrides.
+func GetEnvironmentFromContext(ctx context.Context) []string {
+	return getContextValue[[]string](ctx, EnvironmentContextKey, nil)
 }
 
 // UnsupportedMediaResponse tells the model it cannot receive a tool's media.

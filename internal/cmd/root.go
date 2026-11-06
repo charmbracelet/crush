@@ -61,7 +61,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolP("debug", "d", false, "Debug")
 	rootCmd.PersistentFlags().StringVarP(&clientHost, "host", "H", server.DefaultHost(), "Connect to a specific crush server host (for advanced users)")
 	rootCmd.Flags().BoolP("help", "h", false, "Help")
-	rootCmd.PersistentFlags().CountP("yolo", "y", "Skip permission prompts: -y to stop being asked, -yy to also drop the exec-time block list")
+	rootCmd.PersistentFlags().CountP("yolo", "y", "Skip permission prompts: -y to stop being asked and block dangerous commands, -yy to allow them too")
 	rootCmd.PersistentFlags().StringSlice("channels", nil, "MCP servers to enable as channels (repeatable), e.g. --channels server:webhook")
 	_ = rootCmd.PersistentFlags().MarkHidden("channels")
 	rootCmd.Flags().StringP("session", "s", "", "Continue a previous session by ID")
@@ -99,10 +99,10 @@ cat README.md | crush run "make this more glamorous" > GLAMOROUS_README.md
 # Run with debug logging in a specific directory
 crush --debug --cwd /path/to/project
 
-# Run in yolo mode (skip permission prompts)
+# Run in yolo mode (skip permission prompts, block dangerous commands)
 crush -y
 
-# Run in sysadmin mode (skip prompts and the exec-time block list too)
+# Run in sysadmin mode (skip prompts and allow dangerous commands too)
 crush -yy
 
 # Run with custom data directory

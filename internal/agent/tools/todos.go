@@ -15,7 +15,7 @@ var todosDescription string
 const TodosToolName = "todos"
 
 type TodosParams struct {
-	Todos []TodoItem `json:"todos" description:"The updated todo list"`
+	Todos []TodoItem `json:"todos" description:"The updated todo list" items_description:"A single todo item"`
 }
 
 type TodoItem struct {

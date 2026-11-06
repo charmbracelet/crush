@@ -21,7 +21,7 @@ var lspRestartDescription string
 type LSPRestartParams struct {
 	// Name is the optional name of a specific LSP client to restart.
 	// If empty, all LSP clients will be restarted.
-	Name string `json:"name,omitempty"`
+	Name string `json:"name,omitempty" description:"The name of a specific LSP client to restart. Leave empty to restart all LSP clients."`
 }
 
 func NewLSPRestartTool(lspManager *lsp.Manager) fantasy.AgentTool {

@@ -20,6 +20,21 @@ type KeyMap struct {
 		// History navigation
 		HistoryPrev key.Binding
 		HistoryNext key.Binding
+
+		// CopySelection copies the current textarea selection to the
+		// clipboard.
+		CopySelection key.Binding
+
+		// CutSelection copies the current textarea selection to the
+		// clipboard and deletes it from the textarea.
+		CutSelection key.Binding
+
+		// SelectAll selects all text in the textarea.
+		SelectAll key.Binding
+
+		// PasteText pastes clipboard text into the textarea, as an
+		// alternative to bracketed paste.
+		PasteText key.Binding
 	}
 
 	Chat struct {
@@ -29,6 +44,7 @@ type KeyMap struct {
 		Tab            key.Binding
 		Details        key.Binding
 		TogglePills    key.Binding
+		ToggleSidebar  key.Binding
 		PillLeft       key.Binding
 		PillRight      key.Binding
 		Down           key.Binding
@@ -43,6 +59,7 @@ type KeyMap struct {
 		HalfPageUp     key.Binding
 		Home           key.Binding
 		End            key.Binding
+		EndFollow      key.Binding
 		Copy           key.Binding
 		ClearHighlight key.Binding
 		Expand         key.Binding
@@ -68,6 +85,7 @@ type KeyMap struct {
 	Sessions   key.Binding
 	Tab        key.Binding
 	ToggleYolo key.Binding
+	ShiftTab   key.Binding
 }
 
 func DefaultKeyMap() KeyMap {
@@ -104,6 +122,10 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("ctrl+y"),
 			key.WithHelp("ctrl+y", "toggle yolo"),
 		),
+		ShiftTab: key.NewBinding(
+			key.WithKeys("shift+tab"),
+			key.WithHelp("shift+tab", "mode"),
+		),
 	}
 
 	km.Editor.SendMessage = key.NewBinding(
@@ -126,8 +148,12 @@ func DefaultKeyMap() KeyMap {
 		key.WithHelp("ctrl+f", "add image"),
 	)
 	km.Editor.PasteImage = key.NewBinding(
-		key.WithKeys("ctrl+v", "super+v"),
+		key.WithKeys("ctrl+v"),
 		key.WithHelp("ctrl+v", "paste image from clipboard"),
+	)
+	km.Editor.PasteText = key.NewBinding(
+		key.WithKeys("ctrl+shift+v"),
+		key.WithHelp("ctrl+shift+v", "paste text"),
 	)
 	km.Editor.MentionFile = key.NewBinding(
 		key.WithKeys("@"),
@@ -155,6 +181,18 @@ func DefaultKeyMap() KeyMap {
 	km.Editor.HistoryNext = key.NewBinding(
 		key.WithKeys("down"),
 	)
+	km.Editor.CopySelection = key.NewBinding(
+		key.WithKeys("ctrl+shift+c"),
+		key.WithHelp("ctrl+shift+c", "copy selection"),
+	)
+	km.Editor.CutSelection = key.NewBinding(
+		key.WithKeys("ctrl+shift+x"),
+		key.WithHelp("ctrl+shift+x", "cut selection"),
+	)
+	km.Editor.SelectAll = key.NewBinding(
+		key.WithKeys("ctrl+shift+a"),
+		key.WithHelp("ctrl+shift+a", "select all"),
+	)
 
 	km.Chat.NewSession = key.NewBinding(
 		key.WithKeys("ctrl+n"),
@@ -179,6 +217,10 @@ func DefaultKeyMap() KeyMap {
 	km.Chat.TogglePills = key.NewBinding(
 		key.WithKeys("ctrl+t", "ctrl+space"),
 		key.WithHelp("ctrl+t", "toggle tasks"),
+	)
+	km.Chat.ToggleSidebar = key.NewBinding(
+		key.WithKeys("ctrl+b"),
+		key.WithHelp("ctrl+b", "toggle sidebar"),
 	)
 	km.Chat.PillLeft = key.NewBinding(
 		key.WithKeys("left"),
@@ -236,6 +278,9 @@ func DefaultKeyMap() KeyMap {
 	km.Chat.End = key.NewBinding(
 		key.WithKeys("G", "end"),
 		key.WithHelp("G", "end"),
+	)
+	km.Chat.EndFollow = key.NewBinding(
+		key.WithKeys("ctrl+end"),
 	)
 	km.Chat.Copy = key.NewBinding(
 		key.WithKeys("c", "y", "C", "Y"),

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -15,8 +16,6 @@ import (
 
 	"github.com/charmbracelet/crush/internal/backend"
 	"github.com/charmbracelet/crush/internal/config"
-	_ "github.com/charmbracelet/crush/internal/swagger"
-	httpswagger "github.com/swaggo/http-swagger/v2"
 )
 
 // maxUnixSocketPathLen is the maximum length of a Unix domain socket
@@ -39,11 +38,15 @@ func socketDir() string {
 // ErrServerClosed is returned when the server is closed.
 var ErrServerClosed = http.ErrServerClosed
 
-// ParseHostURL parses a host URL into a [url.URL].
+// ParseHostURL parses a host URL into a [url.URL]. The "http" scheme
+// is accepted as an alias for "tcp" and normalized to it.
 func ParseHostURL(host string) (*url.URL, error) {
 	proto, addr, ok := strings.Cut(host, "://")
 	if !ok {
 		return nil, fmt.Errorf("invalid host format: %s", host)
+	}
+	if proto == "http" {
+		proto = "tcp"
 	}
 
 	var basePath string
@@ -155,77 +158,11 @@ func (s *Server) installHandler() {
 	p.SetUnencryptedHTTP2(true)
 	c := &controllerV1{backend: s.backend, server: s}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /v1/health", c.handleGetHealth)
-	mux.HandleFunc("GET /v1/version", c.handleGetVersion)
-	mux.HandleFunc("GET /v1/config", c.handleGetConfig)
-	mux.HandleFunc("POST /v1/control", c.handlePostControl)
-	mux.HandleFunc("DELETE /v1/clients/{client_id}", c.handleDeleteClient)
-	mux.HandleFunc("GET /v1/workspaces", c.handleGetWorkspaces)
-	mux.HandleFunc("POST /v1/workspaces", c.handlePostWorkspaces)
-	mux.HandleFunc("DELETE /v1/workspaces/{id}", c.handleDeleteWorkspaces)
-	mux.HandleFunc("POST /v1/workspaces/{id}/current-session", c.handlePostWorkspaceCurrentSession)
-	mux.HandleFunc("GET /v1/workspaces/{id}", c.handleGetWorkspace)
-	mux.HandleFunc("GET /v1/workspaces/{id}/config", c.handleGetWorkspaceConfig)
-	mux.HandleFunc("GET /v1/workspaces/{id}/events", c.handleGetWorkspaceEvents)
-	mux.HandleFunc("GET /v1/workspaces/{id}/providers", c.handleGetWorkspaceProviders)
-	mux.HandleFunc("GET /v1/workspaces/{id}/sessions", c.handleGetWorkspaceSessions)
-	mux.HandleFunc("POST /v1/workspaces/{id}/sessions", c.handlePostWorkspaceSessions)
-	mux.HandleFunc("GET /v1/workspaces/{id}/sessions/{sid}", c.handleGetWorkspaceSession)
-	mux.HandleFunc("PUT /v1/workspaces/{id}/sessions/{sid}", c.handlePutWorkspaceSession)
-	mux.HandleFunc("DELETE /v1/workspaces/{id}/sessions/{sid}", c.handleDeleteWorkspaceSession)
-	mux.HandleFunc("GET /v1/workspaces/{id}/sessions/{sid}/history", c.handleGetWorkspaceSessionHistory)
-	mux.HandleFunc("GET /v1/workspaces/{id}/sessions/{sid}/messages", c.handleGetWorkspaceSessionMessages)
-	mux.HandleFunc("GET /v1/workspaces/{id}/sessions/{sid}/messages/user", c.handleGetWorkspaceSessionUserMessages)
-	mux.HandleFunc("GET /v1/workspaces/{id}/messages/user", c.handleGetWorkspaceAllUserMessages)
-	mux.HandleFunc("GET /v1/workspaces/{id}/sessions/{sid}/filetracker/files", c.handleGetWorkspaceSessionFileTrackerFiles)
-	mux.HandleFunc("POST /v1/workspaces/{id}/filetracker/read", c.handlePostWorkspaceFileTrackerRead)
-	mux.HandleFunc("GET /v1/workspaces/{id}/filetracker/lastread", c.handleGetWorkspaceFileTrackerLastRead)
-	mux.HandleFunc("GET /v1/workspaces/{id}/lsps", c.handleGetWorkspaceLSPs)
-	mux.HandleFunc("GET /v1/workspaces/{id}/lsps/{lsp}/diagnostics", c.handleGetWorkspaceLSPDiagnostics)
-	mux.HandleFunc("POST /v1/workspaces/{id}/lsps/start", c.handlePostWorkspaceLSPStart)
-	mux.HandleFunc("POST /v1/workspaces/{id}/lsps/stop", c.handlePostWorkspaceLSPStopAll)
-	mux.HandleFunc("GET /v1/workspaces/{id}/permissions/skip", c.handleGetWorkspacePermissionsSkip)
-	mux.HandleFunc("POST /v1/workspaces/{id}/permissions/skip", c.handlePostWorkspacePermissionsSkip)
-	mux.HandleFunc("POST /v1/workspaces/{id}/permissions/grant", c.handlePostWorkspacePermissionsGrant)
-	mux.HandleFunc("POST /v1/workspaces/{id}/questions/answer", c.handlePostWorkspaceQuestionsAnswer)
-	mux.HandleFunc("POST /v1/workspaces/{id}/questions/cancel", c.handlePostWorkspaceQuestionsCancel)
-	mux.HandleFunc("GET /v1/workspaces/{id}/agent", c.handleGetWorkspaceAgent)
-	mux.HandleFunc("POST /v1/workspaces/{id}/agent", c.handlePostWorkspaceAgent)
-	mux.HandleFunc("POST /v1/workspaces/{id}/agent/init", c.handlePostWorkspaceAgentInit)
-	mux.HandleFunc("POST /v1/workspaces/{id}/agent/update", c.handlePostWorkspaceAgentUpdate)
-	mux.HandleFunc("GET /v1/workspaces/{id}/agent/sessions/{sid}", c.handleGetWorkspaceAgentSession)
-	mux.HandleFunc("POST /v1/workspaces/{id}/agent/sessions/{sid}/cancel", c.handlePostWorkspaceAgentSessionCancel)
-	mux.HandleFunc("GET /v1/workspaces/{id}/agent/sessions/{sid}/prompts/queued", c.handleGetWorkspaceAgentSessionPromptQueued)
-	mux.HandleFunc("GET /v1/workspaces/{id}/agent/sessions/{sid}/prompts/list", c.handleGetWorkspaceAgentSessionPromptList)
-	mux.HandleFunc("POST /v1/workspaces/{id}/agent/sessions/{sid}/prompts/clear", c.handlePostWorkspaceAgentSessionPromptClear)
-	mux.HandleFunc("POST /v1/workspaces/{id}/agent/sessions/{sid}/summarize", c.handlePostWorkspaceAgentSessionSummarize)
-	mux.HandleFunc("POST /v1/workspaces/{id}/agent/sessions/{sid}/shell", c.handlePostWorkspaceAgentSessionShell)
-	mux.HandleFunc("GET /v1/workspaces/{id}/agent/default-small-model", c.handleGetWorkspaceAgentDefaultSmallModel)
-	mux.HandleFunc("POST /v1/workspaces/{id}/config/set", c.handlePostWorkspaceConfigSet)
-	mux.HandleFunc("POST /v1/workspaces/{id}/config/remove", c.handlePostWorkspaceConfigRemove)
-	mux.HandleFunc("POST /v1/workspaces/{id}/config/model", c.handlePostWorkspaceConfigModel)
-	mux.HandleFunc("POST /v1/workspaces/{id}/config/compact", c.handlePostWorkspaceConfigCompact)
-	mux.HandleFunc("POST /v1/workspaces/{id}/config/provider-key", c.handlePostWorkspaceConfigProviderKey)
-	mux.HandleFunc("POST /v1/workspaces/{id}/config/import-copilot", c.handlePostWorkspaceConfigImportCopilot)
-	mux.HandleFunc("POST /v1/workspaces/{id}/config/refresh-oauth", c.handlePostWorkspaceConfigRefreshOAuth)
-	mux.HandleFunc("GET /v1/workspaces/{id}/project/needs-init", c.handleGetWorkspaceProjectNeedsInit)
-	mux.HandleFunc("POST /v1/workspaces/{id}/project/init", c.handlePostWorkspaceProjectInit)
-	mux.HandleFunc("GET /v1/workspaces/{id}/project/init-prompt", c.handleGetWorkspaceProjectInitPrompt)
-	mux.HandleFunc("GET /v1/workspaces/{id}/skills", c.handleGetWorkspaceSkills)
-	mux.HandleFunc("POST /v1/workspaces/{id}/skills/read", c.handlePostWorkspaceSkillRead)
-	mux.HandleFunc("POST /v1/workspaces/{id}/mcp/refresh-tools", c.handlePostWorkspaceMCPRefreshTools)
-	mux.HandleFunc("POST /v1/workspaces/{id}/mcp/read-resource", c.handlePostWorkspaceMCPReadResource)
-	mux.HandleFunc("GET /v1/workspaces/{id}/mcp/prompts", c.handleGetWorkspaceMCPPrompts)
-	mux.HandleFunc("POST /v1/workspaces/{id}/mcp/get-prompt", c.handlePostWorkspaceMCPGetPrompt)
-	mux.HandleFunc("GET /v1/workspaces/{id}/mcp/states", c.handleGetWorkspaceMCPStates)
-	mux.HandleFunc("GET /v1/workspaces/{id}/mcp/pending-auth", c.handleGetWorkspaceMCPPendingAuth)
-	mux.HandleFunc("GET /v1/workspaces/{id}/mcp/auth-url", c.handleGetWorkspaceMCPAuthURL)
-	mux.HandleFunc("POST /v1/workspaces/{id}/mcp/auth", c.handlePostWorkspaceMCPAuth)
-	mux.HandleFunc("POST /v1/workspaces/{id}/mcp/refresh-prompts", c.handlePostWorkspaceMCPRefreshPrompts)
-	mux.HandleFunc("POST /v1/workspaces/{id}/mcp/refresh-resources", c.handlePostWorkspaceMCPRefreshResources)
-	mux.HandleFunc("POST /v1/workspaces/{id}/mcp/docker/enable", c.handlePostWorkspaceMCPEnableDocker)
-	mux.HandleFunc("POST /v1/workspaces/{id}/mcp/docker/disable", c.handlePostWorkspaceMCPDisableDocker)
-	mux.Handle("/v1/docs/", httpswagger.WrapHandler)
+	for _, e := range c.endpoints() {
+		mux.HandleFunc(e.Method()+" "+e.Path(), e.Handler())
+	}
+	mux.HandleFunc("GET /v1/docs/", c.handleDocsIndex)
+	mux.HandleFunc("GET /v1/docs/openapi.json", c.handleDocsSpec)
 	s.h = &http.Server{
 		Protocols: &p,
 		Handler:   s.recoverHandler(s.loggingHandler(mux)),
@@ -266,17 +203,25 @@ func (s *Server) closeListener() {
 	}
 }
 
-// Close force closes all listeners and connections.
+// Close force closes all listeners and connections. Unlike [Server.Shutdown]
+// it leaves hosted workspaces running.
 func (s *Server) Close() error {
 	defer func() { s.closeListener() }()
 	return s.h.Close()
 }
 
-// Shutdown gracefully shuts down the server without interrupting active
-// connections.
+// Shutdown tears down hosted workspaces, then gracefully shuts down the
+// server without interrupting active connections. ctx bounds both. The
+// idle-shutdown path relies on the teardown being a no-op with none left.
 func (s *Server) Shutdown(ctx context.Context) error {
 	defer func() { s.closeListener() }()
-	return s.h.Shutdown(ctx)
+	err := s.backend.ShutdownWorkspaces(ctx)
+	return errors.Join(err, s.h.Shutdown(ctx))
+}
+
+// ReloadConfig re-reads the server and hosted workspace configs from disk.
+func (s *Server) ReloadConfig(ctx context.Context) error {
+	return s.backend.ReloadConfig(ctx)
 }
 
 func (s *Server) logDebug(r *http.Request, msg string, args ...any) {

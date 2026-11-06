@@ -5,23 +5,37 @@ import (
 	"errors"
 	"time"
 
-	"charm.land/catwalk/pkg/catwalk"
+	"charm.land/catwalk/v3/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/lsp"
+)
+
+// WorkspacePermissionMode represents the permission enforcement level for a
+// workspace.
+type WorkspacePermissionMode string
+
+const (
+	// WorkspacePermissionModeNormal prompts for all non-safe commands.
+	WorkspacePermissionModeNormal WorkspacePermissionMode = "normal"
+	// WorkspacePermissionModeYolo never prompts: it approves ordinary
+	// requests and blocks dangerous commands without asking.
+	WorkspacePermissionModeYolo WorkspacePermissionMode = "yolo"
+	// WorkspacePermissionModeSysadmin never prompts and blocks nothing.
+	WorkspacePermissionModeSysadmin WorkspacePermissionMode = "sysadmin"
 )
 
 // Workspace represents a running app.App workspace with its associated
 // resources and state.
 type Workspace struct {
-	ID       string         `json:"id"`
-	Path     string         `json:"path"`
-	YOLO     bool           `json:"yolo,omitempty"`
-	Debug    bool           `json:"debug,omitempty"`
-	DataDir  string         `json:"data_dir,omitempty"`
-	Version  string         `json:"version,omitempty"`
-	ClientID string         `json:"client_id,omitempty"`
-	Config   *config.Config `json:"config,omitempty"`
-	Env      []string       `json:"env,omitempty"`
+	ID             string                  `json:"id"`
+	Path           string                  `json:"path"`
+	PermissionMode WorkspacePermissionMode `json:"permission_mode,omitempty"`
+	Debug          bool                    `json:"debug,omitempty"`
+	DataDir        string                  `json:"data_dir,omitempty"`
+	Version        string                  `json:"version,omitempty"`
+	ClientID       string                  `json:"client_id,omitempty"`
+	Config         *config.Config          `json:"config,omitempty"`
+	Env            []string                `json:"env,omitempty"`
 	// Channels lists the MCP servers opted in as channels for this workspace
 	// (from the --channels flag).
 	Channels []string `json:"channels,omitempty"`
@@ -53,10 +67,29 @@ type UpdateAvailable struct {
 	IsDevelopment  bool   `json:"is_development"`
 }
 
+// ClientSession is the payload of a client_session event: the session a
+// client of a workspace is viewing has changed. An empty SessionID means
+// the client no longer views one, such as the landing screen or after it
+// went away.
+type ClientSession struct {
+	ClientID  string `json:"client_id"`
+	SessionID string `json:"session_id"`
+}
+
 // CurrentSession is the request body for the per-client
 // current-session endpoint. An empty SessionID clears the entry.
 type CurrentSession struct {
 	SessionID string `json:"session_id"`
+}
+
+// HostContext is what the application hosting Crush, such as an editor, has
+// in view: the files it has open, and the file and line the user is on. The
+// agent gets it with each prompt, so that "here" or "this file" means what
+// the user sees. The zero HostContext is none.
+type HostContext struct {
+	OpenFiles  []string `json:"open_files,omitempty"`
+	ActiveFile string   `json:"active_file,omitempty"`
+	Line       int      `json:"line,omitempty"` // 1-based line of the cursor in ActiveFile
 }
 
 // RunComplete is the authoritative end-of-run signal for a session,
@@ -142,10 +175,19 @@ func (a AgentInfo) IsZero() bool {
 // remains correct only when no other turns are in flight for the
 // same session.
 type AgentMessage struct {
-	SessionID   string       `json:"session_id"`
-	RunID       string       `json:"run_id,omitempty"`
-	Prompt      string       `json:"prompt"`
-	Attachments []Attachment `json:"attachments,omitempty"`
+	HiddenUserMessage bool         `json:"hidden_user_message,omitempty"`
+	SessionID         string       `json:"session_id"`
+	RunID             string       `json:"run_id,omitempty"`
+	Channel           string       `json:"channel,omitempty"`
+	Prompt            string       `json:"prompt"`
+	Attachments       []Attachment `json:"attachments,omitempty"`
+}
+
+// SessionNote is something the host application tells a session's agent,
+// to be read with the session's next prompt. It starts no run and is not a
+// chat message.
+type SessionNote struct {
+	Text string `json:"text"`
 }
 
 // ShellCommandRequest represents a request to run a shell command directly.
@@ -260,12 +302,100 @@ type QuestionAnswerResponse struct {
 // QuestionNotification is published when a question batch is
 // resolved so non-answering clients can dismiss their forms.
 type QuestionNotification struct {
-	BatchID string `json:"batch_id"`
+	BatchID   string `json:"batch_id"`
+	SessionID string `json:"session_id"`
 }
 
-// PermissionSkipRequest represents a request to skip permission prompts.
-type PermissionSkipRequest struct {
-	Skip bool `json:"skip"`
+// PinentryKey is the wire format for the key a pinentry prompt
+// concerns, as far as GPG reported it.
+type PinentryKey struct {
+	CardNumber  string `json:"card_number,omitempty"`
+	KeyID       string `json:"key_id,omitempty"`
+	Fingerprint string `json:"fingerprint,omitempty"`
+	Holder      string `json:"holder,omitempty"`
+}
+
+// PinentryPromptRequest is the SSE wire format for an integrated
+// pinentry credential prompt (a GPG passphrase or security key PIN).
+// The resolved secret is never carried on this type.
+type PinentryPromptRequest struct {
+	ID         string      `json:"id"`
+	Prompt     string      `json:"prompt"`
+	Key        PinentryKey `json:"key,omitempty"`
+	Kind       string      `json:"kind"`
+	RetryCount int         `json:"retry_count,omitempty"`
+	Error      string      `json:"error,omitempty"`
+}
+
+// PinentryAnswer is the wire format for answering a pinentry prompt,
+// sent from client to server via REST.
+type PinentryAnswer struct {
+	RequestID string `json:"request_id"`
+	Secret    string `json:"secret"`
+}
+
+// PinentryCancel is the wire format for dismissing a pinentry prompt.
+type PinentryCancel struct {
+	RequestID string `json:"request_id"`
+}
+
+// PinentryResponse is the server's response to pinentry answer and
+// cancel calls.
+type PinentryResponse struct {
+	Resolved bool `json:"resolved"`
+}
+
+// PinentryNotification is published when a pinentry prompt is resolved
+// so non-answering clients can dismiss their dialogs.
+type PinentryNotification struct {
+	RequestID string `json:"request_id"`
+}
+
+// SSHPromptRequest is the SSE wire format for an integrated SSH askpass
+// prompt: an authentication password or key passphrase, or a
+// confirmation question (security key touch, host key acceptance). The
+// resolved secret is never carried on this type.
+type SSHPromptRequest struct {
+	ID      string `json:"id"`
+	Prompt  string `json:"prompt"`
+	KeyInfo string `json:"key_info,omitempty"`
+	Kind    string `json:"kind"`
+	Title   string `json:"title,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+// SSHAnswer is the wire format for answering an SSH prompt, sent from
+// client to server via REST.
+type SSHAnswer struct {
+	RequestID string `json:"request_id"`
+	Secret    string `json:"secret"`
+}
+
+// SSHCancel is the wire format for dismissing an SSH prompt.
+type SSHCancel struct {
+	RequestID string `json:"request_id"`
+}
+
+// SSHResponse is the server's response to SSH answer and cancel calls.
+type SSHResponse struct {
+	Resolved bool `json:"resolved"`
+}
+
+// SSHNotification is published when an SSH prompt is resolved so
+// non-answering clients can dismiss their dialogs.
+type SSHNotification struct {
+	RequestID string `json:"request_id"`
+}
+
+// PermissionSetModeRequest represents a request to set the permission mode.
+type PermissionSetModeRequest struct {
+	Mode WorkspacePermissionMode `json:"mode"`
+}
+
+// PermissionModeEvent is the SSE payload published whenever the server-side
+// permission mode changes.
+type PermissionModeEvent struct {
+	Mode WorkspacePermissionMode `json:"mode"`
 }
 
 // LSPEventType represents the type of LSP event.

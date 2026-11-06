@@ -7,8 +7,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"charm.land/catwalk/pkg/catwalk"
-	"charm.land/catwalk/pkg/embedded"
+	"charm.land/catwalk/v3/pkg/catwalk"
+	"charm.land/catwalk/v3/pkg/embedded"
 )
 
 type catwalkClient interface {
@@ -25,6 +25,7 @@ type catwalkSync struct {
 	client     catwalkClient
 	autoupdate bool
 	init       atomic.Bool
+	updated    atomic.Bool
 }
 
 func (s *catwalkSync) Init(client catwalkClient, path string, autoupdate bool) {
@@ -43,6 +44,12 @@ func (s *catwalkSync) Get(ctx context.Context) ([]catwalk.Provider, error) {
 	// sees the same outcome, not just the one that won the once.
 	s.once.Do(func() {
 		if !s.autoupdate {
+			cached, _, cachedErr := s.cache.Get()
+			if len(cached) > 0 && cachedErr == nil {
+				slog.Info("Using cached Catwalk providers (auto-update disabled)")
+				s.result = cached
+				return
+			}
 			slog.Info("Using embedded Catwalk providers")
 			s.result = embedded.GetAll()
 			return
@@ -85,6 +92,17 @@ func (s *catwalkSync) Get(ctx context.Context) ([]catwalk.Provider, error) {
 		// result rather than in place of one.
 		s.result = result
 		s.err = s.cache.Store(result)
+		s.updated.Store(true)
 	})
 	return s.result, s.err
+}
+
+// Updated reports whether the last Get replaced the catalog with fresh
+// data from Catwalk rather than falling back to the cache, the embedded
+// copy, or a 304 Not Modified response. It is false before Get runs and
+// stays false for the whole process when auto-update is disabled, which
+// makes it the signal for refreshing catalogs that shadow Catwalk's,
+// such as the ChatGPT model catalog.
+func (s *catwalkSync) Updated() bool {
+	return s.updated.Load()
 }

@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/oauth"
@@ -181,6 +182,10 @@ func NewHandler(
 		AuthorizationCodeFetcher: receiver.fetchAuthorizationCode,
 		RequestRefreshToken:      true,
 		NewTokenSource:           newTokenSource,
+		// Some servers (e.g. Sentry) send the RFC 9207 iss parameter
+		// without advertising it in their metadata. Accept a matching
+		// unadvertised iss instead of failing the flow.
+		AcceptUnadvertisedIss: true,
 		// Use a metadata-fixing HTTP client so trailing-slash issuers in
 		// OAuth metadata responses don't trip the SDK's strict RFC 8414
 		// validation. Also rewrite internal-cluster redirects back to the
@@ -422,6 +427,9 @@ type authFlight struct {
 	once   sync.Once
 	result *auth.AuthorizationResult
 	err    error
+
+	// joined counts callers waiting on this flight instead of opening a tab.
+	joined atomic.Int32
 }
 
 // settle records the outcome of the flight and wakes everyone waiting on
@@ -443,6 +451,7 @@ func (r *callbackReceiver) begin() (*authFlight, bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.flight != nil {
+		r.flight.joined.Add(1)
 		return r.flight, false, nil
 	}
 	if err := r.bindLocked(); err != nil {
@@ -588,7 +597,7 @@ func (r *callbackReceiver) fetchAuthorizationCode(ctx context.Context, args *aut
 	if !owned {
 		// Another request already opened the browser for this server. Wait
 		// for that redirect instead of opening a second tab.
-		slog.Debug("Joining in-progress MCP OAuth authorization", "name", r.serverName)
+		slog.Debug("Joining in-progress MCP OAuth authorization", "name", r.serverName, "waiting", flight.joined.Load())
 		return r.await(ctx, flight, false)
 	}
 	defer r.end(flight)

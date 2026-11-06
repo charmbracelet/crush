@@ -20,7 +20,7 @@ func TestPersistOutput_SkipsMissingSession(t *testing.T) {
 	messages := message.NewService(db.New(conn))
 
 	missingID := uuid.New().String()
-	err = PersistOutput(t.Context(), messages, missingID, "cat file.txt", "hello", 0)
+	err = PersistOutput(t.Context(), messages, missingID, "cat file.txt", "hello", 0, t.TempDir())
 	require.NoError(t, err)
 
 	stored, err := messages.List(t.Context(), missingID)
@@ -37,7 +37,7 @@ func TestPersistOutput_NoOpForEmptySessionID(t *testing.T) {
 
 	messages := message.NewService(db.New(conn))
 
-	require.NoError(t, PersistOutput(t.Context(), messages, "", "echo hi", "hi", 0))
+	require.NoError(t, PersistOutput(t.Context(), messages, "", "echo hi", "hi", 0, t.TempDir()))
 }
 
 func TestPersistOutput_PersistsForExistingSession(t *testing.T) {
@@ -54,7 +54,7 @@ func TestPersistOutput_PersistsForExistingSession(t *testing.T) {
 	sess, err := sessions.Create(t.Context(), "shell test")
 	require.NoError(t, err)
 
-	err = PersistOutput(t.Context(), messages, sess.ID, "cat file.txt", "hello", 0)
+	err = PersistOutput(t.Context(), messages, sess.ID, "cat file.txt", "hello", 0, t.TempDir())
 	require.NoError(t, err)
 
 	stored, err := messages.List(t.Context(), sess.ID)

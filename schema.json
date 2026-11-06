@@ -29,6 +29,22 @@
       "additionalProperties": false,
       "type": "object"
     },
+    "Capabilities": {
+      "properties": {
+        "vision": {
+          "type": "boolean"
+        },
+        "audio": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "vision",
+        "audio"
+      ]
+    },
     "Completions": {
       "properties": {
         "max_depth": {
@@ -110,6 +126,22 @@
       },
       "additionalProperties": false,
       "type": "object"
+    },
+    "EffortLevel": {
+      "properties": {
+        "value": {
+          "type": "string"
+        },
+        "display": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "value",
+        "display"
+      ]
     },
     "HookConfig": {
       "properties": {
@@ -219,6 +251,63 @@
       },
       "type": "object"
     },
+    "MCPChannelReply": {
+      "properties": {
+        "user": {
+          "$ref": "#/$defs/MCPChannelReplyRoute",
+          "description": "Reply route for direct messages"
+        },
+        "group": {
+          "$ref": "#/$defs/MCPChannelReplyRoute",
+          "description": "Reply route for group messages"
+        },
+        "message_param": {
+          "type": "string",
+          "description": "Tool argument name that receives the reply text",
+          "default": "message"
+        },
+        "suppress_tools": {
+          "items": {
+            "type": "string",
+            "examples": [
+              "send"
+            ]
+          },
+          "type": "array",
+          "description": "Additional tool names that suppress the automatic reply when the model already called one of them during the turn"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "MCPChannelReplyRoute": {
+      "properties": {
+        "tool": {
+          "type": "string",
+          "description": "MCP tool name that sends the reply",
+          "examples": [
+            "send_message_to_user"
+          ]
+        },
+        "target_param": {
+          "type": "string",
+          "description": "Tool argument name that receives the reply target",
+          "examples": [
+            "user_id"
+          ]
+        },
+        "target_meta": {
+          "type": "string",
+          "description": "Channel meta attribute carrying the reply target; defaults to sender (user route) or group (group route)"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "tool",
+        "target_param"
+      ]
+    },
     "MCPConfig": {
       "properties": {
         "command": {
@@ -295,6 +384,11 @@
             120
           ]
         },
+        "sessionless": {
+          "type": "boolean",
+          "description": "Mark a sessionless MCP server (no Mcp-Session-Id) so Crush skips the subscriptions/listen stream it would otherwise reject. Leave unset to auto-detect known sessionless servers (e.g. GitHub MCP)",
+          "default": false
+        },
         "headers": {
           "additionalProperties": {
             "type": "string"
@@ -318,6 +412,15 @@
         "oauth_callback_port": {
           "type": "integer",
           "description": "Fixed localhost port for the OAuth callback"
+        },
+        "channel_enabled": {
+          "type": "boolean",
+          "description": "Enable this MCP server as a channel (equivalent to --channels)",
+          "default": false
+        },
+        "channel_reply": {
+          "$ref": "#/$defs/MCPChannelReply",
+          "description": "Automatically route replies for turns originating from this channel back through one of the server's tools"
         }
       },
       "additionalProperties": false,
@@ -337,20 +440,14 @@
         "id": {
           "type": "string"
         },
+        "type": {
+          "type": "string"
+        },
         "name": {
           "type": "string"
         },
-        "cost_per_1m_in": {
-          "type": "number"
-        },
-        "cost_per_1m_out": {
-          "type": "number"
-        },
-        "cost_per_1m_in_cached": {
-          "type": "number"
-        },
-        "cost_per_1m_out_cached": {
-          "type": "number"
+        "pricing": {
+          "$ref": "#/$defs/Pricing"
         },
         "context_window": {
           "type": "integer"
@@ -358,20 +455,14 @@
         "default_max_tokens": {
           "type": "integer"
         },
-        "can_reason": {
-          "type": "boolean"
+        "reasoning": {
+          "$ref": "#/$defs/Reasoning"
         },
-        "reasoning_levels": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
+        "capabilities": {
+          "$ref": "#/$defs/Capabilities"
         },
-        "default_reasoning_effort": {
-          "type": "string"
-        },
-        "supports_attachments": {
-          "type": "boolean"
+        "max_attachments": {
+          "type": "integer"
         },
         "options": {
           "$ref": "#/$defs/ModelOptions"
@@ -382,14 +473,11 @@
       "required": [
         "id",
         "name",
-        "cost_per_1m_in",
-        "cost_per_1m_out",
-        "cost_per_1m_in_cached",
-        "cost_per_1m_out_cached",
+        "pricing",
         "context_window",
         "default_max_tokens",
-        "can_reason",
-        "supports_attachments"
+        "reasoning",
+        "capabilities"
       ]
     },
     "ModelOptions": {
@@ -571,6 +659,38 @@
           },
           "type": "array",
           "description": "List of skill names to disable and hide from the agent"
+        },
+        "request_timeout": {
+          "type": "integer",
+          "description": "Timeout in seconds for each LLM API request. Streaming responses are aborted only after this much inactivity between tokens, so slow but active streams are never killed; the wait for the first token gets at least five minutes for prompt prefill. 0 disables it, negative values are invalid.",
+          "default": 60,
+          "examples": [
+            120,
+            300,
+            0
+          ]
+        },
+        "max_background_jobs": {
+          "type": "integer",
+          "description": "How many background shell jobs may run at once. Jobs that have finished never count against it. 0 or negative restores the default.",
+          "default": 50,
+          "examples": [
+            10,
+            200
+          ]
+        },
+        "pinentry_integrated": {
+          "type": "boolean",
+          "description": "Render GPG passphrase prompts as a native Crush dialog instead of an external pinentry program. Works with file-based keys and security keys and never modifies GPG or git configuration.",
+          "default": true
+        },
+        "pinentry_cache_timeout": {
+          "type": "integer",
+          "description": "Seconds Crush keeps an entered GPG passphrase in memory so repeated signing operations do not re-prompt. 0 (the default) disables it; gpg-agent's own cache applies regardless.",
+          "default": 0,
+          "examples": [
+            300
+          ]
         }
       },
       "additionalProperties": false,
@@ -588,10 +708,65 @@
           },
           "type": "array",
           "description": "List of tools that don't require permission prompts"
+        },
+        "blocked_commands": {
+          "items": {
+            "type": "string",
+            "examples": [
+              "kubectl",
+              "terraform"
+            ]
+          },
+          "type": "array",
+          "description": "Extra shell commands to treat as dangerous (prompted for in normal mode)"
+        },
+        "allowed_commands": {
+          "items": {
+            "type": "string",
+            "examples": [
+              "curl",
+              "ssh"
+            ]
+          },
+          "type": "array",
+          "description": "Shell commands to drop from the dangerous list so they stop prompting"
+        },
+        "safe_commands": {
+          "items": {
+            "type": "string",
+            "examples": [
+              "go build",
+              "cargo check"
+            ]
+          },
+          "type": "array",
+          "description": "Exact command lines that skip the permission prompt. Matched literally with no extra arguments"
         }
       },
       "additionalProperties": false,
       "type": "object"
+    },
+    "Pricing": {
+      "properties": {
+        "input": {
+          "type": "number"
+        },
+        "output": {
+          "type": "number"
+        },
+        "cache_create": {
+          "type": "number"
+        },
+        "cache_hit": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "input",
+        "output"
+      ]
     },
     "ProviderConfig": {
       "properties": {
@@ -620,15 +795,9 @@
         "type": {
           "type": "string",
           "enum": [
-            "openai",
-            "openai-compat",
-            "openrouter",
-            "vercel",
-            "anthropic",
-            "google",
-            "azure",
-            "bedrock",
-            "google-vertex",
+            "completions",
+            "responses",
+            "messages",
             "hyper",
             "litellm",
             "llamacpp",
@@ -697,6 +866,27 @@
       },
       "additionalProperties": false,
       "type": "object"
+    },
+    "Reasoning": {
+      "properties": {
+        "thinking": {
+          "type": "string"
+        },
+        "effort_levels": {
+          "items": {
+            "$ref": "#/$defs/EffortLevel"
+          },
+          "type": "array"
+        },
+        "default_effort_level": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "thinking"
+      ]
     },
     "SelectedModel": {
       "properties": {
@@ -792,6 +982,16 @@
           ],
           "description": "Diff mode for the TUI interface"
         },
+        "active_theme": {
+          "type": "string",
+          "description": "Name of the currently active theme",
+          "default": "charmtone-panther",
+          "examples": [
+            "charmtone-panther",
+            "gruvbox-dark",
+            "keanu"
+          ]
+        },
         "completions": {
           "$ref": "#/$defs/Completions",
           "description": "Completions UI options"
@@ -810,6 +1010,21 @@
           ],
           "description": "Chat scrollbar visibility",
           "default": "default"
+        },
+        "mouse": {
+          "type": "boolean",
+          "description": "Enable terminal mouse capture for selection, clicks, and scrolling in the TUI. Disable to let the terminal emulator or tmux handle text selection and copy/paste",
+          "default": true
+        },
+        "exit_banner": {
+          "type": "string",
+          "enum": [
+            "default",
+            "compact",
+            "none"
+          ],
+          "description": "Exit banner style after quitting Crush",
+          "default": "default"
         }
       },
       "additionalProperties": false,
@@ -821,6 +1036,12 @@
           "type": "string"
         },
         "refresh_token": {
+          "type": "string"
+        },
+        "id_token": {
+          "type": "string"
+        },
+        "account_id": {
           "type": "string"
         },
         "expires_in": {

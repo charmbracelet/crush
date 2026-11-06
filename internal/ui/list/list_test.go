@@ -830,3 +830,44 @@ func totalRenderHits(items []*trackedItem) int {
 	}
 	return n
 }
+
+// tallItem renders a fixed number of lines, so tests can build lists
+// whose first visible item is taller than the viewport.
+type tallItem struct {
+	*Versioned
+	lines int
+}
+
+func newTallItem(lines int) *tallItem {
+	return &tallItem{Versioned: NewVersioned(), lines: lines}
+}
+
+func (t *tallItem) Render(width int) string {
+	return strings.TrimSuffix(strings.Repeat("x\n", t.lines), "\n")
+}
+
+func (t *tallItem) Finished() bool { return false }
+
+// TestList_AtBottom_TallFirstVisibleItem covers the case where the item
+// at offsetIdx is taller than the viewport: the accumulated height passes
+// the viewport height long before the end of the list, but the lines
+// scrolled out of view (offsetLine) make up the difference. AtBottom must
+// account for offsetLine before bailing out early.
+func TestList_AtBottom_TallFirstVisibleItem(t *testing.T) {
+	t.Parallel()
+
+	for _, gap := range []int{0, 1} {
+		l := NewList(newTallItem(50), newTallItem(3))
+		l.SetGap(gap)
+		l.SetSize(40, 10)
+
+		l.ScrollToBottom()
+		require.True(t, l.AtBottom(), "gap=%d: at bottom after ScrollToBottom", gap)
+
+		l.ScrollBy(-1)
+		require.False(t, l.AtBottom(), "gap=%d: not at bottom after scrolling up", gap)
+
+		l.ScrollBy(1)
+		require.True(t, l.AtBottom(), "gap=%d: back at bottom after scrolling down", gap)
+	}
+}

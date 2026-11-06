@@ -7,9 +7,32 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"testing"
 )
 
-var homedir, homedirErr = os.UserHomeDir()
+var homedir, homedirErr = userHomeDir()
+
+// userHomeDir returns the real home, or under go test a scratch one so no
+// test can read or rewrite the developer's files.
+func userHomeDir() (string, error) {
+	if !testing.Testing() {
+		return os.UserHomeDir()
+	}
+	for _, key := range testIgnoredEnv {
+		os.Unsetenv(key) //nolint:errcheck
+	}
+	return os.MkdirTemp("", "crush-test-home-*")
+}
+
+// testIgnoredEnv would point tests at real dirs; tests set them via t.Setenv.
+var testIgnoredEnv = []string{
+	"CRUSH_GLOBAL_CONFIG",
+	"CRUSH_GLOBAL_DATA",
+	"CRUSH_DATA_DIR",
+	"XDG_CONFIG_HOME",
+	"XDG_DATA_HOME",
+	"XDG_CACHE_HOME",
+}
 
 func init() {
 	if homedirErr != nil {
@@ -35,12 +58,24 @@ func Short(p string) string {
 	if homedir == "" || !strings.HasPrefix(p, homedir) {
 		return p
 	}
+	if len(p) == len(homedir) {
+		return "~"
+	}
+	if !os.IsPathSeparator(p[len(homedir)]) {
+		return p
+	}
 	return filepath.Join("~", strings.TrimPrefix(p, homedir))
 }
 
 // Long replaces the `~` with actual home path from [Dir].
 func Long(p string) string {
 	if homedir == "" || !strings.HasPrefix(p, "~") {
+		return p
+	}
+	if len(p) == 1 {
+		return homedir
+	}
+	if !os.IsPathSeparator(p[1]) {
 		return p
 	}
 	return strings.Replace(p, "~", homedir, 1)

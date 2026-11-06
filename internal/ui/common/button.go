@@ -18,6 +18,10 @@ type ButtonOpts struct {
 	Selected bool
 	// Hovered indicates whether the mouse is hovering over the button
 	Hovered bool
+	// Inactive marks a button inside a prompt that is not in the active
+	// pane. It renders lighter than the plain blurred style so the
+	// choices stay legible while the chat has focus.
+	Inactive bool
 	// Padding inner horizontal padding defaults to 2 if this is 0
 	Padding int
 }
@@ -32,6 +36,8 @@ func Button(t *styles.Styles, opts ButtonOpts) string {
 		style = t.Button.Hovered.Bold(true)
 	} else if opts.Selected {
 		style = t.Button.Focused
+	} else if opts.Inactive {
+		style = t.Button.Inactive
 	}
 
 	text := opts.Text
@@ -75,10 +81,10 @@ func ButtonGroup(t *styles.Styles, buttons []ButtonOpts, spacing string) string 
 	return strings.Join(parts, spacing)
 }
 
-// ButtonHitCompositor builds a lipgloss Compositor with one hit
-// layer per button, positioned horizontally at (x, y). Layer IDs
-// are "btn_0", "btn_1", etc. The spacing parameter must match
-// what was passed to ButtonGroup when rendering.
+// ButtonHitCompositor builds a lipgloss Compositor with one hit layer per
+// button. A spacing value containing a newline positions buttons vertically;
+// otherwise they are positioned horizontally. Layer IDs are "btn_0",
+// "btn_1", etc. The spacing must match what ButtonGroup uses for rendering.
 func ButtonHitCompositor(sty *styles.Styles, opts []ButtonOpts, spacing string, x, y int) *lipgloss.Compositor {
 	if len(opts) == 0 {
 		return nil
@@ -86,15 +92,22 @@ func ButtonHitCompositor(sty *styles.Styles, opts []ButtonOpts, spacing string, 
 	if spacing == "" {
 		spacing = "  "
 	}
+	vertical := strings.Contains(spacing, "\n")
 	spacingWidth := lipgloss.Width(spacing)
+	spacingHeight := strings.Count(spacing, "\n")
 	var layers []*lipgloss.Layer
-	bx := x
+	bx, by := x, y
 	for i, o := range opts {
 		b := Button(sty, o)
 		w := lipgloss.Width(b)
 		hitStr := strings.Repeat(" ", w)
-		layers = append(layers, lipgloss.NewLayer(hitStr).X(bx).Y(y).ID(fmt.Sprintf("btn_%d", i)))
-		bx += w + spacingWidth
+		layers = append(layers, lipgloss.NewLayer(hitStr).X(bx).Y(by).ID(fmt.Sprintf("btn_%d", i)))
+		if vertical {
+			bx = x
+			by += lipgloss.Height(b) + max(0, spacingHeight-1)
+		} else {
+			bx += w + spacingWidth
+		}
 	}
 	return lipgloss.NewCompositor(layers...)
 }

@@ -36,6 +36,8 @@ func TestCloneForWrite_Isolation(t *testing.T) {
 	clone.Options.TUI.CompactMode = true
 	enabled := true
 	clone.Options.TUI.Transparent = &enabled
+	disabled := false
+	clone.Options.TUI.Mouse = &disabled
 
 	// The original must be untouched.
 	require.Equal(t, "openai", orig.Models[SelectedModelTypeLarge].Provider, "Models leaked")
@@ -43,4 +45,5 @@ func TestCloneForWrite_Isolation(t *testing.T) {
 	require.NotContains(t, orig.MCP, "b", "MCP leaked")
 	require.False(t, orig.Options.TUI.CompactMode, "Options.TUI.CompactMode leaked")
 	require.Nil(t, orig.Options.TUI.Transparent, "Options.TUI.Transparent leaked")
+	require.Nil(t, orig.Options.TUI.Mouse, "Options.TUI.Mouse leaked")
 }

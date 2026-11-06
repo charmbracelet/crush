@@ -3,6 +3,7 @@ package config
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -12,8 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/catwalk/pkg/catwalk"
+	"charm.land/catwalk/v3/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/invopop/jsonschema"
@@ -58,6 +60,7 @@ const (
 
 const (
 	AgentCoder string = "coder"
+	AgentPlan  string = "plan"
 	AgentTask  string = "task"
 )
 
@@ -146,40 +149,41 @@ type ProviderConfig struct {
 
 	// The provider models
 	Models []catwalk.Model `json:"models,omitempty" jsonschema:"description=List of models available from this provider"`
+
+	// ChatGPTModels lists the models the ChatGPT (Codex) backend grants
+	// when the provider is authenticated with a ChatGPT account. It is
+	// the provider's whole catalog in that case: the API-key models in
+	// Models are not served by the subscription.
+	ChatGPTModels []catwalk.Model `json:"chatgpt_models,omitempty" jsonschema:"-"`
+
+	// GrokModels lists the models the Grok plan grants when the provider
+	// is authenticated with a Grok account. Like ChatGPTModels, it is
+	// the provider's whole catalog in that case.
+	GrokModels []catwalk.Model `json:"grok_models,omitempty" jsonschema:"-"`
 }
 
 // ToProvider converts the [ProviderConfig] to a [catwalk.Provider].
 func (c *ProviderConfig) ToProvider() catwalk.Provider {
-	// Convert config provider to provider.Provider format
-	provider := catwalk.Provider{
+	return catwalk.Provider{
 		Name:   c.Name,
 		ID:     catwalk.InferenceProvider(c.ID),
-		Models: make([]catwalk.Model, len(c.Models)),
+		Models: c.Models,
 	}
-
-	// Convert models
-	for i, model := range c.Models {
-		provider.Models[i] = catwalk.Model{
-			ID:                     model.ID,
-			Name:                   model.Name,
-			CostPer1MIn:            model.CostPer1MIn,
-			CostPer1MOut:           model.CostPer1MOut,
-			CostPer1MInCached:      model.CostPer1MInCached,
-			CostPer1MOutCached:     model.CostPer1MOutCached,
-			ContextWindow:          model.ContextWindow,
-			DefaultMaxTokens:       model.DefaultMaxTokens,
-			CanReason:              model.CanReason,
-			ReasoningLevels:        model.ReasoningLevels,
-			DefaultReasoningEffort: model.DefaultReasoningEffort,
-			SupportsImages:         model.SupportsImages,
-		}
-	}
-
-	return provider
 }
 
 func (c *ProviderConfig) SetupGitHubCopilot() {
 	maps.Copy(c.ExtraHeaders, copilot.Headers())
+}
+
+// HasAPIKey reports whether the provider's api_key resolves to a usable
+// credential. The stored value is often an unresolved template like
+// $OPENAI_API_KEY, which is not a credential until the variable exists.
+func (c *ProviderConfig) HasAPIKey(resolver VariableResolver) bool {
+	if c.APIKey == "" {
+		return false
+	}
+	v, err := resolver.ResolveValue(c.APIKey)
+	return err == nil && v != ""
 }
 
 type MCPType string
@@ -200,6 +204,19 @@ type MCPConfig struct {
 	DisabledTools []string          `json:"disabled_tools,omitempty" jsonschema:"description=List of tools from this MCP server to disable,example=get-library-doc"`
 	EnabledTools  []string          `json:"enabled_tools,omitempty" jsonschema:"description=Allow list of tools from this MCP server,example=get-library-doc"`
 	Timeout       int               `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds for MCP server connections,default=10,example=30,example=60,example=120"`
+
+	// Sessionless marks a server that does not maintain an MCP session (it
+	// never issues a Mcp-Session-Id). When true, Crush omits the
+	// tools/prompts/resources list-changed handlers: the go-sdk opens a
+	// SEP-2575 "subscriptions/listen" stream whenever any of those handlers
+	// is set, and sessionless streamable-HTTP servers (e.g. GitHub MCP)
+	// answer that POST with 404 ("session not found"), which the SDK treats
+	// as fatal. The cost is no live list-changed notifications from this
+	// server.
+	//
+	// When nil, Crush auto-detects a set of known sessionless servers (see
+	// IsSessionless); set it explicitly to override that detection.
+	Sessionless *bool `json:"sessionless,omitempty" jsonschema:"description=Mark a sessionless MCP server (no Mcp-Session-Id) so Crush skips the subscriptions/listen stream it would otherwise reject. Leave unset to auto-detect known sessionless servers (e.g. GitHub MCP),default=false"`
 
 	// Headers are HTTP headers for HTTP/SSE MCP servers. Values run
 	// through shell expansion at MCP startup, so $VAR and $(cmd)
@@ -236,6 +253,52 @@ type MCPConfig struct {
 	// OAuthToken is the persisted OAuth token for this server. It is
 	// managed internally and stored in the global data config.
 	OAuthToken *oauth.Token `json:"oauth_token,omitempty" jsonschema:"-"`
+
+	// ChannelEnabled enables an MCP server as a channel directly from config,
+	// equivalent to passing its name via --channels on the CLI. This lets
+	// channels be declared persistently in crush.json without needing a CLI
+	// flag on every launch.
+	ChannelEnabled bool `json:"channel_enabled,omitempty" jsonschema:"description=Enable this MCP server as a channel (equivalent to --channels),default=false"`
+
+	// ChannelReply, when set on a server enabled as a channel, makes Crush
+	// route the final assistant response of every turn that originated from
+	// this channel back through one of the server's own tools, so a message
+	// received on the channel gets a reply on the channel even when the
+	// model only produced terminal output.
+	ChannelReply *MCPChannelReply `json:"channel_reply,omitempty" jsonschema:"description=Automatically route replies for turns originating from this channel back through one of the server's tools"`
+}
+
+// MCPChannelReply configures deterministic reply routing for an MCP server
+// acting as a channel: which of the server's tools deliver a reply for
+// direct and group pushes, and how the reply text and target are mapped
+// onto tool arguments.
+type MCPChannelReply struct {
+	// User routes replies to direct (person-to-person) channel pushes.
+	User *MCPChannelReplyRoute `json:"user,omitempty" jsonschema:"description=Reply route for direct messages"`
+	// Group routes replies to group channel pushes. It is preferred over
+	// User when the push carries the group route's meta attribute.
+	Group *MCPChannelReplyRoute `json:"group,omitempty" jsonschema:"description=Reply route for group messages"`
+	// MessageParam is the tool argument that receives the reply text.
+	MessageParam string `json:"message_param,omitempty" jsonschema:"description=Tool argument name that receives the reply text,default=message"`
+	// SuppressTools lists additional tool names (beyond the two route
+	// tools) that count as the model having already replied on the channel
+	// during the turn, e.g. an operator-shortcut send tool.
+	SuppressTools []string `json:"suppress_tools,omitempty" jsonschema:"description=Additional tool names that suppress the automatic reply when the model already called one of them during the turn,example=send"`
+}
+
+// MCPChannelReplyRoute maps one kind of inbound channel push onto the MCP
+// tool call that delivers a reply to it.
+type MCPChannelReplyRoute struct {
+	// Tool is the MCP tool (bare name, without the mcp_<server>_ prefix)
+	// invoked to deliver the reply.
+	Tool string `json:"tool" jsonschema:"required,description=MCP tool name that sends the reply,example=send_message_to_user"`
+	// TargetParam is the tool argument that receives the reply target
+	// (recipient or group ID).
+	TargetParam string `json:"target_param" jsonschema:"required,description=Tool argument name that receives the reply target,example=user_id"`
+	// TargetMeta is the <channel> meta attribute whose value identifies
+	// the reply target. Defaults to "sender" for the user route and
+	// "group" for the group route.
+	TargetMeta string `json:"target_meta,omitempty" jsonschema:"description=Channel meta attribute carrying the reply target; defaults to sender (user route) or group (group route)"`
 }
 
 // isOrphanedToken reports whether this entry is a leftover OAuth token
@@ -257,14 +320,52 @@ type LSPConfig struct {
 }
 
 type TUIOptions struct {
-	CompactMode bool   `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
-	DiffMode    string `json:"diff_mode,omitempty" jsonschema:"description=Diff mode for the TUI interface,enum=unified,enum=split"`
-	// Here we can add themes later or any TUI related options
-	//
-
+	CompactMode bool        `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
+	DiffMode    string      `json:"diff_mode,omitempty" jsonschema:"description=Diff mode for the TUI interface,enum=unified,enum=split"`
+	ActiveTheme string      `json:"active_theme,omitempty" jsonschema:"description=Name of the currently active theme,default=charmtone-panther,example=charmtone-panther,example=gruvbox-dark,example=keanu"`
 	Completions Completions `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
 	Transparent *bool       `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
 	Scrollbar   string      `json:"scrollbar,omitempty" jsonschema:"description=Chat scrollbar visibility,enum=default,enum=always,enum=never,default=default"`
+	Mouse       *bool       `json:"mouse,omitempty" jsonschema:"description=Enable terminal mouse capture for selection\\, clicks\\, and scrolling in the TUI. Disable to let the terminal emulator or tmux handle text selection and copy/paste,default=true"`
+	ExitBanner  ExitBanner  `json:"exit_banner,omitempty" jsonschema:"description=Exit banner style after quitting Crush,enum=default,enum=compact,enum=none,default=default"`
+}
+
+// IsTransparent reports whether the TUI draws a transparent background. The
+// nil receiver and the unset pointer both mean opaque, so callers can ask
+// without unwrapping either.
+func (t *TUIOptions) IsTransparent() bool {
+	return t != nil && t.Transparent != nil && *t.Transparent
+}
+
+// UnmarshalJSON tolerates the legacy string form of the "theme" field.
+// Older Crush builds stored the selected theme as `"theme":
+// "gruvbox-dark"`. When that string is encountered it is promoted to the
+// active theme name so existing configs keep loading.
+func (t *TUIOptions) UnmarshalJSON(data []byte) error {
+	type tuiOptionsAlias TUIOptions
+	var loose struct {
+		tuiOptionsAlias
+		Theme json.RawMessage `json:"theme"`
+	}
+	if err := json.Unmarshal(data, &loose); err != nil {
+		return err
+	}
+	*t = TUIOptions(loose.tuiOptionsAlias)
+	if len(loose.Theme) == 0 || string(loose.Theme) == "null" {
+		return nil
+	}
+
+	var legacyName string
+	if err := json.Unmarshal(loose.Theme, &legacyName); err != nil {
+		// Legacy inline theme maps are ignored now that files are the only
+		// palette source, but they must remain loadable during migration.
+		var legacyThemes map[string]json.RawMessage
+		return json.Unmarshal(loose.Theme, &legacyThemes)
+	}
+	if legacyName != "" && t.ActiveTheme == "" {
+		t.ActiveTheme = legacyName
+	}
+	return nil
 }
 
 // Completions defines options for the completions UI.
@@ -273,9 +374,17 @@ type Completions struct {
 	MaxItems *int `json:"max_items,omitempty" jsonschema:"description=Maximum number of items to return for the ls tool,default=1000,example=100"`
 }
 
+// Limits returns the configured completion limits. Zero means the user has not
+// pinned that limit, and callers fall back to their own built-in cap.
 func (c Completions) Limits() (depth, items int) {
 	return ptrValOr(c.MaxDepth, 0), ptrValOr(c.MaxItems, 0)
 }
+
+// Diff mode options.
+const (
+	DiffModeUnified = "unified" // Inline unified diffs
+	DiffModeSplit   = "split"   // Side-by-side diffs
+)
 
 // Scrollbar visibility options.
 const (
@@ -284,8 +393,41 @@ const (
 	ScrollbarNever   = "never"   // Never show scrollbar
 )
 
+// ExitBanner selects what Crush prints after the TUI exits.
+type ExitBanner string
+
+const (
+	// ExitBannerDefault renders the full ASCII art logo with padding. It is
+	// also what the zero value and any unrecognized value fall back to.
+	ExitBannerDefault ExitBanner = "default"
+	// ExitBannerCompact renders only the session and resume lines, with no
+	// logo and no padding. With no active session it renders nothing at all,
+	// so Crush exits silently.
+	ExitBannerCompact ExitBanner = "compact"
+	// ExitBannerNone renders nothing.
+	ExitBannerNone ExitBanner = "none"
+)
+
 type Permissions struct {
 	AllowedTools []string `json:"allowed_tools,omitempty" jsonschema:"description=List of tools that don't require permission prompts,example=bash,example=view"`
+	// BlockedCommands adds to the built-in list of commands treated as
+	// dangerous. Dangerous commands are prompted for in normal mode, and
+	// blocked at exec time when they turn up indirectly.
+	BlockedCommands []string `json:"blocked_commands,omitempty" jsonschema:"description=Extra shell commands to treat as dangerous (prompted for in normal mode),example=kubectl,example=terraform"`
+	// AllowedCommands removes entries from the effective dangerous list,
+	// including the built-in defaults.
+	AllowedCommands []string `json:"allowed_commands,omitempty" jsonschema:"description=Shell commands to drop from the dangerous list so they stop prompting,example=curl,example=ssh"`
+	// SafeCommands are exact command lines that skip the permission prompt
+	// entirely, e.g. "go build" or "cargo check". An entry matches only when
+	// the command is written exactly as given, with no extra arguments and
+	// no flags, so "go build" never covers "go build -o /usr/local/bin/x".
+	//
+	// This is the narrow form on purpose. The built-in list carries a flag
+	// policy per command, which is what lets `git log` through while holding
+	// back `git push` and `git diff --output=FILE`. Expressing that in
+	// configuration would be a small security language, and the thing people
+	// actually want to say is "the exact command I run fifty times a day".
+	SafeCommands []string `json:"safe_commands,omitempty" jsonschema:"description=Exact command lines that skip the permission prompt. Matched literally with no extra arguments,example=go build,example=cargo check"`
 }
 
 type TrailerStyle string
@@ -334,6 +476,70 @@ type Options struct {
 	Progress                  *bool        `json:"progress,omitempty" jsonschema:"description=Show indeterminate progress updates during long operations,default=true"`
 	Notifications             string       `json:"notifications,omitempty" jsonschema:"description=Notification style to use. Options: auto (default)\\, native\\, osc\\, bell\\, disabled. Auto selects based on environment: native for local sessions\\, osc for SSH (with automatic OSC 99/777 detection).,enum=auto,enum=native,enum=osc,enum=bell,enum=disabled,default=auto"`
 	DisabledSkills            []string     `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=crush-config"`
+	RequestTimeout            *int         `json:"request_timeout,omitempty" jsonschema:"description=Timeout in seconds for each LLM API request. Streaming responses are aborted only after this much inactivity between tokens\\, so slow but active streams are never killed; the wait for the first token gets at least five minutes for prompt prefill. 0 disables it\\, negative values are invalid.,default=60,example=120,example=300,example=0"`
+	MaxBackgroundJobs         *int         `json:"max_background_jobs,omitempty" jsonschema:"description=How many background shell jobs may run at once. Jobs that have finished never count against it. 0 or negative restores the default.,default=50,example=10,example=200"`
+	// PinentryIntegrated renders GPG passphrase/PIN prompts as a native
+	// Crush dialog (loopback pinentry) instead of handing the terminal
+	// over to an external pinentry program. No GPG or git configuration
+	// is modified: the redirect only applies to processes Crush spawns.
+	PinentryIntegrated   *bool `json:"pinentry_integrated,omitempty" jsonschema:"description=Render GPG passphrase prompts as a native Crush dialog instead of an external pinentry program. Works with file-based keys and security keys and never modifies GPG or git configuration.,default=true"`
+	PinentryCacheTimeout *int  `json:"pinentry_cache_timeout,omitempty" jsonschema:"description=Seconds Crush keeps an entered GPG passphrase in memory so repeated signing operations do not re-prompt. 0 (the default) disables it; gpg-agent's own cache applies regardless.,default=0,example=300"`
+}
+
+// DefaultMaxBackgroundJobs is how many background shell jobs may run at once
+// when the user has not set max_background_jobs.
+const DefaultMaxBackgroundJobs = 50
+
+// GetMaxBackgroundJobs returns the running-job ceiling, always positive.
+func (o *Options) GetMaxBackgroundJobs() int {
+	if o == nil || o.MaxBackgroundJobs == nil || *o.MaxBackgroundJobs <= 0 {
+		return DefaultMaxBackgroundJobs
+	}
+	return *o.MaxBackgroundJobs
+}
+
+// DefaultRequestTimeout bounds each LLM API request when the user has not
+// configured a timeout. Slow or unreachable providers fail after it instead
+// of blocking a session forever; streamed responses are only aborted after
+// this much inactivity between tokens, and users running slow local models
+// can raise or disable it via options.request_timeout.
+const DefaultRequestTimeout = 2 * time.Minute
+
+// GetRequestTimeout returns the per-request timeout for LLM API calls (a
+// hard deadline for non-streaming requests and an idle timeout for
+// streams, with a more generous budget for the first streamed token), or
+// zero when disabled. The nil receiver and the unset field both mean
+// DefaultRequestTimeout, so callers can ask without unwrapping either.
+func (o *Options) GetRequestTimeout() time.Duration {
+	if o == nil || o.RequestTimeout == nil {
+		return DefaultRequestTimeout
+	}
+	if *o.RequestTimeout <= 0 {
+		return 0
+	}
+	return time.Duration(*o.RequestTimeout) * time.Second
+}
+
+// GetPinentryIntegrated reports whether the integrated pinentry is
+// enabled. Enabled by default; callers use it to decide whether to
+// prompt in-app or let the external pinentry handle credentials.
+func (o *Options) GetPinentryIntegrated() bool {
+	if o == nil || o.PinentryIntegrated == nil {
+		return true
+	}
+	return *o.PinentryIntegrated
+}
+
+// GetPinentryCacheTimeout returns how long an entered GPG passphrase may
+// stay in Crush's memory, or 0 when caching is disabled.
+func (o *Options) GetPinentryCacheTimeout() time.Duration {
+	if o == nil || o.PinentryCacheTimeout == nil {
+		return 0
+	}
+	if *o.PinentryCacheTimeout <= 0 {
+		return 0
+	}
+	return time.Duration(*o.PinentryCacheTimeout) * time.Second
 }
 
 type MCPs map[string]MCPConfig
@@ -438,6 +644,33 @@ func (m MCPConfig) ResolvedURL(r VariableResolver) (string, error) {
 		return "", fmt.Errorf("url: %w", err)
 	}
 	return v, nil
+}
+
+// knownSessionlessMCPs is the set of MCP endpoint URLs (normalized, no
+// trailing slash) that are known not to maintain an MCP session — they
+// never issue a Mcp-Session-Id and reject the SEP-2575
+// "subscriptions/listen" stream. Add an entry when a server is confirmed to
+// behave this way.
+var knownSessionlessMCPs = map[string]struct{}{
+	"https://api.github.com/mcp":        {},
+	"https://api.githubcopilot.com/mcp": {},
+}
+
+// IsSessionless reports whether the server should be treated as sessionless.
+// An explicit Sessionless value wins; when unset, the resolved URL is matched
+// against knownSessionlessMCPs (trailing slash ignored). The URL is resolved
+// through r so $VAR-expanded endpoints are detected too; on a resolution
+// error the explicit value (or false) is used.
+func (m MCPConfig) IsSessionless(r VariableResolver) bool {
+	if m.Sessionless != nil {
+		return *m.Sessionless
+	}
+	url, err := m.ResolvedURL(r)
+	if err != nil {
+		return false
+	}
+	_, ok := knownSessionlessMCPs[strings.TrimSuffix(url, "/")]
+	return ok
 }
 
 // ResolvedHeaders returns m.Headers with every value expanded through
@@ -603,38 +836,9 @@ func (t ToolGlob) GetTimeout() time.Duration {
 	return ptrValOr(t.Timeout, 30*time.Second)
 }
 
-// HookConfig defines a user-configured shell command that fires on a hook
-// event (e.g. PreToolUse). This is a pure-data struct: matcher compilation
-// is owned by hooks.Runner so a JSON round-trip, merge, or reload can't
-// silently drop compiled state.
-type HookConfig struct {
-	// Friendly display name shown in the TUI. Falls back to Command when empty.
-	Name string `json:"name,omitempty" jsonschema:"description=Friendly display name shown in the TUI for this hook"`
-	// Regex pattern tested against the tool name. Empty means match all.
-	Matcher string `json:"matcher,omitempty" jsonschema:"description=Regex pattern tested against the tool name. Empty means match all tools."`
-	// Shell command to execute.
-	Command string `json:"command" jsonschema:"required,description=Shell command to execute when the hook fires"`
-	// Timeout in seconds. Default 30.
-	Timeout int `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds for the hook command,default=30"`
-}
-
-// DisplayName returns the hook name for display purposes. It returns Name
-// when set, otherwise falls back to Command.
-func (h *HookConfig) DisplayName() string {
-	if h.Name != "" {
-		return h.Name
-	}
-	return h.Command
-}
-
-// TimeoutDuration returns the hook timeout as a time.Duration, defaulting
-// to 30s.
-func (h *HookConfig) TimeoutDuration() time.Duration {
-	if h.Timeout <= 0 {
-		return 30 * time.Second
-	}
-	return time.Duration(h.Timeout) * time.Second
-}
+// HookConfig is a user-configured hook command. The hooks package owns
+// the type because it owns the event list it is validated against.
+type HookConfig = hooks.HookConfig
 
 // Config holds the configuration for crush.
 type Config struct {
@@ -728,8 +932,92 @@ func (c *Config) GetModel(provider, model string) *catwalk.Model {
 				return &m
 			}
 		}
+		for _, m := range providerConfig.ChatGPTModels {
+			if m.ID == model {
+				return &m
+			}
+		}
+		for _, m := range providerConfig.GrokModels {
+			if m.ID == model {
+				return &m
+			}
+		}
 	}
 	return nil
+}
+
+// ValidateReasoningEffort checks that effort is a reasoning level the
+// given provider/model supports. It returns an error listing the accepted
+// levels when the model cannot use it.
+func (c *Config) ValidateReasoningEffort(provider, modelID, effort string) error {
+	model := c.GetModel(provider, modelID)
+	if model == nil {
+		return fmt.Errorf("model %q not found for provider %q", modelID, provider)
+	}
+	levels := model.ReasoningEffortLevels()
+	if len(levels) == 0 {
+		return fmt.Errorf("model %q does not support reasoning effort", modelID)
+	}
+	if slices.Contains(levels, effort) {
+		return nil
+	}
+	return fmt.Errorf(
+		"model %q does not support reasoning effort %q, accepted values: %s",
+		modelID, effort, strings.Join(levels, ", "),
+	)
+}
+
+// IsModelAvailable returns true if the provider is enabled and the model
+// exists in its catalog. Unlike GetModel, it rejects disabled providers.
+func (c *Config) IsModelAvailable(provider, model string) bool {
+	providerConfig, ok := c.Providers.Get(provider)
+	if !ok || providerConfig.Disable {
+		return false
+	}
+	// A model is available in any of the provider's catalogs: the
+	// API-key list, or the ChatGPT/Grok subscription list fetched on
+	// login. Subscription models live outside Models, so checking only
+	// there would reject a model that is selectable and usable.
+	for _, m := range providerConfig.Models {
+		if m.ID == model {
+			return true
+		}
+	}
+	for _, m := range providerConfig.ChatGPTModels {
+		if m.ID == model {
+			return true
+		}
+	}
+	for _, m := range providerConfig.GrokModels {
+		if m.ID == model {
+			return true
+		}
+	}
+	return false
+}
+
+// UsableModels returns the models the current credential can serve: a
+// ChatGPT or Grok login only reaches its subscription's models.
+func (p ProviderConfig) UsableModels() []catwalk.Model {
+	if models, ok := p.SubscriptionModels(); ok {
+		return models
+	}
+	return p.Models
+}
+
+// SubscriptionModels returns the models a ChatGPT or Grok login grants, and
+// whether the provider is signed in with one at all.
+func (p ProviderConfig) SubscriptionModels() ([]catwalk.Model, bool) {
+	if p.OAuthToken == nil {
+		return nil, false
+	}
+	switch catwalk.InferenceProvider(p.ID) {
+	case catwalk.InferenceProviderOpenAI:
+		return p.ChatGPTModels, true
+	case catwalk.InferenceProviderXAI:
+		return p.GrokModels, true
+	}
+	return nil, false
 }
 
 func (c *Config) GetProviderForModel(modelType SelectedModelType) *ProviderConfig {
@@ -772,6 +1060,10 @@ const maxRecentModelsPerType = 5
 func allToolNames() []string {
 	return []string{
 		"agent",
+		"agent_dispatch",
+		"agent_send",
+		"agent_status",
+		"agent_stop",
 		"bash",
 		"crush_info",
 		"crush_logs",
@@ -817,6 +1109,37 @@ func resolveReadOnlyTools(tools []string) []string {
 	return filterSlice(tools, readOnlyTools, true)
 }
 
+func resolvePlanTools(tools []string) []string {
+	// The read-only LSP lookups mirror the task agent's tool set: planning
+	// needs symbol navigation just as much as research does. Both
+	// delegation styles are listed; the coordinator keeps whichever one
+	// suits the run mode.
+	planTools := []string{
+		"agent",
+		"agent_dispatch",
+		"agent_send",
+		"agent_status",
+		"agent_stop",
+		"glob",
+		"grep",
+		"ls",
+		"lsp_call_hierarchy",
+		"lsp_definition",
+		"lsp_symbols",
+		"question",
+		"sourcegraph",
+		"view",
+	}
+	return filterSlice(tools, planTools, true)
+}
+
+// resolveTaskTools returns the tools available to the task subagent: the
+// read-only set plus bash, so it can run git diff, tests, and rg while
+// reviewing. It still cannot edit or write files.
+func resolveTaskTools(tools []string) []string {
+	return filterSlice(tools, append(resolveReadOnlyTools(tools), "bash"), true)
+}
+
 func filterSlice(data []string, mask []string, include bool) []string {
 	var filtered []string
 	for _, s := range data {
@@ -848,7 +1171,18 @@ func (c *Config) SetupAgents() {
 			Description:  "An agent that helps with searching for context and finding implementation details.",
 			Model:        SelectedModelTypeLarge,
 			ContextPaths: c.Options.ContextPaths,
-			AllowedTools: resolveReadOnlyTools(allowedTools),
+			AllowedTools: resolveTaskTools(allowedTools),
+			// NO MCPs or LSPs by default
+			AllowedMCP: map[string][]string{},
+		},
+
+		AgentPlan: {
+			ID:           AgentPlan,
+			Name:         "Plan",
+			Description:  "An agent that performs deep analysis and prepares implementation plans without modifying files.",
+			Model:        SelectedModelTypeLarge,
+			ContextPaths: c.Options.ContextPaths,
+			AllowedTools: resolvePlanTools(allowedTools),
 			// NO MCPs or LSPs by default
 			AllowedMCP: map[string][]string{},
 		},
@@ -875,41 +1209,7 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 			return fmt.Errorf("invalid API key format for provider %s", c.ID)
 		}
 		return nil
-	}
-
-	switch c.Type {
-	case catwalk.TypeOpenAI, catwalk.TypeOpenAICompat, catwalk.TypeOpenRouter:
-		baseURL, _ := resolver.ResolveValue(c.BaseURL)
-		baseURL = cmp.Or(baseURL, "https://api.openai.com/v1")
-
-		switch providerID {
-		case catwalk.InferenceProviderOpenRouter:
-			testURL = baseURL + "/credits"
-		case catwalk.InferenceProviderOpenCodeGo:
-			testURL = strings.Replace(baseURL, "/go", "", 1) + "/models"
-		default:
-			testURL = baseURL + "/models"
-		}
-
-		headers["Authorization"] = "Bearer " + apiKey
-	case catwalk.TypeAnthropic:
-		baseURL, _ := resolver.ResolveValue(c.BaseURL)
-		baseURL = cmp.Or(baseURL, "https://api.anthropic.com/v1")
-
-		switch providerID {
-		case catwalk.InferenceKimiCoding:
-			testURL = baseURL + "/v1/models"
-		default:
-			testURL = baseURL + "/models"
-		}
-
-		headers["x-api-key"] = apiKey
-		headers["anthropic-version"] = "2023-06-01"
-	case catwalk.TypeGoogle:
-		baseURL, _ := resolver.ResolveValue(c.BaseURL)
-		baseURL = cmp.Or(baseURL, "https://generativelanguage.googleapis.com")
-		testURL = baseURL + "/v1beta/models?key=" + url.QueryEscape(apiKey)
-	case catwalk.TypeBedrock:
+	case catwalk.InferenceProviderBedrock, catwalk.InferenceProviderBedrockEurope:
 		// NOTE: Bedrock has a `/foundation-models` endpoint that we could in
 		// theory use, but apparently the authorization is region-specific,
 		// so it's not so trivial.
@@ -917,12 +1217,44 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 			return nil
 		}
 		return errors.New("not a valid bedrock api key")
-	case catwalk.TypeVercel:
+	case catwalk.InferenceProviderVercel:
 		// NOTE: Vercel does not validate API keys on the `/models` endpoint.
 		if strings.HasPrefix(apiKey, "vck_") { // Vercel API keys
 			return nil
 		}
 		return errors.New("not a valid vercel api key")
+	case catwalk.InferenceProviderGemini:
+		baseURL, _ := resolver.ResolveValue(c.BaseURL)
+		baseURL = cmp.Or(baseURL, "https://generativelanguage.googleapis.com")
+		testURL = baseURL + "/v1beta/models?key=" + url.QueryEscape(apiKey)
+	}
+
+	if testURL == "" {
+		// The models API endpoint is determined by the provider type, which
+		// describes the API format the provider speaks.
+		switch c.Type {
+		case catwalk.TypeMessages:
+			baseURL, _ := resolver.ResolveValue(c.BaseURL)
+			baseURL = cmp.Or(baseURL, "https://api.anthropic.com")
+
+			testURL = baseURL + "/v1/models"
+
+			headers["x-api-key"] = apiKey
+			headers["anthropic-version"] = "2023-06-01"
+		default:
+			// Completions, responses, and custom provider types all expose
+			// an OpenAI-style /models endpoint.
+			baseURL, _ := resolver.ResolveValue(c.BaseURL)
+			baseURL = cmp.Or(baseURL, "https://api.openai.com/v1")
+
+			if providerID == catwalk.InferenceProviderOpenRouter {
+				testURL = baseURL + "/credits"
+			} else {
+				testURL = baseURL + "/models"
+			}
+
+			headers["Authorization"] = "Bearer " + apiKey
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

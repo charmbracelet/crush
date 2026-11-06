@@ -33,6 +33,12 @@ type UserMessageItem struct {
 	sty         *styles.Styles
 }
 
+// newAttachmentRenderer builds the renderer user messages use to draw their
+// attachments.
+func newAttachmentRenderer(sty *styles.Styles) *attachments.Renderer {
+	return attachments.NewRenderer(sty.Attachments)
+}
+
 // NewUserMessageItem creates a new UserMessageItem.
 func NewUserMessageItem(sty *styles.Styles, message *message.Message, attachments *attachments.Renderer) MessageItem {
 	v := list.NewVersioned()
@@ -45,6 +51,11 @@ func NewUserMessageItem(sty *styles.Styles, message *message.Message, attachment
 		message:                  message,
 		sty:                      sty,
 	}
+}
+
+// Message returns the message the item renders.
+func (m *UserMessageItem) Message() *message.Message {
+	return m.message
 }
 
 // Finished implements list.Item. User messages are immutable once
@@ -73,7 +84,7 @@ func (m *UserMessageItem) RawRender(width int) string {
 		return m.renderHighlighted(content, cappedWidth, height)
 	}
 
-	renderer := common.MarkdownRenderer(m.sty, cappedWidth)
+	renderer := common.UserMarkdownRenderer(m.sty, cappedWidth)
 	mu := common.LockMarkdownRenderer(renderer)
 
 	mu.Lock()
@@ -105,7 +116,7 @@ func (m *UserMessageItem) renderSkillInvocation(content string, width int) strin
 	var skill skillInvocation
 	if err := xml.Unmarshal([]byte(content), &skill); err != nil {
 		// If parsing fails, just render as markdown
-		renderer := common.MarkdownRenderer(m.sty, width)
+		renderer := common.UserMarkdownRenderer(m.sty, width)
 		mu := common.LockMarkdownRenderer(renderer)
 
 		mu.Lock()

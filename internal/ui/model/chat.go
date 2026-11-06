@@ -2,6 +2,7 @@ package model
 
 import (
 	"image"
+	"slices"
 	"strings"
 	"time"
 
@@ -91,10 +92,28 @@ type Chat struct {
 	list     *list.List
 	idInxMap map[string]int // Map of message IDs to their indices in the list
 
-	// Animation visibility optimization: track animations paused due to items
-	// being scrolled out of view. When items become visible again, their
-	// animations are restarted.
-	pausedAnimations map[string]struct{}
+	// externalAnimation is set when something outside the list is animating
+	// and needs the shared clock, such as the header's subagent spinner.
+	externalAnimation bool
+
+	// animRunning is true while the shared animation clock has a tick
+	// outstanding. The clock stops itself when no visible item is spinning
+	// and is re-armed by EnsureAnimating once one is. animGen identifies
+	// the current clock: a tick carrying an older generation belongs to a
+	// clock that was superseded and is ignored, so a delayed tick can
+	// never run alongside a replacement. animArmedAt lets EnsureAnimating
+	// recover if a tick is ever lost.
+	animRunning bool
+	animGen     uint64
+	animArmedAt time.Time
+	// animNow is an injectable clock for tests (nil == real time).
+	animNow func() time.Time
+
+	// animAllowed gates the shared clock. setSessionMessages clears it when
+	// reloading a session whose agent is not busy so ghost spinners (an
+	// assistant message that never got a Finish part) stay still; the
+	// message handlers re-enable it when new work arrives.
+	animAllowed bool
 
 	// Mouse state
 	mouseDown     bool
@@ -129,6 +148,11 @@ type Chat struct {
 	scrollbarVisible bool
 	scrollbarHideSeq int    // current sequence number for hide timer
 	scrollbarMode    string // "default", "always", or "never"
+	// scrollbarHideArmed is the hide timeout already scheduled, or zero when
+	// none is outstanding. The tick is armed from the UI's Update tail rather
+	// than returned by the scroll calls, so a caller ignoring a command can
+	// no longer lose the auto-hide.
+	scrollbarHideArmed int
 
 	// resizing suppresses the O(N) total-height scan while a resize is in
 	// flight (and during the incremental warm afterward), so a drag only
@@ -165,10 +189,10 @@ type chatDrawCache struct {
 // messages.
 func NewChat(com *common.Common, scrollbarMode string) *Chat {
 	c := &Chat{
-		com:              com,
-		idInxMap:         make(map[string]int),
-		pausedAnimations: make(map[string]struct{}),
-		scrollbarMode:    scrollbarMode,
+		com:           com,
+		idInxMap:      make(map[string]int),
+		scrollbarMode: scrollbarMode,
+		animAllowed:   true,
 	}
 	l := list.NewList()
 	l.SetGap(1)
@@ -228,6 +252,13 @@ func (m *Chat) Draw(scr uv.Screen, area uv.Rectangle) {
 	}
 
 	rendered := m.list.Render()
+	// If we're in follow mode but the render revealed we're no longer at
+	// the bottom (e.g. streaming content grew an item), re-anchor and
+	// re-render so the view stays pinned to the end.
+	if m.follow && !m.list.AtBottom() {
+		m.list.ScrollToBottom()
+		rendered = m.list.Render()
+	}
 	method, ok := scr.WidthMethod().(ansi.Method)
 	if !ok {
 		// Width method isn't an ansi.Method (unlikely in practice — both
@@ -393,11 +424,24 @@ func (m *Chat) InvalidateRenderCaches() {
 	chat.ClearItemCaches(items)
 }
 
+// InvalidateVisibleRenderCaches drops cached rendered output on the
+// message items currently visible in the viewport, so the next draw
+// re-renders them with the current styles. Items outside the viewport
+// keep their cached output, which keeps theme previews fast in large
+// sessions; they are re-rendered by a later full invalidation.
+func (m *Chat) InvalidateVisibleRenderCaches() {
+	start, end := m.list.VisibleItemIndices()
+	for i := start; i <= end; i++ {
+		if item, ok := m.list.ItemAt(i).(chat.MessageItem); ok {
+			chat.ClearItemCaches([]chat.MessageItem{item})
+		}
+	}
+}
+
 // SetMessages sets the chat messages to the provided list of message items.
 func (m *Chat) SetMessages(msgs ...chat.MessageItem) tea.Cmd {
 	m.idInxMap = make(map[string]int)
-	m.pausedAnimations = make(map[string]struct{})
-	m.scrollbarVisible = false // Reset scrollbar visibility on new session load
+	m.resetScrollbar() // Reset scrollbar visibility on new session load
 
 	items := make([]list.Item, len(msgs))
 	for i, msg := range msgs {
@@ -416,7 +460,16 @@ func (m *Chat) SetMessages(msgs ...chat.MessageItem) tea.Cmd {
 }
 
 // AppendMessages appends a new message item to the chat list.
+//
+// The turn placeholder is carried to the end, so a message that lands while
+// it is up goes above it rather than below: the spinner marks the bottom of
+// the transcript for the whole turn instead of hopping over each arrival.
 func (m *Chat) AppendMessages(msgs ...chat.MessageItem) {
+	if pending := m.MessageItem(chat.PendingAssistantID); pending != nil && !containsMessage(msgs, chat.PendingAssistantID) {
+		m.RemoveMessage(chat.PendingAssistantID)
+		msgs = append(append(make([]chat.MessageItem, 0, len(msgs)+1), msgs...), pending)
+	}
+
 	items := make([]list.Item, len(msgs))
 	indexOffset := m.list.Len()
 	for i, msg := range msgs {
@@ -430,6 +483,24 @@ func (m *Chat) AppendMessages(msgs ...chat.MessageItem) {
 		items[i] = msg
 	}
 	m.list.AppendItems(items...)
+}
+
+// LastPromptID returns the id of the last stored prompt in view, or "".
+func (m *Chat) LastPromptID() string {
+	for i := m.list.Len() - 1; i >= 0; i-- {
+		item, ok := m.list.ItemAt(i).(*chat.UserMessageItem)
+		if ok && item.ID() != chat.PendingUserID && item.Message().IsPrompt() {
+			return item.ID()
+		}
+	}
+	return ""
+}
+
+// containsMessage reports whether any of msgs carries the given id.
+func containsMessage(msgs []chat.MessageItem, id string) bool {
+	return slices.ContainsFunc(msgs, func(msg chat.MessageItem) bool {
+		return msg.ID() == id
+	})
 }
 
 // UpdateNestedToolIDs updates the ID map for nested tools within a container.
@@ -456,69 +527,124 @@ func (m *Chat) UpdateNestedToolIDs(containerID string) {
 	}
 }
 
-// Animate animates items in the chat list. Only propagates animation messages
-// to visible items to save CPU. When items are not visible, their animation ID
-// is tracked so it can be restarted when they become visible again.
-func (m *Chat) Animate(msg anim.StepMsg) tea.Cmd {
-	idx, ok := m.idInxMap[msg.ID]
-	if !ok {
-		return nil
-	}
+// animTickMsg is the shared animation clock. One tick advances every
+// visible spinner by a frame; there is one live clock at a time regardless
+// of how many items are animating. gen is the clock generation the tick
+// was armed for.
+type animTickMsg struct{ gen uint64 }
 
-	animatable, ok := m.list.ItemAt(idx).(chat.Animatable)
-	if !ok {
-		return nil
+// hasVisibleAnimation reports whether any item in the viewport is spinning.
+func (m *Chat) hasVisibleAnimation() bool {
+	if m.list.Len() == 0 {
+		return false
 	}
-
-	// Check if item is currently visible.
 	startIdx, endIdx := m.list.VisibleItemIndices()
-	isVisible := idx >= startIdx && idx <= endIdx
-
-	if !isVisible {
-		// Item not visible - pause animation by not propagating.
-		// Track it so we can restart when it becomes visible.
-		m.pausedAnimations[msg.ID] = struct{}{}
-		return nil
+	for idx := startIdx; idx <= endIdx; idx++ {
+		if animatable, ok := m.list.ItemAt(idx).(chat.Animatable); ok && animatable.Spinning() {
+			return true
+		}
 	}
-
-	// Item is visible - remove from paused set and animate.
-	delete(m.pausedAnimations, msg.ID)
-	return animatable.Animate(msg)
+	return false
 }
 
-// RestartPausedVisibleAnimations restarts animations for items that were paused
-// due to being scrolled out of view but are now visible again.
-func (m *Chat) RestartPausedVisibleAnimations() tea.Cmd {
-	if len(m.pausedAnimations) == 0 {
+// animClockLostAfter is how long an armed clock may go without its tick
+// arriving before EnsureAnimating assumes the command was lost and arms a
+// new one. Generous enough that a slow frame never trips it.
+const animClockLostAfter = 2 * time.Second
+
+// SetAnimationsAllowed gates the shared animation clock. It is cleared
+// when a session is reloaded whose agent is not busy so ghost spinners (an
+// assistant message that never got a Finish part) stay still, and re-enabled
+// whenever new messages arrive for the current session.
+func (m *Chat) SetAnimationsAllowed(allowed bool) {
+	m.animAllowed = allowed
+}
+
+// EnsureAnimating starts the shared animation clock if a visible item is
+// spinning and no tick is outstanding. Update calls it in its tail on
+// every message so any change that puts a spinner on screen (new message,
+// tool update, scroll, session load) starts the clock without per-call-site
+// wiring. It is the only place a tick is armed apart from Tick itself.
+// SetExternalAnimation records whether something outside the transcript is
+// animating, such as the header's subagent spinner. The clock is shared, and
+// its gate otherwise only looks at items currently on screen, so an animation
+// living in the chrome would never keep it running.
+func (m *Chat) SetExternalAnimation(animating bool) {
+	m.externalAnimation = animating
+}
+
+func (m *Chat) EnsureAnimating() tea.Cmd {
+	if !m.animAllowed {
+		m.animRunning = false
 		return nil
 	}
+	if m.animRunning && m.now().Sub(m.animArmedAt) < animClockLostAfter {
+		return nil
+	}
+	if !m.hasVisibleAnimation() && !m.externalAnimation {
+		m.animRunning = false
+		return nil
+	}
+	return m.armAnimClock()
+}
 
+func (m *Chat) armAnimClock() tea.Cmd {
+	m.animRunning = true
+	m.animArmedAt = m.now()
+	m.animGen++
+	gen := m.animGen
+	return tea.Tick(anim.FrameInterval(), func(time.Time) tea.Msg {
+		return animTickMsg{gen: gen}
+	})
+}
+
+func (m *Chat) now() time.Time {
+	if m.animNow != nil {
+		return m.animNow()
+	}
+	return time.Now()
+}
+
+// stopAnimating marks the clock as stopped so the next EnsureAnimating
+// re-arms it. Called while consuming the current clock's tick; bumping
+// the generation also retires that clock in case the tick was not the
+// current one.
+func (m *Chat) stopAnimating(msg animTickMsg) {
+	if msg.gen != m.animGen {
+		return
+	}
+	m.animRunning = false
+}
+
+// Tick advances every visible spinning item by one frame. It reports
+// whether any rendered output changed and returns the next tick while a
+// visible item is still spinning; when none is, the clock stops and no
+// command is returned. Ticks from a superseded clock generation are
+// ignored so they cannot re-arm a second clock.
+func (m *Chat) Tick(msg animTickMsg) (changed bool, cmd tea.Cmd) {
+	if msg.gen != m.animGen {
+		return false, nil
+	}
+	m.animRunning = false
+	if m.list.Len() == 0 {
+		return false, nil
+	}
+	spinning := false
 	startIdx, endIdx := m.list.VisibleItemIndices()
-	var cmds []tea.Cmd
-
-	for id := range m.pausedAnimations {
-		idx, ok := m.idInxMap[id]
-		if !ok {
-			// Item no longer exists.
-			delete(m.pausedAnimations, id)
+	for idx := startIdx; idx <= endIdx; idx++ {
+		animatable, ok := m.list.ItemAt(idx).(chat.Animatable)
+		if !ok || !animatable.Spinning() {
 			continue
 		}
-
-		if idx >= startIdx && idx <= endIdx {
-			// Item is now visible - restart its animation.
-			if animatable, ok := m.list.ItemAt(idx).(chat.Animatable); ok {
-				if cmd := animatable.StartAnimation(); cmd != nil {
-					cmds = append(cmds, cmd)
-				}
-			}
-			delete(m.pausedAnimations, id)
+		spinning = true
+		if animatable.Advance() {
+			changed = true
 		}
 	}
-
-	if len(cmds) == 0 {
-		return nil
+	if !spinning {
+		return changed, nil
 	}
-	return tea.Batch(cmds...)
+	return changed, m.armAnimClock()
 }
 
 // Focus sets the focus state of the chat component.
@@ -529,6 +655,56 @@ func (m *Chat) Focus() {
 // Blur removes the focus state from the chat component.
 func (m *Chat) Blur() {
 	m.list.Blur()
+}
+
+// ScrollPosition returns the list's first visible item index and the line
+// offset into it.
+func (m *Chat) ScrollPosition() (offsetIdx, offsetLine int) {
+	return m.list.ScrollPosition()
+}
+
+// Offset returns the scroll offset in lines from the top of the list.
+func (m *Chat) Offset() int {
+	return m.list.Offset()
+}
+
+// Selected returns the index of the selected item.
+func (m *Chat) Selected() int {
+	return m.list.Selected()
+}
+
+// Focused returns whether the chat list is focused.
+func (m *Chat) Focused() bool {
+	return m.list.Focused()
+}
+
+// RenderState captures everything about the chat that affects its rendered
+// output and is not carried by item versions. Anything added to Chat that
+// Draw reads belongs here, so callers that memoize whole frames stay correct
+// without knowing Chat's internals.
+type RenderState struct {
+	OffsetIdx        int
+	OffsetLine       int
+	Selected         int
+	Focused          bool
+	ScrollbarVisible bool
+	// ItemsVersion changes when any message mutates its rendered output.
+	ItemsVersion uint64
+}
+
+// RenderState returns the current render-affecting chat state. It renders
+// nothing; the only non-constant part is the item version fold, which reads
+// one field per message.
+func (m *Chat) RenderState() RenderState {
+	offsetIdx, offsetLine := m.ScrollPosition()
+	return RenderState{
+		OffsetIdx:        offsetIdx,
+		OffsetLine:       offsetLine,
+		Selected:         m.Selected(),
+		Focused:          m.Focused(),
+		ScrollbarVisible: m.scrollbarVisible,
+		ItemsVersion:     m.list.ItemsVersion(),
+	}
 }
 
 // AtBottom returns whether the chat list is currently scrolled to the bottom.
@@ -544,21 +720,20 @@ func (m *Chat) Follow() bool {
 
 // ScrollToBottom scrolls the chat view to the bottom.
 // Does not trigger scrollbar visibility (auto-scroll to show new content).
-func (m *Chat) ScrollToBottom() tea.Cmd {
+func (m *Chat) ScrollToBottom() {
 	m.list.ScrollToBottom()
 	m.follow = true
-	return nil
 }
 
 // ScrollToTop scrolls the chat view to the top.
-func (m *Chat) ScrollToTop() tea.Cmd {
+func (m *Chat) ScrollToTop() {
 	m.list.ScrollToTop()
 	m.follow = false // Disable follow mode when user scrolls up
-	return m.showScrollbar()
+	m.showScrollbar()
 }
 
 // ScrollBy scrolls the chat view by the given number of line deltas.
-func (m *Chat) ScrollBy(lines int) tea.Cmd {
+func (m *Chat) ScrollBy(lines int) {
 	m.list.ScrollBy(lines)
 	if lines < 0 {
 		// Scrolling up always disables follow mode.
@@ -567,31 +742,47 @@ func (m *Chat) ScrollBy(lines int) tea.Cmd {
 		// Scrolling down re-enables follow when we reach the bottom.
 		m.follow = true
 	}
-	return m.showScrollbar()
+	m.showScrollbar()
 }
 
 // ScrollToSelected scrolls the chat view to the selected item.
-func (m *Chat) ScrollToSelected() tea.Cmd {
+func (m *Chat) ScrollToSelected() {
 	m.list.ScrollToSelected()
 	m.follow = m.AtBottom() // Disable follow mode if user scrolls up
-	return m.showScrollbar()
+	m.showScrollbar()
 }
 
 // ScrollToIndex scrolls the chat view to the item at the given index.
-func (m *Chat) ScrollToIndex(index int) tea.Cmd {
+func (m *Chat) ScrollToIndex(index int) {
 	m.list.ScrollToIndex(index)
 	m.follow = m.AtBottom() // Disable follow mode if user scrolls up
-	return m.showScrollbar()
+	m.showScrollbar()
 }
 
-// showScrollbar makes the scrollbar visible and returns a command to hide it after timeout.
-func (m *Chat) showScrollbar() tea.Cmd {
+// showScrollbar reveals the scrollbar and restarts its auto-hide timeout.
+// The tick itself is scheduled by EnsureScrollbarHide.
+func (m *Chat) showScrollbar() {
 	// Only start timer for "default" mode
 	if m.scrollbarMode != config.ScrollbarDefault {
-		return nil
+		return
 	}
 	m.scrollbarVisible = true
 	m.scrollbarHideSeq++
+}
+
+// EnsureScrollbarHide schedules the hide tick for a visible scrollbar whose
+// current timeout has none outstanding. Each scroll bumps the sequence, so a
+// fresh deadline is armed for the newest activity while earlier ticks go stale
+// and get ignored. This is the sole place the timeout is armed, mirroring the
+// shared animation clock, so no call site can drop it.
+func (m *Chat) EnsureScrollbarHide() tea.Cmd {
+	if m.scrollbarMode != config.ScrollbarDefault || !m.scrollbarVisible {
+		return nil
+	}
+	if m.scrollbarHideArmed == m.scrollbarHideSeq {
+		return nil
+	}
+	m.scrollbarHideArmed = m.scrollbarHideSeq
 	return scrollbarHideCmd(m.scrollbarHideSeq)
 }
 
@@ -603,31 +794,22 @@ func (m *Chat) HideScrollbar(seq int) {
 	}
 	if seq == m.scrollbarHideSeq {
 		m.scrollbarVisible = false
+		m.scrollbarHideArmed = 0
 	}
 }
 
-// ScrollToTopAndAnimate scrolls the chat view to the top and returns a command to restart
-// any paused animations that are now visible.
-func (m *Chat) ScrollToTopAndAnimate() tea.Cmd {
-	return tea.Batch(m.ScrollToTop(), m.RestartPausedVisibleAnimations())
+// resetScrollbar hides the scrollbar and forgets any outstanding timeout, for
+// when the list stops showing the content it was scrolled through.
+func (m *Chat) resetScrollbar() {
+	m.scrollbarVisible = false
+	m.scrollbarHideArmed = 0
 }
 
-// ScrollToBottomAndAnimate scrolls the chat view to the bottom and returns a command to
-// restart any paused animations that are now visible.
-func (m *Chat) ScrollToBottomAndAnimate() tea.Cmd {
-	return tea.Batch(m.ScrollToBottom(), m.RestartPausedVisibleAnimations())
-}
-
-// ScrollByAndAnimate scrolls the chat view by the given number of line deltas and returns
-// a command to restart any paused animations that are now visible.
-func (m *Chat) ScrollByAndAnimate(lines int) tea.Cmd {
-	return tea.Batch(m.ScrollBy(lines), m.RestartPausedVisibleAnimations())
-}
-
-// ScrollToSelectedAndAnimate scrolls the chat view to the selected item and returns a
-// command to restart any paused animations that are now visible.
-func (m *Chat) ScrollToSelectedAndAnimate() tea.Cmd {
-	return tea.Batch(m.ScrollToSelected(), m.RestartPausedVisibleAnimations())
+// ScrollToBottomAndSelectLast scrolls the chat view to the bottom and selects
+// the last item.
+func (m *Chat) ScrollToBottomAndSelectLast() {
+	m.ScrollToBottom()
+	m.SelectLast()
 }
 
 // SelectedItemInView returns whether the selected item is currently in view.
@@ -752,11 +934,32 @@ func (m *Chat) SelectLastInView() {
 	}
 }
 
+// SelectNearestInView moves an out-of-view selection to the visible edge
+// nearest to it: the top row when the selection is above the viewport, the
+// bottom row when it is below. With no selection, scrolledUp picks the
+// bottom row (the content the user is moving towards) and otherwise the
+// top row.
+func (m *Chat) SelectNearestInView(scrolledUp bool) {
+	startIdx, _ := m.list.VisibleItemIndices()
+	sel := m.list.Selected()
+	switch {
+	case sel < 0:
+		if scrolledUp {
+			m.SelectLastInView()
+		} else {
+			m.SelectFirstInView()
+		}
+	case sel < startIdx:
+		m.SelectFirstInView()
+	default:
+		m.SelectLastInView()
+	}
+}
+
 // ClearMessages removes all messages from the chat list.
 func (m *Chat) ClearMessages() {
 	m.idInxMap = make(map[string]int)
-	m.pausedAnimations = make(map[string]struct{})
-	m.scrollbarVisible = false
+	m.resetScrollbar()
 	m.list.SetItems()
 	m.ClearMouse()
 }
@@ -780,9 +983,6 @@ func (m *Chat) RemoveMessage(id string) {
 			m.idInxMap[item.ID()] = i
 		}
 	}
-
-	// Clean up any paused animations for this message
-	delete(m.pausedAnimations, id)
 }
 
 // MessageItem returns the message item with the given ID, or nil if not found.
@@ -798,13 +998,24 @@ func (m *Chat) MessageItem(id string) chat.MessageItem {
 	return item
 }
 
+// MessageItemAt returns the message item at index i, or nil if i is out of
+// range or the item is not a [chat.MessageItem].
+func (m *Chat) MessageItemAt(i int) chat.MessageItem {
+	if i < 0 || i >= m.list.Len() {
+		return nil
+	}
+	item, ok := m.list.ItemAt(i).(chat.MessageItem)
+	if !ok {
+		return nil
+	}
+	return item
+}
+
 // ToggleExpandedSelectedItem expands the selected message item if it is expandable.
 func (m *Chat) ToggleExpandedSelectedItem() {
 	if expandable, ok := m.list.SelectedItem().(chat.Expandable); ok {
 		wasFollowing := m.follow
-		if !expandable.ToggleExpanded() {
-			m.ScrollToIndex(m.list.Selected())
-		}
+		expandable.ToggleExpanded()
 		if wasFollowing {
 			m.ScrollToBottom()
 		}
@@ -933,9 +1144,7 @@ func (m *Chat) HandleDelayedClick(msg DelayedClickMsg) bool {
 		if handled {
 			if expandable, ok := selectedItem.(chat.Expandable); ok {
 				wasFollowing := m.follow
-				if !expandable.ToggleExpanded() {
-					m.ScrollToIndex(m.list.Selected())
-				}
+				expandable.ToggleExpanded()
 				if wasFollowing {
 					m.ScrollToBottom()
 				}

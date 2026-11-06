@@ -8,11 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"charm.land/catwalk/pkg/catwalk"
+	"charm.land/catwalk/v3/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/lsp"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/stretchr/testify/require"
 )
@@ -157,11 +158,25 @@ func TestCrushInfo_YoloMode(t *testing.T) {
 		Providers:   csync.NewMap[string, config.ProviderConfig](),
 		Permissions: &config.Permissions{},
 	})
-	cfg.Overrides().SkipPermissionRequests = true
+	cfg.Overrides().PermissionMode = permission.PermissionModeYolo
 
 	output := buildCrushInfo(cfg, nil, nil, nil, nil)
 	require.Contains(t, output, "[permissions]")
 	require.Contains(t, output, "mode = yolo")
+}
+
+func TestCrushInfo_SysadminMode(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.NewTestStore(&config.Config{
+		Providers:   csync.NewMap[string, config.ProviderConfig](),
+		Permissions: &config.Permissions{},
+	})
+	cfg.Overrides().PermissionMode = permission.PermissionModeSysadmin
+
+	output := buildCrushInfo(cfg, nil, nil, nil, nil)
+	require.Contains(t, output, "[permissions]")
+	require.Contains(t, output, "mode = sysadmin")
 }
 
 func TestCrushInfo_AllowedTools(t *testing.T) {
@@ -208,6 +223,49 @@ func TestCrushInfo_Options(t *testing.T) {
 	require.Contains(t, output, "auto_summarize = false")
 	require.Contains(t, output, "data_directory = /Users/user/project/.crush")
 	require.Contains(t, output, "debug = true")
+}
+
+func TestCrushInfo_TUIOptions(t *testing.T) {
+	t.Parallel()
+
+	transparent := true
+	depth, items := 3, 42
+	cfg := config.NewTestStore(&config.Config{
+		Providers: csync.NewMap[string, config.ProviderConfig](),
+		Options: &config.Options{
+			TUI: &config.TUIOptions{
+				CompactMode: true,
+				DiffMode:    config.DiffModeSplit,
+				Scrollbar:   config.ScrollbarNever,
+				ExitBanner:  config.ExitBannerCompact,
+				Transparent: &transparent,
+				Completions: config.Completions{MaxDepth: &depth, MaxItems: &items},
+			},
+		},
+	})
+
+	output := buildCrushInfo(cfg, nil, nil, nil, nil)
+	require.Contains(t, output, "compact_mode = true")
+	require.Contains(t, output, "diff_mode = split")
+	require.Contains(t, output, "scrollbar = never")
+	require.Contains(t, output, "exit_banner = compact")
+	require.Contains(t, output, "transparent = true")
+	require.Contains(t, output, "completions_max_depth = 3")
+	require.Contains(t, output, "completions_max_items = 42")
+}
+
+func TestCrushInfo_TUIOptionsUnpinnedCompletionsOmitted(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.NewTestStore(&config.Config{
+		Providers: csync.NewMap[string, config.ProviderConfig](),
+		Options:   &config.Options{TUI: &config.TUIOptions{}},
+	})
+
+	output := buildCrushInfo(cfg, nil, nil, nil, nil)
+	require.Contains(t, output, "transparent = false")
+	require.NotContains(t, output, "completions_max_depth")
+	require.NotContains(t, output, "completions_max_items")
 }
 
 func TestCrushInfo_AutoSummarizeInversion(t *testing.T) {
@@ -264,7 +322,6 @@ func TestCrushInfo_DeterministicOrdering(t *testing.T) {
 			AllowedTools: []string{"z-perm", "a-perm"},
 		},
 	})
-	cfg.Overrides().SkipPermissionRequests = true
 
 	// Test MCP ordering via writeMCP directly.
 	var mcpBuf strings.Builder
@@ -296,8 +353,8 @@ func TestCrushInfo_EmptySectionsOmitted(t *testing.T) {
 	})
 
 	output := buildCrushInfo(cfg, nil, nil, nil, nil)
-	require.NotContains(t, output, "[tools]")
 	require.NotContains(t, output, "[permissions]")
+	require.NotContains(t, output, "[tools]")
 	require.NotContains(t, output, "[lsp]")
 	require.NotContains(t, output, "[mcp]")
 	require.NotContains(t, output, "[skills]")

@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/crush/internal/diff"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -26,6 +27,7 @@ type loadSessionMsg struct {
 	session   *session.Session
 	files     []SessionFile
 	readFiles []string
+	messages  []message.Message
 }
 
 // lspFilePaths returns deduplicated file paths from both modified and read
@@ -86,10 +88,18 @@ func (m *UI) loadSession(sessionID string) tea.Cmd {
 			slog.Error("Failed to load read files for session", "error", err)
 		}
 
+		// Read the transcript here, not in Update: a long session is tens
+		// of megabytes and would freeze the event loop while it loads.
+		messages, err := m.com.Workspace.ListMessages(context.Background(), sessionID)
+		if err != nil {
+			return util.ReportError(err)
+		}
+
 		return loadSessionMsg{
 			session:   &session,
 			files:     sessionFiles,
 			readFiles: readFiles,
+			messages:  messages,
 		}
 	}
 	return tea.Batch(load, m.reportCurrentSession(sessionID))
@@ -97,9 +107,10 @@ func (m *UI) loadSession(sessionID string) tea.Cmd {
 
 // reportCurrentSession returns a fire-and-forget tea.Cmd that
 // informs the workspace which session this client is currently
-// viewing. Errors are logged at debug only; the call is a hint
-// for server-side presence tracking, not correctness-critical
-// state.
+// viewing. In client/server mode the report scopes the event stream:
+// permission and question prompts are only delivered to clients
+// viewing the session that raised them. Errors are logged at debug
+// only; the call is best-effort, not correctness-critical state.
 func (m *UI) reportCurrentSession(sessionID string) tea.Cmd {
 	return func() tea.Msg {
 		if err := m.com.Workspace.SetCurrentSession(context.Background(), sessionID); err != nil {
@@ -205,18 +216,9 @@ func (m *UI) filesInfo(cwd string, width, maxItems int, isSection bool) string {
 // fileList renders a list of files with their diff statistics, truncating to
 // maxItems and showing a "...and N more" message if needed.
 func fileList(t *styles.Styles, cwd string, filesWithChanges []SessionFile, width, maxItems int) string {
-	if maxItems <= 0 {
-		return ""
-	}
 	var renderedFiles []string
-	filesShown := 0
 
 	for _, f := range filesWithChanges {
-		// Skip files with no changes
-		if filesShown >= maxItems {
-			break
-		}
-
 		// Build stats string with colors
 		var statusParts []string
 		if f.Additions > 0 {
@@ -246,15 +248,9 @@ func fileList(t *styles.Styles, cwd string, filesWithChanges []SessionFile, widt
 		}
 
 		renderedFiles = append(renderedFiles, line)
-		filesShown++
 	}
 
-	if len(filesWithChanges) > maxItems {
-		remaining := len(filesWithChanges) - maxItems
-		renderedFiles = append(renderedFiles, t.Files.TruncationHint.Render(fmt.Sprintf("…and %d more", remaining)))
-	}
-
-	return lipgloss.JoinVertical(lipgloss.Left, renderedFiles...)
+	return lipgloss.JoinVertical(lipgloss.Left, truncateRows(renderedFiles, maxItems, t.Files.TruncationHint)...)
 }
 
 // startLSPs starts LSP servers for the given file paths.

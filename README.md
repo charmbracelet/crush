@@ -29,11 +29,11 @@ Use a package manager:
 # Homebrew
 brew install charmbracelet/tap/crush
 
-# NPM
+# NPM (macOS, Linux, and Windows)
 npm install -g @charmland/crush
 
 # Arch Linux (btw)
-yay -S crush-bin
+yay -S crush
 
 # Nix
 nix run github:numtide/nix-ai-tools#crush
@@ -72,7 +72,7 @@ nix-shell -p '(import <nur> { pkgs = import <nixpkgs> {}; }).repos.charmbracelet
 ### NixOS & Home Manager Module Usage via NUR
 
 Crush provides NixOS and Home Manager modules via NUR.
-You can use these modules directly in your flake by importing them from NUR. Since it auto detects whether its a home manager or nixos context you can use the import the exact same way :)
+You can use these modules directly in your flake by importing them from NUR. Since it auto detects whether it's a home manager or nixos context you can use the import the exact same way :)
 
 ```nix
 {
@@ -100,8 +100,8 @@ You can use these modules directly in your flake by importing them from NUR. Sin
                   api_key = "sk-fake123456789abcdef...";
                   models = [
                     {
-                      id = "gpt-4";
-                      name = "GPT-4";
+                      id = "gpt-5.6-sol";
+                      name = "GPT-5.6 Sol";
                     }
                   ];
                 };
@@ -182,14 +182,18 @@ go install -tags sqlite3_dotlk github.com/charmbracelet/crush@latest
 
 ## Getting Started
 
-The quickest way to get started is to choose a [Hyper][hyper] model from model
-picker. Follow the steps to authenticate and you'll be good to go.
-
-[Hyper], from Charm, is the official Crush provider. It’s subscription-based,
-with a free tier, and optimized for Crush. It’s privacy focused, with zero data
-retention (ZDR) is and designed to comply with GDPR. [More on Hyper][hyper].
+The quickest way to get started is to choose a [Hyper][hyper] model from the 
+little model picker. Follow the steps to authenticate and you're ready to go.
 
 <p><a href="https://hyper.charm.land"><img width="340" height="200" alt="Charm Hyper" src="https://github.com/user-attachments/assets/50875289-7992-454d-9f14-9f790413fb5e" /></a></p>
+
+[Hyper][hyper], from Charm, is the official model provider for Crush. It’s 
+built  on open-weight models and is optimized for Crush, with an emphasis 
+on high-quality inference. There are subscription and prepaid options, including zero data retention 
+(ZDR). It's also GDPR compliant!
+
+[More on Hyper][hyper].
+
 
 ## API Keys
 
@@ -229,6 +233,7 @@ That said, you can also set environment variables for preferred providers:
 | `AZURE_OPENAI_API_KEY`      | Azure OpenAI models (optional when using Entra ID) |
 | `AZURE_OPENAI_API_VERSION`  | Azure OpenAI models                                |
 | `MOONSHOT_API_KEY`          | Moonshot                                           |
+| `XAI_API_KEY`               | xAI                                                |
 
 [hyper]: https://hyper.charm.land
 
@@ -275,10 +280,10 @@ if [[ $HOSTNAME == "babysquid" ]]; then
     source ~/my-stuff/babysquid.sh
 fi
 
-# Add an MCP server, with a GitHub API token stored in 1password.
+# Add an MCP server, with a GitHub API token stored in 1Password.
 mcp add github \
   --type http \
-  --url "https://api.githubcopilot.com/mcp/" \
+  --url "https://api.github.com/mcp/" \
   --header Authorization "Bearer $(op read 'op://my-secret-key')"
 ```
 
@@ -299,13 +304,14 @@ does not execute a `crushrc` from them.)
 [xdg]: https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html
 
 What about the old JSON format? It’s still supported, but it should be
-consdiered deprecated. See: [the config docs](./docs/config/) for details.
+considered deprecated. See: [the config docs](./docs/config/) for details.
 
 > [!TIP]
 > You can override the user and data config locations by setting:
 >
 > - `CRUSH_GLOBAL_CONFIG`
 > - `CRUSH_GLOBAL_DATA`
+> - `CRUSH_DATA_DIR` (overrides the per-project `.crush` directory)
 
 As an additional note, Crush also stores ephemeral data, such as application
 state, in one additional location. This is state and should not be edited by
@@ -346,6 +352,58 @@ Values support the same `$VAR` and `$(command)` expansion as other config
 fields, so you can reference existing environment variables or shell out for
 a value.
 
+### Themes
+
+Crush ships with built-in color themes.
+
+#### Switching Themes
+
+Open the command palette with `ctrl+p`, select **Themes**, and browse the
+list. The UI previews each theme as you navigate, and pressing `enter`
+confirms the selection. Press `esc` to cancel and revert.
+
+#### Editing Themes
+
+Open **Themes**, highlight the theme to customize, and press `ctrl+e`.
+Changes preview live as you type. Press `enter` or `ctrl+s` to save, or `esc`
+to cancel and revert. User themes are stored globally in the Crush config
+directory under `themes/`.
+
+You can also select a theme directly in your config with `active_theme`:
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "options": {
+    "tui": {
+      "active_theme": "gruvbox-dark"
+    }
+  }
+}
+```
+
+Custom theme palettes are stored as JSON files in the global theme directory.
+For example, `~/.config/crush/themes/my-theme.json`:
+
+```json
+{
+  "base": "gruvbox-dark",
+  "primary": "#ff6b6b",
+  "bg_base": "#1a1a2e"
+}
+```
+
+Select it by setting `active_theme` to `my-theme` or from the **Themes**
+dialog.
+
+#### Built-In Themes
+
+| Theme             | Name                          |
+| ----------------- | ----------------------------- |
+| Charmtone Pantera | `charmtone-panther` (default) |
+| Gruvbox Dark      | `gruvbox-dark`                |
+| Keanu             | `keanu`                       |
+
 ### LSPs
 
 Crush can use LSPs for additional context to help inform its decisions, just
@@ -373,7 +431,7 @@ mcp add filesystem --command node --args /path/to/mcp-server.js \
   --timeout 10 --disabled-tools some-tool-name --env NODE_ENV production
 
 # Add a GitHub MCP server that uses an API token.
-mcp add github --type http --url "https://api.githubcopilot.com/mcp/" \
+mcp add github --type http --url https://api.github.com/mcp/ \
   --timeout 10 --header Authorization "Bearer $GH_PAT" \
   --disabled-tools create_issue --disabled-tools create_pull_request
 
@@ -411,7 +469,7 @@ credentials directly. All values support shell expansion:
   "mcp": {
     "github": {
       "type": "http",
-      "url": "https://api.githubcopilot.com/mcp/",
+      "url": "https://api.github.com/mcp/",
       "oauth": true,
       "oauth_client_id": "Iv1.abc123def456",
       "oauth_client_secret": "$GITHUB_MCP_SECRET",
@@ -425,6 +483,20 @@ When `oauth_client_id` is set, Crush skips dynamic client registration
 and authenticates as the specified client. When omitted, Crush attempts
 dynamic registration automatically (works with Linear, Notion, and other
 servers that support RFC 7591).
+
+#### Sessionless servers
+
+Some HTTP MCP servers are sessionless — they never issue a
+`Mcp-Session-Id` and reject the `subscriptions/listen` stream Crush opens
+for list-changed notifications, which would otherwise break the
+connection. Crush auto-detects known sessionless servers (GitHub MCP,
+`api.githubcopilot.com/mcp`), so those need no extra configuration.
+
+For other sessionless servers, mark them explicitly with
+`"sessionless": true` (or `--sessionless true` in `crushrc`); set it to
+`false` to force the default behavior for an auto-detected URL. The
+tradeoff is that a sessionless server won't push live
+tool/prompt/resource list-changed notifications.
 
 ### Hooks
 
@@ -508,6 +580,13 @@ permissions. Use this with care.
 ```bash
 permissions allow view ls grep edit mcp_context7_get-library-doc
 ```
+
+The `bash` tool additionally runs a small set of read-only commands (`ls`,
+`pwd`, `git status`, `git log`, …) without prompting. Crush parses the command
+to decide, so it applies only when the whole command is provably inert: a
+redirection, a variable assignment, a command substitution, a pipeline, or an
+argument that mutates state (`git branch -D`, `git remote set-url`) all fall
+back to the normal permission prompt.
 
 ### Disabling Built-In Tools
 
@@ -674,11 +753,15 @@ Crush supports custom provider configurations for both OpenAI-compatible and
 Anthropic-compatible APIs.
 
 > [!NOTE]
-> Note that we support two "types" for OpenAI. Make sure to choose the right one
-> to ensure the best experience!
+> The provider type describes the API format the provider speaks. Make sure
+> to choose the right one to ensure the best experience!
 >
-> - `openai` should be used when proxying or routing requests through OpenAI.
-> - `openai-compat` should be used when using non-OpenAI providers that have OpenAI-compatible APIs.
+> - `responses` should be used when proxying or routing requests through OpenAI.
+> - `completions` should be used when using non-OpenAI providers that have OpenAI-compatible APIs.
+> - `messages` should be used for Anthropic-compatible APIs.
+>
+> Legacy values (`openai`, `openai-compat`, `anthropic`) are still accepted and
+> migrated automatically.
 
 #### OpenAI-Compatible APIs
 
@@ -686,7 +769,7 @@ Here’s an example configuration for Deepseek, which uses an OpenAI-compatible
 API. Don't forget to set `DEEPSEEK_API_KEY` in your environment.
 
 ```bash
-provider add deepseek --type openai-compat \
+provider add deepseek --type completions \
   --base-url "https://api.deepseek.com/v1" \
   --api-key "$DEEPSEEK_API_KEY"
 
@@ -706,7 +789,7 @@ Custom Anthropic-compatible providers follow this format:
 
 ```bash
 provider add custom-anthropic \
-  --type anthropic \
+  --type messages \
   --base-url "https://api.anthropic.com/v1" \
   --api-key "$ANTHROPIC_API_KEY" \
   --extra-header anthropic-version 2023-06-01
@@ -715,7 +798,7 @@ model add custom-anthropic/claude-sonnet-4-20250514 \
   --name "Claude Sonnet 4" \
   --context-window 200000 \
   --default-max-tokens 50000 \
-  --can-reason true \
+  --thinking toggleable \
   --supports-images true \
   --price-input 3 \
   --price-output 15 \
@@ -776,13 +859,13 @@ To add specific models to the configuration, configure as such:
 
 ```bash
 # crushrc — authentication still comes from gcloud and the VERTEXAI_* env vars.
-provider add vertexai --type google-vertex
+provider add vertexai
 
 model add vertexai/claude-sonnet-4@20250514 \
   --name "VertexAI Sonnet 4" \
   --context-window 200000 \
   --default-max-tokens 50000 \
-  --can-reason true \
+  --thinking toggleable \
   --supports-images true \
   --price-input 3 \
   --price-output 15 \
@@ -874,10 +957,16 @@ the open source Crush provider database. This means that when new providers and
 models are available, or when model metadata changes, Crush automatically
 updates your local configuration.
 
+### Custom provider catalog
+
+You can also override [Catwalk](https://github.com/charmbracelet/catwalk) default URL (for testing, using a fork).
+
+You can do so by setting the `CATWALK_URL` environment variable. (e.g. `export CATWALK_URL=http://localhost:8000`)
+
 ### Disabling automatic provider updates
 
 For those with restricted internet access, or those who prefer to work in
-air-gapped environments, this might not be want you want, and this feature can
+air-gapped environments, this might not be what you want, and this feature can
 be disabled.
 
 To disable automatic provider updates in your `crushrc`:
@@ -924,8 +1013,12 @@ collected.
 Details on exactly what’s collected are in the source code ([here](https://github.com/charmbracelet/crush/tree/main/internal/event)
 and [here](https://github.com/charmbracelet/crush/blob/main/internal/llm/agent/event.go)).
 
-You can opt out of metrics collection at any time by setting the environment
-variable by setting the following in your environment:
+Also, when you use Crush with [Hyper][hyper], your Crush usage metrics may 
+be associated with your Hyper account to help us improve the service and
+diagnose issues. For more information, see [the Hyper Privacy Policy](https://hyper.charm.land/legal/privacy-policy).
+
+Either way, you can opt out of metrics collection at any time by setting 
+the following  in your environment:
 
 ```bash
 export CRUSH_DISABLE_METRICS=1

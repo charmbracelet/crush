@@ -123,3 +123,40 @@ func TestServe_StatusCodes(t *testing.T) {
 		})
 	}
 }
+
+// TestWrite_ContinueHandoff proves the handoff page renders the continue
+// button and none of the outcome machinery. The link deliberately omits
+// rel=noopener: the tab it opens may only close itself when it keeps an
+// opener, which is the whole point of the handoff.
+func TestWrite_ContinueHandoff(t *testing.T) {
+	t.Parallel()
+
+	var b strings.Builder
+	require.NoError(t, Write(&b, Result{
+		Subject:     "OpenAI",
+		ContinueURL: "https://auth.openai.com/oauth/authorize?client_id=x",
+	}))
+	page := b.String()
+
+	require.Contains(t, page, `class="card continue"`)
+	require.Contains(t, page, "One more click")
+	require.Contains(t, page, "OpenAI")
+	require.Contains(t, page, `id="continue"`)
+	require.Contains(t, page, `href="https://auth.openai.com/oauth/authorize?client_id=x"`)
+	require.Contains(t, page, `target="_blank"`)
+	// The anchor must keep the opener relationship; the quoted attribute
+	// form must not appear (the CSS comments mention noopener unquoted).
+	require.NotContains(t, page, `rel="noopener"`)
+	// A handoff page has no countdown and no outcome text.
+	require.NotContains(t, page, `id="rail"`)
+	require.NotContains(t, page, "You’re all set")
+}
+
+func TestServe_ContinueStatusCode(t *testing.T) {
+	t.Parallel()
+
+	rec := httptest.NewRecorder()
+	require.NoError(t, Serve(rec, Result{ContinueURL: "https://auth.openai.com/x"}))
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
+}

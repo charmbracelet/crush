@@ -9,17 +9,15 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
 	"time"
 
-	"charm.land/catwalk/pkg/catwalk"
-	"charm.land/catwalk/pkg/embedded"
+	"charm.land/catwalk/v3/pkg/catwalk"
+	"charm.land/catwalk/v3/pkg/embedded"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/x/etag"
 )
 
@@ -33,25 +31,10 @@ var (
 	providerErr  error
 )
 
-// file to cache provider data
+// file to cache provider data. It resolves through GlobalConfigData so the
+// catalog follows CRUSH_GLOBAL_DATA like the rest of the data directory.
 func cachePathFor(name string) string {
-	xdgDataHome := os.Getenv("XDG_DATA_HOME")
-	if xdgDataHome != "" {
-		return filepath.Join(xdgDataHome, appName, name+".json")
-	}
-
-	// return the path to the main data directory
-	// for windows, it should be in `%LOCALAPPDATA%/crush/`
-	// for linux and macOS, it should be in `$HOME/.local/share/crush/`
-	if runtime.GOOS == "windows" {
-		localAppData := os.Getenv("LOCALAPPDATA")
-		if localAppData == "" {
-			localAppData = filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Local")
-		}
-		return filepath.Join(localAppData, appName, name+".json")
-	}
-
-	return filepath.Join(home.Dir(), ".local", "share", appName, name+".json")
+	return filepath.Join(filepath.Dir(GlobalConfigData()), name+".json")
 }
 
 // UpdateProviders updates the Catwalk providers list from a specified source.
@@ -89,6 +72,27 @@ func UpdateProviders(pathOrURL string) error {
 	return nil
 }
 
+// ResolveHyperAPIKey returns the Hyper API key from the environment or
+// the raw config value. The env var takes precedence.
+func ResolveHyperAPIKey(cfg *Config) string {
+	if key := os.Getenv("HYPER_API_KEY"); key != "" {
+		return key
+	}
+	if cfg == nil || cfg.Providers == nil {
+		return ""
+	}
+	pc, ok := cfg.Providers.Get("hyper")
+	if !ok {
+		return ""
+	}
+	return pc.APIKey
+}
+
+// HyperTokenRefresher is a function that refreshes the Hyper OAuth
+// token. It is passed to Providers so the catalog fetch can retry on
+// 401 without relying on package-global state.
+type HyperTokenRefresher func(context.Context) error
+
 // UpdateHyper updates the Hyper provider information from a specified URL.
 func UpdateHyper(pathOrURL string) error {
 	var provider catwalk.Provider
@@ -98,7 +102,10 @@ func UpdateHyper(pathOrURL string) error {
 	case pathOrURL == "embedded":
 		provider = hyper.Embedded()
 	case strings.HasPrefix(pathOrURL, "http://") || strings.HasPrefix(pathOrURL, "https://"):
-		client := realHyperClient{baseURL: pathOrURL}
+		client := realHyperClient{
+			baseURL:    pathOrURL,
+			resolveKey: func() string { return ResolveHyperAPIKey(nil) },
+		}
 		var err error
 		provider, err = client.Get(context.Background(), "")
 		if err != nil {
@@ -127,6 +134,15 @@ var (
 	hyperSyncer   = &hyperSync{}
 )
 
+// CatwalkUpdated reports whether the Catwalk provider catalog was
+// refreshed with new data during this run's catalog fetch. The fetch
+// runs once per process, before the first call to Providers returns, so
+// the result is stable afterwards. Callers use it to renew catalogs that
+// shadow Catwalk's, such as the ChatGPT model catalog.
+func CatwalkUpdated() bool {
+	return catwalkSyncer.Updated()
+}
+
 // Providers returns the list of providers, taking into account cached results
 // and whether or not auto update is enabled.
 //
@@ -144,13 +160,20 @@ var (
 // is not an error at all: the cached or embedded catalog is a sound answer, so
 // those are logged and the fallback is returned.
 func Providers(cfg *Config) ([]catwalk.Provider, error) {
+	return LoadProviders(context.Background(), cfg, nil)
+}
+
+// LoadProviders is Providers with a context bounding the catalog fetch and a
+// Hyper token refresher for retrying on 401. Only the first call in a process
+// fetches; later calls return the memoized result and ignore both arguments.
+func LoadProviders(ctx context.Context, cfg *Config, refreshHyper HyperTokenRefresher) ([]catwalk.Provider, error) {
 	providerOnce.Do(func() {
 		var wg sync.WaitGroup
 		providers := csync.NewSlice[catwalk.Provider]()
 		autoupdate := !cfg.Options.DisableProviderAutoUpdate
 		customProvidersOnly := cfg.Options.DisableDefaultProviders
 
-		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 		defer cancel()
 
 		// Each goroutine owns its own error so the two can report
@@ -173,7 +196,7 @@ func Providers(cfg *Config) ([]catwalk.Provider, error) {
 			// providers at all over a transient disk or network problem.
 			items, err := catwalkSyncer.Get(ctx)
 			if err != nil {
-				catwalkURL := fmt.Sprintf("%s/v2/providers", cmp.Or(os.Getenv("CATWALK_URL"), defaultCatwalkURL))
+				catwalkURL := fmt.Sprintf("%s/v3/providers", cmp.Or(os.Getenv("CATWALK_URL"), defaultCatwalkURL))
 				catwalkErr = fmt.Errorf("Crush was unable to fetch an updated list of providers from %s. Consider setting CRUSH_DISABLE_PROVIDER_AUTO_UPDATE=1 to use the embedded providers bundled at the time of this Crush release. You can also update providers manually. For more info see crush update-providers --help.\n\nCause: %w", catwalkURL, err) //nolint:staticcheck
 			}
 			providers.Append(items...)
@@ -184,7 +207,12 @@ func Providers(cfg *Config) ([]catwalk.Provider, error) {
 				return
 			}
 			path := cachePathFor("hyper")
-			hyperSyncer.Init(realHyperClient{baseURL: hyper.BaseURL()}, path, autoupdate)
+			cfgSnapshot := cfg
+			hyperSyncer.Init(realHyperClient{
+				baseURL:      hyper.BaseURL(),
+				resolveKey:   func() string { return ResolveHyperAPIKey(cfgSnapshot) },
+				refreshToken: refreshHyper,
+			}, path, autoupdate)
 
 			// As above: keep whatever provider we were handed. The syncer
 			// already falls back to the cached or embedded copy, so an
@@ -211,6 +239,21 @@ func Providers(cfg *Config) ([]catwalk.Provider, error) {
 	return providerList, providerErr
 }
 
+// UpdateProviderInList replaces a provider in the memoized provider list
+// returned by Providers(). This is used after re-fetching a single
+// provider (e.g. Hyper after OAuth) so that all callers of Providers()
+// see the updated entry without needing to reset sync.Once.
+func UpdateProviderInList(provider catwalk.Provider) {
+	for i, p := range providerList {
+		if p.ID == provider.ID {
+			providerList[i] = provider
+			return
+		}
+	}
+	// Provider not found in list; prepend it.
+	providerList = append([]catwalk.Provider{provider}, providerList...)
+}
+
 type cache[T any] struct {
 	path string
 }
@@ -221,7 +264,7 @@ func newCache[T any](path string) cache[T] {
 
 func (c cache[T]) Get() (T, string, error) {
 	var v T
-	data, err := os.ReadFile(c.path)
+	data, err := readFile(c.path)
 	if err != nil {
 		return v, "", fmt.Errorf("failed to read provider cache file: %w", err)
 	}

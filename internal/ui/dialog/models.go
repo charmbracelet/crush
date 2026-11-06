@@ -10,7 +10,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/catwalk/pkg/catwalk"
+	"charm.land/catwalk/v3/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/util"
@@ -221,13 +221,16 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 				return util.ReportError(err)
 			}
 		default:
+			prevValue := m.input.Value()
 			var cmd tea.Cmd
 			m.input, cmd = m.input.Update(msg)
 			value := m.input.Value()
-			m.list.Focus()
-			m.list.SetFilter(value)
-			m.list.SelectFirst()
-			m.list.ScrollToTop()
+			if value != prevValue {
+				m.list.Focus()
+				m.list.SetFilter(value)
+				m.list.SelectFirst()
+				m.list.ScrollToTop()
+			}
 			return ActionCmd{cmd}
 		}
 	}
@@ -437,6 +440,24 @@ func (m *Models) setProviderItems() error {
 		}
 
 		name := cmp.Or(displayProvider.Name, providerID)
+
+		// A ChatGPT or Grok login lists only its subscription's models; the
+		// API catalog would 404. Until that list is fetched, show the catalog.
+		if subscriptionModels, _ := providerConfig.SubscriptionModels(); subscriptionModels != nil {
+			group := NewModelGroup(t, name, true)
+			for _, model := range subscriptionModels {
+				item := NewModelItem(t, provider, model, m.modelType, false)
+				group.AppendItems(item)
+				itemsMap[item.ID()] = item
+				if model.ID == currentModel.Model && string(provider.ID) == currentModel.Provider {
+					selectedItemID = item.ID()
+				}
+			}
+			if len(group.Items) > 0 {
+				groups = append(groups, group)
+			}
+			continue
+		}
 
 		group := NewModelGroup(t, name, providerConfigured)
 		for _, model := range displayProvider.Models {

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/stretchr/testify/require"
@@ -88,6 +89,42 @@ func TestSubscribeEventsContextCancelClosesEvents(t *testing.T) {
 	}
 }
 
+// TestSubscribeEventsAbortedStreamClosesEvents covers a server that dies
+// mid-stream: the body fails with an unexpected EOF rather than a clean
+// end, and the events channel must still close so the caller reconnects.
+// It used to retry reading the dead body every 2s forever.
+func TestSubscribeEventsAbortedStreamClosesEvents(t *testing.T) {
+	t.Parallel()
+
+	payload := marshalSSEPayload(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", payload)
+		w.(http.Flusher).Flush()
+		// Close the connection without the final chunk.
+		panic(http.ErrAbortHandler)
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	events, err := captureClient(t, srv).SubscribeEvents(ctx, "ws1")
+	require.NoError(t, err)
+
+	select {
+	case _, ok := <-events:
+		require.True(t, ok, "the event written before the abort must arrive")
+	case <-time.After(5 * time.Second):
+		require.Fail(t, "timed out waiting for the first event")
+	}
+	select {
+	case _, ok := <-events:
+		require.False(t, ok, "no event follows the abort")
+	case <-time.After(5 * time.Second):
+		require.Fail(t, "the events channel stayed open after the stream died")
+	}
+}
+
 func TestSendMessageAcceptsStatusAccepted(t *testing.T) {
 	t.Parallel()
 
@@ -97,7 +134,22 @@ func TestSendMessageAcceptsStatusAccepted(t *testing.T) {
 	defer srv.Close()
 
 	c := captureClient(t, srv)
-	require.NoError(t, c.SendMessage(context.Background(), "ws1", "sess1", "", "hello"))
+	require.NoError(t, c.SendMessage(context.Background(), "ws1", "sess1", "", "", "hello"))
+}
+
+func TestSendMessageIncludesChannelOrigin(t *testing.T) {
+	t.Parallel()
+
+	var got proto.AgentMessage
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer srv.Close()
+
+	c := captureClient(t, srv)
+	require.NoError(t, c.SendMessage(context.Background(), "ws1", "sess1", "", "signal", "hello"))
+	require.Equal(t, "signal", got.Channel)
 }
 
 func TestSendMessageAcceptsStatusOK(t *testing.T) {
@@ -109,7 +161,7 @@ func TestSendMessageAcceptsStatusOK(t *testing.T) {
 	defer srv.Close()
 
 	c := captureClient(t, srv)
-	require.NoError(t, c.SendMessage(context.Background(), "ws1", "sess1", "", "hello"))
+	require.NoError(t, c.SendMessage(context.Background(), "ws1", "sess1", "", "", "hello"))
 }
 
 func TestSendMessageDecodesErrorBody(t *testing.T) {
@@ -122,7 +174,7 @@ func TestSendMessageDecodesErrorBody(t *testing.T) {
 	defer srv.Close()
 
 	c := captureClient(t, srv)
-	err := c.SendMessage(context.Background(), "ws1", "", "", "hello")
+	err := c.SendMessage(context.Background(), "ws1", "", "", "", "hello")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "status code 400")
 	require.Contains(t, err.Error(), "session id is required")
@@ -138,7 +190,7 @@ func TestSendMessageFallsBackOnMalformedErrorBody(t *testing.T) {
 	defer srv.Close()
 
 	c := captureClient(t, srv)
-	err := c.SendMessage(context.Background(), "ws1", "sess1", "", "hello")
+	err := c.SendMessage(context.Background(), "ws1", "sess1", "", "", "hello")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "status code 500")
 	require.NotContains(t, err.Error(), "not json")
@@ -153,9 +205,41 @@ func TestSendMessageFallsBackOnEmptyErrorBody(t *testing.T) {
 	defer srv.Close()
 
 	c := captureClient(t, srv)
-	err := c.SendMessage(context.Background(), "ws1", "sess1", "", "hello")
+	err := c.SendMessage(context.Background(), "ws1", "sess1", "", "", "hello")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "status code 500")
+}
+
+func TestSetMainAgentSendsAgentID(t *testing.T) {
+	t.Parallel()
+
+	var gotPath string
+	var got proto.AgentSetMainRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := captureClient(t, srv)
+	require.NoError(t, c.SetMainAgent(context.Background(), "ws1", "plan"))
+
+	require.Equal(t, "/v1/workspaces/ws1/agent/main", gotPath)
+	require.Equal(t, "plan", got.AgentID)
+}
+
+func TestSetMainAgentPropagatesServerError(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	c := captureClient(t, srv)
+	err := c.SetMainAgent(context.Background(), "ws1", "plan")
+	require.Error(t, err)
 }
 
 func marshalSSEPayload(t *testing.T) []byte {
@@ -175,4 +259,24 @@ func marshalSSEPayload(t *testing.T) []byte {
 	})
 	require.NoError(t, err)
 	return payload
+}
+
+func TestSendHiddenContinuation(t *testing.T) {
+	t.Parallel()
+	requests := make(chan proto.AgentMessage, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var msg proto.AgentMessage
+		if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		requests <- msg
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer srv.Close()
+	c := captureClient(t, srv)
+	require.NoError(t, c.SendMessage(message.WithHiddenUserMessage(t.Context()), "ws1", "sess1", "", "", "Implement the plan."))
+	msg := <-requests
+	require.True(t, msg.HiddenUserMessage)
+	require.Equal(t, "Implement the plan.", msg.Prompt)
 }

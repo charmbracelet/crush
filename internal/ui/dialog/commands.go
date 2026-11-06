@@ -57,7 +57,10 @@ type Commands struct {
 	hasSession bool
 	hasTodos   bool
 	hasQueue   bool
-	selected   CommandType
+	// transparent is whether the background color is off on screen,
+	// which a host theme can make differ from the config.
+	transparent bool
+	selected    CommandType
 
 	spinner spinner.Model
 	loading bool
@@ -77,8 +80,9 @@ type Commands struct {
 
 var _ Dialog = (*Commands)(nil)
 
-// NewCommands creates a new commands dialog.
-func NewCommands(com *common.Common, sessionID string, hasSession, hasTodos, hasQueue bool, customCommands []commands.CustomCommand, mcpPrompts []commands.MCPPrompt) (*Commands, error) {
+// NewCommands creates a new commands dialog. transparent is whether the
+// background color is currently off on screen.
+func NewCommands(com *common.Common, sessionID string, hasSession, hasTodos, hasQueue, transparent bool, customCommands []commands.CustomCommand, mcpPrompts []commands.MCPPrompt) (*Commands, error) {
 	c := &Commands{
 		com:            com,
 		selected:       SystemCommands,
@@ -86,6 +90,7 @@ func NewCommands(com *common.Common, sessionID string, hasSession, hasTodos, has
 		hasSession:     hasSession,
 		hasTodos:       hasTodos,
 		hasQueue:       hasQueue,
+		transparent:    transparent,
 		customCommands: customCommands,
 		mcpPrompts:     mcpPrompts,
 	}
@@ -228,11 +233,14 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 					}
 				}
 			}
+			prevValue := c.input.Value()
 			c.input, cmd = c.input.Update(msg)
 			value := c.input.Value()
-			c.list.SetFilter(value)
-			c.list.ScrollToTop()
-			c.list.SetSelected(0)
+			if value != prevValue {
+				c.list.SetFilter(value)
+				c.list.ScrollToTop()
+				c.list.SetSelected(0)
+			}
 			return ActionCmd{cmd}
 		}
 	}
@@ -460,11 +468,12 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	if agentCfg, ok := cfg.Agents[config.AgentCoder]; ok {
 		providerCfg := cfg.GetProviderForModel(agentCfg.Model)
 		model := cfg.GetModelByType(agentCfg.Model)
-		if providerCfg != nil && model != nil && model.CanReason {
+		if providerCfg != nil && model != nil && model.CanReason() {
 			selectedModel := cfg.Models[agentCfg.Model]
+			effortLevels := model.ReasoningEffortLevels()
 
 			// Anthropic models: thinking toggle
-			if model.CanReason && len(model.ReasoningLevels) == 0 {
+			if len(effortLevels) == 0 {
 				status := "Enable"
 				if selectedModel.Think {
 					status = "Disable"
@@ -473,7 +482,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 			}
 
 			// OpenAI models: reasoning effort dialog
-			if len(model.ReasoningLevels) > 0 {
+			if len(effortLevels) > 0 {
 				commands = append(commands, NewCommandItem(c.com.Styles, "select_reasoning_effort", "Select Reasoning Effort", "", ActionOpenDialog{
 					DialogID: ReasoningID,
 				}))
@@ -482,13 +491,13 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	}
 	// Only show toggle compact mode command if window width is larger than compact breakpoint (120)
 	if c.windowWidth >= sidebarCompactModeBreakpoint && c.hasSession {
-		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_sidebar", "Toggle Sidebar", "", ActionToggleCompactMode{}))
+		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_sidebar", "Toggle Sidebar", "ctrl+b", ActionToggleCompactMode{}))
 	}
 	if c.hasSession {
 		cfgPrime := c.com.Config()
 		agentCfg := cfgPrime.Agents[config.AgentCoder]
 		model := cfgPrime.GetModelByType(agentCfg.Model)
-		if model != nil && model.SupportsImages {
+		if model != nil && model.Capabilities.Vision {
 			commands = append(commands, NewCommandItem(c.com.Styles, "file_picker", "Open File Picker", "ctrl+f", ActionOpenDialog{
 				DialogID: FilePickerID,
 			}))
@@ -514,6 +523,13 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		commands = append(commands, NewCommandItem(c.com.Styles, "disable_docker_mcp", "Disable Docker MCP Catalog", "", ActionDisableDockerMCP{}))
 	}
 
+	// Toggle MCP servers for this repository when any are configured.
+	if len(cfg.MCP) > 0 {
+		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_mcps", "Toggle MCPs", "", ActionOpenDialog{
+			DialogID: MCPTogglesID,
+		}))
+	}
+
 	if c.hasTodos || c.hasQueue {
 		var label string
 		switch {
@@ -534,16 +550,27 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	commands = append(
 		commands,
 		NewCommandItem(c.com.Styles, "toggle_yolo", "Toggle Yolo Mode", "ctrl+y", ActionToggleYoloMode{}),
+		NewCommandItem(c.com.Styles, "toggle_sysadmin", "Toggle Sysadmin Mode", "", ActionToggleSysadminMode{}),
 		NewCommandItem(c.com.Styles, "toggle_help", "Toggle Help", "ctrl+g", ActionToggleHelp{}),
 		NewCommandItem(c.com.Styles, "init", "Initialize Project", "", ActionInitializeProject{}),
 	)
 
-	// Add transparent background toggle.
+	// Add transparent background toggle. The label follows what is on
+	// screen, which the toggle flips.
 	transparentLabel := "Disable Background Color"
-	if cfg != nil && cfg.Options != nil && cfg.Options.TUI.Transparent != nil && *cfg.Options.TUI.Transparent {
+	if c.transparent {
 		transparentLabel = "Enable Background Color"
 	}
 	commands = append(commands, NewCommandItem(c.com.Styles, "toggle_transparent", transparentLabel, "", ActionToggleTransparentBackground{}))
+
+	commands = append(commands, NewCommandItem(c.com.Styles, "switch_theme", "Themes", "", ActionOpenDialog{ThemeID}))
+
+	// Add mouse support toggle.
+	mouseLabel := "Disable Mouse"
+	if cfg != nil && cfg.Options != nil && cfg.Options.TUI.Mouse != nil && !*cfg.Options.TUI.Mouse {
+		mouseLabel = "Enable Mouse"
+	}
+	commands = append(commands, NewCommandItem(c.com.Styles, "toggle_mouse", mouseLabel, "", ActionToggleMouseSupport{}))
 
 	commands = append(
 		commands,

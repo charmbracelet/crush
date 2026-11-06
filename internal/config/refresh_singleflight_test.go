@@ -15,6 +15,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func isolateHyperCredentials(t *testing.T) {
+	t.Helper()
+	t.Setenv("HYPER_API_KEY", "")
+	t.Setenv("CRUSH_HYPER_API_KEY", "")
+}
+
 // writeTokenToDisk persists token as the hyper provider credential in the
 // config file at path, mimicking what another crush instance would leave
 // behind after a successful refresh.
@@ -73,7 +79,7 @@ func newRefreshTestStore(t *testing.T, configPath string, exchange func(ctx cont
 // concurrent refresh calls for the same provider collapses into a single
 // token exchange.
 func TestRefreshOAuthToken_InProcessSingleFlight(t *testing.T) {
-	t.Parallel()
+	isolateHyperCredentials(t)
 
 	configPath := filepath.Join(t.TempDir(), "crush.json")
 
@@ -121,7 +127,7 @@ func TestRefreshOAuthToken_InProcessSingleFlight(t *testing.T) {
 // refresh token it has already rotated returns an error, so a second
 // exchange would be observable as a failure.
 func TestRefreshOAuthToken_CrossProcessAdopt(t *testing.T) {
-	t.Parallel()
+	isolateHyperCredentials(t)
 
 	configPath := filepath.Join(t.TempDir(), "crush.json")
 
@@ -222,7 +228,7 @@ func rotatingExchange(live string, next int) (exchange func(ctx context.Context,
 // disk rather than presenting its own revoked one, which would revoke the
 // whole token family and force the user to log in again.
 func TestRefreshOAuthToken_StalePeerBorrowsRotatedRefreshToken(t *testing.T) {
-	t.Parallel()
+	isolateHyperCredentials(t)
 
 	configPath := filepath.Join(t.TempDir(), "crush.json")
 	exchange, exchanges, reuse := rotatingExchange("rt3", 4)
@@ -252,7 +258,7 @@ func TestRefreshOAuthToken_StalePeerBorrowsRotatedRefreshToken(t *testing.T) {
 // whose in-memory credential has aged out adopts a peer's still-valid
 // token from disk without spending an exchange at all.
 func TestRefreshOAuthToken_AdoptsFresherDiskToken(t *testing.T) {
-	t.Parallel()
+	isolateHyperCredentials(t)
 
 	configPath := filepath.Join(t.TempDir(), "crush.json")
 	exchange, exchanges, _ := rotatingExchange("rt9", 10)
@@ -278,7 +284,7 @@ func TestRefreshOAuthToken_AdoptsFresherDiskToken(t *testing.T) {
 // backwards: a config file holding an older credential than the one we
 // already have must not be adopted or borrowed from.
 func TestRefreshOAuthToken_IgnoresOlderDiskToken(t *testing.T) {
-	t.Parallel()
+	isolateHyperCredentials(t)
 
 	configPath := filepath.Join(t.TempDir(), "crush.json")
 	exchange, exchanges, reuse := rotatingExchange("rt0", 1)

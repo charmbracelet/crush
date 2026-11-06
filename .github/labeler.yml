@@ -67,6 +67,8 @@
   - "/llama/i"
 "provider: openai chatgpt":
   - "/(openai|gpt)/i"
+"provider: opencode":
+  - "/opencode/i"
 "provider: openrouter":
   - "/openrouter/i"
 "provider: qwen":

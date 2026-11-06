@@ -9,6 +9,9 @@ import (
 )
 
 // PersistOutput stores a bang-mode shell command result as a user message.
+// Oversized output is truncated first, with the full text spilled to a file
+// under spillDir, so a single noisy command cannot swamp the context window
+// or the session.
 // If the target session no longer exists (deleted before or during the
 // command), persistence is skipped without surfacing an error.
 func PersistOutput(
@@ -16,6 +19,7 @@ func PersistOutput(
 	messages message.Service,
 	sessionID, command, output string,
 	exitCode int,
+	spillDir string,
 ) error {
 	if sessionID == "" {
 		return nil
@@ -25,7 +29,7 @@ func PersistOutput(
 		Role: message.User,
 		Parts: []message.ContentPart{message.ShellCommand{
 			Command:  command,
-			Output:   output,
+			Output:   TruncateForPersist(output, spillDir),
 			ExitCode: exitCode,
 		}},
 	})

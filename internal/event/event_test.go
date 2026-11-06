@@ -10,6 +10,60 @@ import (
 	"github.com/posthog/posthog-go"
 )
 
+func TestSetNonInteractive(t *testing.T) {
+	originalNonInteractive := baseProps[nonInteractiveAttrName]
+	originalNonInteractiveNested := baseProps[nonInteractiveNestedAttrName]
+	t.Cleanup(func() {
+		baseProps = baseProps.
+			Set(nonInteractiveAttrName, originalNonInteractive).
+			Set(nonInteractiveNestedAttrName, originalNonInteractiveNested)
+	})
+
+	tests := []struct {
+		name                     string
+		nonInteractive           bool
+		crush                    string
+		wantNonInteractiveNested bool
+	}{
+		{
+			name: "interactive direct invocation",
+		},
+		{
+			name:           "non-interactive direct invocation",
+			nonInteractive: true,
+		},
+		{
+			name:  "interactive nested invocation",
+			crush: "1",
+		},
+		{
+			name:                     "non-interactive nested invocation",
+			nonInteractive:           true,
+			crush:                    "1",
+			wantNonInteractiveNested: true,
+		},
+		{
+			name:           "non-interactive invocation with unrecognized marker",
+			nonInteractive: true,
+			crush:          "0",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("CRUSH", tt.crush)
+			SetNonInteractive(tt.nonInteractive)
+
+			if got := baseProps[nonInteractiveAttrName]; got != tt.nonInteractive {
+				t.Errorf("%s = %v, want %v", nonInteractiveAttrName, got, tt.nonInteractive)
+			}
+			if got := baseProps[nonInteractiveNestedAttrName]; got != tt.wantNonInteractiveNested {
+				t.Errorf("%s = %v, want %v", nonInteractiveNestedAttrName, got, tt.wantNonInteractiveNested)
+			}
+		})
+	}
+}
+
 func TestError(t *testing.T) {
 	t.Run("returns early when client is nil", func(t *testing.T) {
 		// This test verifies that when the PostHog client is not initialized

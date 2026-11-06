@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -29,6 +31,16 @@ const responseContextHeight = 10
 
 // toolBodyLeftPaddingTotal represents the padding that should be applied to each tool body
 const toolBodyLeftPaddingTotal = 2
+
+// collapsedMaxLines returns the number of lines to display when content
+// is collapsed. If collapsing would hide only a single line, all lines
+// are shown instead.
+func collapsedMaxLines(totalLines int) int {
+	if totalLines <= responseContextHeight+1 {
+		return totalLines
+	}
+	return responseContextHeight
+}
 
 // ToolStatus represents the current state of a tool call.
 type ToolStatus int
@@ -214,13 +226,14 @@ func NewToolMessageItem(
 	toolCall message.ToolCall,
 	result *message.ToolResult,
 	canceled bool,
+	workingDir string,
 ) ToolMessageItem {
 	var item ToolMessageItem
 	switch toolCall.Name {
 	case tools.BashToolName:
-		item = NewBashToolMessageItem(sty, toolCall, result, canceled)
+		item = NewBashToolMessageItem(sty, toolCall, result, canceled, workingDir)
 	case tools.JobOutputToolName:
-		item = NewJobOutputToolMessageItem(sty, toolCall, result, canceled)
+		item = NewJobOutputToolMessageItem(sty, toolCall, result, canceled, workingDir)
 	case tools.JobKillToolName:
 		item = NewJobKillToolMessageItem(sty, toolCall, result, canceled)
 	case tools.ViewToolName:
@@ -245,8 +258,10 @@ func NewToolMessageItem(
 		item = NewSourcegraphToolMessageItem(sty, toolCall, result, canceled)
 	case tools.DiagnosticsToolName:
 		item = NewDiagnosticsToolMessageItem(sty, toolCall, result, canceled)
-	case agent.AgentToolName:
+	case agent.AgentToolName, agent.AgentDispatchToolName:
 		item = NewAgentToolMessageItem(sty, toolCall, result, canceled)
+	case agent.AgentSendToolName, agent.AgentStatusToolName, agent.AgentStopToolName:
+		item = NewAgentControlToolMessageItem(sty, toolCall, result, canceled)
 	case tools.AgenticFetchToolName:
 		item = NewAgenticFetchToolMessageItem(sty, toolCall, result, canceled)
 	case tools.WebFetchToolName:
@@ -299,32 +314,29 @@ func (t *baseToolMessageItem) ID() string {
 	return t.toolCall.ID
 }
 
-// StartAnimation starts the assistant message animation if it should be spinning.
-func (t *baseToolMessageItem) StartAnimation() tea.Cmd {
-	if !t.isSpinning() {
-		return nil
-	}
-	return t.anim.Start()
+// Spinning implements [Animatable].
+func (t *baseToolMessageItem) Spinning() bool {
+	return t.isSpinning()
 }
 
-// Animate progresses the assistant message animation if it should be spinning.
+// restyleAnim implements [animRestyler].
+func (t *baseToolMessageItem) restyleAnim() {
+	t.anim.SetColors(t.sty.WorkingLabelColor, t.sty.WorkingGradFromColor, t.sty.WorkingGradToColor, nil)
+}
+
+// Advance implements [Animatable].
 //
 // Bumps the F6 list-cache version so the next draw re-renders this
-// item: a spinner tick mutates anim's internal frame counter, which
-// changes the rendered output but is invisible to the per-item
-// caches. Without the bump the list cache would serve the previously
-// rendered frame indefinitely and the spinner would appear frozen.
-// The ID gate keeps unrelated ticks (routed here by a future change
-// to chat.Animate's dispatch) from churning the cache.
-func (t *baseToolMessageItem) Animate(msg anim.StepMsg) tea.Cmd {
-	if !t.isSpinning() {
-		return nil
-	}
-	if msg.ID != t.toolCall.ID {
-		return nil
+// item: a spinner frame mutates anim's internal counter, which changes
+// the rendered output but is invisible to the per-item caches. Without
+// the bump the list cache would serve the previously rendered frame
+// indefinitely and the spinner would appear frozen.
+func (t *baseToolMessageItem) Advance() bool {
+	if !t.isSpinning() || !t.anim.Advance() {
+		return false
 	}
 	t.Bump()
-	return t.anim.Animate(msg)
+	return true
 }
 
 // RawRender implements [MessageItem].
@@ -458,7 +470,8 @@ func (t *baseToolMessageItem) computeStatus() ToolStatus {
 	return t.status
 }
 
-// isSpinning returns true if the tool should show animation.
+// isSpinning returns true if the tool should show animation. A recorded
+// result stops it too, for calls stored before settling marked them finished.
 func (t *baseToolMessageItem) isSpinning() bool {
 	if t.spinningFunc != nil {
 		return t.spinningFunc(SpinningState{
@@ -467,7 +480,7 @@ func (t *baseToolMessageItem) isSpinning() bool {
 			Status:   t.status,
 		})
 	}
-	return !t.toolCall.Finished && t.status != ToolStatusCanceled
+	return !t.toolCall.Finished && t.result == nil && t.status != ToolStatusCanceled
 }
 
 // SetSpinningFunc sets a custom function to determine if the tool should spin.
@@ -529,6 +542,88 @@ func pendingTool(sty *styles.Styles, name string, anim *anim.Anim, nested bool) 
 	return fmt.Sprintf("%s %s %s", icon, toolName, animView)
 }
 
+// partialJSONStringValue matches the raw remainder of a partial JSON
+// object after the decoder stopped, when the value of the pending key
+// is an in-flight string, e.g. `: "hel`.
+var partialJSONStringValue = regexp.MustCompile(`^\s*:\s*"((?:[^"\\]|\\.)*\\?)$`)
+
+// partialJSONFields extracts every complete top-level scalar field of a
+// JSON object that may be cut off mid-stream, e.g. while a tool call
+// input is still being streamed. The value currently streaming is also
+// recovered as far as it is unambiguous: a string value is included
+// while it grows (a cut escape at its end is dropped), while partial
+// keys, numbers, booleans, and nested values are omitted. Nested
+// objects and arrays are skipped: tool parameter schemas are flat.
+func partialJSONFields(input string) map[string]any {
+	fields := make(map[string]any)
+	dec := json.NewDecoder(strings.NewReader(input))
+	var key string
+	depth := 0
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			break
+		}
+		switch v := tok.(type) {
+		case json.Delim:
+			if v == '{' || v == '[' {
+				depth++
+			} else {
+				depth--
+				if depth == 1 {
+					// A nested value of the top-level object just closed;
+					// drop its dangling key so the next key/value pair stays
+					// in sync.
+					key = ""
+				}
+			}
+		case string:
+			if depth != 1 {
+				continue
+			}
+			if key == "" {
+				key = v
+			} else {
+				fields[key] = v
+				key = ""
+			}
+		default:
+			if depth == 1 && key != "" {
+				fields[key] = v
+				key = ""
+			}
+		}
+	}
+	if key != "" && depth == 1 {
+		offset := min(int(dec.InputOffset()), len(input))
+		if m := partialJSONStringValue.FindStringSubmatch(input[offset:]); m != nil {
+			fields[key] = unescapePartialString(m[1])
+		}
+	}
+	return fields
+}
+
+// unescapePartialString unescapes a string value cut off mid-stream,
+// dropping a trailing incomplete escape such as a lone backslash or a
+// short \u sequence. Unescaping is best-effort: the value is a prefix
+// of the final one and self-corrects as more input arrives.
+func unescapePartialString(s string) string {
+	// JSON allows \/ where Go string syntax does not.
+	s = strings.ReplaceAll(s, `\/`, `/`)
+	for {
+		if v, err := strconv.Unquote(`"` + s + `"`); err == nil {
+			return v
+		}
+		idx := strings.LastIndexByte(s, '\\')
+		if idx < 0 || len(s)-idx > len(`\uXXXX`) {
+			// No escape to trim: the failure is not a cut tail, so the
+			// raw prefix is the best display we have.
+			return s
+		}
+		s = s[:idx]
+	}
+}
+
 // toolEarlyStateContent handles error/cancelled/pending states before content rendering.
 // Returns the rendered output and true if early state was handled.
 func toolEarlyStateContent(sty *styles.Styles, opts *ToolRenderOpts, width int) (string, bool) {
@@ -583,7 +678,8 @@ func toolIcon(sty *styles.Styles, status ToolStatus) string {
 }
 
 // toolParamList formats tool parameters as "main (key=value, ...)" with truncation.
-// When opts.ExpandedContent is true, the output wraps instead of truncating.
+// When opts.ExpandedContent is true, the output wraps instead of truncating,
+// unless the tool is compact (nested in an agent tree), which always truncates.
 func toolParamList(sty *styles.Styles, params []string, width int, opts *ToolRenderOpts) string {
 	// minSpaceForMainParam is the min space required for the main param
 	// if this is less that the value set we will only show the main param nothing else
@@ -607,44 +703,81 @@ func toolParamList(sty *styles.Styles, params []string, width int, opts *ToolRen
 	if len(kvPairs) > 0 {
 		partsStr := strings.Join(kvPairs, ", ")
 		if remaining := width - lipgloss.Width(partsStr) - 3; remaining >= minSpaceForMainParam {
-			output = fmt.Sprintf("%s (%s)", mainParam, partsStr)
+			// main param is syntax highlighted so style the param as well
+			pairs := sty.Tool.ParamMain.Render(fmt.Sprintf("(%s)", partsStr))
+			output = fmt.Sprintf("%s %s", mainParam, pairs)
 		}
 	}
 
-	if width >= 0 && (opts == nil || !opts.ExpandedContent) {
-		output = ansi.Truncate(output, width, "…")
-	} else if opts != nil && opts.ExpandedContent && width > 0 && lipgloss.Width(output) > width {
-		output = ansi.Hardwrap(output, width, false)
+	// Compact tools are the children of an agent tree, where a wrapped
+	// header would push continuation lines past the tree's branch drawing
+	// and break the bars. They truncate even when expanded, and stay on one
+	// line even when a parameter has newlines of its own.
+	if opts != nil && opts.Compact {
+		output = strings.ReplaceAll(output, "\n", " ")
+	}
+	if width >= 0 && (opts == nil || !opts.ExpandedContent || opts.Compact) {
+		return sty.Tool.ParamMain.Render(ansi.Truncate(output, width, "…"))
+	}
+	if opts != nil && opts.ExpandedContent && width > 0 && lipgloss.Width(output) > width {
+		// Let Lip Gloss do the wrapping rather than wrapping and styling in
+		// separate steps. A parameter is often syntax highlighted, and a
+		// wrap falls wherever the width runs out, usually part-way through a
+		// coloured token. Lip Gloss carries the colours that are open at the
+		// break and re-opens them on the next line, on top of the parameter
+		// style. Hard-wrapping first and styling after would emit only the
+		// parameter colour there and drop the highlight; styling first and
+		// hard-wrapping after would emit nothing there and drop both.
+		return capLineWidths(sty.Tool.ParamMain.Width(width).Render(output), width)
 	}
 	return sty.Tool.ParamMain.Render(output)
+}
+
+// capLineWidths holds every line of s to width.
+//
+// Word wrapping keeps the space it broke on, so a word that ends exactly at
+// the edge leaves its line a column wider than the space it was given, and
+// the header spills past the pane. The space is invisible and sits before
+// the closing reset, out of reach of a plain trim, so the line is cut with
+// the escape sequences accounted for.
+func capLineWidths(s string, width int) string {
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		if lipgloss.Width(line) > width {
+			lines[i] = ansi.Truncate(line, width, "")
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // toolHeader builds the tool header line: "● ToolName params..."
 // When opts.ExpandedContent is true, long parameters wrap instead of truncating.
 func toolHeader(sty *styles.Styles, status ToolStatus, name string, width int, opts *ToolRenderOpts, params ...string) string {
-	nested := opts != nil && opts.Compact
-	icon := toolIcon(sty, status)
-	nameStyle := sty.Tool.NameNormal
-	if nested {
-		nameStyle = sty.Tool.NameNested
-	}
-	toolName := nameStyle.Render(name)
-	prefix := fmt.Sprintf("%s %s ", icon, toolName)
+	prefix := toolHeaderPrefix(sty, status, name, opts)
 	prefixWidth := lipgloss.Width(prefix)
-	remainingWidth := width - prefixWidth
-	paramsStr := toolParamList(sty, params, remainingWidth, opts)
+	paramsStr := toolParamList(sty, params, width-prefixWidth, opts)
 
 	// When expanded, toolParamList may return multiple lines. Indent
 	// continuation lines to align with the first line's param text.
-	if strings.Contains(paramsStr, "\n") {
-		lines := strings.Split(paramsStr, "\n")
-		indent := strings.Repeat(" ", prefixWidth)
-		for i := 1; i < len(lines); i++ {
-			lines[i] = indent + lines[i]
-		}
-		return prefix + strings.Join(lines, "\n")
+	if first, rest, found := strings.Cut(paramsStr, "\n"); found {
+		return prefix + first + "\n" + indentLines(rest, prefixWidth)
 	}
 	return prefix + paramsStr
+}
+
+// toolHeaderPrefix returns the styled "● ToolName " that leads a tool header.
+func toolHeaderPrefix(sty *styles.Styles, status ToolStatus, name string, opts *ToolRenderOpts) string {
+	nameStyle := sty.Tool.NameNormal
+	if opts != nil && opts.Compact {
+		nameStyle = sty.Tool.NameNested
+	}
+	return fmt.Sprintf("%s %s ", toolIcon(sty, status), nameStyle.Render(name))
+}
+
+// indentLines indents every line of s by n spaces.
+func indentLines(s string, n int) string {
+	indent := strings.Repeat(" ", n)
+	return indent + strings.ReplaceAll(s, "\n", "\n"+indent)
 }
 
 // toolOutputPlainContent renders plain text with optional expansion support.
@@ -654,7 +787,7 @@ func toolOutputPlainContent(sty *styles.Styles, content string, width int, expan
 	content = common.RemapANSI16(content, sty.ANSI)
 	lines := strings.Split(content, "\n")
 
-	maxLines := responseContextHeight
+	maxLines := collapsedMaxLines(len(lines))
 	if expanded {
 		maxLines = len(lines) // Show all
 	}
@@ -671,12 +804,12 @@ func toolOutputPlainContent(sty *styles.Styles, content string, width int, expan
 		out = append(out, sty.Tool.ContentLine.Width(width).Render(ln))
 	}
 
-	wasTruncated := len(lines) > responseContextHeight
+	wasTruncated := len(lines) > maxLines
 
 	if !expanded && wasTruncated {
 		out = append(out, sty.Tool.ContentTruncation.
 			Width(width).
-			Render(fmt.Sprintf(assistantMessageTruncateFormat, len(lines)-responseContextHeight)))
+			Render(fmt.Sprintf(assistantMessageTruncateFormat, len(lines)-maxLines)))
 	}
 
 	return strings.Join(out, "\n")
@@ -687,7 +820,7 @@ func toolOutputCodeContent(sty *styles.Styles, path, content string, offset, wid
 	content = stringext.NormalizeSpace(content)
 
 	lines := strings.Split(content, "\n")
-	maxLines := responseContextHeight
+	maxLines := collapsedMaxLines(len(lines))
 	if expanded {
 		maxLines = len(lines)
 	}
@@ -914,13 +1047,13 @@ func hookDetail(sty *styles.Styles, hi hooks.HookInfo) string {
 		return sty.Tool.HookDenied.Render(denialMessage)
 	case "allow":
 		result := sty.Tool.HookOK.Render(okMessage)
-		if hi.InputRewrite {
+		if hi.InputRewrite || hi.OutputRewrite {
 			result += " " + sty.Tool.HookRewrote.Render(rewroteMessage)
 		}
 		return result
 	default:
 		result := sty.Tool.HookOK.Render(okMessage)
-		if hi.InputRewrite {
+		if hi.InputRewrite || hi.OutputRewrite {
 			result += " " + sty.Tool.HookRewrote.Render(rewroteMessage)
 		}
 		return result
@@ -977,7 +1110,7 @@ func toolOutputDiffContent(sty *styles.Styles, file, oldContent, newContent stri
 	lines := strings.Split(formatted, "\n")
 
 	// Truncate if needed.
-	maxLines := responseContextHeight
+	maxLines := collapsedMaxLines(len(lines))
 	if expanded {
 		maxLines = len(lines)
 	}
@@ -1027,7 +1160,7 @@ func toolOutputMultiEditDiffContent(sty *styles.Styles, file string, meta tools.
 	lines := strings.Split(formatted, "\n")
 
 	// Truncate if needed.
-	maxLines := responseContextHeight
+	maxLines := collapsedMaxLines(len(lines))
 	if expanded {
 		maxLines = len(lines)
 	}
@@ -1050,14 +1183,19 @@ func toolOutputMultiEditDiffContent(sty *styles.Styles, file string, meta tools.
 	return sty.Tool.Body.Render(formatted)
 }
 
+// roundedTree styles a tool tree so multiline children stay aligned: the
+// enumerator draws each branch and the indenter continues it down the child's
+// wrapped lines. They share one width because the continuation bar only lines
+// up with the branch when their geometry matches.
+func roundedTree(t *tree.Tree, width int) *tree.Tree {
+	return t.
+		Enumerator(roundedEnumerator(2, width)).
+		Indenter(roundedIndenter(2, width))
+}
+
 // roundedEnumerator creates a tree enumerator with rounded corners.
 func roundedEnumerator(lPadding, width int) tree.Enumerator {
-	if width == 0 {
-		width = 2
-	}
-	if lPadding == 0 {
-		lPadding = 1
-	}
+	lPadding, width = enumeratorDims(lPadding, width)
 	return func(children tree.Children, index int) string {
 		line := strings.Repeat("─", width)
 		padding := strings.Repeat(" ", lPadding)
@@ -1066,6 +1204,31 @@ func roundedEnumerator(lPadding, width int) tree.Enumerator {
 		}
 		return padding + "├" + line
 	}
+}
+
+// roundedIndenter continues a branch down a child's wrapped lines, matching
+// roundedEnumerator's geometry so the bar stays under the branch.
+func roundedIndenter(lPadding, width int) tree.Indenter {
+	lPadding, width = enumeratorDims(lPadding, width)
+	return func(children tree.Children, index int) string {
+		padding := strings.Repeat(" ", lPadding)
+		if children.Length()-1 == index {
+			return padding + " " + strings.Repeat(" ", width)
+		}
+		return padding + "│" + strings.Repeat(" ", width)
+	}
+}
+
+// enumeratorDims applies the shared defaults so the enumerator and indenter
+// agree on geometry.
+func enumeratorDims(lPadding, width int) (int, int) {
+	if width == 0 {
+		width = 2
+	}
+	if lPadding == 0 {
+		lPadding = 1
+	}
+	return lPadding, width
 }
 
 // toolOutputMarkdownContent renders markdown content with optional truncation.
@@ -1086,8 +1249,13 @@ func toolOutputMarkdownContent(sty *styles.Styles, content string, width int, ex
 		return toolOutputPlainContent(sty, content, width, expanded)
 	}
 
+	// Glamour ends with a blank, still-painted line, sometimes only a
+	// code block's margin wide; drop it so the box ends with its text.
 	lines := strings.Split(rendered, "\n")
-	maxLines := responseContextHeight
+	for len(lines) > 0 && strings.TrimSpace(ansi.Strip(lines[len(lines)-1])) == "" {
+		lines = lines[:len(lines)-1]
+	}
+	maxLines := collapsedMaxLines(len(lines))
 	if expanded {
 		maxLines = len(lines)
 	}
@@ -1285,6 +1453,32 @@ func (t *baseToolMessageItem) formatParametersForCopy() string {
 		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
 			return fmt.Sprintf("**Task:**\n%s", params.Prompt)
 		}
+	case agent.AgentDispatchToolName:
+		var params agent.AgentDispatchParams
+		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
+			return fmt.Sprintf("**Task (%s):**\n%s", params.Label, params.Prompt)
+		}
+	case agent.AgentSendToolName:
+		var params agent.AgentSendParams
+		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
+			return fmt.Sprintf("**To %s:**\n%s", params.Label, params.Message)
+		}
+	case agent.AgentStatusToolName:
+		var params agent.AgentStatusParams
+		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
+			if params.Label == "" {
+				return "**Subagents:** all"
+			}
+			return fmt.Sprintf("**Subagent:** %s", params.Label)
+		}
+	case agent.AgentStopToolName:
+		var params agent.AgentStopParams
+		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
+			if params.Reason == "" {
+				return fmt.Sprintf("**Stop:** %s", params.Label)
+			}
+			return fmt.Sprintf("**Stop:** %s\n**Reason:** %s", params.Label, params.Reason)
+		}
 	}
 
 	var params map[string]any
@@ -1333,7 +1527,7 @@ func (t *baseToolMessageItem) formatResultForCopy() string {
 		return t.formatAgenticFetchResultForCopy()
 	case tools.WebFetchToolName:
 		return t.formatWebFetchResultForCopy()
-	case agent.AgentToolName:
+	case agent.AgentToolName, agent.AgentDispatchToolName:
 		return t.formatAgentResultForCopy()
 	case tools.DownloadToolName, tools.GrepToolName, tools.GlobToolName, tools.LSToolName, tools.SourcegraphToolName, tools.DiagnosticsToolName, tools.TodosToolName:
 		return fmt.Sprintf("```\n%s\n```", t.result.Content)
@@ -1653,6 +1847,14 @@ func prettifyToolName(name string) string {
 	switch name {
 	case agent.AgentToolName:
 		return "Agent"
+	case agent.AgentDispatchToolName:
+		return "Create Subagent"
+	case agent.AgentSendToolName:
+		return "Message Subagent"
+	case agent.AgentStatusToolName:
+		return "Subagent Status"
+	case agent.AgentStopToolName:
+		return "Stop Subagent"
 	case tools.BashToolName:
 		return "Bash"
 	case tools.JobOutputToolName:

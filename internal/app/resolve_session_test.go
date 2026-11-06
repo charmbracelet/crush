@@ -60,6 +60,10 @@ func (m *mockSessionService) Save(_ context.Context, s session.Session) (session
 	return s, nil
 }
 
+func (m *mockSessionService) SetChannel(_ context.Context, sessionID, channel string) (session.Session, error) {
+	return session.Session{ID: sessionID, Channel: channel}, nil
+}
+
 func (m *mockSessionService) UpdateTitleAndUsage(context.Context, string, string, int64, int64, float64) error {
 	return nil
 }
@@ -70,6 +74,18 @@ func (m *mockSessionService) Rename(context.Context, string, string) error {
 
 func (m *mockSessionService) Delete(context.Context, string) error {
 	return nil
+}
+
+func (m *mockSessionService) MCPDisabledServers(context.Context) ([]string, error) {
+	return nil, nil
+}
+
+func (m *mockSessionService) SetMCPServerDisabled(context.Context, string, bool) error {
+	return nil
+}
+
+func (m *mockSessionService) MCPServersEnabled(context.Context) ([]string, error) {
+	return nil, nil
 }
 
 func (m *mockSessionService) CreateAgentToolSessionID(messageID, toolCallID string) string {

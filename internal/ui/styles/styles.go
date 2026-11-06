@@ -2,8 +2,10 @@
 package styles
 
 import (
+	"encoding/json"
 	"fmt"
 	"image/color"
+	"log/slog"
 	"strings"
 
 	"charm.land/bubbles/v2/filepicker"
@@ -26,6 +28,26 @@ const (
 
 	ArrowRightIcon string = "→"
 
+	// CodespanPadding is the padding rendered around inline code spans in
+	// markdown. It displays identically to the blank padding it replaced,
+	// but selection copies recognize it and turn it back into the original
+	// backticks (see list.HighlightContent).
+	//
+	// It is a no-break space tagged with the text-presentation variation
+	// selector (U+FE0E): the pair is a single one-cell grapheme that
+	// renders as a blank and, being non-breaking, keeps word wrap from
+	// tearing a codespan between its padding and its text. The selector
+	// makes the sentinel distinct from a real no-break space in message
+	// text (pasted text, some LLM output), which a selection copy must
+	// preserve verbatim.
+	//
+	// The selector must be U+FE0E, not the emoji-presentation U+FE0F:
+	// ansi.StringWidth measures any cluster ending in U+FE0F as two
+	// cells wide, while terminals render it as one, and that mismatch
+	// makes the frame differ repaint the line on every frame (visible
+	// as flicker).
+	CodespanPadding string = "\u00a0\ufe0e"
+
 	ToolPending string = "●"
 	ToolSuccess string = "✓"
 	ToolError   string = "×"
@@ -46,6 +68,8 @@ const (
 	TextIcon   string = "≡"
 	SkillIcon  string = "▲"
 	RemoveIcon string = "✕"
+
+	ColorSwatchIcon string = "■"
 
 	ScrollbarThumb string = "┃"
 	ScrollbarTrack string = "│"
@@ -81,6 +105,7 @@ type Styles struct {
 		Keystroke         lipgloss.Style // Style for keystroke hints (e.g., "ctrl+d")
 		KeystrokeTip      lipgloss.Style // Style for keystroke action text (e.g., "open", "close")
 		WorkingDir        lipgloss.Style // Style for current working directory
+		GitBranch         lipgloss.Style // Style for the current git branch name
 		Separator         lipgloss.Style // Style for separator dots (•)
 		Wrapper           lipgloss.Style // Outer container for the entire header row
 		LogoGradCanvas    lipgloss.Style // Canvas for the compact "CRUSH" gradient
@@ -103,6 +128,7 @@ type Styles struct {
 	// Markdown & Chroma
 	Markdown      ansi.StyleConfig
 	QuietMarkdown ansi.StyleConfig
+	PlanMarkdown  ansi.StyleConfig
 
 	// Inputs
 	TextInput textinput.Styles
@@ -118,8 +144,12 @@ type Styles struct {
 
 	// Buttons
 	Button struct {
-		Focused  lipgloss.Style
-		Blurred  lipgloss.Style
+		Focused lipgloss.Style
+		Blurred lipgloss.Style
+		// Inactive styles buttons of a prompt that is not in the
+		// active pane: slightly lighter than Blurred so the choices
+		// stay legible while the chat has focus.
+		Inactive lipgloss.Style
 		Hovered  lipgloss.Style
 		Negative lipgloss.Style // Selected negative/destructive action.
 	}
@@ -128,11 +158,19 @@ type Styles struct {
 	Editor struct {
 		Textarea textarea.Styles
 
-		// Normal mode prompt (default "::: ").
-		PromptNormalFocused lipgloss.Style
-		PromptNormalBlurred lipgloss.Style
+		// Normal mode prompt ("> " icon on the first line, "::: " after).
+		PromptNormalIconFocused lipgloss.Style
+		PromptNormalIconBlurred lipgloss.Style
+		PromptNormalFocused     lipgloss.Style
+		PromptNormalBlurred     lipgloss.Style
 
-		// YOLO mode prompt (" ! " icon + ":::" dots).
+		// Plan mode prompt.
+		PromptPlanIconFocused lipgloss.Style
+		PromptPlanIconBlurred lipgloss.Style
+		PromptPlanDotsFocused lipgloss.Style
+		PromptPlanDotsBlurred lipgloss.Style
+
+		// YOLO mode prompt.
 		PromptYoloIconFocused lipgloss.Style
 		PromptYoloIconBlurred lipgloss.Style
 		PromptYoloDotsFocused lipgloss.Style
@@ -159,6 +197,12 @@ type Styles struct {
 		QuestionRadioOff   lipgloss.Style // Unselected single-choice radio.
 		QuestionCheckOn    lipgloss.Style // Checked multi-choice indicator.
 		QuestionCheckOff   lipgloss.Style // Unchecked multi-choice indicator.
+
+		// Sysadmin mode prompt (" # " icon + ":::" dots).
+		PromptSysadminIconFocused lipgloss.Style
+		PromptSysadminIconBlurred lipgloss.Style
+		PromptSysadminDotsFocused lipgloss.Style
+		PromptSysadminDotsBlurred lipgloss.Style
 	}
 
 	// Radio
@@ -182,6 +226,12 @@ type Styles struct {
 	// Background
 	Background color.Color
 
+	// Exit banner
+	ExitBanner struct {
+		Text  lipgloss.Style // Parting message, session title, and resume command
+		Label lipgloss.Style // Session and Continue labels
+	}
+
 	// Logo
 	Logo struct {
 		FieldColor         color.Color
@@ -202,6 +252,8 @@ type Styles struct {
 	WorkingGradToColor   color.Color
 	WorkingLabelColor    color.Color // Label text color next to the indicator
 	WorkingTimerColor    color.Color // Elapsed timer suffix color
+	ThinkingLabelColor   color.Color // Label text color for thinking/summarizing spinners
+	CanceledLabelColor   color.Color // Label text color for canceled prompts
 
 	// Section Title
 	Section struct {
@@ -252,10 +304,12 @@ type Styles struct {
 		Name            lipgloss.Style // Resource name (e.g. "gopls")
 		StatusText      lipgloss.Style // Row status description (e.g. "starting...")
 		OfflineIcon     lipgloss.Style // Offline/unstarted/stopped status icon
+		WorkingIcon     lipgloss.Style // In-progress icon style with no preset glyph
 		DisabledIcon    lipgloss.Style // Disabled status icon
 		BusyIcon        lipgloss.Style // Busy/starting status icon
 		ErrorIcon       lipgloss.Style // Error status icon
 		OnlineIcon      lipgloss.Style // Online/ready status icon
+		OnlineText      lipgloss.Style // Online/ready status text (e.g. "connected"), no icon
 		NeedsAuthIcon   lipgloss.Style // Needs authentication status icon
 		AdditionalText  lipgloss.Style // "None" and "…and N more" text
 		CapabilityCount lipgloss.Style // "N tools" / "N prompts" / "N resources"
@@ -300,7 +354,11 @@ type Styles struct {
 		ShellOutput        lipgloss.Style // Plain output text.
 		ShellExitCode      lipgloss.Style // Non-zero exit code indicator.
 		ShellTruncation    lipgloss.Style // "N more lines" hint.
-		SectionHeader      lipgloss.Style
+
+		SectionHeader lipgloss.Style
+
+		// Plan section styles
+		PlanBox lipgloss.Style // Border+padding for the final plan message
 
 		// Thinking section styles
 		ThinkingBox            lipgloss.Style // Background for thinking content
@@ -311,6 +369,7 @@ type Styles struct {
 		AssistantInfoModel     lipgloss.Style
 		AssistantInfoProvider  lipgloss.Style
 		AssistantInfoDuration  lipgloss.Style
+		SubduedHypercreditIcon lipgloss.Style // Subdued ◆ for hypercredit figures within subdued text
 		AssistantCanceled      lipgloss.Style // Italic "Canceled" footer
 	}
 
@@ -327,8 +386,9 @@ type Styles struct {
 		NameNested lipgloss.Style // Nested child tool name (inside Agent/Agentic Fetch)
 
 		// Parameter list styles
-		ParamMain lipgloss.Style
-		ParamKey  lipgloss.Style
+		ParamMain   lipgloss.Style
+		ParamKey    lipgloss.Style
+		Description lipgloss.Style // A tool's own summary of what it is doing
 
 		// Content rendering styles
 		ContentLine           lipgloss.Style // Individual content line with background and width
@@ -374,6 +434,9 @@ type Styles struct {
 		// Agent task styles
 		AgentTaskTag lipgloss.Style // Agent task tag (blue background, bold)
 		AgentPrompt  lipgloss.Style // Agent prompt text
+		AgentName    lipgloss.Style // Subagent first name
+		AgentLabel   lipgloss.Style // Label a subagent was dispatched with, after its first name
+		AgentMessage lipgloss.Style // Message sent to a subagent
 
 		// Agentic fetch styles
 		AgenticFetchPromptTag lipgloss.Style // Agentic fetch prompt tag (green background, bold)
@@ -451,12 +514,24 @@ type Styles struct {
 		SelectedItem lipgloss.Style
 		InputPrompt  lipgloss.Style
 
+		// PromptMessage is the friendly description of what an
+		// integrated credential prompt (GPG pinentry) is asking for.
+		PromptMessage lipgloss.Style
+		// PromptKey styles the labeled key rows shown under it.
+		PromptKey lipgloss.Style
+		// SSHMessage is the friendly description of what an integrated
+		// SSH askpass prompt is asking for.
+		SSHMessage lipgloss.Style
+		// SSHKey styles the labeled account/key row shown under it.
+		SSHKey lipgloss.Style
+
 		List lipgloss.Style
 
 		Spinner lipgloss.Style
 
 		// ContentPanel is used for content blocks with subtle background.
-		ContentPanel lipgloss.Style
+		ContentPanel   lipgloss.Style
+		ContentPanelBg color.Color // Background color for ContentPanel syntax highlighting.
 
 		// Scrollbar styles for scrollable content.
 		ScrollbarThumb lipgloss.Style
@@ -492,11 +567,19 @@ type Styles struct {
 		Quit struct {
 			Content lipgloss.Style // Wrapper for the quit dialog's inner content
 			Hint    lipgloss.Style // Style for quit hint
+			Warning lipgloss.Style // Style for the work-in-progress warning
 			Frame   lipgloss.Style // Outer rounded border framing the quit dialog
 		}
 
 		APIKey struct {
 			Spinner lipgloss.Style // Loading spinner while validating the key
+		}
+
+		// AuthMethod styles the OAuth-vs-API-key choice dialog.
+		AuthMethod struct {
+			Prompt      lipgloss.Style // "How would you like to authenticate?" question line
+			CardBlurred lipgloss.Style // Unselected choice card frame and label
+			CardFocused lipgloss.Style // Selected choice card frame and label
 		}
 
 		OAuth struct {
@@ -542,6 +625,19 @@ type Styles struct {
 	Status struct {
 		Help lipgloss.Style
 
+		// Mode badges shown before the help hints.
+		ModeBadgePlan     lipgloss.Style
+		ModeBadgeYolo     lipgloss.Style
+		ModeBadgeSysadmin lipgloss.Style
+
+		// Full-width banners shown when switching modes.
+		ModeBannerPlan          lipgloss.Style
+		ModeBannerPlanBadge     lipgloss.Style
+		ModeBannerYolo          lipgloss.Style
+		ModeBannerYoloBadge     lipgloss.Style
+		ModeBannerSysadmin      lipgloss.Style
+		ModeBannerSysadminBadge lipgloss.Style
+
 		ErrorIndicator   lipgloss.Style
 		WarnIndicator    lipgloss.Style
 		InfoIndicator    lipgloss.Style
@@ -563,14 +659,7 @@ type Styles struct {
 	}
 
 	// Attachments styles
-	Attachments struct {
-		Normal   lipgloss.Style
-		Image    lipgloss.Style
-		Text     lipgloss.Style
-		Skill    lipgloss.Style
-		Remove   lipgloss.Style
-		Deleting lipgloss.Style
-	}
+	Attachments AttachmentStyles
 
 	// Pills styles for todo/queue pills
 	Pills struct {
@@ -595,46 +684,95 @@ type Styles struct {
 // ChromaTheme converts the current markdown chroma styles to a chroma
 // StyleEntries map.
 func (s *Styles) ChromaTheme() chroma.StyleEntries {
-	rules := s.Markdown.CodeBlock
+	return ChromaEntries(s.Markdown.CodeBlock.Chroma)
+}
 
-	return chroma.StyleEntries{
-		chroma.Text:                chromaStyle(rules.Chroma.Text),
-		chroma.Error:               chromaStyle(rules.Chroma.Error),
-		chroma.Comment:             chromaStyle(rules.Chroma.Comment),
-		chroma.CommentPreproc:      chromaStyle(rules.Chroma.CommentPreproc),
-		chroma.Keyword:             chromaStyle(rules.Chroma.Keyword),
-		chroma.KeywordReserved:     chromaStyle(rules.Chroma.KeywordReserved),
-		chroma.KeywordNamespace:    chromaStyle(rules.Chroma.KeywordNamespace),
-		chroma.KeywordType:         chromaStyle(rules.Chroma.KeywordType),
-		chroma.Operator:            chromaStyle(rules.Chroma.Operator),
-		chroma.Punctuation:         chromaStyle(rules.Chroma.Punctuation),
-		chroma.Name:                chromaStyle(rules.Chroma.Name),
-		chroma.NameBuiltin:         chromaStyle(rules.Chroma.NameBuiltin),
-		chroma.NameTag:             chromaStyle(rules.Chroma.NameTag),
-		chroma.NameAttribute:       chromaStyle(rules.Chroma.NameAttribute),
-		chroma.NameClass:           chromaStyle(rules.Chroma.NameClass),
-		chroma.NameConstant:        chromaStyle(rules.Chroma.NameConstant),
-		chroma.NameDecorator:       chromaStyle(rules.Chroma.NameDecorator),
-		chroma.NameException:       chromaStyle(rules.Chroma.NameException),
-		chroma.NameFunction:        chromaStyle(rules.Chroma.NameFunction),
-		chroma.NameOther:           chromaStyle(rules.Chroma.NameOther),
-		chroma.Literal:             chromaStyle(rules.Chroma.Literal),
-		chroma.LiteralNumber:       chromaStyle(rules.Chroma.LiteralNumber),
-		chroma.LiteralDate:         chromaStyle(rules.Chroma.LiteralDate),
-		chroma.LiteralString:       chromaStyle(rules.Chroma.LiteralString),
-		chroma.LiteralStringEscape: chromaStyle(rules.Chroma.LiteralStringEscape),
-		chroma.GenericDeleted:      chromaStyle(rules.Chroma.GenericDeleted),
-		chroma.GenericEmph:         chromaStyle(rules.Chroma.GenericEmph),
-		chroma.GenericInserted:     chromaStyle(rules.Chroma.GenericInserted),
-		chroma.GenericStrong:       chromaStyle(rules.Chroma.GenericStrong),
-		chroma.GenericSubheading:   chromaStyle(rules.Chroma.GenericSubheading),
-		chroma.Background:          chromaStyle(rules.Chroma.Background),
+// ChromaEntries converts a markdown chroma config to chroma style entries,
+// the same way glamour does for code blocks. A nil config has no entries.
+func ChromaEntries(c *ansi.Chroma) chroma.StyleEntries {
+	if c == nil {
+		return chroma.StyleEntries{}
 	}
+	return chroma.StyleEntries{
+		chroma.Text:                chromaStyle(c.Text),
+		chroma.Error:               chromaStyle(c.Error),
+		chroma.Comment:             chromaStyle(c.Comment),
+		chroma.CommentPreproc:      chromaStyle(c.CommentPreproc),
+		chroma.Keyword:             chromaStyle(c.Keyword),
+		chroma.KeywordReserved:     chromaStyle(c.KeywordReserved),
+		chroma.KeywordNamespace:    chromaStyle(c.KeywordNamespace),
+		chroma.KeywordType:         chromaStyle(c.KeywordType),
+		chroma.Operator:            chromaStyle(c.Operator),
+		chroma.Punctuation:         chromaStyle(c.Punctuation),
+		chroma.Name:                chromaStyle(c.Name),
+		chroma.NameBuiltin:         chromaStyle(c.NameBuiltin),
+		chroma.NameTag:             chromaStyle(c.NameTag),
+		chroma.NameAttribute:       chromaStyle(c.NameAttribute),
+		chroma.NameClass:           chromaStyle(c.NameClass),
+		chroma.NameConstant:        chromaStyle(c.NameConstant),
+		chroma.NameDecorator:       chromaStyle(c.NameDecorator),
+		chroma.NameException:       chromaStyle(c.NameException),
+		chroma.NameFunction:        chromaStyle(c.NameFunction),
+		chroma.NameOther:           chromaStyle(c.NameOther),
+		chroma.Literal:             chromaStyle(c.Literal),
+		chroma.LiteralNumber:       chromaStyle(c.LiteralNumber),
+		chroma.LiteralDate:         chromaStyle(c.LiteralDate),
+		chroma.LiteralString:       chromaStyle(c.LiteralString),
+		chroma.LiteralStringEscape: chromaStyle(c.LiteralStringEscape),
+		chroma.GenericDeleted:      chromaStyle(c.GenericDeleted),
+		chroma.GenericEmph:         chromaStyle(c.GenericEmph),
+		chroma.GenericInserted:     chromaStyle(c.GenericInserted),
+		chroma.GenericStrong:       chromaStyle(c.GenericStrong),
+		chroma.GenericSubheading:   chromaStyle(c.GenericSubheading),
+		chroma.Background:          chromaStyle(c.Background),
+	}
+}
+
+// AttachmentStyles are the styles for one attachment chip row. They are
+// passed to the attachments renderer as a unit so adding a style does not
+// mean touching every construction site.
+type AttachmentStyles struct {
+	Normal   lipgloss.Style
+	Image    lipgloss.Style
+	Text     lipgloss.Style
+	Skill    lipgloss.Style
+	Remove   lipgloss.Style
+	Deleting lipgloss.Style
+	More     lipgloss.Style // "N more…" hint for chips that didn't fit
 }
 
 // DialogHelpStyles returns the styles for dialog help.
 func (s *Styles) DialogHelpStyles() help.Styles {
 	return help.Styles(s.Dialog.Help)
+}
+
+// Clone returns a deep copy of the Styles struct, ensuring pointer fields
+// (particularly within ansi.StyleConfig) are not aliased. This is used to
+// safely snapshot styles before a theme preview.
+func (s *Styles) Clone() Styles {
+	clone := *s
+	clone.Markdown = cloneStyleConfig(s.Markdown)
+	clone.QuietMarkdown = cloneStyleConfig(s.QuietMarkdown)
+	return clone
+}
+
+// cloneStyleConfig deep-copies an ansi.StyleConfig by JSON round-tripping.
+//
+// NOTE: This assumes ansi.StyleConfig remains fully JSON-round-trippable.
+// If the glamour library adds non-serializable fields, this approach will
+// need to be replaced with a reflect-based deep copy.
+func cloneStyleConfig(src ansi.StyleConfig) ansi.StyleConfig {
+	data, err := json.Marshal(src)
+	if err != nil {
+		slog.Error("Failed to marshal markdown styles for theme preview", "error", err)
+		return src
+	}
+	var dst ansi.StyleConfig
+	if err := json.Unmarshal(data, &dst); err != nil {
+		slog.Error("Failed to unmarshal markdown styles for theme preview", "error", err)
+		return src
+	}
+	return dst
 }
 
 // hex returns a pointer to the "#rrggbb" representation of c. It's used to

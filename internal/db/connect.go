@@ -137,7 +137,7 @@ func Connect(ctx context.Context, dataDir string, opts ...ConnectOption) (*sql.D
 	// Serialize all access through a single connection. SQLite
 	// serializes writes at the file level anyway, and allowing multiple
 	// pool connections to interleave writes/checkpoints (especially
-	// under concurrent sub-agents) has caused WAL/header desync
+	// under concurrent subagents) has caused WAL/header desync
 	// resulting in SQLITE_NOTADB (26) on the next open.
 	conn.SetMaxOpenConns(1)
 

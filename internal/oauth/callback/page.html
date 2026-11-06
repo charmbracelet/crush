@@ -26,7 +26,11 @@
         {{.Detail}}{{with .Subject}} <span class="subject">{{.}}</span>{{end}}
       </p>
 
-      {{if .ErrorCode}}
+      {{if .ContinueURL}}
+      <p class="continue">
+        <a id="continue" href="{{.ContinueURL}}" target="_blank">Continue</a>
+      </p>
+      {{end}} {{if .ErrorCode}}
       <div class="reason">
         <span class="code">{{.ErrorCode}}</span>
         {{with .ErrorDescription}}{{.}}{{else}}The authorization server did not

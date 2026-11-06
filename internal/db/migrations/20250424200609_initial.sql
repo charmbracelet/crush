@@ -9,8 +9,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     prompt_tokens  INTEGER NOT NULL DEFAULT 0 CHECK (prompt_tokens >= 0),
     completion_tokens  INTEGER NOT NULL DEFAULT 0 CHECK (completion_tokens>= 0),
     cost REAL NOT NULL DEFAULT 0.0 CHECK (cost >= 0.0),
-    updated_at INTEGER NOT NULL,  -- Unix timestamp in milliseconds
-    created_at INTEGER NOT NULL   -- Unix timestamp in milliseconds
+    updated_at INTEGER NOT NULL,  -- Unix timestamp in seconds
+    created_at INTEGER NOT NULL   -- Unix timestamp in seconds
 );
 
 CREATE TRIGGER IF NOT EXISTS update_sessions_updated_at
@@ -27,8 +27,8 @@ CREATE TABLE IF NOT EXISTS files (
     path TEXT NOT NULL,
     content TEXT NOT NULL,
     version INTEGER NOT NULL DEFAULT 0,
-    created_at INTEGER NOT NULL,  -- Unix timestamp in milliseconds
-    updated_at INTEGER NOT NULL,  -- Unix timestamp in milliseconds
+    created_at INTEGER NOT NULL,  -- Unix timestamp in seconds
+    updated_at INTEGER NOT NULL,  -- Unix timestamp in seconds
     FOREIGN KEY (session_id) REFERENCES sessions (id) ON DELETE CASCADE,
     UNIQUE(path, session_id, version)
 );
@@ -50,9 +50,9 @@ CREATE TABLE IF NOT EXISTS messages (
     role TEXT NOT NULL,
     parts TEXT NOT NULL default '[]',
     model TEXT,
-    created_at INTEGER NOT NULL,  -- Unix timestamp in milliseconds
-    updated_at INTEGER NOT NULL,  -- Unix timestamp in milliseconds
-    finished_at INTEGER,  -- Unix timestamp in milliseconds
+    created_at INTEGER NOT NULL,  -- Unix timestamp in seconds
+    updated_at INTEGER NOT NULL,  -- Unix timestamp in seconds
+    finished_at INTEGER,  -- Unix timestamp in seconds
     FOREIGN KEY (session_id) REFERENCES sessions (id) ON DELETE CASCADE
 );
 

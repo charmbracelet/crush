@@ -1,3 +1,4 @@
+* text=auto eol=lf
 *.golden linguist-generated=true -text
 .github/crush-schema.json linguist-generated=true
 internal/agent/hyper/provider.json linguist-generated=true

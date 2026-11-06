@@ -23,6 +23,7 @@ type Session struct {
 	SummaryMessageID string  `json:"summary_message_id"`
 	Cost             float64 `json:"cost"`
 	Todos            []Todo  `json:"todos,omitempty"`
+	Channel          string  `json:"channel,omitempty"`
 	CreatedAt        int64   `json:"created_at"`
 	UpdatedAt        int64   `json:"updated_at"`
 	IsBusy           bool    `json:"is_busy"`

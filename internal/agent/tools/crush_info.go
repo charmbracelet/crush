@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"cmp"
 	"context"
 	_ "embed"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/lsp"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/skills"
 )
 
@@ -350,18 +352,24 @@ func writePermissions(b *strings.Builder, cfg *config.ConfigStore) {
 	c := cfg.Config()
 	overrides := cfg.Overrides()
 
-	if c.Permissions == nil {
-		if !overrides.SkipPermissionRequests {
-			return
-		}
-	} else if !overrides.SkipPermissionRequests && len(c.Permissions.AllowedTools) == 0 {
+	hasAllowedTools := c.Permissions != nil && len(c.Permissions.AllowedTools) > 0
+	isNonNormalMode := overrides.PermissionMode == permission.PermissionModeYolo ||
+		overrides.PermissionMode == permission.PermissionModeSysadmin
+
+	if !isNonNormalMode && !hasAllowedTools {
 		return
 	}
+
 	b.WriteString("[permissions]\n")
-	if overrides.SkipPermissionRequests {
+	switch overrides.PermissionMode {
+	case permission.PermissionModeSysadmin:
+		b.WriteString("mode = sysadmin\n")
+	case permission.PermissionModeYolo:
 		b.WriteString("mode = yolo\n")
+	default:
+		b.WriteString("mode = normal\n")
 	}
-	if c.Permissions != nil && len(c.Permissions.AllowedTools) > 0 {
+	if hasAllowedTools {
 		sorted := slices.Clone(c.Permissions.AllowedTools)
 		slices.Sort(sorted)
 		fmt.Fprintf(b, "allowed_tools = %s\n", strings.Join(sorted, ", "))
@@ -398,6 +406,22 @@ func writeOptions(b *strings.Builder, cfg *config.ConfigStore) {
 	opts = append(opts, kv{"auto_lsp", fmt.Sprintf("%v", autoLSP)})
 	autoSummarize := !c.Options.DisableAutoSummarize
 	opts = append(opts, kv{"auto_summarize", fmt.Sprintf("%v", autoSummarize)})
+
+	if c.Options.TUI != nil {
+		opts = append(opts, kv{"compact_mode", fmt.Sprintf("%v", c.Options.TUI.CompactMode)})
+		// An empty DiffMode means "follow the terminal width"; report that
+		// rather than an empty value.
+		opts = append(opts, kv{"diff_mode", cmp.Or(c.Options.TUI.DiffMode, "auto")})
+		opts = append(opts, kv{"scrollbar", c.Options.TUI.Scrollbar})
+		opts = append(opts, kv{"exit_banner", string(c.Options.TUI.ExitBanner)})
+		opts = append(opts, kv{"transparent", fmt.Sprintf("%v", c.Options.TUI.IsTransparent())})
+		// Report the completion limits only once the user has pinned them;
+		// see Completions.Limits for what zero means.
+		if depth, items := c.Options.TUI.Completions.Limits(); depth != 0 || items != 0 {
+			opts = append(opts, kv{"completions_max_depth", fmt.Sprintf("%d", depth)})
+			opts = append(opts, kv{"completions_max_items", fmt.Sprintf("%d", items)})
+		}
+	}
 
 	slices.SortFunc(opts, func(a, b kv) int { return strings.Compare(a.key, b.key) })
 	b.WriteString("[options]\n")

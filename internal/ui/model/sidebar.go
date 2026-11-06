@@ -29,15 +29,15 @@ func (m *UI) modelInfo(width int) string {
 			providerName = providerConfig.Name
 
 			// Only check reasoning if model can reason
-			if model.CatwalkCfg.CanReason {
-				if len(model.CatwalkCfg.ReasoningLevels) == 0 {
+			if model.CatwalkCfg.CanReason() {
+				if len(model.CatwalkCfg.Reasoning.EffortLevels) == 0 {
 					if model.ModelCfg.Think {
 						reasoningInfo = "Thinking On"
 					} else {
 						reasoningInfo = "Thinking Off"
 					}
 				} else {
-					reasoningEffort := cmp.Or(model.ModelCfg.ReasoningEffort, model.CatwalkCfg.DefaultReasoningEffort)
+					reasoningEffort := cmp.Or(model.ModelCfg.ReasoningEffort, model.CatwalkCfg.Reasoning.DefaultEffortLevel)
 					reasoningInfo = fmt.Sprintf("Reasoning %s", common.FormatReasoningEffort(reasoningEffort))
 				}
 			}
@@ -77,7 +77,7 @@ func (m *UI) updateSidebarScrollState() {
 	contentWidth := max(width-2, 1)
 
 	title := t.Sidebar.SessionTitle.Width(contentWidth).MaxHeight(2).Render(m.session.Title)
-	cwd := common.PrettyPath(t, m.com.Workspace.WorkingDir(), contentWidth)
+	cwd := common.PrettyPathWithBranch(t, m.com.Workspace.WorkingDir(), m.gitBranch, contentWidth)
 	sidebarLogo := m.sidebarLogo
 	if height < logoHeightBreakpoint {
 		sidebarLogo = lipgloss.JoinVertical(lipgloss.Left, logo.SmallRender(m.com.Styles, contentWidth, logo.Opts{
@@ -99,7 +99,9 @@ func (m *UI) updateSidebarScrollState() {
 	skillsSection := m.skillsInfo(contentWidth, len(m.skillStatusItems()), true)
 	filesSection := m.filesInfo(m.com.Workspace.WorkingDir(), contentWidth, fileChangeCount(m.sessionFiles), true)
 
-	// Build the scrollable content.
+	// Build the scrollable content. The subagent section renders empty
+	// until something is dispatched, so it takes no space in a session
+	// that never uses them.
 	content := lipgloss.JoinVertical(
 		lipgloss.Left,
 		title,
@@ -108,6 +110,14 @@ func (m *UI) updateSidebarScrollState() {
 		"",
 		m.modelInfo(contentWidth),
 		"",
+	)
+	subAgents := m.subAgentStatuses()
+	if subAgentSection := m.subAgentsInfo(subAgents, contentWidth, len(subAgents), true); subAgentSection != "" {
+		content = lipgloss.JoinVertical(lipgloss.Left, content, subAgentSection, "")
+	}
+	content = lipgloss.JoinVertical(
+		lipgloss.Left,
+		content,
 		filesSection,
 		"",
 		lspSection,

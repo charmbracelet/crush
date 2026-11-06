@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -446,7 +448,7 @@ func TestPathDedupe_DifferentPaths_DifferentWorkspaces(t *testing.T) {
 
 // TestPathDedupe_FirstWinsKeepsOriginalEnv verifies that the second
 // create at the same path returns the *originating* client's Env in
-// its proto and does not mutate the existing workspace's YOLO/Debug
+// its proto and does not mutate the existing workspace's PermissionMode/Debug
 // flags.
 func TestPathDedupe_FirstWinsKeepsOriginalEnv(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
@@ -463,23 +465,23 @@ func TestPathDedupe_FirstWinsKeepsOriginalEnv(t *testing.T) {
 
 	originalEnv := []string{"FOO=bar"}
 	argsA := protoWS(cwd, dataDir, uuid.New().String())
-	argsA.YOLO = true
+	argsA.PermissionMode = proto.WorkspacePermissionModeYolo
 	argsA.Env = originalEnv
 	wsA, protoA, err := b.CreateWorkspace(argsA)
 	require.NoError(t, err)
-	require.True(t, protoA.YOLO)
+	require.Equal(t, proto.WorkspacePermissionModeYolo, protoA.PermissionMode)
 	require.Equal(t, originalEnv, protoA.Env)
 
 	argsB := protoWS(cwd, dataDir, uuid.New().String())
-	argsB.YOLO = false
+	argsB.PermissionMode = proto.WorkspacePermissionModeNormal
 	argsB.Debug = true
 	argsB.Env = []string{"BAZ=qux"}
 	_, protoB, err := b.CreateWorkspace(argsB)
 	require.NoError(t, err)
 	require.Equal(t, protoA.ID, protoB.ID)
-	require.True(t, protoB.YOLO, "first wins: YOLO must remain true")
+	require.Equal(t, proto.WorkspacePermissionModeYolo, protoB.PermissionMode, "first wins: PermissionMode must remain yolo")
 	require.Equal(t, originalEnv, protoB.Env, "proto must carry the originating client's Env")
-	require.Equal(t, wsA.Cfg.Overrides().SkipPermissionRequests, true)
+	require.Equal(t, permission.PermissionModeYolo, wsA.Cfg.Overrides().PermissionMode)
 }
 
 // TestPathDedupe_Symlink confirms two paths that resolve to the same
@@ -686,7 +688,7 @@ func xdgIsolated(t *testing.T) {
 }
 
 // TestFirstWinsMismatch_LogsOnFlagDifferences verifies that the
-// debug mismatch line is emitted when any of YOLO, Debug, DataDir,
+// debug mismatch line is emitted when any of PermissionMode, Debug, DataDir,
 // or Env differs between the first and second CreateWorkspace at
 // the same path, and that the existing workspace's Debug flag is
 // not overwritten.
@@ -697,7 +699,7 @@ func TestFirstWinsMismatch_LogsOnFlagDifferences(t *testing.T) {
 	}{
 		{
 			name:   "yolo",
-			mutate: func(p *proto.Workspace) { p.YOLO = true },
+			mutate: func(p *proto.Workspace) { p.PermissionMode = proto.WorkspacePermissionModeYolo },
 		},
 		{
 			name:   "debug",
@@ -729,7 +731,7 @@ func TestFirstWinsMismatch_LogsOnFlagDifferences(t *testing.T) {
 			wsA, _, err := b.CreateWorkspace(argsA)
 			require.NoError(t, err)
 			originalDebug := wsA.Cfg.Config().Options.Debug
-			originalYOLO := wsA.Cfg.Overrides().SkipPermissionRequests
+			originalMode := wsA.Cfg.Overrides().PermissionMode
 
 			argsB := protoWS(cwd, dataDir, uuid.New().String())
 			argsB.Env = []string{"FOO=bar"} // identical by default
@@ -742,8 +744,8 @@ func TestFirstWinsMismatch_LogsOnFlagDifferences(t *testing.T) {
 				"Workspace flag mismatch on duplicate create",
 				"expected debug log for mismatching %s", tc.name,
 			)
-			// Existing workspace's YOLO and Debug must not change.
-			require.Equal(t, originalYOLO, wsA.Cfg.Overrides().SkipPermissionRequests, "YOLO must be immutable on first-wins")
+			// Existing workspace's PermissionMode and Debug must not change.
+			require.Equal(t, originalMode, wsA.Cfg.Overrides().PermissionMode, "PermissionMode must be immutable on first-wins")
 			require.Equal(t, originalDebug, wsA.Cfg.Config().Options.Debug, "Debug must be immutable on first-wins")
 		})
 	}
@@ -1064,26 +1066,26 @@ func TestSetCurrentSession_BasicAttachAndSwitch(t *testing.T) {
 	require.NoError(t, b.AttachClient(ws.ID, cidA))
 	require.NoError(t, b.AttachClient(ws.ID, cidB))
 
-	require.NoError(t, b.SetCurrentSession(ws.ID, cidA, "S1"))
+	require.NoError(t, b.SetCurrentSession(context.Background(), ws.ID, cidA, "S1"))
 	ws.clientsMu.Lock()
 	require.Equal(t, "S1", ws.clients[cidA].currentSessionID)
 	ws.clientsMu.Unlock()
 
-	require.NoError(t, b.SetCurrentSession(ws.ID, cidB, "S1"))
+	require.NoError(t, b.SetCurrentSession(context.Background(), ws.ID, cidB, "S1"))
 	ws.clientsMu.Lock()
 	require.Equal(t, "S1", ws.clients[cidA].currentSessionID)
 	require.Equal(t, "S1", ws.clients[cidB].currentSessionID)
 	ws.clientsMu.Unlock()
 
 	// B switches to S2; counts redistribute.
-	require.NoError(t, b.SetCurrentSession(ws.ID, cidB, "S2"))
+	require.NoError(t, b.SetCurrentSession(context.Background(), ws.ID, cidB, "S2"))
 	ws.clientsMu.Lock()
 	require.Equal(t, "S1", ws.clients[cidA].currentSessionID)
 	require.Equal(t, "S2", ws.clients[cidB].currentSessionID)
 	ws.clientsMu.Unlock()
 
 	// A clears its selection.
-	require.NoError(t, b.SetCurrentSession(ws.ID, cidA, ""))
+	require.NoError(t, b.SetCurrentSession(context.Background(), ws.ID, cidA, ""))
 	ws.clientsMu.Lock()
 	require.Empty(t, ws.clients[cidA].currentSessionID)
 	require.Equal(t, "S2", ws.clients[cidB].currentSessionID)
@@ -1110,7 +1112,7 @@ func TestSetCurrentSession_DetachClearsEntry(t *testing.T) {
 
 	cid := newClientID(t)
 	require.NoError(t, b.AttachClient(ws.ID, cid))
-	require.NoError(t, b.SetCurrentSession(ws.ID, cid, "S2"))
+	require.NoError(t, b.SetCurrentSession(context.Background(), ws.ID, cid, "S2"))
 
 	b.DetachClient(ws.ID, cid)
 
@@ -1121,7 +1123,7 @@ func TestSetCurrentSession_DetachClearsEntry(t *testing.T) {
 
 	// A follow-up SetCurrentSession on the gone client must be
 	// rejected with ErrClientNotAttached.
-	require.ErrorIs(t, b.SetCurrentSession(ws.ID, cid, "S3"), ErrClientNotAttached)
+	require.ErrorIs(t, b.SetCurrentSession(context.Background(), ws.ID, cid, "S3"), ErrClientNotAttached)
 
 	b.DetachClient(ws.ID, anchor)
 }
@@ -1141,7 +1143,7 @@ func TestSetCurrentSession_RejectsHoldOnly(t *testing.T) {
 	cid := newClientID(t)
 	b.registerClient(ws, cid)
 
-	require.ErrorIs(t, b.SetCurrentSession(ws.ID, cid, "S1"), ErrClientNotAttached)
+	require.ErrorIs(t, b.SetCurrentSession(context.Background(), ws.ID, cid, "S1"), ErrClientNotAttached)
 
 	ws.clientsMu.Lock()
 	require.Empty(t, ws.clients[cid].currentSessionID, "hold-only client must not write a session id")
@@ -1159,7 +1161,7 @@ func TestSetCurrentSession_UnknownClient(t *testing.T) {
 	b, _ := newTestBackend(t)
 	ws, _ := insertTestWorkspace(t, b, "/tmp/current-session-unknown")
 
-	require.ErrorIs(t, b.SetCurrentSession(ws.ID, newClientID(t), "S1"), ErrClientNotAttached)
+	require.ErrorIs(t, b.SetCurrentSession(context.Background(), ws.ID, newClientID(t), "S1"), ErrClientNotAttached)
 }
 
 // TestSetCurrentSession_RejectsBadInputs covers the validation
@@ -1170,12 +1172,12 @@ func TestSetCurrentSession_RejectsBadInputs(t *testing.T) {
 	b, _ := newTestBackend(t)
 	ws, _ := insertTestWorkspace(t, b, "/tmp/current-session-bad")
 
-	require.ErrorIs(t, b.SetCurrentSession(ws.ID, "", "S1"), ErrInvalidClientID)
-	require.ErrorIs(t, b.SetCurrentSession(ws.ID, "not-a-uuid", "S1"), ErrInvalidClientID)
+	require.ErrorIs(t, b.SetCurrentSession(context.Background(), ws.ID, "", "S1"), ErrInvalidClientID)
+	require.ErrorIs(t, b.SetCurrentSession(context.Background(), ws.ID, "not-a-uuid", "S1"), ErrInvalidClientID)
 
 	require.ErrorIs(
 		t,
-		b.SetCurrentSession("00000000-0000-0000-0000-000000000000", newClientID(t), "S1"),
+		b.SetCurrentSession(context.Background(), "00000000-0000-0000-0000-000000000000", newClientID(t), "S1"),
 		ErrWorkspaceNotFound,
 	)
 }
@@ -1205,14 +1207,14 @@ func TestSetCurrentSession_RaceWithDetach(t *testing.T) {
 			// Errors are tolerated: once cidA detaches,
 			// further updates against cidA must return
 			// ErrClientNotAttached but never panic.
-			_ = b.SetCurrentSession(ws.ID, cidA, "SA")
+			_ = b.SetCurrentSession(context.Background(), ws.ID, cidA, "SA")
 			_ = i
 		}
 	}()
 	go func() {
 		defer wg.Done()
 		for i := range updates {
-			_ = b.SetCurrentSession(ws.ID, cidB, "SB")
+			_ = b.SetCurrentSession(context.Background(), ws.ID, cidB, "SB")
 			_ = i
 		}
 	}()
@@ -1249,7 +1251,7 @@ func TestAttachedClients_BasicLifecycle(t *testing.T) {
 	// Attach A, set to S1. Count for S1 is 1; count for S2 is 0.
 	cidA := newClientID(t)
 	require.NoError(t, b.AttachClient(ws.ID, cidA))
-	require.NoError(t, b.SetCurrentSession(ws.ID, cidA, "S1"))
+	require.NoError(t, b.SetCurrentSession(context.Background(), ws.ID, cidA, "S1"))
 
 	n, err = b.AttachedClients(ws.ID, "S1")
 	require.NoError(t, err)
@@ -1261,13 +1263,13 @@ func TestAttachedClients_BasicLifecycle(t *testing.T) {
 	// Attach B, set to S1. Count for S1 is 2.
 	cidB := newClientID(t)
 	require.NoError(t, b.AttachClient(ws.ID, cidB))
-	require.NoError(t, b.SetCurrentSession(ws.ID, cidB, "S1"))
+	require.NoError(t, b.SetCurrentSession(context.Background(), ws.ID, cidB, "S1"))
 
 	n, _ = b.AttachedClients(ws.ID, "S1")
 	require.Equal(t, 2, n)
 
 	// B switches to S2; counts redistribute.
-	require.NoError(t, b.SetCurrentSession(ws.ID, cidB, "S2"))
+	require.NoError(t, b.SetCurrentSession(context.Background(), ws.ID, cidB, "S2"))
 	n, _ = b.AttachedClients(ws.ID, "S1")
 	require.Equal(t, 1, n)
 	n, _ = b.AttachedClients(ws.ID, "S2")
@@ -1781,4 +1783,68 @@ func TestIdleShutdown_RefusesLaterCreates(t *testing.T) {
 	_, _, err := b.CreateWorkspace(protoWS(t.TempDir(), t.TempDir(), cid))
 	require.ErrorIs(t, err, ErrServerShuttingDown,
 		"the client must be told to retry against a replacement server")
+}
+
+// TestShutdownWorkspaces_TearsDownEachOnceInParallel covers a server told
+// to stop while hosting live workspaces: each is torn down exactly once,
+// concurrently, and the backend refuses creates and server re-shutdowns.
+func TestShutdownWorkspaces_TearsDownEachOnceInParallel(t *testing.T) {
+	t.Parallel()
+
+	b, serverShutdowns := newTestBackend(t)
+	const n = 3
+	var started sync.WaitGroup
+	started.Add(n)
+	release := make(chan struct{})
+	counts := make([]*atomic.Int32, n)
+	workspaces := make([]*Workspace, n)
+	for i := range n {
+		ws, count := insertTestWorkspace(t, b, fmt.Sprintf("/tmp/live-%d", i))
+		ws.shutdownFn = func() {
+			count.Add(1)
+			started.Done()
+			<-release
+		}
+		counts[i], workspaces[i] = count, ws
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- b.ShutdownWorkspaces(t.Context()) }()
+	// Every teardown must be in flight at once; serial teardown would
+	// block here on the first workspace forever.
+	started.Wait()
+	close(release)
+	require.NoError(t, <-done)
+
+	for _, count := range counts {
+		require.Equal(t, int32(1), count.Load())
+	}
+	require.Zero(t, b.workspaces.Len())
+	require.Empty(t, b.pathIndex)
+
+	// A detach racing the shutdown must not tear a workspace down again,
+	// nor trigger the idle server shutdown.
+	b.teardown(workspaces[0])
+	require.Equal(t, int32(1), counts[0].Load())
+	require.Zero(t, serverShutdowns.Load())
+
+	_, _, err := b.CreateWorkspace(protoWS(t.TempDir(), t.TempDir(), newClientID(t)))
+	require.ErrorIs(t, err, ErrServerShuttingDown)
+}
+
+// TestShutdownWorkspaces_GivesUpAtDeadline covers a workspace whose
+// teardown hangs: the caller's deadline wins, not the slowest workspace.
+func TestShutdownWorkspaces_GivesUpAtDeadline(t *testing.T) {
+	t.Parallel()
+
+	b, _ := newTestBackend(t)
+	ws, _ := insertTestWorkspace(t, b, "/tmp/stuck")
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	ws.shutdownFn = func() { <-release }
+
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	require.ErrorIs(t, b.ShutdownWorkspaces(ctx), context.DeadlineExceeded)
+	require.Zero(t, b.workspaces.Len())
 }

@@ -7,12 +7,14 @@ import (
 	"net/http"
 	"testing"
 
-	"charm.land/catwalk/pkg/catwalk"
+	"charm.land/catwalk/v3/pkg/catwalk"
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/anthropic"
 	"charm.land/fantasy/providers/bedrock"
 	"charm.land/fantasy/providers/openaicompat"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/discover"
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -33,7 +35,6 @@ func (m *mockSessionAgent) BeginAccepted(sessionID string) *AcceptedRun {
 }
 
 func (m *mockSessionAgent) Model() Model                        { return m.model }
-func (m *mockSessionAgent) SetModels(large, small Model)        {}
 func (m *mockSessionAgent) SetTools(tools []fantasy.AgentTool)  {}
 func (m *mockSessionAgent) SetSystemPrompt(systemPrompt string) {}
 func (m *mockSessionAgent) Cancel(sessionID string) {
@@ -45,14 +46,18 @@ func (m *mockSessionAgent) IsBusy() bool                                { return
 func (m *mockSessionAgent) QueuedPrompts(sessionID string) int          { return 0 }
 func (m *mockSessionAgent) QueuedPromptsList(sessionID string) []string { return nil }
 func (m *mockSessionAgent) ClearQueue(sessionID string)                 {}
+func (m *mockSessionAgent) AddNote(sessionID, text string)              {}
 func (m *mockSessionAgent) Summarize(context.Context, string, fantasy.ProviderOptions, func(context.Context, *fantasy.ProviderError) error) error {
 	return nil
 }
 func (m *mockSessionAgent) GenerateTitle(context.Context, string, string) {}
+func (m *mockSessionAgent) ListSettledMessages(context.Context, string) ([]message.Message, error) {
+	return nil, nil
+}
 
 // newTestCoordinator creates a minimal coordinator for unit testing runSubAgent.
 func newTestCoordinator(t *testing.T, env fakeEnv, providerID string, providerCfg config.ProviderConfig) *coordinator {
-	cfg, err := config.Init(env.workingDir, "", false)
+	cfg, err := config.Init(t.Context(), env.workingDir, "", false)
 	require.NoError(t, err)
 	cfg.Config().Providers.Set(providerID, providerCfg)
 	return &coordinator{
@@ -184,7 +189,33 @@ func TestRunSubAgent(t *testing.T) {
 		})
 		require.NoError(t, err)
 		assert.True(t, resp.IsError)
-		assert.Equal(t, "Sub-agent completed but produced no text output.", resp.Content)
+		assert.Equal(t, "Subagent completed but produced no text output.", resp.Content)
+	})
+
+	t.Run("refused or truncated run says why it stopped", func(t *testing.T) {
+		narration := fantasy.ResponseContent{fantasy.TextContent{Text: "Now processes, network, and systemd state."}}
+		for _, tc := range []struct {
+			reason fantasy.FinishReason
+			want   string
+		}{
+			{fantasy.FinishReasonContentFilter, subAgentRefused},
+			{fantasy.FinishReasonLength, subAgentTruncated},
+		} {
+			resp := subAgentResponse(&fantasy.AgentResult{
+				Steps: []fantasy.StepResult{
+					{Response: fantasy.Response{Content: narration, FinishReason: fantasy.FinishReasonToolCalls}},
+					{Response: fantasy.Response{FinishReason: tc.reason}},
+				},
+				Response: fantasy.Response{Content: narration},
+			})
+			assert.True(t, resp.IsError, tc.reason)
+			assert.Equal(t, tc.want, resp.Content, "earlier narration must not pass for a report")
+		}
+
+		resp := subAgentResponse(&fantasy.AgentResult{
+			Steps: []fantasy.StepResult{{Response: fantasy.Response{Content: narration, FinishReason: fantasy.FinishReasonContentFilter}}},
+		})
+		assert.Equal(t, subAgentRefused+"\n\nIts last output before stopping:\n\n"+narration.Text(), resp.Content)
 	})
 
 	t.Run("empty result returns error response", func(t *testing.T) {
@@ -208,7 +239,7 @@ func TestRunSubAgent(t *testing.T) {
 		})
 		require.NoError(t, err)
 		assert.True(t, resp.IsError)
-		assert.Equal(t, "Sub-agent completed but produced no text output.", resp.Content)
+		assert.Equal(t, "Subagent completed but produced no text output.", resp.Content)
 	})
 
 	t.Run("ModelCfg.MaxTokens overrides default", func(t *testing.T) {
@@ -384,7 +415,7 @@ func TestRunSubAgent(t *testing.T) {
 func TestUpdateParentSessionCost(t *testing.T) {
 	t.Run("accumulates cost correctly", func(t *testing.T) {
 		env := testEnv(t)
-		cfg, err := config.Init(env.workingDir, "", false)
+		cfg, err := config.Init(t.Context(), env.workingDir, "", false)
 		require.NoError(t, err)
 		coord := &coordinator{cfg: cfg, sessions: env.sessions}
 
@@ -409,7 +440,7 @@ func TestUpdateParentSessionCost(t *testing.T) {
 
 	t.Run("accumulates multiple child costs", func(t *testing.T) {
 		env := testEnv(t)
-		cfg, err := config.Init(env.workingDir, "", false)
+		cfg, err := config.Init(t.Context(), env.workingDir, "", false)
 		require.NoError(t, err)
 		coord := &coordinator{cfg: cfg, sessions: env.sessions}
 
@@ -440,7 +471,7 @@ func TestUpdateParentSessionCost(t *testing.T) {
 
 	t.Run("child session not found", func(t *testing.T) {
 		env := testEnv(t)
-		cfg, err := config.Init(env.workingDir, "", false)
+		cfg, err := config.Init(t.Context(), env.workingDir, "", false)
 		require.NoError(t, err)
 		coord := &coordinator{cfg: cfg, sessions: env.sessions}
 
@@ -454,7 +485,7 @@ func TestUpdateParentSessionCost(t *testing.T) {
 
 	t.Run("parent session not found", func(t *testing.T) {
 		env := testEnv(t)
-		cfg, err := config.Init(env.workingDir, "", false)
+		cfg, err := config.Init(t.Context(), env.workingDir, "", false)
 		require.NoError(t, err)
 		coord := &coordinator{cfg: cfg, sessions: env.sessions}
 
@@ -470,7 +501,7 @@ func TestUpdateParentSessionCost(t *testing.T) {
 
 	t.Run("zero cost handled correctly", func(t *testing.T) {
 		env := testEnv(t)
-		cfg, err := config.Init(env.workingDir, "", false)
+		cfg, err := config.Init(t.Context(), env.workingDir, "", false)
 		require.NoError(t, err)
 		coord := &coordinator{cfg: cfg, sessions: env.sessions}
 
@@ -502,9 +533,11 @@ func TestGetProviderOptionsReasoningEffort(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			model := Model{
 				CatwalkCfg: catwalk.Model{
-					ID:              "claude-opus-4-7",
-					CanReason:       true,
-					ReasoningLevels: []string{"max"},
+					ID: "claude-opus-4-7",
+					Reasoning: catwalk.Reasoning{
+						Thinking:     catwalk.ThinkingToggleable,
+						EffortLevels: catwalk.NewEffortLevels("max"),
+					},
 				},
 				ModelCfg: config.SelectedModel{
 					Provider:        "test",
@@ -551,12 +584,48 @@ func TestIsUnauthorized(t *testing.T) {
 	})
 }
 
+func TestGetProviderOptionsReasoningEffortCustomProvider(t *testing.T) {
+	// Custom local providers (lmstudio, ollama, omlx, litellm, llamacpp)
+	// go through the OpenAI-compat client and must receive the selected
+	// reasoning effort like any other OpenAI-compatible provider.
+	for _, providerType := range discover.RegisteredProviderTypes() {
+		t.Run(providerType, func(t *testing.T) {
+			model := Model{
+				CatwalkCfg: catwalk.Model{
+					ID: "qwen/qwen3-8b",
+					Reasoning: catwalk.Reasoning{
+						Thinking:     catwalk.ThinkingToggleable,
+						EffortLevels: catwalk.NewEffortLevels("low", "medium", "high"),
+					},
+				},
+				ModelCfg: config.SelectedModel{
+					Provider:        "local",
+					Model:           "qwen/qwen3-8b",
+					ReasoningEffort: "high",
+				},
+			}
+			providerCfg := config.ProviderConfig{ID: "local", Type: catwalk.Type(providerType)}
+
+			opts := getProviderOptions(model, providerCfg)
+
+			raw, ok := opts[openaicompat.Name]
+			require.True(t, ok, "options should be keyed under openaicompat.Name for type %q", providerType)
+			parsed, ok := raw.(*openaicompat.ProviderOptions)
+			require.True(t, ok)
+			require.NotNil(t, parsed.ReasoningEffort)
+			assert.Equal(t, "high", string(*parsed.ReasoningEffort))
+		})
+	}
+}
+
 func TestGetProviderOptionsReasoningEffortFallback(t *testing.T) {
 	model := Model{
 		CatwalkCfg: catwalk.Model{
-			ID:              "glm-5.2",
-			CanReason:       true,
-			ReasoningLevels: []string{"high", "max"},
+			ID: "glm-5.2",
+			Reasoning: catwalk.Reasoning{
+				Thinking:     catwalk.ThinkingToggleable,
+				EffortLevels: catwalk.NewEffortLevels("high", "max"),
+			},
 		},
 		ModelCfg: config.SelectedModel{
 			Provider: "zai",
@@ -579,4 +648,204 @@ func TestGetProviderOptionsReasoningEffortFallback(t *testing.T) {
 	thinking, ok := parsed.ExtraBody["thinking"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "enabled", thinking["type"])
+}
+
+func TestGetProviderOptionsTopKExtraBody(t *testing.T) {
+	// "ollama" has a registered discover.Enricher, so it is treated as a
+	// known custom provider speaking openai-compat.
+	knownCustomProviderCfg := config.ProviderConfig{ID: "ollama", Type: "ollama"}
+
+	t.Run("model top_k is injected into extra_body for known custom providers", func(t *testing.T) {
+		model := Model{
+			CatwalkCfg: catwalk.Model{ID: "llama3"},
+			ModelCfg:   config.SelectedModel{Provider: "ollama", TopK: ptr(int64(40))},
+		}
+
+		opts := getProviderOptions(model, knownCustomProviderCfg)
+
+		raw, ok := opts[openaicompat.Name]
+		require.True(t, ok)
+		parsed, ok := raw.(*openaicompat.ProviderOptions)
+		require.True(t, ok)
+		topK, ok := parsed.ExtraBody["top_k"].(int64)
+		require.True(t, ok)
+		assert.Equal(t, int64(40), topK)
+	})
+
+	t.Run("falls back to catwalk top_k when the model config has none", func(t *testing.T) {
+		model := Model{
+			CatwalkCfg: catwalk.Model{
+				ID:      "llama3",
+				Options: catwalk.ModelOptions{TopK: ptr(int64(64))},
+			},
+			ModelCfg: config.SelectedModel{Provider: "ollama"},
+		}
+
+		opts := getProviderOptions(model, knownCustomProviderCfg)
+
+		raw, ok := opts[openaicompat.Name]
+		require.True(t, ok)
+		parsed, ok := raw.(*openaicompat.ProviderOptions)
+		require.True(t, ok)
+		topK, ok := parsed.ExtraBody["top_k"].(int64)
+		require.True(t, ok)
+		assert.Equal(t, int64(64), topK)
+	})
+
+	t.Run("does not set extra_body when no top_k is configured anywhere", func(t *testing.T) {
+		model := Model{
+			CatwalkCfg: catwalk.Model{ID: "llama3"},
+			ModelCfg:   config.SelectedModel{Provider: "ollama"},
+		}
+
+		opts := getProviderOptions(model, knownCustomProviderCfg)
+
+		raw, ok := opts[openaicompat.Name]
+		require.True(t, ok)
+		parsed, ok := raw.(*openaicompat.ProviderOptions)
+		require.True(t, ok)
+		_, hasTopK := parsed.ExtraBody["top_k"]
+		assert.False(t, hasTopK)
+	})
+
+	t.Run("does not overwrite an explicitly configured extra_body.top_k", func(t *testing.T) {
+		model := Model{
+			CatwalkCfg: catwalk.Model{ID: "llama3"},
+			ModelCfg: config.SelectedModel{
+				Provider: "ollama",
+				TopK:     ptr(int64(40)),
+				ProviderOptions: map[string]any{
+					"extra_body": map[string]any{"top_k": 7},
+				},
+			},
+		}
+
+		opts := getProviderOptions(model, knownCustomProviderCfg)
+
+		raw, ok := opts[openaicompat.Name]
+		require.True(t, ok)
+		parsed, ok := raw.(*openaicompat.ProviderOptions)
+		require.True(t, ok)
+		assert.EqualValues(t, 7, parsed.ExtraBody["top_k"])
+	})
+
+	t.Run("is not injected for providers outside the known-custom-provider default branch", func(t *testing.T) {
+		model := Model{
+			CatwalkCfg: catwalk.Model{ID: "glm-5.2"},
+			ModelCfg:   config.SelectedModel{Provider: "zai", TopK: ptr(int64(40))},
+		}
+		providerCfg := config.ProviderConfig{ID: string(catwalk.InferenceProviderZAI), Type: openaicompat.Name}
+
+		opts := getProviderOptions(model, providerCfg)
+
+		raw, ok := opts[openaicompat.Name]
+		require.True(t, ok)
+		parsed, ok := raw.(*openaicompat.ProviderOptions)
+		require.True(t, ok)
+		_, hasTopK := parsed.ExtraBody["top_k"]
+		assert.False(t, hasTopK)
+	})
+}
+
+func TestGetProviderOptionsMalformedFallback(t *testing.T) {
+	model := Model{
+		CatwalkCfg: catwalk.Model{ID: "llama3"},
+		ModelCfg: config.SelectedModel{
+			Provider:        "ollama",
+			TopK:            ptr(int64(40)),
+			ProviderOptions: map[string]any{"user": 5.0},
+		},
+	}
+	providerCfg := config.ProviderConfig{ID: "test", Type: "ollama"}
+
+	opts := getProviderOptions(model, providerCfg)
+
+	raw, ok := opts[openaicompat.Name]
+	require.True(t, ok, "malformed provider_options should still fall back to top_k")
+	parsed, ok := raw.(*openaicompat.ProviderOptions)
+	require.True(t, ok)
+
+	// The malformed fields are dropped; only the injected top_k survives.
+	assert.Nil(t, parsed.User)
+	assert.Nil(t, parsed.ReasoningEffort)
+	require.Len(t, parsed.ExtraBody, 1)
+	topK, ok := parsed.ExtraBody["top_k"].(int64)
+	require.True(t, ok)
+	assert.Equal(t, int64(40), topK)
+}
+
+func TestCallTopK(t *testing.T) {
+	knownCustomProviderCfg := config.ProviderConfig{ID: "ollama", Type: "ollama"}
+
+	tests := []struct {
+		name        string
+		providerCfg config.ProviderConfig
+		want        *int64
+	}{
+		{
+			name:        "suppressed for known custom providers",
+			providerCfg: knownCustomProviderCfg,
+			want:        nil,
+		},
+		{
+			name:        "passed through for openai-compat hosted providers",
+			providerCfg: config.ProviderConfig{ID: "zai", Type: openaicompat.Name},
+			want:        ptr(int64(40)),
+		},
+		{
+			name:        "passed through for anthropic",
+			providerCfg: config.ProviderConfig{ID: "anthropic", Type: catwalk.Type(anthropic.Name)},
+			want:        ptr(int64(40)),
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := callTopK(tc.providerCfg, ptr(int64(40)))
+			if tc.want == nil {
+				assert.Nil(t, got)
+				return
+			}
+			require.NotNil(t, got)
+			assert.Equal(t, *tc.want, *got)
+		})
+	}
+
+	t.Run("nil input stays nil regardless of provider", func(t *testing.T) {
+		assert.Nil(t, callTopK(knownCustomProviderCfg, nil))
+		assert.Nil(t, callTopK(config.ProviderConfig{Type: openaicompat.Name}, nil))
+	})
+}
+
+func ptr[T any](v T) *T { return &v }
+
+func TestCoordinatorSetMainAgent(t *testing.T) {
+	t.Run("switches current agent", func(t *testing.T) {
+		coder := &mockSessionAgent{}
+		plan := &mockSessionAgent{}
+		coord := &coordinator{
+			mainAgent:     coder,
+			mainAgentName: config.AgentCoder,
+			agents: map[string]SessionAgent{
+				config.AgentCoder: coder,
+				config.AgentPlan:  plan,
+			},
+		}
+
+		err := coord.SetMainAgent(config.AgentPlan)
+		require.NoError(t, err)
+		assert.Equal(t, config.AgentPlan, coord.mainAgentName)
+		assert.Same(t, plan, coord.mainAgent)
+	})
+
+	t.Run("returns error for unknown agent", func(t *testing.T) {
+		coord := &coordinator{
+			agents: map[string]SessionAgent{
+				config.AgentCoder: &mockSessionAgent{},
+			},
+		}
+
+		err := coord.SetMainAgent("unknown")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, errMainAgentNotFound)
+	})
 }

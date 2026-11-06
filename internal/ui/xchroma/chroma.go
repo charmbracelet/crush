@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image/color"
 	"io"
+	"strings"
 	"sync"
 
 	"charm.land/lipgloss/v2"
@@ -77,10 +78,26 @@ func Formatter(bgColor color.Color, processValue func(string) string) chroma.For
 				s = s.Foreground(lipgloss.Color(entry.Colour.String()))
 			}
 
-			if _, err := fmt.Fprint(w, s.Render(value)); err != nil {
+			if _, err := fmt.Fprint(w, renderLines(s, value)); err != nil {
 				return err
 			}
 		}
 		return nil
 	})
+}
+
+// renderLines styles each line of value separately, joining them with plain
+// newlines. Tokens may contain trailing or embedded newlines (e.g. Chroma's
+// CommentSingle includes the line terminator), and rendering a multi-line
+// string through Lip Gloss makes it equalize line widths, padding the line
+// after a comment with stray spaces and corrupting its indentation.
+func renderLines(s lipgloss.Style, value string) string {
+	if !strings.Contains(value, "\n") {
+		return s.Render(value)
+	}
+	lines := strings.Split(value, "\n")
+	for i, line := range lines {
+		lines[i] = s.Render(line)
+	}
+	return strings.Join(lines, "\n")
 }

@@ -2,13 +2,15 @@ package message
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
-	"charm.land/catwalk/pkg/catwalk"
+	"charm.land/catwalk/v3/pkg/catwalk"
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/anthropic"
 	"charm.land/fantasy/providers/google"
@@ -65,10 +67,23 @@ type ReasoningContent struct {
 func (tc ReasoningContent) String() string {
 	return tc.Thinking
 }
+
+// HasReplayData reports whether the reasoning must be sent back to the
+// provider. Providers may return signed reasoning with no visible text,
+// and dropping it changes the prefix their signatures are bound to.
+func (tc ReasoningContent) HasReplayData() bool {
+	return tc.Thinking != "" || tc.Signature != "" || tc.ThoughtSignature != "" || tc.ResponsesData != nil
+}
 func (ReasoningContent) isPart() {}
 
 type TextContent struct {
 	Text string `json:"text"`
+	// Hidden marks generated user continuations that remain in model history.
+	Hidden bool `json:"hidden,omitempty"`
+	// Context is text sent to the model ahead of the prompt, such as host
+	// context and user notes. It is stored so the replayed history matches
+	// what the model saw, which signed thinking blocks depend on.
+	Context string `json:"context,omitempty"`
 }
 
 func (tc TextContent) String() string {
@@ -155,6 +170,11 @@ func (m *Message) HasShellCommand() bool {
 	return false
 }
 
+// IsPrompt reports whether the message is something the user typed.
+func (m *Message) IsPrompt() bool {
+	return m.Role == User && !m.HasShellCommand() && len(m.SubAgentReports()) == 0
+}
+
 // ShellCommands returns all ShellCommand parts from the message.
 func (m *Message) ShellCommands() []ShellCommand {
 	var cmds []ShellCommand
@@ -166,16 +186,79 @@ func (m *Message) ShellCommands() []ShellCommand {
 	return cmds
 }
 
+// SubAgentReport stores the result a detached subagent reported back, as a
+// distinct content part so the UI can render it as a subagent result rather
+// than as something the user typed.
+type SubAgentReport struct {
+	Label  string `json:"label"`
+	Output string `json:"output"`
+	Failed bool   `json:"failed,omitempty"`
+	// Model is provider/model, for display.
+	Model string `json:"model,omitempty"`
+}
+
+func (SubAgentReport) isPart() {}
+
+// PromptText is the report as the model reads it.
+func (r SubAgentReport) PromptText() string {
+	return fmt.Sprintf("<subagent-report label=%q>\n%s\n</subagent-report>", r.Label, r.Output)
+}
+
+// ParseSubAgentReportPrompt recovers a report from its PromptText, for
+// places such as the prompt queue that only carry the text.
+func ParseSubAgentReportPrompt(prompt string) (SubAgentReport, bool) {
+	const prefix, suffix = "<subagent-report label=", "\n</subagent-report>"
+	rest, ok := strings.CutPrefix(prompt, prefix)
+	if !ok {
+		return SubAgentReport{}, false
+	}
+	quoted, output, ok := strings.Cut(rest, ">\n")
+	if !ok {
+		return SubAgentReport{}, false
+	}
+	label, err := strconv.Unquote(quoted)
+	if err != nil {
+		return SubAgentReport{}, false
+	}
+	return SubAgentReport{Label: label, Output: strings.TrimSuffix(output, suffix)}, true
+}
+
+// HasSubAgentReport reports whether the message contains any SubAgentReport parts.
+func (m *Message) HasSubAgentReport() bool {
+	for _, part := range m.Parts {
+		if _, ok := part.(SubAgentReport); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// SubAgentReports returns all SubAgentReport parts from the message.
+func (m *Message) SubAgentReports() []SubAgentReport {
+	var reports []SubAgentReport
+	for _, part := range m.Parts {
+		if r, ok := part.(SubAgentReport); ok {
+			reports = append(reports, r)
+		}
+	}
+	return reports
+}
+
 type Message struct {
-	ID               string
-	Role             MessageRole
-	SessionID        string
-	Parts            []ContentPart
-	Model            string
-	Provider         string
-	CreatedAt        int64
-	UpdatedAt        int64
-	IsSummaryMessage bool
+	ID                      string
+	Role                    MessageRole
+	SessionID               string
+	Parts                   []ContentPart
+	Model                   string
+	ModelName               string
+	Provider                string
+	CreatedAt               int64
+	UpdatedAt               int64
+	IsSummaryMessage        bool
+	PrismModelID            string
+	PrismModelName          string
+	PrismHypercreditSavings *float64
+	PrismDollarSavings      *float64
 }
 
 func (m *Message) Content() TextContent {
@@ -274,6 +357,15 @@ func (m *Message) IsErrorLike() bool {
 	return false
 }
 
+// IsTruncated reports whether the model stopped because it ran out of
+// output tokens instead of completing the response on its own terms.
+// The TUI renders this as a TRUNCATED banner, alongside the
+// error-style banners, so a response that stops mid-sentence is never
+// mistaken for a complete one.
+func (m *Message) IsTruncated() bool {
+	return m.FinishReason() == FinishReasonMaxTokens
+}
+
 func (m *Message) IsThinking() bool {
 	if m.ReasoningContent().Thinking != "" && m.Content().Text == "" && !m.IsFinished() {
 		return true
@@ -285,7 +377,8 @@ func (m *Message) AppendContent(delta string) {
 	found := false
 	for i, part := range m.Parts {
 		if c, ok := part.(TextContent); ok {
-			m.Parts[i] = TextContent{Text: c.Text + delta}
+			c.Text += delta
+			m.Parts[i] = c
 			found = true
 		}
 	}
@@ -407,20 +500,13 @@ func (m *Message) FinishToolCall(toolCallID string) {
 	}
 }
 
-func (m *Message) AppendToolCallInput(toolCallID string, inputDelta string) {
-	for i, part := range m.Parts {
-		if c, ok := part.(ToolCall); ok {
-			if c.ID == toolCallID {
-				m.Parts[i] = ToolCall{
-					ID:       c.ID,
-					Name:     c.Name,
-					Input:    c.Input + inputDelta,
-					Finished: c.Finished,
-				}
-				return
-			}
-		}
+// toolCallInput returns arguments safe to hand a provider. Empty or partial
+// input becomes {}, since providers disagree about what a blank means.
+func toolCallInput(input string) string {
+	if !json.Valid([]byte(input)) {
+		return "{}"
 	}
+	return input
 }
 
 func (m *Message) AddToolCall(tc ToolCall) {
@@ -487,6 +573,12 @@ func (m *Message) ResetStreamedContent() {
 }
 
 func (m *Message) AddFinish(reason FinishReason, message, details string) {
+	m.AddFinishAt(reason, message, details, time.Now().Unix())
+}
+
+// AddFinishAt is AddFinish with an explicit timestamp, for backdating a
+// repaired turn so response-time statistics stay honest.
+func (m *Message) AddFinishAt(reason FinishReason, message, details string, at int64) {
 	// remove any existing finish part
 	for i, part := range m.Parts {
 		if _, ok := part.(Finish); ok {
@@ -494,7 +586,7 @@ func (m *Message) AddFinish(reason FinishReason, message, details string) {
 			break
 		}
 	}
-	m.Parts = append(m.Parts, Finish{Reason: reason, Time: time.Now().Unix(), Message: message, Details: details})
+	m.Parts = append(m.Parts, Finish{Reason: reason, Time: at, Message: message, Details: details})
 }
 
 func (m *Message) AddImageURL(url, detail string) {
@@ -546,7 +638,18 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 				Content:  content.Data,
 			})
 		}
-		text = PromptWithTextAttachments(text, textAttachments)
+		text = m.Content().Context + PromptWithTextAttachments(text, textAttachments)
+		// Include subagent reports as context for the agent. The part
+		// carries the label and body separately so the UI can render
+		// them; the model sees them as one tagged block.
+		for _, r := range m.SubAgentReports() {
+			reportText := r.PromptText()
+			if text != "" {
+				text += "\n\n" + reportText
+			} else {
+				text = reportText
+			}
+		}
 		// Include bang-mode shell commands as context for the agent.
 		for _, sc := range m.ShellCommands() {
 			shellText := fmt.Sprintf("$ %s\n%s\n(exit code %d)", sc.Command, ansi.Strip(sc.Output), sc.ExitCode)
@@ -577,11 +680,8 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 	case Assistant:
 		var parts []fantasy.MessagePart
 		text := m.Content().Text
-		if text != "" {
-			parts = append(parts, fantasy.TextPart{Text: text})
-		}
 		reasoning := m.ReasoningContent()
-		if reasoning.Thinking != "" {
+		if reasoning.HasReplayData() {
 			reasoningPart := fantasy.ReasoningPart{Text: reasoning.Thinking, ProviderOptions: fantasy.ProviderOptions{}}
 			if reasoning.Signature != "" {
 				reasoningPart.ProviderOptions[anthropic.Name] = &anthropic.ReasoningOptionMetadata{
@@ -599,11 +699,14 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 			}
 			parts = append(parts, reasoningPart)
 		}
+		if text != "" {
+			parts = append(parts, fantasy.TextPart{Text: text})
+		}
 		for _, call := range m.ToolCalls() {
 			parts = append(parts, fantasy.ToolCallPart{
 				ToolCallID:       call.ID,
 				ToolName:         call.Name,
-				Input:            call.Input,
+				Input:            toolCallInput(call.Input),
 				ProviderExecuted: call.ProviderExecuted,
 			})
 		}

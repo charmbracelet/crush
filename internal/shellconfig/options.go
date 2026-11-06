@@ -31,6 +31,11 @@ import (
 //	option metrics false
 //	option debug true
 //	option auto-lsp false
+//	option request-timeout 300
+//	option request-timeout 0
+//	option max-background-jobs 200
+//	option pinentry-integrated false
+//	option pinentry-cache-timeout 300
 //
 // Boolean shortcuts: for boolean fields, omitting the value sets it to true.
 func handleOption(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
@@ -139,6 +144,18 @@ func handleOption(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		slog.Info("Option set in shell config", "key", key, "value", o[spec.jsonKey])
 		return nil
 
+	case optInt:
+		if val == "" {
+			return usage(stderr, fmt.Sprintf("option: %s requires a value", key))
+		}
+		n, err := strconv.Atoi(val)
+		if err != nil {
+			return usage(stderr, fmt.Sprintf("option: %s expects a number of seconds, got %q", key, val))
+		}
+		o[spec.jsonKey] = n
+		slog.Info("Option set in shell config", "key", key, "value", n)
+		return nil
+
 	default: // optString
 		if val == "" {
 			return usage(stderr, fmt.Sprintf("option: %s requires a value", key))
@@ -156,6 +173,7 @@ const (
 	optString optionKind = iota
 	optBool
 	optList
+	optInt
 )
 
 // optionSpec describes one user-facing option key: the JSON field it writes,
@@ -179,10 +197,11 @@ type optionSpec struct {
 // handleOption above and do not appear here.
 var optionSpecs = map[string]optionSpec{
 	// Boolean fields (stored as-is).
-	"debug":     {jsonKey: "debug", kind: optBool},
-	"debug-lsp": {jsonKey: "debug_lsp", kind: optBool},
-	"auto-lsp":  {jsonKey: "auto_lsp", kind: optBool},
-	"progress":  {jsonKey: "progress", kind: optBool},
+	"debug":               {jsonKey: "debug", kind: optBool},
+	"debug-lsp":           {jsonKey: "debug_lsp", kind: optBool},
+	"auto-lsp":            {jsonKey: "auto_lsp", kind: optBool},
+	"progress":            {jsonKey: "progress", kind: optBool},
+	"pinentry-integrated": {jsonKey: "pinentry_integrated", kind: optBool},
 
 	// Boolean fields exposed positively but stored as their negation.
 	"metrics":              {jsonKey: "disable_metrics", kind: optBool, inverted: true},
@@ -195,6 +214,11 @@ var optionSpecs = map[string]optionSpec{
 	"data-directory": {jsonKey: "data_directory", kind: optString},
 	"initialize-as":  {jsonKey: "initialize_as", kind: optString},
 
+	// Integer fields.
+	"request-timeout":        {jsonKey: "request_timeout", kind: optInt},
+	"max-background-jobs":    {jsonKey: "max_background_jobs", kind: optInt},
+	"pinentry-cache-timeout": {jsonKey: "pinentry_cache_timeout", kind: optInt},
+
 	// List fields. Keys are singular because each call appends one value.
 	"context-path":        {jsonKey: "context_paths", kind: optList},
 	"global-context-path": {jsonKey: "global_context_paths", kind: optList},
@@ -206,7 +230,7 @@ var optionSpecs = map[string]optionSpec{
 // that live under options.tui rather than as top-level options.
 func optionUI(options map[string]any, args []string, stderr io.Writer) error {
 	if len(args) != 4 {
-		return usage(stderr, "usage: option ui <compact|diff|transparent|scrollbar|completions-max-depth|completions-max-items> <value>")
+		return usage(stderr, "usage: option ui <compact|diff|transparent|mouse|scrollbar|completions-max-depth|completions-max-items|exit-banner> <value>")
 	}
 
 	key := args[2]
@@ -214,14 +238,14 @@ func optionUI(options map[string]any, args []string, stderr io.Writer) error {
 	ui := childMap(options, "tui")
 
 	switch key {
-	case "compact", "transparent":
+	case "compact", "transparent", "mouse":
 		parsed, err := parseBool(value)
 		if err != nil {
 			return usage(stderr, fmt.Sprintf("option ui %s expects true/false, got %q", key, value))
 		}
-		jsonKey := "compact_mode"
-		if key == "transparent" {
-			jsonKey = "transparent"
+		jsonKey := key
+		if key == "compact" {
+			jsonKey = "compact_mode"
 		}
 		ui[jsonKey] = parsed
 	case "diff":
@@ -234,6 +258,11 @@ func optionUI(options map[string]any, args []string, stderr io.Writer) error {
 			return usage(stderr, fmt.Sprintf("option ui scrollbar expects default, always, or never, got %q", value))
 		}
 		ui["scrollbar"] = value
+	case "exit-banner":
+		if value != "default" && value != "compact" && value != "none" {
+			return usage(stderr, fmt.Sprintf("option ui exit-banner expects default, compact, or none, got %q", value))
+		}
+		ui["exit_banner"] = value
 	case "completions-max-depth", "completions-max-items":
 		parsed, err := strconv.Atoi(value)
 		if err != nil || parsed < 0 {

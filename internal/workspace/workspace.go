@@ -10,7 +10,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/catwalk/pkg/catwalk"
+	"charm.land/catwalk/v3/pkg/catwalk"
 	mcptools "github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
@@ -76,6 +76,17 @@ type ConnectionEvent struct {
 	Stuck bool
 }
 
+// HostThemeEvent is delivered to the TUI as a tea.Msg when the host
+// application running Crush in a pane (an editor, for example) sets or
+// clears its theme on the server. Clients also receive the current theme
+// when their event stream attaches, and the current theme or its absence
+// after a reconnect, so the same theme can arrive more than once. Local
+// (in-process) workspaces never emit it.
+type HostThemeEvent struct {
+	// Theme is the host's theme, or nil when the host cleared it.
+	Theme *proto.HostTheme
+}
+
 // LSPClientInfo holds information about an LSP client's state. This is
 // the frontend-facing type; implementations translate from the
 // underlying app or proto representation.
@@ -135,8 +146,18 @@ type Workspace interface {
 	ListUserMessages(ctx context.Context, sessionID string) ([]message.Message, error)
 	ListAllUserMessages(ctx context.Context) ([]message.Message, error)
 
+	// RoutesChannelEvents reports whether the workspace's backing
+	// process routes MCP channel events into sessions itself. When
+	// true (client/server mode), frontends must not inject channel
+	// messages on EventChannelMessage — the server injects each event
+	// exactly once and the resulting turn arrives through the normal
+	// session/message event stream. When false (in-process mode), the
+	// frontend owns injection.
+	RoutesChannelEvents() bool
+
 	// Agent
 	AgentRun(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) error
+	AgentRunChannel(ctx context.Context, channel, sessionID, prompt string, attachments ...message.Attachment) error
 	AgentRunShellCommand(ctx context.Context, sessionID, command string, termWidth int, onProgress func(string), isFirstMessage bool) (proto.ShellCommandResponse, error)
 	AgentCancel(sessionID string)
 	AgentIsBusy() bool
@@ -153,6 +174,7 @@ type Workspace interface {
 	AgentQueuedPrompts(sessionID string) int
 	AgentQueuedPromptsList(sessionID string) []string
 	AgentClearQueue(sessionID string)
+	AgentSetMain(agentID string) error
 	AgentSummarize(ctx context.Context, sessionID string) error
 	UpdateAgentModel(ctx context.Context) error
 	InitCoderAgent(ctx context.Context) error
@@ -171,8 +193,12 @@ type Workspace interface {
 	PermissionGrant(perm permission.PermissionRequest) bool
 	PermissionGrantPersistent(perm permission.PermissionRequest) bool
 	PermissionDeny(perm permission.PermissionRequest) bool
-	PermissionSkipRequests() bool
-	PermissionSetSkipRequests(skip bool)
+	PermissionMode() permission.PermissionMode
+	PermissionSetMode(mode permission.PermissionMode)
+
+	// HostContext returns what the host application has in view, such
+	// as its open files, or the zero context when there is no host.
+	HostContext(ctx context.Context) (proto.HostContext, error)
 
 	// Questions
 	//
@@ -181,6 +207,22 @@ type Workspace interface {
 
 	// QuestionCancel cancels the pending question.
 	QuestionCancel() bool
+
+	// Pinentry
+	//
+	// PinentryRespond resolves the pending GPG credential prompt with
+	// the secret; PinentryCancel dismisses it. Both return false when
+	// no matching prompt is pending.
+	PinentryRespond(id, secret string) bool
+	PinentryCancel(id string) bool
+	// SSH prompts
+	//
+	// SSHRespond resolves the pending integrated SSH credential or
+	// confirmation prompt with the secret ("yes" for confirmations);
+	// SSHCancel dismisses it. Both return false when no matching prompt
+	// is pending.
+	SSHRespond(id, secret string) bool
+	SSHCancel(id string) bool
 
 	// FileTracker
 	FileTrackerRecordRead(ctx context.Context, sessionID, path string)
@@ -199,6 +241,7 @@ type Workspace interface {
 	// Config (read-only data)
 	Config() *config.Config
 	WorkingDir() string
+	GitBranch(ctx context.Context) (string, error)
 	Resolver() config.VariableResolver
 
 	// Config mutations (proxied to server in client mode)
@@ -206,6 +249,7 @@ type Workspace interface {
 	SetCompactMode(scope config.Scope, enabled bool) error
 	SetProviderAPIKey(scope config.Scope, providerID string, apiKey any) error
 	SetConfigField(scope config.Scope, key string, value any) error
+	SetConfigFields(scope config.Scope, fields map[string]any) error
 	RemoveConfigField(scope config.Scope, key string) error
 	ImportCopilot() (*oauth.Token, bool)
 	RefreshOAuthToken(ctx context.Context, scope config.Scope, providerID string) error
@@ -227,6 +271,11 @@ type Workspace interface {
 	GetMCPPrompt(clientID, promptID string, args map[string]string) (string, error)
 	EnableDockerMCP(ctx context.Context) error
 	DisableDockerMCP() error
+	MCPServersDisabled(ctx context.Context) ([]string, error)
+	MCPSetServerDisabled(ctx context.Context, name string, disabled bool) error
+	MCPSetServerConfigDisabled(ctx context.Context, name string, disabled bool) error
+	MCPServersEnabled(ctx context.Context) ([]string, error)
+	MCPStartServer(ctx context.Context, name string) error
 	MCPAuthenticate(ctx context.Context, name string) error
 	MCPPendingAuth() []mcptools.PendingAuthServer
 	MCPAuthURL(name string) string

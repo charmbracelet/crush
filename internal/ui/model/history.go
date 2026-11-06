@@ -15,7 +15,8 @@ type promptHistoryLoadedMsg struct {
 	messages []string
 }
 
-// loadPromptHistory loads user messages for history navigation.
+// loadPromptHistory loads user messages for history navigation. Both queries
+// stop at the 200 most recent entries; recall only steps back one at a time.
 func (m *UI) loadPromptHistory() tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
@@ -131,7 +132,7 @@ func (m *UI) syncBangModeFromTextarea() {
 		m.bangMode = false
 		m.bangWasEmpty = false
 	}
-	m.setEditorPrompt(m.yoloModeCached())
+	m.setEditorPrompt(m.permModeCached())
 }
 
 // historyPrev changes the text area content to the previous message in the history

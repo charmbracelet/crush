@@ -47,7 +47,7 @@ func newGateTestCoordinator(t *testing.T, interactive bool) *coordinator {
 		interactive: interactive,
 	}
 
-	p, err := coderPrompt(prompt.WithWorkingDir(env.workingDir))
+	p, err := loadPrompt(cfg, "coder", prompt.WithWorkingDir(env.workingDir))
 	require.NoError(t, err)
 	agentCfg := cfg.Config().Agents[config.AgentCoder]
 

@@ -1371,11 +1371,8 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 		}
 	case pubsub.Event[proto.RunComplete]:
 		// Translate the wire-level proto.RunComplete back into the
-		// agent's domain notify.RunComplete. Without this case the
-		// default branch below warns on every run completion in the
-		// server-mode TUI, even though the TUI itself doesn't act
-		// on RunComplete — converting silently keeps the workspace
-		// event bridge symmetric with the server-side wrapEvent.
+		// agent's domain notify.RunComplete. The TUI ends its pending
+		// turn and clears its busy probe on it.
 		return pubsub.Event[notify.RunComplete]{
 			Type: e.Type,
 			Payload: notify.RunComplete{

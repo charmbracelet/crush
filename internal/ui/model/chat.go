@@ -533,21 +533,6 @@ func (m *Chat) UpdateNestedToolIDs(containerID string) {
 // was armed for.
 type animTickMsg struct{ gen uint64 }
 
-// HasLiveSpinner reports whether any item, on screen or not, is spinning
-// with the animation clock allowed. A frozen spinner is a ghost left by a
-// killed run, not progress.
-func (m *Chat) HasLiveSpinner() bool {
-	if !m.animAllowed {
-		return false
-	}
-	for idx := m.list.Len() - 1; idx >= 0; idx-- {
-		if animatable, ok := m.list.ItemAt(idx).(chat.Animatable); ok && animatable.Spinning() {
-			return true
-		}
-	}
-	return false
-}
-
 // hasVisibleAnimation reports whether any item in the viewport is spinning.
 func (m *Chat) hasVisibleAnimation() bool {
 	if m.list.Len() == 0 {

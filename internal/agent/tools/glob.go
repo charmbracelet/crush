@@ -6,6 +6,7 @@ import (
 	"cmp"
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"html/template"
 	"log/slog"
@@ -13,6 +14,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/config"
@@ -111,9 +113,9 @@ func globFiles(ctx context.Context, pattern, searchPath string, limit int) ([]st
 	cmdRg := getRgCmd(ctx, walkPattern)
 	if cmdRg != nil {
 		cmdRg.Dir = walkRoot
-		matches, err := runRipgrep(cmdRg, walkRoot, limit)
+		matches, partial, err := runRipgrep(cmdRg, walkRoot, limit)
 		if err == nil {
-			return matches, len(matches) >= limit && limit > 0, nil
+			return matches, partial || (len(matches) >= limit && limit > 0), nil
 		}
 		slog.Warn("Ripgrep execution failed, falling back to doublestar", "error", err)
 	}
@@ -121,7 +123,10 @@ func globFiles(ctx context.Context, pattern, searchPath string, limit int) ([]st
 	return fsext.GlobGitignoreAwareCtx(ctx, walkPattern, walkRoot, limit)
 }
 
-func runRipgrep(cmd *exec.Cmd, searchRoot string, limit int) ([]string, error) {
+// runRipgrep returns the paths it read and whether the listing is incomplete. A
+// partial listing is not an error: #2816 made glob failure non-fatal, and the caller
+// reports an incomplete list through the existing `truncated` flag instead.
+func runRipgrep(cmd *exec.Cmd, searchRoot string, limit int) ([]string, bool, error) {
 	// Stream ripgrep's stdout instead of buffering the whole file list.
 	// Over a huge root (e.g. $HOME) the full --files listing can be
 	// hundreds of MB; reading it all at once and then sorting allocated
@@ -135,13 +140,13 @@ func runRipgrep(cmd *exec.Cmd, searchRoot string, limit int) ([]string, error) {
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, fmt.Errorf("ripgrep: %w", err)
+		return nil, false, fmt.Errorf("ripgrep: %w", err)
 	}
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("ripgrep: %w", err)
+		return nil, false, fmt.Errorf("ripgrep: %w", err)
 	}
 
 	var matches []string
@@ -171,11 +176,29 @@ func runRipgrep(cmd *exec.Cmd, searchRoot string, limit int) ([]string, error) {
 	// Close our end so ripgrep gets SIGPIPE and stops, then reap it.
 	_ = stdout.Close()
 	waitErr := cmd.Wait()
-	if waitErr != nil && len(matches) == 0 {
-		if ee, ok := waitErr.(*exec.ExitError); ok && ee.ExitCode() == 1 {
-			return nil, nil // No matches.
+	// Breaking out of the read loop once `candidatePool` is full closes the pipe
+	// early on purpose, so that SIGPIPE kill is expected and not an error. Any
+	// other failure (exit code 2, a context timeout, an unreadable directory) means
+	// the listing we read is short, so it must not be reported as complete.
+	complete := true
+	if waitErr != nil {
+		switch {
+		case len(matches) == 0:
+			// Nothing came back, so there is no partial answer to salvage: exit code 1
+			// is ripgrep's "no matches", anything else is a real failure.
+			if ee, ok := waitErr.(*exec.ExitError); ok && ee.ExitCode() == 1 {
+				return nil, false, nil // No matches, and that is the complete answer.
+			}
+			return nil, false, fmt.Errorf("ripgrep: %w\n%s", waitErr, stderr.String())
+		case len(matches) >= candidatePool || errors.Is(waitErr, syscall.EPIPE):
+			// The pool filled up and we closed the pipe on purpose; the extra SIGPIPE
+			// kill is the bounded-search path working as intended, not a short listing.
+		default:
+			// ripgrep failed after we had already read paths (exit code 2, a context
+			// timeout, an unreadable directory). Those paths are still useful, but the
+			// listing is short, so it must not be presented as complete.
+			complete = false
 		}
-		return nil, fmt.Errorf("ripgrep: %w\n%s", waitErr, stderr.String())
 	}
 
 	sort.SliceStable(matches, func(i, j int) bool {
@@ -185,7 +208,7 @@ func runRipgrep(cmd *exec.Cmd, searchRoot string, limit int) ([]string, error) {
 	if limit > 0 && len(matches) > limit {
 		matches = matches[:limit]
 	}
-	return matches, nil
+	return matches, !complete, nil
 }
 
 func normalizeFilePaths(paths []string) {

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"testing"
 
@@ -16,18 +17,27 @@ import (
 
 var (
 	pragmas = map[string]string{
-		"foreign_keys":  "ON",
-		"journal_mode":  "WAL",
-		"page_size":     "4096",
-		"temp_store":    "MEMORY",
-		"cache_size":    "-8000",
-		"synchronous":   "NORMAL",
-		"secure_delete": "ON",
-		"busy_timeout":  "30000",
+		"foreign_keys": "ON",
+		"journal_mode": "WAL",
+		"page_size":    "4096",
+		"temp_store":   "MEMORY",
+		"cache_size":   "-8000",
+		"synchronous":  "NORMAL",
+		"busy_timeout": "30000",
 	}
 	gooseInitOnce sync.Once
 	gooseInitErr  error
 )
+
+// secureDeleteEnabled reports whether deleted SQLite content should be
+// overwritten with zeros. It is off by default (SQLite's default) and
+// can be enabled with CRUSH_SECURE_DELETE=1. The zeroing adds write
+// amplification to every UPDATE and DELETE without protecting data on
+// copy-on-write filesystems or wear-leveled SSDs.
+func secureDeleteEnabled() bool {
+	v, _ := strconv.ParseBool(os.Getenv("CRUSH_SECURE_DELETE"))
+	return v
+}
 
 //go:embed migrations/*.sql
 var FS embed.FS

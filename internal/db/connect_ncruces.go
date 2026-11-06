@@ -33,6 +33,11 @@ func openDB(dbPath string) (*sql.DB, error) {
 				return fmt.Errorf("failed to set pragma %q: %w", name, err)
 			}
 		}
+		if secureDeleteEnabled() {
+			if err := c.Exec("PRAGMA secure_delete = ON;"); err != nil {
+				return fmt.Errorf("failed to set pragma %q: %w", "secure_delete", err)
+			}
+		}
 		return nil
 	})
 	if err != nil {

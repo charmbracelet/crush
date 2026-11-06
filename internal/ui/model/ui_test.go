@@ -761,6 +761,35 @@ func TestToggleInputMode_BlockedWhileAgentBusy(t *testing.T) {
 	require.Equal(t, util.InfoTypeWarn, info.Type)
 }
 
+func TestTogglePlanMode(t *testing.T) {
+	t.Parallel()
+	u, ws := newPlanUI(t, "sess-1")
+	ws.agentReady = true
+
+	applyModeSwitchMsg(u, u.togglePlanMode())
+	require.Equal(t, uiInputModeCode, u.mode)
+	require.Equal(t, config.AgentCoder, ws.setMainCalledWith)
+
+	applyModeSwitchMsg(u, u.togglePlanMode())
+	require.Equal(t, uiInputModePlan, u.mode)
+	require.Equal(t, config.AgentPlan, ws.setMainCalledWith)
+}
+
+func TestTogglePlanMode_BlockedWhileAgentBusy(t *testing.T) {
+	t.Parallel()
+	u, ws := newPlanUI(t, "sess-1")
+	ws.agentReady = true
+	ws.agentBusy = true
+	u.agentBusyCache.set(true)
+
+	msg := u.togglePlanMode()()
+	require.Equal(t, uiInputModePlan, u.mode)
+	require.Empty(t, ws.setMainCalledWith)
+	info, ok := msg.(util.InfoMsg)
+	require.True(t, ok)
+	require.Equal(t, util.InfoTypeWarn, info.Type)
+}
+
 func TestSetInputMode_TracksModeSwitching(t *testing.T) {
 	t.Parallel()
 	u, _ := newPlanUI(t, "sess-1")

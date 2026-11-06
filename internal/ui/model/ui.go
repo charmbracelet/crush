@@ -2316,6 +2316,11 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 
 	// Command dialog messages.
+	case dialog.ActionTogglePlanMode:
+		if cmd := m.togglePlanMode(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleYoloMode:
 		if m.mode == uiInputModePlan {
 			// Same as Ctrl+Y in plan mode: YOLO only exists as YOLO
@@ -5001,6 +5006,19 @@ func (m *UI) toggleInputMode() tea.Cmd {
 		// Fourth step: sysadmin -> normal, closing the cycle.
 		m.setYolo(false)
 		return util.ReportInfo("input mode: code")
+	}
+	return m.setInputMode(uiInputModePlan)
+}
+
+// togglePlanMode enters or leaves plan mode directly (from the command
+// palette), without advancing through the YOLO/sysadmin rungs of the
+// Shift+Tab cycle.
+func (m *UI) togglePlanMode() tea.Cmd {
+	if m.isAgentBusy() || m.modeSwitching {
+		return util.ReportWarn("Agent is busy, please wait before switching input mode...")
+	}
+	if m.mode == uiInputModePlan {
+		return m.setInputMode(uiInputModeCode)
 	}
 	return m.setInputMode(uiInputModePlan)
 }

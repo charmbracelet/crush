@@ -1171,6 +1171,16 @@ func (w *ClientWorkspace) consumeEvents(evc <-chan any, send func(tea.Msg)) {
 // goodbye less tidy.
 const shutdownDrainTimeout = 5 * time.Second
 
+// shutdownRetireTimeout bounds Shutdown's goodbye to the server, the legacy
+// fallback included. The client SDK sets no request timeout of its own, and
+// by the time Shutdown runs the TUI is gone and the root signal handler
+// swallows Ctrl+C, so a server that accepts the request and never answers
+// (stopped in a debugger, suspended with Ctrl+Z) would hang the exit
+// forever. Giving up is safe: the server releases a client that left without
+// a goodbye once its detach or create grace runs out. A var, not a const, so
+// tests can shrink it.
+var shutdownRetireTimeout = 5 * time.Second
+
 func (w *ClientWorkspace) Shutdown() {
 	// Stop the reconnect/recovery loop first, then wait for it: cancelling
 	// alone does not unwind a workspace recovery that is already in
@@ -1187,7 +1197,9 @@ func (w *ClientWorkspace) Shutdown() {
 	// teardown exact even when a recovery create's response was lost: the
 	// create either landed before this call, and its claim is released here,
 	// or it arrives afterwards and registers nothing.
-	err := w.client.RetireClient(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), shutdownRetireTimeout)
+	defer cancel()
+	err := w.client.RetireClient(ctx)
 	if err == nil {
 		return
 	}
@@ -1198,7 +1210,7 @@ func (w *ClientWorkspace) Shutdown() {
 	// The server predates client retirement, so fall back to releasing
 	// the workspace we know about. Nothing better is possible against an
 	// older server.
-	_ = w.client.DeleteWorkspace(context.Background(), w.workspaceID())
+	_ = w.client.DeleteWorkspace(ctx, w.workspaceID())
 }
 
 // awaitSubscription waits for the subscription loop to return. It returns

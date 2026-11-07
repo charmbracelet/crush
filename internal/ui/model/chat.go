@@ -252,12 +252,17 @@ func (m *Chat) Draw(scr uv.Screen, area uv.Rectangle) {
 	}
 
 	rendered := m.list.Render()
-	// If we're in follow mode but the render revealed we're no longer at
-	// the bottom (e.g. streaming content grew an item), re-anchor and
-	// re-render so the view stays pinned to the end.
-	if m.follow && !m.list.AtBottom() {
+	// In follow mode the view stays pinned to the end. Re-anchor whenever
+	// the render moved the end: content growing past it (streaming), or
+	// shrinking away from it (an item removed, such as the prompt echo
+	// giving way to the stored prompt), which would otherwise leave the
+	// transcript lifted off the bottom until something else scrolls.
+	if m.follow {
+		idx, line := m.list.ScrollPosition()
 		m.list.ScrollToBottom()
-		rendered = m.list.Render()
+		if newIdx, newLine := m.list.ScrollPosition(); newIdx != idx || newLine != line {
+			rendered = m.list.Render()
+		}
 	}
 	method, ok := scr.WidthMethod().(ansi.Method)
 	if !ok {

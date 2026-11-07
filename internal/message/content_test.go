@@ -221,7 +221,7 @@ func TestToAIMessage_UserContextReplayed(t *testing.T) {
 	require.Len(t, messages, 1)
 	part, ok := messages[0].Content[0].(fantasy.TextPart)
 	require.True(t, ok)
-	require.Equal(t, "<host_context>x</host_context>\n\ncontinue", part.Text)
+	require.Equal(t, "<host_context>x</host_context>\n\n  continue  ", part.Text)
 }
 
 func TestAppendContentKeepsContext(t *testing.T) {

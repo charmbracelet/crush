@@ -253,7 +253,10 @@ type UI struct {
 	// during this session. It guards against provider-driven theme swaps
 	// discarding that choice, even in client/server mode where the
 	// config round-trip may not reflect the selection immediately.
-	userThemeSelected bool
+	userThemeSelected               bool
+	themePreviewName                string
+	systemThemeRevision             uint64
+	systemThemeNotificationRevision uint64
 
 	// hostTheme tracks the theme a host application pushes through the
 	// server (see hosttheme.go).
@@ -887,7 +890,15 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	m.beginFrameUpdate()
 	// Update terminal capabilities
-	m.caps.Update(msg)
+	paletteWasUsable := m.caps.TerminalPalette.IsUsable()
+	if m.caps.Update(msg) {
+		if cmd := m.systemThemeRefreshCmd(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		if !paletteWasUsable && m.caps.TerminalPalette.IsUsable() && m.wantsSystemThemePalette() {
+			cmds = append(cmds, util.ReportInfo(systemThemePaletteStatus(m.caps.TerminalPalette)))
+		}
+	}
 	m.trackTurnOutcome(msg)
 	switch msg := msg.(type) {
 	case tea.EnvMsg:
@@ -895,15 +906,35 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.sendProgressBar {
 			m.sendProgressBar = slices.Contains(msg, "WT_SESSION")
 		}
-		cmds = append(cmds, common.QueryCmd(uv.Environ(msg)))
+		env := uv.Environ(msg)
+		cmds = append(cmds, common.QueryCmd(env))
+		if m.wantsSystemThemePalette() {
+			cmds = append(cmds, common.QueryTerminalPaletteCmd(env, m.caps.TerminalVersion))
+			if !m.caps.TerminalPalette.IsUsable() {
+				cmds = append(cmds, util.ReportInfo("System theme is waiting for the terminal palette"))
+			}
+		}
 	case tea.ModeReportMsg:
 		m.updateNotificationBackend()
 	case uv.UnknownOscEvent:
 		m.updateNotificationBackend()
+	case uv.UnknownCsiEvent:
+		if isTerminalThemeNotification(string(msg)) && m.wantsSystemThemePalette() {
+			cmds = append(cmds, m.systemThemePaletteNotificationCmd())
+		}
 	case tea.FocusMsg:
 		m.notifyWindowFocused = true
+		if m.wantsSystemThemePalette() {
+			cmds = append(cmds, common.QueryTerminalPaletteCmd(m.caps.Env, m.caps.TerminalVersion))
+		}
 	case tea.BlurMsg:
 		m.notifyWindowFocused = false
+	case systemThemeRefreshMsg:
+		m.applySystemThemeFromTerminal(msg.revision)
+	case systemThemePaletteNotificationMsg:
+		if cmd := m.handleSystemThemePaletteNotification(msg.revision); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.CollapseInlineMsg:
 		m.focusActiveInline(uiFocusMain)
 	case pubsub.Event[notify.Notification]:
@@ -1220,7 +1251,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.sendProgressBar {
 			m.sendProgressBar = xstrings.ContainsAnyOf(termVersion, "ghostty", "iterm2", "rio")
 		}
-		return m, nil
+		if m.wantsSystemThemePalette() && common.IsTmuxTerminal(m.caps.Env, m.caps.TerminalVersion) {
+			cmds = append(cmds, common.QueryTerminalPaletteCmd(m.caps.Env, m.caps.TerminalVersion))
+		}
+		return m, tea.Batch(cmds...)
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		// Suppress the chat's full-height scan during the resize so a drag
@@ -2429,27 +2463,36 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionSwitchTheme:
 		themeName := msg.Theme
-		newStyles, err := styles.LoadTheme(themeName)
+		newStyles, err := m.resolveThemeStyles(themeName)
 		if err != nil {
 			cmds = append(cmds, util.ReportError(err))
 			break
 		}
 		if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.tui.active_theme", themeName); err != nil {
-			if m.preThemeStyles != nil {
-				m.applyTheme(*m.preThemeStyles)
-				m.preThemeStyles = nil
-			}
+			m.restoreThemePreview()
 			cmds = append(cmds, util.ReportError(err))
 			break
 		}
 		m.applyTheme(newStyles)
 		m.preThemeStyles = nil
+		m.themePreviewName = ""
 		m.userAppliedTheme()
-		cmds = append(cmds, util.ReportInfo("Theme switched to "+themeName))
+		infoMessage := "Theme switched to " + themeName
+		if strings.EqualFold(themeName, styles.SystemThemeName) {
+			if m.caps.TerminalPalette.IsUsable() {
+				infoMessage = systemThemePaletteStatus(m.caps.TerminalPalette)
+			} else {
+				infoMessage = "System theme selected; waiting for terminal colors"
+			}
+		}
+		cmds = append(cmds, util.ReportInfo(infoMessage))
 		m.userThemeSelected = true
 		m.dialog.CloseDialog(dialog.ThemeID)
+		if strings.EqualFold(themeName, styles.SystemThemeName) {
+			cmds = append(cmds, common.QueryTerminalPaletteCmd(m.caps.Env, m.caps.TerminalVersion))
+		}
 	case dialog.ActionPreviewTheme:
-		newStyles, err := styles.LoadTheme(msg.Theme)
+		newStyles, err := m.resolveThemeStyles(msg.Theme)
 		if err != nil {
 			break
 		}
@@ -2457,12 +2500,18 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			saved := m.com.Styles.Clone()
 			m.preThemeStyles = &saved
 		}
+		m.themePreviewName = msg.Theme
 		m.previewTheme(newStyles)
-	case dialog.ActionRevertThemePreview:
-		if m.preThemeStyles != nil {
-			m.applyTheme(*m.preThemeStyles)
-			m.preThemeStyles = nil
+		if strings.EqualFold(msg.Theme, styles.SystemThemeName) {
+			cmds = append(cmds, common.QueryTerminalPaletteCmd(m.caps.Env, m.caps.TerminalVersion))
+			if !m.caps.TerminalPalette.IsUsable() {
+				cmds = append(cmds, util.ReportInfo("System theme preview is waiting for terminal colors"))
+			} else {
+				cmds = append(cmds, util.ReportInfo(systemThemePaletteStatus(m.caps.TerminalPalette)))
+			}
 		}
+	case dialog.ActionRevertThemePreview:
+		m.restoreThemePreview()
 		m.dialog.CloseDialog(dialog.ThemeID)
 	case dialog.ActionPreviewThemePalette:
 		newStyles, err := styles.LoadPaletteTheme(msg.Base, msg.Palette)
@@ -2473,6 +2522,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			saved := m.com.Styles.Clone()
 			m.preThemeStyles = &saved
 		}
+		m.themePreviewName = ""
 		m.previewTheme(newStyles)
 	case dialog.ActionSaveThemePalette:
 		// The theme is stored under its own name; Base only identifies the
@@ -2512,6 +2562,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			}
 			m.applyTheme(newStyles)
 			m.preThemeStyles = nil
+			m.themePreviewName = ""
 			m.userAppliedTheme()
 		}
 		cmds = append(cmds, util.ReportInfo("Theme saved"))
@@ -2522,10 +2573,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	case dialog.ActionEditTheme:
 		m.openThemeEditorDialog(msg.Name)
 	case dialog.ActionRevertThemePalette:
-		if m.preThemeStyles != nil {
-			m.applyTheme(*m.preThemeStyles)
-			m.preThemeStyles = nil
-		}
+		m.restoreThemePreview()
 		m.dialog.CloseDialog(dialog.ThemeEditorID)
 	case dialog.ActionRevertOverriddenTheme:
 		// Drop any user override layered on top of the built-in: the
@@ -2539,11 +2587,12 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		// If the reverted theme is the active one, re-apply the pristine
 		// built-in so the change is visible immediately.
 		if strings.EqualFold(common.ThemeNameFromConfig(m.com.Config()), msg.Name) {
-			if newStyles, err := styles.LoadTheme(msg.Name); err == nil {
+			if newStyles, err := m.resolveThemeStyles(msg.Name); err == nil {
 				m.applyTheme(newStyles)
 				// A preview snapshot holds the styles from before the
 				// revert; esc must not bring them back.
 				m.preThemeStyles = nil
+				m.themePreviewName = ""
 				m.userAppliedTheme()
 			}
 		}

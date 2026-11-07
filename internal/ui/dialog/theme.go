@@ -327,7 +327,7 @@ func (th *Theme) HandleMsg(msg tea.Msg) Action {
 					break
 				}
 				themeItem, ok := selectedItem.(*ThemeItem)
-				if !ok || themeItem.name == newThemeItemName {
+				if !ok || themeItem.name == newThemeItemName || strings.EqualFold(themeItem.name, styles.SystemThemeName) {
 					break
 				}
 				return ActionEditTheme{Name: themeItem.name}
@@ -538,11 +538,10 @@ func (th *Theme) canRenameSelected() bool {
 	return !styles.IsBuiltinTheme(item.name)
 }
 
-// canEditSelected reports whether the currently selected theme item
-// supports editing (not the sentinel).
+// canEditSelected reports whether the selected theme has an editable palette.
 func (th *Theme) canEditSelected() bool {
 	item := th.selectedThemeItem()
-	return item != nil && item.name != newThemeItemName
+	return item != nil && item.name != newThemeItemName && !strings.EqualFold(item.name, styles.SystemThemeName)
 }
 
 // canRevertSelected reports whether the currently selected theme item is a
@@ -687,6 +686,9 @@ func (th *Theme) setThemeItems() {
 
 func (th *Theme) newThemeItem(info styles.ThemeInfo, currentTheme string) *ThemeItem {
 	label := info.Name
+	if strings.EqualFold(info.Name, styles.SystemThemeName) {
+		label = "system (terminal palette)"
+	}
 	if info.Overridden {
 		label += " (overridden)"
 	}

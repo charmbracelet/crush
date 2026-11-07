@@ -623,7 +623,11 @@ func (c *choiceList) clampToBounds(lines []contentLine, viewport int) {
 // description) comes back into view.
 func (c *choiceList) clampScroll(lines []contentLine, viewport int) {
 	if c.suppressScroll {
+		// Skip the snap to the cursor, but not the bounds: the click
+		// that suppressed it may have shrunk the content (a blurred
+		// fill-in collapses to one row).
 		c.suppressScroll = false
+		c.clampToBounds(lines, viewport)
 		return
 	}
 	// After wheel scroll, only enforce bounds instead of snapping

@@ -27,8 +27,9 @@ jobs:
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           args: --config=.golangci.yml --timeout=10m ./...
-          version: v2.13.1
+          version: v2.15.0
           # Build from source so the linter matches the Go version in go.mod.
-          # Prebuilt binaries made with an older toolchain cannot read the
-          # standard library's export data.
+          # Prebuilt binaries made with an older toolchain refuse to lint a
+          # module that targets a newer Go. v2.14.0 or later is required to
+          # read the export data Go 1.27.3 writes.
           install-mode: goinstall

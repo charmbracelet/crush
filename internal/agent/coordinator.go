@@ -1109,6 +1109,10 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	// itself is still wrapped from the coder's side.
 	filteredTools = wrapToolsWithHooks(filteredTools, c.hookRunner, isSubAgent)
 
+	// Strict OpenAI-compatible providers reject a whole request when a tool
+	// parameter carries no description, so nothing leaves Crush without one.
+	filteredTools = tools.DescribeTools(filteredTools)
+
 	return filteredTools, nil
 }
 

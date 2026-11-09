@@ -110,6 +110,13 @@ type ToolRenderOpts struct {
 	Compact         bool
 	IsSpinning      bool
 	Status          ToolStatus
+	// StartedAt is when the tool call started rendering live. Zero for
+	// items restored from history, where the real start time is unknown,
+	// so no elapsed time is shown for them.
+	StartedAt time.Time
+	// Elapsed is how long the tool call has been (or was) running.
+	// Zero when the start time is unknown (restored items).
+	Elapsed time.Duration
 }
 
 // IsPending returns true if the tool call is still pending (not finished and
@@ -170,9 +177,21 @@ type baseToolMessageItem struct {
 	sty             *styles.Styles
 	anim            *anim.Anim
 	expandedContent bool
+	startedAt       time.Time
+	finishedAt      time.Time
 }
 
 var _ Expandable = (*baseToolMessageItem)(nil)
+
+// markRestored clears startedAt for items rebuilt from session history:
+// the real start time is unknown there, and a constructor timestamp would
+// restart the timer from zero and misreport the elapsed time.
+func (t *baseToolMessageItem) markRestored() {
+	if !t.startedAt.IsZero() {
+		t.startedAt = time.Time{}
+		t.Bump()
+	}
+}
 
 // newBaseToolMessageItem is the internal constructor for base tool message items.
 func newBaseToolMessageItem(
@@ -202,6 +221,7 @@ func newBaseToolMessageItem(
 		result:                   result,
 		status:                   status,
 		hasCappedWidth:           hasCappedWidth,
+		startedAt:                time.Now(),
 	}
 	t.anim = anim.New(anim.Settings{
 		ID:          toolCall.ID,
@@ -210,6 +230,11 @@ func newBaseToolMessageItem(
 		GradColorB:  sty.WorkingGradToColor,
 		LabelColor:  sty.WorkingLabelColor,
 		CycleColors: true,
+		// Timer on the pending spinner: quick tools (view, grep, edit)
+		// show the overall turn time, long-running ones their own
+		// elapsed time once it becomes the more useful signal.
+		Suffix:      t.spinnerTimer,
+		SuffixColor: sty.WorkingTimerColor,
 	})
 
 	return t
@@ -357,6 +382,8 @@ func (t *baseToolMessageItem) RawRender(width int) string {
 			Compact:         t.isCompact,
 			IsSpinning:      t.isSpinning(),
 			Status:          t.computeStatus(),
+			StartedAt:       t.startedAt,
+			Elapsed:         t.elapsed(),
 		})
 
 		// Prepend hook indicator if hooks ran for this tool call.
@@ -420,9 +447,47 @@ func (t *baseToolMessageItem) ToolCall() message.ToolCall {
 
 // SetToolCall sets the tool call associated with this message item.
 func (t *baseToolMessageItem) SetToolCall(tc message.ToolCall) {
+	// Capture the end time on the live finished transition so the tool's
+	// total duration can be shown after completion.
+	if tc.Finished && !t.toolCall.Finished && !t.startedAt.IsZero() {
+		t.finishedAt = time.Now()
+	}
 	t.toolCall = tc
 	t.clearCache()
 	t.Bump()
+}
+
+// elapsed returns how long the tool call has been (or was) running. Zero
+// when the start time is unknown (restored items).
+func (t *baseToolMessageItem) elapsed() time.Duration {
+	if t.startedAt.IsZero() {
+		return 0
+	}
+	end := t.finishedAt
+	if end.IsZero() {
+		end = time.Now()
+	}
+	return end.Sub(t.startedAt)
+}
+
+// toolTimerOwnTimeThreshold is how long a tool call must run before its
+// own elapsed time takes over the pending spinner's timer. Quick tools
+// (view, grep, edit) never cross it and keep showing the overall turn
+// time, which is the more useful signal for them; long-running ones
+// (bash, fetch, sub-agents) switch to their own duration once it starts
+// to matter.
+const toolTimerOwnTimeThreshold = 10 * time.Second
+
+// spinnerTimer returns the timer text shown next to the pending
+// spinner: the overall turn time while the tool is quick, its own
+// elapsed time once it has been running long enough to matter. Empty
+// when no turn is active and the start time is unknown, so renders of
+// restored sessions are unaffected.
+func (t *baseToolMessageItem) spinnerTimer() string {
+	if d := t.elapsed(); d >= toolTimerOwnTimeThreshold {
+		return common.FormatDuration(d)
+	}
+	return common.CurrentElapsed()
 }
 
 // SetResult sets the tool result associated with this message item.
@@ -626,6 +691,20 @@ func unescapePartialString(s string) string {
 	}
 }
 
+// waitingForToolMessage builds the "Waiting for tool response..." label,
+// including how long the tool has been running and, when a turn is
+// active, the total elapsed turn time.
+func waitingForToolMessage(opts *ToolRenderOpts) string {
+	msg := "Waiting for tool response"
+	if !opts.StartedAt.IsZero() {
+		msg += fmt.Sprintf(" for %s", common.FormatDuration(time.Since(opts.StartedAt)))
+	}
+	if total := common.CurrentElapsed(); total != "" {
+		msg += fmt.Sprintf(" (%s total)", total)
+	}
+	return msg + "..."
+}
+
 // toolEarlyStateContent handles error/cancelled/pending states before content rendering.
 // Returns the rendered output and true if early state was handled.
 func toolEarlyStateContent(sty *styles.Styles, opts *ToolRenderOpts, width int) (string, bool) {
@@ -636,13 +715,24 @@ func toolEarlyStateContent(sty *styles.Styles, opts *ToolRenderOpts, width int) 
 	case ToolStatusCanceled:
 		msg = sty.Tool.StateCancelled.Render("Canceled.")
 	case ToolStatusAwaitingPermission:
-		msg = sty.Tool.StateWaiting.Render("Requesting permission...")
+		msg = sty.Tool.StateWaiting.Render("Requesting permission...") + toolTimerSuffix(sty)
 	case ToolStatusRunning:
-		msg = sty.Tool.StateWaiting.Render("Waiting for tool response...")
+		msg = sty.Tool.StateWaiting.Render(waitingForToolMessage(opts))
 	default:
 		return "", false
 	}
 	return msg, true
+}
+
+// toolTimerSuffix renders the live turn timer shown next to tool calls
+// that are still in flight. Returns an empty string when no turn is
+// active, so renders of persisted sessions are unaffected.
+func toolTimerSuffix(sty *styles.Styles) string {
+	elapsed := common.CurrentElapsed()
+	if elapsed == "" {
+		return ""
+	}
+	return " " + lipgloss.NewStyle().Foreground(sty.WorkingTimerColor).Render(elapsed)
 }
 
 // toolErrorContent formats an error message with an ERROR or WARN tag.

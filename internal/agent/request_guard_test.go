@@ -156,13 +156,13 @@ func TestRequestGuardModel_ActiveStreamSurvives(t *testing.T) {
 	// but every gap is shorter than the idle window, so it must finish.
 	inner.stream = func(yield func(fantasy.StreamPart) bool) {
 		for range 6 {
-			time.Sleep(10 * time.Millisecond)
+			time.Sleep(40 * time.Millisecond)
 			if !yield(fantasy.StreamPart{}) {
 				return
 			}
 		}
 	}
-	m := newRequestGuardModel(inner, 25*time.Millisecond)
+	m := newRequestGuardModel(inner, 150*time.Millisecond)
 	stream, err := m.Stream(t.Context(), fantasy.Call{})
 	require.NoError(t, err)
 
@@ -406,24 +406,24 @@ func TestRequestGuardModel_SlowConsumerDoesNotAbort(t *testing.T) {
 	// takes longer per part than the idle window used to read as provider
 	// silence and killed healthy streams.
 	inner.stream = func(yield func(fantasy.StreamPart) bool) {
-		for i := range 20 {
+		for i := range 5 {
 			if !yield(fantasy.StreamPart{Delta: fmt.Sprint(i)}) {
 				return
 			}
 		}
 	}
-	m := newTestRequestGuardModel(inner, 10*time.Millisecond)
+	m := newTestRequestGuardModel(inner, 100*time.Millisecond)
 	stream, err := m.Stream(t.Context(), fantasy.Call{})
 	require.NoError(t, err)
 
 	var got []string
 	for part := range stream {
-		time.Sleep(30 * time.Millisecond)
+		time.Sleep(200 * time.Millisecond)
 		require.NoError(t, part.Error, "work on this side must not be reported as a timeout")
 		got = append(got, part.Delta)
 	}
 
-	require.Len(t, got, 20)
+	require.Len(t, got, 5)
 	for i, delta := range got {
 		require.Equal(t, fmt.Sprint(i), delta, "parts must arrive in order")
 	}

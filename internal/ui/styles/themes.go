@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/exp/charmtone"
+	"charm.land/tone"
 )
 
 // ThemeKeyForProvider returns a stable identifier for the theme
@@ -54,70 +54,70 @@ func CharmtonePantera() Styles {
 // using colors from the upstream charmbracelet/x/exp/charmtone package.
 func charmtoneOpts() quickStyleOpts {
 	return quickStyleOpts{
-		primary:   charmtone.Charple,
-		secondary: charmtone.Dolly,
-		accent:    charmtone.Bok,
-		keyword:   charmtone.Blush,
+		primary:   tone.Charple,
+		secondary: tone.Dolly,
+		accent:    tone.Bok,
+		keyword:   tone.Blush,
 
-		fgBase:       charmtone.Sash,
-		fgMoreSubtle: charmtone.Squid,
-		fgSubtle:     charmtone.Smoke,
-		fgMostSubtle: charmtone.Oyster,
+		fgBase:       tone.Sash,
+		fgMoreSubtle: tone.Squid,
+		fgSubtle:     tone.Smoke,
+		fgMostSubtle: tone.Oyster,
 
-		onPrimary: charmtone.Butter,
+		onPrimary: tone.Butter,
 
-		bgBase:         charmtone.Pepper,
-		bgLeastVisible: charmtone.BBQ,
-		bgLessVisible:  charmtone.Char,
-		bgMostVisible:  charmtone.Iron,
+		bgBase:         tone.Pepper,
+		bgLeastVisible: tone.BBQ,
+		bgLessVisible:  tone.Char,
+		bgMostVisible:  tone.Iron,
 
-		separator: charmtone.Char,
+		separator: tone.Char,
 
-		destructive:       charmtone.Coral,
-		destructiveSubtle: charmtone.Salmon,
-		error:             charmtone.Sriracha,
-		warningSubtle:     charmtone.Zest,
-		warning:           charmtone.Mustard,
-		attention:         charmtone.Tang,
-		busy:              charmtone.Citron,
-		info:              charmtone.Malibu,
-		infoMoreSubtle:    charmtone.Sardine,
-		infoMostSubtle:    charmtone.Damson,
-		success:           charmtone.Julep,
-		successMoreSubtle: charmtone.Bok,
-		successMostSubtle: charmtone.Guac,
-		yolo:              charmtone.Zest,
-		plan:              charmtone.Charple,
-		planMoreSubtle:    charmtone.Hazy,
+		destructive:       tone.Coral,
+		destructiveSubtle: tone.Salmon,
+		error:             tone.Sriracha,
+		warningSubtle:     tone.Zest,
+		warning:           tone.Mustard,
+		attention:         tone.Tang,
+		busy:              tone.Citron,
+		info:              tone.Malibu,
+		infoMoreSubtle:    tone.Sardine,
+		infoMostSubtle:    tone.Damson,
+		success:           tone.Julep,
+		successMoreSubtle: tone.Bok,
+		successMostSubtle: tone.Guac,
+		yolo:              tone.Zest,
+		plan:              tone.Charple,
+		planMoreSubtle:    tone.Hazy,
 
 		// Muted diff foreground hues; the backgrounds derive from these
 		// over bgBase.
 		diffInsertFg: lipgloss.Color("#629657"),
 		diffDeleteFg: lipgloss.Color("#a45c59"),
 
-		button:         charmtone.Dolly,
-		buttonSubtle:   charmtone.Char,
-		buttonInactive: charmtone.Iron,
-		buttonHovered:  charmtone.Oyster,
+		button:         tone.Dolly,
+		buttonSubtle:   tone.Char,
+		buttonInactive: tone.Iron,
+		buttonHovered:  tone.Oyster,
 		// ANSI 16-color palette for remapping raw terminal output
 		// (e.g. bang-mode shell commands) onto legible Charmtone colors.
-		ansiBlack:   charmtone.BBQ,
-		ansiRed:     charmtone.Coral,
-		ansiGreen:   charmtone.Guac,
-		ansiYellow:  charmtone.Mustard,
-		ansiBlue:    charmtone.Charple,
-		ansiMagenta: charmtone.Dolly,
-		ansiCyan:    charmtone.Malibu,
-		ansiWhite:   charmtone.Smoke,
+		ansiBlack:   tone.BBQ,
+		ansiRed:     tone.Coral,
+		ansiGreen:   tone.Guac,
+		ansiYellow:  tone.Mustard,
+		ansiBlue:    tone.Charple,
+		ansiMagenta: tone.Dolly,
+		ansiCyan:    tone.Malibu,
+		ansiWhite:   tone.Smoke,
 
-		ansiBrightBlack:   charmtone.Iron,
-		ansiBrightRed:     charmtone.Tuna,
-		ansiBrightGreen:   charmtone.Julep,
-		ansiBrightYellow:  charmtone.Zest,
-		ansiBrightBlue:    charmtone.Guppy,
-		ansiBrightMagenta: charmtone.Blush,
-		ansiBrightCyan:    charmtone.Sardine,
-		ansiBrightWhite:   charmtone.Salt,
+		ansiBrightBlack:   tone.Iron,
+		ansiBrightRed:     tone.Tuna,
+		ansiBrightGreen:   tone.Julep,
+		ansiBrightYellow:  tone.Zest,
+		ansiBrightBlue:    tone.Guppy,
+		ansiBrightMagenta: tone.Blush,
+		ansiBrightCyan:    tone.Sardine,
+		ansiBrightWhite:   tone.Salt,
 	}
 }
 
@@ -126,45 +126,45 @@ func charmtoneOpts() quickStyleOpts {
 func charmtoneOverrides(s Styles) Styles {
 	// Bang ! prompt overrides - use Salt/Hazy/Larple colors.
 	s.Editor.PromptBangIconFocused = s.Editor.PromptBangIconFocused.
-		Foreground(charmtone.Salt).
-		Background(charmtone.Hazy)
+		Foreground(tone.Salt).
+		Background(tone.Hazy)
 	s.Editor.PromptBangDotsFocused = s.Editor.PromptBangDotsFocused.
-		Foreground(charmtone.Hazy)
+		Foreground(tone.Hazy)
 	s.Editor.PromptBangDotsBlurred = s.Editor.PromptBangDotsBlurred.
-		Foreground(charmtone.Larple)
+		Foreground(tone.Larple)
 
 	// Shell bar/prompt overrides - use Charple/Iron/Hazy colors.
 	s.Messages.ShellBarFocused = s.Messages.ShellBarFocused.
-		BorderForeground(charmtone.Charple)
+		BorderForeground(tone.Charple)
 	s.Messages.ShellBarBlurred = s.Messages.ShellBarBlurred.
-		BorderForeground(charmtone.Iron)
+		BorderForeground(tone.Iron)
 	s.Messages.ShellPrompt = s.Messages.ShellPrompt.
-		Foreground(charmtone.Hazy)
+		Foreground(tone.Hazy)
 	s.Messages.ShellPromptBlurred = s.Messages.ShellPromptBlurred.
-		Foreground(charmtone.Hazy)
+		Foreground(tone.Hazy)
 
 	// Restore the original Charmtone syntax-highlight and markdown colors
 	// where the generic quickStyle token choices diverge from the palette
 	// this theme has always used.
 	chroma := s.Markdown.CodeBlock.Chroma
 	if chroma != nil {
-		chroma.CommentPreproc.Color = hex(charmtone.Bengal)
-		chroma.KeywordReserved.Color = hex(charmtone.Pony)
-		chroma.KeywordNamespace.Color = hex(charmtone.Pony)
-		chroma.KeywordType.Color = hex(charmtone.Guppy)
-		chroma.Operator.Color = hex(charmtone.Salmon)
-		chroma.NameTag.Color = hex(charmtone.Mauve)
-		chroma.NameAttribute.Color = hex(charmtone.Hazy)
-		chroma.NameClass.Color = hex(charmtone.Salt)
-		chroma.LiteralString.Color = hex(charmtone.Cumin)
+		chroma.CommentPreproc.Color = hex(tone.Bengal)
+		chroma.KeywordReserved.Color = hex(tone.Pony)
+		chroma.KeywordNamespace.Color = hex(tone.Pony)
+		chroma.KeywordType.Color = hex(tone.Guppy)
+		chroma.Operator.Color = hex(tone.Salmon)
+		chroma.NameTag.Color = hex(tone.Mauve)
+		chroma.NameAttribute.Color = hex(tone.Hazy)
+		chroma.NameClass.Color = hex(tone.Salt)
+		chroma.LiteralString.Color = hex(tone.Cumin)
 	}
-	s.Markdown.Link.Color = hex(charmtone.Zinc)
-	s.Markdown.Image.Color = hex(charmtone.Cheeky)
+	s.Markdown.Link.Color = hex(tone.Zinc)
+	s.Markdown.Image.Color = hex(tone.Cheeky)
 
 	// The ◆ hypercredit symbol inside subdued text (e.g. savings
 	// suffixes) uses Mochi so it stays visible against its surroundings.
 	s.Messages.SubduedHypercreditIcon = s.Messages.SubduedHypercreditIcon.
-		Foreground(charmtone.Violet)
+		Foreground(tone.Violet)
 
 	return s
 }
@@ -418,7 +418,7 @@ func BuiltinThemeNames() []string {
 // CharmtonePantera styles for an empty name. Returns an error if the
 // name is not recognized as either a user file or a built-in.
 // LoadTheme loads a theme by name. Global user theme files take precedence
-// over built-in themes of the same name. Empty names use Charmtone.
+// over built-in themes of the same name. Empty names use tone.
 func LoadTheme(name string) (Styles, error) {
 	if name == "" {
 		return CharmtonePantera(), nil

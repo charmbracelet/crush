@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/exp/charmtone"
+	"charm.land/tone"
 )
 
 // validHexColor matches "#rgb", "#rrggbb", "#rgba", or "#rrggbbaa".
@@ -21,13 +21,13 @@ var validANSIColor = regexp.MustCompile(`^([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9
 var charmtoneByName map[string]string
 
 func init() {
-	charmtoneByName = make(map[string]string, len(charmtone.Keys()))
-	for _, k := range charmtone.Keys() {
+	charmtoneByName = make(map[string]string, len(tone.Keys()))
+	for _, k := range tone.Keys() {
 		charmtoneByName[strings.ToLower(k.String())] = k.Hex()
 	}
 	// Include aliases.
-	charmtoneByName["ash"] = charmtone.Sash.Hex()
-	charmtoneByName["charcoal"] = charmtone.Char.Hex()
+	charmtoneByName["ash"] = tone.Sash.Hex()
+	charmtoneByName["charcoal"] = tone.Char.Hex()
 }
 
 // PaletteField describes a single customizable color token in a Palette.
@@ -346,7 +346,7 @@ func ParseColor(s string) string {
 	}
 	if strings.HasPrefix(s, "#") {
 		if validHexColor.MatchString(s) {
-			if name := charmtone.NameFromHex(s); name != "" {
+			if name := tone.NameFromHex(s); name != "" {
 				return name
 			}
 			return s
@@ -357,7 +357,7 @@ func ParseColor(s string) string {
 		return s
 	}
 	if hex, ok := charmtoneByName[strings.ToLower(s)]; ok {
-		if name := charmtone.NameFromHex(hex); name != "" {
+		if name := tone.NameFromHex(hex); name != "" {
 			return name
 		}
 		return hex
@@ -405,9 +405,9 @@ func ThemePalette(name string) (Palette, error) {
 }
 
 // MergePalette applies palette overrides on top of a built-in base theme
-// and returns the fully resolved palette. Empty baseName uses Charmtone.
+// and returns the fully resolved palette. Empty baseName uses tone.
 // MergePalette applies palette overrides on top of a built-in or user theme
-// and returns the fully resolved palette. Empty baseName uses Charmtone.
+// and returns the fully resolved palette. Empty baseName uses tone.
 func MergePalette(baseName string, palette Palette) (Palette, error) {
 	base, root, err := resolveThemePalette(baseName, map[string]bool{})
 	if err != nil {
@@ -533,7 +533,7 @@ func colorToHex(c color.Color) string {
 	}
 	r, g, b, _ := c.RGBA()
 	hex := fmt.Sprintf("#%02x%02x%02x", r>>8, g>>8, b>>8)
-	if name := charmtone.NameFromHex(hex); name != "" {
+	if name := tone.NameFromHex(hex); name != "" {
 		return name
 	}
 	return hex

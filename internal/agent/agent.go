@@ -35,6 +35,7 @@ import (
 	"charm.land/fantasy/providers/openrouter"
 	"charm.land/fantasy/providers/vercel"
 	"charm.land/lipgloss/v2"
+	"charm.land/tone"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/tools"
@@ -50,7 +51,6 @@ import (
 	"github.com/charmbracelet/crush/internal/stringext"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/charmbracelet/x/exp/charmtone"
 )
 
 const (
@@ -1289,7 +1289,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		var providerErr *fantasy.ProviderError
 		var requestTimedOutErr *requestTimeoutError
 		const defaultTitle = "Provider Error"
-		linkStyle := lipgloss.NewStyle().Foreground(charmtone.Guac).Underline(true)
+		linkStyle := lipgloss.NewStyle().Foreground(tone.Guac).Underline(true)
 		if isCancelErr {
 			currentAssistant.AddFinish(message.FinishReasonCanceled, "User canceled request", "")
 		} else if errors.As(err, &requestTimedOutErr) {

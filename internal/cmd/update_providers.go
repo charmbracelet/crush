@@ -5,8 +5,8 @@ import (
 	"log/slog"
 
 	"charm.land/lipgloss/v2"
+	"charm.land/tone"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/spf13/cobra"
 )
 
@@ -61,8 +61,8 @@ crush update-providers --source=hyper https://hyper.example.com
 		// NOTE(@andreynering): This style is more-or-less copied from Fang's
 		// error message, adapted for success.
 		headerStyle := lipgloss.NewStyle().
-			Foreground(charmtone.Butter).
-			Background(charmtone.Guac).
+			Foreground(tone.Butter).
+			Background(tone.Guac).
 			Bold(true).
 			Padding(0, 1).
 			Margin(1).

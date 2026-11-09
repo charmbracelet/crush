@@ -25,7 +25,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/charmbracelet/x/exp/charmtone"
+	"charm.land/tone"
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 )
@@ -174,8 +174,8 @@ func runSessionList(cmd *cobra.Command, _ []string) error {
 	w, cleanup, usingPager := sessionWriter(ctx, len(list))
 	defer cleanup()
 
-	hashStyle := lipgloss.NewStyle().Foreground(charmtone.Malibu)
-	dateStyle := lipgloss.NewStyle().Foreground(charmtone.Damson)
+	hashStyle := lipgloss.NewStyle().Foreground(tone.Malibu)
+	dateStyle := lipgloss.NewStyle().Foreground(tone.Damson)
 
 	width := sessionOutputWidth
 	if tw, _, err := term.GetSize(os.Stdout.Fd()); err == nil && tw > 0 {
@@ -454,8 +454,8 @@ func outputSessionHuman(ctx context.Context, cfg *config.ConfigStore, sess sessi
 	}
 	contentWidth := min(width, sessionMaxContentWidth)
 
-	keyStyle := lipgloss.NewStyle().Foreground(charmtone.Damson)
-	valStyle := lipgloss.NewStyle().Foreground(charmtone.Malibu)
+	keyStyle := lipgloss.NewStyle().Foreground(tone.Damson)
+	valStyle := lipgloss.NewStyle().Foreground(tone.Malibu)
 
 	hash := session.HashID(sess.ID)[:12]
 	created := time.Unix(sess.CreatedAt, 0).Format("Mon Jan 2 15:04:05 2006 -0700")

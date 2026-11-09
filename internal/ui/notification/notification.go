@@ -4,7 +4,8 @@
 //   - NativeBackend: Uses the native OS notification system (macOS, Windows, Linux)
 //   - OSCBackend: Uses OSC escape sequences with automatic protocol detection.
 //     Prefers OSC 99 (modern standard with rich notifications) if supported,
-//     falling back to OSC 777 (urxvt extension, widely supported). Used for SSH sessions.
+//     then OSC 9 (iTerm2 legacy notifications), falling back to OSC 777
+//     (urxvt extension, widely supported). Used for SSH sessions.
 //   - BellBackend: Triggers the terminal bell character (\x07), causing an audible
 //     beep or visual flash. Works in virtually all terminals but provides no message text.
 //   - NoopBackend: A no-op backend that silently discards notifications. Used when

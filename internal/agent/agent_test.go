@@ -26,6 +26,9 @@ import (
 
 func TestMain(m *testing.M) {
 	slog.SetLogLoggerLevel(slog.LevelError)
+	// Bypass trust verification so project configs written to temp
+	// directories are loaded without a trust prompt.
+	os.Setenv("CRUSH_TRUST_ALL", "1")
 	os.Exit(runIsolated(m))
 }
 

@@ -279,6 +279,10 @@ func (w *testWorkspace) Config() *config.Config {
 	return w.cfg
 }
 
+func (w *testWorkspace) ConfigStore() *config.ConfigStore {
+	return nil
+}
+
 func (w *testWorkspace) WorkingDir() string {
 	return "/tmp/crush-test"
 }

@@ -114,3 +114,26 @@ func TestRunWaitsForMCPOnlyWhenNonInteractive(t *testing.T) {
 		}
 	})
 }
+
+func TestRefreshSkillPromptRebuildsOnlyAfterToggle(t *testing.T) {
+	t.Parallel()
+
+	coord := newGateTestCoordinator(t, true)
+	require.NoError(t, coord.readyWg.Wait())
+
+	p, err := coderPrompt(coord.skillOverrideOptions()...)
+	require.NoError(t, err)
+	coord.prompts = map[string]*prompt.Prompt{config.AgentCoder: p}
+	coord.skillKeys = map[string]string{config.AgentCoder: coord.skillToggleKey(t.Context())}
+
+	agent := coord.mainAgent.(*sessionAgent)
+	agent.SetSystemPrompt("stale")
+
+	require.NoError(t, coord.refreshSkillPrompt(t.Context(), agent, config.AgentCoder))
+	require.Equal(t, "stale", agent.systemPrompt.Get(), "unchanged toggles must keep the prompt")
+
+	require.NoError(t, coord.sessions.SetSkillDisabled(t.Context(), "crush-config", true, false))
+	require.NoError(t, coord.refreshSkillPrompt(t.Context(), agent, config.AgentCoder))
+	require.NotEqual(t, "stale", agent.systemPrompt.Get(), "a toggle must rebuild the prompt")
+	require.NotContains(t, agent.systemPrompt.Get(), "<name>crush-config</name>")
+}

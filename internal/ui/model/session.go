@@ -102,7 +102,7 @@ func (m *UI) loadSession(sessionID string) tea.Cmd {
 			messages:  messages,
 		}
 	}
-	return tea.Batch(load, m.reportCurrentSession(sessionID))
+	return tea.Batch(load, m.refreshSkillOverrides(), m.reportCurrentSession(sessionID))
 }
 
 // reportCurrentSession returns a fire-and-forget tea.Cmd that

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
@@ -55,6 +56,59 @@ func (m *Tool) ProviderOptions() fantasy.ProviderOptions {
 	return m.providerOptions
 }
 
+// dereferenceSchema inlines local $ref targets ($defs and definitions) so the
+// schema survives Info()'s properties/required-only round trip. A $ref cycle is
+// cut by the depth limit rather than resolved forever.
+func dereferenceSchema(schema map[string]any) map[string]any {
+	defs, _ := schema["$defs"].(map[string]any)
+	if defs == nil {
+		defs, _ = schema["definitions"].(map[string]any)
+	}
+	if defs == nil {
+		return schema
+	}
+
+	const maxDepth = 32
+	var resolve func(any, int) any
+	resolve = func(v any, depth int) any {
+		if depth > maxDepth {
+			return v
+		}
+		switch node := v.(type) {
+		case map[string]any:
+			if ref, ok := node["$ref"].(string); ok {
+				name := strings.TrimPrefix(strings.TrimPrefix(ref, "#/$defs/"), "#/definitions/")
+				if name != ref {
+					if target, ok := defs[name].(map[string]any); ok {
+						return resolve(target, depth+1)
+					}
+				}
+			}
+			out := make(map[string]any, len(node))
+			for k, child := range node {
+				if k == "$defs" || k == "definitions" {
+					continue
+				}
+				out[k] = resolve(child, depth+1)
+			}
+			return out
+		case []any:
+			out := make([]any, len(node))
+			for i, child := range node {
+				out[i] = resolve(child, depth+1)
+			}
+			return out
+		default:
+			return v
+		}
+	}
+
+	if resolved, ok := resolve(schema, 0).(map[string]any); ok {
+		return resolved
+	}
+	return schema
+}
+
 func (m *Tool) Name() string {
 	return fmt.Sprintf("mcp_%s_%s", m.mcpName, m.tool.Name)
 }
@@ -72,8 +126,9 @@ func (m *Tool) Info() fantasy.ToolInfo {
 	required := make([]string, 0)
 
 	if input, ok := m.tool.InputSchema.(map[string]any); ok {
+		input = dereferenceSchema(input)
 		if props, ok := input["properties"].(map[string]any); ok {
-			parameters = props
+			parameters = describeParameters(props)
 		}
 		if req, ok := input["required"].([]any); ok {
 			// Convert []any -> []string when elements are strings

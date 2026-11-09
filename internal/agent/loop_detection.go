@@ -9,8 +9,9 @@ import (
 )
 
 const (
-	loopDetectionWindowSize = 10
-	loopDetectionMaxRepeats = 5
+	loopDetectionWindowSize       = 10
+	loopDetectionMaxRepeats       = 5
+	errorLoopDetectionMaxRepeats  = 3
 )
 
 // hasRepeatedToolCalls checks whether the agent is stuck in a loop by looking
@@ -68,6 +69,29 @@ func getToolInteractionSignature(content fantasy.ResponseContent) string {
 		io.WriteString(h, "\x00")
 	}
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// hasRepeatedToolErrors checks whether the same tool name keeps returning
+// errors regardless of input variation. This catches cases where the LLM
+// retries a failing tool with slightly different arguments (e.g. an MCP
+// server returning 401 Unauthorized on every attempt).
+func hasRepeatedToolErrors(steps []fantasy.StepResult, maxErrors int) bool {
+	errorCounts := make(map[string]int)
+
+	for _, step := range steps {
+		for _, tr := range step.Content.ToolResults() {
+			if errResult, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentError](tr.Result); ok {
+				if errResult.Error != nil {
+					errorCounts[tr.ToolName]++
+					if errorCounts[tr.ToolName] >= maxErrors {
+						return true
+					}
+				}
+			}
+		}
+	}
+
+	return false
 }
 
 // toolResultOutputString converts a ToolResultOutputContent to a stable string

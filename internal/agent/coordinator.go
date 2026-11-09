@@ -198,6 +198,13 @@ type coordinator struct {
 	activeSkills []*skills.Skill // Post-filter: active skills only.
 	skillTracker *skills.Tracker
 
+	// prompts holds each main agent's prompt template, and skillKeys the
+	// skill toggle state its system prompt was last built with, so a
+	// toggle rebuilds the prompt on the next turn. Guarded by skillKeysMu.
+	prompts     map[string]*prompt.Prompt
+	skillKeys   map[string]string
+	skillKeysMu sync.Mutex
+
 	readyWg errgroup.Group
 
 	hostContext csync.Value[proto.HostContext]
@@ -296,6 +303,16 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	}
 	c.agents[config.AgentPlan] = planAgent
 
+	c.prompts = map[string]*prompt.Prompt{
+		config.AgentCoder: coderPrompt,
+		config.AgentPlan:  planSystemPrompt,
+	}
+	key := c.skillToggleKey(ctx)
+	c.skillKeys = map[string]string{
+		config.AgentCoder: key,
+		config.AgentPlan:  key,
+	}
+
 	c.mainAgent = agent
 	c.mainAgentName = config.AgentCoder
 	return c, nil
@@ -383,6 +400,9 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, report *mess
 	agent, agentName := c.activeAgent()
 	if err := c.updateAgentModels(ctx, agent, agentName); err != nil {
 		return nil, fmt.Errorf("failed to update models: %w", err)
+	}
+	if err := c.refreshSkillPrompt(ctx, agent, agentName); err != nil {
+		slog.Error("Failed to rebuild system prompt after skill toggle", "error", err)
 	}
 
 	model := agent.Model()
@@ -873,8 +893,8 @@ func mergeCallOptions(model Model, cfg config.ProviderConfig) (fantasy.ProviderO
 
 // skillOverrideOptions returns the prompt options carrying the
 // repository-scoped skill toggle overrides. They read the DB at Build
-// time, the same point where the config's disabled list is applied, so a
-// running agent picks up toggles on its next rebuild (agent build).
+// time, the same point where the config's disabled list is applied;
+// refreshSkillPrompt rebuilds on the next turn after a toggle.
 func (c *coordinator) skillOverrideOptions() []prompt.Option {
 	disabled := func(ctx context.Context) []string {
 		names, err := c.sessions.SkillsDisabled(ctx)
@@ -896,6 +916,45 @@ func (c *coordinator) skillOverrideOptions() []prompt.Option {
 		prompt.WithWorkingDir(c.cfg.WorkingDir()),
 		prompt.WithSkillOverrides(disabled, enabled),
 	}
+}
+
+// skillToggleKey fingerprints everything that decides which skills the
+// system prompt lists: the config's disabled list and the repository
+// overrides.
+func (c *coordinator) skillToggleKey(ctx context.Context) string {
+	var configDisabled []string
+	if opts := c.cfg.Config().Options; opts != nil {
+		configDisabled = opts.DisabledSkills
+	}
+	repoDisabled, _ := c.sessions.SkillsDisabled(ctx)
+	repoEnabled, _ := c.sessions.SkillsEnabled(ctx)
+	return fmt.Sprint(configDisabled, repoDisabled, repoEnabled)
+}
+
+// refreshSkillPrompt rebuilds the agent's system prompt when the skill
+// toggles changed since it was last built, so a toggle applies from the
+// next turn. Otherwise the prompt is left alone, keeping the provider's
+// prompt cache warm.
+func (c *coordinator) refreshSkillPrompt(ctx context.Context, agent SessionAgent, name string) error {
+	p, ok := c.prompts[name]
+	if !ok {
+		return nil
+	}
+	key := c.skillToggleKey(ctx)
+
+	c.skillKeysMu.Lock()
+	defer c.skillKeysMu.Unlock()
+	if c.skillKeys[name] == key {
+		return nil
+	}
+	model := agent.Model().Model
+	systemPrompt, err := p.Build(ctx, model.Provider(), model.Model(), c.cfg)
+	if err != nil {
+		return err
+	}
+	agent.SetSystemPrompt(systemPrompt)
+	c.skillKeys[name] = key
+	return nil
 }
 
 func (c *coordinator) buildAgent(ctx context.Context, ready *errgroup.Group, prompt *prompt.Prompt, agent config.Agent, isSubAgent bool) (SessionAgent, error) {

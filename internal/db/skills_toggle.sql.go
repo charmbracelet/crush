@@ -10,7 +10,7 @@ import (
 )
 
 const deleteSkillsDisabled = `-- name: DeleteSkillsDisabled :exec
-DELETE FROM skills_disabled_servers WHERE name = ?
+DELETE FROM disabled_skills WHERE name = ?
 `
 
 func (q *Queries) DeleteSkillsDisabled(ctx context.Context, name string) error {
@@ -19,7 +19,7 @@ func (q *Queries) DeleteSkillsDisabled(ctx context.Context, name string) error {
 }
 
 const deleteSkillsEnabled = `-- name: DeleteSkillsEnabled :exec
-DELETE FROM skills_enabled_servers WHERE name = ?
+DELETE FROM enabled_skills WHERE name = ?
 `
 
 func (q *Queries) DeleteSkillsEnabled(ctx context.Context, name string) error {
@@ -28,7 +28,7 @@ func (q *Queries) DeleteSkillsEnabled(ctx context.Context, name string) error {
 }
 
 const insertSkillsDisabled = `-- name: InsertSkillsDisabled :exec
-INSERT OR IGNORE INTO skills_disabled_servers (name) VALUES (?)
+INSERT OR IGNORE INTO disabled_skills (name) VALUES (?)
 `
 
 func (q *Queries) InsertSkillsDisabled(ctx context.Context, name string) error {
@@ -37,7 +37,7 @@ func (q *Queries) InsertSkillsDisabled(ctx context.Context, name string) error {
 }
 
 const insertSkillsEnabled = `-- name: InsertSkillsEnabled :exec
-INSERT OR IGNORE INTO skills_enabled_servers (name) VALUES (?)
+INSERT OR IGNORE INTO enabled_skills (name) VALUES (?)
 `
 
 func (q *Queries) InsertSkillsEnabled(ctx context.Context, name string) error {
@@ -46,7 +46,7 @@ func (q *Queries) InsertSkillsEnabled(ctx context.Context, name string) error {
 }
 
 const listSkillsDisabled = `-- name: ListSkillsDisabled :many
-SELECT name FROM skills_disabled_servers ORDER BY name
+SELECT name FROM disabled_skills ORDER BY name
 `
 
 func (q *Queries) ListSkillsDisabled(ctx context.Context) ([]string, error) {
@@ -73,7 +73,7 @@ func (q *Queries) ListSkillsDisabled(ctx context.Context) ([]string, error) {
 }
 
 const listSkillsEnabled = `-- name: ListSkillsEnabled :many
-SELECT name FROM skills_enabled_servers ORDER BY name
+SELECT name FROM enabled_skills ORDER BY name
 `
 
 func (q *Queries) ListSkillsEnabled(ctx context.Context) ([]string, error) {

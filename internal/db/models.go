@@ -8,6 +8,14 @@ import (
 	"database/sql"
 )
 
+type DisabledSkill struct {
+	Name string `json:"name"`
+}
+
+type EnabledSkill struct {
+	Name string `json:"name"`
+}
+
 type File struct {
 	ID        string `json:"id"`
 	SessionID string `json:"session_id"`
@@ -63,12 +71,4 @@ type Session struct {
 	SummaryMessageID sql.NullString `json:"summary_message_id"`
 	Todos            sql.NullString `json:"todos"`
 	Channel          sql.NullString `json:"channel"`
-}
-
-type SkillsDisabledServer struct {
-	Name string `json:"name"`
-}
-
-type SkillsEnabledServer struct {
-	Name string `json:"name"`
 }

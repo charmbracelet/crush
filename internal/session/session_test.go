@@ -160,22 +160,29 @@ func TestSkillDisabledRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, disabled, "a new repository must default to the config")
 
-	require.NoError(t, sessions.SetSkillDisabled(t.Context(), "charmtone", true))
-	require.NoError(t, sessions.SetSkillDisabled(t.Context(), "pair", true))
-	require.NoError(t, sessions.SetSkillDisabled(t.Context(), "charmtone", true), "disabling twice must be idempotent")
+	require.NoError(t, sessions.SetSkillDisabled(t.Context(), "charmtone", true, false))
+	require.NoError(t, sessions.SetSkillDisabled(t.Context(), "pair", true, false))
+	require.NoError(t, sessions.SetSkillDisabled(t.Context(), "charmtone", true, false), "disabling twice must be idempotent")
 
 	disabled, err = sessions.SkillsDisabled(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, []string{"charmtone", "pair"}, disabled)
 
-	// Re-enabling records an enabled override so a config-disabled skill
-	// stays enabled across restarts; disabling removes it again.
-	require.NoError(t, sessions.SetSkillDisabled(t.Context(), "charmtone", false))
+	// Re-enabling a skill the config does not disable records no enabled
+	// override, so a later config disable still applies here.
+	require.NoError(t, sessions.SetSkillDisabled(t.Context(), "pair", false, false))
 	enabled, err := sessions.SkillsEnabled(t.Context())
+	require.NoError(t, err)
+	require.Empty(t, enabled)
+
+	// Re-enabling a config-disabled skill records an enabled override so
+	// it stays enabled across restarts; disabling removes it again.
+	require.NoError(t, sessions.SetSkillDisabled(t.Context(), "charmtone", false, true))
+	enabled, err = sessions.SkillsEnabled(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, []string{"charmtone"}, enabled)
 
-	require.NoError(t, sessions.SetSkillDisabled(t.Context(), "charmtone", true))
+	require.NoError(t, sessions.SetSkillDisabled(t.Context(), "charmtone", true, true))
 	enabled, err = sessions.SkillsEnabled(t.Context())
 	require.NoError(t, err)
 	require.Empty(t, enabled)

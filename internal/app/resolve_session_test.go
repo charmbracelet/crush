@@ -92,7 +92,7 @@ func (m *mockSessionService) SkillsDisabled(context.Context) ([]string, error) {
 	return nil, nil
 }
 
-func (m *mockSessionService) SetSkillDisabled(context.Context, string, bool) error {
+func (m *mockSessionService) SetSkillDisabled(context.Context, string, bool, bool) error {
 	return nil
 }
 

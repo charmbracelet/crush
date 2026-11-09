@@ -176,7 +176,7 @@ func (b *Backend) SetSkillDisabled(ctx context.Context, workspaceID, name string
 		return err
 	}
 
-	return ws.Sessions.SetSkillDisabled(ctx, name, disabled)
+	return ws.Sessions.SetSkillDisabled(ctx, name, disabled, ws.Cfg.SkillConfigDisabled(name))
 }
 
 // SkillsEnabled returns the skills with a repository-scoped enabled

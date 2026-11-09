@@ -584,7 +584,7 @@ func (w *AppWorkspace) SkillsEnabled(ctx context.Context) ([]string, error) {
 
 // SkillSetDisabled adds or removes a repository-scoped skill override.
 func (w *AppWorkspace) SkillSetDisabled(ctx context.Context, name string, disabled bool) error {
-	return w.app.Sessions.SetSkillDisabled(ctx, name, disabled)
+	return w.app.Sessions.SetSkillDisabled(ctx, name, disabled, w.store.SkillConfigDisabled(name))
 }
 
 // SkillSetConfigDisabled toggles a skill's disabled flag in the global

@@ -279,11 +279,11 @@ func (m *UI) applySkillToggle(msg dialog.ActionToggleSkill) tea.Cmd {
 			if err := m.com.Workspace.SkillSetConfigDisabled(context.TODO(), name, disable); err != nil {
 				return util.NewErrorMsg(err)
 			}
-			return util.NewInfoMsg(fmt.Sprintf("Skill %q %s globally", name, status))
+			return util.NewInfoMsg(fmt.Sprintf("Skill %q %s globally from the next message", name, status))
 		}
 		if err := m.com.Workspace.SkillSetDisabled(context.TODO(), name, disable); err != nil {
 			return util.NewErrorMsg(err)
 		}
-		return util.NewInfoMsg(fmt.Sprintf("Skill %q %s for this repository", name, status))
+		return util.NewInfoMsg(fmt.Sprintf("Skill %q %s for this repository from the next message", name, status))
 	}
 }

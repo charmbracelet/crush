@@ -1,17 +1,17 @@
 -- name: ListSkillsDisabled :many
-SELECT name FROM skills_disabled_servers ORDER BY name;
+SELECT name FROM disabled_skills ORDER BY name;
 
 -- name: InsertSkillsDisabled :exec
-INSERT OR IGNORE INTO skills_disabled_servers (name) VALUES (?);
+INSERT OR IGNORE INTO disabled_skills (name) VALUES (?);
 
 -- name: DeleteSkillsDisabled :exec
-DELETE FROM skills_disabled_servers WHERE name = ?;
+DELETE FROM disabled_skills WHERE name = ?;
 
 -- name: ListSkillsEnabled :many
-SELECT name FROM skills_enabled_servers ORDER BY name;
+SELECT name FROM enabled_skills ORDER BY name;
 
 -- name: InsertSkillsEnabled :exec
-INSERT OR IGNORE INTO skills_enabled_servers (name) VALUES (?);
+INSERT OR IGNORE INTO enabled_skills (name) VALUES (?);
 
 -- name: DeleteSkillsEnabled :exec
-DELETE FROM skills_enabled_servers WHERE name = ?;
+DELETE FROM enabled_skills WHERE name = ?;

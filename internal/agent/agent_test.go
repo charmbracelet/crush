@@ -659,6 +659,52 @@ func BenchmarkBuildSummaryPrompt(b *testing.B) {
 	}
 }
 
+func TestPreparePrompt_DropsReasoningOnlyAssistant(t *testing.T) {
+	// A turn cancelled while the model is still thinking is persisted with
+	// only a reasoning part: no content and no tool calls. It cannot be sent
+	// to any provider -- the OpenAI-compatible converter renders it as an
+	// assistant message with a null content, which gateways reject with
+	// "Invalid assistant message: content or tool_calls must be set", and
+	// because the row is in the persisted history every later request in the
+	// session fails the same way.
+	env := testEnv(t)
+	sa := testSessionAgent(env, nil, nil, "test prompt")
+	agent := sa.(*sessionAgent)
+
+	ctx := t.Context()
+	sess, err := env.sessions.Create(ctx, "test")
+	require.NoError(t, err)
+
+	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role: message.User,
+		Parts: []message.ContentPart{
+			message.TextContent{Text: "run the thing"},
+		},
+	})
+	require.NoError(t, err)
+
+	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.ReasoningContent{Thinking: "let me think about this"},
+			message.Finish{Reason: message.FinishReasonCanceled, Message: "User canceled request"},
+		},
+	})
+	require.NoError(t, err)
+
+	msgs, err := env.messages.List(ctx, sess.ID)
+	require.NoError(t, err)
+
+	history, _ := agent.preparePrompt(msgs, false)
+
+	for _, msg := range history {
+		if msg.Role != fantasy.MessageRoleAssistant {
+			continue
+		}
+		t.Fatalf("reasoning-only assistant turn must not reach the provider, got %#v", msg.Content)
+	}
+}
+
 func TestPreparePrompt_FiltersImageAttachments(t *testing.T) {
 	env := testEnv(t)
 	sa := testSessionAgent(env, nil, nil, "test prompt")

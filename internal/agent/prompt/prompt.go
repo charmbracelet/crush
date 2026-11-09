@@ -60,6 +60,14 @@ type ContextFile struct {
 	Content string
 }
 
+// ToolEnabled reports whether a built-in tool is available to the agent.
+func (d PromptDat) ToolEnabled(name string) bool {
+	if d.Config.Options == nil {
+		return true
+	}
+	return !slices.Contains(d.Config.Options.DisabledTools, name)
+}
+
 type Option func(*Prompt)
 
 func WithTimeFunc(fn func() time.Time) Option {

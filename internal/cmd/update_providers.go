@@ -5,8 +5,8 @@ import (
 	"log/slog"
 
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/crush/internal/config"
 	"charm.land/tone"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/spf13/cobra"
 )
 

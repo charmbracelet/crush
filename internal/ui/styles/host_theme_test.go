@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"charm.land/glamour/v2/ansi"
-	"github.com/alecthomas/chroma/v2"
 	"charm.land/tone"
+	"github.com/alecthomas/chroma/v2"
 	"github.com/stretchr/testify/require"
 )
 

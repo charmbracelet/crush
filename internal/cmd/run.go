@@ -101,7 +101,9 @@ crush run --continue "Follow up on your last response"
 			event.SetContinueLastSession(true)
 		}
 
-		if useClientServer() {
+		// Only attach to a server that is already running; a one-shot
+		// run should not leave a detached server behind.
+		if useClientServer() && serverRunning(ctx) {
 			c, ws, cleanup, err := connectToServer(cmd)
 			if err != nil {
 				return err

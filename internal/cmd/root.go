@@ -760,6 +760,22 @@ func waitForServerReady(ctx context.Context, hostURL *url.URL) error {
 	}
 }
 
+// serverRunning reports whether a server is already answering on the
+// configured host, without spawning one.
+func serverRunning(ctx context.Context) bool {
+	hostURL, err := server.ParseHostURL(clientHost)
+	if err != nil {
+		return false
+	}
+	httpClient, reqURL, err := readinessHTTPClient(hostURL)
+	if err != nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
+	return probeHealth(ctx, httpClient, reqURL, hostURL) == nil
+}
+
 // readinessHTTPClient builds an *http.Client whose transport dials the
 // server using the same scheme-aware logic as *client.Client (unix
 // socket, named pipe, or tcp).

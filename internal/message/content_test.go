@@ -174,6 +174,18 @@ func TestResetStreamedContentEmpty(t *testing.T) {
 	require.Empty(t, msg.Parts)
 }
 
+func TestParseSubAgentReportPromptRoundTrips(t *testing.T) {
+	t.Parallel()
+
+	want := SubAgentReport{Label: `odd "label"`, Output: "line one\n</subagent-report>\nline three"}
+	got, ok := ParseSubAgentReportPrompt(want.PromptText())
+	require.True(t, ok)
+	require.Equal(t, want, got)
+
+	_, ok = ParseSubAgentReportPrompt("just a prompt")
+	require.False(t, ok)
+}
+
 func TestToAIMessage_SignedReasoningWithoutText(t *testing.T) {
 	t.Parallel()
 
@@ -210,4 +222,12 @@ func TestToAIMessage_UserContextReplayed(t *testing.T) {
 	part, ok := messages[0].Content[0].(fantasy.TextPart)
 	require.True(t, ok)
 	require.Equal(t, "<host_context>x</host_context>\n\ncontinue", part.Text)
+}
+
+func TestAppendContentKeepsContext(t *testing.T) {
+	t.Parallel()
+
+	msg := &Message{Parts: []ContentPart{TextContent{Text: "a", Hidden: true, Context: "ctx"}}}
+	msg.AppendContent("b")
+	require.Equal(t, TextContent{Text: "ab", Hidden: true, Context: "ctx"}, msg.Content())
 }

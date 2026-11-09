@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -63,6 +64,11 @@ const (
 
 var userAgent = fmt.Sprintf("Charm-Crush/%s (https://charm.land/crush)", version.Version)
 
+// providerStoppedTurnMessage is the banner title recorded when a provider
+// ends the response on its own terms (fantasy's error/other finish
+// reasons) instead of completing it. Details are filled in per turn.
+const providerStoppedTurnMessage = "Provider stopped the response"
+
 //go:embed templates/title.md
 var titlePrompt []byte
 
@@ -88,16 +94,23 @@ type SessionAgentCall struct {
 	RunID             string
 	Channel           string
 	HiddenUserMessage bool
-	Prompt            string
-	ProviderOptions   fantasy.ProviderOptions
-	Attachments       []message.Attachment
-	MaxOutputTokens   int64
-	Temperature       *float64
-	TopP              *float64
-	TopK              *int64
-	FrequencyPenalty  *float64
-	PresencePenalty   *float64
-	NonInteractive    bool
+	// QueueOnly delivers the call only into an active turn; on an idle
+	// session Run returns ErrSessionIdle instead of starting one.
+	QueueOnly bool
+	Prompt    string
+	// Report is a subagent report this call delivers. It is written to
+	// the transcript only when delivered, so it lands where the model
+	// reads it. Prompt is still what the model reads for it.
+	Report           *message.SubAgentReport
+	ProviderOptions  fantasy.ProviderOptions
+	Attachments      []message.Attachment
+	MaxOutputTokens  int64
+	Temperature      *float64
+	TopP             *float64
+	TopK             *int64
+	FrequencyPenalty *float64
+	PresencePenalty  *float64
+	NonInteractive   bool
 
 	// HostContext is what the host application had in view when the
 	// prompt was sent. The model sees it with this prompt only; it is
@@ -194,6 +207,9 @@ func filterToolsForChannel(agentTools []fantasy.AgentTool, channel string, state
 	return filtered
 }
 
+// ErrSessionIdle is returned for a QueueOnly call when no turn is active.
+var ErrSessionIdle = errors.New("session is idle")
+
 type SessionAgent interface {
 	Run(context.Context, SessionAgentCall) (*fantasy.AgentResult, error)
 	BeginAccepted(sessionID string) *AcceptedRun
@@ -244,7 +260,7 @@ type sessionAgent struct {
 	sessions   session.Service
 	messages   message.Service
 	// cfg backs channel reply routing (config lookup + MCP tool
-	// invocation). Nil in tests and sub-agents that never see channel
+	// invocation). Nil in tests and subagents that never see channel
 	// turns; sendChannelReply treats nil as "routing disabled".
 	cfg                  *config.ConfigStore
 	disableAutoSummarize bool
@@ -462,8 +478,23 @@ func (a *sessionAgent) enqueueCall(call SessionAgentCall) {
 	}
 	queued.OnComplete = nil
 	queued.Accepted = nil
-	existing = append(existing, queued)
-	a.messageQueue.Set(call.SessionID, existing)
+	// Once queued the call is accepted: if no step folds it in, it runs as
+	// its own turn rather than being refused as idle.
+	queued.QueueOnly = false
+	a.messageQueue.Set(call.SessionID, insertQueued(existing, queued))
+}
+
+// insertQueued appends call, except that the user's own prompts go ahead of
+// queued subagent reports: delivered together they read as one message, and
+// a short line trailing a long report gets missed.
+func insertQueued(queue []SessionAgentCall, call SessionAgentCall) []SessionAgentCall {
+	at := len(queue)
+	if call.Report == nil {
+		for at > 0 && queue[at-1].Report != nil {
+			at--
+		}
+	}
+	return slices.Insert(queue, at, call)
 }
 
 // drainQueueForStep partitions the session's queued calls for the current
@@ -473,10 +504,8 @@ func (a *sessionAgent) enqueueCall(call SessionAgentCall) {
 // prevents a cancel recorded between the drain and the check from being
 // observed inconsistently.
 //
-// Calls covered by a pending cancel are dropped; the dropped ones that
-// carry a RunID are returned in canceledWithRunID so the caller can
-// publish their terminal cancelled RunComplete (a caller waiting on that
-// RunID, e.g. `crush run`, would otherwise hang). Uncanceled calls without
+// Calls covered by a pending cancel are dropped and returned in canceled
+// for the caller to settle (see settleDroppedCalls). Uncanceled calls without
 // a RunID are returned in fold to be folded into the active turn,
 // preserving the existing follow-up behavior. Uncanceled calls that carry
 // a RunID are left in the queue so each runs as its own turn via the
@@ -484,7 +513,7 @@ func (a *sessionAgent) enqueueCall(call SessionAgentCall) {
 // RunID-bearing prompt an explicit lifecycle instead of being silently
 // absorbed into another turn. fold is processed by the caller without the
 // lock held.
-func (a *sessionAgent) drainQueueForStep(sessionID string) (fold, canceledWithRunID []SessionAgentCall) {
+func (a *sessionAgent) drainQueueForStep(sessionID string) (fold, canceled []SessionAgentCall) {
 	dispatchLock := a.sessionMu(sessionID)
 	dispatchLock.Lock()
 	defer dispatchLock.Unlock()
@@ -492,9 +521,7 @@ func (a *sessionAgent) drainQueueForStep(sessionID string) (fold, canceledWithRu
 	var keep []SessionAgentCall
 	for _, queued := range queuedCalls {
 		if a.canceledBySeq(sessionID, queued.acceptSeq) {
-			if queued.RunID != "" {
-				canceledWithRunID = append(canceledWithRunID, queued)
-			}
+			canceled = append(canceled, queued)
 			continue
 		}
 		if queued.RunID != "" {
@@ -508,11 +535,13 @@ func (a *sessionAgent) drainQueueForStep(sessionID string) (fold, canceledWithRu
 	} else {
 		a.messageQueue.Set(sessionID, keep)
 	}
-	return fold, canceledWithRunID
+	return fold, canceled
 }
 
-// publishCanceledQueueDrops emits a terminal cancelled RunComplete for
-// every dropped queued call that carries a RunID. A queued prompt removed
+// settleDroppedCalls settles queued calls removed without running. A
+// subagent report is written to the transcript, where the model reads it
+// next turn, so cancelling a turn never loses one. Each call that carries a
+// RunID gets a terminal cancelled RunComplete. A queued prompt removed
 // from the queue without ever running — covered by a pending cancel, or
 // cleared by Cancel/ClearQueue — would otherwise leave a caller blocked on
 // that RunID: `crush run` ignores live message events and exits only on a
@@ -520,20 +549,18 @@ func (a *sessionAgent) drainQueueForStep(sessionID string) (fold, canceledWithRu
 // and are dropped silently as before. A detached, bounded context keeps the
 // must-deliver publish alive even when the run context that triggered the
 // drop is already canceled.
-func (a *sessionAgent) publishCanceledQueueDrops(drops []SessionAgentCall) {
-	var hasRunID bool
-	for _, d := range drops {
-		if d.RunID != "" {
-			hasRunID = true
-			break
-		}
-	}
-	if !hasRunID {
+func (a *sessionAgent) settleDroppedCalls(drops []SessionAgentCall) {
+	if len(drops) == 0 {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	for _, d := range drops {
+		if d.Report != nil {
+			if _, err := a.createUserMessage(ctx, d, ""); err != nil {
+				slog.Error("Failed to record a dropped subagent report", "session_id", d.SessionID, "error", err)
+			}
+		}
 		if d.RunID == "" {
 			continue
 		}
@@ -555,7 +582,7 @@ func (a *sessionAgent) clearQueueAndNotify(sessionID string) {
 	if !ok {
 		return
 	}
-	a.publishCanceledQueueDrops(queued)
+	a.settleDroppedCalls(queued)
 }
 
 // clearPendingCancel removes any pending-cancel mark for sessionID. It
@@ -603,10 +630,11 @@ func (a *sessionAgent) persistCanceledTurn(ctx context.Context, call SessionAgen
 	}
 	largeModel := a.models().Large
 	assistant, err := a.messages.Create(writeCtx, call.SessionID, message.CreateMessageParams{
-		Role:     message.Assistant,
-		Parts:    []message.ContentPart{},
-		Model:    largeModel.ModelCfg.Model,
-		Provider: largeModel.ModelCfg.Provider,
+		Role:      message.Assistant,
+		Parts:     []message.ContentPart{},
+		Model:     largeModel.ModelCfg.Model,
+		ModelName: a.modelDisplayName(largeModel.ModelCfg),
+		Provider:  largeModel.ModelCfg.Provider,
 	})
 	if err != nil {
 		return err
@@ -649,6 +677,63 @@ func ValidateCall(call SessionAgentCall) error {
 		return ErrSessionMissing
 	}
 	return nil
+}
+
+// turnFinish maps the upstream finish reason of a step onto what the
+// assistant message records: the reason itself plus the banner copy the
+// agent owns for the stops it has to explain (empty copy means the TUI
+// supplies its own). Abnormal stops are logged because they otherwise
+// look exactly like a turn that completed normally — the response just
+// stops short.
+func turnFinish(largeModel Model, sessionID string, reason fantasy.FinishReason) (message.FinishReason, string, string) {
+	switch reason {
+	case fantasy.FinishReasonStop:
+		return message.FinishReasonEndTurn, "", ""
+	case fantasy.FinishReasonToolCalls:
+		return message.FinishReasonToolUse, "", ""
+	case fantasy.FinishReasonLength:
+		// The turn looks like a normal, completed answer that simply
+		// stops mid-sentence, so leave a trace in the log even though
+		// the TUI owns the display copy.
+		slog.Warn(
+			"Model response truncated at the output token limit",
+			"session_id", sessionID,
+			"provider", largeModel.ModelCfg.Provider,
+			"model", largeModel.ModelCfg.Model,
+			"finish_reason", string(reason),
+		)
+		return message.FinishReasonMaxTokens, "", ""
+	case fantasy.FinishReasonContentFilter:
+		// Provider safety classifier stopped the model
+		// (Anthropic stop_reason=refusal, OpenAI content_filter).
+		// The TUI owns the display copy; we only persist the
+		// reason so the UI can show a REFUSED banner.
+		slog.Warn(
+			"Provider content filter stopped the model",
+			"session_id", sessionID,
+			"finish_reason", string(reason),
+		)
+		return message.FinishReasonContentFilter, "", ""
+	case fantasy.FinishReasonError, fantasy.FinishReasonOther:
+		// The provider gave up on the response from its own side
+		// (e.g. insufficient_system_resource) but the stream still
+		// completed, so no error reaches the run's error path. Record
+		// it as an error finish, with copy generic enough for any
+		// provider reason, or the turn renders as a normal completed
+		// answer that stops short.
+		slog.Warn(
+			"Provider stopped the model",
+			"session_id", sessionID,
+			"provider", largeModel.ModelCfg.Provider,
+			"model", largeModel.ModelCfg.Model,
+			"finish_reason", string(reason),
+		)
+		return message.FinishReasonError, providerStoppedTurnMessage, fmt.Sprintf(
+			"The provider ended this response before it was complete (finish_reason=%s). Try again, or use a different model.",
+			string(reason),
+		)
+	}
+	return message.FinishReasonUnknown, "", ""
 }
 
 func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *fantasy.AgentResult, retErr error) {
@@ -727,6 +812,14 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		}
 		sessMu.Unlock()
 		return nil, nil
+	}
+
+	if call.QueueOnly {
+		if call.Accepted != nil {
+			call.Accepted.Close()
+		}
+		sessMu.Unlock()
+		return nil, ErrSessionIdle
 	}
 
 	// Idle: become the active run. Register the cancel func before dropping
@@ -844,7 +937,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	if err != nil {
 		return nil, fmt.Errorf("failed to get session messages: %w", err)
 	}
-
 	// Generate title from the first real (non-shell) user prompt in the
 	// background; Run must not wait on it. CancelAll drains it instead.
 	if !hasUserTextMessage(msgs) {
@@ -1023,8 +1115,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			// into this turn; uncanceled prompts with a RunID are left
 			// queued so each runs as its own turn (with its own
 			// RunComplete) via the recursive run path below.
-			fold, canceledRunIDs := a.drainQueueForStep(call.SessionID)
-			a.publishCanceledQueueDrops(canceledRunIDs)
+			fold, canceled := a.drainQueueForStep(call.SessionID)
+			a.settleDroppedCalls(canceled)
 			for _, queued := range fold {
 				userMessage, createErr := a.createUserMessage(callContext, queued, "")
 				if createErr != nil {
@@ -1062,10 +1154,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 			var assistantMsg message.Message
 			assistantMsg, err = a.messages.Create(callContext, call.SessionID, message.CreateMessageParams{
-				Role:     message.Assistant,
-				Parts:    []message.ContentPart{},
-				Model:    turnModel.ModelCfg.Model,
-				Provider: turnModel.ModelCfg.Provider,
+				Role:      message.Assistant,
+				Parts:     []message.ContentPart{},
+				Model:     turnModel.ModelCfg.Model,
+				ModelName: a.modelDisplayName(turnModel.ModelCfg),
+				Provider:  turnModel.ModelCfg.Provider,
 			})
 			if err != nil {
 				return callContext, prepared, err
@@ -1178,6 +1271,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			if _, ok := sanitizedToolCalls.Get(result.ToolCallID); ok {
 				toolResult.Content = "Tool call failed: arguments were not valid JSON. Please check your tool call format and try again."
 				toolResult.IsError = true
+			} else if toolResult.IsError && genCtx.Err() != nil {
+				// The turn was cancelled out from under the tool.
+				toolResult.Content = interruptedToolCallResult
 			}
 			if !toolResult.IsError && toolResult.Name != "" {
 				completedToolCalls.Set(toolResult.Name, struct{}{})
@@ -1199,26 +1295,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			for _, w := range stepResult.Warnings {
 				slog.Warn("Provider warning", "type", w.Type, "message", w.Message)
 			}
-			finishReason := message.FinishReasonUnknown
-			switch stepResult.FinishReason {
-			case fantasy.FinishReasonLength:
-				finishReason = message.FinishReasonMaxTokens
-			case fantasy.FinishReasonStop:
-				finishReason = message.FinishReasonEndTurn
-			case fantasy.FinishReasonToolCalls:
-				finishReason = message.FinishReasonToolUse
-			case fantasy.FinishReasonContentFilter:
-				// Provider safety classifier stopped the model
-				// (Anthropic stop_reason=refusal, OpenAI content_filter).
-				// The TUI owns the display copy; we only persist the
-				// reason so the UI can show a REFUSED banner.
-				finishReason = message.FinishReasonContentFilter
-				slog.Warn(
-					"Provider content filter stopped the model",
-					"session_id", call.SessionID,
-					"finish_reason", string(stepResult.FinishReason),
-				)
-			}
+			finishReason, finishMessage, finishDetails := turnFinish(largeModel, call.SessionID, stepResult.FinishReason)
 			// If a tool result halted the turn (e.g. a hook halt or a
 			// permission denial), the step ends on FinishReasonToolCalls but
 			// the model will not be called again. Treat it as the end of the
@@ -1231,7 +1308,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 					}
 				}
 			}
-			currentAssistant.AddFinish(finishReason, "", "")
+			currentAssistant.AddFinish(finishReason, finishMessage, finishDetails)
 			currentAssistant.PrismModelID, currentAssistant.PrismModelName = extractPrismModel(stepResult.ProviderMetadata)
 			currentAssistant.PrismHypercreditSavings, currentAssistant.PrismDollarSavings = extractPrismSavings(stepResult.ProviderMetadata)
 			sessionLock.Lock()
@@ -1242,7 +1319,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				return getSessionErr
 			}
 			usage, estimated := fallbackStepUsage(stepMessages, stepResult)
-			a.updateSessionUsage(turnModel, &updatedSession, usage, a.openrouterCost(stepResult.ProviderMetadata), estimated)
+			pricingModel := a.modelForStepCost(turnModel, stepResult.ProviderMetadata)
+			a.updateSessionUsage(pricingModel, &updatedSession, usage, a.openrouterCost(stepResult.ProviderMetadata), estimated)
 			updatedSession.Cost += pendingRouterCost
 			pendingRouterCost = 0
 			_, sessionErr := a.sessions.Save(ctx, updatedSession)
@@ -1394,6 +1472,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			// Resume on the same routed model instead of re-classifying
 			// the synthetic continuation prompt.
 			call.routed = routed
+			// The rewritten prompt is a new message, not the report.
+			call.Report = nil
 			a.messageQueue.Set(call.SessionID, append(existing, call))
 			continued = true
 		}
@@ -1402,9 +1482,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 	// Route the finished turn's response back to the channel it came
 	// from. Runs before the busy state is released so a follow-up push
-	// queued behind this turn cannot overtake its reply.
+	// queued behind this turn cannot overtake its reply. The reply text
+	// carries a closing note when the response stopped short, because a
+	// channel recipient sees only the text, never the TUI banner.
 	if finished {
-		a.sendChannelReply(ctx, call, currentAssistant.Content().String(), completedToolCalls.Copy())
+		a.sendChannelReply(ctx, call, channelReplyText(currentAssistant), completedToolCalls.Copy())
 	}
 
 	// Release active request before publishing the notification.
@@ -1449,23 +1531,17 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		// queued prompts it covers (accept sequence at or below the
 		// mark, or untracked); keep any queued after the cancel (higher
 		// sequence) so they still run.
-		var kept []SessionAgentCall
-		var canceledRunIDDrops []SessionAgentCall
+		var kept, dropped []SessionAgentCall
 		for _, q := range queuedMessages {
 			if q.acceptSeq == 0 || q.acceptSeq <= mark {
-				if q.RunID != "" {
-					canceledRunIDDrops = append(canceledRunIDDrops, q)
-				}
+				dropped = append(dropped, q)
 				continue
 			}
 			kept = append(kept, q)
 		}
 		queuedMessages = kept
 		a.messageQueue.Set(call.SessionID, kept)
-		// A dropped prompt carrying a RunID must still publish its
-		// terminal cancelled RunComplete so a caller waiting on that
-		// RunID does not hang.
-		a.publishCanceledQueueDrops(canceledRunIDDrops)
+		a.settleDroppedCalls(dropped)
 	}
 	if len(queuedMessages) == 0 {
 		// No queued work. Clear the cancel mark only when no accepted
@@ -1583,6 +1659,7 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID, trigger string,
 	summaryMessage, err := a.messages.Create(ctx, sessionID, message.CreateMessageParams{
 		Role:             message.Assistant,
 		Model:            largeModel.ModelCfg.Model,
+		ModelName:        a.modelDisplayName(largeModel.ModelCfg),
 		Provider:         largeModel.ModelCfg.Provider,
 		IsSummaryMessage: true,
 	})
@@ -1643,27 +1720,38 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID, trigger string,
 		return err
 	}
 
-	var openrouterCost *float64
+	var overrideCost *float64
 	for _, step := range resp.Steps {
 		summaryMessage.PrismModelID, summaryMessage.PrismModelName = extractPrismModel(step.ProviderMetadata)
 		summaryMessage.PrismHypercreditSavings, summaryMessage.PrismDollarSavings = extractPrismSavings(step.ProviderMetadata)
 		stepCost := a.openrouterCost(step.ProviderMetadata)
 		if stepCost != nil {
 			newCost := *stepCost
-			if openrouterCost != nil {
-				newCost += *openrouterCost
+			if overrideCost != nil {
+				newCost += *overrideCost
 			}
-			openrouterCost = &newCost
+			overrideCost = &newCost
 		}
 	}
+	if hyperCost := a.hyperStepsCost(largeModel, resp.Steps); hyperCost != nil {
+		overrideCost = hyperCost
+	}
 
-	summaryMessage.AddFinish(message.FinishReasonEndTurn, "", "")
+	// A compaction summary that stopped short is the record the session
+	// goes on reading from, so record and log why it is incomplete
+	// rather than filing it under a clean end_turn. Unknown finishes
+	// (providers that never report one) keep the historical end_turn.
+	finishReason, finishMessage, finishDetails := turnFinish(largeModel, sessionID, resp.Response.FinishReason)
+	if finishReason == message.FinishReasonUnknown {
+		finishReason = message.FinishReasonEndTurn
+	}
+	summaryMessage.AddFinish(finishReason, finishMessage, finishDetails)
 	err = a.messages.Update(genCtx, summaryMessage)
 	if err != nil {
 		return err
 	}
 
-	a.updateSessionUsage(largeModel, &currentSession, resp.TotalUsage, openrouterCost, false)
+	a.updateSessionUsage(largeModel, &currentSession, resp.TotalUsage, overrideCost, false)
 
 	// Just in case, get just the last usage info.
 	usage := resp.Response.Usage
@@ -1724,6 +1812,12 @@ func sessionHeaders(sessionID string) map[string]string {
 }
 
 func (a *sessionAgent) createUserMessage(ctx context.Context, call SessionAgentCall, modelContext string) (message.Message, error) {
+	if call.Report != nil {
+		return a.messages.Create(ctx, call.SessionID, message.CreateMessageParams{
+			Role:  message.User,
+			Parts: []message.ContentPart{*call.Report},
+		})
+	}
 	parts := []message.ContentPart{message.TextContent{Text: call.Prompt, Hidden: call.HiddenUserMessage, Context: modelContext}}
 	var attachmentParts []message.ContentPart
 	for _, attachment := range call.Attachments {
@@ -1850,7 +1944,7 @@ If not, please feel free to ignore. Again do not mention this message to the use
 
 // filterDisabledMCPTools removes tools from MCP servers disabled via the
 // "Toggle MCPs" dialog. The override set is repository-scoped and shared
-// by every session in the repository, including sub-agent sessions.
+// by every session in the repository, including subagent sessions.
 // Connections are process-global and left untouched; only the tool list
 // changes.
 func (a *sessionAgent) filterDisabledMCPTools(ctx context.Context, toolList []fantasy.AgentTool) []fantasy.AgentTool {
@@ -2048,27 +2142,26 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	}
 
 	// Calculate usage and cost.
-	var openrouterCost *float64
+	var overrideCost *float64
 	for _, step := range resp.Steps {
 		stepCost := a.openrouterCost(step.ProviderMetadata)
 		if stepCost != nil {
 			newCost := *stepCost
-			if openrouterCost != nil {
-				newCost += *openrouterCost
+			if overrideCost != nil {
+				newCost += *overrideCost
 			}
-			openrouterCost = &newCost
+			overrideCost = &newCost
 		}
 	}
+	if hyperCost := a.hyperStepsCost(model, resp.Steps); hyperCost != nil {
+		overrideCost = hyperCost
+	}
 
-	modelConfig := model.CatwalkCfg
-	cost := modelConfig.Pricing.CacheCreate/1e6*float64(resp.TotalUsage.CacheCreationTokens) +
-		modelConfig.Pricing.CacheHit/1e6*float64(resp.TotalUsage.CacheReadTokens) +
-		modelConfig.Pricing.Input/1e6*float64(resp.TotalUsage.InputTokens) +
-		modelConfig.Pricing.Output/1e6*float64(resp.TotalUsage.OutputTokens)
+	cost := usageCost(model.CatwalkCfg.Pricing, resp.TotalUsage)
 
-	// Use override cost if available (e.g., from OpenRouter).
-	if openrouterCost != nil {
-		cost = *openrouterCost
+	// Use override cost if available (e.g., from OpenRouter or Hyper Prism).
+	if overrideCost != nil {
+		cost = *overrideCost
 	}
 
 	// Skip cost accumulation
@@ -2119,6 +2212,54 @@ func extractPrismModel(metadata fantasy.ProviderMetadata) (modelID, modelName st
 	return modelID, modelName
 }
 
+// modelDisplayName resolves the display name of a model from the
+// current config, falling back to the model ID when no entry exists or
+// the entry has no name. The result is persisted on assistant messages
+// so the UI keeps showing a meaningful name after the model is renamed
+// or removed from the config.
+func (a *sessionAgent) modelDisplayName(model config.SelectedModel) string {
+	if a.cfg != nil {
+		if cfg := a.cfg.Config(); cfg != nil {
+			if m := cfg.GetModel(model.Provider, model.Model); m != nil && m.Name != "" {
+				return m.Name
+			}
+		}
+	}
+	return model.Model
+}
+
+func (a *sessionAgent) modelForStepCost(model Model, metadata fantasy.ProviderMetadata) Model {
+	if model.ModelCfg.Provider != hyper.Name || a.cfg == nil {
+		return model
+	}
+	routedModelID, _ := extractPrismModel(metadata)
+	if routedModelID == "" {
+		return model
+	}
+	cfg := a.cfg.Config()
+	if cfg == nil {
+		return model
+	}
+	routedModel := cfg.GetModel(hyper.Name, routedModelID)
+	if routedModel == nil {
+		return model
+	}
+	model.CatwalkCfg = *routedModel
+	return model
+}
+
+func (a *sessionAgent) hyperStepsCost(model Model, steps []fantasy.StepResult) *float64 {
+	if model.ModelCfg.Provider != hyper.Name || len(steps) == 0 {
+		return nil
+	}
+	var cost float64
+	for _, step := range steps {
+		pricingModel := a.modelForStepCost(model, step.ProviderMetadata)
+		cost += usageCost(pricingModel.CatwalkCfg.Pricing, step.Usage)
+	}
+	return &cost
+}
+
 // extractPrismSavings returns the hypercredit and dollar savings from
 // routing the turn through the Hyper Prism model router, as reported by
 // its savings trailers, or nil when not reported or malformed.
@@ -2147,16 +2288,19 @@ func extraFieldFloat(pm *openai.ProviderMetadata, key string) *float64 {
 	return &parsed
 }
 
+func usageCost(pricing catwalk.Pricing, usage fantasy.Usage) float64 {
+	return pricing.CacheCreate/1e6*float64(usage.CacheCreationTokens) +
+		pricing.CacheHit/1e6*float64(usage.CacheReadTokens) +
+		pricing.Input/1e6*float64(usage.InputTokens) +
+		pricing.Output/1e6*float64(usage.OutputTokens)
+}
+
 func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session, usage fantasy.Usage, overrideCost *float64, estimated bool) {
 	if !usageIsZero(usage) {
 		session.EstimatedUsage = estimated
 	}
 
-	modelConfig := model.CatwalkCfg
-	cost := modelConfig.Pricing.CacheCreate/1e6*float64(usage.CacheCreationTokens) +
-		modelConfig.Pricing.CacheHit/1e6*float64(usage.CacheReadTokens) +
-		modelConfig.Pricing.Input/1e6*float64(usage.InputTokens) +
-		modelConfig.Pricing.Output/1e6*float64(usage.OutputTokens)
+	cost := usageCost(model.CatwalkCfg.Pricing, usage)
 
 	if !estimated {
 		a.eventTokensUsed(session.ID, model, usage, cost)

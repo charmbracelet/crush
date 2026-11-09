@@ -240,6 +240,11 @@ func migrateCatwalkV2Model(model map[string]any) bool {
 // Load loads the configuration from the default paths and returns a
 // ConfigStore that owns both the pure-data Config and all runtime state.
 func Load(ctx context.Context, workingDir, dataDir string, debug bool) (*ConfigStore, error) {
+	// The CRUSH_DATA_DIR env var overrides the per-project data directory
+	// when no --data-dir flag is given. Relative paths resolve against the
+	// working directory, like the data_directory config option.
+	dataDir = cmp.Or(dataDir, os.Getenv("CRUSH_DATA_DIR"))
+
 	// Migrate deprecated disable_notifications before loading config.
 	migrateDisableNotifications()
 

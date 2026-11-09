@@ -92,6 +92,10 @@ type Chat struct {
 	list     *list.List
 	idInxMap map[string]int // Map of message IDs to their indices in the list
 
+	// externalAnimation is set when something outside the list is animating
+	// and needs the shared clock, such as the header's subagent spinner.
+	externalAnimation bool
+
 	// animRunning is true while the shared animation clock has a tick
 	// outstanding. The clock stops itself when no visible item is spinning
 	// and is re-armed by EnsureAnimating once one is. animGen identifies
@@ -248,12 +252,17 @@ func (m *Chat) Draw(scr uv.Screen, area uv.Rectangle) {
 	}
 
 	rendered := m.list.Render()
-	// If we're in follow mode but the render revealed we're no longer at
-	// the bottom (e.g. streaming content grew an item), re-anchor and
-	// re-render so the view stays pinned to the end.
-	if m.follow && !m.list.AtBottom() {
+	// In follow mode the view stays pinned to the end. Re-anchor whenever
+	// the render moved the end: content growing past it (streaming), or
+	// shrinking away from it (an item removed, such as the prompt echo
+	// giving way to the stored prompt), which would otherwise leave the
+	// transcript lifted off the bottom until something else scrolls.
+	if m.follow {
+		idx, line := m.list.ScrollPosition()
 		m.list.ScrollToBottom()
-		rendered = m.list.Render()
+		if newIdx, newLine := m.list.ScrollPosition(); newIdx != idx || newLine != line {
+			rendered = m.list.Render()
+		}
 	}
 	method, ok := scr.WidthMethod().(ansi.Method)
 	if !ok {
@@ -529,21 +538,6 @@ func (m *Chat) UpdateNestedToolIDs(containerID string) {
 // was armed for.
 type animTickMsg struct{ gen uint64 }
 
-// HasLiveSpinner reports whether any item, on screen or not, is spinning
-// with the animation clock allowed. A frozen spinner is a ghost left by a
-// killed run, not progress.
-func (m *Chat) HasLiveSpinner() bool {
-	if !m.animAllowed {
-		return false
-	}
-	for idx := m.list.Len() - 1; idx >= 0; idx-- {
-		if animatable, ok := m.list.ItemAt(idx).(chat.Animatable); ok && animatable.Spinning() {
-			return true
-		}
-	}
-	return false
-}
-
 // hasVisibleAnimation reports whether any item in the viewport is spinning.
 func (m *Chat) hasVisibleAnimation() bool {
 	if m.list.Len() == 0 {
@@ -576,6 +570,14 @@ func (m *Chat) SetAnimationsAllowed(allowed bool) {
 // every message so any change that puts a spinner on screen (new message,
 // tool update, scroll, session load) starts the clock without per-call-site
 // wiring. It is the only place a tick is armed apart from Tick itself.
+// SetExternalAnimation records whether something outside the transcript is
+// animating, such as the header's subagent spinner. The clock is shared, and
+// its gate otherwise only looks at items currently on screen, so an animation
+// living in the chrome would never keep it running.
+func (m *Chat) SetExternalAnimation(animating bool) {
+	m.externalAnimation = animating
+}
+
 func (m *Chat) EnsureAnimating() tea.Cmd {
 	if !m.animAllowed {
 		m.animRunning = false
@@ -584,7 +586,7 @@ func (m *Chat) EnsureAnimating() tea.Cmd {
 	if m.animRunning && m.now().Sub(m.animArmedAt) < animClockLostAfter {
 		return nil
 	}
-	if !m.hasVisibleAnimation() {
+	if !m.hasVisibleAnimation() && !m.externalAnimation {
 		m.animRunning = false
 		return nil
 	}
@@ -995,6 +997,19 @@ func (m *Chat) MessageItem(id string) chat.MessageItem {
 		return nil
 	}
 	item, ok := m.list.ItemAt(idx).(chat.MessageItem)
+	if !ok {
+		return nil
+	}
+	return item
+}
+
+// MessageItemAt returns the message item at index i, or nil if i is out of
+// range or the item is not a [chat.MessageItem].
+func (m *Chat) MessageItemAt(i int) chat.MessageItem {
+	if i < 0 || i >= m.list.Len() {
+		return nil
+	}
+	item, ok := m.list.ItemAt(i).(chat.MessageItem)
 	if !ok {
 		return nil
 	}

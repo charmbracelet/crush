@@ -132,13 +132,13 @@ func TestWrapToolsWithHooks(t *testing.T) {
 		}
 	})
 
-	t.Run("sub-agent skips the wrap", func(t *testing.T) {
+	t.Run("subagent skips the wrap", func(t *testing.T) {
 		t.Parallel()
 		out := wrapToolsWithHooks(inputs, runner, true)
-		require.Equal(t, inputs, out, "sub-agent tools should be returned unwrapped")
+		require.Equal(t, inputs, out, "subagent tools should be returned unwrapped")
 		for _, tool := range out {
 			_, isHooked := tool.(*hookedTool)
-			require.False(t, isHooked, "sub-agent tool should not be wrapped")
+			require.False(t, isHooked, "subagent tool should not be wrapped")
 		}
 	})
 

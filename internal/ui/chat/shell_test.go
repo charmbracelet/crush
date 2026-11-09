@@ -167,3 +167,26 @@ func BenchmarkShellItemCollapsedRender(b *testing.B) {
 		benchmarkShellOutput = item.RawRender(120)
 	}
 }
+
+// TestShellItemHorizontalScrollStaysInBounds verifies the horizontal offset
+// never passes the widest line: not when the output already fits, and not
+// after the item is rendered wider than when it was scrolled.
+func TestShellItemHorizontalScrollStaysInBounds(t *testing.T) {
+	t.Parallel()
+	sty := styles.CharmtonePantera()
+
+	short := NewShellItem(&sty, "echo hi", "hello", 0).(*ShellItem)
+	short.Render(80)
+	for range 5 {
+		short.ScrollHorizontal(6)
+	}
+	require.Contains(t, ansi.Strip(short.Render(80)), "hello",
+		"output that fits must not scroll out of view")
+
+	wide := NewShellItem(&sty, "cat", strings.Repeat("x", 200)+" end", 0).(*ShellItem)
+	wide.Render(60)
+	wide.ScrollHorizontal(1000)
+	wide.Render(300)
+	require.LessOrEqual(t, wide.xOffset, wide.maxLineWidth,
+		"a wider render must pull a stale offset back in range")
+}

@@ -3,8 +3,8 @@
   "id": "hyper",
   "api_endpoint": "https://hyper.charm.land/api/v1/fantasy",
   "type": "hyper",
-  "default_large_model_id": "qwen3.8-max",
-  "default_small_model_id": "deepseek-v4.1-flash",
+  "default_large_model_id": "prism",
+  "default_small_model_id": "prism-flash",
   "models": [
     {
       "id": "prism",
@@ -15,7 +15,43 @@
         "cache_hit": 0.32664
       },
       "context_window": 1000000,
-      "default_max_tokens": 16000,
+      "default_max_tokens": 131072,
+      "reasoning": {
+        "thinking": ""
+      },
+      "capabilities": {
+        "vision": true,
+        "audio": false
+      }
+    },
+    {
+      "id": "prism-core",
+      "name": "Prism Core",
+      "pricing": {
+        "input": 1.52432,
+        "output": 4.79072,
+        "cache_hit": 0.283088
+      },
+      "context_window": 1000000,
+      "default_max_tokens": 131072,
+      "reasoning": {
+        "thinking": ""
+      },
+      "capabilities": {
+        "vision": true,
+        "audio": false
+      }
+    },
+    {
+      "id": "prism-flash",
+      "name": "Prism Flash",
+      "pricing": {
+        "input": 0.33,
+        "output": 1.31,
+        "cache_hit": 0.03
+      },
+      "context_window": 1000000,
+      "default_max_tokens": 131072,
       "reasoning": {
         "thinking": ""
       },
@@ -27,39 +63,6 @@
     {
       "id": "deepseek-v4.1-flash-1017",
       "name": "DeepSeek V4.1 Flash 1017",
-      "pricing": {
-        "input": 0.33,
-        "output": 1.31,
-        "cache_hit": 0.03
-      },
-      "context_window": 1000000,
-      "default_max_tokens": 262144,
-      "reasoning": {
-        "thinking": "toggleable",
-        "effort_levels": [
-          {
-            "value": "low",
-            "display": "Low"
-          },
-          {
-            "value": "high",
-            "display": "High"
-          },
-          {
-            "value": "max",
-            "display": "Max"
-          }
-        ],
-        "default_effort_level": "high"
-      },
-      "capabilities": {
-        "vision": true,
-        "audio": false
-      }
-    },
-    {
-      "id": "deepseek-v4.1-flash",
-      "name": "DeepSeek V4.1 Flash",
       "pricing": {
         "input": 0.33,
         "output": 1.31,
@@ -124,15 +127,15 @@
       }
     },
     {
-      "id": "deepseek-v4-flash-0731",
-      "name": "DeepSeek V4 Flash 0731",
+      "id": "kimi-k3.1-pro",
+      "name": "Kimi K3.1 Pro",
       "pricing": {
-        "input": 0.44,
-        "output": 1.32,
-        "cache_hit": 0.044
+        "input": 2.2,
+        "output": 11,
+        "cache_hit": 0.22
       },
       "context_window": 1000000,
-      "default_max_tokens": 384000,
+      "default_max_tokens": 262144,
       "reasoning": {
         "thinking": "toggleable",
         "effort_levels": [
@@ -152,7 +155,7 @@
         "default_effort_level": "high"
       },
       "capabilities": {
-        "vision": false,
+        "vision": true,
         "audio": false
       }
     },
@@ -186,42 +189,6 @@
       },
       "capabilities": {
         "vision": true,
-        "audio": false
-      }
-    },
-    {
-      "id": "kimi-k2.7-code",
-      "name": "Kimi K2.7 Code",
-      "pricing": {
-        "input": 1.03436,
-        "output": 4.3552,
-        "cache_hit": 0.206872
-      },
-      "context_window": 256000,
-      "default_max_tokens": 16000,
-      "reasoning": {
-        "thinking": "never"
-      },
-      "capabilities": {
-        "vision": true,
-        "audio": false
-      }
-    },
-    {
-      "id": "kimi-k2-thinking",
-      "name": "Kimi K2 Thinking",
-      "pricing": {
-        "input": 0.6,
-        "output": 2.5,
-        "cache_hit": 0.3
-      },
-      "context_window": 262144,
-      "default_max_tokens": 26214,
-      "reasoning": {
-        "thinking": "toggleable"
-      },
-      "capabilities": {
-        "vision": false,
         "audio": false
       }
     },
@@ -292,35 +259,6 @@
       }
     },
     {
-      "id": "glm-5.2",
-      "name": "GLM-5.2",
-      "pricing": {
-        "input": 1.52432,
-        "output": 4.79072,
-        "cache_hit": 0.152432
-      },
-      "context_window": 1000000,
-      "default_max_tokens": 32768,
-      "reasoning": {
-        "thinking": "toggleable",
-        "effort_levels": [
-          {
-            "value": "high",
-            "display": "High"
-          },
-          {
-            "value": "xhigh",
-            "display": "X-High"
-          }
-        ],
-        "default_effort_level": "high"
-      },
-      "capabilities": {
-        "vision": false,
-        "audio": false
-      }
-    },
-    {
       "id": "minimax-m3",
       "name": "MiniMax M3",
       "pricing": {
@@ -350,24 +288,6 @@
       },
       "capabilities": {
         "vision": true,
-        "audio": false
-      }
-    },
-    {
-      "id": "minimax-m2.7",
-      "name": "MiniMax M2.7",
-      "pricing": {
-        "input": 0.484,
-        "output": 1.852,
-        "cache_hit": 0.242
-      },
-      "context_window": 262100,
-      "default_max_tokens": 6553,
-      "reasoning": {
-        "thinking": "never"
-      },
-      "capabilities": {
-        "vision": false,
         "audio": false
       }
     },
@@ -542,129 +462,6 @@
       }
     },
     {
-      "id": "qwen3.7-max",
-      "name": "Qwen3.7-Max",
-      "pricing": {
-        "input": 2.5,
-        "output": 7.5,
-        "cache_hit": 0.5
-      },
-      "context_window": 1000000,
-      "default_max_tokens": 64000,
-      "reasoning": {
-        "thinking": "toggleable",
-        "effort_levels": [
-          {
-            "value": "none",
-            "display": "None"
-          },
-          {
-            "value": "minimal",
-            "display": "Minimal"
-          },
-          {
-            "value": "low",
-            "display": "Low"
-          },
-          {
-            "value": "medium",
-            "display": "Medium"
-          },
-          {
-            "value": "high",
-            "display": "High"
-          }
-        ],
-        "default_effort_level": "medium"
-      },
-      "capabilities": {
-        "vision": false,
-        "audio": false
-      }
-    },
-    {
-      "id": "qwen3.7-plus",
-      "name": "Qwen3.7-Plus",
-      "pricing": {
-        "input": 1.2,
-        "output": 4.8,
-        "cache_hit": 0.24
-      },
-      "context_window": 1000000,
-      "default_max_tokens": 64000,
-      "reasoning": {
-        "thinking": "toggleable",
-        "effort_levels": [
-          {
-            "value": "none",
-            "display": "None"
-          },
-          {
-            "value": "minimal",
-            "display": "Minimal"
-          },
-          {
-            "value": "low",
-            "display": "Low"
-          },
-          {
-            "value": "medium",
-            "display": "Medium"
-          },
-          {
-            "value": "high",
-            "display": "High"
-          }
-        ],
-        "default_effort_level": "medium"
-      },
-      "capabilities": {
-        "vision": true,
-        "audio": false
-      }
-    },
-    {
-      "id": "qwen3.7-flash",
-      "name": "Qwen3.7-Flash",
-      "pricing": {
-        "input": 0.2,
-        "output": 0.8,
-        "cache_hit": 0.04
-      },
-      "context_window": 1000000,
-      "default_max_tokens": 64000,
-      "reasoning": {
-        "thinking": "toggleable",
-        "effort_levels": [
-          {
-            "value": "none",
-            "display": "None"
-          },
-          {
-            "value": "minimal",
-            "display": "Minimal"
-          },
-          {
-            "value": "low",
-            "display": "Low"
-          },
-          {
-            "value": "medium",
-            "display": "Medium"
-          },
-          {
-            "value": "high",
-            "display": "High"
-          }
-        ],
-        "default_effort_level": "medium"
-      },
-      "capabilities": {
-        "vision": true,
-        "audio": false
-      }
-    },
-    {
       "id": "gpt-oss-120b",
       "name": "gpt-oss-120b",
       "pricing": {
@@ -712,6 +509,43 @@
       },
       "capabilities": {
         "vision": false,
+        "audio": false
+      }
+    },
+    {
+      "id": "muse-spark-open",
+      "name": "Muse Spark Open",
+      "pricing": {
+        "input": 1.4,
+        "output": 4.65,
+        "cache_hit": 0.17
+      },
+      "context_window": 1048576,
+      "default_max_tokens": 1048576,
+      "reasoning": {
+        "thinking": "toggleable",
+        "effort_levels": [
+          {
+            "value": "low",
+            "display": "Low"
+          },
+          {
+            "value": "medium",
+            "display": "Medium"
+          },
+          {
+            "value": "high",
+            "display": "High"
+          },
+          {
+            "value": "xhigh",
+            "display": "X-High"
+          }
+        ],
+        "default_effort_level": "xhigh"
+      },
+      "capabilities": {
+        "vision": true,
         "audio": false
       }
     }

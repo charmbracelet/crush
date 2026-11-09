@@ -40,6 +40,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/exitbanner"
 	ui "github.com/charmbracelet/crush/internal/ui/model"
+	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/crush/internal/workspace"
 	uv "github.com/charmbracelet/ultraviolet"
@@ -47,6 +48,7 @@ import (
 	"github.com/charmbracelet/x/exp/charmtone"
 	xstrings "github.com/charmbracelet/x/exp/strings"
 	"github.com/charmbracelet/x/term"
+	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
 )
 
@@ -58,7 +60,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolP("debug", "d", false, "Debug")
 	rootCmd.PersistentFlags().StringVarP(&clientHost, "host", "H", server.DefaultHost(), "Connect to a specific crush server host (for advanced users)")
 	rootCmd.Flags().BoolP("help", "h", false, "Help")
-	rootCmd.PersistentFlags().CountP("yolo", "y", "Skip permission prompts: -y to stop being asked, -yy to also drop the exec-time block list")
+	rootCmd.PersistentFlags().CountP("yolo", "y", "Skip permission prompts: -y to stop being asked and block dangerous commands, -yy to allow them too")
 	rootCmd.PersistentFlags().StringSlice("channels", nil, "MCP servers to enable as channels (repeatable), e.g. --channels server:webhook")
 	_ = rootCmd.PersistentFlags().MarkHidden("channels")
 	rootCmd.Flags().StringP("session", "s", "", "Continue a previous session by ID")
@@ -96,10 +98,10 @@ cat README.md | crush run "make this more glamorous" > GLAMOROUS_README.md
 # Run with debug logging in a specific directory
 crush --debug --cwd /path/to/project
 
-# Run in yolo mode (skip permission prompts)
+# Run in yolo mode (skip permission prompts, block dangerous commands)
 crush -y
 
-# Run in sysadmin mode (skip prompts and the exec-time block list too)
+# Run in sysadmin mode (skip prompts and allow dangerous commands too)
 crush -yy
 
 # Run with custom data directory
@@ -112,6 +114,14 @@ crush --session {session-id}
 crush --continue
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Bail out before loading config or reporting anything when there is
+		// no terminal to draw on, e.g. package manager validators that run
+		// the binary with redirected streams and no console.
+		if !hasTerminal(term.IsTerminal, os.Stdin.Fd(), os.Stdout.Fd()) {
+			fmt.Fprintln(cmd.ErrOrStderr(), "Crush needs an interactive terminal. Use `crush run` for non-interactive use.")
+			return nil
+		}
+
 		sessionID, _ := cmd.Flags().GetString("session")
 		continueLast, _ := cmd.Flags().GetBool("continue")
 
@@ -136,6 +146,9 @@ crush --continue
 
 		inputFilter := ui.NewFilter()
 		var env uv.Environ = os.Environ()
+		// Don't leak the errors to the TUI
+		browser.Stderr = nil
+		browser.Stdout = nil
 		program := tea.NewProgram(
 			model,
 			tea.WithEnvironment(env),
@@ -160,7 +173,7 @@ crush --continue
 		if cfg := com.Config(); cfg != nil {
 			banner = cfg.Options.TUI.ExitBanner
 		}
-		printSessionResume(model, banner)
+		printSessionResume(model, com.Styles, banner)
 		return nil
 	},
 }
@@ -182,9 +195,9 @@ var heartbit = lipgloss.NewStyle().Foreground(charmtone.Dolly).SetString(`
 // printSessionResume prints the exit banner after the TUI exits, including the
 // session title and the hint to resume it with `crush -s <id>`. The banner
 // style decides how much of that is shown; see config.ExitBanner.
-func printSessionResume(model *ui.UI, banner config.ExitBanner) {
+func printSessionResume(model *ui.UI, theme *styles.Styles, banner config.ExitBanner) {
 	tw, _, _ := term.GetSize(os.Stdout.Fd())
-	body := exitbanner.Render(banner, model.CurrentSession(), tw)
+	body := exitbanner.Render(theme, banner, model.CurrentSession(), tw)
 	if body == "" {
 		return
 	}
@@ -194,6 +207,13 @@ func printSessionResume(model *ui.UI, banner config.ExitBanner) {
 // copied from cobra:
 const defaultVersionTemplate = `{{with .DisplayName}}{{printf "%s " .}}{{end}}{{printf "version %s" .Version}}
 `
+
+// hasTerminal reports whether the TUI has a terminal to attach to. Either
+// stdin or stdout being a terminal is enough: when only stdout is (as in
+// `echo foo | crush`), Bubble Tea reopens the controlling TTY for input.
+func hasTerminal(isTerminal func(uintptr) bool, stdin, stdout uintptr) bool {
+	return isTerminal(stdin) || isTerminal(stdout)
+}
 
 func Execute() {
 	// FIXME: config.Load uses slog internally during provider resolution,

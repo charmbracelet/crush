@@ -1,12 +1,16 @@
 package dialog
 
 import (
+	"image"
+	"strconv"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/stretchr/testify/require"
 )
 
@@ -165,4 +169,29 @@ func TestPermissions_EscapeDenies(t *testing.T) {
 	resp, ok := action.(ActionPermissionResponse)
 	require.True(t, ok)
 	require.Equal(t, PermissionDeny, resp.Action)
+}
+
+// TestPermissions_TallerViewportClampsOffset verifies that growing the
+// dialog's height while scrolled to the bottom does not leave the viewport
+// scrolled past the end with blank rows under the content.
+func TestPermissions_TallerViewportClampsOffset(t *testing.T) {
+	t.Parallel()
+	s := styles.CharmtonePantera()
+	com := &common.Common{Styles: &s}
+	lines := make([]string, 200)
+	for i := range lines {
+		lines[i] = "line " + strconv.Itoa(i)
+	}
+	p := NewPermissions(com, permission.PermissionRequest{
+		ID:          "perm-test",
+		ToolName:    "custom_tool",
+		Description: strings.Join(lines, "\n"),
+	})
+
+	p.Draw(uv.NewScreenBuffer(250, 25), image.Rect(0, 0, 250, 25))
+	p.viewport.GotoBottom()
+	p.Draw(uv.NewScreenBuffer(250, 60), image.Rect(0, 0, 250, 60))
+
+	maxOffset := max(0, p.viewport.TotalLineCount()-p.viewport.Height())
+	require.LessOrEqual(t, p.viewport.YOffset(), maxOffset)
 }

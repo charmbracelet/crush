@@ -5,6 +5,7 @@ import (
 	"log/slog"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 
 	mcptools "github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
@@ -52,12 +53,12 @@ func (b *Backend) SubscribeEventsWithOverflow(ctx context.Context, workspaceID s
 
 // maxSessionAncestryDepth bounds how far [Backend.RootSessionID] walks
 // the parent chain when resolving a session to its top-level session.
-// Sub-agents cannot spawn sub-agents today, so one hop suffices in
+// Subagents cannot spawn subagents today, so one hop suffices in
 // practice; the extra slack guards against cycles and future nesting.
 const maxSessionAncestryDepth = 4
 
 // RootSessionID resolves sessionID to its top-level session by walking
-// the parent chain. Sub-agent sessions (created by the agent tool or
+// the parent chain. Subagent sessions (created by the agent tool or
 // agentic fetch) carry derived IDs; their interactive prompts are
 // scoped to the top-level session a user can actually view. A session
 // with no parent resolves to itself. The sessionID is returned
@@ -191,6 +192,14 @@ func (b *Backend) GetLSPDiagnostics(workspaceID, lspName string) (any, error) {
 		if name == lspName {
 			return client.GetDiagnostics(), nil
 		}
+	}
+
+	// GetLSPStates also lists servers that are no longer running (failed
+	// init, stopped, or started by another workspace), so callers iterate
+	// over names this manager does not hold. Report those as having no
+	// diagnostics, like the local workspace does, instead of a 404.
+	if _, ok := app.GetLSPState(lspName); ok {
+		return map[protocol.DocumentURI][]protocol.Diagnostic{}, nil
 	}
 
 	return nil, ErrLSPClientNotFound

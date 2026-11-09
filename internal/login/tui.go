@@ -150,6 +150,9 @@ func newAuthModel(title string, newFlow func() flow) authModel {
 // runTUI runs the OAuth authorization flow with a small TUI that guides
 // the user through opening a browser and waiting for the callback.
 func runTUI(title string, newFlow func() flow) (*oauth.Token, error) {
+	// Don't leak the errors to the TUI
+	browser.Stderr = nil
+	browser.Stdout = nil
 	p := tea.NewProgram(newAuthModel(title, newFlow))
 	final, err := p.Run()
 	if err != nil {

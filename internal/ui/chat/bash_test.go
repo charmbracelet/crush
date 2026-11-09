@@ -254,3 +254,19 @@ func TestBashToolMessageItem_DescriptionHeader(t *testing.T) {
 	out = render(map[string]any{"command": "echo hi", "description": ""}, false, false)
 	require.Contains(t, out[0], "echo hi")
 }
+
+// A subagent's tool calls render one line each, so a multi-line command
+// collapses onto its first row instead of spilling a few lines of an inline
+// script into the tree.
+func TestBashToolMessageItem_CompactCommandIsOneLine(t *testing.T) {
+	t.Parallel()
+
+	ctx := &BashToolRenderContext{workingDir: t.TempDir()}
+	cmd := "cd ~/.local/share/crush && python3 -c \"\nimport json\n    d=json.load(open('hyper.json'))\n\""
+	out := renderTool(t, ctx, "bash", map[string]any{"command": cmd}, nil, false, true)
+	require.NotContains(t, out, "\n")
+	require.Contains(t, out, `python3 -c " import json d=json.load(`)
+
+	out = renderTool(t, ctx, "bash", map[string]any{"command": cmd}, nil, true, false)
+	require.Contains(t, out, "\n", "a top-level call still shows the command as written")
+}

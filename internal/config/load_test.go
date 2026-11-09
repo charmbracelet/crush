@@ -43,6 +43,41 @@ func TestConfig_LoadFromBytes(t *testing.T) {
 	require.Equal(t, "https://api.openai.com/v2", pc.BaseURL)
 }
 
+func TestLoadDataDirEnv(t *testing.T) {
+	t.Setenv("CRUSH_GLOBAL_CONFIG", t.TempDir())
+	t.Setenv("CRUSH_GLOBAL_DATA", t.TempDir())
+	t.Setenv("CRUSH_DISABLE_PROVIDER_AUTO_UPDATE", "1")
+
+	t.Run("CRUSH_DATA_DIR overrides the project data directory", func(t *testing.T) {
+		workDir := t.TempDir()
+		dataDir := t.TempDir()
+		t.Setenv("CRUSH_DATA_DIR", dataDir)
+
+		store, err := Load(t.Context(), workDir, "", false)
+		require.NoError(t, err)
+		require.Equal(t, dataDir, store.Config().Options.DataDirectory)
+	})
+
+	t.Run("an explicit data directory wins over CRUSH_DATA_DIR", func(t *testing.T) {
+		workDir := t.TempDir()
+		dataDir := t.TempDir()
+		t.Setenv("CRUSH_DATA_DIR", t.TempDir())
+
+		store, err := Load(t.Context(), workDir, dataDir, false)
+		require.NoError(t, err)
+		require.Equal(t, dataDir, store.Config().Options.DataDirectory)
+	})
+
+	t.Run("relative CRUSH_DATA_DIR resolves against the working directory", func(t *testing.T) {
+		workDir := t.TempDir()
+		t.Setenv("CRUSH_DATA_DIR", "state")
+
+		store, err := Load(t.Context(), workDir, "", false)
+		require.NoError(t, err)
+		require.Equal(t, filepath.Join(workDir, "state"), store.Config().Options.DataDirectory)
+	})
+}
+
 func TestLookupConfigs_BoundedByProject(t *testing.T) {
 	// Force GlobalConfig and GlobalConfigData to point at locations we
 	// control so they can be present in the result without polluting
@@ -863,11 +898,11 @@ func TestConfig_setupAgentsWithNoDisabledTools(t *testing.T) {
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
-	assert.Equal(t, []string{"lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "glob", "grep", "ls", "sourcegraph", "view"}, taskAgent.AllowedTools)
+	assert.Equal(t, []string{"bash", "lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "glob", "grep", "ls", "sourcegraph", "view"}, taskAgent.AllowedTools)
 
 	planAgent, ok := cfg.Agents[AgentPlan]
 	require.True(t, ok)
-	assert.Equal(t, []string{"agent", "lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "glob", "grep", "ls", "question", "sourcegraph", "view"}, planAgent.AllowedTools)
+	assert.Equal(t, []string{"agent", "agent_dispatch", "agent_send", "agent_status", "agent_stop", "lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "glob", "grep", "ls", "question", "sourcegraph", "view"}, planAgent.AllowedTools)
 }
 
 func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {
@@ -885,15 +920,15 @@ func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
 
-	assert.Equal(t, []string{"agent", "bash", "crush_info", "crush_logs", "job_output", "job_kill", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "lsp_rename", "lsp_replace_symbol", "fetch", "agentic_fetch", "glob", "ls", "question", "sourcegraph", "todos", "view", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
+	assert.Equal(t, []string{"agent", "agent_dispatch", "agent_send", "agent_status", "agent_stop", "bash", "crush_info", "crush_logs", "job_output", "job_kill", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "lsp_rename", "lsp_replace_symbol", "fetch", "agentic_fetch", "glob", "ls", "question", "sourcegraph", "todos", "view", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
-	assert.Equal(t, []string{"lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "glob", "ls", "sourcegraph", "view"}, taskAgent.AllowedTools)
+	assert.Equal(t, []string{"bash", "lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "glob", "ls", "sourcegraph", "view"}, taskAgent.AllowedTools)
 
 	planAgent, ok := cfg.Agents[AgentPlan]
 	require.True(t, ok)
-	assert.Equal(t, []string{"agent", "lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "glob", "ls", "question", "sourcegraph", "view"}, planAgent.AllowedTools)
+	assert.Equal(t, []string{"agent", "agent_dispatch", "agent_send", "agent_status", "agent_stop", "lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "glob", "ls", "question", "sourcegraph", "view"}, planAgent.AllowedTools)
 }
 
 func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
@@ -901,6 +936,7 @@ func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
 		Options: &Options{
 			DisabledTools: []string{
 				"agent",
+				"bash",
 				"glob",
 				"grep",
 				"ls",
@@ -916,7 +952,7 @@ func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
 	cfg.SetupAgents()
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
-	assert.Equal(t, []string{"bash", "crush_info", "crush_logs", "job_output", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_rename", "lsp_replace_symbol", "fetch", "agentic_fetch", "question", "todos", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
+	assert.Equal(t, []string{"agent_dispatch", "agent_send", "agent_status", "agent_stop", "crush_info", "crush_logs", "job_output", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_rename", "lsp_replace_symbol", "fetch", "agentic_fetch", "question", "todos", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
@@ -924,7 +960,7 @@ func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
 
 	planAgent, ok := cfg.Agents[AgentPlan]
 	require.True(t, ok)
-	assert.Equal(t, []string{"question"}, planAgent.AllowedTools)
+	assert.Equal(t, []string{"agent_dispatch", "agent_send", "agent_status", "agent_stop", "question"}, planAgent.AllowedTools)
 }
 
 func TestConfig_configureProvidersWithDisabledProvider(t *testing.T) {

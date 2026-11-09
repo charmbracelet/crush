@@ -70,6 +70,9 @@ func TestRunnerSucceedsWhenCached(t *testing.T) {
 }
 
 func TestRunnerReadsKeyFromPrivateStatusFD(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake gpg shim only runs on POSIX shells")
+	}
 	// A security key signing run by hand (no --status-fd from the
 	// caller): gpg only names the key on the status fd the runner adds.
 	script := `#!/bin/sh

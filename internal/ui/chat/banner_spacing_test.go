@@ -32,6 +32,10 @@ func TestFinishBannerIsSetOffFromContent(t *testing.T) {
 			message.TextContent{Text: "Now the real test, replay:"},
 			message.Finish{Reason: message.FinishReasonCanceled, Time: 1},
 		)},
+		{"truncated", assistantWith(
+			message.TextContent{Text: "Now the real test, replay:"},
+			message.Finish{Reason: message.FinishReasonMaxTokens, Time: 1},
+		)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

@@ -467,6 +467,10 @@ func (p *Permissions) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		p.viewport.SetContent(renderedContent)
 		p.viewportWidth = p.viewport.Width()
 		p.viewportDirty = false
+	} else {
+		// SetHeight does not clamp the offset; only SetContent does. Re-set
+		// it so a taller viewport does not stay scrolled past the end.
+		p.viewport.SetYOffset(p.viewport.YOffset())
 	}
 	content = p.viewport.View()
 	if needsScrollbar {

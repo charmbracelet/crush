@@ -183,14 +183,18 @@ go install -tags sqlite3_dotlk github.com/charmbracelet/crush@latest
 
 ## Getting Started
 
-The quickest way to get started is to choose a [Hyper][hyper] model from model
-picker. Follow the steps to authenticate and you'll be good to go.
-
-[Hyper], from Charm, is the official Crush provider. It’s subscription-based
-and optimized for Crush. It’s privacy focused, with zero data retention (ZDR)
-and is designed to comply with GDPR. [More on Hyper][hyper].
+The quickest way to get started is to choose a [Hyper][hyper] model from the 
+little model picker. Follow the steps to authenticate and you're ready to go.
 
 <p><a href="https://hyper.charm.land"><img width="340" height="200" alt="Charm Hyper" src="https://github.com/user-attachments/assets/50875289-7992-454d-9f14-9f790413fb5e" /></a></p>
+
+[Hyper][hyper], from Charm, is the official model provider for Crush. It’s 
+built  on open-weight models and is optimized for Crush, with an emphasis 
+on high-quality inference. There are subscription and prepaid options, including zero data retention 
+(ZDR). It's also GDPR compliant!
+
+[More on Hyper][hyper].
+
 
 ## API Keys
 
@@ -308,6 +312,7 @@ considered deprecated. See: [the config docs](./docs/config/) for details.
 >
 > - `CRUSH_GLOBAL_CONFIG`
 > - `CRUSH_GLOBAL_DATA`
+> - `CRUSH_DATA_DIR` (overrides the per-project `.crush` directory)
 
 As an additional note, Crush also stores ephemeral data, such as application
 state, in one additional location. This is state and should not be edited by
@@ -1098,8 +1103,12 @@ collected.
 Details on exactly what’s collected are in the source code ([here](https://github.com/charmbracelet/crush/tree/main/internal/event)
 and [here](https://github.com/charmbracelet/crush/blob/main/internal/llm/agent/event.go)).
 
-You can opt out of metrics collection at any time by setting the environment
-variable by setting the following in your environment:
+Also, when you use Crush with [Hyper][hyper], your Crush usage metrics may 
+be associated with your Hyper account to help us improve the service and
+diagnose issues. For more information, see [the Hyper Privacy Policy](https://hyper.charm.land/legal/privacy-policy).
+
+Either way, you can opt out of metrics collection at any time by setting 
+the following  in your environment:
 
 ```bash
 export CRUSH_DISABLE_METRICS=1

@@ -281,8 +281,13 @@ func NewBashTool(permissions permission.Service, workingDir, spillDir string, at
 			// Check whether the command is dangerous so we can surface a
 			// warning in the permission dialog.
 			var check shell.CommandCheck
+			mode := permissions.PermissionMode()
 			if !safeReadOnly {
 				check = shell.CheckCommand(params.Command, blockFuncs(blocked))
+
+				if check.Matched && mode.RefusesDangerous() {
+					return fantasy.NewTextErrorResponse(yoloBlockedMessage(check.Reason)), nil
+				}
 
 				p, err := permissions.Request(
 					ctx,
@@ -311,30 +316,19 @@ func NewBashTool(permissions permission.Service, workingDir, spillDir string, at
 				}
 			}
 
-			// Re-blocking a command that was already approved would override
-			// the answer that was given, whether the user gave it at a prompt
-			// or yolo mode gave it on their behalf. That only applies when the
-			// check actually recognised a command by name, though: a warning
-			// that merely says "this could not be analysed" names nothing the
-			// user could have judged, so approving it is not approval of
-			// anything in particular and the block list stays on. Otherwise a
-			// stray $(date) anywhere on the line would waive the run-time
-			// checks for every command beside it.
-			//
-			// What the block list can see is narrow: commands this interpreter
-			// dispatches itself, including names that only resolve after a
-			// glob or variable expands. A command that runs inside a child
-			// process is invisible to it.
-			//
-			// Sysadmin mode is the deliberate exception: it asks for nothing
-			// and blocks nothing.
+			// A named match reaching here was approved at a prompt; keep the block list for everything else.
 			var blocksToUse []shell.BlockFunc
-			if !check.Matched && permissions.PermissionMode() != permission.PermissionModeSysadmin {
+			if !check.Matched && mode != permission.PermissionModeSysadmin {
 				blocksToUse = blockFuncs(blocked)
 			}
 			return executeBashCommand(ctx, params, execWorkingDir, spillDir, blocksToUse, maxBackgroundJobs, shellOwner)
 		},
 	)
+}
+
+// yoloBlockedMessage names the way out so the model doesn't retry variations.
+func yoloBlockedMessage(command string) string {
+	return fmt.Sprintf("blocked: %s is a dangerous command, and yolo mode blocks dangerous commands without asking. Tell the user: they can switch to normal mode to be asked about it, use sysadmin mode to allow it, or mark it safe with `permissions safe`.", command)
 }
 
 func executeBashCommand(ctx context.Context, params BashParams, execWorkingDir, spillDir string, blockFuncsToUse []shell.BlockFunc, maxBackgroundJobs int, shellOwner any) (fantasy.ToolResponse, error) {

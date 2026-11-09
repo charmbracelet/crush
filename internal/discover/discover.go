@@ -2,6 +2,7 @@ package discover
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -90,12 +91,19 @@ type Resolver interface {
 	ResolveValue(val string) (string, error)
 }
 
+// modelsResponse mirrors a /models listing. The Anthropic Models API
+// specifies max_input_tokens and max_tokens. The OpenAI spec has no token
+// limits, but LiteLLM adds max_input_tokens and max_output_tokens to its
+// OpenAI-shaped listing.
 type modelsResponse struct {
 	Data []struct {
-		ID      string `json:"id"`
-		Object  string `json:"object"`
-		Created int64  `json:"created"`
-		OwnedBy string `json:"owned_by"`
+		ID              string `json:"id"`
+		Object          string `json:"object"`
+		Created         int64  `json:"created"`
+		OwnedBy         string `json:"owned_by"`
+		MaxInputTokens  int64  `json:"max_input_tokens"`
+		MaxOutputTokens int64  `json:"max_output_tokens"`
+		MaxTokens       int64  `json:"max_tokens"`
 	} `json:"data"`
 }
 
@@ -136,8 +144,10 @@ func DiscoverModels(ctx context.Context, cfg Config, resolver Resolver) ([]catwa
 			continue
 		}
 		result = append(result, catwalk.Model{
-			ID:   e.ID,
-			Name: e.ID,
+			ID:               e.ID,
+			Name:             e.ID,
+			ContextWindow:    e.MaxInputTokens,
+			DefaultMaxTokens: cmp.Or(e.MaxOutputTokens, e.MaxTokens),
 		})
 	}
 

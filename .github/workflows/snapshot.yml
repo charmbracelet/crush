@@ -24,7 +24,7 @@ jobs:
         id: go
         with:
           # Keep in sync with release.yml so releases reuse this build cache.
-          go-version: "1.27.1"
+          go-version: "1.27.3"
           check-latest: true
           cache: false
       # Saved on every push to main (setup-go never refreshes an existing

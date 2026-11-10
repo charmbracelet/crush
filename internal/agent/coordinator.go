@@ -1412,8 +1412,11 @@ func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers 
 			openaicompat.WithLanguageModelOptions(
 				openai.WithLanguageModelHeaderFunc(hyper.HeaderFunc),
 			),
-			// Hyper has support for Gzip-compressed requests.
-			openaicompat.WithRequestCompression(),
+			// Hyper supports both Brotli and GZip for compressed requests.
+			openaicompat.WithRequestCompression(
+				openaicompat.EncodingBrotli,
+				openaicompat.EncodingGzip,
+			),
 		)
 	}
 	if httpClient == nil && c.cfg.Config().Options.Debug {

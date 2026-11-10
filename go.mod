@@ -7,7 +7,7 @@ require (
 	charm.land/bubbletea/v2 v2.1.1
 	charm.land/catwalk/v3 v3.1.7
 	charm.land/fang/v2 v2.0.1
-	charm.land/fantasy v0.47.0
+	charm.land/fantasy v0.48.0
 	charm.land/glamour/v2 v2.0.1
 	charm.land/lipgloss/v2 v2.0.6
 	charm.land/log/v2 v2.0.1
@@ -49,6 +49,7 @@ require (
 	github.com/lucasb-eyer/go-colorful v1.4.1
 	github.com/mattn/go-isatty v0.0.24
 	github.com/modelcontextprotocol/go-sdk v1.8.0
+	github.com/molecule-man/go-brrr v1.3.1
 	github.com/ncruces/go-sqlite3 v0.36.0
 	github.com/nxadm/tail v1.4.11
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c

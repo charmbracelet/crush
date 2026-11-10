@@ -1058,11 +1058,11 @@ func createSession(ctx context.Context, cfg *config.ConfigStore, name string, m 
 
 	// When the server is marked Sessionless, the tools/prompts/resources
 	// list-changed handlers are omitted. The go-sdk opens a SEP-2575
-	// "subscriptions/listen" stream whenever any of those handlers is set
-	// (client.go), and sessionless streamable-HTTP servers such as GitHub MCP
-	// answer that POST with 404 ("session not found"), which the SDK treats
-	// as fatal and tears the connection down. Setting the flag lets those
-	// servers connect at the cost of live list-changed notifications.
+	// "subscriptions/listen" stream whenever any of those handlers is set and
+	// the server advertises listChanged (client.go), and sessionless
+	// streamable-HTTP servers such as GitHub MCP answer that POST with 404.
+	// The SDK tolerates that rejection, so the flag only skips the doomed
+	// listen request.
 	opts := &mcp.ClientOptions{
 		LoggingMessageHandler: func(ctx context.Context, req *mcp.LoggingMessageRequest) {
 			level := parseLevel(string(req.Params.Level))

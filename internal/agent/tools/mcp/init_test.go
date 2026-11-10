@@ -830,14 +830,14 @@ func TestBeginAuth_Concurrent(t *testing.T) {
 // for sessionless streamable-HTTP servers such as GitHub MCP. Those servers
 // complete the SEP-2575 server/discover probe without ever issuing a
 // Mcp-Session-Id, then answer the follow-up "subscriptions/listen" POST
-// (which the go-sdk opens whenever any tools/prompts/resources list-changed
-// handler is registered) with HTTP 404. The SDK maps that 404 to
-// mcp.ErrSessionMissing and fails the whole connection asynchronously, so
-// the next RPC (here tools/list) errors. With Sessionless set, the
-// handlers are omitted, no listen stream is opened, and the server works.
+// (which the go-sdk opens when a list-changed handler is registered and the
+// server advertises the matching listChanged capability) with HTTP 404.
+// Since go-sdk v1.8.0 that rejection no longer poisons the connection, so
+// the default still works; Sessionless just skips the doomed listen stream.
 //
 // The stub server mimics GitHub: it answers server/discover (no session
-// id), 404s any subscriptions/listen, and serves tools/list.
+// id, tools.listChanged advertised), 404s any subscriptions/listen, and
+// serves tools/list.
 func TestCreateSession_Sessionless(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
@@ -867,7 +867,7 @@ func TestCreateSession_Sessionless(t *testing.T) {
 				// Sessionless: deliberately no Mcp-Session-Id header.
 				writeResult(map[string]any{
 					"supportedVersions": []string{"2026-07-28"},
-					"capabilities":      map[string]any{},
+					"capabilities":      map[string]any{"tools": map[string]any{"listChanged": true}},
 				})
 			case "subscriptions/listen":
 				listenTotal.Add(1)
@@ -904,14 +904,12 @@ func TestCreateSession_Sessionless(t *testing.T) {
 		require.Zero(t, listenTotal.Load(), "no subscriptions/listen stream should be opened when disabled")
 	})
 
-	t.Run("default opens listen stream and breaks sessionless server", func(t *testing.T) {
+	t.Run("default opens listen stream and survives its rejection", func(t *testing.T) {
 		srv, listenTotal := newStub(t)
 		const name = "sessionless-default"
 		states.Del(name)
 		t.Cleanup(func() { states.Del(name) })
 
-		// Connect itself succeeds; the listen stream fails asynchronously
-		// and poisons the connection, so the subsequent tools/list fails.
 		cfg := config.MCPConfig{Type: config.MCPHttp, URL: srv.URL, Timeout: 15}
 		sess, err := createSession(t.Context(), nil, name, cfg, resolver, false)
 		require.NoError(t, err)
@@ -919,8 +917,7 @@ func TestCreateSession_Sessionless(t *testing.T) {
 		t.Cleanup(func() { sess.Close() })
 
 		_, err = sess.ListTools(t.Context(), &mcp.ListToolsParams{})
-		require.Error(t, err, "default handlers open a listen stream that the sessionless server 404s")
-		require.Contains(t, err.Error(), "session not found")
+		require.NoError(t, err, "a 404 on the listen stream must not break later RPCs")
 		require.GreaterOrEqual(t, listenTotal.Load(), int64(1), "expected the listen stream attempt")
 	})
 }

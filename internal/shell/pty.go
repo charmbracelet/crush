@@ -71,6 +71,9 @@ type InteractiveSessionOptions struct {
 	// Owner is the chat session that started the session through the
 	// agent. Empty means the user started it.
 	Owner string
+	// AgentDriven gives the keyboard to the agent of Owner from the start.
+	// Otherwise the user holds it.
+	AgentDriven bool
 }
 
 // InteractiveSession runs a command attached to a real PTY while mirroring
@@ -88,7 +91,16 @@ type InteractiveSession struct {
 	pty     xpty.Pty
 	cmd     *exec.Cmd
 	command string
-	owner   string
+
+	// controlMu guards who controls the session. owner is the chat session
+	// whose agent may drive it, empty for a terminal the user started and
+	// never handed over; agentDriven reports whether the agent or the user
+	// holds the keyboard now. controlChanged is closed and replaced at
+	// every handover.
+	controlMu      sync.Mutex
+	owner          string
+	agentDriven    bool
+	controlChanged chan struct{}
 
 	// id is assigned by the manager; empty for sessions that never
 	// registered.
@@ -418,18 +430,20 @@ func NewInteractiveSession(opts InteractiveSessionOptions) (*InteractiveSession,
 	startTime := time.Now().Unix() / 60
 
 	session := &InteractiveSession{
-		emu:          emulator,
-		pty:          pty,
-		input:        input,
-		command:      opts.Command,
-		owner:        opts.Owner,
-		dirty:        make(chan struct{}, 1),
-		done:         make(chan struct{}),
-		readDone:     make(chan struct{}),
-		inputCh:      make(chan func(), interactiveInputQueueSize),
-		inputStop:    make(chan struct{}),
-		registeredAt: startTime,
-		overrides:    make(map[int]color.Color),
+		emu:            emulator,
+		pty:            pty,
+		input:          input,
+		command:        opts.Command,
+		owner:          opts.Owner,
+		agentDriven:    opts.AgentDriven,
+		controlChanged: make(chan struct{}),
+		dirty:          make(chan struct{}, 1),
+		done:           make(chan struct{}),
+		readDone:       make(chan struct{}),
+		inputCh:        make(chan func(), interactiveInputQueueSize),
+		inputStop:      make(chan struct{}),
+		registeredAt:   startTime,
+		overrides:      make(map[int]color.Color),
 	}
 
 	emulator.SetCallbacks(vt.Callbacks{
@@ -992,9 +1006,58 @@ func (s *InteractiveSession) ID() string { return s.id }
 // means the session is a bare interactive shell.
 func (s *InteractiveSession) Command() string { return s.command }
 
-// Owner returns the chat session that started this session through the
-// agent, or the empty string for sessions the user started.
-func (s *InteractiveSession) Owner() string { return s.owner }
+// Owner returns the chat session whose agent may drive this session: the
+// one that started it, or the one the user handed it to. It is empty for a
+// terminal the user started and never handed over.
+func (s *InteractiveSession) Owner() string {
+	s.controlMu.Lock()
+	defer s.controlMu.Unlock()
+	return s.owner
+}
+
+// AgentDriven reports whether the agent holds the keyboard. Otherwise the
+// user does, and the agent may not type into the session.
+func (s *InteractiveSession) AgentDriven() bool {
+	s.controlMu.Lock()
+	defer s.controlMu.Unlock()
+	return s.agentDriven
+}
+
+// ControlChanged returns a channel that is closed at the next handover.
+func (s *InteractiveSession) ControlChanged() <-chan struct{} {
+	s.controlMu.Lock()
+	defer s.controlMu.Unlock()
+	return s.controlChanged
+}
+
+// HandToUser gives the keyboard to the user. The owner keeps the session,
+// and gets the keyboard back when the user hands it over.
+func (s *InteractiveSession) HandToUser() {
+	s.updateControl(func() { s.agentDriven = false })
+}
+
+// HandToAgent gives the session and the keyboard to the agent of the chat
+// session chat.
+func (s *InteractiveSession) HandToAgent(chat string) {
+	s.updateControl(func() { s.owner, s.agentDriven = chat, true })
+}
+
+// updateControl applies a handover and, when it changed anything, wakes
+// the waiters on [InteractiveSession.ControlChanged] and the UI.
+func (s *InteractiveSession) updateControl(apply func()) {
+	s.controlMu.Lock()
+	owner, agentDriven := s.owner, s.agentDriven
+	apply()
+	changed := owner != s.owner || agentDriven != s.agentDriven
+	if changed {
+		close(s.controlChanged)
+		s.controlChanged = make(chan struct{})
+	}
+	s.controlMu.Unlock()
+	if changed {
+		s.signalDirty()
+	}
+}
 
 // completedAgeMinutes is how many minutes have passed since the process
 // exited; 0 while it is still running.

@@ -171,6 +171,12 @@ type (
 	// between the docked panel and a full-window overlay.
 	ActionTerminalFullscreen struct{}
 
+	// ActionTerminalHandover asks the model to move the keyboard of a
+	// terminal the agent owns: to the agent when ToAgent, else to the user.
+	ActionTerminalHandover struct {
+		ToAgent bool
+	}
+
 	// ActionTerminalComplete is sent when an interactive terminal's
 	// process exited, carrying the final transcript.
 	ActionTerminalComplete struct {

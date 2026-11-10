@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -40,21 +41,23 @@ var terminalDescription string
 
 // Terminal actions.
 const (
-	terminalActionStart = "start"
-	terminalActionRead  = "read"
-	terminalActionWrite = "write"
-	terminalActionPaste = "paste"
-	terminalActionKill  = "kill"
+	terminalActionStart    = "start"
+	terminalActionRead     = "read"
+	terminalActionWrite    = "write"
+	terminalActionPaste    = "paste"
+	terminalActionKill     = "kill"
+	terminalActionHandover = "handover"
+	terminalActionTake     = "take"
 )
 
 type TerminalParams struct {
-	Action string `json:"action" description:"What to do: start (run a command), read (see the screen), write (send keystrokes), or kill (end the session)"`
+	Action string `json:"action" description:"What to do: start (run a command), read (see the screen), write (send keystrokes), paste (send text as a paste), kill (end the session), handover (give the keyboard to the user), or take (ask the user for the keyboard)"`
 
 	// start
 	Command     string `json:"command,omitempty" description:"The command to run in the terminal (start only)"`
 	WorkingDir  string `json:"working_dir,omitempty" description:"The working directory for the command (start only, defaults to the project directory)"`
-	Description string `json:"description,omitempty" description:"A brief description of what the command does (start only, try to keep it under 30 characters or so)"`
-	Wait        *bool  `json:"wait,omitempty" description:"Wait for the user to finish before returning (start only, default true). The user owns the terminal and can type in it; the call blocks until the command exits, the user closes the terminal, or the wait budget elapses, and returns the transcript. Set false when you own the terminal: the user sees a read-only view they cannot type into, and you drive it with write/read or let it run"`
+	Description string `json:"description,omitempty" description:"start: a brief description of what the command does; handover: what the user should do in the terminal. Try to keep it under 30 characters or so"`
+	Wait        *bool  `json:"wait,omitempty" description:"Wait for the user to finish before returning (start and handover, default true). The user holds the keyboard and can type in the terminal; the call blocks until the command exits, the user hands the terminal back or closes it, or the wait budget elapses. Set false on start when you drive the terminal: the user sees a read-only view they cannot type into, and you drive it with write/read or let it run"`
 
 	// write
 	Text     string   `json:"text,omitempty" description:"The exact text/keystrokes to send (write/paste). Use \\r for Enter, \\u0003 for Ctrl+C, and escape sequences for arrow keys (\\u001b[A/B/C/D)"`
@@ -63,13 +66,13 @@ type TerminalParams struct {
 
 	// read
 	IncludeScrollback bool `json:"include_scrollback,omitempty" description:"Also return everything that scrolled off the visible screen (read only)"`
-	WaitSeconds       int  `json:"wait_seconds,omitempty" description:"Block until the session exits or this many seconds elapse (read only, 0 returns immediately). Prefer this over polling in a loop"`
+	WaitSeconds       int  `json:"wait_seconds,omitempty" description:"Block until the session exits, the keyboard changes hands, or this many seconds elapse (read only, 0 returns immediately). Prefer this over polling in a loop"`
 
 	// write (mouse)
 	Mouse *TerminalMouse `json:"mouse,omitempty" description:"Send a mouse event instead of keys (write only). Programs that enabled mouse tracking receive it; others ignore it"`
 
-	// read, write, kill
-	SessionID string `json:"session_id,omitempty" description:"The terminal session ID (read/write/kill). Defaults to the most recent session"`
+	// read, write, paste, kill, handover, take
+	SessionID string `json:"session_id,omitempty" description:"The terminal session ID (every action but start). Defaults to the most recent session"`
 }
 
 // TerminalMouse is a mouse event to send to a session. Coordinates are
@@ -95,10 +98,14 @@ type TerminalResponseMetadata struct {
 	WorkingDir string `json:"working_dir,omitempty"`
 	Exited     bool   `json:"exited,omitempty"`
 	ExitCode   int    `json:"exit_code,omitempty"`
+	// UserControlled reports that the user holds the keyboard, so the
+	// agent must take it before typing.
+	UserControlled bool `json:"user_controlled,omitempty"`
 }
 
-// terminalOpInspect describes a session the agent wants to type into, so
-// the permission prompt can name what runs there. It is not a tool action.
+// terminalOpInspect describes a session the agent wants to type into or
+// take, so the permission prompt can name what runs there. It is not a
+// tool action.
 const terminalOpInspect = "inspect"
 
 const terminalUnavailableMessage = "the terminal tool is unavailable in this environment: no terminal is attached. Run the command with bash instead, or ask the user to run it themselves"
@@ -119,14 +126,21 @@ func NewTerminalTool(permissions permission.Service, terminals terminal.Service,
 			switch params.Action {
 			case terminalActionStart:
 				return tool.start(ctx, params, blocked)
-			case terminalActionRead, terminalActionKill:
+			case terminalActionRead, terminalActionKill, terminalActionHandover:
+				// Handing the keyboard to the user only takes power away
+				// from the agent, so it needs no permission.
 				return tool.response(tool.run(ctx, params.Action, params))
 			case terminalActionWrite, terminalActionPaste:
 				return tool.input(ctx, params)
+			case terminalActionTake:
+				return tool.take(ctx, params)
 			default:
 				return fantasy.NewTextErrorResponse(fmt.Sprintf(
-					"unknown action %q; expected one of: %s, %s, %s, %s, %s",
-					params.Action, terminalActionStart, terminalActionRead, terminalActionWrite, terminalActionPaste, terminalActionKill,
+					"unknown action %q; expected one of: %s",
+					params.Action, strings.Join([]string{
+						terminalActionStart, terminalActionRead, terminalActionWrite, terminalActionPaste,
+						terminalActionKill, terminalActionHandover, terminalActionTake,
+					}, ", "),
 				)), nil
 			}
 		},
@@ -241,7 +255,7 @@ func (t terminalTool) input(ctx context.Context, params TerminalParams) (fantasy
 		ToolCallID:  t.call.ID,
 		ToolName:    TerminalToolName,
 		Action:      terminalActionWrite,
-		Description: fmt.Sprintf("%s the interactive terminal running %q: %q", verb, session.Command, input),
+		Description: fmt.Sprintf("%s the interactive terminal running %s: %q", verb, commandLabel(session.Command), input),
 		Params: TerminalPermissionsParams{
 			Description: verb + " the running terminal",
 			Command:     input,
@@ -258,6 +272,62 @@ func (t terminalTool) input(ctx context.Context, params TerminalParams) (fantasy
 	// Act on the session that was approved, not whichever is newest now.
 	params.SessionID = session.SessionID
 	return t.response(t.run(ctx, params.Action, params))
+}
+
+// take asks for the keyboard of a terminal the user holds: one they opened
+// themselves, or one the agent handed them. Moving control to the agent is
+// the user's call, so it goes through a permission prompt.
+func (t terminalTool) take(ctx context.Context, params TerminalParams) (fantasy.ToolResponse, error) {
+	info, err := t.run(ctx, terminalOpInspect, params)
+	if err != nil || info.IsError {
+		return t.response(info, err)
+	}
+	var session TerminalResponseMetadata
+	if err := json.Unmarshal([]byte(info.Metadata), &session); err != nil {
+		return fantasy.ToolResponse{}, fmt.Errorf("could not decode terminal session: %w", err)
+	}
+	if session.Exited {
+		return fantasy.NewTextErrorResponse(fmt.Sprintf(
+			"session %s has already exited; there is nothing to take", session.SessionID,
+		)), nil
+	}
+	if !session.UserControlled {
+		return fantasy.NewTextResponse(fmt.Sprintf(
+			"You already hold the keyboard of terminal session %s.", session.SessionID,
+		)), nil
+	}
+
+	granted, err := t.permissions.Request(ctx, permission.CreatePermissionRequest{
+		SessionID:   GetSessionFromContext(ctx),
+		Path:        session.WorkingDir,
+		ToolCallID:  t.call.ID,
+		ToolName:    TerminalToolName,
+		Action:      terminalActionTake,
+		Description: fmt.Sprintf("Take over the interactive terminal running %s", commandLabel(session.Command)),
+		Params: TerminalPermissionsParams{
+			Description: "Hand your terminal to the agent",
+			Command:     session.Command,
+			WorkingDir:  session.WorkingDir,
+		},
+	})
+	if err != nil {
+		return fantasy.ToolResponse{}, err
+	}
+	if !granted {
+		return NewPermissionDeniedResponse(), nil
+	}
+
+	params.SessionID = session.SessionID
+	return t.response(t.run(ctx, terminalActionTake, params))
+}
+
+// commandLabel names a session's command for a prompt; an empty command is
+// a bare shell.
+func commandLabel(command string) string {
+	if command == "" {
+		return "an interactive shell"
+	}
+	return strconv.Quote(command)
 }
 
 // run executes op on the process that owns the terminals: a client, when
@@ -334,6 +404,10 @@ func ExecTerminal(ctx context.Context, terminals terminal.Service, workingDir st
 		return host.paste(ctx, params)
 	case terminalActionKill:
 		return host.kill(ctx, params)
+	case terminalActionHandover:
+		return host.handover(ctx, params)
+	case terminalActionTake:
+		return host.take(ctx, params)
 	default:
 		return terminalError(fmt.Sprintf("unknown terminal operation %q", call.Op)), nil
 	}
@@ -360,20 +434,35 @@ func terminalResult(content string, metadata TerminalResponseMetadata) terminal.
 	return terminal.Result{Content: content, Metadata: string(raw)}
 }
 
-// inspect describes a session the agent may type into.
+// inspect describes a session the agent wants to type into, which needs
+// the keyboard, or to take, which needs the user to hold it.
 func (h terminalHost) inspect(params TerminalParams) (terminal.Result, error) {
-	session, err := resolveInteractiveSession(h.chat, params.SessionID, true)
+	session, err := resolveInteractiveSession(h.chat, params.SessionID, params.Action != terminalActionTake)
 	if err != nil {
 		return terminalError(err.Error()), nil
 	}
 	return terminalResult("", TerminalResponseMetadata{
-		Action:     terminalOpInspect,
-		SessionID:  session.ID(),
-		Command:    session.Command(),
-		WorkingDir: session.WorkingDir(),
-		Exited:     session.Exited(),
-		ExitCode:   session.ExitCode(),
+		Action:         terminalOpInspect,
+		SessionID:      session.ID(),
+		Command:        session.Command(),
+		WorkingDir:     session.WorkingDir(),
+		Exited:         session.Exited(),
+		ExitCode:       session.ExitCode(),
+		UserControlled: !agentControls(session, h.chat),
 	}), nil
+}
+
+// agentControls reports whether the agent of chat holds the keyboard.
+func agentControls(session *shell.InteractiveSession, chat string) bool {
+	return session.Owner() == chat && session.AgentDriven()
+}
+
+// keyboardHolder tells the agent who may type into the session.
+func keyboardHolder(session *shell.InteractiveSession, chat string) string {
+	if agentControls(session, chat) {
+		return "You hold the keyboard."
+	}
+	return "The user holds the keyboard; ask for it with take before typing."
 }
 
 // start spawns a command in the embedded terminal and shows it to the
@@ -392,11 +481,13 @@ func (h terminalHost) start(ctx context.Context, params TerminalParams) (termina
 		Cols:       shell.DefaultInteractiveCols,
 		Rows:       shell.DefaultInteractiveRows,
 		Owner:      h.chat,
+		// A waiting start puts the user at the keyboard.
+		AgentDriven: !terminalStartWaits(params),
 	})
 	if err != nil {
 		if errors.Is(err, shell.ErrInteractiveActive) {
 			return terminalError(fmt.Sprintf(
-				"%v. If you started it, drive it with action read/write or end it with action kill first; otherwise wait for it to finish (read with wait_seconds)",
+				"%v. If you hold its keyboard, drive it with read/write or end it with kill first; if the user holds it, wait for them (read with wait_seconds) or ask for the keyboard with take",
 				err,
 			)), nil
 		}
@@ -428,14 +519,15 @@ func (h terminalHost) start(ctx context.Context, params TerminalParams) (termina
 	// By default a start waits for the user: the agent pauses here until
 	// the user finishes their work in the terminal.
 	if terminalStartWaits(params) {
-		return terminalWaitForUser(ctx, session, metadata)
+		return terminalWaitForUser(ctx, session, h.chat, metadata)
 	}
 
 	output := fmt.Sprintf(
 		"Terminal session %s started with command: %s\n\n"+
 			"The terminal is open on the user's screen in read-only mode: they can watch but not type into it.\n\n"+
 			"Next steps: read to see the current screen (set wait_seconds to block until it exits instead of polling), "+
-			"write to send keystrokes (for example %q to answer a prompt), and kill to end the session.\n\n"+
+			"write to send keystrokes (for example %q to answer a prompt), handover when the user must type (a password, a choice only they can make), "+
+			"and kill to end the session.\n\n"+
 			"The session keeps running until the command exits or it is killed.",
 		session.ID(), params.Command, "y\\r",
 	)
@@ -450,33 +542,30 @@ func terminalStartWaits(params TerminalParams) bool {
 	return params.Wait == nil || *params.Wait
 }
 
-// terminalStartWaitBudget is the cut-off for a waiting start. It is a var
-// so tests can shorten it.
+// terminalStartWaitBudget is the cut-off for a waiting start or handover.
+// It is a var so tests can shorten it.
 var terminalStartWaitBudget = TerminalStartWait
 
 // terminalWaitForUser pauses the agent while the user works in the
-// terminal. The call returns once the command exits, the user closes the
-// terminal (which kills the session), the wait budget elapses, or the run
-// is canceled.
+// terminal. The call returns once the command exits, the user hands the
+// keyboard to the agent or closes the terminal (which kills the session),
+// the wait budget elapses, or the run is canceled.
 func terminalWaitForUser(
 	ctx context.Context,
 	session *shell.InteractiveSession,
+	chat string,
 	metadata TerminalResponseMetadata,
 ) (terminal.Result, error) {
-	if !session.Exited() {
-		select {
-		case <-session.Done():
-		case <-time.After(terminalStartWaitBudget):
-		case <-ctx.Done():
-			return terminal.Result{}, ctx.Err()
-		}
+	if err := awaitUser(ctx, session, chat, terminalStartWaitBudget); err != nil {
+		return terminal.Result{}, err
 	}
 
 	metadata.Exited = session.Exited()
 	metadata.ExitCode = session.ExitCode()
 
 	var output string
-	if session.Exited() {
+	switch {
+	case session.Exited():
 		transcript := session.CaptureText()
 		if transcript == "" {
 			transcript = BashNoOutput
@@ -485,23 +574,140 @@ func terminalWaitForUser(
 			"Terminal session %s finished (command: %s, exit code %d).\n\n<transcript>\n%s\n</transcript>",
 			session.ID(), session.Command(), session.ExitCode(), transcript,
 		)
-	} else {
+	case agentControls(session, chat):
+		output = fmt.Sprintf(
+			"The user handed you the keyboard of terminal session %s (command: %s): drive it with write or paste, hand it back with handover, or end it with kill.\n\n"+
+				"<screen>\n%s\n</screen>\n\n%s",
+			session.ID(), session.Command(), screenText(session), sessionGeometry(session),
+		)
+	default:
 		// The wait budget elapsed with the user still working. Hand control
 		// back with the current screen so the agent can decide to keep
-		// waiting (read wait_seconds) or take over (write).
-		screen := session.ScreenText()
-		if screen == "" {
-			screen = BashNoOutput
-		}
+		// waiting (read wait_seconds) or ask for the keyboard (take).
+		metadata.UserControlled = true
 		output = fmt.Sprintf(
 			"Terminal session %s (command: %s) is still running after %s; the user may still be working in it.\n\n"+
-				"Keep waiting with read (wait_seconds) or take over with write. The session ends when the command exits or it is killed.\n\n"+
+				"Keep waiting with read (wait_seconds), or ask the user for the keyboard with take. The session ends when the command exits or it is killed.\n\n"+
 				"<screen>\n%s\n</screen>",
-			session.ID(), session.Command(), terminalStartWaitBudget, screen,
+			session.ID(), session.Command(), terminalStartWaitBudget, screenText(session),
 		)
 	}
 
 	return terminalResult(output, metadata), nil
+}
+
+// awaitUser blocks while the user holds the keyboard of a running
+// session: until the command exits, the user hands the keyboard to the
+// agent of chat, wait elapses, or ctx ends.
+func awaitUser(ctx context.Context, session *shell.InteractiveSession, chat string, wait time.Duration) error {
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	for {
+		// Take the channel before checking, so a handover in between is
+		// not missed.
+		changed := session.ControlChanged()
+		if session.Exited() || agentControls(session, chat) {
+			return nil
+		}
+		select {
+		case <-session.Done():
+			return nil
+		case <-changed:
+		case <-timer.C:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+// screenText returns the visible screen, or a placeholder when it is
+// blank.
+func screenText(session *shell.InteractiveSession) string {
+	if screen := session.ScreenText(); screen != "" {
+		return screen
+	}
+	return BashNoOutput
+}
+
+// handover gives the user the keyboard of a session the agent drives, and
+// by default waits for them to finish.
+func (h terminalHost) handover(ctx context.Context, params TerminalParams) (terminal.Result, error) {
+	if h.terminals == nil || !h.terminals.Available() {
+		return terminalError(terminalUnavailableMessage), nil
+	}
+	session, err := resolveInteractiveSession(h.chat, params.SessionID, true)
+	if err != nil {
+		return terminalError(err.Error()), nil
+	}
+	if session.Exited() {
+		return terminalError(fmt.Sprintf("session %s has already exited; there is nothing to hand over", session.ID())), nil
+	}
+
+	session.HandToUser()
+	if _, err := h.terminals.Show(ctx, terminal.Request{
+		SessionID:   h.chat,
+		ToolCallID:  h.toolCallID,
+		Command:     session.Command(),
+		WorkingDir:  session.WorkingDir(),
+		Description: params.Description,
+		Session:     session,
+	}); err != nil {
+		session.HandToAgent(h.chat)
+		return terminalError(fmt.Sprintf("could not hand the terminal over: %v", err)), nil
+	}
+
+	metadata := TerminalResponseMetadata{
+		Action:    terminalActionHandover,
+		SessionID: session.ID(),
+		Command:   session.Command(),
+	}
+	if terminalStartWaits(params) {
+		return terminalWaitForUser(ctx, session, h.chat, metadata)
+	}
+
+	metadata.UserControlled = true
+	return terminalResult(fmt.Sprintf(
+		"The user now holds the keyboard of terminal session %s; you cannot type into it until they hand it back or you take it with take. "+
+			"Read it to follow along: wait_seconds blocks until the keyboard changes hands or the command exits.",
+		session.ID(),
+	), metadata), nil
+}
+
+// take gives the agent the keyboard of a session the user holds, once
+// the user allowed it.
+func (h terminalHost) take(ctx context.Context, params TerminalParams) (terminal.Result, error) {
+	session, err := resolveInteractiveSession(h.chat, params.SessionID, false)
+	if err != nil {
+		return terminalError(err.Error()), nil
+	}
+	if session.Exited() {
+		return terminalError(fmt.Sprintf("session %s has already exited; there is nothing to take", session.ID())), nil
+	}
+
+	session.HandToAgent(h.chat)
+	if h.terminals != nil {
+		// Turn the panel read-only. Without a UI there is nothing to
+		// update.
+		_, _ = h.terminals.Show(ctx, terminal.Request{
+			SessionID:   h.chat,
+			ToolCallID:  h.toolCallID,
+			Command:     session.Command(),
+			WorkingDir:  session.WorkingDir(),
+			AgentDriven: true,
+			Session:     session,
+		})
+	}
+
+	return terminalResult(fmt.Sprintf(
+		"You now hold the keyboard of terminal session %s; the user watches a read-only view. Drive it with write or paste, hand it back with handover, or end it with kill.\n\n"+
+			"<screen>\n%s\n</screen>\n\n%s",
+		session.ID(), screenText(session), sessionGeometry(session),
+	), TerminalResponseMetadata{
+		Action:    terminalActionTake,
+		SessionID: session.ID(),
+		Command:   session.Command(),
+	}), nil
 }
 
 // read returns the session's current screen, optionally waiting for it to
@@ -514,8 +720,10 @@ func (h terminalHost) read(ctx context.Context, params TerminalParams) (terminal
 
 	if params.WaitSeconds > 0 && !session.Exited() {
 		wait := min(time.Duration(params.WaitSeconds)*time.Second, TerminalMaxReadWait)
+		changed := session.ControlChanged()
 		select {
 		case <-session.Done():
+		case <-changed:
 		case <-time.After(wait):
 		case <-ctx.Done():
 			return terminal.Result{}, ctx.Err()
@@ -534,15 +742,20 @@ func (h terminalHost) read(ctx context.Context, params TerminalParams) (terminal
 		screen = BashNoOutput
 	}
 	parts = append(parts, "<screen>\n"+screen+"\n</screen>")
-	parts = append(parts, fmt.Sprintf("Session %s: %s", session.ID(), sessionStatus(session)))
+	status := fmt.Sprintf("Session %s: %s.", session.ID(), sessionStatus(session))
+	if !session.Exited() {
+		status += " " + keyboardHolder(session, h.chat)
+	}
+	parts = append(parts, status)
 	parts = append(parts, sessionGeometry(session))
 
 	return terminalResult(strings.Join(parts, "\n\n"), TerminalResponseMetadata{
-		Action:    terminalActionRead,
-		SessionID: session.ID(),
-		Command:   session.Command(),
-		Exited:    session.Exited(),
-		ExitCode:  session.ExitCode(),
+		Action:         terminalActionRead,
+		SessionID:      session.ID(),
+		Command:        session.Command(),
+		Exited:         session.Exited(),
+		ExitCode:       session.ExitCode(),
+		UserControlled: !session.Exited() && !agentControls(session, h.chat),
 	}), nil
 }
 
@@ -726,9 +939,10 @@ func (h terminalHost) kill(ctx context.Context, params TerminalParams) (terminal
 
 // resolveInteractiveSession finds the session named by id, or the running
 // session (or most recent) when id is empty. Sessions another chat started
-// are invisible; sessions the user started are readable but, with
-// mustOwn, refused: the agent only drives terminals it started itself.
-func resolveInteractiveSession(chat, id string, mustOwn bool) (*shell.InteractiveSession, error) {
+// are invisible. With mustControl, the agent must hold the keyboard: the
+// user's own terminals and the ones handed to them are readable, but the
+// agent may only type into or kill them after taking the keyboard.
+func resolveInteractiveSession(chat, id string, mustControl bool) (*shell.InteractiveSession, error) {
 	manager := shell.GetInteractiveSessionManager()
 	visible := func(s *shell.InteractiveSession) bool {
 		return s.Owner() == "" || s.Owner() == chat
@@ -758,9 +972,16 @@ func resolveInteractiveSession(chat, id string, mustOwn bool) (*shell.Interactiv
 		session = s
 	}
 
-	if mustOwn && session.Owner() != chat {
+	// The keyboard of a finished session no longer matters.
+	if mustControl && !session.Exited() && !agentControls(session, chat) {
+		if session.Owner() == "" {
+			return nil, fmt.Errorf(
+				"terminal session %s belongs to the user; you can read it, but to type into it or kill it, ask for the keyboard with action take",
+				session.ID(),
+			)
+		}
 		return nil, fmt.Errorf(
-			"terminal session %s belongs to the user; you can read it but not type into or kill it. Start your own session instead",
+			"the user holds the keyboard of terminal session %s; wait for them to hand it back (read with wait_seconds) or ask for it with action take",
 			session.ID(),
 		)
 	}

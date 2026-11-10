@@ -262,7 +262,7 @@ model add repotwo/m1 --name M1`,
 model add globalone/m1 --name M1`,
 	})
 
-	store, err := config.Load(workDir, t.TempDir(), false)
+	store, err := config.Load(t.Context(), workDir, t.TempDir(), false)
 	require.NoError(t, err)
 
 	cfg := store.Config()
@@ -296,7 +296,7 @@ model add shared/m1 --name M1`
 		"shared.sh": declare("https://last.example/v1"),
 	})
 
-	store, err := config.Load(workDir, t.TempDir(), false)
+	store, err := config.Load(t.Context(), workDir, t.TempDir(), false)
 	require.NoError(t, err)
 	pc, ok := store.Config().Providers.Get("shared")
 	require.True(t, ok)

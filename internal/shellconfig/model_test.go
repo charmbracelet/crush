@@ -41,13 +41,17 @@ func TestModelAddReasoningLevels(t *testing.T) {
 	// A family that sells one model per tier collapses into a single entry
 	// with the tiers behind the reasoning selector.
 	result := loadScript(t, `provider add gemini-sub --api-key k
-model add gemini-sub/flash --name "Flash" --can-reason true \
+model add gemini-sub/flash --name "Flash" --thinking toggleable \
   --reasoning-level low --reasoning-level medium --reasoning-level high \
   --reasoning-effort medium`)
 
 	model := result["providers"].(map[string]any)["gemini-sub"].(map[string]any)["models"].([]any)[0].(map[string]any)
-	require.Equal(t, []any{"low", "medium", "high"}, model["reasoning_levels"].([]any))
-	require.Equal(t, "medium", model["default_reasoning_effort"])
+	reasoning := model["reasoning"].(map[string]any)
+	levels := reasoning["effort_levels"].([]any)
+	require.Len(t, levels, 3)
+	require.Equal(t, map[string]any{"value": "low", "display": "Low"}, levels[0])
+	require.Equal(t, map[string]any{"value": "high", "display": "High"}, levels[2])
+	require.Equal(t, "medium", reasoning["default_effort_level"])
 }
 
 // TestModelAddReplacesDuplicateID verifies that re-adding a model id updates

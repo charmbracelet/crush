@@ -3,6 +3,7 @@ package lsp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -10,15 +11,18 @@ import (
 	"slices"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/home"
+	"github.com/charmbracelet/crush/internal/lsphost"
 	powernap "github.com/charmbracelet/x/powernap/pkg/lsp"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/charmbracelet/x/powernap/pkg/transport"
+	"github.com/sourcegraph/jsonrpc2"
 )
 
 // DiagnosticCounts holds the count of diagnostics by severity.
@@ -30,7 +34,10 @@ type DiagnosticCounts struct {
 }
 
 type Client struct {
-	client *powernap.Client
+	// client is the connection to the server. A restart replaces it while
+	// other goroutines use the client, so it is read through
+	// [Client.server].
+	client atomic.Pointer[powernap.Client]
 	name   string
 	debug  bool
 
@@ -66,6 +73,25 @@ type Client struct {
 
 	// Server state
 	serverState atomic.Value
+
+	// host is the server of a host application this client is connected
+	// to, or nil when the client runs a server of its own.
+	host *hostTarget
+
+	// lost is set once the connection to the server is known to be gone:
+	// the server exited, or the host closed the connection. A lost client
+	// is of no use and never comes back; see [Client.markLost].
+	lost atomic.Bool
+	// closing is set while the client is being stopped on purpose, so that
+	// the connection going away is not taken for a failure.
+	closing atomic.Bool
+	// restarting is set while [Client.Restart] runs. A restart closes the
+	// client and starts it again, which is not the client being stopped:
+	// a start that is still waiting for the client leaves it alone.
+	restarting atomic.Bool
+	// onLost, when set, is called once, on its own goroutine, when the
+	// client is lost. It is set before the client is initialized.
+	onLost func(*Client)
 }
 
 // New creates a new LSP client using the powernap implementation.
@@ -75,6 +101,19 @@ func New(
 	resolver config.VariableResolver,
 	cwd string,
 	debug bool,
+) (*Client, error) {
+	return newClient(name, cfg, resolver, cwd, debug, nil)
+}
+
+// newClient creates a client for a server of its own or, when host is not
+// nil, for that server of a host application.
+func newClient(
+	name string,
+	cfg config.LSPConfig,
+	resolver config.VariableResolver,
+	cwd string,
+	debug bool,
+	host *hostTarget,
 ) (*Client, error) {
 	// Use a long-lived context independent of the caller's request context.
 	// The caller's context may be canceled when the tool call completes,
@@ -91,6 +130,7 @@ func New(
 		debug:       debug,
 		resolver:    resolver,
 		cwd:         cwd,
+		host:        host,
 	}
 	client.serverState.Store(StateStopped)
 
@@ -110,12 +150,12 @@ func (c *Client) Initialize(ctx context.Context, workspaceDir string) (*protocol
 	// late for those — the server treats an unhandled response as fatal.
 	c.registerHandlers()
 
-	if err := c.client.Initialize(ctx, false); err != nil {
+	if err := c.server().Initialize(ctx, false); err != nil {
 		return nil, fmt.Errorf("failed to initialize the lsp client: %w", err)
 	}
 
 	// Convert powernap capabilities to protocol capabilities
-	caps := c.client.GetCapabilities()
+	caps := c.server().GetCapabilities()
 	protocolCaps := protocol.ServerCapabilities{
 		TextDocumentSync: caps.TextDocumentSync,
 		CompletionProvider: func() *protocol.CompletionOptions {
@@ -140,25 +180,140 @@ func (c *Client) Initialize(ctx context.Context, workspaceDir string) (*protocol
 // closeTimeout is the maximum time to wait for a graceful LSP shutdown.
 const closeTimeout = 5 * time.Second
 
+// server returns the client's current connection to its server.
+func (c *Client) server() *powernap.Client {
+	return c.client.Load()
+}
+
 // Kill kills the client without doing anything else.
-func (c *Client) Kill() { c.client.Kill() }
+func (c *Client) Kill() {
+	c.closing.Store(true)
+	c.server().Kill()
+}
 
 // Shutdown permanently cancels the client's long-lived context and kills the
 // underlying process. Unlike Restart, this is terminal: the client cannot be
 // reused after Shutdown.
 func (c *Client) Shutdown() {
+	c.closing.Store(true)
 	c.cancelCtx()
-	c.client.Kill()
+	c.server().Kill()
+}
+
+// Host returns the name of the host application whose language server this
+// client is connected to, and false when the client runs its own server.
+func (c *Client) Host() (string, bool) {
+	if c == nil || c.host == nil {
+		return "", false
+	}
+	return c.host.name, true
+}
+
+// alive reports whether the client's connection to its server is not known
+// to be gone.
+func (c *Client) alive() bool {
+	return !c.lost.Load()
+}
+
+// markLost records that the connection to the server is gone, unless the
+// client is being stopped on purpose. The client's state becomes
+// [StateError] and onLost runs, which is how the manager drops the client
+// so that the next start connects or spawns again.
+func (c *Client) markLost() {
+	if c.closing.Load() || !c.lost.CompareAndSwap(false, true) {
+		return
+	}
+	slog.Warn("LSP server connection lost", "name", c.name, "hosted", c.host != nil)
+	c.SetServerState(StateError)
+	if c.onLost != nil {
+		// Not on this goroutine: it may be the connection's read loop,
+		// which the handler will close.
+		go c.onLost(c)
+	}
+}
+
+// observe marks the client lost when err says its connection is gone, and
+// returns err. The LSP library cannot tell that a server exited until
+// something is written to it, so every call to the server goes through
+// here.
+func (c *Client) observe(err error) error {
+	if err != nil && connectionLost(err) {
+		c.markLost()
+	}
+	return err
+}
+
+// errConnectionLost is returned for a client whose server went away while
+// it was starting.
+var errConnectionLost = errors.New("the connection to the server was lost")
+
+// errStopped is returned for a client that was stopped on purpose while it
+// was starting. It is not a failure of the server or of its host.
+var errStopped = errors.New("the client was stopped while it was starting")
+
+// errRestarted is returned for a client that was restarted while it was
+// starting. The restart has taken the client over.
+var errRestarted = errors.New("the client was restarted while it was starting")
+
+// stopReason returns why the client cannot become ready:
+// [errConnectionLost] when its connection is gone, [errStopped] when it
+// is being stopped on purpose, and nil otherwise. A lost client is shut
+// down by its manager, which also marks it as closing, so being lost is
+// checked first.
+func (c *Client) stopReason() error {
+	switch {
+	case c.lost.Load():
+		return errConnectionLost
+	case c.closing.Load():
+		return errStopped
+	}
+	return nil
+}
+
+// interrupted is stopReason for a start that is waiting for the client. A
+// restart closes the client on its way, which is no reason for the start
+// to give the client up: there is none while one runs.
+func (c *Client) interrupted() error {
+	// In this order: a restart marks itself before it closes the client.
+	reason := c.stopReason()
+	if c.restarting.Load() {
+		return nil
+	}
+	return reason
+}
+
+// giveUp ends the wait for a client that was interrupted while starting,
+// and returns why. A lost client is in [StateError] again, which waiting
+// had replaced; the state of a stopped one is left to whoever stopped it.
+func (c *Client) giveUp(why error) error {
+	if errors.Is(why, errConnectionLost) {
+		c.SetServerState(StateError)
+	}
+	return why
+}
+
+// connectionLost reports whether err means the server's end of the
+// connection is gone.
+func connectionLost(err error) bool {
+	return errors.Is(err, jsonrpc2.ErrClosed) ||
+		errors.Is(err, syscall.EPIPE) ||
+		errors.Is(err, os.ErrClosed)
 }
 
 // GetOffsetEncoding returns the negotiated offset encoding for this client.
 func (c *Client) GetOffsetEncoding() powernap.OffsetEncoding {
-	return c.client.GetOffsetEncoding()
+	return c.server().GetOffsetEncoding()
 }
 
 // Close closes all open files in the client, then shuts down gracefully.
 // If shutdown takes longer than closeTimeout, it falls back to Kill().
+//
+// The exit notification is only sent after the server answered the shutdown
+// request: a server that gets exit without having shut down exits with an
+// error, and a server shared with other clients could take them with it.
+// A server that fails to shut down is killed instead.
 func (c *Client) Close(ctx context.Context) error {
+	c.closing.Store(true)
 	c.CloseAllFiles(ctx)
 
 	// Use a timeout to prevent hanging on unresponsive LSP servers.
@@ -169,17 +324,20 @@ func (c *Client) Close(ctx context.Context) error {
 
 	done := make(chan error, 1)
 	go func() {
-		if err := c.client.Shutdown(closeCtx); err != nil {
+		if err := c.server().Shutdown(closeCtx); err != nil {
 			slog.Warn("Failed to shutdown LSP client", "error", err)
+			c.server().Kill()
+			done <- err
+			return
 		}
-		done <- c.client.Exit()
+		done <- c.server().Exit()
 	}()
 
 	select {
 	case err := <-done:
 		return err
 	case <-closeCtx.Done():
-		c.client.Kill()
+		c.server().Kill()
 		return closeCtx.Err()
 	}
 }
@@ -203,8 +361,18 @@ func (c *Client) createPowernapClient() error {
 		return fmt.Errorf("invalid lsp env: %w", err)
 	}
 
+	command = home.Long(command)
+	if c.host != nil {
+		// The host's server is reached through this executable, which
+		// connects the client's pipes to the host's socket. The server
+		// runs with the host's arguments, environment and settings.
+		command = c.host.executable
+		args = lsphost.Args(c.host.socket, c.host.server, c.cwd, c.host.workspace, os.Getpid())
+		envs = nil
+	}
+
 	clientConfig := powernap.ClientConfig{
-		Command:     home.Long(command),
+		Command:     command,
 		Args:        args,
 		RootURI:     rootURI,
 		Environment: envs,
@@ -223,13 +391,15 @@ func (c *Client) createPowernapClient() error {
 		return fmt.Errorf("failed to create lsp client: %w", err)
 	}
 
-	c.client = powernapClient
+	c.client.Store(powernapClient)
+	c.lost.Store(false)
+	c.closing.Store(false)
 	return nil
 }
 
 // registerHandlers registers the standard LSP notification and request handlers.
 func (c *Client) registerHandlers() {
-	c.RegisterServerRequestHandler("workspace/applyEdit", HandleApplyEdit(c.client.GetOffsetEncoding()))
+	c.RegisterServerRequestHandler("workspace/applyEdit", HandleApplyEdit(c.server().GetOffsetEncoding()))
 	c.RegisterServerRequestHandler("workspace/configuration", HandleWorkspaceConfiguration)
 	c.RegisterServerRequestHandler("client/registerCapability", HandleRegisterCapability)
 	c.RegisterServerRequestHandler("window/workDoneProgress/create", HandleWorkDoneProgressCreate)
@@ -241,13 +411,28 @@ func (c *Client) registerHandlers() {
 	c.RegisterNotificationHandler("textDocument/publishDiagnostics", func(_ context.Context, _ string, params json.RawMessage) {
 		HandleDiagnostics(c, params)
 	})
+	if c.host != nil {
+		// Sent by `crush __lsp-dial` when the host closes the connection.
+		c.RegisterNotificationHandler(lsphost.ClosedMethod, func(context.Context, string, json.RawMessage) {
+			c.markLost()
+		})
+	}
 }
 
 // Restart closes the current LSP client and creates a new one with the same configuration.
 func (c *Client) Restart() error {
+	c.restarting.Store(true)
+	defer c.restarting.Store(false)
+
+	// The open files are keyed by URI; they are reopened by path.
 	var openFiles []string
 	for uri := range c.openFiles.Seq2() {
-		openFiles = append(openFiles, string(uri))
+		path, err := protocol.DocumentURI(uri).Path()
+		if err != nil {
+			slog.Warn("Failed to convert URI to path", "uri", uri, "error", err)
+			continue
+		}
+		openFiles = append(openFiles, path)
 	}
 
 	// Cancel the old long-lived context and create a fresh one so that
@@ -263,6 +448,12 @@ func (c *Client) Restart() error {
 	}
 
 	c.SetServerState(StateStopped)
+
+	// Nothing is open on the new server, whether or not the old one was
+	// told so.
+	for uri := range c.openFiles.Seq2() {
+		c.openFiles.Del(uri)
+	}
 
 	c.diagCountsCache = DiagnosticCounts{}
 	c.diagCountsVersion = 0
@@ -281,20 +472,20 @@ func (c *Client) Restart() error {
 	// don't crash on an unhandled response.
 	c.registerHandlers()
 
-	if err := c.client.Initialize(initCtx, false); err != nil {
+	if err := c.server().Initialize(initCtx, false); err != nil {
 		c.SetServerState(StateError)
 		return fmt.Errorf("failed to initialize lsp client: %w", err)
 	}
 
-	if err := c.WaitForServerReady(initCtx); err != nil {
+	if err := c.waitForServerReady(initCtx, true); err != nil {
 		slog.Error("Server failed to become ready after restart", "name", c.name, "error", err)
 		c.SetServerState(StateError)
 		return err
 	}
 
-	for _, uri := range openFiles {
-		if err := c.OpenFile(initCtx, uri); err != nil {
-			slog.Warn("Failed to reopen file after restart", "file", uri, "error", err)
+	for _, path := range openFiles {
+		if err := c.OpenFile(initCtx, path); err != nil {
+			slog.Warn("Failed to reopen file after restart", "file", path, "error", err)
 		}
 	}
 	return nil
@@ -340,8 +531,17 @@ func (c *Client) SetDiagnosticsCallback(callback func(name string, count int)) {
 	c.onDiagnosticsChanged = callback
 }
 
-// WaitForServerReady waits for the server to be ready
+// WaitForServerReady waits for the server to be ready. It gives up at once
+// when the client is lost or stopped meanwhile: neither can become ready,
+// and waiting out ctx would block the start that is waiting for this one.
 func (c *Client) WaitForServerReady(ctx context.Context) error {
+	return c.waitForServerReady(ctx, false)
+}
+
+// waitForServerReady is WaitForServerReady for a start, and for a restart
+// when restart is set. A start that finds the client being restarted
+// leaves the server alone until the restart is done with it.
+func (c *Client) waitForServerReady(ctx context.Context, restart bool) error {
 	// Set initial state
 	c.SetServerState(StateStarting)
 
@@ -361,8 +561,17 @@ func (c *Client) WaitForServerReady(ctx context.Context) error {
 			c.SetServerState(StateError)
 			return fmt.Errorf("timeout waiting for LSP server to be ready")
 		case <-ticker.C:
+			// In this order: a restart marks itself before it closes
+			// the client.
+			reason := c.stopReason()
+			if !restart && c.restarting.Load() {
+				continue
+			}
+			if reason != nil {
+				return c.giveUp(reason)
+			}
 			// Check if client is running
-			if !c.client.IsRunning() {
+			if !c.server().IsRunning() {
 				if c.debug {
 					slog.Debug("LSP server not ready yet", "server", c.name)
 				}
@@ -417,8 +626,8 @@ func (c *Client) OpenFile(ctx context.Context, filepath string) error {
 	}
 
 	// Notify the server about the opened document
-	if err = c.client.NotifyDidOpenTextDocument(ctx, uri, string(powernap.DetectLanguage(filepath)), 1, string(content)); err != nil {
-		return err
+	if err = c.server().NotifyDidOpenTextDocument(ctx, uri, string(powernap.DetectLanguage(filepath)), 1, string(content)); err != nil {
+		return c.observe(err)
 	}
 
 	c.openFiles.Set(uri, &OpenFileInfo{
@@ -458,7 +667,7 @@ func (c *Client) NotifyChange(ctx context.Context, filepath string) error {
 		},
 	}
 
-	return c.client.NotifyDidChangeTextDocument(ctx, uri, int(fileInfo.Version), changes)
+	return c.observe(c.server().NotifyDidChangeTextDocument(ctx, uri, int(fileInfo.Version), changes))
 }
 
 // IsFileOpen checks if a file is currently open.
@@ -474,7 +683,7 @@ func (c *Client) CloseAllFiles(ctx context.Context) {
 		if c.debug {
 			slog.Debug("Closing file", "file", uri)
 		}
-		if err := c.client.NotifyDidCloseTextDocument(ctx, uri); err != nil {
+		if err := c.server().NotifyDidCloseTextDocument(ctx, uri); err != nil {
 			slog.Warn("Error closing file", "uri", uri, "error", err)
 			continue
 		}
@@ -549,12 +758,12 @@ func (c *Client) OpenFileOnDemand(ctx context.Context, filepath string) error {
 
 // RegisterNotificationHandler registers a notification handler.
 func (c *Client) RegisterNotificationHandler(method string, handler transport.NotificationHandler) {
-	c.client.RegisterNotificationHandler(method, handler)
+	c.server().RegisterNotificationHandler(method, handler)
 }
 
 // RegisterServerRequestHandler handles server requests.
 func (c *Client) RegisterServerRequestHandler(method string, handler transport.Handler) {
-	c.client.RegisterHandler(method, handler)
+	c.server().RegisterHandler(method, handler)
 }
 
 // openKeyConfigFiles opens important configuration files that help initialize the server.
@@ -581,9 +790,9 @@ func (c *Client) NotifyWorkspaceChange(ctx context.Context) error {
 	if c == nil {
 		return nil
 	}
-	return c.client.NotifyDidChangeWatchedFiles(ctx, []protocol.FileEvent{
+	return c.observe(c.server().NotifyDidChangeWatchedFiles(ctx, []protocol.FileEvent{
 		{URI: protocol.DocumentURI(protocol.URIFromPath(c.cwd)), Type: protocol.Changed},
-	})
+	}))
 }
 
 // RefreshOpenFiles re-notifies the LSP server about all currently open files,
@@ -611,7 +820,7 @@ func (c *Client) RefreshOpenFiles(ctx context.Context) {
 				},
 			},
 		}
-		if err := c.client.NotifyDidChangeTextDocument(ctx, uri, int(info.Version), changes); err != nil {
+		if err := c.observe(c.server().NotifyDidChangeTextDocument(ctx, uri, int(info.Version), changes)); err != nil {
 			slog.Warn("Failed to notify file change", "uri", uri, "error", err)
 		}
 	}
@@ -701,7 +910,8 @@ func (c *Client) FindReferences(ctx context.Context, filepath string, line, char
 
 	// NOTE: line and character should be 0-based.
 	// See: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#position
-	return c.client.FindReferences(ctx, filepath, line-1, character-1, includeDeclaration)
+	result, err := c.server().FindReferences(ctx, filepath, line-1, character-1, includeDeclaration)
+	return result, c.observe(err) //nolint:wrapcheck
 }
 
 // Rename renames the symbol at the given position across all files.
@@ -713,7 +923,8 @@ func (c *Client) Rename(ctx context.Context, filepath string, line, character in
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	return c.client.RequestRename(ctx, filepath, line-1, character-1, newName) //nolint:wrapcheck
+	result, err := c.server().RequestRename(ctx, filepath, line-1, character-1, newName)
+	return result, c.observe(err) //nolint:wrapcheck
 }
 
 // DocumentSymbols returns the document symbols for the given file.
@@ -725,7 +936,8 @@ func (c *Client) DocumentSymbols(ctx context.Context, filepath string) ([]protoc
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	return c.client.RequestDocumentSymbols(ctx, filepath) //nolint:wrapcheck
+	result, err := c.server().RequestDocumentSymbols(ctx, filepath)
+	return result, c.observe(err) //nolint:wrapcheck
 }
 
 // Definition finds the definition of the symbol at the given position.
@@ -737,7 +949,8 @@ func (c *Client) Definition(ctx context.Context, filepath string, line, characte
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	return c.client.RequestDefinition(ctx, filepath, line-1, character-1) //nolint:wrapcheck
+	result, err := c.server().RequestDefinition(ctx, filepath, line-1, character-1)
+	return result, c.observe(err) //nolint:wrapcheck
 }
 
 // PrepareCallHierarchy prepares a call hierarchy item at the given position.
@@ -749,7 +962,8 @@ func (c *Client) PrepareCallHierarchy(ctx context.Context, filepath string, line
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	return c.client.PrepareCallHierarchy(ctx, filepath, line-1, character-1) //nolint:wrapcheck
+	result, err := c.server().PrepareCallHierarchy(ctx, filepath, line-1, character-1)
+	return result, c.observe(err) //nolint:wrapcheck
 }
 
 // IncomingCalls returns all callers of the given call hierarchy item.
@@ -757,7 +971,8 @@ func (c *Client) IncomingCalls(ctx context.Context, item protocol.CallHierarchyI
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	return c.client.IncomingCalls(ctx, item) //nolint:wrapcheck
+	result, err := c.server().IncomingCalls(ctx, item)
+	return result, c.observe(err) //nolint:wrapcheck
 }
 
 // OutgoingCalls returns all callees of the given call hierarchy item.
@@ -765,5 +980,6 @@ func (c *Client) OutgoingCalls(ctx context.Context, item protocol.CallHierarchyI
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	return c.client.OutgoingCalls(ctx, item) //nolint:wrapcheck
+	result, err := c.server().OutgoingCalls(ctx, item)
+	return result, c.observe(err) //nolint:wrapcheck
 }

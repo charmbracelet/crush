@@ -135,6 +135,41 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 			Fails(400, 404).
 			Handle(c.handlePostWorkspaceHostContext),
 
+		apigen.Get("/v1/workspaces/{id}/lsp-host").
+			Summary("Get LSP host").
+			Description("Returns the application that shares its language "+
+				"servers with the workspace: the newest registration among "+
+				"the workspace's clients, with the client it belongs to. "+
+				"lsp_host is null when there is none.").
+			Tags("workspaces").
+			PathParam("id", "Workspace ID").
+			Responds(proto.LSPHostState{}).
+			Fails(404).
+			Handle(c.handleGetWorkspaceLSPHost),
+
+		apigen.Post("/v1/workspaces/{id}/lsp-host").
+			Summary("Set LSP host").
+			Description("Registers the calling client's application (e.g. "+
+				"an editor running Crush in a pane) as a host that shares "+
+				"its language servers, or clears the client's registration "+
+				"with a null lsp_host. Crush then connects to the servers "+
+				"the host offers, on the unix socket at address, instead of "+
+				"starting its own with the same command. The registration "+
+				"is kept in memory only and belongs to the client's claim on "+
+				"the workspace: the client must hold one (409 otherwise), and "+
+				"the registration goes away with it. With several "+
+				"registrations the newest is used. A change of the "+
+				"workspace's host is broadcast as an lsp_host event, and "+
+				"clients attaching later receive the current host first. "+
+				"Responds with the client's registration.").
+			Tags("workspaces").
+			PathParam("id", "Workspace ID").
+			RequiredQueryParam("client_id", "Client ID (UUID) of the host's client").
+			Accepts(proto.LSPHostRequest{}).
+			Responds(proto.LSPHostState{}).
+			Fails(400, 404, 409, 413).
+			Handle(c.handlePostWorkspaceLSPHost),
+
 		apigen.Get("/v1/workspaces/{id}/config").
 			Summary("Get workspace config").
 			Description("Returns the resolved workspace configuration (config.Config).").

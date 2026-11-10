@@ -488,3 +488,33 @@ func needsPOSIXShell(t *testing.T) {
 		t.Skip("needs a POSIX shell; cmd.exe has no sh, stty, dd or od")
 	}
 }
+
+// TestTerminalDialogHandKey checks ctrl+t on a terminal the agent owns:
+// it takes the keyboard from the agent, and gives it back. The user's own
+// terminals pass the key to their programs.
+func TestTerminalDialogHandKey(t *testing.T) {
+	t.Parallel()
+
+	dialog, session := newTerminalDialogForTestOptions(t, "sleep 30", TerminalDialogOptions{
+		Command:     "sleep 30",
+		AgentDriven: true,
+	})
+	ctrlT := tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl}
+
+	_, ok := dialog.HandKey()
+	require.False(t, ok, "the user's own terminal keeps ctrl+t")
+	require.Nil(t, dialog.HandleMsg(ctrlT), "a read-only view refuses the key like any other")
+
+	session.HandToAgent("chat")
+	hand, ok := dialog.HandKey()
+	require.True(t, ok)
+	require.Equal(t, "take over", hand.Help().Desc)
+	require.Equal(t, ActionTerminalHandover{ToAgent: false}, dialog.HandleMsg(ctrlT))
+
+	dialog.SetAgentDriven(false)
+	hand, _ = dialog.HandKey()
+	require.Equal(t, "give to agent", hand.Help().Desc)
+	require.Equal(t, ActionTerminalHandover{ToAgent: true}, dialog.HandleMsg(ctrlT))
+	require.IsType(t, ActionTerminalInput{}, dialog.HandleMsg(tea.KeyPressMsg{Code: 'a', Text: "a"}),
+		"the user types into the terminal they hold")
+}

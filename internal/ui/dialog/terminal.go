@@ -18,6 +18,10 @@ import (
 // TerminalID is the identifier for the interactive terminal dialog.
 const TerminalID = "terminal"
 
+// TerminalHandKey moves the keyboard of a terminal the agent owns between
+// the user and the agent.
+const TerminalHandKey = "ctrl+t"
+
 // TerminalOutputMsg signals that the embedded terminal changed and should
 // repaint.
 type TerminalOutputMsg struct{}
@@ -60,6 +64,7 @@ type TerminalDialog struct {
 	contentRect uv.Rectangle
 	closeKey    key.Binding
 	fullKey     key.Binding
+	handKey     key.Binding
 }
 
 var _ Dialog = (*TerminalDialog)(nil)
@@ -82,6 +87,13 @@ func NewTerminalDialog(com *common.Common, session *shell.InteractiveSession, op
 	t.fullKey = key.NewBinding(
 		key.WithKeys("ctrl+f"),
 		key.WithHelp("ctrl+f", "fullscreen"),
+	)
+	// Moves the keyboard of a terminal the agent owns between the user and
+	// the agent. The user's own terminals keep the key for their programs:
+	// the agent asks for those through a permission prompt instead.
+	t.handKey = key.NewBinding(
+		key.WithKeys(TerminalHandKey),
+		key.WithHelp(TerminalHandKey, "give to agent"),
 	)
 	t.applyTheme()
 	return t
@@ -118,6 +130,26 @@ func (t *TerminalDialog) Keys() (close, fullscreen key.Binding) {
 	return t.closeKey, t.fullKey
 }
 
+// HandKey returns the binding that moves the keyboard between the user and
+// the agent, labeled for the direction it moves it now. ok is false when it
+// does not apply: the terminal is the user's own, or its command ended.
+func (t *TerminalDialog) HandKey() (binding key.Binding, ok bool) {
+	if t.session.Owner() == "" || t.session.Exited() {
+		return key.Binding{}, false
+	}
+	binding = t.handKey
+	if t.agentDriven {
+		binding.SetHelp(TerminalHandKey, "take over")
+	}
+	return binding, true
+}
+
+// SetAgentDriven switches the panel between the agent's read-only view and
+// the user's interactive one after the keyboard changed hands.
+func (t *TerminalDialog) SetAgentDriven(agentDriven bool) {
+	t.agentDriven = agentDriven
+}
+
 // HandleMsg implements [Dialog].
 func (t *TerminalDialog) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
@@ -128,6 +160,9 @@ func (t *TerminalDialog) HandleMsg(msg tea.Msg) Action {
 		}
 		if key.Matches(msg, t.fullKey) {
 			return ActionTerminalFullscreen{}
+		}
+		if hand, ok := t.HandKey(); ok && key.Matches(msg, hand) {
+			return ActionTerminalHandover{ToAgent: !t.agentDriven}
 		}
 		// Agent-driven sessions are read-only for the user: their keys must
 		// not reach a command the agent is driving. The agent's write tool

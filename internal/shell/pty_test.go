@@ -287,3 +287,39 @@ func TestInteractiveSessionTrySendKeyKeepsOrder(t *testing.T) {
 	waitForExit(t, session)
 	require.Contains(t, session.CaptureText(), "got:abcdefghijklmnopqrstuvwxyz")
 }
+
+func TestInteractiveSessionHandover(t *testing.T) {
+	t.Parallel()
+
+	session := newTestSession(t, "sleep 30")
+	require.Empty(t, session.Owner(), "a session the user starts is theirs")
+	require.False(t, session.AgentDriven())
+
+	changed := session.ControlChanged()
+	session.HandToAgent("chat")
+	require.Equal(t, "chat", session.Owner())
+	require.True(t, session.AgentDriven())
+	select {
+	case <-changed:
+	default:
+		t.Fatal("a handover must wake its waiters")
+	}
+
+	changed = session.ControlChanged()
+	session.HandToUser()
+	require.Equal(t, "chat", session.Owner(), "the agent keeps the session it handed over")
+	require.False(t, session.AgentDriven())
+	select {
+	case <-changed:
+	default:
+		t.Fatal("a handover must wake its waiters")
+	}
+
+	changed = session.ControlChanged()
+	session.HandToUser()
+	select {
+	case <-changed:
+		t.Fatal("a handover that changes nothing must not wake waiters")
+	default:
+	}
+}

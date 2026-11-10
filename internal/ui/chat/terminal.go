@@ -80,7 +80,7 @@ func (t *TerminalToolRenderContext) RenderTool(sty *styles.Styles, width int, op
 // user is watching live; errors always surface.
 func terminalShowsBody(action string) bool {
 	switch action {
-	case "read", "write", "paste":
+	case "read", "write", "paste", "take":
 		return false
 	default:
 		return true
@@ -118,6 +118,13 @@ func terminalActionDetail(sty *styles.Styles, meta tools.TerminalResponseMetadat
 		return "send " + sty.Tool.TerminalKeys.Render(keys)
 	case "kill":
 		return "terminate session"
+	case "handover":
+		if params.Description != "" {
+			return "hand to user: " + params.Description
+		}
+		return "hand to user"
+	case "take":
+		return "take the keyboard"
 	default:
 		return ""
 	}

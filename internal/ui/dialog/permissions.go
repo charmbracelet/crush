@@ -534,8 +534,11 @@ func (p *Permissions) renderHeader(contentWidth int) string {
 	case tools.TerminalToolName:
 		if params, ok := p.permission.Params.(tools.TerminalPermissionsParams); ok {
 			mode := "interactive terminal (you will drive the command)"
-			if p.permission.Action == "write" {
+			switch p.permission.Action {
+			case "write":
 				mode = "typing into a running interactive terminal"
+			case "take":
+				mode = "handing your terminal to the agent: it gets the keyboard, you watch (" + TerminalHandKey + " takes it back)"
 			}
 			lines = append(lines, p.renderKeyValue("Desc", params.Description, contentWidth))
 			lines = append(lines, p.renderKeyValue("Mode", mode, contentWidth))

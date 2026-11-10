@@ -5,6 +5,7 @@ import (
 	"errors"
 	"image"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/charmbracelet/crush/internal/terminal"
 	"github.com/charmbracelet/crush/internal/ui/attachments"
 	"github.com/charmbracelet/crush/internal/ui/dialog"
+	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/crush/internal/workspace"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/stretchr/testify/require"
@@ -658,4 +660,88 @@ func TestTerminalExitClosesPanelBehindAnotherDialog(t *testing.T) {
 	require.Nil(t, u.activeTerminal)
 	require.False(t, u.dialog.ContainsDialog(dialog.TerminalID))
 	require.True(t, u.dialog.ContainsDialog(dialog.QuitID), "the dialog in front stays open")
+}
+
+// TestTerminalHandoverMovesTheKeyboard follows a terminal the agent owns
+// as its keyboard changes hands: the agent hands it to the user, who gives
+// it back with ctrl+t and later takes it over again.
+func TestTerminalHandoverMovesTheKeyboard(t *testing.T) {
+	u, session := newAgentDrivenTerminalUI(t)
+	u.attachments = attachments.New(nil, attachments.Keymap{})
+	u.keyMap = DefaultKeyMap()
+	session.HandToAgent("sess-A")
+
+	// The agent hands it over: the open panel turns interactive and takes
+	// the keyboard.
+	session.HandToUser()
+	_, cmd := u.Update(pubsubEventTerminalRequest(terminal.Request{
+		SessionID:   "sess-A",
+		Description: "Type your password",
+		Session:     session,
+	}))
+	var told bool
+	for _, msg := range runCmdSync(cmd) {
+		if info, ok := msg.(util.InfoMsg); ok && strings.Contains(info.Msg, "Type your password") {
+			told = true
+		}
+	}
+	require.True(t, told, "the user learns what the agent needs")
+	require.False(t, u.activeTerminal.agentDriven)
+	require.Equal(t, uiFocusTerminal, u.focus)
+
+	// The dialog absorbs keystrokes during its input grace period after
+	// opening; wait it out before pressing keys.
+	time.Sleep(1700 * time.Millisecond)
+
+	ctrlT := tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl}
+	u.handleKeyPressMsg(ctrlT)
+	require.True(t, session.AgentDriven(), "ctrl+t gives the keyboard back")
+	require.Equal(t, "sess-A", session.Owner())
+	require.True(t, u.activeTerminal.agentDriven)
+	require.Equal(t, uiFocusEditor, u.focus)
+
+	u.focusTerminal()
+	u.handleKeyPressMsg(ctrlT)
+	require.False(t, session.AgentDriven(), "ctrl+t takes the keyboard from the agent")
+	require.False(t, u.activeTerminal.agentDriven)
+	require.Equal(t, uiFocusTerminal, u.focus)
+}
+
+// TestAgentTakesTheUsersTerminal checks the panel after the user let the
+// agent take their own terminal.
+func TestAgentTakesTheUsersTerminal(t *testing.T) {
+	u, session := newAttachedTerminalUI(t)
+	_, ok := u.frontTerminal().HandKey()
+	require.False(t, ok, "the user's own terminal keeps ctrl+t for its programs")
+
+	session.HandToAgent("sess-A")
+	_, cmd := u.Update(pubsubEventTerminalRequest(terminal.Request{
+		SessionID:   "sess-A",
+		AgentDriven: true,
+		Session:     session,
+	}))
+	_ = runCmdSync(cmd)
+	require.True(t, u.activeTerminal.agentDriven)
+	require.True(t, u.activeTerminal.agentStarted, "the agent reads it now; nothing is persisted on exit")
+	require.Equal(t, uiFocusEditor, u.focus)
+	_, ok = u.frontTerminal().HandKey()
+	require.True(t, ok)
+}
+
+// TestHandoverReachesHiddenTerminal checks that a handover for a terminal
+// hidden with its chat session sticks until the panel comes back.
+func TestHandoverReachesHiddenTerminal(t *testing.T) {
+	u, session := newAgentDrivenTerminalUI(t)
+	session.HandToAgent("sess-A")
+	_ = u.detachTerminal()
+	require.Nil(t, u.activeTerminal)
+
+	session.HandToUser()
+	_, cmd := u.Update(pubsubEventTerminalRequest(terminal.Request{SessionID: "sess-A", Session: session}))
+	_ = runCmdSync(cmd)
+	require.Nil(t, u.activeTerminal, "a hidden terminal stays hidden")
+	require.False(t, u.detachedTerminal.agentDriven)
+
+	_ = u.restoreDetachedTerminal("sess-A")
+	require.False(t, u.activeTerminal.agentDriven, "it comes back in the user's hands")
 }

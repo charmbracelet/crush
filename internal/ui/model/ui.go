@@ -179,12 +179,13 @@ type (
 // on screen. Only one exists at a time.
 type activeTerminalSession struct {
 	session *shell.InteractiveSession
-	// agentStarted marks sessions requested by a tool: their output is
-	// read back through the terminal tools rather than persisted.
+	// agentStarted marks sessions whose output returns through the
+	// terminal tools rather than being persisted: the ones a tool started
+	// and the ones the agent took over.
 	agentStarted bool
-	// agentDriven marks sessions the agent owns and drives itself. The
-	// panel is read-only: user keys and mouse events never reach the
-	// command, so the user cannot interfere with the agent's work.
+	// agentDriven reports that the agent holds the keyboard. The panel is
+	// then read-only: user keys and mouse events never reach the command,
+	// so the user cannot interfere with the agent's work.
 	agentDriven bool
 	userCommand string
 	// chatSessionID is the chat session the terminal was opened in. It
@@ -1311,6 +1312,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pubsub.Event[sshaskpass.Notification]:
 		m.handleSSHNotification(msg.Payload)
 	case pubsub.Event[terminal.Request]:
+		// A request about a terminal that is already open moves its
+		// keyboard between the agent and the user.
+		if cmd, ok := m.updateTerminalControl(msg.Payload); ok {
+			cmds = append(cmds, cmd)
+			break
+		}
 		if m.activeTerminal != nil {
 			// One terminal at a time: the session stays alive (the model
 			// can still read it) but there is nothing to show.
@@ -2493,6 +2500,16 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	case dialog.ActionTerminalFullscreen:
 		if m.activeTerminal != nil {
 			m.setTerminalFullscreen(!m.activeTerminal.fullscreen)
+		}
+	case dialog.ActionTerminalHandover:
+		if m.activeTerminal != nil {
+			session := m.activeTerminal.session
+			if msg.ToAgent {
+				session.HandToAgent(session.Owner())
+			} else {
+				session.HandToUser()
+			}
+			cmds = append(cmds, m.applyTerminalControl(msg.ToAgent))
 		}
 	case dialog.ActionTerminalComplete:
 		cmds = append(cmds, m.closeTerminalDialog(msg.Result))
@@ -4261,10 +4278,7 @@ func (m *UI) ShortHelp() []key.Binding {
 	// While the interactive terminal holds focus, its controls are the only
 	// ones that matter.
 	if m.focus == uiFocusTerminal {
-		quit, fullscreen := m.terminalHelpBindings()
-		tab := k.Tab
-		tab.SetHelp("tab", "editor")
-		return []key.Binding{quit, fullscreen, tab}
+		return m.terminalHints()
 	}
 
 	// When an inline editor is active, show its help.
@@ -4381,10 +4395,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 	// While the interactive terminal holds focus, its controls are the only
 	// ones that matter.
 	if m.focus == uiFocusTerminal {
-		quit, fullscreen := m.terminalHelpBindings()
-		tab := m.keyMap.Tab
-		tab.SetHelp("tab", "editor")
-		return [][]key.Binding{{quit, fullscreen, tab}}
+		return [][]key.Binding{m.terminalHints()}
 	}
 
 	// When an inline editor is active, show its help.
@@ -6498,6 +6509,21 @@ func (m *UI) terminalHelpBindings() (quit, fullscreen key.Binding) {
 	return quit, fullscreen
 }
 
+// terminalHints returns the bindings the focused terminal answers to, for
+// the help and the hint row.
+func (m *UI) terminalHints() []key.Binding {
+	quit, fullscreen := m.terminalHelpBindings()
+	binds := []key.Binding{quit, fullscreen}
+	if terminal := m.frontTerminal(); terminal != nil {
+		if hand, ok := terminal.HandKey(); ok {
+			binds = append(binds, hand)
+		}
+	}
+	tab := m.keyMap.Tab
+	tab.SetHelp("tab", "editor")
+	return append(binds, tab)
+}
+
 // drawTerminalHints fills the editor area with the docked terminal's
 // keybind hints while the terminal holds focus. The textarea is blurred
 // then, so leaving its prompt on screen would only invite confusion.
@@ -6506,15 +6532,11 @@ func (m *UI) drawTerminalHints(scr uv.Screen, area uv.Rectangle) {
 		return
 	}
 
-	quit, fullscreen := m.terminalHelpBindings()
-	tab := m.keyMap.Tab
-	tab.SetHelp("tab", "editor")
-
-	hints := strings.Join([]string{
-		quit.Help().Key + " " + quit.Help().Desc,
-		fullscreen.Help().Key + " " + fullscreen.Help().Desc,
-		tab.Help().Key + " " + tab.Help().Desc,
-	}, "   ")
+	var parts []string
+	for _, binding := range m.terminalHints() {
+		parts = append(parts, binding.Help().Key+" "+binding.Help().Desc)
+	}
+	hints := strings.Join(parts, "   ")
 	row := m.com.Styles.Terminal.Hint.Render(hints)
 
 	// Keep the row where the editor's first prompt line sits, below the
@@ -6632,6 +6654,69 @@ func (m *UI) restoreDetachedTerminal(chatSessionID string) tea.Cmd {
 	if t.fullscreen {
 		m.setTerminalFullscreen(true)
 	}
+	return cmd
+}
+
+// updateTerminalControl applies a handover the agent made to a terminal
+// that is already open, docked or hidden with its chat session. It
+// reports false for a request about any other session, which opens a new
+// terminal instead.
+func (m *UI) updateTerminalControl(req terminal.Request) (tea.Cmd, bool) {
+	var cmd tea.Cmd
+	switch {
+	case m.activeTerminal != nil && m.activeTerminal.session == req.Session:
+		cmd = m.applyTerminalControl(req.AgentDriven)
+	case m.detachedTerminal != nil && m.detachedTerminal.session == req.Session:
+		m.detachedTerminal.agentDriven = req.AgentDriven
+		m.detachedTerminal.agentStarted = m.detachedTerminal.agentStarted || req.AgentDriven
+	default:
+		return nil, false
+	}
+	if req.AgentDriven {
+		return cmd, true
+	}
+
+	// The agent needs the user: tell them, even when they look elsewhere.
+	note := cmp.Or(req.Description, "The agent handed you the terminal")
+	return tea.Batch(
+		cmd,
+		util.ReportInfo(fmt.Sprintf("Terminal handed to you: %s (%s gives it back)", note, dialog.TerminalHandKey)),
+		m.sendNotification(notification.Notification{
+			Title:   "Interactive terminal",
+			Message: note,
+		}),
+	), true
+}
+
+// applyTerminalControl switches the open terminal to whoever now holds its
+// keyboard: an interactive panel with the focus for the user, a read-only
+// view for the agent.
+func (m *UI) applyTerminalControl(agentDriven bool) tea.Cmd {
+	t := m.activeTerminal
+	if t == nil || t.agentDriven == agentDriven {
+		return nil
+	}
+	t.agentDriven = agentDriven
+	// The agent reads what happens next through the terminal tools; a
+	// transcript persisted on exit would land in the middle of its turn.
+	t.agentStarted = t.agentStarted || agentDriven
+	if d, ok := m.dialog.Dialog(dialog.TerminalID).(*dialog.TerminalDialog); ok {
+		d.SetAgentDriven(agentDriven)
+	}
+
+	var cmd tea.Cmd
+	if agentDriven {
+		if m.focus == uiFocusTerminal {
+			m.focus = uiFocusEditor
+			cmd = m.textarea.Focus()
+		}
+	} else {
+		m.textarea.Blur()
+		m.focusTerminal()
+	}
+	// Resize the PTY for its new driver: the panel for the user, the
+	// ghost fullscreen for the agent.
+	m.updateLayoutAndSize()
 	return cmd
 }
 

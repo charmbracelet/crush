@@ -716,9 +716,10 @@ func TestTerminalWriteAsksPermission(t *testing.T) {
 	workingDir := t.TempDir()
 
 	session, err := shell.GetInteractiveSessionManager().Start(shell.InteractiveSessionOptions{
-		Command:    "cat",
-		WorkingDir: workingDir,
-		Owner:      "test-session",
+		Command:     "cat",
+		WorkingDir:  workingDir,
+		Owner:       "test-session",
+		AgentDriven: true,
 	})
 	require.NoError(t, err)
 
@@ -834,4 +835,147 @@ func TestTerminalToolRemoteWithoutClient(t *testing.T) {
 	resp := runTerminalTool(t, tool, TerminalParams{Action: "start", Command: "printf hi"})
 	require.True(t, resp.IsError)
 	require.Contains(t, resp.Content, "unavailable")
+}
+
+// startAgentDriven starts a session the agent drives and returns it.
+func startAgentDriven(t *testing.T, tool fantasy.AgentTool, command string) *shell.InteractiveSession {
+	t.Helper()
+	resp := runTerminalTool(t, tool, TerminalParams{Action: "start", Command: command, Wait: agentDriven()})
+	require.False(t, resp.IsError, resp.Content)
+
+	var meta TerminalResponseMetadata
+	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
+	session, ok := shell.GetInteractiveSessionManager().Get(meta.SessionID)
+	require.True(t, ok)
+	require.True(t, session.AgentDriven())
+	return session
+}
+
+// runTerminalToolAsync runs the tool in the background, for calls that
+// block until the user acts.
+func runTerminalToolAsync(t *testing.T, tool fantasy.AgentTool, params TerminalParams) <-chan fantasy.ToolResponse {
+	t.Helper()
+	done := make(chan fantasy.ToolResponse, 1)
+	go func() { done <- runTerminalTool(t, tool, params) }()
+	return done
+}
+
+func awaitResponse(t *testing.T, done <-chan fantasy.ToolResponse) fantasy.ToolResponse {
+	t.Helper()
+	select {
+	case resp := <-done:
+		return resp
+	case <-time.After(10 * time.Second):
+		t.Fatal("the call did not return")
+		return fantasy.ToolResponse{}
+	}
+}
+
+func TestTerminalHandoverWaitsForTheUser(t *testing.T) {
+	needsPOSIXShell(t)
+
+	tool, terminals := newTerminalToolForTest(t)
+	session := startAgentDriven(t, tool, "cat")
+
+	done := runTerminalToolAsync(t, tool, TerminalParams{
+		Action:      "handover",
+		SessionID:   session.ID(),
+		Description: "Type your password",
+	})
+	require.Eventually(t, func() bool { return !session.AgentDriven() }, 5*time.Second, 10*time.Millisecond,
+		"the user gets the keyboard")
+
+	// The user hands it back from the panel.
+	session.HandToAgent("test-session")
+	resp := awaitResponse(t, done)
+	require.False(t, resp.IsError, resp.Content)
+	require.Contains(t, resp.Content, "handed you the keyboard")
+
+	require.Len(t, terminals.shown, 2, "the start and the handover reach the UI")
+	handover := terminals.shown[1]
+	require.Same(t, session, handover.Session)
+	require.False(t, handover.AgentDriven)
+	require.Equal(t, "Type your password", handover.Description)
+
+	write := runTerminalTool(t, tool, TerminalParams{Action: "write", SessionID: session.ID(), Text: "back\r"})
+	require.False(t, write.IsError, write.Content)
+}
+
+func TestTerminalHandoverWithoutWaitLocksTheAgentOut(t *testing.T) {
+	needsPOSIXShell(t)
+
+	tool, _ := newTerminalToolForTest(t)
+	session := startAgentDriven(t, tool, "cat")
+
+	resp := runTerminalTool(t, tool, TerminalParams{Action: "handover", SessionID: session.ID(), Wait: agentDriven()})
+	require.False(t, resp.IsError, resp.Content)
+	require.False(t, session.AgentDriven())
+
+	for _, action := range []string{"write", "paste", "kill", "handover"} {
+		resp := runTerminalTool(t, tool, TerminalParams{Action: action, SessionID: session.ID(), Text: "x"})
+		require.True(t, resp.IsError, action)
+		require.Contains(t, resp.Content, "the user holds the keyboard", action)
+	}
+
+	read := runTerminalTool(t, tool, TerminalParams{Action: "read", SessionID: session.ID()})
+	require.False(t, read.IsError)
+	require.Contains(t, read.Content, "The user holds the keyboard")
+}
+
+func TestTerminalStartReturnsWhenTheUserHandsOver(t *testing.T) {
+	needsPOSIXShell(t)
+
+	tool, _ := newTerminalToolForTest(t)
+	done := runTerminalToolAsync(t, tool, TerminalParams{Action: "start", Command: "cat"})
+
+	var session *shell.InteractiveSession
+	require.Eventually(t, func() bool {
+		var ok bool
+		session, ok = shell.GetInteractiveSessionManager().Active()
+		return ok
+	}, 5*time.Second, 10*time.Millisecond)
+	require.False(t, session.AgentDriven(), "a waiting start puts the user at the keyboard")
+
+	session.HandToAgent("test-session")
+	resp := awaitResponse(t, done)
+	require.False(t, resp.IsError, resp.Content)
+	require.Contains(t, resp.Content, "handed you the keyboard")
+}
+
+func TestTerminalTakeAsksTheUser(t *testing.T) {
+	needsPOSIXShell(t)
+
+	workingDir := t.TempDir()
+	resetTerminalManager(t)
+
+	// A shell the user opened themselves.
+	user, err := shell.NewInteractiveSession(shell.InteractiveSessionOptions{Command: "cat", WorkingDir: workingDir})
+	require.NoError(t, err)
+	require.NoError(t, shell.GetInteractiveSessionManager().Register(user))
+
+	denying := &denyingPermissionService{}
+	resp := runTerminalTool(t, NewTerminalTool(denying, newFakeTerminalService(), workingDir, workingDir, nil),
+		TerminalParams{Action: "take", SessionID: user.ID()})
+	require.True(t, resp.IsError)
+	require.Len(t, denying.requests, 1)
+	require.Equal(t, "take", denying.requests[0].Action)
+	require.Contains(t, denying.requests[0].Description, `"cat"`)
+	require.Empty(t, user.Owner(), "a refused take leaves the terminal with the user")
+
+	terminals := newFakeTerminalService()
+	permissions := &mockBashPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}
+	tool := NewTerminalTool(permissions, terminals, workingDir, workingDir, nil)
+	resp = runTerminalTool(t, tool, TerminalParams{Action: "take", SessionID: user.ID()})
+	require.False(t, resp.IsError, resp.Content)
+	require.Equal(t, "test-session", user.Owner())
+	require.True(t, user.AgentDriven())
+	require.Len(t, terminals.shown, 1)
+	require.True(t, terminals.shown[0].AgentDriven, "the panel turns read-only")
+
+	again := runTerminalTool(t, tool, TerminalParams{Action: "take", SessionID: user.ID()})
+	require.False(t, again.IsError)
+	require.Contains(t, again.Content, "already hold")
+
+	write := runTerminalTool(t, tool, TerminalParams{Action: "write", SessionID: user.ID(), Text: "mine\r"})
+	require.False(t, write.IsError, write.Content)
 }

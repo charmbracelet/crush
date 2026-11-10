@@ -18,10 +18,15 @@ import (
 )
 
 // fakeTerminalService records display requests and reports an attached UI
-// unless told otherwise.
+// unless told otherwise. It runs every call in this process.
 type fakeTerminalService struct {
+	terminal.Service
 	available bool
 	shown     []terminal.Request
+}
+
+func (f *fakeTerminalService) Exec(context.Context, terminal.Call) (terminal.Result, bool, error) {
+	return terminal.Result{}, false, nil
 }
 
 func newFakeTerminalService() *fakeTerminalService {
@@ -767,4 +772,66 @@ func TestTerminalRefusesSessionsItDoesNotOwn(t *testing.T) {
 	resp := runTerminalTool(t, tool, TerminalParams{Action: "read"})
 	require.True(t, resp.IsError)
 	require.Contains(t, resp.Content, "no terminal session is running")
+}
+
+// TestTerminalToolRunsOnRemoteClient drives the tool through a service
+// that forwards calls, with a goroutine standing in for the client: the
+// agent's half checks and approves each call, and the client's half runs
+// it against the sessions on its machine.
+func TestTerminalToolRunsOnRemoteClient(t *testing.T) {
+	needsPOSIXShell(t)
+
+	workingDir := t.TempDir()
+	resetTerminalManager(t)
+
+	server := terminal.NewService()
+	server.SetRouter(func(string, string) (string, error) { return "client", nil })
+	client := newFakeTerminalService()
+	calls := server.SubscribeCalls(t.Context())
+	go func() {
+		for ev := range calls {
+			call := ev.Payload
+			if call.Op == terminal.OpCancel {
+				continue
+			}
+			go func() {
+				result, err := ExecTerminal(t.Context(), client, workingDir, call)
+				if err != nil {
+					result = terminal.Result{Content: err.Error(), IsError: true}
+				}
+				server.Respond(call.ID, "client", result)
+			}()
+		}
+	}()
+
+	permissions := &mockBashPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}
+	tool := NewTerminalTool(permissions, server, workingDir, workingDir, nil)
+
+	start := runTerminalTool(t, tool, TerminalParams{Action: "start", Command: "cat", Wait: agentDriven()})
+	require.False(t, start.IsError, start.Content)
+	require.Len(t, client.shown, 1, "the client shows the terminal it runs")
+
+	var meta TerminalResponseMetadata
+	require.NoError(t, json.Unmarshal([]byte(start.Metadata), &meta))
+
+	write := runTerminalTool(t, tool, TerminalParams{Action: "write", SessionID: meta.SessionID, Text: "remote-echo\r"})
+	require.False(t, write.IsError, write.Content)
+	require.Contains(t, write.Content, "remote-echo")
+
+	kill := runTerminalTool(t, tool, TerminalParams{Action: "kill", SessionID: meta.SessionID})
+	require.False(t, kill.IsError, kill.Content)
+	require.Contains(t, kill.Content, "Session terminated")
+}
+
+func TestTerminalToolRemoteWithoutClient(t *testing.T) {
+	resetTerminalManager(t)
+
+	server := terminal.NewService()
+	server.SetRouter(func(string, string) (string, error) { return "", terminal.ErrUnavailable })
+	permissions := &mockBashPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}
+	tool := NewTerminalTool(permissions, server, t.TempDir(), t.TempDir(), nil)
+
+	resp := runTerminalTool(t, tool, TerminalParams{Action: "start", Command: "printf hi"})
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "unavailable")
 }

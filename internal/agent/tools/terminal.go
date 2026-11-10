@@ -1,8 +1,10 @@
 package tools
 
 import (
+	"cmp"
 	"context"
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -87,12 +89,19 @@ type TerminalPermissionsParams struct {
 
 // TerminalResponseMetadata describes the session an action affected.
 type TerminalResponseMetadata struct {
-	Action    string `json:"action"`
-	SessionID string `json:"session_id"`
-	Command   string `json:"command,omitempty"`
-	Exited    bool   `json:"exited,omitempty"`
-	ExitCode  int    `json:"exit_code,omitempty"`
+	Action     string `json:"action"`
+	SessionID  string `json:"session_id"`
+	Command    string `json:"command,omitempty"`
+	WorkingDir string `json:"working_dir,omitempty"`
+	Exited     bool   `json:"exited,omitempty"`
+	ExitCode   int    `json:"exit_code,omitempty"`
 }
+
+// terminalOpInspect describes a session the agent wants to type into, so
+// the permission prompt can name what runs there. It is not a tool action.
+const terminalOpInspect = "inspect"
+
+const terminalUnavailableMessage = "the terminal tool is unavailable in this environment: no terminal is attached. Run the command with bash instead, or ask the user to run it themselves"
 
 func NewTerminalTool(permissions permission.Service, terminals terminal.Service, workingDir, spillDir string, perms *config.Permissions) fantasy.AgentTool {
 	blocked := resolveBlockedCommands(perms)
@@ -100,17 +109,20 @@ func NewTerminalTool(permissions permission.Service, terminals terminal.Service,
 		TerminalToolName,
 		terminalDescription,
 		func(ctx context.Context, params TerminalParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			tool := terminalTool{
+				permissions: permissions,
+				terminals:   terminals,
+				workingDir:  workingDir,
+				spillDir:    spillDir,
+				call:        call,
+			}
 			switch params.Action {
 			case terminalActionStart:
-				return terminalStart(ctx, permissions, terminals, params, call, workingDir, spillDir, blocked)
-			case terminalActionRead:
-				return terminalRead(ctx, params, spillDir)
-			case terminalActionWrite:
-				return terminalWrite(ctx, permissions, params, call)
-			case terminalActionPaste:
-				return terminalPaste(ctx, permissions, params, call)
-			case terminalActionKill:
-				return terminalKill(ctx, params, spillDir)
+				return tool.start(ctx, params, blocked)
+			case terminalActionRead, terminalActionKill:
+				return tool.response(tool.run(ctx, params.Action, params))
+			case terminalActionWrite, terminalActionPaste:
+				return tool.input(ctx, params)
 			default:
 				return fantasy.NewTextErrorResponse(fmt.Sprintf(
 					"unknown action %q; expected one of: %s, %s, %s, %s, %s",
@@ -121,26 +133,23 @@ func NewTerminalTool(permissions permission.Service, terminals terminal.Service,
 	)
 }
 
-// terminalStart spawns a command in the embedded terminal and returns its
-// session ID immediately.
-func terminalStart(
-	ctx context.Context,
-	permissions permission.Service,
-	terminals terminal.Service,
-	params TerminalParams,
-	call fantasy.ToolCall,
-	workingDir string,
-	spillDir string,
-	blocked []string,
-) (fantasy.ToolResponse, error) {
+// terminalTool is the agent's half of the terminal tool: it validates a
+// call and asks for permission, then has the process that owns the PTYs
+// run it (see [ExecTerminal]). That is this process for a local TUI, or
+// the client's when the agent runs on a server.
+type terminalTool struct {
+	permissions permission.Service
+	terminals   terminal.Service
+	workingDir  string
+	spillDir    string
+	call        fantasy.ToolCall
+}
+
+// start checks and approves a command, then spawns it in the embedded
+// terminal.
+func (t terminalTool) start(ctx context.Context, params TerminalParams, blocked []string) (fantasy.ToolResponse, error) {
 	if params.Command == "" {
 		return fantasy.NewTextErrorResponse("missing command"), nil
-	}
-
-	if terminals == nil || !terminals.Available() {
-		return fantasy.NewTextErrorResponse(
-			"the terminal tool is unavailable in this environment: no terminal is attached. Run the command with bash instead, or ask the user to run it themselves",
-		), nil
 	}
 
 	// The interactive session spawns a real shell, so the deny-list that
@@ -153,22 +162,19 @@ func terminalStart(
 		)), nil
 	}
 
-	execWorkingDir := params.WorkingDir
-	if execWorkingDir == "" {
-		execWorkingDir = workingDir
-	}
+	execWorkingDir := cmp.Or(params.WorkingDir, t.workingDir)
 
 	sessionID := GetSessionFromContext(ctx)
 	if sessionID == "" {
 		return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for starting a terminal session")
 	}
 
-	p, err := permissions.Request(
+	p, err := t.permissions.Request(
 		ctx,
 		permission.CreatePermissionRequest{
 			SessionID:   sessionID,
 			Path:        execWorkingDir,
-			ToolCallID:  call.ID,
+			ToolCallID:  t.call.ID,
 			ToolName:    TerminalToolName,
 			Action:      "execute",
 			Description: fmt.Sprintf("Run in an interactive terminal: %s", params.Command),
@@ -186,27 +192,220 @@ func terminalStart(
 		return NewPermissionDeniedResponse(), nil
 	}
 
+	return t.response(t.run(ctx, terminalActionStart, params))
+}
+
+// input asks the user before the agent types or pastes into a running
+// session: whatever runs there (a shell, a REPL) executes the input with
+// no further checks.
+func (t terminalTool) input(ctx context.Context, params TerminalParams) (fantasy.ToolResponse, error) {
+	info, err := t.run(ctx, terminalOpInspect, params)
+	if err != nil || info.IsError {
+		return t.response(info, err)
+	}
+	var session TerminalResponseMetadata
+	if err := json.Unmarshal([]byte(info.Metadata), &session); err != nil {
+		return fantasy.ToolResponse{}, fmt.Errorf("could not decode terminal session: %w", err)
+	}
+
+	verb, done := "Type into", "sent"
+	if params.Action == terminalActionPaste {
+		verb, done = "Paste into", "pasted"
+	}
+	if session.Exited {
+		return fantasy.NewTextErrorResponse(fmt.Sprintf(
+			"session %s has already exited; nothing was %s", session.SessionID, done,
+		)), nil
+	}
+
+	input := params.Text
+	if params.Action == terminalActionPaste {
+		if params.Text == "" {
+			return fantasy.NewTextErrorResponse("nothing to paste: provide text"), nil
+		}
+	} else {
+		if params.Text == "" && len(params.Keys) == 0 && params.Mouse == nil {
+			return fantasy.NewTextErrorResponse("nothing to send: provide text, keys, or mouse"), nil
+		}
+		if len(params.Keys) > 0 {
+			input += fmt.Sprintf(" [keys: %s]", strings.Join(params.Keys, ", "))
+		}
+		if params.Mouse != nil {
+			input += fmt.Sprintf(" [mouse %s %s at %d,%d]", params.Mouse.Action, params.Mouse.Button, params.Mouse.X, params.Mouse.Y)
+		}
+	}
+
+	granted, err := t.permissions.Request(ctx, permission.CreatePermissionRequest{
+		SessionID:   GetSessionFromContext(ctx),
+		Path:        session.WorkingDir,
+		ToolCallID:  t.call.ID,
+		ToolName:    TerminalToolName,
+		Action:      terminalActionWrite,
+		Description: fmt.Sprintf("%s the interactive terminal running %q: %q", verb, session.Command, input),
+		Params: TerminalPermissionsParams{
+			Description: verb + " the running terminal",
+			Command:     input,
+			WorkingDir:  session.WorkingDir,
+		},
+	})
+	if err != nil {
+		return fantasy.ToolResponse{}, err
+	}
+	if !granted {
+		return NewPermissionDeniedResponse(), nil
+	}
+
+	// Act on the session that was approved, not whichever is newest now.
+	params.SessionID = session.SessionID
+	return t.response(t.run(ctx, params.Action, params))
+}
+
+// run executes op on the process that owns the terminals: a client, when
+// the service forwards calls, or this one.
+func (t terminalTool) run(ctx context.Context, op string, params TerminalParams) (terminal.Result, error) {
+	raw, err := json.Marshal(params)
+	if err != nil {
+		return terminal.Result{}, err
+	}
+	call := terminal.Call{
+		SessionID:  GetSessionFromContext(ctx),
+		ToolCallID: t.call.ID,
+		Op:         op,
+		Params:     raw,
+	}
+
+	result, remote, err := t.terminals.Exec(ctx, call)
+	switch {
+	case !remote:
+		return ExecTerminal(ctx, t.terminals, t.workingDir, call)
+	case err == nil:
+		return result, nil
+	case ctx.Err() != nil:
+		return terminal.Result{}, ctx.Err()
+	case errors.Is(err, terminal.ErrUnavailable):
+		return terminalError(terminalUnavailableMessage), nil
+	default:
+		return terminalError(fmt.Sprintf("terminal %s failed: %v", op, err)), nil
+	}
+}
+
+// response turns a terminal result into the tool's response. Oversized
+// output spills here, on the agent's machine, where the agent can read
+// the spilled file back.
+func (t terminalTool) response(result terminal.Result, err error) (fantasy.ToolResponse, error) {
+	if err != nil {
+		return fantasy.ToolResponse{}, err
+	}
+	if result.IsError {
+		return fantasy.NewTextErrorResponse(result.Content), nil
+	}
+	resp := fantasy.NewTextResponse(TruncateOutput(result.Content, t.spillDir))
+	resp.Metadata = result.Metadata
+	return resp, nil
+}
+
+// ExecTerminal runs a terminal call against this process's interactive
+// sessions. It is the half of the terminal tool that runs where the PTYs
+// live, after the agent's half validated the call and got permission.
+// workingDir is the default directory for new sessions, and terminals
+// shows them to the TUI of this process.
+func ExecTerminal(ctx context.Context, terminals terminal.Service, workingDir string, call terminal.Call) (terminal.Result, error) {
+	var params TerminalParams
+	if err := json.Unmarshal(call.Params, &params); err != nil {
+		return terminalError(fmt.Sprintf("invalid terminal parameters: %v", err)), nil
+	}
+
+	host := terminalHost{
+		terminals:  terminals,
+		workingDir: workingDir,
+		chat:       call.SessionID,
+		toolCallID: call.ToolCallID,
+	}
+	switch call.Op {
+	case terminalOpInspect:
+		return host.inspect(params)
+	case terminalActionStart:
+		return host.start(ctx, params)
+	case terminalActionRead:
+		return host.read(ctx, params)
+	case terminalActionWrite:
+		return host.write(ctx, params)
+	case terminalActionPaste:
+		return host.paste(ctx, params)
+	case terminalActionKill:
+		return host.kill(ctx, params)
+	default:
+		return terminalError(fmt.Sprintf("unknown terminal operation %q", call.Op)), nil
+	}
+}
+
+// terminalHost runs terminal calls for one chat session against the
+// interactive sessions of this process.
+type terminalHost struct {
+	terminals  terminal.Service
+	workingDir string
+	chat       string
+	toolCallID string
+}
+
+func terminalError(content string) terminal.Result {
+	return terminal.Result{Content: content, IsError: true}
+}
+
+func terminalResult(content string, metadata TerminalResponseMetadata) terminal.Result {
+	raw, err := json.Marshal(metadata)
+	if err != nil {
+		return terminal.Result{Content: content}
+	}
+	return terminal.Result{Content: content, Metadata: string(raw)}
+}
+
+// inspect describes a session the agent may type into.
+func (h terminalHost) inspect(params TerminalParams) (terminal.Result, error) {
+	session, err := resolveInteractiveSession(h.chat, params.SessionID, true)
+	if err != nil {
+		return terminalError(err.Error()), nil
+	}
+	return terminalResult("", TerminalResponseMetadata{
+		Action:     terminalOpInspect,
+		SessionID:  session.ID(),
+		Command:    session.Command(),
+		WorkingDir: session.WorkingDir(),
+		Exited:     session.Exited(),
+		ExitCode:   session.ExitCode(),
+	}), nil
+}
+
+// start spawns a command in the embedded terminal and shows it to the
+// user.
+func (h terminalHost) start(ctx context.Context, params TerminalParams) (terminal.Result, error) {
+	if h.terminals == nil || !h.terminals.Available() {
+		return terminalError(terminalUnavailableMessage), nil
+	}
+
+	execWorkingDir := cmp.Or(params.WorkingDir, h.workingDir)
+
 	manager := shell.GetInteractiveSessionManager()
 	session, err := manager.Start(shell.InteractiveSessionOptions{
 		Command:    params.Command,
 		WorkingDir: execWorkingDir,
 		Cols:       shell.DefaultInteractiveCols,
 		Rows:       shell.DefaultInteractiveRows,
-		Owner:      sessionID,
+		Owner:      h.chat,
 	})
 	if err != nil {
 		if errors.Is(err, shell.ErrInteractiveActive) {
-			return fantasy.NewTextErrorResponse(fmt.Sprintf(
+			return terminalError(fmt.Sprintf(
 				"%v. If you started it, drive it with action read/write or end it with action kill first; otherwise wait for it to finish (read with wait_seconds)",
 				err,
 			)), nil
 		}
-		return fantasy.NewTextErrorResponse(fmt.Sprintf("could not start terminal session: %v", err)), nil
+		return terminalError(fmt.Sprintf("could not start terminal session: %v", err)), nil
 	}
 
-	if _, err := terminals.Show(ctx, terminal.Request{
-		SessionID:   sessionID,
-		ToolCallID:  call.ID,
+	if _, err := h.terminals.Show(ctx, terminal.Request{
+		SessionID:   h.chat,
+		ToolCallID:  h.toolCallID,
 		Command:     params.Command,
 		WorkingDir:  execWorkingDir,
 		Description: params.Description,
@@ -217,7 +416,7 @@ func terminalStart(
 		_ = session.Kill()
 		_ = session.Close()
 		manager.Remove(session.ID())
-		return fantasy.NewTextErrorResponse(fmt.Sprintf("could not open terminal: %v", err)), nil
+		return terminalError(fmt.Sprintf("could not open terminal: %v", err)), nil
 	}
 
 	metadata := TerminalResponseMetadata{
@@ -229,7 +428,7 @@ func terminalStart(
 	// By default a start waits for the user: the agent pauses here until
 	// the user finishes their work in the terminal.
 	if terminalStartWaits(params) {
-		return terminalWaitForUser(ctx, session, spillDir, metadata)
+		return terminalWaitForUser(ctx, session, metadata)
 	}
 
 	output := fmt.Sprintf(
@@ -241,7 +440,7 @@ func terminalStart(
 		session.ID(), params.Command, "y\\r",
 	)
 
-	return fantasy.WithResponseMetadata(fantasy.NewTextResponse(output), metadata), nil
+	return terminalResult(output, metadata), nil
 }
 
 // terminalStartWaits reports whether a start call should block until the
@@ -262,15 +461,14 @@ var terminalStartWaitBudget = TerminalStartWait
 func terminalWaitForUser(
 	ctx context.Context,
 	session *shell.InteractiveSession,
-	spillDir string,
 	metadata TerminalResponseMetadata,
-) (fantasy.ToolResponse, error) {
+) (terminal.Result, error) {
 	if !session.Exited() {
 		select {
 		case <-session.Done():
 		case <-time.After(terminalStartWaitBudget):
 		case <-ctx.Done():
-			return fantasy.ToolResponse{}, ctx.Err()
+			return terminal.Result{}, ctx.Err()
 		}
 	}
 
@@ -279,7 +477,7 @@ func terminalWaitForUser(
 
 	var output string
 	if session.Exited() {
-		transcript := TruncateOutput(session.CaptureText(), spillDir)
+		transcript := session.CaptureText()
 		if transcript == "" {
 			transcript = BashNoOutput
 		}
@@ -303,15 +501,15 @@ func terminalWaitForUser(
 		)
 	}
 
-	return fantasy.WithResponseMetadata(fantasy.NewTextResponse(output), metadata), nil
+	return terminalResult(output, metadata), nil
 }
 
-// terminalRead returns the session's current screen, optionally waiting for
-// it to exit.
-func terminalRead(ctx context.Context, params TerminalParams, spillDir string) (fantasy.ToolResponse, error) {
-	session, err := resolveInteractiveSession(ctx, params.SessionID, false)
+// read returns the session's current screen, optionally waiting for it to
+// exit.
+func (h terminalHost) read(ctx context.Context, params TerminalParams) (terminal.Result, error) {
+	session, err := resolveInteractiveSession(h.chat, params.SessionID, false)
 	if err != nil {
-		return fantasy.NewTextErrorResponse(err.Error()), nil
+		return terminalError(err.Error()), nil
 	}
 
 	if params.WaitSeconds > 0 && !session.Exited() {
@@ -320,7 +518,7 @@ func terminalRead(ctx context.Context, params TerminalParams, spillDir string) (
 		case <-session.Done():
 		case <-time.After(wait):
 		case <-ctx.Done():
-			return fantasy.ToolResponse{}, ctx.Err()
+			return terminal.Result{}, ctx.Err()
 		}
 	}
 
@@ -336,30 +534,27 @@ func terminalRead(ctx context.Context, params TerminalParams, spillDir string) (
 		screen = BashNoOutput
 	}
 	parts = append(parts, "<screen>\n"+screen+"\n</screen>")
-
-	status := "running"
-	if session.Exited() {
-		exitCode := session.ExitCode()
-		status = "exited"
-		if exitCode != 0 {
-			status = fmt.Sprintf("exited (exit code %d)", exitCode)
-		}
-	}
-	parts = append(parts, fmt.Sprintf("Session %s: %s", session.ID(), status))
-
+	parts = append(parts, fmt.Sprintf("Session %s: %s", session.ID(), sessionStatus(session)))
 	parts = append(parts, sessionGeometry(session))
 
-	output := TruncateOutput(strings.Join(parts, "\n\n"), spillDir)
-
-	metadata := TerminalResponseMetadata{
+	return terminalResult(strings.Join(parts, "\n\n"), TerminalResponseMetadata{
 		Action:    terminalActionRead,
 		SessionID: session.ID(),
 		Command:   session.Command(),
 		Exited:    session.Exited(),
 		ExitCode:  session.ExitCode(),
-	}
+	}), nil
+}
 
-	return fantasy.WithResponseMetadata(fantasy.NewTextResponse(output), metadata), nil
+// sessionStatus describes whether the session still runs.
+func sessionStatus(session *shell.InteractiveSession) string {
+	if !session.Exited() {
+		return "running"
+	}
+	if exitCode := session.ExitCode(); exitCode != 0 {
+		return fmt.Sprintf("exited (exit code %d)", exitCode)
+	}
+	return "exited"
 }
 
 // sessionGeometry reports the session's state an agent needs between
@@ -393,56 +588,38 @@ func sessionGeometry(session *shell.InteractiveSession) string {
 // redraw before the screen is reported.
 const defaultTerminalWriteSettle = 250 * time.Millisecond
 
-// terminalWrite sends text and keystrokes to the session and, after letting
-// it redraw, returns the updated screen.
-func terminalWrite(ctx context.Context, permissions permission.Service, params TerminalParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-	session, err := resolveInteractiveSession(ctx, params.SessionID, true)
+// write sends text and keystrokes to the session and, after letting it
+// redraw, returns the updated screen.
+func (h terminalHost) write(ctx context.Context, params TerminalParams) (terminal.Result, error) {
+	session, err := resolveInteractiveSession(h.chat, params.SessionID, true)
 	if err != nil {
-		return fantasy.NewTextErrorResponse(err.Error()), nil
+		return terminalError(err.Error()), nil
 	}
-
 	if session.Exited() {
-		return fantasy.NewTextErrorResponse(fmt.Sprintf(
-			"session %s has already exited; nothing was sent", session.ID(),
-		)), nil
-	}
-
-	if params.Text == "" && len(params.Keys) == 0 && params.Mouse == nil {
-		return fantasy.NewTextErrorResponse("nothing to send: provide text, keys, or mouse"), nil
-	}
-
-	input := params.Text
-	if len(params.Keys) > 0 {
-		input += fmt.Sprintf(" [keys: %s]", strings.Join(params.Keys, ", "))
-	}
-	if params.Mouse != nil {
-		input += fmt.Sprintf(" [mouse %s %s at %d,%d]", params.Mouse.Action, params.Mouse.Button, params.Mouse.X, params.Mouse.Y)
-	}
-	if resp, ok, err := requestTerminalInput(ctx, permissions, session, call, "Type into", input); !ok {
-		return resp, err
+		return terminalError(fmt.Sprintf("session %s has already exited; nothing was sent", session.ID())), nil
 	}
 
 	if params.Text != "" {
 		if err := session.Write([]byte(params.Text)); err != nil {
-			return fantasy.NewTextErrorResponse(fmt.Sprintf("could not write to session %s: %v", session.ID(), err)), nil
+			return terminalError(fmt.Sprintf("could not write to session %s: %v", session.ID(), err)), nil
 		}
 	}
 	for _, name := range params.Keys {
 		key, err := shell.ParseKey(name)
 		if err != nil {
-			return fantasy.NewTextErrorResponse(err.Error()), nil
+			return terminalError(err.Error()), nil
 		}
 		if err := session.SendKey(key); err != nil {
-			return fantasy.NewTextErrorResponse(err.Error()), nil
+			return terminalError(err.Error()), nil
 		}
 	}
 	if params.Mouse != nil {
 		event, err := terminalMouseEvent(*params.Mouse)
 		if err != nil {
-			return fantasy.NewTextErrorResponse(err.Error()), nil
+			return terminalError(err.Error()), nil
 		}
 		if err := session.SendMouse(event); err != nil {
-			return fantasy.NewTextErrorResponse(err.Error()), nil
+			return terminalError(err.Error()), nil
 		}
 	}
 
@@ -451,37 +628,27 @@ func terminalWrite(ctx context.Context, permissions permission.Service, params T
 	return terminalWriteResult(ctx, session, terminalActionWrite, sent, params)
 }
 
-// terminalPaste sends text as a paste: when the child enabled bracketed
-// paste mode the text is wrapped in paste markers, so multi-line pastes
-// are inserted into an editor or command line instead of executed line by
-// line.
-func terminalPaste(ctx context.Context, permissions permission.Service, params TerminalParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-	session, err := resolveInteractiveSession(ctx, params.SessionID, true)
+// paste sends text as a paste: when the child enabled bracketed paste mode
+// the text is wrapped in paste markers, so multi-line pastes are inserted
+// into an editor or command line instead of executed line by line.
+func (h terminalHost) paste(ctx context.Context, params TerminalParams) (terminal.Result, error) {
+	session, err := resolveInteractiveSession(h.chat, params.SessionID, true)
 	if err != nil {
-		return fantasy.NewTextErrorResponse(err.Error()), nil
+		return terminalError(err.Error()), nil
 	}
-
 	if session.Exited() {
-		return fantasy.NewTextErrorResponse(fmt.Sprintf(
-			"session %s has already exited; nothing was pasted", session.ID(),
-		)), nil
-	}
-	if params.Text == "" {
-		return fantasy.NewTextErrorResponse("nothing to paste: provide text"), nil
-	}
-	if resp, ok, err := requestTerminalInput(ctx, permissions, session, call, "Paste into", params.Text); !ok {
-		return resp, err
+		return terminalError(fmt.Sprintf("session %s has already exited; nothing was pasted", session.ID())), nil
 	}
 
 	if err := session.Paste(params.Text); err != nil {
-		return fantasy.NewTextErrorResponse(fmt.Sprintf("could not paste to session %s: %v", session.ID(), err)), nil
+		return terminalError(fmt.Sprintf("could not paste to session %s: %v", session.ID(), err)), nil
 	}
 	return terminalWriteResult(ctx, session, terminalActionPaste, fmt.Sprintf("Pasted %d characters into terminal session %s", len(params.Text), session.ID()), params)
 }
 
 // terminalWriteResult waits for the session to redraw and reports the
 // resulting screen.
-func terminalWriteResult(ctx context.Context, session *shell.InteractiveSession, action, sent string, params TerminalParams) (fantasy.ToolResponse, error) {
+func terminalWriteResult(ctx context.Context, session *shell.InteractiveSession, action, sent string, params TerminalParams) (terminal.Result, error) {
 	// Let the session redraw before reporting the screen.
 	settle := defaultTerminalWriteSettle
 	if params.SettleMs > 0 {
@@ -490,7 +657,7 @@ func terminalWriteResult(ctx context.Context, session *shell.InteractiveSession,
 	select {
 	case <-time.After(settle):
 	case <-ctx.Done():
-		return fantasy.ToolResponse{}, ctx.Err()
+		return terminal.Result{}, ctx.Err()
 	}
 
 	screen := session.ScreenText()
@@ -498,35 +665,24 @@ func terminalWriteResult(ctx context.Context, session *shell.InteractiveSession,
 		screen = BashNoOutput
 	}
 
-	status := "running"
-	if session.Exited() {
-		exitCode := session.ExitCode()
-		status = "exited"
-		if exitCode != 0 {
-			status = fmt.Sprintf("exited (exit code %d)", exitCode)
-		}
-	}
-
-	metadata := TerminalResponseMetadata{
+	response := fmt.Sprintf(
+		"%s. Session: %s.\n\n<screen>\n%s\n</screen>\n\n%s",
+		sent, sessionStatus(session), screen, sessionGeometry(session),
+	)
+	return terminalResult(response, TerminalResponseMetadata{
 		Action:    action,
 		SessionID: session.ID(),
 		Command:   session.Command(),
 		Exited:    session.Exited(),
 		ExitCode:  session.ExitCode(),
-	}
-
-	response := fmt.Sprintf(
-		"%s. Session: %s.\n\n<screen>\n%s\n</screen>\n\n%s",
-		sent, status, screen, sessionGeometry(session),
-	)
-	return fantasy.WithResponseMetadata(fantasy.NewTextResponse(response), metadata), nil
+	}), nil
 }
 
-// terminalKill ends the session and returns its final transcript.
-func terminalKill(ctx context.Context, params TerminalParams, spillDir string) (fantasy.ToolResponse, error) {
-	session, err := resolveInteractiveSession(ctx, params.SessionID, true)
+// kill ends the session and returns its final transcript.
+func (h terminalHost) kill(ctx context.Context, params TerminalParams) (terminal.Result, error) {
+	session, err := resolveInteractiveSession(h.chat, params.SessionID, true)
 	if err != nil {
-		return fantasy.NewTextErrorResponse(err.Error()), nil
+		return terminalError(err.Error()), nil
 	}
 
 	wasRunning := !session.Exited()
@@ -536,11 +692,11 @@ func terminalKill(ctx context.Context, params TerminalParams, spillDir string) (
 		case <-session.Done():
 		case <-time.After(terminalKillWait):
 		case <-ctx.Done():
-			return fantasy.ToolResponse{}, ctx.Err()
+			return terminal.Result{}, ctx.Err()
 		}
 	}
 
-	output := TruncateOutput(session.CaptureText(), spillDir)
+	output := session.CaptureText()
 	if output == "" {
 		output = BashNoOutput
 	}
@@ -558,58 +714,22 @@ func terminalKill(ctx context.Context, params TerminalParams, spillDir string) (
 		status += fmt.Sprintf(" Exit code %d.", exitCode)
 	}
 
-	metadata := TerminalResponseMetadata{
+	result := fmt.Sprintf("%s\n\n<transcript>\n%s\n</transcript>", status, output)
+	return terminalResult(result, TerminalResponseMetadata{
 		Action:    terminalActionKill,
 		SessionID: session.ID(),
 		Command:   session.Command(),
 		Exited:    true,
 		ExitCode:  exitCode,
-	}
-
-	result := fmt.Sprintf("%s\n\n<transcript>\n%s\n</transcript>", status, output)
-	return fantasy.WithResponseMetadata(fantasy.NewTextResponse(result), metadata), nil
-}
-
-// requestTerminalInput asks the user before the agent types into a running
-// session: whatever runs there (a shell, a REPL) executes the input with no
-// further checks. It reports false with the response to return when the
-// input must not be sent.
-func requestTerminalInput(
-	ctx context.Context,
-	permissions permission.Service,
-	session *shell.InteractiveSession,
-	call fantasy.ToolCall,
-	verb, input string,
-) (fantasy.ToolResponse, bool, error) {
-	granted, err := permissions.Request(ctx, permission.CreatePermissionRequest{
-		SessionID:   GetSessionFromContext(ctx),
-		Path:        session.WorkingDir(),
-		ToolCallID:  call.ID,
-		ToolName:    TerminalToolName,
-		Action:      terminalActionWrite,
-		Description: fmt.Sprintf("%s the interactive terminal running %q: %q", verb, session.Command(), input),
-		Params: TerminalPermissionsParams{
-			Description: verb + " the running terminal",
-			Command:     input,
-			WorkingDir:  session.WorkingDir(),
-		},
-	})
-	if err != nil {
-		return fantasy.ToolResponse{}, false, err
-	}
-	if !granted {
-		return NewPermissionDeniedResponse(), false, nil
-	}
-	return fantasy.ToolResponse{}, true, nil
+	}), nil
 }
 
 // resolveInteractiveSession finds the session named by id, or the running
 // session (or most recent) when id is empty. Sessions another chat started
 // are invisible; sessions the user started are readable but, with
 // mustOwn, refused: the agent only drives terminals it started itself.
-func resolveInteractiveSession(ctx context.Context, id string, mustOwn bool) (*shell.InteractiveSession, error) {
+func resolveInteractiveSession(chat, id string, mustOwn bool) (*shell.InteractiveSession, error) {
 	manager := shell.GetInteractiveSessionManager()
-	chat := GetSessionFromContext(ctx)
 	visible := func(s *shell.InteractiveSession) bool {
 		return s.Owner() == "" || s.Owner() == chat
 	}

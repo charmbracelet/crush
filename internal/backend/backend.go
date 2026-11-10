@@ -495,6 +495,9 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 		cancel:       wsCancel,
 		clients:      make(map[string]*clientState),
 	}
+	// The TUIs run in client processes, so the agent's terminals open
+	// on their machines.
+	appWorkspace.Terminal.SetRouter(ws.terminalClient)
 
 	b.mu.Lock()
 	// Re-check admission: the client may have retired while the slow
@@ -811,6 +814,7 @@ func (b *Backend) detachStream(ws *Workspace, clientID string) {
 	if cs.streams > 0 {
 		cs.streams--
 	}
+	gone := cs.streams == 0
 	teardown := false
 	if cs.streams == 0 && cs.holdTimer == nil {
 		if grace > 0 && !cs.released {
@@ -827,6 +831,10 @@ func (b *Backend) detachStream(ws *Workspace, clientID string) {
 		}
 	}
 	ws.clientsMu.Unlock()
+	if gone && ws.App != nil && ws.Terminal != nil {
+		// Terminal calls the client was running can no longer answer.
+		ws.Terminal.DropClient(clientID)
+	}
 	if teardown {
 		b.teardown(ws)
 	}

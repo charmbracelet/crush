@@ -783,6 +783,8 @@ func (app *App) setupEvents() {
 	app.subscribeMustDeliver(ctx, "ssh-notifications", sshaskpass.DefaultPrompts().SubscribeNotifications)
 	app.subscribeMustDeliver(ctx, "permissions-mode", app.Permissions.SubscribeModeChanges)
 	app.subscribeMustDeliver(ctx, "terminal-sessions", app.Terminal.Subscribe)
+	// Terminal calls forwarded to a client stall the agent if lost.
+	app.subscribeMustDeliver(ctx, "terminal-calls", app.Terminal.SubscribeCalls)
 	app.subscribe(ctx, "history", app.History.Subscribe)
 	app.subscribe(ctx, "agent-notifications", app.agentNotifications.Subscribe)
 	// Pinentry transitions are rare and drive the terminal handover, so

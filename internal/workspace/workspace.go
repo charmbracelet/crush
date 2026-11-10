@@ -226,8 +226,8 @@ type Workspace interface {
 	// Terminal
 	//
 	// PersistShellCommand stores a user-run shell command result as a user
-	// message, like bang-mode commands. Remote workspaces return an error
-	// because the session database lives on the server.
+	// message, like bang-mode commands. Remote workspaces send it to the
+	// server, where the session database lives.
 	PersistShellCommand(ctx context.Context, sessionID, command, output string, exitCode int) error
 
 	// FileTracker

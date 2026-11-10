@@ -52,6 +52,8 @@ func NewForTest(ctx context.Context) *App {
 		app.Questions.SubscribeNotifications)
 	app.subscribeMustDeliver(eventsCtx, "terminal-sessions",
 		app.Terminal.Subscribe)
+	app.subscribeMustDeliver(eventsCtx, "terminal-calls",
+		app.Terminal.SubscribeCalls)
 	app.subscribe(eventsCtx, "agent-notifications",
 		app.agentNotifications.Subscribe)
 	app.subscribe(eventsCtx, "run-completions",

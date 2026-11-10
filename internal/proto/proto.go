@@ -387,6 +387,42 @@ type SSHNotification struct {
 	RequestID string `json:"request_id"`
 }
 
+// TerminalCall is the SSE wire format for an interactive terminal action
+// the agent asks a client to run: terminals open on the machine of the
+// user's TUI, not the server's. Only the client named by ClientID
+// receives it. A call with Op "cancel" withdraws the call with its ID.
+type TerminalCall struct {
+	ID         string          `json:"id"`
+	ClientID   string          `json:"client_id"`
+	SessionID  string          `json:"session_id"`
+	ToolCallID string          `json:"tool_call_id"`
+	Op         string          `json:"op"`
+	Params     json.RawMessage `json:"params,omitempty"`
+}
+
+// TerminalResult is the wire format for a client's answer to a
+// TerminalCall, sent from client to server via REST.
+type TerminalResult struct {
+	CallID   string `json:"call_id"`
+	Content  string `json:"content"`
+	Metadata string `json:"metadata,omitempty"`
+	IsError  bool   `json:"is_error,omitempty"`
+}
+
+// TerminalResponse is the server's response to a TerminalResult.
+type TerminalResponse struct {
+	Resolved bool `json:"resolved"`
+}
+
+// ShellCommandRecord is the wire format for storing a shell command the
+// user ran on the client's machine, such as an interactive terminal
+// session, as a message in the session.
+type ShellCommandRecord struct {
+	Command  string `json:"command"`
+	Output   string `json:"output"`
+	ExitCode int    `json:"exit_code"`
+}
+
 // PermissionSetModeRequest represents a request to set the permission mode.
 type PermissionSetModeRequest struct {
 	Mode WorkspacePermissionMode `json:"mode"`

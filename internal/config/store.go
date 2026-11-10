@@ -1418,6 +1418,13 @@ func NewTestStore(cfg *Config, loadedPaths ...string) *ConfigStore {
 	}
 }
 
+// NewTestStoreIn is [NewTestStore] for a store with a working directory.
+func NewTestStoreIn(workingDir string, cfg *Config) *ConfigStore {
+	store := NewTestStore(cfg)
+	store.workingDir = workingDir
+	return store
+}
+
 // ImportCopilot attempts to import a GitHub Copilot token from disk.
 func (s *ConfigStore) ImportCopilot() (*oauth.Token, bool) {
 	if s.HasConfigField(ScopeGlobal, "providers.copilot.api_key") || s.HasConfigField(ScopeGlobal, "providers.copilot.oauth") {

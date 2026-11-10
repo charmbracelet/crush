@@ -285,6 +285,12 @@ func (c *Client) SubscribeEvents(ctx context.Context, id string) (<-chan any, er
 				if !sendEvent(ctx, events, e) {
 					return
 				}
+			case pubsub.PayloadTypeLSPHost:
+				var e pubsub.Event[proto.LSPHostState]
+				_ = json.Unmarshal(p.Payload, &e)
+				if !sendEvent(ctx, events, e) {
+					return
+				}
 			case pubsub.PayloadTypePermissionModeChanged:
 				var e pubsub.Event[proto.PermissionModeEvent]
 				_ = json.Unmarshal(p.Payload, &e)
@@ -921,6 +927,46 @@ func (c *Client) GetHostTheme(ctx context.Context, id string) (*proto.HostThemeS
 	var st proto.HostThemeState
 	if err := json.NewDecoder(rsp.Body).Decode(&st); err != nil {
 		return nil, fmt.Errorf("failed to decode host theme: %w", err)
+	}
+	return &st, nil
+}
+
+// SetLSPHost registers this client's application as an LSP host of the
+// workspace: one that shares its language servers with Crush. A nil host
+// clears the registration. It returns the client's registration, and fails
+// with an error carrying the server's message when the host is invalid or
+// the client holds no claim on the workspace.
+func (c *Client) SetLSPHost(ctx context.Context, id string, host *proto.LSPHost) (*proto.LSPHostState, error) {
+	q := url.Values{"client_id": []string{c.clientID}}
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/lsp-host", id), q, jsonBody(proto.LSPHostRequest{LSPHost: host}), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return nil, fmt.Errorf("failed to set LSP host: %w", err)
+	}
+	defer rsp.Body.Close()
+	if err := checkStatus(rsp); err != nil {
+		return nil, fmt.Errorf("failed to set LSP host: %w", err)
+	}
+	var st proto.LSPHostState
+	if err := json.NewDecoder(rsp.Body).Decode(&st); err != nil {
+		return nil, fmt.Errorf("failed to decode LSP host: %w", err)
+	}
+	return &st, nil
+}
+
+// GetLSPHost retrieves the LSP host of a workspace. The returned state's
+// LSPHost is nil when there is none.
+func (c *Client) GetLSPHost(ctx context.Context, id string) (*proto.LSPHostState, error) {
+	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/lsp-host", id), nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get LSP host: %w", err)
+	}
+	defer rsp.Body.Close()
+	if err := checkStatus(rsp); err != nil {
+		return nil, fmt.Errorf("failed to get LSP host: %w", err)
+	}
+	var st proto.LSPHostState
+	if err := json.NewDecoder(rsp.Body).Decode(&st); err != nil {
+		return nil, fmt.Errorf("failed to decode LSP host: %w", err)
 	}
 	return &st, nil
 }

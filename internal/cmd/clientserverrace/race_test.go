@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -298,12 +299,21 @@ func buildCrushBinary(t *testing.T, repoRoot string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "go", "build", "-o", binPath, ".")
+	// Build with this test binary's own flags (inherited env, plus -race
+	// when set) so the build reuses the cache warmed by `go test` and CI's
+	// `go build -race ./...`. Any other flags (e.g. CGO_ENABLED=0) force a
+	// cold rebuild of every dependency, which blew the timeout on macOS
+	// runners.
+	args := []string{"build", "-o", binPath}
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		for _, s := range bi.Settings {
+			if s.Key == "-race" && s.Value == "true" {
+				args = append(args, "-race")
+			}
+		}
+	}
+	cmd := exec.CommandContext(ctx, "go", append(args, ".")...)
 	cmd.Dir = repoRoot
-	// Match the project's standard build flags. CGO_ENABLED=0 keeps
-	// the binary statically linked and avoids surprising the test on
-	// hosts without a C toolchain.
-	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("go build crush: %v\n%s", err, out)

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"charm.land/catwalk/v3/pkg/catwalk"
+	"github.com/charmbracelet/x/etag"
 	"github.com/stretchr/testify/require"
 )
 
@@ -405,6 +406,32 @@ func TestProviders_HonorsDisableDefaultProviders(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Empty(t, providers)
+}
+
+func TestCacheMigratesLegacyModels(t *testing.T) {
+	t.Parallel()
+
+	model := `{"id":"cached","can_reason":true,"reasoning_levels":["low","high"],"default_reasoning_effort":"high","supports_attachments":true}`
+	raw := []byte(`[{"id":"cached","models":[` + model + `]}]`)
+	path := filepath.Join(t.TempDir(), "providers.json")
+	require.NoError(t, os.WriteFile(path, raw, 0o644))
+	providers, digest, err := newCache[[]catwalk.Provider](path).Get()
+	require.NoError(t, err)
+	require.Equal(t, etag.Of(raw), digest)
+	require.Len(t, providers, 1)
+	require.Len(t, providers[0].Models, 1)
+	migrated := providers[0].Models[0]
+	require.Equal(t, []string{"low", "high"}, migrated.ReasoningEffortLevels())
+	require.Equal(t, "high", migrated.Reasoning.DefaultEffortLevel)
+	require.True(t, migrated.Capabilities.Vision)
+
+	raw = []byte(`{"id":"hyper","models":[` + model + `]}`)
+	path = filepath.Join(t.TempDir(), "hyper.json")
+	require.NoError(t, os.WriteFile(path, raw, 0o644))
+	hyper, _, err := newCache[catwalk.Provider](path).Get()
+	require.NoError(t, err)
+	require.Len(t, hyper.Models, 1)
+	require.Equal(t, []string{"low", "high"}, hyper.Models[0].ReasoningEffortLevels())
 }
 
 // TestCacheStore_ReplacesFileInsteadOfRewritingIt guards the property that

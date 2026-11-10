@@ -60,6 +60,7 @@ model add catalog-sub/big --reasoning-effort high`, server.URL))
 			big = true
 			require.Equal(t, "Big Model", model.Name, "the listing supplies what the declaration left out")
 			require.Equal(t, int64(1000000), model.ContextWindow)
+			require.ElementsMatch(t, []string{"low", "high"}, model.ReasoningEffortLevels())
 			require.Equal(t, "high", model.Reasoning.DefaultEffortLevel, "the declared default wins")
 		case "small":
 			small = true

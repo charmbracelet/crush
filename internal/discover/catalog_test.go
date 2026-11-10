@@ -109,6 +109,30 @@ func TestCatalogReadsAProvidersOwnListing(t *testing.T) {
 	require.False(t, haiku.Capabilities.Vision)
 }
 
+func TestCatalogMigratesLegacyModels(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[{"id":"legacy","context_window":200000}]}`))
+	}))
+	defer server.Close()
+
+	models, err := Catalog(context.Background(), CatalogConfig{
+		ID:      "plan",
+		BaseURL: server.URL,
+		Spec: &oauth.CatalogSpec{
+			URL:     "/v1/models",
+			Program: `.data | map({id, context_window, can_reason: true, reasoning_levels: ["low", "medium"], default_reasoning_effort: "medium", supports_attachments: true})`,
+		},
+	}, &mockResolver{})
+	require.NoError(t, err)
+	require.Len(t, models, 1)
+	require.Equal(t, []string{"low", "medium"}, models[0].ReasoningEffortLevels())
+	require.Equal(t, "medium", models[0].Reasoning.DefaultEffortLevel)
+	require.Equal(t, catwalk.ThinkingToggleable, models[0].Reasoning.Thinking)
+	require.True(t, models[0].Capabilities.Vision)
+}
+
 // A catalog fills in what a declared model leaves out and leaves alone what it
 // sets, so a plugin can pin one field without restating the rest.
 func TestCatalogKeepsDeclaredFields(t *testing.T) {

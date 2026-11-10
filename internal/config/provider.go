@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"encoding/json"
@@ -18,6 +19,7 @@ import (
 	"charm.land/catwalk/v3/pkg/embedded"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/discover"
 	"github.com/charmbracelet/x/etag"
 )
 
@@ -56,7 +58,7 @@ func UpdateProviders(pathOrURL string) error {
 		if err != nil {
 			return fmt.Errorf("failed to read file: %w", err)
 		}
-		if err := json.Unmarshal(content, &providers); err != nil {
+		if err := json.Unmarshal(migrateProviderCache(content), &providers); err != nil {
 			return fmt.Errorf("failed to unmarshal provider data: %w", err)
 		}
 		if len(providers) == 0 {
@@ -116,7 +118,7 @@ func UpdateHyper(pathOrURL string) error {
 		if err != nil {
 			return fmt.Errorf("failed to read file: %w", err)
 		}
-		if err := json.Unmarshal(content, &provider); err != nil {
+		if err := json.Unmarshal(migrateProviderCache(content), &provider); err != nil {
 			return fmt.Errorf("failed to unmarshal provider data: %w", err)
 		}
 	}
@@ -269,11 +271,52 @@ func (c cache[T]) Get() (T, string, error) {
 		return v, "", fmt.Errorf("failed to read provider cache file: %w", err)
 	}
 
-	if err := json.Unmarshal(data, &v); err != nil {
+	if err := json.Unmarshal(migrateProviderCache(data), &v); err != nil {
 		return v, "", fmt.Errorf("failed to unmarshal provider data from cache: %w", err)
 	}
 
 	return v, etag.Of(data), nil
+}
+
+func migrateProviderCache(data []byte) []byte {
+	if !json.Valid(data) {
+		return data
+	}
+	var raw any
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	if err := decoder.Decode(&raw); err != nil {
+		return data
+	}
+	switch document := raw.(type) {
+	case []any:
+		for _, entry := range document {
+			migrateCachedProvider(entry)
+		}
+	case map[string]any:
+		migrateCachedProvider(document)
+	}
+	migrated, err := json.Marshal(raw)
+	if err != nil {
+		return data
+	}
+	return migrated
+}
+
+func migrateCachedProvider(value any) {
+	provider, ok := value.(map[string]any)
+	if !ok {
+		return
+	}
+	models, ok := provider["models"].([]any)
+	if !ok {
+		return
+	}
+	for _, entry := range models {
+		if model, ok := entry.(map[string]any); ok {
+			discover.MigrateV2Model(model)
+		}
+	}
 }
 
 func (c cache[T]) Store(v T) error {

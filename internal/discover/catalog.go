@@ -102,6 +102,11 @@ func Catalog(ctx context.Context, cfg CatalogConfig, resolver Resolver) ([]catwa
 	if !isJSONArray(output) {
 		output = []any{output}
 	}
+	for _, entry := range output.([]any) {
+		if model, ok := entry.(map[string]any); ok {
+			MigrateV2Model(model)
+		}
+	}
 
 	encoded, err := json.Marshal(output)
 	if err != nil {

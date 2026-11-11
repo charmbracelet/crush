@@ -10,14 +10,23 @@ import (
 )
 
 func TestRenamePreservesSessionActivity(t *testing.T) {
-	for _, name := range []string{"fresh", "upgrade"} {
-		t.Run(name, func(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		upgrade bool
+		save    bool
+	}{
+		{name: "rename/fresh"},
+		{name: "rename/upgrade", upgrade: true},
+		{name: "save/fresh", save: true},
+		{name: "save/upgrade", save: true, upgrade: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
 			dataDir := t.TempDir()
 			t.Cleanup(func() { require.NoError(t, db.Release(dataDir)) })
 
 			conn, err := db.Connect(t.Context(), dataDir)
 			require.NoError(t, err)
-			if name == "upgrade" {
+			if tt.upgrade {
 				require.NoError(t, goose.DownTo(conn, "migrations", 20261109000000))
 			}
 
@@ -32,8 +41,23 @@ func TestRenamePreservesSessionActivity(t *testing.T) {
 			conn, err = db.Connect(t.Context(), dataDir)
 			require.NoError(t, err)
 			sessions := NewService(db.New(conn), conn)
+			unchanged, err := sessions.Get(t.Context(), "older")
+			require.NoError(t, err)
+			_, err = sessions.Save(t.Context(), unchanged)
+			require.NoError(t, err)
+			unchanged, err = sessions.Get(t.Context(), "older")
+			require.NoError(t, err)
+			require.Equal(t, int64(100), unchanged.UpdatedAt)
 
-			require.NoError(t, sessions.Rename(t.Context(), "older", "New title"))
+			if tt.save {
+				older, err := sessions.Get(t.Context(), "older")
+				require.NoError(t, err)
+				older.Title = "New title"
+				_, err = sessions.Save(t.Context(), older)
+				require.NoError(t, err)
+			} else {
+				require.NoError(t, sessions.Rename(t.Context(), "older", "New title"))
+			}
 
 			renamed, err := sessions.Get(t.Context(), "older")
 			require.NoError(t, err)
@@ -56,7 +80,7 @@ func TestRenamePreservesSessionActivity(t *testing.T) {
 }
 
 func TestSessionActivityAdvancesTimestamp(t *testing.T) {
-	for _, name := range []string{"message", "channel", "save"} {
+	for _, name := range []string{"message", "delete-message", "channel", "save", "usage"} {
 		t.Run(name, func(t *testing.T) {
 			dataDir := t.TempDir()
 			t.Cleanup(func() { require.NoError(t, db.Release(dataDir)) })
@@ -76,6 +100,13 @@ func TestSessionActivityAdvancesTimestamp(t *testing.T) {
 				_, err = message.NewService(queries).Create(t.Context(), "active", message.CreateMessageParams{
 					Role: message.User,
 				})
+			case "delete-message":
+				messages := message.NewService(queries)
+				created, createErr := messages.Create(t.Context(), "active", message.CreateMessageParams{Role: message.User})
+				require.NoError(t, createErr)
+				_, err = conn.ExecContext(t.Context(), "UPDATE sessions SET updated_at = 100 WHERE id = 'active'")
+				require.NoError(t, err)
+				err = messages.Delete(t.Context(), created.ID)
 			case "channel":
 				_, err = sessions.SetChannel(t.Context(), "active", "signal")
 			case "save":
@@ -84,6 +115,8 @@ func TestSessionActivityAdvancesTimestamp(t *testing.T) {
 				require.NoError(t, err)
 				active.Todos = []Todo{{Content: "Next task", Status: TodoStatusPending}}
 				_, err = sessions.Save(t.Context(), active)
+			case "usage":
+				err = sessions.UpdateTitleAndUsage(t.Context(), "active", "Conversation", 0, 0, 0)
 			}
 			require.NoError(t, err)
 

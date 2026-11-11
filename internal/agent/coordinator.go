@@ -1962,6 +1962,11 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 		return fantasy.ToolResponse{}, fmt.Errorf("create session: %w", err)
 	}
 
+	// A subagent works on its parent's behalf, so it inherits the parent's
+	// automatic approval. crush run approves its own session that way, and
+	// nobody would be there to answer the subagent's prompts otherwise.
+	c.permissions.InheritAutoApproval(params.SessionID, session.ID)
+
 	// Call session setup function if provided
 	if params.SessionSetup != nil {
 		params.SessionSetup(session.ID)

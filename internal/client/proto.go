@@ -110,10 +110,22 @@ func (c *Client) SetCurrentSession(ctx context.Context, workspaceID, sessionID s
 	return nil
 }
 
+// EventsOption configures an event subscription.
+type EventsOption func(url.Values)
+
+// HostTerminals marks the subscriber as a TUI that can open the agent's
+// interactive terminals, so the server may route terminal calls to it.
+func HostTerminals() EventsOption {
+	return func(q url.Values) { q.Set("terminal_host", "1") }
+}
+
 // SubscribeEvents subscribes to server-sent events for a workspace.
-func (c *Client) SubscribeEvents(ctx context.Context, id string) (<-chan any, error) {
+func (c *Client) SubscribeEvents(ctx context.Context, id string, opts ...EventsOption) (<-chan any, error) {
 	events := make(chan any, 100)
 	q := url.Values{"client_id": []string{c.clientID}}
+	for _, opt := range opts {
+		opt(q)
+	}
 	//nolint:bodyclose
 	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/events", id), q, http.Header{
 		"Accept":        []string{"text/event-stream"},

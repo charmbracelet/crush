@@ -182,12 +182,17 @@ type Backend struct {
 //     registrations of a workspace: the highest is the newest. Stored
 //     hosts are never mutated, only replaced. The registration is part of
 //     the claim and is gone when the entry is removed.
+//   - terminalStreams counts the live streams whose client declared that
+//     it runs a TUI able to open the agent's interactive terminals. Only
+//     those clients are routed terminal calls: an API client that merely
+//     follows a session, such as an editor plugin, would never answer one.
 //
 // streams and holdTimer are mutually exclusive in practice (the hold
 // timer is stopped the moment an SSE stream attaches), but both being
 // zero/nil means the entry has been released and should be removed.
 type clientState struct {
 	streams          int
+	terminalStreams  int
 	holdTimer        *time.Timer
 	currentSessionID string
 	sessionReported  bool
@@ -871,7 +876,6 @@ func (b *Backend) detachStream(ws *Workspace, clientID string) {
 	if cs.streams > 0 {
 		cs.streams--
 	}
-	gone := cs.streams == 0
 	teardown := false
 	viewing := ""
 	if cs.streams == 0 && cs.holdTimer == nil {
@@ -891,10 +895,6 @@ func (b *Backend) detachStream(ws *Workspace, clientID string) {
 	}
 	ws.clientsMu.Unlock()
 	ws.cancelUnwatchedRun(viewing)
-	if gone && ws.App != nil && ws.Terminal != nil {
-		// Terminal calls the client was running can no longer answer.
-		ws.Terminal.DropClient(clientID)
-	}
 	if teardown {
 		b.teardown(ws)
 	}
@@ -952,6 +952,12 @@ func forgetClient(ws *Workspace, clientID string, cs *clientState) {
 	delete(ws.clients, clientID)
 	if cs.lspHost != nil {
 		syncLSPHost(ws)
+	}
+	// The terminal calls the client was running can no longer be answered.
+	// A stream that merely dropped keeps them: the client may be back
+	// within the detach grace, still running them.
+	if ws.App != nil && ws.Terminal != nil {
+		ws.Terminal.DropClient(clientID)
 	}
 }
 

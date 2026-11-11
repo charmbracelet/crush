@@ -979,3 +979,44 @@ func TestTerminalTakeAsksTheUser(t *testing.T) {
 	write := runTerminalTool(t, tool, TerminalParams{Action: "write", SessionID: user.ID(), Text: "mine\r"})
 	require.False(t, write.IsError, write.Content)
 }
+
+// TestTerminalToolGivesUpOnALostCall checks that a forwarded call nobody
+// answers fails within its budget instead of stalling the agent, and that
+// the client is told to stop.
+func TestTerminalToolGivesUpOnALostCall(t *testing.T) {
+	resetTerminalManager(t)
+	slack := terminalCallSlack
+	terminalCallSlack = 100 * time.Millisecond
+	t.Cleanup(func() { terminalCallSlack = slack })
+
+	server := terminal.NewService()
+	server.SetRouter(func(string, string) (string, error) { return "client", nil })
+	calls := server.SubscribeCalls(t.Context())
+	permissions := &mockBashPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}
+	tool := NewTerminalTool(permissions, server, t.TempDir(), t.TempDir(), nil)
+
+	resp := runTerminalTool(t, tool, TerminalParams{Action: "read"})
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "did not answer")
+
+	var ops []string
+	for range 2 {
+		select {
+		case ev := <-calls:
+			ops = append(ops, ev.Payload.Op)
+		case <-time.After(5 * time.Second):
+			t.Fatal("the call and its cancel were not published")
+		}
+	}
+	require.Equal(t, []string{"read", terminal.OpCancel}, ops)
+}
+
+func TestTerminalCallBudget(t *testing.T) {
+	waits, noWait := true, false
+	require.Equal(t, terminalStartWaitBudget+terminalCallSlack, terminalCallBudget("start", TerminalParams{}))
+	require.Equal(t, terminalStartWaitBudget+terminalCallSlack, terminalCallBudget("handover", TerminalParams{Wait: &waits}))
+	require.Equal(t, terminalCallSlack, terminalCallBudget("start", TerminalParams{Wait: &noWait}))
+	require.Equal(t, 7*time.Second+terminalCallSlack, terminalCallBudget("read", TerminalParams{WaitSeconds: 7}))
+	require.Equal(t, TerminalMaxReadWait+terminalCallSlack, terminalCallBudget("read", TerminalParams{WaitSeconds: 1 << 62}), "no overflow")
+	require.Equal(t, terminalCallSlack, terminalCallBudget("write", TerminalParams{}))
+}

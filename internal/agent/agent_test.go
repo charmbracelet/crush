@@ -33,7 +33,7 @@ var modelPairs = []modelPair{
 	{"deepseek-v4", hyperBuilder("deepseek-v4-pro-0813"), hyperBuilder("deepseek-v4-flash-0731")},
 }
 
-func getModels(t *testing.T, r *vcr.Recorder, pair modelPair) (fantasy.LanguageModel, fantasy.LanguageModel) {
+func getModels(t *testing.T, r cassetteClient, pair modelPair) (fantasy.LanguageModel, fantasy.LanguageModel) {
 	large, err := pair.largeModel(t, r)
 	require.NoError(t, err)
 	small, err := pair.smallModel(t, r)
@@ -42,12 +42,16 @@ func getModels(t *testing.T, r *vcr.Recorder, pair modelPair) (fantasy.LanguageM
 }
 
 func setupAgent(t *testing.T, pair modelPair) (SessionAgent, fakeEnv) {
-	r := vcr.NewRecorder(t)
-	large, small := getModels(t, r, pair)
 	env := testEnv(t)
+	r := workspaceRewriter{
+		next:     vcr.NewRecorder(t),
+		private:  filepath.ToSlash(env.workingDir),
+		recorded: filepath.ToSlash(env.recordedDir),
+	}
+	large, small := getModels(t, r, pair)
 
 	createSimpleGoProject(t, env.workingDir)
-	agent, err := coderAgent(r, env, large, small)
+	agent, err := coderAgent(t, r, env, large, small)
 	require.NoError(t, err)
 	return agent, env
 }

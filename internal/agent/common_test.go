@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,6 +32,7 @@ import (
 // fakeEnv is an environment for testing.
 type fakeEnv struct {
 	workingDir  string
+	recordedDir string
 	sessions    session.Service
 	messages    message.Service
 	permissions permission.Service
@@ -62,10 +64,9 @@ func hyperBuilder(model string) builderFunc {
 }
 
 func testEnv(t *testing.T) fakeEnv {
-	workingDir := filepath.Join("/tmp/crush-test/", t.Name())
-	os.RemoveAll(workingDir)
-
-	err := os.MkdirAll(workingDir, 0o755)
+	// Resolve symlinks because the temporary root is one on macOS, and tools
+	// report resolved paths.
+	workingDir, err := filepath.EvalSymlinks(t.TempDir())
 	require.NoError(t, err)
 
 	conn, err := db.Connect(t.Context(), t.TempDir())
@@ -85,11 +86,11 @@ func testEnv(t *testing.T) fakeEnv {
 
 	t.Cleanup(func() {
 		conn.Close()
-		os.RemoveAll(workingDir)
 	})
 
 	return fakeEnv{
 		workingDir,
+		"/tmp/crush-test/" + t.Name(),
 		sessions,
 		messages,
 		permissions,
@@ -132,7 +133,7 @@ func coderAgent(r *vcr.Recorder, env fakeEnv, large, small fantasy.LanguageModel
 	prompt, err := coderPrompt(
 		prompt.WithTimeFunc(fixedTime),
 		prompt.WithPlatform("linux"),
-		prompt.WithWorkingDir(filepath.ToSlash(env.workingDir)),
+		prompt.WithWorkingDir(env.recordedDir),
 	)
 	if err != nil {
 		return nil, err
@@ -181,7 +182,25 @@ func coderAgent(r *vcr.Recorder, env fakeEnv, large, small fantasy.LanguageModel
 		tools.NewWriteTool(nil, env.permissions, env.history, *env.filetracker, env.workingDir),
 	}
 
+	for i, tool := range allTools {
+		allTools[i] = recordedPathTool{tool, env}
+	}
+
 	return testSessionAgent(env, large, small, systemPrompt, allTools...), nil
+}
+
+// recordedPathTool runs a tool in the private workspace while the model, and
+// so the cassettes, only ever see the recorded path.
+type recordedPathTool struct {
+	fantasy.AgentTool
+	env fakeEnv
+}
+
+func (r recordedPathTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+	call.Input = strings.ReplaceAll(call.Input, r.env.recordedDir, r.env.workingDir)
+	resp, err := r.AgentTool.Run(ctx, call)
+	resp.Content = strings.ReplaceAll(resp.Content, r.env.workingDir, r.env.recordedDir)
+	return resp, err
 }
 
 // createSimpleGoProject creates a simple Go project structure in the given directory.

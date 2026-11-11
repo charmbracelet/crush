@@ -131,11 +131,15 @@ func TestPromptHistoryRefreshPreservesDraft(t *testing.T) {
 		t.Run(change, func(t *testing.T) {
 			t.Parallel()
 
-			old := message.Message{ID: "old", SessionID: "s1", Role: message.User,
-				Parts: []message.ContentPart{message.TextContent{Text: "old prompt"}}}
+			old := message.Message{
+				ID: "old", SessionID: "s1", Role: message.User,
+				Parts: []message.ContentPart{message.TextContent{Text: "old prompt"}},
+			}
 			prompt := message.Message{ID: "new", SessionID: "s1", Role: message.User}
-			ws := &promptHistoryWorkspace{countingWorkspace: &countingWorkspace{ready: true},
-				messages: []message.Message{old}}
+			ws := &promptHistoryWorkspace{
+				countingWorkspace: &countingWorkspace{ready: true},
+				messages:          []message.Message{old},
+			}
 			u := newBusyUI(ws.countingWorkspace)
 			u.com.Workspace = ws
 			warmCaches(u, false)
@@ -174,15 +178,19 @@ func TestPromptHistoryIgnoresHiddenContinuation(t *testing.T) {
 	t.Parallel()
 
 	ws := &promptHistoryWorkspace{countingWorkspace: &countingWorkspace{ready: true}}
-	old := message.Message{ID: "old", SessionID: "s1", Role: message.User,
-		Parts: []message.ContentPart{message.TextContent{Text: "old prompt"}}}
+	old := message.Message{
+		ID: "old", SessionID: "s1", Role: message.User,
+		Parts: []message.ContentPart{message.TextContent{Text: "old prompt"}},
+	}
 	ws.messages = []message.Message{old}
 	u := newBusyUI(ws.countingWorkspace)
 	u.com.Workspace = ws
 	warmCaches(u, false)
 	u.Update(u.loadPromptHistory()())
-	hidden := message.Message{ID: "hidden", SessionID: "s1", Role: message.User,
-		Parts: []message.ContentPart{message.TextContent{Text: "Implement the plan.", Hidden: true}}}
+	hidden := message.Message{
+		ID: "hidden", SessionID: "s1", Role: message.User,
+		Parts: []message.ContentPart{message.TextContent{Text: "Implement the plan.", Hidden: true}},
+	}
 	ws.messages = []message.Message{hidden, old}
 	_, cmd := u.Update(pubsub.Event[message.Message]{Type: pubsub.CreatedEvent, Payload: hidden})
 	for _, msg := range runCmd(cmd) {
@@ -201,8 +209,10 @@ func TestPromptHistoryRefreshKeepsDuplicateSelection(t *testing.T) {
 	for _, item := range []struct{ id, text string }{
 		{"first", "repeat prompt"}, {"middle", "middle prompt"}, {"last", "repeat prompt"},
 	} {
-		ws.messages = append(ws.messages, message.Message{ID: item.id, SessionID: "s1", Role: message.User,
-			Parts: []message.ContentPart{message.TextContent{Text: item.text}}})
+		ws.messages = append(ws.messages, message.Message{
+			ID: item.id, SessionID: "s1", Role: message.User,
+			Parts: []message.ContentPart{message.TextContent{Text: item.text}},
+		})
 	}
 	u := newBusyUI(ws.countingWorkspace)
 	u.com.Workspace = ws
@@ -212,8 +222,10 @@ func TestPromptHistoryRefreshKeepsDuplicateSelection(t *testing.T) {
 	for range 3 {
 		require.True(t, u.historyPrev())
 	}
-	prompt := message.Message{ID: "new", SessionID: "s1", Role: message.User,
-		Parts: []message.ContentPart{message.TextContent{Text: "new prompt"}}}
+	prompt := message.Message{
+		ID: "new", SessionID: "s1", Role: message.User,
+		Parts: []message.ContentPart{message.TextContent{Text: "new prompt"}},
+	}
 	ws.messages = append([]message.Message{prompt}, ws.messages...)
 	_, cmd := u.Update(pubsub.Event[message.Message]{Type: pubsub.CreatedEvent, Payload: prompt})
 	for _, msg := range runCmd(cmd) {
@@ -231,13 +243,17 @@ func TestPromptHistoryRefreshKeepsDuplicateSelection(t *testing.T) {
 func TestPromptHistoryRefreshKeepsShellCommandSelection(t *testing.T) {
 	t.Parallel()
 
-	ws := &promptHistoryWorkspace{countingWorkspace: &countingWorkspace{ready: true},
-		messages: []message.Message{{ID: "shells", SessionID: "s1", Role: message.User,
+	ws := &promptHistoryWorkspace{
+		countingWorkspace: &countingWorkspace{ready: true},
+		messages: []message.Message{{
+			ID: "shells", SessionID: "s1", Role: message.User,
 			Parts: []message.ContentPart{
 				message.ShellCommand{Command: "echo same"},
 				message.ShellCommand{Command: "echo middle"},
 				message.ShellCommand{Command: "echo same"},
-			}}}}
+			},
+		}},
+	}
 	u := newBusyUI(ws.countingWorkspace)
 	u.com.Workspace = ws
 	warmCaches(u, false)
@@ -246,8 +262,10 @@ func TestPromptHistoryRefreshKeepsShellCommandSelection(t *testing.T) {
 	for range 3 {
 		require.True(t, u.historyPrev())
 	}
-	prompt := message.Message{ID: "new", SessionID: "s1", Role: message.User,
-		Parts: []message.ContentPart{message.TextContent{Text: "new prompt"}}}
+	prompt := message.Message{
+		ID: "new", SessionID: "s1", Role: message.User,
+		Parts: []message.ContentPart{message.TextContent{Text: "new prompt"}},
+	}
 	ws.messages = append([]message.Message{prompt}, ws.messages...)
 	_, cmd := u.Update(pubsub.Event[message.Message]{Type: pubsub.CreatedEvent, Payload: prompt})
 	for _, msg := range runCmd(cmd) {

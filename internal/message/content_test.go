@@ -186,7 +186,7 @@ func TestParseSubAgentReportPromptRoundTrips(t *testing.T) {
 	require.False(t, ok)
 }
 
-func TestToAIMessage_SignedReasoningWithoutText(t *testing.T) {
+func TestToAIMessage_SignedReasoningReplayed(t *testing.T) {
 	t.Parallel()
 
 	msg := &Message{
@@ -205,6 +205,12 @@ func TestToAIMessage_SignedReasoningWithoutText(t *testing.T) {
 	require.True(t, ok)
 	require.Empty(t, reasoning.Text)
 	require.NotNil(t, reasoning.ProviderOptions)
+
+	// Anthropic rejects blank text blocks; signed reasoning must survive.
+	msg.Parts[1] = TextContent{Text: " \t\n\u2003"}
+	replayed := msg.ToAIMessage()
+	require.Len(t, replayed, 1)
+	require.Equal(t, messages[0].Content[:1], replayed[0].Content)
 }
 
 func TestToAIMessage_UserContextReplayed(t *testing.T) {
@@ -222,6 +228,19 @@ func TestToAIMessage_UserContextReplayed(t *testing.T) {
 	part, ok := messages[0].Content[0].(fantasy.TextPart)
 	require.True(t, ok)
 	require.Equal(t, "<host_context>x</host_context>\n\n  continue  ", part.Text)
+
+	// Omit blank replay text only after composing the stored context.
+	content := TextContent{Text: " \t\n\u2003", Context: "<host_context>x</host_context>\n\n"}
+	msg.Parts[0] = content
+	messages = msg.ToAIMessage()
+	require.Len(t, messages, 1)
+	require.Equal(t, []fantasy.MessagePart{fantasy.TextPart{Text: content.Context + content.Text}}, messages[0].Content)
+	require.Equal(t, content, msg.Content())
+
+	msg.Parts[0] = TextContent{Text: content.Text}
+	messages = msg.ToAIMessage()
+	require.Len(t, messages, 1)
+	require.Empty(t, messages[0].Content)
 }
 
 func TestAppendContentKeepsContext(t *testing.T) {

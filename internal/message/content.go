@@ -659,7 +659,7 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 				text = shellText
 			}
 		}
-		if text != "" {
+		if strings.TrimSpace(text) != "" {
 			parts = append(parts, fantasy.TextPart{Text: text})
 		}
 		for _, content := range m.BinaryContent() {
@@ -699,7 +699,7 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 			}
 			parts = append(parts, reasoningPart)
 		}
-		if text != "" {
+		if strings.TrimSpace(text) != "" {
 			parts = append(parts, fantasy.TextPart{Text: text})
 		}
 		for _, call := range m.ToolCalls() {

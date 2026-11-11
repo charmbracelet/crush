@@ -396,6 +396,7 @@ func (s *runStream) handle(ev any, stopSpinner func()) (done bool, err error) {
 
 		part := content[readBytes:]
 		if readBytes == 0 {
+			part = strings.TrimPrefix(part, "\n")
 			part = strings.TrimLeft(part, " \t")
 		}
 		if s.printed || strings.TrimSpace(part) != "" {
@@ -442,6 +443,7 @@ func (s *runStream) handle(ev any, stopSpinner func()) (done bool, err error) {
 			if readBytes < len(full) {
 				tail := full[readBytes:]
 				if readBytes == 0 {
+					tail = strings.TrimPrefix(tail, "\n")
 					tail = strings.TrimLeft(tail, " \t")
 				}
 				if s.printed || strings.TrimSpace(tail) != "" {

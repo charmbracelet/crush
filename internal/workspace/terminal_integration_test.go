@@ -1,13 +1,17 @@
 package workspace_test
 
 import (
-	"encoding/json"
+	"context"
+	"io"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent/tools"
+	"github.com/charmbracelet/crush/internal/client"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -17,11 +21,28 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// recorderModel is a TUI that only records the messages it receives.
+type recorderModel struct{ msgs chan<- tea.Msg }
+
+func (recorderModel) Init() tea.Cmd { return nil }
+
+func (m recorderModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	select {
+	case m.msgs <- msg:
+	default:
+	}
+	return m, nil
+}
+
+func (recorderModel) View() tea.View { return tea.NewView("") }
+
 // TestClientWorkspace_RunsAgentTerminals checks the client/server path of
-// the interactive terminal end to end: the server's terminal service
-// forwards the agent's calls to the client viewing the session, which runs
-// them on its own machine and shows the terminal in its TUI, and terminals
-// the user ran on the client are stored on the server.
+// the interactive terminal end to end, with the agent's own tool on the
+// server and a real TUI subscription on the client: the call is forwarded
+// to the TUI viewing the session, which runs it on its own machine and
+// shows the terminal. An editor plugin that follows the same session (and
+// sorts first) must not be picked: it would never answer. Terminals the
+// user ran on the client are stored on the server.
 func TestClientWorkspace_RunsAgentTerminals(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("needs a POSIX shell")
@@ -36,57 +57,85 @@ func TestClientWorkspace_RunsAgentTerminals(t *testing.T) {
 	require.NoError(t, err)
 
 	ws := workspace.NewClientWorkspace(c, *wsProto)
-	shown := make(chan pubsub.Event[terminal.Request], 1)
-	ws.AttachTerminalsForTest(func(msg tea.Msg) {
-		if ev, ok := msg.(pubsub.Event[terminal.Request]); ok {
-			shown <- ev
-		}
-	})
-	evc, err := c.SubscribeEvents(ctx, wsProto.ID)
-	require.NoError(t, err)
-	go ws.ConsumeEventsForTest(evc, func(tea.Msg) {})
+	msgs := make(chan tea.Msg, 1024)
+	program := tea.NewProgram(recorderModel{msgs},
+		tea.WithInput(nil), tea.WithOutput(io.Discard), tea.WithoutRenderer(), tea.WithoutSignals())
+	go func() { _, _ = program.Run() }()
+	t.Cleanup(program.Kill)
+	go ws.Subscribe(program)
 	t.Cleanup(shell.GetInteractiveSessionManager().KillAll)
 
 	sess, err := ws.CreateSession(ctx, "chat")
 	require.NoError(t, err)
-	require.NoError(t, ws.SetCurrentSession(ctx, sess.ID))
+	require.Eventually(t, func() bool { return ws.SetCurrentSession(ctx, sess.ID) == nil },
+		5*time.Second, 20*time.Millisecond, "the TUI attaches its event stream")
+
+	// The editor plugin: an API client of the same workspace that follows
+	// the TUI's session but knows nothing about terminals.
+	var editor *client.Client
+	for range 64 {
+		editor = rt.newClient(t, cwd)
+		if editor.ClientID() < c.ClientID() {
+			break
+		}
+	}
+	require.Less(t, editor.ClientID(), c.ClientID())
+	_, err = editor.CreateWorkspace(ctx, proto.Workspace{Path: cwd, DataDir: wsProto.DataDir})
+	require.NoError(t, err)
+	_, err = editor.SubscribeEvents(ctx, wsProto.ID)
+	require.NoError(t, err)
+	require.NoError(t, editor.SetCurrentSession(ctx, wsProto.ID, sess.ID))
 
 	server, err := rt.srv.Backend().GetWorkspace(wsProto.ID)
 	require.NoError(t, err)
-	exec := func(params tools.TerminalParams) terminal.Result {
+	server.Permissions.AutoApproveSession(sess.ID)
+	tool := tools.NewTerminalTool(server.Permissions, server.Terminal, cwd, t.TempDir(), nil)
+	run := func(input string) fantasy.ToolResponse {
 		t.Helper()
-		raw, err := json.Marshal(params)
-		require.NoError(t, err)
-		result, remote, err := server.Terminal.Exec(ctx, terminal.Call{
-			SessionID:  sess.ID,
-			ToolCallID: "tool-call",
-			Op:         params.Action,
-			Params:     raw,
-		})
-		require.NoError(t, err)
-		require.True(t, remote, "a server forwards terminal calls to its client")
-		require.False(t, result.IsError, result.Content)
-		return result
+		done := make(chan fantasy.ToolResponse, 1)
+		go func() {
+			resp, err := tool.Run(context.WithValue(ctx, tools.SessionIDContextKey, sess.ID),
+				fantasy.ToolCall{ID: "tool-call", Name: tools.TerminalToolName, Input: input})
+			if err != nil {
+				resp = fantasy.NewTextErrorResponse(err.Error())
+			}
+			done <- resp
+		}()
+		select {
+		case resp := <-done:
+			require.False(t, resp.IsError, resp.Content)
+			return resp
+		case <-time.After(10 * time.Second):
+			t.Fatalf("the terminal call hung: %s", input)
+			return fantasy.ToolResponse{}
+		}
 	}
 
-	noWait := false
-	exec(tools.TerminalParams{Action: "start", Command: "printf remote-hello", Wait: &noWait})
-	select {
-	case ev := <-shown:
-		require.NotNil(t, ev.Payload.Session, "the client's TUI gets the session it runs")
-		require.Equal(t, sess.ID, ev.Payload.SessionID)
-	case <-time.After(5 * time.Second):
-		t.Fatal("the terminal was not shown on the client")
+	run(`{"action":"start","command":"printf remote-hello; sleep 30","wait":false}`)
+	shown := false
+	for !shown {
+		select {
+		case msg := <-msgs:
+			if ev, ok := msg.(pubsub.Event[terminal.Request]); ok {
+				require.NotNil(t, ev.Payload.Session, "the client's TUI gets the session it runs")
+				require.Equal(t, sess.ID, ev.Payload.SessionID)
+				shown = true
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("the terminal was not shown on the client")
+		}
 	}
 
-	read := exec(tools.TerminalParams{Action: "read", WaitSeconds: 5})
-	require.Contains(t, read.Content, "remote-hello")
+	require.Eventually(t, func() bool {
+		return strings.Contains(run(`{"action":"read"}`).Content, "remote-hello")
+	}, 5*time.Second, 100*time.Millisecond)
+	run(`{"action":"kill"}`)
 
 	require.NoError(t, ws.PersistShellCommand(ctx, sess.ID, "htop", "load average", 0))
-	msgs, err := ws.ListMessages(ctx, sess.ID)
+	stored, err := ws.ListMessages(ctx, sess.ID)
 	require.NoError(t, err)
 	var recorded []message.ShellCommand
-	for _, msg := range msgs {
+	for _, msg := range stored {
 		for _, part := range msg.Parts {
 			if cmd, ok := part.(message.ShellCommand); ok {
 				recorded = append(recorded, cmd)

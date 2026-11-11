@@ -525,7 +525,7 @@ type UI struct {
 
 	// Prompt history for up/down navigation through previous messages.
 	promptHistory struct {
-		messages   []string
+		messages   []promptHistoryEntry
 		index      int
 		draft      string
 		generation uint64
@@ -1092,9 +1092,20 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.generation != m.promptHistory.generation || msg.sessionID != m.currentSessionID() {
 			break
 		}
+		if i := m.promptHistory.index; i >= 0 && i < len(m.promptHistory.messages) {
+			selected := m.promptHistory.messages[i]
+			index := slices.IndexFunc(msg.messages, func(entry promptHistoryEntry) bool {
+				return entry.messageID == selected.messageID && entry.shellIndex == selected.shellIndex
+			})
+			if index < 0 {
+				cmds = append(cmds, m.handleHistoryEscape(nil))
+			} else {
+				m.promptHistory.index = index
+			}
+		} else {
+			m.historyReset()
+		}
 		m.promptHistory.messages = msg.messages
-		m.promptHistory.index = -1
-		m.promptHistory.draft = ""
 
 	case closeDialogMsg:
 		m.dialog.CloseFrontDialog()

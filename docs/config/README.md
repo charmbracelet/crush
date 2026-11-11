@@ -92,12 +92,13 @@ precedence:
 | -------- | -------------------------------- | --------------------------------- |
 | 1        | `./.crushrc`                     | `.\.crushrc`                      |
 | 2        | `./crushrc`                      | `.\crushrc`                       |
-| 3        | `$XDG_CONFIG_HOME/crush/crushrc` | `%XDG_CONFIG_HOME%\crush\crushrc` |
+| 3        | `./.config/crush/crushrc`        | `.\.config\crush\crushrc`         |
+| 4        | `$XDG_CONFIG_HOME/crush/crushrc` | `%XDG_CONFIG_HOME%\crush\crushrc` |
 
 Legacy JSON uses `.crush.json` / `crush.json` in the same directories as the
-above. Everything found is merged, with project settings overriding global ones
-and `crushrc` overriding JSON in the same directory. If a folder has both, they
-merge and Crush logs a warning.
+above (just `crush.json` under `./.config/crush/`). Everything found is merged,
+with project settings overriding global ones and `crushrc` overriding JSON in
+the same directory. If a folder has both, they merge and Crush logs a warning.
 
 Data directories (`~/.local/share/crush` on Unix-like systems and
 `%LOCALAPPDATA%\crush` on Windows) contain machine-owned JSON state. Crush does

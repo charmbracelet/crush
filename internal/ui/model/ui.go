@@ -525,9 +525,10 @@ type UI struct {
 
 	// Prompt history for up/down navigation through previous messages.
 	promptHistory struct {
-		messages []string
-		index    int
-		draft    string
+		messages   []string
+		index      int
+		draft      string
+		generation uint64
 	}
 }
 
@@ -1088,6 +1089,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case promptHistoryLoadedMsg:
+		if msg.generation != m.promptHistory.generation || msg.sessionID != m.currentSessionID() {
+			break
+		}
 		m.promptHistory.messages = msg.messages
 		m.promptHistory.index = -1
 		m.promptHistory.draft = ""
@@ -1142,6 +1146,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.Type {
 		case pubsub.CreatedEvent:
 			cmds = append(cmds, m.appendSessionMessage(msg.Payload))
+			if msg.Payload.Role == message.User {
+				cmds = append(cmds, m.loadPromptHistory())
+			}
 			// A new message is a run boundary — a user prompt starting
 			// a turn or the agent replying/dequeueing. Drop the
 			// memoized busy state and re-fetch it and the queue
@@ -3494,7 +3501,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				m.randomizePlaceholders()
 				m.historyReset()
 
-				return tea.Batch(m.sendMessage(value, attachments...), m.loadPromptHistory())
+				return m.sendMessage(value, attachments...)
 			case key.Matches(msg, m.keyMap.Chat.NewSession):
 				if !m.hasSession() {
 					break

@@ -17,7 +17,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/v3/pkg/catwalk"
-	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
@@ -451,28 +450,23 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	// Report session identity to herdr.
 	app.ReportCurrentSession(sess.ID)
 
-	type response struct {
-		result *fantasy.AgentResult
-		err    error
+	answer, err := newAnswerPrinter(ctx, output, sess.ID, app.Messages, continueSessionID != "" || useLast)
+	if err != nil {
+		return err
 	}
-	done := make(chan response, 1)
 
+	// Subscribe before the agent starts, so no update is published before
+	// anyone listens.
+	messageEvents := app.Messages.Subscribe(ctx)
+
+	done := make(chan error, 1)
 	go func(ctx context.Context, sessionID, prompt string) {
-		result, err := app.AgentCoordinator.Run(ctx, sess.ID, prompt)
-		if err != nil {
-			done <- response{
-				err: fmt.Errorf("failed to start agent processing stream: %w", err),
-			}
+		if _, err := app.AgentCoordinator.Run(ctx, sessionID, prompt); err != nil {
+			done <- fmt.Errorf("failed to start agent processing stream: %w", err)
 			return
 		}
-		done <- response{
-			result: result,
-		}
+		done <- nil
 	}(ctx, sess.ID, prompt)
-
-	messageEvents := app.Messages.Subscribe(ctx)
-	messageReadBytes := make(map[string]int)
-	var printed bool
 
 	defer func() {
 		if progress && stderrTTY {
@@ -484,57 +478,14 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 		_, _ = fmt.Fprintln(output)
 	}()
 
-	for {
+	beforeWait := func() {
 		if progress && stderrTTY {
 			// HACK: Reinitialize the terminal progress bar on every iteration
 			// so it doesn't get hidden by the terminal due to inactivity.
 			_, _ = fmt.Fprintf(os.Stderr, ansi.SetIndeterminateProgressBar)
 		}
-
-		select {
-		case result := <-done:
-			stopSpinner()
-			if result.err != nil {
-				if errors.Is(result.err, context.Canceled) || errors.Is(result.err, agent.ErrRequestCancelled) {
-					slog.Debug("Non-interactive: agent processing cancelled", "session_id", sess.ID)
-					return nil
-				}
-				return fmt.Errorf("agent processing failed: %w", result.err)
-			}
-			return nil
-
-		case event := <-messageEvents:
-			msg := event.Payload
-			if msg.SessionID == sess.ID && msg.Role == message.Assistant && len(msg.Parts) > 0 {
-				stopSpinner()
-
-				content := msg.Content().String()
-				readBytes := messageReadBytes[msg.ID]
-
-				if len(content) < readBytes {
-					slog.Error("Non-interactive: message content is shorter than read bytes", "message_length", len(content), "read_bytes", readBytes)
-					return fmt.Errorf("message content is shorter than read bytes: %d < %d", len(content), readBytes)
-				}
-
-				part := content[readBytes:]
-				// Trim leading whitespace. Sometimes the LLM includes leading
-				// formatting and indentation, which we don't want here.
-				if readBytes == 0 {
-					part = strings.TrimLeft(part, " \t")
-				}
-				// Ignore initial whitespace-only messages.
-				if printed || strings.TrimSpace(part) != "" {
-					printed = true
-					fmt.Fprint(output, part)
-				}
-				messageReadBytes[msg.ID] = len(content)
-			}
-
-		case <-ctx.Done():
-			stopSpinner()
-			return ctx.Err()
-		}
 	}
+	return answer.printUntilDone(ctx, messageEvents, done, app.Messages, beforeWait, stopSpinner)
 }
 
 func (app *App) UpdateAgentModel(ctx context.Context) error {

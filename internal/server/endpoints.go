@@ -159,10 +159,12 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 				"question prompts are scoped to the session the client currently "+
 				"views (see POST current-session): they are only delivered to clients "+
 				"viewing the session that raised them, and clients viewing no session "+
-				"receive none. All other events are workspace-wide.").
+				"receive none. Terminal calls go to one client that hosts terminals "+
+				"(terminal_host=1), and all other events are workspace-wide.").
 			Tags("workspaces").
 			PathParam("id", "Workspace ID").
 			RequiredQueryParam("client_id", "Client ID (UUID)").
+			QueryParam("terminal_host", "1 when the client runs a TUI that can open the agent's interactive terminals").
 			SSE().
 			Fails(400, 404, 500).
 			Handle(c.handleGetWorkspaceEvents),

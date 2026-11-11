@@ -15,14 +15,6 @@ func (w *ClientWorkspace) ConsumeEventsForTest(evc <-chan any, send func(tea.Msg
 	w.consumeEvents(evc, send)
 }
 
-// AttachTerminalsForTest does what Subscribe does for the interactive
-// terminals of a TUI: they become available, and their display requests
-// go to send.
-func (w *ClientWorkspace) AttachTerminalsForTest(send func(tea.Msg)) {
-	w.terminals.SetAvailable(true)
-	go w.forwardTerminals(send)
-}
-
 // RunSubscriptionForTest runs the full subscribe/reconnect/recovery loop.
 // Exposed for cross-package integration tests. It returns once the
 // workspace is shut down.

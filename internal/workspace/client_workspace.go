@@ -1067,7 +1067,11 @@ func (w *ClientWorkspace) runSubscription(send func(tea.Msg)) {
 			return
 		}
 
-		evc, err := w.client.SubscribeEvents(w.subCtx, w.workspaceID())
+		var opts []client.EventsOption
+		if w.terminals.Available() {
+			opts = append(opts, client.HostTerminals())
+		}
+		evc, err := w.client.SubscribeEvents(w.subCtx, w.workspaceID(), opts...)
 		if err != nil {
 			if w.subCtx.Err() != nil {
 				return

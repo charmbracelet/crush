@@ -344,7 +344,12 @@ func (t terminalTool) run(ctx context.Context, op string, params TerminalParams)
 		Params:     raw,
 	}
 
-	result, remote, err := t.terminals.Exec(ctx, call)
+	// A forwarded call that is never answered (its event or its answer got
+	// lost) must not stall the agent for good: on the client, every
+	// operation ends within its own budget.
+	execCtx, cancel := context.WithTimeout(ctx, terminalCallBudget(op, params))
+	defer cancel()
+	result, remote, err := t.terminals.Exec(execCtx, call)
 	switch {
 	case !remote:
 		return ExecTerminal(ctx, t.terminals, t.workingDir, call)
@@ -352,11 +357,41 @@ func (t terminalTool) run(ctx context.Context, op string, params TerminalParams)
 		return result, nil
 	case ctx.Err() != nil:
 		return terminal.Result{}, ctx.Err()
+	case errors.Is(err, context.DeadlineExceeded):
+		return terminalError(fmt.Sprintf(
+			"the user's terminal did not answer the %s call in time; the user's Crush may have disconnected. Check the session with read before retrying",
+			op,
+		)), nil
 	case errors.Is(err, terminal.ErrUnavailable):
 		return terminalError(terminalUnavailableMessage), nil
 	default:
 		return terminalError(fmt.Sprintf("terminal %s failed: %v", op, err)), nil
 	}
+}
+
+// terminalCallSlack is how long past its own budget a forwarded call may
+// take to be answered. It is a var so tests can shorten it.
+var terminalCallSlack = 30 * time.Second
+
+// terminalCallBudget bounds how long op can take where the terminals live:
+// the waits of a start, handover, or read, plus slack for everything else.
+func terminalCallBudget(op string, params TerminalParams) time.Duration {
+	switch op {
+	case terminalActionStart, terminalActionHandover:
+		if terminalStartWaits(params) {
+			return terminalStartWaitBudget + terminalCallSlack
+		}
+	case terminalActionRead:
+		return readWait(params) + terminalCallSlack
+	}
+	return terminalCallSlack
+}
+
+// readWait is how long a read may block, capped before it is multiplied so
+// a huge wait_seconds cannot overflow into no wait at all.
+func readWait(params TerminalParams) time.Duration {
+	limit := int(TerminalMaxReadWait / time.Second)
+	return time.Duration(min(max(params.WaitSeconds, 0), limit)) * time.Second
 }
 
 // response turns a terminal result into the tool's response. Oversized
@@ -718,8 +753,7 @@ func (h terminalHost) read(ctx context.Context, params TerminalParams) (terminal
 		return terminalError(err.Error()), nil
 	}
 
-	if params.WaitSeconds > 0 && !session.Exited() {
-		wait := min(time.Duration(params.WaitSeconds)*time.Second, TerminalMaxReadWait)
+	if wait := readWait(params); wait > 0 && !session.Exited() {
 		changed := session.ControlChanged()
 		select {
 		case <-session.Done():

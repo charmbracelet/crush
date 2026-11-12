@@ -7,16 +7,17 @@ import (
 	"slices"
 	"time"
 
-	"charm.land/catwalk/pkg/catwalk"
+	"charm.land/catwalk/v3/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/message"
 )
 
 // CreateMessageParams represents parameters for creating a message.
 type CreateMessageParams struct {
-	Role     MessageRole   `json:"role"`
-	Parts    []ContentPart `json:"parts"`
-	Model    string        `json:"model"`
-	Provider string        `json:"provider,omitempty"`
+	Role      MessageRole   `json:"role"`
+	Parts     []ContentPart `json:"parts"`
+	Model     string        `json:"model"`
+	ModelName string        `json:"model_name,omitempty"`
+	Provider  string        `json:"provider,omitempty"`
 }
 
 // Message represents a message in the proto layer.
@@ -26,6 +27,7 @@ type Message struct {
 	SessionID               string        `json:"session_id"`
 	Parts                   []ContentPart `json:"parts"`
 	Model                   string        `json:"model"`
+	ModelName               string        `json:"model_name,omitempty"`
 	Provider                string        `json:"provider"`
 	PrismModelID            string        `json:"prism_model_id,omitempty"`
 	PrismModelName          string        `json:"prism_model_name,omitempty"`
@@ -187,6 +189,17 @@ type ShellCommand struct {
 }
 
 func (ShellCommand) isPart() {}
+
+// SubAgentReport stores the result a detached subagent reported back.
+type SubAgentReport struct {
+	Label  string `json:"label"`
+	Output string `json:"output"`
+	Failed bool   `json:"failed,omitempty"`
+	// Model is provider/model, for display.
+	Model string `json:"model,omitempty"`
+}
+
+func (SubAgentReport) isPart() {}
 
 // MarshalJSON implements the [json.Marshaler] interface.
 func (m Message) MarshalJSON() ([]byte, error) {
@@ -429,24 +442,6 @@ func (m *Message) FinishToolCall(toolCallID string) {
 	}
 }
 
-// AppendToolCallInput appends input to a tool call.
-func (m *Message) AppendToolCallInput(toolCallID string, inputDelta string) {
-	for i, part := range m.Parts {
-		if c, ok := part.(ToolCall); ok {
-			if c.ID == toolCallID {
-				m.Parts[i] = ToolCall{
-					ID:       c.ID,
-					Name:     c.Name,
-					Input:    c.Input + inputDelta,
-					Type:     c.Type,
-					Finished: c.Finished,
-				}
-				return
-			}
-		}
-	}
-}
-
 // AddToolCall adds or updates a tool call.
 func (m *Message) AddToolCall(tc ToolCall) {
 	for i, part := range m.Parts {
@@ -511,14 +506,15 @@ func (m *Message) AddBinary(mimeType string, data []byte) {
 type partType string
 
 const (
-	reasoningType    partType = "reasoning"
-	textType         partType = "text"
-	imageURLType     partType = "image_url"
-	binaryType       partType = "binary"
-	toolCallType     partType = "tool_call"
-	toolResultType   partType = "tool_result"
-	finishType       partType = "finish"
-	shellCommandType partType = "shell_command"
+	reasoningType      partType = "reasoning"
+	textType           partType = "text"
+	imageURLType       partType = "image_url"
+	binaryType         partType = "binary"
+	toolCallType       partType = "tool_call"
+	toolResultType     partType = "tool_result"
+	finishType         partType = "finish"
+	shellCommandType   partType = "shell_command"
+	subAgentReportType partType = "sub_agent_report"
 )
 
 type partWrapper struct {
@@ -550,6 +546,8 @@ func MarshalParts(parts []ContentPart) ([]byte, error) {
 			typ = finishType
 		case ShellCommand:
 			typ = shellCommandType
+		case SubAgentReport:
+			typ = subAgentReportType
 		default:
 			return nil, fmt.Errorf("unknown part type: %T", part)
 		}
@@ -627,6 +625,12 @@ func UnmarshalParts(data []byte) ([]ContentPart, error) {
 			parts = append(parts, part)
 		case shellCommandType:
 			part := ShellCommand{}
+			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
+				return nil, err
+			}
+			parts = append(parts, part)
+		case subAgentReportType:
+			part := SubAgentReport{}
 			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
 				return nil, err
 			}

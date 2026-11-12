@@ -40,6 +40,7 @@ func TestMCPToggles_Toggle(t *testing.T) {
 	require.Equal(t, "serena", toggled.Name)
 	require.False(t, toggled.Disabled, "enter should re-enable a disabled server")
 	require.False(t, m.Items()[1].Disabled)
+	require.Equal(t, "starting", m.Items()[1].Status, "a locally re-enabled server is restarted")
 }
 
 func TestMCPToggles_ConfigDisabledCanBeEnabled(t *testing.T) {
@@ -108,6 +109,22 @@ func TestMCPToggles_LocalEnableDoesNotAffectGlobalScope(t *testing.T) {
 	require.True(t, ok)
 	require.False(t, toggled.Disabled)
 	require.True(t, toggled.Global)
+	require.False(t, m.Items()[0].ConfigDisabled)
+}
+
+func TestMCPToggles_LocalDisableDoesNotAffectGlobalScope(t *testing.T) {
+	t.Parallel()
+
+	m := newMCPTogglesForTest([]MCPToggleItem{
+		{Name: "docker", Status: "connected"},
+	})
+
+	m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m.SetItemStatus("docker", "disabled")
+	require.Equal(t, "disabled", m.itemStatus(m.Items()[0]))
+
+	m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyTab})
+	require.Equal(t, "enabled", m.itemStatus(m.Items()[0]))
 	require.False(t, m.Items()[0].ConfigDisabled)
 }
 

@@ -2,7 +2,7 @@ package login
 
 import (
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/exp/charmtone"
+	"charm.land/tone"
 )
 
 var (
@@ -14,9 +14,9 @@ var (
 
 	headerStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(charmtone.Charple)
+			Foreground(tone.Charple)
 	slashStyle = lipgloss.NewStyle().
 			Bold(true)
 	errorStyle = lipgloss.NewStyle().
-			Foreground(charmtone.Coral)
+			Foreground(tone.Coral)
 )

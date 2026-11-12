@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/oauth"
@@ -426,6 +427,9 @@ type authFlight struct {
 	once   sync.Once
 	result *auth.AuthorizationResult
 	err    error
+
+	// joined counts callers waiting on this flight instead of opening a tab.
+	joined atomic.Int32
 }
 
 // settle records the outcome of the flight and wakes everyone waiting on
@@ -447,6 +451,7 @@ func (r *callbackReceiver) begin() (*authFlight, bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.flight != nil {
+		r.flight.joined.Add(1)
 		return r.flight, false, nil
 	}
 	if err := r.bindLocked(); err != nil {
@@ -592,7 +597,7 @@ func (r *callbackReceiver) fetchAuthorizationCode(ctx context.Context, args *aut
 	if !owned {
 		// Another request already opened the browser for this server. Wait
 		// for that redirect instead of opening a second tab.
-		slog.Debug("Joining in-progress MCP OAuth authorization", "name", r.serverName)
+		slog.Debug("Joining in-progress MCP OAuth authorization", "name", r.serverName, "waiting", flight.joined.Load())
 		return r.await(ctx, flight, false)
 	}
 	defer r.end(flight)

@@ -72,15 +72,16 @@ provider add <id> [flags]    # define/update; repeated calls merge
 provider remove <id>         # alias: rm — removes the provider and its models
 ```
 
-Flags: `--name`, `--type` (`openai`, `openai-compat`, `anthropic`, or a local
-type like `ollama`, `lmstudio`, `llamacpp`), `--api-key`, `--base-url`,
+Flags: `--name`, `--type` (`completions`, `responses`, `messages`, or a local
+type like `ollama`, `lmstudio`, `llamacpp`; legacy values `openai`, `openai-compat`,
+`anthropic` are migrated automatically), `--api-key`, `--base-url`,
 `--disable BOOL`, `--flat-rate BOOL`, `--discover-models BOOL`,
 `--system-prompt-prefix TEXT`, `--extra-header KEY VALUE` (repeatable),
 `--extra-body JSON`, `--provider-options JSON`.
 
 ```bash
 provider add deepseek \
-  --type openai-compat \
+  --type completions \
   --base-url "https://api.deepseek.com/v1" \
   --api-key "${DEEPSEEK_API_KEY:?set DEEPSEEK_API_KEY}"
 ```
@@ -97,9 +98,10 @@ model small [<provider>/<id>] [flags]  # set the small slot; no arg prints it
 - `<provider>/<id>` is the same form `crush models` prints. A missing slash is
   an error. `model add` requires the provider to already exist.
 - `model add` flags: `--name`, `--context-window N`, `--default-max-tokens N`,
-  `--can-reason BOOL`, `--supports-images BOOL`, `--price-input F`,
-  `--price-output F`, `--price-cache-create F`, `--price-cache-hit F`,
-  `--reasoning-effort low|medium|high`.
+  `--thinking always|never|toggleable`, `--supports-images BOOL`,
+  `--price-input F`, `--price-output F`, `--price-cache-create F`,
+  `--price-cache-hit F`, `--reasoning-effort low|medium|high`,
+  `--max-attachments N`.
 - `model large`/`model small` flags: `--think`, `--reasoning-effort`,
   `--max-tokens N`, `--temperature F`, `--top-p F`, `--top-k N`,
   `--frequency-penalty F`, `--presence-penalty F`, `--provider-options JSON`.
@@ -212,9 +214,12 @@ option ui exit-banner compact
 
 ## Hooks runtime
 
-Hooks are user-defined shell commands that fire on agent events. Currently only
-`PreToolUse` is supported, which runs before a tool executes. This behavior is
-the same however the hook is defined (`hook add` or JSON).
+Hooks are user-defined shell commands that fire on agent events. Crush supports
+13 events: `PreToolUse`, `PostToolUse`, `PostToolUseFailure`,
+`PermissionRequest`, `PermissionResult`, `SessionStart`, `SessionEnd`,
+`TurnStart`, `TurnEnd`, `StopFailure`, `Interrupt`, `PreCompact`, and
+`PostCompact`. `--matcher` is only accepted on the first five. This behavior
+is the same however the hook is defined (`hook add` or JSON).
 
 ### How hooks work
 
@@ -232,12 +237,20 @@ Event names are case-insensitive and accept snake_case: `PreToolUse`,
 ```json
 {
   "event": "PreToolUse",
+  "hook_event_name": "PreToolUse",
   "session_id": "abc-123",
   "cwd": "/path/to/project",
   "tool_name": "bash",
-  "tool_input": { "command": "ls -la" }
+  "tool_input": { "command": "ls -la" },
+  "tool_use_id": "call_01"
 }
 ```
+
+Events without a tool call omit the `tool_*` fields. Some add one of their
+own: `tool_response` (PostToolUse), `error` (PostToolUseFailure,
+StopFailure), `last_assistant_message` (TurnEnd), `decision`
+(PermissionResult), `source` (SessionStart), `reason` (SessionEnd), and
+`trigger` (PreCompact, PostCompact).
 
 ### Hook environment variables
 
@@ -248,6 +261,7 @@ Event names are case-insensitive and accept snake_case: `PreToolUse`,
 | `CRUSH_SESSION_ID`           | Current session ID                                |
 | `CRUSH_CWD`                  | Current working directory                         |
 | `CRUSH_PROJECT_DIR`          | Project root directory                            |
+| `CLAUDE_PROJECT_DIR`         | Same value, for scripts written for Claude Code   |
 | `CRUSH_TOOL_INPUT_COMMAND`   | Value of `command` from tool input (if present)   |
 | `CRUSH_TOOL_INPUT_FILE_PATH` | Value of `file_path` from tool input (if present) |
 
@@ -262,23 +276,31 @@ Event names are case-insensitive and accept snake_case: `PreToolUse`,
 - `decision`: `allow` to explicitly allow, `deny` to block, `none` (or omit).
 - `reason`: explanation (used when denying).
 - `context`: extra context appended to the tool result.
-- `updated_input`: replacement JSON for the tool input; last non-empty wins.
+- `updated_input`: on PreToolUse, a shallow-merge patch against the tool
+  input.
+- `updated_output`: on PostToolUse, a string that replaces the tool output.
+- `halt`: `true` ends the turn (blocks compaction on PreCompact).
 
 **Exit code 2** — the tool call is blocked; stderr is the deny reason.
 
-**Any other exit code** — non-blocking error; the tool call proceeds.
+**Exit code 49** — the whole turn is halted; stderr is the reason.
+
+**Any other exit code** — non-blocking error; the tool call proceeds, unless
+stdout holds a JSON object, which is applied anyway.
 
 ### Decision aggregation
 
 - **Deny wins over allow** — any deny blocks the call.
 - **Allow wins over none** — a lone allow lets it proceed.
 - Deny reasons and context strings are concatenated (newline-separated).
-- For `updated_input`, the last non-empty value wins.
+- `updated_input` patches shallow-merge in config order on PreToolUse;
+  `updated_output` on PostToolUse is last-one-wins.
 
 ### Claude Code compatibility
 
-Crush also accepts the Claude Code hook output format, so existing hooks work
-unchanged:
+Crush also accepts the Claude Code hook output formats (`hookSpecificOutput`,
+top-level `decision: "block"` with `reason`, `continue: false`), so existing
+hooks work unchanged:
 
 ```json
 {
@@ -351,6 +373,7 @@ The `$schema` property enables IDE autocomplete but is optional.
 | `option skill-path ./skills`         | `options.skills_paths = ["./skills"]`                  |
 | `option metrics false`               | `options.disable_metrics = true`                       |
 | `option request-timeout 300`          | `options.request_timeout = 300`                        |
+| `option max-background-jobs 200`     | `options.max_background_jobs = 200`                    |
 | `option attribution-trailer-style none` | `options.attribution.trailer_style = "none"`        |
 | `option attribution-generated-with false` | `options.attribution.generated_with = false`       |
 

@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -14,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"charm.land/catwalk/pkg/catwalk"
+	"charm.land/catwalk/v3/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/oauth"
@@ -24,9 +25,7 @@ import (
 
 func TestMain(m *testing.M) {
 	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
-
-	exitVal := m.Run()
-	os.Exit(exitVal)
+	os.Exit(m.Run())
 }
 
 func TestConfig_LoadFromBytes(t *testing.T) {
@@ -42,6 +41,41 @@ func TestConfig_LoadFromBytes(t *testing.T) {
 	pc, _ := loadedConfig.Providers.Get("openai")
 	require.Equal(t, "key2", pc.APIKey)
 	require.Equal(t, "https://api.openai.com/v2", pc.BaseURL)
+}
+
+func TestLoadDataDirEnv(t *testing.T) {
+	t.Setenv("CRUSH_GLOBAL_CONFIG", t.TempDir())
+	t.Setenv("CRUSH_GLOBAL_DATA", t.TempDir())
+	t.Setenv("CRUSH_DISABLE_PROVIDER_AUTO_UPDATE", "1")
+
+	t.Run("CRUSH_DATA_DIR overrides the project data directory", func(t *testing.T) {
+		workDir := t.TempDir()
+		dataDir := t.TempDir()
+		t.Setenv("CRUSH_DATA_DIR", dataDir)
+
+		store, err := Load(t.Context(), workDir, "", false)
+		require.NoError(t, err)
+		require.Equal(t, dataDir, store.Config().Options.DataDirectory)
+	})
+
+	t.Run("an explicit data directory wins over CRUSH_DATA_DIR", func(t *testing.T) {
+		workDir := t.TempDir()
+		dataDir := t.TempDir()
+		t.Setenv("CRUSH_DATA_DIR", t.TempDir())
+
+		store, err := Load(t.Context(), workDir, dataDir, false)
+		require.NoError(t, err)
+		require.Equal(t, dataDir, store.Config().Options.DataDirectory)
+	})
+
+	t.Run("relative CRUSH_DATA_DIR resolves against the working directory", func(t *testing.T) {
+		workDir := t.TempDir()
+		t.Setenv("CRUSH_DATA_DIR", "state")
+
+		store, err := Load(t.Context(), workDir, "", false)
+		require.NoError(t, err)
+		require.Equal(t, filepath.Join(workDir, "state"), store.Config().Options.DataDirectory)
+	})
 }
 
 func TestLookupConfigs_BoundedByProject(t *testing.T) {
@@ -814,11 +848,11 @@ func TestConfig_setupAgentsWithNoDisabledTools(t *testing.T) {
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
-	assert.Equal(t, []string{"lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "glob", "grep", "ls", "sourcegraph", "view"}, taskAgent.AllowedTools)
+	assert.Equal(t, []string{"bash", "lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "glob", "grep", "ls", "sourcegraph", "view"}, taskAgent.AllowedTools)
 
 	planAgent, ok := cfg.Agents[AgentPlan]
 	require.True(t, ok)
-	assert.Equal(t, []string{"agent", "lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "glob", "grep", "ls", "question", "sourcegraph", "view"}, planAgent.AllowedTools)
+	assert.Equal(t, []string{"agent", "agent_dispatch", "agent_send", "agent_status", "agent_stop", "lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "glob", "grep", "ls", "question", "sourcegraph", "view"}, planAgent.AllowedTools)
 }
 
 func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {
@@ -836,15 +870,15 @@ func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
 
-	assert.Equal(t, []string{"agent", "bash", "crush_info", "crush_logs", "job_output", "job_kill", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "lsp_rename", "lsp_replace_symbol", "fetch", "agentic_fetch", "glob", "ls", "question", "sourcegraph", "todos", "view", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
+	assert.Equal(t, []string{"agent", "agent_dispatch", "agent_send", "agent_status", "agent_stop", "bash", "crush_info", "crush_logs", "job_output", "job_kill", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "lsp_rename", "lsp_replace_symbol", "fetch", "agentic_fetch", "glob", "ls", "question", "sourcegraph", "todos", "view", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
-	assert.Equal(t, []string{"lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "glob", "ls", "sourcegraph", "view"}, taskAgent.AllowedTools)
+	assert.Equal(t, []string{"bash", "lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "glob", "ls", "sourcegraph", "view"}, taskAgent.AllowedTools)
 
 	planAgent, ok := cfg.Agents[AgentPlan]
 	require.True(t, ok)
-	assert.Equal(t, []string{"agent", "lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "glob", "ls", "question", "sourcegraph", "view"}, planAgent.AllowedTools)
+	assert.Equal(t, []string{"agent", "agent_dispatch", "agent_send", "agent_status", "agent_stop", "lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "glob", "ls", "question", "sourcegraph", "view"}, planAgent.AllowedTools)
 }
 
 func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
@@ -852,6 +886,7 @@ func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
 		Options: &Options{
 			DisabledTools: []string{
 				"agent",
+				"bash",
 				"glob",
 				"grep",
 				"ls",
@@ -867,7 +902,7 @@ func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
 	cfg.SetupAgents()
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
-	assert.Equal(t, []string{"bash", "crush_info", "crush_logs", "job_output", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_rename", "lsp_replace_symbol", "fetch", "agentic_fetch", "question", "todos", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
+	assert.Equal(t, []string{"agent_dispatch", "agent_send", "agent_status", "agent_stop", "crush_info", "crush_logs", "job_output", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_rename", "lsp_replace_symbol", "fetch", "agentic_fetch", "question", "todos", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
@@ -875,7 +910,7 @@ func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
 
 	planAgent, ok := cfg.Agents[AgentPlan]
 	require.True(t, ok)
-	assert.Equal(t, []string{"question"}, planAgent.AllowedTools)
+	assert.Equal(t, []string{"agent_dispatch", "agent_send", "agent_status", "agent_stop", "question"}, planAgent.AllowedTools)
 }
 
 func TestConfig_configureProvidersWithDisabledProvider(t *testing.T) {
@@ -1238,7 +1273,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 				"custom": {
 					APIKey:  "test-key",
 					BaseURL: "https://api.custom.com/v1",
-					Type:    catwalk.TypeOpenAI,
+					Type:    catwalk.TypeResponses,
 					Models: []catwalk.Model{{
 						ID: "test-model",
 					}},
@@ -1266,7 +1301,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 				"custom-anthropic": {
 					APIKey:  "test-key",
 					BaseURL: "https://api.anthropic.com/v1",
-					Type:    catwalk.TypeAnthropic,
+					Type:    catwalk.TypeMessages,
 					Models: []catwalk.Model{{
 						ID: "claude-3-sonnet",
 					}},
@@ -1286,7 +1321,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 		require.Equal(t, "custom-anthropic", customProvider.ID)
 		require.Equal(t, "test-key", customProvider.APIKey)
 		require.Equal(t, "https://api.anthropic.com/v1", customProvider.BaseURL)
-		require.Equal(t, catwalk.TypeAnthropic, customProvider.Type)
+		require.Equal(t, catwalk.TypeMessages, customProvider.Type)
 	})
 
 	t.Run("disabled custom provider is removed", func(t *testing.T) {
@@ -1295,7 +1330,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 				"custom": {
 					APIKey:  "test-key",
 					BaseURL: "https://api.custom.com/v1",
-					Type:    catwalk.TypeOpenAI,
+					Type:    catwalk.TypeResponses,
 					Disable: true,
 					Models: []catwalk.Model{{
 						ID: "test-model",
@@ -1987,6 +2022,63 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 		require.Equal(t, "openai", small.Provider)
 		require.Equal(t, int64(500), small.MaxTokens)
 	})
+	t.Run("should keep reasoning options only for models that reason", func(t *testing.T) {
+		toggleable := catwalk.Reasoning{Thinking: catwalk.ThinkingToggleable}
+		withLevels := catwalk.Reasoning{
+			Thinking:           catwalk.ThinkingToggleable,
+			EffortLevels:       catwalk.NewEffortLevels("low", "high"),
+			DefaultEffortLevel: "low",
+		}
+		knownProviders := []catwalk.Provider{
+			{
+				ID:                  "openai",
+				APIKey:              "abc",
+				DefaultLargeModelID: "toggle",
+				DefaultSmallModelID: "toggle",
+				Models: []catwalk.Model{
+					{ID: "toggle", DefaultMaxTokens: 1000, Reasoning: toggleable},
+					{ID: "levels", DefaultMaxTokens: 1000, Reasoning: withLevels},
+					{ID: "never", DefaultMaxTokens: 1000, Reasoning: catwalk.Reasoning{Thinking: catwalk.ThinkingNever}},
+					{ID: "unknown", DefaultMaxTokens: 1000},
+				},
+			},
+		}
+
+		tests := []struct {
+			name       string
+			selected   SelectedModel
+			wantEffort string
+			wantThink  bool
+		}{
+			{"toggleable keeps think", SelectedModel{Model: "toggle", Think: true}, "", true},
+			{"levels keep a chosen effort", SelectedModel{Model: "levels", ReasoningEffort: "high"}, "high", false},
+			{"levels default an empty effort", SelectedModel{Model: "levels"}, "low", false},
+			{"never drops both", SelectedModel{Model: "never", ReasoningEffort: "high", Think: true}, "", false},
+			{"undeclared drops both", SelectedModel{Model: "unknown", ReasoningEffort: "high", Think: true}, "", false},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				cfg := &Config{
+					Models: map[SelectedModelType]SelectedModel{
+						SelectedModelTypeLarge: tt.selected,
+						SelectedModelTypeSmall: tt.selected,
+					},
+				}
+				cfg.setDefaults(t.TempDir(), "")
+				env := env.NewFromMap(map[string]string{})
+				resolver := NewShellVariableResolver(env)
+				require.NoError(t, cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, knownProviders))
+
+				resolved, err := resolveSelectedModels(cfg, knownProviders)
+				require.NoError(t, err)
+				for _, got := range []SelectedModel{resolved.Large, resolved.Small} {
+					require.Equal(t, tt.selected.Model, got.Model)
+					require.Equal(t, tt.wantEffort, got.ReasoningEffort)
+					require.Equal(t, tt.wantThink, got.Think)
+				}
+			})
+		}
+	})
 	t.Run("should be possible to use multiple providers", func(t *testing.T) {
 		knownProviders := []catwalk.Provider{
 			{
@@ -2341,7 +2433,7 @@ func TestConfig_configureProviders_LiteralEmptyHeaderDropped(t *testing.T) {
 			"my-llm": {
 				APIKey:  "test-key",
 				BaseURL: "https://my-llm.example.com/v1",
-				Type:    catwalk.TypeOpenAI,
+				Type:    catwalk.TypeResponses,
 				Models:  []catwalk.Model{{ID: "m"}},
 				ExtraHeaders: map[string]string{
 					"X-Custom": "",
@@ -2546,4 +2638,197 @@ func TestConfig_LoadFromBytes_EnvMerge(t *testing.T) {
 	require.NotNil(t, loadedConfig.Env)
 	require.Equal(t, "second", loadedConfig.Env["AWS_PROFILE"])
 	require.Equal(t, "us-east-1", loadedConfig.Env["AWS_REGION"])
+}
+
+func TestConfig_LoadFromBytes_MigratesCatwalkV2Models(t *testing.T) {
+	data := []byte(`{
+		"providers": {
+			"openrouter": {
+				"type": "openrouter",
+				"models": [
+					{
+						"id": "reasoning-model",
+						"name": "Reasoning Model",
+						"cost_per_1m_in": 1.5,
+						"cost_per_1m_out": 6,
+						"cost_per_1m_in_cached": 0.15,
+						"cost_per_1m_out_cached": 0.6,
+						"context_window": 200000,
+						"default_max_tokens": 8192,
+						"can_reason": true,
+						"reasoning_levels": ["low", "high"],
+						"default_reasoning_effort": "high",
+						"supports_attachments": true
+					},
+					{
+						"id": "dumb-model",
+						"name": "Dumb Model",
+						"cost_per_1m_in": 0.5,
+						"cost_per_1m_out": 2,
+						"can_reason": false
+					}
+				]
+			}
+		}
+	}`)
+
+	cfg, err := loadFromBytes([][]byte{data})
+
+	require.NoError(t, err)
+	provider, ok := cfg.Providers.Get("openrouter")
+	require.True(t, ok)
+
+	require.Len(t, provider.Models, 2)
+
+	reasoning := provider.Models[0]
+	require.Equal(t, "reasoning-model", reasoning.ID)
+	require.Equal(t, 1.5, reasoning.Pricing.Input)
+	require.Equal(t, 6.0, reasoning.Pricing.Output)
+	require.Equal(t, 0.15, reasoning.Pricing.CacheCreate)
+	require.Equal(t, 0.6, reasoning.Pricing.CacheHit)
+	require.True(t, reasoning.Capabilities.Vision)
+	require.Equal(t, catwalk.ThinkingToggleable, reasoning.Reasoning.Thinking)
+	require.Equal(t, []string{"low", "high"}, reasoning.ReasoningEffortLevels())
+	require.Equal(t, "high", reasoning.Reasoning.DefaultEffortLevel)
+	require.Equal(t, int64(200000), reasoning.ContextWindow)
+	require.Equal(t, int64(8192), reasoning.DefaultMaxTokens)
+
+	dumb := provider.Models[1]
+	require.Equal(t, 0.5, dumb.Pricing.Input)
+	require.Equal(t, 2.0, dumb.Pricing.Output)
+	require.False(t, dumb.Capabilities.Vision)
+	require.Equal(t, catwalk.ThinkingNever, dumb.Reasoning.Thinking)
+}
+
+func TestConfig_LoadFromBytes_KeepsCatwalkV3Models(t *testing.T) {
+	data := []byte(`{
+		"providers": {
+			"custom": {
+				"type": "completions",
+				"models": [
+					{
+						"id": "v3-model",
+						"name": "V3 Model",
+						"pricing": {"input": 3, "output": 15},
+						"capabilities": {"vision": true},
+						"reasoning": {"thinking": "always"}
+					}
+				]
+			}
+		}
+	}`)
+
+	cfg, err := loadFromBytes([][]byte{data})
+
+	require.NoError(t, err)
+	provider, ok := cfg.Providers.Get("custom")
+	require.True(t, ok)
+	require.Len(t, provider.Models, 1)
+	model := provider.Models[0]
+	require.Equal(t, 3.0, model.Pricing.Input)
+	require.Equal(t, 15.0, model.Pricing.Output)
+	require.True(t, model.Capabilities.Vision)
+	require.Equal(t, catwalk.ThinkingAlways, model.Reasoning.Thinking)
+}
+
+func TestLoadFromConfigPaths_PersistsCatwalkV2Migration(t *testing.T) {
+	t.Parallel()
+	t.Run("rewrites v2 config files on disk", func(t *testing.T) {
+		t.Parallel()
+		tmpDir := t.TempDir()
+		path := filepath.Join(tmpDir, "crush.json")
+		require.NoError(t, os.WriteFile(path, []byte(`{
+			"providers": {
+				"openrouter": {
+					"type": "openrouter",
+					"models": [
+						{
+							"id": "reasoning-model",
+							"name": "Reasoning Model",
+							"cost_per_1m_in": 1.5,
+							"cost_per_1m_out": 6,
+							"can_reason": true,
+							"reasoning_levels": ["low", "high"],
+							"default_reasoning_effort": "high",
+							"supports_attachments": true
+						}
+					]
+				}
+			}
+		}`), 0o644))
+
+		cfg, loaded, err := loadFromConfigPaths(context.Background(), []string{path})
+		require.NoError(t, err)
+		require.Contains(t, loaded, path)
+		provider, ok := cfg.Providers.Get("openrouter")
+		require.True(t, ok)
+		require.Len(t, provider.Models, 1)
+		require.Equal(t, 1.5, provider.Models[0].Pricing.Input)
+		require.Equal(t, catwalk.ThinkingToggleable, provider.Models[0].Reasoning.Thinking)
+
+		// The file itself is rewritten with the v3 schema and the legacy
+		// fields are gone.
+		rewritten, err := os.ReadFile(path)
+		require.NoError(t, err)
+		var raw map[string]any
+		require.NoError(t, json.Unmarshal(rewritten, &raw))
+		model := raw["providers"].(map[string]any)["openrouter"].(map[string]any)["models"].([]any)[0]
+		m := model.(map[string]any)
+		require.Contains(t, m, "pricing")
+		require.Contains(t, m, "reasoning")
+		require.Contains(t, m, "capabilities")
+		require.NotContains(t, m, "cost_per_1m_in")
+		require.NotContains(t, m, "can_reason")
+		require.NotContains(t, m, "supports_attachments")
+		require.NotContains(t, m, "reasoning_levels")
+	})
+
+	t.Run("leaves v3 config files untouched", func(t *testing.T) {
+		t.Parallel()
+		tmpDir := t.TempDir()
+		path := filepath.Join(tmpDir, "crush.json")
+		original := []byte(`{
+			"providers": {
+				"custom": {
+					"type": "completions",
+					"models": [
+						{
+							"id": "v3-model",
+							"name": "V3 Model",
+							"pricing": {"input": 3, "output": 15},
+							"reasoning": {"thinking": "always"}
+						}
+					]
+				}
+			}
+		}`)
+		require.NoError(t, os.WriteFile(path, original, 0o644))
+
+		_, _, err := loadFromConfigPaths(context.Background(), []string{path})
+		require.NoError(t, err)
+		rewritten, err := os.ReadFile(path)
+		require.NoError(t, err)
+		require.JSONEq(t, string(original), string(rewritten))
+	})
+}
+
+func TestMigrateCatwalkV2KeepsLargeIntegersExact(t *testing.T) {
+	in := `{"providers":{"x":{"models":[{"id":"m","context_window":9007199254740993,"cost_per_1m_in":0.1}]}}}`
+	out, changed := migrateCatwalkV2([]byte(in))
+	require.True(t, changed)
+	require.Contains(t, string(out), `"context_window":9007199254740993`)
+	require.Contains(t, string(out), `"pricing":{"input":0.1}`)
+}
+
+func TestNormalizeProviderType(t *testing.T) {
+	t.Parallel()
+	for in, want := range map[catwalk.Type]catwalk.Type{
+		"openai":                catwalk.TypeResponses,
+		"openai-compat":         catwalk.TypeCompletions,
+		"anthropic":             catwalk.TypeMessages,
+		catwalk.TypeCompletions: catwalk.TypeCompletions,
+		"hyper":                 "hyper",
+	} {
+		require.Equal(t, want, NormalizeProviderType(in), string(in))
+	}
 }

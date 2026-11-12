@@ -582,6 +582,31 @@ func (l *List) Render() string {
 	}
 
 	budget := max(l.height, 0)
+	lines := l.renderWindow(budget)
+	// A window that ends before the viewport is full while scrolled means
+	// the offset is past the end: content below it shrank or went away
+	// (an item removed, a tail that collapsed, a filter). Clamp so the
+	// view never sits lifted off the bottom. Checking only the underfilled
+	// case keeps the common path free of the tail walk.
+	if len(lines) < budget && (l.offsetIdx > 0 || l.offsetLine > 0) {
+		l.ScrollToBottom()
+		lines = l.renderWindow(budget)
+	}
+
+	l.height = budget
+
+	if l.reverse {
+		// Reverse the lines so the list renders bottom-to-top.
+		for i, j := 0, len(lines)-1; i < j; i, j = i+1, j-1 {
+			lines[i], lines[j] = lines[j], lines[i]
+		}
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+// renderWindow collects at most budget lines starting at the scroll offset.
+func (l *List) renderWindow(budget int) []string {
 	lines := make([]string, 0, budget)
 	currentIdx := l.offsetIdx
 	currentOffset := l.offsetLine
@@ -635,17 +660,7 @@ func (l *List) Render() string {
 		currentIdx++
 		currentOffset = 0 // Reset offset for subsequent items.
 	}
-
-	l.height = budget
-
-	if l.reverse {
-		// Reverse the lines so the list renders bottom-to-top.
-		for i, j := 0, len(lines)-1; i < j; i, j = i+1, j-1 {
-			lines[i], lines[j] = lines[j], lines[i]
-		}
-	}
-
-	return strings.Join(lines, "\n")
+	return lines
 }
 
 // PrependItems prepends items to the list.
@@ -703,11 +718,14 @@ func (l *List) RemoveItem(idx int) {
 		l.selectedIdx--
 	}
 
-	// Adjust offset if needed
+	// Adjust offset if needed. Removing the item the view starts inside
+	// starts the view at the top of the item that slid into its place; the
+	// old line offset belonged to the removed item and would skip into,
+	// or past, the new one.
 	if l.offsetIdx > idx {
 		l.offsetIdx--
-	} else if l.offsetIdx == idx && l.offsetIdx >= len(l.items) {
-		l.offsetIdx = max(0, len(l.items)-1)
+	} else if l.offsetIdx == idx {
+		l.offsetIdx = min(l.offsetIdx, max(0, len(l.items)-1))
 		l.offsetLine = 0
 	}
 	l.totalHeightValid = false

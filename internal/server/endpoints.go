@@ -84,6 +84,57 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 			Fails(400, 404).
 			Handle(c.handlePostWorkspaceCurrentSession),
 
+		apigen.Get("/v1/workspaces/{id}/theme").
+			Summary("Get host theme").
+			Description("Returns the theme a host application set for the "+
+				"workspace; theme is null when none is set.").
+			Tags("workspaces").
+			PathParam("id", "Workspace ID").
+			Responds(proto.HostThemeState{}).
+			Fails(404).
+			Handle(c.handleGetWorkspaceTheme),
+
+		apigen.Post("/v1/workspaces/{id}/theme").
+			Summary("Set host theme").
+			Description("Sets the theme a host application (e.g. an editor "+
+				"running Crush in a pane) supplies for every client of the "+
+				"workspace, or clears it with a null theme. Palette keys are "+
+				"theme-file keys and syntax keys are code highlighting tokens; "+
+				"unknown keys are ignored, invalid colors and an unknown base "+
+				"theme are rejected. The theme is kept in memory only. A change "+
+				"is broadcast as a host_theme event, and clients attaching "+
+				"later receive the current theme first. Setting the current "+
+				"theme again is a no-op. Responds with the resulting state.").
+			Tags("workspaces").
+			PathParam("id", "Workspace ID").
+			QueryParam("client_id", "Client ID (UUID) of the caller; only logged").
+			Accepts(proto.HostThemeRequest{}).
+			Responds(proto.HostThemeState{}).
+			Fails(400, 404, 413).
+			Handle(c.handlePostWorkspaceTheme),
+
+		apigen.Get("/v1/workspaces/{id}/host-context").
+			Summary("Get host context").
+			Description("Returns what the host application (e.g. an editor "+
+				"running Crush) has in view; empty when none is set.").
+			Tags("workspaces").
+			PathParam("id", "Workspace ID").
+			Responds(proto.HostContext{}).
+			Fails(404).
+			Handle(c.handleGetWorkspaceHostContext),
+
+		apigen.Post("/v1/workspaces/{id}/host-context").
+			Summary("Set host context").
+			Description("Records what the host application has in view: its "+
+				"open files and the file and line the user is on. The agent "+
+				"gets it with each prompt, and file completions list the open "+
+				"files first. An empty body clears it.").
+			Tags("workspaces").
+			PathParam("id", "Workspace ID").
+			Accepts(proto.HostContext{}).
+			Fails(400, 404).
+			Handle(c.handlePostWorkspaceHostContext),
+
 		apigen.Get("/v1/workspaces/{id}/config").
 			Summary("Get workspace config").
 			Description("Returns the resolved workspace configuration (config.Config).").
@@ -104,7 +155,11 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 			Summary("Stream workspace events (SSE)").
 			Description("Streams workspace events as Server-Sent Events. The client must "+
 				"identify itself with the client_id query parameter; the stream attaches "+
-				"the client to the workspace until it disconnects.").
+				"the client to the workspace until it disconnects. Permission and "+
+				"question prompts are scoped to the session the client currently "+
+				"views (see POST current-session): they are only delivered to clients "+
+				"viewing the session that raised them, and clients viewing no session "+
+				"receive none. All other events are workspace-wide.").
 			Tags("workspaces").
 			PathParam("id", "Workspace ID").
 			RequiredQueryParam("client_id", "Client ID (UUID)").
@@ -247,21 +302,13 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 			Fails(404, 500).
 			Handle(c.handlePostWorkspaceLSPStopAll),
 
-		apigen.Get("/v1/workspaces/{id}/permissions/skip").
-			Summary("Get skip permissions status").
+		apigen.Post("/v1/workspaces/{id}/permissions/mode").
+			Summary("Set permission mode").
 			Tags("permissions").
 			PathParam("id", "Workspace ID").
-			Responds(proto.PermissionSkipRequest{}).
-			Fails(404, 500).
-			Handle(c.handleGetWorkspacePermissionsSkip),
-
-		apigen.Post("/v1/workspaces/{id}/permissions/skip").
-			Summary("Set skip permissions").
-			Tags("permissions").
-			PathParam("id", "Workspace ID").
-			Accepts(proto.PermissionSkipRequest{}).
+			Accepts(proto.PermissionSetModeRequest{}).
 			Fails(400, 404, 500).
-			Handle(c.handlePostWorkspacePermissionsSkip),
+			Handle(c.handlePostWorkspacePermissionsMode),
 
 		apigen.Post("/v1/workspaces/{id}/permissions/grant").
 			Summary("Grant permission").
@@ -288,6 +335,41 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 			Responds(proto.QuestionAnswerResponse{}).
 			Fails(400, 404, 500).
 			Handle(c.handlePostWorkspaceQuestionsCancel),
+
+		apigen.Post("/v1/workspaces/{id}/pinentry/answer").
+			Summary("Answer pinentry prompt").
+			Tags("pinentry").
+			PathParam("id", "Workspace ID").
+			Accepts(proto.PinentryAnswer{}).
+			Responds(proto.PinentryResponse{}).
+			Fails(400, 404, 500).
+			Handle(c.handlePostWorkspacePinentryAnswer),
+
+		apigen.Post("/v1/workspaces/{id}/pinentry/cancel").
+			Summary("Cancel pinentry prompt").
+			Tags("pinentry").
+			PathParam("id", "Workspace ID").
+			Accepts(proto.PinentryCancel{}).
+			Responds(proto.PinentryResponse{}).
+			Fails(400, 404, 500).
+			Handle(c.handlePostWorkspacePinentryCancel),
+		apigen.Post("/v1/workspaces/{id}/ssh/answer").
+			Summary("Answer SSH prompt").
+			Tags("ssh").
+			PathParam("id", "Workspace ID").
+			Accepts(proto.SSHAnswer{}).
+			Responds(proto.SSHResponse{}).
+			Fails(400, 404, 500).
+			Handle(c.handlePostWorkspaceSSHAnswer),
+
+		apigen.Post("/v1/workspaces/{id}/ssh/cancel").
+			Summary("Cancel SSH prompt").
+			Tags("ssh").
+			PathParam("id", "Workspace ID").
+			Accepts(proto.SSHCancel{}).
+			Responds(proto.SSHResponse{}).
+			Fails(400, 404, 500).
+			Handle(c.handlePostWorkspaceSSHCancel),
 
 		apigen.Get("/v1/workspaces/{id}/agent").
 			Summary("Get agent info").
@@ -377,6 +459,17 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 			PathParam("sid", "Session ID").
 			Fails(404, 500).
 			Handle(c.handlePostWorkspaceAgentSessionPromptClear),
+
+		apigen.Post("/v1/workspaces/{id}/agent/sessions/{sid}/notes").
+			Summary("Add a note for the next prompt").
+			Description("Keeps text for the session's next prompt, which the agent reads "+
+				"with it. Starts no run and is not shown in the chat.").
+			Tags("agent").
+			PathParam("id", "Workspace ID").
+			PathParam("sid", "Session ID").
+			Accepts(proto.SessionNote{}).
+			Fails(400, 404, 500).
+			Handle(c.handlePostWorkspaceAgentSessionNote),
 
 		apigen.Post("/v1/workspaces/{id}/agent/sessions/{sid}/summarize").
 			Summary("Summarize session").
@@ -484,6 +577,14 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 			Responds(proto.ProjectInitPromptResponse{}).
 			Fails(404, 500).
 			Handle(c.handleGetWorkspaceProjectInitPrompt),
+
+		apigen.Get("/v1/workspaces/{id}/git/branch").
+			Summary("Get current Git branch").
+			Tags("git").
+			PathParam("id", "Workspace ID").
+			Responds(proto.GitBranchResponse{}).
+			Fails(404, 500).
+			Handle(c.handleGetWorkspaceGitBranch),
 
 		apigen.Get("/v1/workspaces/{id}/skills").
 			Summary("List visible skills").
@@ -644,5 +745,37 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 			Accepts(proto.MCPNameRequest{}).
 			Fails(400, 404, 500).
 			Handle(c.handlePostWorkspaceMCPStartServer),
+
+		apigen.Get("/v1/workspaces/{id}/skills/disabled").
+			Summary("List disabled skills").
+			Tags("skills").
+			PathParam("id", "Workspace ID").
+			Responds([]string{}).
+			Fails(404, 500).
+			Handle(c.handleGetWorkspaceSkillsDisabled),
+
+		apigen.Post("/v1/workspaces/{id}/skills/disabled").
+			Summary("Toggle a skill for the repository").
+			Tags("skills").
+			PathParam("id", "Workspace ID").
+			Accepts(proto.SkillSetDisabledRequest{}).
+			Fails(400, 404, 500).
+			Handle(c.handlePostWorkspaceSetSkillDisabled),
+
+		apigen.Get("/v1/workspaces/{id}/skills/enabled").
+			Summary("List enabled-override skills").
+			Tags("skills").
+			PathParam("id", "Workspace ID").
+			Responds([]string{}).
+			Fails(404, 500).
+			Handle(c.handleGetWorkspaceSkillsEnabled),
+
+		apigen.Post("/v1/workspaces/{id}/skills/config-disabled").
+			Summary("Toggle a skill in the config").
+			Tags("skills").
+			PathParam("id", "Workspace ID").
+			Accepts(proto.SkillSetDisabledRequest{}).
+			Fails(400, 404, 500).
+			Handle(c.handlePostWorkspaceSetSkillConfigDisabled),
 	}
 }

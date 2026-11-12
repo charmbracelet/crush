@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
@@ -92,20 +91,4 @@ func (m *UI) filterAuthPending(pending []mcp.PendingAuthServer) []mcp.PendingAut
 		filtered = append(filtered, server)
 	}
 	return filtered
-}
-
-// checkPendingMCPAuth waits for MCP initialization to finish and then
-// checks whether any OAuth MCPs need authentication. This runs as a
-// Bubble Tea command so it doesn't block the UI.
-func (m *UI) checkPendingMCPAuth() tea.Cmd {
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		if err := mcp.WaitForInit(ctx); err != nil {
-			return nil
-		}
-		return mcpStateChangedMsg{
-			states: m.com.Workspace.MCPGetStates(),
-		}
-	}
 }

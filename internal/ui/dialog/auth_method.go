@@ -9,7 +9,7 @@ import (
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/catwalk/pkg/catwalk"
+	"charm.land/catwalk/v3/pkg/catwalk"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/ui/common"
@@ -188,7 +188,13 @@ func (m *AuthMethod) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	if !sideBySide {
 		cardWidth = innerWidth
 	}
-	oauthCard := m.renderCard("ChatGPT Account\nwith Subscription", m.selected == 0, cardWidth)
+	// The OAuth card names the account the sign-in uses, which is
+	// provider-specific: ChatGPT for OpenAI, Grok for xAI.
+	oauthCardLabel := "ChatGPT Account\nwith Subscription"
+	if m.provider.ID == catwalk.InferenceProviderXAI {
+		oauthCardLabel = "Grok Account\nwith Subscription"
+	}
+	oauthCard := m.renderCard(oauthCardLabel, m.selected == 0, cardWidth)
 	apiKeyCard := m.renderCard("API Key", m.selected == 1, cardWidth)
 
 	var cards string

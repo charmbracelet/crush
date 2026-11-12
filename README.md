@@ -406,6 +406,7 @@ dialog.
 | Rosé Pine         | `rose-pine`                   |
 | Rosé Pine Moon    | `rose-pine-moon`              |
 | Rosé Pine Dawn    | `rose-pine-dawn`              |
+| KITT              | `kitt`                        |
 
 ### LSPs
 

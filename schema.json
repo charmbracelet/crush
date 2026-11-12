@@ -989,7 +989,8 @@
           "examples": [
             "charmtone-panther",
             "gruvbox-dark",
-            "keanu"
+            "keanu",
+            "kitt"
           ]
         },
         "completions": {

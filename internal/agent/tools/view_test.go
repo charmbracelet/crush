@@ -227,6 +227,8 @@ func (m *mockViewPermissionService) GrantPersistent(req permission.PermissionReq
 
 func (m *mockViewPermissionService) AutoApproveSession(sessionID string) {}
 
+func (m *mockViewPermissionService) InheritAutoApproval(parentSessionID, childSessionID string) {}
+
 func (m *mockViewPermissionService) ActiveRequest() (permission.PermissionRequest, bool) {
 	return permission.PermissionRequest{}, false
 }

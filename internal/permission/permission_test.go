@@ -882,3 +882,48 @@ func TestPromptObserverHearsShownThenResolved(t *testing.T) {
 	require.Equal(t, "shown c1", <-obs.events)
 	require.Equal(t, "resolved c1 granted", <-obs.events)
 }
+
+func TestPermissionService_InheritAutoApproval(t *testing.T) {
+	t.Parallel()
+
+	request := func(service Service, ctx context.Context) (bool, error) {
+		return service.Request(ctx, CreatePermissionRequest{
+			SessionID: "child", ToolCallID: "c1", ToolName: "view", Action: "read", Path: "/tmp",
+		})
+	}
+
+	t.Run("child of an auto-approved session is not asked", func(t *testing.T) {
+		t.Parallel()
+		service := NewPermissionService("/tmp", nil, nil)
+		service.AutoApproveSession("parent")
+		service.InheritAutoApproval("parent", "child")
+
+		// A prompt would wait for an answer that never comes, so bound it.
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		granted, err := request(service, ctx)
+		require.NoError(t, err)
+		require.True(t, granted)
+	})
+
+	t.Run("child of any other session is still asked", func(t *testing.T) {
+		t.Parallel()
+		service := NewPermissionService("/tmp", nil, nil)
+		service.InheritAutoApproval("parent", "child")
+		requests := service.Subscribe(t.Context())
+
+		done := make(chan bool, 1)
+		go func() {
+			granted, _ := request(service, t.Context())
+			done <- granted
+		}()
+		select {
+		case event := <-requests:
+			require.Equal(t, "child", event.Payload.SessionID)
+			require.True(t, service.Deny(event.Payload))
+			require.False(t, <-done)
+		case granted := <-done:
+			t.Fatalf("answered without asking: granted=%v", granted)
+		}
+	})
+}

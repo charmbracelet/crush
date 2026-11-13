@@ -304,6 +304,7 @@ Flags:
       --disabled bool            disable without removing
       --disabled-tools string       deny a server tool (repeatable)
       --enabled-tools string        allow only these server tools (repeatable)
+      --always-allow bool           skip permission prompts for this server's tools
       --oauth bool                  enable OAuth 2.1 flow (HTTP only)
       --oauth-client-id string      pre-registered OAuth client ID
       --oauth-client-secret string  pre-registered OAuth client secret
@@ -460,6 +461,10 @@ Usage:
 permissions allow view ls grep edit
 permissions deny bash
 ```
+
+In the TUI, the permission prompt offers Allow, Allow for Session, Always
+Allow, and Deny. Always Allow appends the tool to `allowed_tools` in the
+global config, so it stops prompting in future sessions too.
 
 ### option
 

@@ -438,6 +438,9 @@ mcp add github --type http --url https://api.github.com/mcp/ \
 # Add a streaming MCP server that uses SSE.
 mcp add streaming-service --type sse --url "https://example.com/mcp/sse" \
   --timeout 10 --header API-Key "$API_KEY"
+
+# Add an MCP server whose tools never prompt for permission.
+mcp add atlassian --command uvx --args mcp-atlassian --always-allow true
 ```
 
 #### MCP OAuth

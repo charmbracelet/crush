@@ -799,7 +799,6 @@
             "responses",
             "messages",
             "hyper",
-            "completions",
             "litellm",
             "llamacpp",
             "lmstudio",

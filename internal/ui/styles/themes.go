@@ -397,11 +397,12 @@ func kittOpts() quickStyleOpts {
 		separator: lipgloss.Color("#7a2933"), // maroon rule
 
 		destructive:       lipgloss.Color("#ff4545"), // bright red
+		destructiveSubtle: lipgloss.Color("#7a1620"), // deep scanner red
 		error:             lipgloss.Color("#ff6565"), // light red
 		warningSubtle:     lipgloss.Color("#df932b"), // dark amber
 		warning:           lipgloss.Color("#ffc247"), // amber
 		attention:         lipgloss.Color("#ff8a38"), // ember orange
-		busy:              lipgloss.Color("#ff3535"), // scanner red
+		busy:              lipgloss.Color("#ffc247"), // amber
 		info:              lipgloss.Color("#ffbf47"), // dash amber
 		infoMoreSubtle:    lipgloss.Color("#d58a2d"), // mid amber
 		infoMostSubtle:    lipgloss.Color("#875624"), // deep amber
@@ -409,9 +410,9 @@ func kittOpts() quickStyleOpts {
 		successMoreSubtle: lipgloss.Color("#37b879"), // mid green
 		successMostSubtle: lipgloss.Color("#2e8558"), // deep green
 
-		yolo:           lipgloss.Color("#ffc247"), // amber
-		plan:           lipgloss.Color("#ff6969"), // soft red
-		planMoreSubtle: lipgloss.Color("#62232d"), // deep maroon
+		yolo:           lipgloss.Color("#df932b"), // dark amber
+		plan:           lipgloss.Color("#6ee5a4"), // mint green
+		planMoreSubtle: lipgloss.Color("#19402b"), // forest green
 
 		diffInsertFg:       lipgloss.Color("#8aefb4"), // pale mint
 		diffInsertCodeBg:   lipgloss.Color("#10291d"), // deep green
@@ -457,7 +458,18 @@ func kittOverrides(s Styles) Styles {
 
 	// The file picker selection is not bold, so white on scanner red is
 	// too faint for regular text. Use the dark ink instead.
-	s.FilePicker.Selected = s.FilePicker.Selected.Foreground(lipgloss.Color("#160000"))
+	ink := lipgloss.Color("#160000")
+	s.FilePicker.Selected = s.FilePicker.Selected.Foreground(ink)
+
+	// The plan prompt and badge are filled with primary by default, which
+	// would make Plan, YOLO and Sysadmin all read as scanner red. Light
+	// Plan mode in green instead, so YOLO stays amber and Sysadmin red.
+	// The banner badge is a copy made inside quickStyle, so re-copy it.
+	planGreen := kittOpts().plan
+	s.Editor.PromptPlanIconFocused = s.Editor.PromptPlanIconFocused.Foreground(ink).Background(planGreen)
+	s.Editor.PromptPlanDotsFocused = s.Editor.PromptPlanDotsFocused.Foreground(planGreen)
+	s.Status.ModeBadgePlan = s.Status.ModeBadgePlan.Foreground(ink).Background(planGreen)
+	s.Status.ModeBannerPlanBadge = s.Status.ModeBadgePlan
 
 	return s
 }

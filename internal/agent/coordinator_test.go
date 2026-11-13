@@ -14,7 +14,6 @@ import (
 	"charm.land/fantasy/providers/openaicompat"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/discover"
-	"github.com/charmbracelet/crush/internal/message"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -51,9 +50,6 @@ func (m *mockSessionAgent) Summarize(context.Context, string, fantasy.ProviderOp
 	return nil
 }
 func (m *mockSessionAgent) GenerateTitle(context.Context, string, string) {}
-func (m *mockSessionAgent) ListSettledMessages(context.Context, string) ([]message.Message, error) {
-	return nil, nil
-}
 
 // newTestCoordinator creates a minimal coordinator for unit testing runSubAgent.
 func newTestCoordinator(t *testing.T, env fakeEnv, providerID string, providerCfg config.ProviderConfig) *coordinator {

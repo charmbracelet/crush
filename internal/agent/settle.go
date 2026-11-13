@@ -24,18 +24,18 @@ const (
 )
 
 // toolResultsForCalls builds the tool message that must immediately follow
-// an assistant message with tool calls. Results are taken from
-// toolResultsByCall and consumed, so a result stored alongside results for
+// an assistant message with tool calls. toolResultsByCall holds one result
+// per call and is consumed, so a result stored alongside results for
 // other assistants is emitted once, next to the call that asked for it. A
 // call with no stored result gets a synthetic one; settling should have made
 // that impossible, so it is logged as a warning.
-func toolResultsForCalls(m message.Message, toolResultsByCall map[string][]fantasy.MessagePart) fantasy.Message {
+func toolResultsForCalls(m message.Message, toolResultsByCall map[string]fantasy.ToolResultPart) fantasy.Message {
 	content := make([]fantasy.MessagePart, 0, len(m.ToolCalls()))
 	for _, tc := range m.ToolCalls() {
-		parts := toolResultsByCall[tc.ID]
+		result, ok := toolResultsByCall[tc.ID]
 		delete(toolResultsByCall, tc.ID)
-		if len(parts) > 0 {
-			content = append(content, parts...)
+		if ok {
+			content = append(content, result)
 			continue
 		}
 		slog.Warn(
@@ -135,8 +135,8 @@ func settleToolCalls(ctx context.Context, messages message.Service, assistant *m
 }
 
 // repairInterruptedToolCalls settles calls a dead process left without a
-// reply and returns msgs with the repair applied. The caller must hold the
-// session so that no run can still answer them.
+// reply and returns msgs with the repair applied. The caller must have
+// checked that nothing is running the session.
 func repairInterruptedToolCalls(ctx context.Context, messages message.Service, msgs []message.Message) ([]message.Message, error) {
 	resolved := make(map[string]struct{})
 	for _, msg := range msgs {
@@ -175,27 +175,27 @@ func repairInterruptedToolCalls(ctx context.Context, messages message.Service, m
 }
 
 // ListSettledMessages returns a session's transcript with calls a dead
-// process left dangling already settled. It holds the session's dispatch
-// lock throughout, so a run cannot start between the busy check and the
-// repair.
-func (a *sessionAgent) ListSettledMessages(ctx context.Context, sessionID string) ([]message.Message, error) {
-	mu := a.sessionMu(sessionID)
-	mu.Lock()
-	defer mu.Unlock()
+// process left dangling already settled. Readers are serialized so two
+// cannot settle the same call twice. Busy is sampled on both sides of the
+// read, since a run that ends mid-read left a snapshot missing its results.
+func (c *coordinator) ListSettledMessages(ctx context.Context, sessionID string) ([]message.Message, error) {
+	c.settleMu.Lock()
+	defer c.settleMu.Unlock()
 
-	if err := a.messages.FlushAll(ctx); err != nil {
+	if err := c.messages.FlushAll(ctx); err != nil {
 		return nil, err
 	}
-	msgs, err := a.messages.List(ctx, sessionID)
-	if err != nil || a.IsSessionBusy(sessionID) {
+	busy := c.IsSessionBusy(sessionID)
+	msgs, err := c.messages.List(ctx, sessionID)
+	if err != nil || busy || c.IsSessionBusy(sessionID) {
 		return msgs, err
 	}
-	settled, err := repairInterruptedToolCalls(ctx, a.messages, msgs)
+	settled, err := repairInterruptedToolCalls(ctx, c.messages, msgs)
 	if err != nil {
 		// The repair may have stopped halfway, so reread what was stored.
 		slog.Warn("Failed to settle interrupted tool calls",
 			"session_id", sessionID, "error", err)
-		return a.messages.List(ctx, sessionID)
+		return c.messages.List(ctx, sessionID)
 	}
 	return settled, nil
 }

@@ -1,9 +1,11 @@
 package agent
 
 import (
+	"sync"
 	"testing"
 
 	"charm.land/fantasy"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/stretchr/testify/require"
@@ -318,11 +320,11 @@ func TestListSettledMessages_HealthySessionIsUntouched(t *testing.T) {
 	require.Len(t, after, len(before), "settling a healthy session writes nothing")
 }
 
-// listSettled reads a session through the agent, which settles orphans first.
+// listSettled reads a session through the coordinator, which settles orphans
+// first.
 func listSettled(t *testing.T, env fakeEnv, sessionID string) []message.Message {
 	t.Helper()
-	agent := NewSessionAgent(SessionAgentOptions{Models: noModels, Sessions: env.sessions, Messages: env.messages})
-	msgs, err := agent.ListSettledMessages(t.Context(), sessionID)
+	msgs, err := settlingCoordinator(env).ListSettledMessages(t.Context(), sessionID)
 	require.NoError(t, err)
 	return msgs
 }
@@ -344,18 +346,71 @@ func TestListSettledMessages_ReturnsWhatWasStored(t *testing.T) {
 	}
 }
 
-// A live run's unanswered call is not an orphan yet, so it is left alone.
+func settlingCoordinator(env fakeEnv) *coordinator {
+	main := NewSessionAgent(SessionAgentOptions{Models: noModels, Sessions: env.sessions, Messages: env.messages})
+	return &coordinator{mainAgent: main, agents: map[string]SessionAgent{config.AgentCoder: main}, messages: env.messages}
+}
+
+// A live run's unanswered call is not an orphan yet, so it is left alone,
+// whether the main agent is running it or a subagent on its own instance.
 func TestListSettledMessages_SkipsBusySessions(t *testing.T) {
-	env := testEnv(t)
+	for name, markBusy := range map[string]func(t *testing.T, c *coordinator, sessionID string){
+		"main agent": func(_ *testing.T, c *coordinator, sessionID string) {
+			c.mainAgent.(*sessionAgent).activeRequests.Set(sessionID, &activeCancel{cancel: func() {}})
+		},
+		"subagent": func(t *testing.T, c *coordinator, sessionID string) {
+			t.Cleanup(c.trackSubSession(sessionID))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			env := testEnv(t)
+			sess, _ := killedTurn(t, env, true)
+			c := settlingCoordinator(env)
+			markBusy(t, c, sess.ID)
 
-	sess, _ := killedTurn(t, env, true)
-
-	agent := NewSessionAgent(SessionAgentOptions{Models: noModels, Sessions: env.sessions, Messages: env.messages}).(*sessionAgent)
-	agent.activeRequests.Set(sess.ID, &activeCancel{cancel: func() {}})
-
-	msgs, err := agent.ListSettledMessages(t.Context(), sess.ID)
-	require.NoError(t, err)
-	for _, m := range msgs {
-		require.Empty(t, m.ToolResults(), "a live run's unanswered call must be left alone")
+			msgs, err := c.ListSettledMessages(t.Context(), sess.ID)
+			require.NoError(t, err)
+			for _, m := range msgs {
+				require.Empty(t, m.ToolResults(), "a live run's unanswered call must be left alone")
+			}
+		})
 	}
+}
+
+// Switching coder to plan must not make a run still going on coder look idle,
+// or a reader would settle its in-flight calls.
+func TestCoordinatorIsSessionBusy_SeesEveryMainAgent(t *testing.T) {
+	env := testEnv(t)
+	coder := NewSessionAgent(SessionAgentOptions{Models: noModels, Sessions: env.sessions, Messages: env.messages}).(*sessionAgent)
+	plan := NewSessionAgent(SessionAgentOptions{Models: noModels, Sessions: env.sessions, Messages: env.messages})
+	c := &coordinator{mainAgent: plan, agents: map[string]SessionAgent{"coder": coder, "plan": plan}}
+
+	coder.activeRequests.Set("sess", &activeCancel{cancel: func() {}})
+	require.True(t, c.IsSessionBusy("sess"))
+	require.False(t, c.IsSessionBusy("other"))
+}
+
+// Several clients can reload one session at once, say after a reconnect.
+// Each must not settle the same orphan, or the call ends up with two results.
+func TestListSettledMessages_ConcurrentReadersSettleOnce(t *testing.T) {
+	env := testEnv(t)
+	sess, _ := killedTurn(t, env, true)
+	c := settlingCoordinator(env)
+
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Go(func() {
+			_, err := c.ListSettledMessages(t.Context(), sess.ID)
+			require.NoError(t, err)
+		})
+	}
+	wg.Wait()
+
+	stored, err := env.messages.List(t.Context(), sess.ID)
+	require.NoError(t, err)
+	var results int
+	for _, m := range stored {
+		results += len(m.ToolResults())
+	}
+	require.Equal(t, 1, results, "the orphan must be settled exactly once")
 }

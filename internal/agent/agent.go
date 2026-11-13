@@ -198,7 +198,6 @@ type SessionAgent interface {
 	CancelAll()
 	IsSessionBusy(sessionID string) bool
 	IsBusy() bool
-	ListSettledMessages(ctx context.Context, sessionID string) ([]message.Message, error)
 	QueuedPrompts(sessionID string) int
 	QueuedPromptsList(sessionID string) []string
 	ClearQueue(sessionID string)
@@ -1743,7 +1742,7 @@ If not, please feel free to ignore. Again do not mention this message to the use
 			knownToolCallIDs[tc.ID] = struct{}{}
 		}
 	}
-	toolResultsByCall := make(map[string][]fantasy.MessagePart)
+	toolResultsByCall := make(map[string]fantasy.ToolResultPart)
 	for _, m := range msgs {
 		if m.Role != message.Tool {
 			continue
@@ -1767,7 +1766,17 @@ If not, please feel free to ignore. Again do not mention this message to the use
 					)
 					continue
 				}
-				toolResultsByCall[tr.ToolCallID] = append(toolResultsByCall[tr.ToolCallID], part)
+				// One result per call: a real result beats an error, since the
+				// usual duplicate is a premature "interrupted" then the output.
+				if kept, seen := toolResultsByCall[tr.ToolCallID]; seen {
+					_, keptIsError := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentError](kept.Output)
+					slog.Warn("Dropping duplicate tool result", "session_id", m.SessionID,
+						"tool_call_id", tr.ToolCallID, "kept_later", keptIsError)
+					if !keptIsError {
+						continue
+					}
+				}
+				toolResultsByCall[tr.ToolCallID] = tr
 			}
 		}
 	}
@@ -2342,6 +2351,8 @@ func (a *sessionAgent) IsBusy() bool {
 	return busy
 }
 
+// IsSessionBusy reports only this agent's own runs. Asking whether anything
+// works on a session, subagents included, is coordinator.IsSessionBusy.
 func (a *sessionAgent) IsSessionBusy(sessionID string) bool {
 	_, busy := a.activeRequests.Get(sessionID)
 	return busy

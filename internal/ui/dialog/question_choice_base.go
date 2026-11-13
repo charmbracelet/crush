@@ -77,6 +77,42 @@ func (c *choiceList) numberKeyIndex(msg tea.KeyPressMsg) int {
 	return n - 1
 }
 
+// clickedItem moves the cursor to the choice or fill-in at x, y, and gives
+// the fill-in focus only when it is the one clicked. A choice's hit area
+// covers its open note, so a click there keeps that note open; any other
+// note closes. ok is false when the click hits neither.
+func (c *choiceList) clickedItem(x, y int) (idx int, ok bool) {
+	if c.choiceCompositor == nil {
+		return 0, false
+	}
+	hit := c.choiceCompositor.Hit(x, y)
+	if hit.Empty() {
+		return 0, false
+	}
+	if _, err := fmt.Sscanf(hit.ID(), "choice_%d", &idx); err != nil {
+		return 0, false
+	}
+	if idx < 0 {
+		return 0, false
+	}
+	if idx > len(c.Request.Choices) {
+		return 0, false
+	}
+	if idx == len(c.Request.Choices) {
+		c.closeNote()
+		c.fillIn.Focus()
+	} else {
+		if c.activeNoteKey != c.Request.Choices[idx].ID {
+			c.closeNote()
+		}
+		c.fillIn.Blur()
+	}
+	c.cursorIdx = idx
+	c.mouseActive = false
+	c.suppressScroll = true
+	return idx, true
+}
+
 // newChoiceList creates a choiceList with a configured fill-in
 // textarea and navigation bindings.
 func newChoiceList(sty *styles.Styles, req question.Question) choiceList {
@@ -116,7 +152,7 @@ func (c *choiceList) moveUp() {
 	c.mouseActive = false
 	c.fillIn.Blur()
 	if c.activeNoteKey != "" {
-		c.closeNote(c.noteKey())
+		c.closeNote()
 	}
 	c.cursorIdx--
 	if c.cursorIdx < 0 {
@@ -137,7 +173,7 @@ func (c *choiceList) moveDown() {
 	c.mouseActive = false
 	c.fillIn.Blur()
 	if c.activeNoteKey != "" {
-		c.closeNote(c.noteKey())
+		c.closeNote()
 	}
 	c.cursorIdx++
 	if c.cursorIdx >= c.itemCount() {

@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	acp "github.com/coder/acp-go-sdk"
@@ -60,9 +61,15 @@ func (c *stubCoordinator) QueuedPrompts(sessionID string) int                { r
 func (c *stubCoordinator) QueuedPromptsList(sessionID string) []string       { return nil }
 func (c *stubCoordinator) ClearQueue(sessionID string)                       {}
 func (c *stubCoordinator) Summarize(_ context.Context, _ string) error       { return nil }
-func (c *stubCoordinator) Model() agent.Model                                { return agent.Model{} }
-func (c *stubCoordinator) UpdateModels(_ context.Context) error              { return nil }
-func (c *stubCoordinator) GenerateTitle(_ context.Context, _, _ string)      {}
+func (c *stubCoordinator) AddNote(_, _ string)                               {}
+func (c *stubCoordinator) ListSettledMessages(_ context.Context, _ string) ([]message.Message, error) {
+	return nil, nil
+}
+func (c *stubCoordinator) SetHostContext(_ proto.HostContext)           {}
+func (c *stubCoordinator) HostContext() proto.HostContext               { return proto.HostContext{} }
+func (c *stubCoordinator) Model() agent.Model                           { return agent.Model{} }
+func (c *stubCoordinator) UpdateModels(_ context.Context) error         { return nil }
+func (c *stubCoordinator) GenerateTitle(_ context.Context, _, _ string) {}
 
 // stubBlockingCoordinator blocks until the prompt's context is cancelled.
 type stubBlockingCoordinator struct {
@@ -902,3 +909,22 @@ func TestConformanceInvalidSessionError(t *testing.T) {
 		t.Error("server did not exit")
 	}
 }
+
+func (s *stubPermSvc) ActiveRequest() (permission.PermissionRequest, bool) {
+	return permission.PermissionRequest{}, false
+}
+func (s *stubPermSvc) InheritAutoApproval(_, _ string)               {}
+func (s *stubPermSvc) SetPermissionMode(_ permission.PermissionMode) {}
+func (s *stubPermSvc) PermissionMode() permission.PermissionMode {
+	return permission.PermissionModeNormal
+}
+func (s *stubPermSvc) SubscribeModeChanges(_ context.Context) <-chan pubsub.Event[permission.ModeChangedEvent] {
+	return make(chan pubsub.Event[permission.ModeChangedEvent])
+}
+
+func (c *stubBlockingCoordinator) AddNote(_, _ string) {}
+func (c *stubBlockingCoordinator) ListSettledMessages(_ context.Context, _ string) ([]message.Message, error) {
+	return nil, nil
+}
+func (c *stubBlockingCoordinator) SetHostContext(_ proto.HostContext) {}
+func (c *stubBlockingCoordinator) HostContext() proto.HostContext     { return proto.HostContext{} }

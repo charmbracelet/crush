@@ -70,12 +70,27 @@ func (s *acpPermissionService) AutoApproveSession(sessionID string) {
 	s.real.AutoApproveSession(sessionID)
 }
 
-// SetSkipRequests delegates to the real service.
-func (s *acpPermissionService) SetSkipRequests(skip bool) {
-	s.real.SetSkipRequests(skip)
+// ActiveRequest delegates to the real service.
+func (s *acpPermissionService) ActiveRequest() (permission.PermissionRequest, bool) {
+	return s.real.ActiveRequest()
 }
 
-// SkipRequests delegates to the real service.
-func (s *acpPermissionService) SkipRequests() bool {
-	return s.real.SkipRequests()
+// InheritAutoApproval delegates to the real service.
+func (s *acpPermissionService) InheritAutoApproval(parentSessionID, childSessionID string) {
+	s.real.InheritAutoApproval(parentSessionID, childSessionID)
+}
+
+// SetPermissionMode delegates to the real service.
+func (s *acpPermissionService) SetPermissionMode(mode permission.PermissionMode) {
+	s.real.SetPermissionMode(mode)
+}
+
+// PermissionMode delegates to the real service.
+func (s *acpPermissionService) PermissionMode() permission.PermissionMode {
+	return s.real.PermissionMode()
+}
+
+// SubscribeModeChanges delegates to the real service.
+func (s *acpPermissionService) SubscribeModeChanges(ctx context.Context) <-chan pubsub.Event[permission.ModeChangedEvent] {
+	return s.real.SubscribeModeChanges(ctx)
 }

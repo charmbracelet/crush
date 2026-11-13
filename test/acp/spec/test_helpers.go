@@ -123,3 +123,21 @@ func (s *stubMessageStore) DeleteSessionMessages(_ context.Context, _ string) er
 func (s *stubMessageStore) Flush(_ context.Context, _ string) error { return nil }
 
 func (s *stubMessageStore) FlushAll(_ context.Context) error { return nil }
+
+func (s *stubSessionService) MCPDisabledServers(_ context.Context) ([]string, error) {
+	return nil, nil
+}
+func (s *stubSessionService) MCPServersEnabled(_ context.Context) ([]string, error) {
+	return nil, nil
+}
+func (s *stubSessionService) SetMCPServerDisabled(_ context.Context, _ string, _ bool) error {
+	return nil
+}
+func (s *stubSessionService) SetChannel(_ context.Context, sessionID, _ string) (session.Session, error) {
+	return session.Session{ID: sessionID}, nil
+}
+func (s *stubSessionService) SkillsDisabled(_ context.Context) ([]string, error) { return nil, nil }
+func (s *stubSessionService) SetSkillDisabled(_ context.Context, _ string, _, _ bool) error {
+	return nil
+}
+func (s *stubSessionService) SkillsEnabled(_ context.Context) ([]string, error) { return nil, nil }

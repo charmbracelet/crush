@@ -13,6 +13,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/client"
@@ -296,6 +297,19 @@ func TestTranslateEvent_HostTheme(t *testing.T) {
 	got, ok = out.(HostThemeEvent)
 	require.True(t, ok, "expected HostThemeEvent, got %T", out)
 	require.Nil(t, got.Theme)
+}
+
+func TestTranslateReauthenticateEvent(t *testing.T) {
+	t.Parallel()
+
+	event := pubsub.Event[proto.AgentEvent]{
+		Type:    pubsub.CreatedEvent,
+		Payload: proto.AgentEvent{Type: proto.AgentEventType(notify.TypeReAuthenticate), ProviderID: "example"},
+	}
+	w := NewClientWorkspace(nil, proto.Workspace{})
+	out := w.translateEvent(event).(pubsub.Event[notify.Notification])
+	require.Equal(t, notify.TypeReAuthenticate, out.Payload.Type)
+	require.Equal(t, "example", out.Payload.ProviderID)
 }
 
 // TestTranslateEvent_UpdateAvailable verifies that an incoming

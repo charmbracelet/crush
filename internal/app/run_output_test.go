@@ -63,22 +63,33 @@ func TestAnswerPrinter_SkipsLeadingBlankReplies(t *testing.T) {
 	require.Equal(t, "Done.", out.String())
 }
 
-// Leading blank lines are dropped whether the reply arrives in pieces or
-// whole, as it does from the store.
+// TestAnswerPrinter_LeadingBlankLines checks that leading blank lines and
+// spaces are dropped until something is printed, whether the reply arrives
+// in pieces or whole, as it does from the store.
 func TestAnswerPrinter_LeadingBlankLines(t *testing.T) {
 	t.Parallel()
-	var pieces, whole bytes.Buffer
-	p := newTestPrinter(t, &pieces)
-	p.write(assistantReply("m", "s", "\n"))
-	p.write(assistantReply("m", "s", "\nHello"))
-	newTestPrinter(t, &whole).write(assistantReply("m", "s", "\nHello"))
-	require.Equal(t, "Hello", pieces.String())
-	require.Equal(t, "Hello", whole.String())
+	for name, texts := range map[string][]string{
+		"whole":               {"\nHello"},
+		"pieces":              {"\n", "\nHello"},
+		"more blank lines":    {"\n", "\n\nHello"},
+		"spaces":              {" ", "  Hello"},
+		"blank then indented": {"\n", "\n  Hello"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			var out bytes.Buffer
+			p := newTestPrinter(t, &out)
+			for _, text := range texts {
+				p.write(assistantReply("m", "s", text))
+			}
+			require.Equal(t, "Hello", out.String())
+		})
+	}
 }
 
-// A provider retry resets the reply after part of it has streamed. The new
-// text is then printed in full on a new line, whether it is shorter or
-// longer than the first attempt.
+// TestAnswerPrinter_RetryReplacesReply covers a provider retry that resets
+// the reply after part of it has streamed. The new text is printed in full
+// on a new line, whether it is shorter or longer than the first attempt.
 func TestAnswerPrinter_RetryReplacesReply(t *testing.T) {
 	t.Parallel()
 	for name, retry := range map[string]string{
@@ -98,8 +109,9 @@ func TestAnswerPrinter_RetryReplacesReply(t *testing.T) {
 	}
 }
 
-// A retry that starts with the same text as the failed attempt continues
-// from where the output stopped.
+// TestAnswerPrinter_RetryWithSameStartContinues covers a retry that starts
+// with the same text as the failed attempt. The output continues from
+// where it stopped.
 func TestAnswerPrinter_RetryWithSameStartContinues(t *testing.T) {
 	t.Parallel()
 	var out bytes.Buffer
@@ -109,7 +121,8 @@ func TestAnswerPrinter_RetryWithSameStartContinues(t *testing.T) {
 	require.Equal(t, "The answer is 42.", out.String())
 }
 
-// An update older than one already printed adds nothing.
+// TestAnswerPrinter_StaleUpdateAddsNothing checks that an update older
+// than one already printed adds nothing.
 func TestAnswerPrinter_StaleUpdateAddsNothing(t *testing.T) {
 	t.Parallel()
 	var out bytes.Buffer
@@ -120,8 +133,9 @@ func TestAnswerPrinter_StaleUpdateAddsNothing(t *testing.T) {
 	require.Equal(t, "Hello world!", out.String())
 }
 
-// The agent can report done before the events carrying the end of its
-// reply have been read. flush then prints the missing end from the store.
+// TestAnswerPrinter_FlushPrintsWhatTheEventsMissed covers the race: the
+// agent reports done before the events carrying the end of its reply have
+// been read. flush then prints the missing end from the store.
 func TestAnswerPrinter_FlushPrintsWhatTheEventsMissed(t *testing.T) {
 	t.Parallel()
 	var out bytes.Buffer
@@ -148,8 +162,9 @@ func TestAnswerPrinter_FlushWithNoEventsAtAll(t *testing.T) {
 	require.Equal(t, "The whole answer.", out.String())
 }
 
-// A reply replaced by a retry does not stop flush from printing the
-// replies after it.
+// TestAnswerPrinter_FlushContinuesPastReplacedReply checks that a reply
+// replaced by a retry does not stop flush from printing the replies after
+// it.
 func TestAnswerPrinter_FlushContinuesPastReplacedReply(t *testing.T) {
 	t.Parallel()
 	var out bytes.Buffer
@@ -171,8 +186,35 @@ func TestAnswerPrinter_FlushIgnoresAListError(t *testing.T) {
 	require.Equal(t, "Partial", out.String(), "what was already printed stays, and the list error does not fail the run")
 }
 
-// A continued session holds the replies of earlier runs. Because flush
-// reads the whole session, it must print only what this run added.
+// TestAnswerPrinter_SkipsSummaries checks that a compaction summary is not
+// printed, from its events or from the store, wherever it falls among the
+// replies. It is stored as an assistant message in the run's session, but
+// it is not part of the answer.
+func TestAnswerPrinter_SkipsSummaries(t *testing.T) {
+	t.Parallel()
+	summary := func(id string) message.Message {
+		msg := assistantReply(id, "s", "SUMMARY")
+		msg.IsSummaryMessage = true
+		return msg
+	}
+	msgs := []message.Message{
+		assistantReply("m1", "s", "Before."), summary("mid"),
+		assistantReply("m2", "s", "After."), summary("last"),
+	}
+
+	var fromEvents, fromStore bytes.Buffer
+	p := newTestPrinter(t, &fromEvents)
+	for _, msg := range msgs {
+		p.write(msg)
+	}
+	newTestPrinter(t, &fromStore).flush(t.Context(), storedMessages{msgs: msgs})
+	require.Equal(t, "Before.After.", fromEvents.String())
+	require.Equal(t, "Before.After.", fromStore.String())
+}
+
+// TestNewAnswerPrinter_ContinuedSession checks that a run in a continued
+// session prints only what it added. flush reads the whole session, which
+// also holds the replies of earlier runs.
 func TestNewAnswerPrinter_ContinuedSession(t *testing.T) {
 	t.Parallel()
 	earlier := []message.Message{
@@ -191,8 +233,9 @@ func TestNewAnswerPrinter_ContinuedSession(t *testing.T) {
 	require.Equal(t, "The new answer.", out.String(), "earlier replies are not repeated, and the new reply is trimmed as the first reply of this run")
 }
 
-// A new session is not read from the store. A continued session is, and
-// the run fails if that read fails.
+// TestNewAnswerPrinter_ListsOnlyContinuedSessions checks that a new
+// session is not read from the store. A continued session is, and the run
+// fails if that read fails.
 func TestNewAnswerPrinter_ListsOnlyContinuedSessions(t *testing.T) {
 	t.Parallel()
 	broken := storedMessages{err: errors.New("database is closed")}
@@ -202,8 +245,8 @@ func TestNewAnswerPrinter_ListsOnlyContinuedSessions(t *testing.T) {
 	require.ErrorContains(t, err, "database is closed")
 }
 
-// When done is ready and no events ever arrive, the whole answer is
-// printed from the store.
+// TestAnswerPrinter_PrintUntilDoneWhenDoneWins checks that the whole answer
+// is printed from the store when done is ready and no events ever arrive.
 func TestAnswerPrinter_PrintUntilDoneWhenDoneWins(t *testing.T) {
 	t.Parallel()
 	var out bytes.Buffer
@@ -282,10 +325,11 @@ func TestAnswerPrinter_PrintUntilDoneContextDone(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 }
 
-// Runs the printer against the real message service. The agent stores
-// every update before it reports done, so a flush prints whatever a
-// subscription that fell behind did not deliver, and the earlier reply of
-// a continued session is not printed again.
+// TestAnswerPrinter_MessageService runs the printer against the real
+// message service. It stores the messages of a run and calls FlushAll, as
+// the agent does before it reports done, then reads a single event. flush
+// must print the rest, must not repeat the earlier reply of the continued
+// session, and must leave out the compaction summary.
 func TestAnswerPrinter_MessageService(t *testing.T) {
 	t.Parallel()
 	conn, err := db.Connect(t.Context(), t.TempDir())
@@ -308,8 +352,16 @@ func TestAnswerPrinter_MessageService(t *testing.T) {
 	require.NoError(t, err)
 	events := msgs.Subscribe(t.Context())
 
-	// The run: two assistant messages, streamed in debounced deltas.
-	for _, text := range []string{"Let me check. ", "The answer is forty-two."} {
+	// The run: two assistant messages, streamed in debounced deltas, with
+	// a compaction summary between them.
+	for i, text := range []string{"Let me check. ", "The answer is forty-two."} {
+		if i == 1 {
+			summary, err := msgs.Create(t.Context(), sess.ID, message.CreateMessageParams{Role: message.Assistant, IsSummaryMessage: true})
+			require.NoError(t, err)
+			summary.AppendContent("The summary.")
+			summary.AddFinish(message.FinishReasonEndTurn, "", "")
+			require.NoError(t, msgs.Update(t.Context(), summary))
+		}
 		m, err := msgs.Create(t.Context(), sess.ID, message.CreateMessageParams{Role: message.Assistant})
 		require.NoError(t, err)
 		for _, r := range text {

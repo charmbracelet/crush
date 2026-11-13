@@ -34,7 +34,8 @@ type answerPrinter struct {
 type replyState struct {
 	// content is the reply's text as it was last seen.
 	content string
-	// shown is set once some of content has been written.
+	// shown is set once some of content has been written, or when the
+	// reply was stored before the run started.
 	shown bool
 }
 
@@ -60,10 +61,13 @@ func newAnswerPrinter(ctx context.Context, out io.Writer, sessionID string, mess
 }
 
 // isReply reports whether msg is an assistant message in the printer's
-// session that has at least one part. Its text may still be empty, as it
-// is for a message that only calls tools.
+// session that has at least one part and is not a compaction summary. Its
+// text may still be empty, as it is for a message that only calls tools.
 func (p *answerPrinter) isReply(msg message.Message) bool {
-	return msg.SessionID == p.sessionID && msg.Role == message.Assistant && len(msg.Parts) > 0
+	return msg.SessionID == p.sessionID &&
+		msg.Role == message.Assistant &&
+		!msg.IsSummaryMessage &&
+		len(msg.Parts) > 0
 }
 
 // write prints the text that msg adds to what has been seen of the reply.
@@ -91,15 +95,14 @@ func (p *answerPrinter) write(msg message.Message) {
 		part, st = content, replyState{}
 	}
 
-	if st.content == "" {
-		// Trim leading whitespace. Sometimes the LLM includes leading
-		// formatting and indentation, which we don't want here. Before
-		// anything is printed, leading newlines are trimmed too.
-		cutset := " \t"
-		if !p.printed {
-			cutset = " \t\r\n"
-		}
-		part = strings.TrimLeft(part, cutset)
+	// Trim leading whitespace. Sometimes the LLM includes leading
+	// formatting and indentation, which we don't want here. Until
+	// something has been printed, leading newlines are trimmed too.
+	switch {
+	case !p.printed:
+		part = strings.TrimLeft(part, " \t\r\n")
+	case st.content == "":
+		part = strings.TrimLeft(part, " \t")
 	}
 	// Ignore initial whitespace-only messages.
 	if p.printed || strings.TrimSpace(part) != "" {

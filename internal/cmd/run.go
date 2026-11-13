@@ -295,7 +295,7 @@ func runNonInteractive(
 		sessionID: sess.ID,
 		runID:     runID,
 		out:       os.Stdout,
-		read:      make(map[string]int),
+		seen:      make(map[string]string),
 	}
 
 	// Start herdr integration when running inside a herdr pane.
@@ -361,7 +361,7 @@ type runStream struct {
 	sessionID string
 	runID     string
 	out       io.Writer
-	read      map[string]int
+	seen      map[string]string // text of each message as last seen, by ID
 	printed   bool
 }
 
@@ -383,28 +383,15 @@ func (s *runStream) handle(ev any, stopSpinner func()) (done bool, err error) {
 		if msg.SessionID != s.sessionID || msg.Role != proto.Assistant || len(msg.Parts) == 0 {
 			return false, nil
 		}
+		// A compaction summary is not part of the answer.
+		if msg.IsSummaryMessage {
+			return false, nil
+		}
 		if s.runID != "" {
 			return false, nil
 		}
 		stop()
-
-		content := msg.Content().String()
-		readBytes := s.read[msg.ID]
-		if len(content) < readBytes {
-			slog.Error("Non-interactive: message content shorter than read bytes",
-				"message_length", len(content), "read_bytes", readBytes)
-			return false, fmt.Errorf("message content is shorter than read bytes: %d < %d", len(content), readBytes)
-		}
-
-		part := content[readBytes:]
-		if readBytes == 0 {
-			part = strings.TrimLeft(part, " \t")
-		}
-		if s.printed || strings.TrimSpace(part) != "" {
-			s.printed = true
-			fmt.Fprint(s.out, part)
-		}
-		s.read[msg.ID] = len(content)
+		s.write(msg.ID, msg.Content().String())
 		return false, nil
 
 	case pubsub.Event[proto.RunComplete]:
@@ -439,18 +426,7 @@ func (s *runStream) handle(ev any, stopSpinner func()) (done bool, err error) {
 		// yet; the embedded Text field is the backstop that
 		// guarantees the full final text always appears on stdout.
 		if e.Payload.MessageID != "" {
-			full := e.Payload.Text
-			readBytes := s.read[e.Payload.MessageID]
-			if readBytes < len(full) {
-				tail := full[readBytes:]
-				if readBytes == 0 {
-					tail = strings.TrimLeft(tail, " \t")
-				}
-				if s.printed || strings.TrimSpace(tail) != "" {
-					s.printed = true
-					fmt.Fprint(s.out, tail)
-				}
-			}
+			s.write(e.Payload.MessageID, e.Payload.Text)
 		}
 		return true, nil
 
@@ -478,6 +454,46 @@ func (s *runStream) handle(ev any, stopSpinner func()) (done bool, err error) {
 		return true, fmt.Errorf("agent error: %w", e.Payload.Error)
 	}
 	return false, nil
+}
+
+// write prints the text that content adds to what has been seen of the
+// message with the given ID. A message's text normally only grows. Text
+// that is a prefix of what was seen is an out-of-date update and adds
+// nothing. Text that no longer starts with what was seen has been
+// replaced, which happens when a provider request is retried after part
+// of the reply has streamed. The new text is then printed in full, on a
+// new line if the old text was not blank.
+func (s *runStream) write(id, content string) {
+	old := s.seen[id]
+	part, ok := strings.CutPrefix(content, old)
+	switch {
+	case ok:
+		// The text grew or is unchanged, and part is what is new.
+	case strings.HasPrefix(old, content):
+		return
+	default:
+		// Non-blank old text was printed, so start a new line.
+		if strings.TrimSpace(old) != "" {
+			fmt.Fprintln(s.out)
+		}
+		part, old = content, ""
+	}
+
+	// Trim leading whitespace. Sometimes the LLM includes leading
+	// formatting and indentation, which we don't want here. Until
+	// something has been printed, leading newlines are trimmed too.
+	switch {
+	case !s.printed:
+		part = strings.TrimLeft(part, " \t\r\n")
+	case old == "":
+		part = strings.TrimLeft(part, " \t")
+	}
+	// Ignore initial whitespace-only messages.
+	if s.printed || strings.TrimSpace(part) != "" {
+		s.printed = true
+		fmt.Fprint(s.out, part)
+	}
+	s.seen[id] = content
 }
 
 // waitForAgent polls GetAgentInfo until the agent is ready, with a

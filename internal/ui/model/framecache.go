@@ -1,6 +1,8 @@
 package model
 
 import (
+	"image"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -180,31 +182,103 @@ func (m *UI) beginFrameUpdate() {
 	m.dialogMotionOnly = false
 }
 
-// drawFrame draws the UI onto canvas. A pointer moving over open dialogs
-// changes nothing beneath them, so it redraws only the dialogs over the
-// backdrop the last full frame drew. That keeps its cost independent of the
-// conversation and the sidebar.
-func (m *UI) drawFrame(canvas uv.ScreenBuffer) *tea.Cursor {
-	reuse := m.dialogMotionOnly && m.backdrop != nil && m.backdrop.Bounds() == canvas.Bounds()
-	m.dialogMotionOnly = false
-	if !m.dialog.HasDialogs() {
-		m.backdrop = nil
-		return m.Draw(canvas, canvas.Bounds())
-	}
-	if reuse {
-		m.backdrop.Draw(canvas, canvas.Bounds())
-	} else {
-		m.drawBackdrop(canvas, canvas.Bounds())
+// frameRenderer turns the UI's layered draws into View content. It keeps the
+// last frame so the next one renders only the lines that changed: a pointer
+// moving over a dialog usually changes a line or two, or none, while
+// rendering every line costs as much as drawing the frame. It also keeps the
+// backdrop beneath open dialogs, so that motion redraws only the dialogs and
+// its cost stays independent of the conversation and the sidebar.
+type frameRenderer struct {
+	// backdrop is everything beneath the open dialogs as the last full
+	// frame drew it, nil while no dialog is open.
+	backdrop *uv.Buffer
+	last     uv.ScreenBuffer
+	lines    []string
+	content  string
+	// spare is the screen before last, which the next frame draws on.
+	spare uv.ScreenBuffer
+}
+
+// frame draws a width by height frame and returns it as View content: each
+// line styled, without trailing spaces. below draws everything beneath the
+// dialogs, and dialogs draws the open dialogs over it, or is nil when none
+// is open. When backdropStill is set, nothing beneath the dialogs changed,
+// so the backdrop the last frame drew stands in for below.
+func (f *frameRenderer) frame(width, height int, backdropStill bool, below, dialogs func(uv.Screen, uv.Rectangle) *tea.Cursor) (string, *tea.Cursor) {
+	bounds := image.Rect(0, 0, width, height)
+	reuse := backdropStill && dialogs != nil && f.backdrop != nil && f.backdrop.Bounds() == bounds
+	// The backdrop covers every cell, so a canvas it is copied onto needs
+	// no clearing.
+	canvas := f.canvas(bounds, !reuse)
+	switch {
+	case dialogs == nil:
+		f.backdrop = nil
+		cursor := below(canvas, bounds)
+		return f.render(canvas), cursor
+	case reuse:
+		// The backdrop is the same size, so copy whole lines rather than
+		// drawing it cell by cell.
+		for y, line := range f.backdrop.Lines {
+			copy(canvas.Lines[y], line)
+		}
+	default:
+		below(canvas, bounds)
 		// Copy into a kept buffer: cloning would allocate a whole screen on
 		// every frame drawn while a dialog is open.
-		if m.backdrop == nil || m.backdrop.Bounds() != canvas.Bounds() {
-			m.backdrop = uv.NewBuffer(canvas.Width(), canvas.Height())
+		if f.backdrop == nil || f.backdrop.Bounds() != bounds {
+			f.backdrop = uv.NewBuffer(width, height)
 		}
 		for y, line := range canvas.Lines {
-			copy(m.backdrop.Lines[y], line)
+			copy(f.backdrop.Lines[y], line)
 		}
 	}
-	return m.dialog.Draw(canvas, canvas.Bounds())
+	cursor := dialogs(canvas, bounds)
+	return f.render(canvas), cursor
+}
+
+// canvas returns a screen for the next frame, blank when clear is set.
+func (f *frameRenderer) canvas(bounds image.Rectangle, clear bool) uv.ScreenBuffer {
+	spare := f.spare
+	f.spare = uv.ScreenBuffer{}
+	if spare.RenderBuffer == nil || spare.Bounds() != bounds {
+		return uv.NewScreenBuffer(bounds.Dx(), bounds.Dy())
+	}
+	if clear {
+		// Frames are rendered from their cells, so skip touch tracking.
+		spare.Buffer.Clear()
+	}
+	return spare
+}
+
+// render returns canvas as View content, re-rendering only the lines that
+// differ from the last frame, and keeps canvas as the last frame.
+func (f *frameRenderer) render(canvas uv.ScreenBuffer) string {
+	same := f.last.RenderBuffer != nil && f.last.Bounds() == canvas.Bounds()
+	if !same {
+		f.lines = make([]string, len(canvas.Lines))
+	}
+	changed := !same
+	for y, line := range canvas.Lines {
+		if same && linesEqual(line, f.last.Lines[y]) {
+			continue
+		}
+		f.lines[y] = strings.TrimRight(line.Render(), " ")
+		changed = true
+	}
+	f.spare, f.last = f.last, canvas
+	if changed {
+		f.content = strings.Join(f.lines, "\n")
+	}
+	return f.content
+}
+
+func linesEqual(a, b uv.Line) bool {
+	for x := range a {
+		if !a[x].Equal(&b[x]) {
+			return false
+		}
+	}
+	return true
 }
 
 // endFrameUpdate returns the command that arms the idle GC timer when this

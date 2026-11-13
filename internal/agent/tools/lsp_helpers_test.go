@@ -6,6 +6,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type testLSPClient struct{ handles, symbols bool }
+
+func (c *testLSPClient) HandlesFile(string) bool       { return c.handles }
+func (c *testLSPClient) SupportsDocumentSymbols() bool { return c.symbols }
+
+func TestSelectLSPClient_PrefersDocumentSymbols(t *testing.T) {
+	without, with := &testLSPClient{handles: true}, &testLSPClient{handles: true, symbols: true}
+	require.Same(t, with, selectLSPClient([]*testLSPClient{without, with}, "src/main.py", true))
+	require.Same(t, without, selectLSPClient([]*testLSPClient{without, with}, "src/main.py", false))
+}
+
 func TestGetSymbolOffset(t *testing.T) {
 	t.Parallel()
 

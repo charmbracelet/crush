@@ -71,7 +71,7 @@ func resolveSymbolResults(ctx context.Context, lspManager *lsp.Manager, symbol, 
 			continue
 		}
 
-		client := findLSPClient(lspManager, absPath)
+		client := findLSPClient(lspManager, absPath, false)
 		if client == nil {
 			continue
 		}
@@ -90,17 +90,31 @@ func resolveSymbolResults(ctx context.Context, lspManager *lsp.Manager, symbol, 
 	return results, nil
 }
 
-// findLSPClient returns the first LSP client that handles the given file path.
-func findLSPClient(lspManager *lsp.Manager, filePath string) *lsp.Client {
-	if abs, err := filepath.Abs(filePath); err == nil {
-		filePath = abs
-	}
-	for c := range lspManager.Clients().Seq() {
-		if c.HandlesFile(filePath) {
+func selectLSPClient[T interface {
+	HandlesFile(string) bool
+	SupportsDocumentSymbols() bool
+}](clients []T, filePath string, preferSymbols bool) T {
+	var fallback T
+	for _, c := range clients {
+		if c.HandlesFile(filePath) && (!preferSymbols || c.SupportsDocumentSymbols()) {
 			return c
 		}
 	}
-	return nil
+	if preferSymbols {
+		return selectLSPClient(clients, filePath, false)
+	}
+	return fallback
+}
+
+func findLSPClient(lspManager *lsp.Manager, filePath string, preferSymbols ...bool) *lsp.Client {
+	if abs, err := filepath.Abs(filePath); err == nil {
+		filePath = abs
+	}
+	var clients []*lsp.Client
+	for c := range lspManager.Clients().Seq() {
+		clients = append(clients, c)
+	}
+	return selectLSPClient(clients, filePath, len(preferSymbols) == 0 || preferSymbols[0])
 }
 
 // collectAffectedFiles extracts all unique file paths from a WorkspaceEdit.

@@ -41,6 +41,7 @@ type ConfirmComponent struct {
 	lastWidth    int
 	scrollOffset int
 	compositor   *lipgloss.Compositor
+	buttonArea   image.Rectangle
 	hoverX       int
 	hoverY       int
 
@@ -178,6 +179,8 @@ func (c *ConfirmComponent) Height(width int) int {
 // Draw renders the confirmation content with scroll support.
 func (c *ConfirmComponent) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	c.lastWidth = area.Dx()
+	c.compositor = nil
+	c.buttonArea = image.Rectangle{}
 	viewport := area.Dy()
 
 	// Build all content lines into a virtual buffer.
@@ -267,6 +270,8 @@ func (c *ConfirmComponent) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	if overflow {
 		contentWidth--
 	}
+	textClip := area
+	textClip.Max.X = area.Min.X + contentWidth
 
 	// Blit visible window.
 	for screenRow := range viewport {
@@ -279,13 +284,14 @@ func (c *ConfirmComponent) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		if ln.buttons {
 			// Build compositor for button hit detection.
 			c.compositor = common.ButtonHitCompositor(c.Styles, confirmButtonOpts, " ", area.Min.X, y)
+			c.buttonArea = image.Rect(area.Min.X, y, area.Min.X+contentWidth, y+1).Intersect(area)
 			hoveredBtn := common.HitButtonIndex(c.compositor, c.hoverX, c.hoverY)
 			confirmButtonOpts[0].Hovered = hoveredBtn == 0
 			confirmButtonOpts[1].Hovered = hoveredBtn == 1
 			buttons := common.ButtonGroup(c.Styles, confirmButtonOpts, " ")
-			drawStyledText(scr, image.Rect(area.Min.X, y, area.Min.X+contentWidth, y+1), buttons)
+			drawStyledText(scr, textClip, area.Min.X, y, buttons)
 		} else if ln.text != "" {
-			drawStyledText(scr, image.Rect(area.Min.X, y, area.Min.X+contentWidth, y+1), ln.text)
+			drawStyledText(scr, textClip, area.Min.X, y, ln.text)
 		}
 	}
 
@@ -314,6 +320,9 @@ func (c *ConfirmComponent) SetHover(x, y int) { c.hoverX = x; c.hoverY = y }
 // triggers the corresponding action. Returns done=true for Yup!,
 // done=false for Not yet (goes back to editing).
 func (c *ConfirmComponent) HandleMouseClick(x, y int) (bool, bool) {
+	if !image.Pt(x, y).In(c.buttonArea) {
+		return false, false
+	}
 	switch common.HitButtonIndex(c.compositor, x, y) {
 	case 0: // Yup!
 		c.confirmYes = true

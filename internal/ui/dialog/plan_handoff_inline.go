@@ -296,13 +296,13 @@ func (p *PlanHandoffInline) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	y := area.Min.Y
 	layout := p.choiceLayout(area.Dx())
-	y += drawStyledText(scr, image.Rect(area.Min.X+planHandoffIndent, y, area.Max.X, area.Max.Y), layout.question)
+	y += drawStyledText(scr, area, area.Min.X+planHandoffIndent, y, layout.question)
 	y++ // blank
 
 	buttonsX := area.Min.X + planHandoffIndent
 	p.compositor = common.ButtonHitCompositor(p.com.Styles, layout.buttons, layout.spacing, buttonsX, y)
 	buttons := common.ButtonGroup(p.com.Styles, layout.buttons, layout.spacing)
-	drawStyledText(scr, image.Rect(buttonsX, y, area.Max.X, area.Max.Y), buttons)
+	drawStyledText(scr, area, buttonsX, y, buttons)
 
 	return nil
 }
@@ -315,7 +315,7 @@ func (p *PlanHandoffInline) drawEditor(scr uv.Screen, area uv.Rectangle) *tea.Cu
 	questionText := p.com.Styles.Editor.QuestionUnselected.Render(
 		ansi.Wrap(planHandoffFeedbackPrompt, max(1, area.Dx()-planHandoffIndent-iconWidth), ""),
 	)
-	y += drawStyledText(scr, image.Rect(blockX, y, area.Max.X, area.Max.Y), iconPrompt+questionText)
+	y += drawStyledText(scr, area, blockX, y, iconPrompt+questionText)
 	y++
 
 	promptPrefix := p.com.Styles.Editor.QuestionBody.Render("> ")
@@ -346,7 +346,7 @@ func (p *PlanHandoffInline) drawEditor(scr uv.Screen, area uv.Rectangle) *tea.Cu
 		if row > 0 {
 			text = strings.Repeat(" ", prefixWidth) + line
 		}
-		drawStyledText(scr, image.Rect(blockX, y+row, area.Max.X, y+row+1), text)
+		drawStyledText(scr, area, blockX, y+row, text)
 		if editorCursor != nil && editorCursor.Y == row {
 			current := *editorCursor
 			current.X += planHandoffIndent + prefixWidth

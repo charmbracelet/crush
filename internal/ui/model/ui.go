@@ -932,6 +932,19 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		paste.Content = strings.ReplaceAll(paste.Content, "\r\n", "\n")
 		msg = paste
 	}
+	// An open dialog is modal: it takes pointer input and pastes, and
+	// nothing it covers sees them.
+	if m.dialog.HasDialogs() {
+		switch msg := msg.(type) {
+		case tea.MouseClickMsg:
+			return m, m.handleDialogMsg(msg)
+		case tea.MouseMotionMsg, tea.MouseReleaseMsg, common.CoalescedWheelMsg:
+			m.dialog.Update(msg)
+			return m, nil
+		case tea.PasteMsg:
+			return m, m.handleDialogMsg(msg)
+		}
+	}
 	switch msg := msg.(type) {
 	case tea.EnvMsg:
 		// Is this Windows Terminal?
@@ -1329,14 +1342,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Handle delayed single-click action (e.g., expansion).
 		m.chat.HandleDelayedClick(msg)
 	case tea.MouseClickMsg:
-		// Pass mouse events to dialogs first if any are open.
-		if m.dialog.HasDialogs() {
-			if cmd := m.handleDialogMsg(msg); cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-			return m, tea.Batch(cmds...)
-		}
-
 		// Route clicks to inline editors that support mouse interaction.
 		if m.activeInline != nil {
 			if selectable, ok := m.activeInline.(dialog.MouseSelectableEditor); ok &&
@@ -1401,12 +1406,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.MouseMotionMsg:
-		// Pass mouse events to dialogs first if any are open.
-		if m.dialog.HasDialogs() {
-			m.dialog.Update(msg)
-			return m, tea.Batch(cmds...)
-		}
-
 		// Track hover position for inline editors.
 		if m.activeInline != nil {
 			if selectable, ok := m.activeInline.(dialog.MouseSelectableEditor); ok &&
@@ -1460,12 +1459,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.MouseReleaseMsg:
-		// Pass mouse events to dialogs first if any are open.
-		if m.dialog.HasDialogs() {
-			m.dialog.Update(msg)
-			return m, tea.Batch(cmds...)
-		}
-
 		if m.activeInline != nil {
 			if selectable, ok := m.activeInline.(dialog.MouseSelectableEditor); ok {
 				if handled, cmd := selectable.HandleMouseRelease(msg.X, msg.Y); handled {
@@ -1510,12 +1503,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				we.HandleWheel(msg.DeltaX, msg.DeltaY)
 				return m, tea.Batch(cmds...)
 			}
-		}
-
-		// Pass mouse events to dialogs first if any are open.
-		if m.dialog.HasDialogs() {
-			m.dialog.Update(msg)
-			return m, tea.Batch(cmds...)
 		}
 
 		// Otherwise handle mouse wheel for chat. Use the coalesced delta
@@ -6449,10 +6436,6 @@ func (m *UI) checkBangModeAfterPaste() {
 
 // handlePasteMsg handles a paste message.
 func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
-	if m.dialog.HasDialogs() {
-		return m.handleDialogMsg(msg)
-	}
-
 	if m.focus != uiFocusEditor {
 		return nil
 	}

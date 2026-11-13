@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/attachments"
 	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/dialog"
 	uv "github.com/charmbracelet/ultraviolet"
 )
 
@@ -70,6 +71,7 @@ func newTestUI() *UI {
 		status:   NewStatus(com, nil),
 		chat:     NewChat(com, config.ScrollbarDefault),
 		textarea: ta,
+		dialog:   dialog.NewOverlay(),
 		state:    uiChat,
 		focus:    uiFocusEditor,
 		width:    140,

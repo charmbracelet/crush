@@ -153,6 +153,24 @@ func (f *ModelsList) SelectLast() (v bool) {
 	return v
 }
 
+// ScrollToSelected scrolls to the selected item. If it lands at the top of
+// the viewport, the scroll position includes any group header directly above it.
+func (f *ModelsList) ScrollToSelected() {
+	f.List.ScrollToSelected()
+
+	selected := f.Selected()
+	if selected <= 0 {
+		return
+	}
+	offsetIdx, offsetLine := f.ScrollPosition()
+	if offsetIdx != selected || offsetLine != 0 {
+		return
+	}
+	if _, ok := f.ItemAt(selected - 1).(*ModelGroup); ok {
+		f.ScrollToIndex(selected - 1)
+	}
+}
+
 // IsSelectedFirst checks if the selected item is the first model item.
 func (f *ModelsList) IsSelectedFirst() bool {
 	originalIndex := f.Selected()

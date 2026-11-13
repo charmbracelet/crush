@@ -1,12 +1,14 @@
 package model
 
 import (
+	"image"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/attachments"
@@ -473,6 +475,16 @@ func TestUpdate_DirtyFromNonCacheableViewResetsNextScrollOnlyView(t *testing.T) 
 	require.Equal(t, 1, u.frames.Len())
 }
 
+// trimLines formats a rendered screen as View content: without trailing
+// spaces on any line.
+func trimLines(rendered string) string {
+	lines := strings.Split(strings.ReplaceAll(rendered, "\r\n", "\n"), "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimRight(line, " ")
+	}
+	return strings.Join(lines, "\n")
+}
+
 // A pointer moving over a dialog redraws only the dialog, which must never
 // leave a stale background: every frame matches a full redraw, including
 // after something beneath the dialog changed.
@@ -486,12 +498,9 @@ func TestDialogMotionKeepsBackdropCurrent(t *testing.T) {
 	full := func() string {
 		t.Helper()
 		canvas := uv.NewScreenBuffer(u.width, u.height)
-		u.Draw(canvas, canvas.Bounds())
-		lines := strings.Split(strings.ReplaceAll(canvas.Render(), "\r\n", "\n"), "\n")
-		for i, line := range lines {
-			lines[i] = strings.TrimRight(line, " ")
-		}
-		return strings.Join(lines, "\n")
+		u.drawBackdrop(canvas, canvas.Bounds())
+		u.dialog.Draw(canvas, canvas.Bounds())
+		return trimLines(canvas.Render())
 	}
 	move := func(dx int) string {
 		t.Helper()
@@ -506,4 +515,40 @@ func TestDialogMotionKeepsBackdropCurrent(t *testing.T) {
 	require.Contains(t, u.View().Content, "After", "other updates redraw the backdrop")
 	require.Equal(t, full(), move(0))
 	require.Contains(t, move(1), "After")
+}
+
+// TestFrameRendererMatchesFreshRender checks that rendering only changed
+// lines on a recycled screen matches drawing each frame from scratch.
+func TestFrameRendererMatchesFreshRender(t *testing.T) {
+	t.Parallel()
+	// Draw only over the text, so cells a frame leaves alone keep whatever
+	// the screen held.
+	draw := func(scr uv.Screen, text string) {
+		width, height := lipgloss.Size(text)
+		uv.NewStyledString(text).Draw(scr, image.Rect(0, 0, width, height))
+	}
+	render := func(width, height int, text string) string {
+		scr := uv.NewScreenBuffer(width, height)
+		draw(scr, text)
+		return trimLines(scr.Render())
+	}
+	var f frameRenderer
+	for _, frame := range []struct {
+		width, height int
+		text          string
+	}{
+		{20, 3, "\x1b[1mhello\x1b[0m world\nsecond"},
+		// Only the style of the first word changes.
+		{20, 3, "\x1b[31mhello\x1b[0m world\nsecond"},
+		// Drawn on the first frame's recycled screen.
+		{20, 3, "hi"},
+		{20, 3, "hi"},
+		{12, 2, "resized"},
+	} {
+		got, _ := f.frame(frame.width, frame.height, false, func(scr uv.Screen, _ uv.Rectangle) *tea.Cursor {
+			draw(scr, frame.text)
+			return nil
+		}, nil)
+		require.Equal(t, render(frame.width, frame.height, frame.text), got, "%q", frame.text)
+	}
 }

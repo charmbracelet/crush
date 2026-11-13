@@ -30,8 +30,9 @@ The UI uses a **hybrid rendering** approach:
    `layout.editor`, `layout.sidebar`, `layout.pills`, `layout.status`.
 2. **String-based**: Sub-components like `list.List` and `completions` render
    to strings, which are painted onto the screen buffer.
-3. **`View()`** creates the screen buffer, calls `Draw()`, then
-   `canvas.Render()` flattens it to a string for Bubble Tea.
+3. **`View()`** draws onto a screen buffer recycled from the last frame,
+   then flattens it to a string for Bubble Tea, rendering only the lines
+   that changed since that frame (`frameRenderer` in `model/framecache.go`).
 
 ### Main Model (`model/ui.go`)
 

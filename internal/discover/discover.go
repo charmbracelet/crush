@@ -97,6 +97,9 @@ type modelCapabilities struct {
 	ContextWindow int64 `json:"contextWindow"`
 }
 
+// modelsResponse is the OpenAI-compatible /models listing. The context
+// fields are optional: standard OpenAI-style responses omit them, while
+// providers like llama-swap and 9Router populate them.
 type modelsResponse struct {
 	Data []struct {
 		ID                  string            `json:"id"`
@@ -146,28 +149,10 @@ func DiscoverModels(ctx context.Context, cfg Config, resolver Resolver) ([]catwa
 		if _, ok := existing[e.ID]; ok {
 			continue
 		}
-		m := catwalk.Model{
+		result = append(result, catwalk.Model{
 			ID:   e.ID,
 			Name: e.ID,
-		}
-		// Populate context window from whichever field the provider
-		// exposes: prefer top-level context_window, then context_length,
-		// then a nested capabilities.contextWindow (e.g. 9Router).
-		// Standard OpenAI-style responses omit all of these, leaving the
-		// value at zero — which is fine, specialized enrichers can fill
-		// it in later.
-		switch {
-		case e.ContextWindow != nil && *e.ContextWindow > 0:
-			m.ContextWindow = *e.ContextWindow
-		case e.ContextLength != nil && *e.ContextLength > 0:
-			m.ContextWindow = *e.ContextLength
-		case e.Capabilities.ContextWindow > 0:
-			m.ContextWindow = e.Capabilities.ContextWindow
-		}
-		if e.MaxCompletionTokens != nil && *e.MaxCompletionTokens > 0 {
-			m.DefaultMaxTokens = *e.MaxCompletionTokens
-		}
-		result = append(result, m)
+		})
 	}
 
 	return result, nil

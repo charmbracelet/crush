@@ -178,6 +178,7 @@ func mcpConfigEqual(a, b config.MCPConfig) bool {
 		a.Disabled == b.Disabled &&
 		slices.Equal(a.DisabledTools, b.DisabledTools) &&
 		slices.Equal(a.EnabledTools, b.EnabledTools) &&
+		a.AlwaysAllow == b.AlwaysAllow &&
 		a.Timeout == b.Timeout &&
 		boolPtrEqual(a.Sessionless, b.Sessionless) &&
 		maps.Equal(a.Headers, b.Headers) &&

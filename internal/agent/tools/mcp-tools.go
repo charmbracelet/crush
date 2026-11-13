@@ -109,8 +109,10 @@ func (m *Tool) Run(ctx context.Context, params fantasy.ToolCall) (fantasy.ToolRe
 		return fantasy.NewTextErrorResponse("This channel tool is only available for messages from its originating channel."), nil
 	}
 
-	// Skip permission for whitelisted Docker MCP tools.
-	if !slices.Contains(whitelistDockerTools, params.Name) {
+	// Skip permission for whitelisted Docker MCP tools, and for every
+	// tool of an MCP server whose config opts into always allow.
+	alwaysAllow := m.cfg.Config().MCP[m.mcpName].AlwaysAllow
+	if !alwaysAllow && !slices.Contains(whitelistDockerTools, params.Name) {
 		permissionDescription := fmt.Sprintf("execute %s with the following parameters:", m.Info().Name)
 		p, err := m.permissions.Request(
 			ctx,

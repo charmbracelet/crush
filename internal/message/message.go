@@ -74,21 +74,28 @@ type Service interface {
 
 // pendingState holds the in-memory coalescing buffer for a single
 // message ID. All fields except where noted are guarded by
-// service.mu. The flushing flag serializes concurrent flushers for
-// the same ID so SQL writes never reorder.
+// service.mu. flushDone serializes concurrent flushers for the same
+// ID so SQL writes and their publications never reorder.
 type pendingState struct {
 	// latest is the most recent [Message] passed to [Service.Update]
 	// that has not yet been flushed.
 	latest Message
 
 	// dirty is true when latest contains state that has not been
-	// written to SQL since the last successful flush.
+	// written to SQL and published since the last successful flush.
 	dirty bool
 
-	// flushing is true while a goroutine is performing the SQL write
-	// for this ID. New updates are still accepted (and re-mark dirty)
-	// but other flushers must back off.
-	flushing bool
+	// flushDone is non-nil while a goroutine writes and publishes this
+	// ID, and is closed when it finishes. New updates are still
+	// accepted (and re-mark dirty) but other flushers must wait for it
+	// or back off.
+	flushDone chan struct{}
+
+	// deleters counts the Delete calls in progress for this message.
+	deleters int
+
+	// deleted is true once a Delete has removed the row.
+	deleted bool
 
 	// timer is the active debounce timer, or nil if no flush is
 	// scheduled. Stopped and reset when a terminal update preempts
@@ -104,6 +111,42 @@ type pendingState struct {
 	// ID; until then baseline is the zero value and must not be
 	// treated as a real prior state.
 	hasFlushed bool
+}
+
+// deleteState is how far [Service.Delete] has got with a message.
+// Updates that arrive once it has begun are never written or
+// published.
+type deleteState uint8
+
+const (
+	// notDeleted is a live message.
+	notDeleted deleteState = iota
+	// deleting holds updates in latest while any Delete runs, so a
+	// failed delete can still write and publish them.
+	deleting
+	// deleted drops updates. The entry stays as a tombstone: an update
+	// that arrived after Delete returned would otherwise create a fresh
+	// entry and publish a message that no longer exists.
+	deleted
+)
+
+// deletion is how far Delete has got with this message.
+func (p *pendingState) deletion() deleteState {
+	switch {
+	case p.deleted:
+		return deleted
+	case p.deleters > 0:
+		return deleting
+	default:
+		return notDeleted
+	}
+}
+
+// endFlush marks the flush in progress as finished and wakes the
+// callers waiting for it.
+func (p *pendingState) endFlush() {
+	close(p.flushDone)
+	p.flushDone = nil
 }
 
 // flushBaseline is the compact projection of a flushed [Message] that
@@ -178,24 +221,79 @@ func (s *service) Delete(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	err = s.q.DeleteMessage(ctx, message.ID)
-	if err != nil {
+
+	// Mark the message even when nothing is pending yet, so an update
+	// that starts now is held instead of written.
+	s.mu.Lock()
+	p := s.pendingFor(id)
+	// Another Delete already removed the row after this one read it.
+	if p.deleted {
+		s.mu.Unlock()
+		return nil
+	}
+	p.deleters++
+	if p.timer != nil {
+		p.timer.Stop()
+		p.timer = nil
+	}
+	// Marking stops new flushes from starting, so waiting for the one
+	// in progress is enough.
+	done := p.flushDone
+	s.mu.Unlock()
+	if done != nil {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			s.resumePendingAfterFailedDelete(id)
+			return ctx.Err()
+		}
+	}
+
+	if err := s.q.DeleteMessage(ctx, message.ID); err != nil {
+		s.resumePendingAfterFailedDelete(id)
 		return err
 	}
-	// Drop any pending coalesced state for this ID. We never want to
-	// flush back over a deleted row.
+
 	s.mu.Lock()
-	if p, ok := s.pending[id]; ok {
-		if p.timer != nil {
-			p.timer.Stop()
-		}
-		delete(s.pending, id)
-	}
+	p.deleters--
+	p.deleted = true
+	p.latest = Message{}
+	p.dirty = false
 	s.mu.Unlock()
 	// Clone the message before publishing to avoid race conditions with
 	// concurrent modifications to the Parts slice.
 	s.Publish(pubsub.DeletedEvent, message.Clone())
 	return nil
+}
+
+func (s *service) resumePendingAfterFailedDelete(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p := s.pending[id]
+	p.deleters--
+	// Another Delete still running or already done keeps holding
+	// updates.
+	if p.deletion() != notDeleted {
+		return
+	}
+	// Flush as a sync caller: no later update may come along to pick up
+	// the held state.
+	if p.dirty {
+		p.timer = time.AfterFunc(s.debounce, func() {
+			_ = s.flushOne(context.Background(), id, true)
+		})
+	}
+}
+
+// pendingFor returns id's pending state, creating it on first use.
+// Entries are never removed. The caller holds s.mu.
+func (s *service) pendingFor(id string) *pendingState {
+	p, ok := s.pending[id]
+	if !ok {
+		p = &pendingState{}
+		s.pending[id] = p
+	}
+	return p
 }
 
 func (s *service) Create(ctx context.Context, sessionID string, params CreateMessageParams) (Message, error) {
@@ -257,30 +355,28 @@ func (s *service) DeleteSessionMessages(ctx context.Context, sessionID string) e
 func (s *service) Update(ctx context.Context, msg Message) error {
 	cloned := msg.Clone()
 
+	s.mu.Lock()
+	p := s.pendingFor(msg.ID)
+	if p.deleted {
+		s.mu.Unlock()
+		return nil
+	}
+	p.latest = cloned
+	p.dirty = true
+	// While Delete runs, hold the update so a failed delete can still
+	// write it.
+	if p.deletion() == deleting {
+		s.mu.Unlock()
+		return nil
+	}
+
 	// Zero or negative debounce: flush every update synchronously. This
 	// preserves the pre-coalescing behaviour for tests and any caller
 	// that explicitly opted out via [WithDebounce].
 	if s.debounce <= 0 {
-		s.mu.Lock()
-		p, ok := s.pending[msg.ID]
-		if !ok {
-			p = &pendingState{}
-			s.pending[msg.ID] = p
-		}
-		p.latest = cloned
-		p.dirty = true
 		s.mu.Unlock()
 		return s.flushOne(ctx, msg.ID, true)
 	}
-
-	s.mu.Lock()
-	p, ok := s.pending[msg.ID]
-	if !ok {
-		p = &pendingState{}
-		s.pending[msg.ID] = p
-	}
-	p.latest = cloned
-	p.dirty = true
 
 	var prev *flushBaseline
 	if p.hasFlushed {
@@ -300,7 +396,7 @@ func (s *service) Update(ctx context.Context, msg Message) error {
 	// Debounce: schedule a single flush per pending state. If a flush
 	// is already running we let it finish; it writes or schedules the
 	// trailing dirty bit, unless its write fails.
-	if p.timer == nil && !p.flushing {
+	if p.timer == nil && p.flushDone == nil {
 		s.scheduleFlush(p, msg.ID)
 	}
 	s.mu.Unlock()
@@ -331,7 +427,7 @@ func (s *service) FlushAll(ctx context.Context) error {
 	s.mu.Lock()
 	ids := make([]string, 0, len(s.pending))
 	for id, p := range s.pending {
-		if p.dirty || p.flushing {
+		if p.dirty || p.flushDone != nil {
 			ids = append(ids, id)
 		}
 	}
@@ -365,15 +461,24 @@ func (s *service) flushOne(ctx context.Context, id string, syncCaller bool) erro
 			s.mu.Unlock()
 			return nil
 		}
-		if p.flushing {
+		// Wait for a write in progress before anything else, so a sync
+		// caller never returns while one is still running, even for a
+		// message being deleted.
+		if done := p.flushDone; done != nil {
+			s.mu.Unlock()
 			if !syncCaller {
-				s.mu.Unlock()
 				return nil
 			}
-			s.mu.Unlock()
-			// Brief yield; in-flight write should land in <1ms typical.
-			time.Sleep(time.Millisecond)
+			select {
+			case <-done:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 			continue
+		}
+		if p.deletion() != notDeleted {
+			s.mu.Unlock()
+			return nil
 		}
 		if !p.dirty {
 			s.mu.Unlock()
@@ -387,58 +492,66 @@ func (s *service) flushOne(ctx context.Context, id string, syncCaller bool) erro
 		snap := p.latest
 		// Decide whether this snapshot represents a terminal event
 		// against the prior baseline. We must do this before resetting
-		// dirty/flushing because shouldFlushNow looks at p.baseline
+		// dirty and start the flush because shouldFlushNow looks at p.baseline
 		// (which is what was on disk before this write).
 		var prev *flushBaseline
 		if p.hasFlushed {
 			prev = &p.baseline
 		}
 		isTerminal := shouldFlushNow(prev, &snap)
-		p.flushing = true
+		p.flushDone = make(chan struct{})
 		p.dirty = false
 		s.mu.Unlock()
 
 		err := s.write(ctx, snap)
 
 		s.mu.Lock()
-		p.flushing = false
+		if p.deletion() != notDeleted {
+			// Delete suppresses this write's publication. Preserve it so a
+			// failed delete can publish the latest state during rollback.
+			p.dirty = true
+			p.endFlush()
+			s.mu.Unlock()
+			return err
+		}
 		if err == nil {
 			p.baseline = newFlushBaseline(&snap)
 			p.hasFlushed = true
 		} else {
 			// Restore dirty so the next caller retries.
 			p.dirty = true
-		}
-		// If a delta arrived during the SQL write and we are a sync
-		// caller, the user expects that delta to land too.
-		wasDirty := p.dirty
-		if !wasDirty {
-			// Nothing left to write, so drop the snapshot. Pending
-			// entries outlive the streams that created them; holding
-			// latest here would pin every finished message's parts
-			// for the life of the process.
-			p.latest = Message{}
-		}
-		// A delta that arrived during the SQL write could not arm its
-		// own timer, so schedule one for it here. A sync caller writes
-		// it itself below.
-		if wasDirty && err == nil && !syncCaller && p.timer == nil {
-			s.scheduleFlush(p, id)
+			p.endFlush()
+			s.mu.Unlock()
+			return err
 		}
 		s.mu.Unlock()
 
-		if err != nil {
-			return err
-		}
-
-		// Terminal events — message finished, tool call added or
-		// finished, reasoning ended — use the bounded must-deliver
-		// path so they never get dropped under channel contention.
+		// Keep this message's flush serialized through publication, not just
+		// through its SQL write. Otherwise a newer flush can publish before
+		// this snapshot and subscribers can regress to stale state.
 		if isTerminal {
 			s.PublishMustDeliver(ctx, pubsub.UpdatedEvent, snap)
 		} else {
 			s.Publish(pubsub.UpdatedEvent, snap)
 		}
+
+		s.mu.Lock()
+		p.endFlush()
+		// If a delta arrived during the SQL write or publication and we are a
+		// sync caller, the user expects that delta to land too.
+		wasDirty := p.dirty
+		if !wasDirty {
+			// Pending entries outlive their streams; release the payload once
+			// no write or failed-delete rollback needs it.
+			p.latest = Message{}
+		}
+		// A delta that arrived during the SQL write or publication could
+		// not arm its own timer, so schedule one for it here. A sync
+		// caller writes it itself below, and a running Delete holds it.
+		if wasDirty && !syncCaller && p.timer == nil && p.deletion() == notDeleted {
+			s.scheduleFlush(p, id)
+		}
+		s.mu.Unlock()
 
 		if wasDirty && syncCaller {
 			continue

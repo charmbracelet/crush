@@ -2,11 +2,13 @@ package model
 
 import (
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/attachments"
 	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/common"
@@ -469,4 +471,39 @@ func TestUpdate_DirtyFromNonCacheableViewResetsNextScrollOnlyView(t *testing.T) 
 	u.View()
 	require.Equal(t, 0, u.frames.hits)
 	require.Equal(t, 1, u.frames.Len())
+}
+
+// A pointer moving over a dialog redraws only the dialog, which must never
+// leave a stale background: every frame matches a full redraw, including
+// after something beneath the dialog changed.
+func TestDialogMotionKeepsBackdropCurrent(t *testing.T) {
+	t.Parallel()
+	u := newFrameTestUI(t)
+	u.com.Config().Options = &config.Options{}
+	u.session = &session.Session{ID: "s1", Title: "Before"}
+	u.updateLayoutAndSize()
+	u.dialog.OpenDialog(dialog.NewQuit(u.com, 0))
+	full := func() string {
+		t.Helper()
+		canvas := uv.NewScreenBuffer(u.width, u.height)
+		u.Draw(canvas, canvas.Bounds())
+		lines := strings.Split(strings.ReplaceAll(canvas.Render(), "\r\n", "\n"), "\n")
+		for i, line := range lines {
+			lines[i] = strings.TrimRight(line, " ")
+		}
+		return strings.Join(lines, "\n")
+	}
+	move := func(dx int) string {
+		t.Helper()
+		u.Update(tea.MouseMotionMsg(tea.Mouse{X: u.width/2 + dx, Y: u.height / 2}))
+		return u.View().Content
+	}
+	u.View()
+	require.Equal(t, full(), move(0))
+	require.Equal(t, full(), move(1))
+	u.session.Title = "After"
+	u.Update(neutralMsg{})
+	require.Contains(t, u.View().Content, "After", "other updates redraw the backdrop")
+	require.Equal(t, full(), move(0))
+	require.Contains(t, move(1), "After")
 }

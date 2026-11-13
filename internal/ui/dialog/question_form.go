@@ -416,7 +416,7 @@ func (f *QuestionForm) DrawCollapsed(scr uv.Screen, area uv.Rectangle) {
 		if remaining > 0 {
 			rendered = rendered + " " + lineStyle.Render(strings.Repeat(styles.SectionSeparator, remaining))
 		}
-		drawStyledText(scr, area, rendered)
+		drawStyledText(scr, area, area.Min.X, area.Min.Y, rendered)
 	} else if f.numQuestions == 1 {
 		plainText = f.getQuestionText(0)
 		textWidth := iconWidth + 1 + lipgloss.Width(plainText)
@@ -425,7 +425,7 @@ func (f *QuestionForm) DrawCollapsed(scr uv.Screen, area uv.Rectangle) {
 		if remaining > 0 {
 			rendered = rendered + " " + lineStyle.Render(strings.Repeat(styles.SectionSeparator, remaining))
 		}
-		drawStyledText(scr, area, rendered)
+		drawStyledText(scr, area, area.Min.X, area.Min.Y, rendered)
 	}
 }
 

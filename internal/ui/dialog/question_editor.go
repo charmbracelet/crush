@@ -274,7 +274,7 @@ func (e *questionEditor) drawStandaloneNote(scr uv.Screen, area uv.Rectangle, y 
 			if j > 0 {
 				text = strings.Repeat(" ", prefixWidth) + ln
 			}
-			lines := drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, y+1), text)
+			drawStyledText(scr, area, area.Min.X, y, text)
 			if j == 0 {
 				if tc := e.noteEditor.Cursor(); tc != nil {
 					tc.X += prefixWidth
@@ -282,7 +282,10 @@ func (e *questionEditor) drawStandaloneNote(scr uv.Screen, area uv.Rectangle, y 
 					cur = tc
 				}
 			}
-			y += lines
+			y++
+		}
+		if cur != nil && (cur.Y < 0 || cur.Y >= area.Dy()) {
+			cur = nil
 		}
 		return cur, y
 	}
@@ -290,7 +293,9 @@ func (e *questionEditor) drawStandaloneNote(scr uv.Screen, area uv.Rectangle, y 
 	if saved, ok := e.notes[noteKey]; ok && saved != "" {
 		y++
 		noteStyle := e.Styles.Editor.QuestionNote
-		drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, y+1), notePrefix+noteStyle.Render(saved))
+		// The saved note takes one row.
+		row := image.Rect(area.Min.X, y, area.Max.X, y+1).Intersect(area)
+		drawStyledText(scr, row, area.Min.X, y, notePrefix+noteStyle.Render(saved))
 		y++
 	}
 

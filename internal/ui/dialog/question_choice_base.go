@@ -300,14 +300,25 @@ func wrapIndent(text string, width int, indent string) string {
 	return strings.Join(lines, "\n")
 }
 
-// drawStyledText blits an ANSI-styled string into area and returns
-// the number of visual lines it occupies.
-func drawStyledText(scr uv.Screen, area uv.Rectangle, text string) int {
-	if text == "" {
-		return 0
+// drawStyledText draws text with its first line at column x and row y,
+// clipped to clip, and returns how many lines the text has, drawn or not.
+// It builds the target itself because image.Rect swaps the corners of a
+// rectangle that starts below the area's bottom, which would paint the
+// text below the area.
+func drawStyledText(scr uv.Screen, clip uv.Rectangle, x, y int, text string) int {
+	lines := strings.Count(text, "\n") + 1
+	if above := clip.Min.Y - y; above > 0 {
+		if above >= lines {
+			return lines
+		}
+		text = strings.SplitAfterN(text, "\n", above+1)[above]
+		y = clip.Min.Y
 	}
-	uv.NewStyledString(text).Draw(scr, area)
-	return strings.Count(text, "\n") + 1
+	target := uv.Rectangle{Min: image.Pt(x, y), Max: image.Pt(clip.Max.X, y+lines)}.Intersect(clip)
+	if !target.Empty() {
+		uv.NewStyledString(text).Draw(scr, target)
+	}
+	return lines
 }
 
 // buildLines renders the entire choice list into a flat slice of

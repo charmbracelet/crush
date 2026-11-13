@@ -2,6 +2,7 @@ package model
 
 import (
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/message"
@@ -88,4 +89,30 @@ func TestAttachmentClickRequiresLeftMouseButton(t *testing.T) {
 			require.Len(t, u.attachments.List(), tt.remaining)
 		})
 	}
+}
+
+// TestClickAfterActivationIsIgnoredBriefly checks the double-click guard: the
+// second click of a double-click on a remove button lands on the next chip,
+// which slid under the pointer, and must not remove it too.
+func TestClickAfterActivationIsIgnoredBriefly(t *testing.T) {
+	t.Parallel()
+
+	u, removeX := newAttachmentClickTestUI(t)
+	require.True(t, u.attachments.Update(message.Attachment{FileName: "next.txt"}))
+	_ = u.attachments.Render(u.layout.editor.Dx())
+	click := tea.MouseClickMsg(tea.Mouse{
+		X:      u.layout.editor.Min.X + removeX,
+		Y:      u.layout.editor.Min.Y,
+		Button: uv.MouseLeft,
+	})
+
+	_, _ = u.Update(click)
+	_ = u.attachments.Render(u.layout.editor.Dx())
+	_, _ = u.Update(click)
+	require.Len(t, u.attachments.List(), 1, "a double-click removes only the chip it started on")
+
+	u.lastActivation.at = time.Now().Add(-doubleClickThreshold)
+	_ = u.attachments.Render(u.layout.editor.Dx())
+	_, _ = u.Update(click)
+	require.Empty(t, u.attachments.List())
 }

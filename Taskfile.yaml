@@ -193,7 +193,7 @@ tasks:
       GONOSUMDB: charm.land/*
     cmds:
       - go get charm.land/fantasy@latest
-      - go get charm.land/catwalk@latest
+      - go get charm.land/catwalk/v3@latest
       - go mod tidy
 
   sqlc:

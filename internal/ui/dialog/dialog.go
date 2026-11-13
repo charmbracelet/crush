@@ -31,6 +31,16 @@ var CloseKey = key.NewBinding(
 // Action represents an action taken in a dialog after handling a message.
 type Action any
 
+// Activates reports whether a click that returned action acted on
+// something.
+func Activates(action Action) bool {
+	switch action.(type) {
+	case nil:
+		return false
+	}
+	return true
+}
+
 // Dialog is a component that can be displayed on top of the UI.
 type Dialog interface {
 	// ID returns the unique identifier of the dialog.

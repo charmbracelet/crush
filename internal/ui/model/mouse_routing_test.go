@@ -101,6 +101,29 @@ func TestDialogOpenedByUpdateEndsConversationDrag(t *testing.T) {
 	require.False(t, u.chat.HasHighlight(), "opening the dialog ended the drag")
 }
 
+// A double click acts once, but a quick click on another choice still acts.
+func TestDoubleClickGuardKeepsQuickClicksElsewhere(t *testing.T) {
+	t.Parallel()
+	u := newFrameTestUI(t)
+	f := dialog.NewQuestionForm(u.com.Styles, question.Request{Questions: []question.Question{{
+		ID: "pick", Type: question.TypeMultiChoice, Text: "Pick some",
+		Choices: []question.Choice{{ID: "a", Label: "Alpha"}, {ID: "b", Label: "Bravo"}},
+	}}})
+	var answers []question.Answer
+	f.OnAnswer = func(a []question.Answer) { answers = a }
+	u.activeInline = f
+	u.focusActiveInline(uiFocusEditor)
+	u.updateLayoutAndSize()
+	frame := u.View().Content
+	alpha, bravo := findPainted(t, frame, "Alpha"), findPainted(t, frame, "Bravo")
+	for _, at := range []image.Point{alpha, alpha, bravo} {
+		u.Update(tea.MouseClickMsg{X: at.X, Y: at.Y, Button: tea.MouseLeft})
+	}
+	u.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.Len(t, answers, 1)
+	require.Equal(t, []string{"a", "b"}, answers[0].SelectedIDs)
+}
+
 func TestDialogEndsConversationDragBeneathIt(t *testing.T) {
 	t.Parallel()
 	u := newFrameTestUI(t)

@@ -519,8 +519,11 @@ type UI struct {
 
 	// mouse highlighting related state
 	lastClickTime time.Time
-	hoverX        int
-	hoverY        int
+	// lastActivation is where and when a click last activated a control.
+	// See the tea.MouseClickMsg case in Update.
+	lastActivation clickActivation
+	hoverX         int
+	hoverY         int
 
 	// subAgentsRunning is how many subagents were still working as of the
 	// last update. Counting them walks the whole transcript, and the header
@@ -932,9 +935,18 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		paste.Content = strings.ReplaceAll(paste.Content, "\r\n", "\n")
 		msg = paste
 	}
-	// We only use the left button for now.
-	if click, ok := msg.(tea.MouseClickMsg); ok && click.Button != tea.MouseLeft {
-		return m, nil
+	if click, ok := msg.(tea.MouseClickMsg); ok {
+		// We only use the left button for now.
+		if click.Button != tea.MouseLeft {
+			return m, nil
+		}
+		// A habitual double-click sends its second click right after the
+		// first one opened, closed, or toggled something. Ignoring that
+		// second press on the same cell stops it from acting on whatever is
+		// now under the pointer, while a quick click elsewhere still acts.
+		if m.lastActivation.repeatedBy(click) {
+			return m, nil
+		}
 	}
 	// An open dialog is modal: it takes pointer input and pastes, and
 	// nothing it covers sees them.
@@ -942,7 +954,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg := msg.(type) {
 		case tea.MouseClickMsg:
 			m.releasePointerBeneathDialog()
-			return m, m.handleDialogMsg(msg)
+			action := m.dialog.Update(msg)
+			if dialog.Activates(action) {
+				m.lastActivation = activatedBy(msg)
+			}
+			return m, m.handleDialogAction(action)
 		case tea.MouseMotionMsg, tea.MouseReleaseMsg:
 			m.releasePointerBeneathDialog()
 			m.dialog.Update(msg)
@@ -1359,6 +1375,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if clickable, ok := m.activeInline.(dialog.MouseClickableEditor); ok {
 				if done, handled := clickable.HandleMouseClick(msg.X, msg.Y); handled {
+					m.lastActivation = activatedBy(msg)
 					if cmd := m.handleClickFocus(msg); cmd != nil {
 						cmds = append(cmds, cmd)
 					}
@@ -1388,6 +1405,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.activeInline == nil && len(m.attachments.List()) > 0 && msg.Y == m.layout.editor.Min.Y {
 			relX := msg.X - m.layout.editor.Min.X
 			if m.changeAttachments(func() bool { return m.attachments.HandleClick(relX) }) {
+				m.lastActivation = activatedBy(msg)
 				return m, tea.Batch(cmds...)
 			}
 		}
@@ -2176,6 +2194,23 @@ func (m *UI) handleClickFocus(msg tea.MouseClickMsg) (cmd tea.Cmd) {
 	return cmd
 }
 
+// clickActivation is where and when a left click activated a control.
+type clickActivation struct {
+	at   time.Time
+	cell image.Point
+}
+
+// activatedBy records that msg activated a control.
+func activatedBy(msg tea.MouseClickMsg) clickActivation {
+	return clickActivation{at: time.Now(), cell: image.Pt(msg.X, msg.Y)}
+}
+
+// repeatedBy reports whether msg is the second press of a double click that
+// began with this activation: a click on the same cell, soon after.
+func (a clickActivation) repeatedBy(msg tea.MouseClickMsg) bool {
+	return image.Pt(msg.X, msg.Y) == a.cell && time.Since(a.at) < doubleClickThreshold
+}
+
 // releasePointerBeneathDialog ends gestures begun beneath a dialog, because
 // the dialog now receives their remaining motion and release.
 func (m *UI) releasePointerBeneathDialog() {
@@ -2356,8 +2391,12 @@ func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.
 }
 
 func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
+	return m.handleDialogAction(m.dialog.Update(msg))
+}
+
+// handleDialogAction applies an action the front dialog returned.
+func (m *UI) handleDialogAction(action dialog.Action) tea.Cmd {
 	var cmds []tea.Cmd
-	action := m.dialog.Update(msg)
 	if action == nil {
 		return tea.Batch(cmds...)
 	}

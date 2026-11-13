@@ -710,7 +710,7 @@ func TestPlanHandoffRequestChangesRoutesEditorTextSelection(t *testing.T) {
 	scr := uv.NewScreenBuffer(80, u.layout.editor.Max.Y)
 	inline.Draw(scr, u.layout.editor)
 
-	u.Update(tea.MouseClickMsg{X: 4, Y: 12})
+	u.Update(tea.MouseClickMsg{X: 4, Y: 12, Button: tea.MouseLeft})
 	u.Update(tea.MouseMotionMsg{X: 8, Y: 12})
 	_, cmd := u.Update(tea.MouseReleaseMsg{X: 8, Y: 12})
 

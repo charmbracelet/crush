@@ -214,7 +214,7 @@ func (m *AuthMethod) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		rc.IsOnboarding = true
 		view = rc.Render()
 	}
-	m.updateCardAreas(area, view, sideBySide, cardWidth, innerWidth)
+	m.updateCardAreas(area, view, sideBySide, cardWidth, innerWidth, lipgloss.Height(prompt))
 	if m.isOnboarding {
 		DrawOnboardingCursor(scr, area, view, nil)
 	} else {
@@ -225,7 +225,7 @@ func (m *AuthMethod) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 // updateCardAreas records where each card lands on screen so mouse clicks
 // can be mapped back to a choice.
-func (m *AuthMethod) updateCardAreas(area uv.Rectangle, view string, sideBySide bool, cardWidth, innerWidth int) {
+func (m *AuthMethod) updateCardAreas(area uv.Rectangle, view string, sideBySide bool, cardWidth, innerWidth, promptHeight int) {
 	m.oauthCardArea = image.Rectangle{}
 	m.apiKeyCardArea = image.Rectangle{}
 
@@ -243,11 +243,10 @@ func (m *AuthMethod) updateCardAreas(area uv.Rectangle, view string, sideBySide 
 	contentLeft := origin.X + frame.GetMarginLeft() + frame.GetBorderLeftSize() + frame.GetPaddingLeft()
 	contentTop := origin.Y + frame.GetMarginTop() + frame.GetBorderTopSize() + frame.GetPaddingTop()
 
-	// Lines above the cards: the prompt, plus the title and its blank line
-	// outside onboarding.
-	cardsTop := contentTop + 1
+	// Use the rendered prompt height, including wrapping and blank lines.
+	cardsTop := contentTop + promptHeight
 	if !m.isOnboarding {
-		cardsTop += 2
+		cardsTop += titleContentHeight + m.com.Styles.Dialog.Title.GetVerticalFrameSize()
 	}
 
 	groupWidth := cardWidth

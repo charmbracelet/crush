@@ -282,6 +282,11 @@ type UI struct {
 	frameDirty       bool
 	frameSkipPut     bool
 	frameGCArmed     bool
+	// backdrop is everything beneath the open dialogs as the last full
+	// frame drew it, and dialogMotionOnly marks an update that only moved
+	// the pointer over the dialogs, so View redraws just them over it.
+	backdrop         *uv.Buffer
+	dialogMotionOnly bool
 	// planReadySessionID holds the session whose plan run emitted the
 	// plan-ready marker but has not been confirmed for execution yet. It
 	// lets the user reopen the handoff prompt after dismissing it.
@@ -960,7 +965,14 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.lastActivation = activatedBy(msg)
 			}
 			return m, m.handleDialogAction(action)
-		case tea.MouseMotionMsg, tea.MouseReleaseMsg:
+		case tea.MouseMotionMsg:
+			// Moving the pointer over the dialogs changes only the dialogs,
+			// unless it ends a gesture begun beneath them.
+			m.dialogMotionOnly = !m.chat.mouseDown && !m.textareaMouseSelecting
+			m.releasePointerBeneathDialog()
+			m.dialog.Update(msg)
+			return m, nil
+		case tea.MouseReleaseMsg:
 			m.releasePointerBeneathDialog()
 			m.dialog.Update(msg)
 			return m, nil
@@ -3878,6 +3890,19 @@ func (m *UI) drawHeader(scr uv.Screen, area uv.Rectangle) {
 
 // Draw implements [uv.Drawable] and draws the UI model.
 func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
+	cursor := m.drawBackdrop(scr, area)
+	// This needs to come last to overlay on top of everything. We always pass
+	// the full screen bounds because the dialogs will position themselves
+	// accordingly.
+	if m.dialog.HasDialogs() {
+		return m.dialog.Draw(scr, scr.Bounds())
+	}
+	return cursor
+}
+
+// drawBackdrop draws everything beneath the dialogs and returns the cursor
+// to show when no dialog is open.
+func (m *UI) drawBackdrop(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	layout := m.generateLayout(area.Dx(), area.Dy())
 
 	if m.layout != layout {
@@ -4004,13 +4029,6 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		})
 	}
 
-	// This needs to come last to overlay on top of everything. We always pass
-	// the full screen bounds because the dialogs will position themselves
-	// accordingly.
-	if m.dialog.HasDialogs() {
-		return m.dialog.Draw(scr, scr.Bounds())
-	}
-
 	switch m.focus {
 	case uiFocusEditor:
 		if m.layout.editor.Dy() <= 0 {
@@ -4081,7 +4099,7 @@ func (m *UI) View() tea.View {
 	}
 
 	canvas := uv.NewScreenBuffer(m.width, m.height)
-	v.Cursor = m.Draw(canvas, canvas.Bounds())
+	v.Cursor = m.drawFrame(canvas)
 
 	content := strings.ReplaceAll(canvas.Render(), "\r\n", "\n") // normalize newlines
 	contentLines := strings.Split(content, "\n")

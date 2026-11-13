@@ -4,6 +4,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 )
 
 const (
@@ -176,6 +177,34 @@ func (m *UI) invalidateFrames() {
 func (m *UI) beginFrameUpdate() {
 	m.scrollOnlyUpdate = false
 	m.frameSkipPut = false
+	m.dialogMotionOnly = false
+}
+
+// drawFrame draws the UI onto canvas. A pointer moving over open dialogs
+// changes nothing beneath them, so it redraws only the dialogs over the
+// backdrop the last full frame drew. That keeps its cost independent of the
+// conversation and the sidebar.
+func (m *UI) drawFrame(canvas uv.ScreenBuffer) *tea.Cursor {
+	reuse := m.dialogMotionOnly && m.backdrop != nil && m.backdrop.Bounds() == canvas.Bounds()
+	m.dialogMotionOnly = false
+	if !m.dialog.HasDialogs() {
+		m.backdrop = nil
+		return m.Draw(canvas, canvas.Bounds())
+	}
+	if reuse {
+		m.backdrop.Draw(canvas, canvas.Bounds())
+	} else {
+		m.drawBackdrop(canvas, canvas.Bounds())
+		// Copy into a kept buffer: cloning would allocate a whole screen on
+		// every frame drawn while a dialog is open.
+		if m.backdrop == nil || m.backdrop.Bounds() != canvas.Bounds() {
+			m.backdrop = uv.NewBuffer(canvas.Width(), canvas.Height())
+		}
+		for y, line := range canvas.Lines {
+			copy(m.backdrop.Lines[y], line)
+		}
+	}
+	return m.dialog.Draw(canvas, canvas.Bounds())
 }
 
 // endFrameUpdate returns the command that arms the idle GC timer when this

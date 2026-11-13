@@ -192,6 +192,7 @@ type Workspace interface {
 	// won the race.
 	PermissionGrant(perm permission.PermissionRequest) bool
 	PermissionGrantPersistent(perm permission.PermissionRequest) bool
+	PermissionGrantAlways(perm permission.PermissionRequest) bool
 	PermissionDeny(perm permission.PermissionRequest) bool
 	PermissionMode() permission.PermissionMode
 	PermissionSetMode(mode permission.PermissionMode)

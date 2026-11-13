@@ -274,6 +274,17 @@ func (w *AppWorkspace) PermissionGrantPersistent(perm permission.PermissionReque
 	return w.app.Permissions.GrantPersistent(perm)
 }
 
+func (w *AppWorkspace) PermissionGrantAlways(perm permission.PermissionRequest) bool {
+	resolved := w.app.Permissions.GrantAlways(perm)
+	// Persist the grant so future sessions skip the prompt too. A
+	// failed write keeps the in-session grant but leaves the prompt
+	// returning on the next run.
+	if err := w.store.AddAllowedTool(config.ScopeGlobal, perm.ToolName); err != nil {
+		slog.Warn("Failed to persist always-allow tool", "tool", perm.ToolName, "error", err)
+	}
+	return resolved
+}
+
 func (w *AppWorkspace) PermissionDeny(perm permission.PermissionRequest) bool {
 	return w.app.Permissions.Deny(perm)
 }

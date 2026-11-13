@@ -134,6 +134,12 @@ type Service interface {
 	// actually resolved the pending request; false if the request had
 	// already been resolved or is unknown.
 	Deny(permission PermissionRequest) bool
+	// GrantAlways grants a permission request and adds the requesting
+	// tool to the always-allow list, so future calls to the same tool
+	// skip the prompt for the lifetime of the process. It returns true
+	// if this call actually resolved the pending request; false if the
+	// request had already been resolved or is unknown.
+	GrantAlways(permission PermissionRequest) bool
 	Request(ctx context.Context, opts CreatePermissionRequest) (bool, error)
 	// ActiveRequest returns the request that is currently awaiting a
 	// decision, or false when no request is pending. A request is only
@@ -188,6 +194,7 @@ type permissionService struct {
 	autoApproveSessions   map[string]bool
 	autoApproveSessionsMu sync.RWMutex
 	allowedTools          []string
+	allowedToolsMu        sync.RWMutex
 	observer              PromptObserver
 	mode                  PermissionMode
 	modeMu                sync.RWMutex
@@ -280,6 +287,16 @@ func (s *permissionService) Deny(permission PermissionRequest) bool {
 	return s.resolve(permission, false, true, nil)
 }
 
+func (s *permissionService) GrantAlways(permission PermissionRequest) bool {
+	return s.resolve(permission, true, false, func(req PermissionRequest) {
+		s.allowedToolsMu.Lock()
+		defer s.allowedToolsMu.Unlock()
+		if !slices.Contains(s.allowedTools, req.ToolName) {
+			s.allowedTools = append(s.allowedTools, req.ToolName)
+		}
+	})
+}
+
 func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRequest) (bool, error) {
 	s.modeMu.RLock()
 	mode := s.mode
@@ -291,7 +308,10 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 
 	// Check if the tool/action combination is in the allowlist
 	commandKey := opts.ToolName + ":" + opts.Action
-	if slices.Contains(s.allowedTools, commandKey) || slices.Contains(s.allowedTools, opts.ToolName) {
+	s.allowedToolsMu.RLock()
+	allowed := slices.Contains(s.allowedTools, commandKey) || slices.Contains(s.allowedTools, opts.ToolName)
+	s.allowedToolsMu.RUnlock()
+	if allowed {
 		return true, nil
 	}
 

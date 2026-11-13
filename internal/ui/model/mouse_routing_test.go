@@ -72,6 +72,20 @@ func TestOnlyLeftClicksAct(t *testing.T) {
 	}
 }
 
+func TestClickingInlineChoiceFocusesEditor(t *testing.T) {
+	t.Parallel()
+	u := newFrameTestUI(t)
+	u.activeInline = dialog.NewQuestionForm(u.com.Styles, question.Request{Questions: []question.Question{{
+		ID: "pick", Type: question.TypeMultiChoice, Text: "Pick some",
+		Choices: []question.Choice{{ID: "a", Label: "Alpha"}, {ID: "b", Label: "Bravo"}},
+	}}})
+	u.focusActiveInline(uiFocusMain)
+	u.updateLayoutAndSize()
+	at := findPainted(t, u.View().Content, "Alpha")
+	u.Update(tea.MouseClickMsg{X: at.X, Y: at.Y, Button: tea.MouseLeft})
+	require.Equal(t, uiFocusEditor, u.focus)
+}
+
 func TestDialogOpenedByUpdateEndsConversationDrag(t *testing.T) {
 	t.Parallel()
 	u := newFrameTestUI(t)

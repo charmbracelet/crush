@@ -1317,6 +1317,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if clickable, ok := m.activeInline.(dialog.MouseClickableEditor); ok {
 				if done, handled := clickable.HandleMouseClick(msg.X, msg.Y); handled {
+					if cmd := m.handleClickFocus(msg); cmd != nil {
+						cmds = append(cmds, cmd)
+					}
 					if done {
 						prev := m.activeInline
 						m.activeInline = nil

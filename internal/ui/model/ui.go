@@ -932,13 +932,22 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		paste.Content = strings.ReplaceAll(paste.Content, "\r\n", "\n")
 		msg = paste
 	}
+	// We only use the left button for now.
+	if click, ok := msg.(tea.MouseClickMsg); ok && click.Button != tea.MouseLeft {
+		return m, nil
+	}
 	// An open dialog is modal: it takes pointer input and pastes, and
 	// nothing it covers sees them.
 	if m.dialog.HasDialogs() {
 		switch msg := msg.(type) {
 		case tea.MouseClickMsg:
+			m.releasePointerBeneathDialog()
 			return m, m.handleDialogMsg(msg)
-		case tea.MouseMotionMsg, tea.MouseReleaseMsg, common.CoalescedWheelMsg:
+		case tea.MouseMotionMsg, tea.MouseReleaseMsg:
+			m.releasePointerBeneathDialog()
+			m.dialog.Update(msg)
+			return m, nil
+		case common.CoalescedWheelMsg:
 			m.dialog.Update(msg)
 			return m, nil
 		case tea.PasteMsg:
@@ -1373,7 +1382,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Check if the click landed on an attachment's remove button.
 		// The attachment chips are rendered on the first row of the
 		// editor layout area, above the textarea.
-		if m.activeInline == nil && msg.Button == uv.MouseLeft && len(m.attachments.List()) > 0 && msg.Y == m.layout.editor.Min.Y {
+		if m.activeInline == nil && len(m.attachments.List()) > 0 && msg.Y == m.layout.editor.Min.Y {
 			relX := msg.X - m.layout.editor.Min.X
 			if m.changeAttachments(func() bool { return m.attachments.HandleClick(relX) }) {
 				return m, tea.Batch(cmds...)
@@ -1395,7 +1404,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Adjust for chat area position
 			x -= m.layout.main.Min.X
 			y -= m.layout.main.Min.Y
-			if !image.Pt(msg.X, msg.Y).In(m.layout.sidebar) {
+			if image.Pt(msg.X, msg.Y).In(m.layout.main) {
 				if handled, cmd := m.chat.HandleMouseDown(x, y); handled {
 					m.lastClickTime = time.Now()
 					if cmd != nil {
@@ -1772,6 +1781,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// tea.Sequence.
 	m.subAgentsRunning = m.runningSubAgents()
 	if m.state == uiChat {
+		if m.dialog.HasDialogs() {
+			m.releasePointerBeneathDialog()
+		}
 		if cmd := m.ensureAnimating(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -2159,6 +2171,18 @@ func (m *UI) handleClickFocus(msg tea.MouseClickMsg) (cmd tea.Cmd) {
 		m.sidebarScrollbarVisible = false
 	}
 	return cmd
+}
+
+// releasePointerBeneathDialog ends gestures begun beneath a dialog, because
+// the dialog now receives their remaining motion and release.
+func (m *UI) releasePointerBeneathDialog() {
+	if m.chat.mouseDown {
+		m.chat.ClearMouse()
+	}
+	if m.textareaMouseSelecting {
+		m.textareaMouseSelecting = false
+		m.textarea.EndSelection()
+	}
 }
 
 // focusActiveInline moves focus between an inline editor and the chat while
@@ -4536,9 +4560,6 @@ func (m *UI) forwardMouseToTextarea(msg tea.MouseMsg) (bool, tea.Cmd) {
 
 	switch msg.(type) {
 	case tea.MouseClickMsg:
-		if rel.Button != uv.MouseLeft {
-			return false, nil
-		}
 		m.textareaMouseSelecting = true
 		m.textarea.BeginSelection(rel.X, rel.Y)
 		return true, nil

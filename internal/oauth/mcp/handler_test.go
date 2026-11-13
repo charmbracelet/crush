@@ -36,6 +36,12 @@ type fakeASOpts struct {
 	// in the authorization response, and the SDK rejects the authorization
 	// if no issuer comes back.
 	issSupported bool
+	// clientIDMetadataSupported advertises the Client ID Metadata Document
+	// registration method (SEP-991), like Home Assistant.
+	clientIDMetadataSupported bool
+	// noRegistrationEndpoint omits registration_endpoint from the
+	// authorization server metadata, so dynamic registration is impossible.
+	noRegistrationEndpoint bool
 }
 
 // newFakeAS starts an httptest server speaking enough of the OAuth
@@ -67,9 +73,14 @@ func newFakeAS(t *testing.T, opts fakeASOpts) (base, mcpURL string) {
 			"issuer":                           baseURL,
 			"authorization_endpoint":           baseURL + "/authorize",
 			"token_endpoint":                   baseURL + "/token",
-			"registration_endpoint":            baseURL + "/register",
 			"code_challenge_methods_supported": []string{"S256"},
 			"scopes_supported":                 []string{"offline_access"},
+		}
+		if !opts.noRegistrationEndpoint {
+			meta["registration_endpoint"] = baseURL + "/register"
+		}
+		if opts.clientIDMetadataSupported {
+			meta["client_id_metadata_document_supported"] = true
 		}
 		if opts.issSupported {
 			meta["authorization_response_iss_parameter_supported"] = true
@@ -206,6 +217,69 @@ func TestHandler_FreshAuthorize(t *testing.T) {
 	require.NotNil(t, saved.Client)
 	require.Equal(t, "fresh-client", saved.Client.ClientID)
 	require.Equal(t, base+"/token", saved.Client.TokenURL)
+}
+
+// TestHandler_ClientIDMetadataDocument proves SEP-991 registration: a
+// server that advertises client_id_metadata_document_supported and has no
+// registration endpoint (e.g. Home Assistant) authorizes using the
+// configured metadata document URL as the client_id.
+func TestHandler_ClientIDMetadataDocument(t *testing.T) {
+	base, mcpURL := newFakeAS(t, fakeASOpts{
+		accessToken:               "cimd-access",
+		refreshToken:              "cimd-refresh",
+		clientIDMetadataSupported: true,
+		noRegistrationEndpoint:    true,
+	})
+
+	// The SDK validates the metadata document URL is a non-root HTTPS
+	// URL up front; it is never fetched by the client itself, so a fake
+	// https URL works with the http test server.
+	metadataURL := "https://client.example.com/oauth-client.json"
+
+	var (
+		mu    sync.Mutex
+		saved *oauth.Token
+	)
+	h, err := NewHandler("test", mcpURL, nil, nil, func(tok *oauth.Token) {
+		mu.Lock()
+		saved = tok
+		mu.Unlock()
+	}, true, 0, WithClientIDMetadataURL(metadataURL))
+	require.NoError(t, err)
+	t.Cleanup(h.Close)
+	h.openURL = browserRedirect("cimd-code")
+
+	require.NoError(t, authorizeWith401(t, h, base, mcpURL))
+
+	ts, err := h.TokenSource(t.Context())
+	require.NoError(t, err)
+	tok, err := ts.Token()
+	require.NoError(t, err)
+	require.Equal(t, "cimd-access", tok.AccessToken)
+	mu.Lock()
+	defer mu.Unlock()
+	require.NotNil(t, saved)
+	require.Equal(t, metadataURL, saved.Client.ClientID)
+}
+
+// TestHandler_NoSupportedRegistrationMethod proves the guidance error is
+// returned when the server supports neither dynamic registration nor the
+// Client ID Metadata Document method and no client is pre-registered.
+func TestHandler_NoSupportedRegistrationMethod(t *testing.T) {
+	base, mcpURL := newFakeAS(t, fakeASOpts{
+		clientIDMetadataSupported: true,
+		noRegistrationEndpoint:    true,
+	})
+
+	h, err := NewHandler("test", mcpURL, nil, nil, func(*oauth.Token) {}, true, 0)
+	require.NoError(t, err)
+	t.Cleanup(h.Close)
+	h.openURL = func(string) error { return nil }
+
+	err = authorizeWith401(t, h, base, mcpURL)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "does not support automatic OAuth client registration")
+	require.Contains(t, err.Error(), "oauth_client_id")
 }
 
 // TestHandler_PreregisteredClientSkipsDCR proves that a configured client is

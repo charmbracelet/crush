@@ -18,6 +18,7 @@ import (
 //	    [--sessionless true|false]
 //	    [--oauth true|false] [--oauth-client-id ID]
 //	    [--oauth-client-secret SECRET] [--oauth-callback-port PORT]
+//	    [--oauth-client-id-metadata URL]
 //	mcp remove <name>   (alias: rm)
 //
 // "add" defines or updates an MCP server; repeated calls with the same <name>
@@ -58,11 +59,12 @@ var mcpAddFlags = []flagSpec{
 	{name: "--oauth-client-id", jsonKey: "oauth_client_id", kind: flagString, op: opSet},
 	{name: "--oauth-client-secret", jsonKey: "oauth_client_secret", kind: flagString, op: opSet},
 	{name: "--oauth-callback-port", jsonKey: "oauth_callback_port", kind: flagInt, op: opSet},
+	{name: "--oauth-client-id-metadata", jsonKey: "oauth_client_id_metadata", kind: flagString, op: opSet},
 }
 
 func mcpAdd(b *ConfigBuilder, args []string, stderr io.Writer) error {
 	if len(args) < 3 {
-		return usage(stderr, "usage: mcp add <name> --type stdio|sse|http [--command CMD] [--args ARG ...] [--env KEY VALUE ...] [--url URL] [--header KEY VALUE ...] [--timeout N] [--disabled true|false] [--disabled-tools TOOL ...] [--enabled-tools TOOL ...] [--sessionless true|false] [--oauth true|false] [--oauth-client-id ID] [--oauth-client-secret SECRET] [--oauth-callback-port PORT]")
+		return usage(stderr, "usage: mcp add <name> --type stdio|sse|http [--command CMD] [--args ARG ...] [--env KEY VALUE ...] [--url URL] [--header KEY VALUE ...] [--timeout N] [--disabled true|false] [--disabled-tools TOOL ...] [--enabled-tools TOOL ...] [--sessionless true|false] [--oauth true|false] [--oauth-client-id ID] [--oauth-client-secret SECRET] [--oauth-callback-port PORT] [--oauth-client-id-metadata URL]")
 	}
 	name := args[2]
 	slog.Info("MCP server defined in shell config", "name", name)

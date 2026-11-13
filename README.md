@@ -484,6 +484,47 @@ and authenticates as the specified client. When omitted, Crush attempts
 dynamic registration automatically (works with Linear, Notion, and other
 servers that support RFC 7591).
 
+##### Client ID Metadata Documents
+
+Some servers (Home Assistant and similar) don't support dynamic
+registration either; they register clients by fetching a Client ID
+Metadata Document (SEP-991) — a public JSON file that names the client
+and lists its redirect URIs. Host the document on any HTTPS URL that
+returns 200 directly (no redirects), and point `oauth_client_id_metadata`
+at it. The `client_id` inside the document must equal its hosting URL
+exactly:
+
+```json
+{
+  "mcp": {
+    "home-assistant": {
+      "type": "http",
+      "url": "https://home.example.dev/api/mcp",
+      "oauth": true,
+      "oauth_client_id_metadata": "https://example.com/oauth-client.json"
+    }
+  }
+}
+```
+
+The document should look like this; it lists Crush's loopback callback,
+and the server may redirect to any localhost port because Crush always
+sends PKCE S256:
+
+```json
+{
+  "client_id": "https://example.com/oauth-client.json",
+  "client_name": "Crush",
+  "redirect_uris": ["http://localhost:40704/callback"],
+  "grant_types": ["authorization_code", "refresh_token"],
+  "response_types": ["code"],
+  "token_endpoint_auth_method": "none"
+}
+```
+
+When the server does not advertise the Client ID Metadata Document
+method, the option is ignored and other registration methods apply.
+
 #### Sessionless servers
 
 Some HTTP MCP servers are sessionless — they never issue a

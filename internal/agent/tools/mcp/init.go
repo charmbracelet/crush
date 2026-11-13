@@ -1260,9 +1260,21 @@ func createTransport(ctx context.Context, cfg *config.ConfigStore, name string, 
 				}
 			}
 
+			// A Client ID Metadata Document URL (SEP-991) covers servers
+			// that advertise client_id_metadata_document_supported but
+			// have no registration endpoint (e.g. Home Assistant).
+			var oauthOpts []mcpoauth.Option
+			if strings.TrimSpace(m.OAuthClientIDMetadata) != "" {
+				metadataURL, err := resolver.ResolveValue(m.OAuthClientIDMetadata)
+				if err != nil {
+					return nil, nil, fmt.Errorf("oauth_client_id_metadata: %w", err)
+				}
+				oauthOpts = append(oauthOpts, mcpoauth.WithClientIDMetadataURL(strings.TrimSpace(metadataURL)))
+			}
+
 			// Normalize trailing slash for PRM discovery compatibility.
 			normalizedURL := strings.TrimSuffix(url, "/")
-			oauthHandler, oauthErr := mcpoauth.NewHandler(name, normalizedURL, m.OAuthToken, preregistered, tokenSaver, mcpoauth.IsInteractive(ctx), m.OAuthCallbackPort)
+			oauthHandler, oauthErr := mcpoauth.NewHandler(name, normalizedURL, m.OAuthToken, preregistered, tokenSaver, mcpoauth.IsInteractive(ctx), m.OAuthCallbackPort, oauthOpts...)
 			if oauthErr != nil {
 				return nil, nil, fmt.Errorf("failed to create OAuth handler for mcp %q: %w", name, oauthErr)
 			}
@@ -1331,9 +1343,21 @@ func createTransport(ctx context.Context, cfg *config.ConfigStore, name string, 
 				}
 			}
 
+			// A Client ID Metadata Document URL (SEP-991) covers servers
+			// that advertise client_id_metadata_document_supported but
+			// have no registration endpoint (e.g. Home Assistant).
+			var oauthOpts []mcpoauth.Option
+			if strings.TrimSpace(m.OAuthClientIDMetadata) != "" {
+				metadataURL, err := resolver.ResolveValue(m.OAuthClientIDMetadata)
+				if err != nil {
+					return nil, nil, fmt.Errorf("oauth_client_id_metadata: %w", err)
+				}
+				oauthOpts = append(oauthOpts, mcpoauth.WithClientIDMetadataURL(strings.TrimSpace(metadataURL)))
+			}
+
 			// Normalize trailing slash for PRM discovery compatibility.
 			normalizedURL := strings.TrimSuffix(url, "/")
-			handler, oauthErr := mcpoauth.NewHandler(name, normalizedURL, m.OAuthToken, preregistered, tokenSaver, mcpoauth.IsInteractive(ctx), m.OAuthCallbackPort)
+			handler, oauthErr := mcpoauth.NewHandler(name, normalizedURL, m.OAuthToken, preregistered, tokenSaver, mcpoauth.IsInteractive(ctx), m.OAuthCallbackPort, oauthOpts...)
 			if oauthErr != nil {
 				return nil, nil, fmt.Errorf("failed to create OAuth handler for mcp %q: %w", name, oauthErr)
 			}

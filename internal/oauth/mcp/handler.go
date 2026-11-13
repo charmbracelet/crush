@@ -99,6 +99,24 @@ type Handler struct {
 
 var _ auth.OAuthHandler = (*Handler)(nil)
 
+// Option customizes optional Handler behavior without changing the
+// positional signature shared by many call sites.
+type Option func(*options)
+
+type options struct {
+	clientIDMetadataURL string
+}
+
+// WithClientIDMetadataURL enables the Client ID Metadata Document
+// registration method (SEP-991). The URL is sent as the client_id for
+// servers that advertise client_id_metadata_document_supported (e.g.
+// Home Assistant); the server fetches the document and validates the
+// redirect URIs it lists. When the server does not advertise that
+// method, the option is ignored and other registration methods apply.
+func WithClientIDMetadataURL(url string) Option {
+	return func(o *options) { o.clientIDMetadataURL = url }
+}
+
 // NewHandler creates a new OAuth handler for an MCP server. savedToken,
 // if present, restores a prior session: its access/refresh tokens and
 // captured client registration are injected so the SDK can use and
@@ -116,7 +134,13 @@ func NewHandler(
 	onTokenRefresh func(*oauth.Token),
 	interactive bool,
 	callbackPort int,
+	opts ...Option,
 ) (*Handler, error) {
+	o := options{}
+	for _, opt := range opts {
+		opt(&o)
+	}
+
 	receiver := &callbackReceiver{
 		serverName: serverName,
 		fixedPort:  callbackPort,
@@ -199,6 +223,11 @@ func NewHandler(
 				GrantTypes:   []string{"authorization_code", "refresh_token"},
 			},
 		},
+	}
+	if o.clientIDMetadataURL != "" {
+		cfg.ClientIDMetadataDocumentConfig = &auth.ClientIDMetadataDocumentConfig{
+			URL: o.clientIDMetadataURL,
+		}
 	}
 
 	// Restore a saved client registration as a pre-registered client so

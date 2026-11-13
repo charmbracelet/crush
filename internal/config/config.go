@@ -244,6 +244,15 @@ type MCPConfig struct {
 	// expansion, so $VAR and $(cmd) work.
 	OAuthClientSecret string `json:"oauth_client_secret,omitempty" jsonschema:"description=Pre-registered OAuth client secret paired with oauth_client_id"`
 
+	// OAuthClientIDMetadata is the URL of an OAuth Client ID Metadata
+	// Document (SEP-991) used as the client_id for servers that
+	// advertise client_id_metadata_document_supported but offer no
+	// dynamic client registration endpoint (e.g. Home Assistant). The
+	// URL must serve an OAuth client metadata document listing Crush's
+	// redirect URIs. Values run through shell expansion, so $VAR and
+	// $(cmd) work.
+	OAuthClientIDMetadata string `json:"oauth_client_id_metadata,omitempty" jsonschema:"description=URL of an OAuth Client ID Metadata Document (SEP-991) sent as the client_id for servers that advertise client_id_metadata_document_supported but have no registration endpoint"`
+
 	// OAuthCallbackPort pins the localhost port used for the OAuth
 	// redirect listener. Set this when the OAuth provider requires an
 	// exact-match callback URL (e.g. GitHub OAuth Apps). When omitted,

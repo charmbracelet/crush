@@ -152,6 +152,7 @@ type coordinator struct {
 	lspManager  *lsp.Manager
 	notify      pubsub.Publisher[notify.Notification]
 	runComplete pubsub.Publisher[notify.RunComplete]
+	runActivity pubsub.Publisher[notify.RunActivity]
 	interactive bool
 
 	// agentMu guards mainAgent and mainAgentName: SetMainAgent runs on
@@ -231,6 +232,7 @@ type CoordinatorOptions struct {
 	LSPManager  *lsp.Manager
 	Notify      pubsub.Publisher[notify.Notification]
 	RunComplete pubsub.Publisher[notify.RunComplete]
+	RunActivity pubsub.Publisher[notify.RunActivity]
 	Skills      *skills.Manager
 	HookRunner  *hooks.Runner
 	Interactive bool
@@ -261,6 +263,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		lspManager:      opts.LSPManager,
 		notify:          opts.Notify,
 		runComplete:     opts.RunComplete,
+		runActivity:     opts.RunActivity,
 		agents:          make(map[string]SessionAgent),
 		allSkills:       allSkills,
 		activeSkills:    activeSkills,
@@ -998,6 +1001,7 @@ func (c *coordinator) buildAgentWithModels(ctx context.Context, ready *errgroup.
 		Tools:                nil,
 		Notify:               c.notify,
 		RunComplete:          c.runComplete,
+		RunActivity:          c.runActivity,
 		Hooks:                c.hookRunner,
 		titles:               &c.titles,
 	})

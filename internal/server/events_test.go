@@ -152,6 +152,36 @@ func TestRunCompleteToProto_RoundTrip(t *testing.T) {
 	require.False(t, decoded.Payload.Cancelled)
 }
 
+func TestRunActivityToProto(t *testing.T) {
+	t.Parallel()
+
+	src := pubsub.Event[notify.RunActivity]{
+		Type: pubsub.UpdatedEvent,
+		Payload: notify.RunActivity{
+			SessionID: "session",
+			RunID:     "run",
+			MessageID: "assistant",
+			Type:      notify.RunActivityToolFinished,
+			ToolCall: message.ToolCall{
+				ID:       "call",
+				Name:     "view",
+				Input:    `{"file_path":"main.go"}`,
+				Finished: true,
+			},
+			ToolResult: message.ToolResult{ToolCallID: "call", Name: "view", Content: "omitted"},
+		},
+	}
+	env := wrapEvent(src)
+	require.NotNil(t, env)
+	require.Equal(t, pubsub.PayloadTypeRunActivity, env.Type)
+	var decoded pubsub.Event[proto.RunActivity]
+	require.NoError(t, json.Unmarshal(env.Payload, &decoded))
+	require.Equal(t, proto.RunActivityToolFinished, decoded.Payload.Type)
+	require.Equal(t, "run", decoded.Payload.RunID)
+	require.Equal(t, `{"file_path":"main.go"}`, decoded.Payload.ToolCall.Input)
+	require.Empty(t, decoded.Payload.ToolResult.Content)
+}
+
 func TestReauthenticateEventIncludesProvider(t *testing.T) {
 	t.Parallel()
 

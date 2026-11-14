@@ -19,7 +19,6 @@ import (
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
-	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/workspace"
 	"github.com/charmbracelet/x/ansi"
@@ -211,33 +210,23 @@ func runNonInteractive(
 	}
 
 	var (
-		spinner   *format.Spinner
 		stderrTTY bool
 		progress  bool
 	)
 
 	stderrTTY = term.IsTerminal(os.Stderr.Fd())
 	progress = ws.Config.Options.Progress == nil || *ws.Config.Options.Progress
-
-	if !hideSpinner && stderrTTY {
-		t := common.ThemeStylesFromConfig(ws.Config)
-
-		spinner = format.NewSpinner(ctx, cancel, anim.Settings{
-			Size:        10,
-			Label:       "Generating",
-			GradColorA:  t.WorkingGradFromColor,
-			GradColorB:  t.WorkingGradToColor,
-			CycleColors: true,
-		})
-		spinner.Start()
-	}
-
-	stopSpinner := func() {
-		if !hideSpinner && spinner != nil {
-			spinner.Stop()
-			spinner = nil
-		}
-	}
+	t := common.ThemeStylesFromConfig(ws.Config)
+	width, _, _ := term.GetSize(os.Stderr.Fd())
+	presenter := format.NewActivityPresenter(ctx, cancel, format.ActivityPresenterOptions{
+		Output:      os.Stderr,
+		WorkingDir:  ws.Path,
+		TTY:         stderrTTY,
+		HideSpinner: hideSpinner,
+		Styles:      &t,
+		Width:       width,
+	})
+	stopSpinner := presenter.StopProgress
 
 	// Wait for the agent to become ready (MCP init, etc).
 	if err := waitForAgent(ctx, c, ws.ID); err != nil {
@@ -296,6 +285,7 @@ func runNonInteractive(
 		runID:     runID,
 		out:       os.Stdout,
 		read:      make(map[string]int),
+		activity:  presenter,
 	}
 
 	// Start herdr integration when running inside a herdr pane.
@@ -363,6 +353,7 @@ type runStream struct {
 	out       io.Writer
 	read      map[string]int
 	printed   bool
+	activity  *format.ActivityPresenter
 }
 
 // handle processes one SSE event. Returns done=true when the run
@@ -407,6 +398,20 @@ func (s *runStream) handle(ev any, stopSpinner func()) (done bool, err error) {
 		s.read[msg.ID] = len(content)
 		return false, nil
 
+	case pubsub.Event[proto.RunActivity]:
+		activity := proto.RunActivityFromProto(e.Payload)
+		if activity.RunID != "" {
+			if activity.RunID != s.runID {
+				return false, nil
+			}
+		} else if activity.SessionID != s.sessionID {
+			return false, nil
+		}
+		if s.activity != nil {
+			s.activity.Handle(activity)
+		}
+		return false, nil
+
 	case pubsub.Event[proto.RunComplete]:
 		// RunComplete is the authoritative end-of-run signal. We
 		// exit on it instead of guessing from message finish parts,
@@ -429,6 +434,9 @@ func (s *runStream) handle(ev any, stopSpinner func()) (done bool, err error) {
 			return false, nil
 		}
 		stop()
+		if s.activity != nil {
+			s.activity.Reconcile(proto.RunActivitiesFromProto(e.Payload.Activities))
+		}
 		if e.Payload.Error != "" && !e.Payload.Cancelled {
 			return true, fmt.Errorf("agent run failed: %s", e.Payload.Error)
 		}

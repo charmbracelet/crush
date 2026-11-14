@@ -79,11 +79,14 @@ func RecoverPanic(name string, cleanup func()) {
 			fmt.Fprintf(file, "Panic in %s: %v\n\n", name, r)
 			fmt.Fprintf(file, "Time: %s\n\n", time.Now().Format(time.RFC3339))
 			fmt.Fprintf(file, "Stack Trace:\n%s\n", debug.Stack())
+		} else {
+			slog.Error("Failed to write panic log", "name", name, "panic", r, "error", err)
+		}
 
-			// Execute cleanup function if provided
-			if cleanup != nil {
-				cleanup()
-			}
+		// Execute cleanup function if provided, whether or not the panic
+		// log could be written.
+		if cleanup != nil {
+			cleanup()
 		}
 	}
 }

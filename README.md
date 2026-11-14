@@ -1011,7 +1011,7 @@ metrics include solely usage metadata; prompts and responses are NEVER
 collected.
 
 Details on exactly what’s collected are in the source code ([here](https://github.com/charmbracelet/crush/tree/main/internal/event)
-and [here](https://github.com/charmbracelet/crush/blob/main/internal/llm/agent/event.go)).
+and [here](https://github.com/charmbracelet/crush/blob/main/internal/agent/event.go)).
 
 Also, when you use Crush with [Hyper][hyper], your Crush usage metrics may 
 be associated with your Hyper account to help us improve the service and

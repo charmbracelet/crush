@@ -97,6 +97,21 @@ Instructions here.
 			wantInstr: "# Spaced Delimiter",
 		},
 		{
+			name: "delimiter inside yaml block scalar",
+			content: "---\n" +
+				"name: yaml-skill\n" +
+				"description: |\n" +
+				"  Compare these sections:\n" +
+				"  ---\n" +
+				"  Keep both sections.\n" +
+				"metadata:\n  topic: yaml\n" +
+				"---\n\n# Instructions\n",
+			wantName:  "yaml-skill",
+			wantDesc:  "Compare these sections:\n---\nKeep both sections.\n",
+			wantMeta:  map[string]string{"topic": "yaml"},
+			wantInstr: "# Instructions",
+		},
+		{
 			name:    "no frontmatter",
 			content: "# Just Markdown\n\nNo frontmatter here.",
 			wantErr: true,

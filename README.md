@@ -132,7 +132,11 @@ You can use these modules directly in your flake by importing them from NUR. Sin
 ```bash
 sudo mkdir -p /etc/apt/keyrings
 curl -fsSL https://repo.charm.sh/apt/gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/charm.gpg
-echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" | sudo tee /etc/apt/sources.list.d/charm.list
+echo "Types: deb
+URIs: https://repo.charm.sh/apt/
+Suites: *
+Components: *
+Signed-By: /etc/apt/keyrings/charm.gpg" | sudo tee /etc/apt/sources.list.d/charm.sources
 sudo apt update && sudo apt install crush
 ```
 

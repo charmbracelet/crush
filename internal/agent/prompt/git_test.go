@@ -2,11 +2,13 @@ package prompt
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
 
+	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/stretchr/testify/require"
 )
 
@@ -38,6 +40,74 @@ func newRepo(t *testing.T, branch string) string {
 	runGit(t, dir, "commit", "-m", "initial commit")
 	runGit(t, dir, "checkout", "-b", branch)
 	return dir
+}
+
+// binDirWith returns a directory holding symlinks to the named host
+// executables, to be handed to a shell as its whole PATH. Naming an
+// executable the host does not have is a test failure, so a skip would hide
+// a broken assumption.
+func binDirWith(t *testing.T, names ...string) string {
+	t.Helper()
+
+	dir := t.TempDir()
+	for _, name := range names {
+		path, err := exec.LookPath(name)
+		require.NoError(t, err, "%s is not available", name)
+		require.NoError(t, os.Symlink(path, filepath.Join(dir, name)))
+	}
+	return dir
+}
+
+// A snapshot that reports no changes is a claim the working tree is clean,
+// and the model plans around it. A git that could not answer is not a git
+// that answered "clean".
+func TestGetGitStatusDoesNotClaimCleanWhenGitFails(t *testing.T) {
+	t.Parallel()
+
+	dir := newRepo(t, "feature/thing")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.txt"), []byte("changed"), 0o644))
+
+	// head stays on PATH so the shell runs the pipeline; git does not.
+	sh := shell.NewShell(&shell.Options{WorkingDir: dir, Env: []string{"PATH=" + binDirWith(t, "head")}})
+
+	out, err := getGitStatusSummary(context.Background(), sh)
+	require.NoError(t, err)
+	require.NotContains(t, out, "Status: clean", "a failed git status must not be reported as a clean tree")
+	require.Contains(t, out, "Status: unavailable")
+}
+
+// head is an external command, not a builtin, so a host without it (a
+// Windows box outside Git Bash, a minimal container) has no status block at
+// all when the status is asked for through a pipe.
+func TestGetGitStatusWorksWithoutHeadOnPath(t *testing.T) {
+	t.Parallel()
+
+	dir := newRepo(t, "feature/thing")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.txt"), []byte("changed"), 0o644))
+
+	sh := shell.NewShell(&shell.Options{WorkingDir: dir, Env: []string{"PATH=" + binDirWith(t, "git")}})
+
+	out, err := getGitStatusSummary(context.Background(), sh)
+	require.NoError(t, err)
+	require.Contains(t, out, "Status:")
+	require.Contains(t, out, "M a.txt")
+}
+
+// A dirty tree is listed, longest list capped so the prompt stays small.
+func TestGetGitStatusListsChangesAndCapsThem(t *testing.T) {
+	t.Parallel()
+
+	dir := newRepo(t, "feature/thing")
+	for i := range 25 {
+		name := filepath.Join(dir, fmt.Sprintf("f%02d.txt", i))
+		require.NoError(t, os.WriteFile(name, []byte("new"), 0o644))
+	}
+
+	out, err := getGitStatusSummary(context.Background(), shell.NewShell(&shell.Options{WorkingDir: dir}))
+	require.NoError(t, err)
+	require.Contains(t, out, "?? f00.txt")
+	require.NotContains(t, out, "f24.txt", "status list is capped")
+	require.Contains(t, out, "(+5 more)", "a capped list says how many entries were left out")
 }
 
 // The git block is assembled on whichever machine owns the workspace files.

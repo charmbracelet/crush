@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"testing"
 
 	"charm.land/fantasy"
@@ -197,4 +199,60 @@ func TestHookedTool_PostToolUse(t *testing.T) {
 		require.True(t, resp.IsError)
 		require.Equal(t, "boom\nseen failure", resp.Content)
 	})
+}
+
+func TestPostToolEvent_Metadata(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name  string
+		resp  fantasy.ToolResponse
+		err   error
+		event string
+	}{
+		{name: "success", resp: fantasy.NewTextResponse("ok"), event: hooks.EventPostToolUse},
+		{name: "error response", resp: fantasy.NewTextErrorResponse("failed"), event: hooks.EventPostToolUseFailure},
+		{name: "Go error", err: errors.New("failed"), event: hooks.EventPostToolUseFailure},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tc.resp.Metadata = `{"completed":true,"exit_code":7}`
+			ev := postToolEvent(hooks.Event{Name: hooks.EventPreToolUse}, tc.resp, tc.err)
+			require.Equal(t, tc.event, ev.Name)
+			require.JSONEq(t, tc.resp.Metadata, string(ev.ToolMetadata))
+		})
+	}
+}
+
+func TestHookedTool_PostToolMetadata(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name     string
+		metadata string
+		want     string
+	}{
+		{name: "completed success", metadata: `{"completed":true,"exit_code":0,"interrupted":false}`, want: "compacted"},
+		{name: "completed failure", metadata: `{"completed":true,"exit_code":7,"interrupted":false}`, want: "original"},
+		{name: "still running", metadata: `{"completed":false,"background":true}`, want: "original"},
+		{name: "interrupted", metadata: `{"completed":true,"exit_code":0,"interrupted":true}`, want: "original"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			inner := &fakeTool{name: "bash", resp: fantasy.NewTextResponse("original")}
+			inner.resp.Metadata = tc.metadata
+			runner := newRunnerFor(t, map[string][]config.HookConfig{
+				hooks.EventPostToolUse: {{Command: `jq -c 'if .tool_metadata.completed == true and .tool_metadata.exit_code == 0 and .tool_metadata.interrupted == false then {updated_output: "compacted"} else {} end'`}},
+			})
+			resp, err := newHookedTool(inner, runner).Run(t.Context(), fantasy.ToolCall{ID: "c", Name: "bash", Input: `{}`})
+			require.NoError(t, err)
+			require.Equal(t, tc.want, resp.Content)
+			require.False(t, resp.IsError)
+			var metadata map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &metadata))
+			var original map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal([]byte(tc.metadata), &original))
+			for key, value := range original {
+				require.JSONEq(t, string(value), string(metadata[key]))
+			}
+		})
+	}
 }

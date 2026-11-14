@@ -152,6 +152,12 @@ func (c *Common) Config() *config.Config {
 	return c.Workspace.Config()
 }
 
+// ConfigStore returns the config store associated with this [Common]
+// instance. Returns nil for client workspaces.
+func (c *Common) ConfigStore() *config.ConfigStore {
+	return c.Workspace.ConfigStore()
+}
+
 // DefaultCommon returns the default common UI configurations using the
 // theme from config (or the default Charmtone theme if unset).
 func DefaultCommon(ws workspace.Workspace) *Common {

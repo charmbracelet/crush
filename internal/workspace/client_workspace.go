@@ -391,6 +391,23 @@ func (w *ClientWorkspace) PermissionGrantPersistent(perm permission.PermissionRe
 	return resolved
 }
 
+func (w *ClientWorkspace) PermissionGrantAlways(perm permission.PermissionRequest) bool {
+	resolved, _ := w.client.GrantPermission(context.Background(), w.workspaceID(), proto.PermissionGrant{
+		Permission: proto.PermissionRequest{
+			ID:          perm.ID,
+			SessionID:   perm.SessionID,
+			ToolCallID:  perm.ToolCallID,
+			ToolName:    perm.ToolName,
+			Description: perm.Description,
+			Action:      perm.Action,
+			Path:        perm.Path,
+			Params:      perm.Params,
+		},
+		Action: proto.PermissionAlwaysAllow,
+	})
+	return resolved
+}
+
 func (w *ClientWorkspace) PermissionDeny(perm permission.PermissionRequest) bool {
 	resolved, _ := w.client.GrantPermission(context.Background(), w.workspaceID(), proto.PermissionGrant{
 		Permission: proto.PermissionRequest{

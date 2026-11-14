@@ -203,6 +203,7 @@ type MCPConfig struct {
 	Disabled      bool              `json:"disabled,omitempty" jsonschema:"description=Whether this MCP server is disabled,default=false"`
 	DisabledTools []string          `json:"disabled_tools,omitempty" jsonschema:"description=List of tools from this MCP server to disable,example=get-library-doc"`
 	EnabledTools  []string          `json:"enabled_tools,omitempty" jsonschema:"description=Allow list of tools from this MCP server,example=get-library-doc"`
+	AlwaysAllow   bool              `json:"always_allow,omitempty" jsonschema:"description=Skip permission prompts for every tool this MCP server exposes,default=false"`
 	Timeout       int               `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds for MCP server connections,default=10,example=30,example=60,example=120"`
 
 	// Sessionless marks a server that does not maintain an MCP session (it

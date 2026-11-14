@@ -120,8 +120,8 @@ mcp remove <name>                              # alias: rm
 Flags: `--command CMD`, `--args ARG` (repeatable), `--env KEY VALUE`
 (repeatable), `--url URL`, `--header KEY VALUE` (repeatable), `--timeout N`,
 `--disabled BOOL`, `--disabled-tools TOOL` (repeatable), `--enabled-tools TOOL`
-(repeatable), `--oauth BOOL`, `--oauth-client-id ID`, `--oauth-client-secret SECRET`,
-`--oauth-callback-port PORT`.
+(repeatable), `--always-allow BOOL`, `--oauth BOOL`, `--oauth-client-id ID`,
+`--oauth-client-secret SECRET`, `--oauth-callback-port PORT`.
 
 ```bash
 mcp add github --type http \
@@ -171,6 +171,11 @@ permissions deny <tool> [<tool> ...]    # hide tools from the agent entirely
 
 `deny` is the inverse of `allow`: it writes `options.disabled_tools`. A denied
 tool is hidden from the agent, not merely prompted for.
+
+The TUI permission prompt also offers **Always Allow**, which appends the tool
+to `permissions.allowed_tools` in the global config so it stops prompting in
+future sessions. To never prompt for every tool an MCP server exposes, add the
+server with `mcp add ... --always-allow true` (JSON: `"always_allow": true`).
 
 ### options
 

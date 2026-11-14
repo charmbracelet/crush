@@ -34,6 +34,10 @@ func (m *mockBashPermissionService) GrantPersistent(req permission.PermissionReq
 	return true
 }
 
+func (m *mockBashPermissionService) GrantAlways(req permission.PermissionRequest) bool {
+	return true
+}
+
 func (m *mockBashPermissionService) AutoApproveSession(sessionID string) {}
 
 func (m *mockBashPermissionService) InheritAutoApproval(parentSessionID, childSessionID string) {}
@@ -121,6 +125,10 @@ func (m *recordingPermissionService) Grant(req permission.PermissionRequest) boo
 func (m *recordingPermissionService) Deny(req permission.PermissionRequest) bool { return true }
 
 func (m *recordingPermissionService) GrantPersistent(req permission.PermissionRequest) bool {
+	return true
+}
+
+func (m *recordingPermissionService) GrantAlways(req permission.PermissionRequest) bool {
 	return true
 }
 

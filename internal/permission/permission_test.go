@@ -927,3 +927,39 @@ func TestPermissionService_InheritAutoApproval(t *testing.T) {
 		}
 	})
 }
+
+// TestPermissionService_GrantAlways pins the always-allow flow: an
+// always-allow resolves the pending request, and the tool never prompts
+// again for the lifetime of the service.
+func TestPermissionService_GrantAlways(t *testing.T) {
+	t.Parallel()
+
+	service := NewPermissionService("/tmp", nil, nil)
+	requests := service.Subscribe(t.Context())
+
+	done := make(chan bool, 1)
+	go func() {
+		granted, _ := service.Request(t.Context(), CreatePermissionRequest{
+			SessionID: "always", ToolCallID: "c1", ToolName: "mcp_server_tool", Action: "execute", Path: "/tmp",
+		})
+		done <- granted
+	}()
+
+	var pending PermissionRequest
+	select {
+	case event := <-requests:
+		pending = event.Payload
+	case granted := <-done:
+		t.Fatalf("answered without asking: granted=%v", granted)
+	}
+
+	require.True(t, service.GrantAlways(pending))
+	require.True(t, <-done)
+
+	// A later call from the same tool is approved without a prompt.
+	granted, err := service.Request(t.Context(), CreatePermissionRequest{
+		SessionID: "always2", ToolCallID: "c2", ToolName: "mcp_server_tool", Action: "execute", Path: "/tmp",
+	})
+	require.NoError(t, err)
+	require.True(t, granted)
+}

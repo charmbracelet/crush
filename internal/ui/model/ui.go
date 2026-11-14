@@ -2750,6 +2750,8 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			m.com.Workspace.PermissionGrant(msg.Permission)
 		case dialog.PermissionAllowForSession:
 			m.com.Workspace.PermissionGrantPersistent(msg.Permission)
+		case dialog.PermissionAlwaysAllow:
+			m.com.Workspace.PermissionGrantAlways(msg.Permission)
 		case dialog.PermissionDeny:
 			m.com.Workspace.PermissionDeny(msg.Permission)
 		}

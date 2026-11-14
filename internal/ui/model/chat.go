@@ -9,7 +9,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
@@ -92,29 +91,6 @@ type Chat struct {
 	list     *list.List
 	idInxMap map[string]int // Map of message IDs to their indices in the list
 
-	// externalAnimation is set when something outside the list is animating
-	// and needs the shared clock, such as the header's subagent spinner.
-	externalAnimation bool
-
-	// animRunning is true while the shared animation clock has a tick
-	// outstanding. The clock stops itself when no visible item is spinning
-	// and is re-armed by EnsureAnimating once one is. animGen identifies
-	// the current clock: a tick carrying an older generation belongs to a
-	// clock that was superseded and is ignored, so a delayed tick can
-	// never run alongside a replacement. animArmedAt lets EnsureAnimating
-	// recover if a tick is ever lost.
-	animRunning bool
-	animGen     uint64
-	animArmedAt time.Time
-	// animNow is an injectable clock for tests (nil == real time).
-	animNow func() time.Time
-
-	// animAllowed gates the shared clock. setSessionMessages clears it when
-	// reloading a session whose agent is not busy so ghost spinners (an
-	// assistant message that never got a Finish part) stay still; the
-	// message handlers re-enable it when new work arrives.
-	animAllowed bool
-
 	// Mouse state
 	mouseDown     bool
 	mouseDownItem int // Item index where mouse was pressed
@@ -192,7 +168,6 @@ func NewChat(com *common.Common, scrollbarMode string) *Chat {
 		com:           com,
 		idInxMap:      make(map[string]int),
 		scrollbarMode: scrollbarMode,
-		animAllowed:   true,
 	}
 	l := list.NewList()
 	l.SetGap(1)
@@ -532,12 +507,6 @@ func (m *Chat) UpdateNestedToolIDs(containerID string) {
 	}
 }
 
-// animTickMsg is the shared animation clock. One tick advances every
-// visible spinner by a frame; there is one live clock at a time regardless
-// of how many items are animating. gen is the clock generation the tick
-// was armed for.
-type animTickMsg struct{ gen uint64 }
-
 // hasVisibleAnimation reports whether any item in the viewport is spinning.
 func (m *Chat) hasVisibleAnimation() bool {
 	if m.list.Len() == 0 {
@@ -552,104 +521,19 @@ func (m *Chat) hasVisibleAnimation() bool {
 	return false
 }
 
-// animClockLostAfter is how long an armed clock may go without its tick
-// arriving before EnsureAnimating assumes the command was lost and arms a
-// new one. Generous enough that a slow frame never trips it.
-const animClockLostAfter = 2 * time.Second
-
-// SetAnimationsAllowed gates the shared animation clock. It is cleared
-// when a session is reloaded whose agent is not busy so ghost spinners (an
-// assistant message that never got a Finish part) stay still, and re-enabled
-// whenever new messages arrive for the current session.
-func (m *Chat) SetAnimationsAllowed(allowed bool) {
-	m.animAllowed = allowed
-}
-
-// EnsureAnimating starts the shared animation clock if a visible item is
-// spinning and no tick is outstanding. Update calls it in its tail on
-// every message so any change that puts a spinner on screen (new message,
-// tool update, scroll, session load) starts the clock without per-call-site
-// wiring. It is the only place a tick is armed apart from Tick itself.
-// SetExternalAnimation records whether something outside the transcript is
-// animating, such as the header's subagent spinner. The clock is shared, and
-// its gate otherwise only looks at items currently on screen, so an animation
-// living in the chrome would never keep it running.
-func (m *Chat) SetExternalAnimation(animating bool) {
-	m.externalAnimation = animating
-}
-
-func (m *Chat) EnsureAnimating() tea.Cmd {
-	if !m.animAllowed {
-		m.animRunning = false
-		return nil
-	}
-	if m.animRunning && m.now().Sub(m.animArmedAt) < animClockLostAfter {
-		return nil
-	}
-	if !m.hasVisibleAnimation() && !m.externalAnimation {
-		m.animRunning = false
-		return nil
-	}
-	return m.armAnimClock()
-}
-
-func (m *Chat) armAnimClock() tea.Cmd {
-	m.animRunning = true
-	m.animArmedAt = m.now()
-	m.animGen++
-	gen := m.animGen
-	return tea.Tick(anim.FrameInterval(), func(time.Time) tea.Msg {
-		return animTickMsg{gen: gen}
-	})
-}
-
-func (m *Chat) now() time.Time {
-	if m.animNow != nil {
-		return m.animNow()
-	}
-	return time.Now()
-}
-
-// stopAnimating marks the clock as stopped so the next EnsureAnimating
-// re-arms it. Called while consuming the current clock's tick; bumping
-// the generation also retires that clock in case the tick was not the
-// current one.
-func (m *Chat) stopAnimating(msg animTickMsg) {
-	if msg.gen != m.animGen {
-		return
-	}
-	m.animRunning = false
-}
-
-// Tick advances every visible spinning item by one frame. It reports
-// whether any rendered output changed and returns the next tick while a
-// visible item is still spinning; when none is, the clock stops and no
-// command is returned. Ticks from a superseded clock generation are
-// ignored so they cannot re-arm a second clock.
-func (m *Chat) Tick(msg animTickMsg) (changed bool, cmd tea.Cmd) {
-	if msg.gen != m.animGen {
-		return false, nil
-	}
-	m.animRunning = false
+// advanceVisible steps every visible spinning item by one frame and reports
+// whether any rendered output changed.
+func (m *Chat) advanceVisible() (changed bool) {
 	if m.list.Len() == 0 {
-		return false, nil
+		return false
 	}
-	spinning := false
 	startIdx, endIdx := m.list.VisibleItemIndices()
 	for idx := startIdx; idx <= endIdx; idx++ {
-		animatable, ok := m.list.ItemAt(idx).(chat.Animatable)
-		if !ok || !animatable.Spinning() {
-			continue
-		}
-		spinning = true
-		if animatable.Advance() {
+		if animatable, ok := m.list.ItemAt(idx).(chat.Animatable); ok && animatable.Spinning() && animatable.Advance() {
 			changed = true
 		}
 	}
-	if !spinning {
-		return changed, nil
-	}
-	return changed, m.armAnimClock()
+	return changed
 }
 
 // Focus sets the focus state of the chat component.

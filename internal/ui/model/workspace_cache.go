@@ -241,7 +241,7 @@ func (m *UI) applyBusyState(msg busyStateMsg) []tea.Cmd {
 		// the agent is working. The authoritative probe re-enables it so
 		// freshly rendered spinners tick. When the probe reports idle the
 		// reload gate stands, keeping ghost spinners still.
-		m.chat.SetAnimationsAllowed(true)
+		m.animClock.frozen = false
 	}
 	if m.hasSession() && hasInProgressTodo(m.session.Todos) && busy && !m.todoIsSpinning {
 		m.todoIsSpinning = true

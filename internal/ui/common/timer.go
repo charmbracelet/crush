@@ -3,8 +3,34 @@ package common
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 )
+
+// frameNanos is the time the frame being built is drawn at, so every live
+// label in one frame reads the same instant.
+var frameNanos atomic.Int64
+
+// SetFrameTime pins the time [Now] returns until the next frame.
+func SetFrameTime(t time.Time) {
+	frameNanos.Store(t.UnixNano())
+}
+
+// Now returns the current frame's time, or the wall clock before the first
+// frame.
+func Now() time.Time {
+	if n := frameNanos.Load(); n != 0 {
+		return time.Unix(0, n)
+	}
+	return time.Now()
+}
+
+// ElapsedSince is how long a live timer started at started shows at now.
+// Both ends snap to the wall-clock second so every running timer changes on
+// the same frame.
+func ElapsedSince(started, now time.Time) time.Duration {
+	return max(0, now.Truncate(time.Second).Sub(started.Truncate(time.Second)))
+}
 
 // turnClock tracks when each session's current turn started. Turns in
 // different sessions run concurrently, so one clock per session: a turn
@@ -62,7 +88,7 @@ func Elapsed(sessionID string) string {
 		return ""
 	}
 
-	return FormatDuration(time.Since(startTime))
+	return FormatDuration(ElapsedSince(startTime, Now()))
 }
 
 // FormatDuration formats a duration as a human friendly string.

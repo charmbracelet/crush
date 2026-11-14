@@ -55,14 +55,14 @@ func newAnimTestUI(t *testing.T) (u *UI, top, bottom *spinTestItem) {
 func TestAnimClock_StartsFromUpdateTailWhenSpinnerVisible(t *testing.T) {
 	t.Parallel()
 	u, _, _ := newAnimTestUI(t)
-	require.False(t, u.chat.animRunning)
+	require.False(t, u.animClock.running)
 
 	_, cmd := u.Update(neutralMsg{})
 	require.NotNil(t, cmd, "an update with a visible spinner must arm the clock")
-	require.True(t, u.chat.animRunning)
+	require.True(t, u.animClock.running)
 
 	_, _ = u.Update(neutralMsg{})
-	require.True(t, u.chat.animRunning, "clock must not be double-armed")
+	require.True(t, u.animClock.running, "clock must not be double-armed")
 }
 
 func TestAnimClock_TickAdvancesOnlyVisibleSpinners(t *testing.T) {
@@ -70,13 +70,13 @@ func TestAnimClock_TickAdvancesOnlyVisibleSpinners(t *testing.T) {
 	u, top, bottom := newAnimTestUI(t)
 	_, _ = u.Update(neutralMsg{})
 
-	_, cmd := u.Update(animTickMsg{gen: u.chat.animGen})
+	_, cmd := u.Update(animTickMsg{gen: u.animClock.gen})
 	require.NotNil(t, cmd, "tick with a visible spinner must re-arm")
 	require.Equal(t, 1, bottom.advances)
 	require.Equal(t, 0, top.advances, "off-screen spinner must not advance")
-	require.True(t, u.chat.animRunning)
+	require.True(t, u.animClock.running)
 
-	_, _ = u.Update(animTickMsg{gen: u.chat.animGen})
+	_, _ = u.Update(animTickMsg{gen: u.animClock.gen})
 	require.Equal(t, 2, bottom.advances)
 }
 
@@ -84,13 +84,13 @@ func TestAnimClock_StopsWhenNothingVisibleSpins(t *testing.T) {
 	t.Parallel()
 	u, _, bottom := newAnimTestUI(t)
 	_, _ = u.Update(neutralMsg{})
-	require.True(t, u.chat.animRunning)
+	require.True(t, u.animClock.running)
 
 	bottom.spinning = false
-	_, _ = u.Update(animTickMsg{gen: u.chat.animGen})
-	require.False(t, u.chat.animRunning, "clock must stop when nothing visible is spinning")
+	_, _ = u.Update(animTickMsg{gen: u.animClock.gen})
+	require.False(t, u.animClock.running, "clock must stop when nothing visible is spinning")
 	_, _ = u.Update(neutralMsg{})
-	require.False(t, u.chat.animRunning, "clock must stay off while nothing visible is spinning")
+	require.False(t, u.animClock.running, "clock must stay off while nothing visible is spinning")
 }
 
 func TestAnimClock_IdleTickIsScrollOnly(t *testing.T) {
@@ -101,7 +101,7 @@ func TestAnimClock_IdleTickIsScrollOnly(t *testing.T) {
 	require.Equal(t, 1, u.frames.Len())
 
 	bottom.spinning = false
-	_, _ = u.Update(animTickMsg{gen: u.chat.animGen})
+	_, _ = u.Update(animTickMsg{gen: u.animClock.gen})
 	u.View()
 	require.Equal(t, 1, u.frames.hits, "a tick that advanced nothing must serve the memoized frame")
 }
@@ -111,12 +111,12 @@ func TestAnimClock_RestartsWhenScrollRevealsSpinner(t *testing.T) {
 	u, top, bottom := newAnimTestUI(t)
 	bottom.spinning = false
 	_, _ = u.Update(neutralMsg{})
-	require.False(t, u.chat.animRunning, "no visible spinner: clock stays off")
+	require.False(t, u.animClock.running, "no visible spinner: clock stays off")
 
 	u.chat.ScrollToTop()
 	_, _ = u.Update(neutralMsg{})
-	require.True(t, u.chat.animRunning, "revealing a spinner must arm the clock")
-	_, _ = u.Update(animTickMsg{gen: u.chat.animGen})
+	require.True(t, u.animClock.running, "revealing a spinner must arm the clock")
+	_, _ = u.Update(animTickMsg{gen: u.animClock.gen})
 	require.Equal(t, 1, top.advances)
 }
 
@@ -124,11 +124,11 @@ func TestAnimClock_TickOutsideChatStops(t *testing.T) {
 	t.Parallel()
 	u, _, _ := newAnimTestUI(t)
 	_, _ = u.Update(neutralMsg{})
-	require.True(t, u.chat.animRunning)
+	require.True(t, u.animClock.running)
 
 	u.state = uiLanding
-	_, _ = u.Update(animTickMsg{gen: u.chat.animGen})
-	require.False(t, u.chat.animRunning)
+	_, _ = u.Update(animTickMsg{gen: u.animClock.gen})
+	require.False(t, u.animClock.running)
 }
 
 func TestAnimClock_TickKeepsFollowPinned(t *testing.T) {
@@ -143,7 +143,7 @@ func TestAnimClock_TickKeepsFollowPinned(t *testing.T) {
 	u.chat.follow = true
 	require.False(t, u.chat.AtBottom())
 
-	_, _ = u.Update(animTickMsg{gen: u.chat.animGen})
+	_, _ = u.Update(animTickMsg{gen: u.animClock.gen})
 	require.True(t, u.chat.AtBottom(), "a frame while following must re-pin to the bottom")
 }
 
@@ -151,48 +151,47 @@ func TestAnimClock_ReArmsIfTickWasLost(t *testing.T) {
 	t.Parallel()
 	u, _, _ := newAnimTestUI(t)
 	now := time.Now()
-	u.chat.animNow = func() time.Time { return now }
+	u.animClock.now = func() time.Time { return now }
 
 	_, cmd := u.Update(neutralMsg{})
 	require.NotNil(t, cmd)
-	require.True(t, u.chat.animRunning)
+	require.True(t, u.animClock.running)
 
 	// Still within the grace window: no second clock.
 	now = now.Add(animClockLostAfter / 2)
-	require.Nil(t, u.chat.EnsureAnimating())
+	require.Nil(t, u.ensureAnimating())
 
 	// The tick never came back; a new clock must be armed.
 	now = now.Add(animClockLostAfter)
-	require.NotNil(t, u.chat.EnsureAnimating(), "a lost tick must not freeze spinners forever")
-	require.True(t, u.chat.animRunning)
+	require.NotNil(t, u.ensureAnimating(), "a lost tick must not freeze spinners forever")
+	require.True(t, u.animClock.running)
 }
 
 func TestAnimClock_StaleGenerationTickIsIgnored(t *testing.T) {
 	t.Parallel()
 	u, _, bottom := newAnimTestUI(t)
 	now := time.Now()
-	u.chat.animNow = func() time.Time { return now }
+	u.animClock.now = func() time.Time { return now }
 
 	_, _ = u.Update(neutralMsg{})
-	stale := animTickMsg{gen: u.chat.animGen}
+	stale := animTickMsg{gen: u.animClock.gen}
 
 	// The event loop stalls; the watchdog arms a replacement clock.
 	now = now.Add(2 * animClockLostAfter)
 	_, _ = u.Update(neutralMsg{})
-	current := u.chat.animGen
+	current := u.animClock.gen
 	require.NotEqual(t, stale.gen, current)
 
 	// The delayed tick from the old clock arrives: it must neither
 	// advance nor re-arm, leaving exactly one live clock.
-	require.Nil(t, u.handleAnimTick(stale), "stale tick must return nothing")
 	_, _ = u.Update(stale)
 	require.Equal(t, 0, bottom.advances, "stale tick must not advance")
-	require.True(t, u.chat.animRunning)
-	require.Equal(t, current, u.chat.animGen, "stale tick must not arm another clock")
+	require.True(t, u.animClock.running)
+	require.Equal(t, current, u.animClock.gen, "stale tick must not arm another clock")
 
 	_, _ = u.Update(animTickMsg{gen: current})
 	require.Equal(t, 1, bottom.advances)
-	require.Equal(t, current+1, u.chat.animGen, "current tick re-arms exactly once")
+	require.Equal(t, current+1, u.animClock.gen, "current tick re-arms exactly once")
 }
 
 func TestAnimClock_TickWithoutFollowLeavesScrollAlone(t *testing.T) {
@@ -203,7 +202,7 @@ func TestAnimClock_TickWithoutFollowLeavesScrollAlone(t *testing.T) {
 	require.False(t, u.chat.Follow())
 	before := u.chat.Offset()
 
-	_, _ = u.Update(animTickMsg{gen: u.chat.animGen})
+	_, _ = u.Update(animTickMsg{gen: u.animClock.gen})
 	require.Equal(t, before, u.chat.Offset())
 }
 
@@ -230,14 +229,14 @@ func TestAnimClock_UnchangedFrameIsScrollOnlyButKeepsClock(t *testing.T) {
 	u.chat.SetMessages(item)
 	_, _ = u.Update(neutralMsg{})
 	u.View()
-	require.True(t, u.chat.animRunning)
+	require.True(t, u.animClock.running)
 
-	_, _ = u.Update(animTickMsg{gen: u.chat.animGen})
-	require.True(t, u.chat.animRunning, "a spinning item that did not change this frame must keep the clock running")
+	_, _ = u.Update(animTickMsg{gen: u.animClock.gen})
+	require.True(t, u.animClock.running, "a spinning item that did not change this frame must keep the clock running")
 	u.View()
 	require.Equal(t, 1, u.frames.hits, "an unchanged frame must serve the memoized frame")
 
-	_, _ = u.Update(animTickMsg{gen: u.chat.animGen})
+	_, _ = u.Update(animTickMsg{gen: u.animClock.gen})
 	u.View()
 	require.Equal(t, 1, u.frames.hits, "a changed frame must redraw")
 }

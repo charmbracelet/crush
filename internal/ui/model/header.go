@@ -3,7 +3,6 @@ package model
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/config"
@@ -150,7 +149,7 @@ func renderHeaderDetails(
 	// a live count of how many are still going.
 	if runningSubAgents > 0 {
 		parts = append(parts, t.Header.Percentage.Render(fmt.Sprintf(
-			"%s %d", subAgentSpinner(time.Now()), runningSubAgents,
+			"%s %d", subAgentSpinner(common.Now()), runningSubAgents,
 		)))
 	}
 

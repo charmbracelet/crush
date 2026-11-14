@@ -9,44 +9,39 @@ import (
 )
 
 // The header spins while subagents work, and they work out of sight: that
-// is the reason the header mentions them at all. The shared clock otherwise
-// only arms for an item currently on screen, so with an empty or scrolled
-// transcript nothing would drive the spinner and it would sit still until an
-// unrelated message forced a repaint.
-func TestChatAnimatesForSomethingOutsideTheList(t *testing.T) {
+// is the reason the header mentions them at all. With an empty or scrolled
+// transcript nothing else would drive the spinner.
+func TestAnimClockRunsForSubagentsOutsideTheList(t *testing.T) {
 	t.Parallel()
 
-	newChat := func() *Chat {
-		return NewChat(common.DefaultCommon(&prismWorkspace{}), config.ScrollbarDefault)
+	newUI := func() *UI {
+		return &UI{chat: NewChat(common.DefaultCommon(&prismWorkspace{}), config.ScrollbarDefault)}
 	}
 
-	t.Run("nothing visible and nothing external stays stopped", func(t *testing.T) {
+	t.Run("nothing visible and no subagents stays stopped", func(t *testing.T) {
 		t.Parallel()
-		c := newChat()
-		require.Nil(t, c.EnsureAnimating(), "no reason to run the clock")
-		require.False(t, c.animRunning)
+		u := newUI()
+		require.Nil(t, u.ensureAnimating(), "no reason to run the clock")
+		require.False(t, u.animClock.running)
 	})
 
-	t.Run("nothing visible but something external starts the clock", func(t *testing.T) {
+	t.Run("a running subagent starts the clock", func(t *testing.T) {
 		t.Parallel()
-		c := newChat()
-		c.SetExternalAnimation(true)
-		require.NotNil(t, c.EnsureAnimating(),
+		u := newUI()
+		u.subAgentsRunning = 1
+		require.NotNil(t, u.ensureAnimating(),
 			"the header spinner has to keep the clock running on its own")
-		require.True(t, c.animRunning)
+		require.True(t, u.animClock.running)
 	})
 
-	t.Run("the external reason going away stops the clock", func(t *testing.T) {
+	t.Run("the last subagent finishing stops the clock", func(t *testing.T) {
 		t.Parallel()
-		c := newChat()
-		c.SetExternalAnimation(true)
-		require.NotNil(t, c.EnsureAnimating())
+		u := newUI()
+		u.subAgentsRunning = 1
+		require.NotNil(t, u.ensureAnimating())
 
-		// A clock already running is left alone until it lapses, so the stop
-		// is observed through the gate rather than the outstanding tick.
-		c.SetExternalAnimation(false)
-		c.animRunning = false
-		require.Nil(t, c.EnsureAnimating(), "nothing is animating any more")
-		require.False(t, c.animRunning)
+		u.subAgentsRunning = 0
+		require.Nil(t, u.ensureAnimating(), "nothing is animating any more")
+		require.False(t, u.animClock.running)
 	})
 }

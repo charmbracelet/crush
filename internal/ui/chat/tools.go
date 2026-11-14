@@ -460,14 +460,14 @@ func (t *baseToolMessageItem) SetToolCall(tc message.ToolCall) {
 // elapsed returns how long the tool call has been (or was) running. Zero
 // when the start time is unknown (restored items).
 func (t *baseToolMessageItem) elapsed() time.Duration {
-	if t.startedAt.IsZero() {
+	switch {
+	case t.startedAt.IsZero():
 		return 0
+	case t.finishedAt.IsZero():
+		return common.ElapsedSince(t.startedAt, common.Now())
+	default:
+		return t.finishedAt.Sub(t.startedAt)
 	}
-	end := t.finishedAt
-	if end.IsZero() {
-		end = time.Now()
-	}
-	return end.Sub(t.startedAt)
 }
 
 // toolTimerOwnTimeThreshold is how long a tool call must run before its
@@ -697,7 +697,7 @@ func unescapePartialString(s string) string {
 func waitingForToolMessage(opts *ToolRenderOpts) string {
 	msg := "Waiting for tool response"
 	if !opts.StartedAt.IsZero() {
-		msg += fmt.Sprintf(" for %s", common.FormatDuration(time.Since(opts.StartedAt)))
+		msg += fmt.Sprintf(" for %s", common.FormatDuration(common.ElapsedSince(opts.StartedAt, common.Now())))
 	}
 	if total := common.CurrentElapsed(); total != "" {
 		msg += fmt.Sprintf(" (%s total)", total)

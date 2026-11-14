@@ -6,6 +6,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/agent"
+	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/common"
 )
@@ -15,9 +16,10 @@ import (
 // frame from the clock is enough to make it move without its own ticker.
 var subAgentSpinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
-// subAgentSpinner returns the frame for the current moment.
+// subAgentSpinner returns the frame for the given moment. The glyph period
+// is a whole number of animation frames so every glyph holds equally long.
 func subAgentSpinner(now time.Time) string {
-	const frameEvery = 80 * time.Millisecond
+	frameEvery := 2 * anim.FrameInterval()
 	i := (now.UnixNano() / int64(frameEvery)) % int64(len(subAgentSpinnerFrames))
 	return subAgentSpinnerFrames[i]
 }
@@ -69,16 +71,16 @@ func (m *UI) runningSubAgents() int {
 
 // subAgentRow renders one subagent's line: a spinner and elapsed time while
 // it works; once finished, the icon's color alone says so.
-func (m *UI) subAgentRow(status chat.DispatchStatus, width int) string {
+func (m *UI) subAgentRow(status chat.DispatchStatus, width int, now time.Time) string {
 	t := m.com.Styles
 
-	icon := t.Resource.WorkingIcon.Render(subAgentSpinner(time.Now()))
+	icon := t.Resource.WorkingIcon.Render(subAgentSpinner(now))
 	state := "starting"
 	switch {
 	case !status.Running:
 		icon, state = t.Resource.OfflineIcon.String(), ""
 	case !status.Started.IsZero():
-		state = time.Since(status.Started).Round(time.Second).String()
+		state = common.FormatDuration(common.ElapsedSince(status.Started, now))
 	}
 	var extra string
 	if state != "" {
@@ -114,9 +116,10 @@ func (m *UI) subAgentsInfo(statuses []chat.DispatchStatus, width, maxItems int, 
 		title = common.Section(t, title, width)
 	}
 
+	now := common.Now()
 	rows := make([]string, 0, len(statuses))
 	for _, status := range statuses {
-		rows = append(rows, m.subAgentRow(status, width))
+		rows = append(rows, m.subAgentRow(status, width, now))
 	}
 	rows = truncateRows(rows, maxItems, t.Resource.AdditionalText)
 

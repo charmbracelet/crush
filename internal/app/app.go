@@ -520,6 +520,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 				// Trim leading whitespace. Sometimes the LLM includes leading
 				// formatting and indentation, which we don't want here.
 				if readBytes == 0 {
+					part = strings.TrimPrefix(part, "\n")
 					part = strings.TrimLeft(part, " \t")
 				}
 				// Ignore initial whitespace-only messages.

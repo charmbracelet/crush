@@ -2,45 +2,16 @@ package config
 
 import (
 	"os"
-	"path/filepath"
+
+	"github.com/charmbracelet/crush/internal/fsext"
 )
 
 // atomicWriteFile writes data to a file atomically by writing to a unique
 // temporary file in the same directory and renaming it into place. This
 // prevents concurrent readers from observing a partially-written file.
+//
+// The implementation lives in fsext so that plugins, which install files that
+// are executed at config load, share the same crash-safe writer.
 func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
-	path = filepath.Clean(path)
-	dir := filepath.Dir(path)
-	f, err := os.CreateTemp(dir, filepath.Base(path)+".*.tmp")
-	if err != nil {
-		return err
-	}
-	tmp := f.Name()
-	if _, err := f.Write(data); err != nil {
-		f.Close()
-		os.Remove(tmp)
-		return err
-	}
-	if err := f.Chmod(perm); err != nil {
-		f.Close()
-		os.Remove(tmp)
-		return err
-	}
-	if err := f.Close(); err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	if err := renameFile(tmp, path); err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	return nil
-}
-
-// renameFile renames tmp over path. On Windows the rename fails with
-// ERROR_ACCESS_DENIED or ERROR_SHARING_VIOLATION while another process
-// (antivirus, search indexer) or a concurrent reader briefly holds a
-// handle on the destination, so transient failures are retried.
-func renameFile(tmp, path string) error {
-	return retryTransient(func() error { return os.Rename(tmp, path) })
+	return fsext.AtomicWriteFile(path, data, perm)
 }

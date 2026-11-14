@@ -8,11 +8,13 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"charm.land/log/v2"
 	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/server"
 	"github.com/charmbracelet/x/term"
 	"github.com/nxadm/tail"
 	"github.com/spf13/cobra"
@@ -55,18 +57,30 @@ var logsCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("failed to load configuration: %v", err)
 		}
-		logsFile := filepath.Join(cfg.Config().Options.DataDirectory, "logs", "crush.log")
-		_, err = os.Stat(logsFile)
-		if os.IsNotExist(err) {
+		logsFiles := []string{filepath.Join(cfg.Config().Options.DataDirectory, "logs", "crush.log")}
+		if useClientServer() {
+			// The agent runs in the server, which keeps its own log, and
+			// clients log their startup next to it.
+			hostURL, err := server.ParseHostURL(clientHost)
+			if err != nil {
+				return fmt.Errorf("invalid host URL: %v", err)
+			}
+			logsFiles = append(logsFiles, clientLogFile(hostURL), serverLogFile(hostURL))
+		}
+		logsFiles = slices.DeleteFunc(logsFiles, func(logsFile string) bool {
+			_, err := os.Stat(logsFile)
+			return os.IsNotExist(err)
+		})
+		if len(logsFiles) == 0 {
 			log.Warn("Looks like you are not in a crush project. No logs found.")
 			return nil
 		}
 
 		if follow {
-			return followLogs(cmd.Context(), logsFile, tailLines)
+			return followLogs(cmd.Context(), logsFiles, tailLines)
 		}
 
-		return showLogs(logsFile, tailLines)
+		return showLogs(logsFiles, tailLines)
 	},
 }
 
@@ -75,82 +89,61 @@ func init() {
 	logsCmd.Flags().IntP("tail", "t", defaultTailLines, "Show only the last N lines default: 1000 for performance")
 }
 
-func followLogs(ctx context.Context, logsFile string, tailLines int) error {
-	t, err := tail.TailFile(logsFile, tail.Config{
-		Follow: false,
-		ReOpen: false,
-		Logger: tail.DiscardingLogger,
-	})
+func followLogs(ctx context.Context, logsFiles []string, tailLines int) error {
+	lines, err := lastLogLines(logsFiles, tailLines)
 	if err != nil {
-		return fmt.Errorf("failed to tail log file: %v", err)
+		return err
 	}
-
-	var lines []string
-	for line := range t.Lines {
-		if line.Err != nil {
-			continue
-		}
-		lines = append(lines, line.Text)
-		if len(lines) > tailLines {
-			lines = lines[len(lines)-tailLines:]
-		}
-	}
-	t.Stop()
 
 	for _, line := range lines {
 		printLogLine(line)
 	}
 
 	if len(lines) == tailLines {
-		fmt.Fprintf(os.Stderr, "\nShowing last %d lines. Full logs available at: %s\n", tailLines, logsFile)
+		fmt.Fprintf(os.Stderr, "\nShowing last %d lines. Full logs available at: %s\n", tailLines, strings.Join(logsFiles, ", "))
 		fmt.Fprintf(os.Stderr, "Following new log entries...\n\n")
 	}
 
-	t, err = tail.TailFile(logsFile, tail.Config{
-		Follow:   true,
-		ReOpen:   true,
-		Logger:   tail.DiscardingLogger,
-		Location: &tail.SeekInfo{Offset: 0, Whence: io.SeekEnd},
-	})
-	if err != nil {
-		return fmt.Errorf("failed to tail log file: %v", err)
+	newLines := make(chan string)
+	for _, logsFile := range logsFiles {
+		t, err := tail.TailFile(logsFile, tail.Config{
+			Follow:   true,
+			ReOpen:   true,
+			Logger:   tail.DiscardingLogger,
+			Location: &tail.SeekInfo{Offset: 0, Whence: io.SeekEnd},
+		})
+		if err != nil {
+			return fmt.Errorf("failed to tail log file: %v", err)
+		}
+		defer t.Stop()
+		go func() {
+			for line := range t.Lines {
+				if line.Err != nil {
+					continue
+				}
+				select {
+				case newLines <- line.Text:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
 	}
-	defer t.Stop()
 
 	for {
 		select {
-		case line := <-t.Lines:
-			if line.Err != nil {
-				continue
-			}
-			printLogLine(line.Text)
+		case line := <-newLines:
+			printLogLine(line)
 		case <-ctx.Done():
 			return nil
 		}
 	}
 }
 
-func showLogs(logsFile string, tailLines int) error {
-	t, err := tail.TailFile(logsFile, tail.Config{
-		Follow:      false,
-		ReOpen:      false,
-		Logger:      tail.DiscardingLogger,
-		MaxLineSize: 0,
-	})
+func showLogs(logsFiles []string, tailLines int) error {
+	lines, err := lastLogLines(logsFiles, tailLines)
 	if err != nil {
-		return fmt.Errorf("failed to tail log file: %v", err)
-	}
-	defer t.Stop()
-
-	var lines []string
-	for line := range t.Lines {
-		if line.Err != nil {
-			continue
-		}
-		lines = append(lines, line.Text)
-		if len(lines) > tailLines {
-			lines = lines[len(lines)-tailLines:]
-		}
+		return err
 	}
 
 	for _, line := range lines {
@@ -158,10 +151,64 @@ func showLogs(logsFile string, tailLines int) error {
 	}
 
 	if len(lines) == tailLines {
-		fmt.Fprintf(os.Stderr, "\nShowing last %d lines. Full logs available at: %s\n", tailLines, logsFile)
+		fmt.Fprintf(os.Stderr, "\nShowing last %d lines. Full logs available at: %s\n", tailLines, strings.Join(logsFiles, ", "))
 	}
 
 	return nil
+}
+
+// lastLogLines returns the last tailLines lines of logsFiles. Lines of
+// several files are interleaved in the order they were logged.
+func lastLogLines(logsFiles []string, tailLines int) ([]string, error) {
+	var lines []string
+	for _, logsFile := range logsFiles {
+		t, err := tail.TailFile(logsFile, tail.Config{
+			Follow:      false,
+			ReOpen:      false,
+			Logger:      tail.DiscardingLogger,
+			MaxLineSize: 0,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to tail log file: %v", err)
+		}
+
+		var fileLines []string
+		for line := range t.Lines {
+			if line.Err != nil {
+				continue
+			}
+			fileLines = append(fileLines, line.Text)
+			if len(fileLines) > tailLines {
+				fileLines = fileLines[len(fileLines)-tailLines:]
+			}
+		}
+		t.Stop()
+		lines = append(lines, fileLines...)
+	}
+	if len(logsFiles) < 2 {
+		return lines, nil
+	}
+
+	type timedLine struct {
+		time time.Time
+		text string
+	}
+	timed := make([]timedLine, len(lines))
+	for i, text := range lines {
+		var entry struct {
+			Time time.Time `json:"time"`
+		}
+		_ = json.Unmarshal([]byte(text), &entry)
+		timed[i] = timedLine{time: entry.Time, text: text}
+	}
+	slices.SortStableFunc(timed, func(a, b timedLine) int {
+		return a.time.Compare(b.time)
+	})
+	lines = lines[:0]
+	for _, line := range timed[max(len(timed)-tailLines, 0):] {
+		lines = append(lines, line.text)
+	}
+	return lines, nil
 }
 
 func printLogLine(lineText string) {

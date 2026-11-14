@@ -17,12 +17,11 @@ import (
 // delivers the result.
 func NewOAuthOpenAI(
 	com *common.Common,
-	isOnboarding bool,
 	provider catwalk.Provider,
 	model config.SelectedModel,
 	modelType config.SelectedModelType,
 ) (*OAuth, tea.Cmd) {
-	return newOAuth(com, isOnboarding, provider, model, modelType, &OAuthOpenAI{})
+	return newOAuth(com, provider, model, modelType, &OAuthOpenAI{})
 }
 
 type OAuthOpenAI struct {

@@ -1160,6 +1160,18 @@ func quickStyle(o quickStyleOpts) Styles {
 	// Dialog.Models
 	s.Dialog.Models.ConfiguredText = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
 
+	// Dialog.Onboarding (first-run setup screens).
+	s.Dialog.Onboarding.Step = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
+	s.Dialog.Onboarding.Lead = lipgloss.NewStyle().Foreground(o.fgBase).Padding(0, 1)
+	s.Dialog.Onboarding.StepDot = lipgloss.NewStyle().Foreground(o.separator).SetString("·")
+	s.Dialog.Onboarding.StepDotOn = s.Dialog.Onboarding.StepDot.Foreground(o.fgBase)
+	s.Dialog.Onboarding.Blurb = lipgloss.NewStyle().Foreground(o.fgMostSubtle).Padding(0, 1)
+	s.Dialog.Onboarding.Badge = lipgloss.NewStyle().Foreground(o.success).Bold(true)
+	s.Dialog.Onboarding.BadgeBlurred = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
+	s.Dialog.Onboarding.Key = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
+	s.Dialog.Onboarding.Desc = lipgloss.NewStyle().Foreground(o.fgBase)
+	s.Dialog.Onboarding.Tip = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
+
 	// Dialog.Permissions
 	s.Dialog.Permissions.KeyText = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
 	s.Dialog.Permissions.ValueText = lipgloss.NewStyle().Foreground(o.fgBase)

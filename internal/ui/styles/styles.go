@@ -558,6 +558,22 @@ type Styles struct {
 			ConfiguredText lipgloss.Style // "Configured" badge shown on the ModelGroup header
 		}
 
+		// Onboarding styles the first-run setup screens: the provider
+		// selector, the curated model shortlist, and the usage hints
+		// shown once setup completes.
+		Onboarding struct {
+			Step         lipgloss.Style // "1 of 3" progress label
+			StepDot      lipgloss.Style // Inactive progress dot
+			StepDotOn    lipgloss.Style // Active progress dot
+			Lead         lipgloss.Style // Opening sentence under the dialog header
+			Blurb        lipgloss.Style // Description line under a row title
+			Badge        lipgloss.Style // Right-aligned row badge on the focused row
+			BadgeBlurred lipgloss.Style // Badge on every other row, receding into the background
+			Key          lipgloss.Style // Key name in the usage hints
+			Desc         lipgloss.Style // Key description in the usage hints
+			Tip          lipgloss.Style // Trailing example line
+		}
+
 		Permissions struct {
 			KeyText   lipgloss.Style // Left key cell of a key/value row
 			ValueText lipgloss.Style // Right value cell of a key/value row

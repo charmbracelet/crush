@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 
@@ -76,6 +77,12 @@ type Service interface {
 	UpdateTitleAndUsage(ctx context.Context, sessionID, title string, promptTokens, completionTokens int64, cost float64) error
 	Rename(ctx context.Context, id string, title string) error
 	Delete(ctx context.Context, id string) error
+	MCPDisabledServers(ctx context.Context) ([]string, error)
+	SetMCPServerDisabled(ctx context.Context, name string, disabled bool) error
+	MCPServersEnabled(ctx context.Context) ([]string, error)
+	SkillsDisabled(ctx context.Context) ([]string, error)
+	SetSkillDisabled(ctx context.Context, name string, disabled, configDisabled bool) error
+	SkillsEnabled(ctx context.Context) ([]string, error)
 
 	// Agent tool session management
 	CreateAgentToolSessionID(messageID, toolCallID string) string
@@ -359,6 +366,88 @@ func unmarshalTodos(data string) ([]Todo, error) {
 		return []Todo{}, err
 	}
 	return todos, nil
+}
+
+// MCPDisabledServers returns the MCP servers disabled for this
+// repository. The database is scoped to the project, so the override set
+// is shared by every session in the repository, including subagent
+// sessions. New repositories start empty and follow the config.
+func (s *service) MCPDisabledServers(ctx context.Context) ([]string, error) {
+	return s.q.ListMCPDisabledServers(ctx)
+}
+
+// SetMCPServerDisabled adds or removes a repository-scoped MCP override.
+// Enabling a config-disabled server also records an enabled override so the
+// runtime start survives a restart; the override is removed when the server
+// is disabled again.
+func (s *service) SetMCPServerDisabled(ctx context.Context, name string, disabled bool) error {
+	var err error
+	if disabled {
+		err = s.q.InsertMCPDisabledServer(ctx, name)
+	} else {
+		err = s.q.DeleteMCPDisabledServer(ctx, name)
+	}
+	if err != nil {
+		return err
+	}
+	if disabled {
+		return s.q.DeleteMCPEnabledServer(ctx, name)
+	}
+	return s.q.InsertMCPEnabledServer(ctx, name)
+}
+
+// MCPServersEnabled returns the MCP servers with a repository-scoped
+// enabled override: config-disabled servers the user enabled for this
+// repository. Startup force-starts them so the override survives restarts.
+func (s *service) MCPServersEnabled(ctx context.Context) ([]string, error) {
+	return s.q.ListMCPEnabledServers(ctx)
+}
+
+// HasMCPOverride reports whether the named MCP server has a
+// repository-scoped override, which takes precedence over the config.
+func HasMCPOverride(ctx context.Context, s Service, name string) (bool, error) {
+	disabled, err := s.MCPDisabledServers(ctx)
+	if err != nil {
+		return false, err
+	}
+	enabled, err := s.MCPServersEnabled(ctx)
+	if err != nil {
+		return false, err
+	}
+	return slices.Contains(disabled, name) || slices.Contains(enabled, name), nil
+}
+
+// SkillsDisabled returns the skills disabled for this repository.
+// Same semantics as MCPDisabledServers: project-scoped, shared by every
+// session in the repository.
+func (s *service) SkillsDisabled(ctx context.Context) ([]string, error) {
+	return s.q.ListSkillsDisabled(ctx)
+}
+
+// SetSkillDisabled adds or removes a repository-scoped skill override.
+// Enabling a config-disabled skill records an enabled override so it
+// stays enabled across restarts. Enabling a skill the config does not
+// disable records none, so a later config disable still applies here.
+func (s *service) SetSkillDisabled(ctx context.Context, name string, disabled, configDisabled bool) error {
+	var err error
+	if disabled {
+		err = s.q.InsertSkillsDisabled(ctx, name)
+	} else {
+		err = s.q.DeleteSkillsDisabled(ctx, name)
+	}
+	if err != nil {
+		return err
+	}
+	if !disabled && configDisabled {
+		return s.q.InsertSkillsEnabled(ctx, name)
+	}
+	return s.q.DeleteSkillsEnabled(ctx, name)
+}
+
+// SkillsEnabled returns the skills with a repository-scoped enabled
+// override: config-disabled skills the user enabled for this repository.
+func (s *service) SkillsEnabled(ctx context.Context) ([]string, error) {
+	return s.q.ListSkillsEnabled(ctx)
 }
 
 func NewService(q *db.Queries, conn *sql.DB) Service {

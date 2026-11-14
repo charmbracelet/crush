@@ -30,6 +30,13 @@ const (
 	PayloadTypeUpdateAvailable        PayloadType = "update_available"
 	PayloadTypeQuestionRequest        PayloadType = "question_batch_request"
 	PayloadTypeQuestionNotification   PayloadType = "question_batch_notification"
+	PayloadTypeHostTheme              PayloadType = "host_theme"
+	PayloadTypeClientSession          PayloadType = "client_session"
+	PayloadTypePinentryPromptRequest  PayloadType = "pinentry_prompt_request"
+	PayloadTypePinentryNotification   PayloadType = "pinentry_prompt_notification"
+	PayloadTypeSSHPromptRequest       PayloadType = "ssh_prompt_request"
+	PayloadTypeSSHNotification        PayloadType = "ssh_prompt_notification"
+	PayloadTypePermissionModeChanged  PayloadType = "permission_mode_changed"
 )
 
 // Payload wraps a discriminated JSON payload with a type tag.
@@ -51,6 +58,10 @@ type (
 	Event[T any] struct {
 		Type    EventType `json:"type"`
 		Payload T         `json:"payload"`
+		// MustDeliver is set on events published via PublishMustDeliver.
+		// It is only meaningful to re-publishers, such as the app fan-in,
+		// that must keep the same delivery semantics.
+		MustDeliver bool `json:"-"`
 	}
 
 	// Publisher can publish events of type T.

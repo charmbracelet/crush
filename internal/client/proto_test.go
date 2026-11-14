@@ -89,6 +89,42 @@ func TestSubscribeEventsContextCancelClosesEvents(t *testing.T) {
 	}
 }
 
+// TestSubscribeEventsAbortedStreamClosesEvents covers a server that dies
+// mid-stream: the body fails with an unexpected EOF rather than a clean
+// end, and the events channel must still close so the caller reconnects.
+// It used to retry reading the dead body every 2s forever.
+func TestSubscribeEventsAbortedStreamClosesEvents(t *testing.T) {
+	t.Parallel()
+
+	payload := marshalSSEPayload(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", payload)
+		w.(http.Flusher).Flush()
+		// Close the connection without the final chunk.
+		panic(http.ErrAbortHandler)
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	events, err := captureClient(t, srv).SubscribeEvents(ctx, "ws1")
+	require.NoError(t, err)
+
+	select {
+	case _, ok := <-events:
+		require.True(t, ok, "the event written before the abort must arrive")
+	case <-time.After(5 * time.Second):
+		require.Fail(t, "timed out waiting for the first event")
+	}
+	select {
+	case _, ok := <-events:
+		require.False(t, ok, "no event follows the abort")
+	case <-time.After(5 * time.Second):
+		require.Fail(t, "the events channel stayed open after the stream died")
+	}
+}
+
 func TestSendMessageAcceptsStatusAccepted(t *testing.T) {
 	t.Parallel()
 

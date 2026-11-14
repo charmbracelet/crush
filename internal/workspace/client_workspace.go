@@ -24,11 +24,13 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/pinentry"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/charmbracelet/crush/internal/sshaskpass"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/pkg/browser"
@@ -186,9 +188,12 @@ func (w *ClientWorkspace) ParseAgentToolSessionID(sessionID string) (string, str
 }
 
 // SetCurrentSession reports the session this client is currently
-// viewing to the server. Empty sessionID clears the entry. Errors
-// are propagated to the caller; the TUI logs and ignores them since
-// the presence record is a hint, not correctness-critical state.
+// viewing to the server. Empty sessionID clears the entry. The report
+// scopes the client's event stream: permission and question prompts
+// are only delivered to clients viewing the session that raised them.
+// Errors are propagated to the caller; the TUI logs and ignores them
+// since the presence record is best-effort, not correctness-critical
+// state.
 func (w *ClientWorkspace) SetCurrentSession(ctx context.Context, sessionID string) error {
 	w.herdrClient.SetSessionID(sessionID)
 	w.mu.Lock()
@@ -233,9 +238,8 @@ func (w *ClientWorkspace) ListAllUserMessages(ctx context.Context) ([]message.Me
 // -- Agent --
 
 func (w *ClientWorkspace) AgentRun(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) error {
-	// The interactive TUI does not consume notify.RunComplete for
-	// completion detection (it observes message events directly),
-	// so passing an empty RunID is correct here: it skips the
+	// The interactive TUI matches notify.RunComplete by session, not
+	// RunID, so passing an empty RunID is correct here: it skips the
 	// correlator stamping path without functional consequences.
 	return w.client.SendMessage(ctx, w.workspaceID(), sessionID, "", "", prompt, attachments...)
 }
@@ -404,16 +408,18 @@ func (w *ClientWorkspace) PermissionDeny(perm permission.PermissionRequest) bool
 	return resolved
 }
 
-func (w *ClientWorkspace) PermissionSkipRequests() bool {
-	skip, err := w.client.GetPermissionsSkipRequests(context.Background(), w.workspaceID())
-	if err != nil {
-		return false
-	}
-	return skip
+func (w *ClientWorkspace) PermissionMode() permission.PermissionMode {
+	return proto.ProtoModeToPermission(w.cached().PermissionMode)
 }
 
-func (w *ClientWorkspace) PermissionSetSkipRequests(skip bool) {
-	_ = w.client.SetPermissionsSkipRequests(context.Background(), w.workspaceID(), skip)
+func (w *ClientWorkspace) PermissionSetMode(mode permission.PermissionMode) {
+	_ = w.client.SetPermissionMode(context.Background(), w.workspaceID(), proto.PermissionModeToProto(mode))
+}
+
+// -- Host context --
+
+func (w *ClientWorkspace) HostContext(ctx context.Context) (proto.HostContext, error) {
+	return w.client.GetHostContext(ctx, w.workspaceID())
 }
 
 // -- Questions --
@@ -445,6 +451,64 @@ func (w *ClientWorkspace) QuestionCancel() bool {
 	cancelled, err := w.client.CancelQuestionBatch(context.Background(), w.workspaceID())
 	if err != nil {
 		slog.Error("Failed to cancel question", "error", err)
+		return false
+	}
+	return cancelled
+}
+
+// -- Pinentry --
+
+// PinentryRespond submits the secret for a pending integrated pinentry
+// prompt via the client SDK.
+func (w *ClientWorkspace) PinentryRespond(id, secret string) bool {
+	resolved, err := w.client.AnswerPinentry(context.Background(), w.workspaceID(), proto.PinentryAnswer{
+		RequestID: id,
+		Secret:    secret,
+	})
+	if err != nil {
+		slog.Error("Failed to answer pinentry prompt", "error", err)
+		return false
+	}
+	return resolved
+}
+
+// PinentryCancel dismisses a pending integrated pinentry prompt via the
+// client SDK.
+func (w *ClientWorkspace) PinentryCancel(id string) bool {
+	cancelled, err := w.client.CancelPinentry(context.Background(), w.workspaceID(), proto.PinentryCancel{
+		RequestID: id,
+	})
+	if err != nil {
+		slog.Error("Failed to cancel pinentry prompt", "error", err)
+		return false
+	}
+	return cancelled
+}
+
+// -- SSH prompts --
+
+// SSHRespond submits the secret for a pending integrated SSH prompt via
+// the client SDK. Confirmations answer "yes".
+func (w *ClientWorkspace) SSHRespond(id, secret string) bool {
+	resolved, err := w.client.AnswerSSH(context.Background(), w.workspaceID(), proto.SSHAnswer{
+		RequestID: id,
+		Secret:    secret,
+	})
+	if err != nil {
+		slog.Error("Failed to answer ssh prompt", "error", err)
+		return false
+	}
+	return resolved
+}
+
+// SSHCancel dismisses a pending integrated SSH prompt via the client
+// SDK.
+func (w *ClientWorkspace) SSHCancel(id string) bool {
+	cancelled, err := w.client.CancelSSH(context.Background(), w.workspaceID(), proto.SSHCancel{
+		RequestID: id,
+	})
+	if err != nil {
+		slog.Error("Failed to cancel ssh prompt", "error", err)
 		return false
 	}
 	return cancelled
@@ -537,6 +601,13 @@ func (w *ClientWorkspace) Config() *config.Config {
 
 func (w *ClientWorkspace) WorkingDir() string {
 	return w.cached().Path
+}
+
+// GitBranch asks the server for the branch checked out in the workspace's
+// working directory. Callers keep this off the render path; the TUI polls it
+// on a ticker and renders from its own state.
+func (w *ClientWorkspace) GitBranch(ctx context.Context) (string, error) {
+	return w.client.GitBranch(ctx, w.workspaceID())
 }
 
 func (w *ClientWorkspace) Resolver() config.VariableResolver {
@@ -661,9 +732,19 @@ func (w *ClientWorkspace) ReadSkill(ctx context.Context, skillID string) ([]byte
 
 // -- MCP operations --
 
+// mcpStatesTimeout bounds a single MCP state probe. The client SDK sets no
+// request timeout of its own, and the UI serializes refreshes behind an
+// in-flight flag: without a deadline a hung request would wedge that flag
+// forever, queueing every later refresh behind it and silently freezing the
+// MCP sidebar. A var, not a const, so tests can shrink it.
+var mcpStatesTimeout = 10 * time.Second
+
 func (w *ClientWorkspace) MCPGetStates() map[string]mcp.ClientInfo {
-	states, err := w.client.MCPGetStates(context.Background(), w.workspaceID())
+	ctx, cancel := context.WithTimeout(context.Background(), mcpStatesTimeout)
+	defer cancel()
+	states, err := w.client.MCPGetStates(ctx, w.workspaceID())
 	if err != nil {
+		slog.Warn("Failed to fetch MCP states", "error", err)
 		return nil
 	}
 	result := make(map[string]mcp.ClientInfo, len(states))
@@ -751,6 +832,42 @@ func (w *ClientWorkspace) EnableDockerMCP(ctx context.Context) error {
 
 func (w *ClientWorkspace) DisableDockerMCP() error {
 	return w.client.DisableDockerMCP(context.Background(), w.workspaceID())
+}
+
+func (w *ClientWorkspace) MCPServersDisabled(ctx context.Context) ([]string, error) {
+	return w.client.MCPServersDisabled(ctx, w.workspaceID())
+}
+
+func (w *ClientWorkspace) MCPServersEnabled(ctx context.Context) ([]string, error) {
+	return w.client.MCPServersEnabled(ctx, w.workspaceID())
+}
+
+func (w *ClientWorkspace) MCPSetServerDisabled(ctx context.Context, name string, disabled bool) error {
+	return w.client.SetMCPServerDisabled(ctx, w.workspaceID(), name, disabled)
+}
+
+func (w *ClientWorkspace) MCPSetServerConfigDisabled(ctx context.Context, name string, disabled bool) error {
+	return w.client.SetMCPServerConfigDisabled(ctx, w.workspaceID(), name, disabled)
+}
+
+func (w *ClientWorkspace) SkillsDisabled(ctx context.Context) ([]string, error) {
+	return w.client.SkillsDisabled(ctx, w.workspaceID())
+}
+
+func (w *ClientWorkspace) SkillSetDisabled(ctx context.Context, name string, disabled bool) error {
+	return w.client.SetSkillDisabled(ctx, w.workspaceID(), name, disabled)
+}
+
+func (w *ClientWorkspace) SkillsEnabled(ctx context.Context) ([]string, error) {
+	return w.client.SkillsEnabled(ctx, w.workspaceID())
+}
+
+func (w *ClientWorkspace) SkillSetConfigDisabled(ctx context.Context, name string, disabled bool) error {
+	return w.client.SetSkillConfigDisabled(ctx, w.workspaceID(), name, disabled)
+}
+
+func (w *ClientWorkspace) MCPStartServer(ctx context.Context, name string) error {
+	return w.client.StartMCPServer(ctx, w.workspaceID(), name)
 }
 
 func (w *ClientWorkspace) MCPAuthenticate(ctx context.Context, name string) error {
@@ -976,22 +1093,23 @@ func (w *ClientWorkspace) recoverWorkspace() error {
 func (w *ClientWorkspace) recreateArgs() proto.Workspace {
 	ws := w.cached()
 	return proto.Workspace{
-		Path:     ws.Path,
-		DataDir:  ws.DataDir,
-		Debug:    ws.Debug,
-		YOLO:     ws.YOLO,
-		Channels: ws.Channels,
-		Env:      ws.Env,
-		Version:  version.Version,
+		Path:           ws.Path,
+		DataDir:        ws.DataDir,
+		Debug:          ws.Debug,
+		PermissionMode: ws.PermissionMode,
+		Channels:       ws.Channels,
+		Env:            ws.Env,
+		Version:        version.Version,
 	}
 }
 
 // afterReconnect runs once a degraded subscription is re-established. It
 // re-asserts the client's current-session selection, since the server's
 // presence entry (or the whole workspace) may have been re-created while we
-// were away, and tells the UI to resync state published while detached. The
-// SSE handler attaches the client before writing its 200, so the presence
-// call cannot be rejected as not-attached here.
+// were away, re-reads the host theme, and tells the UI to resync state
+// published while detached. The SSE handler attaches the client before
+// writing its 200, so the presence call cannot be rejected as not-attached
+// here.
 func (w *ClientWorkspace) afterReconnect(send func(tea.Msg)) {
 	w.mu.RLock()
 	sid := w.lastSession
@@ -1001,7 +1119,30 @@ func (w *ClientWorkspace) afterReconnect(send func(tea.Msg)) {
 			slog.Warn("Failed to re-assert current session after reconnect", "error", err)
 		}
 	}
+	w.resyncHostTheme(send)
 	send(ConnectionEvent{State: ConnectionRecovered})
+}
+
+// hostThemeResyncTimeout bounds the host theme read after a reconnect, so a
+// wedged server cannot pin the subscription goroutine.
+const hostThemeResyncTimeout = 5 * time.Second
+
+// resyncHostTheme hands the UI the host theme the server holds after a
+// reconnect. The attach replay only covers a theme that is set, so a clear
+// published while the client was away, or a workspace re-created without
+// one, would otherwise leave the TUI on the host's colors. The read runs
+// after the new stream attached, so any later change still arrives as an
+// event, and the UI ignores a theme equal to the last one it received.
+func (w *ClientWorkspace) resyncHostTheme(send func(tea.Msg)) {
+	ctx, cancel := context.WithTimeout(w.subCtx, hostThemeResyncTimeout)
+	defer cancel()
+	st, err := w.client.GetHostTheme(ctx, w.workspaceID())
+	if err != nil {
+		// Servers that predate host themes have no such endpoint.
+		slog.Debug("Failed to read host theme after reconnect", "error", err)
+		return
+	}
+	send(HostThemeEvent{Theme: st.Theme})
 }
 
 // sleepOrDone waits for d or until the subscription context is
@@ -1137,15 +1278,18 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 				Action:      e.Payload.Action,
 				Path:        e.Payload.Path,
 				Params:      e.Payload.Params,
+				Danger:      e.Payload.Danger,
 			},
 		}
 	case pubsub.Event[proto.PermissionNotification]:
 		return pubsub.Event[permission.PermissionNotification]{
 			Type: e.Type,
 			Payload: permission.PermissionNotification{
+				SessionID:  e.Payload.SessionID,
 				ToolCallID: e.Payload.ToolCallID,
 				Granted:    e.Payload.Granted,
 				Denied:     e.Payload.Denied,
+				Cancelled:  e.Payload.Cancelled,
 			},
 		}
 	case pubsub.Event[proto.QuestionRequest]:
@@ -1165,6 +1309,49 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 			Type: e.Type,
 			Payload: question.Notification{
 				BatchID: e.Payload.BatchID,
+			},
+		}
+	case pubsub.Event[proto.PinentryPromptRequest]:
+		return pubsub.Event[pinentry.PromptRequest]{
+			Type: e.Type,
+			Payload: pinentry.PromptRequest{
+				ID:     e.Payload.ID,
+				Prompt: e.Payload.Prompt,
+				Key: pinentry.Key{
+					CardNumber:  e.Payload.Key.CardNumber,
+					KeyID:       e.Payload.Key.KeyID,
+					Fingerprint: e.Payload.Key.Fingerprint,
+					Holder:      e.Payload.Key.Holder,
+				},
+				Kind:       pinentry.Kind(e.Payload.Kind),
+				RetryCount: e.Payload.RetryCount,
+				Error:      e.Payload.Error,
+			},
+		}
+	case pubsub.Event[proto.PinentryNotification]:
+		return pubsub.Event[pinentry.Notification]{
+			Type: e.Type,
+			Payload: pinentry.Notification{
+				RequestID: e.Payload.RequestID,
+			},
+		}
+	case pubsub.Event[proto.SSHPromptRequest]:
+		return pubsub.Event[sshaskpass.PromptRequest]{
+			Type: e.Type,
+			Payload: sshaskpass.PromptRequest{
+				ID:      e.Payload.ID,
+				Prompt:  e.Payload.Prompt,
+				KeyInfo: e.Payload.KeyInfo,
+				Kind:    sshaskpass.Kind(e.Payload.Kind),
+				Title:   e.Payload.Title,
+				Message: e.Payload.Message,
+			},
+		}
+	case pubsub.Event[proto.SSHNotification]:
+		return pubsub.Event[sshaskpass.Notification]{
+			Type: e.Type,
+			Payload: sshaskpass.Notification{
+				RequestID: e.Payload.RequestID,
 			},
 		}
 	case pubsub.Event[proto.Message]:
@@ -1188,6 +1375,7 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 			SessionTitle: e.Payload.SessionTitle,
 			RunID:        e.Payload.RunID,
 			Type:         notify.Type(e.Payload.Type),
+			ProviderID:   e.Payload.ProviderID,
 			AWSSOCommand: e.Payload.AWSSOCommand,
 			AWSSOURL:     e.Payload.AWSSOURL,
 		}
@@ -1200,11 +1388,8 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 		}
 	case pubsub.Event[proto.RunComplete]:
 		// Translate the wire-level proto.RunComplete back into the
-		// agent's domain notify.RunComplete. Without this case the
-		// default branch below warns on every run completion in the
-		// server-mode TUI, even though the TUI itself doesn't act
-		// on RunComplete — converting silently keeps the workspace
-		// event bridge symmetric with the server-side wrapEvent.
+		// agent's domain notify.RunComplete. The TUI ends its pending
+		// turn and clears its busy probe on it.
 		return pubsub.Event[notify.RunComplete]{
 			Type: e.Type,
 			Payload: notify.RunComplete{
@@ -1231,6 +1416,19 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 			LatestVersion:  e.Payload.LatestVersion,
 			IsDevelopment:  e.Payload.IsDevelopment,
 		}
+	case pubsub.Event[proto.HostThemeState]:
+		theme := e.Payload.Theme
+		if e.Type == pubsub.DeletedEvent {
+			theme = nil
+		}
+		return HostThemeEvent{Theme: theme}
+	case pubsub.Event[proto.PermissionModeEvent]:
+		// Keep the cached workspace in sync so PermissionMode() never goes
+		// stale when another client or the server changes the mode.
+		w.mu.Lock()
+		w.ws.PermissionMode = e.Payload.Mode
+		w.mu.Unlock()
+		return nil
 	default:
 		slog.Warn("Unknown event type in translateEvent", "type", fmt.Sprintf("%T", ev))
 		return nil
@@ -1311,6 +1509,7 @@ func protoToMessage(m proto.Message) message.Message {
 		SessionID:               m.SessionID,
 		Role:                    message.MessageRole(m.Role),
 		Model:                   m.Model,
+		ModelName:               m.ModelName,
 		Provider:                m.Provider,
 		PrismModelID:            m.PrismModelID,
 		PrismModelName:          m.PrismModelName,
@@ -1365,6 +1564,13 @@ func protoToMessage(m proto.Message) message.Message {
 				Command:  v.Command,
 				Output:   v.Output,
 				ExitCode: v.ExitCode,
+			})
+		case proto.SubAgentReport:
+			msg.Parts = append(msg.Parts, message.SubAgentReport{
+				Label:  v.Label,
+				Output: v.Output,
+				Failed: v.Failed,
+				Model:  v.Model,
 			})
 		}
 	}

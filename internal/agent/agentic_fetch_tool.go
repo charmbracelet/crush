@@ -134,7 +134,7 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 					fullPrompt = fmt.Sprintf("%s\n\nWeb page URL: %s\n\n<webpage_content>\n%s\n</webpage_content>", params.Prompt, params.URL, content)
 				}
 			} else {
-				// Search mode: let the sub-agent search and fetch as needed.
+				// Search mode: let the subagent search and fetch as needed.
 				fullPrompt = fmt.Sprintf("%s\n\nUse the web_search tool to find relevant information. Break down the question into smaller, focused searches if needed. After searching, use web_fetch to get detailed content from the most relevant results.", params.Prompt)
 			}
 
@@ -147,10 +147,7 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				return fantasy.ToolResponse{}, fmt.Errorf("error creating prompt: %s", err)
 			}
 
-			_, small, err := c.buildAgentModels(ctx, true)
-			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("error building models: %s", err)
-			}
+			small := c.smallOnlyModels().Small
 
 			systemPrompt, err := promptTemplate.Build(ctx, small.Model.Provider(), small.Model.Model(), c.cfg)
 			if err != nil {
@@ -173,24 +170,23 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				tools.NewViewTool(c.lspManager, c.permissions, c.filetracker, nil, tmpDir),
 			}
 
-			// Sub-agent tools run without hook interception. The top-level
+			// Subagent tools run without hook interception. The top-level
 			// `agentic_fetch` call itself is already wrapped from the coder's
 			// side; firing hooks again for every inner tool call would run
 			// the user's hooks N times per delegated turn.
 
 			agent := NewSessionAgent(SessionAgentOptions{
-				LargeModel:           small, // Use small model for both (fetch doesn't need large)
-				SmallModel:           small,
+				Models:               c.smallOnlyModels,
 				SystemPromptPrefix:   smallProviderCfg.SystemPromptPrefix,
 				SystemPrompt:         systemPrompt,
 				DisableAutoSummarize: c.cfg.Config().Options.DisableAutoSummarize,
-				IsYolo:               c.permissions.SkipRequests(),
 				Sessions:             c.sessions,
 				Messages:             c.messages,
 				Tools:                fetchTools,
+				titles:               &c.titles,
 			})
 
-			return c.runSubAgent(ctx, subAgentParams{
+			return c.runSubAgentMaybeBackground(ctx, tools.AgenticFetchToolName, accessRead, subAgentParams{
 				Agent:          agent,
 				SessionID:      validationResult.SessionID,
 				AgentMessageID: validationResult.AgentMessageID,

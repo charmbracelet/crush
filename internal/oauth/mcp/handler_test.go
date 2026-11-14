@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/oauth2"
 )
@@ -552,12 +553,18 @@ func TestCallbackReceiver_ConcurrentAuthorizeOpensOneTab(t *testing.T) {
 
 	base := serveReceiver(t, r)
 
-	// Stand in for the browser: record the open, then redirect back as the
-	// authorization server would once the user consents.
+	const callers = 4
+
+	// Stand in for the browser: record the open, then redirect back once
+	// every caller has joined, as they would while a real user consents.
 	var opens atomic.Int64
 	r.handler = &Handler{openURL: func(string) error {
 		opens.Add(1)
 		go func() {
+			assert.Eventually(t, func() bool {
+				flight := r.current()
+				return flight != nil && flight.joined.Load() == callers-1
+			}, 10*time.Second, time.Millisecond)
 			resp, gerr := http.Get(base + callbackPath + "?code=abc&state=xyz") //nolint:noctx
 			if gerr == nil {
 				resp.Body.Close()
@@ -566,7 +573,6 @@ func TestCallbackReceiver_ConcurrentAuthorizeOpensOneTab(t *testing.T) {
 		return nil
 	}}
 
-	const callers = 4
 	var wg sync.WaitGroup
 	results := make(chan *auth.AuthorizationResult, callers)
 	errs := make(chan error, callers)

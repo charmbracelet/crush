@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/config"
@@ -78,4 +79,35 @@ func TestSkillStatusItemsExcludesDisabledSkills(t *testing.T) {
 		require.NotEqual(t, "go-doc", item.name)
 		require.NotEqual(t, "crush-config", item.name)
 	}
+}
+
+func TestSkillStatusItemsShowsErroredSkillWithRedDot(t *testing.T) {
+	t.Parallel()
+
+	st := uistyles.CharmtonePantera()
+	ui := &UI{
+		com: &common.Common{Styles: &st},
+		skillStates: []*skills.SkillState{
+			{Name: "go-doc", Path: "/tmp/go-doc/SKILL.md", State: skills.StateNormal},
+			// Parse failures carry no name; the sidebar derives it from
+			// the skill directory.
+			{Path: "/tmp/broken/SKILL.md", State: skills.StateError, Err: fmt.Errorf("yaml: cannot unmarshal")},
+			{Name: "invalid", Path: "/tmp/invalid/SKILL.md", State: skills.StateError, Err: fmt.Errorf("missing description")},
+		},
+	}
+
+	items := ui.skillStatusItems()
+
+	byName := make(map[string]skillStatusItem, len(items))
+	for _, item := range items {
+		byName[item.name] = item
+	}
+
+	broken, ok := byName["broken"]
+	require.True(t, ok, "a parse-failed skill must still appear in the sidebar")
+	require.Contains(t, broken.icon, st.Resource.ErrorIcon.String(), "errored skills must show the red dot")
+
+	invalid, ok := byName["invalid"]
+	require.True(t, ok, "a validation-failed skill must appear in the sidebar")
+	require.Contains(t, invalid.icon, st.Resource.ErrorIcon.String())
 }

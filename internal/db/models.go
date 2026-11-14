@@ -8,6 +8,14 @@ import (
 	"database/sql"
 )
 
+type DisabledSkill struct {
+	Name string `json:"name"`
+}
+
+type EnabledSkill struct {
+	Name string `json:"name"`
+}
+
 type File struct {
 	ID        string `json:"id"`
 	SessionID string `json:"session_id"`
@@ -16,6 +24,14 @@ type File struct {
 	Version   int64  `json:"version"`
 	CreatedAt int64  `json:"created_at"`
 	UpdatedAt int64  `json:"updated_at"`
+}
+
+type McpDisabledServer struct {
+	Name string `json:"name"`
+}
+
+type McpEnabledServer struct {
+	Name string `json:"name"`
 }
 
 type Message struct {
@@ -33,6 +49,7 @@ type Message struct {
 	PrismModelName          sql.NullString  `json:"prism_model_name"`
 	PrismHypercreditSavings sql.NullFloat64 `json:"prism_hypercredit_savings"`
 	PrismDollarSavings      sql.NullFloat64 `json:"prism_dollar_savings"`
+	ModelName               sql.NullString  `json:"model_name"`
 }
 
 type ReadFile struct {

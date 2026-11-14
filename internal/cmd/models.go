@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 
-	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2/tree"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/mattn/go-isatty"
@@ -33,7 +32,7 @@ crush models gpt5`,
 		dataDir, _ := cmd.Flags().GetString("data-dir")
 		debug, _ := cmd.Flags().GetBool("debug")
 
-		cfg, err := config.Init(cwd, dataDir, debug)
+		cfg, err := config.Init(cmd.Context(), cwd, dataDir, debug)
 		if err != nil {
 			return err
 		}
@@ -58,15 +57,7 @@ crush models gpt5`,
 				configured: true,
 			}
 
-			// The OpenAI provider holds exactly one credential. Signed
-			// in with ChatGPT, only the models the subscription grants are
-			// usable; an API key lists the regular catalog.
-			var models []catwalk.Model
-			if providerID == string(catwalk.InferenceProviderOpenAI) && provider.OAuthToken != nil {
-				models = provider.ChatGPTModels
-			} else {
-				models = provider.Models
-			}
+			models := provider.UsableModels()
 
 			for _, model := range models {
 				if term != "" {

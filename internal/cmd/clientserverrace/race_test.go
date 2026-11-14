@@ -164,17 +164,16 @@ func TestClientServerSpawnRace(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), clientTimeout)
 			defer cancel()
 
-			// `crush run` exercises connectToServer (which is where
-			// the readiness race lives). On a fresh sandbox the
-			// command may legitimately keep running past the race
-			// (e.g. waiting on event subscriptions); the context
-			// timeout above bounds that. We assert race outcomes
-			// purely from output, not exit code.
+			// `crush logout` exercises connectToServer (which is
+			// where the readiness race lives) and, unlike `crush
+			// run`, spawns a server when none is running. The
+			// context timeout above bounds the run. We assert race
+			// outcomes purely from output, not exit code.
 			c := exec.CommandContext(
 				ctx, bin,
 				"--host", host,
 				"--cwd", cwd,
-				"run", "hi",
+				"logout", "hyper",
 			)
 			c.Env = env
 			var outBuf, errBuf strings.Builder

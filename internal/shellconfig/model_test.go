@@ -32,7 +32,7 @@ model add openai/gpt-5.6-sol --name "GPT 5.6 Sol" --context-window 200000 --can-
 	require.Equal(t, "gpt-5.6-sol", m["id"])
 	require.Equal(t, "GPT 5.6 Sol", m["name"])
 	require.Equal(t, float64(200000), m["context_window"])
-	require.Equal(t, true, m["can_reason"])
+	require.Equal(t, "toggleable", m["reasoning"].(map[string]any)["thinking"])
 }
 
 // TestModelAddReplacesDuplicateID verifies that re-adding a model id updates
@@ -57,10 +57,11 @@ func TestModelAddPricingFlags(t *testing.T) {
 model add anthropic/claude-x --price-input 3 --price-output 15 --price-cache-create 3.75 --price-cache-hit 0.3`)
 
 	model := result["providers"].(map[string]any)["anthropic"].(map[string]any)["models"].([]any)[0].(map[string]any)
-	require.Equal(t, 3.0, model["cost_per_1m_in"])
-	require.Equal(t, 15.0, model["cost_per_1m_out"])
-	require.Equal(t, 3.75, model["cost_per_1m_in_cached"])
-	require.Equal(t, 0.3, model["cost_per_1m_out_cached"])
+	pricing := model["pricing"].(map[string]any)
+	require.Equal(t, 3.0, pricing["input"])
+	require.Equal(t, 15.0, pricing["output"])
+	require.Equal(t, 3.75, pricing["cache_create"])
+	require.Equal(t, 0.3, pricing["cache_hit"])
 }
 
 func TestModelAddRejectsLegacyPricingFlags(t *testing.T) {

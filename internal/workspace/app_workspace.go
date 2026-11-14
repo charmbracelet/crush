@@ -13,16 +13,19 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/gitutil"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/pinentry"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/charmbracelet/crush/internal/sshaskpass"
 )
 
 // AppWorkspace implements the Workspace interface by delegating
@@ -45,7 +48,7 @@ func NewAppWorkspace(a *app.App, store *config.ConfigStore) *AppWorkspace {
 // -- Sessions --
 
 func (w *AppWorkspace) CreateSession(ctx context.Context, title string) (session.Session, error) {
-	return w.app.Sessions.Create(ctx, title)
+	return w.app.CreateSession(ctx, title)
 }
 
 func (w *AppWorkspace) GetSession(ctx context.Context, sessionID string) (session.Session, error) {
@@ -88,9 +91,9 @@ func (w *AppWorkspace) RoutesChannelEvents() bool { return false }
 // -- Messages --
 
 func (w *AppWorkspace) ListMessages(ctx context.Context, sessionID string) ([]message.Message, error) {
-	// Drain any debounced updates so the caller observes the latest
-	// in-memory state. message.Service buffers streaming deltas and a
-	// cold List would otherwise miss them at session-switch time.
+	if w.app.AgentCoordinator != nil {
+		return w.app.AgentCoordinator.ListSettledMessages(ctx, sessionID)
+	}
 	if err := w.app.Messages.FlushAll(ctx); err != nil {
 		return nil, err
 	}
@@ -275,12 +278,21 @@ func (w *AppWorkspace) PermissionDeny(perm permission.PermissionRequest) bool {
 	return w.app.Permissions.Deny(perm)
 }
 
-func (w *AppWorkspace) PermissionSkipRequests() bool {
-	return w.app.Permissions.SkipRequests()
+func (w *AppWorkspace) PermissionMode() permission.PermissionMode {
+	return w.app.Permissions.PermissionMode()
 }
 
-func (w *AppWorkspace) PermissionSetSkipRequests(skip bool) {
-	w.app.Permissions.SetSkipRequests(skip)
+func (w *AppWorkspace) PermissionSetMode(mode permission.PermissionMode) {
+	w.app.Permissions.SetPermissionMode(mode)
+}
+
+// -- Host context --
+
+func (w *AppWorkspace) HostContext(_ context.Context) (proto.HostContext, error) {
+	if w.app.AgentCoordinator == nil {
+		return proto.HostContext{}, nil
+	}
+	return w.app.AgentCoordinator.HostContext(), nil
 }
 
 // -- Questions --
@@ -291,6 +303,26 @@ func (w *AppWorkspace) QuestionAnswer(responses []question.Answer) bool {
 
 func (w *AppWorkspace) QuestionCancel() bool {
 	return w.app.Questions.Cancel()
+}
+
+// -- Pinentry --
+
+func (w *AppWorkspace) PinentryRespond(id, secret string) bool {
+	return pinentry.DefaultPrompts().Respond(id, secret)
+}
+
+func (w *AppWorkspace) PinentryCancel(id string) bool {
+	return pinentry.DefaultPrompts().Cancel(id)
+}
+
+// -- SSH prompts --
+
+func (w *AppWorkspace) SSHRespond(id, secret string) bool {
+	return sshaskpass.DefaultPrompts().Respond(id, secret)
+}
+
+func (w *AppWorkspace) SSHCancel(id string) bool {
+	return sshaskpass.DefaultPrompts().Cancel(id)
 }
 
 // -- FileTracker --
@@ -354,6 +386,10 @@ func (w *AppWorkspace) Config() *config.Config {
 
 func (w *AppWorkspace) WorkingDir() string {
 	return w.store.WorkingDir()
+}
+
+func (w *AppWorkspace) GitBranch(context.Context) (string, error) {
+	return gitutil.CurrentBranch(w.store.WorkingDir()), nil
 }
 
 func (w *AppWorkspace) Resolver() config.VariableResolver {
@@ -491,6 +527,70 @@ func (w *AppWorkspace) DisableDockerMCP() error {
 		return fmt.Errorf("failed to disable docker MCP: %w", err)
 	}
 	return w.store.DisableDockerMCP()
+}
+
+// MCPServersDisabled returns the MCP servers disabled for this
+// repository. The override set is shared by every session, including
+// subagent sessions.
+func (w *AppWorkspace) MCPServersDisabled(ctx context.Context) ([]string, error) {
+	return w.app.Sessions.MCPDisabledServers(ctx)
+}
+
+// MCPServersEnabled returns the MCP servers with a repository-scoped
+// enabled override: config-disabled servers the user enabled here. Startup
+// force-starts them so the toggle survives restarts.
+func (w *AppWorkspace) MCPServersEnabled(ctx context.Context) ([]string, error) {
+	return w.app.Sessions.MCPServersEnabled(ctx)
+}
+
+// MCPSetServerDisabled adds or removes a repository-scoped MCP override
+// and applies it to the running client. Config files are never touched.
+func (w *AppWorkspace) MCPSetServerDisabled(ctx context.Context, name string, disabled bool) error {
+	if err := w.app.Sessions.SetMCPServerDisabled(ctx, name, disabled); err != nil {
+		return err
+	}
+	return mcptools.SetLocalDisabled(ctx, w.store, name, disabled)
+}
+
+// MCPSetServerConfigDisabled toggles an MCP server's disabled flag in the
+// global config and applies the change to the running client unless a
+// repository-scoped override takes precedence.
+func (w *AppWorkspace) MCPSetServerConfigDisabled(ctx context.Context, name string, disabled bool) error {
+	override, err := session.HasMCPOverride(ctx, w.app.Sessions, name)
+	if err != nil {
+		return err
+	}
+	return mcptools.SetConfigDisabled(ctx, w.store, config.ScopeGlobal, name, disabled, override)
+}
+
+// MCPStartServer starts the named MCP server even when its config entry is
+// disabled. The repository-scoped enabled override recorded by
+// MCPSetServerDisabled makes the start survive restarts. Config files are
+// never touched.
+func (w *AppWorkspace) MCPStartServer(ctx context.Context, name string) error {
+	return mcptools.InitializeSingleForced(ctx, name, w.store)
+}
+
+// SkillsDisabled returns the skills disabled for this repository.
+func (w *AppWorkspace) SkillsDisabled(ctx context.Context) ([]string, error) {
+	return w.app.Sessions.SkillsDisabled(ctx)
+}
+
+// SkillsEnabled returns the skills with a repository-scoped enabled
+// override (config-disabled skills re-enabled here).
+func (w *AppWorkspace) SkillsEnabled(ctx context.Context) ([]string, error) {
+	return w.app.Sessions.SkillsEnabled(ctx)
+}
+
+// SkillSetDisabled adds or removes a repository-scoped skill override.
+func (w *AppWorkspace) SkillSetDisabled(ctx context.Context, name string, disabled bool) error {
+	return w.app.Sessions.SetSkillDisabled(ctx, name, disabled, w.store.SkillConfigDisabled(name))
+}
+
+// SkillSetConfigDisabled toggles a skill's disabled flag in the global
+// config's options.disabled_skills list.
+func (w *AppWorkspace) SkillSetConfigDisabled(ctx context.Context, name string, disabled bool) error {
+	return w.store.SetSkillDisabledConfig(config.ScopeGlobal, name, disabled)
 }
 
 func (w *AppWorkspace) MCPAuthenticate(ctx context.Context, name string) error {

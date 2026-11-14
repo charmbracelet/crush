@@ -209,6 +209,7 @@ func newCancelTestAgentWithRunComplete(t *testing.T) (*sessionAgent, fakeEnv, *p
 	broker := pubsub.NewBroker[notify.RunComplete]()
 	t.Cleanup(broker.Shutdown)
 	sa := NewSessionAgent(SessionAgentOptions{
+		Models:      noModels,
 		Sessions:    env.sessions,
 		Messages:    env.messages,
 		RunComplete: broker,
@@ -257,6 +258,33 @@ func TestRun_CancelOnEntryPublishesRunComplete(t *testing.T) {
 			"cancel-on-entry RunComplete must be marked cancelled")
 	case <-time.After(2 * time.Second):
 		t.Fatal("cancel-on-entry must publish RunComplete; a RunID caller would hang otherwise")
+	}
+}
+
+// A run that fails while setting up, after it became active, still ends
+// with RunComplete; observers would otherwise think the session busy.
+func TestRun_SetupFailurePublishesRunComplete(t *testing.T) {
+	t.Parallel()
+	sa, _, broker := newCancelTestAgentWithRunComplete(t)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	ch := broker.Subscribe(ctx)
+
+	_, err := sa.Run(t.Context(), SessionAgentCall{
+		SessionID: "missing",
+		RunID:     "run-setup-failure",
+		Prompt:    "hello",
+	})
+	require.Error(t, err)
+
+	select {
+	case got := <-ch:
+		assert.Equal(t, "run-setup-failure", got.Payload.RunID)
+		assert.NotEmpty(t, got.Payload.Error)
+		assert.False(t, got.Payload.Cancelled)
+	case <-time.After(2 * time.Second):
+		t.Fatal("a run that failed during setup must publish RunComplete")
 	}
 }
 

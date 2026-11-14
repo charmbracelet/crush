@@ -6,7 +6,7 @@ const AgenticFetchToolName = "agentic_fetch"
 // WebFetchToolName is the name of the web_fetch tool.
 const WebFetchToolName = "web_fetch"
 
-// WebSearchToolName is the name of the web_search tool for sub-agents.
+// WebSearchToolName is the name of the web_search tool for subagents.
 const WebSearchToolName = "web_search"
 
 // LargeContentThreshold is the size threshold for saving content to a file.

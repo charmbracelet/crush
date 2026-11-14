@@ -129,6 +129,18 @@ func IsImagePath(path string) bool {
 	})
 }
 
+// AllowedAudioTypes defines the permitted audio file types.
+var AllowedAudioTypes = []string{".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"}
+
+// IsAudioPath reports whether the given path has one of the allowed audio
+// file extensions.
+func IsAudioPath(path string) bool {
+	lowerPath := strings.ToLower(path)
+	return slices.ContainsFunc(AllowedAudioTypes, func(ext string) bool {
+		return strings.HasSuffix(lowerPath, ext)
+	})
+}
+
 // Common defines common UI options and configurations.
 type Common struct {
 	Workspace workspace.Workspace

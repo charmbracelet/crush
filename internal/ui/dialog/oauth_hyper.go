@@ -6,7 +6,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/catwalk/pkg/catwalk"
+	"charm.land/catwalk/v3/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/oauth/hyper"
 	"github.com/charmbracelet/crush/internal/ui/common"
@@ -92,5 +92,16 @@ func (m *OAuthHyper) stopPolling() tea.Msg {
 	if m.cancelFunc != nil {
 		m.cancelFunc()
 	}
+	return nil
+}
+
+// supportsCodeEntry reports whether the provider's flow can finish with
+// a pasted code. Only the Grok browser flow offers the manual fallback.
+func (m *OAuthHyper) supportsCodeEntry() bool {
+	return false
+}
+
+// submitCode is unreachable for providers without code entry.
+func (m *OAuthHyper) submitCode(string) tea.Cmd {
 	return nil
 }

@@ -202,7 +202,7 @@ func frameTestItems(prefix string) []chat.MessageItem {
 func scrollOnlyUpdate(u *UI, lines int) tea.View {
 	u.beginFrameUpdate()
 	u.markScrollOnly()
-	_ = u.chat.ScrollBy(lines)
+	u.chat.ScrollBy(lines)
 	u.endFrameUpdate()
 	return u.View()
 }

@@ -9,14 +9,14 @@ import (
 
 func (a *sessionAgent) eventPromptSent(sessionID string) {
 	event.PromptSent(
-		a.eventCommon(sessionID, a.largeModel.Get())...,
+		a.eventCommon(sessionID, a.models().Large)...,
 	)
 }
 
 func (a *sessionAgent) eventPromptResponded(sessionID string, duration time.Duration) {
 	event.PromptResponded(
 		append(
-			a.eventCommon(sessionID, a.largeModel.Get()),
+			a.eventCommon(sessionID, a.models().Large),
 			"prompt duration pretty", duration.String(),
 			"prompt duration in seconds", int64(duration.Seconds()),
 		)...,
@@ -46,6 +46,5 @@ func (a *sessionAgent) eventCommon(sessionID string, model Model) []any {
 		"model", m.Model,
 		"reasoning effort", m.ReasoningEffort,
 		"thinking mode", m.Think,
-		"yolo mode", a.isYolo,
 	}
 }

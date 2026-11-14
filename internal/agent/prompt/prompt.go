@@ -8,12 +8,14 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"text/template"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/filepathext"
+	"github.com/charmbracelet/crush/internal/gitutil"
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/skills"
@@ -26,6 +28,13 @@ type Prompt struct {
 	now        func() time.Time
 	platform   string
 	workingDir string
+	canWrite   bool
+	toolNames  []string
+
+	// skillOverrides fetches the repository-scoped skill toggle state at
+	// Build time: which skills the repository disabled and which it
+	// re-enabled over the config. Nil means no overrides.
+	skillOverrides func(ctx context.Context) (disabled, enabled []string)
 }
 
 type PromptDat struct {
@@ -40,6 +49,10 @@ type PromptDat struct {
 	ContextFiles       []ContextFile
 	GlobalContextFiles []ContextFile
 	AvailSkillXML      string
+	CanWrite           bool
+	// ToolNames are the tools the agent is actually given, which is not
+	// always its whole configured set: some tools depend on the run mode.
+	ToolNames []string
 }
 
 type ContextFile struct {
@@ -61,9 +74,42 @@ func WithPlatform(platform string) Option {
 	}
 }
 
+// WithCanWrite marks the prompt as belonging to an agent that can edit files.
+func WithCanWrite(canWrite bool) Option {
+	return func(p *Prompt) {
+		p.canWrite = canWrite
+	}
+}
+
+// WithToolNames sets the tools the agent is actually given, so a prompt that
+// advertises its tools cannot promise one that was never attached.
+func WithToolNames(names []string) Option {
+	return func(p *Prompt) {
+		p.toolNames = names
+	}
+}
+
 func WithWorkingDir(workingDir string) Option {
 	return func(p *Prompt) {
 		p.workingDir = workingDir
+	}
+}
+
+// WithSkillOverrides supplies the repository-scoped skill toggle state,
+// evaluated when the prompt is built. disabled lists skills turned off
+// for the repository; enabled lists config-disabled skills turned back
+// on for it.
+func WithSkillOverrides(disabled, enabled func(ctx context.Context) []string) Option {
+	return func(p *Prompt) {
+		p.skillOverrides = func(ctx context.Context) (d, e []string) {
+			if disabled != nil {
+				d = disabled(ctx)
+			}
+			if enabled != nil {
+				e = enabled(ctx)
+			}
+			return d, e
+		}
 	}
 }
 
@@ -200,6 +246,28 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 	// Filter out disabled skills.
 	allSkills = skills.Filter(allSkills, cfg.Options.DisabledSkills)
 
+	// Apply repository-scoped toggle overrides on top: repo-disabled
+	// skills hide too, and config-disabled skills with a repository
+	// enabled override come back for this repository.
+	if p.skillOverrides != nil {
+		repoDisabled, repoEnabled := p.skillOverrides(ctx)
+		effective := make(map[string]bool, len(repoDisabled))
+		for _, name := range repoDisabled {
+			effective[name] = true
+		}
+		for _, name := range repoEnabled {
+			delete(effective, name)
+		}
+		if len(effective) > 0 {
+			disabled := make([]string, 0, len(effective))
+			for name := range effective {
+				disabled = append(disabled, name)
+			}
+			slices.Sort(disabled)
+			allSkills = skills.Filter(allSkills, disabled)
+		}
+	}
+
 	if len(allSkills) > 0 {
 		availSkillXML = skills.ToPromptXML(allSkills)
 	}
@@ -214,6 +282,8 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 		Platform:      platform,
 		Date:          p.now().Format("1/2/2006"),
 		AvailSkillXML: availSkillXML,
+		CanWrite:      p.canWrite,
+		ToolNames:     p.toolNames,
 	}
 	if isGit {
 		var err error
@@ -241,10 +311,7 @@ func getGitStatus(ctx context.Context, dir string) (string, error) {
 	sh := shell.NewShell(&shell.Options{
 		WorkingDir: dir,
 	})
-	branch, err := getGitBranch(ctx, sh)
-	if err != nil {
-		return "", err
-	}
+	branch := getGitBranch(dir)
 	status, err := getGitStatusSummary(ctx, sh)
 	if err != nil {
 		return "", err
@@ -256,16 +323,16 @@ func getGitStatus(ctx context.Context, dir string) (string, error) {
 	return branch + status + commits, nil
 }
 
-func getGitBranch(ctx context.Context, sh *shell.Shell) (string, error) {
-	out, _, err := sh.Exec(ctx, "git branch --show-current 2>/dev/null")
-	if err != nil {
-		return "", nil
+// getGitBranch reads the checked-out branch straight from the repository.
+// This runs on every prompt build, so it stays off the shell: spawning git
+// each turn is wasted work, and a detail of prompt assembly has no business
+// passing through command blocking and permission policy.
+func getGitBranch(dir string) string {
+	branch := gitutil.CurrentBranch(dir)
+	if branch == "" {
+		return ""
 	}
-	out = strings.TrimSpace(out)
-	if out == "" {
-		return "", nil
-	}
-	return fmt.Sprintf("Current branch: %s\n", out), nil
+	return fmt.Sprintf("Current branch: %s\n", branch)
 }
 
 func getGitStatusSummary(ctx context.Context, sh *shell.Shell) (string, error) {

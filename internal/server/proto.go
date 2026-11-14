@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/charmbracelet/crush/internal/backend"
@@ -124,9 +125,34 @@ func (c *controllerV1) handlePostWorkspaceCurrentSession(w http.ResponseWriter, 
 		jsonError(w, http.StatusBadRequest, "failed to decode request")
 		return
 	}
-	if err := c.backend.SetCurrentSession(id, clientID, req.SessionID); err != nil {
+	if err := c.backend.SetCurrentSession(r.Context(), id, clientID, req.SessionID); err != nil {
 		c.handleError(w, r, err)
 		return
+	}
+}
+
+// handleGetWorkspaceHostContext returns what the host application has in
+// view.
+func (c *controllerV1) handleGetWorkspaceHostContext(w http.ResponseWriter, r *http.Request) {
+	hc, err := c.backend.GetHostContext(r.PathValue("id"))
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	jsonEncode(w, hc)
+}
+
+// handlePostWorkspaceHostContext records what the host application has in
+// view.
+func (c *controllerV1) handlePostWorkspaceHostContext(w http.ResponseWriter, r *http.Request) {
+	var hc proto.HostContext
+	if err := json.NewDecoder(r.Body).Decode(&hc); err != nil && !errors.Is(err, io.EOF) {
+		c.server.logError(r, "Failed to decode request", "error", err)
+		jsonError(w, http.StatusBadRequest, "failed to decode request")
+		return
+	}
+	if err := c.backend.SetHostContext(r.PathValue("id"), hc); err != nil {
+		c.handleError(w, r, err)
 	}
 }
 
@@ -191,6 +217,11 @@ func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.R
 		c.handleError(w, r, err)
 		return
 	}
+	sessions, err := c.backend.SubscribeClientSessions(r.Context(), id)
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
 	if err := c.backend.AttachClient(id, clientID); err != nil {
 		c.handleError(w, r, err)
 		return
@@ -207,6 +238,9 @@ func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.R
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
+	c.replayHostTheme(w, r, flusher, id)
+	c.replayClientSessions(w, r, flusher, id)
+
 	for {
 		select {
 		case <-r.Context().Done():
@@ -216,20 +250,34 @@ func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.R
 			if !ok {
 				return
 			}
-			wrapped := wrapEvent(ev.Payload)
-			if wrapped == nil {
+			if !c.deliverToClient(r.Context(), id, clientID, ev.Payload) {
 				continue
 			}
-			data, err := json.Marshal(wrapped)
-			if err != nil {
-				c.server.logError(r, "Failed to marshal event", "error", err)
+			c.writeEvent(w, r, flusher, ev.Payload)
+		case sev, ok := <-sessions:
+			if !ok {
+				sessions = nil
 				continue
 			}
-
-			fmt.Fprintf(w, "data: %s\n\n", data)
-			flusher.Flush()
+			c.writeEvent(w, r, flusher, sev)
 		}
 	}
+}
+
+// writeEvent wraps a workspace event in its SSE envelope and writes it to
+// the stream. Events with no wire form are skipped.
+func (c *controllerV1) writeEvent(w http.ResponseWriter, r *http.Request, flusher *http.ResponseController, ev any) {
+	wrapped := wrapEvent(ev)
+	if wrapped == nil {
+		return
+	}
+	data, err := json.Marshal(wrapped)
+	if err != nil {
+		c.server.logError(r, "Failed to marshal event", "error", err)
+		return
+	}
+	fmt.Fprintf(w, "data: %s\n\n", data)
+	flusher.Flush()
 }
 
 // handleGetWorkspaceLSPs lists LSP clients for a workspace.
@@ -607,6 +655,20 @@ func (c *controllerV1) handlePostWorkspaceAgentSessionPromptClear(w http.Respons
 	w.WriteHeader(http.StatusOK)
 }
 
+// handlePostWorkspaceAgentSessionNote keeps a note for the session's next prompt.
+func (c *controllerV1) handlePostWorkspaceAgentSessionNote(w http.ResponseWriter, r *http.Request) {
+	var note proto.SessionNote
+	if err := json.NewDecoder(r.Body).Decode(&note); err != nil || note.Text == "" {
+		jsonError(w, http.StatusBadRequest, "failed to decode request")
+		return
+	}
+	if err := c.backend.AddNote(r.PathValue("id"), r.PathValue("sid"), note.Text); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
 // handlePostWorkspaceAgentSessionSummarize summarizes a session.
 func (c *controllerV1) handlePostWorkspaceAgentSessionSummarize(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
@@ -714,32 +776,23 @@ func (c *controllerV1) handlePostWorkspaceQuestionsCancel(w http.ResponseWriter,
 	jsonEncode(w, proto.QuestionAnswerResponse{Resolved: cancelled})
 }
 
-// handlePostWorkspacePermissionsSkip sets whether to skip permission prompts.
-func (c *controllerV1) handlePostWorkspacePermissionsSkip(w http.ResponseWriter, r *http.Request) {
+// handlePostWorkspacePermissionsMode sets the permission mode for a workspace.
+func (c *controllerV1) handlePostWorkspacePermissionsMode(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	var req proto.PermissionSkipRequest
+	var req proto.PermissionSetModeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		c.server.logError(r, "Failed to decode request", "error", err)
 		jsonError(w, http.StatusBadRequest, "failed to decode request")
 		return
 	}
 
-	if err := c.backend.SetPermissionsSkip(id, req.Skip); err != nil {
+	mode := proto.ProtoModeToPermission(req.Mode)
+	if err := c.backend.SetPermissionMode(id, mode); err != nil {
 		c.handleError(w, r, err)
 		return
 	}
-}
-
-// handleGetWorkspacePermissionsSkip returns whether permission prompts are skipped.
-func (c *controllerV1) handleGetWorkspacePermissionsSkip(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	skip, err := c.backend.GetPermissionsSkip(id)
-	if err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-	jsonEncode(w, proto.PermissionSkipRequest{Skip: skip})
+	w.WriteHeader(http.StatusOK)
 }
 
 // handleError maps backend errors to HTTP status codes and writes the
@@ -773,6 +826,10 @@ func (c *controllerV1) handleError(w http.ResponseWriter, r *http.Request, err e
 	case errors.Is(err, backend.ErrUnknownCommand):
 		status = http.StatusBadRequest
 	case errors.Is(err, backend.ErrInvalidClientID):
+		status = http.StatusBadRequest
+	case errors.Is(err, backend.ErrInvalidTheme):
+		// The message names every offending color (or the unknown base
+		// theme), so a host can fix its theme mapping from the response.
 		status = http.StatusBadRequest
 	case errors.Is(err, backend.ErrClientNotAttached):
 		// 409, not 404: the workspace exists, the caller just has no live

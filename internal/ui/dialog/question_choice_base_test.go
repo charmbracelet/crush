@@ -245,3 +245,18 @@ func TestFillInBarFollowsSelection(t *testing.T) {
 			"in hover mode the bar belongs to the hovered choice")
 	})
 }
+
+// TestSuppressedScrollStillClampsBounds verifies that a click that skips the
+// snap to the cursor still keeps the offset inside the content, since the
+// click can shrink it (a blurred fill-in collapses to one row).
+func TestSuppressedScrollStillClampsBounds(t *testing.T) {
+	t.Parallel()
+
+	d := newTestMultiChoice(t)
+	d.scrollOffset = 6
+	d.suppressScroll = true
+	d.clampScroll(make([]contentLine, 12), 8)
+
+	require.Equal(t, 4, d.scrollOffset)
+	require.False(t, d.suppressScroll)
+}

@@ -338,9 +338,8 @@ func TestToggleInputMode(t *testing.T) {
 	t.Parallel()
 	ui, ws := newPlanUI(t, "sess-1")
 	ui.mode = uiInputModeCode
-	// The Shift+Tab cycle: code -> plan -> YOLO -> sysadmin -> code. Only
-	// the two input-mode changes switch agents, so the update count stops
-	// climbing once the cycle is only moving the permission mode.
+	// The Shift+Tab cycle: code -> plan -> YOLO -> code. Only the input-mode
+	// changes switch agents, which is what the update count tracks.
 	for _, want := range []struct {
 		mode    uiInputMode
 		perm    permission.PermissionMode
@@ -348,8 +347,8 @@ func TestToggleInputMode(t *testing.T) {
 	}{
 		{uiInputModePlan, permission.PermissionModeNormal, 1},
 		{uiInputModeCode, permission.PermissionModeYolo, 2},
-		{uiInputModeCode, permission.PermissionModeSysadmin, 2},
 		{uiInputModeCode, permission.PermissionModeNormal, 2},
+		{uiInputModePlan, permission.PermissionModeNormal, 3},
 	} {
 		applyModeSwitchMsg(ui, ui.toggleInputMode())
 		require.Equal(t, want.mode, ui.mode)
@@ -920,26 +919,27 @@ func TestGeneratedPlanContinuationIsHidden(t *testing.T) {
 	require.Equal(t, []string{"Implement the plan.", "Implement the plan."}, ws.runPrompts)
 }
 
-// A permissive mode the user chose himself is part of the ring like any
-// other: the cycle picks up where the badge says it is and closes.
-func TestToggleInputModeCycleCompletesFromExplicitYolo(t *testing.T) {
+// A permissive mode picked outside the cycle (Ctrl+Y, or sysadmin from the
+// palette) closes the ring back to code; sysadmin is never a stop.
+func TestToggleInputModeCycleCompletesFromExplicitMode(t *testing.T) {
 	t.Parallel()
-	u, ws := newPlanUI(t, "sess-1")
-	u.mode = uiInputModeCode
-	seedYolo(u, ws, true)
+	for _, start := range []permission.PermissionMode{permission.PermissionModeYolo, permission.PermissionModeSysadmin} {
+		u, ws := newPlanUI(t, "sess-1")
+		u.mode = uiInputModeCode
+		u.setPermissionMode(start)
 
-	for _, want := range []struct {
-		mode uiInputMode
-		perm permission.PermissionMode
-	}{
-		{uiInputModeCode, permission.PermissionModeSysadmin},
-		{uiInputModeCode, permission.PermissionModeNormal},
-		{uiInputModePlan, permission.PermissionModeNormal},
-		{uiInputModeCode, permission.PermissionModeYolo},
-	} {
-		applyModeSwitchMsg(u, u.toggleInputMode())
-		require.Equal(t, want.mode, u.mode)
-		require.Equal(t, want.perm, ws.permMode)
+		for _, want := range []struct {
+			mode uiInputMode
+			perm permission.PermissionMode
+		}{
+			{uiInputModeCode, permission.PermissionModeNormal},
+			{uiInputModePlan, permission.PermissionModeNormal},
+			{uiInputModeCode, permission.PermissionModeYolo},
+		} {
+			applyModeSwitchMsg(u, u.toggleInputMode())
+			require.Equal(t, want.mode, u.mode)
+			require.Equal(t, want.perm, ws.permMode)
+		}
 	}
 }
 

@@ -53,6 +53,7 @@ type (
 	ActionToggleThinking          struct{}
 	ActionTogglePills             struct{}
 	ActionExternalEditor          struct{}
+	ActionTogglePlanMode          struct{}
 	ActionToggleYoloMode          struct{}
 	ActionToggleSysadminMode      struct{}
 	ActionToggleNotifications     struct{}

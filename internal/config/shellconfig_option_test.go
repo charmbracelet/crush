@@ -38,6 +38,7 @@ option ui diff split
 option ui transparent false
 option ui mouse false
 option ui scrollbar always
+option ui timestamps 24h
 option ui completions-max-depth 4
 option ui completions-max-items 200`)
 
@@ -50,6 +51,7 @@ option ui completions-max-items 200`)
 	require.NotNil(t, ui.Mouse)
 	require.False(t, *ui.Mouse)
 	require.Equal(t, "always", ui.Scrollbar)
+	require.Equal(t, "24h", string(ui.Timestamps))
 	require.NotNil(t, ui.Completions.MaxDepth)
 	require.Equal(t, 4, *ui.Completions.MaxDepth)
 	require.NotNil(t, ui.Completions.MaxItems)

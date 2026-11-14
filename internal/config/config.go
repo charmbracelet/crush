@@ -64,6 +64,11 @@ const (
 	AgentTask  string = "task"
 )
 
+// MinRecommendedContextWindow is the context window size, in tokens, below
+// which Crush warns that a model may be too small to function well. It is
+// also the auto-summarization threshold used by the agent.
+const MinRecommendedContextWindow = 200_000
+
 type SelectedModel struct {
 	// The model id as used by the provider API.
 	// Required.
@@ -482,8 +487,9 @@ type Options struct {
 	// Crush dialog (loopback pinentry) instead of handing the terminal
 	// over to an external pinentry program. No GPG or git configuration
 	// is modified: the redirect only applies to processes Crush spawns.
-	PinentryIntegrated   *bool `json:"pinentry_integrated,omitempty" jsonschema:"description=Render GPG passphrase prompts as a native Crush dialog instead of an external pinentry program. Works with file-based keys and security keys and never modifies GPG or git configuration.,default=true"`
-	PinentryCacheTimeout *int  `json:"pinentry_cache_timeout,omitempty" jsonschema:"description=Seconds Crush keeps an entered GPG passphrase in memory so repeated signing operations do not re-prompt. 0 (the default) disables it; gpg-agent's own cache applies regardless.,default=0,example=300"`
+	PinentryIntegrated    *bool `json:"pinentry_integrated,omitempty" jsonschema:"description=Render GPG passphrase prompts as a native Crush dialog instead of an external pinentry program. Works with file-based keys and security keys and never modifies GPG or git configuration.,default=true"`
+	PinentryCacheTimeout  *int  `json:"pinentry_cache_timeout,omitempty" jsonschema:"description=Seconds Crush keeps an entered GPG passphrase in memory so repeated signing operations do not re-prompt. 0 (the default) disables it; gpg-agent's own cache applies regardless.,default=0,example=300"`
+	DisableSystemWarnings bool  `json:"disable_system_warnings,omitempty" jsonschema:"description=Disable Crush system advisories such as small-context-model and sysadmin warnings,default=false"`
 }
 
 // DefaultMaxBackgroundJobs is how many background shell jobs may run at once

@@ -46,15 +46,56 @@ func badgesOf(s Styles, o quickStyleOpts) []badge {
 	}
 }
 
+// badgeInkExceptions pins the inks [badgeInk] swaps on built-in themes
+// whose fills sit below [minBadgeInkContrast] against their background
+// role. Rosé Pine's pine fills are mid-tone and its dawn variant is
+// light, so those badges write the text color, which reads better on
+// the fill than the background role.
+var badgeInkExceptions = map[string]map[string]string{
+	"rose-pine": {
+		"Status.SuccessIndicator":    "#e0def4",
+		"Status.InfoIndicator":       "#e0def4",
+		"Status.UpdateIndicator":     "#e0def4",
+		"Status.SuccessMessage":      "#e0def4",
+		"Status.InfoMessage":         "#e0def4",
+		"Status.UpdateMessage":       "#e0def4",
+		"Attachments.Image":          "#e0def4",
+		"Attachments.Text":           "#e0def4",
+		"Attachments.Skill":          "#e0def4",
+		"Tool.AgenticFetchPromptTag": "#e0def4",
+	},
+	"rose-pine-moon": {
+		"Status.SuccessMessage": "#e0def4",
+		"Status.InfoMessage":    "#e0def4",
+		"Status.UpdateMessage":  "#e0def4",
+	},
+	"rose-pine-dawn": {
+		"Status.WarnIndicator":         "#575279",
+		"Status.SuccessMessage":        "#575279",
+		"Status.InfoMessage":           "#575279",
+		"Status.UpdateMessage":         "#575279",
+		"Status.ModeBadgeYolo":         "#575279",
+		"Status.ModeBannerYolo":        "#575279",
+		"Editor.PromptYoloIconFocused": "#575279",
+	},
+}
+
 // TestBadgeInk_BuiltinsKeepTheirInk pins the built-in themes' look: each
-// keeps the background role it always wrote on its badges.
+// keeps the background role it always wrote on its badges, except where
+// [badgeInk] swaps it per [badgeInkExceptions].
 func TestBadgeInk_BuiltinsKeepTheirInk(t *testing.T) {
 	t.Parallel()
 	for name, opts := range builtinThemes {
 		o := opts()
 		s := quickStyle(o)
 		for _, b := range badgesOf(s, o) {
-			require.Equal(t, rgbHex(b.ink), rgbHex(b.style.GetForeground()), "%s: %s", name, b.name)
+			want := rgbHex(b.ink)
+			if ex, ok := badgeInkExceptions[name]; ok {
+				if v, ok := ex[b.name]; ok {
+					want = v
+				}
+			}
+			require.Equal(t, want, rgbHex(b.style.GetForeground()), "%s: %s", name, b.name)
 		}
 	}
 }

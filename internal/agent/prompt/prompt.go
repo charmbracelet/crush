@@ -335,14 +335,29 @@ func getGitBranch(dir string) string {
 	return fmt.Sprintf("Current branch: %s\n", branch)
 }
 
+// gitStatusMaxPaths bounds the status block: a long list of changed paths
+// does not help the model plan, and the prompt is rebuilt on every turn.
+const gitStatusMaxPaths = 20
+
 func getGitStatusSummary(ctx context.Context, sh *shell.Shell) (string, error) {
-	out, _, err := sh.Exec(ctx, "git status --short 2>/dev/null | head -20")
+	// Run git directly rather than piping through head. In a pipeline the
+	// shell reports head's exit status, so a git that could not run at all
+	// (no binary on PATH, a repository git refuses to read) answers with
+	// nothing, which is indistinguishable from a clean tree. head is also an
+	// external command: on a host without coreutils on PATH the pipeline
+	// failed outright and the block was dropped.
+	out, errOut, err := sh.Exec(ctx, "git status --short")
 	if err != nil {
-		return "", nil
+		slog.Debug("Could not read git status", "error", err, "stderr", strings.TrimSpace(errOut))
+		return "Status: unavailable (git status failed)\n", nil
 	}
 	out = strings.TrimSpace(out)
 	if out == "" {
 		return "Status: clean\n", nil
+	}
+	if lines := strings.Split(out, "\n"); len(lines) > gitStatusMaxPaths {
+		out = strings.Join(lines[:gitStatusMaxPaths], "\n") +
+			fmt.Sprintf("\n(+%d more)", len(lines)-gitStatusMaxPaths)
 	}
 	return fmt.Sprintf("Status:\n%s\n", out), nil
 }

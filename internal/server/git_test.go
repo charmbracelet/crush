@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/crush/internal/backend"
+	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -43,6 +45,25 @@ func TestGitBranchEndpoint(t *testing.T) {
 		Path:     wsPath,
 		DataDir:  t.TempDir(),
 		ClientID: uuid.New().String(),
+	})
+
+	// Windows cannot remove the temp data directory while the pooled
+	// DB connection is open, so release it on teardown and wait for
+	// the create grace to expire before TempDir cleanup runs.
+	bw, err := h.backend.GetWorkspace(ws.ID)
+	require.NoError(t, err)
+	wsDataDir := bw.Cfg.Config().Options.DataDirectory
+	released := make(chan struct{})
+	backend.SetWorkspaceShutdownFnForTest(bw, func() {
+		_ = db.Release(wsDataDir)
+		close(released)
+	})
+	t.Cleanup(func() {
+		select {
+		case <-released:
+		case <-time.After(10 * time.Second):
+			t.Error("workspace was not released")
+		}
 	})
 
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet,

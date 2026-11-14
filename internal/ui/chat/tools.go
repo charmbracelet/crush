@@ -117,6 +117,9 @@ type ToolRenderOpts struct {
 	// Elapsed is how long the tool call has been (or was) running.
 	// Zero when the start time is unknown (restored items).
 	Elapsed time.Duration
+	// LiveOutput is output streamed while the tool runs, shown instead of
+	// the result until the tool finishes.
+	LiveOutput string
 }
 
 // IsPending returns true if the tool call is still pending (not finished and
@@ -173,12 +176,33 @@ type baseToolMessageItem struct {
 	// spinningFunc allows tools to override the default spinning logic.
 	// If nil, uses the default: !toolCall.Finished && !canceled.
 	spinningFunc SpinningFunc
+	// liveOutput is output streamed while the tool runs. It is display
+	// only and is cleared once the result arrives.
+	liveOutput string
 
 	sty             *styles.Styles
 	anim            *anim.Anim
 	expandedContent bool
 	startedAt       time.Time
 	finishedAt      time.Time
+}
+
+// LiveOutputItem is implemented by tool items that can show output while
+// the tool is still running.
+type LiveOutputItem interface {
+	SetLiveOutput(output string) bool
+}
+
+// SetLiveOutput sets the output to show while the tool runs. It is ignored
+// once a result is set, and reports whether the item changed.
+func (t *baseToolMessageItem) SetLiveOutput(output string) bool {
+	if t.result != nil || t.liveOutput == output {
+		return false
+	}
+	t.liveOutput = output
+	t.clearCache()
+	t.Bump()
+	return true
 }
 
 var _ Expandable = (*baseToolMessageItem)(nil)
@@ -384,6 +408,7 @@ func (t *baseToolMessageItem) RawRender(width int) string {
 			Status:          t.computeStatus(),
 			StartedAt:       t.startedAt,
 			Elapsed:         t.elapsed(),
+			LiveOutput:      t.liveOutput,
 		})
 
 		// Prepend hook indicator if hooks ran for this tool call.
@@ -493,6 +518,9 @@ func (t *baseToolMessageItem) spinnerTimer() string {
 // SetResult sets the tool result associated with this message item.
 func (t *baseToolMessageItem) SetResult(res *message.ToolResult) {
 	t.result = res
+	if res != nil {
+		t.liveOutput = ""
+	}
 	t.clearCache()
 	t.Bump()
 }

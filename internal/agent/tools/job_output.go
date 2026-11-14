@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"fmt"
 	"strings"
+	"time"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/shell"
@@ -46,7 +47,7 @@ func NewJobOutputTool(spillDir string) fantasy.AgentTool {
 			}
 
 			if params.Wait {
-				bgShell.WaitContext(ctx)
+				waitWithProgress(ctx, bgShell, newProgressReporter(GetSessionFromContext(ctx), call.ID))
 			}
 
 			stdout, stderr, done, err := bgShell.GetOutput()
@@ -89,4 +90,21 @@ func NewJobOutputTool(spillDir string) fantasy.AgentTool {
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(result), metadata), nil
 		},
 	)
+}
+
+// waitWithProgress blocks until the shell finishes or ctx is cancelled,
+// publishing live output while it waits.
+func waitWithProgress(ctx context.Context, bgShell *shell.BackgroundShell, progress *progressReporter) {
+	ticker := time.NewTicker(progressPollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-bgShell.Done():
+			return
+		case <-ticker.C:
+			progress.report(bgShell)
+		}
+	}
 }

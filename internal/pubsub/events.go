@@ -37,6 +37,7 @@ const (
 	PayloadTypeSSHPromptRequest       PayloadType = "ssh_prompt_request"
 	PayloadTypeSSHNotification        PayloadType = "ssh_prompt_notification"
 	PayloadTypePermissionModeChanged  PayloadType = "permission_mode_changed"
+	PayloadTypeToolProgress           PayloadType = "tool_progress"
 )
 
 // Payload wraps a discriminated JSON payload with a type tag.

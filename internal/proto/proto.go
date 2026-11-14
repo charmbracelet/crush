@@ -417,6 +417,14 @@ func (e *LSPEventType) UnmarshalText(data []byte) error {
 	return nil
 }
 
+// ToolProgress is the wire form of live output for a running tool call.
+type ToolProgress struct {
+	SessionID  string `json:"session_id"`
+	ToolCallID string `json:"tool_call_id"`
+	ShellID    string `json:"shell_id,omitempty"`
+	Output     string `json:"output"`
+}
+
 // LSPEvent represents an event in the LSP system.
 type LSPEvent struct {
 	Type            LSPEventType    `json:"type"`

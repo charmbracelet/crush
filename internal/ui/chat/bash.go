@@ -99,6 +99,10 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		return header
 	}
 
+	if live, ok := toolLiveOutputContent(sty, opts, cappedWidth); ok {
+		return joinToolParts(header, live)
+	}
+
 	if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
 		return joinToolParts(header, earlyState)
 	}
@@ -298,6 +302,10 @@ func renderJobTool(sty *styles.Styles, opts *ToolRenderOpts, width int, action, 
 		return header
 	}
 
+	if live, ok := toolLiveOutputContent(sty, opts, width); ok {
+		return joinToolParts(header, live)
+	}
+
 	if earlyState, ok := toolEarlyStateContent(sty, opts, width); ok {
 		return joinToolParts(header, earlyState)
 	}
@@ -338,4 +346,23 @@ func jobHeader(sty *styles.Styles, status ToolStatus, action, shellID, descripti
 // joinToolParts joins header and body with a blank line separator.
 func joinToolParts(header, body string) string {
 	return strings.Join([]string{header, "", body}, "\n")
+}
+
+// toolLiveOutputContent renders output streamed while a tool is still
+// running. When collapsed it shows the newest lines rather than the first,
+// since those are the ones still changing. Returns false when there is a
+// result or no live output yet.
+func toolLiveOutputContent(sty *styles.Styles, opts *ToolRenderOpts, width int) (string, bool) {
+	if opts.HasResult() || opts.LiveOutput == "" || opts.Status != ToolStatusRunning {
+		return "", false
+	}
+	bodyWidth := width - toolBodyLeftPaddingTotal
+	output := opts.LiveOutput
+	if !opts.ExpandedContent {
+		lines := strings.Split(output, "\n")
+		if keep := collapsedMaxLines(len(lines)); len(lines) > keep {
+			output = strings.Join(lines[len(lines)-keep:], "\n")
+		}
+	}
+	return sty.Tool.Body.Render(toolOutputPlainContent(sty, output, bodyWidth, opts.ExpandedContent)), true
 }

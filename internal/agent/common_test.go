@@ -12,6 +12,7 @@ import (
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/openaicompat"
 	"charm.land/x/vcr"
+	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
@@ -50,7 +51,7 @@ type modelPair struct {
 func hyperBuilder(model string) builderFunc {
 	return func(t *testing.T, r *vcr.Recorder) (fantasy.LanguageModel, error) {
 		provider, err := openaicompat.New(
-			openaicompat.WithBaseURL("https://hyper.charm.land/v1"),
+			openaicompat.WithBaseURL(hyper.BaseURL()+"/v1"),
 			openaicompat.WithAPIKey(os.Getenv("CRUSH_HYPER_API_KEY")),
 			openaicompat.WithHTTPClient(&http.Client{Transport: r}),
 		)

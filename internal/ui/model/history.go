@@ -10,39 +10,51 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 )
 
+type promptHistoryEntry struct {
+	messageID  string
+	shellIndex int // -1 for text prompts.
+	text       string
+}
+
 // promptHistoryLoadedMsg is sent when prompt history is loaded.
 type promptHistoryLoadedMsg struct {
-	messages []string
+	messages   []promptHistoryEntry
+	sessionID  string
+	generation uint64
 }
 
 // loadPromptHistory loads user messages for history navigation. Both queries
 // stop at the 200 most recent entries; recall only steps back one at a time.
 func (m *UI) loadPromptHistory() tea.Cmd {
+	m.promptHistory.generation++
+	generation := m.promptHistory.generation
+	sessionID := m.currentSessionID()
+	ws := m.com.Workspace
 	return func() tea.Msg {
 		ctx := context.Background()
 		var messages []message.Message
 		var err error
 
-		if m.session != nil {
-			messages, err = m.com.Workspace.ListUserMessages(ctx, m.session.ID)
+		if sessionID != "" {
+			messages, err = ws.ListUserMessages(ctx, sessionID)
 		} else {
-			messages, err = m.com.Workspace.ListAllUserMessages(ctx)
+			messages, err = ws.ListAllUserMessages(ctx)
 		}
 		if err != nil {
 			slog.Error("Failed to load prompt history", "error", err)
-			return promptHistoryLoadedMsg{messages: nil}
+			return promptHistoryLoadedMsg{sessionID: sessionID, generation: generation}
 		}
 
-		texts := make([]string, 0, len(messages))
+		entries := make([]promptHistoryEntry, 0, len(messages))
 		for _, msg := range messages {
-			if text := msg.Content().Text; text != "" {
-				texts = append(texts, text)
+			if content := msg.Content(); content.Text != "" && !content.Hidden {
+				entries = append(entries, promptHistoryEntry{messageID: msg.ID, shellIndex: -1, text: content.Text})
 			}
-			for _, sc := range msg.ShellCommands() {
-				texts = append(texts, "!"+sc.Command)
+			for i, sc := range msg.ShellCommands() {
+				entries = append(entries, promptHistoryEntry{messageID: msg.ID, shellIndex: i, text: "!" + sc.Command})
 			}
 		}
-		return promptHistoryLoadedMsg{messages: texts}
+		return promptHistoryLoadedMsg{messages: entries, sessionID: sessionID, generation: generation}
 	}
 }
 
@@ -150,7 +162,7 @@ func (m *UI) historyPrev() bool {
 	}
 	m.promptHistory.index = nextIndex
 	m.textarea.Reset()
-	m.textarea.InsertString(m.promptHistory.messages[nextIndex])
+	m.textarea.InsertString(m.promptHistory.messages[nextIndex].text)
 	m.textarea.MoveToBegin()
 	m.syncBangModeFromTextarea()
 	return true
@@ -172,7 +184,7 @@ func (m *UI) historyNext() bool {
 	}
 	m.promptHistory.index = nextIndex
 	m.textarea.Reset()
-	m.textarea.InsertString(m.promptHistory.messages[nextIndex])
+	m.textarea.InsertString(m.promptHistory.messages[nextIndex].text)
 	m.syncBangModeFromTextarea()
 	return true
 }

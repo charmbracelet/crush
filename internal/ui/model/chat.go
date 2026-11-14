@@ -599,7 +599,7 @@ func (m *Chat) armAnimClock() tea.Cmd {
 	m.animArmedAt = m.now()
 	m.animGen++
 	gen := m.animGen
-	return tea.Tick(anim.FrameInterval(), func(time.Time) tea.Msg {
+	return tea.Every(anim.FrameInterval(), func(time.Time) tea.Msg {
 		return animTickMsg{gen: gen}
 	})
 }

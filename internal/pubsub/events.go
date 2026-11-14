@@ -26,6 +26,7 @@ const (
 	PayloadTypeAgentEvent             PayloadType = "agent_event"
 	PayloadTypeConfigChanged          PayloadType = "config_changed"
 	PayloadTypeSkillsEvent            PayloadType = "skills_event"
+	PayloadTypeRunActivity            PayloadType = "run_activity"
 	PayloadTypeRunComplete            PayloadType = "run_complete"
 	PayloadTypeUpdateAvailable        PayloadType = "update_available"
 	PayloadTypeQuestionRequest        PayloadType = "question_batch_request"

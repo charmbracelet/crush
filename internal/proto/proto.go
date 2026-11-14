@@ -109,12 +109,13 @@ type HostContext struct {
 // SessionID may arrive first, and filtering by SessionID alone
 // would terminate the caller before its own turn ran.
 type RunComplete struct {
-	SessionID string `json:"session_id"`
-	RunID     string `json:"run_id,omitempty"`
-	MessageID string `json:"message_id"`
-	Text      string `json:"text,omitempty"`
-	Error     string `json:"error,omitempty"`
-	Cancelled bool   `json:"cancelled,omitempty"`
+	SessionID  string        `json:"session_id"`
+	RunID      string        `json:"run_id,omitempty"`
+	MessageID  string        `json:"message_id"`
+	Text       string        `json:"text,omitempty"`
+	Error      string        `json:"error,omitempty"`
+	Cancelled  bool          `json:"cancelled,omitempty"`
+	Activities []RunActivity `json:"activities,omitempty"`
 }
 
 // SkillInfo describes a visible skill exposed to a frontend.

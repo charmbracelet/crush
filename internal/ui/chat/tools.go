@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/diff"
+	"github.com/charmbracelet/crush/internal/format"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/message"
@@ -43,14 +44,14 @@ func collapsedMaxLines(totalLines int) int {
 }
 
 // ToolStatus represents the current state of a tool call.
-type ToolStatus int
+type ToolStatus = format.ToolStatus
 
 const (
-	ToolStatusAwaitingPermission ToolStatus = iota
-	ToolStatusRunning
-	ToolStatusSuccess
-	ToolStatusError
-	ToolStatusCanceled
+	ToolStatusAwaitingPermission = format.ToolStatusAwaitingPermission
+	ToolStatusRunning            = format.ToolStatusRunning
+	ToolStatusSuccess            = format.ToolStatusSuccess
+	ToolStatusError              = format.ToolStatusError
+	ToolStatusCanceled           = format.ToolStatusCanceled
 )
 
 // ToolMessageItem represents a tool call message in the chat UI.
@@ -757,113 +758,32 @@ func toolErrorContent(sty *styles.Styles, result *message.ToolResult, width int)
 // toolIcon returns the status icon for a tool call.
 // toolIcon returns the status icon for a tool call based on its status.
 func toolIcon(sty *styles.Styles, status ToolStatus) string {
-	switch status {
-	case ToolStatusSuccess:
-		return sty.Tool.IconSuccess.String()
-	case ToolStatusError:
-		return sty.Tool.IconError.String()
-	case ToolStatusCanceled:
-		return sty.Tool.IconCancelled.String()
-	default:
-		return sty.Tool.IconPending.String()
+	return format.ToolIcon(sty, status)
+}
+
+func toolHeaderOptions(opts *ToolRenderOpts) *format.ToolHeaderOptions {
+	if opts == nil {
+		return nil
+	}
+	return &format.ToolHeaderOptions{
+		ExpandedContent: opts.ExpandedContent,
+		Compact:         opts.Compact,
 	}
 }
 
-// toolParamList formats tool parameters as "main (key=value, ...)" with truncation.
-// When opts.ExpandedContent is true, the output wraps instead of truncating,
-// unless the tool is compact (nested in an agent tree), which always truncates.
 func toolParamList(sty *styles.Styles, params []string, width int, opts *ToolRenderOpts) string {
-	// minSpaceForMainParam is the min space required for the main param
-	// if this is less that the value set we will only show the main param nothing else
-	const minSpaceForMainParam = 30
-	if len(params) == 0 {
-		return ""
-	}
-
-	mainParam := params[0]
-
-	// Build key=value pairs from remaining params (consecutive key, value pairs).
-	var kvPairs []string
-	for i := 1; i+1 < len(params); i += 2 {
-		if params[i+1] != "" {
-			kvPairs = append(kvPairs, fmt.Sprintf("%s=%s", params[i], params[i+1]))
-		}
-	}
-
-	// Try to include key=value pairs if there's enough space.
-	output := mainParam
-	if len(kvPairs) > 0 {
-		partsStr := strings.Join(kvPairs, ", ")
-		if remaining := width - lipgloss.Width(partsStr) - 3; remaining >= minSpaceForMainParam {
-			// main param is syntax highlighted so style the param as well
-			pairs := sty.Tool.ParamMain.Render(fmt.Sprintf("(%s)", partsStr))
-			output = fmt.Sprintf("%s %s", mainParam, pairs)
-		}
-	}
-
-	// Compact tools are the children of an agent tree, where a wrapped
-	// header would push continuation lines past the tree's branch drawing
-	// and break the bars. They truncate even when expanded, and stay on one
-	// line even when a parameter has newlines of its own.
-	if opts != nil && opts.Compact {
-		output = strings.ReplaceAll(output, "\n", " ")
-	}
-	if width >= 0 && (opts == nil || !opts.ExpandedContent || opts.Compact) {
-		return sty.Tool.ParamMain.Render(ansi.Truncate(output, width, "…"))
-	}
-	if opts != nil && opts.ExpandedContent && width > 0 && lipgloss.Width(output) > width {
-		// Let Lip Gloss do the wrapping rather than wrapping and styling in
-		// separate steps. A parameter is often syntax highlighted, and a
-		// wrap falls wherever the width runs out, usually part-way through a
-		// coloured token. Lip Gloss carries the colours that are open at the
-		// break and re-opens them on the next line, on top of the parameter
-		// style. Hard-wrapping first and styling after would emit only the
-		// parameter colour there and drop the highlight; styling first and
-		// hard-wrapping after would emit nothing there and drop both.
-		return capLineWidths(sty.Tool.ParamMain.Width(width).Render(output), width)
-	}
-	return sty.Tool.ParamMain.Render(output)
-}
-
-// capLineWidths holds every line of s to width.
-//
-// Word wrapping keeps the space it broke on, so a word that ends exactly at
-// the edge leaves its line a column wider than the space it was given, and
-// the header spills past the pane. The space is invisible and sits before
-// the closing reset, out of reach of a plain trim, so the line is cut with
-// the escape sequences accounted for.
-func capLineWidths(s string, width int) string {
-	lines := strings.Split(s, "\n")
-	for i, line := range lines {
-		if lipgloss.Width(line) > width {
-			lines[i] = ansi.Truncate(line, width, "")
-		}
-	}
-	return strings.Join(lines, "\n")
+	return format.ToolParamList(sty, params, width, toolHeaderOptions(opts))
 }
 
 // toolHeader builds the tool header line: "● ToolName params..."
 // When opts.ExpandedContent is true, long parameters wrap instead of truncating.
 func toolHeader(sty *styles.Styles, status ToolStatus, name string, width int, opts *ToolRenderOpts, params ...string) string {
-	prefix := toolHeaderPrefix(sty, status, name, opts)
-	prefixWidth := lipgloss.Width(prefix)
-	paramsStr := toolParamList(sty, params, width-prefixWidth, opts)
-
-	// When expanded, toolParamList may return multiple lines. Indent
-	// continuation lines to align with the first line's param text.
-	if first, rest, found := strings.Cut(paramsStr, "\n"); found {
-		return prefix + first + "\n" + indentLines(rest, prefixWidth)
-	}
-	return prefix + paramsStr
+	return format.ToolHeader(sty, status, name, width, toolHeaderOptions(opts), params...)
 }
 
 // toolHeaderPrefix returns the styled "● ToolName " that leads a tool header.
 func toolHeaderPrefix(sty *styles.Styles, status ToolStatus, name string, opts *ToolRenderOpts) string {
-	nameStyle := sty.Tool.NameNormal
-	if opts != nil && opts.Compact {
-		nameStyle = sty.Tool.NameNested
-	}
-	return fmt.Sprintf("%s %s ", toolIcon(sty, status), nameStyle.Render(name))
+	return format.ToolHeaderPrefix(sty, status, name, toolHeaderOptions(opts))
 }
 
 // indentLines indents every line of s by n spaces.

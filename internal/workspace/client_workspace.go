@@ -1386,6 +1386,11 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 			Type:    e.Type,
 			Payload: n,
 		}
+	case pubsub.Event[proto.RunActivity]:
+		return pubsub.Event[notify.RunActivity]{
+			Type:    e.Type,
+			Payload: proto.RunActivityFromProto(e.Payload),
+		}
 	case pubsub.Event[proto.RunComplete]:
 		// Translate the wire-level proto.RunComplete back into the
 		// agent's domain notify.RunComplete. The TUI ends its pending
@@ -1393,12 +1398,13 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 		return pubsub.Event[notify.RunComplete]{
 			Type: e.Type,
 			Payload: notify.RunComplete{
-				SessionID: e.Payload.SessionID,
-				RunID:     e.Payload.RunID,
-				MessageID: e.Payload.MessageID,
-				Text:      e.Payload.Text,
-				Error:     e.Payload.Error,
-				Cancelled: e.Payload.Cancelled,
+				SessionID:  e.Payload.SessionID,
+				RunID:      e.Payload.RunID,
+				MessageID:  e.Payload.MessageID,
+				Text:       e.Payload.Text,
+				Error:      e.Payload.Error,
+				Cancelled:  e.Payload.Cancelled,
+				Activities: proto.RunActivitiesFromProto(e.Payload.Activities),
 			},
 		}
 	case pubsub.Event[proto.SkillsEvent]:

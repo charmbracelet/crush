@@ -35,6 +35,7 @@ func NewForTest(ctx context.Context) *App {
 		serviceEventsWG:    &sync.WaitGroup{},
 		tuiWG:              &sync.WaitGroup{},
 		agentNotifications: pubsub.NewBroker[notify.Notification](),
+		runActivities:      pubsub.NewBroker[notify.RunActivity](),
 		runCompletions:     pubsub.NewBroker[notify.RunComplete](),
 	}
 
@@ -50,6 +51,8 @@ func NewForTest(ctx context.Context) *App {
 		app.Questions.SubscribeNotifications)
 	app.subscribe(eventsCtx, "agent-notifications",
 		app.agentNotifications.Subscribe)
+	app.subscribe(eventsCtx, "run-activities",
+		app.runActivities.Subscribe)
 	app.subscribe(eventsCtx, "run-completions",
 		app.runCompletions.Subscribe)
 	app.cleanupFuncs = append(app.cleanupFuncs, func(context.Context) error {

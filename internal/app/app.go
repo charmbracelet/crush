@@ -41,12 +41,12 @@ import (
 	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/sshaskpass"
-	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/update"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/term"
+	"github.com/google/uuid"
 )
 
 // UpdateAvailableMsg is sent when a new version is available.
@@ -82,6 +82,7 @@ type App struct {
 	globalCtx          context.Context
 	cleanupFuncs       []func(context.Context) error
 	agentNotifications *pubsub.Broker[notify.Notification]
+	runActivities      *pubsub.Broker[notify.RunActivity]
 	// runCompletions is the authoritative per-run completion signal,
 	// emitted once per top-level agent turn after all message
 	// updates have been flushed. Bridged into app.events so SSE
@@ -147,6 +148,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		serviceEventsWG:    &sync.WaitGroup{},
 		tuiWG:              &sync.WaitGroup{},
 		agentNotifications: pubsub.NewBroker[notify.Notification](),
+		runActivities:      pubsub.NewBroker[notify.RunActivity](),
 		runCompletions:     pubsub.NewBroker[notify.RunComplete](),
 	}
 
@@ -368,39 +370,25 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 		}
 	}
 
-	var (
-		spinner   *format.Spinner
-		stderrTTY bool
-		progress  bool
-	)
+	stderrTTY := term.IsTerminal(os.Stderr.Fd())
+	progress := app.config.Config().Options.Progress == nil || *app.config.Config().Options.Progress
 
-	stderrTTY = term.IsTerminal(os.Stderr.Fd())
-	progress = app.config.Config().Options.Progress == nil || *app.config.Config().Options.Progress
-
-	if !hideSpinner && stderrTTY {
-		activeTheme := ""
-		if cfg := app.config.Config(); cfg != nil && cfg.Options != nil && cfg.Options.TUI != nil {
-			activeTheme = cfg.Options.TUI.ActiveTheme
-		}
-		t := styles.ThemeFromConfig(activeTheme)
-
-		spinner = format.NewSpinner(ctx, cancel, anim.Settings{
-			Size:        10,
-			Label:       "Generating",
-			GradColorA:  t.WorkingGradFromColor,
-			GradColorB:  t.WorkingGradToColor,
-			CycleColors: true,
-		})
-		spinner.Start()
+	activeTheme := ""
+	if cfg := app.config.Config(); cfg != nil && cfg.Options != nil && cfg.Options.TUI != nil {
+		activeTheme = cfg.Options.TUI.ActiveTheme
 	}
-
-	// Helper function to stop spinner once.
-	stopSpinner := func() {
-		if !hideSpinner && spinner != nil {
-			spinner.Stop()
-			spinner = nil
-		}
-	}
+	t := styles.ThemeFromConfig(activeTheme)
+	width, _, _ := term.GetSize(os.Stderr.Fd())
+	presenter := format.NewActivityPresenter(ctx, cancel, format.ActivityPresenterOptions{
+		Output:      os.Stderr,
+		WorkingDir:  app.config.WorkingDir(),
+		TTY:         stderrTTY,
+		HideSpinner: hideSpinner,
+		Styles:      &t,
+		Width:       width,
+	})
+	defer presenter.Close()
+	stopSpinner := presenter.StopProgress
 
 	// Non-interactive runs get a single shot at the tool palette, so wait for
 	// MCP initialization to settle before reading MCP tools. The coordinator
@@ -416,8 +404,6 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 
 	// force update of agent models before running so mcp tools are loaded
 	app.AgentCoordinator.UpdateModels(ctx)
-
-	defer stopSpinner()
 
 	sess, err := app.resolveSession(ctx, continueSessionID, useLast)
 	if err != nil {
@@ -456,6 +442,8 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 		err    error
 	}
 	done := make(chan response, 1)
+	runCtx := agent.WithRunID(ctx, uuid.NewString())
+	runID := agent.RunIDFromContext(runCtx)
 
 	go func(ctx context.Context, sessionID, prompt string) {
 		result, err := app.AgentCoordinator.Run(ctx, sess.ID, prompt)
@@ -468,9 +456,11 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 		done <- response{
 			result: result,
 		}
-	}(ctx, sess.ID, prompt)
+	}(runCtx, sess.ID, prompt)
 
 	messageEvents := app.Messages.Subscribe(ctx)
+	activityEvents := app.runActivities.Subscribe(ctx)
+	completionEvents := app.runCompletions.Subscribe(ctx)
 	messageReadBytes := make(map[string]int)
 	var printed bool
 
@@ -501,13 +491,43 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 				}
 				return fmt.Errorf("agent processing failed: %w", result.err)
 			}
+
+		case event := <-activityEvents:
+			if event.Payload.RunID == runID && event.Payload.SessionID == sess.ID {
+				presenter.Handle(event.Payload)
+			}
+
+		case event := <-completionEvents:
+			completion := event.Payload
+			if completion.RunID != runID || completion.SessionID != sess.ID {
+				continue
+			}
+			stopSpinner()
+			presenter.Reconcile(completion.Activities)
+			if completion.Error != "" && !completion.Cancelled {
+				return fmt.Errorf("agent processing failed: %s", completion.Error)
+			}
+			if completion.MessageID != "" {
+				presenter.TextStarted()
+				full := completion.Text
+				readBytes := messageReadBytes[completion.MessageID]
+				if readBytes < len(full) {
+					tail := full[readBytes:]
+					if readBytes == 0 {
+						tail = strings.TrimLeft(tail, " \t")
+					}
+					if printed || strings.TrimSpace(tail) != "" {
+						printed = true
+						fmt.Fprint(output, tail)
+					}
+					messageReadBytes[completion.MessageID] = len(full)
+				}
+			}
 			return nil
 
 		case event := <-messageEvents:
 			msg := event.Payload
 			if msg.SessionID == sess.ID && msg.Role == message.Assistant && len(msg.Parts) > 0 {
-				stopSpinner()
-
 				content := msg.Content().String()
 				readBytes := messageReadBytes[msg.ID]
 
@@ -524,6 +544,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 				}
 				// Ignore initial whitespace-only messages.
 				if printed || strings.TrimSpace(part) != "" {
+					presenter.TextStarted()
 					printed = true
 					fmt.Fprint(output, part)
 				}
@@ -781,6 +802,7 @@ func (app *App) setupEvents() {
 	app.subscribeMustDeliver(ctx, "permissions-mode", app.Permissions.SubscribeModeChanges)
 	app.subscribe(ctx, "history", app.History.Subscribe)
 	app.subscribe(ctx, "agent-notifications", app.agentNotifications.Subscribe)
+	app.subscribe(ctx, "run-activities", app.runActivities.Subscribe)
 	// Pinentry transitions are rare and drive the terminal handover, so
 	// they must not be dropped: a lost release/restore would leave the
 	// terminal in the wrong state. The same goes for integrated pinentry
@@ -934,6 +956,7 @@ func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 		LSPManager:  app.LSPManager,
 		Notify:      app.agentNotifications,
 		RunComplete: app.runCompletions,
+		RunActivity: app.runActivities,
 		Skills:      app.Skills,
 		HookRunner:  app.hookRunner,
 		Interactive: interactive,

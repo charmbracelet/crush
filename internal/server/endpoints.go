@@ -159,10 +159,12 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 				"question prompts are scoped to the session the client currently "+
 				"views (see POST current-session): they are only delivered to clients "+
 				"viewing the session that raised them, and clients viewing no session "+
-				"receive none. All other events are workspace-wide.").
+				"receive none. Terminal calls go to one client that hosts terminals "+
+				"(terminal_host=1), and all other events are workspace-wide.").
 			Tags("workspaces").
 			PathParam("id", "Workspace ID").
 			RequiredQueryParam("client_id", "Client ID (UUID)").
+			QueryParam("terminal_host", "1 when the client runs a TUI that can open the agent's interactive terminals").
 			SSE().
 			Fails(400, 404, 500).
 			Handle(c.handleGetWorkspaceEvents),
@@ -371,6 +373,17 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 			Fails(400, 404, 500).
 			Handle(c.handlePostWorkspaceSSHCancel),
 
+		apigen.Post("/v1/workspaces/{id}/terminal/result").
+			Summary("Answer terminal call").
+			Description("Resolves a terminal call the agent forwarded to the calling client.").
+			Tags("terminal").
+			PathParam("id", "Workspace ID").
+			RequiredQueryParam("client_id", "Client ID (UUID)").
+			Accepts(proto.TerminalResult{}).
+			Responds(proto.TerminalResponse{}).
+			Fails(400, 404, 500).
+			Handle(c.handlePostWorkspaceTerminalResult),
+
 		apigen.Get("/v1/workspaces/{id}/agent").
 			Summary("Get agent info").
 			Tags("agent").
@@ -489,6 +502,16 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 			Responds(proto.ShellCommandResponse{}).
 			Fails(400, 404, 500).
 			Handle(c.handlePostWorkspaceAgentSessionShell),
+
+		apigen.Post("/v1/workspaces/{id}/agent/sessions/{sid}/shell/record").
+			Summary("Record shell command").
+			Description("Stores a shell command the user ran on the client's machine as a message in the session.").
+			Tags("agent").
+			PathParam("id", "Workspace ID").
+			PathParam("sid", "Session ID").
+			Accepts(proto.ShellCommandRecord{}).
+			Fails(400, 404, 500).
+			Handle(c.handlePostWorkspaceAgentSessionShellRecord),
 
 		apigen.Get("/v1/workspaces/{id}/agent/default-small-model").
 			Summary("Get default small model").

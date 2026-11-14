@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
+	"github.com/charmbracelet/crush/internal/terminal"
 )
 
 // NewForTest constructs a minimal [App] suitable for in-process tests
@@ -30,6 +31,7 @@ func NewForTest(ctx context.Context) *App {
 	app := &App{
 		Permissions:        permission.NewPermissionService("", nil, nil),
 		Questions:          question.NewService(),
+		Terminal:           terminal.NewService(),
 		globalCtx:          ctx,
 		events:             pubsub.NewCoalescingBroker(eventCoalesceKey),
 		serviceEventsWG:    &sync.WaitGroup{},
@@ -48,6 +50,10 @@ func NewForTest(ctx context.Context) *App {
 		app.Questions.Subscribe)
 	app.subscribeMustDeliver(eventsCtx, "question-notifications",
 		app.Questions.SubscribeNotifications)
+	app.subscribeMustDeliver(eventsCtx, "terminal-sessions",
+		app.Terminal.Subscribe)
+	app.subscribeMustDeliver(eventsCtx, "terminal-calls",
+		app.Terminal.SubscribeCalls)
 	app.subscribe(eventsCtx, "agent-notifications",
 		app.agentNotifications.Subscribe)
 	app.subscribe(eventsCtx, "run-completions",

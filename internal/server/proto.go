@@ -227,6 +227,11 @@ func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.R
 		return
 	}
 	defer c.backend.DetachClient(id, clientID)
+	// Only a TUI can open the agent's terminals, and it says so here.
+	if r.URL.Query().Get("terminal_host") == "1" {
+		c.backend.AttachTerminalHost(id, clientID)
+		defer c.backend.DetachTerminalHost(id, clientID)
+	}
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")

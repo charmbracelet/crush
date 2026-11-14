@@ -21,6 +21,7 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/sshaskpass"
+	"github.com/charmbracelet/crush/internal/terminal"
 )
 
 // wrapEvent converts a raw tea.Msg (a pubsub.Event[T] from the app
@@ -158,6 +159,23 @@ func wrapEvent(ev any) *pubsub.Payload {
 				RequestID: e.Payload.RequestID,
 			},
 		})
+	case pubsub.Event[terminal.Call]:
+		return envelope(pubsub.PayloadTypeTerminalCall, pubsub.Event[proto.TerminalCall]{
+			Type: e.Type,
+			Payload: proto.TerminalCall{
+				ID:         e.Payload.ID,
+				ClientID:   e.Payload.ClientID,
+				SessionID:  e.Payload.SessionID,
+				ToolCallID: e.Payload.ToolCallID,
+				Op:         e.Payload.Op,
+				Params:     e.Payload.Params,
+			},
+		})
+	case pubsub.Event[terminal.Request]:
+		// Display requests carry an in-process session and only reach a
+		// TUI in this process; remote clients show the terminals they
+		// run themselves.
+		return nil
 	case pubsub.Event[message.Message]:
 		return envelope(pubsub.PayloadTypeMessage, pubsub.Event[proto.Message]{
 			Type:    e.Type,
@@ -273,8 +291,13 @@ func sessionScopedEventID(ev any) (string, bool) {
 // screen (an explicitly cleared session) receive no prompts, while
 // clients that never reported a session at all (e.g. API clients
 // predating session reporting) fail open so their prompts are not
-// stranded. All other events are delivered unfiltered.
+// stranded. Terminal calls go only to the client named to run them.
+// All other events are delivered unfiltered.
 func (c *controllerV1) deliverToClient(ctx context.Context, workspaceID, clientID string, ev any) bool {
+	// A terminal call runs on exactly one machine: the client it names.
+	if call, ok := ev.(pubsub.Event[terminal.Call]); ok {
+		return call.Payload.ClientID == clientID
+	}
 	sessionID, scoped := sessionScopedEventID(ev)
 	if !scoped {
 		return true

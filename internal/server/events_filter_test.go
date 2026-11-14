@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/terminal"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
@@ -188,4 +189,20 @@ func TestDeliverToClient_SubSessionResolvesToParent(t *testing.T) {
 	// better to broadcast than to strand a prompt nobody can answer.
 	ghostReq := pubsub.Event[permission.PermissionRequest]{Payload: permission.PermissionRequest{SessionID: "ghost"}}
 	require.True(t, c.deliverToClient(t.Context(), ws.ID, cidB, ghostReq))
+}
+
+// TestDeliverTerminalCallOnlyToItsClient checks that a terminal call
+// reaches only the client named to run it: any other client would open a
+// second terminal.
+func TestDeliverTerminalCallOnlyToItsClient(t *testing.T) {
+	t.Parallel()
+
+	c := &controllerV1{}
+	ev := pubsub.Event[terminal.Call]{Payload: terminal.Call{ID: "call", ClientID: "client-a", Op: "start"}}
+	require.True(t, c.deliverToClient(t.Context(), "ws", "client-a", ev))
+	require.False(t, c.deliverToClient(t.Context(), "ws", "client-b", ev))
+
+	wrapped := wrapEvent(ev)
+	require.NotNil(t, wrapped)
+	require.Equal(t, pubsub.PayloadTypeTerminalCall, wrapped.Type)
 }

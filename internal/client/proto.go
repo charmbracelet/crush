@@ -110,10 +110,22 @@ func (c *Client) SetCurrentSession(ctx context.Context, workspaceID, sessionID s
 	return nil
 }
 
+// EventsOption configures an event subscription.
+type EventsOption func(url.Values)
+
+// HostTerminals marks the subscriber as a TUI that can open the agent's
+// interactive terminals, so the server may route terminal calls to it.
+func HostTerminals() EventsOption {
+	return func(q url.Values) { q.Set("terminal_host", "1") }
+}
+
 // SubscribeEvents subscribes to server-sent events for a workspace.
-func (c *Client) SubscribeEvents(ctx context.Context, id string) (<-chan any, error) {
+func (c *Client) SubscribeEvents(ctx context.Context, id string, opts ...EventsOption) (<-chan any, error) {
 	events := make(chan any, 100)
 	q := url.Values{"client_id": []string{c.clientID}}
+	for _, opt := range opts {
+		opt(q)
+	}
 	//nolint:bodyclose
 	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/events", id), q, http.Header{
 		"Accept":        []string{"text/event-stream"},
@@ -221,6 +233,12 @@ func (c *Client) SubscribeEvents(ctx context.Context, id string) (<-chan any, er
 				}
 			case pubsub.PayloadTypeSSHNotification:
 				var e pubsub.Event[proto.SSHNotification]
+				_ = json.Unmarshal(p.Payload, &e)
+				if !sendEvent(ctx, events, e) {
+					return
+				}
+			case pubsub.PayloadTypeTerminalCall:
+				var e pubsub.Event[proto.TerminalCall]
 				_ = json.Unmarshal(p.Payload, &e)
 				if !sendEvent(ctx, events, e) {
 					return
@@ -856,6 +874,40 @@ func (c *Client) CancelSSH(ctx context.Context, id string, req proto.SSHCancel) 
 		return false, fmt.Errorf("failed to decode cancel ssh prompt response: %w", err)
 	}
 	return resp.Resolved, nil
+}
+
+// RespondTerminal answers a terminal call the server forwarded to this
+// client with the result of running it here. Returns true if the call was
+// still waiting for the answer.
+func (c *Client) RespondTerminal(ctx context.Context, id string, req proto.TerminalResult) (bool, error) {
+	q := url.Values{"client_id": []string{c.clientID}}
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/terminal/result", id), q, jsonBody(req), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return false, fmt.Errorf("failed to answer terminal call: %w", err)
+	}
+	defer rsp.Body.Close()
+	if err := checkStatus(rsp); err != nil {
+		return false, fmt.Errorf("failed to answer terminal call: %w", err)
+	}
+	var resp proto.TerminalResponse
+	if err := json.NewDecoder(rsp.Body).Decode(&resp); err != nil {
+		return false, fmt.Errorf("failed to decode terminal call response: %w", err)
+	}
+	return resp.Resolved, nil
+}
+
+// RecordShellCommand stores a shell command the user ran on this machine
+// as a message in the session.
+func (c *Client) RecordShellCommand(ctx context.Context, id, sessionID string, req proto.ShellCommandRecord) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent/sessions/%s/shell/record", id, sessionID), nil, jsonBody(req), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return fmt.Errorf("failed to record shell command: %w", err)
+	}
+	defer rsp.Body.Close()
+	if err := checkStatus(rsp); err != nil {
+		return fmt.Errorf("failed to record shell command: %w", err)
+	}
+	return nil
 }
 
 // SetPermissionMode sets the permission mode for a workspace.

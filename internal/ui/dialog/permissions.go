@@ -531,6 +531,18 @@ func (p *Permissions) renderHeader(contentWidth int) string {
 		if params, ok := p.permission.Params.(tools.BashPermissionsParams); ok {
 			lines = append(lines, p.renderKeyValue("Desc", params.Description, contentWidth))
 		}
+	case tools.TerminalToolName:
+		if params, ok := p.permission.Params.(tools.TerminalPermissionsParams); ok {
+			mode := "interactive terminal (you will drive the command)"
+			switch p.permission.Action {
+			case "write":
+				mode = "typing into a running interactive terminal"
+			case "take":
+				mode = "handing your terminal to the agent: it gets the keyboard, you watch (" + TerminalHandKey + " takes it back)"
+			}
+			lines = append(lines, p.renderKeyValue("Desc", params.Description, contentWidth))
+			lines = append(lines, p.renderKeyValue("Mode", mode, contentWidth))
+		}
 	case tools.DownloadToolName:
 		if params, ok := p.permission.Params.(tools.DownloadPermissionsParams); ok {
 			lines = append(lines, p.renderKeyValue("URL", params.URL, contentWidth))

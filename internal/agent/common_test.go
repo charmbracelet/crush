@@ -2,16 +2,18 @@ package agent
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
 	"charm.land/catwalk/v3/pkg/catwalk"
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/openaicompat"
-	"charm.land/x/vcr"
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
@@ -31,6 +33,7 @@ import (
 // fakeEnv is an environment for testing.
 type fakeEnv struct {
 	workingDir  string
+	recordedDir string
 	sessions    session.Service
 	messages    message.Service
 	permissions permission.Service
@@ -39,7 +42,91 @@ type fakeEnv struct {
 	lspClients  *csync.Map[string, *lsp.Client]
 }
 
-type builderFunc func(t *testing.T, r *vcr.Recorder) (fantasy.LanguageModel, error)
+type builderFunc func(t *testing.T, r cassetteClient) (fantasy.LanguageModel, error)
+
+// cassetteClient is the surface provider builders and tool clients need:
+// an HTTP round tripper that can also hand out a default client. The VCR
+// recorder satisfies it, and so does the path rewriting wrapper below.
+type cassetteClient interface {
+	http.RoundTripper
+	GetDefaultClient() *http.Client
+}
+
+// recordedWorkspace is the workspace path the recorded cassettes were made
+// with: the fixed /tmp/crush-test/<name> root testEnv used before #4242.
+func recordedWorkspace(t *testing.T) string {
+	return filepath.Join("/tmp/crush-test", t.Name())
+}
+
+// workspaceRewriter maps the private per-allocation workspace back to the
+// recorded path in every outgoing request body. The system prompt carries
+// the working directory, so without this rewrite no recorded cassette
+// would match a request from a private workspace.
+type workspaceRewriter struct {
+	next     cassetteClient
+	private  string
+	recorded string
+}
+
+func (w workspaceRewriter) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.Body != nil {
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
+		_ = req.Body.Close()
+		rewritten := strings.ReplaceAll(string(body), w.private, w.recorded)
+		req.Body = io.NopCloser(strings.NewReader(rewritten))
+		req.ContentLength = int64(len(rewritten))
+	}
+	return w.next.RoundTrip(req)
+}
+
+func (w workspaceRewriter) GetDefaultClient() *http.Client {
+	return &http.Client{Transport: w}
+}
+
+// workspaceTool translates workspace paths around a tool call. Replayed
+// tool inputs point at the recorded workspace, which does not exist on a
+// private-directory run, so the recorded prefix is swapped for the private
+// one before execution; tool output is translated back so the follow-up
+// request still matches the cassette.
+type workspaceTool struct {
+	tool     fantasy.AgentTool
+	recorded string
+	private  string
+}
+
+func (w workspaceTool) Info() fantasy.ToolInfo { return w.tool.Info() }
+
+func (w workspaceTool) ProviderOptions() fantasy.ProviderOptions {
+	return w.tool.ProviderOptions()
+}
+
+func (w workspaceTool) SetProviderOptions(opts fantasy.ProviderOptions) {
+	w.tool.SetProviderOptions(opts)
+}
+
+func (w workspaceTool) Run(ctx context.Context, params fantasy.ToolCall) (fantasy.ToolResponse, error) {
+	params.Input = strings.ReplaceAll(params.Input, w.recorded, w.private)
+	res, err := w.tool.Run(ctx, params)
+	res.Content = strings.ReplaceAll(res.Content, w.private, w.recorded)
+	return res, err
+}
+
+// mapWorkspaceTools wraps every tool so cassette paths are translated at
+// the tool boundary.
+func mapWorkspaceTools(tools []fantasy.AgentTool, env fakeEnv) []fantasy.AgentTool {
+	mapped := make([]fantasy.AgentTool, 0, len(tools))
+	for _, tool := range tools {
+		mapped = append(mapped, workspaceTool{
+			tool:     tool,
+			recorded: filepath.ToSlash(env.recordedDir),
+			private:  filepath.ToSlash(env.workingDir),
+		})
+	}
+	return mapped
+}
 
 type modelPair struct {
 	name       string
@@ -48,7 +135,7 @@ type modelPair struct {
 }
 
 func hyperBuilder(model string) builderFunc {
-	return func(t *testing.T, r *vcr.Recorder) (fantasy.LanguageModel, error) {
+	return func(t *testing.T, r cassetteClient) (fantasy.LanguageModel, error) {
 		provider, err := openaicompat.New(
 			openaicompat.WithBaseURL("https://hyper.charm.land/v1"),
 			openaicompat.WithAPIKey(os.Getenv("CRUSH_HYPER_API_KEY")),
@@ -62,11 +149,14 @@ func hyperBuilder(model string) builderFunc {
 }
 
 func testEnv(t *testing.T) fakeEnv {
-	workingDir := filepath.Join("/tmp/crush-test/", t.Name())
-	os.RemoveAll(workingDir)
-
-	err := os.MkdirAll(workingDir, 0o755)
-	require.NoError(t, err)
+	// Each allocation gets its own private workspace (#4242). The old
+	// fixed /tmp/crush-test/<name> root let two parallel go test runs of
+	// the same test delete each other's files, and it ignored TMPDIR.
+	// t.TempDir is unique per call, honors the temporary root, and is
+	// cleaned up with the test. The cassettes still carry the recorded
+	// path, which is kept alongside for the boundary translators above.
+	workingDir := t.TempDir()
+	recordedDir := recordedWorkspace(t)
 
 	conn, err := db.Connect(t.Context(), t.TempDir())
 	require.NoError(t, err)
@@ -85,11 +175,11 @@ func testEnv(t *testing.T) fakeEnv {
 
 	t.Cleanup(func() {
 		conn.Close()
-		os.RemoveAll(workingDir)
 	})
 
 	return fakeEnv{
 		workingDir,
+		recordedDir,
 		sessions,
 		messages,
 		permissions,
@@ -124,7 +214,7 @@ func testSessionAgent(env fakeEnv, large, small fantasy.LanguageModel, systemPro
 	return agent
 }
 
-func coderAgent(r *vcr.Recorder, env fakeEnv, large, small fantasy.LanguageModel) (SessionAgent, error) {
+func coderAgent(t *testing.T, r cassetteClient, env fakeEnv, large, small fantasy.LanguageModel) (SessionAgent, error) {
 	fixedTime := func() time.Time {
 		t, _ := time.Parse("1/2/2006", "1/1/2025")
 		return t
@@ -181,7 +271,7 @@ func coderAgent(r *vcr.Recorder, env fakeEnv, large, small fantasy.LanguageModel
 		tools.NewWriteTool(nil, env.permissions, env.history, *env.filetracker, env.workingDir),
 	}
 
-	return testSessionAgent(env, large, small, systemPrompt, allTools...), nil
+	return testSessionAgent(env, large, small, systemPrompt, mapWorkspaceTools(allTools, env)...), nil
 }
 
 // createSimpleGoProject creates a simple Go project structure in the given directory.
@@ -213,3 +303,41 @@ func fixedModels(large, small Model) func() ModelSet {
 
 // noModels is the model source for tests that never reach a provider.
 func noModels() ModelSet { return ModelSet{} }
+
+// Two allocations of the same named test must not share a workspace:
+// parallel go test processes run the same test name, and the fixed
+// /tmp/crush-test/<name> path let either one delete the other's files
+// (#4242). The temporary root must also be honored.
+func TestTestEnvWorkspaceIsolation(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on windows for now")
+	}
+
+	// The temporary root is read when t.TempDir is first called, so the
+	// switch has to land before any allocation. Go's testing TempDir
+	// reads GOTMPDIR first, then TMPDIR, so set both.
+	tmpRoot, err := os.MkdirTemp("", "crush-test-tmproot-")
+	require.NoError(t, err)
+	t.Setenv("TMPDIR", tmpRoot)
+	t.Setenv("GOTMPDIR", tmpRoot)
+	t.Cleanup(func() { os.RemoveAll(tmpRoot) })
+
+	first := testEnv(t)
+	marker := filepath.Join(first.workingDir, "marker.txt")
+	require.NoError(t, os.WriteFile(marker, []byte("one"), 0o644))
+
+	// A second process would allocate under its own temporary root for
+	// the same test name; within one process a second allocation stands
+	// in for it, and must not reach into the first workspace.
+	second := testEnv(t)
+	require.NotEqual(t, first.workingDir, second.workingDir)
+	require.NotEqual(t, first.workingDir, first.recordedDir)
+	require.NoError(t, os.WriteFile(filepath.Join(second.workingDir, "marker.txt"), []byte("two"), 0o644))
+
+	data, err := os.ReadFile(marker)
+	require.NoError(t, err, "the second allocation deleted the first workspace's marker")
+	require.Equal(t, "one", string(data))
+
+	require.True(t, strings.HasPrefix(first.workingDir, tmpRoot),
+		"workspace ignores the configured temporary root: %s", first.workingDir)
+}

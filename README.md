@@ -355,6 +355,11 @@ a value.
 ### Themes
 
 Crush ships with built-in color themes.
+The `system` theme adapts to the terminal's reported foreground, background,
+and ANSI palette, and falls back to Charmtone when those colors are
+unavailable.
+For tmux versions older than 3.6, enable passthrough in `tmux.conf` with
+`set -g allow-passthrough on` to allow indexed palette queries.
 
 #### Switching Themes
 
@@ -403,6 +408,7 @@ dialog.
 | Charmtone Pantera | `charmtone-panther` (default) |
 | Gruvbox Dark      | `gruvbox-dark`                |
 | Keanu             | `keanu`                       |
+| System            | `system`                      |
 
 ### LSPs
 

@@ -376,6 +376,7 @@ var builtinThemes = map[string]func() quickStyleOpts{
 	"charmtone-panther": charmtoneOpts,
 	"gruvbox-dark":      gruvboxDarkOpts,
 	"keanu":             keanuOpts,
+	SystemThemeName:     charmtoneOpts,
 }
 
 // builtinThemeOverrides maps theme names to functions that apply
@@ -385,6 +386,7 @@ var builtinThemeOverrides = map[string]func(Styles) Styles{
 	"charmtone-panther": charmtoneOverrides,
 	"gruvbox-dark":      gruvboxDarkOverrides,
 	"keanu":             keanuOverrides,
+	SystemThemeName:     charmtoneOverrides,
 }
 
 // deprecatedThemeNames maps legacy built-in theme names to their current

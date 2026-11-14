@@ -111,6 +111,7 @@ func (h *hookedTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.To
 // failure, as in Claude Code, so PostToolUse only ever sees output the
 // model will treat as a success.
 func postToolEvent(ev hooks.Event, resp fantasy.ToolResponse, err error) hooks.Event {
+	ev.ToolMetadata = json.RawMessage(resp.Metadata)
 	switch {
 	case err != nil:
 		ev.Name, ev.Error = hooks.EventPostToolUseFailure, err.Error()

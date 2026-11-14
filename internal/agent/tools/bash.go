@@ -47,6 +47,9 @@ type BashResponseMetadata struct {
 	WorkingDirectory string `json:"working_directory"`
 	Background       bool   `json:"background,omitempty"`
 	ShellID          string `json:"shell_id,omitempty"`
+	Completed        bool   `json:"completed"`
+	ExitCode         *int   `json:"exit_code,omitempty"`
+	Interrupted      bool   `json:"interrupted"`
 }
 
 const (
@@ -362,6 +365,9 @@ func executeBashCommand(ctx context.Context, params BashParams, execWorkingDir, 
 				Description:      params.Description,
 				Background:       params.RunInBackground,
 				WorkingDirectory: bgShell.WorkingDir,
+				Completed:        true,
+				ExitCode:         new(exitCode),
+				Interrupted:      interrupted,
 			}
 			if stdout == "" {
 				return fantasy.WithResponseMetadata(fantasy.NewTextResponse(BashNoOutput), metadata), nil
@@ -431,6 +437,9 @@ func executeBashCommand(ctx context.Context, params BashParams, execWorkingDir, 
 			Description:      params.Description,
 			Background:       params.RunInBackground,
 			WorkingDirectory: bgShell.WorkingDir,
+			Completed:        true,
+			ExitCode:         new(exitCode),
+			Interrupted:      interrupted,
 		}
 		if stdout == "" {
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(BashNoOutput), metadata), nil

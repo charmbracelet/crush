@@ -31,6 +31,7 @@ type Payload struct {
 	ToolInput            json.RawMessage `json:"tool_input,omitempty"`
 	ToolUseID            string          `json:"tool_use_id,omitempty"`
 	ToolResponse         *string         `json:"tool_response,omitempty"`
+	ToolMetadata         json.RawMessage `json:"tool_metadata,omitempty"`
 	Error                string          `json:"error,omitempty"`
 	LastAssistantMessage *string         `json:"last_assistant_message,omitempty"`
 	Decision             string          `json:"decision,omitempty"`
@@ -53,6 +54,9 @@ func BuildPayload(ev Event, cwd string) []byte {
 		Source:               ev.Source,
 		Reason:               ev.Reason,
 		Trigger:              ev.Trigger,
+	}
+	if json.Valid(ev.ToolMetadata) {
+		p.ToolMetadata = ev.ToolMetadata
 	}
 	if ev.Tool != nil {
 		p.ToolName = ev.Tool.Name

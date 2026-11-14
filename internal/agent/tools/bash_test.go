@@ -95,11 +95,48 @@ func TestBashTool_CustomAutoBackgroundThreshold(t *testing.T) {
 	var meta BashResponseMetadata
 	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
 	require.True(t, meta.Background)
+	require.False(t, meta.Completed)
+	require.Nil(t, meta.ExitCode)
 	require.NotEmpty(t, meta.ShellID)
 	require.Contains(t, resp.Content, "moved to background")
 
 	bgManager := shell.GetBackgroundShellManager()
 	require.NoError(t, bgManager.Kill(meta.ShellID))
+}
+
+func TestBashTool_CompletionMetadata(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		command    string
+		exitCode   int
+		background bool
+	}{
+		{name: "success", command: "printf complete", exitCode: 0},
+		{name: "nonzero exit", command: "printf output; printf failure >&2; exit 7", exitCode: 7},
+		{name: "background fast success", command: "printf complete", exitCode: 0, background: true},
+		{name: "background fast failure", command: "printf output; printf failure >&2; exit 7", exitCode: 7, background: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			workingDir := t.TempDir()
+			resp, err := executeBashCommand(t.Context(), BashParams{
+				Command:         tc.command,
+				RunInBackground: tc.background,
+			}, workingDir, workingDir, nil, config.DefaultMaxBackgroundJobs)
+			require.NoError(t, err)
+			require.False(t, resp.IsError, "shell exit status does not change the existing response semantics")
+			var meta BashResponseMetadata
+			require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
+			require.True(t, meta.Completed)
+			require.NotNil(t, meta.ExitCode)
+			require.Equal(t, tc.exitCode, *meta.ExitCode)
+			require.False(t, meta.Interrupted)
+			require.Equal(t, tc.background, meta.Background)
+			if tc.exitCode != 0 {
+				require.Contains(t, resp.Content, "output")
+				require.Contains(t, resp.Content, "failure")
+			}
+		})
+	}
 }
 
 type recordingPermissionService struct {

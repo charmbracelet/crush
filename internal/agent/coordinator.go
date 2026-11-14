@@ -1937,7 +1937,7 @@ func (c *coordinator) subAgentCall(agent SessionAgent, sessionID, prompt string)
 		return SessionAgentCall{}, Model{}, errModelProviderNotConfigured
 	}
 
-	opts := getProviderOptions(model, providerCfg)
+	opts, temp, topP, topK, freqPenalty, presPenalty := mergeCallOptions(model, providerCfg)
 	injectOpenrouterSessionID(opts, sessionID)
 
 	return SessionAgentCall{
@@ -1945,11 +1945,11 @@ func (c *coordinator) subAgentCall(agent SessionAgent, sessionID, prompt string)
 		Prompt:           prompt,
 		MaxOutputTokens:  maxTokens,
 		ProviderOptions:  opts,
-		Temperature:      model.ModelCfg.Temperature,
-		TopP:             model.ModelCfg.TopP,
-		TopK:             callTopK(providerCfg, model.ModelCfg.TopK),
-		FrequencyPenalty: model.ModelCfg.FrequencyPenalty,
-		PresencePenalty:  model.ModelCfg.PresencePenalty,
+		Temperature:      temp,
+		TopP:             topP,
+		TopK:             callTopK(providerCfg, topK),
+		FrequencyPenalty: freqPenalty,
+		PresencePenalty:  presPenalty,
 		NonInteractive:   true,
 		OnAuthRefresh:    c.makeAuthRefreshCallback(providerCfg),
 	}, model, nil

@@ -396,6 +396,27 @@ func TestLookupClosestBounded(t *testing.T) {
 		require.Empty(t, foundPath)
 	})
 
+	t.Run("does not climb past boundary spelled in different case", func(t *testing.T) {
+		parent := t.TempDir()
+
+		// Target lives above the boundary.
+		require.NoError(t, os.WriteFile(filepath.Join(parent, "target.txt"), []byte("test"), 0o644))
+
+		boundary := filepath.Join(parent, "Project")
+		require.NoError(t, os.MkdirAll(filepath.Join(boundary, "subdir"), 0o755))
+
+		// On a case-insensitive filesystem (the macOS default) this
+		// spelling names a directory inside the boundary.
+		subDir := filepath.Join(parent, "project", "subdir")
+		if _, err := os.Stat(subDir); err != nil {
+			t.Skip("filesystem is case-sensitive")
+		}
+
+		foundPath, found := LookupClosestBounded(subDir, boundary, "target.txt")
+		require.False(t, found, "walk climbed past the boundary to %s", foundPath)
+		require.Empty(t, foundPath)
+	})
+
 	t.Run("empty boundary searches only starting directory", func(t *testing.T) {
 		parent := t.TempDir()
 
@@ -452,6 +473,26 @@ func TestLookupBounded(t *testing.T) {
 		require.NoError(t, os.Mkdir(subDir, 0o755))
 
 		// Target lives only above the boundary.
+		found, err := LookupBounded(subDir, boundary, "target.txt")
+		require.NoError(t, err)
+		require.Empty(t, found)
+	})
+
+	t.Run("ignores matches above boundary spelled in different case", func(t *testing.T) {
+		parent := t.TempDir()
+
+		require.NoError(t, os.WriteFile(filepath.Join(parent, "target.txt"), []byte("nope"), 0o644))
+
+		boundary := filepath.Join(parent, "Project")
+		require.NoError(t, os.MkdirAll(filepath.Join(boundary, "subdir"), 0o755))
+
+		// On a case-insensitive filesystem (the macOS default) this
+		// spelling names a directory inside the boundary.
+		subDir := filepath.Join(parent, "project", "subdir")
+		if _, err := os.Stat(subDir); err != nil {
+			t.Skip("filesystem is case-sensitive")
+		}
+
 		found, err := LookupBounded(subDir, boundary, "target.txt")
 		require.NoError(t, err)
 		require.Empty(t, found)

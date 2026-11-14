@@ -34,13 +34,15 @@ func TestMCPOAuthFlags(t *testing.T) {
   --oauth true \
   --oauth-client-id "my-client" \
   --oauth-client-secret "my-secret" \
-  --oauth-callback-port 8085`)
+  --oauth-callback-port 8085 \
+  --oauth-client-id-metadata "https://client.example.com/oauth-client.json"`)
 
 	m := result["mcp"].(map[string]any)["secure"].(map[string]any)
 	require.Equal(t, true, m["oauth"])
 	require.Equal(t, "my-client", m["oauth_client_id"])
 	require.Equal(t, "my-secret", m["oauth_client_secret"])
 	require.Equal(t, float64(8085), m["oauth_callback_port"])
+	require.Equal(t, "https://client.example.com/oauth-client.json", m["oauth_client_id_metadata"])
 }
 
 func TestMCPUnknownSubcommand(t *testing.T) {

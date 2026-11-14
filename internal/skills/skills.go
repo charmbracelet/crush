@@ -197,7 +197,7 @@ func splitFrontmatter(content string) (frontmatter, body string, err error) {
 	}
 
 	endOffset := slices.IndexFunc(lines[start+1:], func(line string) bool {
-		return strings.TrimSpace(line) == "---"
+		return strings.TrimRight(line, " \t") == "---"
 	})
 	if endOffset == -1 {
 		return "", "", errors.New("unclosed frontmatter")

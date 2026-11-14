@@ -95,6 +95,11 @@ func NewFilePicker(com *common.Common) (*FilePicker, tea.Cmd) {
 		key.WithKeys("esc", "alt+esc"),
 		key.WithHelp("esc", "close/exit"),
 	)
+	applyDialogKeybinds(com, map[string]*key.Binding{
+		"select":              &f.km.Select,
+		"filepicker.forward":  &f.km.Forward,
+		"filepicker.backward": &f.km.Backward,
+	})
 
 	fp := filepicker.New()
 	fp.AllowedTypes = common.AllowedImageTypes

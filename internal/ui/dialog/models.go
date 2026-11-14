@@ -142,6 +142,13 @@ func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
 		key.WithHelp("↑", "previous item"),
 	)
 	m.keyMap.Close = CloseKey
+	applyDialogKeybinds(com, map[string]*key.Binding{
+		"tab":         &m.keyMap.Tab,
+		"select":      &m.keyMap.Select,
+		"models.edit": &m.keyMap.Edit,
+		"next":        &m.keyMap.Next,
+		"previous":    &m.keyMap.Previous,
+	})
 
 	// A stale catalog must not keep this dialog from opening: it is the
 	// only way for the user to choose a model.
@@ -309,16 +316,10 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 // ShortHelp returns the short help view.
 func (m *Models) ShortHelp() []key.Binding {
 	if m.isOnboarding {
-		return []key.Binding{
-			m.keyMap.UpDown,
-			m.keyMap.Select,
-		}
+		return append(navHelp(m.keyMap.Next, m.keyMap.Previous), m.keyMap.Select)
 	}
-	h := []key.Binding{
-		m.keyMap.UpDown,
-		m.keyMap.Tab,
-		m.keyMap.Select,
-	}
+	h := navHelp(m.keyMap.Next, m.keyMap.Previous)
+	h = append(h, m.keyMap.Tab, m.keyMap.Select)
 	if m.isSelectedConfigured() {
 		h = append(h, m.keyMap.Edit)
 	}

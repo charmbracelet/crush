@@ -135,8 +135,15 @@ func NewCommands(com *common.Common, sessionID string, hasSession, hasTodos, has
 		key.WithHelp("shift+tab", "switch selection prev"),
 	)
 	closeKey := CloseKey
-	closeKey.SetHelp("esc", "cancel")
+	closeKey.SetHelp(firstKey(CloseKey), "cancel")
 	c.keyMap.Close = closeKey
+	applyDialogKeybinds(com, map[string]*key.Binding{
+		"select":             &c.keyMap.Select,
+		"next":               &c.keyMap.Next,
+		"previous":           &c.keyMap.Previous,
+		"tab":                &c.keyMap.Tab,
+		"commands.shift_tab": &c.keyMap.ShiftTab,
+	})
 
 	if available, known := config.DockerMCPAvailabilityCached(); known {
 		c.dockerMCPAvailable = &available
@@ -340,20 +347,17 @@ func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 // ShortHelp implements [help.KeyMap].
 func (c *Commands) ShortHelp() []key.Binding {
-	return []key.Binding{
-		c.keyMap.Tab,
-		c.keyMap.UpDown,
-		c.keyMap.Select,
-		c.keyMap.Close,
-	}
+	h := []key.Binding{c.keyMap.Tab}
+	h = append(h, navHelp(c.keyMap.Next, c.keyMap.Previous)...)
+	h = append(h, c.keyMap.Select, c.keyMap.Close)
+	return h
 }
 
 // FullHelp implements [help.KeyMap].
 func (c *Commands) FullHelp() [][]key.Binding {
-	return [][]key.Binding{
-		{c.keyMap.Select, c.keyMap.Next, c.keyMap.Previous, c.keyMap.Tab},
-		{c.keyMap.Close},
-	}
+	nav := append([]key.Binding{c.keyMap.Select}, navHelp(c.keyMap.Next, c.keyMap.Previous)...)
+	nav = append(nav, c.keyMap.Tab)
+	return [][]key.Binding{nav, {c.keyMap.Close}}
 }
 
 // nextCommandType returns the next command type in the cycle.
@@ -453,14 +457,14 @@ func (c *Commands) setCommandItems(commandType CommandType) {
 // defaultCommands returns the list of default system commands.
 func (c *Commands) defaultCommands() []*CommandItem {
 	commands := []*CommandItem{
-		NewCommandItem(c.com.Styles, "new_session", "New Session", "ctrl+n", ActionNewSession{}).WithAliases("clear"),
-		NewCommandItem(c.com.Styles, "switch_session", "Sessions", "ctrl+s", ActionOpenDialog{SessionsID}),
-		NewCommandItem(c.com.Styles, "switch_model", "Switch Model", "ctrl+l", ActionOpenDialog{ModelsID}),
+		NewCommandItem(c.com.Styles, "new_session", "New Session", shortcutFor(c.com, "chat.new_session", "ctrl+n"), ActionNewSession{}).WithAliases("clear"),
+		NewCommandItem(c.com.Styles, "switch_session", "Sessions", shortcutFor(c.com, "global.sessions", "ctrl+s"), ActionOpenDialog{SessionsID}),
+		NewCommandItem(c.com.Styles, "switch_model", "Switch Model", shortcutFor(c.com, "global.models", "ctrl+l"), ActionOpenDialog{ModelsID}),
 	}
 
 	// Only show compact command if there's an active session
 	if c.hasSession {
-		commands = append(commands, NewCommandItem(c.com.Styles, "summarize", "Summarize Session", "", ActionSummarize{SessionID: c.sessionID}))
+		commands = append(commands, NewCommandItem(c.com.Styles, "summarize", "Summarize Session", shortcutFor(c.com, "global.summarize", "ctrl+."), ActionSummarize{SessionID: c.sessionID}))
 	}
 
 	// Add reasoning toggle for models that support it
@@ -478,7 +482,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 				if selectedModel.Think {
 					status = "Disable"
 				}
-				commands = append(commands, NewCommandItem(c.com.Styles, "toggle_thinking", status+" Thinking Mode", "", ActionToggleThinking{}))
+				commands = append(commands, NewCommandItem(c.com.Styles, "toggle_thinking", status+" Thinking Mode", shortcutFor(c.com, "global.toggle_thinking", "ctrl+,"), ActionToggleThinking{}))
 			}
 
 			// OpenAI models: reasoning effort dialog
@@ -491,7 +495,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	}
 	// Only show toggle compact mode command if window width is larger than compact breakpoint (120)
 	if c.windowWidth >= sidebarCompactModeBreakpoint && c.hasSession {
-		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_sidebar", "Toggle Sidebar", "ctrl+b", ActionToggleCompactMode{}))
+		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_sidebar", "Toggle Sidebar", shortcutFor(c.com, "chat.toggle_sidebar", "ctrl+b"), ActionToggleCompactMode{}))
 	}
 	if c.hasSession {
 		cfgPrime := c.com.Config()
@@ -510,7 +514,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	// because os.Getenv does IO is breaks the TEA paradigm and is generally an
 	// antipattern.
 	if os.Getenv("EDITOR") != "" {
-		commands = append(commands, NewCommandItem(c.com.Styles, "open_external_editor", "Open External Editor", "ctrl+o", ActionExternalEditor{}))
+		commands = append(commands, NewCommandItem(c.com.Styles, "open_external_editor", "Open External Editor", shortcutFor(c.com, "editor.open_editor", "ctrl+o"), ActionExternalEditor{}))
 	}
 
 	// Add Docker MCP command if available and not already enabled.
@@ -547,12 +551,12 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		default:
 			label = "Toggle To-Dos"
 		}
-		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_pills", label, "ctrl+t", ActionTogglePills{}))
+		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_pills", label, shortcutFor(c.com, "chat.toggle_pills", "ctrl+t"), ActionTogglePills{}))
 	}
 
 	// Add a command for selecting notification style via picker dialog.
 	notificationLabel := "Notification Style"
-	commands = append(commands, NewCommandItem(c.com.Styles, "select_notifications", notificationLabel, "", ActionOpenDialog{DialogID: NotificationsID}))
+	commands = append(commands, NewCommandItem(c.com.Styles, "select_notifications", notificationLabel, shortcutFor(c.com, "global.notifications", "ctrl+7"), ActionOpenDialog{DialogID: NotificationsID}))
 
 	commands = append(
 		commands,
@@ -568,7 +572,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	if c.transparent {
 		transparentLabel = "Enable Background Color"
 	}
-	commands = append(commands, NewCommandItem(c.com.Styles, "toggle_transparent", transparentLabel, "", ActionToggleTransparentBackground{}))
+	commands = append(commands, NewCommandItem(c.com.Styles, "toggle_transparent", transparentLabel, shortcutFor(c.com, "global.toggle_transparent", "ctrl+'"), ActionToggleTransparentBackground{}))
 
 	commands = append(commands, NewCommandItem(c.com.Styles, "switch_theme", "Themes", "", ActionOpenDialog{ThemeID}))
 
@@ -581,7 +585,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 
 	commands = append(
 		commands,
-		NewCommandItem(c.com.Styles, "quit", "Quit", "ctrl+c", tea.QuitMsg{}).WithAliases("exit"),
+		NewCommandItem(c.com.Styles, "quit", "Quit", shortcutFor(c.com, "global.quit", "ctrl+c"), tea.QuitMsg{}).WithAliases("exit"),
 	)
 
 	return commands

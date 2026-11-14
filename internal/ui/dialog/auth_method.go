@@ -95,6 +95,10 @@ func NewAuthMethod(
 		key.WithKeys("esc", "alt+esc"),
 		key.WithHelp("esc", "back"),
 	)
+	applyDialogKeybinds(com, map[string]*key.Binding{
+		"select": &m.keyMap.Select,
+		"close":  &m.keyMap.Close,
+	})
 
 	return m
 }

@@ -541,17 +541,17 @@ func TestSetSessionMessagesGatesAnimationsOnBusy(t *testing.T) {
 	// animation clock so the ghost spinner stays still.
 	cmd := m.setSessionMessages(msgs)
 	require.Nil(t, cmd, "setSessionMessages must not start animations when agent is idle")
-	require.False(t, m.chat.animAllowed, "an idle session reload must freeze the animation clock")
-	require.Nil(t, m.chat.EnsureAnimating(), "a frozen clock must not arm while idle")
-	require.False(t, m.chat.animRunning)
+	require.True(t, m.animClock.frozen, "an idle session reload must freeze the animation clock")
+	require.Nil(t, m.ensureAnimating(), "a frozen clock must not arm while idle")
+	require.False(t, m.animClock.running)
 
 	// When the agent is busy, the clock may run for the same message.
 	warmCaches(m, true)
 	cmd = m.setSessionMessages(msgs)
 	require.Nil(t, cmd, "setSessionMessages must not arm the clock itself")
-	require.True(t, m.chat.animAllowed, "setSessionMessages must allow animations when agent is busy")
-	require.NotNil(t, m.chat.EnsureAnimating(), "a visible spinning message must arm the clock")
-	require.True(t, m.chat.animRunning)
+	require.False(t, m.animClock.frozen, "setSessionMessages must allow animations when agent is busy")
+	require.NotNil(t, m.ensureAnimating(), "a visible spinning message must arm the clock")
+	require.True(t, m.animClock.running)
 }
 
 // TestBusyProbeReEnablesFrozenAnimationClock pins the boot race: a session
@@ -583,21 +583,21 @@ func TestBusyProbeReEnablesFrozenAnimationClock(t *testing.T) {
 	require.False(t, m.isAgentBusy(), "boot: the memoized busy state is not populated yet")
 	cmd := m.setSessionMessages(msgs)
 	require.Nil(t, cmd)
-	require.False(t, m.chat.animAllowed, "the boot reload must freeze the clock off the unpopulated cache")
-	require.Nil(t, m.chat.EnsureAnimating(), "the frozen clock must not arm")
-	require.False(t, m.chat.animRunning)
+	require.True(t, m.animClock.frozen, "the boot reload must freeze the clock off the unpopulated cache")
+	require.Nil(t, m.ensureAnimating(), "the frozen clock must not arm")
+	require.False(t, m.animClock.running)
 
 	// The authoritative probe lands: the agent is busy. The gate must
 	// re-open so the visible spinner ticks.
 	m.applyBusyState(busyStateMsg{gen: m.busyFetchGen, ready: true, agentBusy: true})
-	require.True(t, m.chat.animAllowed, "a busy probe must re-enable the animation gate")
-	require.NotNil(t, m.chat.EnsureAnimating(), "a visible spinning item must arm the clock once allowed")
-	require.True(t, m.chat.animRunning)
+	require.False(t, m.animClock.frozen, "a busy probe must re-enable the animation gate")
+	require.NotNil(t, m.ensureAnimating(), "a visible spinning item must arm the clock once allowed")
+	require.True(t, m.animClock.running)
 
 	// An idle probe must not re-freeze the clock on its own: the ghost
 	// guard belongs to the session reload, not to the probe.
 	m.applyBusyState(busyStateMsg{gen: m.busyFetchGen, ready: true, agentBusy: false})
-	require.True(t, m.chat.animAllowed, "an idle probe must leave the gate alone")
+	require.False(t, m.animClock.frozen, "an idle probe must leave the gate alone")
 }
 
 // TestStaleBusyRefreshDiscardedAndReDispatched pins the generation guard for

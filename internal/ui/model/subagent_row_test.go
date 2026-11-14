@@ -16,11 +16,12 @@ func TestSubAgentRowKeepsElapsedTimeWhenLabelIsLong(t *testing.T) {
 
 	u := newTestUI()
 	const width = 32
+	now := time.Now()
 	row := u.subAgentRow(chat.DispatchStatus{
 		Label:   "freddy-ysam-redteam-audit-with-a-very-long-tail",
 		Running: true,
-		Started: time.Now().Add(-42 * time.Second),
-	}, width)
+		Started: now.Add(-42 * time.Second),
+	}, width, now)
 
 	plain := ansi.Strip(row)
 	require.LessOrEqual(t, lipgloss.Width(row), width)
@@ -33,7 +34,7 @@ func TestSubAgentRowLeavesShortLabelWhole(t *testing.T) {
 	t.Parallel()
 
 	u := newTestUI()
-	plain := ansi.Strip(u.subAgentRow(chat.DispatchStatus{Label: "xochitl-porky"}, 40))
+	plain := ansi.Strip(u.subAgentRow(chat.DispatchStatus{Label: "xochitl-porky"}, 40, time.Now()))
 	require.Equal(t, "porky", lastWord(plain))
 	require.NotContains(t, plain, "done")
 	require.NotContains(t, plain, "…")

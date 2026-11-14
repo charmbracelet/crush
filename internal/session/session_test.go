@@ -4,8 +4,128 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/db"
+	"github.com/charmbracelet/crush/internal/message"
+	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
 )
+
+func TestRenamePreservesSessionActivity(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		upgrade bool
+		save    bool
+	}{
+		{name: "rename/fresh"},
+		{name: "rename/upgrade", upgrade: true},
+		{name: "save/fresh", save: true},
+		{name: "save/upgrade", save: true, upgrade: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dataDir := t.TempDir()
+			t.Cleanup(func() { require.NoError(t, db.Release(dataDir)) })
+
+			conn, err := db.Connect(t.Context(), dataDir)
+			require.NoError(t, err)
+			if tt.upgrade {
+				require.NoError(t, goose.DownTo(conn, "migrations", 20261109000000))
+			}
+
+			// Seed persisted activity times without depending on the wall clock.
+			_, err = conn.ExecContext(t.Context(), `
+				INSERT INTO sessions (id, title, prompt_tokens, cost, created_at, updated_at)
+				VALUES ('older', 'Old title', 100, 0.25, 1, 100),
+				       ('latest', 'Latest conversation', 200, 0.50, 2, 200)
+			`)
+			require.NoError(t, err)
+			require.NoError(t, db.Release(dataDir))
+			conn, err = db.Connect(t.Context(), dataDir)
+			require.NoError(t, err)
+			sessions := NewService(db.New(conn), conn)
+			unchanged, err := sessions.Get(t.Context(), "older")
+			require.NoError(t, err)
+			_, err = sessions.Save(t.Context(), unchanged)
+			require.NoError(t, err)
+			unchanged, err = sessions.Get(t.Context(), "older")
+			require.NoError(t, err)
+			require.Equal(t, int64(100), unchanged.UpdatedAt)
+
+			if tt.save {
+				older, err := sessions.Get(t.Context(), "older")
+				require.NoError(t, err)
+				older.Title = "New title"
+				_, err = sessions.Save(t.Context(), older)
+				require.NoError(t, err)
+			} else {
+				require.NoError(t, sessions.Rename(t.Context(), "older", "New title"))
+			}
+
+			renamed, err := sessions.Get(t.Context(), "older")
+			require.NoError(t, err)
+			require.Equal(t, "New title", renamed.Title)
+			require.Equal(t, int64(100), renamed.UpdatedAt)
+			require.Equal(t, int64(100), renamed.PromptTokens)
+			require.Equal(t, 0.25, renamed.Cost)
+
+			listed, err := sessions.List(t.Context())
+			require.NoError(t, err)
+			require.Len(t, listed, 2)
+			require.Equal(t, "latest", listed[0].ID)
+			require.Equal(t, "older", listed[1].ID)
+
+			last, err := sessions.GetLast(t.Context())
+			require.NoError(t, err)
+			require.Equal(t, "latest", last.ID)
+		})
+	}
+}
+
+func TestSessionActivityAdvancesTimestamp(t *testing.T) {
+	for _, name := range []string{"message", "delete-message", "channel", "save", "usage"} {
+		t.Run(name, func(t *testing.T) {
+			dataDir := t.TempDir()
+			t.Cleanup(func() { require.NoError(t, db.Release(dataDir)) })
+
+			conn, err := db.Connect(t.Context(), dataDir)
+			require.NoError(t, err)
+			_, err = conn.ExecContext(t.Context(), `
+				INSERT INTO sessions (id, title, created_at, updated_at)
+				VALUES ('active', 'Conversation', 1, 100)
+			`)
+			require.NoError(t, err)
+			queries := db.New(conn)
+			sessions := NewService(queries, conn)
+
+			switch name {
+			case "message":
+				_, err = message.NewService(queries).Create(t.Context(), "active", message.CreateMessageParams{
+					Role: message.User,
+				})
+			case "delete-message":
+				messages := message.NewService(queries)
+				created, createErr := messages.Create(t.Context(), "active", message.CreateMessageParams{Role: message.User})
+				require.NoError(t, createErr)
+				_, err = conn.ExecContext(t.Context(), "UPDATE sessions SET updated_at = 100 WHERE id = 'active'")
+				require.NoError(t, err)
+				err = messages.Delete(t.Context(), created.ID)
+			case "channel":
+				_, err = sessions.SetChannel(t.Context(), "active", "signal")
+			case "save":
+				var active Session
+				active, err = sessions.Get(t.Context(), "active")
+				require.NoError(t, err)
+				active.Todos = []Todo{{Content: "Next task", Status: TodoStatusPending}}
+				_, err = sessions.Save(t.Context(), active)
+			case "usage":
+				err = sessions.UpdateTitleAndUsage(t.Context(), "active", "Conversation", 0, 0, 0)
+			}
+			require.NoError(t, err)
+
+			updated, err := sessions.Get(t.Context(), "active")
+			require.NoError(t, err)
+			require.Greater(t, updated.UpdatedAt, int64(100))
+		})
+	}
+}
 
 func TestEstimatedUsageStateSurvivesFetchModifySave(t *testing.T) {
 	dataDir := t.TempDir()

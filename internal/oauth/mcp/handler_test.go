@@ -36,6 +36,11 @@ type fakeASOpts struct {
 	// in the authorization response, and the SDK rejects the authorization
 	// if no issuer comes back.
 	issSupported bool
+	// refreshError, when set, makes a refresh_token grant fail with this
+	// OAuth error code (and optional refreshErrorDesc). Used to simulate
+	// a revoked refresh token.
+	refreshError     string
+	refreshErrorDesc string
 }
 
 // newFakeAS starts an httptest server speaking enough of the OAuth
@@ -88,6 +93,15 @@ func newFakeAS(t *testing.T, opts fakeASOpts) (base, mcpURL string) {
 	})
 	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
+		if r.Form.Get("grant_type") == "refresh_token" && opts.refreshError != "" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			writeJSON(w, map[string]any{
+				"error":             opts.refreshError,
+				"error_description": opts.refreshErrorDesc,
+			})
+			return
+		}
 		access := opts.accessToken
 		if r.Form.Get("grant_type") == "refresh_token" && opts.refreshedToken != "" {
 			access = opts.refreshedToken
@@ -769,4 +783,63 @@ func TestConnect_OneLoginOpensOneTab(t *testing.T) {
 
 	require.Equal(t, int64(1), opens.Load(), "one login must open exactly one browser tab")
 	require.NotNil(t, h.Token(), "the login must yield a usable token")
+}
+
+// TestHandler_RevokedRefreshToken proves a restored, expired token whose
+// refresh is rejected (RFC 6749 invalid_grant, or unauthorized_client as
+// used by some servers) surfaces as a retrieve error and does not persist
+// a replacement token. The caller is expected to drop the stored token
+// so the next start can re-authenticate.
+func TestHandler_RevokedRefreshToken(t *testing.T) {
+	cases := []struct {
+		name     string
+		code     string
+		desc     string
+		wantCode string
+	}{
+		{"invalid_grant", "invalid_grant", "refresh token revoked", "invalid_grant"},
+		{"unauthorized_client", "unauthorized_client", "refresh_token is invalid", "unauthorized_client"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			base, mcpURL := newFakeAS(t, fakeASOpts{
+				clientID:         "saved-client",
+				refreshError:     tc.code,
+				refreshErrorDesc: tc.desc,
+			})
+
+			saved := &oauth.Token{
+				AccessToken:  "stale-access",
+				RefreshToken: "revoked-refresh",
+				ExpiresAt:    time.Now().Add(-time.Hour).Unix(),
+				Client: &oauth.OAuthClient{
+					ClientID: "saved-client",
+					AuthURL:  base + "/authorize",
+					TokenURL: base + "/token",
+				},
+			}
+
+			var saverCalls int
+			h, err := NewHandler("test", mcpURL, saved, nil, func(*oauth.Token) {
+				saverCalls++
+			}, false, 0)
+			require.NoError(t, err)
+			t.Cleanup(h.Close)
+			h.openURL = func(string) error {
+				t.Error("browser must not open when a refresh is rejected")
+				return nil
+			}
+
+			ts, err := h.TokenSource(t.Context())
+			require.NoError(t, err)
+			_, err = ts.Token()
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.wantCode)
+
+			var rErr *oauth2.RetrieveError
+			require.ErrorAs(t, err, &rErr)
+			require.Equal(t, tc.wantCode, rErr.ErrorCode)
+			require.Zero(t, saverCalls, "a failed refresh must not persist a token")
+		})
+	}
 }

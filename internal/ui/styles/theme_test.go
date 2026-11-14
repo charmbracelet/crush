@@ -43,6 +43,10 @@ func TestLoadTheme_CaseInsensitive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadTheme: %v", err)
 	}
+	_, err = LoadTheme("KITT")
+	if err != nil {
+		t.Fatalf("LoadTheme: %v", err)
+	}
 }
 
 func TestLoadTheme_Empty(t *testing.T) {
@@ -223,5 +227,136 @@ func TestKeanu_BodyTextContrast(t *testing.T) {
 	bg := *hex(s.Background)
 	if ratio := contrastRatio(fg, bg); ratio < minAA {
 		t.Errorf("keanu body text contrast %.2f is below WCAG AA (%.1f)", ratio, minAA)
+	}
+}
+
+func TestKitt_BadgeContrast(t *testing.T) {
+	// KITT fills badges with the scanner red primary. Bold badges keep
+	// the white text at the bold-text floor; selection rows and the H1
+	// use the dark ink and must clear WCAG AA. The banner badges are
+	// copied inside quickStyle before overrides run, so check both.
+	const minAA = 4.5
+	const minBold = 3.0
+	s, err := LoadTheme("kitt")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	boldBadges := map[string]lipgloss.Style{
+		"PromptQuestionIconFocused": s.Editor.PromptQuestionIconFocused,
+		"ModeBadgePlan":             s.Status.ModeBadgePlan,
+		"ModeBannerPlanBadge":       s.Status.ModeBannerPlanBadge,
+	}
+	for name, style := range boldBadges {
+		if !style.GetBold() {
+			t.Errorf("kitt %s must be bold to use the bold-text contrast floor", name)
+		}
+		fg := *hex(style.GetForeground())
+		bg := *hex(style.GetBackground())
+		if ratio := contrastRatio(fg, bg); ratio < minBold {
+			t.Errorf("kitt %s contrast %.2f is below the bold-text floor (%.1f)", name, ratio, minBold)
+		}
+	}
+
+	badges := map[string]lipgloss.Style{
+		"FilePickerSelected":  s.FilePicker.Selected,
+		"ModeBadgeYolo":       s.Status.ModeBadgeYolo,
+		"ModeBannerYoloBadge": s.Status.ModeBannerYoloBadge,
+		"CompletionsFocused":  s.Completions.Focused,
+		"DialogSelectedItem":  s.Dialog.SelectedItem,
+	}
+	for name, style := range badges {
+		fg := *hex(style.GetForeground())
+		bg := *hex(style.GetBackground())
+		if ratio := contrastRatio(fg, bg); ratio < minAA {
+			t.Errorf("kitt %s contrast %.2f is below WCAG AA (%.1f)", name, ratio, minAA)
+		}
+	}
+
+	for name, h1 := range map[string]*string{
+		"Markdown.H1":     s.Markdown.H1.Color,
+		"PlanMarkdown.H1": s.PlanMarkdown.H1.Color,
+	} {
+		if h1 == nil || s.Markdown.H1.BackgroundColor == nil {
+			t.Fatalf("%s style is missing fg/bg colors", name)
+		}
+		if ratio := contrastRatio(*h1, *s.Markdown.H1.BackgroundColor); ratio < minAA {
+			t.Errorf("kitt %s contrast %.2f is below WCAG AA (%.1f)", name, ratio, minAA)
+		}
+	}
+}
+
+func TestKitt_TextContrast(t *testing.T) {
+	// Body text and inline code must stay legible on the near-black
+	// dashboard background.
+	const minAA = 4.5
+	s, err := LoadTheme("kitt")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	fg := *hex(s.Messages.NoContent.GetForeground())
+	bg := *hex(s.Background)
+	if ratio := contrastRatio(fg, bg); ratio < minAA {
+		t.Errorf("kitt body text contrast %.2f is below WCAG AA (%.1f)", ratio, minAA)
+	}
+
+	code := s.Markdown.Code
+	if code.Color == nil || code.BackgroundColor == nil {
+		t.Fatal("inline code style is missing fg/bg colors")
+	}
+	if ratio := contrastRatio(*code.Color, *code.BackgroundColor); ratio < minAA {
+		t.Errorf("kitt inline code contrast %.2f is below WCAG AA (%.1f)", ratio, minAA)
+	}
+}
+
+func TestKitt_ModeColorsAreDistinct(t *testing.T) {
+	// Plan, YOLO and Sysadmin each get their own fill so the active mode
+	// is obvious at a glance: green, amber and red respectively.
+	const minBold = 3.0
+	s, err := LoadTheme("kitt")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	modeBadges := map[string]lipgloss.Style{
+		"plan":     s.Status.ModeBadgePlan,
+		"yolo":     s.Status.ModeBadgeYolo,
+		"sysadmin": s.Status.ModeBadgeSysadmin,
+	}
+	promptIcons := map[string]lipgloss.Style{
+		"plan":     s.Editor.PromptPlanIconFocused,
+		"yolo":     s.Editor.PromptYoloIconFocused,
+		"sysadmin": s.Editor.PromptSysadminIconFocused,
+	}
+	for _, group := range []map[string]lipgloss.Style{modeBadges, promptIcons} {
+		seenFills := map[string]string{}
+		for mode, style := range group {
+			fill := *hex(style.GetBackground())
+			if other, ok := seenFills[fill]; ok {
+				t.Errorf("kitt %s and %s modes share the fill %s", mode, other, fill)
+			}
+			seenFills[fill] = mode
+
+			fg := *hex(style.GetForeground())
+			if ratio := contrastRatio(fg, fill); ratio < minBold {
+				t.Errorf("kitt %s mode contrast %.2f is below the bold-text floor (%.1f)", mode, ratio, minBold)
+			}
+		}
+	}
+
+	banners := map[string]lipgloss.Style{
+		"plan":     s.Status.ModeBannerPlan,
+		"yolo":     s.Status.ModeBannerYolo,
+		"sysadmin": s.Status.ModeBannerSysadmin,
+	}
+	const minAA = 4.5
+	for mode, style := range banners {
+		if _, ok := style.GetBackground().(lipgloss.NoColor); ok {
+			t.Errorf("kitt %s mode banner has no fill", mode)
+			continue
+		}
+		fg := *hex(style.GetForeground())
+		bg := *hex(style.GetBackground())
+		if ratio := contrastRatio(fg, bg); ratio < minAA {
+			t.Errorf("kitt %s mode banner contrast %.2f is below WCAG AA (%.1f)", mode, ratio, minAA)
+		}
 	}
 }

@@ -392,7 +392,7 @@ func TestGhostSpinnerInAnEarlierTurnDoesNotQueueThePrompt(t *testing.T) {
 		{ID: "a0", Role: message.Assistant, SessionID: "s1"},
 		userMessage("u1", "s1", "later"),
 	})
-	m.chat.SetAnimationsAllowed(true)
+	m.animClock.frozen = false
 
 	m.sendMessage("hello")
 

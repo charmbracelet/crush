@@ -460,7 +460,7 @@ func (t *baseToolMessageItem) elapsed() time.Duration {
 	if start == 0 || end < start {
 		return 0
 	}
-	return time.Duration(end-start) * time.Millisecond
+	return common.ElapsedSince(time.UnixMilli(start), time.UnixMilli(end))
 }
 
 // toolTimerOwnTimeThreshold is how long a tool call must run before its

@@ -78,6 +78,23 @@ func stripANSI(s string) string {
 // helper makes that comparison explicit.
 func normalizeRender(s string) string {
 	clean := stripANSI(s)
+	// Copy sentinels render as blank cells (they stand in for raw
+	// markdown syntax markers so selection copies can restore them, see
+	// internal/ui/list/rawcopy.go), so they are invisible and must not
+	// count as line content here. Match them with or without the
+	// variation selector: word wrap strips it from whitespace-based
+	// sentinels.
+	for _, sentinel := range []string{
+		styles.CodespanPadding,
+		styles.SentinelEmph,
+		styles.SentinelStrong,
+		styles.SentinelStrike,
+		styles.SentinelFence,
+		styles.SentinelTask,
+		"\u2004", "\u2005", "\u2007",
+	} {
+		clean = strings.ReplaceAll(clean, sentinel, "")
+	}
 	lines := strings.Split(clean, "\n")
 	for i, l := range lines {
 		lines[i] = strings.TrimRight(l, " \t")

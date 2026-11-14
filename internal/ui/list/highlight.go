@@ -6,7 +6,6 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/stringext"
-	"github.com/charmbracelet/crush/internal/ui/styles"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -23,7 +22,14 @@ var DefaultHighlighter Highlighter = func(x, y int, c *uv.Cell) *uv.Cell {
 // Highlighter represents a function that defines how to highlight text.
 type Highlighter func(x, y int, c *uv.Cell) *uv.Cell
 
-// HighlightContent returns the content with highlighted regions based on the specified parameters.
+// HighlightContent returns the currently highlighted content based on the mouse
+// selection. It returns an empty string if no content is highlighted.
+//
+// The copy is a raw-markdown reconstruction, not the rendered text: the
+// extractor in rawcopy.go maps the invisible sentinel cells rendered by the
+// markdown style config back to their syntax markers, restores link targets
+// from the cells' OSC 8 metadata, and rebuilds pipe-table and fenced-code
+// syntax from the rendered structure.
 func HighlightContent(content string, area image.Rectangle, startLine, startCol, endLine, endCol int) string {
 	content = stringext.NormalizeSpace(content)
 
@@ -42,22 +48,16 @@ func HighlightContent(content string, area image.Rectangle, startLine, startCol,
 		endCol = width
 	}
 
-	rows := extractRows(buf, startLine, startCol, endLine, endCol, height)
-	return joinRows(rows, width) + "\n"
+	rows := extractMarkdownRows(buf, startLine, startCol, endLine, endCol, height)
+	return joinRows(assembleMarkdownRows(rows), width) + "\n"
 }
 
-// renderBuffer draws content into a screen buffer of the given dimensions.
-func renderBuffer(content string, area image.Rectangle, width, height int) uv.ScreenBuffer {
-	buf := uv.NewScreenBuffer(width, height)
-	styled := uv.NewStyledString(content)
-	styled.Draw(&buf, area)
-	return buf
-}
-
-// extractRows extracts the text of the selected region from the buffer,
-// one string per row, trimmed to the last cell holding content.
-func extractRows(buf uv.ScreenBuffer, startLine, startCol, endLine, endCol, height int) []string {
-	rows := make([]string, 0, endLine-startLine+1)
+// extractMarkdownRows extracts the raw markdown text of the selected
+// region from the buffer, one row per line, trimmed to the last cell
+// holding content.
+func extractMarkdownRows(buf uv.ScreenBuffer, startLine, startCol, endLine, endCol, height int) []markdownRow {
+	ex := &rawExtractor{}
+	rows := make([]markdownRow, 0, max(endLine-startLine+1, 1))
 	for y := startLine; y <= endLine && y < height; y++ {
 		if y >= buf.Height() {
 			break
@@ -73,43 +73,17 @@ func extractRows(buf uv.ScreenBuffer, startLine, startCol, endLine, endCol, heig
 			colEnd = min(endCol, len(line))
 		}
 
-		rows = append(rows, extractRow(line, colStart, colEnd))
+		rows = append(rows, ex.row(line, colStart, colEnd))
 	}
 	return rows
 }
 
-// extractRow returns the text of a single buffer line between colStart and
-// colEnd, trimmed to the last cell holding any content (including explicit
-// spaces: renderers like glamour pad rows with real space cells, so content
-// usually reaches the full width).
-//
-// Codespan padding cells are converted back into backticks: markdown inline
-// code renders blank padding in place of its backticks
-// ([styles.CodespanPadding]), and a copy of a selection must reproduce the
-// original source text, not the rendered blank padding. The sentinel is a
-// no-break space tagged with a variation selector, so a real no-break space
-// in the message text does not match it and is copied verbatim.
-func extractRow(line uv.Line, colStart, colEnd int) string {
-	lastCellX := -1
-	for x := colStart; x < colEnd; x++ {
-		cell := line.At(x)
-		if cell != nil && cell.Content != "" {
-			lastCellX = x
-		}
-	}
-
-	var row strings.Builder
-	for x := colStart; x <= lastCellX; x++ {
-		cell := line.At(x)
-		if cell != nil {
-			if cell.Content == styles.CodespanPadding {
-				row.WriteString("`")
-			} else {
-				row.WriteString(cell.Content)
-			}
-		}
-	}
-	return row.String()
+// renderBuffer draws content into a screen buffer of the given dimensions.
+func renderBuffer(content string, area image.Rectangle, width, height int) uv.ScreenBuffer {
+	buf := uv.NewScreenBuffer(width, height)
+	styled := uv.NewStyledString(content)
+	styled.Draw(&buf, area)
+	return buf
 }
 
 // joinRows stitches screen rows back into text, deciding per row boundary
@@ -160,10 +134,10 @@ func isWordWrap(text, next string, width int) bool {
 	return width > 0 && ansi.StringWidth(text) >= width*3/5
 }
 
-// startsBlock reports whether a row begins a new markdown block such as a
-// list item or heading, rather than continuing a wrapped paragraph.
-// Indented rows are continuations of nested content (e.g. the second line
-// of a list item), not new blocks.
+// startsBlock reports whether a row begins a new markdown block such as
+// a list item, heading, table row, or code fence, rather than continuing
+// a wrapped paragraph. Indented rows are continuations of nested content
+// (e.g. the second line of a list item), not new blocks.
 func startsBlock(row string) bool {
 	if row != strings.TrimLeft(row, " ") {
 		return false
@@ -171,7 +145,8 @@ func startsBlock(row string) bool {
 	switch {
 	case strings.HasPrefix(row, "- "), strings.HasPrefix(row, "* "),
 		strings.HasPrefix(row, "+ "), strings.HasPrefix(row, "• "),
-		strings.HasPrefix(row, "#"):
+		strings.HasPrefix(row, "#"), strings.HasPrefix(row, "|"),
+		strings.HasPrefix(row, "```"):
 		return true
 	}
 	if i := strings.IndexAny(row, ".)"); i > 0 && i < 4 {

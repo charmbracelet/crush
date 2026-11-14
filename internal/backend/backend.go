@@ -45,6 +45,8 @@ var (
 	ErrServerNotIdle           = errors.New("server is hosting live workspaces")
 	ErrClientRetired           = errors.New("client has been retired")
 	ErrInvalidTheme            = errors.New("invalid host theme")
+	ErrInvalidLSPHost          = errors.New("invalid LSP host")
+	ErrClientNoClaim           = errors.New("client holds no claim on the workspace")
 	ErrChannelOptInMismatch    = errors.New("requested channels differ from the existing workspace; channels are an explicit opt-in and are not shared across duplicate creates")
 )
 
@@ -165,6 +167,11 @@ type Backend struct {
 //     streams were still open, which a clean exit does. The final stream
 //     detach then tears down immediately instead of waiting out the
 //     detach grace for a client that is not coming back.
+//   - lspHost is the LSP host the client registered with
+//     [Backend.SetLSPHost], or nil, and lspHostSeq orders the
+//     registrations of a workspace: the highest is the newest. Stored
+//     hosts are never mutated, only replaced. The registration is part of
+//     the claim and is gone when the entry is removed.
 //
 // streams and holdTimer are mutually exclusive in practice (the hold
 // timer is stopped the moment an SSE stream attaches), but both being
@@ -175,6 +182,8 @@ type clientState struct {
 	currentSessionID string
 	sessionReported  bool
 	released         bool
+	lspHost          *proto.LSPHost
+	lspHostSeq       uint64
 }
 
 // Workspace represents a running [app.App] workspace with its
@@ -229,6 +238,12 @@ type Workspace struct {
 	// setting client: it stays until a host clears it or the workspace
 	// goes away. Stored themes are never mutated, only replaced.
 	hostTheme *proto.HostTheme
+
+	// lspHostSeq numbers the LSP host registrations of the workspace's
+	// clients, and lspHost is the one in effect, the newest, as it was
+	// last announced. Both are guarded by clientsMu.
+	lspHostSeq uint64
+	lspHost    *proto.LSPHost
 
 	// rootCache memoizes [Backend.RootSessionID] resolutions, keyed by
 	// session ID. Session parentage is fixed at creation, so entries
@@ -735,7 +750,9 @@ func (b *Backend) registerClient(ws *Workspace, clientID string) {
 			return
 		}
 		old.holdTimer.Stop()
-		ws.clients[clientID] = b.newHeldClient(ws, clientID, old.currentSessionID, old.sessionReported, b.createGrace)
+		held := b.newHeldClient(ws, clientID, old.currentSessionID, old.sessionReported, b.createGrace)
+		held.lspHost, held.lspHostSeq = old.lspHost, old.lspHostSeq
+		ws.clients[clientID] = held
 		return
 	}
 	ws.clients[clientID] = b.newHeldClient(ws, clientID, "", false, b.createGrace)
@@ -848,12 +865,16 @@ func (ws *Workspace) clientSessionBroker() *pubsub.Broker[proto.ClientSession] {
 
 // forgetClient removes a client's claim on the workspace. Its session is
 // cleared for the event streams first, so that they do not keep showing a
-// client that is gone. It is called with clientsMu held.
+// client that is gone, and its LSP host registration goes with it. It is
+// called with clientsMu held.
 func forgetClient(ws *Workspace, clientID string, cs *clientState) {
 	if cs.currentSessionID != "" {
 		publishClientSession(ws, clientID, "")
 	}
 	delete(ws.clients, clientID)
+	if cs.lspHost != nil {
+		syncLSPHost(ws)
+	}
 }
 
 // ClientSessions returns the session each client of the workspace views,

@@ -213,6 +213,8 @@ func wrapEvent(ev any) *pubsub.Payload {
 		return envelope(pubsub.PayloadTypeHostTheme, e)
 	case pubsub.Event[proto.ClientSession]:
 		return envelope(pubsub.PayloadTypeClientSession, e)
+	case pubsub.Event[proto.LSPHostState]:
+		return envelope(pubsub.PayloadTypeLSPHost, e)
 	case app.UpdateAvailableMsg:
 		return envelope(pubsub.PayloadTypeUpdateAvailable, pubsub.Event[proto.UpdateAvailable]{
 			Type: pubsub.UpdatedEvent,

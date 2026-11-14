@@ -239,6 +239,7 @@ func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.R
 	flusher.Flush()
 
 	c.replayHostTheme(w, r, flusher, id)
+	c.replayLSPHost(w, r, flusher, id)
 	c.replayClientSessions(w, r, flusher, id)
 
 	for {
@@ -831,6 +832,12 @@ func (c *controllerV1) handleError(w http.ResponseWriter, r *http.Request, err e
 		// The message names every offending color (or the unknown base
 		// theme), so a host can fix its theme mapping from the response.
 		status = http.StatusBadRequest
+	case errors.Is(err, backend.ErrInvalidLSPHost):
+		status = http.StatusBadRequest
+	case errors.Is(err, backend.ErrClientNoClaim):
+		// 409 like ErrClientNotAttached, for the same reason: the
+		// workspace exists, the caller is just not one of its clients.
+		status = http.StatusConflict
 	case errors.Is(err, backend.ErrClientNotAttached):
 		// 409, not 404: the workspace exists, the caller just has no live
 		// stream yet. A 404 here is indistinguishable from "workspace

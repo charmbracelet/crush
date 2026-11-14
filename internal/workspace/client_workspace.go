@@ -1422,6 +1422,10 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 			theme = nil
 		}
 		return HostThemeEvent{Theme: theme}
+	case pubsub.Event[proto.LSPHostState]:
+		// Which application shares its language servers only matters to
+		// the server: the servers' states arrive as LSP events.
+		return nil
 	case pubsub.Event[proto.PermissionModeEvent]:
 		// Keep the cached workspace in sync so PermissionMode() never goes
 		// stale when another client or the server changes the mode.

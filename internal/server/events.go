@@ -432,20 +432,22 @@ func messageToProto(m message.Message) proto.Message {
 			})
 		case message.ToolCall:
 			msg.Parts = append(msg.Parts, proto.ToolCall{
-				ID:       v.ID,
-				Name:     v.Name,
-				Input:    v.Input,
-				Finished: v.Finished,
+				ID:          v.ID,
+				Name:        v.Name,
+				Input:       v.Input,
+				Finished:    v.Finished,
+				StartedAtMs: v.StartedAtMs,
 			})
 		case message.ToolResult:
 			msg.Parts = append(msg.Parts, proto.ToolResult{
-				ToolCallID: v.ToolCallID,
-				Name:       v.Name,
-				Content:    v.Content,
-				Data:       v.Data,
-				MIMEType:   v.MIMEType,
-				Metadata:   v.Metadata,
-				IsError:    v.IsError,
+				ToolCallID:   v.ToolCallID,
+				Name:         v.Name,
+				Content:      v.Content,
+				Data:         v.Data,
+				MIMEType:     v.MIMEType,
+				Metadata:     v.Metadata,
+				IsError:      v.IsError,
+				FinishedAtMs: v.FinishedAtMs,
 			})
 		case message.Finish:
 			msg.Parts = append(msg.Parts, proto.Finish{

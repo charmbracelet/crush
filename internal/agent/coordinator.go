@@ -1680,7 +1680,7 @@ func (c *coordinator) IsBusy() bool {
 // instance other than the main one.
 func (c *coordinator) IsSessionBusy(sessionID string) bool {
 	for _, agent := range c.agents {
-		if agent.IsSessionBusy(sessionID) {
+		if agent.HasPendingWork(sessionID) {
 			return true
 		}
 	}

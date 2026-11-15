@@ -40,7 +40,8 @@ func (m *mockSessionAgent) Cancel(sessionID string) {
 	m.cancelled = append(m.cancelled, sessionID)
 }
 func (m *mockSessionAgent) CancelAll()                                  {}
-func (m *mockSessionAgent) IsSessionBusy(sessionID string) bool         { return false }
+func (m *mockSessionAgent) HasActiveTurn(sessionID string) bool         { return false }
+func (m *mockSessionAgent) HasPendingWork(sessionID string) bool        { return false }
 func (m *mockSessionAgent) IsBusy() bool                                { return false }
 func (m *mockSessionAgent) QueuedPrompts(sessionID string) int          { return 0 }
 func (m *mockSessionAgent) QueuedPromptsList(sessionID string) []string { return nil }

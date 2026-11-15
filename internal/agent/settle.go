@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"charm.land/fantasy"
 
@@ -122,10 +123,11 @@ func settleToolCalls(ctx context.Context, messages message.Service, assistant *m
 		created, err := messages.Create(ctx, assistant.SessionID, message.CreateMessageParams{
 			Role: message.Tool,
 			Parts: []message.ContentPart{message.ToolResult{
-				ToolCallID: tc.ID,
-				Name:       tc.Name,
-				Content:    reason,
-				IsError:    true,
+				ToolCallID:   tc.ID,
+				Name:         tc.Name,
+				Content:      reason,
+				IsError:      true,
+				FinishedAtMs: time.Now().UnixMilli(),
 			}},
 		})
 		if err != nil {

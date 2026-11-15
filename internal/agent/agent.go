@@ -1163,6 +1163,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			if !toolResult.IsError && toolResult.Name != "" {
 				completedToolCalls.Set(toolResult.Name, struct{}{})
 			}
+			toolResult.FinishedAtMs = time.Now().UnixMilli()
 			// Use parent ctx instead of genCtx to ensure the message is created
 			// even if the request is canceled mid-stream
 			_, createMsgErr := a.messages.Create(ctx, currentAssistant.SessionID, message.CreateMessageParams{

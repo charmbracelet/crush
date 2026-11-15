@@ -36,7 +36,7 @@ type DiagnosticsToolRenderContext struct{}
 // RenderTool implements the [ToolRenderer] interface.
 func (d *DiagnosticsToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
-	if opts.IsPending() {
+	if opts.IsStreamingInput() {
 		return pendingTool(sty, "Diagnostics", opts.Anim, opts.Compact)
 	}
 

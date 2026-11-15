@@ -30,7 +30,7 @@ type AgentControlToolRenderContext struct{}
 func (r *AgentControlToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
 	name := prettifyToolName(opts.ToolCall.Name)
-	if opts.IsPending() {
+	if opts.IsStreamingInput() {
 		return pendingTool(sty, name, opts.Anim, opts.Compact)
 	}
 

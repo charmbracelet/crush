@@ -25,7 +25,6 @@ func (m testMessageItem) ID() string           { return m.id }
 func (m testMessageItem) Render(int) string    { return m.text }
 func (m testMessageItem) RawRender(int) string { return m.text }
 func (m testMessageItem) Version() uint64      { return 0 }
-func (m testMessageItem) Finished() bool       { return true }
 
 var _ chat.MessageItem = testMessageItem{}
 
@@ -47,7 +46,6 @@ func (m *mutableMessageItem) Render(width int) string {
 }
 func (m *mutableMessageItem) RawRender(width int) string { return m.Render(width) }
 func (m *mutableMessageItem) Version() uint64            { return m.version }
-func (m *mutableMessageItem) Finished() bool             { return false }
 
 var _ chat.MessageItem = (*mutableMessageItem)(nil)
 

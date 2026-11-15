@@ -40,12 +40,6 @@ func NewCommandItem(t *styles.Styles, id, title, shortcut string, action Action)
 	}
 }
 
-// Finished implements list.Item. Command items are render-stable
-// outside of explicit SetFocused / SetMatch.
-func (c *CommandItem) Finished() bool {
-	return true
-}
-
 // WithAliases returns the CommandItem with the given aliases for filtering.
 func (c *CommandItem) WithAliases(aliases ...string) *CommandItem {
 	c.aliases = aliases

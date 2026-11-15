@@ -40,7 +40,6 @@ func (m *countingMessageItem) Render(int) string {
 }
 
 func (m *countingMessageItem) RawRender(width int) string { return m.Render(width) }
-func (m *countingMessageItem) Finished() bool             { return true }
 
 func TestChatSetSize_ReservesScrollbarColumn(t *testing.T) {
 	t.Parallel()

@@ -862,16 +862,6 @@ func (a *AssistantMessageItem) SetMessage(msg *message.Message) {
 	// update.
 }
 
-// Finished implements list.Item. The assistant message is freezable
-// once the message reports IsFinished() and is no longer spinning
-// (no animation frame remains pending). Streaming tail animation is
-// caught by isSpinning, so freezing only kicks in once the turn is
-// fully terminal. The list cache invalidates the entry on the next
-// version bump if anything (focus, highlight, expansion) changes.
-func (a *AssistantMessageItem) Finished() bool {
-	return a.message.IsFinished() && !a.isSpinning()
-}
-
 // clearCache drops every cached render for this item, including the
 // per-section caches. Shadows the embedded cachedMessageItem.clearCache
 // so ClearItemCache (style change) wipes the section caches too.

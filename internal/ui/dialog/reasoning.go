@@ -52,12 +52,6 @@ type ReasoningItem struct {
 	focused   bool
 }
 
-// Finished implements list.Item. Reasoning items are render-stable
-// outside of explicit SetFocused / SetMatch.
-func (r *ReasoningItem) Finished() bool {
-	return true
-}
-
 var (
 	_ Dialog   = (*Reasoning)(nil)
 	_ ListItem = (*ReasoningItem)(nil)

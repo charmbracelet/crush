@@ -63,12 +63,6 @@ type NotificationItem struct {
 	focused   bool
 }
 
-// Finished implements list.Item. Notification items are render-stable
-// outside of explicit SetFocused / SetMatch.
-func (n *NotificationItem) Finished() bool {
-	return true
-}
-
 var (
 	_ Dialog   = (*Notifications)(nil)
 	_ ListItem = (*NotificationItem)(nil)

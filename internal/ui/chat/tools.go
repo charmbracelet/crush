@@ -556,12 +556,6 @@ func (t *baseToolMessageItem) ToggleExpanded() bool {
 	return t.expandedContent
 }
 
-// Finished implements list.Item: a call is freezable once it stops spinning
-// with a result or a cancel.
-func (t *baseToolMessageItem) Finished() bool {
-	return !t.isSpinning() && (t.result != nil || t.status == ToolStatusCanceled)
-}
-
 // HandleMouseClick implements MouseClickable.
 func (t *baseToolMessageItem) HandleMouseClick(btn ansi.MouseButton, x, y int) bool {
 	return btn == ansi.MouseLeft

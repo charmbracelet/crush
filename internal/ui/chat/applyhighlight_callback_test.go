@@ -36,10 +36,6 @@ func (r *renderCountingItem) Version() uint64 {
 	return r.inner.(versionedItem).Version()
 }
 
-func (r *renderCountingItem) Finished() bool {
-	return r.inner.Finished()
-}
-
 // SetHighlight forwards to the embedded item; the underlying
 // highlightableMessageItem dedupes equivalent ranges and bumps the
 // shared version on observable change.
@@ -59,8 +55,8 @@ func (r *renderCountingItem) Highlight() (int, int, int, int) {
 	return -1, -1, -1, -1
 }
 
-// TestList_CallbackDrivenHighlightUnfreezeAndReFreeze covers F6
-// §4.5.1 along the live applyHighlightRange path. Instead of
+// TestList_CallbackDrivenHighlightCaching covers the F6 cache along
+// the live applyHighlightRange path. Instead of
 // driving BeginSelectionDrag directly, the test registers a render
 // callback that mutates the chat items' highlight ranges (just like
 // Chat.applyHighlightRange does in production) and verifies the
@@ -68,26 +64,22 @@ func (r *renderCountingItem) Highlight() (int, int, int, int) {
 //
 //   - Items inside the active range pick up a SetHighlight call,
 //     their version bumps, the F6 cache invalidates, and the list
-//     re-renders them on the next draw. The post-render entry is
-//     frozen again because the items are Finished() — but their
-//     stored output now reflects the highlight.
+//     re-renders them on the next draw, so the stored output reflects
+//     the highlight.
 //   - Subsequent draws while the range is unchanged are cache hits:
 //     the callback's SetHighlight call dedupes (same range), the
 //     version is stable, and the list serves the previous output
 //     verbatim without calling Render.
 //   - When the range moves OFF an item, the callback clears the
-//     highlight, the version bumps, and the item re-renders. After
-//     that single re-render the entry re-freezes; further draws are
-//     cache hits.
-func TestList_CallbackDrivenHighlightUnfreezeAndReFreeze(t *testing.T) {
+//     highlight, the version bumps, and the item re-renders once;
+//     further draws are cache hits.
+func TestList_CallbackDrivenHighlightCaching(t *testing.T) {
 	t.Parallel()
 
 	sty := styles.CharmtonePantera()
 
-	// Build three finished assistant messages so all three are
-	// candidates for freezing. Real items (per Round 2 spec) — the
-	// surrounding renderCountingItem wrapper just lets the test see
-	// per-item Render calls.
+	// Build three finished assistant messages. The renderCountingItem
+	// wrapper lets the test see per-item Render calls.
 	mk := func(id, body string) *renderCountingItem {
 		msg := &message.Message{
 			ID:   id,
@@ -103,7 +95,6 @@ func TestList_CallbackDrivenHighlightUnfreezeAndReFreeze(t *testing.T) {
 			},
 		}
 		inner := NewAssistantMessageItem(&sty, msg)
-		require.True(t, inner.Finished(), "test fixture must be Finished()")
 		return newRenderCountingItem(inner)
 	}
 
@@ -143,13 +134,13 @@ func TestList_CallbackDrivenHighlightUnfreezeAndReFreeze(t *testing.T) {
 
 	// Subsequent renders without an active range are cache hits.
 	// The callback's SetHighlight call dedupes (already cleared),
-	// no version bump, frozen entries served verbatim.
+	// no version bump, cached entries served verbatim.
 	for range 3 {
 		_ = l.Render()
 	}
-	require.Equal(t, 1, a.renderHits, "frozen item must not re-render across stable draws")
-	require.Equal(t, 1, b.renderHits, "frozen item must not re-render across stable draws")
-	require.Equal(t, 1, c.renderHits, "frozen item must not re-render across stable draws")
+	require.Equal(t, 1, a.renderHits, "cached item must not re-render across stable draws")
+	require.Equal(t, 1, b.renderHits, "cached item must not re-render across stable draws")
+	require.Equal(t, 1, c.renderHits, "cached item must not re-render across stable draws")
 
 	// Activate a selection range over items a and b. The callback
 	// will SetHighlight on both during the next render, bumping
@@ -159,7 +150,7 @@ func TestList_CallbackDrivenHighlightUnfreezeAndReFreeze(t *testing.T) {
 	_ = l.Render()
 	require.Equal(t, 2, a.renderHits, "in-range item must re-render after SetHighlight")
 	require.Equal(t, 2, b.renderHits, "in-range item must re-render after SetHighlight")
-	require.Equal(t, 1, c.renderHits, "out-of-range item stays frozen")
+	require.Equal(t, 1, c.renderHits, "out-of-range item stays cached")
 
 	// Verify the highlight actually landed on the in-range items.
 	sLine, _, eLine, _ := a.Highlight()
@@ -171,37 +162,34 @@ func TestList_CallbackDrivenHighlightUnfreezeAndReFreeze(t *testing.T) {
 
 	// While the range stays the same, subsequent renders are cache
 	// hits. The callback dedupes (same range), no version bump,
-	// the post-render entry served verbatim. Note: items are
-	// re-frozen because they're still Finished() and not in the
-	// list's freezeSuppressed set.
+	// the post-render entry served verbatim.
 	for range 3 {
 		_ = l.Render()
 	}
-	require.Equal(t, 2, a.renderHits, "in-range item re-freezes after the highlight render")
-	require.Equal(t, 2, b.renderHits, "in-range item re-freezes after the highlight render")
-	require.Equal(t, 1, c.renderHits, "out-of-range item stays frozen")
+	require.Equal(t, 2, a.renderHits, "in-range item is cached after the highlight render")
+	require.Equal(t, 2, b.renderHits, "in-range item is cached after the highlight render")
+	require.Equal(t, 1, c.renderHits, "out-of-range item stays cached")
 
 	// Move the range off the items entirely. The callback clears
 	// each in-range item's highlight back to (-1,-1,-1,-1), which
 	// bumps their versions and triggers exactly one re-render
-	// each. After that, the entries re-freeze.
+	// each.
 	activeRange = [2]int{-1, -1}
 	_ = l.Render()
 	require.Equal(t, 3, a.renderHits, "exiting-range item must re-render once when highlight clears")
 	require.Equal(t, 3, b.renderHits, "exiting-range item must re-render once when highlight clears")
-	require.Equal(t, 1, c.renderHits, "never-highlighted item stays frozen")
+	require.Equal(t, 1, c.renderHits, "never-highlighted item stays cached")
 
 	// Confirm the highlight has been fully cleared.
 	sLine, _, eLine, _ = a.Highlight()
 	require.Equal(t, -1, sLine)
 	require.Equal(t, -1, eLine)
 
-	// And subsequent renders are cache hits again — the items
-	// re-froze.
+	// And subsequent renders are cache hits again.
 	for range 3 {
 		_ = l.Render()
 	}
-	require.Equal(t, 3, a.renderHits, "re-frozen item must not re-render across stable draws")
-	require.Equal(t, 3, b.renderHits, "re-frozen item must not re-render across stable draws")
-	require.Equal(t, 1, c.renderHits, "never-highlighted item stays frozen")
+	require.Equal(t, 3, a.renderHits, "cached item must not re-render across stable draws")
+	require.Equal(t, 3, b.renderHits, "cached item must not re-render across stable draws")
+	require.Equal(t, 1, c.renderHits, "never-highlighted item stays cached")
 }

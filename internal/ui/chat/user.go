@@ -58,12 +58,6 @@ func (m *UserMessageItem) Message() *message.Message {
 	return m.message
 }
 
-// Finished implements list.Item. User messages are immutable once
-// submitted, so the entry is always safe to freeze.
-func (m *UserMessageItem) Finished() bool {
-	return true
-}
-
 // RawRender implements [MessageItem].
 func (m *UserMessageItem) RawRender(width int) string {
 	cappedWidth := cappedMessageWidth(width)

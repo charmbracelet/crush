@@ -59,10 +59,6 @@ func NewSubAgentReportItem(sty *styles.Styles, label, model, output string, fail
 func (s *SubAgentReportItem) ID() string          { return s.id }
 func (s *SubAgentReportItem) FilterValue() string { return s.label + " " + s.output }
 
-// Finished implements [MessageItem]. A report only exists once the subagent
-// has finished, so it is never in flight.
-func (s *SubAgentReportItem) Finished() bool { return true }
-
 // ToggleExpanded toggles between the collapsed and full report.
 func (s *SubAgentReportItem) ToggleExpanded() bool {
 	s.expandedContent = !s.expandedContent

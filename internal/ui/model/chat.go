@@ -418,6 +418,16 @@ func (m *Chat) Len() int {
 	return m.list.Len()
 }
 
+// SetHideThinking shows or hides reasoning traces on every assistant item in
+// the transcript, leaving the model's thinking configuration untouched.
+func (m *Chat) SetHideThinking(hide bool) {
+	for i := range m.list.Len() {
+		if item, ok := m.list.ItemAt(i).(*chat.AssistantMessageItem); ok {
+			item.SetHideThinking(hide)
+		}
+	}
+}
+
 // InvalidateRenderCaches drops cached rendered output on every message
 // item so the next draw re-renders with the current styles.
 func (m *Chat) InvalidateRenderCaches() {

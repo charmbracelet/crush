@@ -196,6 +196,11 @@ type AssistantMessageItem struct {
 	thinkingViewMode  thinkingViewMode
 	thinkingBoxHeight int // Tracks the rendered thinking box height for click detection.
 
+	// hideThinking suppresses the reasoning section without changing the
+	// model's thinking configuration, so reasoning can stay enabled while
+	// the transcript stays readable.
+	hideThinking bool
+
 	// planAgent marks this item as plan-agent output. While the plan
 	// streams (the message is not finished) and the plan-start marker
 	// has arrived, the content renders as an open plan card: top and
@@ -246,6 +251,10 @@ var _ Expandable = (*AssistantMessageItem)(nil)
 
 // NewAssistantMessageItem creates a new AssistantMessageItem.
 func NewAssistantMessageItem(sty *styles.Styles, message *message.Message) MessageItem {
+	return newAssistantMessageItem(sty, message, false)
+}
+
+func newAssistantMessageItem(sty *styles.Styles, message *message.Message, hideThinking bool) *AssistantMessageItem {
 	v := list.NewVersioned()
 	a := &AssistantMessageItem{
 		Versioned:                v,
@@ -254,6 +263,7 @@ func NewAssistantMessageItem(sty *styles.Styles, message *message.Message) Messa
 		focusableMessageItem:     newFocusableMessageItem(v),
 		message:                  message,
 		sty:                      sty,
+		hideThinking:             hideThinking,
 	}
 
 	// Summary messages are generated outside a regular turn, so the turn
@@ -438,12 +448,16 @@ func (a *AssistantMessageItem) renderMessageContent(width int) (string, int) {
 	thinking := strings.TrimSpace(a.message.ReasoningContent().Thinking)
 	content := strings.TrimSpace(a.message.Content().Text)
 
-	if thinking != "" {
+	if a.hideThinking {
+		// Nothing renders, but a stale height would still make the
+		// invisible box clickable.
+		a.thinkingBoxHeight = 0
+	} else if thinking != "" {
 		messageParts = append(messageParts, a.cachedThinking(width))
 	}
 
 	if content != "" {
-		if thinking != "" {
+		if thinking != "" && !a.hideThinking {
 			messageParts = append(messageParts, "")
 		}
 		messageParts = append(messageParts, a.cachedContent(width))
@@ -891,6 +905,18 @@ func (a *AssistantMessageItem) clearCache() {
 	a.thinkingHashSample = ""
 }
 
+// SetHideThinking shows or hides the reasoning section without rebuilding the
+// item, so scroll position and expansion state stay intact.
+func (a *AssistantMessageItem) SetHideThinking(hide bool) {
+	if a.hideThinking == hide {
+		return
+	}
+	a.hideThinking = hide
+	a.thinkingBoxHeight = 0
+	a.clearCache()
+	a.Bump()
+}
+
 // ToggleExpanded advances the F5 thinking view-mode cycle and returns
 // whether the item is now in any expanded state (tail-window or full).
 // The cycle is collapsed → tail-window → full → collapsed, with the
@@ -904,6 +930,9 @@ func (a *AssistantMessageItem) clearCache() {
 // there is nothing to expand, and mutating the view mode would
 // thrash the thinking-section cache key for no visible benefit.
 func (a *AssistantMessageItem) ToggleExpanded() bool {
+	if a.hideThinking {
+		return false
+	}
 	if strings.TrimSpace(a.message.ReasoningContent().Thinking) == "" {
 		return a.thinkingViewMode != thinkingCollapsed
 	}

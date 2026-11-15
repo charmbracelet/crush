@@ -489,6 +489,11 @@ func (c *Commands) defaultCommands() []*CommandItem {
 			}
 		}
 	}
+	// Display-only toggle: hide the reasoning trace while leaving the
+	// model's thinking mode and effort untouched.
+	if c.hasSession {
+		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_thinking_visibility", "Hide/Show Thinking", "", ActionToggleThinkingVisibility{}))
+	}
 	// Only show toggle compact mode command if window width is larger than compact breakpoint (120)
 	if c.windowWidth >= sidebarCompactModeBreakpoint && c.hasSession {
 		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_sidebar", "Toggle Sidebar", "ctrl+b", ActionToggleCompactMode{}))

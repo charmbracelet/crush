@@ -874,7 +874,7 @@ func (a *AssistantMessageItem) Finished() bool {
 
 // clearCache drops every cached render for this item, including the
 // per-section caches. Shadows the embedded cachedMessageItem.clearCache
-// so ClearItemCaches (style change) wipes the section caches too.
+// so ClearItemCache (style change) wipes the section caches too.
 // F8: also drop the streaming-markdown stable-prefix cache because
 // the cached glamour render embeds the OLD style's ANSI sequences
 // and is no longer visually consistent with the new style.

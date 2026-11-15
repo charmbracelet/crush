@@ -27,7 +27,7 @@ import (
 
 // newHostThemeTestUI builds a UI with every component a theme switch
 // restyles, over a stub workspace serving cfg.
-func newHostThemeTestUI(t *testing.T, cfg *config.Config) *UI {
+func newHostThemeTestUI(t testing.TB, cfg *config.Config) *UI {
 	t.Helper()
 	if cfg == nil {
 		cfg = &config.Config{Options: &config.Options{TUI: &config.TUIOptions{}}}

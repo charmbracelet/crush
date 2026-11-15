@@ -162,36 +162,27 @@ type animRestyler interface {
 	restyleAnim()
 }
 
-// ClearItemCaches drops any cached rendered output on each item so the
-// next render uses the current styles. It also bumps each item's
-// version so the F6 list-level memo invalidates frozen entries on
-// the next render.
-//
-// Tools nested in an Agent or AgenticFetch item are not list entries of
-// their own, so their caches are cleared through the parent; otherwise the
-// parent's re-render would reuse their cached, old-colored output. (Their
-// spinners are restyled by the parent's restyleAnim.)
-func ClearItemCaches(items []MessageItem) {
-	for _, item := range items {
-		if cc, ok := item.(cacheClearable); ok {
-			cc.clearCache()
-		}
-		if ar, ok := item.(animRestyler); ok {
-			ar.restyleAnim()
-		}
-		if c, ok := item.(NestedToolContainer); ok {
-			for _, nested := range c.NestedTools() {
-				if cc, ok := nested.(cacheClearable); ok {
-					cc.clearCache()
-				}
-				if v, ok := nested.(interface{ Bump() }); ok {
-					v.Bump()
-				}
+// ClearItemCache drops an item's cached rendered output, and that of any
+// nested tools, so the next render uses the current styles.
+func ClearItemCache(item MessageItem) {
+	if cc, ok := item.(cacheClearable); ok {
+		cc.clearCache()
+	}
+	if ar, ok := item.(animRestyler); ok {
+		ar.restyleAnim()
+	}
+	if c, ok := item.(NestedToolContainer); ok {
+		for _, nested := range c.NestedTools() {
+			if cc, ok := nested.(cacheClearable); ok {
+				cc.clearCache()
+			}
+			if v, ok := nested.(interface{ Bump() }); ok {
+				v.Bump()
 			}
 		}
-		if v, ok := item.(interface{ Bump() }); ok {
-			v.Bump()
-		}
+	}
+	if v, ok := item.(interface{ Bump() }); ok {
+		v.Bump()
 	}
 }
 

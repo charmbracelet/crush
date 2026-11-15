@@ -2481,15 +2481,9 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.userThemeSelected = true
 		m.dialog.CloseDialog(dialog.ThemeID)
 	case dialog.ActionPreviewTheme:
-		newStyles, err := styles.LoadTheme(msg.Theme)
-		if err != nil {
-			break
+		if newStyles, err := styles.LoadTheme(msg.Theme); err == nil {
+			m.previewTheme(newStyles)
 		}
-		if m.preThemeStyles == nil {
-			saved := m.com.Styles.Clone()
-			m.preThemeStyles = &saved
-		}
-		m.previewTheme(newStyles)
 	case dialog.ActionRevertThemePreview:
 		if m.preThemeStyles != nil {
 			m.applyTheme(*m.preThemeStyles)
@@ -2497,15 +2491,9 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		m.dialog.CloseDialog(dialog.ThemeID)
 	case dialog.ActionPreviewThemePalette:
-		newStyles, err := styles.LoadPaletteTheme(msg.Base, msg.Palette)
-		if err != nil {
-			break
+		if newStyles, err := styles.LoadPaletteTheme(msg.Base, msg.Palette); err == nil {
+			m.previewTheme(newStyles)
 		}
-		if m.preThemeStyles == nil {
-			saved := m.com.Styles.Clone()
-			m.preThemeStyles = &saved
-		}
-		m.previewTheme(newStyles)
 	case dialog.ActionSaveThemePalette:
 		// The theme is stored under its own name; Base only identifies the
 		// built-in palette its colors are derived from.
@@ -5408,19 +5396,17 @@ func (m *UI) applyTheme(s styles.Styles) {
 	*m.com.Styles = s
 	common.InvalidateStyleCaches()
 	m.refreshStyles()
-	m.chat.InvalidateRenderCaches()
+	m.chat.Restyle()
 }
 
-// previewTheme applies the given styles for live preview inside an open
-// theme dialog. The whole interface updates, but only the chat messages
-// currently on screen re-render; the rest of the transcript keeps its
-// cached output so browsing themes stays fast in large sessions. Off-screen
-// messages follow along when the theme is actually applied.
+// previewTheme shows a theme from an open theme dialog, saving the theme in
+// effect beforehand so closing the dialog can restore it.
 func (m *UI) previewTheme(s styles.Styles) {
-	*m.com.Styles = s
-	common.InvalidateStyleCaches()
-	m.refreshStyles()
-	m.chat.InvalidateVisibleRenderCaches()
+	if m.preThemeStyles == nil {
+		saved := m.com.Styles.Clone()
+		m.preThemeStyles = &saved
+	}
+	m.applyTheme(s)
 }
 
 // refreshStyles pushes the current *m.com.Styles into every subcomponent

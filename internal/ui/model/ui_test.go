@@ -381,6 +381,7 @@ func newPlanUI(t *testing.T, sessionID string) (*UI, *testWorkspace) {
 		session:  sess,
 		chat:     NewChat(com, config.ScrollbarDefault),
 	}
+	u.status = NewStatus(com, u)
 	return u, ws
 }
 

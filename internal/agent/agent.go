@@ -2382,14 +2382,19 @@ func (a *sessionAgent) QueuedPrompts(sessionID string) int {
 	return len(l)
 }
 
+// QueuedPromptsList returns the queued prompts a user sees. Hidden
+// continuations are left out, as they are in the transcript, though
+// QueuedPrompts still counts them.
 func (a *sessionAgent) QueuedPromptsList(sessionID string) []string {
 	l, ok := a.messageQueue.Get(sessionID)
 	if !ok {
 		return nil
 	}
-	prompts := make([]string, len(l))
-	for i, call := range l {
-		prompts[i] = call.Prompt
+	prompts := make([]string, 0, len(l))
+	for _, call := range l {
+		if !call.HiddenUserMessage {
+			prompts = append(prompts, call.Prompt)
+		}
 	}
 	return prompts
 }

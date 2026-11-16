@@ -403,6 +403,7 @@ dialog.
 | Charmtone Pantera | `charmtone-panther` (default) |
 | Gruvbox Dark      | `gruvbox-dark`                |
 | Keanu             | `keanu`                       |
+| Tigra Blanca      | `charmtone-tigra-blanca`      |
 
 ### LSPs
 

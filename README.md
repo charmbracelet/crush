@@ -398,11 +398,12 @@ dialog.
 
 #### Built-In Themes
 
-| Theme             | Name                          |
-| ----------------- | ----------------------------- |
-| Charmtone Pantera | `charmtone-panther` (default) |
-| Gruvbox Dark      | `gruvbox-dark`                |
-| Keanu             | `keanu`                       |
+| Theme                  | Name                          |
+| ---------------------- | ----------------------------- |
+| Charmtone Pantera      | `charmtone-panther` (default) |
+| Charmtone Tigra Blanca | `charmtone-tigra-blanca`      |
+| Gruvbox Dark           | `gruvbox-dark`                |
+| Keanu                  | `keanu`                       |
 
 ### LSPs
 

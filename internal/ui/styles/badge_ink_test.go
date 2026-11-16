@@ -47,14 +47,16 @@ func badgesOf(s Styles, o quickStyleOpts) []badge {
 }
 
 // TestBadgeInk_BuiltinsKeepTheirInk pins the built-in themes' look: each
-// keeps the background role it always wrote on its badges.
+// badge keeps the ink [badgeInk] resolves from the background role, which
+// is the role itself unless it is illegible on the fill (light themes).
 func TestBadgeInk_BuiltinsKeepTheirInk(t *testing.T) {
 	t.Parallel()
 	for name, opts := range builtinThemes {
 		o := opts()
 		s := quickStyle(o)
 		for _, b := range badgesOf(s, o) {
-			require.Equal(t, rgbHex(b.ink), rgbHex(b.style.GetForeground()), "%s: %s", name, b.name)
+			want := badgeInk(b.fill, b.ink, o.fgBase)
+			require.Equal(t, rgbHex(want), rgbHex(b.style.GetForeground()), "%s: %s", name, b.name)
 		}
 	}
 }

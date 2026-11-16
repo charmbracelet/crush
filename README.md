@@ -408,6 +408,7 @@ dialog.
 | Rosé Pine Moon    | `rose-pine-moon`              |
 | Rosé Pine Dawn    | `rose-pine-dawn`              |
 | KITT              | `kitt`                        |
+| Tigra Blanca      | `charmtone-tigra-blanca`      |
 
 ### LSPs
 

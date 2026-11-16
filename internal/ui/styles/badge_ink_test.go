@@ -78,6 +78,22 @@ var badgeInkExceptions = map[string]map[string]string{
 		"Status.ModeBannerYolo":        "#575279",
 		"Editor.PromptYoloIconFocused": "#575279",
 	},
+	// Tigra Blanca is a light theme: its pale background roles read worse
+	// than the dark text on the bright fills, so badgeInk swaps them.
+	"charmtone-tigra-blanca": {
+		"Status.SuccessIndicator":    "#3a3943",
+		"Status.InfoIndicator":       "#3a3943",
+		"Status.UpdateIndicator":     "#3a3943",
+		"Status.SuccessMessage":      "#3a3943",
+		"Status.InfoMessage":         "#3a3943",
+		"Status.UpdateMessage":       "#3a3943",
+		"Status.ModeBannerYolo":      "#3a3943",
+		"Button.Hovered":             "#3a3943",
+		"Attachments.Image":          "#3a3943",
+		"Attachments.Text":           "#3a3943",
+		"Attachments.Skill":          "#3a3943",
+		"Tool.AgenticFetchPromptTag": "#3a3943",
+	},
 }
 
 // TestBadgeInk_BuiltinsKeepTheirInk pins the built-in themes' look: each

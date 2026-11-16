@@ -108,6 +108,47 @@ func servingProvider(providerCfg config.ProviderConfig, model catwalk.Model) str
 	}
 }
 
+// anthropicThinkingBlockBindingSupported reports whether this provider serves
+// Anthropic models through an endpoint that accepts thinking.block_binding.
+//
+// Anthropic binds a thinking block's signature to the system prompt and tool
+// list that preceded it, and Crush changes both within a single session: an
+// MCP server connects, disconnects, or comes back with a different tool set.
+// The stored history then replays a signature that no longer matches the
+// request, and every turn fails with "Invalid signature in thinking block".
+// Asking the API to drop only the blocks that no longer match keeps the
+// session usable instead of dead until the user starts a new one.
+//
+// Providers that serve Anthropic models through their own API (Bedrock,
+// Azure, Vertex AI, Gemini) do not take the parameter, and the
+// Anthropic-compatible gateways known to reject parameters they do not
+// understand are listed here too.
+func anthropicThinkingBlockBindingSupported(providerCfg config.ProviderConfig) bool {
+	switch providerCfg.ID {
+	case string(catwalk.InferenceProviderBedrock),
+		string(catwalk.InferenceProviderBedrockEurope),
+		string(catwalk.InferenceProviderAzure),
+		string(catwalk.InferenceProviderVertexAI),
+		string(catwalk.InferenceProviderGemini),
+		string(catwalk.InferenceProviderAlibabaSingapore),
+		string(catwalk.InferenceProviderAlibabaUS):
+		return false
+	}
+	return true
+}
+
+// anthropicThinkingBetas returns the anthropic-beta flags that accompany a
+// thinking request. Block binding rides along only where the endpoint accepts
+// it, and it must never travel without the body field getProviderOptions sets,
+// nor the body field without it: the API rejects either half on its own.
+func anthropicThinkingBetas(providerCfg config.ProviderConfig) string {
+	betas := []string{"interleaved-thinking-2025-05-14"}
+	if anthropicThinkingBlockBindingSupported(providerCfg) {
+		betas = append(betas, "thinking-binding-controls-2026-08-01")
+	}
+	return strings.Join(betas, ",")
+}
+
 type Coordinator interface {
 	SetMainAgent(agentName string) error
 	Run(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error)
@@ -605,7 +646,8 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		reasoningEffort != "" &&
 		slices.Contains(levels, reasoningEffort)
 
-	switch servingProvider(providerCfg, model.CatwalkCfg) {
+	serving := servingProvider(providerCfg, model.CatwalkCfg)
+	switch serving {
 	case openai.Name:
 		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
 		if !hasReasoningEffort && shouldSetEffort {
@@ -679,6 +721,23 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 			case !hasThink && model.ModelCfg.Think:
 				mergedOptions["thinking"] = map[string]any{"budget_tokens": 2000}
 			}
+		}
+
+		thinking := hasThink || hasEffort || model.ModelCfg.Think || shouldSetEffort
+		if serving == anthropic.Name && thinking && anthropicThinkingBlockBindingSupported(providerCfg) {
+			extraBody, _ := mergedOptions["extra_body"].(map[string]any)
+			if extraBody == nil {
+				extraBody = make(map[string]any)
+			}
+			// Leave a user-supplied behavior alone: the point is to stop
+			// hard-failing on stale signatures, not to override a
+			// deliberate choice.
+			if _, overridden := extraBody["thinking.block_binding"]; !overridden {
+				extraBody["thinking.block_binding"] = map[string]any{
+					"prefix_mismatch_behavior": "drop_block",
+				}
+			}
+			mergedOptions["extra_body"] = extraBody
 		}
 
 		parsed, err := anthropic.ParseOptions(mergedOptions)
@@ -1526,12 +1585,25 @@ func (c *coordinator) buildGoogleVertexProvider(headers map[string]string, optio
 	return google.New(opts...)
 }
 
-func (c *coordinator) isAnthropicThinking(model config.SelectedModel) bool {
+func (c *coordinator) isAnthropicThinking(providerCfg config.ProviderConfig, model config.SelectedModel) bool {
 	if model.Think {
 		return true
 	}
-	opts, err := anthropic.ParseOptions(model.ProviderOptions)
-	return err == nil && opts.Thinking != nil
+	// Provider-level options count too: thinking enabled there produces the
+	// same request the betas below have to accompany.
+	for _, raw := range []map[string]any{providerCfg.ProviderOptions, model.ProviderOptions} {
+		if raw == nil {
+			continue
+		}
+		opts, err := anthropic.ParseOptions(raw)
+		if err != nil {
+			continue
+		}
+		if opts.Thinking != nil || opts.Effort != nil {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model config.SelectedModel, isSubAgent bool, wireType catwalk.Type) (fantasy.Provider, error) {
@@ -1542,11 +1614,15 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 	}
 
 	// handle special headers for anthropic
-	if wireType == catwalk.TypeMessages && c.isAnthropicThinking(model) {
+	if wireType == catwalk.TypeMessages && c.isAnthropicThinking(providerCfg, model) {
+		beta := anthropicThinkingBetas(providerCfg)
 		if v, ok := headers["anthropic-beta"]; ok {
-			headers["anthropic-beta"] = v + ",interleaved-thinking-2025-05-14"
+			headers["anthropic-beta"] = v + "," + beta
 		} else {
-			headers["anthropic-beta"] = "interleaved-thinking-2025-05-14"
+			headers["anthropic-beta"] = beta
+		}
+		if anthropicThinkingBlockBindingSupported(providerCfg) {
+			slog.Debug("Sending anthropic thinking block binding beta", "provider", providerCfg.ID, "model", model.Model)
 		}
 	}
 

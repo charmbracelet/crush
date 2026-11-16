@@ -556,6 +556,128 @@ func TestGetProviderOptionsReasoningEffort(t *testing.T) {
 	}
 }
 
+func TestGetProviderOptionsAnthropicThinkingBlockBinding(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		providerID string
+		think      bool
+		want       bool
+	}{
+		{name: "anthropic", providerID: string(catwalk.InferenceProviderAnthropic), think: true, want: true},
+		{name: "custom messages gateway", providerID: "gateway", think: true, want: true},
+		{name: "anthropic-compatible gateway", providerID: string(catwalk.InferenceProviderMiniMax), think: true, want: true},
+		{name: "thinking off", providerID: string(catwalk.InferenceProviderAnthropic), think: false, want: false},
+		{name: "bedrock is left alone", providerID: string(catwalk.InferenceProviderBedrock), think: true, want: false},
+		{name: "alibaba is left alone", providerID: string(catwalk.InferenceProviderAlibabaSingapore), think: true, want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			model := Model{
+				CatwalkCfg: catwalk.Model{
+					ID:        "claude-opus-5-5",
+					Reasoning: catwalk.Reasoning{Thinking: catwalk.ThinkingToggleable},
+				},
+				ModelCfg: config.SelectedModel{Provider: "test", Think: tc.think},
+			}
+			providerCfg := config.ProviderConfig{ID: tc.providerID, Type: catwalk.TypeMessages}
+
+			opts := getProviderOptions(model, providerCfg)
+
+			raw, ok := opts[anthropic.Name]
+			require.True(t, ok)
+			parsed, ok := raw.(*anthropic.ProviderOptions)
+			require.True(t, ok)
+			binding, hasBinding := parsed.ExtraBody["thinking.block_binding"].(map[string]any)
+			assert.Equal(t, tc.want, hasBinding, "thinking.block_binding presence")
+			if tc.want {
+				assert.Equal(t, "drop_block", binding["prefix_mismatch_behavior"], "a stale signature must be dropped, not fatal")
+			}
+		})
+	}
+}
+
+// Effort turns thinking on for the models that support it, so the stale
+// signature cleanup has to ride along with effort-only configurations too.
+func TestGetProviderOptionsAnthropicThinkingBlockBindingWithEffort(t *testing.T) {
+	t.Parallel()
+
+	model := Model{
+		CatwalkCfg: catwalk.Model{
+			ID: "claude-opus-5-5",
+			Reasoning: catwalk.Reasoning{
+				Thinking:     catwalk.ThinkingToggleable,
+				EffortLevels: catwalk.NewEffortLevels("max"),
+			},
+		},
+		ModelCfg: config.SelectedModel{Provider: "test", ReasoningEffort: "max"},
+	}
+	providerCfg := config.ProviderConfig{ID: string(catwalk.InferenceProviderAnthropic), Type: catwalk.TypeMessages}
+
+	opts := getProviderOptions(model, providerCfg)
+
+	parsed, ok := opts[anthropic.Name].(*anthropic.ProviderOptions)
+	require.True(t, ok)
+	_, hasBinding := parsed.ExtraBody["thinking.block_binding"]
+	assert.True(t, hasBinding, "effort-only requests need the block binding field too")
+}
+
+func TestGetProviderOptionsAnthropicThinkingBlockBindingKeepsUserOverride(t *testing.T) {
+	t.Parallel()
+
+	model := Model{
+		CatwalkCfg: catwalk.Model{
+			ID:        "claude-opus-5-5",
+			Reasoning: catwalk.Reasoning{Thinking: catwalk.ThinkingToggleable},
+		},
+		ModelCfg: config.SelectedModel{
+			Provider: "test",
+			Think:    true,
+			ProviderOptions: map[string]any{
+				"extra_body": map[string]any{
+					"thinking.block_binding": map[string]any{"prefix_mismatch_behavior": "error"},
+				},
+			},
+		},
+	}
+	providerCfg := config.ProviderConfig{ID: string(catwalk.InferenceProviderAnthropic), Type: catwalk.TypeMessages}
+
+	opts := getProviderOptions(model, providerCfg)
+
+	parsed, ok := opts[anthropic.Name].(*anthropic.ProviderOptions)
+	require.True(t, ok)
+	binding, ok := parsed.ExtraBody["thinking.block_binding"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "error", binding["prefix_mismatch_behavior"], "an explicit user choice must win")
+}
+
+func TestAnthropicThinkingBetas(t *testing.T) {
+	t.Parallel()
+
+	const (
+		interleaved = "interleaved-thinking-2025-05-14"
+		binding     = "thinking-binding-controls-2026-08-01"
+	)
+	tests := []struct {
+		name       string
+		providerID string
+		want       string
+	}{
+		{name: "anthropic", providerID: string(catwalk.InferenceProviderAnthropic), want: interleaved + "," + binding},
+		{name: "custom messages gateway", providerID: "gateway", want: interleaved + "," + binding},
+		{name: "bedrock", providerID: string(catwalk.InferenceProviderBedrock), want: interleaved},
+		{name: "alibaba", providerID: string(catwalk.InferenceProviderAlibabaUS), want: interleaved},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tc.want, anthropicThinkingBetas(config.ProviderConfig{ID: tc.providerID}))
+		})
+	}
+}
+
 func TestIsUnauthorized(t *testing.T) {
 	t.Run("nil error", func(t *testing.T) {
 		assert.False(t, isUnauthorized(nil))

@@ -185,6 +185,51 @@ provider add openai \
 
 If `OPENAI_ORG_ID` is unset, the header is simply not sent.
 
+#### Adding a gateway or relay
+
+Hosted gateways and relays are providers like any other: pick `--type` by the wire protocol the endpoint serves, not by the model vendor behind it. Most gateways speak the OpenAI chat completions format (`completions`, base URL usually ending in `/v1`); some also serve the Anthropic messages format (`messages`, base URL usually the bare host), so a dual-protocol gateway is registered once per protocol under the same key:
+
+```bash
+provider add mygateway \
+  --type completions \
+  --base-url "https://gateway.example.com/v1" \
+  --api-key "${GATEWAY_KEY:?set GATEWAY_KEY}" \
+  --discover-models true
+
+provider add mygateway-claude \
+  --type messages \
+  --base-url "https://gateway.example.com" \
+  --api-key "${GATEWAY_KEY:?set GATEWAY_KEY}"
+```
+
+Then register models the gateway didn't auto-discover:
+
+```bash
+model add mygateway/gpt-6-astra --name "GPT-6 Astra"
+```
+
+Two things to check when a gateway misbehaves:
+
+- **Base URL shape:** if the first request 404s, the trailing `/v1` is usually wrong for that gateway — try the other form before anything else.
+- **Model IDs:** they are the gateway's own names and don't always match vendor names. Copy them from the gateway's model list endpoint (`{base URL}/models` on the OpenAI-compatible path).
+
+A real-world example of the dual-protocol shape (disclosure: TeapotRouter is a gateway I help develop — any endpoint serving these protocols is configured the same way):
+
+```bash
+provider add teapot \
+  --type completions \
+  --base-url "https://api.teapotrouter.com/v1" \
+  --api-key "${TEAPOT_KEY:?set TEAPOT_KEY}" \
+  --discover-models true
+
+provider add teapot-claude \
+  --type messages \
+  --base-url "https://api.teapotrouter.com" \
+  --api-key "${TEAPOT_KEY:?set TEAPOT_KEY}"
+
+model add teapot-claude/claude-sonnet-5-5 --name "Claude Sonnet 5.5"
+```
+
 #### `provider remove`
 
 Remove a provider and all custom models registered on it.

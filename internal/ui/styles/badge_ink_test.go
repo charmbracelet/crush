@@ -48,9 +48,8 @@ func badgesOf(s Styles, o quickStyleOpts) []badge {
 
 // badgeInkExceptions pins the inks [badgeInk] swaps on built-in themes
 // whose fills sit below [minBadgeInkContrast] against their background
-// role. Rosé Pine's pine fills are mid-tone and its dawn variant is
-// light, so those badges write the text color, which reads better on
-// the fill than the background role.
+// role. Rosé Pine's mid-tone pine fills take the text color; dawn's light
+// gold fills take the deep text color instead.
 var badgeInkExceptions = map[string]map[string]string{
 	"rose-pine": {
 		"Status.SuccessIndicator":    "#e0def4",
@@ -71,6 +70,7 @@ var badgeInkExceptions = map[string]map[string]string{
 	},
 	"rose-pine-dawn": {
 		"Status.WarnIndicator":         "#575279",
+		"Status.WarnMessage":           "#575279",
 		"Status.SuccessMessage":        "#575279",
 		"Status.InfoMessage":           "#575279",
 		"Status.UpdateMessage":         "#575279",
@@ -84,10 +84,11 @@ var badgeInkExceptions = map[string]map[string]string{
 // keeps the background role it always wrote on its badges, except where
 // [badgeInk] swaps it per [badgeInkExceptions].
 func TestBadgeInk_BuiltinsKeepTheirInk(t *testing.T) {
-	t.Parallel()
+	setTestThemeDirs(t, []string{t.TempDir()})
 	for name, opts := range builtinThemes {
 		o := opts()
-		s := quickStyle(o)
+		s, err := LoadTheme(name)
+		require.NoError(t, err)
 		for _, b := range badgesOf(s, o) {
 			want := rgbHex(b.ink)
 			if ex, ok := badgeInkExceptions[name]; ok {

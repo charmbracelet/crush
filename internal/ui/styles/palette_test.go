@@ -48,7 +48,7 @@ func TestPaletteFromOpts_RosePineVariants(t *testing.T) {
 	}{
 		{"rose-pine", rosePineOpts, "#c4a7e7", "#191724", "#e0def4"},
 		{"rose-pine-moon", rosePineMoonOpts, "#c4a7e7", "#232136", "#e0def4"},
-		{"rose-pine-dawn", rosePineDawnOpts, "#907aa9", "#faf4ed", "#575279"},
+		{"rose-pine-dawn", rosePineDawnOpts, "#907aa9", "#faf4ed", "#464261"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

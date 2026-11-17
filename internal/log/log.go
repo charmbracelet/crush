@@ -18,17 +18,14 @@ import (
 var (
 	initOnce    sync.Once
 	initialized atomic.Bool
+
+	// file is the log file Setup writes to. SetFile moves it.
+	file switchableFile
 )
 
 func Setup(logFile string, debug bool, ws ...io.Writer) {
 	initOnce.Do(func() {
-		logRotator := &lumberjack.Logger{
-			Filename:   logFile,
-			MaxSize:    10,    // Max size in MB
-			MaxBackups: 0,     // Number of backups
-			MaxAge:     30,    // Days
-			Compress:   false, // Enable compression
-		}
+		_ = file.set(logFile)
 
 		level := slog.LevelInfo
 		if debug {
@@ -41,7 +38,7 @@ func Setup(logFile string, debug bool, ws ...io.Writer) {
 		}
 
 		var handlers []slog.Handler
-		handlers = append(handlers, slog.NewJSONHandler(logRotator, opts))
+		handlers = append(handlers, slog.NewJSONHandler(&file, opts))
 
 		for _, w := range ws {
 			if w == nil {
@@ -61,6 +58,46 @@ func Setup(logFile string, debug bool, ws ...io.Writer) {
 
 func Initialized() bool {
 	return initialized.Load()
+}
+
+// SetFile moves file logging to logFile. It closes the file written so far,
+// so this process no longer holds it open. It does nothing before Setup.
+func SetFile(logFile string) error {
+	if !Initialized() {
+		return nil
+	}
+	return file.set(logFile)
+}
+
+// switchableFile is a rotating log file that can be moved to another path
+// while it is in use.
+type switchableFile struct {
+	mu sync.Mutex
+	w  *lumberjack.Logger
+}
+
+func (f *switchableFile) Write(p []byte) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.w.Write(p)
+}
+
+// set points f at path and closes the file it wrote to before, if any.
+func (f *switchableFile) set(path string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	prev := f.w
+	f.w = &lumberjack.Logger{
+		Filename:   path,
+		MaxSize:    10,    // Max size in MB
+		MaxBackups: 0,     // Number of backups
+		MaxAge:     30,    // Days
+		Compress:   false, // Enable compression
+	}
+	if prev == nil {
+		return nil
+	}
+	return prev.Close()
 }
 
 func RecoverPanic(name string, cleanup func()) {

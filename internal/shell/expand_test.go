@@ -215,6 +215,39 @@ func TestExpandValue_RequiredOptIn(t *testing.T) {
 	require.Equal(t, "ok", got)
 }
 
+// TestExpandArgument pins the argv variant: backslash pairs in literal
+// text are kept, while escapes for "$" and "`" and all substitutions
+// work the same as in ExpandValue.
+func TestExpandArgument(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{name: "named pipe", value: `\\.\pipe\example`, want: `\\.\pipe\example`},
+		{name: "UNC path", value: `\\server\share\file`, want: `\\server\share\file`},
+		{name: "single backslashes", value: `C:\Users\me`, want: `C:\Users\me`},
+		{name: "trailing pair", value: `C:\dir\\`, want: `C:\dir\\`},
+		{name: "quotes stay literal", value: `"a b" 'c'`, want: `"a b" 'c'`},
+		{name: "var after pipe prefix", value: `\\.\pipe\x-$PIPE`, want: `\\.\pipe\x-example`},
+		{name: "pair before var", value: `\\$PIPE`, want: `\\example`},
+		{name: "escaped dollar", value: `\$PIPE`, want: `$PIPE`},
+		{name: "escaped backtick", value: "a\\`b", want: "a`b"},
+		{name: "cmdsubst keeps shell rules", value: `$(echo \\x)`, want: `\x`},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := ExpandArgument(t.Context(), tc.value, []string{"PIPE=example"})
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
 func TestSanitizeStderr(t *testing.T) {
 	t.Parallel()
 

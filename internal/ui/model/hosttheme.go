@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/proto"
@@ -86,10 +87,15 @@ func (m *UI) buildHostThemeStyles(seq uint64, theme *proto.HostTheme) tea.Cmd {
 func (m *UI) buildOwnThemeStyles(seq uint64) tea.Cmd {
 	name := common.ThemeNameFromConfig(m.com.Config())
 	key := m.themeKey
+	palette := m.caps.TerminalPalette
 	return func() tea.Msg {
 		s := styles.ThemeForKey(key)
 		if name != "" {
-			s = styles.ThemeFromConfig(name)
+			if strings.EqualFold(name, styles.SystemThemeName) && palette.IsUsable() {
+				s = styles.SystemThemeStyles(palette)
+			} else {
+				s = styles.ThemeFromConfig(name)
+			}
 		}
 		return hostThemeStylesMsg{seq: seq, styles: s}
 	}
@@ -104,6 +110,10 @@ func (m *UI) handleHostThemeStyles(msg hostThemeStylesMsg) tea.Cmd {
 	}
 	if msg.err != nil {
 		return util.ReportError(fmt.Errorf("apply host theme %q: %w", msg.theme.Name, msg.err))
+	}
+	if msg.theme == nil && strings.EqualFold(common.ThemeNameFromConfig(m.com.Config()), styles.SystemThemeName) &&
+		m.caps.TerminalPalette.IsUsable() {
+		msg.styles = styles.SystemThemeStyles(m.caps.TerminalPalette)
 	}
 
 	if m.preThemeStyles != nil {

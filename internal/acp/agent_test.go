@@ -151,3 +151,42 @@ func TestConfigOptionsIncludesModel(t *testing.T) {
 	require.NotNil(t, modelOpt.Options.Ungrouped)
 	require.Len(t, *modelOpt.Options.Ungrouped, 1)
 }
+
+func TestValidateConfigOption_AcceptsAdvertisedValues(t *testing.T) {
+	cfg := &config.Config{
+		Providers: csync.NewMapFrom(map[string]config.ProviderConfig{
+			"openai": {Models: []catwalk.Model{{ID: "gpt-4o", Name: "GPT-4o"}}},
+		}),
+		Models: map[config.SelectedModelType]config.SelectedModel{
+			config.SelectedModelTypeLarge: {Provider: "openai", Model: "gpt-4o"},
+		},
+	}
+
+	// Both advertised option families validate.
+	require.NoError(t, validateConfigOption(cfg, acp.SetSessionConfigOptionRequest{
+		Boolean: &acp.SetSessionConfigOptionBoolean{ConfigId: "thinking", Value: true},
+	}))
+	require.NoError(t, validateConfigOption(cfg, acp.SetSessionConfigOptionRequest{
+		ValueId: &acp.SetSessionConfigOptionValueId{ConfigId: "model", Value: "openai/gpt-4o"},
+	}))
+}
+
+func TestValidateConfigOption_RejectsUnknown(t *testing.T) {
+	cfg := &config.Config{
+		Providers: csync.NewMapFrom(map[string]config.ProviderConfig{
+			"openai": {Models: []catwalk.Model{{ID: "gpt-4o"}}},
+		}),
+		Models: map[config.SelectedModelType]config.SelectedModel{
+			config.SelectedModelTypeLarge: {Provider: "openai", Model: "gpt-4o"},
+		},
+	}
+
+	// Unknown configId, unknown value, and an empty request all fail.
+	require.Error(t, validateConfigOption(cfg, acp.SetSessionConfigOptionRequest{
+		Boolean: &acp.SetSessionConfigOptionBoolean{ConfigId: "yolo", Value: true},
+	}))
+	require.Error(t, validateConfigOption(cfg, acp.SetSessionConfigOptionRequest{
+		ValueId: &acp.SetSessionConfigOptionValueId{ConfigId: "model", Value: "openai/nonexistent"},
+	}))
+	require.Error(t, validateConfigOption(cfg, acp.SetSessionConfigOptionRequest{}))
+}

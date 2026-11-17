@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/skills"
 	acp "github.com/coder/acp-go-sdk"
 )
 
@@ -148,15 +150,46 @@ func samePath(a, b string) bool {
 	return cleanA == cleanB
 }
 
-// ListSessions implements acp.Agent.
-func (a *crushAgent) ListSessions(_ context.Context, _ acp.ListSessionsRequest) (acp.ListSessionsResponse, error) {
+// listPageSize bounds how many sessions one session/list response carries. The
+// spec lets Agents enforce a reasonable page size and requires only that a
+// missing nextCursor marks the end of the results.
+const listPageSize = 50
+
+// ListSessions implements acp.Agent. It supports the spec's cursor-based
+// pagination and cwd filter: an opaque offset cursor comes back as
+// nextCursor while more sessions remain, and an unparseable cursor is
+// rejected with -32602 rather than silently restarting from the first page.
+func (a *crushAgent) ListSessions(_ context.Context, req acp.ListSessionsRequest) (acp.ListSessionsResponse, error) {
+	cwd := a.workingDir()
+	// Crush has a single workspace root, so a filter naming any other
+	// directory matches nothing.
+	if req.Cwd != nil && *req.Cwd != "" && cwd != "" && !samePath(cwd, *req.Cwd) {
+		return acp.ListSessionsResponse{Sessions: []acp.SessionInfo{}}, nil
+	}
+
 	sessions, err := a.app.Sessions.List(context.Background())
 	if err != nil {
 		return acp.ListSessionsResponse{}, fmt.Errorf("list sessions: %w", err)
 	}
-	out := make([]acp.SessionInfo, 0, len(sessions))
-	cwd := a.workingDir()
-	for _, s := range sessions {
+
+	start := 0
+	if req.Cursor != nil && *req.Cursor != "" {
+		offset, err := decodeListCursor(*req.Cursor)
+		if err != nil {
+			return acp.ListSessionsResponse{}, acp.NewInvalidParams(map[string]any{
+				"cursor": *req.Cursor,
+				"error":  err.Error(),
+			})
+		}
+		start = offset
+	}
+	if start >= len(sessions) {
+		return acp.ListSessionsResponse{Sessions: []acp.SessionInfo{}}, nil
+	}
+	end := min(start+listPageSize, len(sessions))
+
+	out := make([]acp.SessionInfo, 0, end-start)
+	for _, s := range sessions[start:end] {
 		t := s.Title
 		info := acp.SessionInfo{
 			SessionId: acp.SessionId(s.ID),
@@ -172,7 +205,36 @@ func (a *crushAgent) ListSessions(_ context.Context, _ acp.ListSessionsRequest) 
 		}
 		out = append(out, info)
 	}
-	return acp.ListSessionsResponse{Sessions: out}, nil
+
+	resp := acp.ListSessionsResponse{Sessions: out}
+	if end < len(sessions) {
+		next := encodeListCursor(end)
+		resp.NextCursor = &next
+	}
+	return resp, nil
+}
+
+// encodeListCursor renders an offset as the opaque cursor token handed to
+// clients. Clients MUST treat it as opaque, so the encoding is an
+// implementation detail.
+func encodeListCursor(offset int) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(strconv.Itoa(offset)))
+}
+
+// decodeListCursor parses a cursor produced by encodeListCursor.
+func decodeListCursor(cursor string) (int, error) {
+	raw, err := base64.RawURLEncoding.DecodeString(cursor)
+	if err != nil {
+		return 0, fmt.Errorf("malformed cursor")
+	}
+	offset, err := strconv.Atoi(string(raw))
+	if err != nil {
+		return 0, fmt.Errorf("malformed cursor")
+	}
+	if offset < 0 {
+		return 0, fmt.Errorf("malformed cursor")
+	}
+	return offset, nil
 }
 
 // CloseSession implements acp.Agent.
@@ -232,6 +294,12 @@ func (a *crushAgent) Cancel(_ context.Context, req acp.CancelNotification) error
 func (a *crushAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.PromptResponse, error) {
 	sessionID := string(req.SessionId)
 
+	// The spec requires -32002 with data.sessionId for a session-scoped
+	// request naming a session that does not exist or is not active.
+	if err := a.requireSession(ctx, req.SessionId); err != nil {
+		return acp.PromptResponse{}, err
+	}
+
 	// Record any _meta the client sent so it is echoed on session/update
 	// notifications streamed for this turn (S7).
 	if a.bridge != nil {
@@ -255,9 +323,45 @@ func (a *crushAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Pro
 	return acp.PromptResponse{StopReason: stopReason, Meta: req.Meta}, nil
 }
 
-// SetSessionMode acknowledges a mode change and notifies the client.
+// requireSession reports -32002 when the named session does not exist. Callers
+// treat a nil error as "go ahead"; a store error other than not-found is
+// reported as-is rather than masked as a missing session.
+func (a *crushAgent) requireSession(ctx context.Context, id acp.SessionId) error {
+	if a.app == nil || a.app.Sessions == nil || id == "" {
+		return nil
+	}
+	if _, err := a.app.Sessions.Get(ctx, string(id)); err != nil {
+		// The SDK ships no constructor for -32002, so build the RequestError
+		// directly.
+		return &acp.RequestError{
+			Code:    acpErrorResourceNotFound,
+			Message: "Resource not found",
+			Data:    map[string]any{"sessionId": string(id)},
+		}
+	}
+	return nil
+}
+
+// SetSessionMode acknowledges a mode change and notifies the client. An
+// unknown mode is rejected with -32602 as the spec prescribes; validation is
+// skipped when no config is loaded, since there is nothing to compare against.
 func (a *crushAgent) SetSessionMode(ctx context.Context, req acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
 	a.log.Info("ACP set session mode", "sessionId", req.SessionId, "modeId", req.ModeId)
+	if cfg := a.config(); cfg != nil {
+		known := false
+		for id, agentCfg := range cfg.Agents {
+			if agentCfg.Disabled {
+				continue
+			}
+			if string(req.ModeId) == id {
+				known = true
+				break
+			}
+		}
+		if !known {
+			return acp.SetSessionModeResponse{}, invalidParam("modeId", string(req.ModeId))
+		}
+	}
 	a.pushUpdate(ctx, req.SessionId, acp.SessionUpdate{
 		CurrentModeUpdate: &acp.SessionCurrentModeUpdate{CurrentModeId: req.ModeId},
 	})
@@ -265,9 +369,15 @@ func (a *crushAgent) SetSessionMode(ctx context.Context, req acp.SetSessionModeR
 }
 
 // SetSessionConfigOption acknowledges a configuration change and notifies the
-// client of the resulting config options.
+// client of the resulting config options. Unknown ids and unsupported values
+// are rejected with -32602, as the spec prescribes.
 func (a *crushAgent) SetSessionConfigOption(ctx context.Context, req acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
 	sessionID := configOptionSessionID(req)
+	if cfg := a.config(); cfg != nil {
+		if err := validateConfigOption(cfg, req); err != nil {
+			return acp.SetSessionConfigOptionResponse{}, err
+		}
+	}
 	if req.Boolean != nil && req.Boolean.ConfigId == "thinking" {
 		if err := a.setThinking(ctx, req.Boolean.Value); err != nil {
 			a.log.Warn("Failed to apply thinking config option", "error", err)
@@ -292,6 +402,45 @@ func configOptionSessionID(req acp.SetSessionConfigOptionRequest) acp.SessionId 
 		return req.Boolean.SessionId
 	}
 	return ""
+}
+
+// acpErrorResourceNotFound is JSON-RPC "Resource not found" (-32002). The SDK
+// defines no constructor for it, though it does for -32602 and friends.
+const acpErrorResourceNotFound = -32002
+
+// invalidParam builds the -32602 error the spec prescribes for malformed
+// parameters and unsupported values (error.md:48-52).
+func invalidParam(field, value string) error {
+	return acp.NewInvalidParams(map[string]any{field: value})
+}
+
+// validateConfigOption rejects an unknown configId and any value outside the
+// set the Agent advertises, so callers cannot silently no-op a bad request.
+// Only the two option families Crush actually implements are validated;
+// anything else is unknown.
+func validateConfigOption(cfg *config.Config, req acp.SetSessionConfigOptionRequest) error {
+	switch {
+	case req.Boolean != nil:
+		if req.Boolean.ConfigId != "thinking" {
+			return invalidParam("configId", string(req.Boolean.ConfigId))
+		}
+	case req.ValueId != nil:
+		if req.ValueId.ConfigId != "model" {
+			return invalidParam("configId", string(req.ValueId.ConfigId))
+		}
+		value := string(req.ValueId.Value)
+		for _, opt := range modelOptionsFor(cfg) {
+			if string(opt.Value) == value {
+				return nil
+			}
+		}
+		return invalidParam("value", value)
+	default:
+		return acp.NewInvalidParams(map[string]any{
+			"error": "either valueId or boolean must be set",
+		})
+	}
+	return nil
 }
 
 // setThinking toggles the current model's reasoning flag and persists it the
@@ -434,24 +583,86 @@ func (a *crushAgent) config() *config.Config {
 	return store.Config()
 }
 
-// availableCommandsUpdate advertises the slash commands Crush can run.
+// availableCommandsUpdate advertises the slash commands Crush can run:
+// user-invocable skills, custom markdown commands, and MCP prompts. When
+// input is expected, an unstructured-input hint is included so the client can
+// prompt the user for it. Shell builtins are intentionally omitted; they are
+// crushrc config operations with no slash-command surface (see plan Q1).
 func (a *crushAgent) availableCommandsUpdate() acp.SessionUpdate {
-	cmds := []acp.AvailableCommand{}
+	var cmds []acp.AvailableCommand
+
+	// User-invocable skills become commands the user can type directly.
+	if a.app != nil && a.app.Skills != nil {
+		entries := skills.Catalog(a.app.Skills.ActiveSkills(), a.app.Skills.ResolvedPaths(), a.workingDir())
+		for _, c := range commands.FromSkillCatalog(entries) {
+			desc := c.Name
+			if c.Skill != nil && c.Skill.Description != "" {
+				desc = c.Skill.Description
+			}
+			cmds = append(cmds, newAvailableCommand(c.Name, desc, c.Arguments))
+		}
+	}
+
 	if cfg := a.config(); cfg != nil {
 		if custom, err := commands.LoadCustomCommands(cfg); err == nil {
 			for _, c := range custom {
-				cmds = append(cmds, acp.AvailableCommand{
-					Name:        c.Name,
-					Description: firstLine(c.Content),
-				})
+				desc := firstLine(c.Content)
+				cmds = append(cmds, newAvailableCommand(c.Name, desc, c.Arguments))
 			}
 		}
 	}
+
+	if prompts, err := commands.LoadMCPPrompts(); err == nil {
+		for _, p := range prompts {
+			cmds = append(cmds, newAvailableCommand(p.ID, p.Description, p.Arguments))
+		}
+	}
+
 	return acp.SessionUpdate{
 		AvailableCommandsUpdate: &acp.SessionAvailableCommandsUpdate{
 			AvailableCommands: cmds,
 		},
 	}
+}
+
+// newAvailableCommand builds one advertised command. The hint is left off
+// when the command takes no arguments, since the spec requires hint to be
+// non-empty whenever an input object is present.
+func newAvailableCommand(name, description string, args []commands.Argument) acp.AvailableCommand {
+	cmd := acp.AvailableCommand{Name: name, Description: description}
+	if len(args) == 0 {
+		return cmd
+	}
+	cmd.Input = &acp.AvailableCommandInput{
+		Unstructured: &acp.UnstructuredCommandInput{Hint: commandHint(args)},
+	}
+	return cmd
+}
+
+// commandHint renders a short placeholder describing the arguments a command
+// expects, e.g. "<name> [path]".
+func commandHint(args []commands.Argument) string {
+	var sb strings.Builder
+	for i, a := range args {
+		if i > 0 {
+			sb.WriteByte(' ')
+		}
+		if !a.Required {
+			sb.WriteByte('[')
+		}
+		label := a.Title
+		if label == "" {
+			label = a.ID
+		}
+		sb.WriteString("<" + label + ">")
+		if !a.Required {
+			sb.WriteByte(']')
+		}
+	}
+	if sb.Len() == 0 {
+		return "arguments"
+	}
+	return sb.String()
 }
 
 // sessionInfoUpdate reports the session's title and last-activity timestamp.

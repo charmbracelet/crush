@@ -78,8 +78,12 @@ type dispatcher struct {
 	conn  *acp.AgentSideConnection
 }
 
+// Authenticate answers -32601. Crush advertises no auth methods, so the spec
+// says clients must not call this; answering "method not found" matches the
+// guidance for a capability-gated method the Agent never advertised, whereas a
+// generic error would surface as -32603 internal error.
 func (d *dispatcher) Authenticate(_ context.Context, _ acp.AuthenticateRequest) (acp.AuthenticateResponse, error) {
-	return acp.AuthenticateResponse{}, errors.New("auth not supported")
+	return acp.AuthenticateResponse{}, acp.NewMethodNotFound("authenticate")
 }
 
 func (d *dispatcher) Logout(ctx context.Context, req acp.LogoutRequest) (acp.LogoutResponse, error) {

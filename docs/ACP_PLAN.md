@@ -75,7 +75,7 @@ Status legend: ✅ done · ⚠️ partial/stub · ❌ not implemented.
 | `mcpCapabilities` (http/sse) | OPTIONAL | ✅ empty (no MCP transport) |
 | `sessionCapabilities` (close/list/resume/delete/additionalDirectories) | OPTIONAL | ✅ all five advertised, including `resume` (`agent.go:70-76`) |
 | `auth.logout` capability | OPTIONAL | ✅ advertised |
-| `authenticate` method | Only reachable for advertised methods; a capability-gated method the Agent did not advertise SHOULD answer `-32601` (`error.md:46`) | ⚠️ `authMethods:[]` means clients MUST NOT call it, so nothing is owed today. Crush answers a stray call with a generic error → JSON-RPC `-32603`, not `-32601` (`server.go:81-83`). S2 (register provider auth methods, type `agent`, trigger OAuth) is the real work |
+| `authenticate` method | Only reachable for advertised methods; a capability-gated method the Agent did not advertise SHOULD answer `-32601` (`error.md:46`) | ⚠️ `authMethods:[]` means clients MUST NOT call it, so nothing is owed today. Crush now answers a stray call with `-32601` (`server.go:81-83`). S2 (register provider auth methods, type `agent`, trigger OAuth) is the real work |
 | `logout` method | MUST exist if `auth.logout` advertised | ✅ success no-op (Crush has no auth session) |
 
 ### 3.2 Session lifecycle methods
@@ -87,12 +87,12 @@ Status legend: ✅ done · ⚠️ partial/stub · ❌ not implemented.
 | `session/cancel` (notification) | MUST | ✅ cancels coordinator |
 | `session/update` (notifications) | MUST | ✅ message/thought/tool_call/tool_call_update/usage emitted (see §3.3) |
 | `session/close` | OPTIONAL (advertise `sessionCapabilities.close`) | ✅ implemented + advertised. Spec: closing MUST cancel ongoing work, is idempotent, and a non-existent session SHOULD still return the empty result; clients SHOULD treat `-32002` as success. Crush cancels the coordinator and always returns `{}`, which satisfies both |
-| `session/list` | OPTIONAL (advertise `sessionCapabilities.list`) | ⚠️ implemented + advertised; `cwd`, `title`, `updatedAt`, `additionalDirectories` echoed. ❌ **Pagination not implemented**: `ListSessions` ignores `req.Cursor` and never sets `NextCursor`, so results are unbounded (spec-legal while one page suffices; a bad cursor is not rejected with `-32602`). `_meta` is not populated per `SessionInfo`. |
+| `session/list` | OPTIONAL (advertise `sessionCapabilities.list`) | ✅ implemented + advertised. `cwd`, `title`, `updatedAt`, `additionalDirectories` echoed. ✅ **Pagination implemented**: `req.Cursor` is honoured (opaque base64 offset), `NextCursor` is set while more results remain, a malformed cursor is rejected with `-32602`, and pages are bounded at `listPageSize` (50). A `cwd` filter naming a different root returns an empty list (Crush has one workspace root). `_meta` on `SessionInfo` is still unpopulated. |
 | `session/load` | OPTIONAL (advertise `loadSession`) | ✅ full-history replay (R7): user/agent text, `agent_thought_chunk`, `tool_call` starts (kind/title/rawInput), tool results with terminal status + content + `diff`, and `plan` updates. Synthesizes a start when a result has no matching call (`server.go:132-140`) |
 | `session/resume` | OPTIONAL (advertise `sessionCapabilities.resume`) | ✅ implemented (Option B, §6.2 O5): returns mode/config state without replaying history; capability advertised |
 | `session/delete` | OPTIONAL (advertise `sessionCapabilities.delete`) | ✅ implemented + advertised (`UnstableDeleteSession`). **Semantics**: deleting an already-deleted session SHOULD succeed silently; deleting an active session is implementation-defined. |
 | `session/set_mode` | OPTIONAL (legacy; prefer config options; spec notes modes will be removed in a future version) | ✅ echoes `modeId` + emits `current_mode_update` (no real mode switch) |
-| `session/set_config_option` | OPTIONAL | ✅ applies thinking/model and returns the complete `configOptions` list (spec MUST, `session-config-options.md:304`). Spec: every option's `currentValue` is the default the Agent operates with (`:245`). ❌ Unknown `configId`/value SHOULD answer `-32602` (`error.md:50`); Crush logs a warning and returns success with unchanged options (`agent.go:269-284`). |
+| `session/set_config_option` | OPTIONAL | ✅ applies thinking/model and returns the complete `configOptions` list (spec MUST, `session-config-options.md:304`). Spec: every option's `currentValue` is the default the Agent operates with (`:245`). ✅ Unknown `configId`/value now answers `-32602` via `validateConfigOption` (`error.md:50`); `SetSessionMode` likewise rejects an unknown `modeId` with `-32602`. |
 
 ### 3.3 Prompt turn & streaming (`session/update` types)
 
@@ -108,7 +108,7 @@ The spec distinguishes `session/load` (MUST replay history via these) from
 | `tool_call` | SHOULD | ✅ emitted on tool start (S1) |
 | `tool_call_update` | SHOULD (`pending`/`in_progress`/`completed`/`failed`) | ✅ full lifecycle: `pending` emitted by `CheckPermission` before the permission request; `in_progress`/`completed` by the event bridge; `failed` on tool errors and permission denial (S10) |
 | `plan` | SHOULD | ✅ emitted as a full-replace update whenever the `todos` tool runs (S4): entries map from `session.Todo{Content, Status}` with `priority: medium` (todos carry no priority) |
-| `available_commands_update` | MAY | ⚠️ emitted on `session/new` (S8) but **incomplete**: only custom markdown commands (`commands.LoadCustomCommands`) are listed; MCP prompts (`commands.LoadMCPPrompts`) and skills (`commands.FromSkillCatalog`) are **not**, despite §4.2 claiming they were. `input.hint` is never populated (`AvailableCommandInput.Unstructured.Hint` is required once `input` is present), and **shell builtins** (`provider`, `model`, `mcp`, `lsp`, `permissions`, `hook`, `option`) are not advertised — see §4.2. (`agent.go:438-455`) |
+| `available_commands_update` | MAY | ✅ emitted on `session/new` (S8, O17). Covers **user-invocable skills** (`commands.FromSkillCatalog`), **custom markdown commands** (`commands.LoadCustomCommands`), and **MCP prompts** (`commands.LoadMCPPrompts`). Commands that take arguments carry an unstructured `input.hint`; argument-less commands omit `input` entirely, since the spec makes `hint` required once `input` is present. **Shell builtins** (`provider`, `model`, `mcp`, `lsp`, `permissions`, `hook`, `option`) are **not** advertised — see §4.2 |
 | `current_mode_update` | MAY | ✅ emitted on `session/set_mode` (S9) |
 | `config_option_update` | MAY | ✅ emitted on config change (S9) |
 | `session_info_update` | MAY (ties to `session/list`) | ✅ emitted on `session/new` (S9). Fields are `title`, `updatedAt`, `_meta`; Crush sets title + timestamp |
@@ -329,21 +329,23 @@ diverges from a spec requirement (independent of the §4 completion checkboxes):
   Implement `Authenticate` to trigger OAuth flow per method ID. Decision
   recorded 2026-09-18: agent-type methods (not terminal, not side-auth).
 - **Error codes for unknown/unsupported input** (SHOULD-level, re-audited
-  2026-11-13). The spec pins specific codes (`error.md:29-60`):
+  2026-11-13, mostly implemented same day). The spec pins specific codes
+  (`error.md:29-60`):
   - unknown session on a session-scoped request → `-32002` with
-    `data.sessionId`. ❌ Crush falls through to the generic wrapper, so a
-    missing session surfaces as `-32603` internal error.
+    `data.sessionId`. ✅ `session/prompt` now calls `requireSession` and
+    answers `-32002`; previously the store error surfaced as `-32603`.
+    Remaining: `session/load`/`session/resume`/`set_mode`/
+    `set_config_option` do not all check yet.
   - invalid `session/list` cursor, or an unknown `configId`/value in
     `session/set_config_option`, or an unknown mode in `session/set_mode`
-    → `-32602`. ❌ `ListSessions` ignores the cursor entirely;
-    `SetSessionConfigOption` and `SetSessionMode` accept anything and
-    return success.
+    → `-32602`. ✅ implemented: cursors are validated in `ListSessions`,
+    `validateConfigOption` checks both option families, and
+    `SetSessionMode` rejects unknown agent ids.
   - a request other than `initialize` before initialization completes →
     `-32600`. ❌ no guard in `internal/acp`; the SDK's dispatch does not
     enforce ordering either.
-  - a method the Agent did not advertise → `-32601`. ⚠️ `dispatcher.Authenticate`
-    returns a plain `errors.New`, which `toReqErr` maps to `-32603`
-    (`server.go:81-83`).
+  - a method the Agent did not advertise → `-32601`. ✅
+    `dispatcher.Authenticate` now returns `acp.NewMethodNotFound`.
 - **`usage_update` cost fields.** Spec requires `amount` + `currency` when
   `cost` is present and non-null `used`/`size` always. ✅ emitted with both
   token counts; cost is omitted rather than sent partially
@@ -448,7 +450,7 @@ have the SDK surface + Crush infrastructure today?
 
 | Feature | Status | Implementable? | Blocker |
 |---|---|---|---|
-| `available_commands_update` | ⚠️ custom cmds only, no `input.hint` | **Yes** | O17: add MCP prompts + skills and populate hints; builtins need the prompt-prefix dispatch path (Q1 path 1) |
+| `available_commands_update` | ✅ skills + custom cmds + MCP prompts, with `input.hint` | — | O17 done 2026-11-13; builtins still need the prompt-prefix dispatch path (Q1 path 1) |
 | `usage_update` | ✅ | — | |
 | `current_mode_update` / `config_option_update` / `session_info_update` | ✅ | — | |
 | `session/resume` | ✅ (Option B) | — | Returns mode/config state without replay; capability advertised |
@@ -730,15 +732,24 @@ implementation batch). Each entry records the finding that drove the call.
   content blocks, deduped per message. (`event_bridge.go` `streamAttachments`.)
 - [ ] **O16. Annotations on content blocks** — optional in spec; currently
   ignored (§3.4). Low priority; implement only if a client needs them.
-- [ ] **O17. `available_commands_update` completeness** — populate
-  `input.hint` from `CustomCommand.Arguments` / `MCPPrompt.Arguments`, and add
-  MCP prompts (`commands.LoadMCPPrompts`) and skills
-  (`commands.FromSkillCatalog`) to the advertised list. See §3.3. (`agent.go`
-  `availableCommandsUpdate`.)
-- [ ] **O18. Spec error codes** — `-32002` for unknown sessions, `-32602` for a
-  bad `session/list` cursor and for unknown `configId`/value/mode, `-32600`
-  for requests before `initialize`, `-32601` for an unadvertised
-  `authenticate`. All SHOULD-level. See §4.1.
+- [x] **O17. `available_commands_update` completeness** — ✅ IMPLEMENTED
+  (2026-11-13): user-invocable skills, custom markdown commands and MCP
+  prompts are all advertised, and commands with arguments carry an
+  unstructured `input.hint` built from `Argument.Title`/`ID`
+  (`newAvailableCommand`, `commandHint`). Shell builtins stay out on purpose.
+  (`agent.go` `availableCommandsUpdate`.)
+- [ ] **O18. Spec error codes** — ✅ PARTIAL: `-32602` for a bad
+  `session/list` cursor and unknown `configId`/value/mode, `-32601` for
+  `authenticate`, `-32002` for a missing session on `session/prompt`. Still
+  open: the same `-32002` guard on `session/load`/`resume`/`set_mode`/
+  `set_config_option`, and the `-32600` before-initialize guard. All
+  SHOULD-level. See §4.1.
+- [x] **O19. `session/list` pagination** — ✅ IMPLEMENTED (2026-11-13):
+  opaque offset cursors, `nextCursor` while more remain, 50-entry pages,
+  `-32602` on a malformed cursor, and `cwd` filtering. See §3.2.
+  (`agent.go` `ListSessions`, `encodeListCursor`, `decodeListCursor`.)
+  Tests: `TestListSessionsPaginates`, `TestListSessionsFiltersByCwd`,
+  `TestListSessionsEmptyReturnsEmptySlice`.
 
 **Tier 4 — Tests** (gate each Tier 1–3 item)
 - [ ] Regression tests per missing update type; `TestConformanceSessionLoad`;
@@ -782,9 +793,9 @@ Genuinely still open:
   returns when the SDK cancels the request context.
 - **Terminal callbacks** in client track (O8, deferred) + terminal-auth methods (§4.1 — SDK *does* model these; not implemented).
 - **Annotations on content blocks** (O16, MAY, low priority).
-- **Session list pagination** (SHOULD) — `ListSessions` ignores `req.Cursor` and sets no `NextCursor`; spec-legal while everything fits in one page, but unbounded, and a bad cursor is not rejected with `-32602` (`session-list.md:170-177`).
-- **`available_commands_update` is incomplete** (MAY) — only custom markdown commands are listed; MCP prompts + user-invocable skills are missing and `input.hint` is never populated (§3.3, §4.2 Q1, O17).
-- **Spec error codes** (SHOULD) — `-32002` for an unknown session, `-32602` for a bad cursor / unknown `configId`, value or mode, `-32600` for requests before `initialize`, `-32601` for the unadvertised `authenticate`. All currently fall through to `-32603` (§4.1, O18).
+- **Session list pagination** (SHOULD) — ✅ DONE (O19): cursors, `nextCursor`, page bound and `-32602` on a bad cursor are all implemented; only `SessionInfo._meta` remains unpopulated.
+- **`available_commands_update`** (MAY) — ✅ DONE (O17): skills, custom markdown commands and MCP prompts are advertised with `input.hint`. Shell builtins are still not exposed (§4.2 Q1).
+- **Spec error codes** (SHOULD) — ✅ PARTIAL (O18): `-32602` (bad cursor, unknown `configId`/value/mode), `-32601` (`authenticate`) and `-32002` on `session/prompt` are done. Remaining: `-32002` on the other session-scoped methods, and the `-32600` before-initialize guard (§4.1).
 - **Session compaction / notices** (`compaction_update`, `compaction_summary_chunk`, `notice`) — MAY update types in v1, each gated on a `clientCapabilities.session.*` field that the pinned SDK does not model. Not emitted; also not replayable on `session/load` (§3.3).
 
 Resolved 2026-09-22: `session/load` full-history replay (R7, tool/thought/result parts), tool-call `pending`/`failed` lifecycle (S10), tool `title`/`locations`/`rawInput`/`rawOutput`/`diff`, `plan` updates from todos results (S4), `_meta` echo (S7), `session/resume` (O5), config `category` (O14), output-side image/audio (O15).

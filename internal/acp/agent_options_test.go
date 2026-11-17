@@ -47,6 +47,56 @@ func TestUnstableDeleteSession(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestListSessionsPaginates(t *testing.T) {
+	stub := &stubSessionService{}
+	a := newTestAgent(stub)
+	for range listPageSize + 5 {
+		_, err := a.NewSession(context.Background(), acp.NewSessionRequest{})
+		require.NoError(t, err)
+	}
+
+	first, err := a.ListSessions(context.Background(), acp.ListSessionsRequest{})
+	require.NoError(t, err)
+	require.Len(t, first.Sessions, listPageSize)
+	require.NotNil(t, first.NextCursor, "a full page must hand back a cursor")
+
+	second, err := a.ListSessions(context.Background(), acp.ListSessionsRequest{Cursor: first.NextCursor})
+	require.NoError(t, err)
+	require.Len(t, second.Sessions, 5)
+	require.Nil(t, second.NextCursor, "the last page must not return a cursor")
+
+	// Cursors are opaque: a garbage token is rejected with -32602.
+	bad := "not-a-cursor"
+	_, err = a.ListSessions(context.Background(), acp.ListSessionsRequest{Cursor: &bad})
+	var reqErr *acp.RequestError
+	require.ErrorAs(t, err, &reqErr)
+	require.Equal(t, -32602, reqErr.Code)
+}
+
+func TestListSessionsFiltersByCwd(t *testing.T) {
+	stub := &stubSessionService{}
+	a := newTestAgent(stub)
+	_, err := a.NewSession(context.Background(), acp.NewSessionRequest{})
+	require.NoError(t, err)
+
+	// No config store means no working directory, so the filter is a no-op
+	// and every session is listed.
+	other := "/some/other/project"
+	got, err := a.ListSessions(context.Background(), acp.ListSessionsRequest{Cwd: &other})
+	require.NoError(t, err)
+	require.Len(t, got.Sessions, 1)
+}
+
+func TestListSessionsEmptyReturnsEmptySlice(t *testing.T) {
+	a := newTestAgent(&stubSessionService{})
+	resp, err := a.ListSessions(context.Background(), acp.ListSessionsRequest{})
+	require.NoError(t, err)
+	// The SDK validates that sessions is non-nil, so an empty result must
+	// still serialize as [] rather than null.
+	require.NotNil(t, resp.Sessions)
+	require.Empty(t, resp.Sessions)
+}
+
 func TestLogoutNoop(t *testing.T) {
 	a := &crushAgent{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	_, err := a.Logout(context.Background(), acp.LogoutRequest{})

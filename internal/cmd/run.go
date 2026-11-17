@@ -281,6 +281,13 @@ func runNonInteractive(
 		return fmt.Errorf("failed to subscribe to events: %w", err)
 	}
 
+	// Report the session as viewed, so the server does not cancel this
+	// run when another client viewing it leaves. It needs the event
+	// stream above to be attached.
+	if err := c.SetCurrentSession(ctx, ws.ID, sess.ID); err != nil {
+		slog.Warn("Failed to report current session", "session_id", sess.ID, "error", err)
+	}
+
 	// Mint a per-call RunID so we can correlate the terminal
 	// RunComplete with *this* SendMessage even if the session was
 	// busy and another turn finished first. Without it the stream

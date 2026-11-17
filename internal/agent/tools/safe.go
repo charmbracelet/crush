@@ -256,6 +256,39 @@ func isSafeReadOnly(command string, extra []safeCommand) bool {
 	return safeStmts(file.Stmts, extra)
 }
 
+// bashGrantKey returns what "allow for session" covers for a command. A
+// single plain command is keyed by its program name, so approving
+// `git commit -m x` approves every later `git` call. Anything else (lists,
+// pipes, redirections, env assignments, non-literal words, or a command
+// flagged dangerous) is keyed by the exact command text, so one approval
+// cannot widen into something the user never saw.
+func bashGrantKey(command string, dangerous bool) string {
+	if dangerous {
+		return command
+	}
+	file, err := syntax.NewParser().Parse(strings.NewReader(command), "")
+	if err != nil || len(file.Stmts) != 1 {
+		return command
+	}
+	stmt := file.Stmts[0]
+	if len(stmt.Redirs) > 0 || stmt.Background || stmt.Coprocess || stmt.Negated || stmt.Disown {
+		return command
+	}
+	call, ok := stmt.Cmd.(*syntax.CallExpr)
+	if !ok || len(call.Assigns) > 0 || len(call.Args) == 0 {
+		return command
+	}
+	argv, ok := literalArgs(call.Args)
+	if !ok {
+		return command
+	}
+	argv = shell.ResolveArgv(argv)
+	if len(argv) == 0 {
+		return command
+	}
+	return shell.NormalizeCommandName(argv[0])
+}
+
 // safeStmts reports whether every statement in a list is safe. An empty list
 // is not: a command that resolves to nothing is not something to wave
 // through, and it is the shape a parse surprise tends to take.

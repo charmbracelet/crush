@@ -241,3 +241,26 @@ func TestFlagDenied(t *testing.T) {
 	assert.False(t, flagDenied("--utc", deny), "a long flag is not read character by character")
 	assert.False(t, flagDenied("--iso-8601=seconds", deny))
 }
+
+func TestBashGrantKey(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		command   string
+		dangerous bool
+		want      string
+	}{
+		{"git commit -m 'yolo'", false, "git"},
+		{"git status", false, "git"},
+		{"/usr/bin/git log", false, "git"},
+		{"git status && rm -rf x", false, "git status && rm -rf x"},
+		{"git log | head", false, "git log | head"},
+		{"FOO=1 git log", false, "FOO=1 git log"},
+		{"git log > out", false, "git log > out"},
+		{"git $(whoami)", false, "git $(whoami)"},
+		{"sudo rm -rf /", true, "sudo rm -rf /"},
+	}
+	for _, tt := range tests {
+		assert.Equal(t, tt.want, bashGrantKey(tt.command, tt.dangerous), tt.command)
+	}
+}

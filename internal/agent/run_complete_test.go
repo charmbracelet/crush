@@ -325,3 +325,25 @@ func TestDrainQueueForStep_DroppedRunIDPublishesCancelledRunComplete(t *testing.
 
 	requireSingleCancelledRunComplete(t, ch, sessionID, "run-dropped")
 }
+
+// TestQueuedPromptsList_SkipsHidden pins that a hidden continuation is
+// counted for scheduling but never listed for the queue pill.
+func TestQueuedPromptsList_SkipsHidden(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	a := NewSessionAgent(SessionAgentOptions{
+		Models:   noModels,
+		Sessions: env.sessions,
+		Messages: env.messages,
+	}).(*sessionAgent)
+
+	const sessionID = "hidden-queue"
+	a.messageQueue.Set(sessionID, []SessionAgentCall{
+		{SessionID: sessionID, Prompt: "visible"},
+		{SessionID: sessionID, Prompt: "continue the plan", HiddenUserMessage: true},
+	})
+
+	require.Equal(t, 2, a.QueuedPrompts(sessionID))
+	require.Equal(t, []string{"visible"}, a.QueuedPromptsList(sessionID))
+}

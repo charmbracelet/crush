@@ -19,7 +19,6 @@ type spinTestItem struct {
 
 func (s *spinTestItem) Spinning() bool  { return s.spinning }
 func (s *spinTestItem) Version() uint64 { return s.version }
-func (s *spinTestItem) Finished() bool  { return !s.spinning }
 func (s *spinTestItem) Advance() bool {
 	if !s.spinning {
 		return false

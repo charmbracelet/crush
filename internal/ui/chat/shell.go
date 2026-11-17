@@ -119,7 +119,6 @@ func (s *ShellItem) replaceOutput(output string) {
 
 func (s *ShellItem) ID() string          { return s.id }
 func (s *ShellItem) FilterValue() string { return s.command }
-func (s *ShellItem) Finished() bool      { return !s.pending }
 
 // Spinning implements [Animatable].
 func (s *ShellItem) Spinning() bool {

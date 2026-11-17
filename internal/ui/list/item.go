@@ -9,12 +9,9 @@ import (
 // Item represents a single item in the lazy-loaded list.
 //
 // Items participate in the list-level render memo (F6). The cache key
-// for each item is (pointer, width, version). Items must:
-//
-//   - Bump their version (via the embedded *Versioned helper) on every
-//     mutation that changes the rendered output.
-//   - Return Finished() == true once their rendered output will not
-//     change again unless an explicit mutator is invoked.
+// for each item is (pointer, width, version), so items must bump their
+// version (via the embedded *Versioned helper) on every mutation that
+// changes the rendered output.
 type Item interface {
 	// Render returns the string representation of the item for the given
 	// width.
@@ -25,11 +22,6 @@ type Item interface {
 	// (via Versioned.Bump) on every state change that would alter
 	// the rendered output.
 	Version() uint64
-
-	// Finished reports whether the item's rendered output has reached
-	// a terminal state. Items that animate, stream, or otherwise still
-	// mutate must return false.
-	Finished() bool
 }
 
 // Versioned is a tiny embeddable helper that satisfies Item.Version()
@@ -110,9 +102,4 @@ func NewSpacerItem(height int) *SpacerItem {
 // Render implements the Item interface for [SpacerItem].
 func (s *SpacerItem) Render(width int) string {
 	return strings.Repeat("\n", s.Height)
-}
-
-// Finished implements Item. SpacerItems never change.
-func (s *SpacerItem) Finished() bool {
-	return true
 }

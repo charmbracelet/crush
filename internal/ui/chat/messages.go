@@ -80,9 +80,8 @@ type SendMsg struct {
 
 type highlightableMessageItem struct {
 	// version is the parent item's version counter. SetHighlight
-	// bumps it on every observable change so the F6 list memo and
-	// any frozen entry get invalidated when a selection drag enters
-	// or leaves the item.
+	// bumps it on every observable change so the F6 list memo is
+	// invalidated when a selection drag enters or leaves the item.
 	version *list.Versioned
 
 	startLine int
@@ -328,13 +327,6 @@ func NewAssistantInfoItem(sty *styles.Styles, message *message.Message, cfg *con
 		cfg:                 cfg,
 		lastUserMessageTime: lastUserMessageTime,
 	}
-}
-
-// Finished implements list.Item. Assistant info blocks render a fixed
-// model/duration footer once the assistant turn finishes; the data
-// is immutable after construction so the entry is safe to freeze.
-func (a *AssistantInfoItem) Finished() bool {
-	return true
 }
 
 // ID implements MessageItem.

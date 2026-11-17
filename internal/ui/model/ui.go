@@ -2712,33 +2712,9 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 	case dialog.ActionSelectReasoningEffort:
-		cfg := m.com.Config()
-		if cfg == nil {
-			cmds = append(cmds, util.ReportError(errors.New("configuration not found")))
-			break
+		if cmd := m.handleSelectReasoningEffort(msg.Effort); cmd != nil {
+			cmds = append(cmds, cmd)
 		}
-
-		agentCfg, ok := cfg.Agents[config.AgentCoder]
-		if !ok {
-			cmds = append(cmds, util.ReportError(errors.New("agent configuration not found")))
-			break
-		}
-
-		currentModel := cfg.Models[agentCfg.Model]
-		currentModel.ReasoningEffort = msg.Effort
-		if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, agentCfg.Model, currentModel); err != nil {
-			cmds = append(cmds, util.ReportError(err))
-			break
-		}
-
-		note := m.nextMessageNote()
-		cmds = append(cmds, m.updateAgentModelCmd(func() tea.Msg {
-			if err := m.com.Workspace.UpdateAgentModel(context.TODO()); err != nil {
-				return util.ReportError(err)()
-			}
-			return util.NewInfoMsg("Reasoning effort set to " + msg.Effort + note)
-		}))
-		m.dialog.CloseDialog(dialog.ReasoningID)
 	case dialog.ActionPermissionResponse:
 		m.dialog.CloseDialog(dialog.PermissionsID)
 		switch msg.Action {
@@ -2997,6 +2973,36 @@ func (m *UI) restoreModelFromSession(msgs []message.Message) tea.Cmd {
 			"provider", lastAssistant.Provider,
 			"model", lastAssistant.Model)
 		return nil
+	})
+}
+
+// handleSelectReasoningEffort saves the coder model's reasoning effort and
+// rebuilds the agent's models. A run in progress keeps its effort; the new
+// one applies from the next message.
+func (m *UI) handleSelectReasoningEffort(effort string) tea.Cmd {
+	cfg := m.com.Config()
+	if cfg == nil {
+		return util.ReportError(errors.New("configuration not found"))
+	}
+
+	agentCfg, ok := cfg.Agents[config.AgentCoder]
+	if !ok {
+		return util.ReportError(errors.New("agent configuration not found"))
+	}
+
+	currentModel := cfg.Models[agentCfg.Model]
+	currentModel.ReasoningEffort = effort
+	if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, agentCfg.Model, currentModel); err != nil {
+		return util.ReportError(err)
+	}
+
+	note := m.nextMessageNote()
+	m.dialog.CloseDialog(dialog.ReasoningID)
+	return m.updateAgentModelCmd(func() tea.Msg {
+		if err := m.com.Workspace.UpdateAgentModel(context.TODO()); err != nil {
+			return util.ReportError(err)()
+		}
+		return util.NewInfoMsg("Reasoning effort set to " + effort + note)
 	})
 }
 

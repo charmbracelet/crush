@@ -342,7 +342,7 @@ func TestSelectReasoningEffort_AllowedWhileAgentBusy(t *testing.T) {
 	ws.agentBusy = true
 	u.agentBusyCache.set(true)
 
-	u.handleDialogMsg(dialog.ActionSelectReasoningEffort{Effort: "high"})
+	require.NotNil(t, u.handleSelectReasoningEffort("high"))
 	require.Equal(t, "high", ws.cfg.Models[config.SelectedModelTypeLarge].ReasoningEffort,
 		"the effort is saved for the next message instead of being refused")
 	require.Equal(t, " (applies to your next message)", u.nextMessageNote())

@@ -2420,6 +2420,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleThinking:
+		note := m.nextMessageNote()
 		cmds = append(cmds, m.updateAgentModelCmd(func() tea.Msg {
 			cfg := m.com.Config()
 			if cfg == nil {
@@ -2441,7 +2442,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			if currentModel.Think {
 				status = "enabled"
 			}
-			return util.NewInfoMsg("Thinking mode " + status)
+			return util.NewInfoMsg("Thinking mode " + status + note)
 		}))
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleTransparentBackground:
@@ -2716,11 +2717,6 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 	case dialog.ActionSelectReasoningEffort:
-		if m.isAgentBusy() {
-			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait..."))
-			break
-		}
-
 		cfg := m.com.Config()
 		if cfg == nil {
 			cmds = append(cmds, util.ReportError(errors.New("configuration not found")))
@@ -2740,9 +2736,12 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			break
 		}
 
+		note := m.nextMessageNote()
 		cmds = append(cmds, m.updateAgentModelCmd(func() tea.Msg {
-			m.com.Workspace.UpdateAgentModel(context.TODO())
-			return util.NewInfoMsg("Reasoning effort set to " + msg.Effort)
+			if err := m.com.Workspace.UpdateAgentModel(context.TODO()); err != nil {
+				return util.ReportError(err)()
+			}
+			return util.NewInfoMsg("Reasoning effort set to " + msg.Effort + note)
 		}))
 		m.dialog.CloseDialog(dialog.ReasoningID)
 	case dialog.ActionPermissionResponse:
@@ -3011,11 +3010,6 @@ func (m *UI) restoreModelFromSession(msgs []message.Message) tea.Cmd {
 func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 	var cmds []tea.Cmd
 
-	// we ignore dialogs with the oauth id as they need to be able to be dismissed
-	if m.isAgentBusy() && !m.dialog.ContainsDialog(dialog.OAuthID) {
-		return util.ReportWarn("Agent is busy, please wait...")
-	}
-
 	cfg := m.com.Config()
 	if cfg == nil {
 		return util.ReportError(errors.New("configuration not found"))
@@ -3117,6 +3111,7 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		}
 	}
 
+	note := m.nextMessageNote()
 	cmds = append(cmds, m.updateAgentModelCmd(func() tea.Msg {
 		if err := m.com.Workspace.UpdateAgentModel(context.TODO()); err != nil {
 			return util.ReportError(err)
@@ -3129,7 +3124,7 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		if catwalkModel := cfg.GetModel(msg.Model.Provider, msg.Model.Model); catwalkModel != nil && catwalkModel.Name != "" {
 			modelName = catwalkModel.Name
 		}
-		modelMsg := fmt.Sprintf("%s model changed to %s", modelType, modelName)
+		modelMsg := fmt.Sprintf("%s model changed to %s%s", modelType, modelName, note)
 
 		return util.NewInfoMsg(modelMsg)
 	}))
@@ -5312,6 +5307,16 @@ func (m *UI) isAgentBusy() bool {
 		return true
 	}
 	return m.agentBusyCache.val
+}
+
+// nextMessageNote qualifies a model setting change made while the agent
+// runs: the running turn keeps the model it started with, and the change
+// applies from the next message.
+func (m *UI) nextMessageNote() string {
+	if m.agentBusyCache.val {
+		return " (applies to your next message)"
+	}
+	return ""
 }
 
 // hasSession returns true if there is an active session with a valid ID.

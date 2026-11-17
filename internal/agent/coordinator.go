@@ -475,6 +475,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, report *mess
 			Report:            report,
 			HiddenUserMessage: message.HiddenUserMessage(ctx),
 			Attachments:       attachments,
+			Model:             model,
 			MaxOutputTokens:   maxTokens,
 			ProviderOptions:   mergedOptions,
 			Temperature:       temp,

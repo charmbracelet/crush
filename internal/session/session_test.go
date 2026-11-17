@@ -143,3 +143,47 @@ func TestEstimatedUsageStateCanBeClearedByExplicitSave(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, refetched.EstimatedUsage)
 }
+
+func TestSkillDisabledRoundTrip(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Cleanup(func() {
+		require.NoError(t, db.Release(dataDir))
+		db.ResetPool()
+	})
+
+	conn, err := db.Connect(t.Context(), dataDir)
+	require.NoError(t, err)
+
+	sessions := NewService(db.New(conn), conn)
+
+	disabled, err := sessions.SkillsDisabled(t.Context())
+	require.NoError(t, err)
+	require.Empty(t, disabled, "a new repository must default to the config")
+
+	require.NoError(t, sessions.SetSkillDisabled(t.Context(), "charmtone", true, false))
+	require.NoError(t, sessions.SetSkillDisabled(t.Context(), "pair", true, false))
+	require.NoError(t, sessions.SetSkillDisabled(t.Context(), "charmtone", true, false), "disabling twice must be idempotent")
+
+	disabled, err = sessions.SkillsDisabled(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, []string{"charmtone", "pair"}, disabled)
+
+	// Re-enabling a skill the config does not disable records no enabled
+	// override, so a later config disable still applies here.
+	require.NoError(t, sessions.SetSkillDisabled(t.Context(), "pair", false, false))
+	enabled, err := sessions.SkillsEnabled(t.Context())
+	require.NoError(t, err)
+	require.Empty(t, enabled)
+
+	// Re-enabling a config-disabled skill records an enabled override so
+	// it stays enabled across restarts; disabling removes it again.
+	require.NoError(t, sessions.SetSkillDisabled(t.Context(), "charmtone", false, true))
+	enabled, err = sessions.SkillsEnabled(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, []string{"charmtone"}, enabled)
+
+	require.NoError(t, sessions.SetSkillDisabled(t.Context(), "charmtone", true, true))
+	enabled, err = sessions.SkillsEnabled(t.Context())
+	require.NoError(t, err)
+	require.Empty(t, enabled)
+}

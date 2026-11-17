@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"charm.land/lipgloss/v2"
+	"charm.land/tone"
 	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
@@ -25,7 +26,6 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 )
@@ -174,8 +174,8 @@ func runSessionList(cmd *cobra.Command, _ []string) error {
 	w, cleanup, usingPager := sessionWriter(ctx, len(list))
 	defer cleanup()
 
-	hashStyle := lipgloss.NewStyle().Foreground(charmtone.Malibu)
-	dateStyle := lipgloss.NewStyle().Foreground(charmtone.Damson)
+	hashStyle := lipgloss.NewStyle().Foreground(tone.Malibu)
+	dateStyle := lipgloss.NewStyle().Foreground(tone.Damson)
 
 	width := sessionOutputWidth
 	if tw, _, err := term.GetSize(os.Stdout.Fd()); err == nil && tw > 0 {
@@ -454,8 +454,8 @@ func outputSessionHuman(ctx context.Context, cfg *config.ConfigStore, sess sessi
 	}
 	contentWidth := min(width, sessionMaxContentWidth)
 
-	keyStyle := lipgloss.NewStyle().Foreground(charmtone.Damson)
-	valStyle := lipgloss.NewStyle().Foreground(charmtone.Malibu)
+	keyStyle := lipgloss.NewStyle().Foreground(tone.Damson)
+	valStyle := lipgloss.NewStyle().Foreground(tone.Malibu)
 
 	hash := session.HashID(sess.ID)[:12]
 	created := time.Unix(sess.CreatedAt, 0).Format("Mon Jan 2 15:04:05 2006 -0700")
@@ -607,6 +607,10 @@ type sessionShowPart struct {
 	StartedAt  int64  `json:"started_at,omitempty"`
 	FinishedAt int64  `json:"finished_at,omitempty"`
 
+	// Tool timing, in Unix milliseconds.
+	StartedAtMs  int64 `json:"started_at_ms,omitempty"`
+	FinishedAtMs int64 `json:"finished_at_ms,omitempty"`
+
 	// Tool call
 	ToolCallID string `json:"tool_call_id,omitempty"`
 	Name       string `json:"name,omitempty"`
@@ -681,19 +685,21 @@ func convertParts(parts []message.ContentPart) []sessionShowPart {
 			})
 		case message.ToolCall:
 			result = append(result, sessionShowPart{
-				Type:       "tool_call",
-				ToolCallID: p.ID,
-				Name:       p.Name,
-				Input:      p.Input,
+				Type:        "tool_call",
+				ToolCallID:  p.ID,
+				Name:        p.Name,
+				Input:       p.Input,
+				StartedAtMs: p.StartedAtMs,
 			})
 		case message.ToolResult:
 			result = append(result, sessionShowPart{
-				Type:       "tool_result",
-				ToolCallID: p.ToolCallID,
-				Name:       p.Name,
-				Content:    p.Content,
-				IsError:    p.IsError,
-				MIMEType:   p.MIMEType,
+				Type:         "tool_result",
+				ToolCallID:   p.ToolCallID,
+				Name:         p.Name,
+				Content:      p.Content,
+				IsError:      p.IsError,
+				MIMEType:     p.MIMEType,
+				FinishedAtMs: p.FinishedAtMs,
 			})
 		case message.BinaryContent:
 			result = append(result, sessionShowPart{

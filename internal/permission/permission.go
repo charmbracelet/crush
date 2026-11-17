@@ -153,6 +153,10 @@ type Service interface {
 	// restores the default of one scope for the whole service.
 	SetSessionScope(scope SessionScope)
 	AutoApproveSession(sessionID string)
+	// InheritAutoApproval approves the child session automatically when its
+	// parent session already is. A child of any other session keeps
+	// prompting.
+	InheritAutoApproval(parentSessionID, childSessionID string)
 	SetPermissionMode(mode PermissionMode)
 	PermissionMode() PermissionMode
 	SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification]
@@ -519,6 +523,14 @@ func (s *permissionService) AutoApproveSession(sessionID string) {
 	s.autoApproveSessionsMu.Lock()
 	s.autoApproveSessions[sessionID] = true
 	s.autoApproveSessionsMu.Unlock()
+}
+
+func (s *permissionService) InheritAutoApproval(parentSessionID, childSessionID string) {
+	s.autoApproveSessionsMu.Lock()
+	defer s.autoApproveSessionsMu.Unlock()
+	if s.autoApproveSessions[parentSessionID] {
+		s.autoApproveSessions[childSessionID] = true
+	}
 }
 
 func (s *permissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification] {

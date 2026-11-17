@@ -11,6 +11,11 @@ import (
 func TestParseHostURL(t *testing.T) {
 	t.Parallel()
 
+	// A path without a drive letter is not absolute on Windows, so it is
+	// resolved against the current drive.
+	unixSock, err := filepath.Abs("/tmp/crush.sock")
+	require.NoError(t, err)
+
 	cases := []struct {
 		name     string
 		host     string
@@ -23,7 +28,7 @@ func TestParseHostURL(t *testing.T) {
 		{name: "tcp with base path", host: "tcp://127.0.0.1:8080/api", scheme: "tcp", addr: "127.0.0.1:8080", basePath: "/api"},
 		{name: "http aliases tcp", host: "http://127.0.0.1:8080", scheme: "tcp", addr: "127.0.0.1:8080"},
 		{name: "http with base path", host: "http://127.0.0.1:8080/api", scheme: "tcp", addr: "127.0.0.1:8080", basePath: "/api"},
-		{name: "unix", host: "unix:///tmp/crush.sock", scheme: "unix", addr: "/tmp/crush.sock"},
+		{name: "unix", host: "unix:///tmp/crush.sock", scheme: "unix", addr: unixSock},
 		{name: "missing separator", host: "127.0.0.1:8080", wantErr: true},
 	}
 

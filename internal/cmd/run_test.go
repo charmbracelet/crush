@@ -107,7 +107,9 @@ func runComplete(rc proto.RunComplete) func(http.ResponseWriter, *http.Request, 
 
 // TestRunNonInteractive_RunOutcome guards `crush run` exiting 0 when the
 // server dropped or cancelled the run, and checks that every run asks the
-// server to auto-approve its session (it hung on permission prompts).
+// server to auto-approve its session (it hung on permission prompts) and
+// reports it as the session it views, so the run is not cancelled when
+// another client viewing it leaves.
 func TestRunNonInteractive_RunOutcome(t *testing.T) {
 	t.Parallel()
 
@@ -131,7 +133,7 @@ func TestRunNonInteractive_RunOutcome(t *testing.T) {
 			} else {
 				require.ErrorContains(t, err, tc.wantErr)
 			}
-			require.Equal(t, []string{"sessions/s/auto-approve"}, srv.requests())
+			require.Equal(t, []string{"sessions/s/auto-approve", "current-session"}, srv.requests())
 		})
 	}
 }

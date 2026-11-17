@@ -212,6 +212,13 @@ type (
 	mcpStateChangedMsg struct {
 		states map[string]mcp.ClientInfo
 	}
+	// skillsOverridesLoadedMsg carries the repository-scoped skill toggle
+	// sets after a workspace fetch so the sidebar and the toggles dialog
+	// can filter without blocking on workspace calls during render.
+	skillsOverridesLoadedMsg struct {
+		disabled map[string]bool
+		enabled  map[string]bool
+	}
 	// sendMessageMsg is sent to send a message.
 	// currently only used for mcp prompts.
 	sendMessageMsg struct {
@@ -445,6 +452,12 @@ type UI struct {
 
 	// skills
 	skillStates []*skills.SkillState
+	// skillsDisabledOverrides mirrors the repository-scoped disabled set
+	// so the sidebar can filter without blocking on workspace calls.
+	skillsDisabledOverrides map[string]bool
+	// skillsEnabledOverrides mirrors the repository-scoped enabled set
+	// (config-disabled skills re-enabled for this repository).
+	skillsEnabledOverrides map[string]bool
 
 	// sidebarLogo keeps a cached version of the sidebar sidebarLogo.
 	sidebarLogo string
@@ -1159,6 +1172,14 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd := m.requestMCPRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case skillsOverridesLoadedMsg:
+		m.skillsDisabledOverrides = msg.disabled
+		m.skillsEnabledOverrides = msg.enabled
+		if dia := m.dialog.Dialog(dialog.SkillsTogglesID); dia != nil {
+			if toggles, ok := dia.(*dialog.SkillToggles); ok {
+				toggles.SetItems(m.skillsTogglesList())
+			}
+		}
 	case mcpPromptsLoadedMsg:
 		m.mcpPrompts = msg.Prompts
 		dia := m.dialog.Dialog(dialog.CommandsID)
@@ -1303,7 +1324,16 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pubsub.Event[pinentry.Notification]:
 		m.handlePinentryNotification(msg.Payload)
 	case pubsub.Event[question.Request]:
-		m.openBatchFormDialog(msg.Payload)
+		// CRUSH_QUESTIONS_PIPED=1: another client (an editor Crush runs in)
+		// shows the questions and answers them, so this UI doesn't ask twice.
+		// Skip the scroll and notification too: the server re-sends a pending
+		// batch whenever a client reports its session, so both would repeat.
+		if piped, _ := strconv.ParseBool(os.Getenv("CRUSH_QUESTIONS_PIPED")); piped {
+			break
+		}
+		if !m.openBatchFormDialog(msg.Payload) {
+			break // a replay of the batch the form already shows
+		}
 		m.chat.ScrollToBottom()
 		if cmd := m.sendNotification(notification.Notification{
 			Title:   "Crush is waiting...",
@@ -2341,6 +2371,8 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 		m.chat.RemoveMessage(chat.AssistantInfoID(msg.ID))
 	}
 
+	m.chat.RemoveStaleToolCalls(msg.ID, msg.ToolCalls())
+
 	var items []chat.MessageItem
 	for _, tc := range msg.ToolCalls() {
 		existingToolItem := m.chat.MessageItem(tc.ID)
@@ -2621,6 +2653,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleThinking:
+		note := m.nextMessageNote()
 		cmds = append(cmds, m.updateAgentModelCmd(func() tea.Msg {
 			cfg := m.com.Config()
 			if cfg == nil {
@@ -2642,7 +2675,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			if currentModel.Think {
 				status = "enabled"
 			}
-			return util.NewInfoMsg("Thinking mode " + status)
+			return util.NewInfoMsg("Thinking mode " + status + note)
 		}))
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleTransparentBackground:
@@ -2899,6 +2932,11 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		cmds = append(cmds, m.disableDockerMCP)
 	case dialog.ActionToggleMCP:
 		cmds = append(cmds, m.applyMCPToggle(msg))
+	case dialog.ActionToggleSkill:
+		// Sequence apply then refresh: the refresh must read the
+		// overrides after the toggle commits, or the dialog shows stale
+		// state.
+		cmds = append(cmds, tea.Sequence(m.applySkillToggle(msg), m.refreshSkillOverrides()))
 	case dialog.ActionInitializeProject:
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before summarizing session..."))
@@ -2912,35 +2950,9 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 	case dialog.ActionSelectReasoningEffort:
-		if m.isAgentBusy() {
-			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait..."))
-			break
+		if cmd := m.handleSelectReasoningEffort(msg.Effort); cmd != nil {
+			cmds = append(cmds, cmd)
 		}
-
-		cfg := m.com.Config()
-		if cfg == nil {
-			cmds = append(cmds, util.ReportError(errors.New("configuration not found")))
-			break
-		}
-
-		agentCfg, ok := cfg.Agents[config.AgentCoder]
-		if !ok {
-			cmds = append(cmds, util.ReportError(errors.New("agent configuration not found")))
-			break
-		}
-
-		currentModel := cfg.Models[agentCfg.Model]
-		currentModel.ReasoningEffort = msg.Effort
-		if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, agentCfg.Model, currentModel); err != nil {
-			cmds = append(cmds, util.ReportError(err))
-			break
-		}
-
-		cmds = append(cmds, m.updateAgentModelCmd(func() tea.Msg {
-			m.com.Workspace.UpdateAgentModel(context.TODO())
-			return util.NewInfoMsg("Reasoning effort set to " + msg.Effort)
-		}))
-		m.dialog.CloseDialog(dialog.ReasoningID)
 	case dialog.ActionPermissionResponse:
 		m.dialog.CloseDialog(dialog.PermissionsID)
 		switch msg.Action {
@@ -3209,15 +3221,40 @@ func (m *UI) restoreModelFromSession(msgs []message.Message) tea.Cmd {
 	})
 }
 
+// handleSelectReasoningEffort saves the coder model's reasoning effort and
+// rebuilds the agent's models. A run in progress keeps its effort; the new
+// one applies from the next message.
+func (m *UI) handleSelectReasoningEffort(effort string) tea.Cmd {
+	cfg := m.com.Config()
+	if cfg == nil {
+		return util.ReportError(errors.New("configuration not found"))
+	}
+
+	agentCfg, ok := cfg.Agents[config.AgentCoder]
+	if !ok {
+		return util.ReportError(errors.New("agent configuration not found"))
+	}
+
+	currentModel := cfg.Models[agentCfg.Model]
+	currentModel.ReasoningEffort = effort
+	if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, agentCfg.Model, currentModel); err != nil {
+		return util.ReportError(err)
+	}
+
+	note := m.nextMessageNote()
+	m.dialog.CloseDialog(dialog.ReasoningID)
+	return m.updateAgentModelCmd(func() tea.Msg {
+		if err := m.com.Workspace.UpdateAgentModel(context.TODO()); err != nil {
+			return util.ReportError(err)()
+		}
+		return util.NewInfoMsg("Reasoning effort set to " + effort + note)
+	})
+}
+
 // handleSelectModel performs the model selection after any provider
 // pre-checks (such as a silent Hyper OAuth refresh) have completed.
 func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 	var cmds []tea.Cmd
-
-	// we ignore dialogs with the oauth id as they need to be able to be dismissed
-	if m.isAgentBusy() && !m.dialog.ContainsDialog(dialog.OAuthID) {
-		return util.ReportWarn("Agent is busy, please wait...")
-	}
 
 	cfg := m.com.Config()
 	if cfg == nil {
@@ -3359,6 +3396,7 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		}
 	}
 
+	note := m.nextMessageNote()
 	cmds = append(cmds, m.updateAgentModelCmd(func() tea.Msg {
 		if err := m.com.Workspace.UpdateAgentModel(context.TODO()); err != nil {
 			return util.ReportError(err)
@@ -3375,6 +3413,7 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		if routersDisabled {
 			modelMsg += " (router disabled)"
 		}
+		modelMsg += note
 
 		return util.NewInfoMsg(modelMsg)
 	}))
@@ -5416,11 +5455,8 @@ func (m *UI) bangPromptFunc(info textarea.PromptInfo) string {
 	return t.Editor.PromptBangDotsBlurred.Render()
 }
 
-// toggleInputMode advances the Shift+Tab cycle by one position. The cycle is
-// a ring of four positions read straight off the current state — code ->
-// plan -> YOLO -> sysadmin -> code. Nothing is remembered between presses,
-// so the next position is always the one the badge implies, whether the
-// permission mode came from this cycle or from Ctrl+Y.
+// toggleInputMode advances the Shift+Tab cycle (code -> plan -> YOLO -> code),
+// reading the position off the current state. Sysadmin is palette-only.
 func (m *UI) toggleInputMode() tea.Cmd {
 	if m.isAgentBusy() || m.modeSwitching {
 		return util.ReportWarn("Agent is busy, please wait before switching input mode...")
@@ -5434,14 +5470,7 @@ func (m *UI) toggleInputMode() tea.Cmd {
 		return m.setInputMode(uiInputModeCode)
 	}
 	if m.yoloActive() {
-		if m.permModeCached() == permission.PermissionModeYolo {
-			// Third step: YOLO -> sysadmin. The banner spells out what was
-			// just given up, since this is the most permissive state the
-			// program has and it is now one keystroke away.
-			m.setPermissionMode(permission.PermissionModeSysadmin)
-			return util.CmdHandler(util.InfoMsg{Type: util.InfoTypeSysadmin, Msg: sysadminModeBannerMsg})
-		}
-		// Fourth step: sysadmin -> normal, closing the cycle.
+		// Third step: YOLO, or a palette-chosen sysadmin, back to code.
 		m.setYolo(false)
 		return util.ReportInfo("input mode: code")
 	}
@@ -5728,6 +5757,16 @@ func (m *UI) isAgentBusy() bool {
 		return true
 	}
 	return m.agentBusyCache.val
+}
+
+// nextMessageNote qualifies a model setting change made while the agent
+// runs: the running turn keeps the model it started with, and the change
+// applies from the next message.
+func (m *UI) nextMessageNote() string {
+	if m.agentBusyCache.val {
+		return " (applies to your next message)"
+	}
+	return ""
 }
 
 // hasSession returns true if there is an active session with a valid ID.
@@ -6255,6 +6294,10 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openRouterEditor(""); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.SkillsTogglesID:
+		if cmd := m.openSkillsTogglesDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.FilePickerID:
 		if cmd := m.openFilesDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -6428,9 +6471,17 @@ func (m *UI) openPermissionsDialog(perm permission.PermissionRequest) tea.Cmd {
 
 // openBatchFormDialog activates a tabbed multi-question form in
 // the editor area. Single questions render without tabs or confirm.
-func (m *UI) openBatchFormDialog(batch question.Request) {
+// It reports whether it opened a form, which it doesn't for a batch
+// the open form already shows.
+func (m *UI) openBatchFormDialog(batch question.Request) bool {
 	// Close any existing question form first to prevent stacking.
 	if qf, ok := m.activeInline.(*dialog.QuestionForm); ok && qf != nil {
+		// The server re-sends a pending batch whenever a client reports
+		// its session; keep the form already showing it so the answers
+		// typed so far survive.
+		if qf.BatchID == batch.ID {
+			return false
+		}
 		m.activeInline = nil
 	}
 
@@ -6446,6 +6497,7 @@ func (m *UI) openBatchFormDialog(batch question.Request) {
 	m.focus = uiFocusEditor
 	m.activeInline.SetFocused(true)
 	m.updateLayoutAndSize()
+	return true
 }
 
 // handleQuestionNotification dismisses an open question form when

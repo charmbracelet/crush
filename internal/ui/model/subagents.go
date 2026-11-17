@@ -92,10 +92,11 @@ func (m *UI) subAgentRow(status chat.DispatchStatus, width int) string {
 		title, label = t.Tool.AgentLabel.Render(label), ""
 	}
 	return common.Status(t, common.StatusOpts{
-		Icon:         icon,
-		Title:        title,
-		Description:  label,
-		ExtraContent: extra,
+		Icon:             icon,
+		Title:            title,
+		Description:      label,
+		DescriptionColor: t.Resource.DefaultTitleFg,
+		ExtraContent:     extra,
 	}, width)
 }
 

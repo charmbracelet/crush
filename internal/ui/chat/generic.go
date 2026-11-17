@@ -56,7 +56,7 @@ func (g *GenericToolRenderContext) RenderTool(sty *styles.Styles, width int, opt
 		name = title
 	}
 
-	if opts.IsPending() {
+	if opts.IsStreamingInput() {
 		return pendingTool(sty, name, opts.Anim, opts.Compact)
 	}
 

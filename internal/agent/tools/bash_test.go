@@ -36,6 +36,8 @@ func (m *mockBashPermissionService) GrantPersistent(req permission.PermissionReq
 
 func (m *mockBashPermissionService) AutoApproveSession(sessionID string) {}
 
+func (m *mockBashPermissionService) InheritAutoApproval(parentSessionID, childSessionID string) {}
+
 func (m *mockBashPermissionService) ActiveRequests() []permission.PermissionRequest {
 	return nil
 }
@@ -125,6 +127,8 @@ func (m *recordingPermissionService) GrantPersistent(req permission.PermissionRe
 }
 
 func (m *recordingPermissionService) AutoApproveSession(sessionID string) {}
+
+func (m *recordingPermissionService) InheritAutoApproval(parentSessionID, childSessionID string) {}
 
 func (m *recordingPermissionService) ActiveRequests() []permission.PermissionRequest {
 	return nil

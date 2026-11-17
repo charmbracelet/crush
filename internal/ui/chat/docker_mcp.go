@@ -113,7 +113,7 @@ func (d *DockerMCPToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 		toolParams = append(toolParams, k, extraArgs[k])
 	}
 
-	if opts.IsPending() {
+	if opts.IsStreamingInput() {
 		return pendingTool(sty, d.formatToolName(sty, tool), opts.Anim, false)
 	}
 
@@ -217,7 +217,7 @@ func (d *DockerMCPToolRenderContext) makeHeader(sty *styles.Styles, tool string,
 	}
 
 	icon := toolIcon(sty, opts.Status)
-	if opts.IsPending() {
+	if opts.IsStreamingInput() {
 		icon = sty.Tool.IconPending.Render()
 	}
 	prefix := fmt.Sprintf("%s %s ", icon, d.formatToolName(sty, tool))

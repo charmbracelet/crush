@@ -8,6 +8,14 @@ import (
 	"database/sql"
 )
 
+type DisabledSkill struct {
+	Name string `json:"name"`
+}
+
+type EnabledSkill struct {
+	Name string `json:"name"`
+}
+
 type File struct {
 	ID        string `json:"id"`
 	SessionID string `json:"session_id"`

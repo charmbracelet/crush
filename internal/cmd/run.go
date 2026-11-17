@@ -101,7 +101,9 @@ crush run --continue "Follow up on your last response"
 			event.SetContinueLastSession(true)
 		}
 
-		if useClientServer() {
+		// Only attach to a server that is already running; a one-shot
+		// run should not leave a detached server behind.
+		if useClientServer() && serverRunning(ctx) {
 			c, ws, cleanup, err := connectToServer(cmd)
 			if err != nil {
 				return err
@@ -294,6 +296,13 @@ func runNonInteractive(
 	events, err := c.SubscribeEvents(ctx, ws.ID)
 	if err != nil {
 		return fmt.Errorf("failed to subscribe to events: %w", err)
+	}
+
+	// Report the session as viewed, so the server does not cancel this
+	// run when another client viewing it leaves. It needs the event
+	// stream above to be attached.
+	if err := c.SetCurrentSession(ctx, ws.ID, sess.ID); err != nil {
+		slog.Warn("Failed to report current session", "session_id", sess.ID, "error", err)
 	}
 
 	// The server runs the prompt for the workspace, not for this request,

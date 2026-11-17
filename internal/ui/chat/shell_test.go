@@ -118,6 +118,41 @@ func TestCompletedShellItemShowsHeadAndAccurateCount(t *testing.T) {
 	require.Equal(t, "… 2 more lines", lines[11])
 }
 
+func TestCompletedShellItemPreservesCRLFOutput(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	item := NewPendingShellItem(&sty, "curl -D - -o /dev/null example.com")
+	item.Complete("HTTP/1.1 200 OK\r\n"+
+		strings.Repeat("X-Example: value\r\n", 9)+
+		"Content-Length: 0\r\n\r\n", 0)
+
+	collapsed := ansi.Strip(item.Render(80))
+	require.Contains(t, collapsed, "HTTP/1.1 200 OK")
+	require.Equal(t, 9, strings.Count(collapsed, "X-Example: value"))
+	require.Contains(t, collapsed, "… 1 more lines")
+	require.NotContains(t, collapsed, "Content-Length: 0")
+
+	require.True(t, item.ToggleExpanded())
+	expanded := ansi.Strip(item.Render(80))
+	require.Contains(t, expanded, "HTTP/1.1 200 OK")
+	require.Equal(t, 9, strings.Count(expanded, "X-Example: value"))
+	require.Contains(t, expanded, "Content-Length: 0")
+	require.NotContains(t, expanded, "more lines")
+}
+
+func TestShellItemPreservesBareCarriageReturnBeforeErase(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	item := NewShellItem(&sty, "printf", "first\r\nprogress\r\x1b[K\nlast\r\n", 0)
+
+	rendered := ansi.Strip(item.Render(80))
+	require.Contains(t, rendered, "first")
+	require.NotContains(t, rendered, "progress")
+	require.Contains(t, rendered, "last")
+}
+
 func TestShellOutputWindows(t *testing.T) {
 	t.Parallel()
 

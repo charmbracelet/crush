@@ -971,6 +971,22 @@ func (w *ClientWorkspace) MCPSetServerConfigDisabled(ctx context.Context, name s
 	return w.client.SetMCPServerConfigDisabled(ctx, w.workspaceID(), name, disabled)
 }
 
+func (w *ClientWorkspace) SkillsDisabled(ctx context.Context) ([]string, error) {
+	return w.client.SkillsDisabled(ctx, w.workspaceID())
+}
+
+func (w *ClientWorkspace) SkillSetDisabled(ctx context.Context, name string, disabled bool) error {
+	return w.client.SetSkillDisabled(ctx, w.workspaceID(), name, disabled)
+}
+
+func (w *ClientWorkspace) SkillsEnabled(ctx context.Context) ([]string, error) {
+	return w.client.SkillsEnabled(ctx, w.workspaceID())
+}
+
+func (w *ClientWorkspace) SkillSetConfigDisabled(ctx context.Context, name string, disabled bool) error {
+	return w.client.SetSkillConfigDisabled(ctx, w.workspaceID(), name, disabled)
+}
+
 func (w *ClientWorkspace) MCPStartServer(ctx context.Context, name string) error {
 	return w.client.StartMCPServer(ctx, w.workspaceID(), name)
 }
@@ -1567,6 +1583,7 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 			SessionTitle: e.Payload.SessionTitle,
 			RunID:        e.Payload.RunID,
 			Type:         notify.Type(e.Payload.Type),
+			ProviderID:   e.Payload.ProviderID,
 			AWSSOCommand: e.Payload.AWSSOCommand,
 			AWSSOURL:     e.Payload.AWSSOURL,
 		}
@@ -1730,20 +1747,22 @@ func protoToMessage(m proto.Message) message.Message {
 			})
 		case proto.ToolCall:
 			msg.Parts = append(msg.Parts, message.ToolCall{
-				ID:       v.ID,
-				Name:     v.Name,
-				Input:    v.Input,
-				Finished: v.Finished,
+				ID:          v.ID,
+				Name:        v.Name,
+				Input:       v.Input,
+				Finished:    v.Finished,
+				StartedAtMs: v.StartedAtMs,
 			})
 		case proto.ToolResult:
 			msg.Parts = append(msg.Parts, message.ToolResult{
-				ToolCallID: v.ToolCallID,
-				Name:       v.Name,
-				Content:    v.Content,
-				Data:       v.Data,
-				MIMEType:   v.MIMEType,
-				Metadata:   v.Metadata,
-				IsError:    v.IsError,
+				ToolCallID:   v.ToolCallID,
+				Name:         v.Name,
+				Content:      v.Content,
+				Data:         v.Data,
+				MIMEType:     v.MIMEType,
+				Metadata:     v.Metadata,
+				IsError:      v.IsError,
+				FinishedAtMs: v.FinishedAtMs,
 			})
 		case proto.Finish:
 			msg.Parts = append(msg.Parts, message.Finish{

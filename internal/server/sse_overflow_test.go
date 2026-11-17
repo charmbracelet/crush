@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -55,11 +56,12 @@ func TestE2E_StalledStreamClosedOnOverflow(t *testing.T) {
 	h.waitForAttached(t, 1)
 	h.setCurrentSession(t, ctx, h.workspace.ID, cid, "s-overflow")
 
-	// Overflow pubsub's 4096-event buffer for the stalled subscriber.
-	for range 4096 + 64 {
+	// Overflow pubsub's 4096-event buffer for the stalled subscriber. Each
+	// event updates a different message, so the broker cannot coalesce them.
+	for i := range 4096 + 64 {
 		h.app.SendEvent(pubsub.Event[message.Message]{
 			Type:    pubsub.UpdatedEvent,
-			Payload: message.Message{ID: uuid.NewString(), SessionID: "s-overflow", Role: message.Assistant},
+			Payload: message.Message{ID: fmt.Sprintf("m-%d", i), SessionID: "s-overflow", Role: message.Assistant},
 		})
 	}
 	close(resume)

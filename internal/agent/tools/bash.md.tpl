@@ -21,6 +21,7 @@ Common shell builtins and core utils available on Windows.
 - Chain with ';' or '&&', avoid newlines except in quoted strings
 - Each command runs in independent shell (no state persistence between calls)
 - Prefer absolute paths over 'cd' (use 'cd' only if user explicitly requests)
+- Run privileged commands with plain `sudo`, never `sudo -n`: the user can approve with Touch ID or another PAM method, and without one sudo fails at once ("a terminal is required") instead of hanging. Each command authenticates separately
 {{- if .RgAvailable }}
 - Ripgrep (`rg`) is available; prefer it over `grep` for faster, more intuitive searching
 {{- end }}

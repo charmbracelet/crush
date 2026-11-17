@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -1106,6 +1107,60 @@ func TestPreparePrompt_ResultBeforeAssistant(t *testing.T) {
 		}
 	}
 	require.Equal(t, 1, resultCount, "result must be emitted exactly once")
+}
+
+// A transcript can hold two results for one call, and providers accept one.
+// The usual cause is an "interrupted" error settled while the call still ran,
+// then its real result. Another process sharing the database can store them
+// the other way round, so a stored error never shadows a later result.
+func TestPreparePrompt_DuplicateResultsKeepTheRealOne(t *testing.T) {
+	t.Parallel()
+	stale := message.ToolResult{ToolCallID: "call_X", Name: "bash", Content: interruptedToolCallResult, IsError: true}
+	output := message.ToolResult{ToolCallID: "call_X", Name: "bash", Content: "real output"}
+	failure := message.ToolResult{ToolCallID: "call_X", Name: "bash", Content: "exit status 1", IsError: true}
+	for name, tc := range map[string]struct {
+		stored []message.ToolResult
+		want   fantasy.ToolResultOutputContent
+	}{
+		"stale then output":  {[]message.ToolResult{stale, output}, fantasy.ToolResultOutputContentText{Text: "real output"}},
+		"output then stale":  {[]message.ToolResult{output, stale}, fantasy.ToolResultOutputContentText{Text: "real output"}},
+		"stale then failure": {[]message.ToolResult{stale, failure}, fantasy.ToolResultOutputContentError{Error: errors.New("exit status 1")}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			env := testEnv(t)
+			agent := testSessionAgent(env, nil, nil, "test prompt").(*sessionAgent)
+			ctx := t.Context()
+			sess, err := env.sessions.Create(ctx, "test")
+			require.NoError(t, err)
+
+			_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+				Role:  message.Assistant,
+				Parts: []message.ContentPart{message.ToolCall{ID: "call_X", Name: "bash", Input: `{}`, Finished: true}},
+			})
+			require.NoError(t, err)
+			for _, tr := range tc.stored {
+				_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{Role: message.Tool, Parts: []message.ContentPart{tr}})
+				require.NoError(t, err)
+			}
+
+			msgs, err := env.messages.List(ctx, sess.ID)
+			require.NoError(t, err)
+			history, _ := agent.preparePrompt(msgs, false, false)
+			requireToolCallAdjacency(t, history)
+
+			var sent []fantasy.ToolResultPart
+			for _, msg := range history {
+				for _, part := range msg.Content {
+					if tr, ok := fantasy.AsMessagePart[fantasy.ToolResultPart](part); ok {
+						sent = append(sent, tr)
+					}
+				}
+			}
+			require.Len(t, sent, 1, "each call must get exactly one result")
+			require.Equal(t, tc.want, sent[0].Output)
+		})
+	}
 }
 
 func TestPreparePrompt_BundledResultsAcrossAssistants(t *testing.T) {

@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -19,17 +18,16 @@ func TestRespawnKeepsPreviousServerOutput(t *testing.T) {
 	sb := newSandbox(t, crushBinary(t), "CRUSH_CLIENT_SERVER=1")
 	t.Cleanup(func() { shutdownServer(t, sb.socket) })
 
-	// With no provider configured, `crush run` stops once it has a
-	// workspace on a server.
+	// `crush logout` connects to the server and, unlike `crush run`,
+	// spawns one when none is running.
 	run := func() {
 		t.Helper()
 		ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 		defer cancel()
-		c := exec.CommandContext(ctx, sb.bin, "--host", sb.host, "--cwd", sb.project, "run", "hi")
+		c := exec.CommandContext(ctx, sb.bin, "--host", sb.host, "--cwd", sb.project, "logout", "hyper")
 		c.Env = sb.env
 		out, _ := c.CombinedOutput()
-		require.Contains(t, strings.Join(strings.Fields(strings.ToLower(string(out))), " "),
-			"no providers configured", "client output:\n%s", out)
+		require.NoError(t, pingHealth(sb.socket), "a server must be running; client output:\n%s", out)
 	}
 
 	run()

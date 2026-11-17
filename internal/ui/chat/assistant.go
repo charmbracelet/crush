@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -679,14 +680,78 @@ func renderPlanBox(style lipgloss.Style, content string, width int, closed bool)
 		style = style.BorderBottom(false)
 	}
 	lines := strings.Split(strings.TrimSpace(content), "\n")
+	needsCellLayout := false
 	for i, line := range lines {
-		lines[i] = ansi.Truncate(line, innerWidth, "")
+		graphemeWidth := ansi.StringWidth(line)
+		needsCellLayout = needsCellLayout || graphemeWidth != ansi.WcWidth.StringWidth(line)
+		if graphemeWidth > innerWidth {
+			// Keep the existing clipping of intentionally overlong lines.
+			lines[i] = ansi.WcWidth.Truncate(line, innerWidth, "")
+		}
 	}
-	// In lipgloss v2 Width is the total box width: border and padding live
-	// inside it, so the content area ends up Width minus the frame. Glamour
-	// already wrapped at innerWidth (width minus the frame), so size the box
-	// to the full width or every line gets re-wrapped narrower.
-	return style.Width(max(1, width)).Render(strings.Join(lines, "\n"))
+	content = strings.Join(lines, "\n")
+	if !needsCellLayout {
+		return style.Width(max(1, width)).Render(content)
+	}
+
+	// Reflow by the UI's cell widths before drawing. Limit the temporary
+	// buffer to the text's actual width, rather than the entire card.
+	text, textWidth, textHeight := wrapPlanText(content, innerWidth)
+	canvas := uv.NewScreenBuffer(max(1, textWidth), textHeight)
+	uv.NewStyledString(text).Draw(canvas, canvas.Bounds())
+	frame := style.Width(max(1, width)).Render(strings.Repeat("\n", textHeight-1))
+	frameLines := strings.Split(frame, "\n")
+	frameWidth := lipgloss.Width(frame)
+	left := style.GetBorderLeftSize() + style.GetPaddingLeft()
+	top := style.GetBorderTopSize() + style.GetPaddingTop()
+	for i, cells := range canvas.Lines {
+		for j := range cells {
+			if cells[j].Width > 0 && cells[j].Style.Fg == nil {
+				cells[j].Style.Fg = style.GetForeground()
+			}
+		}
+		row := frameLines[top+i]
+		frameLines[top+i] = ansi.Cut(row, 0, left) + cells.Render() +
+			strings.Repeat(" ", innerWidth-canvas.Width()) +
+			ansi.Cut(row, left+innerWidth, frameWidth)
+	}
+	return strings.Join(frameLines, "\n")
+}
+
+// wrapPlanText keeps ANSI sequences intact while wrapping printable clusters
+// with the same width policy as the UI screen. A cluster wider than the whole
+// content area is omitted without dropping any following text.
+func wrapPlanText(content string, width int) (string, int, int) {
+	p := ansi.GetParser()
+	defer ansi.PutParser(p)
+	var out strings.Builder
+	var state byte
+	x, maxWidth, height := 0, 0, 1
+	for len(content) > 0 {
+		seq, cellWidth, n, nextState := ansi.DecodeSequenceWc(content, state, p)
+		// Padding past the right edge does not need a new display row.
+		if cellWidth <= width && (seq != " " || x != width) {
+			if cellWidth > 0 && x+cellWidth > width {
+				out.WriteByte('\n')
+				x = 0
+				height++
+			}
+			out.WriteString(seq)
+			switch seq {
+			case "\n":
+				x = 0
+				height++
+			case "\r":
+				x = 0
+			default:
+				x += cellWidth
+				maxWidth = max(maxWidth, x)
+			}
+		}
+		state = nextState
+		content = content[n:]
+	}
+	return out.String(), maxWidth, height
 }
 
 // planBoxLayout returns a style and content width whose combined horizontal

@@ -293,3 +293,98 @@ func colorsEqual(left, right color.Color) bool {
 	rightR, rightG, rightB, rightA := right.RGBA()
 	return [4]uint32{leftR, leftG, leftB, leftA} == [4]uint32{rightR, rightG, rightB, rightA}
 }
+
+func TestAssistantMessageItem_PlanCardBordersAlign(t *testing.T) {
+	// Glamour registers code-block styles globally, so keep this matrix serial.
+
+	for name, content := range map[string]string{
+		"prose":            strings.Repeat("A plan with `inline code`, **bold**, and [a link](https://example.com). ", 8),
+		"long_code":        "```python\n" + strings.Repeat("long_argument_", 20) + "\n```",
+		"tabs":             "```python\n\tprint(\"hello\")\n\t\tprint(\"world\")\n```",
+		"arrow":            strings.Repeat("User flow: count → prefix prompt. ", 8),
+		"dash":             strings.Repeat("User flow: count — prefix prompt. ", 8),
+		"cjk":              strings.Repeat("User flow: count 中文 prefix prompt. ", 8),
+		"emoji":            "👩‍💻",
+		"cancelled_widths": "```text\n👩‍💻©️©️Z\n```",
+		"cancelled_faces":  "```text\n👩‍💻☺️☺️Z\n```",
+		"empty":            "",
+		"oversize_only":    "👨‍👩‍👧‍👦",
+		"long_link":        "[L👩‍💻 L👩‍💻 L👩‍💻](https://example.com)",
+		"family_emoji":     "👨‍👩‍👧‍👦Z",
+		"combining":        "e\u0301Z",
+		"narrow_emoji":     "123👩‍💻Z",
+		"boundary_emoji":   "1234567890123👩‍💻Z",
+	} {
+		for _, streaming := range []bool{false, true} {
+			for _, width := range []int{8, 12, 13, 16, 20, 24, 72, 128} {
+				t.Run(fmt.Sprintf("%s_streaming_%t_width_%d", name, streaming, width), func(t *testing.T) {
+					sty := styles.CharmtonePantera()
+					msg := &message.Message{
+						ID:   "aligned-plan",
+						Role: message.Assistant,
+						Parts: []message.ContentPart{
+							message.TextContent{Text: "<!-- CRUSH_PLAN_START -->\n\n" + content},
+						},
+					}
+					if !streaming {
+						msg.Parts[0] = message.TextContent{Text: content + "\n\n<!-- CRUSH_PLAN_READY -->"}
+						msg.Parts = append(msg.Parts, message.Finish{Reason: message.FinishReasonEndTurn, Time: 1})
+					}
+					item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
+					item.SetPlanAgent(true)
+					rendered := item.RawRender(width)
+					if name == "family_emoji" || name == "oversize_only" {
+						_, inner := planBoxLayout(sty.Messages.PlanBox, cappedMessageWidth(width))
+						if inner >= 8 {
+							require.Contains(t, rendered, "👨‍👩‍👧‍👦")
+						} else {
+							require.NotContains(t, rendered, "👨‍👩‍👧‍👦")
+						}
+					}
+					if name == "boundary_emoji" && width >= 24 {
+						require.Contains(t, rendered, "Z")
+						require.Contains(t, rendered, "👩‍💻")
+					}
+					scr := uv.NewScreenBuffer(cappedMessageWidth(width), lipgloss.Height(rendered))
+					uv.NewStyledString(rendered).Draw(scr, scr.Bounds())
+					if name == "family_emoji" || name == "combining" || name == "narrow_emoji" {
+						var screenText strings.Builder
+						for _, row := range scr.Lines {
+							for _, cell := range row {
+								screenText.WriteString(cell.Content)
+							}
+						}
+						require.Contains(t, screenText.String(), "Z")
+					}
+					linkedLabels := 0
+					for row, line := range scr.Lines {
+						for _, cell := range line {
+							if name == "long_link" && cell.Content == "L" {
+								require.Equal(t, "https://example.com", cell.Link.URL)
+								linkedLabels++
+							}
+						}
+
+						want := "│"
+						if row == 0 {
+							want = "╮"
+						}
+						if row == len(scr.Lines)-1 && !streaming {
+							want = "╯"
+						}
+						require.Equal(t, want, line[len(line)-1].Content,
+							"right border must stay in the last column at row %d", row)
+						require.Empty(t, line[len(line)-1].Link.URL, "links must not extend onto the border")
+					}
+					if name == "long_link" {
+						require.Equal(t, 3, linkedLabels)
+					}
+					for row, line := range strings.Split(rendered, "\n") {
+						require.Equal(t, cappedMessageWidth(width), ansi.WcWidth.StringWidth(line),
+							"plan row %d must fit the UI screen's width method", row)
+					}
+				})
+			}
+		}
+	}
+}

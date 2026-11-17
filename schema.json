@@ -143,6 +143,34 @@
         "display"
       ]
     },
+    "ExperimentalOptions": {
+      "properties": {
+        "client_server": {
+          "type": "boolean",
+          "description": "Run the agent in a background server that the TUI attaches to. Overridden by CRUSH_CLIENT_SERVER.",
+          "default": false
+        },
+        "server_ready_timeout": {
+          "type": "integer",
+          "description": "Seconds a client waits for the server to become ready. Overridden by CRUSH_SERVER_READY_TIMEOUT.",
+          "examples": [
+            30
+          ]
+        },
+        "server_idle_timeout": {
+          "type": "integer",
+          "description": "Seconds the server stays alive after its last workspace closes. 0 shuts it down at once. Overridden by CRUSH_SERVER_IDLE_TIMEOUT.",
+          "default": 60
+        },
+        "server_detach_grace": {
+          "type": "integer",
+          "description": "Seconds a workspace survives after a client's connection drops. 0 tears it down at once. Overridden by CRUSH_SERVER_DETACH_GRACE.",
+          "default": 10
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
     "HookConfig": {
       "properties": {
         "name": {
@@ -695,6 +723,10 @@
         "prompts": {
           "$ref": "#/$defs/PromptPaths",
           "description": "Files that replace Crush's built-in prompts, keyed by prompt name. A replacement is used verbatim, so anything the built-in template injected (skills, context files, LSP status) is lost unless the replacement asks for it too."
+        },
+        "experimental": {
+          "$ref": "#/$defs/ExperimentalOptions",
+          "description": "Experimental features. They are unfinished and may change or be removed in any release."
         }
       },
       "additionalProperties": false,

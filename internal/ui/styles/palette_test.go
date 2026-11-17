@@ -26,6 +26,19 @@ func TestPaletteFromOpts_RoundTrip(t *testing.T) {
 	require.Equal(t, colorToHex(opts.fgBase), colorToHex(recovered.fgBase))
 }
 
+func TestPalette_DestructiveSubtle(t *testing.T) {
+	setTestThemeDirs(t, []string{t.TempDir()})
+	p := Palette{DestructiveSubtle: "#112233"}
+
+	// The token should survive a palette round trip like every other color.
+	recovered := PaletteFromOpts(p.ToQuickStyleOpts(charmtoneOpts()))
+	require.Equal(t, "#112233", recovered.DestructiveSubtle)
+
+	s, err := LoadPaletteTheme("gruvbox-dark", p)
+	require.NoError(t, err)
+	require.Equal(t, "#112233", colorToHex(s.Status.ModeBannerSysadmin.GetBackground()))
+}
+
 func TestPaletteFromOpts_GruvboxDark(t *testing.T) {
 	t.Parallel()
 	opts := gruvboxDarkOpts()

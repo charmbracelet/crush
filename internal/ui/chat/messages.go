@@ -483,7 +483,9 @@ func formatHypercreditSavings(v float64) string {
 //
 // For assistant messages with tool calls, pass a toolResults map to link results.
 // Use BuildToolResultMap to create this map from all messages in a session.
-func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults map[string]message.ToolResult, workingDir string) []MessageItem {
+// hideThinking suppresses the reasoning section of assistant messages without
+// changing the model's thinking configuration.
+func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults map[string]message.ToolResult, workingDir string, hideThinking bool) []MessageItem {
 	switch msg.Role {
 	case message.User:
 		if msg.Content().Hidden {
@@ -508,7 +510,7 @@ func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults m
 	case message.Assistant:
 		var items []MessageItem
 		if ShouldRenderAssistantMessage(msg) {
-			items = append(items, NewAssistantMessageItem(sty, msg))
+			items = append(items, newAssistantMessageItem(sty, msg, hideThinking))
 		}
 		for _, tc := range msg.ToolCalls() {
 			var result *message.ToolResult

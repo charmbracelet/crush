@@ -226,6 +226,13 @@ func wcagLuminance(c color.Color) float64 {
 func quickStyle(o quickStyleOpts) Styles {
 	o.deriveDiffColors()
 
+	// destructive_subtle is optional: only Charmtone names a softer hue, and
+	// a theme that leaves it unset should still get a banner body instead of
+	// a nil fill that renders as an empty line.
+	if o.destructiveSubtle == nil {
+		o.destructiveSubtle = o.destructive
+	}
+
 	var (
 		base   = lipgloss.NewStyle().Foreground(o.fgBase)
 		muted  = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)

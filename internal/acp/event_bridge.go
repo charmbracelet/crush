@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"log/slog"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -15,6 +16,7 @@ import (
 	notify "github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/filepathext"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/x/ansi"
@@ -26,6 +28,43 @@ import (
 // full-turn snapshots rather than per-token deltas, spacing chunks
 // out makes output appear progressive rather than bursty.
 const chunkDeliveryDelay = 50 * time.Millisecond
+
+// absPather resolves a relative tool path into the absolute form the spec
+// requires on the wire (overview.md:160). Both the live event bridge and the
+// session/load replay need it, so both satisfy this.
+type absPather interface {
+	absPath(path string) string
+}
+
+// workingDir returns the directory relative tool paths resolve against. The
+// spec requires every file path on the wire to be absolute (overview.md:160),
+// and the tools resolve their own paths against this same directory, so this
+// is the value a relative input must be joined to.
+func (b *eventBridge) workingDir() string {
+	if b.app == nil {
+		return ""
+	}
+	store := b.app.Store()
+	if store == nil {
+		return ""
+	}
+	defer func() { _ = recover() }()
+	return store.WorkingDir()
+}
+
+// absPath resolves a path from a tool's input into the absolute form the spec
+// requires on the wire. A path that cannot be resolved is returned unchanged
+// rather than dropped, so a client still sees something rather than nothing.
+func (b *eventBridge) absPath(path string) string {
+	if path == "" || filepath.IsAbs(path) {
+		return path
+	}
+	abs, err := filepath.Abs(filepathext.SmartJoin(b.workingDir(), path))
+	if err != nil {
+		return path
+	}
+	return abs
+}
 
 // eventBridge translates Crush agent events into ACP session updates.
 type eventBridge struct {
@@ -279,7 +318,7 @@ func (b *eventBridge) streamToolResults(ctx context.Context, m message.Message) 
 		if text != "" {
 			contents = append(contents, acp.ToolContent(acp.TextBlock(text)))
 		}
-		if diff := diffContentFor(tr.Name, input, tr); diff != nil {
+		if diff := diffContentFor(b, tr.Name, input, tr); diff != nil {
 			contents = append(contents, *diff)
 		}
 		opts := []acp.ToolCallUpdateOpt{acp.WithUpdateStatus(status)}
@@ -467,7 +506,7 @@ func (b *eventBridge) streamToolCalls(ctx context.Context, m message.Message) {
 			acp.WithStartKind(toolKindFor(a.name)),
 			acp.WithStartRawInput(toolRawInput(a.input)),
 		}
-		if locs := toolLocations(a.input); len(locs) > 0 {
+		if locs := b.toolLocations(a.input); len(locs) > 0 {
 			opts = append(opts, acp.WithStartLocations(locs))
 		}
 		if a.input != "" {
@@ -530,7 +569,7 @@ func planUpdateFor(tr message.ToolResult) *acp.SessionUpdatePlan {
 // results (edit/multiedit) from their old/new content metadata. Returns nil
 // when no diff data is available. An empty old content means the file was
 // created, which the protocol represents as a diff without oldText.
-func diffContentFor(name, input string, tr message.ToolResult) *acp.ToolCallContent {
+func diffContentFor(b absPather, name, input string, tr message.ToolResult) *acp.ToolCallContent {
 	if tr.IsError || (name != "edit" && name != "multiedit") {
 		return nil
 	}
@@ -547,11 +586,14 @@ func diffContentFor(name, input string, tr message.ToolResult) *acp.ToolCallCont
 	if err := json.Unmarshal([]byte(input), &params); err != nil || params.FilePath == "" {
 		return nil
 	}
+	// The diff path must be absolute like every other path on the wire
+	// (overview.md:160). The tool resolves against the same working directory.
+	path := b.absPath(params.FilePath)
 	if meta.OldContent == "" {
-		content := acp.ToolDiffContent(params.FilePath, meta.NewContent)
+		content := acp.ToolDiffContent(path, meta.NewContent)
 		return &content
 	}
-	content := acp.ToolDiffContent(params.FilePath, meta.NewContent, meta.OldContent)
+	content := acp.ToolDiffContent(path, meta.NewContent, meta.OldContent)
 	return &content
 }
 
@@ -583,8 +625,10 @@ func toolPrimaryArg(input string) string {
 }
 
 // toolLocations extracts file paths from a tool input JSON object as ACP
-// tool-call locations so clients can follow the agent across files.
-func toolLocations(input string) []acp.ToolCallLocation {
+// tool-call locations so clients can follow the agent across files. Paths are
+// resolved to their absolute form, which the spec requires on the wire
+// (overview.md:160).
+func (b *eventBridge) toolLocations(input string) []acp.ToolCallLocation {
 	var obj map[string]any
 	if err := json.Unmarshal([]byte(input), &obj); err != nil {
 		return nil
@@ -592,7 +636,7 @@ func toolLocations(input string) []acp.ToolCallLocation {
 	var locs []acp.ToolCallLocation
 	for _, key := range []string{"path", "file_path", "notebook_path"} {
 		if v, ok := obj[key].(string); ok && v != "" {
-			locs = append(locs, acp.ToolCallLocation{Path: v})
+			locs = append(locs, acp.ToolCallLocation{Path: b.absPath(v)})
 		}
 	}
 	return locs

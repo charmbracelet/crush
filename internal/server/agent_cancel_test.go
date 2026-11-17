@@ -96,8 +96,14 @@ func (s *runCoordinator) SetMainAgent(agentName string) error {
 }
 
 func (s *runCoordinator) MainAgent() string {
-	name, _ := s.lastMainAgentSet.Load().(string)
-	return name
+	if name, ok := s.lastMainAgentSet.Load().(string); ok && name != "" {
+		return name
+	}
+	return "coder"
+}
+
+func (s *runCoordinator) MainAgentName() string {
+	return s.MainAgent()
 }
 
 func (s *runCoordinator) capturedCtx() context.Context {

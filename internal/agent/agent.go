@@ -1886,6 +1886,8 @@ If not, please feel free to ignore. Again do not mention this message to the use
 // Connections are process-global and left untouched; only the tool list
 // changes.
 func (a *sessionAgent) filterDisabledMCPTools(ctx context.Context, toolList []fantasy.AgentTool) []fantasy.AgentTool {
+	toolList = filterOtherSessionsMCPTools(ctx, toolList)
+
 	disabledServers, err := a.sessions.MCPDisabledServers(ctx)
 	if err != nil {
 		slog.Error("Failed to list disabled MCP servers", "error", err)
@@ -1906,6 +1908,35 @@ func (a *sessionAgent) filterDisabledMCPTools(ctx context.Context, toolList []fa
 			}
 		}
 		filtered = append(filtered, t)
+	}
+	return filtered
+}
+
+// filterOtherSessionsMCPTools drops MCP tools belonging to an ACP session other
+// than the one making this call.
+//
+// ACP-injected MCP servers are registered in a process-wide registry under a
+// name that embeds the owning session (mcp.ACPServerName), because every
+// registry in the MCP package is keyed by name alone. The tool palette, though,
+// is built once for all sessions, so without this filter a run could offer a
+// tool backed by another session's connection — and invoking it would execute
+// against that connection rather than its own.
+//
+// A tool whose server is not an ACP server is kept: config-file MCP servers are
+// shared by design and belong to no session.
+func filterOtherSessionsMCPTools(ctx context.Context, toolList []fantasy.AgentTool) []fantasy.AgentTool {
+	sessionID := tools.GetSessionFromContext(ctx)
+	filtered := make([]fantasy.AgentTool, 0, len(toolList))
+	for _, t := range toolList {
+		mcpTool, ok := t.(*tools.Tool)
+		if !ok {
+			filtered = append(filtered, t)
+			continue
+		}
+		owner, isACP := mcp.ACPSessionOf(mcpTool.MCP())
+		if !isACP || owner == sessionID {
+			filtered = append(filtered, t)
+		}
 	}
 	return filtered
 }

@@ -82,7 +82,7 @@ Status legend: ✅ done · ⚠️ partial/stub · ❌ not implemented.
 
 | Method | Level | Crush status |
 |---|---|---|
-| `session/new` | MUST | ✅ creates SQLite session, returns `sessionId`, `modes` and `configOptions`. The `cwd` is validated against the process working directory (mismatch is rejected). `additionalDirectories` is ignored: the capability is not advertised (§3.14, O23) |
+| `session/new` | MUST | ✅ creates SQLite session, returns `sessionId`, `modes` and `configOptions`. The `cwd` is validated against the process working directory (mismatch is rejected). `mcpServers` are connected for this session only (§3.12). `additionalDirectories` is ignored: the capability is not advertised (§3.14, O23) |
 | `session/prompt` | MUST | ✅ runs coordinator, returns `StopReason` |
 | `session/cancel` (notification) | MUST | ✅ cancels coordinator |
 | `session/update` (notifications) | MUST | ✅ message/thought/tool_call/tool_call_update/usage emitted (see §3.3) |
@@ -91,8 +91,8 @@ Status legend: ✅ done · ⚠️ partial/stub · ❌ not implemented.
 | `session/load` | OPTIONAL (advertise `loadSession`) | ✅ full-history replay (R7): user/agent text, `agent_thought_chunk`, `tool_call` starts (kind/title/rawInput), tool results with terminal status + content + `diff`, and `plan` updates. Synthesizes a start when a result has no matching call. ✅ Returns `modes` and `configOptions` like `session/resume` (O26/G7), validates `req.Cwd`, and answers `-32002` for an unknown session. `req.AdditionalDirectories` is not applied: the capability is not advertised |
 | `session/resume` | OPTIONAL (advertise `sessionCapabilities.resume`) | ✅ implemented (Option B, §6.2 O5): returns mode/config state without replaying history; capability advertised. ✅ Validates `req.Cwd` and answers `-32002` for an unknown session (O22/O18). `req.AdditionalDirectories` is not applied |
 | `session/delete` | OPTIONAL (advertise `sessionCapabilities.delete`) | ✅ implemented + advertised (`UnstableDeleteSession`) and **idempotent** (O21): a missing session is treated as `sql.ErrNoRows` and succeeds silently per `session-delete.md:85`, while a real store failure still surfaces as an internal error. Deleting an active session is implementation-defined |
-| `session/set_mode` | OPTIONAL (legacy; prefer config options; spec notes modes will be removed in a future version) | ✅ echoes `modeId` + emits `current_mode_update`, records the selection per session, and rejects an unknown or non-selectable `modeId` with `-32602`. `currentModeId` is derived from the session's selection through `defaultMode`/`currentMode` and is always one of `availableModes` (`session-modes.md:58-64`); `config.AgentTask` is excluded because it is a subagent profile. ⚠️ Still advisory: no real mode switch happens (O25/OQ-3) |
-| `session/set_config_option` | OPTIONAL | ✅ applies thinking/model/mode and returns the complete `configOptions` list (spec MUST, `session-config-options.md:304`). Spec: every option's `currentValue` is the default the Agent operates with (`:245`). ✅ Unknown `configId`/value answers `-32602` via `validateConfigOption` (`error.md:50`); `SetSessionMode` likewise rejects an unknown `modeId` with `-32602`. ✅ Answers `-32002` for an unknown session |
+| `session/set_mode` | OPTIONAL (legacy; prefer config options; spec notes modes will be removed in a future version) | ✅ **switches for real** (2026-11-17): the requested id is resolved against an ACP-only four-mode enum and applied by calling `SetMainAgent` for the agent half and `SetPermissionMode` for the permission half. Emits `current_mode_update`. An unknown id is `-32602`; `coder` is accepted as a legacy alias for `code` |
+| `session/set_config_option` | OPTIONAL | ✅ applies thinking/model/mode and returns the complete `configOptions` list (spec MUST, `session-config-options.md:304`). Every option's `currentValue` is read from live state, so it is the value the Agent operates with (`:245`). ✅ Unknown `configId`/value answers `-32602` via `validateConfigOption` (`error.md:50`). ✅ Answers `-32002` for an unknown session |
 
 ### 3.3 Prompt turn & streaming (`session/update` types)
 
@@ -261,35 +261,52 @@ The spec makes **stdio a MUST baseline for every Agent**; HTTP and SSE are optio
 `McpServer.Stdio` "All Agents MUST support this transport"
 (`types_gen.go:2716-2719`).
 
-❌ **NOT DONE — the plan previously claimed this was met by Option B; it was not.**
-Re-audited 2026-11-13: `NewSession`/`LoadSession`/`ResumeSession` never read
-`req.McpServers`; no `mcp.Initialize` call exists in `internal/acp` (only the
-browser-client `agent/tools/mcp` package, wired at app startup). Crush connects
-the MCP servers it knows from config at startup, already-initialised, so a
-client-supplied server list is silently dropped. This is the one remaining
-MUST-level gap. `McpCapabilities` is advertised empty, which is consistent
-(no HTTP/SSE), but the stdio baseline is not honoured for
-client-supplied servers.
+✅ **DONE (2026-11-17).** `NewSession`, `LoadSession` and `ResumeSession` now
+read `req.McpServers` and connect each stdio server through
+`mcp.InitializeSingleWithConfig`, a new entry point that takes a
+`config.MCPConfig` directly instead of requiring a store entry.
 
-**Shape of the fix** (verified against the packages, not guessed):
-`internal/agent/tools/mcp` already has everything needed — `createSession`
-takes a `config.MCPConfig` (which is exactly `command`/`args`/`env`/`type`),
-`registerSessionTools` writes the tools into the global registry that
-`tools.GetMCPTools` iterates at the start of every turn, and `InitializeSingle`
-already wires both. The missing piece is a session-scoped lifecycle: today
-the registry is keyed by server *name* only and `session.Service` has no MCP
-ownership, so two ACP sessions supplying different servers with the same
-name would collide. Options: (a) name-mangle with the session id as the
-registry key, (b) keep a per-session allow-list of server names and filter
-`GetMCPTools` by it. `internal/app` already imports `tools/mcp`, so the
-connection itself can live in the app layer and be exposed to `internal/acp`
-as a narrow interface, avoiding an import cycle.
+**How the collision was solved.** Every registry in `internal/agent/tools/mcp`
+(`sessions`, `states`, `allTools`, `allPrompts`, `allResources`, `gens`,
+`renewMus`, `authURLs`) is keyed by server name alone, so two sessions asking for
+a server called `github` would have overwritten each other's connection and
+leaked the loser's stdio child. Rather than re-keying eight maps and ~40
+functions, the registry name embeds the owning session
+(`mcp.ACPServerName` → `acp:<sessionID>:<name>`), which makes each entry
+single-tenant. `mcp.ACPSessionOf` recovers the owner.
+
+Three supporting pieces make that safe:
+
+- `mcp.TeardownSession(sessionID)` closes every server a session injected. Called
+  from `session/close` and `session/delete`, so a closed session frees its
+  processes (`session-setup.md:313`).
+- `reconcile` skips `acp:`-prefixed names. Without this a config reload would
+  have emitted `reinitRemove` for servers that are not in the config store by
+  design, tearing down a live session's connection — a correctness bug, not a
+  gap.
+- `filterOtherSessionsMCPTools` runs in `PrepareStep` and drops tools belonging
+  to a *different* ACP session. The tool palette is process-wide, so without it
+  a run could offer a tool backed by another session's connection.
+
+The connection uses `context.WithoutCancel(ctx)`: the `session/new` request
+context is cancelled the moment the response is written, and the MCP session
+must outlive it.
+
+**Known limitations, recorded rather than hidden.** Tool names carry the
+registry key, so the model sees `mcp_acp_<sessionID>_github_search`. MCP prompts
+(`availableCommandsUpdate`), resource completions and the `/mcp` UI all read the
+config-file registry and so do not surface ACP-injected servers. OAuth, HTTP/SSE
+headers, `EnabledTools`/`DisabledTools` and the channel subsystem have no ACP
+equivalent and are not applied — none of them are advertised over ACP anyway.
+`env` is additive to the inherited process environment, matching
+`createTransport`, rather than an exclusive set.
 
 Security constraints the spec adds (`session-setup.md:200-210`): launch with
 `command` and `args` as separate arguments (never through a shell); never
 echo `env` or `headers` values into session updates, errors, `_meta`,
 `session/list`, replayed history, model context, or command lines; never log
-or persist them.
+or persist them. `config.MCPConfig` carries `env`, so it holds no secrets on the
+wire.
 
 ### 3.13 Transport Protocol
 
@@ -362,13 +379,15 @@ diverges from a spec requirement (independent of the §4 completion checkboxes):
 - **Boolean option client-capability gate.** Spec: Agent MUST NOT emit
   `type:"boolean"` options unless the client advertises
   `session.configOptions.boolean` (`initialization.md:179-185`,
-  `session-config-options.md:207-209`). **SDK-blocked:** pinned `acp-go-sdk`
-  v0.13.5 `ClientCapabilities` has no `session` field, so the gate can't be
-  read through typed fields. Options: (a) wait for the SDK, (b) unmarshal
-  `InitializeRequest` params a second time into a local struct with the extra
-  field. Recorded, not fixing today; `thinking` is emitted ungated meanwhile.
-- **MCP stdio connect** (see §3.12) — ❌ NOT IMPLEMENTED. `req.McpServers` is
-  never read; no per-session `mcp.Initialize`. See §3.12.
+  `session-config-options.md:207-209`). ✅ **RESOLVED without the SDK (2026-11-17)**
+  by taking the escape hatch the spec names one line later: "Agents that need to
+  support older Clients should omit the boolean option or provide a `select`
+  fallback" (`:209`). `thinking` is now a `select` with `on`/`off`, so no
+  boolean option is ever emitted and the MUST cannot be violated. The `req.Boolean`
+  branch is kept in `validateConfigOption` so a client that cached the old
+  advertisement still works. Same treatment will be needed if `_yolo` (§4.2 Q2)
+  is ever added — it cannot ship as a boolean gate either.
+- **MCP stdio connect** (see §3.12) — ✅ IMPLEMENTED (2026-11-17).
 - **`session/load` replay completeness.** ✅ IMPLEMENTED (R7): full history replays — user/agent text, thought chunks, tool calls (kind/title/rawInput), and tool results with terminal status and content.
 - **`$/cancel_request` / error `-32800`.** ✅ CONFORMANT, not a gap. `cancellation.md:23-25`
   requires the implementation to send *either* a valid response (e.g.
@@ -663,23 +682,53 @@ semantics change, the ACP copy will not follow. The alternative is one exported
 resolver in `internal/commands` that both paths call, which was declined for this
 batch to keep the TUI untouched.
 
-**OQ-3 — Should `session/set_mode` actually switch the agent?**
+**OQ-3 — RESOLVED 2026-11-17: `session/set_mode` now switches for real.**
 
-Tier 3b makes mode switching **advisory**: the selection is validated, recorded
-per session and echoed through `current_mode_update` and the `mode` config
-option, but nothing calls `SetMainAgent`.
+The earlier Tier 3b batch made mode switching advisory. That left a real MUST
+violation: `session-config-options.md:245` requires an option's `currentValue`
+to be the value the Agent operates with, and the advertised value was a
+per-session record while the agent never moved.
 
-Why it is not wired: `Coordinator.SetMainAgent` (`internal/agent/coordinator.go:337-347`)
-mutates `mainAgent`/`mainAgentName` on the shared coordinator, which is
-**workspace-wide, not per session**. Under `crush acp` (one session per process)
-that is harmless. Behind the HTTP backend it would silently change every session
-on the connection, and `tool-calls.md:251` explicitly says an Agent should not
-reduce user oversight without user action.
+The fix flattens Crush's mode ring into an ACP-only four-mode enum, which is
+what makes a single-value `modes` field able to express the TUI's two-axis
+state:
+
+| ACP mode id | Agent | PermissionMode |
+|---|---|---|
+| `code` | `coder` | Normal |
+| `plan` | `plan` | Normal |
+| `yolo` | `coder` | Yolo |
+| `sysadmin` | `coder` | Sysadmin |
+
+Verified premise: YOLO and Sysadmin really are "coder with a permission toggle
+on" — `setYolo` only calls `setPermissionMode` and leaves the agent alone
+(`ui.go:4873-4877`), and `switchPlanToYolo` forces `uiInputModeCode`
+(`ui.go:5048-5057`). `SetPermissionMode` was already on the
+`permission.Service` interface and already delegated by
+`acpPermissionService`, so the permission half needed no new plumbing.
+
+`SetSessionMode` and the `mode` config option both funnel through `applyMode`,
+which calls `SetMainAgent` and `SetPermissionMode` and then echoes
+`current_mode_update`. `currentMode` reads the answer back from the live
+coordinator (`Coordinator.MainAgentName`, added for this) and permission service
+rather than a private map, so `currentValue` stays truthful even when the other
+session or the TUI moved the workspace-wide agent.
+
+Two limitations recorded rather than hidden:
+
+1. `SetMainAgent` is still workspace-wide. With two concurrent ACP sessions the
+   last switch wins the agent for both, so the second session's `currentValue`
+   reflects reality — it reports what the agent is doing — but the user's
+   earlier choice is not per-session honoured. Real per-session agents need
+   coordinator work, not an adapter change.
+2. `plan` + `yolo` is reachable in the TUI but has no ACP id. Selecting `plan`
+   resets the permission mode to Normal, which raises oversight rather than
+   lowering it, so the degradation is in the safe direction.
 
 #### Preliminary research: what "mode" means in Crush
 
 Three different concepts share the word. Only the first is what ACP's `modes`
-field means.
+field means; the third is a separate axis the flattened enum above absorbs.
 
 | Layer | Values | Where | ACP-visible |
 |---|---|---|---|
@@ -832,10 +881,12 @@ current code state from §3.
 > **Deferred** — grouped by the *actual* blocker (SDK vs missing Crush work):
 > - **SDK-gated (UNSTABLE in pinned v0.13.5):** **S5** `messageId` — the field exists
 >   on chunks and `PromptRequest`/`PromptResponse` but is flagged UNSTABLE; **S6**
->   elicitation — only `Unstable*` variants ship; the boolean config-option client
->   gate (`ClientCapabilities.session.configOptions.boolean`) and terminal auth
+>   elicitation — only `Unstable*` variants ship; terminal auth
 >   methods (`clientCapabilities.auth.terminal`, `type:"terminal"`) are likewise
->   not modelled. Revisit on the next SDK release.
+>   not modelled. The boolean config-option client gate
+>   (`ClientCapabilities.session.configOptions.boolean`) is still unreadable, but
+>   it no longer blocks anything: the spec's `select` fallback is used instead
+>   (§4.1). Revisit on the next SDK release.
 > - **Missing Crush subsystem (NOT SDK-gated — implementable with product work):**
 >   ~~**S4** `plan` updates~~ (done 2026-09-22 — the existing `session.Todo`
 >   data model feeds `acp.UpdatePlan`), **O8** terminals (could be
@@ -1073,9 +1124,7 @@ mode/config/info notifications, `user_message_chunk` on load, tool `diff`
 content, and output-side image/audio. See §3.3/§3.5 status and §4.
 
 Genuinely still open:
-- **MCP stdio connect at session setup** (§3.12) — **spec MUST baseline, NOT met.** `req.McpServers` is ignored; no per-session `mcp.Initialize`. Highest-priority remaining gap.
 - **Tool `name` field and `terminal` tool content** (§3.5, §4.1) — `name` is SHOULD on the wire: the SDK's `SessionUpdateToolCall`/`ToolCall` have no `Name` field at all and no start/update helper, so it cannot be emitted with v0.13.5; `terminal` needs the deferred terminal subsystem (O8).
-- **Boolean client-capability gate** (SDK-blocked, §4.1) — `ClientCapabilities` has no `session` field in v0.13.5, so a `type:"boolean"` option is emitted regardless of client support (spec: MAY only after advertisement).
 - **`messageId`** on chunks (MAY in spec; UNSTABLE in pinned SDK — S5).
 - **Elicitation** (`elicitation/create`/`complete`) on either side (S6) — only `Unstable*` types ship; server-side is agent-initiated, client-side unimplemented.
 - **W3C trace-context generation** (`traceparent`/`tracestate`/`baggage` values are reserved but never generated; `_meta` echo itself is implemented, S7).
@@ -1090,8 +1139,9 @@ Genuinely still open:
 - **Session list pagination** (SHOULD) — ✅ DONE (O19): cursors, `nextCursor`, page bound and `-32602` on a bad cursor are all implemented; only `SessionInfo._meta` remains unpopulated.
 - **`available_commands_update`** (MAY) — ✅ DONE (O17 + O24): skills, custom markdown commands and MCP prompts are advertised with `input.hint` **and** resolved on the prompt path. Shell builtins are still not exposed at all.
 - **Spec error codes** (SHOULD) — ✅ DONE (O18/O20/O21): `-32602` (bad cursor, unknown `configId`/value/mode), `-32601` (`authenticate`), `-32002` on `prompt`/`load`/`resume`/`set_mode`/`set_config_option`, `-32600` before initialize, and `-32002` for a missing file in the client fs track. Remaining: the per-connection active-session concept (G12).
-- **Mode switching is advisory** (O25/OQ-3) — the mode is validated, recorded and echoed but does not change the agent, because `SetMainAgent` is workspace-wide.
+- **Mode switching is workspace-wide** (O25/OQ-3) — `set_mode` really switches now, but `SetMainAgent` is process-wide, so two concurrent ACP sessions share one agent. `currentValue` is read back from live state, so it stays truthful.
 - **Slash-command resolver duplication** (O24/OQ-2) — the ACP copy in `internal/acp/commands.go` and the TUI copy in `internal/ui/model` are separate.
+- **ACP-injected MCP servers are keys, not config entries** (§3.12) — their tool names embed the session id, and MCP prompts / resource completions / the `/mcp` UI read the config-file registry, so they do not surface them.
 - **Root-set enforcement** (OQ-1) — the capability is no longer advertised (§3.14), but no tool-layer root set exists either.
 - **Session compaction / notices** (`compaction_update`, `compaction_summary_chunk`, `notice`) — MAY update types in v1, each gated on a `clientCapabilities.session.*` field that the pinned SDK does not model. Not emitted; also not replayable on `session/load` (§3.3).
 
@@ -1102,31 +1152,34 @@ completeness for skills/custom commands/MCP prompts with `input.hint` (O17).
 
 Audited 2026-11-17: all 22 spec files re-read against the code. That pass found
 twelve gaps the plan had either marked closed or never listed — see §4.1b and
-Tier 3b (O20–O26). All seven Tier 3b items were then implemented the same day;
-G1–G10 and G12's method coverage are closed, and the three decisions the batch
-declined to make are recorded as **OQ-1/OQ-2/OQ-3**.
+Tier 3b (O20–O26). All seven Tier 3b items were implemented the same day.
+
+A second pass the same day enumerated every Agent-side MUST in the v1 prose and
+found four unmet. All four are now closed:
+
+| MUST | Spec | Resolution |
+|---|---|---|
+| stdio MCP support | `session-setup.md:458,466` | `req.McpServers` connected per session (§3.12) |
+| no boolean option unadvertised | `session-config-options.md:207` | `thinking` became a `select` (§4.1) |
+| every path absolute | `overview.md:160`, `tool-calls.md:307,353` | `absPath` on tool locations and diff paths |
+| `currentValue` is what the Agent uses | `session-config-options.md:245` | four-mode enum applied for real; value read from live state |
 
 All baseline methods, the permission bridge, fs read/write, text/resource_link
-content, `session/close`/`list`/`delete`, stdio transport, and capability
-advertising are present. The MUST-level gap is the **MCP stdio baseline**
-(§3.12). Three further caveats are behavioural rather than structural:
+content, `session/close`/`list`/`delete`, stdio transport, per-session MCP, and
+capability advertising are present. **No MUST-level gap remains.** Three caveats
+are behavioural rather than structural:
 
-1. `thinking` ships as an ungated `type:"boolean"` option because the client
-   gate is unreadable in v0.13.5, and no other optional update type is gated on
-   client advertisement either — the SDK exposes no client-session capability
-   surface at all. Neither is a MUST violation under the spec's "omitted means
-   unsupported" rule so long as the client tolerates the extra updates, which a
-   v1 client must (G-recorded in §4.1).
-2. A session mode is recorded and echoed but switches nothing (OQ-3), and
-   `reject_always`/`allow_always` are remembered only for the call they were
-   granted for (`permissionBridge.permitted` is keyed by session+toolCall). Both
-   are honest limitations of the current bridge, not advertised capabilities
-   that do nothing.
+1. `thinking` is a `select` rather than a `boolean`. The spec forbids a boolean
+   unless the client advertises support and the pinned SDK cannot read that
+   capability, so the `select` fallback the spec names
+   (`session-config-options.md:209`) is used instead. Functionally identical.
+2. `reject_always` and `allow_always` are remembered only for the call they were
+   granted for (`permissionBridge.permitted` is keyed by session+toolCall). An
+   honest limitation of the bridge, not an advertised capability that does
+   nothing.
 3. `additionalDirectories` is no longer advertised at all, so there is no
    capability promising a scope Crush does not enforce. Enforcement itself
    remains open (OQ-1).
-3. Advertised slash commands cannot be invoked (§4.2 Q1, O24) — the palette is
-   populated, but a `/name` prompt is not recognised.
 
 ---
 

@@ -10,18 +10,18 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"charm.land/fantasy"
+	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/skills"
 	acp "github.com/coder/acp-go-sdk"
 )
@@ -38,10 +38,6 @@ type crushAgent struct {
 	// clientCaps holds the capabilities the connected client advertised during
 	// initialize. Used to gate optional server track features (fs).
 	clientCaps acp.ClientCapabilities
-	// activeMode records the mode each session selected, so mode state and the
-	// "mode" config option agree. Nothing here switches the agent: see plan
-	// O25/Q3, a switch is workspace-wide, not per session.
-	activeMode sync.Map
 }
 
 // newCrushAgent creates an ACP agent backed by the given Crush app.
@@ -105,6 +101,12 @@ func (a *crushAgent) NewSession(ctx context.Context, req acp.NewSessionRequest) 
 	// Additional workspace roots are not supported: the capability is not
 	// advertised, so the request field is ignored rather than half-applied.
 	// See plan O23 for the enforcement work this replaces.
+
+	// Connect any MCP servers the client supplied. The spec makes stdio a
+	// baseline every Agent must support (session-setup.md:458,466).
+	if err := a.connectSessionMCPServers(ctx, session.ID, req.McpServers); err != nil {
+		return acp.NewSessionResponse{}, err
+	}
 
 	// Advertise setup state the client needs before the first prompt. These
 	// notifications are sent before the response returns, so the client's
@@ -270,6 +272,9 @@ func decodeListCursor(cursor string) (int, error) {
 func (a *crushAgent) CloseSession(_ context.Context, req acp.CloseSessionRequest) (acp.CloseSessionResponse, error) {
 	id := string(req.SessionId)
 	a.app.AgentCoordinator.Cancel(id)
+	// Closing frees the resources associated with the session, which includes
+	// any MCP servers it brought with it (session-setup.md:313).
+	mcp.TeardownSession(id)
 	return acp.CloseSessionResponse{}, nil
 }
 
@@ -286,6 +291,13 @@ func (a *crushAgent) ResumeSession(ctx context.Context, req acp.ResumeSessionReq
 		return acp.ResumeSessionResponse{}, err
 	}
 	if err := a.requireSession(ctx, req.SessionId); err != nil {
+		return acp.ResumeSessionResponse{}, err
+	}
+	// The spec requires resume to reconnect the requested MCP servers
+	// (session-setup.md:257). The request list is authoritative for this
+	// session, so any servers it already had are replaced.
+	mcp.TeardownSession(string(req.SessionId))
+	if err := a.connectSessionMCPServers(ctx, string(req.SessionId), req.McpServers); err != nil {
 		return acp.ResumeSessionResponse{}, err
 	}
 	// The request's additional roots are not applied: the capability is not
@@ -320,7 +332,7 @@ func (a *crushAgent) UnstableDeleteSession(ctx context.Context, req acp.Unstable
 			return acp.UnstableDeleteSessionResponse{}, fmt.Errorf("delete session: %w", err)
 		}
 	}
-	a.activeMode.Delete(id)
+	mcp.TeardownSession(id)
 	return acp.UnstableDeleteSessionResponse{}, nil
 }
 
@@ -402,23 +414,39 @@ func (a *crushAgent) SetSessionMode(ctx context.Context, req acp.SetSessionModeR
 	if err := a.requireSession(ctx, req.SessionId); err != nil {
 		return acp.SetSessionModeResponse{}, err
 	}
-	if cfg := a.config(); cfg != nil {
-		if !isSelectableMode(cfg, string(req.ModeId)) {
-			return acp.SetSessionModeResponse{}, invalidParam("modeId", string(req.ModeId))
-		}
+	mode, ok := resolveModeId(req.ModeId)
+	if !ok {
+		return acp.SetSessionModeResponse{}, invalidParam("modeId", string(req.ModeId))
 	}
-	a.setMode(ctx, req.SessionId, req.ModeId)
+	if err := a.applyMode(ctx, req.SessionId, mode); err != nil {
+		return acp.SetSessionModeResponse{}, err
+	}
 	return acp.SetSessionModeResponse{}, nil
 }
 
-// setMode records the session's selected mode and announces it. Both
+// applyMode switches Crush into the mode and announces it. Both
 // session/set_mode and the "mode" config option funnel through here so the two
 // entry points can never disagree.
-func (a *crushAgent) setMode(ctx context.Context, sessionID acp.SessionId, modeID acp.SessionModeId) {
-	a.activeMode.Store(string(sessionID), modeID)
+//
+// The switch is real: SetMainAgent changes the agent for the whole workspace
+// (the coordinator has no per-session agent), and SetPermissionMode changes the
+// permission mode for the session. Both halves are needed because ACP's mode
+// enum is a flattening of the TUI's (agent, permission) ring — see modes.go.
+func (a *crushAgent) applyMode(ctx context.Context, sessionID acp.SessionId, mode acpMode) error {
+	if a.app != nil {
+		if a.app.AgentCoordinator != nil {
+			if err := a.app.AgentCoordinator.SetMainAgent(mode.agent); err != nil {
+				return fmt.Errorf("switch agent to %q: %w", mode.agent, err)
+			}
+		}
+		if a.app.Permissions != nil {
+			a.app.Permissions.SetPermissionMode(mode.perm)
+		}
+	}
 	a.pushUpdate(ctx, sessionID, acp.SessionUpdate{
-		CurrentModeUpdate: &acp.SessionCurrentModeUpdate{CurrentModeId: modeID},
+		CurrentModeUpdate: &acp.SessionCurrentModeUpdate{CurrentModeId: mode.id},
 	})
+	return nil
 }
 
 // SetSessionConfigOption acknowledges a configuration change and notifies the
@@ -434,13 +462,24 @@ func (a *crushAgent) SetSessionConfigOption(ctx context.Context, req acp.SetSess
 			return acp.SetSessionConfigOptionResponse{}, err
 		}
 	}
+	if req.ValueId != nil && req.ValueId.ConfigId == "mode" {
+		mode, ok := resolveModeId(acp.SessionModeId(req.ValueId.Value))
+		if !ok {
+			return acp.SetSessionConfigOptionResponse{}, invalidParam("value", string(req.ValueId.Value))
+		}
+		if err := a.applyMode(ctx, sessionID, mode); err != nil {
+			return acp.SetSessionConfigOptionResponse{}, err
+		}
+	}
 	if req.Boolean != nil && req.Boolean.ConfigId == "thinking" {
 		if err := a.setThinking(ctx, req.Boolean.Value); err != nil {
 			a.log.Warn("Failed to apply thinking config option", "error", err)
 		}
 	}
-	if req.ValueId != nil && req.ValueId.ConfigId == "mode" {
-		a.setMode(ctx, sessionID, acp.SessionModeId(req.ValueId.Value))
+	if req.ValueId != nil && req.ValueId.ConfigId == "thinking" {
+		if err := a.setThinking(ctx, req.ValueId.Value == "on"); err != nil {
+			a.log.Warn("Failed to apply thinking config option", "error", err)
+		}
 	}
 	if req.ValueId != nil && req.ValueId.ConfigId == "model" {
 		if err := a.setModel(ctx, parseModelValue(string(req.ValueId.Value))); err != nil {
@@ -495,7 +534,13 @@ func validateConfigOption(cfg *config.Config, req acp.SetSessionConfigOptionRequ
 			return invalidParam("value", value)
 		case "mode":
 			value := string(req.ValueId.Value)
-			if !isSelectableMode(cfg, value) {
+			if !isSelectableMode(value) {
+				return invalidParam("value", value)
+			}
+			return nil
+		case "thinking":
+			value := string(req.ValueId.Value)
+			if value != "on" && value != "off" {
 				return invalidParam("value", value)
 			}
 			return nil
@@ -650,6 +695,15 @@ func (a *crushAgent) config() *config.Config {
 	return store.Config()
 }
 
+// store returns the configuration store, or nil when the app carries none (as
+// in tests). MCP setup needs the store itself, not just a config snapshot.
+func (a *crushAgent) store() *config.ConfigStore {
+	if a.app == nil {
+		return nil
+	}
+	return a.app.Store()
+}
+
 // availableCommandsUpdate advertises the slash commands Crush can run:
 // user-invocable skills, custom markdown commands, and MCP prompts. When
 // input is expected, an unstructured-input hint is included so the client can
@@ -748,7 +802,7 @@ func (a *crushAgent) sessionInfoUpdate(title string) acp.SessionUpdate {
 // picker and a reasoning on/off control.
 func (a *crushAgent) configOptions(sessionID acp.SessionId) []acp.SessionConfigOption {
 	cfg := a.config()
-	return configOptionsFor(cfg, a.currentMode(cfg, sessionID))
+	return configOptionsFor(cfg, a.currentMode())
 }
 
 // configOptionsFor builds the config-option list from a config snapshot and the
@@ -763,34 +817,49 @@ func configOptionsFor(cfg *config.Config, currentMode acp.SessionModeId) []acp.S
 	if cfg == nil {
 		return opts
 	}
-	if modeOpts := modeSelectOptions(cfg); len(modeOpts) > 0 {
-		cur := acp.SessionConfigValueId(currentMode)
-		if cur == "" {
-			cur = modeOpts[0].Value
-		}
-		ungroupedModes := acp.SessionConfigSelectOptionsUngrouped(modeOpts)
-		opts = append(opts, acp.SessionConfigOption{
-			Select: &acp.SessionConfigOptionSelect{
-				Id:           "mode",
-				Name:         "Mode",
-				Type:         "select",
-				CurrentValue: cur,
-				Category:     acp.Ptr(acp.SessionConfigOptionCategoryMode),
-				Description:  acp.Ptr("Switch between Crush's agents"),
-				Options: acp.SessionConfigSelectOptions{
-					Ungrouped: &ungroupedModes,
-				},
-			},
-		})
+	modeOpts := modeSelectOptions()
+	cur := acp.SessionConfigValueId(currentMode)
+	if cur == "" {
+		cur = modeOpts[0].Value
 	}
+	ungroupedModes := acp.SessionConfigSelectOptionsUngrouped(modeOpts)
 	opts = append(opts, acp.SessionConfigOption{
-		Boolean: &acp.SessionConfigOptionBoolean{
+		Select: &acp.SessionConfigOptionSelect{
+			Id:           "mode",
+			Name:         "Mode",
+			Type:         "select",
+			CurrentValue: cur,
+			Category:     acp.Ptr(acp.SessionConfigOptionCategoryMode),
+			Description:  acp.Ptr("Switch between Crush's modes"),
+			Options: acp.SessionConfigSelectOptions{
+				Ungrouped: &ungroupedModes,
+			},
+		},
+	})
+	// Thinking is a select rather than a boolean on purpose: the spec forbids
+	// emitting `type:"boolean"` unless the client advertised support for
+	// boolean options, and the pinned SDK cannot read that capability. It names
+	// a select fallback for exactly this case (session-config-options.md:207-209).
+	thinkingOpts := []acp.SessionConfigSelectOption{
+		{Value: "on", Name: "On"},
+		{Value: "off", Name: "Off"},
+	}
+	thinkingCurrent := acp.SessionConfigValueId("off")
+	if thinkingEnabled(cfg) {
+		thinkingCurrent = "on"
+	}
+	ungroupedThinking := acp.SessionConfigSelectOptionsUngrouped(thinkingOpts)
+	opts = append(opts, acp.SessionConfigOption{
+		Select: &acp.SessionConfigOptionSelect{
 			Id:           "thinking",
 			Name:         "Thinking",
-			Type:         "boolean",
-			CurrentValue: thinkingEnabled(cfg),
+			Type:         "select",
+			CurrentValue: thinkingCurrent,
 			Description:  acp.Ptr("Enable extended reasoning for supported models"),
 			Category:     acp.Ptr(acp.SessionConfigOptionCategoryThoughtLevel),
+			Options: acp.SessionConfigSelectOptions{
+				Ungrouped: &ungroupedThinking,
+			},
 		},
 	})
 	modelOpts := modelOptionsFor(cfg)
@@ -816,89 +885,36 @@ func configOptionsFor(cfg *config.Config, currentMode acp.SessionModeId) []acp.S
 	return opts
 }
 
-// modeSelectOptions renders the selectable agents as config-option values.
-func modeSelectOptions(cfg *config.Config) []acp.SessionConfigSelectOption {
-	names := selectableModes(cfg)
-	opts := make([]acp.SessionConfigSelectOption, 0, len(names))
-	for _, name := range names {
-		agent := cfg.Agents[name]
-		opt := acp.SessionConfigSelectOption{
-			Value: acp.SessionConfigValueId(name),
-			Name:  name,
-		}
-		if agent.Name != "" {
-			opt.Name = agent.Name
-		}
-		if agent.Description != "" {
-			desc := agent.Description
-			opt.Description = &desc
-		}
-		opts = append(opts, opt)
-	}
-	return opts
+// isSelectableMode reports whether id names a mode in the ACP ring, after
+// alias resolution.
+func isSelectableMode(id string) bool {
+	_, ok := resolveModeId(acp.SessionModeId(id))
+	return ok
 }
 
-// selectableModes lists the agent ids a client may switch the session to,
-// sorted so the advertised order is stable across requests.
+// currentMode reports the mode the agent is actually in, read from live state
+// rather than a private record.
 //
-// config.AgentTask is excluded on purpose: it is the profile a subagent runs
-// under (internal/agent/agent.go agentTool), with a reduced tool set and no
-// MCP or LSP access. Offering it as a session mode would let a client degrade
-// its own session by selecting it.
-func selectableModes(cfg *config.Config) []string {
-	if cfg == nil {
-		return nil
+// The spec requires an option's currentValue to be the value the Agent operates
+// with (session-config-options.md:245), so this must reflect reality even when
+// another ACP session, or the TUI, moved the workspace-wide agent. When no
+// coordinator or permission service is wired (as in unit tests) it falls back
+// to the ring's first entry.
+func (a *crushAgent) currentMode() acp.SessionModeId {
+	if a.app == nil {
+		return acpModes[0].id
 	}
-	names := make([]string, 0, len(cfg.Agents))
-	for id, agent := range cfg.Agents {
-		if agent.Disabled || id == config.AgentTask {
-			continue
+	perm := permission.PermissionModeNormal
+	if a.app.Permissions != nil {
+		perm = a.app.Permissions.PermissionMode()
+	}
+	agent := config.AgentCoder
+	if a.app.AgentCoordinator != nil {
+		if name := a.app.AgentCoordinator.MainAgentName(); name != "" {
+			agent = name
 		}
-		names = append(names, id)
 	}
-	sort.Strings(names)
-	return names
-}
-
-// isSelectableMode reports whether id names an agent a session may switch to.
-func isSelectableMode(cfg *config.Config, id string) bool {
-	if id == "" {
-		return false
-	}
-	return slices.Contains(selectableModes(cfg), id)
-}
-
-// defaultMode picks the mode a session starts in: the coder agent when it is
-// available, otherwise the first selectable agent. It never returns a mode that
-// is absent from the advertised list (session-modes.md:58-64).
-func defaultMode(cfg *config.Config) acp.SessionModeId {
-	names := selectableModes(cfg)
-	if len(names) == 0 {
-		return ""
-	}
-	if slices.Contains(names, config.AgentCoder) {
-		return acp.SessionModeId(config.AgentCoder)
-	}
-	return acp.SessionModeId(names[0])
-}
-
-// currentMode reports the mode the session selected, falling back to the
-// default. A stored value that is no longer selectable is ignored, so a mode
-// disabled in config cannot linger in the advertised state.
-func (a *crushAgent) currentMode(cfg *config.Config, sessionID acp.SessionId) acp.SessionModeId {
-	fallback := defaultMode(cfg)
-	if sessionID == "" {
-		return fallback
-	}
-	stored, ok := a.activeMode.Load(string(sessionID))
-	if !ok {
-		return fallback
-	}
-	mode, ok := stored.(acp.SessionModeId)
-	if !ok || !isSelectableMode(cfg, string(mode)) {
-		return fallback
-	}
-	return mode
+	return modeForState(agent, perm).id
 }
 
 // thinkingEnabled reports whether the current model has reasoning enabled.
@@ -922,28 +938,13 @@ func (a *crushAgent) configOptionsUpdate(sessionID acp.SessionId) acp.SessionUpd
 }
 
 // modeState reports the available session modes and the active one.
-func (a *crushAgent) modeState(sessionID acp.SessionId) *acp.SessionModeState {
-	cfg := a.config()
-	if cfg == nil {
+func (a *crushAgent) modeState(_ acp.SessionId) *acp.SessionModeState {
+	if a.config() == nil {
 		return nil
 	}
-	names := selectableModes(cfg)
-	modes := make([]acp.SessionMode, 0, len(names))
-	for _, id := range names {
-		agent := cfg.Agents[id]
-		mode := acp.SessionMode{Id: acp.SessionModeId(id), Name: id}
-		if agent.Name != "" {
-			mode.Name = agent.Name
-		}
-		if agent.Description != "" {
-			desc := agent.Description
-			mode.Description = &desc
-		}
-		modes = append(modes, mode)
-	}
 	return &acp.SessionModeState{
-		AvailableModes: modes,
-		CurrentModeId:  a.currentMode(cfg, sessionID),
+		AvailableModes: availableModes(),
+		CurrentModeId:  a.currentMode(),
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -227,7 +228,7 @@ func TestEventBridge_ToolCallEnrichment(t *testing.T) {
 		SessionID: "sess-1",
 		Role:      message.Assistant,
 		Parts: []message.ContentPart{
-			message.ToolCall{ID: "call-9", Name: "view", Input: `{"path":"/tmp/x.go","limit":10}`},
+			message.ToolCall{ID: "call-9", Name: "view", Input: `{"path":"x.go","limit":10}`},
 		},
 	}
 	b.handleMessage(context.Background(), assistantMsg)
@@ -241,10 +242,12 @@ func TestEventBridge_ToolCallEnrichment(t *testing.T) {
 	require.NotNil(t, u.ToolCall)
 	require.Equal(t, acp.ToolCallId("call-9"), u.ToolCall.ToolCallId)
 	require.Equal(t, acp.ToolKindRead, u.ToolCall.Kind)
-	require.Contains(t, u.ToolCall.Title, "/tmp/x.go")
+	require.Contains(t, u.ToolCall.Title, "x.go")
 	require.Equal(t, acp.ToolCallStatusInProgress, u.ToolCall.Status)
 	require.NotEmpty(t, u.ToolCall.Locations)
-	require.Equal(t, "/tmp/x.go", u.ToolCall.Locations[0].Path)
+	// The title echoes the input as the user wrote it, but the location on the
+	// wire must be absolute (overview.md:160).
+	require.True(t, filepath.IsAbs(u.ToolCall.Locations[0].Path))
 	require.NotNil(t, u.ToolCall.RawInput)
 	require.Contains(t, u.ToolCall.Title, "View")
 }
@@ -380,7 +383,7 @@ func TestEventBridge_DiffContentForEdit(t *testing.T) {
 	assistantMsg := message.Message{
 		ID: "msg-edit", SessionID: "sess-1", Role: message.Assistant,
 		Parts: []message.ContentPart{
-			message.ToolCall{ID: "call-edit", Name: "edit", Input: `{"file_path":"/tmp/f.go"}`},
+			message.ToolCall{ID: "call-edit", Name: "edit", Input: `{"file_path":"` + filepath.ToSlash(filepath.Join(t.TempDir(), "f.go")) + `"}`},
 		},
 	}
 	b.handleMessage(context.Background(), assistantMsg)
@@ -412,7 +415,7 @@ func TestEventBridge_DiffContentForEdit(t *testing.T) {
 			if c.Diff == nil {
 				continue
 			}
-			require.Equal(t, "/tmp/f.go", c.Diff.Path)
+			require.True(t, filepath.IsAbs(c.Diff.Path))
 			require.Equal(t, "a\nc", c.Diff.NewText)
 			require.NotNil(t, c.Diff.OldText)
 			require.Equal(t, "a\nb", *c.Diff.OldText)

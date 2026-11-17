@@ -13,6 +13,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/app"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/proto"
@@ -55,6 +56,7 @@ func (c *stubCoordinator) RunAccepted(ctx context.Context, accept *agent.Accepte
 
 func (c *stubCoordinator) BeginAccepted(sessionID string) *agent.AcceptedRun { return nil }
 func (c *stubCoordinator) SetMainAgent(_ string) error                       { return nil }
+func (c *stubCoordinator) MainAgentName() string                             { return config.AgentCoder }
 func (c *stubCoordinator) Cancel(sessionID string)                           {}
 func (c *stubCoordinator) CancelAll()                                        {}
 func (c *stubCoordinator) IsSessionBusy(sessionID string) bool               { return false }
@@ -107,6 +109,7 @@ func (c *stubBlockingCoordinator) RunAccepted(ctx context.Context, accept *agent
 
 func (c *stubBlockingCoordinator) BeginAccepted(sessionID string) *agent.AcceptedRun { return nil }
 func (c *stubBlockingCoordinator) SetMainAgent(_ string) error                       { return nil }
+func (c *stubBlockingCoordinator) MainAgentName() string                             { return config.AgentCoder }
 func (c *stubBlockingCoordinator) Cancel(sessionID string)                           {}
 func (c *stubBlockingCoordinator) CancelAll()                                        {}
 func (c *stubBlockingCoordinator) IsSessionBusy(sessionID string) bool               { return true }

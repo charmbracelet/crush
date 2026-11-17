@@ -9,6 +9,7 @@ import (
 	"charm.land/catwalk/v3/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/permission"
 	acp "github.com/coder/acp-go-sdk"
 	"github.com/stretchr/testify/require"
 )
@@ -68,12 +69,21 @@ func TestConfigOptionsIncludesThinking(t *testing.T) {
 
 	var found bool
 	for _, o := range opts {
-		if o.Boolean != nil && o.Boolean.Id == "thinking" {
+		if o.Select != nil && o.Select.Id == "thinking" {
 			found = true
-			require.True(t, o.Boolean.CurrentValue)
+			require.Equal(t, acp.SessionConfigValueId("on"), o.Select.CurrentValue)
+			require.NotNil(t, o.Select.Options.Ungrouped)
+			require.Len(t, *o.Select.Options.Ungrouped, 2)
 		}
 	}
-	require.True(t, found, "expected a thinking boolean config option")
+	require.True(t, found, "expected a thinking config option")
+
+	// The spec forbids a boolean option unless the client advertised support,
+	// and the pinned SDK cannot read that capability, so nothing may be a
+	// boolean (session-config-options.md:207-209).
+	for _, o := range opts {
+		require.Nil(t, o.Boolean, "no config option may be a boolean")
+	}
 }
 
 func TestParseModelValue(t *testing.T) {
@@ -193,65 +203,96 @@ func TestConfigOptionsIncludesMode(t *testing.T) {
 	require.NotNil(t, modeOpt.Category)
 	require.Equal(t, acp.SessionConfigOptionCategoryMode, *modeOpt.Category)
 	// coder is the default mode, and task is never offered as one.
-	require.Equal(t, acp.SessionConfigValueId(config.AgentCoder), modeOpt.CurrentValue)
+	require.Equal(t, acp.SessionConfigValueId("code"), modeOpt.CurrentValue)
 	require.NotNil(t, modeOpt.Options.Ungrouped)
-	require.Len(t, *modeOpt.Options.Ungrouped, 2)
+	require.Len(t, *modeOpt.Options.Ungrouped, len(acpModes))
 	for _, o := range *modeOpt.Options.Ungrouped {
 		require.NotEqual(t, config.AgentTask, string(o.Value), "task is a subagent profile, not a session mode")
 	}
 }
 
-func TestSelectableModesExcludesTaskAndDisabled(t *testing.T) {
-	cfg := &config.Config{
-		Agents: map[string]config.Agent{
-			config.AgentCoder: {Name: "Coder"},
-			config.AgentPlan:  {Name: "Plan"},
-			config.AgentTask:  {Name: "Task"},
-			"disabled-agent":  {Name: "Off", Disabled: true},
-			"zzz-custom":      {Name: "Custom"},
-		},
+func TestAcpModeRing(t *testing.T) {
+	// The ring flattens the TUI's four states onto Crush's two agents.
+	want := []struct {
+		id    acp.SessionModeId
+		agent string
+		perm  permission.PermissionMode
+	}{
+		{"code", config.AgentCoder, permission.PermissionModeNormal},
+		{"plan", config.AgentPlan, permission.PermissionModeNormal},
+		{"yolo", config.AgentCoder, permission.PermissionModeYolo},
+		{"sysadmin", config.AgentCoder, permission.PermissionModeSysadmin},
 	}
-	require.Equal(t, []string{config.AgentCoder, config.AgentPlan, "zzz-custom"}, selectableModes(cfg))
-	require.True(t, isSelectableMode(cfg, config.AgentPlan))
-	require.False(t, isSelectableMode(cfg, config.AgentTask))
-	require.False(t, isSelectableMode(cfg, "disabled-agent"))
-	require.False(t, isSelectableMode(cfg, ""))
+	require.Len(t, acpModes, len(want))
+	for i, w := range want {
+		require.Equal(t, w.id, acpModes[i].id)
+		require.Equal(t, w.agent, acpModes[i].agent)
+		require.Equal(t, w.perm, acpModes[i].perm)
+		require.NotEmpty(t, acpModes[i].name)
+		require.NotEmpty(t, acpModes[i].description)
+	}
 }
 
-func TestDefaultModeFallsBackWhenCoderMissing(t *testing.T) {
-	// coder disabled: the default must still be a mode that is advertised.
-	cfg := &config.Config{
-		Agents: map[string]config.Agent{
-			config.AgentCoder: {Disabled: true},
-			config.AgentPlan:  {Name: "Plan"},
-		},
+func TestResolveModeId(t *testing.T) {
+	// Every ring id resolves, and "coder" is kept as a legacy alias.
+	for _, m := range acpModes {
+		got, ok := resolveModeId(m.id)
+		require.True(t, ok, "mode %q must resolve", m.id)
+		require.Equal(t, m.id, got.id)
 	}
-	require.Equal(t, acp.SessionModeId(config.AgentPlan), defaultMode(cfg))
+	got, ok := resolveModeId("coder")
+	require.True(t, ok)
+	require.Equal(t, acp.SessionModeId("code"), got.id)
 
-	// No selectable agents at all: no mode claim is made.
-	require.Empty(t, defaultMode(&config.Config{Agents: map[string]config.Agent{
-		config.AgentTask: {Name: "Task"},
-	}}))
+	// Agent names that are not session modes, and nonsense, do not resolve.
+	// task is a subagent profile with a reduced tool set.
+	for _, bad := range []acp.SessionModeId{"", "task", "nonsense"} {
+		_, ok := resolveModeId(bad)
+		require.False(t, ok, "%q must not resolve", bad)
+	}
 }
 
-func TestModeStateReportsCurrentMode(t *testing.T) {
-	cfg := &config.Config{
-		Agents: map[string]config.Agent{
-			config.AgentCoder: {Name: "Coder"},
-			config.AgentPlan:  {Name: "Plan"},
-		},
-	}
+func TestIsSelectableMode(t *testing.T) {
+	require.True(t, isSelectableMode("code"))
+	require.True(t, isSelectableMode("plan"))
+	require.True(t, isSelectableMode("yolo"))
+	require.True(t, isSelectableMode("sysadmin"))
+	require.True(t, isSelectableMode("coder"), "legacy alias")
+	require.False(t, isSelectableMode("task"))
+	require.False(t, isSelectableMode(""))
+}
+
+func TestModeForState(t *testing.T) {
+	// Exact agent+permission pairs win.
+	require.Equal(t, acp.SessionModeId("code"), modeForState(config.AgentCoder, permission.PermissionModeNormal).id)
+	require.Equal(t, acp.SessionModeId("plan"), modeForState(config.AgentPlan, permission.PermissionModeNormal).id)
+	require.Equal(t, acp.SessionModeId("yolo"), modeForState(config.AgentCoder, permission.PermissionModeYolo).id)
+	require.Equal(t, acp.SessionModeId("sysadmin"), modeForState(config.AgentCoder, permission.PermissionModeSysadmin).id)
+
+	// plan + yolo is reachable in the TUI but has no ACP id, so it degrades to
+	// plan rather than reporting a mode outside availableModes.
+	require.Equal(t, acp.SessionModeId("plan"), modeForState(config.AgentPlan, permission.PermissionModeYolo).id)
+
+	// An unknown agent still reports a mode that is in the list.
+	require.Equal(t, acpModes[0].id, modeForState("mystery-agent", permission.PermissionModeNormal).id)
+}
+
+func TestCurrentModeDefaultsToCode(t *testing.T) {
+	// No coordinator or permission service wired (as in unit tests).
 	a := &crushAgent{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
-	a.activeMode.Store("sess", acp.SessionModeId(config.AgentPlan))
+	require.Equal(t, acpModes[0].id, a.currentMode())
+}
 
-	// currentMode is the resolver both modeState and the config option use, so
-	// assert on it directly: the agent carries no config store in this test.
-	require.Equal(t, acp.SessionModeId(config.AgentPlan), a.currentMode(cfg, "sess"))
-	// An unknown session falls back to the default rather than reporting empty.
-	require.Equal(t, acp.SessionModeId(config.AgentCoder), a.currentMode(cfg, "other"))
-	// A stored mode that is no longer selectable is ignored.
-	a.activeMode.Store("stale", acp.SessionModeId(config.AgentTask))
-	require.Equal(t, acp.SessionModeId(config.AgentCoder), a.currentMode(cfg, "stale"))
+func TestModeStateAdvertisesTheRing(t *testing.T) {
+	a := &crushAgent{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	// No config store means no session modes to report.
+	require.Nil(t, a.modeState(""))
+
+	modes := availableModes()
+	require.Len(t, modes, len(acpModes))
+	// currentModeId must always be one of availableModes
+	// (session-modes.md:58-64).
+	require.Equal(t, acpModes[0].id, a.currentMode())
 }
 
 func TestBuildPromptBlobResource(t *testing.T) {

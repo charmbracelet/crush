@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"path/filepath"
 	"sync/atomic"
 
 	"github.com/charmbracelet/crush/internal/app"
+	"github.com/charmbracelet/crush/internal/filepathext"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	acp "github.com/coder/acp-go-sdk"
@@ -42,6 +44,10 @@ type Agent interface {
 	SessionExists(ctx context.Context, sessionID acp.SessionId) bool
 	// SessionState reports the mode and config-option payload for a session.
 	SessionState(sessionID acp.SessionId) (*acp.SessionModeState, []acp.SessionConfigOption)
+	// ConnectMCPServers starts the MCP servers a setup request supplied. The
+	// dispatcher owns session/load, which carries the same field session/new
+	// and session/resume do (session-setup.md:458).
+	ConnectMCPServers(ctx context.Context, sessionID string, servers []acp.McpServer) error
 }
 
 // NewServer creates a new ACP server that connects to the given peer.
@@ -76,6 +82,26 @@ func (s *Server) PermissionService() permission.Service {
 // StartEventBridge starts the event bridge in a goroutine. Call this before Start.
 func (s *Server) StartEventBridge(ctx context.Context) {
 	go s.eventBridge.Start(ctx)
+}
+
+// absPath resolves a path from a replayed tool call into its absolute form,
+// for the same reason the live bridge does: the spec requires every path on the
+// wire to be absolute (overview.md:160).
+func (d *dispatcher) absPath(path string) string {
+	if path == "" || filepath.IsAbs(path) {
+		return path
+	}
+	local := ""
+	if d.app != nil {
+		if store := d.app.Store(); store != nil {
+			local = store.WorkingDir()
+		}
+	}
+	abs, err := filepath.Abs(filepathext.SmartJoin(local, path))
+	if err != nil {
+		return path
+	}
+	return abs
 }
 
 // dispatcher forwards SDK Agent method calls to our Agent interface.
@@ -170,6 +196,12 @@ func (d *dispatcher) LoadSession(ctx context.Context, req acp.LoadSessionRequest
 		}
 	}
 	sessionID := string(req.SessionId)
+	// Reconnect the MCP servers the client supplied for this load. The spec
+	// makes stdio a baseline (session-setup.md:458) and session/load carries
+	// the same field as session/new.
+	if err := d.agent.ConnectMCPServers(ctx, sessionID, req.McpServers); err != nil {
+		return acp.LoadSessionResponse{}, err
+	}
 	msgs, err := d.app.Messages.List(ctx, sessionID)
 	if err != nil {
 		return acp.LoadSessionResponse{}, fmt.Errorf("list messages: %w", err)
@@ -211,7 +243,7 @@ func (d *dispatcher) LoadSession(ctx context.Context, req acp.LoadSessionRequest
 		if text != "" {
 			contents = append(contents, acp.ToolContent(acp.TextBlock(text)))
 		}
-		if diff := diffContentFor(tr.Name, input, tr); diff != nil {
+		if diff := diffContentFor(d, tr.Name, input, tr); diff != nil {
 			contents = append(contents, *diff)
 		}
 		opts := []acp.ToolCallUpdateOpt{acp.WithUpdateStatus(status)}

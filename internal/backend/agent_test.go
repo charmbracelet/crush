@@ -73,6 +73,13 @@ func (c *blockingCoordinator) SetMainAgent(agentName string) error {
 	return c.setMainAgentErr
 }
 
+func (c *blockingCoordinator) MainAgentName() string {
+	if name, ok := c.lastMainAgentSet.Load().(string); ok && name != "" {
+		return name
+	}
+	return "coder"
+}
+
 // insertAgentWorkspace installs a synthetic workspace with the given
 // coordinator (or none) and a workspace run context, mirroring the
 // fields CreateWorkspace initializes.

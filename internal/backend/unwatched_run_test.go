@@ -181,3 +181,25 @@ func TestClientDeparture_KeepsRunAnotherClientViews(t *testing.T) {
 	require.NoError(t, b.RetireClient(watcher))
 	awaitCancelled(t, done, "the run must be cancelled once its last viewer leaves")
 }
+
+// TestClientDeparture_KeepsNonInteractiveRun is the regression for crush
+// run continuing (-C or -s) a session a TUI also has open. crush run
+// reports the session it drives as current once it knows it, so when the
+// TUI quits the run still has a viewer and keeps going. It is cancelled
+// only once crush run itself leaves.
+func TestClientDeparture_KeepsNonInteractiveRun(t *testing.T) {
+	t.Parallel()
+	b, _ := newTestBackend(t)
+	ws, coord := newRunWorkspace(t, b)
+
+	runner, tui := newClientID(t), newClientID(t)
+	attachViewing(t, b, ws, tui, "s-shared")
+	attachViewing(t, b, ws, runner, "s-shared")
+	run, done := coord.startRun(t, ws, "s-shared")
+
+	require.NoError(t, b.RetireClient(tui))
+	require.NoError(t, run.Err(), "a run driven by a connected crush run must keep going")
+
+	require.NoError(t, b.RetireClient(runner))
+	awaitCancelled(t, done, "the run must be cancelled once crush run leaves too")
+}

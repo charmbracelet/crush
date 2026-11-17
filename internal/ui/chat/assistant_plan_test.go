@@ -388,3 +388,67 @@ func TestAssistantMessageItem_PlanCardBordersAlign(t *testing.T) {
 		}
 	}
 }
+
+// A line that only overflows by the UI's cell widths is re-wrapped the way
+// glamour wraps: whole words move to the next row, which keeps the line's
+// indent.
+func TestAssistantMessageItem_PlanCardRewrapKeepsWordsAndIndent(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	nested := "nested 👩‍💻 item with more than enough words to wrap a few times"
+	msg := &message.Message{
+		ID:   "plan-rewrap",
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.TextContent{Text: "- top\n  - " + nested + "\n\n<!-- CRUSH_PLAN_READY -->"},
+			message.Finish{Reason: message.FinishReasonEndTurn, Time: 1},
+		},
+	}
+	for width := 30; width <= 72; width++ {
+		var rows []string
+		for line := range strings.Lines(ansi.Strip(NewAssistantMessageItem(&sty, msg).RawRender(width))) {
+			row, ok := strings.CutPrefix(strings.TrimSuffix(line, "\n"), "│  ")
+			row = strings.TrimRight(strings.TrimSuffix(row, "│"), " ")
+			if ok && (len(rows) > 0 || strings.Contains(row, "nested")) && row != "" {
+				rows = append(rows, row)
+			}
+		}
+		for _, row := range rows {
+			require.True(t, strings.HasPrefix(row, "  "),
+				"width %d: row %q must keep the nested item's indent", width, row)
+		}
+		require.Equal(t, append([]string{"•"}, strings.Fields(nested)...),
+			strings.Fields(strings.Join(rows, " ")), "width %d: words must not be split", width)
+	}
+}
+
+// BenchmarkPlanCardStreaming measures one streaming flush of a long plan. One
+// line whose cell width differs from its grapheme width sends the whole card
+// through the cell layout.
+func BenchmarkPlanCardStreaming(b *testing.B) {
+	for _, tc := range []struct{ name, emoji string }{{"plain", ""}, {"emoji", " 👩‍💻"}} {
+		b.Run(tc.name, func(b *testing.B) {
+			var plan strings.Builder
+			plan.WriteString("<!-- CRUSH_PLAN_START -->\n\n# Plan\n\n")
+			for i := range 150 {
+				fmt.Fprintf(&plan, "## Step %d\n\n- Update the renderer%s so the border stays put across terminals\n"+
+					"- Add a test with `inline code` and a [link](https://example.com)\n\n"+
+					"Prose explaining why this matters, long enough to wrap in the card.\n\n", i+1, tc.emoji)
+			}
+			sty := styles.CharmtonePantera()
+			msg := &message.Message{
+				ID:    "plan-bench",
+				Role:  message.Assistant,
+				Parts: []message.ContentPart{message.TextContent{Text: plan.String()}},
+			}
+			item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
+			item.SetPlanAgent(true)
+			_ = item.RawRender(120)
+			for i := 0; b.Loop(); i++ {
+				msg.Parts[0] = message.TextContent{Text: plan.String() + strings.Repeat("x", i%8+1)}
+				_ = item.RawRender(120)
+			}
+		})
+	}
+}

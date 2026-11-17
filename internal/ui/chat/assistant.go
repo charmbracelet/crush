@@ -691,67 +691,96 @@ func renderPlanBox(style lipgloss.Style, content string, width int, closed bool)
 	}
 	content = strings.Join(lines, "\n")
 	if !needsCellLayout {
+		// In lipgloss v2 Width is the total box width: border and padding live
+		// inside it, so the content area ends up Width minus the frame. Glamour
+		// already wrapped at innerWidth (width minus the frame), so size the box
+		// to the full width or every line gets re-wrapped narrower.
 		return style.Width(max(1, width)).Render(content)
 	}
 
-	// Reflow by the UI's cell widths before drawing. Limit the temporary
-	// buffer to the text's actual width, rather than the entire card.
-	text, textWidth, textHeight := wrapPlanText(content, innerWidth)
-	canvas := uv.NewScreenBuffer(max(1, textWidth), textHeight)
-	uv.NewStyledString(text).Draw(canvas, canvas.Bounds())
-	frame := style.Width(max(1, width)).Render(strings.Repeat("\n", textHeight-1))
+	// Lay the text out in cells with the UI's widths, re-wrap the lines that
+	// no longer fit, and splice the rows into an empty frame so lipgloss
+	// never measures them by grapheme width.
+	canvasWidth := 1
+	for _, line := range lines {
+		canvasWidth = max(canvasWidth, ansi.WcWidth.StringWidth(line))
+	}
+	canvas := uv.NewScreenBuffer(canvasWidth, len(lines))
+	uv.NewStyledString(content).Draw(canvas, canvas.Bounds())
+	var rows []uv.Line
+	for _, line := range canvas.Lines {
+		rows = append(rows, wrapPlanLine(line, innerWidth)...)
+	}
+	frame := style.Width(max(1, width)).Render(strings.Repeat("\n", len(rows)-1))
 	frameLines := strings.Split(frame, "\n")
 	frameWidth := lipgloss.Width(frame)
 	left := style.GetBorderLeftSize() + style.GetPaddingLeft()
 	top := style.GetBorderTopSize() + style.GetPaddingTop()
-	for i, cells := range canvas.Lines {
-		for j := range cells {
-			if cells[j].Width > 0 && cells[j].Style.Fg == nil {
-				cells[j].Style.Fg = style.GetForeground()
+	for i, row := range rows {
+		rowWidth := 0
+		for j := range row {
+			rowWidth += row[j].Width
+			if row[j].Width > 0 && row[j].Style.Fg == nil {
+				row[j].Style.Fg = style.GetForeground()
 			}
 		}
-		row := frameLines[top+i]
-		frameLines[top+i] = ansi.Cut(row, 0, left) + cells.Render() +
-			strings.Repeat(" ", innerWidth-canvas.Width()) +
-			ansi.Cut(row, left+innerWidth, frameWidth)
+		frameRow := frameLines[top+i]
+		frameLines[top+i] = ansi.Cut(frameRow, 0, left) + row.Render() +
+			strings.Repeat(" ", innerWidth-rowWidth) +
+			ansi.Cut(frameRow, left+innerWidth, frameWidth)
 	}
 	return strings.Join(frameLines, "\n")
 }
 
-// wrapPlanText keeps ANSI sequences intact while wrapping printable clusters
-// with the same width policy as the UI screen. A cluster wider than the whole
-// content area is omitted without dropping any following text.
-func wrapPlanText(content string, width int) (string, int, int) {
-	p := ansi.GetParser()
-	defer ansi.PutParser(p)
-	var out strings.Builder
-	var state byte
-	x, maxWidth, height := 0, 0, 1
-	for len(content) > 0 {
-		seq, cellWidth, n, nextState := ansi.DecodeSequenceWc(content, state, p)
-		// Padding past the right edge does not need a new display row.
-		if cellWidth <= width && (seq != " " || x != width) {
-			if cellWidth > 0 && x+cellWidth > width {
-				out.WriteByte('\n')
-				x = 0
-				height++
-			}
-			out.WriteString(seq)
-			switch seq {
-			case "\n":
-				x = 0
-				height++
-			case "\r":
-				x = 0
-			default:
-				x += cellWidth
-				maxWidth = max(maxWidth, x)
-			}
-		}
-		state = nextState
-		content = content[n:]
+// wrapPlanLine fits a line of cells to width the way glamour wraps: it
+// breaks at the last space that fits, and starts each added row with the
+// line's indent (leading spaces and blockquote bars), so list items and
+// quotes stay aligned. Padding past the edge is dropped, and so is a
+// cluster too wide for any row, without losing the text after it.
+func wrapPlanLine(line uv.Line, width int) []uv.Line {
+	lineWidth := 0
+	for _, c := range line {
+		lineWidth += c.Width
 	}
-	return out.String(), maxWidth, height
+	for lineWidth > width && len(line) > 0 && line[len(line)-1].Content == " " {
+		line = line[:len(line)-1]
+		lineWidth--
+	}
+	if lineWidth <= width {
+		return []uv.Line{line}
+	}
+
+	indent := 0
+	for indent < len(line) && (line[indent].Content == " " || line[indent].Content == "│") {
+		indent++
+	}
+	var rows []uv.Line
+	row := append(uv.Line(nil), line[:indent]...)
+	rowWidth := indent
+	// The last space in the row, and the row's width up to it.
+	space, spaceWidth := -1, 0
+	for _, c := range line[indent:] {
+		if c.Width > width-indent {
+			continue
+		}
+		for rowWidth+c.Width > width {
+			next := append(uv.Line(nil), line[:indent]...)
+			nextWidth := indent
+			if space >= 0 {
+				next = append(next, row[space+1:]...)
+				nextWidth += rowWidth - spaceWidth - 1
+				row = row[:space]
+			}
+			rows = append(rows, row)
+			row, rowWidth, space = next, nextWidth, -1
+		}
+		if c.Content == " " {
+			space, spaceWidth = len(row), rowWidth
+		}
+		row = append(row, c)
+		rowWidth += c.Width
+	}
+	return append(rows, row)
 }
 
 // planBoxLayout returns a style and content width whose combined horizontal

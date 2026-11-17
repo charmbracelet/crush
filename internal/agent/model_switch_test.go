@@ -71,3 +71,43 @@ func TestRun_ModelSwitchMidRunAppliesToNextPrompt(t *testing.T) {
 	require.Equal(t, int64(1), newLM.calls.Load(), "the next prompt runs on the new model")
 	require.Equal(t, int64(2), oldLM.calls.Load())
 }
+
+// TestPersistCanceledTurn_RecordsCallModel cancels a turn after the model
+// was switched; the record names the model the turn ran on.
+func TestPersistCanceledTurn_RecordsCallModel(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	catwalkCfg := catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}
+	oldModel := Model{Model: &finishStreamModel{text: "old"}, CatwalkCfg: catwalkCfg, ModelCfg: config.SelectedModel{Provider: "fake", Model: "old"}}
+	newModel := Model{Model: &finishStreamModel{text: "new"}, CatwalkCfg: catwalkCfg, ModelCfg: config.SelectedModel{Provider: "fake", Model: "new"}}
+
+	sa := NewSessionAgent(SessionAgentOptions{
+		Models:   func() ModelSet { return ModelSet{Large: newModel, Small: newModel} },
+		Sessions: env.sessions,
+		Messages: env.messages,
+	}).(*sessionAgent)
+
+	sess, err := env.sessions.Create(t.Context(), "session")
+	require.NoError(t, err)
+
+	call := SessionAgentCall{SessionID: sess.ID, Prompt: "hi", Model: oldModel}
+	require.NoError(t, sa.persistCanceledTurn(t.Context(), call, false))
+
+	msgs, err := env.messages.List(t.Context(), sess.ID)
+	require.NoError(t, err)
+	require.Len(t, msgs, 2)
+	require.Equal(t, "old", msgs[1].Model)
+}
+
+// TestSubAgentCall_PinsModel checks a subagent call carries the model its
+// options were built for, so a switch while it is queued cannot split them.
+func TestSubAgentCall_PinsModel(t *testing.T) {
+	t.Parallel()
+
+	c, _ := newOverrideTestCoordinator(t)
+	model := c.mainModels().Large
+	call, err := c.subAgentCall(&mockSessionAgent{model: model}, "sess", "task")
+	require.NoError(t, err)
+	require.Equal(t, model.ModelCfg, call.Model.ModelCfg)
+}

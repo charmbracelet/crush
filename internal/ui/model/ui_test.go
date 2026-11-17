@@ -332,7 +332,7 @@ func (w *testWorkspace) UpdatePreferredModel(_ config.Scope, modelType config.Se
 	return nil
 }
 
-func TestSelectReasoningEffort_AllowedWhileAgentBusy(t *testing.T) {
+func TestModelSettingsChangeWhileAgentBusy(t *testing.T) {
 	t.Parallel()
 	u, ws := newPlanUI(t, "sess-1")
 	ws.cfg.Agents = map[string]config.Agent{config.AgentCoder: {Model: config.SelectedModelTypeLarge}}
@@ -342,7 +342,10 @@ func TestSelectReasoningEffort_AllowedWhileAgentBusy(t *testing.T) {
 	ws.agentBusy = true
 	u.agentBusyCache.set(true)
 
-	require.NotNil(t, u.handleSelectReasoningEffort("high"))
+	require.NotNil(t, u.updateCoderModel(func(model *config.SelectedModel) string {
+		model.ReasoningEffort = "high"
+		return "Reasoning effort set to high"
+	}))
 	require.Equal(t, "high", ws.cfg.Models[config.SelectedModelTypeLarge].ReasoningEffort,
 		"the effort is saved for the next message instead of being refused")
 	require.Equal(t, " (applies to your next message)", u.nextMessageNote())

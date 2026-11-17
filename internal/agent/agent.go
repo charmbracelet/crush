@@ -96,11 +96,8 @@ type SessionAgentCall struct {
 	// the transcript only when delivered, so it lands where the model
 	// reads it. Prompt is still what the model reads for it.
 	Report *message.SubAgentReport
-	// Model, when set, is the large model ProviderOptions and
-	// MaxOutputTokens were built for. The turn runs on it even if the
-	// model is switched while the call waits in the queue, so a switch
-	// applies from the next prompt and never pairs a model with another
-	// model's options. When unset the agent's current model is used.
+	// Model is the large model the options below were built for. Run pins
+	// an unset one to the current model on entry.
 	Model            Model
 	ProviderOptions  fantasy.ProviderOptions
 	Attachments      []message.Attachment
@@ -203,7 +200,7 @@ type SessionAgent interface {
 	QueuedPromptsList(sessionID string) []string
 	ClearQueue(sessionID string)
 	AddNote(sessionID, text string)
-	Summarize(context.Context, string, fantasy.ProviderOptions, func(context.Context, *fantasy.ProviderError) error) error
+	Summarize(context.Context, string, Model, fantasy.ProviderOptions, func(context.Context, *fantasy.ProviderError) error) error
 	Model() Model
 	GenerateTitle(ctx context.Context, sessionID, userPrompt string)
 }
@@ -644,7 +641,7 @@ func (a *sessionAgent) persistCanceledTurn(ctx context.Context, call SessionAgen
 			return err
 		}
 	}
-	largeModel := a.models().Large
+	largeModel := call.Model
 	assistant, err := a.messages.Create(writeCtx, call.SessionID, message.CreateMessageParams{
 		Role:      message.Assistant,
 		Parts:     []message.ContentPart{},
@@ -755,6 +752,9 @@ func turnFinish(largeModel Model, sessionID string, reason fantasy.FinishReason)
 func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *fantasy.AgentResult, retErr error) {
 	if err := ValidateCall(call); err != nil {
 		return nil, err
+	}
+	if call.Model.Model == nil {
+		call.Model = a.models().Large
 	}
 
 	if call.Channel != "" && call.channelMeta == nil {
@@ -920,12 +920,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 	// Copy mutable fields under lock to avoid races with SetTools.
 	agentTools := filterToolsForChannel(a.tools.Copy(), call.Channel, mcp.GetStates())
-	largeModel := a.models().Large
-	if call.Model.Model != nil {
-		largeModel = call.Model
-	}
-	// A compaction continuation re-queues this call; keep it on this model.
-	call.Model = largeModel
+	largeModel := call.Model
 	systemPrompt := a.systemPrompt.Get()
 	promptPrefix := a.systemPromptPrefix.Get()
 	var instructions strings.Builder
@@ -1539,13 +1534,14 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	return a.Run(ctx, firstQueuedMessage)
 }
 
-// Summarize compacts the session on the user's request. It returns
-// ErrCompactionBlocked when a PreCompact hook blocks it.
-func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error) error {
+// Summarize compacts the session on the user's request with model, which
+// must be the model opts were built for. It returns ErrCompactionBlocked
+// when a PreCompact hook blocks it.
+func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, model Model, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error) error {
 	if a.HasPendingWork(sessionID) {
 		return ErrSessionBusy
 	}
-	return a.summarize(ctx, a.models().Large, sessionID, compactTriggerManual, opts, onAuthRefresh)
+	return a.summarize(ctx, model, sessionID, compactTriggerManual, opts, onAuthRefresh)
 }
 
 // summarize compacts the session with largeModel, which must be the model

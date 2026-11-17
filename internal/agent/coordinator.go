@@ -1753,7 +1753,8 @@ func (c *coordinator) QueuedPromptsList(sessionID string) []string {
 
 func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
 	agent := c.currentAgent()
-	providerCfg, ok := c.cfg.Config().Providers.Get(agent.Model().ModelCfg.Provider)
+	model := agent.Model()
+	providerCfg, ok := c.cfg.Config().Providers.Get(model.ModelCfg.Provider)
 	if !ok {
 		return errModelProviderNotConfigured
 	}
@@ -1764,9 +1765,9 @@ func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
 
 	// Auth failures during summarize flow through fantasy's OnAuthRefresh,
 	// the same path used by regular turns.
-	opts := getProviderOptions(agent.Model(), providerCfg)
+	opts := getProviderOptions(model, providerCfg)
 	injectOpenrouterSessionID(opts, sessionID)
-	return agent.Summarize(ctx, sessionID, opts, c.makeAuthRefreshCallback(providerCfg))
+	return agent.Summarize(ctx, sessionID, model, opts, c.makeAuthRefreshCallback(providerCfg))
 }
 
 // GenerateTitle generates a session title using the current agent.
@@ -1942,7 +1943,7 @@ func callTopK(providerCfg config.ProviderConfig, topK *int64) *int64 {
 // settings for the subagent's own model, not the parent's. Both the initial
 // task and any message sent to a running subagent go through it, so a
 // mid-flight message cannot start a turn with an unconfigured model.
-func (c *coordinator) subAgentCall(agent SessionAgent, sessionID, prompt string) (SessionAgentCall, Model, error) {
+func (c *coordinator) subAgentCall(agent SessionAgent, sessionID, prompt string) (SessionAgentCall, error) {
 	model := agent.Model()
 	maxTokens := model.CatwalkCfg.DefaultMaxTokens
 	if model.ModelCfg.MaxTokens != 0 {
@@ -1951,7 +1952,7 @@ func (c *coordinator) subAgentCall(agent SessionAgent, sessionID, prompt string)
 
 	providerCfg, ok := c.cfg.Config().Providers.Get(model.ModelCfg.Provider)
 	if !ok {
-		return SessionAgentCall{}, Model{}, errModelProviderNotConfigured
+		return SessionAgentCall{}, errModelProviderNotConfigured
 	}
 
 	opts := getProviderOptions(model, providerCfg)
@@ -1960,6 +1961,7 @@ func (c *coordinator) subAgentCall(agent SessionAgent, sessionID, prompt string)
 	return SessionAgentCall{
 		SessionID:        sessionID,
 		Prompt:           prompt,
+		Model:            model,
 		MaxOutputTokens:  maxTokens,
 		ProviderOptions:  opts,
 		Temperature:      model.ModelCfg.Temperature,
@@ -1969,7 +1971,7 @@ func (c *coordinator) subAgentCall(agent SessionAgent, sessionID, prompt string)
 		PresencePenalty:  model.ModelCfg.PresencePenalty,
 		NonInteractive:   true,
 		OnAuthRefresh:    c.makeAuthRefreshCallback(providerCfg),
-	}, model, nil
+	}, nil
 }
 
 // runSubAgent runs a subagent and handles session management and cost accumulation.
@@ -1993,7 +1995,7 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 		params.SessionSetup(session.ID)
 	}
 
-	call, model, err := c.subAgentCall(params.Agent, session.ID, params.Prompt)
+	call, err := c.subAgentCall(params.Agent, session.ID, params.Prompt)
 	if err != nil {
 		return fantasy.ToolResponse{}, err
 	}
@@ -2001,7 +2003,7 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 	done := c.trackSubSession(session.ID)
 	result, err := params.Agent.Run(ctx, call)
 	done()
-	c.askToSignInAgain(err, model)
+	c.askToSignInAgain(err, call.Model)
 	if err != nil {
 		return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to generate response: %s", err)), nil
 	}

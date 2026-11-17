@@ -198,6 +198,7 @@ func gruvboxDarkOpts() quickStyleOpts {
 		separator: lipgloss.Color("#504945"), // bg2
 
 		destructive:       lipgloss.Color("#fb4934"), // red bright
+		destructiveSubtle: lipgloss.Color("#fe8019"), // orange bright, a lighter fill
 		error:             lipgloss.Color("#cc241d"), // red dark
 		warningSubtle:     lipgloss.Color("#fabd2f"), // yellow bright
 		warning:           lipgloss.Color("#d79921"), // yellow dark
@@ -280,6 +281,7 @@ func rosePineOpts() quickStyleOpts {
 		separator: lipgloss.Color("#2f2d3b"),
 
 		destructive:       lipgloss.Color("#eb6f92"), // love
+		destructiveSubtle: lipgloss.Color("#ebbcba"), // rose, brighter than love
 		error:             lipgloss.Color("#eb6f92"), // love
 		warningSubtle:     lipgloss.Color("#bf9662"),
 		warning:           lipgloss.Color("#f6c177"), // gold
@@ -352,6 +354,7 @@ func rosePineMoonOpts() quickStyleOpts {
 		separator: lipgloss.Color("#38364b"),
 
 		destructive:       lipgloss.Color("#eb6f92"), // love
+		destructiveSubtle: lipgloss.Color("#ebbcba"), // rose, brighter than love
 		error:             lipgloss.Color("#eb6f92"), // love
 		warningSubtle:     lipgloss.Color("#c19967"),
 		warning:           lipgloss.Color("#f6c177"), // gold
@@ -426,8 +429,9 @@ func rosePineDawnOpts() quickStyleOpts {
 
 		separator: lipgloss.Color("#cecacd"), // highlight_high
 
-		destructive: lipgloss.Color("#b4637a"), // love
-		error:       lipgloss.Color("#b4637a"), // love
+		destructive:       lipgloss.Color("#b4637a"), // love
+		destructiveSubtle: lipgloss.Color("#d7827e"), // rose, brighter than love
+		error:             lipgloss.Color("#b4637a"), // love
 		// Gold is too light for text on base, so the muted golds below are
 		// darkened; bright gold stays for badge fills, which write dark ink.
 		warningSubtle:     lipgloss.Color("#9c6a2b"),
@@ -503,6 +507,7 @@ func keanuOpts() quickStyleOpts {
 		separator: lipgloss.Color("#183c22"), // elevated green surface
 
 		destructive:       lipgloss.Color("#ff5252"), // bright red
+		destructiveSubtle: lipgloss.Color("#ff7a7a"), // bright red, softened
 		error:             lipgloss.Color("#d43d3d"), // deep red
 		warningSubtle:     lipgloss.Color("#d7f75b"), // lime
 		warning:           lipgloss.Color("#b8d43d"), // dark lime

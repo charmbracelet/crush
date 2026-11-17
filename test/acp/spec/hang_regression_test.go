@@ -393,6 +393,9 @@ func TestNewSessionReportsCwdMismatch(t *testing.T) {
 	// The stub app carries no config store, so the agent cannot see a local
 	// working directory and must accept whatever the client asks for.
 	h := newPipeHarness(t, stubApp(newStubCoordinator(nil)))
+	if _, err := h.client.Initialize(t.Context(), acp.InitializeRequest{ProtocolVersion: acp.ProtocolVersionNumber}); err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
 
 	if _, err := h.client.NewSession(t.Context(), acp.NewSessionRequest{
 		Cwd: "/workspace", McpServers: []acp.McpServer{},
@@ -405,6 +408,9 @@ func TestNewSessionReportsCwdMismatch(t *testing.T) {
 // panel before the first prompt.
 func TestSessionSetupMethodsSucceed(t *testing.T) {
 	h := newPipeHarness(t, stubApp(newStubCoordinator(nil)))
+	if _, err := h.client.Initialize(t.Context(), acp.InitializeRequest{ProtocolVersion: acp.ProtocolVersionNumber}); err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
 
 	ns, err := h.client.NewSession(t.Context(), acp.NewSessionRequest{
 		Cwd: "/workspace", McpServers: []acp.McpServer{},

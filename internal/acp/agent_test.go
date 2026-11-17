@@ -1,6 +1,9 @@
 package acp
 
 import (
+	"encoding/base64"
+	"io"
+	"log/slog"
 	"testing"
 
 	"charm.land/catwalk/v3/pkg/catwalk"
@@ -60,7 +63,7 @@ func TestConfigOptionsIncludesThinking(t *testing.T) {
 			config.SelectedModelTypeLarge: {Think: true},
 		},
 	}
-	opts := configOptionsFor(cfg)
+	opts := configOptionsFor(cfg, "")
 	require.NotEmpty(t, opts)
 
 	var found bool
@@ -141,7 +144,7 @@ func TestConfigOptionsIncludesModel(t *testing.T) {
 		},
 	}
 	var modelOpt *acp.SessionConfigOptionSelect
-	for _, o := range configOptionsFor(cfg) {
+	for _, o := range configOptionsFor(cfg, "") {
 		if o.Select != nil && o.Select.Id == "model" {
 			modelOpt = o.Select
 		}
@@ -169,6 +172,120 @@ func TestValidateConfigOption_AcceptsAdvertisedValues(t *testing.T) {
 	require.NoError(t, validateConfigOption(cfg, acp.SetSessionConfigOptionRequest{
 		ValueId: &acp.SetSessionConfigOptionValueId{ConfigId: "model", Value: "openai/gpt-4o"},
 	}))
+}
+
+func TestConfigOptionsIncludesMode(t *testing.T) {
+	cfg := &config.Config{
+		Agents: map[string]config.Agent{
+			config.AgentCoder: {Name: "Coder"},
+			config.AgentPlan:  {Name: "Plan"},
+			config.AgentTask:  {Name: "Task"},
+		},
+	}
+
+	var modeOpt *acp.SessionConfigOptionSelect
+	for _, o := range configOptionsFor(cfg, "") {
+		if o.Select != nil && o.Select.Id == "mode" {
+			modeOpt = o.Select
+		}
+	}
+	require.NotNil(t, modeOpt, "expected a mode select config option")
+	require.NotNil(t, modeOpt.Category)
+	require.Equal(t, acp.SessionConfigOptionCategoryMode, *modeOpt.Category)
+	// coder is the default mode, and task is never offered as one.
+	require.Equal(t, acp.SessionConfigValueId(config.AgentCoder), modeOpt.CurrentValue)
+	require.NotNil(t, modeOpt.Options.Ungrouped)
+	require.Len(t, *modeOpt.Options.Ungrouped, 2)
+	for _, o := range *modeOpt.Options.Ungrouped {
+		require.NotEqual(t, config.AgentTask, string(o.Value), "task is a subagent profile, not a session mode")
+	}
+}
+
+func TestSelectableModesExcludesTaskAndDisabled(t *testing.T) {
+	cfg := &config.Config{
+		Agents: map[string]config.Agent{
+			config.AgentCoder: {Name: "Coder"},
+			config.AgentPlan:  {Name: "Plan"},
+			config.AgentTask:  {Name: "Task"},
+			"disabled-agent":  {Name: "Off", Disabled: true},
+			"zzz-custom":      {Name: "Custom"},
+		},
+	}
+	require.Equal(t, []string{config.AgentCoder, config.AgentPlan, "zzz-custom"}, selectableModes(cfg))
+	require.True(t, isSelectableMode(cfg, config.AgentPlan))
+	require.False(t, isSelectableMode(cfg, config.AgentTask))
+	require.False(t, isSelectableMode(cfg, "disabled-agent"))
+	require.False(t, isSelectableMode(cfg, ""))
+}
+
+func TestDefaultModeFallsBackWhenCoderMissing(t *testing.T) {
+	// coder disabled: the default must still be a mode that is advertised.
+	cfg := &config.Config{
+		Agents: map[string]config.Agent{
+			config.AgentCoder: {Disabled: true},
+			config.AgentPlan:  {Name: "Plan"},
+		},
+	}
+	require.Equal(t, acp.SessionModeId(config.AgentPlan), defaultMode(cfg))
+
+	// No selectable agents at all: no mode claim is made.
+	require.Empty(t, defaultMode(&config.Config{Agents: map[string]config.Agent{
+		config.AgentTask: {Name: "Task"},
+	}}))
+}
+
+func TestModeStateReportsCurrentMode(t *testing.T) {
+	cfg := &config.Config{
+		Agents: map[string]config.Agent{
+			config.AgentCoder: {Name: "Coder"},
+			config.AgentPlan:  {Name: "Plan"},
+		},
+	}
+	a := &crushAgent{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	a.activeMode.Store("sess", acp.SessionModeId(config.AgentPlan))
+
+	// currentMode is the resolver both modeState and the config option use, so
+	// assert on it directly: the agent carries no config store in this test.
+	require.Equal(t, acp.SessionModeId(config.AgentPlan), a.currentMode(cfg, "sess"))
+	// An unknown session falls back to the default rather than reporting empty.
+	require.Equal(t, acp.SessionModeId(config.AgentCoder), a.currentMode(cfg, "other"))
+	// A stored mode that is no longer selectable is ignored.
+	a.activeMode.Store("stale", acp.SessionModeId(config.AgentTask))
+	require.Equal(t, acp.SessionModeId(config.AgentCoder), a.currentMode(cfg, "stale"))
+}
+
+func TestBuildPromptBlobResource(t *testing.T) {
+	png := []byte("\x89PNG\r\n\x1a\n")
+	blob := acp.ContentBlockResource{
+		Resource: acp.EmbeddedResourceResource{
+			BlobResourceContents: &acp.BlobResourceContents{
+				Uri:  "file:///img.png",
+				Blob: base64.StdEncoding.EncodeToString(png),
+			},
+		},
+	}
+	prompt, attachments := buildPrompt([]acp.ContentBlock{{Resource: &blob}})
+	// The MIME type is undeclared, so it is sniffed: a PNG must attach as an
+	// image rather than degrade to a text placeholder.
+	require.Len(t, attachments, 1)
+	require.Equal(t, "image/png", attachments[0].MimeType)
+	require.Equal(t, png, attachments[0].Content)
+	require.Empty(t, prompt)
+
+	// A non-media blob is described in the prompt so nothing is silently lost.
+	text := acp.ContentBlockResource{
+		Resource: acp.EmbeddedResourceResource{
+			BlobResourceContents: &acp.BlobResourceContents{
+				Uri:      "file:///data.bin",
+				Blob:     base64.StdEncoding.EncodeToString([]byte("payload")),
+				MimeType: acp.Ptr("application/octet-stream"),
+			},
+		},
+	}
+	prompt, attachments = buildPrompt([]acp.ContentBlock{{Resource: &text}})
+	require.Empty(t, attachments)
+	require.Contains(t, prompt, "file:///data.bin")
+	require.Contains(t, prompt, "application/octet-stream")
 }
 
 func TestValidateConfigOption_RejectsUnknown(t *testing.T) {

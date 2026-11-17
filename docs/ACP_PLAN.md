@@ -73,7 +73,7 @@ Status legend: ✅ done · ⚠️ partial/stub · ❌ not implemented.
 | `loadSession` capability | OPTIONAL | ✅ `true` |
 | `promptCapabilities` (image/audio/embeddedContext) | OPTIONAL (MUST support Text+ResourceLink in prompts regardless) | ✅ all `true` |
 | `mcpCapabilities` (http/sse) | OPTIONAL | ✅ empty (no MCP transport) |
-| `sessionCapabilities` (close/list/resume/delete/additionalDirectories) | OPTIONAL | ✅ all five advertised, including `resume` and `additionalDirectories` (`agent.go:72-78`). ⚠️ `additionalDirectories` is advertised without being enforced — see §3.14 |
+| `sessionCapabilities` (close/list/resume/delete) | OPTIONAL | ✅ four advertised: `close`, `delete`, `list`, `resume` (`agent.go`). `additionalDirectories` is **deliberately not advertised** — Crush has no per-session root set to back it, so the capability was retracted rather than promised and ignored (§3.14, O23). |
 | `auth.logout` capability | OPTIONAL | ✅ advertised |
 | `authenticate` method | Only reachable for advertised methods; a capability-gated method the Agent did not advertise SHOULD answer `-32601` (`error.md:46`) | ⚠️ `authMethods:[]` means clients MUST NOT call it, so nothing is owed today. Crush now answers a stray call with `-32601` (`server.go:81-87`). S2 (register provider auth methods, type `agent`, trigger OAuth) is the real work |
 | `logout` method | MUST exist if `auth.logout` advertised | ✅ success no-op (Crush has no auth session) |
@@ -82,17 +82,17 @@ Status legend: ✅ done · ⚠️ partial/stub · ❌ not implemented.
 
 | Method | Level | Crush status |
 |---|---|---|
-| `session/new` | MUST | ✅ creates SQLite session, returns `sessionId`. The `cwd` is validated against the process working directory (mismatch is rejected). `additionalDirectories` is recorded for `session/list` echo but is **not** applied to any tool root set (see §3.14) |
+| `session/new` | MUST | ✅ creates SQLite session, returns `sessionId`, `modes` and `configOptions`. The `cwd` is validated against the process working directory (mismatch is rejected). `additionalDirectories` is ignored: the capability is not advertised (§3.14, O23) |
 | `session/prompt` | MUST | ✅ runs coordinator, returns `StopReason` |
 | `session/cancel` (notification) | MUST | ✅ cancels coordinator |
 | `session/update` (notifications) | MUST | ✅ message/thought/tool_call/tool_call_update/usage emitted (see §3.3) |
 | `session/close` | OPTIONAL (advertise `sessionCapabilities.close`) | ✅ implemented + advertised. Spec: closing MUST cancel ongoing work, is idempotent, and a non-existent session SHOULD still return the empty result; clients SHOULD treat `-32002` as success. Crush cancels the coordinator and always returns `{}`, which satisfies both |
-| `session/list` | OPTIONAL (advertise `sessionCapabilities.list`) | ✅ implemented + advertised. `cwd`, `title`, `updatedAt`, `additionalDirectories` echoed. ✅ **Pagination implemented**: `req.Cursor` is honoured (opaque base64 offset), `NextCursor` is set while more results remain, a malformed cursor is rejected with `-32602`, and pages are bounded at `listPageSize` (50). A `cwd` filter naming a different root returns an empty list (Crush has one workspace root). `_meta` on `SessionInfo` is still unpopulated. |
-| `session/load` | OPTIONAL (advertise `loadSession`) | ✅ full-history replay (R7): user/agent text, `agent_thought_chunk`, `tool_call` starts (kind/title/rawInput), tool results with terminal status + content + `diff`, and `plan` updates. Synthesizes a start when a result has no matching call (`server.go:132-140`). ⚠️ Gaps: the response returns an empty `{}` (the spec `MAY` returns modes/config, and `session/resume` already does), `req.AdditionalDirectories` is read by nobody so a load with `[]` keeps stale roots, and `req.Cwd` is never validated (`session-setup.md:359`) |
-| `session/resume` | OPTIONAL (advertise `sessionCapabilities.resume`) | ✅ implemented (Option B, §6.2 O5): returns mode/config state without replaying history; capability advertised. ⚠️ Same `additionalDirectories`/`cwd` gaps as `session/load`: `req.AdditionalDirectories` is ignored and `req.Cwd` is not validated |
-| `session/delete` | OPTIONAL (advertise `sessionCapabilities.delete`) | ⚠️ implemented + advertised (`UnstableDeleteSession`), but **not idempotent**: `session.Service.Delete` returns the `GetSessionByID` error for a missing id, which `UnstableDeleteSession` wraps and the SDK surfaces as `-32603`. The spec says deleting an already-deleted or never-existing session `SHOULD` succeed silently (`session-delete.md:85`), and clients `SHOULD` treat `-32002` as success. Neither holds. Deleting an active session is implementation-defined |
-| `session/set_mode` | OPTIONAL (legacy; prefer config options; spec notes modes will be removed in a future version) | ✅ echoes `modeId` + emits `current_mode_update`. An unknown `modeId` is rejected with `-32602`. No real mode switch happens. ⚠️ `modeState()` hardcodes `currentModeId: "coder"` even if that agent is absent or disabled, which breaks `session-modes.md:58-64` (`currentModeId` must be one of `availableModes`) |
-| `session/set_config_option` | OPTIONAL | ✅ applies thinking/model and returns the complete `configOptions` list (spec MUST, `session-config-options.md:304`). Spec: every option's `currentValue` is the default the Agent operates with (`:245`). ✅ Unknown `configId`/value now answers `-32602` via `validateConfigOption` (`error.md:50`); `SetSessionMode` likewise rejects an unknown `modeId` with `-32602`. |
+| `session/list` | OPTIONAL (advertise `sessionCapabilities.list`) | ✅ implemented + advertised. `cwd`, `title`, `updatedAt` populated. ✅ **Pagination implemented**: `req.Cursor` is honoured (opaque base64 offset), `NextCursor` is set while more results remain, a malformed cursor is rejected with `-32602`, and pages are bounded at `listPageSize` (50). A `cwd` filter naming a different root returns an empty list (Crush has one workspace root). `_meta` on `SessionInfo` is still unpopulated. |
+| `session/load` | OPTIONAL (advertise `loadSession`) | ✅ full-history replay (R7): user/agent text, `agent_thought_chunk`, `tool_call` starts (kind/title/rawInput), tool results with terminal status + content + `diff`, and `plan` updates. Synthesizes a start when a result has no matching call. ✅ Returns `modes` and `configOptions` like `session/resume` (O26/G7), validates `req.Cwd`, and answers `-32002` for an unknown session. `req.AdditionalDirectories` is not applied: the capability is not advertised |
+| `session/resume` | OPTIONAL (advertise `sessionCapabilities.resume`) | ✅ implemented (Option B, §6.2 O5): returns mode/config state without replaying history; capability advertised. ✅ Validates `req.Cwd` and answers `-32002` for an unknown session (O22/O18). `req.AdditionalDirectories` is not applied |
+| `session/delete` | OPTIONAL (advertise `sessionCapabilities.delete`) | ✅ implemented + advertised (`UnstableDeleteSession`) and **idempotent** (O21): a missing session is treated as `sql.ErrNoRows` and succeeds silently per `session-delete.md:85`, while a real store failure still surfaces as an internal error. Deleting an active session is implementation-defined |
+| `session/set_mode` | OPTIONAL (legacy; prefer config options; spec notes modes will be removed in a future version) | ✅ echoes `modeId` + emits `current_mode_update`, records the selection per session, and rejects an unknown or non-selectable `modeId` with `-32602`. `currentModeId` is derived from the session's selection through `defaultMode`/`currentMode` and is always one of `availableModes` (`session-modes.md:58-64`); `config.AgentTask` is excluded because it is a subagent profile. ⚠️ Still advisory: no real mode switch happens (O25/OQ-3) |
+| `session/set_config_option` | OPTIONAL | ✅ applies thinking/model/mode and returns the complete `configOptions` list (spec MUST, `session-config-options.md:304`). Spec: every option's `currentValue` is the default the Agent operates with (`:245`). ✅ Unknown `configId`/value answers `-32602` via `validateConfigOption` (`error.md:50`); `SetSessionMode` likewise rejects an unknown `modeId` with `-32602`. ✅ Answers `-32002` for an unknown session |
 
 ### 3.3 Prompt turn & streaming (`session/update` types)
 
@@ -108,7 +108,7 @@ The spec distinguishes `session/load` (MUST replay history via these) from
 | `tool_call` | SHOULD | ✅ emitted on tool start (S1) |
 | `tool_call_update` | SHOULD (`pending`/`in_progress`/`completed`/`failed`) | ✅ full lifecycle: `pending` emitted by `CheckPermission` before the permission request; `in_progress`/`completed` by the event bridge; `failed` on tool errors and permission denial (S10) |
 | `plan` | SHOULD | ✅ emitted as a full-replace update whenever the `todos` tool runs (S4): entries map from `session.Todo{Content, Status}` with `priority: medium` (todos carry no priority) |
-| `available_commands_update` | MAY | ⚠️ emitted on `session/new` (S8, O17). Covers **user-invocable skills** (`commands.FromSkillCatalog`), **custom markdown commands** (`commands.LoadCustomCommands`), and **MCP prompts** (`commands.LoadMCPPrompts`). Commands that take arguments carry an unstructured `input.hint`; argument-less commands omit `input` entirely, since the spec makes `hint` required once `input` is present. **Shell builtins** (`provider`, `model`, `mcp`, `lsp`, `permissions`, `hook`, `option`) are **not** advertised — see §4.2. **The advertised set is display-only:** nothing parses a `/name` prefix out of `session/prompt`, so a command the client offers is delivered to the model as literal text instead of being executed (`slash-commands.md:99`) — see §4.2 Q1 |
+| `available_commands_update` | MAY | ✅ emitted on `session/new` (S8, O17) and **executable** (O24): a leading `/name` is resolved against the same sources before `Coordinator.Run` (`internal/acp/commands.go`). Covers **user-invocable skills** (`commands.FromSkillCatalog`), **custom markdown commands** (`commands.LoadCustomCommands`), and **MCP prompts** (`commands.LoadMCPPrompts`). Commands that take arguments carry an unstructured `input.hint`; argument-less commands omit `input` entirely, since the spec makes `hint` required once `input` is present. **Shell builtins** (`provider`, `model`, `mcp`, `lsp`, `permissions`, `hook`, `option`) are **not** advertised — see §4.2. The advisory resolver, its longest-prefix matching and its argument binding are documented in §4.2 Q1 |
 | `current_mode_update` | MAY | ✅ emitted on `session/set_mode` (S9) |
 | `config_option_update` | MAY | ✅ emitted on config change (S9) |
 | `session_info_update` | MAY (ties to `session/list`) | ✅ emitted on `session/new` (S9). Fields are `title`, `updatedAt`, `_meta`; Crush sets title + timestamp |
@@ -133,7 +133,7 @@ capability-gated on client fields the pinned SDK does not model.
 | `resource_link` | MUST | ✅ rendered inline by `buildPrompt` |
 | `image` | OPTIONAL (gated by `promptCapabilities.image`) | ✅ both directions: decoded to `message.Attachment` on input (O7); streamed back as `agent_message_chunk` image blocks on output (O15, `streamAttachments`) |
 | `audio` | OPTIONAL | ✅ both directions: decoded on input (O7); streamed back as audio content blocks on output (O15) |
-| `resource` (embedded) | OPTIONAL (gated by `embeddedContext`) | ⚠️ parsed into prompt (O7) **only for text resources**: `buildPrompt` (`agent.go:847-851`) reads `TextResourceContents` and silently drops `BlobResourceContents` (`content.md:148-160`) |
+| `resource` (embedded) | OPTIONAL (gated by `embeddedContext`) | ✅ text resources are inlined and **blob resources** are handled: image/audio blobs attach as media (MIME sniffed when undeclared), other blobs become a described placeholder (O26/G8) |
 | `annotations` on blocks | OPTIONAL | ❌ ignored |
 
 ### 3.5 Tool calls
@@ -144,8 +144,8 @@ capability-gated on client fields the pinned SDK does not model.
 | Tool kinds: `read/edit/delete/move/search/execute/think/fetch/switch_mode/other` | OPTIONAL taxonomy | ✅ `toolKindFor` maps Crush tools to all kinds incl. `switch_mode` |
 | Tool content: `content` / `diff` / `terminal` | SHOULD | ⚠️ `content` always; `diff` emitted for `edit`/`multiedit` results (from old/new content metadata); `terminal` not emitted (deferred, O8) |
 | `toolCallId`, `name`, `title`, `kind`, `status`, `locations`, `rawInput`, `rawOutput` | `title` required; `name` SHOULD when available; rest optional; **all fields except `toolCallId` are optional in updates** | ✅ `title` (human-readable: tool + primary argument), `kind`, `status`, `locations` (input `path`/`file_path`), `rawInput` (decoded JSON), `rawOutput` (tool result content), and `diff` content for `edit`/`multiedit`. ❌ `name` cannot be emitted: the SDK's `SessionUpdateToolCall`/`ToolCall` **have no `Name` field at all** (verified in v0.13.5 `types_gen.go`), so this needs an SDK bump, not a helper |
-| `session/request_permission` (4 option kinds: `allow_once`/`allow_always`/`reject_once`/`reject_always`) | MUST when needed | ⚠️ bridge implemented, but only **3** of the 4 kinds are offered: `buildPermissionOptions` (`permission.go:131-149`) emits `allow_once`, `allow_always` and `reject_once`, never `reject_always`. The spec's kind list is not a MUST-complete set, so this is a UX gap rather than a violation |
-| Unrecognised permission outcomes | Agents **SHOULD NOT** treat an outcome they don't recognise as approval (`tool-calls.md:248`) | ❌ `mapPermissionOutcome` (`permission.go:152-157`) returns `true` for **any** `optionId` other than the literal `"reject_once"`. A client answering `reject_always` — which the spec defines and Crush neither offers nor understands — is read as **approval** |
+| `session/request_permission` (4 option kinds: `allow_once`/`allow_always`/`reject_once`/`reject_always`) | MUST when needed | ✅ all **4** kinds offered (`buildPermissionOptions`, `permission.go`). `reject_always` is offered but **not remembered**: the grant cache is keyed by `sessionID+toolCallID`, so a remembered decision cannot outlive its own call. That limitation is pre-existing and documented, not a spec violation — the spec only asks that the Agent decides the scope of a remembered decision |
+| Unrecognised permission outcomes | Agents **SHOULD NOT** treat an outcome they don't recognise as approval (`tool-calls.md:248`) | ✅ `mapPermissionOutcome` (`permission.go`) grants on an explicit allow-list (`allow_once`, `allow_always`) and denies everything else, including `reject_always` and any unknown `optionId` (O20) |
 | Client MUST respond `cancelled` to pending permission on `session/cancel` | MUST (client-side duty) | ⚠️ applies to the peer client; agent-side only aborts + returns `cancelled` stop reason |
 
 ### 3.6 Elicitation (`elicitation/create`, `elicitation/complete`)
@@ -222,14 +222,15 @@ Agent MUST `release` terminals it creates.
 ### 3.10 Capability advertising summary
 
 Advertised today: `loadSession:true`, `promptCapabilities{image,audio,embeddedContext:true}`,
-`sessionCapabilities{close,list,additionalDirectories,delete,resume}`, `auth.logout`,
-and `authMethods:[]` (explicitly set to an empty, non-nil slice at
-`agent.go:60`, so it serializes as `[]`).
+`sessionCapabilities{close,delete,list,resume}`, `auth.logout`,
+and `authMethods:[]` (explicitly set to an empty, non-nil slice, so it serializes
+as `[]`).
 
-⚠️ One advertised capability is **behaviourally empty**: `additionalDirectories`
-is echoed back through `session/list` but never applied to a tool root set, so
-the advertised multi-root scope does not exist (§3.14). The remaining gaps are
-behavioural rather than advertising, except this one.
+✅ No advertised capability is behaviourally empty. `additionalDirectories` was
+removed from the advertised set on 2026-11-17 (§3.14, O23) precisely because it
+had no enforcement behind it. What remains unimplemented is behavioural and
+unadvertised: no per-session root set exists (§3.14, OQ-1), and a mode selection
+is recorded and echoed without switching agents (§4.2, OQ-3).
 
 Agent capabilities **not** advertised, and correctly so:
 `sessionCapabilities.systemPrompt` (no system-prompt injection support) and
@@ -311,22 +312,26 @@ its process; ACP does not sandbox it. Every Agent-authored string, URI and path
 is untrusted, *including replayed content*. `clientInfo`/`agentInfo` are
 self-reported and MUST NOT drive security decisions.
 
-**The root set is advertised but not enforced.** This is the one substantive
-finding. `session-setup.md:444-452` defines the session's effective root set as
+**The root set: advertised capability retracted, enforcement still open.**
+`session-setup.md:444-452` defines the session's effective root set as
 `[cwd, ...additionalDirectories]` and says it SHOULD bound tool filesystem
-operations. Crush:
+operations. Crush has no per-session root concept at all, so the earlier state
+advertised `sessionCapabilities.additionalDirectories` while ignoring it.
 
-- advertises `sessionCapabilities.additionalDirectories` (`agent.go:73`);
-- accepts `req.AdditionalDirectories` on `session/new` and stores it purely for
-  `session/list` echo (`agent.go:108-112`);
-- ignores it on `session/load` and `session/resume`;
-- never consults the list anywhere in the tool layer, so `bash`, `view`, `edit`
-  and friends operate on the whole filesystem regardless.
+Resolved 2026-11-17 by **retraction** (O23), not enforcement:
 
-The advertisement therefore promises a scope that does not exist. Either enforce
-the root set at tool-call time (fail closed, compare by path component, per
-`session-setup.md:452`) or stop advertising the capability. Enforcement is the
-larger change: `internal/agent/tools` has no per-session root concept today.
+- `sessionCapabilities.additionalDirectories` is no longer advertised;
+- the request field is ignored rather than half-applied on
+  `session/new`/`load`/`resume`;
+- the `session/list` echo and its `sync.Map` storage were removed;
+- `cwd` **is** validated and compared against this process's workspace on all
+  three setup methods, since it is part of the same root set.
+
+The advertisement therefore no longer promises a scope that does not exist.
+What remains open is enforcement itself (OQ-1): `internal/agent/tools` still has
+no per-session root set, so `bash`, `view`, `edit` and friends operate on the
+whole filesystem. The spec's check is a SHOULD, and a retracted capability is an
+honest position while Crush serves one workspace per process.
 
 **Agent duties Crush does not implement** (all SHOULD, none blocking):
 
@@ -335,7 +340,7 @@ larger change: `internal/agent/tools` has no per-session root concept today.
 | Treat embedded resources, files, tool results and MCP results as data, not instructions | `security.md:50` | ⚠️ prompt structure only; no explicit delimiting |
 | Request permission before sending data off-machine after reading untrusted content | `security.md:51` | ❌ not distinguished from any other network tool |
 | Request permission before writing files that control execution or approval (VCS hooks, editor/agent settings, MCP config) | `security.md:52` | ❌ no such classification in the permission layer |
-| Apply the root set to URIs in prompts | `security.md:41` | ❌ |
+| Apply the root set to URIs in prompts | `security.md:41` | ❌ still open — no root set exists to apply (OQ-1) |
 | Scope `session/list`, loading and resumption to the owning user | `security.md:60` | N/A today — Crush serves one user per process |
 
 **Client duties** (peer side; recorded so they are not mistaken for our gaps):
@@ -394,17 +399,18 @@ diverges from a spec requirement (independent of the §4 completion checkboxes):
     surfaced as `-32603`. ⚠️ Narrower than the spec: `error.md:56` also covers a
     session "not active on the connection", and `requireSession` checks DB
     existence only, so any session id known to the store is accepted from any
-    connection. No per-connection active set exists. Remaining:
-    `session/load`/`session/resume`/`set_mode`/`set_config_option` do not all
-    check yet either.
+    connection. No per-connection active set exists. ✅ The guard now covers
+    `session/prompt`, `session/load`, `session/resume`, `session/set_mode` and
+    `session/set_config_option` (O18); only the per-connection active-set idea
+    remains (G12).
   - invalid `session/list` cursor, or an unknown `configId`/value in
     `session/set_config_option`, or an unknown mode in `session/set_mode`
     → `-32602`. ✅ implemented: cursors are validated in `ListSessions`,
-    `validateConfigOption` checks both option families, and
-    `SetSessionMode` rejects unknown agent ids.
+    `validateConfigOption` checks all three option families (thinking, model,
+    mode), and `SetSessionMode` rejects an unknown or non-selectable mode id.
   - a request other than `initialize` before initialization completes →
-    `-32600`. ❌ no guard in `internal/acp`; the SDK's dispatch does not
-    enforce ordering either.
+    `-32600`. ✅ implemented (O18): `dispatcher.requireInitialized` gates every
+    request method; `session/cancel` is a notification and is exempt.
   - a method the Agent did not advertise → `-32601`. ✅
     `dispatcher.Authenticate` now returns `acp.NewMethodNotFound`.
 - **`usage_update` cost fields.** Spec requires `amount` + `currency` when
@@ -419,18 +425,18 @@ were previously marked done or simply unlisted; each is a real divergence.
 
 | # | Gap | Spec | Status |
 |---|---|---|---|
-| G1 | `reject_always` is never offered; an unrecognised `optionId` is read as **approval** | `tool-calls.md:232-248` | ❌ `buildPermissionOptions` emits 3 of 4 kinds; `mapPermissionOutcome` treats anything but the literal `"reject_once"` as a grant |
-| G2 | `session/delete` is not idempotent | `session-delete.md:85` | ❌ a missing session returns the store error → `-32603` |
-| G3 | `additionalDirectories` advertised but never enforced or applied | `session-setup.md:359,444-452` | ❌ stored for echo only; ignored on load/resume; no tool-layer root set (§3.14) |
-| G4 | `cwd` not validated on `session/load` / `session/resume` | `session-setup.md:359` | ❌ only `session/new` compares it |
-| G5 | No `category:"mode"` config option alongside `modes` | `session-config-options.md:462-471` | ⚠️ SHOULD for agents offering mode-like config |
-| G6 | `currentModeId` hardcoded to `"coder"` | `session-modes.md:58-64` | ⚠️ invalid if that agent is disabled or absent |
-| G7 | `session/load` returns an empty result | `session-setup.md:200` | ⚠️ MAY carry modes/config; `session/resume` already returns them |
-| G8 | Embedded `BlobResourceContents` dropped from the prompt | `content.md:148-160` | ❌ only text resources are parsed |
-| G9 | Advertised slash commands are not runnable | `slash-commands.md:99` | ❌ nothing parses a `/name` prefix from `session/prompt` |
-| G10 | Client-track `fs` returns `-32603` for a missing file | `error.md:60` | ❌ should be `-32002` |
+| G1 | ~~`reject_always` is never offered; an unrecognised `optionId` is read as **approval**~~ | `tool-calls.md:232-248` | ✅ **fixed (O20)**: all four kinds offered; `mapPermissionOutcome` uses an allow-list so an unknown outcome denies |
+| G2 | ~~`session/delete` is not idempotent~~ | `session-delete.md:85` | ✅ **fixed (O21)**: a missing session (`sql.ErrNoRows`) is success; other store errors still surface |
+| G3 | ~~`additionalDirectories` advertised but never enforced or applied~~ | `session-setup.md:359,444-452` | ✅ **resolved by retraction (O23)**: the capability is no longer advertised and the field is ignored. Enforcement remains open — see OQ-1 |
+| G4 | ~~`cwd` not validated on `session/load` / `session/resume`~~ | `session-setup.md:359` | ✅ **fixed (O22)**: `validateCwd` is shared by `session/new`, `session/load` and `session/resume` |
+| G5 | ~~No `category:"mode"` config option alongside `modes`~~ | `session-config-options.md:462-471` | ✅ **fixed (O25)**: a `mode` select carries `category:"mode"` and its selection is recorded per session |
+| G6 | ~~`currentModeId` hardcoded to `"coder"`~~ | `session-modes.md:58-64` | ✅ **fixed (O25)**: derived from the session's selection, always one of `availableModes`; `task` excluded; an empty or stale selection falls back to a real mode |
+| G7 | ~~`session/load` returns an empty result~~ | `session-setup.md:200` | ✅ **fixed (O26)**: returns `modes` and `configOptions`. ✅ The field is implementable — `LoadSessionResponse` has both |
+| G8 | ~~Embedded `BlobResourceContents` dropped from the prompt~~ | `content.md:148-160` | ✅ **fixed (O26)**: decoded; image/audio blobs attach as media (sniffed when MIME is undeclared), anything else becomes a described placeholder |
+| G9 | ~~Advertised slash commands are not runnable~~ | `slash-commands.md:99` | ✅ **fixed (O24)**: a leading `/name` resolves against skills, custom commands and MCP prompts. ACP-local resolver; see OQ-2 |
+| G10 | ~~Client-track `fs` returns `-32603` for a missing file~~ | `error.md:60` | ✅ **fixed (O26)**: `fs.ErrNotExist` answers `-32002` with `data.path` |
 | G11 | `systemPrompt` not supported | `session-setup.md:363-421` | **SDK-blocked, not a Crush decision.** `SystemPrompt` appears on no request type (`NewSessionRequest`/`LoadSessionRequest`/`ResumeSessionRequest` carry only `Meta`, `AdditionalDirectories`, `Cwd`, `McpServers`) and `SessionCapabilities` has no `SystemPrompt` field in v0.13.5. The field is dropped at the SDK boundary, so Crush neither sees it nor needs to reject it. Correctly unadvertised |
-| G12 | `active session on the connection` not tracked | `error.md:56` | ⚠️ `requireSession` checks DB existence only |
+| G12 | `active session on the connection` not tracked | `error.md:56` | ⚠️ `requireSession` checks DB existence only. ✅ It now guards `prompt`, `load`, `resume`, `set_mode` and `set_config_option` (O18); the per-connection active-set idea is still unimplemented |
 
 
 ### 4.2 Verification: commands, YOLO, and feature gaps (2026-09-17)
@@ -439,7 +445,7 @@ Answers to three verification questions asked on `feature/acp`:
 
 #### Q1 — Are commands supported from ACP? How to implement Crush commands in the bridge?
 
-**Partial, and the gap is execution rather than advertising.** The
+**Resolved 2026-11-17 (O24): the gap was execution, not advertising.** The
 `available_commands_update` notification (§3 spec: **MAY**) is emitted on
 `session/new` (`agent.go` `availableCommandsUpdate`) and covers three sources:
 user-invocable skills (`commands.FromSkillCatalog`), custom markdown commands
@@ -448,29 +454,26 @@ Commands that take arguments carry an `input.hint`; argument-less ones omit
 `input` entirely, since the spec requires `hint` whenever `input` is present
 (`slash-commands.md:70-72`).
 
-What is still missing is that **none of it is executable over ACP**. The spec
-says commands "are run as part of regular `session/prompt` requests where the
-Client includes the command text in the prompt", and that "the Agent recognizes
-the command prefix and processes it accordingly" (`slash-commands.md:9,99`).
-Crush has no such recogniser: `Prompt` passes the raw text straight to
-`Coordinator.Run` (`agent.go:294-313`), so `/review` reaches the model as
-literal text. The same is true inside Crush itself, where the TUI resolves
-commands in `internal/ui/model` rather than in the agent layer — so the
-resolution logic exists but is not reachable from `internal/acp`.
+The spec says commands "are run as part of regular `session/prompt` requests
+where the Client includes the command text in the prompt", and that "the Agent
+recognizes the command prefix and processes it accordingly"
+(`slash-commands.md:9,99`). `Prompt` now resolves a leading `/name` against the
+same three sources before `Coordinator.Run`, in `internal/acp/commands.go`:
 
-**The fix is one function, not two paths.** Before `Coordinator.Run`, match a
-leading `/name` against the same three sources `availableCommandsUpdate`
-enumerates, then:
+- **skill** → `Skill.FormatInvocation()`, plus any trailing argument text;
+- **custom markdown command** → `$ARG_*` substitution, arguments bound
+  positionally from the trailing text;
+- **MCP prompt** → `commands.GetMCPPrompt(store, clientID, promptID, args)`.
 
-- **skill** → replace the prompt with `Skill.FormatInvocation()`
-  (`internal/skills/skills.go:325`), plus any trailing argument text;
-- **custom markdown command** → substitute `$ARG_*` placeholders using
-  `internal/ui/model`'s `substituteArgs` semantics;
-- **MCP prompt** → call `commands.GetMCPPrompt(store, clientID, promptID, args)`
-  and use the returned text.
+Matching is longest-prefix, because command ids embed `:` prefixes and path
+separators (`user:foo`, `project:sub/bar`). An unknown `/name` falls through to
+the model unchanged, and so does a command whose required arguments are missing —
+sending a template with `$ARG_X` still in it would be worse than the raw text.
 
-An unknown `/name` should fall through to the model unchanged rather than
-erroring, so ordinary prose that happens to start with a slash still works.
+The resolver is an **ACP-local copy** of the TUI's logic rather than a shared
+helper; the duplication and its drift risk are recorded in **OQ-2**. The TUI
+resolves commands in `internal/ui/model` and can prompt for arguments through a
+dialog, which a prompt has no equivalent of.
 
 **Shell builtins** (`provider`, `model`, `mcp`, `lsp`, `permissions`, `hook`,
 `option`) stay out of scope. They are registered via `shell.RegisterBuiltin`
@@ -559,10 +562,10 @@ have the SDK surface + Crush infrastructure today?
 
 | Feature | Status | Implementable? | Blocker |
 |---|---|---|---|
-| `available_commands_update` | ⚠️ advertised (skills + custom cmds + MCP prompts, with `input.hint`) but **not executable** | Yes | O17 done; the prompt-prefix recogniser is missing, so a client-invoked `/name` reaches the model as text (Q1) |
+| `available_commands_update` | ✅ advertised (skills + custom cmds + MCP prompts, with `input.hint`) **and executable** | — | O17 + O24: a leading `/name` resolves against the same three sources in `internal/acp/commands.go` (Q1, OQ-2) |
 | `usage_update` | ✅ | — | |
 | `current_mode_update` / `config_option_update` / `session_info_update` | ✅ | — | |
-| `session/resume` | ✅ (Option B) | — | Returns mode/config state without replay; capability advertised. `additionalDirectories`/`cwd` gaps shared with `session/load` (G4) |
+| `session/resume` | ✅ (Option B) | — | Returns mode/config state without replay; capability advertised. Validates `cwd` and answers `-32002` for an unknown session (G4/O18); `additionalDirectories` is not applied because the capability is not advertised |
 | Config option with `category:"mode"` alongside `modes` | ❌ | Yes | `session-config-options.md:462-471` SHOULD; Crush sends only `modes` (G5) |
 | Boolean config options (`type:"boolean"`) | ⚠️ emitted ungated | Not with this SDK | SDK gating: `ClientCapabilities.session.configOptions.boolean` is missing in v0.13.5, so the spec's MUST-NOT-until-advertised gate cannot be read (O2 caveat) |
 | Config option `category` | ✅ | — | `model`/`thought_level` set (O14) |
@@ -597,8 +600,10 @@ Phases reflect **verified code state** on branch `feature/acp`.
   `Cancel`, `ListSessions`, `CloseSession`, `ResumeSession`,
   `SetSessionMode`, `SetSessionConfigOption` — all implemented (the last three
   were stubs when this line was first written).
-- [x] **Phase 3** Permission bridge (`allow_always` cache). ⚠️ 3 of the 4 spec
-  option kinds are offered and unrecognised outcomes are read as approval (G1).
+- [x] **Phase 3** Permission bridge (`allow_always` cache). ✅ All four spec
+  option kinds are offered and an unrecognised outcome denies (G1, O20).
+  Limitation: the grant cache is keyed by session+toolCall, so a remembered
+  decision cannot outlive the call it was granted for.
 - [x] **Phase 4** CLI `crush acp` (headless workspace, stderr logging, SIGINT).
 - [x] **Phase 5** Tests: `TestServerStartEndToEnd`, permission roundtrip,
   conformance (moved to `test/acp/spec/`), Tangerg interop, golden.
@@ -610,6 +615,90 @@ Phases reflect **verified code state** on branch `feature/acp`.
 - [x] **Phase 6** `acp.Client` callbacks; subprocess spawn; `Subscribe`.
 - [x] **Phase 7** Client unit tests.
 - [x] **Phase 8** `crush acp connect` CLI + interactive loop (prints `StopReason`).
+
+### Open questions (raised 2026-11-17 when Tier 3b landed)
+
+Each is a decision the Tier 3b batch deliberately did not make. They are recorded
+here rather than in a separate file so they travel with the plan they belong to.
+
+**OQ-1 — Should the root set be enforced?**
+
+Tier 3b **retracted** `sessionCapabilities.additionalDirectories` instead of
+enforcing it, because Crush has no per-session root concept in
+`internal/agent/tools` and a retracted capability is an honest position while
+Crush serves one workspace per process. What is still unaddressed is the spec's
+SHOULD at `session-setup.md:444-452`.
+
+Enforcement would need:
+
+1. a `RootsContextKey` beside `SessionIDContextKey` in
+   `internal/agent/tools/tools.go:22-33`, populated where the tool context is
+   built (`internal/agent/agent.go:807`, `:949`);
+2. a consumer in every path-touching tool: `view.go:113`, `write.go:66`,
+   `edit.go:72`, `multiedit.go:77` (and a documented decision for `bash`, which a
+   path check cannot confine without a sandbox);
+3. a session→roots lookup on `app.App`, since the current storage was deleted;
+4. comparison by path component on the **resolved** path, failing closed
+   (`session-setup.md:452`).
+
+The question for the maintainer is whether a single-workspace ACP server should
+carry this at all, or whether the retraction is the correct resting state.
+
+**OQ-2 — Where should the slash-command resolver live?**
+
+Tier 3b added an **ACP-local** resolver in `internal/acp/commands.go`. The TUI
+keeps its own copy in `internal/ui/model/ui.go:2783-2838`.
+
+The duplication is real and bounded:
+
+| Piece | TUI | ACP |
+|---|---|---|
+| Argument substitution | `substituteArgs` (`ui.go:2832-2838`) | `substituteArgs` (`commands.go`) |
+| Argument collection | `dialog.NewArguments` — asks the user | positional binding from trailing text |
+| Skill invocation | `Skill.FormatInvocation()` | identical |
+| MCP prompt | `runMCPPrompt` | `commands.GetMCPPrompt` |
+
+The documented drift risk: if the TUI's `$NAME` rule or the argument-collection
+semantics change, the ACP copy will not follow. The alternative is one exported
+resolver in `internal/commands` that both paths call, which was declined for this
+batch to keep the TUI untouched.
+
+**OQ-3 — Should `session/set_mode` actually switch the agent?**
+
+Tier 3b makes mode switching **advisory**: the selection is validated, recorded
+per session and echoed through `current_mode_update` and the `mode` config
+option, but nothing calls `SetMainAgent`.
+
+Why it is not wired: `Coordinator.SetMainAgent` (`internal/agent/coordinator.go:337-347`)
+mutates `mainAgent`/`mainAgentName` on the shared coordinator, which is
+**workspace-wide, not per session**. Under `crush acp` (one session per process)
+that is harmless. Behind the HTTP backend it would silently change every session
+on the connection, and `tool-calls.md:251` explicitly says an Agent should not
+reduce user oversight without user action.
+
+#### Preliminary research: what "mode" means in Crush
+
+Three different concepts share the word. Only the first is what ACP's `modes`
+field means.
+
+| Layer | Values | Where | ACP-visible |
+|---|---|---|---|
+| **Selectable agents** (`modes`) | `coder`, `plan` | `config.go:62-63`; built in `SetupAgents` (`config.go:1155-1191`) | ✅ yes, via `modeState` |
+| **Agents, internal** | `task` | `config.go:64`; `SetupAgents:1168`; consumed by `internal/agent/agent_tool.go:36` | ⚠️ **leaked** before Tier 3b — `modeState` and `SetSessionMode` accepted it; now excluded by `selectableModes` |
+| **Custom agents** | any key in `cfg.Agents` | user config, `Disabled` filtered | ✅ yes — the set is open-ended |
+| **TUI input mode** | `uiInputModeCode`, `uiInputModePlan` | `internal/ui/model/ui.go:136-137`; maps to `coder`/`plan` via `setInputMode` (`ui.go:5067-5075`) | ❌ a UI affordance over the same agents |
+| **Permission mode** | `PermissionModeNormal`, `PermissionModeYolo`, `PermissionModeSysadmin` | `internal/permission/permission.go:41-46` | ❌ orthogonal state on `permission.Service`, not an agent |
+
+Findings carried into the implementation:
+
+1. **`task` must never be a session mode.** It is the subagent profile with
+   `resolveTaskTools` and no MCP/LSP access; selecting it as the main agent would
+   silently degrade the session. Fixed in `selectableModes`.
+2. **YOLO is not a mode.** It lives on `permission.Service`; §4.2 Q2 already
+   scopes it correctly as an `_yolo` boolean config option.
+3. **A real switch is workspace-wide.** Wiring `set_mode` to `SetMainAgent`
+   needs per-session agent selection in the coordinator first. That is the open
+   question, not a missing field.
 
 ### Roadmap: remaining spec requirements (prioritized)
 
@@ -679,7 +768,7 @@ current code state from §3.
 - [x] **O1.** Return `modes` + `configOptions` in `session/new` response.
 - [x] **O2.** Boolean config options — **IMPLEMENT** (`thinking` toggle on
   `SelectedModel.Think` via `UpdatePreferredModel` + `UpdateAgentModel`). See §6.1. (`agent.go`.)
-- [x] **O3.** `additionalDirectories` capability + handling in `/new`, `/list` (echo back via `SessionInfo`). See §6.2. ⚠️ Echo only: the advertised root set is never enforced, and `session/load`/`session/resume` ignore the field (G3, G4).
+- [x] **O3.** `additionalDirectories` capability + handling in `/new`, `/list` (echo back via `SessionInfo`). See §6.2. ✅ **Superseded 2026-11-17 by O23**: the capability was retracted rather than left unenforced, so there is no echo to maintain. The decision record in §6.2 is kept for history.
 - [x] **O4.** `session/delete` + `sessionCapabilities.delete` — ✅ IMPLEMENT
   (`UnstableDeleteSession`). See §6.2. ⚠️ Not idempotent: a missing session
   answers `-32603` instead of succeeding silently or answering `-32002` (G2).
@@ -701,33 +790,43 @@ current code state from §3.
   (`Client.Subscribe` drain goroutine). See §6.1. (`acp_client.go`.)
 
 **Tier 3b — Gaps found in the 2026-11-17 audit (§4.1b)**
-- [ ] **O20. Permission option kinds and outcomes (G1).** Offer `reject_always`
-  so all four spec kinds exist, and replace `mapPermissionOutcome`'s
-  "anything but `reject_once` is a grant" rule with an explicit allow-list so an
-  unrecognised `optionId` is treated as a denial (`tool-calls.md:248`).
-  Small, self-contained, and the only item here with a security consequence.
-- [ ] **O21. `session/delete` idempotency (G2).** Treat a not-found session as
-  success in `UnstableDeleteSession` (`session-delete.md:85`). One branch.
-- [ ] **O22. `additionalDirectories` on load/resume + `cwd` validation (G4).**
-  Replace the stored root list on `session/load`/`session/resume` so the request
-  list is authoritative, and validate `req.Cwd` the same way `session/new` does.
-  Enforcement of the root set itself is O23.
-- [ ] **O23. Enforce the root set (G3, §3.14).** The largest item here: give the
-  tool layer a per-session root set and fail closed on paths outside it, or stop
-  advertising `sessionCapabilities.additionalDirectories`. Enforcement touches
-  `internal/agent/tools` and needs a session→roots lookup the app can serve.
-- [ ] **O24. Slash-command recogniser (G9).** Resolve a leading `/name` in
-  `session/prompt` against skills, custom commands and MCP prompts before
-  `Coordinator.Run`. Without it every advertised command is display-only. See
-  §4.2 Q1 for the intended shape.
-- [ ] **O25. Mode/config parity (G5, G6).** Emit a `category:"mode"` config
-  option alongside `modes` (`session-config-options.md:462-471`), and derive
-  `currentModeId` from an available mode instead of hardcoding `"coder"`
-  (`session-modes.md:58-64`).
-- [ ] **O26. Small conformance leftovers.** `session/load` returning
-  modes/config like `session/resume` does (G7); embedded
-  `BlobResourceContents` in `buildPrompt` (G8); `-32002` for a missing file in
-  the client track (G10).
+- [x] **O20. Permission option kinds and outcomes (G1).** ✅ IMPLEMENTED
+  (2026-11-17): `buildPermissionOptions` emits all four spec kinds, and
+  `mapPermissionOutcome` grants only on an explicit allow-list, so `reject_always`
+  and any unrecognised `optionId` deny (`tool-calls.md:248`). `reject_always` is
+  not remembered: the grant cache is keyed by `sessionID+toolCallID`. Tests:
+  `TestBuildPermissionOptions`, `TestMapPermissionOutcome`.
+- [x] **O21. `session/delete` idempotency (G2).** ✅ IMPLEMENTED (2026-11-17):
+  `UnstableDeleteSession` treats `sql.ErrNoRows` as success and still surfaces
+  other store errors (`session-delete.md:85`). Fixed at the agent, not in
+  `session.Service.Delete`, so `crush session rm` and the HTTP path are
+  unchanged. Tests: `TestUnstableDeleteSession`,
+  `TestConformanceDeleteIsIdempotent`.
+- [x] **O22. `cwd` validation on load/resume (G4).** ✅ IMPLEMENTED
+  (2026-11-17): `validateCwd` is shared by `session/new`, `session/load` and
+  `session/resume`, and `requireSession` answers `-32002` on all three. The
+  `additionalDirectories` half of this item was resolved by retraction (O23).
+- [x] **O23. Root set advertising (G3, §3.14).** ✅ RESOLVED BY RETRACTION
+  (2026-11-17): `sessionCapabilities.additionalDirectories` is no longer
+  advertised, the `sync.Map` echo storage is gone, and the request field is
+  ignored rather than half-applied. Enforcement is still open — see **OQ-1**.
+- [x] **O24. Slash-command recogniser (G9).** ✅ IMPLEMENTED (2026-11-17):
+  `internal/acp/commands.go` resolves a leading `/name` against skills, custom
+  commands and MCP prompts before `Coordinator.Run`, with longest-prefix
+  matching, positional argument binding and pass-through for unknown names.
+  ACP-local copy, not shared with the TUI — see **OQ-2**. Tests:
+  `internal/acp/commands_test.go`.
+- [x] **O25. Mode/config parity (G5, G6).** ✅ IMPLEMENTED (2026-11-17) as an
+  **advisory** mode: a `category:"mode"` select is emitted alongside `modes`,
+  its selection is recorded per session, `currentModeId` is derived from that
+  selection (never a hardcoded `"coder"`), `selectableModes` sorts and excludes
+  `config.AgentTask`, and `validateConfigOption` accepts `configId:"mode"`.
+  No call to `SetMainAgent`. Remaining question: **OQ-3**.
+- [x] **O26. Small conformance leftovers.** ✅ IMPLEMENTED (2026-11-17):
+  `session/load` returns `modes`/`configOptions` (G7); embedded
+  `BlobResourceContents` is decoded and attached as media or described as a
+  placeholder (G8); the client-track `fs` answers `-32002` for a missing file
+  (G10). Tests: `TestBuildPromptBlobResource`, `TestClientReadTextFile`.
 
 
 > **Deferred** — grouped by the *actual* blocker (SDK vs missing Crush work):
@@ -763,6 +862,28 @@ implementation batch). Each entry records the finding that drove the call.
 
 - **SDK bump (S5/S6 gate).** No version newer than `coder/acp-go-sdk@v0.13.5`
   exists in the module proxy. S5/S6 stay SDK-gated; revisit on next SDK release.
+
+- **O25 — mode switching stays advisory.** The `mode` config option and
+  `session/set_mode` both record the selection in `crushAgent.activeMode` and
+  echo it, but neither calls `SetMainAgent`. Reason: `Coordinator.SetMainAgent`
+  (`internal/agent/coordinator.go:337-347`) mutates the shared coordinator, so a
+  switch is workspace-wide rather than per-session — harmless under `crush acp`
+  (one session per process), wrong behind the HTTP backend, and against
+  `tool-calls.md:251` ("should not switch to a mode that reduces user
+  oversight without user action"). Open question tracked as OQ-3.
+
+- **O23 — retract rather than enforce.** Advertised-but-unenforced
+  `additionalDirectories` was removed from `Initialize`, along with the
+  echo-only `sync.Map` and the `session/list` field. A capability the Agent
+  cannot honour is worse than an absent one, and enforcement needs a root set
+  the tool layer does not have. Open question tracked as OQ-1.
+
+- **O24 — ACP-local resolver, not a shared one.** `internal/acp/commands.go`
+  duplicates the TUI's `substituteArgs` and skill/MCP resolution rather than
+  exporting a shared helper from `internal/commands`. The TUI's path runs
+  through `dialog.ActionRunCustomCommand` and can ask the user for arguments;
+  a prompt cannot, so the two differ in argument collection anyway. Drift risk
+  recorded as OQ-2.
 
 - **S2 — `user_message_chunk` on live prompt: NOT ECHOED; load replay DOES emit.**
   Correction from spec audit: `user_message_chunk` is *not* client→agent only, and
@@ -822,12 +943,14 @@ implementation batch). Each entry records the finding that drove the call.
 
 ### 6.2 Decisions log — optional group (O3–O6, O12–O13)
 
-- **O3 — `additionalDirectories`: IMPLEMENT (advertise + echo).** Advertise
-  `sessionCapabilities.additionalDirectories` and accept `NewSessionRequest.AdditionalDirectories`,
-  storing them per session in a `sync.Map` and echoing them back via
-  `SessionInfo.AdditionalDirectories` in `ListSessions`. Crush has no multi-root
-  model, so they are persisted for round-tripping only; they do not change the
-  agent's filesystem scope.
+- **O3 — `additionalDirectories`: SUPERSEDED 2026-11-17 by O23.** The original
+  decision was to advertise `sessionCapabilities.additionalDirectories`, accept
+  `NewSessionRequest.AdditionalDirectories`, store them per session in a
+  `sync.Map` and echo them back via `SessionInfo.AdditionalDirectories` in
+  `ListSessions`, with the note that Crush has no multi-root model so they were
+  persisted for round-tripping only. That left an advertised capability with no
+  behaviour behind it, so the capability, the storage and the echo were all
+  removed in Tier 3b. Enforcement is tracked as OQ-1.
 
 - **O4 — `session/delete`: IMPLEMENT.** Advertise `sessionCapabilities.delete`
   (SDK `SessionDeleteCapabilities`, UNSTABLE) and implement `UnstableDeleteSession`:
@@ -882,13 +1005,15 @@ implementation batch). Each entry records the finding that drove the call.
   (`newAvailableCommand`, `commandHint`). Shell builtins stay out on purpose.
   (`agent.go` `availableCommandsUpdate`.) ⚠️ Advertising only: the prompt-side
   recogniser is missing, so the commands cannot actually run (O24, G9).
-- [ ] **O18. Spec error codes** — ✅ PARTIAL: `-32602` for a bad
-  `session/list` cursor and unknown `configId`/value/mode, `-32601` for
-  `authenticate`, `-32002` for a missing session on `session/prompt`. Still
-  open: the same `-32002` guard on `session/load`/`resume`/`set_mode`/
-  `set_config_option`, the `-32600` before-initialize guard, and the
-  per-connection active-session concept that `error.md:56` assumes but
-  `requireSession` does not implement (G12). All SHOULD-level. See §4.1, §4.1b.
+- [x] **O18. Spec error codes** — ✅ IMPLEMENTED (2026-11-17): `-32602` for a
+  bad `session/list` cursor and an unknown `configId`/value/mode, `-32601` for
+  `authenticate`, `-32600` for any request before `initialize`
+  (`dispatcher.requireInitialized`), and `-32002` for a missing session on
+  `prompt`/`load`/`resume`/`set_mode`/`set_config_option`. Remaining and
+  un-implemented: the per-connection active-session concept that `error.md:56`
+  assumes but `requireSession` does not implement (G12). All SHOULD-level.
+  See §4.1, §4.1b. Tests: `TestConformanceRejectsRequestBeforeInitialize`,
+  `TestConformanceUnknownSessionOnSetupMethods`.
 - [x] **O19. `session/list` pagination** — ✅ IMPLEMENTED (2026-11-13):
   opaque offset cursors, `nextCursor` while more remain, 50-entry pages,
   `-32602` on a malformed cursor, and `cwd` filtering. See §3.2.
@@ -897,16 +1022,27 @@ implementation batch). Each entry records the finding that drove the call.
   `TestListSessionsEmptyReturnsEmptySlice`.
 
 **Tier 4 — Tests** (gate each Tier 1–3 item)
-- [ ] Regression tests per missing update type; `TestConformanceSessionLoad`;
-  elicitation roundtrip; `_meta` passthrough; cancellation `cancelled` outcome.
+- [ ] Regression tests per missing update type; elicitation roundtrip; `_meta`
+  passthrough; cancellation `cancelled` outcome.
   Already present and passing: `TestConformanceInitialize/NewSession/PromptEndTurn/
   SessionSetupAndUnsupportedMethods/SessionLifecycle/SessionLoad/CancelDuringPrompt/
   MultipleSessions/SessionUpdates/ContentBlockVariants/InitializeCapabilities/
   InvalidSessionError` and `TestGolden*`, `TestZed*`, `TestStdio*` in `test/acp/spec/`.
-  ⚠️ Nothing yet covers the `-32600` before-initialize guard (unimplemented, O18), the
-  per-connection active-session concept (O18/G12), slash-command resolution
-  (O24/G9), or the permission-outcome allow-list (O20/G1) — new tests are needed
-  alongside those fixes.
+- [x] Tier 3b coverage added 2026-11-17:
+  `TestConformanceRejectsRequestBeforeInitialize` (`-32600`),
+  `TestConformanceUnknownSessionOnSetupMethods` (`-32002` on load/resume/
+  set_mode/set_config_option), `TestConformanceDeleteIsIdempotent`,
+  `TestBuildPermissionOptions`/`TestMapPermissionOutcome` (four kinds,
+  allow-list), `TestInitializeOmitsAdditionalDirectories`,
+  `TestNewSessionIgnoresAdditionalDirectories`, `TestValidateCwd`,
+  `TestUnstableDeleteSession`, `TestConfigOptionsIncludesMode`,
+  `TestSelectableModesExcludesTaskAndDisabled`,
+  `TestDefaultModeFallsBackWhenCoderMissing`, `TestModeStateReportsCurrentMode`,
+  `TestBuildPromptBlobResource`, and the whole of
+  `internal/acp/commands_test.go` for the slash-command resolver.
+- [ ] Still uncovered: the per-connection active-session concept (G12), MCP
+  prompt resolution end-to-end (needs a live MCP client), and blob attachments
+  flowing all the way through `Coordinator.Run`.
 
 ## 7. Test strategy
 
@@ -917,8 +1053,10 @@ CRUSH_BIN=$(go build -o /tmp/crush .) \
   go test -tags e2e ./test/acp/ -count=1       # subprocess e2e
 ./test/acp/run.sh all                          # full runner (unit/spec/interop/sdk/e2e)
 ```
-- Unit: permission logic, server roundtrip (`TestServerStartEndToEnd`),
-  event bridge lifecycle, client subscribe/permission/IO.
+- Unit: permission logic (four kinds + allow-list), server roundtrip
+  (`TestServerStartEndToEnd`), event bridge lifecycle, client
+  subscribe/permission/IO, mode selection helpers, and the slash-command resolver
+  (`internal/acp/commands_test.go`).
 - Golden: 33 JSON fixtures in `test/acp/spec/testdata/json_golden`.
 - Cross-SDK: Tangerg/acp fixtures + Zed transcript in `test/acp/spec/testdata/tangerg`.
 - OpenAgents conformance harness: documented in `test/acp/README.md`, not wired
@@ -936,9 +1074,6 @@ content, and output-side image/audio. See §3.3/§3.5 status and §4.
 
 Genuinely still open:
 - **MCP stdio connect at session setup** (§3.12) — **spec MUST baseline, NOT met.** `req.McpServers` is ignored; no per-session `mcp.Initialize`. Highest-priority remaining gap.
-- **Slash commands are advertised but not executable** (§4.2 Q1, O24/G9) — a client-invoked `/name` reaches the model as literal text. Affects every command Crush advertises, not just shell builtins.
-- **The advertised root set is not enforced** (§3.14, O23/G3) — `additionalDirectories` is echoed through `session/list` but never bounds a tool. Either enforce it or stop advertising it.
-- **Permission outcomes** (O20/G1) — a `reject_always` or any unrecognised `optionId` is read as approval (`permission.go:152`).
 - **Tool `name` field and `terminal` tool content** (§3.5, §4.1) — `name` is SHOULD on the wire: the SDK's `SessionUpdateToolCall`/`ToolCall` have no `Name` field at all and no start/update helper, so it cannot be emitted with v0.13.5; `terminal` needs the deferred terminal subsystem (O8).
 - **Boolean client-capability gate** (SDK-blocked, §4.1) — `ClientCapabilities` has no `session` field in v0.13.5, so a `type:"boolean"` option is emitted regardless of client support (spec: MAY only after advertisement).
 - **`messageId`** on chunks (MAY in spec; UNSTABLE in pinned SDK — S5).
@@ -949,14 +1084,15 @@ Genuinely still open:
   returns when the SDK cancels the request context.
 - **Terminal callbacks** in client track (O8, deferred) + terminal-auth methods (§4.1 — SDK *does* model these; not implemented).
 - **Annotations on content blocks** (O16, MAY, low priority).
-- **`session/delete` idempotency** (O21/G2), **mode/config parity** (O25/G5, G6),
-  and the **small leftovers** in O26 (G7, G8, G10) — all recorded in §4.1b.
 - **`systemPrompt`** (`session-setup.md:363-421`) — correctly unadvertised and
   **SDK-blocked**: no request type carries the field and `SessionCapabilities`
   has no `SystemPrompt` member in v0.13.5 (G11).
 - **Session list pagination** (SHOULD) — ✅ DONE (O19): cursors, `nextCursor`, page bound and `-32602` on a bad cursor are all implemented; only `SessionInfo._meta` remains unpopulated.
-- **`available_commands_update`** (MAY) — ⚠️ PARTIAL (O17): skills, custom markdown commands and MCP prompts are advertised with `input.hint`, but nothing resolves them on the prompt path (O24). Shell builtins are still not exposed at all.
-- **Spec error codes** (SHOULD) — ✅ PARTIAL (O18): `-32602` (bad cursor, unknown `configId`/value/mode), `-32601` (`authenticate`) and `-32002` on `session/prompt` are done. Remaining: `-32002` on the other session-scoped methods, the `-32600` before-initialize guard, and the per-connection active-session concept (G12).
+- **`available_commands_update`** (MAY) — ✅ DONE (O17 + O24): skills, custom markdown commands and MCP prompts are advertised with `input.hint` **and** resolved on the prompt path. Shell builtins are still not exposed at all.
+- **Spec error codes** (SHOULD) — ✅ DONE (O18/O20/O21): `-32602` (bad cursor, unknown `configId`/value/mode), `-32601` (`authenticate`), `-32002` on `prompt`/`load`/`resume`/`set_mode`/`set_config_option`, `-32600` before initialize, and `-32002` for a missing file in the client fs track. Remaining: the per-connection active-session concept (G12).
+- **Mode switching is advisory** (O25/OQ-3) — the mode is validated, recorded and echoed but does not change the agent, because `SetMainAgent` is workspace-wide.
+- **Slash-command resolver duplication** (O24/OQ-2) — the ACP copy in `internal/acp/commands.go` and the TUI copy in `internal/ui/model` are separate.
+- **Root-set enforcement** (OQ-1) — the capability is no longer advertised (§3.14), but no tool-layer root set exists either.
 - **Session compaction / notices** (`compaction_update`, `compaction_summary_chunk`, `notice`) — MAY update types in v1, each gated on a `clientCapabilities.session.*` field that the pinned SDK does not model. Not emitted; also not replayable on `session/load` (§3.3).
 
 Resolved 2026-09-22: `session/load` full-history replay (R7, tool/thought/result parts), tool-call `pending`/`failed` lifecycle (S10), tool `title`/`locations`/`rawInput`/`rawOutput`/`diff`, `plan` updates from todos results (S4), `_meta` echo (S7), `session/resume` (O5), config `category` (O14), output-side image/audio (O15).
@@ -966,7 +1102,9 @@ completeness for skills/custom commands/MCP prompts with `input.hint` (O17).
 
 Audited 2026-11-17: all 22 spec files re-read against the code. That pass found
 twelve gaps the plan had either marked closed or never listed — see §4.1b and
-Tier 3b (O20–O26). Nothing above should be read as "all done" without them.
+Tier 3b (O20–O26). All seven Tier 3b items were then implemented the same day;
+G1–G10 and G12's method coverage are closed, and the three decisions the batch
+declined to make are recorded as **OQ-1/OQ-2/OQ-3**.
 
 All baseline methods, the permission bridge, fs read/write, text/resource_link
 content, `session/close`/`list`/`delete`, stdio transport, and capability
@@ -979,9 +1117,14 @@ advertising are present. The MUST-level gap is the **MCP stdio baseline**
    surface at all. Neither is a MUST violation under the spec's "omitted means
    unsupported" rule so long as the client tolerates the extra updates, which a
    v1 client must (G-recorded in §4.1).
-2. `additionalDirectories` is advertised without being enforced (§3.14, O23).
-   This is the one place where an advertised capability is behaviourally empty,
-   which the tolerated-extras argument above does **not** cover.
+2. A session mode is recorded and echoed but switches nothing (OQ-3), and
+   `reject_always`/`allow_always` are remembered only for the call they were
+   granted for (`permissionBridge.permitted` is keyed by session+toolCall). Both
+   are honest limitations of the current bridge, not advertised capabilities
+   that do nothing.
+3. `additionalDirectories` is no longer advertised at all, so there is no
+   capability promising a scope Crush does not enforce. Enforcement itself
+   remains open (OQ-1).
 3. Advertised slash commands cannot be invoked (§4.2 Q1, O24) — the palette is
    populated, but a `/name` prompt is not recognised.
 

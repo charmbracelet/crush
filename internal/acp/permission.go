@@ -128,6 +128,9 @@ func (b *permissionBridge) pushToolCallStatus(ctx context.Context, sessionID, to
 }
 
 // buildPermissionOptions creates ACP permission options from Crush's action type.
+// All four kinds the spec defines are offered (tool-calls.md:232-235). The
+// allow-once option stays first so a client that picks the first option by
+// default grants rather than denies.
 func buildPermissionOptions(_ string) []acp.PermissionOption {
 	return []acp.PermissionOption{
 		{
@@ -145,15 +148,27 @@ func buildPermissionOptions(_ string) []acp.PermissionOption {
 			Name:     "Reject once",
 			Kind:     acp.PermissionOptionKindRejectOnce,
 		},
+		{
+			OptionId: acp.PermissionOptionId("reject_always"),
+			Name:     "Reject always",
+			Kind:     acp.PermissionOptionKindRejectAlways,
+		},
 	}
 }
 
 // mapPermissionOutcome converts an ACP outcome to a boolean grant decision.
+// Only the two allow options grant: the spec requires that an unrecognised
+// outcome is never treated as approval (tool-calls.md:248).
 func mapPermissionOutcome(outcome acp.RequestPermissionOutcome) bool {
-	if outcome.Selected != nil {
-		return outcome.Selected.OptionId != "reject_once"
+	if outcome.Selected == nil {
+		return false
 	}
-	return false
+	switch outcome.Selected.OptionId {
+	case acp.PermissionOptionId("allow_once"), acp.PermissionOptionId("allow_always"):
+		return true
+	default:
+		return false
+	}
 }
 
 // isAllowAlways checks if the outcome indicates a permanent grant.

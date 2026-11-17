@@ -14,6 +14,9 @@ type stubSessionService struct {
 	mu       sync.Mutex
 	sessions []session.Session
 	nextID   int
+	// deleteErr, when set, is returned by Delete. Tests use it to exercise the
+	// not-found path without a real store.
+	deleteErr error
 }
 
 func (s *stubSessionService) Subscribe(_ context.Context) <-chan pubsub.Event[session.Session] {
@@ -62,7 +65,7 @@ func (s *stubSessionService) UpdateTitleAndUsage(_ context.Context, _, _ string,
 	return nil
 }
 func (s *stubSessionService) Rename(_ context.Context, _, _ string) error { return nil }
-func (s *stubSessionService) Delete(_ context.Context, _ string) error    { return nil }
+func (s *stubSessionService) Delete(_ context.Context, _ string) error    { return s.deleteErr }
 func (s *stubSessionService) CreateAgentToolSessionID(_, _ string) string { return "tool-session" }
 func (s *stubSessionService) ParseAgentToolSessionID(_ string) (string, string, bool) {
 	return "", "", true

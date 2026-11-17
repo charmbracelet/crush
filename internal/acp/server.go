@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"sync/atomic"
 
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/message"
@@ -35,6 +36,12 @@ type Agent interface {
 	SetSessionConfigOption(ctx context.Context, req acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error)
 	Logout(ctx context.Context, req acp.LogoutRequest) (acp.LogoutResponse, error)
 	UnstableDeleteSession(ctx context.Context, req acp.UnstableDeleteSessionRequest) (acp.UnstableDeleteSessionResponse, error)
+	// ValidateCwd reports whether a session cwd names this workspace.
+	ValidateCwd(cwd string) error
+	// SessionExists reports whether the store knows a session.
+	SessionExists(ctx context.Context, sessionID acp.SessionId) bool
+	// SessionState reports the mode and config-option payload for a session.
+	SessionState(sessionID acp.SessionId) (*acp.SessionModeState, []acp.SessionConfigOption)
 }
 
 // NewServer creates a new ACP server that connects to the given peer.
@@ -76,6 +83,19 @@ type dispatcher struct {
 	agent Agent
 	app   *app.App
 	conn  *acp.AgentSideConnection
+	// initialized records that session/initialize completed on this connection.
+	// Every other request is rejected with -32600 until it is set (error.md:62-64).
+	initialized atomic.Bool
+}
+
+// requireInitialized rejects a request that arrived before initialization
+// completed. The spec makes this a SHOULD, and the reason it matters is that an
+// early request otherwise looks like a working session to the client.
+func (d *dispatcher) requireInitialized(method string) error {
+	if d.initialized.Load() {
+		return nil
+	}
+	return acp.NewInvalidRequest(map[string]any{"method": method})
 }
 
 // Authenticate answers -32601. Crush advertises no auth methods, so the spec
@@ -87,26 +107,46 @@ func (d *dispatcher) Authenticate(_ context.Context, _ acp.AuthenticateRequest) 
 }
 
 func (d *dispatcher) Logout(ctx context.Context, req acp.LogoutRequest) (acp.LogoutResponse, error) {
+	if err := d.requireInitialized("logout"); err != nil {
+		return acp.LogoutResponse{}, err
+	}
 	return d.agent.Logout(ctx, req)
 }
 
 func (d *dispatcher) Initialize(ctx context.Context, req acp.InitializeRequest) (acp.InitializeResponse, error) {
-	return d.agent.Initialize(ctx, req)
+	resp, err := d.agent.Initialize(ctx, req)
+	if err != nil {
+		return acp.InitializeResponse{}, err
+	}
+	d.initialized.Store(true)
+	return resp, nil
 }
 
 func (d *dispatcher) NewSession(ctx context.Context, req acp.NewSessionRequest) (acp.NewSessionResponse, error) {
+	if err := d.requireInitialized("session/new"); err != nil {
+		return acp.NewSessionResponse{}, err
+	}
 	return d.agent.NewSession(ctx, req)
 }
 
 func (d *dispatcher) ListSessions(ctx context.Context, req acp.ListSessionsRequest) (acp.ListSessionsResponse, error) {
+	if err := d.requireInitialized("session/list"); err != nil {
+		return acp.ListSessionsResponse{}, err
+	}
 	return d.agent.ListSessions(ctx, req)
 }
 
 func (d *dispatcher) CloseSession(ctx context.Context, req acp.CloseSessionRequest) (acp.CloseSessionResponse, error) {
+	if err := d.requireInitialized("session/close"); err != nil {
+		return acp.CloseSessionResponse{}, err
+	}
 	return d.agent.CloseSession(ctx, req)
 }
 
 func (d *dispatcher) ResumeSession(ctx context.Context, req acp.ResumeSessionRequest) (acp.ResumeSessionResponse, error) {
+	if err := d.requireInitialized("session/resume"); err != nil {
+		return acp.ResumeSessionResponse{}, err
+	}
 	return d.agent.ResumeSession(ctx, req)
 }
 
@@ -116,6 +156,19 @@ func (d *dispatcher) ResumeSession(ctx context.Context, req acp.ResumeSessionReq
 // user/agent text chunks, agent thought chunks, and tool calls with their
 // terminal status and result content.
 func (d *dispatcher) LoadSession(ctx context.Context, req acp.LoadSessionRequest) (acp.LoadSessionResponse, error) {
+	if err := d.requireInitialized("session/load"); err != nil {
+		return acp.LoadSessionResponse{}, err
+	}
+	if err := d.agent.ValidateCwd(req.Cwd); err != nil {
+		return acp.LoadSessionResponse{}, err
+	}
+	if !d.agent.SessionExists(ctx, req.SessionId) {
+		return acp.LoadSessionResponse{}, &acp.RequestError{
+			Code:    acpErrorResourceNotFound,
+			Message: "Resource not found",
+			Data:    map[string]any{"sessionId": string(req.SessionId)},
+		}
+	}
 	sessionID := string(req.SessionId)
 	msgs, err := d.app.Messages.List(ctx, sessionID)
 	if err != nil {
@@ -211,27 +264,46 @@ func (d *dispatcher) LoadSession(ctx context.Context, req acp.LoadSessionRequest
 			}
 		}
 	}
-	return acp.LoadSessionResponse{}, nil
+	// Return the same setup payload session/new and session/resume carry, so a
+	// client that loads a session can render its mode and config controls
+	// without a second round-trip (session-setup.md:200).
+	modes, configOptions := d.agent.SessionState(req.SessionId)
+	return acp.LoadSessionResponse{Modes: modes, ConfigOptions: configOptions}, nil
 }
 
 // UnstableDeleteSession forwards the session/delete request to the agent.
 func (d *dispatcher) UnstableDeleteSession(ctx context.Context, req acp.UnstableDeleteSessionRequest) (acp.UnstableDeleteSessionResponse, error) {
+	if err := d.requireInitialized("session/delete"); err != nil {
+		return acp.UnstableDeleteSessionResponse{}, err
+	}
 	return d.agent.UnstableDeleteSession(ctx, req)
 }
 
+// Cancel is a notification, so it has no error channel to report -32600
+// through; the SDK's own dispatch handles a notification for an unknown method.
+// A cancel that arrives before initialization simply finds nothing to cancel.
 func (d *dispatcher) Cancel(ctx context.Context, req acp.CancelNotification) error {
 	return d.agent.Cancel(ctx, req)
 }
 
 func (d *dispatcher) Prompt(ctx context.Context, req acp.PromptRequest) (acp.PromptResponse, error) {
+	if err := d.requireInitialized("session/prompt"); err != nil {
+		return acp.PromptResponse{}, err
+	}
 	return d.agent.Prompt(ctx, req)
 }
 
 func (d *dispatcher) SetSessionMode(ctx context.Context, req acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
+	if err := d.requireInitialized("session/set_mode"); err != nil {
+		return acp.SetSessionModeResponse{}, err
+	}
 	return d.agent.SetSessionMode(ctx, req)
 }
 
 func (d *dispatcher) SetSessionConfigOption(ctx context.Context, req acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
+	if err := d.requireInitialized("session/set_config_option"); err != nil {
+		return acp.SetSessionConfigOptionResponse{}, err
+	}
 	return d.agent.SetSessionConfigOption(ctx, req)
 }
 

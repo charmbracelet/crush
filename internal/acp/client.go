@@ -3,8 +3,10 @@ package acp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -252,6 +254,16 @@ func (cc *crushClient) RequestPermission(_ context.Context, params acp.RequestPe
 func (cc *crushClient) ReadTextFile(_ context.Context, params acp.ReadTextFileRequest) (acp.ReadTextFileResponse, error) {
 	data, err := os.ReadFile(params.Path)
 	if err != nil {
+		// A missing file is a referenced resource that does not exist, which
+		// the spec answers with -32002 rather than a generic failure
+		// (error.md:38,60).
+		if errors.Is(err, fs.ErrNotExist) {
+			return acp.ReadTextFileResponse{}, &acp.RequestError{
+				Code:    acpErrorResourceNotFound,
+				Message: "Resource not found",
+				Data:    map[string]any{"path": params.Path},
+			}
+		}
 		return acp.ReadTextFileResponse{}, fmt.Errorf("read file: %w", err)
 	}
 	content := string(data)

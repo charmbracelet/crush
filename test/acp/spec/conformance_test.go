@@ -2,6 +2,8 @@ package acp
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"io"
 	"log/slog"
 	"sync"
@@ -288,6 +290,11 @@ func TestConformanceNewSession(t *testing.T) {
 	}()
 
 	client := acp.NewClientSideConnection(newStubClient(), c2aW, a2cR)
+	// session/new is rejected with -32600 until initialize completes
+	// (error.md:64), so the handshake comes first.
+	if _, err := client.Initialize(t.Context(), acp.InitializeRequest{ProtocolVersion: acp.ProtocolVersionNumber}); err != nil {
+		t.Fatalf("Initialize failed: %v", err)
+	}
 	ns, err := client.NewSession(t.Context(), acp.NewSessionRequest{Cwd: "/workspace", McpServers: []acp.McpServer{}})
 	if err != nil {
 		t.Fatalf("NewSession failed: %v", err)
@@ -331,6 +338,9 @@ func TestConformancePromptEndTurn(t *testing.T) {
 	}()
 
 	client := acp.NewClientSideConnection(newStubClient(), c2aW, a2cR)
+	if _, err := client.Initialize(t.Context(), acp.InitializeRequest{ProtocolVersion: acp.ProtocolVersionNumber}); err != nil {
+		t.Fatalf("Initialize failed: %v", err)
+	}
 	ns, err := client.NewSession(t.Context(), acp.NewSessionRequest{Cwd: "/workspace", McpServers: []acp.McpServer{}})
 	if err != nil {
 		t.Fatalf("NewSession failed: %v", err)
@@ -380,6 +390,9 @@ func TestConformanceSessionSetupAndUnsupportedMethods(t *testing.T) {
 	}()
 
 	client := acp.NewClientSideConnection(newStubClient(), c2aW, a2cR)
+	if _, err := client.Initialize(t.Context(), acp.InitializeRequest{ProtocolVersion: acp.ProtocolVersionNumber}); err != nil {
+		t.Fatalf("Initialize failed: %v", err)
+	}
 	ns, err := client.NewSession(t.Context(), acp.NewSessionRequest{Cwd: "/workspace", McpServers: []acp.McpServer{}})
 	if err != nil {
 		t.Fatalf("NewSession failed: %v", err)
@@ -907,6 +920,153 @@ func TestConformanceInvalidSessionError(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Error("server did not exit")
+	}
+}
+
+// TestConformanceRejectsRequestBeforeInitialize pins error.md:64: any request
+// other than initialize that arrives before the handshake completes is -32600.
+func TestConformanceRejectsRequestBeforeInitialize(t *testing.T) {
+	c2aR, c2aW := io.Pipe()
+	a2cR, a2cW := io.Pipe()
+	defer c2aR.Close()
+	defer c2aW.Close()
+	defer a2cR.Close()
+	defer a2cW.Close()
+
+	app := stubApp(newStubCoordinator(nil))
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := acpsrv.NewServer(app, log, c2aR, a2cW)
+
+	done := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		done <- srv.Start(ctx)
+	}()
+
+	// Deliberately no Initialize call.
+	client := acp.NewClientSideConnection(newStubClient(), c2aW, a2cR)
+	_, err := client.NewSession(t.Context(), acp.NewSessionRequest{Cwd: "/workspace", McpServers: []acp.McpServer{}})
+	requireACPCode(t, err, -32600)
+
+	_, err = client.ListSessions(t.Context(), acp.ListSessionsRequest{})
+	requireACPCode(t, err, -32600)
+
+	c2aW.Close()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Error("server did not exit")
+	}
+}
+
+// TestConformanceUnknownSessionOnSetupMethods pins error.md:56-58: the -32002
+// rule covers the session-scoped request methods, not just session/prompt.
+func TestConformanceUnknownSessionOnSetupMethods(t *testing.T) {
+	c2aR, c2aW := io.Pipe()
+	a2cR, a2cW := io.Pipe()
+	defer c2aR.Close()
+	defer c2aW.Close()
+	defer a2cR.Close()
+	defer a2cW.Close()
+
+	app := stubApp(newStubCoordinator(nil))
+	// The stub store reports not-found so the guard has something to see.
+	app.Sessions = &stubSessionService{getErr: sql.ErrNoRows}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := acpsrv.NewServer(app, log, c2aR, a2cW)
+
+	done := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		done <- srv.Start(ctx)
+	}()
+
+	client := acp.NewClientSideConnection(newStubClient(), c2aW, a2cR)
+	if _, err := client.Initialize(t.Context(), acp.InitializeRequest{ProtocolVersion: acp.ProtocolVersionNumber}); err != nil {
+		t.Fatalf("Initialize failed: %v", err)
+	}
+
+	missing := acp.SessionId("nonexistent-session")
+	_, err := client.SetSessionMode(t.Context(), acp.SetSessionModeRequest{SessionId: missing, ModeId: "coder"})
+	requireACPCode(t, err, -32002)
+
+	_, err = client.SetSessionConfigOption(t.Context(), acp.SetSessionConfigOptionRequest{
+		Boolean: &acp.SetSessionConfigOptionBoolean{SessionId: missing, ConfigId: "thinking", Value: true},
+	})
+	requireACPCode(t, err, -32002)
+
+	_, err = client.ResumeSession(t.Context(), acp.ResumeSessionRequest{SessionId: missing, Cwd: "/workspace"})
+	requireACPCode(t, err, -32002)
+
+	_, err = client.LoadSession(t.Context(), acp.LoadSessionRequest{
+		SessionId:  missing,
+		Cwd:        "/workspace",
+		McpServers: []acp.McpServer{},
+	})
+	requireACPCode(t, err, -32002)
+
+	c2aW.Close()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Error("server did not exit")
+	}
+}
+
+// TestConformanceDeleteIsIdempotent pins session-delete.md:85: deleting a
+// session that never existed succeeds silently.
+func TestConformanceDeleteIsIdempotent(t *testing.T) {
+	c2aR, c2aW := io.Pipe()
+	a2cR, a2cW := io.Pipe()
+	defer c2aR.Close()
+	defer c2aW.Close()
+	defer a2cR.Close()
+	defer a2cW.Close()
+
+	app := stubApp(newStubCoordinator(nil))
+	app.Sessions = &stubSessionService{deleteErr: sql.ErrNoRows}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := acpsrv.NewServer(app, log, c2aR, a2cW)
+
+	done := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		done <- srv.Start(ctx)
+	}()
+
+	client := acp.NewClientSideConnection(newStubClient(), c2aW, a2cR)
+	if _, err := client.Initialize(t.Context(), acp.InitializeRequest{ProtocolVersion: acp.ProtocolVersionNumber}); err != nil {
+		t.Fatalf("Initialize failed: %v", err)
+	}
+
+	_, err := client.UnstableDeleteSession(t.Context(), acp.UnstableDeleteSessionRequest{SessionId: "gone"})
+	if err != nil {
+		t.Errorf("deleting a nonexistent session must succeed, got %v", err)
+	}
+
+	c2aW.Close()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Error("server did not exit")
+	}
+}
+
+// requireACPCode asserts an error carries the given JSON-RPC code.
+func requireACPCode(t *testing.T, err error, code int) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("expected error with code %d, got nil", code)
+	}
+	var reqErr *acp.RequestError
+	if !errors.As(err, &reqErr) {
+		t.Fatalf("expected a *acp.RequestError, got %T: %v", err, err)
+	}
+	if reqErr.Code != code {
+		t.Errorf("error code = %d, want %d (%v)", reqErr.Code, code, err)
 	}
 }
 

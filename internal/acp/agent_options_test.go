@@ -2,6 +2,8 @@ package acp
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"io"
 	"log/slog"
 	"path/filepath"
@@ -19,12 +21,23 @@ func newTestAgent(stub *stubSessionService) *crushAgent {
 	}
 }
 
-func TestNewSessionStoresAdditionalDirs(t *testing.T) {
-	stub := &stubSessionService{}
-	a := newTestAgent(stub)
+func TestInitializeOmitsAdditionalDirectories(t *testing.T) {
+	// The capability is not advertised because Crush never enforces a root set
+	// (plan O23). Advertising it promised a scope that did not exist.
+	a := newTestAgent(&stubSessionService{})
+	resp, err := a.Initialize(context.Background(), acp.InitializeRequest{
+		ProtocolVersion: acp.ProtocolVersionNumber,
+	})
+	require.NoError(t, err)
+	require.Nil(t, resp.AgentCapabilities.SessionCapabilities.AdditionalDirectories)
+}
+
+func TestNewSessionIgnoresAdditionalDirectories(t *testing.T) {
+	// A client that sends roots anyway must not be rejected: the field is
+	// simply not applied.
+	a := newTestAgent(&stubSessionService{})
 	resp, err := a.NewSession(context.Background(), acp.NewSessionRequest{
-		Cwd:                   "/workspace",
-		AdditionalDirectories: []string{"/extra1", "/extra2"},
+		AdditionalDirectories: []string{"/extra1"},
 	})
 	require.NoError(t, err)
 	require.NotEmpty(t, resp.SessionId)
@@ -32,19 +45,30 @@ func TestNewSessionStoresAdditionalDirs(t *testing.T) {
 	list, err := a.ListSessions(context.Background(), acp.ListSessionsRequest{})
 	require.NoError(t, err)
 	require.Len(t, list.Sessions, 1)
-	require.Equal(t, []string{"/extra1", "/extra2"}, list.Sessions[0].AdditionalDirectories)
+	require.Empty(t, list.Sessions[0].AdditionalDirectories)
+}
+
+func TestValidateCwd(t *testing.T) {
+	// No config store means no working directory, so nothing can be compared
+	// and the check is a no-op rather than a refusal.
+	a := newTestAgent(&stubSessionService{})
+	require.NoError(t, a.validateCwd(""))
+	require.NoError(t, a.validateCwd("/anything"))
 }
 
 func TestUnstableDeleteSession(t *testing.T) {
-	stub := &stubSessionService{}
+	// A session the store does not know deletes silently
+	// (session-delete.md:85).
+	stub := &stubSessionService{deleteErr: sql.ErrNoRows}
 	a := newTestAgent(stub)
 	_, err := a.UnstableDeleteSession(context.Background(), acp.UnstableDeleteSessionRequest{SessionId: "abc"})
 	require.NoError(t, err)
 
-	// A stored additional-directories key is cleared without error.
-	a.additionalDirs.Store("abc", []string{"/x"})
+	// A real failure still surfaces.
+	boom := errors.New("disk on fire")
+	stub.deleteErr = boom
 	_, err = a.UnstableDeleteSession(context.Background(), acp.UnstableDeleteSessionRequest{SessionId: "abc"})
-	require.NoError(t, err)
+	require.ErrorIs(t, err, boom)
 }
 
 func TestListSessionsPaginates(t *testing.T) {

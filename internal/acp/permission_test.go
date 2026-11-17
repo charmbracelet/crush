@@ -13,17 +13,30 @@ import (
 
 func TestBuildPermissionOptions(t *testing.T) {
 	opts := buildPermissionOptions("execute")
-	if len(opts) != 3 {
-		t.Fatalf("expected 3 options, got %d", len(opts))
+	if len(opts) != 4 {
+		t.Fatalf("expected 4 options, got %d", len(opts))
 	}
-	if opts[0].OptionId != "allow_once" {
-		t.Errorf("expected first option allow_once, got %s", opts[0].OptionId)
+	// All four kinds the spec defines must be offered (tool-calls.md:232-235).
+	want := []struct {
+		id   acp.PermissionOptionId
+		kind acp.PermissionOptionKind
+	}{
+		{"allow_once", acp.PermissionOptionKindAllowOnce},
+		{"allow_always", acp.PermissionOptionKindAllowAlways},
+		{"reject_once", acp.PermissionOptionKindRejectOnce},
+		{"reject_always", acp.PermissionOptionKindRejectAlways},
 	}
-	if opts[1].OptionId != "allow_always" {
-		t.Errorf("expected second option allow_always, got %s", opts[1].OptionId)
+	for i, w := range want {
+		if opts[i].OptionId != w.id {
+			t.Errorf("option %d: got %s, want %s", i, opts[i].OptionId, w.id)
+		}
+		if opts[i].Kind != w.kind {
+			t.Errorf("option %d: got kind %s, want %s", i, opts[i].Kind, w.kind)
+		}
 	}
-	if opts[2].OptionId != "reject_once" {
-		t.Errorf("expected third option reject_once, got %s", opts[2].OptionId)
+	// A client that grants by picking the first option must not deny.
+	if opts[0].Kind != acp.PermissionOptionKindAllowOnce {
+		t.Error("first option must be an allow kind")
 	}
 }
 
@@ -44,6 +57,19 @@ func TestMapPermissionOutcome(t *testing.T) {
 	outcome = acp.NewRequestPermissionOutcomeSelected("reject_once")
 	if mapPermissionOutcome(outcome) {
 		t.Error("expected reject_once to be denied")
+	}
+
+	// reject_always denies: it is a rejection, not a grant.
+	outcome = acp.NewRequestPermissionOutcomeSelected("reject_always")
+	if mapPermissionOutcome(outcome) {
+		t.Error("expected reject_always to be denied")
+	}
+
+	// An option id Crush never offered must never be read as approval
+	// (tool-calls.md:248).
+	outcome = acp.NewRequestPermissionOutcomeSelected("bogus_id")
+	if mapPermissionOutcome(outcome) {
+		t.Error("expected an unrecognised optionId to be denied")
 	}
 
 	// Test cancelled

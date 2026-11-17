@@ -2,11 +2,15 @@ package acp
 
 import (
 	"context"
+	"database/sql"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -34,9 +38,10 @@ type crushAgent struct {
 	// clientCaps holds the capabilities the connected client advertised during
 	// initialize. Used to gate optional server track features (fs).
 	clientCaps acp.ClientCapabilities
-	// additionalDirs records per-session additional roots accepted on
-	// session/new so they can be echoed back via session/list.
-	additionalDirs sync.Map
+	// activeMode records the mode each session selected, so mode state and the
+	// "mode" config option agree. Nothing here switches the agent: see plan
+	// O25/Q3, a switch is workspace-wide, not per session.
+	activeMode sync.Map
 }
 
 // newCrushAgent creates an ACP agent backed by the given Crush app.
@@ -70,11 +75,10 @@ func (a *crushAgent) Initialize(_ context.Context, req acp.InitializeRequest) (a
 				EmbeddedContext: true,
 			},
 			SessionCapabilities: acp.SessionCapabilities{
-				AdditionalDirectories: &acp.SessionAdditionalDirectoriesCapabilities{},
-				Close:                 &acp.SessionCloseCapabilities{},
-				Delete:                &acp.SessionDeleteCapabilities{},
-				List:                  &acp.SessionListCapabilities{},
-				Resume:                &acp.SessionResumeCapabilities{},
+				Close:  &acp.SessionCloseCapabilities{},
+				Delete: &acp.SessionDeleteCapabilities{},
+				List:   &acp.SessionListCapabilities{},
+				Resume: &acp.SessionResumeCapabilities{},
 			},
 			McpCapabilities: acp.McpCapabilities{},
 		},
@@ -87,13 +91,8 @@ func (a *crushAgent) Initialize(_ context.Context, req acp.InitializeRequest) (a
 func (a *crushAgent) NewSession(ctx context.Context, req acp.NewSessionRequest) (acp.NewSessionResponse, error) {
 	title := "ACP Session"
 
-	if req.Cwd != "" {
-		if local := a.workingDir(); local != "" && !samePath(local, req.Cwd) {
-			return acp.NewSessionResponse{}, fmt.Errorf(
-				"session cwd %q does not match crush working directory %q; "+
-					"start crush with -c %s to use that workspace",
-				req.Cwd, local, req.Cwd)
-		}
+	if err := a.validateCwd(req.Cwd); err != nil {
+		return acp.NewSessionResponse{}, err
 	}
 
 	session, err := a.app.Sessions.Create(context.Background(), title)
@@ -103,13 +102,9 @@ func (a *crushAgent) NewSession(ctx context.Context, req acp.NewSessionRequest) 
 	a.log.Info("ACP new session", "sessionId", session.ID, "cwd", req.Cwd)
 	sid := acp.SessionId(session.ID)
 
-	// Record the additional roots so session/list can echo them back. Crush has
-	// no multi-root model, so they are persisted for round-tripping only.
-	if len(req.AdditionalDirectories) > 0 {
-		dirs := make([]string, len(req.AdditionalDirectories))
-		copy(dirs, req.AdditionalDirectories)
-		a.additionalDirs.Store(session.ID, dirs)
-	}
+	// Additional workspace roots are not supported: the capability is not
+	// advertised, so the request field is ignored rather than half-applied.
+	// See plan O23 for the enforcement work this replaces.
 
 	// Advertise setup state the client needs before the first prompt. These
 	// notifications are sent before the response returns, so the client's
@@ -120,9 +115,46 @@ func (a *crushAgent) NewSession(ctx context.Context, req acp.NewSessionRequest) 
 
 	return acp.NewSessionResponse{
 		SessionId:     sid,
-		Modes:         a.modeState(),
-		ConfigOptions: a.configOptions(),
+		Modes:         a.modeState(sid),
+		ConfigOptions: a.configOptions(sid),
 	}, nil
+}
+
+// validateCwd rejects a cwd naming a workspace other than the one Crush was
+// started in. The spec makes cwd part of the session's root set and the base
+// for relative paths (session-setup.md:437-444), and Crush serves exactly one
+// workspace per process, so a mismatch cannot be honoured.
+func (a *crushAgent) validateCwd(cwd string) error {
+	if cwd == "" {
+		return nil
+	}
+	local := a.workingDir()
+	if local == "" || samePath(local, cwd) {
+		return nil
+	}
+	return fmt.Errorf(
+		"session cwd %q does not match crush working directory %q; "+
+			"start crush with -c %s to use that workspace",
+		cwd, local, cwd)
+}
+
+// ValidateCwd exposes validateCwd to the dispatcher, which owns session/load.
+func (a *crushAgent) ValidateCwd(cwd string) error {
+	return a.validateCwd(cwd)
+}
+
+// SessionState reports the mode and config-option state for a session, so
+// session/load can return the same setup payload session/new and session/resume
+// do (session-setup.md:200 allows it; the client needs it to render the
+// session it just loaded).
+func (a *crushAgent) SessionState(sessionID acp.SessionId) (*acp.SessionModeState, []acp.SessionConfigOption) {
+	return a.modeState(sessionID), a.configOptions(sessionID)
+}
+
+// SessionExists reports whether the store knows the session. The dispatcher
+// uses it for the -32002 check on session/load, which it serves itself.
+func (a *crushAgent) SessionExists(ctx context.Context, sessionID acp.SessionId) bool {
+	return a.requireSession(ctx, sessionID) == nil
 }
 
 // workingDir reports the directory Crush was started in, or "" when the app
@@ -200,9 +232,6 @@ func (a *crushAgent) ListSessions(_ context.Context, req acp.ListSessionsRequest
 			ts := time.Unix(s.UpdatedAt, 0).UTC().Format(time.RFC3339)
 			info.UpdatedAt = &ts
 		}
-		if dirs, ok := a.additionalDirs.Load(s.ID); ok {
-			info.AdditionalDirectories = dirs.([]string)
-		}
 		out = append(out, info)
 	}
 
@@ -248,11 +277,22 @@ func (a *crushAgent) CloseSession(_ context.Context, req acp.CloseSessionRequest
 // session/load, resume MUST NOT stream session/update notifications). Crush
 // continues any session id on the next session/prompt (same as `crush
 // --continue`), so resume returns the current mode/config state and succeeds.
-func (a *crushAgent) ResumeSession(_ context.Context, req acp.ResumeSessionRequest) (acp.ResumeSessionResponse, error) {
+//
+// A session the store does not know is -32002 (error.md:58), and the request
+// cwd must match this workspace for the same reason session/new checks it.
+func (a *crushAgent) ResumeSession(ctx context.Context, req acp.ResumeSessionRequest) (acp.ResumeSessionResponse, error) {
 	a.log.Info("ACP resume session", "sessionId", req.SessionId)
+	if err := a.validateCwd(req.Cwd); err != nil {
+		return acp.ResumeSessionResponse{}, err
+	}
+	if err := a.requireSession(ctx, req.SessionId); err != nil {
+		return acp.ResumeSessionResponse{}, err
+	}
+	// The request's additional roots are not applied: the capability is not
+	// advertised, so any list the client sends is left untouched.
 	return acp.ResumeSessionResponse{
-		Modes:         a.modeState(),
-		ConfigOptions: a.configOptions(),
+		Modes:         a.modeState(req.SessionId),
+		ConfigOptions: a.configOptions(req.SessionId),
 	}, nil
 }
 
@@ -265,6 +305,10 @@ func (a *crushAgent) Logout(_ context.Context, _ acp.LogoutRequest) (acp.LogoutR
 
 // UnstableDeleteSession deletes a session from the store. The method name keeps
 // the SDK's unstable prefix for the session/delete capability.
+//
+// Deleting a session that never existed is a success, not an error
+// (session-delete.md:85). The store reports a missing row as sql.ErrNoRows,
+// which is the only case swallowed here; a real failure still surfaces.
 func (a *crushAgent) UnstableDeleteSession(ctx context.Context, req acp.UnstableDeleteSessionRequest) (acp.UnstableDeleteSessionResponse, error) {
 	id := string(req.SessionId)
 	a.log.Info("ACP delete session", "sessionId", id)
@@ -272,11 +316,11 @@ func (a *crushAgent) UnstableDeleteSession(ctx context.Context, req acp.Unstable
 		a.app.AgentCoordinator.Cancel(id)
 	}
 	if a.app.Sessions != nil {
-		if err := a.app.Sessions.Delete(ctx, id); err != nil {
+		if err := a.app.Sessions.Delete(ctx, id); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return acp.UnstableDeleteSessionResponse{}, fmt.Errorf("delete session: %w", err)
 		}
 	}
-	a.additionalDirs.Delete(id)
+	a.activeMode.Delete(id)
 	return acp.UnstableDeleteSessionResponse{}, nil
 }
 
@@ -307,6 +351,10 @@ func (a *crushAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Pro
 	}
 
 	prompt, attachments := buildPrompt(req.Prompt)
+	// A leading /name is resolved against the commands advertised in
+	// available_commands_update, as the spec says commands are "run as part of
+	// regular session/prompt requests" (slash-commands.md:9,99).
+	prompt = a.resolveCommand(prompt)
 	a.log.Info("ACP prompt", "sessionId", sessionID, "promptLen", len(prompt))
 
 	// Prompt result.
@@ -345,27 +393,32 @@ func (a *crushAgent) requireSession(ctx context.Context, id acp.SessionId) error
 // SetSessionMode acknowledges a mode change and notifies the client. An
 // unknown mode is rejected with -32602 as the spec prescribes; validation is
 // skipped when no config is loaded, since there is nothing to compare against.
+//
+// The selection is recorded per session so modeState and the "mode" config
+// option report it back. It does not switch Crush's agent: the coordinator's
+// main agent is workspace-wide, not per session (see plan O25).
 func (a *crushAgent) SetSessionMode(ctx context.Context, req acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
 	a.log.Info("ACP set session mode", "sessionId", req.SessionId, "modeId", req.ModeId)
+	if err := a.requireSession(ctx, req.SessionId); err != nil {
+		return acp.SetSessionModeResponse{}, err
+	}
 	if cfg := a.config(); cfg != nil {
-		known := false
-		for id, agentCfg := range cfg.Agents {
-			if agentCfg.Disabled {
-				continue
-			}
-			if string(req.ModeId) == id {
-				known = true
-				break
-			}
-		}
-		if !known {
+		if !isSelectableMode(cfg, string(req.ModeId)) {
 			return acp.SetSessionModeResponse{}, invalidParam("modeId", string(req.ModeId))
 		}
 	}
-	a.pushUpdate(ctx, req.SessionId, acp.SessionUpdate{
-		CurrentModeUpdate: &acp.SessionCurrentModeUpdate{CurrentModeId: req.ModeId},
-	})
+	a.setMode(ctx, req.SessionId, req.ModeId)
 	return acp.SetSessionModeResponse{}, nil
+}
+
+// setMode records the session's selected mode and announces it. Both
+// session/set_mode and the "mode" config option funnel through here so the two
+// entry points can never disagree.
+func (a *crushAgent) setMode(ctx context.Context, sessionID acp.SessionId, modeID acp.SessionModeId) {
+	a.activeMode.Store(string(sessionID), modeID)
+	a.pushUpdate(ctx, sessionID, acp.SessionUpdate{
+		CurrentModeUpdate: &acp.SessionCurrentModeUpdate{CurrentModeId: modeID},
+	})
 }
 
 // SetSessionConfigOption acknowledges a configuration change and notifies the
@@ -373,6 +426,9 @@ func (a *crushAgent) SetSessionMode(ctx context.Context, req acp.SetSessionModeR
 // are rejected with -32602, as the spec prescribes.
 func (a *crushAgent) SetSessionConfigOption(ctx context.Context, req acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
 	sessionID := configOptionSessionID(req)
+	if err := a.requireSession(ctx, sessionID); err != nil {
+		return acp.SetSessionConfigOptionResponse{}, err
+	}
 	if cfg := a.config(); cfg != nil {
 		if err := validateConfigOption(cfg, req); err != nil {
 			return acp.SetSessionConfigOptionResponse{}, err
@@ -383,14 +439,17 @@ func (a *crushAgent) SetSessionConfigOption(ctx context.Context, req acp.SetSess
 			a.log.Warn("Failed to apply thinking config option", "error", err)
 		}
 	}
+	if req.ValueId != nil && req.ValueId.ConfigId == "mode" {
+		a.setMode(ctx, sessionID, acp.SessionModeId(req.ValueId.Value))
+	}
 	if req.ValueId != nil && req.ValueId.ConfigId == "model" {
 		if err := a.setModel(ctx, parseModelValue(string(req.ValueId.Value))); err != nil {
 			a.log.Warn("Failed to apply model config option", "error", err)
 		}
 	}
 	a.log.Info("ACP set session config option", "sessionId", sessionID)
-	a.pushUpdate(ctx, sessionID, a.configOptionsUpdate())
-	return acp.SetSessionConfigOptionResponse{ConfigOptions: a.configOptions()}, nil
+	a.pushUpdate(ctx, sessionID, a.configOptionsUpdate(sessionID))
+	return acp.SetSessionConfigOptionResponse{ConfigOptions: a.configOptions(sessionID)}, nil
 }
 
 // configOptionSessionID extracts the session id from either request variant.
@@ -416,8 +475,8 @@ func invalidParam(field, value string) error {
 
 // validateConfigOption rejects an unknown configId and any value outside the
 // set the Agent advertises, so callers cannot silently no-op a bad request.
-// Only the two option families Crush actually implements are validated;
-// anything else is unknown.
+// Only the option families Crush actually implements are validated; anything
+// else is unknown.
 func validateConfigOption(cfg *config.Config, req acp.SetSessionConfigOptionRequest) error {
 	switch {
 	case req.Boolean != nil:
@@ -425,16 +484,24 @@ func validateConfigOption(cfg *config.Config, req acp.SetSessionConfigOptionRequ
 			return invalidParam("configId", string(req.Boolean.ConfigId))
 		}
 	case req.ValueId != nil:
-		if req.ValueId.ConfigId != "model" {
+		switch req.ValueId.ConfigId {
+		case "model":
+			value := string(req.ValueId.Value)
+			for _, opt := range modelOptionsFor(cfg) {
+				if string(opt.Value) == value {
+					return nil
+				}
+			}
+			return invalidParam("value", value)
+		case "mode":
+			value := string(req.ValueId.Value)
+			if !isSelectableMode(cfg, value) {
+				return invalidParam("value", value)
+			}
+			return nil
+		default:
 			return invalidParam("configId", string(req.ValueId.ConfigId))
 		}
-		value := string(req.ValueId.Value)
-		for _, opt := range modelOptionsFor(cfg) {
-			if string(opt.Value) == value {
-				return nil
-			}
-		}
-		return invalidParam("value", value)
 	default:
 		return acp.NewInvalidParams(map[string]any{
 			"error": "either valueId or boolean must be set",
@@ -676,18 +743,45 @@ func (a *crushAgent) sessionInfoUpdate(title string) acp.SessionUpdate {
 	}
 }
 
-// configOptions advertises the available session modes as a select option and a
-// boolean "thinking" toggle so the client can render a mode switcher and a
-// reasoning on/off control.
-func (a *crushAgent) configOptions() []acp.SessionConfigOption {
-	return configOptionsFor(a.config())
+// configOptions advertises the session's selectable modes, the available models
+// and the thinking toggle, so the client can render a mode switcher, a model
+// picker and a reasoning on/off control.
+func (a *crushAgent) configOptions(sessionID acp.SessionId) []acp.SessionConfigOption {
+	cfg := a.config()
+	return configOptionsFor(cfg, a.currentMode(cfg, sessionID))
 }
 
-// configOptionsFor builds the config-option list from a config snapshot.
-func configOptionsFor(cfg *config.Config) []acp.SessionConfigOption {
+// configOptionsFor builds the config-option list from a config snapshot and the
+// session's active mode.
+//
+// The "mode" select is emitted alongside `modes` because the spec makes config
+// options the modern spelling of a mode switcher and asks Agents that offer
+// mode-like configuration to send both during the transition
+// (session-config-options.md:462-471).
+func configOptionsFor(cfg *config.Config, currentMode acp.SessionModeId) []acp.SessionConfigOption {
 	opts := []acp.SessionConfigOption{}
 	if cfg == nil {
 		return opts
+	}
+	if modeOpts := modeSelectOptions(cfg); len(modeOpts) > 0 {
+		cur := acp.SessionConfigValueId(currentMode)
+		if cur == "" {
+			cur = modeOpts[0].Value
+		}
+		ungroupedModes := acp.SessionConfigSelectOptionsUngrouped(modeOpts)
+		opts = append(opts, acp.SessionConfigOption{
+			Select: &acp.SessionConfigOptionSelect{
+				Id:           "mode",
+				Name:         "Mode",
+				Type:         "select",
+				CurrentValue: cur,
+				Category:     acp.Ptr(acp.SessionConfigOptionCategoryMode),
+				Description:  acp.Ptr("Switch between Crush's agents"),
+				Options: acp.SessionConfigSelectOptions{
+					Ungrouped: &ungroupedModes,
+				},
+			},
+		})
 	}
 	opts = append(opts, acp.SessionConfigOption{
 		Boolean: &acp.SessionConfigOptionBoolean{
@@ -722,6 +816,91 @@ func configOptionsFor(cfg *config.Config) []acp.SessionConfigOption {
 	return opts
 }
 
+// modeSelectOptions renders the selectable agents as config-option values.
+func modeSelectOptions(cfg *config.Config) []acp.SessionConfigSelectOption {
+	names := selectableModes(cfg)
+	opts := make([]acp.SessionConfigSelectOption, 0, len(names))
+	for _, name := range names {
+		agent := cfg.Agents[name]
+		opt := acp.SessionConfigSelectOption{
+			Value: acp.SessionConfigValueId(name),
+			Name:  name,
+		}
+		if agent.Name != "" {
+			opt.Name = agent.Name
+		}
+		if agent.Description != "" {
+			desc := agent.Description
+			opt.Description = &desc
+		}
+		opts = append(opts, opt)
+	}
+	return opts
+}
+
+// selectableModes lists the agent ids a client may switch the session to,
+// sorted so the advertised order is stable across requests.
+//
+// config.AgentTask is excluded on purpose: it is the profile a subagent runs
+// under (internal/agent/agent.go agentTool), with a reduced tool set and no
+// MCP or LSP access. Offering it as a session mode would let a client degrade
+// its own session by selecting it.
+func selectableModes(cfg *config.Config) []string {
+	if cfg == nil {
+		return nil
+	}
+	names := make([]string, 0, len(cfg.Agents))
+	for id, agent := range cfg.Agents {
+		if agent.Disabled || id == config.AgentTask {
+			continue
+		}
+		names = append(names, id)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// isSelectableMode reports whether id names an agent a session may switch to.
+func isSelectableMode(cfg *config.Config, id string) bool {
+	if id == "" {
+		return false
+	}
+	return slices.Contains(selectableModes(cfg), id)
+}
+
+// defaultMode picks the mode a session starts in: the coder agent when it is
+// available, otherwise the first selectable agent. It never returns a mode that
+// is absent from the advertised list (session-modes.md:58-64).
+func defaultMode(cfg *config.Config) acp.SessionModeId {
+	names := selectableModes(cfg)
+	if len(names) == 0 {
+		return ""
+	}
+	if slices.Contains(names, config.AgentCoder) {
+		return acp.SessionModeId(config.AgentCoder)
+	}
+	return acp.SessionModeId(names[0])
+}
+
+// currentMode reports the mode the session selected, falling back to the
+// default. A stored value that is no longer selectable is ignored, so a mode
+// disabled in config cannot linger in the advertised state.
+func (a *crushAgent) currentMode(cfg *config.Config, sessionID acp.SessionId) acp.SessionModeId {
+	fallback := defaultMode(cfg)
+	if sessionID == "" {
+		return fallback
+	}
+	stored, ok := a.activeMode.Load(string(sessionID))
+	if !ok {
+		return fallback
+	}
+	mode, ok := stored.(acp.SessionModeId)
+	if !ok || !isSelectableMode(cfg, string(mode)) {
+		return fallback
+	}
+	return mode
+}
+
 // thinkingEnabled reports whether the current model has reasoning enabled.
 func thinkingEnabled(cfg *config.Config) bool {
 	agent, ok := cfg.Agents[config.AgentCoder]
@@ -736,33 +915,36 @@ func thinkingEnabled(cfg *config.Config) bool {
 }
 
 // configOptionsUpdate wraps configOptions in a session/update notification.
-func (a *crushAgent) configOptionsUpdate() acp.SessionUpdate {
+func (a *crushAgent) configOptionsUpdate(sessionID acp.SessionId) acp.SessionUpdate {
 	return acp.SessionUpdate{
-		ConfigOptionUpdate: &acp.SessionConfigOptionUpdate{ConfigOptions: a.configOptions()},
+		ConfigOptionUpdate: &acp.SessionConfigOptionUpdate{ConfigOptions: a.configOptions(sessionID)},
 	}
 }
 
 // modeState reports the available session modes and the active one.
-func (a *crushAgent) modeState() *acp.SessionModeState {
-	if cfg := a.config(); cfg != nil {
-		modes := make([]acp.SessionMode, 0, len(cfg.Agents))
-		for id, agent := range cfg.Agents {
-			if agent.Disabled {
-				continue
-			}
-			desc := agent.Description
-			modes = append(modes, acp.SessionMode{
-				Id:          acp.SessionModeId(id),
-				Name:        agent.Name,
-				Description: &desc,
-			})
-		}
-		return &acp.SessionModeState{
-			AvailableModes: modes,
-			CurrentModeId:  "coder",
-		}
+func (a *crushAgent) modeState(sessionID acp.SessionId) *acp.SessionModeState {
+	cfg := a.config()
+	if cfg == nil {
+		return nil
 	}
-	return nil
+	names := selectableModes(cfg)
+	modes := make([]acp.SessionMode, 0, len(names))
+	for _, id := range names {
+		agent := cfg.Agents[id]
+		mode := acp.SessionMode{Id: acp.SessionModeId(id), Name: id}
+		if agent.Name != "" {
+			mode.Name = agent.Name
+		}
+		if agent.Description != "" {
+			desc := agent.Description
+			mode.Description = &desc
+		}
+		modes = append(modes, mode)
+	}
+	return &acp.SessionModeState{
+		AvailableModes: modes,
+		CurrentModeId:  a.currentMode(cfg, sessionID),
+	}
 }
 
 // firstLine returns the first non-empty line of s, trimmed.
@@ -848,9 +1030,49 @@ func buildPrompt(blocks []acp.ContentBlock) (string, []message.Attachment) {
 			sb.WriteString("[resource: " + b.ResourceLink.Name + ": " + b.ResourceLink.Uri + "]")
 		case b.Resource != nil && b.Resource.Resource.TextResourceContents != nil:
 			sb.WriteString("[resource: " + b.Resource.Resource.TextResourceContents.Uri + ": " + b.Resource.Resource.TextResourceContents.Text + "]")
+		case b.Resource != nil && b.Resource.Resource.BlobResourceContents != nil:
+			blob := b.Resource.Resource.BlobResourceContents
+			data, err := base64.StdEncoding.DecodeString(blob.Blob)
+			if err != nil {
+				sb.WriteString("[resource: " + blob.Uri + ": undecodable blob]")
+				break
+			}
+			mimeType := ""
+			if blob.MimeType != nil {
+				mimeType = *blob.MimeType
+			}
+			if mediaType, ok := mediaAttachmentType(mimeType, data); ok {
+				attachments = append(attachments, message.Attachment{
+					Content:  data,
+					MimeType: mediaType,
+					FileName: "resource",
+				})
+				break
+			}
+			// Not media the model can consume, so describe it rather than
+			// dropping the resource on the floor (content.md:148-160).
+			label := mimeType
+			if label == "" {
+				label = "unknown type"
+			}
+			sb.WriteString(fmt.Sprintf("[resource: %s: %d bytes of %s]", blob.Uri, len(data), label))
 		}
 	}
 	return sb.String(), attachments
+}
+
+// mediaAttachmentType reports the MIME type to attach a blob as, when the blob
+// is media the model can consume. A blob with no declared type is sniffed, so
+// an embedded image is not silently downgraded to a text placeholder.
+func mediaAttachmentType(declared string, data []byte) (string, bool) {
+	mimeType := declared
+	if mimeType == "" {
+		mimeType = http.DetectContentType(data)
+	}
+	if strings.HasPrefix(mimeType, "image/") || strings.HasPrefix(mimeType, "audio/") {
+		return mimeType, true
+	}
+	return "", false
 }
 
 // mapFinishReason converts fantasy finish reasons to ACP stop reasons.

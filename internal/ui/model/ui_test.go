@@ -327,6 +327,27 @@ func (w *testWorkspace) SetCompactMode(scope config.Scope, compact bool) error {
 	return nil
 }
 
+func (w *testWorkspace) UpdatePreferredModel(_ config.Scope, modelType config.SelectedModelType, model config.SelectedModel) error {
+	w.cfg.Models[modelType] = model
+	return nil
+}
+
+func TestSelectReasoningEffort_AllowedWhileAgentBusy(t *testing.T) {
+	t.Parallel()
+	u, ws := newPlanUI(t, "sess-1")
+	ws.cfg.Agents = map[string]config.Agent{config.AgentCoder: {Model: config.SelectedModelTypeLarge}}
+	ws.cfg.Models = map[config.SelectedModelType]config.SelectedModel{
+		config.SelectedModelTypeLarge: {Provider: "openai", Model: "gpt", ReasoningEffort: "low"},
+	}
+	ws.agentBusy = true
+	u.agentBusyCache.set(true)
+
+	u.handleDialogMsg(dialog.ActionSelectReasoningEffort{Effort: "high"})
+	require.Equal(t, "high", ws.cfg.Models[config.SelectedModelTypeLarge].ReasoningEffort,
+		"the effort is saved for the next message instead of being refused")
+	require.Equal(t, " (applies to your next message)", u.nextMessageNote())
+}
+
 func TestDefaultKeyMapHasShiftTab(t *testing.T) {
 	t.Parallel()
 

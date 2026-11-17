@@ -240,18 +240,6 @@ func (m *Chat) Draw(scr uv.Screen, area uv.Rectangle) {
 		showScrollbar = false
 	}
 
-	// Reserve space for scrollbar only when visible.
-	scrollbarWidth := 0
-	if showScrollbar {
-		scrollbarWidth = 1
-	}
-
-	// Adjust list width to reserve space for scrollbar.
-	listArea := area
-	if scrollbarWidth > 0 {
-		listArea.Max.X -= scrollbarWidth
-	}
-
 	rendered := m.list.Render()
 	// In follow mode the view stays pinned to the end. Re-anchor whenever
 	// the render moved the end: content growing past it (streaming), or
@@ -270,24 +258,22 @@ func (m *Chat) Draw(scr uv.Screen, area uv.Rectangle) {
 		// Width method isn't an ansi.Method (unlikely in practice — both
 		// TerminalScreen and ScreenBuffer store ansi.Method). Fall back
 		// to the uncached path so behavior matches upstream exactly.
-		uv.NewStyledString(rendered).Draw(scr, listArea)
+		uv.NewStyledString(rendered).Draw(scr, area)
 	} else {
 		if m.drawCache == nil ||
 			m.drawCache.rendered != rendered ||
 			m.drawCache.method != method {
 			m.drawCache = newChatDrawCache(rendered, method)
 		}
-		drawCachedBuffer(scr, listArea, m.drawCache.buf)
+		drawCachedBuffer(scr, area, m.drawCache.buf)
 	}
 
-	// Draw scrollbar if visible and needed. Only reached when not resizing
-	// (showScrollbar requires it), so TotalHeight is already computed and
-	// cached above.
-	if scrollbarWidth > 0 {
+	// Never drawn while resizing.
+	if showScrollbar {
 		scrollbar := common.Scrollbar(m.com.Styles, listHeight, m.list.TotalHeight()-1, listHeight, m.list.Offset())
 		if scrollbar != "" {
 			scrollbarArea := image.Rectangle{
-				Min: image.Point{X: area.Max.X - scrollbarWidth, Y: area.Min.Y},
+				Min: image.Point{X: area.Max.X - m.scrollbarCols(), Y: area.Min.Y},
 				Max: image.Point{X: area.Max.X, Y: area.Max.Y},
 			}
 			uv.NewStyledString(scrollbar).Draw(scr, scrollbarArea)
@@ -390,27 +376,27 @@ func (m *Chat) WarmStep(seq int) (cmd tea.Cmd, done bool) {
 
 // SetSize sets the size of the chat view port.
 func (m *Chat) SetSize(width, height int) {
-	// Reserve a column for the scrollbar when content overflows, decided
-	// with a cheap bounded overflow check rather than the O(N) total height.
-	// The final width is applied in a single SetSize so that an unchanged
-	// width is a no-op — critical after warming, where re-setting the same
-	// width would otherwise drop the freshly warmed cache and reintroduce
-	// the blocking full render.
 	// Capture whether we should stay pinned to the bottom *before* the size
 	// change. A width change rewraps every item, so the list's line offsets
 	// (offsetIdx/offsetLine) become stale and AtBottom() can no longer be
 	// trusted afterward. follow short-circuits the AtBottom() walk in the
 	// common streaming case.
 	wasFollowing := m.follow || m.AtBottom()
-	listWidth := width
-	if m.list.Overflows(height) {
-		listWidth = max(0, width-1)
-	}
-	m.list.SetSize(listWidth, height)
+	m.list.SetSize(max(0, width-m.scrollbarCols()), height)
 	// Re-anchor to bottom if we were pinned there before the resize.
 	if wasFollowing {
 		m.ScrollToBottom()
 	}
+}
+
+// scrollbarCols is the width reserved for the scrollbar. It does not depend
+// on overflow, so the list width (and every cached render) never flips as
+// the transcript crosses the viewport height.
+func (m *Chat) scrollbarCols() int {
+	if m.scrollbarMode == config.ScrollbarNever {
+		return 0
+	}
+	return 1
 }
 
 // Len returns the number of items in the chat list.
@@ -418,30 +404,16 @@ func (m *Chat) Len() int {
 	return m.list.Len()
 }
 
-// InvalidateRenderCaches drops cached rendered output on every message
-// item so the next draw re-renders with the current styles.
-func (m *Chat) InvalidateRenderCaches() {
-	items := make([]chat.MessageItem, 0, m.list.Len())
-	for i := range m.list.Len() {
-		if item, ok := m.list.ItemAt(i).(chat.MessageItem); ok {
-			items = append(items, item)
+// Restyle drops cached rendered output on every message item so it
+// re-renders with the current styles once drawn. Styles never change
+// layout, so the list keeps its heights and only visible items render on
+// the next frame.
+func (m *Chat) Restyle() {
+	m.list.Restyle(func(item list.Item) {
+		if msg, ok := item.(chat.MessageItem); ok {
+			chat.ClearItemCache(msg)
 		}
-	}
-	chat.ClearItemCaches(items)
-}
-
-// InvalidateVisibleRenderCaches drops cached rendered output on the
-// message items currently visible in the viewport, so the next draw
-// re-renders them with the current styles. Items outside the viewport
-// keep their cached output, which keeps theme previews fast in large
-// sessions; they are re-rendered by a later full invalidation.
-func (m *Chat) InvalidateVisibleRenderCaches() {
-	start, end := m.list.VisibleItemIndices()
-	for i := start; i <= end; i++ {
-		if item, ok := m.list.ItemAt(i).(chat.MessageItem); ok {
-			chat.ClearItemCaches([]chat.MessageItem{item})
-		}
-	}
+	})
 }
 
 // SetMessages sets the chat messages to the provided list of message items.

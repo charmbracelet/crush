@@ -14,10 +14,7 @@ import (
 //   - Bump their version (via the embedded *Versioned helper) on every
 //     mutation that changes the rendered output.
 //   - Return Finished() == true once their rendered output will not
-//     change again unless an explicit mutator is invoked. Frozen
-//     entries are emitted verbatim — no Render call — until either
-//     Version() bumps, the viewport width changes, or the list
-//     explicitly invalidates the entry.
+//     change again unless an explicit mutator is invoked.
 type Item interface {
 	// Render returns the string representation of the item for the given
 	// width.
@@ -30,11 +27,8 @@ type Item interface {
 	Version() uint64
 
 	// Finished reports whether the item's rendered output has reached
-	// a terminal state and may be frozen by the list cache. Items
-	// that animate, stream, or otherwise still mutate must return
-	// false. A finished item that later mutates must bump its
-	// version on the mutation; the cache treats version bumps as
-	// implicit unfreeze + invalidate.
+	// a terminal state. Items that animate, stream, or otherwise still
+	// mutate must return false.
 	Finished() bool
 }
 
@@ -118,9 +112,7 @@ func (s *SpacerItem) Render(width int) string {
 	return strings.Repeat("\n", s.Height)
 }
 
-// Finished implements Item. SpacerItems are immutable in practice and
-// safe to freeze; any mutation goes through Versioned.Bump which
-// invalidates the frozen entry.
+// Finished implements Item. SpacerItems never change.
 func (s *SpacerItem) Finished() bool {
 	return true
 }

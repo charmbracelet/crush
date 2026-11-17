@@ -945,3 +945,45 @@ func TestList_SetItems_FewerItemsStaysFull(t *testing.T) {
 	require.Len(t, got, 8)
 	require.Equal(t, "c:3", got[len(got)-1])
 }
+
+// TestList_Restyle_KeepsHeights covers the theme-swap path: scroll geometry
+// is served from the cached heights, only drawn items re-render, and an
+// item that changed before the restyle still re-renders for its height.
+func TestList_Restyle_KeepsHeights(t *testing.T) {
+	t.Parallel()
+
+	items := make([]*trackedItem, 0, 20)
+	listItems := make([]Item, 0, 20)
+	for idx := range 20 {
+		item := newTrackedItem(strconv.Itoa(idx), "item "+strconv.Itoa(idx), true)
+		items = append(items, item)
+		listItems = append(listItems, item)
+	}
+	l := NewList(listItems...)
+	l.SetSize(40, 3)
+	l.ScrollToIndex(17)
+	_ = l.Render()
+	total := l.TotalHeight()
+	offset := l.Offset()
+	before := totalRenderHits(items)
+
+	// An off-screen item that mutated before the restyle has no current
+	// height to keep.
+	items[0].Bump()
+
+	restyled := 0
+	l.Restyle(func(item Item) {
+		restyled++
+		item.(*trackedItem).Bump()
+	})
+	require.Equal(t, len(items), restyled)
+
+	require.Equal(t, total, l.TotalHeight())
+	require.Equal(t, offset, l.Offset())
+	require.Equal(t, before+1, totalRenderHits(items), "only the mutated item re-renders for its height")
+
+	_ = l.Render()
+	require.Equal(t, before+4, totalRenderHits(items), "visible items re-render their content")
+	require.Equal(t, 2, items[19].renderHits)
+	require.Equal(t, 1, items[10].renderHits, "off-screen items keep their cached render")
+}

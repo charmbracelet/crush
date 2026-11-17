@@ -1010,8 +1010,9 @@ crush update-providers --help
 
 Crush records pseudonymous usage metrics (tied to a device-specific hash),
 which maintainers rely on to inform development and support priorities. The
-metrics include solely usage metadata; prompts and responses are NEVER
-collected.
+usage metrics include metadata such as model names and token counts, without
+prompt or response content. Crush also sends crash reports containing error
+or panic messages, which may include local file paths.
 
 Details on exactly what’s collected are in the source code ([here](https://github.com/charmbracelet/crush/tree/main/internal/event)
 and [here](https://github.com/charmbracelet/crush/blob/main/internal/llm/agent/event.go)).

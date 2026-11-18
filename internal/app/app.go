@@ -386,7 +386,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	// so the override is applied after that restore instead.
 	deferredEffort := (continueSessionID != "" || useLast) && largeModel == "" && smallModel == ""
 	if reasoningEffort != "" && !deferredEffort {
-		if err := app.overrideReasoningEffort(ctx, reasoningEffort); err != nil {
+		if err := app.overrideReasoningEffort(ctx, "", reasoningEffort); err != nil {
 			return err
 		}
 	}
@@ -462,7 +462,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	}
 
 	if reasoningEffort != "" && deferredEffort {
-		if err := app.overrideReasoningEffort(ctx, reasoningEffort); err != nil {
+		if err := app.overrideReasoningEffort(ctx, sess.ID, reasoningEffort); err != nil {
 			return err
 		}
 	}
@@ -570,12 +570,8 @@ func (app *App) UpdateAgentModel(ctx context.Context) error {
 	return coord.UpdateModels(ctx)
 }
 
-// restoreModelFromSession reads the last assistant message in the
-// session and, if it used a different provider/model than the current
-// config, overrides the preferred model in-memory (non-persistent)
-// provided the provider/model is still available. This ensures that
-// continuing a session uses the same model that produced the last
-// response.
+// restoreModelFromSession pins the session to the model of its last
+// response, when that model is still available.
 func (app *App) restoreModelFromSession(ctx context.Context, sessionID string) error {
 	lastMsg, err := app.Messages.GetLastAssistantMessage(ctx, sessionID)
 	if err != nil {
@@ -601,16 +597,17 @@ func (app *App) restoreModelFromSession(ctx context.Context, sessionID string) e
 		return nil
 	}
 
-	app.config.OverridePreferredModel(config.SelectedModelTypeLarge, config.SelectedModel{
+	if err := app.Agent().SetSessionModel(ctx, sessionID, config.SelectedModel{
 		Provider: lastMsg.Provider,
 		Model:    lastMsg.Model,
-	})
-	if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
-		smallModel := app.GetDefaultSmallModel(lastMsg.Provider)
-		app.config.OverridePreferredModel(config.SelectedModelTypeSmall, smallModel)
+	}); err != nil {
+		return fmt.Errorf("failed to set session model: %w", err)
 	}
-	if err := app.Agent().UpdateModels(ctx); err != nil {
-		return fmt.Errorf("failed to update agent models: %w", err)
+	if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
+		app.config.OverridePreferredModel(config.SelectedModelTypeSmall, app.GetDefaultSmallModel(lastMsg.Provider))
+		if err := app.Agent().UpdateModels(ctx); err != nil {
+			return fmt.Errorf("failed to update agent models: %w", err)
+		}
 	}
 	slog.Info("Restored model from session",
 		"provider", lastMsg.Provider,
@@ -671,12 +668,16 @@ func (app *App) overrideModelsForNonInteractive(ctx context.Context, largeModel,
 }
 
 // overrideReasoningEffort validates the requested reasoning effort against
-// the large model in effect for this run (which may have been overridden by
-// --model or restored from a continued session) and applies it as an
-// in-memory override.
-func (app *App) overrideReasoningEffort(ctx context.Context, reasoningEffort string) error {
+// the large model in effect for this run and applies it in memory: to the
+// session's model when continuing one, else to the default.
+func (app *App) overrideReasoningEffort(ctx context.Context, sessionID, reasoningEffort string) error {
 	cfg := app.config.Config()
 	selected, ok := cfg.Models[config.SelectedModelTypeLarge]
+	if sessionID != "" {
+		if m := app.Agent().SessionModel(sessionID); m.ModelCfg.Model != "" {
+			selected, ok = m.ModelCfg, true
+		}
+	}
 	if !ok {
 		return fmt.Errorf("no large model selected; set one with the --model flag or 'model large'")
 	}
@@ -688,6 +689,9 @@ func (app *App) overrideReasoningEffort(ctx context.Context, reasoningEffort str
 		"provider", selected.Provider,
 		"model", selected.Model,
 		"reasoning_effort", reasoningEffort)
+	if sessionID != "" {
+		return app.Agent().SetSessionModel(ctx, sessionID, selected)
+	}
 	app.config.OverridePreferredModel(config.SelectedModelTypeLarge, selected)
 	return app.Agent().UpdateModels(ctx)
 }

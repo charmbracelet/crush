@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/charmbracelet/crush/internal/config"
+
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/app"
@@ -51,7 +53,11 @@ func (s *stubCoordinator) AddNote(string, string)            {}
 func (s *stubCoordinator) Summarize(context.Context, string) error {
 	return nil
 }
-func (s *stubCoordinator) Model() agent.Model                            { return agent.Model{} }
+func (s *stubCoordinator) Model() agent.Model              { return agent.Model{} }
+func (s *stubCoordinator) SessionModel(string) agent.Model { return agent.Model{} }
+func (s *stubCoordinator) SetSessionModel(context.Context, string, config.SelectedModel) error {
+	return nil
+}
 func (s *stubCoordinator) UpdateModels(context.Context) error            { return nil }
 func (s *stubCoordinator) SetMainAgent(string) error                     { return nil }
 func (s *stubCoordinator) GenerateTitle(context.Context, string, string) {}

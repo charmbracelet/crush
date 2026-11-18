@@ -382,6 +382,22 @@ func (w *ClientWorkspace) UpdateAgentModel(ctx context.Context) error {
 	return w.client.UpdateAgent(ctx, w.workspaceID())
 }
 
+// SetSessionModel pins a session to a model selection on the server,
+// applying from its next turn.
+func (w *ClientWorkspace) SetSessionModel(ctx context.Context, sessionID string, model config.SelectedModel) error {
+	return w.client.SetSessionModel(ctx, w.workspaceID(), sessionID, model)
+}
+
+// AgentSessionModel reports the model a session runs on, as the server
+// resolves it.
+func (w *ClientWorkspace) AgentSessionModel(sessionID string) AgentModel {
+	info, err := w.client.GetAgentSessionInfo(context.Background(), w.workspaceID(), sessionID)
+	if err != nil {
+		return AgentModel{}
+	}
+	return AgentModel{CatwalkCfg: info.Model, ModelCfg: info.ModelCfg}
+}
+
 func (w *ClientWorkspace) InitCoderAgent(ctx context.Context) error {
 	return w.client.InitiateAgentProcessing(ctx, w.workspaceID(), true)
 }

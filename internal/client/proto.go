@@ -519,6 +519,21 @@ func (c *Client) UpdateAgent(ctx context.Context, id string) error {
 	return nil
 }
 
+// SetSessionModel pins a session to a model selection on the server,
+// applying from its next turn.
+func (c *Client) SetSessionModel(ctx context.Context, id, sessionID string, model config.SelectedModel) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent/sessions/%s/model", id, sessionID), nil,
+		jsonBody(proto.AgentSetSessionModelRequest{Model: model}), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return fmt.Errorf("failed to set session model: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to set session model: status code %d", rsp.StatusCode)
+	}
+	return nil
+}
+
 // SetMainAgent switches the workspace's active agent (e.g. "coder" or
 // "plan") on the server.
 func (c *Client) SetMainAgent(ctx context.Context, id, agentID string) error {

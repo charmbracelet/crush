@@ -629,6 +629,25 @@ func (c *controllerV1) handlePostWorkspaceAgentMain(w http.ResponseWriter, r *ht
 	w.WriteHeader(http.StatusOK)
 }
 
+// handlePostWorkspaceSessionModel pins a session to a model selection.
+func (c *controllerV1) handlePostWorkspaceSessionModel(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	sessionID := r.PathValue("sid")
+
+	var req proto.AgentSetSessionModelRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		c.server.logError(r, "Failed to decode agent session model request", "error", err)
+		jsonError(w, http.StatusBadRequest, "failed to decode request")
+		return
+	}
+
+	if err := c.backend.SetSessionModel(r.Context(), id, sessionID, req.Model); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
 // handleGetWorkspaceAgentSession returns a specific agent session.
 func (c *controllerV1) handleGetWorkspaceAgentSession(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")

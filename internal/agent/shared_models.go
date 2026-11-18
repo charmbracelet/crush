@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"log/slog"
 	"sync"
 
@@ -51,72 +53,78 @@ func (c *coordinator) rebuildModels(ctx context.Context) error {
 	return nil
 }
 
-// overrideModelKey identifies a per-dispatch override selection.
-type overrideModelKey struct {
-	provider string
-	model    string
-	think    bool
-	effort   string
+// buildKey identifies one shared build: the whole selection, settings
+// included, and whether it bills as a subagent.
+type buildKey struct {
+	sel      string
+	subAgent bool
 }
 
-// overrideModel is the shared build of one override selection. It is built
-// as a subagent model, so Copilot bills it as agent-initiated.
-type overrideModel struct {
-	sel config.SelectedModel
+func newBuildKey(sel config.SelectedModel, subAgent bool) buildKey {
+	// encoding/json sorts map keys, so equal selections give equal keys.
+	b, _ := json.Marshal(sel)
+	return buildKey{sel: string(b), subAgent: subAgent}
+}
+
+// sharedBuild is the build of one selection that sessions and override
+// subagents share. It rebuilds lazily when the shared models do.
+type sharedBuild struct {
+	sel      config.SelectedModel
+	subAgent bool
 
 	mu    sync.Mutex
 	model Model
 	gen   uint64 // c.modelsGen the build was made under.
 }
 
-// current returns the build, rebuilding it first if the shared models were
-// rebuilt since. A failed rebuild keeps the old build rather than moving a
-// running subagent onto the session default.
-func (o *overrideModel) current(c *coordinator) Model {
-	model, _ := o.refresh(c)
+// current returns the build, refreshed if the shared models were rebuilt.
+// A failed rebuild keeps the old build rather than switching models.
+func (b *sharedBuild) current(c *coordinator) Model {
+	model, _ := b.refresh(c)
+	model.latest = func() fantasy.LanguageModel { return b.current(c).Model }
 	return model
 }
 
-func (o *overrideModel) refresh(c *coordinator) (Model, error) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
+func (b *sharedBuild) refresh(c *coordinator) (Model, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	gen := c.modelsGen.Load()
-	if o.gen == gen {
-		return o.model, nil
+	if b.gen == gen {
+		return b.model, nil
 	}
-	model, err := c.buildModelFromSelection(context.Background(), o.sel, true)
+	model, err := c.buildModelFromSelection(context.Background(), b.sel, b.subAgent)
 	if err != nil {
-		if o.model.Model != nil {
-			slog.Warn("Failed to refresh an overridden subagent model",
-				"model", o.sel.Model, "provider", o.sel.Provider, "error", err)
+		if b.model.Model != nil {
+			slog.Warn("Failed to refresh a model; keeping the previous build",
+				"model", b.sel.Model, "provider", b.sel.Provider, "error", err)
 		}
-		return o.model, err
+		return b.model, err
 	}
-	o.model, o.gen = model, gen
-	return o.model, nil
+	b.model, b.gen = model, gen
+	return b.model, nil
 }
 
-// overrideModel returns the shared, built model for a selection. A selection
-// that fails its first build is not cached, so a later dispatch tries afresh.
-func (c *coordinator) overrideModel(sel config.SelectedModel) (*overrideModel, error) {
-	key := overrideModelKey{provider: sel.Provider, model: sel.Model, think: sel.Think, effort: sel.ReasoningEffort}
-	c.overrideModelsMu.Lock()
-	if c.overrideModels == nil {
-		c.overrideModels = make(map[overrideModelKey]*overrideModel)
+// sharedBuild returns the built model for a selection. A selection that fails
+// its first build is not cached, so a later call tries afresh.
+func (c *coordinator) sharedBuild(sel config.SelectedModel, subAgent bool) (*sharedBuild, error) {
+	key := newBuildKey(sel, subAgent)
+	c.buildsMu.Lock()
+	if c.builds == nil {
+		c.builds = make(map[buildKey]*sharedBuild)
 	}
-	entry, ok := c.overrideModels[key]
+	entry, ok := c.builds[key]
 	if !ok {
-		entry = &overrideModel{sel: sel, gen: ^uint64(0)}
-		c.overrideModels[key] = entry
+		entry = &sharedBuild{sel: sel, subAgent: subAgent, gen: ^uint64(0)}
+		c.builds[key] = entry
 	}
-	c.overrideModelsMu.Unlock()
+	c.buildsMu.Unlock()
 
 	if model, err := entry.refresh(c); model.Model == nil {
-		c.overrideModelsMu.Lock()
-		if c.overrideModels[key] == entry {
-			delete(c.overrideModels, key)
+		c.buildsMu.Lock()
+		if c.builds[key] == entry {
+			delete(c.builds, key)
 		}
-		c.overrideModelsMu.Unlock()
+		c.buildsMu.Unlock()
 		return nil, err
 	}
 	return entry, nil
@@ -125,6 +133,63 @@ func (c *coordinator) overrideModel(sel config.SelectedModel) (*overrideModel, e
 func (c *coordinator) mainModels() ModelSet {
 	m := c.models.Get()
 	return ModelSet{Large: m.large, Small: m.small}
+}
+
+// modelForSession returns the large model a session's turns run on, pinning
+// the current default on first use so a later pick elsewhere can't move it.
+func (c *coordinator) modelForSession(sessionID string) (Model, error) {
+	c.sessionModelsMu.Lock()
+	sel, ok := c.sessionModels[sessionID]
+	if !ok {
+		def, configured := c.cfg.Config().Models[config.SelectedModelTypeLarge]
+		if !configured {
+			c.sessionModelsMu.Unlock()
+			return Model{}, fmt.Errorf("%s %w", config.SelectedModelTypeLarge, errModelNotSelected)
+		}
+		sel = def
+		c.setSessionModelLocked(sessionID, sel)
+	}
+	c.sessionModelsMu.Unlock()
+
+	build, err := c.sharedBuild(sel, false)
+	if err != nil {
+		return Model{}, err
+	}
+	return build.current(c), nil
+}
+
+// SessionModel implements Coordinator. Unlike modelForSession it never pins,
+// so a session that has not run yet follows the default.
+func (c *coordinator) SessionModel(sessionID string) Model {
+	c.sessionModelsMu.Lock()
+	sel, ok := c.sessionModels[sessionID]
+	c.sessionModelsMu.Unlock()
+	if !ok {
+		return c.mainModels().Large
+	}
+	build, err := c.sharedBuild(sel, false)
+	if err != nil {
+		return Model{}
+	}
+	return build.current(c)
+}
+
+// SetSessionModel implements Coordinator. The selection must build.
+func (c *coordinator) SetSessionModel(_ context.Context, sessionID string, sel config.SelectedModel) error {
+	if _, err := c.sharedBuild(sel, false); err != nil {
+		return err
+	}
+	c.sessionModelsMu.Lock()
+	c.setSessionModelLocked(sessionID, sel)
+	c.sessionModelsMu.Unlock()
+	return nil
+}
+
+func (c *coordinator) setSessionModelLocked(sessionID string, sel config.SelectedModel) {
+	if c.sessionModels == nil {
+		c.sessionModels = make(map[string]config.SelectedModel)
+	}
+	c.sessionModels[sessionID] = sel
 }
 
 func (c *coordinator) subAgentModels() ModelSet {
@@ -142,6 +207,9 @@ func (c *coordinator) smallOnlyModels() ModelSet {
 // a retry gets a refreshed credential but a model switch waits for the next
 // turn.
 func (a *sessionAgent) currentBuildOf(started Model) fantasy.LanguageModel {
+	if started.latest != nil {
+		return started.latest()
+	}
 	m := a.models().Large
 	if m.ModelCfg.Provider != started.ModelCfg.Provider || m.ModelCfg.Model != started.ModelCfg.Model {
 		return started.Model

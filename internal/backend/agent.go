@@ -239,6 +239,21 @@ func (b *Backend) UpdateAgent(ctx context.Context, workspaceID string) error {
 	return coord.UpdateModels(ctx)
 }
 
+// SetSessionModel pins a session to a model selection, applying from its
+// next turn. The default other sessions run on is untouched.
+func (b *Backend) SetSessionModel(ctx context.Context, workspaceID, sessionID string, model config.SelectedModel) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+
+	coord := ws.Coordinator()
+	if coord == nil {
+		return errors.New("agent configuration is missing")
+	}
+	return coord.SetSessionModel(ctx, sessionID, model)
+}
+
 // SetMainAgent switches the workspace's active agent (coder or plan). It
 // is rejected while the agent is running so a switch can never strand a
 // run's queued prompts on the previous agent — the same protection the

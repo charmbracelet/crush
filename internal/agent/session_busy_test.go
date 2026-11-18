@@ -70,7 +70,7 @@ func TestSummarize_RefusesWhileARunIsAccepted(t *testing.T) {
 	accept := sa.BeginAccepted("sid")
 	t.Cleanup(accept.Close)
 
-	err := sa.Summarize(t.Context(), "sid", nil, nil)
+	err := sa.Summarize(t.Context(), "sid", sa.Model(), nil, nil)
 	require.ErrorIs(t, err, ErrSessionBusy)
 }
 

@@ -3,6 +3,7 @@ package backend
 import (
 	"context"
 
+	"github.com/charmbracelet/crush/internal/agent"
 	mcptools "github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
@@ -53,9 +54,13 @@ func (b *Backend) GetAgentSession(ctx context.Context, workspaceID, sessionID st
 		return proto.AgentSession{}, err
 	}
 
-	var isSessionBusy bool
+	var (
+		isSessionBusy bool
+		model         agent.Model
+	)
 	if coord := ws.Coordinator(); coord != nil {
 		isSessionBusy = coord.IsSessionBusy(sessionID)
+		model = coord.SessionModel(sessionID)
 	}
 
 	return proto.AgentSession{
@@ -63,7 +68,9 @@ func (b *Backend) GetAgentSession(ctx context.Context, workspaceID, sessionID st
 			ID:    se.ID,
 			Title: se.Title,
 		},
-		IsBusy: isSessionBusy,
+		IsBusy:   isSessionBusy,
+		Model:    model.CatwalkCfg,
+		ModelCfg: model.ModelCfg,
 	}, nil
 }
 

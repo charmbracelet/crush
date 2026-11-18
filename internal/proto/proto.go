@@ -212,10 +212,13 @@ type ShellCommandResponse struct {
 	ExitCode int    `json:"exit_code"`
 }
 
-// AgentSession represents a session with its busy status.
+// AgentSession represents a session with its busy status and the model its
+// turns run on, which may differ from the workspace default.
 type AgentSession struct {
 	Session
-	IsBusy bool `json:"is_busy"`
+	IsBusy   bool                 `json:"is_busy"`
+	Model    catwalk.Model        `json:"model"`
+	ModelCfg config.SelectedModel `json:"model_cfg"`
 }
 
 // IsZero checks if the AgentSession is zero-valued.

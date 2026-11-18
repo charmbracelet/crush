@@ -209,7 +209,7 @@ func runNonInteractive(
 	// so the override is applied after that restore instead.
 	deferredEffort := (continueSessionID != "" || useLast) && largeModel == "" && smallModel == ""
 	if reasoningEffort != "" && !deferredEffort {
-		if err := overrideReasoningEffort(ctx, c, ws.ID, reasoningEffort); err != nil {
+		if err := overrideReasoningEffort(ctx, c, ws.ID, "", reasoningEffort); err != nil {
 			return err
 		}
 	}
@@ -275,7 +275,7 @@ func runNonInteractive(
 	}
 
 	if reasoningEffort != "" && deferredEffort {
-		if err := overrideReasoningEffort(ctx, c, ws.ID, reasoningEffort); err != nil {
+		if err := overrideReasoningEffort(ctx, c, ws.ID, sess.ID, reasoningEffort); err != nil {
 			return err
 		}
 	}
@@ -643,11 +643,8 @@ func overrideModels(
 	return c.UpdateAgent(ctx, ws.ID)
 }
 
-// restoreModelFromSession reads the last assistant message in the
-// session and, if it used a different provider/model than the current
-// config, updates the preferred model on the server provided the
-// provider/model is still available. This ensures that continuing a
-// session uses the same model that produced the last response.
+// restoreModelFromSession pins the session to the model of its last
+// response, when that model is still available.
 func restoreModelFromSession(ctx context.Context, c *client.Client, ws *proto.Workspace, sessionID string) error {
 	msgs, err := c.ListMessages(ctx, ws.ID, sessionID)
 	if err != nil {
@@ -682,8 +679,8 @@ func restoreModelFromSession(ctx context.Context, c *client.Client, ws *proto.Wo
 		Provider: lastAssistant.Provider,
 		Model:    lastAssistant.Model,
 	}
-	if err := c.UpdatePreferredModel(ctx, ws.ID, config.ScopeWorkspace, config.SelectedModelTypeLarge, selectedModel); err != nil {
-		return fmt.Errorf("failed to set large model: %w", err)
+	if err := c.SetSessionModel(ctx, ws.ID, sessionID, selectedModel); err != nil {
+		return fmt.Errorf("failed to set session model: %w", err)
 	}
 
 	if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
@@ -701,16 +698,20 @@ func restoreModelFromSession(ctx context.Context, c *client.Client, ws *proto.Wo
 }
 
 // overrideReasoningEffort validates the requested reasoning effort against
-// the large model in effect for this run (which may have been overridden by
-// --model or restored from a continued session) and applies it on the
-// server.
-func overrideReasoningEffort(ctx context.Context, c *client.Client, wsID, reasoningEffort string) error {
+// the large model in effect for this run and applies it on the server: to
+// the session's model when continuing one, else to the default.
+func overrideReasoningEffort(ctx context.Context, c *client.Client, wsID, sessionID, reasoningEffort string) error {
 	cfg, err := c.GetConfig(ctx, wsID)
 	if err != nil {
 		return fmt.Errorf("failed to get config: %w", err)
 	}
 
 	selected, ok := cfg.Models[config.SelectedModelTypeLarge]
+	if sessionID != "" {
+		if info, err := c.GetAgentSessionInfo(ctx, wsID, sessionID); err == nil && info.ModelCfg.Model != "" {
+			selected, ok = info.ModelCfg, true
+		}
+	}
 	if !ok {
 		return fmt.Errorf("no large model selected; set one with the --model flag or 'model large'")
 	}
@@ -722,6 +723,9 @@ func overrideReasoningEffort(ctx context.Context, c *client.Client, wsID, reason
 		"provider", selected.Provider,
 		"model", selected.Model,
 		"reasoning_effort", reasoningEffort)
+	if sessionID != "" {
+		return c.SetSessionModel(ctx, wsID, sessionID, selected)
+	}
 	if err := c.UpdatePreferredModel(ctx, wsID, config.ScopeWorkspace, config.SelectedModelTypeLarge, selected); err != nil {
 		return fmt.Errorf("failed to set reasoning effort: %w", err)
 	}

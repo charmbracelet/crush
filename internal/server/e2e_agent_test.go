@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/crush/internal/config"
+
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/app"
@@ -212,14 +214,18 @@ func (c *scriptedCoordinator) CancelAll() {
 	}
 }
 
-func (c *scriptedCoordinator) IsBusy() bool                                  { return false }
-func (c *scriptedCoordinator) IsSessionBusy(string) bool                     { return false }
-func (c *scriptedCoordinator) QueuedPrompts(string) int                      { return 0 }
-func (c *scriptedCoordinator) QueuedPromptsList(string) []string             { return nil }
-func (c *scriptedCoordinator) ClearQueue(string)                             {}
-func (c *scriptedCoordinator) AddNote(string, string)                        {}
-func (c *scriptedCoordinator) Summarize(context.Context, string) error       { return nil }
-func (c *scriptedCoordinator) Model() agent.Model                            { return agent.Model{} }
+func (c *scriptedCoordinator) IsBusy() bool                            { return false }
+func (c *scriptedCoordinator) IsSessionBusy(string) bool               { return false }
+func (c *scriptedCoordinator) QueuedPrompts(string) int                { return 0 }
+func (c *scriptedCoordinator) QueuedPromptsList(string) []string       { return nil }
+func (c *scriptedCoordinator) ClearQueue(string)                       {}
+func (c *scriptedCoordinator) AddNote(string, string)                  {}
+func (c *scriptedCoordinator) Summarize(context.Context, string) error { return nil }
+func (c *scriptedCoordinator) Model() agent.Model                      { return agent.Model{} }
+func (c *scriptedCoordinator) SessionModel(string) agent.Model         { return agent.Model{} }
+func (c *scriptedCoordinator) SetSessionModel(context.Context, string, config.SelectedModel) error {
+	return nil
+}
 func (c *scriptedCoordinator) UpdateModels(context.Context) error            { return nil }
 func (c *scriptedCoordinator) SetMainAgent(string) error                     { return nil }
 func (c *scriptedCoordinator) GenerateTitle(context.Context, string, string) {}

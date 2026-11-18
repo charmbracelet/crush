@@ -177,6 +177,10 @@ type Workspace interface {
 	AgentSetMain(agentID string) error
 	AgentSummarize(ctx context.Context, sessionID string) error
 	UpdateAgentModel(ctx context.Context) error
+	SetSessionModel(ctx context.Context, sessionID string, model config.SelectedModel) error
+	// AgentSessionModel reports the model a session runs on, which may
+	// differ from AgentModel's default once the session is pinned.
+	AgentSessionModel(sessionID string) AgentModel
 	InitCoderAgent(ctx context.Context) error
 	InitCoderAgentNonInteractive(ctx context.Context) error
 	GetDefaultSmallModel(providerID string) config.SelectedModel

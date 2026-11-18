@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/crush/internal/config"
+
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/app"
@@ -62,10 +64,15 @@ func (c *blockingCoordinator) ClearQueue(string)                                
 func (c *blockingCoordinator) AddNote(string, string)                            {}
 func (c *blockingCoordinator) Summarize(context.Context, string) error           { return nil }
 func (c *blockingCoordinator) Model() agent.Model                                { return agent.Model{} }
-func (c *blockingCoordinator) UpdateModels(context.Context) error                { return nil }
-func (c *blockingCoordinator) GenerateTitle(context.Context, string, string)     {}
-func (c *blockingCoordinator) SetHostContext(proto.HostContext)                  {}
-func (c *blockingCoordinator) HostContext() proto.HostContext                    { return proto.HostContext{} }
+
+func (c *blockingCoordinator) SessionModel(string) agent.Model { return agent.Model{} }
+func (c *blockingCoordinator) SetSessionModel(context.Context, string, config.SelectedModel) error {
+	return nil
+}
+func (c *blockingCoordinator) UpdateModels(context.Context) error            { return nil }
+func (c *blockingCoordinator) GenerateTitle(context.Context, string, string) {}
+func (c *blockingCoordinator) SetHostContext(proto.HostContext)              {}
+func (c *blockingCoordinator) HostContext() proto.HostContext                { return proto.HostContext{} }
 
 func (c *blockingCoordinator) SetMainAgent(agentName string) error {
 	c.lastMainAgentSet.Store(agentName)

@@ -252,6 +252,23 @@ func (w *AppWorkspace) UpdateAgentModel(ctx context.Context) error {
 	return w.app.UpdateAgentModel(ctx)
 }
 
+func (w *AppWorkspace) SetSessionModel(ctx context.Context, sessionID string, model config.SelectedModel) error {
+	coord := w.app.Agent()
+	if coord == nil {
+		return errors.New("agent coordinator not initialized")
+	}
+	return coord.SetSessionModel(ctx, sessionID, model)
+}
+
+func (w *AppWorkspace) AgentSessionModel(sessionID string) AgentModel {
+	coord := w.app.Agent()
+	if coord == nil {
+		return AgentModel{}
+	}
+	m := coord.SessionModel(sessionID)
+	return AgentModel{CatwalkCfg: m.CatwalkCfg, ModelCfg: m.ModelCfg}
+}
+
 func (w *AppWorkspace) InitCoderAgent(ctx context.Context) error {
 	return w.app.InitCoderAgent(ctx)
 }

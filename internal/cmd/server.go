@@ -58,6 +58,7 @@ at /v1/docs/openapi.json.
 		if err != nil {
 			return fmt.Errorf("failed to load configuration: %v", err)
 		}
+		cfg.Config().Options.Experimental.ExportEnv()
 
 		hostURL, err := server.ParseHostURL(serverHost)
 		if err != nil {

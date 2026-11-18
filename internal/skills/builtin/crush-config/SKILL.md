@@ -193,6 +193,13 @@ option reset <list-key>    # clear a list option back to empty
   scrolling), `option ui scrollbar default|always|never`,
   `option ui exit-banner default|compact|none`,
   `option ui completions-max-depth N`, `option ui completions-max-items N`.
+- **Experimental** (unfinished, may change or disappear in any release):
+  `option experimental client-server BOOL` runs the agent in a background
+  server the TUI attaches to; `option experimental server-ready-timeout N`,
+  `server-idle-timeout N` (default 60), and `server-detach-grace N` (default
+  10) are in seconds. The env vars `CRUSH_CLIENT_SERVER`,
+  `CRUSH_SERVER_READY_TIMEOUT`, `CRUSH_SERVER_IDLE_TIMEOUT`, and
+  `CRUSH_SERVER_DETACH_GRACE` take priority when set.
 - **List keys** (singular, one value per call, repeatable): `context-path`,
   `global-context-path`, `skill-path`, `disable-skill`. Use `option reset <key>`
   to wipe inherited values (e.g. after `source`).

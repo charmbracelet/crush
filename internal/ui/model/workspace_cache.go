@@ -183,13 +183,16 @@ func (m *UI) dispatchBusyRefresh() tea.Cmd {
 	gen := m.busyFetchGen
 	sessionID := m.currentSessionID()
 	return func() tea.Msg {
-		st := busyStateMsg{gen: gen, forSession: sessionID}
+		st := busyStateMsg{gen: gen}
 		if ws.AgentIsReady() {
 			st.ready = true
 			st.agentBusy = ws.AgentIsBusy()
 			st.model = ws.AgentModel()
 			if sessionID != "" {
-				st.sessionBusy = ws.AgentIsSessionBusy(sessionID)
+				if busy, err := ws.AgentIsSessionBusy(sessionID); err == nil {
+					st.forSession = sessionID
+					st.sessionBusy = busy
+				}
 			}
 		}
 		st.permMode = ws.PermissionMode()

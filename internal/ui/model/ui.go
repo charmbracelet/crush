@@ -1820,7 +1820,8 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 	m.loadNestedToolCalls(items)
 	m.setMessagePlanFlags(items)
 	replayDispatchReports(items, msgPtrs, func(messageID, toolCallID string) bool {
-		return m.com.Workspace.AgentIsSessionBusy(m.com.Workspace.CreateAgentToolSessionID(messageID, toolCallID))
+		busy, _ := m.com.Workspace.AgentIsSessionBusy(m.com.Workspace.CreateAgentToolSessionID(messageID, toolCallID))
+		return busy
 	})
 
 	// If the user switches between sessions while the agent is working we
@@ -2383,7 +2384,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		m.dialog.CloseDialog(dialog.NotificationsID)
 	case dialog.ActionNewSession:
-		if m.isAgentBusy() {
+		if m.isCurrentSessionBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before starting a new session..."))
 			break
 		}
@@ -3496,7 +3497,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				if !m.hasSession() {
 					break
 				}
-				if m.isAgentBusy() {
+				if m.isCurrentSessionBusy() {
 					cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before starting a new session..."))
 					break
 				}
@@ -3676,7 +3677,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				if !m.hasSession() {
 					break
 				}
-				if m.isAgentBusy() {
+				if m.isCurrentSessionBusy() {
 					cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before starting a new session..."))
 					break
 				}
@@ -5309,6 +5310,20 @@ func (m *UI) isAgentBusy() bool {
 	return m.agentBusyCache.val
 }
 
+// isCurrentSessionBusy falls back to the workspace state until a fresh probe
+// covers the session in view.
+func (m *UI) isCurrentSessionBusy() bool {
+	if m.bangCancel != nil {
+		return true
+	}
+	sessionID := m.currentSessionID()
+	if sessionID == "" {
+		return false
+	}
+	hasCurrentProbe := m.probedSession == sessionID && m.agentBusyCache.fresh(busyCacheTTL)
+	return m.turnInFlight(sessionID) || (!hasCurrentProbe && m.agentBusyCache.val)
+}
+
 // hasSession returns true if there is an active session with a valid ID.
 func (m *UI) hasSession() bool {
 	return m.session != nil && m.session.ID != ""
@@ -6312,6 +6327,15 @@ func (m *UI) newSession() tea.Cmd {
 		return nil
 	}
 
+	var stopLSP tea.Cmd
+	// The workspace's language servers may be in use by another session.
+	if !m.isAgentBusy() {
+		ws := m.com.Workspace
+		stopLSP = func() tea.Msg {
+			ws.LSPStopAll(context.Background())
+			return nil
+		}
+	}
 	planCmd := m.resetPlanModeState()
 	m.turnOutcome = ""
 	m.session = nil
@@ -6333,10 +6357,7 @@ func (m *UI) newSession() tea.Cmd {
 	agenttools.ResetCache()
 	return tea.Batch(
 		planCmd,
-		func() tea.Msg {
-			m.com.Workspace.LSPStopAll(context.Background())
-			return nil
-		},
+		stopLSP,
 		m.loadPromptHistory(),
 		m.reportCurrentSession(""),
 	)

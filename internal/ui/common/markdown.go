@@ -1,22 +1,129 @@
 package common
 
 import (
+	"fmt"
 	"image/color"
+	"io"
+	"maps"
+	"slices"
+	"strings"
 	"sync"
 
 	"charm.land/glamour/v2"
+	"charm.land/glamour/v2/ansi"
+	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/formatters"
+	chromastyles "github.com/alecthomas/chroma/v2/styles"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/ui/xchroma"
 )
 
 const formatterName = "crush"
 
+// Code block colors.
+//
+// Glamour turns a style config's code-block chroma settings into a chroma
+// style registered globally under one fixed name, and only the first time:
+// renderers built after a theme switch kept highlighting fenced code with
+// the colors of the first theme ever rendered. Registering again is no fix,
+// because chroma's registry is a plain map that every highlight reads
+// without a lock, so writing it while a renderer runs on another goroutine
+// is a data race.
+//
+// So the registry is only written here, at init: it gets a fixed set of
+// empty placeholder styles. Each renderer's config names one placeholder
+// instead of carrying chroma settings ([codeBlockConfig]), a placeholder
+// stands for one distinct set of settings, and the "crush" formatter every
+// renderer uses swaps the placeholder for the real style while it formats.
+// Placeholders are reused round-robin once all are taken; renderers are
+// rebuilt on every theme change, so the live ones always share the current
+// settings.
+const codeBlockSlots = 32
+
+var (
+	// codeBlockSlotOf maps each placeholder style to its slot. It is
+	// written only at init.
+	codeBlockSlotOf = map[*chroma.Style]int{}
+
+	// codeBlockMu guards the slot assignments below.
+	codeBlockMu     sync.Mutex
+	codeBlockByKey  = map[string]int{}
+	codeBlockKeys   [codeBlockSlots]string
+	codeBlockStyles [codeBlockSlots]*chroma.Style
+	codeBlockNext   int
+)
+
 func init() {
 	// NOTE: Glamour does not offer us an option to pass the formatter
 	// implementation directly. We need to register and use by name.
 	var zero color.Color
-	formatters.Register(formatterName, xchroma.Formatter(zero, nil))
+	inner := xchroma.Formatter(zero, nil)
+	formatters.Register(formatterName, chroma.FormatterFunc(
+		func(w io.Writer, style *chroma.Style, it chroma.Iterator) error {
+			return inner.Format(w, codeBlockStyle(style), it)
+		},
+	))
+	for i := range codeBlockSlots {
+		placeholder := chromastyles.Register(chroma.MustNewStyle(codeBlockSlotName(i), chroma.StyleEntries{}))
+		codeBlockSlotOf[placeholder] = i
+	}
+}
+
+// codeBlockSlotName is the registry name of a code block placeholder.
+func codeBlockSlotName(slot int) string {
+	return fmt.Sprintf("crush-code-block-%d", slot)
+}
+
+// codeBlockConfig returns cfg ready to hand to glamour: chroma settings in
+// its code block are replaced by the name of the placeholder that stands
+// for them. See the comment on [codeBlockSlots].
+func codeBlockConfig(cfg ansi.StyleConfig) ansi.StyleConfig {
+	if cfg.CodeBlock.Chroma == nil {
+		return cfg
+	}
+	cfg.CodeBlock.Theme = codeBlockSlotName(codeBlockSlot(cfg.CodeBlock.Chroma))
+	cfg.CodeBlock.Chroma = nil
+	return cfg
+}
+
+// codeBlockSlot returns the placeholder slot for the given chroma settings,
+// assigning one (and building its style) the first time they are seen.
+func codeBlockSlot(c *ansi.Chroma) int {
+	entries := styles.ChromaEntries(c)
+	var key strings.Builder
+	for _, t := range slices.Sorted(maps.Keys(entries)) {
+		fmt.Fprintf(&key, "%d=%s;", t, entries[t])
+	}
+
+	codeBlockMu.Lock()
+	defer codeBlockMu.Unlock()
+	if slot, ok := codeBlockByKey[key.String()]; ok {
+		return slot
+	}
+	slot := codeBlockNext
+	codeBlockNext = (codeBlockNext + 1) % codeBlockSlots
+	if old := codeBlockKeys[slot]; old != "" {
+		delete(codeBlockByKey, old)
+	}
+	codeBlockKeys[slot] = key.String()
+	codeBlockStyles[slot] = chroma.MustNewStyle("crush", entries)
+	codeBlockByKey[key.String()] = slot
+	return slot
+}
+
+// codeBlockStyle returns the real style for a code block placeholder, or
+// style itself when it is not one.
+func codeBlockStyle(style *chroma.Style) *chroma.Style {
+	slot, ok := codeBlockSlotOf[style]
+	if !ok {
+		return style
+	}
+	codeBlockMu.Lock()
+	defer codeBlockMu.Unlock()
+	if s := codeBlockStyles[slot]; s != nil {
+		return s
+	}
+	return style
 }
 
 // mdCacheMu guards mdCache, quietMDCache, userMDCache, and planMDCache.
@@ -51,7 +158,7 @@ func MarkdownRenderer(sty *styles.Styles, width int) *glamour.TermRenderer {
 		return r
 	}
 	r, _ := glamour.NewTermRenderer(
-		glamour.WithStyles(sty.Markdown),
+		glamour.WithStyles(codeBlockConfig(sty.Markdown)),
 		glamour.WithWordWrap(width),
 		glamour.WithChromaFormatter(formatterName),
 	)
@@ -82,7 +189,7 @@ func UserMarkdownRenderer(sty *styles.Styles, width int) *glamour.TermRenderer {
 		return r
 	}
 	r, _ := glamour.NewTermRenderer(
-		glamour.WithStyles(sty.Markdown),
+		glamour.WithStyles(codeBlockConfig(sty.Markdown)),
 		glamour.WithWordWrap(width),
 		glamour.WithChromaFormatter(formatterName),
 		glamour.WithPreservedNewLines(),
@@ -102,7 +209,7 @@ func QuietMarkdownRenderer(sty *styles.Styles, width int) *glamour.TermRenderer 
 		return r
 	}
 	r, _ := glamour.NewTermRenderer(
-		glamour.WithStyles(sty.QuietMarkdown),
+		glamour.WithStyles(codeBlockConfig(sty.QuietMarkdown)),
 		glamour.WithWordWrap(width),
 		glamour.WithChromaFormatter(formatterName),
 	)
@@ -122,7 +229,7 @@ func PlanMarkdownRenderer(sty *styles.Styles, width int) *glamour.TermRenderer {
 		return r
 	}
 	r, _ := glamour.NewTermRenderer(
-		glamour.WithStyles(sty.PlanMarkdown),
+		glamour.WithStyles(codeBlockConfig(sty.PlanMarkdown)),
 		glamour.WithWordWrap(width),
 		glamour.WithChromaFormatter(formatterName),
 	)

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"text/template"
 	"time"
@@ -23,10 +24,17 @@ import (
 // Prompt represents a template-based prompt generator.
 type Prompt struct {
 	name       string
-	template   string
+	template   *template.Template
 	now        func() time.Time
 	platform   string
 	workingDir string
+	canWrite   bool
+	toolNames  []string
+
+	// skillOverrides fetches the repository-scoped skill toggle state at
+	// Build time: which skills the repository disabled and which it
+	// re-enabled over the config. Nil means no overrides.
+	skillOverrides func(ctx context.Context) (disabled, enabled []string)
 }
 
 type PromptDat struct {
@@ -41,6 +49,10 @@ type PromptDat struct {
 	ContextFiles       []ContextFile
 	GlobalContextFiles []ContextFile
 	AvailSkillXML      string
+	CanWrite           bool
+	// ToolNames are the tools the agent is actually given, which is not
+	// always its whole configured set: some tools depend on the run mode.
+	ToolNames []string
 }
 
 type ContextFile struct {
@@ -62,16 +74,55 @@ func WithPlatform(platform string) Option {
 	}
 }
 
+// WithCanWrite marks the prompt as belonging to an agent that can edit files.
+func WithCanWrite(canWrite bool) Option {
+	return func(p *Prompt) {
+		p.canWrite = canWrite
+	}
+}
+
+// WithToolNames sets the tools the agent is actually given, so a prompt that
+// advertises its tools cannot promise one that was never attached.
+func WithToolNames(names []string) Option {
+	return func(p *Prompt) {
+		p.toolNames = names
+	}
+}
+
 func WithWorkingDir(workingDir string) Option {
 	return func(p *Prompt) {
 		p.workingDir = workingDir
 	}
 }
 
+// WithSkillOverrides supplies the repository-scoped skill toggle state,
+// evaluated when the prompt is built. disabled lists skills turned off
+// for the repository; enabled lists config-disabled skills turned back
+// on for it.
+func WithSkillOverrides(disabled, enabled func(ctx context.Context) []string) Option {
+	return func(p *Prompt) {
+		p.skillOverrides = func(ctx context.Context) (d, e []string) {
+			if disabled != nil {
+				d = disabled(ctx)
+			}
+			if enabled != nil {
+				e = enabled(ctx)
+			}
+			return d, e
+		}
+	}
+}
+
+// NewPrompt parses promptTemplate up front, so a malformed template fails
+// here instead of on every turn that builds it.
 func NewPrompt(name, promptTemplate string, opts ...Option) (*Prompt, error) {
+	t, err := template.New(name).Parse(promptTemplate)
+	if err != nil {
+		return nil, fmt.Errorf("parsing %s prompt template: %w", name, err)
+	}
 	p := &Prompt{
 		name:     name,
-		template: promptTemplate,
+		template: t,
 		now:      time.Now,
 	}
 	for _, opt := range opts {
@@ -81,16 +132,12 @@ func NewPrompt(name, promptTemplate string, opts ...Option) (*Prompt, error) {
 }
 
 func (p *Prompt) Build(ctx context.Context, provider, model string, store *config.ConfigStore) (string, error) {
-	t, err := template.New(p.name).Parse(p.template)
-	if err != nil {
-		return "", fmt.Errorf("parsing template: %w", err)
-	}
 	var sb strings.Builder
 	d, err := p.promptData(ctx, provider, model, store)
 	if err != nil {
 		return "", err
 	}
-	if err := t.Execute(&sb, d); err != nil {
+	if err := p.template.Execute(&sb, d); err != nil {
 		return "", fmt.Errorf("executing template: %w", err)
 	}
 
@@ -136,8 +183,8 @@ func processContextPath(p string, store *config.ConfigStore) []ContextFile {
 	return contexts
 }
 
-// expandPath expands ~ and environment variables in file paths
-func expandPath(path string, store *config.ConfigStore) string {
+// ExpandPath resolves ~ and environment variables in a config-supplied path.
+func ExpandPath(path string, store *config.ConfigStore) string {
 	path = home.Long(path)
 	// Handle environment variable expansion using the same pattern as config
 	if strings.HasPrefix(path, "$") {
@@ -153,7 +200,7 @@ func expandPath(path string, store *config.ConfigStore) string {
 func loadContextFiles(paths []string, store *config.ConfigStore) map[string][]ContextFile {
 	files := map[string][]ContextFile{}
 	for _, pth := range paths {
-		expanded := expandPath(pth, store)
+		expanded := ExpandPath(pth, store)
 		pathKey := strings.ToLower(expanded)
 		if _, ok := files[pathKey]; ok {
 			continue
@@ -185,7 +232,7 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 	if len(cfg.Options.SkillsPaths) > 0 {
 		expandedPaths := make([]string, 0, len(cfg.Options.SkillsPaths))
 		for _, pth := range cfg.Options.SkillsPaths {
-			expandedPaths = append(expandedPaths, expandPath(pth, store))
+			expandedPaths = append(expandedPaths, ExpandPath(pth, store))
 		}
 		for _, userSkill := range skills.Discover(expandedPaths) {
 			if builtinNames[userSkill.Name] {
@@ -201,6 +248,28 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 	// Filter out disabled skills.
 	allSkills = skills.Filter(allSkills, cfg.Options.DisabledSkills)
 
+	// Apply repository-scoped toggle overrides on top: repo-disabled
+	// skills hide too, and config-disabled skills with a repository
+	// enabled override come back for this repository.
+	if p.skillOverrides != nil {
+		repoDisabled, repoEnabled := p.skillOverrides(ctx)
+		effective := make(map[string]bool, len(repoDisabled))
+		for _, name := range repoDisabled {
+			effective[name] = true
+		}
+		for _, name := range repoEnabled {
+			delete(effective, name)
+		}
+		if len(effective) > 0 {
+			disabled := make([]string, 0, len(effective))
+			for name := range effective {
+				disabled = append(disabled, name)
+			}
+			slices.Sort(disabled)
+			allSkills = skills.Filter(allSkills, disabled)
+		}
+	}
+
 	if len(allSkills) > 0 {
 		availSkillXML = skills.ToPromptXML(allSkills)
 	}
@@ -215,6 +284,8 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 		Platform:      platform,
 		Date:          p.now().Format("1/2/2006"),
 		AvailSkillXML: availSkillXML,
+		CanWrite:      p.canWrite,
+		ToolNames:     p.toolNames,
 	}
 	if isGit {
 		var err error

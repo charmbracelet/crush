@@ -1,11 +1,15 @@
 package workspace
 
 import (
+	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -13,15 +17,20 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/client"
 	"github.com/charmbracelet/crush/internal/commands"
+	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/charmbracelet/crush/internal/ui/util"
+	"github.com/charmbracelet/crush/internal/version"
 	"github.com/stretchr/testify/require"
 )
 
@@ -158,6 +167,7 @@ func TestClientWorkspace_PermissionGrantMapping(t *testing.T) {
 				Description: "do thing",
 				Action:      "act",
 				Path:        "/tmp/p",
+				Params:      `{"repo":"charmbracelet/crush"}`,
 			}
 			tc.call(ws, perm)
 
@@ -168,6 +178,8 @@ func TestClientWorkspace_PermissionGrantMapping(t *testing.T) {
 			require.Equal(t, "tool", got.Permission.ToolName)
 			require.Equal(t, "act", got.Permission.Action)
 			require.Equal(t, "/tmp/p", got.Permission.Path)
+			// Older servers reject an MCP tool's string params.
+			require.Nil(t, got.Permission.Params)
 		})
 	}
 }
@@ -271,6 +283,44 @@ func TestNewClientWorkspace_SeedsSkillsCache(t *testing.T) {
 	got := skills.GetLatestStates()
 	require.Len(t, got, 1)
 	require.Equal(t, "seeded", got[0].Name)
+}
+
+// TestTranslateEvent_HostTheme verifies that host theme events reach the
+// TUI as HostThemeEvent: the theme for an update, nil for a clear.
+func TestTranslateEvent_HostTheme(t *testing.T) {
+	t.Parallel()
+
+	w := NewClientWorkspace(nil, proto.Workspace{})
+	theme := &proto.HostTheme{Name: "charmtone-dark", Palette: map[string]string{"primary": "#6B50FF"}}
+
+	out := w.translateEvent(pubsub.Event[proto.HostThemeState]{
+		Type:    pubsub.UpdatedEvent,
+		Payload: proto.HostThemeState{WorkspaceID: "ws1", Theme: theme},
+	})
+	got, ok := out.(HostThemeEvent)
+	require.True(t, ok, "expected HostThemeEvent, got %T", out)
+	require.Same(t, theme, got.Theme)
+
+	out = w.translateEvent(pubsub.Event[proto.HostThemeState]{
+		Type:    pubsub.DeletedEvent,
+		Payload: proto.HostThemeState{WorkspaceID: "ws1"},
+	})
+	got, ok = out.(HostThemeEvent)
+	require.True(t, ok, "expected HostThemeEvent, got %T", out)
+	require.Nil(t, got.Theme)
+}
+
+func TestTranslateReauthenticateEvent(t *testing.T) {
+	t.Parallel()
+
+	event := pubsub.Event[proto.AgentEvent]{
+		Type:    pubsub.CreatedEvent,
+		Payload: proto.AgentEvent{Type: proto.AgentEventType(notify.TypeReAuthenticate), ProviderID: "example"},
+	}
+	w := NewClientWorkspace(nil, proto.Workspace{})
+	out := w.translateEvent(event).(pubsub.Event[notify.Notification])
+	require.Equal(t, notify.TypeReAuthenticate, out.Payload.Type)
+	require.Equal(t, "example", out.Payload.ProviderID)
 }
 
 // TestTranslateEvent_UpdateAvailable verifies that an incoming
@@ -553,21 +603,48 @@ type recoveryServer struct {
 	// never learns the ID of a workspace the server did register.
 	hangUpOnCreate bool
 
+	// hostTheme is the host theme the theme endpoint reports.
+	hostTheme *proto.HostTheme
+	// abortStreams kills each event stream mid-response, as a server
+	// that dies does, instead of ending it cleanly.
+	abortStreams bool
+	// config is the config creates report; a configured one makes
+	// recovery initialize the agent.
+	config *config.Config
+
 	creates      int
+	createReqs   []proto.Workspace
 	streams      int
 	sessionPosts []string
 	retired      []string
 	deleted      []string
+	// agentCalls logs agent calls as "<call> <id> [<agent>]".
+	agentCalls []string
 }
 
 func (s *recoveryServer) start(t *testing.T) *client.Client {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(s.handler(t))
+	t.Cleanup(srv.Close)
+
+	u, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	c, err := client.NewClient(t.TempDir(), "tcp", u.Host)
+	require.NoError(t, err)
+	return c
+}
+
+// handler serves the scripted API, so a test can put it on any listener.
+func (s *recoveryServer) handler(t *testing.T) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/workspaces":
 			s.creates++
+			var req proto.Workspace
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+			s.createReqs = append(s.createReqs, req)
 			if s.createErr != nil {
 				http.Error(w, "no", s.createErr())
 				return
@@ -586,7 +663,7 @@ func (s *recoveryServer) start(t *testing.T) *client.Client {
 			}
 			s.liveID = s.nextID
 			require.NoError(t, json.NewEncoder(w).Encode(proto.Workspace{
-				ID: s.liveID, Path: "/tmp/recover",
+				ID: s.liveID, Path: "/tmp/recover", Config: s.config,
 			}))
 		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/v1/clients/"):
 			s.retired = append(s.retired, strings.TrimPrefix(r.URL.Path, "/v1/clients/"))
@@ -602,6 +679,24 @@ func (s *recoveryServer) start(t *testing.T) *client.Client {
 			var req proto.CurrentSession
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
 			s.sessionPosts = append(s.sessionPosts, req.SessionID)
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/theme"):
+			id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v1/workspaces/"), "/theme")
+			if id != s.liveID {
+				http.Error(w, "workspace not found", http.StatusNotFound)
+				return
+			}
+			require.NoError(t, json.NewEncoder(w).Encode(proto.HostThemeState{
+				WorkspaceID: id, Theme: s.hostTheme,
+			}))
+		case strings.Contains(r.URL.Path, "/agent/"):
+			id, call, _ := strings.Cut(strings.TrimPrefix(r.URL.Path, "/v1/workspaces/"), "/")
+			if id != s.liveID {
+				http.Error(w, "workspace not found", http.StatusNotFound)
+				return
+			}
+			var req proto.AgentSetMainRequest
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			s.agentCalls = append(s.agentCalls, strings.TrimSpace(call+" "+id+" "+req.AgentID))
 		case strings.HasSuffix(r.URL.Path, "/events"):
 			id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v1/workspaces/"), "/events")
 			if id != s.liveID {
@@ -614,18 +709,14 @@ func (s *recoveryServer) start(t *testing.T) *client.Client {
 			if f, ok := w.(http.Flusher); ok {
 				f.Flush()
 			}
+			if s.abortStreams {
+				panic(http.ErrAbortHandler)
+			}
 			// Drop the stream so the loop keeps cycling.
 		default:
 			w.WriteHeader(http.StatusOK)
 		}
-	}))
-	t.Cleanup(srv.Close)
-
-	u, err := url.Parse(srv.URL)
-	require.NoError(t, err)
-	c, err := client.NewClient(t.TempDir(), "tcp", u.Host)
-	require.NoError(t, err)
-	return c
+	})
 }
 
 func (s *recoveryServer) snapshot(f func(*recoveryServer)) {
@@ -774,6 +865,103 @@ func TestClientWorkspace_ResyncsAfterPlainStreamDrop(t *testing.T) {
 	}
 }
 
+// TestClientWorkspace_ResyncsHostThemeAfterReconnect covers a host theme
+// cleared while the stream was down: the attach replay only carries a
+// theme that is set, so the client must re-read it after the reconnect and
+// hand the UI the clear. Once the host sets a theme again, the next
+// reconnect hands that over too.
+func TestClientWorkspace_ResyncsHostThemeAfterReconnect(t *testing.T) {
+	t.Cleanup(SetSSEBackoffForTest(time.Millisecond, 5*time.Millisecond))
+
+	srv := &recoveryServer{liveID: "ws-1"}
+	c := srv.start(t)
+	ws := NewClientWorkspace(c, proto.Workspace{ID: "ws-1", Path: "/tmp/theme"})
+
+	var (
+		mu     sync.Mutex
+		themes []*proto.HostTheme
+	)
+	send := func(msg tea.Msg) {
+		if ev, ok := msg.(HostThemeEvent); ok {
+			mu.Lock()
+			themes = append(themes, ev.Theme)
+			mu.Unlock()
+		}
+	}
+	last := func() (*proto.HostTheme, int) {
+		mu.Lock()
+		defer mu.Unlock()
+		if len(themes) == 0 {
+			return nil, 0
+		}
+		return themes[len(themes)-1], len(themes)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		ws.runSubscription(send)
+		close(done)
+	}()
+
+	require.Eventually(t, func() bool {
+		theme, n := last()
+		return n > 0 && theme == nil
+	}, 3*time.Second, 5*time.Millisecond,
+		"a reconnect must hand the UI the host theme the server holds, even none")
+
+	theme := &proto.HostTheme{Name: "host", Palette: map[string]string{"primary": "#112233"}}
+	srv.snapshot(func(s *recoveryServer) { s.hostTheme = theme })
+	require.Eventually(t, func() bool {
+		got, _ := last()
+		return theme.Equal(got)
+	}, 3*time.Second, 5*time.Millisecond)
+
+	ws.Shutdown()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("runSubscription did not return after Shutdown")
+	}
+}
+
+// TestClientWorkspace_ResyncsHostThemeAfterAbortedStream covers a stream
+// that dies mid-response (the server was killed) instead of ending
+// cleanly: the loop must still resubscribe and re-read the host theme, so a
+// clear published meanwhile reaches the UI.
+func TestClientWorkspace_ResyncsHostThemeAfterAbortedStream(t *testing.T) {
+	t.Cleanup(SetSSEBackoffForTest(time.Millisecond, 5*time.Millisecond))
+
+	srv := &recoveryServer{liveID: "ws-1", abortStreams: true}
+	c := srv.start(t)
+	ws := NewClientWorkspace(c, proto.Workspace{ID: "ws-1", Path: "/tmp/abort"})
+
+	var resynced atomic.Bool
+	send := func(msg tea.Msg) {
+		if ev, ok := msg.(HostThemeEvent); ok && ev.Theme == nil {
+			resynced.Store(true)
+		}
+	}
+	done := make(chan struct{})
+	go func() {
+		ws.runSubscription(send)
+		close(done)
+	}()
+
+	require.Eventually(t, func() bool {
+		var streams int
+		srv.snapshot(func(s *recoveryServer) { streams = s.streams })
+		return streams >= 2 && resynced.Load()
+	}, 3*time.Second, 5*time.Millisecond,
+		"an aborted stream must be resubscribed and the host theme re-read")
+
+	ws.Shutdown()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("runSubscription did not return after Shutdown")
+	}
+}
+
 // TestClientWorkspace_EscalatesUnrecoverableConnection checks the loop
 // keeps trying when re-registration itself keeps failing, and escalates
 // the UI notice rather than stopping: a hard stop would strand a user
@@ -805,6 +993,71 @@ func TestClientWorkspace_EscalatesUnrecoverableConnection(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("runSubscription did not return after Shutdown")
 	}
+}
+
+// runSubscriptionUntilStreams runs the subscription loop until srv has
+// served n event streams, then shuts the workspace down.
+func runSubscriptionUntilStreams(t *testing.T, ws *ClientWorkspace, srv *recoveryServer, n int, send func(tea.Msg)) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() {
+		ws.runSubscription(send)
+		close(done)
+	}()
+	require.Eventually(t, func() bool {
+		var streams int
+		srv.snapshot(func(s *recoveryServer) { streams = s.streams })
+		return streams >= n
+	}, 3*time.Second, 5*time.Millisecond)
+	ws.Shutdown()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("runSubscription did not return after Shutdown")
+	}
+}
+
+// TestClientWorkspace_RespawnsDeadServer guards against the reconnect loop
+// retrying a dead server's address forever instead of respawning it.
+func TestClientWorkspace_RespawnsDeadServer(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows servers listen on named pipes; see the npipe twin")
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0") //nolint:noctx
+	require.NoError(t, err)
+	addr := ln.Addr().String()
+	require.NoError(t, ln.Close())
+	testRespawnsDeadServer(t, "tcp", addr, func() (net.Listener, error) {
+		return net.Listen("tcp", addr) //nolint:noctx
+	})
+}
+
+// testRespawnsDeadServer points a client at an address nothing listens on
+// and expects the respawn hook to bring up a server there, on which the
+// workspace is re-registered.
+func testRespawnsDeadServer(t *testing.T, network, addr string, listen func() (net.Listener, error)) {
+	t.Helper()
+	t.Cleanup(SetSSEBackoffForTest(time.Millisecond, 5*time.Millisecond))
+	c, err := client.NewClient(t.TempDir(), network, addr)
+	require.NoError(t, err)
+
+	next := &recoveryServer{nextID: "ws-2"}
+	var respawns atomic.Int32
+	ws := NewClientWorkspace(c, proto.Workspace{ID: "ws-1", Path: "/tmp/respawn"},
+		WithServerRespawn(func(context.Context) error {
+			ln, err := listen()
+			if err != nil {
+				return err
+			}
+			hs := &http.Server{Handler: next.handler(t)}
+			go func() { _ = hs.Serve(ln) }()
+			t.Cleanup(func() { _ = hs.Close() })
+			respawns.Add(1)
+			return nil
+		}))
+	runSubscriptionUntilStreams(t, ws, next, 1, func(tea.Msg) {})
+	require.Equal(t, "ws-2", ws.workspaceID())
+	require.EqualValues(t, 1, respawns.Load())
 }
 
 // TestClientWorkspace_ShutdownRetiresAfterLostCreateResponse is the
@@ -883,6 +1136,77 @@ func TestClientWorkspace_ShutdownFallsBackForLegacyServer(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 	require.Equal(t, []string{"ws-1"}, deleted)
+}
+
+// TestClientWorkspace_ShutdownIsBounded checks quitting cannot hang on a
+// server that accepts the goodbye and never answers it, such as one stopped
+// in a debugger or suspended with Ctrl+Z. The client SDK sets no request
+// timeout of its own, and by the time Shutdown runs the TUI is gone and the
+// root signal handler swallows Ctrl+C, so nothing else can end the wait.
+func TestClientWorkspace_ShutdownIsBounded(t *testing.T) {
+	// Shrink the bound so the test does not wait out the production window,
+	// keeping enough of it for the goodbye to reach the server on a loaded
+	// machine. Not parallel: other tests read the bound through Shutdown.
+	orig := shutdownRetireTimeout
+	shutdownRetireTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { shutdownRetireTimeout = orig })
+
+	for _, tc := range []struct {
+		name string
+		// wedged is the path of the goodbye request that never answers.
+		// Every other request gets a 404, which is how a server that
+		// predates client retirement answers the retire.
+		wedged string
+	}{
+		{name: "retire", wedged: "/v1/clients/"},
+		{name: "legacy server", wedged: "/v1/workspaces/ws-1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reached := make(chan struct{})
+			var once sync.Once
+			release := make(chan struct{})
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodDelete || !strings.HasPrefix(r.URL.Path, tc.wedged) {
+					http.NotFound(w, r)
+					return
+				}
+				once.Do(func() { close(reached) })
+				// Accept the request and never answer it.
+				select {
+				case <-r.Context().Done():
+				case <-release:
+				}
+			}))
+			// Unwedge the handler first: closing the server waits on it.
+			t.Cleanup(func() {
+				close(release)
+				srv.Close()
+			})
+
+			u, err := url.Parse(srv.URL)
+			require.NoError(t, err)
+			c, err := client.NewClient(t.TempDir(), "tcp", u.Host)
+			require.NoError(t, err)
+			ws := NewClientWorkspace(c, proto.Workspace{ID: "ws-1"})
+
+			done := make(chan struct{})
+			go func() {
+				ws.Shutdown()
+				close(done)
+			}()
+
+			select {
+			case <-reached:
+			case <-time.After(5 * time.Second):
+				t.Fatal("Shutdown never said goodbye to the server")
+			}
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("Shutdown blocked on an unresponsive server")
+			}
+		})
+	}
 }
 
 // TestClientWorkspace_AgentReadyErr_WorkspaceGone checks the status the
@@ -1028,6 +1352,61 @@ func TestClientWorkspace_RecoveryCreateIsBounded(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("recoverWorkspace blocked on an unresponsive server")
 	}
+}
+
+// TestClientWorkspace_RecoveryRestoresMainAgent guards against a
+// re-created workspace dropping plan mode.
+func TestClientWorkspace_RecoveryRestoresMainAgent(t *testing.T) {
+	t.Cleanup(SetSSEBackoffForTest(time.Millisecond, 5*time.Millisecond))
+
+	srv := &recoveryServer{
+		liveID: "ws-1",
+		nextID: "ws-2",
+		config: &config.Config{
+			Options: &config.Options{},
+			Providers: csync.NewMapFrom(map[string]config.ProviderConfig{
+				"fake": {ID: "fake"},
+			}),
+		},
+	}
+	ws := NewClientWorkspace(srv.start(t), proto.Workspace{ID: "ws-1", Path: "/tmp/recover"})
+	require.NoError(t, ws.AgentSetMain(config.AgentPlan))
+
+	srv.snapshot(func(s *recoveryServer) { s.liveID = "" })
+	runSubscriptionUntilStreams(t, ws, srv, 1, func(tea.Msg) {})
+
+	srv.snapshot(func(s *recoveryServer) {
+		require.Len(t, s.createReqs, 1)
+		require.Equal(t, []string{"agent/main ws-1 plan", "agent/init ws-2", "agent/main ws-2 plan"}, s.agentCalls)
+	})
+}
+
+// TestClientWorkspace_WarnsAboutServerVersionMismatch guards that the user
+// is warned, once, when the workspace's server runs another Crush version.
+func TestClientWorkspace_WarnsAboutServerVersionMismatch(t *testing.T) {
+	t.Cleanup(SetSSEBackoffForTest(time.Millisecond, 5*time.Millisecond))
+
+	otherVersion := "not-" + version.Version
+	srv := &recoveryServer{liveID: "ws-1"}
+	ws := NewClientWorkspace(srv.start(t), proto.Workspace{
+		ID: "ws-1", Path: "/tmp/version", Version: otherVersion,
+	})
+
+	var mu sync.Mutex
+	var msgs []util.InfoMsg
+	runSubscriptionUntilStreams(t, ws, srv, 3, func(msg tea.Msg) {
+		if info, ok := msg.(util.InfoMsg); ok {
+			mu.Lock()
+			msgs = append(msgs, info)
+			mu.Unlock()
+		}
+	})
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.Len(t, msgs, 1)
+	require.Equal(t, util.InfoTypeWarn, msgs[0].Type)
+	require.Contains(t, msgs[0].Msg, strconv.Quote(otherVersion))
 }
 
 // TestTranslateEvent_PermissionNotification verifies that the

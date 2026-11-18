@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/exp/charmtone"
+	"charm.land/tone"
 )
 
 // ThemeKeyForProvider returns a stable identifier for the theme
@@ -29,7 +29,14 @@ func ThemeKeyForProvider(providerID string) string {
 // ID. Unknown or empty provider IDs yield the default Charmtone Pantera
 // theme.
 func ThemeForProvider(providerID string) Styles {
-	switch ThemeKeyForProvider(providerID) {
+	return ThemeForKey(ThemeKeyForProvider(providerID))
+}
+
+// ThemeForKey returns the Styles for a key returned by
+// [ThemeKeyForProvider]. Unknown keys yield the default Charmtone Pantera
+// theme.
+func ThemeForKey(key string) Styles {
+	switch key {
 	case "hyper":
 		return HypercrushObsidiana()
 	default:
@@ -47,69 +54,70 @@ func CharmtonePantera() Styles {
 // using colors from the upstream charmbracelet/x/exp/charmtone package.
 func charmtoneOpts() quickStyleOpts {
 	return quickStyleOpts{
-		primary:   charmtone.Charple,
-		secondary: charmtone.Dolly,
-		accent:    charmtone.Bok,
-		keyword:   charmtone.Blush,
+		primary:   tone.Charple,
+		secondary: tone.Dolly,
+		accent:    tone.Bok,
+		keyword:   tone.Blush,
 
-		fgBase:       charmtone.Sash,
-		fgMoreSubtle: charmtone.Squid,
-		fgSubtle:     charmtone.Smoke,
-		fgMostSubtle: charmtone.Oyster,
+		fgBase:       tone.Sash,
+		fgMoreSubtle: tone.Squid,
+		fgSubtle:     tone.Smoke,
+		fgMostSubtle: tone.Oyster,
 
-		onPrimary: charmtone.Butter,
+		onPrimary: tone.Butter,
 
-		bgBase:         charmtone.Pepper,
-		bgLeastVisible: charmtone.BBQ,
-		bgLessVisible:  charmtone.Char,
-		bgMostVisible:  charmtone.Iron,
+		bgBase:         tone.Pepper,
+		bgLeastVisible: tone.BBQ,
+		bgLessVisible:  tone.Char,
+		bgMostVisible:  tone.Iron,
 
-		separator: charmtone.Char,
+		separator: tone.Char,
 
-		destructive:       charmtone.Coral,
-		error:             charmtone.Sriracha,
-		warningSubtle:     charmtone.Zest,
-		warning:           charmtone.Mustard,
-		attention:         charmtone.Tang,
-		busy:              charmtone.Citron,
-		info:              charmtone.Malibu,
-		infoMoreSubtle:    charmtone.Sardine,
-		infoMostSubtle:    charmtone.Damson,
-		success:           charmtone.Julep,
-		successMoreSubtle: charmtone.Bok,
-		successMostSubtle: charmtone.Guac,
-		yolo:              charmtone.Zest,
-		plan:              charmtone.Charple,
-		planMoreSubtle:    charmtone.Hazy,
+		destructive:       tone.Coral,
+		destructiveSubtle: tone.Salmon,
+		error:             tone.Sriracha,
+		warningSubtle:     tone.Zest,
+		warning:           tone.Mustard,
+		attention:         tone.Tang,
+		busy:              tone.Citron,
+		info:              tone.Malibu,
+		infoMoreSubtle:    tone.Sardine,
+		infoMostSubtle:    tone.Damson,
+		success:           tone.Julep,
+		successMoreSubtle: tone.Bok,
+		successMostSubtle: tone.Guac,
+		yolo:              tone.Zest,
+		plan:              tone.Charple,
+		planMoreSubtle:    tone.Hazy,
 
 		// Muted diff foreground hues; the backgrounds derive from these
 		// over bgBase.
 		diffInsertFg: lipgloss.Color("#629657"),
 		diffDeleteFg: lipgloss.Color("#a45c59"),
 
-		button:         charmtone.Dolly,
-		buttonSubtle:   charmtone.Char,
-		buttonInactive: charmtone.Iron,
-		buttonHovered:  charmtone.Oyster,
+		button:         tone.Dolly,
+		buttonSubtle:   tone.Char,
+		buttonInactive: tone.Iron,
+		buttonHovered:  tone.Oyster,
 		// ANSI 16-color palette for remapping raw terminal output
 		// (e.g. bang-mode shell commands) onto legible Charmtone colors.
-		ansiBlack:   charmtone.BBQ,
-		ansiRed:     charmtone.Coral,
-		ansiGreen:   charmtone.Guac,
-		ansiYellow:  charmtone.Mustard,
-		ansiBlue:    charmtone.Charple,
-		ansiMagenta: charmtone.Dolly,
-		ansiCyan:    charmtone.Malibu,
-		ansiWhite:   charmtone.Smoke,
+		ansiBlack:   tone.BBQ,
+		ansiRed:     tone.Coral,
+		ansiGreen:   tone.Guac,
+		ansiYellow:  tone.Mustard,
+		ansiBlue:    tone.Charple,
+		ansiMagenta: tone.Dolly,
+		ansiCyan:    tone.Malibu,
+		ansiWhite:   tone.Smoke,
 
-		ansiBrightBlack:   charmtone.Iron,
-		ansiBrightRed:     charmtone.Tuna,
-		ansiBrightGreen:   charmtone.Julep,
-		ansiBrightYellow:  charmtone.Zest,
-		ansiBrightBlue:    charmtone.Guppy,
-		ansiBrightMagenta: charmtone.Blush,
-		ansiBrightCyan:    charmtone.Sardine,
-		ansiBrightWhite:   charmtone.Salt,
+		ansiBrightBlack:   tone.Iron,
+		ansiBrightRed:     tone.Tuna,
+		ansiBrightGreen:   tone.Julep,
+		ansiBrightYellow:  tone.Zest,
+		ansiBrightBlue:    tone.Guppy,
+		ansiBrightMagenta: tone.Blush,
+		ansiBrightCyan:    tone.Sardine,
+		ansiBrightWhite:   tone.Salt,
 	}
 }
 
@@ -118,45 +126,45 @@ func charmtoneOpts() quickStyleOpts {
 func charmtoneOverrides(s Styles) Styles {
 	// Bang ! prompt overrides - use Salt/Hazy/Larple colors.
 	s.Editor.PromptBangIconFocused = s.Editor.PromptBangIconFocused.
-		Foreground(charmtone.Salt).
-		Background(charmtone.Hazy)
+		Foreground(tone.Salt).
+		Background(tone.Hazy)
 	s.Editor.PromptBangDotsFocused = s.Editor.PromptBangDotsFocused.
-		Foreground(charmtone.Hazy)
+		Foreground(tone.Hazy)
 	s.Editor.PromptBangDotsBlurred = s.Editor.PromptBangDotsBlurred.
-		Foreground(charmtone.Larple)
+		Foreground(tone.Larple)
 
 	// Shell bar/prompt overrides - use Charple/Iron/Hazy colors.
 	s.Messages.ShellBarFocused = s.Messages.ShellBarFocused.
-		BorderForeground(charmtone.Charple)
+		BorderForeground(tone.Charple)
 	s.Messages.ShellBarBlurred = s.Messages.ShellBarBlurred.
-		BorderForeground(charmtone.Iron)
+		BorderForeground(tone.Iron)
 	s.Messages.ShellPrompt = s.Messages.ShellPrompt.
-		Foreground(charmtone.Hazy)
+		Foreground(tone.Hazy)
 	s.Messages.ShellPromptBlurred = s.Messages.ShellPromptBlurred.
-		Foreground(charmtone.Hazy)
+		Foreground(tone.Hazy)
 
 	// Restore the original Charmtone syntax-highlight and markdown colors
 	// where the generic quickStyle token choices diverge from the palette
 	// this theme has always used.
 	chroma := s.Markdown.CodeBlock.Chroma
 	if chroma != nil {
-		chroma.CommentPreproc.Color = hex(charmtone.Bengal)
-		chroma.KeywordReserved.Color = hex(charmtone.Pony)
-		chroma.KeywordNamespace.Color = hex(charmtone.Pony)
-		chroma.KeywordType.Color = hex(charmtone.Guppy)
-		chroma.Operator.Color = hex(charmtone.Salmon)
-		chroma.NameTag.Color = hex(charmtone.Mauve)
-		chroma.NameAttribute.Color = hex(charmtone.Hazy)
-		chroma.NameClass.Color = hex(charmtone.Salt)
-		chroma.LiteralString.Color = hex(charmtone.Cumin)
+		chroma.CommentPreproc.Color = hex(tone.Bengal)
+		chroma.KeywordReserved.Color = hex(tone.Pony)
+		chroma.KeywordNamespace.Color = hex(tone.Pony)
+		chroma.KeywordType.Color = hex(tone.Guppy)
+		chroma.Operator.Color = hex(tone.Salmon)
+		chroma.NameTag.Color = hex(tone.Mauve)
+		chroma.NameAttribute.Color = hex(tone.Hazy)
+		chroma.NameClass.Color = hex(tone.Salt)
+		chroma.LiteralString.Color = hex(tone.Cumin)
 	}
-	s.Markdown.Link.Color = hex(charmtone.Zinc)
-	s.Markdown.Image.Color = hex(charmtone.Cheeky)
+	s.Markdown.Link.Color = hex(tone.Zinc)
+	s.Markdown.Image.Color = hex(tone.Cheeky)
 
 	// The ◆ hypercredit symbol inside subdued text (e.g. savings
 	// suffixes) uses Mochi so it stays visible against its surroundings.
 	s.Messages.SubduedHypercreditIcon = s.Messages.SubduedHypercreditIcon.
-		Foreground(charmtone.Violet)
+		Foreground(tone.Violet)
 
 	return s
 }
@@ -190,6 +198,7 @@ func gruvboxDarkOpts() quickStyleOpts {
 		separator: lipgloss.Color("#504945"), // bg2
 
 		destructive:       lipgloss.Color("#fb4934"), // red bright
+		destructiveSubtle: lipgloss.Color("#fe8019"), // orange bright, a lighter fill
 		error:             lipgloss.Color("#cc241d"), // red dark
 		warningSubtle:     lipgloss.Color("#fabd2f"), // yellow bright
 		warning:           lipgloss.Color("#d79921"), // yellow dark
@@ -248,10 +257,409 @@ func gruvboxDarkOverrides(s Styles) Styles {
 	return s
 }
 
+// rosePineOpts returns the quickStyleOpts for the Rose pine base theme variant,
+// using canonical colors from the rose-pine/rose-pine-theme palette.
+func rosePineOpts() quickStyleOpts {
+	return quickStyleOpts{
+		primary:   lipgloss.Color("#c4a7e7"), // iris
+		secondary: lipgloss.Color("#ebbcba"), // rose
+		accent:    lipgloss.Color("#9ccfd8"), // foam
+		keyword:   lipgloss.Color("#eb6f92"), // love
+
+		fgBase:       lipgloss.Color("#e0def4"), // text
+		fgMoreSubtle: lipgloss.Color("#6e6a86"), // muted
+		fgSubtle:     lipgloss.Color("#908caa"), // subtle
+		fgMostSubtle: lipgloss.Color("#524f67"), // highlight_high
+
+		onPrimary: lipgloss.Color("#1d1923"),
+
+		bgBase:         lipgloss.Color("#191724"), // base
+		bgLeastVisible: lipgloss.Color("#23212e"),
+		bgLessVisible:  lipgloss.Color("#2f2d3b"),
+		bgMostVisible:  lipgloss.Color("#3f3d4c"),
+
+		separator: lipgloss.Color("#2f2d3b"),
+
+		destructive:       lipgloss.Color("#eb6f92"), // love
+		destructiveSubtle: lipgloss.Color("#ebbcba"), // rose, brighter than love
+		error:             lipgloss.Color("#eb6f92"), // love
+		warningSubtle:     lipgloss.Color("#bf9662"),
+		warning:           lipgloss.Color("#f6c177"), // gold
+		attention:         lipgloss.Color("#f6c177"), // gold
+		busy:              lipgloss.Color("#f6c177"), // gold
+		info:              lipgloss.Color("#31748f"), // pine
+		infoMoreSubtle:    lipgloss.Color("#4b6a7f"),
+		infoMostSubtle:    lipgloss.Color("#46596d"),
+		success:           lipgloss.Color("#31748f"), // pine
+		successMoreSubtle: lipgloss.Color("#4c6e84"),
+		successMostSubtle: lipgloss.Color("#485f72"),
+
+		yolo:           lipgloss.Color("#f6c177"), // gold
+		plan:           lipgloss.Color("#c4a7e7"), // iris
+		planMoreSubtle: lipgloss.Color("#3f3d4c"),
+
+		// Muted diff foreground hues; the backgrounds derive from these
+		// over bgBase.
+		diffInsertFg: lipgloss.Color("#31748f"), // pine
+		diffDeleteFg: lipgloss.Color("#eb6f92"), // love
+
+		button:         lipgloss.Color("#ebbcba"), // rose
+		buttonSubtle:   lipgloss.Color("#2f2d3b"),
+		buttonInactive: lipgloss.Color("#3f3d4c"),
+		buttonHovered:  lipgloss.Color("#e8c6ca"),
+
+		// ANSI 16-color palette for remapping raw terminal output
+		// (e.g. bang-mode shell commands) onto legible Rosé Pine colors.
+		ansiBlack:   lipgloss.Color("#191724"),
+		ansiRed:     lipgloss.Color("#eb6f92"),
+		ansiGreen:   lipgloss.Color("#31748f"),
+		ansiYellow:  lipgloss.Color("#f6c177"),
+		ansiBlue:    lipgloss.Color("#31748f"),
+		ansiMagenta: lipgloss.Color("#ebbcba"),
+		ansiCyan:    lipgloss.Color("#9ccfd8"),
+		ansiWhite:   lipgloss.Color("#908caa"),
+
+		ansiBrightBlack:   lipgloss.Color("#524f67"),
+		ansiBrightRed:     lipgloss.Color("#f092ac"),
+		ansiBrightGreen:   lipgloss.Color("#6295aa"),
+		ansiBrightYellow:  lipgloss.Color("#f8d098"),
+		ansiBrightBlue:    lipgloss.Color("#6295aa"),
+		ansiBrightMagenta: lipgloss.Color("#f0cccb"),
+		ansiBrightCyan:    lipgloss.Color("#b4dbe1"),
+		ansiBrightWhite:   lipgloss.Color("#e0def4"),
+	}
+}
+
+// rosePineMoonOpts returns the quickStyleOpts for the Rose pine moon theme variant,
+// using canonical colors from the rose-pine/rose-pine-theme palette.
+func rosePineMoonOpts() quickStyleOpts {
+	return quickStyleOpts{
+		primary:   lipgloss.Color("#c4a7e7"), // iris
+		secondary: lipgloss.Color("#ea9a97"), // rose
+		accent:    lipgloss.Color("#9ccfd8"), // foam
+		keyword:   lipgloss.Color("#eb6f92"), // love
+
+		fgBase:       lipgloss.Color("#e0def4"), // text
+		fgMoreSubtle: lipgloss.Color("#6e6a86"), // muted
+		fgSubtle:     lipgloss.Color("#908caa"), // subtle
+		fgMostSubtle: lipgloss.Color("#56526e"), // highlight_high
+
+		onPrimary: lipgloss.Color("#1d1923"),
+
+		bgBase:         lipgloss.Color("#232136"), // base
+		bgLeastVisible: lipgloss.Color("#2c2a40"),
+		bgLessVisible:  lipgloss.Color("#38364b"),
+		bgMostVisible:  lipgloss.Color("#47455a"),
+
+		separator: lipgloss.Color("#38364b"),
+
+		destructive:       lipgloss.Color("#eb6f92"), // love
+		destructiveSubtle: lipgloss.Color("#ebbcba"), // rose, brighter than love
+		error:             lipgloss.Color("#eb6f92"), // love
+		warningSubtle:     lipgloss.Color("#c19967"),
+		warning:           lipgloss.Color("#f6c177"), // gold
+		attention:         lipgloss.Color("#f6c177"), // gold
+		busy:              lipgloss.Color("#f6c177"), // gold
+		info:              lipgloss.Color("#3e8fb0"), // pine
+		infoMoreSubtle:    lipgloss.Color("#547a96"),
+		infoMostSubtle:    lipgloss.Color("#4f677f"),
+		success:           lipgloss.Color("#3e8fb0"), // pine
+		successMoreSubtle: lipgloss.Color("#467490"),
+		successMostSubtle: lipgloss.Color("#516d86"),
+
+		yolo:           lipgloss.Color("#f6c177"), // gold
+		plan:           lipgloss.Color("#c4a7e7"), // iris
+		planMoreSubtle: lipgloss.Color("#47455a"),
+
+		// Muted diff foreground hues; the backgrounds derive from these
+		// over bgBase.
+		diffInsertFg: lipgloss.Color("#3e8fb0"), // pine
+		diffDeleteFg: lipgloss.Color("#eb6f92"), // love
+
+		button:         lipgloss.Color("#ea9a97"), // rose
+		buttonSubtle:   lipgloss.Color("#38364b"),
+		buttonInactive: lipgloss.Color("#47455a"),
+		buttonHovered:  lipgloss.Color("#e7adb1"),
+
+		// ANSI 16-color palette for remapping raw terminal output
+		// (e.g. bang-mode shell commands) onto legible Rosé Pine colors.
+		ansiBlack:   lipgloss.Color("#232136"),
+		ansiRed:     lipgloss.Color("#eb6f92"),
+		ansiGreen:   lipgloss.Color("#3e8fb0"),
+		ansiYellow:  lipgloss.Color("#f6c177"),
+		ansiBlue:    lipgloss.Color("#3e8fb0"),
+		ansiMagenta: lipgloss.Color("#ea9a97"),
+		ansiCyan:    lipgloss.Color("#9ccfd8"),
+		ansiWhite:   lipgloss.Color("#908caa"),
+
+		ansiBrightBlack:   lipgloss.Color("#56526e"),
+		ansiBrightRed:     lipgloss.Color("#f092ac"),
+		ansiBrightGreen:   lipgloss.Color("#6caac3"),
+		ansiBrightYellow:  lipgloss.Color("#f8d098"),
+		ansiBrightBlue:    lipgloss.Color("#6caac3"),
+		ansiBrightMagenta: lipgloss.Color("#efb2b0"),
+		ansiBrightCyan:    lipgloss.Color("#b4dbe1"),
+		ansiBrightWhite:   lipgloss.Color("#e0def4"),
+	}
+}
+
+// rosePineDawnOpts returns the quickStyleOpts for the Rose pine dawn theme variant,
+// using canonical colors from the rose-pine/rose-pine-theme palette.
+//
+// Text and subtle tones step one shade deeper than the variant's own, so
+// they stay readable on a light background.
+func rosePineDawnOpts() quickStyleOpts {
+	return quickStyleOpts{
+		primary:   lipgloss.Color("#907aa9"), // iris
+		secondary: lipgloss.Color("#d7827e"), // rose
+		accent:    lipgloss.Color("#56949f"), // foam
+		keyword:   lipgloss.Color("#b4637a"), // love
+
+		fgBase:       lipgloss.Color("#464261"), // text
+		fgMoreSubtle: lipgloss.Color("#797593"), // subtle
+		fgSubtle:     lipgloss.Color("#575279"), // text
+		fgMostSubtle: lipgloss.Color("#9893a5"), // muted
+
+		onPrimary: lipgloss.Color("#161219"),
+
+		bgBase:         lipgloss.Color("#faf4ed"), // base
+		bgLeastVisible: lipgloss.Color("#f2e9e1"), // overlay
+		bgLessVisible:  lipgloss.Color("#dfdad9"), // highlight_med
+		bgMostVisible:  lipgloss.Color("#cecacd"), // highlight_high
+
+		separator: lipgloss.Color("#cecacd"), // highlight_high
+
+		destructive:       lipgloss.Color("#b4637a"), // love
+		destructiveSubtle: lipgloss.Color("#d7827e"), // rose, brighter than love
+		error:             lipgloss.Color("#b4637a"), // love
+		// Gold is too light for text on base, so the muted golds below are
+		// darkened; bright gold stays for badge fills, which write dark ink.
+		warningSubtle:     lipgloss.Color("#9c6a2b"),
+		warning:           lipgloss.Color("#ea9d34"), // gold
+		attention:         lipgloss.Color("#9c6a2b"),
+		busy:              lipgloss.Color("#ea9d34"), // gold
+		info:              lipgloss.Color("#286983"), // pine
+		infoMoreSubtle:    lipgloss.Color("#56949f"), // foam
+		infoMostSubtle:    lipgloss.Color("#56949f"), // foam
+		success:           lipgloss.Color("#286983"), // pine
+		successMoreSubtle: lipgloss.Color("#56949f"), // foam
+		successMostSubtle: lipgloss.Color("#56949f"), // foam
+
+		yolo:           lipgloss.Color("#ea9d34"), // gold
+		plan:           lipgloss.Color("#907aa9"), // iris
+		planMoreSubtle: lipgloss.Color("#cecacd"), // highlight_high
+
+		// Muted diff foreground hues; the backgrounds derive from these
+		// over bgBase.
+		diffInsertFg: lipgloss.Color("#286983"), // pine
+		diffDeleteFg: lipgloss.Color("#b4637a"), // love
+
+		button:         lipgloss.Color("#d7827e"), // rose
+		buttonSubtle:   lipgloss.Color("#dfdad9"), // highlight_med
+		buttonInactive: lipgloss.Color("#cecacd"), // highlight_high
+		buttonHovered:  lipgloss.Color("#b3757d"),
+
+		// ANSI 16-color palette for remapping raw terminal output
+		// (e.g. bang-mode shell commands) onto legible Rosé Pine colors.
+		ansiBlack:   lipgloss.Color("#faf4ed"),
+		ansiRed:     lipgloss.Color("#b4637a"),
+		ansiGreen:   lipgloss.Color("#286983"),
+		ansiYellow:  lipgloss.Color("#9c6a2b"),
+		ansiBlue:    lipgloss.Color("#286983"),
+		ansiMagenta: lipgloss.Color("#907aa9"),
+		ansiCyan:    lipgloss.Color("#56949f"),
+		ansiWhite:   lipgloss.Color("#797593"),
+
+		ansiBrightBlack:   lipgloss.Color("#9893a5"),
+		ansiBrightRed:     lipgloss.Color("#894b5d"),
+		ansiBrightGreen:   lipgloss.Color("#1e5064"),
+		ansiBrightYellow:  lipgloss.Color("#8a5f24"),
+		ansiBrightBlue:    lipgloss.Color("#1e5064"),
+		ansiBrightMagenta: lipgloss.Color("#7d6598"),
+		ansiBrightCyan:    lipgloss.Color("#417079"),
+		ansiBrightWhite:   lipgloss.Color("#464261"),
+	}
+}
+
+// keanuOpts returns the quickStyleOpts for the Keanu theme, a black
+// terminal with phosphor-green text in the spirit of the Matrix films'
+// digital rain. Statuses keep their conventional hues (red for
+// errors, amber for warnings) so they stay readable against the green.
+func keanuOpts() quickStyleOpts {
+	return quickStyleOpts{
+		primary:   lipgloss.Color("#00ff41"), // neon green
+		secondary: lipgloss.Color("#7dffa6"), // pale phosphor green
+		accent:    lipgloss.Color("#00d78f"), // spring green
+		keyword:   lipgloss.Color("#c8ff4d"), // electric lime
+
+		fgBase:       lipgloss.Color("#00ff41"), // neon green text
+		fgMoreSubtle: lipgloss.Color("#00a838"), // dim green
+		fgSubtle:     lipgloss.Color("#00d447"), // mid green
+		fgMostSubtle: lipgloss.Color("#008a30"), // faintest green
+
+		onPrimary: lipgloss.Color("#001507"), // near-black ink on bright chips
+
+		bgBase:         lipgloss.Color("#000000"), // pure black terminal
+		bgLeastVisible: lipgloss.Color("#0e2415"), // darkest green surface
+		bgLessVisible:  lipgloss.Color("#183c22"), // elevated green surface
+		bgMostVisible:  lipgloss.Color("#24572f"), // brightest green surface
+
+		separator: lipgloss.Color("#183c22"), // elevated green surface
+
+		destructive:       lipgloss.Color("#ff5252"), // bright red
+		destructiveSubtle: lipgloss.Color("#ff7a7a"), // bright red, softened
+		error:             lipgloss.Color("#d43d3d"), // deep red
+		warningSubtle:     lipgloss.Color("#d7f75b"), // lime
+		warning:           lipgloss.Color("#b8d43d"), // dark lime
+		attention:         lipgloss.Color("#ff9f43"), // amber
+		busy:              lipgloss.Color("#c8ff4d"), // electric lime
+		info:              lipgloss.Color("#00d9c3"), // teal
+		infoMoreSubtle:    lipgloss.Color("#00b3a1"), // mid teal
+		infoMostSubtle:    lipgloss.Color("#008f7f"), // dark teal
+		success:           lipgloss.Color("#00ff41"), // neon green
+		successMoreSubtle: lipgloss.Color("#00c443"), // mid green
+		successMostSubtle: lipgloss.Color("#009637"), // dark green
+
+		yolo:           lipgloss.Color("#c8ff4d"), // electric lime
+		plan:           lipgloss.Color("#4dffb8"), // bright teal-green
+		planMoreSubtle: lipgloss.Color("#0d332b"), // deep teal
+
+		// Diff colors derive from success/destructive over bgBase.
+
+		button:         lipgloss.Color("#00ff41"), // neon green
+		buttonSubtle:   lipgloss.Color("#183c22"), // elevated green surface
+		buttonInactive: lipgloss.Color("#24572f"), // brightest green surface
+		buttonHovered:  lipgloss.Color("#00d447"), // mid green
+
+		// ANSI 16-color palette for remapping raw terminal output
+		// (e.g. bang-mode shell commands) onto legible Keanu colors.
+		ansiBlack:   lipgloss.Color("#0e2415"),
+		ansiRed:     lipgloss.Color("#ff5252"),
+		ansiGreen:   lipgloss.Color("#00d447"),
+		ansiYellow:  lipgloss.Color("#d7f75b"),
+		ansiBlue:    lipgloss.Color("#00b8d9"),
+		ansiMagenta: lipgloss.Color("#b98cff"),
+		ansiCyan:    lipgloss.Color("#00e0c3"),
+		ansiWhite:   lipgloss.Color("#a8d9b8"),
+
+		ansiBrightBlack:   lipgloss.Color("#24572f"),
+		ansiBrightRed:     lipgloss.Color("#ff7a7a"),
+		ansiBrightGreen:   lipgloss.Color("#00ff41"),
+		ansiBrightYellow:  lipgloss.Color("#eaff66"),
+		ansiBrightBlue:    lipgloss.Color("#33cfff"),
+		ansiBrightMagenta: lipgloss.Color("#d1a6ff"),
+		ansiBrightCyan:    lipgloss.Color("#66ffe0"),
+		ansiBrightWhite:   lipgloss.Color("#e6ffe6"),
+	}
+}
+
+// keanuOverrides applies Keanu tweaks that don't fit the token model.
+// The theme is monochrome green, so the default contrast pairings
+// between a bright foreground and the neon-green background collapse into
+// green-on-green and need explicit dark ink instead.
+func keanuOverrides(s Styles) Styles {
+	// fgBase and primary are both neon green, so the shared "fgBase on
+	// primary" pairings (file picker selection, question badge, plan
+	// badge) would render invisible. Use the near-black onPrimary ink.
+	ink := lipgloss.Color("#001507")
+	s.FilePicker.Selected = s.FilePicker.Selected.Foreground(ink)
+	s.Editor.PromptQuestionIconFocused = s.Editor.PromptQuestionIconFocused.Foreground(ink)
+	s.Status.ModeBadgePlan = s.Status.ModeBadgePlan.Foreground(ink)
+	// The banner badges were copied from the badges inside quickStyle
+	// before this override ran, so re-copy the fixed plan badge; the
+	// banner copy otherwise keeps the green-on-green pairing.
+	s.Status.ModeBannerPlanBadge = s.Status.ModeBadgePlan
+
+	// H1 is a badge that pairs the lime warning foreground with the neon
+	// green background, which is far below WCAG AA. Use the dark ink.
+	// PlanMarkdown copies Markdown before overrides run, so fix both.
+	s.Markdown.H1.Color = hex(ink)
+	s.PlanMarkdown.H1.Color = hex(ink)
+
+	// Inline code defaults to the destructive red on the elevated green
+	// background, which sits below WCAG AA. Use pale lime on the elevated
+	// green surface instead: the chip stays legible and stands out from
+	// the pure-black message background.
+	codeFg := lipgloss.Color("#c8ff8f")
+	codeBg := lipgloss.Color("#183c22")
+	s.Markdown.Code.Color = hex(codeFg)
+	s.Markdown.Code.BackgroundColor = hex(codeBg)
+	s.PlanMarkdown.Code.Color = hex(codeFg)
+	s.PlanMarkdown.Code.BackgroundColor = hex(codeBg)
+
+	// Punctuation and string literals both default to the lime warning
+	// hue, which blends code structure into strings. Dim punctuation to
+	// the mid green the operator style already uses.
+	if chroma := s.Markdown.CodeBlock.Chroma; chroma != nil {
+		chroma.Punctuation.Color = hex(lipgloss.Color("#00d447"))
+	}
+
+	return s
+}
+
+// rosePineDawnOverrides restores the softer chips and inks that read
+// better than the deepened text color on their fills.
+func rosePineDawnOverrides(s Styles) Styles {
+	ink := lipgloss.Color("#575279")
+	gold := lipgloss.Color("#ea9d34")
+
+	// The status toasts (e.g. "input mode: code") keep the pale pine chip.
+	msg := s.Status.SuccessMessage.Foreground(ink).
+		Background(lipgloss.Color("#8fa2b0"))
+	s.Status.SuccessMessage = msg
+	s.Status.InfoMessage = msg
+	s.Status.UpdateMessage = msg
+
+	// The warning pills keep their amber fills and muted ink.
+	s.Status.WarnIndicator = s.Status.WarnIndicator.Foreground(ink)
+	s.Status.WarnMessage = s.Status.WarnMessage.Foreground(ink).
+		Background(lipgloss.Color("#a7856d"))
+	s.Tool.WarnTag = s.Tool.WarnTag.Background(gold)
+
+	// The YOLO badge keeps the muted ink on its gold fill, and the banner
+	// body behind it takes the brighter gold so the two don't blend.
+	yoloBadge := s.Status.ModeBadgeYolo.Foreground(ink)
+	s.Status.ModeBadgeYolo = yoloBadge
+	s.Status.ModeBannerYoloBadge = yoloBadge
+	s.Status.ModeBannerYolo = s.Status.ModeBannerYolo.Foreground(ink).
+		Background(lipgloss.Color("#f6c177"))
+	s.Editor.PromptYoloIconFocused = s.Editor.PromptYoloIconFocused.Foreground(ink)
+
+	// Tool call names pop in foam, bold so they still lead the muted
+	// params and descriptions around them.
+	foam := lipgloss.Color("#56949f")
+	name := func(st lipgloss.Style) lipgloss.Style {
+		return st.Foreground(foam).Bold(true)
+	}
+	s.Tool.NameNormal = name(s.Tool.NameNormal)
+	s.Tool.NameNested = name(s.Tool.NameNested)
+	s.Tool.JobToolName = name(s.Tool.JobToolName)
+	s.Tool.MCPName = name(s.Tool.MCPName)
+	s.Tool.MCPArrow = s.Tool.MCPArrow.Foreground(foam)
+
+	// The question badge writes ink on iris, which needs the deep onPrimary
+	// tone rather than the text color.
+	s.Editor.PromptQuestionIconFocused = s.Editor.PromptQuestionIconFocused.
+		Foreground(lipgloss.Color("#161219"))
+
+	// These three paint a surface color as text, which is unreadable on a
+	// light background. Give them the mid tone instead.
+	mid := lipgloss.Color("#797593")
+	s.Tool.HookDeniedReason = s.Tool.HookDeniedReason.Foreground(mid)
+	s.Tool.HookRewrote = s.Tool.HookRewrote.Foreground(mid)
+	s.CompactDetails.Version = s.CompactDetails.Version.Foreground(mid)
+
+	return s
+}
+
 // builtinThemes maps theme names to their quickStyleOpts palette definitions.
 var builtinThemes = map[string]func() quickStyleOpts{
 	"charmtone-panther": charmtoneOpts,
 	"gruvbox-dark":      gruvboxDarkOpts,
+	"keanu":             keanuOpts,
+	"rose-pine":         rosePineOpts,
+	"rose-pine-moon":    rosePineMoonOpts,
+	"rose-pine-dawn":    rosePineDawnOpts,
 }
 
 // builtinThemeOverrides maps theme names to functions that apply
@@ -260,6 +668,8 @@ var builtinThemes = map[string]func() quickStyleOpts{
 var builtinThemeOverrides = map[string]func(Styles) Styles{
 	"charmtone-panther": charmtoneOverrides,
 	"gruvbox-dark":      gruvboxDarkOverrides,
+	"keanu":             keanuOverrides,
+	"rose-pine-dawn":    rosePineDawnOverrides,
 }
 
 // deprecatedThemeNames maps legacy built-in theme names to their current
@@ -293,7 +703,7 @@ func BuiltinThemeNames() []string {
 // CharmtonePantera styles for an empty name. Returns an error if the
 // name is not recognized as either a user file or a built-in.
 // LoadTheme loads a theme by name. Global user theme files take precedence
-// over built-in themes of the same name. Empty names use Charmtone.
+// over built-in themes of the same name. Empty names use tone.
 func LoadTheme(name string) (Styles, error) {
 	if name == "" {
 		return CharmtonePantera(), nil

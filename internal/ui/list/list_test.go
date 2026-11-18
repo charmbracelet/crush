@@ -16,26 +16,20 @@ type trackedItem struct {
 	*Versioned
 	id         string
 	body       string
-	finished   bool
 	renderHits int
 }
 
-func newTrackedItem(id, body string, finished bool) *trackedItem {
+func newTrackedItem(id, body string) *trackedItem {
 	return &trackedItem{
 		Versioned: NewVersioned(),
 		id:        id,
 		body:      body,
-		finished:  finished,
 	}
 }
 
 func (t *trackedItem) Render(width int) string {
 	t.renderHits++
 	return t.body + ":w=" + strconv.Itoa(width)
-}
-
-func (t *trackedItem) Finished() bool {
-	return t.finished
 }
 
 // TestList_RenderMemo_PointerKey covers the F6 invariant that the
@@ -45,9 +39,9 @@ func (t *trackedItem) Finished() bool {
 func TestList_RenderMemo_PointerKey(t *testing.T) {
 	t.Parallel()
 
-	a := newTrackedItem("a", "alpha", false)
-	b := newTrackedItem("b", "bravo", false)
-	c := newTrackedItem("c", "charlie", false)
+	a := newTrackedItem("a", "alpha")
+	b := newTrackedItem("b", "bravo")
+	c := newTrackedItem("c", "charlie")
 
 	l := NewList(a, b, c)
 	l.SetSize(40, 10)
@@ -62,7 +56,7 @@ func TestList_RenderMemo_PointerKey(t *testing.T) {
 	// the wrong key. The existing items render exactly once more
 	// only if their cache was lost, which would be a bug. Scroll to
 	// the top so the prepended item is visible and gets rendered.
-	z := newTrackedItem("z", "zulu", false)
+	z := newTrackedItem("z", "zulu")
 	l.PrependItems(z)
 	l.ScrollToTop()
 	_ = l.Render()
@@ -72,7 +66,7 @@ func TestList_RenderMemo_PointerKey(t *testing.T) {
 	require.Equal(t, 1, c.renderHits, "stable item must keep its cached entry across PrependItems")
 
 	// AppendItems is symmetric.
-	d := newTrackedItem("d", "delta", false)
+	d := newTrackedItem("d", "delta")
 	l.AppendItems(d)
 	_ = l.Render()
 	require.Equal(t, 1, d.renderHits, "appended item rendered once")
@@ -90,8 +84,8 @@ func TestList_RenderMemo_PointerKey(t *testing.T) {
 func TestList_SetSize_WidthChangeInvalidates(t *testing.T) {
 	t.Parallel()
 
-	a := newTrackedItem("a", "alpha", false)
-	b := newTrackedItem("b", "bravo", false)
+	a := newTrackedItem("a", "alpha")
+	b := newTrackedItem("b", "bravo")
 
 	l := NewList(a, b)
 	l.SetSize(40, 10)
@@ -118,9 +112,9 @@ func TestList_SetSize_WidthChangeInvalidates(t *testing.T) {
 func TestList_RemoveItem_DropsEntry(t *testing.T) {
 	t.Parallel()
 
-	a := newTrackedItem("a", "alpha", false)
-	b := newTrackedItem("b", "bravo", false)
-	c := newTrackedItem("c", "charlie", false)
+	a := newTrackedItem("a", "alpha")
+	b := newTrackedItem("b", "bravo")
+	c := newTrackedItem("c", "charlie")
 
 	l := NewList(a, b, c)
 	l.SetSize(40, 10)
@@ -141,68 +135,34 @@ func TestList_RemoveItem_DropsEntry(t *testing.T) {
 	require.Equal(t, 2, b.renderHits, "re-added item must re-render")
 }
 
-// TestList_FrozenItem_NotReRendered covers §4.5.1: items that report
-// Finished() == true on entry creation are marked frozen after the
-// first render and are never re-rendered until width change or
-// version bump.
-func TestList_FrozenItem_NotReRendered(t *testing.T) {
+// TestList_Cache_NotReRendered pins that a cached item is never
+// re-rendered until a width change or version bump.
+func TestList_Cache_NotReRendered(t *testing.T) {
 	t.Parallel()
 
-	a := newTrackedItem("a", "alpha", true)
-	b := newTrackedItem("b", "bravo", true)
+	a := newTrackedItem("a", "alpha")
+	b := newTrackedItem("b", "bravo")
 
 	l := NewList(a, b)
 	l.SetSize(40, 10)
 	_ = l.Render()
-	require.Equal(t, 1, a.renderHits, "frozen items render exactly once on first draw")
-	require.Equal(t, 1, b.renderHits, "frozen items render exactly once on first draw")
+	require.Equal(t, 1, a.renderHits, "items render exactly once on first draw")
+	require.Equal(t, 1, b.renderHits, "items render exactly once on first draw")
 
-	// Many subsequent renders must not re-render frozen items.
+	// Many subsequent renders must not re-render cached items.
 	for range 5 {
 		_ = l.Render()
 	}
-	require.Equal(t, 1, a.renderHits, "frozen items must not re-render across redraws")
-	require.Equal(t, 1, b.renderHits, "frozen items must not re-render across redraws")
+	require.Equal(t, 1, a.renderHits, "cached items must not re-render across redraws")
+	require.Equal(t, 1, b.renderHits, "cached items must not re-render across redraws")
 }
 
-// TestList_FrozenItem_TransitionsAfterFinish covers §4.5.1: a
-// streaming item that later reports Finished() == true transitions
-// to frozen on the first render after finish.
-func TestList_FrozenItem_TransitionsAfterFinish(t *testing.T) {
+// TestList_Cache_VersionBumpInvalidates pins that a version bump
+// re-renders the item, so no stale output is served.
+func TestList_Cache_VersionBumpInvalidates(t *testing.T) {
 	t.Parallel()
 
-	a := newTrackedItem("a", "alpha", false) // streaming
-	l := NewList(a)
-	l.SetSize(40, 10)
-
-	// While unfinished, every render rebuilds the cache because the
-	// item's Finished() is false.
-	for range 3 {
-		// Bump the version to simulate a streaming delta.
-		a.Bump()
-		_ = l.Render()
-	}
-	require.Equal(t, 3, a.renderHits)
-
-	// Item finishes; on the next render it freezes.
-	a.finished = true
-	a.Bump()
-	_ = l.Render()
-	require.Equal(t, 4, a.renderHits, "post-finish render still happens once")
-
-	for range 5 {
-		_ = l.Render()
-	}
-	require.Equal(t, 4, a.renderHits, "frozen after finish, no further renders")
-}
-
-// TestList_FrozenItem_VersionBumpUnfreezes covers §4.5.1: a frozen
-// item that gets a version bump (unexpectedly mutated) is unfrozen
-// and re-rendered — no stale output.
-func TestList_FrozenItem_VersionBumpUnfreezes(t *testing.T) {
-	t.Parallel()
-
-	a := newTrackedItem("a", "alpha", true)
+	a := newTrackedItem("a", "alpha")
 	l := NewList(a)
 	l.SetSize(40, 10)
 
@@ -212,20 +172,20 @@ func TestList_FrozenItem_VersionBumpUnfreezes(t *testing.T) {
 
 	a.Bump()
 	_ = l.Render()
-	require.Equal(t, 2, a.renderHits, "version bump must invalidate frozen entry")
+	require.Equal(t, 2, a.renderHits, "version bump must invalidate the entry")
 
 	// Re-renders without bumping go back to cache hits.
 	_ = l.Render()
 	_ = l.Render()
-	require.Equal(t, 2, a.renderHits, "post-bump render re-freezes")
+	require.Equal(t, 2, a.renderHits, "post-bump render is cached again")
 }
 
-// TestList_FrozenItem_ResizeUnfreezes covers §4.5.1: resize
-// invalidates frozen entries.
-func TestList_FrozenItem_ResizeUnfreezes(t *testing.T) {
+// TestList_Cache_ResizeInvalidates pins that a width change
+// invalidates cached entries.
+func TestList_Cache_ResizeInvalidates(t *testing.T) {
 	t.Parallel()
 
-	a := newTrackedItem("a", "alpha", true)
+	a := newTrackedItem("a", "alpha")
 	l := NewList(a)
 	l.SetSize(40, 10)
 
@@ -234,18 +194,17 @@ func TestList_FrozenItem_ResizeUnfreezes(t *testing.T) {
 
 	l.SetSize(80, 10)
 	_ = l.Render()
-	require.Equal(t, 2, a.renderHits, "width change must invalidate frozen entry")
+	require.Equal(t, 2, a.renderHits, "width change must invalidate the entry")
 }
 
-// TestList_FrozenItem_SelectionDragUnfreeze covers §4.5.1: an active
-// selection-drag span must un-freeze items inside the range; ending
-// the drag re-freezes them.
-func TestList_FrozenItem_SelectionDragUnfreeze(t *testing.T) {
+// TestList_Cache_SelectionDrag pins that beginning and ending a
+// selection drag each re-render the items inside its range once.
+func TestList_Cache_SelectionDrag(t *testing.T) {
 	t.Parallel()
 
-	a := newTrackedItem("a", "alpha", true)
-	b := newTrackedItem("b", "bravo", true)
-	c := newTrackedItem("c", "charlie", true)
+	a := newTrackedItem("a", "alpha")
+	b := newTrackedItem("b", "bravo")
+	c := newTrackedItem("c", "charlie")
 
 	l := NewList(a, b, c)
 	l.SetSize(40, 10)
@@ -255,37 +214,31 @@ func TestList_FrozenItem_SelectionDragUnfreeze(t *testing.T) {
 	require.Equal(t, 1, c.renderHits)
 
 	// Begin a selection drag spanning items 0..1. Items inside the
-	// range must re-render (they re-render exactly once because
-	// the un-freeze drops the cached entry, and the selection
-	// suppression keeps them un-frozen until the drag ends).
+	// range re-render exactly once.
 	l.BeginSelectionDrag(0, 1)
 	_ = l.Render()
 	require.Equal(t, 2, a.renderHits, "drag-spanned item must re-render once on entering the drag")
 	require.Equal(t, 2, b.renderHits, "drag-spanned item must re-render once on entering the drag")
-	require.Equal(t, 1, c.renderHits, "out-of-range item must remain frozen")
+	require.Equal(t, 1, c.renderHits, "out-of-range item stays cached")
 
-	// While the drag is active, items inside the range are NOT
-	// frozen. Subsequent renders without state changes still
-	// trigger re-renders (because version+width hit but frozen=false
-	// also matches; we still re-use the cache — no, actually with
-	// our implementation we DO cache unfrozen entries by version).
+	// While the drag is active, renders without state changes are
+	// cache hits.
 	_ = l.Render()
-	require.Equal(t, 2, a.renderHits, "unfrozen but version-stable hits the cache")
-	require.Equal(t, 2, b.renderHits, "unfrozen but version-stable hits the cache")
+	require.Equal(t, 2, a.renderHits, "version-stable item hits the cache")
+	require.Equal(t, 2, b.renderHits, "version-stable item hits the cache")
 
-	// End the drag. Items inside the range re-render once and
-	// re-freeze.
+	// End the drag. Items inside the range re-render once.
 	l.EndSelectionDrag()
 	_ = l.Render()
-	require.Equal(t, 3, a.renderHits, "post-drag render re-freezes the entry")
-	require.Equal(t, 3, b.renderHits, "post-drag render re-freezes the entry")
+	require.Equal(t, 3, a.renderHits, "ending the drag re-renders the entry")
+	require.Equal(t, 3, b.renderHits, "ending the drag re-renders the entry")
 
 	// Subsequent renders are cache hits again.
 	for range 3 {
 		_ = l.Render()
 	}
-	require.Equal(t, 3, a.renderHits, "frozen after drag end")
-	require.Equal(t, 3, b.renderHits, "frozen after drag end")
+	require.Equal(t, 3, a.renderHits, "cached after drag end")
+	require.Equal(t, 3, b.renderHits, "cached after drag end")
 }
 
 // TestList_RenderOutputStableAcrossDraws is the F6 byte-equality
@@ -296,7 +249,7 @@ func TestList_RenderOutputStableAcrossDraws(t *testing.T) {
 
 	items := make([]Item, 0, 5)
 	for i := range 5 {
-		items = append(items, newTrackedItem(strconv.Itoa(i), "item-"+strconv.Itoa(i), i%2 == 0))
+		items = append(items, newTrackedItem(strconv.Itoa(i), "item-"+strconv.Itoa(i)))
 	}
 	l := NewList(items...)
 	l.SetSize(40, 20)
@@ -320,10 +273,10 @@ func TestList_RenderOutputStableAcrossDraws(t *testing.T) {
 func TestList_SetItems_PointerOverlapRetainsCache(t *testing.T) {
 	t.Parallel()
 
-	a := newTrackedItem("a", "alpha", false)
-	b := newTrackedItem("b", "bravo", false)
-	c := newTrackedItem("c", "charlie", false)
-	d := newTrackedItem("d", "delta", false)
+	a := newTrackedItem("a", "alpha")
+	b := newTrackedItem("b", "bravo")
+	c := newTrackedItem("c", "charlie")
+	d := newTrackedItem("d", "delta")
 
 	l := NewList(a, b, c)
 	l.SetSize(40, 10)
@@ -358,9 +311,9 @@ func TestList_SetItems_PointerOverlapRetainsCache(t *testing.T) {
 func TestList_SetItems_AllNewDropsEveryEntry(t *testing.T) {
 	t.Parallel()
 
-	a := newTrackedItem("a", "alpha", false)
-	b := newTrackedItem("b", "bravo", false)
-	c := newTrackedItem("c", "charlie", false)
+	a := newTrackedItem("a", "alpha")
+	b := newTrackedItem("b", "bravo")
+	c := newTrackedItem("c", "charlie")
 
 	l := NewList(a, b, c)
 	l.SetSize(40, 10)
@@ -371,8 +324,8 @@ func TestList_SetItems_AllNewDropsEveryEntry(t *testing.T) {
 
 	// Replace with a fully disjoint slice. Every entry from the
 	// previous slice must be dropped.
-	x := newTrackedItem("x", "xray", false)
-	y := newTrackedItem("y", "yankee", false)
+	x := newTrackedItem("x", "xray")
+	y := newTrackedItem("y", "yankee")
 	l.SetItems(x, y)
 	_ = l.Render()
 	require.Equal(t, 1, x.renderHits, "new item renders once")
@@ -428,8 +381,6 @@ func (m *multiLineItem) Render(_ int) string {
 	}
 	return strings.Join(parts, "\n")
 }
-
-func (m *multiLineItem) Finished() bool { return true }
 
 // expectedRender computes what list.Render *should* produce from
 // first principles given the item heights, viewport, offsetIdx,
@@ -523,6 +474,19 @@ func TestList_F7_ByteIdentityMatrix(t *testing.T) {
 
 							got := l.Render()
 							want := expectedRender(items, vh, oIdx, oLine, gap, reverse)
+							if n := strings.Count(want, "\n") + 1; n < vh && (oIdx > 0 || oLine > 0) {
+								// The offset is past the end, so Render
+								// clamps it. The output must still match
+								// the reference at the clamped offset,
+								// and be full unless that is the top.
+								cIdx, cLine := l.ScrollPosition()
+								want = expectedRender(items, vh, cIdx, cLine, gap, reverse)
+								if cIdx > 0 || cLine > 0 {
+									require.Equalf(t, vh, strings.Count(got, "\n")+1,
+										"clamped render underfilled heights=%v vh=%d oIdx=%d oLine=%d gap=%d",
+										heights, vh, oIdx, oLine, gap)
+								}
+							}
 							require.Equalf(t, want, got,
 								"mismatch heights=%v vh=%d oIdx=%d oLine=%d gap=%d reverse=%v",
 								heights, vh, oIdx, oLine, gap, reverse)
@@ -778,7 +742,7 @@ func TestList_Prewarm(t *testing.T) {
 	items := make([]Item, 6)
 	tracked := make([]*trackedItem, 6)
 	for i := range items {
-		it := newTrackedItem(strconv.Itoa(i), "body", true)
+		it := newTrackedItem(strconv.Itoa(i), "body")
 		tracked[i] = it
 		items[i] = it
 	}
@@ -814,7 +778,7 @@ func TestList_Overflows(t *testing.T) {
 
 	items := make([]Item, 10)
 	for i := range items {
-		items[i] = newTrackedItem(strconv.Itoa(i), "body", true) // 1 line each
+		items[i] = newTrackedItem(strconv.Itoa(i), "body") // 1 line each
 	}
 	l := NewList(items...)
 	l.SetSize(40, 4)
@@ -846,8 +810,6 @@ func (t *tallItem) Render(width int) string {
 	return strings.TrimSuffix(strings.Repeat("x\n", t.lines), "\n")
 }
 
-func (t *tallItem) Finished() bool { return false }
-
 // TestList_AtBottom_TallFirstVisibleItem covers the case where the item
 // at offsetIdx is taller than the viewport: the accumulated height passes
 // the viewport height long before the end of the list, but the lines
@@ -870,4 +832,107 @@ func TestList_AtBottom_TallFirstVisibleItem(t *testing.T) {
 		l.ScrollBy(1)
 		require.True(t, l.AtBottom(), "gap=%d: back at bottom after scrolling down", gap)
 	}
+}
+
+// fiveByFour builds six four-line items with a one-line gap in an
+// eight-line viewport, so the tail can be scrolled past and shrunk.
+func fiveByFour() (*List, []*multiLineItem) {
+	items := make([]*multiLineItem, 0, 6)
+	listItems := make([]Item, 0, 6)
+	for i := range 6 {
+		it := newMultiLineItem(string(rune('a'+i)), 4)
+		items = append(items, it)
+		listItems = append(listItems, it)
+	}
+	l := NewList(listItems...)
+	l.SetGap(1)
+	l.SetSize(20, 8)
+	return l, items
+}
+
+// A tail that shrinks while the view is scrolled near the end must not
+// leave the view parked past the last line with blank rows below it.
+func TestList_Render_ClampsWhenTailShrinks(t *testing.T) {
+	t.Parallel()
+	l, items := fiveByFour()
+	l.ScrollToBottom()
+	l.ScrollBy(-1)
+
+	items[5].height = 1
+	items[5].Bump()
+	got := strings.Split(l.Render(), "\n")
+
+	require.Len(t, got, 8, "viewport must stay full")
+	require.Equal(t, "f:0", got[len(got)-1], "last line must be the end of the content")
+	require.True(t, l.AtBottom())
+}
+
+// Removing the item the view starts inside must show the next item from
+// its top, not skip as many of its lines as the removed item had scrolled.
+func TestList_RemoveItem_TopItemResetsLineOffset(t *testing.T) {
+	t.Parallel()
+	l, items := fiveByFour()
+	items[2].height = 1
+	l.offsetIdx, l.offsetLine = 1, 3
+
+	l.RemoveItem(1)
+	got := strings.Split(l.Render(), "\n")
+
+	require.Equal(t, "c:0", got[0])
+}
+
+// Shrinking the item set below the scroll offset (as a filter does) must
+// show the end of what remains rather than one item at the top.
+func TestList_SetItems_FewerItemsStaysFull(t *testing.T) {
+	t.Parallel()
+	l, items := fiveByFour()
+	l.ScrollToBottom()
+
+	l.SetItems(items[0], items[1], items[2])
+	got := strings.Split(l.Render(), "\n")
+
+	require.Len(t, got, 8)
+	require.Equal(t, "c:3", got[len(got)-1])
+}
+
+// TestList_Restyle_KeepsHeights covers the theme-swap path: scroll geometry
+// is served from the cached heights, only drawn items re-render, and an
+// item that changed before the restyle still re-renders for its height.
+func TestList_Restyle_KeepsHeights(t *testing.T) {
+	t.Parallel()
+
+	items := make([]*trackedItem, 0, 20)
+	listItems := make([]Item, 0, 20)
+	for idx := range 20 {
+		item := newTrackedItem(strconv.Itoa(idx), "item "+strconv.Itoa(idx))
+		items = append(items, item)
+		listItems = append(listItems, item)
+	}
+	l := NewList(listItems...)
+	l.SetSize(40, 3)
+	l.ScrollToIndex(17)
+	_ = l.Render()
+	total := l.TotalHeight()
+	offset := l.Offset()
+	before := totalRenderHits(items)
+
+	// An off-screen item that mutated before the restyle has no current
+	// height to keep.
+	items[0].Bump()
+
+	restyled := 0
+	l.Restyle(func(item Item) {
+		restyled++
+		item.(*trackedItem).Bump()
+	})
+	require.Equal(t, len(items), restyled)
+
+	require.Equal(t, total, l.TotalHeight())
+	require.Equal(t, offset, l.Offset())
+	require.Equal(t, before+1, totalRenderHits(items), "only the mutated item re-renders for its height")
+
+	_ = l.Render()
+	require.Equal(t, before+4, totalRenderHits(items), "visible items re-render their content")
+	require.Equal(t, 2, items[19].renderHits)
+	require.Equal(t, 1, items[10].renderHits, "off-screen items keep their cached render")
 }

@@ -3,7 +3,7 @@ package dialog
 import (
 	"testing"
 
-	"charm.land/catwalk/pkg/catwalk"
+	"charm.land/catwalk/v3/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -13,8 +13,8 @@ import (
 
 // versionedItem is the cross-cutting interface every dialog list
 // item must satisfy under F6: every documented mutator must bump
-// the shared version counter so the list-level memo invalidates
-// frozen entries.
+// the shared version counter so the list-level memo invalidates its
+// entries.
 type versionedItem interface {
 	list.Item
 	Version() uint64

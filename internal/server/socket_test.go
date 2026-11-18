@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -58,6 +59,14 @@ func TestIsStaleSocketErr(t *testing.T) {
 			require.Equal(t, tc.want, IsStaleSocketErr(tc.err))
 		})
 	}
+}
+
+// TestDefaultHost_UIDWithoutUserEnv guards against users that user.Current
+// cannot resolve (no $USER or $HOME) sharing one socket.
+func TestDefaultHost_UIDWithoutUserEnv(t *testing.T) {
+	t.Setenv("USER", "")
+	t.Setenv("HOME", "")
+	require.Equal(t, fmt.Sprintf("crush-%d.sock", os.Getuid()), filepath.Base(DefaultHost()))
 }
 
 func TestDefaultHost_XDGRuntimeDir(t *testing.T) {
@@ -190,4 +199,80 @@ func TestListen_LiveSocketNotRemoved(t *testing.T) {
 	conn, dialErr := net.DialTimeout("unix", path, 200*time.Millisecond) //nolint:noctx
 	require.NoError(t, dialErr, "live socket should still accept dials")
 	_ = conn.Close()
+}
+
+// TestListen_RacingStaleRecovery guards against a listen call that found a
+// stale socket removing the live one a concurrent call bound meanwhile.
+func TestListen_RacingStaleRecovery(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.sock")
+	staleSocketPath(t, path)
+
+	probed := make(chan struct{})
+	secondDone := make(chan struct{})
+	var calls atomic.Int32
+	origDial := dialSocket
+	dialSocket = func(network, address string) (net.Conn, error) {
+		conn, err := origDial(network, address)
+		if calls.Add(1) == 1 {
+			// Stall the first caller between its probe and its removal.
+			close(probed)
+			select {
+			case <-secondDone:
+			case <-time.After(time.Second):
+			}
+		}
+		return conn, err
+	}
+	t.Cleanup(func() { dialSocket = origDial })
+
+	firstErr := make(chan error, 1)
+	go func() {
+		ln, _, err := listen("unix", path)
+		if err == nil {
+			t.Cleanup(func() { _ = ln.Close() })
+		}
+		firstErr <- err
+	}()
+	<-probed
+	ln2, _, err2 := listen("unix", path)
+	close(secondDone)
+	if err2 == nil {
+		t.Cleanup(func() { _ = ln2.Close() })
+	}
+	require.NoError(t, <-firstErr)
+	require.ErrorIs(t, err2, syscall.EADDRINUSE)
+}
+
+// TestListen_RestrictsSocketToOwner guards against a socket other users can
+// connect to. The umask is process-wide, so this test is not parallel.
+func TestListen_RestrictsSocketToOwner(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.sock")
+	oldUmask := syscall.Umask(0)
+	ln, _, err := listen("unix", path)
+	syscall.Umask(oldUmask)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ln.Close() })
+
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+}
+
+// TestListen_CloseKeepsReplacement guards against an exiting server's
+// listener unlinking the socket of the replacement bound on its path.
+func TestListen_CloseKeepsReplacement(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "s.sock")
+	old, _, err := listen("unix", path)
+	require.NoError(t, err)
+	require.NoError(t, os.Remove(path))
+	repl, _, err := listen("unix", path)
+	require.NoError(t, err)
+
+	require.NoError(t, old.Close())
+	_, err = os.Stat(path)
+	require.NoError(t, err, "closing the old listener removed the replacement's socket")
+	require.NoError(t, repl.Close())
+	_, err = os.Stat(path)
+	require.ErrorIs(t, err, fs.ErrNotExist, "a listener must still remove its own socket")
 }

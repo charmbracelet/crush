@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/stretchr/testify/require"
 )
 
@@ -414,4 +415,36 @@ func TestDiscoverReplyFromTools_EdgeCases(t *testing.T) {
 		reply := discoverReplyFromTools(tools)
 		require.Nil(t, reply)
 	})
+}
+
+// TestChannelReplyText marks a turn whose response stopped short, so a
+// channel recipient reading only the reply text cannot mistake a half
+// answer for a complete one.
+func TestChannelReplyText(t *testing.T) {
+	t.Parallel()
+
+	withFinish := func(reason message.FinishReason, title string) *message.Message {
+		return &message.Message{
+			Role: message.Assistant,
+			Parts: []message.ContentPart{
+				message.TextContent{Text: "Here is the answer, cut off mid-th"},
+				message.Finish{Reason: reason, Message: title},
+			},
+		}
+	}
+
+	truncated := channelReplyText(withFinish(message.FinishReasonMaxTokens, ""))
+	require.Contains(t, truncated, "Here is the answer, cut off mid-th")
+	require.Contains(t, truncated, "output token limit")
+
+	// The persisted banner title is what an error turn reports.
+	stopped := channelReplyText(withFinish(message.FinishReasonError, providerStoppedTurnMessage))
+	require.Contains(t, stopped, providerStoppedTurnMessage)
+
+	refused := channelReplyText(withFinish(message.FinishReasonContentFilter, ""))
+	require.Contains(t, refused, "safety classifier")
+
+	// A turn that ended on its own terms is passed through untouched.
+	complete := withFinish(message.FinishReasonEndTurn, "")
+	require.Equal(t, "Here is the answer, cut off mid-th", channelReplyText(complete))
 }

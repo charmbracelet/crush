@@ -273,9 +273,8 @@ func (ed *ThemeEditor) keepSelectedVisible(height int) {
 	if ed.index >= ed.scroll+height {
 		ed.scroll = ed.index - height + 1
 	}
-	if ed.scroll < 0 {
-		ed.scroll = 0
-	}
+	// A taller window must not stay scrolled past the last slot.
+	ed.scroll = max(0, min(ed.scroll, len(ed.slots)-height))
 }
 
 func (ed *ThemeEditor) renderSlots(width, height int) string {

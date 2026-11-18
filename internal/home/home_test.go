@@ -1,6 +1,7 @@
 package home
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -47,4 +48,14 @@ func TestLong_OnlyExpandsBareTildeOrTildeSlash(t *testing.T) {
 	require.Equal(t, otherUser, Long(otherUser),
 		"Long must not rewrite ~user paths into the current user's home")
 	require.Equal(t, "~~/x", Long("~~/x"))
+}
+
+func TestDirIsScratchUnderTest(t *testing.T) {
+	real, err := os.UserHomeDir()
+	require.NoError(t, err)
+	require.NotEqual(t, real, Dir())
+	require.Equal(t, filepath.Join(Dir(), ".config"), Config())
+	for _, key := range testIgnoredEnv {
+		require.Emptyf(t, os.Getenv(key), "%s is inherited by tests", key)
+	}
 }

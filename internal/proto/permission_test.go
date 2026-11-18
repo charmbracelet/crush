@@ -11,10 +11,10 @@ import (
 
 // TestPermissionRequestParamsTypeAssertable guards the permission
 // dialog's type assertions across the client/server boundary. The TUI
-// asserts PermissionRequest.Params to tools.*PermissionsParams; when
-// the request round-trips over the SSE wire (server → client), the
-// decoded value must be the same Go type, otherwise the dialog
-// renders empty content.
+// asserts PermissionRequest.Params to tools.*PermissionsParams (or to a
+// string for MCP tools); when the request round-trips over the SSE wire
+// (server → client), the decoded value must be the same Go type,
+// otherwise the dialog renders empty content.
 func TestPermissionRequestParamsTypeAssertable(t *testing.T) {
 	t.Parallel()
 
@@ -155,6 +155,24 @@ func TestPermissionRequestParamsTypeAssertable(t *testing.T) {
 				require.True(t, ok, "params must decode as tools.AgenticFetchPermissionsParams, got %T", got)
 				require.Equal(t, "https://example.com", v.URL)
 				require.Equal(t, "summarize this page", v.Prompt)
+			},
+		},
+		{
+			name:     "replace_symbol",
+			toolName: tools.ReplaceSymbolToolName,
+			params:   tools.ReplaceSymbolPermissionsParams{FilePath: "/tmp/x.go"},
+			assert: func(t *testing.T, got any) {
+				v, ok := got.(tools.ReplaceSymbolPermissionsParams)
+				require.True(t, ok, "got %T", got)
+				require.Equal(t, "/tmp/x.go", v.FilePath)
+			},
+		},
+		{
+			name:     "mcp",
+			toolName: "mcp_github_create_issue",
+			params:   `{"repo":"charmbracelet/crush"}`,
+			assert: func(t *testing.T, got any) {
+				require.Equal(t, `{"repo":"charmbracelet/crush"}`, got)
 			},
 		},
 	}

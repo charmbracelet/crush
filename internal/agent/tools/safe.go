@@ -257,11 +257,12 @@ func isSafeReadOnly(command string, extra []safeCommand) bool {
 }
 
 // bashGrantKey returns what "allow for session" covers for a command. A
-// single plain command is keyed by its program name, so approving
-// `git commit -m x` approves every later `git` call. Anything else (lists,
-// pipes, redirections, env assignments, non-literal words, or a command
-// flagged dangerous) is keyed by the exact command text, so one approval
-// cannot widen into something the user never saw.
+// single plain command run by bare name is keyed by its program name, so
+// approving `git commit -m x` approves every later `git` call. Anything else
+// (lists, pipes, redirections, env assignments, non-literal words, a path
+// such as ./git, a program that runs other code such as bash or npm, or a
+// command flagged dangerous) is keyed by the exact command text, so one
+// approval cannot widen into something the user never saw.
 func bashGrantKey(command string, dangerous bool) string {
 	if dangerous {
 		return command
@@ -286,7 +287,54 @@ func bashGrantKey(command string, dangerous bool) string {
 	if len(argv) == 0 {
 		return command
 	}
-	return shell.NormalizeCommandName(argv[0])
+	// Only a bare program name collapses. A path such as ./git or
+	// /tmp/x/git names a specific file, which may be a script in the repo
+	// rather than the program the user approved.
+	name := argv[0]
+	if name == "" || strings.ContainsAny(name, `/\=`) || strings.HasPrefix(name, "-") {
+		return command
+	}
+	name = shell.NormalizeCommandName(name)
+	if runsArbitraryCode(name) {
+		return command
+	}
+	return name
+}
+
+// codeRunners are programs whose arguments are themselves code: approving
+// `bash build.sh` or `npm test` must not approve `bash -c '<anything>'`, so
+// these keep the exact-command grant key.
+var codeRunners = []string{
+	// Shells and shell builtins that run their arguments.
+	"sh", "bash", "zsh", "dash", "ksh", "mksh", "csh", "tcsh", "fish",
+	"pwsh", "powershell", "cmd", "busybox",
+	"eval", "exec", "source", ".", "command", "builtin", "trap",
+	// Interpreters and runtimes.
+	"python", "python2", "python3", "pypy", "pypy3", "node", "nodejs",
+	"deno", "bun", "ruby", "irb", "perl", "php", "lua", "luajit", "tclsh",
+	"osascript", "java", "jshell", "groovy", "scala", "kotlin", "R",
+	"rscript", "julia", "awk", "gawk", "mawk", "nawk", "sed", "jq",
+	"go", "cargo", "dotnet", "swift",
+	// Package managers and task runners that run project scripts.
+	"npm", "npx", "pnpm", "pnpx", "yarn", "uv", "uvx", "pip", "pip3",
+	"pipx", "poetry", "bundle", "rake", "gradle", "gradlew", "mvn",
+	"make", "gmake", "just", "task", "ninja", "cmake",
+	// Programs that run another command given as an argument.
+	"xargs", "find", "parallel", "watch", "time", "sudo", "doas", "su",
+	"ssh", "env", "nohup", "nice", "timeout", "strace", "ltrace", "gdb",
+	"script", "flock", "chroot", "nsenter", "unshare", "setsid",
+	"stdbuf", "systemd-run", "docker", "podman", "kubectl",
+}
+
+// runsArbitraryCode reports whether name is a [codeRunners] entry, allowing
+// for a version suffix such as python3.12 or node18.
+func runsArbitraryCode(name string) bool {
+	if slices.ContainsFunc(codeRunners, func(r string) bool { return strings.EqualFold(r, name) }) {
+		return true
+	}
+	base := strings.TrimRight(name, "0123456789.-")
+	return base != name && base != "" &&
+		slices.ContainsFunc(codeRunners, func(r string) bool { return strings.EqualFold(r, base) })
 }
 
 // safeStmts reports whether every statement in a list is safe. An empty list

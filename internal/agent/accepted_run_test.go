@@ -16,6 +16,7 @@ func newCancelTestAgent(t *testing.T) (*sessionAgent, fakeEnv) {
 	t.Helper()
 	env := testEnv(t)
 	sa := NewSessionAgent(SessionAgentOptions{
+		Models:   noModels,
 		Sessions: env.sessions,
 		Messages: env.messages,
 	}).(*sessionAgent)
@@ -177,7 +178,7 @@ func TestPersistCanceledTurn_WritesAssistantOnlyWhenUserCreated(t *testing.T) {
 	_, err = sa.createUserMessage(t.Context(), SessionAgentCall{
 		SessionID: sess.ID,
 		Prompt:    "hello",
-	})
+	}, "")
 	require.NoError(t, err)
 
 	err = sa.persistCanceledTurn(t.Context(), SessionAgentCall{

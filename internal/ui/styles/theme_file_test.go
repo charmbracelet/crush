@@ -16,9 +16,10 @@ func TestThemeFile_SaveAndLoad_RoundTrip(t *testing.T) {
 	tf := &ThemeFile{
 		Base: "charmtone-panther",
 		Palette: Palette{
-			Primary: "#ff0000",
-			BgBase:  "#1a1a2e",
-			FgBase:  "#ffffff",
+			Primary:           "#ff0000",
+			BgBase:            "#1a1a2e",
+			FgBase:            "#ffffff",
+			DestructiveSubtle: "#fabd2f",
 		},
 	}
 
@@ -30,6 +31,7 @@ func TestThemeFile_SaveAndLoad_RoundTrip(t *testing.T) {
 	require.Equal(t, tf.Primary, loaded.Primary)
 	require.Equal(t, tf.BgBase, loaded.BgBase)
 	require.Equal(t, tf.FgBase, loaded.FgBase)
+	require.Equal(t, tf.DestructiveSubtle, loaded.DestructiveSubtle)
 	require.Empty(t, loaded.Secondary)
 }
 
@@ -249,6 +251,7 @@ func TestThemeFile_AllPaletteFieldsRoundTrip(t *testing.T) {
 			OnPrimary:         "#282828",
 			Separator:         "#504945",
 			Destructive:       "#fb4934",
+			DestructiveSubtle: "#fb4934",
 			Error:             "#cc241d",
 			Warning:           "#d79921",
 			WarningSubtle:     "#fabd2f",

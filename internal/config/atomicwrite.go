@@ -37,6 +37,12 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 	return nil
 }
 
+// AtomicWriteFile is atomicWriteFile for state files other packages keep
+// next to the global config, such as the projects list.
+func AtomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	return atomicWriteFile(path, data, perm)
+}
+
 // renameFile renames tmp over path. On Windows the rename fails with
 // ERROR_ACCESS_DENIED or ERROR_SHARING_VIOLATION while another process
 // (antivirus, search indexer) or a concurrent reader briefly holds a

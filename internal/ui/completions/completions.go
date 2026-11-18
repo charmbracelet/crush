@@ -2,6 +2,7 @@ package completions
 
 import (
 	"cmp"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -117,6 +118,12 @@ func (c *Completions) SetStyles(normalStyle, focusedStyle, matchStyle lipgloss.S
 	c.normalStyle = normalStyle
 	c.focusedStyle = focusedStyle
 	c.matchStyle = matchStyle
+	// Items loaded already copied the old styles.
+	for _, item := range c.allItems {
+		if ci, ok := item.(*CompletionItem); ok {
+			ci.setStyles(normalStyle, focusedStyle, matchStyle)
+		}
+	}
 }
 
 // IsOpen returns whether the completions popup is open.
@@ -140,13 +147,15 @@ func (c *Completions) KeyMap() KeyMap {
 	return c.keyMap
 }
 
-// Open opens the completions with file items from the filesystem.
-func (c *Completions) Open(depth, limit int) tea.Cmd {
+// Open opens the completions with file items from the filesystem. Files that
+// hostFiles names, the host application's open files, are listed first. It
+// is called off the UI goroutine.
+func (c *Completions) Open(depth, limit int, hostFiles func() []string) tea.Cmd {
 	return func() tea.Msg {
 		var msg CompletionItemsLoadedMsg
 		var wg sync.WaitGroup
 		wg.Go(func() {
-			msg.Files = loadFiles(depth, limit)
+			msg.Files = loadFiles(depth, limit, hostFiles())
 		})
 		wg.Go(func() {
 			msg.Resources = loadMCPResources()
@@ -404,16 +413,50 @@ func (c *Completions) Render() string {
 	return c.list.List.Render()
 }
 
-func loadFiles(depth, limit int) []FileCompletionValue {
+// loadFiles lists the files under the working directory, with the open ones
+// that are listed first, in the order given.
+func loadFiles(depth, limit int, open []string) []FileCompletionValue {
 	files, _, _ := fsext.ListDirectory(".", nil, depth, limit)
 	slices.Sort(files)
-	result := make([]FileCompletionValue, 0, len(files))
+	for i, file := range files {
+		files[i] = filepath.ToSlash(filepath.Clean(file))
+	}
+	listed := make(map[string]bool, len(files))
 	for _, file := range files {
-		result = append(result, FileCompletionValue{
-			Path: strings.TrimPrefix(file, "./"),
-		})
+		listed[file] = true
+	}
+	result := make([]FileCompletionValue, 0, len(files))
+	added := make(map[string]bool, len(open))
+	for _, path := range open {
+		rel := relativePath(path)
+		if listed[rel] && !added[rel] {
+			added[rel] = true
+			result = append(result, FileCompletionValue{Path: rel})
+		}
+	}
+	for _, file := range files {
+		if !added[file] {
+			result = append(result, FileCompletionValue{Path: file})
+		}
 	}
 	return result
+}
+
+// relativePath returns path relative to the working directory, with slashes,
+// or "" when it is outside of it.
+func relativePath(path string) string {
+	if !filepath.IsAbs(path) {
+		return filepath.ToSlash(filepath.Clean(path))
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	rel, err := filepath.Rel(wd, path)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return ""
+	}
+	return filepath.ToSlash(rel)
 }
 
 func loadMCPResources() []ResourceCompletionValue {

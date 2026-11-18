@@ -1,12 +1,16 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/crush/internal/client"
 	"github.com/charmbracelet/crush/internal/proto"
@@ -185,6 +189,26 @@ func TestRestartIfStale_MatchingServerUntouched(t *testing.T) {
 	require.Empty(t, log.all())
 }
 
+// TestRestartIfStale_GivesUpOnUnresponsiveServer guards the client blocking
+// at startup on a stopped (SIGSTOP) or wedged server that accepts but never
+// answers.
+func TestRestartIfStale_GivesUpOnUnresponsiveServer(t *testing.T) {
+	// Not parallel: it swaps a package var the other tests read.
+	orig := versionCheckTimeout
+	versionCheckTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { versionCheckTimeout = orig })
+
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ln.Close() })
+
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	_, err = restartIfStale(commandWithContext(ctx), &url.URL{Scheme: "tcp", Host: ln.Addr().String()})
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.NoError(t, ctx.Err(), "restartIfStale waited for the caller's deadline")
+}
+
 // TestCreateWorkspaceOnLiveServer_RetriesPastExitingServer covers the
 // startup race left over from making the shutdown decision final: a client
 // can reach a server in the instant between its committing to an idle
@@ -231,6 +255,39 @@ func TestCreateWorkspaceOnLiveServer_RetriesPastExitingServer(t *testing.T) {
 	defer mu.Unlock()
 	require.Equal(t, 1, replaced, "exactly one replacement must be spawned")
 	require.Equal(t, 2, creates)
+}
+
+// TestCreateWorkspaceOnLiveServer_RetryReachesReplacement guards the retry
+// reusing the pooled connection to the exiting server instead of reaching
+// the replacement that now owns the address.
+func TestCreateWorkspaceOnLiveServer_RetryReachesReplacement(t *testing.T) {
+	t.Parallel()
+
+	// Each connection remembers how many replacements preceded it.
+	type generationKey struct{}
+	var replaced atomic.Int32
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Context().Value(generationKey{}) == int32(0) {
+			http.Error(w, "server is shutting down", http.StatusServiceUnavailable)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(proto.Workspace{ID: "ws-new"})
+	}))
+	srv.Config.ConnContext = func(ctx context.Context, _ net.Conn) context.Context {
+		return context.WithValue(ctx, generationKey{}, replaced.Load())
+	}
+	srv.Start()
+	t.Cleanup(srv.Close)
+	u, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	c, err := client.NewClient(t.TempDir(), "tcp", u.Host)
+	require.NoError(t, err)
+
+	ws, err := createWorkspaceOnLiveServer(t.Context(), c, proto.Workspace{Path: t.TempDir()},
+		func() error { replaced.Add(1); return nil })
+	require.NoError(t, err)
+	require.Equal(t, "ws-new", ws.ID)
+	require.EqualValues(t, 1, replaced.Load())
 }
 
 // TestCreateWorkspaceOnLiveServer_GivesUpOnOtherFailures makes sure the

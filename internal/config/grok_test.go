@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"charm.land/catwalk/pkg/catwalk"
+	"charm.land/catwalk/v3/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/stretchr/testify/require"
@@ -226,7 +226,7 @@ func TestLoadRefreshesGrokModelsWhenCatwalkUpdates(t *testing.T) {
 	newCatwalkStub(t, http.StatusOK, []catwalk.Provider{{
 		Name:                "xAI",
 		ID:                  catwalk.InferenceProviderXAI,
-		Type:                catwalk.TypeOpenAICompat,
+		Type:                catwalk.TypeCompletions,
 		DefaultLargeModelID: "grok-4.5",
 		DefaultSmallModelID: "grok-4.5",
 		Models: []catwalk.Model{
@@ -244,7 +244,7 @@ func TestLoadRefreshesGrokModelsWhenCatwalkUpdates(t *testing.T) {
 
 	fetched := stubGrokModels(t, []catwalk.Model{{ID: "grok-fresh", Name: "Grok Fresh"}})
 
-	store, err := Load(workDir, dataDir, false)
+	store, err := Load(t.Context(), workDir, dataDir, false)
 	require.NoError(t, err)
 
 	require.True(t, CatwalkUpdated(), "the stub served a fresh catalog")
@@ -278,7 +278,7 @@ func TestLoadKeepsGrokModelsWhenCatwalkNotModified(t *testing.T) {
 
 	fetched := stubGrokModels(t, []catwalk.Model{{ID: "grok-fresh", Name: "Grok Fresh"}})
 
-	store, err := Load(workDir, dataDir, false)
+	store, err := Load(t.Context(), workDir, dataDir, false)
 	require.NoError(t, err)
 
 	require.False(t, CatwalkUpdated(), "the stub reported the catalog unchanged")

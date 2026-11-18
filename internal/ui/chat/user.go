@@ -33,6 +33,12 @@ type UserMessageItem struct {
 	sty         *styles.Styles
 }
 
+// newAttachmentRenderer builds the renderer user messages use to draw their
+// attachments.
+func newAttachmentRenderer(sty *styles.Styles) *attachments.Renderer {
+	return attachments.NewRenderer(sty.Attachments)
+}
+
 // NewUserMessageItem creates a new UserMessageItem.
 func NewUserMessageItem(sty *styles.Styles, message *message.Message, attachments *attachments.Renderer) MessageItem {
 	v := list.NewVersioned()
@@ -47,10 +53,9 @@ func NewUserMessageItem(sty *styles.Styles, message *message.Message, attachment
 	}
 }
 
-// Finished implements list.Item. User messages are immutable once
-// submitted, so the entry is always safe to freeze.
-func (m *UserMessageItem) Finished() bool {
-	return true
+// Message returns the message the item renders.
+func (m *UserMessageItem) Message() *message.Message {
+	return m.message
 }
 
 // RawRender implements [MessageItem].

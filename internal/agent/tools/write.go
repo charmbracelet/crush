@@ -83,12 +83,7 @@ func NewWriteTool(
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("File %s already contains the exact content. No changes made.", filePath)), nil
 				}
 			} else if !os.IsNotExist(err) {
-				return fantasy.ToolResponse{}, fmt.Errorf("error checking file: %w", err)
-			}
-
-			dir := filepath.Dir(filePath)
-			if err = os.MkdirAll(dir, 0o755); err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("error creating directory: %w", err)
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to check file: %s", err)), nil
 			}
 
 			oldContent := ""
@@ -134,9 +129,8 @@ func NewWriteTool(
 				return resp, nil
 			}
 
-			err = os.WriteFile(filePath, []byte(params.Content), 0o644)
-			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("error writing file: %w", err)
+			if err = writeFileWithParents(filePath, []byte(params.Content)); err != nil {
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to write file: %s", err)), nil
 			}
 
 			// Check if file exists in history
@@ -144,8 +138,7 @@ func NewWriteTool(
 			if err != nil {
 				_, err = files.Create(ctx, sessionID, filePath, oldContent)
 				if err != nil {
-					// Log error but don't fail the operation
-					return fantasy.ToolResponse{}, fmt.Errorf("error creating file history: %w", err)
+					slog.Error("Error creating file history", "error", err)
 				}
 			}
 			if file.Content != oldContent {
@@ -178,4 +171,25 @@ func NewWriteTool(
 			), nil
 		},
 	)
+}
+
+// ensureParentDir creates the parent directories of path. Call it only
+// after the user has granted permission to write path.
+func ensureParentDir(path string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("failed to create parent directories: %w", err)
+	}
+	return nil
+}
+
+// writeFileWithParents writes data to path, creating any missing parent
+// directories. Call it only after write permission has been granted.
+func writeFileWithParents(path string, data []byte) error {
+	if err := ensureParentDir(path); err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return fmt.Errorf("failed to write file: %w", err)
+	}
+	return nil
 }

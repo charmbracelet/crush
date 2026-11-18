@@ -74,3 +74,18 @@ func TestFormatAnswer_Skipped(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "User skipped this question", resp.Content)
 }
+
+func TestFormatAnswers_AttachesMetadata(t *testing.T) {
+	t.Parallel()
+	questions := []question.Question{{Text: "Pick", Type: question.TypeFreeText}}
+	answers := []question.Answer{{FillInText: "line one\nline two"}}
+
+	resp, err := formatAnswers(answers, questions)
+	require.NoError(t, err)
+	require.Equal(t, "Q1: Pick\nUser provided: line one\nline two", resp.Content)
+
+	var meta QuestionResponseMetadata
+	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
+	require.Equal(t, questions, meta.Questions)
+	require.Equal(t, answers, meta.Answers)
+}

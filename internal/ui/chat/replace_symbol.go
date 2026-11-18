@@ -32,7 +32,7 @@ type ReplaceSymbolToolRenderContext struct{}
 // RenderTool implements the [ToolRenderer] interface.
 func (r *ReplaceSymbolToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	// Replace symbol uses full width for diffs, like edit.
-	if opts.IsPending() {
+	if opts.IsStreamingInput() {
 		return pendingTool(sty, "Replace Symbol", opts.Anim, opts.Compact)
 	}
 

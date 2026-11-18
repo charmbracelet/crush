@@ -11,6 +11,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/oauth"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -117,13 +118,13 @@ func TestConfigStore_RuntimeOverrides_Independent(t *testing.T) {
 	store1 := &ConfigStore{config: &Config{}}
 	store2 := &ConfigStore{config: &Config{}}
 
-	require.False(t, store1.Overrides().SkipPermissionRequests)
-	require.False(t, store2.Overrides().SkipPermissionRequests)
+	require.Equal(t, permission.PermissionModeNormal, store1.Overrides().PermissionMode)
+	require.Equal(t, permission.PermissionModeNormal, store2.Overrides().PermissionMode)
 
-	store1.Overrides().SkipPermissionRequests = true
+	store1.Overrides().PermissionMode = permission.PermissionModeYolo
 
-	require.True(t, store1.Overrides().SkipPermissionRequests)
-	require.False(t, store2.Overrides().SkipPermissionRequests)
+	require.Equal(t, permission.PermissionModeYolo, store1.Overrides().PermissionMode)
+	require.Equal(t, permission.PermissionModeNormal, store2.Overrides().PermissionMode)
 }
 
 func TestConfigStore_RuntimeOverrides_MutableViaPointer(t *testing.T) {
@@ -132,10 +133,10 @@ func TestConfigStore_RuntimeOverrides_MutableViaPointer(t *testing.T) {
 	store := &ConfigStore{config: &Config{}}
 	overrides := store.Overrides()
 
-	require.False(t, overrides.SkipPermissionRequests)
+	require.Equal(t, permission.PermissionModeNormal, overrides.PermissionMode)
 
-	overrides.SkipPermissionRequests = true
-	require.True(t, store.Overrides().SkipPermissionRequests)
+	overrides.PermissionMode = permission.PermissionModeYolo
+	require.Equal(t, permission.PermissionModeYolo, store.Overrides().PermissionMode)
 }
 
 func TestGlobalWorkspaceDir(t *testing.T) {
@@ -345,7 +346,7 @@ func TestReloadFromDisk_UsesNewConfigValues(t *testing.T) {
 	require.NoError(t, os.WriteFile(configPath, []byte(initialConfig), 0o600))
 
 	// Load initial config properly
-	store, err := Load(dir, dir, false)
+	store, err := Load(t.Context(), dir, dir, false)
 	require.NoError(t, err)
 
 	// Set globalDataPath for the test (Load doesn't set this directly)
@@ -398,7 +399,7 @@ func TestSetConfigField_AutoReloads(t *testing.T) {
 	require.NoError(t, os.WriteFile(configPath, []byte(initialConfig), 0o600))
 
 	// Load initial config
-	store, err := Load(dir, dir, false)
+	store, err := Load(t.Context(), dir, dir, false)
 	require.NoError(t, err)
 
 	// Verify initial state
@@ -433,7 +434,7 @@ func TestRemoveConfigField_AutoReloads(t *testing.T) {
 	require.NoError(t, os.WriteFile(configPath, []byte(initialConfig), 0o600))
 
 	// Load initial config
-	store, err := Load(dir, dir, false)
+	store, err := Load(t.Context(), dir, dir, false)
 	require.NoError(t, err)
 
 	// Set globalDataPath and capture snapshot
@@ -501,7 +502,7 @@ func TestAutoReloadDisabledDuringReload(t *testing.T) {
 
 	// Load will trigger configureProviders which removes anthropic OAuth config.
 	// This should NOT cause infinite recursion — writeMu prevents re-entrant reloads.
-	store, err := Load(dir, dir, false)
+	store, err := Load(t.Context(), dir, dir, false)
 	require.NoError(t, err)
 
 	// Capture snapshot and verify reload also works without recursion
@@ -530,7 +531,7 @@ func TestSetConfigFields_AutoReloadsAtomically(t *testing.T) {
 	require.NoError(t, os.WriteFile(configPath, []byte(initialConfig), 0o600))
 
 	// Load initial config.
-	store, err := Load(dir, dir, false)
+	store, err := Load(t.Context(), dir, dir, false)
 	require.NoError(t, err)
 
 	// Set globalDataPath and capture snapshot.

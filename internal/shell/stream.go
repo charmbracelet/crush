@@ -1,24 +1,19 @@
 package shell
 
 import (
-	"bytes"
 	"context"
 	"os"
-	"sync"
 )
 
-// progressWriter wraps an io.Writer and calls onProgress with each write.
-// It is safe for concurrent use from multiple goroutines (e.g. stdout and
-// stderr writing simultaneously).
+// progressWriter captures output and calls onProgress with each write.
+// stdout and stderr share one, so onProgress may be called concurrently
+// and its order can differ from the captured output.
 type progressWriter struct {
-	mu         sync.Mutex
-	buf        bytes.Buffer
+	buf        *cappedBuffer
 	onProgress func(string)
 }
 
 func (w *progressWriter) Write(p []byte) (int, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
 	n, err := w.buf.Write(p)
 	if n > 0 && w.onProgress != nil {
 		w.onProgress(string(p[:n]))
@@ -28,13 +23,14 @@ func (w *progressWriter) Write(p []byte) (int, error) {
 
 // RunAndCaptureStream executes a shell command and streams output chunks
 // to onProgress as they arrive. Returns the complete output and exit code.
+// onProgress must be safe for concurrent use.
 func RunAndCaptureStream(ctx context.Context, opts RunOptions, onProgress func(string)) (CaptureResult, error) {
 	if opts.Env == nil {
 		opts.Env = os.Environ()
 	}
 	opts.Env = append(opts.Env, ptyColorEnvVars...)
 
-	buf := &progressWriter{onProgress: onProgress}
+	buf := &progressWriter{buf: newCappedBuffer(maxKeptOutput), onProgress: onProgress}
 	opts.Stdout = buf
 	opts.Stderr = buf
 

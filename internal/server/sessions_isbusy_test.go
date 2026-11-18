@@ -47,6 +47,7 @@ func (s *stubCoordinator) IsSessionBusy(id string) bool {
 func (s *stubCoordinator) QueuedPrompts(string) int          { return 0 }
 func (s *stubCoordinator) QueuedPromptsList(string) []string { return nil }
 func (s *stubCoordinator) ClearQueue(string)                 {}
+func (s *stubCoordinator) AddNote(string, string)            {}
 func (s *stubCoordinator) Summarize(context.Context, string) error {
 	return nil
 }
@@ -54,6 +55,8 @@ func (s *stubCoordinator) Model() agent.Model                            { retur
 func (s *stubCoordinator) UpdateModels(context.Context) error            { return nil }
 func (s *stubCoordinator) SetMainAgent(string) error                     { return nil }
 func (s *stubCoordinator) GenerateTitle(context.Context, string, string) {}
+func (s *stubCoordinator) SetHostContext(proto.HostContext)              {}
+func (s *stubCoordinator) HostContext() proto.HostContext                { return proto.HostContext{} }
 
 // stubSessions is a minimal session.Service that returns a fixed list
 // (and supports Get by ID). All other methods return zero values; the
@@ -251,7 +254,7 @@ func TestSessionListIncludesAttachedClients(t *testing.T) {
 	cidA := uuid.New().String()
 	require.NoError(t, c.backend.AttachClient(ws.ID, cidA))
 	t.Cleanup(func() { c.backend.DetachClient(ws.ID, cidA) })
-	require.NoError(t, c.backend.SetCurrentSession(ws.ID, cidA, "S1"))
+	require.NoError(t, c.backend.SetCurrentSession(context.Background(), ws.ID, cidA, "S1"))
 	counts = countsBySessionID(listSessions(t, c, ws.ID))
 	require.Equal(t, 1, counts["S1"])
 	require.Equal(t, 0, counts["S2"])
@@ -259,13 +262,13 @@ func TestSessionListIncludesAttachedClients(t *testing.T) {
 	// Attach B, set to S1: S1=2.
 	cidB := uuid.New().String()
 	require.NoError(t, c.backend.AttachClient(ws.ID, cidB))
-	require.NoError(t, c.backend.SetCurrentSession(ws.ID, cidB, "S1"))
+	require.NoError(t, c.backend.SetCurrentSession(context.Background(), ws.ID, cidB, "S1"))
 	counts = countsBySessionID(listSessions(t, c, ws.ID))
 	require.Equal(t, 2, counts["S1"])
 	require.Equal(t, 0, counts["S2"])
 
 	// B switches to S2: counts redistribute.
-	require.NoError(t, c.backend.SetCurrentSession(ws.ID, cidB, "S2"))
+	require.NoError(t, c.backend.SetCurrentSession(context.Background(), ws.ID, cidB, "S2"))
 	counts = countsBySessionID(listSessions(t, c, ws.ID))
 	require.Equal(t, 1, counts["S1"])
 	require.Equal(t, 1, counts["S2"])
@@ -319,7 +322,7 @@ func TestSessionGetIncludesAttachedClients(t *testing.T) {
 	cid := uuid.New().String()
 	require.NoError(t, c.backend.AttachClient(ws.ID, cid))
 	t.Cleanup(func() { c.backend.DetachClient(ws.ID, cid) })
-	require.NoError(t, c.backend.SetCurrentSession(ws.ID, cid, "S1"))
+	require.NoError(t, c.backend.SetCurrentSession(context.Background(), ws.ID, cid, "S1"))
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
 		"/v1/workspaces/"+ws.ID+"/sessions/S1", nil)
@@ -332,4 +335,8 @@ func TestSessionGetIncludesAttachedClients(t *testing.T) {
 	var got proto.Session
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
 	require.Equal(t, 1, got.AttachedClients)
+}
+
+func (*stubCoordinator) ListSettledMessages(context.Context, string) ([]message.Message, error) {
+	return nil, nil
 }

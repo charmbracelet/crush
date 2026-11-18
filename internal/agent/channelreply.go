@@ -13,6 +13,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/message"
 )
 
 // channelReplyTimeout bounds the auto-reply tool call so a wedged MCP
@@ -231,6 +232,36 @@ func autoReplyDelivered(reply *config.MCPChannelReply, channel string, completed
 	return channelReplyDelivered(reply, channel, completedTools)
 }
 
+// skipsPermissionPrompts reports whether tool calls are being auto-approved
+// rather than put in front of the user, which is what makes an
+// auto-discovered reply route safe to use unasked.
+func (a *sessionAgent) skipsPermissionPrompts() bool {
+	return a.permissions != nil && a.permissions.PermissionMode().SkipsPrompts()
+}
+
+// channelReplyText is the assistant text a channel recipient gets back for
+// a finished turn. A response that stopped before it was complete — cut
+// off by the output token limit, refused, or abandoned by the provider —
+// closes with a note, because the recipient sees only this text and would
+// otherwise read a half answer as a whole one.
+func channelReplyText(m *message.Message) string {
+	var note string
+	switch m.FinishReason() {
+	case message.FinishReasonMaxTokens:
+		note = "response cut off: the model reached its output token limit"
+	case message.FinishReasonContentFilter:
+		note = "response stopped: the provider's safety classifier refused to continue"
+	case message.FinishReasonError:
+		note = "the response ended before it was complete"
+		if finish := m.FinishPart(); finish != nil && finish.Message != "" {
+			note = finish.Message
+		}
+	default:
+		return m.Content().String()
+	}
+	return strings.TrimSpace(m.Content().String()) + "\n\n(" + note + ")"
+}
+
 // sendChannelReply routes the final assistant text of a channel-originated
 // turn back through the channel's configured reply tool. It is a no-op for
 // local turns, channels without a channel_reply config, empty responses,
@@ -281,12 +312,12 @@ func (a *sessionAgent) sendChannelReply(ctx context.Context, call SessionAgentCa
 	}
 	// An explicit channel_reply config is itself the consent to use the
 	// tool for replies. An auto-discovered route, however, was not
-	// explicitly opted into — only proceed when permissions are globally
-	// skipped (--dangerously-skip-permissions), so a user who has
+	// explicitly opted into — only proceed when the user has turned tool
+	// prompts off altogether (yolo or sysadmin mode), so someone who has
 	// declined the tool in a normal turn does not get a message sent on
 	// their behalf without consent.
-	if autoDiscovered && !a.isYolo {
-		slog.Info("Channel reply skipped: auto-discovered route requires --dangerously-skip-permissions or explicit channel_reply config",
+	if autoDiscovered && !a.skipsPermissionPrompts() {
+		slog.Info("Channel reply skipped: auto-discovered route requires yolo or sysadmin mode, or explicit channel_reply config",
 			"channel", call.Channel, "tool", tool)
 		return
 	}

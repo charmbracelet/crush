@@ -8,9 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -19,9 +21,11 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/db"
+	"github.com/charmbracelet/crush/internal/dirid"
+	"github.com/charmbracelet/crush/internal/projects"
 	"github.com/charmbracelet/crush/internal/proto"
+	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/skills"
-	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/google/uuid"
 )
@@ -41,7 +45,9 @@ var (
 	ErrServerShuttingDown      = errors.New("server is shutting down")
 	ErrServerNotIdle           = errors.New("server is hosting live workspaces")
 	ErrClientRetired           = errors.New("client has been retired")
+	ErrInvalidTheme            = errors.New("invalid host theme")
 	ErrChannelOptInMismatch    = errors.New("requested channels differ from the existing workspace; channels are an explicit opt-in and are not shared across duplicate creates")
+	ErrPromptOverrideMismatch  = errors.New("another Crush session already has this directory open with different prompts; --prompt only applies to the session that opens it, so close the others and try again")
 )
 
 // DefaultCreateGrace is the window in which a client must open an SSE
@@ -57,6 +63,8 @@ var DefaultCreateGrace = 30 * time.Second
 // new client can attach to — or create a workspace on — a server that is
 // already tearing down, and then observe its coder agent as "offline".
 // Any workspace create within the window cancels the pending shutdown.
+// A server that never hosts a workspace waits it out from the moment it
+// starts listening (see [Backend.ArmIdleShutdown]).
 // Overridable via CRUSH_SERVER_IDLE_TIMEOUT (seconds; 0 restores the
 // old shut-down-immediately behavior).
 var DefaultIdleShutdownDelay = 60 * time.Second
@@ -113,7 +121,15 @@ type Backend struct {
 	// to run unlocked; CreateWorkspace refuses once it is set. That
 	// makes the shutdown-vs-create decision atomic: a create can never
 	// be handed a workspace on a process that is already leaving.
+	// [Backend.ShutdownWorkspaces] sets it too, for an external stop.
 	closing bool
+	// teardowns counts the workspace shutdowns [Backend.teardown] has taken
+	// over but not finished. Their workspaces have left the map, so
+	// [Backend.ShutdownWorkspaces] waits on this too rather than let the
+	// process exit halfway through one. Add happens under mu right after a
+	// workspace is unregistered, which cannot happen once ShutdownWorkspaces
+	// has latched closing and emptied the map, so no Add races its Wait.
+	teardowns sync.WaitGroup
 	// retired holds the IDs of clients that announced their exit via
 	// RetireClient. Creates from a retired client are refused, which is what
 	// lets a client release a workspace whose ID it never learned.
@@ -151,6 +167,11 @@ type Backend struct {
 //     viewing. Empty string means the client has no session selected
 //     (e.g. the landing screen). Cleared automatically when the
 //     clientState entry is removed.
+//   - sessionReported records whether the client has ever reported a
+//     current session via [Backend.SetCurrentSession]. Clients that
+//     never report one (e.g. API clients predating session reporting)
+//     are indistinguishable from landing-screen clients by session ID
+//     alone; this flag lets the SSE filter fail open for them.
 //   - released marks that the client gave up its claim explicitly while
 //     streams were still open, which a clean exit does. The final stream
 //     detach then tears down immediately instead of waiting out the
@@ -163,6 +184,7 @@ type clientState struct {
 	streams          int
 	holdTimer        *time.Timer
 	currentSessionID string
+	sessionReported  bool
 	released         bool
 }
 
@@ -180,6 +202,12 @@ type Workspace struct {
 	// Backend.pathIndex. It is filepath.EvalSymlinks(filepath.Abs(Path))
 	// with fallback to the cleaned absolute path.
 	resolvedPath string
+	// dirID identifies the directory found at resolvedPath when the
+	// workspace was created, or is the zero (unknown) ID. It dedupes
+	// spellings of the directory that resolvedPath does not unify. It
+	// is not re-validated: this assumes the directory outlives the
+	// workspace, so its inode or file ID is not reused by another one.
+	dirID dirid.ID
 
 	// ctx is the workspace-scoped run context. It is derived from
 	// the backend context in CreateWorkspace and lives for the
@@ -198,11 +226,38 @@ type Workspace struct {
 	closing bool
 	runWG   sync.WaitGroup
 
+	// agentMu guards the embedded App.AgentCoordinator once the workspace
+	// is published. Every client of the workspace shares that coordinator,
+	// so it is only created while missing ([Workspace.initAgent]) and never
+	// replaced; readers take it through [Workspace.Coordinator].
+	agentMu sync.RWMutex
+
 	// clientsMu guards clients. It is held only briefly (no IO).
 	clientsMu sync.Mutex
 	// clients tracks each client's claim on this workspace. Refcount
 	// is a derived value: len(clients).
 	clients map[string]*clientState
+
+	// sessions announces when a client of the workspace changes the session
+	// it views. It is apart from the app's events, which the agent's
+	// sessions publish on, so that it reaches the streams on its own.
+	sessions     *pubsub.Broker[proto.ClientSession]
+	sessionsOnce sync.Once
+
+	// themeMu guards hostTheme. It is held only briefly (no IO) and never
+	// together with clientsMu.
+	themeMu sync.Mutex
+	// hostTheme is the theme a host application set for every client of
+	// the workspace, or nil. It is never persisted and is not tied to the
+	// setting client: it stays until a host clears it or the workspace
+	// goes away. Stored themes are never mutated, only replaced.
+	hostTheme *proto.HostTheme
+
+	// rootCache memoizes [Backend.RootSessionID] resolutions, keyed by
+	// session ID. Session parentage is fixed at creation, so entries
+	// never go stale; the cache keeps a DB read per event per client
+	// off the SSE hot path.
+	rootCache sync.Map // map[string]string
 
 	// shutdownFn is the function invoked by [Backend.teardown] to
 	// release the workspace's underlying resources. It defaults to the
@@ -248,8 +303,8 @@ func (w *Workspace) Shutdown() {
 	if w.cancel != nil {
 		w.cancel()
 	}
-	if w.App != nil && w.AgentCoordinator != nil {
-		w.AgentCoordinator.CancelAll()
+	if coord := w.Coordinator(); coord != nil {
+		coord.CancelAll()
 	}
 	w.runWG.Wait()
 	if w.App != nil {
@@ -340,8 +395,8 @@ func (b *Backend) ListWorkspaces() []proto.Workspace {
 }
 
 // CreateWorkspace initializes a new workspace from the given
-// parameters, or returns an existing workspace if one already exists at
-// the same resolved path (first-wins semantics).
+// parameters, or returns an existing workspace if one already exists for
+// the same directory (first-wins semantics).
 //
 // args.ClientID must be a valid UUID identifying the calling client;
 // the resulting workspace registers a creation hold on behalf of that
@@ -360,6 +415,7 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	if err != nil {
 		return nil, proto.Workspace{}, fmt.Errorf("failed to resolve workspace path: %w", err)
 	}
+	dirID, _ := dirid.Of(key)
 
 	b.mu.Lock()
 	if err := b.admitLocked(clientID); err != nil {
@@ -369,7 +425,7 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	// A client is arriving: cancel any pending idle shutdown so we never
 	// hand back a workspace on a server that is about to tear itself down.
 	b.cancelShutdownLocked()
-	if existingID, ok := b.pathIndex[key]; ok {
+	if existingID, ok := b.lookupLocked(key, dirID); ok {
 		if ws, found := b.workspaces.Get(existingID); found {
 			// Hold b.mu while registering: teardown also
 			// acquires b.mu before tearing the workspace
@@ -377,9 +433,9 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 			// return cannot be torn out from under us
 			// between lookup and registerClient. Lock order
 			// here is b.mu -> ws.clientsMu.
-			if !stringSlicesEqual(ws.Cfg.Overrides().EnabledChannels, args.Channels) {
+			if err := joinMismatch(ws, args); err != nil {
 				b.mu.Unlock()
-				return nil, proto.Workspace{}, ErrChannelOptInMismatch
+				return nil, proto.Workspace{}, err
 			}
 			logFirstWinsMismatch(ws, args)
 			b.registerClient(ws, clientID)
@@ -415,17 +471,29 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 		}
 	}()
 
+	if err := config.ValidatePromptNames(args.Prompts); err != nil {
+		return nil, proto.Workspace{}, err
+	}
+
 	id := uuid.New().String()
-	cfg, err := config.Init(args.Path, args.DataDir, args.Debug)
+	cfg, err := config.Init(context.Background(), args.Path, args.DataDir, args.Debug)
 	if err != nil {
 		return nil, proto.Workspace{}, fmt.Errorf("failed to initialize config: %w", err)
 	}
 
-	cfg.Overrides().SkipPermissionRequests = args.YOLO
 	cfg.Overrides().EnabledChannels = args.Channels
+	cfg.Overrides().PermissionMode = proto.ProtoModeToPermission(args.PermissionMode)
+	cfg.Overrides().Prompts = args.Prompts
 
 	if err := createDotCrushDir(cfg.Config().Options.DataDirectory); err != nil {
 		return nil, proto.Workspace{}, fmt.Errorf("failed to create data directory: %w", err)
+	}
+
+	// Record the project as local mode does, so `crush projects` and
+	// `crush stats --all` know about it. The list is only bookkeeping, so
+	// failing to update it must not keep the workspace from opening.
+	if err := projects.Register(args.Path, cfg.Config().Options.DataDirectory); err != nil {
+		slog.Warn("Failed to register project", "path", args.Path, "error", err)
 	}
 
 	conn, err := db.Connect(b.ctx, cfg.Config().Options.DataDirectory, db.WithDataDirLock(true))
@@ -459,18 +527,18 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 		Env:          args.Env,
 		Skills:       skillsMgr,
 		resolvedPath: key,
+		dirID:        dirID,
 		ctx:          wsCtx,
 		cancel:       wsCancel,
 		clients:      make(map[string]*clientState),
 	}
+	scopePermissionPrompts(ws)
 
 	b.mu.Lock()
 	// Re-check admission: the client may have retired while the slow
 	// init above ran with b.mu released, and registering a claim for a
 	// client that has already announced its exit would strand the
-	// workspace. (b.closing cannot have flipped: every shutdown decision
-	// requires pending == 0, and this create has held pending since
-	// before it released b.mu.)
+	// workspace, or the server may have been told to stop meanwhile.
 	if err := b.admitLocked(clientID); err != nil {
 		b.mu.Unlock()
 		ws.invokeShutdown()
@@ -478,15 +546,15 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	}
 	// Re-check the index under the lock: a concurrent caller may have
 	// won the race between the initial unlock and here.
-	if existingID, ok := b.pathIndex[key]; ok {
+	if existingID, ok := b.lookupLocked(key, dirID); ok {
 		if existing, found := b.workspaces.Get(existingID); found {
 			// Register under b.mu so teardown cannot run
 			// between lookup and registerClient. Lock order
 			// is b.mu -> ws.clientsMu.
-			if !stringSlicesEqual(existing.Cfg.Overrides().EnabledChannels, args.Channels) {
+			if err := joinMismatch(existing, args); err != nil {
 				b.mu.Unlock()
 				ws.invokeShutdown()
-				return nil, proto.Workspace{}, ErrChannelOptInMismatch
+				return nil, proto.Workspace{}, err
 			}
 			logFirstWinsMismatch(existing, args)
 			b.registerClient(existing, clientID)
@@ -504,16 +572,14 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	b.registerClient(ws, clientID)
 	b.mu.Unlock()
 
+	// Clients warn their users themselves, from the version every
+	// returned workspace carries.
 	if args.Version != "" && args.Version != version.Version {
 		slog.Warn(
 			"Client/server version mismatch",
 			"client", args.Version,
 			"server", version.Version,
 		)
-		appWorkspace.SendEvent(util.NewWarnMsg(fmt.Sprintf(
-			"Server version %q differs from client version %q. Consider restarting the server.",
-			version.Version, args.Version,
-		)))
 	}
 
 	return ws, workspaceToProto(ws), nil
@@ -650,13 +716,15 @@ func (b *Backend) RetireClient(clientID string) error {
 	}
 	b.retired[clientID] = struct{}{}
 	var orphaned []*Workspace
+	viewing := make(map[*Workspace]string)
 	for _, ws := range b.workspaces.Seq2() {
 		ws.clientsMu.Lock()
 		if cs, ok := ws.clients[clientID]; ok {
 			if cs.holdTimer != nil {
 				cs.holdTimer.Stop()
 			}
-			delete(ws.clients, clientID)
+			forgetClient(ws, clientID, cs)
+			viewing[ws] = cs.currentSessionID
 			if len(ws.clients) == 0 {
 				orphaned = append(orphaned, ws)
 			}
@@ -665,6 +733,9 @@ func (b *Backend) RetireClient(clientID string) error {
 	}
 	b.mu.Unlock()
 
+	for ws, sessionID := range viewing {
+		ws.cancelUnwatchedRun(sessionID)
+	}
 	for _, ws := range orphaned {
 		b.teardown(ws)
 	}
@@ -705,16 +776,16 @@ func (b *Backend) registerClient(ws *Workspace, clientID string) {
 			return
 		}
 		old.holdTimer.Stop()
-		ws.clients[clientID] = b.newHeldClient(ws, clientID, old.currentSessionID, b.createGrace)
+		ws.clients[clientID] = b.newHeldClient(ws, clientID, old.currentSessionID, old.sessionReported, b.createGrace)
 		return
 	}
-	ws.clients[clientID] = b.newHeldClient(ws, clientID, "", b.createGrace)
+	ws.clients[clientID] = b.newHeldClient(ws, clientID, "", false, b.createGrace)
 }
 
 // newHeldClient builds a clientState whose claim is held only by a timer
 // that releases it after grace. Callers must hold ws.clientsMu.
-func (b *Backend) newHeldClient(ws *Workspace, clientID, sessionID string, grace time.Duration) *clientState {
-	cs := &clientState{currentSessionID: sessionID}
+func (b *Backend) newHeldClient(ws *Workspace, clientID, sessionID string, reported bool, grace time.Duration) *clientState {
+	cs := &clientState{currentSessionID: sessionID, sessionReported: reported}
 	cs.holdTimer = time.AfterFunc(grace, func() {
 		b.expireHold(ws, clientID, cs)
 	})
@@ -732,9 +803,11 @@ func (b *Backend) expireHold(ws *Workspace, clientID string, timer *clientState)
 		return
 	}
 	cs.holdTimer = nil
-	delete(ws.clients, clientID)
+	forgetClient(ws, clientID, cs)
+	viewing := cs.currentSessionID
 	teardown := len(ws.clients) == 0
 	ws.clientsMu.Unlock()
+	ws.cancelUnwatchedRun(viewing)
 	if teardown {
 		b.teardown(ws)
 	}
@@ -752,8 +825,10 @@ func (b *Backend) releaseHoldLocked(ws *Workspace, clientID string) {
 		cs.holdTimer = nil
 	}
 	teardown := false
+	viewing := ""
 	if cs.streams == 0 {
-		delete(ws.clients, clientID)
+		forgetClient(ws, clientID, cs)
+		viewing = cs.currentSessionID
 		teardown = len(ws.clients) == 0
 	} else {
 		// The client gave up its claim while streams are still open, which
@@ -762,6 +837,7 @@ func (b *Backend) releaseHoldLocked(ws *Workspace, clientID string) {
 		cs.released = true
 	}
 	ws.clientsMu.Unlock()
+	ws.cancelUnwatchedRun(viewing)
 	if teardown {
 		b.teardown(ws)
 	}
@@ -782,6 +858,7 @@ func (b *Backend) detachStream(ws *Workspace, clientID string) {
 		cs.streams--
 	}
 	teardown := false
+	viewing := ""
 	if cs.streams == 0 && cs.holdTimer == nil {
 		if grace > 0 && !cs.released {
 			// The stream dropped without the client releasing its claim, so
@@ -792,14 +869,86 @@ func (b *Backend) detachStream(ws *Workspace, clientID string) {
 				b.expireHold(ws, clientID, cs)
 			})
 		} else {
-			delete(ws.clients, clientID)
+			forgetClient(ws, clientID, cs)
+			viewing = cs.currentSessionID
 			teardown = len(ws.clients) == 0
 		}
 	}
 	ws.clientsMu.Unlock()
+	ws.cancelUnwatchedRun(viewing)
 	if teardown {
 		b.teardown(ws)
 	}
+}
+
+// cancelUnwatchedRun cancels the run in sessionID unless a client left on
+// the workspace is still viewing that session. Callers pass the session a
+// client was viewing when its claim on the workspace ended, and must not
+// hold w.clientsMu. Permission prompts and questions are only delivered to
+// a session's viewers, so a run nobody views would otherwise go on
+// headless and wait forever on the first prompt it raises; quitting crush
+// in local mode cancels its runs the same way. A client inside its detach
+// grace still counts as a viewer, since it is expected back.
+func (w *Workspace) cancelUnwatchedRun(sessionID string) {
+	if sessionID == "" || w.App == nil || w.AgentCoordinator == nil {
+		return
+	}
+	w.clientsMu.Lock()
+	for _, cs := range w.clients {
+		if cs.currentSessionID == sessionID {
+			w.clientsMu.Unlock()
+			return
+		}
+	}
+	w.clientsMu.Unlock()
+	if w.AgentCoordinator.IsSessionBusy(sessionID) {
+		slog.Info("Cancelling run in a session no client is viewing",
+			"workspace", w.ID, "session_id", sessionID)
+	}
+	w.AgentCoordinator.Cancel(sessionID)
+}
+
+// publishClientSession tells the workspace's event streams which session
+// a client now views. It is called with clientsMu held; publishing never
+// blocks.
+func publishClientSession(ws *Workspace, clientID, sessionID string) {
+	ws.clientSessionBroker().Publish(pubsub.UpdatedEvent, proto.ClientSession{ClientID: clientID, SessionID: sessionID})
+}
+
+// clientSessionBroker returns the broker of client session changes,
+// creating it on first use.
+func (ws *Workspace) clientSessionBroker() *pubsub.Broker[proto.ClientSession] {
+	ws.sessionsOnce.Do(func() { ws.sessions = pubsub.NewBroker[proto.ClientSession]() })
+	return ws.sessions
+}
+
+// forgetClient removes a client's claim on the workspace. Its session is
+// cleared for the event streams first, so that they do not keep showing a
+// client that is gone. It is called with clientsMu held.
+func forgetClient(ws *Workspace, clientID string, cs *clientState) {
+	if cs.currentSessionID != "" {
+		publishClientSession(ws, clientID, "")
+	}
+	delete(ws.clients, clientID)
+}
+
+// ClientSessions returns the session each client of the workspace views,
+// for the clients that have one. It is sent to an event stream as it
+// opens, so a client that starts after another one learns its session.
+func (b *Backend) ClientSessions(workspaceID string) ([]proto.ClientSession, error) {
+	ws, ok := b.workspaces.Get(workspaceID)
+	if !ok {
+		return nil, ErrWorkspaceNotFound
+	}
+	ws.clientsMu.Lock()
+	defer ws.clientsMu.Unlock()
+	var out []proto.ClientSession
+	for id, cs := range ws.clients {
+		if cs.currentSessionID != "" {
+			out = append(out, proto.ClientSession{ClientID: id, SessionID: cs.currentSessionID})
+		}
+	}
+	return out, nil
 }
 
 // teardown removes the workspace from the index, shuts down its
@@ -825,10 +974,13 @@ func (b *Backend) teardown(ws *Workspace) {
 		return
 	}
 	ws.clientsMu.Unlock()
-	if existing, ok := b.pathIndex[ws.resolvedPath]; ok && existing == ws.ID {
-		delete(b.pathIndex, ws.resolvedPath)
+	if !b.unregisterLocked(ws) {
+		b.mu.Unlock()
+		return
 	}
-	b.workspaces.Del(ws.ID)
+	// This call now owns the shutdown; count it while mu is still held so
+	// a concurrent ShutdownWorkspaces waits for it (see b.teardowns).
+	b.teardowns.Add(1)
 	// Arm (or, with lingering disabled, request) the idle shutdown. It
 	// only proceeds once there is genuinely nothing left: no live
 	// workspaces AND no create in flight. Deferring via the linger lets a
@@ -837,12 +989,48 @@ func (b *Backend) teardown(ws *Workspace) {
 	shutdownNow := b.scheduleShutdownIfIdleLocked()
 	b.mu.Unlock()
 
-	ws.invokeShutdown()
+	// Done is deferred so a shutdown that panics, which the HTTP layer
+	// recovers from, cannot leave a server stop waiting on it.
+	func() {
+		defer b.teardowns.Done()
+		ws.invokeShutdown()
+	}()
 
 	if shutdownNow {
 		slog.Info("Last workspace removed, shutting down server...")
 		b.shutdownFn()
 	}
+}
+
+// lookupLocked returns the ID of the workspace registered for the
+// directory at key. It matches the resolved path first and then, when dir
+// is known, the directory itself: EvalSymlinks leaves some spellings of
+// one directory apart (another case on a case-insensitive filesystem; on
+// Windows a junction, subst drive or UNC path), and each of them must join
+// the same workspace rather than open its data directory a second time.
+// It does no IO and must be called with b.mu held.
+func (b *Backend) lookupLocked(key string, dir dirid.ID) (string, bool) {
+	if id, ok := b.pathIndex[key]; ok {
+		return id, true
+	}
+	for id, ws := range b.workspaces.Seq2() {
+		if dir.Same(ws.dirID) {
+			return id, true
+		}
+	}
+	return "", false
+}
+
+// unregisterLocked removes ws from the backend and reports whether this
+// caller now owns its shutdown. It must be called with b.mu held.
+func (b *Backend) unregisterLocked(ws *Workspace) bool {
+	if !b.workspaces.CompareAndDelete(ws.ID, ws) {
+		return false
+	}
+	if id, ok := b.pathIndex[ws.resolvedPath]; ok && id == ws.ID {
+		delete(b.pathIndex, ws.resolvedPath)
+	}
+	return true
 }
 
 // scheduleShutdownIfIdleLocked decides what to do about server shutdown
@@ -860,7 +1048,7 @@ func (b *Backend) teardown(ws *Workspace) {
 // Returning true also latches [Backend.closing], since the caller has to
 // release b.mu before it can run shutdownFn.
 func (b *Backend) scheduleShutdownIfIdleLocked() (shutdownNow bool) {
-	if b.shutdownFn == nil {
+	if b.shutdownFn == nil || b.closing {
 		return false
 	}
 	if b.workspaces.Len() != 0 || b.pending != 0 {
@@ -874,6 +1062,33 @@ func (b *Backend) scheduleShutdownIfIdleLocked() (shutdownNow bool) {
 		b.shutdownTimer = time.AfterFunc(b.lingerDelay, b.maybeShutdown)
 	}
 	return false
+}
+
+// ArmIdleShutdown starts the idle-shutdown timer on a server that is not
+// hosting anything yet. It is meant to be called once the server is
+// reachable. The timer is otherwise armed only when a workspace or a
+// create goes away, so a server whose spawning client never got as far as
+// creating a workspace (it was interrupted, or failed first) would run
+// forever. The first create cancels the timer, and [Backend.maybeShutdown]
+// re-checks idleness when it fires.
+//
+// With lingering disabled (lingerDelay <= 0) a fresh server would exit
+// before its client could create anything, so it waits out the create
+// grace instead.
+func (b *Backend) ArmIdleShutdown() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.shutdownFn == nil || b.closing || b.shutdownTimer != nil {
+		return
+	}
+	if b.workspaces.Len() != 0 || b.pending != 0 {
+		return
+	}
+	delay := b.lingerDelay
+	if delay <= 0 {
+		delay = b.createGrace
+	}
+	b.shutdownTimer = time.AfterFunc(delay, b.maybeShutdown)
 }
 
 // cancelShutdownLocked stops any armed idle-shutdown timer. It must be
@@ -918,7 +1133,9 @@ func (b *Backend) DeleteWorkspace(id, clientID string) error {
 // SetCurrentSession records which session the given client is
 // currently viewing within the workspace. Passing an empty sessionID
 // clears the client's current-session entry (e.g. the client has
-// returned to the landing screen).
+// returned to the landing screen). The recorded session scopes the
+// client's SSE stream: permission and question prompts are only
+// delivered to clients viewing the session that raised them.
 //
 // The client must be actually attached — i.e. its [clientState] entry
 // must exist and have at least one live stream. A bare creation hold
@@ -926,7 +1143,7 @@ func (b *Backend) DeleteWorkspace(id, clientID string) error {
 // guards against zombie writes from a client that has detached and
 // against ghost presence from a hold-only client that never opened an
 // SSE stream.
-func (b *Backend) SetCurrentSession(workspaceID, clientID, sessionID string) error {
+func (b *Backend) SetCurrentSession(ctx context.Context, workspaceID, clientID, sessionID string) error {
 	if _, err := validateClientID(clientID); err != nil {
 		return err
 	}
@@ -935,17 +1152,53 @@ func (b *Backend) SetCurrentSession(workspaceID, clientID, sessionID string) err
 		return ErrWorkspaceNotFound
 	}
 	ws.clientsMu.Lock()
-	defer ws.clientsMu.Unlock()
 	cs, ok := ws.clients[clientID]
 	if !ok || cs.streams == 0 {
 		// No entry, or hold-only (no live stream): refuse the
 		// write. The presence record this is meant to feed
 		// should only reflect clients that can actually observe
 		// session events.
+		ws.clientsMu.Unlock()
 		return ErrClientNotAttached
 	}
+	changed := cs.currentSessionID != sessionID
 	cs.currentSessionID = sessionID
+	cs.sessionReported = true
+	if changed {
+		publishClientSession(ws, clientID, sessionID)
+	}
+	ws.clientsMu.Unlock()
+
+	// A prompt that was raised while no client viewed the session
+	// would otherwise stay unanswered until the run is cancelled.
+	// Re-publish any pending prompt for the session the client just
+	// switched to; the per-client stream filter limits delivery to
+	// that session's viewers.
+	if sessionID != "" {
+		b.republishPendingPrompts(ctx, ws, sessionID)
+	}
 	return nil
+}
+
+// ClientCurrentSession returns the session the given client is
+// currently viewing within the workspace, or "" when the client has
+// no session selected (e.g. the landing screen) or is unknown. The
+// second return value reports whether the client has ever reported a
+// session: a client that never did (e.g. an API client predating
+// session reporting) is treated differently from one that explicitly
+// cleared its selection.
+func (b *Backend) ClientCurrentSession(workspaceID, clientID string) (string, bool) {
+	ws, ok := b.workspaces.Get(workspaceID)
+	if !ok {
+		return "", false
+	}
+	ws.clientsMu.Lock()
+	defer ws.clientsMu.Unlock()
+	cs, ok := ws.clients[clientID]
+	if !ok {
+		return "", false
+	}
+	return cs.currentSessionID, cs.sessionReported
 }
 
 // AttachedClients returns the number of clients currently viewing
@@ -1003,14 +1256,47 @@ func (b *Backend) Config() *config.ConfigStore {
 	return b.cfg
 }
 
-// Shutdown initiates a graceful server shutdown.
-func (b *Backend) Shutdown() {
+// ShutdownWorkspaces refuses new creates and tears down every hosted
+// workspace in parallel, so interrupted work is recorded before exit. It
+// also waits for teardowns already under way, such as one started by an
+// expired detach grace. It returns ctx's error, naming the stragglers in
+// the log, if ctx ends first.
+func (b *Backend) ShutdownWorkspaces(ctx context.Context) error {
 	b.mu.Lock()
 	b.closing = true
-	fn := b.shutdownFn
+	b.cancelShutdownLocked()
+	var owned []*Workspace
+	for _, ws := range slices.Collect(b.workspaces.Seq()) {
+		if b.unregisterLocked(ws) {
+			owned = append(owned, ws)
+		}
+	}
 	b.mu.Unlock()
-	if fn != nil {
-		fn()
+
+	remaining := csync.NewMap[string, struct{}]()
+	var wg sync.WaitGroup
+	for _, ws := range owned {
+		slog.Info("Shutting down workspace", "workspace", ws.ID)
+		remaining.Set(ws.ID, struct{}{})
+		wg.Go(func() {
+			ws.invokeShutdown()
+			remaining.Del(ws.ID)
+		})
+	}
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		b.teardowns.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		slog.Warn("Gave up waiting for workspaces to shut down; their final state may not be recorded",
+			"workspaces", slices.Sorted(maps.Keys(remaining.Copy())))
+		return ctx.Err()
 	}
 }
 
@@ -1044,6 +1330,14 @@ func (b *Backend) ShutdownIfIdle() bool {
 	return true
 }
 
+// Closing reports whether the server has committed to shutting down. The
+// decision is final: once it reports true, it always will.
+func (b *Backend) Closing() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.closing
+}
+
 // resolveWorkspaceKey returns a stable canonical form of path suitable
 // for use as a dedup key. It applies filepath.Abs, then attempts
 // filepath.EvalSymlinks; because EvalSymlinks errors on non-existent
@@ -1073,21 +1367,46 @@ func validateClientID(id string) (string, error) {
 
 func workspaceToProto(ws *Workspace) proto.Workspace {
 	cfg := ws.Cfg.Config()
+	// Report the mode the permission service actually enforces rather
+	// than the startup override. The override is a one-shot seed that
+	// app.New reads at construction; runtime toggles reach only the
+	// service, so reporting the override would show a client "normal"
+	// while the server auto-approves everything.
+	//
+	// ws.Permissions is safe to dereference here: it is promoted from
+	// the embedded app.App, which CreateWorkspace always populates
+	// alongside ws.Cfg, and ws.Cfg is already dereferenced above.
 	out := proto.Workspace{
-		ID:       ws.ID,
-		Path:     ws.Path,
-		YOLO:     ws.Cfg.Overrides().SkipPermissionRequests,
-		Channels: ws.Cfg.Overrides().EnabledChannels,
-		DataDir:  cfg.Options.DataDirectory,
-		Debug:    cfg.Options.Debug,
-		Config:   cfg,
-		Env:      ws.Env,
-		Version:  version.Version,
+		ID:             ws.ID,
+		Path:           ws.Path,
+		PermissionMode: proto.PermissionModeToProto(ws.Permissions.PermissionMode()),
+		Channels:       ws.Cfg.Overrides().EnabledChannels,
+		Prompts:        ws.Cfg.Overrides().Prompts,
+		DataDir:        cfg.Options.DataDirectory,
+		Debug:          cfg.Options.Debug,
+		Config:         cfg,
+		Env:            ws.Env,
+		Version:        version.Version,
 	}
 	if ws.Skills != nil {
 		out.Skills = skillStatesToProto(ws.Skills.States())
 	}
 	return out
+}
+
+// joinMismatch reports why a duplicate create may not join existing.
+// Channels must match exactly. Prompts only have to match when the caller
+// asked for some: a plain client may join a workspace opened with --prompt,
+// but a --prompt the existing workspace would ignore must not be dropped
+// without a word.
+func joinMismatch(existing *Workspace, args proto.Workspace) error {
+	if !stringSlicesEqual(existing.Cfg.Overrides().EnabledChannels, args.Channels) {
+		return ErrChannelOptInMismatch
+	}
+	if len(args.Prompts) > 0 && !maps.Equal(existing.Cfg.Overrides().Prompts, args.Prompts) {
+		return ErrPromptOverrideMismatch
+	}
+	return nil
 }
 
 // logFirstWinsMismatch emits a debug line whenever a second
@@ -1101,21 +1420,25 @@ func workspaceToProto(ws *Workspace) proto.Workspace {
 // while the first set one will still log the mismatch.
 func logFirstWinsMismatch(existing *Workspace, args proto.Workspace) {
 	existingCfg := existing.Cfg.Config()
-	existingYOLO := existing.Cfg.Overrides().SkipPermissionRequests
 	existingChannels := existing.Cfg.Overrides().EnabledChannels
-	if existingYOLO == args.YOLO &&
+	// Compare the internal modes so an unset request ("") matches the
+	// normalized default ("normal") instead of spuriously logging.
+	existingMode := existing.Cfg.Overrides().PermissionMode
+	requestedMode := proto.ProtoModeToPermission(args.PermissionMode)
+	if existingMode == requestedMode &&
 		existingCfg.Options.Debug == args.Debug &&
 		existingCfg.Options.DataDirectory == args.DataDir &&
 		stringSlicesEqual(existing.Env, args.Env) &&
-		stringSlicesEqual(existingChannels, args.Channels) {
+		stringSlicesEqual(existingChannels, args.Channels) &&
+		maps.Equal(existing.Cfg.Overrides().Prompts, args.Prompts) {
 		return
 	}
 	slog.Debug(
 		"Workspace flag mismatch on duplicate create; first wins",
 		"workspace_id", existing.ID,
 		"path", existing.Path,
-		"existing_yolo", existingYOLO,
-		"requested_yolo", args.YOLO,
+		"existing_permission_mode", proto.PermissionModeToProto(existingMode),
+		"requested_permission_mode", proto.PermissionModeToProto(requestedMode),
 		"existing_debug", existingCfg.Options.Debug,
 		"requested_debug", args.Debug,
 		"existing_data_dir", existingCfg.Options.DataDirectory,
@@ -1124,6 +1447,8 @@ func logFirstWinsMismatch(existing *Workspace, args proto.Workspace) {
 		"requested_env", args.Env,
 		"existing_channels", existingChannels,
 		"requested_channels", args.Channels,
+		"existing_prompts", existing.Cfg.Overrides().Prompts,
+		"requested_prompts", args.Prompts,
 	)
 }
 

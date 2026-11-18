@@ -33,7 +33,7 @@ func (g *GenericToolRenderContext) RenderTool(sty *styles.Styles, width int, opt
 	cappedWidth := cappedMessageWidth(width)
 	name := humanizedToolName(opts.ToolCall.Name)
 
-	if opts.IsPending() {
+	if opts.IsStreamingInput() {
 		return pendingTool(sty, name, opts.Anim, opts.Compact)
 	}
 

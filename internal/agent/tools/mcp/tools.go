@@ -57,61 +57,55 @@ func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string
 		return ToolResult{}, err
 	}
 
+	return toolResultFromCall(result), nil
+}
+
+// toolResultFromCall folds the content blocks of an MCP reply into the one
+// result Crush carries, keeping at most one image and one audio payload.
+func toolResultFromCall(result *mcp.CallToolResult) ToolResult {
 	if len(result.Content) == 0 {
-		return ToolResult{Type: "text", Content: ""}, nil
+		return ToolResult{Type: "text", Content: ""}
 	}
 
 	var textParts []string
-	var imageData []byte
-	var imageMimeType string
-	var audioData []byte
-	var audioMimeType string
-
+	var image, audio mediaPayload
 	for _, v := range result.Content {
 		switch content := v.(type) {
 		case *mcp.TextContent:
 			textParts = append(textParts, content.Text)
 		case *mcp.ImageContent:
-			if imageData == nil {
-				imageData = content.Data
-				imageMimeType = content.MIMEType
-			}
+			image.offer(content.Data, content.MIMEType)
 		case *mcp.AudioContent:
-			if audioData == nil {
-				audioData = content.Data
-				audioMimeType = content.MIMEType
-			}
+			audio.offer(content.Data, content.MIMEType)
 		default:
 			textParts = append(textParts, fmt.Sprintf("%v", v))
 		}
 	}
-
 	textContent := strings.Join(textParts, "\n")
 
-	// We need to make sure the data is base64
-	// when using something like docker + playwright the data was not returned correctly.
-	if imageData != nil {
-		return ToolResult{
-			Type:      "image",
-			Content:   textContent,
-			Data:      ensureRawBytes(imageData),
-			MediaType: imageMimeType,
-		}, nil
+	switch {
+	case image.seen && (len(image.data) > 0 || !audio.seen):
+		return ToolResult{Type: "image", Content: textContent, Data: image.data, MediaType: image.mimeType}
+	case audio.seen:
+		return ToolResult{Type: "media", Content: textContent, Data: audio.data, MediaType: audio.mimeType}
+	default:
+		return ToolResult{Type: "text", Content: textContent}
 	}
+}
 
-	if audioData != nil {
-		return ToolResult{
-			Type:      "media",
-			Content:   textContent,
-			Data:      ensureRawBytes(audioData),
-			MediaType: audioMimeType,
-		}, nil
+// mediaPayload keeps the first non-empty payload offered, or the first one
+// if they are all empty, decoded to raw bytes.
+type mediaPayload struct {
+	data     []byte
+	mimeType string
+	seen     bool
+}
+
+func (m *mediaPayload) offer(data []byte, mimeType string) {
+	if m.seen && len(m.data) > 0 {
+		return
 	}
-
-	return ToolResult{
-		Type:    "text",
-		Content: textContent,
-	}, nil
+	*m = mediaPayload{data: ensureRawBytes(data), mimeType: mimeType, seen: true}
 }
 
 // RefreshTools gets the updated list of tools from the MCP and updates the

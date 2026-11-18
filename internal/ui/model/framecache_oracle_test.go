@@ -62,7 +62,7 @@ func TestScrollbarDefault_ClampedScrollRevealsScrollbar(t *testing.T) {
 	// ScrollBy still calls showScrollbar and sets scrollbarVisible.
 	u.beginFrameUpdate()
 	u.markScrollOnly()
-	_ = u.chat.ScrollBy(5)
+	u.chat.ScrollBy(5)
 	u.endFrameUpdate()
 	require.True(t, u.chat.scrollbarVisible, "scroll must reveal the scrollbar")
 	viewChecked(t, u, "clamped scroll that reveals the scrollbar")

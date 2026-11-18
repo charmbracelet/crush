@@ -43,3 +43,22 @@ func TestApplyChatScroll_OutOfViewSelectionGoesToNearestEdge(t *testing.T) {
 	u.chat.SelectLastInView()
 	require.Equal(t, u.chat.Selected(), got, "selection below viewport must snap to the bottom edge")
 }
+
+// Swapping the prompt echo for the stored prompt removes an item from a
+// followed view. The view must stay pinned to the end rather than leaving
+// the transcript lifted off the bottom until something else scrolls it.
+func TestChatFollow_RemovingItemKeepsViewPinned(t *testing.T) {
+	t.Parallel()
+	u := newFrameTestUI(t)
+	u.chat.ScrollToBottom()
+	_ = u.View()
+
+	u.chat.RemoveMessage("198")
+	_ = u.View()
+	gotIdx, gotLine := u.chat.ScrollPosition()
+
+	u.chat.ScrollToBottom()
+	wantIdx, wantLine := u.chat.ScrollPosition()
+	require.Equal(t, wantIdx, gotIdx)
+	require.Equal(t, wantLine, gotLine)
+}

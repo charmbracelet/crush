@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"charm.land/catwalk/pkg/catwalk"
+	"charm.land/catwalk/v3/pkg/catwalk"
 	"github.com/stretchr/testify/require"
 )
 
@@ -48,6 +48,29 @@ func TestLlamacppEnricher(t *testing.T) {
 		require.Equal(t, int64(8192), result[0].ContextWindow)
 		require.Equal(t, int64(4096), result[1].ContextWindow)
 		require.Equal(t, int64(0), result[2].ContextWindow)
+	})
+
+	t.Run("base URL that already ends in /v1", func(t *testing.T) {
+		t.Parallel()
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			require.Equal(t, "/v1/models", r.URL.Path)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(llamacppModelsResponse{
+				Data: []llamacppModelEntry{
+					{ID: "m1", Meta: llamacppMeta{NCtx: 8192}},
+				},
+			})
+		}))
+		defer srv.Close()
+
+		cfg := Config{ID: "test-llamacpp", BaseURL: srv.URL + "/v1"}
+		models := []catwalk.Model{{ID: "m1"}}
+
+		e := &llamacppEnricher{}
+		result, err := e.EnrichModels(context.Background(), cfg, &mockResolver{}, models)
+		require.NoError(t, err)
+		require.Equal(t, int64(8192), result[0].ContextWindow,
+			"a base URL with /v1 must not be asked for /v1/v1/models")
 	})
 
 	t.Run("falls back to n_ctx_train when n_ctx is zero", func(t *testing.T) {

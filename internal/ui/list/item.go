@@ -9,15 +9,9 @@ import (
 // Item represents a single item in the lazy-loaded list.
 //
 // Items participate in the list-level render memo (F6). The cache key
-// for each item is (pointer, width, version). Items must:
-//
-//   - Bump their version (via the embedded *Versioned helper) on every
-//     mutation that changes the rendered output.
-//   - Return Finished() == true once their rendered output will not
-//     change again unless an explicit mutator is invoked. Frozen
-//     entries are emitted verbatim — no Render call — until either
-//     Version() bumps, the viewport width changes, or the list
-//     explicitly invalidates the entry.
+// for each item is (pointer, width, version), so items must bump their
+// version (via the embedded *Versioned helper) on every mutation that
+// changes the rendered output.
 type Item interface {
 	// Render returns the string representation of the item for the given
 	// width.
@@ -28,14 +22,6 @@ type Item interface {
 	// (via Versioned.Bump) on every state change that would alter
 	// the rendered output.
 	Version() uint64
-
-	// Finished reports whether the item's rendered output has reached
-	// a terminal state and may be frozen by the list cache. Items
-	// that animate, stream, or otherwise still mutate must return
-	// false. A finished item that later mutates must bump its
-	// version on the mutation; the cache treats version bumps as
-	// implicit unfreeze + invalidate.
-	Finished() bool
 }
 
 // Versioned is a tiny embeddable helper that satisfies Item.Version()
@@ -116,11 +102,4 @@ func NewSpacerItem(height int) *SpacerItem {
 // Render implements the Item interface for [SpacerItem].
 func (s *SpacerItem) Render(width int) string {
 	return strings.Repeat("\n", s.Height)
-}
-
-// Finished implements Item. SpacerItems are immutable in practice and
-// safe to freeze; any mutation goes through Versioned.Bump which
-// invalidates the frozen entry.
-func (s *SpacerItem) Finished() bool {
-	return true
 }

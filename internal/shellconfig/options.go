@@ -33,6 +33,9 @@ import (
 //	option auto-lsp false
 //	option request-timeout 300
 //	option request-timeout 0
+//	option max-background-jobs 200
+//	option pinentry-integrated false
+//	option pinentry-cache-timeout 300
 //
 // Boolean shortcuts: for boolean fields, omitting the value sets it to true.
 func handleOption(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
@@ -49,6 +52,10 @@ func handleOption(ctx context.Context, args []string, stdin io.Reader, stdout, s
 
 	if key == "ui" {
 		return optionUI(o, args, stderr)
+	}
+
+	if key == "prompt" {
+		return optionPrompt(o, args, stderr)
 	}
 
 	// "option reset <key>" wipes a list back to empty. Because the builder
@@ -194,10 +201,11 @@ type optionSpec struct {
 // handleOption above and do not appear here.
 var optionSpecs = map[string]optionSpec{
 	// Boolean fields (stored as-is).
-	"debug":     {jsonKey: "debug", kind: optBool},
-	"debug-lsp": {jsonKey: "debug_lsp", kind: optBool},
-	"auto-lsp":  {jsonKey: "auto_lsp", kind: optBool},
-	"progress":  {jsonKey: "progress", kind: optBool},
+	"debug":               {jsonKey: "debug", kind: optBool},
+	"debug-lsp":           {jsonKey: "debug_lsp", kind: optBool},
+	"auto-lsp":            {jsonKey: "auto_lsp", kind: optBool},
+	"progress":            {jsonKey: "progress", kind: optBool},
+	"pinentry-integrated": {jsonKey: "pinentry_integrated", kind: optBool},
 
 	// Boolean fields exposed positively but stored as their negation.
 	"metrics":              {jsonKey: "disable_metrics", kind: optBool, inverted: true},
@@ -210,8 +218,10 @@ var optionSpecs = map[string]optionSpec{
 	"data-directory": {jsonKey: "data_directory", kind: optString},
 	"initialize-as":  {jsonKey: "initialize_as", kind: optString},
 
-	// Integer fields, in seconds.
-	"request-timeout": {jsonKey: "request_timeout", kind: optInt},
+	// Integer fields.
+	"request-timeout":        {jsonKey: "request_timeout", kind: optInt},
+	"max-background-jobs":    {jsonKey: "max_background_jobs", kind: optInt},
+	"pinentry-cache-timeout": {jsonKey: "pinentry_cache_timeout", kind: optInt},
 
 	// List fields. Keys are singular because each call appends one value.
 	"context-path":        {jsonKey: "context_paths", kind: optList},
@@ -220,11 +230,34 @@ var optionSpecs = map[string]optionSpec{
 	"disable-skill":       {jsonKey: "disabled_skills", kind: optList},
 }
 
+// uiBoolKeys maps boolean "option ui" keys to their options.tui JSON keys.
+var uiBoolKeys = map[string]string{
+	"compact":     "compact_mode",
+	"transparent": "transparent",
+	"mouse":       "mouse",
+	"nerd-fonts":  "nerd_fonts",
+}
+
+// optionPrompt implements "option prompt <name> <path>", pointing a built-in
+// prompt at a replacement file. Unknown names are rejected later, by config
+// validation, which owns the list of built-in prompts.
+func optionPrompt(options map[string]any, args []string, stderr io.Writer) error {
+	if len(args) != 4 {
+		return usage(stderr, "usage: option prompt <name> <path>")
+	}
+
+	name, path := args[2], args[3]
+	childMap(options, "prompts")[name] = path
+
+	slog.Info("Prompt override set in shell config", "prompt", name, "path", path)
+	return nil
+}
+
 // optionUI implements "option ui <key> <value>" for TUI-specific settings
 // that live under options.tui rather than as top-level options.
 func optionUI(options map[string]any, args []string, stderr io.Writer) error {
 	if len(args) != 4 {
-		return usage(stderr, "usage: option ui <compact|diff|transparent|mouse|scrollbar|completions-max-depth|completions-max-items|exit-banner> <value>")
+		return usage(stderr, "usage: option ui <compact|diff|transparent|mouse|nerd-fonts|scrollbar|completions-max-depth|completions-max-items|exit-banner> <value>")
 	}
 
 	key := args[2]
@@ -232,16 +265,6 @@ func optionUI(options map[string]any, args []string, stderr io.Writer) error {
 	ui := childMap(options, "tui")
 
 	switch key {
-	case "compact", "transparent", "mouse":
-		parsed, err := parseBool(value)
-		if err != nil {
-			return usage(stderr, fmt.Sprintf("option ui %s expects true/false, got %q", key, value))
-		}
-		jsonKey := key
-		if key == "compact" {
-			jsonKey = "compact_mode"
-		}
-		ui[jsonKey] = parsed
 	case "diff":
 		if value != "unified" && value != "split" {
 			return usage(stderr, fmt.Sprintf("option ui diff expects unified or split, got %q", value))
@@ -268,7 +291,15 @@ func optionUI(options map[string]any, args []string, stderr io.Writer) error {
 		}
 		childMap(ui, "completions")[jsonKey] = parsed
 	default:
-		return usage(stderr, fmt.Sprintf("option ui: unknown key %q", key))
+		jsonKey, ok := uiBoolKeys[key]
+		if !ok {
+			return usage(stderr, fmt.Sprintf("option ui: unknown key %q", key))
+		}
+		parsed, err := parseBool(value)
+		if err != nil {
+			return usage(stderr, fmt.Sprintf("option ui %s expects true/false, got %q", key, value))
+		}
+		ui[jsonKey] = parsed
 	}
 
 	slog.Info("UI option set in shell config", "key", key, "value", value)

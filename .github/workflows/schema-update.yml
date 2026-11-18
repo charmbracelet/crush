@@ -8,6 +8,9 @@ on:
       - "internal/agent/hyper/**"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   update-schema:
     runs-on: ubuntu-latest

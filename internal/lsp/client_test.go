@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
@@ -108,6 +109,8 @@ func TestNilClient(t *testing.T) {
 	c.WaitForDiagnostics(context.Background(), time.Second)
 }
 
+// newTestClient builds a stopped client. Tests that wait on it run under
+// synctest, since real timers stall on CI.
 func newTestClient() *Client {
 	c := &Client{
 		name:        "test",
@@ -121,76 +124,83 @@ func newTestClient() *Client {
 func TestWaitForDiagnostics_NoChange(t *testing.T) {
 	t.Parallel()
 
-	c := newTestClient()
-	start := time.Now()
-	c.WaitForDiagnostics(t.Context(), 5*time.Second)
-	elapsed := time.Since(start)
+	synctest.Test(t, func(t *testing.T) {
+		c := newTestClient()
+		start := time.Now()
+		c.WaitForDiagnostics(t.Context(), 5*time.Second)
+		elapsed := time.Since(start)
 
-	// Should return early via firstChangeDeadline (~1s), not the full timeout.
-	require.Less(t, elapsed, 2*time.Second, "should return early when no diagnostics change")
+		// Should return early via firstChangeDeadline (1s), not the full timeout.
+		require.Equal(t, time.Second, elapsed, "should return early when no diagnostics change")
+	})
 }
 
 func TestWaitForDiagnostics_ImmediateChange(t *testing.T) {
 	t.Parallel()
 
-	c := newTestClient()
+	synctest.Test(t, func(t *testing.T) {
+		c := newTestClient()
 
-	go func() {
-		time.Sleep(100 * time.Millisecond)
-		c.diagnostics.Set(protocol.DocumentURI("file:///test.go"), nil)
-	}()
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+			c.diagnostics.Set(protocol.DocumentURI("file:///test.go"), nil)
+		}()
 
-	start := time.Now()
-	c.WaitForDiagnostics(t.Context(), 5*time.Second)
-	elapsed := time.Since(start)
+		start := time.Now()
+		c.WaitForDiagnostics(t.Context(), 5*time.Second)
+		elapsed := time.Since(start)
 
-	// Should detect the change and then settle (~300ms settle + overhead).
-	require.Less(t, elapsed, 2*time.Second, "should return after settling, not full timeout")
-	require.Greater(t, elapsed, 200*time.Millisecond, "should wait for settle duration")
+		// Should detect the change and then settle for 300ms.
+		require.GreaterOrEqual(t, elapsed, 400*time.Millisecond, "should wait for settle duration")
+		require.Less(t, elapsed, time.Second, "should return after settling, not full timeout")
+	})
 }
 
 func TestWaitForDiagnostics_RepeatedChanges(t *testing.T) {
 	t.Parallel()
 
-	c := newTestClient()
+	synctest.Test(t, func(t *testing.T) {
+		c := newTestClient()
 
-	// Simulate an LSP server that publishes diagnostics in bursts.
-	go func() {
-		for i := range 5 {
-			time.Sleep(50 * time.Millisecond)
-			c.diagnostics.Set(protocol.DocumentURI("file:///test.go"), []protocol.Diagnostic{
-				{Message: fmt.Sprintf("diag-%d", i)},
-			})
-		}
-	}()
+		// Simulate an LSP server that publishes diagnostics in bursts.
+		go func() {
+			for i := range 5 {
+				time.Sleep(50 * time.Millisecond)
+				c.diagnostics.Set(protocol.DocumentURI("file:///test.go"), []protocol.Diagnostic{
+					{Message: fmt.Sprintf("diag-%d", i)},
+				})
+			}
+		}()
 
-	start := time.Now()
-	c.WaitForDiagnostics(t.Context(), 5*time.Second)
-	elapsed := time.Since(start)
+		start := time.Now()
+		c.WaitForDiagnostics(t.Context(), 5*time.Second)
+		elapsed := time.Since(start)
 
-	// Should wait for diagnostics to settle after the burst finishes.
-	// Burst lasts ~250ms, then 300ms settle window, so total ~550ms+.
-	require.Less(t, elapsed, 2*time.Second, "should return after settling, not full timeout")
-	require.Greater(t, elapsed, 400*time.Millisecond, "should wait for all changes to settle")
+		// Burst lasts 250ms, then a 300ms settle window.
+		require.GreaterOrEqual(t, elapsed, 550*time.Millisecond, "should wait for all changes to settle")
+		require.Less(t, elapsed, time.Second, "should return after settling, not full timeout")
+	})
 }
 
 func TestWaitForDiagnostics_ContextCancellation(t *testing.T) {
 	t.Parallel()
 
-	c := newTestClient()
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
+	synctest.Test(t, func(t *testing.T) {
+		c := newTestClient()
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
 
-	go func() {
-		time.Sleep(200 * time.Millisecond)
-		cancel()
-	}()
+		go func() {
+			time.Sleep(200 * time.Millisecond)
+			cancel()
+		}()
 
-	start := time.Now()
-	c.WaitForDiagnostics(ctx, 5*time.Second)
-	elapsed := time.Since(start)
+		start := time.Now()
+		c.WaitForDiagnostics(ctx, 5*time.Second)
+		elapsed := time.Since(start)
 
-	require.Less(t, elapsed, 1*time.Second, "should return shortly after context cancellation")
+		require.Equal(t, 200*time.Millisecond, elapsed, "should return as soon as the context is cancelled")
+	})
 }
 
 func TestWaitForDiagnostics_NilClient(t *testing.T) {

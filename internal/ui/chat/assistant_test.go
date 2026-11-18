@@ -9,6 +9,32 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestAssistantMessageItemLeadingNewlines(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	for _, prefix := range []string{"\n", "\n\n"} {
+		plain := NewAssistantMessageItem(&sty, thinkingMessage("plain", "", "")).(*AssistantMessageItem)
+		prefixed := NewAssistantMessageItem(&sty, thinkingMessage("prefixed", "", "")).(*AssistantMessageItem)
+		for _, text := range []string{"", "Hello", "Hello **world**.\n\nSecond paragraph."} {
+			plain.SetMessage(thinkingMessage("plain", "", text))
+			prefixed.SetMessage(thinkingMessage("prefixed", "", prefix+text))
+			want, wantHeight := plain.renderMessageContent(80)
+			got, gotHeight := prefixed.renderMessageContent(80)
+			// Exact equality preserves blank rows that normalizeRender removes.
+			require.Equal(t, want, got, "prefix %q, text %q", prefix, text)
+			require.Equal(t, wantHeight, gotHeight)
+			require.Equal(t, prefix+text, prefixed.message.Content().Text)
+		}
+		for _, item := range []*AssistantMessageItem{plain, prefixed} {
+			msg := *item.message
+			msg.Parts = append(msg.Parts, message.Finish{Reason: message.FinishReasonEndTurn, Time: testFinishTime})
+			item.SetMessage(&msg)
+		}
+		require.Equal(t, plain.Render(80), prefixed.Render(80))
+	}
+}
+
 // TestAssistantMessageItemExpandable guards the Expandable contract on
 // AssistantMessageItem along the keyboard-driven expand path. The earlier
 // implementation returned no value, which meant the type silently did

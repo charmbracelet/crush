@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"slices"
 	"strings"
 )
 
@@ -13,10 +14,11 @@ import (
 // Usage:
 //
 //	model add <provider>/<id> [--name NAME] [--context-window N]
-//	    [--default-max-tokens N] [--can-reason true|false]
+//	    [--default-max-tokens N] [--thinking always|never|toggleable]
 //	    [--supports-images true|false] [--price-input F]
 //	    [--price-output F] [--price-cache-create F]
 //	    [--price-cache-hit F] [--reasoning-effort low|medium|high]
+//	    [--max-attachments N]
 //	model remove <provider>/<id>   (alias: rm)
 //	model large [<provider>/<id>] [--think] [--reasoning-effort L]
 //	    [--max-tokens N] [--temperature F] [--top-p F] [--top-k N]
@@ -64,18 +66,26 @@ var modelAddFlags = []flagSpec{
 	{name: "--name", jsonKey: "name", kind: flagString, op: opSet},
 	{name: "--context-window", jsonKey: "context_window", kind: flagInt, op: opSet},
 	{name: "--default-max-tokens", jsonKey: "default_max_tokens", kind: flagInt, op: opSet},
+	{name: "--thinking", jsonKey: "thinking", child: "reasoning", kind: flagString, op: opSetInChild, validate: func(v any) error {
+		thinking, ok := v.(string)
+		if !ok || !slices.Contains([]string{"always", "never", "toggleable"}, thinking) {
+			return fmt.Errorf("--thinking expects always, never, or toggleable, got %v", v)
+		}
+		return nil
+	}},
 	{name: "--can-reason", jsonKey: "can_reason", kind: flagBool, op: opSet},
-	{name: "--supports-images", jsonKey: "supports_attachments", kind: flagBool, op: opSet},
-	{name: "--price-input", jsonKey: "cost_per_1m_in", kind: flagFloat, op: opSet},
-	{name: "--price-output", jsonKey: "cost_per_1m_out", kind: flagFloat, op: opSet},
-	{name: "--price-cache-create", jsonKey: "cost_per_1m_in_cached", kind: flagFloat, op: opSet},
-	{name: "--price-cache-hit", jsonKey: "cost_per_1m_out_cached", kind: flagFloat, op: opSet},
-	{name: "--reasoning-effort", jsonKey: "default_reasoning_effort", kind: flagString, op: opSet},
+	{name: "--supports-images", jsonKey: "vision", child: "capabilities", kind: flagBool, op: opSetInChild},
+	{name: "--price-input", jsonKey: "input", child: "pricing", kind: flagFloat, op: opSetInChild},
+	{name: "--price-output", jsonKey: "output", child: "pricing", kind: flagFloat, op: opSetInChild},
+	{name: "--price-cache-create", jsonKey: "cache_create", child: "pricing", kind: flagFloat, op: opSetInChild},
+	{name: "--price-cache-hit", jsonKey: "cache_hit", child: "pricing", kind: flagFloat, op: opSetInChild},
+	{name: "--reasoning-effort", jsonKey: "default_effort_level", child: "reasoning", kind: flagString, op: opSetInChild},
+	{name: "--max-attachments", jsonKey: "max_attachments", kind: flagInt, op: opSet},
 }
 
 func modelAdd(b *ConfigBuilder, args []string, stderr io.Writer) error {
 	if len(args) < 3 {
-		return usage(stderr, "usage: model add <provider>/<id> [--name NAME] [--context-window N] [--default-max-tokens N] [--can-reason true|false] [--supports-images true|false] [--price-input F] [--price-output F] [--price-cache-create F] [--price-cache-hit F] [--reasoning-effort low|medium|high]")
+		return usage(stderr, "usage: model add <provider>/<id> [--name NAME] [--context-window N] [--default-max-tokens N] [--thinking always|never|toggleable] [--supports-images true|false] [--price-input F] [--price-output F] [--price-cache-create F] [--price-cache-hit F] [--reasoning-effort low|medium|high] [--max-attachments N]")
 	}
 	provider, id, ok := splitProviderModel(args[2])
 	if !ok {
@@ -90,6 +100,16 @@ func modelAdd(b *ConfigBuilder, args []string, stderr io.Writer) error {
 	model := map[string]any{"id": id}
 	if err := applyFlags(modelAddFlags, args, 3, model, "model add", stderr); err != nil {
 		return err
+	}
+
+	// Translate the legacy --can-reason boolean into the reasoning schema.
+	if canReason, ok := model["can_reason"].(bool); ok {
+		delete(model, "can_reason")
+		thinking := "never"
+		if canReason {
+			thinking = "toggleable"
+		}
+		childMap(model, "reasoning")["thinking"] = thinking
 	}
 
 	p := childMap(providers, provider)

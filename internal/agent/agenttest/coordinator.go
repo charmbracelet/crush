@@ -8,8 +8,7 @@ package agenttest
 import (
 	"context"
 
-	"charm.land/catwalk/pkg/catwalk"
-	"charm.land/fantasy/providers/openaicompat"
+	"charm.land/catwalk/v3/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
@@ -26,7 +25,7 @@ import (
 // the provider must construct without network I/O; the cancel-on-entry
 // path this helper is built to exercise returns before any model call,
 // so no request is ever issued. The coder agent's allowed-tools list is
-// cleared to keep tool construction cheap and free of sub-agent wiring.
+// cleared to keep tool construction cheap and free of subagent wiring.
 //
 // The optional coordinator dependencies (history, filetracker, LSP,
 // notify, runComplete, skills) are nil: run guards the publisher fields
@@ -37,7 +36,7 @@ func NewCoordinator(
 	sessions session.Service,
 	messages message.Service,
 ) (agent.Coordinator, error) {
-	cfg, err := config.Init(workingDir, "", false)
+	cfg, err := config.Init(ctx, workingDir, "", false)
 	if err != nil {
 		return nil, err
 	}
@@ -49,7 +48,7 @@ func NewCoordinator(
 	cfg.Config().Providers.Set(providerID, config.ProviderConfig{
 		ID:      providerID,
 		Name:    "Test",
-		Type:    openaicompat.Name,
+		Type:    catwalk.TypeCompletions,
 		BaseURL: "http://127.0.0.1:0/v1",
 		APIKey:  "test",
 		Models:  []catwalk.Model{{ID: modelID, DefaultMaxTokens: 4096}},
@@ -59,7 +58,7 @@ func NewCoordinator(
 	cfg.OverridePreferredModel(config.SelectedModelTypeSmall, selected)
 	cfg.SetupAgents()
 
-	// Keep buildTools light: no sub-agent or agentic-fetch construction.
+	// Keep buildTools light: no subagent or agentic-fetch construction.
 	coderCfg := cfg.Config().Agents[config.AgentCoder]
 	coderCfg.AllowedTools = nil
 	cfg.Config().Agents[config.AgentCoder] = coderCfg
@@ -68,6 +67,6 @@ func NewCoordinator(
 		Config:      cfg,
 		Sessions:    sessions,
 		Messages:    messages,
-		Permissions: permission.NewPermissionService(workingDir, true, nil),
+		Permissions: permission.NewPermissionService(workingDir, nil, nil),
 	})
 }

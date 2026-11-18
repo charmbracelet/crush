@@ -204,9 +204,6 @@ func mcpCounts(t *styles.Styles, counts mcp.Counts) string {
 // mcpList renders a list of MCP clients with their status and counts,
 // truncating to maxItems if needed.
 func mcpList(t *styles.Styles, mcps []mcp.ClientInfo, width, maxItems int) string {
-	if maxItems <= 0 {
-		return ""
-	}
 	var renderedMcps []string
 
 	for _, m := range mcps {
@@ -259,13 +256,7 @@ func mcpList(t *styles.Styles, mcps []mcp.ClientInfo, width, maxItems int) strin
 		}, width))
 	}
 
-	if len(renderedMcps) > maxItems {
-		visibleItems := renderedMcps[:maxItems-1]
-		remaining := len(renderedMcps) - maxItems
-		visibleItems = append(visibleItems, t.Resource.AdditionalText.Render(fmt.Sprintf("…and %d more", remaining)))
-		return lipgloss.JoinVertical(lipgloss.Left, visibleItems...)
-	}
-	return lipgloss.JoinVertical(lipgloss.Left, renderedMcps...)
+	return lipgloss.JoinVertical(lipgloss.Left, truncateRows(renderedMcps, maxItems, t.Resource.AdditionalText)...)
 }
 
 // openMCPTogglesDialog opens the repository-scoped MCP toggles dialog.
@@ -320,12 +311,10 @@ func (m *UI) mcpToggleItems() ([]dialog.MCPToggleItem, error) {
 	return items, nil
 }
 
-// applyMCPToggle persists an MCP toggle. Local toggles write a
-// repository-scoped override; enabling a config-disabled server also starts
-// it now and records an enabled override, so it stays enabled across
-// restarts. Global toggles write the disabled flag to the config and apply
-// the change to the running client. The dialog keeps its own optimistic
-// state; failures surface as an error toast.
+// applyMCPToggle persists an MCP toggle and applies it to the running
+// client. Local toggles write a repository-scoped override; global toggles
+// write the disabled flag to the config. The dialog keeps its own
+// optimistic state; failures surface as an error toast.
 func (m *UI) applyMCPToggle(msg dialog.ActionToggleMCP) tea.Cmd {
 	name := msg.Name
 	disable := msg.Disabled
@@ -339,13 +328,6 @@ func (m *UI) applyMCPToggle(msg dialog.ActionToggleMCP) tea.Cmd {
 				return util.NewErrorMsg(err)
 			}
 			return util.NewInfoMsg(fmt.Sprintf("MCP %q %s globally", name, status))
-		}
-		if !disable {
-			if configured, ok := m.com.Config().MCP[name]; ok && configured.Disabled {
-				if err := m.com.Workspace.MCPStartServer(context.TODO(), name); err != nil {
-					return util.NewErrorMsg(err)
-				}
-			}
 		}
 		if err := m.com.Workspace.MCPSetServerDisabled(context.TODO(), name, disable); err != nil {
 			return util.NewErrorMsg(err)

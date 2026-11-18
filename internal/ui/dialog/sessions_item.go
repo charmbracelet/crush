@@ -54,13 +54,6 @@ type SessionItem struct {
 	hideInfo         bool
 }
 
-// Finished implements list.Item. Session items are render-stable
-// outside of explicit SetFocused / SetMatch calls, both of which
-// bump Version() and therefore invalidate the F6 frozen entry.
-func (s *SessionItem) Finished() bool {
-	return true
-}
-
 var _ ListItem = &SessionItem{}
 
 // Filter returns the filterable value of the session.
@@ -261,15 +254,21 @@ func sessionItems(t *styles.Styles, mode sessionsMode, sessions ...session.Sessi
 			item.updateTitleInput = textinput.New()
 			item.updateTitleInput.SetVirtualCursor(false)
 			item.updateTitleInput.Prompt = ""
-			inputStyle := t.TextInput
-			inputStyle.Focused.Placeholder = t.Dialog.Sessions.RenamingPlaceholder
-			item.updateTitleInput.SetStyles(inputStyle)
+			item.updateTitleInput.SetStyles(sessionRenameInputStyles(t))
 			item.updateTitleInput.SetValue(s.Title)
 			item.updateTitleInput.Focus()
 		}
 		items[i] = item
 	}
 	return items
+}
+
+// sessionRenameInputStyles returns the styles of the input that renames a
+// session.
+func sessionRenameInputStyles(t *styles.Styles) textinput.Styles {
+	inputStyle := t.TextInput
+	inputStyle.Focused.Placeholder = t.Dialog.Sessions.RenamingPlaceholder
+	return inputStyle
 }
 
 func matchedRanges(in []int) [][2]int {

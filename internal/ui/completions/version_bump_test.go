@@ -83,3 +83,27 @@ func TestCompletionItem_MutatorsBumpVersion(t *testing.T) {
 		require.Greater(t, item.Version(), stable, "SetMatch with different indexes must bump")
 	})
 }
+
+// TestCompletions_SetStylesRestylesLoadedItems checks a theme change
+// reaches the items already in the popup: they copied the styles they were
+// built with and cache their renders.
+func TestCompletions_SetStylesRestylesLoadedItems(t *testing.T) {
+	t.Parallel()
+
+	files := []FileCompletionValue{{Path: "main.go"}, {Path: "go.mod"}}
+	normal := lipgloss.NewStyle().Foreground(lipgloss.Color("#111111"))
+	focused := lipgloss.NewStyle().Foreground(lipgloss.Color("#222222"))
+	match := lipgloss.NewStyle().Underline(true)
+	newNormal := lipgloss.NewStyle().Foreground(lipgloss.Color("#aa0000"))
+	newFocused := lipgloss.NewStyle().Foreground(lipgloss.Color("#00aa00"))
+
+	c := New(normal, focused, match)
+	c.SetItems(files, nil)
+	before := c.Render()
+
+	c.SetStyles(newNormal, newFocused, match)
+	fresh := New(newNormal, newFocused, match)
+	fresh.SetItems(files, nil)
+	require.NotEqual(t, before, fresh.Render())
+	require.Equal(t, fresh.Render(), c.Render())
+}

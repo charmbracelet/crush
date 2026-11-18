@@ -2,6 +2,7 @@ package filetracker
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -11,9 +12,10 @@ import (
 )
 
 type testEnv struct {
-	ctx context.Context
-	q   *db.Queries
-	svc Service
+	ctx        context.Context
+	q          *db.Queries
+	svc        Service
+	workingDir string
 }
 
 func setupTest(t *testing.T) *testEnv {
@@ -24,10 +26,12 @@ func setupTest(t *testing.T) *testEnv {
 	t.Cleanup(func() { conn.Close() })
 
 	q := db.New(conn)
+	workingDir := t.TempDir()
 	return &testEnv{
-		ctx: t.Context(),
-		q:   q,
-		svc: NewService(q),
+		ctx:        t.Context(),
+		q:          q,
+		svc:        NewService(q, workingDir),
+		workingDir: workingDir,
 	}
 }
 
@@ -113,4 +117,18 @@ func TestService_RecordRead_DifferentPaths(t *testing.T) {
 
 	lastRead2 := env.svc.LastReadTime(env.ctx, sessionID, path2)
 	require.True(t, lastRead2.IsZero(), "path2 should not be recorded")
+}
+
+// TestService_PathsRelativeToWorkingDir guards that read records resolve
+// against the workspace, so they survive a server running from another cwd.
+func TestService_PathsRelativeToWorkingDir(t *testing.T) {
+	env := setupTest(t)
+	sessionID := "test-session-4"
+	path := filepath.Join(env.workingDir, "main.go")
+	env.createSession(t, sessionID)
+
+	t.Chdir(t.TempDir())
+	NewService(env.q, env.workingDir).RecordRead(env.ctx, sessionID, path)
+	t.Chdir(t.TempDir())
+	require.False(t, NewService(env.q, env.workingDir).LastReadTime(env.ctx, sessionID, path).IsZero())
 }

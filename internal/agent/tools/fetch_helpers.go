@@ -67,12 +67,7 @@ func FetchURLAndConvert(ctx context.Context, client *http.Client, url string) (s
 		}
 		content = cleanupMarkdown(markdown)
 	} else if strings.Contains(contentType, "application/json") || strings.Contains(contentType, "text/json") {
-		// Format JSON for better readability.
-		formatted, err := FormatJSON(content)
-		if err == nil {
-			content = formatted
-		}
-		// If formatting fails, keep original content.
+		content = formatJSON(content)
 	}
 
 	return content, nil
@@ -157,19 +152,12 @@ func ConvertHTMLToMarkdown(htmlContent string) (string, error) {
 	return markdown, nil
 }
 
-// FormatJSON formats JSON content with proper indentation.
-func FormatJSON(content string) (string, error) {
-	var data any
-	if err := json.Unmarshal([]byte(content), &data); err != nil {
-		return "", err
-	}
-
+// formatJSON indents content when it is JSON and returns it unchanged
+// otherwise. Source bytes are kept, so numbers and key order survive.
+func formatJSON(content string) string {
 	var buf bytes.Buffer
-	encoder := json.NewEncoder(&buf)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(data); err != nil {
-		return "", err
+	if json.Indent(&buf, bytes.TrimSpace([]byte(content)), "", "  ") != nil {
+		return content
 	}
-
-	return buf.String(), nil
+	return buf.String()
 }

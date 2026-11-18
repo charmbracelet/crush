@@ -252,7 +252,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.WorkingGradToColor = o.secondary
 	s.WorkingLabelColor = o.fgBase
 	s.WorkingTimerColor = o.fgMostSubtle
-	s.ThinkingLabelColor = o.fgMoreSubtle
+	s.ThinkingLabelColor = s.WorkingTimerColor
 	s.CanceledLabelColor = o.fgMoreSubtle
 
 	s.TextInput = textinput.Styles{

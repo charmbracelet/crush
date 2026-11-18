@@ -61,8 +61,8 @@ func (v *ViewToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		return header
 	}
 
-	if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
-		return joinToolParts(header, earlyState)
+	if block, ok := toolStateBlock(sty, opts, cappedWidth, header); ok {
+		return block
 	}
 
 	if !opts.HasResult() {
@@ -140,8 +140,8 @@ func (w *WriteToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	}
 
 	if !opts.HasResult() {
-		if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
-			return joinToolParts(header, earlyState)
+		if block, ok := toolStateBlock(sty, opts, cappedWidth, header); ok {
+			return block
 		}
 		return header
 	}
@@ -209,8 +209,8 @@ func (e *EditToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	}
 
 	if !opts.HasResult() {
-		if earlyState, ok := toolEarlyStateContent(sty, opts, width); ok {
-			return joinToolParts(header, earlyState)
+		if block, ok := toolStateBlock(sty, opts, width, header); ok {
+			return block
 		}
 		return header
 	}
@@ -289,8 +289,8 @@ func (m *MultiEditToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 	}
 
 	if !opts.HasResult() {
-		if earlyState, ok := toolEarlyStateContent(sty, opts, width); ok {
-			return joinToolParts(header, earlyState)
+		if block, ok := toolStateBlock(sty, opts, width, header); ok {
+			return block
 		}
 		return header
 	}
@@ -371,8 +371,8 @@ func (d *DownloadToolRenderContext) RenderTool(sty *styles.Styles, width int, op
 		return header
 	}
 
-	if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
-		return joinToolParts(header, earlyState)
+	if block, ok := toolStateBlock(sty, opts, cappedWidth, header); ok {
+		return block
 	}
 
 	if opts.HasEmptyResult() {

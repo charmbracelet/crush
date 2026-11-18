@@ -690,7 +690,7 @@ func ShouldRenderAssistantMessage(msg *message.Message) bool {
 	// A tool-only turn renders no assistant body, but an error, refusal,
 	// or truncation banner still has to appear, so those finishes force
 	// the message to render.
-	return !hasToolCalls || content != "" || thinking != "" || msg.IsThinking() || msg.IsErrorLike() || msg.IsTruncated() || isCancelled
+	return !hasToolCalls || content != "" || thinking != "" || msg.HasReasoningAwaitingAnswer() || msg.IsErrorLike() || msg.IsTruncated() || isCancelled
 }
 
 // BuildToolResultMap creates a map of tool call IDs to their results from a list of messages.

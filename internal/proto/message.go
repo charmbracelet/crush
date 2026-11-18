@@ -341,11 +341,6 @@ func (m *Message) FinishReason() FinishReason {
 	return ""
 }
 
-// IsThinking returns true if the message is currently in a thinking state.
-func (m *Message) IsThinking() bool {
-	return m.ReasoningContent().Thinking != "" && m.Content().Text == "" && !m.IsFinished()
-}
-
 // AppendContent appends text to the text content part.
 func (m *Message) AppendContent(delta string) {
 	found := false

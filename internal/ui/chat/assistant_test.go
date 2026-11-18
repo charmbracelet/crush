@@ -166,3 +166,26 @@ func TestAssistantMessageItemHandleMouseClick(t *testing.T) {
 	require.False(t, item.HandleMouseClick(ansi.MouseRight, 0, 2))
 	require.Equal(t, thinkingCollapsed, item.thinkingViewMode)
 }
+
+// The spinner reads "Thinking" only while reasoning streams. Once the
+// reasoning block closes, the model may still be silent for a while before
+// its answer or tool calls start; the label must not linger then.
+func TestAssistantSpinnerLabelsOnlyStreamingThinking(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	msg := &message.Message{
+		ID:   "a1",
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.ReasoningContent{Thinking: "pondering", StartedAt: testStartedAt},
+		},
+	}
+	item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
+	require.Contains(t, ansi.Strip(item.renderSpinning()), "Thinking")
+
+	msg.Parts[0] = message.ReasoningContent{Thinking: "pondering", StartedAt: testStartedAt, FinishedAt: testFinishedAt}
+	item.SetMessage(msg)
+	require.True(t, item.isSpinning(), "still waiting on the answer")
+	require.NotContains(t, ansi.Strip(item.renderSpinning()), "Thinking")
+}

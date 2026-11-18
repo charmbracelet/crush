@@ -371,11 +371,17 @@ func (m *Message) IsTruncated() bool {
 	return m.FinishReason() == FinishReasonMaxTokens
 }
 
-func (m *Message) IsThinking() bool {
-	if m.ReasoningContent().Thinking != "" && m.Content().Text == "" && !m.IsFinished() {
-		return true
-	}
-	return false
+// HasReasoningAwaitingAnswer reports whether the message has reasoning but
+// no answer text yet and has not finished. The reasoning itself may already
+// be over; see [Message.IsStreamingReasoning].
+func (m *Message) HasReasoningAwaitingAnswer() bool {
+	return m.ReasoningContent().Thinking != "" && m.Content().Text == "" && !m.IsFinished()
+}
+
+// IsStreamingReasoning reports whether reasoning is arriving right now.
+func (m *Message) IsStreamingReasoning() bool {
+	r := m.ReasoningContent()
+	return r.Thinking != "" && r.FinishedAt == 0 && !m.IsFinished()
 }
 
 func (m *Message) AppendContent(delta string) {
@@ -516,7 +522,7 @@ func toolCallInput(input string) string {
 }
 
 // AddToolCall adds or replaces a tool call by ID, keeping the time the
-// call first appeared.
+// call started running.
 func (m *Message) AddToolCall(tc ToolCall) {
 	for i, part := range m.Parts {
 		if c, ok := part.(ToolCall); ok && c.ID == tc.ID {
@@ -525,8 +531,22 @@ func (m *Message) AddToolCall(tc ToolCall) {
 			return
 		}
 	}
-	tc.StartedAtMs = cmp.Or(tc.StartedAtMs, time.Now().UnixMilli())
 	m.Parts = append(m.Parts, tc)
+}
+
+// StartToolCall records when the tool call started running. Calls only
+// run once the whole response has streamed, and calls that cannot run in
+// parallel wait their turn, so this is later than when the call first
+// appeared. Reports whether the call was found.
+func (m *Message) StartToolCall(toolCallID string, atMs int64) bool {
+	for i, part := range m.Parts {
+		if c, ok := part.(ToolCall); ok && c.ID == toolCallID {
+			c.StartedAtMs = atMs
+			m.Parts[i] = c
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Message) SetToolCalls(tc []ToolCall) {

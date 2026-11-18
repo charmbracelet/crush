@@ -26,12 +26,18 @@ var turnClock = struct {
 // StartTurn starts sessionID's turn clock from now, replacing any earlier
 // start.
 func StartTurn(sessionID string) {
+	StartTurnAt(sessionID, time.Now())
+}
+
+// StartTurnAt starts sessionID's turn clock from at, for a turn that began
+// before this client saw it.
+func StartTurnAt(sessionID string, at time.Time) {
 	if sessionID == "" {
 		return
 	}
 	turnClock.mu.Lock()
 	defer turnClock.mu.Unlock()
-	turnClock.started[sessionID] = time.Now()
+	turnClock.started[sessionID] = at
 	turnClock.current = sessionID
 }
 

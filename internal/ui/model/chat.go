@@ -900,6 +900,16 @@ func (m *Chat) MessageItemAt(i int) chat.MessageItem {
 	return item
 }
 
+// lastItemBeforeTurnTimer returns the last item, ignoring the turn timer.
+func (m *Chat) lastItemBeforeTurnTimer() chat.MessageItem {
+	for i := m.list.Len() - 1; i >= 0; i-- {
+		if item := m.MessageItemAt(i); item != nil && item.ID() != chat.PendingAssistantID {
+			return item
+		}
+	}
+	return nil
+}
+
 // ToggleExpandedSelectedItem expands the selected message item if it is expandable.
 func (m *Chat) ToggleExpandedSelectedItem() {
 	if expandable, ok := m.list.SelectedItem().(chat.Expandable); ok {

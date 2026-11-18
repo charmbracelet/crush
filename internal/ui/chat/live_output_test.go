@@ -12,7 +12,7 @@ import (
 )
 
 // TestBashToolRendersLiveOutputUntilResult verifies that streamed output
-// replaces the waiting message and is itself replaced by the final result.
+// appears under the bare running header and is replaced by the final result.
 func TestBashToolRendersLiveOutputUntilResult(t *testing.T) {
 	t.Parallel()
 
@@ -21,13 +21,12 @@ func TestBashToolRendersLiveOutputUntilResult(t *testing.T) {
 	item := NewBashToolMessageItem(&sty, tc, nil, false, "")
 	live := item.(LiveOutputItem)
 
-	require.Contains(t, ansi.Strip(item.Render(100)), "Waiting for tool response")
+	require.Equal(t, 1, strings.Count(strings.TrimSpace(ansi.Strip(item.Render(100))), "\n")+1)
 
 	require.True(t, live.SetLiveOutput("1\n2"))
 	rendered := ansi.Strip(item.Render(100))
 	require.Contains(t, rendered, "1")
 	require.Contains(t, rendered, "2")
-	require.NotContains(t, rendered, "Waiting for tool response")
 	require.False(t, live.SetLiveOutput("1\n2"), "unchanged output is a no-op")
 
 	item.SetResult(&message.ToolResult{ToolCallID: "call1", Content: "final-output"})
@@ -81,7 +80,7 @@ func TestLiveOutputShowsTailWhenCollapsed(t *testing.T) {
 	require.Contains(t, expanded, "LASTLINE")
 }
 
-func TestLiveOutputControlOnlyFallsBackToWaiting(t *testing.T) {
+func TestLiveOutputControlOnlyFallsBackToHeader(t *testing.T) {
 	t.Parallel()
 
 	sty := styles.CharmtonePantera()
@@ -89,7 +88,7 @@ func TestLiveOutputControlOnlyFallsBackToWaiting(t *testing.T) {
 	item := NewBashToolMessageItem(&sty, tc, nil, false, "")
 	item.(LiveOutputItem).SetLiveOutput("\x1b[?25l")
 
-	require.Contains(t, ansi.Strip(item.Render(100)), "Waiting for tool response")
+	require.Equal(t, "● Bash sleep 1", strings.TrimSpace(ansi.Strip(item.Render(100))))
 }
 
 func TestLiveOutputIgnoredAndClearedWhenCanceled(t *testing.T) {

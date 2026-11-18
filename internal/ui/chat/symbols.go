@@ -43,8 +43,8 @@ func (r *SymbolsToolRenderContext) RenderTool(sty *styles.Styles, width int, opt
 		return header
 	}
 
-	if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
-		return joinToolParts(header, earlyState)
+	if block, ok := toolStateBlock(sty, opts, cappedWidth, header); ok {
+		return block
 	}
 
 	if opts.HasEmptyResult() {

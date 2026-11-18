@@ -241,6 +241,9 @@ type AssistantMessageItem struct {
 	// from streamingContent because it renders through the plan
 	// renderer, whose cached prefix is not interchangeable.
 	streamingPlan streamingMarkdown
+
+	// turnTimer is set while the UI has handed this spinner the turn time.
+	turnTimer turnTimerSlot
 }
 
 var _ Expandable = (*AssistantMessageItem)(nil)
@@ -273,7 +276,7 @@ func NewAssistantMessageItem(sty *styles.Styles, message *message.Message) Messa
 			SuffixColor: sty.WorkingTimerColor,
 		})
 	} else {
-		a.anim = newTurnAnim(sty, a.ID(), message.SessionID)
+		a.anim = newTurnAnim(sty, a.ID(), a.turnTimer.text)
 	}
 	return a
 }
@@ -281,6 +284,17 @@ func NewAssistantMessageItem(sty *styles.Styles, message *message.Message) Messa
 // Spinning implements [Animatable].
 func (a *AssistantMessageItem) Spinning() bool {
 	return a.isSpinning()
+}
+
+// CarriesTurnTimer reports whether the message's spinner is showing.
+func (a *AssistantMessageItem) CarriesTurnTimer() bool { return a.isSpinning() }
+
+// SetTurnTimer makes the spinner show sessionID's turn time, or nothing
+// when sessionID is empty.
+func (a *AssistantMessageItem) SetTurnTimer(sessionID string) {
+	if a.turnTimer.set(sessionID) {
+		a.Bump()
+	}
 }
 
 // restyleAnim implements [animRestyler].
@@ -486,7 +500,7 @@ func (a *AssistantMessageItem) renderMessageContent(width int) (string, int) {
 // thinking section. extra folds in everything other than the raw
 // thinking text that affects the rendered output: the view mode
 // (collapsed / tail-window / full) and the footer state (which
-// depends on IsThinking, ToolCalls, and ThinkingDuration).
+// depends on HasReasoningAwaitingAnswer, ToolCalls, and ThinkingDuration).
 //
 // The source hash is computed incrementally: during streaming the
 // thinking text only grows by appending, so we continue the FNV-64a
@@ -496,7 +510,7 @@ func (a *AssistantMessageItem) thinkingKey() (uint64, uint64) {
 	thinking := a.message.ReasoningContent().Thinking
 	srcHash := a.thinkingHashIncremental(thinking)
 
-	showFooter := !a.message.IsThinking() || len(a.message.ToolCalls()) > 0
+	showFooter := !a.message.HasReasoningAwaitingAnswer() || len(a.message.ToolCalls()) > 0
 	var durationStr string
 	if showFooter {
 		duration := a.message.ThinkingDuration()
@@ -862,7 +876,7 @@ func (a *AssistantMessageItem) renderThinking(thinking string, width int) string
 
 	var footer string
 	// if thinking is done add the thought for footer
-	if !a.message.IsThinking() || len(a.message.ToolCalls()) > 0 {
+	if !a.message.HasReasoningAwaitingAnswer() || len(a.message.ToolCalls()) > 0 {
 		duration := a.message.ThinkingDuration()
 		if duration.String() != "0s" {
 			footer = a.sty.Messages.ThinkingFooterTitle.Render("Thought for ") +
@@ -892,10 +906,15 @@ func (a *AssistantMessageItem) renderMarkdown(content string, width int) string 
 }
 
 func (a *AssistantMessageItem) renderSpinning() string {
-	if a.message.IsThinking() {
-		a.anim.SetLabel("Thinking")
-	} else if a.message.IsSummaryMessage {
-		a.anim.SetLabel("Summarizing")
+	var label string
+	switch {
+	case a.message.IsSummaryMessage:
+		label = "Summarizing"
+	case a.message.IsStreamingReasoning():
+		label = "Thinking"
+	}
+	if a.anim.Label() != label {
+		a.anim.SetLabel(label)
 	}
 	return a.anim.Render()
 }
@@ -926,13 +945,11 @@ func (a *AssistantMessageItem) renderError(width int) string {
 	return fmt.Sprintf("%s\n\n%s", title, details)
 }
 
-// isSpinning returns true if the assistant message is still generating.
+// isSpinning returns true while the message is unfinished and has shown
+// neither answer text nor tool calls.
 func (a *AssistantMessageItem) isSpinning() bool {
-	isThinking := a.message.IsThinking()
-	isFinished := a.message.IsFinished()
 	hasContent := strings.TrimSpace(a.message.Content().Text) != ""
-	hasToolCalls := len(a.message.ToolCalls()) > 0
-	return (isThinking || !isFinished) && !hasContent && !hasToolCalls
+	return !a.message.IsFinished() && !hasContent && len(a.message.ToolCalls()) == 0
 }
 
 // SetMessage is used to update the underlying message. Only the

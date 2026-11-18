@@ -49,8 +49,8 @@ func (r *RenameToolRenderContext) RenderTool(sty *styles.Styles, width int, opts
 		return header
 	}
 
-	if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
-		return joinToolParts(header, earlyState)
+	if block, ok := toolStateBlock(sty, opts, cappedWidth, header); ok {
+		return block
 	}
 
 	if opts.HasEmptyResult() {

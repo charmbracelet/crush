@@ -156,6 +156,19 @@ func (a *AgentToolMessageItem) dispatchSettled() bool {
 	return a.dispatchReported || (a.result != nil && a.result.IsError)
 }
 
+// CarriesTurnTimer reports whether the subagent's spinner is showing: until
+// its result lands, or for a dispatch, until its report does.
+func (a *AgentToolMessageItem) CarriesTurnTimer() bool {
+	switch {
+	case a.Status() == ToolStatusCanceled:
+		return false
+	case a.dispatchLabel != "":
+		return !a.dispatchSettled()
+	default:
+		return a.result == nil
+	}
+}
+
 // Advance implements [Animatable].
 //
 // Advances the parent's own spinner and every spinning nested tool in
@@ -166,15 +179,7 @@ func (a *AgentToolMessageItem) dispatchSettled() bool {
 // Without the bump, the list cache would serve the previously rendered
 // frame indefinitely and the spinner would appear frozen.
 func (a *AgentToolMessageItem) Advance() bool {
-	if a.Status() == ToolStatusCanceled {
-		return false
-	}
-	// A dispatched subagent keeps working after its tool result lands, so
-	// its animation runs until the report arrives.
-	if a.dispatchLabel == "" && a.result != nil {
-		return false
-	}
-	if a.dispatchLabel != "" && a.dispatchSettled() {
+	if !a.CarriesTurnTimer() {
 		return false
 	}
 	changed := a.anim.Advance()
@@ -389,11 +394,17 @@ func NewAgenticFetchToolMessageItem(
 	return t
 }
 
+// CarriesTurnTimer reports whether the fetch's spinner is showing, which is
+// until its result lands.
+func (a *AgenticFetchToolMessageItem) CarriesTurnTimer() bool {
+	return a.result == nil && a.Status() != ToolStatusCanceled
+}
+
 // Advance implements [Animatable]. See [AgentToolMessageItem.Advance]
 // for the parent-bump rationale; without an override the embedded base
 // Advance would never advance the nested children.
 func (a *AgenticFetchToolMessageItem) Advance() bool {
-	if a.result != nil || a.Status() == ToolStatusCanceled {
+	if !a.CarriesTurnTimer() {
 		return false
 	}
 	changed := a.anim.Advance()

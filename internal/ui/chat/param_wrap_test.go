@@ -29,7 +29,7 @@ func TestToolParamListKeepsHighlightingAcrossWraps(t *testing.T) {
 	require.NoError(t, err)
 
 	const width = 60
-	out := toolParamList(&sty, []string{highlighted}, width, &ToolRenderOpts{ExpandedContent: true})
+	out := toolParamList(&sty, highlighted, nil, width, &ToolRenderOpts{ExpandedContent: true})
 
 	lines := strings.Split(out, "\n")
 	require.Greater(t, len(lines), 1, "the command must actually wrap for this to test anything")
@@ -69,7 +69,7 @@ func TestToolParamListStylesTruncatedParams(t *testing.T) {
 	sty := styles.CharmtonePantera()
 	long := strings.Repeat("abcdefghij", 20)
 
-	out := toolParamList(&sty, []string{long}, 30, nil)
+	out := toolParamList(&sty, long, nil, 30, nil)
 	require.Contains(t, out, "…", "an over-long parameter must be truncated")
 	require.NotEqual(t, long, out, "the parameter must be styled, not passed through bare")
 }

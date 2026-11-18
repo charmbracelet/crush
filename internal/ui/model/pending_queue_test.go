@@ -2,6 +2,7 @@ package model
 
 import (
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/message"
@@ -9,6 +10,7 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 )
 
@@ -24,8 +26,27 @@ func newPendingUI(t *testing.T) *UI {
 	return m
 }
 
+// created and updated deliver a message event through Update, as the app
+// does, so the turn timer is synced the way it is at runtime.
+func created(m *UI, msg message.Message) {
+	m.Update(pubsub.Event[message.Message]{Type: pubsub.CreatedEvent, Payload: msg})
+}
+
+func updated(m *UI, msg message.Message) {
+	m.Update(pubsub.Event[message.Message]{Type: pubsub.UpdatedEvent, Payload: msg})
+}
+
+// hasPending reports whether the placeholder spinner is showing, as opposed
+// to nothing or the "Running" line.
 func hasPending(m *UI) bool {
-	return m.chat.MessageItem(chat.PendingAssistantID) != nil
+	item, ok := m.chat.MessageItem(chat.PendingAssistantID).(*chat.PendingAssistantItem)
+	return ok && item.Live()
+}
+
+// hasTurnTimer reports whether the "Running" line is showing.
+func hasTurnTimer(m *UI) bool {
+	item, ok := m.chat.MessageItem(chat.PendingAssistantID).(*chat.PendingAssistantItem)
+	return ok && !item.Live()
 }
 
 // transcriptIDs lists the ids of the items in view, top to bottom.
@@ -65,7 +86,7 @@ func TestStoredPromptReplacesTheEcho(t *testing.T) {
 	m := newPendingUI(t)
 	m.sendMessage("hello")
 
-	m.appendSessionMessage(userMessage("u1", "s1", "hello"))
+	created(m, userMessage("u1", "s1", "hello"))
 
 	require.Equal(t, []string{"u1", chat.PendingAssistantID}, transcriptIDs(m))
 }
@@ -81,7 +102,7 @@ func TestLoadRacingTheStoredPromptShowsItOnce(t *testing.T) {
 		m.setSessionMessages([]message.Message{stored})
 		require.Equal(t, []string{"u1", chat.PendingAssistantID}, transcriptIDs(m))
 
-		m.appendSessionMessage(stored)
+		created(m, stored)
 		require.Equal(t, []string{"u1", chat.PendingAssistantID}, transcriptIDs(m))
 	})
 
@@ -89,7 +110,7 @@ func TestLoadRacingTheStoredPromptShowsItOnce(t *testing.T) {
 		m := newPendingUI(t)
 		m.sendMessage("hello")
 
-		m.appendSessionMessage(stored)
+		created(m, stored)
 		m.setSessionMessages([]message.Message{stored})
 		require.Equal(t, []string{"u1", chat.PendingAssistantID}, transcriptIDs(m))
 	})
@@ -113,8 +134,8 @@ func TestLoadOfOlderHistoryKeepsTheEcho(t *testing.T) {
 func TestQueuedPromptIsNotEchoed(t *testing.T) {
 	m := newPendingUI(t)
 	m.sendMessage("first")
-	m.appendSessionMessage(userMessage("u1", "s1", "first"))
-	m.appendSessionMessage(message.Message{ID: "a1", Role: message.Assistant, SessionID: "s1"})
+	created(m, userMessage("u1", "s1", "first"))
+	created(m, message.Message{ID: "a1", Role: message.Assistant, SessionID: "s1"})
 
 	m.sendMessage("second")
 
@@ -130,11 +151,11 @@ func TestQueuedPromptIsNotEchoed(t *testing.T) {
 func TestPromptSentDuringAToolRunIsNotEchoed(t *testing.T) {
 	m := newPendingUI(t)
 	m.sendMessage("first")
-	m.appendSessionMessage(userMessage("u1", "s1", "first"))
+	created(m, userMessage("u1", "s1", "first"))
 	m.applyBusyState(busyStateMsg{
 		gen: m.busyFetchGen, ready: true, forSession: "s1", sessionBusy: true,
 	})
-	m.appendSessionMessage(message.Message{
+	created(m, message.Message{
 		ID: "a1", Role: message.Assistant, SessionID: "s1",
 		Parts: []message.ContentPart{message.ToolCall{
 			ID: "tc1", Name: "bash", Input: "{}", Finished: true,
@@ -145,6 +166,7 @@ func TestPromptSentDuringAToolRunIsNotEchoed(t *testing.T) {
 
 	require.Nil(t, m.chat.MessageItem(chat.PendingUserID), "the queue owns it")
 	require.False(t, hasPending(m), "no second spinner underneath the turn")
+	require.True(t, hasTurnTimer(m), "the turn time stays on screen while the tool runs")
 }
 
 // A run this client never sent (a subagent report, a channel event, a
@@ -154,8 +176,8 @@ func TestPromptSentDuringAToolRunIsNotEchoed(t *testing.T) {
 // spinner as though it had started a turn of its own.
 func TestPromptSentDuringAnUnsentRunIsNotEchoed(t *testing.T) {
 	m := newPendingUI(t)
-	m.appendSessionMessage(userMessage("u1", "s1", "report"))
-	m.appendSessionMessage(message.Message{
+	created(m, userMessage("u1", "s1", "report"))
+	created(m, message.Message{
 		ID: "a1", Role: message.Assistant, SessionID: "s1",
 		Parts: []message.ContentPart{message.ToolCall{
 			ID: "tc1", Name: "bash", Input: "{}", Finished: true,
@@ -211,7 +233,7 @@ func TestAssistantMessageRetiresPendingSpinner(t *testing.T) {
 	m.sendMessage("hello")
 	require.True(t, hasPending(m))
 
-	m.appendSessionMessage(message.Message{
+	created(m, message.Message{
 		ID: "a1", Role: message.Assistant, SessionID: "s1",
 	})
 
@@ -224,8 +246,9 @@ func TestOtherSessionAssistantLeavesPendingSpinner(t *testing.T) {
 	m := newPendingUI(t)
 	m.sendMessage("hello")
 
-	m.appendSessionMessage(message.Message{
-		ID: "a1", Role: message.Assistant, SessionID: "other",
+	m.Update(pubsub.Event[message.Message]{
+		Type:    pubsub.CreatedEvent,
+		Payload: message.Message{ID: "a1", Role: message.Assistant, SessionID: "other"},
 	})
 
 	require.True(t, hasPending(m))
@@ -238,7 +261,7 @@ func TestQueuedPromptDoesNotStackASecondSpinner(t *testing.T) {
 	m := newPendingUI(t)
 	m.sendMessage("first")
 	started := common.Elapsed("s1")
-	m.appendSessionMessage(message.Message{
+	created(m, message.Message{
 		ID: "a1", Role: message.Assistant, SessionID: "s1",
 	})
 
@@ -280,7 +303,7 @@ func runComplete(m *UI, sessionID string, cancelled bool) {
 func TestRunCompleteStopsTheClockAfterHandoff(t *testing.T) {
 	m := newPendingUI(t)
 	m.sendMessage("hello")
-	m.appendSessionMessage(message.Message{ID: "a1", Role: message.Assistant, SessionID: "s1"})
+	created(m, message.Message{ID: "a1", Role: message.Assistant, SessionID: "s1"})
 	require.False(t, hasPending(m), "the assistant message carries the spinner")
 
 	runComplete(m, "s1", false)
@@ -405,7 +428,7 @@ func TestGhostSpinnerInAnEarlierTurnDoesNotQueueThePrompt(t *testing.T) {
 func TestEndedRunClearsTheBusyProbe(t *testing.T) {
 	m := newPendingUI(t)
 	m.sendMessage("first")
-	m.appendSessionMessage(userMessage("u1", "s1", "first"))
+	created(m, userMessage("u1", "s1", "first"))
 	m.applyBusyState(busyStateMsg{
 		gen: m.busyFetchGen, ready: true, forSession: "s1", sessionBusy: true,
 	})
@@ -422,7 +445,7 @@ func TestEndedRunClearsTheBusyProbe(t *testing.T) {
 func TestProbeInFlightAtRunEndIsDiscarded(t *testing.T) {
 	m := newPendingUI(t)
 	m.sendMessage("first")
-	m.appendSessionMessage(userMessage("u1", "s1", "first"))
+	created(m, userMessage("u1", "s1", "first"))
 	inFlight := m.busyFetchGen
 	runComplete(m, "s1", false)
 	m.applyBusyState(busyStateMsg{
@@ -433,4 +456,146 @@ func TestProbeInFlightAtRunEndIsDiscarded(t *testing.T) {
 
 	require.NotNil(t, m.chat.MessageItem(chat.PendingUserID), "the prompt is echoed")
 	require.True(t, hasPending(m), "the spinner shows straight away")
+}
+
+// Once the assistant message stops spinning, the turn's elapsed time stays
+// at the bottom of the transcript until the turn ends, hidden only while a
+// spinning assistant message shows it itself.
+func TestTurnTimerOutlivesTheSpinner(t *testing.T) {
+	m := newPendingUI(t)
+	m.sendMessage("first")
+	created(m, userMessage("u1", "s1", "first"))
+	created(m, message.Message{ID: "a1", Role: message.Assistant, SessionID: "s1"})
+	require.False(t, hasTurnTimer(m), "the spinning message shows the time")
+
+	updated(m, message.Message{
+		ID: "a1", Role: message.Assistant, SessionID: "s1",
+		Parts: []message.ContentPart{message.ToolCall{ID: "tc1", Name: "bash", Input: "{}", Finished: true}},
+	})
+	require.True(t, hasTurnTimer(m))
+	ids := transcriptIDs(m)
+	require.Equal(t, chat.PendingAssistantID, ids[len(ids)-1], "the timer sits under the tool call")
+
+	m.endPendingTurn("s1")
+	require.False(t, hasTurnTimer(m), "the timer goes with the turn")
+}
+
+func TestTurnTimerReadsRunning(t *testing.T) {
+	m := newPendingUI(t)
+	m.sendMessage("first")
+	created(m, message.Message{
+		ID: "a1", Role: message.Assistant, SessionID: "s1",
+		Parts: []message.ContentPart{message.ToolCall{ID: "tc1", Name: "bash", Input: "{}", Finished: true}},
+	})
+	require.True(t, hasTurnTimer(m))
+	out := ansi.Strip(m.chat.MessageItem(chat.PendingAssistantID).Render(80))
+	require.Regexp(t, `Running \d+s`, out)
+}
+
+// While tool calls are still being written, the turn time rides on the last
+// one's spinner instead of a separate line; once the arguments finish it
+// moves back to the "Running" line under the calls.
+func TestTurnTimerRidesOnTheLastStreamingToolCall(t *testing.T) {
+	m := newPendingUI(t)
+	m.sendMessage("first")
+	created(m, userMessage("u1", "s1", "first"))
+	created(m, message.Message{ID: "a1", Role: message.Assistant, SessionID: "s1"})
+
+	streaming := message.Message{
+		ID: "a1", Role: message.Assistant, SessionID: "s1",
+		Parts: []message.ContentPart{
+			message.ToolCall{ID: "tc1", Name: "bash"},
+			message.ToolCall{ID: "tc2", Name: "bash"},
+		},
+	}
+	updated(m, streaming)
+	require.False(t, hasTurnTimer(m), "the streaming call carries the time")
+	require.Equal(t, "tc2", m.pending.carrier.ID(), "only the last streaming call shows it")
+
+	streaming.Parts = []message.ContentPart{
+		message.ToolCall{ID: "tc1", Name: "bash", Input: "{}", Finished: true},
+		message.ToolCall{ID: "tc2", Name: "bash", Input: "{}", Finished: true},
+	}
+	updated(m, streaming)
+	require.True(t, hasTurnTimer(m), "finished arguments hand the time back to the Running line")
+	require.Nil(t, m.pending.carrier)
+}
+
+// The bottom spinner means live tokens are streaming: it spins while answer
+// text arrives and settles to the static "Running" line once a tool runs.
+func TestTurnTimerSpinsWhileTextStreams(t *testing.T) {
+	m := newPendingUI(t)
+	m.sendMessage("first")
+	created(m, userMessage("u1", "s1", "first"))
+	created(m, message.Message{ID: "a1", Role: message.Assistant, SessionID: "s1"})
+
+	text := message.Message{
+		ID: "a1", Role: message.Assistant, SessionID: "s1",
+		Parts: []message.ContentPart{message.TextContent{Text: "partial answer"}},
+	}
+	updated(m, text)
+	require.True(t, hasPending(m), "streaming text keeps the bottom spinner spinning")
+
+	text.Parts = append(text.Parts, message.ToolCall{ID: "tc1", Name: "bash", Input: "{}", Finished: true})
+	updated(m, text)
+	require.True(t, hasTurnTimer(m), "once a tool runs it settles to the Running line")
+}
+
+// A working subagent already shows a spinner under its tree, so it carries
+// the turn time itself instead of a second spinner or Running line below it.
+func TestTurnTimerRidesOnARunningSubagent(t *testing.T) {
+	m := newPendingUI(t)
+	m.sendMessage("first")
+	created(m, userMessage("u1", "s1", "first"))
+	created(m, message.Message{ID: "a1", Role: message.Assistant, SessionID: "s1"})
+
+	updated(m, message.Message{
+		ID: "a1", Role: message.Assistant, SessionID: "s1",
+		Parts: []message.ContentPart{message.ToolCall{
+			ID: "ag1", Name: "agentic_fetch", Input: `{"prompt":"look it up"}`, Finished: true,
+		}},
+	})
+	require.False(t, hasTurnTimer(m), "the subagent's spinner shows the time")
+	require.False(t, hasPending(m), "and no second spinner sits under it")
+	require.Equal(t, "ag1", m.pending.carrier.ID())
+
+	created(m, message.Message{
+		ID: "r1", Role: message.Tool, SessionID: "s1",
+		Parts: []message.ContentPart{message.ToolResult{ToolCallID: "ag1", Name: "agentic_fetch", Content: "done"}},
+	})
+	require.True(t, hasTurnTimer(m), "once it finishes the Running line takes over")
+	require.Nil(t, m.pending.carrier)
+}
+
+// A turn already running when the session is opened, or started by another
+// client, gets the same turn timer, counted from its prompt, and an idle
+// probe retires it if no RunComplete arrives.
+func TestRunningTurnFromElsewhereIsTimed(t *testing.T) {
+	m := newPendingUI(t)
+	m.lastUserMessageTime = time.Now().Add(-90 * time.Second).Unix()
+	created(m, userMessage("u1", "s1", "from another client"))
+	m.lastUserMessageTime = time.Now().Add(-90 * time.Second).Unix()
+	created(m, message.Message{
+		ID: "a1", Role: message.Assistant, SessionID: "s1",
+		Parts: []message.ContentPart{message.ToolCall{ID: "tc1", Name: "bash", Input: "{}", Finished: true}},
+	})
+	require.False(t, hasTurnTimer(m), "nothing to time until the probe says the session is busy")
+
+	m.applyBusyState(busyStateMsg{gen: m.busyFetchGen, ready: true, forSession: "s1", sessionBusy: true})
+	m.Update(neutralMsg{})
+	require.True(t, hasTurnTimer(m), "the adopted turn shows the Running line")
+	require.Contains(t, common.Elapsed("s1"), "1m", "it counts from the prompt, not from when it was seen")
+
+	m.applyBusyState(busyStateMsg{gen: m.busyFetchGen, ready: true, forSession: "s1", sessionBusy: false})
+	m.Update(neutralMsg{})
+	require.False(t, hasTurnTimer(m), "an idle probe retires a turn this client only adopted")
+}
+
+// A turn this client sent is not touched by an idle probe that lags behind it.
+func TestIdleProbeLeavesASentTurn(t *testing.T) {
+	m := newPendingUI(t)
+	m.sendMessage("first")
+	m.applyBusyState(busyStateMsg{gen: m.busyFetchGen, ready: true, forSession: "s1", sessionBusy: false})
+	m.Update(neutralMsg{})
+	require.True(t, hasPending(m))
 }

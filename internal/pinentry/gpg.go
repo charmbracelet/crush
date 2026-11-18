@@ -151,7 +151,7 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) error {
 	// surface an error.
 	var lastErr error
 	for attempt := 1; attempt <= maxPassphraseAttempts; attempt++ {
-		secret, perr := r.collectCredential(ctx, st, attempt, lastErr)
+		secret, perr := r.collectCredential(ctx, st, attempt, lastErr, opts.Args)
 		if perr != nil {
 			if errors.Is(perr, ErrNoPrompter) {
 				return aio.plain(ctx, bin, opts)
@@ -180,7 +180,7 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) error {
 
 // collectCredential returns a credential for the current attempt,
 // preferring the optional cache on the first attempt.
-func (r *Runner) collectCredential(ctx context.Context, st *status, attempt int, lastErr error) (string, error) {
+func (r *Runner) collectCredential(ctx context.Context, st *status, attempt int, lastErr error, args []string) (string, error) {
 	if attempt == 1 {
 		if key := st.cacheKey(); key != "" {
 			if secret, ok := r.cache.get(key); ok {
@@ -192,6 +192,11 @@ func (r *Runner) collectCredential(ctx context.Context, st *status, attempt int,
 		Key:        st.key(),
 		Kind:       classifyKind(st),
 		RetryCount: attempt - 1,
+	}
+	// Security keys report no key ID in the status output, so fall back
+	// to the key the caller asked to sign with.
+	if req.Key.KeyID == "" && req.Key.Fingerprint == "" {
+		req.Key.KeyID = localUser(args)
 	}
 	req.Prompt = promptMessage(req.Kind)
 	if lastErr != nil {
@@ -232,8 +237,45 @@ func (r *Runner) exec(ctx context.Context, bin string, opts RunOptions, aio *att
 	// The loopback flags go first: gpg stops parsing options at the
 	// first non-option argument, so flags after a file operand would be
 	// taken as more file names.
-	args := append([]string{"--batch", "--pinentry-mode", "loopback", "--passphrase-fd", passphraseFD()}, opts.Args[1:]...)
-	return aio.run(ctx, bin, args, opts, st, pr)
+	args := []string{"--batch", "--pinentry-mode", "loopback", "--passphrase-fd", passphraseFD()}
+	files := []*os.File{pr}
+
+	// Status lines name the key being unlocked. Callers like git ask for
+	// them on stderr, which st already records; for everyone else, ask
+	// gpg for them on a private pipe so the caller's stderr stays clean.
+	if !hasStatusFD(opts.Args) {
+		sr, sw, err := os.Pipe()
+		if err != nil {
+			return err
+		}
+		defer sr.Close()
+		done := make(chan struct{})
+		go func() {
+			_, _ = io.Copy(statusWriter{st: st}, sr)
+			close(done)
+		}()
+		defer func() {
+			_ = sw.Close()
+			<-done
+		}()
+		args = append(args, "--status-fd", "4")
+		files = append(files, sw)
+	}
+
+	args = append(args, opts.Args[1:]...)
+	return aio.run(ctx, bin, args, opts, st, files)
+}
+
+// hasStatusFD reports whether a gpg argv already routes status lines
+// somewhere; gpg honors only one status destination.
+func hasStatusFD(args []string) bool {
+	for _, a := range args {
+		if a == "--status-fd" || a == "--status-file" ||
+			strings.HasPrefix(a, "--status-fd=") || strings.HasPrefix(a, "--status-file=") {
+			return true
+		}
+	}
+	return false
 }
 
 // attemptIO is the stdio shared by the gpg attempts of one [Runner.Run]:
@@ -245,9 +287,9 @@ type attemptIO struct {
 }
 
 // run executes one gpg attempt with the given arguments (argv[0]
-// excluded), replacing the previous attempt's output. A non-nil
-// passphrase file is passed to gpg as fd 3.
-func (a *attemptIO) run(ctx context.Context, bin string, args []string, opts RunOptions, st *status, passphrase *os.File) error {
+// excluded), replacing the previous attempt's output. Extra files are
+// passed to gpg starting at fd 3.
+func (a *attemptIO) run(ctx context.Context, bin string, args []string, opts RunOptions, st *status, files []*os.File) error {
 	if _, err := a.stdin.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
@@ -260,9 +302,7 @@ func (a *attemptIO) run(ctx context.Context, bin string, args []string, opts Run
 	cmd.Stdin = a.stdin
 	cmd.Stdout = &a.stdout
 	cmd.Stderr = statusWriter{inner: &a.stderr, st: st}
-	if passphrase != nil {
-		cmd.ExtraFiles = []*os.File{passphrase}
-	}
+	cmd.ExtraFiles = files
 	prepareProcess(cmd)
 
 	if err := cmd.Start(); err != nil {
@@ -379,8 +419,14 @@ func (s *status) key() Key {
 			if k.KeyID == "" {
 				k.KeyID = fs[2]
 			}
-		case "KEY_CONSIDERED":
-			k.Fingerprint = fs[2]
+		case "ENC_TO":
+			if k.KeyID == "" {
+				k.KeyID = fs[2]
+			}
+		case "KEY_CONSIDERED", "DECRYPTION_KEY":
+			if k.Fingerprint == "" || fs[1] == "KEY_CONSIDERED" {
+				k.Fingerprint = fs[2]
+			}
 		case "CARDCTRL":
 			// CARDCTRL <what> [<serialno>]: the serial only rides
 			// along for the values that concern a specific card.
@@ -390,6 +436,28 @@ func (s *status) key() Key {
 		}
 	}
 	return k
+}
+
+// localUser returns the key named by -u/--local-user in a gpg argv
+// (including bundled short flags such as -bsau KEYID), or "".
+func localUser(args []string) string {
+	for i, arg := range args {
+		switch {
+		case arg == "--local-user" || arg == "--default-key":
+			if i+1 < len(args) {
+				return args[i+1]
+			}
+		case strings.HasPrefix(arg, "--local-user="):
+			return strings.TrimPrefix(arg, "--local-user=")
+		case strings.HasPrefix(arg, "--default-key="):
+			return strings.TrimPrefix(arg, "--default-key=")
+		case strings.HasPrefix(arg, "-") && !strings.HasPrefix(arg, "--") && strings.HasSuffix(arg, "u"):
+			if i+1 < len(args) {
+				return args[i+1]
+			}
+		}
+	}
+	return ""
 }
 
 // credentialRequired reports whether gpg rejected the attempt because of

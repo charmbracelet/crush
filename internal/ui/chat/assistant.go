@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -14,6 +15,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -40,6 +42,17 @@ const (
 	refusalTagLabel = "REFUSED"
 	refusalTitle    = "Model refused to continue"
 	refusalDetails  = "The provider's safety classifier stopped this response before any usable content was produced. Rephrase the request, start a fresh session, or try a different model."
+)
+
+// Default copy for a truncated-response banner. As with refusals, the
+// agent persists only the FinishReasonMaxTokens reason and the TUI owns
+// the text, so a response that stops mid-sentence says why instead of
+// looking complete. The hint matters: raising max tokens is the one
+// thing the user can do about it.
+const (
+	truncatedTagLabel = "TRUNCATED"
+	truncatedTitle    = "Response cut off at the token limit"
+	truncatedDetails  = "The model reached its output token limit and stopped mid-response. Raise the model's max tokens to get the full answer, or retry with a narrower request."
 )
 
 // maxExpandedThinkingTailLines is the F5 tail-window cap. When the user
@@ -244,7 +257,24 @@ func NewAssistantMessageItem(sty *styles.Styles, message *message.Message) Messa
 		sty:                      sty,
 	}
 
-	a.anim = newTurnAnim(sty, a.ID(), message.SessionID)
+	// Summary messages are generated outside a regular turn, so the turn
+	// timer is not active while they stream; give them their own elapsed
+	// timer anchored at item creation instead.
+	if message.IsSummaryMessage {
+		startedAt := time.Now()
+		a.anim = anim.New(anim.Settings{
+			ID:          a.ID(),
+			Size:        15,
+			GradColorA:  sty.WorkingGradFromColor,
+			GradColorB:  sty.WorkingGradToColor,
+			LabelColor:  sty.WorkingLabelColor,
+			CycleColors: true,
+			Suffix:      func() string { return common.FormatDuration(common.ElapsedSince(startedAt, time.Now())) },
+			SuffixColor: sty.WorkingTimerColor,
+		})
+	} else {
+		a.anim = newTurnAnim(sty, a.ID(), message.SessionID)
+	}
 	return a
 }
 
@@ -432,7 +462,10 @@ func (a *AssistantMessageItem) renderMessageContent(width int) (string, int) {
 				break
 			}
 			banner = a.sty.Messages.AssistantCanceled.Render("Canceled")
-		case a.message.IsErrorLike():
+		case a.message.IsErrorLike(), a.message.IsTruncated():
+			// ERROR, REFUSED and TRUNCATED all render through the same
+			// banner section: a tag, a one-line title, and the details
+			// the finish part carries (or the TUI's defaults).
 			banner = a.cachedError(width)
 		}
 		if banner != "" {
@@ -544,10 +577,10 @@ func (a *AssistantMessageItem) planStreaming() bool {
 }
 
 // errorKey returns the (srcHash, extra) cache key components for the
-// error / refusal section. Returns (0, 0) when no error-like finish
-// is present so the cache stays a no-op for normal messages.
+// error / refusal / truncation section. Returns (0, 0) when no banner
+// finish is present so the cache stays a no-op for normal messages.
 func (a *AssistantMessageItem) errorKey() (uint64, uint64) {
-	if !a.message.IsFinished() || !a.message.IsErrorLike() {
+	if !a.message.IsFinished() || (!a.message.IsErrorLike() && !a.message.IsTruncated()) {
 		return 0, 0
 	}
 	finishPart := a.message.FinishPart()
@@ -647,14 +680,107 @@ func renderPlanBox(style lipgloss.Style, content string, width int, closed bool)
 		style = style.BorderBottom(false)
 	}
 	lines := strings.Split(strings.TrimSpace(content), "\n")
+	needsCellLayout := false
 	for i, line := range lines {
-		lines[i] = ansi.Truncate(line, innerWidth, "")
+		graphemeWidth := ansi.StringWidth(line)
+		needsCellLayout = needsCellLayout || graphemeWidth != ansi.WcWidth.StringWidth(line)
+		if graphemeWidth > innerWidth {
+			// Keep the existing clipping of intentionally overlong lines.
+			lines[i] = ansi.WcWidth.Truncate(line, innerWidth, "")
+		}
 	}
-	// In lipgloss v2 Width is the total box width: border and padding live
-	// inside it, so the content area ends up Width minus the frame. Glamour
-	// already wrapped at innerWidth (width minus the frame), so size the box
-	// to the full width or every line gets re-wrapped narrower.
-	return style.Width(max(1, width)).Render(strings.Join(lines, "\n"))
+	content = strings.Join(lines, "\n")
+	if !needsCellLayout {
+		// In lipgloss v2 Width is the total box width: border and padding live
+		// inside it, so the content area ends up Width minus the frame. Glamour
+		// already wrapped at innerWidth (width minus the frame), so size the box
+		// to the full width or every line gets re-wrapped narrower.
+		return style.Width(max(1, width)).Render(content)
+	}
+
+	// Lay the text out in cells with the UI's widths, re-wrap the lines that
+	// no longer fit, and splice the rows into an empty frame so lipgloss
+	// never measures them by grapheme width.
+	canvasWidth := 1
+	for _, line := range lines {
+		canvasWidth = max(canvasWidth, ansi.WcWidth.StringWidth(line))
+	}
+	canvas := uv.NewScreenBuffer(canvasWidth, len(lines))
+	uv.NewStyledString(content).Draw(canvas, canvas.Bounds())
+	var rows []uv.Line
+	for _, line := range canvas.Lines {
+		rows = append(rows, wrapPlanLine(line, innerWidth)...)
+	}
+	frame := style.Width(max(1, width)).Render(strings.Repeat("\n", len(rows)-1))
+	frameLines := strings.Split(frame, "\n")
+	frameWidth := lipgloss.Width(frame)
+	left := style.GetBorderLeftSize() + style.GetPaddingLeft()
+	top := style.GetBorderTopSize() + style.GetPaddingTop()
+	for i, row := range rows {
+		rowWidth := 0
+		for j := range row {
+			rowWidth += row[j].Width
+			if row[j].Width > 0 && row[j].Style.Fg == nil {
+				row[j].Style.Fg = style.GetForeground()
+			}
+		}
+		frameRow := frameLines[top+i]
+		frameLines[top+i] = ansi.Cut(frameRow, 0, left) + row.Render() +
+			strings.Repeat(" ", innerWidth-rowWidth) +
+			ansi.Cut(frameRow, left+innerWidth, frameWidth)
+	}
+	return strings.Join(frameLines, "\n")
+}
+
+// wrapPlanLine fits a line of cells to width the way glamour wraps: it
+// breaks at the last space that fits, and starts each added row with the
+// line's indent (leading spaces and blockquote bars), so list items and
+// quotes stay aligned. Padding past the edge is dropped, and so is a
+// cluster too wide for any row, without losing the text after it.
+func wrapPlanLine(line uv.Line, width int) []uv.Line {
+	lineWidth := 0
+	for _, c := range line {
+		lineWidth += c.Width
+	}
+	for lineWidth > width && len(line) > 0 && line[len(line)-1].Content == " " {
+		line = line[:len(line)-1]
+		lineWidth--
+	}
+	if lineWidth <= width {
+		return []uv.Line{line}
+	}
+
+	indent := 0
+	for indent < len(line) && (line[indent].Content == " " || line[indent].Content == "│") {
+		indent++
+	}
+	var rows []uv.Line
+	row := append(uv.Line(nil), line[:indent]...)
+	rowWidth := indent
+	// The last space in the row, and the row's width up to it.
+	space, spaceWidth := -1, 0
+	for _, c := range line[indent:] {
+		if c.Width > width-indent {
+			continue
+		}
+		for rowWidth+c.Width > width {
+			next := append(uv.Line(nil), line[:indent]...)
+			nextWidth := indent
+			if space >= 0 {
+				next = append(next, row[space+1:]...)
+				nextWidth += rowWidth - spaceWidth - 1
+				row = row[:space]
+			}
+			rows = append(rows, row)
+			row, rowWidth, space = next, nextWidth, -1
+		}
+		if c.Content == " " {
+			space, spaceWidth = len(row), rowWidth
+		}
+		row = append(row, c)
+		rowWidth += c.Width
+	}
+	return append(rows, row)
 }
 
 // planBoxLayout returns a style and content width whose combined horizontal
@@ -774,16 +900,21 @@ func (a *AssistantMessageItem) renderSpinning() string {
 	return a.anim.Render()
 }
 
-// renderError renders an error or provider-refusal banner.
+// renderError renders an error, provider-refusal, or truncation banner.
 func (a *AssistantMessageItem) renderError(width int) string {
 	finishPart := a.message.FinishPart()
 	tagLabel := "ERROR"
 	titleText := finishPart.Message
 	detailsText := finishPart.Details
-	if finishPart.Reason == message.FinishReasonContentFilter {
+	switch finishPart.Reason {
+	case message.FinishReasonContentFilter:
 		tagLabel = refusalTagLabel
 		titleText = cmp.Or(titleText, refusalTitle)
 		detailsText = cmp.Or(detailsText, refusalDetails)
+	case message.FinishReasonMaxTokens:
+		tagLabel = truncatedTagLabel
+		titleText = cmp.Or(titleText, truncatedTitle)
+		detailsText = cmp.Or(detailsText, truncatedDetails)
 	}
 	errTag := a.sty.Messages.ErrorTag.Render(tagLabel)
 	truncated := ansi.Truncate(titleText, width-2-lipgloss.Width(errTag), "...")
@@ -825,19 +956,9 @@ func (a *AssistantMessageItem) SetMessage(msg *message.Message) {
 	// update.
 }
 
-// Finished implements list.Item. The assistant message is freezable
-// once the message reports IsFinished() and is no longer spinning
-// (no animation frame remains pending). Streaming tail animation is
-// caught by isSpinning, so freezing only kicks in once the turn is
-// fully terminal. The list cache invalidates the entry on the next
-// version bump if anything (focus, highlight, expansion) changes.
-func (a *AssistantMessageItem) Finished() bool {
-	return a.message.IsFinished() && !a.isSpinning()
-}
-
 // clearCache drops every cached render for this item, including the
 // per-section caches. Shadows the embedded cachedMessageItem.clearCache
-// so ClearItemCaches (style change) wipes the section caches too.
+// so ClearItemCache (style change) wipes the section caches too.
 // F8: also drop the streaming-markdown stable-prefix cache because
 // the cached glamour render embeds the OLD style's ANSI sequences
 // and is no longer visually consistent with the new style.

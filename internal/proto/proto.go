@@ -17,11 +17,10 @@ type WorkspacePermissionMode string
 const (
 	// WorkspacePermissionModeNormal prompts for all non-safe commands.
 	WorkspacePermissionModeNormal WorkspacePermissionMode = "normal"
-	// WorkspacePermissionModeYolo auto-approves every request, including
-	// dangerous commands, while keeping the exec-time block list armed.
+	// WorkspacePermissionModeYolo never prompts: it approves ordinary
+	// requests and blocks dangerous commands without asking.
 	WorkspacePermissionModeYolo WorkspacePermissionMode = "yolo"
-	// WorkspacePermissionModeSysadmin auto-approves every request and drops
-	// the exec-time block list as well.
+	// WorkspacePermissionModeSysadmin never prompts and blocks nothing.
 	WorkspacePermissionModeSysadmin WorkspacePermissionMode = "sysadmin"
 )
 
@@ -292,6 +291,12 @@ type QuestionResponse struct {
 	FillInText  string            `json:"fill_in_text,omitempty"`
 	Yes         *bool             `json:"yes,omitempty"`
 	Notes       map[string]string `json:"notes,omitempty"`
+}
+
+// QuestionCancel is the wire format for cancelling a batch question,
+// sent from client to server via REST.
+type QuestionCancel struct {
+	BatchRequestID string `json:"batch_request_id"`
 }
 
 // QuestionAnswerResponse is the server's response to a

@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"charm.land/glamour/v2/ansi"
+	"charm.land/tone"
 	"github.com/alecthomas/chroma/v2"
-	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/stretchr/testify/require"
 )
 
@@ -36,7 +36,7 @@ func TestHostThemeStyles_EmptyThemeIsCharmtone(t *testing.T) {
 	require.Equal(t, "#201f26", *hex(s.Background))
 	require.Equal(t, *hex(builtin.WorkingGradFromColor), *hex(s.WorkingGradFromColor))
 	// The pristine built-in keeps its hardcoded overrides.
-	require.Equal(t, *hex(charmtone.Bengal), *s.Markdown.CodeBlock.Chroma.CommentPreproc.Color)
+	require.Equal(t, *hex(tone.Bengal), *s.Markdown.CodeBlock.Chroma.CommentPreproc.Color)
 	require.Equal(t, builtin.ChromaTheme(), s.ChromaTheme())
 }
 
@@ -68,17 +68,17 @@ func TestHostThemeStyles_Palette(t *testing.T) {
 
 	require.Equal(t, "#112233", *hex(s.WorkingGradFromColor))
 	require.Equal(t, "#112233", *hex(s.TextSelection.GetBackground()))
-	require.Equal(t, *hex(charmtone.Butter), *hex(s.TextSelection.GetForeground()))
+	require.Equal(t, *hex(tone.Butter), *hex(s.TextSelection.GetForeground()))
 	require.Equal(t, "#ffffff", *hex(s.Background))
 	// Colors left out come from the base.
-	require.Equal(t, *hex(charmtone.Dolly), *hex(s.WorkingGradToColor))
+	require.Equal(t, *hex(tone.Dolly), *hex(s.WorkingGradToColor))
 
 	// Diff backgrounds are re-derived from the host's bg_base.
 	builtin := CharmtonePantera()
 	require.NotEqual(t, *hex(builtin.Diff.InsertLine.Code.GetBackground()), *hex(s.Diff.InsertLine.Code.GetBackground()))
 
 	// A modified palette is token driven: no hardcoded built-in overrides.
-	require.NotEqual(t, *hex(charmtone.Bengal), *s.Markdown.CodeBlock.Chroma.CommentPreproc.Color)
+	require.NotEqual(t, *hex(tone.Bengal), *s.Markdown.CodeBlock.Chroma.CommentPreproc.Color)
 }
 
 func TestHostThemeStyles_Syntax(t *testing.T) {
@@ -96,7 +96,7 @@ func TestHostThemeStyles_Syntax(t *testing.T) {
 
 	c := s.Markdown.CodeBlock.Chroma
 	require.Equal(t, "#123456", *c.Keyword.Color)
-	require.Equal(t, *hex(charmtone.Charple), *c.Comment.Color)
+	require.Equal(t, *hex(tone.Charple), *c.Comment.Color)
 	require.Equal(t, "#aabbcc", *c.NameFunction.Color)
 	require.Equal(t, "#ffaf00", *c.LiteralNumber.Color) // xterm 214.
 	// Only the color changes; the token's attributes stay.
@@ -112,7 +112,7 @@ func TestHostThemeStyles_Syntax(t *testing.T) {
 
 	// Tokens the host leaves out keep the base's colors, built-in
 	// overrides included, since the palette is untouched.
-	require.Equal(t, *hex(charmtone.Bengal), *c.CommentPreproc.Color)
+	require.Equal(t, *hex(tone.Bengal), *c.CommentPreproc.Color)
 }
 
 func TestHostThemeStyles_RejectsInvalidColors(t *testing.T) {

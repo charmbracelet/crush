@@ -199,6 +199,14 @@ func (c *Client) RetireClient(ctx context.Context) error {
 	return nil
 }
 
+// CloseIdleConnections closes the kept-alive connections the client is not
+// using, so its next request dials the server address afresh. A caller
+// that has replaced the server at that address needs this: a pooled
+// connection still leads to the old process.
+func (c *Client) CloseIdleConnections() {
+	c.h.CloseIdleConnections()
+}
+
 // Dial opens a connection to the server using the same scheme-aware
 // logic the client uses for its HTTP transport. Exposed so callers can
 // reuse the dialer when they need to construct sibling HTTP transports
@@ -207,6 +215,11 @@ func (c *Client) Dial(ctx context.Context, network, address string) (net.Conn, e
 	return c.dialer(ctx, network, address)
 }
 
+// dialer connects to the server. Unix sockets and named pipes live at
+// predictable addresses that another local user can claim before our
+// server does, and requests carry secrets (creating a workspace sends the
+// whole environment), so a server that does not run as the current user
+// is refused before anything is sent. TCP offers no such identity.
 func (c *Client) dialer(ctx context.Context, network, address string) (net.Conn, error) {
 	d := net.Dialer{
 		Timeout:   30 * time.Second,
@@ -218,7 +231,15 @@ func (c *Client) dialer(ctx context.Context, network, address string) (net.Conn,
 		defer cancel()
 		return dialPipeContext(ctx, c.addr)
 	case "unix":
-		return d.DialContext(ctx, "unix", c.addr)
+		conn, err := d.DialContext(ctx, "unix", c.addr)
+		if err != nil {
+			return nil, err
+		}
+		if err := verifyUnixPeer(conn, c.addr); err != nil {
+			conn.Close()
+			return nil, err
+		}
+		return conn, nil
 	default:
 		return d.DialContext(ctx, network, address)
 	}

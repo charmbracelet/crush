@@ -25,7 +25,7 @@ import (
 // the provider must construct without network I/O; the cancel-on-entry
 // path this helper is built to exercise returns before any model call,
 // so no request is ever issued. The coder agent's allowed-tools list is
-// cleared to keep tool construction cheap and free of sub-agent wiring.
+// cleared to keep tool construction cheap and free of subagent wiring.
 //
 // The optional coordinator dependencies (history, filetracker, LSP,
 // notify, runComplete, skills) are nil: run guards the publisher fields
@@ -58,7 +58,7 @@ func NewCoordinator(
 	cfg.OverridePreferredModel(config.SelectedModelTypeSmall, selected)
 	cfg.SetupAgents()
 
-	// Keep buildTools light: no sub-agent or agentic-fetch construction.
+	// Keep buildTools light: no subagent or agentic-fetch construction.
 	coderCfg := cfg.Config().Agents[config.AgentCoder]
 	coderCfg.AllowedTools = nil
 	cfg.Config().Agents[config.AgentCoder] = coderCfg

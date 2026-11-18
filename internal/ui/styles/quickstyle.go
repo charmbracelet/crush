@@ -226,6 +226,13 @@ func wcagLuminance(c color.Color) float64 {
 func quickStyle(o quickStyleOpts) Styles {
 	o.deriveDiffColors()
 
+	// destructive_subtle is optional: only Charmtone names a softer hue, and
+	// a theme that leaves it unset should still get a banner body instead of
+	// a nil fill that renders as an empty line.
+	if o.destructiveSubtle == nil {
+		o.destructiveSubtle = o.destructive
+	}
+
 	var (
 		base   = lipgloss.NewStyle().Foreground(o.fgBase)
 		muted  = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
@@ -234,6 +241,11 @@ func quickStyle(o quickStyleOpts) Styles {
 	)
 
 	s.Background = o.bgBase
+
+	// The terminal's background is restored before the banner is printed.
+	// Keep text on its default foreground so it stays readable after exit.
+	s.ExitBanner.Text = lipgloss.NewStyle()
+	s.ExitBanner.Label = lipgloss.NewStyle().Bold(true)
 
 	// Populate color fields
 	s.WorkingGradFromColor = o.primary
@@ -815,6 +827,7 @@ func quickStyle(o quickStyleOpts) Styles {
 
 	s.Tool.ParamMain = subtle
 	s.Tool.ParamKey = subtle
+	s.Tool.Description = base
 
 	// Content rendering - prepared styles that accept width parameter
 	s.Tool.ContentLine = muted.Background(o.bgLeastVisible)
@@ -855,6 +868,9 @@ func quickStyle(o quickStyleOpts) Styles {
 	// Agent task styles
 	s.Tool.AgentTaskTag = base.Bold(true).Padding(0, 1).MarginLeft(2).Background(o.infoMoreSubtle).Foreground(o.onPrimary)
 	s.Tool.AgentPrompt = muted
+	s.Tool.AgentName = base.Foreground(o.infoMostSubtle)
+	s.Tool.AgentLabel = base.Foreground(o.fgMostSubtle)
+	s.Tool.AgentMessage = muted
 
 	// Agentic fetch styles
 	s.Tool.AgenticFetchPromptTag = base.Bold(true).Padding(0, 1).MarginLeft(2).Background(o.success).Foreground(badgeInk(o.success, o.separator, o.fgBase))
@@ -1009,6 +1025,9 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Resource.ErrorIcon = s.Resource.OfflineIcon.Foreground(o.destructive)
 	s.Resource.OnlineIcon = s.Resource.OfflineIcon.Foreground(o.successMostSubtle)
 	s.Resource.OnlineText = lipgloss.NewStyle().Foreground(o.successMostSubtle)
+	// Same green as OnlineIcon but with no preset glyph, for callers that
+	// supply their own (e.g. an animated spinner).
+	s.Resource.WorkingIcon = lipgloss.NewStyle().Foreground(o.successMostSubtle)
 	s.Resource.NeedsAuthIcon = s.Resource.OfflineIcon.Foreground(o.attention)
 	s.Resource.DisabledIcon = lipgloss.NewStyle().Foreground(o.fgMoreSubtle).SetString("●")
 	s.Resource.AdditionalText = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
@@ -1156,6 +1175,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	// Dialog.Quit
 	s.Dialog.Quit.Content = lipgloss.NewStyle().Foreground(o.fgBase)
 	s.Dialog.Quit.Hint = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
+	s.Dialog.Quit.Warning = lipgloss.NewStyle().Foreground(o.destructive)
 	s.Dialog.Quit.Frame = lipgloss.NewStyle().BorderForeground(o.primary).Border(lipgloss.RoundedBorder()).Padding(1, 2)
 	s.Dialog.View = base.Border(lipgloss.RoundedBorder()).BorderForeground(o.primary)
 	s.Dialog.PrimaryText = base.Padding(0, 1).Foreground(o.primary)
@@ -1171,10 +1191,10 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Dialog.NormalItem = base.Padding(0, 1).Foreground(o.fgBase)
 	s.Dialog.SelectedItem = base.Padding(0, 1).Background(o.primary).Foreground(o.onPrimary)
 	s.Dialog.InputPrompt = base.Margin(1, 1)
-	s.Dialog.PromptMessage = base.Foreground(o.fgSubtle).PaddingLeft(1)
-	s.Dialog.PromptKey = base.PaddingLeft(1)
-	s.Dialog.SSHMessage = base.PaddingLeft(1)
-	s.Dialog.SSHKey = base.PaddingLeft(1)
+	s.Dialog.PromptMessage = base.Foreground(o.fgSubtle).Padding(0, 1)
+	s.Dialog.PromptKey = base.Foreground(o.fgSubtle).Padding(0, 1)
+	s.Dialog.SSHMessage = base.Foreground(o.fgSubtle).Padding(0, 1)
+	s.Dialog.SSHKey = base.Foreground(o.fgSubtle).Padding(0, 1)
 
 	s.Dialog.List = base.Margin(0, 0, 1, 0)
 	s.Dialog.ContentPanel = base.Background(o.bgLessVisible).Foreground(o.fgBase).Padding(1, 2)

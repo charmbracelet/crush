@@ -2,6 +2,7 @@ package permission
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -696,15 +697,14 @@ func TestPermissionService_ResolveIdempotency(t *testing.T) {
 	})
 }
 
-func TestActiveRequest(t *testing.T) {
+func TestActiveRequests(t *testing.T) {
 	t.Parallel()
 
 	t.Run("reports the pending request only while resolvable", func(t *testing.T) {
 		t.Parallel()
 		service := NewPermissionService("/tmp", nil, nil)
 
-		_, ok := service.ActiveRequest()
-		assert.False(t, ok, "no request pending yet")
+		assert.Empty(t, service.ActiveRequests(), "no request pending yet")
 
 		events := service.Subscribe(t.Context())
 		done := make(chan bool, 1)
@@ -721,16 +721,15 @@ func TestActiveRequest(t *testing.T) {
 		}()
 
 		event := <-events
-		active, ok := service.ActiveRequest()
-		require.True(t, ok, "request must be active while awaiting a decision")
-		assert.Equal(t, event.Payload.ID, active.ID)
-		assert.Equal(t, "s1", active.SessionID)
+		active := service.ActiveRequests()
+		require.Len(t, active, 1, "request must be active while awaiting a decision")
+		assert.Equal(t, event.Payload.ID, active[0].ID)
+		assert.Equal(t, "s1", active[0].SessionID)
 
-		assert.True(t, service.Grant(active))
+		assert.True(t, service.Grant(active[0]))
 		assert.True(t, <-done)
 
-		_, ok = service.ActiveRequest()
-		assert.False(t, ok, "resolved request must no longer be active")
+		assert.Empty(t, service.ActiveRequests(), "resolved request must no longer be active")
 	})
 
 	t.Run("does not report a request whose waiter was cancelled", func(t *testing.T) {
@@ -753,15 +752,59 @@ func TestActiveRequest(t *testing.T) {
 		}()
 
 		<-events
-		_, ok := service.ActiveRequest()
-		require.True(t, ok, "request must be active before cancellation")
+		require.Len(t, service.ActiveRequests(), 1, "request must be active before cancellation")
 
 		cancel()
 		<-done
 
-		_, ok = service.ActiveRequest()
-		assert.False(t, ok, "cancelled request cannot be resolved and must not be reported")
+		assert.Empty(t, service.ActiveRequests(), "cancelled request cannot be resolved and must not be reported")
 	})
+}
+
+// TestRequestScopes guards that a pending prompt only holds back later
+// requests in its own session scope, not every other session's.
+func TestRequestScopes(t *testing.T) {
+	t.Parallel()
+	service := NewPermissionService("/tmp", nil, nil)
+	service.SetSessionScope(func(_ context.Context, sessionID string) string {
+		root, _, _ := strings.Cut(sessionID, "/")
+		return root
+	})
+	events := service.Subscribe(t.Context())
+	var wg sync.WaitGroup
+	t.Cleanup(wg.Wait)
+	request := func(sessionID string) {
+		wg.Go(func() {
+			_, _ = service.Request(t.Context(), CreatePermissionRequest{
+				SessionID:  sessionID,
+				ToolCallID: "call-" + sessionID,
+				ToolName:   "bash",
+				Action:     "execute",
+				Path:       "/tmp",
+			})
+		})
+	}
+	next := func() PermissionRequest {
+		select {
+		case ev := <-events:
+			return ev.Payload
+		case <-time.After(2 * time.Second):
+			t.Fatal("permission request was never published")
+			return PermissionRequest{}
+		}
+	}
+
+	request("s1")
+	first := next()
+	request("s1/child")
+	request("s2")
+	second := next()
+	require.Equal(t, "s2", second.SessionID, "another scope's request must not wait")
+	require.True(t, service.Grant(second))
+	require.True(t, service.Grant(first))
+	child := next()
+	require.Equal(t, "s1/child", child.SessionID)
+	require.True(t, service.Grant(child))
 }
 
 func TestNotificationsCarrySessionID(t *testing.T) {
@@ -881,4 +924,49 @@ func TestPromptObserverHearsShownThenResolved(t *testing.T) {
 
 	require.Equal(t, "shown c1", <-obs.events)
 	require.Equal(t, "resolved c1 granted", <-obs.events)
+}
+
+func TestPermissionService_InheritAutoApproval(t *testing.T) {
+	t.Parallel()
+
+	request := func(service Service, ctx context.Context) (bool, error) {
+		return service.Request(ctx, CreatePermissionRequest{
+			SessionID: "child", ToolCallID: "c1", ToolName: "view", Action: "read", Path: "/tmp",
+		})
+	}
+
+	t.Run("child of an auto-approved session is not asked", func(t *testing.T) {
+		t.Parallel()
+		service := NewPermissionService("/tmp", nil, nil)
+		service.AutoApproveSession("parent")
+		service.InheritAutoApproval("parent", "child")
+
+		// A prompt would wait for an answer that never comes, so bound it.
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		granted, err := request(service, ctx)
+		require.NoError(t, err)
+		require.True(t, granted)
+	})
+
+	t.Run("child of any other session is still asked", func(t *testing.T) {
+		t.Parallel()
+		service := NewPermissionService("/tmp", nil, nil)
+		service.InheritAutoApproval("parent", "child")
+		requests := service.Subscribe(t.Context())
+
+		done := make(chan bool, 1)
+		go func() {
+			granted, _ := request(service, t.Context())
+			done <- granted
+		}()
+		select {
+		case event := <-requests:
+			require.Equal(t, "child", event.Payload.SessionID)
+			require.True(t, service.Deny(event.Payload))
+			require.False(t, <-done)
+		case granted := <-done:
+			t.Fatalf("answered without asking: granted=%v", granted)
+		}
+	})
 }

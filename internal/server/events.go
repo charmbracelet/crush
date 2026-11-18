@@ -179,6 +179,7 @@ func wrapEvent(ev any) *pubsub.Payload {
 			SessionTitle: e.Payload.SessionTitle,
 			RunID:        e.Payload.RunID,
 			Type:         proto.AgentEventType(e.Payload.Type),
+			ProviderID:   e.Payload.ProviderID,
 			AWSSOCommand: e.Payload.AWSSOCommand,
 			AWSSOURL:     e.Payload.AWSSOURL,
 		}
@@ -266,7 +267,7 @@ func sessionScopedEventID(ev any) (string, bool) {
 // only delivered to clients currently viewing the session that raised
 // them: a permission dialog or question form is only actionable there,
 // and broadcasting it to every client in the workspace lets sessions
-// steal each other's prompts. Prompts raised by sub-agent sessions
+// steal each other's prompts. Prompts raised by subagent sessions
 // (agent tool, agentic fetch) resolve to the top-level session so the
 // viewer of the parent session can answer them. Clients on the landing
 // screen (an explicitly cleared session) receive no prompts, while
@@ -357,10 +358,11 @@ func sessionToProto(s session.Session) proto.Session {
 // unconditionally — the workspace lookup error is already surfaced by
 // the prior ListSessions/GetSession call when relevant.
 func isSessionBusy(ws *backend.Workspace, sessionID string) bool {
-	if ws == nil || ws.App == nil || ws.AgentCoordinator == nil {
+	if ws == nil {
 		return false
 	}
-	return ws.AgentCoordinator.IsSessionBusy(sessionID)
+	coord := ws.Coordinator()
+	return coord != nil && coord.IsSessionBusy(sessionID)
 }
 
 // attachedClients returns the number of clients currently viewing
@@ -407,6 +409,7 @@ func messageToProto(m message.Message) proto.Message {
 		SessionID:               m.SessionID,
 		Role:                    proto.MessageRole(m.Role),
 		Model:                   m.Model,
+		ModelName:               m.ModelName,
 		Provider:                m.Provider,
 		PrismModelID:            m.PrismModelID,
 		PrismModelName:          m.PrismModelName,
@@ -430,20 +433,22 @@ func messageToProto(m message.Message) proto.Message {
 			})
 		case message.ToolCall:
 			msg.Parts = append(msg.Parts, proto.ToolCall{
-				ID:       v.ID,
-				Name:     v.Name,
-				Input:    v.Input,
-				Finished: v.Finished,
+				ID:          v.ID,
+				Name:        v.Name,
+				Input:       v.Input,
+				Finished:    v.Finished,
+				StartedAtMs: v.StartedAtMs,
 			})
 		case message.ToolResult:
 			msg.Parts = append(msg.Parts, proto.ToolResult{
-				ToolCallID: v.ToolCallID,
-				Name:       v.Name,
-				Content:    v.Content,
-				Data:       v.Data,
-				MIMEType:   v.MIMEType,
-				Metadata:   v.Metadata,
-				IsError:    v.IsError,
+				ToolCallID:   v.ToolCallID,
+				Name:         v.Name,
+				Content:      v.Content,
+				Data:         v.Data,
+				MIMEType:     v.MIMEType,
+				Metadata:     v.Metadata,
+				IsError:      v.IsError,
+				FinishedAtMs: v.FinishedAtMs,
 			})
 		case message.Finish:
 			msg.Parts = append(msg.Parts, proto.Finish{
@@ -461,6 +466,13 @@ func messageToProto(m message.Message) proto.Message {
 				Command:  v.Command,
 				Output:   v.Output,
 				ExitCode: v.ExitCode,
+			})
+		case message.SubAgentReport:
+			msg.Parts = append(msg.Parts, proto.SubAgentReport{
+				Label:  v.Label,
+				Output: v.Output,
+				Failed: v.Failed,
+				Model:  v.Model,
 			})
 		}
 	}

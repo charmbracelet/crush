@@ -226,6 +226,12 @@ type Styles struct {
 	// Background
 	Background color.Color
 
+	// Exit banner
+	ExitBanner struct {
+		Text  lipgloss.Style // Parting message, session title, and resume command
+		Label lipgloss.Style // Session and Continue labels
+	}
+
 	// Logo
 	Logo struct {
 		FieldColor         color.Color
@@ -298,6 +304,7 @@ type Styles struct {
 		Name            lipgloss.Style // Resource name (e.g. "gopls")
 		StatusText      lipgloss.Style // Row status description (e.g. "starting...")
 		OfflineIcon     lipgloss.Style // Offline/unstarted/stopped status icon
+		WorkingIcon     lipgloss.Style // In-progress icon style with no preset glyph
 		DisabledIcon    lipgloss.Style // Disabled status icon
 		BusyIcon        lipgloss.Style // Busy/starting status icon
 		ErrorIcon       lipgloss.Style // Error status icon
@@ -347,7 +354,8 @@ type Styles struct {
 		ShellOutput        lipgloss.Style // Plain output text.
 		ShellExitCode      lipgloss.Style // Non-zero exit code indicator.
 		ShellTruncation    lipgloss.Style // "N more lines" hint.
-		SectionHeader      lipgloss.Style
+
+		SectionHeader lipgloss.Style
 
 		// Plan section styles
 		PlanBox lipgloss.Style // Border+padding for the final plan message
@@ -378,8 +386,9 @@ type Styles struct {
 		NameNested lipgloss.Style // Nested child tool name (inside Agent/Agentic Fetch)
 
 		// Parameter list styles
-		ParamMain lipgloss.Style
-		ParamKey  lipgloss.Style
+		ParamMain   lipgloss.Style
+		ParamKey    lipgloss.Style
+		Description lipgloss.Style // A tool's own summary of what it is doing
 
 		// Content rendering styles
 		ContentLine           lipgloss.Style // Individual content line with background and width
@@ -425,6 +434,9 @@ type Styles struct {
 		// Agent task styles
 		AgentTaskTag lipgloss.Style // Agent task tag (blue background, bold)
 		AgentPrompt  lipgloss.Style // Agent prompt text
+		AgentName    lipgloss.Style // Subagent first name
+		AgentLabel   lipgloss.Style // Label a subagent was dispatched with, after its first name
+		AgentMessage lipgloss.Style // Message sent to a subagent
 
 		// Agentic fetch styles
 		AgenticFetchPromptTag lipgloss.Style // Agentic fetch prompt tag (green background, bold)
@@ -555,6 +567,7 @@ type Styles struct {
 		Quit struct {
 			Content lipgloss.Style // Wrapper for the quit dialog's inner content
 			Hint    lipgloss.Style // Style for quit hint
+			Warning lipgloss.Style // Style for the work-in-progress warning
 			Frame   lipgloss.Style // Outer rounded border framing the quit dialog
 		}
 

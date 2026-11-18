@@ -206,7 +206,7 @@ three layers:
   constructs a `Styles` struct from `quickStyleOpts` — a palette of
   design tokens (primary, secondary, fgBase, bgBase, success, error, etc.).
   `quickStyle` must be fully token-driven: never hardcode specific
-  `charmtone.*` colors here (except Chroma syntax highlighting, which is
+  `tone.*` colors here (except Chroma syntax highlighting, which is
   pending tokenization). This lets any theme reuse the base without
   inheriting Charmtone-specific colors.
 - **`themes.go`**: Defines concrete themes. Each theme function (e.g.
@@ -226,8 +226,8 @@ func CharmtonePantera() Styles {
 
 	// Override only the colors that differ from the token defaults.
 	s.Editor.PromptBangIconFocused = s.Editor.PromptBangIconFocused.
-		Foreground(charmtone.Salt).
-		Background(charmtone.Hazy)
+		Foreground(tone.Salt).
+		Background(tone.Hazy)
 
 	return s
 }

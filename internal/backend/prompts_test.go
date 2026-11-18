@@ -2,6 +2,7 @@ package backend
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -196,8 +197,12 @@ func TestSetCurrentSession_RepublishesPendingPermission(t *testing.T) {
 
 	var active permission.PermissionRequest
 	require.Eventually(t, func() bool {
-		active, _ = a.Permissions.ActiveRequest()
-		return active.ID != ""
+		pending := a.Permissions.ActiveRequests()
+		if len(pending) == 0 {
+			return false
+		}
+		active = pending[0]
+		return true
 	}, 10*time.Second, 5*time.Millisecond, "request must be pending")
 	require.Equal(t, "tc-1", active.ToolCallID)
 
@@ -251,11 +256,10 @@ func TestSetCurrentSession_RepublishesPendingQuestion(t *testing.T) {
 			}},
 		})
 	}()
-	defer func() { a.Questions.Cancel(); <-done }()
+	defer func() { a.Questions.Cancel(""); <-done }()
 
 	require.Eventually(t, func() bool {
-		_, ok := a.Questions.Pending()
-		return ok
+		return len(a.Questions.Pending()) > 0
 	}, 10*time.Second, 5*time.Millisecond, "question must be pending")
 
 	// Absorb the original publish, then attach a client.
@@ -273,4 +277,61 @@ func TestSetCurrentSession_RepublishesPendingQuestion(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("expected re-published question request")
 	}
+}
+
+// TestCreateWorkspace_PermissionPromptsWaitPerTopLevelSession guards
+// against one unanswered permission prompt blocking every other session's;
+// a sub-agent's prompt must still wait for its parent session's.
+func TestCreateWorkspace_PermissionPromptsWaitPerTopLevelSession(t *testing.T) {
+	xdgIsolated(t)
+	b := New(context.Background(), nil, func() {})
+	b.SetCreateGrace(2 * time.Second)
+	t.Cleanup(func() { drainBackend(t, b) })
+	ws, _, err := b.CreateWorkspace(protoWS(t.TempDir(), t.TempDir(), uuid.New().String()))
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	var wg sync.WaitGroup
+	t.Cleanup(func() { cancel(); wg.Wait() })
+	top, err := ws.Sessions.Create(ctx, "top")
+	require.NoError(t, err)
+	child, err := ws.Sessions.CreateTaskSession(ctx, "child-1", top.ID, "child")
+	require.NoError(t, err)
+	other, err := ws.Sessions.Create(ctx, "other")
+	require.NoError(t, err)
+
+	requests := ws.Permissions.Subscribe(ctx)
+	request := func(sessionID string) {
+		wg.Go(func() {
+			_, _ = ws.Permissions.Request(ctx, permission.CreatePermissionRequest{
+				SessionID: sessionID, ToolCallID: "tc-" + sessionID,
+				ToolName: "bash", Action: "execute", Path: ws.Path,
+			})
+		})
+	}
+	next := func(wait time.Duration) (permission.PermissionRequest, bool) {
+		select {
+		case ev := <-requests:
+			return ev.Payload, true
+		case <-time.After(wait):
+			return permission.PermissionRequest{}, false
+		}
+	}
+
+	request(top.ID)
+	reqTop, ok := next(10 * time.Second)
+	require.True(t, ok)
+	require.Equal(t, top.ID, reqTop.SessionID)
+	request(child.ID)
+	request(other.ID)
+	reqOther, ok := next(10 * time.Second)
+	require.True(t, ok, "another session's prompt waited for an unanswered one")
+	require.Equal(t, other.ID, reqOther.SessionID, "a sub-agent's prompt must wait for its parent's")
+	_, ok = next(200 * time.Millisecond)
+	require.False(t, ok, "a sub-agent's prompt must wait for its parent's")
+
+	require.True(t, ws.Permissions.Grant(reqTop))
+	reqChild, ok := next(10 * time.Second)
+	require.True(t, ok)
+	require.Equal(t, child.ID, reqChild.SessionID)
 }

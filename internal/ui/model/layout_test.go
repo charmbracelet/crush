@@ -8,6 +8,7 @@ import (
 	"charm.land/bubbles/v2/textarea"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/ui/attachments"
 	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	uv "github.com/charmbracelet/ultraviolet"
@@ -24,7 +25,6 @@ func (m testMessageItem) ID() string           { return m.id }
 func (m testMessageItem) Render(int) string    { return m.text }
 func (m testMessageItem) RawRender(int) string { return m.text }
 func (m testMessageItem) Version() uint64      { return 0 }
-func (m testMessageItem) Finished() bool       { return true }
 
 var _ chat.MessageItem = testMessageItem{}
 
@@ -46,7 +46,6 @@ func (m *mutableMessageItem) Render(width int) string {
 }
 func (m *mutableMessageItem) RawRender(width int) string { return m.Render(width) }
 func (m *mutableMessageItem) Version() uint64            { return m.version }
-func (m *mutableMessageItem) Finished() bool             { return false }
 
 var _ chat.MessageItem = (*mutableMessageItem)(nil)
 
@@ -78,6 +77,37 @@ func newTestUI() *UI {
 	}
 
 	return u
+}
+
+func TestGenerateLayout_HelpAndSidebarDoNotOverlap(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		fullHelp bool
+	}{
+		{name: "short help", fullHelp: false},
+		{name: "full help", fullHelp: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			u := newTestUI()
+			u.com.Workspace = &testWorkspace{}
+			u.attachments = attachments.New(nil, attachments.Keymap{})
+			if tt.fullHelp {
+				u.status.ToggleHelp()
+			}
+			l := u.generateLayout(120, 40)
+			if l.status.Max.X > l.sidebar.Min.X {
+				t.Fatalf("help ends at column %d, past the sidebar at %d", l.status.Max.X, l.sidebar.Min.X)
+			}
+			if l.sidebar.Max.Y != l.status.Max.Y-1 {
+				t.Fatalf("sidebar ends at row %d, want it to reach the last help row %d", l.sidebar.Max.Y, l.status.Max.Y-2)
+			}
+		})
+	}
 }
 
 func TestUpdateLayoutAndSize_EditorGrowthShrinksChat(t *testing.T) {
@@ -304,7 +334,7 @@ func TestAutoExpandPillsIfReasonable(t *testing.T) {
 		u := newTestUI()
 		u.height = 50
 		u.session = &session.Session{ID: "s1", Todos: []session.Todo{}}
-		u.promptQueue = 2
+		u.promptQueue.SetFetched([]string{"a", "b"})
 
 		u.autoExpandPillsIfReasonable()
 

@@ -28,6 +28,8 @@ import (
 	"slices"
 	"time"
 
+	"github.com/charmbracelet/crush/internal/message"
+
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/charmbracelet/crush/internal/permission"
@@ -126,6 +128,8 @@ type promptQueueMsg struct {
 // rejected prompt gets no RunComplete, so err must end its turn.
 type agentRunSubmittedMsg struct {
 	sessionID string
+	// pendingID is the optimistic queue entry for the prompt, or zero.
+	pendingID uint64
 	err       error
 }
 
@@ -239,7 +243,7 @@ func (m *UI) applyBusyState(msg busyStateMsg) []tea.Cmd {
 		// the agent is working. The authoritative probe re-enables it so
 		// freshly rendered spinners tick. When the probe reports idle the
 		// reload gate stands, keeping ghost spinners still.
-		m.chat.SetAnimationsAllowed(true)
+		m.animClock.frozen = false
 	}
 	if m.hasSession() && hasInProgressTodo(m.session.Todos) && busy && !m.todoIsSpinning {
 		m.todoIsSpinning = true
@@ -265,14 +269,14 @@ func (m *UI) dispatchPromptQueueRefresh() tea.Cmd {
 		return nil
 	}
 	if !m.hasSession() {
-		m.promptQueueItems = nil
 		m.promptQueueCheckedAt = time.Now()
 		// Bump the generation so any in-flight fetch scoped to the
 		// now-departed session is discarded rather than repopulating the
 		// queue.
 		m.invalidatePromptQueue()
-		if m.promptQueue != 0 {
-			m.promptQueue = 0
+		prev := m.promptQueue.Shown()
+		m.promptQueue.Reset()
+		if prev != 0 {
 			m.updateLayoutAndSize()
 		}
 		return nil
@@ -305,10 +309,17 @@ func (m *UI) applyPromptQueue(msg promptQueueMsg) []tea.Cmd {
 		return nil
 	}
 	m.promptQueueCheckedAt = time.Now()
-	itemsChanged := !slices.Equal(m.promptQueueItems, msg.prompts)
-	countChanged := len(msg.prompts) != m.promptQueue
-	m.promptQueueItems = msg.prompts
-	m.promptQueue = len(msg.prompts)
+	prevItems := m.promptQueue.Items()
+	m.promptQueue.SetFetched(msg.prompts)
+	itemsChanged := !slices.Equal(prevItems, m.promptQueue.Items())
+	countChanged := len(prevItems) != m.promptQueue.Shown()
+	// A report waits in the queue until the model reads it, but its
+	// subagent is already done.
+	for _, prompt := range msg.prompts {
+		if report, ok := message.ParseSubAgentReportPrompt(prompt); ok {
+			m.markDispatchReported(report.Label)
+		}
+	}
 	if countChanged {
 		m.updateLayoutAndSize()
 	} else if itemsChanged {

@@ -231,3 +231,69 @@ func TestSessionMouseClickIgnoresUnsupportedClicks(t *testing.T) {
 }
 
 var _ workspace.Workspace = (*sessionMouseWorkspace)(nil)
+
+func testSessions(n int) []session.Session {
+	sessions := make([]session.Session, n)
+	for i := range sessions {
+		sessions[i] = session.Session{
+			ID:    fmt.Sprintf("s%02d", i),
+			Title: fmt.Sprintf("Session %02d", i),
+		}
+	}
+	return sessions
+}
+
+func deleteSelectedSession(t *testing.T, dialog *Session) {
+	t.Helper()
+	dialog.HandleMsg(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
+	require.Equal(t, sessionsModeDeleting, dialog.sessionsMode)
+	dialog.HandleMsg(tea.KeyPressMsg{Code: 'y'})
+	require.Equal(t, sessionsModeNormal, dialog.sessionsMode)
+}
+
+func TestSessionOpensScrolledToSelected(t *testing.T) {
+	t.Parallel()
+
+	dialog := newSessionMouseDialog(t, testSessions(40), "s30")
+	scr := uv.NewScreenBuffer(80, 30)
+	dialog.Draw(scr, image.Rect(0, 0, 80, 30))
+
+	require.True(t, dialog.list.SelectedItemInView())
+	require.Equal(t, "s30", dialog.selectedSessionItem().ID())
+}
+
+func TestSessionDeleteKeepsListPosition(t *testing.T) {
+	t.Parallel()
+
+	dialog := newSessionMouseDialog(t, testSessions(40), "s20")
+	scr := uv.NewScreenBuffer(80, 30)
+	dialog.Draw(scr, image.Rect(0, 0, 80, 30))
+	offset := dialog.list.Offset()
+	require.Positive(t, offset, "expected the dialog to open scrolled down")
+
+	deleteSelectedSession(t, dialog)
+
+	require.Equal(t, offset, dialog.list.Offset(), "deleting must not scroll the list")
+	require.Equal(t, "s21", dialog.selectedSessionItem().ID(), "selection must fall through to the next session")
+}
+
+func TestSessionDeleteAfterWheelScrollsSelectionBackIntoView(t *testing.T) {
+	t.Parallel()
+
+	dialog := newSessionMouseDialog(t, testSessions(40), "s00")
+	scr := uv.NewScreenBuffer(80, 30)
+	dialog.Draw(scr, image.Rect(0, 0, 80, 30))
+
+	// Wheel the selection out of view without moving it.
+	dialog.HandleMsg(common.CoalescedWheelMsg{
+		Mouse:  tea.Mouse{X: 10, Y: 10},
+		DeltaY: 15,
+	})
+	dialog.Draw(scr, image.Rect(0, 0, 80, 30))
+	require.False(t, dialog.list.SelectedItemInView(), "wheel must not drag the selection along")
+
+	deleteSelectedSession(t, dialog)
+
+	require.True(t, dialog.list.SelectedItemInView(), "deleting off-screen must show what it landed on")
+	require.Equal(t, "s01", dialog.selectedSessionItem().ID())
+}

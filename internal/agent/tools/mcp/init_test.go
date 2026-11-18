@@ -8,13 +8,16 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"reflect"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/oauth"
+	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
@@ -315,6 +318,27 @@ func TestCreateTransport_StdioResolution(t *testing.T) {
 		require.Equal(t, []string{"forgejo-mcp", "--token", "$MCP_MISSING"}, ct.Command.Args)
 		require.Contains(t, ct.Command.Env, "TOKEN=$(vault read -f token)")
 	})
+}
+
+// TestCreateTransport_StdioStartsInWorkingDir guards that a stdio MCP
+// server starts in the workspace directory, not the server process's cwd.
+func TestCreateTransport_StdioStartsInWorkingDir(t *testing.T) {
+	isolated := t.TempDir()
+	t.Setenv("HOME", isolated)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(isolated, ".config"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(isolated, ".local", "share"))
+	t.Setenv("CRUSH_DISABLE_PROVIDER_AUTO_UPDATE", "1")
+
+	workingDir := t.TempDir()
+	cfg, err := config.Init(t.Context(), workingDir, t.TempDir(), false)
+	require.NoError(t, err)
+
+	m := config.MCPConfig{Type: config.MCPStdio, Command: "sh", Args: []string{"server.sh"}}
+	tr, _, err := createTransport(t.Context(), cfg, "test", m, shellResolverWithPath(t, nil))
+	require.NoError(t, err)
+	ct, ok := tr.(*mcp.CommandTransport)
+	require.True(t, ok, "expected CommandTransport, got %T", tr)
+	require.Equal(t, workingDir, ct.Command.Dir)
 }
 
 // TestCreateTransport_HeadersResolution pins that a single failing
@@ -830,14 +854,14 @@ func TestBeginAuth_Concurrent(t *testing.T) {
 // for sessionless streamable-HTTP servers such as GitHub MCP. Those servers
 // complete the SEP-2575 server/discover probe without ever issuing a
 // Mcp-Session-Id, then answer the follow-up "subscriptions/listen" POST
-// (which the go-sdk opens whenever any tools/prompts/resources list-changed
-// handler is registered) with HTTP 404. The SDK maps that 404 to
-// mcp.ErrSessionMissing and fails the whole connection asynchronously, so
-// the next RPC (here tools/list) errors. With Sessionless set, the
-// handlers are omitted, no listen stream is opened, and the server works.
+// (which the go-sdk opens when a list-changed handler is registered and the
+// server advertises the matching listChanged capability) with HTTP 404.
+// Since go-sdk v1.8.0 that rejection no longer poisons the connection, so
+// the default still works; Sessionless just skips the doomed listen stream.
 //
 // The stub server mimics GitHub: it answers server/discover (no session
-// id), 404s any subscriptions/listen, and serves tools/list.
+// id, tools.listChanged advertised), 404s any subscriptions/listen, and
+// serves tools/list.
 func TestCreateSession_Sessionless(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
@@ -867,7 +891,7 @@ func TestCreateSession_Sessionless(t *testing.T) {
 				// Sessionless: deliberately no Mcp-Session-Id header.
 				writeResult(map[string]any{
 					"supportedVersions": []string{"2026-07-28"},
-					"capabilities":      map[string]any{},
+					"capabilities":      map[string]any{"tools": map[string]any{"listChanged": true}},
 				})
 			case "subscriptions/listen":
 				listenTotal.Add(1)
@@ -904,14 +928,12 @@ func TestCreateSession_Sessionless(t *testing.T) {
 		require.Zero(t, listenTotal.Load(), "no subscriptions/listen stream should be opened when disabled")
 	})
 
-	t.Run("default opens listen stream and breaks sessionless server", func(t *testing.T) {
+	t.Run("default opens listen stream and survives its rejection", func(t *testing.T) {
 		srv, listenTotal := newStub(t)
 		const name = "sessionless-default"
 		states.Del(name)
 		t.Cleanup(func() { states.Del(name) })
 
-		// Connect itself succeeds; the listen stream fails asynchronously
-		// and poisons the connection, so the subsequent tools/list fails.
 		cfg := config.MCPConfig{Type: config.MCPHttp, URL: srv.URL, Timeout: 15}
 		sess, err := createSession(t.Context(), nil, name, cfg, resolver, false)
 		require.NoError(t, err)
@@ -919,8 +941,42 @@ func TestCreateSession_Sessionless(t *testing.T) {
 		t.Cleanup(func() { sess.Close() })
 
 		_, err = sess.ListTools(t.Context(), &mcp.ListToolsParams{})
-		require.Error(t, err, "default handlers open a listen stream that the sessionless server 404s")
-		require.Contains(t, err.Error(), "session not found")
+		require.NoError(t, err, "a 404 on the listen stream must not break later RPCs")
 		require.GreaterOrEqual(t, listenTotal.Load(), int64(1), "expected the listen stream attempt")
 	})
+}
+
+// TestClose_LastReferenceClosesSessions guards that one workspace's
+// teardown leaves MCP sessions open while another still holds a reference,
+// and that Close never shuts the event broker down.
+func TestClose_LastReferenceClosesSessions(t *testing.T) {
+	const name = "close-refcount"
+	t.Cleanup(func() { sessions.Del(name) })
+
+	sess, sessCtx := liveSession(t, "do_thing")
+	sessions.Set(name, sess)
+	events := SubscribeEvents(t.Context())
+
+	Acquire()
+	Acquire()
+
+	require.NoError(t, Close(t.Context()))
+	require.NoError(t, sessCtx.Err(), "Close must leave the sessions open while another reference is held")
+
+	require.NoError(t, Close(t.Context()))
+	require.ErrorIs(t, sessCtx.Err(), context.Canceled, "the last Close must close the sessions")
+
+	broker.Publish(pubsub.UpdatedEvent, Event{Type: EventStateChanged, Name: name})
+	timeout := time.After(5 * time.Second)
+	for {
+		select {
+		case ev, ok := <-events:
+			require.True(t, ok, "Close must not shut the event broker down")
+			if ev.Payload.Name == name {
+				return
+			}
+		case <-timeout:
+			t.Fatal("timed out waiting for an event published after Close")
+		}
+	}
 }

@@ -118,6 +118,41 @@ func TestCompletedShellItemShowsHeadAndAccurateCount(t *testing.T) {
 	require.Equal(t, "… 2 more lines", lines[11])
 }
 
+func TestCompletedShellItemPreservesCRLFOutput(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	item := NewPendingShellItem(&sty, "curl -D - -o /dev/null example.com")
+	item.Complete("HTTP/1.1 200 OK\r\n"+
+		strings.Repeat("X-Example: value\r\n", 9)+
+		"Content-Length: 0\r\n\r\n", 0)
+
+	collapsed := ansi.Strip(item.Render(80))
+	require.Contains(t, collapsed, "HTTP/1.1 200 OK")
+	require.Equal(t, 9, strings.Count(collapsed, "X-Example: value"))
+	require.Contains(t, collapsed, "… 1 more lines")
+	require.NotContains(t, collapsed, "Content-Length: 0")
+
+	require.True(t, item.ToggleExpanded())
+	expanded := ansi.Strip(item.Render(80))
+	require.Contains(t, expanded, "HTTP/1.1 200 OK")
+	require.Equal(t, 9, strings.Count(expanded, "X-Example: value"))
+	require.Contains(t, expanded, "Content-Length: 0")
+	require.NotContains(t, expanded, "more lines")
+}
+
+func TestShellItemPreservesBareCarriageReturnBeforeErase(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	item := NewShellItem(&sty, "printf", "first\r\nprogress\r\x1b[K\nlast\r\n", 0)
+
+	rendered := ansi.Strip(item.Render(80))
+	require.Contains(t, rendered, "first")
+	require.NotContains(t, rendered, "progress")
+	require.Contains(t, rendered, "last")
+}
+
 func TestShellOutputWindows(t *testing.T) {
 	t.Parallel()
 
@@ -166,4 +201,27 @@ func BenchmarkShellItemCollapsedRender(b *testing.B) {
 	for b.Loop() {
 		benchmarkShellOutput = item.RawRender(120)
 	}
+}
+
+// TestShellItemHorizontalScrollStaysInBounds verifies the horizontal offset
+// never passes the widest line: not when the output already fits, and not
+// after the item is rendered wider than when it was scrolled.
+func TestShellItemHorizontalScrollStaysInBounds(t *testing.T) {
+	t.Parallel()
+	sty := styles.CharmtonePantera()
+
+	short := NewShellItem(&sty, "echo hi", "hello", 0).(*ShellItem)
+	short.Render(80)
+	for range 5 {
+		short.ScrollHorizontal(6)
+	}
+	require.Contains(t, ansi.Strip(short.Render(80)), "hello",
+		"output that fits must not scroll out of view")
+
+	wide := NewShellItem(&sty, "cat", strings.Repeat("x", 200)+" end", 0).(*ShellItem)
+	wide.Render(60)
+	wide.ScrollHorizontal(1000)
+	wide.Render(300)
+	require.LessOrEqual(t, wide.xOffset, wide.maxLineWidth,
+		"a wider render must pull a stale offset back in range")
 }

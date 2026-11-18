@@ -297,12 +297,12 @@ func (w *AppWorkspace) HostContext(_ context.Context) (proto.HostContext, error)
 
 // -- Questions --
 
-func (w *AppWorkspace) QuestionAnswer(responses []question.Answer) bool {
-	return w.app.Questions.Answer(responses)
+func (w *AppWorkspace) QuestionAnswer(batchID string, responses []question.Answer) bool {
+	return w.app.Questions.Answer(batchID, responses)
 }
 
-func (w *AppWorkspace) QuestionCancel() bool {
-	return w.app.Questions.Cancel()
+func (w *AppWorkspace) QuestionCancel(batchID string) bool {
+	return w.app.Questions.Cancel(batchID)
 }
 
 // -- Pinentry --
@@ -531,7 +531,7 @@ func (w *AppWorkspace) DisableDockerMCP() error {
 
 // MCPServersDisabled returns the MCP servers disabled for this
 // repository. The override set is shared by every session, including
-// sub-agent sessions.
+// subagent sessions.
 func (w *AppWorkspace) MCPServersDisabled(ctx context.Context) ([]string, error) {
 	return w.app.Sessions.MCPDisabledServers(ctx)
 }
@@ -569,6 +569,28 @@ func (w *AppWorkspace) MCPSetServerConfigDisabled(ctx context.Context, name stri
 // never touched.
 func (w *AppWorkspace) MCPStartServer(ctx context.Context, name string) error {
 	return mcptools.InitializeSingleForced(ctx, name, w.store)
+}
+
+// SkillsDisabled returns the skills disabled for this repository.
+func (w *AppWorkspace) SkillsDisabled(ctx context.Context) ([]string, error) {
+	return w.app.Sessions.SkillsDisabled(ctx)
+}
+
+// SkillsEnabled returns the skills with a repository-scoped enabled
+// override (config-disabled skills re-enabled here).
+func (w *AppWorkspace) SkillsEnabled(ctx context.Context) ([]string, error) {
+	return w.app.Sessions.SkillsEnabled(ctx)
+}
+
+// SkillSetDisabled adds or removes a repository-scoped skill override.
+func (w *AppWorkspace) SkillSetDisabled(ctx context.Context, name string, disabled bool) error {
+	return w.app.Sessions.SetSkillDisabled(ctx, name, disabled, w.store.SkillConfigDisabled(name))
+}
+
+// SkillSetConfigDisabled toggles a skill's disabled flag in the global
+// config's options.disabled_skills list.
+func (w *AppWorkspace) SkillSetConfigDisabled(ctx context.Context, name string, disabled bool) error {
+	return w.store.SetSkillDisabledConfig(config.ScopeGlobal, name, disabled)
 }
 
 func (w *AppWorkspace) MCPAuthenticate(ctx context.Context, name string) error {

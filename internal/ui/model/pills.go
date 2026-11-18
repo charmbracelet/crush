@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -116,17 +117,29 @@ func queueList(queueItems []string, t *styles.Styles) string {
 		return ""
 	}
 
-	var lines []string
+	prefix := t.Pills.QueueItemPrefix.Render() + " "
+	lines := make([]string, 0, len(queueItems))
 	for _, item := range queueItems {
-		text := item
-		if ansi.StringWidth(text) > maxQueueDisplayLength {
-			text = ansi.Truncate(text, maxQueueDisplayLength-1, "…")
-		}
-		prefix := t.Pills.QueueItemPrefix.Render() + " "
-		lines = append(lines, prefix+t.Pills.QueueItemText.Render(text))
+		lines = append(lines, prefix+ansi.Truncate(queueItem(item, t), maxQueueDisplayLength, "…"))
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+// queueItem renders one queued prompt on a single line. A subagent report
+// reads like its transcript header, not the raw markup the model gets.
+func queueItem(item string, t *styles.Styles) string {
+	report, ok := message.ParseSubAgentReportPrompt(item)
+	if !ok {
+		return t.Pills.QueueItemText.Render(singleLine(item))
+	}
+	return chat.SubagentReportTitle(t, report.Label)
+}
+
+// singleLine collapses runs of whitespace, newlines included, so a queued
+// item takes exactly the one row the pills area reserves for it.
+func singleLine(s string) string {
+	return strings.Join(strings.Fields(s), " ")
 }
 
 // pillsHeightReasonableTerminalHeight is the minimum terminal height at which
@@ -145,7 +158,7 @@ func (m *UI) autoExpandPillsIfReasonable() tea.Cmd {
 	if m.height < pillsHeightReasonableTerminalHeight {
 		return nil
 	}
-	hasPills := hasIncompleteTodos(m.session.Todos) || m.promptQueue > 0
+	hasPills := hasIncompleteTodos(m.session.Todos) || m.promptQueue.Shown() > 0
 	if !hasPills {
 		return nil
 	}
@@ -174,7 +187,7 @@ func (m *UI) togglePillsExpanded() tea.Cmd {
 	if !m.hasSession() {
 		return nil
 	}
-	hasPills := hasIncompleteTodos(m.session.Todos) || m.promptQueue > 0
+	hasPills := hasIncompleteTodos(m.session.Todos) || m.promptQueue.Shown() > 0
 	if !hasPills {
 		return nil
 	}
@@ -204,7 +217,7 @@ func (m *UI) switchPillSection(dir int) tea.Cmd {
 		return nil
 	}
 	hasIncompleteTodos := hasIncompleteTodos(m.session.Todos)
-	hasQueue := m.promptQueue > 0
+	hasQueue := m.promptQueue.Shown() > 0
 
 	if dir < 0 && m.focusedPillSection == pillSectionQueue && hasIncompleteTodos {
 		m.focusedPillSection = pillSectionTodos
@@ -226,7 +239,7 @@ func (m *UI) switchPillSection(dir int) tea.Cmd {
 // to whichever section still has content so the expanded list stays populated.
 func (m *UI) effectiveFocusedSection() pillSection {
 	hasIncomplete := hasIncompleteTodos(m.session.Todos)
-	hasQueue := m.promptQueue > 0
+	hasQueue := m.promptQueue.Shown() > 0
 	switch m.focusedPillSection {
 	case pillSectionQueue:
 		if hasQueue {
@@ -246,6 +259,28 @@ func (m *UI) effectiveFocusedSection() pillSection {
 	return m.focusedPillSection
 }
 
+// pillsAttachmentGap reports whether the open list needs a blank row above
+// the attachments, which otherwise sit flush against it.
+func (m *UI) pillsAttachmentGap() bool {
+	return m.pillsExpanded && m.hasAttachments()
+}
+
+// hasAttachments reports whether the editor holds any attachments.
+func (m *UI) hasAttachments() bool {
+	return m.attachments != nil && len(m.attachments.List()) > 0
+}
+
+// changeAttachments runs change and relays out if it moved the pills gap.
+func (m *UI) changeAttachments(change func() bool) bool {
+	hadGap := m.pillsAttachmentGap()
+	changed := change()
+	if m.pillsAttachmentGap() != hadGap {
+		m.updateLayoutAndSize()
+		m.invalidateFrames()
+	}
+	return changed
+}
+
 // pillsAreaHeight calculates the total height needed for the pills area.
 func (m *UI) pillsAreaHeight() int {
 	if !m.hasSession() {
@@ -257,7 +292,7 @@ func (m *UI) pillsAreaHeight() int {
 		return 0
 	}
 	hasIncomplete := hasIncompleteTodos(m.session.Todos)
-	hasQueue := m.promptQueue > 0
+	hasQueue := m.promptQueue.Shown() > 0
 	hasPills := hasIncomplete || hasQueue
 	if !hasPills {
 		return 0
@@ -272,8 +307,11 @@ func (m *UI) pillsAreaHeight() int {
 			}
 		case pillSectionQueue:
 			if hasQueue {
-				pillsAreaHeight += m.promptQueue
+				pillsAreaHeight += m.promptQueue.Shown()
 			}
+		}
+		if m.pillsAttachmentGap() {
+			pillsAreaHeight++
 		}
 	}
 	return pillsAreaHeight
@@ -299,7 +337,7 @@ func (m *UI) renderPills() {
 	contentWidth := max(width-paddingLeft, 0)
 
 	hasIncomplete := hasIncompleteTodos(m.session.Todos)
-	hasQueue := m.promptQueue > 0
+	hasQueue := m.promptQueue.Shown() > 0
 
 	if !hasIncomplete && !hasQueue {
 		return
@@ -320,7 +358,7 @@ func (m *UI) renderPills() {
 		pills = append(pills, todoPill(m.session.Todos, inProgressIcon, m.pillsExpanded, t))
 	}
 	if hasQueue {
-		pills = append(pills, queuePill(m.promptQueue, t))
+		pills = append(pills, queuePill(m.promptQueue.Shown(), t))
 	}
 
 	var expandedList string
@@ -331,8 +369,8 @@ func (m *UI) renderPills() {
 			// Render from the memoized queue (fetched off-thread, see
 			// workspace_cache.go): renderPills runs on the Update/View
 			// path and must never block on a workspace round-trip.
-			if len(m.promptQueueItems) > 0 {
-				expandedList = queueList(m.promptQueueItems, t)
+			if items := m.promptQueue.Items(); len(items) > 0 {
+				expandedList = queueList(items, t)
 			}
 		}
 	}
@@ -355,6 +393,9 @@ func (m *UI) renderPills() {
 	pillsArea := pillsRow
 	if expandedList != "" {
 		pillsArea = lipgloss.JoinVertical(lipgloss.Left, pillsRow, expandedList)
+	}
+	if m.pillsAttachmentGap() {
+		pillsArea += "\n"
 	}
 
 	m.pillsView = t.Pills.Area.MaxWidth(width).PaddingLeft(paddingLeft).Render(pillsArea)

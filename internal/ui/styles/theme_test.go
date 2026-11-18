@@ -225,3 +225,38 @@ func TestKeanu_BodyTextContrast(t *testing.T) {
 		t.Errorf("keanu body text contrast %.2f is below WCAG AA (%.1f)", ratio, minAA)
 	}
 }
+
+func TestSysadminBanner_VisibleOnEveryTheme(t *testing.T) {
+	// The banner body sits on the subtler destructive token, which only
+	// Charmtone names. Every other theme, and an overridden Charmtone, used
+	// to end up with a nil fill and bgBase-colored text: an empty line. A
+	// fallback should keep the banner visible wherever it's rendered.
+	const minContrast = 3.0
+	themes := map[string]func() (Styles, error){}
+	for _, name := range BuiltinThemeNames() {
+		themes[name] = func() (Styles, error) { return LoadTheme(name) }
+	}
+	themes["overridden-charmtone"] = func() (Styles, error) {
+		return LoadPaletteTheme("charmtone-panther", Palette{Primary: "#ff0000"})
+	}
+
+	for name, load := range themes {
+		t.Run(name, func(t *testing.T) {
+			s, err := load()
+			if err != nil {
+				t.Fatalf("load: %v", err)
+			}
+			style := s.Status.ModeBannerSysadmin
+			fg, bg := style.GetForeground(), style.GetBackground()
+			if fg == nil {
+				t.Fatal("sysadmin banner has no foreground")
+			}
+			if bg == nil {
+				t.Fatal("sysadmin banner has no background fill")
+			}
+			if ratio := contrastRatio(*hex(fg), *hex(bg)); ratio < minContrast {
+				t.Errorf("sysadmin banner contrast %.2f is below %.1f", ratio, minContrast)
+			}
+		})
+	}
+}

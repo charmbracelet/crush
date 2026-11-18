@@ -2960,11 +2960,8 @@ func (m *UI) gitBranchTicker() tea.Cmd {
 	})
 }
 
-// restoreModelFromSession checks the last assistant message in the
-// loaded session and, if it used a different provider/model than the
-// current config, restores that model/provider provided it is still
-// available. Returns a tea.Cmd that rebuilds the agent models if a
-// switch was made, or nil if no switch was needed.
+// restoreModelFromSession pins the loaded session to the model of its last
+// response, when that model is still available.
 func (m *UI) restoreModelFromSession(msgs []message.Message) tea.Cmd {
 	var lastAssistant *message.Message
 	for i := len(msgs) - 1; i >= 0; i-- {
@@ -2974,6 +2971,11 @@ func (m *UI) restoreModelFromSession(msgs []message.Message) tea.Cmd {
 		}
 	}
 	if lastAssistant == nil || lastAssistant.Provider == "" || lastAssistant.Model == "" {
+		return nil
+	}
+
+	sessionID := m.currentSessionID()
+	if sessionID == "" {
 		return nil
 	}
 
@@ -2998,11 +3000,6 @@ func (m *UI) restoreModelFromSession(msgs []message.Message) tea.Cmd {
 		Provider: lastAssistant.Provider,
 		Model:    lastAssistant.Model,
 	}
-	if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeLarge, selectedModel); err != nil {
-		slog.Error("Failed to restore model from session", "error", err)
-		return nil
-	}
-
 	m.applyThemeForProvider(lastAssistant.Provider)
 
 	if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
@@ -3012,13 +3009,11 @@ func (m *UI) restoreModelFromSession(msgs []message.Message) tea.Cmd {
 		}
 	}
 
+	ws := m.com.Workspace
 	return m.updateAgentModelCmd(func() tea.Msg {
-		if err := m.com.Workspace.UpdateAgentModel(context.TODO()); err != nil {
-			return util.ReportError(err)()
+		if err := ws.SetSessionModel(context.TODO(), sessionID, selectedModel); err != nil {
+			slog.Error("Failed to restore model from session", "error", err)
 		}
-		slog.Info("Restored model from session",
-			"provider", lastAssistant.Provider,
-			"model", lastAssistant.Model)
 		return nil
 	})
 }
@@ -3026,19 +3021,13 @@ func (m *UI) restoreModelFromSession(msgs []message.Message) tea.Cmd {
 // updateCoderModel applies change to the coder model's settings, saves them
 // and rebuilds the agent's models. change returns the message to report.
 func (m *UI) updateCoderModel(change func(*config.SelectedModel) string) tea.Cmd {
-	cfg := m.com.Config()
-	if cfg == nil {
-		return util.ReportError(errors.New("configuration not found"))
-	}
-
-	agentCfg, ok := cfg.Agents[config.AgentCoder]
+	model, ok := m.currentModelSelection()
 	if !ok {
 		return util.ReportError(errors.New("agent configuration not found"))
 	}
 
-	model := cfg.Models[agentCfg.Model]
 	info := change(&model)
-	if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, agentCfg.Model, model); err != nil {
+	if err := pinCoderModel(m.com.Workspace, m.currentSessionID(), model); err != nil {
 		return util.ReportError(err)
 	}
 
@@ -3158,7 +3147,18 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 	}
 
 	note := m.nextMessageNote()
+	// The default write above is for new sessions; the session the model
+	// was picked in switches too, and other running sessions keep theirs.
+	pinSession := ""
+	if msg.ModelType == config.SelectedModelTypeLarge && !isOnboarding {
+		pinSession = m.currentSessionID()
+	}
 	cmds = append(cmds, m.updateAgentModelCmd(func() tea.Msg {
+		if pinSession != "" {
+			if err := m.com.Workspace.SetSessionModel(context.TODO(), pinSession, msg.Model); err != nil {
+				return util.ReportError(err)
+			}
+		}
 		if err := m.com.Workspace.UpdateAgentModel(context.TODO()); err != nil {
 			return util.ReportError(err)()
 		}
@@ -3835,7 +3835,17 @@ func (m *UI) drawHeader(scr uv.Screen, area uv.Rectangle) {
 		m.hyperCredits,
 		m.gitBranchLabel(),
 		m.subAgentsRunning,
+		m.currentContextWindow(),
 	)
+}
+
+// currentContextWindow returns the context window of the model the current
+// session runs on, or zero when unknown.
+func (m *UI) currentContextWindow() int64 {
+	if model := m.currentCatwalkModel(); model != nil {
+		return model.ContextWindow
+	}
+	return 0
 }
 
 // Draw implements [uv.Drawable] and draws the UI model.
@@ -4383,29 +4393,70 @@ func (m *UI) inlineFocusHelp() key.Binding {
 	return tab
 }
 
-func (m *UI) currentModelSupportsImages() bool {
+// currentModelSelection returns the selection a settings change applies to:
+// the current session's model, else the configured coder model.
+func (m *UI) currentModelSelection() (config.SelectedModel, bool) {
+	if sel := m.selectedLargeModel(); sel != nil && sel.ModelCfg.Model != "" {
+		return sel.ModelCfg, true
+	}
 	cfg := m.com.Config()
 	if cfg == nil {
-		return false
+		return config.SelectedModel{}, false
 	}
 	agentCfg, ok := cfg.Agents[config.AgentCoder]
 	if !ok {
-		return false
+		return config.SelectedModel{}, false
 	}
-	model := cfg.GetModelByType(agentCfg.Model)
+	sel, ok := cfg.Models[agentCfg.Model]
+	return sel, ok
+}
+
+// saveCoderModel applies sel to the current session, then makes it the
+// default for new sessions. Pinning first means an unbuildable selection
+// changes nothing.
+func saveCoderModel(ws workspace.Workspace, sessionID string, sel config.SelectedModel) error {
+	if err := pinCoderModel(ws, sessionID, sel); err != nil {
+		return err
+	}
+	return ws.UpdateAgentModel(context.TODO())
+}
+
+// pinCoderModel is saveCoderModel without the agent rebuild, for callers
+// that rebuild later.
+func pinCoderModel(ws workspace.Workspace, sessionID string, sel config.SelectedModel) error {
+	if sessionID != "" {
+		if err := ws.SetSessionModel(context.TODO(), sessionID, sel); err != nil {
+			return err
+		}
+	}
+	return ws.UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeLarge, sel)
+}
+
+// currentCatwalkModel returns the current session's model from the memoized
+// probe, else the configured coder model. It never probes the workspace.
+func (m *UI) currentCatwalkModel() *catwalk.Model {
+	if sel := m.selectedLargeModel(); sel != nil && sel.CatwalkCfg.ID != "" {
+		model := sel.CatwalkCfg
+		return &model
+	}
+	cfg := m.com.Config()
+	if cfg == nil {
+		return nil
+	}
+	agentCfg, ok := cfg.Agents[config.AgentCoder]
+	if !ok {
+		return nil
+	}
+	return cfg.GetModelByType(agentCfg.Model)
+}
+
+func (m *UI) currentModelSupportsImages() bool {
+	model := m.currentCatwalkModel()
 	return model != nil && model.Capabilities.Vision
 }
 
 func (m *UI) currentModelSupportsAudio() bool {
-	cfg := m.com.Config()
-	if cfg == nil {
-		return false
-	}
-	agentCfg, ok := cfg.Agents[config.AgentCoder]
-	if !ok {
-		return false
-	}
-	model := cfg.GetModelByType(agentCfg.Model)
+	model := m.currentCatwalkModel()
 	return model != nil && model.Capabilities.Audio
 }
 
@@ -4413,15 +4464,7 @@ func (m *UI) currentModelSupportsAudio() bool {
 // current model accepts in a single request. Zero means the provider does
 // not enforce a hard limit.
 func (m *UI) currentModelMaxAttachments() int {
-	cfg := m.com.Config()
-	if cfg == nil {
-		return 0
-	}
-	agentCfg, ok := cfg.Agents[config.AgentCoder]
-	if !ok {
-		return 0
-	}
-	model := cfg.GetModelByType(agentCfg.Model)
+	model := m.currentCatwalkModel()
 	if model == nil {
 		return 0
 	}

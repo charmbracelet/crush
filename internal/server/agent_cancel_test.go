@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/crush/internal/config"
+
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/app"
@@ -84,7 +86,11 @@ func (s *runCoordinator) AddNote(string, string)            {}
 func (s *runCoordinator) Summarize(context.Context, string) error {
 	return nil
 }
-func (s *runCoordinator) Model() agent.Model                            { return agent.Model{} }
+func (s *runCoordinator) Model() agent.Model              { return agent.Model{} }
+func (s *runCoordinator) SessionModel(string) agent.Model { return agent.Model{} }
+func (s *runCoordinator) SetSessionModel(context.Context, string, config.SelectedModel) error {
+	return nil
+}
 func (s *runCoordinator) UpdateModels(context.Context) error            { return nil }
 func (s *runCoordinator) GenerateTitle(context.Context, string, string) {}
 func (s *runCoordinator) SetHostContext(proto.HostContext)              {}

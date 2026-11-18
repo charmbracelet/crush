@@ -437,6 +437,16 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 			Fails(400, 404, 409, 500).
 			Handle(c.handlePostWorkspaceAgentMain),
 
+		apigen.Post("/v1/workspaces/{id}/agent/sessions/{sid}/model").
+			Summary("Set session model").
+			Description("Pins a session to a model selection, applying from its next turn without changing the default for other sessions.").
+			Tags("agent").
+			PathParam("id", "Workspace ID").
+			PathParam("sid", "Session ID").
+			Accepts(proto.AgentSetSessionModelRequest{}).
+			Fails(400, 404, 500).
+			Handle(c.handlePostWorkspaceSessionModel),
+
 		apigen.Get("/v1/workspaces/{id}/agent/sessions/{sid}").
 			Summary("Get agent session").
 			Tags("agent").

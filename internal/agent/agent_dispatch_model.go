@@ -14,15 +14,6 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 )
 
-// mainModel returns the model the main agent runs on, or the zero Model
-// before one is set.
-func (c *coordinator) mainModel() Model {
-	if agent, _ := c.activeAgent(); agent != nil {
-		return agent.Model()
-	}
-	return Model{}
-}
-
 // resolveModelOverride turns the dispatch tool's model-override params into
 // the model selection a subagent should run on. ok is false when no
 // override was requested. A non-empty refusal means one was requested but
@@ -33,6 +24,11 @@ func (c *coordinator) resolveModelOverride(params AgentDispatchParams, parentMod
 	reasoning := strings.TrimSpace(params.Reasoning)
 	switch {
 	case provider == "" && model == "" && reasoning == "":
+		// A session pinned off the subagent default farms work out on its
+		// own model.
+		if sub := c.subAgentModels().Large; parentModel.Model != nil && !sameModel(parentModel, sub) {
+			return parentModel.ModelCfg, true, ""
+		}
 		return config.SelectedModel{}, false, ""
 	case provider != "" && model == "":
 		return config.SelectedModel{}, false, "provider is given without model; pass model as well"
@@ -183,7 +179,7 @@ func (c *coordinator) overrideDispatchAgent(ctx context.Context, access string, 
 // current build, so a model refresh reaches a running subagent on its next
 // turn.
 func (c *coordinator) overrideTaskAgent(ctx context.Context, access string, sel config.SelectedModel) (SessionAgent, string) {
-	entry, err := c.overrideModel(sel)
+	entry, err := c.sharedBuild(sel, true)
 	if err != nil {
 		return nil, "failed to set up the requested model: " + err.Error()
 	}
@@ -236,4 +232,9 @@ func (c *coordinator) sendOnNewModel(ctx context.Context, entry *dispatchedAgent
 		"Moved %q to %s and delivered the message. It will answer in a new report.",
 		entry.Label, meta.RunModel,
 	)), meta)
+}
+
+// sameModel reports whether two builds serve the same provider model.
+func sameModel(a, b Model) bool {
+	return a.ModelCfg.Provider == b.ModelCfg.Provider && a.ModelCfg.Model == b.ModelCfg.Model
 }

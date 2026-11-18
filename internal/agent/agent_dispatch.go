@@ -378,7 +378,7 @@ func dispatchKey(parentSessionID, label string) string {
 // agentDispatchTool launches a subagent that runs detached from this tool
 // call. The tool returns as soon as the subagent starts; the result is
 // delivered later as a message into the parent session.
-func (c *coordinator) agentDispatchTool(ctx context.Context, parentAgentID string, parentModel func() Model) (fantasy.AgentTool, error) {
+func (c *coordinator) agentDispatchTool(ctx context.Context, parentAgentID string) (fantasy.AgentTool, error) {
 	readOnly := readOnlyParent(parentAgentID)
 	agents, err := c.taskAgents(ctx, readOnly)
 	if err != nil {
@@ -387,7 +387,7 @@ func (c *coordinator) agentDispatchTool(ctx context.Context, parentAgentID strin
 
 	return fantasy.NewParallelAgentTool(
 		AgentDispatchToolName,
-		strings.TrimSpace(agentDispatchToolDescription)+dispatchModelCatalog(c.cfg.Config(), parentModel()),
+		strings.TrimSpace(agentDispatchToolDescription)+dispatchModelCatalog(c.cfg.Config(), c.mainModels().Large),
 		func(ctx context.Context, params AgentDispatchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Prompt == "" {
 				return fantasy.NewTextErrorResponse("prompt is required"), nil
@@ -405,22 +405,22 @@ func (c *coordinator) agentDispatchTool(ctx context.Context, parentAgentID strin
 				return fantasy.ToolResponse{}, errors.New("agent message id missing from context")
 			}
 
+			parentSessionID := tools.GetSessionFromContext(ctx)
+			if parentSessionID == "" {
+				return fantasy.ToolResponse{}, errors.New("session id missing from context")
+			}
+
 			// A model override swaps the shared subagent for a dedicated
 			// one running on the requested model. It is resolved before the
 			// label is taken, so a refused override leaves the label free
 			// and the call can be retried immediately.
 			access := accessOrRead(params.Access)
-			overrideAgent, sel, hasOverride, refusal := c.overrideDispatchAgent(ctx, access, params, parentModel())
+			overrideAgent, sel, hasOverride, refusal := c.overrideDispatchAgent(ctx, access, params, c.SessionModel(parentSessionID))
 			if refusal != "" {
 				return fantasy.NewTextErrorResponse(refusal), nil
 			}
 			if overrideAgent != nil {
 				agent = overrideAgent
-			}
-
-			parentSessionID := tools.GetSessionFromContext(ctx)
-			if parentSessionID == "" {
-				return fantasy.ToolResponse{}, errors.New("session id missing from context")
 			}
 
 			// The sub-session ID derives from the bare tool call ID so the
@@ -676,7 +676,7 @@ func (c *coordinator) recordDispatchReport(parentSessionID string, report messag
 // agentSendTool delivers a message to a running detached subagent. The
 // message is queued on the subagent's session, where sessionAgent folds it
 // into the subagent's turn at its next step.
-func (c *coordinator) agentSendTool(parentModel func() Model) fantasy.AgentTool {
+func (c *coordinator) agentSendTool() fantasy.AgentTool {
 	return fantasy.NewParallelAgentTool(
 		AgentSendToolName,
 		agentSendToolDescription,
@@ -711,7 +711,7 @@ func (c *coordinator) agentSendTool(parentModel func() Model) fantasy.AgentTool 
 			}
 
 			if params.switchesModel() {
-				return c.sendOnNewModel(ctx, entry, params, parentModel()), nil
+				return c.sendOnNewModel(ctx, entry, params, c.SessionModel(parentSessionID)), nil
 			}
 
 			// Each pass either folds the message into a running turn or
@@ -892,25 +892,22 @@ func (c *coordinator) rehydrateDispatch(ctx context.Context, parentSessionID, la
 
 	// An override resumes as it was asked for, re-resolved against the live
 	// config; if it no longer serves, the subagent is not quietly moved to
-	// the session default.
-	if record.Model != "" || record.Reasoning != "" {
-		params := AgentDispatchParams{Model: record.Model, Provider: record.Provider, Reasoning: record.Reasoning}
-		parent := Model{}
-		if params.Model != "" && params.Provider == "" {
-			// The result never landed: use the provider it ran on, else the session's.
-			provider, err := c.dispatchRunProvider(ctx, c.sessions.CreateAgentToolSessionID(record.MessageID, record.CallID))
-			if err != nil {
-				return nil, fmt.Errorf("subagent %q cannot be resumed: reading its transcript failed: %w", label, err)
-			}
-			params.Provider = provider
-			if provider == "" {
-				parent = c.mainModel()
-			}
+	// the session default. One without an override follows its session.
+	params := AgentDispatchParams{Model: record.Model, Provider: record.Provider, Reasoning: record.Reasoning}
+	parent := c.SessionModel(parentSessionID)
+	if params.Model != "" && params.Provider == "" {
+		// The result never landed: use the provider it ran on, else the session's.
+		provider, err := c.dispatchRunProvider(ctx, c.sessions.CreateAgentToolSessionID(record.MessageID, record.CallID))
+		if err != nil {
+			return nil, fmt.Errorf("subagent %q cannot be resumed: reading its transcript failed: %w", label, err)
 		}
-		overrideAgent, _, _, refusal := c.overrideDispatchAgent(ctx, record.Access, params, parent)
-		if refusal != "" {
-			return nil, fmt.Errorf("subagent %q cannot be resumed on its model override: %s", label, refusal)
-		}
+		params.Provider = provider
+	}
+	overrideAgent, _, _, refusal := c.overrideDispatchAgent(ctx, record.Access, params, parent)
+	if refusal != "" {
+		return nil, fmt.Errorf("subagent %q cannot be resumed on its model override: %s", label, refusal)
+	}
+	if overrideAgent != nil {
 		agent = overrideAgent
 	}
 

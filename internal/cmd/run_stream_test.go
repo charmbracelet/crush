@@ -20,7 +20,7 @@ import (
 func TestRunStream_ToolUseDoesNotTerminate(t *testing.T) {
 	t.Parallel()
 
-	s := &runStream{sessionID: "S", out: &bytes.Buffer{}, read: map[string]int{}}
+	s := &runStream{sessionID: "S", out: &bytes.Buffer{}, seen: map[string]string{}}
 
 	toolUse := proto.Message{
 		ID:        "m1",
@@ -45,7 +45,7 @@ func TestRunStream_RunCompleteExits(t *testing.T) {
 	t.Parallel()
 
 	buf := &bytes.Buffer{}
-	s := &runStream{sessionID: "S", out: buf, read: map[string]int{}}
+	s := &runStream{sessionID: "S", out: buf, seen: map[string]string{}}
 
 	// Tool-use step.
 	done, err := s.handle(pubsub.Event[proto.Message]{Payload: proto.Message{
@@ -90,7 +90,7 @@ func TestRunStream_ReconcilesOnOutOfOrderRunComplete(t *testing.T) {
 	t.Parallel()
 
 	buf := &bytes.Buffer{}
-	s := &runStream{sessionID: "S", out: buf, read: map[string]int{}}
+	s := &runStream{sessionID: "S", out: buf, seen: map[string]string{}}
 
 	done, err := s.handle(pubsub.Event[proto.RunComplete]{Payload: proto.RunComplete{
 		SessionID: "S",
@@ -111,7 +111,7 @@ func TestRunStream_ReconcilesPartialStream(t *testing.T) {
 	t.Parallel()
 
 	buf := &bytes.Buffer{}
-	s := &runStream{sessionID: "S", out: buf, read: map[string]int{}}
+	s := &runStream{sessionID: "S", out: buf, seen: map[string]string{}}
 
 	_, err := s.handle(pubsub.Event[proto.Message]{Payload: proto.Message{
 		ID: "m2", SessionID: "S", Role: proto.Assistant,
@@ -135,7 +135,7 @@ func TestRunStream_ReconcilesPartialStream(t *testing.T) {
 func TestRunStream_IgnoresOtherSessions(t *testing.T) {
 	t.Parallel()
 
-	s := &runStream{sessionID: "S", out: &bytes.Buffer{}, read: map[string]int{}}
+	s := &runStream{sessionID: "S", out: &bytes.Buffer{}, seen: map[string]string{}}
 	done, err := s.handle(pubsub.Event[proto.RunComplete]{Payload: proto.RunComplete{
 		SessionID: "OTHER",
 		MessageID: "x",
@@ -151,7 +151,7 @@ func TestRunStream_IgnoresOtherSessions(t *testing.T) {
 func TestRunStream_ErrorRunComplete(t *testing.T) {
 	t.Parallel()
 
-	s := &runStream{sessionID: "S", out: &bytes.Buffer{}, read: map[string]int{}}
+	s := &runStream{sessionID: "S", out: &bytes.Buffer{}, seen: map[string]string{}}
 	done, err := s.handle(pubsub.Event[proto.RunComplete]{Payload: proto.RunComplete{
 		SessionID: "S",
 		Error:     "model temporarily unavailable",
@@ -167,7 +167,7 @@ func TestRunStream_ErrorRunComplete(t *testing.T) {
 func TestRunStream_CancelledRunCompleteIsClean(t *testing.T) {
 	t.Parallel()
 
-	s := &runStream{sessionID: "S", out: &bytes.Buffer{}, read: map[string]int{}}
+	s := &runStream{sessionID: "S", out: &bytes.Buffer{}, seen: map[string]string{}}
 	done, err := s.handle(pubsub.Event[proto.RunComplete]{Payload: proto.RunComplete{
 		SessionID: "S",
 		Error:     "context canceled",
@@ -186,7 +186,7 @@ func TestRunStream_LeadingWhitespaceTrimmedOnce(t *testing.T) {
 	t.Parallel()
 
 	buf := &bytes.Buffer{}
-	s := &runStream{sessionID: "S", out: buf, read: map[string]int{}}
+	s := &runStream{sessionID: "S", out: buf, seen: map[string]string{}}
 
 	done, err := s.handle(pubsub.Event[proto.RunComplete]{Payload: proto.RunComplete{
 		SessionID: "S",
@@ -196,6 +196,40 @@ func TestRunStream_LeadingWhitespaceTrimmedOnce(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, done)
 	require.Equal(t, "actual output", buf.String())
+}
+
+// TestRunStream_LeadingBlankLines checks that leading blank lines and
+// spaces are dropped until something is printed. With a RunID only the
+// final text in RunComplete is printed. Without one the reply is printed
+// in pieces as its events arrive.
+func TestRunStream_LeadingBlankLines(t *testing.T) {
+	t.Parallel()
+	for name, texts := range map[string][]string{
+		"whole":               {"\nHello"},
+		"pieces":              {"\n", "\nHello"},
+		"more blank lines":    {"\n", "\n\nHello"},
+		"spaces":              {" ", "  Hello"},
+		"blank then indented": {"\n", "\n  Hello"},
+	} {
+		for _, runID := range []string{"", "run-mine"} {
+			t.Run(name+"/runID="+runID, func(t *testing.T) {
+				t.Parallel()
+				buf := &bytes.Buffer{}
+				s := &runStream{sessionID: "S", runID: runID, out: buf, seen: map[string]string{}}
+				for _, text := range texts {
+					done, err := s.handle(replyEvent("m", text), nil)
+					require.NoError(t, err)
+					require.False(t, done)
+				}
+				done, err := s.handle(pubsub.Event[proto.RunComplete]{Payload: proto.RunComplete{
+					SessionID: "S", RunID: runID, MessageID: "m", Text: texts[len(texts)-1],
+				}}, nil)
+				require.NoError(t, err)
+				require.True(t, done)
+				require.Equal(t, "Hello", buf.String())
+			})
+		}
+	}
 }
 
 // TestRunStream_StopSpinnerInvokedOnFirstOutput verifies the
@@ -208,7 +242,7 @@ func TestRunStream_StopSpinnerInvokedOnFirstOutput(t *testing.T) {
 
 	calls := 0
 	stop := func() { calls++ }
-	s := &runStream{sessionID: "S", out: &bytes.Buffer{}, read: map[string]int{}}
+	s := &runStream{sessionID: "S", out: &bytes.Buffer{}, seen: map[string]string{}}
 	_, _ = s.handle(pubsub.Event[proto.Message]{Payload: proto.Message{
 		ID: "m1", SessionID: "S", Role: proto.Assistant,
 		Parts: []proto.ContentPart{proto.TextContent{Text: "hi"}},
@@ -235,7 +269,7 @@ func TestRunStream_RunIDFiltersForeignTurns(t *testing.T) {
 		sessionID: sessionID,
 		runID:     myRun,
 		out:       buf,
-		read:      map[string]int{},
+		seen:      map[string]string{},
 	}
 
 	// The busy session's existing turn emits more text before it finishes.
@@ -284,7 +318,7 @@ func TestRunStream_RunIDSuppressesLiveMessagesAndPrintsRunComplete(t *testing.T)
 		sessionID: "S",
 		runID:     "run-mine",
 		out:       buf,
-		read:      map[string]int{},
+		seen:      map[string]string{},
 	}
 
 	done, err := s.handle(pubsub.Event[proto.Message]{Payload: proto.Message{
@@ -318,7 +352,7 @@ func TestRunStream_AgentErrorRunIDFiltersForeign(t *testing.T) {
 	t.Parallel()
 
 	// Foreign RunID with a matching session is still foreign.
-	s := &runStream{sessionID: "S", runID: "run-mine", out: &bytes.Buffer{}, read: map[string]int{}}
+	s := &runStream{sessionID: "S", runID: "run-mine", out: &bytes.Buffer{}, seen: map[string]string{}}
 	done, err := s.handle(pubsub.Event[proto.AgentEvent]{Payload: proto.AgentEvent{
 		Type:      proto.AgentEventTypeError,
 		SessionID: "S",
@@ -366,7 +400,7 @@ func TestRunStream_AgentErrorRunIDFiltersForeign(t *testing.T) {
 func TestRunStream_AgentErrorNoRunIDFiltersBySession(t *testing.T) {
 	t.Parallel()
 
-	s := &runStream{sessionID: "S", out: &bytes.Buffer{}, read: map[string]int{}}
+	s := &runStream{sessionID: "S", out: &bytes.Buffer{}, seen: map[string]string{}}
 
 	// Empty RunID for another session is ignored.
 	done, err := s.handle(pubsub.Event[proto.AgentEvent]{Payload: proto.AgentEvent{
@@ -405,7 +439,7 @@ func TestRunStream_NoRunIDFallsBackToSessionID(t *testing.T) {
 	t.Parallel()
 
 	buf := &bytes.Buffer{}
-	s := &runStream{sessionID: "S", out: buf, read: map[string]int{}}
+	s := &runStream{sessionID: "S", out: buf, seen: map[string]string{}}
 	done, err := s.handle(pubsub.Event[proto.RunComplete]{Payload: proto.RunComplete{
 		SessionID: "S",
 		MessageID: "m2",
@@ -414,4 +448,151 @@ func TestRunStream_NoRunIDFallsBackToSessionID(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, done)
 	require.Equal(t, "DONE", buf.String())
+}
+
+// replyEvent returns a message event for an assistant reply with the
+// given text in session "S".
+func replyEvent(id, text string) pubsub.Event[proto.Message] {
+	return pubsub.Event[proto.Message]{Payload: proto.Message{
+		ID: id, SessionID: "S", Role: proto.Assistant,
+		Parts: []proto.ContentPart{proto.TextContent{Text: text}},
+	}}
+}
+
+// TestRunStream_RunIDRetryPrintsFinalText pins what `crush run` prints
+// through a server when a provider request is retried after part of the
+// reply has streamed. runNonInteractive always supplies a RunID, so
+// message events are not printed and stdout comes from RunComplete
+// alone: the retried text, even when it is shorter than what the first
+// attempt streamed.
+func TestRunStream_RunIDRetryPrintsFinalText(t *testing.T) {
+	t.Parallel()
+
+	buf := &bytes.Buffer{}
+	s := &runStream{sessionID: "S", runID: "run-mine", out: buf, seen: map[string]string{}}
+	for _, ev := range []pubsub.Event[proto.Message]{
+		replyEvent("m", "A first attempt that"),
+		// The reset update of a retry has no parts.
+		{Payload: proto.Message{ID: "m", SessionID: "S", Role: proto.Assistant}},
+		replyEvent("m", "Real."),
+	} {
+		done, err := s.handle(ev, nil)
+		require.NoError(t, err)
+		require.False(t, done)
+	}
+	require.Empty(t, buf.String())
+
+	done, err := s.handle(pubsub.Event[proto.RunComplete]{Payload: proto.RunComplete{
+		SessionID: "S", RunID: "run-mine", MessageID: "m", Text: "Real.",
+	}}, nil)
+	require.NoError(t, err)
+	require.True(t, done)
+	require.Equal(t, "Real.", buf.String())
+}
+
+// TestRunStream_NoRunIDRetryReplacesText covers the fallback without a
+// RunID, where message events are printed as they arrive. A provider
+// retry resets the reply after part of it has streamed. The run must not
+// fail, and the new text is printed in full without its leading spaces,
+// whether it is shorter or longer than the first attempt. It starts on a
+// new line unless the first attempt was blank.
+func TestRunStream_NoRunIDRetryReplacesText(t *testing.T) {
+	t.Parallel()
+
+	for name, tc := range map[string]struct {
+		texts []string
+		want  string
+	}{
+		"shorter": {
+			texts: []string{"A first attempt that", "Real."},
+			want:  "A first attempt that\nReal.",
+		},
+		"longer": {
+			texts: []string{"A first attempt that", "The real answer, which is longer than the first attempt."},
+			want:  "A first attempt that\nThe real answer, which is longer than the first attempt.",
+		},
+		"indented": {
+			texts: []string{"First", "  Second"},
+			want:  "First\nSecond",
+		},
+		"blank first attempt": {
+			texts: []string{"\n", "Real."},
+			want:  "Real.",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			buf := &bytes.Buffer{}
+			s := &runStream{sessionID: "S", out: buf, seen: map[string]string{}}
+			for _, text := range tc.texts {
+				done, err := s.handle(replyEvent("m", text), nil)
+				require.NoError(t, err)
+				require.False(t, done)
+			}
+			final := tc.texts[len(tc.texts)-1]
+			done, err := s.handle(pubsub.Event[proto.RunComplete]{Payload: proto.RunComplete{
+				SessionID: "S", MessageID: "m", Text: final,
+			}}, nil)
+			require.NoError(t, err)
+			require.True(t, done)
+			require.Equal(t, tc.want, buf.String())
+		})
+	}
+}
+
+// TestRunStream_NoRunIDReconcilesAfterMissedRetry covers a retry whose
+// message events never reach the stream. RunComplete then carries text
+// that does not continue what was printed, so it is printed in full on
+// a new line instead of being dropped or cut at the old length.
+func TestRunStream_NoRunIDReconcilesAfterMissedRetry(t *testing.T) {
+	t.Parallel()
+
+	buf := &bytes.Buffer{}
+	s := &runStream{sessionID: "S", out: buf, seen: map[string]string{}}
+	_, err := s.handle(replyEvent("m", "A first attempt that"), nil)
+	require.NoError(t, err)
+	done, err := s.handle(pubsub.Event[proto.RunComplete]{Payload: proto.RunComplete{
+		SessionID: "S", MessageID: "m", Text: "Real.",
+	}}, nil)
+	require.NoError(t, err)
+	require.True(t, done)
+	require.Equal(t, "A first attempt that\nReal.", buf.String())
+}
+
+// TestRunStream_NoRunIDGrowingAndStaleUpdates covers text that grows,
+// which continues the output, and an update older than one already
+// printed, which adds nothing. A retry that starts with the text of the
+// failed attempt looks the same as growing text.
+func TestRunStream_NoRunIDGrowingAndStaleUpdates(t *testing.T) {
+	t.Parallel()
+
+	buf := &bytes.Buffer{}
+	s := &runStream{sessionID: "S", out: buf, seen: map[string]string{}}
+	for _, text := range []string{"The ans", "The answer", "The ans", "The answer is 42."} {
+		done, err := s.handle(replyEvent("m", text), nil)
+		require.NoError(t, err)
+		require.False(t, done)
+	}
+	require.Equal(t, "The answer is 42.", buf.String())
+}
+
+// TestRunStream_NoRunIDSkipsSummaries covers the fallback without a
+// RunID: a compaction summary is stored as an assistant message in the
+// session, but it is not part of the answer, so it is not printed.
+func TestRunStream_NoRunIDSkipsSummaries(t *testing.T) {
+	t.Parallel()
+
+	buf := &bytes.Buffer{}
+	s := &runStream{sessionID: "S", out: buf, seen: map[string]string{}}
+	summary := replyEvent("sum", "SUMMARY")
+	summary.Payload.IsSummaryMessage = true
+	for _, ev := range []pubsub.Event[proto.Message]{
+		replyEvent("m1", "Before."), summary, replyEvent("m2", "After."),
+	} {
+		done, err := s.handle(ev, nil)
+		require.NoError(t, err)
+		require.False(t, done)
+	}
+	require.Equal(t, "Before.After.", buf.String())
 }

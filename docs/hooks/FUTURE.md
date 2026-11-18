@@ -152,14 +152,14 @@ unaffected.
 
 ## `UserPromptSubmit` event
 
-**Status:** partially implemented as `TurnStart`. The current `TurnStart` event
-fires when the agent begins processing a prompt but does not yet support
-`decision` (blocking prompts) or `updated_prompt` (rewriting prompts). Those
-control features are still planned.
+**Status:** blocking is implemented. `UserPromptSubmit` fires before the prompt
+is stored, titled, queued, or sent, receives the `prompt`, and honors `deny`,
+`halt`, and exit 2. `context` and `updated_prompt` (rewriting prompts) are
+still planned; the rest of this section describes them.
 
 ### Motivation
 
-Crush now supports 13 hook events including `TurnStart`, which covers the basic
+Crush now supports 14 hook events including `TurnStart`, which covers the basic
 observability use case. The remaining gap is **control**: letting hooks block
 prompts matching a policy or rewrite them before they reach the LLM. This would
 enable secret redaction from prompts, policy enforcement ("don't mention

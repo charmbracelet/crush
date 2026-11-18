@@ -33,6 +33,7 @@ type Payload struct {
 	ToolResponse         *string         `json:"tool_response,omitempty"`
 	Error                string          `json:"error,omitempty"`
 	LastAssistantMessage *string         `json:"last_assistant_message,omitempty"`
+	Prompt               *string         `json:"prompt,omitempty"`
 	Decision             string          `json:"decision,omitempty"`
 	Source               string          `json:"source,omitempty"`
 	Reason               string          `json:"reason,omitempty"`
@@ -49,6 +50,7 @@ func BuildPayload(ev Event, cwd string) []byte {
 		ToolResponse:         ev.ToolResponse,
 		Error:                ev.Error,
 		LastAssistantMessage: ev.LastAssistantMessage,
+		Prompt:               ev.Prompt,
 		Decision:             ev.Decision,
 		Source:               ev.Source,
 		Reason:               ev.Reason,

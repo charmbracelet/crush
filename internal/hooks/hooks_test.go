@@ -2,6 +2,7 @@ package hooks
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"strings"
 	"sync"
@@ -840,4 +841,19 @@ func TestRunnerPicksUpSourceChanges(t *testing.T) {
 
 	hooks = map[string][]HookConfig{EventPreToolUse: {{Command: "exit 0"}}}
 	require.Equal(t, 1, r.Run(context.Background(), preToolEvent("bash", `{}`)).HookCount)
+}
+
+func TestUserPromptSubmitPayloadCarriesPrompt(t *testing.T) {
+	t.Parallel()
+	name, ok := NormalizeEvent("user_prompt_submit")
+	require.True(t, ok)
+	require.Equal(t, EventUserPromptSubmit, name)
+	require.False(t, EventHasTool(EventUserPromptSubmit))
+
+	payload := BuildPayload(Event{Name: EventUserPromptSubmit, SessionID: "s", Prompt: new("fix the login flow")}, "/tmp")
+	var p Payload
+	require.NoError(t, json.Unmarshal(payload, &p))
+	require.Equal(t, "UserPromptSubmit", p.HookEventName)
+	require.NotNil(t, p.Prompt)
+	require.Equal(t, "fix the login flow", *p.Prompt)
 }

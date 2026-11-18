@@ -2189,9 +2189,11 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 		existingToolItem := m.chat.MessageItem(tc.ID)
 		if toolItem, ok := existingToolItem.(chat.ToolMessageItem); ok {
 			existingToolCall := toolItem.ToolCall()
-			// only update if finished state changed or input changed
-			// to avoid clearing the cache
-			if (tc.Finished && !existingToolCall.Finished) || tc.Input != existingToolCall.Input {
+			// Only update when finished state, input, or start time changed,
+			// to avoid clearing the cache. The start time lands after the
+			// input finishes, once the call actually begins running.
+			if (tc.Finished && !existingToolCall.Finished) || tc.Input != existingToolCall.Input ||
+				tc.StartedAtMs != existingToolCall.StartedAtMs {
 				toolItem.SetToolCall(tc)
 			}
 		}
@@ -2201,6 +2203,9 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 	}
 
 	m.chat.AppendMessages(items...)
+	// The message may have stopped spinning or grown tool calls, either of
+	// which moves the turn timer.
+	m.syncPendingItem()
 	if m.chat.Follow() {
 		m.chat.ScrollToBottom()
 		m.chat.SelectLast()

@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"time"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/agent/tools"
@@ -88,19 +87,14 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	if params.RunInBackground {
 		options = append(options, "background", "true")
 	}
-	// Show how long the command ran (or has been running) beside the
-	// command; sub-second runs are noise, so they show nothing.
-	if opts.Elapsed >= time.Second {
-		options = append(options, "took", common.FormatDuration(opts.Elapsed))
-	}
 
 	header := bashHeader(sty, opts, cappedWidth, params.Description, cmd, options)
 	if opts.Compact {
 		return header
 	}
 
-	if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
-		return joinToolParts(header, earlyState)
+	if block, ok := toolStateBlock(sty, opts, cappedWidth, header); ok {
+		return block
 	}
 
 	if !opts.HasResult() {
@@ -142,7 +136,7 @@ func bashHeader(sty *styles.Styles, opts *ToolRenderOpts, width int, description
 	}
 	// The command sits below the description, in the output's column.
 	indent := toolBodyLeftPaddingTotal
-	return header + "\n\n" + indentLines(toolParamList(sty, []string{cmd}, width-indent, &cmdOpts), indent)
+	return header + "\n\n" + indentLines(toolParamList(sty, cmd, nil, width-indent, &cmdOpts), indent)
 }
 
 // singleLine joins a multi-line command onto one line, dropping each
@@ -298,8 +292,8 @@ func renderJobTool(sty *styles.Styles, opts *ToolRenderOpts, width int, action, 
 		return header
 	}
 
-	if earlyState, ok := toolEarlyStateContent(sty, opts, width); ok {
-		return joinToolParts(header, earlyState)
+	if block, ok := toolStateBlock(sty, opts, width, header); ok {
+		return block
 	}
 
 	if content == "" {

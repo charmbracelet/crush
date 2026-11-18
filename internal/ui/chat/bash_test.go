@@ -65,7 +65,7 @@ func TestBashToolMessageItem_TookHidesSubSecond(t *testing.T) {
 		}))
 	}
 
-	require.NotContains(t, render(900*time.Millisecond), "took")
+	require.NotContains(t, render(1500*time.Millisecond), "took", "quick commands show no duration")
 	require.Contains(t, render(3*time.Second), "took=3s")
 }
 

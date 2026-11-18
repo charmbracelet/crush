@@ -4,6 +4,7 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/common"
@@ -59,11 +60,16 @@ func newTurnAnim(sty *styles.Styles, id, sessionID string) *anim.Anim {
 }
 
 // PendingAssistantItem holds the turn spinner between a prompt being sent
-// and the assistant message that owns the animation arriving.
+// and the assistant message that owns the animation arriving. Once stopped
+// it shows only the turn's elapsed time, for the rest of the turn.
 type PendingAssistantItem struct {
 	*list.Versioned
-	sty  *styles.Styles
-	anim *anim.Anim
+	sty       *styles.Styles
+	anim      *anim.Anim
+	sessionID string
+	stopped   bool
+	// shown is the timer text last rendered while stopped.
+	shown string
 }
 
 var (
@@ -79,6 +85,18 @@ func NewPendingAssistantItem(sty *styles.Styles, sessionID string) *PendingAssis
 		Versioned: list.NewVersioned(),
 		sty:       sty,
 		anim:      newTurnAnim(sty, PendingAssistantID, sessionID),
+		sessionID: sessionID,
+	}
+}
+
+// Stopped reports whether the item shows only the elapsed time.
+func (p *PendingAssistantItem) Stopped() bool { return p.stopped }
+
+// Stop drops the spinner and keeps only the elapsed time.
+func (p *PendingAssistantItem) Stop() {
+	if !p.stopped {
+		p.stopped = true
+		p.Bump()
 	}
 }
 
@@ -95,15 +113,23 @@ func (p *PendingAssistantItem) Spinning() bool { return true }
 // [AssistantMessageItem.restyleAnim], which takes the spinner over.
 func (p *PendingAssistantItem) restyleAnim() {
 	p.anim.SetColors(
-		p.sty.WorkingLabelColor,
+		p.sty.ThinkingLabelColor,
 		p.sty.WorkingGradFromColor,
 		p.sty.WorkingGradToColor,
 		p.sty.WorkingTimerColor,
 	)
 }
 
-// Advance implements [Animatable].
+// Advance implements [Animatable]. A stopped item only changes when its
+// timer text does.
 func (p *PendingAssistantItem) Advance() bool {
+	if p.stopped {
+		if p.timer() == p.shown {
+			return false
+		}
+		p.Bump()
+		return true
+	}
 	if !p.anim.Advance() {
 		return false
 	}
@@ -113,7 +139,18 @@ func (p *PendingAssistantItem) Advance() bool {
 }
 
 // RawRender implements list.RawRenderable.
-func (p *PendingAssistantItem) RawRender(int) string { return p.anim.Render() }
+func (p *PendingAssistantItem) RawRender(int) string {
+	if !p.stopped {
+		return p.anim.Render()
+	}
+	p.shown = p.timer()
+	if p.shown == "" {
+		return ""
+	}
+	return lipgloss.NewStyle().Foreground(p.sty.WorkingTimerColor).Render("Running " + p.shown)
+}
+
+func (p *PendingAssistantItem) timer() string { return common.Elapsed(p.sessionID) }
 
 // Render implements list.Item.
 func (p *PendingAssistantItem) Render(width int) string {

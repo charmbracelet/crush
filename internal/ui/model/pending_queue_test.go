@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 )
 
@@ -24,8 +25,17 @@ func newPendingUI(t *testing.T) *UI {
 	return m
 }
 
+// hasPending reports whether the placeholder spinner is showing, as opposed
+// to nothing or the stopped turn timer.
 func hasPending(m *UI) bool {
-	return m.chat.MessageItem(chat.PendingAssistantID) != nil
+	item, ok := m.chat.MessageItem(chat.PendingAssistantID).(*chat.PendingAssistantItem)
+	return ok && !item.Stopped()
+}
+
+// hasTurnTimer reports whether the stopped turn timer is showing.
+func hasTurnTimer(m *UI) bool {
+	item, ok := m.chat.MessageItem(chat.PendingAssistantID).(*chat.PendingAssistantItem)
+	return ok && item.Stopped()
 }
 
 // transcriptIDs lists the ids of the items in view, top to bottom.
@@ -145,6 +155,7 @@ func TestPromptSentDuringAToolRunIsNotEchoed(t *testing.T) {
 
 	require.Nil(t, m.chat.MessageItem(chat.PendingUserID), "the queue owns it")
 	require.False(t, hasPending(m), "no second spinner underneath the turn")
+	require.True(t, hasTurnTimer(m), "the turn time stays on screen while the tool runs")
 }
 
 // A run this client never sent (a subagent report, a channel event, a
@@ -433,4 +444,67 @@ func TestProbeInFlightAtRunEndIsDiscarded(t *testing.T) {
 
 	require.NotNil(t, m.chat.MessageItem(chat.PendingUserID), "the prompt is echoed")
 	require.True(t, hasPending(m), "the spinner shows straight away")
+}
+
+// Once the assistant message stops spinning, the turn's elapsed time stays
+// at the bottom of the transcript until the turn ends, hidden only while a
+// spinning assistant message shows it itself.
+func TestTurnTimerOutlivesTheSpinner(t *testing.T) {
+	m := newPendingUI(t)
+	m.sendMessage("first")
+	m.appendSessionMessage(userMessage("u1", "s1", "first"))
+	m.appendSessionMessage(message.Message{ID: "a1", Role: message.Assistant, SessionID: "s1"})
+	require.False(t, hasTurnTimer(m), "the spinning message shows the time")
+
+	m.updateSessionMessage(message.Message{
+		ID: "a1", Role: message.Assistant, SessionID: "s1",
+		Parts: []message.ContentPart{message.ToolCall{ID: "tc1", Name: "bash", Input: "{}", Finished: true}},
+	})
+	require.True(t, hasTurnTimer(m))
+	ids := transcriptIDs(m)
+	require.Equal(t, chat.PendingAssistantID, ids[len(ids)-1], "the timer sits under the tool call")
+
+	m.endPendingTurn("s1")
+	require.False(t, hasTurnTimer(m), "the timer goes with the turn")
+}
+
+func TestTurnTimerReadsRunning(t *testing.T) {
+	m := newPendingUI(t)
+	m.sendMessage("first")
+	m.appendSessionMessage(message.Message{
+		ID: "a1", Role: message.Assistant, SessionID: "s1",
+		Parts: []message.ContentPart{message.ToolCall{ID: "tc1", Name: "bash", Input: "{}", Finished: true}},
+	})
+	require.True(t, hasTurnTimer(m))
+	out := ansi.Strip(m.chat.MessageItem(chat.PendingAssistantID).Render(80))
+	require.Regexp(t, `Running \d+s`, out)
+}
+
+// While tool calls are still being written, the turn time rides on the last
+// one's spinner instead of a separate line; once the arguments finish it
+// moves back to the "Running" line under the calls.
+func TestTurnTimerRidesOnTheLastStreamingToolCall(t *testing.T) {
+	m := newPendingUI(t)
+	m.sendMessage("first")
+	m.appendSessionMessage(userMessage("u1", "s1", "first"))
+	m.appendSessionMessage(message.Message{ID: "a1", Role: message.Assistant, SessionID: "s1"})
+
+	streaming := message.Message{
+		ID: "a1", Role: message.Assistant, SessionID: "s1",
+		Parts: []message.ContentPart{
+			message.ToolCall{ID: "tc1", Name: "bash"},
+			message.ToolCall{ID: "tc2", Name: "bash"},
+		},
+	}
+	m.updateSessionMessage(streaming)
+	require.False(t, hasTurnTimer(m), "the streaming call carries the time")
+	require.Equal(t, "tc2", m.pending.timerTool.ID(), "only the last streaming call shows it")
+
+	streaming.Parts = []message.ContentPart{
+		message.ToolCall{ID: "tc1", Name: "bash", Input: "{}", Finished: true},
+		message.ToolCall{ID: "tc2", Name: "bash", Input: "{}", Finished: true},
+	}
+	m.updateSessionMessage(streaming)
+	require.True(t, hasTurnTimer(m), "finished arguments hand the time back to the Running line")
+	require.Nil(t, m.pending.timerTool)
 }

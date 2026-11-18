@@ -22,7 +22,7 @@ const (
 
 // thinkingMessage builds an assistant message with a fixed reasoning
 // content and an optional text content. When text is empty the
-// message represents a still-thinking turn (matches IsThinking()).
+// message represents a still-thinking turn (matches HasReasoningAwaitingAnswer()).
 // Both reasoning timestamps are anchored to fixed Unix seconds so
 // ThinkingDuration is deterministic and cache-equality assertions
 // don't depend on wall-clock time.
@@ -84,7 +84,7 @@ func snapshot(a *AssistantMessageItem) sectionSnapshot {
 // the central F4 invariant: streaming the main content through SetMessage
 // must keep the cached thinking render intact, provided the inputs to
 // the thinking section render (text, expanded flag, footer state) are
-// unchanged. We seed an already-non-empty content so that IsThinking()
+// unchanged. We seed an already-non-empty content so that HasReasoningAwaitingAnswer()
 // is false on both renders — that's the steady streaming state where
 // the thinking block has finished and content keeps growing.
 func TestAssistantSectionCache_ContentChangeDoesNotInvalidateThinking(t *testing.T) {

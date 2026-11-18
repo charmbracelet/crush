@@ -420,7 +420,7 @@ type Styles struct {
 		ContentLineNumber lipgloss.Style // Line numbers in code
 
 		// State message styles
-		StateWaiting   lipgloss.Style // "Waiting for tool response..."
+		StateWaiting   lipgloss.Style // "Requesting permission..."
 		StateCancelled lipgloss.Style // "Canceled."
 
 		// Error styles

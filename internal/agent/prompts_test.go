@@ -162,38 +162,65 @@ func TestPromptTextRuntimeOverrideWins(t *testing.T) {
 	require.Equal(t, "configured", task)
 }
 
-// Summary and title are only loaded mid-session, so their files must be
-// checked up front or a typo surfaces the first time a session compacts.
-func TestCheckPromptsCatchesMissingLazyPrompt(t *testing.T) {
+// Summary and title are only used mid-session, so their files must be read
+// up front or a typo surfaces the first time a session compacts.
+func TestLoadPromptTextsCatchesMissingLazyPrompt(t *testing.T) {
 	t.Parallel()
 
 	store := promptStore(t, map[string]string{"summary": filepath.Join(t.TempDir(), "nope.md")})
-	require.ErrorContains(t, checkPrompts(store), "reading summary prompt")
+	_, err := loadPromptTexts(store)
+	require.ErrorContains(t, err, "reading summary prompt")
 }
 
-func TestCheckPromptsCatchesMalformedTemplate(t *testing.T) {
+func TestLoadPromptTextsCatchesMalformedTemplate(t *testing.T) {
 	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "plan.md.tpl")
 	require.NoError(t, os.WriteFile(path, []byte("{{.WorkingDir"), 0o644))
 
 	store := promptStore(t, map[string]string{"plan": path})
-	require.ErrorContains(t, checkPrompts(store), "parsing plan prompt template")
+	_, err := loadPromptTexts(store)
+	require.ErrorContains(t, err, "parsing plan prompt template")
 }
 
 // Title and summary are sent verbatim, so braces in them are just text.
-func TestCheckPromptsAllowsBracesInPlainPrompts(t *testing.T) {
+func TestLoadPromptTextsAllowsBracesInPlainPrompts(t *testing.T) {
 	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "title.md")
 	require.NoError(t, os.WriteFile(path, []byte("name it {{ like this"), 0o644))
 
 	store := promptStore(t, map[string]string{"title": path})
-	require.NoError(t, checkPrompts(store))
+	_, err := loadPromptTexts(store)
+	require.NoError(t, err)
 }
 
-func TestCheckPromptsWithoutOverrides(t *testing.T) {
+func TestLoadPromptTextsWithoutOverrides(t *testing.T) {
 	t.Parallel()
 
-	require.NoError(t, checkPrompts(promptStore(t, nil)))
+	texts, err := loadPromptTexts(promptStore(t, nil))
+	require.NoError(t, err)
+	for _, name := range config.PromptNames {
+		require.Equal(t, string(builtinPrompts[name]), texts[name])
+	}
+}
+
+// A replacement is read once at startup, so moving or deleting the file
+// mid-session must not break compaction or titles.
+func TestSessionAgentKeepsPromptsAfterFileIsGone(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "summary.md")
+	require.NoError(t, os.WriteFile(path, []byte("sum it up"), 0o644))
+
+	texts, err := loadPromptTexts(promptStore(t, map[string]string{"summary": path}))
+	require.NoError(t, err)
+	require.NoError(t, os.Remove(path))
+
+	a := NewSessionAgent(SessionAgentOptions{Prompts: texts}).(*sessionAgent)
+	require.Equal(t, "sum it up", promptOrBuiltin(a.prompts, "summary"))
+	require.Equal(t, string(titlePromptTmpl), promptOrBuiltin(a.prompts, "title"))
+
+	bare := NewSessionAgent(SessionAgentOptions{}).(*sessionAgent)
+	require.Equal(t, string(summaryPromptTmpl), promptOrBuiltin(bare.prompts, "summary"))
 }

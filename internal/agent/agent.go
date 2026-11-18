@@ -237,6 +237,9 @@ type sessionAgent struct {
 	// turns; sendChannelReply treats nil as "routing disabled".
 	cfg                  *config.ConfigStore
 	disableAutoSummarize bool
+	// prompts is every prompt's text as read at startup; summarize and
+	// generateTitle take theirs from it. Nil falls back to the built-ins.
+	prompts map[string]string
 	// permissions answers whether the user is being asked about tool
 	// calls at all. Nil in tests and anywhere that never needs to know.
 	permissions permission.Service
@@ -302,9 +305,12 @@ type SessionAgentOptions struct {
 	Messages             message.Service
 	Permissions          permission.Service
 	Cfg                  *config.ConfigStore
-	Tools                []fantasy.AgentTool
-	Notify               pubsub.Publisher[notify.Notification]
-	RunComplete          pubsub.Publisher[notify.RunComplete]
+	// Prompts is every prompt's text, read once at startup. Nil uses the
+	// built-ins.
+	Prompts     map[string]string
+	Tools       []fantasy.AgentTool
+	Notify      pubsub.Publisher[notify.Notification]
+	RunComplete pubsub.Publisher[notify.RunComplete]
 	// Hooks runs lifecycle hooks for turns and compaction. Nil runs none.
 	Hooks *hooks.Runner
 	// titles is shared by a coordinator's agents so one drain covers all.
@@ -322,6 +328,7 @@ func NewSessionAgent(
 		sessions:             opts.Sessions,
 		messages:             opts.Messages,
 		cfg:                  opts.Cfg,
+		prompts:              opts.Prompts,
 		disableAutoSummarize: opts.DisableAutoSummarize,
 		permissions:          opts.Permissions,
 		tools:                csync.NewSliceFrom(opts.Tools),
@@ -1529,13 +1536,9 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID, trigger string,
 		}
 	}()
 
-	sysPrompt, err := promptText(a.cfg, "summary")
-	if err != nil {
-		return err
-	}
 	agent := fantasy.NewAgent(
 		largeModel.Model,
-		fantasy.WithSystemPrompt(sysPrompt),
+		fantasy.WithSystemPrompt(promptOrBuiltin(a.prompts, "summary")),
 		fantasy.WithUserAgent(userAgent),
 	)
 	summaryMessage, err := a.messages.Create(ctx, sessionID, message.CreateMessageParams{
@@ -1951,12 +1954,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	models := a.models()
 	smallModel, largeModel := models.Small, models.Large
 	systemPromptPrefix := a.systemPromptPrefix.Get()
-
-	titlePrompt, err := promptText(a.cfg, "title")
-	if err != nil {
-		slog.Error("Failed to load title prompt", "error", err)
-		return
-	}
+	titlePrompt := promptOrBuiltin(a.prompts, "title")
 
 	newAgent := func(m fantasy.LanguageModel, p string, tok int64) fantasy.Agent {
 		return fantasy.NewAgent(
@@ -1991,6 +1989,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	}
 
 	var resp *fantasy.AgentResult
+	var err error
 	var model Model
 	var success bool
 	for _, attempt := range attempts {

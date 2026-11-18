@@ -2907,3 +2907,28 @@ func TestConfig_PromptOverrideUnknownNameFails(t *testing.T) {
 	_, err := Init(t.Context(), dir, "", false)
 	require.ErrorContains(t, err, `unknown prompt "codr"`)
 }
+
+// A relative prompt path belongs to the config file that set it, so a global
+// config means the same file in every project.
+func TestConfig_PromptPathsAnchorToTheirConfigFile(t *testing.T) {
+	t.Setenv("CRUSH_DISABLE_PROVIDER_AUTO_UPDATE", "1")
+	globalDir := t.TempDir()
+	t.Setenv("CRUSH_GLOBAL_CONFIG", globalDir)
+	t.Setenv("CRUSH_GLOBAL_DATA", t.TempDir())
+
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "crushrc"), []byte(
+		"option prompt summary prompts/summary.md\noption prompt title prompts/title.md\n"), 0o644))
+
+	project := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(project, "crush.json"), []byte(
+		`{"options":{"prompts":{"coder":".crush/coder.md.tpl","title":"~/title.md","task":"$TASK_PROMPT"}}}`), 0o644))
+
+	cfg, err := Init(t.Context(), project, "", false)
+	require.NoError(t, err)
+
+	prompts := cfg.Config().Options.Prompts
+	require.Equal(t, filepath.Join(globalDir, "prompts", "summary.md"), prompts["summary"])
+	require.Equal(t, filepath.Join(project, ".crush", "coder.md.tpl"), prompts["coder"])
+	require.Equal(t, "~/title.md", prompts["title"], "the project wins, and ~ is expanded on read")
+	require.Equal(t, "$TASK_PROMPT", prompts["task"], "$VARS are expanded on read")
+}

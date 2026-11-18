@@ -565,9 +565,11 @@ option prompt summary ~/.config/crush/prompts/summary.md
 ```
 
 Paths go through the shell, so `~` and `$VARS` work. A relative path is
-resolved against the project directory, the same as context paths, so
+resolved against the directory of the config file that sets it. So
 `option prompt coder .crush/coder.md.tpl` in a project's `crushrc` finds the
-file even when Crush starts with `--cwd` or runs on a server.
+project's file, and `option prompt summary prompts/summary.md` in your global
+`~/.config/crush/crushrc` finds `~/.config/crush/prompts/summary.md` from every
+project. Both hold when Crush starts with `--cwd` or runs on a server.
 
 Overrides layer like every other option: one in your global
 `~/.config/crush/crushrc` applies everywhere, and a project config replaces
@@ -596,6 +598,11 @@ crush --prompt coder=./terse-coder.md.tpl
 crush run --prompt summary=./summary.md "tidy up the changelog"
 ```
 
+When Crush runs through a server, every session in a directory shares one
+workspace, so `--prompt` only applies to the session that opens it. A later
+`--prompt` asking for different prompts fails rather than being ignored; close
+the other sessions in that directory first.
+
 Start from the prompt you are replacing rather than a blank file:
 [coder][coder], [task][task], [plan][plan], [summary][summary], [title][title],
 [initialize][initialize]. They all live in
@@ -614,12 +621,30 @@ unless you ask for it too. That includes the pieces you probably want:
 
 ```text
 {{.AvailSkillXML}}        available skills
-{{.ContextFiles}}         AGENTS.md and friends from the project
-{{.GlobalContextFiles}}   the same from your global config
 {{.WorkingDir}}           where Crush is running
 {{.Platform}}             the host OS
 {{.GitStatus}}            branch, status, and recent commits
-{{.Config.LSP}}           configured language servers
+```
+
+Context files and language servers are lists rather than text, so pasting
+`{{.ContextFiles}}` or `{{.Config.LSP}}` as-is prints raw Go data. Use the
+blocks the built-in `coder` prompt uses instead. For AGENTS.md and friends from
+the project (use `.GlobalContextFiles` for the ones from your global config):
+
+```text
+{{range .ContextFiles}}
+<file path="{{.Path}}">
+{{.Content}}
+</file>
+{{end}}
+```
+
+And to mention LSP diagnostics only when a language server is configured:
+
+```text
+{{if .Config.LSP}}
+Diagnostics (lint/typecheck) are included in tool output.
+{{end}}
 ```
 
 A name that is not on the list above, a file that cannot be read, and a

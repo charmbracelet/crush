@@ -195,10 +195,12 @@ option reset <list-key>    # clear a list option back to empty
   `option ui completions-max-depth N`, `option ui completions-max-items N`.
 - **Prompt overrides**: `option prompt <name> <path>` replaces a built-in
   prompt (`coder`, `task`, `plan`, `summary`, `title`, `initialize`) with a
-  file. Relative paths resolve against the project directory. The file
-  replaces the built-in whole, so a `coder` replacement must include
-  `{{.AvailSkillXML}}`, `{{.ContextFiles}}` and friends to keep them. For one
-  run, use `crush --prompt coder=./file.md.tpl` instead.
+  file. Relative paths resolve against the directory of the config file
+  that sets them. The file replaces the built-in whole, so a `coder`
+  replacement must include `{{.AvailSkillXML}}` and a
+  `{{range .ContextFiles}}<file path="{{.Path}}">{{.Content}}</file>{{end}}`
+  loop (copy the blocks from the built-in `coder.md.tpl`) to keep them. For
+  one run, use `crush --prompt coder=./file.md.tpl` instead.
 - **List keys** (singular, one value per call, repeatable): `context-path`,
   `global-context-path`, `skill-path`, `disable-skill`. Use `option reset <key>`
   to wipe inherited values (e.g. after `source`).

@@ -59,9 +59,9 @@ func promptText(store *config.ConfigStore, name string) (string, error) {
 }
 
 // promptPath returns the file replacing the named prompt, or "" for the
-// built-in. A --prompt flag beats options.prompts. Relative config paths
-// resolve against the workspace, like context paths, so they keep working
-// under --cwd and in server workspaces.
+// built-in. A --prompt flag beats options.prompts. Config loading already
+// anchors relative paths to the config file that set them; anything still
+// relative (a $VAR that expands to one) resolves against the workspace.
 func promptPath(store *config.ConfigStore, name string) string {
 	if path := store.Overrides().Prompts[name]; path != "" {
 		return path
@@ -73,26 +73,39 @@ func promptPath(store *config.ConfigStore, name string) string {
 	return filepathext.SmartJoin(store.WorkingDir(), prompt.ExpandPath(opts.Prompts[name], store))
 }
 
-// checkPrompts loads every replaced prompt, so a missing file or a broken
-// template fails at startup. Without it, a bad summary or title override
-// would only surface the first time a session compacts or gets named.
-func checkPrompts(store *config.ConfigStore) error {
+// loadPromptTexts reads every prompt once, built-in or replaced, so a
+// missing file or a broken template fails at startup, and a file moved or
+// deleted mid-session cannot later break compaction, titles, or sub-agents.
+func loadPromptTexts(store *config.ConfigStore) (map[string]string, error) {
+	texts := make(map[string]string, len(config.PromptNames))
 	for _, name := range config.PromptNames {
-		if promptPath(store, name) == "" {
-			continue
-		}
 		text, err := promptText(store, name)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		if !templatedPrompts[name] {
-			continue
+		if templatedPrompts[name] {
+			if _, err := prompt.NewPrompt(name, text); err != nil {
+				return nil, err
+			}
 		}
-		if _, err := prompt.NewPrompt(name, text); err != nil {
-			return err
-		}
+		texts[name] = text
 	}
-	return nil
+	return texts, nil
+}
+
+// promptOrBuiltin returns the named prompt from texts, as loaded by
+// loadPromptTexts, or the built-in when texts lacks it, as it does for
+// agents built by hand in tests.
+func promptOrBuiltin(texts map[string]string, name string) string {
+	if text, ok := texts[name]; ok {
+		return text
+	}
+	return string(builtinPrompts[name])
+}
+
+// newPrompt builds a templated prompt from the text read at startup.
+func (c *coordinator) newPrompt(name string, opts ...prompt.Option) (*prompt.Prompt, error) {
+	return prompt.NewPrompt(name, promptOrBuiltin(c.promptTexts, name), opts...)
 }
 
 // templatedPrompts are the prompts rendered as Go templates. Title and

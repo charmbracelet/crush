@@ -879,7 +879,8 @@ func (c *controllerV1) handleError(w http.ResponseWriter, r *http.Request, err e
 		status = http.StatusConflict
 	case errors.Is(err, backend.ErrWorkspaceClosing),
 		errors.Is(err, backend.ErrServerNotIdle),
-		errors.Is(err, backend.ErrClientRetired):
+		errors.Is(err, backend.ErrClientRetired),
+		errors.Is(err, backend.ErrPromptOverrideMismatch):
 		status = http.StatusConflict
 	case errors.Is(err, backend.ErrServerShuttingDown):
 		// 503, not 409: the request is not wrong, this process is just

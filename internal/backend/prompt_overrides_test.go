@@ -51,6 +51,51 @@ func TestBackend_CreateWorkspacePromptOverrides(t *testing.T) {
 	require.Empty(t, ws.Cfg.Config().Options.Prompts, "a flag must not leak into persisted config")
 }
 
+// A second --prompt run in an already-open directory cannot change its
+// prompts, so it must fail loudly instead of silently running the old ones.
+// A client that asks for no prompts may still join.
+func TestBackend_CreateWorkspacePromptMismatch(t *testing.T) {
+	isolatePromptOverrideEnv(t)
+
+	wd := t.TempDir()
+	srvCfg, err := config.Init(t.Context(), wd, "", false)
+	require.NoError(t, err)
+	b := backend.New(t.Context(), srvCfg, nil)
+
+	create := func(prompts config.PromptPaths) (*backend.Workspace, error) {
+		cid := uuid.New().String()
+		ws, _, err := b.CreateWorkspace(proto.Workspace{
+			ClientID: cid,
+			Path:     wd,
+			DataDir:  filepath.Join(wd, ".crush"),
+			Prompts:  prompts,
+		})
+		if err == nil {
+			t.Cleanup(func() { _ = b.DeleteWorkspace(ws.ID, cid) })
+		}
+		return ws, err
+	}
+
+	first := filepath.Join(wd, "first.md.tpl")
+	second := filepath.Join(wd, "second.md.tpl")
+	require.NoError(t, os.WriteFile(first, []byte("first"), 0o644))
+	require.NoError(t, os.WriteFile(second, []byte("second"), 0o644))
+
+	ws, err := create(config.PromptPaths{"coder": first})
+	require.NoError(t, err)
+
+	_, err = create(config.PromptPaths{"coder": second})
+	require.ErrorIs(t, err, backend.ErrPromptOverrideMismatch)
+
+	same, err := create(config.PromptPaths{"coder": first})
+	require.NoError(t, err)
+	require.Equal(t, ws.ID, same.ID)
+
+	plain, err := create(nil)
+	require.NoError(t, err)
+	require.Equal(t, ws.ID, plain.ID)
+}
+
 func TestBackend_CreateWorkspaceRejectsUnknownPrompt(t *testing.T) {
 	isolatePromptOverrideEnv(t)
 

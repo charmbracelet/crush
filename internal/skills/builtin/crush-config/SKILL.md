@@ -193,6 +193,14 @@ option reset <list-key>    # clear a list option back to empty
   scrolling), `option ui scrollbar default|always|never`,
   `option ui exit-banner default|compact|none`,
   `option ui completions-max-depth N`, `option ui completions-max-items N`.
+- **Prompt overrides**: `option prompt <name> <path>` replaces a built-in
+  prompt (`coder`, `task`, `plan`, `summary`, `title`, `initialize`) with a
+  file. Relative paths resolve against the directory of the config file
+  that sets them. The file replaces the built-in whole, so a `coder`
+  replacement must include `{{.AvailSkillXML}}` and a
+  `{{range .ContextFiles}}<file path="{{.Path}}">{{.Content}}</file>{{end}}`
+  loop (copy the blocks from the built-in `coder.md.tpl`) to keep them. For
+  one run, use `crush --prompt coder=./file.md.tpl` instead.
 - **List keys** (singular, one value per call, repeatable): `context-path`,
   `global-context-path`, `skill-path`, `disable-skill`. Use `option reset <key>`
   to wipe inherited values (e.g. after `source`).
@@ -374,6 +382,7 @@ The `$schema` property enables IDE autocomplete but is optional.
 | `option metrics false`               | `options.disable_metrics = true`                       |
 | `option request-timeout 300`          | `options.request_timeout = 300`                        |
 | `option max-background-jobs 200`     | `options.max_background_jobs = 200`                    |
+| `option prompt coder ./coder.md.tpl` | `options.prompts.coder = "./coder.md.tpl"`             |
 | `option attribution-trailer-style none` | `options.attribution.trailer_style = "none"`        |
 | `option attribution-generated-with false` | `options.attribution.generated_with = false`       |
 

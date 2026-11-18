@@ -69,12 +69,6 @@ var userAgent = fmt.Sprintf("Charm-Crush/%s (https://charm.land/crush)", version
 // reasons) instead of completing it. Details are filled in per turn.
 const providerStoppedTurnMessage = "Provider stopped the response"
 
-//go:embed templates/title.md
-var titlePrompt []byte
-
-//go:embed templates/summary.md
-var summaryPrompt []byte
-
 // Used to remove <think> tags from generated titles.
 var (
 	thinkTagRegex       = regexp.MustCompile(`(?s)<think>.*?</think>`)
@@ -243,6 +237,9 @@ type sessionAgent struct {
 	// turns; sendChannelReply treats nil as "routing disabled".
 	cfg                  *config.ConfigStore
 	disableAutoSummarize bool
+	// prompts is every prompt's text as read at startup; summarize and
+	// generateTitle take theirs from it. Nil falls back to the built-ins.
+	prompts map[string]string
 	// permissions answers whether the user is being asked about tool
 	// calls at all. Nil in tests and anywhere that never needs to know.
 	permissions permission.Service
@@ -308,9 +305,12 @@ type SessionAgentOptions struct {
 	Messages             message.Service
 	Permissions          permission.Service
 	Cfg                  *config.ConfigStore
-	Tools                []fantasy.AgentTool
-	Notify               pubsub.Publisher[notify.Notification]
-	RunComplete          pubsub.Publisher[notify.RunComplete]
+	// Prompts is every prompt's text, read once at startup. Nil uses the
+	// built-ins.
+	Prompts     map[string]string
+	Tools       []fantasy.AgentTool
+	Notify      pubsub.Publisher[notify.Notification]
+	RunComplete pubsub.Publisher[notify.RunComplete]
 	// Hooks runs lifecycle hooks for turns and compaction. Nil runs none.
 	Hooks *hooks.Runner
 	// titles is shared by a coordinator's agents so one drain covers all.
@@ -328,6 +328,7 @@ func NewSessionAgent(
 		sessions:             opts.Sessions,
 		messages:             opts.Messages,
 		cfg:                  opts.Cfg,
+		prompts:              opts.Prompts,
 		disableAutoSummarize: opts.DisableAutoSummarize,
 		permissions:          opts.Permissions,
 		tools:                csync.NewSliceFrom(opts.Tools),
@@ -1537,7 +1538,7 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID, trigger string,
 
 	agent := fantasy.NewAgent(
 		largeModel.Model,
-		fantasy.WithSystemPrompt(string(summaryPrompt)),
+		fantasy.WithSystemPrompt(promptOrBuiltin(a.prompts, "summary")),
 		fantasy.WithUserAgent(userAgent),
 	)
 	summaryMessage, err := a.messages.Create(ctx, sessionID, message.CreateMessageParams{
@@ -1953,11 +1954,12 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	models := a.models()
 	smallModel, largeModel := models.Small, models.Large
 	systemPromptPrefix := a.systemPromptPrefix.Get()
+	titlePrompt := promptOrBuiltin(a.prompts, "title")
 
-	newAgent := func(m fantasy.LanguageModel, p []byte, tok int64) fantasy.Agent {
+	newAgent := func(m fantasy.LanguageModel, p string, tok int64) fantasy.Agent {
 		return fantasy.NewAgent(
 			m,
-			fantasy.WithSystemPrompt(string(p)+"\n /no_think"),
+			fantasy.WithSystemPrompt(p+"\n /no_think"),
 			fantasy.WithMaxOutputTokens(tok),
 			fantasy.WithUserAgent(userAgent),
 		)

@@ -63,6 +63,7 @@ func init() {
 	rootCmd.PersistentFlags().CountP("yolo", "y", "Skip permission prompts: -y to stop being asked and block dangerous commands, -yy to allow them too")
 	rootCmd.PersistentFlags().StringSlice("channels", nil, "MCP servers to enable as channels (repeatable), e.g. --channels server:webhook")
 	_ = rootCmd.PersistentFlags().MarkHidden("channels")
+	addPromptFlag(rootCmd.PersistentFlags())
 	rootCmd.Flags().StringP("session", "s", "", "Continue a previous session by ID")
 	rootCmd.Flags().BoolP("continue", "C", false, "Continue the most recent session")
 	rootCmd.MarkFlagsMutuallyExclusive("session", "continue")
@@ -327,6 +328,11 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 		return nil, nil, err
 	}
 
+	prompts, err := promptOverrides(cmd)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	store, err := config.Init(ctx, cwd, dataDir, debug)
 	if err != nil {
 		return nil, nil, err
@@ -334,6 +340,7 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 
 	cfg := store.Config()
 	store.Overrides().EnabledChannels = channels
+	store.Overrides().Prompts = prompts
 	if yoloCount > 1 {
 		store.Overrides().PermissionMode = permission.PermissionModeSysadmin
 		fmt.Fprintln(os.Stderr, sysadminModeWarning)
@@ -455,6 +462,11 @@ func connectToServer(cmd *cobra.Command) (*client.Client, *proto.Workspace, func
 		return nil, nil, nil, fmt.Errorf("invalid host URL: %v", err)
 	}
 
+	prompts, err := promptOverrides(cmd)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
 	if err := ensureServer(cmd, hostURL); err != nil {
 		return nil, nil, nil, err
 	}
@@ -488,6 +500,7 @@ func connectToServer(cmd *cobra.Command) (*client.Client, *proto.Workspace, func
 		Debug:          debug,
 		PermissionMode: wsPermMode,
 		Channels:       channels,
+		Prompts:        prompts,
 		Version:        version.Version,
 		Env:            os.Environ(),
 	}

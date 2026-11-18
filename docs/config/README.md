@@ -542,6 +542,114 @@ Available Keys:
   disable-skill         clear disabled skill names
 ```
 
+#### `option prompt`
+
+Replace one of Crush's built-in prompts with your own file.
+
+```text
+Usage:
+  option prompt <name> <path>
+
+Available Names:
+  coder        the main agent's system prompt
+  task         the sub-agent's system prompt
+  plan         the planning agent's system prompt
+  summary      the instructions used to compact a long conversation
+  title        the instructions used to name a session
+  initialize   the instructions used by crush init
+```
+
+```bash
+option prompt coder ~/.config/crush/prompts/coder.md.tpl
+option prompt summary ~/.config/crush/prompts/summary.md
+```
+
+Paths go through the shell, so `~` and `$VARS` work. A relative path is
+resolved against the directory of the config file that sets it. So
+`option prompt coder .crush/coder.md.tpl` in a project's `crushrc` finds the
+project's file, and `option prompt summary prompts/summary.md` in your global
+`~/.config/crush/crushrc` finds `~/.config/crush/prompts/summary.md` from every
+project. Both hold when Crush starts with `--cwd` or runs on a server.
+
+Overrides layer like every other option: one in your global
+`~/.config/crush/crushrc` applies everywhere, and a project config replaces
+it name by name. Overriding `coder` in a project leaves a global `summary`
+override in place.
+
+In `crush.json`, the same settings live under `options.prompts`:
+
+```json
+{
+  "options": {
+    "prompts": {
+      "coder": "~/.config/crush/prompts/coder.md.tpl",
+      "summary": ".crush/summary.md"
+    }
+  }
+}
+```
+
+For a single run, pass `--prompt name=path`. It can be repeated, wins over
+any configured override, and resolves relative paths against the directory
+you ran the command from:
+
+```bash
+crush --prompt coder=./terse-coder.md.tpl
+crush run --prompt summary=./summary.md "tidy up the changelog"
+```
+
+When Crush runs through a server, every session in a directory shares one
+workspace, so `--prompt` only applies to the session that opens it. A later
+`--prompt` asking for different prompts fails rather than being ignored; close
+the other sessions in that directory first.
+
+Start from the prompt you are replacing rather than a blank file:
+[coder][coder], [task][task], [plan][plan], [summary][summary], [title][title],
+[initialize][initialize]. They all live in
+[`internal/agent/templates`](https://github.com/charmbracelet/crush/tree/main/internal/agent/templates).
+
+[coder]: https://github.com/charmbracelet/crush/blob/main/internal/agent/templates/coder.md.tpl
+[task]: https://github.com/charmbracelet/crush/blob/main/internal/agent/templates/task.md.tpl
+[plan]: https://github.com/charmbracelet/crush/blob/main/internal/agent/templates/plan.md.tpl
+[summary]: https://github.com/charmbracelet/crush/blob/main/internal/agent/templates/summary.md
+[title]: https://github.com/charmbracelet/crush/blob/main/internal/agent/templates/title.md
+[initialize]: https://github.com/charmbracelet/crush/blob/main/internal/agent/templates/initialize.md.tpl
+
+The `coder`, `task`, `plan`, and `initialize` prompts are Go templates. Your file
+replaces the built-in one completely, so anything the built-in asked for is gone
+unless you ask for it too. That includes the pieces you probably want:
+
+```text
+{{.AvailSkillXML}}        available skills
+{{.WorkingDir}}           where Crush is running
+{{.Platform}}             the host OS
+{{.GitStatus}}            branch, status, and recent commits
+```
+
+Context files and language servers are lists rather than text, so pasting
+`{{.ContextFiles}}` or `{{.Config.LSP}}` as-is prints raw Go data. Use the
+blocks the built-in `coder` prompt uses instead. For AGENTS.md and friends from
+the project (use `.GlobalContextFiles` for the ones from your global config):
+
+```text
+{{range .ContextFiles}}
+<file path="{{.Path}}">
+{{.Content}}
+</file>
+{{end}}
+```
+
+And to mention LSP diagnostics only when a language server is configured:
+
+```text
+{{if .Config.LSP}}
+Diagnostics (lint/typecheck) are included in tool output.
+{{end}}
+```
+
+A name that is not on the list above, a file that cannot be read, and a
+template Crush cannot parse all fail at startup rather than mid-conversation.
+
 #### `option ui`
 
 Configure terminal UI presentation and completion-list limits.

@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -165,11 +166,14 @@ func (c *recordingCoordinator) IsSessionBusy(string) bool                     { 
 func (c *recordingCoordinator) QueuedPrompts(string) int                      { return 0 }
 func (c *recordingCoordinator) QueuedPromptsList(string) []string             { return nil }
 func (c *recordingCoordinator) ClearQueue(string)                             {}
+func (c *recordingCoordinator) AddNote(string, string)                        {}
 func (c *recordingCoordinator) Summarize(context.Context, string) error       { return nil }
 func (c *recordingCoordinator) Model() agent.Model                            { return agent.Model{} }
 func (c *recordingCoordinator) UpdateModels(context.Context) error            { return nil }
 func (c *recordingCoordinator) SetMainAgent(string) error                     { return nil }
 func (c *recordingCoordinator) GenerateTitle(context.Context, string, string) {}
+func (c *recordingCoordinator) SetHostContext(proto.HostContext)              {}
+func (c *recordingCoordinator) HostContext() proto.HostContext                { return proto.HostContext{} }
 
 // fullFakeSessions adapts fakeChannelSessions to the full session.Service
 // interface by embedding it; only the channelSessionStore subset is
@@ -216,7 +220,7 @@ func insertChannelWorkspaceCfg(t *testing.T, b *Backend, srvName string, enabled
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(wd, "crush.json"), cfgJSON, 0o644))
 
-	cfg, err := config.Init(wd, "", false)
+	cfg, err := config.Init(t.Context(), wd, "", false)
 	require.NoError(t, err)
 	if enabled {
 		cfg.Overrides().EnabledChannels = []string{srvName}
@@ -337,4 +341,8 @@ func TestRouteChannelMessage_ConfigEnabled(t *testing.T) {
 		t.Fatal("expected the config-enabled workspace to receive the channel push")
 	}
 	ws.runWG.Wait()
+}
+
+func (*recordingCoordinator) ListSettledMessages(context.Context, string) ([]message.Message, error) {
+	return nil, nil
 }

@@ -35,7 +35,7 @@ type FetchToolRenderContext struct{}
 // RenderTool implements the [ToolRenderer] interface.
 func (f *FetchToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
-	if opts.IsPending() {
+	if opts.IsStreamingInput() {
 		return pendingTool(sty, "Fetch", opts.Anim, opts.Compact)
 	}
 
@@ -110,7 +110,7 @@ type WebFetchToolRenderContext struct{}
 // RenderTool implements the [ToolRenderer] interface.
 func (w *WebFetchToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
-	if opts.IsPending() {
+	if opts.IsStreamingInput() {
 		return pendingTool(sty, "Fetch", opts.Anim, opts.Compact)
 	}
 
@@ -164,7 +164,7 @@ type WebSearchToolRenderContext struct{}
 // RenderTool implements the [ToolRenderer] interface.
 func (w *WebSearchToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
-	if opts.IsPending() {
+	if opts.IsStreamingInput() {
 		return pendingTool(sty, "Search", opts.Anim, opts.Compact)
 	}
 

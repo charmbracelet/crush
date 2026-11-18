@@ -114,7 +114,7 @@ func NewSourcegraphTool(client *http.Client) fantasy.AgentTool {
 				bytes.NewBuffer([]byte(graphqlQuery)),
 			)
 			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("failed to create request: %w", err)
+				return fantasy.NewTextErrorResponse("Failed to create request: " + err.Error()), nil
 			}
 
 			req.Header.Set("Content-Type", "application/json")
@@ -122,7 +122,7 @@ func NewSourcegraphTool(client *http.Client) fantasy.AgentTool {
 
 			resp, err := client.Do(req)
 			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("failed to fetch URL: %w", err)
+				return fantasy.NewTextErrorResponse("Failed to fetch URL: " + err.Error()), nil
 			}
 			defer resp.Body.Close()
 
@@ -136,12 +136,12 @@ func NewSourcegraphTool(client *http.Client) fantasy.AgentTool {
 			}
 			body, err := io.ReadAll(resp.Body)
 			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("failed to read response body: %w", err)
+				return fantasy.NewTextErrorResponse("Failed to read response body: " + err.Error()), nil
 			}
 
 			var result map[string]any
 			if err = json.Unmarshal(body, &result); err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("failed to unmarshal response: %w", err)
+				return fantasy.NewTextErrorResponse("Failed to parse Sourcegraph response: " + err.Error()), nil
 			}
 
 			formattedResults, err := formatSourcegraphResults(result, params.ContextWindow, params.Count)

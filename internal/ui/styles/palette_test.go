@@ -26,6 +26,19 @@ func TestPaletteFromOpts_RoundTrip(t *testing.T) {
 	require.Equal(t, colorToHex(opts.fgBase), colorToHex(recovered.fgBase))
 }
 
+func TestPalette_DestructiveSubtle(t *testing.T) {
+	setTestThemeDirs(t, []string{t.TempDir()})
+	p := Palette{DestructiveSubtle: "#112233"}
+
+	// The token should survive a palette round trip like every other color.
+	recovered := PaletteFromOpts(p.ToQuickStyleOpts(charmtoneOpts()))
+	require.Equal(t, "#112233", recovered.DestructiveSubtle)
+
+	s, err := LoadPaletteTheme("gruvbox-dark", p)
+	require.NoError(t, err)
+	require.Equal(t, "#112233", colorToHex(s.Status.ModeBannerSysadmin.GetBackground()))
+}
+
 func TestPaletteFromOpts_GruvboxDark(t *testing.T) {
 	t.Parallel()
 	opts := gruvboxDarkOpts()
@@ -35,6 +48,52 @@ func TestPaletteFromOpts_GruvboxDark(t *testing.T) {
 	require.Equal(t, "#d3869b", p.Secondary)
 	require.Equal(t, "#282828", p.BgBase)
 	require.Equal(t, "#ebdbb2", p.FgBase)
+}
+
+func TestPaletteFromOpts_RosePineVariants(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		optsFn  func() quickStyleOpts
+		primary string
+		bgBase  string
+		fgBase  string
+	}{
+		{"rose-pine", rosePineOpts, "#c4a7e7", "#191724", "#e0def4"},
+		{"rose-pine-moon", rosePineMoonOpts, "#c4a7e7", "#232136", "#e0def4"},
+		{"rose-pine-dawn", rosePineDawnOpts, "#907aa9", "#faf4ed", "#464261"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			p := PaletteFromOpts(tc.optsFn())
+			require.Equal(t, tc.primary, p.Primary)
+			require.Equal(t, tc.bgBase, p.BgBase)
+			require.Equal(t, tc.fgBase, p.FgBase)
+			require.NoError(t, p.Validate())
+		})
+	}
+}
+
+func TestThemePalette_RosePineVariants(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		primary string
+		bgBase  string
+	}{
+		{"rose-pine", "#c4a7e7", "#191724"},
+		{"rose-pine-moon", "#c4a7e7", "#232136"},
+		{"rose-pine-dawn", "#907aa9", "#faf4ed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			p, err := ThemePalette(tc.name)
+			require.NoError(t, err)
+			require.Equal(t, tc.primary, p.Primary)
+			require.Equal(t, tc.bgBase, p.BgBase)
+			require.NoError(t, p.Validate())
+		})
+	}
 }
 
 func TestPalette_ToQuickStyleOpts_PartialOverride(t *testing.T) {

@@ -59,16 +59,16 @@ func TestModels(t *testing.T) {
 	require.Len(t, models, 2)
 	require.Equal(t, "grok-4", models[0].ID)
 	require.Equal(t, "Grok 4", models[0].Name)
-	require.True(t, models[0].CanReason)
-	require.Equal(t, []string{"low", "high"}, models[0].ReasoningLevels)
-	require.Equal(t, "high", models[0].DefaultReasoningEffort)
+	require.True(t, models[0].CanReason())
+	require.Equal(t, []string{"low", "high"}, models[0].ReasoningEffortLevels())
+	require.Equal(t, "high", models[0].Reasoning.DefaultEffortLevel)
 	require.Equal(t, int64(256000), models[0].ContextWindow)
-	require.True(t, models[0].SupportsImages)
+	require.True(t, models[0].Capabilities.Vision)
 
-	require.False(t, models[1].CanReason)
-	require.Empty(t, models[1].ReasoningLevels)
-	require.Empty(t, models[1].DefaultReasoningEffort)
-	require.False(t, models[1].SupportsImages)
+	require.False(t, models[1].CanReason())
+	require.Empty(t, models[1].ReasoningEffortLevels())
+	require.Empty(t, models[1].Reasoning.DefaultEffortLevel)
+	require.False(t, models[1].Capabilities.Vision)
 }
 
 func TestModels_Errors(t *testing.T) {

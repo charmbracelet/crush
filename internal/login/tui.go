@@ -13,8 +13,8 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"charm.land/tone"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/pkg/browser"
 
 	"github.com/charmbracelet/crush/internal/oauth"
@@ -84,7 +84,6 @@ type authModel struct {
 
 	verificationURL string
 	userCode        string
-	browserFailed   bool
 
 	// codeEntry is set when the flow can finish with a pasted code from
 	// the authorization page; codeInput is its paste field, shown while
@@ -133,7 +132,7 @@ type authErrMsg struct {
 
 func newAuthModel(platform string, newFlow func() flow) authModel {
 	s := spinner.New(spinner.WithSpinner(spinner.Dot))
-	s.Style = lipgloss.NewStyle().Foreground(charmtone.Julep)
+	s.Style = lipgloss.NewStyle().Foreground(tone.Julep)
 	m := authModel{
 		platform: platform,
 		newFlow:  newFlow,
@@ -149,6 +148,9 @@ func newAuthModel(platform string, newFlow func() flow) authModel {
 // runTUI runs the OAuth authorization flow with a small TUI that guides
 // the user through opening a browser and waiting for the callback.
 func runTUI(platform string, newFlow func() flow) (*oauth.Token, error) {
+	// Don't leak the errors to the TUI
+	browser.Stderr = nil
+	browser.Stdout = nil
 	p := tea.NewProgram(newAuthModel(platform, newFlow))
 	final, err := p.Run()
 	if err != nil {
@@ -182,9 +184,6 @@ func (m authModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.flow = msg.flow
 		m.verificationURL = msg.url
 		m.userCode = msg.userCode
-		if !m.browserFailed {
-			m.browserFailed = browser.OpenURL(msg.url) != nil
-		}
 		m.state = authStateWaiting
 		m.updateAuthKeymap()
 		if msg.userCode == "" {
@@ -198,7 +197,7 @@ func (m authModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.updateAuthKeymap()
 			}
 		}
-		cmds := []tea.Cmd{waitCmd(m.flow), m.spinner.Tick}
+		cmds := []tea.Cmd{openURLCmd(msg.url), waitCmd(m.flow), m.spinner.Tick}
 		if msg.userCode != "" {
 			cmds = append(cmds, tea.SetClipboard(msg.userCode))
 		}
@@ -318,7 +317,7 @@ const maxHeaderSlashes = 50
 // slashes renders n diagonal slashes with a horizontal gradient that fades
 // from the header purple to pink, echoing the dialog title treatment.
 func (authModel) slashes(n int) string {
-	ramp := lipgloss.Blend1D(n, charmtone.Charple, charmtone.Dolly)
+	ramp := lipgloss.Blend1D(n, tone.Charple, tone.Dolly)
 	var b strings.Builder
 	for _, c := range ramp {
 		b.WriteString(slashStyle.Foreground(c).Render("╱"))
@@ -363,13 +362,13 @@ func (m authModel) content() string {
 	case authStateWaiting:
 		if m.userCode != "" {
 			b.WriteString(wrap.Render("Your code is "))
-			b.WriteString(lipgloss.NewStyle().Foreground(charmtone.Julep).Render(m.userCode))
+			b.WriteString(lipgloss.NewStyle().Foreground(tone.Julep).Render(m.userCode))
 			b.WriteString(" ")
-			b.WriteString(lipgloss.NewStyle().Foreground(charmtone.Oyster).Render("copied to clipboard"))
+			b.WriteString(lipgloss.NewStyle().Foreground(tone.Oyster).Render("copied to clipboard"))
 			b.WriteString("\n\n  ")
 		}
 		urlStyle := lipgloss.NewStyle().
-			Foreground(charmtone.Guac).
+			Foreground(tone.Guac).
 			Underline(true).
 			Hyperlink(m.verificationURL).
 			MaxWidth(m.authWidth())
@@ -428,6 +427,15 @@ func startFlowCmd(newFlow func() flow) tea.Cmd {
 			url:      url,
 			userCode: userCode,
 		}
+	}
+}
+
+// openURLCmd opens the browser off the update loop. Failure needs no
+// handling: the waiting view always shows the URL to visit by hand.
+func openURLCmd(url string) tea.Cmd {
+	return func() tea.Msg {
+		_ = browser.OpenURL(url)
+		return nil
 	}
 }
 

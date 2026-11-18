@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -48,6 +49,18 @@ func TestConnect_SeparateConnectionsForDifferentDataDirs(t *testing.T) {
 
 	require.NoError(t, Release(dir1))
 	require.NoError(t, Release(dir2))
+}
+
+// TestConnect_PathWithURIMetacharacters guards that "#", "?" and "%" in
+// the data directory are escaped in the SQLite DSN, not parsed as URI syntax.
+func TestConnect_PathWithURIMetacharacters(t *testing.T) {
+	t.Cleanup(ResetPool)
+
+	dataDir := filepath.Join(t.TempDir(), "C#app", "100%41")
+	_, err := Connect(context.Background(), dataDir)
+	require.NoError(t, err)
+	require.NoError(t, Release(dataDir))
+	require.FileExists(t, filepath.Join(dataDir, "crush.db"))
 }
 
 func TestRelease_NoopForUnknownDataDir(t *testing.T) {
@@ -148,6 +161,29 @@ func TestConnect_SharedPoolDoesNotReacquireLock(t *testing.T) {
 	require.ErrorIs(t, lockErr, lock.ErrContended)
 
 	require.NoError(t, Release(dataDir))
+}
+
+// TestConnect_SharesEntryAcrossDataDirSpellings guards that a symlinked
+// spelling of an open data dir reuses its pool entry instead of contending
+// for its lock.
+func TestConnect_SharesEntryAcrossDataDirSpellings(t *testing.T) {
+	t.Cleanup(ResetPool)
+
+	dataDir := t.TempDir()
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(dataDir, alias); err != nil {
+		t.Skipf("cannot create symlink: %v", err)
+	}
+
+	conn1, err := Connect(context.Background(), dataDir, WithDataDirLock(true))
+	require.NoError(t, err)
+	conn2, err := Connect(context.Background(), alias, WithDataDirLock(true))
+	require.NoError(t, err)
+	require.Same(t, conn1, conn2)
+
+	require.NoError(t, Release(dataDir))
+	require.NoError(t, Release(alias))
+	require.Error(t, conn1.PingContext(context.Background()))
 }
 
 // TestConnect_SkipLockEnvBypassesAcquisition exercises the escape

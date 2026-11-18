@@ -1,7 +1,7 @@
 package dialog
 
 import (
-	"charm.land/catwalk/pkg/catwalk"
+	"charm.land/catwalk/v3/pkg/catwalk"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/ui/common"
@@ -29,11 +29,6 @@ func NewModelGroup(t *styles.Styles, title string, configured bool, items ...*Mo
 		configured: configured,
 		t:          t,
 	}
-}
-
-// Finished implements list.Item. Model groups are immutable headers.
-func (m *ModelGroup) Finished() bool {
-	return true
 }
 
 // AppendItems appends [ModelItem]s to the group.
@@ -80,18 +75,12 @@ type ModelItem struct {
 	showProvider bool
 }
 
-// Finished implements list.Item. Model items are render-stable
-// outside of explicit SetFocused / SetMatch.
-func (m *ModelItem) Finished() bool {
-	return true
-}
-
 // SelectedModel returns this model item as a [config.SelectedModel] instance.
 func (m *ModelItem) SelectedModel() config.SelectedModel {
 	return config.SelectedModel{
 		Model:           m.model.ID,
 		Provider:        string(m.prov.ID),
-		ReasoningEffort: m.model.DefaultReasoningEffort,
+		ReasoningEffort: m.model.Reasoning.DefaultEffortLevel,
 		MaxTokens:       m.model.DefaultMaxTokens,
 	}
 }

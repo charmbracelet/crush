@@ -1,16 +1,27 @@
 package dialog
 
 import (
+	"image"
+	"strconv"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/stretchr/testify/require"
 )
 
 func newTestPermissions(t *testing.T) *Permissions {
+	t.Helper()
+	return newTestPermissionsWithDanger(t, "")
+}
+
+// newTestPermissionsWithDanger builds a dialog for a request flagged with
+// the given danger reason. An empty reason means an ordinary request.
+func newTestPermissionsWithDanger(t *testing.T, danger string) *Permissions {
 	t.Helper()
 	s := styles.CharmtonePantera()
 	com := &common.Common{Styles: &s}
@@ -18,6 +29,7 @@ func newTestPermissions(t *testing.T) *Permissions {
 		ID:         "perm-test",
 		ToolCallID: "tool-call-test",
 		ToolName:   "bash",
+		Danger:     danger,
 	}
 	return NewPermissions(com, perm)
 }
@@ -86,6 +98,68 @@ func TestPermissions_EnterConfirmsSelection(t *testing.T) {
 	require.Equal(t, PermissionAllowForSession, resp.Action)
 }
 
+// TestPermissions_DefaultSelectionAvoidsApprovingDangerousRequests verifies
+// that an ordinary request starts on Allow while a dangerous one starts on
+// Deny, so a reflexive enter refuses instead of approving.
+func TestPermissions_DefaultSelectionAvoidsApprovingDangerousRequests(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		danger string
+		action PermissionAction
+	}{
+		{"ordinary request", "", PermissionAllow},
+		{"dangerous request", "sudo", PermissionDeny},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			p := newTestPermissionsWithDanger(t, tc.danger)
+			require.Equal(t, optionIndex(tc.action), p.selectedOption)
+
+			// The selection is only meaningful if confirming it lands on
+			// the matching action.
+			action := p.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
+			resp, ok := action.(ActionPermissionResponse)
+			require.True(t, ok)
+			require.Equal(t, tc.action, resp.Action)
+		})
+	}
+}
+
+// TestPermissions_CtrlYDoesNotRespond verifies that ctrl+y, the global
+// yolo-mode toggle, does not resolve the dialog. Dialogs see keys before
+// the global handler, so accepting it here would silently approve whatever
+// is on screen.
+func TestPermissions_CtrlYDoesNotRespond(t *testing.T) {
+	t.Parallel()
+
+	for _, danger := range []string{"", "sudo"} {
+		p := newTestPermissionsWithDanger(t, danger)
+		action := p.HandleMsg(tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl})
+		require.Nil(t, action, "ctrl+y should not resolve the permission dialog")
+	}
+}
+
+// TestPermissions_DangerousButtonsLookDifferent verifies that the approving
+// buttons are styled distinctly on a dangerous request, so the prompt does
+// not look identical to a routine one.
+func TestPermissions_DangerousButtonsLookDifferent(t *testing.T) {
+	t.Parallel()
+
+	ordinary := newTestPermissionsWithDanger(t, "")
+	dangerous := newTestPermissionsWithDanger(t, "sudo")
+
+	// Compare the same selection so only the danger styling differs.
+	ordinary.selectedOption = optionIndex(PermissionAllow)
+	dangerous.selectedOption = optionIndex(PermissionAllow)
+
+	require.NotEqual(t, ordinary.renderButtonGroup("  "), dangerous.renderButtonGroup("  "))
+}
+
 // TestPermissions_EscapeDenies verifies that escape denies the request.
 func TestPermissions_EscapeDenies(t *testing.T) {
 	t.Parallel()
@@ -95,4 +169,29 @@ func TestPermissions_EscapeDenies(t *testing.T) {
 	resp, ok := action.(ActionPermissionResponse)
 	require.True(t, ok)
 	require.Equal(t, PermissionDeny, resp.Action)
+}
+
+// TestPermissions_TallerViewportClampsOffset verifies that growing the
+// dialog's height while scrolled to the bottom does not leave the viewport
+// scrolled past the end with blank rows under the content.
+func TestPermissions_TallerViewportClampsOffset(t *testing.T) {
+	t.Parallel()
+	s := styles.CharmtonePantera()
+	com := &common.Common{Styles: &s}
+	lines := make([]string, 200)
+	for i := range lines {
+		lines[i] = "line " + strconv.Itoa(i)
+	}
+	p := NewPermissions(com, permission.PermissionRequest{
+		ID:          "perm-test",
+		ToolName:    "custom_tool",
+		Description: strings.Join(lines, "\n"),
+	})
+
+	p.Draw(uv.NewScreenBuffer(250, 25), image.Rect(0, 0, 250, 25))
+	p.viewport.GotoBottom()
+	p.Draw(uv.NewScreenBuffer(250, 60), image.Rect(0, 0, 250, 60))
+
+	maxOffset := max(0, p.viewport.TotalLineCount()-p.viewport.Height())
+	require.LessOrEqual(t, p.viewport.YOffset(), maxOffset)
 }

@@ -5,9 +5,15 @@ on:
     - cron: "0 0 * * *" # every day at midnight
   workflow_dispatch: # allows manual triggering
 
+permissions:
+  contents: read
+
 jobs:
   check:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
     outputs:
       should_run: ${{ steps.check.outputs.should_run }}
     steps:

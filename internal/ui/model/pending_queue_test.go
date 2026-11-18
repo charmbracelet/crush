@@ -70,6 +70,44 @@ func TestStoredPromptReplacesTheEcho(t *testing.T) {
 	require.Equal(t, []string{"u1", chat.PendingAssistantID}, transcriptIDs(m))
 }
 
+// The load and the event can arrive in either order; the prompt shows once.
+func TestLoadRacingTheStoredPromptShowsItOnce(t *testing.T) {
+	stored := userMessage("u1", "s1", "hello")
+
+	t.Run("load first", func(t *testing.T) {
+		m := newPendingUI(t)
+		m.sendMessage("hello")
+
+		m.setSessionMessages([]message.Message{stored})
+		require.Equal(t, []string{"u1", chat.PendingAssistantID}, transcriptIDs(m))
+
+		m.appendSessionMessage(stored)
+		require.Equal(t, []string{"u1", chat.PendingAssistantID}, transcriptIDs(m))
+	})
+
+	t.Run("event first", func(t *testing.T) {
+		m := newPendingUI(t)
+		m.sendMessage("hello")
+
+		m.appendSessionMessage(stored)
+		m.setSessionMessages([]message.Message{stored})
+		require.Equal(t, []string{"u1", chat.PendingAssistantID}, transcriptIDs(m))
+	})
+}
+
+// A load that lands before the new prompt is stored, showing only the
+// history that was already on screen, must leave the echo in place.
+func TestLoadOfOlderHistoryKeepsTheEcho(t *testing.T) {
+	m := newPendingUI(t)
+	older := []message.Message{userMessage("u0", "s1", "earlier")}
+	m.setSessionMessages(older)
+	m.sendMessage("hello")
+
+	m.setSessionMessages(older)
+
+	require.Equal(t, []string{"u0", chat.PendingUserID, chat.PendingAssistantID}, transcriptIDs(m))
+}
+
 // A prompt queued behind a running turn belongs in the queue pill, not in
 // the transcript, so it is not echoed.
 func TestQueuedPromptIsNotEchoed(t *testing.T) {
@@ -77,7 +115,6 @@ func TestQueuedPromptIsNotEchoed(t *testing.T) {
 	m.sendMessage("first")
 	m.appendSessionMessage(userMessage("u1", "s1", "first"))
 	m.appendSessionMessage(message.Message{ID: "a1", Role: message.Assistant, SessionID: "s1"})
-	require.True(t, m.chat.HasLiveSpinner(), "the assistant message is spinning")
 
 	m.sendMessage("second")
 
@@ -103,7 +140,6 @@ func TestPromptSentDuringAToolRunIsNotEchoed(t *testing.T) {
 			ID: "tc1", Name: "bash", Input: "{}", Finished: true,
 		}},
 	})
-	require.False(t, m.chat.HasLiveSpinner(), "a tool mid-run shows no spinner")
 
 	m.sendMessage("second")
 
@@ -111,7 +147,7 @@ func TestPromptSentDuringAToolRunIsNotEchoed(t *testing.T) {
 	require.False(t, hasPending(m), "no second spinner underneath the turn")
 }
 
-// A run this client never sent (a sub-agent report, a channel event, a
+// A run this client never sent (a subagent report, a channel event, a
 // session opened mid-run) has no pending turn to vouch for it. While its
 // tool runs the transcript is silent too, so the busy probe has to be what
 // keeps a prompt sent then in the queue pill instead of echoed with a
@@ -128,7 +164,6 @@ func TestPromptSentDuringAnUnsentRunIsNotEchoed(t *testing.T) {
 	m.applyBusyState(busyStateMsg{
 		gen: m.busyFetchGen, ready: true, forSession: "s1", sessionBusy: true,
 	})
-	require.False(t, m.chat.HasLiveSpinner(), "a tool mid-run shows no spinner")
 
 	m.sendMessage("keep going")
 
@@ -206,7 +241,6 @@ func TestQueuedPromptDoesNotStackASecondSpinner(t *testing.T) {
 	m.appendSessionMessage(message.Message{
 		ID: "a1", Role: message.Assistant, SessionID: "s1",
 	})
-	require.True(t, m.chat.HasLiveSpinner(), "the assistant message is spinning")
 
 	m.sendMessage("second")
 
@@ -346,4 +380,57 @@ func TestSessionLoadRestoresPendingSpinner(t *testing.T) {
 	m.setSessionMessages(nil)
 
 	require.False(t, hasPending(m), "a different session has no pending turn")
+}
+
+// A ghost spinner left in an earlier turn by a killed run is not a turn in
+// flight. Counting it would treat every new prompt in a long session as
+// queued, holding back its echo and spinner until the agent publishes them.
+func TestGhostSpinnerInAnEarlierTurnDoesNotQueueThePrompt(t *testing.T) {
+	m := newPendingUI(t)
+	m.setSessionMessages([]message.Message{
+		userMessage("u0", "s1", "earlier"),
+		{ID: "a0", Role: message.Assistant, SessionID: "s1"},
+		userMessage("u1", "s1", "later"),
+	})
+	m.animClock.frozen = false
+
+	m.sendMessage("hello")
+
+	require.NotNil(t, m.chat.MessageItem(chat.PendingUserID), "the prompt is echoed")
+	require.True(t, hasPending(m), "the spinner shows straight away")
+}
+
+// The busy probe taken mid-turn goes stale the moment the run ends. A prompt
+// sent before the next probe lands starts a turn rather than queueing.
+func TestEndedRunClearsTheBusyProbe(t *testing.T) {
+	m := newPendingUI(t)
+	m.sendMessage("first")
+	m.appendSessionMessage(userMessage("u1", "s1", "first"))
+	m.applyBusyState(busyStateMsg{
+		gen: m.busyFetchGen, ready: true, forSession: "s1", sessionBusy: true,
+	})
+	runComplete(m, "s1", false)
+
+	m.sendMessage("second")
+
+	require.NotNil(t, m.chat.MessageItem(chat.PendingUserID), "the prompt is echoed")
+	require.True(t, hasPending(m), "the spinner shows straight away")
+}
+
+// A probe sent mid-turn can land after the run ends. Its busy answer is
+// stale, so it must not put the next prompt back in the queue.
+func TestProbeInFlightAtRunEndIsDiscarded(t *testing.T) {
+	m := newPendingUI(t)
+	m.sendMessage("first")
+	m.appendSessionMessage(userMessage("u1", "s1", "first"))
+	inFlight := m.busyFetchGen
+	runComplete(m, "s1", false)
+	m.applyBusyState(busyStateMsg{
+		gen: inFlight, ready: true, forSession: "s1", sessionBusy: true,
+	})
+
+	m.sendMessage("second")
+
+	require.NotNil(t, m.chat.MessageItem(chat.PendingUserID), "the prompt is echoed")
+	require.True(t, hasPending(m), "the spinner shows straight away")
 }

@@ -177,11 +177,9 @@ func TestRunStream_CancelledRunCompleteIsClean(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// TestRunStream_LeadingWhitespaceTrimmedOnce mirrors the
-// pre-existing trim of leading whitespace on the first byte of
-// stdout: the trim must happen exactly once even when stdout is
-// first produced by the RunComplete reconciliation path rather
-// than the live stream.
+// TestRunStream_LeadingWhitespaceTrimmedOnce checks that initial whitespace
+// cleanup strips only one newline and preserves raw byte offsets across live,
+// fragmented, and RunComplete-only output, without duplicating reconciled text.
 func TestRunStream_LeadingWhitespaceTrimmedOnce(t *testing.T) {
 	t.Parallel()
 
@@ -196,6 +194,30 @@ func TestRunStream_LeadingWhitespaceTrimmedOnce(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, done)
 	require.Equal(t, "actual output", buf.String())
+
+	for text, want := range map[string]string{
+		"\nactual output":   "actual output",
+		"\n\nactual output": "\nactual output",
+	} {
+		for _, updates := range [][]string{nil, {text}, {text[:1], text[:len(text)-1]}} {
+			buf.Reset()
+			s = &runStream{sessionID: "S", out: buf, read: map[string]int{}}
+			for _, update := range updates {
+				_, err = s.handle(pubsub.Event[proto.Message]{Payload: proto.Message{
+					ID: "m2", SessionID: "S", Role: proto.Assistant,
+					Parts: []proto.ContentPart{proto.TextContent{Text: update}},
+				}}, nil)
+				require.NoError(t, err)
+				require.Equal(t, len(update), s.read["m2"])
+			}
+			done, err = s.handle(pubsub.Event[proto.RunComplete]{Payload: proto.RunComplete{
+				SessionID: "S", MessageID: "m2", Text: text,
+			}}, nil)
+			require.NoError(t, err)
+			require.True(t, done)
+			require.Equal(t, want, buf.String())
+		}
+	}
 }
 
 // TestRunStream_StopSpinnerInvokedOnFirstOutput verifies the

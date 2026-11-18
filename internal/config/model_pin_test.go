@@ -45,7 +45,7 @@ func TestModelSelectionSurvivesPeerWrite(t *testing.T) {
 
 	require.NoError(t, os.WriteFile(configPath, []byte(twoProviderConfig("openai", "gpt-4")), 0o600))
 
-	store, err := Load(dir, dir, false)
+	store, err := Load(t.Context(), dir, dir, false)
 	require.NoError(t, err)
 	store.globalDataPath = configPath
 	store.CaptureStalenessSnapshot([]string{configPath})
@@ -82,7 +82,7 @@ func TestModelSelectionYieldsToDiskWhenUnchosen(t *testing.T) {
 
 	require.NoError(t, os.WriteFile(configPath, []byte(twoProviderConfig("openai", "gpt-4")), 0o600))
 
-	store, err := Load(dir, dir, false)
+	store, err := Load(t.Context(), dir, dir, false)
 	require.NoError(t, err)
 	store.globalDataPath = configPath
 	store.CaptureStalenessSnapshot([]string{configPath})

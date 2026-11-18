@@ -77,10 +77,15 @@ const (
 	ScrollbarThumb string = "┃"
 	ScrollbarTrack string = "│"
 
-	LSPErrorIcon   string = "E"
-	LSPWarningIcon string = "W"
-	LSPInfoIcon    string = "I"
-	LSPHintIcon    string = "H"
+	// LSP severity icons are Nerd Font glyphs, shown only when the terminal
+	// is expected to render them. Each glyph carries a trailing space as a
+	// separator from the count that follows it. Terminals without Nerd
+	// Font support fall back to the letters E, W, I, and H through
+	// nerdfont.Glyph at the call sites, which supply their own spacing.
+	LSPErrorIcon   string = "\U000F0159 " // nf-md-close_circle
+	LSPWarningIcon string = "\U000F0028 " // nf-md-alert
+	LSPInfoIcon    string = "\U000F02FC " // nf-md-information
+	LSPHintIcon    string = "\U000F0335 " // nf-md-bug_outline
 )
 
 const (

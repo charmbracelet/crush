@@ -1,6 +1,7 @@
 package shell
 
 import (
+	"context"
 	"runtime"
 	"strings"
 	"sync"
@@ -103,7 +104,7 @@ func TestBackgroundShellOutputStaysBounded(t *testing.T) {
 	command := "while :; do echo " + strings.Repeat("x", 4096) + "; done"
 	bg, err := manager.Start(t.Context(), nil, t.TempDir(), nil, command, "endless", testMaxJobs)
 	require.NoError(t, err)
-	t.Cleanup(func() { manager.Kill(bg.ID) })
+	t.Cleanup(func() { manager.Kill(context.Background(), bg.ID) })
 
 	deadline := time.Now().Add(5 * time.Second)
 	for !strings.Contains(bg.stdout.String(), "bytes truncated") {

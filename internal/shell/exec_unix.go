@@ -30,6 +30,22 @@ func isolateProcess(cmd *exec.Cmd) {
 	cmd.SysProcAttr.Setsid = true
 }
 
+// killGroupOnCancel replaces os/exec's default cancellation (which signals
+// only the direct child) with a SIGKILL to the child's whole process group,
+// so descendants like a script's background children die with it. The
+// WaitDelay bounds cmd.Wait when a detached descendant still holds a stdio
+// pipe open after the process exits. Requires isolateProcess so the child
+// leads its own group (pgid == pid).
+func killGroupOnCancel(cmd *exec.Cmd) {
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = defaultKillTimeout + time.Second
+}
+
 // processGroupExecHandler returns an ExecHandlerFunc that replaces
 // interp.DefaultExecHandler with one that fully isolates child processes
 // from Crush's session and controlling terminal.
@@ -60,6 +76,11 @@ func processGroupExecHandler(killTimeout time.Duration) interp.ExecHandlerFunc {
 			Stderr: hc.Stderr,
 		}
 		isolateProcess(&cmd)
+
+		// Bound how long Wait blocks after the process exits: a detached
+		// descendant holding a stdio pipe open would otherwise hang us
+		// forever. Matches mvdan's DefaultExecHandler.
+		cmd.WaitDelay = killTimeout + time.Second
 
 		err = cmd.Start()
 		if err == nil {

@@ -26,6 +26,9 @@ const (
 	ModelIcon       string = "◇"
 	HypercreditIcon string = "◆"
 
+	// GitBranchIcon is the Powerline branch glyph, shown only with Nerd Fonts.
+	GitBranchIcon string = "\ue0a0"
+
 	ArrowRightIcon string = "→"
 
 	// CodespanPadding is the padding rendered around inline code spans in

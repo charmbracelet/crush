@@ -1396,7 +1396,7 @@ func (c *coordinator) buildVercelProvider(_, apiKey string, headers map[string]s
 	return vercel.New(opts...)
 }
 
-func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers map[string]string, extraBody map[string]any, providerID string, isSubAgent bool, wireType catwalk.Type) (fantasy.Provider, error) {
+func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers map[string]string, extraBody map[string]any, providerID string, requestEncoding catwalk.RequestEncoding, isSubAgent bool, wireType catwalk.Type) (fantasy.Provider, error) {
 	opts := []openaicompat.Option{
 		openaicompat.WithBaseURL(baseURL),
 		openaicompat.WithAPIKey(apiKey),
@@ -1437,6 +1437,16 @@ func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers 
 				openaicompat.EncodingGzip,
 			),
 		)
+	}
+	// Any other provider compresses request bodies only when it says it
+	// accepts the encoding. Hyper keeps its own brotli-first pair above.
+	if providerID != hyper.Name {
+		switch requestEncoding {
+		case catwalk.RequestEncodingGzip:
+			opts = append(opts, openaicompat.WithRequestCompression(openaicompat.EncodingGzip))
+		case catwalk.RequestEncodingBrotli:
+			opts = append(opts, openaicompat.WithRequestCompression(openaicompat.EncodingBrotli))
+		}
 	}
 	if httpClient == nil && c.cfg.Config().Options.Debug {
 		httpClient = log.NewHTTPClient()
@@ -1590,7 +1600,7 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 			baseURL = strings.TrimSuffix(baseURL, "/v1")
 			return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID)
 		}
-		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent, wireType)
+		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, providerCfg.RequestEncoding, isSubAgent, wireType)
 	case string(catwalk.InferenceProviderOpenAI):
 		// A ChatGPT login is the provider's single credential: every
 		// request goes through the Codex backend with the OAuth token.
@@ -1624,12 +1634,12 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 			}
 			providerCfg.ExtraBody["tool_stream"] = true
 		}
-		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent, wireType)
+		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, providerCfg.RequestEncoding, isSubAgent, wireType)
 	default:
 		// Known custom providers (litellm, llamacpp, lmstudio, ollama,
 		// omlx) are openai-compat under the hood.
 		if discover.IsKnownCustomProvider(string(providerCfg.Type)) {
-			return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent, wireType)
+			return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, providerCfg.RequestEncoding, isSubAgent, wireType)
 		}
 		return nil, fmt.Errorf("provider type not supported: %q", providerCfg.Type)
 	}

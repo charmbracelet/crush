@@ -526,6 +526,11 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 		prepared.APIKey = p.APIKey
 		prepared.APIKeyTemplate = p.APIKey // Store original template for re-resolution
 		prepared.Type = p.Type
+		// The catalog may advertise a request encoding for the provider.
+		// A value the user configured wins over the catalog default.
+		if prepared.RequestEncoding == "" {
+			prepared.RequestEncoding = p.RequestEncoding
+		}
 		prepared.Models = p.Models
 		prepared.ExtraHeaders = headers
 		if prepared.ExtraParams == nil {

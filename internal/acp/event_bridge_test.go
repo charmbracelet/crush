@@ -11,6 +11,7 @@ import (
 	notify "github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/session"
 	acp "github.com/coder/acp-go-sdk"
 	"github.com/stretchr/testify/require"
 )
@@ -495,4 +496,22 @@ func TestSplitDelta_SingleWord(t *testing.T) {
 	if len(chunks) != 1 || chunks[0] != "hello" {
 		t.Errorf("expected [hello], got %v", chunks)
 	}
+}
+
+func TestTitleChangedSeedsThenReports(t *testing.T) {
+	b := &eventBridge{lastTitles: map[string]string{}}
+
+	// The first observation seeds the baseline silently, so session/new's own
+	// announcement is not duplicated.
+	require.False(t, b.titleChanged(session.Session{ID: "s1", Title: "ACP Session"}))
+	// An unchanged title is not re-announced; usage-only saves republish it.
+	require.False(t, b.titleChanged(session.Session{ID: "s1", Title: "ACP Session"}))
+	// A real rename is reported exactly once.
+	require.True(t, b.titleChanged(session.Session{ID: "s1", Title: "Fix the bug"}))
+	require.False(t, b.titleChanged(session.Session{ID: "s1", Title: "Fix the bug"}))
+	// Sessions are independent baselines.
+	require.False(t, b.titleChanged(session.Session{ID: "s2", Title: "Other"}))
+	// Empty ids or titles are ignored rather than seeding a baseline.
+	require.False(t, b.titleChanged(session.Session{ID: "", Title: "x"}))
+	require.False(t, b.titleChanged(session.Session{ID: "s3", Title: ""}))
 }

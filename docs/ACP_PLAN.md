@@ -97,7 +97,7 @@ so the reference survives edits.
 
 | Method | Level | Status |
 |---|---|---|
-| `session/new` | MUST | ✅ creates session, returns `modes`+`configOptions`; cwd validated; `mcpServers` connected |
+| `session/new` | MUST | ✅ creates session, returns `modes`+`configOptions`; cwd must be absolute, validated; `mcpServers` connected |
 | `session/prompt` | MUST | ✅ runs coordinator, returns `StopReason` |
 | `session/cancel` (notification) | MUST | ✅ cancels coordinator |
 | `session/update` baseline types (text/thought/tool) | MUST | ✅ see 4.3 |
@@ -111,9 +111,11 @@ so the reference survives edits.
 
 Error-code duties (`error.md`): `-32600` before initialize ✅
 (`requireInitialized`); `-32002`+`data.sessionId` on unknown session ✅
-(`requireSession`, guards prompt/load/resume/set_mode/set_config_option);
-`-32602` bad cursor / unknown configId / unknown mode ✅; `-32601`
-unadvertised method ✅; only spec codes used, none outside reserved ranges ✅.
+(`requireSession`, guards prompt/load/resume/set_mode/set_config_option; a
+session the store knows but this connection never created, loaded or resumed
+is also -32002 — the active set, error.md:56); `-32602` bad cursor / unknown
+configId / unknown mode ✅; `-32601` unadvertised method ✅; only spec codes
+used, none outside reserved ranges ✅.
 
 ### 4.3 Session updates (`session/update`)
 
@@ -130,7 +132,7 @@ unadvertised method ✅; only spec codes used, none outside reserved ranges ✅.
 | `available_commands_update` | MAY | ✅ advertised (skills/custom/MCP prompts, `input.hint`) + executable (O24) |
 | `current_mode_update` | MAY | ✅ on mode change (S9) |
 | `config_option_update` | MAY | ✅ on config change, complete state (S9) |
-| `session_info_update` | MAY | ✅ on `session/new` (title+timestamp) |
+| `session_info_update` | MAY | ✅ on `session/new` and whenever the stored title changes (the auto-generated title is announced) |
 | `usage_update` | MAY | ✅ at run completion; `used`/`size` non-null; cost has `amount`+`currency` |
 | `notice` | MAY, gated on `clientCapabilities.session.notices` | ❌ not emitted; SDK has no `session` field, and the MUST-NOT-without-gate rule is satisfied by omission |
 | `compaction_update` / `compaction_summary_chunk` | MAY, gated on `session.compaction`; replayed by load | ❌ not emitted, not replayable; same SDK gate |
@@ -158,7 +160,7 @@ unadvertised method ✅; only spec codes used, none outside reserved ranges ✅.
 | All paths absolute (`tool-calls.md:307,353`) | MUST | ✅ `absPath`/`absPather` at `toolLocations`, `diffContentFor`, load replay |
 | `session/request_permission` with 4 option kinds | MUST when needed | ✅ `buildPermissionOptions` (O20/G1) |
 | Unrecognized outcome ≠ approval | SHOULD | ✅ `mapPermissionOutcome` allow-list (O20) |
-| Remembered decisions owned by the Agent, applied by not asking again | SHOULD | ⚠️ offered but the grant cache is keyed by session+toolCall, so `allow_always`/`reject_always` cannot outlive their call (§5.2) |
+| Remembered decisions owned by the Agent, applied by not asking again | SHOULD | ✅ always-kinds are remembered per session+tool and applied without re-asking, and the option names state the scope. Coarser than the spec's examples: the scope is the tool name, not a command or directory |
 | Client answers pending permission `cancelled` on `session/cancel` | MUST (peer duty) | ⚠️ agent side correct: denial without error, no spurious `failed` |
 
 ### 4.6 Elicitation
@@ -174,12 +176,14 @@ unadvertised mode yields `-32602`.
 
 ### 4.7 File system
 
-OPTIONAL, gated on `clientCapabilities.fs`. ⚠️ Client track: real
+OPTIONAL, gated on `clientCapabilities.fs`. ✅ Client track: real
 `os.ReadFile`/`os.WriteFile` with `line`/`limit`, mkdir-parent, create-if-missing
 (spec MUST), `-32002`+`data.path` for a missing file (G10). Server track:
 `fsReadTextFile`/`fsWriteTextFile` delegate when the client advertises fs,
-else local FS — but the tool layer does not call them yet (O12 ceiling). No
-root-set check on requested paths (`file-system.md:127` is a client duty).
+else local FS (O12). ✅ The ACP server installs a `tools.ClientFS` adapter so
+`view` reads and `write` writes through the connected client when it advertises
+fs; other tools stay on the local FS. The client is responsible for its own
+root-set checks (`file-system.md:127`).
 
 ### 4.8 Terminals
 
@@ -225,9 +229,10 @@ channels have no ACP equivalent and are not applied — none are advertised.
 ### 4.11 Extensibility (`_meta`)
 
 `_meta` echoed on `session/prompt` responses, on every `session/update` of
-that turn, and on load replays ✅ (S7). W3C trace keys (`traceparent`,
-`tracestate`, `baggage`) reserved, never generated — MAY-level work (§5.2).
-No custom root-level fields added; custom methods would be `_`-prefixed.
+that turn, and on load replays ✅ (S7). A W3C `traceparent` is generated per
+turn when the client did not supply one (`withTraceMeta`), so a turn and its
+updates share a correlatable id; `tracestate`/`baggage` stay untouched. No
+custom root-level fields are added; custom methods would be `_`-prefixed.
 
 ### 4.12 Transport
 
@@ -247,7 +252,7 @@ decisions.
 | Treat embedded resources, files, tool results, MCP results as data, not instructions | `security.md:50` | ⚠️ prompt structure only; no explicit delimiting |
 | Permission before sending data off-machine after reading untrusted content | `security.md:51` | ❌ not distinguished from any other network tool |
 | Permission before writing files that control execution or approval (VCS hooks, editor/agent settings, MCP config) | `security.md:52` | ❌ no such classification in the permission layer |
-| Apply the root set to URIs in prompts | `security.md:41` | ❌ no root set exists (OQ-1) |
+| Apply the root set to URIs in prompts | `security.md:41` | ⚠️ root set now exists for path-touching tools; URI resolution in prompts still not applied |
 | Scope `session/list`, load, resume, permissions, elicitation to the owning user | `security.md:60` | n/a — one user per process |
 
 Client duties (peer side, recorded so they are not mistaken for our gaps):
@@ -284,33 +289,12 @@ Grouped by the actual blocker.
 
 ### 5.2 Crush work
 
-- **OQ-1 root-set enforcement** (SHOULD, `session-setup.md:444-452`): needs a
-  `RootsContextKey` beside `SessionIDContextKey`, consumers in every
-  path-touching tool (`view`/`write`/`edit`/`multiedit`, plus a documented
-  decision for `bash`), a session→roots lookup on `app.App`, and
-  component-wise comparison of the resolved path, failing closed.
-- **G12 per-connection active-session set** (SHOULD, `error.md:56`):
-  `requireSession` checks DB existence only.
 - **AUTH-1 `authenticate`** (conditional MUST): register provider auth
   methods (copilot, hyper, openai) as `authMethods` entries with
   `type:"agent"` and trigger OAuth. Nothing is owed while `authMethods:[]`.
 - **O8 terminals** (OPTIONAL): no PTY dependency; could be backed by
   `internal/shell` instead — re-evaluate if `crush acp connect` grows a
   terminal pane.
-- **O12 fs wiring** (OPTIONAL): the delegation helpers exist; the tool layer
-  does not call them.
-- **Remembered permission scope** (SHOULD, 4.5): `allow_always`/
-  `reject_always` need a durable scope (tool/command/directory) instead of a
-  per-call cache key.
-- **W3C trace-context generation** (MAY): echo works; generation needs a
-  tracing layer.
-- **cwd absoluteness** (found in this audit): `validateCwd`/`samePath`
-  resolve a relative cwd against the process dir and accept it; the spec
-  makes `cwd` an absolute path (`overview.md:160`,
-  `session-setup.md:439`, `session-list.md:85`). Reject relative input.
-- **Session title refresh** (MAY): `session_info_update` fires on `new` with
-  the static title; the auto-generated title from the first prompt is never
-  re-announced (`session-list.md:219` says "typically").
 
 ### 5.3 Deliberate decisions (not gaps)
 
@@ -345,23 +329,35 @@ Grouped by the actual blocker.
 | O8 | 09-17 | terminals deferred | no PTY lib; connect CLI has no terminal surface |
 | O9 | 11-17 | connect `req.McpServers` per session | stdio is a MUST baseline; namespaced keys solve the name-keyed registry collision |
 | O11 | 09-17 | render streaming chunks in `crush acp connect` | otherwise the CLI prints only `[stop: ...]` |
-| O12 | 09-17 | fs delegation helpers unwired | no agent-initiated client-side read need yet |
+| O12 | 11-19 | wire fs into `view`/`write` via `tools.ClientFS` | client-side unsaved state must be visible to the tools |
+| OQ-1 | 11-19 | enforce `[cwd]` root set in path tools; bash always prompts | spec SHOULD; permission request is the escape hatch (`security.md:451`) |
 | O18 | 11-17 | spec error codes everywhere | `-32600`/`-32601`/`-32602`/`-32002` per `error.md` |
 | O20 | 11-17 | all four option kinds; allow-list outcome map | unknown outcome must never approve |
 | O21 | 11-17 | delete is idempotent | missing session = success (`session-delete.md:85`) |
 | O22 | 11-17 | shared `validateCwd` on new/load/resume | cwd is part of the root set |
 | O25/OQ-3 | 11-17 | four-mode enum; `applyMode` calls `SetMainAgent`+`SetPermissionMode` | `currentValue` MUST be the value the Agent operates with |
 | AUTH | 09-18 | agent-type methods only | no terminal/side-auth flows advertised |
+| cwd | 11-18 | reject relative cwd on setup and the list filter | protocol paths MUST be absolute (`overview.md:160`) |
+| G12 | 11-18 | active-session set on the connection | `error.md:56` ties -32002 to activity, not store existence |
+| scope | 11-18 | remember always-kinds per session+tool | `tool-calls.md:237-250`: the Agent owns scope; the option name states it |
+| OQ-2 | 11-18 | share `commands.SubstituteArgs`; keep positional binding ACP-local | the only true duplication was the substitution rule |
+| title | 11-18 | announce title changes via `session_info_update` | `session-list.md:219`: clients otherwise show the static new-session title |
+| trace | 11-18 | generate a traceparent when the client sends none | `extensibility.md:40-44` reserves the key; a turn needs a correlatable id |
 
-**OQ-1 — enforce the root set?** Retraction is the current answer; the
-enforcement design is in §5.2.
+**OQ-1 — root set (RESOLVED 11-19).** `tools.RootsContextKey` carries `[cwd]`
+into every run via `sessionAgent.Run`. `OutsideRoots` compares the resolved
+path by component and fails closed; `view`, `write`, `edit` and `multiedit`
+ask permission before touching a path outside it. `bash` always prompts when
+a root set is present: a shell cannot be confined by a path check alone.
+`additionalDirectories` stays retracted (O23), so the set is just `[cwd]`.
 
-**OQ-2 — where should the slash-command resolver live?** ACP-local copy in
-`internal/acp/commands.go`; the TUI keeps its own in `internal/ui/model`.
-The duplication is bounded: argument substitution, skill invocation and MCP
-prompt resolution are identical; argument collection differs (dialog vs
-positional binding). A shared exported resolver in `internal/commands` was
-declined to keep the TUI untouched.
+**OQ-2 — RESOLVED 11-18: the substitution rule is shared.**
+`commands.SubstituteArgs` in `internal/commands` is now the one rule both the
+TUI dialog path and the ACP prompt path call. What stays ACP-local is the
+part that legitimately differs: the TUI collects arguments through a dialog,
+while a prompt binds them positionally from the trailing text (`splitCommand`,
+`bindArgs` in `internal/acp/commands.go`). The drift risk OQ-2 recorded is
+gone for substitution; argument collection is by design.
 
 **OQ-3 — mode switching (RESOLVED 11-17).** The TUI's four-state ring is
 flattened into an ACP-only enum:
@@ -399,15 +395,26 @@ sessions the last switch wins; `currentMode` reads live state back
   the wire (`overview.md:160`, `tool-calls.md:307,353`), truthful
   `currentValue` (`session-config-options.md:245`).
 - **2026-11-18** — this audit: re-read all 22 files against the code. No new
-  code gap at MUST/SHOULD level except the cwd-absolute nit (§5.2). Plan
-  document restructured (one matrix instead of four duplicated status
-  tables); stale rows fixed (O9, O25/Q2/Q3 tables, advisory-mode text).
+  code gap at MUST/SHOULD level except the cwd-absolute nit (closed below).
+  Plan document restructured (one matrix instead of four duplicated status
+  tables); stale rows fixed (O9, O25/Q2/Q3 tables, advisory-mode text). Also
+  closed: relative cwd now rejected with -32602, the per-connection active
+  session set is enforced (G12), and always-kind permission decisions are
+  remembered at tool scope. Batch B landed the same day: the substitution
+  rule moved to `commands.SubstituteArgs` (OQ-2 resolved), title changes are
+  announced as `session_info_update`, and `session/prompt` now generates a
+  W3C `traceparent` when the client sends none.
+- **2026-11-19** — Batch C: `tools.RootsContextKey` now carries `[cwd]` into
+every run, `OutsideRoots` bounds `view`/`write`/`edit`/`multiedit` (outside a
+root needs a permission request) and `bash` always prompts when root-scoped
+(OQ-1 resolved). ACP installs a `tools.ClientFS` so `view` reads and `write`
+writes route through the client when it advertises fs (O12).
 
-**Conformance position:** no MUST gap remains. Three SHOULD items are open
-(root set, per-connection active sessions, tool `name` — two of them
-deliberate or SDK-gated). Three behavioural caveats: the select fallback for
-`thinking`; remembered permission scope cannot outlive its call;
-`additionalDirectories` is retracted, not enforced.
+**Conformance position:** no MUST gap remains. The only SHOULD still open is
+`tool name` (SDK-gated). Two behavioural caveats remain: the select fallback
+for `thinking`, and remembered permission scope being the tool name rather
+than the command or directory. The root set is now enforced for path-touching
+tools, so `additionalDirectories` stays retracted (O23) and the set is `[cwd]`.
 
 ## 8. Tests
 
@@ -422,16 +429,15 @@ CRUSH_BIN=$(go build -o /tmp/crush .) \
 The OpenAgents conformance harness is documented in `test/acp/README.md`;
 informational only (Node/pnpm), not wired into `run.sh`.
 
-Coverage highlights: permission options + outcome mapping; load replay;
-delete idempotency; cwd validation; cursor handling; blob resources;
-fs `-32002`; mode selection and current-mode truthfulness; command
-resolution; absolute-path helpers; initialize-before-request and unknown
-session codes; golden JSON fixtures (33) and the Tangerg/Zed interop
-fixtures.
+Coverage highlights: permission options + outcome mapping + remembered
+scope; load replay; delete idempotency; cwd validation and absoluteness;
+active-session gating; cursor handling; blob resources; fs `-32002`; mode
+selection and current-mode truthfulness; command resolution; absolute-path
+helpers; initialize-before-request and unknown session codes; golden JSON
+fixtures (33) and the Tangerg/Zed interop fixtures.
 
-Still uncovered: per-connection active-session concept (G12), MCP prompt
-resolution end-to-end (needs a live MCP client), blob attachments flowing
-all the way through `Coordinator.Run`.
+Still uncovered: MCP prompt resolution end-to-end (needs a live MCP client),
+blob attachments flowing all the way through `Coordinator.Run`.
 
 ## 9. Appendix — streaming investigations (historical)
 

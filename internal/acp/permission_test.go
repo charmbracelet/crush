@@ -4,15 +4,17 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/app"
+	"github.com/charmbracelet/crush/internal/permission"
 	acp "github.com/coder/acp-go-sdk"
 )
 
 func TestBuildPermissionOptions(t *testing.T) {
-	opts := buildPermissionOptions("execute")
+	opts := buildPermissionOptions("bash")
 	if len(opts) != 4 {
 		t.Fatalf("expected 4 options, got %d", len(opts))
 	}
@@ -37,6 +39,56 @@ func TestBuildPermissionOptions(t *testing.T) {
 	// A client that grants by picking the first option must not deny.
 	if opts[0].Kind != acp.PermissionOptionKindAllowOnce {
 		t.Error("first option must be an allow kind")
+	}
+	// The always-kinds state their scope in the name (tool-calls.md:250);
+	// the once-kinds must not claim it.
+	if !strings.Contains(opts[1].Name, "bash") || !strings.Contains(opts[3].Name, "bash") {
+		t.Errorf("always options must name their scope, got %q and %q", opts[1].Name, opts[3].Name)
+	}
+	if strings.Contains(opts[0].Name, "bash") || strings.Contains(opts[2].Name, "bash") {
+		t.Error("once options must not claim a scope")
+	}
+	// Without a tool name the generic labels survive.
+	plain := buildPermissionOptions("")
+	if plain[1].Name != "Allow always" || plain[3].Name != "Reject always" {
+		t.Errorf("generic labels changed: %q, %q", plain[1].Name, plain[3].Name)
+	}
+}
+
+func TestCheckPermissionAppliesRememberedScope(t *testing.T) {
+	// conn is nil on purpose: a remembered decision must return before any
+	// client round-trip, proving the cache short-circuits the prompt.
+	b := &permissionBridge{
+		log:        slog.New(slog.NewTextHandler(io.Discard, nil)),
+		remembered: make(map[scopeKey]bool),
+	}
+	b.remember(scopeKey{sessionID: "sess", toolName: "bash"}, true)
+
+	granted, err := b.CheckPermission(context.Background(), permission.PermissionRequest{
+		SessionID: "sess", ToolName: "bash", ToolCallID: "call-1",
+	})
+	if err != nil {
+		t.Fatalf("remembered grant failed: %v", err)
+	}
+	if !granted {
+		t.Error("a remembered allow_always must grant without prompting")
+	}
+
+	b.remember(scopeKey{sessionID: "sess", toolName: "bash"}, false)
+	granted, err = b.CheckPermission(context.Background(), permission.PermissionRequest{
+		SessionID: "sess", ToolName: "bash", ToolCallID: "call-2",
+	})
+	if err != nil {
+		t.Fatalf("remembered rejection failed: %v", err)
+	}
+	if granted {
+		t.Error("a remembered reject_always must deny without prompting")
+	}
+
+	// The scope is the tool: only one entry exists, and a different tool
+	// would prompt rather than inherit this decision.
+	if len(b.remembered) != 1 {
+		t.Errorf("remembered decisions = %d, want 1", len(b.remembered))
 	}
 }
 

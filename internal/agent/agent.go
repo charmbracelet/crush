@@ -749,6 +749,16 @@ func turnFinish(largeModel Model, sessionID string, reason fantasy.FinishReason)
 	return message.FinishReasonUnknown, "", ""
 }
 
+// rootDir returns the session's working directory for the root set. It is
+// empty when no config store is wired (tests and subagents), which leaves
+// root enforcement off for those paths.
+func (a *sessionAgent) rootDir() string {
+	if a.cfg == nil {
+		return ""
+	}
+	return a.cfg.WorkingDir()
+}
+
 func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *fantasy.AgentResult, retErr error) {
 	if err := ValidateCall(call); err != nil {
 		return nil, err
@@ -842,6 +852,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// the lock so a Cancel that arrives between here and assistant creation
 	// is not lost.
 	runCtx := context.WithValue(ctx, tools.SessionIDContextKey, call.SessionID)
+	runCtx = context.WithValue(runCtx, tools.RootsContextKey, []string{a.rootDir()})
 	runCtx = withRefusalRetries(runCtx, refusalRetriesPerTurn)
 	genCtx, cancel = context.WithCancel(runCtx)
 	ac := &activeCancel{cancel: cancel}
@@ -985,6 +996,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// cancel func were already created and registered under the dispatch
 	// mutex above for both the accepted and in-process paths.
 	ctx = context.WithValue(ctx, tools.SessionIDContextKey, call.SessionID)
+	// The session's root set is the workspace working directory. The tools
+	// bound paths outside it by consent (session-setup.md:444-452).
+	ctx = context.WithValue(ctx, tools.RootsContextKey, []string{a.rootDir()})
 
 	history, files := a.preparePrompt(msgs, largeModel.CatwalkCfg.Capabilities.Vision, largeModel.CatwalkCfg.Capabilities.Audio, call.Attachments...)
 

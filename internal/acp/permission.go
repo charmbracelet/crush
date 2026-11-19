@@ -13,32 +13,34 @@ import (
 // permissionBridge handles the mapping between Crush permission requests
 // and ACP session/request_permission calls.
 type permissionBridge struct {
-	conn      *acp.AgentSideConnection
-	log       *slog.Logger
-	permitted map[permissionKey]bool
-	mu        sync.Mutex
+	conn *acp.AgentSideConnection
+	log  *slog.Logger
+	// remembered holds allow_always/reject_always decisions by session and
+	// tool scope. The spec makes the Agent the owner of a remembered
+	// decision's scope (tool-calls.md:237-241); the tool name is the scope
+	// Crush can honour, and the connection's lifetime is how long it lasts.
+	remembered map[scopeKey]bool
+	mu         sync.Mutex
 }
 
-type permissionKey struct {
-	sessionID  string
-	toolCallID string
+type scopeKey struct {
+	sessionID string
+	toolName  string
 }
 
 // newPermissionBridge creates a bridge that forwards permission requests
 // to the ACP client via conn.RequestPermission.
 func newPermissionBridge(conn *acp.AgentSideConnection, log *slog.Logger) *permissionBridge {
 	return &permissionBridge{
-		conn:      conn,
-		log:       log,
-		permitted: make(map[permissionKey]bool),
+		conn:       conn,
+		log:        log,
+		remembered: make(map[scopeKey]bool),
 	}
 }
 
 // CheckPermission is called before executing a tool that requires permission.
 // It returns true if the operation is allowed, false if denied.
 func (b *permissionBridge) CheckPermission(ctx context.Context, req permission.PermissionRequest) (bool, error) {
-	key := permissionKey{sessionID: req.SessionID, toolCallID: req.ToolCallID}
-
 	// If the session or request was already cancelled, resolve as a denial
 	// without error so the turn ends with StopReasonCancelled rather than a
 	// spurious tool error.
@@ -46,13 +48,16 @@ func (b *permissionBridge) CheckPermission(ctx context.Context, req permission.P
 		return false, nil
 	}
 
-	// Check persistent grants first.
+	// A remembered decision for this tool in this session applies without
+	// asking again. Only the always kinds land in the cache, so an allow_once
+	// never leaks into a later call.
+	scope := scopeKey{sessionID: req.SessionID, toolName: req.ToolName}
 	b.mu.Lock()
-	if granted, ok := b.permitted[key]; ok {
-		b.mu.Unlock()
+	granted, remembered := b.remembered[scope]
+	b.mu.Unlock()
+	if remembered {
 		return granted, nil
 	}
-	b.mu.Unlock()
 
 	// Build the tool call update for the permission request.
 	title := fmt.Sprintf("%s: %s", req.ToolName, req.Description)
@@ -65,7 +70,7 @@ func (b *permissionBridge) CheckPermission(ctx context.Context, req permission.P
 	// call sits in pending from its first report until permission resolves).
 	b.pushToolCallStatus(ctx, req.SessionID, req.ToolCallID, title, acp.ToolCallStatusPending, "")
 
-	options := buildPermissionOptions(req.Action)
+	options := buildPermissionOptions(req.ToolName)
 
 	permissionReq := acp.RequestPermissionRequest{
 		SessionId: acp.SessionId(req.SessionID),
@@ -86,13 +91,17 @@ func (b *permissionBridge) CheckPermission(ctx context.Context, req permission.P
 	}
 
 	// Map the outcome back to a boolean decision.
-	granted := mapPermissionOutcome(resp.Outcome)
+	granted = mapPermissionOutcome(resp.Outcome)
 
-	// Record persistent grants.
-	if granted && isAllowAlways(resp.Outcome) {
-		b.mu.Lock()
-		b.permitted[key] = true
-		b.mu.Unlock()
+	// Record remembered decisions. The once kinds are deliberately not
+	// cached: they apply to the call they were granted for and no further.
+	if sel := resp.Outcome.Selected; sel != nil {
+		switch sel.OptionId {
+		case acp.PermissionOptionId("allow_always"):
+			b.remember(scope, true)
+		case acp.PermissionOptionId("reject_always"):
+			b.remember(scope, false)
+		}
 	}
 
 	// A denied permission terminates the tool call: report it as failed so the
@@ -102,8 +111,15 @@ func (b *permissionBridge) CheckPermission(ctx context.Context, req permission.P
 			acp.ToolCallStatusFailed, "Permission denied by user")
 	}
 
-	b.log.Info("ACP permission result", "sessionId", req.SessionID, "granted", granted)
+	b.log.Info("ACP permission result", "sessionId", req.SessionID, "tool", req.ToolName, "granted", granted)
 	return granted, nil
+}
+
+// remember stores an always-kind decision for the session+tool scope.
+func (b *permissionBridge) remember(scope scopeKey, granted bool) {
+	b.mu.Lock()
+	b.remembered[scope] = granted
+	b.mu.Unlock()
 }
 
 // pushToolCallStatus emits a tool_call_update so the client observes the
@@ -127,11 +143,16 @@ func (b *permissionBridge) pushToolCallStatus(ctx context.Context, sessionID, to
 	}
 }
 
-// buildPermissionOptions creates ACP permission options from Crush's action type.
-// All four kinds the spec defines are offered (tool-calls.md:232-235). The
-// allow-once option stays first so a client that picks the first option by
-// default grants rather than denies.
-func buildPermissionOptions(_ string) []acp.PermissionOption {
+// buildPermissionOptions creates ACP permission options for the tool being
+// approved. All four kinds the spec defines are offered (tool-calls.md:232-
+// 235), and the always-kinds state their scope in the name, which the spec
+// asks for (tool-calls.md:250). The allow-once option stays first so a client
+// that picks the first option by default grants rather than denies.
+func buildPermissionOptions(toolName string) []acp.PermissionOption {
+	alwaysScope := "always"
+	if toolName != "" {
+		alwaysScope = "always for " + toolName
+	}
 	return []acp.PermissionOption{
 		{
 			OptionId: acp.PermissionOptionId("allow_once"),
@@ -140,7 +161,7 @@ func buildPermissionOptions(_ string) []acp.PermissionOption {
 		},
 		{
 			OptionId: acp.PermissionOptionId("allow_always"),
-			Name:     "Allow always",
+			Name:     "Allow " + alwaysScope,
 			Kind:     acp.PermissionOptionKindAllowAlways,
 		},
 		{
@@ -150,7 +171,7 @@ func buildPermissionOptions(_ string) []acp.PermissionOption {
 		},
 		{
 			OptionId: acp.PermissionOptionId("reject_always"),
-			Name:     "Reject always",
+			Name:     "Reject " + alwaysScope,
 			Kind:     acp.PermissionOptionKindRejectAlways,
 		},
 	}

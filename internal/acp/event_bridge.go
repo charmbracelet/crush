@@ -19,6 +19,7 @@ import (
 	"github.com/charmbracelet/crush/internal/filepathext"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/x/ansi"
 	acp "github.com/coder/acp-go-sdk"
 )
@@ -85,6 +86,7 @@ type eventBridge struct {
 	toolInputs      map[string]string          // toolCallID -> raw input JSON, for diff content
 	attachmentsSent map[string]int             // msgID -> binary content parts already sent
 	promptMeta      map[string]map[string]any  // sessionID -> _meta from session/prompt
+	lastTitles      map[string]string          // sessionID -> last announced title
 
 	// pendingText tracks messages where thinking has started but not finished.
 	// Text for these messages is held back until thinking completes (FinishedAt > 0)
@@ -133,6 +135,7 @@ func newEventBridge(conn *acp.AgentSideConnection, app *app.App, log *slog.Logge
 		toolInputs:      make(map[string]string),
 		attachmentsSent: make(map[string]int),
 		promptMeta:      make(map[string]map[string]any),
+		lastTitles:      make(map[string]string),
 		pendingText:     make(map[string]bool),
 	}
 }
@@ -180,6 +183,11 @@ func (b *eventBridge) Start(ctx context.Context) error {
 	if b.app.Messages != nil {
 		go b.subscribeMessages(ctx)
 	}
+	// Subscribe to session updates so an auto-generated title is announced
+	// rather than leaving the client showing the static new-session title.
+	if b.app.Sessions != nil {
+		go b.subscribeSessions(ctx)
+	}
 
 	<-ctx.Done()
 	return ctx.Err()
@@ -205,6 +213,62 @@ func (b *eventBridge) subscribeMessages(ctx context.Context) {
 			b.handleMessage(ctx, ev.Payload)
 		}
 	}
+}
+
+// subscribeSessions watches the session store for title changes. The store
+// publishes UpdatedEvent on rename and on the title-and-usage update that
+// follows a run, so the change-detection here is what keeps this from
+// announcing every usage-only save.
+func (b *eventBridge) subscribeSessions(ctx context.Context) {
+	ch := b.app.Sessions.Subscribe(ctx)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev := <-ch:
+			if ev.Type != pubsub.CreatedEvent && ev.Type != pubsub.UpdatedEvent {
+				continue
+			}
+			b.handleSessionEvent(ctx, ev.Payload)
+		}
+	}
+}
+
+// handleSessionEvent emits a session_info_update when the stored title moved
+// since the last observation.
+func (b *eventBridge) handleSessionEvent(ctx context.Context, s session.Session) {
+	if !b.titleChanged(s) {
+		return
+	}
+	title := s.Title
+	now := time.Now().UTC().Format(time.RFC3339)
+	note := acp.SessionNotification{
+		SessionId: acp.SessionId(s.ID),
+		Update: acp.SessionUpdate{
+			SessionInfoUpdate: &acp.SessionSessionInfoUpdate{
+				Title:     &title,
+				UpdatedAt: &now,
+			},
+		},
+	}
+	if err := b.conn.SessionUpdate(ctx, note); err != nil {
+		b.log.Warn("Failed to send session info update", "error", err)
+	}
+}
+
+// titleChanged records the session's title and reports whether it moved since
+// the previous observation. The first observation only seeds the baseline, so
+// the announcement session/new already made is not repeated and a session
+// loaded mid-life does not replay its old title.
+func (b *eventBridge) titleChanged(s session.Session) bool {
+	if s.ID == "" || s.Title == "" {
+		return false
+	}
+	b.mu.Lock()
+	last, seen := b.lastTitles[s.ID]
+	b.lastTitles[s.ID] = s.Title
+	b.mu.Unlock()
+	return seen && last != s.Title
 }
 
 func (b *eventBridge) handleMessage(ctx context.Context, m message.Message) {

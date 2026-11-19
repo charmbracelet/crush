@@ -112,3 +112,15 @@ func TestFromSkillCatalog_UsesDiscoveredSymlinkedSkills(t *testing.T) {
 	require.Equal(t, "linked-skill", cmds[0].Skill.Name)
 	require.Equal(t, filepath.Join(link, skills.SkillFileName), cmds[0].Skill.SkillFilePath)
 }
+
+func TestSubstituteArgs(t *testing.T) {
+	t.Parallel()
+
+	// The one resolution rule both the TUI and the ACP path share.
+	got := SubstituteArgs("hello $NAME, welcome to $PLACE", map[string]string{"NAME": "Ada", "PLACE": "Crush"})
+	require.Equal(t, "hello Ada, welcome to Crush", got)
+
+	// Unknown placeholders stay untouched, so a template is never silently
+	// emptied.
+	require.Equal(t, "$MISSING stays", SubstituteArgs("$MISSING stays", nil))
+}

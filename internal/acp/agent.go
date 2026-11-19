@@ -2,8 +2,10 @@ package acp
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -13,10 +15,12 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
+	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
@@ -38,6 +42,12 @@ type crushAgent struct {
 	// clientCaps holds the capabilities the connected client advertised during
 	// initialize. Used to gate optional server track features (fs).
 	clientCaps acp.ClientCapabilities
+
+	// activeSessions holds the sessions created, loaded or resumed on this
+	// connection. error.md:56 makes a session active only then, so a
+	// session-scoped request naming any other id is -32002 even when the store
+	// knows it.
+	activeSessions sync.Map
 }
 
 // newCrushAgent creates an ACP agent backed by the given Crush app.
@@ -95,6 +105,7 @@ func (a *crushAgent) NewSession(ctx context.Context, req acp.NewSessionRequest) 
 	if err != nil {
 		return acp.NewSessionResponse{}, fmt.Errorf("create session: %w", err)
 	}
+	a.activeSessions.Store(string(session.ID), struct{}{})
 	a.log.Info("ACP new session", "sessionId", session.ID, "cwd", req.Cwd)
 	sid := acp.SessionId(session.ID)
 
@@ -123,12 +134,16 @@ func (a *crushAgent) NewSession(ctx context.Context, req acp.NewSessionRequest) 
 }
 
 // validateCwd rejects a cwd naming a workspace other than the one Crush was
-// started in. The spec makes cwd part of the session's root set and the base
-// for relative paths (session-setup.md:437-444), and Crush serves exactly one
+// started in, and any cwd that is not absolute: the spec makes cwd part of
+// the session's root set and requires every protocol path to be absolute
+// (session-setup.md:437-444, overview.md:160). Crush serves exactly one
 // workspace per process, so a mismatch cannot be honoured.
 func (a *crushAgent) validateCwd(cwd string) error {
 	if cwd == "" {
 		return nil
+	}
+	if !isAbsPath(cwd) {
+		return invalidParam("cwd", cwd)
 	}
 	local := a.workingDir()
 	if local == "" || samePath(local, cwd) {
@@ -138,6 +153,12 @@ func (a *crushAgent) validateCwd(cwd string) error {
 		"session cwd %q does not match crush working directory %q; "+
 			"start crush with -c %s to use that workspace",
 		cwd, local, cwd)
+}
+
+// isAbsPath reports whether p is absolute in either form the protocol uses:
+// the spec's POSIX-style leading slash, or a native drive-letter path.
+func isAbsPath(p string) bool {
+	return strings.HasPrefix(p, "/") || filepath.IsAbs(p)
 }
 
 // ValidateCwd exposes validateCwd to the dispatcher, which owns session/load.
@@ -153,10 +174,22 @@ func (a *crushAgent) SessionState(sessionID acp.SessionId) (*acp.SessionModeStat
 	return a.modeState(sessionID), a.configOptions(sessionID)
 }
 
-// SessionExists reports whether the store knows the session. The dispatcher
-// uses it for the -32002 check on session/load, which it serves itself.
+// SessionExists reports whether the store knows the session. It deliberately
+// ignores the active set: session/load is itself one of the ways a session
+// becomes active, so the dispatcher calls it before MarkSessionActive.
 func (a *crushAgent) SessionExists(ctx context.Context, sessionID acp.SessionId) bool {
-	return a.requireSession(ctx, sessionID) == nil
+	if a.app == nil || a.app.Sessions == nil || sessionID == "" {
+		return true
+	}
+	_, err := a.app.Sessions.Get(ctx, string(sessionID))
+	return err == nil
+}
+
+// MarkSessionActive records that a session was created, loaded or resumed on
+// this connection. Until then a session-scoped request naming it answers
+// -32002 even when the store knows the id (error.md:56).
+func (a *crushAgent) MarkSessionActive(sessionID acp.SessionId) {
+	a.activeSessions.Store(string(sessionID), struct{}{})
 }
 
 // workingDir reports the directory Crush was started in, or "" when the app
@@ -195,6 +228,11 @@ const listPageSize = 50
 // rejected with -32602 rather than silently restarting from the first page.
 func (a *crushAgent) ListSessions(_ context.Context, req acp.ListSessionsRequest) (acp.ListSessionsResponse, error) {
 	cwd := a.workingDir()
+	// The filter is itself a protocol path, so it must be absolute
+	// (session-list.md:85).
+	if req.Cwd != nil && *req.Cwd != "" && !isAbsPath(*req.Cwd) {
+		return acp.ListSessionsResponse{}, invalidParam("cwd", *req.Cwd)
+	}
 	// Crush has a single workspace root, so a filter naming any other
 	// directory matches nothing.
 	if req.Cwd != nil && *req.Cwd != "" && cwd != "" && !samePath(cwd, *req.Cwd) {
@@ -271,10 +309,13 @@ func decodeListCursor(cursor string) (int, error) {
 // CloseSession implements acp.Agent.
 func (a *crushAgent) CloseSession(_ context.Context, req acp.CloseSessionRequest) (acp.CloseSessionResponse, error) {
 	id := string(req.SessionId)
-	a.app.AgentCoordinator.Cancel(id)
+	if a.app.AgentCoordinator != nil {
+		a.app.AgentCoordinator.Cancel(id)
+	}
 	// Closing frees the resources associated with the session, which includes
 	// any MCP servers it brought with it (session-setup.md:313).
 	mcp.TeardownSession(id)
+	a.activeSessions.Delete(id)
 	return acp.CloseSessionResponse{}, nil
 }
 
@@ -290,9 +331,12 @@ func (a *crushAgent) ResumeSession(ctx context.Context, req acp.ResumeSessionReq
 	if err := a.validateCwd(req.Cwd); err != nil {
 		return acp.ResumeSessionResponse{}, err
 	}
-	if err := a.requireSession(ctx, req.SessionId); err != nil {
-		return acp.ResumeSessionResponse{}, err
+	if !a.SessionExists(ctx, req.SessionId) {
+		return acp.ResumeSessionResponse{}, sessionNotFound(req.SessionId)
 	}
+	// Resuming is what makes a session active on this connection
+	// (error.md:56), so the existence check above stays store-only.
+	a.activeSessions.Store(string(req.SessionId), struct{}{})
 	// The spec requires resume to reconnect the requested MCP servers
 	// (session-setup.md:257). The request list is authoritative for this
 	// session, so any servers it already had are replaced.
@@ -332,6 +376,7 @@ func (a *crushAgent) UnstableDeleteSession(ctx context.Context, req acp.Unstable
 			return acp.UnstableDeleteSessionResponse{}, fmt.Errorf("delete session: %w", err)
 		}
 	}
+	a.activeSessions.Delete(id)
 	mcp.TeardownSession(id)
 	return acp.UnstableDeleteSessionResponse{}, nil
 }
@@ -356,10 +401,12 @@ func (a *crushAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Pro
 		return acp.PromptResponse{}, err
 	}
 
-	// Record any _meta the client sent so it is echoed on session/update
-	// notifications streamed for this turn (S7).
+	// _meta is echoed on this turn's session/update notifications (S7), with
+	// a W3C traceparent added when the client did not send one so the turn
+	// is correlatable end to end (extensibility.md:40-44).
+	meta := withTraceMeta(req.Meta)
 	if a.bridge != nil {
-		a.bridge.SetPromptMeta(sessionID, req.Meta)
+		a.bridge.SetPromptMeta(sessionID, meta)
 	}
 
 	prompt, attachments := buildPrompt(req.Prompt)
@@ -373,33 +420,41 @@ func (a *crushAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Pro
 	result, err := a.app.AgentCoordinator.Run(ctx, sessionID, prompt, attachments...)
 	if err != nil {
 		if ctx.Err() != nil {
-			return acp.PromptResponse{StopReason: acp.StopReasonCancelled, Meta: req.Meta}, nil
+			return acp.PromptResponse{StopReason: acp.StopReasonCancelled, Meta: meta}, nil
 		}
 		return acp.PromptResponse{}, fmt.Errorf("run prompt: %w", err)
 	}
 
 	stopReason := mapFinishReason(result.Response.FinishReason)
 	a.log.Info("ACP prompt done", "sessionId", sessionID, "stopReason", stopReason)
-	return acp.PromptResponse{StopReason: stopReason, Meta: req.Meta}, nil
+	return acp.PromptResponse{StopReason: stopReason, Meta: meta}, nil
 }
 
-// requireSession reports -32002 when the named session does not exist. Callers
-// treat a nil error as "go ahead"; a store error other than not-found is
-// reported as-is rather than masked as a missing session.
+// requireSession reports -32002 when the named session does not exist or is
+// not active on this connection. Callers treat a nil error as "go ahead"; a
+// store error other than not-found is reported as-is rather than masked as a
+// missing session.
 func (a *crushAgent) requireSession(ctx context.Context, id acp.SessionId) error {
 	if a.app == nil || a.app.Sessions == nil || id == "" {
 		return nil
 	}
 	if _, err := a.app.Sessions.Get(ctx, string(id)); err != nil {
-		// The SDK ships no constructor for -32002, so build the RequestError
-		// directly.
-		return &acp.RequestError{
-			Code:    acpErrorResourceNotFound,
-			Message: "Resource not found",
-			Data:    map[string]any{"sessionId": string(id)},
-		}
+		return sessionNotFound(id)
+	}
+	if _, ok := a.activeSessions.Load(string(id)); !ok {
+		return sessionNotFound(id)
 	}
 	return nil
+}
+
+// sessionNotFound builds the -32002 the spec prescribes for a session that
+// does not exist or is not active on the connection (error.md:56-58).
+func sessionNotFound(id acp.SessionId) error {
+	return &acp.RequestError{
+		Code:    acpErrorResourceNotFound,
+		Message: "Resource not found",
+		Data:    map[string]any{"sessionId": string(id)},
+	}
 }
 
 // SetSessionMode acknowledges a mode change and notifies the client. An
@@ -956,6 +1011,23 @@ func firstLine(s string) string {
 	return strings.TrimSpace(s)
 }
 
+// clientFSAdapter lets the ACP connection serve as the tool layer's client
+// file system. It reads the client's advertised capabilities at call time,
+// because Initialize arrives after the tools are constructed.
+type clientFSAdapter struct {
+	agent *crushAgent
+}
+
+func (c *clientFSAdapter) ReadTextFile(ctx context.Context, path string) (string, error) {
+	sessionID := acp.SessionId(tools.GetSessionFromContext(ctx))
+	return c.agent.fsReadTextFile(ctx, sessionID, path, nil, nil)
+}
+
+func (c *clientFSAdapter) WriteTextFile(ctx context.Context, path, content string) error {
+	sessionID := acp.SessionId(tools.GetSessionFromContext(ctx))
+	return c.agent.fsWriteTextFile(ctx, sessionID, path, content)
+}
+
 // fsReadTextFile reads a text file. When the connected client advertises fs
 // support the read is delegated to the client; otherwise Crush reads it from its
 // own local filesystem. The line/limit windowing supported by the client path
@@ -1088,4 +1160,37 @@ func mapFinishReason(reason fantasy.FinishReason) acp.StopReason {
 	default:
 		return acp.StopReasonEndTurn
 	}
+}
+
+// withTraceMeta returns a copy of the prompt's _meta carrying a W3C
+// traceparent when the client did not send one, so the turn and every update
+// of it share a correlatable id (extensibility.md:40-44 reserves the
+// traceparent/tracestate/baggage keys for exactly this). Crush has no tracer
+// backend; the value is a well-formed id a client can correlate against,
+// not a span join.
+func withTraceMeta(meta map[string]any) map[string]any {
+	out := make(map[string]any, len(meta)+1)
+	for k, v := range meta {
+		out[k] = v
+	}
+	if _, ok := out["traceparent"]; !ok {
+		if tp := newTraceparent(); tp != "" {
+			out["traceparent"] = tp
+		}
+	}
+	return out
+}
+
+// newTraceparent renders a version-00 traceparent with a random trace and
+// span id and the sampled flag set, per the W3C trace-context grammar.
+func newTraceparent() string {
+	var traceID [16]byte
+	var spanID [8]byte
+	if _, err := rand.Read(traceID[:]); err != nil {
+		return ""
+	}
+	if _, err := rand.Read(spanID[:]); err != nil {
+		return ""
+	}
+	return fmt.Sprintf("00-%s-%s-01", hex.EncodeToString(traceID[:]), hex.EncodeToString(spanID[:]))
 }

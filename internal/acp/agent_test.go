@@ -348,3 +348,24 @@ func TestValidateConfigOption_RejectsUnknown(t *testing.T) {
 	}))
 	require.Error(t, validateConfigOption(cfg, acp.SetSessionConfigOptionRequest{}))
 }
+
+func TestWithTraceMetaGeneratesTraceparent(t *testing.T) {
+	// A prompt without _meta still gets a correlatable trace id
+	// (extensibility.md:40-44).
+	meta := withTraceMeta(nil)
+	tp, ok := meta["traceparent"].(string)
+	require.True(t, ok, "expected a generated traceparent")
+	// W3C trace-context grammar: version-traceid-spanid-flags.
+	require.Regexp(t, `^00-[0-9a-f]{32}-[0-9a-f]{16}-01$`, tp)
+
+	// A client-supplied traceparent wins.
+	in := map[string]any{"traceparent": "00-abc-123-01", "custom": true}
+	out := withTraceMeta(in)
+	require.Equal(t, "00-abc-123-01", out["traceparent"])
+	require.Equal(t, true, out["custom"])
+
+	// The caller's map is not mutated.
+	empty := map[string]any{}
+	require.NotEmpty(t, withTraceMeta(empty)["traceparent"])
+	require.Empty(t, empty)
+}

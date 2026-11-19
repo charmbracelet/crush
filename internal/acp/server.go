@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 
 	"github.com/charmbracelet/crush/internal/app"
+	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/filepathext"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -42,6 +43,10 @@ type Agent interface {
 	ValidateCwd(cwd string) error
 	// SessionExists reports whether the store knows a session.
 	SessionExists(ctx context.Context, sessionID acp.SessionId) bool
+	// MarkSessionActive records that a session was created, loaded or resumed
+	// on this connection, which is what makes it active for the session-scoped
+	// requests (error.md:56).
+	MarkSessionActive(sessionID acp.SessionId)
 	// SessionState reports the mode and config-option payload for a session.
 	SessionState(sessionID acp.SessionId) (*acp.SessionModeState, []acp.SessionConfigOption)
 	// ConnectMCPServers starts the MCP servers a setup request supplied. The
@@ -61,6 +66,12 @@ func NewServer(a *app.App, log *slog.Logger, stdin io.Reader, stdout io.Writer) 
 	// Create permission bridge and wrap the real service.
 	permb := newPermissionBridge(conn, log)
 	permService := newACPPermissionService(a.Permissions, permb)
+
+	// Install the client file system so view/write tools delegate to the
+	// connected client when it advertises fs support (file-system.md). The
+	// adapter reads the capabilities at call time, since Initialize arrives
+	// after the tools are constructed.
+	tools.SetClientFS(&clientFSAdapter{agent: ca})
 
 	// Create event bridge for streaming notifications.
 	eventBridge := newEventBridge(conn, a, log)
@@ -195,6 +206,10 @@ func (d *dispatcher) LoadSession(ctx context.Context, req acp.LoadSessionRequest
 			Data:    map[string]any{"sessionId": string(req.SessionId)},
 		}
 	}
+	// Loading is what makes the session active on this connection
+	// (error.md:56), and it must be recorded before the replay streams so a
+	// later session-scoped request passes the active check.
+	d.agent.MarkSessionActive(req.SessionId)
 	sessionID := string(req.SessionId)
 	// Reconnect the MCP servers the client supplied for this load. The spec
 	// makes stdio a baseline (session-setup.md:458) and session/load carries

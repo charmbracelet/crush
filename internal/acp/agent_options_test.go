@@ -56,6 +56,46 @@ func TestValidateCwd(t *testing.T) {
 	require.NoError(t, a.validateCwd("/anything"))
 }
 
+func TestValidateCwdRequiresAbsolute(t *testing.T) {
+	// overview.md:160 makes every protocol path absolute, cwd included.
+	a := newTestAgent(&stubSessionService{})
+	err := a.validateCwd("relative/project")
+	var reqErr *acp.RequestError
+	require.ErrorAs(t, err, &reqErr)
+	require.Equal(t, -32602, reqErr.Code)
+}
+
+func TestListSessionsRejectsRelativeCwd(t *testing.T) {
+	a := newTestAgent(&stubSessionService{})
+	rel := "relative/project"
+	_, err := a.ListSessions(context.Background(), acp.ListSessionsRequest{Cwd: &rel})
+	var reqErr *acp.RequestError
+	require.ErrorAs(t, err, &reqErr)
+	require.Equal(t, -32602, reqErr.Code)
+}
+
+func TestRequireSessionTracksConnectionActiveSet(t *testing.T) {
+	// The store knows every id, but a session never set up on this
+	// connection is not active here (error.md:56).
+	a := newTestAgent(&stubSessionService{})
+	err := a.requireSession(context.Background(), "sess-unknown")
+	var reqErr *acp.RequestError
+	require.ErrorAs(t, err, &reqErr)
+	require.Equal(t, -32002, reqErr.Code)
+
+	// Creating it on the connection makes it active.
+	resp, err := a.NewSession(context.Background(), acp.NewSessionRequest{})
+	require.NoError(t, err)
+	require.NoError(t, a.requireSession(context.Background(), resp.SessionId))
+
+	// Closing frees it again.
+	_, err = a.CloseSession(context.Background(), acp.CloseSessionRequest{SessionId: resp.SessionId})
+	require.NoError(t, err)
+	err = a.requireSession(context.Background(), resp.SessionId)
+	require.ErrorAs(t, err, &reqErr)
+	require.Equal(t, -32002, reqErr.Code)
+}
+
 func TestUnstableDeleteSession(t *testing.T) {
 	// A session the store does not know deletes silently
 	// (session-delete.md:85).

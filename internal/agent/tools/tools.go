@@ -5,7 +5,10 @@ import (
 	"context"
 	"fmt"
 	"html/template"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"charm.land/fantasy"
@@ -116,4 +119,91 @@ func renderTemplate(tmpl *template.Template, data any) string {
 		panic("failed to execute tool description template: " + err.Error())
 	}
 	return out.String()
+}
+
+// rootsContextKey carries the session's effective root set.
+type rootsContextKey string
+
+// RootsContextKey is the key for the session's root set in the context.
+const RootsContextKey rootsContextKey = "session_roots"
+
+// GetRootsFromContext retrieves the session's effective root set. An empty
+// result means the caller is not root-scoped (a CLI run, a test), and the
+// tools treat every path as in scope.
+func GetRootsFromContext(ctx context.Context) []string {
+	return getContextValue(ctx, RootsContextKey, []string(nil))
+}
+
+// OutsideRoots reports whether path escapes the session's root set.
+//
+// The check is by path component on the resolved path and fails closed, which
+// is what the spec asks of an implementation that enforces the root set
+// (session-setup.md:452). An empty root set means enforcement is off.
+func OutsideRoots(roots []string, path string) bool {
+	if len(roots) == 0 || path == "" {
+		return false
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return true
+	}
+	absPath = filepath.Clean(absPath)
+	for _, root := range roots {
+		if root == "" {
+			continue
+		}
+		absRoot, err := filepath.Abs(root)
+		if err != nil {
+			continue
+		}
+		rel, err := filepath.Rel(filepath.Clean(absRoot), absPath)
+		if err != nil {
+			continue
+		}
+		// A relative result of "..", or one that starts with a parent
+		// component, is outside; anything else is inside.
+		if rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))) {
+			return false
+		}
+	}
+	return true
+}
+
+// ClientFS is a client-side file system the tools read and write through,
+// when the connected ACP client advertises one. Delegating to the client is
+// what makes unsaved editor buffers visible to the Agent (file-system.md).
+type ClientFS interface {
+	ReadTextFile(ctx context.Context, path string) (string, error)
+	WriteTextFile(ctx context.Context, path, content string) error
+}
+
+// clientFS is the process-wide client file system, installed by the ACP
+// server when its client advertises fs support. Nil means the tools use the
+// local disk, which is the CLI and TUI behavior.
+var clientFS ClientFS
+
+// SetClientFS installs the client file system. Passing nil restores local
+// disk access.
+func SetClientFS(fs ClientFS) { clientFS = fs }
+
+// ReadFileText reads a text file, preferring the connected client's view of
+// it so unsaved edits are visible.
+func ReadFileText(ctx context.Context, path string) (string, error) {
+	if clientFS != nil {
+		return clientFS.ReadTextFile(ctx, path)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+// WriteFileText writes a text file, preferring the connected client so its
+// editor state and change tracking stay correct.
+func WriteFileText(ctx context.Context, path, content string) error {
+	if clientFS != nil {
+		return clientFS.WriteTextFile(ctx, path, content)
+	}
+	return os.WriteFile(path, []byte(content), 0o644)
 }

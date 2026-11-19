@@ -57,7 +57,7 @@ func (a *crushAgent) resolveAgainst(matches map[string]commandMatch, prompt stri
 	case match.prompt != nil:
 		return a.resolveMCPPrompt(match, args, prompt)
 	case match.content != "":
-		return substituteArgs(match.content, args)
+		return commands.SubstituteArgs(match.content, args)
 	default:
 		return prompt
 	}
@@ -189,14 +189,6 @@ func countRequired(declared []commands.Argument) int {
 		}
 	}
 	return n
-}
-
-// substituteArgs replaces $NAME placeholders in content with their values.
-func substituteArgs(content string, args map[string]string) string {
-	for name, value := range args {
-		content = strings.ReplaceAll(content, "$"+name, value)
-	}
-	return content
 }
 
 // joinNonEmpty joins the parts that carry text with a blank line.

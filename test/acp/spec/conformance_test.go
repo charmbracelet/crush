@@ -909,8 +909,14 @@ func TestConformanceInvalidSessionError(t *testing.T) {
 		SessionId: acp.SessionId("nonexistent-session"),
 		Prompt:    []acp.ContentBlock{acp.TextBlock("hello")},
 	})
-	if err != nil {
+	// A session this connection never set up is -32002 (error.md:56), so
+	// prompting it must error, not succeed.
+	if err == nil {
 		t.Error("Prompt on invalid session should error")
+	}
+	var reqErr *acp.RequestError
+	if errors.As(err, &reqErr) && reqErr.Code != -32002 {
+		t.Errorf("Prompt on invalid session: got code %d, want -32002", reqErr.Code)
 	}
 
 	err = client.Cancel(t.Context(), acp.CancelNotification{SessionId: acp.SessionId("nonexistent-session")})

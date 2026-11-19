@@ -926,6 +926,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Update terminal capabilities
 	m.caps.Update(msg)
 	m.trackTurnOutcome(msg)
+	if paste, ok := msg.(tea.PasteMsg); ok {
+		// A text input's sanitizer turns \r and \n into separate line
+		// breaks, so every input gets the paste with LF line endings.
+		paste.Content = strings.ReplaceAll(paste.Content, "\r\n", "\n")
+		msg = paste
+	}
 	switch msg := msg.(type) {
 	case tea.EnvMsg:
 		// Is this Windows Terminal?
@@ -6443,9 +6449,6 @@ func (m *UI) checkBangModeAfterPaste() {
 
 // handlePasteMsg handles a paste message.
 func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
-	// Normalize \r\n before the textarea sanitizer sees it.
-	msg.Content = strings.ReplaceAll(msg.Content, "\r\n", "\n")
-
 	if m.dialog.HasDialogs() {
 		return m.handleDialogMsg(msg)
 	}

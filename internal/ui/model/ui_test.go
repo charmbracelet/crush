@@ -4,6 +4,7 @@ import (
 	"context"
 	"image"
 	"slices"
+	"strings"
 	"testing"
 
 	"charm.land/bubbles/v2/key"
@@ -15,6 +16,7 @@ import (
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/attachments"
 	"github.com/charmbracelet/crush/internal/ui/chat"
@@ -1110,4 +1112,27 @@ func TestStatusModeBadge(t *testing.T) {
 		s.SetMode(tc.mode, tc.perm)
 		require.Contains(t, ansi.Strip(s.modeBadge()), tc.badge, tc.name)
 	}
+}
+
+func TestInlinePasteNormalizesCRLF(t *testing.T) {
+	t.Parallel()
+	u := newFrameTestUI(t)
+	f := dialog.NewQuestionForm(u.com.Styles, question.Request{Questions: []question.Question{{
+		ID: "answer", Type: question.TypeFreeText, Text: "Answer",
+	}}})
+	u.activeInline = f
+	u.focus = uiFocusEditor
+	u.layout.editor = image.Rect(3, 15, 73, 30)
+	u.Update(tea.PasteMsg{Content: "first line\r\nsecond line"})
+	scr := uv.NewScreenBuffer(80, 35)
+	f.Draw(scr, u.layout.editor)
+	lines := strings.Split(strings.ReplaceAll(ansi.Strip(scr.Render()), "\r\n", "\n"), "\n")
+	for i, line := range lines {
+		if strings.Contains(line, "first line") {
+			require.Less(t, i+1, len(lines))
+			require.Contains(t, lines[i+1], "second line", "a CRLF paste is one line break")
+			return
+		}
+	}
+	t.Fatal("the paste reached the inline form")
 }

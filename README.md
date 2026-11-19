@@ -561,6 +561,12 @@ flag needed on each launch:
 }
 ```
 
+In `crushrc`, use `--channel true`:
+
+```bash
+mcp add webhook --type http --url "https://example.com/mcp" --channel true
+```
+
 Once a server is opted in, a **Channels** section on the landing page and in
 the sidebar shows its state, and the **Channels** command lists every opted-in
 server along with channel-capable servers that are not enabled yet.
@@ -629,6 +635,19 @@ messages.
     }
   }
 }
+```
+
+In `crushrc`, pass the same object to `--channel-reply`:
+
+```bash
+mcp add signal --command uv \
+  --args run --args signal_mcp/main.py --args --operator --args +15551234567 --args --channel \
+  --channel true \
+  --channel-reply '{
+    "user": {"tool": "send_message_to_user", "target_param": "user_id"},
+    "group": {"tool": "send_message_to_group", "target_param": "group_id"},
+    "suppress_tools": ["send"]
+  }'
 ```
 
 How it routes:

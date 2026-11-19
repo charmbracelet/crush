@@ -16,6 +16,7 @@ import (
 //	    [--timeout N] [--disabled true|false]
 //	    [--disabled-tools TOOL ...] [--enabled-tools TOOL ...]
 //	    [--sessionless true|false]
+//	    [--channel true|false] [--channel-reply JSON]
 //	    [--oauth true|false] [--oauth-client-id ID]
 //	    [--oauth-client-secret SECRET] [--oauth-callback-port PORT]
 //	mcp remove <name>   (alias: rm)
@@ -54,6 +55,8 @@ var mcpAddFlags = []flagSpec{
 	{name: "--disabled-tools", jsonKey: "disabled_tools", kind: flagString, op: opAppend},
 	{name: "--enabled-tools", jsonKey: "enabled_tools", kind: flagString, op: opAppend},
 	{name: "--sessionless", jsonKey: "sessionless", kind: flagBool, op: opSet},
+	{name: "--channel", jsonKey: "channel_enabled", kind: flagBool, op: opSet},
+	{name: "--channel-reply", jsonKey: "channel_reply", kind: flagJSONObject, op: opSet},
 	{name: "--oauth", jsonKey: "oauth", kind: flagBool, op: opSet},
 	{name: "--oauth-client-id", jsonKey: "oauth_client_id", kind: flagString, op: opSet},
 	{name: "--oauth-client-secret", jsonKey: "oauth_client_secret", kind: flagString, op: opSet},
@@ -62,7 +65,7 @@ var mcpAddFlags = []flagSpec{
 
 func mcpAdd(b *ConfigBuilder, args []string, stderr io.Writer) error {
 	if len(args) < 3 {
-		return usage(stderr, "usage: mcp add <name> --type stdio|sse|http [--command CMD] [--args ARG ...] [--env KEY VALUE ...] [--url URL] [--header KEY VALUE ...] [--timeout N] [--disabled true|false] [--disabled-tools TOOL ...] [--enabled-tools TOOL ...] [--sessionless true|false] [--oauth true|false] [--oauth-client-id ID] [--oauth-client-secret SECRET] [--oauth-callback-port PORT]")
+		return usage(stderr, "usage: mcp add <name> --type stdio|sse|http [--command CMD] [--args ARG ...] [--env KEY VALUE ...] [--url URL] [--header KEY VALUE ...] [--timeout N] [--disabled true|false] [--disabled-tools TOOL ...] [--enabled-tools TOOL ...] [--sessionless true|false] [--channel true|false] [--channel-reply JSON] [--oauth true|false] [--oauth-client-id ID] [--oauth-client-secret SECRET] [--oauth-callback-port PORT]")
 	}
 	name := args[2]
 	slog.Info("MCP server defined in shell config", "name", name)

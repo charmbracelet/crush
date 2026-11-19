@@ -2,6 +2,7 @@ package shellconfig
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -54,6 +55,9 @@ func hookAdd(b *ConfigBuilder, args []string, stderr io.Writer) error {
 	h := map[string]any{}
 
 	if err := applyFlags(hookAddFlags, args, 3, h, "hook add", stderr); err != nil {
+		if errors.Is(err, errUnknownFlag) {
+			return nil
+		}
 		return err
 	}
 
@@ -82,6 +86,9 @@ func hookRemove(b *ConfigBuilder, args []string, stderr io.Writer) error {
 
 	flags := map[string]any{}
 	if err := applyFlags(hookRemoveFlags, args, 3, flags, "hook remove", stderr); err != nil {
+		if errors.Is(err, errUnknownFlag) {
+			return nil
+		}
 		return err
 	}
 	name, _ := flags["name"].(string)

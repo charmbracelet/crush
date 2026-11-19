@@ -364,15 +364,25 @@ func TestLoadShellConfig_EnvVarExpansion(t *testing.T) {
 }
 
 // TestLoadShellConfig_UnknownFlag verifies error handling for unknown flags.
+// TestLoadShellConfig_UnknownFlag verifies that a line with an unknown flag
+// is dropped instead of failing the load.
 func TestLoadShellConfig_UnknownFlag(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	script := `provider add openai --bogus-flag "value"`
+	script := "provider add openai --bogus-flag \"value\"\noption notifications bell"
 	path := filepath.Join(dir, "crushrc")
 
-	_, err := LoadShellConfig(t.Context(), path, []byte(script))
-	require.Error(t, err)
+	jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(script))
+	require.NoError(t, err)
+
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &result))
+	providers, _ := result["providers"].(map[string]any)
+	require.NotContains(t, providers, "openai",
+		"the dropped line must leave no partial provider entry")
+	require.Equal(t, "bell", result["options"].(map[string]any)["notifications"],
+		"lines after the dropped one still apply")
 }
 
 // TestLoadShellConfig_MissingRequiredArgs verifies error handling for missing args.
@@ -433,6 +443,28 @@ func TestLoadShellConfig_BuiltinUsageErrorStillFails(t *testing.T) {
 	_, err := LoadShellConfig(t.Context(), path, []byte(script))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "expects a number")
+}
+
+// TestLoadShellConfig_UnknownFlagDropsLine verifies that a line using a flag
+// this build does not know, e.g. a fork-only MCP flag, is dropped while the
+// rest of the config still applies.
+func TestLoadShellConfig_UnknownFlagDropsLine(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := "option notifications bell\nmcp add myserver --oauth-client-id-metadata https://example.com\noption notifications osc"
+	path := filepath.Join(dir, "crushrc")
+
+	jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(script))
+	require.NoError(t, err)
+
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &result))
+	mcp, _ := result["mcp"].(map[string]any)
+	require.NotContains(t, mcp, "myserver",
+		"the dropped line must not leave a partial MCP entry")
+	require.Equal(t, "osc", result["options"].(map[string]any)["notifications"],
+		"lines after the dropped one still apply")
 }
 
 func TestLoadShellConfig_ProviderJSONFlagsRequireObjects(t *testing.T) {

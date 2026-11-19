@@ -2,6 +2,7 @@ package shellconfig
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -99,6 +100,9 @@ func modelAdd(b *ConfigBuilder, args []string, stderr io.Writer) error {
 
 	model := map[string]any{"id": id}
 	if err := applyFlags(modelAddFlags, args, 3, model, "model add", stderr); err != nil {
+		if errors.Is(err, errUnknownFlag) {
+			return nil
+		}
 		return err
 	}
 
@@ -199,11 +203,19 @@ func modelSelect(b *ConfigBuilder, args []string, stdout, stderr io.Writer) erro
 		return usage(stderr, fmt.Sprintf("model %s: expected <provider>/<id>, got %q", slot, args[2]))
 	}
 
-	sel := childMap(b.section("models"), slot)
+	models := b.section("models")
+	_, existed := models[slot]
+	sel := childMap(models, slot)
 	sel["provider"] = provider
 	sel["model"] = id
 
 	if err := applyFlags(modelSelectFlags, args, 3, sel, "model "+slot, stderr); err != nil {
+		if errors.Is(err, errUnknownFlag) {
+			if !existed {
+				delete(models, slot)
+			}
+			return nil
+		}
 		return err
 	}
 

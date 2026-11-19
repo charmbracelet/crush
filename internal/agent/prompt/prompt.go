@@ -245,6 +245,11 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 	// Deduplicate: user skills override builtins with the same name.
 	allSkills = skills.Deduplicate(allSkills)
 
+	// Keep the full discovered list before the config filter, so a
+	// repository-scoped enabled override can restore a config-disabled
+	// skill below.
+	discovered := allSkills
+
 	// Filter out disabled skills.
 	allSkills = skills.Filter(allSkills, cfg.Options.DisabledSkills)
 
@@ -253,6 +258,10 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 	// enabled override come back for this repository.
 	if p.skillOverrides != nil {
 		repoDisabled, repoEnabled := p.skillOverrides(ctx)
+		repoEnabledSet := make(map[string]bool, len(repoEnabled))
+		for _, name := range repoEnabled {
+			repoEnabledSet[name] = true
+		}
 		effective := make(map[string]bool, len(repoDisabled))
 		for _, name := range repoDisabled {
 			effective[name] = true
@@ -268,6 +277,23 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 			slices.Sort(disabled)
 			allSkills = skills.Filter(allSkills, disabled)
 		}
+
+		// Restore config-disabled skills that the repository enables,
+		// unless the repository also disables them.
+		var restored []*skills.Skill
+		for _, s := range discovered {
+			if !repoEnabledSet[s.Name] {
+				continue
+			}
+			if effective[s.Name] {
+				continue
+			}
+			if slices.ContainsFunc(allSkills, func(x *skills.Skill) bool { return x.Name == s.Name }) {
+				continue
+			}
+			restored = append(restored, s)
+		}
+		allSkills = append(allSkills, restored...)
 	}
 
 	if len(allSkills) > 0 {

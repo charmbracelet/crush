@@ -37,7 +37,7 @@ func newChannelsTestUI(t *testing.T, mcpNames []string, states map[string]mcp.Cl
 		Workspace: &channelsTestWorkspace{cfg: &config.Config{MCP: mcps}},
 		Styles:    common.DefaultCommon(nil).Styles,
 	}
-	return &UI{com: com, mcpStates: states}
+	return &UI{com: com, mcpStates: states, chat: NewChat(com, config.ScrollbarDefault)}
 }
 
 // TestChannelStatusItems_FiltersSortsAndMapsState covers the core logic:

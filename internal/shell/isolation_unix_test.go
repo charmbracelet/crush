@@ -8,10 +8,14 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 // TestProcessIsolation_SignalDoesNotReachParent verifies that a child
@@ -139,5 +143,47 @@ func TestProcessIsolation_ChildProcessGroupKill(t *testing.T) {
 	// Allow up to 4s: 500ms context timeout + 2s kill timeout + margin.
 	if elapsed > 4*time.Second {
 		t.Fatalf("cancellation took %v; expected prompt process group kill", elapsed)
+	}
+}
+
+// TestProcessIsolation_WaitsForEscalation covers descendants that ignore
+// SIGINT and do not keep the leader's output streams open.
+func TestProcessIsolation_WaitsForEscalation(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	cwd := t.TempDir()
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(ctx, RunOptions{
+			Command: `sh -c 'trap "exit 130" INT; (trap "" INT; exec sleep 12) </dev/null >/dev/null 2>&1 & echo "$$" > ready; wait'`,
+			Cwd:     cwd,
+			Env:     os.Environ(),
+		})
+	}()
+
+	var group int
+	require.Eventually(t, func() bool {
+		data, err := os.ReadFile(filepath.Join(cwd, "ready"))
+		if err != nil {
+			return false
+		}
+		pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+		if err != nil || pid <= 1 {
+			return false
+		}
+		group = -pid
+		return true
+	}, 3*time.Second, 10*time.Millisecond)
+	t.Cleanup(func() { _ = syscall.Kill(group, syscall.SIGKILL) })
+
+	start := time.Now()
+	cancel()
+	select {
+	case <-done:
+		require.GreaterOrEqual(t, time.Since(start), defaultKillTimeout)
+	case <-time.After(defaultKillTimeout + 3*time.Second):
+		t.Fatal("cancellation did not finish after process-group escalation")
 	}
 }

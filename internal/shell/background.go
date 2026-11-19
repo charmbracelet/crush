@@ -29,6 +29,7 @@ type BackgroundShell struct {
 	Shell       *Shell
 	WorkingDir  string
 	owner       any // Who started the shell, for KillOwned
+	autoSession string
 	ctx         context.Context
 	cancel      context.CancelFunc
 	stdout      *cappedBuffer
@@ -174,22 +175,48 @@ const killWaitTimeout = 5 * time.Second
 // Kill terminates a background shell by ID. It never blocks indefinitely:
 // a stubborn descendant can keep the shell's pipes open past cancellation,
 // so it stops waiting once ctx is done or killWaitTimeout elapses. In that
-// case the kill signal has been sent but the process may still be exiting.
+// case the job stays tracked so shutdown can wait for its cleanup.
 func (m *BackgroundShellManager) Kill(ctx context.Context, id string) error {
-	shell, err := m.take(id)
-	if err != nil {
-		return err
+	shell, ok := m.Get(id)
+	if !ok {
+		return fmt.Errorf("background shell not found: %s", id)
 	}
 	shell.cancel()
 	timer := time.NewTimer(killWaitTimeout)
 	defer timer.Stop()
 	select {
 	case <-shell.done:
+		_ = m.Remove(id)
 		return nil
 	case <-ctx.Done():
 		return errors.New("kill signal sent, process may still be exiting")
 	case <-timer.C:
 		return errors.New("kill signal sent, process may still be exiting")
+	}
+}
+
+// MarkAutoBackgrounded records the session that owns an automatically
+// backgrounded job.
+func (m *BackgroundShellManager) MarkAutoBackgrounded(id, sessionID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if shell, ok := m.shells[id]; ok {
+		shell.autoSession = sessionID
+	}
+}
+
+// CancelAutoBackgrounded requests cancellation of implicitly backgrounded
+// jobs in this session. They remain tracked while process cleanup runs.
+func (m *BackgroundShellManager) CancelAutoBackgrounded(owner any, sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, shell := range m.shells {
+		if shell.owner == owner && shell.autoSession == sessionID && !shell.IsDone() {
+			shell.cancel()
+		}
 	}
 }
 

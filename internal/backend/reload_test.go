@@ -26,7 +26,9 @@ func TestReloadConfig_ReloadsEachWorkspace(t *testing.T) {
 	bad := insertReloadWorkspace(t, b)
 
 	writeCrushrc(t, good, "option notifications osc\n")
-	writeCrushrc(t, bad, "exit 1\n")
+	// A bad value for a known option still fails the load; unknown keys
+	// and terminal command failures are tolerated as unknown config.
+	writeCrushrc(t, bad, "option request-timeout abc\n")
 
 	err := b.ReloadConfig(t.Context())
 	require.ErrorContains(t, err, bad.ID)

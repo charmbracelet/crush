@@ -401,6 +401,40 @@ func TestLoadShellConfig_NoBuiltins(t *testing.T) {
 	require.Nil(t, jsonBytes)
 }
 
+// TestLoadShellConfig_TerminalUnknownCommandTolerated verifies that a script
+// ending in an unknown command, e.g. a config builtin only a fork or a newer
+// version registers, keeps the config built so far instead of failing.
+func TestLoadShellConfig_TerminalUnknownCommandTolerated(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := "option notifications bell\nagent add myagent"
+	path := filepath.Join(dir, "crushrc")
+
+	jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(script))
+	require.NoError(t, err)
+	require.NotNil(t, jsonBytes)
+
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &result))
+	require.Equal(t, "bell", result["options"].(map[string]any)["notifications"])
+}
+
+// TestLoadShellConfig_BuiltinUsageErrorStillFails verifies that a malformed
+// line for a builtin this build knows still fails the load; only unknown
+// commands and unknown option keys are dropped.
+func TestLoadShellConfig_BuiltinUsageErrorStillFails(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := "option notifications bell\noption request-timeout abc"
+	path := filepath.Join(dir, "crushrc")
+
+	_, err := LoadShellConfig(t.Context(), path, []byte(script))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "expects a number")
+}
+
 func TestLoadShellConfig_ProviderJSONFlagsRequireObjects(t *testing.T) {
 	t.Parallel()
 

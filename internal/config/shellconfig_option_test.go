@@ -118,16 +118,22 @@ option skill-path ./mine`)
 	require.NotContains(t, paths, "./inherited-b")
 }
 
-func TestShellConfigOptionUnknownKeyFails(t *testing.T) {
-	_, err := loadCrushShErr(t, `option bogus-key value`)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "unknown key")
+// Unknown option keys, e.g. written by a fork or a newer version, are
+// skipped instead of failing the load.
+func TestShellConfigOptionUnknownKeySkipped(t *testing.T) {
+	store := loadCrushSh(t, `option bogus-key value
+option notifications bell`)
+
+	opts := store.Config().Options
+	require.NotContains(t, opts.Notifications, "bogus-key")
+	require.Equal(t, "bell", opts.Notifications)
 }
 
 func TestShellConfigOptionDisableToolRemoved(t *testing.T) {
-	_, err := loadCrushShErr(t, `option disable-tool bash`)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "unknown key")
+	store := loadCrushSh(t, `option disable-tool bash
+option notifications bell`)
+
+	require.Equal(t, "bell", store.Config().Options.Notifications)
 }
 
 func TestShellConfigOptionResetRejectsNonList(t *testing.T) {

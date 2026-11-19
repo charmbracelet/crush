@@ -145,6 +145,12 @@ type MCPClientInfo struct {
 	ConnectedAt   time.Time `json:"connected_at"`
 	// Channel reports whether this server is an active channel.
 	Channel bool `json:"channel,omitempty"`
+	// ChannelOptIn reports whether the server is opted in as a channel,
+	// whatever its connection state.
+	ChannelOptIn bool `json:"channel_opt_in,omitempty"`
+	// ChannelCapable reports whether the server declared the
+	// claude/channel capability, whether or not it is opted in.
+	ChannelCapable bool `json:"channel_capable,omitempty"`
 }
 
 type MCPPromptArgument struct {

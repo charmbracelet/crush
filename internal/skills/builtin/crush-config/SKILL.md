@@ -121,7 +121,9 @@ Flags: `--command CMD`, `--args ARG` (repeatable), `--env KEY VALUE`
 (repeatable), `--url URL`, `--header KEY VALUE` (repeatable), `--timeout N`,
 `--disabled BOOL`, `--disabled-tools TOOL` (repeatable), `--enabled-tools TOOL`
 (repeatable), `--oauth BOOL`, `--oauth-client-id ID`, `--oauth-client-secret SECRET`,
-`--oauth-callback-port PORT`.
+`--oauth-callback-port PORT`, `--channel BOOL` (opt the server in as a
+channel, like `--channels` on the CLI), `--channel-reply JSON` (the
+`channel_reply` routing object).
 
 ```bash
 mcp add github --type http \

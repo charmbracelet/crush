@@ -77,6 +77,8 @@ const (
 	ScrollbarThumb string = "┃"
 	ScrollbarTrack string = "│"
 
+	ChannelIcon string = "↳"
+
 	// LSP severity icons are Nerd Font glyphs, shown only when the terminal
 	// is expected to render them. Each glyph carries a trailing space as a
 	// separator from the count that follows it. Terminals without Nerd
@@ -379,6 +381,12 @@ type Styles struct {
 		AssistantInfoDuration  lipgloss.Style
 		SubduedHypercreditIcon lipgloss.Style // Subdued ◆ for hypercredit figures within subdued text
 		AssistantCanceled      lipgloss.Style // Italic "Canceled" footer
+
+		// Channel message metadata line styles.
+		ChannelInfoIcon      lipgloss.Style // Chat-bubble glyph prefix
+		ChannelInfoSender    lipgloss.Style // Sender name in channel metadata line
+		ChannelInfoProvider  lipgloss.Style // "via <channel>" text
+		ChannelInfoTimestamp lipgloss.Style // "at <timestamp>" text
 	}
 
 	// Tool - styles for tool call rendering

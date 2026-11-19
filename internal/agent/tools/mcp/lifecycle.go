@@ -185,6 +185,7 @@ func mcpConfigEqual(a, b config.MCPConfig) bool {
 		a.OAuthClientID == b.OAuthClientID &&
 		a.OAuthClientSecret == b.OAuthClientSecret &&
 		a.OAuthCallbackPort == b.OAuthCallbackPort &&
+		a.OAuthClientIDMetadata == b.OAuthClientIDMetadata &&
 		a.ChannelEnabled == b.ChannelEnabled
 }
 

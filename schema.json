@@ -409,6 +409,10 @@
           "type": "string",
           "description": "Pre-registered OAuth client secret paired with oauth_client_id"
         },
+        "oauth_client_id_metadata": {
+          "type": "string",
+          "description": "URL of an OAuth Client ID Metadata Document (SEP-991) sent as the client_id for servers that advertise client_id_metadata_document_supported but have no registration endpoint"
+        },
         "oauth_callback_port": {
           "type": "integer",
           "description": "Fixed localhost port for the OAuth callback"

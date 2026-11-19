@@ -29,6 +29,7 @@ type PermissionAction string
 const (
 	PermissionAllow           PermissionAction = "allow"
 	PermissionAllowForSession PermissionAction = "allow_session"
+	PermissionAlwaysAllow     PermissionAction = "always_allow"
 	PermissionDeny            PermissionAction = "deny"
 )
 
@@ -62,7 +63,7 @@ type Permissions struct {
 	fullscreen   bool // true when dialog is fullscreen
 
 	permission     permission.PermissionRequest
-	selectedOption int // 0: Allow, 1: Allow for session, 2: Deny
+	selectedOption int // 0: Allow, 1: Allow for session, 2: Always allow, 3: Deny
 
 	viewport      viewport.Model
 	viewportDirty bool // true when viewport content needs to be re-rendered
@@ -86,6 +87,7 @@ type permissionsKeyMap struct {
 	Select           key.Binding
 	Allow            key.Binding
 	AllowSession     key.Binding
+	AlwaysAllow      key.Binding
 	Deny             key.Binding
 	Close            key.Binding
 	ToggleDiffMode   key.Binding
@@ -126,6 +128,10 @@ func defaultPermissionsKeyMap() permissionsKeyMap {
 		AllowSession: key.NewBinding(
 			key.WithKeys("s", "S", "ctrl+s"),
 			key.WithHelp("s", "allow session"),
+		),
+		AlwaysAllow: key.NewBinding(
+			key.WithKeys("w", "W"),
+			key.WithHelp("w", "always allow"),
 		),
 		Deny: key.NewBinding(
 			key.WithKeys("d", "D"),
@@ -180,6 +186,7 @@ type permissionOption struct {
 var permissionOptions = []permissionOption{
 	{"Allow", 0, PermissionAllow},
 	{"Allow for Session", 10, PermissionAllowForSession},
+	{"Always Allow", 2, PermissionAlwaysAllow},
 	{"Deny", 0, PermissionDeny},
 }
 
@@ -290,6 +297,8 @@ func (p *Permissions) HandleMsg(msg tea.Msg) Action {
 			return p.respond(PermissionAllow)
 		case key.Matches(msg, p.keyMap.AllowSession):
 			return p.respond(PermissionAllowForSession)
+		case key.Matches(msg, p.keyMap.AlwaysAllow):
+			return p.respond(PermissionAlwaysAllow)
 		case key.Matches(msg, p.keyMap.Deny):
 			return p.respond(PermissionDeny)
 		case key.Matches(msg, p.keyMap.ToggleDiffMode):

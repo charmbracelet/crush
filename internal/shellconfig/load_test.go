@@ -109,7 +109,8 @@ func TestLoadShellConfig_MCP(t *testing.T) {
 
 	dir := t.TempDir()
 	script := `mcp add github --type stdio --command npx --args "-y" --args "@modelcontextprotocol/server-github" --env GITHUB_TOKEN "ghp_xxx"
-mcp add local-server --type http --url "http://localhost:3000/mcp" --header "Authorization" "Bearer token"`
+mcp add local-server --type http --url "http://localhost:3000/mcp" --header "Authorization" "Bearer token"
+mcp add no-prompt --type stdio --command uvx --args "mcp-atlassian" --always-allow true`
 	path := filepath.Join(dir, "crushrc")
 
 	jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(script))
@@ -135,6 +136,9 @@ mcp add local-server --type http --url "http://localhost:3000/mcp" --header "Aut
 	require.Equal(t, "http://localhost:3000/mcp", local["url"])
 	headers := local["headers"].(map[string]any)
 	require.Equal(t, "Bearer token", headers["Authorization"])
+
+	noPrompt := mcps["no-prompt"].(map[string]any)
+	require.Equal(t, true, noPrompt["always_allow"])
 }
 
 // TestLoadShellConfig_LSP verifies the lsp builtin.

@@ -1,6 +1,9 @@
 package backend
 
 import (
+	"log/slog"
+
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/proto"
 )
@@ -30,8 +33,15 @@ func (b *Backend) GrantPermission(workspaceID string, req proto.PermissionGrant)
 	switch req.Action {
 	case proto.PermissionAllow:
 		return ws.Permissions.Grant(perm), nil
-	case proto.PermissionAllowForSession:
-		return ws.Permissions.GrantPersistent(perm), nil
+	case proto.PermissionAlwaysAllow:
+		resolved := ws.Permissions.GrantAlways(perm)
+		// Persist the grant so future sessions skip the prompt too. A
+		// failed write keeps the in-session grant but leaves the prompt
+		// returning on the next run.
+		if err := ws.Cfg.AddAllowedTool(config.ScopeGlobal, perm.ToolName); err != nil {
+			slog.Warn("Failed to persist always-allow tool", "tool", perm.ToolName, "error", err)
+		}
+		return resolved, nil
 	case proto.PermissionDeny:
 		return ws.Permissions.Deny(perm), nil
 	default:

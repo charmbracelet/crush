@@ -174,7 +174,7 @@ func getCopilotToken(ctx context.Context, tokenURL, githubToken string) (*oauth.
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("copilot token request failed: %w",
-			&oauth.TokenExchangeError{StatusCode: resp.StatusCode, Body: string(body)})
+			oauth.NewTokenExchangeError(resp.StatusCode, string(body)))
 	}
 
 	var result struct {

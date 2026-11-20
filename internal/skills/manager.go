@@ -183,6 +183,7 @@ func DiscoverFromConfig(cfg DiscoveryConfig) (allSkills, activeSkills []*Skill, 
 	}
 
 	allSkills = Deduplicate(discovered)
+	allSkills = FilterUnavailable(allSkills, cfg.AvailableFeatures)
 	activeSkills = Filter(allSkills, cfg.DisabledSkills)
 
 	allStates := append([]*SkillState(nil), builtinStates...)
@@ -201,6 +202,10 @@ type DiscoveryConfig struct {
 	SkillsPaths    []string
 	DisabledSkills []string
 	WorkingDir     string
+	// AvailableFeatures names optional integrations that are switched
+	// on. A skill declaring `requires:` is hidden unless its feature
+	// appears here.
+	AvailableFeatures []string
 	// Resolver expands $VAR-style references in paths. May be nil.
 	Resolver func(string) (string, error)
 }

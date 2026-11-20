@@ -45,11 +45,11 @@ func handleMCP(ctx context.Context, args []string, stdin io.Reader, stdout, stde
 // mcpAddFlags is the declarative flag surface for `mcp add`.
 var mcpAddFlags = []flagSpec{
 	{name: "--type", jsonKey: "type", kind: flagString, op: opSet},
-	{name: "--command", jsonKey: "command", kind: flagString, op: opSet},
-	{name: "--args", jsonKey: "args", kind: flagString, op: opAppend},
-	{name: "--env", child: "env", kind: flagKeyValue, op: opSetChild},
-	{name: "--url", jsonKey: "url", kind: flagString, op: opSet},
-	{name: "--header", child: "headers", kind: flagKeyValue, op: opSetChild},
+	{name: "--command", jsonKey: "command", kind: flagString, op: opSet, template: true},
+	{name: "--args", jsonKey: "args", kind: flagString, op: opAppend, template: true},
+	{name: "--env", child: "env", kind: flagKeyValue, op: opSetChild, template: true},
+	{name: "--url", jsonKey: "url", kind: flagString, op: opSet, template: true},
+	{name: "--header", child: "headers", kind: flagKeyValue, op: opSetChild, template: true},
 	{name: "--timeout", jsonKey: "timeout", kind: flagInt, op: opSet},
 	{name: "--disabled", jsonKey: "disabled", kind: flagBool, op: opSet},
 	{name: "--disabled-tools", jsonKey: "disabled_tools", kind: flagString, op: opAppend},
@@ -58,8 +58,8 @@ var mcpAddFlags = []flagSpec{
 	{name: "--channel", jsonKey: "channel_enabled", kind: flagBool, op: opSet},
 	{name: "--channel-reply", jsonKey: "channel_reply", kind: flagJSONObject, op: opSet},
 	{name: "--oauth", jsonKey: "oauth", kind: flagBool, op: opSet},
-	{name: "--oauth-client-id", jsonKey: "oauth_client_id", kind: flagString, op: opSet},
-	{name: "--oauth-client-secret", jsonKey: "oauth_client_secret", kind: flagString, op: opSet},
+	{name: "--oauth-client-id", jsonKey: "oauth_client_id", kind: flagString, op: opSet, template: true},
+	{name: "--oauth-client-secret", jsonKey: "oauth_client_secret", kind: flagString, op: opSet, template: true},
 	{name: "--oauth-callback-port", jsonKey: "oauth_callback_port", kind: flagInt, op: opSet},
 }
 

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"charm.land/fantasy"
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/stretchr/testify/require"
 )
 
@@ -140,5 +141,92 @@ func TestRun_PreservesFoldedQueuedPromptAcrossAutonomousSteps(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(queuedMessage, &decoded))
 	require.Equal(t, "user", decoded.Role)
-	require.Equal(t, queuedPrompt, decoded.Content)
+	require.Equal(t, message.MidTurnUserNote+queuedPrompt, decoded.Content)
+}
+
+func TestRun_FramesFoldedReport(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	model := &foldedPromptProbeModel{
+		secondEntered: make(chan struct{}),
+		releaseSecond: make(chan struct{}),
+	}
+	small := &finishStreamModel{text: "title"}
+	echo := fantasy.NewAgentTool(
+		"echo",
+		"Echo the input.",
+		func(_ context.Context, input struct {
+			Message string `json:"message"`
+		}, _ fantasy.ToolCall,
+		) (fantasy.ToolResponse, error) {
+			return fantasy.NewTextResponse("Echo: " + input.Message), nil
+		},
+	)
+	agent := testSessionAgent(env, model, small, "system", echo)
+
+	sess, err := env.sessions.Create(t.Context(), "session")
+	require.NoError(t, err)
+
+	firstDone := make(chan error, 1)
+	go func() {
+		_, runErr := agent.Run(t.Context(), SessionAgentCall{
+			SessionID: sess.ID,
+			Prompt:    "initial task",
+		})
+		firstDone <- runErr
+	}()
+
+	select {
+	case <-model.secondEntered:
+	case <-t.Context().Done():
+		t.Fatal("second autonomous step did not start")
+	}
+
+	report := message.SubAgentReport{Label: "betty-review", Output: "two findings"}
+	_, err = agent.Run(t.Context(), SessionAgentCall{
+		SessionID: sess.ID,
+		Prompt:    report.PromptText(),
+		Report:    &report,
+	})
+	require.NoError(t, err)
+	close(model.releaseSecond)
+	require.NoError(t, <-firstDone)
+
+	calls := model.recordedCalls()
+	require.Len(t, calls, 4)
+
+	folded := report
+	folded.MidTurn = true
+	last := calls[2].Prompt[len(calls[2].Prompt)-1]
+	require.Equal(t, fantasy.MessageRoleUser, last.Role)
+	require.Len(t, last.Content, 1)
+	text, ok := fantasy.AsMessagePart[fantasy.TextPart](last.Content[0])
+	require.True(t, ok)
+	require.Equal(t, folded.PromptText(), text.Text)
+	require.Contains(t, text.Text, "arrived while you were working")
+
+	msgs, err := env.messages.List(t.Context(), sess.ID)
+	require.NoError(t, err)
+	var stored []message.SubAgentReport
+	for _, msg := range msgs {
+		stored = append(stored, msg.SubAgentReports()...)
+	}
+	require.Equal(t, []message.SubAgentReport{folded}, stored)
+}
+
+func TestMidTurnCall(t *testing.T) {
+	t.Parallel()
+
+	report := message.SubAgentReport{Label: "a", Output: "b"}
+	got, note := midTurnCall(SessionAgentCall{Report: &report})
+	require.Empty(t, note)
+	require.True(t, got.Report.MidTurn)
+	require.False(t, report.MidTurn, "the queued report is not mutated")
+
+	_, note = midTurnCall(SessionAgentCall{Prompt: "hi"})
+	require.Equal(t, message.MidTurnUserNote, note)
+
+	_, note = midTurnCall(SessionAgentCall{Prompt: "continue", HiddenUserMessage: true})
+	require.Empty(t, note)
 }

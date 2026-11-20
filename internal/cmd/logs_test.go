@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/log/v2"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/server"
@@ -173,4 +175,20 @@ func writeLogLines(t *testing.T, path string, lines ...string) {
 	t.Helper()
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
 	require.NoError(t, os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600))
+}
+
+// TestPrintLogLineSource covers log lines with and without a source field,
+// since source is only logged in debug mode.
+func TestPrintLogLineSource(t *testing.T) {
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(os.Stdout) })
+
+	printLogLine(`{"time":"2026-01-02T03:04:05Z","level":"INFO","msg":"With source","source":{"function":"main.main","file":"internal/agent/agent.go","line":1168}}`)
+	printLogLine(`{"time":"2026-01-02T03:04:06Z","level":"INFO","msg":"Without source"}`)
+
+	out := buf.String()
+	require.Contains(t, out, "With source")
+	require.Contains(t, out, "internal/agent/agent.go:1168")
+	require.Contains(t, out, "Without source")
 }

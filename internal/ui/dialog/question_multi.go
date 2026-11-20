@@ -1,8 +1,6 @@
 package dialog
 
 import (
-	"fmt"
-	"maps"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -46,7 +44,7 @@ func (d *MultiChoice) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 			// Leaving the note editor drops hover mode so arrow keys
 			// move relative to the noted item, not a hovered choice.
 			d.mouseActive = false
-			d.closeNote(d.noteKey())
+			d.closeNote()
 		})
 		if handled {
 			return false, cmd
@@ -140,10 +138,7 @@ func (d *MultiChoice) respond() question.Answer {
 	if val != "" {
 		resp.FillInText = val
 	}
-	if len(d.notes) > 0 {
-		resp.Notes = make(map[string]string, len(d.notes))
-		maps.Copy(resp.Notes, d.notes)
-	}
+	resp.Notes = d.responseNotes()
 	return resp
 }
 
@@ -170,37 +165,17 @@ func (d *MultiChoice) HandlePaste(msg tea.PasteMsg) tea.Cmd {
 // toggles it, or focuses the fill-in. Returns done=false since
 // multi-choice requires explicit submission.
 func (d *MultiChoice) HandleMouseClick(x, y int) (bool, bool) {
-	if d.choiceCompositor == nil {
+	idx, ok := d.clickedItem(x, y)
+	if !ok {
 		return false, false
 	}
-	hit := d.choiceCompositor.Hit(x, y)
-	if hit.Empty() {
-		return false, false
-	}
-	var idx int
-	if _, err := fmt.Sscanf(hit.ID(), "choice_%d", &idx); err != nil {
-		return false, false
-	}
-	if idx == len(d.Request.Choices) {
-		// Fill-in item.
-		d.cursorIdx = idx
-		d.mouseActive = false
-		d.suppressScroll = true
-		d.fillIn.Focus()
-		return false, true
-	}
-	if idx >= 0 && idx < len(d.Request.Choices) {
-		d.cursorIdx = idx
-		d.mouseActive = false
-		d.suppressScroll = true
-		d.fillIn.Blur()
+	if idx < len(d.Request.Choices) {
 		d.selected[idx] = !d.selected[idx]
 		if !d.selected[idx] {
 			delete(d.selected, idx)
 		}
-		return false, true
 	}
-	return false, false
+	return false, true
 }
 
 // Draw renders the multi-choice question directly to screen.

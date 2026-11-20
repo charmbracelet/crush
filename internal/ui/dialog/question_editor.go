@@ -2,6 +2,7 @@ package dialog
 
 import (
 	"image"
+	"maps"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -84,15 +85,36 @@ func (e *questionEditor) openNote(noteKey string) tea.Cmd {
 }
 
 // closeNote saves the current note text and closes the editor.
-func (e *questionEditor) closeNote(noteKey string) {
-	e.activeNoteKey = ""
-	val := strings.TrimSpace(e.noteEditor.Value())
-	if val != "" {
-		e.notes[noteKey] = val
-	} else {
-		delete(e.notes, noteKey)
+func (e *questionEditor) closeNote() {
+	if e.activeNoteKey == "" {
+		return
 	}
+	e.commitDraft(e.notes)
+	e.activeNoteKey = ""
 	e.noteEditor.Blur()
+}
+
+// commitDraft stores the open note's draft in notes, or removes its note
+// when the draft is blank.
+func (e *questionEditor) commitDraft(notes map[string]string) {
+	if value := strings.TrimSpace(e.noteEditor.Value()); value != "" {
+		notes[e.activeNoteKey] = value
+	} else {
+		delete(notes, e.activeNoteKey)
+	}
+}
+
+// responseNotes includes the active draft without changing editor state.
+func (e *questionEditor) responseNotes() map[string]string {
+	notes := make(map[string]string, len(e.notes)+1)
+	maps.Copy(notes, e.notes)
+	if e.activeNoteKey != "" {
+		e.commitDraft(notes)
+	}
+	if len(notes) == 0 {
+		return nil
+	}
+	return notes
 }
 
 // handleNoteKey processes keys when the note editor is focused.
@@ -252,7 +274,7 @@ func (e *questionEditor) drawStandaloneNote(scr uv.Screen, area uv.Rectangle, y 
 			if j > 0 {
 				text = strings.Repeat(" ", prefixWidth) + ln
 			}
-			lines := drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, y+1), text)
+			drawStyledText(scr, area, area.Min.X, y, text)
 			if j == 0 {
 				if tc := e.noteEditor.Cursor(); tc != nil {
 					tc.X += prefixWidth
@@ -260,7 +282,10 @@ func (e *questionEditor) drawStandaloneNote(scr uv.Screen, area uv.Rectangle, y 
 					cur = tc
 				}
 			}
-			y += lines
+			y++
+		}
+		if cur != nil && (cur.Y < 0 || cur.Y >= area.Dy()) {
+			cur = nil
 		}
 		return cur, y
 	}
@@ -268,7 +293,9 @@ func (e *questionEditor) drawStandaloneNote(scr uv.Screen, area uv.Rectangle, y 
 	if saved, ok := e.notes[noteKey]; ok && saved != "" {
 		y++
 		noteStyle := e.Styles.Editor.QuestionNote
-		drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, y+1), notePrefix+noteStyle.Render(saved))
+		// The saved note takes one row.
+		row := image.Rect(area.Min.X, y, area.Max.X, y+1).Intersect(area)
+		drawStyledText(scr, row, area.Min.X, y, notePrefix+noteStyle.Render(saved))
 		y++
 	}
 

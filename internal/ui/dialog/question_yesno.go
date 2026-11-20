@@ -2,7 +2,6 @@ package dialog
 
 import (
 	"image"
-	"maps"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -23,6 +22,7 @@ type YesNo struct {
 	selectedNo bool
 	focused    bool
 	compositor *lipgloss.Compositor
+	buttonArea image.Rectangle
 	hoverX     int
 	hoverY     int
 
@@ -55,7 +55,7 @@ func NewYesNo(sty *styles.Styles, req question.Question) *YesNo {
 func (d *YesNo) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	// Note editor takes priority when active.
 	if d.activeNoteKey != "" && d.noteEditor.Focused() {
-		cmd, handled := d.handleNoteKey(msg, d.keyClose, func() { d.closeNote(question.QuestionNoteKey) })
+		cmd, handled := d.handleNoteKey(msg, d.keyClose, d.closeNote)
 		if handled {
 			return false, cmd
 		}
@@ -109,10 +109,7 @@ func (d *YesNo) respond(yes bool) question.Answer {
 		QuestionID: d.Request.ID,
 		Yes:        &yes,
 	}
-	if len(d.notes) > 0 {
-		resp.Notes = make(map[string]string, len(d.notes))
-		maps.Copy(resp.Notes, d.notes)
-	}
+	resp.Notes = d.responseNotes()
 	return resp
 }
 
@@ -167,7 +164,7 @@ func (d *YesNo) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	qText := iconPrompt + d.Styles.Editor.QuestionUnselected.Render(
 		ansi.Wrap(d.Request.Text, area.Dx()-lipgloss.Width(iconPrompt), ""),
 	)
-	y += drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, area.Max.Y), qText)
+	y += drawStyledText(scr, area, area.Min.X, y, qText)
 	y++ // blank
 
 	// Draw optional description.
@@ -177,12 +174,10 @@ func (d *YesNo) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		mu.Lock()
 		desc, err := r.Render(d.Request.Description)
 		mu.Unlock()
-		if err == nil {
-			desc = strings.TrimSuffix(desc, "\n")
-			y += drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, area.Max.Y), desc)
-		} else {
-			y += drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, area.Max.Y), d.Request.Description)
+		if err != nil {
+			desc = d.Request.Description
 		}
+		y += drawStyledText(scr, area, area.Min.X, y, strings.TrimSuffix(desc, "\n"))
 		y++ // blank
 	}
 
@@ -192,11 +187,12 @@ func (d *YesNo) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		{Text: "No", Selected: d.selectedNo, Padding: 3, UnderlineIndex: 0},
 	}
 	d.compositor = common.ButtonHitCompositor(d.Styles, buttonOptsList, " ", area.Min.X, y)
+	d.buttonArea = image.Rect(area.Min.X, y, area.Max.X, y+1).Intersect(area)
 	hoveredBtn := common.HitButtonIndex(d.compositor, d.hoverX, d.hoverY)
 	buttonOptsList[0].Hovered = hoveredBtn == 0
 	buttonOptsList[1].Hovered = hoveredBtn == 1
 	buttons := common.ButtonGroup(d.Styles, buttonOptsList, " ")
-	y += drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, area.Max.Y), buttons)
+	y += drawStyledText(scr, area, area.Min.X, y, buttons)
 
 	// Draw note editor or saved note.
 	cur, _ := d.drawStandaloneNote(scr, area, y, question.QuestionNoteKey)
@@ -219,12 +215,17 @@ func (d *YesNo) HandlePaste(msg tea.PasteMsg) tea.Cmd { return d.handlePaste(msg
 // HandleMouseClick checks if the click landed on a button and
 // triggers the corresponding answer.
 func (d *YesNo) HandleMouseClick(x, y int) (bool, bool) {
+	if !image.Pt(x, y).In(d.buttonArea) {
+		return false, false
+	}
 	switch common.HitButtonIndex(d.compositor, x, y) {
 	case 0: // Yes
+		d.closeNote()
 		d.selectedNo = false
 		d.answer(d.respond(true))
 		return true, true
 	case 1: // No
+		d.closeNote()
 		d.selectedNo = true
 		d.answer(d.respond(false))
 		return true, true

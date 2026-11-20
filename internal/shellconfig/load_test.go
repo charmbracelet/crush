@@ -36,6 +36,29 @@ func TestLoadShellConfig_Provider(t *testing.T) {
 	require.Equal(t, "https://api.openai.com/v1", openai["base_url"])
 }
 
+func TestLoadShellConfig_ProviderThinkingBody(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := `provider add llamacpp --type openai-compat --base-url http://127.0.0.1:8080/v1 \
+  --thinking-on-body '{"chat_template_kwargs": {"enable_thinking": true}}' \
+  --thinking-off-body '{"chat_template_kwargs": {"enable_thinking": false}}'`
+	jsonBytes, err := LoadShellConfig(t.Context(), filepath.Join(dir, "crushrc"), []byte(script))
+	require.NoError(t, err)
+
+	var result struct {
+		Providers map[string]struct {
+			ThinkingOnBody  map[string]any `json:"thinking_on_body"`
+			ThinkingOffBody map[string]any `json:"thinking_off_body"`
+		} `json:"providers"`
+	}
+	require.NoError(t, json.Unmarshal(jsonBytes, &result))
+	p, ok := result.Providers["llamacpp"]
+	require.True(t, ok)
+	require.Equal(t, map[string]any{"enable_thinking": true}, p.ThinkingOnBody["chat_template_kwargs"])
+	require.Equal(t, map[string]any{"enable_thinking": false}, p.ThinkingOffBody["chat_template_kwargs"])
+}
+
 // TestLoadShellConfig_FlagBoolCaseInsensitive verifies that flag booleans
 // accept mixed-case values like TRUE/False.
 func TestLoadShellConfig_FlagBoolCaseInsensitive(t *testing.T) {

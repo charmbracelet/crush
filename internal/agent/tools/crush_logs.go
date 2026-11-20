@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
@@ -146,7 +147,10 @@ func readLastLines(filePath string, n int) ([]map[string]any, error) {
 	const chunkSize = 8192 // 8KB chunks
 
 	pos := stat.Size()
+	// The end of a line whose start is in an earlier chunk.
 	var remainder []byte
+	// Set while reading back over a line longer than maxLogLineSize.
+	skipping := false
 
 	for pos > 0 && len(entries) < n {
 		chunkStart := max(pos-chunkSize, 0)
@@ -167,18 +171,29 @@ func readLastLines(filePath string, n int) ([]map[string]any, error) {
 			return nil, err
 		}
 
-		// Combine with remainder from previous (earlier) chunk.
-		data := append(chunk, remainder...)
+		if skipping {
+			end := bytes.LastIndexByte(chunk, '\n')
+			if end < 0 {
+				pos = chunkStart
+				continue
+			}
+			chunk = chunk[:end+1]
+			skipping = false
+		}
 
-		// Split into lines (without the final incomplete line if any).
+		// Combine with the end of the line carried from the later chunk.
+		data := append(chunk, remainder...)
 		lines := splitLines(data)
 
-		// Keep the incomplete line for next iteration.
-		if len(data) > 0 && data[len(data)-1] != '\n' {
-			remainder = lines[len(lines)-1]
-			lines = lines[:len(lines)-1]
-		} else {
-			remainder = nil
+		// The first line can start in an earlier chunk, so carry it back.
+		remainder = nil
+		if chunkStart > 0 {
+			remainder = lines[0]
+			lines = lines[1:]
+			if len(remainder) > maxLogLineSize {
+				remainder = nil
+				skipping = true
+			}
 		}
 
 		// Parse lines from end to start to get most recent first.
@@ -202,16 +217,6 @@ func readLastLines(filePath string, n int) ([]map[string]any, error) {
 		}
 
 		pos = chunkStart
-	}
-
-	// Handle final remainder.
-	if len(remainder) > 0 && len(remainder) <= maxLogLineSize {
-		var entry map[string]any
-		if err := json.Unmarshal(remainder, &entry); err == nil {
-			if len(entries) < n {
-				entries = append(entries, entry)
-			}
-		}
 	}
 
 	// Reverse to get chronological order (oldest first).

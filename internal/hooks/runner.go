@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/charmbracelet/crush/internal/mcpname"
 	"github.com/charmbracelet/crush/internal/shell"
 )
 
@@ -125,7 +126,7 @@ func (r *Runner) matchingHooks(ev Event) []HookConfig {
 		}
 		if h.Matcher != "" && ev.Tool != nil {
 			re := r.matcher(h)
-			if re == nil || !re.MatchString(ev.Tool.Name) {
+			if re == nil || !matchesTool(re, ev.Tool.Name) {
 				continue
 			}
 		}
@@ -133,6 +134,15 @@ func (r *Runner) matchingHooks(ev Event) []HookConfig {
 		matched = append(matched, h)
 	}
 	return matched
+}
+
+// matchesTool matches the tool name or, for MCP tools, its pre-rename name.
+func matchesTool(re *regexp.Regexp, name string) bool {
+	if re.MatchString(name) {
+		return true
+	}
+	legacy, ok := mcpname.LegacyOf(name)
+	return ok && re.MatchString(legacy)
 }
 
 // matcher returns the compiled regex for the hook's matcher, or nil when

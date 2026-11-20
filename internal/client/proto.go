@@ -285,6 +285,10 @@ func (c *Client) SubscribeEvents(ctx context.Context, id string) (<-chan any, er
 				if !sendEvent(ctx, events, e) {
 					return
 				}
+			case pubsub.PayloadTypeCredentialsRequired:
+				// Addressed to the owner of a managed credential, not to
+				// interactive clients.
+				continue
 			case pubsub.PayloadTypePermissionModeChanged:
 				var e pubsub.Event[proto.PermissionModeEvent]
 				_ = json.Unmarshal(p.Payload, &e)

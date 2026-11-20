@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"charm.land/catwalk/v3/pkg/catwalk"
@@ -165,6 +166,13 @@ type ConfigStore struct {
 	// may be adopted from it or exchanged until the save succeeds.
 	// Guarded by tokenMu.
 	pendingPersist map[string]pendingToken
+	// exchanges counts, per provider, token exchanges admitted and not
+	// yet published, so the managed transition can wait them out. Guarded
+	// by tokenMu.
+	exchanges map[string]*exchangeGate
+	// beforeExchange, when set, runs right after an exchange is admitted;
+	// tests use it to hold one in flight.
+	beforeExchange func()
 	// persistTokenFields writes token fields to the config file. Nil
 	// means SetConfigFields; tests substitute a failing writer.
 	persistTokenFields func(scope Scope, fields map[string]any) error
@@ -181,6 +189,12 @@ type ConfigStore struct {
 	// on the next wait.
 	authSignalMu sync.Mutex
 	authSignals  map[string]chan struct{}
+
+	// managed holds credentials pushed by an external owner (e.g. a
+	// bridge driving `crush server`). A managed provider is never
+	// refreshed or reconciled with disk; see managed.go. Atomic so it can
+	// be read with or without writeMu held; nil when nothing is managed.
+	managed atomic.Pointer[ManagedCredentials]
 }
 
 // Config returns the pure-data config struct (read-only after load).
@@ -244,9 +258,11 @@ func (s *ConfigStore) RefetchHyperProvider(ctx context.Context) error {
 	// not the stale snapshot captured at startup. The syncer's original
 	// client closes over the startup config and would send an expired
 	// token after OAuth re-authentication.
+	auth := s.hyperAuth(func() string { return ResolveHyperAPIKey(s.Config()) })
 	freshClient := realHyperClient{
 		baseURL:    hyperp.BaseURL(),
-		resolveKey: func() string { return ResolveHyperAPIKey(s.Config()) },
+		resolveKey: auth.resolveKey,
+		managed:    auth.managed,
 	}
 	hyperSyncer.SetClient(freshClient)
 
@@ -911,6 +927,11 @@ func (s *ConfigStore) RefetchGrokModels(ctx context.Context) {
 // that just happened answers this request too. Use RefreshRejectedOAuthToken
 // when a request was refused, so that cooldown does not apply.
 func (s *ConfigStore) RefreshOAuthToken(ctx context.Context, scope Scope, providerID string) error {
+	if s.IsManagedProvider(providerID) {
+		// Exchanging a refresh token here would race the external owner,
+		// which is the only party allowed to rotate this credential.
+		return managedRefreshError(providerID)
+	}
 	key := fmt.Sprintf("%d\x00%s", scope, providerID)
 	_, err, _ := s.refreshSF.Do(key, func() (any, error) {
 		return nil, s.refreshOAuthTokenLocked(ctx, scope, providerID, nil)
@@ -928,6 +949,9 @@ func (s *ConfigStore) RefreshOAuthToken(ctx context.Context, scope Scope, provid
 // live token itself is always renewed, however recently that token was
 // issued, because the provider has just said it is no good.
 func (s *ConfigStore) RefreshRejectedOAuthToken(ctx context.Context, scope Scope, providerID string, rejected *oauth.Token) error {
+	if s.IsManagedProvider(providerID) {
+		return managedRefreshError(providerID)
+	}
 	if rejected == nil {
 		return s.RefreshOAuthToken(ctx, scope, providerID)
 	}
@@ -999,6 +1023,13 @@ func (s *ConfigStore) refreshOAuthTokenLocked(ctx context.Context, scope Scope, 
 		return fmt.Errorf("acquire refresh lock for provider %s: %w", providerID, lockErr)
 	}
 	defer release()
+
+	// The provider may have become managed while we queued for the lock.
+	// Its owner is the only party allowed to rotate it, and disk and any
+	// unsaved token are no longer its source of truth.
+	if s.IsManagedProvider(providerID) {
+		return managedRefreshError(providerID)
+	}
 
 	// Another goroutine in this process may have replaced the credential
 	// while we waited, so decide against the live token, not the one we
@@ -1079,6 +1110,14 @@ func (s *ConfigStore) refreshOAuthTokenLocked(ctx context.Context, scope Scope, 
 		spend = diskToken
 	}
 
+	// Admission under tokenMu: refused once the provider is managed, and
+	// otherwise registered so a push waits for this exchange (and the
+	// publish that follows it) before marking the provider managed.
+	release, admitted := s.admitExchange(providerID)
+	if !admitted {
+		return managedRefreshError(providerID)
+	}
+	defer release()
 	refreshedToken, refreshErr := s.exchangeDetached(ctx, providerID, spend.RefreshToken)
 	if refreshErr != nil {
 		// The exchange may have failed because a peer rotated the refresh
@@ -1096,6 +1135,9 @@ func (s *ConfigStore) refreshOAuthTokenLocked(ctx context.Context, scope Scope, 
 				return nil
 			}
 			if peerToken.RefreshToken != spend.RefreshToken {
+				if s.IsManagedProvider(providerID) {
+					return managedRefreshError(providerID)
+				}
 				slog.Info("Retrying exchange with refresh token rotated by another session", "provider", providerID)
 				spend = peerToken
 				refreshedToken, refreshErr = s.exchangeDetached(ctx, providerID, spend.RefreshToken)
@@ -1132,6 +1174,17 @@ func (s *ConfigStore) persistThenPublishLocked(scope Scope, providerID string, t
 
 	s.tokenMu.Lock()
 	defer s.tokenMu.Unlock()
+	if s.IsManagedProvider(providerID) {
+		// Became managed mid-exchange. The token is still the user's own
+		// credential, saved above for when the provider stops being
+		// managed, but it is neither published nor kept pending.
+		delete(s.pendingPersist, providerID)
+		if err != nil {
+			slog.Warn("Could not save a token refreshed just before the provider became managed",
+				"provider", providerID, "error", err)
+		}
+		return
+	}
 	if providerConfig, ok := s.Config().Providers.Get(providerID); ok {
 		s.setTokenLocked(providerConfig, providerID, token)
 	}
@@ -1297,6 +1350,10 @@ func (s *ConfigStore) SignalAuthComplete(providerID string) {
 // Adoption is compare-and-swap: if the live credential changed while disk
 // was being read (a refresh or a sign-in landed), it is left alone.
 func (s *ConfigStore) AdoptNewerDiskToken(scope Scope, providerID string) (bool, error) {
+	if s.IsManagedProvider(providerID) {
+		// The external owner is the only source of truth.
+		return false, nil
+	}
 	providerConfig, exists := s.Config().Providers.Get(providerID)
 	if !exists || providerConfig.OAuthToken == nil {
 		return false, nil
@@ -1342,6 +1399,9 @@ func (s *ConfigStore) AdoptNewerDiskToken(scope Scope, providerID string) (bool,
 // is compare-and-swap, so a credential that changed in the meantime is
 // never rolled back to what disk held when we looked.
 func (s *ConfigStore) AdoptPeerRefreshedToken(ctx context.Context, scope Scope, providerID string) (bool, error) {
+	if s.IsManagedProvider(providerID) {
+		return false, nil
+	}
 	providerConfig, exists := s.Config().Providers.Get(providerID)
 	if !exists || providerConfig.OAuthToken == nil {
 		return false, nil
@@ -1565,8 +1625,7 @@ func (s *ConfigStore) applyTokenIfUnchanged(providerID string, observed, token *
 	if !ok || !sameCredential(providerConfig.OAuthToken, observed) {
 		return false
 	}
-	s.setTokenLocked(providerConfig, providerID, token)
-	return true
+	return s.setTokenLocked(providerConfig, providerID, token)
 }
 
 // sameCredential reports whether a and b are the same OAuth credential.
@@ -1583,6 +1642,9 @@ func (s *ConfigStore) reapplyPendingTokens(cfg *Config) {
 	s.tokenMu.Lock()
 	defer s.tokenMu.Unlock()
 	for providerID, p := range s.pendingPersist {
+		if s.IsManagedProvider(providerID) {
+			continue
+		}
 		if providerConfig, ok := cfg.Providers.Get(providerID); ok {
 			cfg.Providers.Set(providerID, withToken(providerConfig, providerID, p.token))
 		}
@@ -1592,8 +1654,16 @@ func (s *ConfigStore) reapplyPendingTokens(cfg *Config) {
 // setTokenLocked writes token into providerConfig and publishes it. The
 // caller holds tokenMu and passes the provider config it just read, so no
 // other field can be rolled back by a stale copy.
-func (s *ConfigStore) setTokenLocked(providerConfig ProviderConfig, providerID string, token *oauth.Token) {
+func (s *ConfigStore) setTokenLocked(providerConfig ProviderConfig, providerID string, token *oauth.Token) bool {
+	// Checked under tokenMu, which SyncManagedProvider also takes, so an
+	// exchange or adoption already in flight when the provider became
+	// managed cannot land on top of it.
+	if s.IsManagedProvider(providerID) {
+		slog.Info("Discarding a token obtained for a provider that is now managed", "provider", providerID)
+		return false
+	}
 	s.Config().Providers.Set(providerID, withToken(providerConfig, providerID, token))
+	return true
 }
 
 // withToken returns providerConfig carrying token as its credential.
@@ -1959,6 +2029,8 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 	if err := cfg.configureProviders(ctx, s, env, resolver, providers); err != nil {
 		return fmt.Errorf("failed to configure providers during reload: %w", err)
 	}
+	// Managed credentials beat whatever disk and env just produced.
+	s.syncAllManagedLocked(cfg)
 
 	// A refreshed token that could not be saved is newer than what the
 	// reload just read from disk, so carry it over.
@@ -2029,4 +2101,74 @@ func (s *ConfigStore) autoReload(ctx context.Context) error {
 	}
 	defer s.writeMu.Unlock()
 	return s.reloadFromDiskLocked(ctx)
+}
+
+// exchangeGate tracks the exchanges in flight for one provider; done is
+// closed when the last one finishes.
+type exchangeGate struct {
+	n    int
+	done chan struct{}
+}
+
+// admitExchange registers a token exchange for providerID unless the
+// provider is managed, returning the release to call once the exchange's
+// result is published.
+func (s *ConfigStore) admitExchange(providerID string) (release func(), admitted bool) {
+	s.tokenMu.Lock()
+	if s.IsManagedProvider(providerID) {
+		s.tokenMu.Unlock()
+		return nil, false
+	}
+	if s.exchanges == nil {
+		s.exchanges = make(map[string]*exchangeGate)
+	}
+	g := s.exchanges[providerID]
+	if g == nil {
+		g = &exchangeGate{done: make(chan struct{})}
+		s.exchanges[providerID] = g
+	}
+	g.n++
+	s.tokenMu.Unlock()
+	if s.beforeExchange != nil {
+		s.beforeExchange()
+	}
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			s.tokenMu.Lock()
+			defer s.tokenMu.Unlock()
+			if g.n--; g.n == 0 {
+				close(g.done)
+				if s.exchanges[providerID] == g {
+					delete(s.exchanges, providerID)
+				}
+			}
+		})
+	}, true
+}
+
+// managedTransitionWait bounds how long making a provider managed waits
+// for exchanges already in flight: one exchange plus its retry.
+const managedTransitionWait = 2 * TokenExchangeTimeout
+
+// waitForExchanges blocks until no exchange is in flight for providerID,
+// or the bound passes. Called with no store locks held: an exchange's
+// publish takes them.
+func (s *ConfigStore) waitForExchanges(providerID string) {
+	deadline := time.NewTimer(managedTransitionWait)
+	defer deadline.Stop()
+	for {
+		s.tokenMu.Lock()
+		g := s.exchanges[providerID]
+		s.tokenMu.Unlock()
+		if g == nil {
+			return
+		}
+		select {
+		case <-g.done:
+		case <-deadline.C:
+			slog.Warn("Marking provider managed while a token exchange is still running", "provider", providerID)
+			return
+		}
+	}
 }

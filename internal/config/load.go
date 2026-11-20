@@ -237,6 +237,14 @@ func migrateCatwalkV2Model(model map[string]any) bool {
 // Load loads the configuration from the default paths and returns a
 // ConfigStore that owns both the pure-data Config and all runtime state.
 func Load(ctx context.Context, workingDir, dataDir string, debug bool) (*ConfigStore, error) {
+	return LoadWithManaged(ctx, workingDir, dataDir, debug, nil)
+}
+
+// LoadWithManaged is [Load] for a store that consults managed provider
+// credentials (see ManagedCredentials) from the start, so a provider that
+// is only configured through a pushed credential takes part in provider
+// and model resolution like any other.
+func LoadWithManaged(ctx context.Context, workingDir, dataDir string, debug bool, managed *ManagedCredentials) (*ConfigStore, error) {
 	// The CRUSH_DATA_DIR env var overrides the per-project data directory
 	// when no --data-dir flag is given. Relative paths resolve against the
 	// working directory, like the data_directory config option.
@@ -261,6 +269,7 @@ func Load(ctx context.Context, workingDir, dataDir string, debug bool) (*ConfigS
 		workspacePath:  filepath.Join(cfg.Options.DataDirectory, fmt.Sprintf("%s.json", appName)),
 		loadedPaths:    loadedPaths,
 	}
+	store.managed.Store(managed)
 
 	if debug {
 		cfg.Options.Debug = true
@@ -313,9 +322,7 @@ func Load(ctx context.Context, workingDir, dataDir string, debug bool) (*ConfigS
 	// list is fatal: starting up without providers is worse than starting
 	// up with slightly stale ones. Pass a Hyper token refresher so the
 	// catalog fetch can retry on 401.
-	providers, err := LoadProviders(ctx, cfg, func(ctx context.Context) error {
-		return store.RefreshOAuthToken(ctx, ScopeGlobal, "hyper")
-	})
+	providers, err := loadProviders(ctx, cfg, store.hyperAuth(func() string { return ResolveHyperAPIKey(cfg) }))
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return nil, ctxErr
 	}
@@ -361,6 +368,8 @@ func Load(ctx context.Context, workingDir, dataDir string, debug bool) (*ConfigS
 	if err := cfg.configureProviders(ctx, store, env, valueResolver, store.knownProviders); err != nil {
 		return nil, fmt.Errorf("failed to configure providers: %w", err)
 	}
+	// Managed credentials take part in model resolution below.
+	store.syncAllManagedLocked(cfg)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -587,7 +596,7 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 				prepared.APIKeyTemplate = apiKey
 			} else {
 				v, err := resolver.ResolveValue(p.APIKey)
-				if v == "" || err != nil {
+				if (v == "" || err != nil) && !store.keepManaged(&prepared) {
 					if configExists {
 						slog.Warn("Skipping Hyper provider due to missing API key", "provider", p.ID)
 						c.Providers.Del(string(p.ID))
@@ -604,7 +613,7 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 			}
 			// if the provider api or endpoint are missing we skip them
 			v, err := resolver.ResolveValue(p.APIKey)
-			if v == "" || err != nil {
+			if (v == "" || err != nil) && !store.keepManaged(&prepared) {
 				if configExists {
 					slog.Warn("Skipping provider due to missing API key", "provider", p.ID)
 					c.Providers.Del(string(p.ID))

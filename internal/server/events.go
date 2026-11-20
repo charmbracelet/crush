@@ -174,6 +174,15 @@ func wrapEvent(ev any) *pubsub.Payload {
 			Payload: fileToProto(e.Payload),
 		})
 	case pubsub.Event[notify.Notification]:
+		if e.Payload.Type == notify.TypeCredentialsRequired {
+			return envelope(pubsub.PayloadTypeCredentialsRequired, pubsub.Event[proto.CredentialsRequired]{
+				Type: e.Type,
+				Payload: proto.CredentialsRequired{
+					Provider: e.Payload.ProviderID,
+					Reason:   e.Payload.Reason,
+				},
+			})
+		}
 		payload := proto.AgentEvent{
 			SessionID:    e.Payload.SessionID,
 			SessionTitle: e.Payload.SessionTitle,

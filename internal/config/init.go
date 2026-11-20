@@ -27,6 +27,12 @@ func Init(ctx context.Context, workingDir, dataDir string, debug bool) (*ConfigS
 	return store, nil
 }
 
+// InitWithManaged is [Init] for a store that consults managed provider
+// credentials from the start; see [LoadWithManaged].
+func InitWithManaged(ctx context.Context, workingDir, dataDir string, debug bool, managed *ManagedCredentials) (*ConfigStore, error) {
+	return LoadWithManaged(ctx, workingDir, dataDir, debug, managed)
+}
+
 func ProjectNeedsInitialization(store *ConfigStore) (bool, error) {
 	if store == nil {
 		return false, fmt.Errorf("config not loaded")

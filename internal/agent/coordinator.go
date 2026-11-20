@@ -184,6 +184,10 @@ type coordinator struct {
 
 	// awsRefresh shares one AWS SSO login among requests that need it.
 	awsRefresh singleflight.Group
+	// managedWait bounds how long a turn waits for the owner of a managed
+	// credential to push a fresh one. Zero means managedWaitTimeout; it
+	// is a field only so tests can shorten it.
+	managedWait time.Duration
 	// modelsGen counts rebuilds; override models rebuild when it moves.
 	modelsGen atomic.Uint64
 	// overrideModels shares builds of per-dispatch model overrides.
@@ -509,6 +513,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, report *mess
 	runID := RunIDFromContext(ctx)
 	channel := ChannelFromContext(ctx)
 	c.syncSessionChannel(ctx, sessionID, channel)
+	authRefresh, managed := c.authRefreshFor(providerCfg)
 	run := func() (*fantasy.AgentResult, error) {
 		return agent.Run(ctx, SessionAgentCall{
 			SessionID:         sessionID,
@@ -529,12 +534,20 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, report *mess
 			PresencePenalty:   presPenalty,
 			OnComplete:        onComplete,
 			Accepted:          accept,
-			OnAuthRefresh:     c.makeAuthRefreshCallback(providerCfg),
+			OnAuthRefresh:     authRefresh,
+			managed:           managed,
 		})
 	}
 	beforeLoaded := c.skillTracker.LoadedNames()
 	result, originalErr := run()
 	logTurnSkillUsage(sessionID, prompt, c.activeSkills, c.skillTracker, beforeLoaded)
+
+	if managed != nil && originalErr != nil {
+		originalErr = managed.mapErr(originalErr)
+		if _, ok := errors.AsType[*managedCredentialError](originalErr); ok && hasLatest && latest.Error != "" {
+			latest.Error = originalErr.Error()
+		}
+	}
 
 	c.askToSignInAgain(originalErr, model)
 
@@ -1281,7 +1294,8 @@ func (c *coordinator) buildModelFromSelection(ctx context.Context, modelCfg conf
 		return Model{}, fmt.Errorf("%s %w", modelCfg.Model, errModelNotFound)
 	}
 
-	provider, err := c.buildProvider(providerCfg, modelCfg, isSubAgent, catwalkModel.EffectiveType(providerCfg.Type))
+	cred, managed := c.managedCredentialFor(providerCfg)
+	provider, err := c.buildProviderWith(providerCfg, cred, managed, modelCfg, isSubAgent, catwalkModel.EffectiveType(providerCfg.Type))
 	if err != nil {
 		return Model{}, err
 	}
@@ -1313,7 +1327,9 @@ func (c *coordinator) buildModelFromSelection(ctx context.Context, modelCfg conf
 		CatwalkCfg:   *catwalkModel,
 		ModelCfg:     modelCfg,
 		FlatRate:     providerCfg.FlatRate,
-		OAuth:        providerCfg.OAuthToken != nil,
+		OAuth:        providerCfg.UsesOAuth() || (managed && cred.Kind == config.ManagedKindOAuth),
+		Managed:      managed,
+		cred:         cred,
 		ProviderName: providerCfg.Name,
 	}, nil
 }
@@ -1322,13 +1338,21 @@ func (c *coordinator) buildModelFromSelection(ctx context.Context, modelCfg conf
 // OAuth token refreshed after the models were built is picked up by the
 // next credits fetch.
 func (c *coordinator) hyperAPIKey() string {
+	if cred, ok := c.cfg.ManagedCredential(hyper.Name); ok {
+		return cred.AccessToken
+	}
 	return config.ResolveHyperAPIKey(c.cfg.Config())
 }
 
-func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map[string]string, providerID string) (fantasy.Provider, error) {
+func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map[string]string, providerID string, bearer, debug bool) (fantasy.Provider, error) {
 	var opts []anthropic.Option
 
 	switch {
+	case bearer:
+		// A managed OAuth credential is a bearer token by its kind,
+		// whatever the token string looks like.
+		os.Setenv("ANTHROPIC_API_KEY", "")
+		headers["Authorization"] = "Bearer " + apiKey
 	case strings.HasPrefix(apiKey, "Bearer "):
 		// NOTE: Prevent the SDK from picking up the API key from env.
 		os.Setenv("ANTHROPIC_API_KEY", "")
@@ -1350,14 +1374,14 @@ func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map
 		opts = append(opts, anthropic.WithBaseURL(baseURL))
 	}
 
-	if c.cfg.Config().Options.Debug {
+	if debug {
 		httpClient := log.NewHTTPClient()
 		opts = append(opts, anthropic.WithHTTPClient(httpClient))
 	}
 	return anthropic.New(opts...)
 }
 
-func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[string]string, token *oauth.Token, wireType catwalk.Type) (fantasy.Provider, error) {
+func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[string]string, token *oauth.Token, wireType catwalk.Type, debug bool) (fantasy.Provider, error) {
 	opts := []openai.Option{
 		openai.WithAPIKey(apiKey),
 		openai.WithUseResponsesAPI(),
@@ -1368,7 +1392,7 @@ func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[st
 		}),
 	}
 	var httpClient *http.Client
-	if c.cfg.Config().Options.Debug {
+	if debug {
 		httpClient = log.NewHTTPClient()
 	}
 	if token != nil {
@@ -1395,7 +1419,7 @@ func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[st
 	return openai.New(opts...)
 }
 
-func (c *coordinator) buildOpenrouterProvider(_, apiKey string, headers map[string]string) (fantasy.Provider, error) {
+func (c *coordinator) buildOpenrouterProvider(_, apiKey string, headers map[string]string, debug bool) (fantasy.Provider, error) {
 	if headers == nil {
 		headers = make(map[string]string)
 	}
@@ -1408,7 +1432,7 @@ func (c *coordinator) buildOpenrouterProvider(_, apiKey string, headers map[stri
 	opts := []openrouter.Option{
 		openrouter.WithAPIKey(apiKey),
 	}
-	if c.cfg.Config().Options.Debug {
+	if debug {
 		httpClient := log.NewHTTPClient()
 		opts = append(opts, openrouter.WithHTTPClient(httpClient))
 	}
@@ -1418,11 +1442,11 @@ func (c *coordinator) buildOpenrouterProvider(_, apiKey string, headers map[stri
 	return openrouter.New(opts...)
 }
 
-func (c *coordinator) buildVercelProvider(_, apiKey string, headers map[string]string) (fantasy.Provider, error) {
+func (c *coordinator) buildVercelProvider(_, apiKey string, headers map[string]string, debug bool) (fantasy.Provider, error) {
 	opts := []vercel.Option{
 		vercel.WithAPIKey(apiKey),
 	}
-	if c.cfg.Config().Options.Debug {
+	if debug {
 		httpClient := log.NewHTTPClient()
 		opts = append(opts, vercel.WithHTTPClient(httpClient))
 	}
@@ -1432,7 +1456,7 @@ func (c *coordinator) buildVercelProvider(_, apiKey string, headers map[string]s
 	return vercel.New(opts...)
 }
 
-func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers map[string]string, extraBody map[string]any, providerID string, isSubAgent bool, wireType catwalk.Type) (fantasy.Provider, error) {
+func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers map[string]string, extraBody map[string]any, providerID string, isSubAgent bool, wireType catwalk.Type, debug bool) (fantasy.Provider, error) {
 	opts := []openaicompat.Option{
 		openaicompat.WithBaseURL(baseURL),
 		openaicompat.WithAPIKey(apiKey),
@@ -1450,7 +1474,7 @@ func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers 
 			openaicompat.WithUseResponsesAPI(),
 			openaicompat.WithResponsesAPIFunc(responsesFunc),
 		)
-		httpClient = copilot.NewClient(isSubAgent, c.cfg.Config().Options.Debug)
+		httpClient = copilot.NewClient(isSubAgent, debug)
 
 	case string(catwalk.InferenceProviderOpenCodeGo), string(catwalk.InferenceProviderOpenCodeZen):
 		opts = append(
@@ -1474,7 +1498,7 @@ func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers 
 			),
 		)
 	}
-	if httpClient == nil && c.cfg.Config().Options.Debug {
+	if httpClient == nil && debug {
 		httpClient = log.NewHTTPClient()
 	}
 	if httpClient != nil {
@@ -1492,13 +1516,13 @@ func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers 
 	return openaicompat.New(opts...)
 }
 
-func (c *coordinator) buildAzureProvider(baseURL, apiKey string, headers map[string]string, options map[string]string) (fantasy.Provider, error) {
+func (c *coordinator) buildAzureProvider(baseURL, apiKey string, headers map[string]string, options map[string]string, debug bool) (fantasy.Provider, error) {
 	opts := []azure.Option{
 		azure.WithBaseURL(baseURL),
 		azure.WithAPIKey(apiKey),
 		azure.WithUseResponsesAPI(),
 	}
-	if c.cfg.Config().Options.Debug {
+	if debug {
 		httpClient := log.NewHTTPClient()
 		opts = append(opts, azure.WithHTTPClient(httpClient))
 	}
@@ -1515,9 +1539,9 @@ func (c *coordinator) buildAzureProvider(baseURL, apiKey string, headers map[str
 	return azure.New(opts...)
 }
 
-func (c *coordinator) buildBedrockProvider(apiKey string, headers map[string]string, providerID string) (fantasy.Provider, error) {
+func (c *coordinator) buildBedrockProvider(apiKey string, headers map[string]string, providerID string, debug bool) (fantasy.Provider, error) {
 	var opts []bedrock.Option
-	if c.cfg.Config().Options.Debug {
+	if debug {
 		httpClient := log.NewHTTPClient()
 		opts = append(opts, bedrock.WithHTTPClient(httpClient))
 	}
@@ -1544,12 +1568,12 @@ func (c *coordinator) buildBedrockProvider(apiKey string, headers map[string]str
 	return bedrock.New(opts...)
 }
 
-func (c *coordinator) buildGoogleProvider(baseURL, apiKey string, headers map[string]string) (fantasy.Provider, error) {
+func (c *coordinator) buildGoogleProvider(baseURL, apiKey string, headers map[string]string, debug bool) (fantasy.Provider, error) {
 	opts := []google.Option{
 		google.WithBaseURL(baseURL),
 		google.WithGeminiAPIKey(apiKey),
 	}
-	if c.cfg.Config().Options.Debug {
+	if debug {
 		httpClient := log.NewHTTPClient()
 		opts = append(opts, google.WithHTTPClient(httpClient))
 	}
@@ -1559,9 +1583,9 @@ func (c *coordinator) buildGoogleProvider(baseURL, apiKey string, headers map[st
 	return google.New(opts...)
 }
 
-func (c *coordinator) buildGoogleVertexProvider(headers map[string]string, options map[string]string) (fantasy.Provider, error) {
+func (c *coordinator) buildGoogleVertexProvider(headers map[string]string, options map[string]string, debug bool) (fantasy.Provider, error) {
 	opts := []google.Option{}
-	if c.cfg.Config().Options.Debug {
+	if debug {
 		httpClient := log.NewHTTPClient()
 		opts = append(opts, google.WithHTTPClient(httpClient))
 	}
@@ -1586,6 +1610,30 @@ func (c *coordinator) isAnthropicThinking(model config.SelectedModel) bool {
 }
 
 func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model config.SelectedModel, isSubAgent bool, wireType catwalk.Type) (fantasy.Provider, error) {
+	cred, managed := c.managedCredentialFor(providerCfg)
+	return c.buildProviderWith(providerCfg, cred, managed, model, isSubAgent, wireType)
+}
+
+// managedOAuthToken is the OAuth token a managed OAuth credential is built
+// with: a copy of the local login when there is one, so account details
+// carry over, otherwise a fresh token. Either way it carries only the pushed
+// access token and expiry, never a refresh token.
+func managedOAuthToken(login *oauth.Token, cred config.ManagedCredential) *oauth.Token {
+	var tok oauth.Token
+	if login != nil {
+		tok = *login
+	}
+	tok.AccessToken = cred.AccessToken
+	tok.RefreshToken = ""
+	tok.ExpiresIn, tok.ExpiresAt = 0, 0
+	if !cred.ExpiresAt.IsZero() {
+		tok.ExpiresAt = cred.ExpiresAt.Unix()
+	}
+	return &tok
+}
+
+// buildProviderWith builds the provider presenting cred when managed.
+func (c *coordinator) buildProviderWith(providerCfg config.ProviderConfig, cred config.ManagedCredential, managed bool, model config.SelectedModel, isSubAgent bool, wireType catwalk.Type) (fantasy.Provider, error) {
 	wireType = config.NormalizeProviderType(wireType)
 	headers := maps.Clone(providerCfg.ExtraHeaders)
 	if headers == nil {
@@ -1601,22 +1649,46 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		}
 	}
 
-	apiKey, _ := c.cfg.Resolve(providerCfg.APIKey)
+	var apiKey string
+	// Debug logging dumps request and response bodies, which can echo a
+	// pushed credential, so managed calls never use the debug client.
+	debug := c.cfg.Config().Options.Debug && !managed
+	bearer := false
+	if managed {
+		// A pushed credential is used literally: it never goes through
+		// the shell resolver, so it cannot expand or execute anything.
+		// How it is presented follows the kind stored at push time, so
+		// every workspace presents it the same way.
+		apiKey = cred.AccessToken
+		if cred.Kind == config.ManagedKindOAuth {
+			providerCfg.OAuthToken = managedOAuthToken(providerCfg.OAuthToken, cred)
+			bearer = providerCfg.ID == string(catwalk.InferenceProviderAnthropic)
+			if providerCfg.ID == string(catwalk.InferenceProviderCopilot) {
+				providerCfg.ExtraHeaders = headers
+				providerCfg.SetupGitHubCopilot()
+			}
+		} else {
+			// The pushed key replaces any OAuth login the provider had.
+			providerCfg.OAuthToken = nil
+		}
+	} else {
+		apiKey, _ = c.cfg.Resolve(providerCfg.APIKey)
+	}
 	baseURL, _ := c.cfg.Resolve(providerCfg.BaseURL)
 
 	switch providerCfg.ID {
 	case string(catwalk.InferenceProviderBedrock), string(catwalk.InferenceProviderBedrockEurope):
-		return c.buildBedrockProvider(apiKey, headers, providerCfg.ID)
+		return c.buildBedrockProvider(apiKey, headers, providerCfg.ID, debug)
 	case string(catwalk.InferenceProviderAzure):
-		return c.buildAzureProvider(baseURL, apiKey, headers, providerCfg.ExtraParams)
+		return c.buildAzureProvider(baseURL, apiKey, headers, providerCfg.ExtraParams, debug)
 	case string(catwalk.InferenceProviderVertexAI):
-		return c.buildGoogleVertexProvider(headers, providerCfg.ExtraParams)
+		return c.buildGoogleVertexProvider(headers, providerCfg.ExtraParams, debug)
 	case string(catwalk.InferenceProviderGemini):
-		return c.buildGoogleProvider(baseURL, apiKey, headers)
+		return c.buildGoogleProvider(baseURL, apiKey, headers, debug)
 	case string(catwalk.InferenceProviderOpenRouter):
-		return c.buildOpenrouterProvider(baseURL, apiKey, headers)
+		return c.buildOpenrouterProvider(baseURL, apiKey, headers, debug)
 	case string(catwalk.InferenceProviderVercel):
-		return c.buildVercelProvider(baseURL, apiKey, headers)
+		return c.buildVercelProvider(baseURL, apiKey, headers, debug)
 	case string(catwalk.InferenceProviderCopilot),
 		string(catwalk.InferenceProviderOpenCodeGo), string(catwalk.InferenceProviderOpenCodeZen):
 		// Messages models on the OpenCode gateways are served by the
@@ -1624,9 +1696,9 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		// prefix the chat completions and responses endpoints use.
 		if wireType == catwalk.TypeMessages {
 			baseURL = strings.TrimSuffix(baseURL, "/v1")
-			return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID)
+			return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID, bearer, debug)
 		}
-		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent, wireType)
+		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent, wireType, debug)
 	case string(catwalk.InferenceProviderOpenAI):
 		// A ChatGPT login is the provider's single credential: every
 		// request goes through the Codex backend with the OAuth token.
@@ -1639,14 +1711,14 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 				headers["chatgpt-account-id"] = token.AccountID
 			}
 		}
-		return c.buildOpenaiProvider(baseURL, apiKey, headers, token, wireType)
+		return c.buildOpenaiProvider(baseURL, apiKey, headers, token, wireType, debug)
 	}
 
 	switch wireType {
 	case catwalk.TypeMessages:
-		return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID)
+		return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID, bearer, debug)
 	case catwalk.TypeResponses:
-		return c.buildOpenaiProvider(baseURL, apiKey, headers, providerCfg.OAuthToken, wireType)
+		return c.buildOpenaiProvider(baseURL, apiKey, headers, providerCfg.OAuthToken, wireType, debug)
 	case catwalk.TypeCompletions, catwalk.Type(hyper.Name):
 		// Hyper's provider advertises its own type rather than a wire
 		// type; it speaks chat completions.
@@ -1660,12 +1732,12 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 			}
 			providerCfg.ExtraBody["tool_stream"] = true
 		}
-		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent, wireType)
+		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent, wireType, debug)
 	default:
 		// Known custom providers (litellm, llamacpp, lmstudio, ollama,
 		// omlx) are openai-compat under the hood.
 		if discover.IsKnownCustomProvider(string(providerCfg.Type)) {
-			return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent, wireType)
+			return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent, wireType, debug)
 		}
 		return nil, fmt.Errorf("provider type not supported: %q", providerCfg.Type)
 	}
@@ -1788,6 +1860,11 @@ func (c *coordinator) QueuedPromptsList(sessionID string) []string {
 }
 
 func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
+	// Fail closed, as turns do: models built before a managed credential
+	// was pushed or deleted must not be used if they cannot be rebuilt.
+	if err := c.syncManagedModels(ctx); err != nil {
+		return fmt.Errorf("rebuild models after a managed credential change: %w", err)
+	}
 	agent := c.currentAgent()
 	model := agent.Model()
 	providerCfg, ok := c.cfg.Config().Providers.Get(model.ModelCfg.Provider)
@@ -1795,7 +1872,11 @@ func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
 		return errModelProviderNotConfigured
 	}
 
-	if err := c.refreshTokenIfExpired(ctx, providerCfg); err != nil {
+	if cred, ok := c.cfg.ManagedCredential(providerCfg.ID); ok {
+		if err := c.prepareManagedCredential(ctx, providerCfg.ID, cred); err != nil {
+			return err
+		}
+	} else if err := c.refreshTokenIfExpired(ctx, providerCfg); err != nil {
 		slog.Error("Failed to refresh OAuth2 token before summarize. Proceeding with existing token.", "error", err)
 	}
 
@@ -1803,13 +1884,20 @@ func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
 	// the same path used by regular turns.
 	opts := getProviderOptions(model, providerCfg)
 	injectOpenrouterSessionID(opts, sessionID)
-	return agent.Summarize(ctx, sessionID, model, opts, c.makeAuthRefreshCallback(providerCfg))
+	authRefresh, managed := c.authRefreshFor(providerCfg)
+	return agent.Summarize(withManagedCall(ctx, managed), sessionID, model, opts, authRefresh)
 }
 
 // GenerateTitle generates a session title using the current agent.
 func (c *coordinator) GenerateTitle(ctx context.Context, sessionID, prompt string) {
 	agent := c.currentAgent()
 	if agent == nil {
+		return
+	}
+	// Fail closed, as turns do; the session keeps its default name.
+	if err := c.syncManagedModels(ctx); err != nil {
+		slog.Error("Not generating a title: models could not be rebuilt after a managed credential change",
+			"session_id", sessionID, "error", err)
 		return
 	}
 	agent.GenerateTitle(ctx, sessionID, prompt)
@@ -1826,6 +1914,13 @@ func (c *coordinator) GenerateTitle(ctx context.Context, sessionID, prompt strin
 // looks exactly like one that had nothing to do, so without the skip line
 // there is no way to tell a broken expiry check from a healthy token.
 func (c *coordinator) refreshTokenIfExpired(ctx context.Context, providerCfg config.ProviderConfig) error {
+	if cred, ok := c.cfg.ManagedCredential(providerCfg.ID); ok {
+		return c.prepareManagedCredential(ctx, providerCfg.ID, cred)
+	}
+	// A credential deleted since the models were built must not go out.
+	if err := c.syncManagedModels(ctx); err != nil {
+		return err
+	}
 	if providerCfg.OAuthToken == nil {
 		return nil
 	}
@@ -1878,6 +1973,10 @@ func (c *coordinator) refreshTokenIfExpired(ctx context.Context, providerCfg con
 // renewal per provider runs at a time, none start once shutdown has begun,
 // and shutdown waits for the ones running to save their result.
 func (c *coordinator) refreshOAuth2TokenAhead(ctx context.Context, providerCfg config.ProviderConfig) {
+	if c.cfg.IsManagedProvider(providerCfg.ID) {
+		// Its owner renews it; nothing here may spend a refresh token.
+		return
+	}
 	c.bgRefreshMu.Lock()
 	if c.bgRefreshClosed || c.bgRefreshInFlight[providerCfg.ID] {
 		c.bgRefreshMu.Unlock()
@@ -1973,6 +2072,11 @@ func (c *coordinator) stopBackgroundRefreshes(timeout time.Duration) {
 //
 // rejected is the OAuth token the refused request was sent with, if known.
 func (c *coordinator) retryAfterUnauthorized(ctx context.Context, providerCfg config.ProviderConfig, rejected *oauth.Token) error {
+	if cred, ok := c.cfg.ManagedCredential(providerCfg.ID); ok {
+		// Normally the call's own managedCall handles this, knowing the
+		// token its attempt sent; this is the fallback for other callers.
+		return c.replaceRejectedCredential(ctx, providerCfg.ID, cred.AccessToken)
+	}
 	switch {
 	case providerCfg.OAuthToken != nil:
 		slog.Debug("Received 401. Refreshing token and retrying", "provider", providerCfg.ID)
@@ -1990,6 +2094,11 @@ func (c *coordinator) retryAfterUnauthorized(ctx context.Context, providerCfg co
 						"provider", providerCfg.ID, "error", adoptErr)
 				} else if adopted {
 					return c.rebuildModels(ctx)
+				}
+				if c.cfg.IsManagedProvider(providerCfg.ID) {
+					// Became managed while we were refreshing: its owner,
+					// not the user, supplies the next credential.
+					return config.ErrCredentialManaged
 				}
 				if c.notify != nil {
 					slog.Info("Refresh token revoked, waiting for re-authentication", "provider", providerCfg.ID)
@@ -2060,6 +2169,9 @@ func isUnauthorized(err error) bool {
 // delegates to the coordinator's existing credential refresh logic. Returns
 // nil if no refresh mechanism is configured for the provider.
 func (c *coordinator) makeAuthRefreshCallback(providerCfg config.ProviderConfig) func(context.Context, *fantasy.ProviderError) error {
+	if managed := c.newManagedCall(providerCfg.ID); managed != nil {
+		return managed.refresh
+	}
 	if providerCfg.OAuthToken == nil &&
 		!strings.Contains(providerCfg.APIKeyTemplate, "$") &&
 		providerCfg.AWSAuthRefresh == "" {
@@ -2115,6 +2227,11 @@ func (c *coordinator) askToSignInAgain(err error, model Model) {
 	if err == nil || !isUnauthorized(err) || c.notify == nil || !model.OAuth {
 		return
 	}
+	if c.cfg.IsManagedProvider(model.ModelCfg.Provider) {
+		// Nobody can sign in interactively for a managed credential;
+		// its owner was already asked via TypeCredentialsRequired.
+		return
+	}
 	c.notify.Publish(pubsub.CreatedEvent, notify.Notification{
 		Type:       notify.TypeReAuthenticate,
 		ProviderID: model.ModelCfg.Provider,
@@ -2167,6 +2284,7 @@ func (c *coordinator) subAgentCall(agent SessionAgent, sessionID, prompt string)
 
 	opts := getProviderOptions(model, providerCfg)
 	injectOpenrouterSessionID(opts, sessionID)
+	authRefresh, managed := c.authRefreshFor(providerCfg)
 
 	return SessionAgentCall{
 		SessionID:        sessionID,
@@ -2180,7 +2298,8 @@ func (c *coordinator) subAgentCall(agent SessionAgent, sessionID, prompt string)
 		FrequencyPenalty: model.ModelCfg.FrequencyPenalty,
 		PresencePenalty:  model.ModelCfg.PresencePenalty,
 		NonInteractive:   true,
-		OnAuthRefresh:    c.makeAuthRefreshCallback(providerCfg),
+		OnAuthRefresh:    authRefresh,
+		managed:          managed,
 	}, nil
 }
 
@@ -2208,6 +2327,9 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 	call, err := c.subAgentCall(params.Agent, session.ID, params.Prompt)
 	if err != nil {
 		return fantasy.ToolResponse{}, err
+	}
+	if err := c.prepareSubAgentTurn(ctx, call.Model); err != nil {
+		return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to generate response: %s", err)), nil
 	}
 
 	done := c.trackSubSession(session.ID)

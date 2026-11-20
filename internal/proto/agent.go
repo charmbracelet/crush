@@ -92,3 +92,22 @@ func (e *AgentEvent) UnmarshalJSON(data []byte) error {
 	}
 	return nil
 }
+
+// CredentialsRequired asks the owner of a managed provider credential to
+// push a fresh one via PUT /v1/credentials/{provider}.
+type CredentialsRequired struct {
+	// Provider is the config provider ID (e.g. "anthropic", "hyper").
+	Provider string `json:"provider"`
+	// Reason is "expiring" or "unauthorized".
+	Reason string `json:"reason"`
+}
+
+// CredentialPush is the body of PUT /v1/credentials/{provider}.
+type CredentialPush struct {
+	AccessToken string `json:"access_token"`
+	// ExpiresAt is an optional RFC 3339 timestamp.
+	ExpiresAt string `json:"expires_at,omitempty"`
+	// Kind is "oauth" or "api-key". When empty it is inferred: oauth
+	// when the provider is signed in by OAuth here, api-key otherwise.
+	Kind string `json:"kind,omitempty"`
+}

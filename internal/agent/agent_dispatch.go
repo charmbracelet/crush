@@ -567,6 +567,10 @@ func (c *coordinator) reopen(entry *dispatchedAgent, prompt string, agent Sessio
 	}
 
 	c.runDispatched(runCtx, entry, gen, func(ctx context.Context) (fantasy.ToolResponse, error) {
+		// Outside dispatchMu: this may wait for a managed credential.
+		if err := c.prepareSubAgentTurn(ctx, agentCall.Model); err != nil {
+			return fantasy.NewTextErrorResponse(fmt.Sprintf("Subagent failed: %s", err)), nil
+		}
 		result, err := agent.Run(ctx, agentCall)
 		if err != nil {
 			return fantasy.NewTextErrorResponse(fmt.Sprintf("Subagent failed: %s", err)), nil

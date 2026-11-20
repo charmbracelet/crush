@@ -16,7 +16,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"os"
 	"regexp"
 	"slices"
@@ -34,8 +33,6 @@ import (
 	"charm.land/fantasy/providers/openai"
 	"charm.land/fantasy/providers/openrouter"
 	"charm.land/fantasy/providers/vercel"
-	"charm.land/lipgloss/v2"
-	"charm.land/tone"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/tools"
@@ -149,6 +146,10 @@ type SessionAgentCall struct {
 	// fantasy retries the stream transparently. Returning an error
 	// surfaces the original auth error without retry.
 	OnAuthRefresh func(ctx context.Context, err *fantasy.ProviderError) error
+	// managed carries the call's managed-credential state (the model each
+	// attempt used, and how its 401s were handled); nil when the provider
+	// is not managed.
+	managed *managedCall
 	// channelMeta holds the attributes of the <channel> element a
 	// channel-originated turn was started with, parsed once at Run
 	// entry. It survives the auto-summarize continuation, whose Prompt
@@ -213,8 +214,15 @@ type Model struct {
 	// OAuth is true when the provider signs in by OAuth, so a rejected
 	// credential calls for a new sign-in rather than a config change.
 	OAuth bool
+	// Managed is true when the provider's credential is owned by an
+	// external process, which is asked for a new one instead of the user.
+	Managed bool
 	// ProviderName is the provider's display name, such as "GitHub Copilot".
 	ProviderName string
+	// cred is the managed credential this build presents, when Managed.
+	// It is part of the build, so a 401 is always judged against the
+	// token the failing attempt actually sent.
+	cred config.ManagedCredential
 }
 
 // activeCancel wraps a context.CancelFunc with a unique pointer identity.
@@ -756,6 +764,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	if call.Model.Model == nil {
 		call.Model = a.models().Large
 	}
+	ctx = withManagedCall(ctx, call.managed)
 
 	if call.Channel != "" && call.channelMeta == nil {
 		call.channelMeta, _ = parseChannelMeta(call.Prompt)
@@ -1158,7 +1167,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			return a.messages.Update(ctx, *currentAssistant)
 		},
 		OnRetry: func(err *fantasy.ProviderError, delay time.Duration) {
-			slog.Warn("Provider request failed, retrying", providerRetryLogFields(err, delay)...)
+			slog.Warn("Provider request failed, retrying",
+				providerRetryLogFields(managedCallFrom(genCtx).redactProviderError(err), delay)...)
 			// Reset streamed content so the retried response doesn't
 			// concatenate with partial content from the failed attempt.
 			// On the final attempt (no more retries), any partial content
@@ -1173,7 +1183,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			slog.Info("ModelProvider called",
 				"provider", largeModel.ModelCfg.Provider,
 				"model", largeModel.ModelCfg.Model)
-			return a.currentBuildOf(largeModel)
+			return a.attemptModel(genCtx, largeModel)
 		},
 		OnToolCall: func(tc fantasy.ToolCallContent) error {
 			input, wasSanitized := sanitizeToolInput(tc.ToolName, tc.ToolCallID, tc.Input)
@@ -1301,6 +1311,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		}
 	}
 
+	err = mapManagedErr(ctx, err, largeModel)
 	if err != nil {
 		isCancelErr := errors.Is(err, context.Canceled)
 		slog.Info("Agent stream returned error",
@@ -1328,43 +1339,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		}
 		// Ensure we finish thinking on error to close the reasoning state.
 		currentAssistant.FinishThinking()
-		var fantasyErr *fantasy.Error
-		var providerErr *fantasy.ProviderError
-		var requestTimedOutErr *requestTimeoutError
-		const defaultTitle = "Provider Error"
-		linkStyle := lipgloss.NewStyle().Foreground(tone.Guac).Underline(true)
-		if isCancelErr {
-			currentAssistant.AddFinish(message.FinishReasonCanceled, "User canceled request", "")
-		} else if errors.Is(err, errRefused) {
-			// Every retry was refused; keep the refusal banner rather than
-			// reporting a generic provider error.
-			currentAssistant.AddFinish(message.FinishReasonContentFilter, "", "")
-		} else if errors.As(err, &requestTimedOutErr) {
-			// Checked before the provider branches so a deadline our own
-			// request timeout imposed is never reported as a provider error.
-			currentAssistant.AddFinish(message.FinishReasonError, "Request timed out", requestTimedOutErr.userMessage())
-		} else if largeModel.OAuth && errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusUnauthorized {
-			currentAssistant.AddFinish(message.FinishReasonError, "Unauthorized", signInAgainMessage(largeModel))
-		} else if errors.As(err, &providerErr) {
-			if providerErr.Message == "The requested model is not supported." {
-				url := "https://github.com/settings/copilot/features"
-				link := linkStyle.Hyperlink(url, "id=copilot").Render(url)
-				currentAssistant.AddFinish(
-					message.FinishReasonError,
-					"Copilot model not enabled",
-					fmt.Sprintf("%q is not enabled in Copilot. Go to the following page to enable it. Then, wait 5 minutes before trying again. %s", largeModel.CatwalkCfg.Name, link),
-				)
-			} else {
-				currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(providerErr.Title), defaultTitle), providerErr.Message)
-			}
-		} else if errors.As(err, &fantasyErr) {
-			currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(fantasyErr.Title), defaultTitle), fantasyErr.Message)
-		} else if fantasy.IsTransportError(err) {
-			wrapped := fantasy.NewTransportError(err)
-			currentAssistant.AddFinish(message.FinishReasonError, stringext.Capitalize(wrapped.Title), wrapped.Message)
-		} else {
-			currentAssistant.AddFinish(message.FinishReasonError, defaultTitle, err.Error())
-		}
+		reason, title, detail := turnFailure(err, largeModel, isCancelErr)
+		currentAssistant.AddFinish(reason, title, detail)
 		updateErr := a.messages.Update(cleanupCtx, *currentAssistant)
 		if updateErr != nil {
 			return nil, updateErr
@@ -1603,7 +1579,7 @@ func (a *sessionAgent) summarize(ctx context.Context, largeModel Model, sessionI
 		ProviderOptions: opts,
 		OnAuthRefresh:   onAuthRefresh,
 		ModelProvider: func() fantasy.LanguageModel {
-			return a.currentBuildOf(largeModel)
+			return a.attemptModel(genCtx, largeModel)
 		},
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 			prepared.Messages = options.Messages
@@ -1638,6 +1614,7 @@ func (a *sessionAgent) summarize(ctx context.Context, largeModel Model, sessionI
 			deleteErr := a.messages.Delete(ctx, summaryMessage.ID)
 			return deleteErr
 		}
+		err = mapManagedErr(ctx, err, largeModel)
 		// Mark the summary message as finished with an error so the UI
 		// stops spinning.
 		summaryMessage.AddFinish(message.FinishReasonError, "Summarization Error", err.Error())
@@ -2048,6 +2025,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 			break
 		}
 		if err != nil {
+			err = mapManagedErr(nil, err, attempt.model)
 			slog.Error("Error generating title with "+attempt.name+" model; trying next", "err", err)
 		} else {
 			slog.Error("Title generation hit token limit with " + attempt.name + " model; trying next")
@@ -2659,12 +2637,4 @@ func sanitizeToolInput(toolName, toolCallID, input string) (string, bool) {
 		return "{}", true
 	}
 	return input, false
-}
-
-// signInAgainMessage tells the user how to replace a credential the provider
-// refused after a refresh.
-func signInAgainMessage(m Model) string {
-	name := cmp.Or(m.ProviderName, m.ModelCfg.Provider)
-	return fmt.Sprintf("Please sign in to %s again. You can also run \"crush login %s --force\".",
-		name, m.ModelCfg.Provider)
 }

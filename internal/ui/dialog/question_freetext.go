@@ -28,6 +28,8 @@ type FreeText struct {
 	keyEnter     key.Binding
 	keyNewline   key.Binding
 	keyClose     key.Binding
+	keyBack      key.Binding
+	keyEdit      key.Binding
 
 	lastResponse question.Answer
 	lastWidth    int
@@ -57,17 +59,36 @@ func NewFreeText(sty *styles.Styles, req question.Question) *FreeText {
 		keyEnter:   key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "submit")),
 		keyNewline: key.NewBinding(key.WithKeys("shift+enter", "ctrl+j"), key.WithHelp("shift+enter", "newline")),
 		keyClose:   CloseKey,
+		keyBack:    key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
+		keyEdit:    key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "edit")),
 	}
 }
 
 // HandleKey processes a key press. Returns true when the user has
 // submitted or dismissed the question.
+//
+// The editor has two states. While editing, keys go to the textarea
+// and esc returns to selection. While not editing, enter activates
+// the editor, esc dismisses the question, and form-level keys such
+// as [ and ] stay available.
 func (d *FreeText) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	d.wheelActive = false
+	if !d.editor.Focused() {
+		switch {
+		case key.Matches(msg, d.keyEnter):
+			return false, d.editor.Focus()
+		case key.Matches(msg, d.keyClose):
+			d.answer(question.Answer{QuestionID: d.Request.ID})
+			return true, nil
+		}
+		return false, nil
+	}
 	switch {
 	case key.Matches(msg, d.keyClose):
-		d.answer(question.Answer{QuestionID: d.Request.ID})
-		return true, nil
+		// Esc leaves editing but keeps the typed text, returning
+		// to selection.
+		d.editor.Blur()
+		return false, nil
 	case key.Matches(msg, d.keyEnter):
 		val := strings.TrimSpace(d.editor.Value())
 		if val != "" {
@@ -92,6 +113,11 @@ func (d *FreeText) answer(resp question.Answer) {
 	d.lastResponse = resp
 }
 
+// Editing reports whether the answer editor is actively being
+// edited. QuestionForm uses it to suspend its tab-navigation
+// bindings so characters like [ and ] reach the editor.
+func (d *FreeText) Editing() bool { return d.editor.Focused() }
+
 // Response returns the current answer, including any unsaved
 // editor content so that tabbing away preserves typed text.
 func (d *FreeText) Response() question.Answer {
@@ -106,7 +132,10 @@ func (d *FreeText) GetRequest() question.Question { return d.Request }
 
 // ShortHelp returns key bindings for the status bar.
 func (d *FreeText) ShortHelp() []key.Binding {
-	return []key.Binding{d.keyEnter, d.keyNewline, d.keyClose}
+	if !d.editor.Focused() {
+		return []key.Binding{d.keyEdit, d.keyClose}
+	}
+	return []key.Binding{d.keyEnter, d.keyNewline, d.keyBack}
 }
 
 // Height returns the visual height at the default max width.

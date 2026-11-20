@@ -61,6 +61,7 @@ type choiceList struct {
 	keyUp    key.Binding
 	keyDown  key.Binding
 	keyClose key.Binding
+	keyBack  key.Binding
 }
 
 // numberKeyIndex returns the zero-based choice index for a number
@@ -91,6 +92,7 @@ func newChoiceList(sty *styles.Styles, req question.Question) choiceList {
 		keyUp:          key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑", "up")),
 		keyDown:        key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓", "down")),
 		keyClose:       CloseKey,
+		keyBack:        key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
 	}
 }
 
@@ -168,21 +170,13 @@ func (c *choiceList) handleFillInKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	case key.Matches(msg, c.navUp):
 		// Arrows move relative to the fill-in the user is editing,
 		// not a choice the mouse happens to hover, so drop hover mode
-		// before navigating.
+		// before navigating. Leaving the editor returns to selection.
 		c.mouseActive = false
 		c.moveUp()
-		if c.isFillIn() {
-			c.fillIn.Focus()
-			return c.fillIn.Focus(), true
-		}
 		return nil, true
 	case key.Matches(msg, c.navDown):
 		c.mouseActive = false
 		c.moveDown()
-		if c.isFillIn() {
-			c.fillIn.Focus()
-			return c.fillIn.Focus(), true
-		}
 		return nil, true
 	default:
 		// Typing is keyboard input, so leave hover mode: the fill-in
@@ -196,20 +190,16 @@ func (c *choiceList) handleFillInKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 }
 
 // handleNavKey processes up/down navigation keys when the
-// fill-in is NOT focused. Returns true if the key was consumed.
+// fill-in is NOT focused. Navigation only moves the highlight;
+// it never focuses the fill-in, so typing requires an explicit
+// enter first. Returns true if the key was consumed.
 func (c *choiceList) handleNavKey(msg tea.KeyPressMsg) bool {
 	switch {
 	case key.Matches(msg, c.keyUp):
 		c.moveUp()
-		if c.isFillIn() {
-			c.fillIn.Focus()
-		}
 		return true
 	case key.Matches(msg, c.keyDown):
 		c.moveDown()
-		if c.isFillIn() {
-			c.fillIn.Focus()
-		}
 		return true
 	}
 	return false

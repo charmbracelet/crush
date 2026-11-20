@@ -275,8 +275,14 @@ func sessionScopedEventID(ev any) (string, bool) {
 // predating session reporting) fail open so their prompts are not
 // stranded. All other events are delivered unfiltered.
 func (c *controllerV1) deliverToClient(ctx context.Context, workspaceID, clientID string, ev any) bool {
-	sessionID, scoped := sessionScopedEventID(ev)
-	if !scoped {
+	sessionID, _ := sessionScopedEventID(ev)
+	return c.deliverScoped(ctx, workspaceID, clientID, sessionID)
+}
+
+// deliverScoped is [controllerV1.deliverToClient] for an event already
+// reduced to the session it is scoped to, or "" for an unscoped event.
+func (c *controllerV1) deliverScoped(ctx context.Context, workspaceID, clientID, sessionID string) bool {
+	if sessionID == "" {
 		return true
 	}
 	current, reported := c.backend.ClientCurrentSession(workspaceID, clientID)

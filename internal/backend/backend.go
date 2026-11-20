@@ -96,7 +96,10 @@ type ShutdownFunc func()
 // while calling [registerClient] so that a workspace cannot be torn
 // down beneath it.
 type Backend struct {
-	workspaces *csync.Map[string, *Workspace]
+	// eventEncoder encodes workspace events for client event streams;
+	// see [Backend.SetEventEncoder].
+	eventEncoder EventEncoder
+	workspaces   *csync.Map[string, *Workspace]
 	// pathIndex maps a resolved absolute workspace path to its
 	// workspace ID. Reads and writes are serialised via mu so
 	// concurrent CreateWorkspace calls at the same path deduplicate
@@ -243,6 +246,12 @@ type Workspace struct {
 	// sessions publish on, so that it reaches the streams on its own.
 	sessions     *pubsub.Broker[proto.ClientSession]
 	sessionsOnce sync.Once
+
+	// sequencer numbers the workspace's events for client event streams
+	// and buffers the recent ones so a dropped stream can resume. It is
+	// started on first use; see [Workspace.eventSequencer].
+	sequencer     *eventSequencer
+	sequencerOnce sync.Once
 
 	// themeMu guards hostTheme. It is held only briefly (no IO) and never
 	// together with clientsMu.

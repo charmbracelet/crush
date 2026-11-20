@@ -10,6 +10,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/backend"
 	"github.com/charmbracelet/crush/internal/proto"
+	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/google/uuid"
 )
@@ -206,7 +207,24 @@ func (c *controllerV1) handleGetWorkspaceProviders(w http.ResponseWriter, r *htt
 	jsonEncode(w, providers)
 }
 
+// lastEventIDQuery is the query parameter that resumes an event stream,
+// for clients that cannot set the Last-Event-ID header.
+const lastEventIDQuery = "last_event_id"
+
 // handleGetWorkspaceEvents streams workspace events as Server-Sent Events.
+//
+// Every workspace event, client session changes included, carries an SSE
+// id ("<epoch>-<seq>", see [backend.SequencedEvent]). A client that
+// reconnects with the last id it saw, in the Last-Event-ID header or the
+// last_event_id query parameter, first gets the events it missed, then
+// live ones. When they cannot be replayed it gets a resync event instead,
+// and re-reads its state.
+//
+// The stream is written in this order: resync (if any), replayed events,
+// the host theme and client session snapshots, then live events. The
+// snapshots are current state rather than workspace events, so they carry
+// no id and do not move the client's resume point; they follow the replay
+// so an older replayed theme or session cannot override the current one.
 func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.Request) {
 	flusher := http.NewResponseController(w)
 	id := r.PathValue("id")
@@ -214,17 +232,16 @@ func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.R
 	if !ok {
 		return
 	}
-	// Subscribe to the event broker BEFORE attaching the client.
+	lastEventID := r.Header.Get("Last-Event-ID")
+	if lastEventID == "" {
+		lastEventID = r.URL.Query().Get(lastEventIDQuery)
+	}
+	// Subscribe to the workspace events BEFORE attaching the client.
 	// AttachClient bumps the stream count that observers use to
 	// detect a live subscriber; subscribing first guarantees that
 	// once a client appears attached, any published event is
 	// delivered rather than dropped on a not-yet-registered stream.
-	events, overflow, err := c.backend.SubscribeEventsWithOverflow(r.Context(), id)
-	if err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-	sessions, err := c.backend.SubscribeClientSessions(r.Context(), id)
+	stream, err := c.backend.SubscribeEventStream(r.Context(), id, lastEventID)
 	if err != nil {
 		c.handleError(w, r, err)
 		return
@@ -245,6 +262,20 @@ func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.R
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
+	if stream.Resync != "" {
+		c.server.logDebug(r, "Event stream cannot resume; sending resync",
+			"last_event_id", lastEventID, "reason", stream.Resync)
+		c.writeResync(w, r, flusher, stream.Resync, stream.ResyncID)
+	}
+	// lastSeq guards the replay/live boundary. The backend already
+	// guarantees live events follow the replay, so this only drops what
+	// would be a duplicate if that ever changed.
+	var lastSeq uint64
+	for _, ev := range stream.Replay {
+		lastSeq = ev.Seq
+		c.writeSequenced(w, r, flusher, id, clientID, ev)
+	}
+
 	c.replayHostTheme(w, r, flusher, id)
 	c.replayClientSessions(w, r, flusher, id)
 
@@ -253,48 +284,95 @@ func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.R
 		case <-r.Context().Done():
 			c.server.logDebug(r, "Stopping event stream")
 			return
-		case <-overflow:
+		case <-stream.Overflow:
 			// The client stopped keeping up (a suspended or wedged
-			// terminal) and events were dropped for it, possibly a
-			// permission request or a run's completion. End the stream
-			// rather than leave a silent gap. A client with a reconnect
-			// loop (the TUI) re-reports its session, which re-delivers
-			// pending permission and question prompts, and reloads what
-			// it shows. Nothing re-delivers a dropped RunComplete:
-			// `crush run` has no reconnect loop and treats the closed
-			// stream as a failed run.
+			// terminal) and its queue filled, so events were dropped
+			// for it, possibly a permission request or a run's
+			// completion. End the stream rather than leave a silent
+			// gap. A client that resumes from its last event id gets
+			// what it missed replayed, or a resync. A client with a
+			// reconnect loop (the TUI) re-reports its session, which
+			// re-delivers pending permission and question prompts, and
+			// reloads what it shows. `crush run` has no reconnect loop
+			// and treats the closed stream as a failed run.
 			slog.Warn("Closing event stream of a client that fell behind",
 				"workspace", id, "client_id", clientID)
 			return
-		case ev, ok := <-events:
+		case ev, ok := <-stream.Events:
 			if !ok {
 				return
 			}
-			if !c.deliverToClient(r.Context(), id, clientID, ev.Payload) {
+			if ev.Seq <= lastSeq {
 				continue
 			}
-			c.writeEvent(w, r, flusher, ev.Payload)
-		case sev, ok := <-sessions:
-			if !ok {
-				sessions = nil
-				continue
-			}
-			c.writeEvent(w, r, flusher, sev)
+			lastSeq = ev.Seq
+			c.writeSequenced(w, r, flusher, id, clientID, ev)
 		}
 	}
 }
 
-// writeEvent wraps a workspace event in its SSE envelope and writes it to
-// the stream. Events with no wire form are skipped.
+// encodeEvent is the backend's [backend.EventEncoder] for client event
+// streams: the SSE data payload of an event, encoded once when the event
+// is sequenced, and the session it is scoped to.
+func encodeEvent(ev any) (backend.EncodedEvent, bool) {
+	wrapped := wrapEvent(ev)
+	if wrapped == nil {
+		return backend.EncodedEvent{}, false
+	}
+	data, err := json.Marshal(wrapped)
+	if err != nil {
+		slog.Error("Failed to marshal event", "error", err)
+		return backend.EncodedEvent{}, false
+	}
+	sessionID, _ := sessionScopedEventID(ev)
+	return backend.EncodedEvent{Data: data, SessionID: sessionID}, true
+}
+
+// writeSequenced writes a sequenced event, with its id, if it is for this
+// client. A filtered event is skipped entirely, so the client's resume
+// point stays on the last event it got, which is equivalent: resuming
+// replays only the events after it, and filters the skipped one again.
+func (c *controllerV1) writeSequenced(w http.ResponseWriter, r *http.Request, flusher *http.ResponseController, workspaceID, clientID string, ev backend.SequencedEvent) {
+	if !c.deliverScoped(r.Context(), workspaceID, clientID, ev.SessionID) {
+		return
+	}
+	writeSSE(w, flusher, ev.ID, ev.Data)
+}
+
+// writeEvent wraps an event in its SSE envelope and writes it to the
+// stream without an id. Events with no wire form are skipped.
 func (c *controllerV1) writeEvent(w http.ResponseWriter, r *http.Request, flusher *http.ResponseController, ev any) {
 	wrapped := wrapEvent(ev)
 	if wrapped == nil {
 		return
 	}
+	c.writeEnvelope(w, r, flusher, "", wrapped)
+}
+
+// writeResync writes a resync event, sent with the id of the latest
+// workspace event so a client that reconnects before any live event
+// arrives resumes from there rather than resyncing again.
+func (c *controllerV1) writeResync(w http.ResponseWriter, r *http.Request, flusher *http.ResponseController, reason proto.ResyncReason, eventID string) {
+	wrapped := envelope(pubsub.PayloadTypeResync, proto.Resync{Reason: reason, LastEventID: eventID})
+	if wrapped == nil {
+		return
+	}
+	c.writeEnvelope(w, r, flusher, eventID, wrapped)
+}
+
+func (c *controllerV1) writeEnvelope(w http.ResponseWriter, r *http.Request, flusher *http.ResponseController, eventID string, wrapped *pubsub.Payload) {
 	data, err := json.Marshal(wrapped)
 	if err != nil {
 		c.server.logError(r, "Failed to marshal event", "error", err)
 		return
+	}
+	writeSSE(w, flusher, eventID, data)
+}
+
+// writeSSE writes one SSE event, with an id line unless eventID is empty.
+func writeSSE(w http.ResponseWriter, flusher *http.ResponseController, eventID string, data []byte) {
+	if eventID != "" {
+		fmt.Fprintf(w, "id: %s\n", eventID)
 	}
 	fmt.Fprintf(w, "data: %s\n\n", data)
 	flusher.Flush()

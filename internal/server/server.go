@@ -207,6 +207,9 @@ func (s *Server) installHandler() {
 	var p http.Protocols
 	p.SetHTTP1(true)
 	p.SetUnencryptedHTTP2(true)
+	if s.backend != nil {
+		s.backend.SetEventEncoder(encodeEvent)
+	}
 	c := &controllerV1{backend: s.backend, server: s}
 	mux := http.NewServeMux()
 	for _, e := range c.endpoints() {

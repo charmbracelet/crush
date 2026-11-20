@@ -111,15 +111,54 @@ func (c *Client) SetCurrentSession(ctx context.Context, workspaceID, sessionID s
 }
 
 // SubscribeEvents subscribes to server-sent events for a workspace.
+// It delivers decoded events only; see [Client.SubscribeEventStream] for
+// event ids and resuming a dropped stream.
 func (c *Client) SubscribeEvents(ctx context.Context, id string) (<-chan any, error) {
+	stream, err := c.SubscribeEventStream(ctx, id, "")
+	if err != nil {
+		return nil, err
+	}
 	events := make(chan any, 100)
+	go func() {
+		defer close(events)
+		for ev := range stream {
+			if !sendEvent(ctx, events, ev.Payload) {
+				return
+			}
+		}
+	}()
+	return events, nil
+}
+
+// StreamEvent is one event of a workspace event stream.
+type StreamEvent struct {
+	// ID is the event's SSE id, or empty for events that have none (the
+	// host theme and client session snapshots sent on attach). A client
+	// resumes a dropped stream from the last non-empty ID it saw.
+	ID string
+	// Payload is the decoded event, such as a
+	// pubsub.Event[proto.Message], or a [proto.Resync] when the stream
+	// could not resume: the caller must then re-read the state it shows.
+	Payload any
+}
+
+// SubscribeEventStream subscribes to server-sent events for a workspace,
+// with their ids. A non-empty lastEventID resumes after that event: the
+// server first replays the events missed since, or sends a [proto.Resync]
+// payload when it cannot. The channel closes when the stream ends.
+func (c *Client) SubscribeEventStream(ctx context.Context, id, lastEventID string) (<-chan StreamEvent, error) {
+	events := make(chan StreamEvent, 100)
 	q := url.Values{"client_id": []string{c.clientID}}
-	//nolint:bodyclose
-	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/events", id), q, http.Header{
+	headers := http.Header{
 		"Accept":        []string{"text/event-stream"},
 		"Cache-Control": []string{"no-cache"},
 		"Connection":    []string{"keep-alive"},
-	})
+	}
+	if lastEventID != "" {
+		headers.Set("Last-Event-ID", lastEventID)
+	}
+	//nolint:bodyclose
+	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/events", id), q, headers)
 	if err != nil {
 		return nil, fmt.Errorf("failed to subscribe to events: %w", err)
 	}
@@ -134,6 +173,10 @@ func (c *Client) SubscribeEvents(ctx context.Context, id string) (<-chan any, er
 		defer close(events)
 
 		scr := bufio.NewReader(rsp.Body)
+		// eventID is the id field of the event being read. Per the SSE
+		// spec an id applies to the event it is part of, which ends at
+		// a blank line.
+		var eventID string
 		for {
 			line, err := scr.ReadBytes('\n')
 			if err != nil {
@@ -147,6 +190,12 @@ func (c *Client) SubscribeEvents(ctx context.Context, id string) (<-chan any, er
 			}
 			line = bytes.TrimSpace(line)
 			if len(line) == 0 {
+				eventID = ""
+				continue
+			}
+
+			if v, ok := bytes.CutPrefix(line, []byte("id:")); ok {
+				eventID = string(bytes.TrimSpace(v))
 				continue
 			}
 
@@ -164,141 +213,91 @@ func (c *Client) SubscribeEvents(ctx context.Context, id string) (<-chan any, er
 				continue
 			}
 
-			switch p.Type {
-			case pubsub.PayloadTypeLSPEvent:
-				var e pubsub.Event[proto.LSPEvent]
-				_ = json.Unmarshal(p.Payload, &e)
-				if !sendEvent(ctx, events, e) {
-					return
-				}
-			case pubsub.PayloadTypeMCPEvent:
-				var e pubsub.Event[proto.MCPEvent]
-				_ = json.Unmarshal(p.Payload, &e)
-				if !sendEvent(ctx, events, e) {
-					return
-				}
-			case pubsub.PayloadTypePermissionRequest:
-				var e pubsub.Event[proto.PermissionRequest]
-				_ = json.Unmarshal(p.Payload, &e)
-				if !sendEvent(ctx, events, e) {
-					return
-				}
-			case pubsub.PayloadTypePermissionNotification:
-				var e pubsub.Event[proto.PermissionNotification]
-				_ = json.Unmarshal(p.Payload, &e)
-				if !sendEvent(ctx, events, e) {
-					return
-				}
-			case pubsub.PayloadTypeQuestionRequest:
-				var e pubsub.Event[proto.QuestionRequest]
-				_ = json.Unmarshal(p.Payload, &e)
-				if !sendEvent(ctx, events, e) {
-					return
-				}
-			case pubsub.PayloadTypeQuestionNotification:
-				var e pubsub.Event[proto.QuestionNotification]
-				_ = json.Unmarshal(p.Payload, &e)
-				if !sendEvent(ctx, events, e) {
-					return
-				}
-			case pubsub.PayloadTypePinentryPromptRequest:
-				var e pubsub.Event[proto.PinentryPromptRequest]
-				_ = json.Unmarshal(p.Payload, &e)
-				if !sendEvent(ctx, events, e) {
-					return
-				}
-			case pubsub.PayloadTypePinentryNotification:
-				var e pubsub.Event[proto.PinentryNotification]
-				_ = json.Unmarshal(p.Payload, &e)
-				if !sendEvent(ctx, events, e) {
-					return
-				}
-			case pubsub.PayloadTypeSSHPromptRequest:
-				var e pubsub.Event[proto.SSHPromptRequest]
-				_ = json.Unmarshal(p.Payload, &e)
-				if !sendEvent(ctx, events, e) {
-					return
-				}
-			case pubsub.PayloadTypeSSHNotification:
-				var e pubsub.Event[proto.SSHNotification]
-				_ = json.Unmarshal(p.Payload, &e)
-				if !sendEvent(ctx, events, e) {
-					return
-				}
-			case pubsub.PayloadTypeMessage:
-				var e pubsub.Event[proto.Message]
-				_ = json.Unmarshal(p.Payload, &e)
-				if !sendEvent(ctx, events, e) {
-					return
-				}
-			case pubsub.PayloadTypeSession:
-				var e pubsub.Event[proto.Session]
-				_ = json.Unmarshal(p.Payload, &e)
-				if !sendEvent(ctx, events, e) {
-					return
-				}
-			case pubsub.PayloadTypeFile:
-				var e pubsub.Event[proto.File]
-				_ = json.Unmarshal(p.Payload, &e)
-				if !sendEvent(ctx, events, e) {
-					return
-				}
-			case pubsub.PayloadTypeAgentEvent:
-				var e pubsub.Event[proto.AgentEvent]
-				_ = json.Unmarshal(p.Payload, &e)
-				if !sendEvent(ctx, events, e) {
-					return
-				}
-			case pubsub.PayloadTypeConfigChanged:
-				var e pubsub.Event[proto.ConfigChanged]
-				_ = json.Unmarshal(p.Payload, &e)
-				if !sendEvent(ctx, events, e) {
-					return
-				}
-			case pubsub.PayloadTypeSkillsEvent:
-				var e pubsub.Event[proto.SkillsEvent]
-				_ = json.Unmarshal(p.Payload, &e)
-				if !sendEvent(ctx, events, e) {
-					return
-				}
-			case pubsub.PayloadTypeRunComplete:
-				var e pubsub.Event[proto.RunComplete]
-				_ = json.Unmarshal(p.Payload, &e)
-				if !sendEvent(ctx, events, e) {
-					return
-				}
-			case pubsub.PayloadTypeUpdateAvailable:
-				var e pubsub.Event[proto.UpdateAvailable]
-				_ = json.Unmarshal(p.Payload, &e)
-				if !sendEvent(ctx, events, e) {
-					return
-				}
-			case pubsub.PayloadTypeHostTheme:
-				var e pubsub.Event[proto.HostThemeState]
-				_ = json.Unmarshal(p.Payload, &e)
-				if !sendEvent(ctx, events, e) {
-					return
-				}
-			case pubsub.PayloadTypeClientSession:
-				var e pubsub.Event[proto.ClientSession]
-				_ = json.Unmarshal(p.Payload, &e)
-				if !sendEvent(ctx, events, e) {
-					return
-				}
-			case pubsub.PayloadTypePermissionModeChanged:
-				var e pubsub.Event[proto.PermissionModeEvent]
-				_ = json.Unmarshal(p.Payload, &e)
-				if !sendEvent(ctx, events, e) {
-					return
-				}
-			default:
+			ev, ok := decodeEventPayload(p)
+			if !ok {
 				slog.Warn("Unknown event type", "type", p.Type)
 				continue
+			}
+			if !sendStreamEvent(ctx, events, StreamEvent{ID: eventID, Payload: ev}) {
+				return
 			}
 		}
 	}()
 
 	return events, nil
+}
+
+// decodeEventPayload decodes an SSE envelope into its typed event. It
+// reports false for unknown payload types.
+func decodeEventPayload(p pubsub.Payload) (any, bool) {
+	switch p.Type {
+	case pubsub.PayloadTypeLSPEvent:
+		return decodeAs[pubsub.Event[proto.LSPEvent]](p.Payload)
+	case pubsub.PayloadTypeMCPEvent:
+		return decodeAs[pubsub.Event[proto.MCPEvent]](p.Payload)
+	case pubsub.PayloadTypePermissionRequest:
+		return decodeAs[pubsub.Event[proto.PermissionRequest]](p.Payload)
+	case pubsub.PayloadTypePermissionNotification:
+		return decodeAs[pubsub.Event[proto.PermissionNotification]](p.Payload)
+	case pubsub.PayloadTypeQuestionRequest:
+		return decodeAs[pubsub.Event[proto.QuestionRequest]](p.Payload)
+	case pubsub.PayloadTypeQuestionNotification:
+		return decodeAs[pubsub.Event[proto.QuestionNotification]](p.Payload)
+	case pubsub.PayloadTypePinentryPromptRequest:
+		return decodeAs[pubsub.Event[proto.PinentryPromptRequest]](p.Payload)
+	case pubsub.PayloadTypePinentryNotification:
+		return decodeAs[pubsub.Event[proto.PinentryNotification]](p.Payload)
+	case pubsub.PayloadTypeSSHPromptRequest:
+		return decodeAs[pubsub.Event[proto.SSHPromptRequest]](p.Payload)
+	case pubsub.PayloadTypeSSHNotification:
+		return decodeAs[pubsub.Event[proto.SSHNotification]](p.Payload)
+	case pubsub.PayloadTypeMessage:
+		return decodeAs[pubsub.Event[proto.Message]](p.Payload)
+	case pubsub.PayloadTypeSession:
+		return decodeAs[pubsub.Event[proto.Session]](p.Payload)
+	case pubsub.PayloadTypeFile:
+		return decodeAs[pubsub.Event[proto.File]](p.Payload)
+	case pubsub.PayloadTypeAgentEvent:
+		return decodeAs[pubsub.Event[proto.AgentEvent]](p.Payload)
+	case pubsub.PayloadTypeConfigChanged:
+		return decodeAs[pubsub.Event[proto.ConfigChanged]](p.Payload)
+	case pubsub.PayloadTypeSkillsEvent:
+		return decodeAs[pubsub.Event[proto.SkillsEvent]](p.Payload)
+	case pubsub.PayloadTypeRunComplete:
+		return decodeAs[pubsub.Event[proto.RunComplete]](p.Payload)
+	case pubsub.PayloadTypeUpdateAvailable:
+		return decodeAs[pubsub.Event[proto.UpdateAvailable]](p.Payload)
+	case pubsub.PayloadTypeHostTheme:
+		return decodeAs[pubsub.Event[proto.HostThemeState]](p.Payload)
+	case pubsub.PayloadTypeClientSession:
+		return decodeAs[pubsub.Event[proto.ClientSession]](p.Payload)
+	case pubsub.PayloadTypePermissionModeChanged:
+		return decodeAs[pubsub.Event[proto.PermissionModeEvent]](p.Payload)
+	case pubsub.PayloadTypeResync:
+		return decodeAs[proto.Resync](p.Payload)
+	default:
+		return nil, false
+	}
+}
+
+// decodeAs decodes raw into a T. Malformed payloads decode to what could
+// be read, as before, rather than being dropped.
+func decodeAs[T any](raw json.RawMessage) (any, bool) {
+	var e T
+	_ = json.Unmarshal(raw, &e)
+	return e, true
+}
+
+func sendStreamEvent(ctx context.Context, evc chan StreamEvent, ev StreamEvent) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	select {
+	case evc <- ev:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
 
 func sendEvent(ctx context.Context, evc chan any, ev any) bool {

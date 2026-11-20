@@ -36,6 +36,7 @@ Common shell builtins and core utils available on Windows.
 - job_output with wait=true blocks until the job finishes, giving back the time you just bought; only wait when waiting is the useful thing to do
 - A command that auto-backgrounds on the timeout behaves the same way: it is still running, so keep working unless you need its result now
 - Use job_kill tool to terminate a background shell
+- Use job_list to find the ID of a background shell you no longer have
 - IMPORTANT: NEVER use `&` at the end of commands to run in background - use run_in_background parameter instead
 - Commands that should run in background:
   * Long-running servers (e.g., `npm start`, `python -m http.server`, `node server.js`)

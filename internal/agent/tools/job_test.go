@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"charm.land/fantasy"
+	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/stretchr/testify/require"
 )
@@ -20,7 +22,7 @@ func TestBackgroundShell_Integration(t *testing.T) {
 
 	// Start a background shell
 	bgManager := shell.GetBackgroundShellManager()
-	bgShell, err := bgManager.Start(ctx, nil, workingDir, nil, "echo 'hello background' && echo 'done'", "", testMaxJobs)
+	bgShell, err := bgManager.Start(ctx, shell.JobScope{}, workingDir, nil, "echo 'hello background' && echo 'done'", "", testMaxJobs)
 	require.NoError(t, err)
 	require.NotEmpty(t, bgShell.ID)
 
@@ -47,7 +49,7 @@ func TestBackgroundShell_Kill(t *testing.T) {
 
 	// Start a long-running background shell
 	bgManager := shell.GetBackgroundShellManager()
-	bgShell, err := bgManager.Start(ctx, nil, workingDir, nil, "sleep 100", "", testMaxJobs)
+	bgShell, err := bgManager.Start(ctx, shell.JobScope{}, workingDir, nil, "sleep 100", "", testMaxJobs)
 	require.NoError(t, err)
 
 	// Kill it
@@ -70,7 +72,7 @@ func TestBackgroundShell_MultipleOutputCalls(t *testing.T) {
 
 	// Start a background shell
 	bgManager := shell.GetBackgroundShellManager()
-	bgShell, err := bgManager.Start(ctx, nil, workingDir, nil, "echo 'step 1' && echo 'step 2' && echo 'step 3'", "", testMaxJobs)
+	bgShell, err := bgManager.Start(ctx, shell.JobScope{}, workingDir, nil, "echo 'step 1' && echo 'step 2' && echo 'step 3'", "", testMaxJobs)
 	require.NoError(t, err)
 	defer bgManager.Kill(ctx, bgShell.ID)
 
@@ -110,7 +112,7 @@ func TestBackgroundShell_EmptyOutput(t *testing.T) {
 
 	// Start a background shell with no output
 	bgManager := shell.GetBackgroundShellManager()
-	bgShell, err := bgManager.Start(ctx, nil, workingDir, nil, "sleep 0.1", "", testMaxJobs)
+	bgShell, err := bgManager.Start(ctx, shell.JobScope{}, workingDir, nil, "sleep 0.1", "", testMaxJobs)
 	require.NoError(t, err)
 	defer bgManager.Kill(ctx, bgShell.ID)
 
@@ -132,7 +134,7 @@ func TestBackgroundShell_ExitCode(t *testing.T) {
 
 	// Start a background shell that exits with non-zero code
 	bgManager := shell.GetBackgroundShellManager()
-	bgShell, err := bgManager.Start(ctx, nil, workingDir, nil, "echo 'failing' && exit 42", "", testMaxJobs)
+	bgShell, err := bgManager.Start(ctx, shell.JobScope{}, workingDir, nil, "echo 'failing' && exit 42", "", testMaxJobs)
 	require.NoError(t, err)
 	defer bgManager.Kill(ctx, bgShell.ID)
 
@@ -160,7 +162,7 @@ func TestBackgroundShell_WithBlockFuncs(t *testing.T) {
 
 	// Start a background shell with a blocked command
 	bgManager := shell.GetBackgroundShellManager()
-	bgShell, err := bgManager.Start(ctx, nil, workingDir, blockFuncs, "curl example.com", "", testMaxJobs)
+	bgShell, err := bgManager.Start(ctx, shell.JobScope{}, workingDir, blockFuncs, "curl example.com", "", testMaxJobs)
 	require.NoError(t, err)
 	defer bgManager.Kill(ctx, bgShell.ID)
 
@@ -189,7 +191,7 @@ func TestBackgroundShell_StdoutAndStderr(t *testing.T) {
 
 	// Start a background shell with both stdout and stderr
 	bgManager := shell.GetBackgroundShellManager()
-	bgShell, err := bgManager.Start(ctx, nil, workingDir, nil, "echo 'stdout message' && echo 'stderr message' >&2", "", testMaxJobs)
+	bgShell, err := bgManager.Start(ctx, shell.JobScope{}, workingDir, nil, "echo 'stdout message' && echo 'stderr message' >&2", "", testMaxJobs)
 	require.NoError(t, err)
 	defer bgManager.Kill(ctx, bgShell.ID)
 
@@ -211,7 +213,7 @@ func TestBackgroundShell_ConcurrentAccess(t *testing.T) {
 
 	// Start a background shell
 	bgManager := shell.GetBackgroundShellManager()
-	bgShell, err := bgManager.Start(ctx, nil, workingDir, nil, "for i in 1 2 3 4 5; do echo \"line $i\"; sleep 0.05; done", "", testMaxJobs)
+	bgShell, err := bgManager.Start(ctx, shell.JobScope{}, workingDir, nil, "for i in 1 2 3 4 5; do echo \"line $i\"; sleep 0.05; done", "", testMaxJobs)
 	require.NoError(t, err)
 	defer bgManager.Kill(ctx, bgShell.ID)
 
@@ -264,7 +266,7 @@ func TestBackgroundShell_List(t *testing.T) {
 	// Start multiple background shells
 	shells := make([]*shell.BackgroundShell, 3)
 	for i := range 3 {
-		bgShell, err := bgManager.Start(ctx, nil, workingDir, nil, "sleep 1", "", testMaxJobs)
+		bgShell, err := bgManager.Start(ctx, shell.JobScope{}, workingDir, nil, "sleep 1", "", testMaxJobs)
 		require.NoError(t, err)
 		shells[i] = bgShell
 	}
@@ -293,7 +295,7 @@ func TestBackgroundShell_AutoBackground(t *testing.T) {
 	t.Run("quick command completes synchronously", func(t *testing.T) {
 		t.Parallel()
 		bgManager := shell.GetBackgroundShellManager()
-		bgShell, err := bgManager.Start(ctx, nil, workingDir, nil, "echo 'quick'", "", testMaxJobs)
+		bgShell, err := bgManager.Start(ctx, shell.JobScope{}, workingDir, nil, "echo 'quick'", "", testMaxJobs)
 		require.NoError(t, err)
 
 		// Wait threshold time
@@ -314,7 +316,7 @@ func TestBackgroundShell_AutoBackground(t *testing.T) {
 	t.Run("long command stays in background", func(t *testing.T) {
 		t.Parallel()
 		bgManager := shell.GetBackgroundShellManager()
-		bgShell, err := bgManager.Start(ctx, nil, workingDir, nil, "sleep 20 && echo '20 seconds completed'", "", testMaxJobs)
+		bgShell, err := bgManager.Start(ctx, shell.JobScope{}, workingDir, nil, "sleep 20 && echo '20 seconds completed'", "", testMaxJobs)
 		require.NoError(t, err)
 		defer bgManager.Kill(ctx, bgShell.ID)
 
@@ -333,4 +335,57 @@ func TestBackgroundShell_AutoBackground(t *testing.T) {
 		require.True(t, ok, "Should be able to retrieve background shell")
 		require.Equal(t, bgShell.ID, retrieved.ID)
 	})
+}
+
+type fakeSessions map[string]session.Session
+
+func (f fakeSessions) Get(_ context.Context, id string) (session.Session, error) {
+	return f[id], nil
+}
+
+// TestJobTools_ScopedToSessionTree checks that the job tools see the jobs
+// their owner started in the current session and its subagents, and
+// nobody else's.
+func TestJobTools_ScopedToSessionTree(t *testing.T) {
+	t.Parallel()
+
+	owner := new(int)
+	sessions := fakeSessions{
+		"parent": {ID: "parent"},
+		"child":  {ID: "child", ParentSessionID: "parent"},
+		"other":  {ID: "other"},
+	}
+	jobs := NewBackgroundJobs(owner, sessions)
+	sessionCtx := func(id string) context.Context {
+		return context.WithValue(t.Context(), SessionIDContextKey, id)
+	}
+
+	bgManager := shell.GetBackgroundShellManager()
+	started, err := bgManager.Start(t.Context(), jobs.Scope(sessionCtx("child")), t.TempDir(), nil, "sleep 10", "child job", testMaxJobs)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = bgManager.Kill(context.Background(), started.ID) })
+	started.MarkBackground()
+	foreign, err := bgManager.Start(t.Context(), jobs.Scope(sessionCtx("other")), t.TempDir(), nil, "sleep 10", "", testMaxJobs)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = bgManager.Kill(context.Background(), foreign.ID) })
+	foreign.MarkBackground()
+
+	list := NewJobListTool(jobs)
+	resp, err := list.Run(sessionCtx("parent"), fantasy.ToolCall{ID: "1", Name: JobListToolName, Input: "{}"})
+	require.NoError(t, err)
+	require.Contains(t, resp.Content, started.ID)
+	require.Contains(t, resp.Content, "running for")
+	require.Contains(t, resp.Content, "(child job)")
+	require.NotContains(t, resp.Content, foreign.ID)
+
+	kill := NewJobKillTool(jobs)
+	resp, err = kill.Run(sessionCtx("parent"), fantasy.ToolCall{ID: "2", Name: JobKillToolName, Input: `{"shell_id":"` + foreign.ID + `"}`})
+	require.NoError(t, err)
+	require.True(t, resp.IsError, "another session's job must not be reachable")
+	require.False(t, foreign.IsDone())
+
+	resp, err = kill.Run(sessionCtx("parent"), fantasy.ToolCall{ID: "3", Name: JobKillToolName, Input: `{"shell_id":"` + started.ID + `"}`})
+	require.NoError(t, err)
+	require.False(t, resp.IsError, resp.Content)
+	require.True(t, started.IsDone())
 }

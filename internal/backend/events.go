@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
+	"github.com/charmbracelet/crush/internal/session"
 )
 
 // SubscribeClientSessions returns a per-caller channel of the session
@@ -51,12 +52,6 @@ func (b *Backend) SubscribeEventsWithOverflow(ctx context.Context, workspaceID s
 	return events, overflow, nil
 }
 
-// maxSessionAncestryDepth bounds how far [Backend.RootSessionID] walks
-// the parent chain when resolving a session to its top-level session.
-// Subagents cannot spawn subagents today, so one hop suffices in
-// practice; the extra slack guards against cycles and future nesting.
-const maxSessionAncestryDepth = 4
-
 // RootSessionID resolves sessionID to its top-level session by walking
 // the parent chain. Subagent sessions (created by the agent tool or
 // agentic fetch) carry derived IDs; their interactive prompts are
@@ -86,16 +81,9 @@ func rootSessionID(ctx context.Context, ws *Workspace, sessionID string) (string
 	if root, ok := ws.rootCache.Load(sessionID); ok {
 		return root.(string), nil
 	}
-	id := sessionID
-	for range maxSessionAncestryDepth {
-		sess, err := ws.Sessions.Get(ctx, id)
-		if err != nil {
-			return sessionID, err
-		}
-		if sess.ParentSessionID == "" || sess.ParentSessionID == id {
-			break
-		}
-		id = sess.ParentSessionID
+	id, err := session.RootID(ctx, ws.Sessions, sessionID)
+	if err != nil {
+		return sessionID, err
 	}
 	ws.rootCache.Store(sessionID, id)
 	return id, nil

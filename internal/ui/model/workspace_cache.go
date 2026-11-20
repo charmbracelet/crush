@@ -106,6 +106,9 @@ type busyStateMsg struct {
 	// sessionBusy reports whether forSession itself has a run in flight,
 	// unlike agentBusy, which any session or shell command sets.
 	sessionBusy bool
+	// backgroundJobs is how many background shells the agent has running
+	// for forSession's tree.
+	backgroundJobs int
 	// model is the coordinator's selected model, fetched by the same probe
 	// so the sidebar/landing model info renders from memoized state. Zero
 	// (and ignored) when ready is false.
@@ -190,6 +193,7 @@ func (m *UI) dispatchBusyRefresh() tea.Cmd {
 			st.model = ws.AgentModel()
 			if sessionID != "" {
 				st.sessionBusy = ws.AgentIsSessionBusy(sessionID)
+				st.backgroundJobs = ws.AgentRunningBackgroundJobs(sessionID)
 			}
 		}
 		st.permMode = ws.PermissionMode()
@@ -254,6 +258,7 @@ func (m *UI) applyBusyState(msg busyStateMsg) []tea.Cmd {
 	}
 	m.probedSession = msg.forSession
 	m.probedSessionBusy = msg.sessionBusy
+	m.backgroundJobs = msg.backgroundJobs
 	if prevBusy != busy {
 		m.renderPills()
 	}

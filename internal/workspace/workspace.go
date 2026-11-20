@@ -173,6 +173,9 @@ type Workspace interface {
 	AgentReadyErr() error
 	AgentQueuedPrompts(sessionID string) int
 	AgentQueuedPromptsList(sessionID string) []string
+	// AgentRunningBackgroundJobs reports how many background shells the
+	// agent has running for the session's tree.
+	AgentRunningBackgroundJobs(sessionID string) int
 	AgentClearQueue(sessionID string)
 	AgentSetMain(agentID string) error
 	AgentSummarize(ctx context.Context, sessionID string) error

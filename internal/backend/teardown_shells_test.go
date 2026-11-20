@@ -26,7 +26,7 @@ func TestTeardown_LeavesOtherWorkspacesShellsRunning(t *testing.T) {
 	for i, cid := range cids {
 		ws, _, err := b.CreateWorkspace(protoWS(t.TempDir(), t.TempDir(), cid))
 		require.NoError(t, err)
-		jobs[i], err = mgr.Start(context.Background(), ws.App, ws.Path, nil, "sleep 30", cid, 10)
+		jobs[i], err = mgr.Start(context.Background(), shell.JobScope{Owner: ws.App}, ws.Path, nil, "sleep 30", cid, 10)
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = mgr.Kill(context.Background(), jobs[i].ID) })
 	}

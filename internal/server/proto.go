@@ -664,6 +664,17 @@ func (c *controllerV1) handleGetWorkspaceAgentSessionPromptQueued(w http.Respons
 	jsonEncode(w, queued)
 }
 
+// handleGetWorkspaceAgentSessionRunningJobs returns the number of running
+// background shells for a session's tree.
+func (c *controllerV1) handleGetWorkspaceAgentSessionRunningJobs(w http.ResponseWriter, r *http.Request) {
+	running, err := c.backend.RunningBackgroundJobs(r.Context(), r.PathValue("id"), r.PathValue("sid"))
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	jsonEncode(w, running)
+}
+
 // handlePostWorkspaceAgentSessionPromptClear clears the prompt queue for a session.
 func (c *controllerV1) handlePostWorkspaceAgentSessionPromptClear(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")

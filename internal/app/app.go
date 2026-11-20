@@ -1012,6 +1012,13 @@ func (app *App) Agent() agent.Coordinator {
 	return app.AgentCoordinator
 }
 
+// RunningBackgroundJobs reports how many background shells the agent has
+// running for the session tree sessionID belongs to.
+func (app *App) RunningBackgroundJobs(ctx context.Context, sessionID string) int {
+	root, _ := session.RootID(ctx, app.Sessions, sessionID)
+	return shell.GetBackgroundShellManager().Running(shell.JobScope{Owner: app, Session: root})
+}
+
 // Subscribe sends events to the TUI as tea.Msgs.
 func (app *App) Subscribe(program *tea.Program) {
 	defer log.RecoverPanic("app.Subscribe", func() {

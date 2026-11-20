@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"sync/atomic"
 
-	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/agent/tools"
+	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/filepathext"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -38,7 +38,7 @@ type Agent interface {
 	SetSessionMode(ctx context.Context, req acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error)
 	SetSessionConfigOption(ctx context.Context, req acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error)
 	Logout(ctx context.Context, req acp.LogoutRequest) (acp.LogoutResponse, error)
-	UnstableDeleteSession(ctx context.Context, req acp.UnstableDeleteSessionRequest) (acp.UnstableDeleteSessionResponse, error)
+	DeleteSession(ctx context.Context, req acp.DeleteSessionRequest) (acp.DeleteSessionResponse, error)
 	// ValidateCwd reports whether a session cwd names this workspace.
 	ValidateCwd(cwd string) error
 	// SessionExists reports whether the store knows a session.
@@ -49,6 +49,8 @@ type Agent interface {
 	MarkSessionActive(sessionID acp.SessionId)
 	// SessionState reports the mode and config-option payload for a session.
 	SessionState(sessionID acp.SessionId) (*acp.SessionModeState, []acp.SessionConfigOption)
+	// SetSessionRoots records the additional roots a setup request supplied.
+	SetSessionRoots(sessionID acp.SessionId, dirs []string) error
 	// ConnectMCPServers starts the MCP servers a setup request supplied. The
 	// dispatcher owns session/load, which carries the same field session/new
 	// and session/resume do (session-setup.md:458).
@@ -200,16 +202,19 @@ func (d *dispatcher) LoadSession(ctx context.Context, req acp.LoadSessionRequest
 		return acp.LoadSessionResponse{}, err
 	}
 	if !d.agent.SessionExists(ctx, req.SessionId) {
-		return acp.LoadSessionResponse{}, &acp.RequestError{
-			Code:    acpErrorResourceNotFound,
-			Message: "Resource not found",
-			Data:    map[string]any{"sessionId": string(req.SessionId)},
-		}
+		return acp.LoadSessionResponse{}, acp.NewRequestError(
+			acpErrorResourceNotFound,
+			"Resource not found",
+			map[string]any{"sessionId": string(req.SessionId)},
+		)
 	}
 	// Loading is what makes the session active on this connection
 	// (error.md:56), and it must be recorded before the replay streams so a
 	// later session-scoped request passes the active check.
 	d.agent.MarkSessionActive(req.SessionId)
+	if err := d.agent.SetSessionRoots(req.SessionId, req.AdditionalDirectories); err != nil {
+		return acp.LoadSessionResponse{}, err
+	}
 	sessionID := string(req.SessionId)
 	// Reconnect the MCP servers the client supplied for this load. The spec
 	// makes stdio a baseline (session-setup.md:458) and session/load carries
@@ -238,7 +243,7 @@ func (d *dispatcher) LoadSession(ctx context.Context, req acp.LoadSessionRequest
 		input, seen := started[tr.ToolCallID]
 		if !seen {
 			started[tr.ToolCallID] = ""
-			if err := send(acp.StartToolCall(id, toolTitle(tr.Name, ""), acp.WithStartKind(toolKindFor(tr.Name)))); err != nil {
+			if err := send(acp.StartToolCall(id, toolTitle(tr.Name, ""), acp.WithStartName(tr.Name), acp.WithStartKind(toolKindFor(tr.Name)))); err != nil {
 				return err
 			}
 		}
@@ -261,7 +266,7 @@ func (d *dispatcher) LoadSession(ctx context.Context, req acp.LoadSessionRequest
 		if diff := diffContentFor(d, tr.Name, input, tr); diff != nil {
 			contents = append(contents, *diff)
 		}
-		opts := []acp.ToolCallUpdateOpt{acp.WithUpdateStatus(status)}
+		opts := []acp.ToolCallUpdateOpt{acp.WithUpdateStatus(status), acp.WithUpdateName(tr.Name)}
 		if len(contents) > 0 {
 			opts = append(opts, acp.WithUpdateContent(contents))
 		}
@@ -278,13 +283,13 @@ func (d *dispatcher) LoadSession(ctx context.Context, req acp.LoadSessionRequest
 				}
 				switch m.Role {
 				case message.User:
-					err = send(acp.UpdateUserMessageText(p.Text))
+					err = send(withMessageID(acp.UpdateUserMessageText(p.Text), m.ID))
 				case message.Assistant:
-					err = send(acp.UpdateAgentMessageText(p.Text))
+					err = send(withMessageID(acp.UpdateAgentMessageText(p.Text), m.ID))
 				}
 			case message.ReasoningContent:
 				if m.Role == message.Assistant && p.Thinking != "" {
-					err = send(acp.UpdateAgentThoughtText(p.Thinking))
+					err = send(withMessageID(acp.UpdateAgentThoughtText(p.Thinking), m.ID))
 				}
 			case message.ToolCall:
 				if m.Role != message.Assistant || p.ID == "" {
@@ -296,6 +301,7 @@ func (d *dispatcher) LoadSession(ctx context.Context, req acp.LoadSessionRequest
 					status = acp.ToolCallStatusCompleted
 				}
 				err = send(acp.StartToolCall(acp.ToolCallId(p.ID), toolTitle(p.Name, p.Input),
+					acp.WithStartName(p.Name),
 					acp.WithStartKind(toolKindFor(p.Name)),
 					acp.WithStartStatus(status),
 					acp.WithStartRawInput(toolRawInput(p.Input)),
@@ -318,12 +324,12 @@ func (d *dispatcher) LoadSession(ctx context.Context, req acp.LoadSessionRequest
 	return acp.LoadSessionResponse{Modes: modes, ConfigOptions: configOptions}, nil
 }
 
-// UnstableDeleteSession forwards the session/delete request to the agent.
-func (d *dispatcher) UnstableDeleteSession(ctx context.Context, req acp.UnstableDeleteSessionRequest) (acp.UnstableDeleteSessionResponse, error) {
+// DeleteSession forwards the session/delete request to the agent.
+func (d *dispatcher) DeleteSession(ctx context.Context, req acp.DeleteSessionRequest) (acp.DeleteSessionResponse, error) {
 	if err := d.requireInitialized("session/delete"); err != nil {
-		return acp.UnstableDeleteSessionResponse{}, err
+		return acp.DeleteSessionResponse{}, err
 	}
-	return d.agent.UnstableDeleteSession(ctx, req)
+	return d.agent.DeleteSession(ctx, req)
 }
 
 // Cancel is a notification, so it has no error channel to report -32600

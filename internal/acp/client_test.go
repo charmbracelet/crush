@@ -2,7 +2,7 @@ package acp
 
 import (
 	"context"
-	"errors"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"os"
@@ -58,7 +58,7 @@ func TestClientPermissionAutoAllow(t *testing.T) {
 	req := acp.RequestPermissionRequest{
 		SessionId: "sess-1",
 		ToolCall: acp.ToolCallUpdate{
-			Title: strPtr("bash"),
+			Title: acp.PatchSet("bash"),
 		},
 		Options: []acp.PermissionOption{
 			{Kind: acp.PermissionOptionKindAllowOnce, OptionId: "opt-1", Name: "Allow once"},
@@ -146,8 +146,8 @@ func TestClientReadTextFile(t *testing.T) {
 	// Test line limiting.
 	resp2, err := impl.ReadTextFile(context.Background(), acp.ReadTextFileRequest{
 		Path:  path,
-		Line:  intPtr(2),
-		Limit: intPtr(1),
+		Line:  acp.Ptr[int64](2),
+		Limit: acp.Ptr[int64](1),
 	})
 	if err != nil {
 		t.Fatalf("ReadTextFile with limits: %v", err)
@@ -246,9 +246,14 @@ func TestDrain(t *testing.T) {
 func TestParseToolCall(t *testing.T) {
 	rawInput := map[string]any{"command": "ls", "args": []string{"-la"}}
 
+	rawJSON, err := json.Marshal(rawInput)
+	if err != nil {
+		t.Fatalf("marshal raw input: %v", err)
+	}
+
 	update := acp.SessionUpdate{}
 	update.ToolCall = &acp.SessionUpdateToolCall{
-		RawInput: rawInput,
+		RawInput: rawJSON,
 	}
 	input, ok := parseToolCall(update)
 	if !ok {
@@ -263,60 +268,4 @@ func TestParseToolCall(t *testing.T) {
 	if ok {
 		t.Fatal("expected false for nil tool call")
 	}
-}
-
-func strPtr(s string) *string { return &s }
-func intPtr(i int) *int       { return &i }
-
-// stubAgent is a minimal ACP agent for pairing with ClientSideConnection in tests.
-type stubAgent struct{}
-
-func (a *stubAgent) Authenticate(_ context.Context, _ acp.AuthenticateRequest) (acp.AuthenticateResponse, error) {
-	return acp.AuthenticateResponse{}, errors.New("not implemented")
-}
-
-func (a *stubAgent) Initialize(_ context.Context, req acp.InitializeRequest) (acp.InitializeResponse, error) {
-	return acp.InitializeResponse{
-		ProtocolVersion: acp.ProtocolVersionNumber,
-		AgentInfo:       &acp.Implementation{Name: "stub", Version: "0.1"},
-		AgentCapabilities: acp.AgentCapabilities{
-			PromptCapabilities: acp.PromptCapabilities{Image: false, Audio: false, EmbeddedContext: false},
-		},
-	}, nil
-}
-
-func (a *stubAgent) Logout(_ context.Context, _ acp.LogoutRequest) (acp.LogoutResponse, error) {
-	return acp.LogoutResponse{}, errors.New("not implemented")
-}
-
-func (a *stubAgent) NewSession(_ context.Context, req acp.NewSessionRequest) (acp.NewSessionResponse, error) {
-	return acp.NewSessionResponse{SessionId: acp.SessionId("stub-" + req.Cwd)}, nil
-}
-
-func (a *stubAgent) ListSessions(_ context.Context, _ acp.ListSessionsRequest) (acp.ListSessionsResponse, error) {
-	return acp.ListSessionsResponse{}, nil
-}
-
-func (a *stubAgent) CloseSession(_ context.Context, _ acp.CloseSessionRequest) (acp.CloseSessionResponse, error) {
-	return acp.CloseSessionResponse{}, nil
-}
-
-func (a *stubAgent) ResumeSession(_ context.Context, _ acp.ResumeSessionRequest) (acp.ResumeSessionResponse, error) {
-	return acp.ResumeSessionResponse{}, errors.New("not implemented")
-}
-
-func (a *stubAgent) Cancel(_ context.Context, _ acp.CancelNotification) error {
-	return nil
-}
-
-func (a *stubAgent) Prompt(_ context.Context, _ acp.PromptRequest) (acp.PromptResponse, error) {
-	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
-}
-
-func (a *stubAgent) SetSessionMode(_ context.Context, _ acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
-	return acp.SetSessionModeResponse{}, errors.New("not implemented")
-}
-
-func (a *stubAgent) SetSessionConfigOption(_ context.Context, _ acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
-	return acp.SetSessionConfigOptionResponse{}, errors.New("not implemented")
 }

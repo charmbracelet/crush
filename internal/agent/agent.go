@@ -759,6 +759,22 @@ func (a *sessionAgent) rootDir() string {
 	return a.cfg.WorkingDir()
 }
 
+// rootSet returns the session's effective root set: the workspace directory
+// followed by any roots the caller already put on the context. The ACP
+// adapter uses that channel for the additionalDirectories a session setup
+// request asked for, so paths under them need no per-use consent
+// (session-setup.md:444-452).
+func (a *sessionAgent) rootSet(ctx context.Context) []string {
+	roots := []string{a.rootDir()}
+	for _, r := range tools.GetRootsFromContext(ctx) {
+		if r == "" || r == a.rootDir() {
+			continue
+		}
+		roots = append(roots, r)
+	}
+	return roots
+}
+
 func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *fantasy.AgentResult, retErr error) {
 	if err := ValidateCall(call); err != nil {
 		return nil, err
@@ -852,7 +868,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// the lock so a Cancel that arrives between here and assistant creation
 	// is not lost.
 	runCtx := context.WithValue(ctx, tools.SessionIDContextKey, call.SessionID)
-	runCtx = context.WithValue(runCtx, tools.RootsContextKey, []string{a.rootDir()})
+	runCtx = context.WithValue(runCtx, tools.RootsContextKey, a.rootSet(ctx))
 	runCtx = withRefusalRetries(runCtx, refusalRetriesPerTurn)
 	genCtx, cancel = context.WithCancel(runCtx)
 	ac := &activeCancel{cancel: cancel}
@@ -996,9 +1012,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// cancel func were already created and registered under the dispatch
 	// mutex above for both the accepted and in-process paths.
 	ctx = context.WithValue(ctx, tools.SessionIDContextKey, call.SessionID)
-	// The session's root set is the workspace working directory. The tools
-	// bound paths outside it by consent (session-setup.md:444-452).
-	ctx = context.WithValue(ctx, tools.RootsContextKey, []string{a.rootDir()})
+	// The session's root set is the workspace working directory plus any
+	// roots the caller supplied. The tools bound paths outside it by consent
+	// (session-setup.md:444-452).
+	ctx = context.WithValue(ctx, tools.RootsContextKey, a.rootSet(ctx))
 
 	history, files := a.preparePrompt(msgs, largeModel.CatwalkCfg.Capabilities.Vision, largeModel.CatwalkCfg.Capabilities.Audio, call.Attachments...)
 

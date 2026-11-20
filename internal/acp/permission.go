@@ -63,7 +63,7 @@ func (b *permissionBridge) CheckPermission(ctx context.Context, req permission.P
 	title := fmt.Sprintf("%s: %s", req.ToolName, req.Description)
 	toolCallUpdate := acp.ToolCallUpdate{
 		ToolCallId: acp.ToolCallId(req.ToolCallID),
-		Title:      &title,
+		Title:      acp.PatchSet(title),
 	}
 
 	// Report the pending status while the user decides (S10 lifecycle: a tool

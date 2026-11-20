@@ -64,7 +64,7 @@ func TestConfigOptionsIncludesThinking(t *testing.T) {
 			config.SelectedModelTypeLarge: {Think: true},
 		},
 	}
-	opts := configOptionsFor(cfg, "")
+	opts := configOptionsFor(cfg, "", false)
 	require.NotEmpty(t, opts)
 
 	var found bool
@@ -78,12 +78,25 @@ func TestConfigOptionsIncludesThinking(t *testing.T) {
 	}
 	require.True(t, found, "expected a thinking config option")
 
-	// The spec forbids a boolean option unless the client advertised support,
-	// and the pinned SDK cannot read that capability, so nothing may be a
-	// boolean (session-config-options.md:207-209).
+	// Without the client advertising boolean support the spec forbids a
+	// boolean option, so a select is the mandated fallback
+	// (session-config-options.md:207-209).
 	for _, o := range opts {
 		require.Nil(t, o.Boolean, "no config option may be a boolean")
 	}
+
+	// With the capability advertised, thinking becomes a real toggle.
+	boolOpts := configOptionsFor(cfg, "", true)
+	found = false
+	for _, o := range boolOpts {
+		if o.Boolean != nil && o.Boolean.Id == "thinking" {
+			found = true
+			require.Equal(t, "boolean", o.Boolean.Type)
+			require.True(t, o.Boolean.CurrentValue)
+		}
+		require.False(t, o.Select != nil && o.Select.Id == "thinking", "boolean-capable clients get no thinking select")
+	}
+	require.True(t, found, "expected a boolean thinking config option")
 }
 
 func TestParseModelValue(t *testing.T) {
@@ -154,7 +167,7 @@ func TestConfigOptionsIncludesModel(t *testing.T) {
 		},
 	}
 	var modelOpt *acp.SessionConfigOptionSelect
-	for _, o := range configOptionsFor(cfg, "") {
+	for _, o := range configOptionsFor(cfg, "", false) {
 		if o.Select != nil && o.Select.Id == "model" {
 			modelOpt = o.Select
 		}
@@ -194,7 +207,7 @@ func TestConfigOptionsIncludesMode(t *testing.T) {
 	}
 
 	var modeOpt *acp.SessionConfigOptionSelect
-	for _, o := range configOptionsFor(cfg, "") {
+	for _, o := range configOptionsFor(cfg, "", false) {
 		if o.Select != nil && o.Select.Id == "mode" {
 			modeOpt = o.Select
 		}
@@ -353,19 +366,27 @@ func TestWithTraceMetaGeneratesTraceparent(t *testing.T) {
 	// A prompt without _meta still gets a correlatable trace id
 	// (extensibility.md:40-44).
 	meta := withTraceMeta(nil)
-	tp, ok := meta["traceparent"].(string)
-	require.True(t, ok, "expected a generated traceparent")
+	var tp string
+	require.NoError(t, meta.Get("traceparent", &tp))
+	require.NotEmpty(t, tp, "expected a generated traceparent")
 	// W3C trace-context grammar: version-traceid-spanid-flags.
 	require.Regexp(t, `^00-[0-9a-f]{32}-[0-9a-f]{16}-01$`, tp)
 
 	// A client-supplied traceparent wins.
-	in := map[string]any{"traceparent": "00-abc-123-01", "custom": true}
+	in, err := acp.NewMeta(map[string]any{"traceparent": "00-abc-123-01", "custom": true})
+	require.NoError(t, err)
 	out := withTraceMeta(in)
-	require.Equal(t, "00-abc-123-01", out["traceparent"])
-	require.Equal(t, true, out["custom"])
+	var got string
+	require.NoError(t, out.Get("traceparent", &got))
+	require.Equal(t, "00-abc-123-01", got)
+	var custom bool
+	require.NoError(t, out.Get("custom", &custom))
+	require.Equal(t, true, custom)
 
 	// The caller's map is not mutated.
-	empty := map[string]any{}
-	require.NotEmpty(t, withTraceMeta(empty)["traceparent"])
+	empty := acp.Meta{}
+	var generated string
+	require.NoError(t, withTraceMeta(empty).Get("traceparent", &generated))
+	require.NotEmpty(t, generated)
 	require.Empty(t, empty)
 }

@@ -85,13 +85,31 @@ type eventBridge struct {
 	finished        map[string]bool            // toolCallID -> terminal status already reported
 	toolInputs      map[string]string          // toolCallID -> raw input JSON, for diff content
 	attachmentsSent map[string]int             // msgID -> binary content parts already sent
-	promptMeta      map[string]map[string]any  // sessionID -> _meta from session/prompt
+	promptMeta      map[string]acp.Meta        // sessionID -> _meta from session/prompt
 	lastTitles      map[string]string          // sessionID -> last announced title
 
 	// pendingText tracks messages where thinking has started but not finished.
 	// Text for these messages is held back until thinking completes (FinishedAt > 0)
 	// to avoid interleaving agent_thought_chunk and agent_message_chunk.
 	pendingText map[string]bool
+}
+
+// withMessageID tags a chunk update with the message it belongs to. All
+// chunks of one message share the id so clients can group them.
+func withMessageID(update acp.SessionUpdate, id string) acp.SessionUpdate {
+	if id == "" {
+		return update
+	}
+	mid := acp.MessageId(id)
+	switch {
+	case update.AgentMessageChunk != nil:
+		update.AgentMessageChunk.MessageId = &mid
+	case update.AgentThoughtChunk != nil:
+		update.AgentThoughtChunk.MessageId = &mid
+	case update.UserMessageChunk != nil:
+		update.UserMessageChunk.MessageId = &mid
+	}
+	return update
 }
 
 // toolKindFor maps a Crush tool name to the closest ACP tool kind.
@@ -134,7 +152,7 @@ func newEventBridge(conn *acp.AgentSideConnection, app *app.App, log *slog.Logge
 		finished:        make(map[string]bool),
 		toolInputs:      make(map[string]string),
 		attachmentsSent: make(map[string]int),
-		promptMeta:      make(map[string]map[string]any),
+		promptMeta:      make(map[string]acp.Meta),
 		lastTitles:      make(map[string]string),
 		pendingText:     make(map[string]bool),
 	}
@@ -142,7 +160,7 @@ func newEventBridge(conn *acp.AgentSideConnection, app *app.App, log *slog.Logge
 
 // SetPromptMeta records the _meta object received on the session/prompt request
 // so it is echoed on every outgoing session/update for that turn.
-func (b *eventBridge) SetPromptMeta(sessionID string, meta map[string]any) {
+func (b *eventBridge) SetPromptMeta(sessionID string, meta acp.Meta) {
 	if len(meta) == 0 {
 		return
 	}
@@ -246,8 +264,8 @@ func (b *eventBridge) handleSessionEvent(ctx context.Context, s session.Session)
 		SessionId: acp.SessionId(s.ID),
 		Update: acp.SessionUpdate{
 			SessionInfoUpdate: &acp.SessionSessionInfoUpdate{
-				Title:     &title,
-				UpdatedAt: &now,
+				Title:     acp.PatchSet(title),
+				UpdatedAt: acp.PatchSet(now),
 			},
 		},
 	}
@@ -332,7 +350,7 @@ func (b *eventBridge) streamAttachments(ctx context.Context, m message.Message) 
 		} else {
 			block = acp.ImageBlock(encoded, bc.MIMEType)
 		}
-		if err := b.conn.SessionUpdate(ctx, b.note(sessionID, acp.UpdateAgentMessage(block))); err != nil {
+		if err := b.conn.SessionUpdate(ctx, b.note(sessionID, withMessageID(acp.UpdateAgentMessage(block), m.ID))); err != nil {
 			b.log.Warn("Failed to send attachment update", "error", err)
 		}
 	}
@@ -385,7 +403,7 @@ func (b *eventBridge) streamToolResults(ctx context.Context, m message.Message) 
 		if diff := diffContentFor(b, tr.Name, input, tr); diff != nil {
 			contents = append(contents, *diff)
 		}
-		opts := []acp.ToolCallUpdateOpt{acp.WithUpdateStatus(status)}
+		opts := []acp.ToolCallUpdateOpt{acp.WithUpdateStatus(status), acp.WithUpdateName(tr.Name)}
 		if len(contents) > 0 {
 			opts = append(opts,
 				acp.WithUpdateContent(contents),
@@ -466,7 +484,7 @@ func (b *eventBridge) streamText(ctx context.Context, m message.Message) {
 	for i, chunk := range chunks {
 		update := acp.SessionNotification{
 			SessionId: acp.SessionId(m.SessionID),
-			Update:    acp.UpdateAgentMessageText(chunk),
+			Update:    withMessageID(acp.UpdateAgentMessageText(chunk), m.ID),
 		}
 		if err := b.conn.SessionUpdate(ctx, update); err != nil {
 			b.log.Warn("Failed to send streamed session update", "error", err)
@@ -505,7 +523,7 @@ func (b *eventBridge) streamThoughts(ctx context.Context, m message.Message) {
 	for i, chunk := range chunks {
 		update := acp.SessionNotification{
 			SessionId: acp.SessionId(m.SessionID),
-			Update:    acp.UpdateAgentThoughtText(chunk),
+			Update:    withMessageID(acp.UpdateAgentThoughtText(chunk), m.ID),
 		}
 		if err := b.conn.SessionUpdate(ctx, update); err != nil {
 			b.log.Warn("Failed to send streamed session update", "error", err)
@@ -567,6 +585,7 @@ func (b *eventBridge) streamToolCalls(ctx context.Context, m message.Message) {
 		}
 		opts := []acp.ToolCallStartOpt{
 			acp.WithStartStatus(status),
+			acp.WithStartName(a.name),
 			acp.WithStartKind(toolKindFor(a.name)),
 			acp.WithStartRawInput(toolRawInput(a.input)),
 		}
@@ -809,14 +828,14 @@ func (b *eventBridge) usageUpdate(ctx context.Context, sessionID string) {
 		return
 	}
 
-	used := int(session.PromptTokens + session.CompletionTokens)
+	used := int64(session.PromptTokens + session.CompletionTokens)
 	cost := &acp.Cost{Amount: session.Cost, Currency: "USD"}
 
-	size := 0
+	size := int64(0)
 	if store := b.app.Store(); store != nil {
 		cfg := store.Config()
 		if model := cfg.GetModelByType(cfg.Agents[config.AgentCoder].Model); model != nil {
-			size = int(model.ContextWindow)
+			size = int64(model.ContextWindow)
 		}
 	}
 

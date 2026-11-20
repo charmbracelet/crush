@@ -209,6 +209,16 @@ func (c *stubClient) WaitForTerminalExit(_ context.Context, _ acp.WaitForTermina
 	return acp.WaitForTerminalExitResponse{}, nil
 }
 
+func (c *stubClient) CreateElicitation(_ context.Context, _ acp.CreateElicitationRequest) (acp.CreateElicitationResponse, error) {
+	return acp.CreateElicitationResponse{
+		Cancel: &acp.CreateElicitationCancel{Action: "cancel"},
+	}, nil
+}
+
+func (c *stubClient) CompleteElicitation(_ context.Context, _ acp.CompleteElicitationNotification) error {
+	return nil
+}
+
 // trackingUpdateClient wraps stubClient and records all SessionUpdate calls.
 type trackingUpdateClient struct {
 	*stubClient
@@ -867,6 +877,76 @@ func TestConformanceInitializeCapabilities(t *testing.T) {
 	if !initResp.AgentCapabilities.LoadSession {
 		t.Error("LoadSession capability = false, want true")
 	}
+	// A client must be able to tell an advertised optional surface from an
+	// unimplemented one (session-setup.md:437-458).
+	if initResp.AgentCapabilities.SessionCapabilities.AdditionalDirectories == nil {
+		t.Error("additionalDirectories capability not advertised")
+	}
+	if !initResp.AgentCapabilities.McpCapabilities.Http || !initResp.AgentCapabilities.McpCapabilities.Sse {
+		t.Errorf("mcpCapabilities = %+v, want http and sse", initResp.AgentCapabilities.McpCapabilities)
+	}
+
+	c2aW.Close()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Error("server did not exit")
+	}
+}
+
+// The additional roots a client supplies must be reported back, since the
+// advertised capability promises they form the session's root set.
+func TestConformanceAdditionalDirectoriesRoundTrip(t *testing.T) {
+	c2aR, c2aW := io.Pipe()
+	a2cR, a2cW := io.Pipe()
+	defer c2aR.Close()
+	defer c2aW.Close()
+	defer a2cR.Close()
+	defer a2cW.Close()
+
+	app := stubApp(newStubCoordinator(nil))
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := acpsrv.NewServer(app, log, c2aR, a2cW)
+
+	done := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		done <- srv.Start(ctx)
+	}()
+
+	client := acp.NewClientSideConnection(newStubClient(), c2aW, a2cR)
+	if _, err := client.Initialize(t.Context(), acp.InitializeRequest{
+		ProtocolVersion:    acp.ProtocolVersionNumber,
+		ClientCapabilities: acp.ClientCapabilities{},
+	}); err != nil {
+		t.Fatalf("Initialize failed: %v", err)
+	}
+
+	if _, err := client.NewSession(t.Context(), acp.NewSessionRequest{
+		Cwd:                   "/workspace",
+		AdditionalDirectories: []string{"/extra1", "/extra2"},
+	}); err != nil {
+		t.Fatalf("NewSession failed: %v", err)
+	}
+
+	list, err := client.ListSessions(t.Context(), acp.ListSessionsRequest{})
+	if err != nil {
+		t.Fatalf("ListSessions failed: %v", err)
+	}
+	if len(list.Sessions) != 1 {
+		t.Fatalf("sessions = %d, want 1", len(list.Sessions))
+	}
+	got := list.Sessions[0].AdditionalDirectories
+	if len(got) != 2 || got[0] != "/extra1" || got[1] != "/extra2" {
+		t.Errorf("additionalDirectories = %v, want [/extra1 /extra2]", got)
+	}
+
+	// A relative root is a protocol path violation (overview.md:160).
+	rel := acp.NewSessionRequest{Cwd: "/workspace", AdditionalDirectories: []string{"relative"}}
+	if _, err := client.NewSession(t.Context(), rel); err == nil {
+		t.Error("NewSession accepted a relative additionalDirectories entry")
+	}
 
 	c2aW.Close()
 	select {
@@ -1051,7 +1131,7 @@ func TestConformanceDeleteIsIdempotent(t *testing.T) {
 		t.Fatalf("Initialize failed: %v", err)
 	}
 
-	_, err := client.UnstableDeleteSession(t.Context(), acp.UnstableDeleteSessionRequest{SessionId: "gone"})
+	_, err := client.DeleteSession(t.Context(), acp.DeleteSessionRequest{SessionId: "gone"})
 	if err != nil {
 		t.Errorf("deleting a nonexistent session must succeed, got %v", err)
 	}

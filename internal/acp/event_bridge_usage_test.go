@@ -41,6 +41,16 @@ func (c *captureClient) SessionUpdate(_ context.Context, n acp.SessionNotificati
 	return nil
 }
 
+func (c *captureClient) CreateElicitation(_ context.Context, _ acp.CreateElicitationRequest) (acp.CreateElicitationResponse, error) {
+	return acp.CreateElicitationResponse{
+		Cancel: &acp.CreateElicitationCancel{Action: "cancel"},
+	}, nil
+}
+
+func (c *captureClient) CompleteElicitation(_ context.Context, _ acp.CompleteElicitationNotification) error {
+	return nil
+}
+
 // TestEventBridge_UsageUpdate verifies the bridge emits a usage_update carrying
 // the session's token usage and cost after a run completes (O13).
 func TestEventBridge_UsageUpdate(t *testing.T) {
@@ -72,7 +82,7 @@ func TestEventBridge_UsageUpdate(t *testing.T) {
 	select {
 	case u := <-cc.ch:
 		require.NotNil(t, u.UsageUpdate)
-		require.Equal(t, 42, u.UsageUpdate.Used)
+		require.Equal(t, int64(42), u.UsageUpdate.Used)
 		require.NotNil(t, u.UsageUpdate.Cost)
 		require.Equal(t, 0.42, u.UsageUpdate.Cost.Amount)
 	case <-time.After(2 * time.Second):

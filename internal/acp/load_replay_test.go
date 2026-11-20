@@ -129,12 +129,15 @@ func TestLoadSessionReplaysFullHistory(t *testing.T) {
 				switch {
 				case u.UserMessageChunk != nil:
 					require.Equal(t, "question", u.UserMessageChunk.Content.Text.Text)
+					require.Equal(t, acp.MessageId("m1"), *u.UserMessageChunk.MessageId)
 					sawUserChunk = true
 				case u.AgentThoughtChunk != nil:
 					require.Equal(t, "pondering", u.AgentThoughtChunk.Content.Text.Text)
+					require.Equal(t, acp.MessageId("m2"), *u.AgentThoughtChunk.MessageId)
 					sawThought = true
 				case u.AgentMessageChunk != nil:
 					require.Equal(t, "answer", u.AgentMessageChunk.Content.Text.Text)
+					require.Equal(t, acp.MessageId("m2"), *u.AgentMessageChunk.MessageId)
 					sawAgentChunk = true
 				case u.ToolCall != nil:
 					start = u
@@ -149,11 +152,15 @@ func TestLoadSessionReplaysFullHistory(t *testing.T) {
 			require.Equal(t, acp.ToolCallId("call-1"), start.ToolCall.ToolCallId)
 			require.Equal(t, acp.ToolKindRead, start.ToolCall.Kind)
 			require.Contains(t, start.ToolCall.Title, "/a/b.go")
+			require.NotNil(t, start.ToolCall.Name)
+			require.Equal(t, "view", *start.ToolCall.Name)
 			require.NotNil(t, result.ToolCallUpdate)
-			require.NotNil(t, result.ToolCallUpdate.Status)
-			require.Equal(t, acp.ToolCallStatusCompleted, *result.ToolCallUpdate.Status)
-			require.Len(t, result.ToolCallUpdate.Content, 1)
-			require.Equal(t, "file body", result.ToolCallUpdate.Content[0].Content.Content.Text.Text)
+			status, ok := result.ToolCallUpdate.Status.Value()
+			require.True(t, ok)
+			require.Equal(t, acp.ToolCallStatusCompleted, status)
+			content, _ := result.ToolCallUpdate.Content.Value()
+			require.Len(t, content, 1)
+			require.Equal(t, "file body", content[0].Content.Content.Text.Text)
 			return
 		case <-time.After(5 * time.Second):
 			t.Fatal("timeout waiting for LoadSession replay")
@@ -215,8 +222,9 @@ func TestLoadSessionReplayToolResultWithoutStart(t *testing.T) {
 				}
 				if u.ToolCallUpdate != nil && u.ToolCallUpdate.ToolCallId == "call-x" {
 					sawResult = true
-					require.NotNil(t, u.ToolCallUpdate.Status)
-					require.Equal(t, acp.ToolCallStatusFailed, *u.ToolCallUpdate.Status)
+					status, ok := u.ToolCallUpdate.Status.Value()
+					require.True(t, ok)
+					require.Equal(t, acp.ToolCallStatusFailed, status)
 				}
 			}
 			require.True(t, sawStart, "synthesized tool_call start")

@@ -19,8 +19,8 @@ import (
 	"time"
 
 	"charm.land/fantasy"
-	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/agent/tools"
+	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
@@ -48,6 +48,11 @@ type crushAgent struct {
 	// session-scoped request naming any other id is -32002 even when the store
 	// knows it.
 	activeSessions sync.Map
+
+	// sessionRoots holds each session's effective root set: the workspace cwd
+	// followed by the additionalDirectories its setup request supplied
+	// (session-setup.md:437-452).
+	sessionRoots sync.Map
 }
 
 // newCrushAgent creates an ACP agent backed by the given Crush app.
@@ -81,12 +86,15 @@ func (a *crushAgent) Initialize(_ context.Context, req acp.InitializeRequest) (a
 				EmbeddedContext: true,
 			},
 			SessionCapabilities: acp.SessionCapabilities{
-				Close:  &acp.SessionCloseCapabilities{},
-				Delete: &acp.SessionDeleteCapabilities{},
-				List:   &acp.SessionListCapabilities{},
-				Resume: &acp.SessionResumeCapabilities{},
+				AdditionalDirectories: &acp.SessionAdditionalDirectoriesCapabilities{},
+				Close:                 &acp.SessionCloseCapabilities{},
+				Delete:                &acp.SessionDeleteCapabilities{},
+				List:                  &acp.SessionListCapabilities{},
+				Resume:                &acp.SessionResumeCapabilities{},
 			},
-			McpCapabilities: acp.McpCapabilities{},
+			// stdio is the baseline transport (session-setup.md:458); http and
+			// sse are served because a Crush MCP server can use either.
+			McpCapabilities: acp.McpCapabilities{Http: true, Sse: true},
 		},
 	}
 	a.log.Info("ACP initialize", "protocol", resp.ProtocolVersion)
@@ -109,9 +117,12 @@ func (a *crushAgent) NewSession(ctx context.Context, req acp.NewSessionRequest) 
 	a.log.Info("ACP new session", "sessionId", session.ID, "cwd", req.Cwd)
 	sid := acp.SessionId(session.ID)
 
-	// Additional workspace roots are not supported: the capability is not
-	// advertised, so the request field is ignored rather than half-applied.
-	// See plan O23 for the enforcement work this replaces.
+	// The session's root set is cwd plus whatever additional roots the
+	// client asked for, so paths under them do not need per-use consent
+	// (session-setup.md:444-452).
+	if err := a.setSessionRoots(sid, req.AdditionalDirectories); err != nil {
+		return acp.NewSessionResponse{}, err
+	}
 
 	// Connect any MCP servers the client supplied. The spec makes stdio a
 	// baseline every Agent must support (session-setup.md:458,466).
@@ -166,6 +177,13 @@ func (a *crushAgent) ValidateCwd(cwd string) error {
 	return a.validateCwd(cwd)
 }
 
+// SetSessionRoots exposes setSessionRoots to the dispatcher, which owns
+// session/load and carries the same additionalDirectories field session/new
+// and session/resume do (session-setup.md:437-444).
+func (a *crushAgent) SetSessionRoots(sessionID acp.SessionId, dirs []string) error {
+	return a.setSessionRoots(sessionID, dirs)
+}
+
 // SessionState reports the mode and config-option state for a session, so
 // session/load can return the same setup payload session/new and session/resume
 // do (session-setup.md:200 allows it; the client needs it to render the
@@ -190,6 +208,32 @@ func (a *crushAgent) SessionExists(ctx context.Context, sessionID acp.SessionId)
 // -32002 even when the store knows the id (error.md:56).
 func (a *crushAgent) MarkSessionActive(sessionID acp.SessionId) {
 	a.activeSessions.Store(string(sessionID), struct{}{})
+}
+
+// setSessionRoots records the additional roots a setup request asked for.
+// Each path must be absolute, since it becomes part of the session's root
+// set, and protocol paths are always absolute (overview.md:160).
+func (a *crushAgent) setSessionRoots(sessionID acp.SessionId, dirs []string) error {
+	for _, dir := range dirs {
+		if !isAbsPath(dir) {
+			return invalidParam("additionalDirectories", dir)
+		}
+	}
+	if len(dirs) == 0 {
+		a.sessionRoots.Delete(string(sessionID))
+		return nil
+	}
+	a.sessionRoots.Store(string(sessionID), dirs)
+	return nil
+}
+
+// extraRoots returns the additional roots the session's setup request asked
+// for, so a turn's tools treat them as in scope (session-setup.md:444-452).
+func (a *crushAgent) extraRoots(sessionID acp.SessionId) []string {
+	if v, ok := a.sessionRoots.Load(string(sessionID)); ok {
+		return v.([]string)
+	}
+	return nil
 }
 
 // workingDir reports the directory Crush was started in, or "" when the app
@@ -264,9 +308,10 @@ func (a *crushAgent) ListSessions(_ context.Context, req acp.ListSessionsRequest
 	for _, s := range sessions[start:end] {
 		t := s.Title
 		info := acp.SessionInfo{
-			SessionId: acp.SessionId(s.ID),
-			Title:     &t,
-			Cwd:       cwd,
+			SessionId:             acp.SessionId(s.ID),
+			Title:                 &t,
+			Cwd:                   cwd,
+			AdditionalDirectories: a.extraRoots(acp.SessionId(s.ID)),
 		}
 		if s.UpdatedAt > 0 {
 			ts := time.Unix(s.UpdatedAt, 0).UTC().Format(time.RFC3339)
@@ -316,6 +361,7 @@ func (a *crushAgent) CloseSession(_ context.Context, req acp.CloseSessionRequest
 	// any MCP servers it brought with it (session-setup.md:313).
 	mcp.TeardownSession(id)
 	a.activeSessions.Delete(id)
+	a.sessionRoots.Delete(id)
 	return acp.CloseSessionResponse{}, nil
 }
 
@@ -337,6 +383,9 @@ func (a *crushAgent) ResumeSession(ctx context.Context, req acp.ResumeSessionReq
 	// Resuming is what makes a session active on this connection
 	// (error.md:56), so the existence check above stays store-only.
 	a.activeSessions.Store(string(req.SessionId), struct{}{})
+	if err := a.setSessionRoots(req.SessionId, req.AdditionalDirectories); err != nil {
+		return acp.ResumeSessionResponse{}, err
+	}
 	// The spec requires resume to reconnect the requested MCP servers
 	// (session-setup.md:257). The request list is authoritative for this
 	// session, so any servers it already had are replaced.
@@ -344,8 +393,8 @@ func (a *crushAgent) ResumeSession(ctx context.Context, req acp.ResumeSessionReq
 	if err := a.connectSessionMCPServers(ctx, string(req.SessionId), req.McpServers); err != nil {
 		return acp.ResumeSessionResponse{}, err
 	}
-	// The request's additional roots are not applied: the capability is not
-	// advertised, so any list the client sends is left untouched.
+	// The request's additional roots replace the session's list; an empty
+	// list clears it (session-setup.md:437-444).
 	return acp.ResumeSessionResponse{
 		Modes:         a.modeState(req.SessionId),
 		ConfigOptions: a.configOptions(req.SessionId),
@@ -359,13 +408,13 @@ func (a *crushAgent) Logout(_ context.Context, _ acp.LogoutRequest) (acp.LogoutR
 	return acp.LogoutResponse{}, nil
 }
 
-// UnstableDeleteSession deletes a session from the store. The method name keeps
-// the SDK's unstable prefix for the session/delete capability.
+// DeleteSession deletes a session from the store, serving the session/delete
+// capability.
 //
 // Deleting a session that never existed is a success, not an error
 // (session-delete.md:85). The store reports a missing row as sql.ErrNoRows,
 // which is the only case swallowed here; a real failure still surfaces.
-func (a *crushAgent) UnstableDeleteSession(ctx context.Context, req acp.UnstableDeleteSessionRequest) (acp.UnstableDeleteSessionResponse, error) {
+func (a *crushAgent) DeleteSession(ctx context.Context, req acp.DeleteSessionRequest) (acp.DeleteSessionResponse, error) {
 	id := string(req.SessionId)
 	a.log.Info("ACP delete session", "sessionId", id)
 	if a.app.AgentCoordinator != nil {
@@ -373,12 +422,12 @@ func (a *crushAgent) UnstableDeleteSession(ctx context.Context, req acp.Unstable
 	}
 	if a.app.Sessions != nil {
 		if err := a.app.Sessions.Delete(ctx, id); err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return acp.UnstableDeleteSessionResponse{}, fmt.Errorf("delete session: %w", err)
+			return acp.DeleteSessionResponse{}, fmt.Errorf("delete session: %w", err)
 		}
 	}
 	a.activeSessions.Delete(id)
 	mcp.TeardownSession(id)
-	return acp.UnstableDeleteSessionResponse{}, nil
+	return acp.DeleteSessionResponse{}, nil
 }
 
 // Cancel implements acp.Agent.
@@ -408,6 +457,10 @@ func (a *crushAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Pro
 	if a.bridge != nil {
 		a.bridge.SetPromptMeta(sessionID, meta)
 	}
+
+	// Paths under the session's additional roots are in scope for this
+	// turn's tools (session-setup.md:444-452).
+	ctx = context.WithValue(ctx, tools.RootsContextKey, a.extraRoots(req.SessionId))
 
 	prompt, attachments := buildPrompt(req.Prompt)
 	// A leading /name is resolved against the commands advertised in
@@ -450,11 +503,11 @@ func (a *crushAgent) requireSession(ctx context.Context, id acp.SessionId) error
 // sessionNotFound builds the -32002 the spec prescribes for a session that
 // does not exist or is not active on the connection (error.md:56-58).
 func sessionNotFound(id acp.SessionId) error {
-	return &acp.RequestError{
-		Code:    acpErrorResourceNotFound,
-		Message: "Resource not found",
-		Data:    map[string]any{"sessionId": string(id)},
-	}
+	return acp.NewRequestError(
+		acpErrorResourceNotFound,
+		"Resource not found",
+		map[string]any{"sessionId": string(id)},
+	)
 }
 
 // SetSessionMode acknowledges a mode change and notifies the client. An
@@ -846,8 +899,8 @@ func (a *crushAgent) sessionInfoUpdate(title string) acp.SessionUpdate {
 	now := time.Now().UTC().Format(time.RFC3339)
 	return acp.SessionUpdate{
 		SessionInfoUpdate: &acp.SessionSessionInfoUpdate{
-			Title:     &title,
-			UpdatedAt: &now,
+			Title:     acp.PatchSet(title),
+			UpdatedAt: acp.PatchSet(now),
 		},
 	}
 }
@@ -857,7 +910,14 @@ func (a *crushAgent) sessionInfoUpdate(title string) acp.SessionUpdate {
 // picker and a reasoning on/off control.
 func (a *crushAgent) configOptions(sessionID acp.SessionId) []acp.SessionConfigOption {
 	cfg := a.config()
-	return configOptionsFor(cfg, a.currentMode())
+	return configOptionsFor(cfg, a.currentMode(), a.booleanConfigOptions())
+}
+
+// booleanConfigOptions reports whether the client advertised support for
+// boolean config options during initialize (session-config-options.md:207).
+func (a *crushAgent) booleanConfigOptions() bool {
+	caps := a.clientCaps.Session
+	return caps != nil && caps.ConfigOptions != nil && caps.ConfigOptions.Boolean != nil
 }
 
 // configOptionsFor builds the config-option list from a config snapshot and the
@@ -867,7 +927,7 @@ func (a *crushAgent) configOptions(sessionID acp.SessionId) []acp.SessionConfigO
 // options the modern spelling of a mode switcher and asks Agents that offer
 // mode-like configuration to send both during the transition
 // (session-config-options.md:462-471).
-func configOptionsFor(cfg *config.Config, currentMode acp.SessionModeId) []acp.SessionConfigOption {
+func configOptionsFor(cfg *config.Config, currentMode acp.SessionModeId, booleanOK bool) []acp.SessionConfigOption {
 	opts := []acp.SessionConfigOption{}
 	if cfg == nil {
 		return opts
@@ -891,32 +951,44 @@ func configOptionsFor(cfg *config.Config, currentMode acp.SessionModeId) []acp.S
 			},
 		},
 	})
-	// Thinking is a select rather than a boolean on purpose: the spec forbids
-	// emitting `type:"boolean"` unless the client advertised support for
-	// boolean options, and the pinned SDK cannot read that capability. It names
-	// a select fallback for exactly this case (session-config-options.md:207-209).
-	thinkingOpts := []acp.SessionConfigSelectOption{
-		{Value: "on", Name: "On"},
-		{Value: "off", Name: "Off"},
-	}
-	thinkingCurrent := acp.SessionConfigValueId("off")
-	if thinkingEnabled(cfg) {
-		thinkingCurrent = "on"
-	}
-	ungroupedThinking := acp.SessionConfigSelectOptionsUngrouped(thinkingOpts)
-	opts = append(opts, acp.SessionConfigOption{
-		Select: &acp.SessionConfigOptionSelect{
-			Id:           "thinking",
-			Name:         "Thinking",
-			Type:         "select",
-			CurrentValue: thinkingCurrent,
-			Description:  acp.Ptr("Enable extended reasoning for supported models"),
-			Category:     acp.Ptr(acp.SessionConfigOptionCategoryThoughtLevel),
-			Options: acp.SessionConfigSelectOptions{
-				Ungrouped: &ungroupedThinking,
+	// Thinking is a boolean only when the client advertised support for
+	// boolean options; otherwise it falls back to the select the spec names
+	// for exactly this case (session-config-options.md:207-209).
+	if booleanOK {
+		opts = append(opts, acp.SessionConfigOption{
+			Boolean: &acp.SessionConfigOptionBoolean{
+				Id:           "thinking",
+				Name:         "Thinking",
+				Type:         "boolean",
+				CurrentValue: thinkingEnabled(cfg),
+				Description:  acp.Ptr("Enable extended reasoning for supported models"),
+				Category:     acp.Ptr(acp.SessionConfigOptionCategoryThoughtLevel),
 			},
-		},
-	})
+		})
+	} else {
+		thinkingOpts := []acp.SessionConfigSelectOption{
+			{Value: "on", Name: "On"},
+			{Value: "off", Name: "Off"},
+		}
+		thinkingCurrent := acp.SessionConfigValueId("off")
+		if thinkingEnabled(cfg) {
+			thinkingCurrent = "on"
+		}
+		ungroupedThinking := acp.SessionConfigSelectOptionsUngrouped(thinkingOpts)
+		opts = append(opts, acp.SessionConfigOption{
+			Select: &acp.SessionConfigOptionSelect{
+				Id:           "thinking",
+				Name:         "Thinking",
+				Type:         "select",
+				CurrentValue: thinkingCurrent,
+				Description:  acp.Ptr("Enable extended reasoning for supported models"),
+				Category:     acp.Ptr(acp.SessionConfigOptionCategoryThoughtLevel),
+				Options: acp.SessionConfigSelectOptions{
+					Ungrouped: &ungroupedThinking,
+				},
+			},
+		})
+	}
 	modelOpts := modelOptionsFor(cfg)
 	if len(modelOpts) > 0 {
 		cur := acp.SessionConfigValueId(modelSelectValue(cfg))
@@ -1032,7 +1104,7 @@ func (c *clientFSAdapter) WriteTextFile(ctx context.Context, path, content strin
 // support the read is delegated to the client; otherwise Crush reads it from its
 // own local filesystem. The line/limit windowing supported by the client path
 // is applied only on delegation; local reads return the whole file.
-func (a *crushAgent) fsReadTextFile(ctx context.Context, sessionID acp.SessionId, path string, line, limit *int) (string, error) {
+func (a *crushAgent) fsReadTextFile(ctx context.Context, sessionID acp.SessionId, path string, line, limit *int64) (string, error) {
 	if a.clientCaps.Fs.ReadTextFile && a.conn != nil {
 		resp, err := a.conn.ReadTextFile(ctx, acp.ReadTextFileRequest{
 			Path:      path,
@@ -1168,14 +1240,14 @@ func mapFinishReason(reason fantasy.FinishReason) acp.StopReason {
 // traceparent/tracestate/baggage keys for exactly this). Crush has no tracer
 // backend; the value is a well-formed id a client can correlate against,
 // not a span join.
-func withTraceMeta(meta map[string]any) map[string]any {
-	out := make(map[string]any, len(meta)+1)
+func withTraceMeta(meta acp.Meta) acp.Meta {
+	out := make(acp.Meta, len(meta)+1)
 	for k, v := range meta {
 		out[k] = v
 	}
 	if _, ok := out["traceparent"]; !ok {
 		if tp := newTraceparent(); tp != "" {
-			out["traceparent"] = tp
+			out.Set("traceparent", tp)
 		}
 	}
 	return out

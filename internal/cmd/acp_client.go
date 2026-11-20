@@ -77,8 +77,17 @@ func runACPConnect(cmd *cobra.Command, args []string) error {
 
 	// Initialize.
 	initResp, err := cli.Initialize(ctx, acpsdk.InitializeRequest{
-		ProtocolVersion:    acpsdk.ProtocolVersionNumber,
-		ClientCapabilities: acpsdk.ClientCapabilities{Fs: acpsdk.FileSystemCapabilities{ReadTextFile: true, WriteTextFile: true}},
+		ProtocolVersion: acpsdk.ProtocolVersionNumber,
+		ClientCapabilities: acpsdk.ClientCapabilities{
+			Fs: acpsdk.FileSystemCapabilities{ReadTextFile: true, WriteTextFile: true},
+			// Ask for boolean config options so the server offers
+			// thinking as a toggle rather than a two-item select.
+			Session: &acpsdk.ClientSessionCapabilities{
+				ConfigOptions: &acpsdk.SessionConfigOptionsCapabilities{
+					Boolean: &acpsdk.BooleanConfigOptionCapabilities{},
+				},
+			},
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("initialize: %w", err)
@@ -167,6 +176,10 @@ func renderUpdate(u acpsdk.SessionUpdate) {
 			fmt.Fprint(os.Stderr, t.Text)
 		}
 	case u.ToolCall != nil:
-		fmt.Fprintf(os.Stderr, "\n[tool: %s]\n", u.ToolCall.Title)
+		title := u.ToolCall.Title
+		if u.ToolCall.Name != nil && *u.ToolCall.Name != "" {
+			title = *u.ToolCall.Name + ": " + title
+		}
+		fmt.Fprintf(os.Stderr, "\n[tool: %s]\n", title)
 	}
 }

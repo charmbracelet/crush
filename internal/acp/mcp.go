@@ -45,12 +45,12 @@ func (a *crushAgent) connectSessionMCPServers(ctx context.Context, sessionID str
 
 	lifeCtx := context.WithoutCancel(ctx)
 	for _, s := range servers {
-		spec, name, ok := acpMCPServer(s, sessionID)
+		spec, name, server, ok := acpMCPServer(s, sessionID)
 		if !ok {
-			// Only stdio is advertised (mcpCapabilities is empty), so a client
-			// sending another transport is outside what Crush claimed to
-			// support. Ignoring is the tolerant reading; failing the session
-			// over a transport we never offered would be worse.
+			// Only the transports advertised in mcpCapabilities are served,
+			// so a client sending another one is outside what Crush claimed
+			// to support. Ignoring is the tolerant reading; failing the
+			// session over a transport we never offered would be worse.
 			a.log.Warn("Ignoring unsupported ACP MCP server", "sessionId", sessionID)
 			continue
 		}
@@ -61,9 +61,9 @@ func (a *crushAgent) connectSessionMCPServers(ctx context.Context, sessionID str
 			// connected for this session is torn down so the failure does not
 			// leave a half-connected session behind.
 			mcp.TeardownSession(sessionID)
-			return fmt.Errorf("connect mcp server %q: %w", s.Stdio.Name, err)
+			return fmt.Errorf("connect mcp server %q: %w", server, err)
 		}
-		a.log.Info("Connected ACP MCP server", "sessionId", sessionID, "server", s.Stdio.Name, "registryName", name)
+		a.log.Info("Connected ACP MCP server", "sessionId", sessionID, "server", server, "registryName", name)
 	}
 	return nil
 }
@@ -71,20 +71,49 @@ func (a *crushAgent) connectSessionMCPServers(ctx context.Context, sessionID str
 // acpMCPServer converts one ACP server description into a Crush MCP config and
 // the unique registry name to file it under. ok is false when the server uses a
 // transport Crush does not serve over ACP.
-func acpMCPServer(s acp.McpServer, sessionID string) (spec config.MCPConfig, name string, ok bool) {
-	if s.Stdio == nil {
-		return config.MCPConfig{}, "", false
-	}
-	spec = config.MCPConfig{
-		Type:    config.MCPStdio,
-		Command: s.Stdio.Command,
-		Args:    s.Stdio.Args,
-	}
-	if len(s.Stdio.Env) > 0 {
-		spec.Env = make(map[string]string, len(s.Stdio.Env))
-		for _, e := range s.Stdio.Env {
-			spec.Env[e.Name] = e.Value
+func acpMCPServer(s acp.McpServer, sessionID string) (spec config.MCPConfig, name, server string, ok bool) {
+	switch {
+	case s.Stdio != nil:
+		spec = config.MCPConfig{
+			Type:    config.MCPStdio,
+			Command: s.Stdio.Command,
+			Args:    s.Stdio.Args,
 		}
+		if len(s.Stdio.Env) > 0 {
+			spec.Env = make(map[string]string, len(s.Stdio.Env))
+			for _, e := range s.Stdio.Env {
+				spec.Env[e.Name] = e.Value
+			}
+		}
+		server = s.Stdio.Name
+	case s.Http != nil:
+		spec = config.MCPConfig{
+			Type:    config.MCPHttp,
+			URL:     s.Http.Url,
+			Headers: headers(s.Http.Headers),
+		}
+		server = s.Http.Name
+	case s.Sse != nil:
+		spec = config.MCPConfig{
+			Type:    config.MCPSSE,
+			URL:     s.Sse.Url,
+			Headers: headers(s.Sse.Headers),
+		}
+		server = s.Sse.Name
+	default:
+		return config.MCPConfig{}, "", "", false
 	}
-	return spec, mcp.ACPServerName(sessionID, s.Stdio.Name), true
+	return spec, mcp.ACPServerName(sessionID, server), server, true
+}
+
+// headers flattens protocol headers into Crush's header map.
+func headers(in []acp.HttpHeader) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for _, h := range in {
+		out[h.Name] = h.Value
+	}
+	return out
 }

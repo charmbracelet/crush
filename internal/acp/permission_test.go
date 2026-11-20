@@ -216,6 +216,16 @@ func (c *acceptingTestClient) ReleaseTerminal(_ context.Context, _ acp.ReleaseTe
 	return acp.ReleaseTerminalResponse{}, nil
 }
 
+func (c *acceptingTestClient) CreateElicitation(_ context.Context, _ acp.CreateElicitationRequest) (acp.CreateElicitationResponse, error) {
+	return acp.CreateElicitationResponse{
+		Cancel: &acp.CreateElicitationCancel{Action: "cancel"},
+	}, nil
+}
+
+func (c *acceptingTestClient) CompleteElicitation(_ context.Context, _ acp.CompleteElicitationNotification) error {
+	return nil
+}
+
 func (c *acceptingTestClient) KillTerminal(_ context.Context, _ acp.KillTerminalRequest) (acp.KillTerminalResponse, error) {
 	return acp.KillTerminalResponse{}, nil
 }

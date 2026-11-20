@@ -129,7 +129,8 @@ func TestEventBridge_ToolResultStreaming(t *testing.T) {
 		if sawContent == nil {
 			sawContent = make(map[string]string)
 		}
-		for _, c := range u.ToolCallUpdate.Content {
+		content, _ := u.ToolCallUpdate.Content.Value()
+		for _, c := range content {
 			if c.Content != nil && c.Content.Content.Text != nil {
 				sawContent[string(u.ToolCallUpdate.ToolCallId)] = c.Content.Content.Text.Text
 			}
@@ -193,12 +194,13 @@ func TestEventBridge_ToolResultFailedStatus(t *testing.T) {
 			t.Fatalf("no tool_call_update %d received", i)
 		}
 		require.NotNil(t, u.ToolCallUpdate)
-		require.NotNil(t, u.ToolCallUpdate.Status, "terminal status must be reported")
+		status, ok := u.ToolCallUpdate.Status.Value()
+		require.True(t, ok, "terminal status must be reported")
 		switch string(u.ToolCallUpdate.ToolCallId) {
 		case "call-err":
-			require.Equal(t, acp.ToolCallStatusFailed, *u.ToolCallUpdate.Status)
+			require.Equal(t, acp.ToolCallStatusFailed, status)
 		case "call-ok":
-			require.Equal(t, acp.ToolCallStatusCompleted, *u.ToolCallUpdate.Status)
+			require.Equal(t, acp.ToolCallStatusCompleted, status)
 		}
 	}
 }
@@ -251,6 +253,9 @@ func TestEventBridge_ToolCallEnrichment(t *testing.T) {
 	require.True(t, filepath.IsAbs(u.ToolCall.Locations[0].Path))
 	require.NotNil(t, u.ToolCall.RawInput)
 	require.Contains(t, u.ToolCall.Title, "View")
+	// The programmatic tool name is a SHOULD on tool_call (tool-calls.md:167).
+	require.NotNil(t, u.ToolCall.Name)
+	require.Equal(t, "view", *u.ToolCall.Name)
 }
 
 // TestEventBridge_PromptMetaEcho verifies the _meta object captured from a
@@ -269,16 +274,22 @@ func TestEventBridge_PromptMetaEcho(t *testing.T) {
 	srv := NewServer(app, log, c2aR, a2cW)
 	b := newEventBridge(srv.conn, app, log)
 
-	b.SetPromptMeta("sess-1", map[string]any{"traceparent": "tp"})
+	meta1, err := acp.NewMeta(map[string]any{"traceparent": "tp"})
+	require.NoError(t, err)
+	b.SetPromptMeta("sess-1", meta1)
 
 	n := b.note("sess-1", acp.UpdateAgentMessageText("hi"))
-	require.Equal(t, "tp", n.Meta["traceparent"])
+	var tp string
+	require.NoError(t, n.Meta.Get("traceparent", &tp))
+	require.Equal(t, "tp", tp)
 
 	n = b.note("sess-2", acp.UpdateAgentMessageText("hi"))
 	require.Empty(t, n.Meta)
 
 	// Run completion clears the recorded meta.
-	b.SetPromptMeta("sess-1", map[string]any{"k": "v"})
+	meta2, err := acp.NewMeta(map[string]any{"k": "v"})
+	require.NoError(t, err)
+	b.SetPromptMeta("sess-1", meta2)
 	cc := &captureClient{ch: make(chan acp.SessionUpdate, 8)}
 	client := acp.NewClientSideConnection(cc, c2aW, a2cR)
 	go func() {
@@ -409,10 +420,14 @@ func TestEventBridge_DiffContentForEdit(t *testing.T) {
 		case <-time.After(2 * time.Second):
 			t.Fatal("no update received")
 		}
-		if u.ToolCallUpdate == nil || u.ToolCallUpdate.Content == nil {
+		if u.ToolCallUpdate == nil {
 			continue
 		}
-		for _, c := range u.ToolCallUpdate.Content {
+		content, _ := u.ToolCallUpdate.Content.Value()
+		if len(content) == 0 {
+			continue
+		}
+		for _, c := range content {
 			if c.Diff == nil {
 				continue
 			}

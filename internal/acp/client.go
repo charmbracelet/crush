@@ -258,33 +258,33 @@ func (cc *crushClient) ReadTextFile(_ context.Context, params acp.ReadTextFileRe
 		// the spec answers with -32002 rather than a generic failure
 		// (error.md:38,60).
 		if errors.Is(err, fs.ErrNotExist) {
-			return acp.ReadTextFileResponse{}, &acp.RequestError{
-				Code:    acpErrorResourceNotFound,
-				Message: "Resource not found",
-				Data:    map[string]any{"path": params.Path},
-			}
+			return acp.ReadTextFileResponse{}, acp.NewRequestError(
+				acpErrorResourceNotFound,
+				"Resource not found",
+				map[string]any{"path": params.Path},
+			)
 		}
 		return acp.ReadTextFileResponse{}, fmt.Errorf("read file: %w", err)
 	}
 	content := string(data)
 	if params.Line != nil || params.Limit != nil {
 		lines := strings.Split(content, "\n")
-		start := 0
+		start := int64(0)
 		if params.Line != nil {
 			start = *params.Line - 1
 			if start < 0 {
 				start = 0
 			}
 		}
-		end := len(lines)
+		end := int64(len(lines))
 		if params.Limit != nil {
 			end = start + *params.Limit
-			if end > len(lines) {
-				end = len(lines)
+			if end > int64(len(lines)) {
+				end = int64(len(lines))
 			}
 		}
-		if start > len(lines) {
-			start = len(lines)
+		if start > int64(len(lines)) {
+			start = int64(len(lines))
 		}
 		content = strings.Join(lines[start:end], "\n")
 	}
@@ -328,17 +328,28 @@ func (cc *crushClient) ReleaseTerminal(_ context.Context, _ acp.ReleaseTerminalR
 	return acp.ReleaseTerminalResponse{}, fmt.Errorf("terminals not supported by Crush ACP client")
 }
 
+// CreateElicitation answers "cancel": Crush advertises no elicitation
+// capability, so a request here comes from an agent that ignored the
+// handshake. Cancelling is the spec's way to say the client did not handle it.
+func (cc *crushClient) CreateElicitation(_ context.Context, _ acp.CreateElicitationRequest) (acp.CreateElicitationResponse, error) {
+	return acp.CreateElicitationResponse{
+		Cancel: &acp.CreateElicitationCancel{Action: "cancel"},
+	}, nil
+}
+
+// CompleteElicitation acknowledges the end of a URL-based elicitation, which
+// Crush never starts.
+func (cc *crushClient) CompleteElicitation(_ context.Context, _ acp.CompleteElicitationNotification) error {
+	return nil
+}
+
 // parseToolCall extracts raw input from a tool call update as a map.
 func parseToolCall(update acp.SessionUpdate) (map[string]any, bool) {
-	if update.ToolCall == nil || update.ToolCall.RawInput == nil {
-		return nil, false
-	}
-	b, err := json.Marshal(update.ToolCall.RawInput)
-	if err != nil {
+	if update.ToolCall == nil || len(update.ToolCall.RawInput) == 0 {
 		return nil, false
 	}
 	var input map[string]any
-	if err := json.Unmarshal(b, &input); err != nil {
+	if err := json.Unmarshal(update.ToolCall.RawInput, &input); err != nil {
 		return nil, false
 	}
 	return input, true

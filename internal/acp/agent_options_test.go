@@ -21,20 +21,31 @@ func newTestAgent(stub *stubSessionService) *crushAgent {
 	}
 }
 
-func TestInitializeOmitsAdditionalDirectories(t *testing.T) {
-	// The capability is not advertised because Crush never enforces a root set
-	// (plan O23). Advertising it promised a scope that did not exist.
+func TestInitializeAdvertisesAdditionalDirectories(t *testing.T) {
+	// The capability is advertised only because Crush now enforces the root
+	// set the client supplies (session-setup.md:437-452).
 	a := newTestAgent(&stubSessionService{})
 	resp, err := a.Initialize(context.Background(), acp.InitializeRequest{
 		ProtocolVersion: acp.ProtocolVersionNumber,
 	})
 	require.NoError(t, err)
-	require.Nil(t, resp.AgentCapabilities.SessionCapabilities.AdditionalDirectories)
+	require.NotNil(t, resp.AgentCapabilities.SessionCapabilities.AdditionalDirectories)
 }
 
-func TestNewSessionIgnoresAdditionalDirectories(t *testing.T) {
-	// A client that sends roots anyway must not be rejected: the field is
-	// simply not applied.
+func TestInitializeAdvertisesMCPHttpAndSSE(t *testing.T) {
+	a := newTestAgent(&stubSessionService{})
+	resp, err := a.Initialize(context.Background(), acp.InitializeRequest{
+		ProtocolVersion: acp.ProtocolVersionNumber,
+	})
+	require.NoError(t, err)
+	mcpCaps := resp.AgentCapabilities.McpCapabilities
+	require.True(t, mcpCaps.Http, "http MCP servers are served")
+	require.True(t, mcpCaps.Sse, "sse MCP servers are served")
+}
+
+func TestNewSessionAppliesAdditionalDirectories(t *testing.T) {
+	// The roots a client asks for become part of the session's root set and
+	// are reported back on session/list (session-setup.md:437-444).
 	a := newTestAgent(&stubSessionService{})
 	resp, err := a.NewSession(context.Background(), acp.NewSessionRequest{
 		AdditionalDirectories: []string{"/extra1"},
@@ -45,7 +56,18 @@ func TestNewSessionIgnoresAdditionalDirectories(t *testing.T) {
 	list, err := a.ListSessions(context.Background(), acp.ListSessionsRequest{})
 	require.NoError(t, err)
 	require.Len(t, list.Sessions, 1)
-	require.Empty(t, list.Sessions[0].AdditionalDirectories)
+	require.Equal(t, []string{"/extra1"}, list.Sessions[0].AdditionalDirectories)
+}
+
+func TestNewSessionRejectsRelativeAdditionalDirectories(t *testing.T) {
+	// Every protocol path is absolute (overview.md:160).
+	a := newTestAgent(&stubSessionService{})
+	_, err := a.NewSession(context.Background(), acp.NewSessionRequest{
+		AdditionalDirectories: []string{"relative/dir"},
+	})
+	var reqErr *acp.RequestError
+	require.ErrorAs(t, err, &reqErr)
+	require.Equal(t, -32602, reqErr.Code)
 }
 
 func TestValidateCwd(t *testing.T) {
@@ -96,18 +118,18 @@ func TestRequireSessionTracksConnectionActiveSet(t *testing.T) {
 	require.Equal(t, -32002, reqErr.Code)
 }
 
-func TestUnstableDeleteSession(t *testing.T) {
+func TestDeleteSession(t *testing.T) {
 	// A session the store does not know deletes silently
 	// (session-delete.md:85).
 	stub := &stubSessionService{deleteErr: sql.ErrNoRows}
 	a := newTestAgent(stub)
-	_, err := a.UnstableDeleteSession(context.Background(), acp.UnstableDeleteSessionRequest{SessionId: "abc"})
+	_, err := a.DeleteSession(context.Background(), acp.DeleteSessionRequest{SessionId: "abc"})
 	require.NoError(t, err)
 
 	// A real failure still surfaces.
 	boom := errors.New("disk on fire")
 	stub.deleteErr = boom
-	_, err = a.UnstableDeleteSession(context.Background(), acp.UnstableDeleteSessionRequest{SessionId: "abc"})
+	_, err = a.DeleteSession(context.Background(), acp.DeleteSessionRequest{SessionId: "abc"})
 	require.ErrorIs(t, err, boom)
 }
 

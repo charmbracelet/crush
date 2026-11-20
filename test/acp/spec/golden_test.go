@@ -142,7 +142,7 @@ func TestGoldenContentBlocks(t *testing.T) {
 	t.Run("content_resource_link", runGolden(
 		func() acp.ContentBlock {
 			mt := "application/pdf"
-			sz := 1024000
+			sz := int64(1024000)
 			return acp.ContentBlock{ResourceLink: &acp.ContentBlockResourceLink{Type: "resource_link", Uri: "file:///home/user/document.pdf", Name: "document.pdf", MimeType: &mt, Size: &sz}}
 		},
 	))

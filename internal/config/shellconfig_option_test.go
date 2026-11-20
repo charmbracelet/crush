@@ -32,6 +32,18 @@ func TestShellConfigOptionPositiveMetricsBare(t *testing.T) {
 	require.False(t, store.Config().Options.DisableMetrics, "metrics on => disable_metrics false")
 }
 
+// "update-check false" must land as disable_update_check = true so no GitHub
+// request is made at startup.
+func TestShellConfigOptionUpdateCheckFalse(t *testing.T) {
+	store := loadCrushSh(t, `option update-check false`)
+	require.True(t, store.Config().Options.DisableUpdateCheck, "update-check off => disable_update_check true")
+}
+
+func TestShellConfigOptionUpdateCheckBare(t *testing.T) {
+	store := loadCrushSh(t, `option update-check`)
+	require.False(t, store.Config().Options.DisableUpdateCheck, "update-check on => disable_update_check false")
+}
+
 func TestShellConfigOptionUI(t *testing.T) {
 	store := loadCrushSh(t, `option ui compact true
 option ui diff split

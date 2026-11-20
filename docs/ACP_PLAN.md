@@ -3,8 +3,10 @@
 Crush implements the Agent Client Protocol as an **ACP Server** (Zed,
 JetBrains, Neovim drive it) and, secondarily, as an **ACP Client**
 (`crush acp connect` drives external agents). Spec:
-https://agentclientprotocol.com/protocol/v1/ — the v1 docs are vendored in
-`docs/acp/protocol/v1/` (22 files, scraped via `scripts/fetch_acp_docs.go`).
+https://agentclientprotocol.com/protocol/v1/ — the docs are vendored under
+`docs/acp/` by `scripts/fetch_acp_docs.go`; the normative v1 prose is the 22
+files in `docs/acp/protocol/v1/` (the rest of the tree is v2 drafts, RFDs,
+announcements and community pages, which are informational only).
 
 Status legend: ✅ done · ⚠️ partial/stub · ❌ not implemented.
 "MUST/SHOULD/MAY" follow the v1 spec wording. Item IDs (R/S/O/G/OQ) are
@@ -25,9 +27,15 @@ stable: tests, audits and commits cite them.
 | CLI Integration | `internal/cmd` | `crush acp` (server), `crush acp connect` (client) |
 | Client Track | `internal/acp/client.go` | `acp.Client` callbacks to drive external agents |
 
-Runtime SDK: `github.com/coder/acp-go-sdk` v0.13.5 (Coder; most active,
-complete v1 typed model, stdio + streaming helpers). `Tangerg/acp` v0.2.4 is
-a test-only fixture (Zed 1.17.2 transcript + 154 cross-SDK fixtures).
+Runtime SDK: `github.com/coder/acp-go-sdk` v0.20.0 (Coder; ACP schema
+1.32.0, stdio + streaming helpers). `Tangerg/acp` v0.2.4 is a test-only
+fixture (Zed 1.17.2 transcript + 154 cross-SDK fixtures).
+
+Upstream shipped v0.14.0 through v0.20.0 on 2026-11-18, walking the ACP
+schema from 0.13.5 to 1.32.0. The bump unblocks every item this plan used to
+call SDK-gated (§5.1) and forces a mechanical type migration (§5.3). The
+plan's conformance status below describes v0.13.5 code; §5.4 is the work
+that brings it to v0.20.0.
 
 ## 2. Protocol-level rules
 
@@ -134,9 +142,9 @@ used, none outside reserved ranges ✅.
 | `config_option_update` | MAY | ✅ on config change, complete state (S9) |
 | `session_info_update` | MAY | ✅ on `session/new` and whenever the stored title changes (the auto-generated title is announced) |
 | `usage_update` | MAY | ✅ at run completion; `used`/`size` non-null; cost has `amount`+`currency` |
-| `notice` | MAY, gated on `clientCapabilities.session.notices` | ❌ not emitted; SDK has no `session` field, and the MUST-NOT-without-gate rule is satisfied by omission |
-| `compaction_update` / `compaction_summary_chunk` | MAY, gated on `session.compaction`; replayed by load | ❌ not emitted, not replayable; same SDK gate |
-| `messageId` on chunks | MAY | ❌ SDK field exists but UNSTABLE |
+| `notice` | MAY, gated on `clientCapabilities.session.notices` | ⚠️ gate and update are modelled in SDK v0.20 (`ClientSessionCapabilities.Notices`, `SessionUpdateNotice`); not emitted yet (M-SDK-4) |
+| `compaction_update` / `compaction_summary_chunk` | MAY, gated on `session.compaction`; replayed by load | ⚠️ gate and both updates modelled in SDK v0.20; not emitted or replayable yet (M-SDK-4) |
+| `messageId` on chunks | MAY | ⚠️ stable since SDK v0.14 (`ContentChunk.MessageId`); not emitted yet (M-SDK-3) |
 
 ### 4.4 Content blocks
 
@@ -156,7 +164,7 @@ used, none outside reserved ranges ✅.
 | Emit `tool_call` + `tool_call_update` during execution | SHOULD | ✅ S1/S10 |
 | Tool kind taxonomy (10 kinds) | OPTIONAL | ✅ `toolKindFor` incl. `switch_mode` |
 | Tool content `content`/`diff`/`terminal` | SHOULD | ⚠️ `content` always; `diff` for edit/multiedit; `terminal` deferred (O8) |
-| Fields: `title` required; `name` SHOULD; `kind`/`status`/`locations`/`rawInput`/`rawOutput` optional | SHOULD (`name`) | ✅ all except `name` — the SDK types have no `Name` field (verified `types_gen.go`), so it needs an SDK bump |
+| Fields: `title` required; `name` SHOULD; `kind`/`status`/`locations`/`rawInput`/`rawOutput` optional | SHOULD (`name`) | ⚠️ `ToolCall.Name` is stable since SDK v0.17, with `WithStartName`/`WithUpdateName`; not emitted yet (M-SDK-3) |
 | All paths absolute (`tool-calls.md:307,353`) | MUST | ✅ `absPath`/`absPather` at `toolLocations`, `diffContentFor`, load replay |
 | `session/request_permission` with 4 option kinds | MUST when needed | ✅ `buildPermissionOptions` (O20/G1) |
 | Unrecognized outcome ≠ approval | SHOULD | ✅ `mapPermissionOutcome` allow-list (O20) |
@@ -165,8 +173,10 @@ used, none outside reserved ranges ✅.
 
 ### 4.6 Elicitation
 
-OPTIONAL. ❌ neither track: the SDK ships only `Unstable*` types and the
-client track does not implement `ClientExperimental`. Essentials for a future
+OPTIONAL. ⚠️ Decision pending (OQ-4). The SDK made elicitation stable in
+v0.16: `acp.Client` now requires `CreateElicitation`/`CompleteElicitation`,
+so the client track must answer them whether or not the feature ships (a
+`-32601` and a `nil` keep today's behaviour). Essentials for an
 implementation: `mode` discriminator required (form/url, no implicit default);
 form uses restricted JSON Schema and MUST NOT request secrets; URL mode needs
 a unique `elicitationId` + `elicitation/complete`, no url→form downgrade,
@@ -268,47 +278,103 @@ embeddedContext:true}`, `sessionCapabilities{close,delete,list,resume}`,
 empty; `additionalDirectories` was retracted (O23) precisely because it had
 no enforcement behind it.
 
-Not advertised, correctly so: `sessionCapabilities.systemPrompt` (SDK drops
-the field, G11), `additionalDirectories` (O23/OQ-1), any `mcpCapabilities`
-(no HTTP/SSE), elicitation and terminal auth (SDK-gated, and Crush has no
-auth session to terminate).
+Not advertised: `additionalDirectories` (O23/OQ-1), any `mcpCapabilities`
+(no HTTP/SSE), elicitation and terminal auth (Crush has no auth session to
+terminate). `sessionCapabilities.systemPrompt` was unadvertisable under
+v0.13.5 because the SDK dropped the field (G11); v0.20 models it, so it is
+now an open decision (OQ-5) rather than an SDK limit.
 
 ## 5. Open items
 
 Grouped by the actual blocker.
 
-### 5.1 SDK-gated (pinned v0.13.5)
+### 5.1 SDK-gated — empty after the v0.20 bump
 
-- Tool-call `name` field (SHOULD, 4.5) — no `Name` on SDK types.
-- `messageId` on chunks (MAY) — field UNSTABLE.
-- Elicitation (OPTIONAL) — only `Unstable*` variants.
-- `notice`/`compaction` gates (MAY) — `ClientCapabilities.session` not
-  modelled; omission keeps us conformant.
-- Boolean config-option client gate (MUST-not-emit) — unreadable; the spec's
-  `select` fallback is used instead, so the MUST holds.
+Every item this section used to list is now expressible in the SDK:
+
+| Was blocked | Unblocked by | New item |
+|---|---|---|
+| tool-call `name` | v0.17 (`ToolCall.Name`, `WithStartName`) | M-SDK-3 |
+| `messageId` on chunks | v0.14 (stable `MessageId`) | M-SDK-3 |
+| boolean config-option gate | v0.15 (`Session.ConfigOptions.Boolean`) | M-SDK-2 |
+| `notice` gate | v0.17 (`Session.Notices`) | M-SDK-4 |
+| `compaction` gate | v0.17 (`Session.Compaction`) | M-SDK-4 |
+| elicitation | v0.16 (stable client methods) | OQ-4 |
+| `systemPrompt` | v0.18 (`Session.SystemPrompt`) | OQ-5 |
+
+Nothing is SDK-gated any more. O8 terminals were never SDK-gated: the SDK
+ships protocol types, not a PTY.
 
 ### 5.2 Crush work
 
 - **AUTH-1 `authenticate`** (conditional MUST): register provider auth
   methods (copilot, hyper, openai) as `authMethods` entries with
   `type:"agent"` and trigger OAuth. Nothing is owed while `authMethods:[]`.
+  v0.20 adds an unstable `providers/*` surface
+  (`AgentUnstableListProviders`/`SetProvider`/`DisableProvider`) that could
+  drive this from the client, but it is outside v1 and not required.
 - **O8 terminals** (OPTIONAL): no PTY dependency; could be backed by
   `internal/shell` instead — re-evaluate if `crush acp connect` grows a
   terminal pane.
 
-### 5.3 Deliberate decisions (not gaps)
+### 5.3 SDK v0.20.0 migration (M-SDK)
+
+The bump is mechanical but wide: most breaks are compile errors in
+`internal/acp`, a few change wire behaviour silently and need a check.
+
+**M-SDK-1 — migrate to v0.20.0 types.** Required, no behaviour change
+intended.
+
+| Break | Sites | Fix |
+|---|---|---|
+| `acp.Agent` requires `DeleteSession` | `agent.go` `UnstableDeleteSession`, `server.go` interface + dispatcher | rename; `Unstable*` types removed |
+| `acp.Client` requires `CreateElicitation`/`CompleteElicitation` | `client.go` `crushClient` | `-32601` + `nil` until OQ-4 decides |
+| `_meta` is `acp.Meta` (`map[string]json.RawMessage`) | `withTraceMeta`, `event_bridge` prompt-meta map, `LoadSession` `send` | `acp.NewMeta`, `Meta.Set`/`Get` |
+| optional update fields are `acp.Patch[T]` | `permission.go` title, `sessionInfoUpdate`, `handleSessionEvent` | `acp.PatchSet`/`PatchFromPtr` |
+| `rawInput`/`rawOutput` are `json.RawMessage` | `toolRawInput`, `parseToolCall` | pass raw JSON; drop the marshal round-trip |
+| `*int` → `*int64` | `fsReadTextFile`, client `ReadTextFile` windowing | clamp in `int64` before slicing |
+| `RequestError` literals | `sessionNotFound`, `LoadSession`, client fs read | `acp.NewRequestError` |
+| `AgentExperimental`/`ClientExperimental` gone | none asserted today | one optional interface per method |
+
+**Silent changes to verify:** `WithUpdateContent`/`WithUpdateLocations` with
+an empty non-nil slice now sends `[]` (clears) — all call sites guard on
+`len()>0`; `WithStartLocations` may inject `rawInput.path`; `WithStartRawInput`
+no longer fails the send on an unencodable value; `RequestError` is no longer
+comparable.
+
+**M-SDK-2 — real boolean config option.** `thinking` becomes
+`type:"boolean"` when `clientCaps.Session.ConfigOptions.Boolean` is set, and
+stays a `select` otherwise. Closes the last MUST-adjacent workaround.
+
+**M-SDK-3 — tool `name` + `messageId`.** Emit `WithStartName`/`WithUpdateName`
+from `toolKindFor`'s sibling mapping, and a stable `MessageId` per message
+(turn-scoped for live, history-id for replay). Closes the last open SHOULD.
+
+**M-SDK-4 — notice + compaction emission.** Only when the corresponding
+`clientCaps.Session` gate is set, per the MUST-NOT rules. Notice candidates:
+run cancellation and permission denial. Compaction needs a Crush-side
+compaction event to forward; if none exists, the gate stays unadvertised and
+emission is correctly omitted.
+
+**Cleanup:** delete `internal/acp/protocol/jsonrpc.go`. It is a hand-rolled
+JSON-RPC 2.0 codec with no importers, superseded by the SDK transport.
+
+### 5.4 Deliberate decisions (not gaps)
 
 - `additionalDirectories` retracted rather than half-enforced (O23).
 - `thinking` is a `select` with on/off — the spec's own fallback
   (`session-config-options.md:209`); `req.Boolean` stays for cached clients.
+  Under v0.20 the boolean gate is readable, so the select becomes the
+  fallback rather than the only option (M-SDK-2).
 - No live-turn `user_message_chunk` echo (decision S2, §6).
 - Shell builtins (`provider`, `model`, `mcp`, …) are not advertised: they
   mutate crushrc config rather than produce a prompt. Two designs were
   weighed — parse `/<builtin>` from prompt text and dispatch via `shell.Run`
   with the `ConfigBuilder` on context (spec-idiomatic), or wrap each as a
   `tool_call` with `kind:"other"` (faster, loses slash-command UX).
-- YOLO as a config option, if ever added, must use the same select treatment
-  (it cannot ship as a boolean gate).
+- YOLO as a config option, if ever added, would be a boolean once the client
+  advertises `session.configOptions.boolean`, and a select otherwise
+  (M-SDK-2).
 - Mode switch is workspace-wide: two concurrent ACP sessions share one agent;
   `currentValue` stays truthful because it reads live state back. `plan`+
   `yolo` has no ACP id; selecting `plan` resets permissions to Normal, which
@@ -318,8 +384,11 @@ Grouped by the actual blocker.
 
 | ID | Date | Decision | Why |
 |---|---|---|---|
-| SDK | — | `coder/acp-go-sdk` v0.13.5 runtime; Tangerg test-only | most complete v1 model, stdio + helpers |
-| O2 | 11-17 | `thinking` as `select`, not `boolean` | boolean gate unreadable; spec names the select fallback; MUST holds |
+| SDK | — | `coder/acp-go-sdk` runtime; Tangerg test-only | most complete v1 model, stdio + helpers |
+| SDK-2 | 11-20 | bump to `acp-go-sdk` v0.20.0 (schema 1.32.0) | upstream stabilised every feature the plan called SDK-gated; one migration beats four |
+| OQ-4 | 11-20 | elicitation: not implemented yet | stable in the SDK, but Crush has no surface to ask a user; the client track answers `-32601` |
+| OQ-5 | 11-20 | `systemPrompt`: unadvertised for now | v0.20 models append/override; implementing `append` is cheap, `override` needs prompt-assembly work |
+| O2 | 11-17 | `thinking` as `select`, not `boolean` | superseded by SDK-2: gate was unreadable on v0.13.5; v0.20 reads it, so boolean returns and select becomes the fallback |
 | O23 | 11-17 | retract `additionalDirectories` (supersedes O3) | an advertised capability with no behaviour behind it is worse than none |
 | O24 | 11-17 | ACP-local command resolver | keeps the TUI untouched; drift risk is OQ-2 |
 | S2 | 09-17 | no live `user_message_chunk` echo | duplicates input the client holds; races the streaming path; load replay does emit (MUST) |
@@ -358,6 +427,20 @@ part that legitimately differs: the TUI collects arguments through a dialog,
 while a prompt binds them positionally from the trailing text (`splitCommand`,
 `bindArgs` in `internal/acp/commands.go`). The drift risk OQ-2 recorded is
 gone for substitution; argument collection is by design.
+
+**OQ-4 — elicitation (OPEN 11-20).** Stable in SDK v0.16, so the blocker is
+gone and the question is now a product one: Crush has no surface that asks a
+user to fill a form or open a URL on the Agent's behalf. Until one exists the
+client track answers `-32601` and the server track advertises no elicitation
+capability, which is conformant. Revisit if `crush acp connect` grows a
+prompting surface.
+
+**OQ-5 — `systemPrompt` (OPEN 11-20).** v0.18 models `append` and `override`.
+`append` is cheap: prepend the client's text to the assembled prompt.
+`override` replaces the system prompt entirely, which would drop the tool
+instructions and context files Crush depends on, so it needs its own design.
+Recommendation: advertise `systemPrompt` with `append` only when the append
+path is implemented.
 
 **OQ-3 — mode switching (RESOLVED 11-17).** The TUI's four-state ring is
 flattened into an ACP-only enum:
@@ -409,12 +492,24 @@ every run, `OutsideRoots` bounds `view`/`write`/`edit`/`multiedit` (outside a
 root needs a permission request) and `bash` always prompts when root-scoped
 (OQ-1 resolved). ACP installs a `tools.ClientFS` so `view` reads and `write`
 writes route through the client when it advertises fs (O12).
+- **2026-11-20** — SDK re-audit against v0.14.0–v0.20.0 release notes and the
+  v0.20.0 `types_gen.go`. All seven SDK-gated items are now expressible; §5.1
+  is empty and §5.3 records the migration (M-SDK-1..4). Status rows for
+  `name`, `messageId`, `notice`, `compaction`, `systemPrompt` and elicitation
+  were corrected from ❌ to ⚠️-pending: the blockers are gone, the work is
+  not done. No code changed in this pass.
 
-**Conformance position:** no MUST gap remains. The only SHOULD still open is
-`tool name` (SDK-gated). Two behavioural caveats remain: the select fallback
-for `thinking`, and remembered permission scope being the tool name rather
-than the command or directory. The root set is now enforced for path-touching
-tools, so `additionalDirectories` stays retracted (O23) and the set is `[cwd]`.
+**Conformance position (v0.13.5 code):** no MUST gap remains. The only SHOULD
+still open is `tool name`. Two behavioural caveats remain: the select
+fallback for `thinking`, and remembered permission scope being the tool name
+rather than the command or directory. The root set is now enforced for
+path-touching tools, so `additionalDirectories` stays retracted (O23) and the
+set is `[cwd]`.
+
+**Conformance position (after M-SDK):** `tool name` closes, so no SHOULD gap
+remains. `thinking` becomes a real boolean where the client advertises it.
+The remaining open items are decisions (OQ-4 elicitation, OQ-5 systemPrompt)
+and one optional feature (O8 terminals).
 
 ## 8. Tests
 

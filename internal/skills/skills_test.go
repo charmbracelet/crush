@@ -19,7 +19,7 @@ func TestParse(t *testing.T) {
 		wantDesc    string
 		wantLicense string
 		wantCompat  string
-		wantMeta    map[string]string
+		wantMeta    map[string]any
 		wantTools   string
 		wantInstr   string
 		wantErr     bool
@@ -45,8 +45,32 @@ Use this skill when the user needs to work with PDF files.
 			wantDesc:    "Extracts text and tables from PDF files, fills PDF forms, and merges multiple PDFs.",
 			wantLicense: "Apache-2.0",
 			wantCompat:  "Requires python 3.8+, pdfplumber, pdfrw libraries",
-			wantMeta:    map[string]string{"author": "example-org", "version": "1.0"},
+			wantMeta:    map[string]any{"author": "example-org", "version": "1.0"},
 			wantInstr:   "# PDF Processing\n\n## When to use this skill\nUse this skill when the user needs to work with PDF files.",
+		},
+		{
+			name: "metadata with non-string values",
+			content: `---
+name: ppt-master
+description: AI-driven presentation workflow for generating editable PPTX decks.
+metadata:
+  version: "6.3.2"
+  license: "MIT"
+  sponsors:
+    - "SPONSORS.md"
+    - "SPONSORS_CN.md"
+---
+
+# PPT Master Skill
+`,
+			wantName: "ppt-master",
+			wantDesc: "AI-driven presentation workflow for generating editable PPTX decks.",
+			wantMeta: map[string]any{
+				"version":  "6.3.2",
+				"license":  "MIT",
+				"sponsors": []any{"SPONSORS.md", "SPONSORS_CN.md"},
+			},
+			wantInstr: "# PPT Master Skill",
 		},
 		{
 			name: "minimal skill",

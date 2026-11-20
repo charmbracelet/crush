@@ -442,14 +442,7 @@ func executeBashCommand(ctx context.Context, params BashParams, execWorkingDir, 
 		return fantasy.WithResponseMetadata(fantasy.NewTextResponse(stdout), metadata), nil
 	}
 
-	// Register before checking the context so a concurrent session cancel
-	// reaches the job either here or through the background manager.
-	bgManager.MarkAutoBackgrounded(bgShell.ID, GetSessionFromContext(ctx))
-	if err := ctx.Err(); err != nil {
-		_ = bgManager.Kill(ctx, bgShell.ID)
-		return fantasy.ToolResponse{}, err
-	}
-
+	// Still running - keep as background job
 	metadata := BashResponseMetadata{
 		StartTime:        startTime.UnixMilli(),
 		EndTime:          time.Now().UnixMilli(),

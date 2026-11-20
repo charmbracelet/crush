@@ -45,7 +45,6 @@ import (
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
-	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/skills"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
@@ -1667,7 +1666,6 @@ func (c *coordinator) Cancel(sessionID string) {
 		}
 	}
 	c.currentAgent().Cancel(sessionID)
-	shell.GetBackgroundShellManager().CancelAutoBackgrounded(c.shellOwner, sessionID)
 }
 
 // CancelAll stops everything, detached subagents included. It is the

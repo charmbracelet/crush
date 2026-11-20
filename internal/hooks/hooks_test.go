@@ -411,6 +411,23 @@ func TestRunnerMatcherFiltering(t *testing.T) {
 		require.Equal(t, DecisionNone, result.Decision)
 	})
 
+	// Matchers written against pre-rename MCP names keep firing.
+	t.Run("matches legacy or current MCP name", func(t *testing.T) {
+		t.Parallel()
+		for _, matcher := range []string{"^mcp_github_", "^mcp__github__", "^mcp_github_get_me$"} {
+			r := newTestRunner(t, []HookConfig{
+				{Command: `echo '{"decision":"deny","reason":"blocked"}'`, Matcher: matcher},
+			})
+			result := r.Run(context.Background(), preToolEvent("mcp__github__get_me", `{}`))
+			require.Equal(t, DecisionDeny, result.Decision, "matcher %q", matcher)
+		}
+		r := newTestRunner(t, []HookConfig{
+			{Command: `echo '{"decision":"deny","reason":"blocked"}'`, Matcher: "^mcp_gitlab_"},
+		})
+		result := r.Run(context.Background(), preToolEvent("mcp__github__get_me", `{}`))
+		require.Equal(t, DecisionNone, result.Decision)
+	})
+
 	// Runner must compile matchers itself; it cannot rely on
 	// ValidateHooks having run first. This is the guarantee that prevents
 	// the reload-drops-matcher class of bug.

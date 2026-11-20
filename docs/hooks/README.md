@@ -191,6 +191,14 @@ event name is a config error.
 `^(edit|write)$`, `^mcp_`). Omit it to match every tool. It is only accepted on
 the events that carry a tool name; configuring one elsewhere is a config error.
 
+**MCP tool names.** MCP tools are named `mcp__<server>__<tool>`. Characters
+outside `[a-zA-Z0-9_-]` become `_`, and a name that had to be cleaned or
+shortened to 64 characters ends in `__` and a short hash (`docker.io`'s `list`
+becomes something like `mcp__docker_io__list__1a2b3c`). Earlier releases used
+`mcp_<server>_<tool>`. Matchers written against that old spelling keep matching
+tools whose names didn't need cleaning. `tool_name` and `CRUSH_TOOL_NAME` carry
+only the new name.
+
 **Scope**: tool and turn events only fire for the **top-level agent**.
 Subagents (the task tool, `agentic_fetch`, and friends) fire none of them,
 so a notification hook on `TurnEnd` speaks once per prompt rather than once

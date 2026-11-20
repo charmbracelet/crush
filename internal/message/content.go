@@ -16,6 +16,7 @@ import (
 	"charm.land/fantasy/providers/anthropic"
 	"charm.land/fantasy/providers/google"
 	"charm.land/fantasy/providers/openai"
+	"github.com/charmbracelet/crush/internal/mcpname"
 	"github.com/charmbracelet/crush/internal/stringext"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -710,10 +711,11 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 		if strings.TrimSpace(text) != "" {
 			parts = append(parts, fantasy.TextPart{Text: text})
 		}
+		// Saved names may predate tool-name cleaning.
 		for _, call := range m.ToolCalls() {
 			parts = append(parts, fantasy.ToolCallPart{
 				ToolCallID:       call.ID,
-				ToolName:         call.Name,
+				ToolName:         mcpname.WireSafe(call.Name),
 				Input:            toolCallInput(call.Input),
 				ProviderExecuted: call.ProviderExecuted,
 			})

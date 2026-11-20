@@ -52,7 +52,10 @@ var (
 
 // DefaultCreateGrace is the window in which a client must open an SSE
 // stream after creating a workspace before its creation hold is
-// released. Exposed as a package variable so tests can shorten it.
+// released. An explicitly started server disables this and its other
+// automatic workspace reaping with [Backend.DisableWorkspaceAutoClose],
+// allowing work to continue headlessly after the creating client exits.
+// Exposed as a package variable so tests can shorten it.
 var DefaultCreateGrace = 30 * time.Second
 
 // DefaultIdleShutdownDelay is how long the server stays alive after its
@@ -123,6 +126,12 @@ type Backend struct {
 	// stopped; one spawned on demand by a client keeps the default.
 	// Guarded by mu.
 	idleShutdown bool
+	// autoClose, when true (the default), lets client claims expire and
+	// releases workspaces once their last claim is gone. It is cleared on
+	// a server started explicitly with `crush server`, where a headless
+	// caller may exit after starting work that must keep running. Guarded
+	// by mu.
+	autoClose bool
 	// closing latches the decision to exit. Every site that commits to
 	// a shutdown sets it while still holding mu, because shutdownFn has
 	// to run unlocked; CreateWorkspace refuses once it is set. That
@@ -334,6 +343,7 @@ func New(ctx context.Context, cfg *config.ConfigStore, shutdownFn ShutdownFunc) 
 		lingerDelay:  idleShutdownDelayFromEnv(),
 		detachGrace:  durationFromEnv("CRUSH_SERVER_DETACH_GRACE", DefaultDetachGrace),
 		idleShutdown: true,
+		autoClose:    true,
 	}
 	b.startChannelRouter()
 	return b
@@ -395,6 +405,19 @@ func (b *Backend) DisableIdleShutdown() {
 	defer b.mu.Unlock()
 	b.idleShutdown = false
 	b.cancelShutdownLocked()
+}
+
+// DisableWorkspaceAutoClose keeps hosted workspaces open after their
+// client claims go away. Creation holds no longer expire, interrupted
+// streams no longer tear the workspace down, and retired clients do not
+// release their claims. Workspaces remain hosted until they are deleted
+// explicitly or the server shuts down, which is what an explicitly
+// started server needs for headless work. Intended to be called before
+// the server starts serving.
+func (b *Backend) DisableWorkspaceAutoClose() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.autoClose = false
 }
 
 // GetWorkspace retrieves a workspace by ID.
@@ -723,6 +746,10 @@ func (b *Backend) admitLocked(clientID string) error {
 // first and this call releases its claim, or it arrives later and is
 // refused, registering nothing.
 //
+// When workspace auto-close is disabled, retirement only records the client
+// so later creates are refused; existing claims and their runs remain alive
+// for headless work.
+//
 // Idempotent. Lock order is the canonical b.mu -> ws.clientsMu; teardowns
 // for workspaces the client was last on run after b.mu is released and
 // re-check under both locks.
@@ -736,6 +763,10 @@ func (b *Backend) RetireClient(clientID string) error {
 		b.retired = make(map[string]struct{})
 	}
 	b.retired[clientID] = struct{}{}
+	if !b.autoClose {
+		b.mu.Unlock()
+		return nil
+	}
 	var orphaned []*Workspace
 	viewing := make(map[*Workspace]string)
 	for _, ws := range b.workspaces.Seq2() {
@@ -787,17 +818,29 @@ func (b *Backend) releaseHold(workspaceID, clientID string) error {
 // back. The re-arm installs a fresh clientState rather than resetting the
 // old timer, so an already-fired timer racing this call fails expireHold's
 // identity check instead of killing the new claim.
+//
+// When workspace auto-close is disabled, the claim has no expiry timer and
+// remains until the workspace is explicitly released or the server shuts
+// down.
 func (b *Backend) registerClient(ws *Workspace, clientID string) {
 	ws.clientsMu.Lock()
 	defer ws.clientsMu.Unlock()
 	if old, ok := ws.clients[clientID]; ok {
 		old.released = false
-		if old.holdTimer == nil {
-			// Live streams hold the claim; nothing to re-arm.
+		if old.holdTimer != nil {
+			old.holdTimer.Stop()
+			old.holdTimer = nil
+		}
+		if !b.autoClose || old.streams > 0 {
+			// Either the claim is permanent, or live streams already hold
+			// it; nothing to re-arm.
 			return
 		}
-		old.holdTimer.Stop()
 		ws.clients[clientID] = b.newHeldClient(ws, clientID, old.currentSessionID, old.sessionReported, b.createGrace)
+		return
+	}
+	if !b.autoClose {
+		ws.clients[clientID] = &clientState{}
 		return
 	}
 	ws.clients[clientID] = b.newHeldClient(ws, clientID, "", false, b.createGrace)
@@ -816,7 +859,16 @@ func (b *Backend) newHeldClient(ws *Workspace, clientID, sessionID string, repor
 // expireHold is the body of the grace timer. It runs in its own
 // goroutine and races against AttachClient/releaseHold; the timer
 // stays valid only while the entry's holdTimer still points at it.
+// If workspace auto-close was disabled after the timer was armed, the
+// timer is harmless.
 func (b *Backend) expireHold(ws *Workspace, clientID string, timer *clientState) {
+	b.mu.Lock()
+	if !b.autoClose {
+		b.mu.Unlock()
+		return
+	}
+	b.mu.Unlock()
+
 	ws.clientsMu.Lock()
 	cs, ok := ws.clients[clientID]
 	if !ok || cs != timer || cs.holdTimer == nil || cs.streams > 0 {
@@ -867,6 +919,7 @@ func (b *Backend) releaseHoldLocked(ws *Workspace, clientID string) {
 func (b *Backend) detachStream(ws *Workspace, clientID string) {
 	b.mu.Lock()
 	grace := b.detachGrace
+	autoClose := b.autoClose
 	b.mu.Unlock()
 
 	ws.clientsMu.Lock()
@@ -881,6 +934,13 @@ func (b *Backend) detachStream(ws *Workspace, clientID string) {
 	teardown := false
 	viewing := ""
 	if cs.streams == 0 && cs.holdTimer == nil {
+		if !autoClose && !cs.released {
+			// The workspace is owned by the explicitly started server, not
+			// the disconnected client. Keep its claim so headless work can
+			// continue after the client goes away.
+			ws.clientsMu.Unlock()
+			return
+		}
 		if grace > 0 && !cs.released {
 			// The stream dropped without the client releasing its claim, so
 			// treat it as an interruption rather than an exit: hold the

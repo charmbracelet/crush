@@ -149,6 +149,15 @@ func (s *Server) DisableIdleShutdown() {
 	s.backend.DisableIdleShutdown()
 }
 
+// DisableWorkspaceAutoClose keeps workspaces hosted after their clients
+// disconnect, retire, or fail to attach before the creation grace expires.
+// An explicitly started server hosts headless work whose creating process
+// may exit; workspaces stay open until explicitly deleted or the server
+// shuts down. A server spawned on demand retains lifecycle-based reaping.
+func (s *Server) DisableWorkspaceAutoClose() {
+	s.backend.DisableWorkspaceAutoClose()
+}
+
 // Backend returns the server's backend. Intended for integration tests
 // that drive lifecycle transitions (detach, grace tuning) against a live
 // HTTP surface.

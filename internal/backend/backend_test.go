@@ -34,6 +34,7 @@ func newTestBackend(t *testing.T) (*Backend, *atomic.Int32) {
 		ctx:          context.Background(),
 		createGrace:  50 * time.Millisecond,
 		idleShutdown: true,
+		autoClose:    true,
 		shutdownFn:   func() { shutdownCount.Add(1) },
 	}
 	return b, &shutdownCount
@@ -1533,6 +1534,52 @@ func TestServer_DisabledIdleShutdownKeepsServerUp(t *testing.T) {
 	require.Never(t, func() bool { return shutdownCount.Load() > 0 },
 		500*time.Millisecond, 10*time.Millisecond,
 		"a server with idle shutdown disabled must stay up when idle")
+}
+
+// TestDisableWorkspaceAutoClose_KeepsHeadlessWork covers a server started
+// explicitly with `crush server`: neither an expired creation hold, a
+// detached stream, nor a retired client may close the workspace. Explicit
+// deletion still does.
+func TestDisableWorkspaceAutoClose_KeepsHeadlessWork(t *testing.T) {
+	t.Parallel()
+
+	b, serverShutdowns := newTestBackend(t)
+	b.DisableIdleShutdown()
+	b.DisableWorkspaceAutoClose()
+	b.createGrace = time.Millisecond
+	b.SetDetachGrace(time.Millisecond)
+
+	ws, wsShutdowns := insertTestWorkspace(t, b, "/tmp/headless-work")
+	cid := newClientID(t)
+
+	b.registerClient(ws, cid)
+	time.Sleep(50 * time.Millisecond)
+
+	require.NoError(t, b.AttachClient(ws.ID, cid))
+	b.DetachClient(ws.ID, cid)
+	time.Sleep(50 * time.Millisecond)
+
+	require.NoError(t, b.RetireClient(cid))
+	time.Sleep(50 * time.Millisecond)
+
+	_, err := b.GetWorkspace(ws.ID)
+	require.NoError(t, err, "the workspace must remain open for headless work")
+	ws.clientsMu.Lock()
+	_, claimExists := ws.clients[cid]
+	ws.clientsMu.Unlock()
+	require.True(t, claimExists, "the retired client's claim must remain")
+	require.Zero(t, wsShutdowns.Load(), "the workspace must not be torn down")
+	require.Zero(t, serverShutdowns.Load(), "the server must remain open")
+
+	require.NoError(t, b.DeleteWorkspace(ws.ID, cid))
+	require.Eventually(t, func() bool {
+		_, err := b.GetWorkspace(ws.ID)
+		return errors.Is(err, ErrWorkspaceNotFound)
+	}, time.Second, 10*time.Millisecond,
+		"an explicit delete must still release the workspace")
+	require.Equal(t, int32(1), wsShutdowns.Load())
+	require.Zero(t, serverShutdowns.Load(),
+		"deleting the last workspace must not shut down an explicitly started server")
 }
 
 // -- Detach grace --

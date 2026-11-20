@@ -391,6 +391,40 @@ func (c *controllerV1) handlePostWorkspaceMCPReadResource(w http.ResponseWriter,
 	jsonEncode(w, contents)
 }
 
+// handleGetWorkspaceMCPTools returns the tools each connected MCP server
+// offers.
+func (c *controllerV1) handleGetWorkspaceMCPTools(w http.ResponseWriter, r *http.Request) {
+	tools, err := c.backend.ListMCPTools(r.PathValue("id"))
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	jsonEncode(w, tools)
+}
+
+// handlePostWorkspaceMCPCallTool calls a tool on a connected MCP server.
+func (c *controllerV1) handlePostWorkspaceMCPCallTool(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	var req proto.MCPCallToolRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		c.server.logError(r, "Failed to decode request", "error", err)
+		jsonError(w, http.StatusBadRequest, "failed to decode request")
+		return
+	}
+	if req.Name == "" || req.Tool == "" {
+		jsonError(w, http.StatusBadRequest, "name and tool are required")
+		return
+	}
+
+	result, err := c.backend.CallMCPTool(r.Context(), id, req.Name, req.Tool, req.Arguments)
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	jsonEncode(w, result)
+}
+
 // handleGetWorkspaceMCPPrompts returns the available MCP prompts for a workspace.
 func (c *controllerV1) handleGetWorkspaceMCPPrompts(w http.ResponseWriter, r *http.Request) {
 	prompts, err := c.backend.ListMCPPrompts(r.PathValue("id"))

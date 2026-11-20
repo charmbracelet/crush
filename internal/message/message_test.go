@@ -557,6 +557,61 @@ func TestFlush_WaitsForInFlightWrite(t *testing.T) {
 	require.Equal(t, "payload", got.Content().Text)
 }
 
+// TestUpdate_DuringTimerFlushIsWritten asserts that a delta arriving while
+// a timer-fired flush writes is written and published too, without waiting
+// for a later Update or Flush. The delta cannot arm its own timer while the
+// write runs, so the flusher must schedule one.
+func TestUpdate_DuringTimerFlushIsWritten(t *testing.T) {
+	t.Parallel()
+
+	conn, err := db.Connect(t.Context(), t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	q := db.New(conn)
+	sess, err := session.NewService(q, conn).Create(t.Context(), "test")
+	require.NoError(t, err)
+
+	slow := &slowUpdateQuerier{
+		Querier: q,
+		release: make(chan struct{}),
+		started: make(chan struct{}),
+	}
+	const debounce = 10 * time.Millisecond
+	svc := NewService(slow, WithDebounce(debounce))
+
+	subCtx, cancelSub := context.WithCancel(t.Context())
+	defer cancelSub()
+	collector := collect(subCtx, svc.Subscribe(subCtx))
+
+	msg, err := svc.Create(t.Context(), sess.ID, CreateMessageParams{Role: Assistant})
+	require.NoError(t, err)
+	collector.dropCreated(t)
+	msg.AppendContent("first")
+	require.NoError(t, svc.Update(t.Context(), msg))
+
+	select {
+	case <-slow.started:
+	case <-time.After(time.Second):
+		t.Fatal("timer-fired flush never reached UpdateMessage")
+	}
+	msg.AppendContent(" second")
+	require.NoError(t, svc.Update(t.Context(), msg))
+	// Outlast the debounce window, so a timer armed by the Update itself
+	// would fire during the write and give up.
+	time.Sleep(5 * debounce)
+	close(slow.release)
+
+	require.Eventually(t, func() bool {
+		got, err := q.GetMessage(t.Context(), msg.ID)
+		return err == nil && strings.Contains(got.Parts, "first second")
+	}, time.Second, 5*time.Millisecond, "the delta made during the write was never written")
+	require.Eventually(t, func() bool {
+		events := collector.snapshot()
+		return len(events) > 0 && events[len(events)-1].Payload.Content().Text == "first second"
+	}, time.Second, 5*time.Millisecond, "the delta made during the write was never published")
+}
+
 // TestFlushAll_WaitsForInFlightWrite asserts FlushAll picks up IDs
 // whose buffer is currently flushing (dirty=false) so shutdown and
 // session-switch callers don't return while an SQL write is mid-flight.

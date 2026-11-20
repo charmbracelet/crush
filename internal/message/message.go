@@ -298,18 +298,23 @@ func (s *service) Update(ctx context.Context, msg Message) error {
 	}
 
 	// Debounce: schedule a single flush per pending state. If a flush
-	// is already running we let it finish; the trailing dirty bit will
-	// be picked up by the next Update or by Flush.
+	// is already running we let it finish; it writes or schedules the
+	// trailing dirty bit, unless its write fails.
 	if p.timer == nil && !p.flushing {
-		id := msg.ID
-		p.timer = time.AfterFunc(s.debounce, func() {
-			// Detached from caller ctx so a cancelled stream context
-			// does not strand the buffered write.
-			_ = s.flushOne(context.Background(), id, false)
-		})
+		s.scheduleFlush(p, msg.ID)
 	}
 	s.mu.Unlock()
 	return nil
+}
+
+// scheduleFlush arms p's debounce timer. The caller holds s.mu and has
+// checked that p.timer is nil, or the old timer would leak.
+func (s *service) scheduleFlush(p *pendingState, id string) {
+	p.timer = time.AfterFunc(s.debounce, func() {
+		// Detached from caller ctx so a cancelled stream context
+		// does not strand the buffered write.
+		_ = s.flushOne(context.Background(), id, false)
+	})
 }
 
 // Flush implements [Service.Flush].
@@ -413,6 +418,12 @@ func (s *service) flushOne(ctx context.Context, id string, syncCaller bool) erro
 			// latest here would pin every finished message's parts
 			// for the life of the process.
 			p.latest = Message{}
+		}
+		// A delta that arrived during the SQL write could not arm its
+		// own timer, so schedule one for it here. A sync caller writes
+		// it itself below.
+		if wasDirty && err == nil && !syncCaller && p.timer == nil {
+			s.scheduleFlush(p, id)
 		}
 		s.mu.Unlock()
 

@@ -12,6 +12,7 @@ import (
 // page the user visits could otherwise read workspace environments and run
 // shell commands. Browsers cannot reach a Unix socket or a named pipe, so
 // requests over those pass through untouched, whatever Host they carry.
+// So do requests over a dial tunnel, which the bridge has authenticated.
 //
 // The Host check defeats DNS rebinding: a page on a domain the attacker
 // controls that re-resolves its own name to this machine is same-origin
@@ -21,7 +22,7 @@ import (
 // text/plain body, which browsers send without a CORS preflight. Clients
 // other than browsers normally send neither header.
 func (s *Server) crossOriginHandler(next http.Handler) http.Handler {
-	if s.network == "unix" || s.network == "npipe" {
+	if s.network == "unix" || s.network == "npipe" || s.network == NetworkDial {
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

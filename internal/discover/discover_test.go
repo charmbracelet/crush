@@ -39,6 +39,51 @@ func TestDiscoverModels(t *testing.T) {
 	require.Equal(t, "model-b", models[1].ID)
 }
 
+func TestDiscoverModels_EnrichesFromNonStandardFields(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"data": [
+				{
+					"id": "poolside/laguna-s-2.1",
+					"object": "model",
+					"owned_by": "poolside",
+					"context_length": 1048576,
+					"max_completion_tokens": 65536
+				},
+				{
+					"id": "bare/model",
+					"object": "model",
+					"owned_by": "bare"
+				}
+			]
+		}`))
+	}))
+	defer server.Close()
+
+	cfg := Config{
+		ID:      "test",
+		BaseURL: server.URL + "/v1",
+		APIKey:  "test-key",
+	}
+
+	models, err := DiscoverModels(context.Background(), cfg, &mockResolver{})
+	require.NoError(t, err)
+	require.Len(t, models, 2)
+
+	// Model with non-standard context_length and max_completion_tokens
+	// fields should have them populated.
+	require.Equal(t, "poolside/laguna-s-2.1", models[0].ID)
+	require.Equal(t, int64(1048576), models[0].ContextWindow)
+	require.Equal(t, int64(65536), models[0].DefaultMaxTokens)
+
+	// Model without those fields should leave ContextWindow and
+	// DefaultMaxTokens at their zero values (backward compatible).
+	require.Equal(t, "bare/model", models[1].ID)
+	require.Equal(t, int64(0), models[1].ContextWindow)
+	require.Equal(t, int64(0), models[1].DefaultMaxTokens)
+}
+
 func TestDiscoverModels_ExistingModelsWin(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

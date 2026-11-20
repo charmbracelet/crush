@@ -52,6 +52,10 @@ func setupChild(t *testing.T) {
 	logFile := filepath.Join(t.TempDir(), "crush.log")
 	Setup(logFile, os.Getenv("CRUSH_LOG_TEST_DEBUG") == "true")
 
+	// Close the log file before TempDir cleanup removes it: on Windows,
+	// open files cannot be deleted.
+	t.Cleanup(func() { _ = file.Close() })
+
 	slog.Info("ModelProvider called")
 
 	got, err := os.ReadFile(logFile)

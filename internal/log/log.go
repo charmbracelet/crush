@@ -109,6 +109,17 @@ func (f *switchableFile) set(path string) error {
 	return prev.Close()
 }
 
+// Close closes the file written so far, so this process no longer holds it
+// open. A later write reopens the file.
+func (f *switchableFile) Close() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.w == nil {
+		return nil
+	}
+	return f.w.Close()
+}
+
 // modulePath is the path prefix source paths are trimmed to.
 const modulePath = "github.com/charmbracelet/crush/"
 

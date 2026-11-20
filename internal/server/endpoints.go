@@ -464,6 +464,16 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 			Fails(404, 500).
 			Handle(c.handleGetWorkspaceAgentSessionPromptQueued),
 
+		apigen.Get("/v1/workspaces/{id}/agent/sessions/{sid}/jobs/running").
+			Summary("Get running background jobs").
+			Description("Returns the number of background shells the agent has running for the session's tree.").
+			Tags("agent").
+			PathParam("id", "Workspace ID").
+			PathParam("sid", "Session ID").
+			Responds(0).
+			Fails(404, 500).
+			Handle(c.handleGetWorkspaceAgentSessionRunningJobs),
+
 		apigen.Get("/v1/workspaces/{id}/agent/sessions/{sid}/prompts/list").
 			Summary("List queued prompts").
 			Tags("agent").

@@ -78,6 +78,8 @@ func (w *countingWorkspace) AgentQueuedPrompts(string) int {
 	return len(w.queued)
 }
 
+func (w *countingWorkspace) AgentRunningBackgroundJobs(string) int { return 0 }
+
 func (w *countingWorkspace) AgentQueuedPromptsList(string) []string {
 	w.queueListCalls++
 	return w.queued

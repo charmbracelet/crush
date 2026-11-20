@@ -26,7 +26,7 @@ type JobKillResponseMetadata struct {
 	Description string `json:"description"`
 }
 
-func NewJobKillTool() fantasy.AgentTool {
+func NewJobKillTool(jobs BackgroundJobs) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		JobKillToolName,
 		jobKillDescription,
@@ -37,7 +37,11 @@ func NewJobKillTool() fantasy.AgentTool {
 
 			bgManager := shell.GetBackgroundShellManager()
 
-			bgShell, ok := bgManager.Get(params.ShellID)
+			scope, err := jobs.Scope(ctx)
+			if err != nil {
+				return fantasy.NewTextErrorResponse(err.Error()), nil
+			}
+			bgShell, ok := bgManager.Lookup(scope, params.ShellID)
 			if !ok {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("background shell not found: %s", params.ShellID)), nil
 			}
@@ -48,8 +52,7 @@ func NewJobKillTool() fantasy.AgentTool {
 				Description: bgShell.Description,
 			}
 
-			err := bgManager.Kill(ctx, params.ShellID)
-			if err != nil {
+			if err := bgManager.Kill(ctx, params.ShellID); err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
 

@@ -65,6 +65,10 @@ type App struct {
 	FileTracker filetracker.Service
 	Pinentry    *pinentry.Service
 
+	// SessionRoots resolves subagent sessions to the top-level session
+	// they serve, remembering each answer.
+	SessionRoots *session.Roots
+
 	AgentCoordinator agent.Coordinator
 
 	LSPManager *lsp.Manager
@@ -148,6 +152,8 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		Pinentry:    pinentry.DefaultService(),
 		LSPManager:  lsp.NewManager(store),
 		Skills:      skillsMgr,
+
+		SessionRoots: new(session.Roots),
 
 		globalCtx:  ctx,
 		hookRunner: hookRunner,
@@ -957,6 +963,8 @@ func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 		HookRunner:   app.hookRunner,
 		Interactive:  interactive,
 		ShellOwner:   app,
+
+		SessionRoots: app.SessionRoots,
 	})
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)
@@ -978,6 +986,17 @@ func (app *App) Agent() agent.Coordinator {
 	app.agentInitMu.Lock()
 	defer app.agentInitMu.Unlock()
 	return app.AgentCoordinator
+}
+
+// RunningBackgroundJobs reports how many background shells the agent has
+// running for the session tree sessionID belongs to, or 0 when that tree
+// cannot be resolved.
+func (app *App) RunningBackgroundJobs(ctx context.Context, sessionID string) int {
+	root, err := app.SessionRoots.Resolve(ctx, app.Sessions, sessionID)
+	if err != nil || root == "" {
+		return 0
+	}
+	return shell.GetBackgroundShellManager().Running(shell.JobScope{Owner: app, Session: root})
 }
 
 // Subscribe sends events to the TUI as tea.Msgs.

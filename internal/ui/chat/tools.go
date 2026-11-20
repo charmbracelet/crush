@@ -242,6 +242,8 @@ func NewToolMessageItem(
 		item = NewJobOutputToolMessageItem(sty, toolCall, result, canceled, workingDir)
 	case tools.JobKillToolName:
 		item = NewJobKillToolMessageItem(sty, toolCall, result, canceled)
+	case tools.JobListToolName:
+		item = NewJobListToolMessageItem(sty, toolCall, result, canceled)
 	case tools.ViewToolName:
 		item = NewViewToolMessageItem(sty, toolCall, result, canceled)
 	case tools.WriteToolName:
@@ -1931,6 +1933,8 @@ func prettifyToolName(name string) string {
 		return "Job: Output"
 	case tools.JobKillToolName:
 		return "Job: Kill"
+	case tools.JobListToolName:
+		return "Job: List"
 	case tools.DownloadToolName:
 		return "Download"
 	case tools.EditToolName:

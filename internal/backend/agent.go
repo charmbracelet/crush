@@ -305,6 +305,19 @@ func (b *Backend) QueuedPrompts(workspaceID, sessionID string) (int, error) {
 	return coord.QueuedPrompts(sessionID), nil
 }
 
+// RunningBackgroundJobs returns the number of background shells the agent
+// has running for the session's tree.
+func (b *Backend) RunningBackgroundJobs(ctx context.Context, workspaceID, sessionID string) (int, error) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return 0, err
+	}
+	if ws.App == nil {
+		return 0, nil
+	}
+	return ws.RunningBackgroundJobs(ctx, sessionID), nil
+}
+
 // ClearQueue clears the prompt queue for the session.
 func (b *Backend) ClearQueue(workspaceID, sessionID string) error {
 	ws, err := b.GetWorkspace(workspaceID)

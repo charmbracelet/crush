@@ -290,6 +290,59 @@ func (j *JobKillToolRenderContext) RenderTool(sty *styles.Styles, width int, opt
 	return renderJobTool(sty, opts, cappedWidth, "Kill", params.ShellID, description, content)
 }
 
+// -----------------------------------------------------------------------------
+// Job List Tool
+// -----------------------------------------------------------------------------
+
+// JobListToolMessageItem is a message item for job_list tool calls.
+type JobListToolMessageItem struct {
+	*baseToolMessageItem
+}
+
+var _ ToolMessageItem = (*JobListToolMessageItem)(nil)
+
+// NewJobListToolMessageItem creates a new [JobListToolMessageItem].
+func NewJobListToolMessageItem(
+	sty *styles.Styles,
+	toolCall message.ToolCall,
+	result *message.ToolResult,
+	canceled bool,
+) ToolMessageItem {
+	return newBaseToolMessageItem(sty, toolCall, result, &JobListToolRenderContext{}, canceled)
+}
+
+// JobListToolRenderContext renders job_list tool messages.
+type JobListToolRenderContext struct{}
+
+// RenderTool implements the [ToolRenderer] interface.
+func (j *JobListToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
+	cappedWidth := cappedMessageWidth(width)
+	if opts.IsStreamingInput() {
+		return pendingTool(sty, "Job", opts.Anim, opts.Compact)
+	}
+
+	var description, content string
+	if opts.HasResult() {
+		content = opts.Result.Content
+		var meta tools.JobListResponseMetadata
+		if opts.Result.Metadata != "" && json.Unmarshal([]byte(opts.Result.Metadata), &meta) == nil {
+			description = jobListSummary(meta.Jobs)
+		}
+	}
+	return renderJobTool(sty, opts, cappedWidth, "List", "", description, content)
+}
+
+// jobListSummary counts the running and finished jobs in a job_list result.
+func jobListSummary(jobs []tools.JobListEntry) string {
+	running := 0
+	for _, job := range jobs {
+		if job.Running {
+			running++
+		}
+	}
+	return fmt.Sprintf("%d running, %d finished", running, len(jobs)-running)
+}
+
 // renderJobTool renders a job-related tool with the common pattern:
 // header → nested check → early state → body.
 func renderJobTool(sty *styles.Styles, opts *ToolRenderOpts, width int, action, shellID, description, content string) string {
@@ -312,14 +365,16 @@ func renderJobTool(sty *styles.Styles, opts *ToolRenderOpts, width int, action, 
 }
 
 // jobHeader builds a header for job-related tools.
-// Format: "● Job (Action) PID shellID description..."
+// Format: "● Job (Action) PID shellID description...", without the PID
+// part when shellID is empty.
 func jobHeader(sty *styles.Styles, status ToolStatus, action, shellID, description string, width int) string {
 	icon := toolIcon(sty, status)
 	jobPart := sty.Tool.JobToolName.Render("Job")
 	actionPart := sty.Tool.JobAction.Render("(" + action + ")")
-	pidPart := sty.Tool.JobPID.Render("PID " + shellID)
-
-	prefix := fmt.Sprintf("%s %s %s %s", icon, jobPart, actionPart, pidPart)
+	prefix := fmt.Sprintf("%s %s %s", icon, jobPart, actionPart)
+	if shellID != "" {
+		prefix += " " + sty.Tool.JobPID.Render("PID "+shellID)
+	}
 
 	if description == "" {
 		return prefix

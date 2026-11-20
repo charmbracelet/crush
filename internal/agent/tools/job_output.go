@@ -30,7 +30,7 @@ type JobOutputResponseMetadata struct {
 	WorkingDirectory string `json:"working_directory"`
 }
 
-func NewJobOutputTool(spillDir string) fantasy.AgentTool {
+func NewJobOutputTool(spillDir string, jobs BackgroundJobs) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		JobOutputToolName,
 		jobOutputDescription,
@@ -40,7 +40,7 @@ func NewJobOutputTool(spillDir string) fantasy.AgentTool {
 			}
 
 			bgManager := shell.GetBackgroundShellManager()
-			bgShell, ok := bgManager.Get(params.ShellID)
+			bgShell, ok := bgManager.Lookup(jobs.Scope(ctx), params.ShellID)
 			if !ok {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("background shell not found: %s", params.ShellID)), nil
 			}

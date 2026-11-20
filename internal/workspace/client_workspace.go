@@ -352,6 +352,14 @@ func (w *ClientWorkspace) AgentQueuedPrompts(sessionID string) int {
 	return count
 }
 
+func (w *ClientWorkspace) AgentRunningBackgroundJobs(sessionID string) int {
+	count, err := w.client.GetAgentSessionRunningJobs(context.Background(), w.workspaceID(), sessionID)
+	if err != nil {
+		return 0
+	}
+	return count
+}
+
 func (w *ClientWorkspace) AgentQueuedPromptsList(sessionID string) []string {
 	prompts, err := w.client.GetAgentSessionQueuedPromptsList(context.Background(), w.workspaceID(), sessionID)
 	if err != nil {

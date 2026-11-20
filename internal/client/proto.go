@@ -476,6 +476,24 @@ func (c *Client) GetAgentSessionQueuedPrompts(ctx context.Context, id string, se
 	return count, nil
 }
 
+// GetAgentSessionRunningJobs retrieves the number of background shells the
+// agent has running for a session's tree.
+func (c *Client) GetAgentSessionRunningJobs(ctx context.Context, id string, sessionID string) (int, error) {
+	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/agent/sessions/%s/jobs/running", id, sessionID), nil, nil)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get session running jobs: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("failed to get session running jobs: status code %d", rsp.StatusCode)
+	}
+	var count int
+	if err := json.NewDecoder(rsp.Body).Decode(&count); err != nil {
+		return 0, fmt.Errorf("failed to decode session running jobs: %w", err)
+	}
+	return count, nil
+}
+
 // ClearAgentSessionQueuedPrompts clears the queued prompts for a session.
 func (c *Client) ClearAgentSessionQueuedPrompts(ctx context.Context, id string, sessionID string) error {
 	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent/sessions/%s/prompts/clear", id, sessionID), nil, nil, nil)

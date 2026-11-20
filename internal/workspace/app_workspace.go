@@ -221,6 +221,10 @@ func (w *AppWorkspace) AgentQueuedPrompts(sessionID string) int {
 	return w.app.Agent().QueuedPrompts(sessionID)
 }
 
+func (w *AppWorkspace) AgentRunningBackgroundJobs(sessionID string) int {
+	return w.app.RunningBackgroundJobs(context.Background(), sessionID)
+}
+
 func (w *AppWorkspace) AgentQueuedPromptsList(sessionID string) []string {
 	if w.app.Agent() == nil {
 		return nil

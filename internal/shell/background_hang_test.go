@@ -61,7 +61,7 @@ func TestKill_SetsidDescendantHoldsPipe(t *testing.T) {
 	reapSleep(t, "17")
 	manager := newBackgroundShellManager()
 
-	bgShell, err := manager.Start(context.Background(), nil, t.TempDir(), nil, "sh -c 'setsid sleep 17 &'", "", testMaxJobs)
+	bgShell, err := manager.Start(context.Background(), JobScope{}, t.TempDir(), nil, "sh -c 'setsid sleep 17 &'", "", testMaxJobs)
 	require.NoError(t, err)
 	requireDescendant(t, "sleep 17")
 
@@ -77,7 +77,7 @@ func TestJobCompletesWhenBackgroundedChildHoldsPipe(t *testing.T) {
 	manager := newBackgroundShellManager()
 
 	start := time.Now()
-	bgShell, err := manager.Start(context.Background(), nil, t.TempDir(), nil, "sh -c 'sleep 8 &'; echo hi", "", testMaxJobs)
+	bgShell, err := manager.Start(context.Background(), JobScope{}, t.TempDir(), nil, "sh -c 'sleep 8 &'; echo hi", "", testMaxJobs)
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithTimeout(t.Context(), 6*time.Second)
@@ -96,7 +96,7 @@ func TestKill_ShebangScriptChild(t *testing.T) {
 	reapSleep(t, "15")
 	manager := newBackgroundShellManager()
 
-	bgShell, err := manager.Start(context.Background(), nil, dir, nil, "./hang.sh", "", testMaxJobs)
+	bgShell, err := manager.Start(context.Background(), JobScope{}, dir, nil, "./hang.sh", "", testMaxJobs)
 	require.NoError(t, err)
 	requireDescendant(t, "sleep 15")
 

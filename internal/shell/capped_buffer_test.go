@@ -102,7 +102,7 @@ func TestBackgroundShellOutputStaysBounded(t *testing.T) {
 	manager := newBackgroundShellManager()
 	// Long lines reach the cap in few loop iterations, even under -race.
 	command := "while :; do echo " + strings.Repeat("x", 4096) + "; done"
-	bg, err := manager.Start(t.Context(), nil, t.TempDir(), nil, command, "endless", testMaxJobs)
+	bg, err := manager.Start(t.Context(), JobScope{}, t.TempDir(), nil, command, "endless", testMaxJobs)
 	require.NoError(t, err)
 	t.Cleanup(func() { manager.Kill(context.Background(), bg.ID) })
 

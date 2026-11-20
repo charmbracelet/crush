@@ -534,6 +534,28 @@ func mergeStats(projectStats []ProjectStats) *Stats {
 	sort.Slice(merged.ToolUsage, func(i, j int) bool {
 		return merged.ToolUsage[i].CallCount > merged.ToolUsage[j].CallCount
 	})
+	// Sort time series so iteration order is deterministic.
+	// Map range order is random, so without these sorts the same data
+	// can appear in a different order on every run.
+	sort.Slice(merged.UsageByDay, func(i, j int) bool {
+		return merged.UsageByDay[i].Day > merged.UsageByDay[j].Day // newest first
+	})
+	sort.Slice(merged.RecentActivity, func(i, j int) bool {
+		return merged.RecentActivity[i].Day < merged.RecentActivity[j].Day // oldest first
+	})
+	sort.Slice(merged.UsageByHour, func(i, j int) bool {
+		return merged.UsageByHour[i].Hour < merged.UsageByHour[j].Hour
+	})
+	sort.Slice(merged.UsageByDayOfWeek, func(i, j int) bool {
+		return merged.UsageByDayOfWeek[i].DayOfWeek < merged.UsageByDayOfWeek[j].DayOfWeek
+	})
+	sort.Slice(merged.HourDayHeatmap, func(i, j int) bool {
+		a, b := merged.HourDayHeatmap[i], merged.HourDayHeatmap[j]
+		if a.DayOfWeek != b.DayOfWeek {
+			return a.DayOfWeek < b.DayOfWeek
+		}
+		return a.Hour < b.Hour
+	})
 
 	return merged
 }

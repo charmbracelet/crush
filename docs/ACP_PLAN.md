@@ -94,12 +94,12 @@ so the reference survives edits.
 | Omitted client capabilities treated as unsupported | MUST | ✅ fs gated on `clientCaps.Fs`; no elicitation/terminal/notice/compaction use |
 | `loadSession` capability | OPTIONAL | ✅ `true` |
 | `promptCapabilities` (image/audio/embeddedContext) | OPTIONAL (text+resource_link MUST regardless) | ✅ all `true` |
-| `mcpCapabilities` (http/sse) | OPTIONAL | ✅ empty |
+| `mcpCapabilities` (http/sse) | OPTIONAL | ✅ both advertised and served (`acpMCPServer` maps stdio/http/sse → `config.MCPConfig`) |
 | `sessionCapabilities` (close/list/resume/delete) | OPTIONAL | ✅ four advertised |
 | `auth.logout` capability | OPTIONAL | ✅ advertised; `Logout` success no-op |
 | `authenticate` method | only reachable if advertised; unadvertised SHOULD answer `-32601` (`error.md:46`) | ✅ `authMethods:[]` so nothing owed; stray call → `-32601` (`dispatcher.Authenticate`) |
-| `systemPrompt` support | OPTIONAL | ✅ unadvertised; SDK drops the field before Crush sees it (G11) |
-| `additionalDirectories` support | OPTIONAL | ✅ unadvertised; field ignored (O23) |
+| `systemPrompt` support | OPTIONAL | ✅ unadvertised; v0.20 models it, so this is OQ-5 (decision), not an SDK limit |
+| `additionalDirectories` support | OPTIONAL | ✅ advertised (`SessionCapabilities.AdditionalDirectories`); absolute paths validated on new/load/resume and merged into the tool root set |
 
 ### 4.2 Session lifecycle
 
@@ -127,7 +127,7 @@ used, none outside reserved ranges ✅.
 
 ### 4.3 Session updates (`session/update`)
 
-14 variants exist; Crush emits 11.
+20 variants exist; Crush emits 11 of the stable ones.
 
 | Update | Level | Status |
 |---|---|---|
@@ -144,7 +144,7 @@ used, none outside reserved ranges ✅.
 | `usage_update` | MAY | ✅ at run completion; `used`/`size` non-null; cost has `amount`+`currency` |
 | `notice` | MAY, gated on `clientCapabilities.session.notices` | ⚠️ gate and update are modelled in SDK v0.20 (`ClientSessionCapabilities.Notices`, `SessionUpdateNotice`); not emitted yet (M-SDK-4) |
 | `compaction_update` / `compaction_summary_chunk` | MAY, gated on `session.compaction`; replayed by load | ⚠️ gate and both updates modelled in SDK v0.20; not emitted or replayable yet (M-SDK-4) |
-| `messageId` on chunks | MAY | ⚠️ stable since SDK v0.14 (`ContentChunk.MessageId`); not emitted yet (M-SDK-3) |
+| `messageId` on chunks | MAY | ✅ stable per message (`withMessageID`); turn/load replay share the history id |
 
 ### 4.4 Content blocks
 
@@ -164,7 +164,7 @@ used, none outside reserved ranges ✅.
 | Emit `tool_call` + `tool_call_update` during execution | SHOULD | ✅ S1/S10 |
 | Tool kind taxonomy (10 kinds) | OPTIONAL | ✅ `toolKindFor` incl. `switch_mode` |
 | Tool content `content`/`diff`/`terminal` | SHOULD | ⚠️ `content` always; `diff` for edit/multiedit; `terminal` deferred (O8) |
-| Fields: `title` required; `name` SHOULD; `kind`/`status`/`locations`/`rawInput`/`rawOutput` optional | SHOULD (`name`) | ⚠️ `ToolCall.Name` is stable since SDK v0.17, with `WithStartName`/`WithUpdateName`; not emitted yet (M-SDK-3) |
+| Fields: `title` required; `name` SHOULD; `kind`/`status`/`locations`/`rawInput`/`rawOutput` optional | SHOULD (`name`) | ✅ `WithStartName`/`WithUpdateName` on live start, live update and load replay |
 | All paths absolute (`tool-calls.md:307,353`) | MUST | ✅ `absPath`/`absPather` at `toolLocations`, `diffContentFor`, load replay |
 | `session/request_permission` with 4 option kinds | MUST when needed | ✅ `buildPermissionOptions` (O20/G1) |
 | Unrecognized outcome ≠ approval | SHOULD | ✅ `mapPermissionOutcome` allow-list (O20) |
@@ -221,7 +221,8 @@ with character-boundary truncation), `output` fields (`output`, `truncated`,
 | Connect all servers the client specifies | SHOULD | ✅; unsupported transports logged and skipped |
 | Launch `command`+`args` without a shell | SHOULD | ✅ `exec.CommandContext` |
 | Never echo `env`/`headers` into updates, errors, `_meta`, list, replay, model context, command lines | SHOULD | ✅ `config.MCPConfig` carries `env`, never serialized |
-| Send `headers` only to the configured origin | SHOULD | n/a (no HTTP/SSE advertised) |
+| Send `headers` only to the configured origin | SHOULD | ✅ headers are handed to the MCP client, which sends them to that server's URL only |
+| HTTP/SSE transports | OPTIONAL, only if advertised | ✅ `mcpCapabilities{Http,Sse}` advertised and mapped to `config.MCPConfig` http/sse |
 
 Collision safety: registry keys are namespaced `acp:<sessionID>:<name>`
 (`mcp.ACPServerName`); `mcp.TeardownSession` closes a session's servers on
@@ -233,8 +234,8 @@ the connection outlive the setup request.
 Limitations (recorded, not hidden): tool names embed the session id; MCP
 prompts/resource completions and the `/mcp` UI read the config-file registry
 and do not surface ACP-injected servers; `env` is additive to the inherited
-process env; OAuth, HTTP/SSE headers, `EnabledTools`/`DisabledTools` and
-channels have no ACP equivalent and are not applied — none are advertised.
+process env; OAuth, `EnabledTools`/`DisabledTools` and channels have no ACP
+equivalent and are not applied.
 
 ### 4.11 Extensibility (`_meta`)
 
@@ -273,16 +274,14 @@ control sequences (`security.md:20-41`).
 ### 4.14 Capability advertising summary
 
 Advertised: `loadSession:true`, `promptCapabilities{image,audio,
-embeddedContext:true}`, `sessionCapabilities{close,delete,list,resume}`,
-`auth.logout`, `authMethods:[]`. No advertised capability is behaviourally
-empty; `additionalDirectories` was retracted (O23) precisely because it had
-no enforcement behind it.
+embeddedContext:true}`, `sessionCapabilities{close,delete,list,resume,
+additionalDirectories}`, `mcpCapabilities{http,sse}`, `auth.logout`,
+`authMethods:[]`. No advertised capability is behaviourally empty:
+`additionalDirectories` is applied to the root set and reported back, and the
+HTTP/SSE MCP transports map onto Crush's MCP client.
 
-Not advertised: `additionalDirectories` (O23/OQ-1), any `mcpCapabilities`
-(no HTTP/SSE), elicitation and terminal auth (Crush has no auth session to
-terminate). `sessionCapabilities.systemPrompt` was unadvertisable under
-v0.13.5 because the SDK dropped the field (G11); v0.20 models it, so it is
-now an open decision (OQ-5) rather than an SDK limit.
+Not advertised: `sessionCapabilities.systemPrompt` (OQ-5), elicitation and
+terminal auth (Crush has no auth session to terminate).
 
 ## 5. Open items
 
@@ -290,17 +289,18 @@ Grouped by the actual blocker.
 
 ### 5.1 SDK-gated — empty after the v0.20 bump
 
-Every item this section used to list is now expressible in the SDK:
+Every item this section used to list is now expressible in the SDK, and all
+but the two decision-gated ones are implemented:
 
-| Was blocked | Unblocked by | New item |
-|---|---|---|
-| tool-call `name` | v0.17 (`ToolCall.Name`, `WithStartName`) | M-SDK-3 |
-| `messageId` on chunks | v0.14 (stable `MessageId`) | M-SDK-3 |
-| boolean config-option gate | v0.15 (`Session.ConfigOptions.Boolean`) | M-SDK-2 |
-| `notice` gate | v0.17 (`Session.Notices`) | M-SDK-4 |
-| `compaction` gate | v0.17 (`Session.Compaction`) | M-SDK-4 |
-| elicitation | v0.16 (stable client methods) | OQ-4 |
-| `systemPrompt` | v0.18 (`Session.SystemPrompt`) | OQ-5 |
+| Was blocked | Unblocked by | New item | Status |
+|---|---|---|---|
+| tool-call `name` | v0.17 (`ToolCall.Name`, `WithStartName`) | M-SDK-3 | ✅ done |
+| `messageId` on chunks | v0.14 (stable `MessageId`) | M-SDK-3 | ✅ done |
+| boolean config-option gate | v0.15 (`Session.ConfigOptions.Boolean`) | M-SDK-2 | ✅ done |
+| `notice` gate | v0.17 (`Session.Notices`) | M-SDK-4 | ⚠️ deferred |
+| `compaction` gate | v0.17 (`Session.Compaction`) | M-SDK-4 | ⚠️ deferred |
+| elicitation | v0.16 (stable client methods) | OQ-4 | ⚠️ declined |
+| `systemPrompt` | v0.18 (`Session.SystemPrompt`) | OQ-5 | ⚠️ deferred |
 
 Nothing is SDK-gated any more. O8 terminals were never SDK-gated: the SDK
 ships protocol types, not a PTY.
@@ -317,13 +317,12 @@ ships protocol types, not a PTY.
   `internal/shell` instead — re-evaluate if `crush acp connect` grows a
   terminal pane.
 
-### 5.3 SDK v0.20.0 migration (M-SDK)
+### 5.3 SDK v0.20.0 migration (M-SDK) — landed 11-20
 
-The bump is mechanical but wide: most breaks are compile errors in
-`internal/acp`, a few change wire behaviour silently and need a check.
+The bump was mechanical but wide: most breaks were compile errors in
+`internal/acp`, a few changed wire behaviour silently and needed a check.
 
-**M-SDK-1 — migrate to v0.20.0 types.** Required, no behaviour change
-intended.
+**M-SDK-1 — migrate to v0.20.0 types. ✅** No behaviour change.
 
 | Break | Sites | Fix |
 |---|---|---|
@@ -342,30 +341,37 @@ an empty non-nil slice now sends `[]` (clears) — all call sites guard on
 no longer fails the send on an unencodable value; `RequestError` is no longer
 comparable.
 
-**M-SDK-2 — real boolean config option.** `thinking` becomes
+**M-SDK-2 — real boolean config option. ✅** `thinking` is
 `type:"boolean"` when `clientCaps.Session.ConfigOptions.Boolean` is set, and
-stays a `select` otherwise. Closes the last MUST-adjacent workaround.
+stays a `select` otherwise.
 
-**M-SDK-3 — tool `name` + `messageId`.** Emit `WithStartName`/`WithUpdateName`
-from `toolKindFor`'s sibling mapping, and a stable `MessageId` per message
-(turn-scoped for live, history-id for replay). Closes the last open SHOULD.
+**M-SDK-3 — tool `name` + `messageId`. ✅** `WithStartName`/`WithUpdateName`
+emitted on live start, live update and load replay; chunks carry a stable
+`messageId` (`withMessageID`). Closes the last open SHOULD.
 
-**M-SDK-4 — notice + compaction emission.** Only when the corresponding
-`clientCaps.Session` gate is set, per the MUST-NOT rules. Notice candidates:
-run cancellation and permission denial. Compaction needs a Crush-side
-compaction event to forward; if none exists, the gate stays unadvertised and
-emission is correctly omitted.
+**M-SDK-4 — notice + compaction emission.** ⚠️ Deferred. Only when the
+corresponding `clientCaps.Session` gate is set, per the MUST-NOT rules. Notice
+candidates: run cancellation and permission denial. Compaction needs a
+Crush-side compaction event to forward; if none exists, the gate stays
+unadvertised and emission is correctly omitted. Neither gate is advertised
+today, so nothing is owed.
 
-**Cleanup:** delete `internal/acp/protocol/jsonrpc.go`. It is a hand-rolled
-JSON-RPC 2.0 codec with no importers, superseded by the SDK transport.
+**B2–B4 also landed:** ACP MCP `http`/`sse` advertised and served, and
+`additionalDirectories` advertised, validated (absolute, on new/load/resume),
+stored per session, reported in `session/list` and merged into the tool root
+set via `tools.RootsContextKey`.
+
+**Cleanup: ✅** `internal/acp/protocol/jsonrpc.go` deleted; superseded by the
+SDK transport.
 
 ### 5.4 Deliberate decisions (not gaps)
 
-- `additionalDirectories` retracted rather than half-enforced (O23).
-- `thinking` is a `select` with on/off — the spec's own fallback
-  (`session-config-options.md:209`); `req.Boolean` stays for cached clients.
-  Under v0.20 the boolean gate is readable, so the select becomes the
-  fallback rather than the only option (M-SDK-2).
+- `additionalDirectories` is enforced, not retracted (supersedes O23):
+  absolute-only on new/load/resume, reported in `session/list`, and merged
+  into the tool root set so path tools see it.
+- `thinking` is a real `boolean` when the client advertises
+  `session.configOptions.boolean`, and a `select` with on/off otherwise — the
+  spec's own fallback (`session-config-options.md:209`).
 - No live-turn `user_message_chunk` echo (decision S2, §6).
 - Shell builtins (`provider`, `model`, `mcp`, …) are not advertised: they
   mutate crushrc config rather than produce a prompt. Two designs were
@@ -390,6 +396,7 @@ JSON-RPC 2.0 codec with no importers, superseded by the SDK transport.
 | OQ-5 | 11-20 | `systemPrompt`: unadvertised for now | v0.20 models append/override; implementing `append` is cheap, `override` needs prompt-assembly work |
 | O2 | 11-17 | `thinking` as `select`, not `boolean` | superseded by SDK-2: gate was unreadable on v0.13.5; v0.20 reads it, so boolean returns and select becomes the fallback |
 | O23 | 11-17 | retract `additionalDirectories` (supersedes O3) | an advertised capability with no behaviour behind it is worse than none |
+| O23' | 11-20 | re-advertise and enforce `additionalDirectories` (supersedes O23) | B4 gave the field behaviour: absolute-only validation, storage, list reporting and root-set merge |
 | O24 | 11-17 | ACP-local command resolver | keeps the TUI untouched; drift risk is OQ-2 |
 | S2 | 09-17 | no live `user_message_chunk` echo | duplicates input the client holds; races the streaming path; load replay does emit (MUST) |
 | O5 | 09-18 | resume = Option B | return mode/config state, no replay |
@@ -413,12 +420,13 @@ JSON-RPC 2.0 codec with no importers, superseded by the SDK transport.
 | title | 11-18 | announce title changes via `session_info_update` | `session-list.md:219`: clients otherwise show the static new-session title |
 | trace | 11-18 | generate a traceparent when the client sends none | `extensibility.md:40-44` reserves the key; a turn needs a correlatable id |
 
-**OQ-1 — root set (RESOLVED 11-19).** `tools.RootsContextKey` carries `[cwd]`
-into every run via `sessionAgent.Run`. `OutsideRoots` compares the resolved
-path by component and fails closed; `view`, `write`, `edit` and `multiedit`
-ask permission before touching a path outside it. `bash` always prompts when
-a root set is present: a shell cannot be confined by a path check alone.
-`additionalDirectories` stays retracted (O23), so the set is just `[cwd]`.
+**OQ-1 — root set (RESOLVED 11-19, extended 11-20).** `tools.RootsContextKey`
+carries the root set into every run via `sessionAgent.Run`. `OutsideRoots`
+compares the resolved path by component and fails closed; `view`, `write`,
+`edit` and `multiedit` ask permission before touching a path outside it.
+`bash` always prompts when a root set is present: a shell cannot be confined
+by a path check alone. Since B4 the set is `[cwd]` plus each session's
+`additionalDirectories`.
 
 **OQ-2 — RESOLVED 11-18: the substitution rule is shared.**
 `commands.SubstituteArgs` in `internal/commands` is now the one rule both the
@@ -492,24 +500,24 @@ every run, `OutsideRoots` bounds `view`/`write`/`edit`/`multiedit` (outside a
 root needs a permission request) and `bash` always prompts when root-scoped
 (OQ-1 resolved). ACP installs a `tools.ClientFS` so `view` reads and `write`
 writes route through the client when it advertises fs (O12).
-- **2026-11-20** — SDK re-audit against v0.14.0–v0.20.0 release notes and the
-  v0.20.0 `types_gen.go`. All seven SDK-gated items are now expressible; §5.1
-  is empty and §5.3 records the migration (M-SDK-1..4). Status rows for
-  `name`, `messageId`, `notice`, `compaction`, `systemPrompt` and elicitation
-  were corrected from ❌ to ⚠️-pending: the blockers are gone, the work is
-  not done. No code changed in this pass.
+- **2026-11-20** — M-SDK landed (B1–B4). B1: `acp-go-sdk` v0.20.0, `_meta` →
+  `acp.Meta`, `Patch[T]` fields, `json.RawMessage` raw I/O, `*int64` windows,
+  `acp.NewRequestError`, `DeleteSession` rename, elicitation client methods
+  answering `-32601`; the hand-rolled `protocol/jsonrpc.go` deleted. B2: tool
+  `name` via `WithStartName`/`WithUpdateName` (live + replay) and a stable
+  `messageId` per message. B3: `thinking` is a real boolean when the client
+  advertises `session.configOptions.boolean`, `select` otherwise. B4: MCP
+  `http`/`sse` advertised and served; `additionalDirectories` advertised,
+  validated, stored, listed and merged into the tool root set. Conformance
+  tests added for both capability groups.
 
-**Conformance position (v0.13.5 code):** no MUST gap remains. The only SHOULD
-still open is `tool name`. Two behavioural caveats remain: the select
-fallback for `thinking`, and remembered permission scope being the tool name
-rather than the command or directory. The root set is now enforced for
-path-touching tools, so `additionalDirectories` stays retracted (O23) and the
-set is `[cwd]`.
-
-**Conformance position (after M-SDK):** `tool name` closes, so no SHOULD gap
-remains. `thinking` becomes a real boolean where the client advertises it.
-The remaining open items are decisions (OQ-4 elicitation, OQ-5 systemPrompt)
-and one optional feature (O8 terminals).
+**Conformance position (current, after M-SDK):** no MUST gap and no SHOULD
+gap remains. `thinking` is a real boolean where the client advertises it, and
+the select is the documented fallback. The root set is `[cwd]` plus each
+session's `additionalDirectories`, both enforced. Remaining open items are
+decisions (OQ-4 elicitation, OQ-5 systemPrompt), one deferred optional
+emission pair (M-SDK-4 notices/compaction, gates unadvertised) and one
+optional feature (O8 terminals).
 
 ## 8. Tests
 
@@ -529,7 +537,10 @@ scope; load replay; delete idempotency; cwd validation and absoluteness;
 active-session gating; cursor handling; blob resources; fs `-32002`; mode
 selection and current-mode truthfulness; command resolution; absolute-path
 helpers; initialize-before-request and unknown session codes; golden JSON
-fixtures (33) and the Tangerg/Zed interop fixtures.
+fixtures (33) and the Tangerg/Zed interop fixtures. Added 11-20: tool `name`
+and `messageId` presence on live and replayed updates, boolean vs select config
+options behind the client gate, MCP `http`/`sse` advertising, and an
+`additionalDirectories` round trip (apply → list → relative reject).
 
 Still uncovered: MCP prompt resolution end-to-end (needs a live MCP client),
 blob attachments flowing all the way through `Coordinator.Run`.

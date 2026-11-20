@@ -84,20 +84,39 @@ func processGroupExecHandler(killTimeout time.Duration) interp.ExecHandlerFunc {
 
 		err = cmd.Start()
 		if err == nil {
-			stopf := context.AfterFunc(ctx, func() {
+			group := -cmd.Process.Pid
+			leaderDone := make(chan struct{})
+			cleanupDone := make(chan struct{})
+			stop := context.AfterFunc(ctx, func() {
+				defer close(cleanupDone)
 				if killTimeout <= 0 {
-					_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+					_ = syscall.Kill(group, syscall.SIGKILL)
 					return
 				}
-				// Signal the child's process group (negative PID) so
-				// grandchildren also receive it.
-				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGINT)
-				time.Sleep(killTimeout)
-				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+
+				if syscall.Kill(group, syscall.SIGINT) == syscall.ESRCH {
+					return
+				}
+				timer := time.NewTimer(killTimeout)
+				defer timer.Stop()
+				select {
+				case <-leaderDone:
+					if syscall.Kill(group, 0) == syscall.ESRCH {
+						return
+					}
+					<-timer.C
+				case <-timer.C:
+				}
+				_ = syscall.Kill(group, syscall.SIGKILL)
 			})
-			defer stopf()
 
 			err = cmd.Wait()
+			close(leaderDone)
+			// The leader can exit on SIGINT while descendants are still
+			// alive. Keep the shell tracked until escalation has run.
+			if !stop() {
+				<-cleanupDone
+			}
 		}
 
 		return exitStatusFromError(ctx, hc.Stderr, err)

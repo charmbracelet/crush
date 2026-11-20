@@ -1089,9 +1089,13 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			// Volatile memory recall goes last, after everything
 			// worth caching, and is excluded from the breakpoints
 			// below. See markCacheBreakpoints for why position and
-			// exclusion both matter.
+			// exclusion both matter. A step that just folded in a
+			// message skips it, so the message is the last thing the
+			// model reads.
 			var recallAppended bool
-			prepared.Messages, recallAppended = appendRecall(callContext, a.memory.get(), prepared.Messages, call.Prompt)
+			if len(foldedMessages) == 0 {
+				prepared.Messages, recallAppended = appendRecall(callContext, a.memory.get(), prepared.Messages, call.Prompt)
+			}
 
 			markCacheBreakpoints(prepared.Messages, a.getCacheControlOptions(), recallAppended)
 

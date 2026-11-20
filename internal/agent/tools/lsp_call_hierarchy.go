@@ -9,6 +9,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/lsp"
+	"github.com/charmbracelet/crush/internal/lsp/util"
 )
 
 type CallHierarchyParams struct {
@@ -62,7 +63,7 @@ func NewCallHierarchyTool(lspManager *lsp.Manager) fantasy.AgentTool {
 				} else {
 					fmt.Fprintf(&b, "%d caller(s):\n\n", len(calls))
 					for _, c := range calls {
-						path, _ := c.From.URI.Path()
+						path, _ := util.PathFromURI(c.From.URI)
 						line := c.From.Range.Start.Line + 1
 						fmt.Fprintf(&b, "  %s:%d — %s\n", path, line, c.From.Name)
 					}
@@ -77,7 +78,7 @@ func NewCallHierarchyTool(lspManager *lsp.Manager) fantasy.AgentTool {
 				} else {
 					fmt.Fprintf(&b, "%d callee(s):\n\n", len(calls))
 					for _, c := range calls {
-						path, _ := c.To.URI.Path()
+						path, _ := util.PathFromURI(c.To.URI)
 						line := c.To.Range.Start.Line + 1
 						fmt.Fprintf(&b, "  %s:%d — %s\n", path, line, c.To.Name)
 					}

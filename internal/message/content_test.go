@@ -186,6 +186,20 @@ func TestParseSubAgentReportPromptRoundTrips(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestSubAgentReportMidTurn(t *testing.T) {
+	t.Parallel()
+
+	report := SubAgentReport{Label: "betty-review", Output: "two findings"}
+	folded := report
+	folded.MidTurn = true
+
+	require.True(t, strings.HasPrefix(folded.PromptText(), report.PromptText()+"\n\n<system_reminder>"))
+	require.Contains(t, folded.PromptText(), `subagent "betty-review" arrived while you were working`)
+	require.NotContains(t, report.PromptText(), "system_reminder")
+	require.True(t, report.SameReport(folded))
+	require.False(t, report.SameReport(SubAgentReport{Label: "betty-review", Output: "other"}))
+}
+
 func TestToAIMessage_SignedReasoningReplayed(t *testing.T) {
 	t.Parallel()
 

@@ -118,6 +118,7 @@ func ExpandValueInDir(ctx context.Context, value, dir string, env []string) (str
 				interp.Interactive(false),
 				interp.Env(expand.ListEnviron(env...)),
 				interp.Dir(s.cwd),
+				callHandlerOption(s.blockFuncs),
 				execHandlerOption(s.blockFuncs),
 			}
 			if strict {

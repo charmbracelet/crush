@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
@@ -17,10 +18,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var serverHost string
+var (
+	serverHost string
+	serverDial string
+)
 
 func init() {
 	serverCmd.Flags().StringVarP(&serverHost, "host", "H", server.DefaultHost(), "Server host  (HTTP, TCP or Unix socket)")
+	serverCmd.Flags().StringVar(&serverDial, "dial", "", "Dial out to a bridge tunnel URL (ws or wss) instead of listening")
+	serverCmd.MarkFlagsMutuallyExclusive("host", "dial")
 	rootCmd.AddCommand(serverCmd)
 }
 
@@ -40,6 +46,10 @@ Usage:
   # Serve over a Unix socket (default)
   crush server --host unix:///tmp/crush.sock
 
+  # Dial out to a bridge instead of listening; the bearer token is read
+  # from $CRUSH_SERVER_DIAL_TOKEN
+  crush server --dial wss://bridge.example.com/tunnel/team/key
+
 While the server is running, browse the HTTP API docs at /v1/docs/
 (e.g. http://127.0.0.1:8080/v1/docs/). The OpenAPI 3.1 spec is served
 at /v1/docs/openapi.json.
@@ -54,14 +64,26 @@ at /v1/docs/openapi.json.
 			return fmt.Errorf("failed to get debug flag: %v", err)
 		}
 
+		var hostURL *url.URL
+		dialToken := os.Getenv(server.DialTokenEnv)
+		dialing := cmd.Flags().Changed("dial")
+		if dialing {
+			if serverDial == "" {
+				return errors.New("--dial needs a tunnel URL (ws:// or wss://)")
+			}
+			if hostURL, err = server.ParseDialURL(serverDial); err != nil {
+				return err
+			}
+			if dialToken == "" {
+				return fmt.Errorf("--dial needs a bearer token in $%s", server.DialTokenEnv)
+			}
+		} else if hostURL, err = server.ParseHostURL(serverHost); err != nil {
+			return fmt.Errorf("invalid server host: %v", err)
+		}
+
 		cfg, err := config.Load(cmd.Context(), config.GlobalWorkspaceDir(), dataDir, debug)
 		if err != nil {
 			return fmt.Errorf("failed to load configuration: %v", err)
-		}
-
-		hostURL, err := server.ParseHostURL(serverHost)
-		if err != nil {
-			return fmt.Errorf("invalid server host: %v", err)
 		}
 
 		logFile := serverLogFile(hostURL)
@@ -72,9 +94,18 @@ at /v1/docs/openapi.json.
 			crushlog.Setup(logFile, debug)
 		}
 
-		srv := server.NewServer(cfg, hostURL.Scheme, hostURL.Host)
+		var srv *server.Server
+		addr := serverHost
+		if dialing {
+			if srv, err = server.NewDialServer(cfg, serverDial, dialToken); err != nil {
+				return err
+			}
+			addr = hostURL.Redacted()
+		} else {
+			srv = server.NewServer(cfg, hostURL.Scheme, hostURL.Host)
+		}
 		srv.SetLogger(slog.Default())
-		slog.Info("Starting Crush server...", "addr", serverHost)
+		slog.Info("Starting Crush server...", "addr", addr)
 
 		errch := make(chan error, 1)
 		go func() {

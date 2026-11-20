@@ -116,6 +116,13 @@ type Backend struct {
 	// waiting out lingerDelay before it shuts the server down. It is
 	// guarded by mu and cancelled the moment a new create arrives.
 	shutdownTimer *time.Timer
+	// idleShutdown, when true (the default), lets the server shut itself
+	// down once it goes idle: the arm at startup and the linger after the
+	// last workspace leaves both stop it. It is cleared on a server
+	// started explicitly with `crush server`, which runs until it is
+	// stopped; one spawned on demand by a client keeps the default.
+	// Guarded by mu.
+	idleShutdown bool
 	// closing latches the decision to exit. Every site that commits to
 	// a shutdown sets it while still holding mu, because shutdownFn has
 	// to run unlocked; CreateWorkspace refuses once it is set. That
@@ -317,15 +324,16 @@ func (w *Workspace) Shutdown() {
 // canceled); see [Backend.startChannelRouter].
 func New(ctx context.Context, cfg *config.ConfigStore, shutdownFn ShutdownFunc) *Backend {
 	b := &Backend{
-		workspaces:  csync.NewMap[string, *Workspace](),
-		pathIndex:   make(map[string]string),
-		retired:     make(map[string]struct{}),
-		cfg:         cfg,
-		ctx:         ctx,
-		shutdownFn:  shutdownFn,
-		createGrace: DefaultCreateGrace,
-		lingerDelay: idleShutdownDelayFromEnv(),
-		detachGrace: durationFromEnv("CRUSH_SERVER_DETACH_GRACE", DefaultDetachGrace),
+		workspaces:   csync.NewMap[string, *Workspace](),
+		pathIndex:    make(map[string]string),
+		retired:      make(map[string]struct{}),
+		cfg:          cfg,
+		ctx:          ctx,
+		shutdownFn:   shutdownFn,
+		createGrace:  DefaultCreateGrace,
+		lingerDelay:  idleShutdownDelayFromEnv(),
+		detachGrace:  durationFromEnv("CRUSH_SERVER_DETACH_GRACE", DefaultDetachGrace),
+		idleShutdown: true,
 	}
 	b.startChannelRouter()
 	return b
@@ -374,6 +382,19 @@ func (b *Backend) SetIdleShutdownDelay(d time.Duration) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.lingerDelay = d
+}
+
+// DisableIdleShutdown turns off the automatic idle shutdown: the server
+// keeps running with no workspaces and no creates in flight until it is
+// stopped explicitly. A server spawned on demand by a client shuts down
+// once its client is gone, but one started explicitly with `crush server`
+// was asked for on purpose. Intended to be called before the server starts
+// serving.
+func (b *Backend) DisableIdleShutdown() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.idleShutdown = false
+	b.cancelShutdownLocked()
 }
 
 // GetWorkspace retrieves a workspace by ID.
@@ -1048,7 +1069,7 @@ func (b *Backend) unregisterLocked(ws *Workspace) bool {
 // Returning true also latches [Backend.closing], since the caller has to
 // release b.mu before it can run shutdownFn.
 func (b *Backend) scheduleShutdownIfIdleLocked() (shutdownNow bool) {
-	if b.shutdownFn == nil || b.closing {
+	if b.shutdownFn == nil || b.closing || !b.idleShutdown {
 		return false
 	}
 	if b.workspaces.Len() != 0 || b.pending != 0 {
@@ -1078,7 +1099,7 @@ func (b *Backend) scheduleShutdownIfIdleLocked() (shutdownNow bool) {
 func (b *Backend) ArmIdleShutdown() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.shutdownFn == nil || b.closing || b.shutdownTimer != nil {
+	if b.shutdownFn == nil || b.closing || b.shutdownTimer != nil || !b.idleShutdown {
 		return
 	}
 	if b.workspaces.Len() != 0 || b.pending != 0 {

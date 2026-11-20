@@ -141,6 +141,14 @@ func (s *Server) SetLogger(logger *slog.Logger) {
 	s.logger = logger
 }
 
+// DisableIdleShutdown keeps the server running when it goes idle. A server
+// spawned on demand by a client shuts down once idle so it cannot outlive
+// the client; one started explicitly with `crush server` was asked for on
+// purpose and runs until it is stopped.
+func (s *Server) DisableIdleShutdown() {
+	s.backend.DisableIdleShutdown()
+}
+
 // Backend returns the server's backend. Intended for integration tests
 // that drive lifecycle transitions (detach, grace tuning) against a live
 // HTTP surface.
@@ -259,6 +267,8 @@ func (s *Server) ListenAndServe() error {
 	}
 	// Start the idle clock now that clients can reach us: a server that
 	// never gets a workspace must not outlive the client that spawned it.
+	// A server started explicitly with `crush server` has idle shutdown
+	// disabled, so this is a no-op there.
 	s.backend.ArmIdleShutdown()
 	return s.Serve(ln)
 }

@@ -29,11 +29,12 @@ func newTestBackend(t *testing.T) (*Backend, *atomic.Int32) {
 	t.Helper()
 	var shutdownCount atomic.Int32
 	b := &Backend{
-		workspaces:  csync.NewMap[string, *Workspace](),
-		pathIndex:   make(map[string]string),
-		ctx:         context.Background(),
-		createGrace: 50 * time.Millisecond,
-		shutdownFn:  func() { shutdownCount.Add(1) },
+		workspaces:   csync.NewMap[string, *Workspace](),
+		pathIndex:    make(map[string]string),
+		ctx:          context.Background(),
+		createGrace:  50 * time.Millisecond,
+		idleShutdown: true,
+		shutdownFn:   func() { shutdownCount.Add(1) },
 	}
 	return b, &shutdownCount
 }
@@ -1507,6 +1508,31 @@ func TestServer_ShutsDownAfterLingerWhenIdle(t *testing.T) {
 	require.Eventually(t, func() bool { return shutdownCount.Load() == 1 },
 		2*time.Second, 10*time.Millisecond,
 		"idle server must shut down after the linger window")
+}
+
+// TestServer_DisabledIdleShutdownKeepsServerUp covers a server the user
+// started explicitly with `crush server`: neither the idle timer armed at
+// startup nor the last client leaving may shut it down. It runs until it
+// is stopped.
+func TestServer_DisabledIdleShutdownKeepsServerUp(t *testing.T) {
+	t.Parallel()
+
+	b, shutdownCount := newTestBackend(t)
+	b.SetIdleShutdownDelay(100 * time.Millisecond)
+	b.DisableIdleShutdown()
+
+	b.ArmIdleShutdown()
+	require.Zero(t, shutdownCount.Load(),
+		"the startup idle timer must not shut down a server with idle shutdown disabled")
+
+	wsA, _ := insertTestWorkspace(t, b, "/tmp/no-linger")
+	cidA := newClientID(t)
+	require.NoError(t, b.AttachClient(wsA.ID, cidA))
+	b.DetachClient(wsA.ID, cidA)
+
+	require.Never(t, func() bool { return shutdownCount.Load() > 0 },
+		500*time.Millisecond, 10*time.Millisecond,
+		"a server with idle shutdown disabled must stay up when idle")
 }
 
 // -- Detach grace --

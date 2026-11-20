@@ -1,11 +1,36 @@
 package session
 
 import (
+	"database/sql"
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/stretchr/testify/require"
 )
+
+func TestGetLastSkipsSubAgentSessions(t *testing.T) {
+	dataDir := t.TempDir()
+	conn, err := db.Connect(t.Context(), dataDir)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, db.Release(dataDir))
+	})
+
+	sessions := NewService(db.New(conn), conn)
+	_, err = sessions.GetLast(t.Context())
+	require.ErrorIs(t, err, sql.ErrNoRows)
+
+	_, err = conn.ExecContext(t.Context(), `INSERT INTO sessions
+		(id, parent_session_id, title, updated_at, created_at) VALUES
+		('parent', NULL, 'Parent', 100, 100),
+		('latest-root', NULL, 'Latest root', 150, 150),
+		('msg$$call', 'parent', 'Sub-agent', 200, 175)`)
+	require.NoError(t, err)
+
+	last, err := sessions.GetLast(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, "latest-root", last.ID)
+}
 
 func TestEstimatedUsageStateSurvivesFetchModifySave(t *testing.T) {
 	dataDir := t.TempDir()

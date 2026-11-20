@@ -1168,7 +1168,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	// secondary hints like keybind shortcuts, so mute it when blurred and
 	// keep it readable on the focused row.
 	s.Dialog.ListItem.InfoBlurred = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
-	s.Dialog.ListItem.InfoFocused = lipgloss.NewStyle().Foreground(o.fgBase)
+	s.Dialog.ListItem.InfoFocused = lipgloss.NewStyle().Foreground(o.onPrimary)
 
 	// Dialog.Models
 	s.Dialog.Models.ConfiguredText = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
@@ -1255,7 +1255,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Dialog.Sessions.RenamingingItemFocused = s.Dialog.SelectedItem.UnsetBackground().UnsetForeground()
 	s.Dialog.Sessions.RenamingPlaceholder = base.Foreground(o.fgMoreSubtle)
 	s.Dialog.Sessions.InfoBlurred = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
-	s.Dialog.Sessions.InfoFocused = lipgloss.NewStyle().Foreground(o.fgBase)
+	s.Dialog.Sessions.InfoFocused = lipgloss.NewStyle().Foreground(o.onPrimary)
 
 	s.Status.Help = lipgloss.NewStyle().Padding(0, 1)
 	s.Status.ModeBadgePlan = lipgloss.NewStyle().Foreground(o.fgBase).Background(o.primary).Padding(0, 1).Bold(true).SetString("PLAN MODE")

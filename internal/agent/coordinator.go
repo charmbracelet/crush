@@ -71,6 +71,17 @@ var (
 	errModelNotFound              = errors.New("model not found in provider config")
 )
 
+// aheadRefreshTimeout bounds an OAuth renewal that runs ahead of expiry.
+// It is detached from the turn, so nothing else would ever stop it.
+const aheadRefreshTimeout = 2 * time.Minute
+
+// backgroundRefreshShutdownWait bounds how long shutdown waits for an
+// ahead-of-time OAuth renewal to save its result. Shutdown cancels a
+// renewal that has not reached the provider yet, so the wait only matters
+// for one whose exchange is already in flight, and it has to cover that
+// exchange plus the write to disk.
+const backgroundRefreshShutdownWait = config.TokenExchangeTimeout + 5*time.Second
+
 // servingProvider returns the fantasy provider package that serves the
 // given provider and model. Providers with bespoke SDKs (Bedrock, Azure,
 // Google, Vertex AI, OpenRouter, Vercel, Hyper) are selected by ID;
@@ -222,6 +233,19 @@ type coordinator struct {
 	// titles is shared by every agent built here, sub-agents included, so
 	// CancelAll on the current agent drains all title generation.
 	titles titleTracker
+
+	// bgRefreshMu guards bgRefreshClosed and bgRefreshInFlight, and makes
+	// checking them and registering with bgRefreshes one step, so shutdown
+	// cannot miss a renewal that starts just as it begins.
+	bgRefreshMu       sync.Mutex
+	bgRefreshClosed   bool
+	bgRefreshCtx      context.Context // cancelled when shutdown begins
+	bgRefreshCancel   context.CancelFunc
+	bgRefreshInFlight map[string]bool // provider ID -> ahead-of-time renewal running
+	bgRefreshes       sync.WaitGroup
+	// refreshAhead performs an ahead-of-time renewal. Nil means the
+	// config store's RefreshOAuthToken; tests substitute their own.
+	refreshAhead func(ctx context.Context, providerID string) error
 }
 
 // CoordinatorOptions holds the dependencies for NewCoordinator. Using a
@@ -1687,6 +1711,7 @@ func (c *coordinator) Cancel(sessionID string) {
 func (c *coordinator) CancelAll() {
 	c.currentAgent().CancelAll()
 	c.stopAllDispatched(stopForShutdown, 5*time.Second)
+	c.stopBackgroundRefreshes(backgroundRefreshShutdownWait)
 }
 
 func (c *coordinator) ClearQueue(sessionID string) {
@@ -1790,13 +1815,154 @@ func (c *coordinator) GenerateTitle(ctx context.Context, sessionID, prompt strin
 	agent.GenerateTitle(ctx, sessionID, prompt)
 }
 
-// refreshTokenIfExpired proactively refreshes the OAuth token if it has expired.
+// refreshTokenIfExpired brings the OAuth credential up to date before a
+// turn uses it.
+//
+// It reconciles with disk first, then renews: early and in the background
+// when the token is merely nearing its deadline, and inline only once it
+// has crossed it.
+//
+// Every outcome is logged. A turn that should have refreshed and did not
+// looks exactly like one that had nothing to do, so without the skip line
+// there is no way to tell a broken expiry check from a healthy token.
 func (c *coordinator) refreshTokenIfExpired(ctx context.Context, providerCfg config.ProviderConfig) error {
-	if providerCfg.OAuthToken == nil || !providerCfg.OAuthToken.IsExpired() {
+	if providerCfg.OAuthToken == nil {
 		return nil
 	}
-	slog.Debug("Token needs to be refreshed", "provider", providerCfg.ID)
-	return c.refreshOAuth2Token(ctx, providerCfg)
+
+	// Disk is the authority on which credential is current, since a peer
+	// may have rotated ours away while this session sat idle. Reconcile
+	// before judging expiry so the decision is made against the live
+	// token rather than against a snapshot from hours ago.
+	if adopted, err := c.cfg.AdoptNewerDiskToken(config.ScopeGlobal, providerCfg.ID); err != nil {
+		slog.Warn("Failed to reconcile the OAuth token with disk",
+			"provider", providerCfg.ID, "error", err)
+	} else if adopted {
+		if current, ok := c.cfg.Config().Providers.Get(providerCfg.ID); ok {
+			providerCfg = current
+		}
+		if err := c.rebuildModels(ctx); err != nil {
+			return err
+		}
+	}
+
+	token := providerCfg.OAuthToken
+	if token.IsExpired() {
+		slog.Info("OAuth token expired, refreshing before the turn",
+			"provider", providerCfg.ID,
+			"refresh_token", token.Fingerprint(),
+			"expires_in_s", token.ExpiresInSeconds())
+		return c.refreshOAuth2Token(ctx, providerCfg)
+	}
+
+	if token.ShouldRefreshAhead() {
+		c.refreshOAuth2TokenAhead(ctx, providerCfg)
+		return nil
+	}
+
+	slog.Debug("OAuth token still valid, not refreshing",
+		"provider", providerCfg.ID,
+		"refresh_token", token.Fingerprint(),
+		"expires_in_s", token.ExpiresInSeconds())
+	return nil
+}
+
+// refreshOAuth2TokenAhead renews a credential that is nearing its deadline
+// without making the turn wait for it. The current token is still good, so
+// a failure here costs nothing: the turn proceeds, and if the renewal never
+// lands the inline path picks it up once the token actually expires.
+//
+// The work is detached from the turn's context so that finishing or
+// cancelling the turn does not abort an exchange already in flight, since
+// abandoning one halfway is how a rotated token gets lost. At most one
+// renewal per provider runs at a time, none start once shutdown has begun,
+// and shutdown waits for the ones running to save their result.
+func (c *coordinator) refreshOAuth2TokenAhead(ctx context.Context, providerCfg config.ProviderConfig) {
+	c.bgRefreshMu.Lock()
+	if c.bgRefreshClosed || c.bgRefreshInFlight[providerCfg.ID] {
+		c.bgRefreshMu.Unlock()
+		return
+	}
+	if c.bgRefreshInFlight == nil {
+		c.bgRefreshInFlight = make(map[string]bool)
+	}
+	if c.bgRefreshCtx == nil {
+		c.bgRefreshCtx, c.bgRefreshCancel = context.WithCancel(context.Background())
+	}
+	shutdownCtx := c.bgRefreshCtx
+	c.bgRefreshInFlight[providerCfg.ID] = true
+	c.bgRefreshes.Add(1)
+	c.bgRefreshMu.Unlock()
+
+	token := providerCfg.OAuthToken
+	slog.Info("OAuth token nearing expiry, refreshing ahead of the turn",
+		"provider", providerCfg.ID,
+		"refresh_token", token.Fingerprint(),
+		"expires_in_s", token.ExpiresInSeconds())
+
+	// Detached from the turn, but cancelled when shutdown begins. The store
+	// checks this context while waiting for the refresh lock and right
+	// before the exchange; once an exchange has started it runs to
+	// completion regardless, and shutdown waits for it.
+	detached, cancel := context.WithTimeout(context.WithoutCancel(ctx), aheadRefreshTimeout)
+	stopOnShutdown := context.AfterFunc(shutdownCtx, cancel)
+	go func() {
+		defer func() {
+			stopOnShutdown()
+			cancel()
+			c.bgRefreshMu.Lock()
+			delete(c.bgRefreshInFlight, providerCfg.ID)
+			c.bgRefreshMu.Unlock()
+			c.bgRefreshes.Done()
+		}()
+		refresh := c.refreshAhead
+		if refresh == nil {
+			refresh = func(ctx context.Context, providerID string) error {
+				return c.cfg.RefreshOAuthToken(ctx, config.ScopeGlobal, providerID)
+			}
+		}
+		if err := refresh(detached, providerCfg.ID); err != nil {
+			slog.Warn("Ahead-of-time OAuth refresh failed; continuing with the current token",
+				"provider", providerCfg.ID, "error", err)
+			return
+		}
+		// Rebuild only when the credential actually changed. A refresh
+		// that found the token just issued leaves it as it was.
+		if live, ok := c.cfg.Config().Providers.Get(providerCfg.ID); ok &&
+			live.OAuthToken != nil && live.OAuthToken.AccessToken == token.AccessToken {
+			return
+		}
+		if err := c.rebuildModels(detached); err != nil {
+			slog.Warn("Failed to rebuild models after ahead-of-time OAuth refresh",
+				"provider", providerCfg.ID, "error", err)
+		}
+	}()
+}
+
+// stopBackgroundRefreshes stops new ahead-of-time OAuth renewals from
+// starting, cancels those that have not reached the provider yet, and
+// waits up to timeout for those whose exchange is in flight. An exchange that
+// has reached the provider has already retired the refresh token it
+// spent, so exiting before its replacement is saved would leave the next
+// start holding a credential the provider has forgotten.
+func (c *coordinator) stopBackgroundRefreshes(timeout time.Duration) {
+	c.bgRefreshMu.Lock()
+	c.bgRefreshClosed = true
+	if c.bgRefreshCancel != nil {
+		c.bgRefreshCancel()
+	}
+	c.bgRefreshMu.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		c.bgRefreshes.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(timeout):
+		slog.Warn("Shutting down with an OAuth refresh still in flight", "waited", timeout)
+	}
 }
 
 // retryAfterUnauthorized attempts to refresh credentials after an auth error
@@ -1804,21 +1970,35 @@ func (c *coordinator) refreshTokenIfExpired(ctx context.Context, providerCfg con
 // refresh token is revoked, and for Bedrock providers whose AWS SSO session
 // has expired, it triggers interactive re-authentication and blocks until the
 // user completes it (or the context is cancelled).
-func (c *coordinator) retryAfterUnauthorized(ctx context.Context, providerCfg config.ProviderConfig) error {
+//
+// rejected is the OAuth token the refused request was sent with, if known.
+func (c *coordinator) retryAfterUnauthorized(ctx context.Context, providerCfg config.ProviderConfig, rejected *oauth.Token) error {
 	switch {
 	case providerCfg.OAuthToken != nil:
 		slog.Debug("Received 401. Refreshing token and retrying", "provider", providerCfg.ID)
-		if err := c.refreshOAuth2Token(ctx, providerCfg); err != nil {
+		if err := c.refreshRejectedOAuth2Token(ctx, providerCfg, rejected); err != nil {
 			// If the refresh token was revoked, trigger interactive
 			// re-auth and wait for the user to complete it.
 			var exchangeErr *oauth.TokenExchangeError
-			if c.notify != nil && errors.As(err, &exchangeErr) && exchangeErr.IsRefreshTokenRevoked() {
-				slog.Info("Refresh token revoked, waiting for re-authentication", "provider", providerCfg.ID)
-				c.notify.Publish(pubsub.CreatedEvent, notify.Notification{
-					Type:       notify.TypeReAuthenticate,
-					ProviderID: providerCfg.ID,
-				})
-				return c.waitForInteractiveReauth(ctx, providerCfg.ID)
+			if errors.As(err, &exchangeErr) && exchangeErr.IsRefreshTokenRevoked() {
+				// A rejected exchange also happens when a peer rotated
+				// the family and its replacement had not reached disk
+				// yet, which is indistinguishable from revocation here.
+				// Look once more before spending the user's attention.
+				if adopted, adoptErr := c.cfg.AdoptPeerRefreshedToken(ctx, config.ScopeGlobal, providerCfg.ID); adoptErr != nil {
+					slog.Warn("Failed to look for a token refreshed by another session",
+						"provider", providerCfg.ID, "error", adoptErr)
+				} else if adopted {
+					return c.rebuildModels(ctx)
+				}
+				if c.notify != nil {
+					slog.Info("Refresh token revoked, waiting for re-authentication", "provider", providerCfg.ID)
+					c.notify.Publish(pubsub.CreatedEvent, notify.Notification{
+						Type:       notify.TypeReAuthenticate,
+						ProviderID: providerCfg.ID,
+					})
+					return c.waitForInteractiveReauth(ctx, providerCfg.ID)
+				}
 			}
 			return err
 		}
@@ -1885,13 +2065,32 @@ func (c *coordinator) makeAuthRefreshCallback(providerCfg config.ProviderConfig)
 		providerCfg.AWSAuthRefresh == "" {
 		return nil
 	}
+	// The callback is built just before the request goes out, so the live
+	// token now is the one a 401 will have refused. Remembering it lets a
+	// burst of refusals renew once instead of once each.
+	var rejected *oauth.Token
+	if live, ok := c.cfg.Config().Providers.Get(providerCfg.ID); ok {
+		rejected = live.OAuthToken
+	}
 	return func(ctx context.Context, _ *fantasy.ProviderError) error {
-		return c.retryAfterUnauthorized(ctx, providerCfg)
+		return c.retryAfterUnauthorized(ctx, providerCfg, rejected)
 	}
 }
 
+// refreshOAuth2Token renews an expired OAuth credential and rebuilds the
+// models so the next request carries it.
 func (c *coordinator) refreshOAuth2Token(ctx context.Context, providerCfg config.ProviderConfig) error {
 	if err := c.cfg.RefreshOAuthToken(ctx, config.ScopeGlobal, providerCfg.ID); err != nil {
+		slog.Error("Failed to refresh expired OAuth token", "provider", providerCfg.ID, "error", err)
+		return err
+	}
+	return c.rebuildModels(ctx)
+}
+
+// refreshRejectedOAuth2Token renews an OAuth credential the provider just
+// refused, unless it was already replaced since, and rebuilds the models.
+func (c *coordinator) refreshRejectedOAuth2Token(ctx context.Context, providerCfg config.ProviderConfig, rejected *oauth.Token) error {
+	if err := c.cfg.RefreshRejectedOAuthToken(ctx, config.ScopeGlobal, providerCfg.ID, rejected); err != nil {
 		slog.Error("Failed to refresh OAuth token after 401 error", "provider", providerCfg.ID, "error", err)
 		return err
 	}

@@ -77,17 +77,19 @@ type Models struct {
 	com          *common.Common
 	isOnboarding bool
 
-	modelType ModelType
-	providers []catwalk.Provider
+	modelType          ModelType
+	providers          []catwalk.Provider
+	showConfiguredOnly bool
 
 	keyMap struct {
-		Tab      key.Binding
-		UpDown   key.Binding
-		Select   key.Binding
-		Edit     key.Binding
-		Next     key.Binding
-		Previous key.Binding
-		Close    key.Binding
+		Tab          key.Binding
+		UpDown       key.Binding
+		Select       key.Binding
+		Edit         key.Binding
+		Next         key.Binding
+		Previous     key.Binding
+		ToggleFilter key.Binding
+		Close        key.Binding
 	}
 	list  *ModelsList
 	input textinput.Model
@@ -140,6 +142,10 @@ func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
 	m.keyMap.Previous = key.NewBinding(
 		key.WithKeys("up", "ctrl+p"),
 		key.WithHelp("↑", "previous item"),
+	)
+	m.keyMap.ToggleFilter = key.NewBinding(
+		key.WithKeys("ctrl+f"),
+		key.WithHelp("ctrl+f", "toggle configured"),
 	)
 	m.keyMap.Close = CloseKey
 
@@ -208,6 +214,14 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 				ModelType:      modelItem.SelectedModelType(),
 				ReAuthenticate: isEdit,
 			}
+		case key.Matches(msg, m.keyMap.ToggleFilter):
+			if m.isOnboarding {
+				break
+			}
+			m.showConfiguredOnly = !m.showConfiguredOnly
+			if err := m.setProviderItems(); err != nil {
+				return util.ReportError(err)
+			}
 		case key.Matches(msg, m.keyMap.Tab):
 			if m.isOnboarding {
 				break
@@ -274,7 +288,12 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	rc := NewRenderContext(t, width)
 	rc.Title = "Switch Model"
-	rc.TitleInfo = m.modelTypeRadioView()
+	var titleInfo string
+	if m.showConfiguredOnly {
+		titleInfo = "  " + t.Dialog.Models.ConfiguredText.Render("Configured only") + "  "
+	}
+	titleInfo += m.modelTypeRadioView()
+	rc.TitleInfo = titleInfo
 
 	if m.isOnboarding {
 		titleText := t.Dialog.PrimaryText.Render("To start, let's choose a provider and model.")
@@ -317,12 +336,11 @@ func (m *Models) ShortHelp() []key.Binding {
 	h := []key.Binding{
 		m.keyMap.UpDown,
 		m.keyMap.Tab,
-		m.keyMap.Select,
+		m.keyMap.ToggleFilter,
 	}
 	if m.isSelectedConfigured() {
 		h = append(h, m.keyMap.Edit)
 	}
-	h = append(h, m.keyMap.Close)
 	return h
 }
 
@@ -413,6 +431,11 @@ func (m *Models) setProviderItems() error {
 
 		providerConfig, providerConfigured := cfg.Providers.Get(providerID)
 		if providerConfigured && providerConfig.Disable {
+			continue
+		}
+
+		// When configured-only filter is active, skip unconfigured providers.
+		if m.showConfiguredOnly && !providerConfigured {
 			continue
 		}
 

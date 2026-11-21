@@ -54,6 +54,13 @@ import (
 
 var clientHost string
 
+// spawnedServerEnv marks a server that a client process started on its
+// behalf. Such a server shuts itself down once idle so it cannot outlive
+// the client; a server started explicitly with `crush server` has no such
+// marker and keeps running. The variable is set on the child environment by
+// [detachedServerCmd] and read by the server command.
+const spawnedServerEnv = "CRUSH_SPAWNED_SERVER"
+
 func init() {
 	rootCmd.PersistentFlags().StringP("cwd", "c", "", "Current working directory")
 	rootCmd.PersistentFlags().StringP("data-dir", "D", "", "Custom crush data directory")
@@ -1237,6 +1244,9 @@ func detachedServerCmd(exe, dir string, args ...string) *exec.Cmd {
 	// process's lifetime.
 	c := exec.CommandContext(context.Background(), exe, args...)
 	c.Dir = dir
+	// Tell the server a client spawned it, so it keeps the idle shutdown
+	// that stops it from outliving that client.
+	c.Env = append(os.Environ(), spawnedServerEnv+"=1")
 	return c
 }
 

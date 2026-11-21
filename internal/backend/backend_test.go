@@ -29,11 +29,13 @@ func newTestBackend(t *testing.T) (*Backend, *atomic.Int32) {
 	t.Helper()
 	var shutdownCount atomic.Int32
 	b := &Backend{
-		workspaces:  csync.NewMap[string, *Workspace](),
-		pathIndex:   make(map[string]string),
-		ctx:         context.Background(),
-		createGrace: 50 * time.Millisecond,
-		shutdownFn:  func() { shutdownCount.Add(1) },
+		workspaces:   csync.NewMap[string, *Workspace](),
+		pathIndex:    make(map[string]string),
+		ctx:          context.Background(),
+		createGrace:  50 * time.Millisecond,
+		idleShutdown: true,
+		autoClose:    true,
+		shutdownFn:   func() { shutdownCount.Add(1) },
 	}
 	return b, &shutdownCount
 }
@@ -1507,6 +1509,77 @@ func TestServer_ShutsDownAfterLingerWhenIdle(t *testing.T) {
 	require.Eventually(t, func() bool { return shutdownCount.Load() == 1 },
 		2*time.Second, 10*time.Millisecond,
 		"idle server must shut down after the linger window")
+}
+
+// TestServer_DisabledIdleShutdownKeepsServerUp covers a server the user
+// started explicitly with `crush server`: neither the idle timer armed at
+// startup nor the last client leaving may shut it down. It runs until it
+// is stopped.
+func TestServer_DisabledIdleShutdownKeepsServerUp(t *testing.T) {
+	t.Parallel()
+
+	b, shutdownCount := newTestBackend(t)
+	b.SetIdleShutdownDelay(100 * time.Millisecond)
+	b.DisableIdleShutdown()
+
+	b.ArmIdleShutdown()
+	require.Zero(t, shutdownCount.Load(),
+		"the startup idle timer must not shut down a server with idle shutdown disabled")
+
+	wsA, _ := insertTestWorkspace(t, b, "/tmp/no-linger")
+	cidA := newClientID(t)
+	require.NoError(t, b.AttachClient(wsA.ID, cidA))
+	b.DetachClient(wsA.ID, cidA)
+
+	require.Never(t, func() bool { return shutdownCount.Load() > 0 },
+		500*time.Millisecond, 10*time.Millisecond,
+		"a server with idle shutdown disabled must stay up when idle")
+}
+
+// TestDisableWorkspaceAutoClose_KeepsHeadlessWork covers a server started
+// explicitly with `crush server`: neither an expired creation hold, a
+// detached stream, nor a retired client may close the workspace. Explicit
+// deletion still does.
+func TestDisableWorkspaceAutoClose_KeepsHeadlessWork(t *testing.T) {
+	t.Parallel()
+
+	b, serverShutdowns := newTestBackend(t)
+	b.DisableIdleShutdown()
+	b.DisableWorkspaceAutoClose()
+	b.createGrace = time.Millisecond
+	b.SetDetachGrace(time.Millisecond)
+
+	ws, wsShutdowns := insertTestWorkspace(t, b, "/tmp/headless-work")
+	cid := newClientID(t)
+
+	b.registerClient(ws, cid)
+	time.Sleep(50 * time.Millisecond)
+
+	require.NoError(t, b.AttachClient(ws.ID, cid))
+	b.DetachClient(ws.ID, cid)
+	time.Sleep(50 * time.Millisecond)
+
+	require.NoError(t, b.RetireClient(cid))
+	time.Sleep(50 * time.Millisecond)
+
+	_, err := b.GetWorkspace(ws.ID)
+	require.NoError(t, err, "the workspace must remain open for headless work")
+	ws.clientsMu.Lock()
+	_, claimExists := ws.clients[cid]
+	ws.clientsMu.Unlock()
+	require.True(t, claimExists, "the retired client's claim must remain")
+	require.Zero(t, wsShutdowns.Load(), "the workspace must not be torn down")
+	require.Zero(t, serverShutdowns.Load(), "the server must remain open")
+
+	require.NoError(t, b.DeleteWorkspace(ws.ID, cid))
+	require.Eventually(t, func() bool {
+		_, err := b.GetWorkspace(ws.ID)
+		return errors.Is(err, ErrWorkspaceNotFound)
+	}, time.Second, 10*time.Millisecond,
+		"an explicit delete must still release the workspace")
+	require.Equal(t, int32(1), wsShutdowns.Load())
+	require.Zero(t, serverShutdowns.Load(),
+		"deleting the last workspace must not shut down an explicitly started server")
 }
 
 // -- Detach grace --

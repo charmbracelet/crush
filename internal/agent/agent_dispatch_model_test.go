@@ -243,7 +243,7 @@ func TestOverrideDispatchAgent(t *testing.T) {
 		Provider: "other",
 	}, parent)
 	require.Empty(t, refusal)
-	require.Len(t, c.overrideModels, 1)
+	require.Len(t, c.builds, 1)
 
 	_, _, _, refusal = c.overrideDispatchAgent(ctx, accessRead, AgentDispatchParams{
 		Provider: "other",
@@ -257,7 +257,7 @@ func TestOverrideModelRefreshedOnRebuild(t *testing.T) {
 	c, _ := newOverrideTestCoordinator(t)
 	ctx := t.Context()
 
-	entry, err := c.overrideModel(config.SelectedModel{Provider: "other", Model: "other-model"})
+	entry, err := c.sharedBuild(config.SelectedModel{Provider: "other", Model: "other-model"}, true)
 	require.NoError(t, err)
 	first := entry.current(c)
 	require.Equal(t, "other-model", first.ModelCfg.Model)
@@ -275,9 +275,9 @@ func TestOverrideModelFailureIsNotCached(t *testing.T) {
 	t.Parallel()
 	c, _ := newOverrideTestCoordinator(t)
 
-	_, err := c.overrideModel(config.SelectedModel{Provider: "nope", Model: "x"})
+	_, err := c.sharedBuild(config.SelectedModel{Provider: "nope", Model: "x"}, true)
 	require.Error(t, err)
-	require.Empty(t, c.overrideModels)
+	require.Empty(t, c.builds)
 }
 
 func dispatchOverrideCall(t *testing.T, id, label, access, model, provider string) message.ToolCall {
@@ -331,11 +331,8 @@ func TestDispatchToolRunsOverrideModel(t *testing.T) {
 	c, env := newOverrideTestCoordinator(t)
 	ctx := t.Context()
 
-	// A parent model gives a model-only override a provider to inherit.
-	agents, err := c.taskAgents(ctx, false)
-	require.NoError(t, err)
-
-	tool, err := c.agentDispatchTool(ctx, config.AgentCoder, agents[accessRead].Model)
+	// The parent session's model gives a model-only override a provider.
+	tool, err := c.agentDispatchTool(ctx, config.AgentCoder)
 	require.NoError(t, err)
 
 	parent, err := env.sessions.Create(ctx, "parent")
@@ -461,13 +458,6 @@ func TestRehydrateDispatchRestoresModelOverride(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// The parent the session has now runs on "other", so a parent fallback
-	// would resolve "crash" onto the wrong provider and fail.
-	c.mainAgent = &mockSessionAgent{model: Model{
-		Model:    c.mainModels().Large.Model,
-		ModelCfg: config.SelectedModel{Provider: "other", Model: "other-model"},
-	}}
-
 	for _, callID := range []string{"c1", "c2", "c3"} {
 		childID := env.sessions.CreateAgentToolSessionID(firstAssistant.ID, callID)
 		_, err := env.sessions.CreateTaskSession(ctx, childID, parent.ID, "Subagent")
@@ -500,6 +490,19 @@ func TestRehydrateDispatchRestoresModelOverride(t *testing.T) {
 	require.Equal(t, "other-model", entry.agent.Model().ModelCfg.Model)
 	require.Equal(t, "other", entry.agent.Model().ModelCfg.Provider)
 
+	// A reasoning override rides the session's selection, keeping its
+	// configured settings, instead of rebuilding a bare selection from the
+	// recorded model.
+	entry, err = c.rehydrateDispatch(ctx, parent.ID, "thunk")
+	require.NoError(t, err)
+	want := c.subAgentModels().Large.ModelCfg
+	want.ReasoningEffort = "high"
+	require.Equal(t, want, entry.agent.Model().ModelCfg, "a reasoning override keeps the default selection's settings")
+
+	// The parent session runs on "other" by now, so a parent fallback would
+	// resolve "crash" onto the wrong provider and fail.
+	require.NoError(t, c.SetSessionModel(ctx, parent.ID, config.SelectedModel{Provider: "other", Model: "other-model"}))
+
 	// The metadata records the resolved provider, so the parent running on
 	// "other" by now does not matter.
 	entry, err = c.rehydrateDispatch(ctx, parent.ID, "mono")
@@ -520,15 +523,6 @@ func TestRehydrateDispatchRestoresModelOverride(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "other-model", entry.agent.Model().ModelCfg.Model)
 	require.Equal(t, "other", entry.agent.Model().ModelCfg.Provider)
-
-	// A reasoning override rides the default selection, keeping its
-	// configured settings, instead of rebuilding a bare selection from the
-	// recorded model.
-	entry, err = c.rehydrateDispatch(ctx, parent.ID, "thunk")
-	require.NoError(t, err)
-	want := c.subAgentModels().Large.ModelCfg
-	want.ReasoningEffort = "high"
-	require.Equal(t, want, entry.agent.Model().ModelCfg, "a reasoning override keeps the default selection's settings")
 
 	// A dispatch whose model no longer resolves is not silently resumed on
 	// the session default.
@@ -646,11 +640,9 @@ func TestAgentSendMovesSubagentToAnotherModel(t *testing.T) {
 	t.Parallel()
 	c, env := newOverrideTestCoordinator(t)
 	ctx := t.Context()
-	agents, err := c.taskAgents(ctx, false)
+	dispatch, err := c.agentDispatchTool(ctx, config.AgentCoder)
 	require.NoError(t, err)
-	dispatch, err := c.agentDispatchTool(ctx, config.AgentCoder, agents[accessRead].Model)
-	require.NoError(t, err)
-	send := c.agentSendTool(agents[accessRead].Model)
+	send := c.agentSendTool()
 
 	parent, err := env.sessions.Create(ctx, "parent")
 	require.NoError(t, err)

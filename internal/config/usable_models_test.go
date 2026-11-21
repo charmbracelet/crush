@@ -19,10 +19,11 @@ func TestProviderConfigUsableModels(t *testing.T) {
 		p    ProviderConfig
 		want []catwalk.Model
 	}{
-		{"api key lists the catalog", ProviderConfig{ID: "openai", Models: api, ChatGPTModels: sub}, api},
-		{"chatgpt login lists the subscription", ProviderConfig{ID: "openai", Models: api, ChatGPTModels: sub, OAuthToken: token}, sub},
-		{"grok login lists the subscription", ProviderConfig{ID: "xai", Models: api, GrokModels: sub, OAuthToken: token}, sub},
-		{"other oauth providers keep the catalog", ProviderConfig{ID: "copilot", Models: api, OAuthToken: token}, api},
+		{"api key lists the catalog", ProviderConfig{ID: "openai", Models: api, SubscriptionCatalog: sub}, api},
+		{"chatgpt login lists the subscription", ProviderConfig{ID: "openai", Models: api, SubscriptionCatalog: sub, OAuthToken: token}, sub},
+		{"grok login lists the subscription", ProviderConfig{ID: "xai", Models: api, SubscriptionCatalog: sub, OAuthToken: token}, sub},
+		{"an unfetched subscription falls back to the catalog", ProviderConfig{ID: "copilot", Models: api, OAuthToken: token}, api},
+		{"other oauth providers keep the catalog", ProviderConfig{ID: "hyper", Models: api, SubscriptionCatalog: sub, OAuthToken: token}, api},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -40,6 +41,6 @@ func TestProviderConfigSubscriptionModels(t *testing.T) {
 	models, ok := ProviderConfig{ID: "openai", OAuthToken: token}.SubscriptionModels()
 	require.True(t, ok)
 	require.Nil(t, models, "signed in but the list is not fetched yet")
-	_, ok = ProviderConfig{ID: "copilot", OAuthToken: token}.SubscriptionModels()
-	require.False(t, ok)
+	_, ok = ProviderConfig{ID: "hyper", OAuthToken: token}.SubscriptionModels()
+	require.False(t, ok, "hyper logins keep the regular catalog")
 }

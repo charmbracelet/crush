@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
@@ -500,8 +501,11 @@ type UI struct {
 
 	// mouse highlighting related state
 	lastClickTime time.Time
-	hoverX        int
-	hoverY        int
+	// lastActivation is where and when a click last activated a control.
+	// See the tea.MouseClickMsg case in Update.
+	lastActivation clickActivation
+	hoverX         int
+	hoverY         int
 
 	// subAgentsRunning is how many subagents were still working as of the
 	// last update. Counting them walks the whole transcript, and the header
@@ -913,13 +917,35 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		paste.Content = strings.ReplaceAll(paste.Content, "\r\n", "\n")
 		msg = paste
 	}
+	if click, ok := msg.(tea.MouseClickMsg); ok {
+		// We only use the left button for now.
+		if click.Button != tea.MouseLeft {
+			return m, nil
+		}
+		// A habitual double-click sends its second click right after the
+		// first one opened, closed, or toggled something. Ignoring that
+		// second press on the same cell stops it from acting on whatever is
+		// now under the pointer, while a quick click elsewhere still acts.
+		if m.lastActivation.repeatedBy(click) {
+			return m, nil
+		}
+	}
 	// An open dialog is modal: it takes pointer input and pastes, and
 	// nothing it covers sees them.
 	if m.dialog.HasDialogs() {
 		switch msg := msg.(type) {
 		case tea.MouseClickMsg:
-			return m, m.handleDialogMsg(msg)
-		case tea.MouseMotionMsg, tea.MouseReleaseMsg, common.CoalescedWheelMsg:
+			m.releasePointerBeneathDialog()
+			action := m.dialog.Update(msg)
+			if dialog.Activates(action) {
+				m.lastActivation = activatedBy(msg)
+			}
+			return m, m.handleDialogAction(action)
+		case tea.MouseMotionMsg, tea.MouseReleaseMsg:
+			m.releasePointerBeneathDialog()
+			m.dialog.Update(msg)
+			return m, nil
+		case common.CoalescedWheelMsg:
 			m.dialog.Update(msg)
 			return m, nil
 		case tea.PasteMsg:
@@ -1303,6 +1329,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Handle delayed single-click action (e.g., expansion).
 		m.chat.HandleDelayedClick(msg)
 	case tea.MouseClickMsg:
+		// Clicks in the textarea move the cursor, which re-checks its @word.
+		if m.completionsOpen && !image.Pt(msg.X, msg.Y).In(m.textareaArea()) {
+			m.closeCompletions()
+		}
+
 		// Route clicks to inline editors that support mouse interaction.
 		if m.activeInline != nil {
 			if selectable, ok := m.activeInline.(dialog.MouseSelectableEditor); ok &&
@@ -1311,6 +1342,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if clickable, ok := m.activeInline.(dialog.MouseClickableEditor); ok {
 				if done, handled := clickable.HandleMouseClick(msg.X, msg.Y); handled {
+					m.lastActivation = activatedBy(msg)
+					if cmd := m.handleClickFocus(msg); cmd != nil {
+						cmds = append(cmds, cmd)
+					}
 					if done {
 						prev := m.activeInline
 						m.activeInline = nil
@@ -1334,9 +1369,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Check if the click landed on an attachment's remove button.
 		// The attachment chips are rendered on the first row of the
 		// editor layout area, above the textarea.
-		if m.activeInline == nil && msg.Button == uv.MouseLeft && len(m.attachments.List()) > 0 && msg.Y == m.layout.editor.Min.Y {
+		if m.activeInline == nil && len(m.attachments.List()) > 0 && msg.Y == m.layout.editor.Min.Y {
 			relX := msg.X - m.layout.editor.Min.X
 			if m.changeAttachments(func() bool { return m.attachments.HandleClick(relX) }) {
+				m.lastActivation = activatedBy(msg)
 				return m, tea.Batch(cmds...)
 			}
 		}
@@ -1356,7 +1392,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Adjust for chat area position
 			x -= m.layout.main.Min.X
 			y -= m.layout.main.Min.Y
-			if !image.Pt(msg.X, msg.Y).In(m.layout.sidebar) {
+			if image.Pt(msg.X, msg.Y).In(m.layout.main) {
 				if handled, cmd := m.chat.HandleMouseDown(x, y); handled {
 					m.lastClickTime = time.Now()
 					if cmd != nil {
@@ -1733,6 +1769,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// tea.Sequence.
 	m.subAgentsRunning = m.runningSubAgents()
 	if m.state == uiChat {
+		if m.dialog.HasDialogs() {
+			m.releasePointerBeneathDialog()
+		}
 		if cmd := m.ensureAnimating(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -2109,6 +2148,35 @@ func (m *UI) handleClickFocus(msg tea.MouseClickMsg) (cmd tea.Cmd) {
 	return cmd
 }
 
+// clickActivation is where and when a left click activated a control.
+type clickActivation struct {
+	at   time.Time
+	cell image.Point
+}
+
+// activatedBy records that msg activated a control.
+func activatedBy(msg tea.MouseClickMsg) clickActivation {
+	return clickActivation{at: time.Now(), cell: image.Pt(msg.X, msg.Y)}
+}
+
+// repeatedBy reports whether msg is the second press of a double click that
+// began with this activation: a click on the same cell, soon after.
+func (a clickActivation) repeatedBy(msg tea.MouseClickMsg) bool {
+	return image.Pt(msg.X, msg.Y) == a.cell && time.Since(a.at) < doubleClickThreshold
+}
+
+// releasePointerBeneathDialog ends gestures begun beneath a dialog, because
+// the dialog now receives their remaining motion and release.
+func (m *UI) releasePointerBeneathDialog() {
+	if m.chat.mouseDown {
+		m.chat.ClearMouse()
+	}
+	if m.textareaMouseSelecting {
+		m.textareaMouseSelecting = false
+		m.textarea.EndSelection()
+	}
+}
+
 // focusActiveInline moves focus between an inline editor and the chat while
 // preserving the editor and reconciling any collapsed layout.
 func (m *UI) focusActiveInline(focus uiFocusState) {
@@ -2277,8 +2345,12 @@ func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.
 }
 
 func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
+	return m.handleDialogAction(m.dialog.Update(msg))
+}
+
+// handleDialogAction applies an action the front dialog returned.
+func (m *UI) handleDialogAction(action dialog.Action) tea.Cmd {
 	var cmds []tea.Cmd
-	action := m.dialog.Update(msg)
 	if action == nil {
 		return tea.Batch(cmds...)
 	}
@@ -3571,7 +3643,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 				// Check for @ trigger before passing to textarea.
 				curValue := m.textarea.Value()
-				curIdx := len(curValue)
+				curIdx := m.textareaCursorOffset()
 
 				// Trigger completions on @.
 				if msg.String() == "@" && !m.completionsOpen {
@@ -3628,25 +3700,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				// After updating textarea, check if we need to filter completions.
 				// Skip filtering on the initial @ keystroke since items are loading async.
 				if m.completionsOpen && msg.String() != "@" {
-					newValue := m.textarea.Value()
-					newIdx := len(newValue)
-
-					// Close completions if cursor moved before start.
-					if newIdx <= m.completionsStartIndex {
-						m.closeCompletions()
-					} else if msg.String() == "space" {
-						// Close on space.
-						m.closeCompletions()
-					} else {
-						// Extract current word and filter.
-						word := m.textareaWord()
-						if strings.HasPrefix(word, "@") {
-							m.completionsQuery = word[1:]
-							m.completions.Filter(m.completionsQuery)
-						} else if m.completionsOpen {
-							m.closeCompletions()
-						}
-					}
+					m.syncCompletionsToCursor()
 				}
 			}
 		case uiFocusMain:
@@ -4475,21 +4529,22 @@ func (m *UI) updateTextarea(msg tea.Msg) tea.Cmd {
 	return m.updateTextareaWithPrevHeight(msg, m.textarea.Height())
 }
 
+// textareaArea is where the textarea is drawn inside layout.editor, below
+// the attachments row. renderEditorView always reserves that first row (an
+// empty line when there are none), so the textarea starts one row lower.
+func (m *UI) textareaArea() image.Rectangle {
+	const attachmentsRow = 1
+	origin := image.Pt(m.layout.editor.Min.X, m.layout.editor.Min.Y+attachmentsRow)
+	return image.Rectangle{Min: origin, Max: origin.Add(image.Pt(m.layout.editor.Dx(), m.textarea.Height()))}
+}
+
 // forwardMouseToTextarea forwards a mouse event to the textarea with
 // coordinates translated into the textarea's local space. It reports whether
 // the event landed within the textarea's rendered region and was forwarded.
 func (m *UI) forwardMouseToTextarea(msg tea.MouseMsg) (bool, tea.Cmd) {
 	mouse := msg.Mouse()
-
-	// The textarea is rendered inside layout.editor below the attachments
-	// row. renderEditorView always reserves the first row for attachments
-	// (an empty line when there are none), so the textarea always starts
-	// one row below the editor top.
-	const attachmentsRow = 1
-	origin := image.Pt(m.layout.editor.Min.X, m.layout.editor.Min.Y+attachmentsRow)
-
-	// The textarea occupies its own height starting at the origin.
-	area := image.Rectangle{Min: origin, Max: origin.Add(image.Pt(m.layout.editor.Dx(), m.textarea.Height()))}
+	area := m.textareaArea()
+	origin := area.Min
 	if !image.Pt(mouse.X, mouse.Y).In(area) {
 		return false, nil
 	}
@@ -4503,17 +4558,16 @@ func (m *UI) forwardMouseToTextarea(msg tea.MouseMsg) (bool, tea.Cmd) {
 
 	switch msg.(type) {
 	case tea.MouseClickMsg:
-		if rel.Button != uv.MouseLeft {
-			return false, nil
-		}
 		m.textareaMouseSelecting = true
 		m.textarea.BeginSelection(rel.X, rel.Y)
+		m.syncCompletionsToCursor()
 		return true, nil
 	case tea.MouseMotionMsg:
 		if !m.textareaMouseSelecting {
 			return true, nil
 		}
 		m.textarea.ExtendSelection(rel.X, rel.Y)
+		m.syncCompletionsToCursor()
 		return true, nil
 	case tea.MouseReleaseMsg:
 		m.textarea.EndSelection()
@@ -5137,20 +5191,21 @@ func (m *UI) closeCompletions() {
 	m.completions.Close()
 }
 
-// insertCompletionText replaces the @query in the textarea with the given text.
-// Returns false if the replacement cannot be performed.
+// insertCompletionText replaces the @word that opened the popup with text
+// and a space, and puts the cursor after that space. Returns false if the
+// @word is gone.
 func (m *UI) insertCompletionText(text string) bool {
-	value := m.textarea.Value()
-	if m.completionsStartIndex > len(value) {
+	start, end, ok := m.completionsSpan()
+	if !ok {
 		return false
 	}
-
-	word := m.textareaWord()
-	endIdx := min(m.completionsStartIndex+len(word), len(value))
-	newValue := value[:m.completionsStartIndex] + text + value[endIdx:]
-	m.textarea.SetValue(newValue)
-	m.textarea.MoveToEnd()
-	m.textarea.InsertRune(' ')
+	value := m.textarea.Value()
+	rest := value[end:]
+	if !strings.HasPrefix(rest, " ") {
+		rest = " " + rest
+	}
+	m.textarea.SetValue(value[:start] + text + rest)
+	m.setTextareaCursorOffset(start + len(text) + len(" "))
 	return true
 }
 
@@ -5280,9 +5335,73 @@ func (m *UI) completionsPosition() image.Point {
 	}
 }
 
-// textareaWord returns the current word at the cursor position.
-func (m *UI) textareaWord() string {
-	return m.textarea.Word()
+// textareaCursorOffset returns the cursor's byte offset in the textarea value.
+func (m *UI) textareaCursorOffset() int {
+	lines := strings.Split(m.textarea.Value(), "\n")
+	row := min(m.textarea.Line(), len(lines)-1)
+	offset := 0
+	for _, line := range lines[:row] {
+		offset += len(line) + 1
+	}
+	line := []rune(lines[row])
+	return offset + len(string(line[:min(m.textarea.Column(), len(line))]))
+}
+
+// setTextareaCursorOffset moves the cursor to a byte offset in the textarea
+// value, the inverse of textareaCursorOffset.
+func (m *UI) setTextareaCursorOffset(offset int) {
+	value := m.textarea.Value()
+	before := value[:offset]
+	row := strings.Count(before, "\n")
+	m.textarea.MoveToBegin()
+	// CursorDown steps through wrapped lines, at most one per byte.
+	for range len(value) {
+		if m.textarea.Line() >= row {
+			break
+		}
+		m.textarea.CursorDown()
+	}
+	m.textarea.SetCursorColumn(utf8.RuneCountInString(before[strings.LastIndexByte(before, '\n')+1:]))
+}
+
+// syncCompletionsToCursor filters by the @word under the cursor, and closes
+// the popup once the cursor leaves the @word that opened it. Accepting a
+// completion replaces that word, so another @word must not reuse the popup.
+func (m *UI) syncCompletionsToCursor() {
+	if !m.completionsOpen {
+		return
+	}
+	start, end, ok := m.completionsSpan()
+	if !ok {
+		m.closeCompletions()
+		return
+	}
+	cursor := m.textareaCursorOffset()
+	if cursor <= start {
+		m.closeCompletions()
+		return
+	}
+	if cursor > end {
+		m.closeCompletions()
+		return
+	}
+	m.completionsQuery = m.textarea.Value()[start+len("@") : end]
+	m.completions.Filter(m.completionsQuery)
+}
+
+// completionsSpan returns the byte range of the @word that opened the
+// popup, from its @ up to the next whitespace. ok is false once an edit
+// has removed that @.
+func (m *UI) completionsSpan() (start, end int, ok bool) {
+	value, start := m.textarea.Value(), m.completionsStartIndex
+	if start >= len(value) || value[start] != '@' {
+		return 0, 0, false
+	}
+	end = len(value)
+	if i := strings.IndexFunc(value[start:], unicode.IsSpace); i >= 0 {
+		end = start + i
+	}
+	return start, end, true
 }
 
 // isWhitespace returns true if the byte is a whitespace character.

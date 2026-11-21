@@ -241,3 +241,45 @@ func TestFlagDenied(t *testing.T) {
 	assert.False(t, flagDenied("--utc", deny), "a long flag is not read character by character")
 	assert.False(t, flagDenied("--iso-8601=seconds", deny))
 }
+
+func TestBashGrantKey(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		command   string
+		dangerous bool
+		want      string
+	}{
+		{"git commit -m 'yolo'", false, "git"},
+		{"git status", false, "git"},
+		{"git.exe status", false, "git"},
+		{"timeout 5 git status", false, "git"},
+		// A path names a specific file, not the approved program.
+		{"/usr/bin/git log", false, "/usr/bin/git log"},
+		{"./git status", false, "./git status"},
+		{"/tmp/whatever/git status", false, "/tmp/whatever/git status"},
+		{"env /tmp/git status", false, "env /tmp/git status"},
+		{"env FOO=1 git status", false, "env FOO=1 git status"},
+		// Programs that run other code keep the exact command.
+		{"bash build.sh", false, "bash build.sh"},
+		{"bash -c 'rm -rf x'", false, "bash -c 'rm -rf x'"},
+		{"python test.py", false, "python test.py"},
+		{"python3.12 -c 'x'", false, "python3.12 -c 'x'"},
+		{"node script.js", false, "node script.js"},
+		{"npm test", false, "npm test"},
+		{"make", false, "make"},
+		{"xargs rm", false, "xargs rm"},
+		{"find . -exec rm {} +", false, "find . -exec rm {} +"},
+		{"command rm x", false, "command rm x"},
+		{"nohup nohup nohup nohup nohup rm x", false, "nohup nohup nohup nohup nohup rm x"},
+		{"git status && rm -rf x", false, "git status && rm -rf x"},
+		{"git log | head", false, "git log | head"},
+		{"FOO=1 git log", false, "FOO=1 git log"},
+		{"git log > out", false, "git log > out"},
+		{"git $(whoami)", false, "git $(whoami)"},
+		{"sudo rm -rf /", true, "sudo rm -rf /"},
+	}
+	for _, tt := range tests {
+		assert.Equal(t, tt.want, bashGrantKey(tt.command, tt.dangerous), tt.command)
+	}
+}

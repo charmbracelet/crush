@@ -2,6 +2,7 @@ package shellconfig
 
 import (
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -88,6 +89,37 @@ option context-path CRUSH.md`
 	require.Equal(t, "CRUSH.md", paths[1])
 }
 
+func TestOption_ListMultipleValues(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		key     string
+		jsonKey string
+	}{
+		{"context-path", "context_paths"},
+		{"global-context-path", "global_context_paths"},
+		{"skill-path", "skills_paths"},
+		{"disable-skill", "disabled_skills"},
+	} {
+		t.Run(tt.key, func(t *testing.T) {
+			t.Parallel()
+
+			path := filepath.Join(t.TempDir(), "crushrc")
+			script := fmt.Sprintf(`option %[1]s first
+option %[1]s "second value" third
+option %[1]s last`, tt.key)
+			jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(script))
+			require.NoError(t, err)
+
+			var result map[string]any
+			require.NoError(t, json.Unmarshal(jsonBytes, &result))
+
+			opts := result["options"].(map[string]any)
+			require.Equal(t, []any{"first", "second value", "third", "last"}, opts[tt.jsonKey])
+		})
+	}
+}
+
 func TestOption_Reset(t *testing.T) {
 	t.Parallel()
 
@@ -105,6 +137,44 @@ option reset skill-path`
 
 	opts := result["options"].(map[string]any)
 	require.Empty(t, opts["skills_paths"].([]any))
+}
+
+func TestOption_ListResetMultipleValues(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "crushrc")
+	script := `option skill-path old-a old-b
+option reset skill-path
+paths=("new path" other)
+option skill-path "${paths[@]}"`
+	jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(script))
+	require.NoError(t, err)
+
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &result))
+
+	opts := result["options"].(map[string]any)
+	require.Equal(t, []any{"new path", "other"}, opts["skills_paths"])
+}
+
+func TestOption_ListRequiresValue(t *testing.T) {
+	t.Parallel()
+
+	for _, script := range []string{
+		`option skill-path`,
+		`option skill-path ""`,
+		`option skill-path first ""`,
+		`option skill-path "" second`,
+	} {
+		t.Run(script, func(t *testing.T) {
+			t.Parallel()
+
+			path := filepath.Join(t.TempDir(), "crushrc")
+			_, err := LoadShellConfig(t.Context(), path, []byte(script))
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "requires a value")
+		})
+	}
 }
 
 func TestOption_ResetThenReadd(t *testing.T) {

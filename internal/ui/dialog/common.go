@@ -200,24 +200,6 @@ func InputCursor(t *styles.Styles, cur *tea.Cursor) *tea.Cursor {
 	return cur
 }
 
-// adjustOnboardingInputCursor removes the dialog view frame offset from an
-// input cursor. Onboarding dialogs render without Dialog.View frame, while
-// InputCursor includes that frame offset for regular dialogs.
-func adjustOnboardingInputCursor(t *styles.Styles, cur *tea.Cursor) *tea.Cursor {
-	if cur == nil {
-		return nil
-	}
-
-	dialogStyle := t.Dialog.View
-	cur.X -= dialogStyle.GetBorderLeftSize() +
-		dialogStyle.GetPaddingLeft() +
-		dialogStyle.GetMarginLeft()
-	cur.Y -= dialogStyle.GetBorderTopSize() +
-		dialogStyle.GetPaddingTop() +
-		dialogStyle.GetMarginTop()
-	return cur
-}
-
 // renameCursorOffset adjusts a cursor returned by an inline list item's
 // text input so it lands at the correct screen position inside a dialog
 // that is showing a rename prompt. The math accounts for the dialog
@@ -295,10 +277,6 @@ type RenderContext struct {
 	// renderDialogHelp so it is sized and padded consistently; it is
 	// appended as-is without further styling.
 	Help string
-	// IsOnboarding indicates whether to render the dialog as part of the
-	// onboarding flow. This means that the content will be rendered at the
-	// bottom left of the screen.
-	IsOnboarding bool
 }
 
 // NewRenderContext creates a new RenderContext with the provided styles and width.
@@ -373,8 +351,5 @@ func (rc *RenderContext) Render() string {
 	}
 
 	content := strings.Join(parts, "\n")
-	if rc.IsOnboarding {
-		return content
-	}
 	return dialogStyle.Render(content)
 }

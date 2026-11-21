@@ -51,8 +51,7 @@ const OAuthID = "oauth"
 
 // OAuth handles the OAuth flow authentication.
 type OAuth struct {
-	com          *common.Common
-	isOnboarding bool
+	com *common.Common
 
 	provider      catwalk.Provider
 	model         config.SelectedModel
@@ -89,7 +88,6 @@ var _ Dialog = (*OAuth)(nil)
 // newOAuth creates a new device flow component.
 func newOAuth(
 	com *common.Common,
-	isOnboarding bool,
 	provider catwalk.Provider,
 	model config.SelectedModel,
 	modelType config.SelectedModelType,
@@ -99,7 +97,6 @@ func newOAuth(
 
 	m := OAuth{}
 	m.com = com
-	m.isOnboarding = isOnboarding
 	m.provider = provider
 	m.model = model
 	m.modelType = modelType
@@ -310,22 +307,11 @@ func (m *OAuth) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		dialogStyle = t.Dialog.View.Width(dialogWidth)
 	)
 	m.width = dialogWidth
-	if m.isOnboarding {
-		view := m.dialogContent()
-		cur := m.cursor()
-		if cur != nil {
-			cur = adjustOnboardingInputCursor(t, cur)
-			DrawOnboardingCursor(scr, area, view, cur)
-		} else {
-			DrawOnboarding(scr, area, view)
-		}
+	view := dialogStyle.Render(m.dialogContent())
+	if cur := m.cursor(); cur != nil {
+		DrawCenterCursor(scr, area, view, cur)
 	} else {
-		view := dialogStyle.Render(m.dialogContent())
-		if cur := m.cursor(); cur != nil {
-			DrawCenterCursor(scr, area, view, cur)
-		} else {
-			DrawCenter(scr, area, view)
-		}
+		DrawCenter(scr, area, view)
 	}
 	return nil
 }
@@ -361,14 +347,10 @@ func (m *OAuth) headerContent() string {
 	var (
 		t            = m.com.Styles
 		titleStyle   = t.Dialog.Title
-		textStyle    = t.Dialog.PrimaryText
 		dialogStyle  = t.Dialog.View.Width(m.width)
 		headerOffset = titleStyle.GetHorizontalFrameSize() + dialogStyle.GetHorizontalFrameSize()
 		dialogTitle  = fmt.Sprintf("Let’s authenticate with %s", m.oAuthProvider.name())
 	)
-	if m.isOnboarding {
-		return textStyle.Render(dialogTitle)
-	}
 	return common.DialogTitle(t, titleStyle.Render(dialogTitle), m.width-headerOffset, t.Dialog.TitleGradFromColor, t.Dialog.TitleGradToColor)
 }
 

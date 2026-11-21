@@ -17,7 +17,6 @@ func newTestAuthMethod() *AuthMethod {
 	s := styles.CharmtonePantera()
 	return NewAuthMethod(
 		&common.Common{Styles: &s},
-		false,
 		catwalk.Provider{ID: catwalk.InferenceProviderOpenAI, Name: "OpenAI"},
 		config.SelectedModel{Provider: "openai", Model: "gpt-5.1"},
 		config.SelectedModelTypeLarge,

@@ -34,8 +34,7 @@ const APIKeyInputID = "api_key_input"
 
 // APIKeyInput represents a model selection dialog.
 type APIKeyInput struct {
-	com          *common.Common
-	isOnboarding bool
+	com *common.Common
 
 	provider  catwalk.Provider
 	model     config.SelectedModel
@@ -58,7 +57,6 @@ var _ Dialog = (*APIKeyInput)(nil)
 // NewAPIKeyInput creates a new Models dialog.
 func NewAPIKeyInput(
 	com *common.Common,
-	isOnboarding bool,
 	provider catwalk.Provider,
 	model config.SelectedModel,
 	modelType config.SelectedModelType,
@@ -67,7 +65,6 @@ func NewAPIKeyInput(
 
 	m := APIKeyInput{}
 	m.com = com
-	m.isOnboarding = isOnboarding
 	m.provider = provider
 	m.model = model
 	m.modelType = modelType
@@ -180,15 +177,7 @@ func (m *APIKeyInput) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	}, "\n")
 
 	cur := m.Cursor()
-
-	if m.isOnboarding {
-		view := content
-		cur = adjustOnboardingInputCursor(t, cur)
-		DrawOnboardingCursor(scr, area, view, cur)
-	} else {
-		view := dialogStyle.Render(content)
-		DrawCenterCursor(scr, area, view, cur)
-	}
+	DrawCenterCursor(scr, area, dialogStyle.Render(content), cur)
 	return cur
 }
 
@@ -196,12 +185,8 @@ func (m *APIKeyInput) headerView() string {
 	var (
 		t           = m.com.Styles
 		titleStyle  = t.Dialog.Title
-		textStyle   = t.Dialog.PrimaryText
 		dialogStyle = t.Dialog.View.Width(m.width)
 	)
-	if m.isOnboarding {
-		return textStyle.Render(m.dialogTitle())
-	}
 	headerOffset := titleStyle.GetHorizontalFrameSize() + dialogStyle.GetHorizontalFrameSize()
 	return common.DialogTitle(t, titleStyle.Render(m.dialogTitle()), m.width-headerOffset, m.com.Styles.Dialog.TitleGradFromColor, m.com.Styles.Dialog.TitleGradToColor)
 }

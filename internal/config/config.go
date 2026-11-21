@@ -329,6 +329,16 @@ type TUIOptions struct {
 	Mouse       *bool       `json:"mouse,omitempty" jsonschema:"description=Enable terminal mouse capture for selection\\, clicks\\, and scrolling in the TUI. Disable to let the terminal emulator or tmux handle text selection and copy/paste,default=true"`
 	NerdFonts   *bool       `json:"nerd_fonts,omitempty" jsonschema:"description=Override Nerd Font glyph detection for the TUI: true forces glyphs on\\, false forces them off\\, and unset keeps automatic detection"`
 	ExitBanner  ExitBanner  `json:"exit_banner,omitempty" jsonschema:"description=Exit banner style after quitting Crush,enum=default,enum=compact,enum=none,default=default"`
+	// Tips controls the first-run usage hints on the landing view. They
+	// disappear after the first prompt, and stay gone once dismissed.
+	Tips *bool `json:"tips,omitempty" jsonschema:"description=Show first-run usage tips on the landing view,default=true"`
+}
+
+// ShowTips reports whether first-run usage tips should be shown. The nil
+// receiver and the unset pointer both mean yes, so callers can ask without
+// unwrapping either.
+func (t *TUIOptions) ShowTips() bool {
+	return t == nil || t.Tips == nil || *t.Tips
 }
 
 // IsTransparent reports whether the TUI draws a transparent background. The

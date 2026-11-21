@@ -159,6 +159,7 @@ Flags:
       --extra-header key value      add an HTTP header (repeatable)
       --extra-body JSON             merge a JSON object into request bodies
       --provider-options JSON       merge a provider-specific JSON object
+      --aws-auth-refresh string     command run when AWS credentials expire (Bedrock only)
 ```
 
 ```bash
@@ -542,6 +543,21 @@ Available Keys:
   disable-skill         clear disabled skill names
 ```
 
+#### Environment variables
+
+Variables you `export` in a `crushrc` are set in Crush's environment when it
+starts, the same as the `env` object in `crush.json`. Only variables the
+script exports or changes count; the environment Crush inherited is left
+alone.
+
+```bash
+export AWS_PROFILE=work
+```
+
+Anything a sourced script exports comes along too. To override it, export
+again after the `source`; the last assignment wins, as in any shell.
+
+
 #### `option prompt`
 
 Replace one of Crush's built-in prompts with your own file.
@@ -747,7 +763,8 @@ For a full reference, See the [JSON schema](../../schema.json).
 
 In JSON, only selected string fields (API keys, URLs, MCP/LSP commands and args,
 headers) are shell-expanded at load time. In `crushrc` there's no such list —
-it's all just Bash.
+it's all just Bash, and values are expanded once, by Bash. A single-quoted
+`'$FOO'` stays the literal text `$FOO`.
 
 Both formats are trusted code: they run with your shell privileges before the UI
 appears. Don't launch Crush in a directory whose config you haven't read.

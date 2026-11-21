@@ -16,11 +16,19 @@ func GenerateDiff(beforeContent, afterContent, fileName string) (string, int, in
 		removals  = 0
 	)
 
+	// The "---" and "+++" file headers come before the first hunk. Inside
+	// a hunk every line is a change or context, so a removed "-- comment"
+	// or an added "++i" counts even though it looks like a header.
+	inHunk := false
 	lines := strings.SplitSeq(unified, "\n")
 	for line := range lines {
-		if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
+		switch {
+		case strings.HasPrefix(line, "@@"):
+			inHunk = true
+		case !inHunk:
+		case strings.HasPrefix(line, "+"):
 			additions++
-		} else if strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---") {
+		case strings.HasPrefix(line, "-"):
 			removals++
 		}
 	}

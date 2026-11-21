@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"charm.land/catwalk/v3/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/stretchr/testify/require"
@@ -304,4 +305,33 @@ func TestRefreshOAuthToken_IgnoresOlderDiskToken(t *testing.T) {
 	pc, ok := store.config.Providers.Get("hyper")
 	require.True(t, ok)
 	require.Equal(t, "rt1", pc.OAuthToken.RefreshToken)
+}
+
+// TestRefreshOAuthToken_KeepsConcurrentProviderUpdates verifies that a
+// refresh publishes its token onto the live provider config rather than a
+// snapshot taken before the exchange, so an update that lands mid-exchange
+// (such as a model catalog fetch) survives.
+func TestRefreshOAuthToken_KeepsConcurrentProviderUpdates(t *testing.T) {
+	isolateHyperCredentials(t)
+
+	configPath := filepath.Join(t.TempDir(), "crush.json")
+	var store *ConfigStore
+	store = newRefreshTestStore(t, configPath, func(context.Context, string, string) (*oauth.Token, error) {
+		store.mutateInMemory(func(c *Config) {
+			pc, _ := c.Providers.Get("hyper")
+			pc.SubscriptionCatalog = []catwalk.Model{{ID: "fetched"}}
+			c.Providers.Set("hyper", pc)
+		})
+		return &oauth.Token{AccessToken: "at1", RefreshToken: "rt1", ExpiresIn: 3600, ExpiresAt: time.Now().Add(time.Hour).Unix()}, nil
+	})
+	// Skip the post-write reload so the in-memory publish is what we see.
+	store.workingDir = ""
+
+	require.NoError(t, store.RefreshOAuthToken(context.Background(), ScopeGlobal, "hyper"))
+
+	pc, ok := store.Config().Providers.Get("hyper")
+	require.True(t, ok)
+	require.Equal(t, "at1", pc.OAuthToken.AccessToken)
+	require.Equal(t, "at1", pc.APIKey)
+	require.Equal(t, []catwalk.Model{{ID: "fetched"}}, pc.SubscriptionCatalog)
 }

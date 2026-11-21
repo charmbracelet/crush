@@ -16,9 +16,9 @@ need to author correct hooks.
 
 ## Supported Events
 
-Crush supports 13 hook events: `PreToolUse`, `PostToolUse`,
+Crush supports 14 hook events: `PreToolUse`, `PostToolUse`,
 `PostToolUseFailure`, `PermissionRequest`, `PermissionResult`,
-`SessionStart`, `SessionEnd`, `TurnStart`, `TurnEnd`, `StopFailure`,
+`SessionStart`, `SessionEnd`, `UserPromptSubmit`, `TurnStart`, `TurnEnd`, `StopFailure`,
 `Interrupt`, `PreCompact`, `PostCompact`. Event names are case-insensitive
 and accept snake_case (`PreToolUse`, `pretooluse`, `pre_tool_use` all work);
 an unknown name is a config error. The five events that carry a tool call
@@ -28,7 +28,8 @@ reject `matcher`.
 
 Only `PreToolUse` (allow/deny/halt/rewrite/context), `PostToolUse`
 (halt/replace output/context/feedback), `PostToolUseFailure`
-(halt/context), and `PreCompact` (block) honor output. The rest are
+(halt/context), `UserPromptSubmit` (block), and `PreCompact` (block) honor
+output. The rest are
 observe-only. Turn and tool events fire only for the top-level agent, never
 for subagents (`agentic_fetch`, the task tool), so a `TurnEnd` hook runs
 once per user prompt.

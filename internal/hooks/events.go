@@ -22,6 +22,9 @@ const (
 	EventSessionStart = "SessionStart"
 	// EventSessionEnd fires for the active session when the app exits.
 	EventSessionEnd = "SessionEnd"
+	// EventUserPromptSubmit fires when the user submits a prompt, before
+	// it is stored, titled, or sent to the model. Hooks can block it.
+	EventUserPromptSubmit = "UserPromptSubmit"
 	// EventTurnStart fires when the agent begins processing a prompt.
 	EventTurnStart = "TurnStart"
 	// EventTurnEnd fires when the agent finishes a turn.
@@ -46,6 +49,7 @@ var events = map[string]bool{
 	EventPermissionResult:   true,
 	EventSessionStart:       false,
 	EventSessionEnd:         false,
+	EventUserPromptSubmit:   false,
 	EventTurnStart:          false,
 	EventTurnEnd:            false,
 	EventStopFailure:        false,
@@ -99,6 +103,8 @@ type Event struct {
 	Error string
 	// LastAssistantMessage is the assistant's text for the turn (TurnEnd).
 	LastAssistantMessage *string
+	// Prompt is the text the user submitted (UserPromptSubmit).
+	Prompt *string
 	// Decision is the permission outcome (PermissionResult).
 	Decision string
 	// Source is why the session started (SessionStart).

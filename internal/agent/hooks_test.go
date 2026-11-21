@@ -6,7 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/config"
@@ -143,4 +145,86 @@ func TestCompactHooks_PostCompactFires(t *testing.T) {
 
 	require.NoError(t, sa.Summarize(t.Context(), sess.ID, nil, nil))
 	require.Equal(t, []string{"PreCompact manual", "PostCompact manual"}, read())
+}
+
+// countingModel counts every call that would reach the provider.
+type countingModel struct {
+	finishStreamModel
+	calls atomic.Int32
+}
+
+func (m *countingModel) Generate(ctx context.Context, call fantasy.Call) (*fantasy.Response, error) {
+	m.calls.Add(1)
+	return m.finishStreamModel.Generate(ctx, call)
+}
+
+func (m *countingModel) Stream(ctx context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
+	m.calls.Add(1)
+	return m.finishStreamModel.Stream(ctx, call)
+}
+
+// blockSecretHook denies any prompt containing "sk_test_".
+const blockSecretHook = `jq -r .prompt | grep -q sk_test_ || exit 0; echo "secret in prompt" >&2; exit 2`
+
+func TestPromptHooks_BlockedPromptGoesNowhere(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	model := &countingModel{finishStreamModel: finishStreamModel{text: "done"}}
+	sa := testSessionAgent(env, model, model, "system").(*sessionAgent)
+	dir := t.TempDir()
+	sa.hooks = hooks.NewRunner(hooks.Static(map[string][]config.HookConfig{
+		hooks.EventUserPromptSubmit: {{Command: blockSecretHook}},
+		hooks.EventTurnStart:        {{Command: `touch ` + filepath.Join(dir, "turn")}},
+	}), dir, dir)
+
+	sess, err := env.sessions.Create(t.Context(), "session")
+	require.NoError(t, err)
+	_, err = sa.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, Prompt: "use sk_test_abc123"})
+	require.ErrorIs(t, err, ErrPromptBlocked)
+	require.Contains(t, err.Error(), "secret in prompt")
+
+	// Not stored, not titled, not sent, and no turn started.
+	msgs, err := env.messages.List(t.Context(), sess.ID)
+	require.NoError(t, err)
+	require.Empty(t, msgs)
+	sa.titles.wait(5 * time.Second)
+	require.Zero(t, model.calls.Load())
+	require.NoFileExists(t, filepath.Join(dir, "turn"))
+	require.False(t, sa.HasActiveTurn(sess.ID))
+}
+
+func TestPromptHooks_AllowedPromptRunsWithPromptInPayload(t *testing.T) {
+	t.Parallel()
+	sa, env := newStreamTestAgent(t)
+	dir := t.TempDir()
+	seen := filepath.Join(dir, "prompt")
+	sa.hooks = hooks.NewRunner(hooks.Static(map[string][]config.HookConfig{
+		hooks.EventUserPromptSubmit: {{Command: `jq -r .prompt > ` + seen}},
+	}), dir, dir)
+
+	sess, err := env.sessions.Create(t.Context(), "session")
+	require.NoError(t, err)
+	_, err = sa.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, Prompt: "hi there"})
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(seen)
+	require.NoError(t, err)
+	require.Equal(t, "hi there", strings.TrimSpace(string(data)))
+	msgs, err := env.messages.List(t.Context(), sess.ID)
+	require.NoError(t, err)
+	require.NotEmpty(t, msgs)
+}
+
+func TestPromptHooks_SubAgentSkipped(t *testing.T) {
+	t.Parallel()
+	sa, env := newStreamTestAgent(t)
+	dir := t.TempDir()
+	sa.hooks = hooks.NewRunner(hooks.Static(map[string][]config.HookConfig{
+		hooks.EventUserPromptSubmit: {{Command: blockSecretHook}},
+	}), dir, dir)
+
+	sess, err := env.sessions.Create(t.Context(), "session")
+	require.NoError(t, err)
+	_, err = sa.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, Prompt: "use sk_test_abc123", NonInteractive: true})
+	require.NoError(t, err)
 }

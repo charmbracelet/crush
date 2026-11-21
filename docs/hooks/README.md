@@ -20,7 +20,7 @@ forward.
   output forms, same exit codes
 - Crush ships with a builtin `crush-hook` skill to write, edit, and configure
   hooks; just tell Crush how to configure Crush
-- Crush supports 13 hook events covering the full agent lifecycle: tool use,
+- Crush supports 14 hook events covering the full agent lifecycle: tool use,
   session management, turn control, permissions, compaction, and error handling
 - Hooks run in parallel for speed, but their results compose in config order
   for determinism
@@ -167,7 +167,7 @@ wins when rewriting input, but first deny wins when blocking.
 
 ## Events
 
-Crush supports 13 hook events. Event names are case-insensitive and accept
+Crush supports 14 hook events. Event names are case-insensitive and accept
 snake_case (`PreToolUse`, `pre_tool_use`, `PRETOOLUSE` all work). An unknown
 event name is a config error.
 
@@ -180,7 +180,8 @@ event name is a config error.
 | `PermissionResult`   | Prompt granted, denied, or cancelled           | observe                                  | tool name | none                        |
 | `SessionStart`       | Session created, or resumed with `--continue`  | observe                                  | —         | same                        |
 | `SessionEnd`         | App exits (2s budget)                          | observe                                  | —         | same                        |
-| `TurnStart`          | Agent begins processing a prompt               | observe                                  | —         | `UserPromptSubmit`          |
+| `UserPromptSubmit`   | User submits a prompt, before anything else    | block                                    | —         | same (block only here)      |
+| `TurnStart`          | Agent begins processing a prompt               | observe                                  | —         | none                        |
 | `TurnEnd`            | Agent finishes a turn                          | observe                                  | —         | `Stop`                      |
 | `StopFailure`        | Turn ends with a provider error                | observe                                  | —         | same                        |
 | `Interrupt`          | User cancels a turn (ctrl-c, escape)           | observe                                  | —         | none                        |
@@ -228,6 +229,14 @@ Events marked "observe" ignore all control fields. They exist for logging,
 monitoring, and external integrations (e.g. herdr, dashboards). To auto-approve
 tools, use `PreToolUse` with `decision: "allow"` rather than
 `PermissionRequest`.
+
+Blocking a prompt (`UserPromptSubmit`) stops it before Crush does anything
+with it: it is not stored in the session, not used to title the session, not
+queued, and not sent to the model. You see the hook's reason instead. This is
+what makes it useful for keeping secrets out of the model: a hook that only ran
+once the turn had started would be too late, since titling alone sends the
+prompt to a model. Prompts typed while a turn is running are checked when you
+submit them, before they are queued.
 
 Blocking compaction (`PreCompact`) leaves the conversation as it was. When the
 compaction was automatic, the turn ends there, since the next step would only
@@ -711,9 +720,11 @@ Where Crush differs:
 - **Config shape** is flat: a list of `{matcher, command}` per event, not
   Claude Code's nested `matcher` groups with `hooks` arrays. Only `command`
   hooks exist; there are no `http`, `prompt`, or `agent` hooks.
-- **Event names**: `TurnStart`, `TurnEnd`, `Interrupt`, and `PermissionResult`
-  are Crush's names for the per-turn events; the table in [Events](#events)
-  maps each one to its Claude Code counterpart. `PermissionRequest` is
+- **Event names**: `TurnEnd`, `Interrupt`, and `PermissionResult` are
+  Crush's names for the per-turn events; the table in [Events](#events) maps
+  each one to its Claude Code counterpart. `TurnStart` is observe-only and has
+  no Claude Code counterpart; use `UserPromptSubmit` to see or block the
+  prompt. `PermissionRequest` is
   observe-only here; use `PreToolUse` to allow or deny.
 - **`updated_input` on `PreToolUse`** is a shallow-merge patch against the
   original `tool_input` rather than a full replacement, so keys you omit are
@@ -912,6 +923,25 @@ output as feedback for the model instead.
 
 `PostToolUseFailure` accepts `halt` and `context` only.
 
+### Stdin payload — UserPromptSubmit
+
+Adds the prompt the user submitted:
+
+```jsonc
+{
+  // string. The prompt text, exactly as typed.
+  "prompt": "fix the login flow",
+}
+```
+
+### Output envelope — UserPromptSubmit
+
+Same as the common envelope. `decision: "deny"`, `halt: true`, or exit 2
+blocks the prompt and shows `reason` (or stderr) to the user. Claude Code's
+`decision: "block"` and `continue: false` work too. Rewriting the prompt
+(`updated_prompt`) and adding context are not supported yet; see
+[FUTURE.md](FUTURE.md).
+
 ### Output envelope — PreCompact
 
 Same as the common envelope. `halt: true`, `decision: "deny"`, or exit 2
@@ -928,7 +958,7 @@ blocks compaction and leaves the conversation as it was. Claude Code's
 | other | Non-blocking error, logged and ignored. If stdout holds a JSON object it is applied all the same.     |
 
 Exit `2` only blocks on events that can block something (`PreToolUse`,
-`PreCompact`). On `PostToolUse` it becomes feedback for the model; on
+`UserPromptSubmit`, `PreCompact`). On `PostToolUse` it becomes feedback for the model; on
 observe-only events it is logged.
 
 ### Aggregation

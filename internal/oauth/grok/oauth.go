@@ -176,10 +176,7 @@ func requestToken(ctx context.Context, vals url.Values) (*oauth.Token, error) {
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, &oauth.TokenExchangeError{
-			StatusCode: resp.StatusCode,
-			Body:       string(body),
-		}
+		return nil, oauth.NewTokenExchangeError(resp.StatusCode, string(body))
 	}
 
 	var tr tokenResponse

@@ -118,7 +118,11 @@ func handleOption(ctx context.Context, args []string, stdin io.Reader, stdout, s
 
 	spec, ok := optionSpecs[key]
 	if !ok {
-		return usage(stderr, fmt.Sprintf("option: unknown key %q", key))
+		// Unknown keys, e.g. written by a fork or a newer version,
+		// are skipped with a warning so a config file does not fail
+		// to load on a build that does not know the key.
+		slog.Warn("Unknown option key in shell config; ignored", "key", key)
+		return nil
 	}
 
 	switch spec.kind {

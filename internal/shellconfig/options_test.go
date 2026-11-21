@@ -234,16 +234,24 @@ func TestOption_InvertedBool(t *testing.T) {
 	require.Equal(t, true, opts["disable_metrics"])
 }
 
-func TestOption_UnknownKey(t *testing.T) {
+// TestOption_UnknownKeySkipped verifies that an unknown option key, e.g.
+// written by a fork or a newer version, is skipped instead of failing the
+// whole load, and later lines still apply.
+func TestOption_UnknownKeySkipped(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	script := `option bogus-key value`
+	script := "option bogus-key value\noption notifications bell"
 	path := filepath.Join(dir, "crushrc")
 
-	_, err := LoadShellConfig(t.Context(), path, []byte(script))
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "unknown key")
+	jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(script))
+	require.NoError(t, err)
+
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &result))
+	opts := result["options"].(map[string]any)
+	require.NotContains(t, opts, "bogus-key")
+	require.Equal(t, "bell", opts["notifications"])
 }
 
 func TestOption_RequestTimeout(t *testing.T) {

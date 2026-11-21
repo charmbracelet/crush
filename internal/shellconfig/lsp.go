@@ -2,6 +2,7 @@ package shellconfig
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -57,9 +58,17 @@ func lspAdd(b *ConfigBuilder, args []string, stderr io.Writer) error {
 	}
 	name := args[2]
 	slog.Info("LSP server defined in shell config", "name", name)
-	l := childMap(b.section("lsp"), name)
+	servers := b.section("lsp")
+	_, existed := servers[name]
+	l := childMap(servers, name)
 
 	if err := applyFlags(lspAddFlags, args, 3, l, "lsp add", stderr); err != nil {
+		if errors.Is(err, errUnknownFlag) {
+			if !existed {
+				delete(servers, name)
+			}
+			return nil
+		}
 		return err
 	}
 

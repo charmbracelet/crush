@@ -2,6 +2,7 @@ package shellconfig
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -60,9 +61,17 @@ func providerAdd(b *ConfigBuilder, args []string, stderr io.Writer) error {
 	}
 	id := args[2]
 	slog.Info("Provider defined in shell config", "provider", id)
-	p := childMap(b.section("providers"), id)
+	providers := b.section("providers")
+	_, existed := providers[id]
+	p := childMap(providers, id)
 
 	if err := applyFlags(providerAddFlags, args, 3, p, "provider add", stderr); err != nil {
+		if errors.Is(err, errUnknownFlag) {
+			if !existed {
+				delete(providers, id)
+			}
+			return nil
+		}
 		return err
 	}
 

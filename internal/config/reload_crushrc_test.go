@@ -56,8 +56,9 @@ func TestReloadFromDisk_FailingCrushrcKeepsOldConfig(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "bell", store.Config().Options.Notifications)
 
-	// Overwrite with a crushrc that errors at load time (unknown option key).
-	require.NoError(t, os.WriteFile(rcPath, []byte("option totally-bogus-key value\n"), 0o644))
+	// Overwrite with a crushrc that errors at load time (a bad value for
+	// a known option; unknown keys are skipped, not errors).
+	require.NoError(t, os.WriteFile(rcPath, []byte("option request-timeout abc\n"), 0o644))
 
 	err = store.ReloadFromDisk(context.Background())
 	require.Error(t, err, "a failing crushrc must surface a reload error")

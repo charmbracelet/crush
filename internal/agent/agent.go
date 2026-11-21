@@ -963,7 +963,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	}
 	// Generate title from the first real (non-shell) user prompt in the
 	// background; Run must not wait on it. CancelAll drains it instead.
-	if !hasUserTextMessage(msgs) {
+	if currentSession.ParentSessionID == "" && !hasUserTextMessage(msgs) {
 		titleCtx := context.WithoutCancel(ctx)
 		a.titles.begin()
 		go func() {

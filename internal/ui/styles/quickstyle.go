@@ -1267,6 +1267,8 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Status.ModeBannerYolo = lipgloss.NewStyle().Foreground(badgeInk(o.yolo, o.bgBase, o.fgBase)).Background(o.yolo).Padding(0, 1)
 	s.Status.ModeBannerSysadminBadge = s.Status.ModeBadgeSysadmin
 	s.Status.ModeBannerSysadmin = lipgloss.NewStyle().Foreground(badgeInk(o.destructiveSubtle, o.bgBase, o.fgBase)).Background(o.destructiveSubtle).Padding(0, 1)
+	s.Status.ModeBannerCodeBadge = lipgloss.NewStyle().Foreground(o.bgBase).Background(o.fgBase).Padding(0, 1).Bold(true).SetString("CODE MODE")
+	s.Status.ModeBannerCode = lipgloss.NewStyle().Foreground(badgeInk(o.bgMostVisible, o.fgBase, o.bgBase)).Background(o.bgMostVisible).Padding(0, 1)
 	// The badges and toasts write a background role on a status fill;
 	// badgeInk swaps it for fgBase where that reads better (light themes).
 	s.Status.SuccessIndicator = base.Foreground(badgeInk(o.success, o.bgLessVisible, o.fgBase)).Background(o.success).Padding(0, 1).Bold(true).SetString("OKAY!")

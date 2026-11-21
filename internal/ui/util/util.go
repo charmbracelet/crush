@@ -36,6 +36,7 @@ const (
 	InfoTypePlan
 	InfoTypeYolo
 	InfoTypeSysadmin
+	InfoTypeCode
 )
 
 func NewInfoMsg(info string) InfoMsg {

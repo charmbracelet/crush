@@ -53,6 +53,25 @@ func setupAgent(t *testing.T, pair modelPair) (SessionAgent, fakeEnv) {
 	return agent, env
 }
 
+func TestTestEnvWorkspaceIsolation(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+
+	t.Run("private workspaces under the temporary root", func(t *testing.T) {
+		t.Setenv("TMPDIR", root)
+		t.Setenv("TMP", root)
+
+		first := testEnv(t)
+		marker := filepath.Join(first.workingDir, "marker")
+		require.NoError(t, os.WriteFile(marker, nil, 0o644))
+
+		second := testEnv(t)
+		require.NotEqual(t, first.workingDir, second.workingDir)
+		require.FileExists(t, marker)
+		require.True(t, strings.HasPrefix(first.workingDir, root), first.workingDir)
+	})
+}
+
 func TestCoderAgent(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("skipping on windows for now")

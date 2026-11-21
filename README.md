@@ -952,6 +952,24 @@ model add deepseek/deepseek-chat \
   --price-cache-hit 0.07
 ```
 
+Another example: Kimi K3.1 Pro via Wallaby, an OpenAI-compatible inference
+platform. Don't forget to set `WALLABY_API_KEY` in your environment.
+
+```bash
+provider add wallaby --type completions \
+  --base-url "https://api.wallabytoken.com/v1" \
+  --api-key "$WALLABY_API_KEY"
+
+model add wallaby/kimi-k3.1-pro \
+  --name "Kimi K3.1 Pro" \
+  --context-window 1048576 \
+  --default-max-tokens 131072 \
+  --supports-images true \
+  --price-input 1.8 \
+  --price-output 9 \
+  --price-cache-hit 0.18
+```
+
 #### Anthropic-Compatible APIs
 
 Custom Anthropic-compatible providers follow this format:

@@ -121,6 +121,52 @@ func TestCrushLogs_MaxCap(t *testing.T) {
 	require.Len(t, lines, 100)
 }
 
+func TestCrushLogs_EntriesAcrossChunkBoundaries(t *testing.T) {
+	t.Parallel()
+	// Entries of about 360 bytes cross several 8KB read boundaries, and
+	// entry 150 is longer than two chunks.
+	var entries []map[string]any
+	for i := range 200 {
+		pad := strings.Repeat("x", 250)
+		if i == 150 {
+			pad = strings.Repeat("x", 20000)
+		}
+		entries = append(entries, makeLogEntry("INFO", fmt.Sprintf("Entry %d", i), "app.go", i, map[string]any{"pad": pad}))
+	}
+
+	logFile := createTestLogFile(t, entries)
+
+	result := runCrushLogs(logFile, CrushLogsParams{Lines: 100})
+
+	lines := strings.Split(result, "\n")
+	require.Len(t, lines, 100)
+	for i, line := range lines {
+		require.Contains(t, line, fmt.Sprintf("Entry %d pad=", 100+i))
+	}
+}
+
+func TestCrushLogs_LinesAlignedToChunks(t *testing.T) {
+	t.Parallel()
+	// Each line is 512 bytes with its newline, so every 8KB chunk starts
+	// at the start of a line and the carried first line is complete.
+	var b strings.Builder
+	for i := range 40 {
+		line := fmt.Sprintf(`{"msg":"Entry %02d","pad":"%s"}`, i, strings.Repeat("x", 484))
+		require.Len(t, line, 511)
+		b.WriteString(line + "\n")
+	}
+	logFile := filepath.Join(t.TempDir(), "crush.log")
+	require.NoError(t, os.WriteFile(logFile, []byte(b.String()), 0o644))
+
+	result := runCrushLogs(logFile, CrushLogsParams{Lines: 40})
+
+	lines := strings.Split(result, "\n")
+	require.Len(t, lines, 40)
+	for i, line := range lines {
+		require.Contains(t, line, fmt.Sprintf("Entry %02d ", i))
+	}
+}
+
 func TestCrushLogs_MissingFile(t *testing.T) {
 	t.Parallel()
 	result := runCrushLogs("/nonexistent/path/crush.log", CrushLogsParams{Lines: 50})
@@ -338,6 +384,35 @@ func TestCrushLogs_OversizedLines(t *testing.T) {
 	require.Len(t, lines, 2)
 	require.Contains(t, lines[0], "Valid entry")
 	require.Contains(t, lines[1], "Second valid entry")
+}
+
+func TestCrushLogs_ScanBackPastOversizedLine(t *testing.T) {
+	t.Parallel()
+	// The big entry is longer than maxLogLineSize by more than one 8KB
+	// chunk, so the reader must scan back to its start. Padded entries
+	// before it cross chunk boundaries, and the short ones share the
+	// chunk where the big entry starts.
+	var entries []map[string]any
+	for i := range 6 {
+		pad := "short"
+		if i < 3 {
+			pad = strings.Repeat("x", 5000)
+		}
+		entries = append(entries, makeLogEntry("INFO", fmt.Sprintf("Before %d", i), "app.go", i, map[string]any{"pad": pad}))
+	}
+	entries = append(entries, makeLogEntry("INFO", "Big message", "big.go", 1, map[string]any{"data": strings.Repeat("x", maxLogLineSize+20000)}))
+	entries = append(entries, makeLogEntry("INFO", "After", "app.go", 3, nil))
+
+	logFile := createTestLogFile(t, entries)
+
+	result := runCrushLogs(logFile, CrushLogsParams{Lines: 10})
+
+	lines := strings.Split(result, "\n")
+	require.Len(t, lines, 7)
+	for i := range 6 {
+		require.Contains(t, lines[i], fmt.Sprintf("Before %d pad=", i))
+	}
+	require.Contains(t, lines[6], "After")
 }
 
 func TestCrushLogs_PartialTrailingLine(t *testing.T) {

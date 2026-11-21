@@ -67,9 +67,15 @@ func toolResultFromCall(result *mcp.CallToolResult) ToolResult {
 		return ToolResult{Type: "text", Content: ""}
 	}
 
+	return contentToResult(result.Content)
+}
+
+// contentToResult collapses the content blocks of a tool result into the
+// single text or media payload that a tool response can carry.
+func contentToResult(contents []mcp.Content) ToolResult {
 	var textParts []string
 	var image, audio mediaPayload
-	for _, v := range result.Content {
+	for _, v := range contents {
 		switch content := v.(type) {
 		case *mcp.TextContent:
 			textParts = append(textParts, content.Text)
@@ -77,8 +83,30 @@ func toolResultFromCall(result *mcp.CallToolResult) ToolResult {
 			image.offer(content.Data, content.MIMEType)
 		case *mcp.AudioContent:
 			audio.offer(content.Data, content.MIMEType)
+		case *mcp.ResourceLink:
+			if content.Name != "" && content.Name != content.URI {
+				textParts = append(textParts, fmt.Sprintf("[resource link: %s (%s)]", content.Name, content.URI))
+			} else {
+				textParts = append(textParts, fmt.Sprintf("[resource link: %s]", content.URI))
+			}
+		case *mcp.EmbeddedResource:
+			res := content.Resource
+			switch {
+			case res == nil:
+				textParts = append(textParts, "[empty resource]")
+			case res.Text != "":
+				textParts = append(textParts, res.Text)
+			case res.Blob != nil && strings.HasPrefix(res.MIMEType, "image/"):
+				image.offer(res.Blob, res.MIMEType)
+			case res.Blob != nil && strings.HasPrefix(res.MIMEType, "audio/"):
+				audio.offer(res.Blob, res.MIMEType)
+			default:
+				textParts = append(textParts, describeResource(res.URI, res.MIMEType, len(res.Blob)))
+			}
 		default:
-			textParts = append(textParts, fmt.Sprintf("%v", v))
+			// The SDK gains content types over time, and %v on an unhandled
+			// one stringifies a pointer into an unusable address.
+			textParts = append(textParts, fmt.Sprintf("[unsupported content: %T]", v))
 		}
 	}
 	textContent := strings.Join(textParts, "\n")
@@ -106,6 +134,18 @@ func (m *mediaPayload) offer(data []byte, mimeType string) {
 		return
 	}
 	*m = mediaPayload{data: ensureRawBytes(data), mimeType: mimeType, seen: true}
+}
+
+// describeResource reports the identity and size of a resource whose payload
+// cannot be turned into tool output, so the text at least says what is there.
+func describeResource(uri, mimeType string, size int) string {
+	if uri == "" {
+		uri = "untitled"
+	}
+	if mimeType == "" {
+		return fmt.Sprintf("[resource: %s, %d bytes]", uri, size)
+	}
+	return fmt.Sprintf("[resource: %s (%s, %d bytes)]", uri, mimeType, size)
 }
 
 // RefreshTools gets the updated list of tools from the MCP and updates the

@@ -79,6 +79,37 @@ type ClientSession struct {
 	SessionID string `json:"session_id"`
 }
 
+// ResyncReason says why a resumed event stream could not replay the
+// events a client missed.
+type ResyncReason string
+
+const (
+	// ResyncReasonInvalidID means the resume id is not an event id.
+	ResyncReasonInvalidID ResyncReason = "invalid_id"
+	// ResyncReasonEpochMismatch means the resume id was issued by
+	// another workspace instance, such as before the server restarted.
+	ResyncReasonEpochMismatch ResyncReason = "epoch_mismatch"
+	// ResyncReasonUnknownID means the resume id is ahead of every event
+	// of this workspace instance.
+	ResyncReasonUnknownID ResyncReason = "unknown_id"
+	// ResyncReasonExpired means events after the resume id have fallen
+	// out of the server's buffer.
+	ResyncReasonExpired ResyncReason = "expired"
+	// ResyncReasonGap means the server lost events after the resume id.
+	ResyncReasonGap ResyncReason = "gap"
+)
+
+// Resync is the payload of a resync event, the first event of a resumed
+// stream whose missed events cannot be replayed. The client must re-read
+// the state it shows; live events follow. LastEventID is the id of the
+// latest workspace event when the stream attached, or empty if there was
+// none: the client is positioned there, and its next live event follows
+// it.
+type Resync struct {
+	Reason      ResyncReason `json:"reason"`
+	LastEventID string       `json:"last_event_id,omitempty"`
+}
+
 // CurrentSession is the request body for the per-client
 // current-session endpoint. An empty SessionID clears the entry.
 type CurrentSession struct {

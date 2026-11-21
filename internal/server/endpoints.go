@@ -164,10 +164,24 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 				"receive none. All other events are workspace-wide. A client that "+
 				"falls so far behind that events are dropped for it has its stream "+
 				"closed; it should reconnect, re-report its current session, which "+
-				"re-delivers pending prompts, and re-read the state it shows.").
+				"re-delivers pending prompts, and re-read the state it shows. "+
+				"Every workspace event carries an SSE id of the form <epoch>-<seq>: seq "+
+				"increases by one per workspace event (a client may see gaps, for "+
+				"prompts scoped to other sessions), and epoch changes whenever the "+
+				"workspace is re-created or the server restarts. To resume after a "+
+				"dropped stream, reconnect with the last id seen in the Last-Event-ID "+
+				"header (or the last_event_id query parameter): the server replays the "+
+				"recent events after it (it keeps up to 1000 events from the last 5 "+
+				"minutes), then continues live. If it cannot (an id from another epoch, "+
+				"an unknown id, or one that has fallen out of the buffer), the first "+
+				"event is instead a resync event ({\"type\":\"resync\",\"payload\":"+
+				"{\"reason\",\"last_event_id\"}}), carrying the id of the latest event; "+
+				"the client must re-read the state it shows. The host theme and client "+
+				"session snapshots sent on attach carry no id.").
 			Tags("workspaces").
 			PathParam("id", "Workspace ID").
 			RequiredQueryParam("client_id", "Client ID (UUID)").
+			QueryParam("last_event_id", "Resume after this event id; an alternative to the Last-Event-ID header").
 			SSE().
 			Fails(400, 404, 500).
 			Handle(c.handleGetWorkspaceEvents),

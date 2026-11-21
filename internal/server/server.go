@@ -134,6 +134,12 @@ type Server struct {
 	selfShutdown        sync.Once
 	selfShutdownStarted atomic.Bool
 	selfShutdownDone    chan struct{}
+
+	// dialToken and dialCfg configure a server on [NetworkDial].
+	dialToken string
+	dialCfg   dialConfig
+	// dialLn is the listener of a server on [NetworkDial] once it runs.
+	dialLn atomic.Pointer[dialListener]
 }
 
 // SetLogger sets the logger for the server.
@@ -177,6 +183,22 @@ func NewServer(cfg *config.ConfigStore, network, address string) *Server {
 	return s
 }
 
+// NewDialServer creates a [Server] that dials out to the bridge at
+// tunnelURL (ws:// or wss://) instead of listening, presenting token as a
+// bearer token. See [NetworkDial].
+func NewDialServer(cfg *config.ConfigStore, tunnelURL, token string) (*Server, error) {
+	u, err := ParseDialURL(tunnelURL)
+	if err != nil {
+		return nil, err
+	}
+	if token == "" {
+		return nil, fmt.Errorf("dialing needs a token in $%s", DialTokenEnv)
+	}
+	s := NewServer(cfg, NetworkDial, u.String())
+	s.dialToken = token
+	return s, nil
+}
+
 // shutdownSelf starts the graceful shutdown the backend asks for when the
 // server has gone idle. The backend can ask more than once (a client's
 // request and the idle timer, say), so only the first call does anything.
@@ -206,7 +228,8 @@ func (s *Server) shutdownSelf(timeout time.Duration) {
 func (s *Server) installHandler() {
 	var p http.Protocols
 	p.SetHTTP1(true)
-	p.SetUnencryptedHTTP2(true)
+	// The bridge at the far end of a dial tunnel speaks HTTP/1.1 only.
+	p.SetUnencryptedHTTP2(s.network != NetworkDial)
 	c := &controllerV1{backend: s.backend, server: s}
 	mux := http.NewServeMux()
 	for _, e := range c.endpoints() {
@@ -250,6 +273,23 @@ func (s *Server) ListenAndServe() error {
 	if s.ln != nil {
 		return fmt.Errorf("server already started")
 	}
+	if s.network == NetworkDial {
+		// A bye from the bridge exits through the same graceful shutdown
+		// as going idle, which closes the listener and so stops redialing.
+		ln, err := newDialListener(s.Addr, s.dialToken, s.dialCfg, s.logger, func() {
+			s.shutdownSelf(selfShutdownTimeout)
+		})
+		if err != nil {
+			return err
+		}
+		// Publish before dialing so only one call ever owns a tunnel.
+		if !s.dialLn.CompareAndSwap(nil, ln) {
+			return fmt.Errorf("server already started")
+		}
+		ln.start()
+		s.backend.ArmIdleShutdown()
+		return s.Serve(ln)
+	}
 	ln, removedStale, err := listen(s.network, s.Addr)
 	if err != nil {
 		return fmt.Errorf("failed to listen on %s: %w", s.Addr, err)
@@ -274,7 +314,11 @@ func (s *Server) closeListener() {
 // it leaves hosted workspaces running.
 func (s *Server) Close() error {
 	defer func() { s.closeListener() }()
-	return s.h.Close()
+	err := s.h.Close()
+	if ln := s.dialLn.Load(); ln != nil {
+		ln.abortRelays()
+	}
+	return err
 }
 
 // Shutdown tears down hosted workspaces, then cancels in-flight requests
@@ -290,7 +334,13 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	// abandoned. Cancelling only now keeps event streams open to deliver
 	// the teardown's final events.
 	s.cancelRequests()
-	return errors.Join(err, s.h.Shutdown(ctx))
+	err = errors.Join(err, s.h.Shutdown(ctx))
+	// The HTTP server has closed its tunnelled connections; wait for
+	// their websockets to finish sending and close.
+	if ln := s.dialLn.Load(); ln != nil {
+		err = errors.Join(err, ln.drain(ctx))
+	}
+	return err
 }
 
 // ReloadConfig re-reads the server and hosted workspace configs from disk.

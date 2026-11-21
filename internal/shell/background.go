@@ -67,8 +67,8 @@ func GetBackgroundShellManager() *BackgroundShellManager {
 // unless maxJobs jobs are already running. The shell is tagged with owner, a
 // comparable value identifying who started it, so that
 // [BackgroundShellManager.KillOwned] can stop it with that owner's other
-// shells.
-func (m *BackgroundShellManager) Start(ctx context.Context, owner any, workingDir string, blockFuncs []BlockFunc, command, description string, maxJobs int) (*BackgroundShell, error) {
+// shells. When provided, env is the full environment for the new shell.
+func (m *BackgroundShellManager) Start(ctx context.Context, owner any, workingDir string, blockFuncs []BlockFunc, command, description string, maxJobs int, env ...string) (*BackgroundShell, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -80,6 +80,7 @@ func (m *BackgroundShellManager) Start(ctx context.Context, owner any, workingDi
 
 	shell := NewShell(&Options{
 		WorkingDir: workingDir,
+		Env:        env,
 		BlockFuncs: blockFuncs,
 	})
 

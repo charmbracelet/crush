@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/notify"
+	"github.com/charmbracelet/crush/internal/agent/tools"
 	mcptools "github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
@@ -102,7 +103,7 @@ func (b *Backend) runAgent(ws *Workspace, coord agent.Coordinator, msg proto.Age
 	defer ws.runWG.Done()
 	defer accept.Close()
 
-	ctx := ws.ctx
+	ctx := context.WithValue(ws.ctx, tools.EnvironmentContextKey, ws.Env)
 	if msg.HiddenUserMessage {
 		ctx = message.WithHiddenUserMessage(ctx)
 	}

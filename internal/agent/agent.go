@@ -95,7 +95,10 @@ type SessionAgentCall struct {
 	// Report is a subagent report this call delivers. It is written to
 	// the transcript only when delivered, so it lands where the model
 	// reads it. Prompt is still what the model reads for it.
-	Report           *message.SubAgentReport
+	Report *message.SubAgentReport
+	// Model is the large model the options below were built for. Run pins
+	// an unset one to the current model on entry.
+	Model            Model
 	ProviderOptions  fantasy.ProviderOptions
 	Attachments      []message.Attachment
 	MaxOutputTokens  int64
@@ -197,7 +200,7 @@ type SessionAgent interface {
 	QueuedPromptsList(sessionID string) []string
 	ClearQueue(sessionID string)
 	AddNote(sessionID, text string)
-	Summarize(context.Context, string, fantasy.ProviderOptions, func(context.Context, *fantasy.ProviderError) error) error
+	Summarize(context.Context, string, Model, fantasy.ProviderOptions, func(context.Context, *fantasy.ProviderError) error) error
 	Model() Model
 	GenerateTitle(ctx context.Context, sessionID, userPrompt string)
 }
@@ -638,7 +641,7 @@ func (a *sessionAgent) persistCanceledTurn(ctx context.Context, call SessionAgen
 			return err
 		}
 	}
-	largeModel := a.models().Large
+	largeModel := call.Model
 	assistant, err := a.messages.Create(writeCtx, call.SessionID, message.CreateMessageParams{
 		Role:      message.Assistant,
 		Parts:     []message.ContentPart{},
@@ -749,6 +752,9 @@ func turnFinish(largeModel Model, sessionID string, reason fantasy.FinishReason)
 func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *fantasy.AgentResult, retErr error) {
 	if err := ValidateCall(call); err != nil {
 		return nil, err
+	}
+	if call.Model.Model == nil {
+		call.Model = a.models().Large
 	}
 
 	if call.Channel != "" && call.channelMeta == nil {
@@ -914,7 +920,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 	// Copy mutable fields under lock to avoid races with SetTools.
 	agentTools := filterToolsForChannel(a.tools.Copy(), call.Channel, mcp.GetStates())
-	largeModel := a.models().Large
+	largeModel := call.Model
 	systemPrompt := a.systemPrompt.Get()
 	promptPrefix := a.systemPromptPrefix.Get()
 	var instructions strings.Builder
@@ -1382,7 +1388,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	continued := false
 	if shouldSummarize {
 		a.activeRequests.Del(call.SessionID)
-		summarizeErr := a.summarize(genCtx, call.SessionID, compactTriggerAuto, call.ProviderOptions, call.OnAuthRefresh)
+		summarizeErr := a.summarize(genCtx, largeModel, call.SessionID, compactTriggerAuto, call.ProviderOptions, call.OnAuthRefresh)
 		switch {
 		case errors.Is(summarizeErr, ErrCompactionBlocked):
 			// Uncompacted, the next step would only hit the limit
@@ -1528,17 +1534,19 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	return a.Run(ctx, firstQueuedMessage)
 }
 
-// Summarize compacts the session on the user's request. It returns
-// ErrCompactionBlocked when a PreCompact hook blocks it.
-func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error) error {
+// Summarize compacts the session on the user's request with model, which
+// must be the model opts were built for. It returns ErrCompactionBlocked
+// when a PreCompact hook blocks it.
+func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, model Model, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error) error {
 	if a.HasPendingWork(sessionID) {
 		return ErrSessionBusy
 	}
-	return a.summarize(ctx, sessionID, compactTriggerManual, opts, onAuthRefresh)
+	return a.summarize(ctx, model, sessionID, compactTriggerManual, opts, onAuthRefresh)
 }
 
-func (a *sessionAgent) summarize(ctx context.Context, sessionID, trigger string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error) error {
-	largeModel := a.models().Large
+// summarize compacts the session with largeModel, which must be the model
+// opts were built for.
+func (a *sessionAgent) summarize(ctx context.Context, largeModel Model, sessionID, trigger string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error) error {
 	systemPromptPrefix := a.systemPromptPrefix.Get()
 
 	currentSession, err := a.sessions.Get(ctx, sessionID)

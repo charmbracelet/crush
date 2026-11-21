@@ -99,6 +99,11 @@ type ProviderConfig struct {
 	BaseURL string `json:"base_url,omitempty" jsonschema:"description=Base URL for the provider's API,format=uri,example=https://api.openai.com/v1"`
 	// The provider type, e.g. "openai", "anthropic", etc. if empty it defaults to openai.
 	Type catwalk.Type `json:"type,omitempty" jsonschema:"description=Provider type that determines the API format,default=openai"`
+	// The encoding applied to request bodies sent to this provider.
+	// "none" (or empty) sends bodies uncompressed, "gzip" and "brotli"
+	// compress them. Only set this for endpoints that accept the
+	// matching Content-Encoding.
+	RequestEncoding catwalk.RequestEncoding `json:"request_encoding,omitempty" jsonschema:"description=Encoding applied to request bodies sent to this provider,enum=none,enum=gzip,enum=brotli,default=none"`
 	// The provider's API key.
 	APIKey string `json:"api_key,omitempty" jsonschema:"description=API key for authentication with the provider,example=$OPENAI_API_KEY"`
 	// The original API key template before resolution (for re-resolution on auth errors).
@@ -165,9 +170,10 @@ type ProviderConfig struct {
 // ToProvider converts the [ProviderConfig] to a [catwalk.Provider].
 func (c *ProviderConfig) ToProvider() catwalk.Provider {
 	return catwalk.Provider{
-		Name:   c.Name,
-		ID:     catwalk.InferenceProvider(c.ID),
-		Models: c.Models,
+		Name:            c.Name,
+		ID:              catwalk.InferenceProvider(c.ID),
+		RequestEncoding: c.RequestEncoding,
+		Models:          c.Models,
 	}
 }
 

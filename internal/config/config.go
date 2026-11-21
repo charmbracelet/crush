@@ -289,7 +289,7 @@ type MCPChannelReply struct {
 // MCPChannelReplyRoute maps one kind of inbound channel push onto the MCP
 // tool call that delivers a reply to it.
 type MCPChannelReplyRoute struct {
-	// Tool is the MCP tool (bare name, without the mcp_<server>_ prefix)
+	// Tool is the MCP tool (bare name, without the mcp__<server>__ prefix)
 	// invoked to deliver the reply.
 	Tool string `json:"tool" jsonschema:"required,description=MCP tool name that sends the reply,example=send_message_to_user"`
 	// TargetParam is the tool argument that receives the reply target

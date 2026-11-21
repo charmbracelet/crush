@@ -8,16 +8,17 @@ import (
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/mcpname"
 	"github.com/charmbracelet/crush/internal/permission"
 )
 
 // whitelistDockerTools contains Docker MCP tools that don't require permission.
 var whitelistDockerTools = []string{
-	"mcp_docker_mcp-find",
-	"mcp_docker_mcp-add",
-	"mcp_docker_mcp-remove",
-	"mcp_docker_mcp-config-set",
-	"mcp_docker_code-mode",
+	mcpname.Tool(config.DockerMCPName, "mcp-find"),
+	mcpname.Tool(config.DockerMCPName, "mcp-add"),
+	mcpname.Tool(config.DockerMCPName, "mcp-remove"),
+	mcpname.Tool(config.DockerMCPName, "mcp-config-set"),
+	mcpname.Tool(config.DockerMCPName, "code-mode"),
 }
 
 // GetMCPTools gets all the currently available MCP tools.
@@ -56,7 +57,7 @@ func (m *Tool) ProviderOptions() fantasy.ProviderOptions {
 }
 
 func (m *Tool) Name() string {
-	return fmt.Sprintf("mcp_%s_%s", m.mcpName, m.tool.Name)
+	return mcpname.Tool(m.mcpName, m.tool.Name)
 }
 
 func (m *Tool) MCP() string {

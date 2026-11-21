@@ -6,13 +6,13 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"errors"
-	"fmt"
 	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/mcpname"
 	"github.com/charmbracelet/crush/internal/message"
 )
 
@@ -96,8 +96,9 @@ func resolveChannelReply(reply *config.MCPChannelReply, meta map[string]string, 
 
 // channelReplyDelivered reports whether the model already delivered a reply
 // through the channel itself during the turn: completedTools holds the full
-// names (mcp_<server>_<tool>) of tool calls that finished without error, and
-// a call to either route tool or any configured suppress tool counts.
+// wire names (see mcpname.Tool) of tool calls that finished without
+// error, and a call to either route tool or any configured suppress tool
+// counts.
 func channelReplyDelivered(reply *config.MCPChannelReply, channel string, completedTools map[string]struct{}) bool {
 	names := make([]string, 0, 2+len(reply.SuppressTools))
 	if reply.User != nil {
@@ -111,7 +112,7 @@ func channelReplyDelivered(reply *config.MCPChannelReply, channel string, comple
 		if name == "" {
 			continue
 		}
-		if _, ok := completedTools[fmt.Sprintf("mcp_%s_%s", channel, name)]; ok {
+		if _, ok := completedTools[mcpname.Tool(channel, name)]; ok {
 			return true
 		}
 	}

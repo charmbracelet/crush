@@ -151,6 +151,11 @@ type Backend struct {
 	createGrace time.Duration
 	lingerDelay time.Duration
 	detachGrace time.Duration
+
+	// managed holds the provider credentials pushed through the
+	// credentials API. They are server-wide: every workspace's config
+	// store consults the same set.
+	managed *config.ManagedCredentials
 }
 
 // clientState tracks one client's claim on a workspace.
@@ -323,9 +328,13 @@ func New(ctx context.Context, cfg *config.ConfigStore, shutdownFn ShutdownFunc) 
 		cfg:         cfg,
 		ctx:         ctx,
 		shutdownFn:  shutdownFn,
+		managed:     config.NewManagedCredentials(),
 		createGrace: DefaultCreateGrace,
 		lingerDelay: idleShutdownDelayFromEnv(),
 		detachGrace: durationFromEnv("CRUSH_SERVER_DETACH_GRACE", DefaultDetachGrace),
+	}
+	if cfg != nil {
+		cfg.AttachManagedCredentials(b.managed)
 	}
 	b.startChannelRouter()
 	return b
@@ -476,7 +485,9 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	}
 
 	id := uuid.New().String()
-	cfg, err := config.Init(context.Background(), args.Path, args.DataDir, args.Debug)
+	// Attached at load, so a provider configured only through a pushed
+	// credential takes part in provider and model resolution.
+	cfg, err := config.InitWithManaged(context.Background(), args.Path, args.DataDir, args.Debug, b.managed)
 	if err != nil {
 		return nil, proto.Workspace{}, fmt.Errorf("failed to initialize config: %w", err)
 	}
@@ -571,6 +582,11 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	// moment it appears in the index.
 	b.registerClient(ws, clientID)
 	b.mu.Unlock()
+
+	// A push or delete that landed after the store loaded but before the
+	// workspace was registered missed the fan-out; re-sync the full set,
+	// which also unmarks providers whose credential was deleted meanwhile.
+	ws.applyManaged(b.ctx, cfg.SyncManagedCredentials())
 
 	// Clients warn their users themselves, from the version every
 	// returned workspace carries.

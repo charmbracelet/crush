@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -155,6 +156,14 @@ func ExchangeToken(ctx context.Context, refreshToken string) (*oauth.Token, erro
 		"refresh_token": refreshToken,
 	}
 
+	// Hyper rotates refresh tokens and revokes the family when a retired
+	// one is presented, so every exchange is logged, named by fingerprint
+	// rather than by value. Without this a revocation gives no way to tell
+	// which credential was spent, or by whom.
+	started := time.Now()
+	sent := oauth.FingerprintSecret(refreshToken)
+	slog.Info("Hyper token exchange starting", "refresh_token", sent)
+
 	data, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
@@ -182,15 +191,38 @@ func ExchangeToken(ctx context.Context, refreshToken string) (*oauth.Token, erro
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, &oauth.TokenExchangeError{StatusCode: resp.StatusCode, Body: string(body)}
+		exchangeErr := oauth.NewTokenExchangeError(resp.StatusCode, string(body))
+		// The body is never logged: a token endpoint may echo credentials
+		// back. The status and a standard OAuth error code are enough to
+		// tell a revocation from an outage.
+		slog.Error("Hyper token exchange rejected",
+			"refresh_token", sent,
+			"status", resp.StatusCode,
+			"error_code", exchangeErr.ErrorCode(),
+			"took", time.Since(started))
+		return nil, exchangeErr
 	}
 
 	var token oauth.Token
 	if err := json.Unmarshal(body, &token); err != nil {
+		slog.Error("Hyper token exchange returned unparsable JSON", "refresh_token", sent, "error", err)
 		return nil, fmt.Errorf("unmarshal response: %w", err)
 	}
 
 	token.SetExpiresAt()
+	// A response that omits refresh_token leaves the old one in force.
+	// Persisting the empty value would strand the account with nothing to
+	// present at the next refresh, which reads as a logout with no cause.
+	// Other OAuth exchanges already keep the old token this way.
+	if token.RefreshToken == "" {
+		token.RefreshToken = refreshToken
+	}
+	slog.Info("Hyper token exchange succeeded",
+		"refresh_token", sent,
+		"new_refresh_token", token.Fingerprint(),
+		"rotated", token.RefreshToken != refreshToken,
+		"expires_in", token.ExpiresIn,
+		"took", time.Since(started))
 	return &token, nil
 }
 

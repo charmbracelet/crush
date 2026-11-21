@@ -167,6 +167,41 @@ func Providers(cfg *Config) ([]catwalk.Provider, error) {
 // Hyper token refresher for retrying on 401. Only the first call in a process
 // fetches; later calls return the memoized result and ignore both arguments.
 func LoadProviders(ctx context.Context, cfg *Config, refreshHyper HyperTokenRefresher) ([]catwalk.Provider, error) {
+	return loadProviders(ctx, cfg, hyperAuth{
+		resolveKey: func() string { return ResolveHyperAPIKey(cfg) },
+		refresh:    refreshHyper,
+	})
+}
+
+// hyperAuth is how the Hyper catalog fetch authenticates.
+type hyperAuth struct {
+	// resolveKey returns the bearer credential to present.
+	resolveKey func() string
+	// refresh renews the credential after a 401; nil means no retry.
+	refresh HyperTokenRefresher
+	// managed reports whether the credential is owned externally, in
+	// which case a 401 is never answered with a refresh.
+	managed func() bool
+}
+
+// hyperAuth returns the Hyper catalog credentials for a store: a managed
+// credential when one was pushed, fallback otherwise.
+func (s *ConfigStore) hyperAuth(fallback func() string) hyperAuth {
+	return hyperAuth{
+		resolveKey: func() string {
+			if cred, ok := s.ManagedCredential(hyper.Name); ok {
+				return cred.AccessToken
+			}
+			return fallback()
+		},
+		refresh: func(ctx context.Context) error {
+			return s.RefreshOAuthToken(ctx, ScopeGlobal, hyper.Name)
+		},
+		managed: func() bool { return s.IsManagedProvider(hyper.Name) },
+	}
+}
+
+func loadProviders(ctx context.Context, cfg *Config, auth hyperAuth) ([]catwalk.Provider, error) {
 	providerOnce.Do(func() {
 		var wg sync.WaitGroup
 		providers := csync.NewSlice[catwalk.Provider]()
@@ -207,11 +242,11 @@ func LoadProviders(ctx context.Context, cfg *Config, refreshHyper HyperTokenRefr
 				return
 			}
 			path := cachePathFor("hyper")
-			cfgSnapshot := cfg
 			hyperSyncer.Init(realHyperClient{
 				baseURL:      hyper.BaseURL(),
-				resolveKey:   func() string { return ResolveHyperAPIKey(cfgSnapshot) },
-				refreshToken: refreshHyper,
+				resolveKey:   auth.resolveKey,
+				refreshToken: auth.refresh,
+				managed:      auth.managed,
 			}, path, autoupdate)
 
 			// As above: keep whatever provider we were handed. The syncer

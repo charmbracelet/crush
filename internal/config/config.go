@@ -133,6 +133,15 @@ type ProviderConfig struct {
 	// Used to pass extra parameters to the provider.
 	ExtraParams map[string]string `json:"-"`
 
+	// ManagedKind is set while an external owner manages this provider's
+	// credential (see ManagedCredentials). The credential itself never
+	// lives on the provider config, so it cannot reach a serialized copy;
+	// it is looked up when the provider is built.
+	ManagedKind ManagedCredentialKind `json:"-"`
+	// managedSynthetic marks an entry created only because a credential
+	// was pushed for a provider that was not otherwise configured.
+	managedSynthetic bool
+
 	// AWSAuthRefresh is a shell command run when Bedrock returns a
 	// credential error. Output is discarded to avoid corrupting the TUI.
 	AWSAuthRefresh string `json:"aws_auth_refresh,omitempty" jsonschema:"description=Shell command to run when AWS credentials expire (Bedrock only)."`
@@ -184,6 +193,16 @@ func (c *ProviderConfig) HasAPIKey(resolver VariableResolver) bool {
 	}
 	v, err := resolver.ResolveValue(c.APIKey)
 	return err == nil && v != ""
+}
+
+// UsesOAuth reports whether requests to the provider authenticate with an
+// OAuth access token rather than an API key. A managed credential decides
+// by its kind, whatever login the provider had before.
+func (c *ProviderConfig) UsesOAuth() bool {
+	if c.ManagedKind != "" {
+		return c.ManagedKind == ManagedKindOAuth
+	}
+	return c.OAuthToken != nil
 }
 
 type MCPType string

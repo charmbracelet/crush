@@ -38,6 +38,32 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 			Tags("system").
 			Handle(c.handleGetConfig),
 
+		apigen.Put("/v1/credentials/{provider}").
+			Summary("Push a managed provider credential").
+			Description("Installs an access token (OAuth access token or API key) "+
+				"for a provider on every workspace. The provider is then managed: "+
+				"Crush never refreshes it and asks for a new one with a "+
+				"credentials_required event. Held in memory only. "+
+				"kind (oauth or api-key) says how it is presented; when omitted it is "+
+				"oauth if the provider is signed in by OAuth here, api-key otherwise. "+
+				"A kind the provider cannot take is refused (400), as is any push "+
+				"over a TCP listener (403).").
+			Tags("system").
+			PathParam("provider", "Provider ID (e.g. anthropic, hyper)").
+			Accepts(proto.CredentialPush{}).
+			Status(204).
+			Fails(400, 403, 404).
+			Handle(c.handlePutCredential),
+
+		apigen.Delete("/v1/credentials/{provider}").
+			Summary("Drop a managed provider credential").
+			Description("The provider falls back to its normal configuration.").
+			Tags("system").
+			PathParam("provider", "Provider ID").
+			Status(204).
+			Fails(403, 404).
+			Handle(c.handleDeleteCredential),
+
 		apigen.Delete("/v1/clients/{client_id}").
 			Summary("Retire a client").
 			Description("Releases every claim the client holds.").

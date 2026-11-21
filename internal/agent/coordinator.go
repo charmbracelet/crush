@@ -71,6 +71,17 @@ var (
 	errModelNotFound              = errors.New("model not found in provider config")
 )
 
+// aheadRefreshTimeout bounds an OAuth renewal that runs ahead of expiry.
+// It is detached from the turn, so nothing else would ever stop it.
+const aheadRefreshTimeout = 2 * time.Minute
+
+// backgroundRefreshShutdownWait bounds how long shutdown waits for an
+// ahead-of-time OAuth renewal to save its result. Shutdown cancels a
+// renewal that has not reached the provider yet, so the wait only matters
+// for one whose exchange is already in flight, and it has to cover that
+// exchange plus the write to disk.
+const backgroundRefreshShutdownWait = config.TokenExchangeTimeout + 5*time.Second
+
 // servingProvider returns the fantasy provider package that serves the
 // given provider and model. Providers with bespoke SDKs (Bedrock, Azure,
 // Google, Vertex AI, OpenRouter, Vercel, Hyper) are selected by ID;
@@ -170,6 +181,10 @@ type coordinator struct {
 
 	// awsRefresh shares one AWS SSO login among requests that need it.
 	awsRefresh singleflight.Group
+	// managedWait bounds how long a turn waits for the owner of a managed
+	// credential to push a fresh one. Zero means managedWaitTimeout; it
+	// is a field only so tests can shorten it.
+	managedWait time.Duration
 	// modelsGen counts rebuilds; override models rebuild when it moves.
 	modelsGen atomic.Uint64
 	// overrideModels shares builds of per-dispatch model overrides.
@@ -219,6 +234,19 @@ type coordinator struct {
 	// titles is shared by every agent built here, sub-agents included, so
 	// CancelAll on the current agent drains all title generation.
 	titles titleTracker
+
+	// bgRefreshMu guards bgRefreshClosed and bgRefreshInFlight, and makes
+	// checking them and registering with bgRefreshes one step, so shutdown
+	// cannot miss a renewal that starts just as it begins.
+	bgRefreshMu       sync.Mutex
+	bgRefreshClosed   bool
+	bgRefreshCtx      context.Context // cancelled when shutdown begins
+	bgRefreshCancel   context.CancelFunc
+	bgRefreshInFlight map[string]bool // provider ID -> ahead-of-time renewal running
+	bgRefreshes       sync.WaitGroup
+	// refreshAhead performs an ahead-of-time renewal. Nil means the
+	// config store's RefreshOAuthToken; tests substitute their own.
+	refreshAhead func(ctx context.Context, providerID string) error
 }
 
 // CoordinatorOptions holds the dependencies for NewCoordinator. Using a
@@ -474,6 +502,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, report *mess
 	runID := RunIDFromContext(ctx)
 	channel := ChannelFromContext(ctx)
 	c.syncSessionChannel(ctx, sessionID, channel)
+	authRefresh, managed := c.authRefreshFor(providerCfg)
 	run := func() (*fantasy.AgentResult, error) {
 		return agent.Run(ctx, SessionAgentCall{
 			SessionID:         sessionID,
@@ -493,12 +522,20 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, report *mess
 			PresencePenalty:   presPenalty,
 			OnComplete:        onComplete,
 			Accepted:          accept,
-			OnAuthRefresh:     c.makeAuthRefreshCallback(providerCfg),
+			OnAuthRefresh:     authRefresh,
+			managed:           managed,
 		})
 	}
 	beforeLoaded := c.skillTracker.LoadedNames()
 	result, originalErr := run()
 	logTurnSkillUsage(sessionID, prompt, c.activeSkills, c.skillTracker, beforeLoaded)
+
+	if managed != nil && originalErr != nil {
+		originalErr = managed.mapErr(originalErr)
+		if _, ok := errors.AsType[*managedCredentialError](originalErr); ok && hasLatest && latest.Error != "" {
+			latest.Error = originalErr.Error()
+		}
+	}
 
 	c.askToSignInAgain(originalErr, model)
 
@@ -1245,7 +1282,8 @@ func (c *coordinator) buildModelFromSelection(ctx context.Context, modelCfg conf
 		return Model{}, fmt.Errorf("%s %w", modelCfg.Model, errModelNotFound)
 	}
 
-	provider, err := c.buildProvider(providerCfg, modelCfg, isSubAgent, catwalkModel.EffectiveType(providerCfg.Type))
+	cred, managed := c.managedCredentialFor(providerCfg)
+	provider, err := c.buildProviderWith(providerCfg, cred, managed, modelCfg, isSubAgent, catwalkModel.EffectiveType(providerCfg.Type))
 	if err != nil {
 		return Model{}, err
 	}
@@ -1277,7 +1315,9 @@ func (c *coordinator) buildModelFromSelection(ctx context.Context, modelCfg conf
 		CatwalkCfg:   *catwalkModel,
 		ModelCfg:     modelCfg,
 		FlatRate:     providerCfg.FlatRate,
-		OAuth:        providerCfg.OAuthToken != nil,
+		OAuth:        providerCfg.UsesOAuth() || (managed && cred.Kind == config.ManagedKindOAuth),
+		Managed:      managed,
+		cred:         cred,
 		ProviderName: providerCfg.Name,
 	}, nil
 }
@@ -1286,13 +1326,21 @@ func (c *coordinator) buildModelFromSelection(ctx context.Context, modelCfg conf
 // OAuth token refreshed after the models were built is picked up by the
 // next credits fetch.
 func (c *coordinator) hyperAPIKey() string {
+	if cred, ok := c.cfg.ManagedCredential(hyper.Name); ok {
+		return cred.AccessToken
+	}
 	return config.ResolveHyperAPIKey(c.cfg.Config())
 }
 
-func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map[string]string, providerID string) (fantasy.Provider, error) {
+func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map[string]string, providerID string, bearer, debug bool) (fantasy.Provider, error) {
 	var opts []anthropic.Option
 
 	switch {
+	case bearer:
+		// A managed OAuth credential is a bearer token by its kind,
+		// whatever the token string looks like.
+		os.Setenv("ANTHROPIC_API_KEY", "")
+		headers["Authorization"] = "Bearer " + apiKey
 	case strings.HasPrefix(apiKey, "Bearer "):
 		// NOTE: Prevent the SDK from picking up the API key from env.
 		os.Setenv("ANTHROPIC_API_KEY", "")
@@ -1314,14 +1362,14 @@ func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map
 		opts = append(opts, anthropic.WithBaseURL(baseURL))
 	}
 
-	if c.cfg.Config().Options.Debug {
+	if debug {
 		httpClient := log.NewHTTPClient()
 		opts = append(opts, anthropic.WithHTTPClient(httpClient))
 	}
 	return anthropic.New(opts...)
 }
 
-func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[string]string, token *oauth.Token, wireType catwalk.Type) (fantasy.Provider, error) {
+func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[string]string, token *oauth.Token, wireType catwalk.Type, debug bool) (fantasy.Provider, error) {
 	opts := []openai.Option{
 		openai.WithAPIKey(apiKey),
 		openai.WithUseResponsesAPI(),
@@ -1332,7 +1380,7 @@ func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[st
 		}),
 	}
 	var httpClient *http.Client
-	if c.cfg.Config().Options.Debug {
+	if debug {
 		httpClient = log.NewHTTPClient()
 	}
 	if token != nil {
@@ -1359,7 +1407,7 @@ func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[st
 	return openai.New(opts...)
 }
 
-func (c *coordinator) buildOpenrouterProvider(_, apiKey string, headers map[string]string) (fantasy.Provider, error) {
+func (c *coordinator) buildOpenrouterProvider(_, apiKey string, headers map[string]string, debug bool) (fantasy.Provider, error) {
 	if headers == nil {
 		headers = make(map[string]string)
 	}
@@ -1372,7 +1420,7 @@ func (c *coordinator) buildOpenrouterProvider(_, apiKey string, headers map[stri
 	opts := []openrouter.Option{
 		openrouter.WithAPIKey(apiKey),
 	}
-	if c.cfg.Config().Options.Debug {
+	if debug {
 		httpClient := log.NewHTTPClient()
 		opts = append(opts, openrouter.WithHTTPClient(httpClient))
 	}
@@ -1382,11 +1430,11 @@ func (c *coordinator) buildOpenrouterProvider(_, apiKey string, headers map[stri
 	return openrouter.New(opts...)
 }
 
-func (c *coordinator) buildVercelProvider(_, apiKey string, headers map[string]string) (fantasy.Provider, error) {
+func (c *coordinator) buildVercelProvider(_, apiKey string, headers map[string]string, debug bool) (fantasy.Provider, error) {
 	opts := []vercel.Option{
 		vercel.WithAPIKey(apiKey),
 	}
-	if c.cfg.Config().Options.Debug {
+	if debug {
 		httpClient := log.NewHTTPClient()
 		opts = append(opts, vercel.WithHTTPClient(httpClient))
 	}
@@ -1396,7 +1444,7 @@ func (c *coordinator) buildVercelProvider(_, apiKey string, headers map[string]s
 	return vercel.New(opts...)
 }
 
-func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers map[string]string, extraBody map[string]any, providerID string, isSubAgent bool, wireType catwalk.Type) (fantasy.Provider, error) {
+func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers map[string]string, extraBody map[string]any, providerID string, isSubAgent bool, wireType catwalk.Type, debug bool) (fantasy.Provider, error) {
 	opts := []openaicompat.Option{
 		openaicompat.WithBaseURL(baseURL),
 		openaicompat.WithAPIKey(apiKey),
@@ -1414,7 +1462,7 @@ func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers 
 			openaicompat.WithUseResponsesAPI(),
 			openaicompat.WithResponsesAPIFunc(responsesFunc),
 		)
-		httpClient = copilot.NewClient(isSubAgent, c.cfg.Config().Options.Debug)
+		httpClient = copilot.NewClient(isSubAgent, debug)
 
 	case string(catwalk.InferenceProviderOpenCodeGo), string(catwalk.InferenceProviderOpenCodeZen):
 		opts = append(
@@ -1438,7 +1486,7 @@ func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers 
 			),
 		)
 	}
-	if httpClient == nil && c.cfg.Config().Options.Debug {
+	if httpClient == nil && debug {
 		httpClient = log.NewHTTPClient()
 	}
 	if httpClient != nil {
@@ -1456,13 +1504,13 @@ func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers 
 	return openaicompat.New(opts...)
 }
 
-func (c *coordinator) buildAzureProvider(baseURL, apiKey string, headers map[string]string, options map[string]string) (fantasy.Provider, error) {
+func (c *coordinator) buildAzureProvider(baseURL, apiKey string, headers map[string]string, options map[string]string, debug bool) (fantasy.Provider, error) {
 	opts := []azure.Option{
 		azure.WithBaseURL(baseURL),
 		azure.WithAPIKey(apiKey),
 		azure.WithUseResponsesAPI(),
 	}
-	if c.cfg.Config().Options.Debug {
+	if debug {
 		httpClient := log.NewHTTPClient()
 		opts = append(opts, azure.WithHTTPClient(httpClient))
 	}
@@ -1479,9 +1527,9 @@ func (c *coordinator) buildAzureProvider(baseURL, apiKey string, headers map[str
 	return azure.New(opts...)
 }
 
-func (c *coordinator) buildBedrockProvider(apiKey string, headers map[string]string, providerID string) (fantasy.Provider, error) {
+func (c *coordinator) buildBedrockProvider(apiKey string, headers map[string]string, providerID string, debug bool) (fantasy.Provider, error) {
 	var opts []bedrock.Option
-	if c.cfg.Config().Options.Debug {
+	if debug {
 		httpClient := log.NewHTTPClient()
 		opts = append(opts, bedrock.WithHTTPClient(httpClient))
 	}
@@ -1508,12 +1556,12 @@ func (c *coordinator) buildBedrockProvider(apiKey string, headers map[string]str
 	return bedrock.New(opts...)
 }
 
-func (c *coordinator) buildGoogleProvider(baseURL, apiKey string, headers map[string]string) (fantasy.Provider, error) {
+func (c *coordinator) buildGoogleProvider(baseURL, apiKey string, headers map[string]string, debug bool) (fantasy.Provider, error) {
 	opts := []google.Option{
 		google.WithBaseURL(baseURL),
 		google.WithGeminiAPIKey(apiKey),
 	}
-	if c.cfg.Config().Options.Debug {
+	if debug {
 		httpClient := log.NewHTTPClient()
 		opts = append(opts, google.WithHTTPClient(httpClient))
 	}
@@ -1523,9 +1571,9 @@ func (c *coordinator) buildGoogleProvider(baseURL, apiKey string, headers map[st
 	return google.New(opts...)
 }
 
-func (c *coordinator) buildGoogleVertexProvider(headers map[string]string, options map[string]string) (fantasy.Provider, error) {
+func (c *coordinator) buildGoogleVertexProvider(headers map[string]string, options map[string]string, debug bool) (fantasy.Provider, error) {
 	opts := []google.Option{}
-	if c.cfg.Config().Options.Debug {
+	if debug {
 		httpClient := log.NewHTTPClient()
 		opts = append(opts, google.WithHTTPClient(httpClient))
 	}
@@ -1550,6 +1598,30 @@ func (c *coordinator) isAnthropicThinking(model config.SelectedModel) bool {
 }
 
 func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model config.SelectedModel, isSubAgent bool, wireType catwalk.Type) (fantasy.Provider, error) {
+	cred, managed := c.managedCredentialFor(providerCfg)
+	return c.buildProviderWith(providerCfg, cred, managed, model, isSubAgent, wireType)
+}
+
+// managedOAuthToken is the OAuth token a managed OAuth credential is built
+// with: a copy of the local login when there is one, so account details
+// carry over, otherwise a fresh token. Either way it carries only the pushed
+// access token and expiry, never a refresh token.
+func managedOAuthToken(login *oauth.Token, cred config.ManagedCredential) *oauth.Token {
+	var tok oauth.Token
+	if login != nil {
+		tok = *login
+	}
+	tok.AccessToken = cred.AccessToken
+	tok.RefreshToken = ""
+	tok.ExpiresIn, tok.ExpiresAt = 0, 0
+	if !cred.ExpiresAt.IsZero() {
+		tok.ExpiresAt = cred.ExpiresAt.Unix()
+	}
+	return &tok
+}
+
+// buildProviderWith builds the provider presenting cred when managed.
+func (c *coordinator) buildProviderWith(providerCfg config.ProviderConfig, cred config.ManagedCredential, managed bool, model config.SelectedModel, isSubAgent bool, wireType catwalk.Type) (fantasy.Provider, error) {
 	wireType = config.NormalizeProviderType(wireType)
 	headers := maps.Clone(providerCfg.ExtraHeaders)
 	if headers == nil {
@@ -1565,22 +1637,46 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		}
 	}
 
-	apiKey, _ := c.cfg.Resolve(providerCfg.APIKey)
+	var apiKey string
+	// Debug logging dumps request and response bodies, which can echo a
+	// pushed credential, so managed calls never use the debug client.
+	debug := c.cfg.Config().Options.Debug && !managed
+	bearer := false
+	if managed {
+		// A pushed credential is used literally: it never goes through
+		// the shell resolver, so it cannot expand or execute anything.
+		// How it is presented follows the kind stored at push time, so
+		// every workspace presents it the same way.
+		apiKey = cred.AccessToken
+		if cred.Kind == config.ManagedKindOAuth {
+			providerCfg.OAuthToken = managedOAuthToken(providerCfg.OAuthToken, cred)
+			bearer = providerCfg.ID == string(catwalk.InferenceProviderAnthropic)
+			if providerCfg.ID == string(catwalk.InferenceProviderCopilot) {
+				providerCfg.ExtraHeaders = headers
+				providerCfg.SetupGitHubCopilot()
+			}
+		} else {
+			// The pushed key replaces any OAuth login the provider had.
+			providerCfg.OAuthToken = nil
+		}
+	} else {
+		apiKey, _ = c.cfg.Resolve(providerCfg.APIKey)
+	}
 	baseURL, _ := c.cfg.Resolve(providerCfg.BaseURL)
 
 	switch providerCfg.ID {
 	case string(catwalk.InferenceProviderBedrock), string(catwalk.InferenceProviderBedrockEurope):
-		return c.buildBedrockProvider(apiKey, headers, providerCfg.ID)
+		return c.buildBedrockProvider(apiKey, headers, providerCfg.ID, debug)
 	case string(catwalk.InferenceProviderAzure):
-		return c.buildAzureProvider(baseURL, apiKey, headers, providerCfg.ExtraParams)
+		return c.buildAzureProvider(baseURL, apiKey, headers, providerCfg.ExtraParams, debug)
 	case string(catwalk.InferenceProviderVertexAI):
-		return c.buildGoogleVertexProvider(headers, providerCfg.ExtraParams)
+		return c.buildGoogleVertexProvider(headers, providerCfg.ExtraParams, debug)
 	case string(catwalk.InferenceProviderGemini):
-		return c.buildGoogleProvider(baseURL, apiKey, headers)
+		return c.buildGoogleProvider(baseURL, apiKey, headers, debug)
 	case string(catwalk.InferenceProviderOpenRouter):
-		return c.buildOpenrouterProvider(baseURL, apiKey, headers)
+		return c.buildOpenrouterProvider(baseURL, apiKey, headers, debug)
 	case string(catwalk.InferenceProviderVercel):
-		return c.buildVercelProvider(baseURL, apiKey, headers)
+		return c.buildVercelProvider(baseURL, apiKey, headers, debug)
 	case string(catwalk.InferenceProviderCopilot),
 		string(catwalk.InferenceProviderOpenCodeGo), string(catwalk.InferenceProviderOpenCodeZen):
 		// Messages models on the OpenCode gateways are served by the
@@ -1588,9 +1684,9 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		// prefix the chat completions and responses endpoints use.
 		if wireType == catwalk.TypeMessages {
 			baseURL = strings.TrimSuffix(baseURL, "/v1")
-			return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID)
+			return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID, bearer, debug)
 		}
-		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent, wireType)
+		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent, wireType, debug)
 	case string(catwalk.InferenceProviderOpenAI):
 		// A ChatGPT login is the provider's single credential: every
 		// request goes through the Codex backend with the OAuth token.
@@ -1603,14 +1699,14 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 				headers["chatgpt-account-id"] = token.AccountID
 			}
 		}
-		return c.buildOpenaiProvider(baseURL, apiKey, headers, token, wireType)
+		return c.buildOpenaiProvider(baseURL, apiKey, headers, token, wireType, debug)
 	}
 
 	switch wireType {
 	case catwalk.TypeMessages:
-		return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID)
+		return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID, bearer, debug)
 	case catwalk.TypeResponses:
-		return c.buildOpenaiProvider(baseURL, apiKey, headers, providerCfg.OAuthToken, wireType)
+		return c.buildOpenaiProvider(baseURL, apiKey, headers, providerCfg.OAuthToken, wireType, debug)
 	case catwalk.TypeCompletions, catwalk.Type(hyper.Name):
 		// Hyper's provider advertises its own type rather than a wire
 		// type; it speaks chat completions.
@@ -1624,12 +1720,12 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 			}
 			providerCfg.ExtraBody["tool_stream"] = true
 		}
-		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent, wireType)
+		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent, wireType, debug)
 	default:
 		// Known custom providers (litellm, llamacpp, lmstudio, ollama,
 		// omlx) are openai-compat under the hood.
 		if discover.IsKnownCustomProvider(string(providerCfg.Type)) {
-			return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent, wireType)
+			return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent, wireType, debug)
 		}
 		return nil, fmt.Errorf("provider type not supported: %q", providerCfg.Type)
 	}
@@ -1675,6 +1771,7 @@ func (c *coordinator) Cancel(sessionID string) {
 func (c *coordinator) CancelAll() {
 	c.currentAgent().CancelAll()
 	c.stopAllDispatched(stopForShutdown, 5*time.Second)
+	c.stopBackgroundRefreshes(backgroundRefreshShutdownWait)
 }
 
 func (c *coordinator) ClearQueue(sessionID string) {
@@ -1751,13 +1848,22 @@ func (c *coordinator) QueuedPromptsList(sessionID string) []string {
 }
 
 func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
+	// Fail closed, as turns do: models built before a managed credential
+	// was pushed or deleted must not be used if they cannot be rebuilt.
+	if err := c.syncManagedModels(ctx); err != nil {
+		return fmt.Errorf("rebuild models after a managed credential change: %w", err)
+	}
 	agent := c.currentAgent()
 	providerCfg, ok := c.cfg.Config().Providers.Get(agent.Model().ModelCfg.Provider)
 	if !ok {
 		return errModelProviderNotConfigured
 	}
 
-	if err := c.refreshTokenIfExpired(ctx, providerCfg); err != nil {
+	if cred, ok := c.cfg.ManagedCredential(providerCfg.ID); ok {
+		if err := c.prepareManagedCredential(ctx, providerCfg.ID, cred); err != nil {
+			return err
+		}
+	} else if err := c.refreshTokenIfExpired(ctx, providerCfg); err != nil {
 		slog.Error("Failed to refresh OAuth2 token before summarize. Proceeding with existing token.", "error", err)
 	}
 
@@ -1765,7 +1871,8 @@ func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
 	// the same path used by regular turns.
 	opts := getProviderOptions(agent.Model(), providerCfg)
 	injectOpenrouterSessionID(opts, sessionID)
-	return agent.Summarize(ctx, sessionID, opts, c.makeAuthRefreshCallback(providerCfg))
+	authRefresh, managed := c.authRefreshFor(providerCfg)
+	return agent.Summarize(withManagedCall(ctx, managed), sessionID, opts, authRefresh)
 }
 
 // GenerateTitle generates a session title using the current agent.
@@ -1774,16 +1881,174 @@ func (c *coordinator) GenerateTitle(ctx context.Context, sessionID, prompt strin
 	if agent == nil {
 		return
 	}
+	// Fail closed, as turns do; the session keeps its default name.
+	if err := c.syncManagedModels(ctx); err != nil {
+		slog.Error("Not generating a title: models could not be rebuilt after a managed credential change",
+			"session_id", sessionID, "error", err)
+		return
+	}
 	agent.GenerateTitle(ctx, sessionID, prompt)
 }
 
-// refreshTokenIfExpired proactively refreshes the OAuth token if it has expired.
+// refreshTokenIfExpired brings the OAuth credential up to date before a
+// turn uses it.
+//
+// It reconciles with disk first, then renews: early and in the background
+// when the token is merely nearing its deadline, and inline only once it
+// has crossed it.
+//
+// Every outcome is logged. A turn that should have refreshed and did not
+// looks exactly like one that had nothing to do, so without the skip line
+// there is no way to tell a broken expiry check from a healthy token.
 func (c *coordinator) refreshTokenIfExpired(ctx context.Context, providerCfg config.ProviderConfig) error {
-	if providerCfg.OAuthToken == nil || !providerCfg.OAuthToken.IsExpired() {
+	if cred, ok := c.cfg.ManagedCredential(providerCfg.ID); ok {
+		return c.prepareManagedCredential(ctx, providerCfg.ID, cred)
+	}
+	// A credential deleted since the models were built must not go out.
+	if err := c.syncManagedModels(ctx); err != nil {
+		return err
+	}
+	if providerCfg.OAuthToken == nil {
 		return nil
 	}
-	slog.Debug("Token needs to be refreshed", "provider", providerCfg.ID)
-	return c.refreshOAuth2Token(ctx, providerCfg)
+
+	// Disk is the authority on which credential is current, since a peer
+	// may have rotated ours away while this session sat idle. Reconcile
+	// before judging expiry so the decision is made against the live
+	// token rather than against a snapshot from hours ago.
+	if adopted, err := c.cfg.AdoptNewerDiskToken(config.ScopeGlobal, providerCfg.ID); err != nil {
+		slog.Warn("Failed to reconcile the OAuth token with disk",
+			"provider", providerCfg.ID, "error", err)
+	} else if adopted {
+		if current, ok := c.cfg.Config().Providers.Get(providerCfg.ID); ok {
+			providerCfg = current
+		}
+		if err := c.rebuildModels(ctx); err != nil {
+			return err
+		}
+	}
+
+	token := providerCfg.OAuthToken
+	if token.IsExpired() {
+		slog.Info("OAuth token expired, refreshing before the turn",
+			"provider", providerCfg.ID,
+			"refresh_token", token.Fingerprint(),
+			"expires_in_s", token.ExpiresInSeconds())
+		return c.refreshOAuth2Token(ctx, providerCfg)
+	}
+
+	if token.ShouldRefreshAhead() {
+		c.refreshOAuth2TokenAhead(ctx, providerCfg)
+		return nil
+	}
+
+	slog.Debug("OAuth token still valid, not refreshing",
+		"provider", providerCfg.ID,
+		"refresh_token", token.Fingerprint(),
+		"expires_in_s", token.ExpiresInSeconds())
+	return nil
+}
+
+// refreshOAuth2TokenAhead renews a credential that is nearing its deadline
+// without making the turn wait for it. The current token is still good, so
+// a failure here costs nothing: the turn proceeds, and if the renewal never
+// lands the inline path picks it up once the token actually expires.
+//
+// The work is detached from the turn's context so that finishing or
+// cancelling the turn does not abort an exchange already in flight, since
+// abandoning one halfway is how a rotated token gets lost. At most one
+// renewal per provider runs at a time, none start once shutdown has begun,
+// and shutdown waits for the ones running to save their result.
+func (c *coordinator) refreshOAuth2TokenAhead(ctx context.Context, providerCfg config.ProviderConfig) {
+	if c.cfg.IsManagedProvider(providerCfg.ID) {
+		// Its owner renews it; nothing here may spend a refresh token.
+		return
+	}
+	c.bgRefreshMu.Lock()
+	if c.bgRefreshClosed || c.bgRefreshInFlight[providerCfg.ID] {
+		c.bgRefreshMu.Unlock()
+		return
+	}
+	if c.bgRefreshInFlight == nil {
+		c.bgRefreshInFlight = make(map[string]bool)
+	}
+	if c.bgRefreshCtx == nil {
+		c.bgRefreshCtx, c.bgRefreshCancel = context.WithCancel(context.Background())
+	}
+	shutdownCtx := c.bgRefreshCtx
+	c.bgRefreshInFlight[providerCfg.ID] = true
+	c.bgRefreshes.Add(1)
+	c.bgRefreshMu.Unlock()
+
+	token := providerCfg.OAuthToken
+	slog.Info("OAuth token nearing expiry, refreshing ahead of the turn",
+		"provider", providerCfg.ID,
+		"refresh_token", token.Fingerprint(),
+		"expires_in_s", token.ExpiresInSeconds())
+
+	// Detached from the turn, but cancelled when shutdown begins. The store
+	// checks this context while waiting for the refresh lock and right
+	// before the exchange; once an exchange has started it runs to
+	// completion regardless, and shutdown waits for it.
+	detached, cancel := context.WithTimeout(context.WithoutCancel(ctx), aheadRefreshTimeout)
+	stopOnShutdown := context.AfterFunc(shutdownCtx, cancel)
+	go func() {
+		defer func() {
+			stopOnShutdown()
+			cancel()
+			c.bgRefreshMu.Lock()
+			delete(c.bgRefreshInFlight, providerCfg.ID)
+			c.bgRefreshMu.Unlock()
+			c.bgRefreshes.Done()
+		}()
+		refresh := c.refreshAhead
+		if refresh == nil {
+			refresh = func(ctx context.Context, providerID string) error {
+				return c.cfg.RefreshOAuthToken(ctx, config.ScopeGlobal, providerID)
+			}
+		}
+		if err := refresh(detached, providerCfg.ID); err != nil {
+			slog.Warn("Ahead-of-time OAuth refresh failed; continuing with the current token",
+				"provider", providerCfg.ID, "error", err)
+			return
+		}
+		// Rebuild only when the credential actually changed. A refresh
+		// that found the token just issued leaves it as it was.
+		if live, ok := c.cfg.Config().Providers.Get(providerCfg.ID); ok &&
+			live.OAuthToken != nil && live.OAuthToken.AccessToken == token.AccessToken {
+			return
+		}
+		if err := c.rebuildModels(detached); err != nil {
+			slog.Warn("Failed to rebuild models after ahead-of-time OAuth refresh",
+				"provider", providerCfg.ID, "error", err)
+		}
+	}()
+}
+
+// stopBackgroundRefreshes stops new ahead-of-time OAuth renewals from
+// starting, cancels those that have not reached the provider yet, and
+// waits up to timeout for those whose exchange is in flight. An exchange that
+// has reached the provider has already retired the refresh token it
+// spent, so exiting before its replacement is saved would leave the next
+// start holding a credential the provider has forgotten.
+func (c *coordinator) stopBackgroundRefreshes(timeout time.Duration) {
+	c.bgRefreshMu.Lock()
+	c.bgRefreshClosed = true
+	if c.bgRefreshCancel != nil {
+		c.bgRefreshCancel()
+	}
+	c.bgRefreshMu.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		c.bgRefreshes.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(timeout):
+		slog.Warn("Shutting down with an OAuth refresh still in flight", "waited", timeout)
+	}
 }
 
 // retryAfterUnauthorized attempts to refresh credentials after an auth error
@@ -1791,21 +2056,45 @@ func (c *coordinator) refreshTokenIfExpired(ctx context.Context, providerCfg con
 // refresh token is revoked, and for Bedrock providers whose AWS SSO session
 // has expired, it triggers interactive re-authentication and blocks until the
 // user completes it (or the context is cancelled).
-func (c *coordinator) retryAfterUnauthorized(ctx context.Context, providerCfg config.ProviderConfig) error {
+//
+// rejected is the OAuth token the refused request was sent with, if known.
+func (c *coordinator) retryAfterUnauthorized(ctx context.Context, providerCfg config.ProviderConfig, rejected *oauth.Token) error {
+	if cred, ok := c.cfg.ManagedCredential(providerCfg.ID); ok {
+		// Normally the call's own managedCall handles this, knowing the
+		// token its attempt sent; this is the fallback for other callers.
+		return c.replaceRejectedCredential(ctx, providerCfg.ID, cred.AccessToken)
+	}
 	switch {
 	case providerCfg.OAuthToken != nil:
 		slog.Debug("Received 401. Refreshing token and retrying", "provider", providerCfg.ID)
-		if err := c.refreshOAuth2Token(ctx, providerCfg); err != nil {
+		if err := c.refreshRejectedOAuth2Token(ctx, providerCfg, rejected); err != nil {
 			// If the refresh token was revoked, trigger interactive
 			// re-auth and wait for the user to complete it.
 			var exchangeErr *oauth.TokenExchangeError
-			if c.notify != nil && errors.As(err, &exchangeErr) && exchangeErr.IsRefreshTokenRevoked() {
-				slog.Info("Refresh token revoked, waiting for re-authentication", "provider", providerCfg.ID)
-				c.notify.Publish(pubsub.CreatedEvent, notify.Notification{
-					Type:       notify.TypeReAuthenticate,
-					ProviderID: providerCfg.ID,
-				})
-				return c.waitForInteractiveReauth(ctx, providerCfg.ID)
+			if errors.As(err, &exchangeErr) && exchangeErr.IsRefreshTokenRevoked() {
+				// A rejected exchange also happens when a peer rotated
+				// the family and its replacement had not reached disk
+				// yet, which is indistinguishable from revocation here.
+				// Look once more before spending the user's attention.
+				if adopted, adoptErr := c.cfg.AdoptPeerRefreshedToken(ctx, config.ScopeGlobal, providerCfg.ID); adoptErr != nil {
+					slog.Warn("Failed to look for a token refreshed by another session",
+						"provider", providerCfg.ID, "error", adoptErr)
+				} else if adopted {
+					return c.rebuildModels(ctx)
+				}
+				if c.cfg.IsManagedProvider(providerCfg.ID) {
+					// Became managed while we were refreshing: its owner,
+					// not the user, supplies the next credential.
+					return config.ErrCredentialManaged
+				}
+				if c.notify != nil {
+					slog.Info("Refresh token revoked, waiting for re-authentication", "provider", providerCfg.ID)
+					c.notify.Publish(pubsub.CreatedEvent, notify.Notification{
+						Type:       notify.TypeReAuthenticate,
+						ProviderID: providerCfg.ID,
+					})
+					return c.waitForInteractiveReauth(ctx, providerCfg.ID)
+				}
 			}
 			return err
 		}
@@ -1867,18 +2156,40 @@ func isUnauthorized(err error) bool {
 // delegates to the coordinator's existing credential refresh logic. Returns
 // nil if no refresh mechanism is configured for the provider.
 func (c *coordinator) makeAuthRefreshCallback(providerCfg config.ProviderConfig) func(context.Context, *fantasy.ProviderError) error {
+	if managed := c.newManagedCall(providerCfg.ID); managed != nil {
+		return managed.refresh
+	}
 	if providerCfg.OAuthToken == nil &&
 		!strings.Contains(providerCfg.APIKeyTemplate, "$") &&
 		providerCfg.AWSAuthRefresh == "" {
 		return nil
 	}
+	// The callback is built just before the request goes out, so the live
+	// token now is the one a 401 will have refused. Remembering it lets a
+	// burst of refusals renew once instead of once each.
+	var rejected *oauth.Token
+	if live, ok := c.cfg.Config().Providers.Get(providerCfg.ID); ok {
+		rejected = live.OAuthToken
+	}
 	return func(ctx context.Context, _ *fantasy.ProviderError) error {
-		return c.retryAfterUnauthorized(ctx, providerCfg)
+		return c.retryAfterUnauthorized(ctx, providerCfg, rejected)
 	}
 }
 
+// refreshOAuth2Token renews an expired OAuth credential and rebuilds the
+// models so the next request carries it.
 func (c *coordinator) refreshOAuth2Token(ctx context.Context, providerCfg config.ProviderConfig) error {
 	if err := c.cfg.RefreshOAuthToken(ctx, config.ScopeGlobal, providerCfg.ID); err != nil {
+		slog.Error("Failed to refresh expired OAuth token", "provider", providerCfg.ID, "error", err)
+		return err
+	}
+	return c.rebuildModels(ctx)
+}
+
+// refreshRejectedOAuth2Token renews an OAuth credential the provider just
+// refused, unless it was already replaced since, and rebuilds the models.
+func (c *coordinator) refreshRejectedOAuth2Token(ctx context.Context, providerCfg config.ProviderConfig, rejected *oauth.Token) error {
+	if err := c.cfg.RefreshRejectedOAuthToken(ctx, config.ScopeGlobal, providerCfg.ID, rejected); err != nil {
 		slog.Error("Failed to refresh OAuth token after 401 error", "provider", providerCfg.ID, "error", err)
 		return err
 	}
@@ -1901,6 +2212,11 @@ func (c *coordinator) refreshApiKeyTemplate(ctx context.Context, providerCfg con
 // is still refused after the refresh-and-retry.
 func (c *coordinator) askToSignInAgain(err error, model Model) {
 	if err == nil || !isUnauthorized(err) || c.notify == nil || !model.OAuth {
+		return
+	}
+	if c.cfg.IsManagedProvider(model.ModelCfg.Provider) {
+		// Nobody can sign in interactively for a managed credential;
+		// its owner was already asked via TypeCredentialsRequired.
 		return
 	}
 	c.notify.Publish(pubsub.CreatedEvent, notify.Notification{
@@ -1955,6 +2271,7 @@ func (c *coordinator) subAgentCall(agent SessionAgent, sessionID, prompt string)
 
 	opts := getProviderOptions(model, providerCfg)
 	injectOpenrouterSessionID(opts, sessionID)
+	authRefresh, managed := c.authRefreshFor(providerCfg)
 
 	return SessionAgentCall{
 		SessionID:        sessionID,
@@ -1967,7 +2284,8 @@ func (c *coordinator) subAgentCall(agent SessionAgent, sessionID, prompt string)
 		FrequencyPenalty: model.ModelCfg.FrequencyPenalty,
 		PresencePenalty:  model.ModelCfg.PresencePenalty,
 		NonInteractive:   true,
-		OnAuthRefresh:    c.makeAuthRefreshCallback(providerCfg),
+		OnAuthRefresh:    authRefresh,
+		managed:          managed,
 	}, model, nil
 }
 
@@ -1995,6 +2313,9 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 	call, model, err := c.subAgentCall(params.Agent, session.ID, params.Prompt)
 	if err != nil {
 		return fantasy.ToolResponse{}, err
+	}
+	if err := c.prepareSubAgentTurn(ctx, model); err != nil {
+		return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to generate response: %s", err)), nil
 	}
 
 	done := c.trackSubSession(session.ID)

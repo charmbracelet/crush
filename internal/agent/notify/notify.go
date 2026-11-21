@@ -25,6 +25,20 @@ const (
 	// finished. Message carries the error text when it failed, empty on
 	// success.
 	TypeAWSSSOAuthResult Type = "aws_sso_auth_result"
+	// TypeCredentialsRequired asks the external owner of a managed
+	// credential (see config.ManagedCredentials) to push a fresh one for
+	// ProviderID. Reason says why.
+	TypeCredentialsRequired Type = "credentials_required"
+)
+
+// Reasons carried by a TypeCredentialsRequired notification.
+const (
+	// CredentialsReasonExpiring means the managed credential is about to
+	// expire and a turn is waiting to start.
+	CredentialsReasonExpiring = "expiring"
+	// CredentialsReasonUnauthorized means the provider rejected the
+	// managed credential.
+	CredentialsReasonUnauthorized = "unauthorized"
 )
 
 // Notification represents a domain event published by the agent.
@@ -47,6 +61,9 @@ type Notification struct {
 	// AWSSOURL carries the SSO verification URL for TypeAWSSSOAuth once it
 	// appears in the refresh command's output.
 	AWSSOURL string
+	// Reason carries why a fresh credential is needed for
+	// TypeCredentialsRequired.
+	Reason string
 }
 
 // RunComplete is the authoritative end-of-run signal for a session.

@@ -20,6 +20,10 @@ type ModelSet struct {
 // elsewhere subLarge is large. The small model is always built that way.
 type coordinatorModels struct {
 	large, subLarge, small Model
+	// managedVersion is the managed-credential version these models were
+	// built under. It is published with them, so a failed build never
+	// marks a version built; a mismatch means they are stale.
+	managedVersion uint64
 }
 
 // rebuildModels rebuilds every shared model from the live config and
@@ -28,6 +32,14 @@ type coordinatorModels struct {
 func (c *coordinator) rebuildModels(ctx context.Context) error {
 	c.rebuildMu.Lock()
 	defer c.rebuildMu.Unlock()
+	return c.rebuildModelsLocked(ctx)
+}
+
+// rebuildModelsLocked is rebuildModels for a caller holding rebuildMu.
+func (c *coordinator) rebuildModelsLocked(ctx context.Context) error {
+	// Read before building: a push that lands mid-build leaves the
+	// recorded version behind, so the next check rebuilds again.
+	managedVersion := c.cfg.ManagedCredentials().Version()
 
 	large, err := c.buildModel(ctx, config.SelectedModelTypeLarge, false)
 	if err != nil {
@@ -44,7 +56,7 @@ func (c *coordinator) rebuildModels(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	c.models.Set(coordinatorModels{large: large, subLarge: subLarge, small: small})
+	c.models.Set(coordinatorModels{large: large, subLarge: subLarge, small: small, managedVersion: managedVersion})
 
 	// Override models rebuild lazily on their next use.
 	c.modelsGen.Add(1)
@@ -142,9 +154,23 @@ func (c *coordinator) smallOnlyModels() ModelSet {
 // a retry gets a refreshed credential but a model switch waits for the next
 // turn.
 func (a *sessionAgent) currentBuildOf(started Model) fantasy.LanguageModel {
+	return a.currentModelOf(started).Model
+}
+
+// currentModelOf is currentBuildOf returning the whole build, including the
+// managed credential it presents.
+func (a *sessionAgent) currentModelOf(started Model) Model {
 	m := a.models().Large
 	if m.ModelCfg.Provider != started.ModelCfg.Provider || m.ModelCfg.Model != started.ModelCfg.Model {
-		return started.Model
+		return started
 	}
+	return m
+}
+
+// attemptModel selects the build an attempt runs on and records it on the
+// call's managed state, so a 401 is matched to the credential it sent.
+func (a *sessionAgent) attemptModel(ctx context.Context, started Model) fantasy.LanguageModel {
+	m := a.currentModelOf(started)
+	managedCallFrom(ctx).record(m)
 	return m.Model
 }

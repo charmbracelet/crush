@@ -549,7 +549,7 @@ func (c *coordinator) reopen(entry *dispatchedAgent, prompt string, agent Sessio
 	if !swap {
 		agent = entry.runner()
 	}
-	agentCall, _, err := c.subAgentCall(agent, entry.SessionID, prompt)
+	agentCall, subModel, err := c.subAgentCall(agent, entry.SessionID, prompt)
 	if err != nil {
 		c.dispatchMu.Unlock()
 		return false
@@ -567,6 +567,10 @@ func (c *coordinator) reopen(entry *dispatchedAgent, prompt string, agent Sessio
 	}
 
 	c.runDispatched(runCtx, entry, gen, func(ctx context.Context) (fantasy.ToolResponse, error) {
+		// Outside dispatchMu: this may wait for a managed credential.
+		if err := c.prepareSubAgentTurn(ctx, subModel); err != nil {
+			return fantasy.NewTextErrorResponse(fmt.Sprintf("Subagent failed: %s", err)), nil
+		}
 		result, err := agent.Run(ctx, agentCall)
 		if err != nil {
 			return fantasy.NewTextErrorResponse(fmt.Sprintf("Subagent failed: %s", err)), nil

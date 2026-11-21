@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -34,6 +35,7 @@ type countingWorkspace struct {
 
 	ready          bool
 	agentBusy      bool
+	sessionBusyErr error
 	permMode       permission.PermissionMode
 	queued         []string
 	model          workspace.AgentModel
@@ -53,6 +55,7 @@ type countingWorkspace struct {
 	modelCalls      int
 	lspStateCalls   int
 	lspDiagCalls    int
+	lspStopCalls    int
 	mcpStateCalls   int
 	mcpPendingCalls int
 }
@@ -63,7 +66,12 @@ func (w *countingWorkspace) AgentIsBusy() bool  { w.agentBusyCalls++; return w.a
 // AgentIsSessionBusy answers for the single session these tests use, and is
 // deliberately uncounted: it is asked once on session load rather than on
 // the per-keystroke paths whose probe counts the other stubs pin.
-func (w *countingWorkspace) AgentIsSessionBusy(string) bool { return w.agentBusy }
+func (w *countingWorkspace) AgentIsSessionBusy(string) (bool, error) {
+	if w.sessionBusyErr != nil {
+		return false, w.sessionBusyErr
+	}
+	return w.agentBusy, nil
+}
 
 func (w *countingWorkspace) AgentReadyErr() error {
 	w.readyCalls++
@@ -143,9 +151,16 @@ func (w *countingWorkspace) ListUserMessages(context.Context, string) ([]message
 	return nil, nil
 }
 
+func (w *countingWorkspace) ListAllUserMessages(context.Context) ([]message.Message, error) {
+	return nil, nil
+}
+
+func (w *countingWorkspace) SetCurrentSession(context.Context, string) error { return nil }
+
 func (w *countingWorkspace) WorkingDir() string { return "" }
 
 func (w *countingWorkspace) LSPStart(context.Context, string) {}
+func (w *countingWorkspace) LSPStopAll(context.Context)       { w.lspStopCalls++ }
 
 func (w *countingWorkspace) Config() *config.Config { return nil }
 
@@ -229,6 +244,85 @@ func runCmds(m *UI, cmd tea.Cmd) {
 		_, next := m.Update(msg)
 		runCmds(m, next)
 	}
+}
+
+func TestNewSessionWhileAnotherSessionRuns(t *testing.T) {
+	pinTTLs(t)
+	shortcut := tea.KeyPressMsg{Code: 'n', Mod: tea.ModCtrl}
+	for _, entry := range []struct {
+		name    string
+		request func(*UI) tea.Cmd
+	}{
+		{"command palette", func(m *UI) tea.Cmd {
+			m.dialog.OpenDialog(&actionDialog{action: dialog.ActionNewSession{}})
+			return m.handleDialogMsg(struct{}{})
+		}},
+		{"editor shortcut", func(m *UI) tea.Cmd {
+			return m.handleKeyPressMsg(shortcut)
+		}},
+		{"chat shortcut", func(m *UI) tea.Cmd {
+			m.focus = uiFocusMain
+			return m.handleKeyPressMsg(shortcut)
+		}},
+	} {
+		t.Run(entry.name, func(t *testing.T) {
+			for _, state := range []struct {
+				name      string
+				probed    string
+				busy      bool
+				pending   bool
+				wantBlock bool
+			}{
+				{name: "viewed session idle", probed: "s1"},
+				{name: "viewed session busy", probed: "s1", busy: true, wantBlock: true},
+				{name: "viewed session pending", probed: "s1", pending: true, wantBlock: true},
+				{name: "viewed session not probed", probed: "s2", wantBlock: true},
+			} {
+				t.Run(state.name, func(t *testing.T) {
+					ws := &countingWorkspace{ready: true, agentBusy: true}
+					m := newBusyUI(ws)
+					warmCaches(m, true)
+					m.applyBusyState(busyStateMsg{
+						ready:       true,
+						agentBusy:   true,
+						forSession:  state.probed,
+						sessionBusy: state.busy,
+					})
+					if state.pending {
+						m.pending.sessionID = "s1"
+					}
+
+					cmd := entry.request(m)
+					require.Zero(t, ws.syncProbes())
+					if state.wantBlock {
+						require.Equal(t, "s1", m.currentSessionID())
+						return
+					}
+
+					require.Equal(t, uiLanding, m.state)
+					require.Empty(t, m.currentSessionID())
+					require.True(t, m.isAgentBusy())
+					runCmds(m, cmd)
+					require.Zero(t, ws.lspStopCalls, "leave the other session's LSP clients running")
+				})
+			}
+		})
+	}
+}
+
+func TestNewSessionWaitsWhenSessionBusyProbeFails(t *testing.T) {
+	pinTTLs(t)
+	ws := &countingWorkspace{
+		ready:          true,
+		agentBusy:      true,
+		sessionBusyErr: errors.New("session busy probe failed"),
+	}
+	m := newBusyUI(ws)
+	warmCaches(m, true)
+	runCmds(m, m.dispatchBusyRefresh())
+
+	m.handleKeyPressMsg(tea.KeyPressMsg{Code: 'n', Mod: tea.ModCtrl})
+	require.Equal(t, "s1", m.currentSessionID())
 }
 
 // plainMsg is an arbitrary tea.Msg standing in for keystroke/mouse/tick

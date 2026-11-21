@@ -185,11 +185,12 @@ func (w *AppWorkspace) AgentIsBusy() bool {
 	return w.app.Agent().IsBusy()
 }
 
-func (w *AppWorkspace) AgentIsSessionBusy(sessionID string) bool {
-	if w.app.Agent() == nil {
-		return false
+func (w *AppWorkspace) AgentIsSessionBusy(sessionID string) (bool, error) {
+	coordinator := w.app.Agent()
+	if coordinator == nil {
+		return false, ErrAgentNotInitialized
 	}
-	return w.app.Agent().IsSessionBusy(sessionID)
+	return coordinator.IsSessionBusy(sessionID), nil
 }
 
 func (w *AppWorkspace) AgentModel() AgentModel {

@@ -463,7 +463,8 @@ func (s *Session) isCurrentSessionBusy() bool {
 		return false
 	}
 
-	return s.com.Workspace.AgentIsSessionBusy(sessionItem.ID())
+	busy, _ := s.com.Workspace.AgentIsSessionBusy(sessionItem.ID())
+	return busy
 }
 
 // ShortHelp implements [help.KeyMap].

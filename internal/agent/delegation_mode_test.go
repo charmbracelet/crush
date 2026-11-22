@@ -126,3 +126,76 @@ func TestReadOnlyParent(t *testing.T) {
 	assert.False(t, readOnlyParent(config.AgentCoder))
 	assert.False(t, readOnlyParent(""))
 }
+
+// TestDispatchToolsNarrowTheSubagent pins the per-dispatch tool restriction:
+// a subagent asked for a narrow toolset must not be able to run anything
+// else. Without this, a delegated agent that is talked into a destructive
+// command has the full toolset to do it with.
+func TestDispatchToolsNarrowTheSubagent(t *testing.T) {
+	t.Parallel()
+
+	// The parent may do anything; the subagent asks for read-only tools.
+	parentCfg := config.Agent{
+		AllowedTools: []string{"view", "grep", "glob", "bash", "write", "edit"},
+	}
+
+	restricted, err := narrowAgentTools(parentCfg, []string{"view", "grep"})
+	require.NoError(t, err)
+
+	c := &coordinator{interactive: false}
+	assert.Equal(t, []string{"view", "grep"}, c.effectiveToolNames(restricted, true))
+
+	t.Run("omitting the list keeps the parent toolset", func(t *testing.T) {
+		t.Parallel()
+		same, err := narrowAgentTools(parentCfg, nil)
+		require.NoError(t, err)
+		assert.Equal(t, parentCfg.AllowedTools, same.AllowedTools)
+	})
+
+	t.Run("naming a tool the parent lacks is refused", func(t *testing.T) {
+		t.Parallel()
+		_, err := narrowAgentTools(parentCfg, []string{"view", "teleport"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "teleport")
+	})
+
+	t.Run("an empty list means no tools at all", func(t *testing.T) {
+		t.Parallel()
+		none, err := narrowAgentTools(parentCfg, []string{})
+		require.NoError(t, err)
+		assert.Empty(t, none.AllowedTools)
+	})
+}
+
+// TestNarrowedTaskAgentKeepsAccessSemantics pins the two invariants a
+// restricted dispatch depends on: the base config comes from the right access
+// level, and narrowing only ever removes tools.
+func TestNarrowedTaskAgentKeepsAccessSemantics(t *testing.T) {
+	t.Parallel()
+
+	readBase := config.Agent{AllowedTools: []string{"view", "grep"}}
+	writeBase := config.Agent{AllowedTools: []string{"view", "grep", "bash", "write"}}
+
+	t.Run("a write subagent keeps its wider base before narrowing", func(t *testing.T) {
+		t.Parallel()
+		kept, err := narrowAgentTools(writeBase, []string{"view", "grep", "bash"})
+		require.NoError(t, err)
+		assert.Contains(t, kept.AllowedTools, "bash",
+			"a write subagent must not lose write-level tools it asked to keep")
+	})
+
+	t.Run("a read subagent cannot ask for a write-only tool", func(t *testing.T) {
+		t.Parallel()
+		_, err := narrowAgentTools(readBase, []string{"bash"})
+		require.Error(t, err, "read base has no bash, so asking for it must be refused")
+	})
+
+	t.Run("narrowing never adds a tool", func(t *testing.T) {
+		t.Parallel()
+		for _, base := range []config.Agent{readBase, writeBase} {
+			out, err := narrowAgentTools(base, []string{"view"})
+			require.NoError(t, err)
+			assert.LessOrEqual(t, len(out.AllowedTools), len(base.AllowedTools))
+		}
+	})
+}

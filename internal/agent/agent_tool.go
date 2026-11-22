@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"errors"
+	"fmt"
 	"slices"
 
 	"charm.land/fantasy"
@@ -28,6 +29,30 @@ const (
 	accessRead  = "read"
 	accessWrite = "write"
 )
+
+// narrowAgentTools returns agentCfg with its toolset cut down to names.
+//
+// The list only ever narrows: naming a tool the agent does not already have is
+// an error rather than a grant, because a dispatch must not be able to widen
+// what the caller could do. A nil list keeps the toolset untouched; an empty
+// one removes every tool but the always-present ones effectiveToolNames keeps
+// for a subagent.
+func narrowAgentTools(agentCfg config.Agent, names []string) (config.Agent, error) {
+	if names == nil {
+		return agentCfg, nil
+	}
+	narrowed := slices.Clone(names)
+	for _, name := range narrowed {
+		if !slices.Contains(agentCfg.AllowedTools, name) {
+			return config.Agent{}, fmt.Errorf(
+				"tool %q is not available to this subagent; it may only use tools the caller already has",
+				name,
+			)
+		}
+	}
+	agentCfg.AllowedTools = narrowed
+	return agentCfg, nil
+}
 
 // writeAgentConfig derives the read-write variant of the task agent: the same
 // agent, given the coder's tools. Subagents never get the delegation tools;
@@ -109,6 +134,40 @@ func (c *coordinator) taskAgentConfig(access string) (config.Agent, bool) {
 		return writeAgentConfig(c.cfg.Config()), true
 	}
 	return c.cfg.Config().Agents[config.AgentTask], false
+}
+
+// narrowTaskAgent builds a task subagent whose toolset is cut down to names.
+//
+// The shared read/write variants are built once per turn, so a per-call
+// restriction cannot reuse them; this builds a dedicated agent instead. The
+// list only narrows, so a dispatch can never hand a subagent a tool the caller
+// does not already have.
+func (c *coordinator) narrowTaskAgent(ctx context.Context, access string, names []string) (SessionAgent, error) {
+	agentCfg, canWrite := c.taskAgentConfig(access)
+	narrowed, err := narrowAgentTools(agentCfg, names)
+	if err != nil {
+		return nil, err
+	}
+	agent, err := c.buildNarrowedTaskAgent(ctx, narrowed, canWrite)
+	if err != nil {
+		return nil, err
+	}
+	return agent, nil
+}
+
+// buildNarrowedTaskAgent builds a task subagent from an already-narrowed
+// config. Kept separate so the decision about which tools an agent gets can be
+// tested without a live coordinator, which building one requires.
+func (c *coordinator) buildNarrowedTaskAgent(ctx context.Context, agentCfg config.Agent, canWrite bool) (SessionAgent, error) {
+	var ready errgroup.Group
+	agent, err := c.buildTaskAgent(ctx, &ready, agentCfg, canWrite, nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := ready.Wait(); err != nil {
+		return nil, err
+	}
+	return agent, nil
 }
 
 // buildTaskAgent schedules one variant of the task subagent into ready; the

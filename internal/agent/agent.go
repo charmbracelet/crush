@@ -248,6 +248,7 @@ type sessionAgent struct {
 	permissions permission.Service
 	notify      pubsub.Publisher[notify.Notification]
 	runComplete pubsub.Publisher[notify.RunComplete]
+	runActivity pubsub.Publisher[notify.RunActivity]
 	hooks       *hooks.Runner
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
@@ -310,10 +311,13 @@ type SessionAgentOptions struct {
 	Cfg                  *config.ConfigStore
 	// Prompts is every prompt's text, read once at startup. Nil uses the
 	// built-ins.
-	Prompts     map[string]string
-	Tools       []fantasy.AgentTool
-	Notify      pubsub.Publisher[notify.Notification]
+	Prompts map[string]string
+	Tools   []fantasy.AgentTool
+
+	Notify pubsub.Publisher[notify.Notification]
+
 	RunComplete pubsub.Publisher[notify.RunComplete]
+	RunActivity pubsub.Publisher[notify.RunActivity]
 	// Hooks runs lifecycle hooks for turns and compaction. Nil runs none.
 	Hooks *hooks.Runner
 	// titles is shared by a coordinator's agents so one drain covers all.
@@ -337,6 +341,7 @@ func NewSessionAgent(
 		tools:                csync.NewSliceFrom(opts.Tools),
 		notify:               opts.Notify,
 		runComplete:          opts.RunComplete,
+		runActivity:          opts.RunActivity,
 		hooks:                opts.Hooks,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		notes:                csync.NewMap[string, []string](),
@@ -870,6 +875,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// message of the turn is the value reachable through this
 	// pointer when the defer runs.
 	var currentAssistant *message.Message
+	activity := newRunActivityTracker(a.runActivity, call)
 	// Drain any debounced message updates before returning. message.Service
 	// already flushes synchronously on terminal updates, but a defer here
 	// guarantees the contract at every Run exit (success, error, panic
@@ -897,7 +903,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		if skipRunComplete {
 			return
 		}
-		complete := notify.RunComplete{SessionID: call.SessionID, RunID: call.RunID}
+		complete := notify.RunComplete{SessionID: call.SessionID, RunID: call.RunID, Activities: activity.summary()}
 		if currentAssistant != nil {
 			complete.MessageID = currentAssistant.ID
 			complete.Text = currentAssistant.Content().String()
@@ -1113,7 +1119,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		},
 		OnReasoningStart: func(id string, reasoning fantasy.ReasoningContent) error {
 			currentAssistant.AppendReasoningContent(reasoning.Text)
-			return a.messages.Update(genCtx, *currentAssistant)
+			err := a.messages.Update(genCtx, *currentAssistant)
+			activity.thinkingStarted(currentAssistant)
+			return err
 		},
 		OnReasoningDelta: func(id string, text string) error {
 			currentAssistant.AppendReasoningContent(text)
@@ -1137,7 +1145,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				}
 			}
 			currentAssistant.FinishThinking()
-			return a.messages.Update(genCtx, *currentAssistant)
+			err := a.messages.Update(genCtx, *currentAssistant)
+			activity.thinkingDone(currentAssistant)
+			return err
 		},
 		OnTextDelta: func(id string, text string) error {
 			// Strip the leading newline only when printing. This is
@@ -1154,6 +1164,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				Finished:         false,
 			}
 			currentAssistant.AddToolCall(toolCall)
+			activity.toolStarted(currentAssistant.ID, toolCall)
 			// Use parent ctx instead of genCtx to ensure the update succeeds
 			// even if the request is canceled mid-stream
 			return a.messages.Update(ctx, *currentAssistant)
@@ -1189,6 +1200,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				Finished:         true,
 			}
 			currentAssistant.AddToolCall(toolCall)
+			activity.toolStarted(currentAssistant.ID, toolCall)
 			// Use parent ctx instead of genCtx to ensure the update succeeds
 			// even if the request is canceled mid-stream
 			return a.messages.Update(ctx, *currentAssistant)
@@ -1216,6 +1228,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			})
 			if createMsgErr == nil {
 				answeredToolCalls.Set(result.ToolCallID, struct{}{})
+				activity.toolFinished(currentAssistant.ID, toolResult, genCtx.Err() != nil)
 			}
 			return createMsgErr
 		},
@@ -1367,6 +1380,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			currentAssistant.AddFinish(message.FinishReasonError, defaultTitle, err.Error())
 		}
 		updateErr := a.messages.Update(cleanupCtx, *currentAssistant)
+		activity.thinkingDone(currentAssistant)
 		if updateErr != nil {
 			return nil, updateErr
 		}

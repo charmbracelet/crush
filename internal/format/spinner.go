@@ -2,82 +2,84 @@ package format
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"io"
 	"os"
+	"sync"
 	"time"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/x/ansi"
 )
 
-// Spinner wraps the bubbles spinner for non-interactive mode
+// Spinner renders a non-interactive activity animation to stderr.
 type Spinner struct {
-	done chan struct{}
-	prog *tea.Program
+	ctx      context.Context
+	anim     *anim.Anim
+	out      io.Writer
+	done     chan struct{}
+	stop     chan struct{}
+	stopOnce sync.Once
+	mu       sync.Mutex
 }
 
-type model struct {
-	cancel context.CancelFunc
-	anim   *anim.Anim
+func NewSpinner(ctx context.Context, _ context.CancelFunc, animSettings anim.Settings) *Spinner {
+	return newSpinnerWithOutput(ctx, animSettings, os.Stderr)
 }
 
-type tickMsg struct{}
-
-func tick() tea.Cmd {
-	return tea.Tick(anim.FrameInterval(), func(time.Time) tea.Msg { return tickMsg{} })
-}
-
-func (m model) Init() tea.Cmd  { return tick() }
-func (m model) View() tea.View { return tea.NewView(m.anim.Render()) }
-
-// Update implements tea.Model.
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyPressMsg:
-		switch msg.String() {
-		case "ctrl+c", "esc":
-			m.cancel()
-			return m, tea.Quit
-		}
-	case tickMsg:
-		m.anim.Advance()
-		return m, tick()
-	}
-	return m, nil
-}
-
-// NewSpinner creates a new spinner with the given message
-func NewSpinner(ctx context.Context, cancel context.CancelFunc, animSettings anim.Settings) *Spinner {
-	m := model{
-		anim:   anim.New(animSettings),
-		cancel: cancel,
-	}
-
-	p := tea.NewProgram(m, tea.WithOutput(os.Stderr), tea.WithContext(ctx))
-
+func newSpinnerWithOutput(ctx context.Context, animSettings anim.Settings, out io.Writer) *Spinner {
 	return &Spinner{
-		prog: p,
-		done: make(chan struct{}, 1),
+		ctx:  ctx,
+		anim: anim.New(animSettings),
+		out:  out,
+		done: make(chan struct{}),
+		stop: make(chan struct{}),
 	}
 }
 
-// Start begins the spinner animation
+// Start begins the spinner animation.
 func (s *Spinner) Start() {
 	go func() {
 		defer close(s.done)
-		_, err := s.prog.Run()
-		// ensures line is cleared
-		fmt.Fprint(os.Stderr, ansi.EraseEntireLine)
-		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, tea.ErrInterrupted) {
-			fmt.Fprintf(os.Stderr, "Error running spinner: %v\n", err)
+		ticker := time.NewTicker(anim.FrameInterval())
+		defer ticker.Stop()
+		defer s.clear()
+		s.render()
+		for {
+			select {
+			case <-ticker.C:
+				s.mu.Lock()
+				s.anim.Advance()
+				s.mu.Unlock()
+				s.render()
+			case <-s.stop:
+				return
+			case <-s.ctx.Done():
+				return
+			}
 		}
 	}()
 }
 
-// Stop ends the spinner animation
+// Stop ends the spinner animation.
 func (s *Spinner) Stop() {
-	s.prog.Quit()
+	s.stopOnce.Do(func() { close(s.stop) })
 	<-s.done
+}
+
+// SetLabel changes the text displayed beside the spinner.
+func (s *Spinner) SetLabel(label string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.anim.SetLabel(label)
+}
+
+func (s *Spinner) render() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, _ = fmt.Fprint(s.out, "\r"+ansi.EraseEntireLine+s.anim.Render())
+}
+
+func (s *Spinner) clear() {
+	_, _ = fmt.Fprint(s.out, "\r"+ansi.EraseEntireLine)
 }

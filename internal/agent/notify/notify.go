@@ -69,10 +69,11 @@ type Notification struct {
 // terminal event even when the session is busy and other turns are
 // finishing on the same session.
 type RunComplete struct {
-	SessionID string
-	RunID     string
-	MessageID string
-	Text      string
-	Error     string
-	Cancelled bool
+	SessionID  string
+	RunID      string
+	MessageID  string
+	Text       string
+	Error      string
+	Cancelled  bool
+	Activities []RunActivity
 }

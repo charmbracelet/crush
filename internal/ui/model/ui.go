@@ -6199,10 +6199,14 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 	var cmds []tea.Cmd
 	switch n.Type {
 	case notify.TypeAgentFinished:
-		cmds = append(cmds, m.sendNotification(notification.Notification{
-			Title:   "Crush is waiting...",
-			Message: fmt.Sprintf("Agent's turn completed in \"%s\"", n.SessionTitle),
-		}))
+		// Agent events are broadcast for state synchronization, but desktop
+		// notifications belong only to the session this client is viewing.
+		if m.session != nil && n.SessionID == m.session.ID {
+			cmds = append(cmds, m.sendNotification(notification.Notification{
+				Title:   "Crush is waiting...",
+				Message: fmt.Sprintf("Agent's turn completed in \"%s\"", n.SessionTitle),
+			}))
+		}
 		// Show what the stored balance says right away, and fetch again:
 		// the refresh for the turn's last response is only kicked off once
 		// its request finishes, so it may still be in flight here.

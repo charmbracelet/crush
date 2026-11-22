@@ -1127,25 +1127,57 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 
 	logFile := filepath.Join(c.cfg.Config().Options.DataDirectory, "logs", "crush.log")
 
-	allTools = append(
-		allTools,
-		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.DataDirectory, c.cfg.Config().Options.Attribution, modelID, c.cfg.Config().Options.GetMaxBackgroundJobs(), c.cfg.Config().Permissions, c.shellOwner, c.toolProgress),
-		tools.NewCrushInfoTool(c.cfg, c.lspManager, c.allSkills, c.activeSkills, c.skillTracker),
-		tools.NewCrushLogsTool(logFile),
-		tools.NewJobOutputTool(c.cfg.Config().Options.DataDirectory, c.toolProgress),
-		tools.NewJobKillTool(),
-		tools.NewDownloadTool(c.permissions, c.cfg.WorkingDir(), nil),
-		tools.NewEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
-		tools.NewMultiEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
-		tools.NewFetchTool(c.permissions, c.cfg.WorkingDir(), nil),
-		tools.NewGlobTool(c.cfg.WorkingDir(), c.cfg.Config().Tools.Glob),
-		tools.NewGrepTool(c.cfg.WorkingDir(), c.cfg.Config().Tools.Grep),
-		tools.NewLsTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Tools.Ls),
-		tools.NewSourcegraphTool(nil),
-		tools.NewTodosTool(c.sessions),
-		tools.NewViewTool(c.lspManager, c.permissions, c.filetracker, c.skillTracker, c.cfg.WorkingDir(), c.cfg.Config().Options.SkillsPaths...),
-		tools.NewWriteTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
-	)
+	// Each constructor below is guarded by `allowed` rather than built and
+	// filtered afterwards. Building a tool the agent cannot use costs its
+	// dependencies, not just an allocation: a subagent allowed only glob and
+	// grep would otherwise still need a live lspManager, permissions, history
+	// and filetracker to be constructed at all.
+	add := func(name string, build func() fantasy.AgentTool) {
+		if slices.Contains(allowed, name) {
+			allTools = append(allTools, build())
+		}
+	}
+
+	add(tools.BashToolName, func() fantasy.AgentTool {
+		return tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.DataDirectory, c.cfg.Config().Options.Attribution, modelID, c.cfg.Config().Options.GetMaxBackgroundJobs(), c.cfg.Config().Permissions, c.shellOwner, c.toolProgress)
+	})
+	add(tools.CrushInfoToolName, func() fantasy.AgentTool {
+		return tools.NewCrushInfoTool(c.cfg, c.lspManager, c.allSkills, c.activeSkills, c.skillTracker)
+	})
+	add(tools.CrushLogsToolName, func() fantasy.AgentTool { return tools.NewCrushLogsTool(logFile) })
+	add(tools.JobOutputToolName, func() fantasy.AgentTool {
+		return tools.NewJobOutputTool(c.cfg.Config().Options.DataDirectory, c.toolProgress)
+	})
+	add(tools.JobKillToolName, func() fantasy.AgentTool { return tools.NewJobKillTool() })
+	add(tools.DownloadToolName, func() fantasy.AgentTool {
+		return tools.NewDownloadTool(c.permissions, c.cfg.WorkingDir(), nil)
+	})
+	add(tools.EditToolName, func() fantasy.AgentTool {
+		return tools.NewEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir())
+	})
+	add(tools.MultiEditToolName, func() fantasy.AgentTool {
+		return tools.NewMultiEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir())
+	})
+	add(tools.FetchToolName, func() fantasy.AgentTool {
+		return tools.NewFetchTool(c.permissions, c.cfg.WorkingDir(), nil)
+	})
+	add(tools.GlobToolName, func() fantasy.AgentTool {
+		return tools.NewGlobTool(c.cfg.WorkingDir(), c.cfg.Config().Tools.Glob)
+	})
+	add(tools.GrepToolName, func() fantasy.AgentTool {
+		return tools.NewGrepTool(c.cfg.WorkingDir(), c.cfg.Config().Tools.Grep)
+	})
+	add(tools.LSToolName, func() fantasy.AgentTool {
+		return tools.NewLsTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Tools.Ls)
+	})
+	add(tools.SourcegraphToolName, func() fantasy.AgentTool { return tools.NewSourcegraphTool(nil) })
+	add(tools.TodosToolName, func() fantasy.AgentTool { return tools.NewTodosTool(c.sessions) })
+	add(tools.ViewToolName, func() fantasy.AgentTool {
+		return tools.NewViewTool(c.lspManager, c.permissions, c.filetracker, c.skillTracker, c.cfg.WorkingDir(), c.cfg.Config().Options.SkillsPaths...)
+	})
+	add(tools.WriteToolName, func() fantasy.AgentTool {
+		return tools.NewWriteTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir())
+	})
 
 	// Interactive-only, and never given to subagents; effectiveToolNames
 	// is what decides both.

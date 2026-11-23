@@ -20,6 +20,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/shell"
 )
 
@@ -258,7 +259,7 @@ func blockFuncs(blocked []string) []shell.BlockFunc {
 // NewBashTool returns the bash tool. Every shell it starts is tagged with
 // shellOwner, so the owner can stop them with
 // [shell.BackgroundShellManager.KillOwned].
-func NewBashTool(permissions permission.Service, workingDir, spillDir string, attribution *config.Attribution, modelID string, maxBackgroundJobs int, perms *config.Permissions, shellOwner any) fantasy.AgentTool {
+func NewBashTool(permissions permission.Service, workingDir, spillDir string, attribution *config.Attribution, modelID string, maxBackgroundJobs int, perms *config.Permissions, shellOwner any, progress pubsub.Publisher[ToolProgress]) fantasy.AgentTool {
 	blocked := resolveBlockedCommands(perms)
 	userSafe := userSafeCommands(perms)
 	return fantasy.NewAgentTool(
@@ -321,7 +322,8 @@ func NewBashTool(permissions permission.Service, workingDir, spillDir string, at
 			if !check.Matched && mode != permission.PermissionModeSysadmin {
 				blocksToUse = blockFuncs(blocked)
 			}
-			return executeBashCommand(ctx, params, execWorkingDir, spillDir, blocksToUse, maxBackgroundJobs, shellOwner)
+			reporter := newProgressReporter(progress, sessionID, call.ID)
+			return executeBashCommand(ctx, params, execWorkingDir, spillDir, blocksToUse, maxBackgroundJobs, shellOwner, reporter)
 		},
 	)
 }
@@ -331,7 +333,7 @@ func yoloBlockedMessage(command string) string {
 	return fmt.Sprintf("blocked: %s is a dangerous command, and yolo mode blocks dangerous commands without asking. Tell the user: they can switch to normal mode to be asked about it, use sysadmin mode to allow it, or mark it safe with `permissions safe`.", command)
 }
 
-func executeBashCommand(ctx context.Context, params BashParams, execWorkingDir, spillDir string, blockFuncsToUse []shell.BlockFunc, maxBackgroundJobs int, shellOwner any) (fantasy.ToolResponse, error) {
+func executeBashCommand(ctx context.Context, params BashParams, execWorkingDir, spillDir string, blockFuncsToUse []shell.BlockFunc, maxBackgroundJobs int, shellOwner any, progress *progressReporter) (fantasy.ToolResponse, error) {
 	// If explicitly requested as background, start immediately with detached context
 	if params.RunInBackground {
 		startTime := time.Now()
@@ -401,15 +403,24 @@ func executeBashCommand(ctx context.Context, params BashParams, execWorkingDir, 
 	autoBackgroundThreshold := time.Duration(autoBackgroundAfter) * time.Second
 	timer := time.NewTimer(autoBackgroundThreshold)
 	defer timer.Stop()
+	progressTicker := time.NewTicker(progressPollInterval)
+	defer progressTicker.Stop()
 
-	select {
-	case <-bgShell.Done():
-	case <-timer.C:
-	case <-ctx.Done():
-		// Incoming context was cancelled before we moved to background
-		// Kill the shell and return error
-		bgManager.Kill(ctx, bgShell.ID)
-		return fantasy.ToolResponse{}, ctx.Err()
+wait:
+	for {
+		select {
+		case <-bgShell.Done():
+			break wait
+		case <-timer.C:
+			break wait
+		case <-progressTicker.C:
+			progress.report(bgShell)
+		case <-ctx.Done():
+			// Incoming context was cancelled before we moved to background
+			// Kill the shell and return error
+			bgManager.Kill(ctx, bgShell.ID)
+			return fantasy.ToolResponse{}, ctx.Err()
+		}
 	}
 	stdout, stderr, done, execErr := bgShell.GetOutput()
 

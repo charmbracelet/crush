@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/stretchr/testify/require"
@@ -76,4 +77,44 @@ func TestEventsCoalesceMessageUpdates(t *testing.T) {
 	require.Equal(t, int64(n), last["b"])
 	require.True(t, deleted["b"])
 	require.Less(t, len(got), 20, "stalled subscriber should hold a handful of events, not %d", 2*n)
+}
+
+func TestEventsCoalesceToolProgress(t *testing.T) {
+	t.Parallel()
+
+	app := NewForTest(t.Context())
+	t.Cleanup(app.ShutdownForTest)
+	events := app.Events(t.Context())
+	require.Eventually(t, func() bool { return app.toolProgress.GetSubscriberCount() == 1 }, time.Second, time.Millisecond)
+
+	const n = 500
+	for i := 1; i <= n; i++ {
+		app.toolProgress.Publish(pubsub.UpdatedEvent, tools.ToolProgress{
+			SessionID:  "s1",
+			ToolCallID: "call-1",
+			Output:     "chunk-" + string(rune('a'+i%26)),
+		})
+	}
+	app.toolProgress.Publish(pubsub.UpdatedEvent, tools.ToolProgress{
+		SessionID:  "s1",
+		ToolCallID: "call-1",
+		Output:     "final-live",
+	})
+
+	var got []tools.ToolProgress
+	for {
+		select {
+		case ev := <-events:
+			if inner, ok := ev.Payload.(pubsub.Event[tools.ToolProgress]); ok {
+				got = append(got, inner.Payload)
+			}
+			continue
+		case <-time.After(200 * time.Millisecond):
+		}
+		break
+	}
+
+	require.NotEmpty(t, got)
+	require.Equal(t, "final-live", got[len(got)-1].Output)
+	require.Less(t, len(got), 20, "stalled subscriber should coalesce tool progress, got %d", len(got))
 }

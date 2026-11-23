@@ -3,6 +3,7 @@ package server
 import (
 	"testing"
 
+	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/backend"
 	"github.com/charmbracelet/crush/internal/db"
@@ -30,6 +31,7 @@ func TestSessionScopedEventID(t *testing.T) {
 		{"permission notification", pubsub.Event[permission.PermissionNotification]{Payload: permission.PermissionNotification{SessionID: "s2"}}, "s2"},
 		{"question request", pubsub.Event[question.Request]{Payload: question.Request{SessionID: "s3"}}, "s3"},
 		{"question notification", pubsub.Event[question.Notification]{Payload: question.Notification{SessionID: "s4"}}, "s4"},
+		{"tool progress", pubsub.Event[tools.ToolProgress]{Payload: tools.ToolProgress{SessionID: "s5", ToolCallID: "c1"}}, "s5"},
 	}
 	for _, tc := range scoped {
 		t.Run(tc.name, func(t *testing.T) {
@@ -52,6 +54,7 @@ func TestSessionScopedEventID(t *testing.T) {
 		{"empty permission notification", pubsub.Event[permission.PermissionNotification]{}},
 		{"empty question request", pubsub.Event[question.Request]{}},
 		{"empty question notification", pubsub.Event[question.Notification]{}},
+		{"empty tool progress", pubsub.Event[tools.ToolProgress]{}},
 	}
 	for _, tc := range unscoped {
 		t.Run("unscoped/"+tc.name, func(t *testing.T) {
@@ -92,12 +95,13 @@ func TestDeliverToClient(t *testing.T) {
 	permNotif := pubsub.Event[permission.PermissionNotification]{Payload: permission.PermissionNotification{SessionID: "S1", Granted: true}}
 	qReq := pubsub.Event[question.Request]{Payload: question.Request{SessionID: "S1"}}
 	qNotif := pubsub.Event[question.Notification]{Payload: question.Notification{SessionID: "S1"}}
+	progressEv := pubsub.Event[tools.ToolProgress]{Payload: tools.ToolProgress{SessionID: "S1", ToolCallID: "c1", Output: "out"}}
 	sessionEv := pubsub.Event[session.Session]{Payload: session.Session{ID: "S1"}}
 
 	t.Run("viewer receives, non-viewer does not", func(t *testing.T) {
 		t.Parallel()
 		c, ws, cidA, cidB := deliverFixture(t)
-		for _, ev := range []any{permReq, permNotif, qReq, qNotif} {
+		for _, ev := range []any{permReq, permNotif, qReq, qNotif, progressEv} {
 			require.True(t, c.deliverToClient(t.Context(), ws.ID, cidA, ev), "%T must reach the viewer", ev)
 			require.False(t, c.deliverToClient(t.Context(), ws.ID, cidB, ev), "%T must not reach the non-viewer", ev)
 		}

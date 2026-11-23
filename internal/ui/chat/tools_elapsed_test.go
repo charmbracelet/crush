@@ -14,34 +14,41 @@ func TestBaseToolMessageItemElapsed(t *testing.T) {
 	t.Parallel()
 
 	sty := styles.CharmtonePantera()
-	tc := message.ToolCall{ID: "toolu_1", Name: "bash", Finished: false}
+	start := time.Now().Add(-5 * time.Second).UnixMilli()
+	tc := message.ToolCall{ID: "toolu_1", Name: "bash", StartedAtMs: start}
 	item := newBaseToolMessageItem(&sty, tc, nil, &BashToolRenderContext{}, false)
+	require.GreaterOrEqual(t, item.elapsed(), 5*time.Second, "a live tool counts from its recorded start")
 
-	// Windows clocks tick in ~0.5ms steps, so the first read can land on
-	// the same tick as construction; poll briefly instead of assuming
-	// sub-millisecond resolution.
-	require.Eventually(t, func() bool {
-		return item.elapsed() > 0
-	}, time.Second, time.Millisecond, "a live tool must report elapsed time")
+	// Arguments finishing is not the tool finishing: the timer keeps running.
+	tc.Finished = true
+	item.SetToolCall(tc)
+	require.True(t, item.isSpinning(), "a call whose arguments are done is still running")
+	require.GreaterOrEqual(t, item.elapsed(), 5*time.Second)
 
-	item.SetToolCall(message.ToolCall{ID: "toolu_1", Name: "bash", Finished: true})
-	require.False(t, item.finishedAt.IsZero(), "finishing must capture the end time")
+	item.SetResult(&message.ToolResult{ToolCallID: "toolu_1", FinishedAtMs: start + 7_000})
+	require.Equal(t, 7*time.Second, item.elapsed(), "a reply fixes the duration")
 
-	// Re-reads right after finishing can still land on the same coarse
-	// clock tick; only a later read must not grow.
-	frozen := item.elapsed()
-	time.Sleep(10 * time.Millisecond)
-	require.LessOrEqual(t, item.elapsed(), frozen, "elapsed must stop growing once finished")
+	item.SetResult(&message.ToolResult{ToolCallID: "toolu_1"})
+	require.Zero(t, item.elapsed(), "a reply with no recorded end has no duration")
+}
 
-	item.markRestored()
-	require.Zero(t, item.elapsed(), "restored items have no trustworthy start time")
+func TestBaseToolMessageItemElapsedUnknownStart(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	tc := message.ToolCall{ID: "old", Name: "bash", Finished: true}
+	item := newBaseToolMessageItem(&sty, tc, &message.ToolResult{ToolCallID: "old"}, &BashToolRenderContext{}, false)
+	require.Zero(t, item.elapsed(), "rows stored before timing was recorded show no duration")
+
+	canceled := newBaseToolMessageItem(&sty, message.ToolCall{ID: "c", StartedAtMs: 1}, nil, &BashToolRenderContext{}, true)
+	require.Zero(t, canceled.elapsed(), "a canceled call stops counting until its reply lands")
 }
 
 func TestBaseToolMessageItemSpinnerTimer(t *testing.T) {
 	t.Parallel()
 
 	sty := styles.CharmtonePantera()
-	tc := message.ToolCall{ID: "toolu_1", Name: "view", Finished: false}
+	tc := message.ToolCall{ID: "toolu_1", Name: "view", StartedAtMs: time.Now().UnixMilli()}
 	item := newBaseToolMessageItem(&sty, tc, nil, &ViewToolRenderContext{}, false)
 
 	// A quick tool with no active turn has nothing to show yet.
@@ -58,7 +65,8 @@ func TestBaseToolMessageItemSpinnerTimer(t *testing.T) {
 
 	// Once a tool has been running long enough, its own elapsed time
 	// takes over the suffix.
-	item.startedAt = time.Now().Add(-15 * time.Second)
+	tc.StartedAtMs = time.Now().Add(-15 * time.Second).UnixMilli()
+	item.SetToolCall(tc)
 	require.Equal(t, common.FormatDuration(item.elapsed()), item.spinnerTimer(),
 		"long-running tools show their own elapsed time")
 }

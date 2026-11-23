@@ -1,8 +1,11 @@
 package chat
 
 import (
+	"cmp"
+	"encoding/xml"
 	"fmt"
 	"image"
+	"strconv"
 	"strings"
 	"time"
 
@@ -80,9 +83,8 @@ type SendMsg struct {
 
 type highlightableMessageItem struct {
 	// version is the parent item's version counter. SetHighlight
-	// bumps it on every observable change so the F6 list memo and
-	// any frozen entry get invalidated when a selection drag enters
-	// or leaves the item.
+	// bumps it on every observable change so the F6 list memo is
+	// invalidated when a selection drag enters or leaves the item.
 	version *list.Versioned
 
 	startLine int
@@ -162,36 +164,27 @@ type animRestyler interface {
 	restyleAnim()
 }
 
-// ClearItemCaches drops any cached rendered output on each item so the
-// next render uses the current styles. It also bumps each item's
-// version so the F6 list-level memo invalidates frozen entries on
-// the next render.
-//
-// Tools nested in an Agent or AgenticFetch item are not list entries of
-// their own, so their caches are cleared through the parent; otherwise the
-// parent's re-render would reuse their cached, old-colored output. (Their
-// spinners are restyled by the parent's restyleAnim.)
-func ClearItemCaches(items []MessageItem) {
-	for _, item := range items {
-		if cc, ok := item.(cacheClearable); ok {
-			cc.clearCache()
-		}
-		if ar, ok := item.(animRestyler); ok {
-			ar.restyleAnim()
-		}
-		if c, ok := item.(NestedToolContainer); ok {
-			for _, nested := range c.NestedTools() {
-				if cc, ok := nested.(cacheClearable); ok {
-					cc.clearCache()
-				}
-				if v, ok := nested.(interface{ Bump() }); ok {
-					v.Bump()
-				}
+// ClearItemCache drops an item's cached rendered output, and that of any
+// nested tools, so the next render uses the current styles.
+func ClearItemCache(item MessageItem) {
+	if cc, ok := item.(cacheClearable); ok {
+		cc.clearCache()
+	}
+	if ar, ok := item.(animRestyler); ok {
+		ar.restyleAnim()
+	}
+	if c, ok := item.(NestedToolContainer); ok {
+		for _, nested := range c.NestedTools() {
+			if cc, ok := nested.(cacheClearable); ok {
+				cc.clearCache()
+			}
+			if v, ok := nested.(interface{ Bump() }); ok {
+				v.Bump()
 			}
 		}
-		if v, ok := item.(interface{ Bump() }); ok {
-			v.Bump()
-		}
+	}
+	if v, ok := item.(interface{ Bump() }); ok {
+		v.Bump()
 	}
 }
 
@@ -339,13 +332,6 @@ func NewAssistantInfoItem(sty *styles.Styles, message *message.Message, cfg *con
 	}
 }
 
-// Finished implements list.Item. Assistant info blocks render a fixed
-// model/duration footer once the assistant turn finishes; the data
-// is immutable after construction so the entry is safe to freeze.
-func (a *AssistantInfoItem) Finished() bool {
-	return true
-}
-
 // ID implements MessageItem.
 func (a *AssistantInfoItem) ID() string {
 	return a.id
@@ -446,6 +432,153 @@ func (a *AssistantInfoItem) renderContent(width int) string {
 	return common.Section(a.sty, assistant, width)
 }
 
+// ChannelInfoID returns a stable ID for channel-info items.
+func ChannelInfoID(messageID string) string {
+	return fmt.Sprintf("%s:channel-info", messageID)
+}
+
+// ChannelInfoItem renders sender/channel/timestamp metadata for a
+// channel-originated user message. It is emitted as a separate list item
+// below the message body, mirroring how AssistantInfoItem appears below
+// assistant messages.
+type ChannelInfoItem struct {
+	*list.Versioned
+	*cachedMessageItem
+
+	id      string
+	message *message.Message
+	sty     *styles.Styles
+}
+
+// NewChannelInfoItem creates a new ChannelInfoItem.
+func NewChannelInfoItem(sty *styles.Styles, msg *message.Message) MessageItem {
+	return &ChannelInfoItem{
+		Versioned:         list.NewVersioned(),
+		cachedMessageItem: &cachedMessageItem{},
+		id:                ChannelInfoID(msg.ID),
+		message:           msg,
+		sty:               sty,
+	}
+}
+
+// Finished implements list.Item. Channel metadata is immutable once
+// rendered, so the entry is always safe to freeze.
+func (c *ChannelInfoItem) Finished() bool {
+	return true
+}
+
+// ID implements MessageItem.
+func (c *ChannelInfoItem) ID() string {
+	return c.id
+}
+
+// RawRender implements MessageItem.
+func (c *ChannelInfoItem) RawRender(width int) string {
+	innerWidth := max(0, width-MessageLeftPaddingTotal)
+	content, _, ok := c.getCachedRender(innerWidth)
+	if !ok {
+		content = c.renderContent(innerWidth)
+		height := lipgloss.Height(content)
+		c.setCachedRender(content, innerWidth, height)
+	}
+	return content
+}
+
+// Render implements MessageItem.
+func (c *ChannelInfoItem) Render(width int) string {
+	if cached, ok := c.getCachedPrefixedRender(width, 0); ok {
+		return cached
+	}
+	prefix := c.sty.Messages.SectionHeader.Render()
+	lines := strings.Split(c.RawRender(width), "\n")
+	for i, line := range lines {
+		lines[i] = prefix + line
+	}
+	out := strings.Join(lines, "\n")
+	c.setCachedPrefixedRender(out, width, 0)
+	return out
+}
+
+func (c *ChannelInfoItem) renderContent(width int) string {
+	info, ok := parseChannelInfo(c.message)
+	if !ok {
+		return ""
+	}
+
+	parts := make([]string, 0, 3)
+	if info.sender != "" {
+		parts = append(parts, c.sty.Messages.ChannelInfoSender.Render(info.sender))
+	}
+	if info.source != "" {
+		parts = append(parts, c.sty.Messages.ChannelInfoProvider.Render(fmt.Sprintf("via %s", info.source)))
+	}
+	if info.time != "" {
+		parts = append(parts, c.sty.Messages.ChannelInfoTimestamp.Render(fmt.Sprintf("at %s", info.time)))
+	}
+
+	icon := c.sty.Messages.ChannelInfoIcon.Render(styles.ChannelIcon)
+	metaStr := fmt.Sprintf("%s %s", icon, strings.Join(parts, " "))
+	return common.Section(c.sty, metaStr, width)
+}
+
+// channelInfo is the metadata shown on a channel message's info line.
+type channelInfo struct {
+	sender string
+	source string
+	time   string
+}
+
+// parseChannelInfo extracts the info-line metadata from a channel-originated
+// message. ok is false when the content is not a well-formed <channel>
+// element or carries nothing to show, in which case no info line is added.
+func parseChannelInfo(msg *message.Message) (channelInfo, bool) {
+	var ch channelMessage
+	if err := xml.Unmarshal([]byte(strings.TrimSpace(msg.Content().Text)), &ch); err != nil {
+		return channelInfo{}, false
+	}
+	info := channelInfo{
+		sender: cmp.Or(ch.SenderName, ch.Sender),
+		source: ch.Source,
+		time:   formatChannelTime(ch.Time, msg.CreatedAt),
+	}
+	return info, info != channelInfo{}
+}
+
+// formatChannelTime renders a push's time attribute the way the CreatedAt
+// fallback is rendered: local HH:MM:SS. The attribute is whatever the server
+// put in its meta, so RFC 3339 timestamps and Unix epochs (seconds or
+// milliseconds) are reformatted, and anything else is shown as sent rather
+// than dropped.
+func formatChannelTime(raw string, createdAt int64) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		if createdAt > 0 {
+			return time.Unix(createdAt, 0).Format(time.TimeOnly)
+		}
+		return ""
+	}
+	if t, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+		return t.Local().Format(time.TimeOnly)
+	}
+	// Only values in epoch range, so a short number such as "1430" is not
+	// mistaken for a 1970 timestamp.
+	if n, err := strconv.ParseInt(raw, 10, 64); err == nil {
+		switch {
+		case n >= 1e12:
+			return time.UnixMilli(n).Format(time.TimeOnly)
+		case n >= 1e9:
+			return time.Unix(n, 0).Format(time.TimeOnly)
+		}
+	}
+	return raw
+}
+
+// IsChannelMessage reports whether the given message content is a
+// channel-originated message (i.e. starts with the <channel XML tag).
+func IsChannelMessage(msg *message.Message) bool {
+	return strings.HasPrefix(strings.TrimSpace(msg.Content().Text), "<channel")
+}
+
 // cappedMessageWidth returns the maximum width for message content for readability.
 func cappedMessageWidth(availableWidth int) int {
 	return min(availableWidth-MessageLeftPaddingTotal, maxTextWidth)
@@ -504,7 +637,15 @@ func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults m
 		if len(items) > 0 {
 			return items
 		}
-		return []MessageItem{NewUserMessageItem(sty, msg, newAttachmentRenderer(sty))}
+		items = []MessageItem{NewUserMessageItem(sty, msg, newAttachmentRenderer(sty))}
+		// Skip the info line when there is no metadata to show (or the
+		// element is malformed), rather than adding a blank row.
+		if IsChannelMessage(msg) {
+			if _, ok := parseChannelInfo(msg); ok {
+				items = append(items, NewChannelInfoItem(sty, msg))
+			}
+		}
+		return items
 	case message.Assistant:
 		var items []MessageItem
 		if ShouldRenderAssistantMessage(msg) {

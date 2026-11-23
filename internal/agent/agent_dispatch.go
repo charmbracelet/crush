@@ -356,7 +356,7 @@ func (d *dispatchedAgent) awaitDeliverable(ctx context.Context) bool {
 		if !d.running() || d.stopping() {
 			return false
 		}
-		if d.runner().IsSessionBusy(d.SessionID) {
+		if d.runner().HasActiveTurn(d.SessionID) {
 			return true
 		}
 		select {
@@ -549,7 +549,7 @@ func (c *coordinator) reopen(entry *dispatchedAgent, prompt string, agent Sessio
 	if !swap {
 		agent = entry.runner()
 	}
-	agentCall, _, err := c.subAgentCall(agent, entry.SessionID, prompt)
+	agentCall, err := c.subAgentCall(agent, entry.SessionID, prompt)
 	if err != nil {
 		c.dispatchMu.Unlock()
 		return false
@@ -726,7 +726,7 @@ func (c *coordinator) agentSendTool(parentModel func() Model) fantasy.AgentTool 
 				}
 				if entry.awaitDeliverable(ctx) {
 					agent := entry.runner()
-					agentCall, _, err := c.subAgentCall(agent, entry.SessionID, params.Message)
+					agentCall, err := c.subAgentCall(agent, entry.SessionID, params.Message)
 					if err != nil {
 						return fantasy.NewTextErrorResponse("Failed to deliver message: " + err.Error()), nil
 					}

@@ -52,7 +52,7 @@ func TestSummarizeRecordsTruncatedSummary(t *testing.T) {
 	require.NoError(t, err)
 	_, err = sa.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, Prompt: "hi"})
 	require.NoError(t, err)
-	require.NoError(t, sa.Summarize(t.Context(), sess.ID, nil, nil))
+	require.NoError(t, sa.Summarize(t.Context(), sess.ID, sa.Model(), nil, nil))
 
 	msgs, err := env.messages.List(t.Context(), sess.ID)
 	require.NoError(t, err)

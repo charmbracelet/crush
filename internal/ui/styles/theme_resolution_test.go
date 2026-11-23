@@ -320,6 +320,10 @@ func TestIsBuiltinTheme(t *testing.T) {
 	require.True(t, IsBuiltinTheme("charmtone-panther"))
 	require.True(t, IsBuiltinTheme("charmtone")) // deprecated alias
 	require.True(t, IsBuiltinTheme("Gruvbox-Dark"))
+	require.True(t, IsBuiltinTheme("rose-pine"))
+	require.True(t, IsBuiltinTheme("rose-pine-moon"))
+	require.True(t, IsBuiltinTheme("rose-pine-dawn"))
+	require.True(t, IsBuiltinTheme("Rose-Pine-Moon")) // case-insensitive
 	require.False(t, IsBuiltinTheme("my-custom"))
 }
 

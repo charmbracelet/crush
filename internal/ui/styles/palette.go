@@ -61,6 +61,7 @@ func PaletteFields() []PaletteField {
 		{"on_primary", func(p Palette) string { return p.OnPrimary }, func(p *Palette, v string) { p.OnPrimary = v }},
 		{"separator", func(p Palette) string { return p.Separator }, func(p *Palette, v string) { p.Separator = v }},
 		{"destructive", func(p Palette) string { return p.Destructive }, func(p *Palette, v string) { p.Destructive = v }},
+		{"destructive_subtle", func(p Palette) string { return p.DestructiveSubtle }, func(p *Palette, v string) { p.DestructiveSubtle = v }},
 		{"error", func(p Palette) string { return p.Error }, func(p *Palette, v string) { p.Error = v }},
 		{"warning", func(p Palette) string { return p.Warning }, func(p *Palette, v string) { p.Warning = v }},
 		{"warning_subtle", func(p Palette) string { return p.WarningSubtle }, func(p *Palette, v string) { p.WarningSubtle = v }},
@@ -127,6 +128,7 @@ type Palette struct {
 	Separator string `json:"separator,omitempty"`
 
 	Destructive       string `json:"destructive,omitempty"`
+	DestructiveSubtle string `json:"destructive_subtle,omitempty"`
 	Error             string `json:"error,omitempty"`
 	Warning           string `json:"warning,omitempty"`
 	WarningSubtle     string `json:"warning_subtle,omitempty"`
@@ -199,6 +201,7 @@ func PaletteFromOpts(o quickStyleOpts) Palette {
 		Separator: colorToHex(o.separator),
 
 		Destructive:       colorToHex(o.destructive),
+		DestructiveSubtle: colorToHex(o.destructiveSubtle),
 		Error:             colorToHex(o.error),
 		Warning:           colorToHex(o.warning),
 		WarningSubtle:     colorToHex(o.warningSubtle),
@@ -270,6 +273,7 @@ func (p Palette) ToQuickStyleOpts(base quickStyleOpts) quickStyleOpts {
 		separator: resolveColor(p.Separator, base.separator),
 
 		destructive:       resolveColor(p.Destructive, base.destructive),
+		destructiveSubtle: resolveColor(p.DestructiveSubtle, base.destructiveSubtle),
 		error:             resolveColor(p.Error, base.error),
 		warning:           resolveColor(p.Warning, base.warning),
 		warningSubtle:     resolveColor(p.WarningSubtle, base.warningSubtle),

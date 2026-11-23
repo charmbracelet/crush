@@ -9,6 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"charm.land/x/nerdfont"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -136,16 +137,16 @@ func (m *UI) lspInfo(width, maxItems int, isSection bool) string {
 func lspDiagnostics(t *styles.Styles, diagnostics map[protocol.DiagnosticSeverity]int) string {
 	var errs []string
 	if diagnostics[protocol.SeverityError] > 0 {
-		errs = append(errs, t.LSP.ErrorDiagnostic.Render(fmt.Sprintf("%s%d", styles.LSPErrorIcon, diagnostics[protocol.SeverityError])))
+		errs = append(errs, t.LSP.ErrorDiagnostic.Render(fmt.Sprintf("%s%d", nerdfont.Glyph(styles.LSPErrorIcon, "E"), diagnostics[protocol.SeverityError])))
 	}
 	if diagnostics[protocol.SeverityWarning] > 0 {
-		errs = append(errs, t.LSP.WarningDiagnostic.Render(fmt.Sprintf("%s%d", styles.LSPWarningIcon, diagnostics[protocol.SeverityWarning])))
+		errs = append(errs, t.LSP.WarningDiagnostic.Render(fmt.Sprintf("%s%d", nerdfont.Glyph(styles.LSPWarningIcon, "W"), diagnostics[protocol.SeverityWarning])))
 	}
 	if diagnostics[protocol.SeverityHint] > 0 {
-		errs = append(errs, t.LSP.HintDiagnostic.Render(fmt.Sprintf("%s%d", styles.LSPHintIcon, diagnostics[protocol.SeverityHint])))
+		errs = append(errs, t.LSP.HintDiagnostic.Render(fmt.Sprintf("%s%d", nerdfont.Glyph(styles.LSPHintIcon, "H"), diagnostics[protocol.SeverityHint])))
 	}
 	if diagnostics[protocol.SeverityInformation] > 0 {
-		errs = append(errs, t.LSP.InfoDiagnostic.Render(fmt.Sprintf("%s%d", styles.LSPInfoIcon, diagnostics[protocol.SeverityInformation])))
+		errs = append(errs, t.LSP.InfoDiagnostic.Render(fmt.Sprintf("%s%d", nerdfont.Glyph(styles.LSPInfoIcon, "I"), diagnostics[protocol.SeverityInformation])))
 	}
 	return strings.Join(errs, " ")
 }

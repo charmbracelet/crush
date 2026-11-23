@@ -3,7 +3,9 @@ package discover
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 
@@ -17,11 +19,14 @@ func init() {
 // ollamaShowResponse mirrors the response from Ollama's POST /api/show
 // endpoint. Only the fields we care about are decoded.
 type ollamaShowResponse struct {
-	ModelInfo map[string]any `json:"model_info"`
+	ModelInfo    map[string]any `json:"model_info"`
+	Capabilities []string       `json:"capabilities"`
 }
 
 // ollamaEnricher fetches model metadata from Ollama's /api/show
-// endpoint and populates context window on discovered models.
+// endpoint and populates context window on discovered models. A model
+// Ollama says cannot call tools is left out, since Crush sends tools on
+// every request and Ollama refuses them for such a model.
 type ollamaEnricher struct{}
 
 func (e *ollamaEnricher) EnrichModels(ctx context.Context, cfg Config, resolver Resolver, models []catwalk.Model) ([]catwalk.Model, error) {
@@ -40,6 +45,7 @@ func (e *ollamaEnricher) EnrichModels(ctx context.Context, cfg Config, resolver 
 	type result struct {
 		index         int
 		contextLength int64
+		noTools       bool
 	}
 
 	results := make([]result, len(needEnrichment))
@@ -64,20 +70,45 @@ func (e *ollamaEnricher) EnrichModels(ctx context.Context, cfg Config, resolver 
 				return
 			}
 
-			if cl := extractContextLength(showResp.ModelInfo); cl > 0 {
-				results[ri] = result{index: idx, contextLength: cl}
+			results[ri] = result{
+				index:         idx,
+				contextLength: extractContextLength(showResp.ModelInfo),
+				noTools:       lacksTools(showResp.Capabilities),
 			}
 		})
 	}
 	wg.Wait()
 
+	var dropped []int
 	for _, r := range results {
+		if r.noTools {
+			slog.Warn("Leaving out an Ollama model that cannot call tools",
+				"provider", cfg.ID, "model", models[r.index].ID,
+				"hint", "its template has no tools; Ollama's /api/show lists its capabilities")
+			dropped = append(dropped, r.index)
+			continue
+		}
 		if r.contextLength > 0 {
 			models[r.index].ContextWindow = r.contextLength
 		}
 	}
+	if len(dropped) == 0 {
+		return models, nil
+	}
+	kept := make([]catwalk.Model, 0, len(models)-len(dropped))
+	for i, m := range models {
+		if !slices.Contains(dropped, i) {
+			kept = append(kept, m)
+		}
+	}
+	return kept, nil
+}
 
-	return models, nil
+// lacksTools reports whether Ollama's capabilities for a model say it
+// cannot call tools. An Ollama too old to report capabilities says
+// nothing, and the model is kept.
+func lacksTools(capabilities []string) bool {
+	return len(capabilities) > 0 && !slices.Contains(capabilities, "tools")
 }
 
 // extractContextLength finds the context_length value in Ollama's

@@ -110,21 +110,16 @@ type ToolRenderOpts struct {
 	Compact         bool
 	IsSpinning      bool
 	Status          ToolStatus
-	// StartedAt is when the tool call started rendering live. Zero for
-	// items restored from history, where the real start time is unknown,
-	// so no elapsed time is shown for them.
-	StartedAt time.Time
-	// Elapsed is how long the tool call has been (or was) running.
-	// Zero when the start time is unknown (restored items).
+	// Elapsed is how long the call has run, or zero when that is unknown.
 	Elapsed time.Duration
 	// LiveOutput is output streamed while the tool runs, shown instead of
 	// the result until the tool finishes.
 	LiveOutput string
 }
 
-// IsPending returns true if the tool call is still pending (not finished and
-// not canceled).
-func (o *ToolRenderOpts) IsPending() bool {
+// IsStreamingInput reports whether the model is still writing the call's
+// arguments, so there is no complete input to show yet.
+func (o *ToolRenderOpts) IsStreamingInput() bool {
 	return !o.ToolCall.Finished && !o.IsCanceled()
 }
 
@@ -173,8 +168,7 @@ type baseToolMessageItem struct {
 	hasCappedWidth bool
 	// isCompact indicates this tool should render in compact mode.
 	isCompact bool
-	// spinningFunc allows tools to override the default spinning logic.
-	// If nil, uses the default: !toolCall.Finished && !canceled.
+	// spinningFunc overrides the default: spin until a result or cancel.
 	spinningFunc SpinningFunc
 	// liveOutput is output streamed while the tool runs. It is display
 	// only and is cleared once the result arrives.
@@ -183,8 +177,6 @@ type baseToolMessageItem struct {
 	sty             *styles.Styles
 	anim            *anim.Anim
 	expandedContent bool
-	startedAt       time.Time
-	finishedAt      time.Time
 }
 
 // LiveOutputItem is implemented by tool items that can show output while
@@ -206,16 +198,6 @@ func (t *baseToolMessageItem) SetLiveOutput(output string) bool {
 }
 
 var _ Expandable = (*baseToolMessageItem)(nil)
-
-// markRestored clears startedAt for items rebuilt from session history:
-// the real start time is unknown there, and a constructor timestamp would
-// restart the timer from zero and misreport the elapsed time.
-func (t *baseToolMessageItem) markRestored() {
-	if !t.startedAt.IsZero() {
-		t.startedAt = time.Time{}
-		t.Bump()
-	}
-}
 
 // newBaseToolMessageItem is the internal constructor for base tool message items.
 func newBaseToolMessageItem(
@@ -245,7 +227,6 @@ func newBaseToolMessageItem(
 		result:                   result,
 		status:                   status,
 		hasCappedWidth:           hasCappedWidth,
-		startedAt:                time.Now(),
 	}
 	t.anim = anim.New(anim.Settings{
 		ID:          toolCall.ID,
@@ -398,18 +379,7 @@ func (t *baseToolMessageItem) RawRender(width int) string {
 	content, height, ok := t.getCachedRender(toolItemWidth)
 	// if we are spinning or there is no cache rerender
 	if !ok || t.isSpinning() {
-		content = t.toolRenderer.RenderTool(t.sty, toolItemWidth, &ToolRenderOpts{
-			ToolCall:        t.toolCall,
-			Result:          t.result,
-			Anim:            t.anim,
-			ExpandedContent: t.expandedContent,
-			Compact:         t.isCompact,
-			IsSpinning:      t.isSpinning(),
-			Status:          t.computeStatus(),
-			StartedAt:       t.startedAt,
-			Elapsed:         t.elapsed(),
-			LiveOutput:      t.liveOutput,
-		})
+		content = t.renderTool(toolItemWidth)
 
 		// Prepend hook indicator if hooks ran for this tool call.
 		if t.result != nil {
@@ -424,6 +394,31 @@ func (t *baseToolMessageItem) RawRender(width int) string {
 	}
 
 	return t.renderHighlighted(content, toolItemWidth, height)
+}
+
+// renderTool renders the call with its tool's renderer, except a call that
+// failed before any input was written: its renderer would only say the
+// input is invalid, so it gets its name and the real error instead.
+func (t *baseToolMessageItem) renderTool(width int) string {
+	if t.result != nil && t.result.IsError && strings.TrimSpace(t.toolCall.Input) == "" {
+		width = cappedMessageWidth(width)
+		header := toolHeader(t.sty, t.computeStatus(), prettifyToolName(t.toolCall.Name), width, nil)
+		if t.isCompact {
+			return header
+		}
+		return joinToolParts(header, toolErrorContent(t.sty, t.result, width))
+	}
+	return t.toolRenderer.RenderTool(t.sty, width, &ToolRenderOpts{
+		ToolCall:        t.toolCall,
+		Result:          t.result,
+		Anim:            t.anim,
+		ExpandedContent: t.expandedContent,
+		Compact:         t.isCompact,
+		IsSpinning:      t.isSpinning(),
+		Status:          t.computeStatus(),
+		Elapsed:         t.elapsed(),
+		LiveOutput:      t.liveOutput,
+	})
 }
 
 // Render renders the tool message item at the given width.
@@ -472,27 +467,25 @@ func (t *baseToolMessageItem) ToolCall() message.ToolCall {
 
 // SetToolCall sets the tool call associated with this message item.
 func (t *baseToolMessageItem) SetToolCall(tc message.ToolCall) {
-	// Capture the end time on the live finished transition so the tool's
-	// total duration can be shown after completion.
-	if tc.Finished && !t.toolCall.Finished && !t.startedAt.IsZero() {
-		t.finishedAt = time.Now()
-	}
 	t.toolCall = tc
 	t.clearCache()
 	t.Bump()
 }
 
-// elapsed returns how long the tool call has been (or was) running. Zero
-// when the start time is unknown (restored items).
+// elapsed returns how long the call has run, from its recorded start to its
+// reply or to now. Zero when either end is unknown.
 func (t *baseToolMessageItem) elapsed() time.Duration {
-	if t.startedAt.IsZero() {
+	start, end := t.toolCall.StartedAtMs, time.Now().UnixMilli()
+	switch {
+	case t.result != nil:
+		end = t.result.FinishedAtMs
+	case t.status == ToolStatusCanceled:
+		end = 0
+	}
+	if start == 0 || end < start {
 		return 0
 	}
-	end := t.finishedAt
-	if end.IsZero() {
-		end = time.Now()
-	}
-	return end.Sub(t.startedAt)
+	return common.ElapsedSince(time.UnixMilli(start), time.UnixMilli(end))
 }
 
 // toolTimerOwnTimeThreshold is how long a tool call must run before its
@@ -565,8 +558,8 @@ func (t *baseToolMessageItem) computeStatus() ToolStatus {
 	return ToolStatusSuccess
 }
 
-// isSpinning returns true if the tool should show animation. A recorded
-// result stops it too, for calls stored before settling marked them finished.
+// isSpinning reports whether the tool is still running; Finished only
+// means its arguments are complete.
 func (t *baseToolMessageItem) isSpinning() bool {
 	if t.spinningFunc != nil {
 		return t.spinningFunc(SpinningState{
@@ -575,7 +568,7 @@ func (t *baseToolMessageItem) isSpinning() bool {
 			Status:   t.status,
 		})
 	}
-	return !t.toolCall.Finished && t.result == nil && t.status != ToolStatusCanceled
+	return t.result == nil && t.status != ToolStatusCanceled
 }
 
 // SetSpinningFunc sets a custom function to determine if the tool should spin.
@@ -589,21 +582,6 @@ func (t *baseToolMessageItem) ToggleExpanded() bool {
 	t.clearCache()
 	t.Bump()
 	return t.expandedContent
-}
-
-// Finished implements list.Item. A tool call is freezable once the
-// tool call itself is marked finished AND a result has been recorded
-// (or it has been canceled). Tools that override the spinning logic
-// via spinningFunc would short-circuit live ticks; we still gate
-// freezing on isSpinning to keep the contract conservative.
-func (t *baseToolMessageItem) Finished() bool {
-	if t.isSpinning() {
-		return false
-	}
-	if t.status == ToolStatusCanceled {
-		return true
-	}
-	return t.toolCall.Finished && t.result != nil
 }
 
 // HandleMouseClick implements MouseClickable.
@@ -724,8 +702,8 @@ func unescapePartialString(s string) string {
 // active, the total elapsed turn time.
 func waitingForToolMessage(opts *ToolRenderOpts) string {
 	msg := "Waiting for tool response"
-	if !opts.StartedAt.IsZero() {
-		msg += fmt.Sprintf(" for %s", common.FormatDuration(time.Since(opts.StartedAt)))
+	if opts.Elapsed > 0 {
+		msg += fmt.Sprintf(" for %s", common.FormatDuration(opts.Elapsed))
 	}
 	if total := common.CurrentElapsed(); total != "" {
 		msg += fmt.Sprintf(" (%s total)", total)

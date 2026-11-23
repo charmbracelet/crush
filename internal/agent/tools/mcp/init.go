@@ -58,6 +58,9 @@ type ClientSession struct {
 	// the claude/channel capability and was opted in via --channels or
 	// channel_enabled in config).
 	channel bool
+	// channelCapable reports whether the server declared the claude/channel
+	// capability, whether or not it was opted in.
+	channelCapable bool
 }
 
 // Close cancels the session context and then closes the underlying session.
@@ -86,6 +89,12 @@ var (
 	initMu      sync.Mutex
 	initStarted bool
 	initArmedAt time.Time
+
+	// refs counts the apps sharing the process-global MCP clients (see
+	// Acquire). A server hosts one app per workspace, so only the Close
+	// that releases the last reference may close the sessions.
+	refsMu sync.Mutex
+	refs   int
 
 	// renewMus serializes lazy session renewals per server so concurrent tool
 	// calls cannot race to rebuild the same session.
@@ -234,6 +243,17 @@ type ClientInfo struct {
 	// claude/channel capability and opted in via --channels or
 	// channel_enabled in config).
 	Channel bool
+
+	// ChannelOptIn reports whether the server is opted in as a channel (via
+	// --channels or channel_enabled), whatever its connection state. It is
+	// recorded when a connect attempt starts, so a channel that is still
+	// starting, has errored, or needs auth is still reported as one.
+	ChannelOptIn bool
+
+	// ChannelCapable reports whether the server declared the claude/channel
+	// capability on its last connect, whether or not it is opted in, so the
+	// UI can point out servers that could be channels but were never enabled.
+	ChannelCapable bool
 }
 
 // SubscribeEvents returns a channel for MCP events.
@@ -300,10 +320,38 @@ func GetState(name string) (ClientInfo, bool) {
 	return states.Get(name)
 }
 
-// Close closes all MCP clients. This should be called during application shutdown.
+// Acquire takes a reference on the process-global MCP clients for an app
+// that is about to start them. Pair every Acquire with one Close.
+func Acquire() {
+	refsMu.Lock()
+	defer refsMu.Unlock()
+	refs++
+}
+
+// Close releases a reference taken by Acquire. Every app in the process
+// shares the MCP clients, so only the call that releases the last reference
+// closes them. The event broker is never shut down: subscriptions end with
+// their contexts, and an app created later in the process still needs it.
+//
+// A Close that is not the last leaves the releasing app's sessions, OAuth
+// handlers and tools in place until another app's Initialize replaces them
+// (connectAndRegister closes the session it replaces) or the last app exits.
 func Close(ctx context.Context) error {
+	refsMu.Lock()
+	if refs > 0 {
+		refs--
+	}
+	if refs > 0 {
+		refsMu.Unlock()
+		return nil
+	}
+	// Snapshot under the lock so nothing started by an app that acquires
+	// after this point is closed here.
+	open, handlers := sessions.Copy(), authURLs.Copy()
+	refsMu.Unlock()
+
 	var wg sync.WaitGroup
-	for name, session := range sessions.Seq2() {
+	for name, session := range open {
 		wg.Go(func() {
 			done := make(chan error, 1)
 			go func() {
@@ -323,10 +371,9 @@ func Close(ctx context.Context) error {
 	}
 	wg.Wait()
 	// Clean up any remaining OAuth handlers.
-	for _, h := range authURLs.Seq2() {
+	for _, h := range handlers {
 		h.Close()
 	}
-	broker.Shutdown()
 	return nil
 }
 
@@ -472,7 +519,7 @@ func AuthenticateMCP(ctx context.Context, cfg *config.ConfigStore, name string) 
 		return fmt.Errorf("mcp '%s' does not use OAuth authentication", name)
 	}
 
-	updateState(name, StateStarting, nil, nil, Counts{}, withPending(m))
+	updateState(name, StateStarting, nil, nil, Counts{}, withPending(m), withChannelOptIn(cfg, name, m))
 
 	// This is the user-initiated flow, so permit the interactive browser
 	// authorization the handler otherwise withholds during startup.
@@ -572,7 +619,7 @@ func BeginAuth(cfg *config.ConfigStore, name string) (finish func(ctx context.Co
 // runAuthFlow executes the OAuth connect for BeginAuth with browser
 // suppression enabled on the freshly created handler.
 func runAuthFlow(ctx context.Context, cfg *config.ConfigStore, name string, m config.MCPConfig) error {
-	updateState(name, StateStarting, nil, nil, Counts{}, withPending(m))
+	updateState(name, StateStarting, nil, nil, Counts{}, withPending(m), withChannelOptIn(cfg, name, m))
 	_, err := connectAndRegister(ctx, cfg, name, m, currentGen(name), cfg.Resolver(), ChannelOptIn(m, cfg.Overrides().EnabledChannels, name))
 	return err
 }
@@ -602,13 +649,13 @@ func initClient(ctx context.Context, cfg *config.ConfigStore, name string, m con
 		if m.OAuthToken != nil {
 			clearOAuthToken(cfg, name)
 		}
-		updateState(name, StateNeedsAuth, nil, nil, Counts{})
+		updateState(name, StateNeedsAuth, nil, nil, Counts{}, withChannelOptIn(cfg, name, m))
 		clearMCPData(name)
 		slog.Info("MCP server requires OAuth authentication", "name", name)
 		return nil
 	}
 
-	updateState(name, StateStarting, nil, nil, Counts{}, withPending(m))
+	updateState(name, StateStarting, nil, nil, Counts{}, withPending(m), withChannelOptIn(cfg, name, m))
 	_, err := connectAndRegister(ctx, cfg, name, m, gen, resolver, ChannelOptIn(m, cfg.Overrides().EnabledChannels, name))
 	if err != nil {
 		// If an OAuth MCP fails because the saved token is no longer
@@ -680,7 +727,13 @@ func connectAndRegister(ctx context.Context, cfg *config.ConfigStore, name strin
 	}
 
 	updatePrompts(name, prompts)
-	sessions.Set(name, session)
+	// Close the session this one replaces. Apps share the sessions and only
+	// the last app's Close walks the map, so a session dropped from it here
+	// would never be closed. Close it off this path so a slow child cannot
+	// hold up Initialize.
+	if old, ok := sessions.Swap(name, session); ok && old != session {
+		go closeSession(name, old)
+	}
 
 	updateState(name, StateConnected, nil, session, Counts{
 		Tools:   toolCount,
@@ -951,6 +1004,14 @@ func withPending(m config.MCPConfig) stateOpt {
 	}
 }
 
+// withChannelOptIn records whether the server is opted in as a channel.
+// Applied on every connect attempt so it tracks the current config and the
+// --channels overrides.
+func withChannelOptIn(cfg *config.ConfigStore, name string, m config.MCPConfig) stateOpt {
+	optIn := ChannelOptIn(m, cfg.Overrides().EnabledChannels, name)
+	return func(i *ClientInfo) { i.ChannelOptIn = optIn }
+}
+
 // updateState updates the state of an MCP client and publishes an event.
 //
 // Config bookkeeping is split between the caller and the state machine:
@@ -969,6 +1030,9 @@ func updateState(name string, state State, err error, client *ClientSession, cou
 	info.Client = client
 	info.Counts = counts
 	info.Channel = client != nil && client.channel
+	if client != nil {
+		info.ChannelCapable = client.channelCapable
+	}
 	for _, opt := range opts {
 		opt(&info)
 	}
@@ -978,6 +1042,9 @@ func updateState(name string, state State, err error, client *ClientSession, cou
 	case StateDisabled:
 		info.Config = config.MCPConfig{}
 		info.PendingConfig = nil
+		// A disabled server is not a channel, whatever its config says.
+		info.ChannelOptIn = false
+		info.ChannelCapable = false
 	case StateError:
 		// A session that has errored is dead to us: close it so the child
 		// process and its stdio pipes are released, and clear its registry
@@ -1058,11 +1125,11 @@ func createSession(ctx context.Context, cfg *config.ConfigStore, name string, m 
 
 	// When the server is marked Sessionless, the tools/prompts/resources
 	// list-changed handlers are omitted. The go-sdk opens a SEP-2575
-	// "subscriptions/listen" stream whenever any of those handlers is set
-	// (client.go), and sessionless streamable-HTTP servers such as GitHub MCP
-	// answer that POST with 404 ("session not found"), which the SDK treats
-	// as fatal and tears the connection down. Setting the flag lets those
-	// servers connect at the cost of live list-changed notifications.
+	// "subscriptions/listen" stream whenever any of those handlers is set and
+	// the server advertises listChanged (client.go), and sessionless
+	// streamable-HTTP servers such as GitHub MCP answer that POST with 404.
+	// The SDK tolerates that rejection, so the flag only skips the doomed
+	// listen request.
 	opts := &mcp.ClientOptions{
 		LoggingMessageHandler: func(ctx context.Context, req *mcp.LoggingMessageRequest) {
 			level := parseLevel(string(req.Params.Level))
@@ -1117,7 +1184,8 @@ func createSession(ctx context.Context, cfg *config.ConfigStore, name string, m 
 	// enough. Otherwise close the gate (fail closed). Resolving drains buffered messages
 	// that arrived during negotiation so a fast server does not lose early
 	// events.
-	isChannel := channelOptIn && hasChannelCapability(session.InitializeResult())
+	channelCapable := hasChannelCapability(session.InitializeResult())
+	isChannel := channelOptIn && channelCapable
 	if isChannel {
 		buffered := channelGate.resolve(true)
 		for _, raw := range buffered {
@@ -1129,10 +1197,11 @@ func createSession(ctx context.Context, cfg *config.ConfigStore, name string, m 
 	}
 
 	return &ClientSession{
-		ClientSession: session,
-		cancel:        cancel,
-		oauthHandler:  oauthHandler,
-		channel:       isChannel,
+		ClientSession:  session,
+		cancel:         cancel,
+		oauthHandler:   oauthHandler,
+		channel:        isChannel,
+		channelCapable: channelCapable,
 	}, nil
 }
 
@@ -1209,6 +1278,13 @@ func createTransport(ctx context.Context, cfg *config.ConfigStore, name string, 
 			return nil, nil, err
 		}
 		cmd := exec.CommandContext(ctx, home.Long(command), args...)
+		// Start the server in the workspace directory, not the process cwd.
+		// In client/server mode one process hosts every workspace and keeps
+		// the cwd of whichever client spawned it, so a relative command or
+		// argument would otherwise resolve against another project.
+		if cfg != nil {
+			cmd.Dir = cfg.WorkingDir()
+		}
 		cmd.Env = append(os.Environ(), envs...)
 		// Run the child in its own process group and kill the whole group when
 		// the session context is cancelled. A stdio server often spawns its own
@@ -1482,6 +1558,7 @@ func stdioCheck(old *exec.Cmd) error {
 		args = args[1:]
 	}
 	cmd := exec.CommandContext(ctx, old.Path, args...)
+	cmd.Dir = old.Dir
 	cmd.Env = old.Env
 	cmd.WaitDelay = stdioCheckTimeout
 	out, err := cmd.CombinedOutput()

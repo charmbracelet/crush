@@ -54,6 +54,10 @@ func handleOption(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		return optionUI(o, args, stderr)
 	}
 
+	if key == "prompt" {
+		return optionPrompt(o, args, stderr)
+	}
+
 	// "option reset <key>" wipes a list back to empty. Because the builder
 	// applies operations in execution order, this is just an assignment:
 	// values added after the reset are kept, earlier ones are dropped.
@@ -226,11 +230,34 @@ var optionSpecs = map[string]optionSpec{
 	"disable-skill":       {jsonKey: "disabled_skills", kind: optList},
 }
 
+// uiBoolKeys maps boolean "option ui" keys to their options.tui JSON keys.
+var uiBoolKeys = map[string]string{
+	"compact":     "compact_mode",
+	"transparent": "transparent",
+	"mouse":       "mouse",
+	"nerd-fonts":  "nerd_fonts",
+}
+
+// optionPrompt implements "option prompt <name> <path>", pointing a built-in
+// prompt at a replacement file. Unknown names are rejected later, by config
+// validation, which owns the list of built-in prompts.
+func optionPrompt(options map[string]any, args []string, stderr io.Writer) error {
+	if len(args) != 4 {
+		return usage(stderr, "usage: option prompt <name> <path>")
+	}
+
+	name, path := args[2], args[3]
+	childMap(options, "prompts")[name] = path
+
+	slog.Info("Prompt override set in shell config", "prompt", name, "path", path)
+	return nil
+}
+
 // optionUI implements "option ui <key> <value>" for TUI-specific settings
 // that live under options.tui rather than as top-level options.
 func optionUI(options map[string]any, args []string, stderr io.Writer) error {
 	if len(args) != 4 {
-		return usage(stderr, "usage: option ui <compact|diff|transparent|mouse|scrollbar|completions-max-depth|completions-max-items|exit-banner> <value>")
+		return usage(stderr, "usage: option ui <compact|diff|transparent|mouse|nerd-fonts|scrollbar|completions-max-depth|completions-max-items|exit-banner> <value>")
 	}
 
 	key := args[2]
@@ -238,16 +265,6 @@ func optionUI(options map[string]any, args []string, stderr io.Writer) error {
 	ui := childMap(options, "tui")
 
 	switch key {
-	case "compact", "transparent", "mouse":
-		parsed, err := parseBool(value)
-		if err != nil {
-			return usage(stderr, fmt.Sprintf("option ui %s expects true/false, got %q", key, value))
-		}
-		jsonKey := key
-		if key == "compact" {
-			jsonKey = "compact_mode"
-		}
-		ui[jsonKey] = parsed
 	case "diff":
 		if value != "unified" && value != "split" {
 			return usage(stderr, fmt.Sprintf("option ui diff expects unified or split, got %q", value))
@@ -274,7 +291,15 @@ func optionUI(options map[string]any, args []string, stderr io.Writer) error {
 		}
 		childMap(ui, "completions")[jsonKey] = parsed
 	default:
-		return usage(stderr, fmt.Sprintf("option ui: unknown key %q", key))
+		jsonKey, ok := uiBoolKeys[key]
+		if !ok {
+			return usage(stderr, fmt.Sprintf("option ui: unknown key %q", key))
+		}
+		parsed, err := parseBool(value)
+		if err != nil {
+			return usage(stderr, fmt.Sprintf("option ui %s expects true/false, got %q", key, value))
+		}
+		ui[jsonKey] = parsed
 	}
 
 	slog.Info("UI option set in shell config", "key", key, "value", value)

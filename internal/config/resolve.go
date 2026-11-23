@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/env"
@@ -32,8 +33,8 @@ func IdentityResolver() VariableResolver {
 }
 
 // Expander is the single-value shell expansion seam used by
-// shellVariableResolver. Production wires it to shell.ExpandValue; tests
-// can inject a fake via WithExpander.
+// shellVariableResolver. Production wires it to shell.ExpandValueInDir;
+// tests can inject a fake via WithExpander.
 type Expander func(ctx context.Context, value string, env []string) (string, error)
 
 // ShellResolverOption customizes shell variable resolver construction.
@@ -49,8 +50,22 @@ func WithExpander(e Expander) ShellResolverOption {
 	}
 }
 
+// WithWorkingDir runs $(...) command substitution in dir, the directory of
+// the workspace whose config is being resolved, instead of the process
+// working directory, which a server shares between all the workspaces it
+// hosts. A dir that does not exist is ignored: the server resolves its own
+// config in GlobalWorkspaceDir, which may not have been created yet.
+func WithWorkingDir(dir string) ShellResolverOption {
+	return func(r *shellVariableResolver) {
+		if info, err := os.Stat(dir); err == nil && info.IsDir() {
+			r.dir = dir
+		}
+	}
+}
+
 type shellVariableResolver struct {
 	env    env.Env
+	dir    string
 	expand Expander
 }
 
@@ -63,9 +78,9 @@ type shellVariableResolver struct {
 // The stricter "unset is always an error" mode is gated globally by
 // shell.NoUnset.
 func NewShellVariableResolver(e env.Env, opts ...ShellResolverOption) VariableResolver {
-	r := &shellVariableResolver{
-		env:    e,
-		expand: shell.ExpandValue,
+	r := &shellVariableResolver{env: e}
+	r.expand = func(ctx context.Context, value string, env []string) (string, error) {
+		return shell.ExpandValueInDir(ctx, value, r.dir, env)
 	}
 	for _, opt := range opts {
 		opt(r)

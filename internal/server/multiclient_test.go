@@ -26,6 +26,9 @@ func installSyntheticWorkspace(t *testing.T, c *controllerV1) *backend.Workspace
 		ID:   uuid.New().String(),
 		Path: t.TempDir(),
 	}
+	// Tests give synthetic workspaces partial apps, which a real teardown
+	// (e.g. when a client's detach grace expires) would panic on.
+	backend.SetWorkspaceShutdownFnForTest(ws, func() {})
 	backend.InsertWorkspaceForTest(c.backend, ws)
 	return ws
 }

@@ -726,10 +726,17 @@ func TestCancelledTurnRecordsToolAsInterrupted(t *testing.T) {
 	msgs, err := env.messages.List(t.Context(), session.ID)
 	require.NoError(t, err)
 	var results []message.ToolResult
+	var calls []message.ToolCall
 	for _, msg := range msgs {
 		results = append(results, msg.ToolResults()...)
+		calls = append(calls, msg.ToolCalls()...)
 	}
 	require.Len(t, results, 1)
 	require.True(t, results[0].IsError)
 	require.Equal(t, interruptedToolCallResult, results[0].Content)
+	// The stored call and reply bracket the run, so a reloaded session
+	// shows the same duration the live one did.
+	require.Len(t, calls, 1)
+	require.Positive(t, calls[0].StartedAtMs, "the call must record when it started")
+	require.GreaterOrEqual(t, results[0].FinishedAtMs, calls[0].StartedAtMs)
 }

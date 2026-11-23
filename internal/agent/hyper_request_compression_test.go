@@ -1,8 +1,9 @@
 package agent
 
-// Hyper accepts gzip request bodies, and every turn re-uploads the whole
-// conversation, so the Hyper provider compresses what it sends. Other
-// openai-compat providers must not, because nothing tells us they can read it.
+// Hyper accepts brotli and gzip request bodies, and every turn re-uploads
+// the whole conversation, so the Hyper provider compresses what it sends,
+// brotli first. Other openai-compat providers must not, because nothing
+// tells us they can read it.
 
 import (
 	"bytes"
@@ -18,6 +19,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/config"
+	brrr "github.com/molecule-man/go-brrr"
 	"github.com/stretchr/testify/require"
 )
 
@@ -30,7 +32,9 @@ type encodingRecorder struct {
 	server    *httptest.Server
 }
 
-func newEncodingRecorder(t *testing.T) *encodingRecorder {
+// When rejectBrotli is set, the recorder answers 400 to a brotli body, the
+// way a Hyper with gzip-only support refuses one.
+func newEncodingRecorder(t *testing.T, rejectBrotli bool) *encodingRecorder {
 	t.Helper()
 	rec := &encodingRecorder{}
 	rec.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -39,7 +43,8 @@ func newEncodingRecorder(t *testing.T) *encodingRecorder {
 
 		encoding := r.Header.Get("Content-Encoding")
 		body := string(raw)
-		if encoding == "gzip" {
+		switch encoding {
+		case "gzip":
 			zr, gzErr := gzip.NewReader(bytes.NewReader(raw))
 			if gzErr != nil {
 				w.WriteHeader(http.StatusBadRequest)
@@ -48,12 +53,22 @@ func newEncodingRecorder(t *testing.T) *encodingRecorder {
 			inflated, gzErr := io.ReadAll(zr)
 			require.NoError(t, gzErr)
 			body = string(inflated)
+		case "br":
+			inflated, brErr := io.ReadAll(brrr.NewReader(bytes.NewReader(raw)))
+			require.NoError(t, brErr)
+			body = string(inflated)
 		}
 
 		rec.mu.Lock()
 		rec.encodings = append(rec.encodings, encoding)
 		rec.bodies = append(rec.bodies, body)
 		rec.mu.Unlock()
+
+		if rejectBrotli && encoding == "br" {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"message":"no","type":"invalid_request_error"}}`))
+			return
+		}
 
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"z","created":1,"model":"test-model","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"Hi"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":2,"total_tokens":4}}`))
@@ -103,14 +118,14 @@ func generateAgainst(t *testing.T, coord *coordinator, baseURL, providerID strin
 func TestHyperProviderCompressesRequests(t *testing.T) {
 	t.Parallel()
 
-	t.Run("hyper uploads a compressed body", func(t *testing.T) {
+	t.Run("hyper uploads a brotli body", func(t *testing.T) {
 		t.Parallel()
-		rec := newEncodingRecorder(t)
+		rec := newEncodingRecorder(t, false)
 
 		require.NoError(t, generateAgainst(t, testCoordinator(t), rec.server.URL+"/v1", hyper.Name, longPrompt()))
 
 		encodings, bodies := rec.received()
-		require.Equal(t, []string{"gzip"}, encodings, "one compressed request, no retry")
+		require.Equal(t, []string{"br"}, encodings, "one compressed request, no retry")
 		require.Contains(t, bodies[0], `"model":"test-model"`,
 			"the server must be able to inflate what Hyper was handed")
 	})
@@ -119,7 +134,7 @@ func TestHyperProviderCompressesRequests(t *testing.T) {
 	// never told about it should not have to guess.
 	t.Run("other openai-compat providers upload plain JSON", func(t *testing.T) {
 		t.Parallel()
-		rec := newEncodingRecorder(t)
+		rec := newEncodingRecorder(t, false)
 
 		require.NoError(t, generateAgainst(t, testCoordinator(t), rec.server.URL+"/v1", "some-other-provider", longPrompt()))
 
@@ -127,9 +142,22 @@ func TestHyperProviderCompressesRequests(t *testing.T) {
 		require.Equal(t, []string{""}, encodings)
 	})
 
+	t.Run("a gzip-only hyper gets the fallback", func(t *testing.T) {
+		t.Parallel()
+		rec := newEncodingRecorder(t, true)
+
+		require.NoError(t, generateAgainst(t, testCoordinator(t), rec.server.URL+"/v1", hyper.Name, longPrompt()))
+
+		encodings, bodies := rec.received()
+		require.Equal(t, []string{"br", "gzip"}, encodings,
+			"a refused brotli body is retried as the next encoding in the list")
+		require.Contains(t, bodies[1], `"model":"test-model"`,
+			"the retry must carry the same request, not an empty one")
+	})
+
 	t.Run("short hyper prompts are not worth compressing", func(t *testing.T) {
 		t.Parallel()
-		rec := newEncodingRecorder(t)
+		rec := newEncodingRecorder(t, false)
 
 		prompt := fantasy.Prompt{
 			{Role: fantasy.MessageRoleUser, Content: []fantasy.MessagePart{fantasy.TextPart{Text: "hi"}}},

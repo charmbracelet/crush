@@ -77,7 +77,7 @@ func (m *UI) updateSidebarScrollState() {
 	contentWidth := max(width-2, 1)
 
 	title := t.Sidebar.SessionTitle.Width(contentWidth).MaxHeight(2).Render(m.session.Title)
-	cwd := common.PrettyPathWithBranch(t, m.com.Workspace.WorkingDir(), m.gitBranch, contentWidth)
+	cwd := common.PrettyPathWithBranch(t, m.com.Workspace.WorkingDir(), m.gitBranchLabel(), contentWidth)
 	sidebarLogo := m.sidebarLogo
 	if height < logoHeightBreakpoint {
 		sidebarLogo = lipgloss.JoinVertical(lipgloss.Left, logo.SmallRender(m.com.Styles, contentWidth, logo.Opts{
@@ -97,27 +97,25 @@ func (m *UI) updateSidebarScrollState() {
 	lspSection := m.lspInfo(contentWidth, len(m.lspStates), true)
 	mcpSection := m.mcpInfo(contentWidth, mcpCount(m.com.Config().MCP.Sorted(), m.mcpStates), true)
 	skillsSection := m.skillsInfo(contentWidth, len(m.skillStatusItems()), true)
+	channels := m.channelStatusItems()
 	filesSection := m.filesInfo(m.com.Workspace.WorkingDir(), contentWidth, fileChangeCount(m.sessionFiles), true)
 
 	// Build the scrollable content. The subagent section renders empty
 	// until something is dispatched, so it takes no space in a session
 	// that never uses them.
-	content := lipgloss.JoinVertical(
-		lipgloss.Left,
+	sections := []string{
 		title,
 		"",
 		cwd,
 		"",
 		m.modelInfo(contentWidth),
 		"",
-	)
+	}
 	subAgents := m.subAgentStatuses()
 	if subAgentSection := m.subAgentsInfo(subAgents, contentWidth, len(subAgents), true); subAgentSection != "" {
-		content = lipgloss.JoinVertical(lipgloss.Left, content, subAgentSection, "")
+		sections = append(sections, subAgentSection, "")
 	}
-	content = lipgloss.JoinVertical(
-		lipgloss.Left,
-		content,
+	sections = append(sections,
 		filesSection,
 		"",
 		lspSection,
@@ -126,6 +124,12 @@ func (m *UI) updateSidebarScrollState() {
 		"",
 		skillsSection,
 	)
+	// Channels are experimental and opt-in: only give them a section once
+	// at least one server is opted in.
+	if len(channels) > 0 {
+		sections = append(sections, "", m.channelsInfo(channels, contentWidth, len(channels), true))
+	}
+	content := lipgloss.JoinVertical(lipgloss.Left, sections...)
 
 	totalLines := strings.Count(content, "\n") + 1
 	m.sidebarContent = content

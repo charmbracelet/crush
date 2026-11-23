@@ -152,6 +152,19 @@ func TestRunCompleteToProto_RoundTrip(t *testing.T) {
 	require.False(t, decoded.Payload.Cancelled)
 }
 
+func TestReauthenticateEventIncludesProvider(t *testing.T) {
+	t.Parallel()
+
+	env := wrapEvent(pubsub.Event[notify.Notification]{
+		Type:    pubsub.CreatedEvent,
+		Payload: notify.Notification{Type: notify.TypeReAuthenticate, ProviderID: "example"},
+	})
+	require.NotNil(t, env)
+	var event pubsub.Event[proto.AgentEvent]
+	require.NoError(t, json.Unmarshal(env.Payload, &event))
+	require.Equal(t, "example", event.Payload.ProviderID)
+}
+
 // TestAgentErrorToProto_PreservesRunID verifies that an async agent
 // error notification carries its originating RunID (and SessionID)
 // through the SSE envelope. Without these correlators, `crush run`

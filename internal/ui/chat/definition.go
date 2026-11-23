@@ -31,7 +31,7 @@ type DefinitionToolRenderContext struct{}
 // RenderTool implements the [ToolRenderer] interface.
 func (r *DefinitionToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
-	if opts.IsPending() {
+	if opts.IsStreamingInput() {
 		return pendingTool(sty, "Find Definition", opts.Anim, opts.Compact)
 	}
 

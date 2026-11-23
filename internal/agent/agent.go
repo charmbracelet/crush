@@ -143,6 +143,10 @@ type SessionAgentCall struct {
 	// paths treat as covered by any present mark, preserving the
 	// pre-sequence behavior.
 	acceptSeq uint64
+	// promptChecked is set once UserPromptSubmit hooks have allowed the
+	// prompt, so a call that was queued and later re-enters Run is not
+	// checked twice.
+	promptChecked bool
 	// OnAuthRefresh, when non-nil, is called by fantasy when a stream
 	// fails with an authentication error (HTTP 401). The callback should
 	// refresh credentials and return nil on success, in which case
@@ -759,6 +763,19 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 	if call.Channel != "" && call.channelMeta == nil {
 		call.channelMeta, _ = parseChannelMeta(call.Prompt)
+	}
+
+	// UserPromptSubmit hooks run before anything else touches the prompt:
+	// before it is stored, queued, titled, or sent to the model. A blocked
+	// prompt leaves no trace in the session.
+	if err := a.checkPrompt(ctx, &call); err != nil {
+		call.Accepted.Close()
+		a.publishRunComplete(ctx, call, notify.RunComplete{
+			SessionID: call.SessionID,
+			RunID:     call.RunID,
+			Error:     err.Error(),
+		})
+		return nil, err
 	}
 
 	// genCtx/cancel are the run context and its cancel func, created under

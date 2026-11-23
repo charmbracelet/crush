@@ -5,17 +5,8 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/ui/common"
-	"github.com/charmbracelet/crush/internal/ui/dialog"
 	"github.com/charmbracelet/crush/internal/workspace"
 	"github.com/charmbracelet/ultraviolet/layout"
-)
-
-// Bounds below which the first-run cheat sheet is dropped rather than
-// crowding the working directory, model, and status sections.
-const (
-	landingTipsMinWidth  = 60
-	landingTipsMinHeight = 20
-	landingTipsKeyWidth  = 12
 )
 
 // selectedLargeModel returns the currently selected large language model as
@@ -36,13 +27,22 @@ func (m *UI) selectedLargeModel() *workspace.AgentModel {
 func (m *UI) landingView() string {
 	t := m.com.Styles
 	width := m.layout.main.Dx()
-	cwd := common.PrettyPathInline(t, m.com.Workspace.WorkingDir(), m.gitBranch, width)
+	cwd := common.PrettyPathInline(t, m.com.Workspace.WorkingDir(), m.gitBranchLabel(), width)
 
-	parts := []string{
-		cwd,
+	parts := []string{cwd}
+
+	if m.isOnboarding() {
+		// Nothing is set up yet, so LSP, MCP and skills status would only
+		// be noise next to the first-run prompts. The instruction (or the
+		// held message) sits at the bottom, right above the editor.
+		if welcome := m.welcomeView(width); welcome != "" {
+			parts = append(parts, "", welcome)
+		}
+		top := lipgloss.JoinVertical(lipgloss.Left, parts...)
+		return anchorBottom(width, m.layout.main.Dy()-1, top, m.firstRunPromptView(width))
 	}
 
-	parts = append(parts, "", m.modelInfo(width))
+	parts = append(parts, "", m.modelInfo(width), "", m.welcomeView(width))
 	infoSection := lipgloss.JoinVertical(lipgloss.Left, parts...)
 
 	var remainingHeightArea image.Rectangle
@@ -51,57 +51,32 @@ func (m *UI) landingView() string {
 		layout.Fill(1),
 	).Split(m.layout.main).Assign(new(image.Rectangle), &remainingHeightArea)
 
-	mcpLspSectionWidth := min(30, (width-2)/3)
-
-	lspSection := m.lspInfo(mcpLspSectionWidth, max(1, remainingHeightArea.Dy()), false)
-	mcpSection := m.mcpInfo(mcpLspSectionWidth, max(1, remainingHeightArea.Dy()), false)
-	skillsSection := m.skillsInfo(mcpLspSectionWidth, max(1, remainingHeightArea.Dy()), false)
-
-	content := lipgloss.JoinHorizontal(lipgloss.Left, lspSection, " ", mcpSection, " ", skillsSection)
-
-	sections := []string{infoSection, ""}
-	if m.showLandingTips() {
-		sections = append(sections, m.landingTipsView(), "")
+	// Channels are experimental and opt-in, so their column only appears
+	// once a server is opted in; otherwise the other columns keep their
+	// full width.
+	channels := m.channelStatusItems()
+	columns := 3
+	if len(channels) > 0 {
+		columns = 4
 	}
-	sections = append(sections, content)
+	mcpLspSectionWidth := min(30, (width-(columns-1))/columns)
+	sectionHeight := max(1, remainingHeightArea.Dy())
+
+	lspSection := m.lspInfo(mcpLspSectionWidth, sectionHeight, false)
+	mcpSection := m.mcpInfo(mcpLspSectionWidth, sectionHeight, false)
+	skillsSection := m.skillsInfo(mcpLspSectionWidth, sectionHeight, false)
+	sections := []string{lspSection, " ", mcpSection, " ", skillsSection}
+	if len(channels) > 0 {
+		sections = append(sections, " ", m.channelsInfo(channels, mcpLspSectionWidth, sectionHeight, false))
+	}
+
+	content := lipgloss.JoinHorizontal(lipgloss.Left, sections...)
 
 	return lipgloss.NewStyle().
 		Width(width).
 		Height(m.layout.main.Dy() - 1).
 		PaddingTop(1).
-		Render(lipgloss.JoinVertical(lipgloss.Left, sections...))
-}
-
-// showLandingTips reports whether the first-run cheat sheet belongs on the
-// landing view: only until the first prompt, and only when there is room for
-// it.
-func (m *UI) showLandingTips() bool {
-	if m.state != uiLanding || m.tipsDismissed {
-		return false
-	}
-	cfg := m.com.Config()
-	if cfg == nil || cfg.Options == nil || !cfg.Options.TUI.ShowTips() {
-		return false
-	}
-	if m.layout.main.Dx() < landingTipsMinWidth || m.layout.main.Dy() < landingTipsMinHeight {
-		return false
-	}
-	return !m.hasSession() || m.chat.Len() == 0
-}
-
-// landingTipsView renders the short key cheat sheet shown on first run.
-func (m *UI) landingTipsView() string {
-	t := m.com.Styles
-	hints := []dialog.KeyHint{
-		keyHint(m.keyMap.Editor.SendMessage, "send"),
-		keyHint(m.keyMap.Editor.MentionFile, "add a file to the conversation"),
-		keyHint(m.keyMap.Editor.Commands, "slash commands"),
-		keyHint(m.keyMap.Commands, "palette: models, sessions, init"),
-	}
-
-	heading := t.Dialog.Onboarding.Step.PaddingLeft(1).Render("Getting started")
-	hintBlock := dialog.RenderKeyHints(t, hints, landingTipsKeyWidth)
-	more := t.Dialog.Onboarding.Tip.PaddingLeft(1).Render("More keys in ctrl+g.")
-
-	return lipgloss.JoinVertical(lipgloss.Left, heading, "", hintBlock, "", more)
+		Render(
+			lipgloss.JoinVertical(lipgloss.Left, infoSection, "", content),
+		)
 }

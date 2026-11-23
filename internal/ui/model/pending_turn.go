@@ -40,10 +40,15 @@ func (m *UI) handOffPendingTurn() {
 	m.syncPendingItem()
 }
 
-// endPendingTurn retires the pending items and the clock for sessionID, if
-// that is the session currently running a turn.
+// endPendingTurn retires the pending items, the clock and the busy probe for
+// sessionID, if that is the session currently running a turn.
 func (m *UI) endPendingTurn(sessionID string) {
 	common.StopTurn(sessionID)
+	// A run ending is a busy edge: drop the probe and any still in flight.
+	m.invalidateBusyCaches()
+	if m.probedSession == sessionID {
+		m.probedSessionBusy = false
+	}
 	if m.pending.sessionID == sessionID {
 		m.pending = pendingTurn{}
 		m.syncPendingItem()
@@ -53,13 +58,8 @@ func (m *UI) endPendingTurn(sessionID string) {
 // turnInFlight reports whether a prompt sent to sessionID now would queue
 // behind a running turn rather than start one.
 func (m *UI) turnInFlight(sessionID string) bool {
-	if m.pending.sessionID == sessionID {
-		return true
-	}
-	if m.probedSession == sessionID && m.probedSessionBusy {
-		return true
-	}
-	return m.chat.HasLiveSpinner()
+	return m.pending.sessionID == sessionID ||
+		m.probedSession == sessionID && m.probedSessionBusy
 }
 
 // syncPendingItem makes the chat match the pending turn, adding or removing

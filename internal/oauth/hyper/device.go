@@ -102,7 +102,6 @@ func PollForToken(ctx context.Context, deviceCode string, expiresIn int) (string
 				return "", err
 			}
 			if result.RefreshToken != "" {
-				event.Alias(result.UserID)
 				return result.RefreshToken, nil
 			}
 			switch result.Error {
@@ -125,6 +124,7 @@ func pollOnce(ctx context.Context, deviceCode string) (TokenResponse, error) {
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "crush")
+	req.Header.Set("x-crush-id", event.GetID())
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)

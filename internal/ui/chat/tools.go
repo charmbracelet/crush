@@ -110,11 +110,13 @@ type ToolRenderOpts struct {
 	Compact         bool
 	IsSpinning      bool
 	Status          ToolStatus
+	// Elapsed is how long the call has run, or zero when that is unknown.
+	Elapsed time.Duration
 }
 
-// IsPending returns true if the tool call is still pending (not finished and
-// not canceled).
-func (o *ToolRenderOpts) IsPending() bool {
+// IsStreamingInput reports whether the model is still writing the call's
+// arguments, so there is no complete input to show yet.
+func (o *ToolRenderOpts) IsStreamingInput() bool {
 	return !o.ToolCall.Finished && !o.IsCanceled()
 }
 
@@ -163,8 +165,7 @@ type baseToolMessageItem struct {
 	hasCappedWidth bool
 	// isCompact indicates this tool should render in compact mode.
 	isCompact bool
-	// spinningFunc allows tools to override the default spinning logic.
-	// If nil, uses the default: !toolCall.Finished && !canceled.
+	// spinningFunc overrides the default: spin until a result or cancel.
 	spinningFunc SpinningFunc
 
 	sty             *styles.Styles
@@ -210,6 +211,11 @@ func newBaseToolMessageItem(
 		GradColorB:  sty.WorkingGradToColor,
 		LabelColor:  sty.WorkingLabelColor,
 		CycleColors: true,
+		// Timer on the pending spinner: quick tools (view, grep, edit)
+		// show the overall turn time, long-running ones their own
+		// elapsed time once it becomes the more useful signal.
+		Suffix:      t.spinnerTimer,
+		SuffixColor: sty.WorkingTimerColor,
 	})
 
 	return t
@@ -258,8 +264,10 @@ func NewToolMessageItem(
 		item = NewSourcegraphToolMessageItem(sty, toolCall, result, canceled)
 	case tools.DiagnosticsToolName:
 		item = NewDiagnosticsToolMessageItem(sty, toolCall, result, canceled)
-	case agent.AgentToolName:
+	case agent.AgentToolName, agent.AgentDispatchToolName:
 		item = NewAgentToolMessageItem(sty, toolCall, result, canceled)
+	case agent.AgentSendToolName, agent.AgentStatusToolName, agent.AgentStopToolName:
+		item = NewAgentControlToolMessageItem(sty, toolCall, result, canceled)
 	case tools.AgenticFetchToolName:
 		item = NewAgenticFetchToolMessageItem(sty, toolCall, result, canceled)
 	case tools.WebFetchToolName:
@@ -347,15 +355,7 @@ func (t *baseToolMessageItem) RawRender(width int) string {
 	content, height, ok := t.getCachedRender(toolItemWidth)
 	// if we are spinning or there is no cache rerender
 	if !ok || t.isSpinning() {
-		content = t.toolRenderer.RenderTool(t.sty, toolItemWidth, &ToolRenderOpts{
-			ToolCall:        t.toolCall,
-			Result:          t.result,
-			Anim:            t.anim,
-			ExpandedContent: t.expandedContent,
-			Compact:         t.isCompact,
-			IsSpinning:      t.isSpinning(),
-			Status:          t.computeStatus(),
-		})
+		content = t.renderTool(toolItemWidth)
 
 		// Prepend hook indicator if hooks ran for this tool call.
 		if t.result != nil {
@@ -370,6 +370,30 @@ func (t *baseToolMessageItem) RawRender(width int) string {
 	}
 
 	return t.renderHighlighted(content, toolItemWidth, height)
+}
+
+// renderTool renders the call with its tool's renderer, except a call that
+// failed before any input was written: its renderer would only say the
+// input is invalid, so it gets its name and the real error instead.
+func (t *baseToolMessageItem) renderTool(width int) string {
+	if t.result != nil && t.result.IsError && strings.TrimSpace(t.toolCall.Input) == "" {
+		width = cappedMessageWidth(width)
+		header := toolHeader(t.sty, t.computeStatus(), prettifyToolName(t.toolCall.Name), width, nil)
+		if t.isCompact {
+			return header
+		}
+		return joinToolParts(header, toolErrorContent(t.sty, t.result, width))
+	}
+	return t.toolRenderer.RenderTool(t.sty, width, &ToolRenderOpts{
+		ToolCall:        t.toolCall,
+		Result:          t.result,
+		Anim:            t.anim,
+		ExpandedContent: t.expandedContent,
+		Compact:         t.isCompact,
+		IsSpinning:      t.isSpinning(),
+		Status:          t.computeStatus(),
+		Elapsed:         t.elapsed(),
+	})
 }
 
 // Render renders the tool message item at the given width.
@@ -423,6 +447,42 @@ func (t *baseToolMessageItem) SetToolCall(tc message.ToolCall) {
 	t.Bump()
 }
 
+// elapsed returns how long the call has run, from its recorded start to its
+// reply or to now. Zero when either end is unknown.
+func (t *baseToolMessageItem) elapsed() time.Duration {
+	start, end := t.toolCall.StartedAtMs, time.Now().UnixMilli()
+	switch {
+	case t.result != nil:
+		end = t.result.FinishedAtMs
+	case t.status == ToolStatusCanceled:
+		end = 0
+	}
+	if start == 0 || end < start {
+		return 0
+	}
+	return common.ElapsedSince(time.UnixMilli(start), time.UnixMilli(end))
+}
+
+// toolTimerOwnTimeThreshold is how long a tool call must run before its
+// own elapsed time takes over the pending spinner's timer. Quick tools
+// (view, grep, edit) never cross it and keep showing the overall turn
+// time, which is the more useful signal for them; long-running ones
+// (bash, fetch, sub-agents) switch to their own duration once it starts
+// to matter.
+const toolTimerOwnTimeThreshold = 10 * time.Second
+
+// spinnerTimer returns the timer text shown next to the pending
+// spinner: the overall turn time while the tool is quick, its own
+// elapsed time once it has been running long enough to matter. Empty
+// when no turn is active and the start time is unknown, so renders of
+// restored sessions are unaffected.
+func (t *baseToolMessageItem) spinnerTimer() string {
+	if d := t.elapsed(); d >= toolTimerOwnTimeThreshold {
+		return common.FormatDuration(d)
+	}
+	return common.CurrentElapsed()
+}
+
 // SetResult sets the tool result associated with this message item.
 func (t *baseToolMessageItem) SetResult(res *message.ToolResult) {
 	t.result = res
@@ -459,17 +519,19 @@ func (t *baseToolMessageItem) Status() ToolStatus {
 
 // computeStatus computes the effective status considering the result.
 func (t *baseToolMessageItem) computeStatus() ToolStatus {
-	if t.result != nil {
-		if t.result.IsError {
-			return ToolStatusError
-		}
-		return ToolStatusSuccess
+	switch {
+	case t.result == nil:
+		return t.status
+	case t.result.IsError && t.status == ToolStatusCanceled:
+		return ToolStatusCanceled // an interruption, not a real error
+	case t.result.IsError:
+		return ToolStatusError
 	}
-	return t.status
+	return ToolStatusSuccess
 }
 
-// isSpinning returns true if the tool should show animation. A recorded
-// result stops it too, for calls stored before settling marked them finished.
+// isSpinning reports whether the tool is still running; Finished only
+// means its arguments are complete.
 func (t *baseToolMessageItem) isSpinning() bool {
 	if t.spinningFunc != nil {
 		return t.spinningFunc(SpinningState{
@@ -478,7 +540,7 @@ func (t *baseToolMessageItem) isSpinning() bool {
 			Status:   t.status,
 		})
 	}
-	return !t.toolCall.Finished && t.result == nil && t.status != ToolStatusCanceled
+	return t.result == nil && t.status != ToolStatusCanceled
 }
 
 // SetSpinningFunc sets a custom function to determine if the tool should spin.
@@ -492,21 +554,6 @@ func (t *baseToolMessageItem) ToggleExpanded() bool {
 	t.clearCache()
 	t.Bump()
 	return t.expandedContent
-}
-
-// Finished implements list.Item. A tool call is freezable once the
-// tool call itself is marked finished AND a result has been recorded
-// (or it has been canceled). Tools that override the spinning logic
-// via spinningFunc would short-circuit live ticks; we still gate
-// freezing on isSpinning to keep the contract conservative.
-func (t *baseToolMessageItem) Finished() bool {
-	if t.isSpinning() {
-		return false
-	}
-	if t.status == ToolStatusCanceled {
-		return true
-	}
-	return t.toolCall.Finished && t.result != nil
 }
 
 // HandleMouseClick implements MouseClickable.
@@ -622,6 +669,20 @@ func unescapePartialString(s string) string {
 	}
 }
 
+// waitingForToolMessage builds the "Waiting for tool response..." label,
+// including how long the tool has been running and, when a turn is
+// active, the total elapsed turn time.
+func waitingForToolMessage(opts *ToolRenderOpts) string {
+	msg := "Waiting for tool response"
+	if opts.Elapsed > 0 {
+		msg += fmt.Sprintf(" for %s", common.FormatDuration(opts.Elapsed))
+	}
+	if total := common.CurrentElapsed(); total != "" {
+		msg += fmt.Sprintf(" (%s total)", total)
+	}
+	return msg + "..."
+}
+
 // toolEarlyStateContent handles error/cancelled/pending states before content rendering.
 // Returns the rendered output and true if early state was handled.
 func toolEarlyStateContent(sty *styles.Styles, opts *ToolRenderOpts, width int) (string, bool) {
@@ -632,13 +693,24 @@ func toolEarlyStateContent(sty *styles.Styles, opts *ToolRenderOpts, width int) 
 	case ToolStatusCanceled:
 		msg = sty.Tool.StateCancelled.Render("Canceled.")
 	case ToolStatusAwaitingPermission:
-		msg = sty.Tool.StateWaiting.Render("Requesting permission...")
+		msg = sty.Tool.StateWaiting.Render("Requesting permission...") + toolTimerSuffix(sty)
 	case ToolStatusRunning:
-		msg = sty.Tool.StateWaiting.Render("Waiting for tool response...")
+		msg = sty.Tool.StateWaiting.Render(waitingForToolMessage(opts))
 	default:
 		return "", false
 	}
 	return msg, true
+}
+
+// toolTimerSuffix renders the live turn timer shown next to tool calls
+// that are still in flight. Returns an empty string when no turn is
+// active, so renders of persisted sessions are unaffected.
+func toolTimerSuffix(sty *styles.Styles) string {
+	elapsed := common.CurrentElapsed()
+	if elapsed == "" {
+		return ""
+	}
+	return " " + lipgloss.NewStyle().Foreground(sty.WorkingTimerColor).Render(elapsed)
 }
 
 // toolErrorContent formats an error message with an ERROR or WARN tag.
@@ -676,7 +748,8 @@ func toolIcon(sty *styles.Styles, status ToolStatus) string {
 }
 
 // toolParamList formats tool parameters as "main (key=value, ...)" with truncation.
-// When opts.ExpandedContent is true, the output wraps instead of truncating.
+// When opts.ExpandedContent is true, the output wraps instead of truncating,
+// unless the tool is compact (nested in an agent tree), which always truncates.
 func toolParamList(sty *styles.Styles, params []string, width int, opts *ToolRenderOpts) string {
 	// minSpaceForMainParam is the min space required for the main param
 	// if this is less that the value set we will only show the main param nothing else
@@ -706,7 +779,14 @@ func toolParamList(sty *styles.Styles, params []string, width int, opts *ToolRen
 		}
 	}
 
-	if width >= 0 && (opts == nil || !opts.ExpandedContent) {
+	// Compact tools are the children of an agent tree, where a wrapped
+	// header would push continuation lines past the tree's branch drawing
+	// and break the bars. They truncate even when expanded, and stay on one
+	// line even when a parameter has newlines of its own.
+	if opts != nil && opts.Compact {
+		output = strings.ReplaceAll(output, "\n", " ")
+	}
+	if width >= 0 && (opts == nil || !opts.ExpandedContent || opts.Compact) {
 		return sty.Tool.ParamMain.Render(ansi.Truncate(output, width, "…"))
 	}
 	if opts != nil && opts.ExpandedContent && width > 0 && lipgloss.Width(output) > width {
@@ -1239,7 +1319,12 @@ func toolOutputMarkdownContent(sty *styles.Styles, content string, width int, ex
 		return toolOutputPlainContent(sty, content, width, expanded)
 	}
 
+	// Glamour ends with a blank, still-painted line, sometimes only a
+	// code block's margin wide; drop it so the box ends with its text.
 	lines := strings.Split(rendered, "\n")
+	for len(lines) > 0 && strings.TrimSpace(ansi.Strip(lines[len(lines)-1])) == "" {
+		lines = lines[:len(lines)-1]
+	}
 	maxLines := collapsedMaxLines(len(lines))
 	if expanded {
 		maxLines = len(lines)
@@ -1438,6 +1523,32 @@ func (t *baseToolMessageItem) formatParametersForCopy() string {
 		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
 			return fmt.Sprintf("**Task:**\n%s", params.Prompt)
 		}
+	case agent.AgentDispatchToolName:
+		var params agent.AgentDispatchParams
+		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
+			return fmt.Sprintf("**Task (%s):**\n%s", params.Label, params.Prompt)
+		}
+	case agent.AgentSendToolName:
+		var params agent.AgentSendParams
+		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
+			return fmt.Sprintf("**To %s:**\n%s", params.Label, params.Message)
+		}
+	case agent.AgentStatusToolName:
+		var params agent.AgentStatusParams
+		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
+			if params.Label == "" {
+				return "**Subagents:** all"
+			}
+			return fmt.Sprintf("**Subagent:** %s", params.Label)
+		}
+	case agent.AgentStopToolName:
+		var params agent.AgentStopParams
+		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
+			if params.Reason == "" {
+				return fmt.Sprintf("**Stop:** %s", params.Label)
+			}
+			return fmt.Sprintf("**Stop:** %s\n**Reason:** %s", params.Label, params.Reason)
+		}
 	}
 
 	var params map[string]any
@@ -1486,7 +1597,7 @@ func (t *baseToolMessageItem) formatResultForCopy() string {
 		return t.formatAgenticFetchResultForCopy()
 	case tools.WebFetchToolName:
 		return t.formatWebFetchResultForCopy()
-	case agent.AgentToolName:
+	case agent.AgentToolName, agent.AgentDispatchToolName:
 		return t.formatAgentResultForCopy()
 	case tools.DownloadToolName, tools.GrepToolName, tools.GlobToolName, tools.LSToolName, tools.SourcegraphToolName, tools.DiagnosticsToolName, tools.TodosToolName:
 		return fmt.Sprintf("```\n%s\n```", t.result.Content)
@@ -1806,6 +1917,14 @@ func prettifyToolName(name string) string {
 	switch name {
 	case agent.AgentToolName:
 		return "Agent"
+	case agent.AgentDispatchToolName:
+		return "Create Subagent"
+	case agent.AgentSendToolName:
+		return "Message Subagent"
+	case agent.AgentStatusToolName:
+		return "Subagent Status"
+	case agent.AgentStopToolName:
+		return "Stop Subagent"
 	case tools.BashToolName:
 		return "Bash"
 	case tools.JobOutputToolName:

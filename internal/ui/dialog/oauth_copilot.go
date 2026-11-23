@@ -14,11 +14,12 @@ import (
 
 func NewOAuthCopilot(
 	com *common.Common,
+	isOnboarding bool,
 	provider catwalk.Provider,
 	model config.SelectedModel,
 	modelType config.SelectedModelType,
 ) (*OAuth, tea.Cmd) {
-	return newOAuth(com, provider, model, modelType, &OAuthCopilot{})
+	return newOAuth(com, isOnboarding, provider, model, modelType, &OAuthCopilot{})
 }
 
 type OAuthCopilot struct {

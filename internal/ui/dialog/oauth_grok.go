@@ -18,11 +18,12 @@ import (
 // enters on accounts.x.ai.
 func NewOAuthGrok(
 	com *common.Common,
+	isOnboarding bool,
 	provider catwalk.Provider,
 	model config.SelectedModel,
 	modelType config.SelectedModelType,
 ) (*OAuth, tea.Cmd) {
-	return newOAuth(com, provider, model, modelType, &OAuthGrok{})
+	return newOAuth(com, isOnboarding, provider, model, modelType, &OAuthGrok{})
 }
 
 type OAuthGrok struct {

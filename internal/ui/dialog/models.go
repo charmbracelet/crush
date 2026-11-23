@@ -62,8 +62,9 @@ func (mt ModelType) Placeholder() string {
 }
 
 const (
-	largeModelInputPlaceholder = "Choose a model for large, complex tasks"
-	smallModelInputPlaceholder = "Choose a model for small, simple tasks"
+	onboardingModelInputPlaceholder = "Find your fave"
+	largeModelInputPlaceholder      = "Choose a model for large, complex tasks"
+	smallModelInputPlaceholder      = "Choose a model for small, simple tasks"
 )
 
 // ModelsID is the identifier for the model selection dialog.
@@ -73,11 +74,8 @@ const defaultModelsDialogMaxWidth = 73
 
 // Models represents a model selection dialog.
 type Models struct {
-	com *common.Common
-	// filterProvider, when set, limits the catalog to one provider. The
-	// onboarding "browse all" row uses it to open the full list scoped to
-	// the provider the user already picked.
-	filterProvider string
+	com          *common.Common
+	isOnboarding bool
 
 	modelType ModelType
 	providers []catwalk.Provider
@@ -99,10 +97,11 @@ type Models struct {
 var _ Dialog = (*Models)(nil)
 
 // NewModels creates a new Models dialog.
-func NewModels(com *common.Common) (*Models, error) {
+func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
 	t := com.Styles
 	m := &Models{}
 	m.com = com
+	m.isOnboarding = isOnboarding
 
 	help := help.New()
 	help.Styles = t.DialogHelpStyles()
@@ -114,7 +113,7 @@ func NewModels(com *common.Common) (*Models, error) {
 
 	m.input = textinput.New()
 	m.input.SetVirtualCursor(false)
-	m.input.Placeholder = largeModelInputPlaceholder
+	m.input.Placeholder = onboardingModelInputPlaceholder
 	m.input.SetStyles(com.Styles.TextInput)
 	m.input.Focus()
 
@@ -159,21 +158,6 @@ func NewModels(com *common.Common) (*Models, error) {
 		return nil, fmt.Errorf("failed to set provider items: %w", err)
 	}
 
-	return m, nil
-}
-
-// NewModelsForProvider creates a models dialog limited to a single provider.
-// The onboarding "browse all" row uses it so the full catalog opens scoped to
-// the provider the user already chose.
-func NewModelsForProvider(com *common.Common, providerID string) (*Models, error) {
-	m, err := NewModels(com)
-	if err != nil {
-		return nil, err
-	}
-	m.filterProvider = providerID
-	if err := m.setProviderItems(); err != nil {
-		return nil, fmt.Errorf("failed to set provider items: %w", err)
-	}
 	return m, nil
 }
 
@@ -225,6 +209,9 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 				ReAuthenticate: isEdit,
 			}
 		case key.Matches(msg, m.keyMap.Tab):
+			if m.isOnboarding {
+				break
+			}
 			if m.modelType == ModelTypeLarge {
 				m.modelType = ModelTypeSmall
 			} else {
@@ -289,6 +276,11 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	rc.Title = "Switch Model"
 	rc.TitleInfo = m.modelTypeRadioView()
 
+	if m.isOnboarding {
+		titleText := t.Dialog.PrimaryText.Render("To start, let's choose a provider and model.")
+		rc.AddPart(titleText)
+	}
+
 	inputView := t.Dialog.InputPrompt.Render(m.input.View())
 	rc.AddPart(inputView)
 
@@ -299,12 +291,29 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	rc.Help = renderDialogHelp(t, &m.help, m, innerWidth)
 
 	cur := m.Cursor()
-	DrawCenterCursor(scr, area, rc.Render(), cur)
+
+	if m.isOnboarding {
+		rc.Title = ""
+		rc.TitleInfo = ""
+		rc.IsOnboarding = true
+		view := rc.Render()
+		cur = adjustOnboardingInputCursor(t, cur)
+		DrawOnboardingCursor(scr, area, view, cur)
+	} else {
+		view := rc.Render()
+		DrawCenterCursor(scr, area, view, cur)
+	}
 	return cur
 }
 
 // ShortHelp returns the short help view.
 func (m *Models) ShortHelp() []key.Binding {
+	if m.isOnboarding {
+		return []key.Binding{
+			m.keyMap.UpDown,
+			m.keyMap.Select,
+		}
+	}
 	h := []key.Binding{
 		m.keyMap.UpDown,
 		m.keyMap.Tab,
@@ -368,9 +377,6 @@ func (m *Models) setProviderItems() error {
 		if p.Disable {
 			continue
 		}
-		if m.filterProvider != "" && id != m.filterProvider {
-			continue
-		}
 
 		// Check if this provider is not in the known providers list
 		if !slices.ContainsFunc(knownProviders, containsProviderFunc(id)) ||
@@ -401,9 +407,6 @@ func (m *Models) setProviderItems() error {
 	// Providers already has Hyper at the front of the list.
 	for _, provider := range m.providers {
 		providerID := string(provider.ID)
-		if m.filterProvider != "" && providerID != m.filterProvider {
-			continue
-		}
 		if addedProviders[providerID] {
 			continue
 		}
@@ -438,34 +441,22 @@ func (m *Models) setProviderItems() error {
 
 		name := cmp.Or(displayProvider.Name, providerID)
 
-		// The OpenAI and xAI providers each hold exactly one credential.
-		// Signed in with ChatGPT or Grok, only the models the
-		// subscription grants are usable, so they are all the section
-		// lists; the API catalog would only 404. Without a login the
-		// section is the API catalog.
-		if providerConfig.OAuthToken != nil {
-			var subscriptionModels []catwalk.Model
-			switch provider.ID {
-			case catwalk.InferenceProviderOpenAI:
-				subscriptionModels = providerConfig.ChatGPTModels
-			case catwalk.InferenceProviderXAI:
-				subscriptionModels = providerConfig.GrokModels
-			}
-			if subscriptionModels != nil {
-				group := NewModelGroup(t, name, true)
-				for _, model := range subscriptionModels {
-					item := NewModelItem(t, provider, model, m.modelType, false)
-					group.AppendItems(item)
-					itemsMap[item.ID()] = item
-					if model.ID == currentModel.Model && string(provider.ID) == currentModel.Provider {
-						selectedItemID = item.ID()
-					}
+		// A ChatGPT or Grok login lists only its subscription's models; the
+		// API catalog would 404. Until that list is fetched, show the catalog.
+		if subscriptionModels, _ := providerConfig.SubscriptionModels(); subscriptionModels != nil {
+			group := NewModelGroup(t, name, true)
+			for _, model := range subscriptionModels {
+				item := NewModelItem(t, provider, model, m.modelType, false)
+				group.AppendItems(item)
+				itemsMap[item.ID()] = item
+				if model.ID == currentModel.Model && string(provider.ID) == currentModel.Provider {
+					selectedItemID = item.ID()
 				}
-				if len(group.Items) > 0 {
-					groups = append(groups, group)
-				}
-				continue
 			}
+			if len(group.Items) > 0 {
+				groups = append(groups, group)
+			}
+			continue
 		}
 
 		group := NewModelGroup(t, name, providerConfigured)
@@ -525,7 +516,9 @@ func (m *Models) setProviderItems() error {
 	}
 
 	// Update placeholder based on model type
-	m.input.Placeholder = m.modelType.Placeholder()
+	if !m.isOnboarding {
+		m.input.Placeholder = m.modelType.Placeholder()
+	}
 
 	return nil
 }

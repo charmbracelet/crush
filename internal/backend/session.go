@@ -54,8 +54,8 @@ func (b *Backend) GetAgentSession(ctx context.Context, workspaceID, sessionID st
 	}
 
 	var isSessionBusy bool
-	if ws.AgentCoordinator != nil {
-		isSessionBusy = ws.AgentCoordinator.IsSessionBusy(sessionID)
+	if coord := ws.Coordinator(); coord != nil {
+		isSessionBusy = coord.IsSessionBusy(sessionID)
 	}
 
 	return proto.AgentSession{
@@ -76,8 +76,8 @@ func (b *Backend) ListSessionMessages(ctx context.Context, workspaceID, sessionI
 
 	// Every remote client reads through here, so this is where interrupted
 	// calls get settled for them.
-	if ws.AgentCoordinator != nil {
-		return ws.AgentCoordinator.ListSettledMessages(ctx, sessionID)
+	if coord := ws.Coordinator(); coord != nil {
+		return coord.ListSettledMessages(ctx, sessionID)
 	}
 	// Drain debounced updates so clients observe the latest in-memory state.
 	if err := ws.Messages.FlushAll(ctx); err != nil {
@@ -155,6 +155,50 @@ func (b *Backend) SetMCPServerConfigDisabled(ctx context.Context, workspaceID, n
 		return err
 	}
 	return mcptools.SetConfigDisabled(ctx, ws.Cfg, config.ScopeGlobal, name, disabled, override)
+}
+
+// SkillsDisabled returns the skills disabled for the given workspace's
+// repository.
+func (b *Backend) SkillsDisabled(ctx context.Context, workspaceID string) ([]string, error) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+
+	return ws.Sessions.SkillsDisabled(ctx)
+}
+
+// SetSkillDisabled toggles a repository-scoped skill override for the
+// given workspace.
+func (b *Backend) SetSkillDisabled(ctx context.Context, workspaceID, name string, disabled bool) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+
+	return ws.Sessions.SetSkillDisabled(ctx, name, disabled, ws.Cfg.SkillConfigDisabled(name))
+}
+
+// SkillsEnabled returns the skills with a repository-scoped enabled
+// override for the given workspace's repository.
+func (b *Backend) SkillsEnabled(ctx context.Context, workspaceID string) ([]string, error) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+
+	return ws.Sessions.SkillsEnabled(ctx)
+}
+
+// SetSkillConfigDisabled toggles a skill's disabled flag in the global
+// config's options.disabled_skills list.
+func (b *Backend) SetSkillConfigDisabled(ctx context.Context, workspaceID, name string, disabled bool) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+
+	return ws.Cfg.SetSkillDisabledConfig(config.ScopeGlobal, name, disabled)
 }
 
 // StartMCPServer starts the named MCP server for the given workspace even

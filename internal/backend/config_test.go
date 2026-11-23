@@ -82,7 +82,7 @@ func TestRemoveConfigField_PublishesConfigChanged(t *testing.T) {
 func TestUpdatePreferredModel_PublishesConfigChanged(t *testing.T) {
 	if raceEnabled {
 		// UpdatePreferredModel writes config.Models concurrently
-		// with the agent coordinator's async sub-agent builder
+		// with the agent coordinator's async subagent builder
 		// that reads it via buildAgentModels. That race is
 		// pre-existing in the codebase and unrelated to this
 		// item; ConfigStore mutations are not currently

@@ -59,6 +59,10 @@ type flagSpec struct {
 	op      flagOp
 	child   string // child map name for opSetChild / opMergeChild
 
+	// template marks fields the config loader shell-expands at use time,
+	// as in crush.json. Their values are escaped to expand to themselves.
+	template bool
+
 	// validate, if non-nil, checks the parsed value before it is stored.
 	// It receives the value as string, bool, int64, float64, or
 	// map[string]any depending on kind.
@@ -85,10 +89,28 @@ func applyFlags(specs []flagSpec, args []string, start int, target map[string]an
 				return usage(stderr, fmt.Sprintf("%s: %s", cmd, err))
 			}
 		}
+		if spec.template {
+			val = escapeTemplateValue(val)
+		}
 		storeFlag(target, spec, val)
 		i = next
 	}
 	return nil
+}
+
+// templateEscaper escapes the characters special in a here-document word,
+// the form the config loader uses to expand template fields.
+var templateEscaper = strings.NewReplacer(`\`, `\\`, `$`, `\$`, "`", "\\`")
+
+// escapeTemplateValue escapes a parsed string or KEY VALUE flag value.
+func escapeTemplateValue(val any) any {
+	switch v := val.(type) {
+	case string:
+		return templateEscaper.Replace(v)
+	case [2]string:
+		return [2]string{v[0], templateEscaper.Replace(v[1])}
+	}
+	return val
 }
 
 func findFlag(specs []flagSpec, name string) (flagSpec, bool) {

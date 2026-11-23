@@ -40,9 +40,9 @@ func handleLSP(ctx context.Context, args []string, stdin io.Reader, stdout, stde
 
 // lspAddFlags is the declarative flag surface for `lsp add`.
 var lspAddFlags = []flagSpec{
-	{name: "--command", jsonKey: "command", kind: flagString, op: opSet},
-	{name: "--args", jsonKey: "args", kind: flagString, op: opAppend},
-	{name: "--env", child: "env", kind: flagKeyValue, op: opSetChild},
+	{name: "--command", jsonKey: "command", kind: flagString, op: opSet, template: true},
+	{name: "--args", jsonKey: "args", kind: flagString, op: opAppend, template: true},
+	{name: "--env", child: "env", kind: flagKeyValue, op: opSetChild, template: true},
 	{name: "--filetypes", jsonKey: "filetypes", kind: flagString, op: opAppend},
 	{name: "--root-markers", jsonKey: "root_markers", kind: flagString, op: opAppend},
 	{name: "--timeout", jsonKey: "timeout", kind: flagInt, op: opSet},

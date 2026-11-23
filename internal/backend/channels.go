@@ -70,15 +70,17 @@ func (b *Backend) routeChannelMessage(ev mcptools.Event) {
 // injectChannelMessage runs one rendered <channel> element as an agent
 // turn in ws. The coder agent is initialized on demand so a headless
 // server (where no client has called InitCoderAgent yet) can still
-// process pushes. Failures are logged and the push is dropped for this
-// workspace; there is no caller to return an error to.
+// process pushes; the non-interactive variant is used because there is
+// nobody attached to answer the question tool. The channel binding is
+// carried through dispatchRun's internal argument, not the wire
+// message, so no client can claim it for its own turns. Failures are
+// logged and the push is dropped for this workspace; there is no
+// caller to return an error to.
 func (b *Backend) injectChannelMessage(ws *Workspace, serverName, content string) {
-	if ws.AgentCoordinator == nil {
-		if err := ws.InitCoderAgent(ws.ctx); err != nil {
-			slog.Warn("Channel message dropped: coder agent init failed",
-				"workspace", ws.ID, "server", serverName, "error", err)
-			return
-		}
+	if _, err := ws.initAgent(ws.ctx, false); err != nil {
+		slog.Warn("Channel message dropped: coder agent init failed",
+			"workspace", ws.ID, "server", serverName, "error", err)
+		return
 	}
 	sessionID, err := channelTargetSession(ws.ctx, serverName, ws.viewedSessions(), ws.Sessions)
 	if err != nil {
@@ -86,11 +88,10 @@ func (b *Backend) injectChannelMessage(ws *Workspace, serverName, content string
 			"workspace", ws.ID, "server", serverName, "error", err)
 		return
 	}
-	if err := b.SendMessage(ws.ID, proto.AgentMessage{
+	if err := b.dispatchRun(ws, proto.AgentMessage{
 		SessionID: sessionID,
-		Channel:   serverName,
 		Prompt:    content,
-	}); err != nil {
+	}, serverName); err != nil {
 		slog.Warn("Channel message dropped: dispatch failed",
 			"workspace", ws.ID, "server", serverName, "session", sessionID, "error", err)
 	}
@@ -113,7 +114,7 @@ func (b *Backend) injectChannelMessage(ws *Workspace, serverName, content string
 //     session only when the workspace has none.
 //
 // The fallback relies on session.Service.List returning only top-level
-// sessions (no sub-agent sessions) ordered by updated_at DESC, so the
+// sessions (no subagent sessions) ordered by updated_at DESC, so the
 // first hit in the list is the most recently updated top-level session.
 // The underlying query (ListSessions) enforces both: WHERE
 // parent_session_id IS NULL ORDER BY updated_at DESC.

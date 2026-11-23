@@ -90,6 +90,10 @@ type SelectedModel struct {
 	ProviderOptions map[string]any `json:"provider_options,omitempty" jsonschema:"description=Additional provider-specific options for the model"`
 }
 
+// ExternalAuthAnt marks an Anthropic provider that signs in with the login of
+// the `ant` command line tool instead of an API key.
+const ExternalAuthAnt = "ant"
+
 type ProviderConfig struct {
 	// The provider's id.
 	ID string `json:"id,omitempty" jsonschema:"description=Unique identifier for the provider,example=openai"`
@@ -103,6 +107,10 @@ type ProviderConfig struct {
 	APIKey string `json:"api_key,omitempty" jsonschema:"description=API key for authentication with the provider,example=$OPENAI_API_KEY"`
 	// The original API key template before resolution (for re-resolution on auth errors).
 	APIKeyTemplate string `json:"-"`
+	// ExternalAuth names a login managed outside Crush that stands in for an
+	// API key, such as [ExternalAuthAnt]. It is detected while loading and
+	// never written to the config file.
+	ExternalAuth string `json:"-"`
 	// OAuthToken for providers that use OAuth2 authentication.
 	OAuthToken *oauth.Token `json:"oauth,omitempty" jsonschema:"description=OAuth2 token for authentication with the provider"`
 	// Marks the provider as disabled.
@@ -322,22 +330,13 @@ type LSPConfig struct {
 type TUIOptions struct {
 	CompactMode bool        `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
 	DiffMode    string      `json:"diff_mode,omitempty" jsonschema:"description=Diff mode for the TUI interface,enum=unified,enum=split"`
-	ActiveTheme string      `json:"active_theme,omitempty" jsonschema:"description=Name of the currently active theme,default=charmtone-panther,example=charmtone-panther,example=gruvbox-dark,example=keanu"`
+	ActiveTheme string      `json:"active_theme,omitempty" jsonschema:"description=Name of the currently active theme,default=charmtone-panther,example=charmtone-panther,example=gruvbox-dark,example=rose-pine,example=keanu,example=kitt"`
 	Completions Completions `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
 	Transparent *bool       `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
 	Scrollbar   string      `json:"scrollbar,omitempty" jsonschema:"description=Chat scrollbar visibility,enum=default,enum=always,enum=never,default=default"`
 	Mouse       *bool       `json:"mouse,omitempty" jsonschema:"description=Enable terminal mouse capture for selection\\, clicks\\, and scrolling in the TUI. Disable to let the terminal emulator or tmux handle text selection and copy/paste,default=true"`
+	NerdFonts   *bool       `json:"nerd_fonts,omitempty" jsonschema:"description=Override Nerd Font glyph detection for the TUI: true forces glyphs on\\, false forces them off\\, and unset keeps automatic detection"`
 	ExitBanner  ExitBanner  `json:"exit_banner,omitempty" jsonschema:"description=Exit banner style after quitting Crush,enum=default,enum=compact,enum=none,default=default"`
-	// Tips controls the first-run usage hints on the landing view. They
-	// disappear after the first prompt, and stay gone once dismissed.
-	Tips *bool `json:"tips,omitempty" jsonschema:"description=Show first-run usage tips on the landing view,default=true"`
-}
-
-// ShowTips reports whether first-run usage tips should be shown. The nil
-// receiver and the unset pointer both mean yes, so callers can ask without
-// unwrapping either.
-func (t *TUIOptions) ShowTips() bool {
-	return t == nil || t.Tips == nil || *t.Tips
 }
 
 // IsTransparent reports whether the TUI draws a transparent background. The
@@ -492,8 +491,9 @@ type Options struct {
 	// Crush dialog (loopback pinentry) instead of handing the terminal
 	// over to an external pinentry program. No GPG or git configuration
 	// is modified: the redirect only applies to processes Crush spawns.
-	PinentryIntegrated   *bool `json:"pinentry_integrated,omitempty" jsonschema:"description=Render GPG passphrase prompts as a native Crush dialog instead of an external pinentry program. Works with file-based keys and security keys and never modifies GPG or git configuration.,default=true"`
-	PinentryCacheTimeout *int  `json:"pinentry_cache_timeout,omitempty" jsonschema:"description=Seconds Crush keeps an entered GPG passphrase in memory so repeated signing operations do not re-prompt. 0 (the default) disables it; gpg-agent's own cache applies regardless.,default=0,example=300"`
+	PinentryIntegrated   *bool       `json:"pinentry_integrated,omitempty" jsonschema:"description=Render GPG passphrase prompts as a native Crush dialog instead of an external pinentry program. Works with file-based keys and security keys and never modifies GPG or git configuration.,default=true"`
+	PinentryCacheTimeout *int        `json:"pinentry_cache_timeout,omitempty" jsonschema:"description=Seconds Crush keeps an entered GPG passphrase in memory so repeated signing operations do not re-prompt. 0 (the default) disables it; gpg-agent's own cache applies regardless.,default=0,example=300"`
+	Prompts              PromptPaths `json:"prompts,omitempty" jsonschema:"description=Files that replace Crush's built-in prompts\\, keyed by prompt name. A replacement is used verbatim\\, so anything the built-in template injected (skills\\, context files\\, LSP status) is lost unless the replacement asks for it too."`
 }
 
 // DefaultMaxBackgroundJobs is how many background shell jobs may run at once
@@ -507,6 +507,13 @@ func (o *Options) GetMaxBackgroundJobs() int {
 	}
 	return *o.MaxBackgroundJobs
 }
+
+// PromptPaths maps a built-in prompt name to a file that replaces it.
+type PromptPaths map[string]string
+
+// PromptNames are the built-in prompts that options.prompts can replace. The
+// agent package owns the templates themselves and asserts it covers this list.
+var PromptNames = []string{"coder", "task", "plan", "summary", "title", "initialize"}
 
 // DefaultRequestTimeout bounds each LLM API request when the user has not
 // configured a timeout. Slow or unreachable providers fail after it instead
@@ -1006,6 +1013,30 @@ func (c *Config) IsModelAvailable(provider, model string) bool {
 	return false
 }
 
+// UsableModels returns the models the current credential can serve: a
+// ChatGPT or Grok login only reaches its subscription's models.
+func (p ProviderConfig) UsableModels() []catwalk.Model {
+	if models, ok := p.SubscriptionModels(); ok {
+		return models
+	}
+	return p.Models
+}
+
+// SubscriptionModels returns the models a ChatGPT or Grok login grants, and
+// whether the provider is signed in with one at all.
+func (p ProviderConfig) SubscriptionModels() ([]catwalk.Model, bool) {
+	if p.OAuthToken == nil {
+		return nil, false
+	}
+	switch catwalk.InferenceProvider(p.ID) {
+	case catwalk.InferenceProviderOpenAI:
+		return p.ChatGPTModels, true
+	case catwalk.InferenceProviderXAI:
+		return p.GrokModels, true
+	}
+	return nil, false
+}
+
 func (c *Config) GetProviderForModel(modelType SelectedModelType) *ProviderConfig {
 	model, ok := c.Models[modelType]
 	if !ok {
@@ -1046,6 +1077,10 @@ const maxRecentModelsPerType = 5
 func allToolNames() []string {
 	return []string{
 		"agent",
+		"agent_dispatch",
+		"agent_send",
+		"agent_status",
+		"agent_stop",
 		"bash",
 		"crush_info",
 		"crush_logs",
@@ -1093,9 +1128,15 @@ func resolveReadOnlyTools(tools []string) []string {
 
 func resolvePlanTools(tools []string) []string {
 	// The read-only LSP lookups mirror the task agent's tool set: planning
-	// needs symbol navigation just as much as research does.
+	// needs symbol navigation just as much as research does. Both
+	// delegation styles are listed; the coordinator keeps whichever one
+	// suits the run mode.
 	planTools := []string{
 		"agent",
+		"agent_dispatch",
+		"agent_send",
+		"agent_status",
+		"agent_stop",
 		"glob",
 		"grep",
 		"ls",
@@ -1107,6 +1148,13 @@ func resolvePlanTools(tools []string) []string {
 		"view",
 	}
 	return filterSlice(tools, planTools, true)
+}
+
+// resolveTaskTools returns the tools available to the task subagent: the
+// read-only set plus bash, so it can run git diff, tests, and rg while
+// reviewing. It still cannot edit or write files.
+func resolveTaskTools(tools []string) []string {
+	return filterSlice(tools, append(resolveReadOnlyTools(tools), "bash"), true)
 }
 
 func filterSlice(data []string, mask []string, include bool) []string {
@@ -1140,7 +1188,7 @@ func (c *Config) SetupAgents() {
 			Description:  "An agent that helps with searching for context and finding implementation details.",
 			Model:        SelectedModelTypeLarge,
 			ContextPaths: c.Options.ContextPaths,
-			AllowedTools: resolveReadOnlyTools(allowedTools),
+			AllowedTools: resolveTaskTools(allowedTools),
 			// NO MCPs or LSPs by default
 			AllowedMCP: map[string][]string{},
 		},

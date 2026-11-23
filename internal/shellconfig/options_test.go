@@ -180,6 +180,24 @@ func TestOption_UIExitBanner(t *testing.T) {
 	require.Contains(t, err.Error(), "expects default, compact, or none")
 }
 
+func TestOption_UINerdFonts(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "crushrc")
+	jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(`option ui nerd-fonts true`))
+	require.NoError(t, err)
+
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &result))
+
+	ui := result["options"].(map[string]any)["tui"].(map[string]any)
+	require.Equal(t, true, ui["nerd_fonts"])
+
+	_, err = LoadShellConfig(t.Context(), path, []byte(`option ui nerd-fonts auto`))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "nerd-fonts expects true/false")
+}
+
 func TestOption_BoolShorthand(t *testing.T) {
 	t.Parallel()
 
@@ -273,4 +291,54 @@ func TestOption_RequestTimeoutInvalid(t *testing.T) {
 	_, err := LoadShellConfig(t.Context(), path, []byte(script))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "expects a number of seconds")
+}
+
+func TestOption_Prompt(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := `option prompt coder /etc/crush/coder.md.tpl
+option prompt summary /etc/crush/summary.md`
+	path := filepath.Join(dir, "crushrc")
+
+	jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(script))
+	require.NoError(t, err)
+
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &result))
+
+	prompts := result["options"].(map[string]any)["prompts"].(map[string]any)
+	require.Equal(t, "/etc/crush/coder.md.tpl", prompts["coder"])
+	require.Equal(t, "/etc/crush/summary.md", prompts["summary"])
+}
+
+// The config is a shell script, so bash expands ~ before the builtin runs.
+func TestOption_PromptExpandsTilde(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := `HOME=/home/someone
+option prompt coder ~/coder.md.tpl`
+	path := filepath.Join(dir, "crushrc")
+
+	jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(script))
+	require.NoError(t, err)
+
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &result))
+
+	prompts := result["options"].(map[string]any)["prompts"].(map[string]any)
+	require.Equal(t, "/home/someone/coder.md.tpl", prompts["coder"])
+}
+
+func TestOption_PromptMissingPath(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := `option prompt coder`
+	path := filepath.Join(dir, "crushrc")
+
+	_, err := LoadShellConfig(t.Context(), path, []byte(script))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "usage: option prompt")
 }

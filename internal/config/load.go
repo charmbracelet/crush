@@ -21,6 +21,7 @@ import (
 
 	"charm.land/catwalk/v3/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
+	"github.com/charmbracelet/crush/internal/antauth"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/discover"
 	"github.com/charmbracelet/crush/internal/env"
@@ -237,6 +238,11 @@ func migrateCatwalkV2Model(model map[string]any) bool {
 // Load loads the configuration from the default paths and returns a
 // ConfigStore that owns both the pure-data Config and all runtime state.
 func Load(ctx context.Context, workingDir, dataDir string, debug bool) (*ConfigStore, error) {
+	// The CRUSH_DATA_DIR env var overrides the per-project data directory
+	// when no --data-dir flag is given. Relative paths resolve against the
+	// working directory, like the data_directory config option.
+	dataDir = cmp.Or(dataDir, os.Getenv("CRUSH_DATA_DIR"))
+
 	// Migrate deprecated disable_notifications before loading config.
 	migrateDisableNotifications()
 
@@ -284,7 +290,11 @@ func Load(ctx context.Context, workingDir, dataDir string, debug bool) (*ConfigS
 		return nil, fmt.Errorf("invalid hook configuration: %w", err)
 	}
 
-	if !isInsideWorktree() {
+	if err := cfg.ValidatePrompts(); err != nil {
+		return nil, fmt.Errorf("invalid prompt configuration: %w", err)
+	}
+
+	if !isInsideWorktree(workingDir) {
 		const depth = 2
 		const items = 100
 		slog.Warn("No git repository detected in working directory, will limit file walk operations", "depth", depth, "items", items)
@@ -337,7 +347,7 @@ func Load(ctx context.Context, workingDir, dataDir string, debug bool) (*ConfigS
 
 	env := env.New()
 	// Configure providers
-	valueResolver := NewShellVariableResolver(env)
+	valueResolver := NewShellVariableResolver(env, WithWorkingDir(workingDir))
 	store.resolver = valueResolver
 
 	// Hold writeMu during initial load to prevent configureProviders
@@ -430,6 +440,10 @@ func PushPopCrushEnv() func() {
 	}
 	return restore
 }
+
+// detectAntLogin reports whether the `ant` command line tool is signed in. It
+// is a variable so tests do not depend on the machine they run on.
+var detectAntLogin = antauth.Detect
 
 func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env env.Env, resolver VariableResolver, knownProviders []catwalk.Provider) error {
 	knownProviderNames := make(map[string]bool)
@@ -595,6 +609,15 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 			}
 			// if the provider api or endpoint are missing we skip them
 			v, err := resolver.ResolveValue(p.APIKey)
+			if (v == "" || err != nil) &&
+				p.ID == catwalk.InferenceProviderAnthropic &&
+				detectAntLogin(env.Get) {
+				// No API key, but the user is signed in with `ant`. An
+				// API key still wins when there is one, as it does in
+				// `ant` itself.
+				prepared.ExternalAuth = ExternalAuthAnt
+				break
+			}
 			if v == "" || err != nil {
 				if configExists {
 					slog.Warn("Skipping provider due to missing API key", "provider", p.ID)
@@ -1122,6 +1145,7 @@ func loadFromConfigPaths(ctx context.Context, configPaths []string) (*Config, []
 				if !json.Valid(jsonBytes) {
 					return nil, nil, fmt.Errorf("shell config %s produced invalid JSON", path)
 				}
+				jsonBytes = anchorPromptPaths(jsonBytes, dir)
 				addTopLevelKeys(shDirKeys, dir, jsonBytes)
 				configs = append(configs, jsonBytes)
 				loaded = append(loaded, path)
@@ -1131,6 +1155,7 @@ func loadFromConfigPaths(ctx context.Context, configPaths []string) (*Config, []
 				return nil, nil, fmt.Errorf("invalid JSON in config file %s", path)
 			}
 			data = migrateCatwalkV2File(path, data)
+			data = anchorPromptPaths(data, dir)
 			addTopLevelKeys(jsonDirKeys, dir, data)
 			configs = append(configs, data)
 			loaded = append(loaded, path)
@@ -1163,6 +1188,29 @@ func loadFromConfigPaths(ctx context.Context, configPaths []string) (*Config, []
 		return nil, nil, err
 	}
 	return cfg, loaded, nil
+}
+
+// anchorPromptPaths makes the relative options.prompts paths in one config
+// file absolute against that file's directory, before the files merge and
+// lose track of where each path came from. Otherwise a relative path in the
+// global config would point at a different file in every project. Paths
+// starting with ~ or $ are left for expansion when the prompt is read.
+func anchorPromptPaths(data []byte, dir string) []byte {
+	gjson.GetBytes(data, "options.prompts").ForEach(func(name, path gjson.Result) bool {
+		p := path.String()
+		if p == "" || strings.HasPrefix(p, "~") || strings.HasPrefix(p, "$") || filepathext.SmartIsAbs(p) {
+			return true
+		}
+		abs, err := filepath.Abs(filepath.Join(dir, p))
+		if err != nil {
+			return true
+		}
+		if out, err := sjson.SetBytes(data, "options.prompts."+gjson.Escape(name.String()), abs); err == nil {
+			data = out
+		}
+		return true
+	})
+	return data
 }
 
 // addTopLevelKeys records the top-level JSON keys present in data into the
@@ -1407,12 +1455,17 @@ func assignIfNil[T any](ptr **T, val T) {
 	}
 }
 
-func isInsideWorktree() bool {
-	bts, err := exec.CommandContext(
+// isInsideWorktree reports whether dir is inside a git working tree. It
+// checks dir rather than the process working directory, which a server
+// shares across every workspace it hosts.
+func isInsideWorktree(dir string) bool {
+	cmd := exec.CommandContext(
 		context.Background(),
 		"git", "rev-parse",
 		"--is-inside-work-tree",
-	).CombinedOutput()
+	)
+	cmd.Dir = dir
+	bts, err := cmd.CombinedOutput()
 	return err == nil && strings.TrimSpace(string(bts)) == "true"
 }
 
@@ -1540,3 +1593,23 @@ func ProjectSkillsDir(workingDir string) []string {
 }
 
 func isAppleTerminal() bool { return os.Getenv("TERM_PROGRAM") == "Apple_Terminal" }
+
+// ValidatePrompts rejects prompt names that do not name a built-in prompt, so
+// a typo fails at startup instead of silently leaving the built-in in place.
+func (c *Config) ValidatePrompts() error {
+	if c.Options == nil {
+		return nil
+	}
+	return ValidatePromptNames(c.Options.Prompts)
+}
+
+// ValidatePromptNames rejects any key in prompts that is not a built-in
+// prompt name. Config files and the --prompt flag both go through it.
+func ValidatePromptNames(prompts PromptPaths) error {
+	for _, name := range slices.Sorted(maps.Keys(prompts)) {
+		if !slices.Contains(PromptNames, name) {
+			return fmt.Errorf("unknown prompt %q, expected one of %s", name, strings.Join(PromptNames, ", "))
+		}
+	}
+	return nil
+}

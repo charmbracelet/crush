@@ -173,3 +173,80 @@ func TestResetStreamedContentEmpty(t *testing.T) {
 	msg.ResetStreamedContent()
 	require.Empty(t, msg.Parts)
 }
+
+func TestParseSubAgentReportPromptRoundTrips(t *testing.T) {
+	t.Parallel()
+
+	want := SubAgentReport{Label: `odd "label"`, Output: "line one\n</subagent-report>\nline three"}
+	got, ok := ParseSubAgentReportPrompt(want.PromptText())
+	require.True(t, ok)
+	require.Equal(t, want, got)
+
+	_, ok = ParseSubAgentReportPrompt("just a prompt")
+	require.False(t, ok)
+}
+
+func TestToAIMessage_SignedReasoningReplayed(t *testing.T) {
+	t.Parallel()
+
+	msg := &Message{
+		Role: Assistant,
+		Parts: []ContentPart{
+			ReasoningContent{Signature: "sig"},
+			TextContent{Text: "hello"},
+		},
+	}
+
+	messages := msg.ToAIMessage()
+	require.Len(t, messages, 1)
+	require.Len(t, messages[0].Content, 2)
+
+	reasoning, ok := messages[0].Content[0].(fantasy.ReasoningPart)
+	require.True(t, ok)
+	require.Empty(t, reasoning.Text)
+	require.NotNil(t, reasoning.ProviderOptions)
+
+	// Anthropic rejects blank text blocks; signed reasoning must survive.
+	msg.Parts[1] = TextContent{Text: " \t\n\u2003"}
+	replayed := msg.ToAIMessage()
+	require.Len(t, replayed, 1)
+	require.Equal(t, messages[0].Content[:1], replayed[0].Content)
+}
+
+func TestToAIMessage_UserContextReplayed(t *testing.T) {
+	t.Parallel()
+
+	msg := &Message{
+		Role: User,
+		Parts: []ContentPart{
+			TextContent{Text: "  continue  ", Context: "<host_context>x</host_context>\n\n"},
+		},
+	}
+
+	messages := msg.ToAIMessage()
+	require.Len(t, messages, 1)
+	part, ok := messages[0].Content[0].(fantasy.TextPart)
+	require.True(t, ok)
+	require.Equal(t, "<host_context>x</host_context>\n\n  continue  ", part.Text)
+
+	// Omit blank replay text only after composing the stored context.
+	content := TextContent{Text: " \t\n\u2003", Context: "<host_context>x</host_context>\n\n"}
+	msg.Parts[0] = content
+	messages = msg.ToAIMessage()
+	require.Len(t, messages, 1)
+	require.Equal(t, []fantasy.MessagePart{fantasy.TextPart{Text: content.Context + content.Text}}, messages[0].Content)
+	require.Equal(t, content, msg.Content())
+
+	msg.Parts[0] = TextContent{Text: content.Text}
+	messages = msg.ToAIMessage()
+	require.Len(t, messages, 1)
+	require.Empty(t, messages[0].Content)
+}
+
+func TestAppendContentKeepsContext(t *testing.T) {
+	t.Parallel()
+
+	msg := &Message{Parts: []ContentPart{TextContent{Text: "a", Hidden: true, Context: "ctx"}}}
+	msg.AppendContent("b")
+	require.Equal(t, TextContent{Text: "ab", Hidden: true, Context: "ctx"}, msg.Content())
+}

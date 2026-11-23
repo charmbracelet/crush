@@ -40,10 +40,11 @@ const (
 // AuthMethod asks how to authenticate a provider that supports both
 // OAuth and an API key, before starting either flow.
 type AuthMethod struct {
-	com       *common.Common
-	provider  catwalk.Provider
-	model     config.SelectedModel
-	modelType config.SelectedModelType
+	com          *common.Common
+	isOnboarding bool
+	provider     catwalk.Provider
+	model        config.SelectedModel
+	modelType    config.SelectedModelType
 
 	selected       int
 	oauthCardArea  image.Rectangle
@@ -64,12 +65,14 @@ var _ Dialog = (*AuthMethod)(nil)
 // authentication for the given provider.
 func NewAuthMethod(
 	com *common.Common,
+	isOnboarding bool,
 	provider catwalk.Provider,
 	model config.SelectedModel,
 	modelType config.SelectedModelType,
 ) *AuthMethod {
 	m := &AuthMethod{
 		com:           com,
+		isOnboarding:  isOnboarding,
 		provider:      provider,
 		model:         model,
 		modelType:     modelType,
@@ -173,8 +176,10 @@ func (m *AuthMethod) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	rc.Title = "Let’s Auth " + cmp.Or(m.provider.Name, string(m.provider.ID))
 
 	prompt := t.Dialog.AuthMethod.Prompt.Width(innerWidth).Render("How would you like to authenticate?")
-	// Keep a single blank line under the title.
-	prompt = "\n" + prompt
+	if !m.isOnboarding {
+		// Keep a single blank line under the title.
+		prompt = "\n" + prompt
+	}
 	prompt += "\n"
 	rc.AddPart(prompt)
 
@@ -204,8 +209,17 @@ func (m *AuthMethod) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	rc.Help = "\n" + renderDialogHelp(t, &m.help, m, innerWidth)
 
 	view := rc.Render()
+	if m.isOnboarding {
+		rc.Title = ""
+		rc.IsOnboarding = true
+		view = rc.Render()
+	}
 	m.updateCardAreas(area, view, sideBySide, cardWidth, innerWidth)
-	DrawCenter(scr, area, view)
+	if m.isOnboarding {
+		DrawOnboardingCursor(scr, area, view, nil)
+	} else {
+		DrawCenter(scr, area, view)
+	}
 	return nil
 }
 
@@ -218,14 +232,23 @@ func (m *AuthMethod) updateCardAreas(area uv.Rectangle, view string, sideBySide 
 	viewWidth, viewHeight := lipgloss.Size(view)
 	viewWidth = min(viewWidth, area.Dx())
 	viewHeight = min(viewHeight, area.Dy())
-	frame := m.com.Styles.Dialog.View
-	origin := common.CenterRect(area, viewWidth, viewHeight).Min
+	var frame lipgloss.Style
+	var origin image.Point
+	if m.isOnboarding {
+		origin = common.BottomLeftRect(area, viewWidth, viewHeight).Min
+	} else {
+		frame = m.com.Styles.Dialog.View
+		origin = common.CenterRect(area, viewWidth, viewHeight).Min
+	}
 	contentLeft := origin.X + frame.GetMarginLeft() + frame.GetBorderLeftSize() + frame.GetPaddingLeft()
 	contentTop := origin.Y + frame.GetMarginTop() + frame.GetBorderTopSize() + frame.GetPaddingTop()
 
-	// Lines above the cards: the title, plus the prompt and its blank
-	// lines.
-	cardsTop := contentTop + 3
+	// Lines above the cards: the prompt, plus the title and its blank line
+	// outside onboarding.
+	cardsTop := contentTop + 1
+	if !m.isOnboarding {
+		cardsTop += 2
+	}
 
 	groupWidth := cardWidth
 	if sideBySide {

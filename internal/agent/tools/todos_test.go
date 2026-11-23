@@ -80,6 +80,18 @@ func (m *mockSessionService) MCPServersEnabled(ctx context.Context) ([]string, e
 	return nil, nil
 }
 
+func (m *mockSessionService) SkillsDisabled(context.Context) ([]string, error) {
+	return nil, nil
+}
+
+func (m *mockSessionService) SetSkillDisabled(context.Context, string, bool, bool) error {
+	return nil
+}
+
+func (m *mockSessionService) SkillsEnabled(context.Context) ([]string, error) {
+	return nil, nil
+}
+
 func (m *mockSessionService) CreateAgentToolSessionID(messageID, toolCallID string) string {
 	return ""
 }

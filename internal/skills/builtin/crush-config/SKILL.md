@@ -77,7 +77,8 @@ type like `ollama`, `lmstudio`, `llamacpp`; legacy values `openai`, `openai-comp
 `anthropic` are migrated automatically), `--api-key`, `--base-url`,
 `--disable BOOL`, `--flat-rate BOOL`, `--discover-models BOOL`,
 `--system-prompt-prefix TEXT`, `--extra-header KEY VALUE` (repeatable),
-`--extra-body JSON`, `--provider-options JSON`.
+`--extra-body JSON`, `--provider-options JSON`, `--aws-auth-refresh CMD`
+(Bedrock only: command run when AWS credentials expire).
 
 ```bash
 provider add deepseek \
@@ -121,7 +122,9 @@ Flags: `--command CMD`, `--args ARG` (repeatable), `--env KEY VALUE`
 (repeatable), `--url URL`, `--header KEY VALUE` (repeatable), `--timeout N`,
 `--disabled BOOL`, `--disabled-tools TOOL` (repeatable), `--enabled-tools TOOL`
 (repeatable), `--oauth BOOL`, `--oauth-client-id ID`, `--oauth-client-secret SECRET`,
-`--oauth-callback-port PORT`.
+`--oauth-callback-port PORT`, `--channel BOOL` (opt the server in as a
+channel, like `--channels` on the CLI), `--channel-reply JSON` (the
+`channel_reply` routing object).
 
 ```bash
 mcp add github --type http \
@@ -193,6 +196,17 @@ option reset <list-key>    # clear a list option back to empty
   scrolling), `option ui scrollbar default|always|never`,
   `option ui exit-banner default|compact|none`,
   `option ui completions-max-depth N`, `option ui completions-max-items N`.
+- **Environment**: `export FOO=bar` in a `crushrc` sets `FOO` in Crush's
+  environment on startup (the top-level `env` object in JSON). Only vars
+  the script exports or changes count.
+- **Prompt overrides**: `option prompt <name> <path>` replaces a built-in
+  prompt (`coder`, `task`, `plan`, `summary`, `title`, `initialize`) with a
+  file. Relative paths resolve against the directory of the config file
+  that sets them. The file replaces the built-in whole, so a `coder`
+  replacement must include `{{.AvailSkillXML}}` and a
+  `{{range .ContextFiles}}<file path="{{.Path}}">{{.Content}}</file>{{end}}`
+  loop (copy the blocks from the built-in `coder.md.tpl`) to keep them. For
+  one run, use `crush --prompt coder=./file.md.tpl` instead.
 - **List keys** (singular, one value per call, repeatable): `context-path`,
   `global-context-path`, `skill-path`, `disable-skill`. Use `option reset <key>`
   to wipe inherited values (e.g. after `source`).
@@ -374,6 +388,8 @@ The `$schema` property enables IDE autocomplete but is optional.
 | `option metrics false`               | `options.disable_metrics = true`                       |
 | `option request-timeout 300`          | `options.request_timeout = 300`                        |
 | `option max-background-jobs 200`     | `options.max_background_jobs = 200`                    |
+| `export AWS_PROFILE=work`            | `env.AWS_PROFILE = "work"`                             |
+| `option prompt coder ./coder.md.tpl` | `options.prompts.coder = "./coder.md.tpl"`             |
 | `option attribution-trailer-style none` | `options.attribution.trailer_style = "none"`        |
 | `option attribution-generated-with false` | `options.attribution.generated_with = false`       |
 

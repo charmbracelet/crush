@@ -21,7 +21,7 @@ var webFetchDescriptionTpl = template.Must(
 		Parse(string(webFetchDescriptionTmpl)),
 )
 
-// NewWebFetchTool creates a simple web fetch tool for sub-agents (no permissions needed).
+// NewWebFetchTool creates a simple web fetch tool for subagents (no permissions needed).
 func NewWebFetchTool(workingDir string, client *http.Client) fantasy.AgentTool {
 	if client == nil {
 		transport := http.DefaultTransport.(*http.Transport).Clone()

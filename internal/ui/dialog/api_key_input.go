@@ -11,12 +11,13 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/v3/pkg/catwalk"
+	"charm.land/tone"
+	"charm.land/x/nerdfont"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/ui/util"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/charmbracelet/x/exp/charmtone"
 )
 
 type APIKeyInputState int
@@ -33,7 +34,8 @@ const APIKeyInputID = "api_key_input"
 
 // APIKeyInput represents a model selection dialog.
 type APIKeyInput struct {
-	com *common.Common
+	com          *common.Common
+	isOnboarding bool
 
 	provider  catwalk.Provider
 	model     config.SelectedModel
@@ -56,6 +58,7 @@ var _ Dialog = (*APIKeyInput)(nil)
 // NewAPIKeyInput creates a new Models dialog.
 func NewAPIKeyInput(
 	com *common.Common,
+	isOnboarding bool,
 	provider catwalk.Provider,
 	model config.SelectedModel,
 	modelType config.SelectedModelType,
@@ -64,6 +67,7 @@ func NewAPIKeyInput(
 
 	m := APIKeyInput{}
 	m.com = com
+	m.isOnboarding = isOnboarding
 	m.provider = provider
 	m.model = model
 	m.modelType = modelType
@@ -176,7 +180,15 @@ func (m *APIKeyInput) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	}, "\n")
 
 	cur := m.Cursor()
-	DrawCenterCursor(scr, area, dialogStyle.Render(content), cur)
+
+	if m.isOnboarding {
+		view := content
+		cur = adjustOnboardingInputCursor(t, cur)
+		DrawOnboardingCursor(scr, area, view, cur)
+	} else {
+		view := dialogStyle.Render(content)
+		DrawCenterCursor(scr, area, view, cur)
+	}
 	return cur
 }
 
@@ -184,8 +196,12 @@ func (m *APIKeyInput) headerView() string {
 	var (
 		t           = m.com.Styles
 		titleStyle  = t.Dialog.Title
+		textStyle   = t.Dialog.PrimaryText
 		dialogStyle = t.Dialog.View.Width(m.width)
 	)
+	if m.isOnboarding {
+		return textStyle.Render(m.dialogTitle())
+	}
 	headerOffset := titleStyle.GetHorizontalFrameSize() + dialogStyle.GetHorizontalFrameSize()
 	return common.DialogTitle(t, titleStyle.Render(m.dialogTitle()), m.width-headerOffset, m.com.Styles.Dialog.TitleGradFromColor, m.com.Styles.Dialog.TitleGradToColor)
 }
@@ -234,9 +250,9 @@ func (m *APIKeyInput) inputView() string {
 		m.input.Blur()
 	case APIKeyInputStateError:
 		ts := t.TextInput
-		ts.Focused.Prompt = ts.Focused.Prompt.Foreground(charmtone.Cherry)
+		ts.Focused.Prompt = ts.Focused.Prompt.Foreground(tone.Cherry)
 
-		m.input.Prompt = styles.LSPErrorIcon + " "
+		m.input.Prompt = nerdfont.Glyph(styles.LSPErrorIcon, "E") + " "
 		m.input.SetStyles(ts)
 		m.input.Focus()
 	}

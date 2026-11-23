@@ -36,9 +36,13 @@ func (m *mockBashPermissionService) GrantPersistent(req permission.PermissionReq
 
 func (m *mockBashPermissionService) AutoApproveSession(sessionID string) {}
 
-func (m *mockBashPermissionService) ActiveRequest() (permission.PermissionRequest, bool) {
-	return permission.PermissionRequest{}, false
+func (m *mockBashPermissionService) InheritAutoApproval(parentSessionID, childSessionID string) {}
+
+func (m *mockBashPermissionService) ActiveRequests() []permission.PermissionRequest {
+	return nil
 }
+
+func (m *mockBashPermissionService) SetSessionScope(scope permission.SessionScope) {}
 
 func (m *mockBashPermissionService) SetSkipRequests(skip bool) {}
 
@@ -97,7 +101,7 @@ func TestBashTool_CustomAutoBackgroundThreshold(t *testing.T) {
 	require.Contains(t, resp.Content, "moved to background")
 
 	bgManager := shell.GetBackgroundShellManager()
-	require.NoError(t, bgManager.Kill(meta.ShellID))
+	require.NoError(t, bgManager.Kill(t.Context(), meta.ShellID))
 }
 
 type recordingPermissionService struct {
@@ -124,9 +128,13 @@ func (m *recordingPermissionService) GrantPersistent(req permission.PermissionRe
 
 func (m *recordingPermissionService) AutoApproveSession(sessionID string) {}
 
-func (m *recordingPermissionService) ActiveRequest() (permission.PermissionRequest, bool) {
-	return permission.PermissionRequest{}, false
+func (m *recordingPermissionService) InheritAutoApproval(parentSessionID, childSessionID string) {}
+
+func (m *recordingPermissionService) ActiveRequests() []permission.PermissionRequest {
+	return nil
 }
+
+func (m *recordingPermissionService) SetSessionScope(scope permission.SessionScope) {}
 
 func (m *recordingPermissionService) SetSkipRequests(skip bool) {}
 
@@ -149,7 +157,7 @@ func (m *recordingPermissionService) SubscribeModeChanges(ctx context.Context) <
 func newBashToolForTest(workingDir string) fantasy.AgentTool {
 	permissions := &mockBashPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}
 	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
-	return NewBashTool(permissions, workingDir, workingDir, attribution, "test-model", config.DefaultMaxBackgroundJobs, nil)
+	return NewBashTool(permissions, workingDir, workingDir, attribution, "test-model", config.DefaultMaxBackgroundJobs, nil, nil)
 }
 
 func newBashToolWithRecordingPerms(workingDir string, allow bool) (fantasy.AgentTool, *recordingPermissionService) {
@@ -158,7 +166,7 @@ func newBashToolWithRecordingPerms(workingDir string, allow bool) (fantasy.Agent
 		allow:  allow,
 	}
 	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
-	return NewBashTool(perms, workingDir, workingDir, attribution, "test-model", config.DefaultMaxBackgroundJobs, nil), perms
+	return NewBashTool(perms, workingDir, workingDir, attribution, "test-model", config.DefaultMaxBackgroundJobs, nil, nil), perms
 }
 
 func TestBashTool_ChainedCommandsRequirePermission(t *testing.T) {
@@ -423,7 +431,7 @@ func TestBashTool_ApprovedDangerousCommandRuns(t *testing.T) {
 		mode:   permission.PermissionModeNormal,
 	}
 	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
-	tool := NewBashTool(perms, workingDir, workingDir, attribution, "test-model", config.DefaultMaxBackgroundJobs, nil)
+	tool := NewBashTool(perms, workingDir, workingDir, attribution, "test-model", config.DefaultMaxBackgroundJobs, nil, nil)
 	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
 
 	// `ifconfig` is on the default dangerous list, so it is prompted for.
@@ -454,7 +462,7 @@ func TestBashTool_UnflaggedCommandKeepsBlockList(t *testing.T) {
 		mode:   permission.PermissionModeYolo,
 	}
 	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
-	tool := NewBashTool(perms, workingDir, workingDir, attribution, "test-model", config.DefaultMaxBackgroundJobs, nil)
+	tool := NewBashTool(perms, workingDir, workingDir, attribution, "test-model", config.DefaultMaxBackgroundJobs, nil, nil)
 	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
 
 	resp := runBashTool(t, tool, ctx, BashParams{
@@ -476,7 +484,7 @@ func TestBashTool_SysadminModeSkipsBlockList(t *testing.T) {
 		mode:   permission.PermissionModeSysadmin,
 	}
 	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
-	tool := NewBashTool(perms, workingDir, workingDir, attribution, "test-model", config.DefaultMaxBackgroundJobs, nil)
+	tool := NewBashTool(perms, workingDir, workingDir, attribution, "test-model", config.DefaultMaxBackgroundJobs, nil, nil)
 	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
 
 	require.NoError(t, os.WriteFile(filepath.Join(workingDir, "ifconfig"), []byte("#!/bin/sh\nexit 0\n"), 0o755))
@@ -499,7 +507,7 @@ func TestBashTool_DeniedDangerousCommandDoesNotRun(t *testing.T) {
 		mode:   permission.PermissionModeNormal,
 	}
 	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
-	tool := NewBashTool(perms, workingDir, workingDir, attribution, "test-model", config.DefaultMaxBackgroundJobs, nil)
+	tool := NewBashTool(perms, workingDir, workingDir, attribution, "test-model", config.DefaultMaxBackgroundJobs, nil, nil)
 	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
 
 	resp := runBashTool(t, tool, ctx, BashParams{
@@ -522,7 +530,7 @@ func TestBashTool_SafeReadOnlyPathStillEnforcesBlockList(t *testing.T) {
 		mode:   permission.PermissionModeNormal,
 	}
 	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
-	tool := NewBashTool(perms, workingDir, workingDir, attribution, "test-model", config.DefaultMaxBackgroundJobs, nil)
+	tool := NewBashTool(perms, workingDir, workingDir, attribution, "test-model", config.DefaultMaxBackgroundJobs, nil, nil)
 	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
 
 	resp := runBashTool(t, tool, ctx, BashParams{
@@ -534,50 +542,71 @@ func TestBashTool_SafeReadOnlyPathStillEnforcesBlockList(t *testing.T) {
 	require.False(t, resp.IsError)
 }
 
-// TestBashTool_YoloModeDoesNotPromptForDangerousCommands pins the rule that
-// yolo mode means stop asking. It drives the real permission service rather
-// than a mock, because the whole behaviour under test lives there.
-func TestBashTool_YoloModeDoesNotPromptForDangerousCommands(t *testing.T) {
+// newModeBashTool builds a bash tool on the real permission service in the given mode.
+func newModeBashTool(t *testing.T, mode permission.PermissionMode) (fantasy.AgentTool, permission.Service, context.Context, string) {
+	t.Helper()
 	workingDir := t.TempDir()
 	perms := permission.NewPermissionService(workingDir, nil, nil)
-	perms.SetPermissionMode(permission.PermissionModeYolo)
+	perms.SetPermissionMode(mode)
+	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
+	tool := NewBashTool(perms, workingDir, workingDir, attribution, "test-model", config.DefaultMaxBackgroundJobs, nil, nil)
+	ctx := context.WithValue(t.Context(), SessionIDContextKey, "test-session")
+	return tool, perms, ctx, workingDir
+}
 
-	// Any prompt would land here. Nothing should.
+func TestBashTool_YoloModeBlocksDangerousCommandsWithoutPrompting(t *testing.T) {
+	tool, perms, ctx, workingDir := newModeBashTool(t, permission.PermissionModeYolo)
 	prompts := perms.Subscribe(t.Context())
 
-	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
-	tool := NewBashTool(perms, workingDir, workingDir, attribution, "test-model", config.DefaultMaxBackgroundJobs, nil)
-	ctx := context.WithValue(t.Context(), SessionIDContextKey, "test-session")
-
-	// `ifconfig` is on the default dangerous list. In yolo it must run
-	// without asking, and without being re-blocked at exec time either.
-	// Run it off the test goroutine so a regression that reinstates the
-	// prompt fails here in a few seconds rather than hanging until the
-	// whole package times out.
-	content := make(chan string, 1)
+	// Off the test goroutine, so a reinstated prompt fails fast instead of hanging.
+	type result struct {
+		content string
+		isError bool
+	}
+	done := make(chan result, 1)
 	go func() {
 		resp := runBashTool(t, tool, ctx, BashParams{
 			Description: "dangerous command in yolo mode",
-			Command:     "ifconfig --help",
+			Command:     "touch ran && ifconfig --help",
 		})
-		content <- resp.Content
+		done <- result{resp.Content, resp.IsError}
 	}()
 
-	var got string
+	var got result
 	select {
-	case got = <-content:
+	case got = <-done:
 	case <-time.After(30 * time.Second):
 		t.Fatal("yolo mode blocked waiting for a permission prompt that should never have been raised")
 	}
 
-	require.NotContains(t, got, "is a dangerous command",
-		"a dangerous command must not be blocked in yolo mode")
+	require.True(t, got.isError)
+	require.Contains(t, got.content, "ifconfig is a dangerous command")
+	require.Contains(t, got.content, "sysadmin mode", "the refusal must name the way out")
+	require.NoFileExists(t, filepath.Join(workingDir, "ran"), "nothing on a refused line may run")
 
 	select {
 	case p := <-prompts:
 		t.Fatalf("yolo mode must not prompt, but got a request for %q", p.Payload.Description)
 	default:
 	}
+}
+
+func TestBashTool_YoloModeRunsOrdinaryCommands(t *testing.T) {
+	tool, _, ctx, workingDir := newModeBashTool(t, permission.PermissionModeYolo)
+
+	resp := runBashTool(t, tool, ctx, BashParams{Description: "ordinary command", Command: "touch ran"})
+
+	require.False(t, resp.IsError, resp.Content)
+	require.FileExists(t, filepath.Join(workingDir, "ran"))
+}
+
+func TestBashTool_SysadminModeRunsDangerousCommands(t *testing.T) {
+	tool, _, ctx, workingDir := newModeBashTool(t, permission.PermissionModeSysadmin)
+	require.NoError(t, os.WriteFile(filepath.Join(workingDir, "ifconfig"), []byte("#!/bin/sh\nexit 0\n"), 0o755))
+
+	resp := runBashTool(t, tool, ctx, BashParams{Description: "dangerous command", Command: "./ifconfig --help"})
+
+	require.NotContains(t, resp.Content, "is a dangerous command")
 }
 
 // TestBashTool_NormalModeStillPromptsForDangerousCommands is the other half of
@@ -590,7 +619,7 @@ func TestBashTool_NormalModeStillPromptsForDangerousCommands(t *testing.T) {
 		mode:   permission.PermissionModeNormal,
 	}
 	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
-	tool := NewBashTool(perms, workingDir, workingDir, attribution, "test-model", config.DefaultMaxBackgroundJobs, nil)
+	tool := NewBashTool(perms, workingDir, workingDir, attribution, "test-model", config.DefaultMaxBackgroundJobs, nil, nil)
 	ctx := context.WithValue(t.Context(), SessionIDContextKey, "test-session")
 
 	runBashTool(t, tool, ctx, BashParams{
@@ -616,7 +645,7 @@ func TestBlockedCommandErrorNamesTheCommand(t *testing.T) {
 		mode:   permission.PermissionModeYolo,
 	}
 	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
-	tool := NewBashTool(perms, workingDir, workingDir, attribution, "test-model", config.DefaultMaxBackgroundJobs, nil)
+	tool := NewBashTool(perms, workingDir, workingDir, attribution, "test-model", config.DefaultMaxBackgroundJobs, nil, nil)
 	ctx := context.WithValue(t.Context(), SessionIDContextKey, "test-session")
 
 	resp := runBashTool(t, tool, ctx, BashParams{

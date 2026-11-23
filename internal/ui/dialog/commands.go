@@ -530,6 +530,13 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		}))
 	}
 
+	// Toggle skills for this repository when any are configured.
+	if len(cfg.Options.SkillsPaths) > 0 {
+		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_skills", "Toggle Skills", "", ActionOpenDialog{
+			DialogID: SkillsTogglesID,
+		}))
+	}
+
 	if c.hasTodos || c.hasQueue {
 		var label string
 		switch {
@@ -571,6 +578,9 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		mouseLabel = "Enable Mouse"
 	}
 	commands = append(commands, NewCommandItem(c.com.Styles, "toggle_mouse", mouseLabel, "", ActionToggleMouseSupport{}))
+
+	// Add Channels command — opens the channels management dialog.
+	commands = append(commands, NewCommandItem(c.com.Styles, "channels", "Channels", "", ActionOpenDialog{DialogID: ChannelsID}))
 
 	commands = append(
 		commands,

@@ -39,13 +39,11 @@ The `UI` struct is the top-level Bubble Tea model. Key fields:
 
 - `width`, `height` — terminal dimensions
 - `layout uiLayout` — computed layout rectangles
-- `state uiState` — `uiOnboarding | uiInitialize | uiLanding | uiChat`
+- `state uiState` — `uiLanding | uiChat`
+- `firstRun firstRunState` — first-run experience: no provider yet, the
+  message held until one is set up, and whether the project needs a context
+  file (see `model/firstrun.go`)
 - `focus uiFocusState` — `uiFocusNone | uiFocusEditor | uiFocusMain`
-- `onboarding` — setup step, chosen provider, and the initialize prompt
-  selection. Setup runs provider → model → a live first-turn demo in
-  `dialog/provider_select.go`, `dialog/model_shortlist.go`, and
-  `dialog/onboarding_demo.go`; the demo also initializes the project when it
-  needs it. `model/onboarding_flow.go` owns that wiring.
 - `chat *Chat` — wraps `list.List` for the message view
 - `textarea textarea.Model` — the input editor
 - `dialog *dialog.Overlay` — stacked dialog system
@@ -239,6 +237,9 @@ through all components that need access to app state or styles.
     call `TotalHeight` per frame during a resize — the chat suppresses the
     scrollbar mid-drag and warms the cache incrementally (`list.Prewarm`)
     on settle instead.
+  - Theme changes go through `list.Restyle`: cached heights stay valid, so
+    only items that are drawn re-render. The chat always reserves the
+    scrollbar column so overflow never changes the list width.
 - Dialog messages are intercepted first in `Update` before other routing.
 - Focus state determines key event routing: `uiFocusEditor` sends keys to
   the textarea, `uiFocusMain` sends them to the chat list.

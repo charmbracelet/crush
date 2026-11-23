@@ -32,7 +32,7 @@ type ReferencesToolRenderContext struct{}
 // RenderTool implements the [ToolRenderer] interface.
 func (r *ReferencesToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
-	if opts.IsPending() {
+	if opts.IsStreamingInput() {
 		return pendingTool(sty, "Find References", opts.Anim, opts.Compact)
 	}
 

@@ -26,6 +26,9 @@ const (
 	ModelIcon       string = "◇"
 	HypercreditIcon string = "◆"
 
+	// GitBranchIcon is the Powerline branch glyph, shown only with Nerd Fonts.
+	GitBranchIcon string = "\ue0a0"
+
 	ArrowRightIcon string = "→"
 
 	// CodespanPadding is the padding rendered around inline code spans in
@@ -74,10 +77,17 @@ const (
 	ScrollbarThumb string = "┃"
 	ScrollbarTrack string = "│"
 
-	LSPErrorIcon   string = "E"
-	LSPWarningIcon string = "W"
-	LSPInfoIcon    string = "I"
-	LSPHintIcon    string = "H"
+	ChannelIcon string = "↳"
+
+	// LSP severity icons are Nerd Font glyphs, shown only when the terminal
+	// is expected to render them. Each glyph carries a trailing space as a
+	// separator from the count that follows it. Terminals without Nerd
+	// Font support fall back to the letters E, W, I, and H through
+	// nerdfont.Glyph at the call sites, which supply their own spacing.
+	LSPErrorIcon   string = "\U000F0159 " // nf-md-close_circle
+	LSPWarningIcon string = "\U000F0028 " // nf-md-alert
+	LSPInfoIcon    string = "\U000F02FC " // nf-md-information
+	LSPHintIcon    string = "\U000F0335 " // nf-md-bug_outline
 )
 
 const (
@@ -226,6 +236,12 @@ type Styles struct {
 	// Background
 	Background color.Color
 
+	// Exit banner
+	ExitBanner struct {
+		Text  lipgloss.Style // Parting message, session title, and resume command
+		Label lipgloss.Style // Session and Continue labels
+	}
+
 	// Logo
 	Logo struct {
 		FieldColor         color.Color
@@ -298,6 +314,7 @@ type Styles struct {
 		Name            lipgloss.Style // Resource name (e.g. "gopls")
 		StatusText      lipgloss.Style // Row status description (e.g. "starting...")
 		OfflineIcon     lipgloss.Style // Offline/unstarted/stopped status icon
+		WorkingIcon     lipgloss.Style // In-progress icon style with no preset glyph
 		DisabledIcon    lipgloss.Style // Disabled status icon
 		BusyIcon        lipgloss.Style // Busy/starting status icon
 		ErrorIcon       lipgloss.Style // Error status icon
@@ -347,7 +364,8 @@ type Styles struct {
 		ShellOutput        lipgloss.Style // Plain output text.
 		ShellExitCode      lipgloss.Style // Non-zero exit code indicator.
 		ShellTruncation    lipgloss.Style // "N more lines" hint.
-		SectionHeader      lipgloss.Style
+
+		SectionHeader lipgloss.Style
 
 		// Plan section styles
 		PlanBox lipgloss.Style // Border+padding for the final plan message
@@ -363,6 +381,12 @@ type Styles struct {
 		AssistantInfoDuration  lipgloss.Style
 		SubduedHypercreditIcon lipgloss.Style // Subdued ◆ for hypercredit figures within subdued text
 		AssistantCanceled      lipgloss.Style // Italic "Canceled" footer
+
+		// Channel message metadata line styles.
+		ChannelInfoIcon      lipgloss.Style // Chat-bubble glyph prefix
+		ChannelInfoSender    lipgloss.Style // Sender name in channel metadata line
+		ChannelInfoProvider  lipgloss.Style // "via <channel>" text
+		ChannelInfoTimestamp lipgloss.Style // "at <timestamp>" text
 	}
 
 	// Tool - styles for tool call rendering
@@ -426,6 +450,9 @@ type Styles struct {
 		// Agent task styles
 		AgentTaskTag lipgloss.Style // Agent task tag (blue background, bold)
 		AgentPrompt  lipgloss.Style // Agent prompt text
+		AgentName    lipgloss.Style // Subagent first name
+		AgentLabel   lipgloss.Style // Label a subagent was dispatched with, after its first name
+		AgentMessage lipgloss.Style // Message sent to a subagent
 
 		// Agentic fetch styles
 		AgenticFetchPromptTag lipgloss.Style // Agentic fetch prompt tag (green background, bold)
@@ -547,22 +574,6 @@ type Styles struct {
 			ConfiguredText lipgloss.Style // "Configured" badge shown on the ModelGroup header
 		}
 
-		// Onboarding styles the first-run setup screens: the provider
-		// selector, the curated model shortlist, and the usage hints
-		// shown once setup completes.
-		Onboarding struct {
-			Step         lipgloss.Style // "1 of 3" progress label
-			StepDot      lipgloss.Style // Inactive progress dot
-			StepDotOn    lipgloss.Style // Active progress dot
-			Lead         lipgloss.Style // Opening sentence under the dialog header
-			Blurb        lipgloss.Style // Description line under a row title
-			Badge        lipgloss.Style // Right-aligned row badge on the focused row
-			BadgeBlurred lipgloss.Style // Badge on every other row, receding into the background
-			Key          lipgloss.Style // Key name in the usage hints
-			Desc         lipgloss.Style // Key description in the usage hints
-			Tip          lipgloss.Style // Trailing example line
-		}
-
 		Permissions struct {
 			KeyText   lipgloss.Style // Left key cell of a key/value row
 			ValueText lipgloss.Style // Right value cell of a key/value row
@@ -572,6 +583,7 @@ type Styles struct {
 		Quit struct {
 			Content lipgloss.Style // Wrapper for the quit dialog's inner content
 			Hint    lipgloss.Style // Style for quit hint
+			Warning lipgloss.Style // Style for the work-in-progress warning
 			Frame   lipgloss.Style // Outer rounded border framing the quit dialog
 		}
 

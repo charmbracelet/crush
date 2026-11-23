@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -18,17 +19,14 @@ import (
 var (
 	initOnce    sync.Once
 	initialized atomic.Bool
+
+	// file is the log file Setup writes to. SetFile moves it.
+	file switchableFile
 )
 
 func Setup(logFile string, debug bool, ws ...io.Writer) {
 	initOnce.Do(func() {
-		logRotator := &lumberjack.Logger{
-			Filename:   logFile,
-			MaxSize:    10,    // Max size in MB
-			MaxBackups: 0,     // Number of backups
-			MaxAge:     30,    // Days
-			Compress:   false, // Enable compression
-		}
+		_ = file.set(logFile)
 
 		level := slog.LevelInfo
 		if debug {
@@ -37,11 +35,19 @@ func Setup(logFile string, debug bool, ws ...io.Writer) {
 
 		opts := &slog.HandlerOptions{
 			Level:     level,
-			AddSource: true,
+			AddSource: debug,
+			ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+				if debug && len(groups) == 0 && a.Key == slog.SourceKey {
+					if src, ok := a.Value.Any().(*slog.Source); ok {
+						src.File = trimSourcePath(src.File)
+					}
+				}
+				return a
+			},
 		}
 
 		var handlers []slog.Handler
-		handlers = append(handlers, slog.NewJSONHandler(logRotator, opts))
+		handlers = append(handlers, slog.NewJSONHandler(&file, opts))
 
 		for _, w := range ws {
 			if w == nil {
@@ -61,6 +67,76 @@ func Setup(logFile string, debug bool, ws ...io.Writer) {
 
 func Initialized() bool {
 	return initialized.Load()
+}
+
+// SetFile moves file logging to logFile. It closes the file written so far,
+// so this process no longer holds it open. It does nothing before Setup.
+func SetFile(logFile string) error {
+	if !Initialized() {
+		return nil
+	}
+	return file.set(logFile)
+}
+
+// switchableFile is a rotating log file that can be moved to another path
+// while it is in use.
+type switchableFile struct {
+	mu sync.Mutex
+	w  *lumberjack.Logger
+}
+
+func (f *switchableFile) Write(p []byte) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.w.Write(p)
+}
+
+// set points f at path and closes the file it wrote to before, if any.
+func (f *switchableFile) set(path string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	prev := f.w
+	f.w = &lumberjack.Logger{
+		Filename:   path,
+		MaxSize:    10,    // Max size in MB
+		MaxBackups: 0,     // Number of backups
+		MaxAge:     30,    // Days
+		Compress:   false, // Enable compression
+	}
+	if prev == nil {
+		return nil
+	}
+	return prev.Close()
+}
+
+// Close closes the file written so far, so this process no longer holds it
+// open. A later write reopens the file.
+func (f *switchableFile) Close() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.w == nil {
+		return nil
+	}
+	return f.w.Close()
+}
+
+// modulePath is the path prefix source paths are trimmed to.
+const modulePath = "github.com/charmbracelet/crush/"
+
+// trimSourcePath shortens an absolute source path so build-machine
+// directories never appear in logs. It trims to the module path, the
+// internal/ tree, or the package cache, and falls back to the file name.
+func trimSourcePath(path string) string {
+	switch {
+	case strings.Contains(path, modulePath):
+		return path[strings.Index(path, modulePath):]
+	case strings.Contains(path, "pkg/mod/"):
+		return path[strings.LastIndex(path, "pkg/mod/")+len("pkg/mod/"):]
+	case strings.Contains(path, "internal/"):
+		return path[strings.Index(path, "internal/"):]
+	default:
+		return path[strings.LastIndex(path, "/")+1:]
+	}
 }
 
 func RecoverPanic(name string, cleanup func()) {

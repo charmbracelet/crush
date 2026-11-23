@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
+	"time"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/agent/tools"
@@ -46,7 +48,7 @@ type BashToolRenderContext struct {
 // RenderTool implements the [ToolRenderer] interface.
 func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
-	if opts.IsPending() {
+	if opts.IsStreamingInput() {
 		return pendingTool(sty, "Bash", opts.Anim, opts.Compact)
 	}
 
@@ -70,6 +72,9 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	}
 
 	cmd := params.Command
+	if opts.Compact {
+		cmd = singleLine(cmd)
+	}
 	cmd = strings.ReplaceAll(cmd, "\t", "    ")
 	cmd = common.StripBashDisplayPrefix(cmd, b.workingDir)
 	if highlighted, err := common.SyntaxHighlightLexerName(sty, cmd, "bash", nil); err == nil {
@@ -82,6 +87,11 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	}
 	if params.RunInBackground {
 		options = append(options, "background", "true")
+	}
+	// Show how long the command ran (or has been running) beside the
+	// command; sub-second runs are noise, so they show nothing.
+	if opts.Elapsed >= time.Second {
+		options = append(options, "took", common.FormatDuration(opts.Elapsed))
 	}
 
 	header := bashHeader(sty, opts, cappedWidth, params.Description, cmd, options)
@@ -133,6 +143,18 @@ func bashHeader(sty *styles.Styles, opts *ToolRenderOpts, width int, description
 	// The command sits below the description, in the output's column.
 	indent := toolBodyLeftPaddingTotal
 	return header + "\n\n" + indentLines(toolParamList(sty, []string{cmd}, width-indent, &cmdOpts), indent)
+}
+
+// singleLine joins a multi-line command onto one line, dropping each
+// continuation line's indent. A subagent's tool calls are one line each,
+// and a heredoc or inline script would otherwise spill its first lines into
+// the tree before the truncation hides the rest.
+func singleLine(s string) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimSpace(line)
+	}
+	return strings.Join(slices.DeleteFunc(lines, func(l string) bool { return l == "" }), " ")
 }
 
 // cwdHint returns where a command ran, relative to the workspace, or "" when
@@ -192,7 +214,7 @@ type JobOutputToolRenderContext struct {
 // RenderTool implements the [ToolRenderer] interface.
 func (j *JobOutputToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
-	if opts.IsPending() {
+	if opts.IsStreamingInput() {
 		return pendingTool(sty, "Job", opts.Anim, opts.Compact)
 	}
 
@@ -244,7 +266,7 @@ type JobKillToolRenderContext struct{}
 // RenderTool implements the [ToolRenderer] interface.
 func (j *JobKillToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
-	if opts.IsPending() {
+	if opts.IsStreamingInput() {
 		return pendingTool(sty, "Job", opts.Anim, opts.Compact)
 	}
 

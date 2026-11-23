@@ -21,6 +21,7 @@ import (
 
 	"charm.land/catwalk/v3/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
+	"github.com/charmbracelet/crush/internal/antauth"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/discover"
 	"github.com/charmbracelet/crush/internal/env"
@@ -440,6 +441,10 @@ func PushPopCrushEnv() func() {
 	return restore
 }
 
+// detectAntLogin reports whether the `ant` command line tool is signed in. It
+// is a variable so tests do not depend on the machine they run on.
+var detectAntLogin = antauth.Detect
+
 func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env env.Env, resolver VariableResolver, knownProviders []catwalk.Provider) error {
 	knownProviderNames := make(map[string]bool)
 	restore := PushPopCrushEnv()
@@ -604,6 +609,15 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 			}
 			// if the provider api or endpoint are missing we skip them
 			v, err := resolver.ResolveValue(p.APIKey)
+			if (v == "" || err != nil) &&
+				p.ID == catwalk.InferenceProviderAnthropic &&
+				detectAntLogin(env.Get) {
+				// No API key, but the user is signed in with `ant`. An
+				// API key still wins when there is one, as it does in
+				// `ant` itself.
+				prepared.ExternalAuth = ExternalAuthAnt
+				break
+			}
 			if v == "" || err != nil {
 				if configExists {
 					slog.Warn("Skipping provider due to missing API key", "provider", p.ID)

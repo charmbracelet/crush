@@ -27,6 +27,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
+	"github.com/charmbracelet/crush/internal/antauth"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/discover"
@@ -1289,10 +1290,17 @@ func (c *coordinator) hyperAPIKey() string {
 	return config.ResolveHyperAPIKey(c.cfg.Config())
 }
 
-func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map[string]string, providerID string) (fantasy.Provider, error) {
-	var opts []anthropic.Option
+func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map[string]string, providerID, externalAuth string) (fantasy.Provider, error) {
+	var (
+		opts        []anthropic.Option
+		useAntLogin bool
+	)
 
 	switch {
+	case externalAuth == config.ExternalAuthAnt && apiKey == "":
+		// The `ant` login's token is short-lived, so it is attached to each
+		// request by the HTTP client below instead of being fixed here.
+		useAntLogin = true
 	case strings.HasPrefix(apiKey, "Bearer "):
 		// NOTE: Prevent the SDK from picking up the API key from env.
 		os.Setenv("ANTHROPIC_API_KEY", "")
@@ -1314,8 +1322,21 @@ func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map
 		opts = append(opts, anthropic.WithBaseURL(baseURL))
 	}
 
+	httpClient := http.DefaultClient
 	if c.cfg.Config().Options.Debug {
-		httpClient := log.NewHTTPClient()
+		httpClient = log.NewHTTPClient()
+	}
+	if useAntLogin {
+		var base http.RoundTripper = http.DefaultTransport
+		if httpClient.Transport != nil {
+			base = httpClient.Transport
+		}
+		httpClient = &http.Client{Transport: &antauth.Transport{
+			Base:   base,
+			Tokens: antauth.NewTokens(antauth.Command),
+		}}
+	}
+	if c.cfg.Config().Options.Debug || useAntLogin {
 		opts = append(opts, anthropic.WithHTTPClient(httpClient))
 	}
 	return anthropic.New(opts...)
@@ -1588,7 +1609,7 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		// prefix the chat completions and responses endpoints use.
 		if wireType == catwalk.TypeMessages {
 			baseURL = strings.TrimSuffix(baseURL, "/v1")
-			return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID)
+			return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID, "")
 		}
 		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent, wireType)
 	case string(catwalk.InferenceProviderOpenAI):
@@ -1608,7 +1629,7 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 
 	switch wireType {
 	case catwalk.TypeMessages:
-		return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID)
+		return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID, providerCfg.ExternalAuth)
 	case catwalk.TypeResponses:
 		return c.buildOpenaiProvider(baseURL, apiKey, headers, providerCfg.OAuthToken, wireType)
 	case catwalk.TypeCompletions, catwalk.Type(hyper.Name):

@@ -1,30 +1,68 @@
 name: labeler
 
 on:
-  issues:
-    types: [opened]
-  pull_request_target:
-    types: [opened]
+  schedule:
+    - cron: "*/10 * * * *"
   workflow_dispatch:
     inputs:
       issue-number:
-        description: "Issue/PR #"
-        required: true
+        description: "Issue/PR # (leave empty to label new items)"
+        required: false
         type: string
 
-permissions:
-  issues: write
-  pull-requests: write
-  contents: read
+permissions: {}
+
+concurrency:
+  group: labeler
+  cancel-in-progress: false
 
 jobs:
   triage:
     runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+      pull-requests: write
     steps:
-      - uses: github/issue-labeler@ccca1e16fcb66762200e616fc29b57b940c1cb67 # v3.5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          configuration-path: .github/labeler.yml
-          enable-versioned-regex: 0
-          include-title: 1
-          include-body: 0
-          issue-number: ${{ github.event.inputs.issue-number || github.event.issue.number || github.event.pull_request.number }}
+          persist-credentials: false
+          sparse-checkout: .github/labeler.yml
+          sparse-checkout-cone-mode: false
+
+      - name: Label issues and PRs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ inputs.issue-number }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "${NUMBER:-}" ]; then
+            [[ "$NUMBER" =~ ^[0-9]+$ ]] || { echo "::error::issue-number must be numeric"; exit 1; }
+            items=$(gh api "repos/$REPO/issues/$NUMBER" | jq -s .)
+          else
+            since=$(gh run list -R "$REPO" -w labeler.yml -e schedule -s success -L 1 --json createdAt -q '.[0].createdAt')
+            since=${since:-$(date -u -d '-30 min' +%Y-%m-%dT%H:%M:%SZ)}
+            items=$(gh api --paginate "repos/$REPO/issues?state=all&since=$since&per_page=100" \
+              --jq ".[] | select(.created_at >= \"$since\")" | jq -s .)
+          fi
+
+          yq -o=json .github/labeler.yml \
+            | jq -r --argjson items "$items" '
+                to_entries as $rules
+                | $items[]
+                | .title as $title
+                | [.labels[].name] as $have
+                | [ $rules[]
+                    | select(any(.value[];
+                        capture("^/(?<re>.*)/(?<fl>[a-z]*)$") as $p | $title | test($p.re; $p.fl)))
+                    | .key
+                    | select(IN($have[]) | not) ] as $add
+                | select($add | length > 0)
+                | "\(.number)\t\({labels: $add})"' \
+            | while IFS=$'\t' read -r n body; do
+                echo "#$n: $body"
+                gh api --method POST "repos/$REPO/issues/$n/labels" --input - <<<"$body" >/dev/null
+              done

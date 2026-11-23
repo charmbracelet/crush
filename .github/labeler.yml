@@ -1,14 +1,9 @@
-# NOTE(@andreynering): We should have a single entry per label, because if we
-# have multiple the action would only apply the label if ALL of them match.
-
 "area: ci":
   - "/^ci: /i"
 "area: crush run":
-  - "/crush run/i"
-  - "/headless/i"
-  - "/non-interactive/i"
+  - "/(crush run|headless|non-interactive)/i"
 "area: diff":
-  - "/diff/i"
+  - "/\\bdiff\\b/i"
 "area: docs":
   - "/(docs|documentation|readme)/i"
 "area: images":
@@ -24,7 +19,7 @@
 "area: permissions":
   - "/permission/i"
 "area: releasing":
-  - "/(release|releasing|aur|brew|nix|npm|scoop|termux|winget)/i"
+  - "/(release|releasing|aur|brew|\\bnix\\b|npm|scoop|termux|winget)/i"
 "area: session":
   - "/session/i"
 "area: shell":
@@ -58,7 +53,7 @@
 "provider: google vertex":
   - "/vertex/i"
 "provider: hyper":
-  - "/hyper/i"
+  - "/\\bhyper\\b/i"
 "provider: kimi":
   - "/kimi/i"
 "provider: minimax":

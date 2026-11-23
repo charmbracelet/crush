@@ -263,6 +263,18 @@ func Load(ctx context.Context, workingDir, dataDir string, debug bool) (*ConfigS
 	valueResolver := NewShellVariableResolver(env, WithWorkingDir(workingDir))
 	store.resolver = valueResolver
 
+	// Renew catalog credentials before taking writeMu: refreshing persists
+	// the token through the same config-write path.
+	for id, pc := range cfg.Providers.Seq2() {
+		if pc.Catalog == nil || pc.Disable || pc.BaseURL == "" || pc.OAuthToken == nil || !pc.OAuthToken.IsExpired() {
+			continue
+		}
+		if err := store.RefreshOAuthToken(ctx, ScopeGlobal, id); err != nil {
+			slog.Warn("Failed to refresh OAuth token before fetching model catalog", "provider", id, "error", err)
+		}
+	}
+	cfg = store.Config()
+
 	// Hold writeMu during initial load to prevent configureProviders
 	// from triggering auto-reload via RemoveConfigField.
 	store.writeMu.Lock()

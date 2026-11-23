@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/stretchr/testify/require"
@@ -113,4 +115,60 @@ func TestPluginCatalogWithBadProgramFailsLoad(t *testing.T) {
 
 	_, err := config.Load(t.Context(), workDir, t.TempDir(), false)
 	require.ErrorContains(t, err, "invalid catalog for provider broken-sub")
+}
+
+func TestPluginCatalogRefreshesExpiredOAuthToken(t *testing.T) {
+	isolated := t.TempDir()
+	t.Setenv("HOME", isolated)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(isolated, ".config"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(isolated, ".local", "share"))
+	t.Setenv("CRUSH_GLOBAL_CONFIG", filepath.Join(isolated, ".config", "crush"))
+	globalData := filepath.Join(isolated, ".local", "share", "crush")
+	t.Setenv("CRUSH_GLOBAL_DATA", globalData)
+
+	var catalogAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/token":
+			require.NoError(t, r.ParseForm())
+			require.Equal(t, "refresh_token", r.PostForm.Get("grant_type"))
+			require.Equal(t, "old-refresh", r.PostForm.Get("refresh_token"))
+			fmt.Fprint(w, `{"access_token":"fresh-access","refresh_token":"fresh-refresh","expires_in":3600}`)
+		case "/v1/models":
+			catalogAuth = r.Header.Get("Authorization")
+			fmt.Fprint(w, `{"data":[{"id":"big","display_name":"Big Model"}]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	require.NoError(t, os.MkdirAll(globalData, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(globalData, "crush.json"), fmt.Appendf(nil, `{
+		"providers": {
+			"catalog-sub": {
+				"api_key": "old-access",
+				"oauth": {
+					"access_token": "old-access",
+					"refresh_token": "old-refresh",
+					"expires_in": 3600,
+					"expires_at": %d
+				}
+			}
+		}
+	}`, time.Now().Add(-time.Hour).Unix()), 0o600))
+
+	workDir := t.TempDir()
+	writePluginScript(t, workDir, "catalog.sh", fmt.Sprintf(`provider add catalog-sub   --name "Catalog Subscription"   --type anthropic   --base-url %[1]q   --catalog-url "%[1]s/v1/models"   --catalog-program '.data | map({id, name: .display_name})'   --oauth-flow browser   --oauth-client-id "crush-example"   --oauth-auth-url "%[1]s/authorize"   --oauth-token-url "%[1]s/token"`, server.URL))
+
+	store, err := config.Load(t.Context(), workDir, t.TempDir(), false)
+	require.NoError(t, err)
+	require.Equal(t, "Bearer fresh-access", catalogAuth)
+
+	pc, ok := store.Config().Providers.Get("catalog-sub")
+	require.True(t, ok)
+	require.Equal(t, "fresh-access", pc.OAuthToken.AccessToken)
+	require.Equal(t, "fresh-refresh", pc.OAuthToken.RefreshToken)
+	require.Len(t, pc.Models, 1)
 }

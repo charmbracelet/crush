@@ -26,10 +26,14 @@ import "time"
 // Onboarding is what is known about one onboarding attempt when an event is
 // sent. Empty fields are left out of the event.
 type Onboarding struct {
-	// ID is random per attempt and set when onboarding starts. It groups
-	// the events of one attempt, since a machine can go through onboarding
-	// more than once.
+	// ID is random per attempt. An attempt runs from the first launch
+	// without a provider until one is set up, across launches, so one ID
+	// is one user's way to a working provider. A machine that loses its
+	// provider later starts a new attempt.
 	ID string
+	// Launch counts the launches of this attempt: 1 the first time, 2 when
+	// the user quit and came back, and so on.
+	Launch int
 	// Provider is the provider chosen so far, such as "anthropic".
 	Provider string
 	// Via is the path that led to the provider: "card", "card key" or
@@ -44,9 +48,14 @@ type Onboarding struct {
 
 // props returns the attempt's properties followed by the given pairs.
 func (o Onboarding) props(pairs ...any) []any {
-	props := make([]any, 0, 10+len(pairs))
+	props := make([]any, 0, 12+len(pairs))
+	if o.ID != "" {
+		props = append(props, "onboarding id", o.ID)
+	}
+	if o.Launch > 0 {
+		props = append(props, "launch", o.Launch)
+	}
 	for _, p := range [][2]string{
-		{"onboarding id", o.ID},
 		{"provider", o.Provider},
 		{"via", o.Via},
 		{"model", o.Model},
@@ -68,7 +77,8 @@ func FirstLaunch(setupWith string) {
 	send("first launch", "set up with", setupWith)
 }
 
-// OnboardingStarted is sent when the TUI opens with no provider set up.
+// OnboardingStarted is sent each time the TUI opens with no provider set
+// up. Filter on launch 1 to count each attempt once.
 func OnboardingStarted(o Onboarding) {
 	send("onboarding started", o.props()...)
 }
@@ -111,7 +121,7 @@ func OnboardingCardDismissed(o Onboarding, heldPrompt bool) {
 
 // OnboardingCompleted is sent once a provider and model are set up and the
 // agent is ready. HeldPrompt reports whether a prompt was waiting for the
-// provider, and duration is the time since onboarding started.
+// provider, and duration is the time since this launch opened.
 func OnboardingCompleted(o Onboarding, heldPrompt bool, duration time.Duration) {
 	d := duration.Truncate(time.Second)
 	send("onboarding completed", o.props(

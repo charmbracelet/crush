@@ -186,9 +186,10 @@ func TestOnboardingProps(t *testing.T) {
 
 	t.Run("carries everything known", func(t *testing.T) {
 		t.Parallel()
-		o := Onboarding{ID: "a1", Provider: "anthropic", Via: "card key", Model: "claude", Auth: "api key"}
+		o := Onboarding{ID: "a1", Launch: 2, Provider: "anthropic", Via: "card key", Model: "claude", Auth: "api key"}
 		want := []any{
 			"onboarding id", "a1",
+			"launch", 2,
 			"provider", "anthropic",
 			"via", "card key",
 			"model", "claude",

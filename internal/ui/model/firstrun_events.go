@@ -1,6 +1,7 @@
 package model
 
 import (
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -48,12 +49,19 @@ func providerChoiceMethod(c dialog.ProviderChoice) string {
 	}
 }
 
+// onboardingAttemptPath is where an onboarding attempt is kept between
+// launches.
+func onboardingAttemptPath() string {
+	return filepath.Join(filepath.Dir(config.GlobalConfigData()), event.OnboardingFileName)
+}
+
 // onboardingEvent returns what telemetry knows about the current onboarding
 // attempt. It starts an attempt when there is none, such as when a provider
 // is lost mid-session.
 func (m *UI) onboardingEvent() event.Onboarding {
 	if m.firstRun.onboarding.ID == "" {
 		m.firstRun.onboarding.ID = uuid.NewString()
+		m.firstRun.onboarding.Launch = 1
 	}
 	return m.firstRun.onboarding
 }
@@ -123,6 +131,7 @@ func (m *UI) trackOnboardingCompleted(msg dialog.ActionSelectModel) {
 	}
 	held := m.firstRun.held != nil
 	event.OnboardingCompleted(m.onboardingEvent(), held, duration)
+	event.FinishOnboarding(onboardingAttemptPath())
 
 	m.firstRun.firstTurn = &firstTurn{
 		onboarding:  m.onboardingEvent(),

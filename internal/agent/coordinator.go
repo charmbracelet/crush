@@ -1187,25 +1187,39 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 
 	// Add LSP tools if user has configured LSPs or auto_lsp is enabled (nil or true).
 	if len(c.cfg.Config().LSP) > 0 || c.cfg.Config().Options.AutoLSP == nil || *c.cfg.Config().Options.AutoLSP {
-		allTools = append(
-			allTools,
-			tools.NewDiagnosticsTool(c.lspManager),
-			tools.NewReferencesTool(c.lspManager),
-			tools.NewLSPRestartTool(c.lspManager),
-			tools.NewSymbolsTool(c.lspManager),
-			tools.NewDefinitionTool(c.lspManager),
-			tools.NewCallHierarchyTool(c.lspManager),
-			tools.NewRenameTool(c.lspManager, c.permissions, c.history, c.filetracker),
-			tools.NewReplaceSymbolTool(c.lspManager, c.permissions, c.history, c.filetracker),
-		)
+		add(tools.DiagnosticsToolName, func() fantasy.AgentTool {
+			return tools.NewDiagnosticsTool(c.lspManager)
+		})
+		add(tools.ReferencesToolName, func() fantasy.AgentTool {
+			return tools.NewReferencesTool(c.lspManager)
+		})
+		add(tools.LSPRestartToolName, func() fantasy.AgentTool {
+			return tools.NewLSPRestartTool(c.lspManager)
+		})
+		add(tools.SymbolsToolName, func() fantasy.AgentTool {
+			return tools.NewSymbolsTool(c.lspManager)
+		})
+		add(tools.DefinitionToolName, func() fantasy.AgentTool {
+			return tools.NewDefinitionTool(c.lspManager)
+		})
+		add(tools.CallHierarchyToolName, func() fantasy.AgentTool {
+			return tools.NewCallHierarchyTool(c.lspManager)
+		})
+		add(tools.RenameToolName, func() fantasy.AgentTool {
+			return tools.NewRenameTool(c.lspManager, c.permissions, c.history, c.filetracker)
+		})
+		add(tools.ReplaceSymbolToolName, func() fantasy.AgentTool {
+			return tools.NewReplaceSymbolTool(c.lspManager, c.permissions, c.history, c.filetracker)
+		})
 	}
 
 	if len(c.cfg.Config().MCP) > 0 {
-		allTools = append(
-			allTools,
-			tools.NewListMCPResourcesTool(c.cfg, c.permissions),
-			tools.NewReadMCPResourceTool(c.cfg, c.permissions),
-		)
+		add(tools.ListMCPResourcesToolName, func() fantasy.AgentTool {
+			return tools.NewListMCPResourcesTool(c.cfg, c.permissions)
+		})
+		add(tools.ReadMCPResourceToolName, func() fantasy.AgentTool {
+			return tools.NewReadMCPResourceTool(c.cfg, c.permissions)
+		})
 	}
 
 	var filteredTools []fantasy.AgentTool

@@ -139,7 +139,16 @@ func TestBuildToolsWithOnlyReadToolsNeedsNoServices(t *testing.T) {
 	agent := config.Agent{AllowedTools: []string{"glob", "grep"}}
 	c := &coordinator{interactive: false, cfg: testConfigStore()}
 
+	var built []string
 	require.NotPanics(t, func() {
-		_, _ = c.buildTools(context.Background(), agent, true, nil)
+		builtTools, err := c.buildTools(context.Background(), agent, true, nil)
+		require.NoError(t, err)
+		for _, tool := range builtTools {
+			built = append(built, tool.Info().Name)
+		}
 	})
+
+	// Nothing outside the allowed list may be attached, and the LSP tools that
+	// auto_lsp would otherwise construct must not appear either.
+	assert.ElementsMatch(t, []string{"glob", "grep"}, built)
 }

@@ -71,7 +71,6 @@ import (
 	"github.com/charmbracelet/ultraviolet/screen"
 	"github.com/charmbracelet/x/editor"
 	xstrings "github.com/charmbracelet/x/exp/strings"
-	"github.com/google/uuid"
 )
 
 // Compact mode breakpoints.
@@ -655,7 +654,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	ui.firstRun.noProvider = !com.Config().IsConfigured()
 	if ui.firstRun.noProvider {
 		ui.firstRun.startedAt = time.Now()
-		ui.firstRun.onboarding.ID = uuid.NewString()
+		ui.firstRun.onboarding.ID, ui.firstRun.onboarding.Launch = event.ResumeOnboarding(onboardingAttemptPath())
 	} else {
 		needs, _ := com.Workspace.ProjectNeedsInitialization()
 		ui.firstRun.needsInit = needs

@@ -141,7 +141,7 @@ func TestWelcomeView(t *testing.T) {
 		view := ansi.Strip(u.welcomeView(100))
 		require.Contains(t, view, introLine1)
 		require.Contains(t, view, introLine2)
-		require.NotContains(t, view, "Ask anything", "the instruction is anchored at the bottom instead")
+		require.NotContains(t, view, "Ready when you are", "the instruction is anchored at the bottom instead")
 		require.NotContains(t, view, "/init")
 	})
 
@@ -198,7 +198,7 @@ func TestFirstRunPromptView(t *testing.T) {
 		u.firstRun.noProvider = true
 
 		view := ansi.Strip(u.firstRunPromptView(100))
-		require.Equal(t, askAnythingLine, view)
+		require.Equal(t, readyLine, view)
 		require.NotContains(t, view, "◇", "that icon is reserved for a model name or response")
 	})
 
@@ -212,8 +212,8 @@ func TestFirstRunPromptView(t *testing.T) {
 		view := ansi.Strip(u.firstRunPromptView(100))
 		require.Contains(t, view, "▌ write tests")
 		require.NotContains(t, view, "for the handler")
-		require.Contains(t, view, "held · sends as soon as a model is ready")
-		require.NotContains(t, view, "Ask anything")
+		require.Contains(t, view, "held · sends once your provider is set up")
+		require.NotContains(t, view, "Ready when you are")
 	})
 }
 

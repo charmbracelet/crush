@@ -175,6 +175,15 @@ provider remove openai`)
 	require.Contains(t, providers, "anthropic")
 }
 
+func TestProviderAWSAuthRefresh(t *testing.T) {
+	t.Parallel()
+
+	result := loadScript(t, `provider add bedrock --aws-auth-refresh "aws sso login --profile work"`)
+
+	bedrock := result["providers"].(map[string]any)["bedrock"].(map[string]any)
+	require.Equal(t, "aws sso login --profile work", bedrock["aws_auth_refresh"])
+}
+
 // TestRemoveRmAlias verifies that "rm" works as an alias for "remove" on both
 // provider and model.
 func TestRemoveRmAlias(t *testing.T) {

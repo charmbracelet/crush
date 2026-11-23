@@ -17,7 +17,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/v3/pkg/catwalk"
-	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
@@ -101,6 +100,14 @@ type App struct {
 	// currentSessionID is the session the user is working in, reported
 	// by the TUI and the non-interactive runner, for SessionEnd.
 	currentSessionID atomic.Value
+
+	// agentInitMu guards AgentCoordinator creation so concurrent
+	// initializers (a client attaching while the server-side channel
+	// injection initializes a headless workspace) cannot build two
+	// coordinators for one workspace. agentInteractive records which
+	// variant the current coordinator was built with.
+	agentInitMu      sync.Mutex
+	agentInteractive bool
 }
 
 // New initializes a new application instance. skillsMgr carries the
@@ -430,7 +437,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	}
 
 	// force update of agent models before running so mcp tools are loaded
-	app.AgentCoordinator.UpdateModels(ctx)
+	app.Agent().UpdateModels(ctx)
 
 	defer stopSpinner()
 
@@ -466,28 +473,26 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	// Report session identity to herdr.
 	app.ReportCurrentSession(sess.ID)
 
-	type response struct {
-		result *fantasy.AgentResult
-		err    error
+	answer, err := newAnswerPrinter(ctx, output, sess.ID, app.Messages, continueSessionID != "" || useLast)
+	if err != nil {
+		return err
 	}
-	done := make(chan response, 1)
 
+	// Subscribe before the agent starts, so no update is published before
+	// anyone listens.
+	subCtx, cancelSub := context.WithCancel(ctx)
+	defer cancelSub()
+	messageEvents := app.Messages.Subscribe(subCtx)
+
+	done := make(chan error, 1)
+	coord := app.Agent()
 	go func(ctx context.Context, sessionID, prompt string) {
-		result, err := app.AgentCoordinator.Run(ctx, sess.ID, prompt)
-		if err != nil {
-			done <- response{
-				err: fmt.Errorf("failed to start agent processing stream: %w", err),
-			}
+		if _, err := coord.Run(ctx, sessionID, prompt); err != nil {
+			done <- fmt.Errorf("failed to start agent processing stream: %w", err)
 			return
 		}
-		done <- response{
-			result: result,
-		}
+		done <- nil
 	}(ctx, sess.ID, prompt)
-
-	messageEvents := app.Messages.Subscribe(ctx)
-	messageReadBytes := make(map[string]int)
-	var printed bool
 
 	defer func() {
 		if progress && stderrTTY {
@@ -499,65 +504,22 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 		_, _ = fmt.Fprintln(output)
 	}()
 
-	for {
+	beforeWait := func() {
 		if progress && stderrTTY {
 			// HACK: Reinitialize the terminal progress bar on every iteration
 			// so it doesn't get hidden by the terminal due to inactivity.
 			_, _ = fmt.Fprintf(os.Stderr, ansi.SetIndeterminateProgressBar)
 		}
-
-		select {
-		case result := <-done:
-			stopSpinner()
-			if result.err != nil {
-				if errors.Is(result.err, context.Canceled) || errors.Is(result.err, agent.ErrRequestCancelled) {
-					slog.Debug("Non-interactive: agent processing cancelled", "session_id", sess.ID)
-					return nil
-				}
-				return fmt.Errorf("agent processing failed: %w", result.err)
-			}
-			return nil
-
-		case event := <-messageEvents:
-			msg := event.Payload
-			if msg.SessionID == sess.ID && msg.Role == message.Assistant && len(msg.Parts) > 0 {
-				stopSpinner()
-
-				content := msg.Content().String()
-				readBytes := messageReadBytes[msg.ID]
-
-				if len(content) < readBytes {
-					slog.Error("Non-interactive: message content is shorter than read bytes", "message_length", len(content), "read_bytes", readBytes)
-					return fmt.Errorf("message content is shorter than read bytes: %d < %d", len(content), readBytes)
-				}
-
-				part := content[readBytes:]
-				// Trim leading whitespace. Sometimes the LLM includes leading
-				// formatting and indentation, which we don't want here.
-				if readBytes == 0 {
-					part = strings.TrimPrefix(part, "\n")
-					part = strings.TrimLeft(part, " \t")
-				}
-				// Ignore initial whitespace-only messages.
-				if printed || strings.TrimSpace(part) != "" {
-					printed = true
-					fmt.Fprint(output, part)
-				}
-				messageReadBytes[msg.ID] = len(content)
-			}
-
-		case <-ctx.Done():
-			stopSpinner()
-			return ctx.Err()
-		}
 	}
+	return answer.printUntilDone(ctx, messageEvents, done, app.Messages, beforeWait, stopSpinner)
 }
 
 func (app *App) UpdateAgentModel(ctx context.Context) error {
-	if app.AgentCoordinator == nil {
+	coord := app.Agent()
+	if coord == nil {
 		return fmt.Errorf("agent configuration is missing")
 	}
-	return app.AgentCoordinator.UpdateModels(ctx)
+	return coord.UpdateModels(ctx)
 }
 
 // restoreModelFromSession reads the last assistant message in the
@@ -599,7 +561,7 @@ func (app *App) restoreModelFromSession(ctx context.Context, sessionID string) e
 		smallModel := app.GetDefaultSmallModel(lastMsg.Provider)
 		app.config.OverridePreferredModel(config.SelectedModelTypeSmall, smallModel)
 	}
-	if err := app.AgentCoordinator.UpdateModels(ctx); err != nil {
+	if err := app.Agent().UpdateModels(ctx); err != nil {
 		return fmt.Errorf("failed to update agent models: %w", err)
 	}
 	slog.Info("Restored model from session",
@@ -657,7 +619,7 @@ func (app *App) overrideModelsForNonInteractive(ctx context.Context, largeModel,
 		app.config.OverridePreferredModel(config.SelectedModelTypeSmall, smallCfg)
 	}
 
-	return app.AgentCoordinator.UpdateModels(ctx)
+	return app.Agent().UpdateModels(ctx)
 }
 
 // overrideReasoningEffort validates the requested reasoning effort against
@@ -679,7 +641,7 @@ func (app *App) overrideReasoningEffort(ctx context.Context, reasoningEffort str
 		"model", selected.Model,
 		"reasoning_effort", reasoningEffort)
 	app.config.OverridePreferredModel(config.SelectedModelTypeLarge, selected)
-	return app.AgentCoordinator.UpdateModels(ctx)
+	return app.Agent().UpdateModels(ctx)
 }
 
 // GetDefaultSmallModel returns the default small model for the given
@@ -933,13 +895,38 @@ func (app *App) InitCoderAgentNonInteractive(ctx context.Context) error {
 	return app.initCoderAgent(ctx, false)
 }
 
+// initCoderAgent builds the workspace's coder coordinator. It is
+// create-only: once a coordinator exists the call is a no-op, so a
+// channel push initializing the agent headlessly cannot race a client
+// attach into building a second coordinator. The one refinement is an
+// upgrade: an interactive initializer replaces a coordinator that was
+// built headlessly, so an attached client regains the interactive-only
+// tools (notably question). A downgrade or a re-init while a run is in
+// flight keeps the existing coordinator, because swapping it then
+// would strand the run.
 func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
+	app.agentInitMu.Lock()
+	defer app.agentInitMu.Unlock()
+	if app.AgentCoordinator != nil {
+		if !interactive || app.agentInteractive {
+			return nil
+		}
+		if app.AgentCoordinator.IsBusy() {
+			slog.Warn("Keeping headless coder agent: interactive init raced a running turn")
+			return nil
+		}
+		// Interactive upgrade: the headless coordinator is swapped out
+		// below. Cancel anything it still has in flight (the IsBusy
+		// check above covers the common case, but a channel push can
+		// start a run between the check and the swap, and nothing
+		// reaches the old coordinator afterwards).
+		app.AgentCoordinator.CancelAll()
+	}
 	coderAgentCfg := app.config.Config().Agents[config.AgentCoder]
 	if coderAgentCfg.ID == "" {
 		return fmt.Errorf("coder agent configuration is missing")
 	}
-	var err error
-	app.AgentCoordinator, err = agent.NewCoordinator(ctx, agent.CoordinatorOptions{
+	coord, err := agent.NewCoordinator(ctx, agent.CoordinatorOptions{
 		Config:      app.config,
 		Sessions:    app.Sessions,
 		Messages:    app.Messages,
@@ -959,7 +946,22 @@ func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 		slog.Error("Failed to create coder agent", "err", err)
 		return err
 	}
+	app.AgentCoordinator = coord
+	app.agentInteractive = interactive
 	return nil
+}
+
+// agentCoordinator returns the current coder coordinator under the init
+// lock. Every reader of the AgentCoordinator field goes through here,
+// so an interactive upgrade replacing a headless coordinator cannot
+// race a dispatch into calling methods on a half-replaced value. The
+// returned coordinator may be swapped for a newer one right after the
+// call; a superseded coordinator has been cancelled and is safe to
+// finish calls on.
+func (app *App) Agent() agent.Coordinator {
+	app.agentInitMu.Lock()
+	defer app.agentInitMu.Unlock()
+	return app.AgentCoordinator
 }
 
 // Subscribe sends events to the TUI as tea.Msgs.
@@ -1002,8 +1004,8 @@ func (app *App) Shutdown() {
 
 	// First, cancel all agents and wait for them to finish. This must complete
 	// before closing the DB so agents can finish writing their state.
-	if app.AgentCoordinator != nil {
-		app.AgentCoordinator.CancelAll()
+	if coord := app.Agent(); coord != nil {
+		coord.CancelAll()
 	}
 	app.fireSessionEnd()
 

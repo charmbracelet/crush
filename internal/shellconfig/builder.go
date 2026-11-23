@@ -44,6 +44,12 @@ func (b *ConfigBuilder) empty() bool {
 	return len(b.root) == 0
 }
 
+// setEnv records a variable the script exported under the top-level env
+// object, which the loader expands like any other template field.
+func (b *ConfigBuilder) setEnv(name, value string) {
+	b.section("env")[name] = templateEscaper.Replace(value)
+}
+
 // JSON marshals the accumulated config to a single JSON object.
 func (b *ConfigBuilder) JSON() ([]byte, error) {
 	return json.Marshal(b.root)

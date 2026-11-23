@@ -3,6 +3,7 @@ package shell
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -166,15 +167,30 @@ func (m *BackgroundShellManager) Remove(id string) error {
 	return err
 }
 
-// Kill terminates a background shell by ID.
-func (m *BackgroundShellManager) Kill(id string) error {
+// killWaitTimeout bounds how long Kill waits for a cancelled shell to
+// report done before giving up and returning.
+const killWaitTimeout = 5 * time.Second
+
+// Kill terminates a background shell by ID. It never blocks indefinitely:
+// a stubborn descendant can keep the shell's pipes open past cancellation,
+// so it stops waiting once ctx is done or killWaitTimeout elapses. In that
+// case the kill signal has been sent but the process may still be exiting.
+func (m *BackgroundShellManager) Kill(ctx context.Context, id string) error {
 	shell, err := m.take(id)
 	if err != nil {
 		return err
 	}
 	shell.cancel()
-	<-shell.done
-	return nil
+	timer := time.NewTimer(killWaitTimeout)
+	defer timer.Stop()
+	select {
+	case <-shell.done:
+		return nil
+	case <-ctx.Done():
+		return errors.New("kill signal sent, process may still be exiting")
+	case <-timer.C:
+		return errors.New("kill signal sent, process may still be exiting")
+	}
 }
 
 // BackgroundShellInfo contains information about a background shell.

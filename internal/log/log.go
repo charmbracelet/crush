@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -34,7 +35,15 @@ func Setup(logFile string, debug bool, ws ...io.Writer) {
 
 		opts := &slog.HandlerOptions{
 			Level:     level,
-			AddSource: true,
+			AddSource: debug,
+			ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+				if debug && len(groups) == 0 && a.Key == slog.SourceKey {
+					if src, ok := a.Value.Any().(*slog.Source); ok {
+						src.File = trimSourcePath(src.File)
+					}
+				}
+				return a
+			},
 		}
 
 		var handlers []slog.Handler
@@ -98,6 +107,36 @@ func (f *switchableFile) set(path string) error {
 		return nil
 	}
 	return prev.Close()
+}
+
+// Close closes the file written so far, so this process no longer holds it
+// open. A later write reopens the file.
+func (f *switchableFile) Close() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.w == nil {
+		return nil
+	}
+	return f.w.Close()
+}
+
+// modulePath is the path prefix source paths are trimmed to.
+const modulePath = "github.com/charmbracelet/crush/"
+
+// trimSourcePath shortens an absolute source path so build-machine
+// directories never appear in logs. It trims to the module path, the
+// internal/ tree, or the package cache, and falls back to the file name.
+func trimSourcePath(path string) string {
+	switch {
+	case strings.Contains(path, modulePath):
+		return path[strings.Index(path, modulePath):]
+	case strings.Contains(path, "pkg/mod/"):
+		return path[strings.LastIndex(path, "pkg/mod/")+len("pkg/mod/"):]
+	case strings.Contains(path, "internal/"):
+		return path[strings.Index(path, "internal/"):]
+	default:
+		return path[strings.LastIndex(path, "/")+1:]
+	}
 }
 
 func RecoverPanic(name string, cleanup func()) {

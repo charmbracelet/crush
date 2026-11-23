@@ -52,6 +52,8 @@ import (
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/sshaskpass"
 	"github.com/charmbracelet/crush/internal/stringext"
+	"github.com/charmbracelet/crush/internal/tips"
+	"github.com/charmbracelet/crush/internal/trial"
 	"github.com/charmbracelet/crush/internal/ui/attachments"
 	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/common"
@@ -124,9 +126,7 @@ type uiState uint8
 
 // Possible uiState values.
 const (
-	uiOnboarding uiState = iota
-	uiInitialize
-	uiLanding
+	uiLanding uiState = iota
 	uiChat
 )
 
@@ -356,10 +356,15 @@ type UI struct {
 	// Chat components
 	chat *Chat
 
-	// onboarding state
-	onboarding struct {
-		yesInitializeSelected bool
-	}
+	// firstRun tracks the first-run experience: whether a provider is set
+	// up yet, the message held until one is, and whether the project needs
+	// a context file.
+	firstRun firstRunState
+	// trial is the free-trial backend. Until one exists it never offers
+	// a trial, so first-run falls through to the provider card.
+	trial trial.Service
+	// tips remembers which one-time hints have already been shown.
+	tips *tips.Store
 
 	// lspStates / lspDiagnostics memoize the workspace LSP state and
 	// per-server severity counts (each probe behind them is a synchronous
@@ -641,19 +646,18 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	// Initialize compact mode from config
 	ui.forceCompactMode = com.Config().Options.TUI.CompactMode
 
-	// set onboarding state defaults
-	ui.onboarding.yesInitializeSelected = true
-
-	desiredState := uiLanding
-	desiredFocus := uiFocusEditor
-	if !com.Config().IsConfigured() {
-		desiredState = uiOnboarding
-	} else if n, _ := com.Workspace.ProjectNeedsInitialization(); n {
-		desiredState = uiInitialize
+	// First run: everyone starts in the regular editor. Without a provider
+	// the first send asks for one; the project's missing context file is
+	// mentioned on the landing page instead of in a dialog.
+	ui.trial = trial.Disabled{}
+	ui.tips = tips.Open(tips.DefaultPath())
+	ui.firstRun.noProvider = !com.Config().IsConfigured()
+	if !ui.firstRun.noProvider {
+		needs, _ := com.Workspace.ProjectNeedsInitialization()
+		ui.firstRun.needsInit = needs
 	}
 
-	// set initial state
-	ui.setState(desiredState, desiredFocus)
+	ui.setState(uiLanding, uiFocusEditor)
 
 	opts := com.Config().Options
 
@@ -678,10 +682,10 @@ func (m *UI) SetProgram(program *tea.Program) {
 // Init initializes the UI model.
 func (m *UI) Init() tea.Cmd {
 	var cmds []tea.Cmd
-	if m.state == uiOnboarding {
-		if cmd := m.openModelsDialog(); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
+	// The landing page mentions a missing context file once per project,
+	// so remember that it was shown instead of nagging on every launch.
+	if m.firstRun.needsInit {
+		cmds = append(cmds, m.markProjectInitializedCmd())
 	}
 	// load the user commands async
 	cmds = append(cmds, m.loadCustomCommands())
@@ -738,7 +742,7 @@ func (m *UI) Init() tea.Cmd {
 // loadInitialSession loads the initial session if one was specified on startup.
 func (m *UI) loadInitialSession() tea.Cmd {
 	switch {
-	case m.state != uiLanding:
+	case m.state != uiLanding || m.isOnboarding():
 		// Only load if we're in landing state (i.e., fully configured)
 		return nil
 	case m.initialSessionID != "":
@@ -1622,6 +1626,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.nerdFonts = bool(msg)
 	case gitBranchPollMsg:
 		cmds = append(cmds, m.fetchGitBranch(), m.gitBranchTicker())
+	case projectInitStateMsg:
+		m.firstRun.needsInit = msg.needs
+	case providerKeyResultMsg:
+		if cmd := m.handleProviderKeyResult(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case util.InfoMsg:
 		if msg.Type == util.InfoTypeError {
 			slog.Error("Error reported", "error", msg.Msg)
@@ -2065,6 +2075,9 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 			}
 			if toolMsgItem, ok := toolItem.(chat.ToolMessageItem); ok {
 				toolMsgItem.SetResult(&tr)
+				if cmd := m.foldingTipFor(tr); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 				// Reopening a finished subagent puts it back to work, so
 				// its dispatch item has to start spinning again.
 				if tr.Name == agent.AgentSendToolName && tr.Metadata != "" {
@@ -2287,26 +2300,14 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		return tea.Batch(cmds...)
 	}
 
-	isOnboarding := m.state == uiOnboarding
-
 	switch msg := action.(type) {
 	// Generic dialog messages
 	case dialog.ActionClose:
-		if isOnboarding && m.dialog.ContainsDialog(dialog.ModelsID) {
-			break
-		}
-
 		if m.dialog.ContainsDialog(dialog.FilePickerID) {
 			defer fimage.ResetCache()
 		}
 
 		m.dialog.CloseFrontDialog()
-
-		if isOnboarding {
-			if cmd := m.openModelsDialog(); cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-		}
 
 		if m.focus == uiFocusEditor {
 			cmds = append(cmds, m.textarea.Focus())
@@ -2318,12 +2319,6 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 
 		if msg.Cmd != nil {
 			cmds = append(cmds, msg.Cmd)
-		}
-
-		if isOnboarding {
-			if cmd := m.openModelsDialog(); cmd != nil {
-				cmds = append(cmds, cmd)
-			}
 		}
 
 		if m.focus == uiFocusEditor {
@@ -3017,7 +3012,7 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		providerID   = msg.Model.Provider
 		isCopilot    = providerID == string(catwalk.InferenceProviderCopilot)
 		isConfigured = func() bool { _, ok := cfg.Providers.Get(providerID); return ok }
-		isOnboarding = m.state == uiOnboarding
+		isOnboarding = m.isOnboarding()
 	)
 
 	// For Hyper, if the stored OAuth token is expired, try a silent
@@ -3109,7 +3104,7 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		}
 	}
 
-	cmds = append(cmds, m.updateAgentModelCmd(func() tea.Msg {
+	modelUpdate := m.updateAgentModelCmd(func() tea.Msg {
 		if err := m.com.Workspace.UpdateAgentModel(context.TODO()); err != nil {
 			return util.ReportError(err)
 		}
@@ -3124,7 +3119,7 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		modelMsg := fmt.Sprintf("%s model changed to %s", modelType, modelName)
 
 		return util.NewInfoMsg(modelMsg)
-	}))
+	})
 
 	m.dialog.CloseDialog(dialog.APIKeyInputID)
 	m.dialog.CloseDialog(dialog.OAuthID)
@@ -3132,9 +3127,22 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 
 	if isOnboarding {
 		m.setState(uiLanding, uiFocusEditor)
+		if cmd := m.closeProviderCard(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 		m.com.Config().SetupAgents()
 		if err := m.com.Workspace.InitCoderAgent(context.TODO()); err != nil {
 			cmds = append(cmds, util.ReportError(err))
+			// Nothing can send the prompt, so give it back to the editor.
+			m.restoreHeldMessage()
+		} else {
+			m.firstRun.noProvider = false
+			// A prompt held for a model goes out right after the model
+			// update lands.
+			if send := m.releaseHeldMessage(); send != nil {
+				modelUpdate = tea.Sequence(modelUpdate, send)
+			}
+			cmds = append(cmds, m.checkProjectInitCmd())
 		}
 		// The agent just came up: re-fetch the memoized ready/model state
 		// so the landing view shows the selected model without waiting for
@@ -3147,6 +3155,7 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		cmds = append(cmds, m.fetchHyperCredits())
 	}
 
+	cmds = append(cmds, modelUpdate)
 	return tea.Batch(cmds...)
 }
 
@@ -3155,7 +3164,7 @@ func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.Se
 		dlg dialog.Dialog
 		cmd tea.Cmd
 
-		isOnboarding = m.state == uiOnboarding
+		isOnboarding = m.isOnboarding()
 	)
 
 	switch provider.ID {
@@ -3212,7 +3221,7 @@ func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.Se
 // handleSelectModel applies it only when the signed-in catalog still
 // offers it and errors otherwise.
 func (m *UI) openAuthenticationDialogWithMethod(provider catwalk.Provider, model config.SelectedModel, modelType config.SelectedModelType, useOAuth bool) tea.Cmd {
-	isOnboarding := m.state == uiOnboarding
+	isOnboarding := m.isOnboarding()
 
 	var (
 		dlg dialog.Dialog
@@ -3385,11 +3394,6 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 	}
 
 	switch m.state {
-	case uiOnboarding:
-		return tea.Batch(cmds...)
-	case uiInitialize:
-		cmds = append(cmds, m.updateInitializeView(msg)...)
-		return tea.Batch(cmds...)
 	case uiChat, uiLanding:
 		switch m.focus {
 		case uiFocusEditor:
@@ -3487,6 +3491,11 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 				m.randomizePlaceholders()
 				m.historyReset()
+
+				if m.isOnboarding() {
+					// No model yet: keep the prompt and ask for a provider.
+					return tea.Batch(m.holdMessage(value, attachments), m.loadPromptHistory())
+				}
 
 				return tea.Batch(m.sendMessage(value, attachments...), m.loadPromptHistory())
 			case key.Matches(msg, m.keyMap.Chat.NewSession):
@@ -3813,20 +3822,15 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	screen.Clear(scr)
 
 	switch m.state {
-	case uiOnboarding:
-		m.drawHeader(scr, layout.header)
-
-		// NOTE: Onboarding flow will be rendered as dialogs below, but
-		// positioned at the bottom left of the screen.
-
-	case uiInitialize:
-		m.drawHeader(scr, layout.header)
-
-		main := uv.NewStyledString(m.initializeView())
-		main.Draw(scr, layout.main)
-
 	case uiLanding:
 		m.drawHeader(scr, layout.header)
+		if m.firstRunDialogFront() {
+			// One prompt at a time: while a first-run step is open it is the
+			// only thing on screen, so neither the landing page nor the
+			// card it came from shows behind or beside it.
+			m.inlineCursor = nil
+			break
+		}
 		main := uv.NewStyledString(m.landingView())
 		main.Draw(scr, layout.main)
 
@@ -3880,15 +3884,15 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		}
 	}
 
-	isOnboarding := m.state == uiOnboarding
-
 	// Add status and help layer
-	m.status.SetHideHelp(isOnboarding)
+	m.status.SetHideHelp(false)
 	m.status.SetMode(m.mode, m.permModeCached())
-	m.status.Draw(scr, layout.status)
+	if !m.firstRunDialogFront() {
+		m.status.Draw(scr, layout.status)
+	}
 
 	// Draw completions popup if open
-	if !isOnboarding && m.completionsOpen && m.completions.HasItems() {
+	if m.completionsOpen && m.completions.HasItems() {
 		w, h := m.completions.Size()
 		x := m.completionsPositionStart.X
 		y := m.completionsPositionStart.Y - h
@@ -4051,8 +4055,6 @@ func (m *UI) ShortHelp() []key.Binding {
 	}
 
 	switch m.state {
-	case uiInitialize:
-		binds = append(binds, k.Quit)
 	case uiChat:
 		// Show cancel binding if agent is busy.
 		if m.isAgentBusy() {
@@ -4167,11 +4169,6 @@ func (m *UI) FullHelp() [][]key.Binding {
 	}
 
 	switch m.state {
-	case uiInitialize:
-		binds = append(binds,
-			[]key.Binding{
-				k.Quit,
-			})
 	case uiChat:
 		// Show cancel binding if agent is busy.
 		if m.isAgentBusy() {
@@ -4613,8 +4610,8 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 	appRect.Min.X += 1
 	appRect.Max.X -= 1
 
-	if slices.Contains([]uiState{uiOnboarding, uiInitialize, uiLanding}, m.state) {
-		// extra padding on left and right for these states
+	if m.state == uiLanding {
+		// extra padding on left and right for this state
 		appRect.Min.X += 1
 		appRect.Max.X -= 1
 	}
@@ -4626,23 +4623,6 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 
 	// Handle different app states
 	switch m.state {
-	case uiOnboarding, uiInitialize:
-		// Layout
-		//
-		// header
-		// ------
-		// main
-		// ------
-		// help
-
-		var headerRect, mainRect image.Rectangle
-		layout.Vertical(
-			layout.Len(landingHeaderHeight),
-			layout.Fill(1),
-		).Split(appRect).Assign(&headerRect, &mainRect)
-		uiLayout.header = headerRect
-		uiLayout.main = mainRect
-
 	case uiLanding:
 		// Layout
 		//
@@ -5874,7 +5854,7 @@ func (m *UI) openModelsDialog() tea.Cmd {
 		return nil
 	}
 
-	isOnboarding := m.state == uiOnboarding
+	isOnboarding := m.isOnboarding()
 	modelsDialog, err := dialog.NewModels(m.com, isOnboarding)
 	if err != nil {
 		return util.ReportError(err)
@@ -5998,9 +5978,14 @@ func (m *UI) openPermissionsDialog(perm permission.PermissionRequest) tea.Cmd {
 		opts = append(opts, dialog.WithDiffMode(diffMode == "split"))
 	}
 
+	tip, claimTip := m.permissionsTipFor(perm.ToolName)
+	if tip != "" {
+		opts = append(opts, dialog.WithTip(tip))
+	}
+
 	permDialog := dialog.NewPermissions(m.com, perm, opts...)
 	m.dialog.OpenDialogWithGrace(permDialog)
-	return nil
+	return claimTip
 }
 
 // openBatchFormDialog activates a tabbed multi-question form in

@@ -319,7 +319,7 @@ const (
 	introLine1 = "Crush can configure itself."
 	introLine2 = "Ask it to add an MCP server, set up an LSP or change a permission."
 
-	askAnythingLine = "Ask anything. You'll pick a model when you send."
+	readyLine = "Ready when you are. You'll pick a provider once you hit send."
 )
 
 // welcomeView renders the intro shown below the path while no provider is
@@ -350,10 +350,10 @@ func (m *UI) firstRunPromptView(width int) string {
 		first, _, _ := strings.Cut(held.content, "\n")
 		return lipgloss.JoinVertical(lipgloss.Left,
 			ansi.Truncate(accent.Render("▌")+" "+text.Render(first), width, "…"),
-			ansi.Truncate(muted.Render("  held · sends as soon as a model is ready"), width, "…"),
+			ansi.Truncate(muted.Render("  held · sends once your provider is set up"), width, "…"),
 		)
 	}
-	return ansi.Truncate(text.Render(askAnythingLine), width, "…")
+	return ansi.Truncate(text.Render(readyLine), width, "…")
 }
 
 // anchorBottom lays out a block of the given height with top flush to the

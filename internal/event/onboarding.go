@@ -133,7 +133,7 @@ func OnboardingFirstPromptSent(o Onboarding, held bool, sinceCompleted time.Dura
 	d := sinceCompleted.Truncate(time.Second)
 	send("onboarding first prompt sent", o.props(
 		"held prompt", held,
-		"seconds since completed", int64(d.Seconds()),
+		"seconds since onboarding completed", int64(d.Seconds()),
 	)...)
 }
 

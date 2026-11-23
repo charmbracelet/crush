@@ -10,9 +10,9 @@
       "id": "prism",
       "name": "Prism",
       "pricing": {
-        "input": 3.2664,
-        "output": 16.332,
-        "cache_hit": 0.32664
+        "input": 2.2,
+        "output": 11,
+        "cache_hit": 0.22
       },
       "context_window": 1000000,
       "default_max_tokens": 131072,
@@ -70,6 +70,39 @@
       },
       "context_window": 1000000,
       "default_max_tokens": 262144,
+      "reasoning": {
+        "thinking": "toggleable",
+        "effort_levels": [
+          {
+            "value": "low",
+            "display": "Low"
+          },
+          {
+            "value": "high",
+            "display": "High"
+          },
+          {
+            "value": "max",
+            "display": "Max"
+          }
+        ],
+        "default_effort_level": "high"
+      },
+      "capabilities": {
+        "vision": true,
+        "audio": false
+      }
+    },
+    {
+      "id": "deepseek-v4.1-flash-1017-economy",
+      "name": "DeepSeek V4.1 Flash 1017 (Economy)",
+      "pricing": {
+        "input": 0.2,
+        "output": 0.6,
+        "cache_hit": 0.01
+      },
+      "context_window": 1000000,
+      "default_max_tokens": 384000,
       "reasoning": {
         "thinking": "toggleable",
         "effort_levels": [
@@ -325,6 +358,47 @@
       }
     },
     {
+      "id": "qwen4-max",
+      "name": "Qwen4-Max",
+      "pricing": {
+        "input": 1.5,
+        "output": 4.5,
+        "cache_hit": 0.075
+      },
+      "context_window": 1000000,
+      "default_max_tokens": 128000,
+      "reasoning": {
+        "thinking": "toggleable",
+        "effort_levels": [
+          {
+            "value": "none",
+            "display": "None"
+          },
+          {
+            "value": "minimal",
+            "display": "Minimal"
+          },
+          {
+            "value": "low",
+            "display": "Low"
+          },
+          {
+            "value": "medium",
+            "display": "Medium"
+          },
+          {
+            "value": "high",
+            "display": "High"
+          }
+        ],
+        "default_effort_level": "medium"
+      },
+      "capabilities": {
+        "vision": true,
+        "audio": false
+      }
+    },
+    {
       "id": "qwen3.8-max",
       "name": "Qwen3.8-Max",
       "pricing": {
@@ -335,7 +409,30 @@
       "context_window": 1000000,
       "default_max_tokens": 65536,
       "reasoning": {
-        "thinking": "toggleable"
+        "thinking": "toggleable",
+        "effort_levels": [
+          {
+            "value": "none",
+            "display": "None"
+          },
+          {
+            "value": "minimal",
+            "display": "Minimal"
+          },
+          {
+            "value": "low",
+            "display": "Low"
+          },
+          {
+            "value": "medium",
+            "display": "Medium"
+          },
+          {
+            "value": "high",
+            "display": "High"
+          }
+        ],
+        "default_effort_level": "medium"
       },
       "capabilities": {
         "vision": true,

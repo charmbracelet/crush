@@ -26,7 +26,9 @@
 //     events published after the event it replaced.
 //
 // Drop counters ([Broker.DropCount], [Broker.MustDeliverDropCount]) are
-// exposed so callers can surface saturation in telemetry.
+// exposed so callers can surface saturation in telemetry. A subscriber
+// that cannot tolerate gaps subscribes with
+// [Broker.SubscribeWithOverflow] to learn when an event is dropped for it.
 package pubsub
 
 import (
@@ -104,17 +106,18 @@ func (b *Broker[T]) SetMustDeliverTimeout(d time.Duration) {
 
 // Shutdown stops the broker. Each subscriber's channel closes once its
 // pending events are delivered, or once its reader stops taking them for
-// [shutdownDrainTimeout].
+// [shutdownDrainTimeout]. It is safe to call more than once, even
+// concurrently, because done is checked and closed under the write lock.
 func (b *Broker[T]) Shutdown() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
 	select {
 	case <-b.done: // Already closed
 		return
 	default:
 		close(b.done)
 	}
-
-	b.mu.Lock()
-	defer b.mu.Unlock()
 
 	for sub := range b.subs {
 		delete(b.subs, sub)
@@ -125,6 +128,21 @@ func (b *Broker[T]) Shutdown() {
 }
 
 func (b *Broker[T]) Subscribe(ctx context.Context) <-chan Event[T] {
+	return b.subscribe(ctx, nil)
+}
+
+// SubscribeWithOverflow is like [Broker.Subscribe] for subscribers that
+// cannot tolerate gaps, such as a stream to a remote client. The second
+// channel is closed the first time an event is dropped for this
+// subscriber, by [Broker.Publish] finding its queue full or by
+// [Broker.PublishMustDeliver] timing out. The subscriber should then stop
+// consuming and resynchronize from the source of truth.
+func (b *Broker[T]) SubscribeWithOverflow(ctx context.Context) (<-chan Event[T], <-chan struct{}) {
+	overflow := make(chan struct{})
+	return b.subscribe(ctx, sync.OnceFunc(func() { close(overflow) })), overflow
+}
+
+func (b *Broker[T]) subscribe(ctx context.Context, onDrop func()) <-chan Event[T] {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -139,9 +157,10 @@ func (b *Broker[T]) Subscribe(ctx context.Context) <-chan Event[T] {
 	sub := &subscription[T]{
 		// Unbuffered so pending events stay in the queue where they can
 		// still be coalesced.
-		out:   make(chan Event[T]),
-		queue: make(chan *item[T], b.channelBufferSize),
-		open:  make(map[string]*item[T]),
+		out:    make(chan Event[T]),
+		queue:  make(chan *item[T], b.channelBufferSize),
+		open:   make(map[string]*item[T]),
+		onDrop: onDrop,
 	}
 	b.subs[sub] = struct{}{}
 	b.subCount++
@@ -216,6 +235,7 @@ func (b *Broker[T]) Publish(t EventType, payload T) {
 			// observable.
 			b.dropCount.Add(1)
 			slog.Warn("Pubsub buffer full; dropping event", "type", t)
+			sub.dropped()
 		}
 	}
 }
@@ -257,6 +277,7 @@ func (b *Broker[T]) PublishMustDeliver(ctx context.Context, t EventType, payload
 		b.mustDeliverDropCount.Add(1)
 		slog.Error("PublishMustDeliver timed out delivering event",
 			"type", t, "timeout", timeout)
+		sub.dropped()
 	}
 }
 
@@ -282,6 +303,17 @@ type subscription[T any] struct {
 
 	mu   sync.Mutex
 	open map[string]*item[T] // Pending replaceable items by key.
+
+	// onDrop is called when an event is dropped for this subscriber, or
+	// is nil.
+	onDrop func()
+}
+
+// dropped reports that an event was dropped for this subscriber.
+func (s *subscription[T]) dropped() {
+	if s.onDrop != nil {
+		s.onDrop()
+	}
 }
 
 // publish queues event without blocking, or overwrites a pending item

@@ -38,6 +38,9 @@ type AgentEvent struct {
 	// caller set one.
 	RunID string `json:"run_id,omitempty"`
 
+	// ProviderID identifies the provider that needs reauthentication.
+	ProviderID string `json:"provider_id,omitempty"`
+
 	// When summarizing.
 	SessionID    string `json:"session_id,omitempty"`
 	SessionTitle string `json:"session_title,omitempty"`

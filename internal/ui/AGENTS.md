@@ -234,6 +234,9 @@ through all components that need access to app state or styles.
     call `TotalHeight` per frame during a resize — the chat suppresses the
     scrollbar mid-drag and warms the cache incrementally (`list.Prewarm`)
     on settle instead.
+  - Theme changes go through `list.Restyle`: cached heights stay valid, so
+    only items that are drawn re-render. The chat always reserves the
+    scrollbar column so overflow never changes the list width.
 - Dialog messages are intercepted first in `Update` before other routing.
 - Focus state determines key event routing: `uiFocusEditor` sends keys to
   the textarea, `uiFocusMain` sends them to the chat list.

@@ -12,6 +12,7 @@ import (
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/openaicompat"
 	"charm.land/x/vcr"
+	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
@@ -50,7 +51,7 @@ type modelPair struct {
 func hyperBuilder(model string) builderFunc {
 	return func(t *testing.T, r *vcr.Recorder) (fantasy.LanguageModel, error) {
 		provider, err := openaicompat.New(
-			openaicompat.WithBaseURL("https://hyper.charm.land/v1"),
+			openaicompat.WithBaseURL(hyper.BaseURL()+"/v1"),
 			openaicompat.WithAPIKey(os.Getenv("CRUSH_HYPER_API_KEY")),
 			openaicompat.WithHTTPClient(&http.Client{Transport: r}),
 		)
@@ -80,7 +81,7 @@ func testEnv(t *testing.T) fakeEnv {
 	// on a permission prompt.
 	permissions.SetPermissionMode(permission.PermissionModeSysadmin)
 	history := history.NewService(q, conn)
-	filetrackerService := filetracker.NewService(q)
+	filetrackerService := filetracker.NewService(q, workingDir)
 	lspClients := csync.NewMap[string, *lsp.Client]()
 
 	t.Cleanup(func() {
@@ -97,6 +98,12 @@ func testEnv(t *testing.T) fakeEnv {
 		&filetrackerService,
 		lspClients,
 	}
+}
+
+// testConfigStore is the minimal store a sessionAgent needs; production always
+// gets a real one.
+func testConfigStore() *config.ConfigStore {
+	return config.NewTestStore(&config.Config{Options: &config.Options{}, Providers: csync.NewMap[string, config.ProviderConfig]()})
 }
 
 func testSessionAgent(env fakeEnv, large, small fantasy.LanguageModel, systemPrompt string, tools ...fantasy.AgentTool) SessionAgent {
@@ -120,6 +127,7 @@ func testSessionAgent(env fakeEnv, large, small fantasy.LanguageModel, systemPro
 		Sessions:     env.sessions,
 		Messages:     env.messages,
 		Tools:        tools,
+		Cfg:          testConfigStore(),
 	})
 	return agent
 }
@@ -129,15 +137,15 @@ func coderAgent(r *vcr.Recorder, env fakeEnv, large, small fantasy.LanguageModel
 		t, _ := time.Parse("1/2/2006", "1/1/2025")
 		return t
 	}
-	prompt, err := coderPrompt(
+	cfg, err := config.Init(context.Background(), env.workingDir, "", false)
+	if err != nil {
+		return nil, err
+	}
+	prompt, err := loadPrompt(cfg, "coder",
 		prompt.WithTimeFunc(fixedTime),
 		prompt.WithPlatform("linux"),
 		prompt.WithWorkingDir(filepath.ToSlash(env.workingDir)),
 	)
-	if err != nil {
-		return nil, err
-	}
-	cfg, err := config.Init(context.Background(), env.workingDir, "", false)
 	if err != nil {
 		return nil, err
 	}
@@ -155,6 +163,9 @@ func coderAgent(r *vcr.Recorder, env fakeEnv, large, small fantasy.LanguageModel
 	cfg.Config().Options.ContextPaths = nil
 	cfg.Config().Options.GlobalContextPaths = nil
 	cfg.Config().LSP = nil
+	// The working directory is not a git repository, so Load caps the ls
+	// walk. The cassettes were recorded without that cap.
+	cfg.Config().Tools.Ls = config.ToolLs{}
 
 	systemPrompt, err := prompt.Build(context.TODO(), large.Provider(), large.Model(), cfg)
 	if err != nil {
@@ -168,7 +179,7 @@ func coderAgent(r *vcr.Recorder, env fakeEnv, large, small fantasy.LanguageModel
 	}
 
 	allTools := []fantasy.AgentTool{
-		tools.NewBashTool(env.permissions, env.workingDir, cfg.Config().Options.DataDirectory, cfg.Config().Options.Attribution, modelName, cfg.Config().Options.GetMaxBackgroundJobs(), cfg.Config().Permissions),
+		tools.NewBashTool(env.permissions, env.workingDir, cfg.Config().Options.DataDirectory, cfg.Config().Options.Attribution, modelName, cfg.Config().Options.GetMaxBackgroundJobs(), cfg.Config().Permissions, nil),
 		tools.NewDownloadTool(env.permissions, env.workingDir, r.GetDefaultClient()),
 		tools.NewEditTool(nil, env.permissions, env.history, *env.filetracker, env.workingDir),
 		tools.NewMultiEditTool(nil, env.permissions, env.history, *env.filetracker, env.workingDir),

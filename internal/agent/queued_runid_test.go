@@ -90,6 +90,7 @@ func TestRun_QueuedRunIDPromptRunsRecursivelyAndPublishesRunComplete(t *testing.
 	small := &finishStreamModel{text: "title"}
 
 	sa := NewSessionAgent(SessionAgentOptions{
+		Cfg: testConfigStore(),
 		Models: fixedModels(
 			Model{Model: large, CatwalkCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}},
 			Model{Model: small, CatwalkCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}},
@@ -123,7 +124,7 @@ func TestRun_QueuedRunIDPromptRunsRecursivelyAndPublishesRunComplete(t *testing.
 	case <-time.After(5 * time.Second):
 		t.Fatal("main run never entered Stream")
 	}
-	require.True(t, sa.IsSessionBusy(sess.ID), "main run must be active before enqueueing the follow-up")
+	require.True(t, sa.HasActiveTurn(sess.ID), "main run must be active before enqueueing the follow-up")
 
 	// Enqueue a RunID-bearing follow-up behind the busy session.
 	res, err := sa.Run(t.Context(), SessionAgentCall{

@@ -1,9 +1,11 @@
 package proto
 
 import (
+	"cmp"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"slices"
 	"time"
 
@@ -154,6 +156,8 @@ type ToolCall struct {
 	Input    string `json:"input"`
 	Type     string `json:"type,omitempty"`
 	Finished bool   `json:"finished,omitempty"`
+	// StartedAtMs is when the call first appeared, in Unix milliseconds.
+	StartedAtMs int64 `json:"started_at_ms,omitempty"`
 }
 
 func (ToolCall) isPart() {}
@@ -167,6 +171,8 @@ type ToolResult struct {
 	MIMEType   string `json:"mime_type,omitempty"`
 	Metadata   string `json:"metadata"`
 	IsError    bool   `json:"is_error"`
+	// FinishedAtMs is when this reply was recorded, in Unix milliseconds.
+	FinishedAtMs int64 `json:"finished_at_ms,omitempty"`
 }
 
 func (ToolResult) isPart() {}
@@ -430,11 +436,12 @@ func (m *Message) FinishToolCall(toolCallID string) {
 		if c, ok := part.(ToolCall); ok {
 			if c.ID == toolCallID {
 				m.Parts[i] = ToolCall{
-					ID:       c.ID,
-					Name:     c.Name,
-					Input:    c.Input,
-					Type:     c.Type,
-					Finished: true,
+					ID:          c.ID,
+					Name:        c.Name,
+					Input:       c.Input,
+					Type:        c.Type,
+					Finished:    true,
+					StartedAtMs: c.StartedAtMs,
 				}
 				return
 			}
@@ -442,14 +449,13 @@ func (m *Message) FinishToolCall(toolCallID string) {
 	}
 }
 
-// AddToolCall adds or updates a tool call.
+// AddToolCall adds or updates a tool call, keeping its recorded start.
 func (m *Message) AddToolCall(tc ToolCall) {
 	for i, part := range m.Parts {
-		if c, ok := part.(ToolCall); ok {
-			if c.ID == tc.ID {
-				m.Parts[i] = tc
-				return
-			}
+		if c, ok := part.(ToolCall); ok && c.ID == tc.ID {
+			tc.StartedAtMs = cmp.Or(tc.StartedAtMs, c.StartedAtMs)
+			m.Parts[i] = tc
+			return
 		}
 	}
 	m.Parts = append(m.Parts, tc)
@@ -560,7 +566,9 @@ func MarshalParts(parts []ContentPart) ([]byte, error) {
 	return json.Marshal(wrappedParts)
 }
 
-// UnmarshalParts unmarshals content parts from JSON.
+// UnmarshalParts unmarshals content parts from JSON. A part of a type this
+// build does not know, such as one added by a newer server, is skipped so
+// that the rest of the message still decodes.
 func UnmarshalParts(data []byte) ([]ContentPart, error) {
 	temp := []json.RawMessage{}
 
@@ -636,7 +644,7 @@ func UnmarshalParts(data []byte) ([]ContentPart, error) {
 			}
 			parts = append(parts, part)
 		default:
-			return nil, fmt.Errorf("unknown part type: %s", wrapper.Type)
+			slog.Debug("Skipping unknown message part type", "type", wrapper.Type)
 		}
 	}
 

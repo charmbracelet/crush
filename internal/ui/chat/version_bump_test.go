@@ -22,8 +22,7 @@ type versionedItem interface {
 
 // requireBump asserts that the supplied mutator advances the item's
 // Version(). The mutator runs once; an absent bump is a regression
-// (a finished item would keep serving stale frozen output to the
-// list cache).
+// (the list cache would keep serving stale output).
 func requireBump(t *testing.T, name string, item versionedItem, mutate func()) {
 	t.Helper()
 	before := item.Version()
@@ -95,11 +94,10 @@ func TestUserMessageItem_MutatorsBumpVersion(t *testing.T) {
 	})
 }
 
-// TestAssistantInfoItem_VersionedAndFinished sanity-checks the
-// AssistantInfoItem wiring. The item carries only immutable data
-// after construction; we still assert Version() is callable and
-// Finished() returns true.
-func TestAssistantInfoItem_VersionedAndFinished(t *testing.T) {
+// TestAssistantInfoItem_Versioned sanity-checks the AssistantInfoItem
+// wiring. The item carries only immutable data after construction; we
+// still assert Version() is callable.
+func TestAssistantInfoItem_Versioned(t *testing.T) {
 	t.Parallel()
 
 	sty := styles.CharmtonePantera()
@@ -111,7 +109,6 @@ func TestAssistantInfoItem_VersionedAndFinished(t *testing.T) {
 	}
 	item := NewAssistantInfoItem(&sty, msg, cfg, time.Unix(0, 0)).(*AssistantInfoItem)
 
-	require.True(t, item.Finished(), "AssistantInfoItem must be Finished()")
 	// Version() is callable and starts at zero.
 	require.Equal(t, uint64(0), item.Version())
 }
@@ -187,7 +184,7 @@ func TestAssistantMessageItem_AdvanceBumpsVersion(t *testing.T) {
 
 	// A non-spinning item must not bump on Advance: the bump only
 	// makes sense while the spinner is live, and a stray bump on a
-	// finished item would needlessly invalidate frozen entries.
+	// finished item would needlessly invalidate its cache entry.
 	finished := &message.Message{
 		ID:   "spin",
 		Role: message.Assistant,
@@ -197,66 +194,15 @@ func TestAssistantMessageItem_AdvanceBumpsVersion(t *testing.T) {
 		},
 	}
 	item.SetMessage(finished)
-	require.True(t, item.Finished(), "item must report Finished() once the message finishes")
 	require.False(t, item.Spinning())
 	before := item.Version()
 	item.Advance()
 	require.Equal(t, before, item.Version(), "Advance must not bump Version() on a non-spinning item")
 }
 
-// TestAssistantMessageItem_FinishedTransition covers §4.5.1: a
-// streaming assistant message reports Finished() == false; once the
-// message reports IsFinished() and stops spinning, Finished() must
-// return true.
-func TestAssistantMessageItem_FinishedTransition(t *testing.T) {
-	t.Parallel()
-
-	sty := styles.CharmtonePantera()
-
-	// Streaming: no finish part, no content yet — isSpinning == true.
-	streaming := &message.Message{
-		ID:   "stream",
-		Role: message.Assistant,
-		Parts: []message.ContentPart{
-			message.ReasoningContent{Thinking: "thinking..."},
-		},
-	}
-	item := NewAssistantMessageItem(&sty, streaming).(*AssistantMessageItem)
-	require.False(t, item.Finished(), "streaming assistant message must not be Finished()")
-
-	// Finished with content.
-	finished := &message.Message{
-		ID:   "stream",
-		Role: message.Assistant,
-		Parts: []message.ContentPart{
-			message.ReasoningContent{Thinking: "thinking", StartedAt: testStartedAt, FinishedAt: testFinishedAt},
-			message.TextContent{Text: "the answer"},
-			message.Finish{Reason: message.FinishReasonEndTurn, Time: testFinishTime},
-		},
-	}
-	item.SetMessage(finished)
-	require.True(t, item.Finished(), "finished assistant message must be Finished()")
-}
-
-// TestUserMessageItem_FinishedAlwaysTrue locks in the freezable
-// contract: user messages are never spinning.
-func TestUserMessageItem_FinishedAlwaysTrue(t *testing.T) {
-	t.Parallel()
-
-	sty := styles.CharmtonePantera()
-	r := attachments.NewRenderer(sty.Attachments)
-	msg := &message.Message{
-		ID:    "u-fin",
-		Role:  message.User,
-		Parts: []message.ContentPart{message.TextContent{Text: "hi"}},
-	}
-	item := NewUserMessageItem(&sty, msg, r).(*UserMessageItem)
-	require.True(t, item.Finished())
-}
-
 // TestAgentToolMessageItem_NestedToolMutatorsBumpVersion covers B1:
 // the nested-tool mutators on AgentToolMessageItem must bump
-// Version() so the list cache invalidates frozen entries when a
+// Version() so the list cache invalidates its entry when a
 // nested tool is added or the slice changes. SetNestedTools always
 // bumps unconditionally — the live update path in
 // internal/ui/model/ui.go mutates existing children in place and
@@ -408,8 +354,8 @@ func requireNoBump(t *testing.T, name string, item versionedItem, mutate func())
 // regression test for non-agent tools: while the tool is spinning,
 // every clock frame must bump Version() so the list-level cache
 // invalidates and the next draw re-renders the advanced spinner
-// frame. A finished tool must not bump (the entry is frozen and stays
-// frozen) and must report that it no longer needs frames.
+// frame. A finished tool must not bump and must report that it no
+// longer needs frames.
 func TestBaseToolMessageItem_AdvanceBumpsVersion(t *testing.T) {
 	t.Parallel()
 
@@ -425,13 +371,12 @@ func TestBaseToolMessageItem_AdvanceBumpsVersion(t *testing.T) {
 		a.Advance()
 	})
 
-	// Finished → no bump. The entry is frozen; a stray bump would
-	// needlessly invalidate frozen entries.
+	// Finished → no bump. A stray bump would needlessly invalidate the
+	// cache entry.
 	tcFinished := tc
 	tcFinished.Finished = true
 	item.SetToolCall(tcFinished)
 	item.SetResult(&message.ToolResult{ToolCallID: tc.ID, Content: "ok"})
-	require.True(t, item.Finished(), "tool must report Finished() once the result lands")
 	require.False(t, a.Spinning(), "finished tool must not request frames")
 
 	requireNoBump(t, "Advance[finished]", v, func() {
@@ -505,28 +450,4 @@ func TestAgenticFetchToolMessageItem_AdvanceBumpsVersion(t *testing.T) {
 	requireNoBump(t, "Advance[finished,nested]", childV, func() {
 		parent.Advance()
 	})
-}
-
-// TestBaseToolMessageItem_FinishedTransition covers §4.5.1 for
-// tools: a still-running tool reports Finished() == false; once the
-// tool call is marked finished and a result lands, Finished()
-// returns true. Cancelled tools also become Finished.
-func TestBaseToolMessageItem_FinishedTransition(t *testing.T) {
-	t.Parallel()
-
-	sty := styles.CharmtonePantera()
-	tc := message.ToolCall{ID: "tc-fin", Name: "bash", Input: "{}", Finished: false}
-	item := NewToolMessageItem(&sty, "msg", tc, nil, false, "")
-	require.False(t, item.Finished(), "running tool must not be Finished()")
-
-	tcFinished := tc
-	tcFinished.Finished = true
-	item.SetToolCall(tcFinished)
-	item.SetResult(&message.ToolResult{ToolCallID: "tc-fin", Content: "ok"})
-	require.True(t, item.Finished(), "finished tool with result must be Finished()")
-
-	// Canceled tool with no result is also Finished.
-	tcCanceled := message.ToolCall{ID: "tc-cancel", Name: "bash", Input: "{}", Finished: false}
-	canceled := NewToolMessageItem(&sty, "msg", tcCanceled, nil, true, "")
-	require.True(t, canceled.Finished(), "canceled tool must be Finished()")
 }

@@ -88,9 +88,6 @@ func (p *PendingAssistantItem) ID() string { return PendingAssistantID }
 // FilterValue implements list.Item.
 func (p *PendingAssistantItem) FilterValue() string { return "" }
 
-// Finished implements list.Item. Never finished; it is removed instead.
-func (p *PendingAssistantItem) Finished() bool { return false }
-
 // Spinning implements [Animatable].
 func (p *PendingAssistantItem) Spinning() bool { return true }
 

@@ -215,6 +215,10 @@ func dispatchShebang(ctx context.Context, scriptPath string, probe []byte, args 
 	cmd.Stdout = hc.Stdout
 	cmd.Stderr = hc.Stderr
 	isolateProcess(cmd)
+	// Cancellation must take out the interpreter's whole process group
+	// (a script's own children included), and Wait must not be held open
+	// forever by a descendant still sitting on the stdio pipes.
+	killGroupOnCancel(cmd)
 
 	if err := cmd.Run(); err != nil {
 		var exitErr *exec.ExitError

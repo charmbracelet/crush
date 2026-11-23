@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/agent/tools"
@@ -47,7 +48,7 @@ type BashToolRenderContext struct {
 // RenderTool implements the [ToolRenderer] interface.
 func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
-	if opts.IsPending() {
+	if opts.IsStreamingInput() {
 		return pendingTool(sty, "Bash", opts.Anim, opts.Compact)
 	}
 
@@ -88,9 +89,8 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		options = append(options, "background", "true")
 	}
 	// Show how long the command ran (or has been running) beside the
-	// command: bash calls can take minutes and the bare header gives no
-	// sense of it.
-	if opts.Elapsed > 0 {
+	// command; sub-second runs are noise, so they show nothing.
+	if opts.Elapsed >= time.Second {
 		options = append(options, "took", common.FormatDuration(opts.Elapsed))
 	}
 
@@ -214,7 +214,7 @@ type JobOutputToolRenderContext struct {
 // RenderTool implements the [ToolRenderer] interface.
 func (j *JobOutputToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
-	if opts.IsPending() {
+	if opts.IsStreamingInput() {
 		return pendingTool(sty, "Job", opts.Anim, opts.Compact)
 	}
 
@@ -266,7 +266,7 @@ type JobKillToolRenderContext struct{}
 // RenderTool implements the [ToolRenderer] interface.
 func (j *JobKillToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
-	if opts.IsPending() {
+	if opts.IsStreamingInput() {
 		return pendingTool(sty, "Job", opts.Anim, opts.Compact)
 	}
 

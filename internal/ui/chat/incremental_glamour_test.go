@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"charm.land/glamour/v2"
+	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/stretchr/testify/require"
 )
@@ -65,17 +67,8 @@ func stripANSI(s string) string {
 	return b.String()
 }
 
-// normalizeRender canonicalises a rendered glamour string for
-// visual-equivalence comparison: strip ANSI, drop per-line
-// trailing whitespace, drop leading/trailing blank lines, and
-// collapse consecutive blank lines to a single blank line.
-//
-// Glamour pads rendered lines with trailing spaces and adds top/
-// bottom block margins that differ subtly between "render the
-// whole document at once" and "render two halves and concatenate
-// them." Per F8 design principle D, those byte-level differences
-// are acceptable as long as the visible content matches; this
-// helper makes that comparison explicit.
+// normalizeRender strips ANSI, trailing spaces and repeated blank lines
+// from a render so failure messages show its visible text.
 func normalizeRender(s string) string {
 	clean := stripANSI(s)
 	lines := strings.Split(clean, "\n")
@@ -402,12 +395,10 @@ func progressivePrefixes(doc string, n int) []string {
 	return out
 }
 
-// TestStreamingMarkdown_FinalVisuallyEquivalent drives a sequence
-// of progressive prefixes through streamingMarkdown and asserts
-// the FINAL output is visually equivalent (per design principle
-// D) to a fresh full-document render. Strict byte-equality is
-// not the bar — see the comment in normalizeRender for why.
-func TestStreamingMarkdown_FinalVisuallyEquivalent(t *testing.T) {
+// TestStreamingMarkdown_FinalMatchesFullRender drives a sequence of
+// progressive prefixes through streamingMarkdown and asserts the final
+// output is byte-identical to a fresh full-document render.
+func TestStreamingMarkdown_FinalMatchesFullRender(t *testing.T) {
 	t.Parallel()
 
 	const width = 80
@@ -426,8 +417,8 @@ func TestStreamingMarkdown_FinalVisuallyEquivalent(t *testing.T) {
 			}
 
 			fresh := freshRender(t, sc.doc, width)
-			require.Equal(t, normalizeRender(fresh), normalizeRender(lastOut),
-				"final streaming output must match a fresh full render visually")
+			require.Equal(t, fresh, lastOut,
+				"final streaming output must match a fresh full render")
 		})
 	}
 }
@@ -530,7 +521,7 @@ func TestStreamingMarkdown_NonPrefixContentInvalidates(t *testing.T) {
 
 	// Visual equivalence to a fresh render of `other`.
 	fresh := freshRender(t, other, width)
-	require.Equal(t, normalizeRender(fresh), normalizeRender(out),
+	require.Equal(t, fresh, out,
 		"render after non-prefix content change must match a fresh render")
 }
 
@@ -559,7 +550,7 @@ func TestStreamingMarkdown_ResetClearsCache(t *testing.T) {
 	// and verify the output matches a fresh full render.
 	out := sm.Render(doc, width, r)
 	fresh := freshRender(t, doc, width)
-	require.Equal(t, normalizeRender(fresh), normalizeRender(out))
+	require.Equal(t, fresh, out)
 }
 
 // -----------------------------------------------------------------------
@@ -823,7 +814,7 @@ func TestStreamingMarkdown_LinkRefDefinition(t *testing.T) {
 }
 
 // TestAssistantStreamingContent_ResetOnClearCache guards the
-// integration contract that ClearItemCaches (style change) drops
+// integration contract that ClearItemCache (style change) drops
 // the streaming-markdown cache. Without this, a style change
 // would leave the OLD style's ANSI sequences embedded in the
 // stable-prefix render and the next flush would visually mix
@@ -844,7 +835,7 @@ func TestAssistantStreamingContent_ResetOnClearCache(t *testing.T) {
 	item.SetMessage(finishedAssistantMessage("stream-clear", doc2))
 	_ = item.RawRender(width)
 
-	// Now wipe the caches the way ClearItemCaches does.
+	// Now wipe the caches the way ClearItemCache does.
 	item.clearCache()
 
 	require.Equal(t, "", item.streamingContent.stablePrefix,
@@ -983,5 +974,96 @@ func TestStreamingMarkdown_LastLinesMatchesOutput(t *testing.T) {
 					"step %d (len=%d): tracked line count must match the output", i, len(p))
 			}
 		})
+	}
+}
+
+// lazyTestDoc is a document with safe boundaries, so a render that grows
+// from it seeds the prefix cache.
+const lazyTestDoc = "# Title\n\nFirst paragraph of the answer.\n\nSecond paragraph.\n\n- one\n- two\n"
+
+func TestStreamingMarkdown_ColdRenderDoesNotSeed(t *testing.T) {
+	t.Parallel()
+
+	var sm streamingMarkdown
+	got := sm.Render(lazyTestDoc, 60, newTestRenderer(t, 60))
+	require.Equal(t, freshRender(t, lazyTestDoc, 60), got)
+	require.Equal(t, countLines(trimGlamourMargins(got)), sm.LastLines())
+	require.Empty(t, sm.stablePrefix, "a cold render must not pay for a seed nothing may reuse")
+}
+
+func TestStreamingMarkdown_RepeatRenderIsMemoized(t *testing.T) {
+	t.Parallel()
+
+	var sm streamingMarkdown
+	first := sm.Render(lazyTestDoc, 60, newTestRenderer(t, 60))
+	lines := sm.LastLines()
+
+	// A renderer that wraps differently proves the repeat skips glamour.
+	again := sm.Render(lazyTestDoc, 60, newTestRenderer(t, 12))
+	require.Equal(t, first, again)
+	require.Equal(t, lines, sm.LastLines())
+
+	// A new width misses.
+	require.Equal(t, freshRender(t, lazyTestDoc, 30), sm.Render(lazyTestDoc, 30, newTestRenderer(t, 30)))
+}
+
+func TestStreamingMarkdown_GrowthSeedsLazily(t *testing.T) {
+	t.Parallel()
+
+	var sm streamingMarkdown
+	_ = sm.Render(lazyTestDoc, 60, newTestRenderer(t, 60))
+
+	grown := lazyTestDoc + "\nA trailing paragraph.\n"
+	got := sm.Render(grown, 60, newTestRenderer(t, 60))
+	require.Equal(t, freshRender(t, grown, 60), got)
+	require.Equal(t, countLines(trimGlamourMargins(got)), sm.LastLines())
+	require.NotEmpty(t, sm.stablePrefix, "growing content seeds the prefix cache")
+}
+
+// A finished message rendered cold renders its content and thinking once,
+// without seeding a stable prefix it would never reuse.
+func TestAssistantMessageItem_FinishedRendersOnce(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	paragraphs := strings.Repeat("A paragraph of text.\n\n", 20)
+	msg := &message.Message{
+		ID:   "finished",
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.ReasoningContent{Thinking: paragraphs, StartedAt: testStartedAt, FinishedAt: testFinishedAt},
+			message.TextContent{Text: paragraphs},
+			message.Finish{Reason: message.FinishReasonEndTurn, Time: testFinishedAt},
+		},
+	}
+	item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
+	item.RawRender(80)
+
+	require.Empty(t, item.streamingContent.stablePrefix)
+	require.Empty(t, item.streamingThinking.stablePrefix)
+	require.NotEmpty(t, item.streamingContent.lastRender)
+	require.NotEmpty(t, item.streamingThinking.lastRender)
+}
+
+// TestMarkdownSentinel_RendersToNothing pins the assumption renderPiece
+// relies on: with every renderer the streaming path uses, the sentinel
+// renders to nothing, so a piece behind it needs no slicing.
+func TestMarkdownSentinel_RendersToNothing(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	for _, width := range []int{20, 60, 120} {
+		for name, renderer := range map[string]*glamour.TermRenderer{
+			"content":  common.MarkdownRenderer(&sty, width),
+			"thinking": common.QuietMarkdownRenderer(&sty, width),
+			"plan":     common.PlanMarkdownRenderer(&sty, width),
+		} {
+			mu := common.LockMarkdownRenderer(renderer)
+			mu.Lock()
+			out, err := renderer.Render(markdownSentinel)
+			mu.Unlock()
+			require.NoError(t, err)
+			require.Empty(t, out, "%s renderer at width %d", name, width)
+		}
 	}
 }

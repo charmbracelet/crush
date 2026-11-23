@@ -6,6 +6,13 @@ import (
 	"time"
 )
 
+// ElapsedSince is how long a timer started at started shows at end. Both
+// ends snap to the wall-clock second so every running timer changes on the
+// same frame, and a finished timer never reads less than it last showed.
+func ElapsedSince(started, end time.Time) time.Duration {
+	return max(0, end.Truncate(time.Second).Sub(started.Truncate(time.Second)))
+}
+
 // turnClock tracks when each session's current turn started. Turns in
 // different sessions run concurrently, so one clock per session: a turn
 // finishing in one session must not reset the elapsed time shown in
@@ -62,7 +69,7 @@ func Elapsed(sessionID string) string {
 		return ""
 	}
 
-	return FormatDuration(time.Since(startTime))
+	return FormatDuration(ElapsedSince(startTime, time.Now()))
 }
 
 // FormatDuration formats a duration as a human friendly string.

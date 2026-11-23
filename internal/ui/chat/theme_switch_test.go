@@ -35,7 +35,7 @@ func sgrColor(color string) string {
 	return fmt.Sprintf("2;%d;%d;%dm", r, g, b)
 }
 
-func TestClearItemCaches_ReachesNestedTools(t *testing.T) {
+func TestClearItemCache_ReachesNestedTools(t *testing.T) {
 	t.Parallel()
 
 	for _, name := range []string{"agent", "agentic_fetch"} {
@@ -63,7 +63,7 @@ func TestClearItemCaches_ReachesNestedTools(t *testing.T) {
 			require.NotContains(t, parent.Render(80), sgrColor("#ff0404")+"*.go")
 
 			sty = switchedStyles(t, "#010203")
-			ClearItemCaches([]MessageItem{parent})
+			ClearItemCache(parent)
 
 			// The pattern is drawn by the nested tool alone, in
 			// fg_most_subtle.
@@ -98,6 +98,6 @@ func TestPendingAssistantItem_RestylesSpinner(t *testing.T) {
 	before := p.RawRender(80)
 
 	sty = switchedStyles(t, "#010203")
-	ClearItemCaches([]MessageItem{p})
+	ClearItemCache(p)
 	require.NotEqual(t, before, p.RawRender(80), "spinner kept its old-theme gradient")
 }

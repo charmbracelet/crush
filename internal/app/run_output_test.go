@@ -325,6 +325,44 @@ func TestAnswerPrinter_PrintUntilDoneContextDone(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 }
 
+func TestAnswerPrinter_PrintUntilDoneClosedEvents(t *testing.T) {
+	t.Parallel()
+	var out bytes.Buffer
+	p := newTestPrinter(t, &out)
+	events := make(chan pubsub.Event[message.Message])
+	close(events)
+	done := make(chan error, 1)
+	waits := 0
+	beforeWait := func() {
+		if waits++; waits == 2 {
+			done <- nil
+		}
+	}
+
+	err := p.printUntilDone(t.Context(), events, done,
+		storedMessages{msgs: []message.Message{assistantReply("final", "s", "Recovered.")}},
+		beforeWait, func() {})
+	require.NoError(t, err)
+	require.Equal(t, "Recovered.", out.String())
+	require.Equal(t, 2, waits, "a closed events channel must be nil'd out rather than busy-spinning")
+}
+
+func TestAnswerPrinter_SubsequentReplyLeadingSpacesAcrossChunks(t *testing.T) {
+	t.Parallel()
+	var chunked, whole bytes.Buffer
+	p := newTestPrinter(t, &chunked)
+	p.write(assistantReply("m1", "s", "First."))
+	p.write(assistantReply("m2", "s", " "))
+	p.write(assistantReply("m2", "s", "  Second."))
+
+	pw := newTestPrinter(t, &whole)
+	pw.write(assistantReply("m1", "s", "First."))
+	pw.write(assistantReply("m2", "s", "  Second."))
+
+	require.Equal(t, "First.Second.", chunked.String())
+	require.Equal(t, whole.String(), chunked.String())
+}
+
 // TestAnswerPrinter_MessageService runs the printer against the real
 // message service. It stores the messages of a run and calls FlushAll, as
 // the agent does before it reports done, then reads a single event. flush

@@ -72,6 +72,10 @@ type RuntimeOverrides struct {
 	// selection made here always outranks whatever the shared config file
 	// happens to hold — see pinPreferredModelLocked.
 	Models map[SelectedModelType]SelectedModel
+	// Prompts replaces built-in prompts for this session only (via the
+	// --prompt flag). Entries win over options.prompts and hold absolute
+	// paths, since they were resolved against the invoking shell's cwd.
+	Prompts PromptPaths
 }
 
 // ConfigStore is the single entry point for all config access. It owns the
@@ -1490,7 +1494,7 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 
 	// Reconfigure providers
 	env := env.New()
-	resolver := NewShellVariableResolver(env)
+	resolver := NewShellVariableResolver(env, WithWorkingDir(s.workingDir))
 
 	// Apply top-level env vars before configuring providers so variables
 	// like AWS_PROFILE are visible to the AWS SDK credential chain.

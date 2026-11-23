@@ -33,6 +33,13 @@ func TestToolItemStopsSpinningOnceItHasAResult(t *testing.T) {
 			want:     true,
 		},
 		{
+			// Finished only means the arguments stopped streaming; the
+			// tool is still running until its result arrives.
+			name:     "finished call without a result spins",
+			toolCall: message.ToolCall{ID: "tc1", Name: "write", Input: "{}", Finished: true},
+			want:     true,
+		},
+		{
 			name:     "unfinished call with a result does not spin",
 			toolCall: message.ToolCall{ID: "tc1", Name: "write", Input: "{}", Finished: false},
 			result:   result,

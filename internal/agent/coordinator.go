@@ -153,6 +153,7 @@ type coordinator struct {
 	notify      pubsub.Publisher[notify.Notification]
 	runComplete pubsub.Publisher[notify.RunComplete]
 	interactive bool
+	shellOwner  any
 
 	// agentMu guards mainAgent and mainAgentName: SetMainAgent runs on
 	// HTTP handler goroutines while runs, cancels, and probes read the
@@ -192,6 +193,9 @@ type coordinator struct {
 	// the busy check sees subagents the main agent is not running itself.
 	subSessionsMu sync.Mutex
 	subSessions   map[string]int
+	// settleMu serializes transcript repairs so two readers cannot both
+	// settle one orphaned call.
+	settleMu sync.Mutex
 
 	// Skills discovery results (session-start snapshot).
 	allSkills    []*skills.Skill // Pre-filter: all discovered after dedup.
@@ -204,6 +208,9 @@ type coordinator struct {
 	prompts     map[string]*prompt.Prompt
 	skillKeys   map[string]string
 	skillKeysMu sync.Mutex
+
+	// promptTexts is every prompt's text, read once at startup.
+	promptTexts map[string]string
 
 	readyWg errgroup.Group
 
@@ -231,6 +238,9 @@ type CoordinatorOptions struct {
 	Skills      *skills.Manager
 	HookRunner  *hooks.Runner
 	Interactive bool
+	// ShellOwner tags the background shells the bash tool starts, so the
+	// owner can stop its own shells without touching anyone else's.
+	ShellOwner any
 }
 
 func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, error) {
@@ -264,6 +274,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		skillTracker:    skillTracker,
 		interactive:     opts.Interactive,
 		hookRunner:      opts.HookRunner,
+		shellOwner:      opts.ShellOwner,
 		dispatched:      csync.NewMap[string, *dispatchedAgent](),
 		backgroundAfter: subAgentBackgroundAfter,
 	}
@@ -273,7 +284,13 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		return nil, errCoderAgentNotConfigured
 	}
 
-	coderPrompt, err := coderPrompt(c.skillOverrideOptions()...)
+	promptTexts, err := loadPromptTexts(c.cfg)
+	if err != nil {
+		return nil, err
+	}
+	c.promptTexts = promptTexts
+
+	coderPrompt, err := c.newPrompt("coder", c.skillOverrideOptions()...)
 	if err != nil {
 		return nil, err
 	}
@@ -289,7 +306,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		return nil, errPlanAgentNotConfigured
 	}
 
-	planSystemPrompt, err := planPrompt(append(
+	planSystemPrompt, err := c.newPrompt("plan", append(
 		c.skillOverrideOptions(),
 		prompt.WithToolNames(c.effectiveToolNames(planCfg, false)),
 	)...)
@@ -467,6 +484,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, report *mess
 			Report:            report,
 			HiddenUserMessage: message.HiddenUserMessage(ctx),
 			Attachments:       attachments,
+			Model:             model,
 			MaxOutputTokens:   maxTokens,
 			ProviderOptions:   mergedOptions,
 			Temperature:       temp,
@@ -992,6 +1010,7 @@ func (c *coordinator) buildAgentWithModels(ctx context.Context, ready *errgroup.
 		Messages:             c.messages,
 		Permissions:          c.permissions,
 		Cfg:                  c.cfg,
+		Prompts:              c.promptTexts,
 		Tools:                nil,
 		Notify:               c.notify,
 		RunComplete:          c.runComplete,
@@ -1107,7 +1126,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 
 	allTools = append(
 		allTools,
-		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.DataDirectory, c.cfg.Config().Options.Attribution, modelID, c.cfg.Config().Options.GetMaxBackgroundJobs(), c.cfg.Config().Permissions),
+		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.DataDirectory, c.cfg.Config().Options.Attribution, modelID, c.cfg.Config().Options.GetMaxBackgroundJobs(), c.cfg.Config().Permissions, c.shellOwner),
 		tools.NewCrushInfoTool(c.cfg, c.lspManager, c.allSkills, c.activeSkills, c.skillTracker),
 		tools.NewCrushLogsTool(logFile),
 		tools.NewJobOutputTool(c.cfg.Config().Options.DataDirectory),
@@ -1246,6 +1265,7 @@ func (c *coordinator) buildModelFromSelection(ctx context.Context, modelCfg conf
 	// configured timeout so unreachable or hung providers fail instead of
 	// blocking a session forever. Retries get a fresh budget each attempt.
 	languageModel = newRequestGuardModel(languageModel, c.cfg.Config().Options.GetRequestTimeout())
+	languageModel = newRefusalRetryModel(languageModel)
 
 	// Hyper completions no longer report the hypercredit balance, so wrap
 	// the Hyper models to fetch it from /v1/credits on every request.
@@ -1675,11 +1695,12 @@ func (c *coordinator) IsBusy() bool {
 // and safe to settle, so it must not miss a subagent running on an agent
 // instance other than the main one.
 func (c *coordinator) IsSessionBusy(sessionID string) bool {
-	return c.currentAgent().IsSessionBusy(sessionID) || c.subSessionBusy(sessionID)
-}
-
-func (c *coordinator) ListSettledMessages(ctx context.Context, sessionID string) ([]message.Message, error) {
-	return c.currentAgent().ListSettledMessages(ctx, sessionID)
+	for _, agent := range c.agents {
+		if agent.HasPendingWork(sessionID) {
+			return true
+		}
+	}
+	return c.subSessionBusy(sessionID)
 }
 
 func (c *coordinator) SetHostContext(hc proto.HostContext) { c.hostContext.Set(hc) }
@@ -1732,7 +1753,8 @@ func (c *coordinator) QueuedPromptsList(sessionID string) []string {
 
 func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
 	agent := c.currentAgent()
-	providerCfg, ok := c.cfg.Config().Providers.Get(agent.Model().ModelCfg.Provider)
+	model := agent.Model()
+	providerCfg, ok := c.cfg.Config().Providers.Get(model.ModelCfg.Provider)
 	if !ok {
 		return errModelProviderNotConfigured
 	}
@@ -1743,9 +1765,9 @@ func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
 
 	// Auth failures during summarize flow through fantasy's OnAuthRefresh,
 	// the same path used by regular turns.
-	opts := getProviderOptions(agent.Model(), providerCfg)
+	opts := getProviderOptions(model, providerCfg)
 	injectOpenrouterSessionID(opts, sessionID)
-	return agent.Summarize(ctx, sessionID, opts, c.makeAuthRefreshCallback(providerCfg))
+	return agent.Summarize(ctx, sessionID, model, opts, c.makeAuthRefreshCallback(providerCfg))
 }
 
 // GenerateTitle generates a session title using the current agent.
@@ -1921,7 +1943,7 @@ func callTopK(providerCfg config.ProviderConfig, topK *int64) *int64 {
 // settings for the subagent's own model, not the parent's. Both the initial
 // task and any message sent to a running subagent go through it, so a
 // mid-flight message cannot start a turn with an unconfigured model.
-func (c *coordinator) subAgentCall(agent SessionAgent, sessionID, prompt string) (SessionAgentCall, Model, error) {
+func (c *coordinator) subAgentCall(agent SessionAgent, sessionID, prompt string) (SessionAgentCall, error) {
 	model := agent.Model()
 	maxTokens := model.CatwalkCfg.DefaultMaxTokens
 	if model.ModelCfg.MaxTokens != 0 {
@@ -1930,7 +1952,7 @@ func (c *coordinator) subAgentCall(agent SessionAgent, sessionID, prompt string)
 
 	providerCfg, ok := c.cfg.Config().Providers.Get(model.ModelCfg.Provider)
 	if !ok {
-		return SessionAgentCall{}, Model{}, errModelProviderNotConfigured
+		return SessionAgentCall{}, errModelProviderNotConfigured
 	}
 
 	opts := getProviderOptions(model, providerCfg)
@@ -1939,6 +1961,7 @@ func (c *coordinator) subAgentCall(agent SessionAgent, sessionID, prompt string)
 	return SessionAgentCall{
 		SessionID:        sessionID,
 		Prompt:           prompt,
+		Model:            model,
 		MaxOutputTokens:  maxTokens,
 		ProviderOptions:  opts,
 		Temperature:      model.ModelCfg.Temperature,
@@ -1948,7 +1971,7 @@ func (c *coordinator) subAgentCall(agent SessionAgent, sessionID, prompt string)
 		PresencePenalty:  model.ModelCfg.PresencePenalty,
 		NonInteractive:   true,
 		OnAuthRefresh:    c.makeAuthRefreshCallback(providerCfg),
-	}, model, nil
+	}, nil
 }
 
 // runSubAgent runs a subagent and handles session management and cost accumulation.
@@ -1962,12 +1985,17 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 		return fantasy.ToolResponse{}, fmt.Errorf("create session: %w", err)
 	}
 
+	// A subagent works on its parent's behalf, so it inherits the parent's
+	// automatic approval. crush run approves its own session that way, and
+	// nobody would be there to answer the subagent's prompts otherwise.
+	c.permissions.InheritAutoApproval(params.SessionID, session.ID)
+
 	// Call session setup function if provided
 	if params.SessionSetup != nil {
 		params.SessionSetup(session.ID)
 	}
 
-	call, model, err := c.subAgentCall(params.Agent, session.ID, params.Prompt)
+	call, err := c.subAgentCall(params.Agent, session.ID, params.Prompt)
 	if err != nil {
 		return fantasy.ToolResponse{}, err
 	}
@@ -1975,7 +2003,7 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 	done := c.trackSubSession(session.ID)
 	result, err := params.Agent.Run(ctx, call)
 	done()
-	c.askToSignInAgain(err, model)
+	c.askToSignInAgain(err, call.Model)
 	if err != nil {
 		return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to generate response: %s", err)), nil
 	}

@@ -31,7 +31,7 @@ type CallHierarchyToolRenderContext struct{}
 // RenderTool implements the [ToolRenderer] interface.
 func (r *CallHierarchyToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
-	if opts.IsPending() {
+	if opts.IsStreamingInput() {
 		return pendingTool(sty, "Call Hierarchy", opts.Anim, opts.Compact)
 	}
 

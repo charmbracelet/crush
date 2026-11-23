@@ -101,7 +101,7 @@ func (p *answerPrinter) write(msg message.Message) {
 	switch {
 	case !p.printed:
 		part = strings.TrimLeft(part, " \t\r\n")
-	case st.content == "":
+	case !st.shown:
 		part = strings.TrimLeft(part, " \t")
 	}
 	// Ignore initial whitespace-only messages.
@@ -159,7 +159,11 @@ func (p *answerPrinter) printUntilDone(
 			}
 			return nil
 
-		case event := <-events:
+		case event, ok := <-events:
+			if !ok {
+				events = nil
+				continue
+			}
 			if p.isReply(event.Payload) {
 				stopSpinner()
 			}

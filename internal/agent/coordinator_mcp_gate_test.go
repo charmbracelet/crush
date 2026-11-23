@@ -47,7 +47,7 @@ func newGateTestCoordinator(t *testing.T, interactive bool) *coordinator {
 		interactive: interactive,
 	}
 
-	p, err := coderPrompt(prompt.WithWorkingDir(env.workingDir))
+	p, err := loadPrompt(cfg, "coder", prompt.WithWorkingDir(env.workingDir))
 	require.NoError(t, err)
 	agentCfg := cfg.Config().Agents[config.AgentCoder]
 
@@ -121,7 +121,7 @@ func TestRefreshSkillPromptRebuildsOnlyAfterToggle(t *testing.T) {
 	coord := newGateTestCoordinator(t, true)
 	require.NoError(t, coord.readyWg.Wait())
 
-	p, err := coderPrompt(coord.skillOverrideOptions()...)
+	p, err := loadPrompt(coord.cfg, "coder", coord.skillOverrideOptions()...)
 	require.NoError(t, err)
 	coord.prompts = map[string]*prompt.Prompt{config.AgentCoder: p}
 	coord.skillKeys = map[string]string{config.AgentCoder: coord.skillToggleKey(t.Context())}

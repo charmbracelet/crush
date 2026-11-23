@@ -201,7 +201,7 @@ func dispatchHistory(msgs []message.Message) dispatchRecords {
 // It runs once per session per process, only while the session is idle, so
 // the report lands between turns rather than in the middle of one.
 func (c *coordinator) reconcileDispatches(ctx context.Context, agent SessionAgent, sessionID string) {
-	if _, done := c.reconciled.Load(sessionID); done || agent.IsSessionBusy(sessionID) {
+	if _, done := c.reconciled.Load(sessionID); done || agent.HasActiveTurn(sessionID) {
 		return
 	}
 	msgs, err := c.messages.List(ctx, sessionID)

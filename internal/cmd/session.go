@@ -607,6 +607,10 @@ type sessionShowPart struct {
 	StartedAt  int64  `json:"started_at,omitempty"`
 	FinishedAt int64  `json:"finished_at,omitempty"`
 
+	// Tool timing, in Unix milliseconds.
+	StartedAtMs  int64 `json:"started_at_ms,omitempty"`
+	FinishedAtMs int64 `json:"finished_at_ms,omitempty"`
+
 	// Tool call
 	ToolCallID string `json:"tool_call_id,omitempty"`
 	Name       string `json:"name,omitempty"`
@@ -681,19 +685,21 @@ func convertParts(parts []message.ContentPart) []sessionShowPart {
 			})
 		case message.ToolCall:
 			result = append(result, sessionShowPart{
-				Type:       "tool_call",
-				ToolCallID: p.ID,
-				Name:       p.Name,
-				Input:      p.Input,
+				Type:        "tool_call",
+				ToolCallID:  p.ID,
+				Name:        p.Name,
+				Input:       p.Input,
+				StartedAtMs: p.StartedAtMs,
 			})
 		case message.ToolResult:
 			result = append(result, sessionShowPart{
-				Type:       "tool_result",
-				ToolCallID: p.ToolCallID,
-				Name:       p.Name,
-				Content:    p.Content,
-				IsError:    p.IsError,
-				MIMEType:   p.MIMEType,
+				Type:         "tool_result",
+				ToolCallID:   p.ToolCallID,
+				Name:         p.Name,
+				Content:      p.Content,
+				IsError:      p.IsError,
+				MIMEType:     p.MIMEType,
+				FinishedAtMs: p.FinishedAtMs,
 			})
 		case message.BinaryContent:
 			result = append(result, sessionShowPart{

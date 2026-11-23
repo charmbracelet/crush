@@ -124,11 +124,11 @@ func TestCompactHooks_PreCompactBlocks(t *testing.T) {
 	_, err = sa.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, Prompt: "hi"})
 	require.NoError(t, err)
 
-	err = sa.Summarize(t.Context(), sess.ID, nil, nil)
+	err = sa.Summarize(t.Context(), sess.ID, sa.Model(), nil, nil)
 	require.ErrorIs(t, err, ErrCompactionBlocked)
 	require.Contains(t, err.Error(), "not now")
 	require.NoFileExists(t, filepath.Join(dir, "post"))
-	require.False(t, sa.IsSessionBusy(sess.ID))
+	require.False(t, sa.HasActiveTurn(sess.ID))
 }
 
 func TestCompactHooks_PostCompactFires(t *testing.T) {
@@ -141,6 +141,6 @@ func TestCompactHooks_PostCompactFires(t *testing.T) {
 	_, err = sa.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, Prompt: "hi"})
 	require.NoError(t, err)
 
-	require.NoError(t, sa.Summarize(t.Context(), sess.ID, nil, nil))
+	require.NoError(t, sa.Summarize(t.Context(), sess.ID, sa.Model(), nil, nil))
 	require.Equal(t, []string{"PreCompact manual", "PostCompact manual"}, read())
 }

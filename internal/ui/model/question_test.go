@@ -20,7 +20,7 @@ type questionWorkspace struct {
 	answers [][]question.Answer
 }
 
-func (w *questionWorkspace) QuestionAnswer(responses []question.Answer) bool {
+func (w *questionWorkspace) QuestionAnswer(_ string, responses []question.Answer) bool {
 	w.answers = append(w.answers, responses)
 	return true
 }

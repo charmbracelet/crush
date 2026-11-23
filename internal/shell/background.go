@@ -261,6 +261,17 @@ func (bs *BackgroundShell) GetOutput() (stdout string, stderr string, done bool,
 	}
 }
 
+// OutputSeq returns a counter that increments whenever stdout or stderr
+// receives bytes, allowing pollers to skip unchanged output without copying.
+func (bs *BackgroundShell) OutputSeq() uint64 {
+	return bs.stdout.seq.Load() + bs.stderr.seq.Load()
+}
+
+// GetOutputTail returns at most the last maxBytes of stdout and stderr.
+func (bs *BackgroundShell) GetOutputTail(maxBytes int) (stdout, stderr string) {
+	return bs.stdout.Tail(maxBytes), bs.stderr.Tail(maxBytes)
+}
+
 // IsDone checks if the background shell has finished execution.
 func (bs *BackgroundShell) IsDone() bool {
 	select {

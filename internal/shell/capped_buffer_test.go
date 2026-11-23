@@ -115,3 +115,44 @@ func TestBackgroundShellOutputStaysBounded(t *testing.T) {
 	require.False(t, done)
 	require.Less(t, len(stdout), maxKeptOutput+64)
 }
+
+func TestCappedBufferTail(t *testing.T) {
+	t.Parallel()
+
+	t.Run("spans head and ring without truncation", func(t *testing.T) {
+		t.Parallel()
+		b := newCappedBuffer(16)
+		require.Zero(t, b.seq.Load())
+		b.Write(nil)
+		require.Zero(t, b.seq.Load())
+
+		b.Write([]byte("hello world"))
+		require.Equal(t, uint64(1), b.seq.Load())
+		require.Equal(t, "", b.Tail(0))
+		require.Equal(t, "ld", b.Tail(2))
+		require.Equal(t, "world", b.Tail(5))
+		require.Equal(t, "hello world", b.Tail(20))
+	})
+
+	t.Run("wrapped ring returns only continuous tail", func(t *testing.T) {
+		t.Parallel()
+		b := newCappedBuffer(8)
+		b.Write([]byte("abcd"))
+		b.Write([]byte("123456"))
+		b.Write([]byte("wxyz"))
+		require.Equal(t, "yz", b.Tail(2))
+		require.Equal(t, "wxyz", b.Tail(4))
+		require.Equal(t, "wxyz", b.Tail(100))
+	})
+
+	t.Run("skips leading partial UTF-8 rune on cut", func(t *testing.T) {
+		t.Parallel()
+		b := newCappedBuffer(16)
+		b.Write([]byte("ab世"))
+		got := b.Tail(2)
+		require.True(t, utf8.ValidString(got))
+		require.Equal(t, "", got)
+		require.Equal(t, "世", b.Tail(3))
+		require.Equal(t, "b世", b.Tail(4))
+	})
+}

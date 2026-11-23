@@ -112,6 +112,9 @@ type ToolRenderOpts struct {
 	Status          ToolStatus
 	// Elapsed is how long the call has run, or zero when that is unknown.
 	Elapsed time.Duration
+	// LiveOutput is output streamed while the tool runs, shown instead of
+	// the result until the tool finishes.
+	LiveOutput string
 }
 
 // IsStreamingInput reports whether the model is still writing the call's
@@ -167,10 +170,32 @@ type baseToolMessageItem struct {
 	isCompact bool
 	// spinningFunc overrides the default: spin until a result or cancel.
 	spinningFunc SpinningFunc
+	// liveOutput is output streamed while the tool runs. It is display
+	// only and is cleared once the result arrives.
+	liveOutput string
 
 	sty             *styles.Styles
 	anim            *anim.Anim
 	expandedContent bool
+}
+
+// LiveOutputItem is implemented by tool items that can show output while
+// the tool is still running.
+type LiveOutputItem interface {
+	SetLiveOutput(output string) bool
+}
+
+// SetLiveOutput sets the output to show while the tool runs. It is ignored
+// once a result is set or the tool is canceled, and reports whether the
+// item changed.
+func (t *baseToolMessageItem) SetLiveOutput(output string) bool {
+	if t.result != nil || t.status == ToolStatusCanceled || t.liveOutput == output {
+		return false
+	}
+	t.liveOutput = output
+	t.clearCache()
+	t.Bump()
+	return true
 }
 
 var _ Expandable = (*baseToolMessageItem)(nil)
@@ -393,6 +418,7 @@ func (t *baseToolMessageItem) renderTool(width int) string {
 		IsSpinning:      t.isSpinning(),
 		Status:          t.computeStatus(),
 		Elapsed:         t.elapsed(),
+		LiveOutput:      t.liveOutput,
 	})
 }
 
@@ -486,6 +512,9 @@ func (t *baseToolMessageItem) spinnerTimer() string {
 // SetResult sets the tool result associated with this message item.
 func (t *baseToolMessageItem) SetResult(res *message.ToolResult) {
 	t.result = res
+	if res != nil {
+		t.liveOutput = ""
+	}
 	t.clearCache()
 	t.Bump()
 }
@@ -508,6 +537,9 @@ func (t *baseToolMessageItem) SetStatus(status ToolStatus) {
 		return
 	}
 	t.status = status
+	if status == ToolStatusCanceled {
+		t.liveOutput = ""
+	}
 	t.clearCache()
 	t.Bump()
 }
@@ -852,8 +884,15 @@ func indentLines(s string, n int) string {
 
 // toolOutputPlainContent renders plain text with optional expansion support.
 func toolOutputPlainContent(sty *styles.Styles, content string, width int, expanded bool) string {
+	return renderPlainToolOutput(sty, content, width, expanded, false)
+}
+
+func renderPlainToolOutput(sty *styles.Styles, content string, width int, expanded, tail bool) string {
 	content = stringext.NormalizeSpace(content)
 	content = common.StripCursorControl(content)
+	if tail && content == "" {
+		return ""
+	}
 	content = common.RemapANSI16(content, sty.ANSI)
 	lines := strings.Split(content, "\n")
 
@@ -862,24 +901,33 @@ func toolOutputPlainContent(sty *styles.Styles, content string, width int, expan
 		maxLines = len(lines) // Show all
 	}
 
-	var out []string
-	for i, ln := range lines {
-		if i >= maxLines {
-			break
+	hidden := max(len(lines)-maxLines, 0)
+	visible := lines
+	if hidden > 0 {
+		if tail {
+			visible = lines[len(lines)-maxLines:]
+		} else {
+			visible = lines[:maxLines]
 		}
+	}
+
+	var out []string
+	if tail && !expanded && hidden > 0 {
+		out = append(out, sty.Tool.ContentTruncation.
+			Width(width).
+			Render(fmt.Sprintf(assistantMessageTruncateFormat, hidden)))
+	}
+	for _, ln := range visible {
 		ln = " " + ln
 		if lipgloss.Width(ln) > width {
 			ln = ansi.Truncate(ln, width, "…")
 		}
 		out = append(out, sty.Tool.ContentLine.Width(width).Render(ln))
 	}
-
-	wasTruncated := len(lines) > maxLines
-
-	if !expanded && wasTruncated {
+	if !tail && !expanded && hidden > 0 {
 		out = append(out, sty.Tool.ContentTruncation.
 			Width(width).
-			Render(fmt.Sprintf(assistantMessageTruncateFormat, len(lines)-maxLines)))
+			Render(fmt.Sprintf(assistantMessageTruncateFormat, hidden)))
 	}
 
 	return strings.Join(out, "\n")

@@ -5,6 +5,7 @@ import (
 
 	"charm.land/catwalk/v3/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/stretchr/testify/require"
 )
 
@@ -57,6 +58,30 @@ func TestServingProvider(t *testing.T) {
 		t.Parallel()
 		require.Equal(t, "litellm", servingProvider(providerCfg("litellm", "litellm"), model("")))
 	})
+}
+
+func TestBuildProviderGoogleGatewayRouting(t *testing.T) {
+	t.Parallel()
+
+	const providerID = "gemini-sub"
+	env := testEnv(t)
+	providerCfg := config.ProviderConfig{
+		ID:      providerID,
+		Type:    catwalk.TypeCompletions,
+		BaseURL: "https://generativelanguage.googleapis.com/",
+		APIKey:  "test-key",
+		Gateway: &oauth.GatewaySpec{Request: ".", Response: "."},
+	}
+	coord := newTestCoordinator(t, env, providerID, providerCfg)
+	catwalkModel := catwalk.Model{ID: "gemini-4-hydrogen-sonar"}
+	require.Equal(t, "google", servingProvider(providerCfg, catwalkModel))
+
+	provider, err := coord.buildProvider(providerCfg, config.SelectedModel{
+		Model:    catwalkModel.ID,
+		Provider: providerID,
+	}, false, catwalk.TypeCompletions)
+	require.NoError(t, err)
+	require.Equal(t, "google", provider.Name())
 }
 
 func TestBuildProviderOpenCodeRouting(t *testing.T) {

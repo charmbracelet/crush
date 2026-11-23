@@ -720,7 +720,7 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 				// The adapter is attached where a provider family lets the
 				// SDK take a client, today google and anthropic. Saying so
 				// beats ignoring the declaration.
-				if providerConfig.ID != string(catwalk.InferenceProviderGemini) && providerConfig.Type != catwalk.TypeMessages {
+				if providerConfig.ID != string(catwalk.InferenceProviderGemini) && providerConfig.Type != catwalk.TypeMessages && providerConfig.Type != catwalk.TypeCompletions {
 					slog.Warn("Gateway adapter is only applied to google- and anthropic-type providers",
 						"provider", id, "type", string(providerConfig.Type))
 				}

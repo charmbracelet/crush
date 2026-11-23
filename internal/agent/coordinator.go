@@ -96,6 +96,10 @@ func servingProvider(providerCfg config.ProviderConfig, model catwalk.Model) str
 		return hyper.Name
 	}
 
+	if providerCfg.Gateway != nil && model.EffectiveType(providerCfg.Type) == catwalk.TypeCompletions {
+		return google.Name
+	}
+
 	switch model.EffectiveType(providerCfg.Type) {
 	case catwalk.TypeResponses:
 		return openai.Name
@@ -1698,6 +1702,10 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 			}
 		}
 		return c.buildOpenaiProvider(baseURL, apiKey, headers, token, wireType)
+	}
+
+	if providerCfg.Gateway != nil && wireType == catwalk.TypeCompletions {
+		return c.buildGoogleProvider(baseURL, apiKey, headers, providerCfg)
 	}
 
 	switch wireType {

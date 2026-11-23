@@ -39,23 +39,36 @@ func TestOnProviderChosenRemembersThePath(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		choice dialog.ProviderChoice
-		via    string
-		method string
+		choice   dialog.ProviderChoice
+		provider string
+		via      string
+		method   string
 	}{
-		{dialog.ProviderChoice{ID: "hyper"}, onboardingViaCard, "sign in"},
-		{dialog.ProviderChoice{ID: "anthropic", NeedsKey: true}, onboardingViaCardKey, "api key"},
-		{dialog.ProviderChoice{ID: dialog.ChoiceMoreProviders}, onboardingViaMoreProviders, "more providers"},
+		{dialog.ProviderChoice{ID: "hyper"}, "hyper", onboardingViaCard, "sign in"},
+		{dialog.ProviderChoice{ID: "anthropic", NeedsKey: true}, "anthropic", onboardingViaCardKey, "api key"},
+		{dialog.ProviderChoice{ID: dialog.ChoiceMoreProviders}, "", onboardingViaMoreProviders, "more providers"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.choice.ID, func(t *testing.T) {
 			t.Parallel()
 			m := &UI{}
+			// A provider picked earlier is replaced by the new choice.
+			m.firstRun.onboarding.Provider = "openai"
 			m.onProviderChosen(tt.choice)
-			require.Equal(t, tt.via, m.firstRun.via)
+			require.Equal(t, tt.provider, m.firstRun.onboarding.Provider)
+			require.Equal(t, tt.via, m.firstRun.onboarding.Via)
 			require.Equal(t, tt.method, providerChoiceMethod(tt.choice))
 		})
 	}
+}
+
+func TestOnboardingEventKeepsOneIDPerAttempt(t *testing.T) {
+	t.Parallel()
+
+	m := &UI{}
+	first := m.onboardingEvent()
+	require.NotEmpty(t, first.ID, "an attempt is started when there is none")
+	require.Equal(t, first.ID, m.onboardingEvent().ID)
 }
 
 func TestFirstTurnIsFollowedOnce(t *testing.T) {

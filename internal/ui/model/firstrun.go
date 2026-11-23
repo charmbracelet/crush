@@ -36,8 +36,8 @@ type firstRunState struct {
 	// startedAt is when the UI opened without a provider. It is zero when a
 	// provider was already set up.
 	startedAt time.Time
-	// via is the path that led to the provider, for telemetry.
-	via string
+	// onboarding is what telemetry knows about this onboarding attempt.
+	onboarding event.Onboarding
 	// firstTurn follows the first prompt after onboarding, for telemetry.
 	firstTurn *firstTurn
 }
@@ -125,7 +125,7 @@ func defaultSelection(p catwalk.Provider) (config.SelectedModel, bool) {
 // to use.
 func (m *UI) holdMessage(content string, attachments []message.Attachment) tea.Cmd {
 	m.firstRun.held = &heldMessage{content: content, attachments: attachments}
-	event.OnboardingPromptHeld(len(attachments) > 0)
+	event.OnboardingPromptHeld(m.onboardingEvent(), len(attachments) > 0)
 	return m.openProviderCard()
 }
 
@@ -165,7 +165,7 @@ func (m *UI) showProviderCard(choices []dialog.ProviderChoice) tea.Cmd {
 	card.OnSelect = m.handleProviderChoice
 	card.OnSubmitKey = m.submitProviderKey
 	card.OnCancel = func() tea.Cmd {
-		event.OnboardingCardDismissed(m.firstRun.held != nil)
+		event.OnboardingCardDismissed(m.onboardingEvent(), m.firstRun.held != nil)
 		m.restoreHeldMessage()
 		return nil
 	}
@@ -279,11 +279,11 @@ func (m *UI) handleProviderKeyResult(msg providerKeyResultMsg) tea.Cmd {
 	}
 	switch {
 	case msg.err != nil:
-		event.OnboardingAPIKeyFailed(string(msg.provider.ID), "error")
+		event.OnboardingAPIKeyFailed(m.onboardingEvent(), "error")
 		card.KeyResult(false)
 		return util.ReportError(msg.err)
 	case msg.rejected:
-		event.OnboardingAPIKeyFailed(string(msg.provider.ID), "rejected")
+		event.OnboardingAPIKeyFailed(m.onboardingEvent(), "rejected")
 		card.KeyResult(false)
 		return nil
 	}

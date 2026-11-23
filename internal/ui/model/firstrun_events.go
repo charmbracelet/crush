@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/ui/dialog"
+	"github.com/google/uuid"
 )
 
 // Ways a provider can be reached during first run, reported as "via" on
@@ -23,6 +24,8 @@ const (
 // firstTurn follows the first prompt after onboarding so its outcome can be
 // reported.
 type firstTurn struct {
+	// onboarding is the finished attempt, carried by the first-turn events.
+	onboarding event.Onboarding
 	// completedAt is when onboarding finished.
 	completedAt time.Time
 	// held reports whether a prompt was waiting for the provider. If so,
@@ -45,18 +48,29 @@ func providerChoiceMethod(c dialog.ProviderChoice) string {
 	}
 }
 
-// onProviderChosen reports a provider card choice and remembers which path
-// the user took.
+// onboardingEvent returns what telemetry knows about the current onboarding
+// attempt. It starts an attempt when there is none, such as when a provider
+// is lost mid-session.
+func (m *UI) onboardingEvent() event.Onboarding {
+	if m.firstRun.onboarding.ID == "" {
+		m.firstRun.onboarding.ID = uuid.NewString()
+	}
+	return m.firstRun.onboarding
+}
+
+// onProviderChosen reports a provider card choice and remembers which
+// provider and path the user took.
 func (m *UI) onProviderChosen(c dialog.ProviderChoice) {
+	o := &m.firstRun.onboarding
 	switch {
 	case c.ID == dialog.ChoiceMoreProviders:
-		m.firstRun.via = onboardingViaMoreProviders
+		o.Provider, o.Via = "", onboardingViaMoreProviders
 	case c.NeedsKey:
-		m.firstRun.via = onboardingViaCardKey
+		o.Provider, o.Via = c.ID, onboardingViaCardKey
 	default:
-		m.firstRun.via = onboardingViaCard
+		o.Provider, o.Via = c.ID, onboardingViaCard
 	}
-	event.OnboardingProviderChosen(c.ID, providerChoiceMethod(c))
+	event.OnboardingProviderChosen(m.onboardingEvent(), providerChoiceMethod(c))
 }
 
 // authKind names the kind of credential a provider uses, without revealing
@@ -96,27 +110,26 @@ func setupSource(cfg *config.Config) string {
 // releasing it sends it right away.
 func (m *UI) trackOnboardingCompleted(msg dialog.ActionSelectModel) {
 	now := time.Now()
-	props := event.OnboardingCompletedProps{
-		Provider:   msg.Model.Provider,
-		Model:      msg.Model.Model,
-		Via:        m.firstRun.via,
-		HeldPrompt: m.firstRun.held != nil,
-	}
-	if props.Via == "" {
+	o := &m.firstRun.onboarding
+	o.Provider, o.Model = msg.Model.Provider, msg.Model.Model
+	if o.Via == "" {
 		// Reached without the card, such as through ctrl+l.
-		props.Via = onboardingViaMoreProviders
+		o.Via = onboardingViaMoreProviders
 	}
 	if pc, ok := m.com.Config().Providers.Get(msg.Model.Provider); ok {
-		props.Auth = authKind(pc)
+		o.Auth = authKind(pc)
 	}
+	var duration time.Duration
 	if !m.firstRun.startedAt.IsZero() {
-		props.Duration = now.Sub(m.firstRun.startedAt)
+		duration = now.Sub(m.firstRun.startedAt)
 	}
-	event.OnboardingCompleted(props)
+	held := m.firstRun.held != nil
+	event.OnboardingCompleted(m.onboardingEvent(), held, duration)
 
 	m.firstRun.firstTurn = &firstTurn{
+		onboarding:  m.onboardingEvent(),
 		completedAt: now,
-		held:        props.HeldPrompt,
+		held:        held,
 	}
 }
 
@@ -139,15 +152,21 @@ func (m *UI) trackSignInClosed() {
 		}
 		return signInCancelled
 	}
+	ended := func(providerID, step, outcome string) {
+		if providerID != "" {
+			m.firstRun.onboarding.Provider = providerID
+		}
+		event.OnboardingSignInEnded(m.onboardingEvent(), step, outcome)
+	}
 	switch d := m.dialog.DialogLast().(type) {
 	case *dialog.OAuth:
-		event.OnboardingSignInEnded(d.ProviderID(), "sign in", outcome(d.Failed()))
+		ended(d.ProviderID(), "sign in", outcome(d.Failed()))
 	case *dialog.APIKeyInput:
-		event.OnboardingSignInEnded(d.ProviderID(), "api key", outcome(d.Failed()))
+		ended(d.ProviderID(), "api key", outcome(d.Failed()))
 	case *dialog.AuthMethod:
-		event.OnboardingSignInEnded(d.ProviderID(), "auth method", signInCancelled)
+		ended(d.ProviderID(), "auth method", signInCancelled)
 	case *dialog.Models:
-		event.OnboardingSignInEnded("", "models", signInCancelled)
+		ended("", "models", signInCancelled)
 	}
 }
 
@@ -159,7 +178,7 @@ func (m *UI) trackFirstPromptSent(sessionID string) {
 	}
 	ft.sessionID = sessionID
 	ft.sentAt = time.Now()
-	event.OnboardingFirstPromptSent(ft.held, ft.sentAt.Sub(ft.completedAt))
+	event.OnboardingFirstPromptSent(ft.onboarding, ft.held, ft.sentAt.Sub(ft.completedAt))
 }
 
 // trackFirstTurnFinished reports how the first turn after onboarding ended.
@@ -179,7 +198,7 @@ func (m *UI) trackFirstTurnFinished(msg tea.Msg) {
 	case done.Payload.Error != "":
 		outcome, category = "error", errorCategory(done.Payload.Error)
 	}
-	event.OnboardingFirstTurnFinished(outcome, category, time.Since(ft.sentAt))
+	event.OnboardingFirstTurnFinished(ft.onboarding, outcome, category, time.Since(ft.sentAt))
 	m.firstRun.firstTurn = nil
 }
 

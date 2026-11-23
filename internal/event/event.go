@@ -82,6 +82,9 @@ func GetID() string { return distinctId }
 
 // send logs an event to PostHog with the given event name and properties.
 func send(event string, props ...any) {
+	// Logged even when metrics are off, so the events can be checked
+	// locally with --debug without sending anything.
+	slog.Debug("Telemetry event", "event", event, "props", props)
 	if client == nil {
 		return
 	}

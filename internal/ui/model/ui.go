@@ -71,6 +71,7 @@ import (
 	"github.com/charmbracelet/ultraviolet/screen"
 	"github.com/charmbracelet/x/editor"
 	xstrings "github.com/charmbracelet/x/exp/strings"
+	"github.com/google/uuid"
 )
 
 // Compact mode breakpoints.
@@ -654,6 +655,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	ui.firstRun.noProvider = !com.Config().IsConfigured()
 	if ui.firstRun.noProvider {
 		ui.firstRun.startedAt = time.Now()
+		ui.firstRun.onboarding.ID = uuid.NewString()
 	} else {
 		needs, _ := com.Workspace.ProjectNeedsInitialization()
 		ui.firstRun.needsInit = needs
@@ -688,7 +690,7 @@ func (m *UI) Init() tea.Cmd {
 		event.FirstLaunch(setupSource(m.com.Config()))
 	}
 	if m.firstRun.noProvider {
-		event.OnboardingStarted()
+		event.OnboardingStarted(m.onboardingEvent())
 	}
 	// The landing page mentions a missing context file once per project,
 	// so remember that it was shown instead of nagging on every launch.
@@ -3085,7 +3087,8 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		providerID == string(catwalk.InferenceProviderXAI) {
 		if !cfg.IsModelAvailable(providerID, msg.Model.Model) {
 			if isOnboarding {
-				event.OnboardingSignInEnded(providerID, "sign in", signInModelUnavailable)
+				m.firstRun.onboarding.Provider = providerID
+				event.OnboardingSignInEnded(m.onboardingEvent(), "sign in", signInModelUnavailable)
 			}
 			m.dialog.CloseDialog(dialog.ModelsID)
 			cmds = append(cmds, util.ReportError(fmt.Errorf(
@@ -3147,7 +3150,9 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		}
 		m.com.Config().SetupAgents()
 		if err := m.com.Workspace.InitCoderAgent(context.TODO()); err != nil {
-			event.OnboardingFailed(msg.Model.Provider, msg.Model.Model)
+			m.firstRun.onboarding.Provider = msg.Model.Provider
+			m.firstRun.onboarding.Model = msg.Model.Model
+			event.OnboardingFailed(m.onboardingEvent())
 			cmds = append(cmds, util.ReportError(err))
 			// Nothing can send the prompt, so give it back to the editor.
 			m.restoreHeldMessage()

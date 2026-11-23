@@ -12,9 +12,52 @@ import "time"
 //	→ onboarding first prompt sent
 //	→ onboarding first turn finished
 //
+// Side events report the ways out of the funnel: onboarding api key failed,
+// onboarding sign in ended, onboarding card dismissed and onboarding failed.
+//
+// Every onboarding event carries an Onboarding, so each one can be read on
+// its own: a breakdown on any step shows the provider, path and model known
+// at that point, without funnel attribution settings.
+//
 // They are sent from the TUI process, so they are reliable even when the
 // agent runs in a separate server process. None of them carry prompt text or
 // credentials.
+
+// Onboarding is what is known about one onboarding attempt when an event is
+// sent. Empty fields are left out of the event.
+type Onboarding struct {
+	// ID is random per attempt and set when onboarding starts. It groups
+	// the events of one attempt, since a machine can go through onboarding
+	// more than once.
+	ID string
+	// Provider is the provider chosen so far, such as "anthropic".
+	Provider string
+	// Via is the path that led to the provider: "card", "card key" or
+	// "more providers".
+	Via string
+	// Model is the model set up with the provider.
+	Model string
+	// Auth is the kind of credential in use: "ant login", "oauth", "env
+	// var", "api key" or "other". It never holds the credential itself.
+	Auth string
+}
+
+// props returns the attempt's properties followed by the given pairs.
+func (o Onboarding) props(pairs ...any) []any {
+	props := make([]any, 0, 10+len(pairs))
+	for _, p := range [][2]string{
+		{"onboarding id", o.ID},
+		{"provider", o.Provider},
+		{"via", o.Via},
+		{"model", o.Model},
+		{"auth", o.Auth},
+	} {
+		if p[1] != "" {
+			props = append(props, p[0], p[1])
+		}
+	}
+	return append(props, pairs...)
+}
 
 // FirstLaunch is sent once per machine, on the first launch of the TUI.
 // SetupWith is the kind of credential already in place, such as "env var"
@@ -26,36 +69,28 @@ func FirstLaunch(setupWith string) {
 }
 
 // OnboardingStarted is sent when the TUI opens with no provider set up.
-func OnboardingStarted() {
-	send("onboarding started")
+func OnboardingStarted(o Onboarding) {
+	send("onboarding started", o.props()...)
 }
 
 // OnboardingPromptHeld is sent when a prompt is sent before a provider is
 // set up, which is what brings up the provider card.
-func OnboardingPromptHeld(hasAttachments bool) {
-	send("onboarding prompt held", "has attachments", hasAttachments)
+func OnboardingPromptHeld(o Onboarding, hasAttachments bool) {
+	send("onboarding prompt held", o.props("has attachments", hasAttachments)...)
 }
 
 // OnboardingProviderChosen is sent when a row of the provider card is
 // chosen. Method is how the provider signs in: "api key", "sign in" or
-// "more providers" for the full list.
-func OnboardingProviderChosen(provider, method string) {
-	send(
-		"onboarding provider chosen",
-		"provider", provider,
-		"method", method,
-	)
+// "more providers" for the full list, where the provider is not known yet.
+func OnboardingProviderChosen(o Onboarding, method string) {
+	send("onboarding provider chosen", o.props("method", method)...)
 }
 
 // OnboardingAPIKeyFailed is sent when a key entered in the provider card does
 // not work. Reason is "rejected" when the provider refused it and "error"
 // when it could not be checked or saved.
-func OnboardingAPIKeyFailed(provider, reason string) {
-	send(
-		"onboarding api key failed",
-		"provider", provider,
-		"reason", reason,
-	)
+func OnboardingAPIKeyFailed(o Onboarding, reason string) {
+	send("onboarding api key failed", o.props("reason", reason)...)
 }
 
 // OnboardingSignInEnded is sent when a sign-in step of first run ends
@@ -64,86 +99,59 @@ func OnboardingAPIKeyFailed(provider, reason string) {
 // when the user backed out, "failed" when the last attempt failed and
 // "model unavailable" when the account does not offer the chosen model.
 // Success is reported by OnboardingCompleted instead.
-func OnboardingSignInEnded(provider, step, outcome string) {
-	send(
-		"onboarding sign in ended",
-		"provider", provider,
-		"step", step,
-		"outcome", outcome,
-	)
+func OnboardingSignInEnded(o Onboarding, step, outcome string) {
+	send("onboarding sign in ended", o.props("step", step, "outcome", outcome)...)
 }
 
 // OnboardingCardDismissed is sent when the user backs out of the provider
 // card without picking one.
-func OnboardingCardDismissed(heldPrompt bool) {
-	send("onboarding card dismissed", "held prompt", heldPrompt)
-}
-
-// OnboardingCompletedProps describes a finished onboarding.
-type OnboardingCompletedProps struct {
-	Provider string
-	Model    string
-	// Auth is the kind of credential in use, see the UI's authKind.
-	Auth string
-	// Via is the path that led to the provider: "card", "card key" or
-	// "more providers".
-	Via string
-	// HeldPrompt reports whether a prompt was waiting for the provider.
-	HeldPrompt bool
-	// Duration is the time since onboarding started.
-	Duration time.Duration
+func OnboardingCardDismissed(o Onboarding, heldPrompt bool) {
+	send("onboarding card dismissed", o.props("held prompt", heldPrompt)...)
 }
 
 // OnboardingCompleted is sent once a provider and model are set up and the
-// agent is ready.
-func OnboardingCompleted(p OnboardingCompletedProps) {
-	d := p.Duration.Truncate(time.Second)
-	send(
-		"onboarding completed",
-		"provider", p.Provider,
-		"model", p.Model,
-		"auth", p.Auth,
-		"via", p.Via,
-		"held prompt", p.HeldPrompt,
+// agent is ready. HeldPrompt reports whether a prompt was waiting for the
+// provider, and duration is the time since onboarding started.
+func OnboardingCompleted(o Onboarding, heldPrompt bool, duration time.Duration) {
+	d := duration.Truncate(time.Second)
+	send("onboarding completed", o.props(
+		"held prompt", heldPrompt,
 		"duration pretty", d.String(),
 		"duration in seconds", int64(d.Seconds()),
-	)
+	)...)
 }
 
 // OnboardingFailed is sent when a provider was picked but the agent could
 // not start with it.
-func OnboardingFailed(provider, model string) {
-	send(
-		"onboarding failed",
-		"provider", provider,
-		"model", model,
-	)
+func OnboardingFailed(o Onboarding) {
+	send("onboarding failed", o.props()...)
 }
 
 // OnboardingFirstPromptSent is sent for the first prompt after onboarding.
 // Held reports whether it is the prompt that waited for the provider.
-func OnboardingFirstPromptSent(held bool, sinceCompleted time.Duration) {
+func OnboardingFirstPromptSent(o Onboarding, held bool, sinceCompleted time.Duration) {
 	d := sinceCompleted.Truncate(time.Second)
-	send(
-		"onboarding first prompt sent",
+	send("onboarding first prompt sent", o.props(
 		"held prompt", held,
 		"seconds since completed", int64(d.Seconds()),
-	)
+	)...)
 }
 
 // OnboardingFirstTurnFinished is sent when the first turn after onboarding
 // ends. Outcome is "done", "error" or "cancelled". ErrorCategory is set only
 // for errors and is a coarse class such as "auth" or "rate limit", never the
 // error text.
-func OnboardingFirstTurnFinished(outcome, errorCategory string, duration time.Duration) {
+func OnboardingFirstTurnFinished(o Onboarding, outcome, errorCategory string, duration time.Duration) {
 	d := duration.Truncate(time.Second)
-	send(
-		"onboarding first turn finished",
-		"outcome", outcome,
-		"error category", errorCategory,
+	props := []any{"outcome", outcome}
+	if errorCategory != "" {
+		props = append(props, "error category", errorCategory)
+	}
+	props = append(props,
 		"duration pretty", d.String(),
 		"duration in seconds", int64(d.Seconds()),
 	)
+	send("onboarding first turn finished", o.props(props...)...)
 }
 
 // TipShown is sent the first time a one-time hint is shown on a machine.

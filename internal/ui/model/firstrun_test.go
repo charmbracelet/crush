@@ -413,3 +413,29 @@ func TestFirstRunDialogFront(t *testing.T) {
 	u.firstRun.noProvider = true
 	require.False(t, u.firstRunDialogFront(), "with no dialog open the card shows")
 }
+
+func TestWorkspaceStatusIsHiddenDuringFirstRun(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		noProvider bool
+		needsInit  bool
+		want       bool
+	}{
+		{"no provider yet", true, false, false},
+		{"provider set up, project needs /init", false, true, false},
+		{"nothing set up and a new project", true, true, false},
+		{"settled in", false, false, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			u := newFirstRunTestUI(t, emptyConfig())
+			u.firstRun.noProvider = tt.noProvider
+			u.firstRun.needsInit = tt.needsInit
+			require.Equal(t, tt.want, u.showsWorkspaceStatus())
+		})
+	}
+}

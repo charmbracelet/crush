@@ -652,7 +652,9 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	ui.trial = trial.Disabled{}
 	ui.tips = tips.Open(tips.DefaultPath())
 	ui.firstRun.noProvider = !com.Config().IsConfigured()
-	if !ui.firstRun.noProvider {
+	if ui.firstRun.noProvider {
+		ui.firstRun.startedAt = time.Now()
+	} else {
 		needs, _ := com.Workspace.ProjectNeedsInitialization()
 		ui.firstRun.needsInit = needs
 	}
@@ -682,6 +684,12 @@ func (m *UI) SetProgram(program *tea.Program) {
 // Init initializes the UI model.
 func (m *UI) Init() tea.Cmd {
 	var cmds []tea.Cmd
+	if event.IsFirstLaunch() {
+		event.FirstLaunch(setupSource(m.com.Config()))
+	}
+	if m.firstRun.noProvider {
+		event.OnboardingStarted()
+	}
 	// The landing page mentions a missing context file once per project,
 	// so remember that it was shown instead of nagging on every launch.
 	if m.firstRun.needsInit {
@@ -911,6 +919,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Update terminal capabilities
 	m.caps.Update(msg)
 	m.trackTurnOutcome(msg)
+	m.trackFirstTurnFinished(msg)
 	switch msg := msg.(type) {
 	case tea.EnvMsg:
 		// Is this Windows Terminal?
@@ -2310,6 +2319,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			defer fimage.ResetCache()
 		}
 
+		m.trackSignInClosed()
 		m.dialog.CloseFrontDialog()
 
 		if m.focus == uiFocusEditor {
@@ -2318,6 +2328,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	case dialog.ActionCloseOAuth:
 		// Same as ActionClose, but with a cleanup command that cancels
 		// the in-flight authorization before the dialog goes away.
+		m.trackSignInClosed()
 		m.dialog.CloseFrontDialog()
 
 		if msg.Cmd != nil {
@@ -3059,6 +3070,9 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 	if providerID == string(catwalk.InferenceProviderOpenAI) ||
 		providerID == string(catwalk.InferenceProviderXAI) {
 		if !cfg.IsModelAvailable(providerID, msg.Model.Model) {
+			if isOnboarding {
+				event.OnboardingSignInEnded(providerID, "sign in", signInModelUnavailable)
+			}
 			m.dialog.CloseDialog(dialog.ModelsID)
 			cmds = append(cmds, util.ReportError(fmt.Errorf(
 				"%s isn't offered by your %s account; choose another model",
@@ -3119,10 +3133,12 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		}
 		m.com.Config().SetupAgents()
 		if err := m.com.Workspace.InitCoderAgent(context.TODO()); err != nil {
+			event.OnboardingFailed(msg.Model.Provider, msg.Model.Model)
 			cmds = append(cmds, util.ReportError(err))
 			// Nothing can send the prompt, so give it back to the editor.
 			m.restoreHeldMessage()
 		} else {
+			m.trackOnboardingCompleted(msg)
 			m.firstRun.noProvider = false
 			// A prompt held for a model goes out right after the model
 			// update lands.
@@ -5516,6 +5532,7 @@ func (m *UI) sendMessageInternal(content string, hidden bool, attachments ...mes
 	// A queued prompt belongs in the queue pill and keeps the running
 	// turn's spinner and clock. A fresh turn gets its own, from now.
 	sessionID := m.currentSessionID()
+	m.trackFirstPromptSent(sessionID)
 	queued := m.turnInFlight(sessionID)
 	// Loading an idle session freezes ghost spinners; sending unfreezes.
 	m.animClock.frozen = false

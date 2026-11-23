@@ -289,3 +289,19 @@ func TestProviderInlineShowsNoCursorUnlessAskingForAKey(t *testing.T) {
 	c.SetFocused(true)
 	require.Nil(t, c.Draw(uv.NewScreenBuffer(100, 40), uv.Rect(0, 30, 80, 5)))
 }
+
+func TestProviderInlineOnChooseSeesEveryRow(t *testing.T) {
+	t.Parallel()
+
+	c := newTestProviderInline()
+	var chosen []string
+	c.OnChoose = func(ch ProviderChoice) { chosen = append(chosen, ch.ID) }
+	c.OnSelect = func(ProviderChoice) tea.Cmd { return nil }
+
+	press(c, tea.KeyEnter)
+	press(c, tea.KeyDown)
+	press(c, tea.KeyEnter)
+
+	require.Equal(t, []string{"hyper", "anthropic"}, chosen)
+	require.True(t, c.AskingForKey(), "a key-only row still asks for its key")
+}

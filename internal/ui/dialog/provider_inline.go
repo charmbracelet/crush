@@ -67,6 +67,10 @@ type ProviderInline struct {
 	// lastHeight backs HeightChanged.
 	lastHeight int
 
+	// OnChoose, when set, runs whenever a row is chosen, before the card
+	// asks for a key or calls OnSelect. It is meant for observers such as
+	// telemetry and must not change the card.
+	OnChoose func(ProviderChoice)
 	// OnSelect runs when a row that is not key-only is chosen. The UI starts
 	// that provider's sign-in or opens the full model list.
 	OnSelect func(ProviderChoice) tea.Cmd
@@ -157,6 +161,9 @@ func (c *ProviderInline) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		choice, ok := c.Selected()
 		if !ok {
 			return false, nil
+		}
+		if c.OnChoose != nil {
+			c.OnChoose(choice)
 		}
 		if choice.NeedsKey {
 			c.beginKeyEntry(choice)

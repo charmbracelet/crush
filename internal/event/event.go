@@ -21,6 +21,7 @@ const (
 	nonInteractiveNestedAttrName = "NonInteractiveNested"
 	continueSessionByIDAttrName  = "ContinueSessionByID"
 	continueLastSessionAttrName  = "ContinueLastSession"
+	firstLaunchAttrName          = "FirstLaunch"
 )
 
 var (
@@ -49,6 +50,19 @@ func SetContinueBySessionID(continueBySessionID bool) {
 
 func SetContinueLastSession(continueLastSession bool) {
 	baseProps = baseProps.Set(continueLastSessionAttrName, continueLastSession)
+}
+
+// SetFirstLaunch marks every event of this process as coming from the first
+// launch of Crush on this machine.
+func SetFirstLaunch(firstLaunch bool) {
+	baseProps = baseProps.Set(firstLaunchAttrName, firstLaunch)
+}
+
+// IsFirstLaunch reports whether this process is the first launch of Crush on
+// this machine.
+func IsFirstLaunch() bool {
+	v, _ := baseProps[firstLaunchAttrName].(bool)
+	return v
 }
 
 func Init() {

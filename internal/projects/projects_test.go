@@ -266,3 +266,19 @@ func TestRegister_ConcurrentProcesses(t *testing.T) {
 	require.NoError(t, json.Unmarshal(data, &list), "projects.json:\n%s", data)
 	require.Len(t, list.Projects, children*paths)
 }
+
+func TestSeen(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", tmpDir)
+	t.Setenv("CRUSH_GLOBAL_DATA", filepath.Join(tmpDir, "crush"))
+
+	if Seen() {
+		t.Fatal("Seen() = true before any project was registered")
+	}
+	if err := Register(filepath.Join(tmpDir, "project"), filepath.Join(tmpDir, "project", ".crush")); err != nil {
+		t.Fatalf("Register failed: %v", err)
+	}
+	if !Seen() {
+		t.Fatal("Seen() = false after a project was registered")
+	}
+}

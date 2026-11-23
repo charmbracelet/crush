@@ -12,6 +12,7 @@ import (
 	"charm.land/lipgloss/v2"
 	agenttools "github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/tips"
 	"github.com/charmbracelet/crush/internal/ui/dialog"
@@ -31,6 +32,14 @@ type firstRunState struct {
 	// held is the message the user sent before a model was ready. It goes
 	// out as soon as one is.
 	held *heldMessage
+
+	// startedAt is when the UI opened without a provider. It is zero when a
+	// provider was already set up.
+	startedAt time.Time
+	// via is the path that led to the provider, for telemetry.
+	via string
+	// firstTurn follows the first prompt after onboarding, for telemetry.
+	firstTurn *firstTurn
 }
 
 // heldMessage is a prompt waiting for a model.
@@ -116,6 +125,7 @@ func defaultSelection(p catwalk.Provider) (config.SelectedModel, bool) {
 // to use.
 func (m *UI) holdMessage(content string, attachments []message.Attachment) tea.Cmd {
 	m.firstRun.held = &heldMessage{content: content, attachments: attachments}
+	event.OnboardingPromptHeld(len(attachments) > 0)
 	return m.openProviderCard()
 }
 
@@ -151,9 +161,11 @@ func (m *UI) showProviderCard(choices []dialog.ProviderChoice) tea.Cmd {
 		title = "Pick a provider to send this"
 	}
 	card := dialog.NewProviderInline(m.com, title, choices)
+	card.OnChoose = m.onProviderChosen
 	card.OnSelect = m.handleProviderChoice
 	card.OnSubmitKey = m.submitProviderKey
 	card.OnCancel = func() tea.Cmd {
+		event.OnboardingCardDismissed(m.firstRun.held != nil)
 		m.restoreHeldMessage()
 		return nil
 	}
@@ -267,9 +279,11 @@ func (m *UI) handleProviderKeyResult(msg providerKeyResultMsg) tea.Cmd {
 	}
 	switch {
 	case msg.err != nil:
+		event.OnboardingAPIKeyFailed(string(msg.provider.ID), "error")
 		card.KeyResult(false)
 		return util.ReportError(msg.err)
 	case msg.rejected:
+		event.OnboardingAPIKeyFailed(string(msg.provider.ID), "rejected")
 		card.KeyResult(false)
 		return nil
 	}
@@ -467,8 +481,12 @@ const (
 // the Update loop.
 func (m *UI) claimTipCmd(name string) tea.Cmd {
 	return func() tea.Msg {
-		if _, err := m.tips.Claim(name); err != nil {
+		first, err := m.tips.Claim(name)
+		if err != nil {
 			slog.Warn("Could not remember that a tip was shown", "tip", name, "error", err)
+		}
+		if first {
+			event.TipShown(name)
 		}
 		return nil
 	}

@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/ui/util"
 )
 
@@ -26,6 +27,7 @@ func (m *UI) markProjectInitializedCmd() tea.Cmd {
 // initializeProject starts project initialization and transitions to the landing view.
 func (m *UI) initializeProject() tea.Cmd {
 	m.firstRun.needsInit = false
+	event.ProjectInitStarted()
 	// clear the session
 	var cmds []tea.Cmd
 	if cmd := m.newSession(); cmd != nil {

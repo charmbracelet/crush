@@ -262,14 +262,17 @@ func (c *ProviderInline) RefreshStyles() {
 	c.input.SetStyles(c.com.Styles.TextInput)
 }
 
-// height is the number of lines the current step needs.
+// keyStepHeight is what the key step itself needs: the question, a blank
+// line, the input and a status line.
+const keyStepHeight = 4
+
+// height is the number of lines the card takes. Every step takes the same,
+// the height of the provider list, so moving on to the key step never shrinks
+// the card and nothing on screen jumps.
 func (c *ProviderInline) height() int {
-	if c.step == providerStepKey {
-		// Question, blank line, input and a status line.
-		return 4
-	}
 	// Question, blank line and one row per choice.
-	return 2 + len(c.choices)
+	listHeight := 2 + len(c.choices)
+	return max(listHeight, keyStepHeight)
 }
 
 // Height implements [InlineEditor].
@@ -310,8 +313,8 @@ func (c *ProviderInline) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		return nil
 	}
 	// The UI wants the cursor relative to the editor area's top-left. The
-	// input sits on the third row, after the gutter bar.
-	cur.X += providerInlineIndent + lipgloss.Width(c.gutter(true))
+	// input sits on the third row.
+	cur.X += providerInlineIndent
 	cur.Y = 2
 	return cur
 }
@@ -373,9 +376,11 @@ func (c *ProviderInline) renderRow(ch ProviderChoice, selected bool, nameWidth, 
 func (c *ProviderInline) renderKeyEntry(width int) string {
 	t := c.com.Styles
 
-	c.input.SetWidth(max(1, width-lipgloss.Width(c.gutter(true))-2))
-	c.input.Prompt = "› "
-	input := c.gutter(true) + c.input.View()
+	// The input has just its own prompt: a bar in front of it would read as
+	// "|>".
+	c.input.Prompt = "> "
+	c.input.SetWidth(max(1, width-lipgloss.Width(c.input.Prompt)-1))
+	input := c.input.View()
 
 	var status string
 	switch {
@@ -385,5 +390,10 @@ func (c *ProviderInline) renderKeyEntry(width int) string {
 		status = c.gutter(false) + t.Dialog.TitleError.Render("That key didn't work. Paste it again?")
 	}
 
-	return strings.Join([]string{c.header(c.keyFor.Name+" API key", width), "", input, status}, "\n")
+	rows := []string{c.header(c.keyFor.Name+" API key", width), "", input, status}
+	// Pad to the list's height, with the question staying put at the top.
+	for len(rows) < c.height() {
+		rows = append(rows, "")
+	}
+	return strings.Join(rows, "\n")
 }

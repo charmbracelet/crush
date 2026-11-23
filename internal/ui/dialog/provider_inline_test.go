@@ -145,20 +145,67 @@ func TestProviderInlineRejectedKeyCanBeRetried(t *testing.T) {
 	require.Equal(t, 2, calls)
 }
 
-func TestProviderInlineHeightTracksTheStep(t *testing.T) {
+func TestProviderInlineKeyStepIsAsTallAsTheList(t *testing.T) {
+	t.Parallel()
+
+	// The key step needs fewer rows than a full provider list, but the card
+	// keeps the list's height so the screen does not jump between steps.
+	choices := []ProviderChoice{
+		{ID: "hyper", Name: "Hyper"},
+		{ID: "anthropic", Name: "Anthropic", NeedsKey: true},
+		{ID: "openai", Name: "OpenAI"},
+		{ID: "copilot", Name: "GitHub Copilot"},
+		{ID: ChoiceMoreProviders, Name: "More providers…"},
+	}
+	c := NewProviderInline(common.DefaultCommon(nil), "Pick a provider", choices)
+
+	listHeight := c.Height(80)
+	require.Equal(t, 7, listHeight, "question, blank line and five rows")
+	require.Equal(t, listHeight, len(strings.Split(c.render(60), "\n")))
+
+	press(c, tea.KeyDown)
+	press(c, tea.KeyEnter)
+	require.True(t, c.AskingForKey())
+
+	require.GreaterOrEqual(t, c.Height(80), listHeight)
+	require.Equal(t, listHeight, len(strings.Split(c.render(60), "\n")), "rendered rows match the height")
+	require.False(t, c.HeightChanged(), "moving between steps does not change the height")
+}
+
+func TestProviderInlineShortListStillFitsTheKeyStep(t *testing.T) {
+	t.Parallel()
+
+	c := NewProviderInline(common.DefaultCommon(nil), "Pick a provider", []ProviderChoice{
+		{ID: "anthropic", Name: "Anthropic", NeedsKey: true},
+	})
+
+	require.Equal(t, keyStepHeight, c.Height(80), "never shorter than the key step itself")
+}
+
+func TestProviderInlineHeightFollowsTheChoices(t *testing.T) {
 	t.Parallel()
 
 	c := newTestProviderInline()
 	require.Equal(t, 5, c.Height(80), "question, blank line and three rows")
 	require.False(t, c.HeightChanged())
 
-	press(c, tea.KeyDown)
-	press(c, tea.KeyEnter)
-	require.Equal(t, 4, c.Height(80), "title, label, input and status")
-
-	c.step = providerStepList
 	c.choices = append(c.choices, ProviderChoice{ID: "x", Name: "X"})
 	require.True(t, c.HeightChanged())
+}
+
+func TestProviderInputHasOnlyAPrompt(t *testing.T) {
+	t.Parallel()
+
+	c := newTestProviderInline()
+	press(c, tea.KeyDown)
+	press(c, tea.KeyEnter)
+	c.HandleKey(tea.KeyPressMsg{Code: 'a', Text: "a"})
+
+	lines := strings.Split(ansi.Strip(c.render(60)), "\n")
+	input := lines[2]
+	require.True(t, strings.HasPrefix(input, "> "), "the input starts with a plain prompt: %q", input)
+	require.NotContains(t, input, "┃", "no bar in front of the prompt")
+	require.NotContains(t, input, "›")
 }
 
 func TestProviderInlineMasksTheKey(t *testing.T) {

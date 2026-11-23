@@ -40,6 +40,14 @@ func projectsFilePath() string {
 	return filepath.Join(filepath.Dir(config.GlobalConfigData()), projectsFileName)
 }
 
+// Seen reports whether any Crush process has registered a project on this
+// machine. It is false only before the very first launch, since every launch
+// registers its working directory.
+func Seen() bool {
+	_, err := os.Stat(projectsFilePath())
+	return err == nil
+}
+
 // lockProjects takes mu and the cross-process lock that guards
 // projects.json, so that crush processes cannot interleave their reads and
 // writes of the file. It returns the path of projects.json and a function

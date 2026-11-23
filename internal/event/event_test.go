@@ -157,3 +157,17 @@ type testError string
 func (e testError) Error() string {
 	return string(e)
 }
+
+func TestSetFirstLaunch(t *testing.T) {
+	original := baseProps[firstLaunchAttrName]
+	t.Cleanup(func() { baseProps = baseProps.Set(firstLaunchAttrName, original) })
+
+	SetFirstLaunch(true)
+	if !IsFirstLaunch() {
+		t.Fatal("IsFirstLaunch() = false after SetFirstLaunch(true)")
+	}
+	SetFirstLaunch(false)
+	if IsFirstLaunch() {
+		t.Fatal("IsFirstLaunch() = true after SetFirstLaunch(false)")
+	}
+}

@@ -39,7 +39,9 @@ The `UI` struct is the top-level Bubble Tea model. Key fields:
 
 - `width`, `height` — terminal dimensions
 - `layout uiLayout` — computed layout rectangles
-- `state uiState` — `uiOnboarding | uiInitialize | uiLanding | uiChat`
+- `state uiState` — `uiInitialize | uiLanding | uiChat`
+- `firstRun firstRunState` — first-run experience: no provider yet and the
+  message held until one is set up (see `model/firstrun.go`)
 - `focus uiFocusState` — `uiFocusNone | uiFocusEditor | uiFocusMain`
 - `chat *Chat` — wraps `list.List` for the message view
 - `textarea textarea.Model` — the input editor

@@ -638,7 +638,7 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 	switch m.Role {
 	case User:
 		var parts []fantasy.MessagePart
-		text := strings.TrimSpace(m.Content().Text)
+		text := m.Content().Text
 		var textAttachments []Attachment
 		for _, content := range m.BinaryContent() {
 			if !strings.HasPrefix(content.MIMEType, "text/") {
@@ -671,7 +671,7 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 				text = shellText
 			}
 		}
-		if text != "" {
+		if strings.TrimSpace(text) != "" {
 			parts = append(parts, fantasy.TextPart{Text: text})
 		}
 		for _, content := range m.BinaryContent() {
@@ -691,7 +691,7 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 		})
 	case Assistant:
 		var parts []fantasy.MessagePart
-		text := strings.TrimSpace(m.Content().Text)
+		text := m.Content().Text
 		reasoning := m.ReasoningContent()
 		if reasoning.HasReplayData() {
 			reasoningPart := fantasy.ReasoningPart{Text: reasoning.Thinking, ProviderOptions: fantasy.ProviderOptions{}}
@@ -711,7 +711,7 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 			}
 			parts = append(parts, reasoningPart)
 		}
-		if text != "" {
+		if strings.TrimSpace(text) != "" {
 			parts = append(parts, fantasy.TextPart{Text: text})
 		}
 		for _, call := range m.ToolCalls() {

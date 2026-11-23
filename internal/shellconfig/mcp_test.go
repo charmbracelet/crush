@@ -43,6 +43,28 @@ func TestMCPOAuthFlags(t *testing.T) {
 	require.Equal(t, float64(8085), m["oauth_callback_port"])
 }
 
+func TestMCPChannelFlags(t *testing.T) {
+	t.Parallel()
+
+	result := loadScript(t, `mcp add signal --command uv \
+  --channel true \
+  --channel-reply '{"user":{"tool":"send_message_to_user","target_param":"user_id"},"suppress_tools":["send"]}'`)
+
+	m := result["mcp"].(map[string]any)["signal"].(map[string]any)
+	require.Equal(t, true, m["channel_enabled"])
+	reply := m["channel_reply"].(map[string]any)
+	require.Equal(t, "send_message_to_user", reply["user"].(map[string]any)["tool"])
+	require.Equal(t, []any{"send"}, reply["suppress_tools"])
+}
+
+func TestMCPChannelReplyRejectsNonObject(t *testing.T) {
+	t.Parallel()
+
+	path := t.TempDir() + "/crushrc"
+	_, err := LoadShellConfig(t.Context(), path, []byte(`mcp add signal --command uv --channel-reply '[]'`))
+	require.Error(t, err)
+}
+
 func TestMCPUnknownSubcommand(t *testing.T) {
 	t.Parallel()
 

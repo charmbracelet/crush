@@ -269,7 +269,7 @@ func NewAssistantMessageItem(sty *styles.Styles, message *message.Message) Messa
 			GradColorB:  sty.WorkingGradToColor,
 			LabelColor:  sty.WorkingLabelColor,
 			CycleColors: true,
-			Suffix:      func() string { return common.FormatDuration(time.Since(startedAt)) },
+			Suffix:      func() string { return common.FormatDuration(common.ElapsedSince(startedAt, time.Now())) },
 			SuffixColor: sty.WorkingTimerColor,
 		})
 	} else {
@@ -956,19 +956,9 @@ func (a *AssistantMessageItem) SetMessage(msg *message.Message) {
 	// update.
 }
 
-// Finished implements list.Item. The assistant message is freezable
-// once the message reports IsFinished() and is no longer spinning
-// (no animation frame remains pending). Streaming tail animation is
-// caught by isSpinning, so freezing only kicks in once the turn is
-// fully terminal. The list cache invalidates the entry on the next
-// version bump if anything (focus, highlight, expansion) changes.
-func (a *AssistantMessageItem) Finished() bool {
-	return a.message.IsFinished() && !a.isSpinning()
-}
-
 // clearCache drops every cached render for this item, including the
 // per-section caches. Shadows the embedded cachedMessageItem.clearCache
-// so ClearItemCaches (style change) wipes the section caches too.
+// so ClearItemCache (style change) wipes the section caches too.
 // F8: also drop the streaming-markdown stable-prefix cache because
 // the cached glamour render embeds the OLD style's ANSI sequences
 // and is no longer visually consistent with the new style.

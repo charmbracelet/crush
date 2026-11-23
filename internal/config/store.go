@@ -97,6 +97,10 @@ type RuntimeOverrides struct {
 	// ActiveRouter records a router choice made in this instance, pinned
 	// across reloads like Models. Nil means no choice was made here.
 	ActiveRouter *string
+	// Prompts replaces built-in prompts for this session only (via the
+	// --prompt flag). Entries win over options.prompts and hold absolute
+	// paths, since they were resolved against the invoking shell's cwd.
+	Prompts PromptPaths
 }
 
 // ConfigStore is the single entry point for all config access. It owns the

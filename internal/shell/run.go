@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"os"
 	"slices"
 	"strings"
@@ -48,6 +49,9 @@ type RunOptions struct {
 	// TermWidth is the terminal width in columns for PTY execution.
 	// Zero uses a default of 200.
 	TermWidth int
+	// Exports, if set, is called after a successful run for each variable
+	// the command exported or changed while exported.
+	Exports func(name, value string)
 }
 
 // Run parses and executes a shell command using the same mvdan.cc/sh
@@ -94,7 +98,37 @@ func Run(ctx context.Context, opts RunOptions) (err error) {
 		return fmt.Errorf("could not run command: %w", err)
 	}
 
-	return runner.Run(ctx, line)
+	if opts.Exports == nil {
+		return runner.Run(ctx, line)
+	}
+
+	// Reset seeds interpreter defaults (IFS, OPTIND, ...) so they land in
+	// the snapshot and are not mistaken for the script's own exports.
+	runner.Reset()
+	before := maps.Collect(runner.Env.Each)
+	maps.Copy(before, runner.Vars)
+
+	if err := runner.Run(ctx, line); err != nil {
+		return err
+	}
+	reportExports(before, runner.Vars, opts.Exports)
+	return nil
+}
+
+// reportExports calls report for each exported string variable in after
+// that is new or changed relative to before. PWD and OLDPWD are skipped
+// because cd changes them as a side effect, not as an export.
+func reportExports(before, after map[string]expand.Variable, report func(name, value string)) {
+	for _, name := range slices.Sorted(maps.Keys(after)) {
+		v := after[name]
+		if name == "PWD" || name == "OLDPWD" || !v.Exported || !v.IsSet() || v.Kind != expand.String {
+			continue
+		}
+		if prev, ok := before[name]; ok && prev.Exported && prev.Str == v.Str {
+			continue
+		}
+		report(name, v.Str)
+	}
 }
 
 // CaptureResult holds the combined output and exit code from a

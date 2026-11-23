@@ -49,6 +49,7 @@ func LoadShellConfig(ctx context.Context, path string, src []byte) ([]byte, erro
 		Command: string(src),
 		Cwd:     cwd,
 		Env:     env,
+		Exports: builder.setEnv,
 	})
 	if err != nil {
 		if shell.IsInterrupt(err) {

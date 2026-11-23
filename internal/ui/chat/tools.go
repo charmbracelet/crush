@@ -462,7 +462,7 @@ func (t *baseToolMessageItem) elapsed() time.Duration {
 	if start == 0 || end < start {
 		return 0
 	}
-	return time.Duration(end-start) * time.Millisecond
+	return common.ElapsedSince(time.UnixMilli(start), time.UnixMilli(end))
 }
 
 // toolTimerOwnTimeThreshold is how long a tool call must run before its
@@ -556,12 +556,6 @@ func (t *baseToolMessageItem) ToggleExpanded() bool {
 	t.clearCache()
 	t.Bump()
 	return t.expandedContent
-}
-
-// Finished implements list.Item: a call is freezable once it stops spinning
-// with a result or a cancel.
-func (t *baseToolMessageItem) Finished() bool {
-	return !t.isSpinning() && (t.result != nil || t.status == ToolStatusCanceled)
 }
 
 // HandleMouseClick implements MouseClickable.

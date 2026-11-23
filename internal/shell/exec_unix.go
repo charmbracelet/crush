@@ -30,6 +30,22 @@ func isolateProcess(cmd *exec.Cmd) {
 	cmd.SysProcAttr.Setsid = true
 }
 
+// killGroupOnCancel replaces os/exec's default cancellation (which signals
+// only the direct child) with a SIGKILL to the child's whole process group,
+// so descendants like a script's background children die with it. The
+// WaitDelay bounds cmd.Wait when a detached descendant still holds a stdio
+// pipe open after the process exits. Requires isolateProcess so the child
+// leads its own group (pgid == pid).
+func killGroupOnCancel(cmd *exec.Cmd) {
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = defaultKillTimeout + time.Second
+}
+
 // processGroupExecHandler returns an ExecHandlerFunc that replaces
 // interp.DefaultExecHandler with one that fully isolates child processes
 // from Crush's session and controlling terminal.
@@ -61,22 +77,46 @@ func processGroupExecHandler(killTimeout time.Duration) interp.ExecHandlerFunc {
 		}
 		isolateProcess(&cmd)
 
+		// Bound how long Wait blocks after the process exits: a detached
+		// descendant holding a stdio pipe open would otherwise hang us
+		// forever. Matches mvdan's DefaultExecHandler.
+		cmd.WaitDelay = killTimeout + time.Second
+
 		err = cmd.Start()
 		if err == nil {
-			stopf := context.AfterFunc(ctx, func() {
+			group := -cmd.Process.Pid
+			leaderDone := make(chan struct{})
+			cleanupDone := make(chan struct{})
+			stop := context.AfterFunc(ctx, func() {
+				defer close(cleanupDone)
 				if killTimeout <= 0 {
-					_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+					_ = syscall.Kill(group, syscall.SIGKILL)
 					return
 				}
-				// Signal the child's process group (negative PID) so
-				// grandchildren also receive it.
-				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGINT)
-				time.Sleep(killTimeout)
-				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+
+				if syscall.Kill(group, syscall.SIGINT) == syscall.ESRCH {
+					return
+				}
+				timer := time.NewTimer(killTimeout)
+				defer timer.Stop()
+				select {
+				case <-leaderDone:
+					if syscall.Kill(group, 0) == syscall.ESRCH {
+						return
+					}
+					<-timer.C
+				case <-timer.C:
+				}
+				_ = syscall.Kill(group, syscall.SIGKILL)
 			})
-			defer stopf()
 
 			err = cmd.Wait()
+			close(leaderDone)
+			// The leader can exit on SIGINT while descendants are still
+			// alive. Keep the shell tracked until escalation has run.
+			if !stop() {
+				<-cleanupDone
+			}
 		}
 
 		return exitStatusFromError(ctx, hc.Stderr, err)

@@ -34,7 +34,17 @@ func (b *Backend) SendMessage(workspaceID string, msg proto.AgentMessage) error 
 	if err != nil {
 		return err
 	}
+	return b.dispatchRun(ws, msg, "")
+}
 
+// dispatchRun validates and accepts a prompt for the workspace's agent
+// and dispatches the run. channel names the MCP server that originated
+// the turn when the run was dispatched by the server-side channel
+// injection path (injectChannelMessage); it is empty for every
+// client-initiated run because proto.AgentMessage cannot carry a
+// channel from the wire, so only this package can bind a channel to a
+// run.
+func (b *Backend) dispatchRun(ws *Workspace, msg proto.AgentMessage, channel string) error {
 	coord := ws.Coordinator()
 	if coord == nil {
 		return ErrAgentNotInitialized
@@ -59,7 +69,7 @@ func (b *Backend) SendMessage(workspaceID string, msg proto.AgentMessage) error 
 	ws.runWG.Add(1)
 	ws.runMu.Unlock()
 
-	go b.runAgent(ws, coord, msg, accept)
+	go b.runAgent(ws, coord, msg, channel, accept)
 	return nil
 }
 
@@ -88,7 +98,7 @@ func (b *Backend) SendMessage(workspaceID string, msg proto.AgentMessage) error 
 // notify.RunComplete event with that correlator. A run-complete marker
 // is also attached so the coordinator can report whether it published
 // the terminal event, letting runAgent avoid a duplicate fallback.
-func (b *Backend) runAgent(ws *Workspace, coord agent.Coordinator, msg proto.AgentMessage, accept *agent.AcceptedRun) {
+func (b *Backend) runAgent(ws *Workspace, coord agent.Coordinator, msg proto.AgentMessage, channel string, accept *agent.AcceptedRun) {
 	defer ws.runWG.Done()
 	defer accept.Close()
 
@@ -101,8 +111,8 @@ func (b *Backend) runAgent(ws *Workspace, coord agent.Coordinator, msg proto.Age
 	}
 	ctx = agent.WithRunCompleteMarker(ctx)
 
-	if msg.Channel != "" {
-		ctx = agent.WithChannel(ctx, msg.Channel)
+	if channel != "" {
+		ctx = agent.WithChannel(ctx, channel)
 	}
 	_, err := coord.RunAccepted(ctx, accept, msg.SessionID, msg.Prompt, proto.AttachmentsToMessage(msg.Attachments)...)
 	if err == nil || errors.Is(err, context.Canceled) {

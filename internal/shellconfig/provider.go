@@ -15,7 +15,7 @@ import (
 //	    [--base-url URL] [--disable true|false] [--flat-rate true|false]
 //	    [--discover-models true|false] [--system-prompt-prefix TEXT]
 //	    [--extra-header KEY VALUE] [--extra-body JSON]
-//	    [--provider-options JSON]
+//	    [--provider-options JSON] [--aws-auth-refresh CMD]
 //	    [--oauth-issuer URL] [--oauth-client-id ID] [--oauth-scope SCOPE]
 //	    [--oauth-flow auto|browser|device] ...
 //	provider remove <id>   (alias: rm)
@@ -55,15 +55,16 @@ func handleProvider(ctx context.Context, args []string, stdin io.Reader, stdout,
 var providerAddFlags = []flagSpec{
 	{name: "--name", jsonKey: "name", kind: flagString, op: opSet},
 	{name: "--type", jsonKey: "type", kind: flagString, op: opSet},
-	{name: "--api-key", jsonKey: "api_key", kind: flagString, op: opSet},
-	{name: "--base-url", jsonKey: "base_url", kind: flagString, op: opSet},
+	{name: "--api-key", jsonKey: "api_key", kind: flagString, op: opSet, template: true},
+	{name: "--base-url", jsonKey: "base_url", kind: flagString, op: opSet, template: true},
 	{name: "--disable", jsonKey: "disable", kind: flagBool, op: opSet},
 	{name: "--flat-rate", jsonKey: "flat_rate", kind: flagBool, op: opSet},
 	{name: "--discover-models", jsonKey: "discover_models", kind: flagBool, op: opSet},
 	{name: "--system-prompt-prefix", jsonKey: "system_prompt_prefix", kind: flagString, op: opSet},
-	{name: "--extra-header", child: "extra_headers", kind: flagKeyValue, op: opSetChild},
+	{name: "--extra-header", child: "extra_headers", kind: flagKeyValue, op: opSetChild, template: true},
 	{name: "--extra-body", child: "extra_body", kind: flagJSONObject, op: opMergeChild},
 	{name: "--provider-options", child: "provider_options", kind: flagJSONObject, op: opMergeChild},
+	{name: "--aws-auth-refresh", jsonKey: "aws_auth_refresh", kind: flagString, op: opSet},
 	// OAuth declarations. Any of these marks the provider as signing in
 	// rather than taking a key, so `crush login <id>` can authenticate it.
 	{
@@ -123,7 +124,7 @@ var providerAddFlags = []flagSpec{
 
 func providerAdd(b *ConfigBuilder, args []string, stderr io.Writer) error {
 	if len(args) < 3 {
-		return usage(stderr, "usage: provider add <id> [--name NAME] [--type TYPE] [--api-key KEY] [--base-url URL] [--disable true|false] [--flat-rate true|false] [--discover-models true|false] [--system-prompt-prefix TEXT] [--extra-header KEY VALUE] [--extra-body JSON] [--provider-options JSON] [--oauth-issuer URL] [--oauth-client-id ID] [--oauth-scope SCOPE] [--oauth-flow auto|browser|device] [--oauth-auth-url URL] [--oauth-token-url URL] [--oauth-device-url URL] [--oauth-redirect-uri URI] [--oauth-callback-port N] [--oauth-param KEY VALUE]")
+		return usage(stderr, "usage: provider add <id> [--name NAME] [--type TYPE] [--api-key KEY] [--base-url URL] [--disable true|false] [--flat-rate true|false] [--discover-models true|false] [--system-prompt-prefix TEXT] [--extra-header KEY VALUE] [--extra-body JSON] [--provider-options JSON] [--aws-auth-refresh CMD] [--oauth-issuer URL] [--oauth-client-id ID] [--oauth-scope SCOPE] [--oauth-flow auto|browser|device] [--oauth-auth-url URL] [--oauth-token-url URL] [--oauth-device-url URL] [--oauth-redirect-uri URI] [--oauth-callback-port N] [--oauth-param KEY VALUE]")
 	}
 	id := args[2]
 	slog.Info("Provider defined in shell config", "provider", id)

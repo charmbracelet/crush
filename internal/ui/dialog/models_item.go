@@ -31,11 +31,6 @@ func NewModelGroup(t *styles.Styles, title string, configured bool, items ...*Mo
 	}
 }
 
-// Finished implements list.Item. Model groups are immutable headers.
-func (m *ModelGroup) Finished() bool {
-	return true
-}
-
 // AppendItems appends [ModelItem]s to the group.
 func (m *ModelGroup) AppendItems(items ...*ModelItem) {
 	m.Items = append(m.Items, items...)
@@ -112,12 +107,6 @@ func (m *ModelItem) IsRouter() bool {
 // RouterName returns the router name, empty for the "New router" item.
 func (m *ModelItem) RouterName() string {
 	return m.router
-}
-
-// Finished implements list.Item. Model items are render-stable
-// outside of explicit SetFocused / SetMatch.
-func (m *ModelItem) Finished() bool {
-	return true
 }
 
 // SelectedModel returns this model item as a [config.SelectedModel] instance.

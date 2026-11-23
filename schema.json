@@ -978,6 +978,10 @@
           "examples": [
             300
           ]
+        },
+        "prompts": {
+          "$ref": "#/$defs/PromptPaths",
+          "description": "Files that replace Crush's built-in prompts, keyed by prompt name. A replacement is used verbatim, so anything the built-in template injected (skills, context files, LSP status) is lost unless the replacement asks for it too."
         }
       },
       "additionalProperties": false,
@@ -1054,6 +1058,12 @@
         "input",
         "output"
       ]
+    },
+    "PromptPaths": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "type": "object"
     },
     "ProviderConfig": {
       "properties": {
@@ -1351,7 +1361,8 @@
             "charmtone-panther",
             "gruvbox-dark",
             "rose-pine",
-            "keanu"
+            "keanu",
+            "kitt"
           ]
         },
         "completions": {
@@ -1377,6 +1388,10 @@
           "type": "boolean",
           "description": "Enable terminal mouse capture for selection, clicks, and scrolling in the TUI. Disable to let the terminal emulator or tmux handle text selection and copy/paste",
           "default": true
+        },
+        "nerd_fonts": {
+          "type": "boolean",
+          "description": "Override Nerd Font glyph detection for the TUI: true forces glyphs on, false forces them off, and unset keeps automatic detection"
         },
         "exit_banner": {
           "type": "string",

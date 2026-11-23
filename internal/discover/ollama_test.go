@@ -107,6 +107,83 @@ func TestOllamaEnricher(t *testing.T) {
 	})
 }
 
+func TestOllamaEnricherKeepsToolCapableModels(t *testing.T) {
+	t.Parallel()
+	srv := newOllamaCapabilitiesServer(t, map[string]string{
+		"tooled:latest": `{"model_info":{"llama.context_length":32768},"capabilities":["completion","tools"]}`,
+	})
+	models, err := (&ollamaEnricher{}).EnrichModels(t.Context(),
+		Config{ID: "test-ollama", BaseURL: srv.URL + "/v1"}, &mockResolver{},
+		[]catwalk.Model{{ID: "tooled:latest"}})
+	require.NoError(t, err)
+	require.Len(t, models, 1)
+	require.Equal(t, "tooled:latest", models[0].ID)
+	require.Equal(t, int64(32768), models[0].ContextWindow)
+}
+
+func TestOllamaEnricherDoesNotRejectUnknownCapabilities(t *testing.T) {
+	t.Parallel()
+	srv := newOllamaCapabilitiesServer(t, map[string]string{
+		"legacy:latest": `{"model_info":{"llama.context_length":8192}}`,
+		"empty:latest":  `{"capabilities":[]}`,
+	})
+	models, err := (&ollamaEnricher{}).EnrichModels(t.Context(),
+		Config{ID: "test-ollama", BaseURL: srv.URL + "/v1"}, &mockResolver{},
+		[]catwalk.Model{{ID: "legacy:latest"}, {ID: "empty:latest"}})
+	require.NoError(t, err)
+	require.Len(t, models, 2)
+	require.Equal(t, "legacy:latest", models[0].ID)
+	require.Equal(t, int64(8192), models[0].ContextWindow)
+	require.Equal(t, "empty:latest", models[1].ID)
+}
+
+func TestOllamaEnricherFiltersModelsWithoutTools(t *testing.T) {
+	t.Parallel()
+	// Literal responses ensure this test also exercises JSON field decoding.
+	srv := newOllamaCapabilitiesServer(t, map[string]string{
+		"plain:latest":   `{"model_info":{"llama.context_length":32768},"capabilities":["completion"]}`,
+		"tooled:latest":  `{"model_info":{"llama.context_length":32768},"capabilities":["completion","tools"]}`,
+		"no-info:latest": `{"capabilities":["completion"]}`,
+		"legacy:latest":  `{}`,
+	})
+	models, err := (&ollamaEnricher{}).EnrichModels(t.Context(),
+		Config{ID: "test-ollama", BaseURL: srv.URL + "/v1"}, &mockResolver{},
+		[]catwalk.Model{
+			{ID: "configured:latest", ContextWindow: 4096},
+			{ID: "plain:latest"},
+			{ID: "tooled:latest"},
+			{ID: "no-info:latest"},
+			{ID: "legacy:latest"},
+		})
+	require.NoError(t, err)
+	require.Len(t, models, 3)
+	require.Equal(t, "configured:latest", models[0].ID)
+	require.Equal(t, int64(4096), models[0].ContextWindow)
+	require.Equal(t, "tooled:latest", models[1].ID)
+	require.Equal(t, int64(32768), models[1].ContextWindow)
+	require.Equal(t, "legacy:latest", models[2].ID)
+}
+
+func newOllamaCapabilitiesServer(t *testing.T, responses map[string]string) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		response, ok := responses[req["model"]]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(response))
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
 func TestExtractContextLength(t *testing.T) {
 	t.Parallel()
 

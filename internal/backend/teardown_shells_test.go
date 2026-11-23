@@ -28,7 +28,7 @@ func TestTeardown_LeavesOtherWorkspacesShellsRunning(t *testing.T) {
 		require.NoError(t, err)
 		jobs[i], err = mgr.Start(context.Background(), ws.App, ws.Path, nil, "sleep 30", cid, 10)
 		require.NoError(t, err)
-		t.Cleanup(func() { _ = mgr.Kill(jobs[i].ID) })
+		t.Cleanup(func() { _ = mgr.Kill(context.Background(), jobs[i].ID) })
 	}
 	exitsWithin := func(job *shell.BackgroundShell, d time.Duration) bool {
 		ctx, cancel := context.WithTimeout(t.Context(), d)

@@ -495,12 +495,10 @@ type UI struct {
 	pillsExpanded      bool
 	pillsAutoExpanded  bool
 	focusedPillSection pillSection
-	// promptQueue / promptQueueItems mirror the session's queued prompts.
-	// They are event-driven with a TTL backstop, fetched off-thread by
-	// dispatchPromptQueueRefresh (see workspace_cache.go); promptQueue is
-	// always len(promptQueueItems).
-	promptQueue          int
-	promptQueueItems     []string
+	// promptQueue is what the queue pill shows. Its server side is
+	// event-driven with a TTL backstop, fetched off-thread by
+	// dispatchPromptQueueRefresh (see workspace_cache.go).
+	promptQueue          promptQueue
 	promptQueueCheckedAt time.Time
 	promptQueueInFlight  bool
 	// promptQueueGen is bumped by every queue state transition; an
@@ -574,6 +572,9 @@ type UI struct {
 	// rather than once per frame.
 	subAgentsRunning int
 
+	// animClock drives every spinner, in the transcript and the chrome.
+	animClock animClock
+
 	// hyperCredits is the remaining Hyper credits as last fetched from
 	// the /v1/credits endpoint. It is nil when no fetch has reported a
 	// balance yet, or when the team has hypercredit display disabled, and
@@ -596,6 +597,9 @@ type UI struct {
 	// locally and a request in client/server mode, so renders take it from
 	// here rather than asking the workspace per frame.
 	gitBranch string
+
+	// nerdFonts reports whether the terminal renders Nerd Font glyphs.
+	nerdFonts bool
 
 	// Prompt history for up/down navigation through previous messages.
 	promptHistory struct {
@@ -810,6 +814,7 @@ func (m *UI) Init() tea.Cmd {
 	// The branch is shown from the first frame on, so read it now and keep
 	// polling for checkouts made outside Crush.
 	cmds = append(cmds, m.fetchGitBranch(), m.gitBranchTicker())
+	cmds = append(cmds, detectNerdFonts(m.com.Config().Options.TUI))
 	cmds = append(cmds, m.hyperCreditsTicker())
 	// Prime the memoized MCP state off-thread. There is deliberately no
 	// wait for server-side MCP initialization: the init gate is
@@ -1038,6 +1043,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case routersChangedMsg:
 		cmds = append(cmds, m.applyRoutersChanged(msg))
 	case agentRunSubmittedMsg:
+		// The fetch below shows the prompt if it was queued.
+		m.promptQueue.Settle(msg.pendingID)
 		if msg.err != nil {
 			// The run never started, so no terminal event is coming to
 			// retire its spinner.
@@ -1090,8 +1097,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// session instead of a stale one.
 		m.invalidateBusyCaches()
 		m.invalidatePromptQueue()
-		m.promptQueue = 0
-		m.promptQueueItems = nil
+		m.promptQueue.Reset()
 		m.promptQueueCheckedAt = time.Time{}
 		if cmd := m.dispatchBusyRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -1163,6 +1169,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					toggles.SetItemStatus(name, mcpStatusText(info))
 				}
 			}
+		}
+		if channels, ok := m.dialog.Dialog(dialog.ChannelsID).(*dialog.Channels); ok {
+			channels.SetStates(msg.states)
 		}
 		cmds = append(cmds, m.applyMCPStates(msg)...)
 	case mcpStartingRetryMsg:
@@ -1678,9 +1687,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case frameGCMsg:
 		m.handleFrameGC()
 	case animTickMsg:
-		if cmd := m.handleAnimTick(msg); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
+		m.handleAnimTick(msg)
 	case scrollbarHideMsg:
 		if m.state == uiChat {
 			m.chat.HideScrollbar(msg.seq)
@@ -1807,6 +1814,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.usageTicker())
 	case gitBranchUpdatedMsg:
 		m.gitBranch = msg.branch
+	case nerdFontsMsg:
+		m.nerdFonts = bool(msg)
 	case gitBranchPollMsg:
 		cmds = append(cmds, m.fetchGitBranch(), m.gitBranchTicker())
 	case util.InfoMsg:
@@ -1922,16 +1931,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// scroll, session load); make sure the clock is running. This is the
 	// sole place the clock is armed so a tick never sits inside a caller's
 	// tea.Sequence.
-	// The header spins while subagents work, and they work out of sight:
-	// that is the whole reason the header says anything about them. So the
-	// clock cannot be left to the transcript alone, which only arms it for
-	// an item currently on screen. Without this the spinner sat still and
-	// then jumped several frames whenever an unrelated message happened to
-	// force a repaint.
 	m.subAgentsRunning = m.runningSubAgents()
 	if m.state == uiChat {
-		m.chat.SetExternalAnimation(m.subAgentsRunning > 0)
-		if cmd := m.chat.EnsureAnimating(); cmd != nil {
+		if cmd := m.ensureAnimating(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 		// Same for the chat scrollbar's auto-hide: a scroll may be applied
@@ -1947,28 +1949,33 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
+// ensureAnimating arms the shared clock while a visible transcript item is
+// spinning or a subagent is running, whose spinners live in the chrome.
+func (m *UI) ensureAnimating() tea.Cmd {
+	return m.animClock.ensure(func() bool {
+		return m.subAgentsRunning > 0 || m.chat.hasVisibleAnimation()
+	})
+}
+
 // handleAnimTick advances every visible spinner by one frame. A tick that
 // changed nothing visible is scroll-only so the frame cache survives; one
 // that did keeps the view pinned to the bottom while following, since
-// animated items can change height.
-func (m *UI) handleAnimTick(msg animTickMsg) tea.Cmd {
-	if m.state != uiChat {
-		m.chat.stopAnimating(msg)
+// animated items can change height. The Update tail re-arms the clock.
+func (m *UI) handleAnimTick(msg animTickMsg) {
+	if !m.animClock.accept(msg) || m.state != uiChat {
 		m.markScrollOnly()
-		return nil
+		return
 	}
-	changed, cmd := m.chat.Tick(msg)
-	if !changed && m.subAgentsRunning == 0 {
+	if !m.chat.advanceVisible() && m.subAgentsRunning == 0 {
 		// Nothing moved on screen, so the frame can be reused. It cannot be
 		// when the header is spinning: that spinner is outside the list and
 		// reusing the frame would freeze it.
 		m.markScrollOnly()
-		return cmd
+		return
 	}
 	if m.chat.Follow() {
 		m.chat.ScrollToBottom()
 	}
-	return cmd
 }
 
 // setSessionMessages sets the messages for the current session in the chat
@@ -2017,7 +2024,7 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 	// leave a ghost "working" spinner (and a second one alongside any tool
 	// spinner) after the session is reloaded. Messages arriving for the
 	// session re-enable the clock.
-	m.chat.SetAnimationsAllowed(m.isAgentBusy())
+	m.animClock.frozen = !m.isAgentBusy()
 
 	if cmd := m.chat.SetMessages(items...); cmd != nil {
 		cmds = append(cmds, cmd)
@@ -2027,7 +2034,7 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 	// waiting on one, so switching away and back does not lose the
 	// spinner for the rest of the turn.
 	if m.syncPendingItem() {
-		m.chat.SetAnimationsAllowed(true)
+		m.animClock.frozen = false
 	}
 	m.chat.SelectLast()
 	return tea.Sequence(cmds...)
@@ -2340,7 +2347,7 @@ func (m *UI) focusActiveInline(focus uiFocusState) {
 func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 	// A message update means work is active; the animation clock may have
 	// been frozen by a non-busy session reload (ghost-spinner guard).
-	m.chat.SetAnimationsAllowed(true)
+	m.animClock.frozen = false
 	var cmds []tea.Cmd
 	existingItem := m.chat.MessageItem(msg.ID)
 
@@ -2415,7 +2422,7 @@ func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.
 	}
 	// Nested tool activity means the agent is running; the animation clock
 	// may have been frozen by a non-busy session reload.
-	m.chat.SetAnimationsAllowed(true)
+	m.animClock.frozen = false
 
 	// Find the parent agent tool item. A nested tool's ID also maps to its
 	// parent, so the ID check keeps this to the item that owns the session.
@@ -2653,29 +2660,12 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleThinking:
-		note := m.nextMessageNote()
-		cmds = append(cmds, m.updateAgentModelCmd(func() tea.Msg {
-			cfg := m.com.Config()
-			if cfg == nil {
-				return util.ReportError(errors.New("configuration not found"))()
+		cmds = append(cmds, m.updateCoderModel(func(model *config.SelectedModel) string {
+			model.Think = !model.Think
+			if model.Think {
+				return "Thinking mode enabled"
 			}
-
-			agentCfg, ok := cfg.Agents[config.AgentCoder]
-			if !ok {
-				return util.ReportError(errors.New("agent configuration not found"))()
-			}
-
-			currentModel := cfg.Models[agentCfg.Model]
-			currentModel.Think = !currentModel.Think
-			if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, agentCfg.Model, currentModel); err != nil {
-				return util.ReportError(err)()
-			}
-			m.com.Workspace.UpdateAgentModel(context.TODO())
-			status := "disabled"
-			if currentModel.Think {
-				status = "enabled"
-			}
-			return util.NewInfoMsg("Thinking mode " + status + note)
+			return "Thinking mode disabled"
 		}))
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleTransparentBackground:
@@ -2715,15 +2705,9 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.userThemeSelected = true
 		m.dialog.CloseDialog(dialog.ThemeID)
 	case dialog.ActionPreviewTheme:
-		newStyles, err := styles.LoadTheme(msg.Theme)
-		if err != nil {
-			break
+		if newStyles, err := styles.LoadTheme(msg.Theme); err == nil {
+			m.previewTheme(newStyles)
 		}
-		if m.preThemeStyles == nil {
-			saved := m.com.Styles.Clone()
-			m.preThemeStyles = &saved
-		}
-		m.previewTheme(newStyles)
 	case dialog.ActionRevertThemePreview:
 		if m.preThemeStyles != nil {
 			m.applyTheme(*m.preThemeStyles)
@@ -2731,15 +2715,9 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		m.dialog.CloseDialog(dialog.ThemeID)
 	case dialog.ActionPreviewThemePalette:
-		newStyles, err := styles.LoadPaletteTheme(msg.Base, msg.Palette)
-		if err != nil {
-			break
+		if newStyles, err := styles.LoadPaletteTheme(msg.Base, msg.Palette); err == nil {
+			m.previewTheme(newStyles)
 		}
-		if m.preThemeStyles == nil {
-			saved := m.com.Styles.Clone()
-			m.preThemeStyles = &saved
-		}
-		m.previewTheme(newStyles)
 	case dialog.ActionSaveThemePalette:
 		// The theme is stored under its own name; Base only identifies the
 		// built-in palette its colors are derived from.
@@ -2950,9 +2928,11 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 	case dialog.ActionSelectReasoningEffort:
-		if cmd := m.handleSelectReasoningEffort(msg.Effort); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
+		cmds = append(cmds, m.updateCoderModel(func(model *config.SelectedModel) string {
+			model.ReasoningEffort = msg.Effort
+			return "Reasoning effort set to " + msg.Effort
+		}))
+		m.dialog.CloseDialog(dialog.ReasoningID)
 	case dialog.ActionPermissionResponse:
 		m.dialog.CloseDialog(dialog.PermissionsID)
 		switch msg.Action {
@@ -3212,7 +3192,7 @@ func (m *UI) restoreModelFromSession(msgs []message.Message) tea.Cmd {
 
 	return m.updateAgentModelCmd(func() tea.Msg {
 		if err := m.com.Workspace.UpdateAgentModel(context.TODO()); err != nil {
-			return util.ReportError(err)
+			return util.ReportError(err)()
 		}
 		slog.Info("Restored model from session",
 			"provider", lastAssistant.Provider,
@@ -3221,10 +3201,9 @@ func (m *UI) restoreModelFromSession(msgs []message.Message) tea.Cmd {
 	})
 }
 
-// handleSelectReasoningEffort saves the coder model's reasoning effort and
-// rebuilds the agent's models. A run in progress keeps its effort; the new
-// one applies from the next message.
-func (m *UI) handleSelectReasoningEffort(effort string) tea.Cmd {
+// updateCoderModel applies change to the coder model's settings, saves them
+// and rebuilds the agent's models. change returns the message to report.
+func (m *UI) updateCoderModel(change func(*config.SelectedModel) string) tea.Cmd {
 	cfg := m.com.Config()
 	if cfg == nil {
 		return util.ReportError(errors.New("configuration not found"))
@@ -3235,19 +3214,18 @@ func (m *UI) handleSelectReasoningEffort(effort string) tea.Cmd {
 		return util.ReportError(errors.New("agent configuration not found"))
 	}
 
-	currentModel := cfg.Models[agentCfg.Model]
-	currentModel.ReasoningEffort = effort
-	if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, agentCfg.Model, currentModel); err != nil {
+	model := cfg.Models[agentCfg.Model]
+	info := change(&model)
+	if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, agentCfg.Model, model); err != nil {
 		return util.ReportError(err)
 	}
 
-	note := m.nextMessageNote()
-	m.dialog.CloseDialog(dialog.ReasoningID)
+	info += m.nextMessageNote()
 	return m.updateAgentModelCmd(func() tea.Msg {
 		if err := m.com.Workspace.UpdateAgentModel(context.TODO()); err != nil {
 			return util.ReportError(err)()
 		}
-		return util.NewInfoMsg("Reasoning effort set to " + effort + note)
+		return util.NewInfoMsg(info)
 	})
 }
 
@@ -3399,7 +3377,7 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 	note := m.nextMessageNote()
 	cmds = append(cmds, m.updateAgentModelCmd(func() tea.Msg {
 		if err := m.com.Workspace.UpdateAgentModel(context.TODO()); err != nil {
-			return util.ReportError(err)
+			return util.ReportError(err)()
 		}
 
 		var (
@@ -4137,7 +4115,7 @@ func (m *UI) drawHeader(scr uv.Screen, area uv.Rectangle) {
 		m.lspErrorCount(),
 		m.hyperCredits,
 		m.usageForCurrentModel(),
-		m.gitBranch,
+		m.gitBranchLabel(),
 		m.subAgentsRunning,
 	)
 }
@@ -4437,7 +4415,7 @@ func (m *UI) ShortHelp() []key.Binding {
 			cancelBinding := k.Chat.Cancel
 			if m.isCanceling {
 				cancelBinding.SetHelp("esc", "press again to cancel")
-			} else if m.promptQueue > 0 {
+			} else if m.promptQueue.ServerQueued() {
 				cancelBinding.SetHelp("esc", "clear queue")
 			}
 			binds = append(binds, cancelBinding)
@@ -4492,7 +4470,7 @@ func (m *UI) ShortHelp() []key.Binding {
 				k.Chat.PageDown,
 				k.Chat.Copy,
 			)
-			if m.pillsExpanded && hasIncompleteTodos(m.session.Todos) && m.promptQueue > 0 {
+			if m.pillsExpanded && hasIncompleteTodos(m.session.Todos) && m.promptQueue.Shown() > 0 {
 				binds = append(binds, k.Chat.PillLeft)
 			}
 		}
@@ -4571,7 +4549,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 			cancelBinding := k.Chat.Cancel
 			if m.isCanceling {
 				cancelBinding.SetHelp("esc", "press again to cancel")
-			} else if m.promptQueue > 0 {
+			} else if m.promptQueue.ServerQueued() {
 				cancelBinding.SetHelp("esc", "clear queue")
 			}
 			binds = append(binds, []key.Binding{cancelBinding})
@@ -4665,7 +4643,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 					k.Chat.ClearHighlight,
 				},
 			)
-			if m.pillsExpanded && hasIncompleteTodos(m.session.Todos) && m.promptQueue > 0 {
+			if m.pillsExpanded && hasIncompleteTodos(m.session.Todos) && m.promptQueue.Shown() > 0 {
 				binds = append(binds, []key.Binding{k.Chat.PillLeft})
 			}
 		}
@@ -5759,11 +5737,10 @@ func (m *UI) isAgentBusy() bool {
 	return m.agentBusyCache.val
 }
 
-// nextMessageNote qualifies a model setting change made while the agent
-// runs: the running turn keeps the model it started with, and the change
-// applies from the next message.
+// nextMessageNote tells the user a model change made mid-run skips the
+// running turn.
 func (m *UI) nextMessageNote() string {
-	if m.agentBusyCache.val {
+	if m.isAgentBusy() {
 		return " (applies to your next message)"
 	}
 	return ""
@@ -5863,19 +5840,17 @@ func (m *UI) applyTheme(s styles.Styles) {
 	*m.com.Styles = s
 	common.InvalidateStyleCaches()
 	m.refreshStyles()
-	m.chat.InvalidateRenderCaches()
+	m.chat.Restyle()
 }
 
-// previewTheme applies the given styles for live preview inside an open
-// theme dialog. The whole interface updates, but only the chat messages
-// currently on screen re-render; the rest of the transcript keeps its
-// cached output so browsing themes stays fast in large sessions. Off-screen
-// messages follow along when the theme is actually applied.
+// previewTheme shows a theme from an open theme dialog, saving the theme in
+// effect beforehand so closing the dialog can restore it.
 func (m *UI) previewTheme(s styles.Styles) {
-	*m.com.Styles = s
-	common.InvalidateStyleCaches()
-	m.refreshStyles()
-	m.chat.InvalidateVisibleRenderCaches()
+	if m.preThemeStyles == nil {
+		saved := m.com.Styles.Clone()
+		m.preThemeStyles = &saved
+	}
+	m.applyTheme(s)
 }
 
 // refreshStyles pushes the current *m.com.Styles into every subcomponent
@@ -6007,7 +5982,7 @@ func (m *UI) sendMessageInternal(content string, hidden bool, attachments ...mes
 	sessionID := m.currentSessionID()
 	queued := m.turnInFlight(sessionID)
 	// Loading an idle session freezes ghost spinners; sending unfreezes.
-	m.chat.SetAnimationsAllowed(true)
+	m.animClock.frozen = false
 	if !queued {
 		common.StartTurn(sessionID)
 		echo := content
@@ -6040,6 +6015,14 @@ func (m *UI) sendMessageInternal(content string, hidden bool, attachments ...mes
 	m.agentBusyCache.set(true)
 	m.busyFetchGen++
 	m.invalidatePromptQueue()
+	// A prompt sent behind a busy turn shows in the queue pill right away
+	// rather than once the agent has built its run and enqueued it. Hidden
+	// prompts never show, matching the server's list.
+	var pendingID uint64
+	if queued && !hidden {
+		pendingID = m.promptQueue.Add(content)
+		m.updateLayoutAndSize()
+	}
 	cmds = append(cmds, func() tea.Msg {
 		// AgentRun is fire-and-forget: it returns once the prompt has
 		// been accepted (HTTP 202) or synchronously with a validation
@@ -6053,7 +6036,7 @@ func (m *UI) sendMessageInternal(content string, hidden bool, attachments ...mes
 		if errors.Is(err, context.Canceled) {
 			err = nil
 		}
-		return agentRunSubmittedMsg{sessionID: sessionID, err: err}
+		return agentRunSubmittedMsg{sessionID: sessionID, pendingID: pendingID, err: err}
 	})
 	return tea.Batch(cmds...)
 }
@@ -6142,7 +6125,7 @@ func (m *UI) runShellCommandInternal(command string, isFirstMessage bool) tea.Cm
 	pendingItem := chat.NewPendingShellItem(m.com.Styles, command)
 	// Bang mode runs without the agent, so re-enable the animation clock
 	// that a non-busy session reload may have frozen.
-	m.chat.SetAnimationsAllowed(true)
+	m.animClock.frozen = false
 	m.chat.AppendMessages(pendingItem)
 	m.chat.ScrollToBottom()
 
@@ -6239,12 +6222,11 @@ func (m *UI) cancelAgent() tea.Cmd {
 		return m.dispatchBusyRefresh()
 	}
 
-	// Queued prompts pending: esc clears the queue. Decide from the cached
-	// count (event-driven) instead of a synchronous workspace probe.
-	if m.promptQueue > 0 {
+	// Queued prompts pending: esc clears the queue, decided from the cached
+	// queue rather than a synchronous workspace probe.
+	if m.promptQueue.ServerQueued() {
 		m.com.Workspace.AgentClearQueue(m.session.ID)
-		m.promptQueue = 0
-		m.promptQueueItems = nil
+		m.promptQueue.ClearServer()
 		m.promptQueueCheckedAt = time.Now()
 		// Bump the queue generation so a fetch started before this clear
 		// cannot land and repopulate the pill we just emptied.
@@ -6308,6 +6290,8 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		m.openThemeNewDialog()
 	case dialog.ThemeEditorID:
 		m.openThemeEditorDialog("")
+	case dialog.ChannelsID:
+		m.openChannelsDialog()
 	case dialog.QuitID:
 		if cmd := m.openQuitDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -6365,7 +6349,7 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 		sessionID = m.session.ID
 	}
 	hasTodos := hasSession && hasIncompleteTodos(m.session.Todos)
-	hasQueue := m.promptQueue > 0
+	hasQueue := m.promptQueue.Shown() > 0
 
 	commands, err := dialog.NewCommands(m.com, sessionID, hasSession, hasTodos, hasQueue, m.isTransparent, m.customCommands, m.mcpPrompts)
 	if err != nil {
@@ -6403,6 +6387,16 @@ func (m *UI) openNotificationsDialog() tea.Cmd {
 	notificationsDialog := dialog.NewNotifications(m.com)
 	m.dialog.OpenDialog(notificationsDialog)
 	return nil
+}
+
+// openChannelsDialog opens the channels management dialog.
+func (m *UI) openChannelsDialog() {
+	if m.dialog.ContainsDialog(dialog.ChannelsID) {
+		m.dialog.BringToFront(dialog.ChannelsID)
+		return
+	}
+	channelsDialog := dialog.NewChannels(m.com, m.mcpStates)
+	m.dialog.OpenDialog(channelsDialog)
 }
 
 // openSessionsDialog opens the sessions dialog. If the dialog is already open,
@@ -7231,8 +7225,7 @@ func (m *UI) newSession() tea.Cmd {
 	m.chat.ClearMessages()
 	m.pillsExpanded = false
 	m.pillsAutoExpanded = false
-	m.promptQueue = 0
-	m.promptQueueItems = nil
+	m.promptQueue.Reset()
 	m.promptQueueCheckedAt = time.Now()
 	m.invalidateBusyCaches()
 	m.invalidatePromptQueue()
@@ -7670,7 +7663,7 @@ func (m *UI) markDispatchRunning(label string) {
 			break
 		}
 	}
-	m.chat.SetAnimationsAllowed(true)
+	m.animClock.frozen = false
 }
 
 // markDispatchReported stops the spinner on the agent_dispatch item that

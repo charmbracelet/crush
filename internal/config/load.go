@@ -203,6 +203,10 @@ func Load(ctx context.Context, workingDir, dataDir string, debug bool) (*ConfigS
 		return nil, fmt.Errorf("invalid router configuration: %w", err)
 	}
 
+	if err := cfg.ValidatePrompts(); err != nil {
+		return nil, fmt.Errorf("invalid prompt configuration: %w", err)
+	}
+
 	if !isInsideWorktree(workingDir) {
 		const depth = 2
 		const items = 100
@@ -1303,6 +1307,7 @@ func loadFromConfigPaths(ctx context.Context, configPaths []string) (*Config, []
 				if !json.Valid(jsonBytes) {
 					return nil, nil, fmt.Errorf("shell config %s produced invalid JSON", path)
 				}
+				jsonBytes = anchorPromptPaths(jsonBytes, dir)
 				addTopLevelKeys(shDirKeys, dir, jsonBytes)
 				configs = append(configs, jsonBytes)
 				loaded = append(loaded, path)
@@ -1312,6 +1317,7 @@ func loadFromConfigPaths(ctx context.Context, configPaths []string) (*Config, []
 				return nil, nil, fmt.Errorf("invalid JSON in config file %s", path)
 			}
 			data = migrateCatwalkV2File(path, data)
+			data = anchorPromptPaths(data, dir)
 			addTopLevelKeys(jsonDirKeys, dir, data)
 			configs = append(configs, data)
 			loaded = append(loaded, path)
@@ -1344,6 +1350,29 @@ func loadFromConfigPaths(ctx context.Context, configPaths []string) (*Config, []
 		return nil, nil, err
 	}
 	return cfg, loaded, nil
+}
+
+// anchorPromptPaths makes the relative options.prompts paths in one config
+// file absolute against that file's directory, before the files merge and
+// lose track of where each path came from. Otherwise a relative path in the
+// global config would point at a different file in every project. Paths
+// starting with ~ or $ are left for expansion when the prompt is read.
+func anchorPromptPaths(data []byte, dir string) []byte {
+	gjson.GetBytes(data, "options.prompts").ForEach(func(name, path gjson.Result) bool {
+		p := path.String()
+		if p == "" || strings.HasPrefix(p, "~") || strings.HasPrefix(p, "$") || filepathext.SmartIsAbs(p) {
+			return true
+		}
+		abs, err := filepath.Abs(filepath.Join(dir, p))
+		if err != nil {
+			return true
+		}
+		if out, err := sjson.SetBytes(data, "options.prompts."+gjson.Escape(name.String()), abs); err == nil {
+			data = out
+		}
+		return true
+	})
+	return data
 }
 
 // addTopLevelKeys records the top-level JSON keys present in data into the
@@ -1888,4 +1917,24 @@ func dedupeRoutes(routes []RouterRoute) []RouterRoute {
 		out = append(out, rt)
 	}
 	return out
+}
+
+// ValidatePrompts rejects prompt names that do not name a built-in prompt, so
+// a typo fails at startup instead of silently leaving the built-in in place.
+func (c *Config) ValidatePrompts() error {
+	if c.Options == nil {
+		return nil
+	}
+	return ValidatePromptNames(c.Options.Prompts)
+}
+
+// ValidatePromptNames rejects any key in prompts that is not a built-in
+// prompt name. Config files and the --prompt flag both go through it.
+func ValidatePromptNames(prompts PromptPaths) error {
+	for _, name := range slices.Sorted(maps.Keys(prompts)) {
+		if !slices.Contains(PromptNames, name) {
+			return fmt.Errorf("unknown prompt %q, expected one of %s", name, strings.Join(PromptNames, ", "))
+		}
+	}
+	return nil
 }

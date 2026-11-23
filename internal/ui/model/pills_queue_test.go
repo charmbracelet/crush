@@ -39,8 +39,7 @@ func TestExpandedPillsLeaveRoomForAttachments(t *testing.T) {
 	u := newTestUI()
 	u.attachments = attachments.New(attachments.NewRenderer(u.com.Styles.Attachments), attachments.Keymap{})
 	u.session = &session.Session{ID: "s1"}
-	u.promptQueue = 1
-	u.promptQueueItems = []string{"queued"}
+	u.promptQueue.SetFetched([]string{"queued"})
 	u.pillsExpanded = true
 	u.focusedPillSection = pillSectionQueue
 

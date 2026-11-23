@@ -1331,7 +1331,7 @@ func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map
 		httpClient = log.NewHTTPClient()
 	}
 	if useAntLogin {
-		var base http.RoundTripper = http.DefaultTransport
+		base := http.DefaultTransport
 		if httpClient.Transport != nil {
 			base = httpClient.Transport
 		}

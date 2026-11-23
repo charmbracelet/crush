@@ -127,7 +127,7 @@ func TestTransportSignsWithTheLoginToken(t *testing.T) {
 	command, _ := fakeAnt(t, "echo login-token\n")
 	client := &http.Client{Transport: &Transport{Tokens: NewTokens(command)}}
 
-	req, err := http.NewRequest(http.MethodGet, server.URL, nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL, nil)
 	require.NoError(t, err)
 	req.Header.Set("X-Api-Key", "key-from-the-environment")
 	resp, err := client.Do(req)
@@ -152,7 +152,9 @@ func TestTransportDropsTheTokenWhenItIsRejected(t *testing.T) {
 	client := &http.Client{Transport: &Transport{Tokens: NewTokens(command)}}
 
 	for range 2 {
-		resp, err := client.Get(server.URL)
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL, nil)
+		require.NoError(t, err)
+		resp, err := client.Do(req)
 		require.NoError(t, err)
 		resp.Body.Close()
 	}
@@ -166,7 +168,12 @@ func TestTransportFailsWhenThereIsNoLogin(t *testing.T) {
 	command, _ := fakeAnt(t, "exit 1\n")
 	client := &http.Client{Transport: &Transport{Tokens: NewTokens(command)}}
 
-	_, err := client.Get("http://127.0.0.1:1/never-reached")
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://127.0.0.1:1/never-reached", nil)
+	require.NoError(t, err)
+	resp, err := client.Do(req)
+	if err == nil {
+		resp.Body.Close()
+	}
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrNoLogin))
 }

@@ -186,9 +186,10 @@ type LiveOutputItem interface {
 }
 
 // SetLiveOutput sets the output to show while the tool runs. It is ignored
-// once a result is set, and reports whether the item changed.
+// once a result is set or the tool is canceled, and reports whether the
+// item changed.
 func (t *baseToolMessageItem) SetLiveOutput(output string) bool {
-	if t.result != nil || t.liveOutput == output {
+	if t.result != nil || t.status == ToolStatusCanceled || t.liveOutput == output {
 		return false
 	}
 	t.liveOutput = output
@@ -536,6 +537,9 @@ func (t *baseToolMessageItem) SetStatus(status ToolStatus) {
 		return
 	}
 	t.status = status
+	if status == ToolStatusCanceled {
+		t.liveOutput = ""
+	}
 	t.clearCache()
 	t.Bump()
 }
@@ -880,8 +884,15 @@ func indentLines(s string, n int) string {
 
 // toolOutputPlainContent renders plain text with optional expansion support.
 func toolOutputPlainContent(sty *styles.Styles, content string, width int, expanded bool) string {
+	return renderPlainToolOutput(sty, content, width, expanded, false)
+}
+
+func renderPlainToolOutput(sty *styles.Styles, content string, width int, expanded, tail bool) string {
 	content = stringext.NormalizeSpace(content)
 	content = common.StripCursorControl(content)
+	if tail && content == "" {
+		return ""
+	}
 	content = common.RemapANSI16(content, sty.ANSI)
 	lines := strings.Split(content, "\n")
 
@@ -890,24 +901,33 @@ func toolOutputPlainContent(sty *styles.Styles, content string, width int, expan
 		maxLines = len(lines) // Show all
 	}
 
-	var out []string
-	for i, ln := range lines {
-		if i >= maxLines {
-			break
+	hidden := max(len(lines)-maxLines, 0)
+	visible := lines
+	if hidden > 0 {
+		if tail {
+			visible = lines[len(lines)-maxLines:]
+		} else {
+			visible = lines[:maxLines]
 		}
+	}
+
+	var out []string
+	if tail && !expanded && hidden > 0 {
+		out = append(out, sty.Tool.ContentTruncation.
+			Width(width).
+			Render(fmt.Sprintf(assistantMessageTruncateFormat, hidden)))
+	}
+	for _, ln := range visible {
 		ln = " " + ln
 		if lipgloss.Width(ln) > width {
 			ln = ansi.Truncate(ln, width, "…")
 		}
 		out = append(out, sty.Tool.ContentLine.Width(width).Render(ln))
 	}
-
-	wasTruncated := len(lines) > maxLines
-
-	if !expanded && wasTruncated {
+	if !tail && !expanded && hidden > 0 {
 		out = append(out, sty.Tool.ContentTruncation.
 			Width(width).
-			Render(fmt.Sprintf(assistantMessageTruncateFormat, len(lines)-maxLines)))
+			Render(fmt.Sprintf(assistantMessageTruncateFormat, hidden)))
 	}
 
 	return strings.Join(out, "\n")

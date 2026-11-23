@@ -351,18 +351,15 @@ func joinToolParts(header, body string) string {
 // toolLiveOutputContent renders output streamed while a tool is still
 // running. When collapsed it shows the newest lines rather than the first,
 // since those are the ones still changing. Returns false when there is a
-// result or no live output yet.
+// result or no visible live output yet.
 func toolLiveOutputContent(sty *styles.Styles, opts *ToolRenderOpts, width int) (string, bool) {
 	if opts.HasResult() || opts.LiveOutput == "" || opts.Status != ToolStatusRunning {
 		return "", false
 	}
 	bodyWidth := width - toolBodyLeftPaddingTotal
-	output := opts.LiveOutput
-	if !opts.ExpandedContent {
-		lines := strings.Split(output, "\n")
-		if keep := collapsedMaxLines(len(lines)); len(lines) > keep {
-			output = strings.Join(lines[len(lines)-keep:], "\n")
-		}
+	content := renderPlainToolOutput(sty, opts.LiveOutput, bodyWidth, opts.ExpandedContent, true)
+	if content == "" {
+		return "", false
 	}
-	return sty.Tool.Body.Render(toolOutputPlainContent(sty, output, bodyWidth, opts.ExpandedContent)), true
+	return sty.Tool.Body.Render(content), true
 }

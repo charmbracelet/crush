@@ -1,9 +1,9 @@
 package tools
 
 import (
-	"context"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/shell"
@@ -29,28 +29,25 @@ type ToolProgress struct {
 	Output     string `json:"output"`
 }
 
-var progressBroker = pubsub.NewBroker[ToolProgress]()
-
-// SubscribeProgress returns a channel of live tool output events.
-func SubscribeProgress(ctx context.Context) <-chan pubsub.Event[ToolProgress] {
-	return progressBroker.Subscribe(ctx)
-}
-
 // progressReporter publishes size-limited live output for one tool call.
 type progressReporter struct {
 	sessionID  string
 	toolCallID string
 	publish    func(ToolProgress)
 
+	lastSeq    uint64
 	lastOutput string
 }
 
-func newProgressReporter(sessionID, toolCallID string) *progressReporter {
+func newProgressReporter(pub pubsub.Publisher[ToolProgress], sessionID, toolCallID string) *progressReporter {
+	if pub == nil || toolCallID == "" {
+		return nil
+	}
 	return &progressReporter{
 		sessionID:  sessionID,
 		toolCallID: toolCallID,
 		publish: func(p ToolProgress) {
-			progressBroker.Publish(pubsub.UpdatedEvent, p)
+			pub.Publish(pubsub.UpdatedEvent, p)
 		},
 	}
 }
@@ -58,32 +55,40 @@ func newProgressReporter(sessionID, toolCallID string) *progressReporter {
 // report publishes the shell's current output if it changed since the last
 // event.
 func (r *progressReporter) report(bgShell *shell.BackgroundShell) {
-	stdout, stderr, _, _ := bgShell.GetOutput()
+	if r == nil || r.publish == nil || r.toolCallID == "" {
+		return
+	}
+	seq := bgShell.OutputSeq()
+	if seq == r.lastSeq {
+		return
+	}
+	r.lastSeq = seq
+	stdout, stderr := bgShell.GetOutputTail(progressMaxBytes)
 	r.publishOutput(bgShell.ID, stdout, stderr)
 }
 
 func (r *progressReporter) publishOutput(shellID, stdout, stderr string) {
-	if r.toolCallID == "" {
+	if r == nil || r.publish == nil || r.toolCallID == "" {
 		return
 	}
-	output := combineProgressOutput(stdout, stderr)
-	if output == r.lastOutput {
+	tail := tailProgressOutput(combineProgressOutput(stdout, stderr))
+	if tail == r.lastOutput {
 		return
 	}
-	r.lastOutput = output
+	r.lastOutput = tail
 	r.publish(ToolProgress{
 		SessionID:  r.sessionID,
 		ToolCallID: r.toolCallID,
 		ShellID:    shellID,
-		Output:     tailProgressOutput(output),
+		Output:     tail,
 	})
 }
 
 // combineProgressOutput joins stdout and stderr the way the final tool
 // result shows them.
 func combineProgressOutput(stdout, stderr string) string {
-	stdout = strings.TrimRight(stdout, "\n")
-	stderr = strings.TrimRight(stderr, "\n")
+	stdout = strings.TrimRight(stdout, "\r\n")
+	stderr = strings.TrimRight(stderr, "\r\n")
 	switch {
 	case stdout == "":
 		return stderr
@@ -95,7 +100,7 @@ func combineProgressOutput(stdout, stderr string) string {
 }
 
 // tailProgressOutput keeps the last progressMaxBytes of output, starting on
-// a line boundary when one is available.
+// a line boundary when one is available, and preserving UTF-8 boundaries.
 func tailProgressOutput(output string) string {
 	if len(output) <= progressMaxBytes {
 		return output
@@ -103,6 +108,12 @@ func tailProgressOutput(output string) string {
 	tail := output[len(output)-progressMaxBytes:]
 	if idx := strings.IndexByte(tail, '\n'); idx >= 0 && idx < len(tail)-1 {
 		tail = tail[idx+1:]
+	} else {
+		skip := 0
+		for skip < len(tail) && skip < utf8.UTFMax-1 && !utf8.RuneStart(tail[skip]) {
+			skip++
+		}
+		tail = tail[skip:]
 	}
-	return tail
+	return strings.Clone(tail)
 }

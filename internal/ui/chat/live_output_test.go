@@ -73,4 +73,35 @@ func TestLiveOutputShowsTailWhenCollapsed(t *testing.T) {
 	rendered := ansi.Strip(item.Render(100))
 	require.Contains(t, rendered, "LASTLINE")
 	require.NotContains(t, rendered, "FIRSTLINE")
+	require.Contains(t, rendered, "90 lines hidden")
+
+	item.(Expandable).ToggleExpanded()
+	expanded := ansi.Strip(item.Render(100))
+	require.Contains(t, expanded, "FIRSTLINE")
+	require.Contains(t, expanded, "LASTLINE")
+}
+
+func TestLiveOutputControlOnlyFallsBackToWaiting(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	tc := message.ToolCall{ID: "call4", Name: tools.BashToolName, Input: `{"command":"sleep 1"}`, Finished: true}
+	item := NewBashToolMessageItem(&sty, tc, nil, false, "")
+	item.(LiveOutputItem).SetLiveOutput("\x1b[?25l")
+
+	require.Contains(t, ansi.Strip(item.Render(100)), "Waiting for tool response")
+}
+
+func TestLiveOutputIgnoredAndClearedWhenCanceled(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	tc := message.ToolCall{ID: "call5", Name: tools.BashToolName, Input: `{"command":"sleep 10"}`, Finished: true}
+	item := NewBashToolMessageItem(&sty, tc, nil, false, "")
+	live := item.(LiveOutputItem)
+
+	require.True(t, live.SetLiveOutput("running..."))
+	item.SetStatus(ToolStatusCanceled)
+	require.Contains(t, ansi.Strip(item.Render(100)), "Canceled.")
+	require.False(t, live.SetLiveOutput("late chunk"))
 }

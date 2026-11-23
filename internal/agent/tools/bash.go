@@ -20,6 +20,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/shell"
 )
 
@@ -258,7 +259,7 @@ func blockFuncs(blocked []string) []shell.BlockFunc {
 // NewBashTool returns the bash tool. Every shell it starts is tagged with
 // shellOwner, so the owner can stop them with
 // [shell.BackgroundShellManager.KillOwned].
-func NewBashTool(permissions permission.Service, workingDir, spillDir string, attribution *config.Attribution, modelID string, maxBackgroundJobs int, perms *config.Permissions, shellOwner any) fantasy.AgentTool {
+func NewBashTool(permissions permission.Service, workingDir, spillDir string, attribution *config.Attribution, modelID string, maxBackgroundJobs int, perms *config.Permissions, shellOwner any, progress pubsub.Publisher[ToolProgress]) fantasy.AgentTool {
 	blocked := resolveBlockedCommands(perms)
 	userSafe := userSafeCommands(perms)
 	return fantasy.NewAgentTool(
@@ -321,8 +322,8 @@ func NewBashTool(permissions permission.Service, workingDir, spillDir string, at
 			if !check.Matched && mode != permission.PermissionModeSysadmin {
 				blocksToUse = blockFuncs(blocked)
 			}
-			progress := newProgressReporter(sessionID, call.ID)
-			return executeBashCommand(ctx, params, execWorkingDir, spillDir, blocksToUse, maxBackgroundJobs, shellOwner, progress)
+			reporter := newProgressReporter(progress, sessionID, call.ID)
+			return executeBashCommand(ctx, params, execWorkingDir, spillDir, blocksToUse, maxBackgroundJobs, shellOwner, reporter)
 		},
 	)
 }

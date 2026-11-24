@@ -441,26 +441,15 @@ func (m *Models) setProviderItems() error {
 
 		name := cmp.Or(displayProvider.Name, providerID)
 
-		// A ChatGPT or Grok login lists only its subscription's models; the
-		// API catalog would 404. Until that list is fetched, show the catalog.
+		// A subscription login lists only the models it grants; the API
+		// catalog would 404. Until that list is fetched, show the catalog.
+		models := displayProvider.Models
 		if subscriptionModels, _ := providerConfig.SubscriptionModels(); subscriptionModels != nil {
-			group := NewModelGroup(t, name, true)
-			for _, model := range subscriptionModels {
-				item := NewModelItem(t, provider, model, m.modelType, false)
-				group.AppendItems(item)
-				itemsMap[item.ID()] = item
-				if model.ID == currentModel.Model && string(provider.ID) == currentModel.Provider {
-					selectedItemID = item.ID()
-				}
-			}
-			if len(group.Items) > 0 {
-				groups = append(groups, group)
-			}
-			continue
+			models = subscriptionModels
 		}
 
 		group := NewModelGroup(t, name, providerConfigured)
-		for _, model := range displayProvider.Models {
+		for _, model := range models {
 			item := NewModelItem(t, provider, model, m.modelType, false)
 			group.AppendItems(item)
 			itemsMap[item.ID()] = item

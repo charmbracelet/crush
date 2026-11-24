@@ -15,7 +15,7 @@ import (
 )
 
 // providerDisplayNames maps OAuth-capable provider IDs to display names.
-// Keep this list in sync with the switch in RunE and the login command.
+// Keep this list in sync with the aliases in RunE and the login command.
 var providerDisplayNames = map[string]string{
 	"hyper":   "Charm Hyper",
 	"copilot": "GitHub Copilot",
@@ -109,83 +109,24 @@ crush logout grok
 			}
 		}
 
-		switch provider {
-		case "hyper":
-			return logoutHyper(c, ws.ID)
-		case "copilot":
-			return logoutCopilot(c, ws.ID)
-		case "openai":
-			return logoutOpenAI(c, ws.ID)
-		case "xai":
-			return logoutXAI(c, ws.ID)
-		default:
-			return fmt.Errorf("unknown platform: %s", provider)
-		}
+		return logoutProvider(c, ws.ID, provider)
 	},
 }
 
-func logoutHyper(c *client.Client, wsID string) error {
+// logoutProvider clears every stored credential for the provider: the
+// login, the API key (which may mirror the login's token), and the model
+// catalog the login granted.
+func logoutProvider(c *client.Client, wsID, provider string) error {
 	ctx := getLogoutContext()
-
 	if err := cmp.Or(
-		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers.hyper.api_key"),
-		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers.hyper.oauth"),
+		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers."+provider+".oauth"),
+		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers."+provider+".api_key"),
+		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers."+provider+".subscription_models"),
 	); err != nil {
 		return err
 	}
 
-	fmt.Printf("Successfully logged out of %s.\n", providerDisplayNames["hyper"])
-	return nil
-}
-
-func logoutCopilot(c *client.Client, wsID string) error {
-	ctx := getLogoutContext()
-
-	if err := cmp.Or(
-		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers.copilot.api_key"),
-		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers.copilot.oauth"),
-	); err != nil {
-		return err
-	}
-
-	fmt.Printf("Successfully logged out of %s.\n", providerDisplayNames["copilot"])
-	return nil
-}
-
-func logoutOpenAI(c *client.Client, wsID string) error {
-	ctx := getLogoutContext()
-
-	// Logout clears every OpenAI credential: the ChatGPT token and its
-	// model catalog, and the API key too. The API key mirrors the access
-	// token when it came from the OAuth flow, and an explicit logout
-	// should leave nothing behind either way.
-	if err := cmp.Or(
-		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers.openai.oauth"),
-		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers.openai.chatgpt_models"),
-		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers.openai.api_key"),
-	); err != nil {
-		return err
-	}
-
-	fmt.Printf("Successfully logged out of %s.\n", providerDisplayNames["openai"])
-	return nil
-}
-
-func logoutXAI(c *client.Client, wsID string) error {
-	ctx := getLogoutContext()
-
-	// Logout clears both stored xAI credentials: the OAuth token, its
-	// model catalog, and the API key, which mirrors the OAuth access
-	// token when the sign-in wrote it.
-	if err := cmp.Or(
-		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers.xai.oauth"),
-		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers.xai.grok_models"),
-		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers.xai.api_key"),
-	); err != nil {
-		return err
-	}
-
-	fmt.Printf("Successfully logged out of %s.\n", providerDisplayNames["xai"])
+	fmt.Printf("Successfully logged out of %s.\n", providerDisplayNames[provider])
 	return nil
 }
 

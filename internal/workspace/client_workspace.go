@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1236,8 +1237,14 @@ func (w *ClientWorkspace) recreateArgs() proto.Workspace {
 		Debug:          ws.Debug,
 		PermissionMode: ws.PermissionMode,
 		Channels:       ws.Channels,
+<<<<<<< HEAD
 		Prompts:        ws.Prompts,
 		Env:            ws.Env,
+||||||| parent of e8986cec (fix(server): stop crush server from leaking the env)
+		Env:            ws.Env,
+=======
+		Env:            os.Environ(),
+>>>>>>> e8986cec (fix(server): stop crush server from leaking the env)
 		Version:        version.Version,
 	}
 }

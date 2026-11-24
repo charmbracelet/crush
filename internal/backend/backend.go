@@ -1465,7 +1465,6 @@ func workspaceToProto(ws *Workspace) proto.Workspace {
 		DataDir:        cfg.Options.DataDirectory,
 		Debug:          cfg.Options.Debug,
 		Config:         cfg,
-		Env:            ws.Env,
 		Version:        version.Version,
 	}
 	if ws.Skills != nil {

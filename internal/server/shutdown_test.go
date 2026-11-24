@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -198,5 +199,82 @@ func TestShutdown_CancelsInFlightRequests(t *testing.T) {
 		require.NoError(t, err)
 	case <-time.After(5 * time.Second):
 		t.Fatal("the shell request did not return after shutdown")
+	}
+}
+
+// TestServe_ClosesUnattachedWorkspaceWhenIdleShutdownDisabled guards the
+// distinction between shutting down the whole server and expiring one
+// workspace's unattached client claim. With the server-level idle shutdown
+// disabled, the create grace still reclaims a workspace whose client never
+// attaches, while the server continues serving.
+func TestServe_ClosesUnattachedWorkspaceWhenIdleShutdownDisabled(t *testing.T) {
+	t.Parallel()
+
+	srv := NewServer(nil, "tcp", "127.0.0.1:0")
+	srv.DisableIdleShutdown()
+	srv.Backend().SetCreateGrace(100 * time.Millisecond)
+
+	var tornDown atomic.Int32
+	ws := &backend.Workspace{ID: uuid.New().String(), Path: t.TempDir()}
+	backend.SetWorkspaceShutdownFnForTest(ws, func() { tornDown.Add(1) })
+	backend.InsertWorkspaceForTest(srv.backend, ws)
+	cid := uuid.New().String()
+	require.NoError(t, backend.RegisterClientForTesting(srv.backend, ws, cid))
+
+	_, served := serveOnLoopback(t, srv)
+	t.Cleanup(func() { _ = srv.Close() })
+
+	_, err := srv.backend.GetWorkspace(ws.ID)
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		_, err := srv.backend.GetWorkspace(ws.ID)
+		return errors.Is(err, backend.ErrWorkspaceNotFound)
+	}, 5*time.Second, 10*time.Millisecond,
+		"an unattached workspace must expire while idle shutdown is disabled")
+	require.Equal(t, int32(1), tornDown.Load())
+
+	select {
+	case err := <-served:
+		t.Fatalf("Serve returned after the last workspace expired (%v)", err)
+	case <-time.After(250 * time.Millisecond):
+	}
+}
+
+// TestServe_KeepsUnattachedWorkspaceWhenAutoCloseDisabled guards headless
+// work on an explicitly started server: the client that created a workspace
+// may exit before ever attaching an SSE stream, but its workspace must
+// remain hosted. Only an explicit delete or a server shutdown may release
+// it.
+func TestServe_KeepsUnattachedWorkspaceWhenAutoCloseDisabled(t *testing.T) {
+	t.Parallel()
+
+	srv := NewServer(nil, "tcp", "127.0.0.1:0")
+	srv.DisableIdleShutdown()
+	srv.DisableWorkspaceAutoClose()
+	srv.Backend().SetCreateGrace(50 * time.Millisecond)
+
+	var tornDown atomic.Int32
+	ws := &backend.Workspace{ID: uuid.New().String(), Path: t.TempDir()}
+	backend.SetWorkspaceShutdownFnForTest(ws, func() { tornDown.Add(1) })
+	backend.InsertWorkspaceForTest(srv.backend, ws)
+	cid := uuid.New().String()
+	require.NoError(t, backend.RegisterClientForTesting(srv.backend, ws, cid))
+
+	_, served := serveOnLoopback(t, srv)
+	t.Cleanup(func() { _ = srv.Close() })
+
+	// Wait well past the creation grace that would otherwise reap the
+	// workspace: the creating client need not be attached for it to live.
+	time.Sleep(250 * time.Millisecond)
+
+	_, err := srv.backend.GetWorkspace(ws.ID)
+	require.NoError(t, err, "the workspace must remain hosted without an attached client")
+	require.Zero(t, tornDown.Load(), "an unattached client must not close a headless workspace")
+
+	select {
+	case err := <-served:
+		t.Fatalf("Serve returned while a headless workspace was hosted (%v)", err)
+	default:
 	}
 }

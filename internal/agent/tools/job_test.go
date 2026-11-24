@@ -2,10 +2,12 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"runtime"
 	"testing"
 	"time"
 
+	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/stretchr/testify/require"
 )
@@ -332,5 +334,59 @@ func TestBackgroundShell_AutoBackground(t *testing.T) {
 		retrieved, ok := bgManager.Get(bgShell.ID)
 		require.True(t, ok, "Should be able to retrieve background shell")
 		require.Equal(t, bgShell.ID, retrieved.ID)
+	})
+}
+
+func runJobOutput(t *testing.T, ctx context.Context, waitLimit time.Duration, shellID string) fantasy.ToolResponse {
+	t.Helper()
+	input, err := json.Marshal(JobOutputParams{ShellID: shellID, Wait: true})
+	require.NoError(t, err)
+	tool := newJobOutputTool(t.TempDir(), nil, waitLimit)
+	resp, err := tool.Run(ctx, fantasy.ToolCall{ID: "call", Name: JobOutputToolName, Input: string(input)})
+	require.NoError(t, err)
+	return resp
+}
+
+func TestJobOutput_WaitLimit(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	bgManager := shell.GetBackgroundShellManager()
+
+	t.Run("gives up on a job that outlives the limit", func(t *testing.T) {
+		t.Parallel()
+		bgShell, err := bgManager.Start(ctx, nil, t.TempDir(), nil, shell.CoreutilsTurtle, "echo started && sleep 100", "", testMaxJobs)
+		require.NoError(t, err)
+		defer bgManager.Kill(ctx, bgShell.ID)
+
+		resp := runJobOutput(t, ctx, 2*time.Second, bgShell.ID)
+		require.Contains(t, resp.Content, "Status: running")
+		require.Contains(t, resp.Content, "started")
+		require.Contains(t, resp.Content, "Stopped waiting")
+		require.False(t, bgShell.IsDone())
+	})
+
+	t.Run("returns the result when the job finishes first", func(t *testing.T) {
+		t.Parallel()
+		bgShell, err := bgManager.Start(ctx, nil, t.TempDir(), nil, shell.CoreutilsTurtle, "echo hi", "", testMaxJobs)
+		require.NoError(t, err)
+		defer bgManager.Kill(ctx, bgShell.ID)
+
+		resp := runJobOutput(t, ctx, time.Minute, bgShell.ID)
+		require.Contains(t, resp.Content, "Status: completed")
+		require.NotContains(t, resp.Content, "Stopped waiting")
+	})
+
+	t.Run("cancellation does not claim the limit ran out", func(t *testing.T) {
+		t.Parallel()
+		bgShell, err := bgManager.Start(ctx, nil, t.TempDir(), nil, shell.CoreutilsTurtle, "sleep 100", "", testMaxJobs)
+		require.NoError(t, err)
+		defer bgManager.Kill(ctx, bgShell.ID)
+
+		cctx, cancel := context.WithCancel(ctx)
+		time.AfterFunc(100*time.Millisecond, cancel)
+		resp := runJobOutput(t, cctx, time.Minute, bgShell.ID)
+		require.Contains(t, resp.Content, "Status: running")
+		require.NotContains(t, resp.Content, "Stopped waiting")
 	})
 }

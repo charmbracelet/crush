@@ -70,7 +70,7 @@ func TestUseClientServer_HostFlag(t *testing.T) {
 // wrong sessions when the server runs elsewhere.
 func TestSessionList_ClientServerModeAsksServer(t *testing.T) {
 	if os.Getenv(childTestEnv) == "1" {
-		listSessionsOnServer(t, os.Getenv("CRUSH_TEST_DATA_DIR"))
+		listSessionsOnServer(t, os.Getenv("CRUSH_TEST_PROJECT"), os.Getenv("CRUSH_TEST_DATA_DIR"))
 		return
 	}
 	t.Parallel()
@@ -83,12 +83,15 @@ func TestSessionList_ClientServerModeAsksServer(t *testing.T) {
 		"CRUSH_DISABLE_PROVIDER_AUTO_UPDATE=1",
 		"CRUSH_DISABLE_METRICS=1",
 		"CRUSH_TEST_DATA_DIR="+t.TempDir(),
+		"CRUSH_TEST_PROJECT="+t.TempDir(),
 	)
 }
 
-// listSessionsOnServer runs `crush session list --json` against a fake
-// server that hosts one session.
-func listSessionsOnServer(t *testing.T, dataDir string) {
+// listSessionsOnServer runs `crush session list --json` from project
+// against a fake server that hosts one session. The project comes from the
+// parent test: the command changes into it, and Windows cannot remove a
+// directory a process is still in.
+func listSessionsOnServer(t *testing.T, project, dataDir string) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/health", func(http.ResponseWriter, *http.Request) {})
 	mux.HandleFunc("POST /v1/workspaces", func(w http.ResponseWriter, _ *http.Request) {
@@ -112,7 +115,7 @@ func listSessionsOnServer(t *testing.T, dataDir string) {
 	cmd := &cobra.Command{}
 	cmd.Flags().Bool("debug", false, "")
 	cmd.Flags().String("data-dir", "", "")
-	cmd.Flags().String("cwd", t.TempDir(), "")
+	cmd.Flags().String("cwd", project, "")
 	cmd.SetContext(t.Context())
 	var out bytes.Buffer
 	cmd.SetOut(&out)

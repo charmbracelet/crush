@@ -22,6 +22,7 @@ func TestPartsRoundTrip(t *testing.T) {
 		Finish{Reason: FinishReasonEndTurn, Time: 42, Message: "done"},
 		ShellCommand{Command: "ls -la", Output: "total 0", ExitCode: 0},
 		SubAgentReport{Label: "auth-review", Output: "two findings", Failed: true},
+		SubAgentReport{Label: "go test", Output: "ok", Job: "07A"},
 	}
 
 	encoded, err := marshalParts(parts)

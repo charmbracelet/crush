@@ -203,6 +203,8 @@ type SubAgentReport struct {
 	Failed bool   `json:"failed,omitempty"`
 	// Model is provider/model, for display.
 	Model string `json:"model,omitempty"`
+	// Job is the background shell ID when a finished job sent the report.
+	Job string `json:"job,omitempty"`
 }
 
 func (SubAgentReport) isPart() {}

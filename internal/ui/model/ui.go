@@ -2081,8 +2081,8 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 		// the user speaking, so it does not move the last-user mark. It
 		// does end the dispatch item's spinner, since the report landing
 		// is the only signal that the subagent finished.
-		if reports := msg.SubAgentReports(); len(reports) > 0 {
-			for _, report := range reports {
+		if msg.HasSubAgentReport() {
+			for _, report := range msg.DispatchReports() {
 				m.markDispatchReported(report.Label)
 			}
 		} else {

@@ -323,7 +323,7 @@ func (m *UI) applyPromptQueue(msg promptQueueMsg) []tea.Cmd {
 	// A report waits in the queue until the model reads it, but its
 	// subagent is already done.
 	for _, prompt := range msg.prompts {
-		if report, ok := message.ParseSubAgentReportPrompt(prompt); ok {
+		if report, ok := message.ParseSubAgentReportPrompt(prompt); ok && !report.IsJob() {
 			m.markDispatchReported(report.Label)
 		}
 	}

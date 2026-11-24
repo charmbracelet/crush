@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -452,6 +453,133 @@ func TestBackgroundJobs_ScopeRefusesToGuess(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, resp.IsError)
 	require.Contains(t, resp.Content, "could not find the session")
+}
+
+// jobReports collects the reports a BackgroundJobs sends.
+type jobReports chan string
+
+func (r jobReports) report(sessionID string, job *shell.BackgroundShell) {
+	r <- sessionID + ":" + job.ID
+}
+
+// next returns the next report, or "" if none arrives within wait.
+func (r jobReports) next(wait time.Duration) string {
+	select {
+	case got := <-r:
+		return got
+	case <-time.After(wait):
+		return ""
+	}
+}
+
+// startBackground runs command in the background through the bash tool and
+// returns the tool's reply and the job's ID.
+func startBackground(t *testing.T, jobs BackgroundJobs, command string) (string, string) {
+	t.Helper()
+	tool := NewBashTool(&mockBashPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}, t.TempDir(), t.TempDir(), &config.Attribution{TrailerStyle: config.TrailerStyleNone}, "test-model", testMaxJobs, shell.CoreutilsTurtle, nil, jobs, nil)
+	input, err := json.Marshal(BashParams{Command: command, Description: "d", RunInBackground: true})
+	require.NoError(t, err)
+	resp, err := tool.Run(sessionCtx(t, "s"), fantasy.ToolCall{ID: "1", Name: BashToolName, Input: string(input)})
+	require.NoError(t, err)
+	require.False(t, resp.IsError, resp.Content)
+	var meta BashResponseMetadata
+	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
+	if meta.ShellID != "" {
+		t.Cleanup(func() { _ = shell.GetBackgroundShellManager().Kill(context.Background(), meta.ShellID) })
+	}
+	return resp.Content, meta.ShellID
+}
+
+// TestJobReports checks that a background job reports back once, to the
+// session it belongs to, unless the agent already has the result.
+func TestJobReports(t *testing.T) {
+	t.Parallel()
+
+	// Long enough to outlast bash's one-second fast-failure window even on
+	// a loaded machine.
+	const slowJob = "sleep 3 && echo done"
+	// How long to wait before concluding no report is coming.
+	const quiet = 500 * time.Millisecond
+
+	newJobs := func() (BackgroundJobs, jobReports) {
+		reports := make(jobReports, 4)
+		return NewBackgroundJobs(new(int), nil, nil).WithReports(reports.report), reports
+	}
+
+	t.Run("a finished job reports to its session once", func(t *testing.T) {
+		t.Parallel()
+		jobs, reports := newJobs()
+		reply, id := startBackground(t, jobs, slowJob)
+		require.Contains(t, reply, "<job-report>")
+		require.NotEmpty(t, id)
+
+		require.Equal(t, "s:"+id, reports.next(10*time.Second))
+		require.Empty(t, reports.next(quiet), "a job reports once")
+	})
+
+	t.Run("a job that finishes inside the fast-failure window stays quiet", func(t *testing.T) {
+		t.Parallel()
+		jobs, reports := newJobs()
+		reply, _ := startBackground(t, jobs, "echo quick")
+		require.Contains(t, reply, "quick")
+		require.Empty(t, reports.next(quiet))
+	})
+
+	t.Run("a job_output that saw the finish takes the report's place", func(t *testing.T) {
+		t.Parallel()
+		jobs, reports := newJobs()
+		_, id := startBackground(t, jobs, slowJob)
+
+		out, err := NewJobOutputTool(t.TempDir(), jobs, nil).Run(sessionCtx(t, "s"), fantasy.ToolCall{ID: "2", Name: JobOutputToolName, Input: `{"shell_id":"` + id + `","wait":true}`})
+		require.NoError(t, err)
+		require.Contains(t, out.Content, "Status: completed")
+		require.Empty(t, reports.next(quiet))
+	})
+
+	t.Run("a cancelled job_output does not take the report's place", func(t *testing.T) {
+		t.Parallel()
+		jobs, reports := newJobs()
+		_, id := startBackground(t, jobs, slowJob)
+		job, ok := shell.GetBackgroundShellManager().Lookup(mustScope(t, jobs, "s"), id)
+		require.True(t, ok)
+
+		// Hold the report back so the job can finish before job_output
+		// runs; the cancelled call then sees it done.
+		release := job.Read()
+		job.Wait()
+		ctx, cancel := context.WithCancel(sessionCtx(t, "s"))
+		cancel()
+		out, err := NewJobOutputTool(t.TempDir(), jobs, nil).Run(ctx, fantasy.ToolCall{ID: "2", Name: JobOutputToolName, Input: `{"shell_id":"` + id + `"}`})
+		require.NoError(t, err)
+		require.Contains(t, out.Content, "Status: completed")
+		release(false)
+
+		require.Equal(t, "s:"+id, reports.next(10*time.Second))
+	})
+
+	t.Run("without reports the tools say nothing about them", func(t *testing.T) {
+		t.Parallel()
+		jobs := NewBackgroundJobs(new(int), nil, nil)
+		reply, _ := startBackground(t, jobs, slowJob)
+		require.NotContains(t, reply, "job-report")
+		require.NotContains(t, bashDescription(&config.Attribution{}, "m", nil, false), "job-report")
+		require.NotContains(t, jobOutputToolDescription(false), "job-report")
+		require.Contains(t, bashDescription(&config.Attribution{}, "m", nil, true), "job-report")
+		require.Contains(t, jobOutputToolDescription(true), "job-report")
+		require.NotContains(t, jobOutputToolDescription(true), "when you need the job's result", "the two descriptions do not mix")
+	})
+}
+
+func TestJobLabel(t *testing.T) {
+	t.Parallel()
+
+	job := &shell.BackgroundShell{Command: "true &&\n" + strings.Repeat("true && ", 20) + "true"}
+	label := JobLabel(job)
+	require.NotContains(t, label, "\n")
+	require.LessOrEqual(t, len([]rune(label)), jobLabelWidth)
+
+	job.Description = "build it"
+	require.Equal(t, "build it", JobLabel(job))
 }
 
 func runJobOutput(t *testing.T, ctx context.Context, jobs BackgroundJobs, waitLimit time.Duration, shellID string) fantasy.ToolResponse {

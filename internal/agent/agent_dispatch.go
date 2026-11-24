@@ -504,7 +504,7 @@ func (c *coordinator) runDispatched(ctx context.Context, entry *dispatchedAgent,
 			// A stopped subagent has nothing to report and its parent
 			// already knows it was stopped, so record the outcome
 			// without starting a turn over it.
-			c.recordDispatchReport(entry.ParentSessionID, message.SubAgentReport{
+			c.recordReport(entry.ParentSessionID, message.SubAgentReport{
 				Label:  entry.Label,
 				Output: "Stopped: " + stopReason + ".",
 				Failed: true,
@@ -624,16 +624,24 @@ func (c *coordinator) reportDispatchResult(entry *dispatchedAgent, resp fantasy.
 		Failed: failed,
 		Model:  modelDisplayName(entry.runner().Model()),
 	}
+	c.deliverReport(entry.ParentSessionID, report)
+}
+
+// deliverReport folds report into sessionID's turn in progress or starts
+// one. If waking the session fails, the report is recorded anyway so it is
+// never lost.
+func (c *coordinator) deliverReport(sessionID string, report message.SubAgentReport) {
 	ctx := context.Background()
-	if _, err := c.runReport(ctx, entry.ParentSessionID, report); err != nil {
+	if _, err := c.runReport(ctx, sessionID, report); err != nil {
 		slog.Error(
-			"Failed to wake the parent with a subagent report",
-			"label", entry.Label,
-			"parent_session", entry.ParentSessionID,
+			"Failed to wake the session with a report",
+			"label", report.Label,
+			"job", report.Job,
+			"session", sessionID,
 			"error", err,
 		)
-		if !c.reportRecorded(ctx, entry.ParentSessionID, report) {
-			c.recordDispatchReport(entry.ParentSessionID, report)
+		if !c.reportRecorded(ctx, sessionID, report) {
+			c.recordReport(sessionID, report)
 		}
 	}
 }
@@ -653,17 +661,17 @@ func (c *coordinator) reportRecorded(ctx context.Context, parentSessionID string
 	return false
 }
 
-// recordDispatchReport stores a report in the parent session without starting
+// recordReport stores a report in the parent session without starting
 // a turn. The model reads it with the rest of the history on its next turn,
 // and the UI settles the subagent's item when it lands.
-func (c *coordinator) recordDispatchReport(parentSessionID string, report message.SubAgentReport) (message.Message, bool) {
+func (c *coordinator) recordReport(parentSessionID string, report message.SubAgentReport) (message.Message, bool) {
 	msg, err := c.messages.Create(context.Background(), parentSessionID, message.CreateMessageParams{
 		Role:  message.User,
 		Parts: []message.ContentPart{report},
 	})
 	if err != nil {
 		slog.Error(
-			"Failed to record subagent report",
+			"Failed to record report",
 			"label", report.Label,
 			"parent_session", parentSessionID,
 			"error", err,

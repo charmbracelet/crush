@@ -133,7 +133,7 @@ func queueItem(item string, t *styles.Styles) string {
 	if !ok {
 		return t.Pills.QueueItemText.Render(singleLine(item))
 	}
-	return chat.SubagentReportTitle(t, report.Label)
+	return chat.ReportTitle(t, report)
 }
 
 // singleLine collapses runs of whitespace, newlines included, so a queued

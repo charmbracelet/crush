@@ -395,7 +395,7 @@ func (c *coordinator) RunAccepted(ctx context.Context, accept *AcceptedRun, sess
 // Accepted so sessionAgent.Run can consume the accept reservation under
 // dispatchMu; when nil (the in-process/local path) no accept tracking
 // applies.
-// runReport delivers a subagent report: it folds into a turn in progress, or
+// runReport delivers a subagent or job report: it folds into a turn in progress, or
 // starts one.
 func (c *coordinator) runReport(ctx context.Context, sessionID string, report message.SubAgentReport) (*fantasy.AgentResult, error) {
 	return c.run(ctx, nil, &report, sessionID, report.PromptText())
@@ -1142,6 +1142,9 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	logFile := filepath.Join(c.cfg.Config().Options.DataDirectory, "logs", "crush.log")
 
 	jobs := tools.NewBackgroundJobs(c.shellOwner, c.sessions, c.roots)
+	if c.interactive && !isSubAgent {
+		jobs = jobs.WithReports(c.reportJob)
+	}
 	allTools = append(
 		allTools,
 		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.DataDirectory, c.cfg.Config().Options.Attribution, modelID, c.cfg.Config().Options.GetMaxBackgroundJobs(), c.cfg.Config().Options.GetCoreutils(), c.cfg.Config().Permissions, jobs, c.toolProgress),

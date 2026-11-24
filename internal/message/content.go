@@ -191,41 +191,73 @@ func (m *Message) ShellCommands() []ShellCommand {
 	return cmds
 }
 
-// SubAgentReport stores the result a detached subagent reported back, as a
-// distinct content part so the UI can render it as a subagent result rather
-// than as something the user typed.
+// SubAgentReport stores the result a detached subagent or a finished
+// background job reported back, as a distinct content part so the UI can
+// render it as a report rather than as something the user typed. A set Job
+// marks a job's report.
 type SubAgentReport struct {
 	Label  string `json:"label"`
 	Output string `json:"output"`
 	Failed bool   `json:"failed,omitempty"`
 	// Model is provider/model, for display.
 	Model string `json:"model,omitempty"`
+	// Job is the ID of the background shell this reports on, set when the
+	// report comes from a finished background job rather than a subagent.
+	Job string `json:"job,omitempty"`
 }
 
 func (SubAgentReport) isPart() {}
 
+// IsJob reports whether a finished background job sent the report, as
+// opposed to a subagent.
+func (r SubAgentReport) IsJob() bool { return r.Job != "" }
+
 // PromptText is the report as the model reads it.
 func (r SubAgentReport) PromptText() string {
+	if r.IsJob() {
+		return fmt.Sprintf("<job-report id=%q label=%q>\n%s\n</job-report>", r.Job, r.Label, r.Output)
+	}
 	return fmt.Sprintf("<subagent-report label=%q>\n%s\n</subagent-report>", r.Label, r.Output)
 }
 
 // ParseSubAgentReportPrompt recovers a report from its PromptText, for
 // places such as the prompt queue that only carry the text.
 func ParseSubAgentReportPrompt(prompt string) (SubAgentReport, bool) {
-	const prefix, suffix = "<subagent-report label=", "\n</subagent-report>"
-	rest, ok := strings.CutPrefix(prompt, prefix)
+	if attrs, output, ok := parseReportTag(prompt, "job-report", "id", "label"); ok {
+		return SubAgentReport{Job: attrs[0], Label: attrs[1], Output: output}, true
+	}
+	if attrs, output, ok := parseReportTag(prompt, "subagent-report", "label"); ok {
+		return SubAgentReport{Label: attrs[0], Output: output}, true
+	}
+	return SubAgentReport{}, false
+}
+
+// parseReportTag parses `<tag k1="v1" k2="v2">\nbody\n</tag>`, the shape
+// PromptText writes, returning the unquoted values of keys in order.
+func parseReportTag(s, tag string, keys ...string) (values []string, body string, ok bool) {
+	rest, ok := strings.CutPrefix(s, "<"+tag)
 	if !ok {
-		return SubAgentReport{}, false
+		return nil, "", false
 	}
-	quoted, output, ok := strings.Cut(rest, ">\n")
-	if !ok {
-		return SubAgentReport{}, false
+	for _, key := range keys {
+		if rest, ok = strings.CutPrefix(rest, " "+key+"="); !ok {
+			return nil, "", false
+		}
+		quoted, err := strconv.QuotedPrefix(rest)
+		if err != nil {
+			return nil, "", false
+		}
+		value, err := strconv.Unquote(quoted)
+		if err != nil {
+			return nil, "", false
+		}
+		values = append(values, value)
+		rest = rest[len(quoted):]
 	}
-	label, err := strconv.Unquote(quoted)
-	if err != nil {
-		return SubAgentReport{}, false
+	if rest, ok = strings.CutPrefix(rest, ">\n"); !ok {
+		return nil, "", false
 	}
-	return SubAgentReport{Label: label, Output: strings.TrimSuffix(output, suffix)}, true
+	return values, strings.TrimSuffix(rest, "\n</"+tag+">"), true
 }
 
 // HasSubAgentReport reports whether the message contains any SubAgentReport parts.
@@ -243,6 +275,18 @@ func (m *Message) SubAgentReports() []SubAgentReport {
 	var reports []SubAgentReport
 	for _, part := range m.Parts {
 		if r, ok := part.(SubAgentReport); ok {
+			reports = append(reports, r)
+		}
+	}
+	return reports
+}
+
+// DispatchReports returns the message's subagent reports, leaving out the
+// ones background jobs sent, for code that tracks dispatched subagents.
+func (m *Message) DispatchReports() []SubAgentReport {
+	var reports []SubAgentReport
+	for _, r := range m.SubAgentReports() {
+		if !r.IsJob() {
 			reports = append(reports, r)
 		}
 	}
@@ -647,7 +691,7 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 			})
 		}
 		text = m.Content().Context + PromptWithTextAttachments(text, textAttachments)
-		// Include subagent reports as context for the agent. The part
+		// Include subagent and job reports as context for the agent. The part
 		// carries the label and body separately so the UI can render
 		// them; the model sees them as one tagged block.
 		for _, r := range m.SubAgentReports() {

@@ -553,10 +553,23 @@ func subagentHeader(sty *styles.Styles, status ToolStatus, name, label, model st
 	return header + " " + sty.Tool.ParamMain.Render(ansi.Truncate("(model="+model+")", room, "…)"))
 }
 
-// SubagentReportTitle renders "Subagent Report → Name label" as a report's
-// header does, for places that show a report without its status icon.
-func SubagentReportTitle(sty *styles.Styles, label string) string {
-	return sty.Tool.NameNormal.Render("Subagent Report") + " " + subagentTarget(sty, label)
+// jobReportName heads the report a finished background job sends.
+const jobReportName = "Job Report"
+
+// ReportTitle renders "Subagent Report → Name label", or "Job Report →
+// label" for a background job, as a report's header does, for places that
+// show a report without its status icon.
+func ReportTitle(sty *styles.Styles, report message.SubAgentReport) string {
+	if report.IsJob() {
+		return sty.Tool.NameNormal.Render(jobReportName) + " " + jobTarget(sty, report.Label)
+	}
+	return sty.Tool.NameNormal.Render("Subagent Report") + " " + subagentTarget(sty, report.Label)
+}
+
+// jobTarget renders "→ label" for a background job, whose label is a
+// command or description rather than a subagent's name.
+func jobTarget(sty *styles.Styles, label string) string {
+	return sty.Tool.MCPArrow.String() + " " + sty.Tool.AgentLabel.Render(label)
 }
 
 // subagentTarget renders "→ Name label", how every subagent header names one.

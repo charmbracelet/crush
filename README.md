@@ -185,7 +185,8 @@ local database uses dot-file locking:
 go install -tags sqlite3_dotlk github.com/charmbracelet/crush@latest
 ```
 
-> [!WARNING] Productivity may increase when using Crush and you may find
+> [!WARNING]
+> Productivity may increase when using Crush and you may find
 > yourself nerd sniped when first using the application. If the symptoms
 > persist, join the [Slack][slack] or [Discord][discord] and nerd snipe the rest
 > of us.
@@ -263,7 +264,8 @@ source repository of Crush-compatible models, and you’re welcome to contribute
 
 ## Configuration
 
-> [!TIP] Crush ships with a builtin skill for configuring itself. Most of the
+> [!TIP]
+> Crush ships with a builtin skill for configuring itself. Most of the
 > time you can just tell what you want it to configure and it will get the job
 > done.
 
@@ -319,7 +321,8 @@ does not execute a `crushrc` from them.)
 What about the old JSON format? It’s still supported, but it should be
 considered deprecated. See: [the config docs](./docs/config/) for details.
 
-> [!TIP] You can override the user and data config locations by setting:
+> [!TIP]
+> You can override the user and data config locations by setting:
 >
 > - `CRUSH_GLOBAL_CONFIG`
 > - `CRUSH_GLOBAL_DATA`
@@ -776,7 +779,7 @@ option attribution-generated-with true
 Crush supports custom provider configurations for both OpenAI-compatible and
 Anthropic-compatible APIs.
 
->[!NOTE] 
+> [!NOTE]
 > The provider type describes the API format the provider speaks. Make
 > sure to choose the right one to ensure the best experience!
 >
